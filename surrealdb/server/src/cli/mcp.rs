@@ -94,6 +94,7 @@ pub async fn init<
 
 	let config = super::config::Config {
 		bind: std::net::SocketAddr::from(([127, 0, 0, 1], 0)),
+		postgres_bind: None,
 		client_ip: crate::ntw::client_ip::ClientIp::Socket,
 		path,
 		user,

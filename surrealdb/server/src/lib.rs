@@ -30,6 +30,8 @@ pub mod ntw;
 /// Observability wiring: community Prometheus registry, `/metrics` handler,
 /// and the allowlists controlling what may leave the server unauthenticated.
 pub mod observe;
+#[cfg(feature = "postgres")]
+mod pg;
 /// Make `rpc` public so embedders can access RpcState and related router definitions
 /// when running SurrealDB as a library.
 pub mod rpc;

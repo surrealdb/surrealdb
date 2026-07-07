@@ -209,6 +209,10 @@ criteria = "safe-to-deploy"
 version = "1.8.5"
 criteria = "safe-to-deploy"
 
+[[exemptions.block-buffer]]
+version = "0.12.1"
+criteria = "safe-to-run"
+
 [[exemptions.blowfish]]
 version = "0.9.1"
 criteria = "safe-to-deploy"
@@ -273,6 +277,10 @@ criteria = "safe-to-deploy"
 version = "5.4.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.cmov]]
+version = "0.5.4"
+criteria = "safe-to-run"
+
 [[exemptions.combine]]
 version = "4.6.7"
 criteria = "safe-to-deploy"
@@ -304,6 +312,10 @@ criteria = "safe-to-deploy"
 [[exemptions.const-oid]]
 version = "0.9.6"
 criteria = "safe-to-deploy"
+
+[[exemptions.const-oid]]
+version = "0.10.2"
+criteria = "safe-to-run"
 
 [[exemptions.constant_time_eq]]
 version = "0.4.2"
@@ -360,6 +372,14 @@ criteria = "safe-to-deploy"
 [[exemptions.crypto-common]]
 version = "0.1.7"
 criteria = "safe-to-deploy"
+
+[[exemptions.crypto-common]]
+version = "0.2.2"
+criteria = "safe-to-run"
+
+[[exemptions.ctutils]]
+version = "0.4.2"
+criteria = "safe-to-run"
 
 [[exemptions.curve25519-dalek]]
 version = "4.1.0"
@@ -420,6 +440,10 @@ criteria = "safe-to-deploy"
 [[exemptions.dialoguer]]
 version = "0.11.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.digest]]
+version = "0.11.3"
+criteria = "safe-to-run"
 
 [[exemptions.dirs]]
 version = "2.0.2"
@@ -685,6 +709,10 @@ criteria = "safe-to-deploy"
 version = "0.12.4"
 criteria = "safe-to-deploy"
 
+[[exemptions.hmac]]
+version = "0.13.0"
+criteria = "safe-to-run"
+
 [[exemptions.hmac-sha256]]
 version = "1.1.14"
 criteria = "safe-to-deploy"
@@ -696,6 +724,10 @@ criteria = "safe-to-deploy"
 [[exemptions.html5ever]]
 version = "0.39.0"
 criteria = "safe-to-deploy"
+
+[[exemptions.hybrid-array]]
+version = "0.4.13"
+criteria = "safe-to-run"
 
 [[exemptions.hyper-rustls]]
 version = "0.27.9"
@@ -897,6 +929,10 @@ criteria = "safe-to-deploy"
 version = "0.10.6"
 criteria = "safe-to-deploy"
 
+[[exemptions.md-5]]
+version = "0.11.0"
+criteria = "safe-to-run"
+
 [[exemptions.mimalloc]]
 version = "0.1.50"
 criteria = "safe-to-deploy"
@@ -956,6 +992,10 @@ criteria = "safe-to-deploy"
 [[exemptions.objc2-io-kit]]
 version = "0.3.2"
 criteria = "safe-to-deploy"
+
+[[exemptions.objc2-system-configuration]]
+version = "0.3.2"
+criteria = "safe-to-run"
 
 [[exemptions.object]]
 version = "0.39.1"
@@ -1100,6 +1140,14 @@ criteria = "safe-to-deploy"
 [[exemptions.portable-atomic-util]]
 version = "0.2.7"
 criteria = "safe-to-deploy"
+
+[[exemptions.postgres-protocol]]
+version = "0.6.12"
+criteria = "safe-to-run"
+
+[[exemptions.postgres-types]]
+version = "0.2.14"
+criteria = "safe-to-run"
 
 [[exemptions.potential_utf]]
 version = "0.1.5"
@@ -1377,6 +1425,10 @@ criteria = "safe-to-run"
 version = "3.4.0"
 criteria = "safe-to-run"
 
+[[exemptions.sha2]]
+version = "0.11.0"
+criteria = "safe-to-run"
+
 [[exemptions.shell-words]]
 version = "1.1.1"
 criteria = "safe-to-deploy"
@@ -1517,6 +1569,10 @@ criteria = "safe-to-deploy"
 version = "1.11.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.tokio-postgres]]
+version = "0.7.18"
+criteria = "safe-to-run"
+
 [[exemptions.tokio-tungstenite]]
 version = "0.28.0"
 criteria = "safe-to-deploy"
@@ -1629,6 +1685,10 @@ criteria = "safe-to-deploy"
 version = "0.0.18"
 criteria = "safe-to-deploy"
 
+[[exemptions.wasite]]
+version = "1.0.2"
+criteria = "safe-to-run"
+
 [[exemptions.wasm-bindgen]]
 version = "0.2.108"
 criteria = "safe-to-deploy"
@@ -1692,6 +1752,10 @@ criteria = "safe-to-deploy"
 [[exemptions.webpki-roots]]
 version = "1.0.7"
 criteria = "safe-to-deploy"
+
+[[exemptions.whoami]]
+version = "2.1.2"
+criteria = "safe-to-run"
 
 [[exemptions.winapi]]
 version = "0.3.9"

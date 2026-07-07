@@ -166,6 +166,14 @@ pub struct StartCommandArguments {
 	#[arg(value_delimiter = ',', value_parser = super::validator::cors_origin)]
 	allow_origin: Vec<String>,
 	//
+	// Postgres server
+	#[arg(
+		help = "The hostname or IP address to listen for Postgres wire protocol connections on",
+		help_heading = "Postgres server"
+	)]
+	#[arg(env = "SURREAL_POSTGRES_BIND", long = "postgres-bind")]
+	postgres_bind: Option<SocketAddr>,
+	//
 	// Database options
 	#[command(flatten)]
 	#[command(next_help_heading = "Database")]
@@ -240,6 +248,7 @@ pub async fn init<
 		no_banner,
 		no_identification_headers,
 		allow_origin,
+		postgres_bind,
 		..
 	}: StartCommandArguments,
 	runtime: ObservabilityRuntime,
@@ -283,6 +292,7 @@ pub async fn init<
 	};
 	let config = Config {
 		bind,
+		postgres_bind,
 		client_ip,
 		path,
 		user,
@@ -392,6 +402,25 @@ pub async fn init<
 		// node-membership refresh task keeps the heartbeat current.
 		max_heartbeat_age: Some(max_heartbeat_age),
 	};
+	// Start the Postgres wire protocol listener when configured
+	#[cfg(feature = "postgres")]
+	if let Some(postgres_addr) = config.postgres_bind {
+		crate::pg::start(
+			postgres_addr,
+			Arc::clone(&datastore),
+			Arc::clone(&ready),
+			canceller.clone(),
+			config.crt.clone(),
+			config.key.clone(),
+		)
+		.await?;
+	}
+	#[cfg(not(feature = "postgres"))]
+	if config.postgres_bind.is_some() {
+		return Err(anyhow::anyhow!(
+			"The --postgres-bind option requires a binary built with the 'postgres' feature"
+		));
+	}
 	// Build and run the HTTP server using the provided RouterFactory implementation
 	ntw::init_with_metrics::<C>(
 		&config,

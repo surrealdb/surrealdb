@@ -45,6 +45,7 @@ impl ConfigCheckRequirements for CommunityComposer {}
 #[derive(Clone, Debug)]
 pub struct Config {
 	pub bind: SocketAddr,
+	pub postgres_bind: Option<SocketAddr>,
 	pub path: String,
 	pub client_ip: ClientIp,
 	pub user: Option<String>,

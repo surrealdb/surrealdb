@@ -384,6 +384,7 @@ pub enum RouteTarget {
 	Api,
 	Mcp,
 	Gql,
+	Postgres,
 }
 
 // impl display
@@ -405,6 +406,7 @@ impl fmt::Display for RouteTarget {
 			RouteTarget::Api => write!(f, "api"),
 			RouteTarget::Mcp => write!(f, "mcp"),
 			RouteTarget::Gql => write!(f, "gql"),
+			RouteTarget::Postgres => write!(f, "postgres"),
 		}
 	}
 }
@@ -445,6 +447,7 @@ impl std::str::FromStr for RouteTarget {
 			"api" => Ok(RouteTarget::Api),
 			"mcp" => Ok(RouteTarget::Mcp),
 			"gql" => Ok(RouteTarget::Gql),
+			"postgres" => Ok(RouteTarget::Postgres),
 			_ => Err(ParseRouteTargetError),
 		}
 	}

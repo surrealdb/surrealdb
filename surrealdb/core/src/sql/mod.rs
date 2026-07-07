@@ -58,9 +58,8 @@ pub(crate) mod arbitrary;
 
 pub(crate) use self::access_type::AccessType;
 pub(crate) use self::algorithm::Algorithm;
-#[cfg(not(feature = "arbitrary"))]
-pub(crate) use self::ast::Ast;
-#[cfg(feature = "arbitrary")]
+// `Ast` is public so embedders (e.g. the server's Postgres listener) can parse
+// a query once and cache it for repeated execution via `Datastore::process*`.
 pub use self::ast::Ast;
 pub(crate) use self::ast::{ExplainFormat, TopLevelExpr};
 pub(crate) use self::base::Base;

@@ -33,6 +33,7 @@ default = [
     "graphql",
     "gql",
     "mcp",
+    "postgres",
 ]
 http = ["surrealdb-core/http"]
 jwks = ["surrealdb-core/jwks"]
@@ -64,6 +65,8 @@ graphql = [
 gql = ["surrealdb-core/gql"]
 # MCP (Model Context Protocol) server support
 mcp = ["dep:surrealdb-mcp", "surrealdb-mcp/server-http", "surrealdb-mcp/transport-io"]
+# Postgres wire protocol support
+postgres = ["dep:base64", "dep:chrono", "dep:rust_decimal"]
 # Interactive CLI support (SQL shell)
 cli = ["dep:rustyline"]
 # Tokio Console support, off by default for production builds.
@@ -134,7 +137,10 @@ dirs = "6.0.0"
 # Other crates
 async-graphql = { workspace = true, default-features = false, optional = true }
 async-graphql-axum = { workspace = true, optional = true }
+base64 = { workspace = true, optional = true }
 bytes.workspace = true
+chrono = { workspace = true, optional = true }
+rust_decimal = { workspace = true, optional = true }
 futures.workspace = true
 futures-util.workspace = true
 http.workspace = true
@@ -147,6 +153,7 @@ reqwest = { workspace = true, default-features = false, features = [
     "http2",
 ] }
 rustls = { workspace = true, features = ["aws_lc_rs"] }
+tokio-rustls = { version = "0.26.4", default-features = false }
 semver.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
@@ -187,7 +194,6 @@ opentelemetry-proto = { version = "0.31.0", features = [
 rcgen = "0.14.7"
 
 # Other crates
-chrono.workspace = true
 env_logger.workspace = true
 jsonwebtoken.workspace = true
 serial_test.workspace = true

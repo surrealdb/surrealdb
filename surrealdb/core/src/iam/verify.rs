@@ -952,6 +952,116 @@ pub async fn verify_db_creds(
 	Ok(user)
 }
 
+/// A resolved SCRAM verifier plus the identity needed to establish the session
+/// once a transport has verified the client proof. Returned by [`scram_lookup`].
+///
+/// SCRAM is challenge-response, so — unlike [`basic`] — the transport drives the
+/// exchange itself (using [`ScramAuth::credential`]) and only then calls
+/// [`ScramAuth::apply`] to authenticate the session. Password verification never
+/// happens here; possession of a valid client proof is the proof of identity.
+pub struct ScramAuth {
+	credential: catalog::ScramCredential,
+	user: catalog::UserDefinition,
+	level: Level,
+}
+
+impl ScramAuth {
+	/// The per-user SCRAM salt, sent to the client in the server-first message.
+	pub fn salt(&self) -> &[u8] {
+		&self.credential.salt
+	}
+
+	/// The PBKDF2 iteration count, sent to the client in the server-first message.
+	pub fn iterations(&self) -> u32 {
+		self.credential.iterations
+	}
+
+	/// Verify a client proof against this verifier for the caller-assembled
+	/// `AuthMessage`. Returns `true` when the proof is valid.
+	pub fn verify_client_proof(&self, auth_message: &[u8], client_proof: &[u8]) -> bool {
+		self.credential.verify_client_proof(auth_message, client_proof)
+	}
+
+	/// The server signature (`v=`) for the caller-assembled `AuthMessage`, proving
+	/// the server also holds the verifier.
+	pub fn server_signature(&self, auth_message: &[u8]) -> [u8; 32] {
+		self.credential.server_signature(auth_message)
+	}
+
+	/// Establish `session.au` / `session.exp` for the SCRAM-verified user. Call
+	/// only after the client proof has been verified via [`Self::verify_client_proof`].
+	pub fn apply(&self, session: &mut Session) -> Result<()> {
+		session.exp = expiration(self.user.session_duration)?;
+		session.au = Arc::new(Auth::new(Actor::from_role_names(
+			self.user.name.to_string(),
+			&self.user.roles,
+			self.level.clone(),
+		)?));
+		Ok(())
+	}
+}
+
+/// Resolve a user's SCRAM verifier for the given scope, trying database, then
+/// namespace, then root level (mirroring the fallback a transport with no
+/// explicit auth-level field uses). Returns the first level at which the named
+/// user exists *and* has SCRAM material, or `None` when none does — in which
+/// case the transport falls back to another mechanism (e.g. cleartext against
+/// the Argon2 hash). Does not verify any password.
+pub async fn scram_lookup(
+	kvs: &Datastore,
+	user: &str,
+	ns: Option<&str>,
+	db: Option<&str>,
+) -> Result<Option<ScramAuth>> {
+	let tx = kvs.transaction(Read, Optimistic).await?;
+	let result = scram_lookup_inner(&tx, user, ns, db).await;
+	let _ = tx.cancel().await;
+	result
+}
+
+async fn scram_lookup_inner(
+	tx: &crate::kvs::Transaction,
+	user: &str,
+	ns: Option<&str>,
+	db: Option<&str>,
+) -> Result<Option<ScramAuth>> {
+	// Database level.
+	if let (Some(ns), Some(db)) = (ns, db)
+		&& let Some(db_def) = tx.get_db_by_name(ns, db, None).await?
+		&& let Some(u) = tx.get_db_user(db_def.namespace_id, db_def.database_id, user, None).await?
+		&& let Some(scram) = u.scram.clone()
+	{
+		return Ok(Some(ScramAuth {
+			credential: scram,
+			user: (*u).clone(),
+			level: Level::Database(ns.to_owned(), db.to_owned()),
+		}));
+	}
+	// Namespace level.
+	if let Some(ns) = ns
+		&& let Some(ns_def) = tx.get_ns_by_name(ns, None).await?
+		&& let Some(u) = tx.get_ns_user(ns_def.namespace_id, user, None).await?
+		&& let Some(scram) = u.scram.clone()
+	{
+		return Ok(Some(ScramAuth {
+			credential: scram,
+			user: (*u).clone(),
+			level: Level::Namespace(ns.to_owned()),
+		}));
+	}
+	// Root level.
+	if let Some(u) = tx.get_root_user(user, None).await?
+		&& let Some(scram) = u.scram.clone()
+	{
+		return Ok(Some(ScramAuth {
+			credential: scram,
+			user: (*u).clone(),
+			level: Level::Root,
+		}));
+	}
+	Ok(None)
+}
+
 fn verify_pass(pass: &str, hash: &str) -> Result<()> {
 	// Compute the hash and verify the password
 	let hash =

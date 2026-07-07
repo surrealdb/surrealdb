@@ -86,6 +86,61 @@ impl Ast {
 	pub fn add_param(&mut self, name: String) {
 		self.expressions.push(TopLevelExpr::Expr(Expr::Param(Param::new(name))));
 	}
+
+	/// Whether a top-level `CANCEL` (transaction rollback) appears in this AST.
+	pub fn contains_cancel(&self) -> bool {
+		self.expressions.iter().any(|e| matches!(e, TopLevelExpr::Cancel))
+	}
+
+	/// Whether this AST is exactly a single top-level `COMMIT`.
+	pub fn is_sole_commit(&self) -> bool {
+		matches!(self.expressions.as_slice(), [TopLevelExpr::Commit])
+	}
+
+	/// Whether this AST is exactly a single top-level `CANCEL`.
+	pub fn is_sole_cancel(&self) -> bool {
+		matches!(self.expressions.as_slice(), [TopLevelExpr::Cancel])
+	}
+
+	/// Split this query into sequentially executable units: each
+	/// non-transactional top-level statement becomes a unit of its own, while
+	/// the statements of a `BEGIN`..`COMMIT`/`CANCEL` block stay together as
+	/// one unit. A `BEGIN` without a matching `COMMIT`/`CANCEL` keeps the
+	/// remainder of the query in its unit.
+	pub fn into_execution_units(self) -> Vec<Ast> {
+		let mut units = Vec::new();
+		let mut block: Option<Vec<TopLevelExpr>> = None;
+		for expr in self.expressions {
+			match expr {
+				TopLevelExpr::Begin => {
+					block.get_or_insert_with(Vec::new).push(expr);
+				}
+				TopLevelExpr::Commit | TopLevelExpr::Cancel => match block.take() {
+					Some(mut statements) => {
+						statements.push(expr);
+						units.push(Ast {
+							expressions: statements,
+						});
+					}
+					None => units.push(Ast {
+						expressions: vec![expr],
+					}),
+				},
+				other => match block.as_mut() {
+					Some(statements) => statements.push(other),
+					None => units.push(Ast {
+						expressions: vec![other],
+					}),
+				},
+			}
+		}
+		if let Some(statements) = block {
+			units.push(Ast {
+				expressions: statements,
+			});
+		}
+		units
+	}
 }
 
 fn is_value_expr(expr: &Expr) -> bool {
@@ -246,5 +301,47 @@ impl ToSql for TopLevelExpr {
 			TopLevelExpr::Show(s) => s.fmt_sql(f, fmt),
 			TopLevelExpr::Expr(e) => e.fmt_sql(f, fmt),
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use crate::syn;
+
+	/// Statement counts per execution unit for a parsed query.
+	fn unit_sizes(query: &str) -> Vec<usize> {
+		syn::parse(query)
+			.unwrap()
+			.into_execution_units()
+			.iter()
+			.map(super::Ast::num_statements)
+			.collect()
+	}
+
+	#[test]
+	fn splits_plain_statements_individually() {
+		assert_eq!(unit_sizes("RETURN 1; RETURN 2; RETURN 3"), vec![1, 1, 1]);
+	}
+
+	#[test]
+	fn keeps_transaction_block_as_one_unit() {
+		// BEGIN; RETURN 1; RETURN 2; COMMIT -> one unit of four statements.
+		assert_eq!(unit_sizes("BEGIN; RETURN 1; RETURN 2; COMMIT"), vec![4]);
+	}
+
+	#[test]
+	fn mixes_blocks_and_plain_statements() {
+		assert_eq!(unit_sizes("RETURN 0; BEGIN; RETURN 1; COMMIT; RETURN 2"), vec![1, 3, 1]);
+	}
+
+	#[test]
+	fn unterminated_block_keeps_remainder() {
+		// A BEGIN with no COMMIT/CANCEL carries the rest of the query.
+		assert_eq!(unit_sizes("RETURN 0; BEGIN; RETURN 1; RETURN 2"), vec![1, 3]);
+	}
+
+	#[test]
+	fn cancel_closes_a_block() {
+		assert_eq!(unit_sizes("BEGIN; RETURN 1; CANCEL"), vec![3]);
 	}
 }
