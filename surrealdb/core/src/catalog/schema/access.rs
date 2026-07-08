@@ -123,7 +123,7 @@ impl InfoStructure for JwtAccess {
 					if v.alg.is_symmetric(){
 						Value::from(map!{
 							"alg" => v.alg.to_string().into(),
-							"key" => "[REDACTED]".into(),
+							"key" => super::REDACTED.into(),
 						})
 					}else{
 						Value::from(map!{
@@ -135,7 +135,7 @@ impl InfoStructure for JwtAccess {
 			},
 			"issuer", if let Some(v) = self.issue => Value::from(map!{
 				"alg" => v.alg.to_string().into(),
-				"key" => "[REDACTED]".into(),
+				"key" => super::REDACTED.into(),
 			}),
 		})
 	}
@@ -314,7 +314,7 @@ impl JwtAccessVerify {
 			Self::Key(mut k) => {
 				// Redact symmetric keys
 				if k.alg.is_symmetric() {
-					k.key = "[REDACTED]".to_string();
+					k.key = super::REDACTED.to_string();
 				}
 				Self::Key(k)
 			}
@@ -328,7 +328,7 @@ impl JwtAccessIssue {
 		Self {
 			alg: self.alg,
 			// Always redact issuer keys as they're private keys
-			key: "[REDACTED]".to_string(),
+			key: super::REDACTED.to_string(),
 		}
 	}
 }

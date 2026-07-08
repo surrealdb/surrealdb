@@ -15,15 +15,15 @@ value = "{ database: 'db', namespace: 'ns' }"
 value = "NONE"
 
 [[test.results]]
-match = '''$result = /DEFINE USER test ON DATABASE PASSHASH '\$argon2id\$.*' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE/'''
+match = '''$result = /DEFINE USER test ON DATABASE PASSHASH '\[REDACTED\]' PASSSCRAM '\[REDACTED\]' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE/'''
 error = false
 
 [[test.results]]
-match = '''$result = /DEFINE USER test ON DATABASE PASSHASH '\$argon2id\$.*' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE/'''
+match = '''$result = /DEFINE USER test ON DATABASE PASSHASH '\[REDACTED\]' PASSSCRAM '\[REDACTED\]' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE/'''
 error = false
 
 [[test.results]]
-match = '''$result = /DEFINE USER test ON DATABASE PASSHASH '\$argon2id\$.*' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE/'''
+match = '''$result = /DEFINE USER test ON DATABASE PASSHASH '\[REDACTED\]' PASSSCRAM '\[REDACTED\]' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE/'''
 error = false
 
 [[test.results]]

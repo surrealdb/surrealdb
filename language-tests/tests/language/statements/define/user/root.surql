@@ -9,7 +9,7 @@ value = "NONE"
 
 [[test.results]]
 match = """
-$result.users.test = /DEFINE USER test ON ROOT PASSHASH '\\$argon2id\\$.*' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE/
+$result.users.test = /DEFINE USER test ON ROOT PASSHASH '\\[REDACTED\\]' PASSSCRAM '\\[REDACTED\\]' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE/
 """
 error = false
 */

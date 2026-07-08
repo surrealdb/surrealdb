@@ -37,6 +37,13 @@ use crate::expr::Expr;
 use crate::expr::statements::info::InfoStructure;
 use crate::val::Value;
 
+/// Placeholder substituted for a secret when a catalog definition is serialised
+/// through `INFO FOR …`. Credentials (Argon2 hashes, SCRAM verifiers, symmetric
+/// and issuer keys) are offline-crackable or directly replayable, so metadata
+/// surfaces must never return their real values. Export goes through the
+/// `from_definition` paths and is intentionally not redacted.
+pub(crate) const REDACTED: &str = "[REDACTED]";
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) enum Permission {

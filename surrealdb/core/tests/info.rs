@@ -101,7 +101,10 @@ async fn info_for_user() {
 	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
 	let out = res.pop().unwrap().output();
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
-	let output_regex = Regex::new(r"DEFINE USER user ON ROOT PASSHASH .* ROLES VIEWER").unwrap();
+	let output_regex = Regex::new(
+		r"DEFINE USER user ON ROOT PASSHASH '\[REDACTED\]' PASSSCRAM '\[REDACTED\]' ROLES VIEWER",
+	)
+	.unwrap();
 	let out_str = out.unwrap().into_string().unwrap();
 	assert!(
 		output_regex.is_match(&out_str),
@@ -109,14 +112,17 @@ async fn info_for_user() {
 		out_str,
 		output_regex
 	);
+	assert!(!out_str.contains("$argon2"), "INFO FOR USER must not leak Argon2 PHC: {}", out_str);
 
 	// Info for NS user
 	let sql = "INFO FOR USER user ON NS";
 	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
 	let out = res.pop().unwrap().output();
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
-	let output_regex =
-		Regex::new(r"DEFINE USER user ON NAMESPACE PASSHASH .* ROLES VIEWER").unwrap();
+	let output_regex = Regex::new(
+		r"DEFINE USER user ON NAMESPACE PASSHASH '\[REDACTED\]' PASSSCRAM '\[REDACTED\]' ROLES VIEWER",
+	)
+	.unwrap();
 	let out_str = out.unwrap().into_string().unwrap();
 	assert!(
 		output_regex.is_match(&out_str),
@@ -124,14 +130,17 @@ async fn info_for_user() {
 		out_str,
 		output_regex
 	);
+	assert!(!out_str.contains("$argon2"), "INFO FOR USER must not leak Argon2 PHC: {}", out_str);
 
 	// Info for DB user
 	let sql = "INFO FOR USER user ON DB";
 	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
 	let out = res.pop().unwrap().output();
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
-	let output_regex =
-		Regex::new(r"DEFINE USER user ON DATABASE PASSHASH .* ROLES VIEWER").unwrap();
+	let output_regex = Regex::new(
+		r"DEFINE USER user ON DATABASE PASSHASH '\[REDACTED\]' PASSSCRAM '\[REDACTED\]' ROLES VIEWER",
+	)
+	.unwrap();
 	let out_str = out.unwrap().into_string().unwrap();
 	assert!(
 		output_regex.is_match(&out_str),
@@ -139,14 +148,17 @@ async fn info_for_user() {
 		out_str,
 		output_regex
 	);
+	assert!(!out_str.contains("$argon2"), "INFO FOR USER must not leak Argon2 PHC: {}", out_str);
 
 	// Info for user on selected level
 	let sql = "INFO FOR USER user";
 	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
 	let out = res.pop().unwrap().output();
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
-	let output_regex =
-		Regex::new(r"DEFINE USER user ON DATABASE PASSHASH .* ROLES VIEWER").unwrap();
+	let output_regex = Regex::new(
+		r"DEFINE USER user ON DATABASE PASSHASH '\[REDACTED\]' PASSSCRAM '\[REDACTED\]' ROLES VIEWER",
+	)
+	.unwrap();
 	let out_str = out.unwrap().into_string().unwrap();
 	assert!(
 		output_regex.is_match(&out_str),
@@ -154,6 +166,7 @@ async fn info_for_user() {
 		out_str,
 		output_regex
 	);
+	assert!(!out_str.contains("$argon2"), "INFO FOR USER must not leak Argon2 PHC: {}", out_str);
 }
 
 //
@@ -416,7 +429,7 @@ async fn permissions_checks_info_user_root() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check = "\"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\""
+	let check = "\"DEFINE USER user ON ROOT PASSHASH '[REDACTED]' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\""
 		.to_string();
 
 	let test_cases = [
@@ -460,7 +473,7 @@ async fn permissions_checks_info_user_ns() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check = "\"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\""
+	let check = "\"DEFINE USER user ON NAMESPACE PASSHASH '[REDACTED]' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\""
 		.to_string();
 
 	let test_cases = [
@@ -504,7 +517,7 @@ async fn permissions_checks_info_user_db() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check = "\"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\""
+	let check = "\"DEFINE USER user ON DATABASE PASSHASH '[REDACTED]' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\""
 		.to_string();
 
 	let test_cases = [

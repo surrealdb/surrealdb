@@ -305,7 +305,7 @@ async fn define_statement_user_root() -> Result<()> {
 	let tmp = res.remove(0).result?;
 	let define_str = tmp.get("users").get("test").clone().into_string().unwrap();
 
-	assert!(define_str.starts_with("DEFINE USER test ON ROOT PASSHASH '$argon2id$"));
+	assert!(define_str.starts_with("DEFINE USER test ON ROOT PASSHASH '[REDACTED]'"));
 	Ok(())
 }
 
@@ -339,7 +339,7 @@ async fn define_statement_user_ns() -> Result<()> {
 			.clone()
 			.into_string()
 			.unwrap()
-			.starts_with("DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$")
+			.starts_with("DEFINE USER test ON NAMESPACE PASSHASH '[REDACTED]'")
 	);
 	assert!(
 		res.next()
@@ -350,7 +350,7 @@ async fn define_statement_user_ns() -> Result<()> {
 			.clone()
 			.into_string()
 			.unwrap()
-			.starts_with("DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$")
+			.starts_with("DEFINE USER test ON NAMESPACE PASSHASH '[REDACTED]'")
 	);
 	assert!(
 		res.next()
@@ -361,7 +361,7 @@ async fn define_statement_user_ns() -> Result<()> {
 			.clone()
 			.into_string()
 			.unwrap()
-			.starts_with("DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$")
+			.starts_with("DEFINE USER test ON NAMESPACE PASSHASH '[REDACTED]'")
 	);
 
 	assert_eq!(
@@ -408,13 +408,13 @@ async fn define_statement_user_db() -> Result<()> {
 	); // User doesn't exist at the NS level
 
 	let s = res[3].result.as_ref().unwrap().clone().into_string().unwrap();
-	assert!(s.starts_with("DEFINE USER test ON DATABASE PASSHASH '$argon2id$"), "{}", s);
+	assert!(s.starts_with("DEFINE USER test ON DATABASE PASSHASH '[REDACTED]'"), "{}", s);
 
 	let s = res[4].result.as_ref().unwrap().clone().into_string().unwrap();
-	assert!(s.starts_with("DEFINE USER test ON DATABASE PASSHASH '$argon2id$"), "{}", s);
+	assert!(s.starts_with("DEFINE USER test ON DATABASE PASSHASH '[REDACTED]'"), "{}", s);
 
 	let s = res[5].result.as_ref().unwrap().clone().into_string().unwrap();
-	assert!(s.starts_with("DEFINE USER test ON DATABASE PASSHASH '$argon2id$"), "{}", s);
+	assert!(s.starts_with("DEFINE USER test ON DATABASE PASSHASH '[REDACTED]'"), "{}", s);
 
 	// If it tries to create a NS user without specifying a NS, it should fail
 	let sql = "
@@ -815,7 +815,7 @@ async fn permissions_checks_define_user_root() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = r#"{ accesses: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: { user: "DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h" } }"#.to_string();
+	let check_success = r#"{ accesses: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: { user: "DEFINE USER user ON ROOT PASSHASH '[REDACTED]' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h" } }"#.to_string();
 	let check_error = "{ accesses: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
 
 	let test_cases = [
@@ -909,7 +909,7 @@ async fn permissions_checks_define_user_ns() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = r#"{ accesses: {  }, databases: { {{DB}}: 'DEFINE DATABASE {{DB}}' }, users: { user: "DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h" } }"#.to_string();
+	let check_success = r#"{ accesses: {  }, databases: { {{DB}}: 'DEFINE DATABASE {{DB}}' }, users: { user: "DEFINE USER user ON NAMESPACE PASSHASH '[REDACTED]' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h" } }"#.to_string();
 	let check_error =
 		"{ accesses: {  }, databases: { {{DB}}: 'DEFINE DATABASE {{DB}}' }, users: {  } }"
 			.to_string();
@@ -998,7 +998,7 @@ async fn permissions_checks_define_user_db() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = r#"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: { }, tables: {  }, users: { user: "DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h" } }"#.to_string();
+	let check_success = r#"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: { }, tables: {  }, users: { user: "DEFINE USER user ON DATABASE PASSHASH '[REDACTED]' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h" } }"#.to_string();
 	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
 
 	let test_cases = [

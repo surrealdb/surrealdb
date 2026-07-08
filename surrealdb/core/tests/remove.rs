@@ -899,7 +899,7 @@ async fn permissions_checks_remove_root_user() {
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
 	let check_success = "{ accesses: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
-	let check_error = r#"{ accesses: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: { user: "DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE" } }"#.to_string();
+	let check_error = r#"{ accesses: {  }, config: { 'QUERY_TIMEOUT': None }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: { user: "DEFINE USER user ON ROOT PASSHASH '[REDACTED]' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE" } }"#.to_string();
 
 	let test_cases = [
 		// Root level
@@ -991,7 +991,7 @@ async fn permissions_checks_remove_ns_user() {
 	let check_success =
 		"{ accesses: {  }, databases: { {{DB}}: 'DEFINE DATABASE {{DB}}' }, users: {  } }"
 			.to_string();
-	let check_error = "{ accesses: {  }, databases: { {{DB}}: 'DEFINE DATABASE {{DB}}' }, users: { user: \"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE\" } }".to_string();
+	let check_error = "{ accesses: {  }, databases: { {{DB}}: 'DEFINE DATABASE {{DB}}' }, users: { user: \"DEFINE USER user ON NAMESPACE PASSHASH '[REDACTED]' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE\" } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -1076,7 +1076,7 @@ async fn permissions_checks_remove_db_user() {
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
 	let check_success = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }".to_string();
-	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE\" } }".to_string();
+	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: { user: \"DEFINE USER user ON DATABASE PASSHASH '[REDACTED]' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE\" } }".to_string();
 
 	let test_cases = [
 		// Root level
