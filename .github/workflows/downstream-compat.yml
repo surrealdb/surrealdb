@@ -148,15 +148,36 @@ jobs:
           export GIT_CONFIG_VALUE_0
           ref=""
           last_err=""
+          # Number of ls-remote attempts per candidate before giving up on it.
+          max_attempts=5
           for cand in "${WANT}" main; do
             # --exit-code: 0 = ref found, 2 = connected but no such ref, other =
             # access/auth error. So a non-empty last_err means we couldn't reach
             # the repo (likely the App lacks Contents:read), vs the ref just being
             # absent (empty last_err).
-            if last_err="$(git -C "$workdir" ls-remote --exit-code --heads "$url" "refs/heads/${cand}" 2>&1 >/dev/null)"; then
-              ref="${cand}"
-              break
-            fi
+            #
+            # Retry only the "couldn't reach the repo" case: a freshly-minted
+            # installation token is occasionally not usable for a moment, and a
+            # private repo surfaces that as a transient 404 ("repository not
+            # found") that is indistinguishable from a real permission gap on a
+            # single attempt. A ref that is merely absent (empty last_err) is a
+            # real "no such branch", so we stop retrying and fall through to the
+            # next candidate. Fixed 5s backoff mirrors the retry style already
+            # used in .github/actions/setup-databases.
+            attempt=1
+            while :; do
+              if last_err="$(git -C "$workdir" ls-remote --exit-code --heads "$url" "refs/heads/${cand}" 2>&1 >/dev/null)"; then
+                ref="${cand}"
+                break
+              fi
+              if [ -z "${last_err}" ] || [ "${attempt}" -ge "${max_attempts}" ]; then
+                break
+              fi
+              echo "Downstream ls-remote for '${cand}' failed (attempt ${attempt}/${max_attempts}); retrying in 5s..." >&2
+              attempt=$((attempt + 1))
+              sleep 5
+            done
+            [ -n "${ref}" ] && break
           done
           if [ -z "${ref}" ]; then
             echo "::error title=Downstream compatibility::could not read '${WANT}' or 'main' on ${OWNER}/${REPO}. If git reports an auth/permission error below, the App is missing Contents:read on the repo (ref reads require it; approve the permission on the installation, not just add it to the App). git said: ${last_err:-<no error output: branches simply do not exist>}"

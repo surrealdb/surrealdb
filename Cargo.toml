@@ -248,11 +248,9 @@ license-file.workspace = true
 
 [features]
 # Inherit the shared default feature set from `surrealdb-server` so the two
-# crates don't duplicate the list. The binary only adds `cli` on top.
-default = [
-    "surrealdb-server/default",
-    "cli",
-]
+# crates don't duplicate the list. This includes `cli`, so the binary and the
+# enterprise binary both get the `sql` subcommand by default.
+default = ["surrealdb-server/default"]
 
 allocator = ["surrealdb-server/allocator"]
 allocation-tracking = ["surrealdb-server/allocation-tracking"]

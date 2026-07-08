@@ -18,7 +18,8 @@ allocation-tracking = ["surrealdb-core/allocation-tracking"]
 allocator = ["surrealdb-core/allocator"]
 # Shared default feature set, inherited by the `surreal` binary crate via
 # `surrealdb-server/default` so the two crates don't duplicate the list.
-# The binary additionally enables `cli` on top of this set.
+# `cli` is included here because the enterprise binary depends on this crate
+# and needs the `sql` subcommand it provides.
 default = [
     "allocator",
     "allocation-tracking",
@@ -34,6 +35,7 @@ default = [
     "gql",
     "mcp",
     "postgres",
+    "cli",
 ]
 http = ["surrealdb-core/http"]
 jwks = ["surrealdb-core/jwks"]
