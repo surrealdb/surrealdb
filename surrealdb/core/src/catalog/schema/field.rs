@@ -6,7 +6,7 @@ use crate::catalog::auth::AuthLimit;
 use crate::expr::reference::Reference;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Idiom, Kind};
-use crate::kvs::impl_kv_value_revisioned;
+use crate::key::impl_kv_value_revisioned;
 use crate::sql::{self, DefineFieldStatement};
 use crate::val::{TableName, Value};
 

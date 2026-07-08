@@ -2,85 +2,53 @@
 use std::borrow::Cow;
 
 use anyhow::Result;
-use storekey::{BorrowDecode, Encode};
 
-use crate::catalog::{DatabaseId, IndexDefinition, IndexId, NamespaceId};
+use crate::catalog::{IndexDefinition, IndexId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::{KVKey, impl_kv_key_storekey};
-use crate::val::TableName;
+use crate::key::database::all::DatabaseRoot;
+use crate::key::{impl_kv_key_storekey, impl_kv_range_storekey, key};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Encode, BorrowDecode)]
-pub(crate) struct IndexNameLookupKey<'key> {
-	__: u8,
-	_a: u8,
-	pub ns: NamespaceId,
-	_b: u8,
-	pub db: DatabaseId,
-	_c: u8,
-	pub tb: Cow<'key, str>,
-	_d: u8,
-	_e: u8,
-	_f: u8,
-	pub ix: IndexId,
-}
-
-impl_kv_key_storekey!(IndexNameLookupKey<'_> => String);
-
-impl<'key> IndexNameLookupKey<'key> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'key str, ix: IndexId) -> Self {
-		Self {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
-			_c: b'*',
-			tb: Cow::Borrowed(tb),
-			_d: b'!',
-			_e: b'i',
-			_f: b'l',
-			ix,
-		}
+key! {
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+	pub(crate) struct IndexNameLookupKey<'key> {
+		pub prefix: DatabaseRoot,
+		b'*',
+		pub tb: Cow<'key, str>,
+		b'!',
+		b'i',
+		b'l',
+		pub ix: IndexId,
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Encode, BorrowDecode)]
-pub(crate) struct IndexDefinitionKey<'key> {
-	__: u8,
-	_a: u8,
-	pub ns: NamespaceId,
-	_b: u8,
-	pub db: DatabaseId,
-	_c: u8,
-	pub tb: Cow<'key, str>,
-	_d: u8,
-	_e: u8,
-	_f: u8,
-	pub ix: Cow<'key, str>,
-}
+impl_kv_key_storekey!(IndexNameLookupKey<'a> => String);
 
-impl_kv_key_storekey!(IndexDefinitionKey<'_> => IndexDefinition);
-
-pub fn new<'key>(
-	ns: NamespaceId,
-	db: DatabaseId,
-	tb: &'key str,
-	ix: &'key str,
-) -> IndexDefinitionKey<'key> {
-	IndexDefinitionKey::new(ns, db, tb, ix)
+key! {
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+	pub(crate) struct IndexDefinitionKey<'key> {
+		pub prefix: DatabaseRoot,
+		b'*',
+		pub tb: Cow<'key, str>,
+		b'!',
+		b'i',
+		b'x',
+		pub ix: Cow<'key, str>,
+	}
 }
+impl_kv_key_storekey!(IndexDefinitionKey<'a> => IndexDefinition);
 
-pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &TableName) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db, tb).encode_key()?;
-	k.extend_from_slice(b"!ix\x00");
-	Ok(k)
+key! {
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+	pub(crate) struct IndexDefinitionPrefix<'key> {
+		pub prefix: DatabaseRoot,
+		b'*',
+		pub tb: Cow<'key, str>,
+		b'!',
+		b'i',
+		b'x',
+	}
 }
-
-pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &TableName) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db, tb).encode_key()?;
-	k.extend_from_slice(b"!ix\xff");
-	Ok(k)
-}
+impl_kv_range_storekey!(IndexDefinitionPrefix<'_>);
 
 impl Categorise for IndexDefinitionKey<'_> {
 	fn categorise(&self) -> Category {
@@ -88,33 +56,24 @@ impl Categorise for IndexDefinitionKey<'_> {
 	}
 }
 
-impl<'key> IndexDefinitionKey<'key> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'key str, ix: &'key str) -> Self {
-		Self {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
-			_c: b'*',
-			tb: Cow::Borrowed(tb),
-			_d: b'!',
-			_e: b'i',
-			_f: b'x',
-			ix: Cow::Borrowed(ix),
-		}
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::key::KVKey;
 
 	#[test]
 	fn key() {
-		let tb = TableName::from("testtb");
-		let val = IndexDefinitionKey::new(NamespaceId(1), DatabaseId(2), &tb, "testix");
+		let tb = "testtb";
+		let val = IndexDefinitionKey {
+			prefix: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+			tb: tb.into(),
+			ix: "testix".into(),
+		};
 		let enc = IndexDefinitionKey::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*\0\0\0\x01*\0\0\0\x02*testtb\0!ixtestix\0");
+		assert_eq!(enc.as_slice(), b"/*\0\0\0\x01*\0\0\0\x02*testtb\0!ixtestix\0");
 	}
 }

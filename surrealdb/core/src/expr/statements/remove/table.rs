@@ -96,11 +96,17 @@ impl RemoveTableStatement {
 		};
 
 		// Remove the resource data
-		let key = crate::key::table::all::new(ns, db, &name);
+		let key = crate::key::table::all::TableRoot {
+			prefix: crate::key::database::all::DatabaseRoot {
+				ns,
+				db,
+			},
+			tb: std::borrow::Cow::Borrowed(&name),
+		};
 		if self.expunge {
-			txn.clrp(&key).await?
+			txn.clr_prefix_key(&key).await?
 		} else {
-			txn.delp(&key).await?
+			txn.del_prefix_key(&key).await?
 		};
 		// Check if this is a foreign table
 		if let Some(view) = &tb.view {
@@ -120,8 +126,15 @@ impl RemoveTableStatement {
 			// Process each foreign table
 			for ft in tables.iter() {
 				// Save the view config
-				let key = crate::key::table::ft::new(ns, db, ft, &name);
-				txn.del(&key).await?;
+				let key = crate::key::table::ft::Ft {
+					prefix: crate::key::database::all::DatabaseRoot {
+						ns,
+						db,
+					},
+					tb: std::borrow::Cow::Borrowed(ft),
+					ft: std::borrow::Cow::Borrowed(&name),
+				};
+				txn.del_key(&key).await?;
 				// Refresh the table cache for foreign tables
 				let foreign_tb = txn.expect_tb(ns, db, ft).await?;
 				txn.put_tb(

@@ -42,7 +42,7 @@ fn setup(prefix_count: usize, per_prefix: usize) -> (Datastore, TempDir) {
 		for p in 0..prefix_count {
 			for k in 0..per_prefix {
 				let key = format!("p_{p:06}/k_{k:06}");
-				tr.set(key.into_bytes(), vec![0u8; 8]).await.unwrap();
+				tr.set(key.into_bytes().into(), vec![0u8; 8]).await.unwrap();
 			}
 		}
 		tx.commit().await.unwrap();
@@ -79,7 +79,7 @@ fn bench_nested_edge(c: &mut Criterion) {
 					for p in 0..prefix_count {
 						let rng = prefix_range(&format!("p_{p:06}/"));
 						let mut cursor =
-							tr.open_keys_cursor(rng, Forward, 0u32, None).await.unwrap();
+							tr.open_keys_cursor(rng.into(), Forward, 0u32, None).await.unwrap();
 						let batch = cursor.next_batch(10).await.unwrap();
 						count += batch.len() as u64;
 						drop(cursor);
@@ -106,7 +106,8 @@ fn bench_bulk_scan(c: &mut Criterion) {
 				let tx = ds.transaction(TransactionType::Read, Optimistic).await.unwrap();
 				let tr: &Transactor = &tx;
 				let rng = prefix_range("p_000000/");
-				let mut cursor = tr.open_keys_cursor(rng, Forward, 0u32, None).await.unwrap();
+				let mut cursor =
+					tr.open_keys_cursor(rng.into(), Forward, 0u32, None).await.unwrap();
 				let mut total = 0u64;
 				while total < count {
 					let batch = cursor.next_batch(2000).await.unwrap();
@@ -134,7 +135,8 @@ fn bench_bulk_scan(c: &mut Criterion) {
 					let tx = ds.transaction(TransactionType::Read, Optimistic).await.unwrap();
 					let tr: &Transactor = &tx;
 					let rng = prefix_range("p_000000/");
-					let mut cursor = tr.open_keys_cursor(rng, Forward, 0u32, None).await.unwrap();
+					let mut cursor =
+						tr.open_keys_cursor(rng.into(), Forward, 0u32, None).await.unwrap();
 					let mut total = 0u64;
 					while total < count {
 						let batch = cursor.next_batch(2000).await.unwrap();

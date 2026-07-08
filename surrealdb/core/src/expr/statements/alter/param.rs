@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::ops::Deref;
 
 use anyhow::Result;
@@ -13,6 +14,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{Base, Expr, FlowResultExt};
 use crate::iam::{Action, ResourceKind};
+use crate::key::database::all::DatabaseRoot;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -62,8 +64,14 @@ impl AlterParamStatement {
 			pa.permissions = p.clone();
 		}
 
-		let key = crate::key::database::pa::new(ns, db, &self.name);
-		txn.set(&key, &pa).await?;
+		let key = crate::key::database::pa::Pa {
+			prefix: DatabaseRoot {
+				ns,
+				db,
+			},
+			pa: Cow::Borrowed(&self.name),
+		};
+		txn.set_key(&key, &pa).await?;
 		txn.clear_cache();
 		Ok(Value::None)
 	}

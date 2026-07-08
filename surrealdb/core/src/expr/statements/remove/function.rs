@@ -35,8 +35,14 @@ impl RemoveFunctionStatement {
 			}
 		};
 		// Delete the definition
-		let key = crate::key::database::fc::new(ns, db, &fc.name);
-		txn.del(&key).await?;
+		let key = crate::key::database::fc::Fc {
+			prefix: crate::key::database::all::DatabaseRoot {
+				ns,
+				db,
+			},
+			fc: std::borrow::Cow::Borrowed(&fc.name),
+		};
+		txn.del_key(&key).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::ops::Deref;
 
 use anyhow::{Result, ensure};
@@ -18,6 +19,7 @@ use crate::expr::reference::Reference;
 use crate::expr::statements::define::kind_contains_object;
 use crate::expr::{Base, Expr, Kind, Literal};
 use crate::iam::{Action, AuthLimit, ResourceKind};
+use crate::key::database::all::DatabaseRoot;
 use crate::val::{TableName, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -193,8 +195,15 @@ impl AlterFieldStatement {
 			);
 		}
 
-		let key = crate::key::table::fd::new(ns, db, &what, &name);
-		txn.set(&key, &df).await?;
+		let key = crate::key::table::fd::Fd {
+			prefix: DatabaseRoot {
+				ns,
+				db,
+			},
+			tb: Cow::Borrowed(&what),
+			fd: Cow::Borrowed(&name),
+		};
+		txn.set_key(&key, &df).await?;
 		// Dropping the REFERENCE clause or narrowing/changing the record kind can
 		// strand reference keys under target tables the field no longer
 		// references. Purge them so the DELETE reference-purge gate stays sound.

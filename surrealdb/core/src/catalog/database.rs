@@ -11,7 +11,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::catalog::NamespaceId;
 use crate::expr::ChangeFeed;
 use crate::expr::statements::info::InfoStructure;
-use crate::kvs::impl_kv_value_revisioned;
+use crate::key::impl_kv_value_revisioned;
 use crate::sql::statements::define::DefineDatabaseStatement;
 use crate::sql::{Expr, Idiom, Literal};
 use crate::val::Value;

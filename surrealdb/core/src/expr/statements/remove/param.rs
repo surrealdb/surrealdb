@@ -34,8 +34,14 @@ impl RemoveParamStatement {
 			}
 		};
 		// Delete the definition
-		let key = crate::key::database::pa::new(ns, db, &pa.name);
-		txn.del(&key).await?;
+		let key = crate::key::database::pa::Pa {
+			prefix: crate::key::database::all::DatabaseRoot {
+				ns,
+				db,
+			},
+			pa: std::borrow::Cow::Borrowed(&pa.name),
+		};
+		txn.del_key(&key).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good

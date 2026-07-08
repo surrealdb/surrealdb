@@ -1,38 +1,22 @@
 //! Stores a DEFINE USER ON ROOT config definition
 use std::borrow::Cow;
 
-use storekey::{BorrowDecode, Encode};
-
 use crate::catalog;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::impl_kv_key_storekey;
+use crate::key::{impl_kv_key_storekey, impl_kv_range_storekey, key};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Us<'a> {
-	__: u8,
-	_a: u8,
-	_b: u8,
-	_c: u8,
-	pub user: Cow<'a, str>,
+key! {
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+	pub(crate) struct Us<'a> {
+		b'/',
+		b'!',
+		b'u',
+		b's',
+		pub user: Cow<'a, str>,
+	}
 }
 
-impl_kv_key_storekey!(Us<'_> => catalog::UserDefinition);
-
-pub fn new(user: &str) -> Us<'_> {
-	Us::new(user)
-}
-
-pub fn prefix() -> Vec<u8> {
-	let mut k = super::all::kv();
-	k.extend_from_slice(b"!us\x00");
-	k
-}
-
-pub fn suffix() -> Vec<u8> {
-	let mut k = super::all::kv();
-	k.extend_from_slice(b"!us\xff");
-	k
-}
+impl_kv_key_storekey!(Us<'a> => catalog::UserDefinition);
 
 impl Categorise for Us<'_> {
 	fn categorise(&self) -> Category {
@@ -40,39 +24,35 @@ impl Categorise for Us<'_> {
 	}
 }
 
-impl<'a> Us<'a> {
-	pub fn new(user: &'a str) -> Self {
-		Self {
-			__: b'/',
-			_a: b'!',
-			_b: b'u',
-			_c: b's',
-			user: Cow::Borrowed(user),
-		}
+key! {
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+	pub(crate) struct UsPrefix {
+		b'/',
+		b'!',
+		b'u',
+		b's',
 	}
 }
+impl_kv_range_storekey!(UsPrefix);
 
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::kvs::KVKey;
+	use crate::key::{KVKey, KVRange};
 
 	#[test]
 	fn key() {
-		let val = Us::new("testuser");
+		let val = Us {
+			user: "testuser".into(),
+		};
 		let enc = Us::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/!ustestuser\x00");
+		assert_eq!(&*enc, b"/!ustestuser\x00");
 	}
 
 	#[test]
 	fn test_prefix() {
-		let val = super::prefix();
-		assert_eq!(val, b"/!us\0");
-	}
-
-	#[test]
-	fn test_suffix() {
-		let val = super::suffix();
-		assert_eq!(val, b"/!us\xff");
+		let val = UsPrefix {}.encode_range().unwrap();
+		assert_eq!(val.start.as_slice(), b"/!us\0");
+		assert_eq!(val.end.as_slice(), b"/!ut");
 	}
 }

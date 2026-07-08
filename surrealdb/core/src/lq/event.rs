@@ -1,6 +1,6 @@
 use revision::revisioned;
 
-use crate::kvs::impl_kv_value_revisioned;
+use crate::key::impl_kv_value_revisioned;
 use crate::val::{RecordId, Value};
 
 /// The kind of mutation that produced a [`LiveEvent`].

@@ -3,9 +3,10 @@
 //! The [`IndexAnalyzer`] examines query conditions and ORDER BY clauses to find
 //! indexes that can accelerate the query.
 
+use std::ops::Bound;
 use std::sync::Arc;
 
-use super::access_path::{AccessPath, BTreeAccess, IndexRef, RangeBound, select_access_path};
+use super::access_path::{AccessPath, BTreeAccess, IndexRef, select_access_path};
 use crate::catalog::{Index, IndexDefinition};
 use crate::exec::planner::util::try_literal_to_value;
 use crate::expr::operator::{MatchesOperator, NearestNeighbor, PrefixOperator};
@@ -13,7 +14,7 @@ use crate::expr::order::Ordering;
 use crate::expr::with::With;
 use crate::expr::{BinaryOperator, Cond, Expr, Idiom};
 use crate::idx::planner::ScanDirection;
-use crate::val::{Number, Value};
+use crate::val::{Number, Range, Value};
 
 /// Analyzes query conditions to find matching indexes.
 pub struct IndexAnalyzer<'a> {
@@ -798,125 +799,31 @@ impl<'a> IndexAnalyzer<'a> {
 			let mut j = i + 1;
 			while j < candidates.len() && candidates[j].index_ref.idx == candidates[i].index_ref.idx
 			{
-				match Self::try_merge_ranges(&candidates[i].access, &candidates[j].access) {
-					Some(Ok(merged_access)) => {
-						let covers_order = candidates[i].covers_order || candidates[j].covers_order;
-						candidates[i].access = merged_access;
-						candidates[i].covers_order = covers_order;
-						candidates.remove(j);
-						// Don't increment j — the next candidate shifted into slot j
-					}
-					Some(Err(())) => {
-						// Contradiction — flag the surviving candidate as
-						// empty so it converts to `AccessPath::EmptyScan`.
+				if let BTreeAccess::Range {
+					range: a,
+				} = &candidates[i].access
+					&& let BTreeAccess::Range {
+						range: b,
+					} = &candidates[j].access
+				{
+					let range = a.clone().intersect(b.clone());
+					if range.is_empty() {
 						candidates[i].empty = true;
 						candidates.remove(j);
+					} else {
+						let covers_order = candidates[i].covers_order || candidates[j].covers_order;
+						candidates[i].access = BTreeAccess::Range {
+							range,
+						};
+						candidates[i].covers_order = covers_order;
+						candidates.remove(j);
 					}
-					None => {
-						j += 1;
-					}
+				} else {
+					j += 1;
 				}
 			}
 			i += 1;
 		}
-	}
-
-	/// Try to merge two BTreeAccess::Range values into a single tighter range.
-	///
-	/// Handles three cases:
-	/// - One side provides `from`, the other provides `to` → produce a bounded range with both.
-	/// - Both sides provide `from` → keep the tighter (larger) bound.
-	/// - Both sides provide `to`   → keep the tighter (smaller) bound.
-	///
-	/// Returns:
-	/// - `Some(Ok(merged))` — a strictly tighter range than either input.
-	/// - `Some(Err(()))`    — the bounds are mutually unsatisfiable; the caller should set the
-	///   candidate's `empty` flag so the planner short-circuits to [`AccessPath::EmptyScan`].
-	/// - `None`             — the inputs cannot be merged (different value kinds, NaN, non-Range
-	///   variants); leave the candidates as-is.
-	#[allow(clippy::result_unit_err)]
-	fn try_merge_ranges(a: &BTreeAccess, b: &BTreeAccess) -> Option<Result<BTreeAccess, ()>> {
-		let (
-			BTreeAccess::Range {
-				from: from_a,
-				to: to_a,
-			},
-			BTreeAccess::Range {
-				from: from_b,
-				to: to_b,
-			},
-		) = (a, b)
-		else {
-			return None;
-		};
-
-		// Skip merges where neither input contributes any bound — that
-		// would just produce a second copy of `Range { None, None }`.
-		if from_a.is_none() && to_a.is_none() && from_b.is_none() && to_b.is_none() {
-			return None;
-		}
-
-		// Tighten `from` bounds: keep the larger value (exclusive wins on
-		// ties so `> 5 AND >= 5` becomes `> 5`).
-		let merged_from = match (from_a, from_b) {
-			(Some(fa), Some(fb)) => Some(Self::tighter_from(fa, fb)?),
-			(Some(f), None) | (None, Some(f)) => Some(f.clone()),
-			(None, None) => None,
-		};
-
-		// Tighten `to` bounds: keep the smaller value (exclusive wins).
-		let merged_to = match (to_a, to_b) {
-			(Some(ta), Some(tb)) => Some(Self::tighter_to(ta, tb)?),
-			(Some(t), None) | (None, Some(t)) => Some(t.clone()),
-			(None, None) => None,
-		};
-
-		// Detect contradiction: from > to (or equal with at least one exclusive).
-		if let (Some(f), Some(t)) = (merged_from.as_ref(), merged_to.as_ref())
-			&& bounds_are_unsatisfiable(f, t)
-		{
-			return Some(Err(()));
-		}
-
-		Some(Ok(BTreeAccess::Range {
-			from: merged_from,
-			to: merged_to,
-		}))
-	}
-
-	/// Pick the tighter (larger) of two `from` bounds. Returns `None` if
-	/// the two values are not comparable (e.g. different `Value::kind`).
-	fn tighter_from(a: &RangeBound, b: &RangeBound) -> Option<RangeBound> {
-		let cmp = a.value.partial_cmp(&b.value)?;
-		Some(match cmp {
-			std::cmp::Ordering::Less => b.clone(),
-			std::cmp::Ordering::Greater => a.clone(),
-			std::cmp::Ordering::Equal => {
-				// Equal values: exclusive (non-inclusive) is tighter.
-				if !a.inclusive {
-					a.clone()
-				} else {
-					b.clone()
-				}
-			}
-		})
-	}
-
-	/// Pick the tighter (smaller) of two `to` bounds. Returns `None` if
-	/// the two values are not comparable.
-	fn tighter_to(a: &RangeBound, b: &RangeBound) -> Option<RangeBound> {
-		let cmp = a.value.partial_cmp(&b.value)?;
-		Some(match cmp {
-			std::cmp::Ordering::Less => a.clone(),
-			std::cmp::Ordering::Greater => b.clone(),
-			std::cmp::Ordering::Equal => {
-				if !a.inclusive {
-					a.clone()
-				} else {
-					b.clone()
-				}
-			}
-		})
 	}
 
 	/// Remove duplicate candidates, preferring compound over simple.
@@ -1038,21 +945,6 @@ impl<'a> IndexAnalyzer<'a> {
 							prefix: vec![v],
 							range: None,
 						},
-						BTreeAccess::Range {
-							from,
-							to,
-						} => {
-							// A range on the first column of a compound index
-							// cannot use Compound prefix+range (that's for
-							// equality prefix + range on next column).
-							// Keep it as a simple range -- the IndexScan compound
-							// path won't be reached, but deduplication may
-							// prefer a compound candidate if one exists.
-							BTreeAccess::Range {
-								from,
-								to,
-							}
-						}
 						other => other,
 					}
 				} else {
@@ -1085,47 +977,44 @@ impl<'a> IndexAnalyzer<'a> {
 			}
 
 			// Less than (field < value)
-			(BinaryOperator::LessThan, IdiomPosition::Left) => Some(BTreeAccess::Range {
-				from: None,
-				to: Some(RangeBound::exclusive(value.clone())),
+			// More then (value > value)
+			(BinaryOperator::LessThan, IdiomPosition::Left)
+			| (BinaryOperator::MoreThan, IdiomPosition::Right) => Some(BTreeAccess::Range {
+				range: Range {
+					start: Bound::Unbounded,
+					end: Bound::Excluded(value.clone()),
+				},
 			}),
 
 			// Less than or equal (field <= value)
-			(BinaryOperator::LessThanEqual, IdiomPosition::Left) => Some(BTreeAccess::Range {
-				from: None,
-				to: Some(RangeBound::inclusive(value.clone())),
+			// More than or equal (value >= field)
+			(BinaryOperator::LessThanEqual, IdiomPosition::Left)
+			| (BinaryOperator::MoreThanEqual, IdiomPosition::Right) => Some(BTreeAccess::Range {
+				range: Range {
+					start: Bound::Unbounded,
+					end: Bound::Included(value.clone()),
+				},
 			}),
 
 			// Greater than (field > value)
-			(BinaryOperator::MoreThan, IdiomPosition::Left) => Some(BTreeAccess::Range {
-				from: Some(RangeBound::exclusive(value.clone())),
-				to: None,
+			// Less than (value < field)
+			(BinaryOperator::MoreThan, IdiomPosition::Left)
+			| (BinaryOperator::LessThan, IdiomPosition::Right) => Some(BTreeAccess::Range {
+				range: Range {
+					start: Bound::Excluded(value.clone()),
+					end: Bound::Unbounded,
+				},
 			}),
 
 			// Greater than or equal (field >= value)
-			(BinaryOperator::MoreThanEqual, IdiomPosition::Left) => Some(BTreeAccess::Range {
-				from: Some(RangeBound::inclusive(value.clone())),
-				to: None,
+			// Less than or equal (value <= field)
+			(BinaryOperator::MoreThanEqual, IdiomPosition::Left)
+			| (BinaryOperator::LessThanEqual, IdiomPosition::Right) => Some(BTreeAccess::Range {
+				range: Range {
+					start: Bound::Included(value.clone()),
+					end: Bound::Unbounded,
+				},
 			}),
-
-			// Handle reversed comparisons (value < field means field > value)
-			(BinaryOperator::LessThan, IdiomPosition::Right) => Some(BTreeAccess::Range {
-				from: Some(RangeBound::exclusive(value.clone())),
-				to: None,
-			}),
-			(BinaryOperator::LessThanEqual, IdiomPosition::Right) => Some(BTreeAccess::Range {
-				from: Some(RangeBound::inclusive(value.clone())),
-				to: None,
-			}),
-			(BinaryOperator::MoreThan, IdiomPosition::Right) => Some(BTreeAccess::Range {
-				from: None,
-				to: Some(RangeBound::exclusive(value.clone())),
-			}),
-			(BinaryOperator::MoreThanEqual, IdiomPosition::Right) => Some(BTreeAccess::Range {
-				from: None,
-				to: Some(RangeBound::inclusive(value.clone())),
-			}),
-
 			// IN clause (field IN [values])
 			(BinaryOperator::Inside, IdiomPosition::Left) => {
 				// Single-element array: treat as equality (field IN [v] → field = v)
@@ -1151,8 +1040,10 @@ impl<'a> IndexAnalyzer<'a> {
 			// + filter path handle `!= NULL` correctly.
 			(BinaryOperator::NotEqual, _) if matches!(value, Value::None) => {
 				Some(BTreeAccess::Range {
-					from: Some(RangeBound::exclusive(value.clone())),
-					to: None,
+					range: Range {
+						start: Bound::Excluded(value.clone()),
+						end: Bound::Unbounded,
+					},
 				})
 			}
 
@@ -1408,8 +1299,7 @@ impl<'a> IndexAnalyzer<'a> {
 			}
 			let index_ref = IndexRef::new(Arc::clone(&self.indexes), idx);
 			let full_range = BTreeAccess::Range {
-				from: None,
-				to: None,
+				range: Range::unbounded(),
 			};
 			if covers_ordering_either_direction(
 				&index_ref,
@@ -1529,13 +1419,15 @@ impl IndexCandidate {
 				}
 			}
 			BTreeAccess::Range {
-				from,
-				to,
+				range: Range {
+					start,
+					end,
+				},
 			} => {
-				score += match (from.is_some(), to.is_some()) {
-					(true, true) => 300,
-					(true, false) | (false, true) => 200,
-					(false, false) => 50,
+				score += match (start, end) {
+					(Bound::Unbounded, Bound::Unbounded) => 50,
+					(_, Bound::Unbounded) | (Bound::Unbounded, _) => 200,
+					(_, _) => 300,
 				};
 			}
 			BTreeAccess::FullText {
@@ -1656,24 +1548,6 @@ pub(crate) fn idiom_matches_containment(expr_idiom: &Idiom, index_col: &Idiom) -
 	let expr_without_all: Vec<&Part> =
 		expr_idiom.0.iter().filter(|p| !matches!(p, Part::All)).collect();
 	col_without_all == expr_without_all
-}
-
-/// Decide whether a `from`/`to` pair describes an unsatisfiable range.
-///
-/// Returns `true` when no value can satisfy both bounds simultaneously:
-/// either `from.value > to.value`, or the values are equal but at least
-/// one bound is exclusive. Returns `false` when at least one value can
-/// satisfy both, **and also** when the values are not comparable — the
-/// caller treats incomparable bounds as "leave it alone" rather than
-/// silently emitting an EmptyScan that could be wrong.
-fn bounds_are_unsatisfiable(from: &RangeBound, to: &RangeBound) -> bool {
-	use std::cmp::Ordering;
-	match from.value.partial_cmp(&to.value) {
-		Some(Ordering::Greater) => true,
-		Some(Ordering::Equal) => !(from.inclusive && to.inclusive),
-		Some(Ordering::Less) => false,
-		None => false,
-	}
 }
 
 /// Normalize a range operator based on the position of the idiom in the
@@ -1904,6 +1778,8 @@ mod tests {
 	// 2. Range / inequality
 	// ------------------------------------------------------------------
 	mod range {
+		use std::ops::Bound;
+
 		use super::*;
 
 		#[test]
@@ -1914,12 +1790,10 @@ mod tests {
 			let c = find_for(&cands, "ix_a").expect("ix_a");
 			match &c.access {
 				BTreeAccess::Range {
-					from,
-					to,
+					range,
 				} => {
-					assert!(from.is_some());
-					assert!(to.is_none());
-					assert!(!from.as_ref().unwrap().inclusive, "MoreThan is exclusive");
+					assert!(matches!(range.start, Bound::Excluded(_)));
+					assert!(matches!(range.end, Bound::Unbounded));
 				}
 				other => panic!("expected Range, got {other:?}"),
 			}
@@ -1933,10 +1807,10 @@ mod tests {
 			let c = find_for(&cands, "ix_a").expect("ix_a");
 			match &c.access {
 				BTreeAccess::Range {
-					from,
+					range,
 					..
 				} => {
-					assert!(from.as_ref().unwrap().inclusive, "MoreThanEqual is inclusive");
+					assert!(matches!(range.start, Bound::Included(_)));
 				}
 				other => panic!("expected Range, got {other:?}"),
 			}
@@ -1951,11 +1825,10 @@ mod tests {
 			let c = find_for(&cands, "ix_a").expect("ix_a");
 			match &c.access {
 				BTreeAccess::Range {
-					from,
-					to,
+					range,
 				} => {
-					assert!(from.is_some());
-					assert!(to.is_some());
+					assert!(!matches!(range.start, Bound::Unbounded));
+					assert!(!matches!(range.end, Bound::Unbounded));
 				}
 				other => panic!("expected merged Range, got {other:?}"),
 			}
@@ -1970,11 +1843,10 @@ mod tests {
 			let c = find_for(&cands, "ix_a").expect("ix_a");
 			match &c.access {
 				BTreeAccess::Range {
-					from,
-					to,
+					range,
 				} => {
-					assert!(from.is_some());
-					assert!(to.is_none());
+					assert!(!matches!(range.start, Bound::Unbounded));
+					assert!(matches!(range.end, Bound::Unbounded));
 				}
 				other => panic!("expected Range from-bound, got {other:?}"),
 			}
@@ -2157,8 +2029,10 @@ mod tests {
 			assert!(matches!(
 				c.access,
 				BTreeAccess::Range {
-					from: None,
-					to: None
+					range: Range {
+						start: Bound::Unbounded,
+						end: Bound::Unbounded,
+					}
 				}
 			));
 		}
@@ -2250,13 +2124,13 @@ mod tests {
 			let c = find_for(&cands, "ix_a").expect("ix_a candidate for != NONE");
 			match &c.access {
 				BTreeAccess::Range {
-					from,
-					to,
+					range: Range {
+						start,
+						end,
+					},
 				} => {
-					let from = from.as_ref().expect("from bound");
-					assert!(matches!(from.value, crate::val::Value::None));
-					assert!(!from.inclusive);
-					assert!(to.is_none());
+					assert!(matches!(start, Bound::Excluded(crate::val::Value::None)));
+					assert!(matches!(end, Bound::Unbounded));
 				}
 				other => panic!("expected exclusive Range from NONE, got {other:?}"),
 			}
@@ -2529,11 +2403,13 @@ mod tests {
 			assert!(!c.empty, "inclusive both sides on same value is non-empty");
 			match &c.access {
 				BTreeAccess::Range {
-					from,
-					to,
+					range: Range {
+						start,
+						end,
+					},
 				} => {
-					assert!(from.as_ref().unwrap().inclusive);
-					assert!(to.as_ref().unwrap().inclusive);
+					assert!(matches!(start, Bound::Included(_)));
+					assert!(matches!(end, Bound::Included(_)));
 				}
 				other => panic!("expected Range, got {other:?}"),
 			}
@@ -2559,15 +2435,12 @@ mod tests {
 			let c = find_for(&cands, "ix_a").expect("ix_a");
 			match &c.access {
 				BTreeAccess::Range {
-					from,
-					to,
+					range,
 				} => {
-					let from = from.as_ref().expect("from bound present");
-					assert!(matches!(&from.value,
-						crate::val::Value::Number(n) if n.to_int() == 10
-					));
-					assert!(!from.inclusive, "exclusive `>` survives");
-					assert!(to.is_none());
+					assert!(
+						matches!(range.start, Bound::Excluded(crate::val::Value::Number(n)) if n.to_int() == 10)
+					);
+					assert!(matches!(range.end, Bound::Unbounded));
 				}
 				other => panic!("expected single tightened Range, got {other:?}"),
 			}
@@ -2582,15 +2455,12 @@ mod tests {
 			let c = find_for(&cands, "ix_a").expect("ix_a");
 			match &c.access {
 				BTreeAccess::Range {
-					from,
-					to,
+					range,
 				} => {
-					assert!(from.is_none());
-					let to = to.as_ref().expect("to bound present");
-					assert!(matches!(&to.value,
-						crate::val::Value::Number(n) if n.to_int() == 50
-					));
-					assert!(!to.inclusive);
+					assert!(matches!(range.start, Bound::Unbounded));
+					assert!(
+						matches!(range.end, Bound::Excluded(crate::val::Value::Number(n)) if n.to_int() == 50)
+					);
 				}
 				other => panic!("expected single tightened Range, got {other:?}"),
 			}
@@ -2605,13 +2475,12 @@ mod tests {
 			let c = find_for(&cands, "ix_a").expect("ix_a");
 			match &c.access {
 				BTreeAccess::Range {
-					from,
-					..
-				} => {
-					let from = from.as_ref().expect("from");
-					assert!(!from.inclusive, "exclusive wins on ties");
-				}
-				other => panic!("expected Range, got {other:?}"),
+					range: Range {
+						start: Bound::Excluded(_),
+						..
+					},
+				} => {}
+				other => panic!("expected Range with inclusive start bound, got {other:?}"),
 			}
 		}
 	}
@@ -2660,19 +2529,17 @@ mod tests {
 					0,
 				),
 				access: BTreeAccess::Range {
-					from: if from_some {
-						Some(RangeBound::inclusive(crate::val::Value::Number(
-							crate::val::Number::Int(0),
-						)))
-					} else {
-						None
-					},
-					to: if to_some {
-						Some(RangeBound::inclusive(crate::val::Value::Number(
-							crate::val::Number::Int(10),
-						)))
-					} else {
-						None
+					range: Range {
+						start: if from_some {
+							Bound::Included(crate::val::Value::Number(crate::val::Number::Int(0)))
+						} else {
+							Bound::Unbounded
+						},
+						end: if to_some {
+							Bound::Included(crate::val::Value::Number(crate::val::Number::Int(10)))
+						} else {
+							Bound::Unbounded
+						},
 					},
 				},
 				covers_order: false,
@@ -2733,10 +2600,12 @@ mod tests {
 					0,
 				),
 				access: BTreeAccess::Range {
-					from: Some(RangeBound::inclusive(crate::val::Value::Number(
-						crate::val::Number::Int(0),
-					))),
-					to: None,
+					range: Range {
+						start: Bound::Included(crate::val::Value::Number(crate::val::Number::Int(
+							0,
+						))),
+						end: Bound::Unbounded,
+					},
 				},
 				covers_order: covers,
 				empty: false,

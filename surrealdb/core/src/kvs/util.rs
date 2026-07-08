@@ -1,54 +1,10 @@
-use std::ops::Range;
+use std::mem;
 use std::sync::Arc;
 
 use anyhow::Result;
 
-use super::direction::Direction;
-use crate::kvs::{KVKey, KVValue, Key};
-
-/// Advances a key to the next value,
-/// can be used to skip over a certain key.
-pub fn advance_key(key: &mut [u8]) {
-	for b in key.iter_mut().rev() {
-		*b = b.wrapping_add(1);
-		if *b != 0 {
-			break;
-		}
-	}
-}
-
-/// Advance a resume-by-bound cursor's range so the next chunk resumes strictly
-/// after `last` (the last key visited this chunk). Mirrors the successor logic
-/// in `DefaultValsCursor`/`DefaultKeysCursor`: forward appends `0x00` to get the
-/// minimal key greater than `last` (the half-open `start` already excludes it
-/// otherwise); backward clips `end` to `last` (the half-open `end` already
-/// excludes it). A `None` `last` means nothing was visited — leave the range.
-pub(crate) fn update_range(rng: &mut Range<Key>, dir: Direction, last: Option<&[u8]>) {
-	let Some(last) = last else {
-		return;
-	};
-	match dir {
-		Direction::Forward => {
-			rng.start.clear();
-			rng.start.extend_from_slice(last);
-			rng.start.push(0x00);
-		}
-		Direction::Backward => {
-			rng.end.clear();
-			rng.end.extend_from_slice(last);
-		}
-	}
-}
-
-pub fn to_prefix_range<K: KVKey>(key: &K) -> Result<Range<Vec<u8>>> {
-	let start = key.encode_key()?;
-	let mut end = start.clone();
-	end.push(0xff);
-	Ok(Range {
-		start,
-		end,
-	})
-}
+use crate::key::{KVValue, Key, KeyRange};
+use crate::kvs::Transaction;
 
 /// Takes an iterator of byte slices and deserializes the byte slices to the
 /// expected type, returning an error if any of the values fail to serialize.
@@ -65,4 +21,149 @@ where
 		buf.push(T::kv_decode_value(slice, ())?)
 	}
 	Ok(Arc::from(buf))
+}
+
+/// Returns true if the range can only contain a single key.
+///
+/// This can be the case if range consists of keys x as the start and key x ++ 0x00 as the end.
+fn range_is_single_key(range: &KeyRange<'_>) -> bool {
+	range.start.as_slice().len() == range.end.as_slice().len() - 1
+		&& range.start.as_slice() == &range.end.as_slice()[..range.end.len() - 1]
+		&& range.end.as_slice()[range.end.len() - 1] == 0
+}
+
+pub async fn scan(
+	range: &mut KeyRange<'static>,
+	tx: &Transaction,
+	limit: u32,
+) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+	if range.is_empty() {
+		return Ok(Vec::new());
+	}
+
+	// Fast path to avoid a full scan if the key can only be a single value.
+	// Avoids costly iterator creation on rocksdb.
+	//
+	// FIXME: The kvs themselves should probably be the one to implement this optimisation
+	if range_is_single_key(range) {
+		let key = mem::replace(&mut range.start, Key::empty());
+		let res = if let Some(res) = tx.get(key.as_borrowed(), None).await? {
+			vec![(key.into_vec(), res)]
+		} else {
+			Vec::new()
+		};
+		range.end = Key::empty();
+		return Ok(res);
+	}
+
+	let res = tx.scan(range.as_borrowed(), limit, 0, None).await?;
+
+	if limit as usize != res.len() {
+		range.end = Key::empty();
+	} else if let Some((key, _)) = res.last() {
+		range.start.clone_from_slice(key);
+		range.start.advance();
+	}
+
+	Ok(res)
+}
+
+pub async fn scan_keys(
+	range: &mut KeyRange<'static>,
+	tx: &Transaction,
+	limit: u32,
+) -> Result<Vec<Vec<u8>>> {
+	if range.is_empty() {
+		return Ok(Vec::new());
+	}
+
+	// Fast path to avoid a full scan if the key can only be a single value.
+	// Avoids costly iterator creation on rocksdb.
+	if range_is_single_key(range) {
+		let key = mem::replace(&mut range.start, Key::empty());
+		let res = if tx.exists(key.as_borrowed(), None).await? {
+			vec![key.into_vec()]
+		} else {
+			Vec::new()
+		};
+		range.end = Key::empty();
+		return Ok(res);
+	}
+
+	let res = tx.keys(range.as_borrowed(), limit, 0, None).await?;
+
+	if limit as usize != res.len() {
+		range.end = Key::empty();
+	} else if let Some(key) = res.last() {
+		range.start.clone_from_slice(key);
+		range.start.advance();
+	}
+
+	Ok(res)
+}
+
+pub async fn scanr(
+	range: &mut KeyRange<'static>,
+	tx: &Transaction,
+	limit: u32,
+) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+	if range.is_empty() {
+		return Ok(Vec::new());
+	}
+
+	// Fast path to avoid a full scan if the key can only be a single value.
+	// Avoids costly iterator creation on rocksdb.
+	if range_is_single_key(range) {
+		let key = mem::replace(&mut range.start, Key::empty());
+		let res = if let Some(res) = tx.get(key.as_borrowed(), None).await? {
+			vec![(key.into_vec(), res)]
+		} else {
+			Vec::new()
+		};
+		range.end = Key::empty();
+		return Ok(res);
+	}
+
+	let res = tx.scanr(range.as_borrowed(), limit, 0, None).await?;
+
+	if limit as usize != res.len() {
+		range.end = Key::empty();
+	} else if let Some((key, _)) = res.last() {
+		range.end.clone_from_slice(key);
+	}
+
+	Ok(res)
+}
+
+pub async fn scanr_keys(
+	range: &mut KeyRange<'static>,
+	tx: &Transaction,
+	limit: u32,
+) -> Result<Vec<Vec<u8>>> {
+	if range.is_empty() {
+		return Ok(Vec::new());
+	}
+
+	// Fast path to avoid a full scan if the key can only be a single value.
+	// Avoids costly iterator creation on rocksdb.
+	if range_is_single_key(range) {
+		let key = mem::replace(&mut range.start, Key::empty());
+		let res = if tx.exists(key.as_borrowed(), None).await? {
+			vec![key.into_vec()]
+		} else {
+			Vec::new()
+		};
+		range.end = Key::empty();
+		return Ok(res);
+	}
+
+	let res = tx.keysr(range.as_borrowed(), limit, 0, None).await?;
+
+	if limit as usize != res.len() {
+		range.end = Key::empty();
+	} else if let Some(key) = res.last() {
+		range.end.clone_from_slice(key);
+	}
+
+	Ok(res)
 }

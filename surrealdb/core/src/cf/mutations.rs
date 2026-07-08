@@ -6,7 +6,7 @@ use crate::catalog::TableDefinition;
 use crate::doc::CursorRecord;
 use crate::expr::Operation;
 use crate::expr::statements::info::InfoStructure;
-use crate::kvs::impl_kv_value_revisioned;
+use crate::key::impl_kv_value_revisioned;
 use crate::val::{Array, Number, Object, RecordId, TableName, Value};
 
 // Mutation is a single mutation to a table.

@@ -4,6 +4,7 @@
 //! supporting equality lookups, range scans, and union operations.
 
 use std::collections::HashSet;
+use std::ops::Bound;
 use std::sync::Arc;
 
 use surrealdb_types::ToSql;
@@ -134,32 +135,17 @@ impl ExecOperator for IndexScan {
 		let access_str = match &self.access {
 			BTreeAccess::Equality(v) => format!("= {}", v.to_sql()),
 			BTreeAccess::Range {
-				from,
-				to,
+				range,
 			} => {
-				let from_str = match from {
-					Some(r) => format!(
-						"{}{}",
-						if r.inclusive {
-							">="
-						} else {
-							">"
-						},
-						r.value.to_sql()
-					),
-					None => String::new(),
+				let from_str = match range.start.as_ref() {
+					Bound::Included(x) => format!(">={}", x.to_sql()),
+					Bound::Excluded(x) => format!(">{}", x.to_sql()),
+					Bound::Unbounded => String::new(),
 				};
-				let to_str = match to {
-					Some(r) => format!(
-						"{}{}",
-						if r.inclusive {
-							"<="
-						} else {
-							"<"
-						},
-						r.value.to_sql()
-					),
-					None => String::new(),
+				let to_str = match range.end.as_ref() {
+					Bound::Included(x) => format!("<={}", x.to_sql()),
+					Bound::Excluded(x) => format!("<{}", x.to_sql()),
+					Bound::Unbounded => String::new(),
 				};
 				format!("{from_str} {to_str}").trim().to_string()
 			}
@@ -521,8 +507,8 @@ impl ExecOperator for IndexScan {
 				// explicit `loop` blocks rather than abstracting over the
 				// iterator type because `async_stream` closures cannot
 				// easily hold trait objects or generics.
-			 (BTreeAccess::Range { from, to }, true) => {
-					let mut iter = UniqueRangeIterator::new(ns_id, db_id, ix, from.as_ref(), to.as_ref(), direction).context("Failed to create iterator")?;
+			 (BTreeAccess::Range { range }, true) => {
+					let mut iter = UniqueRangeIterator::new(ns_id, db_id, ix, range.start.as_ref(), range.end.as_ref(), direction).context("Failed to create iterator")?;
 
 					loop {
 						if ctx.cancellation().is_cancelled() {
@@ -550,8 +536,8 @@ impl ExecOperator for IndexScan {
 					}
 				}
 
-				(BTreeAccess::Range { from, to }, false) => {
-					let mut iter = IndexRangeIterator::new(ns_id, db_id, ix, from.as_ref(), to.as_ref(), direction).context("Failed to create iterator")?;
+				(BTreeAccess::Range { range }, false) => {
+					let mut iter = IndexRangeIterator::new(ns_id, db_id, ix, range.start.as_ref(), range.end.as_ref(), direction).context("Failed to create iterator")?;
 
 					loop {
 						if ctx.cancellation().is_cancelled() {

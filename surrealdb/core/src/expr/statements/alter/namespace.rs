@@ -30,8 +30,10 @@ impl AlterNamespaceStatement {
 		let namespace_id = ctx.expect_ns_id(opt).await?;
 		// Do we request compacting?
 		if self.compact {
-			let namespace_root = crate::key::namespace::all::new(namespace_id);
-			ctx.tx().compact(Some(namespace_root)).await?;
+			let namespace_root = crate::key::namespace::all::NamespaceRoot {
+				ns: namespace_id,
+			};
+			ctx.tx().compact(&namespace_root).await?;
 		}
 		// Ok all good
 		Ok(Value::None)

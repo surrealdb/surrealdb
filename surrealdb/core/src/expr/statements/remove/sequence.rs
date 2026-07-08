@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use anyhow::Result;
 use reblessive::tree::Stk;
 
@@ -9,8 +11,10 @@ use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
+use crate::key::KVRange;
+use crate::key::database::all::DatabaseRoot;
 use crate::key::database::sq::Sq;
-use crate::key::sequence::Prefix;
+use crate::key::sequence::{BaPrefix, StPrefix};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct RemoveSequenceStatement {
@@ -60,13 +64,31 @@ impl RemoveSequenceStatement {
 			seq.sequence_removed(ns, db, &name).await;
 		}
 		// Delete any sequence records
-		let ba_range = Prefix::new_ba_range(ns, db, &sq.name)?;
-		txn.delr(ba_range).await?;
-		let st_range = Prefix::new_st_range(ns, db, &sq.name)?;
-		txn.delr(st_range).await?;
+		let ba_range = BaPrefix {
+			prefix: DatabaseRoot {
+				ns,
+				db,
+			},
+			sq: Cow::Borrowed(&sq.name),
+		};
+		txn.delr(ba_range.encode_range()?).await?;
+		let st_range = StPrefix {
+			prefix: DatabaseRoot {
+				ns,
+				db,
+			},
+			sq: Cow::Borrowed(&sq.name),
+		};
+		txn.delr(st_range.encode_range()?).await?;
 		// Delete the definition
-		let key = Sq::new(ns, db, &name);
-		txn.del(&key).await?;
+		let key = Sq {
+			prefix: DatabaseRoot {
+				ns,
+				db,
+			},
+			sq: Cow::Borrowed(name.as_str()),
+		};
+		txn.del_key(&key).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good

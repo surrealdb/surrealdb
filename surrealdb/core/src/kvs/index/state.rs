@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -11,8 +12,10 @@ use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, IndexDefinition, IndexId, NamespaceId};
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
+use crate::key::database::all::DatabaseRoot;
+use crate::key::impl_kv_value_revisioned;
 use crate::key::table::bs::Bs;
-use crate::kvs::{Error as KvsError, Transaction, impl_kv_value_revisioned};
+use crate::kvs::{Error as KvsError, Transaction};
 use crate::val::{Object, TableName, Value};
 
 #[revisioned(revision = 1)]
@@ -165,7 +168,7 @@ pub(crate) async fn index_building_info(
 	ix: &IndexDefinition,
 ) -> Result<Value> {
 	let ikb = IndexKeyBase::new(ns, db, ix.table_name.clone(), ix.index_id);
-	let status = tx.get(&ikb.new_bs_key(), None).await?;
+	let status = tx.get_key(&ikb.new_bs_key(), None).await?;
 	let mut out = Object::default();
 	out.insert("building", index_building_status_value(ix, status));
 	Ok(out.into())
@@ -186,7 +189,7 @@ pub(crate) async fn retire_durable_index(
 	ix: IndexId,
 ) -> Result<()> {
 	let ikb = IndexKeyBase::new(ns, db, tb.clone(), ix);
-	tx.del(&ikb.new_bs_key()).await?;
+	tx.del_key(&ikb.new_bs_key()).await?;
 	delete_durable_build_queues(tx, &ikb).await?;
 	Ok(())
 }
@@ -262,9 +265,18 @@ pub(crate) async fn filter_online_indexes(
 	if indexes.is_empty() {
 		return Ok(indexes);
 	}
-	let state_keys: Vec<_> =
-		indexes.iter().map(|ix| Bs::new(ns, db, &ix.table_name, ix.index_id)).collect();
-	let states = tx.getm(state_keys, None).await?;
+	let state_keys: Vec<_> = indexes
+		.iter()
+		.map(|ix| Bs {
+			prefix: DatabaseRoot {
+				ns,
+				db,
+			},
+			tb: Cow::Borrowed(&ix.table_name),
+			ix: ix.index_id,
+		})
+		.collect();
+	let states = tx.get_many_key(state_keys, None).await?;
 	let mut filtered = Vec::new();
 	let mut filtered_any = false;
 	for (ix, state) in indexes.iter().zip(states) {

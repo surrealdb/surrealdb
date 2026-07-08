@@ -7,7 +7,6 @@ use crate::doc::CursorDoc;
 use crate::expr::statements::alter::AlterKind;
 use crate::expr::{Base, Expr, FlowResultExt};
 use crate::iam::{Action, ResourceKind};
-use crate::kvs::Key;
 use crate::val::{Duration, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -37,7 +36,7 @@ impl AlterSystemStatement {
 		ctx.is_allowed(opt, Action::Edit, ResourceKind::Any, Base::Root)?;
 		// Are we doing compaction?
 		if self.compact {
-			ctx.tx().compact::<Key>(None).await?;
+			ctx.tx().compact_all().await?;
 		}
 		match &self.query_timeout {
 			AlterKind::None => {}

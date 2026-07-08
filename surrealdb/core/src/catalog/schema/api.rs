@@ -10,7 +10,7 @@ use crate::catalog::auth::AuthLimit;
 use crate::expr::Expr;
 use crate::expr::statements::info::InfoStructure;
 use crate::fmt::Fmt;
-use crate::kvs::impl_kv_value_revisioned;
+use crate::key::impl_kv_value_revisioned;
 use crate::sql;
 use crate::val::{Array, Object, Value};
 

@@ -3,6 +3,7 @@
 //! An [`AccessPath`] represents a specific way to retrieve records from a table,
 //! whether through a full table scan, point lookup, or index scan.
 
+use std::ops::Bound;
 use std::sync::Arc;
 
 use super::IndexCandidate;
@@ -11,7 +12,7 @@ use crate::expr::BinaryOperator;
 use crate::expr::operator::MatchesOperator;
 use crate::expr::with::With;
 use crate::idx::planner::ScanDirection;
-use crate::val::{Number, Value};
+use crate::val::{Number, Range, Value};
 
 /// A reference to an index definition with its position in the schema.
 ///
@@ -144,8 +145,10 @@ impl AccessPath {
 			self,
 			AccessPath::BTreeScan {
 				access: BTreeAccess::Range {
-					from: None,
-					to: None,
+					range: Range {
+						start: Bound::Unbounded,
+						end: Bound::Unbounded,
+					},
 				},
 				..
 			}
@@ -161,8 +164,7 @@ pub enum BTreeAccess {
 
 	/// Range scan with optional bounds: `field > a AND field < b`
 	Range {
-		from: Option<RangeBound>,
-		to: Option<RangeBound>,
+		range: Range,
 	},
 
 	/// Compound index access with fixed prefix and optional range on next column.
@@ -193,33 +195,6 @@ pub enum BTreeAccess {
 		/// ANN search expansion factor
 		ef: u32,
 	},
-}
-
-/// A bound for a range scan.
-#[derive(Debug, Clone)]
-pub struct RangeBound {
-	/// The bound value
-	pub value: Value,
-	/// Whether the bound is inclusive
-	pub inclusive: bool,
-}
-
-impl RangeBound {
-	/// Create an inclusive bound.
-	pub fn inclusive(value: Value) -> Self {
-		Self {
-			value,
-			inclusive: true,
-		}
-	}
-
-	/// Create an exclusive bound.
-	pub fn exclusive(value: Value) -> Self {
-		Self {
-			value,
-			inclusive: false,
-		}
-	}
 }
 
 /// Select the best access path from candidates based on hints and heuristics.

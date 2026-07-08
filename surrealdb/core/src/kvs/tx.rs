@@ -3,16 +3,17 @@
 //! Cache paths use `Entry::Any(val.clone())` for concrete `Arc<T>` values that must coerce to
 //! `Arc<dyn Any + Send + Sync>`; `Arc::clone(&val)` does not perform that unsized coercion.
 #![allow(clippy::clone_on_ref_ptr)]
-// `Transaction`'s pub methods take `K: KVKey` / `K::ValueType: KVValue`.
+// `Transaction`'s pub methods take `K: KVKey` / `K::Value: KVValue`.
 // Both traits are `pub(crate)` (their `pub` declarations are gated by
 // `pub(crate) use` re-exports in `kvs/mod.rs`), so the lint flags every
 // such method. The visibility is intentional — silence at module scope.
 #![allow(private_bounds, private_interfaces)]
 
 use std::any::Any;
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
-use std::ops::{Deref, Range};
+use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -30,7 +31,7 @@ use super::api::{
 	KeyVisitor, KeysBatch, ScanChunkStats, ScanCursorKeys, ScanCursorVals, ValVisitor, ValsBatch,
 };
 use super::batch::Batch;
-use super::{Key, LockType, TransactionFactory, TransactionType, Val, util};
+use super::{LockType, TransactionFactory, TransactionType, Val, util};
 use crate::catalog::providers::{
 	ApiProvider, AuthorisationProvider, BoxProviderFut, BucketProvider, CatalogProvider,
 	DatabaseProvider, NamespaceProvider, NodeProvider, RootProvider, TableProvider, UserProvider,
@@ -47,16 +48,19 @@ use crate::doc::CursorRecord;
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::ScanDirection;
+use crate::key::database::all::DatabaseRoot;
 use crate::key::database::sq::Sq;
 use crate::key::index::all as index_all;
-use crate::key::table::bg::Bg;
+use crate::key::root::rc::{Expunge, ReclaimKind};
+use crate::key::table::bg::BgMutationPrefix;
 use crate::key::table::br::Br;
 use crate::key::table::bs::Bs;
 use crate::key::table::ix as table_ix;
+use crate::key::{KVKey, KVKeyDecode, KVRange, KVValue, Key, KeyRange};
 use crate::kvs::cache::tx::TransactionCache;
 use crate::kvs::index::{
 	BuildGeneration, BuildTicket, BuildTicketMutationSeq, IndexBuildPhase, IndexBuildReportStatus,
-	IndexBuildState, IndexBuilder,
+	IndexBuilder,
 };
 use crate::kvs::sequences::Sequences;
 #[cfg(test)]
@@ -65,8 +69,8 @@ use crate::kvs::testing::{
 	maybe_inject_retryable_conflict,
 };
 use crate::kvs::{
-	BoxTimeStamp, BoxTimeStampImpl, Direction, Error as KvsError, KVKey, KVValue, Transactor,
-	cache, is_retryable_transaction_conflict,
+	BoxTimeStamp, BoxTimeStampImpl, Direction, Error as KvsError, IntoBytes, Transactor, cache,
+	is_retryable_transaction_conflict,
 };
 use crate::lq::writer::LiveEventBuffer;
 use crate::observe::{
@@ -272,13 +276,21 @@ impl PendingUncommittedIndexBuild {
 			.transaction(TransactionType::Write, LockType::Optimistic, self.sequences.clone())
 			.await?;
 		let ikb = IndexKeyBase::new(self.ns, self.db, self.tb.clone(), self.ix);
-		let index_prefix = index_all::new(self.ns, self.db, &self.tb, self.ix).encode_key()?;
+		let index_prefix = index_all::AllIndexRoot {
+			prefix: crate::key::database::all::DatabaseRoot {
+				ns: self.ns,
+				db: self.db,
+			},
+			tb: Cow::Borrowed(&self.tb),
+			ix: self.ix,
+		}
+		.encode_range()?;
 		let result: Result<()> = async {
 			tx.tr.del(ikb.new_bs_key().encode_key()?).await.map_err(Error::from)?;
 			tx.tr.delr(ikb.new_bg_all_generations_range()?).await.map_err(Error::from)?;
 			tx.tr.delr(ikb.new_bp_all_generations_range()?).await.map_err(Error::from)?;
 			tx.tr.delr(ikb.new_br_all_generations_range()?).await.map_err(Error::from)?;
-			tx.tr.delp(index_prefix).await.map_err(Error::from)?;
+			tx.tr.delr(index_prefix).await.map_err(Error::from)?;
 			tx.tr.commit().await.map_err(Error::from)?;
 			Ok(())
 		}
@@ -325,7 +337,7 @@ pub(crate) struct IndexBuildReservationRelease {
 	tf: TransactionFactory,
 	sequences: Sequences,
 	node: Uuid,
-	key: Key,
+	key: Key<'static>,
 	val: Val,
 }
 
@@ -334,7 +346,7 @@ impl IndexBuildReservationRelease {
 		tf: TransactionFactory,
 		sequences: Sequences,
 		node: Uuid,
-		key: Key,
+		key: Key<'static>,
 		val: Val,
 	) -> Self {
 		Self {
@@ -364,7 +376,7 @@ impl IndexBuildReservationRelease {
 			return Err(err);
 		}
 
-		match tx.tr.delc(self.key.clone(), Some(self.val.clone())).await {
+		match tx.tr.delc(self.key.as_borrowed(), Some(&self.val)).await {
 			Ok(()) => {}
 			Err(KvsError::TransactionConditionNotMet) => {
 				let _ = tx.tr.cancel().await;
@@ -401,27 +413,21 @@ impl IndexBuildReservationRelease {
 		// inclusive scan range, not a point exists check on `mutation_seq = 0`,
 		// because the first mutation may not be at index zero on retry paths
 		// that allocate a fresh ticket.
-		let bg_range_start = Bg::new(
-			br.ns,
-			br.db,
-			br.tb.as_ref(),
-			br.ix,
-			br.generation,
-			br.ticket,
-			BuildTicketMutationSeq::MIN,
-		)
-		.encode_key()?;
-		let bg_range_end = Bg::new(
-			br.ns,
-			br.db,
-			br.tb.as_ref(),
-			br.ix,
-			br.generation,
-			br.ticket,
-			BuildTicketMutationSeq::MAX,
-		)
-		.encode_key()?;
-		let bs = Bs::new(br.ns, br.db, br.tb.as_ref(), br.ix).encode_key()?;
+		let range = BgMutationPrefix {
+			prefix: br.prefix,
+			tb: Cow::Borrowed(br.tb.as_ref()),
+			ix: br.ix,
+			generation: br.generation,
+			ticket: br.ticket,
+		}
+		.encode_range()?;
+
+		let bs = Bs {
+			prefix: br.prefix,
+			tb: Cow::Borrowed(br.tb.as_ref()),
+			ix: br.ix,
+		};
+
 		let reason = format!(
 			"Failed to release durable index-build reservation for generation {} ticket {} after transaction close: {release_err}",
 			br.generation, br.ticket
@@ -433,7 +439,7 @@ impl IndexBuildReservationRelease {
 				.transaction(TransactionType::Write, LockType::Optimistic, self.sequences.clone())
 				.await?;
 
-			let current_reservation = match tx.tr.get(self.key.clone(), None).await {
+			let current_reservation = match tx.tr.get(self.key.as_borrowed(), None).await {
 				Ok(current) => current,
 				Err(err) => {
 					let _ = tx.tr.cancel().await;
@@ -445,7 +451,7 @@ impl IndexBuildReservationRelease {
 				return Ok(());
 			}
 
-			match tx.tr.keys(bg_range_start.clone()..bg_range_end.clone(), 1, 0, None).await {
+			match tx.tr.keys(range.as_borrowed(), 1, 0, None).await {
 				Ok(res) if !res.keys.is_empty() => {
 					let _ = tx.tr.cancel().await;
 					return Ok(());
@@ -457,7 +463,7 @@ impl IndexBuildReservationRelease {
 				}
 			}
 
-			let current_state = match tx.tr.get(bs.clone(), None).await {
+			let current = match tx.get_key(&bs, None).await {
 				Ok(Some(current_state)) => current_state,
 				Ok(None) => {
 					let _ = tx.tr.cancel().await;
@@ -465,10 +471,9 @@ impl IndexBuildReservationRelease {
 				}
 				Err(err) => {
 					let _ = tx.tr.cancel().await;
-					return Err(err.into());
+					return Err(err);
 				}
 			};
-			let current = IndexBuildState::kv_decode_value(&current_state, ())?;
 			if current.generation != br.generation
 				|| !matches!(current.phase, IndexBuildPhase::Building | IndexBuildPhase::Closing)
 			{
@@ -476,24 +481,19 @@ impl IndexBuildReservationRelease {
 				return Ok(());
 			}
 
-			let mut next = current.clone();
+			let mut next = current;
 			next.phase = IndexBuildPhase::Error;
 			next.owner = None;
 			next.owner_heartbeat_at = None;
 			next.updated_at = Utc::now();
 			next.error = Some(reason.clone());
 			next.report_status = Some(IndexBuildReportStatus::Error);
-			let next_state = next.kv_encode_value()?;
 
-			match tx.tr.putc(bs.clone(), next_state, Some(current_state)).await {
+			match tx.set_key(&bs, &next).await {
 				Ok(()) => {}
-				Err(KvsError::TransactionConditionNotMet) => {
-					let _ = tx.tr.cancel().await;
-					continue;
-				}
 				Err(err) => {
 					let _ = tx.tr.cancel().await;
-					return Err(err.into());
+					return Err(err);
 				}
 			}
 
@@ -573,7 +573,7 @@ impl IndexBuildReservationRelease {
 			Err(_) => return Err(reservations),
 		};
 		for reservation in &reservations {
-			match tx.tr.delc(reservation.key.clone(), Some(reservation.val.clone())).await {
+			match tx.tr.delc(reservation.key.as_borrowed(), Some(&reservation.val)).await {
 				Ok(()) => {}
 				Err(KvsError::TransactionConditionNotMet) => {
 					// The builder already cleaned this reservation up; that
@@ -1145,7 +1145,7 @@ impl Transaction {
 
 	/// Check if a key exists in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn exists<K>(&self, key: &K, version: Option<u64>) -> Result<bool>
+	pub async fn exists_key<K>(&self, key: &K, version: Option<u64>) -> Result<bool>
 	where
 		K: KVKey + Debug,
 	{
@@ -1158,7 +1158,11 @@ impl Transaction {
 
 	/// Fetch a key from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn get<K>(&self, key: &K, version: Option<u64>) -> Result<Option<K::ValueType>>
+	pub async fn get_key<K>(
+		&self,
+		key: &K,
+		version: Option<u64>,
+	) -> Result<Option<<K as KVKey>::Value>>
 	where
 		K: KVKey + Debug,
 	{
@@ -1172,28 +1176,53 @@ impl Transaction {
 		self.metrics.record_get(keys_found, key_bytes, value_bytes);
 		// Build the decode context only on a hit. For `RecordKey` this
 		// avoids a `RecordId` clone (table + key) on every miss.
-		val.map(|v| K::ValueType::kv_decode_value(&v, key.value_context())).transpose()
+		val.map(|v| <K as KVKey>::Value::kv_decode_value(&v, key.value_context())).transpose()
+	}
+
+	/// Fetch a key from the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn get(&self, key: Key<'_>, version: Option<u64>) -> Result<Option<Vec<u8>>> {
+		let key_bytes = key.len() as u64;
+		let val = self.tr.get(key, version).await.map_err(Error::from)?;
+		let (keys_found, value_bytes) = match &val {
+			Some(v) => (1, v.len() as u64),
+			None => (0, 0),
+		};
+		self.metrics.record_get(keys_found, key_bytes, value_bytes);
+		Ok(val)
+	}
+
+	/// Fetch a key from the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn getr(
+		&self,
+		key: KeyRange<'_>,
+		version: Option<u64>,
+	) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+		let val = self.tr.getr(key, version).await.map_err(Error::from)?;
+		self.metrics.record_get(val.values.len() as u64, val.key_bytes, val.value_bytes);
+		Ok(val.values)
 	}
 
 	/// Retrieve a batch set of keys from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn getm<K>(
+	pub async fn get_many_key<K>(
 		&self,
 		keys: Vec<K>,
 		version: Option<u64>,
-	) -> Result<Vec<Option<K::ValueType>>>
+	) -> Result<Vec<Option<<K as KVKey>::Value>>>
 	where
 		K: KVKey + Debug,
 	{
 		let encoded_keys: Vec<_> = keys.iter().map(|k| k.encode_key()).collect::<Result<_>>()?;
 		let key_bytes: u64 = encoded_keys.iter().map(|k| k.len() as u64).sum();
-		let res = self.tr.getm(encoded_keys, version).await.map_err(Error::from)?;
+		let res = self.tr.getm(&encoded_keys, version).await.map_err(Error::from)?;
 		self.metrics.record_get(res.records, key_bytes, res.value_bytes);
 		res.values
 			.into_iter()
 			.zip(keys)
 			.map(|(v, k)| match v {
-				Some(v) => K::ValueType::kv_decode_value(&v, k.value_context()).map(Some),
+				Some(v) => <K as KVKey>::Value::kv_decode_value(&v, k.value_context()).map(Some),
 				None => Ok(None),
 			})
 			.collect()
@@ -1207,47 +1236,25 @@ impl Transaction {
 	/// must decode the storage key per row and reconstruct the context
 	/// themselves.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn getp<K>(&self, key: &K, version: Option<u64>) -> Result<Vec<(Key, K::ValueType)>>
-	where
-		K: KVKey + Debug,
-		K::ValueType: KVValue<KeyContext = ()>,
-	{
-		let key = key.encode_key()?;
-		let res = self.tr.getp(key, version).await.map_err(Error::from)?;
-		self.metrics.record_scan(res.values.len() as u64, res.key_bytes, res.value_bytes);
-		res.values
-			.into_iter()
-			.map(|(k, v)| Ok((k, K::ValueType::kv_decode_value(&v, ())?)))
-			.collect()
-	}
-
-	/// Retrieve a specific range of keys from the datastore.
-	///
-	/// As with [`Self::getp`], restricted to value types with
-	/// `KeyContext = ()`.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn getr<K>(
+	pub async fn get_prefix_key<K>(
 		&self,
-		rng: Range<K>,
+		key: &K,
 		version: Option<u64>,
-	) -> Result<Vec<(Key, K::ValueType)>>
+	) -> Result<Vec<(Vec<u8>, Vec<u8>)>>
 	where
-		K: KVKey + Debug,
-		K::ValueType: KVValue<KeyContext = ()>,
+		K: KVRange + Debug,
 	{
-		let beg = rng.start.encode_key()?;
-		let end = rng.end.encode_key()?;
-		let res = self.tr.getr(beg..end, version).await.map_err(Error::from)?;
+		let range = key.encode_range()?;
+		let res = self.tr.getr(range, version).await.map_err(Error::from)?;
+
 		self.metrics.record_scan(res.values.len() as u64, res.key_bytes, res.value_bytes);
-		res.values
-			.into_iter()
-			.map(|(k, v)| Ok((k, K::ValueType::kv_decode_value(&v, ())?)))
-			.collect()
+
+		Ok(res.values)
 	}
 
 	/// Delete a key from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn del<K>(&self, key: &K) -> Result<()>
+	pub async fn del_key<K>(&self, key: &K) -> Result<()>
 	where
 		K: KVKey + Debug,
 	{
@@ -1258,16 +1265,35 @@ impl Transaction {
 		Ok(())
 	}
 
+	/// Delete a key from the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn del(&self, key: Key<'_>) -> Result<()> {
+		let key_bytes = key.len() as u64;
+		self.tr.del(key).await.map_err(Error::from)?;
+		self.metrics.record_del(1, key_bytes);
+		Ok(())
+	}
+
 	/// Delete a key from the datastore if the current value matches a
 	/// condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn delc<K>(&self, key: &K, chk: Option<&K::ValueType>) -> Result<()>
+	pub async fn del_compare_key<K>(&self, key: &K, chk: Option<&K::Value>) -> Result<()>
 	where
 		K: KVKey + Debug,
 	{
 		let key = key.encode_key()?;
 		let key_bytes = key.len() as u64;
 		let chk = chk.map(|v| v.kv_encode_value()).transpose()?;
+		self.tr.delc(key, chk.as_deref()).await.map_err(Error::from)?;
+		self.metrics.record_del(1, key_bytes);
+		Ok(())
+	}
+
+	/// Delete a key from the datastore if the current value matches a
+	/// condition.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn del_compare(&self, key: Key<'_>, chk: Option<&[u8]>) -> Result<()> {
+		let key_bytes = key.len() as u64;
 		self.tr.delc(key, chk).await.map_err(Error::from)?;
 		self.metrics.record_del(1, key_bytes);
 		Ok(())
@@ -1278,37 +1304,30 @@ impl Transaction {
 	/// This function deletes entries from the underlying datastore in grouped
 	/// batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn delr<K>(&self, rng: Range<K>) -> Result<()>
-	where
-		K: KVKey + Debug,
-	{
-		let beg = rng.start.encode_key()?;
-		let end = rng.end.encode_key()?;
-		self.tr.delr(beg..end).await.map_err(Error::from)?;
+	pub async fn delr(&self, rng: KeyRange<'_>) -> Result<()> {
+		self.tr.delr(rng).await.map_err(Error::from)?;
 		// Range/prefix deletes don't report the number of affected keys or
 		// their byte size.
 		self.metrics.record_del(0, 0);
 		Ok(())
 	}
 
-	/// Delete a prefix of keys from the datastore.
+	/// Delete a range of keys from the datastore.
 	///
 	/// This function deletes entries from the underlying datastore in grouped
 	/// batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn delp<K>(&self, key: &K) -> Result<()>
+	pub async fn del_prefix_key<K>(&self, rng: &K) -> Result<()>
 	where
-		K: KVKey + Debug,
+		K: KVRange + Debug,
 	{
-		let key = key.encode_key()?;
-		self.tr.delp(key).await.map_err(Error::from)?;
-		self.metrics.record_del(0, 0);
-		Ok(())
+		let rng = rng.encode_range()?;
+		self.delr(rng).await
 	}
 
 	/// Delete all versions of a key from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn clr<K>(&self, key: &K) -> Result<()>
+	pub async fn clr_key<K>(&self, key: &K) -> Result<()>
 	where
 		K: KVKey + Debug,
 	{
@@ -1322,14 +1341,14 @@ impl Transaction {
 	/// Delete all versions of a key from the datastore if the current value
 	/// matches a condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn clrc<K>(&self, key: &K, chk: Option<&K::ValueType>) -> Result<()>
+	pub async fn clr_compare_key<K>(&self, key: &K, chk: Option<&<K as KVKey>::Value>) -> Result<()>
 	where
 		K: KVKey + Debug,
 	{
 		let key = key.encode_key()?;
 		let key_bytes = key.len() as u64;
 		let chk = chk.map(|v| v.kv_encode_value()).transpose()?;
-		self.tr.clrc(key, chk).await.map_err(Error::from)?;
+		self.tr.clrc(key, chk.as_deref()).await.map_err(Error::from)?;
 		self.metrics.record_del(1, key_bytes);
 		Ok(())
 	}
@@ -1339,13 +1358,8 @@ impl Transaction {
 	/// This function deletes entries from the underlying datastore in grouped
 	/// batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn clrr<K>(&self, rng: Range<K>) -> Result<()>
-	where
-		K: KVKey + Debug,
-	{
-		let beg = rng.start.encode_key()?;
-		let end = rng.end.encode_key()?;
-		self.tr.clrr(beg..end).await.map_err(Error::from)?;
+	pub async fn clrr(&self, rng: KeyRange<'_>) -> Result<()> {
+		self.tr.clrr(rng).await.map_err(Error::from)?;
 		self.metrics.record_del(0, 0);
 		Ok(())
 	}
@@ -1355,12 +1369,12 @@ impl Transaction {
 	/// This function deletes entries from the underlying datastore in grouped
 	/// batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn clrp<K>(&self, key: &K) -> Result<()>
+	pub async fn clr_prefix_key<K>(&self, key: &K) -> Result<()>
 	where
-		K: KVKey + Debug,
+		K: KVRange,
 	{
-		let key = key.encode_key()?;
-		self.tr.clrp(key).await.map_err(Error::from)?;
+		let range = key.encode_range()?;
+		self.tr.clrr(range).await.map_err(Error::from)?;
 		self.metrics.record_del(0, 0);
 		Ok(())
 	}
@@ -1384,11 +1398,13 @@ impl Transaction {
 			return Ok(None);
 		};
 		// Delete only the catalog definition; defer the data deletion.
-		let key = crate::key::root::ns::new(&ns_def.name);
+		let key = crate::key::root::ns::NamespaceKey {
+			ns: Cow::Borrowed(&ns_def.name),
+		};
 		if expunge {
-			self.clr(&key).await?;
+			self.clr_key(&key).await?;
 		} else {
-			self.del(&key).await?;
+			self.del_key(&key).await?;
 		}
 		// Enqueue background reclaim of the namespace data prefix.
 		let rc = crate::key::root::rc::ReclaimKey::namespace(
@@ -1396,7 +1412,7 @@ impl Transaction {
 			expunge,
 			Uuid::now_v7(),
 		);
-		self.set(
+		self.set_key(
 			&rc,
 			&crate::key::root::rc::ReclaimState {
 				observed_ms: 0,
@@ -1426,11 +1442,14 @@ impl Transaction {
 			return Ok(None);
 		};
 		// Delete only the catalog definition; defer the data deletion.
-		let key = crate::key::namespace::db::new(db_def.namespace_id, &db_def.name);
+		let key = crate::key::namespace::db::DatabaseKey {
+			ns: db_def.namespace_id,
+			db: Cow::Borrowed(&db_def.name),
+		};
 		if expunge {
-			self.clr(&key).await?;
+			self.clr_key(&key).await?;
 		} else {
-			self.del(&key).await?;
+			self.del_key(&key).await?;
 		}
 		// Enqueue background reclaim of the database data prefix.
 		let rc = crate::key::root::rc::ReclaimKey::database(
@@ -1439,7 +1458,7 @@ impl Transaction {
 			expunge,
 			Uuid::now_v7(),
 		);
-		self.set(
+		self.set_key(
 			&rc,
 			&crate::key::root::rc::ReclaimState {
 				observed_ms: 0,
@@ -1477,22 +1496,37 @@ impl Transaction {
 			return Ok(());
 		};
 		// Delete the catalog definition; defer the index data deletion.
-		let key = crate::key::table::ix::new(ns, db, tb, &ix_def.name);
-		self.del(&key).await?;
+		let key = crate::key::table::ix::IndexDefinitionKey {
+			prefix: crate::key::database::all::DatabaseRoot {
+				ns,
+				db,
+			},
+			tb: Cow::Borrowed(tb),
+			ix: Cow::Borrowed(&ix_def.name),
+		};
+		self.del_key(&key).await?;
 		// Delete the id-to-name lookup.
-		let name_lookup_key =
-			crate::key::table::ix::IndexNameLookupKey::new(ns, db, tb, ix_def.index_id);
-		self.del(&name_lookup_key).await?;
+		let name_lookup_key = crate::key::table::ix::IndexNameLookupKey {
+			prefix: crate::key::database::all::DatabaseRoot {
+				ns,
+				db,
+			},
+			tb: Cow::Borrowed(tb),
+			ix: ix_def.index_id,
+		};
+		self.del_key(&name_lookup_key).await?;
 		// Enqueue background reclaim of the index data prefix.
-		let rc = crate::key::root::rc::ReclaimKey::index(
+		let rc = crate::key::root::rc::ReclaimKey {
+			kind: ReclaimKind::Index,
+
 			ns,
 			db,
-			std::borrow::Cow::Borrowed(tb),
-			ix_def.index_id,
-			false,
-			Uuid::now_v7(),
-		);
-		self.set(
+			tb: Cow::Borrowed(tb),
+			ix: ix_def.index_id,
+			expunge: Expunge::Keep,
+			uid: Uuid::now_v7(),
+		};
+		self.set_key(
 			&rc,
 			&crate::key::root::rc::ReclaimState {
 				observed_ms: 0,
@@ -1508,7 +1542,7 @@ impl Transaction {
 
 	/// Insert or update a key in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn set<K>(&self, key: &K, val: &K::ValueType) -> Result<()>
+	pub async fn set_key<K>(&self, key: &K, val: &K::Value) -> Result<()>
 	where
 		K: KVKey + Debug,
 	{
@@ -1521,9 +1555,23 @@ impl Transaction {
 		Ok(())
 	}
 
+	/// Insert or update a key in the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn set<V>(&self, key: Key<'_>, val: V) -> Result<()>
+	where
+		V: IntoBytes + Debug,
+	{
+		let key_bytes = key.len() as u64;
+		let val = val.into_bytes();
+		let value_bytes = val.len() as u64;
+		self.tr.set(key, val).await.map_err(Error::from)?;
+		self.metrics.record_set(key_bytes, value_bytes);
+		Ok(())
+	}
+
 	/// Insert a key if it doesn't exist in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn put<K>(&self, key: &K, val: &K::ValueType) -> Result<()>
+	pub async fn put_key<K>(&self, key: &K, val: &K::Value) -> Result<()>
 	where
 		K: KVKey + Debug,
 	{
@@ -1536,13 +1584,27 @@ impl Transaction {
 		Ok(())
 	}
 
+	/// Insert a key if it doesn't exist in the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn put<V>(&self, key: Key<'_>, val: V) -> Result<()>
+	where
+		V: IntoBytes + Debug,
+	{
+		let key_bytes = key.len() as u64;
+		let val = val.into_bytes();
+		let value_bytes = val.len() as u64;
+		self.tr.put(key, val).await.map_err(Error::from)?;
+		self.metrics.record_put(key_bytes, value_bytes);
+		Ok(())
+	}
+
 	/// Update a key in the datastore if the current value matches a condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn putc<K>(
+	pub async fn put_compare_key<K>(
 		&self,
 		key: &K,
-		val: &K::ValueType,
-		chk: Option<&K::ValueType>,
+		val: &K::Value,
+		chk: Option<&K::Value>,
 	) -> Result<()>
 	where
 		K: KVKey + Debug,
@@ -1557,9 +1619,23 @@ impl Transaction {
 		Ok(())
 	}
 
+	/// Update a key in the datastore if the current value matches a condition.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn put_compare<V>(&self, key: Key<'_>, val: V, chk: Option<V>) -> Result<()>
+	where
+		V: IntoBytes + Debug,
+	{
+		let val = val.into_bytes();
+		let key_bytes = key.len() as u64;
+		let value_bytes = val.len() as u64;
+		self.tr.putc(key, val, chk.map(|x| x.into_bytes())).await.map_err(Error::from)?;
+		self.metrics.record_put(key_bytes, value_bytes);
+		Ok(())
+	}
+
 	/// Insert or replace a key in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn replace<K>(&self, key: &K, val: &K::ValueType) -> Result<()>
+	pub async fn replace_key<K>(&self, key: &K, val: &K::Value) -> Result<()>
 	where
 		K: KVKey + Debug,
 	{
@@ -1578,7 +1654,7 @@ impl Transaction {
 
 	/// Fetch a key from the datastore, without decoding.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn get_raw<K>(&self, key: &K, version: Option<u64>) -> Result<Option<Val>>
+	pub async fn get_key_raw<K>(&self, key: &K, version: Option<u64>) -> Result<Option<Val>>
 	where
 		K: KVKey + Debug,
 	{
@@ -1601,7 +1677,7 @@ impl Transaction {
 	{
 		let keys = keys.iter().map(|k| k.encode_key()).collect::<Result<Vec<_>>>()?;
 		let key_bytes: u64 = keys.iter().map(|k| k.len() as u64).sum();
-		let res = self.tr.getm(keys, version).await.map_err(Error::from)?;
+		let res = self.tr.getm(&keys, version).await.map_err(Error::from)?;
 		self.metrics.record_get(res.records, key_bytes, res.value_bytes);
 		Ok(res.values)
 	}
@@ -1615,19 +1691,14 @@ impl Transaction {
 	/// This function fetches the full range of keys, in a single request to the
 	/// underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn keys<K>(
+	pub async fn keys(
 		&self,
-		rng: Range<K>,
+		rng: KeyRange<'_>,
 		limit: u32,
 		skip: u32,
 		version: Option<u64>,
-	) -> Result<Vec<Key>>
-	where
-		K: KVKey + Debug,
-	{
-		let beg = rng.start.encode_key()?;
-		let end = rng.end.encode_key()?;
-		let res = self.tr.keys(beg..end, limit, skip, version).await.map_err(Error::from)?;
+	) -> Result<Vec<Vec<u8>>> {
+		let res = self.tr.keys(rng, limit, skip, version).await.map_err(Error::from)?;
 		self.metrics.record_scan(res.keys.len() as u64, res.key_bytes, 0);
 		Ok(res.keys)
 	}
@@ -1637,19 +1708,14 @@ impl Transaction {
 	/// This function fetches the full range of keys, in a single request to the
 	/// underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn keysr<K>(
+	pub async fn keysr(
 		&self,
-		rng: Range<K>,
+		rng: KeyRange<'_>,
 		limit: u32,
 		skip: u32,
 		version: Option<u64>,
-	) -> Result<Vec<Key>>
-	where
-		K: KVKey + Debug,
-	{
-		let beg = rng.start.encode_key()?;
-		let end = rng.end.encode_key()?;
-		let res = self.tr.keysr(beg..end, limit, skip, version).await.map_err(Error::from)?;
+	) -> Result<Vec<Vec<u8>>> {
+		let res = self.tr.keysr(rng, limit, skip, version).await.map_err(Error::from)?;
 		self.metrics.record_scan(res.keys.len() as u64, res.key_bytes, 0);
 		Ok(res.keys)
 	}
@@ -1659,19 +1725,14 @@ impl Transaction {
 	/// This function fetches the full range of key-value pairs, in a single
 	/// request to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn scan<K>(
+	pub async fn scan(
 		&self,
-		rng: Range<K>,
+		rng: KeyRange<'_>,
 		limit: u32,
 		skip: u32,
 		version: Option<u64>,
-	) -> Result<Vec<(Key, Val)>>
-	where
-		K: KVKey + Debug,
-	{
-		let beg = rng.start.encode_key()?;
-		let end = rng.end.encode_key()?;
-		let res = self.tr.scan(beg..end, limit, skip, version).await.map_err(Error::from)?;
+	) -> Result<Vec<(Vec<u8>, Val)>> {
+		let res = self.tr.scan(rng, limit, skip, version).await.map_err(Error::from)?;
 		self.metrics.record_scan(res.values.len() as u64, res.key_bytes, res.value_bytes);
 		Ok(res.values)
 	}
@@ -1681,19 +1742,14 @@ impl Transaction {
 	/// This function fetches the full range of key-value pairs, in a single
 	/// request to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn scanr<K>(
+	pub async fn scanr(
 		&self,
-		rng: Range<K>,
+		rng: KeyRange<'_>,
 		limit: u32,
 		skip: u32,
 		version: Option<u64>,
-	) -> Result<Vec<(Key, Val)>>
-	where
-		K: KVKey + Debug,
-	{
-		let beg = rng.start.encode_key()?;
-		let end = rng.end.encode_key()?;
-		let res = self.tr.scanr(beg..end, limit, skip, version).await.map_err(Error::from)?;
+	) -> Result<Vec<(Vec<u8>, Val)>> {
+		let res = self.tr.scanr(rng, limit, skip, version).await.map_err(Error::from)?;
 		self.metrics.record_scan(res.values.len() as u64, res.key_bytes, res.value_bytes);
 		Ok(res.values)
 	}
@@ -1703,13 +1759,8 @@ impl Transaction {
 	/// This function fetches the total count, in batches, with multiple
 	/// requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn count<K>(&self, rng: Range<K>, version: Option<u64>) -> Result<usize>
-	where
-		K: KVKey + Debug,
-	{
-		let beg = rng.start.encode_key()?;
-		let end = rng.end.encode_key()?;
-		let n = self.tr.count(beg..end, version).await.map_err(Error::from)?;
+	pub async fn count(&self, rng: KeyRange<'_>, version: Option<u64>) -> Result<usize> {
+		let n = self.tr.count(rng, version).await.map_err(Error::from)?;
 		// `count` only reports the number of keys, not their byte size.
 		self.metrics.record_scan(n as u64, 0, 0);
 		Ok(n)
@@ -1727,13 +1778,13 @@ impl Transaction {
 	/// call advances the same iterator instead of re-seeking from scratch.
 	/// `skip` is applied once on the first batch.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn open_keys_cursor(
-		&self,
-		rng: Range<Key>,
+	pub async fn open_keys_cursor<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
 		dir: ScanDirection,
 		skip: u32,
 		version: Option<u64>,
-	) -> Result<MeteredKeysCursor<'_>> {
+	) -> Result<MeteredKeysCursor<'a>> {
 		let inner = self
 			.tr
 			.open_keys_cursor(
@@ -1756,13 +1807,13 @@ impl Transaction {
 	/// Open a stateful key+value scan cursor over a raw-byte range. See
 	/// [`Self::open_keys_cursor`].
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn open_vals_cursor(
-		&self,
-		rng: Range<Key>,
+	pub async fn open_vals_cursor<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
 		dir: ScanDirection,
 		skip: u32,
 		version: Option<u64>,
-	) -> Result<MeteredValsCursor<'_>> {
+	) -> Result<MeteredValsCursor<'a>> {
 		let inner = self
 			.tr
 			.open_vals_cursor(
@@ -1791,18 +1842,13 @@ impl Transaction {
 	/// This function fetches the keys in batches, with multiple requests to the
 	/// underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn batch_keys<K>(
+	pub async fn batch_keys(
 		&self,
-		rng: Range<K>,
+		rng: KeyRange<'_>,
 		batch: u32,
 		version: Option<u64>,
-	) -> Result<Batch<Key>>
-	where
-		K: KVKey + Debug,
-	{
-		let beg = rng.start.encode_key()?;
-		let end = rng.end.encode_key()?;
-		Ok(self.tr.batch_keys(beg..end, batch, version).await.map_err(Error::from)?)
+	) -> Result<Batch<Vec<u8>>> {
+		Ok(self.tr.batch_keys(rng, batch, version).await.map_err(Error::from)?)
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
@@ -1810,18 +1856,13 @@ impl Transaction {
 	/// This function fetches the key-value pairs in batches, with multiple
 	/// requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn batch_keys_vals<K>(
+	pub async fn batch_keys_vals(
 		&self,
-		rng: Range<K>,
+		rng: KeyRange<'_>,
 		batch: u32,
 		version: Option<u64>,
-	) -> Result<Batch<(Key, Val)>>
-	where
-		K: KVKey + Debug,
-	{
-		let beg = rng.start.encode_key()?;
-		let end = rng.end.encode_key()?;
-		Ok(self.tr.batch_keys_vals(beg..end, batch, version).await.map_err(Error::from)?)
+	) -> Result<Batch<(Vec<u8>, Val)>> {
+		Ok(self.tr.batch_keys_vals(rng, batch, version).await.map_err(Error::from)?)
 	}
 
 	// --------------------------------------------------
@@ -1879,9 +1920,15 @@ impl Transaction {
 		db: DatabaseId,
 		tb: &TableName,
 	) -> Result<bool> {
-		let beg = crate::key::table::lq::prefix(ns, db, tb)?;
-		let end = crate::key::table::lq::suffix(ns, db, tb)?;
-		Ok(!self.keys(beg..end, 1, 0, None).await?.is_empty())
+		let range = crate::key::table::lq::LqPrefix {
+			prefix: DatabaseRoot {
+				ns,
+				db,
+			},
+			tb: Cow::Borrowed(tb),
+		}
+		.encode_range()?;
+		Ok(!self.keys(range, 1, 0, None).await?.is_empty())
 	}
 
 	/// Returns the implementation of timestamp that this transaction uses.
@@ -1990,16 +2037,35 @@ impl Transaction {
 		// Both keyspaces share this commit's versionstamp.
 		let buf = &mut [0u8; _];
 		let ts = self.timestamp().await?.encode(buf);
-		// Write the changefeed entries.
+		// Collect all changefeed write operations as futures
 		let cf_futures = cf_changes.into_iter().map(|(ns, db, tb, value)| async move {
-			let key = crate::key::change::new(ns, db, ts, &tb).encode_key()?;
+			// Create the changefeed key with the current timestamp
+			let key = crate::key::change::ChangeFeed {
+				prefix: crate::key::database::all::DatabaseRoot {
+					ns,
+					db,
+				},
+				ts: Cow::Borrowed(ts),
+				tb: Cow::Borrowed(&tb),
+			}
+			.encode_key()?;
+			// Write the changefeed entry using the raw transactor API
 			self.tr.set(key, value).await.map_err(Error::from)?;
 			Ok::<(), anyhow::Error>(())
 		});
 		try_join_all(cf_futures).await?;
 		// Write the live-query event entries to the dedicated keyspace.
 		let lqe_futures = lqe_changes.into_iter().map(|(ns, db, tb, value)| async move {
-			let key = crate::key::lqe::new(ns, db, ts, &tb).encode_key()?;
+			let key = crate::key::lqe::Lqe {
+				prefix: DatabaseRoot {
+					ns,
+					db,
+				},
+				tb: Cow::Borrowed(&tb),
+				ts: Cow::Borrowed(ts),
+			}
+			.encode_key()?;
+
 			self.tr.set(key, value).await.map_err(Error::from)?;
 			Ok::<(), anyhow::Error>(())
 		});
@@ -2147,15 +2213,17 @@ impl Transaction {
 	}
 
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn compact<K>(&self, key: Option<K>) -> Result<()>
+	pub async fn compact<K>(&self, key: &K) -> Result<()>
 	where
-		K: KVKey + Debug,
+		K: KVRange + Debug,
 	{
-		let rng = match key {
-			Some(key) => Some(util::to_prefix_range(&key)?),
-			None => None,
-		};
-		self.tr.inner.compact(rng).await
+		let range = key.encode_range()?;
+		self.tr.inner.compact(Some(range)).await
+	}
+
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn compact_all(&self) -> Result<()> {
+		self.tr.inner.compact(None).await
 	}
 
 	/// Mark this transaction to wake the async event processor after commit.
@@ -2177,10 +2245,10 @@ impl NodeProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_nds(),
 					None => {
-						let beg = crate::key::root::nd::prefix();
-						let end = crate::key::root::nd::suffix();
-						let val = self.getr(beg..end, None).await?;
-						let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+						let range = crate::key::root::nd::NdPrefix {}.encode_range()?;
+						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let val =
+							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Nds(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -2199,10 +2267,13 @@ impl NodeProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val,
 					None => {
-						let key = crate::key::root::nd::new(id);
-						let val = self.get(&key, None).await?.ok_or_else(|| Error::NdNotFound {
-							uuid: id.to_string(),
-						})?;
+						let key = crate::key::root::nd::Nd {
+							nd: id,
+						};
+						let val =
+							self.get_key(&key, None).await?.ok_or_else(|| Error::NdNotFound {
+								uuid: id.to_string(),
+							})?;
 						let val = cache::tx::Entry::Any(Arc::new(val));
 						self.cache.insert(qey, val.clone());
 						val
@@ -2226,8 +2297,10 @@ impl RootProvider for Transaction {
 			match self.cache.get(&qey) {
 				Some(val) => val,
 				None => {
-					let key = crate::key::root::root_config::new("default");
-					let Some(val) = self.get(&key, None).await? else {
+					let key = crate::key::root::root_config::RootConfig {
+						ty: Cow::Borrowed("default"),
+					};
+					let Some(val) = self.get_key(&key, None).await? else {
 						return Ok(None);
 					};
 					let ConfigDefinition::Default(val) = val else {
@@ -2254,8 +2327,10 @@ impl RootProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Option::Some),
 					None => {
-						let key = crate::key::root::root_config::new(cg);
-						if let Some(val) = self.get(&key, None).await? {
+						let key = crate::key::root::root_config::RootConfig {
+							ty: Cow::Borrowed(cg),
+						};
+						if let Some(val) = self.get_key(&key, None).await? {
 							let val = Arc::new(val);
 							let entr = cache::tx::Entry::Any(val.clone());
 							self.cache.insert(qey, entr);
@@ -2284,19 +2359,18 @@ impl NamespaceProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let beg = crate::key::root::ns::prefix();
-					let end = crate::key::root::ns::suffix();
-					let val = self.getr(beg..end, version).await?;
-					return util::deserialize_cache(val.iter().map(|x| x.1.as_slice()));
+					let range = crate::key::root::ns::NamespacePrefix {}.encode_range()?;
+					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Nss;
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_nss(),
 					None => {
-						let beg = crate::key::root::ns::prefix();
-						let end = crate::key::root::ns::suffix();
-						let val = self.getr(beg..end, None).await?;
-						let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+						let range = crate::key::root::ns::NamespacePrefix {}.encode_range()?;
+						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let val =
+							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Nss(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -2314,8 +2388,10 @@ impl NamespaceProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Option<Arc<NamespaceDefinition>>>> {
 		Box::pin(async move {
 			if version.is_some() {
-				let key = crate::key::root::ns::new(ns);
-				let Some(ns) = self.get(&key, version).await? else {
+				let key = crate::key::root::ns::NamespaceKey {
+					ns: Cow::Borrowed(ns),
+				};
+				let Some(ns) = self.get_key(&key, version).await? else {
 					return Ok(None);
 				};
 				return Ok(Some(Arc::new(ns)));
@@ -2324,8 +2400,10 @@ impl NamespaceProvider for Transaction {
 			match self.cache.get(&qey) {
 				Some(val) => val.try_into_type().map(Some),
 				None => {
-					let key = crate::key::root::ns::new(ns);
-					let Some(ns) = self.get(&key, None).await? else {
+					let key = crate::key::root::ns::NamespaceKey {
+						ns: Cow::Borrowed(ns),
+					};
+					let Some(ns) = self.get_key(&key, None).await? else {
 						return Ok(None);
 					};
 
@@ -2357,8 +2435,10 @@ impl NamespaceProvider for Transaction {
 		ns: NamespaceDefinition,
 	) -> BoxProviderFut<'_, Result<Arc<NamespaceDefinition>>> {
 		Box::pin(async move {
-			let key = crate::key::root::ns::new(&ns.name);
-			self.set(&key, &ns).await?;
+			let key = crate::key::root::ns::NamespaceKey {
+				ns: Cow::Borrowed(&ns.name),
+			};
+			self.set_key(&key, &ns).await?;
 
 			// Invalidate the cached list of all namespaces
 			let list_key = cache::tx::Lookup::Nss;
@@ -2397,19 +2477,24 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let beg = crate::key::namespace::db::prefix(ns)?;
-					let end = crate::key::namespace::db::suffix(ns)?;
-					let val = self.getr(beg..end, version).await?;
-					return util::deserialize_cache(val.iter().map(|x| x.1.as_slice()));
+					let range = crate::key::namespace::db::DatabasePrefix {
+						ns,
+					}
+					.encode_range()?;
+					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Dbs(ns);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_dbs(),
 					None => {
-						let beg = crate::key::namespace::db::prefix(ns)?;
-						let end = crate::key::namespace::db::suffix(ns)?;
-						let val = self.getr(beg..end, None).await?;
-						let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+						let range = crate::key::namespace::db::DatabasePrefix {
+							ns,
+						}
+						.encode_range()?;
+						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let val =
+							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Dbs(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -2433,8 +2518,11 @@ impl DatabaseProvider for Transaction {
 					let Some(ns) = self.get_ns_by_name(ns, version).await? else {
 						return Ok(None);
 					};
-					let key = crate::key::namespace::db::new(ns.namespace_id, db);
-					let Some(db_def) = self.get(&key, version).await? else {
+					let key = crate::key::namespace::db::DatabaseKey {
+						ns: ns.namespace_id,
+						db: Cow::Borrowed(db),
+					};
+					let Some(db_def) = self.get_key(&key, version).await? else {
 						return Ok(None);
 					};
 					return Ok(Some(Arc::new(db_def)));
@@ -2447,8 +2535,11 @@ impl DatabaseProvider for Transaction {
 							return Ok(None);
 						};
 
-						let key = crate::key::namespace::db::new(ns.namespace_id, db);
-						let Some(db_def) = self.get(&key, None).await? else {
+						let key = crate::key::namespace::db::DatabaseKey {
+							ns: ns.namespace_id,
+							db: Cow::Borrowed(db),
+						};
+						let Some(db_def) = self.get_key(&key, None).await? else {
 							return Ok(None);
 						};
 
@@ -2533,8 +2624,11 @@ impl DatabaseProvider for Transaction {
 		db: DatabaseDefinition,
 	) -> BoxProviderFut<'a, Result<Arc<DatabaseDefinition>>> {
 		Box::pin(async move {
-			let key = crate::key::namespace::db::new(db.namespace_id, &db.name);
-			self.set(&key, &db).await?;
+			let key = crate::key::namespace::db::DatabaseKey {
+				ns: db.namespace_id,
+				db: Cow::Borrowed(&db.name),
+			};
+			self.set_key(&key, &db).await?;
 
 			// Invalidate the cached list of all databases for this namespace
 			let list_key = cache::tx::Lookup::Dbs(db.namespace_id);
@@ -2561,19 +2655,30 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let beg = crate::key::database::az::prefix(ns, db)?;
-					let end = crate::key::database::az::suffix(ns, db)?;
-					let val = self.getr(beg..end, version).await?;
-					return util::deserialize_cache(val.iter().map(|x| x.1.as_slice()));
+					let range = crate::key::database::az::AnalyzerPrefix {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+					}
+					.encode_range()?;
+					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Azs(ns, db);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_azs(),
 					None => {
-						let beg = crate::key::database::az::prefix(ns, db)?;
-						let end = crate::key::database::az::suffix(ns, db)?;
-						let val = self.getr(beg..end, None).await?;
-						let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+						let range = crate::key::database::az::AnalyzerPrefix {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+						}
+						.encode_range()?;
+						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let val =
+							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Azs(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -2594,19 +2699,30 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let beg = crate::key::database::sq::prefix(ns, db)?;
-					let end = crate::key::database::sq::suffix(ns, db)?;
-					let val = self.getr(beg..end, version).await?;
-					return util::deserialize_cache(val.iter().map(|x| x.1.as_slice()));
+					let range = crate::key::database::sq::SqPrefix {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+					}
+					.encode_range()?;
+					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Sqs(ns, db);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_sqs(),
 					None => {
-						let beg = crate::key::database::sq::prefix(ns, db)?;
-						let end = crate::key::database::sq::suffix(ns, db)?;
-						let val = self.getr(beg..end, None).await?;
-						let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+						let range = crate::key::database::sq::SqPrefix {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+						}
+						.encode_range()?;
+						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let val =
+							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Sqs(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -2627,19 +2743,30 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let beg = crate::key::database::fc::prefix(ns, db)?;
-					let end = crate::key::database::fc::suffix(ns, db)?;
-					let val = self.getr(beg..end, version).await?;
-					return util::deserialize_cache(val.iter().map(|x| x.1.as_slice()));
+					let range = crate::key::database::fc::FcPrefix {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+					}
+					.encode_range()?;
+					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Fcs(ns, db);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_fcs(),
 					None => {
-						let beg = crate::key::database::fc::prefix(ns, db)?;
-						let end = crate::key::database::fc::suffix(ns, db)?;
-						let val = self.getr(beg..end, None).await?;
-						let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+						let range = crate::key::database::fc::FcPrefix {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+						}
+						.encode_range()?;
+						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let val =
+							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Fcs(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -2660,19 +2787,30 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let beg = crate::key::database::md::prefix(ns, db)?;
-					let end = crate::key::database::md::suffix(ns, db)?;
-					let val = self.getr(beg..end, version).await?;
-					return util::deserialize_cache(val.iter().map(|x| x.1.as_slice()));
+					let range = crate::key::database::md::MdPrefix {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+					}
+					.encode_range()?;
+					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Mds(ns, db);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_mds(),
 					None => {
-						let beg = crate::key::database::md::prefix(ns, db)?;
-						let end = crate::key::database::md::suffix(ns, db)?;
-						let val = self.getr(beg..end, None).await?;
-						let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+						let range = crate::key::database::md::MdPrefix {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+						}
+						.encode_range()?;
+						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let val =
+							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Mds(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -2693,19 +2831,30 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let beg = crate::key::database::pa::prefix(ns, db)?;
-					let end = crate::key::database::pa::suffix(ns, db)?;
-					let val = self.getr(beg..end, version).await?;
-					return util::deserialize_cache(val.iter().map(|x| x.1.as_slice()));
+					let range = crate::key::database::pa::PaPrefix {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+					}
+					.encode_range()?;
+					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Pas(ns, db);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_pas(),
 					None => {
-						let beg = crate::key::database::pa::prefix(ns, db)?;
-						let end = crate::key::database::pa::suffix(ns, db)?;
-						let val = self.getr(beg..end, None).await?;
-						let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+						let range = crate::key::database::pa::PaPrefix {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+						}
+						.encode_range()?;
+						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let val =
+							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Pas(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -2726,19 +2875,30 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let beg = crate::key::database::ml::prefix(ns, db)?;
-					let end = crate::key::database::ml::suffix(ns, db)?;
-					let val = self.getr(beg..end, version).await?;
-					return util::deserialize_cache(val.iter().map(|x| x.1.as_slice()));
+					let range = crate::key::database::ml::MlPrefix {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+					}
+					.encode_range()?;
+					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Mls(ns, db);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_mls(),
 					None => {
-						let beg = crate::key::database::ml::prefix(ns, db)?;
-						let end = crate::key::database::ml::suffix(ns, db)?;
-						let val = self.getr(beg..end, None).await?;
-						let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+						let range = crate::key::database::ml::MlPrefix {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+						}
+						.encode_range()?;
+						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let val =
+							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Mls(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -2759,19 +2919,30 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let beg = crate::key::database::cg::prefix(ns, db)?;
-					let end = crate::key::database::cg::suffix(ns, db)?;
-					let val = self.getr(beg..end, version).await?;
-					return util::deserialize_cache(val.iter().map(|x| x.1.as_slice()));
+					let range = crate::key::database::cg::ConfigPrefix {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+					}
+					.encode_range()?;
+					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Cgs(ns, db);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_cgs(),
 					None => {
-						let beg = crate::key::database::cg::prefix(ns, db)?;
-						let end = crate::key::database::cg::suffix(ns, db)?;
-						let val = self.getr(beg..end, None).await?;
-						let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+						let range = crate::key::database::cg::ConfigPrefix {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+						}
+						.encode_range()?;
+						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let val =
+							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Cgs(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -2794,8 +2965,15 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::database::ml::new(ns, db, ml, vn);
-					let Some(val) = self.get(&key, version).await? else {
+					let key = crate::key::database::ml::Ml {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+						ml: Cow::Borrowed(ml),
+						vn: Cow::Borrowed(vn),
+					};
+					let Some(val) = self.get_key(&key, version).await? else {
 						return Ok(None);
 					};
 					return Ok(Some(Arc::new(val)));
@@ -2804,8 +2982,15 @@ impl DatabaseProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = crate::key::database::ml::new(ns, db, ml, vn);
-						let Some(val) = self.get(&key, None).await? else {
+						let key = crate::key::database::ml::Ml {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+							ml: Cow::Borrowed(ml),
+							vn: Cow::Borrowed(vn),
+						};
+						let Some(val) = self.get_key(&key, None).await? else {
 							return Ok(None);
 						};
 						let val = Arc::new(val);
@@ -2830,20 +3015,34 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::database::az::new(ns, db, az);
-					let val = self.get(&key, version).await?.ok_or_else(|| Error::AzNotFound {
-						name: az.to_owned(),
-					})?;
+					let key = crate::key::database::az::Analyzer {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+						az: Cow::Borrowed(az),
+					};
+					let val =
+						self.get_key(&key, version).await?.ok_or_else(|| Error::AzNotFound {
+							name: az.to_owned(),
+						})?;
 					return Ok(Arc::new(val));
 				}
 				let qey = cache::tx::Lookup::Az(ns, db, az);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type(),
 					None => {
-						let key = crate::key::database::az::new(ns, db, az);
-						let val = self.get(&key, None).await?.ok_or_else(|| Error::AzNotFound {
-							name: az.to_owned(),
-						})?;
+						let key = crate::key::database::az::Analyzer {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+							az: Cow::Borrowed(az),
+						};
+						let val =
+							self.get_key(&key, None).await?.ok_or_else(|| Error::AzNotFound {
+								name: az.to_owned(),
+							})?;
 						let val = Arc::new(val);
 						let entry = cache::tx::Entry::Any(val.clone());
 						self.cache.insert(qey, entry);
@@ -2866,19 +3065,32 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = Sq::new(ns, db, sq);
-					let val = self.get(&key, version).await?.ok_or_else(|| Error::SeqNotFound {
-						name: sq.to_owned(),
-					})?;
+					let key = Sq {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+						sq: Cow::Borrowed(sq),
+					};
+					let val =
+						self.get_key(&key, version).await?.ok_or_else(|| Error::SeqNotFound {
+							name: sq.to_owned(),
+						})?;
 					return Ok(Arc::new(val));
 				}
 				let qey = cache::tx::Lookup::Sq(ns, db, sq);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type(),
 					None => {
-						let key = Sq::new(ns, db, sq);
+						let key = Sq {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+							sq: Cow::Borrowed(sq),
+						};
 						let val =
-							self.get(&key, None).await?.ok_or_else(|| Error::SeqNotFound {
+							self.get_key(&key, None).await?.ok_or_else(|| Error::SeqNotFound {
 								name: sq.to_owned(),
 							})?;
 						let val = Arc::new(val);
@@ -2903,20 +3115,34 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::database::fc::new(ns, db, fc);
-					let val = self.get(&key, version).await?.ok_or_else(|| Error::FcNotFound {
-						name: format!("fn::{fc}"),
-					})?;
+					let key = crate::key::database::fc::Fc {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+						fc: Cow::Borrowed(fc),
+					};
+					let val =
+						self.get_key(&key, version).await?.ok_or_else(|| Error::FcNotFound {
+							name: format!("fn::{fc}"),
+						})?;
 					return Ok(Arc::new(val));
 				}
 				let qey = cache::tx::Lookup::Fc(ns, db, fc);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type(),
 					None => {
-						let key = crate::key::database::fc::new(ns, db, fc);
-						let val = self.get(&key, None).await?.ok_or_else(|| Error::FcNotFound {
-							name: format!("fn::{fc}"),
-						})?;
+						let key = crate::key::database::fc::Fc {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+							fc: Cow::Borrowed(fc),
+						};
+						let val =
+							self.get_key(&key, None).await?.ok_or_else(|| Error::FcNotFound {
+								name: format!("fn::{fc}"),
+							})?;
 						let val = Arc::new(val);
 						let entry = cache::tx::Entry::Any(val.clone());
 						self.cache.insert(qey, entry);
@@ -2939,20 +3165,34 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::database::md::new(ns, db, md);
-					let val = self.get(&key, version).await?.ok_or_else(|| Error::MdNotFound {
-						name: md.to_owned(),
-					})?;
+					let key = crate::key::database::md::Md {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+						md: Cow::Borrowed(md),
+					};
+					let val =
+						self.get_key(&key, version).await?.ok_or_else(|| Error::MdNotFound {
+							name: md.to_owned(),
+						})?;
 					return Ok(Arc::new(val));
 				}
 				let qey = cache::tx::Lookup::Md(ns, db, md);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type(),
 					None => {
-						let key = crate::key::database::md::new(ns, db, md);
-						let val = self.get(&key, None).await?.ok_or_else(|| Error::MdNotFound {
-							name: md.to_owned(),
-						})?;
+						let key = crate::key::database::md::Md {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+							md: Cow::Borrowed(md),
+						};
+						let val =
+							self.get_key(&key, None).await?.ok_or_else(|| Error::MdNotFound {
+								name: md.to_owned(),
+							})?;
 						let val = Arc::new(val);
 						let entry = cache::tx::Entry::Any(val.clone());
 						self.cache.insert(qey, entry);
@@ -2975,20 +3215,34 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::database::pa::new(ns, db, pa);
-					let val = self.get(&key, version).await?.ok_or_else(|| Error::PaNotFound {
-						name: pa.to_owned(),
-					})?;
+					let key = crate::key::database::pa::Pa {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+						pa: Cow::Borrowed(pa),
+					};
+					let val =
+						self.get_key(&key, version).await?.ok_or_else(|| Error::PaNotFound {
+							name: pa.to_owned(),
+						})?;
 					return Ok(Arc::new(val));
 				}
 				let qey = cache::tx::Lookup::Pa(ns, db, pa);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type(),
 					None => {
-						let key = crate::key::database::pa::new(ns, db, pa);
-						let val = self.get(&key, None).await?.ok_or_else(|| Error::PaNotFound {
-							name: pa.to_owned(),
-						})?;
+						let key = crate::key::database::pa::Pa {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+							pa: Cow::Borrowed(pa),
+						};
+						let val =
+							self.get_key(&key, None).await?.ok_or_else(|| Error::PaNotFound {
+								name: pa.to_owned(),
+							})?;
 						let val = Arc::new(val);
 						let entry = cache::tx::Entry::Any(val.clone());
 						self.cache.insert(qey, entry);
@@ -3011,8 +3265,14 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::database::cg::new(ns, db, cg);
-					if let Some(val) = self.get(&key, version).await? {
+					let key = crate::key::database::cg::Config {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+						ty: Cow::Borrowed(cg),
+					};
+					if let Some(val) = self.get_key(&key, version).await? {
 						return Ok(Some(Arc::new(val)));
 					} else {
 						return Ok(None);
@@ -3022,8 +3282,14 @@ impl DatabaseProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Option::Some),
 					None => {
-						let key = crate::key::database::cg::new(ns, db, cg);
-						if let Some(val) = self.get(&key, None).await? {
+						let key = crate::key::database::cg::Config {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+							ty: Cow::Borrowed(cg),
+						};
+						if let Some(val) = self.get_key(&key, None).await? {
 							let val = Arc::new(val);
 							let entr = cache::tx::Entry::Any(val.clone());
 							self.cache.insert(qey, entr);
@@ -3045,8 +3311,14 @@ impl DatabaseProvider for Transaction {
 		fc: &'a catalog::FunctionDefinition,
 	) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
-			let key = crate::key::database::fc::new(ns, db, &fc.name);
-			self.set(&key, fc).await?;
+			let key = crate::key::database::fc::Fc {
+				prefix: crate::key::database::all::DatabaseRoot {
+					ns,
+					db,
+				},
+				fc: Cow::Borrowed(&fc.name),
+			};
+			self.set_key(&key, fc).await?;
 
 			// Invalidate the cached list of all functions for this database
 			let list_key = cache::tx::Lookup::Fcs(ns, db);
@@ -3069,8 +3341,14 @@ impl DatabaseProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
 			let name = md.get_storage_name()?;
-			let key = crate::key::database::md::new(ns, db, &name);
-			self.set(&key, md).await?;
+			let key = crate::key::database::md::Md {
+				prefix: crate::key::database::all::DatabaseRoot {
+					ns,
+					db,
+				},
+				md: Cow::Borrowed(name.as_str()),
+			};
+			self.set_key(&key, md).await?;
 
 			// Invalidate the cached list of all modules for this database
 			let list_key = cache::tx::Lookup::Mds(ns, db);
@@ -3092,8 +3370,14 @@ impl DatabaseProvider for Transaction {
 		pa: &'a catalog::ParamDefinition,
 	) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
-			let key = crate::key::database::pa::new(ns, db, &pa.name);
-			self.set(&key, pa).await?;
+			let key = crate::key::database::pa::Pa {
+				prefix: crate::key::database::all::DatabaseRoot {
+					ns,
+					db,
+				},
+				pa: Cow::Borrowed(&pa.name),
+			};
+			self.set_key(&key, pa).await?;
 
 			// Invalidate the cached list of all params for this database
 			let list_key = cache::tx::Lookup::Pas(ns, db);
@@ -3124,19 +3408,30 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let beg = crate::key::database::tb::prefix(ns, db)?;
-					let end = crate::key::database::tb::suffix(ns, db)?;
-					let val = self.getr(beg..end, version).await?;
-					return util::deserialize_cache(val.iter().map(|x| x.1.as_slice()));
+					let range = crate::key::database::tb::TableKeyPrefix {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+					}
+					.encode_range()?;
+					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Tbs(ns, db);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_tbs(),
 					None => {
-						let beg = crate::key::database::tb::prefix(ns, db)?;
-						let end = crate::key::database::tb::suffix(ns, db)?;
-						let val = self.getr(beg..end, None).await?;
-						let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+						let range = crate::key::database::tb::TableKeyPrefix {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+						}
+						.encode_range()?;
+						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let val =
+							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Tbs(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -3158,19 +3453,32 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let beg = crate::key::table::ft::prefix(ns, db, tb)?;
-					let end = crate::key::table::ft::suffix(ns, db, tb)?;
-					let val = self.getr(beg..end, version).await?;
-					return util::deserialize_cache(val.iter().map(|x| x.1.as_slice()));
+					let range = crate::key::table::ft::FtPrefix {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+						tb: Cow::Borrowed(tb),
+					}
+					.encode_range()?;
+					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Fts(ns, db, tb);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_fts(),
 					None => {
-						let beg = crate::key::table::ft::prefix(ns, db, tb)?;
-						let end = crate::key::table::ft::suffix(ns, db, tb)?;
-						let val = self.getr(beg..end, None).await?;
-						let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+						let range = crate::key::table::ft::FtPrefix {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+							tb: Cow::Borrowed(tb),
+						}
+						.encode_range()?;
+						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let val =
+							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Fts(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -3199,9 +3507,14 @@ impl TableProvider for Transaction {
 							name: db.to_owned(),
 						}));
 					};
-					let table_key =
-						crate::key::database::tb::new(db_def.namespace_id, db_def.database_id, tb);
-					if let Some(tb_def) = self.get(&table_key, version).await? {
+					let table_key = crate::key::database::tb::TableKey {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns: db_def.namespace_id,
+							db: db_def.database_id,
+						},
+						tb: Cow::Borrowed(tb),
+					};
+					if let Some(tb_def) = self.get_key(&table_key, version).await? {
 						return Ok(Arc::new(tb_def));
 					}
 					return Err(Error::TbNotFound {
@@ -3221,12 +3534,14 @@ impl TableProvider for Transaction {
 							}));
 						};
 
-						let table_key = crate::key::database::tb::new(
-							db_def.namespace_id,
-							db_def.database_id,
-							tb,
-						);
-						if let Some(tb_def) = self.get(&table_key, None).await? {
+						let table_key = crate::key::database::tb::TableKey {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns: db_def.namespace_id,
+								db: db_def.database_id,
+							},
+							tb: Cow::Borrowed(tb),
+						};
+						if let Some(tb_def) = self.get_key(&table_key, None).await? {
 							let cached_tb = Arc::new(tb_def);
 							let cached_entry = cache::tx::Entry::Any(
 								Arc::clone(&cached_tb) as Arc<dyn Any + Send + Sync>
@@ -3269,8 +3584,14 @@ impl TableProvider for Transaction {
 				let Some(db) = self.get_db_by_name(ns, db, version).await? else {
 					return Ok(None);
 				};
-				let key = crate::key::database::tb::new(db.namespace_id, db.database_id, tb);
-				let Some(tb) = self.get(&key, version).await? else {
+				let key = crate::key::database::tb::TableKey {
+					prefix: crate::key::database::all::DatabaseRoot {
+						ns: db.namespace_id,
+						db: db.database_id,
+					},
+					tb: Cow::Borrowed(tb),
+				};
+				let Some(tb) = self.get_key(&key, version).await? else {
 					return Ok(None);
 				};
 				return Ok(Some(Arc::new(tb)));
@@ -3283,8 +3604,14 @@ impl TableProvider for Transaction {
 						return Ok(None);
 					};
 
-					let key = crate::key::database::tb::new(db.namespace_id, db.database_id, tb);
-					let Some(tb) = self.get(&key, None).await? else {
+					let key = crate::key::database::tb::TableKey {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns: db.namespace_id,
+							db: db.database_id,
+						},
+						tb: Cow::Borrowed(tb),
+					};
+					let Some(tb) = self.get_key(&key, None).await? else {
 						return Ok(None);
 					};
 
@@ -3304,8 +3631,14 @@ impl TableProvider for Transaction {
 		tb: &'a TableDefinition,
 	) -> BoxProviderFut<'a, Result<Arc<TableDefinition>>> {
 		Box::pin(async move {
-			let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
-			match self.set(&key, tb).await {
+			let key = crate::key::database::tb::TableKey {
+				prefix: crate::key::database::all::DatabaseRoot {
+					ns: tb.namespace_id,
+					db: tb.database_id,
+				},
+				tb: Cow::Borrowed(&tb.name),
+			};
+			match self.set_key(&key, tb).await {
 				Ok(_) => {}
 				Err(e) => {
 					if matches!(
@@ -3354,8 +3687,14 @@ impl TableProvider for Transaction {
 				.into());
 			};
 
-			let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
-			self.del(&key).await?;
+			let key = crate::key::database::tb::TableKey {
+				prefix: crate::key::database::all::DatabaseRoot {
+					ns: tb.namespace_id,
+					db: tb.database_id,
+				},
+				tb: Cow::Borrowed(&tb.name),
+			};
+			self.del_key(&key).await?;
 
 			// Invalidate the cached list of all tables for this database
 			let list_key = cache::tx::Lookup::Tbs(tb.namespace_id, tb.database_id);
@@ -3385,8 +3724,14 @@ impl TableProvider for Transaction {
 				.into());
 			};
 
-			let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
-			self.clr(&key).await?;
+			let key = crate::key::database::tb::TableKey {
+				prefix: crate::key::database::all::DatabaseRoot {
+					ns: tb.namespace_id,
+					db: tb.database_id,
+				},
+				tb: Cow::Borrowed(&tb.name),
+			};
+			self.clr_key(&key).await?;
 
 			// Invalidate the cached list of all tables for this database
 			let list_key = cache::tx::Lookup::Tbs(tb.namespace_id, tb.database_id);
@@ -3413,19 +3758,32 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let beg = crate::key::table::ev::prefix(ns, db, tb)?;
-					let end = crate::key::table::ev::suffix(ns, db, tb)?;
-					let val = self.getr(beg..end, version).await?;
-					return util::deserialize_cache(val.iter().map(|x| x.1.as_slice()));
+					let range = crate::key::table::ev::EvPrefix {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+						tb: Cow::Borrowed(tb),
+					}
+					.encode_range()?;
+					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Evs(ns, db, tb);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_evs(),
 					None => {
-						let beg = crate::key::table::ev::prefix(ns, db, tb)?;
-						let end = crate::key::table::ev::suffix(ns, db, tb)?;
-						let val = self.getr(beg..end, None).await?;
-						let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+						let range = crate::key::table::ev::EvPrefix {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+							tb: Cow::Borrowed(tb),
+						}
+						.encode_range()?;
+						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let val =
+							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Evs(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -3447,19 +3805,32 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let beg = crate::key::table::fd::prefix(ns, db, tb)?;
-					let end = crate::key::table::fd::suffix(ns, db, tb)?;
-					let val = self.getr(beg..end, version).await?;
-					return util::deserialize_cache(val.iter().map(|x| x.1.as_slice()));
+					let range = crate::key::table::fd::FdPrefix {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+						tb: Cow::Borrowed(tb),
+					}
+					.encode_range()?;
+					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Fds(ns, db, tb);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_fds(),
 					None => {
-						let beg = crate::key::table::fd::prefix(ns, db, tb)?;
-						let end = crate::key::table::fd::suffix(ns, db, tb)?;
-						let val = self.getr(beg..end, None).await?;
-						let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+						let range = crate::key::table::fd::FdPrefix {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+							tb: Cow::Borrowed(tb),
+						}
+						.encode_range()?;
+						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let val =
+							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Fds(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -3481,19 +3852,32 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let beg = table_ix::prefix(ns, db, tb)?;
-					let end = table_ix::suffix(ns, db, tb)?;
-					let val = self.getr(beg..end, version).await?;
-					return util::deserialize_cache(val.iter().map(|x| x.1.as_slice()));
+					let range = table_ix::IndexDefinitionPrefix {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+						tb: Cow::Borrowed(tb),
+					}
+					.encode_range()?;
+					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Ixs(ns, db, tb);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_ixs(),
 					None => {
-						let beg = table_ix::prefix(ns, db, tb)?;
-						let end = table_ix::suffix(ns, db, tb)?;
-						let val = self.getr(beg..end, None).await?;
-						let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+						let range = table_ix::IndexDefinitionPrefix {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+							tb: Cow::Borrowed(tb),
+						}
+						.encode_range()?;
+						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let val =
+							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Ixs(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -3515,19 +3899,32 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let beg = crate::key::table::lq::prefix(ns, db, tb)?;
-					let end = crate::key::table::lq::suffix(ns, db, tb)?;
-					let val = self.getr(beg..end, version).await?;
-					return util::deserialize_cache(val.iter().map(|x| x.1.as_slice()));
+					let range = crate::key::table::lq::LqPrefix {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+						tb: Cow::Borrowed(tb),
+					}
+					.encode_range()?;
+					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Lvs(ns, db, tb);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_lvs(),
 					None => {
-						let beg = crate::key::table::lq::prefix(ns, db, tb)?;
-						let end = crate::key::table::lq::suffix(ns, db, tb)?;
-						let val = self.getr(beg..end, None).await?;
-						let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+						let range = crate::key::table::lq::LqPrefix {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+							tb: Cow::Borrowed(tb),
+						}
+						.encode_range()?;
+						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let val =
+							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Lvs(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -3549,8 +3946,14 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::database::tb::new(ns, db, tb);
-					let Some(val) = self.get(&key, version).await? else {
+					let key = crate::key::database::tb::TableKey {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+						tb: Cow::Borrowed(tb),
+					};
+					let Some(val) = self.get_key(&key, version).await? else {
 						return Ok(None);
 					};
 					return Ok(Some(Arc::new(val)));
@@ -3559,8 +3962,14 @@ impl TableProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = crate::key::database::tb::new(ns, db, tb);
-						let Some(val) = self.get(&key, None).await? else {
+						let key = crate::key::database::tb::TableKey {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+							tb: Cow::Borrowed(tb),
+						};
+						let Some(val) = self.get_key(&key, None).await? else {
 							return Ok(None);
 						};
 						let val = Arc::new(val);
@@ -3586,20 +3995,36 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::table::ev::new(ns, db, tb, ev);
-					let val = self.get(&key, version).await?.ok_or_else(|| Error::EvNotFound {
-						name: ev.to_owned(),
-					})?;
+					let key = crate::key::table::ev::Ev {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+						tb: Cow::Borrowed(tb),
+						ev: Cow::Borrowed(ev),
+					};
+					let val =
+						self.get_key(&key, version).await?.ok_or_else(|| Error::EvNotFound {
+							name: ev.to_owned(),
+						})?;
 					return Ok(Arc::new(val));
 				}
 				let qey = cache::tx::Lookup::Ev(ns, db, tb, ev);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type(),
 					None => {
-						let key = crate::key::table::ev::new(ns, db, tb, ev);
-						let val = self.get(&key, None).await?.ok_or_else(|| Error::EvNotFound {
-							name: ev.to_owned(),
-						})?;
+						let key = crate::key::table::ev::Ev {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+							tb: Cow::Borrowed(tb),
+							ev: Cow::Borrowed(ev),
+						};
+						let val =
+							self.get_key(&key, None).await?.ok_or_else(|| Error::EvNotFound {
+								name: ev.to_owned(),
+							})?;
 						let val = Arc::new(val);
 						let entry = cache::tx::Entry::Any(val.clone());
 						self.cache.insert(qey, entry);
@@ -3623,8 +4048,15 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::table::fd::new(ns, db, tb, fd);
-					let Some(val) = self.get(&key, version).await? else {
+					let key = crate::key::table::fd::Fd {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+						tb: Cow::Borrowed(tb),
+						fd: Cow::Borrowed(fd),
+					};
+					let Some(val) = self.get_key(&key, version).await? else {
 						return Ok(None);
 					};
 					return Ok(Some(Arc::new(val)));
@@ -3633,8 +4065,15 @@ impl TableProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = crate::key::table::fd::new(ns, db, tb, fd);
-						let Some(val) = self.get(&key, None).await? else {
+						let key = crate::key::table::fd::Fd {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+							tb: Cow::Borrowed(tb),
+							fd: Cow::Borrowed(fd),
+						};
+						let Some(val) = self.get_key(&key, None).await? else {
 							return Ok(None);
 						};
 						let val = Arc::new(val);
@@ -3657,8 +4096,15 @@ impl TableProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
 			let name = fd.name.to_raw_string();
-			let key = crate::key::table::fd::new(ns, db, tb, &name);
-			self.set(&key, fd).await?;
+			let key = crate::key::table::fd::Fd {
+				prefix: crate::key::database::all::DatabaseRoot {
+					ns,
+					db,
+				},
+				tb: Cow::Borrowed(tb),
+				fd: Cow::Borrowed(&name),
+			};
+			self.set_key(&key, fd).await?;
 
 			// Invalidate the cached list of all fields for this table
 			let list_key = cache::tx::Lookup::Fds(ns, db, tb.as_ref());
@@ -3691,8 +4137,15 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = table_ix::new(ns, db, tb, ix);
-					let Some(val) = self.get(&key, version).await? else {
+					let key = table_ix::IndexDefinitionKey {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+						tb: Cow::Borrowed(tb),
+						ix: Cow::Borrowed(ix),
+					};
+					let Some(val) = self.get_key(&key, version).await? else {
 						return Ok(None);
 					};
 					return Ok(Some(Arc::new(val)));
@@ -3701,8 +4154,15 @@ impl TableProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = table_ix::new(ns, db, tb, ix);
-						let Some(val) = self.get(&key, None).await? else {
+						let key = table_ix::IndexDefinitionKey {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+							tb: Cow::Borrowed(tb),
+							ix: Cow::Borrowed(ix),
+						};
+						let Some(val) = self.get_key(&key, None).await? else {
 							return Ok(None);
 						};
 						let val = Arc::new(val);
@@ -3725,8 +4185,15 @@ impl TableProvider for Transaction {
 		version: Option<u64>,
 	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::IndexDefinition>>>> {
 		Box::pin(async move {
-			let key = table_ix::IndexNameLookupKey::new(ns, db, tb, ix);
-			let Some(index_name) = self.get(&key, version).await? else {
+			let key = table_ix::IndexNameLookupKey {
+				prefix: crate::key::database::all::DatabaseRoot {
+					ns,
+					db,
+				},
+				tb: Cow::Borrowed(tb),
+				ix,
+			};
+			let Some(index_name) = self.get_key(&key, version).await? else {
 				return Ok(None);
 			};
 
@@ -3742,11 +4209,25 @@ impl TableProvider for Transaction {
 		ix: &'a catalog::IndexDefinition,
 	) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
-			let key = table_ix::new(ns, db, tb, &ix.name);
-			self.set(&key, ix).await?;
+			let key = table_ix::IndexDefinitionKey {
+				prefix: crate::key::database::all::DatabaseRoot {
+					ns,
+					db,
+				},
+				tb: Cow::Borrowed(tb),
+				ix: Cow::Borrowed(&ix.name),
+			};
+			self.set_key(&key, ix).await?;
 
-			let name_lookup_key = table_ix::IndexNameLookupKey::new(ns, db, tb, ix.index_id);
-			self.set(&name_lookup_key, &ix.name.to_string()).await?;
+			let name_lookup_key = table_ix::IndexNameLookupKey {
+				prefix: crate::key::database::all::DatabaseRoot {
+					ns,
+					db,
+				},
+				tb: Cow::Borrowed(tb),
+				ix: ix.index_id,
+			};
+			self.set_key(&name_lookup_key, &ix.name.to_string()).await?;
 
 			// Invalidate the cached list of all indexes for this table
 			let list_key = cache::tx::Lookup::Ixs(ns, db, tb.as_ref());
@@ -3774,16 +4255,37 @@ impl TableProvider for Transaction {
 			};
 
 			// Remove the index data
-			let key = index_all::new(ns, db, tb, ix.index_id);
-			self.delp(&key).await?;
+			let key = index_all::AllIndexRoot {
+				prefix: crate::key::database::all::DatabaseRoot {
+					ns,
+					db,
+				},
+				tb: Cow::Borrowed(tb),
+				ix: ix.index_id,
+			};
+			self.del_prefix_key(&key).await?;
 
 			// Delete the definition
-			let key = table_ix::new(ns, db, tb, &ix.name);
-			self.del(&key).await?;
+			let key = table_ix::IndexDefinitionKey {
+				prefix: crate::key::database::all::DatabaseRoot {
+					ns,
+					db,
+				},
+				tb: Cow::Borrowed(tb),
+				ix: Cow::Borrowed(&ix.name),
+			};
+			self.del_key(&key).await?;
 
 			// Delete the id-to-name lookup
-			let name_lookup_key = table_ix::IndexNameLookupKey::new(ns, db, tb, ix.index_id);
-			self.del(&name_lookup_key).await?;
+			let name_lookup_key = table_ix::IndexNameLookupKey {
+				prefix: crate::key::database::all::DatabaseRoot {
+					ns,
+					db,
+				},
+				tb: Cow::Borrowed(tb),
+				ix: ix.index_id,
+			};
+			self.del_key(&name_lookup_key).await?;
 
 			// Invalidate the cached list of all indexes for this table
 			let list_key = cache::tx::Lookup::Ixs(ns, db, tb.as_ref());
@@ -3816,8 +4318,15 @@ impl TableProvider for Transaction {
 					// using the storage key, so the canonical `id` is
 					// spliced back in automatically (see
 					// `RecordKey::value_context`).
-					let key = crate::key::record::new(ns, db, tb, id);
-					match self.get(&key, version).await? {
+					let key = crate::key::record::RecordKey {
+						root: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+						tb: Cow::Borrowed(tb),
+						id: Cow::Borrowed(id),
+					};
+					match self.get_key(&key, version).await? {
 						Some(record) => Ok(record.into_read_only()),
 						None => Ok(Arc::new(Default::default())),
 					}
@@ -3828,8 +4337,15 @@ impl TableProvider for Transaction {
 						Some(val) => val.try_into_record(),
 						// The entry is not in the cache
 						None => {
-							let key = crate::key::record::new(ns, db, tb, id);
-							match self.get(&key, None).await? {
+							let key = crate::key::record::RecordKey {
+								root: crate::key::database::all::DatabaseRoot {
+									ns,
+									db,
+								},
+								tb: Cow::Borrowed(tb),
+								id: Cow::Borrowed(id),
+							};
+							match self.get_key(&key, None).await? {
 								Some(record) => {
 									let record = record.into_read_only();
 									let entry = cache::tx::Entry::Val(Arc::clone(&record));
@@ -3868,9 +4384,16 @@ impl TableProvider for Transaction {
 					// automatically.
 					let keys: Vec<crate::key::record::RecordKey<'_>> = rids
 						.iter()
-						.map(|rid| crate::key::record::new(ns, db, &rid.table, &rid.key))
+						.map(|rid| crate::key::record::RecordKey {
+							root: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+							tb: Cow::Borrowed(&rid.table),
+							id: Cow::Borrowed(&rid.key),
+						})
 						.collect();
-					let values = self.getm(keys, version).await?;
+					let values = self.get_many_key(keys, version).await?;
 					let out: Vec<Arc<Record>> = values
 						.into_iter()
 						.map(|opt| match opt {
@@ -3896,9 +4419,16 @@ impl TableProvider for Transaction {
 				if !uncached_rids.is_empty() {
 					let keys: Vec<crate::key::record::RecordKey<'_>> = uncached_rids
 						.iter()
-						.map(|(_, rid)| crate::key::record::new(ns, db, &rid.table, &rid.key))
+						.map(|(_, rid)| crate::key::record::RecordKey {
+							root: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+							tb: Cow::Borrowed(&rid.table),
+							id: Cow::Borrowed(&rid.key),
+						})
 						.collect();
-					let values = self.getm(keys, None).await?;
+					let values = self.get_many_key(keys, None).await?;
 					// Phase 3: populate cache + merge into output
 					for ((i, rid), opt) in uncached_rids.into_iter().zip(values) {
 						let record = match opt {
@@ -3946,8 +4476,15 @@ impl TableProvider for Transaction {
 		version: Option<u64>,
 	) -> BoxProviderFut<'a, Result<bool>> {
 		Box::pin(async move {
-			let key = crate::key::record::new(ns, db, tb, id);
-			self.exists(&key, version).await
+			let key = crate::key::record::RecordKey {
+				root: crate::key::database::all::DatabaseRoot {
+					ns,
+					db,
+				},
+				tb: Cow::Borrowed(tb),
+				id: Cow::Borrowed(id),
+			};
+			self.exists_key(&key, version).await
 		})
 	}
 
@@ -3961,8 +4498,15 @@ impl TableProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(
 			async move {
-				let key = crate::key::record::new(ns, db, tb, id);
-				self.put(&key, record.as_ref()).await?;
+				let key = crate::key::record::RecordKey {
+					root: crate::key::database::all::DatabaseRoot {
+						ns,
+						db,
+					},
+					tb: Cow::Borrowed(tb),
+					id: Cow::Borrowed(id),
+				};
+				self.put_key(&key, record.as_ref()).await?;
 				// Set the value in the cache
 				let qey = cache::tx::Lookup::Record(ns, db, tb, id);
 				self.cache.insert(qey, cache::tx::Entry::Val(record));
@@ -3984,8 +4528,15 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				// Set the value in the datastore
-				let key = crate::key::record::new(ns, db, tb, id);
-				self.set(&key, record.as_ref()).await?;
+				let key = crate::key::record::RecordKey {
+					root: crate::key::database::all::DatabaseRoot {
+						ns,
+						db,
+					},
+					tb: Cow::Borrowed(tb),
+					id: Cow::Borrowed(id),
+				};
+				self.set_key(&key, record.as_ref()).await?;
 				// Clear the value from the cache
 				let qey = cache::tx::Lookup::Record(ns, db, tb, id);
 				self.cache.remove(&qey);
@@ -4006,8 +4557,15 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				// Delete the value in the datastore
-				let key = crate::key::record::new(ns, db, tb, id);
-				self.del(&key).await?;
+				let key = crate::key::record::RecordKey {
+					root: crate::key::database::all::DatabaseRoot {
+						ns,
+						db,
+					},
+					tb: Cow::Borrowed(tb),
+					id: Cow::Borrowed(id),
+				};
+				self.del_key(&key).await?;
 				// Clear the value from the cache
 				let qey = cache::tx::Lookup::Record(ns, db, tb, id);
 				self.cache.remove(&qey);
@@ -4041,19 +4599,18 @@ impl UserProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let beg = crate::key::root::us::prefix();
-					let end = crate::key::root::us::suffix();
-					let val = self.getr(beg..end, version).await?;
-					return util::deserialize_cache(val.iter().map(|x| x.1.as_slice()));
+					let range = crate::key::root::us::UsPrefix {}.encode_range()?;
+					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Rus;
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_rus(),
 					None => {
-						let beg = crate::key::root::us::prefix();
-						let end = crate::key::root::us::suffix();
-						let val = self.getr(beg..end, None).await?;
-						let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+						let range = crate::key::root::us::UsPrefix {}.encode_range()?;
+						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let val =
+							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Rus(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -4073,19 +4630,24 @@ impl UserProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let beg = crate::key::namespace::us::prefix(ns)?;
-					let end = crate::key::namespace::us::suffix(ns)?;
-					let val = self.getr(beg..end, version).await?;
-					return util::deserialize_cache(val.iter().map(|x| x.1.as_slice()));
+					let range = crate::key::namespace::us::UsPrefix {
+						ns,
+					}
+					.encode_range()?;
+					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Nus(ns);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_nus(),
 					None => {
-						let beg = crate::key::namespace::us::prefix(ns)?;
-						let end = crate::key::namespace::us::suffix(ns)?;
-						let val = self.getr(beg..end, None).await?;
-						let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+						let range = crate::key::namespace::us::UsPrefix {
+							ns,
+						}
+						.encode_range()?;
+						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let val =
+							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Nus(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -4106,19 +4668,30 @@ impl UserProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let beg = crate::key::database::us::prefix(ns, db)?;
-					let end = crate::key::database::us::suffix(ns, db)?;
-					let val = self.getr(beg..end, version).await?;
-					return util::deserialize_cache(val.iter().map(|x| x.1.as_slice()));
+					let range = crate::key::database::us::UserKeyPrefix {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+					}
+					.encode_range()?;
+					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Dus(ns, db);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_dus(),
 					None => {
-						let beg = crate::key::database::us::prefix(ns, db)?;
-						let end = crate::key::database::us::suffix(ns, db)?;
-						let val = self.getr(beg..end, None).await?;
-						let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+						let range = crate::key::database::us::UserKeyPrefix {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+						}
+						.encode_range()?;
+						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let val =
+							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Dus(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -4138,8 +4711,10 @@ impl UserProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::root::us::new(us);
-					let Some(val) = self.get(&key, version).await? else {
+					let key = crate::key::root::us::Us {
+						user: Cow::Borrowed(us),
+					};
+					let Some(val) = self.get_key(&key, version).await? else {
 						return Ok(None);
 					};
 					return Ok(Some(Arc::new(val)));
@@ -4148,8 +4723,10 @@ impl UserProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = crate::key::root::us::new(us);
-						let Some(val) = self.get(&key, None).await? else {
+						let key = crate::key::root::us::Us {
+							user: Cow::Borrowed(us),
+						};
+						let Some(val) = self.get_key(&key, None).await? else {
 							return Ok(None);
 						};
 						let val = Arc::new(val);
@@ -4173,8 +4750,11 @@ impl UserProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::namespace::us::new(ns, us);
-					let Some(val) = self.get(&key, version).await? else {
+					let key = crate::key::namespace::us::Us {
+						ns,
+						user: Cow::Borrowed(us),
+					};
+					let Some(val) = self.get_key(&key, version).await? else {
 						return Ok(None);
 					};
 					return Ok(Some(Arc::new(val)));
@@ -4183,8 +4763,11 @@ impl UserProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = crate::key::namespace::us::new(ns, us);
-						let Some(val) = self.get(&key, None).await? else {
+						let key = crate::key::namespace::us::Us {
+							ns,
+							user: Cow::Borrowed(us),
+						};
+						let Some(val) = self.get_key(&key, None).await? else {
 							return Ok(None);
 						};
 
@@ -4210,8 +4793,14 @@ impl UserProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::database::us::new(ns, db, us);
-					let Some(val) = self.get(&key, version).await? else {
+					let key = crate::key::database::us::UserKey {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+						user: Cow::Borrowed(us),
+					};
+					let Some(val) = self.get_key(&key, version).await? else {
 						return Ok(None);
 					};
 					return Ok(Some(Arc::new(val)));
@@ -4220,8 +4809,14 @@ impl UserProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = crate::key::database::us::new(ns, db, us);
-						let Some(val) = self.get(&key, None).await? else {
+						let key = crate::key::database::us::UserKey {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+							user: Cow::Borrowed(us),
+						};
+						let Some(val) = self.get_key(&key, None).await? else {
 							return Ok(None);
 						};
 
@@ -4241,8 +4836,10 @@ impl UserProvider for Transaction {
 		us: &'a catalog::UserDefinition,
 	) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
-			let key = crate::key::root::us::new(&us.name);
-			self.set(&key, us).await?;
+			let key = crate::key::root::us::Us {
+				user: Cow::Borrowed(&us.name),
+			};
+			self.set_key(&key, us).await?;
 
 			// Invalidate the cached list of all root users
 			let list_key = cache::tx::Lookup::Rus;
@@ -4263,8 +4860,11 @@ impl UserProvider for Transaction {
 		us: &'a catalog::UserDefinition,
 	) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
-			let key = crate::key::namespace::us::new(ns, &us.name);
-			self.set(&key, us).await?;
+			let key = crate::key::namespace::us::Us {
+				ns,
+				user: Cow::Borrowed(&us.name),
+			};
+			self.set_key(&key, us).await?;
 
 			// Invalidate the cached list of all namespace users
 			let list_key = cache::tx::Lookup::Nus(ns);
@@ -4286,8 +4886,14 @@ impl UserProvider for Transaction {
 		us: &'a catalog::UserDefinition,
 	) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
-			let key = crate::key::database::us::new(ns, db, &us.name);
-			self.set(&key, us).await?;
+			let key = crate::key::database::us::UserKey {
+				prefix: crate::key::database::all::DatabaseRoot {
+					ns,
+					db,
+				},
+				user: Cow::Borrowed(&us.name),
+			};
+			self.set_key(&key, us).await?;
 
 			// Invalidate the cached list of all database users
 			let list_key = cache::tx::Lookup::Dus(ns, db);
@@ -4316,19 +4922,18 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let beg = crate::key::root::ac::prefix();
-					let end = crate::key::root::ac::suffix();
-					let val = self.getr(beg..end, version).await?;
-					return util::deserialize_cache(val.iter().map(|x| x.1.as_slice()));
+					let range = crate::key::root::ac::AccessKeyPrefix {}.encode_range()?;
+					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Ras;
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_ras(),
 					None => {
-						let beg = crate::key::root::ac::prefix();
-						let end = crate::key::root::ac::suffix();
-						let val = self.getr(beg..end, None).await?;
-						let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+						let range = crate::key::root::ac::AccessKeyPrefix {}.encode_range()?;
+						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let val =
+							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Ras(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -4348,19 +4953,24 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let beg = crate::key::root::access::gr::prefix(ra)?;
-					let end = crate::key::root::access::gr::suffix(ra)?;
-					let val = self.getr(beg..end, version).await?;
-					return util::deserialize_cache(val.iter().map(|x| x.1.as_slice()));
+					let range = crate::key::root::access::gr::AccessGrantPrefix {
+						ac: Cow::Borrowed(ra),
+					}
+					.encode_range()?;
+					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Rgs(ra);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_rag(),
 					None => {
-						let beg = crate::key::root::access::gr::prefix(ra)?;
-						let end = crate::key::root::access::gr::suffix(ra)?;
-						let val = self.getr(beg..end, None).await?;
-						let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+						let range = crate::key::root::access::gr::AccessGrantPrefix {
+							ac: Cow::Borrowed(ra),
+						}
+						.encode_range()?;
+						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let val =
+							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Rag(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -4380,19 +4990,24 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let beg = crate::key::namespace::ac::prefix(ns)?;
-					let end = crate::key::namespace::ac::suffix(ns)?;
-					let val = self.getr(beg..end, version).await?;
-					return util::deserialize_cache(val.iter().map(|x| x.1.as_slice()));
+					let range = crate::key::namespace::ac::AccessKeyPrefix {
+						ns,
+					}
+					.encode_range()?;
+					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Nas(ns);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_nas(),
 					None => {
-						let beg = crate::key::namespace::ac::prefix(ns)?;
-						let end = crate::key::namespace::ac::suffix(ns)?;
-						let val = self.getr(beg..end, None).await?;
-						let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+						let range = crate::key::namespace::ac::AccessKeyPrefix {
+							ns,
+						}
+						.encode_range()?;
+						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let val =
+							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Nas(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -4413,19 +5028,26 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let beg = crate::key::namespace::access::gr::prefix(ns, na)?;
-					let end = crate::key::namespace::access::gr::suffix(ns, na)?;
-					let val = self.getr(beg..end, version).await?;
-					return util::deserialize_cache(val.iter().map(|x| x.1.as_slice()));
+					let range = crate::key::namespace::access::gr::AccessGrantKeyPrefix {
+						ns,
+						ac: Cow::Borrowed(na),
+					}
+					.encode_range()?;
+					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Ngs(ns, na);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_nag(),
 					None => {
-						let beg = crate::key::namespace::access::gr::prefix(ns, na)?;
-						let end = crate::key::namespace::access::gr::suffix(ns, na)?;
-						let val = self.getr(beg..end, None).await?;
-						let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+						let range = crate::key::namespace::access::gr::AccessGrantKeyPrefix {
+							ns,
+							ac: Cow::Borrowed(na),
+						}
+						.encode_range()?;
+						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let val =
+							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Nag(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -4446,19 +5068,30 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let beg = crate::key::database::ac::prefix(ns, db)?;
-					let end = crate::key::database::ac::suffix(ns, db)?;
-					let val = self.getr(beg..end, version).await?;
-					return util::deserialize_cache(val.iter().map(|x| x.1.as_slice()));
+					let range = crate::key::database::ac::AccessKeyPrefix {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+					}
+					.encode_range()?;
+					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Das(ns, db);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_das(),
 					None => {
-						let beg = crate::key::database::ac::prefix(ns, db)?;
-						let end = crate::key::database::ac::suffix(ns, db)?;
-						let val = self.getr(beg..end, None).await?;
-						let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+						let range = crate::key::database::ac::AccessKeyPrefix {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+						}
+						.encode_range()?;
+						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let val =
+							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Das(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -4480,19 +5113,32 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let beg = crate::key::database::access::gr::prefix(ns, db, da)?;
-					let end = crate::key::database::access::gr::suffix(ns, db, da)?;
-					let val = self.getr(beg..end, version).await?;
-					return util::deserialize_cache(val.iter().map(|x| x.1.as_slice()));
+					let range = crate::key::database::access::gr::AccessGrantKeyPrefix {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+						ac: Cow::Borrowed(da),
+					}
+					.encode_range()?;
+					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Dgs(ns, db, da);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_dag(),
 					None => {
-						let beg = crate::key::database::access::gr::prefix(ns, db, da)?;
-						let end = crate::key::database::access::gr::suffix(ns, db, da)?;
-						let val = self.getr(beg..end, None).await?;
-						let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+						let range = crate::key::database::access::gr::AccessGrantKeyPrefix {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+							ac: Cow::Borrowed(da),
+						}
+						.encode_range()?;
+						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let val =
+							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Dag(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -4512,8 +5158,10 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::root::ac::new(ra);
-					let Some(val) = self.get(&key, version).await? else {
+					let key = crate::key::root::ac::AccessKey {
+						ac: Cow::Borrowed(ra),
+					};
+					let Some(val) = self.get_key(&key, version).await? else {
 						return Ok(None);
 					};
 					return Ok(Some(Arc::new(val)));
@@ -4522,8 +5170,10 @@ impl AuthorisationProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = crate::key::root::ac::new(ra);
-						let Some(val) = self.get(&key, None).await? else {
+						let key = crate::key::root::ac::AccessKey {
+							ac: Cow::Borrowed(ra),
+						};
+						let Some(val) = self.get_key(&key, None).await? else {
 							return Ok(None);
 						};
 						let val = Arc::new(val);
@@ -4547,8 +5197,11 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::root::access::gr::new(ac, gr);
-					let Some(val) = self.get(&key, version).await? else {
+					let key = crate::key::root::access::gr::AccessGrantKey {
+						ac: Cow::Borrowed(ac),
+						gr: Cow::Borrowed(gr),
+					};
+					let Some(val) = self.get_key(&key, version).await? else {
 						return Ok(None);
 					};
 					return Ok(Some(Arc::new(val)));
@@ -4557,8 +5210,11 @@ impl AuthorisationProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = crate::key::root::access::gr::new(ac, gr);
-						let Some(val) = self.get(&key, None).await? else {
+						let key = crate::key::root::access::gr::AccessGrantKey {
+							ac: Cow::Borrowed(ac),
+							gr: Cow::Borrowed(gr),
+						};
+						let Some(val) = self.get_key(&key, None).await? else {
 							return Ok(None);
 						};
 						let val = Arc::new(val);
@@ -4582,8 +5238,11 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::namespace::ac::new(ns, na);
-					let Some(val) = self.get(&key, version).await? else {
+					let key = crate::key::namespace::ac::AccessKey {
+						ns,
+						ac: Cow::Borrowed(na),
+					};
+					let Some(val) = self.get_key(&key, version).await? else {
 						return Ok(None);
 					};
 					return Ok(Some(Arc::new(val)));
@@ -4592,8 +5251,11 @@ impl AuthorisationProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = crate::key::namespace::ac::new(ns, na);
-						let Some(val) = self.get(&key, None).await? else {
+						let key = crate::key::namespace::ac::AccessKey {
+							ns,
+							ac: Cow::Borrowed(na),
+						};
+						let Some(val) = self.get_key(&key, None).await? else {
 							return Ok(None);
 						};
 						let val = Arc::new(val);
@@ -4618,8 +5280,12 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::namespace::access::gr::new(ns, ac, gr);
-					let Some(val) = self.get(&key, version).await? else {
+					let key = crate::key::namespace::access::gr::AccessGrantKey {
+						ns,
+						ac: Cow::Borrowed(ac),
+						gr: Cow::Borrowed(gr),
+					};
+					let Some(val) = self.get_key(&key, version).await? else {
 						return Ok(None);
 					};
 					return Ok(Some(Arc::new(val)));
@@ -4628,8 +5294,12 @@ impl AuthorisationProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = crate::key::namespace::access::gr::new(ns, ac, gr);
-						let Some(val) = self.get(&key, None).await? else {
+						let key = crate::key::namespace::access::gr::AccessGrantKey {
+							ns,
+							ac: Cow::Borrowed(ac),
+							gr: Cow::Borrowed(gr),
+						};
+						let Some(val) = self.get_key(&key, None).await? else {
 							return Ok(None);
 						};
 						let val = Arc::new(val);
@@ -4654,8 +5324,14 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::database::ac::new(ns, db, da);
-					let Some(val) = self.get(&key, version).await? else {
+					let key = crate::key::database::ac::AccessKey {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+						ac: Cow::Borrowed(da),
+					};
+					let Some(val) = self.get_key(&key, version).await? else {
 						return Ok(None);
 					};
 					return Ok(Some(Arc::new(val)));
@@ -4664,8 +5340,14 @@ impl AuthorisationProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = crate::key::database::ac::new(ns, db, da);
-						let Some(val) = self.get(&key, None).await? else {
+						let key = crate::key::database::ac::AccessKey {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+							ac: Cow::Borrowed(da),
+						};
+						let Some(val) = self.get_key(&key, None).await? else {
 							return Ok(None);
 						};
 						let val = Arc::new(val);
@@ -4691,8 +5373,15 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::database::access::gr::new(ns, db, ac, gr);
-					let Some(val) = self.get(&key, version).await? else {
+					let key = crate::key::database::access::gr::AccessGrantKey {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+						ac: Cow::Borrowed(ac),
+						gr: Cow::Borrowed(gr),
+					};
+					let Some(val) = self.get_key(&key, version).await? else {
 						return Ok(None);
 					};
 					return Ok(Some(Arc::new(val)));
@@ -4701,8 +5390,15 @@ impl AuthorisationProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = crate::key::database::access::gr::new(ns, db, ac, gr);
-						let Some(val) = self.get(&key, None).await? else {
+						let key = crate::key::database::access::gr::AccessGrantKey {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+							ac: Cow::Borrowed(ac),
+							gr: Cow::Borrowed(gr),
+						};
+						let Some(val) = self.get_key(&key, None).await? else {
 							return Ok(None);
 						};
 						let val = Arc::new(val);
@@ -4719,11 +5415,15 @@ impl AuthorisationProvider for Transaction {
 	fn del_root_access<'a>(&'a self, ra: &'a str) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Delete the definition
-			let key = crate::key::root::ac::new(ra);
-			self.del(&key).await?;
+			let key = crate::key::root::ac::AccessKey {
+				ac: Cow::Borrowed(ra),
+			};
+			self.del_key(&key).await?;
 			// Delete any associated data including access grants.
-			let key = crate::key::root::access::all::new(ra);
-			self.delp(&key).await?;
+			let key = crate::key::root::access::all::AccessRoot {
+				ac: Cow::Borrowed(ra),
+			};
+			self.del_prefix_key(&key).await?;
 
 			// Invalidate the cached list of all root accesses
 			let list_key = cache::tx::Lookup::Ras;
@@ -4742,11 +5442,17 @@ impl AuthorisationProvider for Transaction {
 	fn del_ns_access<'a>(&'a self, ns: NamespaceId, na: &'a str) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Delete the definition
-			let key = crate::key::namespace::ac::new(ns, na);
-			self.del(&key).await?;
+			let key = crate::key::namespace::ac::AccessKey {
+				ns,
+				ac: Cow::Borrowed(na),
+			};
+			self.del_key(&key).await?;
 			// Delete any associated data including access grants.
-			let key = crate::key::namespace::access::all::new(ns, na);
-			self.delp(&key).await?;
+			let key = crate::key::namespace::access::all::AccessRoot {
+				ns,
+				ac: Cow::Borrowed(na),
+			};
+			self.del_prefix_key(&key).await?;
 
 			// Invalidate the cached list of all namespace accesses
 			let list_key = cache::tx::Lookup::Nas(ns);
@@ -4770,11 +5476,23 @@ impl AuthorisationProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Delete the definition
-			let key = crate::key::database::ac::new(ns, db, da);
-			self.del(&key).await?;
+			let key = crate::key::database::ac::AccessKey {
+				prefix: crate::key::database::all::DatabaseRoot {
+					ns,
+					db,
+				},
+				ac: Cow::Borrowed(da),
+			};
+			self.del_key(&key).await?;
 			// Delete any associated data including access grants.
-			let key = crate::key::database::access::all::new(ns, db, da);
-			self.delp(&key).await?;
+			let key = crate::key::database::access::all::DbAccess {
+				prefix: crate::key::database::all::DatabaseRoot {
+					ns,
+					db,
+				},
+				ac: Cow::Borrowed(da),
+			};
+			self.del_prefix_key(&key).await?;
 
 			// Invalidate the cached list of all database accesses
 			let list_key = cache::tx::Lookup::Das(ns, db);
@@ -4806,19 +5524,26 @@ impl ApiProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let beg = crate::key::database::ap::prefix(ns, db)?;
-					let end = crate::key::database::ap::suffix(ns, db)?;
-					let val = self.getr(beg..end, version).await?;
-					return util::deserialize_cache(val.iter().map(|x| x.1.as_slice()));
+					let range = crate::key::database::ap::ApiPrefix {
+						ns,
+						db,
+					}
+					.encode_range()?;
+					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Aps(ns, db);
 				match self.cache.get(&qey) {
 					Some(val) => val,
 					None => {
-						let beg = crate::key::database::ap::prefix(ns, db)?;
-						let end = crate::key::database::ap::suffix(ns, db)?;
-						let val = self.getr(beg..end, None).await?;
-						let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+						let range = crate::key::database::ap::ApiPrefix {
+							ns,
+							db,
+						}
+						.encode_range()?;
+						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let val =
+							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let val = cache::tx::Entry::Aps(Arc::clone(&val));
 						self.cache.insert(qey, val.clone());
 						val
@@ -4841,8 +5566,14 @@ impl ApiProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::database::ap::new(ns, db, ap);
-					let Some(val) = self.get(&key, version).await? else {
+					let key = crate::key::database::ap::Api {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+						ap: Cow::Borrowed(ap),
+					};
+					let Some(val) = self.get_key(&key, version).await? else {
 						return Ok(None);
 					};
 					return Ok(Some(Arc::new(val)));
@@ -4851,8 +5582,14 @@ impl ApiProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = crate::key::database::ap::new(ns, db, ap);
-						let Some(val) = self.get(&key, None).await? else {
+						let key = crate::key::database::ap::Api {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+							ap: Cow::Borrowed(ap),
+						};
+						let Some(val) = self.get_key(&key, None).await? else {
 							return Ok(None);
 						};
 						let val = Arc::new(val);
@@ -4874,8 +5611,14 @@ impl ApiProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
 			let name = ap.path.to_string();
-			let key = crate::key::database::ap::new(ns, db, &name);
-			self.set(&key, ap).await?;
+			let key = crate::key::database::ap::Api {
+				prefix: crate::key::database::all::DatabaseRoot {
+					ns,
+					db,
+				},
+				ap: Cow::Borrowed(&name),
+			};
+			self.set_key(&key, ap).await?;
 
 			// Invalidate the cached list of all APIs for this database
 			let list_key = cache::tx::Lookup::Aps(ns, db);
@@ -4906,19 +5649,30 @@ impl BucketProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let beg = crate::key::database::bu::prefix(ns, db)?;
-					let end = crate::key::database::bu::suffix(ns, db)?;
-					let val = self.getr(beg..end, version).await?;
-					return util::deserialize_cache(val.iter().map(|x| x.1.as_slice()));
+					let range = crate::key::database::bu::BucketKeyPrefix {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+					}
+					.encode_range()?;
+					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Bus(ns, db);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_bus(),
 					None => {
-						let beg = crate::key::database::bu::prefix(ns, db)?;
-						let end = crate::key::database::bu::suffix(ns, db)?;
-						let val = self.getr(beg..end, None).await?;
-						let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+						let range = crate::key::database::bu::BucketKeyPrefix {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+						}
+						.encode_range()?;
+						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let val =
+							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Bus(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -4940,8 +5694,14 @@ impl BucketProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::database::bu::new(ns, db, bu);
-					let Some(val) = self.get(&key, version).await? else {
+					let key = crate::key::database::bu::BucketKey {
+						prefix: crate::key::database::all::DatabaseRoot {
+							ns,
+							db,
+						},
+						bu: Cow::Borrowed(bu),
+					};
+					let Some(val) = self.get_key(&key, version).await? else {
 						return Ok(None);
 					};
 					return Ok(Some(Arc::new(val)));
@@ -4950,8 +5710,14 @@ impl BucketProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = crate::key::database::bu::new(ns, db, bu);
-						let Some(val) = self.get(&key, None).await? else {
+						let key = crate::key::database::bu::BucketKey {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns,
+								db,
+							},
+							bu: Cow::Borrowed(bu),
+						};
+						let Some(val) = self.get_key(&key, None).await? else {
 							return Ok(None);
 						};
 						let bucket_def = Arc::new(val);

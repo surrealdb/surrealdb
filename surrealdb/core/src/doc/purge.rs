@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
@@ -18,8 +19,9 @@ use crate::expr::reference::ReferenceDeleteStrategy;
 use crate::expr::statements::{DeleteStatement, UpdateStatement};
 use crate::expr::{AssignOperator, Data, Expr, FlowResultExt as _, Idiom, Literal, Lookup, Part};
 use crate::idx::planner::ScanDirection;
-use crate::key::graph;
-use crate::key::r#ref::Ref;
+use crate::key::database::all::DatabaseRoot;
+use crate::key::r#ref::{self, Ref};
+use crate::key::{KVKeyDecode, KVRange, graph};
 use crate::kvs::NORMAL_BATCH_SIZE;
 use crate::val::{RecordId, TableName, Value};
 
@@ -125,8 +127,28 @@ impl Document {
 		// `etl` / `etr` are edge-side ("inner") keys: their adjacency
 		// already names the vertex in (ft, fk), so they keep the legacy
 		// layout without an embedded target — same across both variants.
-		let etl = graph::new(ns, db, &rid.table, &rid.key, Dir::In, l);
-		let etr = graph::new(ns, db, &rid.table, &rid.key, Dir::Out, r);
+		let etl = graph::Graph {
+			prefix: DatabaseRoot {
+				ns,
+				db,
+			},
+			tb: Cow::Borrowed(&rid.table),
+			id: Cow::Borrowed(&rid.key),
+			dir: Dir::In,
+			foreign_table: Cow::Borrowed(&l.table),
+			foreign_key: Cow::Borrowed(&l.key),
+		};
+		let etr = graph::Graph {
+			prefix: DatabaseRoot {
+				ns,
+				db,
+			},
+			tb: Cow::Borrowed(&rid.table),
+			id: Cow::Borrowed(&rid.key),
+			dir: Dir::Out,
+			foreign_table: Cow::Borrowed(&r.table),
+			foreign_key: Cow::Borrowed(&r.key),
+		};
 		// Vertex-side keys are written in exactly one of two layouts and
 		// the record's `RecordType::Edge { variant }` stamp tells us
 		// which. Variant 1 records (legacy or pre-target-vertex layout)
@@ -138,17 +160,69 @@ impl Document {
 		// disk, halving the txn ops compared to probing both formats.
 		let variant = self.initial.doc.edge_variant().unwrap_or_default();
 		// Detect which variant the edge is currently
-		match variant {
-			1 => {
-				let ltr = graph::new(ns, db, &l.table, &l.key, Dir::Out, rid);
-				let rtl = graph::new(ns, db, &r.table, &r.key, Dir::In, rid);
-				futures::try_join!(txn.del(&ltr), txn.del(&etl), txn.del(&etr), txn.del(&rtl))?;
-			}
-			_ => {
-				let ltr = graph::new_pointer(ns, db, &l.table, &l.key, Dir::Out, rid, r);
-				let rtl = graph::new_pointer(ns, db, &r.table, &r.key, Dir::In, rid, l);
-				futures::try_join!(txn.del(&ltr), txn.del(&etl), txn.del(&etr), txn.del(&rtl))?;
-			}
+		if variant == 1 {
+			let ltr = graph::Graph {
+				prefix: DatabaseRoot {
+					ns,
+					db,
+				},
+				tb: Cow::Borrowed(&l.table),
+				id: Cow::Borrowed(&l.key),
+				dir: Dir::Out,
+				foreign_table: Cow::Borrowed(&rid.table),
+				foreign_key: Cow::Borrowed(&rid.key),
+			};
+
+			let rtl = graph::Graph {
+				prefix: DatabaseRoot {
+					ns,
+					db,
+				},
+				tb: Cow::Borrowed(&r.table),
+				id: Cow::Borrowed(&r.key),
+				dir: Dir::In,
+				foreign_table: Cow::Borrowed(&rid.table),
+				foreign_key: Cow::Borrowed(&rid.key),
+			};
+			futures::try_join!(
+				txn.del_key(&ltr),
+				txn.del_key(&etl),
+				txn.del_key(&etr),
+				txn.del_key(&rtl)
+			)?;
+		} else {
+			let ltr = graph::GraphWithTarget {
+				prefix: DatabaseRoot {
+					ns,
+					db,
+				},
+				tb: Cow::Borrowed(&l.table),
+				id: Cow::Borrowed(&l.key),
+				dir: Dir::Out,
+				foreign_table: Cow::Borrowed(&rid.table),
+				foreign_key: Cow::Borrowed(&rid.key),
+				target_table: Cow::Borrowed(&r.table),
+				target_key: Cow::Borrowed(&r.key),
+			};
+			let rtl = graph::GraphWithTarget {
+				prefix: DatabaseRoot {
+					ns,
+					db,
+				},
+				tb: Cow::Borrowed(&r.table),
+				id: Cow::Borrowed(&r.key),
+				dir: Dir::In,
+				foreign_table: Cow::Borrowed(&rid.table),
+				foreign_key: Cow::Borrowed(&rid.key),
+				target_table: Cow::Borrowed(&l.table),
+				target_key: Cow::Borrowed(&l.key),
+			};
+			futures::try_join!(
+				txn.del_key(&ltr),
+				txn.del_key(&etl),
+				txn.del_key(&etr),
+				txn.del_key(&rtl)
+			)?;
 		}
 		// Carry on
 		Ok(())
@@ -197,11 +271,17 @@ impl Document {
 		// Get the database id
 		let db = self.doc_ctx.db().database_id;
 		// Get the key range of the graph keys
-		let prefix = crate::key::graph::prefix(ns, db, &rid.table, &rid.key)?;
-		let suffix = crate::key::graph::suffix(ns, db, &rid.table, &rid.key)?;
+		let range = crate::key::graph::Prefix {
+			prefix: DatabaseRoot {
+				ns,
+				db,
+			},
+			tb: Cow::Borrowed(&rid.table),
+			id: Cow::Borrowed(&rid.key),
+		}
+		.encode_range()?;
 		// Open a cursor over the graph edge range so we can peek the first key.
-		let mut cursor =
-			txn.open_keys_cursor(prefix..suffix, ScanDirection::Forward, 0, None).await?;
+		let mut cursor = txn.open_keys_cursor(range, ScanDirection::Forward, 0, None).await?;
 		// Check if there are any edges to purge by fetching at most one key.
 		let batch = cursor.next_batch(1).await?;
 		// Only proceed if there are edges for this record.
@@ -264,11 +344,8 @@ impl Document {
 		opt: &Options,
 		rid: &RecordId,
 	) -> Result<()> {
-		// Get the transaction
 		let txn = ctx.tx();
-		// Get the namespace id
 		let ns = self.doc_ctx.ns().namespace_id;
-		// Get the database id
 		let db = self.doc_ctx.db().database_id;
 		// Skip the scan when no reference field in the database can target this
 		// table. A reference key under this record's range is only ever written
@@ -289,10 +366,17 @@ impl Document {
 		if !txn.table_may_have_incoming_references(ns, db, &rid.table).await? {
 			return Ok(());
 		}
-		// Get the key range of the reference keys
-		let prefix = crate::key::r#ref::prefix(ns, db, &rid.table, &rid.key)?;
-		let suffix = crate::key::r#ref::suffix(ns, db, &rid.table, &rid.key)?;
-		let range = prefix..suffix;
+
+		let range = r#ref::Prefix {
+			root: DatabaseRoot {
+				ns,
+				db,
+			},
+			tb: Cow::Borrowed(&rid.table),
+			id: Cow::Borrowed(&rid.key),
+		}
+		.encode_range()?;
+
 		// Cache the last field definition to avoid redundant lookups
 		let mut prev: Option<(TableName, String, Arc<FieldDefinition>)> = None;
 		// Track whether any reference key was actually observed; if none
@@ -300,7 +384,7 @@ impl Document {
 		let mut saw_reference_key = false;
 		// Obtain a cursor over the reference range.
 		let mut cursor =
-			txn.open_keys_cursor(range.clone(), ScanDirection::Forward, 0, None).await?;
+			txn.open_keys_cursor(range.as_borrowed(), ScanDirection::Forward, 0, None).await?;
 		// Loop until no more entries
 		loop {
 			// Pull the next batch of reference keys from the cursor.
@@ -322,9 +406,9 @@ impl Document {
 				// Decode the key into a reference
 				let key = Ref::decode_key(&key)?;
 				// Extract the foreign table name
-				let ft = key.ft.as_ref();
+				let ft = key.foreign_table.as_ref();
 				// Extract the foreign field name
-				let ff = key.ff.as_ref();
+				let ff = key.foreign_field.as_ref();
 				// Get the reference field definition
 				let fd = match prev {
 					// If the field definition is in the cache, return it
@@ -352,8 +436,8 @@ impl Document {
 						// Reject the delete operation, as indicated by the reference
 						ReferenceDeleteStrategy::Reject => {
 							let record = RecordId {
-								table: key.ft.into_owned(),
-								key: key.fk.into_owned(),
+								table: key.foreign_table.into_owned(),
+								key: key.foreign_key.into_owned(),
 							};
 
 							bail!(Error::DeleteRejectedByReference(rid.to_sql(), record.to_sql(),));
@@ -361,8 +445,8 @@ impl Document {
 						// Delete the remote record which referenced this record
 						ReferenceDeleteStrategy::Cascade => {
 							let record_id = RecordId {
-								table: key.ft.into_owned(),
-								key: key.fk.into_owned(),
+								table: key.foreign_table.into_owned(),
+								key: key.foreign_key.into_owned(),
 							};
 
 							// Setup the delete statement
@@ -384,8 +468,8 @@ impl Document {
 						ReferenceDeleteStrategy::Unset => {
 							let opt = opt.clone().with_perms(false);
 							let record = RecordId {
-								table: key.ft.into_owned(),
-								key: key.fk.into_owned(),
+								table: key.foreign_table.into_owned(),
+								key: key.foreign_key.into_owned(),
 							};
 
 							if let Some(doc) =
@@ -440,8 +524,8 @@ impl Document {
 							let reference = Value::from(rid.clone());
 							// Value for the document is the remote record
 							let this = RecordId {
-								table: key.ft.into_owned(),
-								key: key.fk.into_owned(),
+								table: key.foreign_table.into_owned(),
+								key: key.foreign_key.into_owned(),
 							};
 
 							// Set the `$reference` variable in the context
@@ -477,7 +561,7 @@ impl Document {
 		// keys were observed — there's nothing to clear and the empty
 		// range delete still records a transaction op.
 		if saw_reference_key {
-			txn.delr(range).await?;
+			txn.delr(range.as_borrowed()).await?;
 		}
 		// Carry on
 		Ok(())

@@ -13,16 +13,24 @@
 //! path. The cursor traits, batch/visitor types, and `ScanChunkStats` they build
 //! on are defined alongside the transaction API in [`super::api`].
 
-use std::ops::Range;
-
 use super::api::{
 	BoxFut, KeySpan, KeyValSpan, KeyVisitor, KeysBatch, KeysResult, ScanChunkStats, ScanCursorKeys,
 	ScanCursorVals, ScanResult, Transactable, ValVisitor, ValsBatch,
 };
 use super::direction::Direction;
 use super::err::Result;
-use super::util;
-use crate::kvs::{Key, Val};
+use crate::key::{Key, KeyRange};
+use crate::kvs::Val;
+
+fn update_range(rng: &mut KeyRange<'_>, dir: Direction, last: &[u8]) {
+	match dir {
+		Direction::Forward => {
+			rng.start.clone_from_slice(last);
+			rng.start.advance();
+		}
+		Direction::Backward => rng.end.clone_from_slice(last),
+	}
+}
 
 /// Fetch one page from the backend's single-shot `scan`/`scanr` in `dir`,
 /// advancing the cursor's resume bound past the page and flagging exhaustion
@@ -30,31 +38,25 @@ use crate::kvs::{Key, Val};
 /// `next_batch`/`for_each` and the mem cursor's `next_batch`.
 async fn fetch_vals_page<T: Transactable + ?Sized>(
 	tx: &T,
-	rng: &mut Range<Key>,
+	rng: &mut KeyRange<'_>,
 	dir: Direction,
 	version: Option<u64>,
 	skip: &mut u32,
-	exhausted: &mut bool,
 	limit: u32,
 ) -> Result<ScanResult> {
-	if *exhausted || rng.start >= rng.end {
+	if rng.is_empty() {
 		return Ok(ScanResult::default());
 	}
 	let skip = std::mem::take(skip);
 	let res = match dir {
-		Direction::Forward => tx.scan(rng.clone(), limit, skip, version).await?,
-		Direction::Backward => tx.scanr(rng.clone(), limit, skip, version).await?,
+		Direction::Forward => tx.scan(rng.as_borrowed(), limit, skip, version).await?,
+		Direction::Backward => tx.scanr(rng.as_borrowed(), limit, skip, version).await?,
 	};
-	match res.values.last() {
-		Some((last, _)) => {
-			util::update_range(rng, dir, Some(last));
-			// A short page means the backend ran out of rows before the
-			// requested count: the range is exhausted.
-			if res.values.len() < limit as usize {
-				*exhausted = true;
-			}
-		}
-		None => *exhausted = true,
+
+	if res.values.len() < limit as usize {
+		rng.end = Key::empty();
+	} else if let Some((last, _)) = res.values.last() {
+		update_range(rng, dir, last);
 	}
 	Ok(res)
 }
@@ -67,11 +69,10 @@ async fn fetch_vals_page<T: Transactable + ?Sized>(
 #[allow(clippy::too_many_arguments, reason = "threads the cursor's scan state + reusable arenas")]
 pub(crate) async fn fill_vals_batch<T: Transactable + ?Sized>(
 	tx: &T,
-	rng: &mut Range<Key>,
+	rng: &mut KeyRange<'_>,
 	dir: Direction,
 	version: Option<u64>,
 	skip: &mut u32,
-	exhausted: &mut bool,
 	key_buf: &mut Vec<u8>,
 	val_buf: &mut Vec<u8>,
 	spans: &mut Vec<KeyValSpan>,
@@ -80,7 +81,7 @@ pub(crate) async fn fill_vals_batch<T: Transactable + ?Sized>(
 	key_buf.clear();
 	val_buf.clear();
 	spans.clear();
-	let res = fetch_vals_page(tx, rng, dir, version, skip, exhausted, limit).await?;
+	let res = fetch_vals_page(tx, rng, dir, version, skip, limit).await?;
 	let (kb, vb): (usize, usize) =
 		res.values.iter().fold((0, 0), |(ka, va), (k, v)| (ka + k.len(), va + v.len()));
 	key_buf.reserve(kb);
@@ -106,31 +107,33 @@ pub(crate) async fn fill_vals_batch<T: Transactable + ?Sized>(
 /// Keys analogue of [`fetch_vals_page`].
 async fn fetch_keys_page<T: Transactable + ?Sized>(
 	tx: &T,
-	rng: &mut Range<Key>,
+	rng: &mut KeyRange<'_>,
 	dir: Direction,
 	version: Option<u64>,
 	skip: &mut u32,
-	exhausted: &mut bool,
 	limit: u32,
 ) -> Result<KeysResult> {
-	if *exhausted || rng.start >= rng.end {
+	if rng.is_empty() {
 		return Ok(KeysResult::default());
 	}
 	let skip = std::mem::take(skip);
 	let res = match dir {
-		Direction::Forward => tx.keys(rng.clone(), limit, skip, version).await?,
-		Direction::Backward => tx.keysr(rng.clone(), limit, skip, version).await?,
+		Direction::Forward => tx.keys(rng.as_borrowed(), limit, skip, version).await?,
+		Direction::Backward => tx.keysr(rng.as_borrowed(), limit, skip, version).await?,
 	};
 	match res.keys.last() {
 		Some(last) => {
-			util::update_range(rng, dir, Some(last));
 			// A short page means the backend ran out of rows before the
 			// requested count: the range is exhausted.
 			if res.keys.len() < limit as usize {
-				*exhausted = true;
+				rng.end = Key::empty();
+			} else {
+				update_range(rng, dir, last);
 			}
 		}
-		None => *exhausted = true,
+		None => {
+			rng.end = Key::empty();
+		}
 	}
 	Ok(res)
 }
@@ -139,18 +142,17 @@ async fn fetch_keys_page<T: Transactable + ?Sized>(
 #[allow(clippy::too_many_arguments, reason = "threads the cursor's scan state + reusable arena")]
 async fn fill_keys_batch<T: Transactable + ?Sized>(
 	tx: &T,
-	rng: &mut Range<Key>,
+	rng: &mut KeyRange<'_>,
 	dir: Direction,
 	version: Option<u64>,
 	skip: &mut u32,
-	exhausted: &mut bool,
 	key_buf: &mut Vec<u8>,
 	key_spans: &mut Vec<KeySpan>,
 	limit: u32,
 ) -> Result<u64> {
 	key_buf.clear();
 	key_spans.clear();
-	let res = fetch_keys_page(tx, rng, dir, version, skip, exhausted, limit).await?;
+	let res = fetch_keys_page(tx, rng, dir, version, skip, limit).await?;
 	let total_bytes: usize = res.keys.iter().map(|k| k.len()).sum();
 	key_buf.reserve(total_bytes);
 	key_spans.reserve(res.keys.len());
@@ -200,7 +202,7 @@ pub(crate) struct DefaultKeysCursor<'a, T: ?Sized> {
 	/// cannot outlive the transaction.
 	tx: &'a T,
 	/// Remaining range to scan. Updated after each batch.
-	rng: Range<Key>,
+	rng: KeyRange<'a>,
 	/// Iteration direction, fixed at open time.
 	dir: Direction,
 	/// Optional version timestamp for versioned reads.
@@ -208,9 +210,6 @@ pub(crate) struct DefaultKeysCursor<'a, T: ?Sized> {
 	/// Number of leading items to skip on the first batch. Cleared once
 	/// the first batch has been issued.
 	skip: u32,
-	/// Once true, all subsequent calls return an empty batch without
-	/// hitting the backend.
-	exhausted: bool,
 	/// Concatenated key bytes for the most recent batch. Reused across
 	/// batches — capacity persists, contents are replaced.
 	key_buf: Vec<u8>,
@@ -227,7 +226,7 @@ pub(crate) struct DefaultKeysCursor<'a, T: ?Sized> {
 	/// must be empty whenever `next_batch` runs: interleaving the two paths on
 	/// one cursor is unsupported and would silently skip these buffered rows.
 	/// Debug-asserted at the top of `next_batch`.
-	pending: std::vec::IntoIter<Key>,
+	pending: std::vec::IntoIter<Vec<u8>>,
 }
 
 impl<'a, T: ?Sized> DefaultKeysCursor<'a, T> {
@@ -236,7 +235,7 @@ impl<'a, T: ?Sized> DefaultKeysCursor<'a, T> {
 	/// persists across subsequent batches.
 	pub(crate) fn new(
 		tx: &'a T,
-		rng: Range<Key>,
+		rng: KeyRange<'a>,
 		dir: Direction,
 		version: Option<u64>,
 		skip: u32,
@@ -247,7 +246,6 @@ impl<'a, T: ?Sized> DefaultKeysCursor<'a, T> {
 			dir,
 			version,
 			skip,
-			exhausted: false,
 			key_buf: Vec::new(),
 			key_spans: Vec::new(),
 			pending: Vec::new().into_iter(),
@@ -255,7 +253,7 @@ impl<'a, T: ?Sized> DefaultKeysCursor<'a, T> {
 	}
 }
 
-impl<T> ScanCursorKeys for DefaultKeysCursor<'_, T>
+impl<'a, T> ScanCursorKeys for DefaultKeysCursor<'a, T>
 where
 	T: Transactable + ?Sized,
 {
@@ -278,7 +276,6 @@ where
 				self.dir,
 				self.version,
 				&mut self.skip,
-				&mut self.exhausted,
 				&mut self.key_buf,
 				&mut self.key_spans,
 				limit,
@@ -327,7 +324,6 @@ where
 					self.dir,
 					self.version,
 					&mut self.skip,
-					&mut self.exhausted,
 					limit,
 				)
 				.await?;
@@ -345,16 +341,13 @@ pub(crate) struct DefaultValsCursor<'a, T: ?Sized> {
 	/// The backing transaction. Borrowed for the cursor's lifetime.
 	tx: &'a T,
 	/// Remaining range to scan. Updated after each batch.
-	rng: Range<Key>,
+	rng: KeyRange<'a>,
 	/// Iteration direction, fixed at open time.
 	dir: Direction,
 	/// Optional version timestamp for versioned reads.
 	version: Option<u64>,
 	/// Number of leading items to skip on the first batch.
 	skip: u32,
-	/// Once true, all subsequent calls return an empty batch without
-	/// hitting the backend.
-	exhausted: bool,
 	/// Concatenated key bytes for the most recent batch. Reused.
 	key_buf: Vec<u8>,
 	/// Concatenated value bytes for the most recent batch. Reused.
@@ -371,7 +364,7 @@ pub(crate) struct DefaultValsCursor<'a, T: ?Sized> {
 	/// must be empty whenever `next_batch` runs: interleaving the two paths on
 	/// one cursor is unsupported and would silently skip these buffered rows.
 	/// Debug-asserted at the top of `next_batch`.
-	pending: std::vec::IntoIter<(Key, Val)>,
+	pending: std::vec::IntoIter<(Vec<u8>, Val)>,
 }
 
 impl<'a, T: ?Sized> DefaultValsCursor<'a, T> {
@@ -380,7 +373,7 @@ impl<'a, T: ?Sized> DefaultValsCursor<'a, T> {
 	/// and persists across subsequent batches.
 	pub(crate) fn new(
 		tx: &'a T,
-		rng: Range<Key>,
+		rng: KeyRange<'a>,
 		dir: Direction,
 		version: Option<u64>,
 		skip: u32,
@@ -391,7 +384,6 @@ impl<'a, T: ?Sized> DefaultValsCursor<'a, T> {
 			dir,
 			version,
 			skip,
-			exhausted: false,
 			key_buf: Vec::new(),
 			val_buf: Vec::new(),
 			spans: Vec::new(),
@@ -423,7 +415,6 @@ where
 				self.dir,
 				self.version,
 				&mut self.skip,
-				&mut self.exhausted,
 				&mut self.key_buf,
 				&mut self.val_buf,
 				&mut self.spans,
@@ -485,7 +476,6 @@ where
 					self.dir,
 					self.version,
 					&mut self.skip,
-					&mut self.exhausted,
 					limit,
 				)
 				.await?;

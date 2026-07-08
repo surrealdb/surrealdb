@@ -894,20 +894,12 @@ impl Iterator {
 		// START must apply to the filtered set. Therefore, disallow with WHERE
 		// unless the iterator itself applies the condition (index executor).
 		if let Some(cond) = stm.cond() {
-			if let Some(Iterable::Index(_doc_ctx, t, irf, _)) = self.entries.first() {
-				if let Some(qp) = ctx.get_query_planner() {
-					if let Some(exe) = qp.get_query_executor(t) {
-						if exe.is_iterator_expression(*irf, &cond.0) {
-							// Allowed: index handles the filtering
-						} else {
-							return false;
-						}
-					} else {
-						return false;
-					}
-				} else {
-					return false;
-				}
+			if let Some(Iterable::Index(_doc_ctx, t, irf, _)) = self.entries.first()
+				&& let Some(qp) = ctx.get_query_planner()
+				&& let Some(exe) = qp.get_query_executor(t)
+				&& exe.is_iterator_expression(*irf, &cond.0)
+			{
+				// Allowed: index handles the filtering
 			} else {
 				// WHERE exists but iterator is not an index -> cannot start-skip
 				return false;

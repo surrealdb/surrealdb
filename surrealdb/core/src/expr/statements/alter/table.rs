@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::ops::Deref;
 
 use anyhow::Result;
@@ -16,6 +17,7 @@ use crate::expr::parameterize::expr_to_ident;
 use crate::expr::statements::DefineTableStatement;
 use crate::expr::{Base, ChangeFeed, Expr, Literal};
 use crate::iam::{Action, ResourceKind};
+use crate::key::database::all::DatabaseRoot;
 use crate::val::{TableName, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -151,8 +153,14 @@ impl AlterTableStatement {
 		}
 
 		if self.compact {
-			let key = crate::key::table::all::new(ns, db, &name);
-			txn.compact(Some(key)).await?;
+			let key = crate::key::table::all::TableRoot {
+				prefix: DatabaseRoot {
+					ns,
+					db,
+				},
+				tb: Cow::Borrowed(&name),
+			};
+			txn.compact(&key).await?;
 		}
 
 		// Set the table definition

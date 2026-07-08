@@ -8,7 +8,7 @@ use crate::catalog::{DatabaseId, NamespaceId};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Fetchs, Fields};
 use crate::iam::Auth;
-use crate::kvs::impl_kv_value_revisioned;
+use crate::key::impl_kv_value_revisioned;
 use crate::sql::statements::live::LiveFields;
 use crate::val::{TableName, Value};
 

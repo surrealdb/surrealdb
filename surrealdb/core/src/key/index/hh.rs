@@ -2,79 +2,55 @@
 use std::borrow::Cow;
 use std::fmt::Debug;
 
-use storekey::{BorrowDecode, Encode};
-
-use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+use crate::catalog::IndexId;
 use crate::idx::trees::hnsw::docs::ElementHashedDocs;
-use crate::kvs::impl_kv_key_storekey;
+use crate::key::database::all::DatabaseRoot;
+use crate::key::{impl_kv_key_storekey, key};
 use crate::val::TableName;
 
-#[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
-#[storekey(format = "()")]
-pub(crate) struct Hh<'a> {
-	__: u8,
-	_a: u8,
-	/// The namespace ID
-	pub ns: NamespaceId,
-	_b: u8,
-	/// The database ID
-	pub db: DatabaseId,
-	_c: u8,
-	/// The table name
-	pub tb: Cow<'a, TableName>,
-	_d: u8,
-	/// The index ID
-	pub ix: IndexId,
-	_e: u8,
-	_f: u8,
-	_g: u8,
-	/// The BLAKE3 hash of the vector
-	pub hash: [u8; 32],
-}
-
-impl_kv_key_storekey!(Hh<'_> => ElementHashedDocs);
-
-impl<'a> Hh<'a> {
-	/// Creates a new Hh key
-	pub fn new(
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &'a TableName,
-		ix: IndexId,
-		hash: [u8; 32],
-	) -> Self {
-		Self {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
-			_c: b'*',
-			tb: Cow::Borrowed(tb),
-			_d: b'+',
-			ix,
-			_e: b'!',
-			_f: b'h',
-			_g: b'h',
-			hash,
-		}
+key! {
+	#[derive(Debug, Clone, PartialEq)]
+	pub(crate) struct Hh<'a> {
+		pub prefix: DatabaseRoot,
+		b'*',
+		/// The table name
+		pub tb: Cow<'a, TableName>,
+		b'+',
+		/// The index ID
+		pub ix: IndexId,
+		b'!',
+		b'h',
+		b'h',
+		/// The BLAKE3 hash of the vector
+		pub hash: [u8; 32],
 	}
 }
+
+impl_kv_key_storekey!(Hh<'a> => ElementHashedDocs);
 
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::idx::trees::vector::SerializedVector;
-	use crate::kvs::KVKey;
+	use crate::key::KVKey;
 
 	#[test]
 	fn test_key() {
 		let test = |vec: SerializedVector, expected: &[u8], info: &str| {
 			let tb = TableName::from("testtb");
 			let hash = vec.compute_hash();
-			let val = Hh::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), hash);
+			let val = Hh {
+				prefix: DatabaseRoot {
+					ns: NamespaceId(1),
+					db: DatabaseId(2),
+				},
+				tb: Cow::Borrowed(&tb),
+				ix: IndexId(3),
+				hash,
+			};
 			let enc = Hh::encode_key(&val).unwrap();
-			assert_eq!(enc, expected, "{info}: {}", String::from_utf8_lossy(&enc));
+			assert_eq!(enc.as_slice(), expected, "{info}: {}", String::from_utf8_lossy(&enc));
 		};
 		test(
 			SerializedVector::I16(vec![1, 2, 3]),
@@ -113,17 +89,41 @@ mod tests {
 
 		let v1 = SerializedVector::F64(vec![1.0, 2.0, 3.0]);
 		let h1 = v1.compute_hash();
-		let k1 = Hh::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), h1);
+		let k1 = Hh {
+			prefix: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+			tb: Cow::Borrowed(&tb),
+			ix: IndexId(3),
+			hash: h1,
+		};
 		let enc1 = Hh::encode_key(&k1).unwrap();
 
 		let v2 = SerializedVector::F64(vec![0.0; 1536]);
 		let h2 = v2.compute_hash();
-		let k2 = Hh::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), h2);
+		let k2 = Hh {
+			prefix: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+			tb: Cow::Borrowed(&tb),
+			ix: IndexId(3),
+			hash: h2,
+		};
 		let enc2 = Hh::encode_key(&k2).unwrap();
 
 		let v3 = SerializedVector::F64(vec![0.0; 16384]); // very large vector
 		let h3 = v3.compute_hash();
-		let k3 = Hh::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), h3);
+		let k3 = Hh {
+			prefix: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+			tb: Cow::Borrowed(&tb),
+			ix: IndexId(3),
+			hash: h3,
+		};
 		let enc3 = Hh::encode_key(&k3).unwrap();
 
 		assert_eq!(enc1.len(), enc2.len());

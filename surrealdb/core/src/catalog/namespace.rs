@@ -9,7 +9,7 @@ use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::expr::statements::info::InfoStructure;
-use crate::kvs::impl_kv_value_revisioned;
+use crate::key::impl_kv_value_revisioned;
 use crate::sql::statements::DefineNamespaceStatement;
 use crate::sql::{Expr, Literal};
 use crate::val::Value;

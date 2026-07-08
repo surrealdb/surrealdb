@@ -25,7 +25,8 @@ use crate::idx::trees::diskann::index::{DiskAnnContext, DiskAnnGraph};
 use crate::idx::trees::diskann::{DiskAnnElement, ElementId};
 use crate::idx::trees::knn::Ids64;
 use crate::idx::trees::vector::{SerializedVector, Vector};
-use crate::kvs::{KVValue, Transaction};
+use crate::key::KVValue;
+use crate::kvs::Transaction;
 use crate::val::{RecordId, RecordIdKey};
 
 /// Manages the bidirectional mapping between record IDs and compact DiskANN document IDs.
@@ -52,7 +53,7 @@ impl DiskAnnDocs {
 	/// Loads the persisted document-id allocator state for one DiskANN index.
 	pub(in crate::idx) async fn new(tx: &Transaction, ikb: IndexKeyBase) -> Result<Self> {
 		let state_key = ikb.new_dd_root_key();
-		let state = tx.get(&state_key, None).await?.unwrap_or_default();
+		let state = tx.get_key(&state_key, None).await?.unwrap_or_default();
 		Ok(Self {
 			ikb,
 			state_updated: false,
@@ -66,17 +67,17 @@ impl DiskAnnDocs {
 		tx: &Transaction,
 		id: &RecordIdKey,
 	) -> Result<Option<DocId>> {
-		tx.get(&ikb.new_di_key(id), None).await
+		tx.get_key(&ikb.new_di_key(id), None).await
 	}
 
 	/// Returns the existing document ID for a record key or allocates and persists a new mapping.
 	pub(super) async fn resolve(&mut self, tx: &Transaction, id: &RecordIdKey) -> Result<DocId> {
-		if let Some(doc_id) = tx.get(&self.ikb.new_di_key(id), None).await? {
+		if let Some(doc_id) = tx.get_key(&self.ikb.new_di_key(id), None).await? {
 			Ok(doc_id)
 		} else {
 			let doc_id = self.next_doc_id();
-			tx.set(&self.ikb.new_di_key(id), &doc_id).await?;
-			tx.set(&self.ikb.new_dd_key(doc_id), id).await?;
+			tx.set_key(&self.ikb.new_di_key(id), &doc_id).await?;
+			tx.set_key(&self.ikb.new_dd_key(doc_id), id).await?;
 			Ok(doc_id)
 		}
 	}
@@ -161,7 +162,7 @@ impl DiskAnnDocs {
 			return Ok(rids);
 		}
 		let keys: Vec<_> = misses.iter().map(|(_, doc_id)| ikb.new_dd_key(*doc_id)).collect();
-		let ids: Vec<Option<RecordIdKey>> = tx.getm(keys, None).await?;
+		let ids: Vec<Option<RecordIdKey>> = tx.get_many_key(keys, None).await?;
 		let cache_misses = !tx.writeable();
 		for ((pos, doc_id), id) in misses.into_iter().zip(ids) {
 			if let Some(id) = id {
@@ -181,13 +182,13 @@ impl DiskAnnDocs {
 
 	/// Removes a document mapping and makes the compact ID available for reuse.
 	async fn remove_inner(&mut self, tx: &Transaction, doc_id: DocId) -> Result<Option<DocId>> {
-		let Some(id) = tx.get(&self.ikb.new_dd_key(doc_id), None).await? else {
+		let Some(id) = tx.get_key(&self.ikb.new_dd_key(doc_id), None).await? else {
 			return Ok(None);
 		};
 		self.state_updated = true;
-		tx.del(&self.ikb.new_dd_key(doc_id)).await?;
-		if let Some(doc_id) = tx.get(&self.ikb.new_di_key(&id), None).await? {
-			tx.del(&self.ikb.new_di_key(&id)).await?;
+		tx.del_key(&self.ikb.new_dd_key(doc_id)).await?;
+		if let Some(doc_id) = tx.get_key(&self.ikb.new_di_key(&id), None).await? {
+			tx.del_key(&self.ikb.new_di_key(&id)).await?;
 			self.state.available.insert(doc_id);
 			Ok(Some(doc_id))
 		} else {
@@ -221,7 +222,7 @@ impl DiskAnnDocs {
 	/// Persists allocator state if compaction allocated or freed document IDs.
 	pub(in crate::idx) async fn finish(&mut self, tx: &Transaction) -> Result<()> {
 		if self.state_updated {
-			tx.set(&self.ikb.new_dd_root_key(), &self.state).await?;
+			tx.set_key(&self.ikb.new_dd_root_key(), &self.state).await?;
 			self.state_updated = false;
 		}
 		Ok(())
@@ -248,8 +249,8 @@ mod tests {
 		let cache = DiskAnnCache::new(1024 * 1024);
 		{
 			let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
-			tx.set(&ikb.new_dd_key(1), &RecordIdKey::Number(11)).await?;
-			tx.set(&ikb.new_dd_key(3), &RecordIdKey::Number(33)).await?;
+			tx.set_key(&ikb.new_dd_key(1), &RecordIdKey::Number(11)).await?;
+			tx.set_key(&ikb.new_dd_key(3), &RecordIdKey::Number(33)).await?;
 			tx.commit().await?;
 		}
 
@@ -271,10 +272,10 @@ mod tests {
 		tx.cancel().await?;
 
 		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
-		tx.del(&ikb.new_dd_key(1)).await?;
+		tx.del_key(&ikb.new_dd_key(1)).await?;
 		tx.commit().await?;
 		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
-		let missing: Option<RecordIdKey> = tx.get(&ikb.new_dd_key(1), None).await?;
+		let missing: Option<RecordIdKey> = tx.get_key(&ikb.new_dd_key(1), None).await?;
 		assert!(missing.is_none());
 		let cached =
 			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[1], Some(5)).await?;
@@ -289,7 +290,7 @@ mod tests {
 		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
 		let ikb = ikb();
 		let cache = DiskAnnCache::new(1024 * 1024);
-		tx.set(&ikb.new_dd_key(9), &RecordIdKey::Number(99)).await?;
+		tx.set_key(&ikb.new_dd_key(9), &RecordIdKey::Number(99)).await?;
 
 		let got =
 			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[9], Some(5)).await?;
@@ -314,7 +315,7 @@ mod tests {
 		let cache = DiskAnnCache::new(1024 * 1024);
 		{
 			let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
-			tx.set(&ikb.new_dd_key(1), &RecordIdKey::Number(11)).await?;
+			tx.set_key(&ikb.new_dd_key(1), &RecordIdKey::Number(11)).await?;
 			tx.commit().await?;
 		}
 
@@ -326,7 +327,7 @@ mod tests {
 		assert!(cache.get_doc_id(cache_index(), 1, Some(6)).is_none());
 
 		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
-		tx.set(&ikb.new_dd_key(1), &RecordIdKey::Number(22)).await?;
+		tx.set_key(&ikb.new_dd_key(1), &RecordIdKey::Number(22)).await?;
 		tx.commit().await?;
 
 		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
@@ -345,8 +346,8 @@ mod tests {
 		let id = RecordIdKey::Number(77);
 		{
 			let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
-			tx.set(&ikb.new_dd_key(7), &id).await?;
-			tx.set(&ikb.new_di_key(&id), &7_u64).await?;
+			tx.set_key(&ikb.new_dd_key(7), &id).await?;
+			tx.set_key(&ikb.new_di_key(&id), &7_u64).await?;
 			tx.commit().await?;
 		}
 
@@ -378,7 +379,7 @@ mod tests {
 		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), false);
 		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
 		let vector = Vector::from(ser_vec.clone());
-		tx.set(
+		tx.set_key(
 			&ikb.new_dq_key(&ser_vec),
 			&DiskAnnElementDocs {
 				e_id: 7,
@@ -393,7 +394,7 @@ mod tests {
 		);
 		assert_eq!(cache.get_doc_set(cache_index(), 7), Some(Ids64::One(42)));
 
-		tx.del(&ikb.new_dq_key(&ser_vec)).await?;
+		tx.del_key(&ikb.new_dq_key(&ser_vec)).await?;
 		assert_eq!(
 			vec_docs.get_docs_batch(&tx, &[(7, &vector)]).await?,
 			vec![Some(Ids64::One(42))]
@@ -411,7 +412,7 @@ mod tests {
 		let cache = DiskAnnCache::new(1024 * 1024);
 		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), false);
 		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
-		tx.set(
+		tx.set_key(
 			&ikb.new_de_key(7),
 			&DiskAnnElement {
 				vector: ser_vec.clone(),
@@ -419,7 +420,7 @@ mod tests {
 			},
 		)
 		.await?;
-		tx.set(
+		tx.set_key(
 			&ikb.new_dq_key(&ser_vec),
 			&DiskAnnElementDocs {
 				e_id: 7,
@@ -434,8 +435,8 @@ mod tests {
 		);
 		assert_eq!(cache.get_doc_set(cache_index(), 7), Some(Ids64::One(42)));
 
-		tx.del(&ikb.new_de_key(7)).await?;
-		tx.del(&ikb.new_dq_key(&ser_vec)).await?;
+		tx.del_key(&ikb.new_de_key(7)).await?;
+		tx.del_key(&ikb.new_dq_key(&ser_vec)).await?;
 		assert_eq!(
 			vec_docs.get_docs_by_element_batch(&tx, &[(7, 0.5)]).await?,
 			vec![(7, 0.5, Some(Ids64::One(42)))]
@@ -456,7 +457,7 @@ mod tests {
 		for (element_id, ser_vec, docs) in
 			[(7, first_vec.clone(), Ids64::One(70)), (9, second_vec.clone(), Ids64::One(90))]
 		{
-			tx.set(
+			tx.set_key(
 				&ikb.new_de_key(element_id),
 				&DiskAnnElement {
 					vector: ser_vec.clone(),
@@ -464,7 +465,7 @@ mod tests {
 				},
 			)
 			.await?;
-			tx.set(
+			tx.set_key(
 				&ikb.new_dq_key(&ser_vec),
 				&DiskAnnElementDocs {
 					e_id: element_id,
@@ -495,7 +496,7 @@ mod tests {
 		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
 		let other_vec = SerializedVector::F32(vec![9.0, 9.0]);
 		let vector = Vector::from(ser_vec.clone());
-		tx.set(
+		tx.set_key(
 			&ikb.new_dh_key(ser_vec.compute_hash()),
 			&DiskAnnElementHashedDocs {
 				vectors: vec![
@@ -524,7 +525,7 @@ mod tests {
 		);
 		assert_eq!(cache.get_doc_set(cache_index(), 9), Some(Ids64::One(42)));
 
-		tx.del(&ikb.new_dh_key(ser_vec.compute_hash())).await?;
+		tx.del_key(&ikb.new_dh_key(ser_vec.compute_hash())).await?;
 		assert_eq!(
 			vec_docs.get_docs_batch(&tx, &[(9, &vector)]).await?,
 			vec![Some(Ids64::One(42))]
@@ -543,7 +544,7 @@ mod tests {
 		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), true);
 		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
 		let other_vec = SerializedVector::F32(vec![9.0, 9.0]);
-		tx.set(
+		tx.set_key(
 			&ikb.new_de_key(9),
 			&DiskAnnElement {
 				vector: ser_vec.clone(),
@@ -551,7 +552,7 @@ mod tests {
 			},
 		)
 		.await?;
-		tx.set(
+		tx.set_key(
 			&ikb.new_dh_key(ser_vec.compute_hash()),
 			&DiskAnnElementHashedDocs {
 				vectors: vec![
@@ -838,7 +839,7 @@ impl DiskAnnVecDocs {
 				.iter()
 				.map(|(_, _, ser_vec)| self.ikb.new_dh_key(ser_vec.compute_hash()))
 				.collect();
-			let docs: Vec<Option<DiskAnnElementHashedDocs>> = tx.getm(keys, None).await?;
+			let docs: Vec<Option<DiskAnnElementHashedDocs>> = tx.get_many_key(keys, None).await?;
 			for ((pos, _, ser_vec), docs) in misses.into_iter().zip(docs) {
 				if let Some((element_id, docs)) = docs.and_then(|docs| docs.get_docs(&ser_vec)) {
 					self.cache.insert_doc_set(index, element_id, docs.clone());
@@ -849,7 +850,7 @@ impl DiskAnnVecDocs {
 		}
 		let keys: Vec<_> =
 			misses.iter().map(|(_, _, ser_vec)| self.ikb.new_dq_key(ser_vec)).collect();
-		let docs: Vec<Option<DiskAnnElementDocs>> = tx.getm(keys, None).await?;
+		let docs: Vec<Option<DiskAnnElementDocs>> = tx.get_many_key(keys, None).await?;
 		for ((pos, _, _), docs) in misses.into_iter().zip(docs) {
 			if let Some(docs) = docs {
 				self.cache.insert_doc_set(index, docs.e_id, docs.docs.clone());
@@ -893,7 +894,7 @@ impl DiskAnnVecDocs {
 			}
 		}
 		if !element_keys.is_empty() {
-			let elements: Vec<Option<DiskAnnElement>> = tx.getm(element_keys, None).await?;
+			let elements: Vec<Option<DiskAnnElement>> = tx.get_many_key(element_keys, None).await?;
 			let mut fetched = elements.into_iter();
 			for (_, element_id, vector) in &mut element_misses {
 				if vector.is_some() {
@@ -938,7 +939,7 @@ impl DiskAnnVecDocs {
 				.iter()
 				.map(|ser_vec| self.ikb.new_dh_key(ser_vec.compute_hash()))
 				.collect();
-			let docs: Vec<Option<DiskAnnElementHashedDocs>> = tx.getm(keys, None).await?;
+			let docs: Vec<Option<DiskAnnElementHashedDocs>> = tx.get_many_key(keys, None).await?;
 			return Ok(ser_vecs
 				.into_iter()
 				.zip(docs)
@@ -948,7 +949,7 @@ impl DiskAnnVecDocs {
 				.collect());
 		}
 		let keys: Vec<_> = ser_vecs.iter().map(|ser_vec| self.ikb.new_dq_key(ser_vec)).collect();
-		let docs: Vec<Option<DiskAnnElementDocs>> = tx.getm(keys, None).await?;
+		let docs: Vec<Option<DiskAnnElementDocs>> = tx.get_many_key(keys, None).await?;
 		Ok(docs.into_iter().map(|docs| docs.map(|docs| docs.docs)).collect())
 	}
 
@@ -962,11 +963,11 @@ impl DiskAnnVecDocs {
 		doc_id: DocId,
 	) -> Result<()> {
 		let key = self.ikb.new_dh_key(ser_vec.compute_hash());
-		match ctx.tx.get(&key, None).await? {
+		match ctx.tx.get_key(&key, None).await? {
 			None => {
 				let element_id = graph.insert(ctx, vec).await?;
 				ctx.tx
-					.set(&key, &DiskAnnElementHashedDocs::new(element_id, ser_vec, doc_id))
+					.set_key(&key, &DiskAnnElementHashedDocs::new(element_id, ser_vec, doc_id))
 					.await?;
 				self.evict_cached_doc_set(element_id);
 			}
@@ -975,13 +976,13 @@ impl DiskAnnVecDocs {
 					if let Some(docs) = ed.docs.insert(doc_id) {
 						let element_id = ed.e_id;
 						ed.docs = docs;
-						ctx.tx.set(&key, &ehd).await?;
+						ctx.tx.set_key(&key, &ehd).await?;
 						self.evict_cached_doc_set(element_id);
 					}
 				} else {
 					let element_id = graph.insert(ctx, vec).await?;
 					ehd.add(element_id, ser_vec, doc_id);
-					ctx.tx.set(&key, &ehd).await?;
+					ctx.tx.set_key(&key, &ehd).await?;
 					self.evict_cached_doc_set(element_id);
 				}
 			}
@@ -1002,7 +1003,7 @@ impl DiskAnnVecDocs {
 			return self.insert_hashed(ctx, graph, vec, ser_vec, doc_id).await;
 		}
 		let key = self.ikb.new_dq_key(&ser_vec);
-		if let Some(ed) = match ctx.tx.get(&key, None).await? {
+		if let Some(ed) = match ctx.tx.get_key(&key, None).await? {
 			Some(mut ed) => ed.docs.insert(doc_id).map(|new_docs| {
 				ed.docs = new_docs;
 				ed
@@ -1014,7 +1015,7 @@ impl DiskAnnVecDocs {
 			}
 		} {
 			self.evict_cached_doc_set(ed.e_id);
-			ctx.tx.set(&key, &ed).await?;
+			ctx.tx.set_key(&key, &ed).await?;
 		}
 		Ok(())
 	}
@@ -1028,23 +1029,23 @@ impl DiskAnnVecDocs {
 		doc_id: DocId,
 	) -> Result<()> {
 		let key = self.ikb.new_dh_key(ser_vec.compute_hash());
-		if let Some(mut ehd) = ctx.tx.get(&key, None).await? {
+		if let Some(mut ehd) = ctx.tx.get_key(&key, None).await? {
 			match ehd.remove(&ser_vec, doc_id) {
 				RemoveResult::Empty(e_id) => {
-					ctx.tx.del(&key).await?;
+					ctx.tx.del_key(&key).await?;
 					self.evict_cached_doc_set(e_id);
 					graph.remove(ctx, e_id).await?;
 				}
 				RemoveResult::BucketShrunk {
 					e_id,
 				} => {
-					ctx.tx.set(&key, &ehd).await?;
+					ctx.tx.set_key(&key, &ehd).await?;
 					self.evict_cached_doc_set(e_id);
 				}
 				RemoveResult::EntryRemoved {
 					e_id,
 				} => {
-					ctx.tx.set(&key, &ehd).await?;
+					ctx.tx.set_key(&key, &ehd).await?;
 					self.evict_cached_doc_set(e_id);
 					graph.remove(ctx, e_id).await?;
 				}
@@ -1067,16 +1068,16 @@ impl DiskAnnVecDocs {
 			return self.remove_hashed(ctx, graph, ser_vec, doc_id).await;
 		}
 		let key = self.ikb.new_dq_key(&ser_vec);
-		if let Some(mut ed) = ctx.tx.get(&key, None).await?
+		if let Some(mut ed) = ctx.tx.get_key(&key, None).await?
 			&& let Some(new_docs) = ed.docs.remove(doc_id)
 		{
 			if new_docs.is_empty() {
-				ctx.tx.del(&key).await?;
+				ctx.tx.del_key(&key).await?;
 				self.evict_cached_doc_set(ed.e_id);
 				graph.remove(ctx, ed.e_id).await?;
 			} else {
 				ed.docs = new_docs;
-				ctx.tx.set(&key, &ed).await?;
+				ctx.tx.set_key(&key, &ed).await?;
 				self.evict_cached_doc_set(ed.e_id);
 			}
 		}

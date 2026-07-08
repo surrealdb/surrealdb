@@ -61,8 +61,10 @@ impl RemoveUserStatement {
 				};
 
 				// Process the statement
-				let key = crate::key::root::us::new(&us.name);
-				txn.del(&key).await?;
+				let key = crate::key::root::us::Us {
+					user: std::borrow::Cow::Borrowed(&us.name),
+				};
+				txn.del_key(&key).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -88,8 +90,11 @@ impl RemoveUserStatement {
 					}
 				};
 				// Delete the definition
-				let key = crate::key::namespace::us::new(ns, &us.name);
-				txn.del(&key).await?;
+				let key = crate::key::namespace::us::Us {
+					ns,
+					user: std::borrow::Cow::Borrowed(&us.name),
+				};
+				txn.del_key(&key).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -116,8 +121,14 @@ impl RemoveUserStatement {
 					}
 				};
 				// Delete the definition
-				let key = crate::key::database::us::new(ns, db, &us.name);
-				txn.del(&key).await?;
+				let key = crate::key::database::us::UserKey {
+					prefix: crate::key::database::all::DatabaseRoot {
+						ns,
+						db,
+					},
+					user: std::borrow::Cow::Borrowed(&us.name),
+				};
+				txn.del_key(&key).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good

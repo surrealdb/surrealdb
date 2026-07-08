@@ -4,11 +4,10 @@ use ahash::HashSet;
 
 use crate::ctx::FrozenContext;
 use crate::dbs::Processable;
-use crate::kvs::Key;
 
 // TODO: This is currently processed in memory. In the future is should be on
 // disk (mmap?)
-type Distinct = HashSet<Key>;
+type Distinct = HashSet<Vec<u8>>;
 
 #[derive(Default)]
 pub(crate) struct SyncDistinct {

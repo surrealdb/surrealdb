@@ -13,11 +13,9 @@
 //! - [`determine_scan_direction`] — ORDER BY → scan direction
 
 use std::collections::{HashMap, HashSet};
-use std::ops::Bound;
 use std::sync::Arc;
 
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{DatabaseId, NamespaceId};
 use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
 };
@@ -26,9 +24,9 @@ use crate::exec::topk_pushdown::TopKThresholdProbe;
 use crate::exec::{EvalContext, ExecutionContext, PhysicalExpr, ValueBatch, ValueBatchStream};
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::idx::planner::ScanDirection;
-use crate::key::record;
-use crate::kvs::{KVKey, KVValue, Transaction};
-use crate::val::{RecordIdKey, TableName, Value};
+use crate::key::{KVKeyDecode, KVValue, KeyRange};
+use crate::kvs::Transaction;
+use crate::val::{TableName, Value};
 
 /// A raw computed field entry before topological sorting:
 /// `(field_name, physical_expr, optional_kind, dependency_field_names)`.
@@ -216,8 +214,7 @@ pub(crate) fn determine_scan_direction(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn kv_scan_stream(
 	txn: Arc<Transaction>,
-	beg: crate::kvs::Key,
-	end: crate::kvs::Key,
+	range: KeyRange<'static>,
 	version: Option<u64>,
 	storage_limit: Option<usize>,
 	direction: ScanDirection,
@@ -229,7 +226,7 @@ pub(crate) fn kv_scan_stream(
 	let skip = pre_skip.min(u32::MAX as usize) as u32;
 	let stream = async_stream::try_stream! {
 		let mut cursor = txn
-			.open_vals_cursor(beg..end, direction, skip, version)
+			.open_vals_cursor(range, direction, skip, version)
 			.await
 			.context("Failed to open scan cursor")?;
 		let mut first = true;
@@ -339,7 +336,7 @@ pub(crate) fn decode_record(key: &[u8], val: &[u8]) -> Result<Value, ControlFlow
 
 	let rid = crate::val::RecordId {
 		table: decoded_key.tb.into_owned(),
-		key: decoded_key.id,
+		key: decoded_key.id.into_owned(),
 	};
 
 	let record = crate::catalog::Record::kv_decode_value(val, rid)
@@ -453,54 +450,6 @@ pub(crate) async fn filter_and_process_batch(
 // =============================================================================
 // Key helpers
 // =============================================================================
-
-/// Compute the start key for a range scan.
-pub(crate) fn range_start_key(
-	ns_id: NamespaceId,
-	db_id: DatabaseId,
-	table: &TableName,
-	bound: &Bound<RecordIdKey>,
-) -> Result<crate::kvs::Key, ControlFlow> {
-	match bound {
-		Bound::Unbounded => {
-			record::prefix(ns_id, db_id, table).context("Failed to create prefix key")
-		}
-		Bound::Included(v) => {
-			record::new(ns_id, db_id, table, v).encode_key().context("Failed to create begin key")
-		}
-		Bound::Excluded(v) => {
-			let mut key = record::new(ns_id, db_id, table, v)
-				.encode_key()
-				.context("Failed to create begin key")?;
-			key.push(0x00);
-			Ok(key)
-		}
-	}
-}
-
-/// Compute the end key for a range scan.
-pub(crate) fn range_end_key(
-	ns_id: NamespaceId,
-	db_id: DatabaseId,
-	table: &TableName,
-	bound: &Bound<RecordIdKey>,
-) -> Result<crate::kvs::Key, ControlFlow> {
-	match bound {
-		Bound::Unbounded => {
-			record::suffix(ns_id, db_id, table).context("Failed to create suffix key")
-		}
-		Bound::Excluded(v) => {
-			record::new(ns_id, db_id, table, v).encode_key().context("Failed to create end key")
-		}
-		Bound::Included(v) => {
-			let mut key = record::new(ns_id, db_id, table, v)
-				.encode_key()
-				.context("Failed to create end key")?;
-			key.push(0x00);
-			Ok(key)
-		}
-	}
-}
 
 /// Evaluate a limit or start expression to a usize value.
 pub(crate) async fn eval_limit_expr(

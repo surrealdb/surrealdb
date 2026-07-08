@@ -1,5 +1,7 @@
+use std::borrow::Cow;
 use std::collections::VecDeque;
-use std::ops::Range;
+use std::ops::Bound;
+use std::slice;
 use std::sync::Arc;
 
 use ahash::HashSet;
@@ -9,15 +11,18 @@ use surrealdb_types::ToSql;
 use crate::catalog::{DatabaseId, IndexDefinition, IndexId, NamespaceId, Record};
 use crate::ctx::FrozenContext;
 use crate::err::Error;
+use crate::exec::index::iterator::btree::compute_index_range;
 use crate::expr::BinaryOperator;
 use crate::idx::ft::fulltext::FullTextHitsIterator;
-use crate::idx::planner::plan::RangeValue;
 use crate::idx::planner::tree::IndexReference;
 use crate::idx::seqdocids::DocId;
 use crate::idx::{IndexKeyBase, bump_compaction_generation, read_compaction_generation};
-use crate::key::index::Index;
+use crate::key::database::all::DatabaseRoot;
 use crate::key::index::iu::IndexCountKey;
-use crate::kvs::{COUNT_BATCH_SIZE, KVKey, Key, Transaction, Val};
+use crate::key::index::{IndexPrefix, IndexPrefixTerminated, IndexPrefixUnterminated, UniqueIndex};
+use crate::key::{KVKey, KVKeyDecode, KVRange, KeyRange};
+use crate::kvs::util::{scan, scan_keys, scanr, scanr_keys};
+use crate::kvs::{COUNT_BATCH_SIZE, Transaction};
 use crate::val::{Array, RecordId, TableName, Value};
 
 pub(crate) type IteratorRef = usize;
@@ -56,26 +61,28 @@ impl From<IteratorRef> for IteratorRecord {
 pub(crate) trait IteratorBatch {
 	fn empty() -> Self;
 	fn with_capacity(capacity: usize) -> Self;
-	fn from_one(record: IndexItemRecord) -> Self;
-	fn add(&mut self, record: IndexItemRecord);
+
+	fn add_key(&mut self, id: RecordId, record: IteratorRecord) {
+		self.add(Arc::new(id), record, None)
+	}
+
+	fn add(&mut self, id: Arc<RecordId>, record: IteratorRecord, f: Option<Arc<Record>>);
+
 	fn len(&self) -> usize;
 	fn is_empty(&self) -> bool;
 }
 
 impl IteratorBatch for Vec<IndexItemRecord> {
 	fn empty() -> Self {
-		Vec::from([])
+		Vec::new()
 	}
 
 	fn with_capacity(capacity: usize) -> Self {
 		Vec::with_capacity(capacity)
 	}
-	fn from_one(record: IndexItemRecord) -> Self {
-		Vec::from([record])
-	}
 
-	fn add(&mut self, record: IndexItemRecord) {
-		self.push(record)
+	fn add(&mut self, id: Arc<RecordId>, record: IteratorRecord, f: Option<Arc<Record>>) {
+		self.push(IndexItemRecord::new(id, record, f))
 	}
 
 	fn len(&self) -> usize {
@@ -89,17 +96,38 @@ impl IteratorBatch for Vec<IndexItemRecord> {
 
 impl IteratorBatch for VecDeque<IndexItemRecord> {
 	fn empty() -> Self {
-		VecDeque::from([])
+		VecDeque::new()
 	}
 	fn with_capacity(capacity: usize) -> Self {
 		VecDeque::with_capacity(capacity)
 	}
-	fn from_one(record: IndexItemRecord) -> Self {
-		VecDeque::from([record])
+
+	fn add(&mut self, id: Arc<RecordId>, record: IteratorRecord, f: Option<Arc<Record>>) {
+		self.push_back(IndexItemRecord::new(id, record, f))
 	}
 
-	fn add(&mut self, record: IndexItemRecord) {
-		self.push_back(record)
+	fn len(&self) -> usize {
+		VecDeque::len(self)
+	}
+	fn is_empty(&self) -> bool {
+		VecDeque::is_empty(self)
+	}
+}
+
+impl IteratorBatch for VecDeque<RecordId> {
+	fn empty() -> Self {
+		VecDeque::new()
+	}
+	fn with_capacity(capacity: usize) -> Self {
+		VecDeque::with_capacity(capacity)
+	}
+
+	fn add_key(&mut self, id: RecordId, _: IteratorRecord) {
+		self.push_back(id)
+	}
+
+	fn add(&mut self, id: Arc<RecordId>, _: IteratorRecord, _: Option<Arc<Record>>) {
+		self.push_back((*id).clone())
 	}
 
 	fn len(&self) -> usize {
@@ -193,6 +221,7 @@ impl RecordIterator {
 
 /// Iterator output record. Either a key-only result (for index-only scans)
 /// or a key+value pair when values are fetched by the current RecordStrategy.
+#[derive(Debug)]
 pub(crate) enum IndexItemRecord {
 	/// We just collected the key
 	Key(Arc<RecordId>, IteratorRecord),
@@ -209,17 +238,6 @@ impl IndexItemRecord {
 		}
 	}
 
-	fn new_key(t: RecordId, ir: IteratorRecord) -> Self {
-		Self::Key(Arc::new(t), ir)
-	}
-
-	fn record_id(&self) -> &RecordId {
-		match self {
-			Self::Key(t, _) => t,
-			Self::KeyValue(t, _, _) => t,
-		}
-	}
-
 	pub(crate) fn consume(self) -> (Arc<RecordId>, Option<Arc<Record>>, IteratorRecord) {
 		match self {
 			Self::Key(t, ir) => (t, None, ir),
@@ -230,8 +248,7 @@ impl IndexItemRecord {
 
 pub(crate) struct IndexEqualThingIterator {
 	irf: IteratorRef,
-	beg: Vec<u8>,
-	end: Vec<u8>,
+	range: KeyRange<'static>,
 }
 
 impl IndexEqualThingIterator {
@@ -242,11 +259,10 @@ impl IndexEqualThingIterator {
 		ix: &IndexDefinition,
 		fd: &Array,
 	) -> Result<Self> {
-		let (beg, end) = Self::get_beg_end(ns, db, ix, fd)?;
+		let range = Self::get_beg_end(ns, db, ix, fd)?;
 		Ok(Self {
 			irf,
-			beg,
-			end,
+			range,
 		})
 	}
 
@@ -262,172 +278,51 @@ impl IndexEqualThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		fd: &Array,
-	) -> Result<(Vec<u8>, Vec<u8>)> {
-		Ok(if ix.cols.len() == 1 {
+		fd: &[Value],
+	) -> Result<KeyRange<'static>> {
+		if ix.cols.len() == 1 {
 			// Single column index: straightforward key prefix generation
-			(
-				Index::prefix_ids_beg(ns, db, &ix.table_name, ix.index_id, fd)?,
-				Index::prefix_ids_end(ns, db, &ix.table_name, ix.index_id, fd)?,
-			)
+			IndexPrefixTerminated {
+				prefix: DatabaseRoot {
+					ns,
+					db,
+				},
+				tb: Cow::Borrowed(&ix.table_name),
+				ix: ix.index_id,
+				fd: Cow::Borrowed(fd),
+			}
+			.encode_range()
 		} else {
-			// Composite index: handles multiple column values with proper ordering
-			(
-				Index::prefix_ids_composite_beg(ns, db, &ix.table_name, ix.index_id, fd)?,
-				Index::prefix_ids_composite_end(ns, db, &ix.table_name, ix.index_id, fd)?,
-			)
-		})
-	}
-
-	/// Performs a key-value scan within the specified range and updates the
-	/// begin key for pagination.
-	///
-	/// This method scans the key-value store between `beg` and `end` keys,
-	/// returning up to `limit` results. After scanning, it updates the `beg`
-	/// key to continue from where this scan left off, enabling
-	/// efficient pagination through large result sets.
-	///
-	/// The key manipulation (appending 0x00) ensures that the next scan will
-	/// start after the last key returned, avoiding duplicate results while
-	/// maintaining correct lexicographic ordering.
-	async fn next_scan(
-		tx: &Transaction,
-		beg: &mut Vec<u8>,
-		end: &[u8],
-		limit: u32,
-	) -> Result<Vec<(Key, Val)>> {
-		let min = beg.clone();
-		let max = end.to_owned();
-		let res = tx.scan(min..max, limit, 0, None).await?;
-		// Update the begin key for the next scan to avoid duplicates and enable
-		// pagination
-		if let Some((key, _)) = res.last() {
-			let mut key = key.clone();
-			key.push(0x00); // Move to the next possible key lexicographically
-			*beg = key;
+			IndexPrefixUnterminated {
+				prefix: DatabaseRoot {
+					ns,
+					db,
+				},
+				tb: Cow::Borrowed(&ix.table_name),
+				ix: ix.index_id,
+				fd: Cow::Borrowed(fd),
+			}
+			.encode_range()
 		}
-		Ok(res)
-	}
-
-	async fn next_scan_batch<B: IteratorBatch>(
-		tx: &Transaction,
-		irf: IteratorRef,
-		beg: &mut Vec<u8>,
-		end: &[u8],
-		limit: u32,
-	) -> Result<B> {
-		let res = Self::next_scan(tx, beg, end, limit).await?;
-		let mut records = B::with_capacity(res.len());
-		res.into_iter().try_for_each(|(_, val)| -> Result<()> {
-			records.add(IndexItemRecord::new_key(revision::from_slice(&val)?, irf.into()));
-			Ok(())
-		})?;
-		Ok(records)
 	}
 
 	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction, limit: u32) -> Result<B> {
-		Self::next_scan_batch(tx, self.irf, &mut self.beg, &self.end, limit).await
+		let res = scan(&mut self.range, tx, limit).await?;
+		let mut records = B::with_capacity(res.len());
+		for (_, v) in res {
+			records.add_key(revision::from_slice(&v)?, self.irf.into());
+		}
+		Ok(records)
 	}
 
 	async fn next_count(&mut self, tx: &Transaction, limit: u32) -> Result<usize> {
-		Ok(Self::next_scan(tx, &mut self.beg, &self.end, limit).await?.len())
-	}
-}
-
-struct RangeScan {
-	beg: Key,
-	end: Key,
-	/// True if the beginning key has already been seen and match checked
-	beg_excl_match_checked: bool,
-	/// True if the ending key has already been seen and match checked
-	end_excl_match_checked: bool,
-}
-
-impl RangeScan {
-	fn new(beg_key: Key, beg_incl: bool, end_key: Key, end_incl: bool) -> Self {
-		Self {
-			beg: beg_key,
-			end: end_key,
-			beg_excl_match_checked: beg_incl,
-			end_excl_match_checked: end_incl,
-		}
-	}
-
-	fn range(&self) -> Range<Key> {
-		self.beg.clone()..self.end.clone()
-	}
-
-	/// Determines whether a given key should be included in the range scan
-	/// results.
-	///
-	/// This method implements inclusive/exclusive boundary logic for range
-	/// scans. It tracks whether boundary keys have been encountered and
-	/// applies the appropriate inclusion/exclusion rules based on the range
-	/// configuration.
-	///
-	/// Returns `false` for keys that should be excluded (boundary keys when the
-	/// range is exclusive at that boundary), `true` for keys that should be
-	/// included.
-	fn matches(&mut self, k: &Key) -> bool {
-		// Handle beginning boundary: exclude if this is an exclusive range start
-		if !self.beg_excl_match_checked && self.beg.eq(k) {
-			self.beg_excl_match_checked = true;
-			return false; // Exclude the boundary key for exclusive ranges
-		}
-		// Handle ending boundary: exclude if this is an exclusive range end
-		if !self.end_excl_match_checked && self.end.eq(k) {
-			self.end_excl_match_checked = true;
-			return false; // Exclude the boundary key for exclusive ranges
-		}
-		true // Include all other keys within the range
-	}
-
-	fn matches_end(&mut self) -> bool {
-		// We check if we should match the key matching the end of the range
-		if !self.end_excl_match_checked && self.end.eq(&self.end) {
-			self.end_excl_match_checked = true;
-			return false;
-		}
-		true
-	}
-}
-
-struct ReverseRangeScan {
-	r: RangeScan,
-	/// True if the beginning key should be included
-	beg_incl: bool,
-	/// True if the ending key should be included
-	end_incl: bool,
-}
-
-impl ReverseRangeScan {
-	fn new(r: RangeScan) -> Self {
-		// Capture whether the original forward range considered the endpoints inclusive.
-		// Reverse KV scans typically exclude the end key, so we keep these flags and
-		// later compensate by explicitly fetching the endpoint once per iterator.
-		Self {
-			beg_incl: r.beg_excl_match_checked,
-			end_incl: r.end_excl_match_checked,
-			r,
-		}
-	}
-	fn matches_check(&self, k: &Key) -> bool {
-		// Skip keys that are exactly equal to the range boundaries if we haven't
-		// performed the explicit endpoint compensation yet. This avoids double
-		// returning the endpoints when they are inclusive.
-		if !self.r.beg_excl_match_checked && self.r.beg.eq(k) {
-			return false;
-		}
-		if !self.r.end_excl_match_checked && self.r.end.eq(k) {
-			return false;
-		}
-		true
+		Ok(scan_keys(&mut self.range, tx, limit).await?.len())
 	}
 }
 
 pub(crate) struct IndexRangeThingIterator {
 	irf: IteratorRef,
-	r: RangeScan,
+	r: KeyRange<'static>,
 }
 
 impl IndexRangeThingIterator {
@@ -436,8 +331,8 @@ impl IndexRangeThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		from: RangeValue,
-		to: RangeValue,
+		from: Bound<&Value>,
+		to: Bound<&Value>,
 	) -> Result<Self> {
 		Ok(Self {
 			irf,
@@ -451,7 +346,7 @@ impl IndexRangeThingIterator {
 		db: DatabaseId,
 		ix: &IndexDefinition,
 	) -> Result<Self> {
-		Self::new(irf, ns, db, ix, RangeValue::default(), RangeValue::default())
+		Self::new(irf, ns, db, ix, Bound::Unbounded, Bound::Unbounded)
 	}
 
 	pub(super) fn compound_range(
@@ -470,16 +365,86 @@ impl IndexRangeThingIterator {
 	}
 
 	/// Determines the lowest and highest values in the range
-	fn reduce_range(ranges: &[(BinaryOperator, Arc<Value>)]) -> Result<(RangeValue, RangeValue)> {
-		let mut from = vec![];
-		let mut to = vec![];
+	fn reduce_range(
+		ranges: &[(BinaryOperator, Arc<Value>)],
+	) -> Result<(Bound<&Value>, Bound<&Value>)> {
+		// Returns the bound which has the higher value of the two,
+		// Assuming Unbounded is the minimum value
+		fn constrain_up<'a>(start: Bound<&'a Value>, cmp: Bound<&'a Value>) -> Bound<&'a Value> {
+			match start {
+				Bound::Unbounded => cmp,
+				Bound::Included(a) => match cmp {
+					Bound::Included(b) => Bound::Included(a.max(b)),
+					Bound::Excluded(b) => {
+						if a <= b {
+							Bound::Excluded(b)
+						} else {
+							Bound::Included(a)
+						}
+					}
+					Bound::Unbounded => Bound::Included(a),
+				},
+				Bound::Excluded(a) => match cmp {
+					Bound::Excluded(b) => Bound::Excluded(a.max(b)),
+					Bound::Included(b) => {
+						if a < b {
+							Bound::Included(b)
+						} else {
+							Bound::Excluded(a)
+						}
+					}
+					Bound::Unbounded => Bound::Included(a),
+				},
+			}
+		}
+
+		// Returns the bound which has the lower value of the two,
+		// Assuming Unbounded is the maximum value
+		fn constrain_down<'a>(start: Bound<&'a Value>, cmp: Bound<&'a Value>) -> Bound<&'a Value> {
+			match start {
+				Bound::Unbounded => cmp,
+				Bound::Included(a) => match cmp {
+					Bound::Included(b) => Bound::Included(a.min(b)),
+					Bound::Excluded(b) => {
+						if a >= b {
+							Bound::Excluded(b)
+						} else {
+							Bound::Included(a)
+						}
+					}
+					Bound::Unbounded => Bound::Included(a),
+				},
+				Bound::Excluded(a) => match cmp {
+					Bound::Excluded(b) => Bound::Excluded(a.min(b)),
+					Bound::Included(b) => {
+						if a > b {
+							Bound::Included(b)
+						} else {
+							Bound::Excluded(a)
+						}
+					}
+					Bound::Unbounded => Bound::Included(a),
+				},
+			}
+		}
+
+		let mut start = Bound::Unbounded;
+		let mut end = Bound::Unbounded;
+
 		for (op, v) in ranges {
-			let key = storekey::encode_vec(v.as_ref()).map_err(|_| Error::Unencodable)?;
 			match op {
-				BinaryOperator::LessThan => to.push((key, false, Arc::clone(v))),
-				BinaryOperator::LessThanEqual => to.push((key, true, Arc::clone(v))),
-				BinaryOperator::MoreThan => from.push((key, true, Arc::clone(v))),
-				BinaryOperator::MoreThanEqual => from.push((key, false, Arc::clone(v))),
+				BinaryOperator::LessThan => {
+					end = constrain_down(end, Bound::Excluded(v));
+				}
+				BinaryOperator::LessThanEqual => {
+					end = constrain_down(end, Bound::Included(v));
+				}
+				BinaryOperator::MoreThan => {
+					start = constrain_up(start, Bound::Excluded(v));
+				}
+				BinaryOperator::MoreThanEqual => {
+					start = constrain_up(start, Bound::Included(v));
+				}
 				_ => {
 					bail!(Error::Unreachable(format!(
 						"Invalid operator for range extraction {}",
@@ -488,103 +453,17 @@ impl IndexRangeThingIterator {
 				}
 			}
 		}
-		// Sort candidates by encoded key. For lower bounds we want the greatest value (max),
-		// for upper bounds we want the smallest (min). The comparator orders by key descending
-		// (b1.cmp(a1)), and for equal keys orders by the boolean flag so that strict operators
-		// take precedence when choosing the tightest bound.
-		let cmp =
-			|(a1, a2, _): &(Vec<u8>, bool, Arc<Value>),
-			 (b1, b2, _): &(Vec<u8>, bool, Arc<Value>)| { b1.cmp(a1).then_with(|| b2.cmp(a2)) };
-		from.sort_unstable_by(cmp);
-		to.sort_unstable_by(cmp);
-		// Pick the strongest lower bound: first element after sorting (greatest key).
-		// The stored boolean reflects the original operator kind: true for strict (>, <),
-		// false for inclusive (>=, <=). For the final bound, inclusive is the inverse for
-		// lower bounds because a strict '>' becomes an exclusive range start.
-		let from = if let Some((_, inclusivity, val)) = from.into_iter().next() {
-			RangeValue {
-				value: Some(val),
-				inclusive: !inclusivity,
-			}
-		} else {
-			RangeValue::default()
-		};
-		// Pick the strongest upper bound: last element after sorting (smallest key).
-		// Here the inclusive flag matches the operator: '<=' is inclusive, '<' is exclusive.
-		let to = if let Some((_, inclusivity, val)) = to.into_iter().next_back() {
-			RangeValue {
-				value: Some(val),
-				inclusive: inclusivity,
-			}
-		} else {
-			RangeValue::default()
-		};
-		Ok((from, to))
+		Ok((start, end))
 	}
 
 	fn range_scan(
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		from: RangeValue,
-		to: RangeValue,
-	) -> Result<RangeScan> {
-		let (from_inclusive, to_inclusive) = (from.inclusive, to.inclusive);
-		let beg = Self::compute_beg(ns, db, &ix.table_name, ix.index_id, from)?;
-		let end = Self::compute_end(ns, db, &ix.table_name, ix.index_id, to)?;
-		Ok(RangeScan::new(beg, from_inclusive, end, to_inclusive))
-	}
-
-	/// Compute the begin key for a range scan over an index by value.
-	///
-	/// - If `from.value` is `None` (unbounded), use the index-prefix begin to start at the first
-	///   key in the index keyspace.
-	/// - Otherwise, serialize the `from` value into an index field array and construct the boundary
-	///   key. For an inclusive lower bound use `prefix_ids_beg` (include all records with that
-	///   value); for an exclusive lower bound use `prefix_ids_end` so the scan starts after all
-	///   records with that exact value.
-	fn compute_beg(
-		ns: NamespaceId,
-		db: DatabaseId,
-		ix_what: &TableName,
-		index_id: IndexId,
-		from: RangeValue,
-	) -> Result<Vec<u8>> {
-		let Some(value) = from.value else {
-			return Index::prefix_beg(ns, db, ix_what, index_id);
-		};
-		let array = Array::from(vec![value.as_ref().clone()]);
-		if from.inclusive {
-			Index::prefix_ids_beg(ns, db, ix_what, index_id, &array)
-		} else {
-			Index::prefix_ids_end(ns, db, ix_what, index_id, &array)
-		}
-	}
-
-	/// Compute the end key for a range scan over an index by value.
-	///
-	/// - If `to.value` is `None` (unbounded), use the index-prefix end to stop at the last key in
-	///   the index keyspace.
-	/// - Otherwise, serialize the `to` value and construct the boundary key. For an inclusive upper
-	///   bound use `prefix_ids_end` so the scan can include all records with that exact value; for
-	///   an exclusive upper bound use `prefix_ids_beg` so the scan stops just before any key
-	///   matching that exact value.
-	fn compute_end(
-		ns: NamespaceId,
-		db: DatabaseId,
-		ix_what: &TableName,
-		index_id: IndexId,
-		to: RangeValue,
-	) -> Result<Vec<u8>> {
-		let Some(value) = to.value else {
-			return Index::prefix_end(ns, db, ix_what, index_id);
-		};
-		let array = Array::from(vec![value.as_ref().clone()]);
-		if to.inclusive {
-			Index::prefix_ids_end(ns, db, ix_what, index_id, &array)
-		} else {
-			Index::prefix_ids_beg(ns, db, ix_what, index_id, &array)
-		}
+		from: Bound<&Value>,
+		to: Bound<&Value>,
+	) -> Result<KeyRange<'static>> {
+		compute_index_range(ns, db, ix, from, to)
 	}
 
 	/// Build a range scan over a composite index using a fixed `prefix` and
@@ -598,144 +477,90 @@ impl IndexRangeThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		prefix: &[Value],
-		from: RangeValue,
-		to: RangeValue,
-	) -> Result<RangeScan> {
-		// Prepare the fixed composite prefix (may be empty for the leading column)
-		let prefix_array: Array = if prefix.is_empty() {
-			Array(Vec::with_capacity(1))
-		} else {
-			Array::from(prefix.to_vec())
-		};
-		let (from_inclusive, to_inclusive) = (from.inclusive, to.inclusive);
-		let beg = match from.value {
-			None => {
-				Index::prefix_ids_composite_beg(ns, db, &ix.table_name, ix.index_id, &prefix_array)?
+		value_prefix: &[Value],
+		from: Bound<&Value>,
+		to: Bound<&Value>,
+	) -> Result<KeyRange<'static>> {
+		let unterminated_bound = |value_prefix: &[Value]| {
+			IndexPrefixUnterminated {
+				prefix: DatabaseRoot {
+					ns,
+					db,
+				},
+				tb: Cow::Borrowed(&ix.table_name),
+				ix: ix.index_id,
+				fd: Cow::Borrowed(value_prefix),
 			}
-			Some(v) => Self::compute_beg_with_prefix(
-				ns,
-				db,
-				&ix.table_name,
-				ix.index_id,
-				&prefix_array,
-				&v,
-				from_inclusive,
-			)?,
+			.encode_bound()
 		};
-		let end = match to.value {
-			None => {
-				Index::prefix_ids_composite_end(ns, db, &ix.table_name, ix.index_id, &prefix_array)?
+
+		let terminated_bound = |value_prefix: &[Value]| {
+			IndexPrefixTerminated {
+				prefix: DatabaseRoot {
+					ns,
+					db,
+				},
+				tb: Cow::Borrowed(&ix.table_name),
+				ix: ix.index_id,
+				fd: Cow::Borrowed(value_prefix),
 			}
-			Some(v) => Self::compute_end_with_prefix(
-				ns,
-				db,
-				&ix.table_name,
-				ix.index_id,
-				&prefix_array,
-				&v,
-				to_inclusive,
-			)?,
+			.encode_bound()
 		};
-		Ok(RangeScan::new(beg, from_inclusive, end, to_inclusive))
-	}
 
-	/// Compute the begin key for a composite index range when a fixed `prefix`
-	/// (values for leading columns) is provided and an explicit `from` value
-	/// applies to the next column.
-	fn compute_beg_with_prefix(
-		ns: NamespaceId,
-		db: DatabaseId,
-		ix_what: &TableName,
-		index_id: IndexId,
-		prefix: &Array,
-		value: &Arc<Value>,
-		inclusive: bool,
-	) -> Result<Vec<u8>> {
-		let mut fd = prefix.clone();
-		fd.0.push(value.as_ref().clone());
-		if inclusive {
-			Index::prefix_ids_beg(ns, db, ix_what, index_id, &fd)
-		} else {
-			Index::prefix_ids_end(ns, db, ix_what, index_id, &fd)
-		}
-	}
+		let start = match from {
+			Bound::Included(v) => {
+				let mut value_prefix = value_prefix.to_vec();
+				value_prefix.push(v.clone());
+				unterminated_bound(&value_prefix)?
+			}
+			Bound::Excluded(v) => {
+				let mut value_prefix = value_prefix.to_vec();
+				value_prefix.push(v.clone());
+				unterminated_bound(&value_prefix)?.next_neighbour_expect()
+			}
+			Bound::Unbounded => unterminated_bound(value_prefix)?,
+		};
 
-	/// Compute the end key for a composite index range when a fixed `prefix`
-	/// is provided and an explicit `to` value applies to the next column.
-	fn compute_end_with_prefix(
-		ns: NamespaceId,
-		db: DatabaseId,
-		ix_what: &TableName,
-		index_id: IndexId,
-		prefix: &Array,
-		value: &Arc<Value>,
-		inclusive: bool,
-	) -> Result<Vec<u8>> {
-		let mut fd = prefix.clone();
-		fd.0.push(value.as_ref().clone());
-		if inclusive {
-			Index::prefix_ids_end(ns, db, ix_what, index_id, &fd)
-		} else {
-			Index::prefix_ids_beg(ns, db, ix_what, index_id, &fd)
-		}
-	}
+		let end = match to {
+			Bound::Included(v) => {
+				let mut value_prefix = value_prefix.to_vec();
+				value_prefix.push(v.clone());
+				// Needs to be next_neighbour, instead of next, as the actually searched for keys
+				// have a trailing suffix after created key.
+				terminated_bound(&value_prefix)?.next_neighbour_expect()
+			}
+			Bound::Excluded(v) => {
+				let mut value_prefix = value_prefix.to_vec();
+				value_prefix.push(v.clone());
+				terminated_bound(&value_prefix)?
+			}
+			Bound::Unbounded => unterminated_bound(value_prefix)?.next_neighbour_expect(),
+		};
 
-	/// Scan key-value pairs within the current range, up to `limit`, and
-	/// advance the begin key to resume pagination without duplicates.
-	///
-	/// We update `self.r.beg` to be one byte past the last returned key
-	/// (by appending 0x00), which works with lexicographic ordering to ensure
-	/// the next call starts strictly after the last result.
-	async fn next_scan(&mut self, tx: &Transaction, limit: u32) -> Result<Vec<(Key, Val)>> {
-		let res = tx.scan(self.r.range(), limit, 0, None).await?;
-		if let Some((key, _)) = res.last() {
-			self.r.beg.clone_from(key);
-			// Advance begin key one byte past the last returned key to avoid
-			// returning it again on the next paged call. Since keys are
-			// lexicographically ordered, appending 0x00 moves strictly after `key`.
-			self.r.beg.push(0x00);
-		}
-		Ok(res)
-	}
-
-	/// Scan only the keys within the current range, up to `limit`, and advance
-	/// the begin key to resume on the next call without duplicates. This
-	/// mirrors `next_scan` but avoids fetching values for count-only
-	/// operations.
-	async fn next_keys(&mut self, tx: &Transaction, limit: u32) -> Result<Vec<Key>> {
-		let res = tx.keys(self.r.range(), limit, 0, None).await?;
-		if let Some(key) = res.last() {
-			self.r.beg.clone_from(key);
-			// Same pagination technique as in next_scan: move begin strictly past
-			// the last seen key so subsequent calls don't re-count it.
-			self.r.beg.push(0x00);
-		}
-		Ok(res)
+		Ok(KeyRange {
+			start,
+			end,
+		})
 	}
 
 	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction, limit: u32) -> Result<B> {
-		let res = self.next_scan(tx, limit).await?;
+		let res = scan(&mut self.r, tx, limit).await?;
 		let mut records = B::with_capacity(res.len());
-		res.into_iter().filter(|(k, _)| self.r.matches(k)).try_for_each(
-			|(_, v)| -> Result<()> {
-				records.add(IndexItemRecord::new_key(revision::from_slice(&v)?, self.irf.into()));
-				Ok(())
-			},
-		)?;
+		for (_, v) in res {
+			records.add_key(revision::from_slice(&v)?, self.irf.into());
+		}
+
 		Ok(records)
 	}
 
 	async fn next_count(&mut self, tx: &Transaction, limit: u32) -> Result<usize> {
-		let res = self.next_keys(tx, limit).await?;
-		let count = res.into_iter().filter(|k| self.r.matches(k)).count();
-		Ok(count)
+		Ok(scan_keys(&mut self.r, tx, limit).await?.len())
 	}
 }
 
 pub(crate) struct IndexRangeReverseThingIterator {
 	irf: IteratorRef,
-	r: ReverseRangeScan,
+	r: KeyRange<'static>,
 }
 
 impl IndexRangeReverseThingIterator {
@@ -744,12 +569,12 @@ impl IndexRangeReverseThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		from: RangeValue,
-		to: RangeValue,
+		from: Bound<&Value>,
+		to: Bound<&Value>,
 	) -> Result<Self> {
 		Ok(Self {
 			irf,
-			r: ReverseRangeScan::new(IndexRangeThingIterator::range_scan(ns, db, ix, from, to)?),
+			r: IndexRangeThingIterator::range_scan(ns, db, ix, from, to)?,
 		})
 	}
 
@@ -759,120 +584,28 @@ impl IndexRangeReverseThingIterator {
 		db: DatabaseId,
 		ix: &IndexDefinition,
 	) -> Result<Self> {
-		Self::new(irf, ns, db, ix, RangeValue::default(), RangeValue::default())
-	}
-	/// When scanning in reverse, the KV range APIs do not return the inclusive
-	/// end key. We compensate by explicitly checking and returning the end key
-	/// once per iterator state, decrementing the remaining `limit` accordingly.
-	async fn check_batch_ending(
-		&mut self,
-		tx: &Transaction,
-		limit: &mut u32,
-	) -> Result<Option<IndexItemRecord>> {
-		if !self.r.end_incl || !self.r.matches_check(&self.r.r.end) {
-			return Ok(None);
-		}
-		self.r.r.end_excl_match_checked = true;
-		if let Some(v) = tx.get(&self.r.r.end, None).await? {
-			*limit -= 1;
-			Ok(Some(IndexItemRecord::new_key(revision::from_slice(&v)?, self.irf.into())))
-		} else {
-			Ok(None)
-		}
+		Self::new(irf, ns, db, ix, Bound::Unbounded, Bound::Unbounded)
 	}
 
-	async fn check_keys_ending(&mut self, tx: &Transaction, limit: &mut u32) -> Result<bool> {
-		if !self.r.end_incl || !self.r.matches_check(&self.r.r.end) {
-			return Ok(false);
-		}
-		self.r.r.end_excl_match_checked = true;
-		if tx.exists(&self.r.r.end, None).await? {
-			*limit -= 1;
-			Ok(true)
-		} else {
-			Ok(false)
-		}
-	}
-
-	async fn next_batch<B: IteratorBatch>(
-		&mut self,
-		tx: &Transaction,
-		mut limit: u32,
-	) -> Result<B> {
-		// Check if we need to retrieve the key at end of the range (not returned by the
-		// scanr)
-		let ending = self.check_batch_ending(tx, &mut limit).await?;
-
+	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction, limit: u32) -> Result<B> {
 		// Do we have enough limit left to collect additional records?
-		let res = if limit > 0 {
-			tx.scanr(self.r.r.range(), limit, 0, None).await?
-		} else {
-			vec![]
-		};
+		let scan = scanr(&mut self.r, tx, limit).await?;
 
-		// Proper allocation for the result
-		let mut records = B::with_capacity(res.len() + (ending.is_some() as usize));
-
-		// Add the ending record if any
-		if let Some(r) = ending {
-			records.add(r);
+		let mut res = B::empty();
+		for (_, v) in scan {
+			res.add_key(revision::from_slice(&v)?, self.irf.into());
 		}
-
-		// Collect the last key
-		let last_key = res.last().map(|(k, _)| k.clone());
-
-		// Feed the result
-		res.into_iter().filter(|(k, _)| self.r.r.matches(k)).try_for_each(
-			|(_, v)| -> Result<()> {
-				records.add(IndexItemRecord::new_key(revision::from_slice(&v)?, self.irf.into()));
-				Ok(())
-			},
-		)?;
-
-		// Update the ending for the next batch
-		if let Some(key) = last_key {
-			self.r.r.end = key;
-		}
-
-		// The next batch should not include the end anymore
-		if self.r.end_incl {
-			self.r.end_incl = false;
-		}
-		Ok(records)
+		Ok(res)
 	}
 
-	async fn next_count(&mut self, tx: &Transaction, mut limit: u32) -> Result<usize> {
-		// Check if we need to retrieve the key at end of the range (not returned by the
-		// keysr)
-		let mut count = self.check_keys_ending(tx, &mut limit).await? as usize;
-
-		// Do we have enough limit left to collect additional records?
-		let res = if limit > 0 {
-			tx.keysr(self.r.r.range(), limit, 0, None).await?
-		} else {
-			vec![]
-		};
-
-		// Feed the result
-		count += res.iter().filter(|k| self.r.r.matches(k)).count();
-
-		// Update the ending for the next batch
-		if let Some(key) = res.last() {
-			self.r.r.end.clone_from(key);
-		}
-
-		// The next batch should not include the end anymore
-		if self.r.end_incl {
-			self.r.end_incl = false;
-		}
-		Ok(count)
+	async fn next_count(&mut self, tx: &Transaction, limit: u32) -> Result<usize> {
+		Ok(scanr_keys(&mut self.r, tx, limit).await?.len())
 	}
 }
 
 pub(crate) struct IndexUnionThingIterator {
 	irf: IteratorRef,
-	values: VecDeque<(Vec<u8>, Vec<u8>)>,
-	current: Option<(Vec<u8>, Vec<u8>)>,
+	ranges: Vec<KeyRange<'static>>,
 }
 
 impl IndexUnionThingIterator {
@@ -885,17 +618,18 @@ impl IndexUnionThingIterator {
 	) -> Result<Self> {
 		// We create a VecDeque to hold the prefix keys (begin and end) for each value
 		// in the array.
-		let mut values: VecDeque<(Vec<u8>, Vec<u8>)> = VecDeque::with_capacity(fds.len());
+		let mut values = Vec::with_capacity(fds.len());
 
 		for fd in fds {
-			let (beg, end) = IndexEqualThingIterator::get_beg_end(ns, db, ix, fd)?;
-			values.push_back((beg, end));
+			let range = IndexEqualThingIterator::get_beg_end(ns, db, ix, fd)?;
+			values.push(range);
 		}
-		let current = values.pop_front();
+
+		values.reverse();
+
 		Ok(Self {
 			irf,
-			values,
-			current,
+			ranges: values,
 		})
 	}
 
@@ -903,40 +637,64 @@ impl IndexUnionThingIterator {
 		&mut self,
 		ctx: &FrozenContext,
 		tx: &Transaction,
-		limit: u32,
+		mut limit: u32,
 	) -> Result<B> {
-		while let Some(r) = &mut self.current {
-			if ctx.is_done(None).await? {
+		let mut res = B::empty();
+
+		while !ctx.is_done(Some(res.len())).await? {
+			let Some(last) = self.ranges.last_mut() else {
+				break;
+			};
+
+			let s = scan(last, tx, limit).await?;
+
+			limit -= s.len() as u32;
+
+			for (_, v) in s {
+				res.add_key(revision::from_slice(&v)?, self.irf.into());
+			}
+
+			if last.is_empty() {
+				self.ranges.pop();
+			}
+
+			if limit == 0 {
 				break;
 			}
-			let records: B =
-				IndexEqualThingIterator::next_scan_batch(tx, self.irf, &mut r.0, &r.1, limit)
-					.await?;
-			if !records.is_empty() {
-				return Ok(records);
-			}
-			self.current = self.values.pop_front();
 		}
-		Ok(B::empty())
+
+		Ok(res)
 	}
 
 	async fn next_count(
 		&mut self,
 		ctx: &FrozenContext,
 		tx: &Transaction,
-		limit: u32,
+		mut limit: u32,
 	) -> Result<usize> {
-		while let Some(r) = &mut self.current {
-			if ctx.is_done(None).await? {
+		let mut count = 0;
+
+		while !ctx.is_done(Some(count)).await? {
+			let Some(last) = self.ranges.last_mut() else {
+				return Ok(count);
+			};
+
+			let s = scan_keys(last, tx, limit).await?;
+
+			limit -= s.len() as u32;
+
+			count += s.len();
+
+			if last.is_empty() {
+				self.ranges.pop();
+			}
+
+			if limit == 0 {
 				break;
 			}
-			let res = IndexEqualThingIterator::next_scan(tx, &mut r.0, &r.1, limit).await?;
-			if !res.is_empty() {
-				return Ok(res.len());
-			}
-			self.current = self.values.pop_front();
 		}
-		Ok(0)
+
+		Ok(count)
 	}
 }
 
@@ -945,10 +703,9 @@ struct JoinThingIterator {
 	db: DatabaseId,
 	ix: IndexReference,
 	remote_iterators: VecDeque<RecordIterator>,
-	current_remote: Option<RecordIterator>,
-	current_remote_batch: VecDeque<IndexItemRecord>,
+	current_remote_batch: VecDeque<RecordId>,
 	current_local: Option<RecordIterator>,
-	distinct: HashSet<Key>,
+	distinct: HashSet<RecordId>,
 }
 
 impl JoinThingIterator {
@@ -962,8 +719,7 @@ impl JoinThingIterator {
 			ns,
 			db,
 			ix,
-			current_remote: None,
-			current_remote_batch: VecDeque::with_capacity(1),
+			current_remote_batch: VecDeque::new(),
 			remote_iterators,
 			current_local: None,
 			distinct: Default::default(),
@@ -972,59 +728,43 @@ impl JoinThingIterator {
 }
 
 impl JoinThingIterator {
-	async fn next_current_remote_batch(
-		&mut self,
-		ctx: &FrozenContext,
-		tx: &Transaction,
-		limit: u32,
-	) -> Result<bool> {
-		while !ctx.is_done(None).await? {
-			if let Some(it) = &mut self.current_remote {
-				self.current_remote_batch = it.next_batch(ctx, tx, limit).await?;
-				if !self.current_remote_batch.is_empty() {
-					return Ok(true);
-				}
-			}
-			self.current_remote = self.remote_iterators.pop_front();
-			if self.current_remote.is_none() {
-				break;
-			}
-		}
-		Ok(false)
-	}
-
-	async fn next_current_local<F>(
+	async fn current_iterator<F>(
 		&mut self,
 		ctx: &FrozenContext,
 		tx: &Transaction,
 		limit: u32,
 		new_iter: F,
-	) -> Result<bool>
+	) -> Result<Option<&mut RecordIterator>>
 	where
-		F: Fn(NamespaceId, DatabaseId, &IndexDefinition, Value) -> Result<RecordIterator>,
+		F: Fn(NamespaceId, DatabaseId, &IndexDefinition, Value) -> Result<RecordIterator> + Copy,
 	{
 		let mut count = 0;
-		while !ctx.is_done(None).await? {
-			while let Some(r) = self.current_remote_batch.pop_front() {
-				if ctx.is_done(Some(count)).await? {
+		while self.current_local.is_none() && !ctx.is_done(Some(count)).await? {
+			count += 1;
+
+			if let Some(r) = self.current_remote_batch.pop_front() {
+				if self.distinct.insert(r.clone()) {
+					self.current_local =
+						Some(new_iter(self.ns, self.db, &self.ix, Value::from(r))?);
 					break;
 				}
-				let record = r.record_id();
-				let value: Value = Value::from(record.clone());
-				let k: Key = revision::to_vec(record)?;
-				// `insert` returns true when the key was not already present,
-				// i.e. this is a distinct record we have not yet emitted.
-				if self.distinct.insert(k) {
-					self.current_local = Some(new_iter(self.ns, self.db, &self.ix, value)?);
-					return Ok(true);
+				continue;
+			}
+
+			if let Some(r) = self.remote_iterators.front_mut() {
+				let batch: VecDeque<RecordId> = r.next_batch(ctx, tx, limit).await?;
+				if !batch.is_empty() {
+					self.current_remote_batch = batch;
+				} else {
+					self.remote_iterators.pop_front();
 				}
-				count += 1;
+				continue;
 			}
-			if !self.next_current_remote_batch(ctx, tx, limit).await? {
-				break;
-			}
+
+			break;
 		}
-		Ok(false)
+
+		Ok(self.current_local.as_mut())
 	}
 
 	async fn next_batch<F, B: IteratorBatch>(
@@ -1038,15 +778,16 @@ impl JoinThingIterator {
 		F: Fn(NamespaceId, DatabaseId, &IndexDefinition, Value) -> Result<RecordIterator> + Copy,
 	{
 		while !ctx.is_done(None).await? {
-			if let Some(current_local) = &mut self.current_local {
-				let records: B = current_local.next_batch(ctx, tx, limit).await?;
-				if !records.is_empty() {
-					return Ok(records);
-				}
+			let Some(x) = self.current_iterator(ctx, tx, limit, new_iter).await? else {
+				return Ok(B::empty());
+			};
+
+			let res: B = x.next_batch(ctx, tx, limit).await?;
+			if res.is_empty() {
+				self.current_local = None;
+				continue;
 			}
-			if !self.next_current_local(ctx, tx, limit, new_iter).await? {
-				break;
-			}
+			return Ok(res);
 		}
 		Ok(B::empty())
 	}
@@ -1062,15 +803,16 @@ impl JoinThingIterator {
 		F: Fn(NamespaceId, DatabaseId, &IndexDefinition, Value) -> Result<RecordIterator> + Copy,
 	{
 		while !ctx.is_done(None).await? {
-			if let Some(current_local) = &mut self.current_local {
-				let count = current_local.next_count(ctx, tx, limit).await?;
-				if count > 0 {
-					return Ok(count);
-				}
+			let Some(x) = self.current_iterator(ctx, tx, limit, new_iter).await? else {
+				return Ok(0);
+			};
+
+			let res = x.next_count(ctx, tx, limit).await?;
+			if res == 0 {
+				self.current_local = None;
+				continue;
 			}
-			if !self.next_current_local(ctx, tx, limit, new_iter).await? {
-				break;
-			}
+			return Ok(res);
 		}
 		Ok(0)
 	}
@@ -1124,16 +866,7 @@ impl IndexJoinThingIterator {
 /// suffix), so they require a prefix range scan instead of a point-get.
 pub(crate) struct UniqueEqualThingIterator {
 	irf: IteratorRef,
-	inner: UniqueEqualThingInner,
-}
-
-enum UniqueEqualThingInner {
-	PointGet(Option<Key>),
-	PrefixScan {
-		beg: Key,
-		end: Key,
-		done: bool,
-	},
+	range: KeyRange<'static>,
 }
 
 impl UniqueEqualThingIterator {
@@ -1145,99 +878,54 @@ impl UniqueEqualThingIterator {
 		a: &Array,
 	) -> Result<Self> {
 		let inner = if a.is_any_none_or_null() {
-			let beg = Index::prefix_ids_beg(ns, db, &ix.table_name, ix.index_id, a)?;
-			let end = Index::prefix_ids_end(ns, db, &ix.table_name, ix.index_id, a)?;
-			UniqueEqualThingInner::PrefixScan {
-				beg,
-				end,
-				done: false,
+			IndexPrefixTerminated {
+				prefix: DatabaseRoot {
+					ns,
+					db,
+				},
+				tb: Cow::Borrowed(&ix.table_name),
+				ix: ix.index_id,
+				fd: Cow::Borrowed(a),
 			}
+			.encode_range()?
 		} else {
-			let key = Index::new(ns, db, &ix.table_name, ix.index_id, a, None).encode_key()?;
-			UniqueEqualThingInner::PointGet(Some(key))
+			let key = UniqueIndex {
+				prefix: DatabaseRoot {
+					ns,
+					db,
+				},
+				tb: Cow::Borrowed(&ix.table_name),
+				ix: ix.index_id,
+				fd: Cow::Borrowed(a),
+			}
+			.encode_key()?;
+			let next = key.as_borrowed().next();
+			(key..next).into()
 		};
 		Ok(Self {
 			irf,
-			inner,
+			range: inner,
 		})
 	}
 
 	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction, limit: u32) -> Result<B> {
-		match &mut self.inner {
-			UniqueEqualThingInner::PointGet(key) => {
-				if let Some(key) = key.take()
-					&& let Some(val) = tx.get(&key, None).await?
-				{
-					let rid: RecordId = revision::from_slice(&val)?;
-					let record = IndexItemRecord::new_key(rid, self.irf.into());
-					return Ok(B::from_one(record));
-				}
-				Ok(B::empty())
-			}
-			UniqueEqualThingInner::PrefixScan {
-				beg,
-				end,
-				done,
-			} => {
-				if *done {
-					return Ok(B::empty());
-				}
-				let res = tx.scan(beg.clone()..end.clone(), limit, 0, None).await?;
-				if res.is_empty() {
-					*done = true;
-					return Ok(B::empty());
-				}
-				if let Some((key, _)) = res.last() {
-					beg.clone_from(key);
-					beg.push(0x00);
-				}
-				let mut records = B::with_capacity(res.len());
-				for (_key, val) in res {
-					let rid: RecordId = revision::from_slice(&val)?;
-					records.add(IndexItemRecord::new_key(rid, self.irf.into()));
-				}
-				Ok(records)
-			}
+		let values = scan(&mut self.range, tx, limit).await?;
+		let mut res = B::empty();
+		for (_, val) in values {
+			let rid: RecordId = revision::from_slice(&val)?;
+			res.add_key(rid, self.irf.into());
 		}
+		Ok(res)
 	}
 
 	async fn next_count(&mut self, tx: &Transaction, limit: u32) -> Result<usize> {
-		match &mut self.inner {
-			UniqueEqualThingInner::PointGet(key) => {
-				if let Some(key) = key.take()
-					&& tx.exists(&key, None).await?
-				{
-					return Ok(1);
-				}
-				Ok(0)
-			}
-			UniqueEqualThingInner::PrefixScan {
-				beg,
-				end,
-				done,
-			} => {
-				if *done {
-					return Ok(0);
-				}
-				let res = tx.keys(beg.clone()..end.clone(), limit, 0, None).await?;
-				if res.is_empty() {
-					*done = true;
-					return Ok(0);
-				}
-				if let Some(key) = res.last() {
-					beg.clone_from(key);
-					beg.push(0x00);
-				}
-				Ok(res.len())
-			}
-		}
+		Ok(scan_keys(&mut self.range, tx, limit).await?.len())
 	}
 }
 
 pub(crate) struct UniqueRangeThingIterator {
 	irf: IteratorRef,
-	r: RangeScan,
-	done: bool,
+	r: KeyRange<'static>,
 }
 
 impl UniqueRangeThingIterator {
@@ -1245,14 +933,120 @@ impl UniqueRangeThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		from: &RangeValue,
-		to: &RangeValue,
-	) -> Result<RangeScan> {
-		let from_bound = from.value.as_ref().map(|v| (v.as_ref(), from.inclusive));
-		let to_bound = to.value.as_ref().map(|v| (v.as_ref(), to.inclusive));
-		let (beg, beg_incl) = Self::compute_beg(ns, db, &ix.table_name, ix.index_id, from_bound)?;
-		let (end, end_incl) = Self::compute_end(ns, db, &ix.table_name, ix.index_id, to_bound)?;
-		Ok(RangeScan::new(beg, beg_incl, end, end_incl))
+		from: Bound<&Value>,
+		to: Bound<&Value>,
+	) -> Result<KeyRange<'static>> {
+		let prefix = DatabaseRoot {
+			ns,
+			db,
+		};
+		let start = match from {
+			Bound::Included(x) => {
+				let slice = slice::from_ref(x);
+				if x.is_nullish() {
+					IndexPrefixUnterminated {
+						prefix,
+						tb: Cow::Borrowed(&ix.table_name),
+						ix: ix.index_id,
+						fd: Cow::Borrowed(slice),
+					}
+					.encode_bound()?
+				} else {
+					UniqueIndex {
+						prefix,
+						tb: Cow::Borrowed(&ix.table_name),
+						ix: ix.index_id,
+						fd: Cow::Borrowed(slice),
+					}
+					.encode_key()?
+				}
+			}
+			Bound::Excluded(x) => {
+				let slice = slice::from_ref(x);
+				if x.is_nullish() {
+					IndexPrefixUnterminated {
+						prefix,
+						tb: Cow::Borrowed(&ix.table_name),
+						ix: ix.index_id,
+						fd: Cow::Borrowed(slice),
+					}
+					.encode_bound()?
+					.next_neighbour_expect()
+				} else {
+					UniqueIndex {
+						prefix,
+						tb: Cow::Borrowed(&ix.table_name),
+						ix: ix.index_id,
+						fd: Cow::Borrowed(slice),
+					}
+					.encode_key()?
+					.next_neighbour_expect()
+				}
+			}
+			Bound::Unbounded => IndexPrefix {
+				prefix,
+				tb: Cow::Borrowed(&ix.table_name),
+				ix: ix.index_id,
+			}
+			.encode_bound()?,
+		};
+
+		let end = match to {
+			Bound::Included(x) => {
+				let slice = slice::from_ref(x);
+				if x.is_nullish() {
+					IndexPrefixUnterminated {
+						prefix,
+						tb: Cow::Borrowed(&ix.table_name),
+						ix: ix.index_id,
+						fd: Cow::Borrowed(slice),
+					}
+					.encode_bound()?
+					.next_neighbour_expect()
+				} else {
+					UniqueIndex {
+						prefix,
+						tb: Cow::Borrowed(&ix.table_name),
+						ix: ix.index_id,
+						fd: Cow::Borrowed(slice),
+					}
+					.encode_key()?
+					.next_neighbour_expect()
+				}
+			}
+			Bound::Excluded(x) => {
+				let slice = slice::from_ref(x);
+				if x.is_nullish() {
+					IndexPrefixUnterminated {
+						prefix,
+						tb: Cow::Borrowed(&ix.table_name),
+						ix: ix.index_id,
+						fd: Cow::Borrowed(slice),
+					}
+					.encode_bound()?
+				} else {
+					UniqueIndex {
+						prefix,
+						tb: Cow::Borrowed(&ix.table_name),
+						ix: ix.index_id,
+						fd: Cow::Borrowed(slice),
+					}
+					.encode_key()?
+				}
+			}
+			Bound::Unbounded => IndexPrefix {
+				prefix,
+				tb: Cow::Borrowed(&ix.table_name),
+				ix: ix.index_id,
+			}
+			.encode_bound()?
+			.next_neighbour_expect(),
+		};
+
+		Ok(KeyRange {
+			start,
+			end,
+		})
 	}
 
 	pub(super) fn new(
@@ -1260,14 +1054,13 @@ impl UniqueRangeThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		from: &RangeValue,
-		to: &RangeValue,
+		from: Bound<&Value>,
+		to: Bound<&Value>,
 	) -> Result<Self> {
 		let r = Self::range_scan(ns, db, ix, from, to)?;
 		Ok(Self {
 			irf,
 			r,
-			done: false,
 		})
 	}
 
@@ -1277,9 +1070,7 @@ impl UniqueRangeThingIterator {
 		db: DatabaseId,
 		ix: &IndexDefinition,
 	) -> Result<Self> {
-		let from = RangeValue::default();
-		let to = RangeValue::default();
-		Self::new(irf, ns, db, ix, &from, &to)
+		Self::new(irf, ns, db, ix, Bound::Unbounded, Bound::Unbounded)
 	}
 
 	pub(super) fn compound_range(
@@ -1295,126 +1086,29 @@ impl UniqueRangeThingIterator {
 		Ok(Self {
 			irf,
 			r,
-			done: false,
 		})
 	}
 
-	/// Compute the begin key for a unique-index range scan.
-	///
-	/// `from` is `None` for an unbounded lower side, or `Some((value, inclusive))`
-	/// for an explicit bound. NONE/NULL values use the non-unique key format
-	/// (with record-ID suffix), so they get prefix-based boundaries rather than
-	/// a single point-key.
-	fn compute_beg(
-		ns: NamespaceId,
-		db: DatabaseId,
-		ix_what: &TableName,
-		index_id: IndexId,
-		from: Option<(&Value, bool)>,
-	) -> Result<(Vec<u8>, bool)> {
-		let Some((from, inclusive)) = from else {
-			return Ok((Index::prefix_beg(ns, db, ix_what, index_id)?, true));
-		};
-		let array = Array::from(vec![from.clone()]);
-		if array.is_any_none_or_null() {
-			let key = if inclusive {
-				Index::prefix_ids_beg(ns, db, ix_what, index_id, &array)?
-			} else {
-				Index::prefix_ids_end(ns, db, ix_what, index_id, &array)?
-			};
-			return Ok((key, true));
-		}
-		Ok((Index::new(ns, db, ix_what, index_id, &array, None).encode_key()?, inclusive))
-	}
-
-	/// Compute the end key for a unique-index range scan (symmetric to `compute_beg`).
-	fn compute_end(
-		ns: NamespaceId,
-		db: DatabaseId,
-		ix_what: &TableName,
-		index_id: IndexId,
-		to: Option<(&Value, bool)>,
-	) -> Result<(Vec<u8>, bool)> {
-		let Some((to, inclusive)) = to else {
-			// Sentinel boundary key — no real record is stored here.
-			return Ok((Index::prefix_end(ns, db, ix_what, index_id)?, false));
-		};
-		let array = Array::from(vec![to.clone()]);
-		if array.is_any_none_or_null() {
-			let key = if inclusive {
-				Index::prefix_ids_end(ns, db, ix_what, index_id, &array)?
-			} else {
-				Index::prefix_ids_beg(ns, db, ix_what, index_id, &array)?
-			};
-			// Sentinel boundary keys never store a row; avoid a trailing `get(end)` in
-			// `RangeScan` when the scan is exhausted (mirrors `compute_unique_range_end_key`).
-			return Ok((key, false));
-		}
-		Ok((Index::new(ns, db, ix_what, index_id, &array, None).encode_key()?, inclusive))
-	}
-
-	async fn next_batch<B: IteratorBatch>(
-		&mut self,
-		tx: &Transaction,
-		mut limit: u32,
-	) -> Result<B> {
-		if self.done {
-			return Ok(B::empty());
-		}
-		limit += 1;
-		let res = tx.scan(self.r.range(), limit, 0, None).await?;
+	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction, limit: u32) -> Result<B> {
+		let res = scan(&mut self.r, tx, limit).await?;
 		let mut records = B::with_capacity(res.len());
-		for (k, v) in res {
-			limit -= 1;
-			if limit == 0 {
-				self.r.beg = k;
-				return Ok(records);
-			}
-			if self.r.matches(&k) {
-				let rid: RecordId = revision::from_slice(&v)?;
-				records.add(IndexItemRecord::new_key(rid, self.irf.into()));
-			}
+
+		for (_, v) in res {
+			records.add_key(revision::from_slice(&v)?, self.irf.into());
 		}
 
-		if self.r.matches_end()
-			&& let Some(v) = tx.get(&self.r.end, None).await?
-		{
-			let rid: RecordId = revision::from_slice(&v)?;
-			records.add(IndexItemRecord::new_key(rid, self.irf.into()));
-		}
-		self.done = true;
 		Ok(records)
 	}
 
-	async fn next_count(&mut self, tx: &Transaction, mut limit: u32) -> Result<usize> {
-		if self.done {
-			return Ok(0);
-		}
-		limit += 1;
-		let res = tx.keys(self.r.range(), limit, 0, None).await?;
-		let mut count = 0;
-		for k in res {
-			limit -= 1;
-			if limit == 0 {
-				self.r.beg = k;
-				return Ok(count);
-			}
-			if self.r.matches(&k) {
-				count += 1;
-			}
-		}
-		if self.r.matches_end() && tx.exists(&self.r.end, None).await? {
-			count += 1;
-		}
-		self.done = true;
-		Ok(count)
+	async fn next_count(&mut self, tx: &Transaction, limit: u32) -> Result<usize> {
+		let res = scan_keys(&mut self.r, tx, limit).await?;
+		Ok(res.len())
 	}
 }
 
 pub(crate) struct UniqueRangeReverseThingIterator {
 	irf: IteratorRef,
-	r: ReverseRangeScan,
-	done: bool,
+	r: KeyRange<'static>,
 }
 
 impl UniqueRangeReverseThingIterator {
@@ -1423,14 +1117,13 @@ impl UniqueRangeReverseThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		from: &RangeValue,
-		to: &RangeValue,
+		from: Bound<&Value>,
+		to: Bound<&Value>,
 	) -> Result<Self> {
-		let r = ReverseRangeScan::new(UniqueRangeThingIterator::range_scan(ns, db, ix, from, to)?);
+		let r = UniqueRangeThingIterator::range_scan(ns, db, ix, from, to)?;
 		Ok(Self {
 			irf,
 			r,
-			done: false,
 		})
 	}
 
@@ -1440,111 +1133,29 @@ impl UniqueRangeReverseThingIterator {
 		db: DatabaseId,
 		ix: &IndexDefinition,
 	) -> Result<Self> {
-		let from = RangeValue::default();
-		let to = RangeValue::default();
-		Self::new(irf, ns, db, ix, &from, &to)
+		Self::new(irf, ns, db, ix, Bound::Unbounded, Bound::Unbounded)
 	}
 
-	async fn next_batch<B: IteratorBatch>(
-		&mut self,
-		tx: &Transaction,
-		mut limit: u32,
-	) -> Result<B> {
-		if self.done {
-			return Ok(B::empty());
-		}
-		// Check if we include the last record
-		let ending_record = if self.r.end_incl {
-			// we don't include the ending key for the next batches
-			self.r.end_incl = false;
-			// tx.scanr is end exclusive, so we have to manually collect the value using a
-			// get
-			if let Some(v) = tx.get(&self.r.r.end, None).await? {
-				let rid: RecordId = revision::from_slice(&v)?;
-				let record = IndexItemRecord::new_key(rid, self.irf.into());
-				limit -= 1;
-				if limit == 0 {
-					return Ok(B::from_one(record));
-				}
-				Some(record)
-			} else {
-				None
-			}
-		} else {
-			None
-		};
-		let mut res = tx.scanr(self.r.r.range(), limit, 0, None).await?;
-		if let Some((k, _)) = res.last() {
-			// We set the ending for the next batch
-			self.r.r.end.clone_from(k);
-			// If the last key is the beginning of the range, we're done
-			if self.r.r.beg.eq(k) {
-				self.done = true;
-				// Remove the beginning key if it is not supposed to be included
-				if !self.r.beg_incl {
-					res.remove(res.len() - 1);
-				}
-			}
-		}
+	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction, limit: u32) -> Result<B> {
+		let values = scanr(&mut self.r, tx, limit).await?;
+
 		// We collect the records
-		let mut records = B::with_capacity(res.len() + ending_record.is_some() as usize);
-		if let Some(record) = ending_record {
-			records.add(record);
-		}
-		for (_, v) in res {
+		let mut res = B::with_capacity(values.len());
+		for (_, v) in values {
 			let rid: RecordId = revision::from_slice(&v)?;
-			records.add(IndexItemRecord::new_key(rid, self.irf.into()));
+			res.add_key(rid, self.irf.into());
 		}
-		Ok(records)
+		Ok(res)
 	}
 
-	async fn next_count(&mut self, tx: &Transaction, mut limit: u32) -> Result<usize> {
-		if self.done {
-			return Ok(0);
-		}
-		let mut count = 0;
-		// Check if we include the last record
-		if self.r.end_incl {
-			// we don't include the ending key for the next batches
-			self.r.end_incl = false;
-			// tx.keysr is end exclusive, so we have to manually check if the value exists
-			if tx.exists(&self.r.r.end, None).await? {
-				count += 1;
-				limit -= 1;
-				if limit == 0 {
-					return Ok(count);
-				}
-			}
-		}
-		let mut res = tx.keysr(self.r.r.range(), limit, 0, None).await?;
-		if let Some(k) = res.last() {
-			// We set the ending for the next batch
-			self.r.r.end.clone_from(k);
-			// If the last key is the beginning of the range, we're done
-			if self.r.r.beg.eq(k) {
-				self.done = true;
-				// Remove the beginning if it is not supposed to be included
-				if !self.r.beg_incl {
-					res.remove(res.len() - 1);
-				}
-			}
-		}
-		count += res.len();
-		Ok(count)
+	async fn next_count(&mut self, tx: &Transaction, limit: u32) -> Result<usize> {
+		Ok(scanr_keys(&mut self.r, tx, limit).await?.len())
 	}
 }
 
 pub(crate) struct UniqueUnionThingIterator {
 	irf: IteratorRef,
-	entries: VecDeque<UniqueUnionEntry>,
-}
-
-enum UniqueUnionEntry {
-	PointGet(Key),
-	PrefixScan {
-		beg: Key,
-		end: Key,
-	},
+	entries: Vec<KeyRange<'static>>,
 }
 
 impl UniqueUnionThingIterator {
@@ -1555,18 +1166,38 @@ impl UniqueUnionThingIterator {
 		ix: &IndexDefinition,
 		fds: &[Array],
 	) -> Result<Self> {
-		let mut entries = VecDeque::with_capacity(fds.len());
-		for fd in fds {
+		let mut entries = Vec::with_capacity(fds.len());
+		// Iterate in reverse, so that the ranges end up in reverse order and can then be popped in
+		// the right order from the vec.
+		for fd in fds.iter().rev() {
 			if fd.is_any_none_or_null() {
-				let beg = Index::prefix_ids_beg(ns, db, &ix.table_name, ix.index_id, fd)?;
-				let end = Index::prefix_ids_end(ns, db, &ix.table_name, ix.index_id, fd)?;
-				entries.push_back(UniqueUnionEntry::PrefixScan {
-					beg,
+				let bound = IndexPrefixTerminated {
+					prefix: DatabaseRoot {
+						ns,
+						db,
+					},
+					tb: Cow::Borrowed(&ix.table_name),
+					ix: ix.index_id,
+					fd: Cow::Borrowed(fd),
+				};
+				entries.push(bound.encode_range()?)
+			} else {
+				let start = UniqueIndex {
+					prefix: DatabaseRoot {
+						ns,
+						db,
+					},
+					tb: Cow::Borrowed(&ix.table_name),
+					ix: ix.index_id,
+					fd: Cow::Borrowed(fd),
+				}
+				.encode_key()?;
+				let end = start.as_borrowed().next();
+
+				entries.push(KeyRange {
+					start,
 					end,
 				});
-			} else {
-				let key = Index::new(ns, db, &ix.table_name, ix.index_id, fd, None).encode_key()?;
-				entries.push_back(UniqueUnionEntry::PointGet(key));
 			}
 		}
 		Ok(Self {
@@ -1579,45 +1210,31 @@ impl UniqueUnionThingIterator {
 		&mut self,
 		ctx: &FrozenContext,
 		tx: &Transaction,
-		limit: u32,
+		mut limit: u32,
 	) -> Result<B> {
-		let limit = limit as usize;
-		let mut results = B::with_capacity(limit.min(self.entries.len()));
+		let mut results = B::empty();
 		let mut count = 0;
-		while let Some(entry) = self.entries.pop_front() {
+
+		while let Some(next) = self.entries.last_mut() {
 			if ctx.is_done(Some(count)).await? {
 				break;
 			}
-			let remaining = (limit - results.len()) as u32;
-			match entry {
-				UniqueUnionEntry::PointGet(key) => {
-					if let Some(val) = tx.get(&key, None).await? {
-						count += 1;
-						let rid: RecordId = revision::from_slice(&val)?;
-						results.add(IndexItemRecord::new_key(rid, self.irf.into()));
-					}
-				}
-				UniqueUnionEntry::PrefixScan {
-					mut beg,
-					end,
-				} => {
-					let res = tx.scan(beg.clone()..end.clone(), remaining, 0, None).await?;
-					for (key, val) in &res {
-						count += 1;
-						let rid: RecordId = revision::from_slice(val)?;
-						results.add(IndexItemRecord::new_key(rid, self.irf.into()));
-						beg.clone_from(key);
-					}
-					if !res.is_empty() {
-						beg.push(0x00);
-						self.entries.push_front(UniqueUnionEntry::PrefixScan {
-							beg,
-							end,
-						});
-					}
-				}
+
+			let res = scan(next, tx, limit).await?;
+
+			limit -= res.len() as u32;
+
+			for (_, val) in res {
+				count += 1;
+				let rid: RecordId = revision::from_slice(&val)?;
+				results.add_key(rid, self.irf.into());
 			}
-			if results.len() >= limit {
+
+			if next.is_empty() {
+				self.entries.pop();
+			}
+
+			if limit == 0 {
 				break;
 			}
 		}
@@ -1630,40 +1247,28 @@ impl UniqueUnionThingIterator {
 		tx: &Transaction,
 		limit: u32,
 	) -> Result<usize> {
-		let limit = limit as usize;
+		let mut res = 0;
 		let mut count = 0;
-		while let Some(entry) = self.entries.pop_front() {
+
+		while let Some(next) = self.entries.last_mut() {
 			if ctx.is_done(Some(count)).await? {
 				break;
 			}
-			let remaining = (limit - count) as u32;
-			match entry {
-				UniqueUnionEntry::PointGet(key) => {
-					if tx.exists(&key, None).await? {
-						count += 1;
-					}
-				}
-				UniqueUnionEntry::PrefixScan {
-					mut beg,
-					end,
-				} => {
-					let res = tx.keys(beg.clone()..end.clone(), remaining, 0, None).await?;
-					count += res.len();
-					if let Some(key) = res.last() {
-						beg.clone_from(key);
-						beg.push(0x00);
-						self.entries.push_front(UniqueUnionEntry::PrefixScan {
-							beg,
-							end,
-						});
-					}
-				}
+			count += 1;
+
+			let keys = scan_keys(next, tx, limit - res as u32).await?;
+
+			res += keys.len() as usize;
+
+			if next.is_empty() {
+				self.entries.pop();
 			}
-			if count >= limit {
+
+			if limit as usize <= res {
 				break;
 			}
 		}
-		Ok(count)
+		Ok(res)
 	}
 }
 
@@ -1756,7 +1361,7 @@ where
 						doc_id: Some(doc_id),
 						dist: None,
 					};
-					records.add(IndexItemRecord::new_key(thg, ir));
+					records.add_key(thg, ir);
 					self.hits_left -= 1;
 				} else {
 					break;
@@ -1827,7 +1432,7 @@ impl KnnIterator {
 					doc_id: None,
 					dist: Some(dist),
 				};
-				records.add(IndexItemRecord::new(thing, ir, val));
+				records.add(thing, ir, val);
 			} else {
 				break;
 			}
@@ -1853,7 +1458,7 @@ impl KnnIterator {
 	}
 }
 
-pub(crate) struct IndexCountThingIterator(Option<Range<Key>>);
+pub(crate) struct IndexCountThingIterator(Option<crate::key::KeyRange<'static>>);
 
 /// Snapshot gathered by the read phase of count-index compaction.
 ///
@@ -1866,7 +1471,7 @@ pub(crate) struct IndexCountCompactionPlan {
 	count: i64,
 	has_delta: bool,
 	has_more: bool,
-	keys: Vec<Key>,
+	keys: Vec<Vec<u8>>,
 }
 
 impl IndexCountCompactionPlan {
@@ -1888,8 +1493,19 @@ impl IndexCountThingIterator {
 		tb: &TableName,
 		ix: IndexId,
 	) -> Result<Self> {
-		Ok(Self(Some(IndexCountKey::range(ns, db, tb, ix)?)))
+		Ok(Self(Some(
+			crate::key::index::iu::IndexPrefix {
+				prefix: DatabaseRoot {
+					ns,
+					db,
+				},
+				tb: std::borrow::Cow::Borrowed(tb),
+				ix,
+			}
+			.encode_range()?,
+		)))
 	}
+
 	async fn next_count(
 		&mut self,
 		ctx: &FrozenContext,
@@ -2007,15 +1623,24 @@ impl IndexCountThingIterator {
 		if !bump_compaction_generation(txn, &ikb.new_iv_key(), plan.generation).await? {
 			return Ok(false);
 		}
-		for key in plan.keys {
-			txn.del(&key).await?;
+		for key in plan.keys.iter() {
+			txn.del(key.into()).await?;
 		}
 		let count = plan.count;
 		let pos = count.is_positive();
 		let count = count.unsigned_abs();
-		let compact_key =
-			IndexCountKey::new(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None, pos, count);
-		txn.set(&compact_key, &()).await?;
+		let compact_key = IndexCountKey {
+			prefix: DatabaseRoot {
+				ns: ikb.ns(),
+				db: ikb.db(),
+			},
+			tb: std::borrow::Cow::Borrowed(ikb.table()),
+			ix: ikb.index(),
+			uid: None,
+			pos,
+			count,
+		};
+		txn.set_key(&compact_key, &()).await?;
 		Ok(true)
 	}
 
@@ -2042,6 +1667,46 @@ mod tests {
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::{Read, Write};
+
+	fn count_key<'a>(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a TableName,
+		ix: IndexId,
+		uid: Option<(Uuid, Uuid)>,
+		pos: bool,
+		count: u64,
+	) -> IndexCountKey<'a> {
+		IndexCountKey {
+			prefix: crate::key::database::all::DatabaseRoot {
+				ns,
+				db,
+			},
+			tb: std::borrow::Cow::Borrowed(tb),
+			ix,
+			uid,
+			pos,
+			count,
+		}
+	}
+
+	fn count_range(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+	) -> crate::key::KeyRange<'static> {
+		crate::key::index::iu::IndexPrefix {
+			prefix: crate::key::database::all::DatabaseRoot {
+				ns,
+				db,
+			},
+			tb: std::borrow::Cow::Borrowed(tb),
+			ix,
+		}
+		.encode_range()
+		.unwrap()
+	}
 
 	async fn count_value(ds: &Datastore, ikb: &IndexKeyBase) -> usize {
 		let mut count_iter =
@@ -2079,10 +1744,10 @@ mod tests {
 			let tx = ds.transaction(Write, Optimistic).await.unwrap();
 			let uid1 = (Uuid::new_v4(), Uuid::new_v4());
 			let uid2 = (Uuid::new_v4(), Uuid::new_v4());
-			let k1 = IndexCountKey::new(ns, db, &tb, ix, Some(uid1), true, 10);
-			let k2 = IndexCountKey::new(ns, db, &tb, ix, Some(uid2), true, 5);
-			tx.set(&k1, &()).await.unwrap();
-			tx.set(&k2, &()).await.unwrap();
+			let k1 = count_key(ns, db, &tb, ix, Some(uid1), true, 10);
+			let k2 = count_key(ns, db, &tb, ix, Some(uid2), true, 5);
+			tx.set_key(&k1, &()).await.unwrap();
+			tx.set_key(&k2, &()).await.unwrap();
 			tx.commit().await.unwrap();
 		}
 
@@ -2107,8 +1772,8 @@ mod tests {
 		{
 			let tx = ds.transaction(Write, Optimistic).await.unwrap();
 			let uid3 = (Uuid::new_v4(), Uuid::new_v4());
-			let k3 = IndexCountKey::new(ns, db, &tb, ix, Some(uid3), true, 7);
-			tx.set(&k3, &()).await.unwrap();
+			let k3 = count_key(ns, db, &tb, ix, Some(uid3), true, 7);
+			tx.set_key(&k3, &()).await.unwrap();
 			tx.commit().await.unwrap();
 		}
 
@@ -2143,8 +1808,8 @@ mod tests {
 		{
 			let tx = ds.transaction(Write, Optimistic).await.unwrap();
 			let uid1 = (Uuid::new_v4(), Uuid::new_v4());
-			let k1 = IndexCountKey::new(ns, db, &tb, ix, Some(uid1), true, 10);
-			tx.set(&k1, &()).await.unwrap();
+			let k1 = count_key(ns, db, &tb, ix, Some(uid1), true, 10);
+			tx.set_key(&k1, &()).await.unwrap();
 			tx.commit().await.unwrap();
 		}
 
@@ -2162,8 +1827,8 @@ mod tests {
 		{
 			let tx = ds.transaction(Write, Optimistic).await.unwrap();
 			let uid2 = (Uuid::new_v4(), Uuid::new_v4());
-			let k2 = IndexCountKey::new(ns, db, &tb, ix, Some(uid2), true, 7);
-			tx.set(&k2, &()).await.unwrap();
+			let k2 = count_key(ns, db, &tb, ix, Some(uid2), true, 7);
+			tx.set_key(&k2, &()).await.unwrap();
 			tx.commit().await.unwrap();
 		}
 
@@ -2174,8 +1839,8 @@ mod tests {
 		}
 
 		let tx = ds.transaction(Read, Optimistic).await.unwrap();
-		assert_eq!(tx.get(&ikb.new_iv_key(), None).await.unwrap(), Some(1));
-		let range = IndexCountKey::range(ns, db, &tb, ix).unwrap();
+		assert_eq!(tx.get_key(&ikb.new_iv_key(), None).await.unwrap(), Some(1));
+		let range = count_range(ns, db, &tb, ix);
 		assert_eq!(
 			tx.count(range, None).await.unwrap(),
 			2,
@@ -2198,8 +1863,8 @@ mod tests {
 			let tx = ds.transaction(Write, Optimistic).await.unwrap();
 			for count in [10, 5, 7] {
 				let uid = (Uuid::new_v4(), Uuid::new_v4());
-				let key = IndexCountKey::new(ns, db, &tb, ix, Some(uid), true, count);
-				tx.set(&key, &()).await.unwrap();
+				let key = count_key(ns, db, &tb, ix, Some(uid), true, count);
+				tx.set_key(&key, &()).await.unwrap();
 			}
 			tx.commit().await.unwrap();
 		}
@@ -2225,7 +1890,7 @@ mod tests {
 
 		let tx = ds.transaction(Read, Optimistic).await.unwrap();
 		assert_eq!(
-			tx.count(IndexCountKey::range(ns, db, &tb, ix).unwrap(), None).await.unwrap(),
+			tx.count(count_range(ns, db, &tb, ix), None).await.unwrap(),
 			2,
 			"first batch should leave compacted root plus one residual delta"
 		);
@@ -2253,7 +1918,7 @@ mod tests {
 
 		let tx = ds.transaction(Read, Optimistic).await.unwrap();
 		assert_eq!(
-			tx.count(IndexCountKey::range(ns, db, &tb, ix).unwrap(), None).await.unwrap(),
+			tx.count(count_range(ns, db, &tb, ix), None).await.unwrap(),
 			1,
 			"second batch should collapse all deltas into one compacted root"
 		);
@@ -2273,8 +1938,8 @@ mod tests {
 		{
 			let tx = ds.transaction(Write, Optimistic).await.unwrap();
 			let uid1 = (Uuid::new_v4(), Uuid::new_v4());
-			let k1 = IndexCountKey::new(ns, db, &tb, ix, Some(uid1), true, 10);
-			tx.set(&k1, &()).await.unwrap();
+			let k1 = count_key(ns, db, &tb, ix, Some(uid1), true, 10);
+			tx.set_key(&k1, &()).await.unwrap();
 			tx.commit().await.unwrap();
 		}
 
@@ -2311,7 +1976,7 @@ mod tests {
 		}
 
 		let tx = ds.transaction(Read, Optimistic).await.unwrap();
-		assert_eq!(tx.get(&ikb.new_iv_key(), None).await.unwrap(), Some(1));
+		assert_eq!(tx.get_key(&ikb.new_iv_key(), None).await.unwrap(), Some(1));
 		tx.cancel().await.unwrap();
 		assert_eq!(count_value(&ds, &ikb).await, 10);
 	}

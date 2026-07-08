@@ -1,4 +1,5 @@
 use std::any::{Any, TypeId};
+use std::borrow::Cow;
 #[cfg(not(target_family = "wasm"))]
 use std::collections::HashMap;
 #[cfg(target_family = "wasm")]
@@ -34,7 +35,7 @@ use super::api::{BoxFut, Transactable};
 use super::tr::Transactor;
 use super::tx::Transaction;
 use super::version::MajorVersion;
-use super::{Key, Val, export};
+use super::{Val, export};
 use crate::api::err::ApiError;
 use crate::api::invocation::process_api_request;
 use crate::api::request::ApiRequest;
@@ -71,10 +72,9 @@ use crate::iam::{Action, Auth, Error as IamError, Resource, ResourceKind, Role};
 use crate::idx::IndexKeyBase;
 use crate::idx::index::IndexOperation;
 use crate::idx::trees::store::IndexStores;
-use crate::key::root::ic::IndexCompactionKey;
-use crate::key::root::rc::{
-	RECLAIM_DATABASE, RECLAIM_INDEX, RECLAIM_NAMESPACE, ReclaimKey, ReclaimState,
-};
+use crate::key::root::ic::{IndexCompactionKey, IndexCompactionPrefix};
+use crate::key::root::rc::{Expunge, ReclaimKey, ReclaimKind, ReclaimPrefix, ReclaimState};
+use crate::key::{KVKeyDecode, KVRange, KVValue, Key, KeyRange};
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::kvs::cache::ds::DatastoreCache;
@@ -88,9 +88,7 @@ use crate::kvs::slowlog::SlowLog;
 use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 #[cfg(test)]
 use crate::kvs::testing::{RetryableConflictSite, maybe_inject_retryable_conflict};
-use crate::kvs::{
-	KVValue, LockType, NORMAL_BATCH_SIZE, TransactionType, is_retryable_transaction_conflict,
-};
+use crate::kvs::{LockType, NORMAL_BATCH_SIZE, TransactionType, is_retryable_transaction_conflict};
 use crate::lq::LiveQueryRouter;
 use crate::observe::{ExecutionObserver, NoopObserver};
 use crate::sql::Ast;
@@ -1097,8 +1095,10 @@ impl Datastore {
 	/// any in-memory cluster topology.
 	pub async fn lookup_node_endpoint(&self, node_id: Uuid) -> Result<Option<String>> {
 		let txn = self.transaction(Read, Optimistic).await?;
-		let key = crate::key::root::nd::Nd::new(node_id);
-		let res = txn.get(&key, None).await?;
+		let key = crate::key::root::nd::Nd {
+			nd: node_id,
+		};
+		let res = txn.get_key(&key, None).await?;
 		// Always cancel a read transaction; we don't write through it.
 		let _ = txn.cancel().await;
 		Ok(res.and_then(|node: Node| node.http_endpoint))
@@ -1209,9 +1209,9 @@ impl Datastore {
 		// Start a new writeable transaction
 		let txn = self.transaction(Write, Optimistic).await?.enclose();
 		// Create the key where the version is stored
-		let key = crate::key::version::new();
+		let key = crate::key::version::Version {};
 		// Check if a version is already set in storage
-		let val = match catch!(txn, txn.get(&key, None).await) {
+		let val = match catch!(txn, txn.get_key(&key, None).await) {
 			// There is a version set in the storage
 			Some(val) => {
 				// We didn't write anything, so just rollback
@@ -1222,8 +1222,9 @@ impl Datastore {
 			// There is no version set in the storage
 			None => {
 				// Fetch any keys immediately following the version key
-				let rng = crate::key::version::proceeding();
-				let keys = catch!(txn, txn.keys(rng, 1, 0, None).await);
+				let start = crate::key::version::Version {}.encode_bound()?;
+				let end = Key::from(&[0xff]);
+				let keys = catch!(txn, txn.keys((start..end).into(), 1, 0, None).await);
 				// Check the storage if there are any other keys set
 				let version = if keys.is_empty() {
 					// There are no keys set in storage, so this is a new database
@@ -1241,7 +1242,7 @@ impl Datastore {
 					MajorVersion::v1()
 				};
 				// Attempt to set the current version in storage
-				catch!(txn, txn.replace(&key, &version).await);
+				catch!(txn, txn.replace_key(&key, &version).await);
 				// We set the version, so commit the transaction
 				catch!(txn, txn.commit().await);
 				// Return the current version
@@ -1365,12 +1366,18 @@ impl Datastore {
 	/// responsible for ensuring the data is already logically inaccessible
 	/// (typically by running this only after a committed catalog-clearing
 	/// transaction).
-	pub async fn unsafe_destroy_range(&self, start: Vec<u8>, end: Vec<u8>) -> Result<()> {
-		#[cfg(feature = "kv-tikv")]
-		if let Some(ops) = self.tikv_ops() {
-			return ops.unsafe_destroy_range(start, end).await.map_err(Into::into);
+	pub async fn unsafe_destroy_range(&self, range: KeyRange<'static>) -> Result<()> {
+		cfg_select! {
+			feature = "kv-tikv" => {
+				if let Some(ops) = self.tikv_ops() {
+					return ops.unsafe_destroy_range(range).await.map_err(Into::into);
+				}
+			}
+			_ => {
+				let _ = range;
+			}
+
 		}
-		let _ = (start, end);
 		Ok(())
 	}
 
@@ -1697,10 +1704,12 @@ impl Datastore {
 		crate::sys::refresh().await;
 		// Open transaction and set node data
 		let txn = self.transaction(Write, Optimistic).await?;
-		let key = crate::key::root::nd::Nd::new(self.id);
+		let key = crate::key::root::nd::Nd {
+			nd: self.id,
+		};
 		let now = self.clock_now();
 		let node = Node::new_with_endpoint(self.id, now, false, self.http_endpoint.clone());
-		run!(txn, txn.set(&key, &node).await)
+		run!(txn, txn.set_key(&key, &node).await)
 	}
 
 	/// Updates an already existing node in the cluster.
@@ -1718,10 +1727,12 @@ impl Datastore {
 		crate::sys::refresh().await;
 		// Open transaction and set node data
 		let txn = self.transaction(Write, Optimistic).await?;
-		let key = crate::key::root::nd::new(self.id);
+		let key = crate::key::root::nd::Nd {
+			nd: self.id,
+		};
 		let now = self.clock_now();
 		let node = Node::new_with_endpoint(self.id, now, false, self.http_endpoint.clone());
-		run!(txn, txn.replace(&key, &node).await)
+		run!(txn, txn.replace_key(&key, &node).await)
 	}
 
 	/// Updates this node, bounding each step and explicitly cancelling any
@@ -1749,7 +1760,9 @@ impl Datastore {
 			self.transaction(Write, Optimistic),
 		)
 		.await?;
-		let key = crate::key::root::nd::new(self.id);
+		let key = crate::key::root::nd::Nd {
+			nd: self.id,
+		};
 		let now = self.clock_now();
 		let node = Node::new_with_endpoint(self.id, now, false, self.http_endpoint.clone());
 
@@ -1758,7 +1771,7 @@ impl Datastore {
 			deadline,
 			timeout_duration,
 			Some(canceller),
-			txn.replace(&key, &node),
+			txn.replace_key(&key, &node),
 		)
 		.await?;
 		await_node_tx_step(&txn, deadline, timeout_duration, Some(canceller), txn.commit()).await
@@ -1777,10 +1790,12 @@ impl Datastore {
 		trace!(target: TARGET, id = %self.id, "Archiving node in the cluster");
 		// Open transaction and set node data
 		let txn = self.transaction(Write, Optimistic).await?;
-		let key = crate::key::root::nd::new(self.id);
+		let key = crate::key::root::nd::Nd {
+			nd: self.id,
+		};
 		let val = catch!(txn, txn.get_node(self.id).await);
 		let node = val.as_ref().archive();
-		run!(txn, txn.replace(&key, &node).await)
+		run!(txn, txn.replace_key(&key, &node).await)
 	}
 
 	/// Archives this node, bounding each step and explicitly cancelling any
@@ -1793,12 +1808,14 @@ impl Datastore {
 		let txn =
 			await_node_step(deadline, timeout_duration, None, self.transaction(Write, Optimistic))
 				.await?;
-		let key = crate::key::root::nd::new(self.id);
+		let key = crate::key::root::nd::Nd {
+			nd: self.id,
+		};
 		let val = await_node_tx_step(&txn, deadline, timeout_duration, None, txn.get_node(self.id))
 			.await?;
 		let node = val.as_ref().archive();
 
-		await_node_tx_step(&txn, deadline, timeout_duration, None, txn.replace(&key, &node))
+		await_node_tx_step(&txn, deadline, timeout_duration, None, txn.replace_key(&key, &node))
 			.await?;
 		await_node_tx_step(&txn, deadline, timeout_duration, None, txn.commit()).await
 	}
@@ -1842,9 +1859,11 @@ impl Datastore {
 				// Mark the node as archived
 				let node = nd.archive();
 				// Get the key for the node entry
-				let key = crate::key::root::nd::new(nd.id);
+				let key = crate::key::root::nd::Nd {
+					nd: nd.id,
+				};
 				// Update the node entry
-				catch!(txn, txn.replace(&key, &node).await);
+				catch!(txn, txn.replace_key(&key, &node).await);
 			}
 			// Commit the changes
 			catch!(txn, txn.commit().await);
@@ -1875,9 +1894,12 @@ impl Datastore {
 		// Loop over the archived nodes
 		for id in archived.iter() {
 			// Open a writeable transaction
-			let beg = crate::key::node::lq::prefix(*id)?;
-			let end = crate::key::node::lq::suffix(*id)?;
-			let mut next = Some(beg..end);
+			let mut next = Some(
+				crate::key::node::lq::LqPrefix {
+					nd: *id,
+				}
+				.encode_range()?,
+			);
 			let txn = self.transaction(Write, Optimistic).await?;
 			{
 				// Log the live query scanning
@@ -1895,11 +1917,18 @@ impl Datastore {
 						// Check that the node for this query is archived
 						if archived.contains(&nlq.nd) {
 							// Get the key for this table live query
-							let tlq = crate::key::table::lq::new(val.ns, val.db, &val.tb, nlq.lq);
+							let tlq = crate::key::table::lq::Lq {
+								prefix: crate::key::database::all::DatabaseRoot {
+									ns: val.ns,
+									db: val.db,
+								},
+								tb: Cow::Borrowed(&val.tb),
+								lq: nlq.lq,
+							};
 							// Delete the table live query
-							catch!(txn, txn.clr(&tlq).await);
+							catch!(txn, txn.clr_key(&tlq).await);
 							// Delete the node live query
-							catch!(txn, txn.clr(&nlq).await);
+							catch!(txn, txn.clr_key(&nlq).await);
 						}
 					}
 					// Pause and yield execution
@@ -1910,9 +1939,11 @@ impl Datastore {
 				// Log the node deletion
 				trace!(target: TARGET, id = %id, "Deleting node from the cluster");
 				// Get the key for the node entry
-				let key = crate::key::root::nd::new(*id);
+				let key = crate::key::root::nd::Nd {
+					nd: *id,
+				};
 				// Delete the cluster node entry
-				catch!(txn, txn.clr(&key).await);
+				catch!(txn, txn.clr_key(&key).await);
 			}
 			// Commit the changes
 			catch!(txn, txn.commit().await);
@@ -1977,11 +2008,16 @@ impl Datastore {
 					// Log the namespace
 					trace!(target: TARGET, "Garbage collecting data in table {}/{}/{}", ns.name, db.name, tb.name);
 					// Iterate over the table live queries
-					let beg =
-						crate::key::table::lq::prefix(db.namespace_id, db.database_id, &tb.name)?;
-					let end =
-						crate::key::table::lq::suffix(db.namespace_id, db.database_id, &tb.name)?;
-					let mut next = Some(beg..end);
+					let mut next = Some(
+						crate::key::table::lq::LqPrefix {
+							prefix: crate::key::database::all::DatabaseRoot {
+								ns: db.namespace_id,
+								db: db.database_id,
+							},
+							tb: Cow::Borrowed(&tb.name),
+						}
+						.encode_range()?,
+					);
 					let txn = self.transaction(Write, Optimistic).await?;
 					while let Some(rng) = next {
 						// Fetch the next batch of keys and values
@@ -1998,11 +2034,14 @@ impl Datastore {
 								// Get the key for this node live query
 								let tlq = catch!(txn, crate::key::table::lq::Lq::decode_key(k));
 								// Get the key for this table live query
-								let nlq = crate::key::node::lq::new(nid, lid);
+								let nlq = crate::key::node::lq::Lq {
+									nd: nid,
+									lq: lid,
+								};
 								// Delete the node live query
-								catch!(txn, txn.clr(&nlq).await);
+								catch!(txn, txn.clr_key(&nlq).await);
 								// Delete the table live query
-								catch!(txn, txn.clr(&tlq).await);
+								catch!(txn, txn.clr_key(&tlq).await);
 							}
 						}
 						// Pause and yield execution
@@ -2038,17 +2077,30 @@ impl Datastore {
 		// Loop over the live query unique ids
 		for id in ids {
 			// Get the key for this node live query
-			let nlq = crate::key::node::lq::new(self.id(), id);
+			let nlq = crate::key::node::lq::Lq {
+				nd: self.id(),
+				lq: id,
+			};
 			// Fetch the LIVE meta data node entry
-			if let Some(lq) = catch!(txn, txn.get(&nlq, None).await) {
+			if let Some(lq) = catch!(txn, txn.get_key(&nlq, None).await) {
 				// Get the key for this node live query
-				let nlq = crate::key::node::lq::new(self.id(), id);
+				let nlq = crate::key::node::lq::Lq {
+					nd: self.id(),
+					lq: id,
+				};
 				// Get the key for this table live query
-				let tlq = crate::key::table::lq::new(lq.ns, lq.db, &lq.tb, id);
+				let tlq = crate::key::table::lq::Lq {
+					prefix: crate::key::database::all::DatabaseRoot {
+						ns: lq.ns,
+						db: lq.db,
+					},
+					tb: Cow::Borrowed(&lq.tb),
+					lq: id,
+				};
 				// Delete the table live query
-				catch!(txn, txn.clr(&tlq).await);
+				catch!(txn, txn.clr_key(&tlq).await);
 				// Delete the node live query
-				catch!(txn, txn.clr(&nlq).await);
+				catch!(txn, txn.clr_key(&nlq).await);
 			}
 		}
 		// Commit the changes
@@ -2318,8 +2370,7 @@ impl Datastore {
 			trace!(target: TARGET, "Running index compaction process");
 			// Read the compaction queue in a short-lived read transaction
 			// to avoid holding a write lock across the entire compaction cycle
-			let (beg, end) = IndexCompactionKey::range();
-			let range = beg..end;
+			let range = IndexCompactionPrefix {}.encode_range()?;
 			let items = {
 				let txn = dbs.transaction(Read, Optimistic).await?;
 				let res = txn.getr(range, None).await;
@@ -2331,7 +2382,7 @@ impl Datastore {
 				return Ok((count_iteration, count_error));
 			}
 			// Collect the keys so we can delete them after processing
-			let keys: Vec<Key> = items.iter().map(|(k, _)| k.clone()).collect();
+			let keys: Vec<Vec<u8>> = items.iter().map(|(k, _)| k.clone()).collect();
 			// Process compaction for each index
 			count_iteration += 1;
 			count_error +=
@@ -2350,7 +2401,7 @@ impl Datastore {
 					return Err(e);
 				}
 				for k in &keys {
-					if let Err(e) = txn.del(k).await {
+					if let Err(e) = txn.del(Key::from(k)).await {
 						warn!(target: TARGET, "Failed to delete compaction queue entry: {e}");
 					}
 				}
@@ -2456,10 +2507,10 @@ impl Datastore {
 			Self::ensure_not_cancelled(&canceller)?;
 			// Read the reclaim queue in a short-lived read transaction to avoid
 			// holding a write lock across the entire reclaim cycle.
-			let (beg, end) = ReclaimKey::range();
+			let range = ReclaimPrefix {}.encode_range()?;
 			let items = {
 				let txn = dbs.transaction(Read, Optimistic).await?;
-				let res = txn.getr(beg..end, None).await;
+				let res = txn.getr(range, None).await;
 				let _ = txn.cancel().await;
 				res?
 			};
@@ -2480,8 +2531,8 @@ impl Datastore {
 			// observation time so aging is measured from commit, not the
 			// pre-commit `uid`). Entries seen but still inside the grace window
 			// are left untouched for a later pass.
-			let mut done: Vec<Key> = Vec::with_capacity(items.len());
-			let mut to_stamp: Vec<Key> = Vec::new();
+			let mut done: Vec<Vec<u8>> = Vec::with_capacity(items.len());
+			let mut to_stamp: Vec<Vec<u8>> = Vec::new();
 			for (k, v) in &items {
 				Self::ensure_not_cancelled(&canceller)?;
 				lh.try_maintain_lease().await?;
@@ -2547,13 +2598,13 @@ impl Datastore {
 						let state = ReclaimState {
 							observed_ms: now_ms,
 						};
-						if let Err(e) = txn.set(&rc, &state).await {
+						if let Err(e) = txn.set_key(&rc, &state).await {
 							warn!(target: TARGET, "Failed to stamp reclaim queue entry: {e}");
 						}
 					}
 				}
 				for k in &done {
-					if let Err(e) = txn.del(k).await {
+					if let Err(e) = txn.del(Key::from(k)).await {
 						warn!(target: TARGET, "Failed to delete reclaim queue entry: {e}");
 					}
 				}
@@ -2575,23 +2626,31 @@ impl Datastore {
 
 	/// Destroy the data prefix of a decoded reclaim queue entry.
 	async fn reclaim_decoded(&self, rc: &ReclaimKey<'_>) -> Result<()> {
-		let expunge = rc.expunge != 0;
+		let expunge = rc.expunge == Expunge::Expunge;
 		match rc.kind {
-			RECLAIM_NAMESPACE => {
-				let prefix = crate::key::namespace::all::new(rc.ns);
+			ReclaimKind::Namespace => {
+				let prefix = crate::key::namespace::all::NamespaceRoot {
+					ns: rc.ns,
+				};
 				self.reclaim_prefix(&prefix, expunge).await
 			}
-			RECLAIM_DATABASE => {
-				let prefix = crate::key::database::all::new(rc.ns, rc.db);
+			ReclaimKind::Database => {
+				let prefix = crate::key::database::all::DatabaseRoot {
+					ns: rc.ns,
+					db: rc.db,
+				};
 				self.reclaim_prefix(&prefix, expunge).await
 			}
-			RECLAIM_INDEX => {
-				let prefix = crate::key::index::all::new(rc.ns, rc.db, rc.tb.as_ref(), rc.ix);
+			ReclaimKind::Index => {
+				let prefix = crate::key::index::all::AllIndexRoot {
+					prefix: crate::key::database::all::DatabaseRoot {
+						ns: rc.ns,
+						db: rc.db,
+					},
+					tb: Cow::Borrowed(rc.tb.as_ref()),
+					ix: rc.ix,
+				};
 				self.reclaim_prefix(&prefix, expunge).await
-			}
-			other => {
-				warn!(target: TARGET, "Unknown reclaim queue entry kind {other}, skipping");
-				Ok(())
 			}
 		}
 	}
@@ -2601,24 +2660,24 @@ impl Datastore {
 	/// re-run on an already-empty prefix is a no-op.
 	async fn reclaim_prefix<K>(&self, prefix: &K, expunge: bool) -> Result<()>
 	where
-		K: crate::kvs::KVKey + std::fmt::Debug,
+		K: KVRange + std::fmt::Debug,
 	{
 		#[cfg(feature = "kv-tikv")]
 		if self.tikv_ops().is_some() {
 			// `unsafe_destroy_range` hard-removes every version in the range
 			// in a single out-of-transaction call, so it ignores `expunge`
 			// (the catalog entry is already gone — there is nothing to retain).
-			let range = crate::kvs::util::to_prefix_range(prefix)?;
-			return self.unsafe_destroy_range(range.start, range.end).await;
+			let range = prefix.encode_range()?;
+			return self.unsafe_destroy_range(range).await;
 		}
 		// Non-TiKV backends: delete the prefix transactionally. This runs off
 		// the user request path, so even a large prefix delete here cannot trip
 		// a client deadline.
 		let txn = self.transaction(Write, Optimistic).await?;
 		let res = if expunge {
-			txn.clrp(prefix).await
+			txn.clr_prefix_key(prefix).await
 		} else {
-			txn.delp(prefix).await
+			txn.del_prefix_key(prefix).await
 		};
 		match res {
 			Ok(()) => txn.commit().await,
@@ -2671,7 +2730,7 @@ impl Datastore {
 	async fn index_compaction_loop(
 		dbs: Arc<Datastore>,
 		lh: &LeaseHandler,
-		items: Vec<(Key, Val)>,
+		items: Vec<(Vec<u8>, Val)>,
 		canceller: CancellationToken,
 	) -> Result<usize> {
 		let mut compacted_indexes = HashMap::new();
@@ -2733,7 +2792,7 @@ impl Datastore {
 	async fn index_compaction_loop(
 		dbs: Arc<Datastore>,
 		lh: &LeaseHandler,
-		items: Vec<(Key, Val)>,
+		items: Vec<(Vec<u8>, Val)>,
 		canceller: CancellationToken,
 	) -> Result<usize> {
 		let mut seen = HashSet::new();
@@ -3377,7 +3436,7 @@ impl Datastore {
 		// Cancel the transaction
 		trace!("Cancelling health check transaction");
 		// Attempt to fetch data
-		match tx.get(&vec![0x00], None).await {
+		match tx.get(Key::from(&[0x00]), None).await {
 			Err(err) => {
 				// Ensure the transaction is cancelled
 				let _ = tx.cancel().await;
@@ -4477,8 +4536,10 @@ impl crate::dbs::NodeEndpointResolver for CatalogNodeEndpointResolver {
 				.transaction(Read, Optimistic, self.sequences.clone())
 				.await
 				.ok()?;
-			let key = crate::key::root::nd::Nd::new(uuid);
-			let node: Option<Node> = txn.get(&key, None).await.ok()?;
+			let key = crate::key::root::nd::Nd {
+				nd: uuid,
+			};
+			let node: Option<Node> = txn.get_key(&key, None).await.ok()?;
 			let _ = txn.cancel().await;
 			node.and_then(|n| n.http_endpoint)
 		})
@@ -5361,9 +5422,11 @@ mod test {
 			},
 			false,
 		);
-		let key = crate::key::root::nd::new(ds.id());
+		let key = crate::key::root::nd::Nd {
+			nd: ds.id(),
+		};
 		let txn = ds.transaction(Write, Optimistic).await.unwrap();
-		txn.set(&key, &stale).await.unwrap();
+		txn.set_key(&key, &stale).await.unwrap();
 		txn.commit().await.unwrap();
 		// The reported age should reflect the stale heartbeat.
 		let age = ds.node_heartbeat_age().await.unwrap();

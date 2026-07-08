@@ -6,7 +6,7 @@ use crate::catalog::Permission;
 use crate::catalog::auth::AuthLimit;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Block, Kind};
-use crate::kvs::impl_kv_value_revisioned;
+use crate::key::impl_kv_value_revisioned;
 use crate::sql::statements::define::DefineKind;
 use crate::sql::{self, DefineFunctionStatement};
 use crate::val::Value;

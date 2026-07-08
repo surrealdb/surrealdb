@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -17,13 +18,14 @@ use crate::doc::{Action, CursorDoc, Document, DocumentContext};
 use crate::err::Error;
 use crate::expr::FlowResultExt as _;
 use crate::iam::{Auth, AuthLimit};
-use crate::key::root::eq::EventQueue;
+use crate::key::root::eq::{EventQueue, EventQueuePrefix};
+use crate::key::{KVKeyDecode, KVRange, KVValue, impl_kv_value_revisioned};
 use crate::kvs::TransactionType::Write;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::tasklease::LeaseHandler;
 use crate::kvs::{
-	Datastore, HlcTimeStamp, KVValue, Key, LockType, NORMAL_BATCH_SIZE, Transaction,
-	TransactionFactory, TransactionType, Val, impl_kv_value_revisioned,
+	Datastore, HlcTimeStamp, LockType, NORMAL_BATCH_SIZE, Transaction, TransactionFactory,
+	TransactionType, Val,
 };
 use crate::val::{RecordId, Value};
 
@@ -159,16 +161,16 @@ impl Document {
 		// Persist the event payload so it can be processed out-of-band.
 		// Use the current transaction so enqueue is atomic with the document change.
 		// HLC timestamp + node ID keep the queue key ordered and unique.
-		let key = EventQueue::new(
-			db.namespace_id,
-			db.database_id,
-			&ev.target_table,
-			&ev.name,
-			ts,
+		let key = EventQueue {
+			ns: db.namespace_id,
+			db: db.database_id,
+			tb: Cow::Borrowed(&ev.target_table),
+			ev: Cow::Borrowed(&ev.name),
+			ts: ts.0,
 			node_id,
-		);
+		};
 		let event_record = AsyncEventRecord::new(&opt, &ctx, ev, cursor_doc)?;
-		tx.put(&key, &event_record).await?;
+		tx.put_key(&key, &event_record).await?;
 		tx.trigger_async_event();
 		Ok(())
 	}
@@ -302,9 +304,9 @@ impl AsyncEventRecord {
 				lh.try_maintain_lease().await?;
 			}
 			let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
-			let (beg, end) = EventQueue::range();
+			let range = EventQueuePrefix {}.encode_range()?;
 			// Read a bounded batch without holding a write transaction.
-			let res = catch!(tx, tx.scan(beg..end, NORMAL_BATCH_SIZE, 0, None).await);
+			let res = catch!(tx, tx.scan(range, NORMAL_BATCH_SIZE, 0, None).await);
 			tx.cancel().await?;
 			res
 		};
@@ -316,7 +318,7 @@ impl AsyncEventRecord {
 	#[cfg(not(target_family = "wasm"))]
 	async fn process_events_batch(
 		ds: &Datastore,
-		res: Vec<(Key, Val)>,
+		res: Vec<(Vec<u8>, Val)>,
 		lh: Option<&LeaseHandler>,
 	) -> Result<()> {
 		if res.is_empty() {
@@ -378,7 +380,7 @@ impl AsyncEventRecord {
 	#[cfg(target_family = "wasm")]
 	async fn process_events_batch(
 		ds: &Datastore,
-		res: Vec<(Key, Val)>,
+		res: Vec<(Vec<u8>, Val)>,
 		lh: Option<&LeaseHandler>,
 	) -> Result<()> {
 		let mut stack = TreeStack::new();
@@ -399,12 +401,12 @@ struct AsyncEventContext {
 	tf: TransactionFactory,
 	sequences: Sequences,
 	lh: Option<LeaseHandler>,
-	k: Key,
+	k: Vec<u8>,
 	v: Option<Val>,
 }
 
 impl AsyncEventContext {
-	fn new(ds: &Datastore, lh: Option<LeaseHandler>, k: Key, v: Val) -> Result<Self> {
+	fn new(ds: &Datastore, lh: Option<LeaseHandler>, k: Vec<u8>, v: Val) -> Result<Self> {
 		Ok(Self {
 			ctx: Some(ds.setup_ctx()?),
 			opt: ds.setup_options(&Session::default()),
@@ -439,7 +441,7 @@ impl AsyncEventContext {
 		match Self::process_event(stk, &ctx, &self.opt, self.lh.as_ref(), &eq, &ev).await {
 			Ok(_) => {
 				// Event processed successfully, delete the event from the queue.
-				catch!(tx, tx.del(&eq).await);
+				catch!(tx, tx.del_key(&eq).await);
 				if let Err(e) = tx.commit().await {
 					// If the commit fails, requeue the event and commit that update.
 					tx.cancel().await?;
@@ -475,13 +477,13 @@ impl AsyncEventContext {
 		if ev.attempt <= ev.event_definition.retry() {
 			// Requeue with the same key so the event keeps its original queue position; retries are
 			// bounded here and no backoff is applied.
-			catch!(tx, tx.set(eq, ev).await);
+			catch!(tx, tx.set_key(eq, ev).await);
 		} else {
 			warn!(
 				"Final error after processing the event `{}` on table {} {} times: {e}",
 				eq.ev, ev.event_definition.target_table, ev.attempt
 			);
-			catch!(tx, tx.del(eq).await);
+			catch!(tx, tx.del_key(eq).await);
 		}
 		catch!(tx, tx.commit().await);
 		Ok(())
@@ -505,7 +507,7 @@ impl AsyncEventContext {
 	async fn final_error(tx: Transaction, eq: &EventQueue<'_>, e: &Error) -> Result<()> {
 		// The error is final, we log the final error message and remove the event from the queue
 		warn!("Event processing failed: {:?}", e);
-		catch!(tx, tx.del(eq).await);
+		catch!(tx, tx.del_key(eq).await);
 		catch!(tx, tx.commit().await);
 		// Carry on
 		Ok(())

@@ -2,85 +2,69 @@
 use std::borrow::Cow;
 
 use anyhow::Result;
-use storekey::{BorrowDecode, Encode};
 
-use crate::catalog::{AccessDefinition, DatabaseId, NamespaceId};
+use crate::catalog::AccessDefinition;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::{KVKey, impl_kv_key_storekey};
+use crate::key::database::all::DatabaseRoot;
+use crate::key::{impl_kv_key_storekey, impl_kv_range_storekey, key};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Ac<'a> {
-	__: u8,
-	_a: u8,
-	pub ns: NamespaceId,
-	_b: u8,
-	pub db: DatabaseId,
-	_c: u8,
-	_d: u8,
-	_e: u8,
-	pub ac: Cow<'a, str>,
+key! {
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+	pub(crate) struct AccessKey<'a> {
+		pub prefix: DatabaseRoot,
+		b'!',
+		b'a',
+		b'c',
+		pub ac: Cow<'a, str>,
+	}
 }
-
-impl_kv_key_storekey!(Ac<'_> => AccessDefinition);
-
-pub fn new(ns: NamespaceId, db: DatabaseId, ac: &str) -> Ac<'_> {
-	Ac::new(ns, db, ac)
-}
-
-pub fn prefix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
-	let mut k = crate::key::database::all::new(ns, db).encode_key()?;
-	k.extend_from_slice(b"!ac\x00");
-	Ok(k)
-}
-
-pub fn suffix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
-	let mut k = crate::key::database::all::new(ns, db).encode_key()?;
-	k.extend_from_slice(b"!ac\xff");
-	Ok(k)
-}
-
-impl Categorise for Ac<'_> {
+impl_kv_key_storekey!(AccessKey<'a> => AccessDefinition);
+impl Categorise for AccessKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::DatabaseAccess
 	}
 }
 
-impl<'a> Ac<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, ac: &'a str) -> Self {
-		Self {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
-			_c: b'!',
-			_d: b'a',
-			_e: b'c',
-			ac: Cow::Borrowed(ac),
-		}
+key! {
+	pub(crate) struct AccessKeyPrefix {
+		pub prefix: DatabaseRoot,
+		b'!',
+		b'a',
+		b'c',
 	}
 }
+impl_kv_range_storekey!(AccessKeyPrefix);
 
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::key::{KVKey, KVRange};
 
 	#[test]
 	fn key() {
-		let val = Ac::new(NamespaceId(1), DatabaseId(2), "testac");
-		let enc = Ac::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!actestac\0");
+		let val = AccessKey {
+			prefix: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+			ac: Cow::from("testac"),
+		};
+		let enc = AccessKey::encode_key(&val).unwrap();
+		assert_eq!(enc.as_slice(), b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!actestac\0");
 	}
 
 	#[test]
 	fn test_prefix() {
-		let val = super::prefix(NamespaceId(1), DatabaseId(2)).unwrap();
-		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!ac\0");
-	}
-
-	#[test]
-	fn test_suffix() {
-		let val = super::suffix(NamespaceId(1), DatabaseId(2)).unwrap();
-		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!ac\xff");
+		let val = AccessKeyPrefix {
+			prefix: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+		}
+		.encode_range()
+		.unwrap();
+		assert_eq!(val.start.as_slice(), b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!ac\0");
+		assert_eq!(val.end.as_slice(), b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!ad");
 	}
 }

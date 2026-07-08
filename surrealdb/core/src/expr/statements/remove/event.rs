@@ -66,8 +66,15 @@ impl RemoveEventStatement {
 			}
 		};
 		// Delete the definition
-		let key = crate::key::table::ev::new(ns, db, &ev.target_table, &ev.name);
-		txn.del(&key).await?;
+		let key = crate::key::table::ev::Ev {
+			prefix: crate::key::database::all::DatabaseRoot {
+				ns,
+				db,
+			},
+			tb: std::borrow::Cow::Borrowed(&ev.target_table),
+			ev: std::borrow::Cow::Borrowed(&ev.name),
+		};
+		txn.del_key(&key).await?;
 
 		let Some(tb) = txn.get_tb(ns, db, &table_name, None).await? else {
 			return Err(Error::TbNotFound {

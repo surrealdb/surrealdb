@@ -13,10 +13,11 @@ use web_time::{Duration, SystemTime};
 
 use crate::catalog::providers::DatabaseProvider;
 use crate::dbs::{Capabilities, Session};
-use crate::key::root::rc::{ReclaimKey, ReclaimState};
+use crate::key::root::rc::{ReclaimKey, ReclaimPrefix, ReclaimState};
+use crate::key::{KVKeyDecode, KVRange, KVValue, KeyRange};
+use crate::kvs::Datastore;
 use crate::kvs::LockType::Optimistic;
 use crate::kvs::TransactionType::{Read, Write};
-use crate::kvs::{Datastore, KVValue};
 
 async fn mem_ds() -> Arc<Datastore> {
 	Arc::new(
@@ -29,25 +30,25 @@ async fn mem_ds() -> Arc<Datastore> {
 }
 
 /// Count the keys currently stored under a half-open byte range.
-async fn count_range(ds: &Datastore, beg: Vec<u8>, end: Vec<u8>) -> usize {
+async fn count_range(ds: &Datastore, range: KeyRange<'_>) -> usize {
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let res = tx.getr(beg..end, None).await.unwrap();
+	let res = tx.getr(range, None).await.unwrap();
 	let _ = tx.cancel().await;
 	res.len()
 }
 
 /// Number of pending entries in the background reclaim queue.
 async fn reclaim_queue_len(ds: &Datastore) -> usize {
-	let (beg, end) = ReclaimKey::range();
-	count_range(ds, beg, end).await
+	let range = ReclaimPrefix {}.encode_range().unwrap();
+	count_range(ds, range).await
 }
 
 /// The `observed_ms` stamp of the single pending reclaim entry (asserts there is
 /// exactly one). `0` means the reclaim task has not yet observed it.
 async fn reclaim_entry_observed_ms(ds: &Datastore) -> u64 {
-	let (beg, end) = ReclaimKey::range();
+	let range = ReclaimPrefix {}.encode_range().unwrap();
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let items = tx.getr(beg..end, None).await.unwrap();
+	let items = tx.getr(range, None).await.unwrap();
 	let _ = tx.cancel().await;
 	assert_eq!(items.len(), 1, "expected exactly one reclaim queue entry");
 	ReclaimState::kv_decode_value(&items[0].1, ()).unwrap().observed_ms
@@ -78,10 +79,13 @@ async fn remove_database_defers_data_reclaim() {
 		let _ = tx.cancel().await;
 		(db.namespace_id, db.database_id)
 	};
-	let db_prefix = crate::key::database::all::new(ns_id, db_id);
-	let range = crate::kvs::util::to_prefix_range(&db_prefix).unwrap();
+	let db_prefix = crate::key::database::all::DatabaseRoot {
+		ns: ns_id,
+		db: db_id,
+	};
+	let range = db_prefix.encode_range().unwrap();
 	assert!(
-		count_range(&ds, range.start.clone(), range.end.clone()).await > 0,
+		count_range(&ds, range.as_borrowed()).await > 0,
 		"the database prefix should hold data before reclaim"
 	);
 	assert_eq!(reclaim_queue_len(&ds).await, 0, "no reclaim jobs before removal");
@@ -100,7 +104,7 @@ async fn remove_database_defers_data_reclaim() {
 	assert_eq!(reclaim_queue_len(&ds).await, 1, "REMOVE DATABASE must enqueue one reclaim job");
 	// ...and the data is still physically present (reclaim is deferred).
 	assert!(
-		count_range(&ds, range.start.clone(), range.end.clone()).await > 0,
+		count_range(&ds, range.as_borrowed()).await > 0,
 		"data must still be present before the reclaim task runs"
 	);
 
@@ -116,7 +120,7 @@ async fn remove_database_defers_data_reclaim() {
 
 	// The data prefix is now physically gone and the queue is drained.
 	assert_eq!(
-		count_range(&ds, range.start.clone(), range.end.clone()).await,
+		count_range(&ds, range.as_borrowed()).await,
 		0,
 		"the reclaim task must destroy the database data prefix"
 	);
@@ -134,10 +138,13 @@ async fn remove_database_defers_data_reclaim() {
 
 	// The recreated database starts physically empty — none of the removed
 	// database's data is reachable under the new (disjoint) prefix.
-	let new_prefix = crate::key::database::all::new(ns_id, new_db_id);
-	let new_range = crate::kvs::util::to_prefix_range(&new_prefix).unwrap();
+	let new_prefix = crate::key::database::all::DatabaseRoot {
+		ns: ns_id,
+		db: new_db_id,
+	};
+	let new_range = new_prefix.encode_range().unwrap();
 	assert_eq!(
-		count_range(&ds, new_range.start, new_range.end).await,
+		count_range(&ds, new_range.as_borrowed()).await,
 		0,
 		"recreated database must start empty with no data leaked from the removed one"
 	);
@@ -183,15 +190,17 @@ async fn reclaim_respects_grace_period() {
 		let _ = tx.cancel().await;
 		(db.namespace_id, db.database_id)
 	};
-	let db_prefix = crate::key::database::all::new(ns_id, db_id);
-	let range = crate::kvs::util::to_prefix_range(&db_prefix).unwrap();
+	let db_prefix = crate::key::database::all::DatabaseRoot {
+		ns: ns_id,
+		db: db_id,
+	};
+	let range = db_prefix.encode_range().unwrap();
 
 	// An in-flight reader: a transaction opened *before* the removal. It must
 	// still be able to read the data afterwards, because the reclaim task must not have
 	// destroyed it yet.
 	let reader = ds.transaction(Read, Optimistic).await.unwrap();
-	let reader_seen_before =
-		reader.getr(range.start.clone()..range.end.clone(), None).await.unwrap().len();
+	let reader_seen_before = reader.getr(range.as_borrowed(), None).await.unwrap().len();
 	assert!(reader_seen_before > 0, "reader should see the data before removal");
 
 	// Remove the database. The freshly-enqueued entry is not yet observed.
@@ -215,7 +224,7 @@ async fn reclaim_respects_grace_period() {
 
 	// The data is still physically present and the job is still queued...
 	assert!(
-		count_range(&ds, range.start.clone(), range.end.clone()).await > 0,
+		count_range(&ds, range.as_borrowed()).await > 0,
 		"data must NOT be destroyed while inside the grace window"
 	);
 	assert_eq!(reclaim_queue_len(&ds).await, 1, "the reclaim job must remain queued during grace");
@@ -229,7 +238,7 @@ async fn reclaim_respects_grace_period() {
 	// ...so the in-flight reader still sees consistent data even though the
 	// reclaim task ran while it was open.
 	assert_eq!(
-		reader.getr(range.start.clone()..range.end.clone(), None).await.unwrap().len(),
+		reader.getr(range.as_borrowed(), None).await.unwrap().len(),
 		reader_seen_before,
 		"an in-flight reader opened before REMOVE must still see its data"
 	);
@@ -245,7 +254,7 @@ async fn reclaim_respects_grace_period() {
 	.await
 	.unwrap();
 	assert_eq!(
-		count_range(&ds, range.start.clone(), range.end.clone()).await,
+		count_range(&ds, range.as_borrowed()).await,
 		0,
 		"data must be reclaimed once past the grace window"
 	);
@@ -274,20 +283,24 @@ async fn reclaim_runs_once_observation_ages_past_grace() {
 		let _ = tx.cancel().await;
 		(db.namespace_id, db.database_id)
 	};
-	let range =
-		crate::kvs::util::to_prefix_range(&crate::key::database::all::new(ns_id, db_id)).unwrap();
+	let range = crate::key::database::all::DatabaseRoot {
+		ns: ns_id,
+		db: db_id,
+	}
+	.encode_range()
+	.unwrap();
 
 	ds.execute("REMOVE DATABASE tenant;", &ses, None).await.unwrap();
 
 	// Backdate the queued entry's observation to one hour ago, simulating an
 	// entry the reclaim task observed long before the grace elapsed.
 	{
-		let (beg, end) = ReclaimKey::range();
+		let range = ReclaimPrefix {}.encode_range().unwrap();
 		let tx = ds.transaction(Write, Optimistic).await.unwrap();
-		let items = tx.getr(beg..end, None).await.unwrap();
+		let items = tx.getr(range, None).await.unwrap();
 		assert_eq!(items.len(), 1);
 		let rc = ReclaimKey::decode_key(&items[0].0).unwrap();
-		tx.set(
+		tx.set_key(
 			&rc,
 			&ReclaimState {
 				observed_ms: now_ms().saturating_sub(3_600_000),
@@ -309,7 +322,7 @@ async fn reclaim_runs_once_observation_ages_past_grace() {
 	.await
 	.unwrap();
 	assert_eq!(
-		count_range(&ds, range.start.clone(), range.end.clone()).await,
+		count_range(&ds, range.as_borrowed()).await,
 		0,
 		"an entry observed longer than the grace ago must be reclaimed"
 	);

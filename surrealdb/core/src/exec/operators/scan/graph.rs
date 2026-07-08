@@ -24,6 +24,7 @@ use crate::exec::{
 use crate::expr::{ControlFlow, Dir};
 use crate::iam::Action;
 use crate::idx::planner::ScanDirection;
+use crate::key::Key;
 use crate::kvs::{CachePolicy, Transaction};
 use crate::val::{RecordId, TableName, Value};
 
@@ -318,7 +319,7 @@ impl ExecOperator for GraphEdgeScan {
 							ns_id, db_id, rid, dir, &edge_tables, &ctx,
 						).await?;
 
-						for (beg, end) in ranges {
+						for r in ranges {
 							// Outer cursor over the source vertex's adjacency.
 							// In `TargetVertex` mode, legacy-format keys (no
 							// embedded target) are buffered into a bounded
@@ -329,7 +330,8 @@ impl ExecOperator for GraphEdgeScan {
 							// range is exhausted, we drain it via inner
 							// scans and resume the outer cursor past the
 							// last processed key.
-							let mut current_beg = beg;
+							let mut current_beg = r.start.as_borrowed();
+							let end = r.end;
 							let mut limit_hit = false;
 							'range_chunks: loop {
 								let mut legacy_edges: Vec<RecordId> = Vec::new();
@@ -338,7 +340,7 @@ impl ExecOperator for GraphEdgeScan {
 								{
 									let mut cursor = txn
 										.open_keys_cursor(
-											current_beg.clone()..end.clone(),
+											(current_beg..end.as_borrowed()).into(),
 											ScanDirection::Forward,
 											0,
 											version,
@@ -529,10 +531,10 @@ impl ExecOperator for GraphEdgeScan {
 											&ctx,
 										)
 										.await?;
-										for (ibeg, iend) in inner_ranges {
+										for r in inner_ranges {
 											let mut inner_cursor = txn
 												.open_keys_cursor(
-													ibeg..iend,
+													r,
 													ScanDirection::Forward,
 													0,
 													version,
@@ -612,7 +614,7 @@ impl ExecOperator for GraphEdgeScan {
 								let mut next_beg = last_processed_key
 									.expect("chunk_bound_hit implies a key was processed");
 								next_beg.push(0xff);
-								current_beg = next_beg;
+								current_beg = Key::from(next_beg);
 							}
 
 							if limit_hit {

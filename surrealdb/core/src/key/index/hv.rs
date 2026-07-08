@@ -2,72 +2,51 @@
 use std::borrow::Cow;
 use std::fmt::Debug;
 
-use storekey::{BorrowDecode, Encode};
-
-use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+use crate::catalog::IndexId;
 use crate::idx::trees::hnsw::docs::ElementDocs;
 use crate::idx::trees::vector::SerializedVector;
-use crate::kvs::impl_kv_key_storekey;
+use crate::key::database::all::DatabaseRoot;
+use crate::key::{impl_kv_key_storekey, key};
 use crate::val::TableName;
 
-#[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
-#[storekey(format = "()")]
-pub(crate) struct Hv<'a> {
-	__: u8,
-	_a: u8,
-	pub ns: NamespaceId,
-	_b: u8,
-	pub db: DatabaseId,
-	_c: u8,
-	pub tb: Cow<'a, TableName>,
-	_d: u8,
-	pub ix: IndexId,
-	_e: u8,
-	_f: u8,
-	_g: u8,
-	pub vec: Cow<'a, SerializedVector>,
-}
-
-impl_kv_key_storekey!(Hv<'_> => ElementDocs);
-
-impl<'a> Hv<'a> {
-	pub fn new(
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &'a TableName,
-		ix: IndexId,
-		vec: &'a SerializedVector,
-	) -> Self {
-		Self {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
-			_c: b'*',
-			tb: Cow::Borrowed(tb),
-			_d: b'+',
-			ix,
-			_e: b'!',
-			_f: b'h',
-			_g: b'v',
-			vec: Cow::Borrowed(vec),
-		}
+key! {
+	#[derive(Debug, Clone, PartialEq)]
+	pub(crate) struct Hv<'a> {
+		pub prefix: DatabaseRoot,
+		b'*',
+		pub tb: Cow<'a, TableName>,
+		b'+',
+		pub ix: IndexId,
+		b'!',
+		b'h',
+		b'v',
+		pub vec: Cow<'a, SerializedVector>,
 	}
 }
+
+impl_kv_key_storekey!(Hv<'a> => ElementDocs);
 
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::kvs::KVKey;
+	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::key::KVKey;
 
 	#[test]
 	fn test_key() {
 		let test = |vec: SerializedVector, expected: &[u8], info: &str| {
 			let tb = TableName::from("testtb");
-			let val = Hv::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), &vec);
+			let val = Hv {
+				prefix: DatabaseRoot {
+					ns: NamespaceId(1),
+					db: DatabaseId(2),
+				},
+				tb: Cow::Borrowed(&tb),
+				ix: IndexId(3),
+				vec: Cow::Borrowed(&vec),
+			};
 			let enc = Hv::encode_key(&val).unwrap();
-			assert_eq!(enc, expected, "{info}: {}", String::from_utf8_lossy(&enc));
+			assert_eq!(enc.as_slice(), expected, "{info}: {}", String::from_utf8_lossy(&enc));
 			let dec: Hv<'_> = storekey::decode_borrow(&enc).unwrap();
 			assert_eq!(dec, val, "{info}");
 		};

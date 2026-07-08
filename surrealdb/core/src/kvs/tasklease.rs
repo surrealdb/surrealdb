@@ -1,26 +1,25 @@
+use std::io::Write;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use anyhow::{Result, bail};
 use chrono::{DateTime, Duration, Utc};
 use rand::Rng;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, BorrowReader, DecodeError, Encode, EncodeError, Writer};
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tracing::trace;
 use uuid::Uuid;
 use web_time::Instant;
 
+use crate::catalog::TaskLease;
 use crate::err::Error;
-use crate::key::root::tl::Tl;
+use crate::key::root::task_lease::TaskLease as TaskLeaseKey;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::sequences::Sequences;
-use crate::kvs::{
-	Error as KvsError, LockType, Transaction, TransactionType, impl_kv_value_revisioned,
-};
+use crate::kvs::{Error as KvsError, LockType, Transaction, TransactionType};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 pub(crate) enum TaskLeaseType {
 	/// Task for cleaning up old changefeed data
 	ChangeFeedCleanup,
@@ -34,32 +33,28 @@ pub(crate) enum TaskLeaseType {
 	ReclaimTombstones,
 }
 
-/// Represents a distributed task lease stored in the datastore.
-///
-/// A TaskLease records which node currently owns the exclusive right to perform
-/// a specific task, and when that right expires. The lease is stored in the
-/// datastore and checked/updated atomically to ensure only one node can hold
-/// the lease at any given time.
-///
-/// # Fields
-/// * `owner` - UUID of the node that currently owns this lease
-/// * `expiration` - UTC timestamp when this lease will expire
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-pub(crate) struct TaskLease {
-	owner: Uuid,
-	expiration: DateTime<Utc>,
+impl Encode for TaskLeaseType {
+	fn encode<W: Write>(&self, w: &mut Writer<W>) -> Result<(), EncodeError> {
+		match self {
+			TaskLeaseType::ChangeFeedCleanup => w.write_u16(1),
+			TaskLeaseType::IndexCompaction => w.write_u16(2),
+			TaskLeaseType::EventProcessing => w.write_u16(3),
+			TaskLeaseType::ReclaimTombstones => w.write_u16(4),
+			TaskLeaseType::IndexBuildResume => w.write_u16(5),
+		}
+	}
 }
 
-impl_kv_value_revisioned!(TaskLease);
-
-#[cfg(test)]
-impl TaskLease {
-	pub(crate) fn new(owner: Uuid, expiration: DateTime<Utc>) -> Self {
-		Self {
-			owner,
-			expiration,
-		}
+impl<'de> BorrowDecode<'de> for TaskLeaseType {
+	fn borrow_decode(r: &mut BorrowReader<'de>) -> Result<Self, DecodeError> {
+		Ok(match r.read_u16()? {
+			1 => TaskLeaseType::ChangeFeedCleanup,
+			2 => TaskLeaseType::IndexCompaction,
+			3 => TaskLeaseType::EventProcessing,
+			4 => TaskLeaseType::ReclaimTombstones,
+			5 => TaskLeaseType::IndexBuildResume,
+			_ => return Err(DecodeError::InvalidFormat),
+		})
 	}
 }
 
@@ -411,7 +406,15 @@ impl LeaseHandler {
 		tx: &Transaction,
 		current: DateTime<Utc>,
 	) -> Result<Option<(TaskLease, LeaseStatus)>> {
-		if let Some(lease) = tx.get(&Tl::new(&self.task_type), None).await? {
+		if let Some(lease) = tx
+			.get_key(
+				&TaskLeaseKey {
+					task_id: self.task_type,
+				},
+				None,
+			)
+			.await?
+		{
 			let status = if current > lease.expiration {
 				LeaseStatus::Expired
 			} else if current > lease.expiration - self.lease_duration / 2 {
@@ -494,7 +497,15 @@ impl LeaseHandler {
 		// This ensures mutual exclusion: only one node can successfully acquire the lease when
 		// multiple nodes attempt acquisition simultaneously (e.g., when replacing an expired
 		// lease).
-		let res = tx.putc(&Tl::new(&self.task_type), &new_lease, previous_lease.as_ref()).await;
+		let res = tx
+			.put_compare_key(
+				&TaskLeaseKey {
+					task_id: self.task_type,
+				},
+				&new_lease,
+				previous_lease.as_ref(),
+			)
+			.await;
 		match res {
 			Ok(()) => {
 				tx.commit().await?;

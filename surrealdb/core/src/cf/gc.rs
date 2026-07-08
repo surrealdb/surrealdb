@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -5,10 +6,10 @@ use chrono::{DateTime, Utc};
 
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::key::change;
-use crate::key::debug::Sprintable;
+use crate::key::database::all::DatabaseRoot;
+use crate::key::{KVRange, KeyRange, change};
 use crate::kvs::tasklease::LeaseHandler;
-use crate::kvs::{BoxTimeStamp, BoxTimeStampImpl, KVKey, Transaction};
+use crate::kvs::{BoxTimeStamp, BoxTimeStampImpl, Transaction};
 
 // gc_all_at deletes all change feed entries that become stale at the given
 // current time.
@@ -83,18 +84,36 @@ pub async fn gc_range(
 	// Fetch the watermark timestamp from the storage engine
 	let mut buf = [0u8; _];
 	let end_ts = ts.encode(&mut buf);
-	// Create the changefeed range key prefix
-	let beg = change::prefix_ts(ns, db, beg_ts).encode_key()?;
-	let end = change::prefix_ts(ns, db, end_ts).encode_key()?;
-	// Trace for debugging
+
+	let start = change::ChangeFeedTsPrefix {
+		prefix: DatabaseRoot {
+			ns,
+			db,
+		},
+		ts: Cow::Borrowed(beg_ts),
+	}
+	.encode_bound()?;
+	let end = change::ChangeFeedTsPrefix {
+		prefix: DatabaseRoot {
+			ns,
+			db,
+		},
+		ts: Cow::Borrowed(end_ts),
+	}
+	.encode_bound()?;
+
 	trace!(
-		"Performing garbage collection on {ns}:{db} for watermark time {}, between {} and {}",
+		"Performing garbage collection on {ns}:{db} for watermark time {}, between {:?} and {:?}",
 		ts.as_datetime().unwrap_or(DateTime::<Utc>::MIN_UTC),
-		beg.sprint(),
-		end.sprint()
+		start,
+		end
 	);
 	// Delete the entire range in grouped batches
-	tx.delr(beg..end).await?;
+	tx.delr(KeyRange {
+		start,
+		end,
+	})
+	.await?;
 	// Ok all good
 	Ok(())
 }

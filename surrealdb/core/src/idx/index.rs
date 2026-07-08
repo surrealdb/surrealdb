@@ -13,6 +13,7 @@
 //! - Numeric predicates need a single probe/range in the index; per-variant fan-out is no longer
 //!   required.
 
+use std::borrow::Cow;
 use std::path::PathBuf;
 
 use anyhow::{Result, bail};
@@ -37,6 +38,7 @@ use crate::idx::trees::diskann::index::{DiskAnnCompactionPlan, DiskAnnIndex};
 use crate::idx::trees::hnsw::index::{HnswCompactionPlan, HnswIndex};
 use crate::idx::trees::store::IndexStores;
 use crate::key;
+use crate::key::database::all::DatabaseRoot;
 use crate::key::index::iu::IndexCountKey;
 use crate::kvs::Transaction;
 use crate::val::{Array, RecordId, Value};
@@ -135,22 +137,32 @@ impl<'a> IndexOperation<'a> {
 	/// a canonical, lexicographically ordered byte form which normalizes numeric
 	/// types (Int/Float/Decimal). This means equal numeric values like 0, 0.0 and
 	/// 0dec map to the same index key and therefore conflict on UNIQUE indexes.
-	fn get_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index<'_>> {
-		Ok(key::index::Index::new(self.ns, self.db, &self.ix.table_name, self.ix.index_id, v, None))
+	fn get_unique_index_key(&self, v: &'a [Value]) -> key::index::UniqueIndex<'_> {
+		key::index::UniqueIndex {
+			prefix: DatabaseRoot {
+				ns: self.ns,
+				db: self.db,
+			},
+			tb: Cow::Borrowed(&self.ix.table_name),
+			ix: self.ix.index_id,
+			fd: Cow::Borrowed(v),
+		}
 	}
 
 	/// Build the KV key for a non-unique index. The record id is appended
 	/// to the encoded field values so multiple records can share the same field
 	/// bytes; numeric values inside fd are normalized via Array.
-	fn get_non_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index<'_>> {
-		Ok(key::index::Index::new(
-			self.ns,
-			self.db,
-			&self.ix.table_name,
-			self.ix.index_id,
-			v,
-			Some(&self.rid.key),
-		))
+	fn get_non_unique_index_key(&self, v: &'a [Value]) -> key::index::Index<'_> {
+		key::index::Index {
+			prefix: DatabaseRoot {
+				ns: self.ns,
+				db: self.db,
+			},
+			tb: Cow::Borrowed(&self.ix.table_name),
+			ix: self.ix.index_id,
+			fd: Cow::Borrowed(v),
+			id: Cow::Borrowed(&self.rid.key),
+		}
 	}
 
 	async fn index_unique(&mut self) -> Result<()> {
@@ -162,8 +174,8 @@ impl<'a> IndexOperation<'a> {
 				if o.is_any_none_or_null() {
 					// NONE/NULL tuples use the non-unique key format (with
 					// record ID suffix) so multiple such entries can coexist.
-					let key = self.get_non_unique_index_key(&o)?;
-					match txn.delc(&key, Some(self.rid)).await {
+					let key = self.get_non_unique_index_key(&o);
+					match txn.del_compare_key(&key, Some(self.rid)).await {
 						Err(e)
 							if matches!(
 								e.downcast_ref::<Error>(),
@@ -173,8 +185,8 @@ impl<'a> IndexOperation<'a> {
 						Ok(()) => {}
 					}
 				} else {
-					let key = self.get_unique_index_key(&o)?;
-					match txn.delc(&key, Some(self.rid)).await {
+					let key = self.get_unique_index_key(&o);
+					match txn.del_compare_key(&key, Some(self.rid)).await {
 						Err(e)
 							if matches!(
 								e.downcast_ref::<Error>(),
@@ -194,14 +206,14 @@ impl<'a> IndexOperation<'a> {
 					// NONE/NULL tuples are stored with the non-unique key
 					// format so they remain visible to index scans. No
 					// uniqueness check — NULL != NULL per SQL convention.
-					let key = self.get_non_unique_index_key(&n)?;
-					txn.set(&key, self.rid).await?;
+					let key = self.get_non_unique_index_key(&n);
+					txn.set_key(&key, self.rid).await?;
 				} else {
-					let key = self.get_unique_index_key(&n)?;
-					if txn.putc(&key, self.rid, None).await.is_err() {
-						let key = self.get_unique_index_key(&n)?;
+					let key = self.get_unique_index_key(&n);
+					if txn.put_compare_key(&key, self.rid, None).await.is_err() {
+						let key = self.get_unique_index_key(&n);
 						let rid: RecordId =
-							txn.get(&key, None).await?.expect("record should exist");
+							txn.get_key(&key, None).await?.expect("record should exist");
 						return self.err_index_exists(rid, n);
 					}
 				}
@@ -217,8 +229,8 @@ impl<'a> IndexOperation<'a> {
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
 			for o in i {
-				let key = self.get_non_unique_index_key(&o)?;
-				match txn.delc(&key, Some(self.rid)).await {
+				let key = self.get_non_unique_index_key(&o);
+				match txn.del_compare_key(&key, Some(self.rid)).await {
 					Err(e) => {
 						if matches!(
 							e.downcast_ref::<Error>(),
@@ -237,8 +249,8 @@ impl<'a> IndexOperation<'a> {
 		if let Some(n) = self.n.take() {
 			let i = Indexable::new(n, self.ix);
 			for n in i {
-				let key = self.get_non_unique_index_key(&n)?;
-				txn.set(&key, self.rid).await?;
+				let key = self.get_non_unique_index_key(&n);
+				txn.set_key(&key, self.rid).await?;
 			}
 		}
 		Ok(())
@@ -270,16 +282,18 @@ impl<'a> IndexOperation<'a> {
 		if relative_count == 0 {
 			return Ok(());
 		}
-		let key = IndexCountKey::new(
-			self.ns,
-			self.db,
-			&self.ix.table_name,
-			self.ix.index_id,
-			Some((self.ctx.node_id(), uuid::Uuid::now_v7())),
-			relative_count > 0,
-			relative_count.unsigned_abs() as u64,
-		);
-		self.ctx.tx().put(&key, &()).await?;
+		let key = IndexCountKey {
+			prefix: crate::key::database::all::DatabaseRoot {
+				ns: self.ns,
+				db: self.db,
+			},
+			tb: std::borrow::Cow::Borrowed(&self.ix.table_name),
+			ix: self.ix.index_id,
+			uid: Some((self.ctx.node_id(), uuid::Uuid::now_v7())),
+			pos: relative_count > 0,
+			count: relative_count.unsigned_abs() as u64,
+		};
+		self.ctx.tx().put_key(&key, &()).await?;
 		*require_compaction = true;
 		Ok(())
 	}
@@ -474,7 +488,7 @@ impl<'a> IndexOperation<'a> {
 		nid: Uuid,
 	) -> Result<()> {
 		let ic = ikb.new_ic_key(nid);
-		tx.put(&ic, &()).await?;
+		tx.put_key(&ic, &()).await?;
 		Ok(())
 	}
 

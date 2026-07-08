@@ -2,89 +2,56 @@
 use std::borrow::Cow;
 
 use anyhow::Result;
-use storekey::{BorrowDecode, Encode};
 
-use crate::catalog::{DatabaseId, NamespaceId, Record};
+use crate::catalog::Record;
 use crate::err::Error;
-use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::key::database::all::DatabaseRoot;
+use crate::key::{KVKey, KVKeyDecode, impl_kv_range_storekey, key};
 use crate::val::{RecordId, RecordIdKey, TableName};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-#[storekey(format = "()")]
-pub(crate) struct RecordKey<'a> {
-	__: u8,
-	_a: u8,
-	pub ns: NamespaceId,
-	_b: u8,
-	pub db: DatabaseId,
-	_c: u8,
-	pub tb: Cow<'a, TableName>,
-	_d: u8,
-	pub id: RecordIdKey,
+key! {
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+	pub(crate) struct RecordKey<'a> {
+		pub root: DatabaseRoot,
+		b'*',
+		pub tb: Cow<'a, TableName>,
+		b'*',
+		pub id: Cow<'a,RecordIdKey>,
+	}
 }
 
 impl KVKey for RecordKey<'_> {
-	type ValueType = Record;
+	type Value = Record;
 
-	fn encode_key(&self) -> Result<Vec<u8>> {
-		Ok(storekey::encode_vec(self).map_err(|_| Error::Unencodable)?)
+	fn encode_buffer(&self, buffer: &mut Vec<u8>) -> Result<()> {
+		storekey::encode(buffer, self).map_err(|_| Error::Unencodable)?;
+		Ok(())
 	}
 
 	fn value_context(&self) -> RecordId {
 		RecordId {
 			table: self.tb.as_ref().clone(),
-			key: self.id.clone(),
+			key: self.id.clone().into_owned(),
 		}
 	}
 }
 
-pub fn new<'a>(
-	ns: NamespaceId,
-	db: DatabaseId,
-	tb: &'a TableName,
-	id: &RecordIdKey,
-) -> RecordKey<'a> {
-	RecordKey::new(ns, db, tb, id.to_owned())
-}
-
-pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &TableName) -> Result<Vec<u8>> {
-	let mut k = crate::key::table::all::new(ns, db, tb).encode_key()?;
-	k.extend_from_slice(b"*\x00");
-	Ok(k)
-}
-
-pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &TableName) -> Result<Vec<u8>> {
-	let mut k = crate::key::table::all::new(ns, db, tb).encode_key()?;
-	k.extend_from_slice(b"*\xff");
-	Ok(k)
-}
-
-impl Categorise for RecordKey<'_> {
-	fn categorise(&self) -> Category {
-		Category::Record
+impl<'a> KVKeyDecode<'a> for RecordKey<'a> {
+	fn decode_key(bytes: &'a [u8]) -> Result<Self> {
+		Ok(storekey::decode_borrow(bytes).map_err(|_| Error::Corrupted("Record id key"))?)
 	}
 }
 
-impl<'a> RecordKey<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, id: RecordIdKey) -> Self {
-		Self {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
-			_c: b'*',
-			tb: Cow::Borrowed(tb),
-			_d: b'*',
-			id,
-		}
-	}
-
-	pub fn decode_key(k: &[u8]) -> Result<RecordKey<'_>> {
-		Ok(storekey::decode_borrow(k)?)
+key! {
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+	pub(crate) struct RecordKeyPrefix<'a> {
+		pub root: DatabaseRoot,
+		b'*',
+		pub table: Cow<'a, TableName>,
+		b'*',
 	}
 }
+impl_kv_range_storekey!(RecordKeyPrefix<'_>);
 
 #[cfg(test)]
 mod tests {
@@ -92,19 +59,22 @@ mod tests {
 	use surrealdb_strand::Strand;
 
 	use super::*;
+	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::syn;
 
 	#[test]
 	fn key() {
 		let tb = TableName::from("testtb");
-		let val = RecordKey::new(
-			NamespaceId(1),
-			DatabaseId(2),
-			&tb,
-			RecordIdKey::String(Strand::new_static("testid")),
-		);
+		let val = RecordKey {
+			root: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+			tb: Cow::Borrowed(&tb),
+			id: Cow::Owned(RecordIdKey::String(Strand::new_static("testid"))),
+		};
 		let enc = RecordKey::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0*\x03testid\0");
+		assert_eq!(&*enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0*\x03testid\0");
 	}
 	#[test]
 	fn key_complex() {
@@ -113,16 +83,30 @@ mod tests {
 		let record_id = syn::record_id(id1).expect("Failed to parse the ID");
 		let id1 = record_id.key.into();
 		let tb = TableName::from("testtb");
-		let val = RecordKey::new(NamespaceId(1), DatabaseId(2), &tb, id1);
+		let val = RecordKey {
+			root: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+			tb: Cow::Borrowed(&tb),
+			id: Cow::Borrowed(&id1),
+		};
 		let enc = RecordKey::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0*\x05\x06test\0\0");
+		assert_eq!(&*enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0*\x05\x06test\0\0");
 
 		let id2 = "foo:[u'f8e238f2-e734-47b8-9a16-476b291bd78a']";
 		let record_id = syn::record_id(id2).expect("Failed to parse the ID");
 		let id2 = record_id.key.into();
 		let tb = TableName::from("testtb");
-		let val = RecordKey::new(NamespaceId(1), DatabaseId(2), &tb, id2);
+		let val = RecordKey {
+			root: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+			tb: Cow::Borrowed(&tb),
+			id: Cow::Borrowed(&id2),
+		};
 		let enc = RecordKey::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0*\x05\x09\xf8\xe2\x38\xf2\xe7\x34\x47\xb8\x9a\x16\x47\x6b\x29\x1b\xd7\x8a\x00");
+		assert_eq!(&*enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0*\x05\x09\xf8\xe2\x38\xf2\xe7\x34\x47\xb8\x9a\x16\x47\x6b\x29\x1b\xd7\x8a\x00");
 	}
 }

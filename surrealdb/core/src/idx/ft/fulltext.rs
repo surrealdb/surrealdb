@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -37,8 +38,11 @@ use crate::idx::planner::iterators::MatchesHitsIterator;
 use crate::idx::seqdocids::{DocId, SeqDocIds};
 use crate::idx::trees::store::IndexStores;
 use crate::idx::{IndexKeyBase, bump_compaction_generation, read_compaction_generation};
+use crate::key::database::all::DatabaseRoot;
+use crate::key::index::dc::DcPrefix;
 use crate::key::index::tt::Tt;
-use crate::kvs::{COUNT_BATCH_SIZE, Key, Transaction, impl_kv_value_revisioned};
+use crate::key::{KVKey, KVKeyDecode, KVRange, impl_kv_value_revisioned};
+use crate::kvs::{COUNT_BATCH_SIZE, Transaction};
 use crate::val::{RecordId, Value};
 #[revisioned(revision = 1)]
 #[derive(Debug, Default, PartialEq)]
@@ -188,7 +192,7 @@ impl FullTextCompactionPlan {
 struct DocLengthAndCountCompactionPlan {
 	generation: Option<u64>,
 	dlc: DocLengthAndCount,
-	delta_keys: Vec<Key>,
+	delta_keys: Vec<Vec<u8>>,
 	has_more: bool,
 }
 
@@ -207,7 +211,7 @@ impl DocLengthAndCountCompactionPlan {
 struct TermDocsCompactionPlan {
 	generation: Option<u64>,
 	deltas_by_term: HashMap<String, HashMap<DocId, i64>>,
-	delta_keys: Vec<Key>,
+	delta_keys: Vec<Vec<u8>>,
 	has_more: bool,
 }
 
@@ -301,7 +305,7 @@ impl FullTextIndex {
 					if set.insert(s) {
 						// Delete the term
 						let key = self.ikb.new_td(s, doc_id);
-						tx.del(&key).await?;
+						tx.del_key(&key).await?;
 						self.set_tt(&tx, s, doc_id, &nid, false).await?;
 					}
 				}
@@ -309,16 +313,16 @@ impl FullTextIndex {
 			{
 				let key = self.ikb.new_dl(doc_id);
 				// get the doc length
-				if let Some(dl) = tx.get(&key, None).await? {
+				if let Some(dl) = tx.get_key(&key, None).await? {
 					// Delete the doc length
-					tx.del(&key).await?;
+					tx.del_key(&key).await?;
 					// Decrease the doc count and total doc length
 					let dcl = DocLengthAndCount {
 						total_docs_length: -(dl as i128),
 						doc_count: -1,
 					};
 					let key = self.ikb.new_dc_with_id(doc_id, ctx.node_id(), Uuid::now_v7());
-					tx.put(&key, &dcl).await?;
+					tx.put_key(&key, &dcl).await?;
 					*require_compaction = true;
 				}
 			}
@@ -352,7 +356,7 @@ impl FullTextIndex {
 		let tx = ctx.tx();
 		let nid = ctx.node_id();
 		// Get the doc id (if it exists)
-		let id = self.doc_ids.resolve_doc_id(ctx, rid.key.clone()).await?;
+		let id = self.doc_ids.resolve_doc_id(ctx, &rid.key).await?;
 		// Collect the tokens.
 		let tokens =
 			self.analyzer.analyze_content(stk, ctx, opt, content, FilteringStage::Indexing).await?;
@@ -364,7 +368,7 @@ impl FullTextIndex {
 		{
 			// Set the doc length
 			let key = self.ikb.new_dl(id.doc_id());
-			tx.set(&key, &dl).await?;
+			tx.set_key(&key, &dl).await?;
 		}
 		{
 			// Increase the doc count and total doc length
@@ -373,7 +377,7 @@ impl FullTextIndex {
 				total_docs_length: dl as i128,
 				doc_count: 1,
 			};
-			tx.put(&key, &dcl).await?;
+			tx.put_key(&key, &dcl).await?;
 			*require_compaction = true;
 		}
 		// We're done
@@ -382,7 +386,7 @@ impl FullTextIndex {
 
 	async fn get_doc_length(&self, tx: &Transaction, doc_id: DocId) -> Result<Option<DocLength>> {
 		let key = self.ikb.new_dl(doc_id);
-		tx.get(&key, None).await
+		tx.get_key(&key, None).await
 	}
 
 	async fn index_with_offsets(
@@ -398,7 +402,7 @@ impl FullTextIndex {
 			let key = self.ikb.new_td(t, id);
 			td.f = o.len() as TermFrequency;
 			td.o = o;
-			tx.set(&key, &td).await?;
+			tx.set_key(&key, &td).await?;
 			self.set_tt(tx, t, id, nid, true).await?;
 		}
 		Ok(dl)
@@ -416,7 +420,7 @@ impl FullTextIndex {
 		for (t, f) in tf {
 			let key = self.ikb.new_td(t, id);
 			td.f = f;
-			tx.set(&key, &td).await?;
+			tx.set_key(&key, &td).await?;
 			self.set_tt(tx, t, id, nid, true).await?;
 		}
 		Ok(dl)
@@ -431,7 +435,7 @@ impl FullTextIndex {
 		add: bool,
 	) -> Result<()> {
 		let key = self.ikb.new_tt(term, doc_id, *nid, Uuid::now_v7(), add);
-		tx.set(&key, &String::new()).await
+		tx.set_key(&key, &String::new()).await
 	}
 
 	/// Extracts query terms from a search string
@@ -464,9 +468,9 @@ impl FullTextIndex {
 		// Phase 1: Collect deltas for each term (sequential range scans)
 		let mut all_deltas: Vec<HashMap<DocId, i64>> = Vec::with_capacity(unique_terms.len());
 		for term in &unique_terms {
-			let (beg, end) = self.ikb.new_tt_term_range(term)?;
+			let range = self.ikb.new_tt_term_range(term)?;
 			let mut deltas: HashMap<DocId, i64> = HashMap::new();
-			for k in tx.keys(beg..end, u32::MAX, 0, None).await? {
+			for k in tx.keys(range, u32::MAX, 0, None).await? {
 				let tt = Tt::decode_key(&k)?;
 				let entry = deltas.entry(tt.doc_id).or_default();
 				if tt.add {
@@ -481,7 +485,7 @@ impl FullTextIndex {
 		// Phase 2: Batch-fetch compacted bitmaps for all terms at once
 		let bitmap_keys: Vec<_> =
 			unique_terms.iter().map(|term| self.ikb.new_td_root(term)).collect();
-		let bitmaps: Vec<Option<RoaringTreemap>> = tx.getm(bitmap_keys, None).await?;
+		let bitmaps: Vec<Option<RoaringTreemap>> = tx.get_many_key(bitmap_keys, None).await?;
 
 		// Phase 3: Merge deltas into bitmaps
 		let mut docs = Vec::with_capacity(unique_terms.len());
@@ -542,7 +546,7 @@ impl FullTextIndex {
 		// Retrieve the current compacted document set for this term
 		// This is the consolidated bitmap of all documents containing this term
 		let td = self.ikb.new_td_root(term);
-		let mut docs = tx.get(&td, None).await?.unwrap_or_default();
+		let mut docs = tx.get_key(&td, None).await?.unwrap_or_default();
 
 		// Apply the delta changes to the document set
 		for (doc_id, delta) in deltas {
@@ -571,9 +575,9 @@ impl FullTextIndex {
 		let docs = self.append_term_docs_delta(tx, term, deltas).await?;
 		let td = self.ikb.new_td_root(term);
 		if docs.is_empty() {
-			tx.del(&td).await?;
+			tx.del_key(&td).await?;
 		} else {
-			tx.set(&td, &docs).await?;
+			tx.set_key(&td, &docs).await?;
 		}
 		Ok(())
 	}
@@ -593,8 +597,7 @@ impl FullTextIndex {
 		limit: u32,
 	) -> Result<TermDocsCompactionPlan> {
 		let generation = read_compaction_generation(tx, &self.ikb.new_tv_key()).await?;
-		let (beg, end) = self.ikb.new_tt_terms_range()?;
-		let range = beg..end;
+		let range = self.ikb.new_tt_terms_range()?;
 		let mut delta_keys = Vec::new();
 		let mut deltas_by_term: HashMap<String, HashMap<DocId, i64>> = HashMap::new();
 		let batch = tx.batch_keys(range, limit.max(1), None).await?;
@@ -662,7 +665,7 @@ impl FullTextIndex {
 			}
 		}
 		for key in plan.delta_keys {
-			tx.del(&key).await?;
+			tx.del(key.into()).await?;
 		}
 		Ok(())
 	}
@@ -784,33 +787,38 @@ impl FullTextIndex {
 	async fn collect_doc_length_and_count(
 		&self,
 		tx: &Transaction,
-	) -> Result<(DocLengthAndCount, Vec<Key>)> {
+	) -> Result<(DocLengthAndCount, Vec<Vec<u8>>)> {
 		let mut dlc = DocLengthAndCount::default();
-		let (beg, end) = self.ikb.new_dc_range_with_root()?;
-		let range = beg..end;
 		// Compute the total number of documents (DocCount) and the total number of
 		// terms (DocLength) This key list is supposed to be small, subject to
-		// compaction. The root key is the compacted values, and the others are deltas
-		// from transaction not yet compacted.
-		let root_key = self.ikb.new_dc_compacted()?;
+		// compaction. The prefix key itself is the compacted values,
+		// and the child keys of the prefix are deltas from transaction not yet compacted.
+		let prefix_key = DcPrefix {
+			prefix: DatabaseRoot {
+				ns: self.ikb.ns(),
+				db: self.ikb.db(),
+			},
+			tb: Cow::Borrowed(self.ikb.table()),
+			ix: self.ikb.index(),
+		}
+		.encode_key()?;
+
+		let range = prefix_key.as_borrowed()..prefix_key.as_borrowed().next_neighbour_expect();
+
 		let mut delta_keys = Vec::new();
-		for (k, v) in tx.getr(range.clone(), None).await? {
+		for (idx, (k, v)) in tx.getr(range.into(), None).await?.into_iter().enumerate() {
 			let st: DocLengthAndCount = revision::from_slice(&v)?;
 			dlc.doc_count += st.doc_count;
 			dlc.total_docs_length += st.total_docs_length;
 
-			if k != root_key {
+			// The prefix key can only be the first key.
+			// All other keys are extensions of the prefix key so they must not have the same
+			// length.
+			if idx != 0 && k.len() != prefix_key.len() {
 				delta_keys.push(k);
 			}
 		}
 		Ok((dlc, delta_keys))
-	}
-
-	/// Returns the `!dc` range that contains only delta entries.
-	fn dc_delta_range(&self) -> Result<std::ops::Range<Key>> {
-		let (mut beg, end) = self.ikb.new_dc_range_with_root()?;
-		beg.push(0);
-		Ok(beg..end)
 	}
 
 	/// Collects compacted root stats plus a bounded batch of visible `!dc`
@@ -819,14 +827,19 @@ impl FullTextIndex {
 		&self,
 		tx: &Transaction,
 		limit: u32,
-	) -> Result<(DocLengthAndCount, Vec<Key>, bool)> {
-		let root_key = self.ikb.new_dc_compacted()?;
-		let mut dlc = if let Some(v) = tx.get(&root_key, None).await? {
-			revision::from_slice(&v)?
-		} else {
-			DocLengthAndCount::default()
+	) -> Result<(DocLengthAndCount, Vec<Vec<u8>>, bool)> {
+		let dc_prefix = DcPrefix {
+			prefix: DatabaseRoot {
+				ns: self.ikb.ns(),
+				db: self.ikb.db(),
+			},
+			tb: Cow::Borrowed(self.ikb.table()),
+			ix: self.ikb.index(),
 		};
-		let batch = tx.batch_keys_vals(self.dc_delta_range()?, limit.max(1), None).await?;
+		let mut dlc = tx.get_key(&dc_prefix, None).await?.unwrap_or_default();
+
+		let range = dc_prefix.encode_range()?;
+		let batch = tx.batch_keys_vals(range, limit.max(1), None).await?;
 		let mut delta_keys = Vec::with_capacity(batch.result.len());
 		for (k, v) in batch.result {
 			let st: DocLengthAndCount = revision::from_slice(&v)?;
@@ -847,7 +860,7 @@ impl FullTextIndex {
 			&& !delta_keys.is_empty()
 		{
 			for key in delta_keys {
-				tx.del(&key).await?;
+				tx.del(key.into()).await?;
 			}
 			*compact_log = true;
 		}
@@ -916,9 +929,9 @@ impl FullTextIndex {
 		plan: DocLengthAndCountCompactionPlan,
 	) -> Result<()> {
 		let key = self.ikb.new_dc_compacted()?;
-		tx.set(&key, &revision::to_vec(&plan.dlc)?).await?;
+		tx.set(key, &revision::to_vec(&plan.dlc)?).await?;
 		for key in plan.delta_keys {
-			tx.del(&key).await?;
+			tx.del(key.into()).await?;
 		}
 		Ok(())
 	}
@@ -1019,7 +1032,7 @@ impl FullTextIndex {
 		term: &str,
 	) -> Result<Option<TermDocument>> {
 		let key = self.ikb.new_td(term, id);
-		tx.get(&key, None).await
+		tx.get_key(&key, None).await
 	}
 
 	pub(crate) async fn read_offsets(
@@ -1202,6 +1215,7 @@ impl Scorer {
 
 #[cfg(test)]
 mod tests {
+	use std::borrow::Cow;
 	use std::sync::Arc;
 	use std::time::{Duration, Instant};
 
@@ -1219,6 +1233,9 @@ mod tests {
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::offset::Offset;
 	use crate::idx::index::IndexOperation;
+	use crate::key::KVRange;
+	use crate::key::database::all::DatabaseRoot;
+	use crate::key::index::dc::DcPrefix;
 	use crate::kvs::LockType::*;
 	use crate::kvs::{Datastore, Transaction, TransactionType};
 	use crate::sql::Expr;
@@ -1360,19 +1377,22 @@ mod tests {
 		}
 
 		async fn dc_delta_count(&self, tx: &Transaction) -> usize {
-			let (beg, end) = self.ikb.new_dc_range_with_root().unwrap();
-			let root = self.ikb.new_dc_compacted().unwrap();
-			tx.keys(beg..end, u32::MAX, 0, None)
-				.await
-				.unwrap()
-				.into_iter()
-				.filter(|k| k != &root)
-				.count()
+			let dc_range = DcPrefix {
+				prefix: DatabaseRoot {
+					ns: self.ikb.ns(),
+					db: self.ikb.db(),
+				},
+				tb: Cow::Borrowed(self.ikb.table()),
+				ix: self.ikb.index(),
+			}
+			.encode_range()
+			.unwrap();
+			tx.keys(dc_range, u32::MAX, 0, None).await.unwrap().len()
 		}
 
 		async fn tt_delta_count(&self, tx: &Transaction) -> usize {
-			let (beg, end) = self.ikb.new_tt_terms_range().unwrap();
-			tx.count(beg..end, None).await.unwrap()
+			let range = self.ikb.new_tt_terms_range().unwrap();
+			tx.count(range, None).await.unwrap()
 		}
 	}
 
@@ -1467,11 +1487,21 @@ mod tests {
 
 		// Check that logs have been compacted:
 		let tx = test.new_tx(TransactionType::Read).await;
-		let (beg, end) = test.ikb.new_tt_terms_range().unwrap();
-		assert_eq!(tx.count(beg..end, None).await.unwrap(), 0);
+		let range = test.ikb.new_tt_terms_range().unwrap();
+		assert_eq!(tx.count(range, None).await.unwrap(), 0);
 		assert_eq!(test.dc_delta_count(&tx).await, 0);
-		let (beg, end) = test.ikb.new_dc_range_with_root().unwrap();
-		assert_eq!(tx.count(beg..end, None).await.unwrap(), 1);
+		let prefix_bound = DcPrefix {
+			prefix: DatabaseRoot {
+				ns: test.ikb.ns(),
+				db: test.ikb.db(),
+			},
+			tb: Cow::Borrowed(test.ikb.table()),
+			ix: test.ikb.index(),
+		}
+		.encode_bound()
+		.unwrap();
+		let range = prefix_bound.as_borrowed()..prefix_bound.as_borrowed().next_neighbour_expect();
+		assert_eq!(tx.count(range.into(), None).await.unwrap(), 1);
 	}
 
 	/// BM25 scores must remain non-zero after compaction.
@@ -1722,16 +1752,16 @@ mod tests {
 		write_tx.commit().await.unwrap();
 
 		let tx = test.new_tx(TransactionType::Read).await;
-		assert_eq!(tx.get(&test.ikb.new_dv_key(), None).await.unwrap(), Some(1));
-		assert_eq!(tx.get(&test.ikb.new_tv_key(), None).await.unwrap(), Some(1));
+		assert_eq!(tx.get_key(&test.ikb.new_dv_key(), None).await.unwrap(), Some(1));
+		assert_eq!(tx.get_key(&test.ikb.new_tv_key(), None).await.unwrap(), Some(1));
 		assert_eq!(
 			test.dc_delta_count(&tx).await,
 			1,
 			"post-snapshot doc-length delta must remain uncompacted"
 		);
-		let (beg, end) = test.ikb.new_tt_terms_range().unwrap();
+		let range = test.ikb.new_tt_terms_range().unwrap();
 		assert!(
-			tx.count(beg..end, None).await.unwrap() > 0,
+			tx.count(range, None).await.unwrap() > 0,
 			"post-snapshot term deltas must remain uncompacted"
 		);
 		let dlc = test.fti.compute_doc_length_and_count(&tx, None).await.unwrap();

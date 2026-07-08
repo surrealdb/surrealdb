@@ -16,45 +16,18 @@
 //! - Providing document-specific statistics for the full-text search engine
 use std::borrow::Cow;
 
-use storekey::{BorrowDecode, Encode};
-
-use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+use crate::catalog::IndexId;
 use crate::idx::ft::DocLength;
 use crate::idx::seqdocids::DocId;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::impl_kv_key_storekey;
+use crate::key::database::all::DatabaseRoot;
+use crate::key::{impl_kv_key_storekey, key};
 use crate::val::TableName;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-#[storekey(format = "()")]
-pub(crate) struct Dl<'a> {
-	__: u8,
-	_a: u8,
-	pub ns: NamespaceId,
-	_b: u8,
-	pub db: DatabaseId,
-	_c: u8,
-	pub tb: Cow<'a, TableName>,
-	_d: u8,
-	pub ix: IndexId,
-	_e: u8,
-	_f: u8,
-	_g: u8,
-	pub id: DocId,
-}
-
-impl_kv_key_storekey!(Dl<'_> => DocLength);
-
-impl Categorise for Dl<'_> {
-	fn categorise(&self) -> Category {
-		Category::IndexDocLength
-	}
-}
-
-impl<'a> Dl<'a> {
-	/// Creates a new document length key
+key! {
+	/// Document length key
 	///
-	/// This constructor creates a key that stores the length of an individual
+	/// A key that stores the length of an individual
 	/// document in the full-text index. Document length is a critical factor
 	/// in relevance scoring algorithms like BM25, which normalize term
 	/// frequencies based on document length.
@@ -65,37 +38,49 @@ impl<'a> Dl<'a> {
 	/// * `tb` - Table identifier
 	/// * `ix` - Index identifier
 	/// * `id` - The document ID whose length is being stored
-	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, ix: IndexId, id: DocId) -> Self {
-		Self {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
-			_c: b'*',
-			tb: Cow::Borrowed(tb),
-			_d: b'+',
-			ix,
-			_e: b'!',
-			_f: b'd',
-			_g: b'l',
-			id,
-		}
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+		pub(crate) struct Dl<'a> {
+		pub prefix: DatabaseRoot,
+		b'*',
+		pub tb: Cow<'a, TableName>,
+		b'+',
+		pub ix: IndexId,
+		b'!',
+		b'd',
+		b'l',
+		pub id: DocId,
+	}
+}
+
+impl_kv_key_storekey!(Dl<'a> => DocLength);
+
+impl Categorise for Dl<'_> {
+	fn categorise(&self) -> Category {
+		Category::IndexDocLength
 	}
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::kvs::KVKey;
+	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::key::KVKey;
 
 	#[test]
 	fn key() {
 		let tb = TableName::from("testtb");
-		let val = Dl::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), 16);
+		let val = Dl {
+			prefix: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+			tb: Cow::Borrowed(&tb),
+			ix: IndexId(3),
+			id: 16,
+		};
 		let enc = Dl::encode_key(&val).unwrap();
 		assert_eq!(
-			enc,
+			enc.as_slice(),
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!dl\0\0\0\0\0\0\0\x10"
 		);
 	}

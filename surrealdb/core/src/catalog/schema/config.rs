@@ -7,7 +7,7 @@ use crate::catalog::ApiConfigDefinition;
 use crate::expr::statements::info::InfoStructure;
 use crate::fmt::EscapeKwFreeIdent;
 use crate::iam::ConfigKind;
-use crate::kvs::impl_kv_value_revisioned;
+use crate::key::impl_kv_value_revisioned;
 use crate::val::{TableName, Value};
 
 /// The config struct as it is stored on disk.

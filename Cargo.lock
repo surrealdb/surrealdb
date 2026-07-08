@@ -6763,7 +6763,9 @@ dependencies = [
 name = "surrealdb-common"
 version = "3.3.0-nightly"
 dependencies = [
+ "futures",
  "hashbrown 0.16.1",
+ "tokio",
 ]
 
 [[package]]
@@ -6856,6 +6858,7 @@ dependencies = [
  "strsim",
  "subtle",
  "surrealdb-collections",
+ "surrealdb-common",
  "surrealdb-protocol",
  "surrealdb-rocksdb",
  "surrealdb-strand",

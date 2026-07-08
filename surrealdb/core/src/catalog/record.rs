@@ -10,7 +10,7 @@ use revision::revisioned;
 use surrealdb_strand::Strand;
 
 use crate::catalog::aggregation::AggregationStat;
-use crate::kvs::KVValue;
+use crate::key::KVValue;
 use crate::val::{RecordId, Value};
 
 /// Represents a record stored in the database

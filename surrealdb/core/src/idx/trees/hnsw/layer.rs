@@ -17,6 +17,7 @@ use crate::idx::trees::hnsw::index::HnswContext;
 use crate::idx::trees::hnsw::{ElementId, HnswElements, HnswSearch, VectorId};
 use crate::idx::trees::knn::{DoublePriorityQueue, Ids64};
 use crate::idx::trees::vector::SharedVector;
+use crate::key::KVKeyDecode;
 use crate::key::index::hn::HnswNode;
 use crate::kvs::Transaction;
 
@@ -562,7 +563,7 @@ where
 		for &node_id in nodes {
 			if let Some(val) = self.graph.node_to_val(node_id) {
 				let key = self.ikb.new_hn_key(self.level, node_id);
-				tx.set(&key, &val).await?;
+				tx.set_key(&key, &val).await?;
 			}
 		}
 		// Increase the version
@@ -573,7 +574,7 @@ where
 	/// Deletes a single node's `Hn` key from the KV store.
 	async fn delete_node(&self, tx: &Transaction, node_id: ElementId) -> Result<()> {
 		let key = self.ikb.new_hn_key(self.level, node_id);
-		tx.del(&key).await?;
+		tx.del_key(&key).await?;
 		Ok(())
 	}
 
@@ -606,8 +607,10 @@ where
 			let mut val = Vec::new();
 			for i in 0..st.chunks {
 				let key = self.ikb.new_hl_key(self.level, i);
-				let chunk =
-					tx.get(&key, None).await?.ok_or_else(|| Error::unreachable("Missing chunk"))?;
+				let chunk = tx
+					.get_key(&key, None)
+					.await?
+					.ok_or_else(|| Error::unreachable("Missing chunk"))?;
 				val.extend(chunk);
 			}
 			self.graph.lecacy_reload(&val)?;
@@ -644,7 +647,7 @@ where
 			for &node_id in &self.graph.node_ids() {
 				if let Some(node_val) = self.graph.node_to_val(node_id) {
 					let key = self.ikb.new_hn_key(self.level, node_id);
-					tx.set(&key, &node_val).await?;
+					tx.set_key(&key, &node_val).await?;
 				}
 			}
 			// Delete old Hl chunk keys in a single range deletion

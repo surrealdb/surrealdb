@@ -4,7 +4,7 @@ use sha2::Sha256;
 use surrealdb_types::ToSql;
 use uuid::Uuid;
 
-use crate::kvs::impl_kv_value_revisioned;
+use crate::key::impl_kv_value_revisioned;
 use crate::val::{Datetime, RecordId};
 
 #[revisioned(revision = 1)]

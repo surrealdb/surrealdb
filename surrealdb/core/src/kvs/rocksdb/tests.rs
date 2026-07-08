@@ -14,6 +14,7 @@ use temp_dir::TempDir;
 
 use crate::CommunityComposer;
 use crate::cnf::ConfigMap;
+use crate::key::KeyRange;
 use crate::kvs::Datastore;
 use crate::kvs::LockType::Optimistic;
 use crate::kvs::TransactionType::*;
@@ -22,10 +23,13 @@ use crate::kvs::TransactionType::*;
 /// `prefix`. `end` is `prefix` with a trailing `0xff` byte so RocksDB's
 /// iterate bounds match keys `[prefix, prefix\xff)` — used throughout the
 /// cursor tests below to compose disjoint ranges.
-fn prefix_byte_range(prefix: &str) -> std::ops::Range<Vec<u8>> {
+fn prefix_byte_range(prefix: &str) -> KeyRange<'static> {
 	let start = prefix.as_bytes().to_vec();
 	let end = start.iter().copied().chain(std::iter::once(0xff)).collect::<Vec<u8>>();
-	start..end
+	KeyRange {
+		start: start.into(),
+		end: end.into(),
+	}
 }
 
 #[tokio::test]
@@ -69,13 +73,13 @@ pub async fn read_and_deletion_only() {
 	// Phase 1: Initial writes in normal mode (before reaching space limit)
 	{
 		let tx = ds.transaction(Write, Optimistic).await.unwrap();
-		tx.set(&"initial_key", &"initial_value".as_bytes().to_vec()).await.unwrap();
+		tx.set("initial_key".as_bytes().into(), "initial_value".as_bytes()).await.unwrap();
 		tx.commit().await.unwrap();
 	}
 
 	// Start a transaction that will be left uncommitted until after mode transition
 	let ongoing_tx = ds.transaction(Write, Optimistic).await.unwrap();
-	ongoing_tx.set(&"ongoing_key", &"ongoing_value".as_bytes().to_vec()).await.unwrap();
+	ongoing_tx.set("ongoing_key".as_bytes().into(), "ongoing_value".as_bytes()).await.unwrap();
 
 	// Phase 2: Write data until space limit is reached and mode transitions to
 	// read-and-deletion-only Write ~20MB of data (200 transactions × 100 keys × 1KB each)
@@ -93,7 +97,7 @@ pub async fn read_and_deletion_only() {
 			let key = format!("unlimited_key_{}_{}", i, j);
 			let mut value = vec![0u8; 1024]; // 1KB per value
 			rng.fill_bytes(&mut value);
-			if let Err(e) = tx.set(&key, &value).await {
+			if let Err(e) = tx.set(key.as_bytes().into(), value).await {
 				assert!(
 					e.to_string().contains("read-and-deletion-only mode"),
 					"Unexpected error: {e}"
@@ -114,7 +118,7 @@ pub async fn read_and_deletion_only() {
 	// Confirm new write transactions are blocked
 	{
 		let tx = ds.transaction(Write, Optimistic).await.unwrap();
-		let res = tx.put(&"other_key", &"other_value".as_bytes().to_vec()).await;
+		let res = tx.put("other_key".as_bytes().into(), "other_value".as_bytes()).await;
 		assert!(
 			res.unwrap_err().to_string().contains("read-and-deletion-only mode"),
 			"Expected read-and-deletion-only error"
@@ -134,7 +138,7 @@ pub async fn read_and_deletion_only() {
 	// Confirm read operations still work
 	{
 		let tx = ds.transaction(Read, Optimistic).await.unwrap();
-		let val = tx.get(&"initial_key", None).await.unwrap();
+		let val = tx.get("initial_key".as_bytes().into(), None).await.unwrap();
 		assert!(matches!(val.as_deref(), Some(b"initial_value")));
 		tx.cancel().await.unwrap();
 	}
@@ -145,7 +149,7 @@ pub async fn read_and_deletion_only() {
 		let tx = ds.transaction(Write, Optimistic).await.unwrap();
 		for i in 0..100 {
 			let key = format!("unlimited_key_{}_{}", i, j);
-			tx.del(&key).await.unwrap();
+			tx.del(key.as_bytes().into()).await.unwrap();
 		}
 		tx.commit().await.unwrap();
 	}
@@ -154,7 +158,7 @@ pub async fn read_and_deletion_only() {
 	// Confirm writes are allowed again after space usage drops below limit
 	{
 		let tx = ds.transaction(Write, Optimistic).await.unwrap();
-		tx.put(&"other_key", &"other_value".as_bytes().to_vec()).await.unwrap();
+		tx.put("other_key".as_bytes().into(), "other_value".as_bytes()).await.unwrap();
 		tx.commit().await.unwrap();
 	}
 }
@@ -210,7 +214,7 @@ async fn memtable_merge_count_clamp_inner(versioned: bool) {
 	// implicit default for the non-versioned case, or the explicit
 	// `ColumnFamilyDescriptor` for the versioned case).
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.set(&"clamp_key", &"clamp_value".as_bytes().to_vec()).await.unwrap();
+	tx.set("clamp_key".as_bytes().into(), "clamp_value".as_bytes()).await.unwrap();
 	tokio::time::timeout(std::time::Duration::from_secs(10), tx.commit())
 		.await
 		.expect("commit stalled: min_write_buffer_number_to_merge clamp regressed")
@@ -257,7 +261,7 @@ async fn compact_pushes_data_to_bottommost() {
 			let key: Vec<u8> = format!("bottommost_test_{batch:04}_{i:04}").into_bytes();
 			let mut value = vec![0u8; 256];
 			rng.fill_bytes(&mut value);
-			tx.set(key, value).await.unwrap();
+			tx.set(key.into(), value).await.unwrap();
 		}
 		tx.commit().await.unwrap();
 	}
@@ -339,7 +343,7 @@ async fn universal_compaction_options_wired() {
 
 	// A round-trip write proves the configured CF is healthy.
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.set(&"universal_key", &"universal_value".as_bytes().to_vec()).await.unwrap();
+	tx.set("universal_key".as_bytes().into(), "universal_value".as_bytes()).await.unwrap();
 	tx.commit().await.unwrap();
 }
 
@@ -368,7 +372,7 @@ async fn shutdown_drains_cleanly_with_defaults() {
 		for i in 0..256u32 {
 			let key: Vec<u8> = format!("shutdown_default_{i:04}").into_bytes();
 			let value = vec![0u8; 256];
-			tx.set(key, value).await.unwrap();
+			tx.set(key.into(), value).await.unwrap();
 		}
 		tx.commit().await.unwrap();
 	}
@@ -419,7 +423,7 @@ async fn shutdown_compacts_to_bottommost_when_opted_in() {
 			let key: Vec<u8> = format!("shutdown_compact_{batch:04}_{i:04}").into_bytes();
 			let mut value = vec![0u8; 256];
 			rng.fill_bytes(&mut value);
-			tx.set(key, value).await.unwrap();
+			tx.set(key.into(), value).await.unwrap();
 		}
 		tx.commit().await.unwrap();
 	}
@@ -475,7 +479,7 @@ async fn concurrent_cursors_do_not_evict() {
 			for k in 0..KEYS_PER_PREFIX {
 				let key = format!("prefix_{p:02}/key_{k:04}").into_bytes();
 				let value = format!("v_{p}_{k}").into_bytes();
-				tx.set(key, value).await.unwrap();
+				tx.set(key.into(), value).await.unwrap();
 			}
 		}
 		tx.commit().await.unwrap();
@@ -570,7 +574,7 @@ async fn concurrent_cursors_on_writable_tx() {
 			for k in 0..KEYS_PER_PREFIX {
 				let key = format!("wp_{p:02}/key_{k:04}").into_bytes();
 				let value = vec![p as u8; 8];
-				tx.set(key, value).await.unwrap();
+				tx.set(key.into(), value).await.unwrap();
 			}
 		}
 		tx.commit().await.unwrap();
@@ -645,7 +649,7 @@ async fn cursor_drop_releases_slot() {
 		let tx = ds.transaction(true, true).await.unwrap();
 		for k in 0..10 {
 			let key = format!("drop_test/{k:02}").into_bytes();
-			tx.set(key, vec![0u8]).await.unwrap();
+			tx.set(key.into(), vec![0u8]).await.unwrap();
 		}
 		tx.commit().await.unwrap();
 	}
@@ -691,7 +695,7 @@ async fn next_batch_borrowed_slices_match_owned_scan() {
 		let tx = ds.transaction(true, true).await.unwrap();
 		for k in 0..N {
 			let key = format!("fe_key/{k:06}").into_bytes();
-			tx.set(key, vec![0u8; 4]).await.unwrap();
+			tx.set(key.into(), vec![0u8; 4]).await.unwrap();
 		}
 		tx.commit().await.unwrap();
 	}
@@ -748,7 +752,7 @@ async fn commit_blocks_until_live_cursor_drops() {
 		let tx = ds.transaction(true, true).await.unwrap();
 		for k in 0..16 {
 			let key = format!("race_key/{k:02}").into_bytes();
-			tx.set(key, vec![0u8]).await.unwrap();
+			tx.set(key.into(), vec![0u8]).await.unwrap();
 		}
 		tx.commit().await.unwrap();
 	}
@@ -833,7 +837,7 @@ async fn cancel_blocks_until_live_cursor_drops() {
 		let tx = ds.transaction(true, true).await.unwrap();
 		for k in 0..16 {
 			let key = format!("cancel_race/{k:02}").into_bytes();
-			tx.set(key, vec![0u8]).await.unwrap();
+			tx.set(key.into(), vec![0u8]).await.unwrap();
 		}
 		tx.commit().await.unwrap();
 	}
@@ -893,7 +897,7 @@ async fn open_cursor_after_commit_starts_fails() {
 
 	{
 		let tx = ds.transaction(true, true).await.unwrap();
-		tx.set(b"after_commit/key".to_vec(), vec![0u8]).await.unwrap();
+		tx.set(b"after_commit/key".as_slice().into(), vec![0u8]).await.unwrap();
 		tx.commit().await.unwrap();
 	}
 
@@ -994,7 +998,7 @@ async fn open_cursor_cancellation_releases_cursors_alive_slot() {
 		let tx = ds.transaction(true, true).await.unwrap();
 		for k in 0..50_000u32 {
 			let key = format!("cancel_open/{k:08}").into_bytes();
-			tx.set(key, vec![0u8]).await.unwrap();
+			tx.set(key.into(), vec![0u8]).await.unwrap();
 		}
 		tx.commit().await.unwrap();
 	}

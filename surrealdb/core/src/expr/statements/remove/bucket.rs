@@ -54,8 +54,14 @@ impl RemoveBucketStatement {
 		};
 
 		// Delete the definition
-		let key = crate::key::database::bu::new(ns, db, &bu.name);
-		txn.del(&key).await?;
+		let key = crate::key::database::bu::BucketKey {
+			prefix: crate::key::database::all::DatabaseRoot {
+				ns,
+				db,
+			},
+			bu: std::borrow::Cow::Borrowed(&bu.name),
+		};
+		txn.del_key(&key).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good

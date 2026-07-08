@@ -145,10 +145,11 @@ mod tests {
 	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::cnf::ConfigMap;
 	use crate::dbs::{Capabilities, Session};
-	use crate::key::lqe;
+	use crate::key::database::all::DatabaseRoot;
+	use crate::key::{KVRange, KVValue, lqe};
+	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::{Read, Write};
-	use crate::kvs::{Datastore, KVKey, KVValue};
 	use crate::lq::event::{LiveAction, LiveEvent, LiveEvents};
 	use crate::types::PublicValue;
 
@@ -188,10 +189,16 @@ mod tests {
 	/// Read every live-query event persisted for the database's dedicated keyspace.
 	async fn live_events(ds: &Datastore, ns: NamespaceId, db: DatabaseId) -> Vec<LiveEvent> {
 		let tx = ds.transaction(Read, Optimistic).await.unwrap();
-		let beg = lqe::prefix(ns, db).encode_key().unwrap();
-		let end = lqe::suffix(ns, db).encode_key().unwrap();
+		let range = lqe::LqePrefix {
+			prefix: DatabaseRoot {
+				ns,
+				db,
+			},
+		}
+		.encode_range()
+		.unwrap();
 		let mut events = Vec::new();
-		for (_k, v) in tx.scan(beg..end, 1000, 0, None).await.unwrap() {
+		for (_k, v) in tx.scan(range, 1000, 0, None).await.unwrap() {
 			events.extend(LiveEvents::kv_decode_value(&v, ()).unwrap().0);
 		}
 		tx.cancel().await.unwrap();

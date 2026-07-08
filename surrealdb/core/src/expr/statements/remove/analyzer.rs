@@ -70,8 +70,14 @@ impl RemoveAnalyzerStatement {
 			}
 		}
 		// Delete the definition
-		let key = crate::key::database::az::new(ns, db, &az.name);
-		txn.del(&key).await?;
+		let key = crate::key::database::az::Analyzer {
+			prefix: crate::key::database::all::DatabaseRoot {
+				ns,
+				db,
+			},
+			az: std::borrow::Cow::Borrowed(&az.name),
+		};
+		txn.del_key(&key).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Cleanup in-memory mappers if not used anymore

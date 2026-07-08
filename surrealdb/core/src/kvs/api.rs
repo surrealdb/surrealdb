@@ -2,7 +2,6 @@
 #![warn(clippy::missing_docs_in_private_items)]
 
 use std::future::Future;
-use std::ops::Range;
 use std::pin::Pin;
 
 use anyhow::bail;
@@ -10,13 +9,12 @@ use anyhow::bail;
 use super::cursor::{DefaultKeysCursor, DefaultValsCursor};
 use super::direction::Direction;
 use super::err::{Error, Result};
-use super::util;
-use crate::key::debug::Sprintable;
+use crate::key::{Key, KeyRange};
 use crate::kvs::batch::Batch;
 use crate::kvs::timestamp::IncTimeStamp;
 use crate::kvs::{
 	BoxTimeStamp, BoxTimeStampImpl, COUNT_BATCH_SIZE, HlcTimeStamp, HlcTimeStampImpl,
-	IncTimeStampImpl, Key, NORMAL_BATCH_SIZE, Val,
+	IncTimeStampImpl, NORMAL_BATCH_SIZE, Val,
 };
 
 /// A boxed future returned by `Transactable` / `ScanCursorKeys` /
@@ -41,7 +39,7 @@ pub(crate) type BoxFut<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 #[derive(Debug, Default)]
 pub struct KeysResult {
 	/// The fetched keys.
-	pub keys: Vec<Key>,
+	pub keys: Vec<Vec<u8>>,
 	/// The total number of key bytes in the result.
 	pub key_bytes: u64,
 }
@@ -55,7 +53,7 @@ pub struct KeysResult {
 #[derive(Debug, Default)]
 pub struct ScanResult {
 	/// The fetched key-value pairs.
-	pub values: Vec<(Key, Val)>,
+	pub values: Vec<(Vec<u8>, Val)>,
 	/// The total number of key bytes in the result.
 	pub key_bytes: u64,
 	/// The total number of value bytes in the result.
@@ -490,6 +488,11 @@ pub trait ScanCursorVals: requirements::TransactionRequirements {
 	) -> BoxFut<'s, Result<ScanChunkStats>>;
 }
 
+/// A batch which contains only keys
+type KeyBatch = Batch<Vec<u8>>;
+/// A batch which contains both keys and values.
+type ValueBatch = Batch<(Vec<u8>, Vec<u8>)>;
+
 /// This trait defines the API for a transaction in a key-value store.
 ///
 /// All keys and values are represented as byte arrays, encoding is handled
@@ -519,34 +522,34 @@ pub trait Transactable: requirements::TransactionRequirements {
 	/// Cancel a transaction.
 	///
 	/// This reverses all changes made within the transaction.
-	fn cancel(&self) -> BoxFut<'_, Result<()>>;
+	fn cancel<'a>(&'a self) -> BoxFut<'a, Result<()>>;
 
 	/// Commit a transaction.
 	///
 	/// This attempts to commit all changes made within the transaction.
-	fn commit(&self) -> BoxFut<'_, Result<()>>;
+	fn commit<'a>(&'a self) -> BoxFut<'a, Result<()>>;
 
 	/// Check if a key exists in the datastore.
-	fn exists(&self, key: Key, version: Option<u64>) -> BoxFut<'_, Result<bool>>;
+	fn exists<'a>(&'a self, key: Key<'a>, version: Option<u64>) -> BoxFut<'a, Result<bool>>;
 
 	/// Fetch a key from the datastore.
-	fn get(&self, key: Key, version: Option<u64>) -> BoxFut<'_, Result<Option<Val>>>;
+	fn get<'a>(&'a self, key: Key<'a>, version: Option<u64>) -> BoxFut<'a, Result<Option<Val>>>;
 
 	/// Insert or update a key in the datastore.
-	fn set(&self, key: Key, val: Val) -> BoxFut<'_, Result<()>>;
+	fn set<'a>(&'a self, key: Key<'a>, val: Val) -> BoxFut<'a, Result<()>>;
 
 	/// Insert a key if it doesn't exist in the datastore.
-	fn put(&self, key: Key, val: Val) -> BoxFut<'_, Result<()>>;
+	fn put<'a>(&'a self, key: Key<'a>, val: Val) -> BoxFut<'a, Result<()>>;
 
 	/// Update a key in the datastore if the current value matches a condition.
-	fn putc(&self, key: Key, val: Val, chk: Option<Val>) -> BoxFut<'_, Result<()>>;
+	fn putc<'a>(&'a self, key: Key<'a>, val: Val, chk: Option<Val>) -> BoxFut<'a, Result<()>>;
 
 	/// Delete a key from the datastore.
-	fn del(&self, key: Key) -> BoxFut<'_, Result<()>>;
+	fn del<'a>(&'a self, key: Key<'a>) -> BoxFut<'a, Result<()>>;
 
 	/// Delete a key from the datastore if the current value matches a
 	/// condition.
-	fn delc(&self, key: Key, chk: Option<Val>) -> BoxFut<'_, Result<()>>;
+	fn delc<'a>(&'a self, key: Key<'a>, chk: Option<&'a [u8]>) -> BoxFut<'a, Result<()>>;
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
@@ -555,13 +558,13 @@ pub trait Transactable: requirements::TransactionRequirements {
 	/// total number of key bytes scanned, accumulated during the same
 	/// iteration that produces the keys, so callers can record metrics
 	/// without re-walking the result.
-	fn keys(
-		&self,
-		rng: Range<Key>,
+	fn keys<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
 		limit: u32,
 		skip: u32,
 		version: Option<u64>,
-	) -> BoxFut<'_, Result<KeysResult>>;
+	) -> BoxFut<'a, Result<KeysResult>>;
 
 	/// Retrieve a specific range of keys from the datastore, in reverse order.
 	///
@@ -570,13 +573,13 @@ pub trait Transactable: requirements::TransactionRequirements {
 	/// total number of key bytes scanned, accumulated during the same
 	/// iteration that produces the keys, so callers can record metrics
 	/// without re-walking the result.
-	fn keysr(
-		&self,
-		rng: Range<Key>,
+	fn keysr<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
 		limit: u32,
 		skip: u32,
 		version: Option<u64>,
-	) -> BoxFut<'_, Result<KeysResult>>;
+	) -> BoxFut<'a, Result<KeysResult>>;
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
@@ -585,13 +588,13 @@ pub trait Transactable: requirements::TransactionRequirements {
 	/// total number of value bytes scanned, accumulated during the same
 	/// iteration that produces the values, so callers can record metrics
 	/// without re-walking the result.
-	fn scan(
-		&self,
-		rng: Range<Key>,
+	fn scan<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
 		limit: u32,
 		skip: u32,
 		version: Option<u64>,
-	) -> BoxFut<'_, Result<ScanResult>>;
+	) -> BoxFut<'a, Result<ScanResult>>;
 
 	/// Retrieve a specific range of keys from the datastore in reverse order.
 	///
@@ -600,13 +603,13 @@ pub trait Transactable: requirements::TransactionRequirements {
 	/// total number of value bytes scanned, accumulated during the same
 	/// iteration that produces the values, so callers can record metrics
 	/// without re-walking the result.
-	fn scanr(
-		&self,
-		rng: Range<Key>,
+	fn scanr<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
 		limit: u32,
 		skip: u32,
 		version: Option<u64>,
-	) -> BoxFut<'_, Result<ScanResult>>;
+	) -> BoxFut<'a, Result<ScanResult>>;
 
 	/// Open a stateful keys-only scan cursor over `rng`.
 	///
@@ -623,7 +626,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 	/// rationale.
 	fn open_keys_cursor<'a>(
 		&'a self,
-		rng: Range<Key>,
+		rng: KeyRange<'a>,
 		dir: Direction,
 		skip: u32,
 		version: Option<u64>,
@@ -645,7 +648,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 	/// [`Self::open_keys_cursor`] for the semantics.
 	fn open_vals_cursor<'a>(
 		&'a self,
-		rng: Range<Key>,
+		rng: KeyRange<'a>,
 		dir: Direction,
 		skip: u32,
 		version: Option<u64>,
@@ -664,21 +667,21 @@ pub trait Transactable: requirements::TransactionRequirements {
 	}
 
 	/// Insert or replace a key in the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	fn replace(&self, key: Key, val: Val) -> BoxFut<'_, Result<()>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	fn replace<'a>(&'a self, key: Key<'a>, val: Val) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move { self.set(key, val).await })
 	}
 
 	/// Delete all versions of a key from the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	fn clr(&self, key: Key) -> BoxFut<'_, Result<()>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	fn clr<'a>(&'a self, key: Key<'a>) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move { self.del(key).await })
 	}
 
 	/// Delete all versions of a key from the datastore if the current value
 	/// matches a condition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	fn clrc(&self, key: Key, chk: Option<Val>) -> BoxFut<'_, Result<()>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	fn clrc<'a>(&'a self, key: Key<'a>, chk: Option<&'a [u8]>) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move { self.delc(key, chk).await })
 	}
 
@@ -689,8 +692,12 @@ pub trait Transactable: requirements::TransactionRequirements {
 	/// the number of input keys that were found and the total value bytes
 	/// across the hits, accumulated in the same loop that performs the
 	/// individual point gets.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(keys = keys.sprint()))]
-	fn getm(&self, keys: Vec<Key>, version: Option<u64>) -> BoxFut<'_, Result<GetMultiResult>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(keys = keys.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")))]
+	fn getm<'a>(
+		&'a self,
+		keys: &'a [Key<'a>],
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<GetMultiResult>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
 			if self.closed() {
@@ -701,7 +708,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 			let mut records = 0u64;
 			let mut value_bytes = 0u64;
 			for key in keys {
-				if let Some(val) = self.get(key, version).await? {
+				if let Some(val) = self.get(key.as_borrowed(), version).await? {
 					records += 1;
 					value_bytes += val.len() as u64;
 					out.push(Some(val));
@@ -717,39 +724,25 @@ pub trait Transactable: requirements::TransactionRequirements {
 		})
 	}
 
-	/// Retrieve a range of prefixed keys from the datastore.
-	///
-	/// This function fetches all matching key-value pairs from the underlying
-	/// datastore in grouped batches. The returned [`ScanResult`] also reports
-	/// the total key and value bytes consumed during the scan.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	fn getp(&self, key: Key, version: Option<u64>) -> BoxFut<'_, Result<ScanResult>> {
-		Box::pin(async move {
-			// Check to see if transaction is closed
-			if self.closed() {
-				return Err(Error::TransactionFinished);
-			}
-			// Continue with function logic
-			let range = util::to_prefix_range(&key)?;
-			self.getr(range, version).await
-		})
-	}
-
 	/// Retrieve a range of keys from the datastore.
 	///
 	/// This function fetches all matching key-value pairs from the underlying
 	/// datastore in grouped batches. The returned [`ScanResult`] also reports
 	/// the total key and value bytes consumed during the scan, accumulated
 	/// while merging successive batches.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	fn getr(&self, rng: Range<Key>, version: Option<u64>) -> BoxFut<'_, Result<ScanResult>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	fn getr<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<ScanResult>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
 			if self.closed() {
 				return Err(Error::TransactionFinished);
 			}
 			// Continue with function logic
-			let mut out: Vec<(Key, Val)> = vec![];
+			let mut out: Vec<(Vec<u8>, Val)> = vec![];
 			let mut key_bytes = 0u64;
 			let mut value_bytes = 0u64;
 			let mut next = Some(rng);
@@ -770,33 +763,12 @@ pub trait Transactable: requirements::TransactionRequirements {
 		})
 	}
 
-	/// Delete a range of prefixed keys from the datastore.
-	///
-	/// This function deletes all matching key-value pairs from the underlying
-	/// datastore in grouped batches.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	fn delp(&self, key: Key) -> BoxFut<'_, Result<()>> {
-		Box::pin(async move {
-			// Check to see if transaction is closed
-			if self.closed() {
-				return Err(Error::TransactionFinished);
-			}
-			// Check to see if transaction is writable
-			if !self.writeable() {
-				return Err(Error::TransactionReadonly);
-			}
-			// Continue with function logic
-			let range = util::to_prefix_range(&key)?;
-			self.delr(range).await
-		})
-	}
-
 	/// Delete a range of keys from the datastore.
 	///
 	/// This function deletes all matching key-value pairs from the underlying
 	/// datastore in grouped batches.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	fn delr(&self, rng: Range<Key>) -> BoxFut<'_, Result<()>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	fn delr<'a>(&'a self, rng: KeyRange<'a>) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
 			if self.closed() {
@@ -812,40 +784,18 @@ pub trait Transactable: requirements::TransactionRequirements {
 				let res = self.batch_keys(rng, NORMAL_BATCH_SIZE, None).await?;
 				next = res.next;
 				for k in res.result {
-					self.del(k).await?;
+					self.del(Key::from(k)).await?;
 				}
 			}
 			Ok(())
 		})
 	}
-
-	/// Delete all versions of a range of prefixed keys from the datastore.
-	///
-	/// This function deletes all matching key-value pairs from the underlying
-	/// datastore in grouped batches.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	fn clrp(&self, key: Key) -> BoxFut<'_, Result<()>> {
-		Box::pin(async move {
-			// Check to see if transaction is closed
-			if self.closed() {
-				return Err(Error::TransactionFinished);
-			}
-			// Check to see if transaction is writable
-			if !self.writeable() {
-				return Err(Error::TransactionReadonly);
-			}
-			// Continue with function logic
-			let range = util::to_prefix_range(&key)?;
-			self.clrr(range).await
-		})
-	}
-
 	/// Delete all versions of a range of keys from the datastore.
 	///
 	/// This function deletes all matching key-value pairs from the underlying
 	/// datastore in grouped batches.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	fn clrr(&self, rng: Range<Key>) -> BoxFut<'_, Result<()>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	fn clrr<'a>(&'a self, rng: KeyRange<'a>) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
 			if self.closed() {
@@ -861,7 +811,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 				let res = self.batch_keys(rng, NORMAL_BATCH_SIZE, None).await?;
 				next = res.next;
 				for k in res.result {
-					self.clr(k).await?;
+					self.clr(k.into()).await?;
 				}
 			}
 			Ok(())
@@ -872,8 +822,8 @@ pub trait Transactable: requirements::TransactionRequirements {
 	///
 	/// This function fetches the total key count from the underlying datastore
 	/// in grouped batches.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	fn count(&self, rng: Range<Key>, version: Option<u64>) -> BoxFut<'_, Result<usize>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	fn count<'a>(&'a self, rng: KeyRange<'a>, version: Option<u64>) -> BoxFut<'a, Result<usize>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
 			if self.closed() {
@@ -899,55 +849,39 @@ pub trait Transactable: requirements::TransactionRequirements {
 	///
 	/// This function fetches keys, in batches, with multiple requests to the
 	/// underlying datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	fn batch_keys(
-		&self,
-		rng: Range<Key>,
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	fn batch_keys<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
 		batch: u32,
 		version: Option<u64>,
-	) -> BoxFut<'_, Result<Batch<Key>>> {
+	) -> BoxFut<'a, Result<KeyBatch>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
 			if self.closed() {
 				return Err(Error::TransactionFinished);
 			}
-			// Continue with function logic
-			let end = rng.end.clone();
 			// Scan for the next batch (we only need the keys here; the byte
 			// total is intended for metrics consumers higher up the stack)
-			let res = self.keys(rng, batch, 0, version).await?.keys;
+			let res = self.keys(rng.as_borrowed(), batch, 0, version).await?.keys;
 			// Short page ⇒ the range is fully consumed; no continuation needed.
 			if res.len() < batch as usize && batch > 0 {
-				Ok(Batch::<Key>::new(None, res))
+				Ok(Batch::new(None, res))
 			} else {
 				// Full page ⇒ produce a continuation range starting after the
 				// last returned key.
-				//
-				// NOTE: this uses `util::advance_key` (byte-level increment),
-				// which is **not** the same successor as the per-batch cursor
-				// in `DefaultKeysCursor::next_batch` (`push(0x00)`). The
-				// increment would skip every key that has `last` as a strict
-				// byte-prefix (e.g. `a` → `b` jumps past `a\0`, `ab`, ...).
-				// This is safe here only because every current caller passes a
-				// storekey-encoded range, and the storekey escape format is
-				// prefix-free across distinct stored keys. Callers that pass
-				// arbitrary byte ranges should use the cursor API instead.
 				match res.last() {
-					Some(k) => {
-						let mut k = k.clone();
-						util::advance_key(&mut k);
-						Ok(Batch::<Key>::new(
-							Some(Range {
-								start: k,
-								end,
-							}),
-							res,
-						))
-					}
+					Some(k) => Ok(Batch::new(
+						Some(KeyRange {
+							start: Key::from(k).next(),
+							end: rng.end.into_static(),
+						}),
+						res,
+					)),
 					// Unreachable: the `len < batch` branch above already
 					// handles the empty-result case, so a full page must
 					// have at least one element.
-					None => Ok(Batch::<Key>::new(None, res)),
+					None => Ok(Batch::new(None, res)),
 				}
 			}
 		})
@@ -957,46 +891,41 @@ pub trait Transactable: requirements::TransactionRequirements {
 	///
 	/// This function fetches key-value pairs, in batches, with multiple
 	/// requests to the underlying datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	fn batch_keys_vals(
-		&self,
-		rng: Range<Key>,
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	fn batch_keys_vals<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
 		batch: u32,
 		version: Option<u64>,
-	) -> BoxFut<'_, Result<Batch<(Key, Val)>>> {
+	) -> BoxFut<'a, Result<ValueBatch>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
 			if self.closed() {
 				return Err(Error::TransactionFinished);
 			}
-			// Continue with function logic
-			let end = rng.end.clone();
 			// Scan for the next batch (we only need the values here; the byte
 			// total is intended for metrics consumers higher up the stack)
-			let res = self.scan(rng, batch, 0, version).await?.values;
+			let res = self.scan(rng.as_borrowed(), batch, 0, version).await?.values;
 			// Short page ⇒ the range is fully consumed; no continuation needed.
 			if res.len() < batch as usize && batch > 0 {
-				Ok(Batch::<(Key, Val)>::new(None, res))
+				Ok(Batch::new(None, res))
 			} else {
 				// Full page ⇒ produce a continuation range starting after the
-				// last returned key. See `batch_keys` for why `advance_key`
-				// (used here) differs from the cursor's `push(0x00)`
-				// successor, and why it is safe under the storekey invariant.
+				// last returned key.
 				match res.last() {
 					Some((k, _)) => {
-						let mut k = k.clone();
-						util::advance_key(&mut k);
-						Ok(Batch::<(Key, Val)>::new(
-							Some(Range {
+						let k = Key::from(k).next();
+						Ok(Batch::new(
+							Some(KeyRange {
 								start: k,
-								end,
+								end: rng.end.as_borrowed().into_static(),
 							}),
 							res,
 						))
 					}
 					// Unreachable: the `len < batch` branch above already
 					// handles the empty-result case.
-					None => Ok(Batch::<(Key, Val)>::new(None, res)),
+					None => Ok(Batch::new(None, res)),
 				}
 			}
 		})
@@ -1076,7 +1005,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 	/// override this. The call is advisory — callers must not rely on it
 	/// for correctness, only for reclaiming space / improving read
 	/// performance.
-	fn compact(&self, _range: Option<Range<Key>>) -> BoxFut<'_, anyhow::Result<()>> {
+	fn compact<'a>(&'a self, _range: Option<KeyRange<'a>>) -> BoxFut<'a, anyhow::Result<()>> {
 		Box::pin(async move { bail!(Error::CompactionNotSupported) })
 	}
 }

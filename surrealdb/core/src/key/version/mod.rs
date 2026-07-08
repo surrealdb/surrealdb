@@ -1,26 +1,17 @@
 //! Stores a record document
-use std::ops::Range;
-
-use storekey::{BorrowDecode, Encode};
 
 use crate::key::category::{Categorise, Category};
-use crate::kvs::impl_kv_key_storekey;
+use crate::key::{impl_kv_key_storekey, impl_kv_range_storekey, key};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Version {
-	__: u8,
-	_a: u8,
+key! {
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Default)]
+	pub(crate) struct Version {
+		b'!',
+		b'v',
+	}
 }
-
+impl_kv_range_storekey!(Version);
 impl_kv_key_storekey!(Version => crate::kvs::version::MajorVersion);
-
-pub fn new() -> Version {
-	Version::new()
-}
-
-pub fn proceeding() -> Range<Vec<u8>> {
-	vec![b'!', b'v', 0x00]..vec![0xff]
-}
 
 impl Categorise for Version {
 	fn categorise(&self) -> Category {
@@ -28,30 +19,15 @@ impl Categorise for Version {
 	}
 }
 
-impl Version {
-	pub fn new() -> Self {
-		Self {
-			__: b'!',
-			_a: b'v',
-		}
-	}
-}
-
-impl Default for Version {
-	fn default() -> Self {
-		Self::new()
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::kvs::KVKey;
+	use crate::key::KVKey;
 
 	#[test]
 	fn key() {
-		let val = Version::new();
+		let val = Version {};
 		let enc = Version::encode_key(&val).unwrap();
-		assert_eq!(enc, b"!v");
+		assert_eq!(&*enc, b"!v");
 	}
 }

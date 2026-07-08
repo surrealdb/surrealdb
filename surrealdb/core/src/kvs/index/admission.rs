@@ -15,13 +15,14 @@ use crate::catalog::{DatabaseDefinition, DatabaseId, IndexDefinition, IndexId, N
 use crate::ctx::FrozenContext;
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
+use crate::key::{KVKey, KVValue};
 use crate::kvs::LockType::Optimistic;
+use crate::kvs::TransactionType;
 #[cfg(test)]
 use crate::kvs::testing::{NonRetryableErrorSite, maybe_inject_non_retryable_error};
 use crate::kvs::tx::{
 	CachedIndexBuildReservationKey, CachedIndexBuildReservationLookup, IndexBuildReservationRelease,
 };
-use crate::kvs::{KVKey, KVValue, TransactionType};
 use crate::val::TableName;
 
 /// Resolved slot in a per-(user-txn, index) reservation under which a single
@@ -176,15 +177,15 @@ impl IndexBuilder {
 			count_cond_match,
 		};
 		let tx = ctx.tx();
-		tx.set(
+		tx.set_key(
 			&ikb.new_bg_key(admitted.generation, admitted.ticket, admitted.mutation_seq),
 			&appending,
 		)
 		.await?;
 		if !admitted.initial_complete {
-			let bp = ikb.new_bp_key(admitted.generation, rid.key.clone());
-			if tx.get(&bp, None).await?.is_none() {
-				tx.set(
+			let bp = ikb.new_bp_key(admitted.generation, &rid.key);
+			if tx.get_key(&bp, None).await?.is_none() {
+				tx.set_key(
 					&bp,
 					&PrimaryAppendingTicket {
 						ticket: admitted.ticket,
@@ -217,7 +218,7 @@ impl IndexBuilder {
 			.tf
 			.transaction(TransactionType::Read, Optimistic, ctx.try_get_sequences()?.clone())
 			.await?;
-		let state = catch!(tx, tx.get(&ikb.new_bs_key(), None).await);
+		let state = catch!(tx, tx.get_key(&ikb.new_bs_key(), None).await);
 		tx.cancel().await?;
 		let Some(state) = state else {
 			release.release().await?;
@@ -276,7 +277,7 @@ impl IndexBuilder {
 			.tf
 			.transaction(TransactionType::Read, Optimistic, ctx.try_get_sequences()?.clone())
 			.await?;
-		let state = catch!(tx, tx.get(&ikb.new_bs_key(), None).await);
+		let state = catch!(tx, tx.get_key(&ikb.new_bs_key(), None).await);
 		tx.cancel().await?;
 		let Some(state) = state else {
 			return Err(Error::IndexingBuildingCancelled {
@@ -326,7 +327,7 @@ impl IndexBuilder {
 				.transaction(TransactionType::Write, Optimistic, ctx.try_get_sequences()?.clone())
 				.await?;
 			let state_key = ikb.new_bs_key();
-			let Some(state) = tx.get(&state_key, None).await? else {
+			let Some(state) = tx.get_key(&state_key, None).await? else {
 				tx.cancel().await?;
 				return Ok(DurableAdmissionDecision::MissingState);
 			};
@@ -371,8 +372,8 @@ impl IndexBuilder {
 						br.encode_key()?,
 						reservation.kv_encode_value()?,
 					);
-					tx.set(&br, &reservation).await?;
-					let res = tx.putc(&state_key, &next, Some(&state)).await;
+					tx.set_key(&br, &reservation).await?;
+					let res = tx.put_compare_key(&state_key, &next, Some(&state)).await;
 					match res {
 						Ok(()) => {
 							tx.commit().await?;

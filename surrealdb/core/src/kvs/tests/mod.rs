@@ -174,7 +174,7 @@ mod tikv {
 			.unwrap();
 		// Clear any previous test entries
 		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
-		tx.delr(vec![0u8]..vec![0xffu8]).await.unwrap();
+		tx.delr((vec![0u8]..vec![0xffu8]).into()).await.unwrap();
 		tx.commit().await.unwrap();
 		// Return the datastore
 		(ds, Kvs::Tikv)

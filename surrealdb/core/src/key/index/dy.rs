@@ -9,72 +9,63 @@
 
 use std::borrow::Cow;
 
-use storekey::{BorrowDecode, Encode};
-
-use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+use crate::catalog::IndexId;
 use crate::idx::trees::diskann::DiskAnnPendingState;
-use crate::kvs::impl_kv_key_storekey;
+use crate::key::database::all::DatabaseRoot;
+use crate::key::{impl_kv_key_storekey, key};
 use crate::val::TableName;
 
-/// Stores one shard of the sharded (`!dw`) pending-operation summary for one DiskANN index.
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-#[storekey(format = "()")]
-pub(crate) struct Dy<'a> {
-	__: u8,
-	_a: u8,
-	pub ns: NamespaceId,
-	_b: u8,
-	pub db: DatabaseId,
-	_c: u8,
-	pub tb: Cow<'a, TableName>,
-	_d: u8,
-	pub ix: IndexId,
-	_e: u8,
-	_f: u8,
-	_g: u8,
-	pub shard: u16,
-}
-
-impl_kv_key_storekey!(Dy<'_> => DiskAnnPendingState);
-
-impl<'a> Dy<'a> {
-	/// Creates one `!dy` sharded pending-state guard shard key for one DiskANN index.
-	pub(crate) fn new(
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &'a TableName,
-		ix: IndexId,
-		shard: u16,
-	) -> Self {
-		Self {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
-			_c: b'*',
-			tb: Cow::Borrowed(tb),
-			_d: b'+',
-			ix,
-			_e: b'!',
-			_f: b'd',
-			_g: b'y',
-			shard,
-		}
+key! {
+	/// Stores one shard of the sharded (`!dw`) pending-operation summary for one DiskANN index.
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+	pub(crate) struct Dy<'a> {
+		pub prefix: DatabaseRoot,
+		b'*',
+		pub tb: Cow<'a, TableName>,
+		b'+',
+		pub ix: IndexId,
+		b'!',
+		b'd',
+		b'y',
+		pub shard: u16,
 	}
 }
+
+impl_kv_key_storekey!(Dy<'a> => DiskAnnPendingState);
 
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::key::KVKey;
 	use crate::key::index::dp::Dp;
-	use crate::kvs::KVKey;
 
 	#[test]
 	fn sharded_guard_key_is_distinct_from_legacy_guard() {
 		let tb = TableName::from("testtb");
-		let dy = Dy::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), 7).encode_key().unwrap();
-		let dp = Dp::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), 7).encode_key().unwrap();
+		let dy = Dy {
+			prefix: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+			tb: Cow::Borrowed(&tb),
+			ix: IndexId(3),
+			shard: 7,
+		}
+		.encode_key()
+		.unwrap();
+
+		let dp = Dp {
+			prefix: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+			tb: Cow::Borrowed(&tb),
+			ix: IndexId(3),
+			shard: 7,
+		}
+		.encode_key()
+		.unwrap();
 		// The sharded guard must not collide with the legacy guard an old compactor clears.
 		assert_ne!(dy, dp);
 	}

@@ -1,9 +1,3 @@
-// This triggers because we have regex's in our Value type which have a unsafecell inside.
-#![allow(clippy::mutable_key_type)]
-// Increased to support #[instrument] on complex async functions. Those are compiled out in release
-// builds.
-#![recursion_limit = "256"]
-
 //! # Surrealdb Core
 //!
 //! This crate is the internal core library of SurrealDB. It contains most of the database
@@ -17,6 +11,11 @@
 //! <a href="https://crates.io/crates/surrealdb">the Rust SDK</a>.
 //! </section>
 
+// This triggers because we have regex's in our Value type which have a unsafecell inside.
+#![allow(clippy::mutable_key_type)]
+// Increased to support #[instrument] on complex async functions. Those are compiled out in release
+// builds.
+#![recursion_limit = "256"]
 #![doc(html_favicon_url = "https://surrealdb.s3.amazonaws.com/favicon.png")]
 #![doc(html_logo_url = "https://surrealdb.s3.amazonaws.com/icon.png")]
 
@@ -34,7 +33,8 @@ pub mod doc;
 mod exe;
 mod fmt;
 mod fnc;
-mod key;
+#[doc(hidden)]
+pub mod key;
 mod lq;
 #[doc(hidden)]
 pub mod str;

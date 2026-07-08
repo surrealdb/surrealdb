@@ -4,7 +4,7 @@ use anyhow::Result;
 use async_channel::Sender;
 use surrealdb_types::{SurrealValue, ToSql};
 
-use super::{KVValue, Transaction};
+use super::Transaction;
 use crate::catalog::providers::{
 	ApiProvider, AuthorisationProvider, BucketProvider, DatabaseProvider, TableProvider,
 	UserProvider,
@@ -14,7 +14,7 @@ use crate::err::Error;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::define::{DefineAccessStatement, DefineUserStatement};
 use crate::expr::{Base, DefineAnalyzerStatement};
-use crate::key::record;
+use crate::key::{KVKeyDecode, KVRange, KVValue, record};
 use crate::sql::statements::OptionStatement;
 
 #[derive(Clone, Debug, SurrealValue)]
@@ -388,9 +388,16 @@ impl Transaction {
 		chn.send(bytes!("-- ------------------------------")).await?;
 		chn.send(bytes!("")).await?;
 
-		let beg = crate::key::record::prefix(ns, db, &table.name)?;
-		let end = crate::key::record::suffix(ns, db, &table.name)?;
-		let mut next = Some(beg..end);
+		let mut next = Some(
+			crate::key::record::RecordKeyPrefix {
+				root: crate::key::database::all::DatabaseRoot {
+					ns,
+					db,
+				},
+				table: std::borrow::Cow::Borrowed(&table.name),
+			}
+			.encode_range()?,
+		);
 
 		while let Some(rng) = next {
 			let batch = self.batch_keys_vals(rng, batch_size, None).await?;
@@ -474,7 +481,7 @@ impl Transaction {
 			let k = record::RecordKey::decode_key(&k)?;
 			let rid = crate::val::RecordId {
 				table: k.tb.into_owned(),
-				key: k.id,
+				key: k.id.into_owned(),
 			};
 			let v = Record::kv_decode_value(&v, rid)?;
 			// Process the value and categorize it into records_relate or records_normal.

@@ -24,7 +24,7 @@ use storekey::{BorrowDecode, BorrowReader, DecodeError, Encode, EncodeError, Wri
 use crate::catalog::{Distance, VectorType};
 use crate::err::Error;
 use crate::fnc::util::math::ToFloat;
-use crate::kvs::KVValue;
+use crate::key::KVValue;
 use crate::val::{Number, Value};
 
 #[derive(Debug, Clone, PartialEq)]

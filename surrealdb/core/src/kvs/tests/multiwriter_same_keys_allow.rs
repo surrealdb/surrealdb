@@ -12,33 +12,33 @@ pub async fn multiwriter_same_keys_allow(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Insert an initial key
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.set(&"test", &"some text".as_bytes().to_vec()).await.unwrap();
+	tx.set("test".as_bytes().into(), &"some text".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a writeable transaction
 	let tx1 = ds.transaction(Write, Optimistic).await.unwrap();
-	tx1.set(&"test", &"other text 1".as_bytes().to_vec()).await.unwrap();
+	tx1.set("test".as_bytes().into(), &"other text 1".as_bytes().to_vec()).await.unwrap();
 	// Create a writeable transaction
 	let tx2 = ds.transaction(Write, Optimistic).await.unwrap();
-	tx2.set(&"test", &"other text 2".as_bytes().to_vec()).await.unwrap();
+	tx2.set("test".as_bytes().into(), &"other text 2".as_bytes().to_vec()).await.unwrap();
 	// Create a writeable transaction
 	let tx3 = ds.transaction(Write, Optimistic).await.unwrap();
-	tx3.set(&"test", &"other text 3".as_bytes().to_vec()).await.unwrap();
+	tx3.set("test".as_bytes().into(), &"other text 3".as_bytes().to_vec()).await.unwrap();
 	// Cancel both writeable transactions
 	tx1.commit().await.unwrap();
 	tx2.commit().await.unwrap();
 	tx3.commit().await.unwrap();
 	// Check that the key was updated ok
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.get(&"test", None).await.unwrap().unwrap();
+	let val = tx.get("test".as_bytes().into(), None).await.unwrap().unwrap();
 	assert_eq!(val, b"other text 3");
 	tx.cancel().await.unwrap();
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.set(&"test", &"original text".as_bytes().to_vec()).await.unwrap();
+	tx.set("test".as_bytes().into(), &"original text".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Check that the key was updated ok
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.get(&"test", None).await.unwrap().unwrap();
+	let val = tx.get("test".as_bytes().into(), None).await.unwrap().unwrap();
 	assert_eq!(val, b"original text");
 	tx.cancel().await.unwrap();
 }

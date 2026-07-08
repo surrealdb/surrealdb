@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
@@ -9,6 +11,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Expr, FlowResultExt as _};
 use crate::iam::Error as IamError;
+use crate::key::database::all::DatabaseRoot;
 use crate::types::{PublicAction, PublicNotification, PublicValue};
 use crate::val::{Uuid, Value};
 
@@ -54,17 +57,27 @@ impl KillStatement {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Fetch the live query key
-		let key = crate::key::node::lq::new(nid, lid);
+		let key = crate::key::node::lq::Lq {
+			nd: nid,
+			lq: lid,
+		};
 		// Fetch the live query key if it exists
-		match txn.get(&key, None).await? {
+		match txn.get_key(&key, None).await? {
 			Some(live) => {
 				// Verify that the requesting user is the owner of this live query.
 				// Root-level users may kill any live query; all other users may only
 				// kill live queries they themselves created.
 				if ctx.auth_enabled() && !opt.auth.is_root() {
-					let table_key = crate::key::table::lq::new(live.ns, live.db, &live.tb, lid);
+					let table_key = crate::key::table::lq::Lq {
+						prefix: DatabaseRoot {
+							ns: live.ns,
+							db: live.db,
+						},
+						tb: Cow::Borrowed(&live.tb),
+						lq: lid,
+					};
 					let subscription: Option<SubscriptionDefinition> =
-						txn.get(&table_key, None).await?;
+						txn.get_key(&table_key, None).await?;
 					if let Some(sub) = subscription {
 						// For live queries created before auth tracking was introduced
 						// (sub.auth is None), we have no ownership information and
@@ -96,11 +109,21 @@ impl KillStatement {
 					}
 				}
 				// Delete the node live query
-				let key = crate::key::node::lq::new(nid, lid);
-				txn.clr(&key).await?;
+				let key = crate::key::node::lq::Lq {
+					nd: nid,
+					lq: lid,
+				};
+				txn.clr_key(&key).await?;
 				// Delete the table live query
-				let key = crate::key::table::lq::new(live.ns, live.db, &live.tb, lid);
-				txn.clr(&key).await?;
+				let key = crate::key::table::lq::Lq {
+					prefix: DatabaseRoot {
+						ns: live.ns,
+						db: live.db,
+					},
+					tb: Cow::Borrowed(&live.tb),
+					lq: lid,
+				};
+				txn.clr_key(&key).await?;
 				// Refresh the table cache for lives
 				if let Some(cache) = ctx.get_cache() {
 					cache.set_live_queries_version(live.ns, live.db, &live.tb);
@@ -136,6 +159,7 @@ impl KillStatement {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+	use std::borrow::Cow;
 	use std::sync::Arc;
 
 	use anyhow::Result;
@@ -145,6 +169,7 @@ mod tests {
 	use crate::channel::Receiver;
 	use crate::dbs::{Capabilities, Session};
 	use crate::iam::{Actor, Auth, Level, Role};
+	use crate::key::database::all::DatabaseRoot;
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
@@ -370,16 +395,18 @@ mod tests {
 			let txn = ds.transaction(Write, Optimistic).await.unwrap();
 			let db_def = txn.ensure_ns_db(None, ns, db).await.unwrap();
 			let tb_name = crate::val::TableName::from(tb);
-			let key = crate::key::table::lq::new(
-				db_def.namespace_id,
-				db_def.database_id,
-				&tb_name,
-				live_uuid,
-			);
+			let key = crate::key::table::lq::Lq {
+				prefix: DatabaseRoot {
+					ns: db_def.namespace_id,
+					db: db_def.database_id,
+				},
+				tb: Cow::Borrowed(&tb_name),
+				lq: live_uuid,
+			};
 			let mut sub: crate::catalog::SubscriptionDefinition =
-				txn.get(&key, None).await.unwrap().expect("subscription must exist");
+				txn.get_key(&key, None).await.unwrap().expect("subscription must exist");
 			sub.auth = None;
-			txn.set(&key, &sub).await.unwrap();
+			txn.set_key(&key, &sub).await.unwrap();
 			txn.commit().await.unwrap();
 		}
 
@@ -413,16 +440,18 @@ mod tests {
 			let txn = ds.transaction(Write, Optimistic).await.unwrap();
 			let db_def = txn.ensure_ns_db(None, ns, db).await.unwrap();
 			let tb_name = crate::val::TableName::from(tb);
-			let key = crate::key::table::lq::new(
-				db_def.namespace_id,
-				db_def.database_id,
-				&tb_name,
-				live_uuid,
-			);
+			let key = crate::key::table::lq::Lq {
+				prefix: DatabaseRoot {
+					ns: db_def.namespace_id,
+					db: db_def.database_id,
+				},
+				tb: Cow::Borrowed(&tb_name),
+				lq: live_uuid,
+			};
 			let mut sub: crate::catalog::SubscriptionDefinition =
-				txn.get(&key, None).await.unwrap().expect("subscription must exist");
+				txn.get_key(&key, None).await.unwrap().expect("subscription must exist");
 			sub.auth = None;
-			txn.set(&key, &sub).await.unwrap();
+			txn.set_key(&key, &sub).await.unwrap();
 			txn.commit().await.unwrap();
 		}
 
@@ -460,13 +489,15 @@ mod tests {
 			let txn = ds.transaction(Write, Optimistic).await.unwrap();
 			let db_def = txn.ensure_ns_db(None, ns, db).await.unwrap();
 			let tb_name = crate::val::TableName::from(tb);
-			let key = crate::key::table::lq::new(
-				db_def.namespace_id,
-				db_def.database_id,
-				&tb_name,
-				live_uuid,
-			);
-			txn.clr(&key).await.unwrap();
+			let key = crate::key::table::lq::Lq {
+				prefix: DatabaseRoot {
+					ns: db_def.namespace_id,
+					db: db_def.database_id,
+				},
+				tb: Cow::Borrowed(&tb_name),
+				lq: live_uuid,
+			};
+			txn.clr_key(&key).await.unwrap();
 			txn.commit().await.unwrap();
 		}
 

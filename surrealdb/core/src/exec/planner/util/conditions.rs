@@ -10,6 +10,7 @@
 //! the outer scan's analysis.
 
 use std::collections::HashSet;
+use std::ops::Bound;
 
 use super::literals::try_literal_to_value;
 use crate::catalog::Distance;
@@ -485,8 +486,7 @@ impl IndexConditionMatcher<'_> {
 				false
 			}
 			BTreeAccess::Range {
-				from,
-				to,
+				range,
 			} => {
 				let Some(col) = self.cols.first() else {
 					return false;
@@ -494,41 +494,41 @@ impl IndexConditionMatcher<'_> {
 				if idiom != col {
 					return false;
 				}
-				// Check the from (lower) bound.
-				if let Some(from) = from {
-					let expected_op = if from.inclusive {
-						BinaryOperator::MoreThanEqual
-					} else {
-						BinaryOperator::MoreThan
-					};
-					if effective_op == expected_op && value == from.value {
-						return true;
+				match &range.start {
+					Bound::Included(x) => {
+						if effective_op == BinaryOperator::MoreThanEqual && value == *x {
+							return true;
+						}
 					}
-					// `field != NONE` is equivalent to an exclusive lower bound
-					// at NONE because NONE sorts first in the BTree key
-					// ordering. `!= NULL` is NOT recognised here — that
-					// pushdown is unsafe (it would also drop NONE rows). See
-					// the matching note in
-					// `IndexAnalyzer::match_operator_to_access`.
-					if !from.inclusive
-						&& matches!(from.value, Value::None)
-						&& effective_op == BinaryOperator::NotEqual
-						&& value == from.value
-					{
-						return true;
+					Bound::Excluded(x) => {
+						if effective_op == BinaryOperator::MoreThan && value == *x {
+							return true;
+						}
+
+						if matches!(x, Value::None)
+							&& matches!(value, Value::None)
+							&& effective_op == BinaryOperator::NotEqual
+						{
+							return true;
+						}
 					}
+					Bound::Unbounded => {}
 				}
-				// Check the to (upper) bound.
-				if let Some(to) = to {
-					let expected_op = if to.inclusive {
-						BinaryOperator::LessThanEqual
-					} else {
-						BinaryOperator::LessThan
-					};
-					if effective_op == expected_op && value == to.value {
-						return true;
+
+				match &range.end {
+					Bound::Included(x) => {
+						if effective_op == BinaryOperator::LessThanEqual && value == *x {
+							return true;
+						}
 					}
+					Bound::Excluded(x) => {
+						if effective_op == BinaryOperator::LessThan && value == *x {
+							return true;
+						}
+					}
+					Bound::Unbounded => {}
 				}
+
 				false
 			}
 			// FullText and KNN access types have their own stripping logic.

@@ -17,34 +17,31 @@
 use std::borrow::Cow;
 
 use roaring::RoaringTreemap;
-use storekey::{BorrowDecode, Encode};
 
-use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+use crate::catalog::IndexId;
 use crate::idx::ft::fulltext::TermDocument;
 use crate::idx::seqdocids::DocId;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::impl_kv_key_storekey;
+use crate::key::database::all::DatabaseRoot;
+use crate::key::{impl_kv_key_storekey, key};
 use crate::val::TableName;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-#[storekey(format = "()")]
-pub(crate) struct TdRoot<'a> {
-	__: u8,
-	_a: u8,
-	pub ns: NamespaceId,
-	_b: u8,
-	pub db: DatabaseId,
-	_c: u8,
-	pub tb: Cow<'a, TableName>,
-	_d: u8,
-	pub ix: IndexId,
-	_e: u8,
-	_f: u8,
-	_g: u8,
-	pub term: Cow<'a, str>,
+key! {
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+		pub(crate) struct TdRoot<'a> {
+		pub prefix: DatabaseRoot,
+		b'*',
+		pub tb: Cow<'a, TableName>,
+		b'+',
+		pub ix: IndexId,
+		b'!',
+		b't',
+		b'd',
+		pub term: Cow<'a, str>,
+	}
 }
 
-impl_kv_key_storekey!(TdRoot<'_> => RoaringTreemap);
+impl_kv_key_storekey!(TdRoot<'a> => RoaringTreemap);
 
 impl Categorise for TdRoot<'_> {
 	fn categorise(&self) -> Category {
@@ -52,52 +49,36 @@ impl Categorise for TdRoot<'_> {
 	}
 }
 
-impl<'a> TdRoot<'a> {
-	pub(crate) fn new(
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &'a TableName,
-		ix: IndexId,
-		term: &'a str,
-	) -> Self {
-		Self {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
-			_c: b'*',
-			tb: Cow::Borrowed(tb),
-			_d: b'+',
-			ix,
-			_e: b'!',
-			_f: b't',
-			_g: b'd',
-			term: Cow::Borrowed(term),
-		}
+key! {
+	/// Term-document mapping key
+	///
+	/// A key that maps a term to a document ID.
+	/// It's used by the full-text search engine to efficiently find documents
+	/// that contain specific terms during search operations.
+	///
+	/// # Fields
+	/// * `ns` - Namespace identifier
+	/// * `db` - Database identifier
+	/// * `tb` - Table identifier
+	/// * `ix` - Index identifier
+	/// * `term` - The term being indexed
+	/// * `id` - Optional document ID (Some for specific document, None for term prefix)
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+	pub(crate) struct Td<'a> {
+		pub prefix: DatabaseRoot,
+		b'*',
+		pub tb: Cow<'a, TableName>,
+		b'+',
+		pub ix: IndexId,
+		b'!',
+		b't',
+		b'd',
+		pub term: Cow<'a, str>,
+		pub id: DocId,
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-#[storekey(format = "()")]
-pub(crate) struct Td<'a> {
-	__: u8,
-	_a: u8,
-	pub ns: NamespaceId,
-	_b: u8,
-	pub db: DatabaseId,
-	_c: u8,
-	pub tb: Cow<'a, TableName>,
-	_d: u8,
-	pub ix: IndexId,
-	_e: u8,
-	_f: u8,
-	_g: u8,
-	pub term: Cow<'a, str>,
-	pub id: DocId,
-}
-
-impl_kv_key_storekey!(Td<'_> => TermDocument);
+impl_kv_key_storekey!(Td<'a> => TermDocument);
 
 impl Categorise for Td<'_> {
 	fn categorise(&self) -> Category {
@@ -105,67 +86,44 @@ impl Categorise for Td<'_> {
 	}
 }
 
-impl<'a> Td<'a> {
-	/// Creates a new term-document mapping key
-	///
-	/// This constructor creates a key that maps a term to a document ID.
-	/// It's used by the full-text search engine to efficiently find documents
-	/// that contain specific terms during search operations.
-	///
-	/// # Arguments
-	/// * `ns` - Namespace identifier
-	/// * `db` - Database identifier
-	/// * `tb` - Table identifier
-	/// * `ix` - Index identifier
-	/// * `term` - The term being indexed
-	/// * `id` - Optional document ID (Some for specific document, None for term prefix)
-	pub(crate) fn new(
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &'a TableName,
-		ix: IndexId,
-		term: &'a str,
-		id: DocId,
-	) -> Self {
-		Self {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
-			_c: b'*',
-			tb: Cow::Borrowed(tb),
-			_d: b'+',
-			ix,
-			_e: b'!',
-			_f: b't',
-			_g: b'd',
-			term: Cow::Borrowed(term),
-			id,
-		}
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::kvs::KVKey;
+	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::key::KVKey;
 
 	#[test]
 	fn root() {
 		let tb = TableName::from("testtb");
-		let val = TdRoot::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), "term");
+		let val = TdRoot {
+			prefix: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+			tb: Cow::Borrowed(&tb),
+			ix: IndexId(3),
+			term: "term".into(),
+		};
 		let enc = TdRoot::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!tdterm\0");
+		assert_eq!(&*enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!tdterm\0");
 	}
 
 	#[test]
 	fn key() {
 		let tb = TableName::from("testtb");
-		let val = Td::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), "term", 129);
+		let val = Td {
+			prefix: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+			tb: Cow::Borrowed(&tb),
+			ix: IndexId(3),
+			term: "term".into(),
+			id: 129,
+		};
 		let enc = Td::encode_key(&val).unwrap();
 		assert_eq!(
-			enc,
+			&*enc,
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!tdterm\0\0\0\0\0\0\0\0\x81"
 		);
 	}

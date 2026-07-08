@@ -39,40 +39,45 @@
 use std::borrow::Cow;
 use std::fmt::Debug;
 
-use storekey::{BorrowDecode, Encode};
-
-use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+use crate::catalog::IndexId;
 use crate::idx::seqdocids::DocId;
 use crate::key::category::{Categorise, Category};
+use crate::key::database::all::DatabaseRoot;
+use crate::key::{KVKey, KVKeyDecode, key};
 use crate::val::{IndexFormat, RecordIdKey, TableName};
 
-#[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
-#[storekey(format = "IndexFormat")]
-pub(crate) struct Id<'a> {
-	__: u8,
-	_a: u8,
-	pub ns: NamespaceId,
-	_b: u8,
-	pub db: DatabaseId,
-	_c: u8,
-	pub tb: Cow<'a, TableName>,
-	_d: u8,
-	pub ix: IndexId,
-	_e: u8,
-	_f: u8,
-	_g: u8,
-	pub id: RecordIdKey,
+key! {
+	#[derive(Debug, Clone, PartialEq)]
+	pub(crate) struct Id<'a> for IndexFormat{
+		pub prefix: DatabaseRoot,
+		b'*',
+		pub tb: Cow<'a, TableName>,
+		b'+',
+		pub ix: IndexId,
+		b'!',
+		b'i',
+		b'd',
+		pub id: Cow<'a,RecordIdKey>,
+	}
 }
 
-impl crate::kvs::KVKey for Id<'_> {
-	type ValueType = DocId;
+impl KVKey for Id<'_> {
+	type Value = DocId;
 
-	fn encode_key(&self) -> anyhow::Result<Vec<u8>> {
-		Ok(storekey::encode_vec_format::<IndexFormat, _>(self)
-			.map_err(|_| crate::err::Error::Unencodable)?)
+	fn encode_buffer(&self, buffer: &mut Vec<u8>) -> anyhow::Result<()> {
+		storekey::encode_format::<IndexFormat, _, _>(buffer, self)
+			.map_err(|_| crate::err::Error::Unencodable)?;
+		Ok(())
 	}
 
 	fn value_context(&self) {}
+}
+impl<'a> KVKeyDecode<'a> for Id<'a> {
+	fn decode_key(bytes: &'a [u8]) -> anyhow::Result<Self> {
+		Ok(storekey::decode_borrow_format::<IndexFormat, _>(bytes).map_err(|_| {
+			crate::err::Error::Corrupted("Document ID mapping key cannot be decoded")
+		})?)
+	}
 }
 
 impl Categorise for Id<'_> {
@@ -81,51 +86,27 @@ impl Categorise for Id<'_> {
 	}
 }
 
-impl<'a> Id<'a> {
-	#[cfg_attr(target_family = "wasm", allow(dead_code))]
-	pub fn new(
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &'a TableName,
-		ix: IndexId,
-		id: RecordIdKey,
-	) -> Self {
-		Self {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
-			_c: b'*',
-			tb: Cow::Borrowed(tb),
-			_d: b'+',
-			ix,
-			_e: b'!',
-			_f: b'i',
-			_g: b'd',
-			id,
-		}
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::kvs::KVKey;
+	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::key::KVKey;
 
 	#[test]
 	fn key() {
 		let tb = TableName::from("testtb");
-		let val = Id::new(
-			NamespaceId(1),
-			DatabaseId(2),
-			&tb,
-			IndexId(3),
-			RecordIdKey::from("id".to_owned()),
-		);
+		let val = Id {
+			prefix: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+			tb: Cow::Borrowed(&tb),
+			ix: IndexId(3),
+			id: Cow::Owned(RecordIdKey::from("id".to_owned())),
+		};
 		let enc = Id::encode_key(&val).unwrap();
 		assert_eq!(
-			enc,
+			&*enc,
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!id\x03id\0",
 			"{}",
 			String::from_utf8_lossy(&enc)

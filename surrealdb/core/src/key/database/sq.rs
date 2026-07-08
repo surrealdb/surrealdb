@@ -2,81 +2,70 @@
 use std::borrow::Cow;
 
 use anyhow::Result;
-use storekey::{BorrowDecode, Encode};
 
-use crate::catalog::{DatabaseId, NamespaceId, SequenceDefinition};
+use crate::catalog::SequenceDefinition;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::{KVKey, impl_kv_key_storekey};
+use crate::key::database::all::DatabaseRoot;
+use crate::key::{impl_kv_key_storekey, impl_kv_range_storekey, key};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Sq<'a> {
-	__: u8,
-	_a: u8,
-	pub ns: NamespaceId,
-	_b: u8,
-	pub db: DatabaseId,
-	_c: u8,
-	_d: u8,
-	_e: u8,
-	pub sq: Cow<'a, str>,
+key! {
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+	pub(crate) struct Sq<'a> {
+		pub prefix: DatabaseRoot,
+		b'*', // *
+		b's', // s
+		b'q', // q
+		pub sq: Cow<'a, str>,
+	}
 }
 
-impl_kv_key_storekey!(Sq<'_> => SequenceDefinition);
-
-pub fn prefix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db).encode_key()?;
-	k.extend_from_slice(b"*sq\x00");
-	Ok(k)
-}
-
-pub fn suffix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db).encode_key()?;
-	k.extend_from_slice(b"*sq\xff");
-	Ok(k)
-}
-
+impl_kv_key_storekey!(Sq<'a> => SequenceDefinition);
 impl Categorise for Sq<'_> {
 	fn categorise(&self) -> Category {
 		Category::DatabaseSequence
 	}
 }
 
-impl<'a> Sq<'a> {
-	pub(crate) fn new(ns: NamespaceId, db: DatabaseId, sq: &'a str) -> Self {
-		Self {
-			__: b'/', // /
-			_a: b'*', // *
-			ns,
-			_b: b'*', // *
-			db,
-			_c: b'*', // *
-			_d: b's', // s
-			_e: b'q', // q
-			sq: Cow::Borrowed(sq),
-		}
+key! {
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+	pub(crate) struct SqPrefix {
+		pub prefix: DatabaseRoot,
+		b'*', // *
+		b's', // s
+		b'q', // q
 	}
 }
+impl_kv_range_storekey!(SqPrefix);
 
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::key::{KVKey, KVRange};
 
 	#[test]
 	fn key() {
-		let val = Sq::new(NamespaceId(1), DatabaseId(2), "test");
+		let val = Sq {
+			prefix: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+			sq: "test".into(),
+		};
 		let enc = Sq::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*sqtest\0");
+		assert_eq!(enc.as_slice(), b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*sqtest\0");
 	}
 
 	#[test]
 	fn prefix() {
-		let val = super::prefix(NamespaceId(1), DatabaseId(2)).unwrap();
-		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*sq\0");
-	}
-
-	#[test]
-	fn suffix() {
-		let val = super::suffix(NamespaceId(1), DatabaseId(2)).unwrap();
-		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*sq\xff");
+		let val = SqPrefix {
+			prefix: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+		}
+		.encode_range()
+		.unwrap();
+		assert_eq!(val.start.as_slice(), b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*sq\0");
 	}
 }

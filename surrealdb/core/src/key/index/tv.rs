@@ -1,36 +1,32 @@
 use std::borrow::Cow;
 
-use storekey::{BorrowDecode, Encode};
-
-use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+use crate::catalog::IndexId;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::impl_kv_key_storekey;
+use crate::key::database::all::DatabaseRoot;
+use crate::key::{impl_kv_key_storekey, key};
 use crate::val::TableName;
 
-/// Full-text term-document compaction generation.
-///
-/// This key is intentionally outside the `!tt` delta range. It lets a
-/// compactor validate that the term-doc snapshot it read is still current
-/// before applying exact-key deletes. Missing values are treated as
-/// generation `0`.
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-#[storekey(format = "()")]
-pub(crate) struct Tv<'a> {
-	__: u8,
-	_a: u8,
-	pub ns: NamespaceId,
-	_b: u8,
-	pub db: DatabaseId,
-	_c: u8,
-	pub tb: Cow<'a, TableName>,
-	_d: u8,
-	pub ix: IndexId,
-	_e: u8,
-	_f: u8,
-	_g: u8,
+key! {
+	/// Full-text term-document compaction generation.
+	///
+	/// This key is intentionally outside the `!tt` delta range. It lets a
+	/// compactor validate that the term-doc snapshot it read is still current
+	/// before applying exact-key deletes. Missing values are treated as
+	/// generation `0`.
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+	pub(crate) struct Tv<'a> {
+		pub prefix: DatabaseRoot,
+		b'*',
+		pub tb: Cow<'a, TableName>,
+		b'+',
+		pub ix: IndexId,
+		b'!',
+		b't',
+		b'v',
+	}
 }
 
-impl_kv_key_storekey!(Tv<'_> => u64);
+impl_kv_key_storekey!(Tv<'a> => u64);
 
 impl Categorise for Tv<'_> {
 	fn categorise(&self) -> Category {
@@ -38,37 +34,24 @@ impl Categorise for Tv<'_> {
 	}
 }
 
-impl<'a> Tv<'a> {
-	/// Creates the per-index generation guard for `!tt` compaction.
-	pub(crate) fn new(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, ix: IndexId) -> Self {
-		Self {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
-			_c: b'*',
-			tb: Cow::Borrowed(tb),
-			_d: b'+',
-			ix,
-			_e: b'!',
-			_f: b't',
-			_g: b'v',
-		}
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::key::index::tt::Tt;
-	use crate::kvs::KVKey;
+	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::key::KVKey;
 
 	#[test]
-	fn generation_key_is_outside_tt_range() {
+	fn key() {
 		let tb = TableName::from("testtb");
-		let key = Tv::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3)).encode_key().unwrap();
-		let (beg, end) = Tt::terms_range(NamespaceId(1), DatabaseId(2), &tb, IndexId(3)).unwrap();
-		assert!(!beg.le(&key) || !key.lt(&end));
+		let val = Tv {
+			prefix: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+			tb: Cow::Borrowed(&tb),
+			ix: IndexId(3),
+		};
+		let enc = Tv::encode_key(&val).unwrap();
+		assert_eq!(enc.as_slice(), b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!tv");
 	}
 }

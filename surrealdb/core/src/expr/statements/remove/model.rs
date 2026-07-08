@@ -38,8 +38,15 @@ impl RemoveModelStatement {
 			}
 		};
 		// Delete the definition
-		let key = crate::key::database::ml::new(ns, db, &ml.name, &ml.version);
-		txn.del(&key).await?;
+		let key = crate::key::database::ml::Ml {
+			prefix: crate::key::database::all::DatabaseRoot {
+				ns,
+				db,
+			},
+			ml: std::borrow::Cow::Borrowed(&ml.name),
+			vn: std::borrow::Cow::Borrowed(&ml.version),
+		};
+		txn.del_key(&key).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// `obs::del` is idempotent, so this is safe even for definitions

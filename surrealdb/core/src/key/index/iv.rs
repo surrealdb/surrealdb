@@ -1,36 +1,32 @@
 use std::borrow::Cow;
 
-use storekey::{BorrowDecode, Encode};
-
-use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+use crate::catalog::IndexId;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::impl_kv_key_storekey;
+use crate::key::database::all::DatabaseRoot;
+use crate::key::{impl_kv_key_storekey, key};
 use crate::val::TableName;
 
-/// Count-index compaction generation.
-///
-/// This key is intentionally outside the `!iu` count-entry range. It lets a
-/// compactor validate that the count snapshot it read is still current before
-/// deleting exact keys and writing the compacted aggregate. Missing values are
-/// treated as generation `0`.
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-#[storekey(format = "()")]
-pub(crate) struct Iv<'a> {
-	__: u8,
-	_a: u8,
-	pub ns: NamespaceId,
-	_b: u8,
-	pub db: DatabaseId,
-	_c: u8,
-	pub tb: Cow<'a, TableName>,
-	_d: u8,
-	pub ix: IndexId,
-	_e: u8,
-	_f: u8,
-	_g: u8,
+key! {
+	/// Count-index compaction generation.
+	///
+	/// This key is intentionally outside the `!iu` count-entry range. It lets a
+	/// compactor validate that the count snapshot it read is still current before
+	/// deleting exact keys and writing the compacted aggregate. Missing values are
+	/// treated as generation `0`.
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+		pub(crate) struct Iv<'a> {
+		pub prefix: DatabaseRoot,
+		b'*',
+		pub tb: Cow<'a, TableName>,
+		b'+',
+		pub ix: IndexId,
+		b'!',
+		b'i',
+		b'v',
+	}
 }
 
-impl_kv_key_storekey!(Iv<'_> => u64);
+impl_kv_key_storekey!(Iv<'a> => u64);
 
 impl Categorise for Iv<'_> {
 	fn categorise(&self) -> Category {
@@ -38,37 +34,24 @@ impl Categorise for Iv<'_> {
 	}
 }
 
-impl<'a> Iv<'a> {
-	/// Creates the per-index generation guard for `!iu` compaction.
-	pub(crate) fn new(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, ix: IndexId) -> Self {
-		Self {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
-			_c: b'*',
-			tb: Cow::Borrowed(tb),
-			_d: b'+',
-			ix,
-			_e: b'!',
-			_f: b'i',
-			_g: b'v',
-		}
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::key::index::iu::IndexCountKey;
-	use crate::kvs::KVKey;
+	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::key::KVKey;
 
 	#[test]
-	fn generation_key_is_outside_iu_range() {
+	fn key() {
 		let tb = TableName::from("testtb");
-		let key = Iv::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3)).encode_key().unwrap();
-		let range = IndexCountKey::range(NamespaceId(1), DatabaseId(2), &tb, IndexId(3)).unwrap();
-		assert!(!range.start.le(&key) || !key.lt(&range.end));
+		let val = Iv {
+			prefix: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+			tb: Cow::Borrowed(&tb),
+			ix: IndexId(3),
+		};
+		let enc = Iv::encode_key(&val).unwrap();
+		assert_eq!(enc.as_slice(), b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!iv");
 	}
 }

@@ -2,6 +2,7 @@ use uuid::Uuid;
 
 use super::CreateDs;
 use crate::idx::planner::ScanDirection;
+use crate::key::KeyRange;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 
@@ -11,7 +12,7 @@ pub async fn initialise(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.put(&"test", &"ok".as_bytes().to_vec()).await.unwrap();
+	tx.put("test".as_bytes().into(), &"ok".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 }
 
@@ -21,13 +22,13 @@ pub async fn exists(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.put(&"test", &"ok".as_bytes().to_vec()).await.unwrap();
+	tx.put("test".as_bytes().into(), &"ok".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.exists(&"test", None).await.unwrap();
+	let val = tx.exists("test".as_bytes().into(), None).await.unwrap();
 	assert!(val);
-	let val = tx.exists(&"none", None).await.unwrap();
+	let val = tx.exists("none".as_bytes().into(), None).await.unwrap();
 	assert!(!val);
 	tx.cancel().await.unwrap();
 }
@@ -38,13 +39,13 @@ pub async fn get(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.put(&"test", &"ok".as_bytes().to_vec()).await.unwrap();
+	tx.put("test".as_bytes().into(), &"ok".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.get(&"test", None).await.unwrap();
+	let val = tx.get("test".as_bytes().into(), None).await.unwrap();
 	assert!(matches!(val.as_deref(), Some(b"ok")));
-	let val = tx.get(&"none", None).await.unwrap();
+	let val = tx.get("none".as_bytes().into(), None).await.unwrap();
 	assert!(val.as_deref().is_none());
 	tx.cancel().await.unwrap();
 }
@@ -55,20 +56,20 @@ pub async fn set(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.set(&"test", &"one".as_bytes().to_vec()).await.unwrap();
+	tx.set("test".as_bytes().into(), &"one".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.get(&"test", None).await.unwrap();
+	let val = tx.get("test".as_bytes().into(), None).await.unwrap();
 	assert!(matches!(val.as_deref(), Some(b"one")));
 	tx.cancel().await.unwrap();
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.set(&"test", &"two".as_bytes().to_vec()).await.unwrap();
+	tx.set("test".as_bytes().into(), &"two".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.get(&"test", None).await.unwrap();
+	let val = tx.get("test".as_bytes().into(), None).await.unwrap();
 	assert!(matches!(val.as_deref(), Some(b"two")));
 	tx.cancel().await.unwrap();
 }
@@ -79,20 +80,20 @@ pub async fn put(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.put(&"test", &"one".as_bytes().to_vec()).await.unwrap();
+	tx.put("test".as_bytes().into(), &"one".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.get(&"test", None).await.unwrap();
+	let val = tx.get("test".as_bytes().into(), None).await.unwrap();
 	assert!(matches!(val.as_deref(), Some(b"one")));
 	tx.cancel().await.unwrap();
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	assert!(tx.put(&"test", &"two".as_bytes().to_vec()).await.is_err());
+	assert!(tx.put("test".as_bytes().into(), &"two".as_bytes().to_vec()).await.is_err());
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.get(&"test", None).await.unwrap();
+	let val = tx.get("test".as_bytes().into(), None).await.unwrap();
 	assert!(matches!(val.as_deref(), Some(b"one")));
 	tx.cancel().await.unwrap();
 }
@@ -103,33 +104,43 @@ pub async fn putc(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.put(&"test", &"one".as_bytes().to_vec()).await.unwrap();
+	tx.put("test".as_bytes().into(), &"one".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.get(&"test", None).await.unwrap();
+	let val = tx.get("test".as_bytes().into(), None).await.unwrap();
 	assert!(matches!(val.as_deref(), Some(b"one")));
 	tx.cancel().await.unwrap();
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.putc(&"test", &"two".as_bytes().to_vec(), Some(&"one".as_bytes().to_vec())).await.unwrap();
+	tx.put_compare(
+		"test".as_bytes().into(),
+		&"two".as_bytes().to_vec(),
+		Some(&"one".as_bytes().to_vec()),
+	)
+	.await
+	.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.get(&"test", None).await.unwrap();
+	let val = (*tx).get("test".as_bytes().into(), None).await.unwrap();
 	assert!(matches!(val.as_deref(), Some(b"two")));
 	tx.cancel().await.unwrap();
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	assert!(
-		tx.putc(&"test", &"tre".as_bytes().to_vec(), Some(&"one".as_bytes().to_vec()))
-			.await
-			.is_err()
+		tx.put_compare(
+			"test".as_bytes().into(),
+			&"tre".as_bytes().to_vec(),
+			Some(&"one".as_bytes().to_vec())
+		)
+		.await
+		.is_err()
 	);
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.get(&"test", None).await.unwrap();
+	let val = tx.get("test".as_bytes().into(), None).await.unwrap();
 	assert!(matches!(val.as_deref(), Some(b"two")));
 	tx.cancel().await.unwrap();
 }
@@ -140,15 +151,15 @@ pub async fn del(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.put(&"test", &"one".as_bytes().to_vec()).await.unwrap();
+	tx.put("test".as_bytes().into(), &"one".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.del(&"test").await.unwrap();
+	tx.del("test".as_bytes().into()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.get(&"test", None).await.unwrap();
+	let val = tx.get("test".as_bytes().into(), None).await.unwrap();
 	assert!(val.as_deref().is_none());
 	tx.cancel().await.unwrap();
 }
@@ -159,24 +170,24 @@ pub async fn delc(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.put(&"test", &"one".as_bytes().to_vec()).await.unwrap();
+	tx.put("test".as_bytes().into(), &"one".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	assert!(tx.delc(&"test", Some(&"two".as_bytes().to_vec())).await.is_err());
+	assert!(tx.del_compare("test".as_bytes().into(), Some("two".as_bytes())).await.is_err());
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.get(&"test", None).await.unwrap();
+	let val = tx.get("test".as_bytes().into(), None).await.unwrap();
 	assert!(matches!(val.as_deref(), Some(b"one")));
 	tx.cancel().await.unwrap();
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.delc(&"test", Some(&"one".as_bytes().to_vec())).await.unwrap();
+	tx.del_compare("test".as_bytes().into(), Some("one".as_bytes())).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.get(&"test", None).await.unwrap();
+	let val = tx.get("test".as_bytes().into(), None).await.unwrap();
 	assert!(val.as_deref().is_none());
 	tx.cancel().await.unwrap();
 }
@@ -187,15 +198,15 @@ pub async fn keys(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.put(&"test1", &"1".as_bytes().to_vec()).await.unwrap();
-	tx.put(&"test2", &"2".as_bytes().to_vec()).await.unwrap();
-	tx.put(&"test3", &"3".as_bytes().to_vec()).await.unwrap();
-	tx.put(&"test4", &"4".as_bytes().to_vec()).await.unwrap();
-	tx.put(&"test5", &"5".as_bytes().to_vec()).await.unwrap();
+	tx.put("test1".as_bytes().into(), &"1".as_bytes().to_vec()).await.unwrap();
+	tx.put("test2".as_bytes().into(), &"2".as_bytes().to_vec()).await.unwrap();
+	tx.put("test3".as_bytes().into(), &"3".as_bytes().to_vec()).await.unwrap();
+	tx.put("test4".as_bytes().into(), &"4".as_bytes().to_vec()).await.unwrap();
+	tx.put("test5".as_bytes().into(), &"5".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.keys("test1".."test9", u32::MAX, 0, None).await.unwrap();
+	let val = tx.keys((b"test1"..b"test9").into(), u32::MAX, 0, None).await.unwrap();
 	assert_eq!(val.len(), 5);
 	assert_eq!(val[0], b"test1");
 	assert_eq!(val[1], b"test2");
@@ -205,14 +216,14 @@ pub async fn keys(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.keys("test2".."test4", u32::MAX, 0, None).await.unwrap();
+	let val = tx.keys((b"test2"..b"test4").into(), u32::MAX, 0, None).await.unwrap();
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0], b"test2");
 	assert_eq!(val[1], b"test3");
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.keys("test1".."test9", 2, 0, None).await.unwrap();
+	let val = tx.keys((b"test1"..b"test9").into(), 2, 0, None).await.unwrap();
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0], b"test1");
 	assert_eq!(val[1], b"test2");
@@ -225,15 +236,15 @@ pub async fn keysr(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.put(&"test1", &"1".as_bytes().to_vec()).await.unwrap();
-	tx.put(&"test2", &"2".as_bytes().to_vec()).await.unwrap();
-	tx.put(&"test3", &"3".as_bytes().to_vec()).await.unwrap();
-	tx.put(&"test4", &"4".as_bytes().to_vec()).await.unwrap();
-	tx.put(&"test5", &"5".as_bytes().to_vec()).await.unwrap();
+	tx.put("test1".as_bytes().into(), &"1".as_bytes().to_vec()).await.unwrap();
+	tx.put("test2".as_bytes().into(), &"2".as_bytes().to_vec()).await.unwrap();
+	tx.put("test3".as_bytes().into(), &"3".as_bytes().to_vec()).await.unwrap();
+	tx.put("test4".as_bytes().into(), &"4".as_bytes().to_vec()).await.unwrap();
+	tx.put("test5".as_bytes().into(), &"5".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.keysr("test1".."test9", u32::MAX, 0, None).await.unwrap();
+	let val = tx.keysr((b"test1"..b"test9").into(), u32::MAX, 0, None).await.unwrap();
 	assert_eq!(val.len(), 5);
 	assert_eq!(val[0], b"test5");
 	assert_eq!(val[1], b"test4");
@@ -243,14 +254,14 @@ pub async fn keysr(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.keysr("test2".."test4", u32::MAX, 0, None).await.unwrap();
+	let val = tx.keysr((b"test2"..b"test4").into(), u32::MAX, 0, None).await.unwrap();
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0], b"test3");
 	assert_eq!(val[1], b"test2");
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.keysr("test1".."test9", 2, 0, None).await.unwrap();
+	let val = tx.keysr((b"test1"..b"test9").into(), 2, 0, None).await.unwrap();
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0], b"test5");
 	assert_eq!(val[1], b"test4");
@@ -263,15 +274,15 @@ pub async fn scan(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.put(&"test1", &"1".as_bytes().to_vec()).await.unwrap();
-	tx.put(&"test2", &"2".as_bytes().to_vec()).await.unwrap();
-	tx.put(&"test3", &"3".as_bytes().to_vec()).await.unwrap();
-	tx.put(&"test4", &"4".as_bytes().to_vec()).await.unwrap();
-	tx.put(&"test5", &"5".as_bytes().to_vec()).await.unwrap();
+	tx.put("test1".as_bytes().into(), &"1".as_bytes().to_vec()).await.unwrap();
+	tx.put("test2".as_bytes().into(), &"2".as_bytes().to_vec()).await.unwrap();
+	tx.put("test3".as_bytes().into(), &"3".as_bytes().to_vec()).await.unwrap();
+	tx.put("test4".as_bytes().into(), &"4".as_bytes().to_vec()).await.unwrap();
+	tx.put("test5".as_bytes().into(), &"5".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.scan("test1".."test9", u32::MAX, 0, None).await.unwrap();
+	let val = tx.scan((b"test1"..b"test9").into(), u32::MAX, 0, None).await.unwrap();
 	assert_eq!(val.len(), 5);
 	assert_eq!(val[0].0, b"test1");
 	assert_eq!(val[0].1, b"1");
@@ -286,7 +297,7 @@ pub async fn scan(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.scan("test2".."test4", u32::MAX, 0, None).await.unwrap();
+	let val = tx.scan((b"test2"..b"test4").into(), u32::MAX, 0, None).await.unwrap();
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0].0, b"test2");
 	assert_eq!(val[0].1, b"2");
@@ -295,7 +306,7 @@ pub async fn scan(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.scan("test1".."test9", 2, 0, None).await.unwrap();
+	let val = tx.scan((b"test1"..b"test9").into(), 2, 0, None).await.unwrap();
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0].0, b"test1");
 	assert_eq!(val[0].1, b"1");
@@ -310,15 +321,15 @@ pub async fn scanr(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.put(&"test1", &"1".as_bytes().to_vec()).await.unwrap();
-	tx.put(&"test2", &"2".as_bytes().to_vec()).await.unwrap();
-	tx.put(&"test3", &"3".as_bytes().to_vec()).await.unwrap();
-	tx.put(&"test4", &"4".as_bytes().to_vec()).await.unwrap();
-	tx.put(&"test5", &"5".as_bytes().to_vec()).await.unwrap();
+	tx.put("test1".as_bytes().into(), &"1".as_bytes().to_vec()).await.unwrap();
+	tx.put("test2".as_bytes().into(), &"2".as_bytes().to_vec()).await.unwrap();
+	tx.put("test3".as_bytes().into(), &"3".as_bytes().to_vec()).await.unwrap();
+	tx.put("test4".as_bytes().into(), &"4".as_bytes().to_vec()).await.unwrap();
+	tx.put("test5".as_bytes().into(), &"5".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.scanr("test1".."test9", u32::MAX, 0, None).await.unwrap();
+	let val = tx.scanr((b"test1"..b"test9").into(), u32::MAX, 0, None).await.unwrap();
 	assert_eq!(val.len(), 5);
 	assert_eq!(val[0].0, b"test5");
 	assert_eq!(val[0].1, b"5");
@@ -333,7 +344,7 @@ pub async fn scanr(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.scanr("test2".."test4", u32::MAX, 0, None).await.unwrap();
+	let val = tx.scanr((b"test2"..b"test4").into(), u32::MAX, 0, None).await.unwrap();
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0].0, b"test3");
 	assert_eq!(val[0].1, b"3");
@@ -342,7 +353,7 @@ pub async fn scanr(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.scanr("test1".."test9", 2, 0, None).await.unwrap();
+	let val = tx.scanr((b"test1"..b"test9").into(), 2, 0, None).await.unwrap();
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0].0, b"test5");
 	assert_eq!(val[0].1, b"5");
@@ -357,15 +368,15 @@ pub async fn skip(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.put(&"test1", &"1".as_bytes().to_vec()).await.unwrap();
-	tx.put(&"test2", &"2".as_bytes().to_vec()).await.unwrap();
-	tx.put(&"test3", &"3".as_bytes().to_vec()).await.unwrap();
-	tx.put(&"test4", &"4".as_bytes().to_vec()).await.unwrap();
-	tx.put(&"test5", &"5".as_bytes().to_vec()).await.unwrap();
+	tx.put("test1".as_bytes().into(), &"1".as_bytes().to_vec()).await.unwrap();
+	tx.put("test2".as_bytes().into(), &"2".as_bytes().to_vec()).await.unwrap();
+	tx.put("test3".as_bytes().into(), &"3".as_bytes().to_vec()).await.unwrap();
+	tx.put("test4".as_bytes().into(), &"4".as_bytes().to_vec()).await.unwrap();
+	tx.put("test5".as_bytes().into(), &"5".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Test keys with skip 2
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.keys("test1".."test9", u32::MAX, 2, None).await.unwrap();
+	let val = tx.keys((b"test1"..b"test9").into(), u32::MAX, 2, None).await.unwrap();
 	assert_eq!(val.len(), 3);
 	assert_eq!(val[0], b"test3");
 	assert_eq!(val[1], b"test4");
@@ -373,19 +384,19 @@ pub async fn skip(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 	// Test keys with skip and limit
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.keys("test1".."test9", 2, 2, None).await.unwrap();
+	let val = tx.keys((b"test1"..b"test9").into(), 2, 2, None).await.unwrap();
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0], b"test3");
 	assert_eq!(val[1], b"test4");
 	tx.cancel().await.unwrap();
 	// Test keys with skip past all entries
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.keys("test1".."test9", u32::MAX, 10, None).await.unwrap();
+	let val = tx.keys((b"test1"..b"test9").into(), u32::MAX, 10, None).await.unwrap();
 	assert_eq!(val.len(), 0);
 	tx.cancel().await.unwrap();
 	// Test keysr with skip 2
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.keysr("test1".."test9", u32::MAX, 2, None).await.unwrap();
+	let val = tx.keysr((b"test1"..b"test9").into(), u32::MAX, 2, None).await.unwrap();
 	assert_eq!(val.len(), 3);
 	assert_eq!(val[0], b"test3");
 	assert_eq!(val[1], b"test2");
@@ -393,7 +404,7 @@ pub async fn skip(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 	// Test scan with skip 2
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.scan("test1".."test9", u32::MAX, 2, None).await.unwrap();
+	let val = tx.scan((b"test1"..b"test9").into(), u32::MAX, 2, None).await.unwrap();
 	assert_eq!(val.len(), 3);
 	assert_eq!(val[0].0, b"test3");
 	assert_eq!(val[0].1, b"3");
@@ -404,7 +415,7 @@ pub async fn skip(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 	// Test scanr with skip 2
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.scanr("test1".."test9", u32::MAX, 2, None).await.unwrap();
+	let val = tx.scanr((b"test1"..b"test9").into(), u32::MAX, 2, None).await.unwrap();
 	assert_eq!(val.len(), 3);
 	assert_eq!(val[0].0, b"test3");
 	assert_eq!(val[0].1, b"3");
@@ -415,7 +426,7 @@ pub async fn skip(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 	// Test skip 0 returns all entries (no skip)
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.keys("test1".."test9", u32::MAX, 0, None).await.unwrap();
+	let val = tx.keys((b"test1"..b"test9").into(), u32::MAX, 0, None).await.unwrap();
 	assert_eq!(val.len(), 5);
 	tx.cancel().await.unwrap();
 }
@@ -426,15 +437,15 @@ pub async fn batch(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.put(&"test1", &"1".as_bytes().to_vec()).await.unwrap();
-	tx.put(&"test2", &"2".as_bytes().to_vec()).await.unwrap();
-	tx.put(&"test3", &"3".as_bytes().to_vec()).await.unwrap();
-	tx.put(&"test4", &"4".as_bytes().to_vec()).await.unwrap();
-	tx.put(&"test5", &"5".as_bytes().to_vec()).await.unwrap();
+	tx.put("test1".as_bytes().into(), &"1".as_bytes().to_vec()).await.unwrap();
+	tx.put("test2".as_bytes().into(), &"2".as_bytes().to_vec()).await.unwrap();
+	tx.put("test3".as_bytes().into(), &"3".as_bytes().to_vec()).await.unwrap();
+	tx.put("test4".as_bytes().into(), &"4".as_bytes().to_vec()).await.unwrap();
+	tx.put("test5".as_bytes().into(), &"5".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let rng = "test1".."test9";
+	let rng = (b"test1"..b"test9").into();
 	let res = tx.batch_keys_vals(rng, u32::MAX, None).await.unwrap();
 	let val = res.result;
 	assert_eq!(val.len(), 5);
@@ -451,7 +462,7 @@ pub async fn batch(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let rng = "test2".."test4";
+	let rng = (b"test2"..b"test4").into();
 	let res = tx.batch_keys_vals(rng, u32::MAX, None).await.unwrap();
 	let val = res.result;
 	assert_eq!(val.len(), 2);
@@ -462,7 +473,7 @@ pub async fn batch(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let rng = "test2".."test4";
+	let rng = (b"test2"..b"test4").into();
 	let res = tx.batch_keys_vals(rng, u32::MAX, None).await.unwrap();
 	let val = res.result;
 	assert_eq!(val.len(), 2);
@@ -494,7 +505,7 @@ pub async fn cursor_keys_resume_past_prefix(new_ds: impl CreateDs) {
 		vec![b"a".to_vec(), b"a\x00".to_vec(), b"a\x01".to_vec(), b"ab".to_vec(), b"b".to_vec()];
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	for k in &keys {
-		tx.set(k, &b"v".to_vec()).await.unwrap();
+		tx.set(k.into(), &b"v".to_vec()).await.unwrap();
 	}
 	tx.commit().await.unwrap();
 
@@ -503,7 +514,15 @@ pub async fn cursor_keys_resume_past_prefix(new_ds: impl CreateDs) {
 	// adjacent pair becomes a boundary at which the broken successor
 	// logic would skip.
 	let mut cursor = tx
-		.open_keys_cursor(b"a".to_vec()..b"c".to_vec(), ScanDirection::Forward, 0, None)
+		.open_keys_cursor(
+			KeyRange {
+				start: b"a".into(),
+				end: b"c".into(),
+			},
+			ScanDirection::Forward,
+			0,
+			None,
+		)
 		.await
 		.unwrap();
 	let mut collected: Vec<Vec<u8>> = Vec::new();
@@ -542,15 +561,13 @@ pub async fn cursor_vals_resume_past_prefix(new_ds: impl CreateDs) {
 	];
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	for (k, v) in &pairs {
-		tx.set(k, v).await.unwrap();
+		tx.set(k.into(), v).await.unwrap();
 	}
 	tx.commit().await.unwrap();
 
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let mut cursor = tx
-		.open_vals_cursor(b"a".to_vec()..b"c".to_vec(), ScanDirection::Forward, 0, None)
-		.await
-		.unwrap();
+	let mut cursor =
+		tx.open_vals_cursor((b"a"..b"c").into(), ScanDirection::Forward, 0, None).await.unwrap();
 	let mut collected: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
 	loop {
 		let batch = cursor.next_batch(1).await.unwrap();
@@ -590,15 +607,16 @@ pub async fn cursor_for_each_vals_matches_next_batch(new_ds: impl CreateDs) {
 	];
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	for (k, v) in &pairs {
-		tx.set(k, v).await.unwrap();
+		tx.set(k.into(), v).await.unwrap();
 	}
 	tx.commit().await.unwrap();
 
-	let rng = b"a".to_vec()..b"d".to_vec();
+	let rng = KeyRange::from(b"a"..b"d");
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 
 	// Drain via `next_batch` (chunk size 2 to exercise boundary handling).
-	let mut c1 = tx.open_vals_cursor(rng.clone(), ScanDirection::Forward, 0, None).await.unwrap();
+	let mut c1 =
+		tx.open_vals_cursor(rng.as_borrowed(), ScanDirection::Forward, 0, None).await.unwrap();
 	let mut via_batch: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
 	loop {
 		let batch = c1.next_batch(2).await.unwrap();
@@ -649,14 +667,15 @@ pub async fn cursor_for_each_keys_matches_next_batch(new_ds: impl CreateDs) {
 	];
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	for (k, v) in &pairs {
-		tx.set(k, v).await.unwrap();
+		tx.set(k.into(), v).await.unwrap();
 	}
 	tx.commit().await.unwrap();
 
-	let rng = b"k".to_vec()..b"n".to_vec();
+	let rng = KeyRange::from(b"k"..b"n");
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 
-	let mut c1 = tx.open_keys_cursor(rng.clone(), ScanDirection::Forward, 0, None).await.unwrap();
+	let mut c1 =
+		tx.open_keys_cursor(rng.as_borrowed(), ScanDirection::Forward, 0, None).await.unwrap();
 	let mut via_batch: Vec<Vec<u8>> = Vec::new();
 	loop {
 		let batch = c1.next_batch(2).await.unwrap();
@@ -708,14 +727,15 @@ pub async fn cursor_for_each_vals_matches_next_batch_reverse(new_ds: impl Create
 	];
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	for (k, v) in &pairs {
-		tx.set(k, v).await.unwrap();
+		tx.set(k.into(), v).await.unwrap();
 	}
 	tx.commit().await.unwrap();
 
-	let rng = b"a".to_vec()..b"d".to_vec();
+	let rng = KeyRange::from(b"a"..b"d");
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 
-	let mut c1 = tx.open_vals_cursor(rng.clone(), ScanDirection::Backward, 0, None).await.unwrap();
+	let mut c1 =
+		tx.open_vals_cursor(rng.as_borrowed(), ScanDirection::Backward, 0, None).await.unwrap();
 	let mut via_batch: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
 	loop {
 		let batch = c1.next_batch(2).await.unwrap();
@@ -766,16 +786,16 @@ pub async fn cursor_for_each_metrics_match_next_batch(new_ds: impl CreateDs) {
 	];
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	for (k, v) in &pairs {
-		tx.set(k, v).await.unwrap();
+		tx.set(k.into(), v).await.unwrap();
 	}
 	tx.commit().await.unwrap();
-	let rng = b"a".to_vec()..b"d".to_vec();
+	let rng = KeyRange::from(b"a"..b"d");
 
 	// Drain via next_batch and snapshot the transaction's scan metrics.
 	let tx1 = ds.transaction(Read, Optimistic).await.unwrap();
 	{
 		let mut c =
-			tx1.open_vals_cursor(rng.clone(), ScanDirection::Forward, 0, None).await.unwrap();
+			tx1.open_vals_cursor(rng.as_borrowed(), ScanDirection::Forward, 0, None).await.unwrap();
 		loop {
 			let b = c.next_batch(2).await.unwrap();
 			if b.is_empty() {
@@ -822,11 +842,11 @@ pub async fn cursor_for_each_break_resumes(new_ds: impl CreateDs) {
 		(b"c".to_vec(), b"v5".to_vec()),
 	];
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	for (k, v) in &pairs {
-		tx.set(k, v).await.unwrap();
+	for (k, v) in pairs.iter() {
+		tx.set(k.as_slice().into(), v.as_slice()).await.unwrap();
 	}
 	tx.commit().await.unwrap();
-	let rng = b"a".to_vec()..b"d".to_vec();
+	let rng = KeyRange::from(b"a"..b"d");
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 
 	let mut c = tx.open_vals_cursor(rng, ScanDirection::Forward, 0, None).await.unwrap();
@@ -877,10 +897,10 @@ pub async fn cursor_for_each_vals_limit_counts_match_next_batch(new_ds: impl Cre
 	];
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	for (k, v) in &pairs {
-		tx.set(k, v).await.unwrap();
+		tx.set(k.into(), v.as_slice()).await.unwrap();
 	}
 	tx.commit().await.unwrap();
-	let rng = b"a".to_vec()..b"d".to_vec();
+	let rng = KeyRange::from(b"a"..b"d");
 
 	let expected_key_bytes: u64 = pairs.iter().map(|(k, _)| k.len() as u64).sum();
 	let expected_value_bytes: u64 = pairs.iter().map(|(_, v)| v.len() as u64).sum();
@@ -891,7 +911,7 @@ pub async fn cursor_for_each_vals_limit_counts_match_next_batch(new_ds: impl Cre
 
 		// Drain via next_batch, counting non-empty pages.
 		let mut c1 =
-			tx.open_vals_cursor(rng.clone(), ScanDirection::Forward, 0, None).await.unwrap();
+			tx.open_vals_cursor(rng.as_borrowed(), ScanDirection::Forward, 0, None).await.unwrap();
 		let mut via_batch: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
 		let mut batch_chunks = 0u64;
 		loop {
@@ -968,10 +988,10 @@ pub async fn cursor_for_each_keys_break_resumes(new_ds: impl CreateDs) {
 	];
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	for (k, v) in &pairs {
-		tx.set(k, v).await.unwrap();
+		tx.set(k.into(), v.as_slice()).await.unwrap();
 	}
 	tx.commit().await.unwrap();
-	let rng = b"a".to_vec()..b"d".to_vec();
+	let rng = KeyRange::from(b"a"..b"d");
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 
 	let mut c = tx.open_keys_cursor(rng, ScanDirection::Forward, 0, None).await.unwrap();
@@ -1013,13 +1033,14 @@ pub async fn cursor_for_each_keys_matches_next_batch_reverse(new_ds: impl Create
 	];
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	for (k, v) in &pairs {
-		tx.set(k, v).await.unwrap();
+		tx.set(k.into(), v.as_slice()).await.unwrap();
 	}
 	tx.commit().await.unwrap();
-	let rng = b"k".to_vec()..b"n".to_vec();
+	let rng = KeyRange::from(b"k"..b"n");
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 
-	let mut c1 = tx.open_keys_cursor(rng.clone(), ScanDirection::Backward, 0, None).await.unwrap();
+	let mut c1 =
+		tx.open_keys_cursor(rng.as_borrowed(), ScanDirection::Backward, 0, None).await.unwrap();
 	let mut via_batch: Vec<Vec<u8>> = Vec::new();
 	loop {
 		let batch = c1.next_batch(2).await.unwrap();
@@ -1032,7 +1053,8 @@ pub async fn cursor_for_each_keys_matches_next_batch_reverse(new_ds: impl Create
 	}
 	drop(c1);
 
-	let mut c2 = tx.open_keys_cursor(rng, ScanDirection::Backward, 0, None).await.unwrap();
+	let mut c2 =
+		tx.open_keys_cursor(rng.as_borrowed(), ScanDirection::Backward, 0, None).await.unwrap();
 	let mut via_visit: Vec<Vec<u8>> = Vec::new();
 	loop {
 		let stats = c2
@@ -1072,16 +1094,16 @@ pub async fn cursor_for_each_respects_skip_both_directions(new_ds: impl CreateDs
 	];
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	for (k, v) in &pairs {
-		tx.set(k, v).await.unwrap();
+		tx.set(k.into(), v.as_slice()).await.unwrap();
 	}
 	tx.commit().await.unwrap();
-	let rng = b"a".to_vec()..b"d".to_vec();
+	let rng = KeyRange::from(b"a"..b"d");
 
 	for dir in [ScanDirection::Forward, ScanDirection::Backward] {
 		let tx = ds.transaction(Read, Optimistic).await.unwrap();
 
 		// Vals: next_batch baseline with skip=2.
-		let mut c1 = tx.open_vals_cursor(rng.clone(), dir, 2, None).await.unwrap();
+		let mut c1 = tx.open_vals_cursor(rng.as_borrowed(), dir, 2, None).await.unwrap();
 		let mut via_batch: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
 		loop {
 			let batch = c1.next_batch(2).await.unwrap();
@@ -1320,7 +1342,7 @@ async fn cursor_versioned_for_each_matches_next_batch() {
 		(b"b".to_vec(), b"v2".to_vec()),
 	];
 	for (k, v) in &historical {
-		tx.set(k, v).await.unwrap();
+		tx.set(k.into(), v.as_slice()).await.unwrap();
 	}
 	tx.commit().await.unwrap();
 
@@ -1336,16 +1358,16 @@ async fn cursor_versioned_for_each_matches_next_batch() {
 
 	// Batch B: overwrite one row and add another — the current view.
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.set(&b"a".to_vec(), &b"v0-new".to_vec()).await.unwrap();
-	tx.set(&b"c".to_vec(), &b"v3".to_vec()).await.unwrap();
+	tx.set(b"a".into(), b"v0-new".as_slice()).await.unwrap();
+	tx.set(b"c".into(), b"v3".as_slice()).await.unwrap();
 	tx.commit().await.unwrap();
 
-	let rng = b"a".to_vec()..b"d".to_vec();
+	let rng = KeyRange::from(b"a"..b"d");
 	for dir in [ScanDirection::Forward, ScanDirection::Backward] {
 		let tx = ds.transaction(Read, Optimistic).await.unwrap();
 
 		// Historical view via next_batch.
-		let mut c1 = tx.open_vals_cursor(rng.clone(), dir, 0, Some(version)).await.unwrap();
+		let mut c1 = tx.open_vals_cursor(rng.as_borrowed(), dir, 0, Some(version)).await.unwrap();
 		let mut via_batch: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
 		loop {
 			let batch = c1.next_batch(2).await.unwrap();
@@ -1359,7 +1381,7 @@ async fn cursor_versioned_for_each_matches_next_batch() {
 		drop(c1);
 
 		// Historical view via for_each.
-		let mut c2 = tx.open_vals_cursor(rng.clone(), dir, 0, Some(version)).await.unwrap();
+		let mut c2 = tx.open_vals_cursor(rng.as_borrowed(), dir, 0, Some(version)).await.unwrap();
 		let mut via_visit: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
 		loop {
 			let s = c2

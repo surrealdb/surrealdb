@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::ops::Deref;
 
 use anyhow::Result;
@@ -15,6 +16,7 @@ use crate::doc::CursorDoc;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal};
 use crate::iam::{Action, AuthLimit, ResourceKind};
+use crate::key::database::all::DatabaseRoot;
 use crate::val::{TableName, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -96,8 +98,15 @@ impl AlterEventStatement {
 		// Recompute auth_limit from the current principal to prevent privilege escalation
 		ev.auth_limit = AuthLimit::new_from_auth(opt.auth.as_ref()).into();
 
-		let key = crate::key::table::ev::new(ns, db, &what, &name);
-		txn.set(&key, &ev).await?;
+		let key = crate::key::table::ev::Ev {
+			prefix: DatabaseRoot {
+				ns,
+				db,
+			},
+			tb: Cow::Borrowed(&what),
+			ev: Cow::Borrowed(&name),
+		};
+		txn.set_key(&key, &ev).await?;
 
 		// Refresh the table cache
 		if let Some(tb) = txn.get_tb(ns, db, &what, None).await? {

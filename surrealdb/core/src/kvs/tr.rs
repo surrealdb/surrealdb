@@ -1,13 +1,13 @@
 use std::fmt;
 use std::fmt::Debug;
-use std::ops::Range;
 
 use super::api::{
 	GetMultiResult, KeysResult, ScanCursorKeys, ScanCursorVals, ScanResult, Transactable,
 };
 use super::batch::Batch;
 use super::direction::Direction;
-use super::{IntoBytes, Key, Result, Val};
+use super::{IntoBytes, Result, Val};
+use crate::key::{Key, KeyRange};
 use crate::kvs::timestamp::{BoxTimeStamp, BoxTimeStampImpl};
 
 /// Specifies whether the transaction is read-only or writeable.
@@ -106,45 +106,20 @@ impl Transactor {
 
 	/// Check if a key exists in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn exists<K>(&self, key: K, version: Option<u64>) -> Result<bool>
-	where
-		K: IntoBytes + Debug,
-	{
-		let key = key.into_vec();
+	pub async fn exists(&self, key: Key<'_>, version: Option<u64>) -> Result<bool> {
 		self.inner.exists(key, version).await
 	}
 
 	/// Fetch a key from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn get<K>(&self, key: K, version: Option<u64>) -> Result<Option<Val>>
-	where
-		K: IntoBytes + Debug,
-	{
-		let key = key.into_vec();
+	pub async fn get(&self, key: Key<'_>, version: Option<u64>) -> Result<Option<Val>> {
 		self.inner.get(key, version).await
 	}
 
 	/// Fetch many keys from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn getm<K>(&self, keys: Vec<K>, version: Option<u64>) -> Result<GetMultiResult>
-	where
-		K: IntoBytes + Debug,
-	{
-		let keys = keys.into_iter().map(IntoBytes::into_vec).collect();
+	pub async fn getm(&self, keys: &[Key<'_>], version: Option<u64>) -> Result<GetMultiResult> {
 		self.inner.getm(keys, version).await
-	}
-
-	/// Retrieve a specific prefixed range of keys from the datastore.
-	///
-	/// This function fetches all matching key-value pairs from the underlying
-	/// datastore in grouped batches.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn getp<K>(&self, key: K, version: Option<u64>) -> Result<ScanResult>
-	where
-		K: IntoBytes + Debug,
-	{
-		let key = key.into_vec();
-		self.inner.getp(key, version).await
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -152,59 +127,46 @@ impl Transactor {
 	/// This function fetches all matching key-value pairs from the underlying
 	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn getr<K>(&self, rng: Range<K>, version: Option<u64>) -> Result<ScanResult>
-	where
-		K: IntoBytes + Debug,
-	{
-		let beg = rng.start.into_vec();
-		let end = rng.end.into_vec();
-		self.inner.getr(beg..end, version).await
+	pub async fn getr(&self, rng: KeyRange<'_>, version: Option<u64>) -> Result<ScanResult> {
+		self.inner.getr(rng, version).await
 	}
 
 	/// Insert or update a key in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn set<K, V>(&self, key: K, val: V) -> Result<()>
+	pub async fn set<V>(&self, key: Key<'_>, val: V) -> Result<()>
 	where
-		K: IntoBytes + Debug,
 		V: IntoBytes + Debug,
 	{
-		let key = key.into_vec();
 		let val = val.into_vec();
 		self.inner.set(key, val).await
 	}
 
 	/// Insert or replace a key in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn replace<K, V>(&self, key: K, val: V) -> Result<()>
+	pub async fn replace<V>(&self, key: Key<'_>, val: V) -> Result<()>
 	where
-		K: IntoBytes + Debug,
 		V: IntoBytes + Debug,
 	{
-		let key = key.into_vec();
 		let val = val.into_vec();
 		self.inner.replace(key, val).await
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn put<K, V>(&self, key: K, val: V) -> Result<()>
+	pub async fn put<V>(&self, key: Key<'_>, val: V) -> Result<()>
 	where
-		K: IntoBytes + Debug,
 		V: IntoBytes + Debug,
 	{
-		let key = key.into_vec();
 		let val = val.into_vec();
 		self.inner.put(key, val).await
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn putc<K, V>(&self, key: K, val: V, chk: Option<V>) -> Result<()>
+	pub async fn putc<V>(&self, key: Key<'_>, val: V, chk: Option<V>) -> Result<()>
 	where
-		K: IntoBytes + Debug,
 		V: IntoBytes + Debug,
 	{
-		let key = key.into_vec();
 		let val = val.into_vec();
 		let chk = chk.map(|v| v.into_vec());
 		self.inner.putc(key, val, chk).await
@@ -212,38 +174,15 @@ impl Transactor {
 
 	/// Delete a key from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn del<K>(&self, key: K) -> Result<()>
-	where
-		K: IntoBytes + Debug,
-	{
-		let key = key.into_vec();
+	pub async fn del(&self, key: Key<'_>) -> Result<()> {
 		self.inner.del(key).await
 	}
 
 	/// Delete a key from the datastore if the current value matches a
 	/// condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn delc<K, V>(&self, key: K, chk: Option<V>) -> Result<()>
-	where
-		K: IntoBytes + Debug,
-		V: IntoBytes + Debug,
-	{
-		let key = key.into_vec();
-		let chk = chk.map(|v| v.into_vec());
+	pub async fn delc(&self, key: Key<'_>, chk: Option<&[u8]>) -> Result<()> {
 		self.inner.delc(key, chk).await
-	}
-
-	/// Delete a prefixed range of keys from the datastore.
-	///
-	/// This function deletes all matching key-value pairs from the underlying
-	/// datastore in grouped batches.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn delp<K>(&self, key: K) -> Result<()>
-	where
-		K: IntoBytes + Debug,
-	{
-		let key = key.into_vec();
-		self.inner.delp(key).await
 	}
 
 	/// Delete a range of keys from the datastore.
@@ -251,49 +190,21 @@ impl Transactor {
 	/// This function deletes all matching key-value pairs from the underlying
 	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn delr<K>(&self, rng: Range<K>) -> Result<()>
-	where
-		K: IntoBytes + Debug,
-	{
-		let beg = rng.start.into_vec();
-		let end = rng.end.into_vec();
-		self.inner.delr(beg..end).await
+	pub async fn delr(&self, rng: KeyRange<'_>) -> Result<()> {
+		self.inner.delr(rng).await
 	}
 
 	/// Delete all versions of a key from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn clr<K>(&self, key: K) -> Result<()>
-	where
-		K: IntoBytes + Debug,
-	{
-		let key = key.into_vec();
+	pub async fn clr(&self, key: Key<'_>) -> Result<()> {
 		self.inner.clr(key).await
 	}
 
 	/// Delete all versions of a key from the datastore if the current value
 	/// matches a condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn clrc<K, V>(&self, key: K, chk: Option<V>) -> Result<()>
-	where
-		K: IntoBytes + Debug,
-		V: IntoBytes + Debug,
-	{
-		let key = key.into_vec();
-		let chk = chk.map(|v| v.into_vec());
+	pub async fn clrc(&self, key: Key<'_>, chk: Option<&[u8]>) -> Result<()> {
 		self.inner.clrc(key, chk).await
-	}
-
-	/// Delete all versions of a prefixed range of keys from the datastore.
-	///
-	/// This function deletes all matching key-value pairs from the underlying
-	/// datastore in grouped batches.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn clrp<K>(&self, key: K) -> Result<()>
-	where
-		K: IntoBytes + Debug,
-	{
-		let key = key.into_vec();
-		self.inner.clrp(key).await
 	}
 
 	/// Delete all versions of a range of keys from the datastore.
@@ -301,13 +212,8 @@ impl Transactor {
 	/// This function deletes all matching key-value pairs from the underlying
 	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn clrr<K>(&self, rng: Range<K>) -> Result<()>
-	where
-		K: IntoBytes + Debug,
-	{
-		let beg = rng.start.into_vec();
-		let end = rng.end.into_vec();
-		self.inner.clrr(beg..end).await
+	pub async fn clrr(&self, rng: KeyRange<'_>) -> Result<()> {
+		self.inner.clrr(rng).await
 	}
 
 	// --------------------------------------------------
@@ -317,51 +223,41 @@ impl Transactor {
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of keys without values, in a single
-	/// request to the underlying datastore. The returned [`KeysResult`] also
+	/// request to the underlying datastore. The returned [`Key<'_>sResult`] also
 	/// reports the total key bytes scanned, accumulated by the backend during
 	/// the same iteration that produced the keys.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn keys<K>(
+	pub async fn keys(
 		&self,
-		rng: Range<K>,
+		rng: KeyRange<'_>,
 		limit: u32,
 		skip: u32,
 		version: Option<u64>,
-	) -> Result<KeysResult>
-	where
-		K: IntoBytes + Debug,
-	{
-		let beg = rng.start.into_vec();
-		let end = rng.end.into_vec();
-		if beg > end {
+	) -> Result<KeysResult> {
+		if rng.is_empty() {
 			return Ok(KeysResult::default());
 		}
-		self.inner.keys(beg..end, limit, skip, version).await
+		self.inner.keys(rng, limit, skip, version).await
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of keys without values, in a single
-	/// request to the underlying datastore. The returned [`KeysResult`] also
+	/// request to the underlying datastore. The returned [`Key<'_>sResult`] also
 	/// reports the total key bytes scanned, accumulated by the backend during
 	/// the same iteration that produced the keys.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn keysr<K>(
+	pub async fn keysr(
 		&self,
-		rng: Range<K>,
+		rng: KeyRange<'_>,
 		limit: u32,
 		skip: u32,
 		version: Option<u64>,
-	) -> Result<KeysResult>
-	where
-		K: IntoBytes + Debug,
-	{
-		let beg = rng.start.into_vec();
-		let end = rng.end.into_vec();
-		if beg > end {
+	) -> Result<KeysResult> {
+		if rng.is_empty() {
 			return Ok(KeysResult::default());
 		}
-		self.inner.keysr(beg..end, limit, skip, version).await
+		self.inner.keysr(rng, limit, skip, version).await
 	}
 
 	/// Retrieve a specific range of key-value pairs from the datastore.
@@ -371,22 +267,17 @@ impl Transactor {
 	/// reports the total value bytes scanned, accumulated by the backend
 	/// during the same iteration that produced the values.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn scan<K>(
+	pub async fn scan(
 		&self,
-		rng: Range<K>,
+		rng: KeyRange<'_>,
 		limit: u32,
 		skip: u32,
 		version: Option<u64>,
-	) -> Result<ScanResult>
-	where
-		K: IntoBytes + Debug,
-	{
-		let beg = rng.start.into_vec();
-		let end = rng.end.into_vec();
-		if beg > end {
+	) -> Result<ScanResult> {
+		if rng.is_empty() {
 			return Ok(ScanResult::default());
 		}
-		self.inner.scan(beg..end, limit, skip, version).await
+		self.inner.scan(rng, limit, skip, version).await
 	}
 
 	/// Retrieve a specific range of key-value pairs from the datastore.
@@ -396,22 +287,17 @@ impl Transactor {
 	/// reports the total value bytes scanned, accumulated by the backend
 	/// during the same iteration that produced the values.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn scanr<K>(
+	pub async fn scanr(
 		&self,
-		rng: Range<K>,
+		rng: KeyRange<'_>,
 		limit: u32,
 		skip: u32,
 		version: Option<u64>,
-	) -> Result<ScanResult>
-	where
-		K: IntoBytes + Debug,
-	{
-		let beg = rng.start.into_vec();
-		let end = rng.end.into_vec();
-		if beg > end {
+	) -> Result<ScanResult> {
+		if rng.is_empty() {
 			return Ok(ScanResult::default());
 		}
-		self.inner.scanr(beg..end, limit, skip, version).await
+		self.inner.scanr(rng, limit, skip, version).await
 	}
 
 	/// Count the total number of keys within a range in the datastore.
@@ -419,13 +305,8 @@ impl Transactor {
 	/// This function fetches the total count, in batches, with multiple
 	/// requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn count<K>(&self, rng: Range<K>, version: Option<u64>) -> Result<usize>
-	where
-		K: IntoBytes + Debug,
-	{
-		let beg = rng.start.into_vec();
-		let end = rng.end.into_vec();
-		self.inner.count(beg..end, version).await
+	pub async fn count(&self, rng: KeyRange<'_>, version: Option<u64>) -> Result<usize> {
+		self.inner.count(rng, version).await
 	}
 
 	// --------------------------------------------------
@@ -439,39 +320,29 @@ impl Transactor {
 	/// `next_batch` call advances the same underlying iterator instead of
 	/// re-seeking from scratch, which is the primary cost on RocksDB
 	/// paged scans. `skip` is applied once on the first batch. See
-	/// [`ScanCursorKeys`].
+	/// [`ScanCursorKey<'_>s`].
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn open_keys_cursor<'a, K>(
+	pub async fn open_keys_cursor<'a>(
 		&'a self,
-		rng: Range<K>,
+		rng: KeyRange<'a>,
 		dir: Direction,
 		skip: u32,
 		version: Option<u64>,
-	) -> Result<Box<dyn ScanCursorKeys + 'a>>
-	where
-		K: IntoBytes + Debug,
-	{
-		let beg = rng.start.into_vec();
-		let end = rng.end.into_vec();
-		self.inner.open_keys_cursor(beg..end, dir, skip, version).await
+	) -> Result<Box<dyn ScanCursorKeys + 'a>> {
+		self.inner.open_keys_cursor(rng, dir, skip, version).await
 	}
 
 	/// Open a stateful key+value scan cursor over a range. See
 	/// [`Self::open_keys_cursor`] for the rationale.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn open_vals_cursor<'a, K>(
+	pub async fn open_vals_cursor<'a>(
 		&'a self,
-		rng: Range<K>,
+		rng: KeyRange<'a>,
 		dir: Direction,
 		skip: u32,
 		version: Option<u64>,
-	) -> Result<Box<dyn ScanCursorVals + 'a>>
-	where
-		K: IntoBytes + Debug,
-	{
-		let beg = rng.start.into_vec();
-		let end = rng.end.into_vec();
-		self.inner.open_vals_cursor(beg..end, dir, skip, version).await
+	) -> Result<Box<dyn ScanCursorVals + 'a>> {
+		self.inner.open_vals_cursor(rng, dir, skip, version).await
 	}
 
 	// --------------------------------------------------
@@ -483,18 +354,13 @@ impl Transactor {
 	/// This function fetches keys, in batches, with multiple requests to the
 	/// underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn batch_keys<K>(
+	pub async fn batch_keys(
 		&self,
-		rng: Range<K>,
+		rng: KeyRange<'_>,
 		batch: u32,
 		version: Option<u64>,
-	) -> Result<Batch<Key>>
-	where
-		K: IntoBytes + Debug,
-	{
-		let beg = rng.start.into_vec();
-		let end = rng.end.into_vec();
-		self.inner.batch_keys(beg..end, batch, version).await
+	) -> Result<Batch<Vec<u8>>> {
+		self.inner.batch_keys(rng, batch, version).await
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
@@ -502,18 +368,13 @@ impl Transactor {
 	/// This function fetches key-value pairs, in batches, with multiple
 	/// requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn batch_keys_vals<K>(
+	pub async fn batch_keys_vals(
 		&self,
-		rng: Range<K>,
+		rng: KeyRange<'_>,
 		batch: u32,
 		version: Option<u64>,
-	) -> Result<Batch<(Key, Val)>>
-	where
-		K: IntoBytes + Debug,
-	{
-		let beg = rng.start.into_vec();
-		let end = rng.end.into_vec();
-		self.inner.batch_keys_vals(beg..end, batch, version).await
+	) -> Result<Batch<(Vec<u8>, Val)>> {
+		self.inner.batch_keys_vals(rng, batch, version).await
 	}
 
 	// --------------------------------------------------

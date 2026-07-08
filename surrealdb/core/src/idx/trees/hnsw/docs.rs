@@ -14,7 +14,8 @@ use crate::idx::trees::hnsw::flavor::HnswFlavor;
 use crate::idx::trees::hnsw::index::HnswContext;
 use crate::idx::trees::knn::Ids64;
 use crate::idx::trees::vector::{SerializedVector, Vector};
-use crate::kvs::{KVValue, Transaction};
+use crate::key::KVValue;
+use crate::kvs::Transaction;
 use crate::val::{RecordId, RecordIdKey};
 
 /// Manages the bidirectional mapping between record IDs and internal document IDs.
@@ -44,7 +45,7 @@ impl HnswDocs {
 	/// Creates a new `HnswDocs`, loading existing state from the key-value store.
 	pub(in crate::idx) async fn new(tx: &Transaction, ikb: IndexKeyBase) -> Result<Self> {
 		let state_key = ikb.new_hd_root_key();
-		let state = tx.get(&state_key, None).await?.unwrap_or_default();
+		let state = tx.get_key(&state_key, None).await?.unwrap_or_default();
 		Ok(Self {
 			ikb,
 			state_updated: false,
@@ -61,19 +62,19 @@ impl HnswDocs {
 		tx: &Transaction,
 		id: &RecordIdKey,
 	) -> Result<Option<DocId>> {
-		tx.get(&ikb.new_hi_key(id), None).await
+		tx.get_key(&ikb.new_hi_key(id), None).await
 	}
 
 	/// Resolves a record key to its internal doc ID, creating a new mapping if needed.
 	pub(super) async fn resolve(&mut self, tx: &Transaction, id: &RecordIdKey) -> Result<DocId> {
-		if let Some(doc_id) = tx.get(&self.ikb.new_hi_key(id), None).await? {
+		if let Some(doc_id) = tx.get_key(&self.ikb.new_hi_key(id), None).await? {
 			Ok(doc_id)
 		} else {
 			let doc_id = self.next_doc_id();
 			let id_key = self.ikb.new_hi_key(id);
-			tx.set(&id_key, &doc_id).await?;
+			tx.set_key(&id_key, &doc_id).await?;
 			let doc_key = self.ikb.new_hd_key(doc_id);
-			tx.set(&doc_key, id).await?;
+			tx.set_key(&doc_key, id).await?;
 			Ok(doc_id)
 		}
 	}
@@ -146,7 +147,7 @@ impl HnswDocs {
 			return Ok(rids);
 		}
 		let keys: Vec<_> = misses.iter().map(|(_, doc_id)| ikb.new_hd_key(*doc_id)).collect();
-		let ids: Vec<Option<RecordIdKey>> = tx.getm(keys, None).await?;
+		let ids: Vec<Option<RecordIdKey>> = tx.get_many_key(keys, None).await?;
 		let cache_misses = !tx.writeable();
 		for ((pos, doc_id), id) in misses.into_iter().zip(ids) {
 			if let Some(id) = id {
@@ -176,14 +177,14 @@ impl HnswDocs {
 		let index = Self::cache_index(&self.ikb, table_id);
 		cache.remove_doc_id(index, doc_id).await;
 		let doc_key = self.ikb.new_hd_key(doc_id);
-		let Some(id) = tx.get(&doc_key, None).await? else {
+		let Some(id) = tx.get_key(&doc_key, None).await? else {
 			return Ok(None);
 		};
 		self.state_updated = true;
-		tx.del(&doc_key).await?;
+		tx.del_key(&doc_key).await?;
 		let id_key = self.ikb.new_hi_key(&id);
-		if let Some(doc_id) = tx.get(&id_key, None).await? {
-			tx.del(&id_key).await?;
+		if let Some(doc_id) = tx.get_key(&id_key, None).await? {
+			tx.del_key(&id_key).await?;
 			self.state.available.insert(doc_id);
 			Ok(Some(doc_id))
 		} else {
@@ -197,7 +198,7 @@ impl HnswDocs {
 	pub(in crate::idx) async fn finish(&mut self, tx: &Transaction) -> Result<()> {
 		if self.state_updated {
 			let state_key = self.ikb.new_hd_root_key();
-			tx.set(&state_key, &self.state).await?;
+			tx.set_key(&state_key, &self.state).await?;
 			self.state_updated = false;
 		}
 		Ok(())
@@ -222,8 +223,8 @@ mod tests {
 		let cache = VectorCache::new(1024 * 1024);
 		{
 			let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
-			tx.set(&ikb.new_hd_key(1), &RecordIdKey::Number(11)).await?;
-			tx.set(&ikb.new_hd_key(2), &RecordIdKey::Number(22)).await?;
+			tx.set_key(&ikb.new_hd_key(1), &RecordIdKey::Number(11)).await?;
+			tx.set_key(&ikb.new_hd_key(2), &RecordIdKey::Number(22)).await?;
 			tx.commit().await?;
 		}
 
@@ -236,7 +237,7 @@ mod tests {
 		tx.cancel().await?;
 
 		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
-		tx.del(&ikb.new_hd_key(1)).await?;
+		tx.del_key(&ikb.new_hd_key(1)).await?;
 		tx.commit().await?;
 
 		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
@@ -261,7 +262,7 @@ mod tests {
 		tx.cancel().await?;
 
 		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
-		tx.set(&ikb.new_hd_key(9), &RecordIdKey::Number(99)).await?;
+		tx.set_key(&ikb.new_hd_key(9), &RecordIdKey::Number(99)).await?;
 		let got = HnswDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[9], Some(5)).await?;
 		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(99));
 		assert!(
@@ -281,7 +282,7 @@ mod tests {
 		let cache = VectorCache::new(1024 * 1024);
 		{
 			let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
-			tx.set(&ikb.new_hd_key(1), &RecordIdKey::Number(11)).await?;
+			tx.set_key(&ikb.new_hd_key(1), &RecordIdKey::Number(11)).await?;
 			tx.commit().await?;
 		}
 
@@ -297,7 +298,7 @@ mod tests {
 		);
 
 		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
-		tx.set(&ikb.new_hd_key(1), &RecordIdKey::Number(22)).await?;
+		tx.set_key(&ikb.new_hd_key(1), &RecordIdKey::Number(22)).await?;
 		tx.commit().await?;
 
 		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
@@ -315,8 +316,8 @@ mod tests {
 		let id = RecordIdKey::Number(77);
 		{
 			let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
-			tx.set(&ikb.new_hd_key(7), &id).await?;
-			tx.set(&ikb.new_hi_key(&id), &7_u64).await?;
+			tx.set_key(&ikb.new_hd_key(7), &id).await?;
+			tx.set_key(&ikb.new_hi_key(&id), &7_u64).await?;
 			tx.commit().await?;
 		}
 
@@ -353,7 +354,7 @@ mod tests {
 		let vec_docs = VecDocs::new(ikb.clone(), TableId(4), cache.clone(), false);
 		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
 		let vector = Vector::from(ser_vec.clone());
-		tx.set(
+		tx.set_key(
 			&ikb.new_hv_key(&ser_vec),
 			&ElementDocs {
 				e_id: 7,
@@ -368,7 +369,7 @@ mod tests {
 			Some(Ids64::One(42))
 		);
 
-		tx.del(&ikb.new_hv_key(&ser_vec)).await?;
+		tx.del_key(&ikb.new_hv_key(&ser_vec)).await?;
 		assert_eq!(vec_docs.get_docs_by_element(&tx, 7, &vector).await?, Some(Ids64::One(42)));
 		assert_eq!(vec_docs.get_docs_uncached(&tx, &vector).await?, None);
 		tx.cancel().await?;
@@ -386,7 +387,7 @@ mod tests {
 		let other_vec = SerializedVector::F32(vec![3.0, 4.0]);
 		let vector = Vector::from(ser_vec.clone());
 		let key = ikb.new_hh_key(ser_vec.compute_hash());
-		tx.set(
+		tx.set_key(
 			&key,
 			&ElementHashedDocs {
 				vectors: vec![
@@ -410,7 +411,7 @@ mod tests {
 		.await?;
 
 		assert_eq!(vec_docs.get_docs_by_element(&tx, 7, &vector).await?, Some(Ids64::One(42)));
-		tx.del(&key).await?;
+		tx.del_key(&key).await?;
 		assert_eq!(vec_docs.get_docs_by_element(&tx, 7, &vector).await?, Some(Ids64::One(42)));
 		tx.cancel().await?;
 		Ok(())
@@ -628,7 +629,7 @@ impl VecDocs {
 		let hash = ser_vec.compute_hash();
 		let key = self.ikb.new_hh_key(hash);
 		// We search first in the new hash structure
-		if let Some(ehd) = tx.get(&key, None).await?
+		if let Some(ehd) = tx.get_key(&key, None).await?
 			&& let Some(docs) = ehd.get_docs(&ser_vec)
 		{
 			return Ok(Some(docs));
@@ -644,7 +645,7 @@ impl VecDocs {
 		}
 		// Otherwise we search in the structure
 		let key = self.ikb.new_hv_key(&ser_vec);
-		if let Some(ed) = tx.get(&key, None).await? {
+		if let Some(ed) = tx.get_key(&key, None).await? {
 			return Ok(Some(ed.docs));
 		}
 		Ok(None)
@@ -677,13 +678,13 @@ impl VecDocs {
 		h: &mut HnswFlavor,
 	) -> Result<()> {
 		let key = self.ikb.new_hh_key(ser_vec.compute_hash());
-		match ctx.tx.get(&key, None).await? {
+		match ctx.tx.get_key(&key, None).await? {
 			None => {
 				//  We don't have the vector, we insert it in the graph
 				let element_id = h.insert(ctx, o).await?;
 				let docs = Ids64::One(doc_id);
 				let ehd = ElementHashedDocs::new(element_id, ser_vec, doc_id);
-				ctx.tx.set(&key, &ehd).await?;
+				ctx.tx.set_key(&key, &ehd).await?;
 				self.insert_cached_doc_set(element_id, docs).await;
 			}
 			Some(mut ehd) => {
@@ -693,7 +694,7 @@ impl VecDocs {
 						ed.docs = docs;
 						let element_id = ed.e_id;
 						let docs = ed.docs.clone();
-						ctx.tx.set(&key, &ehd).await?;
+						ctx.tx.set_key(&key, &ehd).await?;
 						self.insert_cached_doc_set(element_id, docs).await;
 					};
 				} else {
@@ -701,7 +702,7 @@ impl VecDocs {
 					let element_id = h.insert(ctx, o).await?;
 					let docs = Ids64::One(doc_id);
 					ehd.add(element_id, ser_vec, doc_id);
-					ctx.tx.set(&key, &ehd).await?;
+					ctx.tx.set_key(&key, &ehd).await?;
 					self.insert_cached_doc_set(element_id, docs).await;
 				}
 			}
@@ -722,7 +723,7 @@ impl VecDocs {
 			return self.insert_hashed(ctx, vec, ser_vec, doc_id, h).await;
 		}
 		let key = self.ikb.new_hv_key(&ser_vec);
-		if let Some(ed) = match ctx.tx.get(&key, None).await? {
+		if let Some(ed) = match ctx.tx.get_key(&key, None).await? {
 			Some(mut ed) => {
 				// We already have the vector
 				ed.docs.insert(doc_id).map(|new_docs| {
@@ -737,7 +738,7 @@ impl VecDocs {
 				Some(ed)
 			}
 		} {
-			ctx.tx.set(&key, &ed).await?;
+			ctx.tx.set_key(&key, &ed).await?;
 			self.insert_cached_doc_set(ed.e_id, ed.docs.clone()).await;
 		}
 		Ok(())
@@ -752,19 +753,19 @@ impl VecDocs {
 		h: &mut HnswFlavor,
 	) -> Result<()> {
 		let key = self.ikb.new_hh_key(ser_vec.compute_hash());
-		if let Some(mut ehd) = ctx.tx.get(&key, None).await? {
+		if let Some(mut ehd) = ctx.tx.get_key(&key, None).await? {
 			match ehd.remove(&ser_vec, d) {
 				RemoveResult::Empty(deleted_element_id) => {
-					ctx.tx.del(&key).await?;
+					ctx.tx.del_key(&key).await?;
 					self.remove_cached_doc_set(deleted_element_id).await;
 					h.remove(ctx, deleted_element_id).await?;
 				}
 				RemoveResult::Updated(element_id, docs) => {
-					ctx.tx.set(&key, &ehd).await?;
+					ctx.tx.set_key(&key, &ehd).await?;
 					self.insert_cached_doc_set(element_id, docs).await;
 				}
 				RemoveResult::RemovedElement(deleted_element_id) => {
-					ctx.tx.set(&key, &ehd).await?;
+					ctx.tx.set_key(&key, &ehd).await?;
 					self.remove_cached_doc_set(deleted_element_id).await;
 					h.remove(ctx, deleted_element_id).await?;
 				}
@@ -789,16 +790,16 @@ impl VecDocs {
 			return self.remove_hashed(ctx, ser_vec, d, h).await;
 		}
 		let key = self.ikb.new_hv_key(&ser_vec);
-		if let Some(mut ed) = ctx.tx.get(&key, None).await?
+		if let Some(mut ed) = ctx.tx.get_key(&key, None).await?
 			&& let Some(new_docs) = ed.docs.remove(d)
 		{
 			if new_docs.is_empty() {
-				ctx.tx.del(&key).await?;
+				ctx.tx.del_key(&key).await?;
 				self.remove_cached_doc_set(ed.e_id).await;
 				h.remove(ctx, ed.e_id).await?;
 			} else {
 				ed.docs = new_docs;
-				ctx.tx.set(&key, &ed).await?;
+				ctx.tx.set_key(&key, &ed).await?;
 				self.insert_cached_doc_set(ed.e_id, ed.docs.clone()).await;
 			}
 		};

@@ -1,28 +1,19 @@
 //! Stores the key prefix for all keys under a database access method
 use std::borrow::Cow;
 
-use storekey::{BorrowDecode, Encode};
-
-use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::impl_kv_key_storekey;
+use crate::key::database::all::DatabaseRoot;
+use crate::key::{impl_kv_range_storekey, key};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct DbAccess<'a> {
-	__: u8,
-	_a: u8,
-	pub ns: NamespaceId,
-	_b: u8,
-	pub db: DatabaseId,
-	_c: u8,
-	pub ac: Cow<'a, str>,
+key! {
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+	pub(crate) struct DbAccess<'a> {
+		pub prefix: DatabaseRoot,
+		b'&',
+		pub ac: Cow<'a, str>,
+	}
 }
-
-impl_kv_key_storekey!(DbAccess<'_> => Vec<u8>);
-
-pub fn new(ns: NamespaceId, db: DatabaseId, ac: &str) -> DbAccess<'_> {
-	DbAccess::new(ns, db, ac)
-}
+impl_kv_range_storekey!(DbAccess<'_>);
 
 impl Categorise for DbAccess<'_> {
 	fn categorise(&self) -> Category {
@@ -30,29 +21,22 @@ impl Categorise for DbAccess<'_> {
 	}
 }
 
-impl<'a> DbAccess<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, ac: &'a str) -> Self {
-		Self {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
-			_c: b'&',
-			ac: Cow::Borrowed(ac),
-		}
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::kvs::KVKey;
+	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::key::KVRange;
 
 	#[test]
 	fn key() {
-		let val = DbAccess::new(NamespaceId(1), DatabaseId(2), "testac");
-		let enc = DbAccess::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02&testac\0");
+		let val = DbAccess {
+			prefix: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+			ac: "testac".into(),
+		};
+		let enc = DbAccess::encode_bound(&val).unwrap();
+		assert_eq!(enc.as_slice(), b"/*\x00\x00\x00\x01*\x00\x00\x00\x02&testac\0");
 	}
 }

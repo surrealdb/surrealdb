@@ -87,7 +87,10 @@ impl AnnIndex {
 impl BenchStore {
 	fn endpoint(self, temp_dir: Option<&TempDir>) -> String {
 		match self {
-			Self::Memory => "memory".to_owned(),
+			Self::Memory => {
+				let _ = temp_dir;
+				"memory".to_owned()
+			}
 			#[cfg(feature = "kv-rocksdb")]
 			Self::RocksDb => {
 				let path = temp_dir.expect("RocksDB benchmark requires a temp dir").child("db");

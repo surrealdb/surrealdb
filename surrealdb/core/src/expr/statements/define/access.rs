@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use anyhow::{Result, bail};
 use rand::distr::{Alphanumeric, SampleString};
 use reblessive::tree::Stk;
@@ -21,6 +23,7 @@ use crate::expr::{
 	AccessType, Algorithm, Base, Expr, FlowResultExt, Idiom, JwtAccess, Literal, RecordAccess,
 };
 use crate::iam::{Action, ResourceKind};
+use crate::key::database::all::DatabaseRoot;
 use crate::val::{self, Duration, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -387,8 +390,10 @@ impl DefineAccessStatement {
 					Self::reject_es512(&definition)?;
 				}
 				// Process the statement
-				let key = crate::key::root::ac::new(definition.name.as_str());
-				txn.set(&key, &definition).await?;
+				let key = crate::key::root::ac::AccessKey {
+					ac: Cow::Borrowed(definition.name.as_str()),
+				};
+				txn.set_key(&key, &definition).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -421,9 +426,12 @@ impl DefineAccessStatement {
 					Self::reject_es512(&definition)?;
 				}
 				// Process the statement
-				let key = crate::key::namespace::ac::new(ns, definition.name.as_str());
+				let key = crate::key::namespace::ac::AccessKey {
+					ns,
+					ac: Cow::Borrowed(definition.name.as_str()),
+				};
 				txn.get_or_add_ns(Some(ctx), opt.ns()?).await?;
-				txn.set(&key, &definition).await?;
+				txn.set_key(&key, &definition).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -459,8 +467,14 @@ impl DefineAccessStatement {
 					Self::reject_es512(&definition)?;
 				}
 				// Process the statement
-				let key = crate::key::database::ac::new(ns, db, definition.name.as_str());
-				txn.set(&key, &definition).await?;
+				let key = crate::key::database::ac::AccessKey {
+					prefix: DatabaseRoot {
+						ns,
+						db,
+					},
+					ac: Cow::Borrowed(definition.name.as_str()),
+				};
+				txn.set_key(&key, &definition).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good

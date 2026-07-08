@@ -2,74 +2,52 @@
 
 use std::borrow::Cow;
 
-use storekey::{BorrowDecode, Encode};
-
-use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+use crate::catalog::IndexId;
 use crate::idx::trees::diskann::DiskAnnPendingState;
-use crate::kvs::impl_kv_key_storekey;
+use crate::key::database::all::DatabaseRoot;
+use crate::key::{impl_kv_key_storekey, key};
 use crate::val::TableName;
 
-/// Stores one shard of the distributed-safe pending-operation summary for one DiskANN index.
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-#[storekey(format = "()")]
-pub(crate) struct Dp<'a> {
-	__: u8,
-	_a: u8,
-	pub ns: NamespaceId,
-	_b: u8,
-	pub db: DatabaseId,
-	_c: u8,
-	pub tb: Cow<'a, TableName>,
-	_d: u8,
-	pub ix: IndexId,
-	_e: u8,
-	_f: u8,
-	_g: u8,
-	pub shard: u16,
-}
-
-impl_kv_key_storekey!(Dp<'_> => DiskAnnPendingState);
-
-impl<'a> Dp<'a> {
-	/// Creates one `!dp` pending-state guard shard key for one DiskANN index.
-	pub(crate) fn new(
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &'a TableName,
-		ix: IndexId,
-		shard: u16,
-	) -> Self {
-		Self {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
-			_c: b'*',
-			tb: Cow::Borrowed(tb),
-			_d: b'+',
-			ix,
-			_e: b'!',
-			_f: b'd',
-			_g: b'p',
-			shard,
-		}
+key! {
+	/// Stores one shard of the distributed-safe pending-operation summary for one DiskANN index.
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+	pub(crate) struct Dp<'a> {
+		pub prefix: DatabaseRoot,
+		b'*',
+		pub tb: Cow<'a, TableName>,
+		b'+',
+		pub ix: IndexId,
+		b'!',
+		b'd',
+		b'p',
+		pub shard: u16,
 	}
 }
+
+impl_kv_key_storekey!(Dp<'a> => DiskAnnPendingState);
 
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::key::index::dr::DiskAnnRecordPendingPrefix;
-	use crate::kvs::KVKey;
+	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::key::KVKey;
 
 	#[test]
-	fn pending_state_key_is_outside_dr_range() {
+	fn key() {
 		let tb = TableName::from("testtb");
-		let key = Dp::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), 7).encode_key().unwrap();
-		let range =
-			DiskAnnRecordPendingPrefix::range(NamespaceId(1), DatabaseId(2), &tb, IndexId(3))
-				.unwrap();
-		assert!(!range.start.le(&key) || !key.lt(&range.end));
+		let val = Dp {
+			prefix: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+			tb: Cow::Borrowed(&tb),
+			ix: IndexId(3),
+			shard: 7,
+		};
+		let enc = Dp::encode_key(&val).unwrap();
+		assert_eq!(
+			enc.as_slice(),
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!dp\0\x07"
+		);
 	}
 }

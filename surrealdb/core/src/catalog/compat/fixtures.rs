@@ -26,6 +26,7 @@ use crate::catalog::schema::base::Base;
 use crate::catalog::{
 	ApiActionDefinition, ApiConfigDefinition, ApiMethod, DatabaseId, IndexId, ModuleDefinition,
 	ModuleExecutable, NamespaceId, NodeLiveQuery, SiloExecutable, SurrealismExecutable, TableId,
+	TaskLease,
 };
 use crate::cf::mutations::{TableMutation, TableMutations};
 use crate::dbs::node::{Node, Timestamp};
@@ -40,7 +41,6 @@ use crate::idx::ft::fulltext::{DocLengthAndCount, TermDocument};
 use crate::idx::ft::offset::Offset;
 use crate::kvs::index::{Appending, PrimaryAppending};
 use crate::kvs::sequences::{BatchValue, SequenceState};
-use crate::kvs::tasklease::TaskLease;
 use crate::kvs::version::MajorVersion;
 use crate::val::{
 	Array, Bytes, Datetime, Duration as ValDuration, File, Geometry, Number, Object, Range,

@@ -56,8 +56,14 @@ impl RemoveApiStatement {
 
 		// Delete the definition
 		let name = ap.path.to_string();
-		let key = crate::key::database::ap::new(ns, db, &name);
-		txn.del(&key).await?;
+		let key = crate::key::database::ap::Api {
+			prefix: crate::key::database::all::DatabaseRoot {
+				ns,
+				db,
+			},
+			ap: std::borrow::Cow::Borrowed(&name),
+		};
+		txn.del_key(&key).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good

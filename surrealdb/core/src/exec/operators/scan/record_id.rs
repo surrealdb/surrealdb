@@ -11,11 +11,9 @@ use futures::StreamExt;
 use tracing::instrument;
 
 use super::common::resolve_version_stamp;
-use super::pipeline::{
-	ScanPipeline, build_field_state, filter_and_process_batch, kv_scan_stream, range_end_key,
-	range_start_key,
-};
+use super::pipeline::{ScanPipeline, build_field_state, filter_and_process_batch, kv_scan_stream};
 use super::resolved::ResolvedTableContext;
+use crate::exec::operators::scan::count::record_key_range;
 use crate::exec::permission::{
 	PhysicalPermission, convert_permission_to_physical_runtime, should_check_perms,
 	validate_record_user_access,
@@ -310,8 +308,7 @@ pub(crate) async fn execute_record_lookup(
 	match &rid.key {
 		RecordIdKey::Range(range) => {
 			// --- Range scan ---
-			let beg = range_start_key(ns.namespace_id, db.database_id, &rid.table, &range.start)?;
-			let end = range_end_key(ns.namespace_id, db.database_id, &rid.table, &range.end)?;
+			let range = record_key_range(ns.namespace_id, db.database_id, &rid.table, range)?;
 
 			let pre_skip = if !needs_row_filtering {
 				start
@@ -334,8 +331,7 @@ pub(crate) async fn execute_record_lookup(
 
 			let mut source = kv_scan_stream(
 				Arc::clone(&txn),
-				beg,
-				end,
+				range,
 				version,
 				effective_storage_limit,
 				crate::idx::planner::ScanDirection::Forward,

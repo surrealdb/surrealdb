@@ -16,15 +16,15 @@
 //! The reclaim job lives at the **root** level (`/!rc...`) precisely so it
 //! survives the deletion of the namespace/database prefix it refers to.
 use std::borrow::Cow;
+use std::io;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::{impl_kv_key_storekey, impl_kv_value_revisioned};
+use crate::key::{impl_kv_key_storekey, impl_kv_range_storekey, impl_kv_value_revisioned, key};
 use crate::val::TableName;
 
 /// Mutable state stored as the value of a [`ReclaimKey`].
@@ -44,125 +44,157 @@ pub(crate) struct ReclaimState {
 
 impl_kv_value_revisioned!(ReclaimState);
 
-/// Reclaim job targeting an entire namespace prefix (`/*{ns}`).
-pub(crate) const RECLAIM_NAMESPACE: u8 = 0;
-/// Reclaim job targeting an entire database prefix (`/*{ns}*{db}`).
-pub(crate) const RECLAIM_DATABASE: u8 = 1;
-/// Reclaim job targeting a single index prefix (`/*{ns}*{db}*{tb}+{ix}`).
-pub(crate) const RECLAIM_INDEX: u8 = 2;
-
-/// Represents an entry in the background reclaim queue.
-///
-/// The `kind` discriminant selects which prefix the reclaim task destroys; the
-/// `ns`/`db`/`tb`/`ix` ids identify it. Fields not relevant to a given `kind`
-/// are zero/empty. `expunge` records whether the data must be hard-cleared
-/// (all MVCC versions) rather than soft-deleted. `uid` is a unique,
-/// time-ordered id that disambiguates entries.
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-#[storekey(format = "()")]
-pub(crate) struct ReclaimKey<'key> {
-	__: u8,
-	_a: u8,
-	_b: u8,
-	_c: u8,
-	pub kind: u8,
-	pub ns: NamespaceId,
-	pub db: DatabaseId,
-	pub tb: Cow<'key, TableName>,
-	pub ix: IndexId,
-	pub expunge: u8,
-	pub uid: Uuid,
+#[derive(Clone, Copy, Eq, PartialEq, Debug, PartialOrd)]
+pub enum ReclaimKind {
+	Namespace,
+	Database,
+	Index,
 }
 
-impl_kv_key_storekey!(ReclaimKey<'_> => ReclaimState);
+impl storekey::Encode for ReclaimKind {
+	fn encode<W: io::Write>(
+		&self,
+		w: &mut storekey::Writer<W>,
+	) -> Result<(), storekey::EncodeError> {
+		match self {
+			ReclaimKind::Namespace => w.write_u8(0),
+			ReclaimKind::Database => w.write_u8(1),
+			ReclaimKind::Index => w.write_u8(2),
+		}
+	}
+}
 
+impl<'de> storekey::BorrowDecode<'de> for ReclaimKind {
+	fn borrow_decode(r: &mut storekey::BorrowReader<'de>) -> Result<Self, storekey::DecodeError> {
+		let w = r.read_u8()?;
+		match w {
+			0 => Ok(ReclaimKind::Namespace),
+			1 => Ok(ReclaimKind::Database),
+			2 => Ok(ReclaimKind::Index),
+			_ => Err(storekey::DecodeError::InvalidFormat),
+		}
+	}
+}
+
+/// Enum for the expunge field.
+///
+/// This enum manually implements storekey encoding as, for backwards compatiblity,
+/// it needs to be serialized with a different format than the default format.
+/// (derive implemention starts enum discriminant at 2, instead of 0)
+#[derive(Clone, Copy, Eq, PartialEq, Debug, PartialOrd)]
+pub enum Expunge {
+	Keep,
+	Expunge,
+}
+
+impl storekey::Encode for Expunge {
+	fn encode<W: io::Write>(
+		&self,
+		w: &mut storekey::Writer<W>,
+	) -> Result<(), storekey::EncodeError> {
+		match self {
+			Expunge::Keep => w.write_u8(0),
+			Expunge::Expunge => w.write_u8(1),
+		}
+	}
+}
+
+impl<'de> storekey::BorrowDecode<'de> for Expunge {
+	fn borrow_decode(r: &mut storekey::BorrowReader<'de>) -> Result<Self, storekey::DecodeError> {
+		let w = r.read_u8()?;
+		match w {
+			0 => Ok(Expunge::Keep),
+			1 => Ok(Expunge::Expunge),
+			_ => Err(storekey::DecodeError::InvalidFormat),
+		}
+	}
+}
+
+key! {
+	/// Represents an entry in the background reclaim queue.
+	///
+	/// The `kind` discriminant selects which prefix the reclaim task destroys; the
+	/// `ns`/`db`/`tb`/`ix` ids identify it. Fields not relevant to a given `kind`
+	/// are zero/empty. `expunge` records whether the data must be hard-cleared
+	/// (all MVCC versions) rather than soft-deleted. `uid` is a unique,
+	/// time-ordered id that disambiguates entries.
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+	pub(crate) struct ReclaimKey<'key> {
+		b'/',
+		b'!',
+		b'r',
+		b'c',
+		pub kind: ReclaimKind,
+		pub ns: NamespaceId,
+		pub db: DatabaseId,
+		pub tb: Cow<'key, TableName>,
+		pub ix: IndexId,
+		pub expunge: Expunge,
+		pub uid: Uuid,
+	}
+}
+
+impl<'key> ReclaimKey<'key> {
+	pub fn namespace(ns: NamespaceId, expunge: bool, uuid: Uuid) -> Self {
+		ReclaimKey {
+			kind: ReclaimKind::Namespace,
+			ns,
+			db: DatabaseId(0),
+			tb: Cow::Owned(TableName::default()),
+			ix: IndexId(0),
+			expunge: if expunge {
+				Expunge::Expunge
+			} else {
+				Expunge::Keep
+			},
+			uid: uuid,
+		}
+	}
+
+	pub fn database(ns: NamespaceId, db: DatabaseId, expunge: bool, uuid: Uuid) -> Self {
+		ReclaimKey {
+			kind: ReclaimKind::Database,
+			ns,
+			db,
+			tb: Cow::Owned(TableName::default()),
+			ix: IndexId(0),
+			expunge: if expunge {
+				Expunge::Expunge
+			} else {
+				Expunge::Keep
+			},
+			uid: uuid,
+		}
+	}
+}
+
+impl_kv_key_storekey!(ReclaimKey<'a> => ReclaimState);
 impl Categorise for ReclaimKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::Reclaim
 	}
 }
 
-impl<'key> ReclaimKey<'key> {
-	/// Enqueue reclaim of a whole namespace prefix.
-	pub(crate) fn namespace(ns: NamespaceId, expunge: bool, uid: Uuid) -> Self {
-		Self::new(
-			RECLAIM_NAMESPACE,
-			ns,
-			DatabaseId(0),
-			Cow::Owned(TableName::from("")),
-			IndexId(0),
-			expunge,
-			uid,
-		)
-	}
-
-	/// Enqueue reclaim of a whole database prefix.
-	pub(crate) fn database(ns: NamespaceId, db: DatabaseId, expunge: bool, uid: Uuid) -> Self {
-		Self::new(
-			RECLAIM_DATABASE,
-			ns,
-			db,
-			Cow::Owned(TableName::from("")),
-			IndexId(0),
-			expunge,
-			uid,
-		)
-	}
-
-	/// Enqueue reclaim of a single index prefix.
-	pub(crate) fn index(
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: Cow<'key, TableName>,
-		ix: IndexId,
-		expunge: bool,
-		uid: Uuid,
-	) -> Self {
-		Self::new(RECLAIM_INDEX, ns, db, tb, ix, expunge, uid)
-	}
-
-	fn new(
-		kind: u8,
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: Cow<'key, TableName>,
-		ix: IndexId,
-		expunge: bool,
-		uid: Uuid,
-	) -> Self {
-		Self {
-			__: b'/',
-			_a: b'!',
-			_b: b'r',
-			_c: b'c',
-			kind,
-			ns,
-			db,
-			tb,
-			ix,
-			expunge: expunge as u8,
-			uid,
-		}
-	}
-
-	/// Half-open byte range covering every reclaim queue entry.
-	pub(crate) fn range() -> (Vec<u8>, Vec<u8>) {
-		(b"/!rc\x00".to_vec(), b"/!rc\xff".to_vec())
-	}
-
-	pub(crate) fn decode_key(k: &[u8]) -> anyhow::Result<ReclaimKey<'_>> {
-		Ok(storekey::decode_borrow(k)?)
+key! {
+	pub(crate) struct ReclaimPrefix {
+		b'/',
+		b'!',
+		b'r',
+		b'c',
 	}
 }
+impl_kv_range_storekey!(ReclaimPrefix);
 
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::kvs::KVKey;
+	use crate::key::{KVKey, KVKeyDecode, KVRange};
 
 	#[test]
 	fn range() {
-		assert_eq!(ReclaimKey::range(), (b"/!rc\x00".to_vec(), b"/!rc\xff".to_vec()));
+		let prefix = ReclaimPrefix {}.encode_range().unwrap();
+		assert_eq!(prefix.start.as_slice(), b"/!rc\x00");
+		assert_eq!(prefix.end.as_slice(), b"/!rd");
 	}
 
 	#[test]
@@ -170,33 +202,34 @@ mod tests {
 		let val = ReclaimKey::database(NamespaceId(1), DatabaseId(2), false, Uuid::from_u128(7));
 		let enc = ReclaimKey::encode_key(&val).unwrap();
 		// Inside the scannable range
-		let (beg, end) = ReclaimKey::range();
-		assert!(enc.as_slice() >= beg.as_slice() && enc.as_slice() < end.as_slice());
+		let range = ReclaimPrefix {}.encode_range().unwrap();
+		assert!(enc.as_slice() >= range.start.as_slice() && enc.as_slice() < range.end.as_slice());
 		let dec = ReclaimKey::decode_key(&enc).unwrap();
-		assert_eq!(dec.kind, RECLAIM_DATABASE);
+		assert_eq!(dec.kind, ReclaimKind::Database);
 		assert_eq!(dec.ns, NamespaceId(1));
 		assert_eq!(dec.db, DatabaseId(2));
-		assert_eq!(dec.expunge, 0);
+		assert_eq!(dec.expunge, Expunge::Keep);
 		assert_eq!(dec.uid, Uuid::from_u128(7));
 	}
 
 	#[test]
 	fn index_key_roundtrips() {
-		let val = ReclaimKey::index(
-			NamespaceId(4),
-			DatabaseId(5),
-			Cow::Owned(TableName::from("testtb")),
-			IndexId(6),
-			true,
-			Uuid::from_u128(9),
-		);
+		let val = ReclaimKey {
+			kind: ReclaimKind::Index,
+			ns: NamespaceId(4),
+			db: DatabaseId(5),
+			tb: Cow::Owned(TableName::from("testtb")),
+			ix: IndexId(6),
+			expunge: Expunge::Expunge,
+			uid: Uuid::from_u128(9),
+		};
 		let enc = ReclaimKey::encode_key(&val).unwrap();
 		let dec = ReclaimKey::decode_key(&enc).unwrap();
-		assert_eq!(dec.kind, RECLAIM_INDEX);
+		assert_eq!(dec.kind, ReclaimKind::Index);
 		assert_eq!(dec.ns, NamespaceId(4));
 		assert_eq!(dec.db, DatabaseId(5));
 		assert_eq!(dec.tb.as_ref(), &TableName::from("testtb"));
 		assert_eq!(dec.ix, IndexId(6));
-		assert_eq!(dec.expunge, 1);
+		assert_eq!(dec.expunge, Expunge::Expunge);
 	}
 }

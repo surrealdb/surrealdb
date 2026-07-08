@@ -82,7 +82,7 @@ impl HnswElements {
 		ser_vec: &SerializedVector,
 	) -> Result<SharedVector> {
 		let key = self.ikb.new_he_key(id);
-		tx.set(&key, ser_vec).await?;
+		tx.set_key(&key, ser_vec).await?;
 		let pt: SharedVector = vec.into();
 		self.vector_cache
 			.insert(self.ikb.ns(), self.ikb.db(), self.table_id, self.index_id, id, pt.clone())
@@ -104,7 +104,7 @@ impl HnswElements {
 			return Ok(Some(v));
 		}
 		let key = self.ikb.new_he_key(*e_id);
-		match tx.get(&key, None).await? {
+		match tx.get_key(&key, None).await? {
 			None => Ok(None),
 			Some(vec) => {
 				let vec = Vector::from(vec);
@@ -145,7 +145,7 @@ impl HnswElements {
 			.remove(self.ikb.ns(), self.ikb.db(), self.table_id, self.index_id, e_id)
 			.await;
 		let key = self.ikb.new_he_key(e_id);
-		tx.del(&key).await?;
+		tx.del_key(&key).await?;
 		Ok(())
 	}
 }

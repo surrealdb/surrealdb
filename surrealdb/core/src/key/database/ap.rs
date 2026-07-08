@@ -2,85 +2,70 @@
 use std::borrow::Cow;
 
 use anyhow::Result;
-use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{ApiDefinition, DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::{KVKey, impl_kv_key_storekey};
+use crate::key::database::all::DatabaseRoot;
+use crate::key::{impl_kv_key_storekey, impl_kv_range_storekey, key};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Ap<'a> {
-	__: u8,
-	_a: u8,
-	pub ns: NamespaceId,
-	_b: u8,
-	pub db: DatabaseId,
-	_c: u8,
-	_d: u8,
-	_e: u8,
-	pub ap: Cow<'a, str>,
+key! {
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+	pub(crate) struct Api<'a> {
+		pub prefix: DatabaseRoot,
+		b'!',
+		b'a',
+		b'p',
+		pub ap: Cow<'a, str>,
+	}
 }
 
-impl_kv_key_storekey!(Ap<'_> => ApiDefinition);
-
-pub fn new(ns: NamespaceId, db: DatabaseId, ap: &str) -> Ap<'_> {
-	Ap::new(ns, db, ap)
-}
-
-pub fn prefix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db).encode_key()?;
-	k.extend_from_slice(b"!ap\x00");
-	Ok(k)
-}
-
-pub fn suffix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db).encode_key()?;
-	k.extend_from_slice(b"!ap\xff");
-	Ok(k)
-}
-
-impl Categorise for Ap<'_> {
+impl_kv_key_storekey!(Api<'a> => ApiDefinition);
+impl Categorise for Api<'_> {
 	fn categorise(&self) -> Category {
 		Category::DatabaseApi
 	}
 }
 
-impl<'a> Ap<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, ap: &'a str) -> Self {
-		Self {
-			__: b'/', // /
-			_a: b'*', // *
-			ns,
-			_b: b'*', // *
-			db,
-			_c: b'!', // !
-			_d: b'a', // a
-			_e: b'p', // p
-			ap: Cow::Borrowed(ap),
-		}
+key! {
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+	pub(crate) struct ApiPrefix {
+		b'/',
+		b'*',
+		pub ns: NamespaceId,
+		b'*',
+		pub db: DatabaseId,
+		b'!',
+		b'a',
+		b'p',
 	}
 }
+impl_kv_range_storekey!(ApiPrefix);
 
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::key::KVKey;
 
 	#[test]
 	fn key() {
-		let val = Ap::new(NamespaceId(1), DatabaseId(2), "test");
-		let enc = Ap::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!aptest\0");
+		let val = Api {
+			prefix: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+			ap: "test".into(),
+		};
+		let enc = Api::encode_key(&val).unwrap();
+		assert_eq!(enc.as_slice(), b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!aptest\0");
 	}
 
 	#[test]
 	fn prefix() {
-		let val = super::prefix(NamespaceId(1), DatabaseId(2)).unwrap();
-		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!ap\0");
-	}
-
-	#[test]
-	fn suffix() {
-		let val = super::suffix(NamespaceId(1), DatabaseId(2)).unwrap();
-		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!ap\xff");
+		let val = ApiPrefix {
+			ns: NamespaceId(1),
+			db: DatabaseId(2),
+		};
+		let enc = storekey::encode_vec(&val).unwrap();
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!ap");
 	}
 }

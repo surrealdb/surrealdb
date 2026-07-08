@@ -4,14 +4,15 @@
 //! at plan time. Skips runtime index analysis and source expression evaluation,
 //! going straight to `kv_scan_stream` + `ScanPipeline`.
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
+use common::future::stream::Yielder;
 use futures::StreamExt;
-use tracing::instrument;
 
-use super::common::resolve_version_stamp;
 use super::pipeline::{ScanPipeline, build_field_state, eval_limit_expr, kv_scan_stream};
 use super::resolved::ResolvedTableContext;
+use crate::exec::operators::scan::common::resolve_version_stamp;
 use crate::exec::permission::{
 	PhysicalPermission, convert_permission_to_physical_runtime, should_check_perms,
 	validate_record_user_access,
@@ -25,7 +26,8 @@ use crate::exec::{
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::iam::Action;
 use crate::idx::planner::ScanDirection;
-use crate::key::record;
+use crate::key::database::all::DatabaseRoot;
+use crate::key::{KVRange, record};
 use crate::val::TableName;
 
 /// Direct KV range scan over a known table.
@@ -182,125 +184,155 @@ impl ExecOperator for TableScan {
 		let metrics = Arc::clone(&self.metrics);
 		let ctx = ctx.clone();
 
-		let stream = async_stream::try_stream! {
-			let db_ctx = ctx.database().context("TableScan requires database context")?;
-			let txn = ctx.txn();
-			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
-			let db = Arc::clone(&db_ctx.db);
+		let stream =
+			common::future::stream::try_async_stream(async move |mut yielder: Yielder<_>| {
+				let db_ctx = ctx.database().context("TableScan requires database context")?;
+				let txn = ctx.txn();
+				let ns = Arc::clone(&db_ctx.ns_ctx.ns);
+				let db = Arc::clone(&db_ctx.db);
 
-			// Evaluate pushed-down LIMIT and START expressions
-			let limit_val: Option<usize> = match &limit_expr {
-				Some(expr) => Some(eval_limit_expr(&**expr, &ctx).await?),
-				None => None,
-			};
-			let start_val: usize = match &start_expr {
-				Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
-				None => 0,
-			};
-
-			// Resolve VERSION timestamp; see [`resolve_version_stamp`] for
-			// why we prefer the stamp already set by the enclosing
-			// `VersionScope` over re-evaluating `version_expr` here.
-			let version: Option<u64> = resolve_version_stamp(&ctx, version_expr.as_ref()).await?;
-
-			// Resolve table metadata: plan-time fast path or runtime fallback
-			let (select_permission, field_state) = if let Some(ref res) = resolved {
-				// Plan-time resolved: use pre-fetched table def + field state.
-				// Only the permission compilation (pure CPU) happens here.
-				let perm = res.select_permission(check_perms);
-				let fs = res.field_state_for_projection(needed_fields.as_ref());
-				(perm, fs)
-			} else {
-				// Runtime fallback (DynamicScan path or no txn at plan time)
-				let table_def = db_ctx
-					.get_table_def(&table_name, version)
-					.await
-					.context("Failed to get table")?;
-
-				if table_def.is_none() {
-					Err(ControlFlow::Err(anyhow::Error::new(crate::err::Error::TbNotFound {
-						name: table_name.clone(),
-					})))?;
-				}
-
-				let perm = if check_perms {
-					let catalog_perm = match &table_def {
-						Some(def) => def.permissions.select.clone(),
-						None => crate::catalog::Permission::None,
-					};
-					convert_permission_to_physical_runtime(&catalog_perm, ctx.ctx())
-						.await
-						.context("Failed to convert permission")?
-				} else {
-					PhysicalPermission::Allow
+				// Evaluate pushed-down LIMIT and START expressions
+				let limit_val: Option<usize> = match &limit_expr {
+					Some(expr) => Some(eval_limit_expr(&**expr, &ctx).await?),
+					None => None,
+				};
+				let start_val: usize = match &start_expr {
+					Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
+					None => 0,
 				};
 
-				let fs = build_field_state(
-					&ctx, &table_name, check_perms, needed_fields.as_ref(),
-				).await?;
+				// Resolve VERSION timestamp; see [`resolve_version_stamp`] for
+				// why we prefer the stamp already set by the enclosing
+				// `VersionScope` over re-evaluating `version_expr` here.
+				let version: Option<u64> =
+					resolve_version_stamp(&ctx, version_expr.as_ref()).await?;
 
-				(perm, fs)
-			};
+				// Resolve table metadata: plan-time fast path or runtime fallback
+				let (select_permission, field_state) = if let Some(ref res) = resolved {
+					// Plan-time resolved: use pre-fetched table def + field state.
+					// Only the permission compilation (pure CPU) happens here.
+					let perm = res.select_permission(check_perms);
+					let fs = res.field_state_for_projection(needed_fields.as_ref());
+					(perm, fs)
+				} else {
+					// Runtime fallback (DynamicScan path or no txn at plan time)
+					let table_def = db_ctx
+						.get_table_def(&table_name, version)
+						.await
+						.context("Failed to get table")?;
 
-			if matches!(select_permission, PhysicalPermission::Deny) {
-				return;
-			}
+					if table_def.is_none() {
+						Err(ControlFlow::Err(anyhow::Error::new(crate::err::Error::TbNotFound {
+							name: table_name.clone(),
+						})))?;
+					}
 
-			if limit_val == Some(0) {
-				return;
-			}
+					let perm = if check_perms {
+						let catalog_perm = match &table_def {
+							Some(def) => def.permissions.select.clone(),
+							None => crate::catalog::Permission::None,
+						};
+						convert_permission_to_physical_runtime(&catalog_perm, ctx.ctx())
+							.await
+							.context("Failed to convert permission")?
+					} else {
+						PhysicalPermission::Allow
+					};
 
-			// Row-filtering (permissions, WHERE) prevents positional pushdown;
-			// row-modifying ops (computed fields, field perms) do not.
-			let needs_row_filtering = ScanPipeline::compute_needs_row_filtering(
-				&select_permission, predicate.as_ref(),
-			);
+					let fs =
+						build_field_state(&ctx, &table_name, check_perms, needed_fields.as_ref())
+							.await?;
 
-			let pre_skip = if !needs_row_filtering { start_val } else { 0 };
-			let effective_storage_limit = if !needs_row_filtering { limit_val } else { None };
+					(perm, fs)
+				};
 
-			let beg = record::prefix(ns.namespace_id, db.database_id, &table_name)?;
-			let end = record::suffix(ns.namespace_id, db.database_id, &table_name)?;
-			let limit_hint = limit_val.map(|l| (l + start_val).try_into().unwrap_or(u32::MAX));
-			let pre_decode_filter = pre_decode_filter_for_execute(
-				&pre_decode_filter_status,
-				&field_state,
-				check_perms,
-				ctx.ctx().config.idiom_recursion_limit,
-			);
-			let topk_probe = topk_probe_for_execute(
-				&topk_pushdown_status,
-				&field_state,
-				check_perms,
-				&metrics,
-			);
-			let mut source = kv_scan_stream(
-				Arc::clone(&txn), beg, end, version,
-				effective_storage_limit, direction, pre_skip, limit_hint,
-				pre_decode_filter, topk_probe,
-			);
-
-			let mut pipeline = ScanPipeline::new(
-				select_permission, predicate, field_state,
-				check_perms, limit_val, start_val.saturating_sub(pre_skip),
-			);
-
-			while let Some(batch_result) = source.next().await {
-				if ctx.cancellation().is_cancelled() {
-					Err(ControlFlow::Err(
-						anyhow::anyhow!(crate::err::Error::QueryCancelled),
-					))?;
+				if matches!(select_permission, PhysicalPermission::Deny) {
+					return Ok(());
 				}
-				let mut batch = batch_result?;
-				let cont = pipeline.process_batch(&mut batch.values, &ctx).await?;
-				if !batch.values.is_empty() {
-					yield ValueBatch { values: batch.values };
+
+				if limit_val == Some(0) {
+					return Ok(());
 				}
-				if !cont {
-					break;
+
+				// Row-filtering (permissions, WHERE) prevents positional pushdown;
+				// row-modifying ops (computed fields, field perms) do not.
+				let needs_row_filtering = ScanPipeline::compute_needs_row_filtering(
+					&select_permission,
+					predicate.as_ref(),
+				);
+
+				let pre_skip = if !needs_row_filtering {
+					start_val
+				} else {
+					0
+				};
+				let effective_storage_limit = if !needs_row_filtering {
+					limit_val
+				} else {
+					None
+				};
+
+				let range = record::RecordKeyPrefix {
+					root: DatabaseRoot {
+						ns: ns.namespace_id,
+						db: db.database_id,
+					},
+					table: Cow::Borrowed(&table_name),
 				}
-			}
-		};
+				.encode_range()?;
+				let limit_hint = limit_val.map(|l| (l + start_val).try_into().unwrap_or(u32::MAX));
+				let pre_decode_filter = pre_decode_filter_for_execute(
+					&pre_decode_filter_status,
+					&field_state,
+					check_perms,
+					ctx.ctx().config.idiom_recursion_limit,
+				);
+				let topk_probe = topk_probe_for_execute(
+					&topk_pushdown_status,
+					&field_state,
+					check_perms,
+					&metrics,
+				);
+				let mut source = kv_scan_stream(
+					Arc::clone(&txn),
+					range,
+					version,
+					effective_storage_limit,
+					direction,
+					pre_skip,
+					limit_hint,
+					pre_decode_filter,
+					topk_probe,
+				);
+
+				let mut pipeline = ScanPipeline::new(
+					select_permission,
+					predicate,
+					field_state,
+					check_perms,
+					limit_val,
+					start_val.saturating_sub(pre_skip),
+				);
+
+				while let Some(batch_result) = source.next().await {
+					if ctx.cancellation().is_cancelled() {
+						Err(ControlFlow::Err(anyhow::anyhow!(crate::err::Error::QueryCancelled)))?;
+					}
+					let mut batch = batch_result?;
+					let cont = pipeline.process_batch(&mut batch.values, &ctx).await?;
+					if !batch.values.is_empty() {
+						yielder
+							.emit(ValueBatch {
+								values: batch.values,
+							})
+							.await;
+					}
+					if !cont {
+						break;
+					}
+				}
+				Ok(())
+			});
 
 		Ok(monitor_stream(Box::pin(stream), "TableScan", &self.metrics))
 	}

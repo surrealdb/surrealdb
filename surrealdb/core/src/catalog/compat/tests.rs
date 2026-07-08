@@ -8,13 +8,13 @@
 
 use super::super::*;
 use super::{fixtures, v3_0_0, v3_0_0_beta_1, v3_0_0_beta_3, v3_1_0, v3_1_1, v3_3_0};
+use crate::catalog::TaskLease;
 use crate::cf::TableMutations;
 use crate::dbs::node::Node;
 use crate::idx::ft::fulltext::{DocLengthAndCount, TermDocument};
-use crate::kvs::KVValue;
+use crate::key::KVValue;
 use crate::kvs::index::{Appending, PrimaryAppending};
 use crate::kvs::sequences::{BatchValue, SequenceState};
-use crate::kvs::tasklease::TaskLease;
 use crate::kvs::version::MajorVersion;
 use crate::val::{RecordId, RecordIdKey};
 

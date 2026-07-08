@@ -74,8 +74,8 @@ impl SeqDocIds {
 		tx: &Transaction,
 		id: &RecordIdKey,
 	) -> Result<Option<DocId>> {
-		let id_key = self.ikb.new_id_key(id.clone());
-		tx.get(&id_key, None).await
+		let id_key = self.ikb.new_id_key(id);
+		tx.get_key(&id_key, None).await
 	}
 
 	/// Resolves a record ID to a document ID, creating a new one if needed
@@ -94,12 +94,12 @@ impl SeqDocIds {
 	pub(in crate::idx) async fn resolve_doc_id(
 		&self,
 		ctx: &FrozenContext,
-		id: RecordIdKey,
+		id: &RecordIdKey,
 	) -> Result<Resolved> {
-		let id_key = self.ikb.new_id_key(id.clone());
+		let id_key = self.ikb.new_id_key(id);
 		let tx = ctx.tx();
 		// Do we already have an ID?
-		if let Some(doc_id) = tx.get(&id_key, None).await? {
+		if let Some(doc_id) = tx.get_key(&id_key, None).await? {
 			return Ok(Resolved::Existing(doc_id));
 		}
 		// If not, let's get one from the sequence
@@ -108,11 +108,11 @@ impl SeqDocIds {
 			.next_fts_doc_id(Some(ctx), self.ikb.clone(), ctx.config.fts_doc_ids_batch_size)
 			.await? as DocId;
 		{
-			tx.set(&id_key, &new_doc_id).await?;
+			tx.set_key(&id_key, &new_doc_id).await?;
 		}
 		{
 			let k = self.ikb.new_ii_key(new_doc_id);
-			tx.set(&k, &id).await?;
+			tx.set_key(&k, id).await?;
 		}
 		Ok(Resolved::New(new_doc_id))
 	}
@@ -135,7 +135,7 @@ impl SeqDocIds {
 		tx: &Transaction,
 		doc_id: DocId,
 	) -> Result<Option<RecordIdKey>> {
-		tx.get(&ikb.new_ii_key(doc_id), None).await
+		tx.get_key(&ikb.new_ii_key(doc_id), None).await
 	}
 
 	/// Removes a document ID and its associated record ID
@@ -152,9 +152,9 @@ impl SeqDocIds {
 		doc_id: DocId,
 	) -> Result<()> {
 		let k = self.ikb.new_ii_key(doc_id);
-		if let Some(id) = tx.get(&k, None).await? {
-			tx.del(&self.ikb.new_id_key(id)).await?;
-			tx.del(&k).await?;
+		if let Some(id) = tx.get_key(&k, None).await? {
+			tx.del_key(&self.ikb.new_id_key(&id)).await?;
+			tx.del_key(&k).await?;
 		}
 		Ok(())
 	}
@@ -162,6 +162,8 @@ impl SeqDocIds {
 
 #[cfg(test)]
 mod tests {
+	use std::borrow::Cow;
+
 	use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 	use crate::ctx::FrozenContext;
 	use crate::idx::IndexKeyBase;
@@ -202,7 +204,7 @@ mod tests {
 		// Resolve a first doc key
 		{
 			let (ctx, d) = new_operation(&ds, Write).await;
-			let doc_id = d.resolve_doc_id(&ctx, "Foo".to_owned().into()).await.unwrap();
+			let doc_id = d.resolve_doc_id(&ctx, &"Foo".to_owned().into()).await.unwrap();
 			assert_eq!(doc_id, Resolved::New(0));
 			finish(ctx).await;
 
@@ -213,7 +215,7 @@ mod tests {
 		// Resolve the same doc key
 		{
 			let (tx, d) = new_operation(&ds, Write).await;
-			let doc_id = d.resolve_doc_id(&tx, "Foo".to_owned().into()).await.unwrap();
+			let doc_id = d.resolve_doc_id(&tx, &"Foo".to_owned().into()).await.unwrap();
 			assert_eq!(doc_id, Resolved::Existing(0));
 			finish(tx).await;
 
@@ -224,7 +226,7 @@ mod tests {
 		// Resolve another single doc key
 		{
 			let (tx, d) = new_operation(&ds, Write).await;
-			let doc_id = d.resolve_doc_id(&tx, "Bar".to_owned().into()).await.unwrap();
+			let doc_id = d.resolve_doc_id(&tx, &"Bar".to_owned().into()).await.unwrap();
 			assert_eq!(doc_id, Resolved::New(1));
 			finish(tx).await;
 
@@ -236,19 +238,19 @@ mod tests {
 		{
 			let (tx, d) = new_operation(&ds, Write).await;
 			assert_eq!(
-				d.resolve_doc_id(&tx, "Foo".to_owned().into()).await.unwrap(),
+				d.resolve_doc_id(&tx, &"Foo".to_owned().into()).await.unwrap(),
 				Resolved::Existing(0)
 			);
 			assert_eq!(
-				d.resolve_doc_id(&tx, "Hello".to_owned().into()).await.unwrap(),
+				d.resolve_doc_id(&tx, &"Hello".to_owned().into()).await.unwrap(),
 				Resolved::New(2)
 			);
 			assert_eq!(
-				d.resolve_doc_id(&tx, "Bar".to_owned().into()).await.unwrap(),
+				d.resolve_doc_id(&tx, &"Bar".to_owned().into()).await.unwrap(),
 				Resolved::Existing(1)
 			);
 			assert_eq!(
-				d.resolve_doc_id(&tx, "World".to_owned().into()).await.unwrap(),
+				d.resolve_doc_id(&tx, &"World".to_owned().into()).await.unwrap(),
 				Resolved::New(3)
 			);
 			finish(tx).await;
@@ -262,19 +264,19 @@ mod tests {
 		{
 			let (tx, d) = new_operation(&ds, Write).await;
 			assert_eq!(
-				d.resolve_doc_id(&tx, "Foo".to_owned().into()).await.unwrap(),
+				d.resolve_doc_id(&tx, &"Foo".to_owned().into()).await.unwrap(),
 				Resolved::Existing(0)
 			);
 			assert_eq!(
-				d.resolve_doc_id(&tx, "Bar".to_owned().into()).await.unwrap(),
+				d.resolve_doc_id(&tx, &"Bar".to_owned().into()).await.unwrap(),
 				Resolved::Existing(1)
 			);
 			assert_eq!(
-				d.resolve_doc_id(&tx, "Hello".to_owned().into()).await.unwrap(),
+				d.resolve_doc_id(&tx, &"Hello".to_owned().into()).await.unwrap(),
 				Resolved::Existing(2)
 			);
 			assert_eq!(
-				d.resolve_doc_id(&tx, "World".to_owned().into()).await.unwrap(),
+				d.resolve_doc_id(&tx, &"World".to_owned().into()).await.unwrap(),
 				Resolved::Existing(3)
 			);
 			finish(tx).await;
@@ -294,11 +296,11 @@ mod tests {
 		{
 			let (tx, d) = new_operation(&ds, Write).await;
 			assert_eq!(
-				d.resolve_doc_id(&tx, "Foo".to_owned().into()).await.unwrap(),
+				d.resolve_doc_id(&tx, &"Foo".to_owned().into()).await.unwrap(),
 				Resolved::New(0)
 			);
 			assert_eq!(
-				d.resolve_doc_id(&tx, "Bar".to_owned().into()).await.unwrap(),
+				d.resolve_doc_id(&tx, &"Bar".to_owned().into()).await.unwrap(),
 				Resolved::New(1)
 			);
 			finish(tx).await;
@@ -323,7 +325,7 @@ mod tests {
 		{
 			let (ctx, d) = new_operation(&ds, Write).await;
 			assert_eq!(
-				d.resolve_doc_id(&ctx, "Hello".to_owned().into()).await.unwrap(),
+				d.resolve_doc_id(&ctx, &"Hello".to_owned().into()).await.unwrap(),
 				Resolved::New(2)
 			);
 			finish(ctx).await;
@@ -356,7 +358,7 @@ mod tests {
 		{
 			let (ctx, d) = new_operation(&ds, Write).await;
 			assert_eq!(
-				d.resolve_doc_id(&ctx, "World".to_owned().into()).await.unwrap(),
+				d.resolve_doc_id(&ctx, &"World".to_owned().into()).await.unwrap(),
 				Resolved::New(3)
 			);
 			finish(ctx).await;
@@ -386,14 +388,16 @@ mod tests {
 			let tx = ctx.tx();
 			let tb = TableName::from(TEST_TB);
 			for id in ["Foo", "Bar", "Hello", "World"] {
-				let id = crate::key::index::id::Id::new(
-					TEST_NS_ID,
-					TEST_DB_ID,
-					&tb,
-					TEST_IX_ID,
-					RecordIdKey::String(id.into()),
-				);
-				assert!(!tx.exists(&id, None).await.unwrap());
+				let id = crate::key::index::id::Id {
+					prefix: crate::key::database::all::DatabaseRoot {
+						ns: TEST_NS_ID,
+						db: TEST_DB_ID,
+					},
+					tb: std::borrow::Cow::Borrowed(&tb),
+					ix: TEST_IX_ID,
+					id: Cow::Owned(RecordIdKey::String(id.into())),
+				};
+				assert!(!tx.exists_key(&id, None).await.unwrap());
 			}
 			let ikb = IndexKeyBase::new(TEST_NS_ID, TEST_DB_ID, TEST_TB.into(), TEST_IX_ID);
 			for doc_id in 0..=3 {

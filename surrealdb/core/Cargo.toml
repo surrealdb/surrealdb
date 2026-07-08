@@ -70,6 +70,7 @@ targets = []
 
 [dependencies]
 surrealdb-strand = { workspace = true }
+common = { workspace = true }
 
 # External surreal crates
 surrealmx = { workspace = true, optional = true }

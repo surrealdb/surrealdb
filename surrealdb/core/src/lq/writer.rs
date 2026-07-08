@@ -4,7 +4,8 @@ use anyhow::Result;
 use parking_lot::Mutex;
 
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::kvs::{KVValue, Val};
+use crate::key::KVValue;
+use crate::kvs::Val;
 use crate::lq::event::LiveEvents;
 use crate::val::{RecordId, TableName, Value};
 

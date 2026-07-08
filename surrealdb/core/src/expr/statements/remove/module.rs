@@ -39,8 +39,14 @@ impl RemoveModuleStatement {
 			}
 		};
 		// Delete the definition
-		let key = crate::key::database::md::new(ns, db, &storage_name);
-		txn.del(&key).await?;
+		let key = crate::key::database::md::Md {
+			prefix: crate::key::database::all::DatabaseRoot {
+				ns,
+				db,
+			},
+			md: std::borrow::Cow::Borrowed(&storage_name),
+		};
+		txn.del_key(&key).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Remove the module from the cache

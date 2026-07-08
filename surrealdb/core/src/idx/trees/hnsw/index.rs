@@ -27,7 +27,8 @@ use crate::idx::{
 	read_compaction_generation,
 };
 use crate::key::index::hr::HnswRecordPending;
-use crate::kvs::{KVValue, Key, Transaction, Val};
+use crate::key::{KVKeyDecode, KVValue, Key};
+use crate::kvs::{Transaction, Val};
 use crate::val::{Number, RecordId, RecordIdKey, Value};
 
 /// Maximum number of pending key/value pairs captured by one compaction plan.
@@ -37,7 +38,7 @@ const HNSW_COMPACTION_MAX_PENDING_BYTES: usize = 16 * 1024 * 1024;
 /// Exact pending key/value observed by an HNSW compaction read phase.
 struct CapturedPendingKey {
 	/// Encoded key to delete if the value still matches.
-	key: Key,
+	key: Vec<u8>,
 	/// Encoded value that must still be present during conditional delete.
 	value: Val,
 }
@@ -110,7 +111,7 @@ impl PendingPlanBuilder {
 	/// Captures one pending key/value and folds its operation into the plan.
 	///
 	/// Returns `false` when adding the pending entry would exceed a batch cap.
-	fn add(&mut self, key: Key, value: Val, pending: PendingOperation) -> bool {
+	fn add(&mut self, key: Vec<u8>, value: Val, pending: PendingOperation) -> bool {
 		if self.captured_keys.len() >= HNSW_COMPACTION_MAX_PENDING_KEYS
 			|| (!self.captured_keys.is_empty()
 				&& self.encoded_bytes + key.len() + value.len() > HNSW_COMPACTION_MAX_PENDING_BYTES)
@@ -277,7 +278,7 @@ impl HnswIndex {
 		};
 		let tx = ctx.tx();
 		let key = self.ikb.new_hr_key(id);
-		let pending = if let Some(mut pending) = tx.get(&key, None).await? {
+		let pending = if let Some(mut pending) = tx.get_key(&key, None).await? {
 			pending.new_vectors = new_vectors;
 			pending
 		} else {
@@ -287,7 +288,7 @@ impl HnswIndex {
 				new_vectors,
 			}
 		};
-		tx.set(&key, &pending).await?;
+		tx.set_key(&key, &pending).await?;
 		Ok(())
 	}
 
@@ -447,7 +448,7 @@ impl HnswIndex {
 			return Ok(false);
 		}
 		for captured in &captured_keys {
-			match tx.delc(&captured.key, Some(&captured.value)).await {
+			match tx.del_compare(Key::from(&captured.key), Some(&captured.value)).await {
 				Ok(()) => {}
 				Err(e) if is_transaction_condition_not_met(&e) => return Ok(false),
 				Err(e) => return Err(e),

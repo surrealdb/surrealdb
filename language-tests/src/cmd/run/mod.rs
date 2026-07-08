@@ -355,7 +355,7 @@ async fn check_retained_keys(dbs: &Datastore) -> Result<Vec<Vec<u8>>> {
 			surrealdb_core::kvs::LockType::Pessimistic,
 		)
 		.await?;
-	let res = txn.keys(vec![0]..vec![0xff], 1000, 0, None).await?;
+	let res = txn.keys(([0].as_slice()..[0xff].as_slice()).into(), 1000, 0, None).await?;
 	txn.cancel().await?;
 	Ok(res
 		.into_iter()

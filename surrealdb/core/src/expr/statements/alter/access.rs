@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::ops::Deref;
 use std::time::Duration;
 
@@ -16,6 +17,7 @@ use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal};
 use crate::iam::{Action, ResourceKind};
+use crate::key::database::all::DatabaseRoot;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -114,8 +116,10 @@ impl AlterAccessStatement {
 			}
 		};
 		self.apply(&mut ac)?;
-		let key = crate::key::root::ac::new(name);
-		txn.set(&key, &ac).await?;
+		let key = crate::key::root::ac::AccessKey {
+			ac: Cow::Borrowed(name),
+		};
+		txn.set_key(&key, &ac).await?;
 		txn.clear_cache();
 		Ok(Value::None)
 	}
@@ -137,8 +141,11 @@ impl AlterAccessStatement {
 			}
 		};
 		self.apply(&mut ac)?;
-		let key = crate::key::namespace::ac::new(ns, name);
-		txn.set(&key, &ac).await?;
+		let key = crate::key::namespace::ac::AccessKey {
+			ns,
+			ac: Cow::Borrowed(name),
+		};
+		txn.set_key(&key, &ac).await?;
 		txn.clear_cache();
 		Ok(Value::None)
 	}
@@ -162,8 +169,15 @@ impl AlterAccessStatement {
 			}
 		};
 		self.apply(&mut ac)?;
-		let key = crate::key::database::ac::new(ns, db, name);
-		txn.set(&key, &ac).await?;
+
+		let key = crate::key::database::ac::AccessKey {
+			prefix: DatabaseRoot {
+				ns,
+				db,
+			},
+			ac: Cow::Borrowed(name),
+		};
+		txn.set_key(&key, &ac).await?;
 		txn.clear_cache();
 		Ok(Value::None)
 	}

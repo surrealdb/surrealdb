@@ -31,35 +31,30 @@
 //! - **Scalability**: Multiple nodes can index documents concurrently
 //! - **Consistency**: Ensures unique document IDs across the entire cluster
 use std::borrow::Cow;
-use std::ops::Range;
 
-use storekey::{BorrowDecode, Encode};
-
-use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+use crate::catalog::IndexId;
 use crate::key::category::{Categorise, Category};
+use crate::key::database::all::DatabaseRoot;
+use crate::key::{impl_kv_key_storekey, impl_kv_range_storekey, key};
 use crate::kvs::sequences::BatchValue;
-use crate::kvs::{KVKey, impl_kv_key_storekey};
 use crate::val::TableName;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-#[storekey(format = "()")]
-pub(crate) struct Ib<'a> {
-	__: u8,
-	_a: u8,
-	pub ns: NamespaceId,
-	_b: u8,
-	pub db: DatabaseId,
-	_c: u8,
-	pub tb: Cow<'a, TableName>,
-	_d: u8,
-	pub ix: IndexId,
-	_e: u8,
-	_f: u8,
-	_g: u8,
-	pub start: i64,
+key! {
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+		pub(crate) struct Ib<'a> {
+		pub prefix: DatabaseRoot,
+		b'*',
+		pub tb: Cow<'a, TableName>,
+		b'+',
+		pub ix: IndexId,
+		b'!',
+		b'i',
+		b'b',
+		pub start: i64,
+	}
 }
 
-impl_kv_key_storekey!(Ib<'_> => BatchValue);
+impl_kv_key_storekey!(Ib<'a> => BatchValue);
 
 impl Categorise for Ib<'_> {
 	fn categorise(&self) -> Category {
@@ -67,58 +62,44 @@ impl Categorise for Ib<'_> {
 	}
 }
 
-impl<'a> Ib<'a> {
-	pub(crate) fn new(
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &'a TableName,
-		ix: IndexId,
-		start: i64,
-	) -> Self {
-		Self {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
-			_c: b'*',
-			tb: Cow::Borrowed(tb),
-			_d: b'+',
-			ix,
-			_e: b'!',
-			_f: b'i',
-			_g: b'b',
-			start,
-		}
-	}
-
-	pub(crate) fn new_range(
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &'a TableName,
-		ix: IndexId,
-	) -> anyhow::Result<Range<Vec<u8>>> {
-		let beg = Self::new(ns, db, tb, ix, i64::MIN).encode_key()?;
-		let end = Self::new(ns, db, tb, ix, i64::MAX).encode_key()?;
-		Ok(beg..end)
+key! {
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+		pub(crate) struct IbPrefix<'a> {
+		pub prefix: DatabaseRoot,
+		b'*',
+		pub tb: Cow<'a, TableName>,
+		b'+',
+		pub ix: IndexId,
+		b'!',
+		b'i',
+		b'b',
 	}
 }
+
+impl_kv_range_storekey!(IbPrefix<'_>);
 
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::key::KVKey;
 
 	#[test]
-	fn ib_range() {
+	fn key() {
 		let tb = TableName::from("testtb");
-		let ib_range = Ib::new_range(NamespaceId(1), DatabaseId(2), &tb, IndexId(3)).unwrap();
+		let val = Ib {
+			prefix: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+			tb: Cow::Borrowed(&tb),
+			ix: IndexId(3),
+			start: 42,
+		};
+		let enc = Ib::encode_key(&val).unwrap();
 		assert_eq!(
-			ib_range.start,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!ib\0\0\0\0\0\0\0\0"
-		);
-		assert_eq!(
-			ib_range.end,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!ib\xff\xff\xff\xff\xff\xff\xff\xff"
+			enc.as_slice(),
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!ib\x80\0\0\0\0\0\0\x2A"
 		);
 	}
 }

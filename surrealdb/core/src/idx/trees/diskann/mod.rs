@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::idx::seqdocids::DocId;
 use crate::idx::trees::vector::SerializedVector;
-use crate::kvs::{KVValue, impl_kv_value_revisioned};
+use crate::key::{KVValue, impl_kv_value_revisioned};
 
 /// Unique identifier for a vector element in the DiskANN graph.
 pub(crate) type ElementId = u64;

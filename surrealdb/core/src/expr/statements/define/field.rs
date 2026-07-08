@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
@@ -22,6 +23,8 @@ use crate::expr::{
 };
 use crate::iam::{Action, AuthLimit, ResourceKind};
 use crate::idx::planner::ScanDirection;
+use crate::key::database::all::DatabaseRoot;
+use crate::key::{KVKeyDecode, KVRange};
 use crate::kvs::{NORMAL_BATCH_SIZE, Transaction};
 use crate::val::{TableName, Value};
 
@@ -357,7 +360,14 @@ impl DefineFieldStatement {
 				// Get the field name
 				let fd = name.to_sql();
 				// Set the subtype `DEFINE FIELD` definition
-				let key = crate::key::table::fd::new(ns, db, &definition.table, &fd);
+				let key = crate::key::table::fd::Fd {
+					prefix: DatabaseRoot {
+						ns,
+						db,
+					},
+					tb: Cow::Borrowed(&definition.table),
+					fd: Cow::Borrowed(&fd),
+				};
 				let val = if let Some(existing) =
 					fields.as_ref().and_then(|x| x.iter().find(|x| x.name == name))
 				{
@@ -375,7 +385,7 @@ impl DefineFieldStatement {
 						..Default::default()
 					}
 				};
-				txn.set(&key, &val).await?;
+				txn.set_key(&key, &val).await?;
 				// Process to any sub field
 				if let Some(new_kind) = new_kind {
 					cur_kind = new_kind;
@@ -761,10 +771,16 @@ pub(crate) async fn purge_dropped_reference_keys(
 		}
 		// Collect the matching keys first, then delete them, so the range is
 		// never mutated while the cursor is still scanning it.
-		let beg = crate::key::r#ref::prefix_tb(ns, db, target)?;
-		let end = crate::key::r#ref::suffix_tb(ns, db, target)?;
+		let range = crate::key::r#ref::PrefixTb {
+			prefix: DatabaseRoot {
+				ns,
+				db,
+			},
+			tb: Cow::Borrowed(target),
+		}
+		.encode_range()?;
 		let mut orphaned: Vec<Vec<u8>> = Vec::new();
-		let mut cursor = txn.open_keys_cursor(beg..end, ScanDirection::Forward, 0, None).await?;
+		let mut cursor = txn.open_keys_cursor(range, ScanDirection::Forward, 0, None).await?;
 		loop {
 			let batch = cursor.next_batch(NORMAL_BATCH_SIZE).await?;
 			if batch.is_empty() {
@@ -772,7 +788,7 @@ pub(crate) async fn purge_dropped_reference_keys(
 			}
 			for raw in batch.iter() {
 				let key = crate::key::r#ref::Ref::decode_key(raw)?;
-				if key.ft.as_ref() == ft && key.ff.as_ref() == ff.as_str() {
+				if key.foreign_table.as_ref() == ft && key.foreign_field.as_ref() == ff.as_str() {
 					orphaned.push(raw.to_vec());
 				}
 			}
@@ -780,7 +796,7 @@ pub(crate) async fn purge_dropped_reference_keys(
 		drop(cursor);
 		for raw in &orphaned {
 			let key = crate::key::r#ref::Ref::decode_key(raw)?;
-			txn.del(&key).await?;
+			txn.del_key(&key).await?;
 		}
 	}
 	Ok(())

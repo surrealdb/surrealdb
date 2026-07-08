@@ -30,7 +30,8 @@ use crate::idx::trees::hnsw::index::HnswContext;
 use crate::idx::trees::hnsw::layer::{HnswLayer, LayerState};
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
-use crate::kvs::{KVValue, Transaction, impl_kv_value_revisioned};
+use crate::key::{KVValue, impl_kv_value_revisioned};
+use crate::kvs::Transaction;
 use crate::val::RecordIdKey;
 
 /// Parameters for a k-nearest neighbor search on the HNSW graph.
@@ -212,7 +213,7 @@ where
 	/// so concurrent kNN searches do not serialise on the graph write lock.
 	async fn needs_state_reload(&self, ctx: &FrozenContext) -> Result<bool> {
 		let tx = ctx.tx();
-		let st: HnswState = tx.get(&self.ikb.new_hs_key(), None).await?.unwrap_or_default();
+		let st: HnswState = tx.get_key(&self.ikb.new_hs_key(), None).await?.unwrap_or_default();
 		// Writable transactions may need to migrate legacy `Hl` layout even when
 		// versions match. Mirrors `force_migration` in `check_state`.
 		if tx.writeable() && st.layer0.chunks > 0 {
@@ -246,7 +247,7 @@ where
 	async fn check_state(&mut self, ctx: &FrozenContext) -> Result<()> {
 		let tx = ctx.tx();
 		// Read the state
-		let mut st: HnswState = tx.get(&self.ikb.new_hs_key(), None).await?.unwrap_or_default();
+		let mut st: HnswState = tx.get_key(&self.ikb.new_hs_key(), None).await?.unwrap_or_default();
 		// Possible migration
 		let mut migrated = false;
 		let force_migration = tx.writeable() && st.layer0.chunks > 0;
@@ -440,7 +441,7 @@ where
 	/// Persists the current graph state to the key-value store.
 	async fn save_state(&self, tx: &Transaction) -> Result<()> {
 		let state_key = self.ikb.new_hs_key();
-		tx.set(&state_key, &self.state).await?;
+		tx.set_key(&state_key, &self.state).await?;
 		Ok(())
 	}
 
@@ -1280,7 +1281,8 @@ mod tests {
 		h.index(&ctx, &id, None, Some(vector_content(&first))).await?;
 		h.index(&ctx, &id, Some(vector_content(&first)), Some(vector_content(&second))).await?;
 
-		let pending: HnswRecordPendingUpdate = tx.get(&ikb.new_hr_key(&id), None).await?.unwrap();
+		let pending: HnswRecordPendingUpdate =
+			tx.get_key(&ikb.new_hr_key(&id), None).await?.unwrap();
 		assert_eq!(pending.doc_id, None);
 		assert!(pending.old_vectors.is_empty());
 		assert_eq!(pending.new_vectors, vec![serialized(&second)]);
@@ -1312,7 +1314,8 @@ mod tests {
 		h.index(&ctx, &id, Some(vector_content(&first)), Some(vector_content(&second))).await?;
 		h.index(&ctx, &id, Some(vector_content(&second)), None).await?;
 
-		let pending: HnswRecordPendingUpdate = tx.get(&ikb.new_hr_key(&id), None).await?.unwrap();
+		let pending: HnswRecordPendingUpdate =
+			tx.get_key(&ikb.new_hr_key(&id), None).await?.unwrap();
 		assert_eq!(pending.doc_id, Some(0));
 		assert_eq!(pending.old_vectors, vec![serialized(&first)]);
 		assert!(pending.new_vectors.is_empty());
@@ -1360,7 +1363,7 @@ mod tests {
 
 		{
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
-			assert!(ctx.tx().get::<_>(&ikb.new_hr_key(&id), None).await?.is_none());
+			assert!(ctx.tx().get_key::<_>(&ikb.new_hr_key(&id), None).await?.is_none());
 			ctx.tx().cancel().await?;
 		}
 		Ok(())
@@ -1409,7 +1412,7 @@ mod tests {
 
 		{
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
-			assert!(ctx.tx().get::<_>(&ikb.new_hr_key(&id), None).await?.is_some());
+			assert!(ctx.tx().get_key::<_>(&ikb.new_hr_key(&id), None).await?.is_some());
 			ctx.tx().cancel().await?;
 		}
 		Ok(())
@@ -1463,7 +1466,7 @@ mod tests {
 		{
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
 			let pending: HnswRecordPendingUpdate =
-				ctx.tx().get(&ikb.new_hr_key(&id), None).await?.unwrap();
+				ctx.tx().get_key(&ikb.new_hr_key(&id), None).await?.unwrap();
 			assert_eq!(pending.new_vectors, vec![serialized(&second)]);
 			ctx.tx().cancel().await?;
 		}
@@ -1518,8 +1521,8 @@ mod tests {
 
 		{
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
-			assert!(ctx.tx().get::<_>(&ikb.new_hr_key(&first_id), None).await?.is_none());
-			assert!(ctx.tx().get::<_>(&ikb.new_hr_key(&second_id), None).await?.is_some());
+			assert!(ctx.tx().get_key::<_>(&ikb.new_hr_key(&first_id), None).await?.is_none());
+			assert!(ctx.tx().get_key::<_>(&ikb.new_hr_key(&second_id), None).await?.is_some());
 			ctx.tx().cancel().await?;
 		}
 		Ok(())
@@ -1602,7 +1605,7 @@ mod tests {
 		let ikb = IndexKeyBase::new(db.namespace_id, db.database_id, tb, ix.index_id);
 		let pending_records = tx.getr(ikb.new_hr_range()?, None).await?;
 		let pending_appends = tx.getr(ikb.new_hp_range()?, None).await?;
-		let state: HnswState = tx.get(&ikb.new_hs_key(), None).await?.unwrap();
+		let state: HnswState = tx.get_key(&ikb.new_hs_key(), None).await?.unwrap();
 		tx.cancel().await?;
 
 		assert!(pending_records.is_empty());

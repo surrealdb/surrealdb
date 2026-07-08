@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use anyhow::{Result, ensure};
 use surrealdb_types::ToSql;
 
@@ -9,7 +11,8 @@ use crate::doc::{Document, Extras};
 use crate::err::Error;
 use crate::expr::Dir;
 use crate::expr::paths::{IN, OUT};
-use crate::key::graph;
+use crate::key::database::all::DatabaseRoot;
+use crate::key::graph::{self, GraphWithTarget};
 
 impl Document {
 	/// Stores edge data for relation records in the graph database.
@@ -90,8 +93,28 @@ impl Document {
 			// `etl` / `etr` are edge-side ("inner") keys: their adjacency
 			// already names the vertex in (ft, fk), so they keep the legacy
 			// layout without an embedded target — same across variants.
-			let etl = graph::new(ns, db, &rid.table, &rid.key, Dir::In, l);
-			let etr = graph::new(ns, db, &rid.table, &rid.key, Dir::Out, r);
+			let etl = graph::Graph {
+				prefix: DatabaseRoot {
+					ns,
+					db,
+				},
+				tb: Cow::Borrowed(&rid.table),
+				id: Cow::Borrowed(&rid.key),
+				dir: Dir::In,
+				foreign_table: Cow::Borrowed(&l.table),
+				foreign_key: Cow::Borrowed(&l.key),
+			};
+			let etr = graph::Graph {
+				prefix: DatabaseRoot {
+					ns,
+					db,
+				},
+				tb: Cow::Borrowed(&rid.table),
+				id: Cow::Borrowed(&rid.key),
+				dir: Dir::Out,
+				foreign_table: Cow::Borrowed(&r.table),
+				foreign_key: Cow::Borrowed(&r.key),
+			};
 			// Dispatch on the layout currently on disk — sourced from
 			// `initial`, not `current`, because `default_record_data`
 			// has already advanced `current`'s stamp to the latest
@@ -99,33 +122,66 @@ impl Document {
 			// deleted before the current layout is written.
 			let variant = self.initial.doc.edge_variant().unwrap_or(LATEST_EDGE_VARIANT);
 			// Detect which variant the edge was originally
-			match variant {
-				1 => {
-					// Delete the legacy vertex-side keys
-					let ltr_legacy = graph::new(ns, db, &l.table, &l.key, Dir::Out, &rid);
-					let rtl_legacy = graph::new(ns, db, &r.table, &r.key, Dir::In, &rid);
-					futures::try_join!(txn.del(&ltr_legacy), txn.del(&rtl_legacy))?;
-					// Write the current target-vertex-bearing keys
-					let ltr = graph::new_pointer(ns, db, &l.table, &l.key, Dir::Out, &rid, r);
-					let rtl = graph::new_pointer(ns, db, &r.table, &r.key, Dir::In, &rid, l);
-					futures::try_join!(
-						txn.set(&ltr, &()),
-						txn.set(&etl, &()),
-						txn.set(&etr, &()),
-						txn.set(&rtl, &()),
-					)?;
-				}
-				_ => {
-					let ltr = graph::new_pointer(ns, db, &l.table, &l.key, Dir::Out, &rid, r);
-					let rtl = graph::new_pointer(ns, db, &r.table, &r.key, Dir::In, &rid, l);
-					futures::try_join!(
-						txn.set(&ltr, &()),
-						txn.set(&etl, &()),
-						txn.set(&etr, &()),
-						txn.set(&rtl, &()),
-					)?;
-				}
+			if variant == 1 {
+				let ltr_legacy = graph::Graph {
+					prefix: DatabaseRoot {
+						ns,
+						db,
+					},
+					tb: Cow::Borrowed(&l.table),
+					id: Cow::Borrowed(&l.key),
+					dir: Dir::Out,
+					foreign_table: Cow::Borrowed(&rid.table),
+					foreign_key: Cow::Borrowed(&rid.key),
+				};
+
+				let rtl_legacy = graph::Graph {
+					prefix: DatabaseRoot {
+						ns,
+						db,
+					},
+					tb: Cow::Borrowed(&l.table),
+					id: Cow::Borrowed(&l.key),
+					dir: Dir::In,
+					foreign_table: Cow::Borrowed(&rid.table),
+					foreign_key: Cow::Borrowed(&rid.key),
+				};
+				futures::try_join!(txn.del_key(&ltr_legacy), txn.del_key(&rtl_legacy))?;
 			}
+			let ltr = GraphWithTarget {
+				prefix: DatabaseRoot {
+					ns,
+					db,
+				},
+				tb: Cow::Borrowed(&l.table),
+				id: Cow::Borrowed(&l.key),
+				dir: Dir::Out,
+				foreign_table: Cow::Borrowed(&rid.table),
+				foreign_key: Cow::Borrowed(&rid.key),
+				target_table: Cow::Borrowed(&r.table),
+				target_key: Cow::Borrowed(&r.key),
+			};
+
+			let rtl = GraphWithTarget {
+				prefix: DatabaseRoot {
+					ns,
+					db,
+				},
+				tb: Cow::Borrowed(&r.table),
+				id: Cow::Borrowed(&r.key),
+				dir: Dir::In,
+				foreign_table: Cow::Borrowed(&rid.table),
+				foreign_key: Cow::Borrowed(&rid.key),
+				target_table: Cow::Borrowed(&l.table),
+				target_key: Cow::Borrowed(&l.key),
+			};
+
+			futures::try_join!(
+				txn.set_key(&ltr, &()),
+				txn.set_key(&etl, &()),
+				txn.set_key(&etr, &()),
+				txn.set_key(&rtl, &()),
+			)?;
 			// Reset `in` / `out` to the canonical RELATE endpoints so a
 			// user-supplied document body can't override the edge's
 			// graph endpoints.

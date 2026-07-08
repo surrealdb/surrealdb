@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use surrealdb_strand::Strand;
@@ -15,6 +17,7 @@ use crate::expr::parameterize::expr_to_ident;
 use crate::expr::tokenizer::Tokenizer;
 use crate::expr::{Base, Expr, FlowResultExt, Idiom, Literal, Value};
 use crate::iam::{Action, ResourceKind};
+use crate::key::database::all::DatabaseRoot;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct DefineAnalyzerStatement {
@@ -107,9 +110,15 @@ impl DefineAnalyzerStatement {
 			}
 		}
 		// Process the statement
-		let key = crate::key::database::az::new(ns, db, definition.name.as_str());
+		let key = crate::key::database::az::Analyzer {
+			prefix: DatabaseRoot {
+				ns,
+				db,
+			},
+			az: Cow::Borrowed(definition.name.as_str()),
+		};
 		ctx.get_index_stores().mappers().load(&definition, &ctx.config.file_allowlist).await?;
-		txn.set(&key, &definition).await?;
+		txn.set_key(&key, &definition).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
@@ -18,6 +19,7 @@ use crate::expr::{
 };
 use crate::idx::planner::RecordStrategy;
 use crate::key;
+use crate::key::database::all::DatabaseRoot;
 use crate::val::{Array, Number, RecordId, RecordIdKey, TableName, TryAdd, TryMul, TryPow, Value};
 struct Recalculation {
 	function: String,
@@ -310,9 +312,16 @@ impl Document {
 		let key = RecordIdKey::Array(Array(group.clone()));
 		let tx = ctx.tx();
 
-		let k = key::record::new(db.namespace_id, db.database_id, view_table_name, &key);
+		let k = key::record::RecordKey {
+			root: DatabaseRoot {
+				ns: db.namespace_id,
+				db: db.database_id,
+			},
+			tb: Cow::Borrowed(view_table_name),
+			id: Cow::Borrowed(&key),
+		};
 		let mut action = Action::Update;
-		let mut record = if let Some(bytes) = tx.get_raw(&k, None).await? {
+		let mut record = if let Some(bytes) = tx.get_key_raw(&k, None).await? {
 			// View-table aggregation rows store their `data` as an `Object`
 			// without an `id` field (the group key is the row's identity
 			// but is not duplicated into the body). Decoding via
@@ -423,11 +432,18 @@ impl Document {
 		let key = RecordIdKey::Array(Array(group.clone()));
 		let tx = ctx.tx();
 
-		let k = key::record::new(db.namespace_id, db.database_id, view_table_name, &key);
+		let k = key::record::RecordKey {
+			root: DatabaseRoot {
+				ns: db.namespace_id,
+				db: db.database_id,
+			},
+			tb: Cow::Borrowed(view_table_name),
+			id: Cow::Borrowed(&key),
+		};
 		// View-table aggregation rows store `data` without an `id`; see the
 		// note on the matching read in the `Update` path above. Use raw
 		// decode so we don't splice the group key back into `data`.
-		let mut record = if let Some(bytes) = tx.get_raw(&k, None).await? {
+		let mut record = if let Some(bytes) = tx.get_key_raw(&k, None).await? {
 			revision::from_slice::<Record>(&bytes)?
 		} else {
 			fail!("Deletion for a view but no record exists for that view")
@@ -445,7 +461,7 @@ impl Document {
 
 		if count == 1 {
 			// Only one record, we can just delete the record.
-			tx.del(&k).await?;
+			tx.del_key(&k).await?;
 
 			let ns = self.doc_ctx.ns();
 			let db = self.doc_ctx.db();
@@ -796,11 +812,18 @@ impl Document {
 		let key = RecordIdKey::Array(Array(group.clone()));
 		let tx = ctx.tx();
 
-		let k = key::record::new(db.namespace_id, db.database_id, view_table_name, &key);
+		let k = key::record::RecordKey {
+			root: DatabaseRoot {
+				ns: db.namespace_id,
+				db: db.database_id,
+			},
+			tb: Cow::Borrowed(view_table_name),
+			id: Cow::Borrowed(&key),
+		};
 		// View-table aggregation rows store `data` without an `id`; see the
 		// note on the matching read in the `Update` path above. Use raw
 		// decode so we don't splice the group key back into `data`.
-		let mut record = if let Some(bytes) = tx.get_raw(&k, None).await? {
+		let mut record = if let Some(bytes) = tx.get_key_raw(&k, None).await? {
 			revision::from_slice::<Record>(&bytes)?
 		} else {
 			fail!("Deletion for a view but no record exists for that view")

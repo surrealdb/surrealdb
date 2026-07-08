@@ -705,6 +705,9 @@ pub(crate) enum Error {
 	#[error("Versioned error: {0}")]
 	Revision(#[from] RevisionError),
 
+	#[error("Encountered KV store corruption: {0}")]
+	Corrupted(&'static str),
+
 	/// The index has been found to be inconsistent
 	#[error("Index is corrupted: {0}")]
 	CorruptedIndex(&'static str),

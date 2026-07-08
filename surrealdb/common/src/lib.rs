@@ -17,5 +17,6 @@ mod error;
 
 pub use error::{Error, ErrorCode, ErrorTrait, TypedError, source as source_error};
 
+pub mod future;
 pub mod non_max;
 pub mod span;

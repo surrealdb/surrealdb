@@ -17,6 +17,7 @@ mod record;
 mod schema;
 mod subscription;
 mod table;
+mod task;
 mod view;
 
 #[cfg(test)]
@@ -35,4 +36,5 @@ pub(crate) use schema::{
 };
 pub(crate) use subscription::*;
 pub(crate) use table::*;
+pub(crate) use task::*;
 pub(crate) use view::*;

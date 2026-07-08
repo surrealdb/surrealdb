@@ -19,7 +19,6 @@
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
-use std::ops::Range;
 use std::sync::Arc;
 
 use ahash::HashMap;
@@ -60,7 +59,8 @@ use crate::idx::{
 };
 use crate::key::index::dr::DiskAnnRecordPending;
 use crate::key::index::dw::DiskAnnRecordPendingShard;
-use crate::kvs::{KVKey, KVValue, Key, Transaction, Val};
+use crate::key::{KVKey, KVKeyDecode, KVValue, Key, KeyRange};
+use crate::kvs::{Transaction, Val};
 use crate::val::{Number, RecordId, RecordIdKey, Value};
 
 /// Soft per-batch limits for [`DiskAnnIndex::prepare_compaction`]. When either cap fires,
@@ -76,7 +76,7 @@ const DISKANN_COMPACTION_MAX_PENDING_BYTES: usize = 16 * 1024 * 1024;
 
 struct CapturedPendingKey {
 	/// Exact pending key captured during the read phase.
-	key: Key,
+	key: Vec<u8>,
 	/// Value observed for the key; apply deletes it conditionally before mutating the graph.
 	value: Val,
 }
@@ -164,7 +164,7 @@ impl PendingPlanBuilder {
 		}
 	}
 
-	fn add(&mut self, key: Key, value: Val, pending: PendingOperation) -> bool {
+	fn add(&mut self, key: Vec<u8>, value: Val, pending: PendingOperation) -> bool {
 		if self.captured_keys.len() >= DISKANN_COMPACTION_MAX_PENDING_KEYS
 			|| (!self.captured_keys.is_empty()
 				&& self.encoded_bytes + key.len() + value.len()
@@ -210,7 +210,7 @@ impl PendingPlanBuilder {
 	/// combined value exceeds `DISKANN_COMPACTION_MAX_PENDING_BYTES`), orphaning the sharded entry
 	/// — phase 2 skips it as folded, so it is neither applied nor deleted and resurfaces as a
 	/// phantom.
-	fn add_authorized(&mut self, key: Key, value: Val, pending: PendingOperation) {
+	fn add_authorized(&mut self, key: Vec<u8>, value: Val, pending: PendingOperation) {
 		self.encoded_bytes += key.len() + value.len();
 		self.captured_keys.push(CapturedPendingKey {
 			key,
@@ -407,7 +407,7 @@ impl DiskAnnGraph {
 			let guard = provider.set_element(&ctx.provider_context, &element_id, values).await?;
 			guard.complete().await;
 			let node: crate::idx::trees::diskann::DiskAnnNode = Default::default();
-			ctx.tx.set(&ctx.ikb.new_dn_key(element_id), &node).await?;
+			ctx.tx.set_key(&ctx.ikb.new_dn_key(element_id), &node).await?;
 			provider.set_entry_point(&ctx.provider_context, Some(element_id)).await?;
 		} else {
 			let strategy = DiskAnnStrategy::<T>::default();
@@ -631,7 +631,7 @@ impl DiskAnnIndex {
 	) -> Result<PendingStateSnapshot> {
 		let keys: Vec<_> =
 			(0..DISKANN_PENDING_STATE_SHARDS).map(|shard| ikb.new_dy_key(shard)).collect();
-		tx.getm(keys, None).await
+		tx.get_many_key(keys, None).await
 	}
 
 	/// Marks the sharded `!dy` pending-state guard non-empty after writing a sharded `!dw` update.
@@ -648,7 +648,7 @@ impl DiskAnnIndex {
 		id: &RecordIdKey,
 	) -> Result<()> {
 		let key = ikb.new_dy_key(Self::pending_state_shard(id));
-		let current: Option<DiskAnnPendingState> = tx.get(&key, None).await?;
+		let current: Option<DiskAnnPendingState> = tx.get_key(&key, None).await?;
 		if current.as_ref().is_some_and(|state| state.kind == DiskAnnPendingStateKind::NonEmpty) {
 			return Ok(());
 		}
@@ -656,7 +656,7 @@ impl DiskAnnIndex {
 			kind: DiskAnnPendingStateKind::NonEmpty,
 			generation: current.as_ref().map_or(0, |state| state.generation).saturating_add(1),
 		};
-		tx.putc(&key, &next, current.as_ref()).await
+		tx.put_compare_key(&key, &next, current.as_ref()).await
 	}
 
 	/// Conditionally advances the given sharded `!dy` guard shards toward empty after compaction
@@ -690,7 +690,7 @@ impl DiskAnnIndex {
 				kind,
 				generation: current.map_or(0, |state| state.generation.saturating_add(1)),
 			};
-			match tx.putc(&key, &next, current).await {
+			match tx.put_compare_key(&key, &next, current).await {
 				Ok(()) => changed = true,
 				Err(e) if is_transaction_condition_not_met(&e) => return Ok(false),
 				Err(e) => return Err(e),
@@ -701,7 +701,7 @@ impl DiskAnnIndex {
 
 	/// Returns whether a KV range holds no entries. Used to re-check emptiness inside the apply
 	/// transaction before advancing pending state.
-	async fn range_empty(ctx: &FrozenContext, tx: &Transaction, rng: Range<Key>) -> Result<bool> {
+	async fn range_empty(ctx: &FrozenContext, tx: &Transaction, rng: KeyRange<'_>) -> Result<bool> {
 		let mut cursor = tx.open_vals_cursor(rng, ScanDirection::Forward, 0, None).await?;
 		// The first non-empty batch is conclusive; we just need to know
 		// whether *any* entry exists in the range.
@@ -770,7 +770,7 @@ impl DiskAnnIndex {
 		// The two layouts always chain (each write's `old_vectors` is the previous value), so fold
 		// them into a single `!dw` entry that keeps the chain head's `old_vectors`.
 		let legacy = Self::take_legacy_pending(&tx, &self.ikb, id).await?;
-		let pending = match (tx.get(&key, None).await?, legacy) {
+		let pending = match (tx.get_key(&key, None).await?, legacy) {
 			(Some(mut sharded), None) => {
 				sharded.new_vectors = new_vectors;
 				sharded
@@ -811,7 +811,7 @@ impl DiskAnnIndex {
 				new_vectors,
 			},
 		};
-		tx.set(&key, &pending).await?;
+		tx.set_key(&key, &pending).await?;
 		Self::mark_pending_non_empty(&tx, &self.ikb, id).await?;
 		Ok(())
 	}
@@ -825,10 +825,10 @@ impl DiskAnnIndex {
 		id: &RecordIdKey,
 	) -> Result<Option<DiskAnnRecordPendingUpdate>> {
 		let legacy_key = ikb.new_dr_key(id);
-		let Some(legacy) = tx.get(&legacy_key, None).await? else {
+		let Some(legacy) = tx.get_key(&legacy_key, None).await? else {
 			return Ok(None);
 		};
-		tx.del(&legacy_key).await?;
+		tx.del_key(&legacy_key).await?;
 		Ok(Some(legacy))
 	}
 
@@ -887,7 +887,7 @@ impl DiskAnnIndex {
 		let mut count = 0;
 		// `!dw` keys folded into phase 1 next to their legacy `!dr` counterpart, so phase 2 skips
 		// them instead of capturing — and conditionally deleting — the same key twice.
-		let mut folded_shard_keys: HashSet<Key> = HashSet::new();
+		let mut folded_shard_keys: HashSet<Vec<u8>> = HashSet::new();
 		// Phase 1: legacy `!dr` (dual-read transition). Drains to empty over time. Each legacy
 		// record's sharded `!dw` counterpart, if any, is folded into the same builder so a
 		// dual-layout record is always coalesced here rather than split across compaction passes.
@@ -957,7 +957,7 @@ impl DiskAnnIndex {
 		ikb: &IndexKeyBase,
 		count: &mut usize,
 		builder: &mut PendingPlanBuilder,
-		folded_shard_keys: &mut HashSet<Key>,
+		folded_shard_keys: &mut HashSet<Vec<u8>>,
 	) -> Result<bool> {
 		let mut cursor =
 			tx.open_vals_cursor(ikb.new_dr_range()?, ScanDirection::Forward, 0, None).await?;
@@ -979,7 +979,7 @@ impl DiskAnnIndex {
 				// here rather than split across passes. Deletes happen only at apply, so the `!dw`
 				// entry is still present for this read.
 				let shard_key = ikb.new_dw_key(Self::pending_state_shard(&id), &id);
-				let shard_entry = match tx.get_raw(&shard_key, None).await? {
+				let shard_entry = match tx.get_key_raw(&shard_key, None).await? {
 					Some(shard_value) => {
 						let update = DiskAnnRecordPendingUpdate::kv_decode_value(&shard_value, ())?;
 						let op = Self::record_pending_to_operation(id.clone(), update);
@@ -1000,8 +1000,12 @@ impl DiskAnnIndex {
 				// never admit one and reject the other (which would orphan the sharded half).
 				builder.add_authorized(legacy_key, legacy_value, legacy_op);
 				if let Some((shard_key_bytes, shard_value, shard_op)) = shard_entry {
-					folded_shard_keys.insert(shard_key_bytes.clone());
-					builder.add_authorized(shard_key_bytes, shard_value, shard_op);
+					folded_shard_keys.insert(shard_key_bytes.as_slice().to_vec());
+					builder.add_authorized(
+						shard_key_bytes.as_slice().to_vec(),
+						shard_value,
+						shard_op,
+					);
 				}
 				*count += 1;
 				if builder.has_more {
@@ -1018,10 +1022,10 @@ impl DiskAnnIndex {
 	async fn capture_shard_range(
 		ctx: &FrozenContext,
 		tx: &Transaction,
-		rng: Range<Key>,
+		rng: KeyRange<'_>,
 		count: &mut usize,
 		builder: &mut PendingPlanBuilder,
-		folded_shard_keys: &HashSet<Key>,
+		folded_shard_keys: &HashSet<Vec<u8>>,
 	) -> Result<bool> {
 		let mut cursor = tx.open_vals_cursor(rng, ScanDirection::Forward, 0, None).await?;
 		loop {
@@ -1105,7 +1109,7 @@ impl DiskAnnIndex {
 			return Ok(false);
 		}
 		for captured in &captured_keys {
-			match tx.delc(&captured.key, Some(&captured.value)).await {
+			match tx.del_compare(Key::from(&captured.key), Some(&captured.value)).await {
 				Ok(()) => {}
 				Err(e) if is_transaction_condition_not_met(&e) => {
 					cancel_silently(&tx).await;
@@ -1504,7 +1508,7 @@ impl DiskAnnIndex {
 	async fn scan_pending_range<F>(
 		ctx: &Context,
 		tx: &Transaction,
-		rng: Range<Key>,
+		rng: KeyRange<'_>,
 		sharded: bool,
 		count: &mut usize,
 		collector: &mut F,
@@ -1606,7 +1610,7 @@ mod tests {
 	) -> Result<Vec<Option<DiskAnnPendingState>>> {
 		let keys: Vec<_> =
 			(0..DISKANN_PENDING_STATE_SHARDS).map(|shard| ikb.new_dy_key(shard)).collect();
-		tx.getm(keys, None).await
+		tx.get_many_key(keys, None).await
 	}
 
 	fn diskann_any_pending_state_non_empty(states: &[Option<DiskAnnPendingState>]) -> bool {
@@ -1917,13 +1921,15 @@ mod tests {
 		{
 			let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
 			let tb = crate::val::TableName::from("pts");
-			let key = crate::key::record::new(
-				db_def.namespace_id,
-				db_def.database_id,
-				&tb,
-				&RecordIdKey::Number(1),
-			);
-			tx.del(&key).await?;
+			let key = crate::key::record::RecordKey {
+				root: crate::key::database::all::DatabaseRoot {
+					ns: db_def.namespace_id,
+					db: db_def.database_id,
+				},
+				tb: std::borrow::Cow::Borrowed(&tb),
+				id: std::borrow::Cow::Owned(RecordIdKey::Number(1)),
+			};
+			tx.del_key(&key).await?;
 			tx.commit().await?;
 		}
 
@@ -2123,7 +2129,8 @@ mod tests {
 
 		index.index(&ctx, &id, None, Some(f32_content(&[1.0, 2.0, 3.0, 4.0]))).await?;
 
-		let pending: DiskAnnRecordPendingUpdate = tx.get(&dw_key(&ikb, &id), None).await?.unwrap();
+		let pending: DiskAnnRecordPendingUpdate =
+			tx.get_key(&dw_key(&ikb, &id), None).await?.unwrap();
 		let states = diskann_pending_states(&tx, &ikb).await?;
 		let state = states
 			.iter()
@@ -2143,7 +2150,8 @@ mod tests {
 				Some(f32_content(&[4.0, 3.0, 2.0, 1.0])),
 			)
 			.await?;
-		let pending: DiskAnnRecordPendingUpdate = tx.get(&dw_key(&ikb, &id), None).await?.unwrap();
+		let pending: DiskAnnRecordPendingUpdate =
+			tx.get_key(&dw_key(&ikb, &id), None).await?.unwrap();
 		let updated_states = diskann_pending_states(&tx, &ikb).await?;
 		let updated_state = updated_states
 			.iter()
@@ -2175,8 +2183,8 @@ mod tests {
 		{
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
 			let tx = ctx.tx();
-			tx.set(&ikb.new_dw_key(shard, &id), &f32_pending(&[1.0, 2.0, 3.0, 4.0])).await?;
-			tx.set(
+			tx.set_key(&ikb.new_dw_key(shard, &id), &f32_pending(&[1.0, 2.0, 3.0, 4.0])).await?;
+			tx.set_key(
 				&ikb.new_dy_key(shard),
 				&DiskAnnPendingState {
 					kind: DiskAnnPendingStateKind::NonEmpty,
@@ -2192,7 +2200,7 @@ mod tests {
 		{
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
 			ctx.tx()
-				.set(
+				.set_key(
 					&ikb.new_dy_key(shard),
 					&DiskAnnPendingState {
 						kind: DiskAnnPendingStateKind::MaybeEmpty,
@@ -2208,7 +2216,7 @@ mod tests {
 		{
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
 			ctx.tx()
-				.set(
+				.set_key(
 					&ikb.new_dy_key(shard),
 					&DiskAnnPendingState {
 						kind: DiskAnnPendingStateKind::Empty,
@@ -2253,7 +2261,7 @@ mod tests {
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
 			for s in 0..DISKANN_PENDING_STATE_SHARDS {
 				ctx.tx()
-					.set(
+					.set_key(
 						&ikb.new_dp_key(s),
 						&DiskAnnPendingState {
 							kind: DiskAnnPendingStateKind::Empty,
@@ -2309,7 +2317,7 @@ mod tests {
 			let states = diskann_pending_states(&ctx.tx(), &ikb).await?;
 			assert!(diskann_pending_states_require_scan(&states));
 			assert!(diskann_any_pending_state_maybe_empty(&states));
-			assert!(ctx.tx().get::<_>(&dw_key(&ikb, &id), None).await?.is_none());
+			assert!(ctx.tx().get_key::<_>(&dw_key(&ikb, &id), None).await?.is_none());
 			ctx.tx().cancel().await?;
 		}
 
@@ -2319,7 +2327,7 @@ mod tests {
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
 			let states = diskann_pending_states(&ctx.tx(), &ikb).await?;
 			assert!(diskann_all_pending_states_empty(&states));
-			assert!(ctx.tx().get::<_>(&dw_key(&ikb, &id), None).await?.is_none());
+			assert!(ctx.tx().get_key::<_>(&dw_key(&ikb, &id), None).await?.is_none());
 			ctx.tx().cancel().await?;
 		}
 		Ok(())
@@ -2380,7 +2388,7 @@ mod tests {
 				states[shard].as_ref().map(|state| state.kind),
 				Some(DiskAnnPendingStateKind::MaybeEmpty)
 			);
-			assert!(ctx.tx().get::<_>(&dw_key(&ikb, &second_id), None).await?.is_some());
+			assert!(ctx.tx().get_key(&dw_key(&ikb, &second_id), None).await?.is_some());
 			ctx.tx().cancel().await?;
 		}
 
@@ -2423,7 +2431,7 @@ mod tests {
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
 			let states = diskann_pending_states(&ctx.tx(), &ikb).await?;
 			assert!(diskann_any_pending_state_non_empty(&states));
-			assert!(ctx.tx().get::<_>(&dw_key(&ikb, &id), None).await?.is_some());
+			assert!(ctx.tx().get_key::<_>(&dw_key(&ikb, &id), None).await?.is_some());
 			ctx.tx().cancel().await?;
 		}
 		Ok(())
@@ -2472,8 +2480,8 @@ mod tests {
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
 			let states = diskann_pending_states(&ctx.tx(), &ikb).await?;
 			assert!(diskann_any_pending_state_non_empty(&states));
-			assert!(ctx.tx().get::<_>(&dw_key(&ikb, &first_id), None).await?.is_none());
-			assert!(ctx.tx().get::<_>(&dw_key(&ikb, &second_id), None).await?.is_some());
+			assert!(ctx.tx().get_key::<_>(&dw_key(&ikb, &first_id), None).await?.is_none());
+			assert!(ctx.tx().get_key::<_>(&dw_key(&ikb, &second_id), None).await?.is_some());
 			ctx.tx().cancel().await?;
 		}
 		Ok(())
@@ -2501,7 +2509,7 @@ mod tests {
 		{
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
 			let tx = ctx.tx();
-			tx.set(&ikb.new_dr_key(&legacy_id), &f32_pending(&[1.0, 2.0, 3.0, 4.0])).await?;
+			tx.set_key(&ikb.new_dr_key(&legacy_id), &f32_pending(&[1.0, 2.0, 3.0, 4.0])).await?;
 			tx.commit().await?;
 		}
 
@@ -2512,7 +2520,7 @@ mod tests {
 		assert!(compact_once(&index, &ds, &ikb).await?);
 		{
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
-			assert!(ctx.tx().get::<_>(&ikb.new_dr_key(&legacy_id), None).await?.is_none());
+			assert!(ctx.tx().get_key::<_>(&ikb.new_dr_key(&legacy_id), None).await?.is_none());
 			ctx.tx().cancel().await?;
 		}
 		// A second pass steps the shard's pending state the rest of the way to Empty.
@@ -2535,8 +2543,8 @@ mod tests {
 		}
 		{
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
-			assert!(ctx.tx().get::<_>(&dw_key(&ikb, &new_id), None).await?.is_some());
-			assert!(ctx.tx().get::<_>(&ikb.new_dr_key(&new_id), None).await?.is_none());
+			assert!(ctx.tx().get_key::<_>(&dw_key(&ikb, &new_id), None).await?.is_some());
+			assert!(ctx.tx().get_key::<_>(&ikb.new_dr_key(&new_id), None).await?.is_none());
 			ctx.tx().cancel().await?;
 		}
 		assert_eq!(knn_len_with_k(&index, &ds, &[4.0, 3.0, 2.0, 1.0], 2).await?, 2);
@@ -2565,7 +2573,7 @@ mod tests {
 		{
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
 			let tx = ctx.tx();
-			tx.set(&ikb.new_dr_key(&id), &f32_pending(&[1.0, 2.0, 3.0, 4.0])).await?;
+			tx.set_key(&ikb.new_dr_key(&id), &f32_pending(&[1.0, 2.0, 3.0, 4.0])).await?;
 			tx.commit().await?;
 		}
 
@@ -2586,9 +2594,9 @@ mod tests {
 		// The legacy entry is folded away; a single sharded entry carries the new value.
 		{
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
-			assert!(ctx.tx().get::<_>(&ikb.new_dr_key(&id), None).await?.is_none());
+			assert!(ctx.tx().get_key::<_>(&ikb.new_dr_key(&id), None).await?.is_none());
 			let folded: DiskAnnRecordPendingUpdate =
-				ctx.tx().get(&dw_key(&ikb, &id), None).await?.unwrap();
+				ctx.tx().get_key(&dw_key(&ikb, &id), None).await?.unwrap();
 			assert_eq!(folded.new_vectors, vec![SerializedVector::F32(vec![9.0, 9.0, 9.0, 9.0])]);
 			ctx.tx().cancel().await?;
 		}
@@ -2622,7 +2630,7 @@ mod tests {
 		{
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
 			let tx = ctx.tx();
-			tx.set(
+			tx.set_key(
 				&ikb.new_dw_key(shard, &id),
 				&DiskAnnRecordPendingUpdate {
 					doc_id: None,
@@ -2631,7 +2639,7 @@ mod tests {
 				},
 			)
 			.await?;
-			tx.set(
+			tx.set_key(
 				&ikb.new_dr_key(&id),
 				&DiskAnnRecordPendingUpdate {
 					doc_id: None,
@@ -2640,7 +2648,7 @@ mod tests {
 				},
 			)
 			.await?;
-			tx.set(
+			tx.set_key(
 				&ikb.new_dy_key(shard),
 				&DiskAnnPendingState {
 					kind: DiskAnnPendingStateKind::NonEmpty,
@@ -2670,9 +2678,9 @@ mod tests {
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
 			// Legacy entry deleted; the single sharded entry carries the chain head's old_vectors
 			// and the newest new_vectors.
-			assert!(ctx.tx().get::<_>(&ikb.new_dr_key(&id), None).await?.is_none());
+			assert!(ctx.tx().get_key::<_>(&ikb.new_dr_key(&id), None).await?.is_none());
 			let folded: DiskAnnRecordPendingUpdate =
-				ctx.tx().get(&dw_key(&ikb, &id), None).await?.unwrap();
+				ctx.tx().get_key(&dw_key(&ikb, &id), None).await?.unwrap();
 			assert_eq!(folded.old_vectors, vec![SerializedVector::F32(vec![1.0, 1.0, 1.0, 1.0])]);
 			assert_eq!(folded.new_vectors, vec![SerializedVector::F32(vec![4.0, 4.0, 4.0, 4.0])]);
 			ctx.tx().cancel().await?;
@@ -2707,7 +2715,7 @@ mod tests {
 		{
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
 			let tx = ctx.tx();
-			tx.set(
+			tx.set_key(
 				&ikb.new_dw_key(shard, &id),
 				&DiskAnnRecordPendingUpdate {
 					doc_id: None,
@@ -2716,7 +2724,7 @@ mod tests {
 				},
 			)
 			.await?;
-			tx.set(
+			tx.set_key(
 				&ikb.new_dr_key(&id),
 				&DiskAnnRecordPendingUpdate {
 					doc_id: None,
@@ -2725,7 +2733,7 @@ mod tests {
 				},
 			)
 			.await?;
-			tx.set(
+			tx.set_key(
 				&ikb.new_dy_key(shard),
 				&DiskAnnPendingState {
 					kind: DiskAnnPendingStateKind::NonEmpty,
@@ -2783,7 +2791,7 @@ mod tests {
 		let doc_id = {
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
 			let dw: DiskAnnRecordPendingUpdate =
-				ctx.tx().get(&dw_key(&ikb, &id), None).await?.unwrap();
+				ctx.tx().get_key(&dw_key(&ikb, &id), None).await?.unwrap();
 			ctx.tx().cancel().await?;
 			dw.doc_id
 		};
@@ -2793,7 +2801,7 @@ mod tests {
 		{
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
 			ctx.tx()
-				.set(
+				.set_key(
 					&ikb.new_dr_key(&id),
 					&DiskAnnRecordPendingUpdate {
 						doc_id,
@@ -2850,7 +2858,7 @@ mod tests {
 		let doc_id = {
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
 			let dw: DiskAnnRecordPendingUpdate =
-				ctx.tx().get(&dw_key(&ikb, &id), None).await?.unwrap();
+				ctx.tx().get_key(&dw_key(&ikb, &id), None).await?.unwrap();
 			ctx.tx().cancel().await?;
 			dw.doc_id
 		};
@@ -2859,7 +2867,7 @@ mod tests {
 		{
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
 			ctx.tx()
-				.set(
+				.set_key(
 					&ikb.new_dr_key(&id),
 					&DiskAnnRecordPendingUpdate {
 						doc_id,
@@ -2880,9 +2888,9 @@ mod tests {
 		// The fold kept the chain head A as old_vectors; the legacy entry is gone.
 		{
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
-			assert!(ctx.tx().get::<_>(&ikb.new_dr_key(&id), None).await?.is_none());
+			assert!(ctx.tx().get_key::<_>(&ikb.new_dr_key(&id), None).await?.is_none());
 			let folded: DiskAnnRecordPendingUpdate =
-				ctx.tx().get(&ikb.new_dw_key(shard, &id), None).await?.unwrap();
+				ctx.tx().get_key(&ikb.new_dw_key(shard, &id), None).await?.unwrap();
 			assert_eq!(folded.old_vectors, vec![SerializedVector::F32(a.to_vec())]);
 			assert_eq!(folded.new_vectors, vec![SerializedVector::F32(c.to_vec())]);
 			ctx.tx().cancel().await?;
@@ -2970,7 +2978,7 @@ mod tests {
 		{
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
 			let tx = ctx.tx();
-			tx.set(
+			tx.set_key(
 				&ikb.new_dr_key(&id),
 				&DiskAnnRecordPendingUpdate {
 					doc_id: None,
@@ -2981,7 +2989,7 @@ mod tests {
 			.await?;
 			for i in 0..DISKANN_COMPACTION_MAX_PENDING_KEYS {
 				let filler = RecordIdKey::Number(1000 + i as i64);
-				tx.set(
+				tx.set_key(
 					&ikb.new_dr_key(&filler),
 					&DiskAnnRecordPendingUpdate {
 						doc_id: None,
@@ -3055,7 +3063,7 @@ mod tests {
 			// below the budget.
 			for i in 0..(DISKANN_COMPACTION_MAX_PENDING_KEYS - 1) {
 				let filler = RecordIdKey::Number(i as i64);
-				tx.set(
+				tx.set_key(
 					&ikb.new_dr_key(&filler),
 					&DiskAnnRecordPendingUpdate {
 						doc_id: None,
@@ -3067,7 +3075,7 @@ mod tests {
 			}
 			// The dual record's legacy `!dr` entry: folded with the `!dw` written above, it is the
 			// 2-key pair that overflows the key budget.
-			tx.set(
+			tx.set_key(
 				&ikb.new_dr_key(&dual),
 				&DiskAnnRecordPendingUpdate {
 					doc_id: None,

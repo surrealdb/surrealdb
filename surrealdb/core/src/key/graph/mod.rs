@@ -38,168 +38,93 @@
 use std::borrow::Cow;
 
 use anyhow::Result;
-use storekey::{BorrowDecode, BorrowReader, Encode};
+use storekey::{BorrowDecode, BorrowReader};
 
-use crate::catalog::{DatabaseId, NamespaceId};
 use crate::expr::dir::Dir;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::{KVKey, impl_kv_key_storekey};
+use crate::key::database::all::DatabaseRoot;
+use crate::key::{impl_kv_key_storekey, impl_kv_range_storekey, key};
 use crate::val::{RecordId, RecordIdKey, TableName};
 
-#[derive(Clone, Debug, Eq, PartialEq, Encode, BorrowDecode)]
-#[storekey(format = "()")]
-struct Prefix<'a> {
-	__: u8,
-	_a: u8,
-	pub ns: NamespaceId,
-	_b: u8,
-	pub db: DatabaseId,
-	_c: u8,
-	pub tb: Cow<'a, TableName>,
-	_d: u8,
-	pub id: RecordIdKey,
-}
-
-impl_kv_key_storekey!(Prefix<'_> => Vec<u8>);
-
-impl<'a> Prefix<'a> {
-	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, id: &RecordIdKey) -> Self {
-		Self {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
-			_c: b'*',
-			tb: Cow::Borrowed(tb),
-			_d: b'~',
-			id: id.to_owned(),
-		}
+key! {
+	#[derive(Clone, Debug, Eq, PartialEq)]
+	pub(crate) struct Prefix<'a> {
+		pub prefix: DatabaseRoot,
+		b'*',
+		pub tb: Cow<'a, TableName>,
+		b'~',
+		pub id: Cow<'a,RecordIdKey>,
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Encode, BorrowDecode)]
-#[storekey(format = "()")]
-struct PrefixEg<'a> {
-	__: u8,
-	_a: u8,
-	pub ns: NamespaceId,
-	_b: u8,
-	pub db: DatabaseId,
-	_c: u8,
-	pub tb: Cow<'a, TableName>,
-	_d: u8,
-	pub id: RecordIdKey,
-	pub eg: Dir,
-}
+impl_kv_range_storekey!(Prefix<'_>);
 
-impl_kv_key_storekey!(PrefixEg<'_> => Vec<u8>);
-
-impl<'a> PrefixEg<'a> {
-	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, id: &RecordIdKey, eg: Dir) -> Self {
-		Self {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
-			_c: b'*',
-			tb: Cow::Borrowed(tb),
-			_d: b'~',
-			id: id.clone(),
-			eg,
-		}
+key! {
+	#[derive(Clone, Debug, Eq, PartialEq)]
+	pub(crate) struct PrefixDir<'a> {
+		pub prefix: DatabaseRoot,
+		b'*',
+		pub tb: Cow<'a, TableName>,
+		b'~',
+		pub id: Cow<'a,RecordIdKey>,
+		pub dir: Dir,
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Encode, BorrowDecode)]
-#[storekey(format = "()")]
-struct PrefixFt<'a> {
-	__: u8,
-	_a: u8,
-	pub ns: NamespaceId,
-	_b: u8,
-	pub db: DatabaseId,
-	_c: u8,
-	pub tb: Cow<'a, TableName>,
-	_d: u8,
-	pub id: RecordIdKey,
-	pub eg: Dir,
-	pub ft: Cow<'a, str>,
+impl_kv_range_storekey!(PrefixDir<'_>);
+
+key! {
+	#[derive(Clone, Debug, Eq, PartialEq)]
+	pub(crate) struct PrefixFt<'a> {
+		pub prefix: DatabaseRoot,
+		b'*',
+		pub tb: Cow<'a, TableName>,
+		b'~',
+		pub id: Cow<'a,RecordIdKey>,
+		pub dir: Dir,
+		pub foreign_table: Cow<'a, str>,
+	}
 }
+impl_kv_range_storekey!(PrefixFt<'_>);
 
-impl_kv_key_storekey!(PrefixFt<'_> => Vec<u8>);
+key! {
+	#[derive(Clone, Debug, Eq, PartialEq)]
+	pub(crate) struct Graph<'a> {
+		pub prefix: DatabaseRoot,
+		b'*',
+		pub tb: Cow<'a, TableName>,
+		b'~',
+		pub id: Cow<'a,RecordIdKey>,
+		pub dir: Dir,
+		pub foreign_table: Cow<'a, TableName>,
+		pub foreign_key: Cow<'a, RecordIdKey>,
+	}
+}
+impl_kv_key_storekey!(Graph<'a> => ());
 
-impl<'a> PrefixFt<'a> {
-	fn new(
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &'a TableName,
-		id: &RecordIdKey,
-		eg: Dir,
-		ft: &'a str,
-	) -> Self {
-		Self {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
-			_c: b'*',
-			tb: Cow::Borrowed(tb),
-			_d: b'~',
-			id: id.to_owned(),
-			eg,
-			ft: Cow::Borrowed(ft),
-		}
+key! {
+	/// Pointer-key wire format: the [`Graph`] layout followed by the target
+	/// vertex `(tt, tk)`.
+	///
+	/// See the module-level docs for the role pointer keys play in a relation
+	/// and why their bytes are a strict superset of the legacy [`Graph`]
+	/// encoding. Construct via [`new_pointer`].
+	#[derive(Clone, Debug, Eq, PartialEq )]
+	pub(crate) struct GraphWithTarget<'a> {
+		pub prefix: DatabaseRoot,
+		b'*',
+		pub tb: Cow<'a, TableName>,
+		b'~',
+		pub id: Cow<'a,RecordIdKey>,
+		pub dir: Dir,
+		pub foreign_table: Cow<'a, TableName>,
+		pub foreign_key: Cow<'a, RecordIdKey>,
+		pub target_table: Cow<'a, TableName>,
+		pub target_key: Cow<'a, RecordIdKey>,
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Encode, BorrowDecode)]
-#[storekey(format = "()")]
-pub(crate) struct Graph<'a> {
-	__: u8,
-	_a: u8,
-	pub ns: NamespaceId,
-	_b: u8,
-	pub db: DatabaseId,
-	_c: u8,
-	pub tb: Cow<'a, TableName>,
-	_d: u8,
-	pub id: RecordIdKey,
-	pub eg: Dir,
-	pub ft: Cow<'a, TableName>,
-	pub fk: Cow<'a, RecordIdKey>,
-}
-
-impl_kv_key_storekey!(Graph<'_> => ());
-
-/// Pointer-key wire format: the [`Graph`] layout followed by the target
-/// vertex `(tt, tk)`.
-///
-/// See the module-level docs for the role pointer keys play in a relation
-/// and why their bytes are a strict superset of the legacy [`Graph`]
-/// encoding. Construct via [`new_pointer`].
-#[derive(Clone, Debug, Eq, PartialEq, Encode, BorrowDecode)]
-#[storekey(format = "()")]
-pub(crate) struct GraphWithTarget<'a> {
-	__: u8,
-	_a: u8,
-	pub ns: NamespaceId,
-	_b: u8,
-	pub db: DatabaseId,
-	_c: u8,
-	pub tb: Cow<'a, TableName>,
-	_d: u8,
-	pub id: RecordIdKey,
-	pub eg: Dir,
-	pub ft: Cow<'a, TableName>,
-	pub fk: Cow<'a, RecordIdKey>,
-	pub tt: Cow<'a, TableName>,
-	pub tk: Cow<'a, RecordIdKey>,
-}
-
-impl_kv_key_storekey!(GraphWithTarget<'_> => ());
+impl_kv_key_storekey!(GraphWithTarget<'a> => ());
 
 /// Result of decoding a graph adjacency key.
 ///
@@ -233,12 +158,12 @@ impl Graph<'_> {
 	/// target tail (preserving the prefix property the range scans rely
 	/// on), never appended to the legacy form. A legacy key with garbage
 	/// trailing bytes is malformed data, not a forward-compat scenario.
-	pub fn decode_key(k: &[u8]) -> Result<DecodedGraph> {
+	pub fn decode_graph_key(k: &[u8]) -> Result<DecodedGraph> {
 		let mut reader = BorrowReader::new(k);
 		let g = <Graph as BorrowDecode>::borrow_decode(&mut reader)?;
 		let edge = RecordId {
-			table: g.ft.into_owned(),
-			key: g.fk.into_owned(),
+			table: g.foreign_table.into_owned(),
+			key: g.foreign_key.into_owned(),
 		};
 		let target = if reader.is_empty() {
 			None
@@ -256,126 +181,6 @@ impl Graph<'_> {
 		})
 	}
 }
-
-pub fn new<'a>(
-	ns: NamespaceId,
-	db: DatabaseId,
-	tb: &'a TableName,
-	id: &RecordIdKey,
-	eg: Dir,
-	fk: &'a RecordId,
-) -> Graph<'a> {
-	Graph::new(ns, db, tb, id.to_owned(), eg, fk)
-}
-
-/// Construct a **pointer key** (vertex-side adjacency) embedding the far
-/// endpoint of the relation.
-///
-/// `fk` identifies the edge record; `target` is the vertex reached by
-/// traversing through that edge in the given direction. Used by
-/// `doc::edges::store_edges_data` to write the two pointer keys of a
-/// `RELATE` so that subsequent `->edge->vertex` (and mirror) range scans
-/// can resolve the far vertex from the adjacency alone, without reading
-/// the edge record. See the module-level docs for the four-key layout.
-pub fn new_pointer<'a>(
-	ns: NamespaceId,
-	db: DatabaseId,
-	tb: &'a TableName,
-	id: &RecordIdKey,
-	eg: Dir,
-	fk: &'a RecordId,
-	target: &'a RecordId,
-) -> GraphWithTarget<'a> {
-	GraphWithTarget {
-		__: b'/',
-		_a: b'*',
-		ns,
-		_b: b'*',
-		db,
-		_c: b'*',
-		tb: Cow::Borrowed(tb),
-		_d: b'~',
-		id: id.to_owned(),
-		eg,
-		ft: Cow::Borrowed(&fk.table),
-		fk: Cow::Borrowed(&fk.key),
-		tt: Cow::Borrowed(&target.table),
-		tk: Cow::Borrowed(&target.key),
-	}
-}
-
-pub fn prefix(
-	ns: NamespaceId,
-	db: DatabaseId,
-	tb: &TableName,
-	id: &RecordIdKey,
-) -> Result<Vec<u8>> {
-	let mut k = Prefix::new(ns, db, tb, id).encode_key()?;
-	k.extend_from_slice(&[0x00]);
-	Ok(k)
-}
-
-pub fn suffix(
-	ns: NamespaceId,
-	db: DatabaseId,
-	tb: &TableName,
-	id: &RecordIdKey,
-) -> Result<Vec<u8>> {
-	let mut k = Prefix::new(ns, db, tb, id).encode_key()?;
-	k.extend_from_slice(&[0xff]);
-	Ok(k)
-}
-
-pub fn egprefix(
-	ns: NamespaceId,
-	db: DatabaseId,
-	tb: &TableName,
-	id: &RecordIdKey,
-	eg: Dir,
-) -> Result<Vec<u8>> {
-	let mut k = PrefixEg::new(ns, db, tb, id, eg).encode_key()?;
-	k.extend_from_slice(&[0x00]);
-	Ok(k)
-}
-
-pub fn egsuffix(
-	ns: NamespaceId,
-	db: DatabaseId,
-	tb: &TableName,
-	id: &RecordIdKey,
-	eg: Dir,
-) -> Result<Vec<u8>> {
-	let mut k = PrefixEg::new(ns, db, tb, id, eg).encode_key()?;
-	k.extend_from_slice(&[0xff]);
-	Ok(k)
-}
-
-pub fn ftprefix(
-	ns: NamespaceId,
-	db: DatabaseId,
-	tb: &TableName,
-	id: &RecordIdKey,
-	eg: Dir,
-	ft: &str,
-) -> Result<Vec<u8>> {
-	let mut k = PrefixFt::new(ns, db, tb, id, eg, ft).encode_key()?;
-	k.extend_from_slice(&[0x00]);
-	Ok(k)
-}
-
-pub fn ftsuffix(
-	ns: NamespaceId,
-	db: DatabaseId,
-	tb: &TableName,
-	id: &RecordIdKey,
-	eg: Dir,
-	ft: &str,
-) -> Result<Vec<u8>> {
-	let mut k = PrefixFt::new(ns, db, tb, id, eg, ft).encode_key()?;
-	k.extend_from_slice(&[0xff]);
-	Ok(k)
-}
-
 impl Categorise for Graph<'_> {
 	fn categorise(&self) -> Category {
 		Category::Graph
@@ -388,35 +193,11 @@ impl Categorise for GraphWithTarget<'_> {
 	}
 }
 
-impl<'a> Graph<'a> {
-	pub fn new(
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &'a TableName,
-		id: RecordIdKey,
-		eg: Dir,
-		fk: &'a RecordId,
-	) -> Self {
-		Self {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
-			_c: b'*',
-			tb: Cow::Borrowed(tb),
-			_d: b'~',
-			id,
-			eg,
-			ft: Cow::Borrowed(&fk.table),
-			fk: Cow::Borrowed(&fk.key),
-		}
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::key::KVKey;
 	use crate::syn;
 	use crate::types::PublicValue;
 
@@ -425,23 +206,25 @@ mod tests {
 		let Ok(PublicValue::RecordId(fk)) = syn::value("other:test") else {
 			panic!()
 		};
-		let fk = fk.into();
 		let tb: TableName = "testtb".into();
-		let val = Graph::new(
-			NamespaceId(1),
-			DatabaseId(2),
-			&tb,
-			"testid".to_owned().into(),
-			Dir::Out,
-			&fk,
-		);
+		let val = Graph {
+			prefix: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+			tb: Cow::Borrowed(&tb),
+			id: Cow::Owned("testid".to_owned().into()),
+			dir: Dir::Out,
+			foreign_table: Cow::Owned(fk.table.into()),
+			foreign_key: Cow::Owned(fk.key.into()),
+		};
 		let enc = Graph::encode_key(&val).unwrap();
 		assert_eq!(
-			enc,
+			enc.as_slice(),
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0~\x03testid\0\x03other\0\x03test\0"
 		);
 		// Legacy keys decode to no target.
-		let dec = Graph::decode_key(&enc).unwrap();
+		let dec = Graph::decode_graph_key(&enc).unwrap();
 		assert_eq!(dec.edge.table.as_str(), "other");
 		assert!(dec.target.is_none());
 	}
@@ -459,11 +242,32 @@ mod tests {
 		let tb: TableName = "person".into();
 		let id: RecordIdKey = "alice".to_owned().into();
 		// Build the new-format key.
-		let new_key =
-			new_pointer(NamespaceId(1), DatabaseId(2), &tb, &id, Dir::Out, &edge, &target);
+		let new_key = GraphWithTarget {
+			prefix: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+			tb: Cow::Borrowed(&tb),
+			id: Cow::Borrowed(&id),
+			dir: Dir::Out,
+			foreign_table: Cow::Borrowed(&edge.table),
+			foreign_key: Cow::Borrowed(&edge.key),
+			target_table: Cow::Borrowed(&target.table),
+			target_key: Cow::Borrowed(&target.key),
+		};
 		let new_bytes = GraphWithTarget::encode_key(&new_key).unwrap();
 		// Build the legacy-format key on the same vertex/edge for comparison.
-		let legacy = Graph::new(NamespaceId(1), DatabaseId(2), &tb, id.clone(), Dir::Out, &edge);
+		let legacy = Graph {
+			prefix: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+			tb: Cow::Borrowed(&tb),
+			id: Cow::Borrowed(&id),
+			dir: Dir::Out,
+			foreign_table: Cow::Borrowed(&edge.table),
+			foreign_key: Cow::Borrowed(&edge.key),
+		};
 		let legacy_bytes = Graph::encode_key(&legacy).unwrap();
 		// The legacy encoding must be a strict prefix of the new encoding so
 		// the same range scan returns both formats.
@@ -486,7 +290,7 @@ mod tests {
 			boundary_byte,
 		);
 		// The unified decoder must round-trip the target on the new format.
-		let dec = Graph::decode_key(&new_bytes).unwrap();
+		let dec = Graph::decode_graph_key(&new_bytes).unwrap();
 		assert_eq!(dec.edge.table.as_str(), "likes");
 		assert_eq!(dec.edge.key, RecordIdKey::from("abc".to_owned()));
 		let tgt = dec.target.expect("new-format key must carry a target");
@@ -508,17 +312,21 @@ mod tests {
 		};
 		let fk: RecordId = fk.into();
 		let tb: TableName = "person".into();
-		let legacy = Graph::new(
-			NamespaceId(1),
-			DatabaseId(2),
-			&tb,
-			"alice".to_owned().into(),
-			Dir::Out,
-			&fk,
-		);
-		let mut bytes = Graph::encode_key(&legacy).unwrap();
+
+		let legacy = Graph {
+			prefix: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+			tb: Cow::Borrowed(&tb),
+			id: Cow::Owned("alice".to_owned().into()),
+			dir: Dir::Out,
+			foreign_table: Cow::Borrowed(&fk.table),
+			foreign_key: Cow::Borrowed(&fk.key),
+		};
+		let mut bytes = Graph::encode_key(&legacy).unwrap().into_vec();
 		bytes.extend_from_slice(b"trailing-garbage");
-		Graph::decode_key(&bytes)
+		Graph::decode_graph_key(&bytes)
 			.expect_err("trailing bytes on a legacy key must surface as a decode error");
 	}
 
@@ -538,11 +346,24 @@ mod tests {
 		let target: RecordId = target.into();
 		let tb: TableName = "person".into();
 		let id: RecordIdKey = "alice".to_owned().into();
-		let key = new_pointer(NamespaceId(1), DatabaseId(2), &tb, &id, Dir::Out, &edge, &target);
-		let mut bytes = GraphWithTarget::encode_key(&key).unwrap();
+
+		let key = GraphWithTarget {
+			prefix: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+			tb: Cow::Borrowed(&tb),
+			id: Cow::Borrowed(&id),
+			dir: Dir::Out,
+			foreign_table: Cow::Borrowed(&edge.table),
+			foreign_key: Cow::Borrowed(&edge.key),
+			target_table: Cow::Borrowed(&target.table),
+			target_key: Cow::Borrowed(&target.key),
+		};
+		let mut bytes = GraphWithTarget::encode_key(&key).unwrap().into_vec();
 		// Append arbitrary trailing bytes mimicking a future field.
 		bytes.extend_from_slice(b"future-extension");
-		let dec = Graph::decode_key(&bytes).expect("trailing bytes must not fail decode");
+		let dec = Graph::decode_graph_key(&bytes).expect("trailing bytes must not fail decode");
 		assert_eq!(dec.edge.table.as_str(), "likes");
 		let tgt = dec.target.expect("target still decoded from prefix");
 		assert_eq!(tgt.table.as_str(), "person");

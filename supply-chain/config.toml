@@ -37,6 +37,9 @@ audit-as-crates-io = false
 [policy.surrealdb-collections]
 audit-as-crates-io = false
 
+[policy.surrealdb-common]
+audit-as-crates-io = false
+
 [policy.surrealdb-core]
 audit-as-crates-io = false
 

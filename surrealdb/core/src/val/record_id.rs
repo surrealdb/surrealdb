@@ -14,7 +14,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{self, Expr, Field, Fields, Literal, SelectStatement};
 use crate::fmt::EscapeRidKey;
-use crate::kvs::impl_kv_value_revisioned;
+use crate::key::impl_kv_value_revisioned;
 use crate::val::{Array, IndexFormat, Number, Object, Range, Strand, TableName, Uuid, Value};
 
 #[revisioned(revision = 1)]

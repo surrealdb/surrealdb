@@ -52,11 +52,11 @@ use super::api::{
 use super::config::SyncMode;
 use super::err::{Error, Result};
 use super::{Direction, ESTIMATED_BYTES_PER_KEY, ESTIMATED_BYTES_PER_KV};
-use crate::key::debug::Sprintable;
+use crate::key::{Key, KeyRange};
+use crate::kvs::Val;
 use crate::kvs::api::Transactable;
 use crate::kvs::ds::{Metric, Metrics};
 use crate::kvs::timestamp::HlcTimeStamp;
-use crate::kvs::{Key, Val};
 
 const TARGET: &str = "surrealdb::core::kvs::rocksdb";
 
@@ -952,7 +952,7 @@ impl Transaction {
 	///
 	/// When the prefix extractor is disabled at the datastore level,
 	/// neither option is set (default behaviour).
-	fn apply_prefix_mode(&self, ro: &mut ReadOptions, rng: &Range<Key>) {
+	fn apply_prefix_mode(&self, ro: &mut ReadOptions, rng: &Range<Vec<u8>>) {
 		// Check if the prefix extractor is enabled
 		if !self.prefix_extractor_enabled {
 			return;
@@ -980,7 +980,7 @@ impl Transaction {
 	/// flags, and (when applicable) the version timestamp.
 	fn scan_read_options(
 		&self,
-		rng: &Range<Key>,
+		rng: &Range<Vec<u8>>,
 		version: Option<u64>,
 		inner: &TransactionInner,
 	) -> ReadOptions {
@@ -1016,7 +1016,7 @@ impl Transaction {
 	/// outlive the count.
 	fn count_read_options(
 		&self,
-		rng: &Range<Key>,
+		rng: &Range<Vec<u8>>,
 		version: Option<u64>,
 		inner: &TransactionInner,
 	) -> ReadOptions {
@@ -1072,7 +1072,7 @@ impl Transaction {
 	/// `ReadOptions` (which copies out the raw snapshot pointer).
 	fn count_blocking(
 		&self,
-		rng: Range<Key>,
+		rng: Range<Vec<u8>>,
 		version: Option<u64>,
 		guard: MutexGuard<'_, Option<TransactionInner>>,
 	) -> Result<usize> {
@@ -1136,7 +1136,7 @@ impl Transaction {
 	/// pending writes are visible.
 	fn keys_blocking(
 		&self,
-		rng: Range<Key>,
+		rng: Range<Vec<u8>>,
 		limit: u32,
 		skip: u32,
 		version: Option<u64>,
@@ -1191,7 +1191,7 @@ impl Transaction {
 	/// pending writes are visible.
 	fn scan_blocking(
 		&self,
-		rng: Range<Key>,
+		rng: Range<Vec<u8>>,
 		limit: u32,
 		skip: u32,
 		version: Option<u64>,
@@ -1266,7 +1266,7 @@ impl Transaction {
 	/// the cursor handle field order in `scan_cursor.rs`.
 	fn build_scan_iter(
 		&self,
-		rng: &Range<Key>,
+		rng: &Range<Vec<u8>>,
 		version: Option<u64>,
 		inner: &TransactionInner,
 	) -> ScanIter {
@@ -1430,8 +1430,8 @@ fn seek_and_skip(
 	dir: Direction,
 	started: &mut bool,
 	skip: &mut u32,
-	start: &Key,
-	end: &Key,
+	start: &[u8],
+	end: &[u8],
 ) -> Result<bool> {
 	if *started {
 		return Ok(true);
@@ -2013,8 +2013,8 @@ impl Transactable for Transaction {
 	}
 
 	/// Check if a key exists.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	fn exists(&self, key: Key, version: Option<u64>) -> BoxFut<'_, Result<bool>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	fn exists<'a>(&'a self, key: Key<'a>, version: Option<u64>) -> BoxFut<'a, Result<bool>> {
 		Box::pin(async move {
 			// Versioned queries require a versioned datastore
 			self.ensure_versioned(version)?;
@@ -2039,8 +2039,8 @@ impl Transactable for Transaction {
 	}
 
 	/// Fetch a key from the database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	fn get(&self, key: Key, version: Option<u64>) -> BoxFut<'_, Result<Option<Val>>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	fn get<'a>(&'a self, key: Key<'a>, version: Option<u64>) -> BoxFut<'a, Result<Option<Val>>> {
 		Box::pin(async move {
 			// Versioned queries require a versioned datastore
 			self.ensure_versioned(version)?;
@@ -2070,8 +2070,12 @@ impl Transactable for Transaction {
 	/// calling tokio worker; refused → dispatched to the affinity pool.
 	/// Larger key lists naturally bias toward the divert branch as the
 	/// global concurrent inline budget is consumed.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(keys = keys.sprint()))]
-	fn getm(&self, keys: Vec<Key>, version: Option<u64>) -> BoxFut<'_, Result<GetMultiResult>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(keys = keys.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")))]
+	fn getm<'a>(
+		&'a self,
+		keys: &'a [Key<'a>],
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<GetMultiResult>> {
 		Box::pin(async move {
 			// Versioned queries require a versioned datastore
 			self.ensure_versioned(version)?;
@@ -2115,8 +2119,8 @@ impl Transactable for Transaction {
 	}
 
 	/// Insert or update a key in the database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	fn set(&self, key: Key, val: Val) -> BoxFut<'_, Result<()>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	fn set<'a>(&'a self, key: Key<'a>, val: Val) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
 			if self.closed() {
@@ -2146,8 +2150,8 @@ impl Transactable for Transaction {
 	}
 
 	/// Insert a key if it doesn't exist in the database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	fn put(&self, key: Key, val: Val) -> BoxFut<'_, Result<()>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	fn put<'a>(&'a self, key: Key<'a>, val: Val) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
 			if self.closed() {
@@ -2177,8 +2181,8 @@ impl Transactable for Transaction {
 	}
 
 	/// Insert a key if the current value matches a condition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	fn putc(&self, key: Key, val: Val, chk: Option<Val>) -> BoxFut<'_, Result<()>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	fn putc<'a>(&'a self, key: Key<'a>, val: Val, chk: Option<Val>) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
 			if self.closed() {
@@ -2209,8 +2213,8 @@ impl Transactable for Transaction {
 	}
 
 	/// Delete a key.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	fn del(&self, key: Key) -> BoxFut<'_, Result<()>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	fn del<'a>(&'a self, key: Key<'a>) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
 			if self.closed() {
@@ -2235,8 +2239,8 @@ impl Transactable for Transaction {
 	}
 
 	/// Delete a key if the current value matches a condition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	fn delc(&self, key: Key, chk: Option<Val>) -> BoxFut<'_, Result<()>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	fn delc<'a>(&'a self, key: Key<'a>, chk: Option<&'a [u8]>) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
 			if self.closed() {
@@ -2251,7 +2255,7 @@ impl Transactable for Transaction {
 					.as_ref()
 					.ok_or_else(|| Error::Internal("expected a transaction".into()))?;
 				match (inner.tx.get_pinned_opt(&key, &self.read_options)?, chk) {
-					(Some(v), Some(w)) if v.eq(&w) => inner.tx.delete(key)?,
+					(Some(v), Some(w)) if *v == *w => inner.tx.delete(key)?,
 					(None, None) => inner.tx.delete(key)?,
 					_ => return Err(Error::TransactionConditionNotMet),
 				};
@@ -2274,8 +2278,8 @@ impl Transactable for Transaction {
 	/// Read-only transactions shard the range across the affinitypool and
 	/// scan all shards in parallel against a shared snapshot, which is a
 	/// significant speed-up on large ranges (e.g. full-table `COUNT(*)`).
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	fn count(&self, rng: Range<Key>, version: Option<u64>) -> BoxFut<'_, Result<usize>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	fn count<'a>(&'a self, rng: KeyRange<'a>, version: Option<u64>) -> BoxFut<'a, Result<usize>> {
 		Box::pin(async move {
 			// Versioned queries require a versioned datastore
 			self.ensure_versioned(version)?;
@@ -2283,6 +2287,8 @@ impl Transactable for Transaction {
 			if self.closed() {
 				return Err(Error::TransactionFinished);
 			}
+			// Convert the range to owned bytes for the internal helpers.
+			let rng = rng.start.to_vec()..rng.end.to_vec();
 			// Writable transactions iterate on the inner transaction so that
 			// pending writes are visible; this cannot safely be sharded across
 			// threads, so we fall back to a single serial scan.
@@ -2385,14 +2391,14 @@ impl Transactable for Transaction {
 	/// but that already serialises ops on the same transaction regardless
 	/// of dispatch shape — and the global permit cap bounds how many
 	/// tokio workers can be pinned at once.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	fn keys(
-		&self,
-		rng: Range<Key>,
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	fn keys<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
 		limit: u32,
 		skip: u32,
 		version: Option<u64>,
-	) -> BoxFut<'_, Result<KeysResult>> {
+	) -> BoxFut<'a, Result<KeysResult>> {
 		Box::pin(async move {
 			// Versioned queries require a versioned datastore
 			self.ensure_versioned(version)?;
@@ -2400,6 +2406,8 @@ impl Transactable for Transaction {
 			if self.closed() {
 				return Err(Error::TransactionFinished);
 			}
+			// Convert the range to owned bytes for the internal helpers.
+			let rng = rng.start.to_vec()..rng.end.to_vec();
 			// Writable transactions always offload range scans to the
 			// affinity pool. The scan iterator holds the inner Mutex for
 			// the whole iter window (`BaseDeltaIterator` over a writable
@@ -2426,14 +2434,14 @@ impl Transactable for Transaction {
 
 	/// Retrieve a range of keys, in reverse. See [`Self::keys`] for the
 	/// dispatch policy.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	fn keysr(
-		&self,
-		rng: Range<Key>,
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	fn keysr<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
 		limit: u32,
 		skip: u32,
 		version: Option<u64>,
-	) -> BoxFut<'_, Result<KeysResult>> {
+	) -> BoxFut<'a, Result<KeysResult>> {
 		Box::pin(async move {
 			// Versioned queries require a versioned datastore
 			self.ensure_versioned(version)?;
@@ -2441,6 +2449,8 @@ impl Transactable for Transaction {
 			if self.closed() {
 				return Err(Error::TransactionFinished);
 			}
+			// Convert the range to owned bytes for the internal helpers.
+			let rng = rng.start.to_vec()..rng.end.to_vec();
 			// Writable transactions always offload range scans to the
 			// affinity pool. The scan iterator holds the inner Mutex for
 			// the whole iter window (`BaseDeltaIterator` over a writable
@@ -2467,14 +2477,14 @@ impl Transactable for Transaction {
 
 	/// Retrieve a range of key-value pairs. See [`Self::keys`] for the
 	/// dispatch policy.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	fn scan(
-		&self,
-		rng: Range<Key>,
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	fn scan<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
 		limit: u32,
 		skip: u32,
 		version: Option<u64>,
-	) -> BoxFut<'_, Result<ScanResult>> {
+	) -> BoxFut<'a, Result<ScanResult>> {
 		Box::pin(async move {
 			// Versioned queries require a versioned datastore
 			self.ensure_versioned(version)?;
@@ -2482,6 +2492,8 @@ impl Transactable for Transaction {
 			if self.closed() {
 				return Err(Error::TransactionFinished);
 			}
+			// Convert the range to owned bytes for the internal helpers.
+			let rng = rng.start.to_vec()..rng.end.to_vec();
 			// Writable transactions always offload range scans to the
 			// affinity pool. The scan iterator holds the inner Mutex for
 			// the whole iter window (`BaseDeltaIterator` over a writable
@@ -2508,14 +2520,14 @@ impl Transactable for Transaction {
 
 	/// Retrieve a range of key-value pairs, in reverse. See [`Self::keys`] for
 	/// the dispatch policy.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	fn scanr(
-		&self,
-		rng: Range<Key>,
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	fn scanr<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
 		limit: u32,
 		skip: u32,
 		version: Option<u64>,
-	) -> BoxFut<'_, Result<ScanResult>> {
+	) -> BoxFut<'a, Result<ScanResult>> {
 		Box::pin(async move {
 			// Versioned queries require a versioned datastore
 			self.ensure_versioned(version)?;
@@ -2523,6 +2535,8 @@ impl Transactable for Transaction {
 			if self.closed() {
 				return Err(Error::TransactionFinished);
 			}
+			// Convert the range to owned bytes for the internal helpers.
+			let rng = rng.start.to_vec()..rng.end.to_vec();
 			// Writable transactions always offload range scans to the
 			// affinity pool. The scan iterator holds the inner Mutex for
 			// the whole iter window (`BaseDeltaIterator` over a writable
@@ -2555,16 +2569,19 @@ impl Transactable for Transaction {
 	/// the first [`ScanCursorKeys::next_batch`] call performs the seek.
 	/// This keeps a cursor that is opened then aborted before pumping
 	/// (e.g. early `LIMIT 0` paths) free of the LSM-seek cost.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
 	fn open_keys_cursor<'a>(
 		&'a self,
-		rng: Range<Key>,
+		rng: KeyRange<'a>,
 		dir: Direction,
 		skip: u32,
 		version: Option<u64>,
 	) -> BoxFut<'a, Result<Box<dyn ScanCursorKeys + 'a>>> {
 		Box::pin(async move {
 			self.ensure_versioned(version)?;
+			// Convert the range to owned bytes: the cursor state stores the
+			// bounds for the first-time seek, which outlives this call.
+			let rng = rng.start.to_vec()..rng.end.to_vec();
 			// Open protocol: increment `cursors_alive` (SeqCst), then claim
 			// the slot via `AliveGuard` so every subsequent exit — the
 			// `done == true` re-check, the future being dropped at the
@@ -2617,16 +2634,19 @@ impl Transactable for Transaction {
 
 	/// Open a stateful key+value scan cursor over `rng`. See
 	/// [`Transactable::open_keys_cursor`] for the rationale.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
 	fn open_vals_cursor<'a>(
 		&'a self,
-		rng: Range<Key>,
+		rng: KeyRange<'a>,
 		dir: Direction,
 		skip: u32,
 		version: Option<u64>,
 	) -> BoxFut<'a, Result<Box<dyn ScanCursorVals + 'a>>> {
 		Box::pin(async move {
 			self.ensure_versioned(version)?;
+			// Convert the range to owned bytes: the cursor state stores the
+			// bounds for the first-time seek, which outlives this call.
+			let rng = rng.start.to_vec()..rng.end.to_vec();
 			// See `open_keys_cursor` for the open-protocol rationale and
 			// why the `AliveGuard` must be bound before the `lock().await`.
 			self.cursors_alive.fetch_add(1, Ordering::SeqCst);
@@ -2684,7 +2704,10 @@ impl Transactable for Transaction {
 		Box::pin(async move { Ok(()) })
 	}
 
-	fn compact(&self, range: Option<Range<Key>>) -> BoxFut<'_, anyhow::Result<()>> {
+	fn compact(&self, range: Option<KeyRange<'_>>) -> BoxFut<'_, anyhow::Result<()>> {
+		// Convert the range to owned bytes up front so the returned future
+		// does not capture the range's borrowed lifetime.
+		let range = range.map(|r| (r.start.to_vec(), r.end.to_vec()));
 		Box::pin(async move {
 			// Create new flush options
 			let mut fopts = FlushOptions::default();
@@ -2708,7 +2731,7 @@ impl Transactable for Transaction {
 				self.db.flush_opt(&fopts)?;
 				// Get the compaction range
 				let (start, end) = match range {
-					Some(r) => (Some(r.start), Some(r.end)),
+					Some((start, end)) => (Some(start), Some(end)),
 					None => (None, None),
 				};
 				// Compact the specified range with the bottommost target.

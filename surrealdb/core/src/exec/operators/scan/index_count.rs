@@ -22,6 +22,7 @@
 //! 4. Falls back to a full scan + filter + count if no matching COUNT index is found or permissions
 //!    are conditional.
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use tracing::instrument;
@@ -40,9 +41,9 @@ use crate::exec::{
 use crate::expr::cond::Cond;
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::iam::Action;
-use crate::key::index::iu::IndexCountKey;
-use crate::key::record;
-use crate::kvs::KVValue;
+use crate::key::database::all::DatabaseRoot;
+use crate::key::index::iu::{IndexCountKey, IndexPrefix};
+use crate::key::{KVKeyDecode, KVRange, KVValue, record};
 use crate::val::{Number, Object, TableName, Value};
 
 /// Optimized operator for `SELECT count() FROM <table> WHERE <cond> GROUP ALL`
@@ -326,8 +327,16 @@ pub(crate) async fn sum_index_count_deltas(
 	tb: &TableName,
 	ix: crate::catalog::IndexId,
 ) -> Result<usize, ControlFlow> {
-	let range =
-		IndexCountKey::range(ns, db, tb, ix).context("Failed to compute index count key range")?;
+	let range = IndexPrefix {
+		prefix: DatabaseRoot {
+			ns,
+			db,
+		},
+		tb: Cow::Borrowed(tb),
+		ix,
+	}
+	.encode_range()?;
+
 	let mut cursor = txn
 		.open_keys_cursor(range, crate::idx::planner::ScanDirection::Forward, 0, None)
 		.await
@@ -372,11 +381,17 @@ async fn count_with_filter_fallback(
 	use crate::exec::permission::PhysicalPermission;
 
 	let txn = ctx.txn();
-	let beg = record::prefix(ns_id, db_id, table_name)?;
-	let end = record::suffix(ns_id, db_id, table_name)?;
+	let range = record::RecordKeyPrefix {
+		root: DatabaseRoot {
+			ns: ns_id,
+			db: db_id,
+		},
+		table: Cow::Borrowed(table_name),
+	}
+	.encode_range()?;
 
 	let mut cursor = txn
-		.open_vals_cursor(beg..end, crate::idx::planner::ScanDirection::Forward, 0, version)
+		.open_vals_cursor(range, crate::idx::planner::ScanDirection::Forward, 0, version)
 		.await
 		.context("Failed to open scan cursor")?;
 	let mut count = 0usize;
@@ -396,7 +411,7 @@ async fn count_with_filter_fallback(
 				.context("Failed to decode record key")?;
 			let rid_val = crate::val::RecordId {
 				table: decoded_key.tb.into_owned(),
-				key: decoded_key.id,
+				key: decoded_key.id.into_owned(),
 			};
 			let record = crate::catalog::Record::kv_decode_value(val, rid_val)
 				.context("Failed to deserialize record")?;
@@ -488,8 +503,7 @@ async fn count_btree_index_keys(
 		}
 		(
 			BTreeAccess::Range {
-				from,
-				to,
+				range,
 			},
 			true,
 		) => {
@@ -497,8 +511,8 @@ async fn count_btree_index_keys(
 				ns_id,
 				db_id,
 				ix,
-				from.as_ref(),
-				to.as_ref(),
+				range.start.as_ref(),
+				range.end.as_ref(),
 				ScanDirection::Forward,
 			)
 			.context("Failed to create unique range iterator")?;
@@ -515,8 +529,7 @@ async fn count_btree_index_keys(
 		}
 		(
 			BTreeAccess::Range {
-				from,
-				to,
+				range,
 			},
 			false,
 		) => {
@@ -524,8 +537,8 @@ async fn count_btree_index_keys(
 				ns_id,
 				db_id,
 				ix,
-				from.as_ref(),
-				to.as_ref(),
+				range.start.as_ref(),
+				range.end.as_ref(),
 				ScanDirection::Forward,
 			)
 			.context("Failed to create index range iterator")?;

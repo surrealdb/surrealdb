@@ -4,7 +4,6 @@ mod background_flusher;
 mod cnf;
 mod commit_coordinator;
 
-use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -22,12 +21,12 @@ use super::Direction;
 use super::api::{BoxFut, KeysResult, ScanResult};
 use super::config::SyncMode;
 use super::err::{Error, Result};
-use crate::key::debug::Sprintable;
+use crate::key::{Key, KeyRange};
+use crate::kvs::Val;
 use crate::kvs::api::Transactable;
 use crate::kvs::timestamp::{
 	BoxTimeStamp, BoxTimeStampImpl, MAX_TIMESTAMP_BYTES, TimeStamp, TimeStampImpl,
 };
-use crate::kvs::{Key, Val};
 
 const TARGET: &str = "surrealdb::core::kvs::surrealkv";
 
@@ -236,8 +235,8 @@ impl Transactable for Transaction {
 	}
 
 	/// Checks if a key exists in the database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	fn exists(&self, key: Key, version: Option<u64>) -> BoxFut<'_, Result<bool>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	fn exists<'a>(&'a self, key: Key<'a>, version: Option<u64>) -> BoxFut<'a, Result<bool>> {
 		Box::pin(async move {
 			// Versioned queries require a versioned datastore
 			self.ensure_versioned(version)?;
@@ -249,8 +248,8 @@ impl Transactable for Transaction {
 			let inner = self.inner.read().await;
 			// Get the key
 			let res = match version {
-				Some(ts) => inner.get_at(&key, ts)?.is_some(),
-				None => inner.get(&key)?.is_some(),
+				Some(ts) => inner.get_at(key.as_slice(), ts)?.is_some(),
+				None => inner.get(key.as_slice())?.is_some(),
 			};
 			// Return result
 			Ok(res)
@@ -258,8 +257,8 @@ impl Transactable for Transaction {
 	}
 
 	/// Fetch a key from the database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	fn get(&self, key: Key, version: Option<u64>) -> BoxFut<'_, Result<Option<Val>>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	fn get<'a>(&'a self, key: Key<'a>, version: Option<u64>) -> BoxFut<'a, Result<Option<Val>>> {
 		Box::pin(async move {
 			// Versioned queries require a versioned datastore
 			self.ensure_versioned(version)?;
@@ -271,8 +270,8 @@ impl Transactable for Transaction {
 			let inner = self.inner.read().await;
 			// Get the key
 			let res = match version {
-				Some(ts) => inner.get_at(&key, ts)?,
-				None => inner.get(&key)?,
+				Some(ts) => inner.get_at(key.as_slice(), ts)?,
+				None => inner.get(key.as_slice())?,
 			};
 			// Return result
 			Ok(res)
@@ -280,8 +279,8 @@ impl Transactable for Transaction {
 	}
 
 	/// Insert or update a key in the database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	fn set(&self, key: Key, val: Val) -> BoxFut<'_, Result<()>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	fn set<'a>(&'a self, key: Key<'a>, val: Val) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
 			if self.closed() {
@@ -294,15 +293,15 @@ impl Transactable for Transaction {
 			// Load the inner transaction
 			let mut inner = self.inner.write().await;
 			// Set the key
-			inner.set(&key, &val)?;
+			inner.set(key.as_slice(), &val)?;
 			// Return result
 			Ok(())
 		})
 	}
 
 	/// Insert or replace a key in the database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	fn replace(&self, key: Key, val: Val) -> BoxFut<'_, Result<()>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	fn replace<'a>(&'a self, key: Key<'a>, val: Val) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
 			if self.closed() {
@@ -315,15 +314,15 @@ impl Transactable for Transaction {
 			// Load the inner transaction
 			let mut inner = self.inner.write().await;
 			// Replace the key
-			inner.replace(&key, &val)?;
+			inner.replace(key.as_slice(), &val)?;
 			// Return result
 			Ok(())
 		})
 	}
 
 	/// Insert a key if it doesn't exist in the database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	fn put(&self, key: Key, val: Val) -> BoxFut<'_, Result<()>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	fn put<'a>(&'a self, key: Key<'a>, val: Val) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
 			if self.closed() {
@@ -336,8 +335,8 @@ impl Transactable for Transaction {
 			// Load the inner transaction
 			let mut inner = self.inner.write().await;
 			// Set the key if empty
-			match inner.get(&key)? {
-				None => inner.set(&key, &val)?,
+			match inner.get(key.as_slice())? {
+				None => inner.set(key.as_slice(), &val)?,
 				_ => return Err(Error::TransactionKeyAlreadyExists),
 			}
 			// Return result
@@ -346,8 +345,8 @@ impl Transactable for Transaction {
 	}
 
 	/// Insert a key if the current value matches a condition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	fn putc(&self, key: Key, val: Val, chk: Option<Val>) -> BoxFut<'_, Result<()>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	fn putc<'a>(&'a self, key: Key<'a>, val: Val, chk: Option<Val>) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
 			if self.closed() {
@@ -360,9 +359,9 @@ impl Transactable for Transaction {
 			// Load the inner transaction
 			let mut inner = self.inner.write().await;
 			// Set the key if valid
-			match (inner.get(&key)?, chk) {
-				(Some(v), Some(w)) if v == w => inner.set(&key, &val)?,
-				(None, None) => inner.set(&key, &val)?,
+			match (inner.get(key.as_slice())?, chk) {
+				(Some(v), Some(w)) if v == w => inner.set(key.as_slice(), &val)?,
+				(None, None) => inner.set(key.as_slice(), &val)?,
 				_ => return Err(Error::TransactionConditionNotMet),
 			};
 			// Return result
@@ -371,8 +370,8 @@ impl Transactable for Transaction {
 	}
 
 	/// Delete a key from the database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	fn del(&self, key: Key) -> BoxFut<'_, Result<()>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	fn del<'a>(&'a self, key: Key<'a>) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
 			if self.closed() {
@@ -386,9 +385,9 @@ impl Transactable for Transaction {
 			let mut inner = self.inner.write().await;
 			// Delete the key
 			if self.versioned {
-				inner.soft_delete(&key)?;
+				inner.soft_delete(key.as_slice())?;
 			} else {
-				inner.delete(&key)?;
+				inner.delete(key.as_slice())?;
 			}
 			// Return result
 			Ok(())
@@ -396,8 +395,8 @@ impl Transactable for Transaction {
 	}
 
 	/// Delete a key if the current value matches a condition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	fn delc(&self, key: Key, chk: Option<Val>) -> BoxFut<'_, Result<()>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	fn delc<'a>(&'a self, key: Key<'a>, chk: Option<&'a [u8]>) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
 			if self.closed() {
@@ -411,15 +410,15 @@ impl Transactable for Transaction {
 			let mut inner = self.inner.write().await;
 			// Delete the key if valid
 			if self.versioned {
-				match (inner.get(&key)?, chk) {
-					(Some(v), Some(w)) if v == w => inner.soft_delete(&key)?,
-					(None, None) => inner.soft_delete(&key)?,
+				match (inner.get(key.as_slice())?, chk) {
+					(Some(v), Some(w)) if v == w => inner.soft_delete(key.as_slice())?,
+					(None, None) => inner.soft_delete(key.as_slice())?,
 					_ => return Err(Error::TransactionConditionNotMet),
 				};
 			} else {
-				match (inner.get(&key)?, chk) {
-					(Some(v), Some(w)) if v == w => inner.delete(&key)?,
-					(None, None) => inner.delete(&key)?,
+				match (inner.get(key.as_slice())?, chk) {
+					(Some(v), Some(w)) if v == w => inner.delete(key.as_slice())?,
+					(None, None) => inner.delete(key.as_slice())?,
 					_ => return Err(Error::TransactionConditionNotMet),
 				};
 			}
@@ -429,8 +428,8 @@ impl Transactable for Transaction {
 	}
 
 	/// Deletes all versions of a key from the database.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	fn clr(&self, key: Key) -> BoxFut<'_, Result<()>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	fn clr<'a>(&'a self, key: Key<'a>) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
 			if self.closed() {
@@ -443,15 +442,15 @@ impl Transactable for Transaction {
 			// Load the inner transaction
 			let mut inner = self.inner.write().await;
 			// Delete the key
-			inner.delete(&key)?;
+			inner.delete(key.as_slice())?;
 			// Return result
 			Ok(())
 		})
 	}
 
 	/// Delete all versions of a key if the current value matches a condition.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	fn clrc(&self, key: Key, chk: Option<Val>) -> BoxFut<'_, Result<()>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	fn clrc<'a>(&'a self, key: Key<'a>, chk: Option<&'a [u8]>) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Check to see if transaction is closed
 			if self.closed() {
@@ -464,9 +463,9 @@ impl Transactable for Transaction {
 			// Load the inner transaction
 			let mut inner = self.inner.write().await;
 			// Delete the key if valid
-			match (inner.get(&key)?, chk) {
-				(Some(v), Some(w)) if v == w => inner.delete(&key)?,
-				(None, None) => inner.delete(&key)?,
+			match (inner.get(key.as_slice())?, chk) {
+				(Some(v), Some(w)) if v == w => inner.delete(key.as_slice())?,
+				(None, None) => inner.delete(key.as_slice())?,
 				_ => return Err(Error::TransactionConditionNotMet),
 			};
 			// Return result
@@ -475,8 +474,8 @@ impl Transactable for Transaction {
 	}
 
 	/// Count the total number of keys within a range.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	fn count(&self, rng: Range<Key>, version: Option<u64>) -> BoxFut<'_, Result<usize>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	fn count<'a>(&'a self, rng: KeyRange<'a>, version: Option<u64>) -> BoxFut<'a, Result<usize>> {
 		Box::pin(async move {
 			// Versioned queries require a versioned datastore
 			self.ensure_versioned(version)?;
@@ -499,7 +498,8 @@ impl Transactable for Transaction {
 						// Include tombstones so we can detect deleted keys
 						let opts = HistoryOptions::new().with_tombstones(true);
 						// Create the iterator with tombstone visibility
-						let mut iter = inner.history_with_options(beg, end, &opts)?;
+						let mut iter =
+							inner.history_with_options(beg.as_slice(), end.as_slice(), &opts)?;
 						// Seek to the first key
 						iter.seek_first()?;
 						// History entries are sorted (key ASC, timestamp DESC),
@@ -533,7 +533,7 @@ impl Transactable for Transaction {
 					}
 					None => {
 						// Create the iterator
-						let mut iter = inner.range(beg, end)?;
+						let mut iter = inner.range(beg.as_slice(), end.as_slice())?;
 						// Seek to the first key
 						iter.seek_first()?;
 						// Loop over all keys
@@ -553,14 +553,14 @@ impl Transactable for Transaction {
 	}
 
 	/// Retrieve a range of keys.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	fn keys(
-		&self,
-		rng: Range<Key>,
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	fn keys<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
 		limit: u32,
 		skip: u32,
 		version: Option<u64>,
-	) -> BoxFut<'_, Result<KeysResult>> {
+	) -> BoxFut<'a, Result<KeysResult>> {
 		Box::pin(async move {
 			// Versioned queries require a versioned datastore
 			self.ensure_versioned(version)?;
@@ -577,7 +577,7 @@ impl Transactable for Transaction {
 			let res = match version {
 				Some(ts) => {
 					// Create the iterator
-					let mut iter = inner.history(&beg, &end)?;
+					let mut iter = inner.history(beg.as_slice(), end.as_slice())?;
 					// Seek to the first key
 					iter.seek_first()?;
 					// Consume the iterator
@@ -590,7 +590,7 @@ impl Transactable for Transaction {
 				}
 				None => {
 					// Create the iterator
-					let mut iter = inner.range(&beg, &end)?;
+					let mut iter = inner.range(beg.as_slice(), end.as_slice())?;
 					// Seek to the first key
 					iter.seek_first()?;
 					// Consume the iterator
@@ -607,14 +607,14 @@ impl Transactable for Transaction {
 	}
 
 	/// Retrieve a range of keys, in reverse.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	fn keysr(
-		&self,
-		rng: Range<Key>,
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	fn keysr<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
 		limit: u32,
 		skip: u32,
 		version: Option<u64>,
-	) -> BoxFut<'_, Result<KeysResult>> {
+	) -> BoxFut<'a, Result<KeysResult>> {
 		Box::pin(async move {
 			// Versioned queries require a versioned datastore
 			self.ensure_versioned(version)?;
@@ -631,7 +631,7 @@ impl Transactable for Transaction {
 			let res = match version {
 				Some(ts) => {
 					// Create the iterator
-					let mut iter = inner.history(&beg, &end)?;
+					let mut iter = inner.history(beg.as_slice(), end.as_slice())?;
 					// Seek to the last key
 					iter.seek_last()?;
 					// Consume the iterator
@@ -644,7 +644,7 @@ impl Transactable for Transaction {
 				}
 				None => {
 					// Create the iterator
-					let mut iter = inner.range(&beg, &end)?;
+					let mut iter = inner.range(beg.as_slice(), end.as_slice())?;
 					// Seek to the last key
 					iter.seek_last()?;
 					// Consume the iterator
@@ -661,14 +661,14 @@ impl Transactable for Transaction {
 	}
 
 	/// Retrieve a range of key-value pairs.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	fn scan(
-		&self,
-		rng: Range<Key>,
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	fn scan<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
 		limit: u32,
 		skip: u32,
 		version: Option<u64>,
-	) -> BoxFut<'_, Result<ScanResult>> {
+	) -> BoxFut<'a, Result<ScanResult>> {
 		Box::pin(async move {
 			// Versioned queries require a versioned datastore
 			self.ensure_versioned(version)?;
@@ -685,7 +685,7 @@ impl Transactable for Transaction {
 			let res = match version {
 				Some(ts) => {
 					// Create the iterator
-					let mut iter = inner.history(&beg, &end)?;
+					let mut iter = inner.history(beg.as_slice(), end.as_slice())?;
 					// Seek to the first key
 					iter.seek_first()?;
 					// Consume the iterator
@@ -698,7 +698,7 @@ impl Transactable for Transaction {
 				}
 				None => {
 					// Create the iterator
-					let mut iter = inner.range(&beg, &end)?;
+					let mut iter = inner.range(beg.as_slice(), end.as_slice())?;
 					// Seek to the first key
 					iter.seek_first()?;
 					// Consume the iterator
@@ -715,14 +715,14 @@ impl Transactable for Transaction {
 	}
 
 	/// Retrieve a range of key-value pairs, in reverse.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	fn scanr(
-		&self,
-		rng: Range<Key>,
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	fn scanr<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
 		limit: u32,
 		skip: u32,
 		version: Option<u64>,
-	) -> BoxFut<'_, Result<ScanResult>> {
+	) -> BoxFut<'a, Result<ScanResult>> {
 		Box::pin(async move {
 			// Versioned queries require a versioned datastore
 			self.ensure_versioned(version)?;
@@ -739,7 +739,7 @@ impl Transactable for Transaction {
 			let res = match version {
 				Some(ts) => {
 					// Create the iterator
-					let mut iter = inner.history(&beg, &end)?;
+					let mut iter = inner.history(beg.as_slice(), end.as_slice())?;
 					// Seek to the last key
 					iter.seek_last()?;
 					// Consume the iterator
@@ -752,7 +752,7 @@ impl Transactable for Transaction {
 				}
 				None => {
 					// Create the iterator
-					let mut iter = inner.range(&beg, &end)?;
+					let mut iter = inner.range(beg.as_slice(), end.as_slice())?;
 					// Seek to the last key
 					iter.seek_last()?;
 					// Consume the iterator
@@ -848,9 +848,9 @@ impl TimeStampImpl for SurrealKvTimeStampImpl {
 // both range iterators and history iterators with timestamp filtering.
 trait Cursor {
 	/// Returns the next key from the cursor, or None if exhausted
-	fn next_key(&mut self) -> Result<Option<Key>>;
+	fn next_key(&mut self) -> Result<Option<Vec<u8>>>;
 	/// Returns the next key-value pair from the cursor, or None if exhausted
-	fn next_entry(&mut self) -> Result<Option<(Key, Val)>>;
+	fn next_entry(&mut self) -> Result<Option<(Vec<u8>, Val)>>;
 }
 
 // A cursor wrapping a range iterator
@@ -860,7 +860,7 @@ struct RangeCursor<'a> {
 }
 
 impl Cursor for RangeCursor<'_> {
-	fn next_key(&mut self) -> Result<Option<Key>> {
+	fn next_key(&mut self) -> Result<Option<Vec<u8>>> {
 		if self.inner.valid() {
 			let key = self.inner.key().user_key().to_vec();
 			match self.dir {
@@ -872,7 +872,7 @@ impl Cursor for RangeCursor<'_> {
 		Ok(None)
 	}
 
-	fn next_entry(&mut self) -> Result<Option<(Key, Val)>> {
+	fn next_entry(&mut self) -> Result<Option<(Vec<u8>, Val)>> {
 		if self.inner.valid() {
 			let key = self.inner.key().user_key().to_vec();
 			let value = self.inner.value()?;
@@ -894,7 +894,7 @@ struct HistoryCursor<'a> {
 }
 
 impl Cursor for HistoryCursor<'_> {
-	fn next_key(&mut self) -> Result<Option<Key>> {
+	fn next_key(&mut self) -> Result<Option<Vec<u8>>> {
 		// History entries are sorted (key ASC, timestamp DESC), so
 		// forward iteration yields newest versions first per key,
 		// and backward iteration yields oldest versions first per key.
@@ -952,7 +952,7 @@ impl Cursor for HistoryCursor<'_> {
 		}
 	}
 
-	fn next_entry(&mut self) -> Result<Option<(Key, Val)>> {
+	fn next_entry(&mut self) -> Result<Option<(Vec<u8>, Val)>> {
 		// History entries are sorted (key ASC, timestamp DESC), so
 		// forward iteration yields newest versions first per key,
 		// and backward iteration yields oldest versions first per key.

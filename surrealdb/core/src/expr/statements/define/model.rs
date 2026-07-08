@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use surrealdb_strand::Strand;
@@ -12,6 +14,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Expr, FlowResultExt};
 use crate::iam::{Action, ResourceKind};
+use crate::key::database::all::DatabaseRoot;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -68,8 +71,15 @@ impl DefineModelStatement {
 			.cast_to()?;
 
 		// Process the statement
-		let key = crate::key::database::ml::new(ns, db, &self.name, &self.version);
-		txn.set(
+		let key = crate::key::database::ml::Ml {
+			prefix: DatabaseRoot {
+				ns,
+				db,
+			},
+			ml: Cow::Borrowed(&self.name),
+			vn: Cow::Borrowed(&self.version),
+		};
+		txn.set_key(
 			&key,
 			&MlModelDefinition {
 				hash: self.hash.clone(),

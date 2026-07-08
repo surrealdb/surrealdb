@@ -2,85 +2,71 @@
 use std::borrow::Cow;
 
 use anyhow::Result;
-use storekey::{BorrowDecode, Encode};
 
-use crate::catalog::{BucketDefinition, DatabaseId, NamespaceId};
+use crate::catalog::BucketDefinition;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::{KVKey, impl_kv_key_storekey};
+use crate::key::database::all::DatabaseRoot;
+use crate::key::{impl_kv_key_storekey, impl_kv_range_storekey, key};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct BucketKey<'a> {
-	__: u8,
-	_a: u8,
-	pub ns: NamespaceId,
-	_b: u8,
-	pub db: DatabaseId,
-	_c: u8,
-	_d: u8,
-	_e: u8,
-	pub bu: Cow<'a, str>,
+key! {
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+	pub(crate) struct BucketKey<'a> {
+		pub prefix: DatabaseRoot,
+		b'!', // *
+		b'b', // *
+		b'u', // *
+		pub bu: Cow<'a, str>,
+	}
 }
 
-impl_kv_key_storekey!(BucketKey<'_> => BucketDefinition);
-
-pub fn new(ns: NamespaceId, db: DatabaseId, bu: &str) -> BucketKey<'_> {
-	BucketKey::new(ns, db, bu)
-}
-
-pub fn prefix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db).encode_key()?;
-	k.extend_from_slice(b"!bu\x00");
-	Ok(k)
-}
-
-pub fn suffix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db).encode_key()?;
-	k.extend_from_slice(b"!bu\xff");
-	Ok(k)
-}
-
+impl_kv_key_storekey!(BucketKey<'a> => BucketDefinition);
 impl Categorise for BucketKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::DatabaseBucket
 	}
 }
 
-impl<'a> BucketKey<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, bu: &'a str) -> Self {
-		Self {
-			__: b'/', // /
-			_a: b'*', // *
-			ns,
-			_b: b'*', // *
-			db,
-			_c: b'!', // !
-			_d: b'b', // b
-			_e: b'u', // u
-			bu: Cow::Borrowed(bu),
-		}
+key! {
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+	pub(crate) struct BucketKeyPrefix {
+		pub prefix: DatabaseRoot,
+		b'!',
+		b'b',
+		b'u',
 	}
 }
+impl_kv_range_storekey!(BucketKeyPrefix);
 
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::key::{KVKey, KVRange};
 
 	#[test]
 	fn key() {
-		let val = BucketKey::new(NamespaceId(1), DatabaseId(2), "test");
+		let val = BucketKey {
+			prefix: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+			bu: "test".into(),
+		};
 		let enc = BucketKey::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!butest\0");
+		assert_eq!(enc.as_slice(), b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!butest\0");
 	}
 
 	#[test]
 	fn prefix() {
-		let val = super::prefix(NamespaceId(1), DatabaseId(2)).unwrap();
-		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!bu\0");
-	}
-
-	#[test]
-	fn suffix() {
-		let val = super::suffix(NamespaceId(1), DatabaseId(2)).unwrap();
-		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!bu\xff");
+		let val = BucketKeyPrefix {
+			prefix: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+		}
+		.encode_range()
+		.unwrap();
+		assert_eq!(val.start.as_slice(), b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!bu\0");
+		assert_eq!(val.end.as_slice(), b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!bv");
 	}
 }

@@ -1,13 +1,16 @@
+use std::borrow::Cow;
+
 use anyhow::Result;
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::cf::{ChangeSet, DatabaseMutation, TableMutations};
 use crate::err::Error;
 use crate::expr::statements::show::ShowSince;
-use crate::key::change;
+use crate::key::database::all::DatabaseRoot;
 #[cfg(debug_assertions)]
 use crate::key::debug::Sprintable;
-use crate::kvs::{KVKey, KVValue, Transaction};
+use crate::key::{KVKeyDecode, KVRange, KVValue, change};
+use crate::kvs::Transaction;
 use crate::val::TableName;
 
 // Reads the change feed for a specific database or a table,
@@ -49,9 +52,27 @@ pub async fn read(
 	let buf = &mut [0u8; _];
 	let ts_bytes = ts.encode(buf);
 
-	let beg = change::prefix_ts(ns, db, ts_bytes).encode_key()?;
+	let beg = change::ChangeFeedTsPrefix {
+		prefix: DatabaseRoot {
+			ns,
+			db,
+		},
+		ts: Cow::Borrowed(ts_bytes),
+	}
+	.encode_bound()?;
+
 	// Calculate the end of the changefeed range
-	let end = change::suffix(ns, db).encode_key()?;
+	let end = change::ChangeFeedPrefix {
+		prefix: DatabaseRoot {
+			ns,
+			db,
+		},
+	}
+	.encode_bound()?
+	.next_neighbour_expect();
+
+	let range = (beg..end).into();
+
 	// Limit the changefeed results with a default
 	let limit = limit.unwrap_or(100).min(1000);
 	// Create an empty buffer for the timestamp
@@ -65,12 +86,12 @@ pub async fn read(
 	let mut prev_ts: Option<Vec<u8>> = None;
 
 	// iterate over _x and put decoded elements to r
-	for (k, v) in tx.scan(beg..end, limit, 0, None).await? {
+	for (k, v) in tx.scan(range, limit, 0, None).await? {
 		#[cfg(debug_assertions)]
 		trace!("Reading change feed entry: {}", k.sprint());
 
 		// Decode the changefeed entry key
-		let key = crate::key::change::Cf::decode_key(&k)?;
+		let key = crate::key::change::ChangeFeed::decode_key(&k)?;
 
 		// Invariant: scan order is ascending, so each entry's versionstamp must be
 		// >= the previous one. Process-local HLC stamping is monotonic within a node;

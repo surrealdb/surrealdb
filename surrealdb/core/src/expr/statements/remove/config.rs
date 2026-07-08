@@ -43,8 +43,10 @@ impl RemoveConfigStatement {
 						.into());
 					}
 				}
-				let key = crate::key::root::root_config::new(cg);
-				txn.del(&key).await?;
+				let key = crate::key::root::root_config::RootConfig {
+					ty: std::borrow::Cow::Borrowed(cg),
+				};
+				txn.del_key(&key).await?;
 			}
 			Base::Db => {
 				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
@@ -58,8 +60,14 @@ impl RemoveConfigStatement {
 						.into());
 					}
 				}
-				let key = crate::key::database::cg::new(ns, db, cg);
-				txn.del(&key).await?;
+				let key = crate::key::database::cg::Config {
+					prefix: crate::key::database::all::DatabaseRoot {
+						ns,
+						db,
+					},
+					ty: std::borrow::Cow::Borrowed(cg),
+				};
+				txn.del_key(&key).await?;
 			}
 			Base::Ns => {
 				fail!("config on namespace scope is not supported");

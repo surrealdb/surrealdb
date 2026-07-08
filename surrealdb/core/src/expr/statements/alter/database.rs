@@ -29,8 +29,11 @@ impl AlterDatabaseStatement {
 		let (namespace_id, database_id) = ctx.expect_ns_db_ids(opt).await?;
 		// Do we request compacting?
 		if self.compact {
-			let database_root = crate::key::database::all::new(namespace_id, database_id);
-			ctx.tx().compact(Some(database_root)).await?;
+			let database_root = crate::key::database::all::DatabaseRoot {
+				ns: namespace_id,
+				db: database_id,
+			};
+			ctx.tx().compact(&database_root).await?;
 		}
 		// Ok all good
 		Ok(Value::None)

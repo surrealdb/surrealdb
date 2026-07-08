@@ -1,6 +1,6 @@
 //! This module stores the TiKV savepoint type.
 
-use crate::kvs::{Key, Val};
+use crate::kvs::Val;
 
 /// A savepoint state capturing operations that can be undone
 #[derive(Debug, Clone)]
@@ -13,9 +13,9 @@ pub(super) struct Savepoint {
 #[derive(Debug, Clone)]
 pub(super) enum Operation {
 	/// Delete a key that was inserted
-	DeleteKey(Key),
+	DeleteKey(Vec<u8>),
 	/// Restore a key to its previous value
-	RestoreValue(Key, Val),
+	RestoreValue(Vec<u8>, Val),
 	/// Restore a key that was deleted (insert it back)
-	RestoreDeleted(Key, Val),
+	RestoreDeleted(Vec<u8>, Val),
 }

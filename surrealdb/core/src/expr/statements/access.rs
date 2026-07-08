@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use anyhow::{Result, bail, ensure};
 use rand::Rng;
 use reblessive::tree::Stk;
@@ -13,6 +15,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Cond, ControlFlow, FlowResult, FlowResultExt as _, RecordIdLit};
 use crate::iam::{Action, ResourceKind};
+use crate::key::database::all::DatabaseRoot;
 use crate::val::{Array, Datetime, Duration, Object, Value};
 use crate::{catalog, val};
 
@@ -274,8 +277,15 @@ pub async fn create_grant(
 					gr_store.grant = catalog::Grant::Bearer(grant.hashed());
 
 					let (ns, db) = ctx.get_ns_db_ids(opt).await?;
-					let key = crate::key::database::access::gr::new(ns, db, &gr.ac, &gr.id);
-					txn.put(&key, &gr_store).await
+					let key = crate::key::database::access::gr::AccessGrantKey {
+						prefix: DatabaseRoot {
+							ns,
+							db,
+						},
+						ac: Cow::Borrowed(&gr.ac),
+						gr: Cow::Borrowed(&gr.id),
+					};
+					txn.put_key(&key, &gr_store).await
 				}
 				_ => bail!(Error::AccessLevelMismatch),
 			};
@@ -392,26 +402,34 @@ pub async fn create_grant(
 			gr_store.grant = catalog::Grant::Bearer(grant.hashed());
 			let res = match base {
 				Base::Root => {
-					let key = crate::key::root::access::gr::new(&gr.ac, &gr.id);
-					txn.put(&key, &gr_store).await
+					let key = crate::key::root::access::gr::AccessGrantKey {
+						ac: Cow::Borrowed(&gr.ac),
+						gr: Cow::Borrowed(&gr.id),
+					};
+					txn.put_key(&key, &gr_store).await
 				}
 				Base::Ns => {
 					let ns = txn.get_or_add_ns(Some(ctx), opt.ns()?).await?;
-					let key =
-						crate::key::namespace::access::gr::new(ns.namespace_id, &gr.ac, &gr.id);
-					txn.put(&key, &gr_store).await
+					let key = crate::key::namespace::access::gr::AccessGrantKey {
+						ns: ns.namespace_id,
+						ac: Cow::Borrowed(&gr.ac),
+						gr: Cow::Borrowed(&gr.id),
+					};
+					txn.put_key(&key, &gr_store).await
 				}
 				Base::Db => {
 					let (ns, db) = opt.ns_db()?;
 					let db = txn.get_or_add_db(Some(ctx), ns, db).await?;
+					let key = crate::key::database::access::gr::AccessGrantKey {
+						prefix: DatabaseRoot {
+							ns: db.namespace_id,
+							db: db.database_id,
+						},
+						ac: Cow::Borrowed(&gr.ac),
+						gr: Cow::Borrowed(&gr.id),
+					};
 
-					let key = crate::key::database::access::gr::new(
-						db.namespace_id,
-						db.database_id,
-						&gr.ac,
-						&gr.id,
-					);
-					txn.put(&key, &gr_store).await
+					txn.put_key(&key, &gr_store).await
 				}
 			};
 
@@ -696,29 +714,34 @@ pub async fn revoke_grant(
 			// Revoke the grant.
 			match base {
 				Base::Root => {
-					let key = crate::key::root::access::gr::new(stmt.ac.as_str(), gr.as_str());
-					txn.set(&key, &revoke).await?;
+					let key = crate::key::root::access::gr::AccessGrantKey {
+						ac: Cow::Borrowed(&stmt.ac),
+						gr: Cow::Borrowed(gr),
+					};
+					txn.set_key(&key, &revoke).await?;
 				}
 				Base::Ns => {
 					let ns = txn.get_or_add_ns(Some(ctx), opt.ns()?).await?;
-					let key = crate::key::namespace::access::gr::new(
-						ns.namespace_id,
-						stmt.ac.as_str(),
-						gr.as_str(),
-					);
-					txn.set(&key, &revoke).await?;
+					let key = crate::key::namespace::access::gr::AccessGrantKey {
+						ns: ns.namespace_id,
+						ac: Cow::Borrowed(&stmt.ac),
+						gr: Cow::Borrowed(gr),
+					};
+					txn.set_key(&key, &revoke).await?;
 				}
 				Base::Db => {
 					let (ns, db) = opt.ns_db()?;
 					let db = txn.get_or_add_db(Some(ctx), ns, db).await?;
 
-					let key = crate::key::database::access::gr::new(
-						db.namespace_id,
-						db.database_id,
-						stmt.ac.as_str(),
-						gr,
-					);
-					txn.set(&key, &revoke).await?;
+					let key = crate::key::database::access::gr::AccessGrantKey {
+						prefix: DatabaseRoot {
+							ns: db.namespace_id,
+							db: db.database_id,
+						},
+						ac: Cow::Borrowed(&stmt.ac),
+						gr: Cow::Borrowed(gr),
+					};
+					txn.set_key(&key, &revoke).await?;
 				}
 			};
 
@@ -790,29 +813,34 @@ pub async fn revoke_grant(
 				// Revoke the grant.
 				match base {
 					Base::Root => {
-						let key = crate::key::root::access::gr::new(stmt.ac.as_str(), &gr.id);
-						txn.set(&key, &gr).await?;
+						let key = crate::key::root::access::gr::AccessGrantKey {
+							ac: Cow::Borrowed(&stmt.ac),
+							gr: Cow::Borrowed(&gr.id),
+						};
+						txn.set_key(&key, &gr).await?;
 					}
 					Base::Ns => {
 						let ns = txn.get_or_add_ns(Some(ctx), opt.ns()?).await?;
-						let key = crate::key::namespace::access::gr::new(
-							ns.namespace_id,
-							stmt.ac.as_str(),
-							&gr.id,
-						);
-						txn.set(&key, &gr).await?;
+						let key = crate::key::namespace::access::gr::AccessGrantKey {
+							ns: ns.namespace_id,
+							ac: Cow::Borrowed(&stmt.ac),
+							gr: Cow::Borrowed(&gr.id),
+						};
+						txn.set_key(&key, &gr).await?;
 					}
 					Base::Db => {
 						let (ns, db) = opt.ns_db()?;
 						let db = txn.get_or_add_db(Some(ctx), ns, db).await?;
 
-						let key = crate::key::database::access::gr::new(
-							db.namespace_id,
-							db.database_id,
-							stmt.ac.as_str(),
-							&gr.id,
-						);
-						txn.set(&key, &gr).await?;
+						let key = crate::key::database::access::gr::AccessGrantKey {
+							prefix: DatabaseRoot {
+								ns: db.namespace_id,
+								db: db.database_id,
+							},
+							ac: Cow::Borrowed(&stmt.ac),
+							gr: Cow::Borrowed(&gr.id),
+						};
+						txn.set_key(&key, &gr).await?;
 					}
 				};
 
@@ -908,22 +936,34 @@ async fn compute_purge(
 		if purge_expired || purge_revoked {
 			match base {
 				Base::Root => {
-					txn.del(&crate::key::root::access::gr::new(stmt.ac.as_str(), &gr.id)).await?
+					let key = crate::key::root::access::gr::AccessGrantKey {
+						ac: Cow::Borrowed(&stmt.ac),
+						gr: Cow::Borrowed(&gr.id),
+					};
+					txn.del_key(&key).await?
 				}
 				Base::Ns => {
 					let ns = ctx.get_ns_id(opt).await?;
-					txn.del(&crate::key::namespace::access::gr::new(ns, stmt.ac.as_str(), &gr.id))
-						.await?
+					let key = crate::key::namespace::access::gr::AccessGrantKey {
+						ns,
+						ac: Cow::Borrowed(&stmt.ac),
+						gr: Cow::Borrowed(&gr.id),
+					};
+
+					txn.del_key(&key).await?
 				}
 				Base::Db => {
 					let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-					txn.del(&crate::key::database::access::gr::new(
-						ns,
-						db,
-						stmt.ac.as_str(),
-						&gr.id,
-					))
-					.await?
+					let key = crate::key::database::access::gr::AccessGrantKey {
+						prefix: DatabaseRoot {
+							ns,
+							db,
+						},
+						ac: Cow::Borrowed(&stmt.ac),
+						gr: Cow::Borrowed(&gr.id),
+					};
+
+					txn.del_key(&key).await?
 				}
 			};
 

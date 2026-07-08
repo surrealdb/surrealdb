@@ -18,9 +18,9 @@
 //! stored in the key-value store. When a node needs IDs, it allocates a batch and uses those
 //! IDs locally until the batch is exhausted, then allocates a new batch.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -39,19 +39,21 @@ use crate::ctx::Context;
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
 use crate::idx::seqdocids::DocId;
-use crate::key::database::th::TableIdGeneratorBatchKey;
+use crate::key::database::all::DatabaseRoot;
+use crate::key::database::th::{TableIdGeneratorBatchKey, TableIdGeneratorBatchPrefix};
 use crate::key::database::ti::TableIdGeneratorStateKey;
-use crate::key::namespace::dh::DatabaseIdGeneratorBatchKey;
+use crate::key::namespace::dh::{DatabaseIdGeneratorBatchKey, DatabaseIdGeneratorBatchPrefix};
 use crate::key::namespace::di::DatabaseIdGeneratorStateKey;
-use crate::key::root::nh::NamespaceIdGeneratorBatchKey;
+use crate::key::root::nh::{NamespaceIdGeneratorBatchKey, NamespaceIdGeneratorBatchPrefix};
 use crate::key::root::ni::NamespaceIdGeneratorStateKey;
-use crate::key::sequence::Prefix;
+use crate::key::sequence::BaPrefix;
 use crate::key::sequence::ba::Ba;
 use crate::key::sequence::st::St;
-use crate::key::table::ih::IndexIdGeneratorBatchKey;
+use crate::key::table::ih::{IndexIdGeneratorBatchKey, IndexIdGeneratorBatchPrefix};
 use crate::key::table::is::IndexIdGeneratorStateKey;
+use crate::key::{KVKey, KVRange, Key, KeyRange, impl_kv_value_revisioned};
 use crate::kvs::ds::TransactionFactory;
-use crate::kvs::{KVKey, LockType, Transaction, TransactionType, impl_kv_value_revisioned};
+use crate::kvs::{LockType, Transaction, TransactionType};
 use crate::val::TableName;
 
 type SequencesMap = Arc<RwLock<HashMap<Arc<SequenceDomain>, Arc<Mutex<Sequence>>>>>;
@@ -113,40 +115,119 @@ impl SequenceDomain {
 		Self::IndexIds(ns, db, tb)
 	}
 
-	fn new_batch_range_keys(&self) -> Result<Range<Vec<u8>>> {
+	fn new_batch_range_keys(&self) -> Result<KeyRange<'static>> {
 		match self {
-			Self::UserName(ns, db, sq) => Prefix::new_ba_range(*ns, *db, sq),
+			Self::UserName(ns, db, sq) => BaPrefix {
+				prefix: DatabaseRoot {
+					ns: *ns,
+					db: *db,
+				},
+				sq: Cow::Borrowed(sq),
+			}
+			.encode_range(),
 			Self::FullTextDocIds(ibk) => ibk.new_ib_range(),
-			Self::NameSpacesIds => NamespaceIdGeneratorBatchKey::range(),
-			Self::DatabasesIds(ns) => DatabaseIdGeneratorBatchKey::range(*ns),
-			Self::TablesIds(ns, db) => TableIdGeneratorBatchKey::range(*ns, *db),
-			Self::IndexIds(ns, db, tb) => IndexIdGeneratorBatchKey::range(*ns, *db, tb),
+			Self::NameSpacesIds => NamespaceIdGeneratorBatchPrefix {}.encode_range(),
+			Self::DatabasesIds(ns) => DatabaseIdGeneratorBatchPrefix {
+				ns: *ns,
+			}
+			.encode_range(),
+			Self::TablesIds(ns, db) => TableIdGeneratorBatchPrefix {
+				prefix: DatabaseRoot {
+					ns: *ns,
+					db: *db,
+				},
+			}
+			.encode_range(),
+			Self::IndexIds(ns, db, tb) => IndexIdGeneratorBatchPrefix {
+				prefix: DatabaseRoot {
+					ns: *ns,
+					db: *db,
+				},
+				tb: Cow::Borrowed(tb),
+			}
+			.encode_range(),
 		}
 	}
 
-	fn new_batch_key(&self, start: i64) -> Result<Vec<u8>> {
+	fn new_batch_key(&self, start: i64) -> Result<Key<'static>> {
 		match &self {
-			Self::UserName(ns, db, sq) => Ba::new(*ns, *db, sq, start).encode_key(),
+			Self::UserName(ns, db, sq) => Ba {
+				prefix: DatabaseRoot {
+					ns: *ns,
+					db: *db,
+				},
+				sq: Cow::Borrowed(sq.as_str()),
+				start,
+			}
+			.encode_key(),
 			Self::FullTextDocIds(ikb) => ikb.new_ib_key(start).encode_key(),
-			Self::NameSpacesIds => NamespaceIdGeneratorBatchKey::new(start).encode_key(),
-			Self::DatabasesIds(ns) => DatabaseIdGeneratorBatchKey::new(*ns, start).encode_key(),
-			Self::TablesIds(ns, db) => TableIdGeneratorBatchKey::new(*ns, *db, start).encode_key(),
-			Self::IndexIds(ns, db, tb) => {
-				IndexIdGeneratorBatchKey::new(*ns, *db, tb, start).encode_key()
+			Self::NameSpacesIds => NamespaceIdGeneratorBatchKey {
+				start,
 			}
+			.encode_key(),
+			Self::DatabasesIds(ns) => DatabaseIdGeneratorBatchKey {
+				ns: *ns,
+				start,
+			}
+			.encode_key(),
+			Self::TablesIds(ns, db) => TableIdGeneratorBatchKey {
+				prefix: DatabaseRoot {
+					ns: *ns,
+					db: *db,
+				},
+				start,
+			}
+			.encode_key(),
+			Self::IndexIds(ns, db, tb) => IndexIdGeneratorBatchKey {
+				prefix: DatabaseRoot {
+					ns: *ns,
+					db: *db,
+				},
+				tb: Cow::Borrowed(tb),
+				start,
+			}
+			.encode_key(),
 		}
 	}
 
-	fn new_state_key(&self, nid: Uuid) -> Result<Vec<u8>> {
+	fn new_state_key(&self, nid: Uuid) -> Result<Key<'static>> {
 		match &self {
-			Self::UserName(ns, db, sq) => St::new(*ns, *db, sq, nid).encode_key(),
-			Self::FullTextDocIds(ikb) => ikb.new_is_key(nid).encode_key(),
-			Self::NameSpacesIds => NamespaceIdGeneratorStateKey::new(nid).encode_key(),
-			Self::DatabasesIds(ns) => DatabaseIdGeneratorStateKey::new(*ns, nid).encode_key(),
-			Self::TablesIds(ns, db) => TableIdGeneratorStateKey::new(*ns, *db, nid).encode_key(),
-			Self::IndexIds(ns, db, tb) => {
-				IndexIdGeneratorStateKey::new(*ns, *db, tb, nid).encode_key()
+			Self::UserName(ns, db, sq) => St {
+				root: DatabaseRoot {
+					ns: *ns,
+					db: *db,
+				},
+				sq: Cow::Borrowed(sq.as_str()),
+				nid,
 			}
+			.encode_key(),
+			Self::FullTextDocIds(ikb) => ikb.new_is_key(nid).encode_key(),
+			Self::NameSpacesIds => NamespaceIdGeneratorStateKey {
+				nid,
+			}
+			.encode_key(),
+			Self::DatabasesIds(ns) => DatabaseIdGeneratorStateKey {
+				ns: *ns,
+				nid,
+			}
+			.encode_key(),
+			Self::TablesIds(ns, db) => TableIdGeneratorStateKey {
+				prefix: DatabaseRoot {
+					ns: *ns,
+					db: *db,
+				},
+				nid,
+			}
+			.encode_key(),
+			Self::IndexIds(ns, db, tb) => IndexIdGeneratorStateKey {
+				prefix: DatabaseRoot {
+					ns: *ns,
+					db: *db,
+				},
+				tb: Cow::Borrowed(tb),
+				nid,
+			}
+			.encode_key(),
 		}
 	}
 }
@@ -412,7 +493,7 @@ struct Sequence {
 	/// The exclusive upper bound of the current batch allocation
 	to: i64,
 	/// The key used to persist this sequence's state
-	state_key: Vec<u8>,
+	state_key: Key<'static>,
 }
 
 impl Sequence {
@@ -442,7 +523,7 @@ impl Sequence {
 		// with the parent transaction in strict serialization mode (e.g., FDB)
 		let tx =
 			sqs.tf.transaction(TransactionType::Read, LockType::Optimistic, sqs.clone()).await?;
-		let mut st: SequenceState = if let Some(v) = tx.get(&state_key, None).await? {
+		let mut st: SequenceState = if let Some(v) = tx.get(state_key.as_borrowed(), None).await? {
 			revision::from_slice(&v)?
 		} else {
 			// First boot for this sequence: bump the configured start past any IDs
@@ -535,7 +616,8 @@ impl Sequence {
 			self.tf.transaction(TransactionType::Write, LockType::Optimistic, sqs.clone()).await?;
 
 		// Execute operations and ensure transaction is cancelled on error
-		match tx.set(&self.state_key, &revision::to_vec(&self.st)?).await {
+		let data = revision::to_vec(&self.st)?;
+		match tx.set(self.state_key.as_borrowed(), &data).await {
 			Ok(_) => {
 				tx.commit().await?;
 				Ok(v)
@@ -647,7 +729,7 @@ impl Sequence {
 						return Ok((next, ba.to));
 					}
 					// Otherwise we can remove this old batch and create a new one
-					tx.del(key).await?;
+					tx.del(key.as_slice().into()).await?;
 				}
 			}
 			// We compute the new batch
@@ -658,7 +740,7 @@ impl Sequence {
 				owner: sqs.nid,
 			})?;
 			let batch_key = seq.new_batch_key(next_start)?;
-			tx.set(&batch_key, &bv).await?;
+			tx.set(batch_key, &bv).await?;
 			Ok::<(i64, i64), anyhow::Error>((next_start, next_to))
 		}
 		.await;

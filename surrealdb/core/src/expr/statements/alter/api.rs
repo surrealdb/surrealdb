@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::ops::Deref;
 
 use anyhow::Result;
@@ -16,6 +17,7 @@ use crate::expr::statements::define::ApiAction;
 use crate::expr::statements::define::config::api::ApiConfig;
 use crate::expr::{Base, Expr, Literal};
 use crate::iam::{Action, AuthLimit, ResourceKind};
+use crate::key::database::all::DatabaseRoot;
 use crate::val::Value;
 
 /// A single `FOR` clause within an `ALTER API` statement.
@@ -135,8 +137,14 @@ impl AlterApiStatement {
 		// Recompute auth_limit from the current principal to prevent privilege escalation
 		ap.auth_limit = AuthLimit::new_from_auth(opt.auth.as_ref()).into();
 
-		let key = crate::key::database::ap::new(ns, db, &path_name);
-		txn.set(&key, &ap).await?;
+		let key = crate::key::database::ap::Api {
+			prefix: DatabaseRoot {
+				ns,
+				db,
+			},
+			ap: Cow::Borrowed(&path_name),
+		};
+		txn.set_key(&key, &ap).await?;
 		txn.clear_cache();
 		Ok(Value::None)
 	}

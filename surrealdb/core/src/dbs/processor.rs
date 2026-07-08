@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::ops::{Bound, Range};
+use std::ops::Bound;
 use std::sync::Arc;
 use std::vec;
 
@@ -18,8 +18,9 @@ use crate::expr::lookup::{ComputedLookupSubject, LookupKind};
 use crate::expr::statements::relate::RelateThrough;
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, RecordIterator};
 use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
-use crate::key::{graph, record, r#ref};
-use crate::kvs::{KVKey, KVValue, Key, NORMAL_BATCH_SIZE, Transaction, Val};
+use crate::key::database::all::DatabaseRoot;
+use crate::key::{KVKey, KVKeyDecode, KVRange, KVValue, KeyRange, graph, record, r#ref};
+use crate::kvs::{NORMAL_BATCH_SIZE, Transaction, Val};
 use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange, TableName, Value};
 
 impl Iterable {
@@ -81,9 +82,9 @@ impl Iterable {
 }
 
 pub(super) enum Collectable {
-	Lookup(DocumentContext, LookupKind, Key),
-	RangeKey(DocumentContext, Key),
-	TableKey(DocumentContext, Key),
+	Lookup(DocumentContext, LookupKind, Vec<u8>),
+	RangeKey(DocumentContext, Vec<u8>),
+	TableKey(DocumentContext, Vec<u8>),
 	Relatable {
 		doc_ctx: DocumentContext,
 		f: RecordId,
@@ -96,7 +97,7 @@ pub(super) enum Collectable {
 	Value(NsDbCtx, Value),
 	Defer(DocumentContext, RecordId),
 	Mergeable(DocumentContext, TableName, Option<RecordIdKey>, Value),
-	KeyVal(DocumentContext, Key, Val),
+	KeyVal(DocumentContext, Vec<u8>, Val),
 	Count(DocumentContext, usize),
 	IndexItem(DocumentContext, IndexItemRecord),
 	IndexItemKey(DocumentContext, IndexItemRecord),
@@ -132,9 +133,9 @@ impl Collectable {
 				Self::process_lookup(doc_ctx, ctx, opt, txn, kind, key, rid_only).await
 			}
 			// Range scan results - lightweight processing for range queries
-			Self::RangeKey(doc_ctx, key) => Self::process_range_key(doc_ctx, key).await,
+			Self::RangeKey(doc_ctx, key) => Self::process_range_key(doc_ctx, &key).await,
 			// Table scan results - basic key-only processing for full table scans
-			Self::TableKey(doc_ctx, key) => Self::process_table_key(doc_ctx, key).await,
+			Self::TableKey(doc_ctx, key) => Self::process_table_key(doc_ctx, &key).await,
 			// Graph relationship records - handles complex from/via/to relationship processing
 			Self::Relatable {
 				doc_ctx,
@@ -177,18 +178,18 @@ impl Collectable {
 		opt: &Options,
 		txn: &Transaction,
 		kind: LookupKind,
-		key: Key,
+		key: Vec<u8>,
 		rid_only: bool,
 	) -> Result<Processable> {
 		// Parse the data from the store
 		let (ft, fk) = match kind {
 			LookupKind::Graph(_) => {
-				let gra = graph::Graph::decode_key(&key)?;
+				let gra = graph::Graph::decode_graph_key(&key)?;
 				(gra.edge.table, gra.edge.key)
 			}
 			LookupKind::Reference => {
 				let refe = r#ref::Ref::decode_key(&key)?;
-				(refe.ft.into_owned(), refe.fk.into_owned())
+				(refe.foreign_table.into_owned(), refe.foreign_key.into_owned())
 			}
 		};
 
@@ -252,12 +253,12 @@ impl Collectable {
 	}
 
 	#[instrument(level = "trace", skip_all)]
-	async fn process_range_key(doc_ctx: DocumentContext, key: Key) -> Result<Processable> {
-		let key = record::RecordKey::decode_key(&key)?;
+	async fn process_range_key(doc_ctx: DocumentContext, key: &[u8]) -> Result<Processable> {
+		let key = record::RecordKey::decode_key(key)?;
 		let val = Record::new(Value::Null);
 		let rid = RecordId {
 			table: key.tb.into_owned(),
-			key: key.id,
+			key: key.id.into_owned(),
 		};
 		// Create a new operable value
 		let val = Operable::Value(val.into());
@@ -274,11 +275,11 @@ impl Collectable {
 	}
 
 	#[instrument(level = "trace", skip_all)]
-	async fn process_table_key(doc_ctx: DocumentContext, key: Key) -> Result<Processable> {
-		let key = record::RecordKey::decode_key(&key)?;
+	async fn process_table_key(doc_ctx: DocumentContext, key: &[u8]) -> Result<Processable> {
+		let key = record::RecordKey::decode_key(key)?;
 		let rid = RecordId {
 			table: key.tb.into_owned(),
-			key: key.id,
+			key: key.id.into_owned(),
 		};
 		// Process the record
 		let pro = Processable {
@@ -476,11 +477,11 @@ impl Collectable {
 	}
 
 	#[instrument(level = "trace", skip_all)]
-	fn process_key_val(doc_ctx: DocumentContext, key: &Key, val: &[u8]) -> Result<Processable> {
+	fn process_key_val(doc_ctx: DocumentContext, key: &[u8], val: &[u8]) -> Result<Processable> {
 		let key = record::RecordKey::decode_key(key)?;
 		let rid = RecordId {
 			table: key.tb.into_owned(),
-			key: key.id,
+			key: key.id.into_owned(),
 		};
 		let val = Record::kv_decode_value(val, rid.clone())?;
 		// Create a new operable value
@@ -751,9 +752,9 @@ pub(super) trait Collector {
 		&mut self,
 		ctx: &FrozenContext,
 		opt: &Options,
-		mut rng: Range<Key>,
+		mut rng: KeyRange<'_>,
 		sc: ScanDirection,
-	) -> Result<Option<Range<Key>>> {
+	) -> Result<Option<KeyRange<'static>>> {
 		// Fast-forward a key range by skipping the first N keys when a START clause is
 		// active.
 		//
@@ -765,7 +766,7 @@ pub(super) trait Collector {
 		let skippable = ite.skippable();
 		if skippable == 0 {
 			// There is nothing to skip, we return the original range.
-			return Ok(Some(rng));
+			return Ok(Some(rng.into_static()));
 		}
 		// Get the transaction
 		let txn = ctx.tx();
@@ -801,14 +802,14 @@ pub(super) trait Collector {
 		// We set the range for the next iteration
 		match sc {
 			ScanDirection::Forward => {
-				last_key.push(0xFF);
-				rng.start = last_key;
+				rng.start.clone_from_slice(&last_key);
+				rng.start.advance();
 			}
 			ScanDirection::Backward => {
-				rng.end = last_key;
+				rng.end.clone_from_slice(&last_key);
 			}
 		}
-		Ok(Some(rng))
+		Ok(Some(rng.into_static()))
 	}
 
 	#[instrument(level = "trace", skip_all)]
@@ -824,11 +825,17 @@ pub(super) trait Collector {
 		let db = doc_ctx.db().database_id;
 
 		// Prepare the start and end keys
-		let beg = record::prefix(ns, db, table)?;
-		let end = record::suffix(ns, db, table)?;
+		let range = record::RecordKeyPrefix {
+			root: DatabaseRoot {
+				ns,
+				db,
+			},
+			table: Cow::Borrowed(table),
+		}
+		.encode_range()?;
 
 		// Optionally skip keys
-		let Some(rng) = self.start_skip(ctx, opt, beg..end, sc).await? else {
+		let Some(rng) = self.start_skip(ctx, opt, range, sc).await? else {
 			return Ok(());
 		};
 
@@ -846,7 +853,7 @@ pub(super) trait Collector {
 			// per-item `self.collect(...)` await may need to call back into
 			// the cursor's transaction, which can't co-exist with the
 			// outstanding `&mut self` borrow on the cursor.
-			let owned: Vec<(Key, Val)> =
+			let owned: Vec<(Vec<u8>, Val)> =
 				batch.iter().map(|(k, v)| (k.to_vec(), v.to_vec())).collect();
 			for (k, v) in owned {
 				if ctx.is_done(Some(count)).await? {
@@ -873,10 +880,16 @@ pub(super) trait Collector {
 		let db = doc_ctx.db().database_id;
 
 		// Prepare the start and end keys
-		let beg = record::prefix(ns, db, table)?;
-		let end = record::suffix(ns, db, table)?;
+		let range = record::RecordKeyPrefix {
+			root: DatabaseRoot {
+				ns,
+				db,
+			},
+			table: Cow::Borrowed(table),
+		}
+		.encode_range()?;
 		// Optionally skip keys
-		let rng = if let Some(rng) = self.start_skip(ctx, opt, beg..end, sc).await? {
+		let rng = if let Some(rng) = self.start_skip(ctx, opt, range, sc).await? {
 			// Returns the next range of keys
 			rng
 		} else {
@@ -893,7 +906,7 @@ pub(super) trait Collector {
 			if batch.is_empty() {
 				break;
 			}
-			let owned: Vec<Key> = batch.iter().map(|k| k.to_vec()).collect();
+			let owned: Vec<Vec<u8>> = batch.iter().map(|k| k.to_vec()).collect();
 			for k in owned {
 				if ctx.is_done(Some(count)).await? {
 					break 'outer;
@@ -916,10 +929,16 @@ pub(super) trait Collector {
 	) -> Result<()> {
 		let ns = doc_ctx.ns().namespace_id;
 		let db = doc_ctx.db().database_id;
-		let beg = record::prefix(ns, db, v)?;
-		let end = record::suffix(ns, db, v)?;
+		let range = record::RecordKeyPrefix {
+			root: DatabaseRoot {
+				ns,
+				db,
+			},
+			table: Cow::Borrowed(v),
+		}
+		.encode_range()?;
 		// Create a new iterable range
-		let count = ctx.tx().count(beg..end, opt.version).await?;
+		let count = ctx.tx().count(range, opt.version).await?;
 		// Collect the count
 		self.collect(Collectable::Count(doc_ctx, count)).await?;
 		// Everything ok
@@ -932,27 +951,58 @@ pub(super) trait Collector {
 		db: DatabaseId,
 		tb: &TableName,
 		r: RecordIdKeyRange,
-	) -> Result<(Vec<u8>, Vec<u8>)> {
-		let beg = match &r.start {
-			Bound::Unbounded => record::prefix(ns, db, tb)?,
-			Bound::Included(v) => record::new(ns, db, tb, v).encode_key()?,
-			Bound::Excluded(v) => {
-				let mut key = record::new(ns, db, tb, v).encode_key()?;
-				key.push(0x00);
-				key
+	) -> Result<KeyRange<'_>> {
+		let prefix = DatabaseRoot {
+			ns,
+			db,
+		};
+		let start = match &r.start {
+			Bound::Unbounded => record::RecordKeyPrefix {
+				root: prefix,
+				table: Cow::Borrowed(tb),
 			}
+			.encode_bound()?
+			.next(),
+			Bound::Included(v) => record::RecordKey {
+				root: prefix,
+				tb: Cow::Borrowed(tb),
+				id: Cow::Borrowed(v),
+			}
+			.encode_key()?,
+			Bound::Excluded(v) => record::RecordKey {
+				root: prefix,
+				tb: Cow::Borrowed(tb),
+				id: Cow::Borrowed(v),
+			}
+			.encode_key()?
+			.next(),
 		};
 		// Prepare the range end key
 		let end = match &r.end {
-			Bound::Unbounded => record::suffix(ns, db, tb)?,
-			Bound::Excluded(v) => record::new(ns, db, tb, v).encode_key()?,
-			Bound::Included(v) => {
-				let mut key = record::new(ns, db, tb, v).encode_key()?;
-				key.push(0x00);
-				key
+			Bound::Unbounded => record::RecordKeyPrefix {
+				root: prefix,
+				table: Cow::Borrowed(tb),
 			}
+			.encode_bound()?
+			.next_neighbour_expect(),
+			Bound::Included(v) => record::RecordKey {
+				root: prefix,
+				tb: Cow::Borrowed(tb),
+				id: Cow::Borrowed(v),
+			}
+			.encode_key()?
+			.next(),
+			Bound::Excluded(v) => record::RecordKey {
+				root: prefix,
+				tb: Cow::Borrowed(tb),
+				id: Cow::Borrowed(v),
+			}
+			.encode_key()?,
 		};
-		Ok((beg, end))
+		Ok(KeyRange {
+			start,
+			end,
+		})
 	}
 
 	#[instrument(level = "trace", skip_all)]
@@ -968,9 +1018,9 @@ pub(super) trait Collector {
 		let ns = doc_ctx.ns().namespace_id;
 		let db = doc_ctx.db().database_id;
 		// Prepare
-		let (beg, end) = Self::range_prepare(ns, db, table_name, r).await?;
+		let rng = Self::range_prepare(ns, db, table_name, r).await?;
 		// Optionally skip keys
-		let rng = if let Some(rng) = self.start_skip(ctx, opt, beg..end, sc).await? {
+		let rng = if let Some(rng) = self.start_skip(ctx, opt, rng, sc).await? {
 			// Returns the next range of keys
 			rng
 		} else {
@@ -987,7 +1037,7 @@ pub(super) trait Collector {
 			if batch.is_empty() {
 				break;
 			}
-			let owned: Vec<(Key, Val)> =
+			let owned: Vec<(Vec<u8>, Val)> =
 				batch.iter().map(|(k, v)| (k.to_vec(), v.to_vec())).collect();
 			for (k, v) in owned {
 				if ctx.is_done(Some(count)).await? {
@@ -1017,9 +1067,9 @@ pub(super) trait Collector {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Prepare
-		let (beg, end) = Self::range_prepare(ns, db, tb, r).await?;
+		let rng = Self::range_prepare(ns, db, tb, r).await?;
 		// Optionally skip keys
-		let rng = if let Some(rng) = self.start_skip(ctx, opt, beg..end, sc).await? {
+		let rng = if let Some(rng) = self.start_skip(ctx, opt, rng, sc).await? {
 			// Returns the next range of keys
 			rng
 		} else {
@@ -1035,7 +1085,7 @@ pub(super) trait Collector {
 			if batch.is_empty() {
 				break;
 			}
-			let owned: Vec<Key> = batch.iter().map(|k| k.to_vec()).collect();
+			let owned: Vec<Vec<u8>> = batch.iter().map(|k| k.to_vec()).collect();
 			for k in owned {
 				if ctx.is_done(Some(count)).await? {
 					break 'outer;
@@ -1060,10 +1110,10 @@ pub(super) trait Collector {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Prepare
-		let (beg, end) =
+		let range =
 			Self::range_prepare(doc_ctx.ns().namespace_id, doc_ctx.db().database_id, tb, r).await?;
 		// Create a new iterable range
-		let count = txn.count(beg..end, opt.version).await?;
+		let count = txn.count(range, opt.version).await?;
 		// Collect the count
 		self.collect(Collectable::Count(doc_ctx, count)).await?;
 		// Everything ok
@@ -1082,51 +1132,64 @@ pub(super) trait Collector {
 	) -> Result<()> {
 		let ns = doc_ctx.ns().namespace_id;
 		let db = doc_ctx.db().database_id;
+		let prefix = DatabaseRoot {
+			ns,
+			db,
+		};
 
 		// Pull out options
 		let tb = &from.table;
-		let id = &from.key;
 		// Fetch start and end key pairs
-		let keys = match (what.is_empty(), &kind) {
-			(true, LookupKind::Reference) => {
-				vec![(r#ref::prefix(ns, db, tb, id)?, r#ref::suffix(ns, db, tb, id)?)]
-			}
+		let ranges = match (what.is_empty(), &kind) {
+			(true, LookupKind::Reference) => vec![
+				r#ref::Prefix {
+					root: prefix,
+					tb: Cow::Borrowed(tb),
+					id: Cow::Borrowed(&from.key),
+				}
+				.encode_range()?,
+			],
 			(true, LookupKind::Graph(dir)) => match dir {
 				// /ns/db/tb/id
-				Dir::Both => {
-					vec![(graph::prefix(ns, db, tb, id)?, graph::suffix(ns, db, tb, id)?)]
-				}
-				// /ns/db/tb/id/IN
-				Dir::In => vec![(
-					graph::egprefix(ns, db, tb, id, *dir)?,
-					graph::egsuffix(ns, db, tb, id, *dir)?,
-				)],
-				// /ns/db/tb/id/OUT
-				Dir::Out => vec![(
-					graph::egprefix(ns, db, tb, id, *dir)?,
-					graph::egsuffix(ns, db, tb, id, *dir)?,
-				)],
+				Dir::Both => vec![
+					graph::Prefix {
+						prefix,
+						tb: Cow::Borrowed(tb),
+						id: Cow::Borrowed(&from.key),
+					}
+					.encode_range()?,
+				],
+				x => vec![
+					graph::PrefixDir {
+						prefix,
+						tb: Cow::Borrowed(tb),
+						id: Cow::Borrowed(&from.key),
+						dir: *x,
+					}
+					.encode_range()?,
+				],
 			},
 			(false, LookupKind::Graph(Dir::Both)) => what
 				.iter()
 				.flat_map(|v| {
 					[
-						v.presuf(ns, db, tb, id, &LookupKind::Graph(Dir::In)),
-						v.presuf(ns, db, tb, id, &LookupKind::Graph(Dir::Out)),
+						v.presuf(ns, db, tb, &from.key, &LookupKind::Graph(Dir::In)),
+						v.presuf(ns, db, tb, &from.key, &LookupKind::Graph(Dir::Out)),
 					]
 				})
 				.collect::<Result<Vec<_>>>()?,
-			(false, kind) => {
-				what.iter().map(|v| v.presuf(ns, db, tb, id, kind)).collect::<Result<Vec<_>>>()?
-			}
+			(false, kind) => what
+				.iter()
+				.map(|v| v.presuf(ns, db, tb, &from.key, kind))
+				.collect::<Result<Vec<_>>>()?,
 		};
 		// Get the transaction
 		let txn = ctx.tx();
 		// Loop over the chosen edge types
-		'keys: for (beg, end) in keys {
+		'keys: for rng in ranges {
 			// Create a new iterable range
 			let mut cursor =
-				txn.open_keys_cursor(beg..end, ScanDirection::Forward, 0, opt.version).await?;
+				txn.open_keys_cursor(rng, ScanDirection::Forward, 0, opt.version).await?;
 			// Loop until no more entries
 			let mut count = 0;
 			loop {
@@ -1134,7 +1197,7 @@ pub(super) trait Collector {
 				if batch.is_empty() {
 					break;
 				}
-				let owned: Vec<Key> = batch.iter().map(|k| k.to_vec()).collect();
+				let owned: Vec<Vec<u8>> = batch.iter().map(|k| k.to_vec()).collect();
 				for key in owned {
 					if ctx.is_done(Some(count)).await? {
 						break 'keys;

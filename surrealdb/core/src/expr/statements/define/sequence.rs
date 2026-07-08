@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
@@ -11,8 +13,10 @@ use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, FlowResultExt, Literal, Value};
 use crate::iam::{Action, ResourceKind};
+use crate::key::KVRange;
+use crate::key::database::all::DatabaseRoot;
 use crate::key::database::sq::Sq;
-use crate::key::sequence::Prefix;
+use crate::key::sequence::{BaPrefix, StPrefix};
 use crate::val::Duration;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -82,7 +86,13 @@ impl DefineSequenceStatement {
 		};
 
 		// Process the statement
-		let key = Sq::new(db.namespace_id, db.database_id, &name);
+		let key = Sq {
+			prefix: DatabaseRoot {
+				ns: db.namespace_id,
+				db: db.database_id,
+			},
+			sq: Cow::Borrowed(&name),
+		};
 
 		let batch = stk
 			.run(|stk| self.batch.compute(stk, ctx, opt, doc))
@@ -110,12 +120,26 @@ impl DefineSequenceStatement {
 			timeout,
 		};
 		// Set the definition
-		txn.set(&key, &sq).await?;
+		txn.set_key(&key, &sq).await?;
 
 		// Clear any pre-existing sequence records
-		let ba_range = Prefix::new_ba_range(db.namespace_id, db.database_id, &sq.name)?;
+		let ba_range = BaPrefix {
+			prefix: DatabaseRoot {
+				ns: db.namespace_id,
+				db: db.database_id,
+			},
+			sq: Cow::Borrowed(&sq.name),
+		}
+		.encode_range()?;
 		txn.delr(ba_range).await?;
-		let st_range = Prefix::new_st_range(db.namespace_id, db.database_id, &sq.name)?;
+		let st_range = StPrefix {
+			prefix: DatabaseRoot {
+				ns: db.namespace_id,
+				db: db.database_id,
+			},
+			sq: Cow::Borrowed(&sq.name),
+		}
+		.encode_range()?;
 		txn.delr(st_range).await?;
 
 		// Clear the cache

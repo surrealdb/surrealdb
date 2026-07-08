@@ -26,14 +26,11 @@ use crate::expr::FlowResultExt as _;
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::index::IndexOperation;
 use crate::key::index::ig::IndexAppending;
-use crate::key::record;
 use crate::key::table::bg::Bg;
 use crate::key::table::bp::Bp;
 use crate::key::table::br::Br;
-use crate::kvs::{
-	INDEXING_BATCH_SIZE, Key, Transaction, Val, impl_kv_value_revisioned,
-	is_retryable_transaction_conflict,
-};
+use crate::key::{KVKeyDecode, impl_kv_value_revisioned, record};
+use crate::kvs::{INDEXING_BATCH_SIZE, Transaction, Val, is_retryable_transaction_conflict};
 use crate::val::{RecordId, RecordIdKey, Value};
 
 #[revisioned(revision = 2)]
@@ -365,7 +362,7 @@ impl Building {
 			}
 			for key in keys {
 				let br = Br::decode_key(&key)?;
-				if let Some(reservation) = tx.get(&br, None).await? {
+				if let Some(reservation) = tx.get_key(&br, None).await? {
 					// One reservation now covers an entire user transaction's
 					// batch of mutations on this index, so existence of any
 					// `!bg(generation, ticket, *)` entry signals that the
@@ -379,7 +376,7 @@ impl Building {
 					let writer_dead = reservation.expires_at <= now
 						&& !self.reservation_node_is_live(&tx, reservation.node).await?;
 					if appending_committed || writer_dead {
-						tx.del(&br).await?;
+						tx.del_key(&br).await?;
 					} else {
 						blocked = true;
 					}
@@ -448,7 +445,7 @@ impl Building {
 			let tx = ctx.tx();
 			for key in keys {
 				let br = Br::decode_key(&key)?;
-				if let Some(reservation) = tx.get(&br, None).await? {
+				if let Some(reservation) = tx.get_key(&br, None).await? {
 					// Same retire test as `wait_for_durable_reservations`: any
 					// committed `!bg(gen, ticket, *)` means the writer's user
 					// transaction committed (its main-table writes are durable),
@@ -461,7 +458,7 @@ impl Building {
 					let writer_dead = reservation.expires_at <= now
 						&& !self.reservation_node_is_live(&tx, reservation.node).await?;
 					if appending_committed || writer_dead {
-						tx.del(&br).await?;
+						tx.del_key(&br).await?;
 					} else {
 						blocked = true;
 					}
@@ -506,7 +503,7 @@ impl Building {
 		&self,
 		ctx: &FrozenContext,
 		tx: &Transaction,
-		values: &[(Key, Val)],
+		values: &[(Vec<u8>, Val)],
 		initial_count: usize,
 		v1_appending_sentinel: &mut bool,
 		count_primary_cursor: &mut Option<Option<RecordIdKey>>,
@@ -532,7 +529,7 @@ impl Building {
 				let val: Record = revision::from_slice(v.as_slice())?;
 				let rid: Arc<RecordId> = RecordId {
 					table: key.tb.into_owned(),
-					key: key.id,
+					key: key.id.into_owned(),
 				}
 				.into();
 				if count_primary_cursor.is_some() {
@@ -748,16 +745,16 @@ impl Building {
 				if scan.live_ids.contains(&bp.id) {
 					continue;
 				}
-				let Some(ptr) = scan.lookup_tx.get(&bp, None).await? else {
+				let Some(ptr) = scan.lookup_tx.get_key(&bp, None).await? else {
 					continue;
 				};
 				let bg = self.ikb.new_bg_key(bp.generation, ptr.ticket, ptr.mutation_seq);
-				let Some(appending) = scan.lookup_tx.get(&bg, None).await? else {
+				let Some(appending) = scan.lookup_tx.get_key(&bg, None).await? else {
 					return Err(Error::CorruptedIndex("Durable appending record is missing").into());
 				};
 				let rid = RecordId {
 					table: self.ikb.table().clone(),
-					key: bp.id.clone(),
+					key: bp.id.into_owned(),
 				};
 				let count_cond_match =
 					appending.count_cond_match.map(|(old_matches, _)| (false, old_matches));
@@ -818,17 +815,17 @@ impl Building {
 	) -> Result<ExistingPrimaryAppending> {
 		let generation = self.build_generation.load(Ordering::Acquire);
 		if generation != 0 {
-			let bp = self.ikb.new_bp_key(generation, id_key.clone());
-			if let Some(ptr) = tx.get(&bp, None).await? {
+			let bp = self.ikb.new_bp_key(generation, id_key);
+			if let Some(ptr) = tx.get_key(&bp, None).await? {
 				let bg = self.ikb.new_bg_key(generation, ptr.ticket, ptr.mutation_seq);
-				let Some(appending) = tx.get(&bg, None).await? else {
+				let Some(appending) = tx.get_key(&bg, None).await? else {
 					return Err(Error::CorruptedIndex("Durable appending record is missing").into());
 				};
 				return Ok(ExistingPrimaryAppending::Appending(appending));
 			}
 		}
 		let ip = self.ikb.new_ip_key(id_key.clone());
-		let Some(pa) = tx.get(&ip, None).await? else {
+		let Some(pa) = tx.get_key(&ip, None).await? else {
 			return Ok(ExistingPrimaryAppending::None);
 		};
 		// Use the old values from the queued update as the initial indexing input.
@@ -836,7 +833,7 @@ impl Building {
 			return Ok(ExistingPrimaryAppending::Legacy);
 		}
 		let ig = self.ikb.new_ig_key(pa.0, pa.1);
-		let Some(appending) = tx.get(&ig, None).await? else {
+		let Some(appending) = tx.get_key(&ig, None).await? else {
 			return Err(Error::CorruptedIndex("Appending record is missing").into());
 		};
 		Ok(ExistingPrimaryAppending::Appending(appending))
@@ -849,9 +846,9 @@ impl Building {
 		let ctx = self.new_write_tx_ctx().await?;
 		let tx = ctx.tx();
 		let ip = self.ikb.new_ip_key(id_key.clone());
-		let pa = catch!(tx, tx.get(&ip, None).await);
+		let pa = catch!(tx, tx.get_key(&ip, None).await);
 		if matches!(pa, Some(pa) if pa.1 == LEGACY_BATCH_ID) {
-			catch!(tx, tx.del(&ip).await);
+			catch!(tx, tx.del_key(&ip).await);
 		}
 		let res = tx.commit().await;
 		match res {
@@ -915,7 +912,7 @@ impl Building {
 		&self,
 		ctx: &FrozenContext,
 		tx: &Transaction,
-		keys: Vec<Key>,
+		keys: Vec<Vec<u8>>,
 		count: &mut usize,
 	) -> Result<()> {
 		let mut rc = false;
@@ -929,15 +926,15 @@ impl Building {
 			}
 			self.is_beyond_threshold(Some(*count))?;
 			let ig = IndexAppending::decode_key(&k)?;
-			if let Some(appending) = tx.get(&ig, None).await? {
+			if let Some(appending) = tx.get_key(&ig, None).await? {
 				let rid_key = self
 					.apply_appending(ctx, &mut stack, &fulltext_index, appending, &mut rc)
 					.await?;
-				tx.del(&ig).await?;
+				tx.del_key(&ig).await?;
 
 				// We can delete the ip record if any
 				let ip = self.ikb.new_ip_key(rid_key);
-				tx.del(&ip).await?;
+				tx.del_key(&ip).await?;
 			}
 
 			*count += 1;
@@ -953,7 +950,7 @@ impl Building {
 		&self,
 		ctx: &FrozenContext,
 		tx: &Transaction,
-		keys: Vec<Key>,
+		keys: Vec<Vec<u8>>,
 		count: &mut usize,
 	) -> Result<()> {
 		let mut rc = false;
@@ -967,14 +964,14 @@ impl Building {
 			}
 			self.is_beyond_threshold(Some(*count))?;
 			let bg = Bg::decode_key(&k)?;
-			if let Some(appending) = tx.get(&bg, None).await? {
+			if let Some(appending) = tx.get_key(&bg, None).await? {
 				let rid_key = self
 					.apply_appending(ctx, &mut stack, &fulltext_index, appending, &mut rc)
 					.await?;
-				tx.del(&bg).await?;
-				let bp = self.ikb.new_bp_key(bg.generation, rid_key);
-				tx.del(&bp).await?;
-				tx.del(&self.ikb.new_br_key(bg.generation, bg.ticket)).await?;
+				tx.del_key(&bg).await?;
+				let bp = self.ikb.new_bp_key(bg.generation, &rid_key);
+				tx.del_key(&bp).await?;
+				tx.del_key(&self.ikb.new_br_key(bg.generation, bg.ticket)).await?;
 			}
 			*count += 1;
 		}

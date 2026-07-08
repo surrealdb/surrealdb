@@ -9,7 +9,7 @@
 //! The output can be copy-pasted into the appropriate version module (e.g., `v3_0_0.rs`).
 
 use super::fixtures as fix;
-use crate::kvs::KVValue;
+use crate::key::KVValue;
 
 /// A fixture definition with its name, description, and serialized bytes.
 ///

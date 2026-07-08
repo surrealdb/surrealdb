@@ -1,12 +1,14 @@
+use std::borrow::Cow;
 use std::time::Duration;
 
 use anyhow::Result;
 
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::key::lqe;
+use crate::key::database::all::DatabaseRoot;
+use crate::key::{KVRange, lqe};
 use crate::kvs::tasklease::LeaseHandler;
-use crate::kvs::{BoxTimeStamp, BoxTimeStampImpl, KVKey, Transaction};
+use crate::kvs::{BoxTimeStamp, BoxTimeStampImpl, Transaction};
 
 /// Garbage-collect the dedicated live-query event keyspace.
 ///
@@ -60,8 +62,23 @@ async fn gc_range(
 	let beg_ts = ts_impl.earliest().encode(&mut buf);
 	let mut buf = [0u8; _];
 	let end_ts = ts.encode(&mut buf);
-	let beg = lqe::prefix_ts(ns, db, beg_ts).encode_key()?;
-	let end = lqe::prefix_ts(ns, db, end_ts).encode_key()?;
-	tx.delr(beg..end).await?;
+	let beg = lqe::LqeTsRange {
+		prefix: DatabaseRoot {
+			ns,
+			db,
+		},
+		ts: Cow::Borrowed(beg_ts),
+	}
+	.encode_bound()?;
+	let end = lqe::LqeTsRange {
+		prefix: DatabaseRoot {
+			ns,
+			db,
+		},
+		ts: Cow::Borrowed(end_ts),
+	}
+	.encode_bound()?;
+
+	tx.delr((beg..end).into()).await?;
 	Ok(())
 }

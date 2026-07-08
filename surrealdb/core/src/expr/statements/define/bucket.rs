@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
@@ -10,6 +12,7 @@ use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, FlowResultExt, Literal};
 use crate::iam::{Action, ResourceKind};
+use crate::key::database::all::DatabaseRoot;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -94,7 +97,13 @@ impl DefineBucketStatement {
 		}
 
 		// Process the statement
-		let key = crate::key::database::bu::new(ns, db, &name);
+		let key = crate::key::database::bu::BucketKey {
+			prefix: DatabaseRoot {
+				ns,
+				db,
+			},
+			bu: Cow::Borrowed(&name),
+		};
 
 		let comment = stk
 			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
@@ -110,7 +119,7 @@ impl DefineBucketStatement {
 			readonly: self.readonly,
 			comment,
 		};
-		txn.set(&key, &ap).await?;
+		txn.set_key(&key, &ap).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good

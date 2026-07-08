@@ -514,9 +514,9 @@ async fn expand_row(
 	let mut edge_rids: Vec<RecordId> = Vec::new();
 	let mut decoded_targets: Vec<Option<RecordId>> = Vec::new();
 
-	for (beg, end) in ranges {
+	for range in ranges {
 		let mut cursor = txn
-			.open_keys_cursor(beg..end, ScanDirection::Forward, 0, version)
+			.open_keys_cursor(range, ScanDirection::Forward, 0, version)
 			.await
 			.context("Failed to open graph cursor")?;
 		loop {

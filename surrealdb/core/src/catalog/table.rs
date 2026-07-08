@@ -8,7 +8,7 @@ use crate::catalog::{DatabaseId, NamespaceId, Permissions, ViewDefinition};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{ChangeFeed, Kind};
 use crate::fmt::EscapeKwFreeIdent;
-use crate::kvs::impl_kv_value_revisioned;
+use crate::key::impl_kv_value_revisioned;
 use crate::sql;
 use crate::sql::statements::DefineTableStatement;
 use crate::val::{TableName, Value};

@@ -133,7 +133,7 @@ impl CreateInfo {
 				// freshly built handle still sees whatever earlier tests left behind.
 				// Physically drop the entire keyspace out-of-transaction; `bootstrap`
 				// below then re-seeds the node keys. See `reset_storage`.
-				ds.unsafe_destroy_range(vec![0u8], vec![0xffu8]).await?;
+				ds.unsafe_destroy_range((vec![0u8]..vec![0xffu8]).into()).await?;
 				ds
 			}
 		};
@@ -171,8 +171,8 @@ impl CreateInfo {
 	/// these are the same prefixes the retained-key check whitelists.
 	async fn reset_storage(&self, ds: &Datastore) -> Result<()> {
 		if let Backend::TikV = self.backend {
-			ds.unsafe_destroy_range(vec![0u8], b"/!ic".to_vec()).await?;
-			ds.unsafe_destroy_range(b"/!ns".to_vec(), vec![0xffu8]).await?;
+			ds.unsafe_destroy_range((vec![0u8]..b"/!ic".to_vec()).into()).await?;
+			ds.unsafe_destroy_range((b"/!ns".as_slice()..[0xffu8].as_slice()).into()).await?;
 		}
 		Ok(())
 	}

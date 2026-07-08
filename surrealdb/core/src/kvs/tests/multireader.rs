@@ -10,19 +10,19 @@ pub async fn multireader(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Insert an initial key
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.set(&"test", &"some text".as_bytes().to_vec()).await.unwrap();
+	tx.set("test".as_bytes().into(), &"some text".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx1 = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx1.get(&"test", None).await.unwrap().unwrap();
+	let val = tx1.get(b"test".into(), None).await.unwrap().unwrap();
 	assert_eq!(val, b"some text");
 	// Create a readonly transaction
 	let tx2 = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx2.get(&"test", None).await.unwrap().unwrap();
+	let val = tx2.get(b"test".into(), None).await.unwrap().unwrap();
 	assert_eq!(val, b"some text");
 	// Create a readonly transaction
 	let tx3 = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx3.get(&"test", None).await.unwrap().unwrap();
+	let val = tx3.get(b"test".into(), None).await.unwrap().unwrap();
 	assert_eq!(val, b"some text");
 	// Cancel both readonly transactions
 	tx1.cancel().await.unwrap();

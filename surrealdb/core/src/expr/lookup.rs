@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::ops::Bound;
 
 use anyhow::{Result, bail};
@@ -11,8 +12,9 @@ use crate::doc::CursorDoc;
 use crate::expr::order::Ordering;
 use crate::expr::start::Start;
 use crate::expr::{Cond, Dir, Fields, Groups, Idiom, Limit, RecordIdKeyRangeLit, Splits};
-use crate::kvs::KVKey;
-use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange, TableName};
+use crate::key::database::all::DatabaseRoot;
+use crate::key::{KVKey, KVRange, KeyRange};
+use crate::val::{RecordIdKey, RecordIdKeyRange, TableName};
 
 /// A lookup is a unified way of looking up graph edges and record references.
 /// Since they both work very similarly, they also both support the same operations
@@ -149,7 +151,11 @@ impl ComputedLookupSubject {
 		tb: &TableName,
 		id: &RecordIdKey,
 		kind: &LookupKind,
-	) -> Result<(Vec<u8>, Vec<u8>)> {
+	) -> Result<KeyRange<'_>> {
+		let prefix = DatabaseRoot {
+			ns,
+			db,
+		};
 		match kind {
 			// We're looking up record references
 			LookupKind::Reference => match self {
@@ -157,18 +163,27 @@ impl ComputedLookupSubject {
 				Self::Table {
 					table,
 					referencing_field: None,
-				} => Ok((
-					crate::key::r#ref::ftprefix(ns, db, tb, id, table)?,
-					crate::key::r#ref::ftsuffix(ns, db, tb, id, table)?,
-				)),
+				} => crate::key::r#ref::PrefixFt {
+					prefix,
+					tb: Cow::Borrowed(tb),
+					id: Cow::Borrowed(id),
+					ft: Cow::Borrowed(table),
+				}
+				.encode_bound()
+				.map(|x| x.prefix_expect()),
 				// Scan the entire range with a referencing field
 				Self::Table {
 					table,
 					referencing_field: Some(field),
-				} => Ok((
-					crate::key::r#ref::ffprefix(ns, db, tb, id, table, field)?,
-					crate::key::r#ref::ffsuffix(ns, db, tb, id, table, field)?,
-				)),
+				} => crate::key::r#ref::PrefixField {
+					prefix,
+					tb: Cow::Borrowed(tb),
+					id: Cow::Borrowed(id),
+					ft: Cow::Borrowed(table),
+					ff: Cow::Borrowed(field),
+				}
+				.encode_bound()
+				.map(|x| x.prefix_expect()),
 				// Scan a specific range
 				Self::Range {
 					table,
@@ -180,31 +195,73 @@ impl ComputedLookupSubject {
 							"Cannot scan a specific range of record references without a referencing field"
 						);
 					};
-					let beg = match &range.start {
-						Bound::Unbounded => {
-							crate::key::r#ref::ffprefix(ns, db, tb, id, table, field)?
+
+					let start = match &range.start {
+						Bound::Unbounded => crate::key::r#ref::PrefixField {
+							prefix,
+							tb: Cow::Borrowed(tb),
+							id: Cow::Borrowed(id),
+							ft: Cow::Borrowed(table),
+							ff: Cow::Borrowed(field),
 						}
-						Bound::Included(v) => {
-							crate::key::r#ref::refprefix(ns, db, tb, id, table, field, v)?
+						.encode_bound()?,
+						Bound::Included(v) => crate::key::r#ref::Ref {
+							prefix,
+							table: Cow::Borrowed(tb),
+							id: Cow::Borrowed(id),
+							foreign_table: Cow::Borrowed(table),
+							foreign_field: Cow::Borrowed(field),
+							foreign_key: Cow::Borrowed(v),
 						}
-						Bound::Excluded(v) => {
-							crate::key::r#ref::refsuffix(ns, db, tb, id, table, field, v)?
+						.encode_key()?,
+						Bound::Excluded(v) => crate::key::r#ref::Ref {
+							prefix,
+							table: Cow::Borrowed(tb),
+							id: Cow::Borrowed(id),
+							foreign_table: Cow::Borrowed(table),
+							foreign_field: Cow::Borrowed(field),
+							foreign_key: Cow::Borrowed(v),
 						}
+						.encode_key()?
+						.next(),
 					};
 					// Prepare the range end key
 					let end = match &range.end {
-						Bound::Unbounded => {
-							crate::key::r#ref::ffsuffix(ns, db, tb, id, table, field)?
+						Bound::Unbounded => crate::key::r#ref::PrefixField {
+							prefix,
+							tb: Cow::Borrowed(tb),
+							id: Cow::Borrowed(id),
+							ft: Cow::Borrowed(table),
+							ff: Cow::Borrowed(field),
 						}
-						Bound::Excluded(v) => {
-							crate::key::r#ref::refprefix(ns, db, tb, id, table, field, v)?
+						.encode_bound()?
+						.next_neighbour()
+						.expect("Reference prefix to have a neighbour"),
+						Bound::Included(v) => crate::key::r#ref::Ref {
+							prefix,
+							table: Cow::Borrowed(tb),
+							id: Cow::Borrowed(id),
+							foreign_table: Cow::Borrowed(table),
+							foreign_field: Cow::Borrowed(field),
+							foreign_key: Cow::Borrowed(v),
 						}
-						Bound::Included(v) => {
-							crate::key::r#ref::refsuffix(ns, db, tb, id, table, field, v)?
+						.encode_key()?
+						.next(),
+						Bound::Excluded(v) => crate::key::r#ref::Ref {
+							prefix,
+							table: Cow::Borrowed(tb),
+							id: Cow::Borrowed(id),
+							foreign_table: Cow::Borrowed(table),
+							foreign_field: Cow::Borrowed(field),
+							foreign_key: Cow::Borrowed(v),
 						}
+						.encode_key()?,
 					};
 
-					Ok((beg, end))
+					Ok(KeyRange {
+						start,
+						end,
+					})
 				}
 			},
 			// We're looking up graph edges
@@ -213,91 +270,94 @@ impl ComputedLookupSubject {
 				Self::Table {
 					table,
 					..
-				} => Ok((
-					crate::key::graph::ftprefix(ns, db, tb, id, *dir, table)?,
-					crate::key::graph::ftsuffix(ns, db, tb, id, *dir, table)?,
-				)),
+				} => Ok(crate::key::graph::PrefixFt {
+					prefix,
+					tb: Cow::Borrowed(tb),
+					id: Cow::Borrowed(id),
+					dir: *dir,
+					foreign_table: Cow::Borrowed(table),
+				}
+				.encode_range()?),
 				// Scan a specific range
 				Self::Range {
 					table,
 					range,
 					..
 				} => {
-					let beg = match &range.start {
-						Bound::Unbounded => {
-							crate::key::graph::ftprefix(ns, db, tb, id, *dir, table)?
+					let start = match &range.start {
+						Bound::Unbounded => crate::key::graph::PrefixFt {
+							prefix,
+							tb: Cow::Borrowed(tb),
+							id: Cow::Borrowed(id),
+							dir: *dir,
+							foreign_table: Cow::Borrowed(table),
 						}
-						Bound::Included(v) => crate::key::graph::new(
-							ns,
-							db,
-							tb,
-							id,
-							*dir,
-							&RecordId {
-								table: table.clone(),
-								key: v.clone(),
-							},
-						)
+						.encode_bound()?,
+						Bound::Included(v) => crate::key::graph::Graph {
+							prefix,
+							tb: Cow::Borrowed(tb),
+							id: Cow::Borrowed(id),
+							dir: *dir,
+							foreign_table: Cow::Borrowed(table),
+							foreign_key: Cow::Borrowed(v),
+						}
 						.encode_key()?,
-						// Append `0xff` to skip past any new-format key for
-						// this fk that embeds a target vertex after the
-						// legacy bytes; see `eval_graph_bound` in the
-						// streaming scan operator for the same logic.
-						Bound::Excluded(v) => crate::key::graph::new(
-							ns,
-							db,
-							tb,
-							id,
-							*dir,
-							&RecordId {
-								table: table.clone(),
-								key: v.to_owned(),
-							},
-						)
-						.encode_key()
-						.map(|mut v| {
-							v.push(0xff);
-							v
-						})?,
+						Bound::Excluded(v) => crate::key::graph::Graph {
+							prefix,
+							tb: Cow::Borrowed(tb),
+							id: Cow::Borrowed(id),
+							dir: *dir,
+							foreign_table: Cow::Borrowed(table),
+							foreign_key: Cow::Borrowed(v),
+						}
+						.encode_key()?
+						// We need next_neighbour because this key is only a prefix of the actual
+						// key stored in the KV store, next_neighbour will skip over any key which
+						// has this key as a prefix.
+						.next_neighbour_expect(),
 					};
 					// Prepare the range end key
 					let end = match &range.end {
-						Bound::Unbounded => {
-							crate::key::graph::ftsuffix(ns, db, tb, id, *dir, table)?
+						Bound::Unbounded => crate::key::graph::PrefixFt {
+							prefix,
+							tb: Cow::Borrowed(tb),
+							id: Cow::Borrowed(id),
+							dir: *dir,
+							foreign_table: Cow::Borrowed(table),
 						}
-						Bound::Excluded(v) => crate::key::graph::new(
-							ns,
-							db,
-							tb,
-							id,
-							*dir,
-							&RecordId {
-								table: table.clone(),
-								key: v.to_owned(),
-							},
-						)
-						.encode_key()?,
+						.encode_bound()?
+						.next_neighbour()
+						.expect("Expect the graph prefix to have a neighbour"),
+						Bound::Included(v) => crate::key::graph::Graph {
+							prefix,
+							tb: Cow::Borrowed(tb),
+							id: Cow::Borrowed(id),
+							dir: *dir,
+							foreign_table: Cow::Borrowed(table),
+							foreign_key: Cow::Borrowed(v),
+						}
+						.encode_key()?
+						// We need next_neighbour because this key is only a prefix of the actual
+						// key stored in the KV store, next_neighbour will skip over any key which
+						// has this key as a prefix.
+						.next_neighbour_expect(),
 						// Append `0xff` to include any new-format key for
 						// this fk (target bytes follow the legacy encoding).
-						Bound::Included(v) => crate::key::graph::new(
-							ns,
-							db,
-							tb,
-							id,
-							*dir,
-							&RecordId {
-								table: table.clone(),
-								key: v.to_owned(),
-							},
-						)
-						.encode_key()
-						.map(|mut v| {
-							v.push(0xff);
-							v
-						})?,
+						Bound::Excluded(v) => crate::key::graph::Graph {
+							prefix,
+							tb: Cow::Borrowed(tb),
+							id: Cow::Borrowed(id),
+							dir: *dir,
+							foreign_table: Cow::Borrowed(table),
+							foreign_key: Cow::Borrowed(v),
+						}
+						.encode_key()?,
 					};
 
-					Ok((beg, end))
+					Ok(KeyRange {
+						start,
+						end,
+					})
 				}
 			},
 		}

@@ -154,7 +154,8 @@ mod test {
 
 	#[test]
 	fn test_surrealkv_config_from_params() {
-		let map = ConfigMap::from_config_string("versioned=true&retention=30d&sync=every");
+		let map = ConfigMap::from_config_string("versioned=true&retention=30d&sync=every")
+			.map_keys(|x| format!("datastore_{x}"));
 		let config = map.load::<SurrealKvConfig>();
 		assert!(config.versioned);
 		assert_eq!(config.retention, Duration::from_secs(30 * 24 * 60 * 60));
@@ -163,7 +164,7 @@ mod test {
 
 	#[test]
 	fn test_surrealkv_config_interval_sync() {
-		let map = ConfigMap::from_config_string("sync=5s");
+		let map = ConfigMap::from_config_string("sync=5s").map_keys(|x| format!("datastore_{x}"));
 		let config = map.load::<SurrealKvConfig>();
 		assert_eq!(config.sync_mode, SyncMode::Interval(Duration::from_secs(5)));
 	}

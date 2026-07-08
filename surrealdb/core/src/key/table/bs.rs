@@ -5,53 +5,30 @@
 //! planner visibility.
 use std::borrow::Cow;
 
-use storekey::{BorrowDecode, Encode};
-
-use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+use crate::catalog::IndexId;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::impl_kv_key_storekey;
+use crate::key::database::all::DatabaseRoot;
+use crate::key::{impl_kv_key_storekey, key};
 use crate::kvs::index::IndexBuildState;
 use crate::val::TableName;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-#[storekey(format = "()")]
-pub(crate) struct Bs<'a> {
-	__: u8,
-	_a: u8,
-	pub ns: NamespaceId,
-	_b: u8,
-	pub db: DatabaseId,
-	_c: u8,
-	pub tb: Cow<'a, TableName>,
-	_d: u8,
-	_e: u8,
-	_f: u8,
-	pub ix: IndexId,
+key! {
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+		pub(crate) struct Bs<'a> {
+		pub prefix: DatabaseRoot,
+		b'*',
+		pub tb: Cow<'a, TableName>,
+		b'!',
+		b'b',
+		b's',
+		pub ix: IndexId,
+	}
 }
 
-impl_kv_key_storekey!(Bs<'_> => IndexBuildState);
+impl_kv_key_storekey!(Bs<'a> => IndexBuildState);
 
 impl Categorise for Bs<'_> {
 	fn categorise(&self) -> Category {
 		Category::IndexBuildState
-	}
-}
-
-impl<'a> Bs<'a> {
-	/// Create the durable build-state key for one table index.
-	pub(crate) fn new(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, ix: IndexId) -> Self {
-		Self {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
-			_c: b'*',
-			tb: Cow::Borrowed(tb),
-			_d: b'!',
-			_e: b'b',
-			_f: b's',
-			ix,
-		}
 	}
 }

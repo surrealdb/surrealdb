@@ -26,12 +26,11 @@ mod direction;
 mod ds;
 mod err;
 mod into;
-mod key;
 mod threadpool;
 mod timestamp;
 mod tr;
 mod tx;
-mod util;
+pub(crate) mod util;
 
 mod indxdb;
 mod mem;
@@ -65,7 +64,6 @@ pub use ds::{
 };
 pub use err::{Error, Result};
 pub use into::IntoBytes;
-pub(crate) use key::{KVKey, KVValue, impl_kv_key_storekey, impl_kv_value_revisioned};
 pub use timestamp::{
 	BoxTimeStamp, BoxTimeStampImpl, HlcTimeStamp, HlcTimeStampImpl, IncTimeStampImpl,
 	MAX_TIMESTAMP_BYTES, TimeStamp, TimeStampImpl,
@@ -73,9 +71,6 @@ pub use timestamp::{
 pub use tr::{LockType, TransactionType, Transactor};
 pub(crate) use tx::CachePolicy;
 pub use tx::Transaction;
-
-/// The key part of a key-value pair. An alias for [`Vec<u8>`].
-pub type Key = Vec<u8>;
 
 /// The value part of a key-value pair. An alias for [`Vec<u8>`].
 pub type Val = Vec<u8>;

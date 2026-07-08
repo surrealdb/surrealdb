@@ -1,6 +1,8 @@
 pub mod api;
 pub mod defaults;
 
+use std::borrow::Cow;
+
 use anyhow::{Result, bail};
 use api::ApiConfig;
 use defaults::DefaultConfig;
@@ -16,6 +18,7 @@ use crate::err::Error;
 use crate::expr::Value;
 use crate::expr::statements::define::DefineKind;
 use crate::iam::{Action, ConfigKind, ResourceKind};
+use crate::key::database::all::DatabaseRoot;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct DefineConfigStatement {
@@ -97,10 +100,12 @@ impl DefineConfigStatement {
 				}
 
 				// Compute the config
-				let key = crate::key::root::root_config::new(cg);
+				let key = crate::key::root::root_config::RootConfig {
+					ty: Cow::Borrowed(cg),
+				};
 				let store = self.inner.compute(stk, ctx, opt, doc).await?;
 				// Put the config
-				txn.replace(&key, &store).await?;
+				txn.replace_key(&key, &store).await?;
 				// Clear the cache
 				txn.clear_cache();
 			}
@@ -125,10 +130,16 @@ impl DefineConfigStatement {
 				}
 
 				// Compute the config
-				let key = crate::key::database::cg::new(ns, db, cg);
+				let key = crate::key::database::cg::Config {
+					prefix: DatabaseRoot {
+						ns,
+						db,
+					},
+					ty: Cow::Borrowed(cg),
+				};
 				let store = self.inner.compute(stk, ctx, opt, doc).await?;
 				// Put the config
-				txn.replace(&key, &store).await?;
+				txn.replace_key(&key, &store).await?;
 				// Clear the cache
 				txn.clear_cache();
 			}

@@ -51,7 +51,8 @@ use crate::idx::trees::diskann::{DiskAnnElement, DiskAnnNode, DiskAnnState, Elem
 use crate::idx::trees::vector::SerializedVector;
 #[cfg(test)]
 use crate::idx::trees::vector::Vector;
-use crate::kvs::{KVValue, Transaction};
+use crate::key::KVValue;
+use crate::kvs::Transaction;
 
 /// Provider execution context passed through the upstream DiskANN trait calls.
 #[derive(Clone)]
@@ -209,7 +210,7 @@ impl DiskAnnProvider {
 		if let Some(state) = self.cache.get_state(index) {
 			return Ok(state);
 		}
-		let state = context.tx.get(&context.ikb.new_ds_key(), None).await?.unwrap_or_default();
+		let state = context.tx.get_key(&context.ikb.new_ds_key(), None).await?.unwrap_or_default();
 		if !context.tx.writeable() {
 			self.cache.insert_state(index, state.clone());
 		}
@@ -222,7 +223,7 @@ impl DiskAnnProvider {
 		context: &DiskAnnProviderContext,
 		state: &DiskAnnState,
 	) -> Result<()> {
-		context.tx.set(&context.ikb.new_ds_key(), state).await?;
+		context.tx.set_key(&context.ikb.new_ds_key(), state).await?;
 		self.cache.insert_state(self.cache_index(), state.clone());
 		Ok(())
 	}
@@ -249,7 +250,8 @@ impl DiskAnnProvider {
 			}
 		}
 		if !miss_keys.is_empty() {
-			let fetched: Vec<Option<DiskAnnElement>> = context.tx.getm(miss_keys, None).await?;
+			let fetched: Vec<Option<DiskAnnElement>> =
+				context.tx.get_many_key(miss_keys, None).await?;
 			let cache_misses = !context.tx.writeable();
 			for ((pos, element_id), element) in miss_positions.into_iter().zip(fetched) {
 				if let Some(element) = element {
@@ -286,7 +288,8 @@ impl DiskAnnProvider {
 			}
 		}
 		if !miss_keys.is_empty() {
-			let fetched: Vec<Option<DiskAnnNode>> = context.tx.getm(miss_keys, None).await?;
+			let fetched: Vec<Option<DiskAnnNode>> =
+				context.tx.get_many_key(miss_keys, None).await?;
 			let cache_misses = !context.tx.writeable();
 			for ((pos, element_id), node) in miss_positions.into_iter().zip(fetched) {
 				if let Some(node) = node {
@@ -481,7 +484,7 @@ where
 		};
 		context
 			.tx
-			.set(&key, &element)
+			.set_key(&key, &element)
 			.await
 			.map_err(|e| ANNError::log_index_error(e.to_string()))?;
 		// Writable-tx cache write-through: only sound because the caller is inside an
@@ -512,7 +515,7 @@ impl Delete for DiskAnnProvider {
 		element.deleted = true;
 		context
 			.tx
-			.set(&key, &element)
+			.set_key(&key, &element)
 			.await
 			.map_err(|e| ANNError::log_index_error(e.to_string()))?;
 		// Keep the deleted marker hot and visible to subsequent status checks.
@@ -527,7 +530,7 @@ impl Delete for DiskAnnProvider {
 	) -> Result<(), Self::Error> {
 		context
 			.tx
-			.del(&context.ikb.new_de_key(id))
+			.del_key(&context.ikb.new_de_key(id))
 			.await
 			.map_err(|e| ANNError::log_index_error(e.to_string()))?;
 		// Release removes the element record entirely, so remove any cached vector/status too.
@@ -835,7 +838,7 @@ impl NeighborAccessorMut for DiskAnnNeighborAccessor<'_> {
 		};
 		self.context
 			.tx
-			.set(&self.context.ikb.new_dn_key(id), &node)
+			.set_key(&self.context.ikb.new_dn_key(id), &node)
 			.await
 			.map_err(|e| ANNError::log_index_error(e.to_string()))?;
 		// Keep cached adjacency coherent with the persisted graph mutation.
@@ -862,7 +865,7 @@ impl NeighborAccessorMut for DiskAnnNeighborAccessor<'_> {
 		}
 		self.context
 			.tx
-			.set(&key, &node)
+			.set_key(&key, &node)
 			.await
 			.map_err(|e| ANNError::log_index_error(e.to_string()))?;
 		// Keep cached adjacency coherent with the persisted graph mutation.
@@ -966,7 +969,7 @@ mod tests {
 		let (provider, context) = provider_and_context().await?;
 		context
 			.tx
-			.set(
+			.set_key(
 				&context.ikb.new_de_key(1),
 				&DiskAnnElement {
 					vector: SerializedVector::F32(vec![1.0, 2.0]),
@@ -976,7 +979,7 @@ mod tests {
 			.await?;
 		context
 			.tx
-			.set(
+			.set_key(
 				&context.ikb.new_de_key(2),
 				&DiskAnnElement {
 					vector: SerializedVector::F32(vec![3.0, 4.0]),
@@ -1011,7 +1014,7 @@ mod tests {
 		let (provider, context) = provider_and_context().await?;
 		context
 			.tx
-			.set(
+			.set_key(
 				&context.ikb.new_dn_key(1),
 				&DiskAnnNode {
 					neighbors: vec![2, 3],
@@ -1020,7 +1023,7 @@ mod tests {
 			.await?;
 		context
 			.tx
-			.set(
+			.set_key(
 				&context.ikb.new_dn_key(2),
 				&DiskAnnNode {
 					neighbors: vec![4],
@@ -1048,7 +1051,7 @@ mod tests {
 		let (provider, context) = provider_and_context().await?;
 		context
 			.tx
-			.set(
+			.set_key(
 				&context.ikb.new_de_key(1),
 				&DiskAnnElement {
 					vector: SerializedVector::F32(vec![1.0, 2.0]),
@@ -1058,7 +1061,7 @@ mod tests {
 			.await?;
 		context
 			.tx
-			.set(
+			.set_key(
 				&context.ikb.new_de_key(2),
 				&DiskAnnElement {
 					vector: SerializedVector::F32(vec![3.0, 4.0]),

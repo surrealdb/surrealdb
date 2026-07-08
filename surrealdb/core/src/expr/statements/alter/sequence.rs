@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::ops::Deref;
 
 use anyhow::Result;
@@ -13,6 +14,7 @@ use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, FlowResultExt, Literal, Value};
 use crate::iam::{Action, ResourceKind};
+use crate::key::database::all::DatabaseRoot;
 use crate::key::database::sq::Sq;
 use crate::val::Duration;
 
@@ -75,8 +77,14 @@ impl AlterSequenceStatement {
 			}
 		}
 		// Set the sequence definition
-		let key = Sq::new(ns, db, &name);
-		txn.set(&key, &sq).await?;
+		let key = Sq {
+			prefix: DatabaseRoot {
+				ns,
+				db,
+			},
+			sq: Cow::Borrowed(&name),
+		};
+		txn.set_key(&key, &sq).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good

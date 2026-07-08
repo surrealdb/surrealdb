@@ -4,6 +4,7 @@
 //! that reference a given source record. Unlike graph edges which are explicit
 //! relationships, references are field-level links tracked by the database.
 
+use std::borrow::Cow;
 use std::ops::Bound;
 use std::sync::Arc;
 
@@ -21,6 +22,8 @@ use crate::exec::{
 use crate::expr::ControlFlow;
 use crate::iam::Action;
 use crate::idx::planner::ScanDirection;
+use crate::key::database::all::DatabaseRoot;
+use crate::key::{KVKey, KVKeyDecode, KVRange, KeyRange};
 use crate::kvs::CachePolicy;
 use crate::val::{RecordId, TableName};
 
@@ -201,7 +204,7 @@ impl ExecOperator for ReferenceScan {
 
 				// Scan references for each target record
 				for rid in &target_rids {
-					let (beg, end) = compute_ref_key_range(
+					let range = compute_ref_key_range(
 						ns_id, db_id, rid,
 						referencing_table.as_ref(),
 						referencing_field.as_deref(),
@@ -210,7 +213,7 @@ impl ExecOperator for ReferenceScan {
 					).await?;
 
 					let mut cursor = txn
-						.open_keys_cursor(beg..end, ScanDirection::Forward, 0, version)
+						.open_keys_cursor(range, ScanDirection::Forward, 0, version)
 						.await
 						.context("Failed to open reference cursor")?;
 					loop {
@@ -223,8 +226,8 @@ impl ExecOperator for ReferenceScan {
 								&mut |key| match crate::key::r#ref::Ref::decode_key(key) {
 									Ok(decoded) => {
 										rid_batch.push(RecordId {
-											table: decoded.ft.into_owned(),
-											key: decoded.fk.into_owned(),
+											table: decoded.foreign_table.into_owned(),
+											key: decoded.foreign_key.into_owned(),
 										});
 										Ok(std::ops::ControlFlow::Continue(()))
 									}
@@ -289,102 +292,130 @@ async fn compute_ref_key_range(
 	range_start: &Bound<Arc<dyn PhysicalExpr>>,
 	range_end: &Bound<Arc<dyn PhysicalExpr>>,
 	ctx: &ExecutionContext,
-) -> Result<(Vec<u8>, Vec<u8>), ControlFlow> {
+) -> Result<KeyRange<'static>, ControlFlow> {
 	let has_range =
 		!matches!(range_start, Bound::Unbounded) || !matches!(range_end, Bound::Unbounded);
 
+	let prefix = DatabaseRoot {
+		ns: ns_id,
+		db: db_id,
+	};
+
 	if has_range {
 		// Range-bounded scan requires both table and field
-		let table = referencing_table
-			.context("Range-bounded reference scans require a referencing table")?;
-		let field = referencing_field.context(
-			"Cannot scan a specific range of record references without a referencing field",
-		)?;
+		let table = referencing_table.ok_or_else(|| {
+			anyhow::anyhow!("Range-bounded reference scans require a referencing table")
+		})?;
+		let field = referencing_field.ok_or_else(|| {
+			anyhow::anyhow!(
+				"Cannot scan a specific range of record references without a referencing field"
+			)
+		})?;
 
-		let beg = eval_ref_bound(ns_id, db_id, rid, table, field, range_start, true, ctx).await?;
-		let end = eval_ref_bound(ns_id, db_id, rid, table, field, range_end, false, ctx).await?;
-		Ok((beg, end))
+		let start = match range_start {
+			Bound::Included(x) => {
+				let fk = evaluate_bound_key(x, ctx).await?;
+				crate::key::r#ref::Ref {
+					prefix,
+					table: Cow::Borrowed(&rid.table),
+					id: Cow::Borrowed(&rid.key),
+					foreign_table: Cow::Borrowed(table),
+					foreign_field: field.into(),
+					foreign_key: Cow::Owned(fk),
+				}
+				.encode_key()?
+			}
+			Bound::Excluded(x) => {
+				let fk = evaluate_bound_key(x, ctx).await?;
+				crate::key::r#ref::Ref {
+					prefix,
+					table: Cow::Borrowed(&rid.table),
+					id: Cow::Borrowed(&rid.key),
+					foreign_table: Cow::Borrowed(table),
+					foreign_field: field.into(),
+					foreign_key: Cow::Owned(fk),
+				}
+				.encode_key()?
+				.next()
+			}
+			Bound::Unbounded => crate::key::r#ref::PrefixField {
+				prefix,
+				tb: Cow::Borrowed(&rid.table),
+				id: Cow::Borrowed(&rid.key),
+				ft: Cow::Borrowed(table),
+				ff: Cow::Borrowed(field),
+			}
+			.encode_bound()?,
+		};
+
+		let end = match range_end {
+			Bound::Included(x) => {
+				let fk = evaluate_bound_key(x, ctx).await?;
+				crate::key::r#ref::Ref {
+					prefix,
+					table: Cow::Borrowed(&rid.table),
+					id: Cow::Borrowed(&rid.key),
+					foreign_table: Cow::Borrowed(table),
+					foreign_field: Cow::Borrowed(field),
+					foreign_key: Cow::Owned(fk),
+				}
+				.encode_key()?
+				.next()
+			}
+			Bound::Excluded(x) => {
+				let fk = evaluate_bound_key(x, ctx).await?;
+				crate::key::r#ref::Ref {
+					prefix,
+					table: Cow::Borrowed(&rid.table),
+					id: Cow::Borrowed(&rid.key),
+					foreign_table: Cow::Borrowed(table),
+					foreign_field: Cow::Borrowed(field),
+					foreign_key: Cow::Owned(fk),
+				}
+				.encode_key()?
+			}
+			Bound::Unbounded => crate::key::r#ref::PrefixField {
+				prefix,
+				tb: Cow::Borrowed(&rid.table),
+				id: Cow::Borrowed(&rid.key),
+				ft: Cow::Borrowed(table),
+				ff: Cow::Borrowed(field),
+			}
+			.encode_bound()?
+			.next_neighbour()
+			.expect("Should have a valid prefix"),
+		};
+
+		Ok(KeyRange {
+			start,
+			end,
+		})
 	} else if let Some(table) = referencing_table {
 		if let Some(field) = referencing_field {
-			// Field-specific scan
-			let beg = crate::key::r#ref::ffprefix(ns_id, db_id, &rid.table, &rid.key, table, field)
-				.context("Failed to create field prefix")?;
-			let end = crate::key::r#ref::ffsuffix(ns_id, db_id, &rid.table, &rid.key, table, field)
-				.context("Failed to create field suffix")?;
-			Ok((beg, end))
+			Ok(crate::key::r#ref::PrefixField {
+				prefix,
+				tb: Cow::Borrowed(&rid.table),
+				id: Cow::Borrowed(&rid.key),
+				ft: Cow::Borrowed(table),
+				ff: Cow::Borrowed(field),
+			}
+			.encode_range()?)
 		} else {
-			// Table-only scan (all fields)
-			let beg = crate::key::r#ref::ftprefix(ns_id, db_id, &rid.table, &rid.key, table)
-				.context("Failed to create table prefix")?;
-			let end = crate::key::r#ref::ftsuffix(ns_id, db_id, &rid.table, &rid.key, table)
-				.context("Failed to create table suffix")?;
-			Ok((beg, end))
+			Ok(crate::key::r#ref::PrefixFt {
+				prefix,
+				tb: Cow::Borrowed(&rid.table),
+				id: Cow::Borrowed(&rid.key),
+				ft: Cow::Borrowed(table),
+			}
+			.encode_range()?)
 		}
 	} else {
-		// Wildcard scan: all references for this record (any table, any field)
-		let beg = crate::key::r#ref::prefix(ns_id, db_id, &rid.table, &rid.key)
-			.context("Failed to create wildcard prefix")?;
-		let end = crate::key::r#ref::suffix(ns_id, db_id, &rid.table, &rid.key)
-			.context("Failed to create wildcard suffix")?;
-		Ok((beg, end))
-	}
-}
-
-/// Evaluate a single start or end bound of a reference key range.
-///
-/// `is_start` determines the fallback for `Unbounded` (prefix vs suffix) and
-/// the semantics of `Included` / `Excluded` bounds:
-///
-/// | Bound     | start (`is_start=true`) | end (`is_start=false`)    |
-/// |-----------|-------------------------|---------------------------|
-/// | Unbounded | `ffprefix`              | `ffsuffix`                |
-/// | Included  | `refprefix` (from key)  | `refsuffix` (through key) |
-/// | Excluded  | `refsuffix` (past key)  | `refprefix` (before key)  |
-#[allow(clippy::too_many_arguments)]
-async fn eval_ref_bound(
-	ns_id: NamespaceId,
-	db_id: DatabaseId,
-	rid: &RecordId,
-	table: &TableName,
-	field: &str,
-	bound: &Bound<Arc<dyn PhysicalExpr>>,
-	is_start: bool,
-	ctx: &ExecutionContext,
-) -> Result<Vec<u8>, ControlFlow> {
-	match bound {
-		Bound::Unbounded => {
-			if is_start {
-				crate::key::r#ref::ffprefix(ns_id, db_id, &rid.table, &rid.key, table, field)
-					.context("Failed to create field prefix")
-			} else {
-				crate::key::r#ref::ffsuffix(ns_id, db_id, &rid.table, &rid.key, table, field)
-					.context("Failed to create field suffix")
-			}
+		Ok(crate::key::r#ref::Prefix {
+			root: prefix,
+			tb: Cow::Borrowed(&rid.table),
+			id: Cow::Borrowed(&rid.key),
 		}
-		Bound::Included(expr) => {
-			let fk = evaluate_bound_key(expr, ctx).await?;
-			// Included start → refprefix (begin at key)
-			// Included end   → refsuffix (include key)
-			if is_start {
-				crate::key::r#ref::refprefix(ns_id, db_id, &rid.table, &rid.key, table, field, &fk)
-					.context("Failed to create range key")
-			} else {
-				crate::key::r#ref::refsuffix(ns_id, db_id, &rid.table, &rid.key, table, field, &fk)
-					.context("Failed to create range key")
-			}
-		}
-		Bound::Excluded(expr) => {
-			let fk = evaluate_bound_key(expr, ctx).await?;
-			// Excluded start → refsuffix (skip past key)
-			// Excluded end   → refprefix (stop before key)
-			if is_start {
-				crate::key::r#ref::refsuffix(ns_id, db_id, &rid.table, &rid.key, table, field, &fk)
-					.context("Failed to create range key")
-			} else {
-				crate::key::r#ref::refprefix(ns_id, db_id, &rid.table, &rid.key, table, field, &fk)
-					.context("Failed to create range key")
-			}
-		}
+		.encode_range()?)
 	}
 }
 

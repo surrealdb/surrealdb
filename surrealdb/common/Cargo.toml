@@ -1,18 +1,24 @@
 [package]
 name = "surrealdb-common"
-authors.workspace = true
 edition.workspace = true
-license-file.workspace = true
-publish.workspace = true
 version.workspace = true
+authors.workspace = true
+publish.workspace = true
 description.workspace = true
 repository.workspace = true
 homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
+license-file.workspace = true
 
 [dependencies]
 hashbrown.workspace = true
+futures.workspace = true
+
+
+[dev-dependencies]
+hashbrown.workspace = true
+tokio = { workspace = true, features = ["rt","time"] }
 
 [lints]
 workspace = true

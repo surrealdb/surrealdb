@@ -64,7 +64,6 @@ use std::sync::atomic::Ordering;
 use rocksdb::{DBRawIteratorWithThreadMode, OptimisticTransactionDB};
 
 use super::{Direction, Transaction};
-use crate::kvs::Key;
 use crate::kvs::api::{
 	BoxFut, KeySpan, KeyValSpan, KeyVisitor, KeysBatch, ScanChunkStats, ScanCursorKeys,
 	ScanCursorVals, ValVisitor, ValsBatch,
@@ -114,10 +113,10 @@ pub(in crate::kvs) struct ScanStateKeys {
 	/// for `Direction::Forward`. The iterator's own
 	/// `iterate_lower_bound` is also set to this value, so seeks before
 	/// it are no-ops.
-	pub(super) start: Key,
+	pub(super) start: Vec<u8>,
 	/// Upper bound of the original range. Used by the first-time seek
 	/// for `Direction::Backward`.
-	pub(super) end: Key,
+	pub(super) end: Vec<u8>,
 	/// Concatenated key bytes for the most recent batch. Reused across
 	/// `next_batch` calls — the underlying allocation persists, only the
 	/// contents are replaced.
@@ -138,9 +137,9 @@ pub(in crate::kvs) struct ScanStateVals {
 	/// First-batch skip count; see [`ScanStateKeys::skip`].
 	pub(super) skip: u32,
 	/// Original range lower bound.
-	pub(super) start: Key,
+	pub(super) start: Vec<u8>,
 	/// Original range upper bound.
-	pub(super) end: Key,
+	pub(super) end: Vec<u8>,
 	/// Concatenated key bytes for the most recent batch. Reused.
 	pub(super) key_buf: Vec<u8>,
 	/// Concatenated value bytes for the most recent batch. Reused.

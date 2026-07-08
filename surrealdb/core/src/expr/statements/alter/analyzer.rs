@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::ops::Deref;
 
 use anyhow::Result;
@@ -13,6 +14,7 @@ use crate::doc::CursorDoc;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Filter, Literal, Tokenizer};
 use crate::iam::{Action, ResourceKind};
+use crate::key::database::all::DatabaseRoot;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -87,8 +89,14 @@ impl AlterAnalyzerStatement {
 			AlterKind::None => {}
 		}
 
-		let key = crate::key::database::az::new(ns, db, &name);
-		txn.set(&key, &az).await?;
+		let key = crate::key::database::az::Analyzer {
+			prefix: DatabaseRoot {
+				ns,
+				db,
+			},
+			az: Cow::Borrowed(&name),
+		};
+		txn.set_key(&key, &az).await?;
 		txn.clear_cache();
 		Ok(Value::None)
 	}

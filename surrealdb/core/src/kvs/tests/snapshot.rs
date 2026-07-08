@@ -10,29 +10,29 @@ pub async fn snapshot(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Insert an initial key
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.set(&"test", &"some text".as_bytes().to_vec()).await.unwrap();
+	tx.set("test".as_bytes().into(), "some text".as_bytes()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx1 = ds.transaction(Read, Optimistic).await.unwrap();
 	// Check that the key was inserted ok
-	let val = tx1.get(&"test", None).await.unwrap().unwrap();
+	let val = tx1.get("test".as_bytes().into(), None).await.unwrap().unwrap();
 	assert_eq!(val, b"some text");
 	// Create a new writeable transaction
 	let txw = ds.transaction(Write, Optimistic).await.unwrap();
 	// Update the test key content
-	txw.set(&"test", &"other text".as_bytes().to_vec()).await.unwrap();
+	txw.set("test".as_bytes().into(), "other text".as_bytes()).await.unwrap();
 	// Create a readonly transaction
 	let tx2 = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx2.get(&"test", None).await.unwrap().unwrap();
+	let val = tx2.get("test".as_bytes().into(), None).await.unwrap().unwrap();
 	assert_eq!(val, b"some text");
 	// Create a readonly transaction
 	let tx3 = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx3.get(&"test", None).await.unwrap().unwrap();
+	let val = tx3.get("test".as_bytes().into(), None).await.unwrap().unwrap();
 	assert_eq!(val, b"some text");
 	// Update the test key content
-	txw.set(&"test", &"extra text".as_bytes().to_vec()).await.unwrap();
+	txw.set("test".as_bytes().into(), "extra text".as_bytes()).await.unwrap();
 	// Check the key from the original transaction
-	let val = tx1.get(&"test", None).await.unwrap().unwrap();
+	let val = (*tx1).get("test".as_bytes().into(), None).await.unwrap().unwrap();
 	assert_eq!(val, b"some text");
 	// Cancel both readonly transactions
 	tx1.cancel().await.unwrap();
@@ -42,7 +42,7 @@ pub async fn snapshot(new_ds: impl CreateDs) {
 	txw.commit().await.unwrap();
 	// Check that the key was updated ok
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
-	let val = tx.get(&"test", None).await.unwrap().unwrap();
+	let val = tx.get("test".as_bytes().into(), None).await.unwrap().unwrap();
 	assert_eq!(val, b"extra text");
 	tx.cancel().await.unwrap();
 }

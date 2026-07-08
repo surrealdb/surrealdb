@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use anyhow::Result;
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
@@ -10,6 +12,7 @@ use crate::doc::CursorDoc;
 use crate::expr::Base;
 use crate::expr::statements::define::config::ConfigInner;
 use crate::iam::{Action, ConfigKind, ResourceKind};
+use crate::key::database::all::DatabaseRoot;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -61,8 +64,14 @@ impl AlterConfigStatement {
 		}
 
 		let new_def = self.inner.compute(stk, ctx, opt, doc).await?;
-		let key = crate::key::database::cg::new(ns, db, config_name);
-		txn.set(&key, &new_def).await?;
+		let key = crate::key::database::cg::Config {
+			prefix: DatabaseRoot {
+				ns,
+				db,
+			},
+			ty: Cow::Borrowed(config_name),
+		};
+		txn.set_key(&key, &new_def).await?;
 		txn.clear_cache();
 		Ok(Value::None)
 	}

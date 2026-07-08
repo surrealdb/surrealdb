@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -28,7 +29,7 @@ use crate::expr::{
 	Groups, Idiom, Kind, Literal, SelectStatement, View,
 };
 use crate::iam::{Action, ResourceKind};
-use crate::key;
+use crate::key::database::all::DatabaseRoot;
 use crate::kvs::Transaction;
 use crate::val::{Array, Number, RecordId, RecordIdKey, TableName, Value};
 
@@ -177,8 +178,14 @@ impl DefineTableStatement {
 		// Check if table is a view
 		if let Some(view) = &tb_def.view {
 			// Remove the table data
-			let key = crate::key::table::all::new(ns.namespace_id, db.database_id, &name);
-			txn.delp(&key).await?;
+			let key = crate::key::table::all::TableRoot {
+				prefix: DatabaseRoot {
+					ns: ns.namespace_id,
+					db: db.database_id,
+				},
+				tb: Cow::Borrowed(&name),
+			};
+			txn.del_prefix_key(&key).await?;
 
 			let (ViewDefinition::Materialized {
 				tables,
@@ -196,8 +203,15 @@ impl DefineTableStatement {
 			// Process each foreign table
 			for ft in tables.iter() {
 				// Save the view config
-				let key = crate::key::table::ft::new(ns.namespace_id, db.database_id, ft, &name);
-				txn.set(&key, &tb_def).await?;
+				let key = crate::key::table::ft::Ft {
+					prefix: DatabaseRoot {
+						ns: ns.namespace_id,
+						db: db.database_id,
+					},
+					tb: Cow::Borrowed(ft),
+					ft: Cow::Borrowed(&name),
+				};
+				txn.set_key(&key, &tb_def).await?;
 				// Refresh the table cache
 				let Some(foreign_tb) =
 					txn.get_tb(ns.namespace_id, db.database_id, ft, None).await?
@@ -341,9 +355,16 @@ impl DefineTableStatement {
 				fail!("select results did not contain a record id");
 			};
 
-			let key = key::record::new(ns, db, view_table_name, &id.key);
+			let key = crate::key::record::RecordKey {
+				root: DatabaseRoot {
+					ns,
+					db,
+				},
+				tb: Cow::Borrowed(view_table_name),
+				id: Cow::Borrowed(&id.key),
+			};
 			let record = Arc::new(Record::new(Value::Object(o)));
-			tx.put(&key, &record).await?;
+			tx.put_key(&key, &record).await?;
 
 			let ns = doc_ctx.ns();
 			let db = doc_ctx.db();
@@ -803,9 +824,16 @@ impl DefineTableStatement {
 		if let TableType::Relation(rel) = &tb.table_type {
 			// Set the `in` field as a DEFINE FIELD definition
 			{
-				let key = crate::key::table::fd::new(ns, db, &tb.name, "in");
+				let key = crate::key::table::fd::Fd {
+					prefix: DatabaseRoot {
+						ns,
+						db,
+					},
+					tb: Cow::Borrowed(&tb.name),
+					fd: Cow::Borrowed("in"),
+				};
 				let val = Some(Kind::Record(rel.from.clone()));
-				txn.set(
+				txn.set_key(
 					&key,
 					&FieldDefinition {
 						name: Idiom::from(IN.to_vec()),
@@ -818,9 +846,16 @@ impl DefineTableStatement {
 			}
 			// Set the `out` field as a DEFINE FIELD definition
 			{
-				let key = crate::key::table::fd::new(ns, db, &tb.name, "out");
+				let key = crate::key::table::fd::Fd {
+					prefix: DatabaseRoot {
+						ns,
+						db,
+					},
+					tb: Cow::Borrowed(&tb.name),
+					fd: Cow::Borrowed("out"),
+				};
 				let val = Some(Kind::Record(rel.to.clone()));
-				txn.set(
+				txn.set_key(
 					&key,
 					&FieldDefinition {
 						name: Idiom::from(OUT.to_vec()),

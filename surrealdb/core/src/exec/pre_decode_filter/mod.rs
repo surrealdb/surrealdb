@@ -54,6 +54,7 @@ use wire_literal::{LiteralSet, LiteralWire};
 
 use crate::expr::operator::BinaryOperator;
 use crate::fnc::operate;
+use crate::key::KVKeyDecode;
 use crate::key::record::RecordKey;
 use crate::val::object_extract::{
 	DescendResult, Extracted, NeedleKey, PathSegment, SlotScanResult, WalkLeafErr,
@@ -585,7 +586,7 @@ impl PreDecodeFilter {
 			};
 			let v = Value::RecordId(RecordId {
 				table: k.tb.into_owned(),
-				key: k.id,
+				key: k.id.into_owned(),
 			});
 			return evidence_from_binary_cmp(op, literal, reversed, &v);
 		}

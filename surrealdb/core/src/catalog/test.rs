@@ -15,7 +15,7 @@ use crate::expr::{
 	Tokenizer,
 };
 use crate::iam::Auth;
-use crate::kvs::KVValue;
+use crate::key::KVValue;
 use crate::kvs::version::MajorVersion;
 use crate::val::{Datetime, TableName, Value};
 

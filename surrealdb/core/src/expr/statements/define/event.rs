@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use uuid::Uuid;
@@ -12,6 +14,7 @@ use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, FlowResultExt};
 use crate::iam::{Action, AuthLimit, ResourceKind};
+use crate::key::database::all::DatabaseRoot;
 use crate::val::{TableName, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -72,8 +75,15 @@ impl DefineEventStatement {
 			.cast_to()?;
 
 		// Process the statement
-		let key = crate::key::table::ev::new(ns, db, &target_table, &name);
-		txn.set(
+		let key = crate::key::table::ev::Ev {
+			prefix: DatabaseRoot {
+				ns,
+				db,
+			},
+			tb: Cow::Borrowed(&target_table),
+			ev: Cow::Borrowed(&name),
+		};
+		txn.set_key(
 			&key,
 			&EventDefinition {
 				name: name.clone().into(),

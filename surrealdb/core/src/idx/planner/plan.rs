@@ -1,6 +1,7 @@
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::Hash;
+use std::ops::Bound;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -42,10 +43,10 @@ pub(super) struct PlanBuilderParameters {
 }
 
 impl PlanBuilder {
-	/// Builds an optimal query execution plan by analyzing available indexes
+	/// Builds a query execution plan by analyzing available indexes
 	/// and query conditions.
 	///
-	/// This method implements a sophisticated cost-based optimizer that chooses
+	/// This method implements a optimizer that chooses
 	/// between different execution strategies:
 	/// 1. Table scan (fallback when no indexes are suitable)
 	/// 2. Single index scan (most common, using one optimal index)
@@ -537,91 +538,6 @@ impl IndexOption {
 	}
 }
 
-#[derive(Debug, Clone, Default, Eq, PartialEq, Hash)]
-pub(super) struct RangeValue {
-	/// `None` means "no bound" (unbounded). `Some(v)` is an explicit bound,
-	/// including `Some(Arc<Value::None>)` for an explicit NONE predicate.
-	pub(super) value: Option<Arc<Value>>,
-	pub(super) inclusive: bool,
-}
-
-impl RangeValue {
-	fn set_to(&mut self, v: &Arc<Value>) {
-		// Merge an exclusive upper bound (e.g., < v). We choose the maximum 'to' value.
-		let Some(current) = &self.value else {
-			self.value = Some(Arc::clone(v));
-			return;
-		};
-		if current.lt(v) {
-			self.value = Some(Arc::clone(v));
-			// A stricter (exclusive) bound dominates when we move the upper limit up.
-			self.inclusive = false;
-		}
-	}
-
-	fn set_to_inclusive(&mut self, v: &Arc<Value>) {
-		// Merge an inclusive upper bound (e.g., <= v). Prefer the highest value; if
-		// values are equal, inclusive wins over exclusive.
-		let Some(current) = &self.value else {
-			self.value = Some(Arc::clone(v));
-			self.inclusive = true;
-			return;
-		};
-		if self.inclusive {
-			if current.lt(v) {
-				self.value = Some(Arc::clone(v));
-			}
-		} else if current.le(v) {
-			self.value = Some(Arc::clone(v));
-			self.inclusive = true;
-		}
-	}
-
-	fn set_from(&mut self, v: &Arc<Value>) {
-		// Merge an exclusive lower bound (e.g., > v). We choose the minimum 'from' value
-		// that is still >= all constraints; moving the bound down uses exclusive.
-		let Some(current) = &self.value else {
-			self.value = Some(Arc::clone(v));
-			return;
-		};
-		if current.as_ref().gt(v.as_ref()) {
-			self.value = Some(Arc::clone(v));
-			self.inclusive = false;
-		}
-	}
-
-	fn set_from_inclusive(&mut self, v: &Arc<Value>) {
-		// Merge an inclusive lower bound (e.g., >= v). If multiple constraints target
-		// the same value, inclusive should override exclusive.
-		let Some(current) = &self.value else {
-			self.value = Some(Arc::clone(v));
-			self.inclusive = true;
-			return;
-		};
-		if self.inclusive {
-			if current.as_ref().gt(v.as_ref()) {
-				self.value = Some(Arc::clone(v));
-			}
-		} else if current.as_ref().ge(v.as_ref()) {
-			self.value = Some(Arc::clone(v));
-			self.inclusive = true;
-		}
-	}
-}
-
-impl From<&RangeValue> for Value {
-	fn from(rv: &RangeValue) -> Self {
-		let val = match &rv.value {
-			Some(v) => v.as_ref().clone(),
-			None => Value::None,
-		};
-		Value::from(Object::from(HashMap::from([
-			("value", val),
-			("inclusive", Value::from(rv.inclusive)),
-		])))
-	}
-}
-
 #[derive(Default)]
 pub(super) struct Group {
 	ranges: HashMap<IndexReference, Vec<(Arc<Expr>, IndexOption)>>,
@@ -655,11 +571,21 @@ impl Group {
 	}
 }
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub(super) struct UnionRangeQueryBuilder {
 	pub(super) exps: HashSet<Arc<Expr>>,
-	pub(super) from: RangeValue,
-	pub(super) to: RangeValue,
+	pub(super) from: Bound<Arc<Value>>,
+	pub(super) to: Bound<Arc<Value>>,
+}
+
+impl Default for UnionRangeQueryBuilder {
+	fn default() -> Self {
+		Self {
+			exps: Default::default(),
+			from: Bound::Unbounded,
+			to: Bound::Unbounded,
+		}
+	}
 }
 
 impl UnionRangeQueryBuilder {
@@ -686,10 +612,56 @@ impl UnionRangeQueryBuilder {
 	fn add(&mut self, exp: Arc<Expr>, io: &IndexOption) -> bool {
 		if let IndexOperator::RangePart(op, val) = io.op() {
 			match op {
-				BinaryOperator::LessThan => self.to.set_to(val),
-				BinaryOperator::LessThanEqual => self.to.set_to_inclusive(val),
-				BinaryOperator::MoreThan => self.from.set_from(val),
-				BinaryOperator::MoreThanEqual => self.from.set_from_inclusive(val),
+				BinaryOperator::LessThan => match &self.to {
+					Bound::Included(v) => {
+						if val <= v {
+							self.to = Bound::Excluded(Arc::clone(val));
+						}
+					}
+					Bound::Excluded(v) => {
+						if val < v {
+							self.to = Bound::Excluded(Arc::clone(val));
+						}
+					}
+					Bound::Unbounded => {
+						self.to = Bound::Excluded(Arc::clone(val));
+					}
+				},
+				BinaryOperator::LessThanEqual => match &self.to {
+					Bound::Included(v) | Bound::Excluded(v) => {
+						if val < v {
+							self.to = Bound::Included(Arc::clone(val));
+						}
+					}
+					Bound::Unbounded => {
+						self.to = Bound::Included(Arc::clone(val));
+					}
+				},
+				BinaryOperator::MoreThan => match &self.from {
+					Bound::Included(v) => {
+						if val >= v {
+							self.from = Bound::Excluded(Arc::clone(val));
+						}
+					}
+					Bound::Excluded(v) => {
+						if val > v {
+							self.from = Bound::Excluded(Arc::clone(val));
+						}
+					}
+					Bound::Unbounded => {
+						self.from = Bound::Excluded(Arc::clone(val));
+					}
+				},
+				BinaryOperator::MoreThanEqual => match &self.from {
+					Bound::Included(v) | Bound::Excluded(v) => {
+						if val > v {
+							self.from = Bound::Included(Arc::clone(val));
+						}
+					}
+					Bound::Unbounded => {
+						self.from = Bound::Included(Arc::clone(val));
+					}
+				},
 				_ => return false,
 			}
 			self.exps.insert(exp);
@@ -704,7 +676,7 @@ mod tests {
 	use std::sync::Arc;
 
 	use crate::expr::Idiom;
-	use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
+	use crate::idx::planner::plan::{IndexOperator, IndexOption};
 	use crate::idx::planner::tree::{IdiomPosition, IndexReference};
 	use crate::val::{Array, Value};
 
@@ -731,96 +703,5 @@ mod tests {
 		set.insert(io2);
 
 		assert_eq!(set.len(), 1);
-	}
-
-	#[test]
-	fn test_range_default_value() {
-		let r = RangeValue::default();
-		assert!(r.value.is_none());
-		assert!(!r.inclusive);
-		assert!(!r.inclusive);
-	}
-	#[test]
-	fn test_range_value_from_inclusive() {
-		let mut r = RangeValue::default();
-		r.set_from_inclusive(&Arc::new(20.into()));
-		assert_eq!(r.value.as_deref(), Some(&Value::from(20)));
-		assert!(r.inclusive);
-		r.set_from_inclusive(&Arc::new(10.into()));
-		assert_eq!(r.value.as_deref(), Some(&Value::from(10)));
-		assert!(r.inclusive);
-		r.set_from_inclusive(&Arc::new(20.into()));
-		assert_eq!(r.value.as_deref(), Some(&Value::from(10)));
-		assert!(r.inclusive);
-	}
-
-	#[test]
-	fn test_range_value_from() {
-		let mut r = RangeValue::default();
-		r.set_from(&Arc::new(20.into()));
-		assert_eq!(r.value.as_deref(), Some(&Value::from(20)));
-		assert!(!r.inclusive);
-		r.set_from(&Arc::new(10.into()));
-		assert_eq!(r.value.as_deref(), Some(&Value::from(10)));
-		assert!(!r.inclusive);
-		r.set_from(&Arc::new(20.into()));
-		assert_eq!(r.value.as_deref(), Some(&Value::from(10)));
-		assert!(!r.inclusive);
-	}
-
-	#[test]
-	fn test_range_value_to_inclusive() {
-		let mut r = RangeValue::default();
-		r.set_to_inclusive(&Arc::new(10.into()));
-		assert_eq!(r.value.as_deref(), Some(&Value::from(10)));
-		assert!(r.inclusive);
-		r.set_to_inclusive(&Arc::new(20.into()));
-		assert_eq!(r.value.as_deref(), Some(&Value::from(20)));
-		assert!(r.inclusive);
-		r.set_to_inclusive(&Arc::new(10.into()));
-		assert_eq!(r.value.as_deref(), Some(&Value::from(20)));
-		assert!(r.inclusive);
-	}
-
-	#[test]
-	fn test_range_value_to() {
-		let mut r = RangeValue::default();
-		r.set_to(&Arc::new(10.into()));
-		assert_eq!(r.value.as_deref(), Some(&Value::from(10)));
-		assert!(!r.inclusive);
-		r.set_to(&Arc::new(20.into()));
-		assert_eq!(r.value.as_deref(), Some(&Value::from(20)));
-		assert!(!r.inclusive);
-		r.set_to(&Arc::new(10.into()));
-		assert_eq!(r.value.as_deref(), Some(&Value::from(20)));
-		assert!(!r.inclusive);
-	}
-
-	#[test]
-	fn test_range_value_to_switch_inclusive() {
-		let mut r = RangeValue::default();
-		r.set_to(&Arc::new(20.into()));
-		assert_eq!(r.value.as_deref(), Some(&Value::from(20)));
-		assert!(!r.inclusive);
-		r.set_to_inclusive(&Arc::new(20.into()));
-		assert_eq!(r.value.as_deref(), Some(&Value::from(20)));
-		assert!(r.inclusive);
-		r.set_to(&Arc::new(20.into()));
-		assert_eq!(r.value.as_deref(), Some(&Value::from(20)));
-		assert!(r.inclusive);
-	}
-
-	#[test]
-	fn test_range_value_from_switch_inclusive() {
-		let mut r = RangeValue::default();
-		r.set_from(&Arc::new(20.into()));
-		assert_eq!(r.value.as_deref(), Some(&Value::from(20)));
-		assert!(!r.inclusive);
-		r.set_from_inclusive(&Arc::new(20.into()));
-		assert_eq!(r.value.as_deref(), Some(&Value::from(20)));
-		assert!(r.inclusive);
-		r.set_from(&Arc::new(20.into()));
-		assert_eq!(r.value.as_deref(), Some(&Value::from(20)));
-		assert!(r.inclusive);
 	}
 }

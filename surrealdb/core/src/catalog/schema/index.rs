@@ -12,7 +12,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Idiom};
-use crate::kvs::impl_kv_value_revisioned;
+use crate::key::impl_kv_value_revisioned;
 use crate::sql;
 use crate::sql::statements::define::DefineKind;
 use crate::val::{Array, Number, TableName, Value};

@@ -6,7 +6,7 @@ use parking_lot::Mutex;
 use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::cf::TableMutations;
 use crate::doc::CursorRecord;
-use crate::kvs::KVValue;
+use crate::key::KVValue;
 use crate::val::{RecordId, TableName};
 
 // PreparedWrite is a tuple of (namespace, database, table, serialized table mutations).

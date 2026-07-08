@@ -8,7 +8,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use uuid::Uuid;
 
 use crate::expr::statements::info::InfoStructure;
-use crate::kvs::impl_kv_value_revisioned;
+use crate::key::impl_kv_value_revisioned;
 use crate::val::{Object, Value};
 
 /// A node in the cluster

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -16,6 +17,7 @@ use crate::expr::idiom::{Idiom, IdiomTrie, IdiomTrieContains};
 use crate::expr::kind::Kind;
 use crate::expr::statements::define::kind_contains_object;
 use crate::iam::{Action, AuthLimit};
+use crate::key::database::all::DatabaseRoot;
 use crate::val::value::every::ArrayBehaviour;
 use crate::val::{RecordId, Value};
 
@@ -787,31 +789,33 @@ impl FieldEditContext<'_> {
 				match action {
 					RefAction::Set(rid) => {
 						let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;
-						let key = crate::key::r#ref::new(
-							ns,
-							db,
-							&rid.table,
-							&rid.key,
-							&self.rid.table,
-							&ff,
-							&self.rid.key,
-						);
-
-						self.ctx.tx().set(&key, &()).await?;
+						let key = crate::key::r#ref::Ref {
+							prefix: DatabaseRoot {
+								ns,
+								db,
+							},
+							table: Cow::Borrowed(&rid.table),
+							id: Cow::Borrowed(&rid.key),
+							foreign_table: Cow::Borrowed(&self.rid.table),
+							foreign_field: Cow::Borrowed(&ff),
+							foreign_key: Cow::Borrowed(&self.rid.key),
+						};
+						self.ctx.tx().set_key(&key, &()).await?;
 					}
 					RefAction::Delete(rid) => {
 						let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;
-						let key = crate::key::r#ref::new(
-							ns,
-							db,
-							&rid.table,
-							&rid.key,
-							&self.rid.table,
-							&ff,
-							&self.rid.key,
-						);
-
-						self.ctx.tx().del(&key).await?;
+						let key = crate::key::r#ref::Ref {
+							prefix: DatabaseRoot {
+								ns,
+								db,
+							},
+							table: Cow::Borrowed(&rid.table),
+							id: Cow::Borrowed(&rid.key),
+							foreign_table: Cow::Borrowed(&self.rid.table),
+							foreign_field: Cow::Borrowed(&ff),
+							foreign_key: Cow::Borrowed(&self.rid.key),
+						};
+						self.ctx.tx().del_key(&key).await?;
 					}
 				}
 			}

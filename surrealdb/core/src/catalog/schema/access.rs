@@ -8,7 +8,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::catalog::schema::base::Base;
 use crate::expr::Expr;
 use crate::expr::statements::info::InfoStructure;
-use crate::kvs::impl_kv_value_revisioned;
+use crate::key::impl_kv_value_revisioned;
 use crate::sql;
 use crate::val::Value;
 

@@ -19,53 +19,23 @@
 use std::borrow::Cow;
 
 use anyhow::Result;
-use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
-use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+use crate::catalog::IndexId;
 use crate::idx::seqdocids::DocId;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::{KVKey, impl_kv_key_storekey};
+use crate::key::database::all::DatabaseRoot;
+use crate::key::{impl_kv_key_storekey, impl_kv_range_storekey, key};
 use crate::val::TableName;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-#[storekey(format = "()")]
-pub(crate) struct Tt<'a> {
-	__: u8,
-	_a: u8,
-	pub ns: NamespaceId,
-	_b: u8,
-	pub db: DatabaseId,
-	_c: u8,
-	pub tb: Cow<'a, TableName>,
-	_d: u8,
-	pub ix: IndexId,
-	_e: u8,
-	_f: u8,
-	_g: u8,
-	pub term: Cow<'a, str>,
-	pub doc_id: DocId,
-	pub nid: Uuid,
-	pub uid: Uuid,
-	pub add: bool,
-}
-
-impl_kv_key_storekey!(Tt<'_> => String);
-
-impl Categorise for Tt<'_> {
-	fn categorise(&self) -> Category {
-		Category::IndexTermDocuments
-	}
-}
-
-impl<'a> Tt<'a> {
-	/// Creates a new term-document key
+key! {
+	/// Term-document key
 	///
-	/// This constructor creates a key that represents a term occurrence in a
+	/// A key that represents a term occurrence in a
 	/// document. It's used by the full-text search engine to build the
 	/// inverted index that maps terms to the documents containing them.
 	///
-	/// # Arguments
+	/// # Fields
 	/// * `ns` - Namespace identifier
 	/// * `db` - Database identifier
 	/// * `tb` - Table identifier
@@ -75,220 +45,90 @@ impl<'a> Tt<'a> {
 	/// * `nid` - Node ID for distributed transaction tracking
 	/// * `uid` - Transaction ID for concurrency control
 	/// * `add` - Whether this is an addition (true) or removal (false) operation
-	#[expect(clippy::too_many_arguments)]
-	pub(crate) fn new(
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &'a TableName,
-		ix: IndexId,
-		term: &'a str,
-		doc_id: DocId,
-		nid: Uuid,
-		uid: Uuid,
-		add: bool,
-	) -> Self {
-		Self {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
-			_c: b'*',
-			tb: Cow::Borrowed(tb),
-			_d: b'+',
-			ix,
-			_e: b'!',
-			_f: b't',
-			_g: b't',
-			term: Cow::Borrowed(term),
-			doc_id,
-			nid,
-			uid,
-			add,
-		}
-	}
-
-	/// Creates a key range for querying a specific term
-	///
-	/// This method generates a key range that can be used to query all
-	/// occurrences of a specific term across all documents in the full-text
-	/// index. It's used for term-specific searches and frequency analysis.
-	///
-	/// # Arguments
-	/// * `ns` - Namespace identifier
-	/// * `db` - Database identifier
-	/// * `tb` - Table identifier
-	/// * `ix` - Index identifier
-	/// * `term` - The specific term to query
-	///
-	/// # Returns
-	/// A tuple of (start, end) keys that define the range for database queries
-	pub(crate) fn term_range(
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &'a TableName,
-		ix: IndexId,
-		term: &'a str,
-	) -> Result<(Vec<u8>, Vec<u8>)> {
-		let prefix = TtTermPrefix::new(ns, db, tb, ix, term);
-		let mut beg = prefix.encode_key()?;
-		beg.extend([0; 41]);
-		let mut end = prefix.encode_key()?;
-		end.extend([255; 41]);
-		Ok((beg, end))
-	}
-
-	/// Creates a key range for querying all terms in an index
-	///
-	/// This method generates a key range that can be used to query all terms
-	/// in the full-text index. It's used for operations that need to scan
-	/// all indexed terms, such as index maintenance, compaction, or complete
-	/// index scans.
-	///
-	/// # Arguments
-	/// * `ns` - Namespace identifier
-	/// * `db` - Database identifier
-	/// * `tb` - Table identifier
-	/// * `ix` - Index identifier
-	///
-	/// # Returns
-	/// A tuple of (start, end) keys that define the range for database queries
-	pub(crate) fn terms_range(
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &'a TableName,
-		ix: IndexId,
-	) -> Result<(Vec<u8>, Vec<u8>)> {
-		let prefix = TtTermsPrefix::new(ns, db, tb, ix);
-		let mut beg = prefix.encode_key()?;
-		beg.push(0);
-		let mut end = prefix.encode_key()?;
-		end.push(255);
-		Ok((beg, end))
-	}
-
-	pub fn decode_key(k: &[u8]) -> Result<Tt<'_>> {
-		Ok(storekey::decode_borrow(k)?)
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+	pub(crate) struct Tt<'a> {
+		pub prefix: DatabaseRoot,
+		b'*',
+		pub tb: Cow<'a, TableName>,
+		b'+',
+		pub ix: IndexId,
+		b'!',
+		b't',
+		b't',
+		pub term: Cow<'a, str>,
+		pub doc_id: DocId,
+		pub nid: Uuid,
+		pub uid: Uuid,
+		pub add: bool,
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-#[storekey(format = "()")]
-struct TtTermPrefix<'a> {
-	__: u8,
-	_a: u8,
-	pub ns: NamespaceId,
-	_b: u8,
-	pub db: DatabaseId,
-	_c: u8,
-	pub tb: Cow<'a, TableName>,
-	_d: u8,
-	pub ix: IndexId,
-	_e: u8,
-	_f: u8,
-	_g: u8,
-	pub term: Cow<'a, str>,
-}
+impl_kv_key_storekey!(Tt<'a> => String);
 
-impl_kv_key_storekey!(TtTermPrefix<'_> => String);
-
-impl<'a> TtTermPrefix<'a> {
-	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, ix: IndexId, term: &'a str) -> Self {
-		Self {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
-			_c: b'*',
-			tb: Cow::Borrowed(tb),
-			_d: b'+',
-			ix,
-			_e: b'!',
-			_f: b't',
-			_g: b't',
-			term: Cow::Borrowed(term),
-		}
+impl Categorise for Tt<'_> {
+	fn categorise(&self) -> Category {
+		Category::IndexTermDocuments
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-#[storekey(format = "()")]
-struct TtTermsPrefix<'a> {
-	__: u8,
-	_a: u8,
-	pub ns: NamespaceId,
-	_b: u8,
-	pub db: DatabaseId,
-	_c: u8,
-	pub tb: Cow<'a, TableName>,
-	_d: u8,
-	pub ix: IndexId,
-	_e: u8,
-	_f: u8,
-	_g: u8,
-}
-
-impl_kv_key_storekey!(TtTermsPrefix<'_> => String);
-
-impl<'a> TtTermsPrefix<'a> {
-	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a TableName, ix: IndexId) -> Self {
-		Self {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
-			_c: b'*',
-			tb: Cow::Borrowed(tb),
-			_d: b'+',
-			ix,
-			_e: b'!',
-			_f: b't',
-			_g: b't',
-		}
+key! {
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+	pub struct TtTermPrefix<'a> {
+		pub prefix: DatabaseRoot,
+		b'*',
+		pub tb: Cow<'a, TableName>,
+		b'+',
+		pub ix: IndexId,
+		b'!',
+		b't',
+		b't',
+		pub term: Cow<'a, str>,
 	}
 }
+
+impl_kv_key_storekey!(TtTermPrefix<'a> => String);
+impl_kv_range_storekey!(TtTermPrefix<'_>);
+
+key! {
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+	pub struct TtTermsPrefix<'a> {
+		pub prefix: DatabaseRoot,
+		b'*',
+		pub tb: Cow<'a, TableName>,
+		b'+',
+		pub ix: IndexId,
+		b'!',
+		b't',
+		b't',
+	}
+}
+
+impl_kv_key_storekey!(TtTermsPrefix<'a> => String);
+impl_kv_range_storekey!(TtTermsPrefix<'_>);
 
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::key::KVKey;
 
 	#[test]
 	fn key() {
 		let tb = TableName::from("testtb");
-		let val = Tt::new(
-			NamespaceId(1),
-			DatabaseId(2),
-			&tb,
-			IndexId(3),
-			"term",
-			129,
-			Uuid::from_u128(1),
-			Uuid::from_u128(2),
-			true,
-		);
+		let val = Tt {
+			prefix: DatabaseRoot {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+			},
+			tb: Cow::Borrowed(&tb),
+			ix: IndexId(3),
+			term: Cow::Borrowed("term"),
+			doc_id: 129,
+			nid: Uuid::from_u128(1),
+			uid: Uuid::from_u128(2),
+			add: true,
+		};
 		let enc = Tt::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!ttterm\0\0\0\0\0\0\0\0\x81\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02\x03");
-	}
-
-	#[test]
-	fn term_range() {
-		let tb = TableName::from("testtb");
-		let (beg, end) =
-			Tt::term_range(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), "term").unwrap();
-		assert_eq!(beg, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!ttterm\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
-		assert_eq!(
-			end,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!ttterm\0\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
-		);
-	}
-
-	#[test]
-	fn terms_range() {
-		let tb = TableName::from("testtb");
-		let (beg, end) = Tt::terms_range(NamespaceId(1), DatabaseId(2), &tb, IndexId(3)).unwrap();
-		assert_eq!(beg, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!tt\0");
-		assert_eq!(end, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!tt\xff");
+		assert_eq!(&*enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!ttterm\0\0\0\0\0\0\0\0\x81\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02\x03");
 	}
 }

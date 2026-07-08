@@ -18,6 +18,7 @@
 //! evaluated against the current binding row first (with the row as the cursor
 //! document), then embedded as concrete literals in the statement.
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use futures::{StreamExt, stream};
@@ -38,7 +39,8 @@ use crate::expr::match_plan::{DetachMode, UpdateData};
 use crate::expr::statements::{CreateStatement, DeleteStatement, RelateStatement, UpdateStatement};
 use crate::expr::{AssignOperator, ControlFlow, Data, Expr, Literal, Output};
 use crate::idx::planner::ScanDirection;
-use crate::key::graph;
+use crate::key::database::all::DatabaseRoot;
+use crate::key::{KVRange, graph};
 use crate::val::{Object, RecordId, TableName, Value};
 
 /// `SET` / `REMOVE` over the binding bound at `target`.
@@ -390,10 +392,17 @@ async fn has_connected_edges(
 	frozen: &FrozenContext,
 ) -> Result<bool, ControlFlow> {
 	let txn = frozen.tx();
-	let prefix = graph::prefix(ns, db, &rid.table, &rid.key).map_err(ControlFlow::Err)?;
-	let suffix = graph::suffix(ns, db, &rid.table, &rid.key).map_err(ControlFlow::Err)?;
+	let range = graph::Prefix {
+		prefix: DatabaseRoot {
+			ns,
+			db,
+		},
+		tb: Cow::Borrowed(&rid.table),
+		id: Cow::Borrowed(&rid.key),
+	}
+	.encode_range()?;
 	let mut cursor = txn
-		.open_keys_cursor(prefix..suffix, ScanDirection::Forward, 0, None)
+		.open_keys_cursor(range, ScanDirection::Forward, 0, None)
 		.await
 		.map_err(ControlFlow::Err)?;
 	let batch = cursor.next_batch(1).await.map_err(ControlFlow::Err)?;

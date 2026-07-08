@@ -1,78 +1,58 @@
 //! Stores a DEFINE ACCESS ON ROOT configuration
 use std::borrow::Cow;
 
-use storekey::{BorrowDecode, Encode};
-
 use crate::catalog::AccessDefinition;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::impl_kv_key_storekey;
+use crate::key::{impl_kv_key_storekey, impl_kv_range_storekey, key};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct RootAccessKey<'a> {
-	__: u8,
-	_a: u8,
-	_b: u8,
-	_c: u8,
-	pub ac: Cow<'a, str>,
+key! {
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+	pub(crate) struct AccessKey<'a> {
+		b'/',
+		b'!',
+		b'a',
+		b'c',
+		pub ac: Cow<'a, str>,
+	}
 }
 
-impl_kv_key_storekey!(RootAccessKey<'_> => AccessDefinition);
+impl_kv_key_storekey!(AccessKey<'a> => AccessDefinition);
 
-pub fn new(ac: &str) -> RootAccessKey<'_> {
-	RootAccessKey::new(ac)
-}
-
-pub fn prefix() -> Vec<u8> {
-	let mut k = crate::key::root::all::kv();
-	k.extend_from_slice(b"!ac\x00");
-	k
-}
-
-pub fn suffix() -> Vec<u8> {
-	let mut k = crate::key::root::all::kv();
-	k.extend_from_slice(b"!ac\xff");
-	k
-}
-
-impl Categorise for RootAccessKey<'_> {
+impl Categorise for AccessKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::Access
 	}
 }
 
-impl<'a> RootAccessKey<'a> {
-	pub fn new(ac: &'a str) -> Self {
-		Self {
-			__: b'/',
-			_a: b'!',
-			_b: b'a',
-			_c: b'c',
-			ac: Cow::Borrowed(ac),
-		}
+key! {
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+	pub(crate) struct AccessKeyPrefix {
+		b'/',
+		b'!',
+		b'a',
+		b'c',
 	}
 }
+impl_kv_range_storekey!(AccessKeyPrefix);
 
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::kvs::KVKey;
+	use crate::key::{KVKey, KVRange};
 
 	#[test]
 	fn key() {
-		let val = RootAccessKey::new("testac");
-		let enc = RootAccessKey::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/!actestac\x00");
+		let val = AccessKey {
+			ac: "testac".into(),
+		};
+		let enc = AccessKey::encode_key(&val).unwrap();
+		assert_eq!(&*enc, b"/!actestac\x00");
 	}
 
 	#[test]
 	fn test_prefix() {
-		let val = super::prefix();
-		assert_eq!(val, b"/!ac\0");
-	}
-
-	#[test]
-	fn test_suffix() {
-		let val = super::suffix();
-		assert_eq!(val, b"/!ac\xff");
+		let val = AccessKeyPrefix {}.encode_range().unwrap();
+		assert_eq!(val.start.as_slice(), b"/!ac\0");
+		assert_eq!(val.end.as_slice(), b"/!ad");
 	}
 }

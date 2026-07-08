@@ -167,8 +167,11 @@ impl LiveStatement {
 					bail!("LIVE query WHERE clause is invalid and will never match: {e}");
 				}
 				// Insert the node live query
-				let key = crate::key::node::lq::new(nid, live_query_id);
-				txn.replace(
+				let key = crate::key::node::lq::Lq {
+					nd: nid,
+					lq: live_query_id,
+				};
+				txn.replace_key(
 					&key,
 					&NodeLiveQuery {
 						ns,
@@ -178,8 +181,15 @@ impl LiveStatement {
 				)
 				.await?;
 				// Insert the table live query
-				let key = crate::key::table::lq::new(ns, db, &tb, live_query_id);
-				txn.replace(&key, &subscription_definition).await?;
+				let key = crate::key::table::lq::Lq {
+					prefix: crate::key::database::all::DatabaseRoot {
+						ns,
+						db,
+					},
+					tb: std::borrow::Cow::Borrowed(&tb),
+					lq: live_query_id,
+				};
+				txn.replace_key(&key, &subscription_definition).await?;
 				// Refresh the table cache for lives
 				if let Some(cache) = ctx.get_cache() {
 					cache.set_live_queries_version(ns, db, &tb);

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::ops::Deref;
 
 use anyhow::Result;
@@ -15,6 +16,7 @@ use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal};
 use crate::iam::{Action, ResourceKind};
+use crate::key::database::all::DatabaseRoot;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -90,8 +92,14 @@ impl AlterBucketStatement {
 			AlterKind::None => {}
 		}
 
-		let key = crate::key::database::bu::new(ns, db, &name);
-		txn.set(&key, &bu).await?;
+		let key = crate::key::database::bu::BucketKey {
+			prefix: DatabaseRoot {
+				ns,
+				db,
+			},
+			bu: Cow::Borrowed(&name),
+		};
+		txn.set_key(&key, &bu).await?;
 		txn.clear_cache();
 		Ok(Value::None)
 	}

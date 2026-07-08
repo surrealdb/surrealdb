@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -31,7 +32,7 @@ use crate::err::Error;
 use crate::idx::IndexKeyBase;
 use crate::idx::index::IndexOperation;
 use crate::key::index::all as index_all;
-use crate::key::record;
+use crate::key::{KVRange, record};
 use crate::kvs::LockType::Optimistic;
 use crate::kvs::ds::TransactionFactory;
 #[cfg(test)]
@@ -378,7 +379,7 @@ impl Building {
 			let ctx = self.new_write_tx_ctx().await?;
 			let tx = ctx.tx();
 			let state_key = self.ikb.new_bs_key();
-			let existing = tx.get(&state_key, None).await?;
+			let existing = tx.get_key(&state_key, None).await?;
 			if let Some(current) = existing.as_ref()
 				&& matches!(current.phase, IndexBuildPhase::Building | IndexBuildPhase::Closing)
 			{
@@ -394,7 +395,7 @@ impl Building {
 				let now = Utc::now();
 				next.updated_at = now;
 				next.owner_heartbeat_at = Some(now);
-				let res = tx.putc(&state_key, &next, Some(current)).await;
+				let res = tx.put_compare_key(&state_key, &next, Some(current)).await;
 				match res {
 					Ok(()) => {
 						if self
@@ -441,7 +442,7 @@ impl Building {
 			// takeover-same-gen branch above handles it.
 			let ctx = self.new_write_tx_ctx().await?;
 			let tx = ctx.tx();
-			let existing = tx.get(&state_key, None).await?;
+			let existing = tx.get_key(&state_key, None).await?;
 			if let Some(current) = existing.as_ref()
 				&& matches!(current.phase, IndexBuildPhase::Building | IndexBuildPhase::Closing)
 			{
@@ -466,7 +467,7 @@ impl Building {
 				pending: None,
 			};
 			delete_durable_build_queues(&tx, &self.ikb).await?;
-			let res = tx.putc(&state_key, &state, existing.as_ref()).await;
+			let res = tx.put_compare_key(&state_key, &state, existing.as_ref()).await;
 			match res {
 				Ok(()) => {
 					if self
@@ -502,7 +503,7 @@ impl Building {
 	/// Read the durable build-state record without changing ownership.
 	async fn read_durable_build_state(&self) -> Result<Option<IndexBuildState>> {
 		let tx = self.new_read_tx().await?;
-		let state = catch!(tx, tx.get(&self.ikb.new_bs_key(), None).await);
+		let state = catch!(tx, tx.get_key(&self.ikb.new_bs_key(), None).await);
 		tx.cancel().await?;
 		Ok(state)
 	}
@@ -518,7 +519,7 @@ impl Building {
 			let ctx = self.new_write_tx_ctx().await?;
 			let tx = ctx.tx();
 			let state_key = self.ikb.new_bs_key();
-			let Some(current) = tx.get(&state_key, None).await? else {
+			let Some(current) = tx.get_key(&state_key, None).await? else {
 				tx.cancel().await?;
 				return Ok(None);
 			};
@@ -536,7 +537,7 @@ impl Building {
 			let now = Utc::now();
 			next.updated_at = now;
 			next.owner_heartbeat_at = Some(now);
-			let res = tx.putc(&state_key, &next, Some(&current)).await;
+			let res = tx.put_compare_key(&state_key, &next, Some(&current)).await;
 			match res {
 				Ok(()) => {
 					if self
@@ -586,7 +587,7 @@ impl Building {
 			let ctx = self.new_write_tx_ctx().await?;
 			let tx = ctx.tx();
 			let state_key = self.ikb.new_bs_key();
-			let Some(current) = tx.get(&state_key, None).await? else {
+			let Some(current) = tx.get_key(&state_key, None).await? else {
 				tx.cancel().await?;
 				return Err(Error::CorruptedIndex(
 					"Index build state is missing during state update",
@@ -609,7 +610,7 @@ impl Building {
 			} else {
 				None
 			};
-			let res = tx.putc(&state_key, &next, Some(&current)).await;
+			let res = tx.put_compare_key(&state_key, &next, Some(&current)).await;
 			match res {
 				Ok(()) => {
 					if self
@@ -726,7 +727,7 @@ impl Building {
 			let ctx = self.new_write_tx_ctx().await?;
 			let tx = ctx.tx();
 			let state_key = self.ikb.new_bs_key();
-			let Some(current) = tx.get(&state_key, None).await? else {
+			let Some(current) = tx.get_key(&state_key, None).await? else {
 				tx.cancel().await?;
 				return Ok(());
 			};
@@ -741,7 +742,7 @@ impl Building {
 			next.error = Some(error.clone());
 			next.report_status = Some(IndexBuildReportStatus::Error);
 			next.updated_at = Utc::now();
-			let res = tx.putc(&state_key, &next, Some(&current)).await;
+			let res = tx.put_compare_key(&state_key, &next, Some(&current)).await;
 			match res {
 				Ok(()) => {
 					if self
@@ -796,7 +797,7 @@ impl Building {
 		allowed: &[IndexBuildPhase],
 	) -> Result<()> {
 		let state_key = self.ikb.new_bs_key();
-		let Some(current) = tx.get(&state_key, None).await? else {
+		let Some(current) = tx.get_key(&state_key, None).await? else {
 			return Err(Error::CorruptedIndex(
 				"Index build state is missing during ownership heartbeat",
 			)
@@ -815,7 +816,7 @@ impl Building {
 		let now = Utc::now();
 		next.updated_at = now;
 		next.owner_heartbeat_at = Some(now);
-		tx.putc(&state_key, &next, Some(&current)).await?;
+		tx.put_compare_key(&state_key, &next, Some(&current)).await?;
 		Ok(())
 	}
 
@@ -950,7 +951,7 @@ impl Building {
 		if generation == 0 {
 			return Ok(false);
 		}
-		let Some(state) = tx.get(&self.ikb.new_bs_key(), None).await? else {
+		let Some(state) = tx.get_key(&self.ikb.new_bs_key(), None).await? else {
 			return Ok(false);
 		};
 		if state.generation != generation || state.phase != IndexBuildPhase::Online {
@@ -1027,8 +1028,14 @@ impl Building {
 					return Ok(());
 				}
 				let ctx = self.new_write_tx_ctx().await?;
-				let key =
-					index_all::new(self.ix_key.ns, self.ix_key.db, &self.ix_key.tb, self.ix_key.ix);
+				let key = index_all::AllIndexRoot {
+					prefix: crate::key::database::all::DatabaseRoot {
+						ns: self.ix_key.ns,
+						db: self.ix_key.db,
+					},
+					tb: Cow::Borrowed(&self.ix_key.tb),
+					ix: self.ix_key.ix,
+				};
 				let tx = ctx.tx();
 				if let Err(err) = self
 					.maintain_build_ownership(&tx, generation, &[IndexBuildPhase::Building])
@@ -1046,7 +1053,7 @@ impl Building {
 					}
 					return Err(err);
 				}
-				if let Err(err) = tx.delp(&key).await {
+				if let Err(err) = tx.del_prefix_key(&key).await {
 					if self
 						.cancel_and_retryable_conflict(
 							&tx,
@@ -1095,9 +1102,16 @@ impl Building {
 			}
 
 			// First pass: index every record.
-			let beg = record::prefix(self.ix_key.ns, self.ix_key.db, self.ikb.table())?;
-			let end = record::suffix(self.ix_key.ns, self.ix_key.db, self.ikb.table())?;
-			let mut next = Some(beg..end);
+			let mut next = Some(
+				record::RecordKeyPrefix {
+					root: crate::key::database::all::DatabaseRoot {
+						ns: self.ix_key.ns,
+						db: self.ix_key.db,
+					},
+					table: Cow::Borrowed(self.ikb.table()),
+				}
+				.encode_range()?,
+			);
 			let mut v1_appending_sentinel = false;
 			let mut count_primary_cursor = matches!(self.ix.index, Index::Count(_)).then_some(None);
 			// Set the initial status.

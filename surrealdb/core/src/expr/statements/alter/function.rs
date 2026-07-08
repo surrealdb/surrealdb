@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::ops::Deref;
 
 use anyhow::Result;
@@ -11,6 +12,7 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::expr::{Base, Block, Kind};
 use crate::iam::{Action, AuthLimit, ResourceKind};
+use crate::key::database::all::DatabaseRoot;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -73,8 +75,14 @@ impl AlterFunctionStatement {
 		// Recompute auth_limit from the current principal to prevent privilege escalation
 		fc.auth_limit = AuthLimit::new_from_auth(&opt.auth).into();
 
-		let key = crate::key::database::fc::new(ns, db, &self.name);
-		txn.set(&key, &fc).await?;
+		let key = crate::key::database::fc::Fc {
+			prefix: DatabaseRoot {
+				ns,
+				db,
+			},
+			fc: Cow::Borrowed(&self.name),
+		};
+		txn.set_key(&key, &fc).await?;
 		txn.clear_cache();
 		Ok(Value::None)
 	}

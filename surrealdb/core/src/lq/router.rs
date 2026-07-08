@@ -14,6 +14,7 @@
 //! it owns (enforced by `MessageBroker::should_emit`). One pass is driven per
 //! tick by the engine's background task ([`Datastore::live_query_router_process`]).
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -21,10 +22,11 @@ use anyhow::Result;
 use parking_lot::Mutex;
 
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
-use crate::key::lqe;
+use crate::key::database::all::DatabaseRoot;
+use crate::key::{KVKeyDecode, KVRange, KVValue, lqe};
+use crate::kvs::Datastore;
 use crate::kvs::LockType::Optimistic;
 use crate::kvs::TransactionType::Read;
-use crate::kvs::{Datastore, KVKey, KVValue};
 use crate::lq::event::{LiveEvent, LiveEvents};
 use crate::lq::subscriber::replay_table_live_events;
 use crate::val::TableName;
@@ -132,12 +134,27 @@ pub(crate) async fn process(ds: &Datastore, router: &LiveQueryRouter) -> Result<
 	for ns in nss.iter() {
 		let dbs = txn.all_db(ns.namespace_id, None).await?;
 		for db in dbs.iter() {
-			let beg = lqe::prefix_ts(db.namespace_id, db.database_id, cursor_bytes).encode_key()?;
-			let end = lqe::suffix(db.namespace_id, db.database_id).encode_key()?;
+			let start = lqe::LqeTsRange {
+				prefix: DatabaseRoot {
+					ns: db.namespace_id,
+					db: db.database_id,
+				},
+
+				ts: Cow::Borrowed(cursor_bytes),
+			}
+			.encode_bound()?;
+			let end = lqe::LqePrefix {
+				prefix: DatabaseRoot {
+					ns: db.namespace_id,
+					db: db.database_id,
+				},
+			}
+			.encode_bound()?
+			.next_neighbour_expect();
 			// Group this database's events per table, preserving the ascending
 			// (versionstamp, table) scan order within each table's vec.
 			let mut per_table: HashMap<TableName, Vec<LiveEvent>> = HashMap::new();
-			for (k, v) in txn.scan(beg..end, u32::MAX, 0, None).await? {
+			for (k, v) in txn.scan((start..end).into(), u32::MAX, 0, None).await? {
 				let key = lqe::Lqe::decode_key(&k)?;
 				let vs = ts_impl.decode(key.ts.as_ref())?.as_versionstamp();
 				// Skip already-delivered events and anything not yet safe.

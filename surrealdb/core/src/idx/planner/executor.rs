@@ -1,5 +1,6 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::ops::Bound;
 use std::sync::Arc;
 
 use anyhow::{Result, ensure};
@@ -27,7 +28,7 @@ use crate::idx::planner::iterators::{
 };
 use crate::idx::planner::knn::{KnnBruteForceResult, KnnPriorityList};
 use crate::idx::planner::plan::IndexOperator::Matches;
-use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
+use crate::idx::planner::plan::{IndexOperator, IndexOption};
 use crate::idx::planner::tree::{IdiomPosition, IndexReference};
 use crate::idx::planner::{IterationStage, ScanDirection};
 use crate::idx::trees::KnnCondFilter;
@@ -106,7 +107,7 @@ impl From<InnerQueryExecutor> for QueryExecutor {
 
 pub(super) enum IteratorEntry {
 	Single(Option<Arc<Expr>>, IndexOption),
-	Range(HashSet<Arc<Expr>>, IndexReference, RangeValue, RangeValue, ScanDirection),
+	Range(HashSet<Arc<Expr>>, IndexReference, Bound<Arc<Value>>, Bound<Arc<Value>>, ScanDirection),
 }
 
 impl IteratorEntry {
@@ -116,8 +117,38 @@ impl IteratorEntry {
 			Self::Range(_, ir, from, to, sc) => {
 				let mut e = HashMap::default();
 				e.insert("index", Value::from(ir.name.clone()));
-				e.insert("from", Value::from(from));
-				e.insert("to", Value::from(to));
+
+				let from = match from {
+					Bound::Included(v) => Value::from(map! {
+						"value" => (**v).clone(),
+						"inclusive" => true.into(),
+					}),
+					Bound::Excluded(v) => Value::from(map! {
+						"value" => (**v).clone(),
+						"inclusive" => false.into(),
+					}),
+					Bound::Unbounded => Value::from(map! {
+						"value" => Value::None,
+						"inclusive" => false.into(),
+					}),
+				};
+
+				e.insert("from", from);
+				let to = match to {
+					Bound::Included(v) => Value::from(map! {
+						"value" => (**v).clone(),
+						"inclusive" => true.into(),
+					}),
+					Bound::Excluded(v) => Value::from(map! {
+						"value" => (**v).clone(),
+						"inclusive" => false.into(),
+					}),
+					Bound::Unbounded => Value::from(map! {
+						"value" => Value::None,
+						"inclusive" => false.into(),
+					}),
+				};
+				e.insert("to", to);
 				e.insert("direction", Value::from(sc.to_string()));
 				Value::from(Object::from(e))
 			}
@@ -445,8 +476,8 @@ impl QueryExecutor {
 						ns,
 						db,
 						index_reference,
-						from.clone(),
-						to.clone(),
+						from.as_ref().map(|x| &**x),
+						to.as_ref().map(|x| &**x),
 						*sc,
 					)?),
 			}
@@ -568,8 +599,8 @@ impl QueryExecutor {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		from: RangeValue,
-		to: RangeValue,
+		from: Bound<&Value>,
+		to: Bound<&Value>,
 		sc: ScanDirection,
 	) -> Result<Option<RecordIterator>> {
 		match ix.index {
@@ -577,7 +608,7 @@ impl QueryExecutor {
 				return Ok(Some(Self::new_index_range_iterator(ir, ns, db, ix, from, to, sc)?));
 			}
 			Index::Uniq => {
-				return Ok(Some(Self::new_unique_range_iterator(ir, ns, db, ix, &from, &to, sc)?));
+				return Ok(Some(Self::new_unique_range_iterator(ir, ns, db, ix, from, to, sc)?));
 			}
 			_ => {}
 		}
@@ -589,8 +620,8 @@ impl QueryExecutor {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		from: RangeValue,
-		to: RangeValue,
+		from: Bound<&Value>,
+		to: Bound<&Value>,
 		sc: ScanDirection,
 	) -> Result<RecordIterator> {
 		Ok(match sc {
@@ -608,8 +639,8 @@ impl QueryExecutor {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		from: &RangeValue,
-		to: &RangeValue,
+		from: Bound<&Value>,
+		to: Bound<&Value>,
 		sc: ScanDirection,
 	) -> Result<RecordIterator> {
 		Ok(match sc {

@@ -31,6 +31,82 @@ impl Range {
 			end: Bound::Unbounded,
 		}
 	}
+
+	/// Returns if the range cannot contain a value.
+	pub fn is_empty(&self) -> bool {
+		match &self.start {
+			Bound::Included(a) => match &self.end {
+				Bound::Included(b) => a > b,
+				Bound::Excluded(b) => a >= b,
+				Bound::Unbounded => false,
+			},
+			Bound::Excluded(a) => match &self.end {
+				Bound::Included(b) | Bound::Excluded(b) => a >= b,
+				Bound::Unbounded => false,
+			},
+			Bound::Unbounded => false,
+		}
+	}
+
+	/// Returns the intersection of two ranges.
+	pub fn intersect(self, other: Self) -> Self {
+		let start = match self.start {
+			Bound::Included(a) => match other.start {
+				Bound::Included(b) => Bound::Included(a.max(b)),
+				Bound::Excluded(b) => {
+					if a <= b {
+						Bound::Excluded(b)
+					} else {
+						Bound::Included(a)
+					}
+				}
+				Bound::Unbounded => Bound::Included(a),
+			},
+			Bound::Excluded(a) => match other.start {
+				Bound::Excluded(b) => Bound::Excluded(a.max(b)),
+				Bound::Included(b) => {
+					if a < b {
+						Bound::Included(b)
+					} else {
+						Bound::Excluded(a)
+					}
+				}
+				Bound::Unbounded => Bound::Excluded(a),
+			},
+			Bound::Unbounded => other.start,
+		};
+
+		let end = match self.end {
+			Bound::Included(a) => match other.end {
+				Bound::Included(b) => Bound::Included(a.min(b)),
+				Bound::Excluded(b) => {
+					if a >= b {
+						Bound::Excluded(b)
+					} else {
+						Bound::Included(a)
+					}
+				}
+				Bound::Unbounded => Bound::Included(a),
+			},
+			Bound::Excluded(a) => match other.end {
+				Bound::Excluded(b) => Bound::Excluded(a.min(b)),
+				Bound::Included(b) => {
+					if a > b {
+						Bound::Included(b)
+					} else {
+						Bound::Excluded(a)
+					}
+				}
+				Bound::Unbounded => Bound::Excluded(a),
+			},
+			Bound::Unbounded => other.end,
+		};
+
+		Range {
+			start,
+			end,
+		}
+	}
 }
 
 impl PartialOrd for Range {

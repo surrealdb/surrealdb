@@ -1,22 +1,19 @@
 //! Stores the key prefix for all nodes
-use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
 use crate::key::category::{Categorise, Category};
-use crate::kvs::impl_kv_key_storekey;
+use crate::key::{impl_kv_key_storekey, key};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct All {
-	__: u8,
-	_a: u8,
-	pub nd: Uuid,
+key! {
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd,)]
+	pub(crate) struct All {
+		b'/',
+		b'$',
+		pub nd: Uuid,
+	}
 }
 
 impl_kv_key_storekey!(All => Vec<u8>);
-
-pub fn new(nd: Uuid) -> All {
-	All::new(nd)
-}
 
 impl Categorise for All {
 	fn categorise(&self) -> Category {
@@ -24,20 +21,10 @@ impl Categorise for All {
 	}
 }
 
-impl All {
-	pub fn new(nd: Uuid) -> Self {
-		Self {
-			__: b'/',
-			_a: b'$',
-			nd,
-		}
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::kvs::KVKey;
+	use crate::key::KVKey;
 
 	#[test]
 	fn key() {
@@ -46,8 +33,10 @@ mod tests {
 			0x0f, 0x10,
 		]);
 
-		let val = All::new(nd);
+		let val = All {
+			nd,
+		};
 		let enc = All::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/$\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10");
+		assert_eq!(&*enc, b"/$\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10");
 	}
 }
