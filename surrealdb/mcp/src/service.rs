@@ -967,21 +967,99 @@ mod http_service {
 		ds: Arc<Datastore>,
 		metrics_recorder: Option<Arc<dyn McpMetricsRecorder>>,
 	) -> McpHttpService {
+		create_http_service_with_config(ds, metrics_recorder, McpConfig::from_env())
+	}
+
+	/// Variant of [`create_http_service_with_metrics`] that takes an
+	/// explicit [`McpConfig`] instead of reading the `SURREAL_MCP_*`
+	/// environment. Embedders with their own configuration source -- and
+	/// tests that need to exercise the `Host`-header allowlist without
+	/// mutating process-global env state -- construct the service this way.
+	///
+	/// The same config drives both the transport-level DNS-rebinding host
+	/// guard (via [`apply_host_policy`]) and every per-session
+	/// [`McpService`]'s runtime caps.
+	pub fn create_http_service_with_config(
+		ds: Arc<Datastore>,
+		metrics_recorder: Option<Arc<dyn McpMetricsRecorder>>,
+		mcp_config: Arc<McpConfig>,
+	) -> McpHttpService {
 		let mut config = StreamableHttpServerConfig::default();
 		config.stateful_mode = true;
+		apply_host_policy(&mut config, &mcp_config);
 		StreamableHttpService::new(
 			move || {
-				let svc = McpService::new(Arc::clone(&ds), None, None, Session::default());
-				let svc = if let Some(rec) = metrics_recorder.clone() {
-					svc.with_metrics_recorder(rec).with_transport_label("http")
-				} else {
-					svc.with_transport_label("http")
+				let svc = McpServiceConfig::new(Arc::clone(&ds))
+					.with_config(Arc::clone(&mcp_config))
+					.with_transport_label("http");
+				let svc = match metrics_recorder.clone() {
+					Some(rec) => svc.with_metrics_recorder(rec),
+					None => svc,
 				};
-				Ok(svc)
+				Ok(svc.build())
 			},
 			Arc::new(LocalSessionManager::default()),
 			config,
 		)
+	}
+
+	/// Map SurrealDB's configured host policy onto rmcp's transport config.
+	///
+	/// rmcp defaults `allowed_hosts` to the loopback set (`localhost`,
+	/// `127.0.0.1`, `::1`) to prevent DNS-rebinding; that default rejects
+	/// every request carrying a public `Host` with
+	/// `403 Forbidden: Host header is not allowed`, before any SurrealDB
+	/// logic runs. The mapping:
+	///
+	/// - `allow_all_hosts` -> clear the list. rmcp treats an empty list as "allow any `Host`"; this
+	///   is the opt-in escape hatch and it wins over `allowed_hosts`.
+	/// - non-empty `allowed_hosts` -> replace the loopback default with the operator's exact
+	///   hostnames.
+	/// - otherwise -> leave rmcp's safe loopback default in place.
+	fn apply_host_policy(config: &mut StreamableHttpServerConfig, mcp: &McpConfig) {
+		if mcp.allow_all_hosts {
+			config.allowed_hosts.clear();
+		} else if !mcp.allowed_hosts.is_empty() {
+			config.allowed_hosts.clone_from(&mcp.allowed_hosts);
+		}
+	}
+
+	#[cfg(test)]
+	mod host_policy_tests {
+		use super::*;
+
+		fn mk_cfg(allowed_hosts: &[&str], allow_all_hosts: bool) -> McpConfig {
+			McpConfig {
+				allowed_hosts: allowed_hosts.iter().map(|s| s.to_string()).collect(),
+				allow_all_hosts,
+				..McpConfig::default()
+			}
+		}
+
+		#[test]
+		fn default_leaves_rmcp_loopback_allowlist_untouched() {
+			let mut c = StreamableHttpServerConfig::default();
+			let before = c.allowed_hosts.clone();
+			apply_host_policy(&mut c, &mk_cfg(&[], false));
+			// Unset config is a no-op: rmcp's (non-empty, restrictive)
+			// loopback default is exactly what we must preserve.
+			assert_eq!(c.allowed_hosts, before);
+			assert!(!c.allowed_hosts.is_empty());
+		}
+
+		#[test]
+		fn explicit_list_replaces_loopback() {
+			let mut c = StreamableHttpServerConfig::default();
+			apply_host_policy(&mut c, &mk_cfg(&["a.example.com"], false));
+			assert_eq!(c.allowed_hosts, vec!["a.example.com".to_string()]);
+		}
+
+		#[test]
+		fn allow_all_clears_list_and_wins_over_list() {
+			let mut c = StreamableHttpServerConfig::default();
+			apply_host_policy(&mut c, &mk_cfg(&["a.example.com"], true));
+			assert!(c.allowed_hosts.is_empty());
+		}
 	}
 }
 

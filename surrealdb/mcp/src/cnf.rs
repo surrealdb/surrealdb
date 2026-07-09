@@ -130,6 +130,25 @@ pub struct McpConfig {
 	/// cap: enrichment is N round-trips through the datastore and
 	/// unbounded N is a DoS vector on databases with many tables.
 	pub schema_resource_max_tables: usize,
+	/// Exact hostnames the HTTP `/mcp` transport accepts in the `Host`
+	/// header. This drives rmcp's DNS-rebinding guard.
+	///
+	/// Empty means "not configured": rmcp's safe loopback default
+	/// (`localhost`, `127.0.0.1`, `::1`) is left in place. A non-empty list
+	/// *replaces* that default with these exact hosts, so include
+	/// `localhost` yourself if you still need loopback access. Ignored when
+	/// `allow_all_hosts` is set.
+	///
+	/// Configured via `SURREAL_MCP_ALLOWED_HOSTS` as a comma-separated
+	/// list, e.g. `instance.example.com,localhost`.
+	pub allowed_hosts: Vec<String>,
+	/// Disable the HTTP `/mcp` transport's `Host`-header allowlist
+	/// entirely, accepting any `Host`. Escape hatch for deployments behind
+	/// a trusted proxy / load balancer that forwards the public `Host`
+	/// unchanged. Takes precedence over `allowed_hosts`.
+	///
+	/// Configured via `SURREAL_MCP_ALLOW_ALL_HOSTS` (`true` / `1`).
+	pub allow_all_hosts: bool,
 }
 
 impl Default for McpConfig {
@@ -141,6 +160,8 @@ impl Default for McpConfig {
 			params_max_keys: DEFAULT_PARAMS_MAX_KEYS,
 			params_max_ql_bytes: DEFAULT_PARAMS_MAX_QL_BYTES,
 			schema_resource_max_tables: DEFAULT_SCHEMA_RESOURCE_MAX_TABLES,
+			allowed_hosts: Vec::new(),
+			allow_all_hosts: false,
 		}
 	}
 }
@@ -176,7 +197,16 @@ impl Config for McpConfig {
 			"schema_resource_max_tables",
 			&mut self.schema_resource_max_tables,
 			positive_usize,
-		);
+		)
+		.parse_key_with("allowed_hosts", &mut self.allowed_hosts, |x| {
+			// Comma-separated list; trim whitespace and drop empties so
+			// `a.example.com, b.example.com` and a trailing comma both
+			// behave. An empty value yields an empty list (== unset).
+			Some(
+				x.split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_string).collect(),
+			)
+		})
+		.parse_key_bool("allow_all_hosts", &mut self.allow_all_hosts);
 	}
 }
 
@@ -220,6 +250,8 @@ mod tests {
 		assert_eq!(cfg.params_max_keys, DEFAULT_PARAMS_MAX_KEYS);
 		assert_eq!(cfg.params_max_ql_bytes, DEFAULT_PARAMS_MAX_QL_BYTES);
 		assert_eq!(cfg.schema_resource_max_tables, DEFAULT_SCHEMA_RESOURCE_MAX_TABLES);
+		assert!(cfg.allowed_hosts.is_empty());
+		assert!(!cfg.allow_all_hosts);
 	}
 
 	#[test]
@@ -257,5 +289,25 @@ mod tests {
 		assert_eq!(cfg.params_max_keys, DEFAULT_PARAMS_MAX_KEYS);
 		assert_eq!(cfg.params_max_ql_bytes, DEFAULT_PARAMS_MAX_QL_BYTES);
 		assert_eq!(cfg.schema_resource_max_tables, DEFAULT_SCHEMA_RESOURCE_MAX_TABLES);
+	}
+
+	#[test]
+	fn parses_allowed_hosts_and_allow_all() {
+		let map = ConfigMap::from_config_string(
+			"allowed_hosts=a.example.com, b.example.com,&allow_all_hosts=true",
+		);
+		let cfg: McpConfig = map.load();
+		// Whitespace trimmed and the trailing empty element dropped.
+		assert_eq!(
+			cfg.allowed_hosts,
+			vec!["a.example.com".to_string(), "b.example.com".to_string()]
+		);
+		assert!(cfg.allow_all_hosts);
+	}
+
+	#[test]
+	fn empty_allowed_hosts_stays_empty() {
+		let cfg: McpConfig = ConfigMap::from_config_string("allowed_hosts=").load();
+		assert!(cfg.allowed_hosts.is_empty());
 	}
 }

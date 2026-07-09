@@ -19,7 +19,10 @@ use http_body_util::{BodyExt, Full};
 use serde_json::{Value, json};
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_mcp::service::{McpHttpService, create_http_service};
+use surrealdb_mcp::cnf::McpConfig;
+use surrealdb_mcp::service::{
+	McpHttpService, create_http_service, create_http_service_with_config,
+};
 
 mod common;
 use common::test_datastore;
@@ -123,6 +126,78 @@ async fn initialize(service: &McpHttpService, attach_session: Option<Session>) -
 
 fn setup_service(ds: Arc<Datastore>) -> McpHttpService {
 	create_http_service(ds)
+}
+
+/// Build an `initialize` POST carrying an explicit `Host` header, used to
+/// exercise rmcp's DNS-rebinding allowlist.
+fn initialize_with_host(host: &str) -> Request<Full<Bytes>> {
+	let body = json!({
+		"jsonrpc": "2.0",
+		"id": 1,
+		"method": "initialize",
+		"params": {
+			"protocolVersion": "2025-06-18",
+			"capabilities": {},
+			"clientInfo": { "name": "http-test", "version": "0.0.0" },
+		},
+	});
+	Request::builder()
+		.method(Method::POST)
+		.uri("/mcp")
+		.header("host", host)
+		.header("content-type", "application/json")
+		.header("accept", "application/json, text/event-stream")
+		.body(Full::new(Bytes::from(body.to_string())))
+		.unwrap()
+}
+
+/// Regression test for the "Host header 403": with the default
+/// (loopback-only) allowlist, a request carrying a real public `Host` is
+/// rejected by rmcp's DNS-rebinding guard before any SurrealDB logic runs.
+/// An explicit `McpConfig::default()` keeps this independent of ambient
+/// `SURREAL_MCP_*` env in the test process.
+#[tokio::test]
+async fn default_config_rejects_non_loopback_host() {
+	let ds = test_datastore().await;
+	let service = create_http_service_with_config(ds, None, Arc::new(McpConfig::default()));
+	let resp = service.handle(initialize_with_host("public.example.com")).await;
+	assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+	let body = body_to_string(resp).await;
+	assert!(
+		body.contains("Host header is not allowed"),
+		"expected rmcp host-guard body, got: {body:?}"
+	);
+}
+
+/// Option A: an explicit allowlist admits the configured public host that
+/// the default would have rejected.
+#[tokio::test]
+async fn configured_allowed_host_is_accepted() {
+	let ds = test_datastore().await;
+	let cfg = McpConfig {
+		allowed_hosts: vec!["public.example.com".to_string()],
+		..McpConfig::default()
+	};
+	let service = create_http_service_with_config(ds, None, Arc::new(cfg));
+	let resp = service.handle(initialize_with_host("public.example.com")).await;
+	assert_eq!(resp.status(), StatusCode::OK);
+	assert!(
+		resp.headers().get("mcp-session-id").is_some(),
+		"initialize should allocate a session id"
+	);
+}
+
+/// Option B: the disable toggle admits an arbitrary host.
+#[tokio::test]
+async fn allow_all_hosts_accepts_any_host() {
+	let ds = test_datastore().await;
+	let cfg = McpConfig {
+		allow_all_hosts: true,
+		..McpConfig::default()
+	};
+	let service = create_http_service_with_config(ds, None, Arc::new(cfg));
+	let resp = service.handle(initialize_with_host("anything.at.all")).await;
+	assert_eq!(resp.status(), StatusCode::OK);
 }
 
 #[tokio::test]
