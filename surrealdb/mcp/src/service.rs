@@ -130,15 +130,27 @@ impl McpServiceConfig {
 	/// should call [`Self::with_base_session`] with [`Session::owner`].
 	///
 	/// The MCP runtime configuration is loaded from the `SURREAL_MCP_*`
-	/// environment by default; embedders that don't want env auto-loading
-	/// can override it via [`Self::with_config`].
+	/// environment; embedders that already hold a loaded config (or don't
+	/// want env auto-loading) should use [`Self::new_with_config`] instead
+	/// of paying a redundant env read.
 	pub fn new(datastore: Arc<Datastore>) -> Self {
+		Self::new_with_config(datastore, McpConfig::from_env())
+	}
+
+	/// Like [`Self::new`] but takes an explicit [`McpConfig`], skipping the
+	/// `SURREAL_MCP_*` environment read.
+	///
+	/// The in-tree HTTP factory uses this so the environment is read once at
+	/// service construction and a single `Arc<McpConfig>` is shared across
+	/// every per-session service, rather than re-read (and immediately
+	/// discarded) on each new session.
+	pub fn new_with_config(datastore: Arc<Datastore>, config: Arc<McpConfig>) -> Self {
 		Self {
 			datastore,
 			default_ns: None,
 			default_db: None,
 			base_session: Session::default(),
-			config: McpConfig::from_env(),
+			config,
 			metrics_recorder: None,
 			// Default transport label for in-process / stdio embedders.
 			// HTTP embedders override via [`Self::with_transport_label`].
@@ -989,9 +1001,9 @@ mod http_service {
 		apply_host_policy(&mut config, &mcp_config);
 		StreamableHttpService::new(
 			move || {
-				let svc = McpServiceConfig::new(Arc::clone(&ds))
-					.with_config(Arc::clone(&mcp_config))
-					.with_transport_label("http");
+				let svc =
+					McpServiceConfig::new_with_config(Arc::clone(&ds), Arc::clone(&mcp_config))
+						.with_transport_label("http");
 				let svc = match metrics_recorder.clone() {
 					Some(rec) => svc.with_metrics_recorder(rec),
 					None => svc,
