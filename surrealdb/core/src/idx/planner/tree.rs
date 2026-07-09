@@ -590,9 +590,20 @@ impl<'a> TreeBuilder<'a> {
 				Index::Uniq => self.eval_index_operator(index_reference, op, n, p, *col),
 				Index::FullText {
 					..
-				} if *col == 0 => Self::eval_matches_operator(op, n),
-				Index::Hnsw(h) if *col == 0 => self.eval_hnsw_knn(e, op, n, h)?,
-				Index::DiskAnn(d) if *col == 0 => self.eval_diskann_knn(e, op, n, d)?,
+				} if *col == 0 => {
+					// Reject an index whose on-disk format predates the shared
+					// table-level doc-ID space before planning a search on it.
+					index_reference.ensure_current_format()?;
+					Self::eval_matches_operator(op, n)
+				}
+				Index::Hnsw(h) if *col == 0 => {
+					index_reference.ensure_current_format()?;
+					self.eval_hnsw_knn(e, op, n, h)?
+				}
+				Index::DiskAnn(d) if *col == 0 => {
+					index_reference.ensure_current_format()?;
+					self.eval_diskann_knn(e, op, n, d)?
+				}
 				_ => None,
 			};
 			if res.is_none()

@@ -445,21 +445,16 @@ impl<'a> IndexOperation<'a> {
 		require_compaction: &mut bool,
 	) -> Result<()> {
 		let mut rc = false;
-		// Delete the old index data
-		let doc_id = if let Some(o) = self.o.take() {
-			fti.remove_content(stk, self.ctx, self.opt, self.rid, o, &mut rc).await?
-		} else {
-			None
-		};
+		// Delete the old index data (posting lists, offsets, doc length/count).
+		if let Some(o) = self.o.take() {
+			fti.remove_content(stk, self.ctx, self.opt, self.rid, o, &mut rc).await?;
+		}
 		// Create the new index data
 		if let Some(n) = self.n.take() {
 			fti.index_content(stk, self.ctx, self.opt, self.rid, n, &mut rc).await?;
-		} else {
-			// It is a deletion, we can remove the doc
-			if let Some(doc_id) = doc_id {
-				fti.remove_doc(self.ctx, doc_id).await?;
-			}
 		}
+		// The record ↔ doc-ID mapping is shared across all of the table's indexes,
+		// so it is removed centrally at record purge, not per index here.
 		// Do we need to trigger the compaction?
 		if rc {
 			*require_compaction = true;

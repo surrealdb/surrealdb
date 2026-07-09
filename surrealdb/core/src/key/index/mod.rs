@@ -15,15 +15,11 @@
 pub mod all;
 pub mod dc;
 #[cfg(diskann)]
-pub mod dd;
-#[cfg(diskann)]
 pub mod de;
 #[cfg(diskann)]
 pub mod dg;
 #[cfg(diskann)]
 pub mod dh;
-#[cfg(diskann)]
-pub mod di;
 pub mod dl;
 #[cfg(diskann)]
 pub mod dn;
@@ -44,23 +40,17 @@ pub mod dv;
 pub mod dw;
 #[cfg(diskann)]
 pub mod dy;
-pub mod hd;
 pub mod he;
 pub mod hg;
 pub mod hh;
-pub mod hi;
 pub mod hl;
 pub mod hn;
 pub mod hp;
 pub mod hr;
 pub mod hs;
 pub mod hv;
-pub mod ib;
-pub mod id;
 pub mod ig;
-pub mod ii;
 pub mod ip;
-pub mod is;
 pub mod iu;
 pub mod iv;
 pub mod td;

@@ -41,16 +41,19 @@ use crate::val::{RecordId, RecordIdKey};
 /// but the encoder now writes the id inline, so re-encoding no longer
 /// reproduces the frozen 3.1.0 bytes.
 ///
+/// `v3_1_1` was demoted from current-format when 3.3.0 bumped two definitions
+/// to revision 2: `UserDefinition` (optional `scram` SCRAM-SHA-256 verifier)
+/// and `IndexDefinition` (`format_version` for the shared table-level doc-ID
+/// space). The decoder still reads 3.1.1's revision-1 fixtures (the new fields
+/// default), but the encoder now emits revision-2 bytes for both, so 3.1.1's
+/// frozen `USER_*` / `INDEX_*` fixtures no longer re-encode byte-identically and
+/// are kept as decode-only snapshots.
+///
 /// When the write format advances again, capture a new `vX_Y_Z` snapshot
 /// and move the tag here.
 const fn version_writes_current_format(version_name: &str) -> bool {
 	// Constant-folded at compile time per macro expansion via
 	// `stringify!`. Compared as bytes so the match is `const`-eligible.
-	//
-	// Moved from `v3_1_1` to `v3_3_0` when `UserDefinition` was bumped to
-	// revision 2 (the optional `scram` field): the encoder now writes rev-2
-	// user bytes, so `v3_1_1`'s frozen user fixtures no longer re-encode
-	// byte-identically and are kept as decode-only snapshots.
 	matches!(version_name.as_bytes(), b"v3_3_0")
 }
 

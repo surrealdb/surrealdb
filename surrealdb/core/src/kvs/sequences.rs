@@ -37,8 +37,7 @@ use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvid
 use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableId};
 use crate::ctx::Context;
 use crate::err::Error;
-use crate::idx::IndexKeyBase;
-use crate::idx::seqdocids::DocId;
+use crate::idx::docids::DocId;
 use crate::key::database::all::DatabaseRoot;
 use crate::key::database::th::{TableIdGeneratorBatchKey, TableIdGeneratorBatchPrefix};
 use crate::key::database::ti::TableIdGeneratorStateKey;
@@ -49,6 +48,8 @@ use crate::key::root::ni::NamespaceIdGeneratorStateKey;
 use crate::key::sequence::BaPrefix;
 use crate::key::sequence::ba::Ba;
 use crate::key::sequence::st::St;
+use crate::key::table::dh::{DocIdGeneratorBatchKey, DocIdGeneratorBatchPrefix};
+use crate::key::table::ds::DocIdGeneratorStateKey;
 use crate::key::table::ih::{IndexIdGeneratorBatchKey, IndexIdGeneratorBatchPrefix};
 use crate::key::table::is::IndexIdGeneratorStateKey;
 use crate::key::{KVKey, KVRange, Key, KeyRange, impl_kv_value_revisioned};
@@ -78,8 +79,8 @@ pub struct Sequences {
 enum SequenceDomain {
 	/// A user-defined sequence in a database
 	UserName(NamespaceId, DatabaseId, String),
-	/// A sequence generating DocIds for a FullText search index
-	FullTextDocIds(IndexKeyBase),
+	/// A sequence generating table-level DocIds shared by all indexes on a table
+	TableDocIds(NamespaceId, DatabaseId, TableName),
 	/// A sequence generating IDs for namespaces
 	NameSpacesIds,
 	/// A sequence generating IDs for databases
@@ -95,8 +96,8 @@ impl SequenceDomain {
 		Self::UserName(ns, db, sq.to_string())
 	}
 
-	pub(crate) fn new_ft_doc_ids(ikb: IndexKeyBase) -> Self {
-		Self::FullTextDocIds(ikb)
+	pub(crate) fn new_table_doc_ids(ns: NamespaceId, db: DatabaseId, tb: TableName) -> Self {
+		Self::TableDocIds(ns, db, tb)
 	}
 
 	pub(crate) fn new_namespace_ids() -> Self {
@@ -125,7 +126,9 @@ impl SequenceDomain {
 				sq: Cow::Borrowed(sq),
 			}
 			.encode_range(),
-			Self::FullTextDocIds(ibk) => ibk.new_ib_range(),
+			Self::TableDocIds(ns, db, tb) => {
+				DocIdGeneratorBatchPrefix::new(*ns, *db, tb).encode_range()
+			}
 			Self::NameSpacesIds => NamespaceIdGeneratorBatchPrefix {}.encode_range(),
 			Self::DatabasesIds(ns) => DatabaseIdGeneratorBatchPrefix {
 				ns: *ns,
@@ -160,7 +163,9 @@ impl SequenceDomain {
 				start,
 			}
 			.encode_key(),
-			Self::FullTextDocIds(ikb) => ikb.new_ib_key(start).encode_key(),
+			Self::TableDocIds(ns, db, tb) => {
+				DocIdGeneratorBatchKey::new(*ns, *db, tb, start).encode_key()
+			}
 			Self::NameSpacesIds => NamespaceIdGeneratorBatchKey {
 				start,
 			}
@@ -201,7 +206,9 @@ impl SequenceDomain {
 				nid,
 			}
 			.encode_key(),
-			Self::FullTextDocIds(ikb) => ikb.new_is_key(nid).encode_key(),
+			Self::TableDocIds(ns, db, tb) => {
+				DocIdGeneratorStateKey::new(*ns, *db, tb, nid).encode_key()
+			}
 			Self::NameSpacesIds => NamespaceIdGeneratorStateKey {
 				nid,
 			}
@@ -457,22 +464,26 @@ impl Sequences {
 		self.next_val(ctx, domain, seq.start, seq.batch, seq.timeout).await
 	}
 
-	/// Generates the next document ID for a full-text search index.
+	/// Generates the next document ID for a table's shared doc-ID space.
 	///
 	/// # Arguments
 	/// * `ctx` - Optional mutable context for transaction operations
-	/// * `ikb` - The index key base identifying the full-text index
+	/// * `ns` - The namespace ID
+	/// * `db` - The database ID
+	/// * `tb` - The table the doc-ID space belongs to
 	/// * `batch` - The batch size for ID allocation
 	///
 	/// # Returns
-	/// A new unique document ID for the full-text search index
-	pub(crate) async fn next_fts_doc_id(
+	/// A new unique, monotonic document ID for the table
+	pub(crate) async fn next_table_doc_id(
 		&self,
 		ctx: Option<&Context>,
-		ikb: IndexKeyBase,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: TableName,
 		batch: u32,
 	) -> Result<DocId> {
-		let domain = Arc::new(SequenceDomain::new_ft_doc_ids(ikb));
+		let domain = Arc::new(SequenceDomain::new_table_doc_ids(ns, db, tb));
 		let id = self.next_val(ctx, domain, 0, batch, None).await?;
 		Ok(id as DocId)
 	}
@@ -578,10 +589,10 @@ impl Sequence {
 					seeded = seeded.max(ix.index_id.0 as i64 + 1);
 				}
 			}
-			// FullText doc IDs and user-defined sequences are not backed by the
-			// catalog id-allocation scheme, so there are no pre-existing IDs to
-			// avoid colliding with.
-			SequenceDomain::FullTextDocIds(_) | SequenceDomain::UserName(..) => {}
+			// Table doc IDs and user-defined sequences are not backed by the catalog
+			// id-allocation scheme, so there are no pre-existing IDs to avoid
+			// colliding with.
+			SequenceDomain::TableDocIds(..) | SequenceDomain::UserName(..) => {}
 		}
 		Ok(seeded)
 	}
@@ -740,7 +751,20 @@ impl Sequence {
 				owner: sqs.nid,
 			})?;
 			let batch_key = seq.new_batch_key(next_start)?;
-			tx.set(batch_key, &bv).await?;
+			// Claim the batch with a conditional create (put-if-absent) rather
+			// than a blind `set`. Two nodes exhausting the same domain
+			// concurrently observe the same committed state and therefore compute
+			// the same `next_start` (a node only reallocates once its current
+			// batch is exhausted, so its local `next` never exceeds the highest
+			// committed `to`), so they collide on this exact key. On
+			// last-writer-wins backends (TiKV) a blind `set` would let both commit
+			// and hand out the same range; a conditional create reads the key
+			// first, which arms the write-conflict check, so only the first
+			// committer wins and the loser is rejected. `find_batch_allocation`
+			// then retries, re-scans, and claims the next free range.
+			// Conflict-serializing backends (mem/rocksdb/surrealkv) already reject
+			// the second writer either way.
+			tx.put(batch_key, &bv).await?;
 			Ok::<(i64, i64), anyhow::Error>((next_start, next_to))
 		}
 		.await;
@@ -812,6 +836,7 @@ mod tests {
 				index: Index::Idx,
 				comment: None,
 				prepare_remove: false,
+				format_version: 1,
 			},
 		)
 		.await
@@ -896,5 +921,100 @@ mod tests {
 		);
 
 		tx.cancel().await.unwrap();
+	}
+}
+
+/// Cross-node concurrency regression tests. These exercise the last-writer-wins
+/// batch-claim race (race #1) that only manifests on TiKV, so they are gated to
+/// the `kv-tikv` backend and require a running cluster at 127.0.0.1:2379 (the
+/// same one the `kvs/tests` suite uses in the `tikv` CI lane).
+#[cfg(test)]
+#[cfg(feature = "kv-tikv")]
+mod tikv_concurrency {
+	use std::collections::HashSet;
+	use std::sync::Arc;
+
+	use uuid::Uuid;
+
+	use super::Sequences;
+	use crate::CommunityComposer;
+	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::kvs::ds::TransactionFactory;
+	use crate::kvs::{Datastore, LockType, TransactionType};
+	use crate::val::TableName;
+
+	/// Build a datastore against the local TiKV cluster, clear the keyspace so
+	/// reruns are deterministic, and hand back its transaction factory.
+	async fn fresh_tikv_tf() -> TransactionFactory {
+		let ds = Datastore::builder()
+			.with_id(Uuid::new_v4())
+			.build_with_factory_path("tikv:127.0.0.1:2379", CommunityComposer())
+			.await
+			.unwrap();
+		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+		tx.delr((vec![0u8]..vec![0xffu8]).into()).await.unwrap();
+		tx.commit().await.unwrap();
+		ds.transaction_factory().clone()
+	}
+
+	/// Race #1: many nodes (distinct node-ids) allocating from one shared
+	/// sequence domain must never hand out the same id twice. `BATCH == 1` makes
+	/// every id a fresh cross-node batch claim, and a `Barrier` releases all
+	/// nodes at once, so they hammer the same batch key and drive the `putc`
+	/// claim + `find_batch_allocation` retry loop hard. This is an end-to-end
+	/// uniqueness invariant over the real allocation path; the precise mechanism
+	/// the fix relies on — a `putc` create serializes where a blind `set` is
+	/// last-writer-wins — is pinned deterministically by the primitive
+	/// `kvs::tests::*::multiwriter_same_keys_putc` / `multiwriter_same_keys_allow`
+	/// pair (a blind `set` only loses to last-writer-wins in the non-overlapping
+	/// commit window, which barrier-synchronised contention here does not hit).
+	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+	#[serial_test::serial]
+	async fn table_doc_ids_unique_across_nodes() {
+		use tokio::sync::Barrier;
+
+		const NODES: usize = 4;
+		const PER_NODE: usize = 100;
+		const BATCH: u32 = 1;
+		let tf = fresh_tikv_tf().await;
+		let ns = NamespaceId(1);
+		let db = DatabaseId(1);
+		let tb: TableName = "t".into();
+		let barrier = Arc::new(Barrier::new(NODES));
+
+		let mut handles = Vec::with_capacity(NODES);
+		for _ in 0..NODES {
+			// Each task is a distinct node with its own node-id, so their
+			// in-process allocators hold independent mutexes and genuinely race
+			// in the KV store.
+			let seqs = Sequences::new(tf.clone(), Uuid::new_v4());
+			let tb = tb.clone();
+			let barrier = Arc::clone(&barrier);
+			handles.push(tokio::spawn(async move {
+				// Start every node's allocation loop at the same instant to
+				// maximise contention on the shared batch key.
+				barrier.wait().await;
+				let mut ids = Vec::with_capacity(PER_NODE);
+				for _ in 0..PER_NODE {
+					let id = seqs.next_table_doc_id(None, ns, db, tb.clone(), BATCH).await.unwrap();
+					ids.push(id);
+				}
+				ids
+			}));
+		}
+
+		let mut all = Vec::with_capacity(NODES * PER_NODE);
+		for h in handles {
+			all.extend(h.await.unwrap());
+		}
+
+		let unique: HashSet<_> = all.iter().copied().collect();
+		assert_eq!(
+			unique.len(),
+			all.len(),
+			"table doc-IDs must be globally unique across nodes; {} duplicate(s) out of {}",
+			all.len() - unique.len(),
+			all.len(),
+		);
 	}
 }

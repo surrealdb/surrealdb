@@ -71,7 +71,13 @@ impl From<u32> for IndexId {
 	}
 }
 
-#[revisioned(revision = 1)]
+/// Current on-disk format version for indexes that use the table-level doc-ID
+/// space (full-text, HNSW, DiskAnn). Bump when their persisted layout changes in
+/// a way that requires `REBUILD INDEX` after an upgrade. Index kinds that do not
+/// use doc-IDs (b-tree, count) are format-agnostic and stay at `0`.
+pub(crate) const INDEX_FORMAT_VERSION: u16 = 1;
+
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[non_exhaustive]
 pub struct IndexDefinition {
@@ -85,6 +91,13 @@ pub struct IndexDefinition {
 	/// Indexes marked for removal are excluded from query planning and document
 	/// indexing, and any in-progress index builds are cancelled.
 	pub(crate) prepare_remove: bool,
+	/// On-disk format version of this index's persisted data. Definitions written
+	/// by a binary predating the table-level doc-ID space decode this as `0`; the
+	/// doc-ID-backed kinds require [`INDEX_FORMAT_VERSION`] and are rejected with
+	/// [`Error::IndexRebuildRequired`](crate::err::Error::IndexRebuildRequired)
+	/// until rebuilt.
+	#[revision(start = 2)]
+	pub(crate) format_version: u16,
 }
 
 impl_kv_value_revisioned!(IndexDefinition);
@@ -123,6 +136,41 @@ impl IndexDefinition {
 		} else {
 			Ok(())
 		}
+	}
+
+	/// The on-disk format version required to read this index kind.
+	///
+	/// Only the doc-ID-backed kinds (full-text, HNSW, DiskAnn) share the
+	/// table-level doc-ID space and therefore gate on [`INDEX_FORMAT_VERSION`];
+	/// b-tree and count indexes are format-agnostic.
+	fn required_format_version(&self) -> u16 {
+		match self.index {
+			Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_) => INDEX_FORMAT_VERSION,
+			Index::Idx | Index::Uniq | Index::Count(_) => 0,
+		}
+	}
+
+	/// Rejects an index whose persisted data predates the running binary's format.
+	///
+	/// Called when a doc-ID-backed index is opened for a query. An index built
+	/// before the table-level doc-ID space decodes as `format_version == 0` and
+	/// must be rebuilt with `REBUILD INDEX` before it can be read, otherwise its
+	/// posting lists / graph payloads reference doc-IDs that no longer resolve.
+	///
+	/// # Errors
+	/// Returns [`Error::IndexRebuildRequired`](crate::err::Error::IndexRebuildRequired)
+	/// when `format_version` is below the kind's requirement.
+	pub(crate) fn ensure_current_format(&self) -> Result<()> {
+		let required = self.required_format_version();
+		if self.format_version < required {
+			return Err(anyhow::Error::new(Error::IndexRebuildRequired {
+				index: self.name.to_string(),
+				table: self.table_name.to_string(),
+				expected: required,
+				actual: self.format_version,
+			}));
+		}
+		Ok(())
 	}
 }
 

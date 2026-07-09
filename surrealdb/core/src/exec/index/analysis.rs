@@ -1620,6 +1620,7 @@ mod tests {
 			index: kind,
 			comment: None,
 			prepare_remove: false,
+			format_version: 1,
 		}
 	}
 

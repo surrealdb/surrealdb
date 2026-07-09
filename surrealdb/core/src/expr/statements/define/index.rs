@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use super::DefineKind;
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{Index, IndexDefinition, TableDefinition, TableId};
+use crate::catalog::{INDEX_FORMAT_VERSION, Index, IndexDefinition, TableDefinition, TableId};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -15,6 +15,7 @@ use crate::err::Error;
 use crate::expr::parameterize::{expr_to_ident, exprs_to_fields};
 use crate::expr::{Base, Expr, FlowResultExt, Idiom, Literal, Part};
 use crate::iam::{Action, ResourceKind};
+use crate::idx::docids::TableDocIds;
 use crate::kvs::Transaction;
 use crate::kvs::index::{IndexBuilder, retire_durable_index};
 use crate::val::{TableName, Value};
@@ -150,7 +151,11 @@ impl DefineIndexStatement {
 		{
 			// Import replays are idempotent when the physical index definition
 			// already matches. Preserve data and durable build state while still
-			// allowing metadata such as comments to be refreshed.
+			// allowing metadata such as comments to be refreshed. Preserve the
+			// existing on-disk `format_version` too: this path reuses the existing
+			// index data without rebuilding, so a stale doc-ID-backed index must
+			// stay stale (and keep failing `ensure_current_format`) rather than be
+			// falsely stamped current and read through the new table-level resolver.
 			let index_def = IndexDefinition {
 				index_id: ix.index_id,
 				name: name.into(),
@@ -159,6 +164,7 @@ impl DefineIndexStatement {
 				index: self.index.clone(),
 				comment,
 				prepare_remove: false,
+				format_version: ix.format_version,
 			};
 			txn.put_tb_index(tb.namespace_id, tb.database_id, &tb.name, &index_def).await?;
 			refresh_table_index_cache(ctx, &txn, ns, db, &tb).await?;
@@ -174,6 +180,31 @@ impl DefineIndexStatement {
 		// rebuild keeps peak disk roughly flat for an inline rebuild instead of
 		// holding the old and new index data simultaneously.
 		if let Some(ix) = existing.as_ref() {
+			// Decide up front — before the catalog is mutated — whether this
+			// destructive replacement drops the table's LAST doc-ID-consuming
+			// index (full-text / HNSW / DiskAnn) with no replacement consumer
+			// taking its place. If so, reclaim the shared table-level doc-ID
+			// space here, exactly as RemoveIndexStatement does; otherwise the
+			// `!di`/`!dd` mappings leak (record deletes stop calling
+			// `remove_doc_id` once no consumer remains, and a doc-ID index defined
+			// later could reuse a deleted record's id). A replacement that is
+			// itself a doc-ID index keeps consuming the space, so it is preserved.
+			let purge_table_doc_ids =
+				matches!(ix.index, Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_))
+					&& !matches!(
+						self.index,
+						Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_)
+					) && !txn
+					.all_tb_indexes(tb.namespace_id, tb.database_id, &tb.name, None)
+					.await?
+					.iter()
+					.any(|other| {
+						other.index_id != ix.index_id
+							&& matches!(
+								other.index,
+								Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_)
+							)
+					});
 			// Clear process-local index wrappers without aborting the current
 			// durable builder here. Durable state and catalog entries are
 			// retired atomically in this schema transaction below, and the
@@ -192,6 +223,32 @@ impl DefineIndexStatement {
 			retire_durable_index(&txn, tb.namespace_id, tb.database_id, &tb.name, ix.index_id)
 				.await?;
 			txn.del_tb_index(tb.namespace_id, tb.database_id, &tb.name, &name).await?;
+			if purge_table_doc_ids {
+				TableDocIds::new(tb.namespace_id, tb.database_id, tb.name.clone())
+					.remove_all(&txn)
+					.await?;
+			}
+			// Serialize concurrent last-consumer replacements on last-writer-wins
+			// backends (TiKV). The `purge_table_doc_ids` decision above is read
+			// from a range scan of the index list, which those backends do not
+			// validate for write-conflicts; two `DEFINE INDEX OVERWRITE`s
+			// replacing the final two doc-ID consumers with non-doc-ID indexes
+			// could each see the other still present and both skip the purge,
+			// leaking the shared `!di`/`!dd` mappings. Reading the
+			// table-definition key here arms the write-conflict check against the
+			// `put_tb` in `refresh_table_index_cache` below (which targets the
+			// same key): the second committer is rejected, its whole transaction
+			// rolls back, and it re-evaluates the decision on retry as the sole
+			// remaining replacer. On conflict-serializing backends the `put_tb`
+			// write already serializes them.
+			let tb_key = crate::key::database::tb::TableKey {
+				prefix: crate::key::database::all::DatabaseRoot {
+					ns: tb.namespace_id,
+					db: tb.database_id,
+				},
+				tb: std::borrow::Cow::Borrowed(&tb.name),
+			};
+			let _ = txn.get_key(&tb_key, None).await?;
 		}
 		// A (re)defined index always gets a fresh internal id, so the retired
 		// index's durable state and generation-scoped queues can never be mistaken
@@ -210,6 +267,7 @@ impl DefineIndexStatement {
 			index: self.index.clone(),
 			comment,
 			prepare_remove: false,
+			format_version: INDEX_FORMAT_VERSION,
 		};
 		txn.put_tb_index(tb.namespace_id, tb.database_id, &tb.name, &index_def).await?;
 
@@ -253,7 +311,7 @@ fn import_replay_can_reuse_index(
 		&& &ix.index == index
 }
 
-async fn refresh_table_index_cache(
+pub(in crate::expr::statements) async fn refresh_table_index_cache(
 	_ctx: &FrozenContext,
 	txn: &Transaction,
 	ns: &str,

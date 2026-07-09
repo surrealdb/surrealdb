@@ -48,6 +48,15 @@ struct CapturedPendingKey {
 struct PendingOperation {
 	/// Existing document ID or record key for a not-yet-resolved document.
 	id: VectorId,
+	/// Record key when this operation came from a record-keyed pending.
+	///
+	/// The graph baseline in `old_vectors` lives under the *captured* doc-ID
+	/// (`id`), but a delete removes the record's shared doc-ID mapping and a
+	/// re-create before compaction folds its vectors into this same pending. The
+	/// record key lets compaction re-resolve the *current* doc-ID for
+	/// `new_vectors`, so re-created records are inserted under a live mapping
+	/// instead of the stale captured one.
+	record: Option<Arc<RecordIdKey>>,
 	/// Graph baseline vectors to remove before applying the desired state.
 	old_vectors: Vec<SerializedVector>,
 	/// Desired vectors for the record after compaction.
@@ -296,6 +305,7 @@ impl HnswIndex {
 	fn append_pending_to_operation(pending: VectorPendingUpdate) -> PendingOperation {
 		PendingOperation {
 			id: pending.id,
+			record: None,
 			old_vectors: pending.old_vectors,
 			new_vectors: pending.new_vectors,
 		}
@@ -310,13 +320,15 @@ impl HnswIndex {
 		id: RecordIdKey,
 		pending: HnswRecordPendingUpdate,
 	) -> PendingOperation {
+		let record = Arc::new(id);
 		let id = if let Some(doc_id) = pending.doc_id {
 			VectorId::DocId(doc_id)
 		} else {
-			VectorId::RecordKey(Arc::new(id))
+			VectorId::RecordKey(Arc::clone(&record))
 		};
 		PendingOperation {
 			id,
+			record: Some(record),
 			old_vectors: pending.old_vectors,
 			new_vectors: pending.new_vectors,
 		}
@@ -457,11 +469,10 @@ impl HnswIndex {
 		let mut hnsw = self.hnsw.write().await;
 		hnsw.check_state(ctx).await?;
 		let mut ctx = self.new_hnsw_context(ctx);
-		let mut docs = HnswDocs::new(&tx, self.ikb.clone()).await?;
+		let docs = HnswDocs::new(self.ikb.clone());
 		for pending in pending {
-			self.apply_pending_operation(&mut ctx, &mut docs, &mut hnsw, pending).await?;
+			self.apply_pending_operation(&mut ctx, &docs, &mut hnsw, pending).await?;
 		}
-		docs.finish(&tx).await?;
 		Ok(true)
 	}
 
@@ -489,28 +500,38 @@ impl HnswIndex {
 	async fn apply_pending_operation(
 		&self,
 		ctx: &mut HnswContext<'_>,
-		docs: &mut HnswDocs,
+		docs: &HnswDocs,
 		hnsw: &mut HnswFlavor,
 		pending: PendingOperation,
 	) -> Result<()> {
 		match pending.id {
 			VectorId::DocId(doc_id) => {
+				// Remove the graph baseline under the doc-ID those vectors live under.
 				for vector in pending.old_vectors {
 					let vector = Vector::from(vector);
 					self.vec_docs.remove(ctx, &vector, doc_id, hnsw).await?;
 				}
 				if pending.new_vectors.is_empty() {
-					docs.remove(&ctx.tx, doc_id, self.table_id, &self.vector_cache).await?;
+					docs.remove(doc_id, self.table_id, &self.vector_cache).await;
 				} else {
+					// A delete removes the record's shared doc-ID mapping and a
+					// re-create before compaction folds its vectors in here, so
+					// resolve the *current* doc-ID from the record key rather than
+					// reusing the captured (possibly deleted) one. For a plain
+					// update the mapping is unchanged and this returns the same id.
+					let insert_doc_id = match &pending.record {
+						Some(record) => docs.resolve(ctx.ctx, record).await?,
+						None => doc_id,
+					};
 					for vector in pending.new_vectors {
 						let vector = Vector::from(vector);
-						self.vec_docs.insert(ctx, vector, doc_id, hnsw).await?;
+						self.vec_docs.insert(ctx, vector, insert_doc_id, hnsw).await?;
 					}
 				}
 			}
 			VectorId::RecordKey(id) => {
 				if !pending.new_vectors.is_empty() {
-					let doc_id = docs.resolve(&ctx.tx, &id).await?;
+					let doc_id = docs.resolve(ctx.ctx, &id).await?;
 					for vector in pending.new_vectors {
 						let vector = Vector::from(vector);
 						self.vec_docs.insert(ctx, vector, doc_id, hnsw).await?;
@@ -709,7 +730,21 @@ impl HnswIndex {
 			if pending.new_vectors.is_empty() {
 				non_deleted_docs.remove(&pending.id);
 			} else {
-				non_deleted_docs.insert(pending.id, pending.new_vectors);
+				// A record-keyed pending may carry a doc-ID captured before a
+				// delete → re-create of the record: that id's shared mapping is
+				// gone, so a DocId-keyed hit could not be resolved back to a
+				// record and would be silently dropped. Emit the surviving
+				// vectors under the record key — always resolvable — while the
+				// captured id (inserted above) still masks the graph's stale
+				// entries. An entry coalesced earlier under the captured id is
+				// superseded.
+				let id = if let Some(record) = &pending.record {
+					non_deleted_docs.remove(&pending.id);
+					VectorId::RecordKey(Arc::clone(record))
+				} else {
+					pending.id
+				};
+				non_deleted_docs.insert(id, pending.new_vectors);
 			}
 		})
 		.await?;

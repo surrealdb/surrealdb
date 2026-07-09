@@ -4,7 +4,7 @@ imports = ["upgrade/define/index_diskann_import.surql"]
 
 [test]
 upgrade = true
-reason = "DiskAnn vector index (catalog::Index::DiskAnn variant) round-trips through upgrade: definition string and on-disk graph both survive."
+reason = "A DiskAnn index built by an older version uses the retired per-index doc-ID format and must be rebuilt after upgrade onto the shared table-level doc-ID space; REBUILD INDEX restores it and returns the nearest neighbor"
 # DISKANN syntax was introduced in 3.1.0-beta.3. The `importing-version`
 # clause is the upgrade harness's "starting at" gate: a hop only runs when
 # its from-version satisfies this requirement (and since adjacent-pair hops
@@ -19,10 +19,16 @@ match = '''string::starts_with($result.indexes.dann_pts, "DEFINE INDEX dann_pts 
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "[{ id: pts:1 }]"
 
 */
 INFO FOR TABLE pts;
 LET $pt = [2.0, 3.0, 4.0, 5.0];
+-- An index built before the shared table-level doc-ID space must be rebuilt
+-- after upgrade before it can be queried.
+REBUILD INDEX dann_pts ON pts;
 -- Single nearest neighbor — pts:1 is closest to [2,3,4,5].
 SELECT id FROM pts WHERE point <|1,100|> $pt;

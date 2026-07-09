@@ -1138,6 +1138,19 @@ pub(crate) enum Error {
 		actual: u16,
 	},
 
+	/// An index was built by an older version whose on-disk format is no longer
+	/// readable, and it must be rebuilt before it can be queried.
+	#[error(
+		"The index `{index}` on table `{table}` was built with an out-of-date on-disk format \
+		 (Expected: {expected}, Actual: {actual}). Run `REBUILD INDEX {index} ON {table}` before querying it."
+	)]
+	IndexRebuildRequired {
+		index: String,
+		table: String,
+		expected: u16,
+		actual: u16,
+	},
+
 	#[error("Size of query script exceeded maximum supported size of 4,294,967,295 bytes.")]
 	QueryTooLarge,
 

@@ -272,6 +272,11 @@ impl ExecOperator for KnnScan {
 
 			// Get the ANN parameters from the index definition
 			let index_def = index_ref.definition();
+			// Reject an HNSW/DiskANN index whose on-disk format predates the
+			// shared table-level doc-ID space; it must be rebuilt before it can
+			// serve KNN searches. Mirrors the plan-time gate in
+			// idx/planner/tree.rs.
+			index_def.ensure_current_format()?;
 			let knn_results = match &index_def.index {
 				Index::Hnsw(hnsw_params) => {
 					// Obtain the shared HNSW index

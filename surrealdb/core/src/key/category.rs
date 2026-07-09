@@ -61,6 +61,10 @@ pub enum Category {
 	TableIndexIdentifierBatch,
 	/// crate::key::table::is                /*{ns}*{db}*{tb}!is
 	TableIndexIdentifierState,
+	/// crate::key::table::dh                /*{ns}*{db}*{tb}!dh
+	TableDocIdGeneratorBatch,
+	/// crate::key::table::ds                /*{ns}*{db}*{tb}!ds
+	TableDocIdGeneratorState,
 	///
 	/// ------------------------------
 	///
@@ -307,6 +311,8 @@ impl Display for Category {
 			Self::EventQueue => "EventQueue",
 			Self::TableIndexIdentifierBatch => "TableIndexIdentifierBatch",
 			Self::TableIndexIdentifierState => "TableIndexIdentifierState",
+			Self::TableDocIdGeneratorBatch => "TableDocIdGeneratorBatch",
+			Self::TableDocIdGeneratorState => "TableDocIdGeneratorState",
 		};
 		write!(f, "{}", name)
 	}

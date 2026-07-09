@@ -4,7 +4,7 @@ imports = ["upgrade/define/index_hnsw_import.surql"]
 
 [test]
 upgrade = true
-reason = "HNSW vector index's on-disk graph survives upgrade — KNN queries still return neighbors in the correct order"
+reason = "An HNSW index built by an older version uses the retired per-index doc-ID format and must be rebuilt after upgrade onto the shared table-level doc-ID space; REBUILD INDEX restores it and KNN returns neighbors in the correct order"
 # Skipping 3.0.0 as the from-version: the post-upgrade KNN query returns the
 # full table with NONE distances (i.e., index empty / not used). Plausible
 # cause is async HNSW build on 3.0.0 leaving the on-disk graph unwritten when
@@ -19,9 +19,15 @@ match = '''string::starts_with($result.indexes.hnsw_pts, "DEFINE INDEX hnsw_pts 
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "[{ dist: 2f, id: pts:1 }, { dist: 4f, id: pts:2 }]"
 
 */
 INFO FOR TABLE pts;
 LET $pt = [2, 3, 4, 5];
+-- An index built before the shared table-level doc-ID space must be rebuilt
+-- after upgrade before it can be queried.
+REBUILD INDEX hnsw_pts ON pts;
 SELECT id, vector::distance::knn() AS dist FROM pts WHERE point <|2,100|> $pt;

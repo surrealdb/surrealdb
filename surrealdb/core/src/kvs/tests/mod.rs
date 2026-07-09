@@ -27,6 +27,7 @@ mod multireader;
 mod multiwriter_different_keys;
 mod multiwriter_same_keys_allow;
 mod multiwriter_same_keys_conflict;
+mod multiwriter_same_keys_putc;
 mod raw;
 #[cfg(feature = "kv-mem")]
 mod reclaim_test;
@@ -87,6 +88,7 @@ mod mem {
 		multireader,
 		multiwriter_different_keys,
 		multiwriter_same_keys_conflict,
+		multiwriter_same_keys_putc,
 	);
 }
 
@@ -119,6 +121,7 @@ mod rocksdb {
 		multireader,
 		multiwriter_different_keys,
 		multiwriter_same_keys_conflict,
+		multiwriter_same_keys_putc,
 		metrics
 	);
 }
@@ -152,6 +155,7 @@ mod surrealkv {
 		multireader,
 		multiwriter_different_keys,
 		multiwriter_same_keys_conflict,
+		multiwriter_same_keys_putc,
 	);
 }
 
@@ -186,5 +190,6 @@ mod tikv {
 		multireader,
 		multiwriter_different_keys,
 		multiwriter_same_keys_allow,
+		multiwriter_same_keys_putc,
 	);
 }

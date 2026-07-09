@@ -936,7 +936,11 @@ impl Building {
 		self.retryable_conflict(err, action).await
 	}
 
-	async fn commit_and_retryable_conflict(&self, tx: &Transaction, action: &str) -> Result<bool> {
+	pub(super) async fn commit_and_retryable_conflict(
+		&self,
+		tx: &Transaction,
+		action: &str,
+	) -> Result<bool> {
 		match tx.commit().await {
 			Ok(()) => Ok(false),
 			Err(err) => {
@@ -1565,6 +1569,20 @@ impl Building {
 		)
 		.await?;
 		self.mark_durable_online(generation, initial_count, updates_count).await?;
+		// Drain the table's durable pending doc-ID reclaim markers, best-effort:
+		// it runs directly after the `Online` commit — before the fallible
+		// compaction passes below can skip it — and an error must not fail a
+		// build that already published successfully. The markers are durable, so
+		// anything left behind is reclaimed by the next doc-ID index build.
+		if let Err(err) = self.reclaim_deferred_doc_ids().await {
+			warn!(
+				index = %self.ix.name,
+				table = %self.ix.table_name,
+				error = %err,
+				"deferred doc-ID reclaim sweep failed; leftover markers will be \
+				 reclaimed by the next doc-ID index build on the table"
+			);
+		}
 		self.compact_hnsw_pendings(&mut last_prepare_remove_check).await?;
 		#[cfg(diskann)]
 		self.compact_diskann_pendings(&mut last_prepare_remove_check).await?;

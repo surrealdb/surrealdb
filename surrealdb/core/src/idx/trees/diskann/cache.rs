@@ -10,7 +10,7 @@ use quick_cache::Weighter;
 use quick_cache::sync::Cache;
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableId};
-use crate::idx::seqdocids::DocId;
+use crate::idx::docids::DocId;
 use crate::idx::trees::diskann::{DiskAnnElement, DiskAnnNode, DiskAnnState, ElementId};
 use crate::idx::trees::knn::Ids64;
 use crate::idx::trees::vector::SerializedVector;

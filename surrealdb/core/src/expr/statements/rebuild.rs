@@ -1,15 +1,18 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 use reblessive::tree::Stk;
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
+use crate::catalog::INDEX_FORMAT_VERSION;
 use crate::catalog::providers::TableProvider;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::Base;
-use crate::expr::statements::define::run_indexing;
+use crate::expr::statements::define::{refresh_table_index_cache, run_indexing};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{TableName, Value};
 
@@ -71,6 +74,24 @@ impl RebuildIndexStatement {
 			}
 		};
 		let tb = ctx.tx().expect_tb(ns, db, &self.table).await?;
+
+		// Stamp the definition with the current on-disk format version. The rebuild
+		// repopulates the index in the current layout, so once it completes queries
+		// must stop rejecting it as out-of-date (see
+		// `IndexDefinition::ensure_current_format`). Index kinds that don't use the
+		// shared doc-ID space are already at the required version, so this is a no-op
+		// for them.
+		let ix = if ix.format_version != INDEX_FORMAT_VERSION {
+			let mut updated = (*ix).clone();
+			updated.format_version = INDEX_FORMAT_VERSION;
+			let txn = ctx.tx();
+			txn.put_tb_index(ns, db, &self.table, &updated).await?;
+			let (ns_name, db_name) = opt.ns_db()?;
+			refresh_table_index_cache(ctx, &txn, ns_name, db_name, &tb).await?;
+			Arc::new(updated)
+		} else {
+			ix
+		};
 
 		// Rebuild the index
 		run_indexing(ctx, opt, tb.table_id, ix, !self.concurrently).await?;

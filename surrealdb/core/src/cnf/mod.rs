@@ -250,11 +250,12 @@ pub struct CommonConfig {
 	/// The maximum number of keys that should be scanned at once for export queries
 	/// (default: 1000)
 	pub export_batch_size: u32,
-	/// Batch size used when allocating sequence-based document IDs for the
-	/// concurrent full-text index. Larger batches reduce coordination on the
-	/// distributed sequence at the cost of larger gaps when a node is lost
-	/// before exhausting its current batch. (default: 1000)
-	pub fts_doc_ids_batch_size: u32,
+	/// Batch size used when allocating sequence-based document IDs for a table's
+	/// shared doc-ID space (used by full-text, HNSW and DiskANN indexes). Larger
+	/// batches reduce coordination on the distributed sequence at the cost of
+	/// larger gaps when a node is lost before exhausting its current batch.
+	/// (default: 1000)
+	pub table_doc_ids_batch_size: u32,
 	/// The number of batches each operator buffers ahead of downstream demand.
 	/// Set to 0 to disable operator-level pipeline buffering.
 	/// (default: 2)
@@ -397,7 +398,7 @@ impl Default for CommonConfig {
 			transaction_cache_size: 512,
 			datastore_cache_size: 1_000,
 			export_batch_size: 1000,
-			fts_doc_ids_batch_size: 1000,
+			table_doc_ids_batch_size: 1000,
 			operator_buffer_size: 2,
 			scan_batch_size: crate::exec::operators::scan::common::DEFAULT_SCAN_BATCH_SIZE,
 			max_order_limit_priority_queue_size: 1000,
@@ -451,7 +452,7 @@ impl Config for CommonConfig {
 			.parse_key("datastore_cache_size", &mut self.datastore_cache_size)
 			.parse_key("surrealism_cache_size", &mut self.surrealism_cache_size)
 			.parse_key("export_batch_size", &mut self.export_batch_size)
-			.parse_key("fts_doc_ids_batch_size", &mut self.fts_doc_ids_batch_size)
+			.parse_key("table_doc_ids_batch_size", &mut self.table_doc_ids_batch_size)
 			.parse_key("operator_buffer_size", &mut self.operator_buffer_size)
 			.parse_key("scan_batch_size", &mut self.scan_batch_size)
 			.parse_key(

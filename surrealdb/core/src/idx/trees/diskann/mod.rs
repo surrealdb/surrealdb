@@ -24,7 +24,7 @@ mod provider;
 use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
 use serde::{Deserialize, Serialize};
 
-use crate::idx::seqdocids::DocId;
+use crate::idx::docids::DocId;
 use crate::idx::trees::vector::SerializedVector;
 use crate::key::{KVValue, impl_kv_value_revisioned};
 

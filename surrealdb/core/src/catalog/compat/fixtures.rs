@@ -1012,6 +1012,7 @@ pub fn index_basic() -> IndexDefinition {
 		index: Index::Idx,
 		comment: None,
 		prepare_remove: false,
+		format_version: 0,
 	}
 }
 
@@ -1025,6 +1026,7 @@ pub fn index_unique() -> IndexDefinition {
 		index: Index::Uniq,
 		comment: Some("Unique email constraint".to_string()),
 		prepare_remove: false,
+		format_version: 0,
 	}
 }
 
@@ -1049,6 +1051,7 @@ pub fn index_hnsw() -> IndexDefinition {
 		}),
 		comment: Some("Vector similarity search index".to_string()),
 		prepare_remove: false,
+		format_version: 0,
 	}
 }
 
@@ -1069,6 +1072,7 @@ pub fn index_fulltext() -> IndexDefinition {
 		}),
 		comment: Some("Full-text search on articles".to_string()),
 		prepare_remove: false,
+		format_version: 0,
 	}
 }
 
@@ -1084,6 +1088,7 @@ pub fn index_count() -> IndexDefinition {
 		)))))),
 		comment: None,
 		prepare_remove: true,
+		format_version: 0,
 	}
 }
 

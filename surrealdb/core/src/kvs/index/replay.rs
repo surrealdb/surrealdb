@@ -17,21 +17,34 @@ use super::{
 	BuildTicketMutationSeq, ExistingPrimaryAppending, IndexBuildPhase, IndexBuildReportStatus,
 	LEGACY_BATCH_ID,
 };
-use crate::catalog::providers::NodeProvider;
+use crate::catalog::providers::{NodeProvider, TableProvider};
 use crate::catalog::{Index, Record};
 use crate::ctx::FrozenContext;
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::expr::FlowResultExt as _;
+use crate::idx::IndexKeyBase;
+use crate::idx::docids::{DocId, TableDocIds};
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::index::IndexOperation;
 use crate::key::index::ig::IndexAppending;
 use crate::key::table::bg::Bg;
 use crate::key::table::bp::Bp;
 use crate::key::table::br::Br;
-use crate::key::{KVKeyDecode, impl_kv_value_revisioned, record};
+use crate::key::table::dp::{self, Dp};
+use crate::key::{KVKeyDecode, KVRange, impl_kv_value_revisioned, record};
 use crate::kvs::{INDEXING_BATCH_SIZE, Transaction, Val, is_retryable_transaction_conflict};
 use crate::val::{RecordId, RecordIdKey, Value};
+
+/// Maximum consecutive commit-conflict retries for one deferred doc-ID reclaim
+/// sweep chunk (and for its repair pass) before the sweep gives up.
+///
+/// The sweep runs after the build is durably `Online` and its `!dp` markers are
+/// durable, so giving up loses nothing — leftover markers are drained by the
+/// next doc-ID index build on the table. The bound exists so a conflict storm
+/// cannot wedge the finished build task (and, for a blocking `DEFINE INDEX`,
+/// the statement waiting on it).
+const DOC_ID_RECLAIM_MAX_RETRIES: usize = 10;
 
 #[revisioned(revision = 2)]
 #[derive(Debug, PartialEq)]
@@ -885,6 +898,17 @@ impl Building {
 		rc: &mut bool,
 	) -> Result<RecordIdKey> {
 		let rid_key = appending.id;
+		// A queued delete (old present, new absent) on a doc-ID index is a consumer
+		// of the shared doc-ID space: the delete path deferred the `!di`/`!dd`
+		// removal precisely so this replay could still resolve the doc-ID (full-text
+		// reads it; HNSW/DiskAnn capture it into the pending). The mapping is
+		// table-scoped, so it may only be reclaimed by the LAST building consumer —
+		// reclaiming it while a sibling doc-ID index is still building would leave
+		// that sibling unable to resolve the doc-ID (guarded by
+		// `other_doc_id_index_building` below).
+		let reclaim_doc_id = appending.new_values.is_none()
+			&& appending.old_values.is_some()
+			&& matches!(self.ix.index, Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_));
 		let rid = RecordId {
 			table: self.ikb.table().clone(),
 			key: rid_key.clone(),
@@ -911,7 +935,277 @@ impl Building {
 		} else {
 			stack.enter(|stk| io.compute(stk, rc)).finish().await?;
 		}
+		if reclaim_doc_id {
+			let tx = ctx.tx();
+			if self.other_doc_id_index_building(ctx).await? {
+				// A sibling doc-ID index is still building and may still need the
+				// shared `!di`/`!dd` mapping to replay its own copy of this delete,
+				// so the mapping must stay live. The delete transaction already
+				// wrote a durable `!dp` marker when it deferred the removal (see
+				// `doc::index`'s `defer_doc_id_removal`); re-assert it here —
+				// atomically with the queue entry being consumed — so the pending
+				// reclaim also holds for legacy `!ig` appendings, and is completed
+				// by whichever doc-ID index build finishes once no sibling is
+				// building (see
+				// [`reclaim_deferred_doc_ids`](Self::reclaim_deferred_doc_ids)).
+				self.defer_doc_id_reclaim(&tx, &rid_key).await?;
+			} else {
+				// Last (or only) building consumer: reclaim the shared mapping now
+				// and consume the delete transaction's pending-reclaim marker.
+				TableDocIds::new(self.ix_key.ns, self.ix_key.db, self.ikb.table().clone())
+					.remove(&tx, &rid_key)
+					.await?;
+				let dp = Dp::new(self.ix_key.ns, self.ix_key.db, self.ikb.table(), &rid_key);
+				tx.del_key(&dp).await?;
+			}
+		}
 		Ok(rid_key)
+	}
+
+	/// Whether another doc-ID-consuming index on the same table is still building
+	/// (durable build phase `Building`/`Closing`), and so may still need the shared
+	/// `!di`/`!dd` mapping to replay its own copy of a queued delete.
+	///
+	/// Gates the reclaim in [`apply_appending`](Self::apply_appending): while a
+	/// sibling is still building the mapping must be kept alive (each build resolves
+	/// and removes its own entries against it), so the reclaim is deferred through a
+	/// durable `!dp` marker and completed by
+	/// [`reclaim_deferred_doc_ids`](Self::reclaim_deferred_doc_ids). The common case
+	/// (a single building doc-ID index) finds no sibling and reclaims immediately;
+	/// an already-`Online` sibling keeps its `!bs` state but is not counted, since
+	/// it processed the delete synchronously.
+	///
+	/// The check counts a sibling by durable phase alone, deliberately ignoring
+	/// owner-lease expiry: a stranded `Building` sibling is resumable, and its
+	/// resumed build still needs the mapping to replay its unconsumed deletes, so
+	/// keeping the mapping (and the durable marker) is the safe answer either way.
+	async fn other_doc_id_index_building(&self, ctx: &FrozenContext) -> Result<bool> {
+		let tx = ctx.tx();
+		let indexes =
+			tx.all_tb_indexes(self.ix_key.ns, self.ix_key.db, self.ikb.table(), None).await?;
+		for other in indexes.iter() {
+			if other.index_id == self.ix.index_id
+				|| !matches!(other.index, Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_))
+			{
+				continue;
+			}
+			let other_ikb = IndexKeyBase::new(
+				self.ix_key.ns,
+				self.ix_key.db,
+				self.ikb.table().clone(),
+				other.index_id,
+			);
+			if let Some(state) = tx.get_key(&other_ikb.new_bs_key(), None).await?
+				&& matches!(state.phase, IndexBuildPhase::Building | IndexBuildPhase::Closing)
+			{
+				return Ok(true);
+			}
+		}
+		Ok(false)
+	}
+
+	/// Records durably — in the same transaction that consumes the delete from
+	/// this builder's queue — that the shared doc-ID mapping for `id` could not
+	/// be reclaimed yet, because a sibling doc-ID index was still building and
+	/// may still need it to replay its own copy of the delete.
+	///
+	/// The `!dp` marker is table-scoped, so it is visible to *every* doc-ID
+	/// index build on the table — including builds that started after the delete
+	/// and resumed/taken-over builds — and survives builder errors, aborts and
+	/// crashes. It is consumed by
+	/// [`reclaim_deferred_doc_ids`](Self::reclaim_deferred_doc_ids).
+	async fn defer_doc_id_reclaim(&self, tx: &Transaction, id: &RecordIdKey) -> Result<()> {
+		let dp = Dp::new(self.ix_key.ns, self.ix_key.db, self.ikb.table(), id);
+		tx.set_key(&dp, &()).await
+	}
+
+	/// Drains the table's durable `!dp` pending-reclaim markers, reclaiming the
+	/// shared `!di`/`!dd` mapping of every marked record that is still absent
+	/// (see [`apply_appending`](Self::apply_appending)).
+	///
+	/// Runs best-effort, immediately after this builder publishes `Online`, and
+	/// only when no sibling doc-ID index is still `Building`/`Closing` — the
+	/// later-to-finish builder re-checks after its own `Online` commit, so it
+	/// deterministically observes every earlier finisher as `Online`. If a
+	/// sibling is still building, the sweep leaves the durable markers in place:
+	/// they are drained by whichever doc-ID index build finishes next with no
+	/// building sibling — including a build that started after the deletes, a
+	/// resumed/taken-over build, or a later `REBUILD` — and
+	/// [`TableDocIds::remove_all`] clears them when the table's last doc-ID
+	/// index is dropped. A marker is therefore never lost, only completed later.
+	///
+	/// The sweep processes markers in [`INDEXING_BATCH_SIZE`] chunks, each in its
+	/// own transaction, probing the marked records with one batched read:
+	/// - a record that is still absent has its `!di`/`!dd` mapping reclaimed;
+	/// - a record re-created during the build keeps its live mapping;
+	/// - the `!dp` marker is consumed in both cases.
+	///
+	/// A record re-created *concurrently with a sweep chunk* can adopt the old
+	/// id from its snapshot (a pure read, which no backend validates at commit)
+	/// while the chunk reclaims that same mapping. Each chunk therefore re-probes
+	/// the records it reclaimed after committing and restores the mapping of any
+	/// that turn out live (see [`TableDocIds::restore`]); the doubly-raced
+	/// residual (a re-create overlapping both the chunk and its repair probe)
+	/// self-heals on the record's next indexed write. Duplicate sweeps (two
+	/// builders finishing in lock-step) are harmless: reclaim and restore are
+	/// both idempotent put-if-absent/delete shapes.
+	pub(super) async fn reclaim_deferred_doc_ids(&self) -> Result<()> {
+		// Only doc-ID-consuming index builds sweep; other index kinds never
+		// defer and skip the range probe entirely.
+		if !matches!(self.ix.index, Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_)) {
+			return Ok(());
+		}
+		let docs = TableDocIds::new(self.ix_key.ns, self.ix_key.db, self.ikb.table().clone());
+		let mut retries = 0usize;
+		loop {
+			// The sweep runs after `Online`, so a `REMOVE INDEX` abort is the
+			// only cancellation signal left to honour.
+			if self.is_aborted().await {
+				return Ok(());
+			}
+			let ctx = self.new_write_tx_ctx().await?;
+			let tx = ctx.tx();
+			// A still-building sibling may still need the mappings to replay its
+			// queued deletes: leave the durable markers for a later finisher.
+			if catch!(tx, self.other_doc_id_index_building(&ctx).await) {
+				tx.cancel().await?;
+				return Ok(());
+			}
+			// Fetch the next chunk of pending markers.
+			let rng = catch!(
+				tx,
+				dp::Prefix::new(self.ix_key.ns, self.ix_key.db, self.ikb.table()).encode_range()
+			);
+			let keys = catch!(tx, tx.keys(rng, INDEXING_BATCH_SIZE, 0, None).await);
+			if keys.is_empty() {
+				tx.cancel().await?;
+				return Ok(());
+			}
+			let mut ids = Vec::with_capacity(keys.len());
+			for k in &keys {
+				ids.push(catch!(tx, Dp::decode_key(k)).into_id());
+			}
+			// One batched probe decides every record's fate in this chunk.
+			let record_keys: Vec<record::RecordKey> =
+				ids.iter().map(|id| self.record_key(id)).collect();
+			let records = catch!(tx, tx.get_many_key(record_keys, None).await);
+			// Records reclaimed in this chunk, remembered for the post-commit
+			// re-probe that repairs concurrent re-creates.
+			let mut reclaimed: Vec<(RecordIdKey, DocId)> = Vec::new();
+			for (id, existing) in ids.iter().zip(records) {
+				if existing.is_none()
+					&& let Some(doc_id) = catch!(tx, docs.remove(&tx, id).await)
+				{
+					reclaimed.push((id.clone(), doc_id));
+				}
+				// The marker is consumed whether the mapping was reclaimed
+				// (record absent), kept (record re-created during the build), or
+				// already gone (reclaimed by an earlier inline pass or sweep).
+				let dp = Dp::new(self.ix_key.ns, self.ix_key.db, self.ikb.table(), id);
+				catch!(tx, tx.del_key(&dp).await);
+			}
+			if self
+				.commit_and_retryable_conflict(
+					&tx,
+					"transient conflict reclaiming deferred doc-ID mappings, retrying",
+				)
+				.await?
+			{
+				// Retry the same chunk: the markers are still durable. Bounded so
+				// a conflict storm cannot wedge the (already Online) build task —
+				// leftover markers are picked up by the next doc-ID index build.
+				retries += 1;
+				if retries > DOC_ID_RECLAIM_MAX_RETRIES {
+					warn!(
+						index = %self.ix.name,
+						table = %self.ix.table_name,
+						"giving up the deferred doc-ID reclaim sweep after repeated \
+						 conflicts; leftover markers will be reclaimed by the next \
+						 doc-ID index build on the table"
+					);
+					return Ok(());
+				}
+				continue;
+			}
+			retries = 0;
+			// Repair the mappings of records re-created while the chunk committed.
+			self.repair_recreated_doc_ids(&docs, &reclaimed).await?;
+		}
+	}
+
+	/// Builds the datastore key of one record on the indexed table.
+	fn record_key<'a>(&'a self, id: &'a RecordIdKey) -> record::RecordKey<'a> {
+		record::RecordKey {
+			root: crate::key::database::all::DatabaseRoot {
+				ns: self.ix_key.ns,
+				db: self.ix_key.db,
+			},
+			tb: std::borrow::Cow::Borrowed(self.ikb.table()),
+			id: std::borrow::Cow::Borrowed(id),
+		}
+	}
+
+	/// Restores the `!di`/`!dd` mapping of any record in `reclaimed` that exists
+	/// again — i.e. was re-created concurrently with the sweep chunk that
+	/// reclaimed its mapping, adopting the old id from its pre-reclaim snapshot.
+	///
+	/// [`TableDocIds::restore`] claims the forward mapping with a put-if-absent,
+	/// so a record that instead re-acquired a *fresh* id after the reclaim is
+	/// left untouched. Best-effort like the sweep itself: on repeated conflicts
+	/// the remaining repairs are abandoned with a warning, and the affected
+	/// record self-heals on its next indexed write.
+	async fn repair_recreated_doc_ids(
+		&self,
+		docs: &TableDocIds,
+		reclaimed: &[(RecordIdKey, DocId)],
+	) -> Result<()> {
+		if reclaimed.is_empty() {
+			return Ok(());
+		}
+		let mut retries = 0usize;
+		loop {
+			let ctx = self.new_write_tx_ctx().await?;
+			let tx = ctx.tx();
+			let record_keys: Vec<record::RecordKey> =
+				reclaimed.iter().map(|(id, _)| self.record_key(id)).collect();
+			let records = catch!(tx, tx.get_many_key(record_keys, None).await);
+			let mut restored = 0usize;
+			for ((id, doc_id), existing) in reclaimed.iter().zip(records) {
+				if existing.is_some() && catch!(tx, docs.restore(&tx, id, *doc_id).await) {
+					restored += 1;
+				}
+			}
+			if restored == 0 {
+				tx.cancel().await?;
+				return Ok(());
+			}
+			if !self
+				.commit_and_retryable_conflict(
+					&tx,
+					"transient conflict repairing re-created doc-ID mappings, retrying",
+				)
+				.await?
+			{
+				warn!(
+					index = %self.ix.name,
+					table = %self.ix.table_name,
+					restored,
+					"restored doc-ID mappings of records re-created concurrently \
+					 with the deferred reclaim sweep"
+				);
+				return Ok(());
+			}
+			retries += 1;
+			if retries > DOC_ID_RECLAIM_MAX_RETRIES {
+				warn!(
+					index = %self.ix.name,
+					table = %self.ix.table_name,
+					"giving up doc-ID mapping repair after repeated conflicts; \
+					 affected records re-index on their next write"
+				);
+				return Ok(());
+			}
+		}
 	}
 
 	/// Replay legacy `!ig` mutations that were committed before this protocol.

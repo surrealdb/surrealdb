@@ -144,6 +144,12 @@ impl MatchesOp {
 					None => return Ok(None),
 				};
 
+				// Reject a full-text index whose on-disk format predates the
+				// shared table-level doc-ID space; it must be rebuilt before it
+				// can serve MATCHES. Mirrors the plan-time gate in
+				// idx/planner/tree.rs.
+				index_def.ensure_current_format()?;
+
 				let ft_params = match &index_def.index {
 					Index::FullText(params) => params,
 					_ => unreachable!("Already checked for FullText above"),

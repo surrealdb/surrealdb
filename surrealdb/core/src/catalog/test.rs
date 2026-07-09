@@ -213,7 +213,8 @@ use crate::val::{Datetime, TableName, Value};
 	index: Index::Idx,
 	comment: Some("comment".to_string()),
 	prepare_remove: false,
-}, 34)]
+	format_version: 1,
+}, 35)]
 #[case::model(MlModelDefinition {
 	name: "model".into(),
 	hash: "hash".into(),

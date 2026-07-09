@@ -10,14 +10,13 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
-use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
-use tracing::warn;
 
 #[cfg(not(target_family = "wasm"))]
 use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableId};
+use crate::ctx::FrozenContext;
 use crate::idx::IndexKeyBase;
-use crate::idx::seqdocids::DocId;
+use crate::idx::docids::{DocId, TableDocIds};
 #[cfg(not(target_family = "wasm"))]
 use crate::idx::trees::diskann::cache::DiskAnnCache;
 #[cfg(not(target_family = "wasm"))]
@@ -29,36 +28,28 @@ use crate::key::KVValue;
 use crate::kvs::Transaction;
 use crate::val::{RecordId, RecordIdKey};
 
-/// Manages the bidirectional mapping between record IDs and compact DiskANN document IDs.
+/// Per-index facade over the table's shared doc-ID space for DiskANN.
+///
+/// The record ↔ doc-ID mapping itself lives in [`TableDocIds`] (keys `!di`/`!dd`
+/// under the table prefix), shared by every index on the table so cross-index
+/// candidate composition can rely on one doc-ID per record. DiskANN keeps its own
+/// element/graph keys; this type only maps between record IDs and those shared
+/// doc-IDs (plus the process-local resolution cache).
 pub(in crate::idx) struct DiskAnnDocs {
 	/// Shared key builder for all DiskANN document mapping keys.
 	ikb: IndexKeyBase,
-	/// Tracks whether allocator state needs to be flushed at the end of compaction.
-	state_updated: bool,
-	/// Persisted allocator state for reusable and next document IDs.
-	state: DiskAnnDocsState,
-}
-
-/// Persisted state for DiskANN document ID allocation.
-#[revisioned(revision = 1)]
-#[derive(Default, Clone, Serialize, Deserialize)]
-pub(crate) struct DiskAnnDocsState {
-	/// Freed document IDs that can be reused by later compacted records.
-	available: RoaringTreemap,
-	/// Next never-used document ID.
-	next_doc_id: DocId,
+	/// The table-level doc-ID mapping shared by every index on the table.
+	docids: TableDocIds,
 }
 
 impl DiskAnnDocs {
-	/// Loads the persisted document-id allocator state for one DiskANN index.
-	pub(in crate::idx) async fn new(tx: &Transaction, ikb: IndexKeyBase) -> Result<Self> {
-		let state_key = ikb.new_dd_root_key();
-		let state = tx.get_key(&state_key, None).await?.unwrap_or_default();
-		Ok(Self {
+	/// Creates a `DiskAnnDocs` facade over the table's shared doc-ID space.
+	pub(in crate::idx) fn new(ikb: IndexKeyBase) -> Self {
+		let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
+		Self {
 			ikb,
-			state_updated: false,
-			state,
-		})
+			docids,
+		}
 	}
 
 	/// Looks up the compact document ID for a record key without allocating a new one.
@@ -67,34 +58,13 @@ impl DiskAnnDocs {
 		tx: &Transaction,
 		id: &RecordIdKey,
 	) -> Result<Option<DocId>> {
-		tx.get_key(&ikb.new_di_key(id), None).await
+		TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone()).get_doc_id(tx, id).await
 	}
 
-	/// Returns the existing document ID for a record key or allocates and persists a new mapping.
-	pub(super) async fn resolve(&mut self, tx: &Transaction, id: &RecordIdKey) -> Result<DocId> {
-		if let Some(doc_id) = tx.get_key(&self.ikb.new_di_key(id), None).await? {
-			Ok(doc_id)
-		} else {
-			let doc_id = self.next_doc_id();
-			tx.set_key(&self.ikb.new_di_key(id), &doc_id).await?;
-			tx.set_key(&self.ikb.new_dd_key(doc_id), id).await?;
-			Ok(doc_id)
-		}
-	}
-
-	fn next_doc_id(&mut self) -> DocId {
-		self.state_updated = true;
-		// `RoaringTreemap::min()` is O(1) and states the intent directly; the
-		// previous `iter().next()` happened to be ascending but only because the
-		// upstream iterator implementation guarantees so.
-		if let Some(doc_id) = self.state.available.min() {
-			self.state.available.remove(doc_id);
-			doc_id
-		} else {
-			let doc_id = self.state.next_doc_id;
-			self.state.next_doc_id += 1;
-			doc_id
-		}
+	/// Returns the existing document ID for a record key or allocates a new one in
+	/// the table's shared doc-ID space.
+	pub(super) async fn resolve(&self, ctx: &FrozenContext, id: &RecordIdKey) -> Result<DocId> {
+		self.docids.resolve_or_assign(ctx, id).await
 	}
 
 	#[cfg(not(target_family = "wasm"))]
@@ -161,8 +131,10 @@ impl DiskAnnDocs {
 		if misses.is_empty() {
 			return Ok(rids);
 		}
-		let keys: Vec<_> = misses.iter().map(|(_, doc_id)| ikb.new_dd_key(*doc_id)).collect();
-		let ids: Vec<Option<RecordIdKey>> = tx.get_many_key(keys, None).await?;
+		let miss_ids: Vec<DocId> = misses.iter().map(|(_, doc_id)| *doc_id).collect();
+		let ids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone())
+			.get_record_ids_batch(tx, &miss_ids)
+			.await?;
 		let cache_misses = !tx.writeable();
 		for ((pos, doc_id), id) in misses.into_iter().zip(ids) {
 			if let Some(id) = id {
@@ -180,53 +152,18 @@ impl DiskAnnDocs {
 		Ok(rids)
 	}
 
-	/// Removes a document mapping and makes the compact ID available for reuse.
-	async fn remove_inner(&mut self, tx: &Transaction, doc_id: DocId) -> Result<Option<DocId>> {
-		let Some(id) = tx.get_key(&self.ikb.new_dd_key(doc_id), None).await? else {
-			return Ok(None);
-		};
-		self.state_updated = true;
-		tx.del_key(&self.ikb.new_dd_key(doc_id)).await?;
-		if let Some(doc_id) = tx.get_key(&self.ikb.new_di_key(&id), None).await? {
-			tx.del_key(&self.ikb.new_di_key(&id)).await?;
-			self.state.available.insert(doc_id);
-			Ok(Some(doc_id))
-		} else {
-			Ok(None)
-		}
-	}
-
-	/// Removes a document mapping and evicts any cached record-id resolution for that document ID.
+	/// Evicts the cached doc-ID → record resolution for a removed document.
+	///
+	/// The record ↔ doc-ID mapping is shared across the table's indexes and is
+	/// removed centrally at record purge (see `doc::index`'s `remove_doc_id`), so
+	/// this only drops the process-local cache entry. Doc-IDs are never recycled.
 	#[cfg(not(target_family = "wasm"))]
-	pub(super) async fn remove(
-		&mut self,
-		tx: &Transaction,
-		doc_id: DocId,
-		table_id: TableId,
-		cache: &DiskAnnCache,
-	) -> Result<Option<DocId>> {
-		let res = self.remove_inner(tx, doc_id).await?;
+	pub(super) fn remove(&self, doc_id: DocId, table_id: TableId, cache: &DiskAnnCache) {
 		cache.remove_doc_id(Self::cache_index(&self.ikb, table_id), doc_id);
-		Ok(res)
 	}
 
 	#[cfg(target_family = "wasm")]
-	pub(super) async fn remove(
-		&mut self,
-		tx: &Transaction,
-		doc_id: DocId,
-	) -> Result<Option<DocId>> {
-		self.remove_inner(tx, doc_id).await
-	}
-
-	/// Persists allocator state if compaction allocated or freed document IDs.
-	pub(in crate::idx) async fn finish(&mut self, tx: &Transaction) -> Result<()> {
-		if self.state_updated {
-			tx.set_key(&self.ikb.new_dd_root_key(), &self.state).await?;
-			self.state_updated = false;
-		}
-		Ok(())
-	}
+	pub(super) fn remove(&self, _doc_id: DocId) {}
 }
 
 #[cfg(test)]
@@ -249,8 +186,16 @@ mod tests {
 		let cache = DiskAnnCache::new(1024 * 1024);
 		{
 			let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
-			tx.set_key(&ikb.new_dd_key(1), &RecordIdKey::Number(11)).await?;
-			tx.set_key(&ikb.new_dd_key(3), &RecordIdKey::Number(33)).await?;
+			tx.set_key(
+				&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 1),
+				&RecordIdKey::Number(11),
+			)
+			.await?;
+			tx.set_key(
+				&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 3),
+				&RecordIdKey::Number(33),
+			)
+			.await?;
 			tx.commit().await?;
 		}
 
@@ -272,10 +217,12 @@ mod tests {
 		tx.cancel().await?;
 
 		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
-		tx.del_key(&ikb.new_dd_key(1)).await?;
+		tx.del_key(&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 1)).await?;
 		tx.commit().await?;
 		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
-		let missing: Option<RecordIdKey> = tx.get_key(&ikb.new_dd_key(1), None).await?;
+		let missing: Option<RecordIdKey> = tx
+			.get_key(&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 1), None)
+			.await?;
 		assert!(missing.is_none());
 		let cached =
 			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[1], Some(5)).await?;
@@ -290,7 +237,11 @@ mod tests {
 		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
 		let ikb = ikb();
 		let cache = DiskAnnCache::new(1024 * 1024);
-		tx.set_key(&ikb.new_dd_key(9), &RecordIdKey::Number(99)).await?;
+		tx.set_key(
+			&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 9),
+			&RecordIdKey::Number(99),
+		)
+		.await?;
 
 		let got =
 			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[9], Some(5)).await?;
@@ -315,7 +266,11 @@ mod tests {
 		let cache = DiskAnnCache::new(1024 * 1024);
 		{
 			let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
-			tx.set_key(&ikb.new_dd_key(1), &RecordIdKey::Number(11)).await?;
+			tx.set_key(
+				&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 1),
+				&RecordIdKey::Number(11),
+			)
+			.await?;
 			tx.commit().await?;
 		}
 
@@ -327,7 +282,11 @@ mod tests {
 		assert!(cache.get_doc_id(cache_index(), 1, Some(6)).is_none());
 
 		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
-		tx.set_key(&ikb.new_dd_key(1), &RecordIdKey::Number(22)).await?;
+		tx.set_key(
+			&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 1),
+			&RecordIdKey::Number(22),
+		)
+		.await?;
 		tx.commit().await?;
 
 		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
@@ -346,8 +305,8 @@ mod tests {
 		let id = RecordIdKey::Number(77);
 		{
 			let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
-			tx.set_key(&ikb.new_dd_key(7), &id).await?;
-			tx.set_key(&ikb.new_di_key(&id), &7_u64).await?;
+			tx.set_key(&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 7), &id)
+				.await?;
 			tx.commit().await?;
 		}
 
@@ -359,13 +318,16 @@ mod tests {
 		tx.cancel().await?;
 
 		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
-		let mut docs = DiskAnnDocs::new(&tx, ikb.clone()).await?;
-		assert_eq!(docs.remove(&tx, 7, TableId(4), &cache).await?, Some(7));
+		let docs = DiskAnnDocs::new(ikb.clone());
+		// `remove` is cache-only now: it evicts the process-local doc-id cache and never
+		// recycles ids (the shared record↔doc-id mapping is deleted centrally at record
+		// purge), so the KV mapping survives.
+		docs.remove(7, TableId(4), &cache);
 		assert!(cache.get_doc_id(cache_index(), 7, Some(5)).is_none());
-		assert_eq!(
-			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[7], Some(5)).await?,
-			vec![None]
-		);
+		// The mapping is still in KV, so a fresh lookup re-resolves it and re-warms the cache.
+		let reloaded =
+			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[7], Some(5)).await?;
+		assert_eq!(&reloaded[0].as_ref().unwrap().key, &id);
 		tx.cancel().await?;
 		Ok(())
 	}
@@ -599,22 +561,6 @@ mod tests {
 		assert!(cache.get_doc_set(cache_index(), 99).is_none());
 		tx.cancel().await?;
 		Ok(())
-	}
-}
-
-impl KVValue for DiskAnnDocsState {
-	type KeyContext = ();
-
-	#[inline]
-	fn kv_encode_value(&self) -> Result<Vec<u8>> {
-		let mut val = Vec::new();
-		SerializeRevisioned::serialize_revisioned(self, &mut val)?;
-		Ok(val)
-	}
-
-	#[inline]
-	fn kv_decode_value(mut val: &[u8], _: ()) -> Result<Self> {
-		Ok(DeserializeRevisioned::deserialize_revisioned(&mut val)?)
 	}
 }
 

@@ -13,7 +13,7 @@ use crate::exec::permission::{
 };
 use crate::expr::{Cond, FlowResultExt as _};
 use crate::idx::IndexKeyBase;
-use crate::idx::seqdocids::DocId;
+use crate::idx::docids::DocId;
 use crate::idx::trees::hnsw::VectorId;
 use crate::idx::trees::hnsw::cache::VectorCache;
 use crate::idx::trees::hnsw::docs::HnswDocs;

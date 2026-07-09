@@ -19,8 +19,8 @@ use std::borrow::Cow;
 use roaring::RoaringTreemap;
 
 use crate::catalog::IndexId;
+use crate::idx::docids::DocId;
 use crate::idx::ft::fulltext::TermDocument;
-use crate::idx::seqdocids::DocId;
 use crate::key::category::{Categorise, Category};
 use crate::key::database::all::DatabaseRoot;
 use crate::key::{impl_kv_key_storekey, key};

@@ -1,7 +1,7 @@
+pub mod docids;
 pub(crate) mod ft;
 pub(crate) mod index;
 pub mod planner;
-pub(super) mod seqdocids;
 pub mod trees;
 
 use std::borrow::Cow;
@@ -13,21 +13,17 @@ use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::err::Error;
-use crate::idx::seqdocids::DocId;
+use crate::idx::docids::DocId;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::vector::SerializedVector;
 use crate::key::database::all::DatabaseRoot;
 use crate::key::index::dc::{Dc, DcPrefix};
-#[cfg(diskann)]
-use crate::key::index::dd::{Dd, DdRoot};
 #[cfg(diskann)]
 use crate::key::index::de::De;
 #[cfg(diskann)]
 use crate::key::index::dg::Dg;
 #[cfg(diskann)]
 use crate::key::index::dh::Dh;
-#[cfg(diskann)]
-use crate::key::index::di::Di;
 use crate::key::index::dl::Dl;
 #[cfg(diskann)]
 use crate::key::index::dn::Dn;
@@ -44,23 +40,17 @@ use crate::key::index::dv::Dv;
 use crate::key::index::dw::{DiskAnnRecordPendingShard, DiskAnnRecordPendingShardPrefix};
 #[cfg(diskann)]
 use crate::key::index::dy::Dy;
-use crate::key::index::hd::{Hd, HdPrefix};
 use crate::key::index::he::He;
 use crate::key::index::hg::Hg;
 use crate::key::index::hh::Hh;
-use crate::key::index::hi::Hi;
 use crate::key::index::hl::{Hl, HlPrefix};
 use crate::key::index::hn::{HnswNode, HnswNodePrefix};
 use crate::key::index::hp::HnswPendingPrefix;
 use crate::key::index::hr::{HnswRecordPending, HnswRecordPendingPrefix};
 use crate::key::index::hs::Hs;
 use crate::key::index::hv::Hv;
-use crate::key::index::ib::{Ib, IbPrefix};
-use crate::key::index::id::Id as IdKey;
 use crate::key::index::ig::{IndexAppending, IndexAppendingPrefix};
-use crate::key::index::ii::Ii;
 use crate::key::index::ip::Ip;
-use crate::key::index::is::Is;
 use crate::key::index::iv::Iv;
 use crate::key::index::td::{Td, TdRoot};
 use crate::key::index::tt::{Tt, TtTermPrefix, TtTermsPrefix};
@@ -146,29 +136,6 @@ impl IndexKeyBase {
 		}))
 	}
 
-	fn new_hd_root_key(&self) -> HdPrefix<'_> {
-		HdPrefix {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
-			tb: Cow::Borrowed(&self.0.tb),
-			ix: self.0.ix,
-		}
-	}
-
-	fn new_hd_key(&self, doc_id: DocId) -> Hd<'_> {
-		Hd {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
-			tb: Cow::Borrowed(&self.0.tb),
-			ix: self.0.ix,
-			doc_id,
-		}
-	}
-
 	fn new_he_key(&self, element_id: ElementId) -> He<'_> {
 		He {
 			prefix: DatabaseRoot {
@@ -178,18 +145,6 @@ impl IndexKeyBase {
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			element_id,
-		}
-	}
-
-	fn new_hi_key<'a>(&'a self, id: &'a RecordIdKey) -> Hi<'a> {
-		Hi {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
-			tb: Cow::Borrowed(&self.0.tb),
-			ix: self.0.ix,
-			id: Cow::Borrowed(id),
 		}
 	}
 
@@ -334,33 +289,6 @@ impl IndexKeyBase {
 		}
 	}
 
-	/// Root key storing DiskANN document-id allocator state.
-	#[cfg(diskann)]
-	fn new_dd_root_key(&self) -> DdRoot<'_> {
-		DdRoot {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
-			tb: Cow::Borrowed(&self.0.tb),
-			ix: self.0.ix,
-		}
-	}
-
-	/// Key mapping a compact DiskANN document ID to a record key.
-	#[cfg(diskann)]
-	fn new_dd_key(&self, doc_id: DocId) -> Dd<'_> {
-		Dd {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
-			tb: Cow::Borrowed(&self.0.tb),
-			ix: self.0.ix,
-			doc_id,
-		}
-	}
-
 	/// Key storing a DiskANN graph element vector/status payload.
 	#[cfg(diskann)]
 	fn new_de_key(&self, element_id: ElementId) -> De<'_> {
@@ -415,20 +343,6 @@ impl IndexKeyBase {
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			hash,
-		}
-	}
-
-	/// Key mapping a record key to a compact DiskANN document ID.
-	#[cfg(diskann)]
-	fn new_di_key<'a>(&'a self, id: &'a RecordIdKey) -> Di<'a> {
-		Di {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
-			tb: Cow::Borrowed(&self.0.tb),
-			ix: self.0.ix,
-			id: Cow::Borrowed(id),
 		}
 	}
 
@@ -571,30 +485,6 @@ impl IndexKeyBase {
 			},
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
-		}
-	}
-
-	fn new_ii_key(&self, doc_id: DocId) -> Ii<'_> {
-		Ii {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
-			tb: Cow::Borrowed(&self.0.tb),
-			ix: self.0.ix,
-			id: doc_id,
-		}
-	}
-
-	fn new_id_key<'a>(&'a self, id: &'a RecordIdKey) -> IdKey<'a> {
-		IdKey {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
-			tb: Cow::Borrowed(&self.0.tb),
-			ix: self.0.ix,
-			id: Cow::Borrowed(id),
 		}
 	}
 
@@ -876,18 +766,6 @@ impl IndexKeyBase {
 		.encode_range()
 	}
 
-	pub(crate) fn new_ib_key(&self, start: i64) -> Ib<'_> {
-		Ib {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
-			tb: Cow::Borrowed(&self.0.tb),
-			ix: self.0.ix,
-			start,
-		}
-	}
-
 	pub(crate) fn new_ic_key(&self, nid: Uuid) -> IndexCompactionKey<'_> {
 		IndexCompactionKey {
 			ns: self.0.ns,
@@ -896,30 +774,6 @@ impl IndexKeyBase {
 			ix: self.0.ix,
 			nid,
 			uid: Uuid::now_v7(),
-		}
-	}
-
-	pub(crate) fn new_ib_range(&self) -> Result<KeyRange<'static>> {
-		IbPrefix {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
-			tb: Cow::Borrowed(&self.0.tb),
-			ix: self.0.ix,
-		}
-		.encode_range()
-	}
-
-	pub(crate) fn new_is_key(&self, nid: Uuid) -> Is<'_> {
-		Is {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
-			tb: Cow::Borrowed(&self.0.tb),
-			ix: self.0.ix,
-			nid,
 		}
 	}
 

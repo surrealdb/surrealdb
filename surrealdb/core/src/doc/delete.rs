@@ -29,8 +29,22 @@ impl Document {
 		self.cleanup_table_references(stk, ctx, opt).await?;
 		// Empty the record data
 		self.clear_record_data();
-		// Clear the document and index data
-		self.store_index_data(stk, ctx, opt).await?;
+		// Clear the document and index data. If a doc-ID index is mid-build it
+		// enqueues this delete for later replay rather than dropping the record
+		// now, so it still needs the shared `!di`/`!dd` mapping when the builder
+		// replays; `store_index_data` reports that deferral.
+		let doc_id_removal_deferred = self.store_index_data(stk, ctx, opt).await?;
+		// Release the record's entry in the table's shared doc-ID space, once every
+		// index has dropped the record. When a build deferred the removal, the
+		// builder's replay owns it (see kvs::index::replay) — dropping the mapping
+		// here would leave that replay unable to resolve the doc-ID — so a durable
+		// `!dp` marker is written instead, in this same transaction, guaranteeing
+		// the reclaim is completed even if the build never replays the delete.
+		if doc_id_removal_deferred {
+			self.defer_doc_id_removal(ctx).await?;
+		} else {
+			self.remove_doc_id(ctx).await?;
+		}
 		self.purge_record_data(stk, ctx, opt).await?;
 		self.process_table_views(stk, ctx, opt, super::Action::Delete).await?;
 		self.process_table_events(stk, ctx, opt, super::Action::Delete).await?;

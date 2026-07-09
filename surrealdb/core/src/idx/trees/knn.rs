@@ -7,7 +7,7 @@ use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 
-use crate::idx::seqdocids::DocId;
+use crate::idx::docids::DocId;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::hnsw::{ElementId, VectorId};
 
@@ -454,7 +454,7 @@ pub(super) mod tests {
 	use web_time::SystemTime;
 
 	use crate::catalog::{Distance, VectorType};
-	use crate::idx::seqdocids::DocId;
+	use crate::idx::docids::DocId;
 	use crate::idx::trees::hnsw::VectorId;
 	use crate::idx::trees::knn::{DoublePriorityQueue, FloatKey, Ids64, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};

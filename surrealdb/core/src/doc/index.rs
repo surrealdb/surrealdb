@@ -23,6 +23,7 @@ use crate::ctx::FrozenContext;
 use crate::dbs::{Force, Options};
 use crate::doc::{CursorDoc, Document};
 use crate::expr::FlowResultExt as _;
+use crate::idx::docids::TableDocIds;
 use crate::idx::index::IndexOperation;
 use crate::kvs::index::{ConsumeResult, IndexMutation};
 use crate::val::{RecordId, Value};
@@ -33,12 +34,12 @@ impl Document {
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
-	) -> Result<()> {
+	) -> Result<bool> {
 		// Collect indexes or skip
 		let ixs = match &opt.force {
 			Force::All => self.doc_ctx.ix()?,
 			_ if self.is_modified() => self.doc_ctx.ix()?,
-			_ => return Ok(()),
+			_ => return Ok(false),
 		};
 		// Get the current database
 		let db = self.doc_ctx.db();
@@ -46,10 +47,14 @@ impl Document {
 		let tb = self.doc_ctx.tb()?;
 		// Check if the table is DROP
 		if tb.drop {
-			return Ok(());
+			return Ok(false);
 		}
 		// Get the record id
 		let rid = self.id()?;
+		// Whether a doc-ID index deferred this record's removal to an in-progress
+		// build (see `one_index`). When true the caller must not drop the shared
+		// doc-ID mapping yet — the builder's replay still needs it.
+		let mut doc_id_removal_deferred = false;
 		// Loop through all index statements
 		for ix in ixs.iter() {
 			// Decommissioned indexes are ignored
@@ -82,10 +87,61 @@ impl Document {
 			// to the predicate-match flag flipping.
 			let cond_changed = matches!(count_cond_match, Some((o, n)) if o != n);
 			if o != n || cond_changed {
-				Self::one_index(db, tb, stk, ctx, opt, ix, o, n, &rid, count_cond_match).await?;
+				doc_id_removal_deferred |=
+					Self::one_index(db, tb, stk, ctx, opt, ix, o, n, &rid, count_cond_match)
+						.await?;
 			}
 		}
 		// Carry on
+		Ok(doc_id_removal_deferred)
+	}
+
+	/// Durably marks the record's shared doc-ID mapping for a later reclaim,
+	/// because an in-progress index build enqueued this delete for replay and
+	/// may still need the mapping (see [`store_index_data`](Self::store_index_data)).
+	///
+	/// The `!dp` marker is written in this same (delete) transaction —
+	/// atomically with the enqueued mutation — so the reclaim obligation exists
+	/// from the moment the central removal is skipped. If the build replays the
+	/// delete, the replay completes (or re-defers) the reclaim and consumes the
+	/// marker; if the build never replays it (error, abort, `REMOVE INDEX`),
+	/// the marker survives and the next doc-ID index build's sweep completes
+	/// the reclaim instead (see `kvs::index::replay`).
+	pub(super) async fn defer_doc_id_removal(&self, ctx: &FrozenContext) -> Result<()> {
+		let db = self.doc_ctx.db();
+		let rid = self.id()?;
+		let dp =
+			crate::key::table::dp::Dp::new(db.namespace_id, db.database_id, &rid.table, &rid.key);
+		ctx.tx().set_key(&dp, &()).await
+	}
+
+	/// Removes the record's entry from the table's shared doc-ID space.
+	///
+	/// The doc-ID mapping (`!di`/`!dd`) is shared by every index on the table, so
+	/// it must be dropped exactly once — after all per-index maintenance has
+	/// released the record — rather than by any individual index. Called on record
+	/// deletion, after [`store_index_data`](Self::store_index_data).
+	///
+	/// No-op for tables without a doc-ID-consuming index (full-text / HNSW /
+	/// DiskAnn), so index-free tables never allocate or write a mapping.
+	pub(super) async fn remove_doc_id(&self, ctx: &FrozenContext) -> Result<()> {
+		// Only tables carrying a doc-ID-consuming index maintain the shared space.
+		let ixs = self.doc_ctx.ix()?;
+		if !ixs
+			.iter()
+			.any(|ix| matches!(ix.index, Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_)))
+		{
+			return Ok(());
+		}
+		// A table being dropped has its whole prefix reclaimed separately.
+		if self.doc_ctx.tb()?.drop {
+			return Ok(());
+		}
+		let db = self.doc_ctx.db();
+		let rid = self.id()?;
+		TableDocIds::new(db.namespace_id, db.database_id, rid.table.clone())
+			.remove(&ctx.tx(), &rid.key)
+			.await?;
 		Ok(())
 	}
 
@@ -101,7 +157,10 @@ impl Document {
 		n: Option<Vec<Value>>,
 		rid: &RecordId,
 		count_cond_match: Option<(bool, bool)>,
-	) -> Result<()> {
+	) -> Result<bool> {
+		// Does this index consume the table's shared doc-ID space?
+		let doc_id_index =
+			matches!(ix.index, Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_));
 		// Get the index builder
 		let (o, n) = if let Some(ib) = ctx.get_index_builder() {
 			let mutation = IndexMutation {
@@ -113,12 +172,14 @@ impl Document {
 			match ib.consume(db, ctx, ix, mutation).await? {
 				// The index builder consumed the value, which means it is currently building the
 				// index asynchronously, we don't index the document and let the index builder
-				// do it later.
-				ConsumeResult::Enqueued => return Ok(()),
+				// do it later. For a doc-ID index this defers the record's removal — and its use
+				// of the shared `!di`/`!dd` mapping — to the builder's replay, so report the
+				// deferral to the caller so it does not drop the mapping before the replay runs.
+				ConsumeResult::Enqueued => return Ok(doc_id_index),
 				// The index builder is done, the index has been built; we can proceed normally
 				ConsumeResult::Ignored(o, n) => (o, n),
 				// The definition was retired after it was read from a cache.
-				ConsumeResult::Retired => return Ok(()),
+				ConsumeResult::Retired => return Ok(false),
 			}
 		} else {
 			(o, n)
@@ -147,7 +208,7 @@ impl Document {
 		if require_compaction {
 			ic.trigger_compaction().await?;
 		}
-		Ok(())
+		Ok(false)
 	}
 
 	/// Extract from the given document, the values required by the index and put then in an array.

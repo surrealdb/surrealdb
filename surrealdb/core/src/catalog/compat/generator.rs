@@ -1117,10 +1117,11 @@ fn generator_v3_1_1() {
 /// Copy the output into `v3_3_0.rs`, then paste the printed hash into
 /// the assertion in `test_v3_3_0_remains_unchanged` below.
 ///
-/// 3.3.0 bumps `UserDefinition` to revision 2, adding the optional `scram`
-/// SCRAM-SHA-256 verifier field. Every `USER_*` fixture is re-encoded under
-/// the new revision (and a new `USER_WITH_SCRAM` fixture is added); every
-/// other fixture is byte-identical to 3.1.1.
+/// 3.3.0 bumps two definitions to revision 2: `UserDefinition` (adding the
+/// optional `scram` SCRAM-SHA-256 verifier field, plus a new `USER_WITH_SCRAM`
+/// fixture) and `IndexDefinition` (adding `format_version` for the shared
+/// table-level doc-ID space). The `USER_*` and `INDEX_*` fixtures re-encode to
+/// new bytes; every other fixture is byte-identical to 3.1.1.
 #[test]
 #[ignore]
 fn generator_v3_3_0() {
@@ -1208,10 +1209,11 @@ fn test_v3_3_0_remains_unchanged() {
 
 	// Read the v3_3_0.rs file, hash it and assert on the hash.
 	//
-	// v3_3_0 captures the wire format after `UserDefinition` was bumped to
-	// revision 2, adding the optional `scram` SCRAM-SHA-256 verifier field.
-	// The `USER_*` fixtures are re-encoded under the new revision and a new
-	// `USER_WITH_SCRAM` fixture is added; every other fixture is
+	// v3_3_0 captures the wire format after two revision-2 bumps landed in
+	// 3.3.0: `UserDefinition` gained the optional `scram` SCRAM-SHA-256 verifier
+	// (with a new `USER_WITH_SCRAM` fixture) and `IndexDefinition` gained
+	// `format_version` for the shared table-level doc-ID space. The `USER_*` and
+	// `INDEX_*` fixtures re-encode; every other fixture is
 	// byte-identical to 3.1.1.
 	//
 	// NEVER modify v3_3_0.rs after commit; if a real format change ships,
@@ -1219,5 +1221,5 @@ fn test_v3_3_0_remains_unchanged() {
 	let v3_3_0 = include_bytes!("v3_3_0.rs");
 	let hash = Sha256::digest(v3_3_0);
 	let hash_str = hex::encode(hash);
-	assert_eq!(hash_str, "0093297cce5017b779683c3ab8a11c1785a6d1eb91d5f7bed7789de6af4a4b2b");
+	assert_eq!(hash_str, "eb621e435db73117b2de45b6c5f2bd3909135dc75cda7cb36b4b36694802818d");
 }

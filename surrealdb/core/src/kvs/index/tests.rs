@@ -1680,6 +1680,7 @@ async fn count_index_duplicate_initial_build_does_not_overcount() -> Result<()> 
 			index: Index::Count(None),
 			comment: None,
 			prepare_remove: false,
+			format_version: 1,
 		});
 		tx.put_tb_index(ns.namespace_id, db.database_id, &table.name, &index).await?;
 		tx.commit().await?;
@@ -4338,5 +4339,826 @@ async fn datastore_drop_releases_index_builder_after_build() -> Result<()> {
 			 index Building still pins the back-reference (regression of #7304)"
 		)
 	})?;
+	Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Table-level doc-ID space lifecycle under concurrent index DDL.
+//
+// A table's shared doc-ID space (`!di` record→doc, `!dd` doc→record) exists iff
+// the table carries at least one doc-ID-consuming index (full-text / HNSW /
+// DiskAnn). These tests exercise that lifecycle through the real DEFINE/REMOVE
+// INDEX statement paths — including concurrent removal, where each REMOVE
+// independently decides whether it dropped the last consumer.
+// ---------------------------------------------------------------------------
+
+/// Smallest key strictly greater than every key sharing `prefix`. The `!di` /
+/// `!dd` sigils end in an ASCII letter well below `0xFF`, so incrementing the
+/// final byte yields a valid exclusive upper bound for a prefix scan.
+/// Returns `(record→doc count, doc→record count)` for `table`'s shared doc-ID
+/// space. Each prefix is scanned over its own range, so the `!dh`/`!ds` sequence
+/// keys (which deliberately survive a purge) are excluded from the counts.
+#[cfg(feature = "kv-mem")]
+async fn count_doc_id_mappings(ds: &Datastore, table: &str) -> Result<(usize, usize)> {
+	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let ns = tx.get_ns_by_name("test", None).await?.expect("namespace should exist");
+	let db = tx.get_db_by_name("test", "test", None).await?.expect("database should exist");
+	let tb: TableName = table.into();
+	let di =
+		crate::key::table::di::Prefix::new(ns.namespace_id, db.database_id, &tb).encode_range()?;
+	let dd =
+		crate::key::table::dd::Prefix::new(ns.namespace_id, db.database_id, &tb).encode_range()?;
+	let di_keys = tx.keys(di, u32::MAX, 0, None).await?;
+	let dd_keys = tx.keys(dd, u32::MAX, 0, None).await?;
+	tx.cancel().await?;
+	Ok((di_keys.len(), dd_keys.len()))
+}
+
+/// The shared doc-ID space must survive removal of a non-last consumer and be
+/// reclaimed only when the last doc-ID-consuming index is dropped.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn table_doc_ids_purged_only_when_last_consumer_removed() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	// Two full-text indexes on the same table share one doc-ID space.
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE ANALYZER simple TOKENIZERS blank;
+		 DEFINE INDEX ft1 ON t FIELDS a FULLTEXT ANALYZER simple BM25;
+		 DEFINE INDEX ft2 ON t FIELDS b FULLTEXT ANALYZER simple BM25;
+		 CREATE t:1 SET a = 'alpha', b = 'one';
+		 CREATE t:2 SET a = 'beta',  b = 'two';
+		 CREATE t:3 SET a = 'gamma', b = 'three';",
+	)
+	.await?;
+	// One shared doc-ID per record, in both directions.
+	assert_eq!(count_doc_id_mappings(&ds, "t").await?, (3, 3), "one shared doc-ID per record");
+
+	// Dropping one of two consumers leaves the mappings — ft2 still needs them.
+	execute_all(&ds, &session, "REMOVE INDEX ft1 ON t;").await?;
+	assert_eq!(
+		count_doc_id_mappings(&ds, "t").await?,
+		(3, 3),
+		"mappings survive while another doc-ID index remains"
+	);
+
+	// Dropping the last consumer reclaims the whole shared space.
+	execute_all(&ds, &session, "REMOVE INDEX ft2 ON t;").await?;
+	assert_eq!(
+		count_doc_id_mappings(&ds, "t").await?,
+		(0, 0),
+		"mappings purged once the last doc-ID index is removed"
+	);
+	Ok(())
+}
+
+/// Concurrent removal of the *only* two consumers must not leak the shared
+/// space. Each REMOVE independently checks whether another consumer remains, so
+/// without serialization both could observe the other still present and skip the
+/// purge. The table-definition write serializes them, so whichever commits last
+/// sees no remaining consumer and reclaims the mappings.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[test_log::test]
+async fn concurrent_removal_of_last_doc_id_indexes_purges_mappings() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE ANALYZER simple TOKENIZERS blank;
+		 DEFINE INDEX ft1 ON t FIELDS a FULLTEXT ANALYZER simple BM25;
+		 DEFINE INDEX ft2 ON t FIELDS b FULLTEXT ANALYZER simple BM25;
+		 CREATE t:1 SET a = 'alpha', b = 'one';
+		 CREATE t:2 SET a = 'beta',  b = 'two';
+		 CREATE t:3 SET a = 'gamma', b = 'three';",
+	)
+	.await?;
+	assert_eq!(count_doc_id_mappings(&ds, "t").await?, (3, 3));
+
+	// Drop both consumers concurrently, retrying the loser of the
+	// table-definition write conflict.
+	let ds = Arc::new(ds);
+	let task_a = {
+		let (ds, session) = (Arc::clone(&ds), session.clone());
+		tokio::spawn(async move {
+			execute_all_retrying_conflicts(&ds, &session, "REMOVE INDEX ft1 ON t;").await
+		})
+	};
+	let task_b = {
+		let (ds, session) = (Arc::clone(&ds), session.clone());
+		tokio::spawn(async move {
+			execute_all_retrying_conflicts(&ds, &session, "REMOVE INDEX ft2 ON t;").await
+		})
+	};
+	let (ra, rb) = tokio::join!(task_a, task_b);
+	ra.expect("task A panicked")?;
+	rb.expect("task B panicked")?;
+
+	// Both consumers gone → space fully reclaimed, nothing leaked.
+	assert_eq!(
+		count_doc_id_mappings(&ds, "t").await?,
+		(0, 0),
+		"no leaked mappings after concurrent last-consumer removal"
+	);
+	Ok(())
+}
+
+/// Concurrently building two doc-ID indexes over the same pre-existing records
+/// must converge on a single shared doc-ID per record (no divergence or
+/// duplication): `resolve_or_assign` is serialized by the per-record `!di` write
+/// conflict.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[test_log::test]
+async fn concurrent_definition_of_doc_id_indexes_shares_one_space() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE ANALYZER simple TOKENIZERS blank;
+		 CREATE t:1 SET a = 'alpha', b = 'one';
+		 CREATE t:2 SET a = 'beta',  b = 'two';
+		 CREATE t:3 SET a = 'gamma', b = 'three';",
+	)
+	.await?;
+	// No doc-ID index yet, so the space is empty.
+	assert_eq!(
+		count_doc_id_mappings(&ds, "t").await?,
+		(0, 0),
+		"no mappings before any doc-ID index"
+	);
+
+	let ds = Arc::new(ds);
+	let task_a = {
+		let (ds, session) = (Arc::clone(&ds), session.clone());
+		tokio::spawn(async move {
+			execute_all_retrying_conflicts(
+				&ds,
+				&session,
+				"DEFINE INDEX ft1 ON t FIELDS a FULLTEXT ANALYZER simple BM25;",
+			)
+			.await
+		})
+	};
+	let task_b = {
+		let (ds, session) = (Arc::clone(&ds), session.clone());
+		tokio::spawn(async move {
+			execute_all_retrying_conflicts(
+				&ds,
+				&session,
+				"DEFINE INDEX ft2 ON t FIELDS b FULLTEXT ANALYZER simple BM25;",
+			)
+			.await
+		})
+	};
+	let (ra, rb) = tokio::join!(task_a, task_b);
+	ra.expect("task A panicked")?;
+	rb.expect("task B panicked")?;
+
+	// Exactly one shared doc-ID per record after both builds backfill.
+	assert_eq!(
+		count_doc_id_mappings(&ds, "t").await?,
+		(3, 3),
+		"one shared doc-ID per record after concurrent index builds"
+	);
+	Ok(())
+}
+
+/// Multi-instance variant of the concurrent-removal test: two SurrealDB
+/// instances with distinct node ids share one storage engine (the deployment
+/// shape the doc-ID space must tolerate) and each drops one of the two — and
+/// only — consumers concurrently. Serialization happens at the shared-storage
+/// table-definition write, not in any node-local state, so the space is
+/// reclaimed exactly once with no leak regardless of which node commits last.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[test_log::test]
+async fn distributed_concurrent_removal_of_last_doc_id_indexes_purges_mappings() -> Result<()> {
+	let (ds_a, ds_b, session) = new_distributed_index_test_ds().await?;
+	execute_all(
+		&ds_a,
+		&session,
+		"DEFINE ANALYZER simple TOKENIZERS blank;
+		 DEFINE INDEX ft1 ON t FIELDS a FULLTEXT ANALYZER simple BM25;
+		 DEFINE INDEX ft2 ON t FIELDS b FULLTEXT ANALYZER simple BM25;
+		 CREATE t:1 SET a = 'alpha', b = 'one';
+		 CREATE t:2 SET a = 'beta',  b = 'two';
+		 CREATE t:3 SET a = 'gamma', b = 'three';",
+	)
+	.await?;
+	assert_eq!(count_doc_id_mappings(&ds_a, "t").await?, (3, 3));
+
+	// Node A drops ft1, node B drops ft2, at the same time.
+	let ds_a = Arc::new(ds_a);
+	let ds_b = Arc::new(ds_b);
+	let task_a = {
+		let (ds, session) = (Arc::clone(&ds_a), session.clone());
+		tokio::spawn(async move {
+			execute_all_retrying_conflicts(&ds, &session, "REMOVE INDEX ft1 ON t;").await
+		})
+	};
+	let task_b = {
+		let (ds, session) = (Arc::clone(&ds_b), session.clone());
+		tokio::spawn(async move {
+			execute_all_retrying_conflicts(&ds, &session, "REMOVE INDEX ft2 ON t;").await
+		})
+	};
+	let (ra, rb) = tokio::join!(task_a, task_b);
+	ra.expect("node A task panicked")?;
+	rb.expect("node B task panicked")?;
+
+	// Read from a fresh transaction: both consumers gone across both nodes, the
+	// shared space is reclaimed, and nothing leaked.
+	assert_eq!(
+		count_doc_id_mappings(&ds_a, "t").await?,
+		(0, 0),
+		"no leaked mappings after concurrent cross-instance last-consumer removal"
+	);
+	Ok(())
+}
+
+/// `DEFINE INDEX ... OVERWRITE` that replaces the last doc-ID consumer with a
+/// non-doc-ID index must reclaim the shared space, just like `REMOVE INDEX`.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn overwrite_last_doc_id_index_with_plain_index_purges_mappings() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE ANALYZER simple TOKENIZERS blank;
+		 DEFINE INDEX ix ON t FIELDS a FULLTEXT ANALYZER simple BM25;
+		 CREATE t:1 SET a = 'alpha';
+		 CREATE t:2 SET a = 'beta';",
+	)
+	.await?;
+	assert_eq!(count_doc_id_mappings(&ds, "t").await?, (2, 2));
+
+	// Overwrite the only doc-ID index with a plain (non-doc-ID) index of the same
+	// name: the last consumer is gone, so the shared space must be reclaimed.
+	execute_all(&ds, &session, "DEFINE INDEX OVERWRITE ix ON t FIELDS a;").await?;
+	assert_eq!(
+		count_doc_id_mappings(&ds, "t").await?,
+		(0, 0),
+		"mappings purged when OVERWRITE drops the last doc-ID consumer"
+	);
+	Ok(())
+}
+
+/// `OVERWRITE` must NOT purge when another doc-ID index still consumes the space.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn overwrite_doc_id_index_keeps_mappings_when_another_consumer_survives() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE ANALYZER simple TOKENIZERS blank;
+		 DEFINE INDEX ft1 ON t FIELDS a FULLTEXT ANALYZER simple BM25;
+		 DEFINE INDEX ft2 ON t FIELDS b FULLTEXT ANALYZER simple BM25;
+		 CREATE t:1 SET a = 'alpha', b = 'one';
+		 CREATE t:2 SET a = 'beta',  b = 'two';",
+	)
+	.await?;
+	assert_eq!(count_doc_id_mappings(&ds, "t").await?, (2, 2));
+
+	// Overwrite ft1 with a plain index while ft2 (doc-ID) remains a consumer.
+	execute_all(&ds, &session, "DEFINE INDEX OVERWRITE ft1 ON t FIELDS a;").await?;
+	assert_eq!(
+		count_doc_id_mappings(&ds, "t").await?,
+		(2, 2),
+		"mappings survive OVERWRITE while another doc-ID index remains"
+	);
+	Ok(())
+}
+
+/// `OVERWRITE` must NOT purge when the replacement is itself a doc-ID index, even
+/// if it is the only consumer — the space keeps being used.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn overwrite_last_doc_id_index_with_doc_id_index_keeps_mappings() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE ANALYZER simple TOKENIZERS blank;
+		 DEFINE INDEX ix ON t FIELDS a FULLTEXT ANALYZER simple BM25;
+		 CREATE t:1 SET a = 'alpha';
+		 CREATE t:2 SET a = 'beta';",
+	)
+	.await?;
+	assert_eq!(count_doc_id_mappings(&ds, "t").await?, (2, 2));
+
+	// Overwrite the only doc-ID index with another doc-ID index (still full-text,
+	// different analyzer): a consumer still exists, so the space is preserved and
+	// the rebuild re-resolves the same ids.
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE ANALYZER simple2 TOKENIZERS class;
+		 DEFINE INDEX OVERWRITE ix ON t FIELDS a FULLTEXT ANALYZER simple2 BM25;",
+	)
+	.await?;
+	assert_eq!(
+		count_doc_id_mappings(&ds, "t").await?,
+		(2, 2),
+		"mappings kept when the replacement is itself a doc-ID index"
+	);
+	Ok(())
+}
+
+/// Regression guard for the delete-during-build deferral path: a record deleted
+/// while a doc-ID index is building must leave the shared doc-ID space in a
+/// consistent state. The delete is enqueued for the building index, so the
+/// central removal is deferred and the builder's replay reclaims the mapping.
+///
+/// NB: with `ft1` already Online this drives the *single-builder inline* reclaim
+/// (no sibling is building, so the delete's replay reclaims the mapping right
+/// away). The two-builders-at-once case — where the replay defers the reclaim
+/// through a durable `!dp` marker and a later sweep completes it — is covered by
+/// [`concurrent_doc_id_index_build_reclaims_deferred_mapping`] (the sweep's
+/// decision matrix, driven directly) and
+/// [`deferred_doc_id_reclaim_survives_across_builds`] (the end-to-end wiring
+/// through a real replay, a bailing sweep, and a later reclaiming build).
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn delete_during_doc_id_index_build_keeps_shared_mapping_consistent() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	// ft1 is built first, so every record already has a shared doc-ID before ft2
+	// starts building.
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE ANALYZER simple TOKENIZERS blank;
+		 CREATE t:1 SET a = 'alpha', b = 'x';
+		 CREATE t:2 SET a = 'beta',  b = 'y';
+		 CREATE t:3 SET a = 'gamma', b = 'z';
+		 DEFINE INDEX ft1 ON t FIELDS a FULLTEXT ANALYZER simple BM25;",
+	)
+	.await?;
+	assert_eq!(count_doc_id_mappings(&ds, "t").await?, (3, 3));
+
+	// Start a second doc-ID index build and delete a record while it is queued.
+	let guard = start_index_build_paused(
+		&ds,
+		&session,
+		"DEFINE INDEX ft2 ON t FIELDS b FULLTEXT ANALYZER simple BM25 CONCURRENTLY",
+	)
+	.await?;
+	execute_all_retrying_conflicts(&ds, &session, "DELETE t:2;").await?;
+	drop(guard);
+	wait_for_index_ready(&ds, &session, "t", "ft2").await?;
+
+	// Exactly the two surviving records remain mapped — the deleted record's
+	// mapping was reclaimed once, not left stale.
+	assert_eq!(
+		count_doc_id_mappings(&ds, "t").await?,
+		(2, 2),
+		"delete during an index build must not leave a stale shared doc-ID mapping"
+	);
+	Ok(())
+}
+
+async fn read_shared_doc_id(
+	ds: &Datastore,
+	docs: &crate::idx::docids::TableDocIds,
+	id: &RecordIdKey,
+) -> Result<Option<crate::idx::docids::DocId>> {
+	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let d = docs.get_doc_id(&tx, id).await?;
+	tx.cancel().await?;
+	Ok(d)
+}
+
+async fn read_shared_record_id(
+	ds: &Datastore,
+	docs: &crate::idx::docids::TableDocIds,
+	doc_id: crate::idx::docids::DocId,
+) -> Result<Option<RecordIdKey>> {
+	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let id = docs.get_record_id(&tx, doc_id).await?;
+	tx.cancel().await?;
+	Ok(id)
+}
+
+/// Assigns (or resolves) a shared doc-ID for `id` in its own committed
+/// transaction.
+async fn assign_shared_doc_id(
+	ds: &Datastore,
+	docs: &crate::idx::docids::TableDocIds,
+	id: &RecordIdKey,
+) -> Result<crate::idx::docids::DocId> {
+	let mut ctx = ds.setup_ctx()?;
+	ctx.set_transaction(ds.transaction(TransactionType::Write, Optimistic).await?.into());
+	let ctx = ctx.freeze();
+	let d = docs.resolve_or_assign(&ctx, id).await?;
+	ctx.tx().commit().await?;
+	Ok(d)
+}
+
+/// Writes a durable `!dp` pending-reclaim marker for `id`, as the delete
+/// replay's defer branch would.
+async fn seed_pending_reclaim(
+	ds: &Datastore,
+	ns: NamespaceId,
+	db: DatabaseId,
+	table: &TableName,
+	id: &RecordIdKey,
+) -> Result<()> {
+	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	tx.set_key(&crate::key::table::dp::Dp::new(ns, db, table, id), &()).await?;
+	tx.commit().await
+}
+
+/// Counts the `!dp` pending-reclaim markers on a table.
+async fn count_pending_reclaims(
+	ds: &Datastore,
+	ns: NamespaceId,
+	db: DatabaseId,
+	table: &TableName,
+) -> Result<usize> {
+	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let rng = crate::key::table::dp::Prefix::new(ns, db, table).encode_range()?;
+	let keys = tx.keys(rng, u32::MAX, 0, None).await?;
+	tx.cancel().await?;
+	Ok(keys.len())
+}
+
+/// Deterministic guard for the concurrent-build reclaim of the shared doc-ID
+/// space — the two-builders-at-once case. When two doc-ID indexes build at the
+/// same time, each defers a deleted record's central mapping removal through a
+/// durable `!dp` marker (the sibling may still need the mapping to replay its
+/// own copy of the delete); a later sweep with no building sibling must reclaim
+/// it, or the `!di`/`!dd` pair is orphaned and a later re-create wrongly reuses
+/// the id.
+///
+/// Drives [`Building::reclaim_deferred_doc_ids`] directly against a simulated
+/// sibling build state to cover its whole decision matrix: markers (and
+/// mappings) survive while a sibling is still building, are reclaimed once no
+/// sibling is building and the record is gone, and a still-present record keeps
+/// its live mapping while its stale marker is consumed. Both directions of the
+/// mapping are asserted. The end-to-end wiring (a real replayed delete writing
+/// the marker, and a real build completion running the sweep) is covered by
+/// [`deferred_doc_id_reclaim_survives_across_builds`].
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn concurrent_doc_id_index_build_reclaims_deferred_mapping() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	// Two full-text indexes on one table => two consumers of the shared !di/!dd
+	// space. `ia` is our builder; `ib` stands in for the concurrent sibling.
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE TABLE t SCHEMALESS;
+		 DEFINE ANALYZER simple TOKENIZERS blank;
+		 DEFINE INDEX ia ON t FIELDS a FULLTEXT ANALYZER simple BM25;
+		 DEFINE INDEX ib ON t FIELDS b FULLTEXT ANALYZER simple BM25;",
+	)
+	.await?;
+
+	let (ns, db, table, ia) = get_table_index(&ds, "t", "ia").await?;
+	let (_, _, _, ib) = get_table_index(&ds, "t", "ib").await?;
+	let ib_ikb = IndexKeyBase::new(ns, db, table.clone(), ib.index_id);
+	let docs = crate::idx::docids::TableDocIds::new(ns, db, table.clone());
+
+	// A record that was indexed (shared mapping assigned) then deleted during the
+	// concurrent build: the mapping and its pending-reclaim marker exist but the
+	// record does not.
+	let gone = RecordIdKey::from("gone".to_owned());
+	let assigned = assign_shared_doc_id(&ds, &docs, &gone).await?;
+	assert_eq!(
+		read_shared_doc_id(&ds, &docs, &gone).await?,
+		Some(assigned),
+		"the deleted record must start with a shared mapping"
+	);
+	seed_pending_reclaim(&ds, ns, db, &table, &gone).await?;
+
+	let ia_building = new_building_for_index(&ds, &session, ns, db, &table, ia).await?;
+
+	// (1) Sibling `ib` still Building: the sweep must leave both the mapping and
+	// the durable marker in place, so `ib` can replay its own copy of the delete
+	// and a later build can still complete the reclaim.
+	set_durable_build_state(
+		&ds,
+		&ib_ikb,
+		durable_build_state_for_phase(IndexBuildPhase::Building, 1, Some(Uuid::now_v7())),
+	)
+	.await?;
+	ia_building.reclaim_deferred_doc_ids().await?;
+	assert_eq!(
+		read_shared_doc_id(&ds, &docs, &gone).await?,
+		Some(assigned),
+		"mapping must survive while a sibling doc-ID index is still building"
+	);
+	assert_eq!(
+		count_pending_reclaims(&ds, ns, db, &table).await?,
+		1,
+		"the durable marker must survive a sweep that bails on a building sibling"
+	);
+
+	// (2) Sibling `ib` now Online: no doc-ID index is building any more and the
+	// record is gone, so the marker seeded above (untouched by the bailed sweep)
+	// is consumed and both directions of the mapping are reclaimed (no orphan).
+	set_durable_build_state(
+		&ds,
+		&ib_ikb,
+		durable_build_state_for_phase(IndexBuildPhase::Online, 1, None),
+	)
+	.await?;
+	ia_building.reclaim_deferred_doc_ids().await?;
+	assert_eq!(
+		read_shared_doc_id(&ds, &docs, &gone).await?,
+		None,
+		"the sweep must reclaim the forward mapping once no sibling is building"
+	);
+	assert_eq!(
+		read_shared_record_id(&ds, &docs, assigned).await?,
+		None,
+		"the sweep must reclaim the reverse mapping too"
+	);
+	assert_eq!(
+		count_pending_reclaims(&ds, ns, db, &table).await?,
+		0,
+		"the sweep must consume the pending-reclaim marker"
+	);
+
+	// delete -> re-create now yields a *new* id (the invariant the reclaim
+	// restores): the stale mapping is gone, so `resolve_or_assign` allocates afresh.
+	let recreated = assign_shared_doc_id(&ds, &docs, &gone).await?;
+	assert_ne!(recreated, assigned, "re-create after reclaim must allocate a fresh doc-ID");
+
+	// (3) Re-creation safety: a record that exists again must keep its mapping
+	// even if a stale marker names it — dropping it would strand its index
+	// entries. The stale marker itself is consumed.
+	execute_all(&ds, &session, "CREATE t:live SET a = 'alpha', b = 'beta';").await?;
+	let live = RecordIdKey::from("live".to_owned());
+	let live_id = read_shared_doc_id(&ds, &docs, &live).await?;
+	assert!(live_id.is_some(), "the live record must have a shared mapping");
+	seed_pending_reclaim(&ds, ns, db, &table, &live).await?;
+	ia_building.reclaim_deferred_doc_ids().await?;
+	assert_eq!(
+		read_shared_doc_id(&ds, &docs, &live).await?,
+		live_id,
+		"a still-present (re-created) record must keep its live mapping"
+	);
+	assert_eq!(
+		count_pending_reclaims(&ds, ns, db, &table).await?,
+		0,
+		"a stale marker for a live record must still be consumed"
+	);
+
+	Ok(())
+}
+
+/// End-to-end wiring of the deferred doc-ID reclaim: a delete replayed by a
+/// real builder while a sibling doc-ID index is (durably) Building must write
+/// the `!dp` marker in the replay transaction, the builder's own end-of-build
+/// sweep must leave it untouched (sibling still building), and a *later* doc-ID
+/// index build — here a `REBUILD`, which never saw the delete — must complete
+/// the reclaim from the durable marker alone.
+///
+/// This pins both halves of the production wiring (the defer branch in
+/// `apply_appending` and the sweep call at the end of a build) and the
+/// keys-survive-across-builds property that makes a late-starting or restarted
+/// build a valid reclaimer.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn deferred_doc_id_reclaim_survives_across_builds() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	// ft1 indexes the records first, so every record has a shared doc-ID before
+	// ft2 starts building; ft3 is a real Online doc-ID index whose durable build
+	// state is forged to Building to stand in for a concurrent sibling.
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE ANALYZER simple TOKENIZERS blank;
+		 CREATE t:1 SET a = 'alpha', b = 'x';
+		 CREATE t:2 SET a = 'beta',  b = 'y';
+		 CREATE t:3 SET a = 'gamma', b = 'z';
+		 DEFINE INDEX ft1 ON t FIELDS a FULLTEXT ANALYZER simple BM25;
+		 DEFINE INDEX ft3 ON t FIELDS b FULLTEXT ANALYZER simple BM25;",
+	)
+	.await?;
+	assert_eq!(count_doc_id_mappings(&ds, "t").await?, (3, 3));
+	let (ns, db, table, _) = get_table_index(&ds, "t", "ft3").await?;
+	let ft3_ikb = {
+		let (_, _, _, ft3) = get_table_index(&ds, "t", "ft3").await?;
+		IndexKeyBase::new(ns, db, table.clone(), ft3.index_id)
+	};
+	// Snapshot ft3's real (Online) build state so it can be restored below.
+	let ft3_online = durable_build_state(&ds, &ft3_ikb).await?;
+
+	// Start ft2's build and pause it; forge ft3 as still Building, then delete a
+	// record. The delete is enqueued into ft2's replay queue, and when ft2's
+	// build resumes, its replay sees a "building" sibling and defers the reclaim
+	// through a durable marker; ft2's own end-of-build sweep bails on it too.
+	let guard = start_index_build_paused(
+		&ds,
+		&session,
+		"DEFINE INDEX ft2 ON t FIELDS b FULLTEXT ANALYZER simple BM25 CONCURRENTLY",
+	)
+	.await?;
+	set_durable_build_state(
+		&ds,
+		&ft3_ikb,
+		durable_build_state_for_phase(
+			IndexBuildPhase::Building,
+			ft3_online.generation,
+			Some(Uuid::now_v7()),
+		),
+	)
+	.await?;
+	execute_all_retrying_conflicts(&ds, &session, "DELETE t:2;").await?;
+	drop(guard);
+	wait_for_index_ready(&ds, &session, "t", "ft2").await?;
+
+	// The mapping is retained (the "building" sibling may still need it) and the
+	// deferral is durable.
+	assert_eq!(
+		count_doc_id_mappings(&ds, "t").await?,
+		(3, 3),
+		"the deleted record's mapping must be retained while a sibling builds"
+	);
+	assert_eq!(
+		count_pending_reclaims(&ds, ns, db, &table).await?,
+		1,
+		"the replayed delete must leave a durable pending-reclaim marker"
+	);
+
+	// Restore ft3 to its real Online state: no doc-ID index is building.
+	set_durable_build_state(&ds, &ft3_ikb, ft3_online).await?;
+
+	// A later build — a REBUILD that never saw the delete — completes the
+	// reclaim from the durable marker alone.
+	execute_all(&ds, &session, "REBUILD INDEX ft2 ON t;").await?;
+	assert_eq!(
+		count_doc_id_mappings(&ds, "t").await?,
+		(2, 2),
+		"the next doc-ID index build must reclaim the deferred mapping"
+	);
+	assert_eq!(
+		count_pending_reclaims(&ds, ns, db, &table).await?,
+		0,
+		"the reclaiming sweep must consume the durable marker"
+	);
+	Ok(())
+}
+
+/// A queued delete whose builder never replays it must still be reclaimed: the
+/// delete transaction itself writes the durable `!dp` marker at the moment the
+/// central removal is deferred (see `doc::index`'s `defer_doc_id_removal`), so
+/// the obligation survives the builder and its queues. Here the building index
+/// is removed while paused — its queued copy of the delete is retired without
+/// ever replaying — and the next doc-ID index build completes the reclaim from
+/// the marker alone.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn deferred_doc_id_reclaim_survives_builder_removal() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE ANALYZER simple TOKENIZERS blank;
+		 CREATE t:1 SET a = 'alpha', b = 'x';
+		 CREATE t:2 SET a = 'beta',  b = 'y';
+		 CREATE t:3 SET a = 'gamma', b = 'z';
+		 DEFINE INDEX ft1 ON t FIELDS a FULLTEXT ANALYZER simple BM25;",
+	)
+	.await?;
+	assert_eq!(count_doc_id_mappings(&ds, "t").await?, (3, 3));
+	let (ns, db, table, _) = get_table_index(&ds, "t", "ft1").await?;
+
+	// ft2's build is paused; the delete is enqueued into its replay queue and
+	// the central removal is deferred. The delete transaction must leave the
+	// durable marker immediately — before any replay runs.
+	let guard = start_index_build_paused(
+		&ds,
+		&session,
+		"DEFINE INDEX ft2 ON t FIELDS b FULLTEXT ANALYZER simple BM25 CONCURRENTLY",
+	)
+	.await?;
+	execute_all_retrying_conflicts(&ds, &session, "DELETE t:2;").await?;
+	assert_eq!(
+		count_pending_reclaims(&ds, ns, db, &table).await?,
+		1,
+		"the delete transaction must write the durable marker at deferral time"
+	);
+	assert_eq!(count_doc_id_mappings(&ds, "t").await?, (3, 3));
+
+	// Remove ft2 while its build is still paused: the queued delete is retired
+	// with the index and never replays. ft1 remains a consumer, so the shared
+	// space is not purged — the marker must carry the reclaim obligation.
+	execute_all_retrying_conflicts(&ds, &session, "REMOVE INDEX ft2 ON t;").await?;
+	drop(guard);
+	assert_eq!(
+		count_pending_reclaims(&ds, ns, db, &table).await?,
+		1,
+		"the marker must survive a builder that never replayed the delete"
+	);
+	assert_eq!(count_doc_id_mappings(&ds, "t").await?, (3, 3));
+
+	// The next doc-ID index build completes the reclaim from the marker alone.
+	execute_all(&ds, &session, "REBUILD INDEX ft1 ON t;").await?;
+	assert_eq!(
+		count_doc_id_mappings(&ds, "t").await?,
+		(2, 2),
+		"the next doc-ID index build must reclaim the never-replayed delete's mapping"
+	);
+	assert_eq!(count_pending_reclaims(&ds, ns, db, &table).await?, 0);
+	Ok(())
+}
+
+/// Runs a KNN query and returns the JSON-encoded result rows.
+#[cfg(feature = "kv-mem")]
+async fn knn_result(ds: &Datastore, session: &Session, sql: &str) -> Result<String> {
+	let mut responses = ds.execute(sql, session, None).await?;
+	let value = responses.remove(0).result?;
+	Ok(value.into_json_value().to_string())
+}
+
+/// A record deleted and re-created before HNSW compaction must remain visible
+/// to KNN search. The record-keyed pending captures the pre-delete doc-ID; the
+/// delete removes that shared mapping, so a pending hit emitted under the
+/// captured id could not be resolved back to a record and would be silently
+/// dropped. The pending search must emit the surviving vectors under the record
+/// key instead (see `search_pendings`).
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn hnsw_pending_search_returns_recreated_record() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	// The full-text index assigns the shared doc-ID at write time, so the HNSW
+	// record pending captures it (`doc_id: Some(..)`).
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE ANALYZER simple TOKENIZERS blank;
+		 DEFINE INDEX ft ON t FIELDS a FULLTEXT ANALYZER simple BM25;
+		 DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 4 DIST EUCLIDEAN TYPE F32;
+		 CREATE t:1 SET a = 'alpha', vec = [1.0, 0.0, 0.0, 0.0];",
+	)
+	.await?;
+
+	// Delete (drops the shared mapping) then re-create before any compaction:
+	// the coalesced record pending still carries the stale captured doc-ID.
+	// NB: no KNN query runs before this point — resolving the captured id while
+	// its mapping is still live would warm the process-local doc-ID cache and
+	// mask the stale-mapping resolution this test pins down.
+	execute_all(
+		&ds,
+		&session,
+		"DELETE t:1;
+		 CREATE t:1 SET a = 'alpha', vec = [1.0, 0.0, 0.0, 0.0];",
+	)
+	.await?;
+	let knn = "SELECT id FROM t WHERE vec <|1,40|> [1.0, 0.0, 0.0, 0.0];";
+	assert!(
+		knn_result(&ds, &session, knn).await?.contains("t:1"),
+		"a record re-created before compaction must remain visible to KNN"
+	);
+	Ok(())
+}
+
+/// DiskANN counterpart of
+/// [`hnsw_pending_search_returns_recreated_record`]: the sharded pending search
+/// must emit a re-created record's vectors under the record key, not the stale
+/// captured doc-ID.
+#[cfg(all(feature = "kv-mem", diskann))]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn diskann_pending_search_returns_recreated_record() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE ANALYZER simple TOKENIZERS blank;
+		 DEFINE INDEX ft ON t FIELDS a FULLTEXT ANALYZER simple BM25;
+		 DEFINE INDEX dx ON t FIELDS vec DISKANN DIMENSION 4 DIST EUCLIDEAN TYPE F32;
+		 CREATE t:1 SET a = 'alpha', vec = [1.0, 0.0, 0.0, 0.0];",
+	)
+	.await?;
+	// NB: no KNN query runs before the delete — see the HNSW counterpart for
+	// why (a warm doc-ID cache would mask the stale-mapping resolution).
+	execute_all(
+		&ds,
+		&session,
+		"DELETE t:1;
+		 CREATE t:1 SET a = 'alpha', vec = [1.0, 0.0, 0.0, 0.0];",
+	)
+	.await?;
+	let knn = "SELECT id FROM t WHERE vec <|1,40|> [1.0, 0.0, 0.0, 0.0];";
+	assert!(
+		knn_result(&ds, &session, knn).await?.contains("t:1"),
+		"a record re-created before compaction must remain visible to KNN"
+	);
 	Ok(())
 }

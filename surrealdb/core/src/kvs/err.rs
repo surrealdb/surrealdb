@@ -179,6 +179,27 @@ impl From<tikv::Error> for Error {
 					Error::Transaction(e.to_string())
 				}
 			}
+			tikv::Error::MultipleKeyErrors(errs) => {
+				// async_commit / 1PC prewrite reports per-key failures batched
+				// into a single `MultipleKeyErrors`. Without unwrapping it, a
+				// write-conflict inside would fall through to the generic,
+				// non-retryable `Transaction` variant below, so callers that
+				// retry on conflict (the sequence batch allocator, doc-ID
+				// get-or-create, index builds) would fail instead of retrying.
+				// Recover the classification from the inner errors: a conflict
+				// anywhere in the batch means the whole transaction is retryable.
+				let mapped: Vec<Error> = errs.into_iter().map(Error::from).collect();
+				if let Some(key) = mapped.iter().find_map(|e| match e {
+					Error::TransactionConflict(k) => Some(k.clone()),
+					_ => None,
+				}) {
+					Error::TransactionConflict(key)
+				} else if mapped.iter().any(|e| matches!(e, Error::TransactionKeyAlreadyExists)) {
+					Error::TransactionKeyAlreadyExists
+				} else {
+					Error::Transaction(format!("multiple key errors: {mapped:?}"))
+				}
+			}
 			tikv::Error::RegionError(ref re) => {
 				// Most region errors carry a region id in their nested
 				// `not_leader` / `region_not_found` / `epoch_not_match`

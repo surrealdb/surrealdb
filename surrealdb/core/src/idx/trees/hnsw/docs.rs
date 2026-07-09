@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
-use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableId};
+use crate::ctx::FrozenContext;
 use crate::idx::IndexKeyBase;
-use crate::idx::seqdocids::DocId;
+use crate::idx::docids::{DocId, TableDocIds};
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::hnsw::cache::VectorCache;
 use crate::idx::trees::hnsw::flavor::HnswFlavor;
@@ -18,39 +18,28 @@ use crate::key::KVValue;
 use crate::kvs::Transaction;
 use crate::val::{RecordId, RecordIdKey};
 
-/// Manages the bidirectional mapping between record IDs and internal document IDs.
+/// Per-index facade over the table's shared doc-ID space for HNSW.
 ///
-/// Maintains a pool of available (recycled) doc IDs and a monotonic counter
-/// for allocating new ones, persisting the state to the key-value store.
+/// The record ↔ doc-ID mapping lives in [`TableDocIds`] (keys `!di`/`!dd` under
+/// the table prefix), shared by every index on the table so cross-index candidate
+/// composition can rely on one doc-ID per record. HNSW keeps its own element/graph
+/// keys; this type only maps between record IDs and those shared doc-IDs (plus the
+/// process-local resolution cache).
 pub(in crate::idx) struct HnswDocs {
 	/// Key base for generating storage keys.
 	ikb: IndexKeyBase,
-	/// Whether the state has been modified and needs to be persisted.
-	state_updated: bool,
-	/// The persisted document allocation state.
-	state: HnswDocsState,
-}
-
-/// Persisted state for document ID allocation.
-#[revisioned(revision = 1)]
-#[derive(Default, Clone, Serialize, Deserialize)]
-pub(crate) struct HnswDocsState {
-	/// Pool of recycled doc IDs available for reuse.
-	available: RoaringTreemap,
-	/// The next doc ID to allocate when the pool is empty.
-	next_doc_id: DocId,
+	/// The table-level doc-ID mapping shared by every index on the table.
+	docids: TableDocIds,
 }
 
 impl HnswDocs {
-	/// Creates a new `HnswDocs`, loading existing state from the key-value store.
-	pub(in crate::idx) async fn new(tx: &Transaction, ikb: IndexKeyBase) -> Result<Self> {
-		let state_key = ikb.new_hd_root_key();
-		let state = tx.get_key(&state_key, None).await?.unwrap_or_default();
-		Ok(Self {
+	/// Creates an `HnswDocs` facade over the table's shared doc-ID space.
+	pub(in crate::idx) fn new(ikb: IndexKeyBase) -> Self {
+		let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
+		Self {
 			ikb,
-			state_updated: false,
-			state,
-		})
+			docids,
+		}
 	}
 
 	/// Looks up the internal doc ID for a given record key, if it exists.
@@ -62,34 +51,13 @@ impl HnswDocs {
 		tx: &Transaction,
 		id: &RecordIdKey,
 	) -> Result<Option<DocId>> {
-		tx.get_key(&ikb.new_hi_key(id), None).await
+		TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone()).get_doc_id(tx, id).await
 	}
 
-	/// Resolves a record key to its internal doc ID, creating a new mapping if needed.
-	pub(super) async fn resolve(&mut self, tx: &Transaction, id: &RecordIdKey) -> Result<DocId> {
-		if let Some(doc_id) = tx.get_key(&self.ikb.new_hi_key(id), None).await? {
-			Ok(doc_id)
-		} else {
-			let doc_id = self.next_doc_id();
-			let id_key = self.ikb.new_hi_key(id);
-			tx.set_key(&id_key, &doc_id).await?;
-			let doc_key = self.ikb.new_hd_key(doc_id);
-			tx.set_key(&doc_key, id).await?;
-			Ok(doc_id)
-		}
-	}
-
-	/// Allocates the next available doc ID, reusing a recycled one if possible.
-	fn next_doc_id(&mut self) -> DocId {
-		self.state_updated = true;
-		if let Some(doc_id) = self.state.available.iter().next() {
-			self.state.available.remove(doc_id);
-			doc_id
-		} else {
-			let doc_id = self.state.next_doc_id;
-			self.state.next_doc_id += 1;
-			doc_id
-		}
+	/// Resolves a record key to its doc ID in the table's shared space, allocating
+	/// a new one if needed.
+	pub(super) async fn resolve(&self, ctx: &FrozenContext, id: &RecordIdKey) -> Result<DocId> {
+		self.docids.resolve_or_assign(ctx, id).await
 	}
 
 	fn cache_index(
@@ -146,8 +114,10 @@ impl HnswDocs {
 		if misses.is_empty() {
 			return Ok(rids);
 		}
-		let keys: Vec<_> = misses.iter().map(|(_, doc_id)| ikb.new_hd_key(*doc_id)).collect();
-		let ids: Vec<Option<RecordIdKey>> = tx.get_many_key(keys, None).await?;
+		let miss_ids: Vec<DocId> = misses.iter().map(|(_, doc_id)| *doc_id).collect();
+		let ids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone())
+			.get_record_ids_batch(tx, &miss_ids)
+			.await?;
 		let cache_misses = !tx.writeable();
 		for ((pos, doc_id), id) in misses.into_iter().zip(ids) {
 			if let Some(id) = id {
@@ -165,43 +135,13 @@ impl HnswDocs {
 		Ok(rids)
 	}
 
-	/// Removes the mapping for a doc ID, recycling it for future reuse.
-	/// Returns the removed doc ID if it existed.
-	pub(super) async fn remove(
-		&mut self,
-		tx: &Transaction,
-		doc_id: DocId,
-		table_id: TableId,
-		cache: &VectorCache,
-	) -> Result<Option<DocId>> {
-		let index = Self::cache_index(&self.ikb, table_id);
-		cache.remove_doc_id(index, doc_id).await;
-		let doc_key = self.ikb.new_hd_key(doc_id);
-		let Some(id) = tx.get_key(&doc_key, None).await? else {
-			return Ok(None);
-		};
-		self.state_updated = true;
-		tx.del_key(&doc_key).await?;
-		let id_key = self.ikb.new_hi_key(&id);
-		if let Some(doc_id) = tx.get_key(&id_key, None).await? {
-			tx.del_key(&id_key).await?;
-			self.state.available.insert(doc_id);
-			Ok(Some(doc_id))
-		} else {
-			Ok(None)
-		}
-	}
-
-	/// Persists the document allocation state if it has been modified,
-	/// then resets the dirty flag so subsequent calls are no-ops until
-	/// the state is modified again.
-	pub(in crate::idx) async fn finish(&mut self, tx: &Transaction) -> Result<()> {
-		if self.state_updated {
-			let state_key = self.ikb.new_hd_root_key();
-			tx.set_key(&state_key, &self.state).await?;
-			self.state_updated = false;
-		}
-		Ok(())
+	/// Evicts the cached doc-ID → record resolution for a removed document.
+	///
+	/// The record ↔ doc-ID mapping is shared across the table's indexes and is
+	/// removed centrally at record purge (see `doc::index`'s `remove_doc_id`), so
+	/// this only drops the process-local cache entry. Doc-IDs are never recycled.
+	pub(super) async fn remove(&self, doc_id: DocId, table_id: TableId, cache: &VectorCache) {
+		cache.remove_doc_id(Self::cache_index(&self.ikb, table_id), doc_id).await;
 	}
 }
 
@@ -223,8 +163,16 @@ mod tests {
 		let cache = VectorCache::new(1024 * 1024);
 		{
 			let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
-			tx.set_key(&ikb.new_hd_key(1), &RecordIdKey::Number(11)).await?;
-			tx.set_key(&ikb.new_hd_key(2), &RecordIdKey::Number(22)).await?;
+			tx.set_key(
+				&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 1),
+				&RecordIdKey::Number(11),
+			)
+			.await?;
+			tx.set_key(
+				&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 2),
+				&RecordIdKey::Number(22),
+			)
+			.await?;
 			tx.commit().await?;
 		}
 
@@ -237,7 +185,7 @@ mod tests {
 		tx.cancel().await?;
 
 		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
-		tx.del_key(&ikb.new_hd_key(1)).await?;
+		tx.del_key(&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 1)).await?;
 		tx.commit().await?;
 
 		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
@@ -262,7 +210,11 @@ mod tests {
 		tx.cancel().await?;
 
 		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
-		tx.set_key(&ikb.new_hd_key(9), &RecordIdKey::Number(99)).await?;
+		tx.set_key(
+			&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 9),
+			&RecordIdKey::Number(99),
+		)
+		.await?;
 		let got = HnswDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[9], Some(5)).await?;
 		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(99));
 		assert!(
@@ -282,7 +234,11 @@ mod tests {
 		let cache = VectorCache::new(1024 * 1024);
 		{
 			let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
-			tx.set_key(&ikb.new_hd_key(1), &RecordIdKey::Number(11)).await?;
+			tx.set_key(
+				&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 1),
+				&RecordIdKey::Number(11),
+			)
+			.await?;
 			tx.commit().await?;
 		}
 
@@ -298,7 +254,11 @@ mod tests {
 		);
 
 		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
-		tx.set_key(&ikb.new_hd_key(1), &RecordIdKey::Number(22)).await?;
+		tx.set_key(
+			&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 1),
+			&RecordIdKey::Number(22),
+		)
+		.await?;
 		tx.commit().await?;
 
 		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
@@ -316,8 +276,8 @@ mod tests {
 		let id = RecordIdKey::Number(77);
 		{
 			let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
-			tx.set_key(&ikb.new_hd_key(7), &id).await?;
-			tx.set_key(&ikb.new_hi_key(&id), &7_u64).await?;
+			tx.set_key(&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 7), &id)
+				.await?;
 			tx.commit().await?;
 		}
 
@@ -333,8 +293,8 @@ mod tests {
 		tx.cancel().await?;
 
 		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
-		let mut docs = HnswDocs::new(&tx, ikb.clone()).await?;
-		assert_eq!(docs.remove(&tx, 7, TableId(4), &cache).await?, Some(7));
+		let docs = HnswDocs::new(ikb.clone());
+		docs.remove(7, TableId(4), &cache).await;
 		assert!(
 			cache
 				.get_doc_id((ikb.ns(), ikb.db(), TableId(4), ikb.index()), 7, Some(5))
@@ -432,22 +392,6 @@ mod tests {
 		);
 		tx.cancel().await?;
 		Ok(())
-	}
-}
-
-impl KVValue for HnswDocsState {
-	type KeyContext = ();
-
-	#[inline]
-	fn kv_encode_value(&self) -> Result<Vec<u8>> {
-		let mut val = Vec::new();
-		SerializeRevisioned::serialize_revisioned(self, &mut val)?;
-		Ok(val)
-	}
-
-	#[inline]
-	fn kv_decode_value(mut val: &[u8], _: ()) -> Result<Self> {
-		Ok(DeserializeRevisioned::deserialize_revisioned(&mut val)?)
 	}
 }
 

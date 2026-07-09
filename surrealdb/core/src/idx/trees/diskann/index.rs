@@ -85,6 +85,15 @@ struct CapturedPendingKey {
 struct PendingOperation {
 	/// Owning record/document ID after coalescing record-keyed pending updates.
 	id: VectorId,
+	/// Record key when this operation came from a record-keyed pending.
+	///
+	/// The graph baseline in `old_vectors` lives under the *captured* doc-ID
+	/// (`id`), but a delete removes the record's shared doc-ID mapping and a
+	/// re-create before compaction folds its vectors into this same pending. The
+	/// record key lets compaction re-resolve the *current* doc-ID for
+	/// `new_vectors`, so re-created records are inserted under a live mapping
+	/// instead of the stale captured one.
+	record: Option<Arc<RecordIdKey>>,
 	/// Vectors currently represented by the compacted graph.
 	old_vectors: Vec<SerializedVector>,
 	/// Latest vectors that should be represented after compaction.
@@ -837,13 +846,15 @@ impl DiskAnnIndex {
 		id: RecordIdKey,
 		pending: DiskAnnRecordPendingUpdate,
 	) -> PendingOperation {
+		let record = Arc::new(id);
 		let id = if let Some(doc_id) = pending.doc_id {
 			VectorId::DocId(doc_id)
 		} else {
-			VectorId::RecordKey(Arc::new(id))
+			VectorId::RecordKey(Arc::clone(&record))
 		};
 		PendingOperation {
 			id,
+			record: Some(record),
 			old_vectors: pending.old_vectors,
 			new_vectors: pending.new_vectors,
 		}
@@ -1128,13 +1139,12 @@ impl DiskAnnIndex {
 		// that pre-empts KV.
 		let mut graph = self.graph.write().await;
 		let apply_result: Result<()> = async {
-			let mut docs = DiskAnnDocs::new(&tx, self.ikb.clone()).await?;
+			let docs = DiskAnnDocs::new(self.ikb.clone());
 			let provider_context = graph.index.provider().context(Arc::clone(&tx));
 			let diskann_ctx = self.new_diskann_context(ctx, provider_context);
 			for pending in pending {
-				self.apply_pending_operation(&diskann_ctx, &mut docs, &mut graph, pending).await?;
+				self.apply_pending_operation(&diskann_ctx, &docs, &mut graph, pending).await?;
 			}
-			docs.finish(&tx).await?;
 			if !cleared_shards.is_empty()
 				&& Self::pending_shard_ranges_empty(ctx, &tx, &self.ikb, &cleared_shards).await?
 			{
@@ -1178,27 +1188,39 @@ impl DiskAnnIndex {
 	async fn apply_pending_operation(
 		&self,
 		ctx: &DiskAnnContext<'_>,
-		docs: &mut DiskAnnDocs,
+		docs: &DiskAnnDocs,
 		graph: &mut DiskAnnGraph,
 		pending: PendingOperation,
 	) -> Result<()> {
 		match pending.id {
 			VectorId::DocId(doc_id) => {
+				// Remove the graph baseline under the doc-ID those vectors live under.
 				for vector in pending.old_vectors {
 					let vector = Vector::from(vector);
 					self.vec_docs.remove(ctx, &vector, doc_id, graph).await?;
 				}
 				if pending.new_vectors.is_empty() {
-					docs.remove(&ctx.tx, doc_id, self.table_id, &self.cache).await?;
+					docs.remove(doc_id, self.table_id, &self.cache);
 				} else {
+					// A delete removes the record's shared doc-ID mapping and a
+					// re-create before compaction folds its vectors in here, so
+					// resolve the *current* doc-ID from the record key rather than
+					// reusing the captured (possibly deleted) one. For a plain
+					// update the mapping is unchanged and this returns the same id.
+					let insert_doc_id = match &pending.record {
+						Some(record) => docs.resolve(ctx.ctx, record).await?,
+						None => doc_id,
+					};
 					for vector in pending.new_vectors {
-						self.vec_docs.insert(ctx, Vector::from(vector), doc_id, graph).await?;
+						self.vec_docs
+							.insert(ctx, Vector::from(vector), insert_doc_id, graph)
+							.await?;
 					}
 				}
 			}
 			VectorId::RecordKey(id) => {
 				if !pending.new_vectors.is_empty() {
-					let doc_id = docs.resolve(&ctx.tx, &id).await?;
+					let doc_id = docs.resolve(ctx.ctx, &id).await?;
 					for vector in pending.new_vectors {
 						self.vec_docs.insert(ctx, Vector::from(vector), doc_id, graph).await?;
 					}
@@ -1436,7 +1458,21 @@ impl DiskAnnIndex {
 			if pending.new_vectors.is_empty() {
 				non_deleted_docs.remove(&pending.id);
 			} else {
-				non_deleted_docs.insert(pending.id, pending.new_vectors);
+				// A record-keyed pending may carry a doc-ID captured before a
+				// delete → re-create of the record: that id's shared mapping is
+				// gone, so a DocId-keyed hit could not be resolved back to a
+				// record and would be silently dropped. Emit the surviving
+				// vectors under the record key — always resolvable — while the
+				// captured id (inserted above) still masks the graph's stale
+				// entries. An entry coalesced earlier under the captured id is
+				// superseded.
+				let id = if let Some(record) = &pending.record {
+					non_deleted_docs.remove(&pending.id);
+					VectorId::RecordKey(Arc::clone(record))
+				} else {
+					pending.id
+				};
+				non_deleted_docs.insert(id, pending.new_vectors);
 			}
 		})
 		.await?;
@@ -1599,7 +1635,9 @@ mod tests {
 
 	async fn new_ctx(ds: &Datastore, tt: TransactionType) -> FrozenContext {
 		let tx = Arc::new(ds.transaction(tt, LockType::Optimistic).await.unwrap());
-		let mut ctx = Context::new_test();
+		// Use the full datastore context so the shared table-level doc-ID
+		// sequence is available to compaction's `resolve`.
+		let mut ctx = ds.setup_ctx().unwrap();
 		ctx.set_transaction(tx);
 		ctx.freeze()
 	}
@@ -2911,8 +2949,10 @@ mod tests {
 	#[test]
 	fn diskann_builder_authorized_pair_survives_byte_budget() {
 		fn op(n: i64) -> PendingOperation {
+			let record = Arc::new(RecordIdKey::Number(n));
 			PendingOperation {
-				id: VectorId::RecordKey(Arc::new(RecordIdKey::Number(n))),
+				id: VectorId::RecordKey(Arc::clone(&record)),
+				record: Some(record),
 				old_vectors: vec![],
 				new_vectors: vec![],
 			}

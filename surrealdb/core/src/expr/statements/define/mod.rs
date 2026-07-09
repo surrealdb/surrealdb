@@ -30,7 +30,7 @@ pub(crate) use field::{
 };
 pub(crate) use function::DefineFunctionStatement;
 pub(crate) use index::DefineIndexStatement;
-pub(in crate::expr::statements) use index::run_indexing;
+pub(in crate::expr::statements) use index::{refresh_table_index_cache, run_indexing};
 pub(crate) use model::DefineModelStatement;
 pub(crate) use module::DefineModuleStatement;
 pub(crate) use namespace::DefineNamespaceStatement;

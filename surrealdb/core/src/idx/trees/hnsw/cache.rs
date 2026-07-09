@@ -7,7 +7,7 @@ use quick_cache::{DefaultHashBuilder, Lifecycle, Weighter};
 use roaring::RoaringTreemap;
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableId};
-use crate::idx::seqdocids::DocId;
+use crate::idx::docids::DocId;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::knn::Ids64;
 use crate::idx::trees::vector::SharedVector;

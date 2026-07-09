@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use crate::catalog::{HnswParams, TableId};
 use crate::ctx::FrozenContext;
 use crate::idx::IndexKeyBase;
-use crate::idx::seqdocids::DocId;
+use crate::idx::docids::DocId;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::hnsw::cache::VectorCache;
 use crate::idx::trees::hnsw::elements::HnswElements;
@@ -647,10 +647,10 @@ mod tests {
 		DatabaseId, Distance, HnswParams, IndexId, NamespaceId, TableDefinition, TableId,
 		VectorType,
 	};
-	use crate::ctx::{Context, FrozenContext};
+	use crate::ctx::FrozenContext;
 	use crate::dbs::Session;
 	use crate::idx::IndexKeyBase;
-	use crate::idx::seqdocids::DocId;
+	use crate::idx::docids::{DocId, TableDocIds};
 	use crate::idx::trees::hnsw::docs::VecDocs;
 	use crate::idx::trees::hnsw::flavor::HnswFlavor;
 	use crate::idx::trees::hnsw::index::{HnswContext, HnswIndex};
@@ -664,7 +664,7 @@ mod tests {
 	use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::{Datastore, TransactionType};
-	use crate::val::{RecordIdKey, Value};
+	use crate::val::{Number, RecordIdKey, Value};
 
 	async fn insert_collection_hnsw(
 		ctx: &HnswContext<'_>,
@@ -1096,7 +1096,9 @@ mod tests {
 
 	async fn new_ctx(ds: &Datastore, tt: TransactionType) -> FrozenContext {
 		let tx = Arc::new(ds.transaction(tt, Optimistic).await.unwrap());
-		let mut ctx = Context::new_test();
+		// Use the full datastore context so the shared table-level doc-ID
+		// sequence is available to compaction's `resolve`.
+		let mut ctx = ds.setup_ctx().unwrap();
 		ctx.set_transaction(tx);
 		ctx.freeze()
 	}
@@ -1320,6 +1322,100 @@ mod tests {
 		assert_eq!(pending.old_vectors, vec![serialized(&first)]);
 		assert!(pending.new_vectors.is_empty());
 		tx.cancel().await?;
+		Ok(())
+	}
+
+	/// Regression: deleting a record removes the shared table-level doc-ID
+	/// mapping; re-creating the same key before the vector pending is compacted
+	/// folds the new vectors into the delete's pending (which still carries the
+	/// deleted doc-ID). Compaction must insert them under the *current* doc-ID,
+	/// re-resolved from the record key, otherwise the re-created record's KNN
+	/// hits reference a doc-ID with no `!dd` mapping and disappear until rebuild.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_delete_recreate_before_compaction_stays_resolvable() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true, true);
+		let id = RecordIdKey::Number(1);
+		let first = new_i16_vec(1, 1);
+		let second = new_i16_vec(2, 2);
+		let docids = TableDocIds::new(NamespaceId(1), DatabaseId(2), "tb".into());
+
+		// Create the record and compact it into the graph under its first doc-ID.
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+			let h = HnswIndex::new(
+				ctx.get_index_stores().vector_cache().clone(),
+				&tx,
+				ikb.clone(),
+				TableId(3),
+				&p,
+			)
+			.await?;
+			h.index(&ctx, &id, None, Some(vector_content(&first))).await?;
+			tx.commit().await?;
+			h
+		};
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			assert_eq!(h.index_pendings(&ctx).await?, 1);
+			ctx.tx().commit().await?;
+		}
+		let original_doc_id = {
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let d = docids.get_doc_id(&ctx.tx(), &id).await?.expect("mapped after compaction");
+			ctx.tx().cancel().await?;
+			d
+		};
+
+		// Delete the record: enqueue the delete pending and remove the shared
+		// doc-ID mapping, mirroring `store_index_data` + the central purge removal.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			h.index(&ctx, &id, Some(vector_content(&first)), None).await?;
+			docids.remove(&ctx.tx(), &id).await?;
+			ctx.tx().commit().await?;
+		}
+		// Re-create the same key before compaction: folds into the delete pending.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			h.index(&ctx, &id, None, Some(vector_content(&second))).await?;
+			ctx.tx().commit().await?;
+		}
+		// Compact the folded pending.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			h.index_pendings(&ctx).await?;
+			ctx.tx().commit().await?;
+		}
+
+		// The record is remapped to a fresh, resolvable doc-ID (the deleted one is
+		// gone and not reused).
+		{
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let tx = ctx.tx();
+			let new_doc_id = docids.get_doc_id(&tx, &id).await?.expect("remapped after recreate");
+			assert_ne!(new_doc_id, original_doc_id, "re-create must not reuse the deleted doc-ID");
+			assert_eq!(docids.get_record_id(&tx, new_doc_id).await?, Some(id.clone()));
+			assert_eq!(docids.get_record_id(&tx, original_doc_id).await?, None);
+			tx.cancel().await?;
+		}
+		// KNN for the re-created vector resolves back to the record.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let mut stack = reblessive::tree::TreeStack::new();
+			let pt = vec![Number::Int(2), Number::Int(2)];
+			let res = stack
+				.enter(|stk| async { h.knn_search(&ctx, stk, &pt, 1, 500, None).await })
+				.finish()
+				.await?;
+			ctx.tx().cancel().await?;
+			assert!(
+				res.iter().any(|(rid, _, _)| rid.key == id),
+				"re-created record must be resolvable in KNN results: {res:?}"
+			);
+		}
 		Ok(())
 	}
 

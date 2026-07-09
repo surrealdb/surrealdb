@@ -28,6 +28,7 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::expr::Idiom;
 use crate::expr::operator::BooleanOperator;
+use crate::idx::docids::{DocId, TableDocIds};
 use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::analyzer::filter::FilteringStage;
 use crate::idx::ft::analyzer::tokenizer::Tokens;
@@ -35,7 +36,6 @@ use crate::idx::ft::highlighter::{HighlightParams, Highlighter, Offseter};
 use crate::idx::ft::offset::Offset;
 use crate::idx::ft::{DocLength, Score, TermFrequency};
 use crate::idx::planner::iterators::MatchesHitsIterator;
-use crate::idx::seqdocids::{DocId, SeqDocIds};
 use crate::idx::trees::store::IndexStores;
 use crate::idx::{IndexKeyBase, bump_compaction_generation, read_compaction_generation};
 use crate::key::database::all::DatabaseRoot;
@@ -159,8 +159,8 @@ pub(crate) struct FullTextIndex {
 	analyzer: Analyzer,
 	/// Whether highlighting is enabled for this index
 	highlighting: bool,
-	/// Mapping between document IDs and their database identifiers
-	doc_ids: SeqDocIds,
+	/// The table's shared record ↔ doc-ID mapping
+	doc_ids: TableDocIds,
 	/// BM25 scoring parameters, if scoring is enabled
 	bm25: Option<Bm25Params>,
 }
@@ -268,7 +268,7 @@ impl FullTextIndex {
 		Ok(Self {
 			analyzer,
 			highlighting: p.highlight,
-			doc_ids: SeqDocIds::new(ikb.clone()),
+			doc_ids: TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone()),
 			ikb,
 			bm25,
 		})
@@ -332,13 +332,6 @@ impl FullTextIndex {
 		}
 	}
 
-	/// This method assumes that remove_content has been called previously,
-	/// as it does not remove the content (terms) but only removes the doc_id
-	/// reference.
-	pub(crate) async fn remove_doc(&self, ctx: &FrozenContext, doc_id: DocId) -> Result<()> {
-		self.doc_ids.remove_doc_id(&ctx.tx(), doc_id).await
-	}
-
 	/// Indexes content in the full-text index
 	///
 	/// This method analyzes and indexes the specified content for a document.
@@ -355,24 +348,24 @@ impl FullTextIndex {
 	) -> Result<()> {
 		let tx = ctx.tx();
 		let nid = ctx.node_id();
-		// Get the doc id (if it exists)
-		let id = self.doc_ids.resolve_doc_id(ctx, &rid.key).await?;
+		// Resolve (or assign) the record's doc id in the table's shared space
+		let doc_id = self.doc_ids.resolve_or_assign(ctx, &rid.key).await?;
 		// Collect the tokens.
 		let tokens =
 			self.analyzer.analyze_content(stk, ctx, opt, content, FilteringStage::Indexing).await?;
 		let dl = if self.highlighting {
-			self.index_with_offsets(&nid, &tx, id.doc_id(), tokens).await?
+			self.index_with_offsets(&nid, &tx, doc_id, tokens).await?
 		} else {
-			self.index_without_offsets(&nid, &tx, id.doc_id(), tokens).await?
+			self.index_without_offsets(&nid, &tx, doc_id, tokens).await?
 		};
 		{
 			// Set the doc length
-			let key = self.ikb.new_dl(id.doc_id());
+			let key = self.ikb.new_dl(doc_id);
 			tx.set_key(&key, &dl).await?;
 		}
 		{
 			// Increase the doc count and total doc length
-			let key = self.ikb.new_dc_with_id(id.doc_id(), ctx.node_id(), Uuid::now_v7());
+			let key = self.ikb.new_dc_with_id(doc_id, ctx.node_id(), Uuid::now_v7());
 			let dcl = DocLengthAndCount {
 				total_docs_length: dl as i128,
 				doc_count: 1,
@@ -1095,8 +1088,9 @@ impl MatchesHitsIterator for FullTextHitsIterator {
 	/// This method retrieves the next document ID from the bitmap and resolves
 	/// it to a Thing. It returns None when there are no more hits.
 	async fn next(&mut self, tx: &Transaction) -> Result<Option<(RecordId, DocId)>> {
+		let docids = TableDocIds::new(self.ikb.ns(), self.ikb.db(), self.ikb.table().clone());
 		for doc_id in self.iter.by_ref() {
-			if let Some(key) = SeqDocIds::get_id(&self.ikb, tx, doc_id).await? {
+			if let Some(key) = docids.get_record_id(tx, doc_id).await? {
 				let rid = RecordId {
 					table: self.ikb.table().clone(),
 					key,

@@ -20,7 +20,7 @@ use crate::exec::permission::{
 };
 use crate::expr::{Cond, FlowResultExt as _};
 use crate::idx::IndexKeyBase;
-use crate::idx::seqdocids::DocId;
+use crate::idx::docids::DocId;
 use crate::idx::trees::diskann::cache::DiskAnnCache;
 use crate::idx::trees::diskann::docs::DiskAnnDocs;
 use crate::idx::trees::diskann::index::DiskAnnContext;
