@@ -38,6 +38,10 @@ pub(super) struct Tree {
 	pub(super) all_and: bool,
 	/// Does a group contain only AND relations?
 	pub(super) all_and_groups: HashMap<GroupRef, bool>,
+	/// Is there at least one AND operator in the condition?
+	/// (`all_and_groups` cannot answer this: a group is flagged `false` as
+	/// soon as an OR is seen, whether or not an AND is nested below it.)
+	pub(super) has_and: bool,
 }
 
 impl Tree {
@@ -65,6 +69,7 @@ impl Tree {
 				&& b.leaf_nodes_with_index_count == b.leaf_nodes_count,
 			all_and: b.all_and.unwrap_or(true),
 			all_and_groups: b.all_and_groups,
+			has_and: b.has_and,
 		})
 	}
 }
@@ -88,6 +93,7 @@ struct TreeBuilder<'a> {
 	leaf_nodes_with_index_count: usize,
 	all_and: Option<bool>,
 	all_and_groups: HashMap<GroupRef, bool>,
+	has_and: bool,
 	/// Set when planning encounters an idiom that resolves to a field whose
 	/// SELECT permission is not `Full`. Used to disable index fast paths
 	/// (in particular the count-only `Iterate Index Count` and dedicated
@@ -132,6 +138,7 @@ impl<'a> TreeBuilder<'a> {
 			knn_condition: None,
 			all_and: None,
 			all_and_groups: Default::default(),
+			has_and: false,
 			leaf_nodes_count: 0,
 			leaf_nodes_with_index_count: 0,
 			cond_touches_restricted_field: false,
@@ -520,6 +527,7 @@ impl<'a> TreeBuilder<'a> {
 				self.all_and_groups.entry(gr).and_modify(|b| *b = false).or_insert(false);
 			}
 			BinaryOperator::And => {
+				self.has_and = true;
 				if self.all_and.is_none() {
 					self.all_and = Some(true);
 				}
