@@ -9,7 +9,7 @@ use std::cmp::PartialEq;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::ops::{Deref, Sub};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use ahash::{AHasher, HashSet};
 use anyhow::{Result, ensure};
@@ -423,45 +423,65 @@ impl Vector {
 		}
 	}
 
-	#[inline]
-	fn cosine_distance_f64(a: &Array1<f64>, b: &Array1<f64>) -> f64 {
-		let dot_product = a.dot(b);
-		let norm_a = (a * a).sum().sqrt();
-		let norm_b = (b * b).sum().sqrt();
-		1.0 - dot_product / (norm_a * norm_b)
+	/// Dot product of two vectors, returned as `f64`.
+	///
+	/// The per-type primitives mirror those used by [`Self::cosine_distance`]:
+	/// the f32/f64 arms use ndarray's (potentially auto-vectorised) `dot`, while
+	/// the remaining types use the generic scalar [`Self::dot_product`]. Keeping
+	/// these identical is what makes a cached-norm cosine bit-for-bit equal to
+	/// the direct computation. Returns `NaN` on an element-type mismatch, which
+	/// cannot occur within a single index (both operands share its vector type).
+	pub(super) fn dot(&self, other: &Self) -> f64 {
+		match (self, other) {
+			(Self::F64(a), Self::F64(b)) => a.dot(b),
+			(Self::F32(a), Self::F32(b)) => a.dot(b) as f64,
+			(Self::F16(a), Self::F16(b)) => Self::dot_product(a, b),
+			(Self::I64(a), Self::I64(b)) => Self::dot_product(a, b),
+			(Self::I32(a), Self::I32(b)) => Self::dot_product(a, b),
+			(Self::I16(a), Self::I16(b)) => Self::dot_product(a, b),
+			(Self::I8(a), Self::I8(b)) => Self::dot_product(a, b),
+			(Self::U8(a), Self::U8(b)) => Self::dot_product(a, b),
+			_ => f64::NAN,
+		}
 	}
 
-	#[inline]
-	fn cosine_distance_f32(a: &Array1<f32>, b: &Array1<f32>) -> f64 {
-		let dot_product = a.dot(b) as f64;
-		let norm_a = ((a * a).sum() as f64).sqrt();
-		let norm_b = ((b * b).sum() as f64).sqrt();
-		1.0 - dot_product / (norm_a * norm_b)
-	}
-
-	#[inline]
-	fn cosine_dist<T>(a: &Array1<T>, b: &Array1<T>) -> f64
-	where
-		T: ToFloat,
-	{
-		let dot_product = Self::dot_product(a, b);
-		let norm_a = Self::magnitude(a);
-		let norm_b = Self::magnitude(b);
-		1.0 - dot_product / (norm_a * norm_b)
+	/// L2 (Euclidean) norm of the vector, returned as `f64`.
+	///
+	/// Mirrors the per-type magnitude computation previously inlined in cosine
+	/// distance, so a norm computed once and cached is bit-identical to one
+	/// recomputed on every call.
+	pub(super) fn l2_norm(&self) -> f64 {
+		match self {
+			Self::F64(a) => (a * a).sum().sqrt(),
+			Self::F32(a) => ((a * a).sum() as f64).sqrt(),
+			Self::F16(a) => Self::magnitude(a),
+			Self::I64(a) => Self::magnitude(a),
+			Self::I32(a) => Self::magnitude(a),
+			Self::I16(a) => Self::magnitude(a),
+			Self::I8(a) => Self::magnitude(a),
+			Self::U8(a) => Self::magnitude(a),
+		}
 	}
 
 	fn cosine_distance(&self, other: &Self) -> f64 {
-		match (self, other) {
-			(Self::F64(a), Self::F64(b)) => Self::cosine_distance_f64(a, b),
-			(Self::F16(a), Self::F16(b)) => Self::cosine_dist(a, b),
-			(Self::F32(a), Self::F32(b)) => Self::cosine_distance_f32(a, b),
-			(Self::I64(a), Self::I64(b)) => Self::cosine_dist(a, b),
-			(Self::I32(a), Self::I32(b)) => Self::cosine_dist(a, b),
-			(Self::I16(a), Self::I16(b)) => Self::cosine_dist(a, b),
-			(Self::I8(a), Self::I8(b)) => Self::cosine_dist(a, b),
-			(Self::U8(a), Self::U8(b)) => Self::cosine_dist(a, b),
-			_ => f64::INFINITY,
+		// A type mismatch cannot occur for a single index but is preserved as
+		// `INFINITY` to keep behaviour identical to the previous match arms.
+		if std::mem::discriminant(self) != std::mem::discriminant(other) {
+			return f64::INFINITY;
 		}
+		1.0 - self.dot(other) / (self.l2_norm() * other.l2_norm())
+	}
+
+	/// Cosine distance using pre-computed L2 norms for both operands.
+	///
+	/// Identical arithmetic to [`Self::cosine_distance`], but the caller supplies
+	/// the (typically cached) magnitudes instead of recomputing them, which
+	/// removes two of the three sum-of-products passes per evaluation.
+	fn cosine_distance_with_norms(&self, other: &Self, self_norm: f64, other_norm: f64) -> f64 {
+		if std::mem::discriminant(self) != std::mem::discriminant(other) {
+			return f64::INFINITY;
+		}
+		1.0 - self.dot(other) / (self_norm * other_norm)
 	}
 
 	fn cosine_normalized_distance(&self, other: &Self) -> f64 {
@@ -727,6 +747,18 @@ impl Vector {
 	}
 }
 
+/// A [`Vector`] together with derived quantities that are expensive to recompute
+/// on every distance evaluation. A shared vector is immutable once created, so
+/// these caches can never go stale.
+#[derive(Debug)]
+struct VectorEntry {
+	/// The underlying vector data.
+	vector: Vector,
+	/// Cached L2 norm, populated on first use by [`SharedVector::norm`]. Only the
+	/// cosine distance reads it, so non-cosine indexes never pay to compute it.
+	norm: OnceLock<f64>,
+}
+
 /// For vectors, as we want to support very large vectors, we want to avoid copy
 /// or clone. So the requirement is multiple ownership but not thread safety.
 /// However, because we are running in an async context, and because we are
@@ -735,12 +767,19 @@ impl Vector {
 /// As computing the hash for a large vector is costly, this structures also
 /// caches the hashcode to avoid recomputing it.
 #[derive(Debug, Clone)]
-pub struct SharedVector(Arc<Vector>, u64);
+pub struct SharedVector(Arc<VectorEntry>, u64);
 impl From<Vector> for SharedVector {
 	fn from(v: Vector) -> Self {
 		let mut h = AHasher::default();
 		v.hash(&mut h);
-		Self(Arc::new(v), h.finish())
+		let hash = h.finish();
+		Self(
+			Arc::new(VectorEntry {
+				vector: v,
+				norm: OnceLock::new(),
+			}),
+			hash,
+		)
 	}
 }
 
@@ -748,7 +787,7 @@ impl Deref for SharedVector {
 	type Target = Vector;
 
 	fn deref(&self) -> &Self::Target {
-		&self.0
+		&self.0.vector
 	}
 }
 
@@ -760,15 +799,29 @@ impl Hash for SharedVector {
 
 impl PartialEq for SharedVector {
 	fn eq(&self, other: &Self) -> bool {
-		self.1 == other.1 && self.0 == other.0
+		// The cached norm is derived from the vector, so it is excluded here
+		// (and `OnceLock` is not `PartialEq` regardless).
+		self.1 == other.1 && self.0.vector == other.0.vector
 	}
 }
 impl Eq for SharedVector {}
 
 impl SharedVector {
 	pub(super) fn mem_size(&self) -> usize {
-		// SharedVector stack size + Vector heap size + Arc heap overhead
-		std::mem::size_of::<Self>() + self.0.mem_size() + 16
+		// SharedVector stack size + Vector heap size + cached-norm cell + Arc heap overhead
+		std::mem::size_of::<Self>()
+			+ self.0.vector.mem_size()
+			+ std::mem::size_of::<OnceLock<f64>>()
+			+ 16
+	}
+
+	/// Returns the vector's L2 norm, computing and caching it on first access.
+	///
+	/// Used by the cosine distance so a stored vector's magnitude is computed
+	/// once and then reused across every comparison for as long as the vector
+	/// stays resident in the index cache.
+	pub(super) fn norm(&self) -> f64 {
+		*self.0.norm.get_or_init(|| self.0.vector.l2_norm())
 	}
 }
 
@@ -814,7 +867,7 @@ impl Hash for Vector {
 #[cfg(test)]
 impl SharedVector {
 	pub(crate) fn clone_vector(&self) -> Vector {
-		self.0.as_ref().clone()
+		self.0.vector.clone()
 	}
 }
 
@@ -993,6 +1046,21 @@ impl Distance {
 			Distance::Pearson => a.pearson_similarity(b),
 		}
 	}
+
+	/// Distance between two shared vectors, reusing their cached L2 norms for the
+	/// metrics that need them (currently only [`Distance::Cosine`]). Every other
+	/// metric delegates to [`Self::calculate`] and is bit-for-bit unchanged.
+	///
+	/// This is the entry point for the HNSW hot path: because both the stored and
+	/// query vectors are [`SharedVector`]s, each magnitude is computed at most
+	/// once and then reused across the whole traversal, turning cosine from three
+	/// sum-of-products passes into one.
+	pub(super) fn calculate_shared(&self, a: &SharedVector, b: &SharedVector) -> f64 {
+		match self {
+			Distance::Cosine => a.cosine_distance_with_norms(b, a.norm(), b.norm()),
+			_ => self.calculate(a, b),
+		}
+	}
 }
 
 #[cfg(test)]
@@ -1061,6 +1129,8 @@ mod tests {
 		let v1: SharedVector = Vector::try_from_vector(t, &v1).unwrap().into();
 		let v2: SharedVector = Vector::try_from_vector(t, &v2).unwrap().into();
 		assert_eq!(dist.calculate(&v1, &v2), res);
+		// The cached-norm path must return a bit-identical result.
+		assert_eq!(dist.calculate_shared(&v1, &v2), res);
 	}
 
 	fn test_distance_collection(dist: &Distance, size: usize, dim: usize) {
@@ -1081,6 +1151,13 @@ mod tests {
 				let v1 = new_random_vec(&mut rng, vt, dim, &r#gen);
 				let v2 = new_random_vec(&mut rng, vt, dim, &r#gen);
 				let d = dist.calculate(&v1, &v2);
+				// The cached-norm path must be bit-identical to the direct one
+				// for every metric and vector type.
+				assert_eq!(
+					d,
+					dist.calculate_shared(&v1, &v2),
+					"cached-norm mismatch - vt: {vt} - v1: {v1:?} - v2: {v2:?}"
+				);
 				assert!(
 					d.is_finite() && !d.is_nan(),
 					"i: {i} - vt: {vt} - v1: {v1:?} - v2: {v2:?}"
@@ -1106,6 +1183,18 @@ mod tests {
 	fn test_distance_cosine() {
 		test_distance_collection(&Distance::Cosine, 100, 1536);
 		test_distance(&Distance::Cosine, &[1.0, 2.0, 3.0], &[2.0, 3.0, 4.0], 0.007416666029069652);
+	}
+
+	#[test]
+	fn test_shared_vector_norm_is_cached_and_correct() {
+		// 3-4-5 right triangle: the L2 norm of [3, 4] is exactly 5.
+		let nums: Vec<Number> = vec![3.0.into(), 4.0.into()];
+		let v: SharedVector = Vector::try_from_vector(VectorType::F64, &nums).unwrap().into();
+		// The lazily-cached norm matches the direct computation...
+		assert_eq!(v.l2_norm(), 5.0);
+		assert_eq!(v.norm(), 5.0);
+		// ...and stays stable when served from the cache on subsequent calls.
+		assert_eq!(v.norm(), 5.0);
 	}
 
 	#[test]

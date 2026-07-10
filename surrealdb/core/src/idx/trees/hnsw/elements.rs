@@ -126,7 +126,7 @@ impl HnswElements {
 
 	/// Computes the distance between two vectors using the configured distance metric.
 	pub(super) fn distance(&self, a: &SharedVector, b: &SharedVector) -> f64 {
-		self.dist.calculate(a, b)
+		self.dist.calculate_shared(a, b)
 	}
 
 	/// Computes the distance between a query vector and an element's stored vector.
@@ -136,7 +136,7 @@ impl HnswElements {
 		q: &SharedVector,
 		e_id: &ElementId,
 	) -> Result<Option<f64>> {
-		Ok(self.get_vector(tx, e_id).await?.map(|r| self.dist.calculate(&r, q)))
+		Ok(self.get_vector(tx, e_id).await?.map(|r| self.dist.calculate_shared(&r, q)))
 	}
 
 	/// Removes an element's vector from both the cache and the key-value store.
