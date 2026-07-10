@@ -8,6 +8,7 @@
 
 use std::sync::Arc;
 
+use surrealdb_kvs::TransactionType::{Read, Write};
 use tokio_util::sync::CancellationToken;
 use web_time::{Duration, SystemTime};
 
@@ -17,7 +18,6 @@ use crate::key::root::rc::{ReclaimKey, ReclaimPrefix, ReclaimState};
 use crate::key::{KVKeyDecode, KVRange, KVValue, KeyRange};
 use crate::kvs::Datastore;
 use crate::kvs::LockType::Optimistic;
-use crate::kvs::TransactionType::{Read, Write};
 
 async fn mem_ds() -> Arc<Datastore> {
 	Arc::new(

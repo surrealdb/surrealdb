@@ -1,0 +1,23 @@
+[package]
+name = "surrealdb-kvs-indxdb"
+publish = true
+readme = "README.md"
+documentation = "https://docs.rs/surrealdb-kvs-indxdb/"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+indxdb = { workspace = true }
+surrealdb-kvs = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,4 +1,5 @@
-use std::any::{Any, TypeId};
+#[cfg(feature = "kv-tikv")]
+use std::any::TypeId;
 use std::borrow::Cow;
 #[cfg(not(target_family = "wasm"))]
 use std::collections::HashMap;
@@ -22,6 +23,8 @@ use bytes::{Bytes, BytesMut};
 use futures::{Future, Stream};
 use rand::Rng;
 use reblessive::TreeStack;
+use surrealdb_kvs::TransactionType;
+use surrealdb_kvs::TransactionType::*;
 use surrealdb_types::{AuthError, Error as TypesError, SurrealValue, object};
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
@@ -31,7 +34,6 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, instrument, trace, warn};
 use uuid::Uuid;
 
-use super::api::{BoxFut, Transactable};
 use super::tr::Transactor;
 use super::tx::Transaction;
 use super::version::MajorVersion;
@@ -76,19 +78,16 @@ use crate::key::root::ic::{IndexCompactionKey, IndexCompactionPrefix};
 use crate::key::root::rc::{Expunge, ReclaimKey, ReclaimKind, ReclaimPrefix, ReclaimState};
 use crate::key::{KVKeyDecode, KVRange, KVValue, Key, KeyRange};
 use crate::kvs::LockType::*;
-use crate::kvs::TransactionType::*;
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::clock::SystemClock;
-use crate::kvs::ds::requirements::{
-	TransactionBuilderFactoryRequirements, TransactionBuilderRequirements,
-};
+use crate::kvs::ds::requirements::TransactionBuilderFactoryRequirements;
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
 use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 #[cfg(test)]
 use crate::kvs::testing::{RetryableConflictSite, maybe_inject_retryable_conflict};
-use crate::kvs::{LockType, NORMAL_BATCH_SIZE, TransactionType, is_retryable_transaction_conflict};
+use crate::kvs::{LockType, NORMAL_BATCH_SIZE, is_retryable_transaction_conflict};
 use crate::lq::LiveQueryRouter;
 use crate::observe::{ExecutionObserver, NoopObserver};
 use crate::sql::Ast;
@@ -278,23 +277,7 @@ pub struct Datastore {
 	observer: Arc<dyn ExecutionObserver>,
 }
 
-/// Represents a collection of metrics for a specific datastore flavor.
-///
-/// This structure is used to expose datastore-specific metrics to the telemetry system.
-pub struct Metrics {
-	/// The name of the metrics group (e.g., "surrealdb.rocksdb").
-	pub name: &'static str,
-	/// A list of u64-based metrics.
-	pub u64_metrics: Vec<Metric>,
-}
-
-/// Represents a single metric with a name and description.
-pub struct Metric {
-	/// The name of the metric.
-	pub name: &'static str,
-	/// A human-readable description of the metric.
-	pub description: &'static str,
-}
+pub use surrealdb_kvs::{Metric, Metrics, TransactionBuilder};
 
 #[derive(Clone)]
 pub(crate) struct TransactionFactory {
@@ -349,11 +332,6 @@ impl TransactionFactory {
 		lock: LockType,
 		sequences: Sequences,
 	) -> Result<Transaction> {
-		// Specify if the transaction is writeable
-		let write = match write {
-			Read => false,
-			Write => true,
-		};
 		// Specify if the transaction is lockable
 		let lock = match lock {
 			Pessimistic => true,
@@ -381,62 +359,6 @@ impl TransactionFactory {
 	/// Collects a specific u64 metric by name if supported by the datastore flavor.
 	fn collect_u64_metric(&self, metric: &str) -> Option<u64> {
 		self.builder.collect_u64_metric(metric)
-	}
-}
-
-/// Abstraction over storage backends for creating and managing transactions.
-///
-/// This trait allows decoupling `Datastore` from concrete KV engines (memory,
-/// RocksDB, TiKV, SurrealKV, SurrealDS, etc.). Implementors translate the
-/// generic transaction parameters into a backend-specific transaction and
-/// report whether the transaction is considered "local" (used internally to
-/// enable some optimizations).
-///
-/// This was introduced to make the server more composable/embeddable. External
-/// crates can implement `TransactionBuilder` to plug in custom backends while
-/// reusing the rest of SurrealDB.
-pub trait TransactionBuilder: TransactionBuilderRequirements {
-	/// Create a new backend transaction.
-	///
-	/// - `write`: whether the transaction is writable (Write vs Read)
-	/// - `lock`: whether pessimistic locking is requested
-	///
-	/// Returns the backend transaction object and a flag indicating if the
-	/// transaction is local to the process (true) or requires external resources
-	/// (false).
-	fn new_transaction(
-		&self,
-		write: bool,
-		lock: bool,
-	) -> BoxFut<'_, Result<(Box<dyn Transactable>, bool)>>;
-
-	/// Perform any backend-specific shutdown/cleanup.
-	fn shutdown(&self) -> BoxFut<'_, Result<()>>;
-
-	/// Registers metrics for the current datastore flavor if supported.
-	///
-	/// This will return a list of available metrics and their descriptions.
-	fn register_metrics(&self) -> Option<Metrics>;
-
-	/// Collects a specific u64 metric by name if supported by the datastore flavor.
-	///
-	/// - `metric`: The name of the metric to collect.
-	fn collect_u64_metric(&self, metric: &str) -> Option<u64>;
-
-	/// Returns an immutable backend-specific extension handle.
-	///
-	/// Backends expose only stable, shareable handles through this hook. The
-	/// default implementation keeps community datastores free of extension
-	/// state.
-	///
-	/// This is the extension point for backend-specific operations that
-	/// don't fit the generic transaction interface: e.g. the TiKV backend
-	/// returns its [`crate::kvs::tikv::TikvOpsHandle`] (matched on
-	/// `TypeId`) so the engine can offer MVCC-GC / lock-cleanup /
-	/// `unsafe_destroy_range` to operators without polluting this trait
-	/// with TiKV-only signatures every other backend would have to no-op.
-	fn extension(&self, _: TypeId) -> Option<Arc<dyn Any + Send + Sync>> {
-		None
 	}
 }
 
@@ -536,13 +458,7 @@ pub trait TransactionBuilderFactory: TransactionBuilderFactoryRequirements {
 }
 
 pub mod requirements {
-	use std::fmt::Display;
-
-	#[cfg(target_family = "wasm")]
-	pub trait TransactionBuilderRequirements: Display {}
-
-	#[cfg(not(target_family = "wasm"))]
-	pub trait TransactionBuilderRequirements: Display + Send + Sync + 'static {}
+	pub use surrealdb_kvs::builder::requirements::TransactionBuilderRequirements;
 
 	#[cfg(target_family = "wasm")]
 	pub trait TransactionBuilderFactoryRequirements {}
@@ -551,321 +467,56 @@ pub mod requirements {
 	pub trait TransactionBuilderFactoryRequirements: Send + Sync + 'static {}
 }
 
-pub enum DatastoreFlavor {
-	#[cfg(feature = "kv-mem")]
-	Mem(super::mem::Datastore),
-	#[cfg(feature = "kv-rocksdb")]
-	RocksDB(super::rocksdb::Datastore),
-	#[cfg(feature = "kv-indxdb")]
-	IndxDB(super::indxdb::Datastore),
-	#[cfg(feature = "kv-tikv")]
-	TiKV(super::tikv::Datastore),
-	#[cfg(feature = "kv-surrealkv")]
-	SurrealKV(super::surrealkv::Datastore),
-}
-
 impl TransactionBuilderFactoryRequirements for CommunityComposer {}
 
 impl TransactionBuilderFactory for CommunityComposer {
 	type RouterState = ();
 
-	#[allow(unused_variables)]
 	async fn new_transaction_builder(
 		&self,
 		path: &str,
-		_canceller: CancellationToken,
+		canceller: CancellationToken,
 		config: ConfigMap,
 	) -> Result<TransactionBuilderParts<Self::RouterState>> {
-		// Extract query parameters from the path before scheme extraction
-		let (raw_path, config_string) = match path.split_once('?') {
-			Some((p, q)) => (p, Some(q)),
-			None => (path, None),
-		};
-
-		let config = if let Some(config_string) = config_string {
-			config.join(
-				ConfigMap::from_config_string(config_string).map_keys(|x| format!("datastore_{x}")),
-			)
-		} else {
-			config
-		};
-
-		// Extract the scheme and path components
-		let (flavour, path) = match raw_path.split_once("://").or_else(|| raw_path.split_once(':'))
-		{
-			None if raw_path == "memory" => ("memory", ""),
-			// Treat "mem" as an alias for "memory"
-			None if raw_path == "mem" => ("memory", ""),
-			Some(("mem", path)) => ("memory", path),
-			Some((flavour, path)) => (flavour, path),
-			// Validated already in the CLI, should never happen
-			_ => bail!(Error::Unreachable("Provide a valid database path parameter".to_owned())),
-		};
-
-		let path = if path.starts_with("/") {
-			// if absolute, remove all slashes except one
-			let normalised = format!("/{}", path.trim_start_matches("/"));
-			info!(target: TARGET, "Starting kvs store at absolute path {flavour}:{normalised}");
-			normalised
-		} else if path.is_empty() {
-			info!(target: TARGET, "Starting kvs store in memory");
-			"".to_string()
-		} else {
-			info!(target: TARGET, "Starting kvs store at relative path {flavour}://{path}");
-			path.to_string()
-		};
-		// Initiate the desired datastore
-		match (flavour, path) {
-			// Initiate an in-memory datastore
-			(flavour @ "memory", path) => {
-				#[cfg(feature = "kv-mem")]
-				{
-					// Create a new blocking threadpool
-					super::threadpool::initialise();
-
-					// Persist path comes from the URL path; do not inject an empty
-					// string or `parse_key_with` logs a spurious DATASTORE_PERSIST warning.
-					let config = if path.is_empty() {
-						config
-					} else {
-						config.with_key_value("datastore_persist", path)
-					};
-					// Parse SurrealMX configuration from URL path and query parameters
-					let config = config.load();
-					// Initialise the storage engine
-					let v = super::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem)?;
-					info!(target: TARGET, "Started kvs store in {flavour}");
-					Ok(TransactionBuilderParts::without_router_state(Box::<DatastoreFlavor>::new(
-						v,
-					)))
-				}
-				#[cfg(not(feature = "kv-mem"))]
-				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
+		cfg_select! {
+			any(
+				feature = "kv-mem",
+				feature = "kv-rocksdb",
+				feature = "kv-indxdb",
+				feature = "kv-tikv",
+				feature = "kv-surrealkv",
+			) => {
+				let builder =
+					surrealdb_kvs_any::new_transaction_builder(path, canceller, config).await?;
+				Ok(TransactionBuilderParts::without_router_state(builder))
 			}
-			// The `file:` scheme has been removed. Catch it here so users
-			// with legacy paths get a targeted message instead of the
-			// generic fallback below.
-			("file", _) => {
+			_ => {
+				let _ = path;
+				let _ = canceller;
+				let _ = config;
 				bail!(Error::Kvs(crate::kvs::Error::Datastore(
-					"The `file://` scheme is no longer supported; use `rocksdb://` or `surrealkv://` instead"
-						.into()
-				)));
-			}
-			// Initiate a RocksDB datastore
-			(flavour @ "rocksdb", path) => {
-				#[cfg(feature = "kv-rocksdb")]
-				{
-					// Create a new blocking threadpool
-					super::threadpool::initialise();
-					// Parse RocksDB-specific configuration from query parameters
-					let config = config.load();
-					// Initialise the storage engine
-					let v = super::rocksdb::Datastore::new(&path, config)
-						.await
-						.map(DatastoreFlavor::RocksDB)?;
-					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok(TransactionBuilderParts::without_router_state(Box::<DatastoreFlavor>::new(
-						v,
-					)))
-				}
-				#[cfg(not(feature = "kv-rocksdb"))]
-				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
-			}
-			// Initiate a SurrealKV database
-			(flavour @ "surrealkv", path) => {
-				#[cfg(feature = "kv-surrealkv")]
-				{
-					// Create a new blocking threadpool
-					super::threadpool::initialise();
-					// Parse SurrealKV-specific configuration from query parameters
-					let config = config.load();
-					// Initialise the storage engine
-					let v = super::surrealkv::Datastore::new(&path, config)
-						.await
-						.map(DatastoreFlavor::SurrealKV)?;
-					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok(TransactionBuilderParts::without_router_state(Box::<DatastoreFlavor>::new(
-						v,
-					)))
-				}
-				#[cfg(not(feature = "kv-surrealkv"))]
-				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
-			}
-			// Initiate an IndxDB database
-			(flavour @ "indxdb", path) => {
-				#[cfg(feature = "kv-indxdb")]
-				{
-					let v =
-						super::indxdb::Datastore::new(&path).await.map(DatastoreFlavor::IndxDB)?;
-					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok(TransactionBuilderParts::without_router_state(Box::<DatastoreFlavor>::new(
-						v,
-					)))
-				}
-				#[cfg(not(feature = "kv-indxdb"))]
-				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
-			}
-			// Initiate a TiKV datastore
-			(flavour @ "tikv", path) => {
-				#[cfg(feature = "kv-tikv")]
-				{
-					// Parse TiKV-specific configuration from env vars
-					// (SURREAL_TIKV_*) and query parameters.
-					let tikv_config = config.load();
-					let v = super::tikv::Datastore::new(&path, tikv_config)
-						.await
-						.map(DatastoreFlavor::TiKV)?;
-					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok(TransactionBuilderParts::without_router_state(Box::<DatastoreFlavor>::new(
-						v,
-					)))
-				}
-				#[cfg(not(feature = "kv-tikv"))]
-				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
-			}
-			// The datastore path is not valid
-			(flavour, path) => {
-				info!(target: TARGET, "Unable to load the specified datastore {flavour}{path}");
-				bail!(Error::Kvs(crate::kvs::Error::Datastore(
-					"Unable to load the specified datastore".into()
+					"No storage engine is enabled in this build of SurrealDB".to_owned()
 				)))
 			}
 		}
 	}
 
 	fn path_valid(v: &str) -> Result<String> {
-		// Strip query parameters before validating the scheme
-		let scheme_part = v.split_once('?').map(|(s, _)| s).unwrap_or(v);
-		match scheme_part {
-			"memory" => Ok(v.to_string()),
-			"mem" => Ok(v.to_string()),
-			v_s if v_s.starts_with("file:") => Ok(v.to_string()),
-			v_s if v_s.starts_with("rocksdb:") => Ok(v.to_string()),
-			v_s if v_s.starts_with("surrealkv:") => Ok(v.to_string()),
-			v_s if v_s.starts_with("mem:") => Ok(v.to_string()),
-			v_s if v_s.starts_with("tikv:") => Ok(v.to_string()),
-			_ => bail!("Provide a valid database path parameter"),
-		}
-	}
-}
-
-impl TransactionBuilderRequirements for DatastoreFlavor {}
-
-impl TransactionBuilder for DatastoreFlavor {
-	#[allow(
-		unreachable_code,
-		unreachable_patterns,
-		unused_variables,
-		reason = "Some variables are unused when no backends are enabled."
-	)]
-	fn new_transaction(
-		&self,
-		write: bool,
-		lock: bool,
-	) -> BoxFut<'_, Result<(Box<dyn Transactable>, bool)>> {
-		Box::pin(async move {
-			Ok(match self {
-				#[cfg(feature = "kv-mem")]
-				Self::Mem(v) => {
-					let tx = v.transaction(write, lock).await?;
-					(tx, true)
-				}
-				#[cfg(feature = "kv-rocksdb")]
-				Self::RocksDB(v) => {
-					let tx = v.transaction(write, lock).await?;
-					(tx, true)
-				}
-				#[cfg(feature = "kv-indxdb")]
-				Self::IndxDB(v) => {
-					let tx = v.transaction(write, lock).await?;
-					(tx, true)
-				}
-				#[cfg(feature = "kv-tikv")]
-				Self::TiKV(v) => {
-					let tx = v.transaction(write, lock).await?;
-					(tx, false)
-				}
-				#[cfg(feature = "kv-surrealkv")]
-				Self::SurrealKV(v) => {
-					let tx = v.transaction(write, lock).await?;
-					(tx, true)
-				}
-				_ => unreachable!(),
-			})
-		})
-	}
-
-	/// Registers metrics for the current datastore flavor if supported.
-	fn register_metrics(&self) -> Option<Metrics> {
-		match self {
-			#[cfg(feature = "kv-rocksdb")]
-			DatastoreFlavor::RocksDB(v) => Some(v.register_metrics()),
-			#[allow(unreachable_patterns)]
-			_ => None,
-		}
-	}
-
-	/// Collects a specific u64 metric by name if supported by the datastore flavor.
-	// Allow unused variable when kv-rocksdb feature is not enabled
-	#[allow(unused_variables)]
-	fn collect_u64_metric(&self, metric: &str) -> Option<u64> {
-		match self {
-			#[cfg(feature = "kv-rocksdb")]
-			DatastoreFlavor::RocksDB(v) => v.collect_u64_metric(metric),
-			#[allow(unreachable_patterns)]
-			_ => None,
-		}
-	}
-
-	fn shutdown(&self) -> BoxFut<'_, Result<()>> {
-		Box::pin(async move {
-			match self {
-				#[cfg(feature = "kv-mem")]
-				Self::Mem(v) => Ok(v.shutdown().await?),
-				#[cfg(feature = "kv-rocksdb")]
-				Self::RocksDB(v) => Ok(v.shutdown().await?),
-				#[cfg(feature = "kv-indxdb")]
-				Self::IndxDB(v) => Ok(v.shutdown().await?),
-				#[cfg(feature = "kv-tikv")]
-				Self::TiKV(v) => Ok(v.shutdown().await?),
-				#[cfg(feature = "kv-surrealkv")]
-				Self::SurrealKV(v) => Ok(v.shutdown().await?),
-				#[allow(unreachable_patterns)]
-				_ => unreachable!(),
+		cfg_select! {
+			any(
+				feature = "kv-mem",
+				feature = "kv-rocksdb",
+				feature = "kv-indxdb",
+				feature = "kv-tikv",
+				feature = "kv-surrealkv",
+			) => {
+			surrealdb_kvs_any::path_valid(v)
+				.map_err(|_| anyhow::anyhow!("Provide a valid database path parameter"))
 			}
-		})
-	}
-
-	#[allow(
-		unused_variables,
-		reason = "type_id is only consumed when a backend feature is enabled"
-	)]
-	fn extension(&self, type_id: TypeId) -> Option<Arc<dyn Any + Send + Sync>> {
-		match self {
-			#[cfg(feature = "kv-tikv")]
-			Self::TiKV(v) if type_id == TypeId::of::<super::tikv::TikvOpsHandle>() => Some(v.ops_handle()),
-			#[allow(unreachable_patterns)]
-			_ => None,
-		}
-	}
-}
-
-impl Display for DatastoreFlavor {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		#![allow(unused_variables)]
-		match self {
-			#[cfg(feature = "kv-mem")]
-			Self::Mem(_) => write!(f, "memory"),
-			#[cfg(feature = "kv-rocksdb")]
-			Self::RocksDB(_) => write!(f, "rocksdb"),
-			#[cfg(feature = "kv-indxdb")]
-			Self::IndxDB(_) => write!(f, "indxdb"),
-			#[cfg(feature = "kv-tikv")]
-			Self::TiKV(_) => write!(f, "tikv"),
-			#[cfg(feature = "kv-surrealkv")]
-			Self::SurrealKV(_) => write!(f, "surrealkv"),
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
+			_ => {
+				let _ = v;
+				bail!("No storage engine is enabled in this build of SurrealDB")
+			}
 		}
 	}
 }
@@ -1236,8 +887,8 @@ impl Datastore {
 						target: TARGET,
 						first_key = ?keys.first().map(|k| format!("{:?}", k)),
 						"No version key found but existing data detected in storage. \
-						 This storage contains data from a previous SurrealDB version. \
-						 The server will not start until the data is migrated or removed."
+						This storage contains data from a previous SurrealDB version. \
+						The server will not start until the data is migrated or removed."
 					);
 					MajorVersion::v1()
 				};
@@ -1309,9 +960,9 @@ impl Datastore {
 		// Create the SQL statement
 		let sql = r"
 			DEFINE NAMESPACE $namespace COMMENT 'Default namespace generated by SurrealDB';
-			USE NS $namespace;
-			DEFINE DATABASE $database COMMENT 'Default database generated by SurrealDB';
-			DEFINE CONFIG DEFAULT NAMESPACE $namespace DATABASE $database;
+		USE NS $namespace;
+		DEFINE DATABASE $database COMMENT 'Default database generated by SurrealDB';
+		DEFINE CONFIG DEFAULT NAMESPACE $namespace DATABASE $database;
 		"
 		.to_string();
 
@@ -1355,7 +1006,7 @@ impl Datastore {
 			self.delete_node_with_timeout(NODE_DELETE_TIMEOUT).await,
 		);
 		// Run any storage engine shutdown tasks
-		self.transaction_factory.builder.shutdown().await
+		Ok(self.transaction_factory.builder.shutdown().await?)
 	}
 
 	/// Drop every version of every key in the half-open range `[start, end)`
@@ -1423,12 +1074,12 @@ impl Datastore {
 	/// Resolve the TiKV operational extension handle, if the backend is
 	/// TiKV. Returns `None` for every other flavour.
 	#[cfg(feature = "kv-tikv")]
-	fn tikv_ops(&self) -> Option<Arc<super::tikv::TikvOpsHandle>> {
+	fn tikv_ops(&self) -> Option<Arc<surrealdb_kvs_any::tikv::TikvOpsHandle>> {
 		let ext = self
 			.transaction_factory
 			.builder
-			.extension(TypeId::of::<super::tikv::TikvOpsHandle>())?;
-		ext.downcast::<super::tikv::TikvOpsHandle>().ok()
+			.extension(TypeId::of::<surrealdb_kvs_any::tikv::TikvOpsHandle>())?;
+		ext.downcast::<surrealdb_kvs_any::tikv::TikvOpsHandle>().ok()
 	}
 
 	// --------------------------------------------------
@@ -4699,7 +4350,7 @@ mod test {
 			&ds,
 			&ses,
 			"CREATE person:1 SET name = 'A'; CREATE person:2 SET name = 'B'; \
-			 RELATE person:1->knows->person:2;",
+			RELATE person:1->knows->person:2;",
 		)
 		.await?;
 		// NODETACH (the default) on a node that still has edges errors.
@@ -4750,7 +4401,7 @@ mod test {
 			&ds,
 			&ses,
 			"MATCH (a:person WHERE a.name = 'A') MATCH (b:person WHERE b.name = 'B') \
-			 INSERT (a)-[:knows]->(b)",
+			INSERT (a)-[:knows]->(b)",
 		)
 		.await?;
 		let val = run_gql(
@@ -4828,7 +4479,7 @@ mod test {
 			&ds,
 			&ses,
 			"CREATE person:1 SET name = 'A'; CREATE person:2 SET name = 'B'; \
-			 RELATE person:1->knows->person:2 SET since = 2020;",
+			RELATE person:1->knows->person:2 SET since = 2020;",
 		)
 		.await?;
 		// SET a property on a bound edge.
@@ -4856,8 +4507,8 @@ mod test {
 			&ds,
 			&ses,
 			"CREATE person:1 SET name = 'A', age = 30; CREATE person:2 SET name = 'B'; \
-			 CREATE person:3 SET name = 'C'; RELATE person:1->knows->person:2; \
-			 RELATE person:1->knows->person:3;",
+			CREATE person:3 SET name = 'C'; RELATE person:1->knows->person:2; \
+			RELATE person:1->knows->person:3;",
 		)
 		.await?;
 		// `a` fans out to two rows; SET a.age = 7 must show a consistent AFTER image
@@ -4866,7 +4517,7 @@ mod test {
 			&ds,
 			&ses,
 			"MATCH (a:person)-[:knows]->(b:person) WHERE a.name = 'A' SET a.age = 7 \
-			 RETURN a.age AS age, b.name AS b ORDER BY b",
+			RETURN a.age AS age, b.name AS b ORDER BY b",
 		)
 		.await?;
 		assert_eq!(
@@ -4887,7 +4538,7 @@ mod test {
 			&ds,
 			&ses,
 			"CREATE person:1 SET name = 'A'; CREATE person:2 SET name = 'B'; \
-			 RELATE person:1->knows->person:2 SET since = 2020;",
+			RELATE person:1->knows->person:2 SET since = 2020;",
 		)
 		.await?;
 		// DETACH DELETE on `a` cascades the `k` edge; the §3 fix nulls `k` in the
@@ -4896,7 +4547,7 @@ mod test {
 			&ds,
 			&ses,
 			"MATCH (a:person)-[k:knows]->(b:person) WHERE a.name = 'A' DETACH DELETE a \
-			 RETURN a AS a, k AS k, b.name AS b",
+			RETURN a AS a, k AS k, b.name AS b",
 		)
 		.await?;
 		assert_eq!(
@@ -4921,7 +4572,7 @@ mod test {
 			&ds,
 			&ses,
 			"MATCH (a:person WHERE a.name = 'A') MATCH (b:person WHERE b.name = 'B') \
-			 INSERT (a)<-[:knows]-(b)",
+			INSERT (a)<-[:knows]-(b)",
 		)
 		.await?;
 		let val = run_gql(
@@ -5005,8 +4656,8 @@ mod test {
 			&ds,
 			&ses,
 			"DEFINE TABLE person SCHEMALESS \
-			 PERMISSIONS FOR select FULL, FOR create NONE, FOR update NONE, FOR delete NONE; \
-			 CREATE person:1 SET name = 'A', age = 30;",
+			PERMISSIONS FOR select FULL, FOR create NONE, FOR update NONE, FOR delete NONE; \
+			CREATE person:1 SET name = 'A', age = 30;",
 		)
 		.await?;
 		// A record-scoped session: table PERMISSIONS clauses apply (a role-based
@@ -5042,11 +4693,11 @@ mod test {
 			&ds,
 			&ses,
 			"DEFINE TABLE person SCHEMALESS \
-			 PERMISSIONS FOR select FULL, FOR create FULL, FOR update FULL, FOR delete FULL; \
-			 DEFINE TABLE knows SCHEMALESS \
-			 PERMISSIONS FOR select NONE, FOR create FULL, FOR update FULL, FOR delete FULL; \
-			 CREATE person:1 SET name = 'A'; CREATE person:2 SET name = 'B'; \
-			 RELATE person:1->knows->person:2;",
+			PERMISSIONS FOR select FULL, FOR create FULL, FOR update FULL, FOR delete FULL; \
+			DEFINE TABLE knows SCHEMALESS \
+			PERMISSIONS FOR select NONE, FOR create FULL, FOR update FULL, FOR delete FULL; \
+			CREATE person:1 SET name = 'A'; CREATE person:2 SET name = 'B'; \
+			RELATE person:1->knows->person:2;",
 		)
 		.await?;
 		let rec = Session::for_record(
@@ -5082,7 +4733,7 @@ mod test {
 			&ds,
 			&ses,
 			"CREATE person:1 SET name = 'A', tier = 'bronze'; \
-			 CREATE person:2 SET name = 'B', tier = 'gold';",
+			CREATE person:2 SET name = 'B', tier = 'gold';",
 		)
 		.await?;
 		// A read step after a write re-scans the live (post-write) state in the same
@@ -5092,7 +4743,7 @@ mod test {
 			&ds,
 			&ses,
 			"MATCH (n:person WHERE n.name = 'A') SET n.tier = 'gold' \
-			 MATCH (m:person WHERE m.tier = 'gold') RETURN m.name AS name ORDER BY name",
+			MATCH (m:person WHERE m.tier = 'gold') RETURN m.name AS name ORDER BY name",
 		)
 		.await?;
 		assert_eq!(
@@ -5116,7 +4767,7 @@ mod test {
 			&ds,
 			&ses,
 			"MATCH (n:person WHERE n.name = 'A') DETACH DELETE n \
-			 MATCH (m:person) RETURN m.name AS name ORDER BY name",
+			MATCH (m:person) RETURN m.name AS name ORDER BY name",
 		)
 		.await?;
 		assert_eq!(val, PublicValue::Array(surrealdb_types::array![object! { name: "B" }]));
@@ -5134,7 +4785,7 @@ mod test {
 			&ds,
 			&ses,
 			"INSERT (a:person {name: 'New', age: 20}) \
-			 MATCH (b:person WHERE b.age = a.age) RETURN b.name AS name ORDER BY name",
+			MATCH (b:person WHERE b.age = a.age) RETURN b.name AS name ORDER BY name",
 		)
 		.await?;
 		assert_eq!(
@@ -5162,8 +4813,8 @@ mod test {
 			&ds,
 			&ses,
 			"MATCH (n:person WHERE n.name = 'A') SET n.tier = 'gold' \
-			 OPTIONAL MATCH (m:person WHERE m.tier = 'gold') \
-			 RETURN n.name AS n, m.name AS m",
+					OPTIONAL MATCH (m:person WHERE m.tier = 'gold') \
+					RETURN n.name AS n, m.name AS m",
 		)
 		.await?;
 		assert_eq!(val, PublicValue::Array(surrealdb_types::array![object! { n: "A", m: "A" }]));
@@ -5182,8 +4833,8 @@ mod test {
 			&ds,
 			&ses,
 			"MATCH (a:person WHERE a.name = 'A') INSERT (t:tag {name: 'X'}) \
-			 OPTIONAL MATCH (m:tag) \
-			 RETURN m.name AS m",
+			OPTIONAL MATCH (m:tag) \
+			RETURN m.name AS m",
 		)
 		.await?;
 		assert_eq!(val, PublicValue::Array(surrealdb_types::array![object! { m: "X" }]));
@@ -5221,24 +4872,24 @@ mod test {
 
 	const COUNT_COMPACTION_SQL: &str = "
 		DEFINE TABLE user SCHEMALESS;
-		DEFINE INDEX count_idx ON user COUNT;
-		CREATE user:1 SET name = 'one' RETURN NONE;
-		CREATE user:2 SET name = 'two' RETURN NONE;
+	DEFINE INDEX count_idx ON user COUNT;
+	CREATE user:1 SET name = 'one' RETURN NONE;
+	CREATE user:2 SET name = 'two' RETURN NONE;
 	";
 
 	const FULLTEXT_COMPACTION_SQL: &str = "
 		DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase;
-		DEFINE TABLE doc SCHEMALESS;
-		DEFINE INDEX ft_idx ON doc FIELDS text FULLTEXT ANALYZER simple BM25 HIGHLIGHTS;
-		CREATE doc:1 SET text = 'alpha beta' RETURN NONE;
-		CREATE doc:2 SET text = 'beta gamma' RETURN NONE;
+	DEFINE TABLE doc SCHEMALESS;
+	DEFINE INDEX ft_idx ON doc FIELDS text FULLTEXT ANALYZER simple BM25 HIGHLIGHTS;
+	CREATE doc:1 SET text = 'alpha beta' RETURN NONE;
+	CREATE doc:2 SET text = 'beta gamma' RETURN NONE;
 	";
 
 	const HNSW_COMPACTION_SQL: &str = "
 		DEFINE TABLE vec SCHEMALESS;
-		DEFINE INDEX hnsw_idx ON vec FIELDS vector HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32 EFC 16 M 4;
-		CREATE vec:1 SET vector = [1, 2] RETURN NONE;
-		CREATE vec:2 SET vector = [2, 3] RETURN NONE;
+	DEFINE INDEX hnsw_idx ON vec FIELDS vector HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32 EFC 16 M 4;
+	CREATE vec:1 SET vector = [1, 2] RETURN NONE;
+	CREATE vec:2 SET vector = [2, 3] RETURN NONE;
 	";
 
 	#[tokio::test]
@@ -5570,12 +5221,12 @@ mod test {
 		// Define some resources to refresh the UUIDs
 		let lqid = {
 			let sql = r"
-		DEFINE FIELD test ON test;
-		DEFINE EVENT test ON test WHEN {} THEN {};
-		DEFINE TABLE view AS SELECT * FROM test;
-		DEFINE INDEX test ON test FIELDS test;
-		LIVE SELECT * FROM test;
-	"
+				DEFINE FIELD test ON test;
+			DEFINE EVENT test ON test WHEN {} THEN {};
+			DEFINE TABLE view AS SELECT * FROM test;
+			DEFINE INDEX test ON test FIELDS test;
+			LIVE SELECT * FROM test;
+			"
 			.to_owned();
 			let res = &mut ds.execute(&sql, &ses, None).await?;
 			assert_eq!(res.len(), 5);
@@ -5609,12 +5260,12 @@ mod test {
 		// Remove the defined resources to refresh the UUIDs
 		{
 			let sql = r"
-		REMOVE FIELD test ON test;
-		REMOVE EVENT test ON test;
-		REMOVE TABLE view;
-		REMOVE INDEX test ON test;
-		KILL $lqid;
-	"
+				REMOVE FIELD test ON test;
+			REMOVE EVENT test ON test;
+			REMOVE TABLE view;
+			REMOVE INDEX test ON test;
+			KILL $lqid;
+			"
 			.to_owned();
 			let vars =
 				PublicVariables::from(BTreeMap::from_iter(map! { "lqid".to_string() => lqid }));

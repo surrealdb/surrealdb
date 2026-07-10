@@ -77,7 +77,9 @@ impl GraphQLSchemaCache {
 		datastore: &Arc<Datastore>,
 		session: &Session,
 	) -> Result<Schema, GraphqlError> {
-		use crate::kvs::{LockType, TransactionType};
+		use surrealdb_kvs::TransactionType;
+
+		use crate::kvs::LockType;
 
 		let ns = session.ns.as_ref().ok_or(GraphqlError::UnspecifiedNamespace)?;
 		let db = session.db.as_ref().ok_or(GraphqlError::UnspecifiedDatabase)?;

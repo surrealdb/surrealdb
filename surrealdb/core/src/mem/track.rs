@@ -4,7 +4,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 use std::sync::atomic::{AtomicI64, Ordering};
 
-use crate::mem::registry;
+use common::mem_registry as registry;
 
 static GLOBAL_TOTAL_BYTES: AtomicI64 = AtomicI64::new(0);
 

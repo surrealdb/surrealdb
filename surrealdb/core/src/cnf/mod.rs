@@ -1,11 +1,12 @@
 pub(crate) mod dynamic;
 
-use std::collections::HashMap;
 use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::LazyLock;
 use std::time::Duration;
+
+pub use common::config::{Config, ConfigMap};
 
 use crate::iam::file::extract_allowed_paths;
 use crate::str::ParseBytes;
@@ -25,154 +26,6 @@ pub const PROTECTED_PARAM_NAMES: &[&str] = &["access", "auth", "token", "session
 /// Default capacity for the bounded channel used to deliver live-query
 /// notifications from the datastore to subscribers.
 pub const NOTIFICATIONS_CHANNEL_SIZE: usize = 15_000;
-
-/// A map with a set of configuration values stored as pairs of strings.
-#[derive(Clone, Debug)]
-pub struct ConfigMap {
-	values: HashMap<String, String>,
-}
-
-impl Default for ConfigMap {
-	fn default() -> Self {
-		Self::empty()
-	}
-}
-
-impl ConfigMap {
-	/// Returns an empty map.
-	pub fn empty() -> Self {
-		ConfigMap {
-			values: HashMap::new(),
-		}
-	}
-
-	/// Adds a new key and value into the config map, will overwrite existing values.
-	pub fn with_key_value<K, V>(mut self, key: K, value: V) -> Self
-	where
-		String: From<K>,
-		String: From<V>,
-	{
-		self.values.insert(key.into(), value.into());
-		self
-	}
-
-	/// Creates a config map from all the environment variables prefixed with `SURREAL_`
-	pub fn from_env() -> Self {
-		Self::from_env_prefix("SURREAL_")
-	}
-
-	/// Creates a config map from all the environment variables prefixed with the specific prefix.
-	pub fn from_env_prefix(prefix: &str) -> Self {
-		let mut values = HashMap::new();
-		for (k, v) in std::env::vars() {
-			let Some(x) = k.strip_prefix(prefix) else {
-				continue;
-			};
-
-			let key_name = x.to_lowercase();
-			values.insert(key_name, v);
-		}
-		ConfigMap {
-			values,
-		}
-	}
-
-	/// Map all the keys in the config map with the given closure.
-	pub fn map_keys<F: FnMut(String) -> String>(self, mut f: F) -> Self {
-		Self {
-			values: self.values.into_iter().map(|(k, v)| (f(k), v)).collect(),
-		}
-	}
-
-	/// Creates a config map from all the environment variables
-	pub fn from_config_string(s: &str) -> Self {
-		let values = s
-			.split('&')
-			.filter_map(|x| {
-				let (k, v) = x.split_once('=')?;
-				Some((k.to_lowercase(), v.to_string()))
-			})
-			.collect();
-
-		ConfigMap {
-			values,
-		}
-	}
-
-	/// Join two config maps together prefering the values not in self.
-	pub fn join(mut self, other: ConfigMap) -> Self {
-		for (k, v) in other.values {
-			self.values.insert(k, v);
-		}
-		self
-	}
-
-	/// Load a config type from the map.
-	pub fn load<C: Config>(&self) -> C {
-		let mut def = C::default();
-		def.parse(self);
-		def
-	}
-
-	/// Parse a value out of the map if it exists.
-	///
-	/// If either the key does not exist or the parsing values the value is unaltered.
-	pub fn parse_key<S: FromStr>(&self, key: &str, value: &mut S) -> &Self {
-		self.parse_key_with(key, value, |x| S::from_str(x).ok())
-	}
-
-	pub fn parse_key_option<S: FromStr>(&self, key: &str, value: &mut Option<S>) -> &Self {
-		self.parse_key_with(key, value, |x| S::from_str(x).ok().map(Some))
-	}
-
-	/// Parse a boolean out of the map if it exists.
-	///
-	/// If either the key does not exist or the parsing values the value is unaltered.
-	pub fn parse_key_bool(&self, key: &str, value: &mut bool) -> &Self {
-		self.parse_key_with(key, value, |x| {
-			if x.eq_ignore_ascii_case("true") || x == "1" {
-				Some(true)
-			} else if x.eq_ignore_ascii_case("false") || x == "0" {
-				Some(false)
-			} else {
-				None
-			}
-		})
-	}
-
-	/// Parse a value out of the map if it exists.
-	/// Takes a closure which can be used to define how to parse the string
-	///
-	/// If either the key does not exist or the parsing closure returns `None` the value is
-	/// unaltered.
-	pub fn parse_key_with<R, F: FnOnce(&str) -> Option<R>>(
-		&self,
-		key: &str,
-		value: &mut R,
-		f: F,
-	) -> &Self {
-		let Some(v) = self.values.get(key) else {
-			return self;
-		};
-
-		let Some(v) = f(v) else {
-			warn!("Could not parse configuration value for key `{}`", key.to_uppercase());
-			return self;
-		};
-
-		*value = v;
-		self
-	}
-
-	pub fn has_key(&self, key: &str) -> bool {
-		self.values.contains_key(key)
-	}
-}
-
-/// Trait for types which contain configureation information.
-pub trait Config: Default {
-	fn parse(&mut self, map: &ConfigMap);
-}
 
 /// Selects which live-query execution engine the datastore uses.
 ///
@@ -509,7 +362,7 @@ impl Config for CommonConfig {
 			})
 			.parse_key("live_query_engine", &mut self.live_query_engine)
 			.parse_key_with("live_query_retention", &mut self.live_query_retention, |x| {
-				crate::kvs::config::parse_duration(x).ok()
+				common::config::parse_duration(x).ok()
 			});
 	}
 }
@@ -651,64 +504,6 @@ pub static SURREALISM_MAX_POOL_SIZE: LazyLock<usize> =
 // as global statics: every operator that reads them already has the execution
 // `CommonConfig` in hand (`ctx.root().ctx.config`), so they are per-datastore
 // and settable programmatically (not only via `SURREAL_GQL_*` env vars).
-
-/// Number of worker threads in the shared KVS blocking threadpool
-/// (`surrealdb-threadpool`) used by the `kv-mem`, `kv-rocksdb`, and
-/// `kv-surrealkv` storage backends to run synchronous storage work off the
-/// tokio runtime.
-///
-/// Default: `num_cpus::get()` on hosts with at least 16 logical cores
-/// (matching the legacy `thread_per_core` behaviour with one pinned
-/// worker per core), `16` on smaller hosts. Override with
-/// `SURREAL_KVS_THREADPOOL_SIZE=<N>` (minimum `4`) to oversubscribe (more
-/// concurrent blocking-IO slots, useful when many workers stall on disk
-/// reads or fsyncs) or undersubscribe (cap blocking concurrency below
-/// core count).
-///
-/// Explicit overrides drop the per-core CPU pinning that the default
-/// applies on >=16-core hosts — pinning only makes sense when the
-/// worker count exactly matches the core count.
-///
-/// **Minimum: 4.** Some kvs operations always run on this pool — read-only
-/// `count` with sharded fan-out, `compact`, writable scans — and below ~4
-/// workers their throughput collapses (sharded `COUNT(*)` becomes serial,
-/// `compact` blocks all other always-pool work). Values below 4, non-numeric
-/// values, and an empty string are reported via `tracing::warn!` and the
-/// computed default is used instead.
-#[cfg(any(feature = "kv-mem", feature = "kv-rocksdb", feature = "kv-surrealkv"))]
-#[cfg(not(target_family = "wasm"))]
-pub static KVS_THREADPOOL_SIZE: LazyLock<usize> = LazyLock::new(|| {
-	let default = || {
-		let cores = num_cpus::get();
-		if cores >= 16 {
-			cores
-		} else {
-			16
-		}
-	};
-	const MINIMUM_OVERRIDE: usize = 4;
-	match std::env::var("SURREAL_KVS_THREADPOOL_SIZE") {
-		Err(_) => default(),
-		Ok(s) if s.is_empty() => default(),
-		Ok(s) => match s.parse::<usize>() {
-			Ok(n) if n >= MINIMUM_OVERRIDE => n,
-			Ok(n) => {
-				tracing::warn!(
-					target: "surrealdb::kvs::threadpool",
-					"SURREAL_KVS_THREADPOOL_SIZE={n} is below the minimum of {MINIMUM_OVERRIDE}; using default",
-				);
-				default()
-			}
-			Err(_) => {
-				tracing::warn!(
-					target: "surrealdb::kvs::threadpool",
-					"SURREAL_KVS_THREADPOOL_SIZE={s:?} is not a valid integer; using default",
-				);
-				default()
-			}
-		},
-	}
-});
 
 #[cfg(test)]
 mod tests {

@@ -6,6 +6,8 @@ use anyhow::{Result, bail};
 use reblessive::TreeStack;
 use reblessive::tree::Stk;
 use revision::revisioned;
+use surrealdb_kvs::TransactionType::Write;
+use surrealdb_kvs::timestamp::HlcTimeStamp;
 use surrealdb_strand::Strand;
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
@@ -20,12 +22,10 @@ use crate::expr::FlowResultExt as _;
 use crate::iam::{Auth, AuthLimit};
 use crate::key::root::eq::{EventQueue, EventQueuePrefix};
 use crate::key::{KVKeyDecode, KVRange, KVValue, impl_kv_value_revisioned};
-use crate::kvs::TransactionType::Write;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::tasklease::LeaseHandler;
 use crate::kvs::{
-	Datastore, HlcTimeStamp, LockType, NORMAL_BATCH_SIZE, Transaction, TransactionFactory,
-	TransactionType, Val,
+	Datastore, LockType, NORMAL_BATCH_SIZE, Transaction, TransactionFactory, TransactionType, Val,
 };
 use crate::val::{RecordId, Value};
 

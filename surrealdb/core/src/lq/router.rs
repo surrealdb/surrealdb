@@ -20,13 +20,13 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use parking_lot::Mutex;
+use surrealdb_kvs::TransactionType::Read;
 
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 use crate::key::database::all::DatabaseRoot;
 use crate::key::{KVKeyDecode, KVRange, KVValue, lqe};
 use crate::kvs::Datastore;
 use crate::kvs::LockType::Optimistic;
-use crate::kvs::TransactionType::Read;
 use crate::lq::event::{LiveEvent, LiveEvents};
 use crate::lq::subscriber::replay_table_live_events;
 use crate::val::TableName;

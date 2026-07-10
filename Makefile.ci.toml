@@ -149,6 +149,8 @@ run_task = { name = [
     "ci-feature-check-sdk",
     "ci-feature-check-core",
     "ci-feature-check-server",
+    "ci-feature-check-kvs",
+    "ci-feature-check-kvs-any",
 ], fork = true, parallel = true }
 
 [tasks.ci-feature-check-sdk]
@@ -179,6 +181,36 @@ args = [
     "check",
     "--package",
     "surrealdb-core",
+    "--each-feature",
+    "--exclude-features",
+    "kv-indxdb",
+]
+
+[tasks.ci-feature-check-kvs]
+category = "CI - CHECK"
+description = "Verify each surrealdb-kvs feature compiles individually"
+install_crate = "cargo-hack"
+env = { RUSTFLAGS = "-D warnings" }
+command = "cargo"
+args = [
+    "hack",
+    "check",
+    "--package",
+    "surrealdb-kvs",
+    "--each-feature",
+]
+
+[tasks.ci-feature-check-kvs-any]
+category = "CI - CHECK"
+description = "Verify each surrealdb-kvs-any feature compiles individually"
+install_crate = "cargo-hack"
+env = { RUSTFLAGS = "-D warnings" }
+command = "cargo"
+args = [
+    "hack",
+    "check",
+    "--package",
+    "surrealdb-kvs-any",
     "--each-feature",
     "--exclude-features",
     "kv-indxdb",
@@ -538,37 +570,71 @@ args = [
     "kvs::tests",
 ]
 
+[tasks.test-kvs-any]
+private = true
+command = "cargo"
+env = { RUST_BACKTRACE = 1 }
+args = [
+    "nextest",
+    "run",
+    "--locked",
+    "--package",
+    "surrealdb-kvs-any",
+    "--features",
+    "${_TEST_FEATURES}",
+]
+
+[tasks.test-kvs-crate]
+private = true
+command = "cargo"
+env = { RUST_BACKTRACE = 1 }
+args = [
+    "nextest",
+    "run",
+    "--locked",
+    "--package",
+    "${_TEST_CRATE}",
+]
+
 [tasks.ci-kvs-mem]
 category = "CI - INTEGRATION TESTS"
 description = "Run KVS integration tests with the in-memory engine"
-env = { _TEST_API_ENGINE = "mem", _TEST_FEATURES = "kv-mem" }
+env = { _TEST_API_ENGINE = "mem", _TEST_FEATURES = "kv-mem", _TEST_CRATE = "surrealdb-kvs-mem" }
 run_task = { name = [
     "test-kvs",
+    "test-kvs-any",
+    "test-kvs-crate",
 ], fork = true, parallel = true }
 
 [tasks.ci-kvs-rocksdb]
 category = "CI - INTEGRATION TESTS"
 description = "Run KVS integration tests with the RocksDB engine"
-env = { _TEST_API_ENGINE = "file", _TEST_FEATURES = "kv-rocksdb" }
+env = { _TEST_API_ENGINE = "file", _TEST_FEATURES = "kv-rocksdb", _TEST_CRATE = "surrealdb-kvs-rocksdb" }
 run_task = { name = [
     "test-kvs",
+    "test-kvs-any",
+    "test-kvs-crate",
 ], fork = true, parallel = true }
 
 [tasks.ci-kvs-surrealkv]
 category = "CI - INTEGRATION TESTS"
 description = "Run KVS integration tests with the SurrealKV engine"
-env = { _TEST_API_ENGINE = "surrealkv", _TEST_FEATURES = "kv-surrealkv" }
+env = { _TEST_API_ENGINE = "surrealkv", _TEST_FEATURES = "kv-surrealkv", _TEST_CRATE = "surrealdb-kvs-surrealkv" }
 run_task = { name = [
     "test-kvs",
+    "test-kvs-any",
+    "test-kvs-crate",
 ], fork = true, parallel = false }
 
 [tasks.ci-kvs-tikv]
 category = "CI - INTEGRATION TESTS"
 description = "Run KVS integration tests with the TiKV engine"
-env = { _TEST_API_ENGINE = "tikv", _TEST_FEATURES = "kv-tikv" }
+env = { _TEST_API_ENGINE = "tikv", _TEST_FEATURES = "kv-tikv", _TEST_CRATE = "surrealdb-kvs-tikv" }
 run_task = { name = [
     "start-tikv",
     "test-kvs",
+    "test-kvs-any",
+    "test-kvs-crate",
     "stop-tikv",
 ], fork = true, parallel = false }
 

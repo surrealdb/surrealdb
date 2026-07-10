@@ -115,7 +115,6 @@ use roaring::{RoaringBitmap, RoaringTreemap};
 pub(crate) mod category;
 pub(crate) mod change;
 pub(crate) mod database;
-pub(crate) mod debug;
 pub(crate) mod graph;
 pub(crate) mod index;
 pub(crate) mod lqe;
@@ -127,12 +126,11 @@ pub(crate) mod r#ref;
 pub(crate) mod root;
 pub(crate) mod sequence;
 pub(crate) mod table;
-pub(crate) mod types;
 pub(crate) mod version;
 
 pub(crate) use mac::{impl_kv_key_storekey, impl_kv_range_storekey, impl_kv_value_revisioned, key};
 // Needs to be public for the enterprise crate.
-pub use types::{Key, KeyRange};
+pub use surrealdb_kvs::{Key, KeyRange};
 
 /// KVKey is a trait that defines a key for the key-value store.
 pub(crate) trait KVKey: Debug + Sized {

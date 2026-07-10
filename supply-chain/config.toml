@@ -43,6 +43,36 @@ audit-as-crates-io = false
 [policy.surrealdb-core]
 audit-as-crates-io = false
 
+[policy.surrealdb-parser]
+audit-as-crates-io = false
+
+[policy.surrealdb-ast]
+audit-as-crates-io = false
+
+[policy.surrealdb-token]
+audit-as-crates-io = false
+
+[policy.surrealdb-kvs]
+audit-as-crates-io = false
+
+[policy.surrealdb-kvs-any]
+audit-as-crates-io = false
+
+[policy.surrealdb-kvs-indxdb]
+audit-as-crates-io = false
+
+[policy.surrealdb-kvs-mem]
+audit-as-crates-io = false
+
+[policy.surrealdb-kvs-rocksdb]
+audit-as-crates-io = false
+
+[policy.surrealdb-kvs-surrealkv]
+audit-as-crates-io = false
+
+[policy.surrealdb-kvs-tikv]
+audit-as-crates-io = false
+
 [policy.surrealdb-mcp]
 audit-as-crates-io = false
 

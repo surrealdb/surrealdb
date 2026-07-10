@@ -251,9 +251,10 @@ mod tests {
 	/// and silently dropped the captured event.)
 	#[tokio::test]
 	async fn router_delivers_events_captured_before_first_pass() {
+		use surrealdb_kvs::TransactionType::Write;
+
 		use crate::catalog::providers::CatalogProvider;
 		use crate::kvs::LockType::Optimistic;
-		use crate::kvs::TransactionType::Write;
 
 		let (recv, ds) = new_ds("router").await;
 		let (ns, db) = ("test", "test");

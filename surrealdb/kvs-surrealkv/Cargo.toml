@@ -1,0 +1,27 @@
+[package]
+name = "surrealdb-kvs-surrealkv"
+publish = true
+readme = "README.md"
+documentation = "https://docs.rs/surrealdb-kvs-surrealkv/"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+affinitypool = { workspace = true }
+chrono = { workspace = true }
+common = { workspace = true }
+parking_lot = { workspace = true }
+surrealdb-kvs = { workspace = true }
+surrealkv = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use chrono::Utc;
+use surrealdb_kvs::TransactionType;
 use tokio::time::{sleep, timeout};
 use uuid::Uuid;
 use web_time::Instant;
@@ -31,7 +32,7 @@ use crate::kvs::testing::{
 use crate::kvs::tx::{
 	CachedIndexBuildReservationKey, CachedIndexBuildReservationLookup, IndexBuildReservationRelease,
 };
-use crate::kvs::{Datastore, TransactionType, is_retryable_transaction_conflict};
+use crate::kvs::{Datastore, is_retryable_transaction_conflict};
 use crate::val::{RecordId, RecordIdKey, TableName, Value};
 
 const REPEATED_RETRY_CONFLICTS: usize = 1000;

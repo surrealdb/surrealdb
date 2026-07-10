@@ -30,6 +30,7 @@ use async_graphql::{Name, Value as GraphqlValue};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
 use serde_json::Number;
+use surrealdb_kvs::TransactionType;
 use surrealdb_types::ToSql;
 
 use super::auth::add_auth_mutations;
@@ -50,7 +51,7 @@ use crate::graphql::mutations::process_mutations;
 use crate::graphql::relations::collect_relations;
 use crate::graphql::subscriptions::process_subscriptions;
 use crate::graphql::tables::{process_tbs, register_filter_helper_types};
-use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
+use crate::kvs::{Datastore, LockType, Transaction};
 use crate::val::{
 	Array as SurArray, Geometry as SurGeometry, Number as SurNumber, Object as SurObject,
 	RecordId as SurRecordId, RecordIdKey as SurRecordIdKey, Set as SurSet, TableName,

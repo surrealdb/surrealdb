@@ -14,6 +14,9 @@ license-file.workspace = true
 [dependencies]
 hashbrown.workspace = true
 futures.workspace = true
+parking_lot.workspace = true
+sysinfo.workspace = true
+tracing.workspace = true
 
 
 [dev-dependencies]

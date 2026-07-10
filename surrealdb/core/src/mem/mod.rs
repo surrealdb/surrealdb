@@ -1,9 +1,8 @@
 mod fake;
 mod notrack;
-mod registry;
 mod track;
 
-pub use registry::{
+pub use common::mem_registry::{
 	MemoryReporter, cleanup_memory_reporters, memory_reporters_allocated_by_name,
 	memory_reporters_allocated_total, register_memory_reporter,
 };

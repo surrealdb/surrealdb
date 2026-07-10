@@ -7,8 +7,6 @@ use crate::cf::{ChangeSet, DatabaseMutation, TableMutations};
 use crate::err::Error;
 use crate::expr::statements::show::ShowSince;
 use crate::key::database::all::DatabaseRoot;
-#[cfg(debug_assertions)]
-use crate::key::debug::Sprintable;
 use crate::key::{KVKeyDecode, KVRange, KVValue, change};
 use crate::kvs::Transaction;
 use crate::val::TableName;
@@ -88,7 +86,7 @@ pub async fn read(
 	// iterate over _x and put decoded elements to r
 	for (k, v) in tx.scan(range, limit, 0, None).await? {
 		#[cfg(debug_assertions)]
-		trace!("Reading change feed entry: {}", k.sprint());
+		trace!("Reading change feed entry: {}", crate::key::Key::from(k.as_slice()));
 
 		// Decode the changefeed entry key
 		let key = crate::key::change::ChangeFeed::decode_key(&k)?;

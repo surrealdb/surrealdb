@@ -1,21 +1,14 @@
 use std::fmt;
 use std::fmt::Debug;
 
+use surrealdb_kvs::Direction;
+
 use super::api::{
-	GetMultiResult, KeysResult, ScanCursorKeys, ScanCursorVals, ScanResult, Transactable,
+	Batch, GetMultiResult, KeysResult, ScanCursorKeys, ScanCursorVals, ScanResult, Transactable,
 };
-use super::batch::Batch;
-use super::direction::Direction;
 use super::{IntoBytes, Result, Val};
 use crate::key::{Key, KeyRange};
 use crate::kvs::timestamp::{BoxTimeStamp, BoxTimeStampImpl};
-
-/// Specifies whether the transaction is read-only or writeable.
-#[derive(Copy, Clone, Eq, PartialEq)]
-pub enum TransactionType {
-	Read,
-	Write,
-}
 
 /// Specifies whether the transaction is optimistic or pessimistic.
 #[derive(Copy, Clone)]

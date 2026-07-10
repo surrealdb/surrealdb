@@ -14,32 +14,19 @@
 //!   database
 //! - `mem`: in-memory database
 
-pub mod config;
+pub use surrealdb_kvs::{Direction, TransactionType, Val, Version};
+pub(crate) use surrealdb_kvs::{api, consts, err, timestamp};
+pub use surrealdb_kvs_any::DatastoreFlavor;
+
 pub mod export;
 
-mod api;
-mod batch;
 mod clock;
-mod consts;
-mod cursor;
-mod direction;
 mod ds;
-mod err;
 mod into;
-mod threadpool;
-mod timestamp;
 mod tr;
 mod tx;
+
 pub(crate) mod util;
-
-mod indxdb;
-mod mem;
-mod rocksdb;
-mod surrealkv;
-mod tikv;
-
-#[cfg(test)]
-mod tests;
 
 pub(crate) mod cache;
 pub(crate) mod index;
@@ -48,6 +35,9 @@ pub(crate) mod slowlog;
 pub(crate) mod tasklease;
 pub(crate) mod version;
 
+#[cfg(test)]
+mod tests;
+
 pub use api::{
 	GetMultiResult, KeysResult, ScanCursorKeys, ScanCursorVals, ScanResult, Transactable,
 };
@@ -55,28 +45,28 @@ pub use consts::{
 	COUNT_BATCH_SIZE, ESTIMATED_BYTES_PER_KEY, ESTIMATED_BYTES_PER_KV, INDEXING_BATCH_SIZE,
 	NORMAL_BATCH_SIZE,
 };
-pub use direction::Direction;
 pub(crate) use ds::TransactionFactory;
 pub use ds::requirements::{TransactionBuilderFactoryRequirements, TransactionBuilderRequirements};
 pub use ds::{
-	Builder, Datastore, DatastoreFlavor, Metric, Metrics, TransactionBuilder,
-	TransactionBuilderFactory, TransactionBuilderParts,
+	Builder, Datastore, Metric, Metrics, TransactionBuilder, TransactionBuilderFactory,
+	TransactionBuilderParts,
 };
 pub use err::{Error, Result};
 pub use into::IntoBytes;
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-rocksdb",
+	feature = "kv-indxdb",
+	feature = "kv-tikv",
+	feature = "kv-surrealkv",
+))]
 pub use timestamp::{
 	BoxTimeStamp, BoxTimeStampImpl, HlcTimeStamp, HlcTimeStampImpl, IncTimeStampImpl,
 	MAX_TIMESTAMP_BYTES, TimeStamp, TimeStampImpl,
 };
-pub use tr::{LockType, TransactionType, Transactor};
+pub use tr::{LockType, Transactor};
 pub(crate) use tx::CachePolicy;
 pub use tx::Transaction;
-
-/// The value part of a key-value pair. An alias for [`Vec<u8>`].
-pub type Val = Vec<u8>;
-
-/// The Version part of a key-value pair. An alias for [`u64`].
-pub type Version = u64;
 
 pub(crate) fn is_retryable_transaction_conflict(err: &anyhow::Error) -> bool {
 	if let Some(kvs_err) = err.downcast_ref::<self::err::Error>() {

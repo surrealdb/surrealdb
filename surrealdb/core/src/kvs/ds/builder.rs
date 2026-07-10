@@ -342,6 +342,7 @@ mod tests {
 	use std::sync::Arc;
 
 	use anyhow::{Result, bail};
+	use surrealdb_kvs::TransactionType;
 	use tokio_util::sync::CancellationToken;
 
 	use super::Builder;
@@ -410,13 +411,13 @@ mod tests {
 	impl TransactionBuilder for TestTransactionBuilder {
 		fn new_transaction(
 			&self,
-			_write: bool,
+			_write: TransactionType,
 			_lock: bool,
-		) -> BoxFut<'_, Result<(Box<dyn Transactable>, bool)>> {
+		) -> BoxFut<'_, crate::kvs::err::Result<(Box<dyn Transactable>, bool)>> {
 			Box::pin(async move { unreachable!("test does not open transactions") })
 		}
 
-		fn shutdown(&self) -> BoxFut<'_, Result<()>> {
+		fn shutdown(&self) -> BoxFut<'_, crate::kvs::err::Result<()>> {
 			Box::pin(async move { Ok(()) })
 		}
 

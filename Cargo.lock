@@ -6717,7 +6717,9 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
+ "surrealdb-common",
  "surrealdb-core",
+ "surrealdb-kvs",
  "surrealdb-types",
  "surrealdb-types-derive",
  "temp-dir",
@@ -6765,7 +6767,10 @@ version = "3.3.0-nightly"
 dependencies = [
  "futures",
  "hashbrown 0.16.1",
+ "parking_lot",
+ "sysinfo",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -6773,7 +6778,6 @@ name = "surrealdb-core"
 version = "3.3.0-nightly"
 dependencies = [
  "addr",
- "affinitypool",
  "ahash 0.8.12",
  "ammonia",
  "anyhow",
@@ -6812,7 +6816,6 @@ dependencies = [
  "hmac 0.12.1",
  "http",
  "humantime",
- "indxdb",
  "ipnet",
  "jsonwebtoken",
  "lexicmp",
@@ -6859,15 +6862,13 @@ dependencies = [
  "subtle",
  "surrealdb-collections",
  "surrealdb-common",
+ "surrealdb-kvs",
+ "surrealdb-kvs-any",
  "surrealdb-protocol",
- "surrealdb-rocksdb",
  "surrealdb-strand",
- "surrealdb-tikv-client",
  "surrealdb-types",
  "surrealism-runtime",
- "surrealkv",
  "surrealml-core",
- "surrealmx",
  "sysinfo",
  "temp-dir",
  "tempfile",
@@ -6889,6 +6890,106 @@ dependencies = [
  "wasmtimer",
  "web-time",
  "wiremock",
+]
+
+[[package]]
+name = "surrealdb-kvs"
+version = "3.3.0-nightly"
+dependencies = [
+ "affinitypool",
+ "chrono",
+ "num_cpus",
+ "surrealdb-common",
+ "thiserror 2.0.18",
+ "tracing",
+ "web-time",
+]
+
+[[package]]
+name = "surrealdb-kvs-any"
+version = "3.3.0-nightly"
+dependencies = [
+ "rand 0.9.4",
+ "serial_test",
+ "surrealdb-common",
+ "surrealdb-kvs",
+ "surrealdb-kvs-indxdb",
+ "surrealdb-kvs-mem",
+ "surrealdb-kvs-rocksdb",
+ "surrealdb-kvs-surrealkv",
+ "surrealdb-kvs-tikv",
+ "temp-dir",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "web-time",
+]
+
+[[package]]
+name = "surrealdb-kvs-indxdb"
+version = "3.3.0-nightly"
+dependencies = [
+ "indxdb",
+ "surrealdb-kvs",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "surrealdb-kvs-mem"
+version = "3.3.0-nightly"
+dependencies = [
+ "affinitypool",
+ "chrono",
+ "surrealdb-common",
+ "surrealdb-kvs",
+ "surrealmx",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "surrealdb-kvs-rocksdb"
+version = "3.3.0-nightly"
+dependencies = [
+ "affinitypool",
+ "futures",
+ "num_cpus",
+ "parking_lot",
+ "rand 0.9.4",
+ "surrealdb-common",
+ "surrealdb-kvs",
+ "surrealdb-rocksdb",
+ "temp-dir",
+ "tokio",
+ "tracing",
+ "web-time",
+]
+
+[[package]]
+name = "surrealdb-kvs-surrealkv"
+version = "3.3.0-nightly"
+dependencies = [
+ "affinitypool",
+ "chrono",
+ "parking_lot",
+ "surrealdb-common",
+ "surrealdb-kvs",
+ "surrealkv",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "surrealdb-kvs-tikv"
+version = "3.3.0-nightly"
+dependencies = [
+ "chrono",
+ "surrealdb-common",
+ "surrealdb-kvs",
+ "surrealdb-tikv-client",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

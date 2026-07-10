@@ -542,6 +542,8 @@ mod tests {
 
 	#[cfg(feature = "kv-mem")]
 	use chrono::Utc;
+	use common::config::ConfigMap;
+	use surrealdb_kvs::TransactionBuilder;
 	#[cfg(feature = "kv-rocksdb")]
 	use temp_dir::TempDir;
 	use tokio::sync::Notify;
@@ -549,7 +551,7 @@ mod tests {
 	use tokio::time::sleep;
 	use uuid::Uuid;
 
-	use crate::kvs::ds::{DatastoreFlavor, TransactionFactory};
+	use crate::kvs::ds::TransactionFactory;
 	use crate::kvs::sequences::Sequences;
 	#[cfg(feature = "kv-mem")]
 	use crate::kvs::tasklease::LeaseStatus;
@@ -631,15 +633,12 @@ mod tests {
 	///
 	/// # Parameters
 	/// * `flavor` - The type of datastore to use for the test (memory or RocksDB)
-	async fn task_lease_concurrency(flavor: DatastoreFlavor) {
+	async fn task_lease_concurrency(builder: Box<dyn TransactionBuilder>) {
 		// Async event trigger
 		let async_event_trigger = Arc::new(Notify::new());
 		// Create a transaction factory with the specified datastore flavor
-		let tf = TransactionFactory::new(
-			async_event_trigger,
-			Box::new(flavor),
-			Arc::new(Default::default()),
-		);
+		let tf =
+			TransactionFactory::new(async_event_trigger, builder, Arc::new(Default::default()));
 		// Create a sequence generator for the transaction factory
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 		// Set test to run for 3 seconds
@@ -684,13 +683,15 @@ mod tests {
 	#[cfg(feature = "kv-mem")]
 	#[tokio::test(flavor = "multi_thread")]
 	async fn task_lease_concurrency_memory() {
-		// Create a new memory configuration
-		let config = crate::kvs::mem::MemoryConfig::default();
-		// Create a new in-memory datastore
-		let flavor =
-			crate::kvs::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem).unwrap();
+		let builder = surrealdb_kvs_any::new_transaction_builder(
+			"mem://",
+			Default::default(),
+			ConfigMap::default(),
+		)
+		.await
+		.unwrap();
 		// Run the concurrency test with the in-memory datastore
-		task_lease_concurrency(flavor).await;
+		task_lease_concurrency(builder).await;
 	}
 
 	/// Tests the task lease concurrency mechanism using a RocksDB datastore.
@@ -706,15 +707,16 @@ mod tests {
 	async fn task_lease_concurrency_rocksdb() {
 		// Create a temporary directory for the RocksDB datastore
 		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
-		// Create a new RocksDB configuration
-		let config = crate::kvs::rocksdb::RocksDbConfig::default();
-		// Create a new RocksDB datastore in the temporary directory
-		let flavor = crate::kvs::rocksdb::Datastore::new(&path, config)
-			.await
-			.map(DatastoreFlavor::RocksDB)
-			.unwrap();
+
+		let builder = surrealdb_kvs_any::new_transaction_builder(
+			&format!("rocksdb://{path}"),
+			Default::default(),
+			ConfigMap::default(),
+		)
+		.await
+		.unwrap();
 		// Run the concurrency test with the RocksDB datastore
-		task_lease_concurrency(flavor).await;
+		task_lease_concurrency(builder).await;
 	}
 
 	/// Tests the task lease concurrency mechanism using a SurrealKV datastore.
@@ -732,15 +734,15 @@ mod tests {
 
 		use temp_dir::TempDir;
 		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
-		// Create a new SurrealKV configuration
-		let config = crate::kvs::surrealkv::SurrealKvConfig::default();
-		// Create a new SurrealKV datastore
-		let flavor = crate::kvs::surrealkv::Datastore::new(&path, config)
-			.await
-			.map(DatastoreFlavor::SurrealKV)
-			.unwrap();
+		let builder = surrealdb_kvs_any::new_transaction_builder(
+			&format!("surrealkv://{path}"),
+			Default::default(),
+			ConfigMap::default(),
+		)
+		.await
+		.unwrap();
 		// Run the concurrency test with the SurrealKV datastore
-		task_lease_concurrency(flavor).await;
+		task_lease_concurrency(builder).await;
 	}
 
 	/// Tests the lease renewal behavior when a node already owns a lease.
@@ -754,19 +756,18 @@ mod tests {
 	#[cfg(feature = "kv-mem")]
 	#[tokio::test]
 	async fn test_lease_renewal_behavior() {
-		// Create a new memory configuration
-		let config = crate::kvs::mem::MemoryConfig::default();
-		// Create an in-memory datastore
-		let flavor =
-			crate::kvs::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem).unwrap();
+		let builder = surrealdb_kvs_any::new_transaction_builder(
+			"mem://",
+			Default::default(),
+			ConfigMap::default(),
+		)
+		.await
+		.unwrap();
 		// Create an async event trigger
 		let async_event_trigger = Arc::new(Notify::new());
 		// Create the transaction factory
-		let tf = TransactionFactory::new(
-			async_event_trigger,
-			Box::new(flavor),
-			Arc::new(Default::default()),
-		);
+		let tf =
+			TransactionFactory::new(async_event_trigger, builder, Arc::new(Default::default()));
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		// Set lease duration to 10 seconds
@@ -836,15 +837,16 @@ mod tests {
 	#[cfg(feature = "kv-mem")]
 	#[tokio::test]
 	async fn test_another_node_rejected_while_lease_valid() {
-		let config = crate::kvs::mem::MemoryConfig::default();
-		let flavor =
-			crate::kvs::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem).unwrap();
+		let builder = surrealdb_kvs_any::new_transaction_builder(
+			"mem://",
+			Default::default(),
+			ConfigMap::default(),
+		)
+		.await
+		.unwrap();
 		let async_event_trigger = Arc::new(Notify::new());
-		let tf = TransactionFactory::new(
-			async_event_trigger,
-			Box::new(flavor),
-			Arc::new(Default::default()),
-		);
+		let tf =
+			TransactionFactory::new(async_event_trigger, builder, Arc::new(Default::default()));
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		let lease_duration = Duration::from_secs(60);
@@ -893,15 +895,16 @@ mod tests {
 	#[cfg(feature = "kv-mem")]
 	#[tokio::test]
 	async fn test_min_lease_duration_floor() {
-		let config = crate::kvs::mem::MemoryConfig::default();
-		let flavor =
-			crate::kvs::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem).unwrap();
+		let builder = surrealdb_kvs_any::new_transaction_builder(
+			"mem://",
+			Default::default(),
+			ConfigMap::default(),
+		)
+		.await
+		.unwrap();
 		let async_event_trigger = Arc::new(Notify::new());
-		let tf = TransactionFactory::new(
-			async_event_trigger,
-			Box::new(flavor),
-			Arc::new(Default::default()),
-		);
+		let tf =
+			TransactionFactory::new(async_event_trigger, builder, Arc::new(Default::default()));
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		// Create a handler with a 1-second lease duration (below the 8-second floor)
@@ -940,15 +943,16 @@ mod tests {
 	#[cfg(feature = "kv-mem")]
 	#[tokio::test]
 	async fn test_different_task_types_are_independent() {
-		let config = crate::kvs::mem::MemoryConfig::default();
-		let flavor =
-			crate::kvs::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem).unwrap();
+		let builder = surrealdb_kvs_any::new_transaction_builder(
+			"mem://",
+			Default::default(),
+			ConfigMap::default(),
+		)
+		.await
+		.unwrap();
 		let async_event_trigger = Arc::new(Notify::new());
-		let tf = TransactionFactory::new(
-			async_event_trigger,
-			Box::new(flavor),
-			Arc::new(Default::default()),
-		);
+		let tf =
+			TransactionFactory::new(async_event_trigger, builder, Arc::new(Default::default()));
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		let lease_duration = Duration::from_secs(60);
@@ -997,15 +1001,16 @@ mod tests {
 	#[cfg(feature = "kv-mem")]
 	#[tokio::test]
 	async fn test_try_maintain_lease_throttling() {
-		let config = crate::kvs::mem::MemoryConfig::default();
-		let flavor =
-			crate::kvs::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem).unwrap();
+		let builder = surrealdb_kvs_any::new_transaction_builder(
+			"mem://",
+			Default::default(),
+			ConfigMap::default(),
+		)
+		.await
+		.unwrap();
 		let async_event_trigger = Arc::new(Notify::new());
-		let tf = TransactionFactory::new(
-			async_event_trigger,
-			Box::new(flavor),
-			Arc::new(Default::default()),
-		);
+		let tf =
+			TransactionFactory::new(async_event_trigger, builder, Arc::new(Default::default()));
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		// Use a 60-second lease so maintain_period = 60/8 = 7 seconds
@@ -1064,15 +1069,16 @@ mod tests {
 	#[cfg(feature = "kv-mem")]
 	#[tokio::test]
 	async fn test_lease_expiration_and_takeover() {
-		let config = crate::kvs::mem::MemoryConfig::default();
-		let flavor =
-			crate::kvs::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem).unwrap();
+		let builder = surrealdb_kvs_any::new_transaction_builder(
+			"mem://",
+			Default::default(),
+			ConfigMap::default(),
+		)
+		.await
+		.unwrap();
 		let async_event_trigger = Arc::new(Notify::new());
-		let tf = TransactionFactory::new(
-			async_event_trigger,
-			Box::new(flavor),
-			Arc::new(Default::default()),
-		);
+		let tf =
+			TransactionFactory::new(async_event_trigger, builder, Arc::new(Default::default()));
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		// Use the minimum lease duration (8 seconds due to the floor)
@@ -1137,15 +1143,16 @@ mod tests {
 	#[cfg(feature = "kv-mem")]
 	#[tokio::test]
 	async fn test_try_maintain_lease_reports_lost_lease() {
-		let config = crate::kvs::mem::MemoryConfig::default();
-		let flavor =
-			crate::kvs::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem).unwrap();
+		let builder = surrealdb_kvs_any::new_transaction_builder(
+			"mem://",
+			Default::default(),
+			ConfigMap::default(),
+		)
+		.await
+		.unwrap();
 		let async_event_trigger = Arc::new(Notify::new());
-		let tf = TransactionFactory::new(
-			async_event_trigger,
-			Box::new(flavor),
-			Arc::new(Default::default()),
-		);
+		let tf =
+			TransactionFactory::new(async_event_trigger, builder, Arc::new(Default::default()));
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		// Use minimum lease duration (clamped to 8 seconds)
@@ -1202,15 +1209,16 @@ mod tests {
 	#[cfg(feature = "kv-mem")]
 	#[tokio::test]
 	async fn test_initial_lease_acquisition_from_empty_state() {
-		let config = crate::kvs::mem::MemoryConfig::default();
-		let flavor =
-			crate::kvs::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem).unwrap();
+		let builder = surrealdb_kvs_any::new_transaction_builder(
+			"mem://",
+			Default::default(),
+			ConfigMap::default(),
+		)
+		.await
+		.unwrap();
 		let async_event_trigger = Arc::new(Notify::new());
-		let tf = TransactionFactory::new(
-			async_event_trigger,
-			Box::new(flavor),
-			Arc::new(Default::default()),
-		);
+		let tf =
+			TransactionFactory::new(async_event_trigger, builder, Arc::new(Default::default()));
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		let node_id = Uuid::new_v4();

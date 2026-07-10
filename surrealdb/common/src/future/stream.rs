@@ -43,6 +43,13 @@ pub struct AsyncStream<'a, F: StreamFn<'a, Y>, Y> {
 	// anything as stacked-borrows will more likely be amended.
 	//
 	// Miri, for example, currently permits this when a type is `!Unpin`.
+	// Also the struct is self reverential, It contains a future which contains a pointer to place.
+	// Which is technically unsound under stacked-borrows, however self reverential structs are
+	// used quite frequently (any `async{ }` block which contains a mutable reference to an item on
+	// the stack is a self-referential struct) so it is improbable that it will actually break
+	// anything as stacked-borrows will more likely be amended.
+	//
+	// Miri, for example, currently permits this when a type is `!Unpin`.
 	_marker: PhantomPinned,
 }
 

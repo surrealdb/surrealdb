@@ -5,12 +5,13 @@
 //! causing "not found" errors.
 
 // Common test setup helpers
+use surrealdb_kvs::TransactionType::Write;
+
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceDefinition, NamespaceId, TableId};
 use crate::dbs::{Capabilities, Session};
 use crate::kvs::Datastore;
 use crate::kvs::LockType::Optimistic;
-use crate::kvs::TransactionType::Write;
 use crate::val::TableName;
 
 /// Helper to create a Datastore and write transaction with namespace and database set up

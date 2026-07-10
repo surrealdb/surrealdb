@@ -1,0 +1,42 @@
+[package]
+name = "surrealdb-kvs-any"
+publish = true
+readme = "README.md"
+documentation = "https://docs.rs/surrealdb-kvs-any/"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+kv-mem = ["dep:surrealdb-kvs-mem"]
+kv-rocksdb = ["dep:surrealdb-kvs-rocksdb"]
+kv-tikv = ["dep:surrealdb-kvs-tikv"]
+kv-surrealkv = ["dep:surrealdb-kvs-surrealkv"]
+kv-indxdb = ["dep:surrealdb-kvs-indxdb"]
+
+[dependencies]
+common = { workspace = true }
+surrealdb-kvs = { workspace = true }
+surrealdb-kvs-indxdb = { workspace = true, optional = true }
+surrealdb-kvs-mem = { workspace = true, optional = true }
+surrealdb-kvs-rocksdb = { workspace = true, optional = true }
+surrealdb-kvs-surrealkv = { workspace = true, optional = true }
+surrealdb-kvs-tikv = { workspace = true, optional = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+rand = { workspace = true }
+serial_test = { workspace = true }
+temp-dir = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+web-time = { workspace = true }
+
+[lints]
+workspace = true

@@ -141,6 +141,8 @@ impl Document {
 mod tests {
 	use std::time::Duration;
 
+	use surrealdb_kvs::TransactionType::{Read, Write};
+
 	use crate::catalog::providers::CatalogProvider;
 	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::cnf::ConfigMap;
@@ -149,7 +151,6 @@ mod tests {
 	use crate::key::{KVRange, KVValue, lqe};
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
-	use crate::kvs::TransactionType::{Read, Write};
 	use crate::lq::event::{LiveAction, LiveEvent, LiveEvents};
 	use crate::types::PublicValue;
 

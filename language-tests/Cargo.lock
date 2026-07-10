@@ -4346,6 +4346,9 @@ version = "3.3.0-nightly"
 dependencies = [
  "futures",
  "hashbrown 0.16.1",
+ "parking_lot",
+ "sysinfo",
+ "tracing",
 ]
 
 [[package]]
@@ -4353,7 +4356,6 @@ name = "surrealdb-core"
 version = "3.3.0-nightly"
 dependencies = [
  "addr",
- "affinitypool",
  "ahash 0.8.12",
  "ammonia",
  "anyhow",
@@ -4427,13 +4429,11 @@ dependencies = [
  "subtle",
  "surrealdb-collections",
  "surrealdb-common",
+ "surrealdb-kvs",
+ "surrealdb-kvs-any",
  "surrealdb-protocol",
- "surrealdb-rocksdb",
  "surrealdb-strand",
- "surrealdb-tikv-client",
  "surrealdb-types",
- "surrealkv",
- "surrealmx",
  "sysinfo",
  "tempfile",
  "thiserror",
@@ -4448,6 +4448,88 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasmtimer",
  "web-time",
+]
+
+[[package]]
+name = "surrealdb-kvs"
+version = "3.3.0-nightly"
+dependencies = [
+ "affinitypool",
+ "chrono",
+ "num_cpus",
+ "surrealdb-common",
+ "thiserror",
+ "tracing",
+ "web-time",
+]
+
+[[package]]
+name = "surrealdb-kvs-any"
+version = "3.3.0-nightly"
+dependencies = [
+ "surrealdb-common",
+ "surrealdb-kvs",
+ "surrealdb-kvs-mem",
+ "surrealdb-kvs-rocksdb",
+ "surrealdb-kvs-surrealkv",
+ "surrealdb-kvs-tikv",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
+name = "surrealdb-kvs-mem"
+version = "3.3.0-nightly"
+dependencies = [
+ "affinitypool",
+ "chrono",
+ "surrealdb-common",
+ "surrealdb-kvs",
+ "surrealmx",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "surrealdb-kvs-rocksdb"
+version = "3.3.0-nightly"
+dependencies = [
+ "affinitypool",
+ "futures",
+ "num_cpus",
+ "parking_lot",
+ "surrealdb-common",
+ "surrealdb-kvs",
+ "surrealdb-rocksdb",
+ "tokio",
+ "tracing",
+ "web-time",
+]
+
+[[package]]
+name = "surrealdb-kvs-surrealkv"
+version = "3.3.0-nightly"
+dependencies = [
+ "affinitypool",
+ "chrono",
+ "parking_lot",
+ "surrealdb-common",
+ "surrealdb-kvs",
+ "surrealkv",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "surrealdb-kvs-tikv"
+version = "3.3.0-nightly"
+dependencies = [
+ "chrono",
+ "surrealdb-common",
+ "surrealdb-kvs",
+ "surrealdb-tikv-client",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -9,6 +9,13 @@ members = [
     "surrealdb/collections",
     "surrealdb/common",
     "surrealdb/core",
+    "surrealdb/kvs",
+    "surrealdb/kvs-any",
+    "surrealdb/kvs-indxdb",
+    "surrealdb/kvs-mem",
+    "surrealdb/kvs-rocksdb",
+    "surrealdb/kvs-surrealkv",
+    "surrealdb/kvs-tikv",
     "surrealdb/mcp",
     "surrealdb/parser",
     "surrealdb/server",
@@ -59,6 +66,13 @@ ast = { version = "3.3.0-nightly", package = "surrealdb-ast", path = "surrealdb/
 token = { version = "3.3.0-nightly", package = "surrealdb-token", path = "surrealdb/token" }
 parser = { version = "3.3.0-nightly", package = "surrealdb-parser", path = "surrealdb/parser" }
 common = { version = "3.3.0-nightly", package = "surrealdb-common", path = "surrealdb/common" }
+surrealdb-kvs = { version = "3.3.0-nightly", path = "surrealdb/kvs" }
+surrealdb-kvs-any = { version = "3.3.0-nightly", path = "surrealdb/kvs-any", default-features = false }
+surrealdb-kvs-indxdb = { version = "3.3.0-nightly", path = "surrealdb/kvs-indxdb" }
+surrealdb-kvs-mem = { version = "3.3.0-nightly", path = "surrealdb/kvs-mem" }
+surrealdb-kvs-rocksdb = { version = "3.3.0-nightly", path = "surrealdb/kvs-rocksdb" }
+surrealdb-kvs-surrealkv = { version = "3.3.0-nightly", path = "surrealdb/kvs-surrealkv" }
+surrealdb-kvs-tikv = { version = "3.3.0-nightly", path = "surrealdb/kvs-tikv" }
 surrealdb-collections = { version = "3.3.0-nightly", path = "surrealdb/collections" }
 
 # SurrealML crates

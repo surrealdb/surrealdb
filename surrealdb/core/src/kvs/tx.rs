@@ -21,6 +21,7 @@ use std::time::Duration;
 use anyhow::Result;
 use chrono::Utc;
 use futures::future::try_join_all;
+use surrealdb_kvs::timestamp::{BoxTimeStamp, BoxTimeStampImpl};
 use tokio::sync::{Mutex, Notify};
 use tokio::time::sleep;
 use tracing::Instrument;
@@ -28,9 +29,9 @@ use uuid::Uuid;
 use web_time::Instant;
 
 use super::api::{
-	KeyVisitor, KeysBatch, ScanChunkStats, ScanCursorKeys, ScanCursorVals, ValVisitor, ValsBatch,
+	Batch, KeyVisitor, KeysBatch, ScanChunkStats, ScanCursorKeys, ScanCursorVals, ValVisitor,
+	ValsBatch,
 };
-use super::batch::Batch;
 use super::{LockType, TransactionFactory, TransactionType, Val, util};
 use crate::catalog::providers::{
 	ApiProvider, AuthorisationProvider, BoxProviderFut, BucketProvider, CatalogProvider,
@@ -69,8 +70,7 @@ use crate::kvs::testing::{
 	maybe_inject_retryable_conflict,
 };
 use crate::kvs::{
-	BoxTimeStamp, BoxTimeStampImpl, Direction, Error as KvsError, IntoBytes, Transactor, cache,
-	is_retryable_transaction_conflict,
+	Direction, Error as KvsError, IntoBytes, Transactor, cache, is_retryable_transaction_conflict,
 };
 use crate::lq::writer::LiveEventBuffer;
 use crate::observe::{
@@ -2218,12 +2218,14 @@ impl Transaction {
 		K: KVRange + Debug,
 	{
 		let range = key.encode_range()?;
-		self.tr.inner.compact(Some(range)).await
+		self.tr.inner.compact(Some(range)).await.map_err(Error::from)?;
+		Ok(())
 	}
 
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn compact_all(&self) -> Result<()> {
-		self.tr.inner.compact(None).await
+		self.tr.inner.compact(None).await.map_err(Error::from)?;
+		Ok(())
 	}
 
 	/// Mark this transaction to wake the async event processor after commit.

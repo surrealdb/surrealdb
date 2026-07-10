@@ -9,6 +9,9 @@ on:
       - Cargo.lock
       - Cargo.toml
       - surrealdb/core/Cargo.toml
+      - surrealdb/common/Cargo.toml
+      - surrealdb/kvs/Cargo.toml
+      - surrealdb/kvs-*/Cargo.toml
       - surrealdb/server/Cargo.toml
       - surrealdb/Cargo.toml
       - build.rs
@@ -25,6 +28,9 @@ on:
       - Cargo.lock
       - Cargo.toml
       - surrealdb/core/Cargo.toml
+      - surrealdb/common/Cargo.toml
+      - surrealdb/kvs/Cargo.toml
+      - surrealdb/kvs-*/Cargo.toml
       - surrealdb/server/Cargo.toml
       - surrealdb/Cargo.toml
       - build.rs

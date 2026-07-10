@@ -1,7 +1,8 @@
 use std::fmt;
 use std::time::Duration;
 
-use surrealdb_core::kvs::config::{AolMode, SnapshotMode, format_duration};
+use common::config::format_duration;
+use surrealdb_kvs::config::{AolMode, SnapshotMode};
 
 use crate::engine::local::Db;
 use crate::{Connect, Error};

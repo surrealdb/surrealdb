@@ -2,13 +2,14 @@ use std::borrow::Cow;
 use std::time::Duration;
 
 use anyhow::Result;
+use surrealdb_kvs::timestamp::{BoxTimeStamp, BoxTimeStampImpl};
 
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::database::all::DatabaseRoot;
 use crate::key::{KVRange, lqe};
+use crate::kvs::Transaction;
 use crate::kvs::tasklease::LeaseHandler;
-use crate::kvs::{BoxTimeStamp, BoxTimeStampImpl, Transaction};
 
 /// Garbage-collect the dedicated live-query event keyspace.
 ///

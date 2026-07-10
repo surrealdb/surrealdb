@@ -1,0 +1,34 @@
+[package]
+name = "surrealdb-kvs-rocksdb"
+publish = true
+readme = "README.md"
+documentation = "https://docs.rs/surrealdb-kvs-rocksdb/"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+affinitypool = { workspace = true }
+common = { workspace = true }
+futures = { workspace = true }
+num_cpus = { workspace = true }
+parking_lot = { workspace = true }
+rocksdb = { workspace = true }
+surrealdb-kvs = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
+tracing = { workspace = true }
+web-time = { workspace = true }
+
+[dev-dependencies]
+rand = { workspace = true }
+temp-dir = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
+
+[lints]
+workspace = true

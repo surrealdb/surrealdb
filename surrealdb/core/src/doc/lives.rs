@@ -628,13 +628,13 @@ impl MessageBroker for DefaultBroker {
 mod tests {
 	use anyhow::Result;
 	use chrono::Utc;
+	use surrealdb_kvs::TransactionType::Write;
 
 	use crate::catalog::providers::CatalogProvider;
 	use crate::channel::Receiver;
 	use crate::dbs::{Capabilities, Session};
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
-	use crate::kvs::TransactionType::Write;
 	use crate::types::{
 		PublicAction, PublicNotification, PublicRecordId, PublicRecordIdKey, PublicValue,
 	};

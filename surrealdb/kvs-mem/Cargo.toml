@@ -1,0 +1,32 @@
+[package]
+name = "surrealdb-kvs-mem"
+publish = true
+readme = "README.md"
+documentation = "https://docs.rs/surrealdb-kvs-mem/"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+affinitypool = { workspace = true }
+chrono = { workspace = true }
+common = { workspace = true }
+surrealdb-kvs = { workspace = true }
+surrealmx = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+tracing = { workspace = true }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+tokio = { workspace = true, features = ["sync", "time"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
+
+[lints]
+workspace = true

@@ -3,13 +3,14 @@ use std::time::Duration;
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use surrealdb_kvs::timestamp::{BoxTimeStamp, BoxTimeStampImpl};
 
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::database::all::DatabaseRoot;
 use crate::key::{KVRange, KeyRange, change};
+use crate::kvs::Transaction;
 use crate::kvs::tasklease::LeaseHandler;
-use crate::kvs::{BoxTimeStamp, BoxTimeStampImpl, Transaction};
 
 // gc_all_at deletes all change feed entries that become stale at the given
 // current time.
