@@ -145,12 +145,30 @@ pub trait RpcProtocol {
 		Ok(DbResult::Other(PublicValue::None))
 	}
 
-	/// The current session for this RPC context
-	fn get_session(&self, id: &Uuid) -> Result<Arc<RwLock<Session>>, surrealdb_types::Error> {
-		match self.session_map().get(id) {
-			Some(session) => Ok(session),
-			None => Err(session_not_found(*id)),
+	/// The current session for this RPC context.
+	///
+	/// A session absent from the in-memory [`session_map`](Self::session_map)
+	/// is rehydrated from durable storage via
+	/// [`load_session`](Self::load_session) and reinstalled, so a client can
+	/// resume an attached session after the node or isolate that held it is
+	/// gone — the case that matters for edge deployments, where an idle
+	/// Durable Object or Worker is evicted between requests. This branch is
+	/// const-gated to nothing unless
+	/// [`PERSIST_SESSIONS`](Self::PERSIST_SESSIONS) is set, so in-memory-only
+	/// implementations keep the plain map lookup.
+	async fn get_session(&self, id: &Uuid) -> Result<Arc<RwLock<Session>>, surrealdb_types::Error> {
+		if let Some(session) = self.session_map().get(id) {
+			return Ok(session);
 		}
+		if Self::PERSIST_SESSIONS
+			&& let Some(restored) = self.load_session(id).await
+		{
+			self.set_session(*id, Arc::new(RwLock::new(restored)));
+			if let Some(session) = self.session_map().get(id) {
+				return Ok(session);
+			}
+		}
+		Err(session_not_found(*id))
 	}
 
 	/// Stores a session for the given ID
@@ -161,6 +179,12 @@ pub trait RpcProtocol {
 	/// Deletes a session
 	async fn del_session(&self, id: &Uuid) {
 		self.session_map().remove(id);
+		// Remove the durable copy too, so `detach`/logout is not silently
+		// undone by a later rehydrate. Const-gated to nothing for
+		// in-memory-only implementations.
+		if Self::PERSIST_SESSIONS {
+			self.forget_session(id).await;
+		}
 		self.cleanup_lqs(id).await;
 	}
 
@@ -174,6 +198,66 @@ pub trait RpcProtocol {
 			.collect();
 		Ok(DbResult::Other(PublicValue::Array(array)))
 	}
+
+	// ------------------------------
+	// Durable sessions
+	// ------------------------------
+
+	/// Whether this implementation persists attached sessions to durable
+	/// storage so they outlive the process (or serverless isolate) that
+	/// holds `session_map`. Off by default: sessions are in-memory only, and
+	/// the three hooks below are never called, so
+	/// [`get_session`](Self::get_session), [`execute`](Self::execute), and
+	/// [`del_session`](Self::del_session) behave exactly as before.
+	///
+	/// When on, the session lifecycle mirrors to durable storage:
+	/// [`get_session`](Self::get_session) rehydrates a session missing from
+	/// `session_map` via [`load_session`](Self::load_session), so a client
+	/// transparently resumes an attached session after the node or isolate
+	/// that attached it is gone — the case that matters for edge deployments,
+	/// where an idle Durable Object or Worker is evicted between requests.
+	/// [`execute`](Self::execute) writes the session back via
+	/// [`persist_session`](Self::persist_session) when a method changed it,
+	/// and [`del_session`](Self::del_session) removes the durable copy via
+	/// [`forget_session`](Self::forget_session).
+	///
+	/// This seam is about session *durability* only; it performs no
+	/// request-level authorization. As in the in-memory model, a session id
+	/// grants access to that session, so an implementation reachable by
+	/// untrusted callers is responsible for its own per-request check (e.g.
+	/// binding an authenticated session to the principal that authenticated
+	/// it) — persistence neither adds nor removes that obligation.
+	///
+	/// The persist happens after the handler releases the session write lock,
+	/// so an implementation that enables this **must serialize dispatch per
+	/// session** (one in-flight RPC per session id); otherwise two concurrent
+	/// mutations of the same session can persist out of order and drop the
+	/// losing one (e.g. an `invalidate` racing a `signin`). A per-connection
+	/// runtime — one Durable Object or Worker per session — satisfies this by
+	/// construction.
+	const PERSIST_SESSIONS: bool = false;
+
+	/// Load a session from durable storage. Called by
+	/// [`get_session`](Self::get_session) on a `session_map` miss to
+	/// rehydrate an evicted session. Returns `None` (the default) for
+	/// in-memory-only implementations, and is only ever called when
+	/// [`PERSIST_SESSIONS`](Self::PERSIST_SESSIONS) is set.
+	async fn load_session(&self, _id: &Uuid) -> Option<Session> {
+		None
+	}
+
+	/// Persist a session that a method changed, so the change outlives
+	/// eviction of `session_map`. The default is a no-op, and it is only ever
+	/// called when [`PERSIST_SESSIONS`](Self::PERSIST_SESSIONS) is set.
+	async fn persist_session(&self, _id: &Uuid, _session: &Session) {}
+
+	/// Remove a session's durable copy, called from
+	/// [`del_session`](Self::del_session) so teardown (`detach`, logout) is
+	/// symmetric with persistence — a deleted session must not resurrect on
+	/// a later [`load_session`](Self::load_session). The default is a no-op,
+	/// and it is only ever called when
+	/// [`PERSIST_SESSIONS`](Self::PERSIST_SESSIONS) is set.
+	async fn forget_session(&self, _id: &Uuid) {}
 
 	// ------------------------------
 	// Transactions
@@ -276,8 +360,27 @@ pub trait RpcProtocol {
 				warn!("Capabilities denied RPC method call attempt, target: '{method}'");
 				return Err(method_not_allowed(method.to_string()));
 			}
+			// Snapshot the session before dispatch so a change can be detected
+			// and persisted afterwards (below). The outer `Some` marks "this
+			// request is tracked for persistence"; the inner `Option` is the
+			// session's pre-dispatch value, or `None` if it did not exist yet
+			// (an `attach` about to create it). Only client-named sessions are
+			// durable — a per-request ephemeral (no `client_session`) is never
+			// persisted — and `get_session` rehydrates an evicted session on
+			// the way, so this also covers the "evicted, first request" case.
+			// Const-gated to nothing for in-memory-only implementations, which
+			// never clone.
+			let tracked: Option<Option<Session>> =
+				if Self::PERSIST_SESSIONS && client_session.is_some() {
+					Some(match self.get_session(&session).await {
+						Ok(lock) => Some(lock.read().await.clone()),
+						Err(_) => None,
+					})
+				} else {
+					None
+				};
 			// Execute the desired method
-			match method {
+			let dispatched = match method {
 				Method::Ping => Ok(DbResult::Other(PublicValue::None)),
 				Method::Info => self.info(txn, session).await,
 				Method::Use => self.yuse(session, params).await,
@@ -321,7 +424,27 @@ pub trait RpcProtocol {
 				Method::Run => self.run(txn, session, params).await,
 				Method::InsertRelation => self.insert_relation(txn, session, params).await,
 				_ => Err(method_not_found(method.to_string())),
+			};
+			// On success, persist the session if dispatch changed it (or
+			// created it — `attach`). Comparing against the pre-dispatch
+			// snapshot means there is no list of "mutating methods" to keep
+			// in sync with the handlers: whatever alters the session is
+			// written and a read-only method writes nothing. A session the
+			// handler removed (`detach`) is gone from the map, so the lookup
+			// misses and deletion rides `del_session` instead. The snapshot
+			// is taken outside the handler's write lock, so correctness
+			// relies on the per-session dispatch serialization
+			// `PERSIST_SESSIONS` requires.
+			if dispatched.is_ok()
+				&& let Some(before) = tracked
+				&& let Ok(lock) = self.get_session(&session).await
+			{
+				let after = lock.read().await;
+				if before.as_ref() != Some(&*after) {
+					self.persist_session(&session, &after).await;
+				}
 			}
+			dispatched
 		}
 		.await;
 		let outcome = Outcome::from(&result);
@@ -335,7 +458,7 @@ pub trait RpcProtocol {
 		// record-access -> `<record>` sentinel) so per-tenant /
 		// dimensional dashboards stay bounded and audit destinations
 		// never receive raw record-access principal ids.
-		let (identity, scope) = match self.get_session(&session) {
+		let (identity, scope) = match self.get_session(&session).await {
 			Ok(session_lock) => {
 				let s = session_lock.read().await;
 				let scope = AuthScope::from(s.au.level());
@@ -399,7 +522,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 
 		// Check permissions with read lock
 		{
@@ -581,7 +704,7 @@ pub trait RpcProtocol {
 			return Err(invalid_params("Expected (params:object)".to_string()));
 		};
 		// Get a write lock on the session
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let mut session = session_lock.write().await;
 		let snapshot = AuthPrincipalSnapshot::capture(&session);
 		// Attempt signup, mutating the session
@@ -615,7 +738,7 @@ pub trait RpcProtocol {
 			return Err(invalid_params("Expected (params:object)".to_string()));
 		};
 		// Get a write lock on the session
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let mut session = session_lock.write().await;
 		let snapshot = AuthPrincipalSnapshot::capture(&session);
 		// Attempt signin, mutating the session
@@ -649,7 +772,7 @@ pub trait RpcProtocol {
 			return Err(invalid_params("Expected (token:string)".to_string()));
 		};
 		// Get a write lock on the session
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let mut session = session_lock.write().await;
 		let snapshot = AuthPrincipalSnapshot::capture(&session);
 		// Log before authentication
@@ -716,7 +839,7 @@ pub trait RpcProtocol {
 			return Err(unexpected());
 		};
 		// Get a write lock on the session
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let mut session = session_lock.write().await;
 		let snapshot = AuthPrincipalSnapshot::capture(&session);
 		// Attempt token refresh, which will:
@@ -737,7 +860,7 @@ pub trait RpcProtocol {
 
 	async fn invalidate(&self, session_id: Uuid) -> Result<DbResult, surrealdb_types::Error> {
 		// Get a write lock on the session
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let mut session = session_lock.write().await;
 		// Clear the current session
 		crate::iam::clear::clear(&mut session).map_err(types_error_from_anyhow)?;
@@ -793,7 +916,7 @@ pub trait RpcProtocol {
 
 	async fn reset(&self, session_id: Uuid) -> Result<DbResult, surrealdb_types::Error> {
 		// Get a write lock on the session
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let mut session = session_lock.write().await;
 		// Reset the current session
 		crate::iam::reset::reset(&mut session);
@@ -812,7 +935,7 @@ pub trait RpcProtocol {
 		_txn: Option<Uuid>,
 		session_id: Uuid,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		let vars = Some(session.variables.clone());
 		let mut res = self.kvs().execute("SELECT * FROM $auth", &session, vars).await?;
@@ -832,7 +955,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 
 		// Check permissions with read lock
 		{
@@ -874,7 +997,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 
 		// Check permissions with read lock
 		{
@@ -907,7 +1030,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
@@ -939,7 +1062,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
@@ -993,7 +1116,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
@@ -1058,7 +1181,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
@@ -1103,7 +1226,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
@@ -1154,7 +1277,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
@@ -1208,7 +1331,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
@@ -1266,7 +1389,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
@@ -1321,7 +1444,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
@@ -1375,7 +1498,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
@@ -1440,7 +1563,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
@@ -1498,7 +1621,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
@@ -1554,7 +1677,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
@@ -1604,7 +1727,7 @@ pub trait RpcProtocol {
 		}
 		#[cfg(feature = "gql")]
 		{
-			let session_lock = self.get_session(&session_id)?;
+			let session_lock = self.get_session(&session_id).await?;
 			let session = session_lock.read().await;
 			// Check if the user is allowed to query
 			if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
@@ -1677,7 +1800,7 @@ pub trait RpcProtocol {
 			// is no HTTP route in play here, so -- as agreed -- access is gated
 			// purely on the query capability for the subject, exactly like the
 			// `query` and `gql` RPC methods.
-			let session_lock = self.get_session(&session_id)?;
+			let session_lock = self.get_session(&session_id).await?;
 			let session = session_lock.read().await;
 			if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 				return Err(method_not_allowed(Method::Graphql.to_string()));
@@ -1739,7 +1862,7 @@ pub trait RpcProtocol {
 		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		let session_lock = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id).await?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
@@ -1942,7 +2065,7 @@ async fn run_query<T>(
 where
 	T: RpcProtocol + ?Sized,
 {
-	let session_lock = this.get_session(&session_id).map_err(anyhow::Error::from)?;
+	let session_lock = this.get_session(&session_id).await.map_err(anyhow::Error::from)?;
 	let session = session_lock.read().await;
 	if !T::LQ_SUPPORT && session.rt {
 		return Err(bad_lq_config().into());
@@ -2036,4 +2159,166 @@ where
 	}
 	// Return the result to the client
 	Ok(res)
+}
+
+#[cfg(test)]
+mod tests {
+	use std::collections::HashMap as StdHashMap;
+	use std::sync::{Arc, Mutex};
+
+	use surrealdb_types::HashMap;
+	use tokio::sync::RwLock;
+	use uuid::Uuid;
+
+	use super::{DbResult, Method, RpcProtocol};
+	use crate::dbs::Session;
+	use crate::kvs::Datastore;
+	use crate::types::{PublicArray, PublicValue};
+
+	/// A minimal persisting `RpcProtocol`: sessions live in `sessions` (the
+	/// in-memory map the trait requires) and are mirrored into `durable`
+	/// (a stand-in for durable storage, holding serialized sessions).
+	struct DurableRpc {
+		ds: Arc<Datastore>,
+		sessions: HashMap<Uuid, Arc<RwLock<Session>>>,
+		durable: Mutex<StdHashMap<Uuid, Vec<u8>>>,
+	}
+
+	impl RpcProtocol for DurableRpc {
+		const PERSIST_SESSIONS: bool = true;
+
+		fn kvs(&self) -> &Datastore {
+			&self.ds
+		}
+		fn kvs_arc(&self) -> Arc<Datastore> {
+			Arc::clone(&self.ds)
+		}
+		fn version_data(&self) -> DbResult {
+			DbResult::Other(PublicValue::String("surrealdb-test".to_owned()))
+		}
+		fn session_map(&self) -> &HashMap<Uuid, Arc<RwLock<Session>>> {
+			&self.sessions
+		}
+		fn cleanup_lqs(&self, _id: &Uuid) -> impl std::future::Future<Output = ()> + Send {
+			std::future::ready(())
+		}
+		fn cleanup_all_lqs(&self) -> impl std::future::Future<Output = ()> + Send {
+			std::future::ready(())
+		}
+
+		async fn load_session(&self, id: &Uuid) -> Option<Session> {
+			let bytes = self.durable.lock().unwrap().get(id).cloned()?;
+			serde_json::from_slice(&bytes).ok()
+		}
+		async fn persist_session(&self, id: &Uuid, session: &Session) {
+			let bytes = serde_json::to_vec(session).unwrap();
+			self.durable.lock().unwrap().insert(*id, bytes);
+		}
+		async fn forget_session(&self, id: &Uuid) {
+			self.durable.lock().unwrap().remove(id);
+		}
+	}
+
+	fn use_params(ns: &str, db: &str) -> PublicArray {
+		vec![PublicValue::String(ns.to_owned()), PublicValue::String(db.to_owned())].into()
+	}
+
+	#[tokio::test]
+	async fn mutations_persist_and_an_evicted_session_is_rehydrated() {
+		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let rpc = DurableRpc {
+			ds,
+			sessions: HashMap::new(),
+			durable: Mutex::new(StdHashMap::new()),
+		};
+		let sid = Uuid::from_u128(7);
+
+		// An attached, authenticated session (as `signin` would leave it).
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+
+		// A session-mutating method (USE) must write the session through to
+		// durable storage.
+		rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await.unwrap();
+		assert!(rpc.durable.lock().unwrap().contains_key(&sid), "USE did not persist the session");
+
+		// Simulate isolate eviction: the in-memory session map is gone.
+		rpc.session_map().remove(&sid);
+		assert!(!rpc.session_map().contains_key(&sid));
+
+		// `get_session` rehydrates the evicted session from durable storage
+		// and reinstalls it, keeping its auth — so every caller (the gate, the
+		// handlers, the observer) resumes it transparently.
+		let restored = rpc.get_session(&sid).await.expect("session was not rehydrated");
+		assert!(restored.read().await.au.is_root(), "auth lost on rehydrate");
+		assert!(rpc.session_map().contains_key(&sid), "rehydrated session was not reinstalled");
+
+		// And a full request against the evicted id succeeds end to end.
+		rpc.session_map().remove(&sid);
+		rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await.unwrap();
+	}
+
+	#[tokio::test]
+	async fn attach_persists_so_a_bare_session_survives_eviction() {
+		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let rpc = DurableRpc {
+			ds,
+			sessions: HashMap::new(),
+			durable: Mutex::new(StdHashMap::new()),
+		};
+		let sid = Uuid::from_u128(13);
+
+		// `attach` creates the session; the change-detection treats a
+		// create as a change, so it is persisted (nothing pre-existed).
+		rpc.execute(None, sid, Some(sid), Method::Attach, PublicArray::new()).await.unwrap();
+		assert!(
+			rpc.durable.lock().unwrap().contains_key(&sid),
+			"attach did not persist the session"
+		);
+
+		// Evicted before any further call, the bare session still resumes.
+		rpc.session_map().remove(&sid);
+		assert!(rpc.get_session(&sid).await.is_ok(), "bare attached session lost on eviction");
+	}
+
+	#[tokio::test]
+	async fn read_only_methods_do_not_persist() {
+		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let rpc = DurableRpc {
+			ds,
+			sessions: HashMap::new(),
+			durable: Mutex::new(StdHashMap::new()),
+		};
+		let sid = Uuid::from_u128(9);
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+
+		// `version` touches no session state, so it must not persist.
+		rpc.execute(None, sid, Some(sid), Method::Version, PublicArray::new()).await.unwrap();
+		assert!(rpc.durable.lock().unwrap().is_empty(), "a read-only method persisted a session");
+	}
+
+	#[tokio::test]
+	async fn detach_deletes_the_durable_copy() {
+		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let rpc = DurableRpc {
+			ds,
+			sessions: HashMap::new(),
+			durable: Mutex::new(StdHashMap::new()),
+		};
+		let sid = Uuid::from_u128(11);
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+		rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await.unwrap();
+		assert!(rpc.durable.lock().unwrap().contains_key(&sid));
+
+		// Detach must remove the durable copy, so the session cannot be
+		// rehydrated (resurrected) afterwards.
+		rpc.execute(None, sid, Some(sid), Method::Detach, PublicArray::new()).await.unwrap();
+		assert!(
+			rpc.durable.lock().unwrap().is_empty(),
+			"detach left a resurrectable durable session"
+		);
+
+		// A later request for the same id finds nothing to rehydrate.
+		let err = rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await;
+		assert!(err.is_err(), "a detached session was still usable");
+	}
 }

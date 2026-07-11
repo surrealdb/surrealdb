@@ -130,7 +130,7 @@ impl Http {
 			return Err(session_not_found(*session_id));
 		}
 		// Fetch the stored session (returns session_not_found if absent).
-		let session_lock = self.get_session(session_id)?;
+		let session_lock = self.get_session(session_id).await?;
 		// Read the principal fingerprint under a short read lock.
 		let session_guard = session_lock.read().await;
 		let session_au = session_guard.au.as_ref();

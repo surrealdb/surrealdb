@@ -3,6 +3,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use chrono::Utc;
+use serde::{Deserialize, Serialize};
 use surrealdb_types::ToSql;
 use uuid::Uuid;
 
@@ -18,7 +19,7 @@ use crate::val::Value;
 /// At the start of work, [`crate::kvs::Datastore::setup_options`] derives the stack-local
 /// [`crate::dbs::Options`] frame; [`crate::ctx::Context::attach_session`] copies tenant identity
 /// and realtime capability into ambient [`crate::ctx::Context`].
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Session {
 	/// The current session [`Auth`] information
 	pub au: Arc<Auth>,
@@ -51,7 +52,7 @@ pub struct Session {
 	pub redact_volatile_explain_attrs: bool,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum NewPlannerStrategy {
 	/// Try the new planner for read-only statements, fall back to compute on Unimplemented.
 	#[default]
@@ -220,5 +221,31 @@ impl Session {
 	/// Create a system session for the root level with Viewer role
 	pub fn viewer() -> Session {
 		Session::for_level(Level::Root, Role::Viewer)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn json_round_trip_preserves_auth_and_context() {
+		// A root-Owner session with selected ns/db and an expiry — the shape
+		// a persisting `RpcProtocol` writes to durable storage and restores.
+		let original = Session {
+			id: Some(Uuid::from_u128(1)),
+			exp: Some(1_700_000_000),
+			..Session::owner().with_ns("app").with_db("app")
+		};
+
+		let json = serde_json::to_string(&original).expect("serialize");
+		let restored: Session = serde_json::from_str(&json).expect("deserialize");
+
+		// The whole struct round-trips, including the `Arc<Auth>` that the
+		// `arc_auth` helper serializes as its inner `Auth`.
+		assert_eq!(original, restored);
+		assert!(restored.au.is_root());
+		assert_eq!(restored.ns.as_deref(), Some("app"));
+		assert_eq!(restored.db.as_deref(), Some("app"));
 	}
 }

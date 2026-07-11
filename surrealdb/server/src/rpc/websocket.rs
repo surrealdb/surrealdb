@@ -707,7 +707,7 @@ impl Websocket {
 		if self.datastore.observer().is_noop() {
 			return NetworkBytesEventCtx::default();
 		}
-		match self.get_session(&self.id) {
+		match self.get_session(&self.id).await {
 			Ok(lock) => NetworkBytesEventCtx::from_session(&*lock.read().await),
 			Err(_) => NetworkBytesEventCtx::default(),
 		}
