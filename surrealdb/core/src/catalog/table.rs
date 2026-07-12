@@ -246,6 +246,26 @@ impl InfoStructure for TableType {
 	}
 }
 
+impl From<sql::table_type::TableType> for TableType {
+	fn from(v: sql::table_type::TableType) -> Self {
+		match v {
+			sql::table_type::TableType::Any => Self::Any,
+			sql::table_type::TableType::Normal => Self::Normal,
+			sql::table_type::TableType::Relation(rel) => Self::Relation(rel.into()),
+		}
+	}
+}
+
+impl From<TableType> for sql::table_type::TableType {
+	fn from(v: TableType) -> Self {
+		match v {
+			TableType::Any => Self::Any,
+			TableType::Normal => Self::Normal,
+			TableType::Relation(rel) => Self::Relation(rel.into()),
+		}
+	}
+}
+
 #[revisioned(revision = 2)]
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct Relation {
@@ -288,5 +308,25 @@ impl Relation {
 			self.to = x
 		}
 		Ok(())
+	}
+}
+
+impl From<sql::table_type::Relation> for Relation {
+	fn from(v: sql::table_type::Relation) -> Self {
+		Self {
+			from: v.from,
+			to: v.to,
+			enforced: v.enforced,
+		}
+	}
+}
+
+impl From<Relation> for sql::table_type::Relation {
+	fn from(v: Relation) -> Self {
+		Self {
+			from: v.from,
+			to: v.to,
+			enforced: v.enforced,
+		}
 	}
 }

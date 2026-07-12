@@ -1,8 +1,8 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
+use crate::expr;
 use crate::fmt::EscapeKwFreeIdent;
 use crate::val::File;
-use crate::{catalog, expr};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -28,28 +28,6 @@ impl ToSql for ModuleName {
 	}
 }
 
-impl From<ModuleName> for crate::catalog::ModuleName {
-	fn from(v: ModuleName) -> Self {
-		match v {
-			ModuleName::Module(name) => crate::catalog::ModuleName::Module(name),
-			ModuleName::Silo(org, pkg, major, minor, patch) => {
-				crate::catalog::ModuleName::Silo(org, pkg, major, minor, patch)
-			}
-		}
-	}
-}
-
-impl From<crate::catalog::ModuleName> for ModuleName {
-	fn from(v: crate::catalog::ModuleName) -> Self {
-		match v {
-			crate::catalog::ModuleName::Module(name) => ModuleName::Module(name),
-			crate::catalog::ModuleName::Silo(org, pkg, major, minor, patch) => {
-				ModuleName::Silo(org, pkg, major, minor, patch)
-			}
-		}
-	}
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) enum ModuleExecutable {
@@ -64,17 +42,6 @@ impl From<expr::ModuleExecutable> for ModuleExecutable {
 				ModuleExecutable::Surrealism(surrealism.into())
 			}
 			expr::ModuleExecutable::Silo(silo) => ModuleExecutable::Silo(silo.into()),
-		}
-	}
-}
-
-impl From<catalog::ModuleExecutable> for ModuleExecutable {
-	fn from(executable: catalog::ModuleExecutable) -> Self {
-		match executable {
-			catalog::ModuleExecutable::Surrealism(surrealism) => {
-				ModuleExecutable::Surrealism(surrealism.into())
-			}
-			catalog::ModuleExecutable::Silo(silo) => ModuleExecutable::Silo(silo.into()),
 		}
 	}
 }
@@ -109,12 +76,6 @@ impl From<expr::SurrealismExecutable> for SurrealismExecutable {
 	}
 }
 
-impl From<catalog::SurrealismExecutable> for SurrealismExecutable {
-	fn from(executable: catalog::SurrealismExecutable) -> Self {
-		Self(File::new(executable.bucket, executable.key))
-	}
-}
-
 impl From<SurrealismExecutable> for expr::SurrealismExecutable {
 	fn from(executable: SurrealismExecutable) -> Self {
 		expr::SurrealismExecutable(executable.0)
@@ -139,18 +100,6 @@ pub(crate) struct SiloExecutable {
 
 impl From<expr::SiloExecutable> for SiloExecutable {
 	fn from(executable: expr::SiloExecutable) -> Self {
-		Self {
-			organisation: executable.organisation,
-			package: executable.package,
-			major: executable.major,
-			minor: executable.minor,
-			patch: executable.patch,
-		}
-	}
-}
-
-impl From<catalog::SiloExecutable> for SiloExecutable {
-	fn from(executable: catalog::SiloExecutable) -> Self {
 		Self {
 			organisation: executable.organisation,
 			package: executable.package,

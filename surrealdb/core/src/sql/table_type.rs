@@ -50,26 +50,6 @@ impl ToSql for TableType {
 	}
 }
 
-impl From<TableType> for crate::catalog::TableType {
-	fn from(v: TableType) -> Self {
-		match v {
-			TableType::Any => Self::Any,
-			TableType::Normal => Self::Normal,
-			TableType::Relation(rel) => Self::Relation(rel.into()),
-		}
-	}
-}
-
-impl From<crate::catalog::TableType> for TableType {
-	fn from(v: crate::catalog::TableType) -> Self {
-		match v {
-			crate::catalog::TableType::Any => Self::Any,
-			crate::catalog::TableType::Normal => Self::Normal,
-			crate::catalog::TableType::Relation(rel) => Self::Relation(rel.into()),
-		}
-	}
-}
-
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Relation {
@@ -78,24 +58,4 @@ pub struct Relation {
 	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
 	pub to: Vec<TableName>,
 	pub enforced: bool,
-}
-
-impl From<Relation> for crate::catalog::Relation {
-	fn from(v: Relation) -> Self {
-		Self {
-			from: v.from,
-			to: v.to,
-			enforced: v.enforced,
-		}
-	}
-}
-
-impl From<crate::catalog::Relation> for Relation {
-	fn from(v: crate::catalog::Relation) -> Self {
-		Self {
-			from: v.from,
-			to: v.to,
-			enforced: v.enforced,
-		}
-	}
 }

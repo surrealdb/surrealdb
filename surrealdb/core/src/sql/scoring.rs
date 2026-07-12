@@ -69,32 +69,3 @@ impl ToSql for Scoring {
 		}
 	}
 }
-
-impl From<Scoring> for crate::catalog::Scoring {
-	fn from(v: Scoring) -> Self {
-		match v {
-			Scoring::Bm {
-				k1,
-				b,
-			} => crate::catalog::Scoring::Bm {
-				k1,
-				b,
-			},
-			Scoring::Vs => crate::catalog::Scoring::Vs,
-		}
-	}
-}
-impl From<crate::catalog::Scoring> for Scoring {
-	fn from(v: crate::catalog::Scoring) -> Self {
-		match v {
-			crate::catalog::Scoring::Bm {
-				k1,
-				b,
-			} => Self::Bm {
-				k1,
-				b,
-			},
-			crate::catalog::Scoring::Vs => Self::Vs,
-		}
-	}
-}

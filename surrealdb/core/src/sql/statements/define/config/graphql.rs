@@ -14,30 +14,6 @@ pub struct GraphQLConfig {
 	pub introspection: IntrospectionConfig,
 }
 
-impl From<GraphQLConfig> for crate::catalog::GraphQLConfig {
-	fn from(v: GraphQLConfig) -> Self {
-		crate::catalog::GraphQLConfig {
-			tables: v.tables.into(),
-			functions: v.functions.into(),
-			depth_limit: v.depth_limit,
-			complexity_limit: v.complexity_limit,
-			introspection: v.introspection.into(),
-		}
-	}
-}
-
-impl From<crate::catalog::GraphQLConfig> for GraphQLConfig {
-	fn from(v: crate::catalog::GraphQLConfig) -> Self {
-		GraphQLConfig {
-			tables: v.tables.into(),
-			functions: v.functions.into(),
-			depth_limit: v.depth_limit,
-			complexity_limit: v.complexity_limit,
-			introspection: v.introspection.into(),
-		}
-	}
-}
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum TablesConfig {
@@ -52,40 +28,6 @@ pub enum TablesConfig {
 		#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
 		Vec<TableConfig>,
 	),
-}
-
-impl From<TablesConfig> for crate::catalog::GraphQLTablesConfig {
-	fn from(v: TablesConfig) -> Self {
-		match v {
-			TablesConfig::None => Self::None,
-			TablesConfig::Auto => Self::Auto,
-			TablesConfig::Include(cs) => Self::Include(cs.into_iter().map(|t| t.name).collect()),
-			TablesConfig::Exclude(cs) => Self::Exclude(cs.into_iter().map(|t| t.name).collect()),
-		}
-	}
-}
-
-impl From<crate::catalog::GraphQLTablesConfig> for TablesConfig {
-	fn from(v: crate::catalog::GraphQLTablesConfig) -> Self {
-		match v {
-			crate::catalog::GraphQLTablesConfig::None => Self::None,
-			crate::catalog::GraphQLTablesConfig::Auto => Self::Auto,
-			crate::catalog::GraphQLTablesConfig::Include(cs) => Self::Include(
-				cs.into_iter()
-					.map(|t| TableConfig {
-						name: t,
-					})
-					.collect(),
-			),
-			crate::catalog::GraphQLTablesConfig::Exclude(cs) => Self::Exclude(
-				cs.into_iter()
-					.map(|t| TableConfig {
-						name: t,
-					})
-					.collect(),
-			),
-		}
-	}
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
@@ -125,24 +67,6 @@ pub enum IntrospectionConfig {
 	None,
 }
 
-impl From<IntrospectionConfig> for crate::catalog::GraphQLIntrospectionConfig {
-	fn from(v: IntrospectionConfig) -> Self {
-		match v {
-			IntrospectionConfig::Auto => Self::Auto,
-			IntrospectionConfig::None => Self::None,
-		}
-	}
-}
-
-impl From<crate::catalog::GraphQLIntrospectionConfig> for IntrospectionConfig {
-	fn from(v: crate::catalog::GraphQLIntrospectionConfig) -> Self {
-		match v {
-			crate::catalog::GraphQLIntrospectionConfig::Auto => Self::Auto,
-			crate::catalog::GraphQLIntrospectionConfig::None => Self::None,
-		}
-	}
-}
-
 impl ToSql for IntrospectionConfig {
 	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		match self {
@@ -169,28 +93,6 @@ impl ToSql for GraphQLConfig {
 		if matches!(self.introspection, IntrospectionConfig::None) {
 			f.push_str(" INTROSPECTION ");
 			self.introspection.fmt_sql(f, fmt);
-		}
-	}
-}
-
-impl From<FunctionsConfig> for crate::catalog::GraphQLFunctionsConfig {
-	fn from(v: FunctionsConfig) -> Self {
-		match v {
-			FunctionsConfig::None => Self::None,
-			FunctionsConfig::Auto => Self::Auto,
-			FunctionsConfig::Include(cs) => Self::Include(cs),
-			FunctionsConfig::Exclude(cs) => Self::Exclude(cs),
-		}
-	}
-}
-
-impl From<crate::catalog::GraphQLFunctionsConfig> for FunctionsConfig {
-	fn from(v: crate::catalog::GraphQLFunctionsConfig) -> Self {
-		match v {
-			crate::catalog::GraphQLFunctionsConfig::None => Self::None,
-			crate::catalog::GraphQLFunctionsConfig::Auto => Self::Auto,
-			crate::catalog::GraphQLFunctionsConfig::Include(cs) => Self::Include(cs),
-			crate::catalog::GraphQLFunctionsConfig::Exclude(cs) => Self::Exclude(cs),
 		}
 	}
 }

@@ -243,6 +243,32 @@ impl ToSql for Index {
 	}
 }
 
+impl From<sql::index::Index> for Index {
+	fn from(v: sql::index::Index) -> Self {
+		match v {
+			sql::index::Index::Idx => Self::Idx,
+			sql::index::Index::Uniq => Self::Uniq,
+			sql::index::Index::Hnsw(p) => Self::Hnsw(p.into()),
+			sql::index::Index::DiskAnn(p) => Self::DiskAnn(p.into()),
+			sql::index::Index::FullText(p) => Self::FullText(p.into()),
+			sql::index::Index::Count(c) => Self::Count(c.map(Into::into)),
+		}
+	}
+}
+
+impl From<Index> for sql::index::Index {
+	fn from(v: Index) -> Self {
+		match v {
+			Index::Idx => Self::Idx,
+			Index::Uniq => Self::Uniq,
+			Index::Hnsw(p) => Self::Hnsw(p.into()),
+			Index::DiskAnn(p) => Self::DiskAnn(p.into()),
+			Index::FullText(p) => Self::FullText(p.into()),
+			Index::Count(c) => Self::Count(c.map(Into::into)),
+		}
+	}
+}
+
 /// Full-Text search parameters.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -253,6 +279,26 @@ pub struct FullTextParams {
 	pub highlight: bool,
 	/// The scoring to use.
 	pub scoring: Scoring,
+}
+
+impl From<sql::index::FullTextParams> for FullTextParams {
+	fn from(v: sql::index::FullTextParams) -> Self {
+		FullTextParams {
+			analyzer: v.az.clone(),
+			highlight: v.hl,
+			scoring: v.sc.into(),
+		}
+	}
+}
+
+impl From<FullTextParams> for sql::index::FullTextParams {
+	fn from(v: FullTextParams) -> Self {
+		Self {
+			az: v.analyzer.clone(),
+			hl: v.highlight,
+			sc: v.scoring.into(),
+		}
+	}
 }
 
 /// Scoring for Full-Text search.
@@ -313,6 +359,36 @@ impl Default for Scoring {
 		Self::Bm {
 			k1: 1.2,
 			b: 0.75,
+		}
+	}
+}
+
+impl From<sql::scoring::Scoring> for Scoring {
+	fn from(v: sql::scoring::Scoring) -> Self {
+		match v {
+			sql::scoring::Scoring::Bm {
+				k1,
+				b,
+			} => Self::Bm {
+				k1,
+				b,
+			},
+			sql::scoring::Scoring::Vs => Self::Vs,
+		}
+	}
+}
+
+impl From<Scoring> for sql::scoring::Scoring {
+	fn from(v: Scoring) -> Self {
+		match v {
+			Scoring::Bm {
+				k1,
+				b,
+			} => sql::scoring::Scoring::Bm {
+				k1,
+				b,
+			},
+			Scoring::Vs => sql::scoring::Scoring::Vs,
 		}
 	}
 }
@@ -418,6 +494,40 @@ impl ToSql for Distance {
 	}
 }
 
+impl From<sql::index::Distance> for Distance {
+	fn from(v: sql::index::Distance) -> Self {
+		match v {
+			sql::index::Distance::Chebyshev => Self::Chebyshev,
+			sql::index::Distance::Cosine => Self::Cosine,
+			sql::index::Distance::CosineNormalized => Self::CosineNormalized,
+			sql::index::Distance::Euclidean => Self::Euclidean,
+			sql::index::Distance::Hamming => Self::Hamming,
+			sql::index::Distance::InnerProduct => Self::InnerProduct,
+			sql::index::Distance::Jaccard => Self::Jaccard,
+			sql::index::Distance::Manhattan => Self::Manhattan,
+			sql::index::Distance::Minkowski(n) => Self::Minkowski(n.into()),
+			sql::index::Distance::Pearson => Self::Pearson,
+		}
+	}
+}
+
+impl From<Distance> for sql::index::Distance {
+	fn from(v: Distance) -> Self {
+		match v {
+			Distance::Chebyshev => sql::index::Distance::Chebyshev,
+			Distance::Cosine => sql::index::Distance::Cosine,
+			Distance::CosineNormalized => sql::index::Distance::CosineNormalized,
+			Distance::Euclidean => sql::index::Distance::Euclidean,
+			Distance::Hamming => sql::index::Distance::Hamming,
+			Distance::InnerProduct => sql::index::Distance::InnerProduct,
+			Distance::Jaccard => sql::index::Distance::Jaccard,
+			Distance::Manhattan => sql::index::Distance::Manhattan,
+			Distance::Minkowski(n) => sql::index::Distance::Minkowski(n.into()),
+			Distance::Pearson => sql::index::Distance::Pearson,
+		}
+	}
+}
+
 /// Vector type for storing vectors.
 #[revisioned(revision = 2)]
 #[derive(Clone, Copy, Default, Debug, Eq, PartialEq, Hash)]
@@ -459,6 +569,36 @@ impl Display for VectorType {
 	}
 }
 
+impl From<sql::index::VectorType> for VectorType {
+	fn from(v: sql::index::VectorType) -> Self {
+		match v {
+			sql::index::VectorType::F64 => Self::F64,
+			sql::index::VectorType::F16 => Self::F16,
+			sql::index::VectorType::F32 => Self::F32,
+			sql::index::VectorType::I64 => Self::I64,
+			sql::index::VectorType::I32 => Self::I32,
+			sql::index::VectorType::I16 => Self::I16,
+			sql::index::VectorType::I8 => Self::I8,
+			sql::index::VectorType::U8 => Self::U8,
+		}
+	}
+}
+
+impl From<VectorType> for sql::index::VectorType {
+	fn from(v: VectorType) -> Self {
+		match v {
+			VectorType::F64 => Self::F64,
+			VectorType::F16 => Self::F16,
+			VectorType::F32 => Self::F32,
+			VectorType::I64 => Self::I64,
+			VectorType::I32 => Self::I32,
+			VectorType::I16 => Self::I16,
+			VectorType::I8 => Self::I8,
+			VectorType::U8 => Self::U8,
+		}
+	}
+}
+
 /// HNSW index parameters.
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -486,6 +626,40 @@ pub(crate) struct HnswParams {
 	pub use_hashed_vector: bool,
 }
 
+impl From<sql::index::HnswParams> for HnswParams {
+	fn from(v: sql::index::HnswParams) -> Self {
+		HnswParams {
+			dimension: v.dimension,
+			distance: v.distance.into(),
+			vector_type: v.vector_type.into(),
+			m: v.m,
+			m0: v.m0,
+			ef_construction: v.ef_construction,
+			ml: v.ml.into(),
+			extend_candidates: v.extend_candidates,
+			keep_pruned_connections: v.keep_pruned_connections,
+			use_hashed_vector: v.use_hashed_vector,
+		}
+	}
+}
+
+impl From<HnswParams> for sql::index::HnswParams {
+	fn from(v: HnswParams) -> Self {
+		Self {
+			dimension: v.dimension,
+			distance: v.distance.into(),
+			vector_type: v.vector_type.into(),
+			m: v.m,
+			m0: v.m0,
+			ef_construction: v.ef_construction,
+			ml: v.ml.into(),
+			extend_candidates: v.extend_candidates,
+			keep_pruned_connections: v.keep_pruned_connections,
+			use_hashed_vector: v.use_hashed_vector,
+		}
+	}
+}
+
 /// DiskANN index parameters.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -504,6 +678,34 @@ pub(crate) struct DiskAnnParams {
 	pub alpha: Number,
 	/// Whether to use vector hashes for vector retrieval.
 	pub use_hashed_vector: bool,
+}
+
+impl From<sql::index::DiskAnnParams> for DiskAnnParams {
+	fn from(v: sql::index::DiskAnnParams) -> Self {
+		DiskAnnParams {
+			dimension: v.dimension,
+			distance: v.distance.into(),
+			vector_type: v.vector_type.into(),
+			degree: v.degree,
+			l_build: v.l_build,
+			alpha: v.alpha.into(),
+			use_hashed_vector: v.use_hashed_vector,
+		}
+	}
+}
+
+impl From<DiskAnnParams> for sql::index::DiskAnnParams {
+	fn from(v: DiskAnnParams) -> Self {
+		Self {
+			dimension: v.dimension,
+			distance: v.distance.into(),
+			vector_type: v.vector_type.into(),
+			degree: v.degree,
+			l_build: v.l_build,
+			alpha: v.alpha.into(),
+			use_hashed_vector: v.use_hashed_vector,
+		}
+	}
 }
 
 #[cfg(test)]

@@ -23,57 +23,12 @@ pub(crate) enum Index {
 	Count(Option<Cond>),
 }
 
-impl From<Index> for crate::catalog::Index {
-	fn from(v: Index) -> Self {
-		match v {
-			Index::Idx => Self::Idx,
-			Index::Uniq => Self::Uniq,
-			Index::Hnsw(p) => Self::Hnsw(p.into()),
-			Index::DiskAnn(p) => Self::DiskAnn(p.into()),
-			Index::FullText(p) => Self::FullText(p.into()),
-			Index::Count(c) => Self::Count(c.map(Into::into)),
-		}
-	}
-}
-
-impl From<crate::catalog::Index> for Index {
-	fn from(v: crate::catalog::Index) -> Self {
-		match v {
-			crate::catalog::Index::Idx => Self::Idx,
-			crate::catalog::Index::Uniq => Self::Uniq,
-			crate::catalog::Index::Hnsw(p) => Self::Hnsw(p.into()),
-			crate::catalog::Index::DiskAnn(p) => Self::DiskAnn(p.into()),
-			crate::catalog::Index::FullText(p) => Self::FullText(p.into()),
-			crate::catalog::Index::Count(c) => Self::Count(c.map(Into::into)),
-		}
-	}
-}
-
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct FullTextParams {
 	pub az: Strand,
 	pub hl: bool,
 	pub sc: Scoring,
-}
-
-impl From<FullTextParams> for crate::catalog::FullTextParams {
-	fn from(v: FullTextParams) -> Self {
-		crate::catalog::FullTextParams {
-			analyzer: v.az.clone(),
-			highlight: v.hl,
-			scoring: v.sc.into(),
-		}
-	}
-}
-impl From<crate::catalog::FullTextParams> for FullTextParams {
-	fn from(v: crate::catalog::FullTextParams) -> Self {
-		Self {
-			az: v.analyzer.clone(),
-			hl: v.highlight,
-			sc: v.scoring.into(),
-		}
-	}
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
@@ -89,40 +44,6 @@ pub(crate) struct HnswParams {
 	pub keep_pruned_connections: bool,
 	pub ml: PublicNumber,
 	pub use_hashed_vector: bool,
-}
-
-impl From<HnswParams> for crate::catalog::HnswParams {
-	fn from(v: HnswParams) -> Self {
-		crate::catalog::HnswParams {
-			dimension: v.dimension,
-			distance: v.distance.into(),
-			vector_type: v.vector_type.into(),
-			m: v.m,
-			m0: v.m0,
-			ef_construction: v.ef_construction,
-			ml: v.ml.into(),
-			extend_candidates: v.extend_candidates,
-			keep_pruned_connections: v.keep_pruned_connections,
-			use_hashed_vector: v.use_hashed_vector,
-		}
-	}
-}
-
-impl From<crate::catalog::HnswParams> for HnswParams {
-	fn from(v: crate::catalog::HnswParams) -> Self {
-		Self {
-			dimension: v.dimension,
-			distance: v.distance.into(),
-			vector_type: v.vector_type.into(),
-			m: v.m,
-			m0: v.m0,
-			ef_construction: v.ef_construction,
-			ml: v.ml.into(),
-			extend_candidates: v.extend_candidates,
-			keep_pruned_connections: v.keep_pruned_connections,
-			use_hashed_vector: v.use_hashed_vector,
-		}
-	}
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
@@ -142,34 +63,6 @@ pub(crate) struct DiskAnnParams {
 	pub alpha: PublicNumber,
 	/// Whether vector-document mappings are keyed by vector hash.
 	pub use_hashed_vector: bool,
-}
-
-impl From<DiskAnnParams> for crate::catalog::DiskAnnParams {
-	fn from(v: DiskAnnParams) -> Self {
-		crate::catalog::DiskAnnParams {
-			dimension: v.dimension,
-			distance: v.distance.into(),
-			vector_type: v.vector_type.into(),
-			degree: v.degree,
-			l_build: v.l_build,
-			alpha: v.alpha.into(),
-			use_hashed_vector: v.use_hashed_vector,
-		}
-	}
-}
-
-impl From<crate::catalog::DiskAnnParams> for DiskAnnParams {
-	fn from(v: crate::catalog::DiskAnnParams) -> Self {
-		Self {
-			dimension: v.dimension,
-			distance: v.distance.into(),
-			vector_type: v.vector_type.into(),
-			degree: v.degree,
-			l_build: v.l_build,
-			alpha: v.alpha.into(),
-			use_hashed_vector: v.use_hashed_vector,
-		}
-	}
 }
 
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Hash)]
@@ -211,40 +104,6 @@ impl ToSql for Distance {
 			Self::Manhattan => f.push_str("MANHATTAN"),
 			Self::Minkowski(order) => write_sql!(f, fmt, "MINKOWSKI {}", order),
 			Self::Pearson => f.push_str("PEARSON"),
-		}
-	}
-}
-
-impl From<Distance> for crate::catalog::Distance {
-	fn from(v: Distance) -> Self {
-		match v {
-			Distance::Chebyshev => crate::catalog::Distance::Chebyshev,
-			Distance::Cosine => crate::catalog::Distance::Cosine,
-			Distance::CosineNormalized => crate::catalog::Distance::CosineNormalized,
-			Distance::Euclidean => crate::catalog::Distance::Euclidean,
-			Distance::Hamming => crate::catalog::Distance::Hamming,
-			Distance::InnerProduct => crate::catalog::Distance::InnerProduct,
-			Distance::Jaccard => crate::catalog::Distance::Jaccard,
-			Distance::Manhattan => crate::catalog::Distance::Manhattan,
-			Distance::Minkowski(n) => crate::catalog::Distance::Minkowski(n.into()),
-			Distance::Pearson => crate::catalog::Distance::Pearson,
-		}
-	}
-}
-
-impl From<crate::catalog::Distance> for Distance {
-	fn from(v: crate::catalog::Distance) -> Self {
-		match v {
-			crate::catalog::Distance::Chebyshev => Self::Chebyshev,
-			crate::catalog::Distance::Cosine => Self::Cosine,
-			crate::catalog::Distance::CosineNormalized => Self::CosineNormalized,
-			crate::catalog::Distance::Euclidean => Self::Euclidean,
-			crate::catalog::Distance::Hamming => Self::Hamming,
-			crate::catalog::Distance::InnerProduct => Self::InnerProduct,
-			crate::catalog::Distance::Jaccard => Self::Jaccard,
-			crate::catalog::Distance::Manhattan => Self::Manhattan,
-			crate::catalog::Distance::Minkowski(n) => Self::Minkowski(n.into()),
-			crate::catalog::Distance::Pearson => Self::Pearson,
 		}
 	}
 }
@@ -342,36 +201,6 @@ impl ToSql for Index {
 					f.push_str(" HASHED_VECTOR")
 				}
 			}
-		}
-	}
-}
-
-impl From<VectorType> for crate::catalog::VectorType {
-	fn from(v: VectorType) -> Self {
-		match v {
-			VectorType::F64 => Self::F64,
-			VectorType::F16 => Self::F16,
-			VectorType::F32 => Self::F32,
-			VectorType::I64 => Self::I64,
-			VectorType::I32 => Self::I32,
-			VectorType::I16 => Self::I16,
-			VectorType::I8 => Self::I8,
-			VectorType::U8 => Self::U8,
-		}
-	}
-}
-
-impl From<crate::catalog::VectorType> for VectorType {
-	fn from(v: crate::catalog::VectorType) -> Self {
-		match v {
-			crate::catalog::VectorType::F64 => Self::F64,
-			crate::catalog::VectorType::F16 => Self::F16,
-			crate::catalog::VectorType::F32 => Self::F32,
-			crate::catalog::VectorType::I64 => Self::I64,
-			crate::catalog::VectorType::I32 => Self::I32,
-			crate::catalog::VectorType::I16 => Self::I16,
-			crate::catalog::VectorType::I8 => Self::I8,
-			crate::catalog::VectorType::U8 => Self::U8,
 		}
 	}
 }

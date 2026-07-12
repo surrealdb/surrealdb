@@ -4,7 +4,8 @@ use revision::revisioned;
 
 use crate::catalog::ModuleDefinition;
 use crate::expr::statements::info::InfoStructure;
-use crate::val::Value;
+use crate::sql;
+use crate::val::{File, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -18,6 +19,17 @@ impl InfoStructure for ModuleExecutable {
 		match self {
 			ModuleExecutable::Surrealism(surrealism) => surrealism.structure(),
 			ModuleExecutable::Silo(silo) => silo.structure(),
+		}
+	}
+}
+
+impl From<ModuleExecutable> for sql::module::ModuleExecutable {
+	fn from(executable: ModuleExecutable) -> Self {
+		match executable {
+			ModuleExecutable::Surrealism(surrealism) => {
+				sql::module::ModuleExecutable::Surrealism(surrealism.into())
+			}
+			ModuleExecutable::Silo(silo) => sql::module::ModuleExecutable::Silo(silo.into()),
 		}
 	}
 }
@@ -36,6 +48,12 @@ impl InfoStructure for SurrealismExecutable {
 			"bucket" => self.bucket.into(),
 			"key" => self.key.into(),
 		})
+	}
+}
+
+impl From<SurrealismExecutable> for sql::module::SurrealismExecutable {
+	fn from(executable: SurrealismExecutable) -> Self {
+		Self(File::new(executable.bucket, executable.key))
 	}
 }
 
@@ -62,6 +80,18 @@ impl InfoStructure for SiloExecutable {
 	}
 }
 
+impl From<SiloExecutable> for sql::module::SiloExecutable {
+	fn from(executable: SiloExecutable) -> Self {
+		Self {
+			organisation: executable.organisation,
+			package: executable.package,
+			major: executable.major,
+			minor: executable.minor,
+			patch: executable.patch,
+		}
+	}
+}
+
 // This enum is not actually stored, but is used to generate the storage name of a module
 // Therefor I found it to fit better inside catalog, and to then let expr use this enum aswell,
 // to have a single point where the storage name is generated.
@@ -77,6 +107,28 @@ impl ModuleName {
 			ModuleName::Module(name) => format!("mod::{}", name),
 			ModuleName::Silo(org, pkg, major, minor, patch) => {
 				format!("silo::{org}::{pkg}<{major}.{minor}.{patch}>")
+			}
+		}
+	}
+}
+
+impl From<sql::module::ModuleName> for ModuleName {
+	fn from(v: sql::module::ModuleName) -> Self {
+		match v {
+			sql::module::ModuleName::Module(name) => ModuleName::Module(name),
+			sql::module::ModuleName::Silo(org, pkg, major, minor, patch) => {
+				ModuleName::Silo(org, pkg, major, minor, patch)
+			}
+		}
+	}
+}
+
+impl From<ModuleName> for sql::module::ModuleName {
+	fn from(v: ModuleName) -> Self {
+		match v {
+			ModuleName::Module(name) => sql::module::ModuleName::Module(name),
+			ModuleName::Silo(org, pkg, major, minor, patch) => {
+				sql::module::ModuleName::Silo(org, pkg, major, minor, patch)
 			}
 		}
 	}
