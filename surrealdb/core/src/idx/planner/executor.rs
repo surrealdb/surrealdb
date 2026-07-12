@@ -860,9 +860,13 @@ impl QueryExecutor {
 		if fte.0.qt.is_empty() {
 			return Ok(false);
 		}
+		// Analyze the value on the idiom side of the expression (the document's
+		// field value, e.g. the record-link target's text for `t.name @@ 'x'`),
+		// not the query literal on the other side — analyzing the query against
+		// its own terms would make every candidate match.
 		let v = match fte.0.io.idiom_position() {
-			IdiomPosition::Left => r,
-			IdiomPosition::Right => l,
+			IdiomPosition::Left => l,
+			IdiomPosition::Right => r,
 			IdiomPosition::None => return Ok(false),
 		};
 		// Check if the value matches the query terms

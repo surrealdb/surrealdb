@@ -39,7 +39,7 @@ pub(crate) use function::{
 };
 pub(crate) use idiom::IdiomExpr;
 pub(crate) use literal::{Literal, MockExpr, Param};
-pub(crate) use matches::MatchesOp;
+pub(crate) use matches::{MatchesOp, MatchesScope, collect_cond_matches};
 pub(crate) use ops::{BinaryOp, PostfixOp, SimpleBinaryOp, UnaryOp};
 pub(crate) use record_id::RecordIdExpr;
 pub(crate) use subquery::ScalarSubquery;

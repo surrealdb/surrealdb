@@ -513,7 +513,7 @@ impl FullTextIndex {
 		})
 	}
 
-	pub(in crate::idx) async fn matches_value(
+	pub(crate) async fn matches_value(
 		&self,
 		stk: &mut Stk,
 		ctx: &FrozenContext,

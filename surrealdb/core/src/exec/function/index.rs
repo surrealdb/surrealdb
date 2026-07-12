@@ -167,8 +167,12 @@ pub struct MatchContext {
 	pub query: String,
 	/// The table name for index lookup.
 	pub table: TableName,
-	/// Lazily initialized full-text index resources.
-	ft_cache: tokio::sync::OnceCell<(FullTextIndex, QueryTerms, Option<Scorer>)>,
+	/// Lazily initialized full-text index resources. The inner `Option` is
+	/// `None` when no full-text index on `table` covers `idiom` — e.g. a
+	/// MATCHES traversing a record link to an index on another table — in
+	/// which case score/highlight/offsets yield `NONE`, matching the legacy
+	/// executor's missing-match-ref-entry behaviour.
+	ft_cache: tokio::sync::OnceCell<Option<(FullTextIndex, QueryTerms, Option<Scorer>)>>,
 }
 
 impl MatchContext {
@@ -186,11 +190,13 @@ impl MatchContext {
 	///
 	/// On first call, this looks up the full-text index definition for the
 	/// table/idiom, opens the FullTextIndex, extracts QueryTerms, and
-	/// optionally creates a Scorer. Subsequent calls return the cached result.
+	/// optionally creates a Scorer. Subsequent calls return the cached
+	/// result. Returns `Ok(None)` when no full-text index on the table
+	/// covers the idiom (see the `ft_cache` field docs).
 	pub async fn ft_resources(
 		&self,
 		ctx: &EvalContext<'_>,
-	) -> Result<&(FullTextIndex, QueryTerms, Option<Scorer>)> {
+	) -> Result<&Option<(FullTextIndex, QueryTerms, Option<Scorer>)>> {
 		self.ft_cache
 			.get_or_try_init(|| async {
 				use crate::catalog::providers::TableProvider;
@@ -221,19 +227,16 @@ impl MatchContext {
 				} else {
 					indexes
 				};
-				let index_def = indexes
-					.iter()
-					.find(|idx| {
-						matches!(&idx.index, Index::FullText(_))
-							&& idx.cols.iter().any(|col| col.0 == self.idiom.0)
-					})
-					.ok_or_else(|| {
-						anyhow::anyhow!(
-							"No full-text index found for field {:?} on table {}",
-							self.idiom,
-							self.table
-						)
-					})?;
+				let index_def = match indexes.iter().find(|idx| {
+					matches!(&idx.index, Index::FullText(_))
+						&& idx.cols.iter().any(|col| col.0 == self.idiom.0)
+				}) {
+					Some(def) => def,
+					// No index on this table covers the idiom (e.g. the
+					// MATCHES traverses a record link) → score/highlight/
+					// offsets yield NONE, like the legacy executor.
+					None => return Ok(None),
+				};
 
 				// Reject a full-text index whose on-disk format predates the
 				// shared table-level doc-ID space; it must be rebuilt before it
@@ -272,7 +275,7 @@ impl MatchContext {
 				// Create scorer if BM25 is configured
 				let scorer = fti.new_scorer(frozen).await?;
 
-				Ok((fti, query_terms, scorer))
+				Ok(Some((fti, query_terms, scorer)))
 			})
 			.await
 	}

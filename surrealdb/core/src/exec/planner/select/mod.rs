@@ -942,6 +942,17 @@ impl<'ctx> Planner<'ctx> {
 		let source_is_single_scan = what.len() == 1
 			&& matches!(what[0], Expr::Table(_) | Expr::FunctionCall(_) | Expr::Postfix { .. });
 
+		// Collect the MATCHES expressions registered by this SELECT's WHERE
+		// condition (legacy-executor parity — see `MatchesScope`). Walked
+		// again after param resolution and constant folding below so that
+		// both the original nodes (as projections reference them) and the
+		// rewritten nodes (as the residual scan predicate contains them) are
+		// in the allowlist.
+		let mut cond_matches = std::collections::HashSet::new();
+		if let Some(ref c) = cond {
+			crate::exec::physical_expr::collect_cond_matches(&c.0, &mut cond_matches);
+		}
+
 		// Resolve bind-parameter references so that downstream index analysis
 		// and KNN extraction see Expr::Literal instead of Expr::Param.
 		// This covers LET bindings, client bind params, and DEFINE PARAM.
@@ -965,6 +976,28 @@ impl<'ctx> Planner<'ctx> {
 			}
 			None => None,
 		};
+
+		// Finalize the MATCHES registration scope on the inner planner:
+		// allowlist from both condition forms, executor tables from the full
+		// table sources (record-id sources never get a legacy
+		// `QueryExecutor`, so their rows evaluate MATCHES to `false` — see
+		// `Iterator::prepare_record_id`).
+		{
+			if let Some(ref c) = cond {
+				crate::exec::physical_expr::collect_cond_matches(&c.0, &mut cond_matches);
+			}
+			let executor_tables: Vec<crate::val::TableName> = what
+				.iter()
+				.filter_map(|e| match e {
+					Expr::Table(t) => Some(t.clone()),
+					_ => None,
+				})
+				.collect();
+			pp.set_matches_scope(Arc::new(crate::exec::physical_expr::MatchesScope {
+				allowlist: cond_matches,
+				executor_tables: Arc::from(executor_tables),
+			}));
+		}
 
 		// KNN handling
 		let has_knn = cond.as_ref().is_some_and(|c| has_knn_operator(&c.0));

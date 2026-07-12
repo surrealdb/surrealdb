@@ -207,8 +207,11 @@ impl IndexFunction for SearchHighlight {
 			// Get the current document value
 			let doc = ctx.current_value.unwrap_or(&Value::None);
 
-			// Get the full-text index resources (lazy init)
-			let (fti, qt, _scorer) = match_ctx.ft_resources(ctx).await?;
+			// Get the full-text index resources (lazy init); no index on
+			// the scan table covering the idiom → NONE (legacy parity).
+			let Some((fti, qt, _scorer)) = match_ctx.ft_resources(ctx).await? else {
+				return Ok(Value::None);
+			};
 
 			let tx = ctx.txn();
 
@@ -274,8 +277,11 @@ impl IndexFunction for SearchScore {
 			// Extract RecordId from the current row
 			let rid = extract_record_id(ctx)?;
 
-			// Get the full-text index resources (lazy init)
-			let (fti, qt, scorer) = match_ctx.ft_resources(ctx).await?;
+			// Get the full-text index resources (lazy init); no index on
+			// the scan table covering the idiom → NONE (legacy parity).
+			let Some((fti, qt, scorer)) = match_ctx.ft_resources(ctx).await? else {
+				return Ok(Value::None);
+			};
 
 			let scorer = match scorer {
 				Some(s) => s,
@@ -355,8 +361,11 @@ impl IndexFunction for SearchOffsets {
 			// Extract RecordId from the current row
 			let rid = extract_record_id(ctx)?;
 
-			// Get the full-text index resources (lazy init)
-			let (fti, qt, _scorer) = match_ctx.ft_resources(ctx).await?;
+			// Get the full-text index resources (lazy init); no index on
+			// the scan table covering the idiom → NONE (legacy parity).
+			let Some((fti, qt, _scorer)) = match_ctx.ft_resources(ctx).await? else {
+				return Ok(Value::None);
+			};
 
 			let tx = ctx.txn();
 

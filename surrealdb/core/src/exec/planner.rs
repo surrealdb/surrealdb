@@ -175,6 +175,15 @@ pub struct Planner<'ctx> {
 	/// Cached `new_planner_strategy()` snapshot — the strategy doesn't
 	/// change during a single planning pass.
 	planner_strategy: NewPlannerStrategy,
+	/// Per-SELECT MATCHES registration scope, set by `plan_select_core` on the
+	/// inner planner it spawns for a SELECT statement. Mirrors which MATCHES
+	/// expressions the legacy planner registers on a table's `QueryExecutor`
+	/// so [`MatchesOp`](crate::exec::physical_expr::MatchesOp) can reproduce
+	/// the legacy evaluate/error/false decision per row. `None` outside
+	/// SELECT planning (RETURN, LET, the literal record-id fast path, …),
+	/// where the legacy executor has no query planner and MATCHES evaluates
+	/// to `false`.
+	pub(crate) matches_scope: Option<Arc<crate::exec::physical_expr::MatchesScope>>,
 	/// Re-entry nesting depth for this planner, the streaming engine's analogue
 	/// of the legacy executor's `Options::dive` (and bounded by the same
 	/// `max_computation_depth`).
@@ -212,6 +221,7 @@ impl<'ctx> Planner<'ctx> {
 			cycle_guard: CycleGuard::default(),
 			ns_db_ids_cache: tokio::sync::OnceCell::new(),
 			planner_strategy: *ctx.new_planner_strategy(),
+			matches_scope: None,
 			depth: 0,
 		}
 	}
@@ -239,6 +249,7 @@ impl<'ctx> Planner<'ctx> {
 			cycle_guard: CycleGuard::default(),
 			ns_db_ids_cache: tokio::sync::OnceCell::new(),
 			planner_strategy: *ctx.new_planner_strategy(),
+			matches_scope: None,
 			depth: 0,
 		}
 	}
@@ -335,6 +346,17 @@ impl<'ctx> Planner<'ctx> {
 	#[inline]
 	pub(crate) fn cycle_guard(&self) -> CycleGuard {
 		self.cycle_guard.clone()
+	}
+
+	/// Set the per-SELECT MATCHES registration scope (see the field docs).
+	/// Called by `plan_select_core` on the inner planner it spawns, after
+	/// the WHERE condition has been param-resolved and folded.
+	#[inline]
+	pub(crate) fn set_matches_scope(
+		&mut self,
+		scope: Arc<crate::exec::physical_expr::MatchesScope>,
+	) {
+		self.matches_scope = Some(scope);
 	}
 
 	/// Seed the re-entry nesting depth (see the `depth` field).
@@ -728,17 +750,24 @@ impl<'ctx> Planner<'ctx> {
 				_ => None,
 			};
 			if let Some(query) = resolved_query {
-				// Multi-part idioms (e.g. `t.name`) may traverse record links
-				// to fields on other tables. MatchesOp can only evaluate
-				// MATCHES against a fulltext index on the source table — it
-				// cannot resolve cross-table record links.
-				if idiom.0.len() > 1 {
-					return Err(Error::PlannerUnimplemented(
-						"MATCHES with multi-part field path not yet supported \
-						 in streaming executor"
-							.to_string(),
-					));
-				}
+				// Determine whether this exact expression is registered in
+				// the enclosing SELECT's WHERE condition (legacy executor
+				// parity — see `MatchesScope`). The lookup key rebuilds the
+				// binary node; the allowlist contains both the original and
+				// the param-resolved/folded condition forms, so both the
+				// projection-side and residual-cond-side conversions of the
+				// same source expression hit it.
+				let (registered, executor_tables) = match &self.matches_scope {
+					Some(scope) => {
+						let key = Expr::Binary {
+							left: Box::new(Expr::Idiom(idiom.clone())),
+							op: crate::expr::operator::BinaryOperator::Matches(matches_op.clone()),
+							right: Box::new(right.clone()),
+						};
+						(scope.allowlist.contains(&key), Arc::clone(&scope.executor_tables))
+					}
+					None => (false, Arc::from(Vec::<crate::val::TableName>::new())),
+				};
 				let idiom_clone = idiom.clone();
 				let query_clone = query.clone();
 				let left_phys = Box::pin(self.physical_expr(Expr::Idiom(idiom))).await?;
@@ -752,6 +781,8 @@ impl<'ctx> Planner<'ctx> {
 					matches_op.clone(),
 					idiom_clone,
 					query_clone,
+					registered,
+					executor_tables,
 				)));
 			}
 			// Left was idiom but right wasn't resolvable — reassemble
