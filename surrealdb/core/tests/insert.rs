@@ -782,6 +782,75 @@ async fn check_permissions_auth_disabled() {
 }
 
 #[tokio::test]
+async fn table_permissions_before_after_insert() {
+	let (_, ds) = new_ds("NS", "DB", true).await.unwrap();
+	let owner = Session::owner().with_ns("NS").with_db("DB");
+	let anon = Session::default().with_ns("NS").with_db("DB");
+
+	let mut resp = ds
+		.execute(
+			"DEFINE TABLE item SCHEMAFULL PERMISSIONS
+				FOR select FULL
+				FOR create WHERE $after.name != NONE
+				FOR update WHERE $before.deleted IS NONE
+				FOR delete FULL;
+			DEFINE FIELD name ON item TYPE string;
+			DEFINE FIELD deleted ON item TYPE option<datetime>;
+			CREATE item:one SET name = 'one';",
+			&owner,
+			None,
+		)
+		.await
+		.unwrap();
+	assert!(resp.remove(0).output().is_ok(), "failed to define table");
+	assert!(resp.remove(0).output().is_ok(), "failed to define field name");
+	assert!(resp.remove(0).output().is_ok(), "failed to define field deleted");
+	assert!(resp.remove(0).output().is_ok(), "failed to create seed record");
+
+	let mut resp =
+		ds.execute("INSERT INTO item { id: item:two, name: 'two' };", &anon, None).await.unwrap();
+	assert_eq!(
+		resp.remove(0).output().unwrap(),
+		syn::value("[{ id: item:two, name: 'two' }]").unwrap(),
+		"INSERT create path should allow rows when $after is the new record"
+	);
+
+	let mut resp =
+		ds.execute("UPDATE item:one SET deleted = time::now();", &owner, None).await.unwrap();
+	assert!(resp.remove(0).output().is_ok(), "failed to soft-delete seed record");
+
+	let mut resp = ds
+		.execute(
+			"INSERT INTO item { id: item:one, name: 'changed' }
+				ON DUPLICATE KEY UPDATE name = $input.name;",
+			&anon,
+			None,
+		)
+		.await
+		.unwrap();
+	assert_eq!(
+		resp.remove(0).output().unwrap(),
+		Value::Array(Array::new()),
+		"INSERT update path should deny rows when $before.deleted is set"
+	);
+
+	let mut resp = ds
+		.execute(
+			"INSERT INTO item { id: item:two, name: 'updated' }
+				ON DUPLICATE KEY UPDATE name = $input.name;",
+			&anon,
+			None,
+		)
+		.await
+		.unwrap();
+	assert_eq!(
+		resp.remove(0).output().unwrap(),
+		syn::value("[{ id: item:two, name: 'updated' }]").unwrap(),
+		"INSERT update path should allow active rows"
+	);
+}
+
+#[tokio::test]
 async fn insert_relation() -> Result<()> {
 	let sql = "
 		INSERT INTO person [

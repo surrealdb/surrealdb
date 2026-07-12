@@ -10,7 +10,7 @@ use std::sync::Arc;
 use reblessive::tree::Stk;
 
 use crate::catalog::{Permission, TableDefinition};
-use crate::ctx::FrozenContext;
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -187,7 +187,11 @@ pub(crate) async fn check_permission_for_value(
 					bound_ctx = ctx.with_param("value", v.clone());
 					&bound_ctx
 				}
-				None => ctx,
+				None => {
+					bound_ctx =
+						ctx.with_param("before", Value::None).with_param("after", Value::None);
+					&bound_ctx
+				}
 			};
 			let mut eval_ctx = EvalContext::from_exec_ctx(exec_ctx).with_value(value);
 			eval_ctx.skip_fetch_perms = true;
@@ -225,8 +229,12 @@ pub(crate) async fn evaluate_table_select_for_doc(
 		Permission::Full => Ok(true),
 		Permission::Specific(e) => {
 			let opt_no_perms = opt.new_for_permission_predicate();
+			let mut child_ctx = Context::new_child(ctx);
+			child_ctx.add_value("before", Arc::new(Value::None));
+			child_ctx.add_value("after", Arc::new(Value::None));
+			let child_ctx = child_ctx.freeze();
 			Ok(stk
-				.run(|stk| e.compute(stk, ctx, &opt_no_perms, Some(cursor_doc)))
+				.run(|stk| e.compute(stk, &child_ctx, &opt_no_perms, Some(cursor_doc)))
 				.await
 				.catch_return()?
 				.is_truthy())

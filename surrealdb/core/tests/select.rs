@@ -506,3 +506,32 @@ async fn select_count_where_btree_paths() -> Result<()> {
 	assert_eq!(compound_range, 20, "active rows for scores 6,8,10,12,14");
 	Ok(())
 }
+
+#[tokio::test]
+async fn table_permissions_before_after_select() -> Result<()> {
+	let (_, ds) = new_ds("NS", "DB", true).await?;
+	let owner = Session::owner().with_ns("NS").with_db("DB");
+	let anon = Session::default().with_ns("NS").with_db("DB");
+
+	ds.execute(
+		"DEFINE TABLE item SCHEMAFULL PERMISSIONS
+			FOR select WHERE deleted IS NONE
+			FOR create FULL
+			FOR update FULL
+			FOR delete FULL;
+		DEFINE FIELD name ON item TYPE string;
+		DEFINE FIELD deleted ON item TYPE option<datetime>;
+		CREATE item:active SET name = 'active';
+		CREATE item:deleted SET name = 'deleted', deleted = time::now();",
+		&owner,
+		None,
+	)
+	.await?;
+
+	let count = query_row_count(&ds, &anon, "SELECT * FROM item").await?;
+	assert_eq!(count, 1, "SELECT should hide soft-deleted rows");
+
+	let count = query_row_count(&ds, &owner, "SELECT * FROM item").await?;
+	assert_eq!(count, 2, "owner bypasses table permissions");
+	Ok(())
+}

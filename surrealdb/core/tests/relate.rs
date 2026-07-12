@@ -5,7 +5,7 @@ use anyhow::Result;
 use helpers::new_ds;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::syn;
-use surrealdb_types::Value;
+use surrealdb_types::{Array, ToSql, Value};
 
 use crate::helpers::Test;
 
@@ -331,5 +331,82 @@ async fn relate_enforced() -> Result<()> {
 	)
 	.unwrap();
 	t.expect_value(&info)?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn table_permissions_before_after_relate() -> Result<()> {
+	let (_, ds) = new_ds("NS", "DB", true).await?;
+	let owner = Session::owner().with_ns("NS").with_db("DB");
+	let anon = Session::default().with_ns("NS").with_db("DB");
+
+	ds.execute(
+		"DEFINE TABLE person SCHEMALESS PERMISSIONS FULL;
+		DEFINE TABLE knows TYPE RELATION SCHEMAFULL PERMISSIONS
+			FOR select FULL
+			FOR create WHERE $after.note != NONE
+			FOR update WHERE $before.deleted IS NONE
+			FOR delete FULL;
+		DEFINE FIELD note ON TABLE knows TYPE string;
+		DEFINE FIELD deleted ON TABLE knows TYPE option<datetime>;
+		CREATE person:a;
+		CREATE person:b;",
+		&owner,
+		None,
+	)
+	.await?;
+
+	let mut resp =
+		ds.execute("RELATE person:a->knows->person:b SET note = 'first';", &anon, None).await?;
+	let created = resp.remove(0).result?;
+	assert_eq!(
+		created.into_array().unwrap().len(),
+		1,
+		"RELATE create path should allow edges when $after is the new record"
+	);
+
+	let mut resp = ds
+		.execute("RELATE OR UPDATE person:a->knows->person:b SET note = 'updated';", &anon, None)
+		.await?;
+	let updated = resp.remove(0).result?;
+	assert_eq!(
+		updated.into_array().unwrap().first().unwrap().to_sql().contains("'updated'"),
+		true,
+		"RELATE update path should allow active edges"
+	);
+
+	ds.execute(
+		"UPDATE knows SET deleted = time::now() WHERE in = person:a AND out = person:b;",
+		&owner,
+		None,
+	)
+	.await?;
+
+	let mut resp = ds
+		.execute(
+			"UPDATE knows SET note = 'blocked' WHERE in = person:a AND out = person:b;",
+			&anon,
+			None,
+		)
+		.await?;
+	assert_eq!(
+		resp.remove(0).result?,
+		Value::Array(Array::new()),
+		"UPDATE should deny soft-deleted edges when $before.deleted is set"
+	);
+
+	let mut resp = ds
+		.execute(
+			"SELECT * FROM knows
+				WHERE in = person:a AND out = person:b AND note = 'blocked';",
+			&owner,
+			None,
+		)
+		.await?;
+	assert_eq!(
+		resp.remove(0).result?,
+		Value::Array(Array::new()),
+		"soft-deleted edge note should remain unchanged"
+	);
 	Ok(())
 }

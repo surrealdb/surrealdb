@@ -8,6 +8,7 @@ mod helpers;
 use helpers::new_ds;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::Role;
+use surrealdb_core::syn;
 
 //
 // Permissions
@@ -471,4 +472,71 @@ async fn check_permissions_auth_disabled() {
 			res
 		);
 	}
+}
+
+#[tokio::test]
+async fn soft_delete_table_permissions() {
+	let (_, ds) = new_ds("NS", "DB", true).await.unwrap();
+	let owner = Session::owner().with_ns("NS").with_db("DB");
+	let anon = Session::default().with_ns("NS").with_db("DB");
+
+	let mut resp = ds
+		.execute(
+			"DEFINE TABLE item SCHEMAFULL PERMISSIONS
+				FOR select WHERE deleted IS NONE
+				FOR create FULL
+				FOR update WHERE $before.deleted IS NONE
+				FOR delete FULL;
+			DEFINE FIELD name ON item TYPE string;
+			DEFINE FIELD deleted ON item TYPE option<datetime>;
+			CREATE item:one SET name = 'one';",
+			&owner,
+			None,
+		)
+		.await
+		.unwrap();
+	assert!(resp.remove(0).output().is_ok(), "failed to define table");
+	assert!(resp.remove(0).output().is_ok(), "failed to define field name");
+	assert!(resp.remove(0).output().is_ok(), "failed to define field deleted");
+	let created = resp.remove(0).output().unwrap();
+	assert_eq!(created.into_array().unwrap().len(), 1, "failed to create record");
+
+	let mut resp = ds.execute("SELECT * FROM item", &anon, None).await.unwrap();
+	assert_eq!(
+		resp.remove(0).output().unwrap(),
+		syn::value("[{ id: item:one, name: 'one' }]").unwrap(),
+		"anonymous user should see active records"
+	);
+
+	let mut resp =
+		ds.execute("UPDATE item:one SET deleted = time::now();", &anon, None).await.unwrap();
+	assert_eq!(
+		resp.remove(0).output().unwrap(),
+		Value::Array(Array::new()),
+		"soft-deleted record should not be returned from UPDATE output"
+	);
+
+	let mut resp = ds.execute("SELECT deleted FROM item:one", &owner, None).await.unwrap();
+	let res = resp.remove(0).output().unwrap();
+	assert_eq!(
+		res.clone().into_array().unwrap().len(),
+		1,
+		"owner should see the soft-deleted record"
+	);
+	assert_eq!(res.to_sql().contains("NONE"), false, "deleted timestamp should be persisted");
+
+	let mut resp = ds.execute("SELECT * FROM item", &anon, None).await.unwrap();
+	assert_eq!(
+		resp.remove(0).output().unwrap(),
+		Value::Array(Array::new()),
+		"anonymous user should not see soft-deleted records"
+	);
+
+	let mut resp = ds.execute("SELECT * FROM item", &owner, None).await.unwrap();
+	let res = resp.remove(0).output().unwrap();
+	assert_eq!(
+		res.into_array().unwrap().len(),
+		1,
+		"owner should still see soft-deleted records via table scan"
+	);
 }

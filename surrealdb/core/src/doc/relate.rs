@@ -96,7 +96,7 @@ impl Document {
 		// user-supplied expression in the WHERE clause or data clause.
 		// Otherwise a `SET x = THROW ...` could exfiltrate field values
 		// before the permission check rejects the operation.
-		self.check_update_permissions(stk, ctx, opt, &self.current).await?;
+		self.check_update_permissions_pre(stk, ctx, opt, &self.current).await?;
 		// Reject writes to read-only view tables (after the permission gate)
 		self.check_table_not_view(opt)?;
 		// Ensure any input data is computed
