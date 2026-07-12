@@ -2,7 +2,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use path_clean::PathClean;
 
 use crate::err::Error;
 
@@ -52,44 +51,6 @@ pub(crate) fn check_is_path_allowed(path: &Path, allowed_paths: &[PathBuf]) -> R
 	}
 }
 
-pub(crate) fn extract_allowed_paths(
-	input: &str,
-	canonicalize: bool,
-	subject: &str,
-) -> Vec<PathBuf> {
-	// or a semicolon on Windows.
-	let delimiter = if cfg!(target_os = "windows") {
-		";"
-	} else {
-		":"
-	};
-	// Split the allowlist string, canonicalize each path, and collect valid paths.
-	input
-		.split(delimiter)
-		.filter_map(|s| {
-			let trimmed = s.trim();
-			if trimmed.is_empty() {
-				None
-			} else {
-				let path = PathBuf::from(trimmed).clean();
-				let path = if canonicalize {
-					let Ok(path) = fs::canonicalize(&path) else {
-						warn!("Failed to canonicalize {subject} path: {}", path.to_string_lossy());
-						return None;
-					};
-
-					path
-				} else {
-					path
-				};
-
-				debug!("Allowed {subject} path: {}", path.to_string_lossy());
-				Some(path)
-			}
-		})
-		.collect()
-}
-
 #[cfg(test)]
 mod tests {
 	use tempfile::tempdir;
@@ -126,7 +87,7 @@ mod tests {
 			delimiter,
 			dir2.path().to_string_lossy()
 		);
-		let allowlist = extract_allowed_paths(&combined, true, "file");
+		let allowlist = crate::cnf::extract_allowed_paths(&combined, true, "file");
 
 		// Create a file in the first allowed directory.
 		let allowed_file1 = dir1.path().join("file1.txt");

@@ -1,15 +1,14 @@
 pub(crate) mod dynamic;
 
-use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::LazyLock;
 use std::time::Duration;
+use std::{fmt, fs};
 
 pub use common::config::{Config, ConfigMap};
-
-use crate::iam::file::extract_allowed_paths;
-use crate::str::ParseBytes;
+use common::str::ParseBytes;
+use path_clean::PathClean;
 
 /// The publicly visible name of the server
 pub const SERVER_NAME: &str = "SurrealDB";
@@ -26,6 +25,56 @@ pub const PROTECTED_PARAM_NAMES: &[&str] = &["access", "auth", "token", "session
 /// Default capacity for the bounded channel used to deliver live-query
 /// notifications from the datastore to subscribers.
 pub const NOTIFICATIONS_CHANNEL_SIZE: usize = 15_000;
+
+/// Default value for [`CommonConfig::scan_batch_size`] — the number of records
+/// each scan operator buffers before yielding a batch downstream. Read at
+/// runtime from config (overridable via `SURREAL_SCAN_BATCH_SIZE`).
+pub const DEFAULT_SCAN_BATCH_SIZE: usize = 1000;
+
+/// Parse an allowlist configuration string into a list of paths.
+///
+/// The string is split on the platform path delimiter (`:` on Unix, `;` on
+/// Windows), each entry is cleaned, and (when `canonicalize` is set) resolved
+/// to its canonical form; entries that fail to canonicalize are dropped with a
+/// warning. `subject` names the allowlist for log messages (e.g. `"file"`).
+/// Enforcement of a resolved path against the allowlist lives in
+/// [`crate::iam::file::check_is_path_allowed`].
+pub(crate) fn extract_allowed_paths(
+	input: &str,
+	canonicalize: bool,
+	subject: &str,
+) -> Vec<PathBuf> {
+	let delimiter = if cfg!(target_os = "windows") {
+		";"
+	} else {
+		":"
+	};
+	// Split the allowlist string, canonicalize each path, and collect valid paths.
+	input
+		.split(delimiter)
+		.filter_map(|s| {
+			let trimmed = s.trim();
+			if trimmed.is_empty() {
+				None
+			} else {
+				let path = PathBuf::from(trimmed).clean();
+				let path = if canonicalize {
+					let Ok(path) = fs::canonicalize(&path) else {
+						warn!("Failed to canonicalize {subject} path: {}", path.to_string_lossy());
+						return None;
+					};
+
+					path
+				} else {
+					path
+				};
+
+				debug!("Allowed {subject} path: {}", path.to_string_lossy());
+				Some(path)
+			}
+		})
+		.collect()
+}
 
 /// Selects which live-query execution engine the datastore uses.
 ///
@@ -253,7 +302,7 @@ impl Default for CommonConfig {
 			export_batch_size: 1000,
 			table_doc_ids_batch_size: 1000,
 			operator_buffer_size: 2,
-			scan_batch_size: crate::exec::operators::scan::common::DEFAULT_SCAN_BATCH_SIZE,
+			scan_batch_size: DEFAULT_SCAN_BATCH_SIZE,
 			max_order_limit_priority_queue_size: 1000,
 			topk_threshold_pushdown_enabled: true,
 			gql_max_join_build_rows: 1_000_000,

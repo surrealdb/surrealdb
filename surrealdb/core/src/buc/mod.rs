@@ -23,7 +23,6 @@ use crate::buc::store::ObjectStore;
 use crate::buc::store::file::FileStore;
 use crate::buc::store::memory::MemoryStore;
 use crate::err::Error;
-use crate::iam::file::extract_allowed_paths;
 use crate::{CommunityComposer, cnf};
 
 pub mod manager;
@@ -39,7 +38,7 @@ pub struct Config {
 impl cnf::Config for Config {
 	fn parse(&mut self, map: &cnf::ConfigMap) {
 		map.parse_key_with("bucket_folder_allowlist", &mut self.bucket_list, |x| {
-			Some(extract_allowed_paths(x, false, "bucket folder"))
+			Some(cnf::extract_allowed_paths(x, false, "bucket folder"))
 		})
 		.parse_key_with("global_bucket", &mut self.global_bucket, |x| Some(Some(x.to_owned())))
 		.parse_key("global_bucket_enforced", &mut self.only_global);

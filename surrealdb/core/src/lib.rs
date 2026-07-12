@@ -36,8 +36,11 @@ mod fnc;
 #[doc(hidden)]
 pub mod key;
 mod lq;
+// `str` moved to `surrealdb-common`; re-exported here so the exported
+// `lazy_env_parse!` macro's `$crate::str::…` expansion keeps resolving in
+// downstream crates.
 #[doc(hidden)]
-pub mod str;
+pub use common::str;
 #[cfg(feature = "surrealism")]
 mod surrealism;
 mod sys;

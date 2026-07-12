@@ -22,4 +22,5 @@ pub mod future;
 pub mod mem_registry;
 pub mod non_max;
 pub mod span;
+pub mod str;
 pub mod sys;

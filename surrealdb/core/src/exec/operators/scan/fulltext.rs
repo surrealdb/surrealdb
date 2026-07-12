@@ -32,7 +32,7 @@ use crate::kvs::CachePolicy;
 
 /// Batch size for full-text result batching.
 ///
-/// Smaller than the default [`super::common::DEFAULT_SCAN_BATCH_SIZE`] because full-text
+/// Smaller than the default [`crate::cnf::DEFAULT_SCAN_BATCH_SIZE`] because full-text
 /// results are ordered by relevance score, so smaller batches let downstream
 /// operators begin processing sooner.
 const BATCH_SIZE: usize = 100;
