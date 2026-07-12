@@ -111,11 +111,55 @@ pub(crate) struct BruteForceKnnParams {
 	/// The idiom path to the vector field.
 	pub field: Idiom,
 	/// The query vector.
-	pub vector: Vec<Number>,
+	pub vector: BruteForceKnnVector,
 	/// Number of nearest neighbors.
 	pub k: u32,
 	/// Distance metric.
 	pub distance: Distance,
+}
+
+/// The query-vector side of a brute-force KNN expression.
+pub(crate) enum BruteForceKnnVector {
+	/// A plan-time literal numeric array.
+	Literal(Vec<Number>),
+	/// A non-literal expression the legacy planner would compute once at
+	/// plan time with no document context (bind parameter, function call,
+	/// array with computed elements, binary of computables). Evaluated once
+	/// at stream open by `KnnTopK` and coerced to `array<number>` with the
+	/// same coercion the legacy tree applies.
+	Deferred(Expr),
+}
+
+/// Whether the legacy planner's `Tree::eval_value` would compute this
+/// expression at plan time (`Node::Computable` / `Node::Computed`). Idioms,
+/// subqueries, closures, prefix expressions and every other node kind are
+/// `Unsupported` there — a brute-force KNN with such a right-hand side never
+/// registers an executor entry and evaluates to `false` per row instead.
+fn is_plan_time_computable(expr: &Expr) -> bool {
+	match expr {
+		// `Tree::eval_array` fully computes array elements, whatever they are.
+		Expr::Literal(Literal::Array(_)) => true,
+		Expr::Literal(
+			Literal::Integer(_)
+			| Literal::Bool(_)
+			| Literal::String(_)
+			| Literal::RecordId(_)
+			| Literal::Duration(_)
+			| Literal::Uuid(_)
+			| Literal::Datetime(_)
+			| Literal::None
+			| Literal::Null
+			| Literal::Decimal(_)
+			| Literal::Float(_),
+		) => true,
+		Expr::Param(_) | Expr::FunctionCall(_) => true,
+		Expr::Binary {
+			left,
+			right,
+			..
+		} => is_plan_time_computable(left) && is_plan_time_computable(right),
+		_ => false,
+	}
 }
 
 /// Extract brute-force KNN parameters from a WHERE clause.
@@ -558,16 +602,29 @@ impl MutVisitor for BruteForceKnnExtractor {
 			right,
 		} = expr && let NearestNeighbor::K(k, dist) = nn.as_ref()
 			&& let Expr::Idiom(idiom) = left.as_ref()
-			&& let Some(vector) = extract_literal_vector(right)
 		{
-			self.params = Some(BruteForceKnnParams {
-				field: idiom.clone(),
-				vector,
-				k: *k,
-				distance: dist.clone(),
-			});
-			*expr = Expr::Literal(Literal::Bool(true));
-			return Ok(());
+			// Literal arrays extract directly; other legacy-computable
+			// right-hand sides defer evaluation to stream open (see
+			// `BruteForceKnnVector`). Anything else (idiom, subquery, …)
+			// stays in the condition and evaluates to `false` per row,
+			// like a legacy KNN expression without an executor entry.
+			let vector = if let Some(vector) = extract_literal_vector(right) {
+				Some(BruteForceKnnVector::Literal(vector))
+			} else if is_plan_time_computable(right) {
+				Some(BruteForceKnnVector::Deferred(right.as_ref().clone()))
+			} else {
+				None
+			};
+			if let Some(vector) = vector {
+				self.params = Some(BruteForceKnnParams {
+					field: idiom.clone(),
+					vector,
+					k: *k,
+					distance: dist.clone(),
+				});
+				*expr = Expr::Literal(Literal::Bool(true));
+				return Ok(());
+			}
 		}
 		expr.visit_mut(self)
 	}

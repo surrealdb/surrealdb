@@ -795,6 +795,23 @@ impl<'ctx> Planner<'ctx> {
 			}));
 		}
 
+		// KNN operators evaluated as expressions (projection position, a
+		// residual conjunct no KNN source consumed, bare expressions):
+		// per-row membership in the statement's KNN result set, `false`
+		// without one — the legacy checker / missing-entry semantics. The
+		// KnnContext is bound here because the execution context does not
+		// carry it.
+		if matches!(op, crate::expr::operator::BinaryOperator::NearestNeighbor(_)) {
+			let left_phys = Box::pin(self.physical_expr(left)).await?;
+			let right_phys = Box::pin(self.physical_expr(right)).await?;
+			return Ok(Arc::new(crate::exec::physical_expr::KnnMembershipOp::new(
+				left_phys,
+				right_phys,
+				op,
+				self.ctx.get_knn_context().cloned(),
+			)));
+		}
+
 		// All other binary operators (and non-standard MATCHES patterns)
 		let left_phys = Box::pin(self.physical_expr(left)).await?;
 		let right_phys = Box::pin(self.physical_expr(right)).await?;

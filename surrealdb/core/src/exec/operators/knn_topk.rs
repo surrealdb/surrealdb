@@ -21,12 +21,28 @@ use futures::StreamExt;
 use surrealdb_types::ToSql;
 
 use crate::catalog::Distance;
+use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
 	OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
 use crate::expr::Idiom;
 use crate::val::{Number, Value};
+
+/// The query vector of a brute-force KNN, as planned.
+///
+/// `Deferred` carries a non-literal right-hand side (bind parameter, function
+/// call, array with computed elements) that the legacy planner would compute
+/// once at plan time with no document context. The streaming equivalent
+/// evaluates it once at stream open and coerces to `array<number>` with the
+/// same coercion the legacy tree applies, so error messages match.
+#[derive(Clone, Debug)]
+pub(crate) enum KnnVectorSource {
+	/// Plan-time literal vector.
+	Literal(Vec<Number>),
+	/// Expression evaluated once at stream open (statement scope, no row).
+	Deferred(Arc<dyn PhysicalExpr>),
+}
 
 /// A heap entry storing a record with its computed distance.
 ///
@@ -83,7 +99,7 @@ pub struct KnnTopK {
 	/// Idiom path to the vector field on each record (e.g., `embedding`).
 	pub(crate) field: Idiom,
 	/// The query vector to compute distances against.
-	pub(crate) query_vector: Vec<Number>,
+	pub(crate) query_vector: KnnVectorSource,
 	/// Number of nearest neighbors to return.
 	pub(crate) k: usize,
 	/// Distance metric to use for computing distances.
@@ -101,7 +117,7 @@ impl KnnTopK {
 	pub(crate) fn new(
 		input: Arc<dyn ExecOperator>,
 		field: Idiom,
-		query_vector: Vec<Number>,
+		query_vector: KnnVectorSource,
 		k: usize,
 		distance: Distance,
 	) -> Self {
@@ -131,20 +147,36 @@ impl ExecOperator for KnnTopK {
 	}
 
 	fn attrs(&self) -> Vec<(String, String)> {
+		let dimension = match &self.query_vector {
+			KnnVectorSource::Literal(v) => v.len().to_string(),
+			KnnVectorSource::Deferred(_) => "deferred".to_string(),
+		};
 		vec![
 			("field".to_string(), self.field.to_sql()),
 			("k".to_string(), self.k.to_string()),
 			("distance".to_string(), format!("{:?}", self.distance)),
-			("dimension".to_string(), self.query_vector.len().to_string()),
+			("dimension".to_string(), dimension),
 		]
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		self.input.required_context()
+		let ctx = self.input.required_context();
+		match &self.query_vector {
+			// A deferred vector expression carries its own requirement
+			// (e.g. a function call needs Database level).
+			KnnVectorSource::Deferred(expr) => ctx.max(expr.required_context()),
+			KnnVectorSource::Literal(_) => ctx,
+		}
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		self.input.access_mode()
+		let mode = self.input.access_mode();
+		match &self.query_vector {
+			// A deferred vector expression can itself require writes
+			// (e.g. a mutating custom function).
+			KnnVectorSource::Deferred(expr) => mode.combine(expr.access_mode()),
+			KnnVectorSource::Literal(_) => mode,
+		}
 	}
 
 	fn cardinality_hint(&self) -> CardinalityHint {
@@ -172,8 +204,22 @@ impl ExecOperator for KnnTopK {
 		let distance = self.distance.clone();
 		let cancellation = ctx.cancellation().clone();
 		let knn_context = self.knn_context.clone();
+		let exec_ctx = ctx.clone();
 
 		let result_stream = futures::stream::once(async move {
+			// Resolve the query vector. Deferred sources evaluate once here,
+			// with no row context, and coerce exactly like the legacy tree's
+			// plan-time compute of the KNN right-hand side.
+			let query_vector: Vec<Number> = match &query_vector {
+				KnnVectorSource::Literal(v) => v.clone(),
+				KnnVectorSource::Deferred(expr) => {
+					let value = expr.evaluate(EvalContext::from_exec_ctx(&exec_ctx)).await?;
+					value
+						.coerce_to::<Vec<Number>>()
+						.map_err(|e| crate::expr::ControlFlow::Err(anyhow::Error::new(e)))?
+				}
+			};
+
 			let mut heap: BinaryHeap<std::cmp::Reverse<DistanceEntry>> =
 				BinaryHeap::with_capacity(k + 1);
 			let mut seq: u64 = 0;

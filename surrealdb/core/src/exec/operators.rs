@@ -68,6 +68,7 @@ pub use info::{
 #[cfg_attr(not(feature = "gql"), allow(unused_imports))]
 pub use join::{HashJoin, JoinType};
 pub use knn_topk::KnnTopK;
+pub(crate) use knn_topk::KnnVectorSource;
 pub use let_plan::LetPlan;
 pub use limit::Limit;
 #[cfg(feature = "gql")]

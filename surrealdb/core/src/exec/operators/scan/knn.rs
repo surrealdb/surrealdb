@@ -112,9 +112,15 @@ impl KnnScan {
 		self
 	}
 }
+impl KnnScan {
+	/// Operator name, shared with the planner's KNN-source detection
+	/// (`source_contains_knn` in `planner/select`).
+	pub(crate) const NAME: &'static str = "KnnScan";
+}
+
 impl ExecOperator for KnnScan {
 	fn name(&self) -> &'static str {
-		"KnnScan"
+		Self::NAME
 	}
 
 	fn attrs(&self) -> Vec<(String, String)> {

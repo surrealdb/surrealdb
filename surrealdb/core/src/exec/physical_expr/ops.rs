@@ -151,11 +151,15 @@ impl PhysicalExpr for BinaryOp {
 					Value::Bool(true)
 				}
 
-				// Records reaching this point have already been selected by
-				// KnnScan (HNSW) or KnnTopK (brute-force). KNN operators are
-				// stripped via strip_knn_from_condition before physical expression
-				// compilation, so this is a defensive fallback only.
-				BinaryOperator::NearestNeighbor(_) => Value::Bool(true),
+				// A KNN expression that was not lowered into KnnScan (HNSW)
+				// or KnnTopK (brute-force): projection position, a bare
+				// expression, a non-plan-time-computable query vector, or an
+				// Approximate form with no index. The legacy executor has no
+				// executor entry for these and evaluates them to `false` per
+				// row. Extracted conjuncts never reach this arm — they are
+				// stripped via strip_knn_from_condition before physical
+				// expression compilation.
+				BinaryOperator::NearestNeighbor(_) => Value::Bool(false),
 			})
 		})
 	}

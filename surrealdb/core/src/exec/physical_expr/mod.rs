@@ -22,6 +22,7 @@ mod conditional;
 mod control_flow;
 pub(crate) mod function;
 mod idiom;
+mod knn_membership;
 mod literal;
 mod matches;
 mod ops;
@@ -38,6 +39,7 @@ pub(crate) use function::{
 	ProjectionFunctionExec, SiloModuleExec, SurrealismModuleExec, UserDefinedFunctionExec,
 };
 pub(crate) use idiom::IdiomExpr;
+pub(crate) use knn_membership::KnnMembershipOp;
 pub(crate) use literal::{Literal, MockExpr, Param};
 pub(crate) use matches::{MatchesOp, MatchesScope, collect_cond_matches};
 pub(crate) use ops::{BinaryOp, PostfixOp, SimpleBinaryOp, UnaryOp};

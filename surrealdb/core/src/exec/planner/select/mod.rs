@@ -25,14 +25,14 @@ pub(crate) use pipeline::{
 
 use super::Planner;
 use super::util::{
-	SELECT_ITERATION_PARAMS, all_value_sources, derive_field_name, extract_bruteforce_knn,
-	extract_count_field_names, extract_matches_context, extract_record_id_point_lookup,
-	extract_version, fold_condition_expressions, has_knn_k_operator, has_knn_ktree_operator,
-	has_knn_operator, has_top_level_or, idiom_to_field_name, index_covers_ordering,
-	is_bounded_topk_downstream, is_count_all_eligible, is_indexed_count_eligible,
-	order_is_scan_compatible, resolve_condition_params, resolve_param_value,
-	resolve_projection_field_idioms, strip_fts_condition, strip_index_conditions,
-	strip_knn_from_condition, strip_union_index_conditions,
+	BruteForceKnnVector, SELECT_ITERATION_PARAMS, all_value_sources, derive_field_name,
+	extract_bruteforce_knn, extract_count_field_names, extract_matches_context,
+	extract_record_id_point_lookup, extract_version, fold_condition_expressions,
+	has_knn_k_operator, has_knn_ktree_operator, has_knn_operator, has_top_level_or,
+	idiom_to_field_name, index_covers_ordering, is_bounded_topk_downstream, is_count_all_eligible,
+	is_indexed_count_eligible, order_is_scan_compatible, resolve_condition_params,
+	resolve_param_value, resolve_projection_field_idioms, strip_fts_condition,
+	strip_index_conditions, strip_knn_from_condition, strip_union_index_conditions,
 };
 use crate::catalog::Index;
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
@@ -42,9 +42,9 @@ use crate::exec::index::analysis::IndexAnalyzer;
 use crate::exec::operators::scan::determine_scan_direction;
 use crate::exec::operators::scan::resolved::{ResolvedTableContext, resolve_table_context};
 use crate::exec::operators::{
-	AnalyzePlan, DynamicScan, ExplainPlan, Fetch, FetchStep, Filter, KnnTopK, Limit, RecordIdScan,
-	SortDirection, SourceExpr, TableScan, Timeout, Union, UnionIndexScan, UnwrapExactlyOne,
-	VersionScope,
+	AnalyzePlan, DynamicScan, ExplainPlan, Fetch, FetchStep, Filter, KnnTopK, KnnVectorSource,
+	Limit, RecordIdScan, SortDirection, SourceExpr, TableScan, Timeout, Union, UnionIndexScan,
+	UnwrapExactlyOne, VersionScope,
 };
 use crate::exec::pre_decode_filter::pre_decode_filter_status_at_plan_time;
 use crate::exec::{ExecOperator, OperatorMetrics};
@@ -1035,11 +1035,13 @@ impl<'ctx> Planner<'ctx> {
 			if brute_force_knn.is_some() {
 				(stripped.clone(), stripped)
 			} else if cond.as_ref().is_some_and(|c| has_knn_k_operator(&c.0)) {
-				return Err(Error::PlannerUnimplemented(
-					"Brute-force KNN with parameter-based vectors is not supported \
-					 in the streaming executor"
-						.to_string(),
-				));
+				// A `K` form whose right-hand side is not plan-time
+				// computable (idiom, subquery, …). The legacy planner
+				// registers no executor entry for such an expression and it
+				// evaluates to `false` per row; keep the conjunct in the
+				// filter so the physical fallback (`BinaryOp`, which yields
+				// `false` for KNN) reproduces that.
+				(cond.clone(), cond)
 			} else {
 				(cond, stripped)
 			}
@@ -1138,6 +1140,7 @@ impl<'ctx> Planner<'ctx> {
 		// The result tracks whether the predicate and limit/start were
 		// consumed by the source operator, so we can avoid duplicating
 		// them in the outer pipeline.
+		let source_count = what.len();
 		let mut planned = pp
 			.plan_sources(
 				what,
@@ -1181,6 +1184,29 @@ impl<'ctx> Planner<'ctx> {
 			}
 		};
 
+		// KNN conjuncts are stripped from `cond_for_filter` on the assumption
+		// a KNN source operator enforces them. When none fired — an
+		// `Approximate` form with no usable HNSW index — restore the full
+		// condition so the conjunct is evaluated per row (as membership in
+		// the empty KNN result set, i.e. `false`), matching the legacy
+		// executor's missing-entry behaviour instead of silently dropping
+		// the conjunct and letting every row through. A multi-source FROM
+		// always restores: a KnnScan in one source's subtree says nothing
+		// about the other sources' rows, which legacy filters out per table
+		// (no executor entry ⇒ false). Membership is stable under
+		// re-evaluation, so restoring over a fired KnnScan is harmless, and
+		// this is also safe for sources that resolve their access path at
+		// run time (`DynamicScan`).
+		let where_clause = if has_knn
+			&& brute_force_knn.is_none()
+			&& (source_count > 1 || !source_contains_knn(&planned.operator))
+			&& let Some(c) = cond_for_index.as_ref()
+		{
+			WhereClauseState::Original(c.clone())
+		} else {
+			where_clause
+		};
+
 		// KNN wrapping. Residual predicates (non-KNN WHERE conditions) must
 		// be applied BEFORE ranking by distance. Otherwise rows that don't
 		// satisfy the WHERE clause can consume top-K slots and push out
@@ -1199,8 +1225,14 @@ impl<'ctx> Planner<'ctx> {
 				WhereClauseState::None => planned.operator,
 			};
 			let knn_ctx = planning_ctx.get_knn_context().cloned();
+			let vector = match kp.vector {
+				BruteForceKnnVector::Literal(v) => KnnVectorSource::Literal(v),
+				BruteForceKnnVector::Deferred(expr) => {
+					KnnVectorSource::Deferred(pp.physical_expr(expr).await?)
+				}
+			};
 			let wrapped = Arc::new(
-				KnnTopK::new(input, kp.field, kp.vector, kp.k as usize, kp.distance)
+				KnnTopK::new(input, kp.field, vector, kp.k as usize, kp.distance)
 					.with_knn_context(knn_ctx),
 			) as Arc<dyn ExecOperator>;
 			(wrapped, WhereClauseState::None)
@@ -3162,6 +3194,15 @@ fn detect_order_for_composite_union(
 	}
 
 	Some((order_path, direction))
+}
+
+/// Whether the planned source tree contains a KNN source operator
+/// (`KnnScan`), i.e. an `Approximate` KNN conjunct from the WHERE condition
+/// was lowered into an index-backed search. Used to decide whether the
+/// pre-stripped filter condition must be restored (see `plan_select_core`).
+fn source_contains_knn(op: &Arc<dyn ExecOperator>) -> bool {
+	op.name() == crate::exec::operators::KnnScan::NAME
+		|| op.children().iter().any(|c| source_contains_knn(c))
 }
 
 #[cfg(test)]
