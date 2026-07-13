@@ -24,6 +24,7 @@ pub mod signin;
 pub mod signup;
 pub mod sql;
 pub mod sync;
+pub(crate) mod timeout;
 mod tracer;
 pub mod version;
 

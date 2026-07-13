@@ -24,6 +24,7 @@ use crate::cnf::{
 };
 use crate::ntw::error::Error as NetError;
 use crate::ntw::input::bytes_to_utf8;
+use crate::ntw::timeout::with_query_timeout;
 
 pub fn router<S>() -> Router<S>
 where
@@ -56,8 +57,9 @@ async fn post_handler(
 	}
 	// Convert the received sql query
 	let sql = bytes_to_utf8(&sql).context("Non UTF-8 request body").map_err(ResponseError)?;
-	// Execute the received sql query
-	match db.execute(sql, &session, Some(vars)).await {
+	// Execute the received sql query under the configured wall-clock query
+	// timeout (default off), reusing `--query-timeout` as the guard duration.
+	match with_query_timeout(db.query_timeout(), db.execute(sql, &session, Some(vars))).await {
 		Ok(res) => match output.as_deref() {
 			// Simple serialization
 			None | Some(Accept::ApplicationJson) => {
@@ -131,8 +133,11 @@ async fn handle_socket(state: AppState, ws: WebSocket, session: Session) {
 		{
 			// Get a database reference
 			let db = &state.datastore;
-			// Execute the received sql query
-			let _ = match db.execute(sql, &session, None).await {
+			// Execute the received sql query under the configured wall-clock
+			// query timeout (default off).
+			let _ = match with_query_timeout(db.query_timeout(), db.execute(sql, &session, None))
+				.await
+			{
 				// Convert the response to JSON
 				Ok(v) => match surrealdb_core::rpc::format::json::encode_str(Value::Array(
 					Array::from(v.into_iter().map(|x| x.into_value()).collect::<Vec<_>>()),

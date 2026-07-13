@@ -119,6 +119,26 @@ pub fn session_expired() -> TypesError {
 	TypesError::not_allowed("The session has expired".to_string(), AuthError::SessionExpired)
 }
 
+/// Build the error returned when a call trips the wall-clock query-timeout
+/// guard. Mirrors the deadline-based query timeout (`err::Error::QueryTimedout`)
+/// in both message and structured [`surrealdb_types::QueryError::TimedOut`]
+/// detail, so a timeout surfaces identically regardless of which guard
+/// (deadline or wall-clock) fired or which transport (RPC / HTTP) reported it.
+///
+/// Shared by the RPC dispatch guard and the HTTP transport helpers so the two
+/// never drift apart.
+pub fn query_timeout_error(duration: std::time::Duration) -> TypesError {
+	TypesError::query(
+		format!(
+			"The query was not executed because it exceeded the timeout: {}",
+			crate::val::Duration::from(duration)
+		),
+		surrealdb_types::QueryError::TimedOut {
+			duration,
+		},
+	)
+}
+
 /// Convert an anyhow error to a wire error, downcasting to preserve structured
 /// error information where possible.
 ///

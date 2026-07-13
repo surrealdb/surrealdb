@@ -18,7 +18,8 @@ use crate::observe::{
 use crate::rpc::args::extract_args;
 use crate::rpc::{
 	DbResult, Method, bad_lq_config, invalid_params, method_not_allowed, method_not_found,
-	session_exists, session_expired, session_not_found, types_error_from_anyhow,
+	query_timeout_error, session_exists, session_expired, session_not_found,
+	types_error_from_anyhow,
 };
 use crate::sql::statements::live::LiveFields;
 use crate::sql::{
@@ -352,7 +353,7 @@ pub trait RpcProtocol {
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let start = web_time::Instant::now();
-		let result: Result<DbResult, surrealdb_types::Error> = async {
+		let dispatch = async {
 			// Check if capabilities allow executing the requested RPC method
 			if !self.kvs().allows_rpc_method(&MethodTarget {
 				method,
@@ -445,8 +446,34 @@ pub trait RpcProtocol {
 				}
 			}
 			dispatched
-		}
-		.await;
+		};
+		// Apply an MCP-style wall-clock guard around the dispatch, reusing the
+		// global `--query-timeout` value as its duration (default off, so no
+		// behaviour change unless an operator sets it). The deadline plumbed
+		// into the executor via `Datastore::setup_ctx` only fires at yield
+		// points and does not bound the GraphQL engine's own work; this
+		// wall-clock backstop bounds the whole method call. Transaction-control
+		// methods (`begin` / `commit` / `cancel`) are exempt because dropping a
+		// commit future mid-flight would be unsafe; the statements executed
+		// inside an explicit transaction are still guarded individually (see
+		// `Method::is_transaction_control`).
+		let result: Result<DbResult, surrealdb_types::Error> = match self.kvs().query_timeout() {
+			Some(timeout) if !method.is_transaction_control() => {
+				match tokio::time::timeout(timeout, dispatch).await {
+					Ok(inner) => inner,
+					Err(_elapsed) => {
+						warn!(
+							target: "surrealdb::core::rpc",
+							timeout = ?timeout,
+							method = method.to_str(),
+							"RPC method exceeded the configured query timeout"
+						);
+						Err(query_timeout_error(timeout))
+					}
+				}
+			}
+			_ => dispatch.await,
+		};
 		let outcome = Outcome::from(&result);
 		// Resolve session context for the observer event. An unknown
 		// session ID yields an empty `TenantIdentity` rather than an

@@ -35,6 +35,7 @@ use tower_service::Service;
 use web_time::Instant;
 
 use crate::ntw::error::Error as NetError;
+use crate::ntw::timeout::{graphql_timeout_message, with_request_timeout};
 
 /// Resolve the operation-type label for the `surrealdb.graphql.operation`
 /// metric attribute.
@@ -143,6 +144,11 @@ where
 			let datastore_ctx = Arc::clone(datastore);
 			let session_ctx = std::sync::Arc::new(session.clone());
 
+			// Snapshot the wall-clock query timeout before `req` (which borrows
+			// `datastore` via the request extensions) is consumed by
+			// `from_request` below.
+			let query_timeout = datastore.query_timeout();
+
 			let is_accept_multipart_mixed = req
 				.headers()
 				.get("accept")
@@ -190,14 +196,33 @@ where
 					)]);
 					Ok(as_application_json(GraphQLResponse::from(response).into_response()))
 				} else {
-					let response = schema.execute(req_with_data).await;
+					// Bound the whole request with the configured wall-clock
+					// query timeout (default off). The GraphQL engine's own
+					// work is not covered by the executor's per-resolver
+					// deadline, so this guard is what caps a hanging request.
+					let (response, timed_out) =
+						match with_request_timeout(query_timeout, schema.execute(req_with_data))
+							.await
+						{
+							Ok(r) => (r, false),
+							Err(dur) => (
+								async_graphql::Response::from_errors(vec![ServerError::new(
+									graphql_timeout_message(dur),
+									None,
+								)]),
+								true,
+							),
+						};
 					if let Some(observer) = metrics_observer.as_ref() {
-						let outcome = if response.is_err() {
+						let is_err = timed_out || response.is_err();
+						let outcome = if is_err {
 							Outcome::Error
 						} else {
 							Outcome::Success
 						};
-						let error_class = if response.is_err() {
+						let error_class = if timed_out {
+							Some(surrealdb_core::observe::error_class::TIMEOUT)
+						} else if response.is_err() {
 							Some(surrealdb_core::observe::error_class::CLIENT)
 						} else {
 							None
@@ -232,20 +257,38 @@ where
 					BatchRequest::Batch(_) => "batch",
 				};
 				let req_with_data = batch_req.data(datastore_ctx).data(session_ctx);
-				let response = schema.execute_batch(req_with_data).await;
+				// Bound the whole batch with the configured wall-clock query
+				// timeout (default off).
+				let (response, timed_out) =
+					match with_request_timeout(query_timeout, schema.execute_batch(req_with_data))
+						.await
+					{
+						Ok(r) => (r, false),
+						Err(dur) => (
+							async_graphql::BatchResponse::Single(
+								async_graphql::Response::from_errors(vec![ServerError::new(
+									graphql_timeout_message(dur),
+									None,
+								)]),
+							),
+							true,
+						),
+					};
 				if let Some(observer) = metrics_observer.as_ref() {
 					// Batch responses can carry per-operation results. We fold
 					// them into a single counter increment with `outcome` set
 					// to `error` if any sub-response errored. Per-operation
 					// duration breakdowns can be reconstructed from the
 					// histogram once the SDK exposes per-op results to us.
-					let any_err = !response.is_ok();
+					let any_err = timed_out || !response.is_ok();
 					let outcome = if any_err {
 						Outcome::Error
 					} else {
 						Outcome::Success
 					};
-					let error_class = if any_err {
+					let error_class = if timed_out {
+						Some(surrealdb_core::observe::error_class::TIMEOUT)
+					} else if any_err {
 						Some(surrealdb_core::observe::error_class::CLIENT)
 					} else {
 						None

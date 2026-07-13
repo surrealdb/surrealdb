@@ -159,6 +159,34 @@ impl Method {
 	pub fn is_valid(&self) -> bool {
 		!matches!(self, Self::Unknown)
 	}
+
+	/// Whether this method controls an explicit transaction lifecycle
+	/// (`begin` / `commit` / `cancel`).
+	///
+	/// Transaction control is the *only* exemption from the per-call wall-clock
+	/// query timeout, primarily for safety: `commit` removes the transaction
+	/// from the connection *before* awaiting the durable commit, so a wall-clock
+	/// timeout dropping that future mid-flight could leave a transaction marked
+	/// done but not committed. `begin` / `cancel` are exempted alongside it.
+	///
+	/// The exemption does not leave real work unbounded: the individual
+	/// statement methods executed inside the transaction (`query`, `create`,
+	/// ...) are each still guarded by the wall-clock query timeout. Note,
+	/// however, that `--transaction-timeout` only caps executor-run
+	/// transactions (auto-transactions and SurrealQL `BEGIN ... COMMIT`
+	/// blocks); a transaction held open across RPC calls (WebSocket
+	/// `begin`/`commit`) is bounded only by its per-statement timeouts and the
+	/// connection lifetime, not by `--transaction-timeout`.
+	///
+	/// Auth methods (`signup` / `signin` / `authenticate`) are deliberately
+	/// *not* exempt: for record access they execute user-defined SurrealQL
+	/// (the access method's `SIGNIN` / `SIGNUP` / `AUTHENTICATE` clauses),
+	/// which is exactly the kind of potentially unbounded work the guard exists
+	/// to cap. Dropping an auth future on timeout is safe (no partial state is
+	/// committed), so bounding them closes a DoS vector rather than opening one.
+	pub fn is_transaction_control(&self) -> bool {
+		matches!(self, Self::Begin | Self::Commit | Self::Cancel)
+	}
 }
 
 #[cfg(test)]
@@ -171,6 +199,27 @@ mod tests {
 		assert_eq!(Method::parse_case_insensitive("GQL"), Method::Gql);
 		assert_eq!(Method::Gql.to_str(), "gql");
 		assert!(Method::Gql.is_valid());
+	}
+
+	#[test]
+	fn transaction_control_methods_are_flagged() {
+		// Only the explicit-transaction lifecycle methods are exempt from the
+		// wall-clock query timeout.
+		assert!(Method::Begin.is_transaction_control());
+		assert!(Method::Commit.is_transaction_control());
+		assert!(Method::Cancel.is_transaction_control());
+		// Statement / query methods are guarded.
+		assert!(!Method::Query.is_transaction_control());
+		assert!(!Method::Graphql.is_transaction_control());
+		assert!(!Method::Gql.is_transaction_control());
+		assert!(!Method::Create.is_transaction_control());
+		assert!(!Method::Select.is_transaction_control());
+		// Auth methods are deliberately guarded too: record-access
+		// signin/signup/authenticate run user-defined SurrealQL, so the
+		// wall-clock timeout must be able to bound them.
+		assert!(!Method::Signin.is_transaction_control());
+		assert!(!Method::Signup.is_transaction_control());
+		assert!(!Method::Authenticate.is_transaction_control());
 	}
 
 	#[test]

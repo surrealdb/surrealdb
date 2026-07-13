@@ -732,6 +732,18 @@ impl Datastore {
 		self.transaction_timeout
 	}
 
+	/// Get the configured global query timeout, if any.
+	///
+	/// This is the deadline set by `--query-timeout` /
+	/// `SURREAL_QUERY_TIMEOUT`. Beyond being applied as an executor deadline
+	/// in [`Self::setup_ctx`], the transports reuse this value as a
+	/// wall-clock guard so a non-yielding hang (or engine work not bounded by
+	/// the deadline) still terminates the request. A return value of `None`
+	/// means no timeout is enforced.
+	pub fn query_timeout(&self) -> Option<Duration> {
+		self.dynamic_configuration.get_query_timeout()
+	}
+
 	/// Returns the broker used to flush live-query notifications after commit.
 	pub(crate) fn live_query_broker(&self) -> Option<Arc<dyn MessageBroker>> {
 		self.live_query_broker.clone()
