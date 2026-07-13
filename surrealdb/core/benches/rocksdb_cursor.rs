@@ -16,7 +16,6 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use surrealdb_core::CommunityComposer;
 use surrealdb_core::kvs::Direction::Forward;
-use surrealdb_core::kvs::LockType::Optimistic;
 use surrealdb_core::kvs::{Datastore, TransactionType, Transactor};
 use temp_dir::TempDir;
 use tokio::runtime::Runtime;
@@ -34,7 +33,7 @@ fn setup(prefix_count: usize, per_prefix: usize) -> (Datastore, TempDir) {
 	let ds = runtime().block_on(async {
 		let ds =
 			Datastore::builder().build_with_factory_path(&path, CommunityComposer()).await.unwrap();
-		let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
 		// Insert raw bytes via the Transactor (`tx.set` on the typed
 		// Transaction wrapper now requires a `KVKey`; we want raw byte
 		// keys for the bench, so go one level lower).
@@ -73,7 +72,7 @@ fn bench_nested_edge(c: &mut Criterion) {
 			|b, &prefix_count| {
 				let rt = runtime();
 				b.to_async(&rt).iter(|| async {
-					let tx = ds.transaction(TransactionType::Read, Optimistic).await.unwrap();
+					let tx = ds.transaction(TransactionType::Read).await.unwrap();
 					let tr: &Transactor = &tx;
 					let mut count = 0u64;
 					for p in 0..prefix_count {
@@ -103,7 +102,7 @@ fn bench_bulk_scan(c: &mut Criterion) {
 		group.bench_with_input(BenchmarkId::new("next_batch_2000", count), &count, |b, &count| {
 			let rt = runtime();
 			b.to_async(&rt).iter(|| async {
-				let tx = ds.transaction(TransactionType::Read, Optimistic).await.unwrap();
+				let tx = ds.transaction(TransactionType::Read).await.unwrap();
 				let tr: &Transactor = &tx;
 				let rng = prefix_range("p_000000/");
 				let mut cursor =
@@ -132,7 +131,7 @@ fn bench_bulk_scan(c: &mut Criterion) {
 			|b, &count| {
 				let rt = runtime();
 				b.to_async(&rt).iter(|| async {
-					let tx = ds.transaction(TransactionType::Read, Optimistic).await.unwrap();
+					let tx = ds.transaction(TransactionType::Read).await.unwrap();
 					let tr: &Transactor = &tx;
 					let rng = prefix_range("p_000000/");
 					let mut cursor =

@@ -769,11 +769,7 @@ impl Datastore {
 	}
 
 	/// Start a new transaction
-	pub async fn transaction(
-		&self,
-		write: TransactionType,
-		_: bool,
-	) -> Result<Box<dyn Transactable>> {
+	pub async fn transaction(&self, write: TransactionType) -> Result<Box<dyn Transactable>> {
 		// Set the transaction options
 		let mut to = OptimisticTransactionOptions::default();
 		to.set_snapshot(true);

@@ -1833,7 +1833,7 @@ mod tests {
 		BindingDef, BindingKind, EdgeQuantifier, MatchColumn, MatchOrder, MatchOutput,
 	};
 	use crate::expr::{BinaryOperator, Literal};
-	use crate::kvs::{Datastore, LockType, TransactionType};
+	use crate::kvs::{Datastore, TransactionType};
 	use crate::val::TableName;
 
 	// ---- shared builders ----
@@ -2213,9 +2213,7 @@ mod tests {
 		.expect("define schema");
 
 		let base = ds.setup_ctx().expect("setup_ctx").freeze();
-		let txn = Arc::new(
-			ds.transaction(TransactionType::Read, LockType::Optimistic).await.expect("txn"),
-		);
+		let txn = Arc::new(ds.transaction(TransactionType::Read).await.expect("txn"));
 		let mut ctx = Context::new_child(&base);
 		ctx.set_transaction(Arc::clone(&txn));
 		let ctx = ctx.freeze();

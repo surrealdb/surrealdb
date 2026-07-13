@@ -31,7 +31,7 @@ use crate::expr::statements::{OptionStatement, UseStatement};
 use crate::expr::{Base, ControlFlow, Expr, FlowResult, TopLevelExpr};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::slowlog::SlowLogVisit;
-use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
+use crate::kvs::{Datastore, Transaction, TransactionType};
 use crate::observe::{
 	Outcome, QueryCounters, QueryEvent, QueryEventSafe, StatementEvent, StatementEventCtx,
 	StatementEventSafe, StatementType,
@@ -1022,7 +1022,7 @@ impl Executor {
 			TransactionType::Write
 		};
 		let txn = Arc::new(
-			kvs.transaction(transaction_type, LockType::Optimistic)
+			kvs.transaction(transaction_type)
 				.await?
 				.with_tenant_identity(self.ctx.tenant_identity().cloned()),
 		);
@@ -1111,7 +1111,7 @@ impl Executor {
 		S: Stream<Item = Result<TopLevelExpr>>,
 	{
 		let Ok(txn) = kvs
-			.transaction(TransactionType::Write, LockType::Optimistic)
+			.transaction(TransactionType::Write)
 			.await
 			.map(|tx| tx.with_tenant_identity(self.ctx.tenant_identity().cloned()))
 		else {

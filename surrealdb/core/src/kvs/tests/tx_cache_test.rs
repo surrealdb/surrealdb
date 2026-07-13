@@ -11,7 +11,6 @@ use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvid
 use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceDefinition, NamespaceId, TableId};
 use crate::dbs::{Capabilities, Session};
 use crate::kvs::Datastore;
-use crate::kvs::LockType::Optimistic;
 use crate::val::TableName;
 
 /// Helper to create a Datastore and write transaction with namespace and database set up
@@ -21,7 +20,7 @@ async fn setup_tx_with_ns_db() -> (Datastore, crate::kvs::Transaction, Namespace
 		.build_with_path("memory")
 		.await
 		.unwrap();
-	let tx = ds.transaction(Write, Optimistic).await.unwrap();
+	let tx = ds.transaction(Write).await.unwrap();
 
 	let ns_def = NamespaceDefinition {
 		namespace_id: NamespaceId(1),
@@ -244,7 +243,7 @@ async fn test_single_tx_cache_invalidation_on_ns_put() {
 		.build_with_path("memory")
 		.await
 		.unwrap();
-	let tx = ds.transaction(Write, Optimistic).await.unwrap();
+	let tx = ds.transaction(Write).await.unwrap();
 
 	// Populate the cache with an empty namespace list
 	let nss = tx.all_ns(None).await.unwrap();
@@ -277,7 +276,7 @@ async fn test_single_tx_cache_invalidation_on_db_put_and_del() {
 		.build_with_path("memory")
 		.await
 		.unwrap();
-	let tx = ds.transaction(Write, Optimistic).await.unwrap();
+	let tx = ds.transaction(Write).await.unwrap();
 
 	let ns_def = NamespaceDefinition {
 		namespace_id: NamespaceId(1),
@@ -410,7 +409,7 @@ async fn test_versioned_read_does_not_pollute_table_cache() {
 	ds.execute("DEFINE DATABASE test", &ses, None).await.unwrap();
 	ds.execute("DEFINE TABLE my_table", &ses, None).await.unwrap();
 
-	let tx = ds.transaction(Write, Optimistic).await.unwrap();
+	let tx = ds.transaction(Write).await.unwrap();
 	let ns_def = tx.get_ns_by_name("test", None).await.unwrap().unwrap();
 	let db_def = tx.get_db_by_name("test", "test", None).await.unwrap().unwrap();
 	let ns = ns_def.namespace_id;
@@ -443,7 +442,7 @@ async fn test_versioned_read_does_not_pollute_field_cache() {
 	ds.execute("DEFINE TABLE my_table", &ses, None).await.unwrap();
 	ds.execute("DEFINE FIELD name ON TABLE my_table TYPE string", &ses, None).await.unwrap();
 
-	let tx = ds.transaction(Write, Optimistic).await.unwrap();
+	let tx = ds.transaction(Write).await.unwrap();
 	let ns_def = tx.get_ns_by_name("test", None).await.unwrap().unwrap();
 	let db_def = tx.get_db_by_name("test", "test", None).await.unwrap().unwrap();
 	let ns = ns_def.namespace_id;

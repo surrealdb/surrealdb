@@ -1665,7 +1665,6 @@ mod tests {
 	use crate::idx::IndexKeyBase;
 	use crate::key::index::iu::IndexCountKey;
 	use crate::kvs::Datastore;
-	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::{Read, Write};
 
 	fn count_key<'a>(
@@ -1711,7 +1710,7 @@ mod tests {
 	async fn count_value(ds: &Datastore, ikb: &IndexKeyBase) -> usize {
 		let mut count_iter =
 			IndexCountThingIterator::new(ikb.ns(), ikb.db(), ikb.table(), ikb.index()).unwrap();
-		let tx = Arc::new(ds.transaction(Read, Optimistic).await.unwrap());
+		let tx = Arc::new(ds.transaction(Read).await.unwrap());
 		let mut ctx = ds.setup_ctx().unwrap();
 		ctx.set_transaction(Arc::clone(&tx));
 		let ctx = ctx.freeze();
@@ -1741,7 +1740,7 @@ mod tests {
 
 		// Write some positive delta entries
 		{
-			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			let tx = ds.transaction(Write).await.unwrap();
 			let uid1 = (Uuid::new_v4(), Uuid::new_v4());
 			let uid2 = (Uuid::new_v4(), Uuid::new_v4());
 			let k1 = count_key(ns, db, &tb, ix, Some(uid1), true, 10);
@@ -1753,7 +1752,7 @@ mod tests {
 
 		// First compaction (new iterator) — compacts (+10, +5) into a single +15 entry
 		{
-			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			let tx = ds.transaction(Write).await.unwrap();
 			IndexCountThingIterator::new(ns, db, &tb, ix)
 				.unwrap()
 				.compaction(&ikb, &tx)
@@ -1770,7 +1769,7 @@ mod tests {
 
 		// Write additional delta entries on top of the compacted state
 		{
-			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			let tx = ds.transaction(Write).await.unwrap();
 			let uid3 = (Uuid::new_v4(), Uuid::new_v4());
 			let k3 = count_key(ns, db, &tb, ix, Some(uid3), true, 7);
 			tx.set_key(&k3, &()).await.unwrap();
@@ -1780,7 +1779,7 @@ mod tests {
 		// Second compaction (new iterator) — must not fail even though the
 		// compacted key already exists from the first compaction.
 		{
-			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			let tx = ds.transaction(Write).await.unwrap();
 			IndexCountThingIterator::new(ns, db, &tb, ix)
 				.unwrap()
 				.compaction(&ikb, &tx)
@@ -1806,7 +1805,7 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 
 		{
-			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			let tx = ds.transaction(Write).await.unwrap();
 			let uid1 = (Uuid::new_v4(), Uuid::new_v4());
 			let k1 = count_key(ns, db, &tb, ix, Some(uid1), true, 10);
 			tx.set_key(&k1, &()).await.unwrap();
@@ -1814,7 +1813,7 @@ mod tests {
 		}
 
 		let plan = {
-			let tx = ds.transaction(Read, Optimistic).await.unwrap();
+			let tx = ds.transaction(Read).await.unwrap();
 			let plan = IndexCountThingIterator::new(ns, db, &tb, ix)
 				.unwrap()
 				.prepare_compaction(&ikb, &tx)
@@ -1825,7 +1824,7 @@ mod tests {
 		};
 
 		{
-			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			let tx = ds.transaction(Write).await.unwrap();
 			let uid2 = (Uuid::new_v4(), Uuid::new_v4());
 			let k2 = count_key(ns, db, &tb, ix, Some(uid2), true, 7);
 			tx.set_key(&k2, &()).await.unwrap();
@@ -1833,12 +1832,12 @@ mod tests {
 		}
 
 		{
-			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			let tx = ds.transaction(Write).await.unwrap();
 			assert!(IndexCountThingIterator::apply_compaction(&ikb, &tx, plan).await.unwrap());
 			tx.commit().await.unwrap();
 		}
 
-		let tx = ds.transaction(Read, Optimistic).await.unwrap();
+		let tx = ds.transaction(Read).await.unwrap();
 		assert_eq!(tx.get_key(&ikb.new_iv_key(), None).await.unwrap(), Some(1));
 		let range = count_range(ns, db, &tb, ix);
 		assert_eq!(
@@ -1860,7 +1859,7 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 
 		{
-			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			let tx = ds.transaction(Write).await.unwrap();
 			for count in [10, 5, 7] {
 				let uid = (Uuid::new_v4(), Uuid::new_v4());
 				let key = count_key(ns, db, &tb, ix, Some(uid), true, count);
@@ -1870,7 +1869,7 @@ mod tests {
 		}
 
 		let plan = {
-			let tx = ds.transaction(Read, Optimistic).await.unwrap();
+			let tx = ds.transaction(Read).await.unwrap();
 			let plan = IndexCountThingIterator::new(ns, db, &tb, ix)
 				.unwrap()
 				.prepare_compaction_with_limit(&ikb, &tx, 2)
@@ -1883,12 +1882,12 @@ mod tests {
 		assert!(plan.has_more());
 
 		{
-			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			let tx = ds.transaction(Write).await.unwrap();
 			assert!(IndexCountThingIterator::apply_compaction(&ikb, &tx, plan).await.unwrap());
 			tx.commit().await.unwrap();
 		}
 
-		let tx = ds.transaction(Read, Optimistic).await.unwrap();
+		let tx = ds.transaction(Read).await.unwrap();
 		assert_eq!(
 			tx.count(count_range(ns, db, &tb, ix), None).await.unwrap(),
 			2,
@@ -1898,7 +1897,7 @@ mod tests {
 		assert_eq!(count_value(&ds, &ikb).await, 22);
 
 		let plan = {
-			let tx = ds.transaction(Read, Optimistic).await.unwrap();
+			let tx = ds.transaction(Read).await.unwrap();
 			let plan = IndexCountThingIterator::new(ns, db, &tb, ix)
 				.unwrap()
 				.prepare_compaction_with_limit(&ikb, &tx, 2)
@@ -1911,12 +1910,12 @@ mod tests {
 		assert!(!plan.has_more());
 
 		{
-			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			let tx = ds.transaction(Write).await.unwrap();
 			assert!(IndexCountThingIterator::apply_compaction(&ikb, &tx, plan).await.unwrap());
 			tx.commit().await.unwrap();
 		}
 
-		let tx = ds.transaction(Read, Optimistic).await.unwrap();
+		let tx = ds.transaction(Read).await.unwrap();
 		assert_eq!(
 			tx.count(count_range(ns, db, &tb, ix), None).await.unwrap(),
 			1,
@@ -1936,7 +1935,7 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 
 		{
-			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			let tx = ds.transaction(Write).await.unwrap();
 			let uid1 = (Uuid::new_v4(), Uuid::new_v4());
 			let k1 = count_key(ns, db, &tb, ix, Some(uid1), true, 10);
 			tx.set_key(&k1, &()).await.unwrap();
@@ -1944,7 +1943,7 @@ mod tests {
 		}
 
 		let plan1 = {
-			let tx = ds.transaction(Read, Optimistic).await.unwrap();
+			let tx = ds.transaction(Read).await.unwrap();
 			let plan = IndexCountThingIterator::new(ns, db, &tb, ix)
 				.unwrap()
 				.prepare_compaction(&ikb, &tx)
@@ -1954,7 +1953,7 @@ mod tests {
 			plan
 		};
 		let plan2 = {
-			let tx = ds.transaction(Read, Optimistic).await.unwrap();
+			let tx = ds.transaction(Read).await.unwrap();
 			let plan = IndexCountThingIterator::new(ns, db, &tb, ix)
 				.unwrap()
 				.prepare_compaction(&ikb, &tx)
@@ -1965,17 +1964,17 @@ mod tests {
 		};
 
 		{
-			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			let tx = ds.transaction(Write).await.unwrap();
 			assert!(IndexCountThingIterator::apply_compaction(&ikb, &tx, plan1).await.unwrap());
 			tx.commit().await.unwrap();
 		}
 		{
-			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			let tx = ds.transaction(Write).await.unwrap();
 			assert!(!IndexCountThingIterator::apply_compaction(&ikb, &tx, plan2).await.unwrap());
 			tx.cancel().await.unwrap();
 		}
 
-		let tx = ds.transaction(Read, Optimistic).await.unwrap();
+		let tx = ds.transaction(Read).await.unwrap();
 		assert_eq!(tx.get_key(&ikb.new_iv_key(), None).await.unwrap(), Some(1));
 		tx.cancel().await.unwrap();
 		assert_eq!(count_value(&ds, &ikb).await, 10);

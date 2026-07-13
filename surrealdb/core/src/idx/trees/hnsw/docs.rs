@@ -150,7 +150,7 @@ mod tests {
 	use anyhow::Result;
 
 	use super::*;
-	use crate::kvs::{Datastore, LockType, TransactionType};
+	use crate::kvs::{Datastore, TransactionType};
 
 	fn ikb() -> IndexKeyBase {
 		IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(3))
@@ -162,7 +162,7 @@ mod tests {
 		let ikb = ikb();
 		let cache = VectorCache::new(1024 * 1024);
 		{
-			let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
+			let tx = ds.transaction(TransactionType::Write).await?;
 			tx.set_key(
 				&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 1),
 				&RecordIdKey::Number(11),
@@ -176,7 +176,7 @@ mod tests {
 			tx.commit().await?;
 		}
 
-		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Read).await?;
 		let got =
 			HnswDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[2, 1, 3], Some(5)).await?;
 		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(22));
@@ -184,11 +184,11 @@ mod tests {
 		assert!(got[2].is_none());
 		tx.cancel().await?;
 
-		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
 		tx.del_key(&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 1)).await?;
 		tx.commit().await?;
 
-		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Read).await?;
 		let cached =
 			HnswDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[1], Some(5)).await?;
 		assert_eq!(&cached[0].as_ref().unwrap().key, &RecordIdKey::Number(11));
@@ -202,14 +202,14 @@ mod tests {
 		let ikb = ikb();
 		let cache = VectorCache::new(1024 * 1024);
 
-		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Read).await?;
 		assert_eq!(
 			HnswDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[9], Some(5)).await?,
 			vec![None]
 		);
 		tx.cancel().await?;
 
-		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
 		tx.set_key(
 			&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 9),
 			&RecordIdKey::Number(99),
@@ -233,7 +233,7 @@ mod tests {
 		let ikb = ikb();
 		let cache = VectorCache::new(1024 * 1024);
 		{
-			let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
+			let tx = ds.transaction(TransactionType::Write).await?;
 			tx.set_key(
 				&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 1),
 				&RecordIdKey::Number(11),
@@ -242,7 +242,7 @@ mod tests {
 			tx.commit().await?;
 		}
 
-		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Read).await?;
 		let got = HnswDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[1], Some(5)).await?;
 		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(11));
 		tx.cancel().await?;
@@ -253,7 +253,7 @@ mod tests {
 				.is_none()
 		);
 
-		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
 		tx.set_key(
 			&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 1),
 			&RecordIdKey::Number(22),
@@ -261,7 +261,7 @@ mod tests {
 		.await?;
 		tx.commit().await?;
 
-		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Read).await?;
 		let got = HnswDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[1], Some(6)).await?;
 		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(22));
 		tx.cancel().await?;
@@ -275,13 +275,13 @@ mod tests {
 		let cache = VectorCache::new(1024 * 1024);
 		let id = RecordIdKey::Number(77);
 		{
-			let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
+			let tx = ds.transaction(TransactionType::Write).await?;
 			tx.set_key(&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 7), &id)
 				.await?;
 			tx.commit().await?;
 		}
 
-		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Read).await?;
 		let got = HnswDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[7], Some(5)).await?;
 		assert_eq!(&got[0].as_ref().unwrap().key, &id);
 		assert!(
@@ -292,7 +292,7 @@ mod tests {
 		);
 		tx.cancel().await?;
 
-		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
 		let docs = HnswDocs::new(ikb.clone());
 		docs.remove(7, TableId(4), &cache).await;
 		assert!(
@@ -308,7 +308,7 @@ mod tests {
 	#[tokio::test]
 	async fn hnsw_vec_docs_populates_and_uses_doc_set_cache() -> Result<()> {
 		let ds = Datastore::new("memory").await?;
-		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
 		let ikb = ikb();
 		let cache = VectorCache::new(1024 * 1024);
 		let vec_docs = VecDocs::new(ikb.clone(), TableId(4), cache.clone(), false);
@@ -339,7 +339,7 @@ mod tests {
 	#[tokio::test]
 	async fn hnsw_vec_docs_hashed_disambiguates_and_caches_by_element() -> Result<()> {
 		let ds = Datastore::new("memory").await?;
-		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
 		let ikb = ikb();
 		let cache = VectorCache::new(1024 * 1024);
 		let vec_docs = VecDocs::new(ikb.clone(), TableId(4), cache.clone(), true);
@@ -380,7 +380,7 @@ mod tests {
 	#[tokio::test]
 	async fn hnsw_vec_docs_missing_mapping_returns_none_without_caching() -> Result<()> {
 		let ds = Datastore::new("memory").await?;
-		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
 		let ikb = ikb();
 		let cache = VectorCache::new(1024 * 1024);
 		let vec_docs = VecDocs::new(ikb.clone(), TableId(4), cache.clone(), false);

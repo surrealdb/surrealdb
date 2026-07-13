@@ -59,7 +59,7 @@ async fn compact_pushes_data_to_bottommost() {
 	// produces multiple SSTs before we compact.
 	let mut rng = StdRng::seed_from_u64(0xC0FF_EEC0_FFEE_u64);
 	for batch in 0..32u32 {
-		let tx = ds.transaction(TransactionType::Write, true).await.unwrap();
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
 		for i in 0..32u32 {
 			let key: Vec<u8> = format!("bottommost_test_{batch:04}_{i:04}").into_bytes();
 			let mut value = vec![0u8; 256];
@@ -73,7 +73,7 @@ async fn compact_pushes_data_to_bottommost() {
 	// `compact` is on the `Transactable` impl for `Transaction`, so spin up
 	// a short-lived transaction just to dispatch it.
 	{
-		let tx = ds.transaction(TransactionType::Read, true).await.unwrap();
+		let tx = ds.transaction(TransactionType::Read).await.unwrap();
 		Transactable::compact(tx.as_ref(), None).await.unwrap();
 		tx.cancel().await.unwrap();
 	}
@@ -114,7 +114,7 @@ async fn shutdown_drains_cleanly_with_defaults() {
 
 	let ds = RocksDbDatastore::new(&path, config).await.unwrap();
 	{
-		let tx = ds.transaction(TransactionType::Write, true).await.unwrap();
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
 		for i in 0..256u32 {
 			let key: Vec<u8> = format!("shutdown_default_{i:04}").into_bytes();
 			let value = vec![0u8; 256];
@@ -164,7 +164,7 @@ async fn shutdown_compacts_to_bottommost_when_opted_in() {
 	// is produced (random values defeat per-level compression collapse).
 	let mut rng = StdRng::seed_from_u64(0xD15C_0DED_BEEF_FACE_u64);
 	for batch in 0..32u32 {
-		let tx = ds.transaction(TransactionType::Write, true).await.unwrap();
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
 		for i in 0..32u32 {
 			let key: Vec<u8> = format!("shutdown_compact_{batch:04}_{i:04}").into_bytes();
 			let mut value = vec![0u8; 256];
@@ -222,7 +222,7 @@ async fn concurrent_cursors_do_not_evict() {
 	// Keys are `prefix_NN/key_MMMM` so each prefix is a contiguous range
 	// `prefix_NN/` ..= `prefix_NN/\xff`.
 	{
-		let tx = ds.transaction(TransactionType::Write, true).await.unwrap();
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
 		for p in 0..PREFIX_COUNT {
 			for k in 0..KEYS_PER_PREFIX {
 				let key = format!("prefix_{p:02}/key_{k:04}").into_bytes();
@@ -234,7 +234,7 @@ async fn concurrent_cursors_do_not_evict() {
 	}
 
 	// Open one cursor per prefix on a single read-only transaction.
-	let tx = ds.transaction(TransactionType::Read, true).await.unwrap();
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
 	let tx_ref = tx.as_ref();
 
 	let mut cursors = Vec::with_capacity(PREFIX_COUNT);
@@ -319,7 +319,7 @@ async fn concurrent_cursors_on_writable_tx() {
 	// Seed in a first transaction so the snapshot the second transaction
 	// captures already contains the data.
 	{
-		let tx = ds.transaction(TransactionType::Write, true).await.unwrap();
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
 		for p in 0..PREFIX_COUNT {
 			for k in 0..KEYS_PER_PREFIX {
 				let key = format!("wp_{p:02}/key_{k:04}").into_bytes();
@@ -330,7 +330,7 @@ async fn concurrent_cursors_on_writable_tx() {
 		tx.commit().await.unwrap();
 	}
 
-	let tx = ds.transaction(TransactionType::Write, true).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	let tx_ref = tx.as_ref();
 
 	let mut cursors = Vec::with_capacity(PREFIX_COUNT);
@@ -397,7 +397,7 @@ async fn cursor_drop_releases_slot() {
 
 	// Seed a tiny dataset so the cursor has something to point at.
 	{
-		let tx = ds.transaction(TransactionType::Write, true).await.unwrap();
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
 		for k in 0..10 {
 			let key = format!("drop_test/{k:02}").into_bytes();
 			tx.set(key.into(), vec![0u8]).await.unwrap();
@@ -405,7 +405,7 @@ async fn cursor_drop_releases_slot() {
 		tx.commit().await.unwrap();
 	}
 
-	let tx = ds.transaction(TransactionType::Read, true).await.unwrap();
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
 	let tx_ref = tx.as_ref();
 
 	// Open and immediately drop several cursors. Each Drop should remove
@@ -444,7 +444,7 @@ async fn next_batch_borrowed_slices_match_owned_scan() {
 	let ds = RocksDbDatastore::new(&path, RocksDbConfig::default()).await.unwrap();
 
 	{
-		let tx = ds.transaction(TransactionType::Write, true).await.unwrap();
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
 		for k in 0..N {
 			let key = format!("fe_key/{k:06}").into_bytes();
 			tx.set(key.into(), vec![0u8; 4]).await.unwrap();
@@ -455,7 +455,7 @@ async fn next_batch_borrowed_slices_match_owned_scan() {
 	// Drive the cursor; copy each borrowed slice into an owned Vec so we
 	// can hold across the next `next_batch` (which would invalidate the
 	// borrow). Compare against the expected keys generated locally.
-	let tx = ds.transaction(TransactionType::Read, true).await.unwrap();
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
 	let tx_ref = tx.as_ref();
 	let rng = prefix_byte_range("fe_key/");
 	let mut cursor =
@@ -501,7 +501,7 @@ async fn commit_blocks_until_live_cursor_drops() {
 	// Seed something so the cursor has data to read. The actual contents
 	// don't matter; what matters is that a cursor can be opened.
 	{
-		let tx = ds.transaction(TransactionType::Write, true).await.unwrap();
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
 		for k in 0..16 {
 			let key = format!("race_key/{k:02}").into_bytes();
 			tx.set(key.into(), vec![0u8]).await.unwrap();
@@ -510,7 +510,7 @@ async fn commit_blocks_until_live_cursor_drops() {
 	}
 
 	// Writable tx so we exercise the commit (not cancel) path.
-	let tx = ds.transaction(TransactionType::Write, true).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	let tx_ref = tx.as_ref();
 
 	// Open a cursor. After this point `cursors_alive == 1` and any
@@ -586,7 +586,7 @@ async fn cancel_blocks_until_live_cursor_drops() {
 	let ds = RocksDbDatastore::new(&path, RocksDbConfig::default()).await.unwrap();
 
 	{
-		let tx = ds.transaction(TransactionType::Write, true).await.unwrap();
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
 		for k in 0..16 {
 			let key = format!("cancel_race/{k:02}").into_bytes();
 			tx.set(key.into(), vec![0u8]).await.unwrap();
@@ -598,7 +598,7 @@ async fn cancel_blocks_until_live_cursor_drops() {
 	// branch (borrow into `self.db`) rather than `ScanIter::Tx`.
 	// Combined with the writable variant in the commit test above, both
 	// `ScanIter` arms get coverage.
-	let tx = ds.transaction(TransactionType::Read, true).await.unwrap();
+	let tx = ds.transaction(TransactionType::Read).await.unwrap();
 	let tx_ref = tx.as_ref();
 
 	let rng = prefix_byte_range("cancel_race/");
@@ -648,12 +648,12 @@ async fn open_cursor_after_commit_starts_fails() {
 	let ds = RocksDbDatastore::new(&path, RocksDbConfig::default()).await.unwrap();
 
 	{
-		let tx = ds.transaction(TransactionType::Write, true).await.unwrap();
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
 		tx.set(b"after_commit/key".as_slice().into(), vec![0u8]).await.unwrap();
 		tx.commit().await.unwrap();
 	}
 
-	let tx = ds.transaction(TransactionType::Write, true).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	let tx_ref = tx.as_ref();
 
 	// Open the blocker cursor first. `cursors_alive` is now 1, so any
@@ -747,7 +747,7 @@ async fn open_cursor_cancellation_releases_cursors_alive_slot() {
 	// of milliseconds — far more than the microsecond budget of the
 	// two `now_or_never` polls plus the future-drop.
 	{
-		let tx = ds.transaction(TransactionType::Write, true).await.unwrap();
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
 		for k in 0..50_000u32 {
 			let key = format!("cancel_open/{k:08}").into_bytes();
 			tx.set(key.into(), vec![0u8]).await.unwrap();
@@ -758,7 +758,7 @@ async fn open_cursor_cancellation_releases_cursors_alive_slot() {
 	// Writable tx so `count()` takes the `inner` lock and holds it
 	// across the affinitypool-offloaded scan: that's our contention
 	// source for forcing `open_keys_cursor` into the parked state.
-	let tx = ds.transaction(TransactionType::Write, true).await.unwrap();
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
 	let tx_ref = tx.as_ref();
 
 	let rng = prefix_byte_range("cancel_open/");

@@ -17,7 +17,7 @@ use crate::err::Error;
 use crate::key::root::task_lease::TaskLease as TaskLeaseKey;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::sequences::Sequences;
-use crate::kvs::{Error as KvsError, LockType, Transaction, TransactionType};
+use crate::kvs::{Error as KvsError, Transaction, TransactionType};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 pub(crate) enum TaskLeaseType {
@@ -373,10 +373,7 @@ impl LeaseHandler {
 	/// * `Err` - If database operations fail
 	async fn read_lease(&self, current: DateTime<Utc>) -> Result<Option<(TaskLease, LeaseStatus)>> {
 		self.ensure_not_cancelled()?;
-		let tx = self
-			.tf
-			.transaction(TransactionType::Read, LockType::Optimistic, self.sequences.clone())
-			.await?;
+		let tx = self.tf.transaction(TransactionType::Read, self.sequences.clone()).await?;
 		if let Err(e) = self.ensure_not_cancelled() {
 			let _ = tx.cancel().await;
 			return Err(e);
@@ -449,10 +446,7 @@ impl LeaseHandler {
 	/// * `Err` - Only if database operations fail (network errors, transaction failures, etc.)
 	async fn acquire_new_lease(&self, current: DateTime<Utc>) -> Result<bool> {
 		self.ensure_not_cancelled()?;
-		let tx = self
-			.tf
-			.transaction(TransactionType::Write, LockType::Optimistic, self.sequences.clone())
-			.await?;
+		let tx = self.tf.transaction(TransactionType::Write, self.sequences.clone()).await?;
 		if let Err(e) = self.ensure_not_cancelled() {
 			let _ = tx.cancel().await;
 			return Err(e);

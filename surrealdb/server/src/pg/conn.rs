@@ -10,7 +10,7 @@ use surrealdb_core::ctx::CancelHandle;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::dbs::capabilities::RouteTarget;
 use surrealdb_core::iam::verify::{self, ScramAuth, basic};
-use surrealdb_core::kvs::{Datastore, LockType, Transaction, TransactionType};
+use surrealdb_core::kvs::{Datastore, Transaction, TransactionType};
 use surrealdb_core::sql::Ast;
 use surrealdb_core::syn;
 use surrealdb_types::{Value, Variables};
@@ -1531,7 +1531,7 @@ impl Connection {
 				} else {
 					let tx = self
 						.ds
-						.transaction(TransactionType::Write, LockType::Optimistic)
+						.transaction(TransactionType::Write)
 						.await
 						.map_err(|err| PgError::internal(err.to_string()))?;
 					self.transaction = Some(Arc::new(tx));

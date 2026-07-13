@@ -124,7 +124,6 @@ mod tests {
 	use crate::cf::ChangeSet;
 	use crate::expr::changefeed::ChangeFeed;
 	use crate::expr::statements::show::ShowSince;
-	use crate::kvs::LockType::*;
 	use crate::kvs::TransactionType::*;
 	use crate::kvs::{Datastore, Transaction};
 	use crate::val::{RecordId, RecordIdKey, TableName, Value};
@@ -143,12 +142,12 @@ mod tests {
 		// Write records to the table.
 		//
 
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		let tb_name = TableName::new(TB.to_owned());
 		let tb = tx.expect_tb_by_name(NS, DB, &tb_name).await.unwrap();
 		tx.commit().await.unwrap();
 
-		let tx1 = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx1 = ds.transaction(Write).await.unwrap();
 		let record_a = RecordId {
 			table: tb_name.clone(),
 			key: RecordIdKey::String(Strand::new_static("A")),
@@ -166,7 +165,7 @@ mod tests {
 		);
 		tx1.commit().await.unwrap();
 
-		let tx2 = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx2 = ds.transaction(Write).await.unwrap();
 		let record_c = RecordId {
 			table: tb_name.clone(),
 			key: RecordIdKey::String(Strand::new_static("C")),
@@ -183,7 +182,7 @@ mod tests {
 		);
 		tx2.commit().await.unwrap();
 
-		let tx3 = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx3 = ds.transaction(Write).await.unwrap();
 		let record_b = RecordId {
 			table: tb_name.clone(),
 			key: RecordIdKey::String(Strand::new_static("B")),
@@ -220,7 +219,7 @@ mod tests {
 
 		let start: u64 = 0;
 
-		let tx4 = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx4 = ds.transaction(Write).await.unwrap();
 		let r = crate::cf::read(
 			&tx4,
 			tb.namespace_id,
@@ -256,14 +255,14 @@ mod tests {
 		// Given we have 2 entries in change feeds
 		let ds = init(false).await;
 
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		let tb_name = TableName::new(TB.to_owned());
 		let tb = tx.expect_tb_by_name(NS, DB, &tb_name).await.unwrap();
 		tx.commit().await.unwrap();
 
 		// Record first change with timestamp ~5
 		let _id1 = record_change_feed_entry(
-			ds.transaction(Write, Optimistic).await.unwrap(),
+			ds.transaction(Write).await.unwrap(),
 			&tb,
 			"First".to_string(),
 		)
@@ -271,23 +270,18 @@ mod tests {
 
 		// Record second change with timestamp ~10 (or later)
 		let _id2 = record_change_feed_entry(
-			ds.transaction(Write, Optimistic).await.unwrap(),
+			ds.transaction(Write).await.unwrap(),
 			&tb,
 			"Second".to_string(),
 		)
 		.await;
 
 		// When we scan from timestamp 0 we should see both changes
-		let r = change_feed_ts(ds.transaction(Write, Optimistic).await.unwrap(), &tb, 0).await;
+		let r = change_feed_ts(ds.transaction(Write).await.unwrap(), &tb, 0).await;
 		assert_eq!(r.len(), 2);
 
 		// When we scan from a timestamp after the first change, we should only see the second
-		let r = change_feed_ts(
-			ds.transaction(Write, Optimistic).await.unwrap(),
-			&tb,
-			r[0].0 as u64 + 1,
-		)
-		.await;
+		let r = change_feed_ts(ds.transaction(Write).await.unwrap(), &tb, r[0].0 as u64 + 1).await;
 		assert_eq!(r.len(), 1);
 	}
 
@@ -368,7 +362,7 @@ mod tests {
 		// conversion work.
 		//
 
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 
 		tx.put_ns(ns_def).await.unwrap();
 		tx.put_db(NS, db_def).await.unwrap();

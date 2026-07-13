@@ -662,7 +662,6 @@ mod tests {
 	};
 	use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
 	use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
-	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::{Datastore, TransactionType};
 	use crate::val::{Number, RecordIdKey, Value};
 
@@ -868,7 +867,7 @@ mod tests {
 	async fn test_hnsw_inner_product_smoke() -> Result<()> {
 		let ds = Datastore::new("memory").await?;
 		{
-			let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+			let tx = ds.transaction(TransactionType::Write).await?;
 			tx.ensure_ns_db(None, "test", "test").await?;
 			tx.commit().await?;
 		}
@@ -909,7 +908,7 @@ mod tests {
 	async fn test_hnsw_filtered_knn_batches_record_fetches() -> Result<()> {
 		let ds = Arc::new(Datastore::new("memory").await?);
 		{
-			let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+			let tx = ds.transaction(TransactionType::Write).await?;
 			tx.ensure_ns_db(None, "test", "test").await?;
 			tx.commit().await?;
 		}
@@ -952,7 +951,7 @@ mod tests {
 			session: &Session,
 			query: &str,
 		) -> Result<(usize, crate::observe::TransactionMetricsSnapshot)> {
-			let tx = Arc::new(ds.transaction(TransactionType::Read, Optimistic).await?);
+			let tx = Arc::new(ds.transaction(TransactionType::Read).await?);
 			let mut response =
 				ds.execute_with_transaction(query, session, None, Arc::clone(&tx)).await?;
 			let len = match response.remove(0).result? {
@@ -1095,7 +1094,7 @@ mod tests {
 	}
 
 	async fn new_ctx(ds: &Datastore, tt: TransactionType) -> FrozenContext {
-		let tx = Arc::new(ds.transaction(tt, Optimistic).await.unwrap());
+		let tx = Arc::new(ds.transaction(tt).await.unwrap());
 		// Use the full datastore context so the shared table-level doc-ID
 		// sequence is available to compaction's `resolve`.
 		let mut ctx = ds.setup_ctx().unwrap();
@@ -1678,7 +1677,7 @@ mod tests {
 	async fn hnsw_blocking_define_index_compacts_pending_vectors() -> Result<()> {
 		let ds = Datastore::new("memory").await?;
 		let db = {
-			let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+			let tx = ds.transaction(TransactionType::Write).await?;
 			let db = tx.ensure_ns_db(None, "test", "test").await?;
 			tx.commit().await?;
 			db
@@ -1694,7 +1693,7 @@ mod tests {
 			response.result?;
 		}
 
-		let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Read).await?;
 		let tb = "pts".into();
 		let ix =
 			tx.get_tb_index(db.namespace_id, db.database_id, &tb, "hnsw_pts", None).await?.unwrap();
@@ -1714,7 +1713,7 @@ mod tests {
 	async fn hnsw_query_reads_record_keyed_pending_vectors() -> Result<()> {
 		let ds = Datastore::new("memory").await?;
 		{
-			let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+			let tx = ds.transaction(TransactionType::Write).await?;
 			tx.ensure_ns_db(None, "test", "test").await?;
 			tx.commit().await?;
 		}
@@ -1750,7 +1749,7 @@ mod tests {
 		info!("Build data collection");
 
 		let ds = Arc::new(Datastore::new("memory").await?);
-		let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
 		let db = tx.ensure_ns_db(None, "myns", "mydb").await?;
 		tx.commit().await?;
 
@@ -1910,7 +1909,7 @@ mod tests {
 		);
 
 		let ds = Arc::new(Datastore::new("memory").await?);
-		let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
 		let db = tx.ensure_ns_db(None, "myns", "mydb").await?;
 		tx.commit().await?;
 

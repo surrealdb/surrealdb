@@ -223,33 +223,32 @@ impl TransactionBuilder for DatastoreFlavor {
 	fn new_transaction(
 		&self,
 		write: TransactionType,
-		lock: bool,
 	) -> BoxFut<'_, Result<(Box<dyn Transactable>, bool)>> {
 		Box::pin(async move {
 			Ok(match self {
 				#[cfg(feature = "kv-mem")]
 				Self::Mem(v) => {
-					let tx = v.transaction(write, lock).await?;
+					let tx = v.transaction(write).await?;
 					(tx, true)
 				}
 				#[cfg(feature = "kv-rocksdb")]
 				Self::RocksDB(v) => {
-					let tx = v.transaction(write, lock).await?;
+					let tx = v.transaction(write).await?;
 					(tx, true)
 				}
 				#[cfg(feature = "kv-indxdb")]
 				Self::IndxDB(v) => {
-					let tx = v.transaction(write, lock).await?;
+					let tx = v.transaction(write).await?;
 					(tx, true)
 				}
 				#[cfg(feature = "kv-tikv")]
 				Self::TiKV(v) => {
-					let tx = v.transaction(write, lock).await?;
+					let tx = v.transaction(write).await?;
 					(tx, false)
 				}
 				#[cfg(feature = "kv-surrealkv")]
 				Self::SurrealKV(v) => {
-					let tx = v.transaction(write, lock).await?;
+					let tx = v.transaction(write).await?;
 					(tx, true)
 				}
 				_ => unreachable!(),

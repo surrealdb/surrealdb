@@ -11,7 +11,7 @@ use futures::{Sink, SinkExt, StreamExt};
 use http::{HeaderMap, HeaderName, HeaderValue};
 use opentelemetry_http::HeaderExtractor;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::kvs::{Datastore, LockType, Transaction, TransactionType};
+use surrealdb_core::kvs::{Datastore, Transaction, TransactionType};
 use surrealdb_core::mem::ALLOC;
 use surrealdb_core::observe::{
 	NetworkBytesEvent, NetworkBytesEventCtx, NetworkBytesEventSafe, NetworkDirection,
@@ -981,8 +981,7 @@ impl RpcProtocol for Websocket {
 		// encapsulates the pre-await + post-await + cancel-on-loss
 		// pattern; any future RPC method that needs to open its own
 		// transaction outside the executor SHOULD route through it.
-		let tx =
-			self.cancel_aware_transaction(TransactionType::Write, LockType::Optimistic).await?;
+		let tx = self.cancel_aware_transaction(TransactionType::Write).await?;
 		// Generate a unique transaction ID
 		let id = Uuid::now_v7();
 		debug!("WebSocket begin: created transaction {id}");
@@ -1114,14 +1113,13 @@ impl Websocket {
 	async fn cancel_aware_transaction(
 		&self,
 		ty: TransactionType,
-		lock: LockType,
 	) -> Result<Transaction, surrealdb_types::Error> {
 		if self.cancel.is_cancelled() {
 			return Err(TypesError::internal(REQUEST_CANCELLED.to_string()));
 		}
 		let tx = self
 			.kvs()
-			.transaction(ty, lock)
+			.transaction(ty)
 			.await
 			.map_err(surrealdb_core::rpc::types_error_from_anyhow)?;
 		if self.cancel.is_cancelled() {

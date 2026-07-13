@@ -187,14 +187,14 @@ mod tests {
 	use crate::expr::DefineAnalyzerStatement;
 	use crate::idx::ft::analyzer::filter::FilteringStage;
 	use crate::idx::ft::analyzer::tokenizer::{Token, Tokens};
-	use crate::kvs::{Datastore, LockType, TransactionType};
+	use crate::kvs::{Datastore, TransactionType};
 	use crate::sql::Expr;
 	use crate::sql::statements::DefineStatement;
 	use crate::syn;
 
 	async fn get_analyzer_tokens(def: &str, input: &str) -> Tokens {
 		let ds = Datastore::new("memory").await.unwrap();
-		let txn = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+		let txn = ds.transaction(TransactionType::Read).await.unwrap();
 		let mut ctx = Context::new_test();
 		ctx.set_transaction(Arc::new(txn));
 		let ctx = ctx.freeze();

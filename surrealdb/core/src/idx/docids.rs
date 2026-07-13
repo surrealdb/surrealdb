@@ -257,7 +257,6 @@ impl TableDocIds {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::{Read, Write};
 	use crate::kvs::{Datastore, TransactionType};
 
@@ -273,7 +272,7 @@ mod tests {
 	/// table-level space.
 	async fn new_op(ds: &Datastore, tt: TransactionType) -> (FrozenContext, TableDocIds) {
 		let mut ctx = ds.setup_ctx().unwrap();
-		let tx = ds.transaction(tt, Optimistic).await.unwrap();
+		let tx = ds.transaction(tt).await.unwrap();
 		ctx.set_transaction(tx.into());
 		let d = TableDocIds::new(NS, DB, "t".into());
 		(ctx.freeze(), d)
@@ -414,7 +413,7 @@ mod tikv_concurrency {
 	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::key::KVRange;
 	use crate::key::table::dd;
-	use crate::kvs::{Datastore, LockType, TransactionType, is_retryable_transaction_conflict};
+	use crate::kvs::{Datastore, TransactionType, is_retryable_transaction_conflict};
 	use crate::val::RecordIdKey;
 
 	const NS: NamespaceId = NamespaceId(1);
@@ -426,7 +425,7 @@ mod tikv_concurrency {
 			.build_with_factory_path("tikv:127.0.0.1:2379", CommunityComposer())
 			.await
 			.unwrap();
-		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
 		tx.delr((vec![0u8]..vec![0xffu8]).into()).await.unwrap();
 		tx.commit().await.unwrap();
 		Arc::new(ds)
@@ -437,7 +436,7 @@ mod tikv_concurrency {
 	async fn resolve_committed(ds: &Datastore, rid: &RecordIdKey) -> DocId {
 		loop {
 			let mut ctx = ds.setup_ctx().unwrap();
-			let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+			let tx = ds.transaction(TransactionType::Write).await.unwrap();
 			ctx.set_transaction(tx.into());
 			let ctx = ctx.freeze();
 			let d = TableDocIds::new(NS, DB, "t".into());
@@ -488,7 +487,7 @@ mod tikv_concurrency {
 		let doc_id = ids[0];
 
 		let tb = "t".into();
-		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+		let tx = ds.transaction(TransactionType::Read).await.unwrap();
 		let d = TableDocIds::new(NS, DB, "t".into());
 		// The bidirectional mapping is consistent...
 		assert_eq!(d.get_doc_id(&tx, &rid).await.unwrap(), Some(doc_id));
@@ -523,7 +522,7 @@ mod tikv_concurrency {
 		// the pre-assignment state (no `!di` yet), even if start timestamps are
 		// assigned lazily.
 		let mut ctx_b = ds.setup_ctx().unwrap();
-		let tx_b = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+		let tx_b = ds.transaction(TransactionType::Write).await.unwrap();
 		ctx_b.set_transaction(tx_b.into());
 		let ctx_b = ctx_b.freeze();
 		let d_b = TableDocIds::new(NS, DB, "t".into());
@@ -532,7 +531,7 @@ mod tikv_concurrency {
 		// A assigns a doc-ID and commits.
 		let a_doc = {
 			let mut ctx_a = ds.setup_ctx().unwrap();
-			let tx_a = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+			let tx_a = ds.transaction(TransactionType::Write).await.unwrap();
 			ctx_a.set_transaction(tx_a.into());
 			let ctx_a = ctx_a.freeze();
 			let d_a = TableDocIds::new(NS, DB, "t".into());
@@ -546,7 +545,7 @@ mod tikv_concurrency {
 		let b_commit_ok = ctx_b.tx().commit().await.is_ok();
 
 		// Exactly one mapping survives, and it is A's.
-		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+		let tx = ds.transaction(TransactionType::Read).await.unwrap();
 		let d = TableDocIds::new(NS, DB, "t".into());
 		let tb = "t".into();
 		let reverse =

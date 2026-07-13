@@ -1,29 +1,28 @@
 use super::CreateDs;
-use super::LockType::*;
 use super::TransactionType::*;
 
 pub async fn snapshot(new_ds: impl CreateDs) {
 	// Create a new datastore
 	let ds = new_ds.create_ds().await;
 	// Insert an initial key
-	let tx = ds.transaction(Write, Optimistic).await.unwrap();
+	let tx = ds.transaction(Write).await.unwrap();
 	tx.set("test".as_bytes().into(), "some text".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
-	let tx1 = ds.transaction(Read, Optimistic).await.unwrap();
+	let tx1 = ds.transaction(Read).await.unwrap();
 	// Check that the key was inserted ok
 	let val = tx1.get("test".as_bytes().into(), None).await.unwrap().unwrap();
 	assert_eq!(val, b"some text");
 	// Create a new writeable transaction
-	let txw = ds.transaction(Write, Optimistic).await.unwrap();
+	let txw = ds.transaction(Write).await.unwrap();
 	// Update the test key content
 	txw.set("test".as_bytes().into(), "other text".as_bytes().to_vec()).await.unwrap();
 	// Create a readonly transaction
-	let tx2 = ds.transaction(Read, Optimistic).await.unwrap();
+	let tx2 = ds.transaction(Read).await.unwrap();
 	let val = tx2.get("test".as_bytes().into(), None).await.unwrap().unwrap();
 	assert_eq!(val, b"some text");
 	// Create a readonly transaction
-	let tx3 = ds.transaction(Read, Optimistic).await.unwrap();
+	let tx3 = ds.transaction(Read).await.unwrap();
 	let val = tx3.get("test".as_bytes().into(), None).await.unwrap().unwrap();
 	assert_eq!(val, b"some text");
 	// Update the test key content
@@ -38,7 +37,7 @@ pub async fn snapshot(new_ds: impl CreateDs) {
 	// Commit the writable transaction
 	txw.commit().await.unwrap();
 	// Check that the key was updated ok
-	let tx = ds.transaction(Read, Optimistic).await.unwrap();
+	let tx = ds.transaction(Read).await.unwrap();
 	let val = tx.get("test".as_bytes().into(), None).await.unwrap().unwrap();
 	assert_eq!(val, b"extra text");
 	tx.cancel().await.unwrap();

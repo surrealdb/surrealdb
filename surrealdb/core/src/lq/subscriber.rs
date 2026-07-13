@@ -254,11 +254,10 @@ mod tests {
 		use surrealdb_kvs::TransactionType::Write;
 
 		use crate::catalog::providers::CatalogProvider;
-		use crate::kvs::LockType::Optimistic;
 
 		let (recv, ds) = new_ds("router").await;
 		let (ns, db) = ("test", "test");
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		tx.ensure_ns_db(None, ns, db).await.unwrap();
 		tx.commit().await.unwrap();
 		let owner = Session::owner().with_ns(ns).with_db(db);

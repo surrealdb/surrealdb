@@ -32,7 +32,7 @@ use super::api::{
 	Batch, KeyVisitor, KeysBatch, ScanChunkStats, ScanCursorKeys, ScanCursorVals, ValVisitor,
 	ValsBatch,
 };
-use super::{LockType, TransactionFactory, TransactionType, Val, util};
+use super::{TransactionFactory, TransactionType, Val, util};
 use crate::catalog::providers::{
 	ApiProvider, AuthorisationProvider, BoxProviderFut, BucketProvider, CatalogProvider,
 	DatabaseProvider, NamespaceProvider, NodeProvider, RootProvider, TableProvider, UserProvider,
@@ -271,10 +271,7 @@ impl PendingUncommittedIndexBuild {
 			);
 		}
 
-		let tx = self
-			.tf
-			.transaction(TransactionType::Write, LockType::Optimistic, self.sequences.clone())
-			.await?;
+		let tx = self.tf.transaction(TransactionType::Write, self.sequences.clone()).await?;
 		let ikb = IndexKeyBase::new(self.ns, self.db, self.tb.clone(), self.ix);
 		let index_prefix = index_all::AllIndexRoot {
 			prefix: crate::key::database::all::DatabaseRoot {
@@ -362,10 +359,7 @@ impl IndexBuildReservationRelease {
 		// Use raw transactor methods here so the cleanup transaction does not
 		// recursively run Transaction::commit/cancel and re-enter reservation
 		// release handling.
-		let tx = self
-			.tf
-			.transaction(TransactionType::Write, LockType::Optimistic, self.sequences.clone())
-			.await?;
+		let tx = self.tf.transaction(TransactionType::Write, self.sequences.clone()).await?;
 
 		#[cfg(test)]
 		if let Err(err) = maybe_inject_non_retryable_error(
@@ -434,10 +428,7 @@ impl IndexBuildReservationRelease {
 		);
 
 		loop {
-			let tx = self
-				.tf
-				.transaction(TransactionType::Write, LockType::Optimistic, self.sequences.clone())
-				.await?;
+			let tx = self.tf.transaction(TransactionType::Write, self.sequences.clone()).await?;
 
 			let current_reservation = match tx.tr.get(self.key.as_borrowed(), None).await {
 				Ok(current) => current,
@@ -567,8 +558,7 @@ impl IndexBuildReservationRelease {
 		};
 		let tf = first.tf.clone();
 		let sequences = first.sequences.clone();
-		let tx = match tf.transaction(TransactionType::Write, LockType::Optimistic, sequences).await
-		{
+		let tx = match tf.transaction(TransactionType::Write, sequences).await {
 			Ok(tx) => tx,
 			Err(_) => return Err(reservations),
 		};

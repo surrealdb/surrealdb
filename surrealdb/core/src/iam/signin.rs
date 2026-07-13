@@ -30,7 +30,6 @@ use crate::iam::issue::{config, expiration};
 use crate::iam::token::{Claims, HEADER, Token};
 use crate::iam::{self, Auth, algorithm_to_jwt_algorithm};
 use crate::kvs::Datastore;
-use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::types::{PublicValue, PublicVariables};
 use crate::val::{Datetime, Value};
@@ -251,7 +250,7 @@ pub async fn db_access(
 	vars: PublicVariables,
 ) -> Result<Token> {
 	// Create a new readonly transaction
-	let tx = kvs.transaction(Read, Optimistic).await?;
+	let tx = kvs.transaction(Read).await?;
 
 	let ns_def = catch!(tx, tx.expect_ns_by_name(&ns).await);
 	let db_def = catch!(tx, tx.expect_db_by_name(&ns, &db).await);
@@ -527,7 +526,7 @@ pub async fn ns_access(
 	vars: PublicVariables,
 ) -> Result<Token> {
 	// Create a new readonly transaction
-	let tx = kvs.transaction(Read, Optimistic).await?;
+	let tx = kvs.transaction(Read).await?;
 	let ns_def = catch!(tx, tx.expect_ns_by_name(&ns).await);
 	// Fetch the specified access method from storage
 	let Some(av) = catch!(tx, tx.get_ns_access(ns_def.namespace_id, &ac, None).await) else {
@@ -663,7 +662,7 @@ pub async fn root_access(
 	vars: PublicVariables,
 ) -> Result<Token> {
 	// Create a new readonly transaction
-	let tx = kvs.transaction(Read, Optimistic).await?;
+	let tx = kvs.transaction(Read).await?;
 	// Fetch the specified access method from storage
 	let Some(av) = catch!(tx, tx.get_root_access(&ac, None).await) else {
 		let _ = tx.cancel().await;
@@ -743,7 +742,7 @@ pub async fn signin_bearer(
 	let kid = validate_grant_bearer(&key)?;
 
 	// Create a new readonly transaction
-	let tx = kvs.transaction(Read, Optimistic).await?;
+	let tx = kvs.transaction(Read).await?;
 	// Fetch the specified access grant from storage
 	let gr = match (&ns, &db) {
 		(Some(ns), Some(db)) => {
@@ -778,7 +777,7 @@ pub async fn signin_bearer(
 	// If the subject of the grant is a system user, get their roles.
 	let roles = if let catalog::Subject::User(user) = &gr.subject {
 		// Create a new readonly transaction.
-		let tx = kvs.transaction(Read, Optimistic).await?;
+		let tx = kvs.transaction(Read).await?;
 		// Fetch the specified user from storage.
 
 		let user = match (&ns, &db) {
@@ -1592,7 +1591,7 @@ mod tests {
 			assert!(ok.is_match(&refresh), "Output '{}' doesn't match regex '{}'", refresh, ok);
 
 			// Get the stored bearer key representing the refresh token
-			let tx = ds.transaction(Read, Optimistic).await.unwrap().enclose();
+			let tx = ds.transaction(Read).await.unwrap().enclose();
 			let grant = tx
 				.get_db_access_grant(NamespaceId(0), DatabaseId(0), "user", id, None)
 				.await
@@ -3399,7 +3398,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				);
 
 				// Get the stored bearer grant
-				let tx = ds.transaction(Read, Optimistic).await.unwrap().enclose();
+				let tx = ds.transaction(Read).await.unwrap().enclose();
 				let grant = match level.level {
 					"DB" => {
 						let db = tx
@@ -4181,7 +4180,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			assert!(ok.is_match(&key), "Output '{}' doesn't match regex '{}'", key, ok);
 
 			// Get the stored bearer grant
-			let tx = ds.transaction(Read, Optimistic).await.unwrap().enclose();
+			let tx = ds.transaction(Read).await.unwrap().enclose();
 			let grant = tx
 				.get_db_access_grant(NamespaceId(0), DatabaseId(0), "api", &id, None)
 				.await

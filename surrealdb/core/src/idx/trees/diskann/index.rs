@@ -1584,7 +1584,7 @@ mod tests {
 	use super::*;
 	use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 	use crate::idx::trees::diskann::cache::DiskAnnCache;
-	use crate::kvs::{Datastore, LockType, TransactionType};
+	use crate::kvs::{Datastore, TransactionType};
 
 	fn ikb() -> IndexKeyBase {
 		IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(3))
@@ -1634,7 +1634,7 @@ mod tests {
 	}
 
 	async fn new_ctx(ds: &Datastore, tt: TransactionType) -> FrozenContext {
-		let tx = Arc::new(ds.transaction(tt, LockType::Optimistic).await.unwrap());
+		let tx = Arc::new(ds.transaction(tt).await.unwrap());
 		// Use the full datastore context so the shared table-level doc-ID
 		// sequence is available to compaction's `resolve`.
 		let mut ctx = ds.setup_ctx().unwrap();
@@ -1782,7 +1782,7 @@ mod tests {
 
 		let ds = Arc::new(Datastore::new("memory").await?);
 		{
-			let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
+			let tx = ds.transaction(TransactionType::Write).await?;
 			tx.ensure_ns_db(None, "test", "test").await?;
 			tx.commit().await?;
 		}
@@ -1821,7 +1821,7 @@ mod tests {
 			session: &Session,
 			query: &str,
 		) -> Result<(usize, crate::observe::TransactionMetricsSnapshot)> {
-			let tx = Arc::new(ds.transaction(TransactionType::Read, LockType::Optimistic).await?);
+			let tx = Arc::new(ds.transaction(TransactionType::Read).await?);
 			let mut response =
 				ds.execute_with_transaction(query, session, None, Arc::clone(&tx)).await?;
 			let len = match response.remove(0).result? {
@@ -1915,7 +1915,7 @@ mod tests {
 
 		let ds = Arc::new(Datastore::new("memory").await?);
 		let db_def = {
-			let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
+			let tx = ds.transaction(TransactionType::Write).await?;
 			let db = tx.ensure_ns_db(None, "test", "test").await?;
 			tx.commit().await?;
 			db
@@ -1957,7 +1957,7 @@ mod tests {
 		// Delete pts:1's record ROW at the KV layer, leaving the graph entry
 		// intact — the committed candidate now resolves to a missing record.
 		{
-			let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
+			let tx = ds.transaction(TransactionType::Write).await?;
 			let tb = crate::val::TableName::from("pts");
 			let key = crate::key::record::RecordKey {
 				root: crate::key::database::all::DatabaseRoot {

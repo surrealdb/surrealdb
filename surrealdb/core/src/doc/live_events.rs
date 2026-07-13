@@ -150,7 +150,6 @@ mod tests {
 	use crate::key::database::all::DatabaseRoot;
 	use crate::key::{KVRange, KVValue, lqe};
 	use crate::kvs::Datastore;
-	use crate::kvs::LockType::Optimistic;
 	use crate::lq::event::{LiveAction, LiveEvent, LiveEvents};
 	use crate::types::PublicValue;
 
@@ -179,7 +178,7 @@ mod tests {
 
 	/// Create ns/db/table, returning the numeric ids for scanning the keyspace.
 	async fn setup(ds: &Datastore, ns: &str, db: &str, tb: &str) -> (NamespaceId, DatabaseId) {
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		let dbdef = tx.ensure_ns_db(None, ns, db).await.unwrap();
 		tx.commit().await.unwrap();
 		let ses = Session::owner().with_ns(ns).with_db(db);
@@ -189,7 +188,7 @@ mod tests {
 
 	/// Read every live-query event persisted for the database's dedicated keyspace.
 	async fn live_events(ds: &Datastore, ns: NamespaceId, db: DatabaseId) -> Vec<LiveEvent> {
-		let tx = ds.transaction(Read, Optimistic).await.unwrap();
+		let tx = ds.transaction(Read).await.unwrap();
 		let range = lqe::LqePrefix {
 			prefix: DatabaseRoot {
 				ns,

@@ -19,7 +19,6 @@ use crate::iam::jwks;
 use crate::iam::token::Claims;
 use crate::iam::{self, Actor, Auth, Level, Role};
 use crate::kvs::Datastore;
-use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::{catalog, syn};
 
@@ -191,7 +190,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the decoded authentication claims
 			trace!("Authenticating with record access method `{}`", ac);
 			// Create a new readonly transaction
-			let tx = kvs.transaction(Read, Optimistic).await?;
+			let tx = kvs.transaction(Read).await?;
 			let db_def = match catch!(tx, tx.get_db_by_name(ns, db, None).await) {
 				Some(db) => db,
 				None => {
@@ -304,7 +303,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the decoded authentication claims
 			trace!("Authenticating to database `{}` with access method `{}`", db, ac);
 			// Create a new readonly transaction
-			let tx = kvs.transaction(Read, Optimistic).await?;
+			let tx = kvs.transaction(Read).await?;
 			let db_def = match catch!(tx, tx.get_db_by_name(ns, db, None).await) {
 				Some(db) => db,
 				None => {
@@ -484,7 +483,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the decoded authentication claims
 			trace!("Authenticating to database `{}` with user `{}`", db, id);
 			// Create a new readonly transaction
-			let tx = kvs.transaction(Read, Optimistic).await?;
+			let tx = kvs.transaction(Read).await?;
 			let db_def = match catch!(tx, tx.get_db_by_name(ns, db, None).await) {
 				Some(db) => db,
 				None => {
@@ -547,7 +546,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the decoded authentication claims
 			trace!("Authenticating to namespace `{}` with access method `{}`", ns, ac);
 			// Create a new readonly transaction
-			let tx = kvs.transaction(Read, Optimistic).await?;
+			let tx = kvs.transaction(Read).await?;
 			let ns_def = match catch!(tx, tx.get_ns_by_name(ns, None).await) {
 				Some(ns) => ns,
 				None => {
@@ -652,7 +651,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the decoded authentication claims
 			trace!("Authenticating to namespace `{}` with user `{}`", ns, id);
 			// Create a new readonly transaction
-			let tx = kvs.transaction(Read, Optimistic).await?;
+			let tx = kvs.transaction(Read).await?;
 			let ns_def = match catch!(tx, tx.get_ns_by_name(ns, None).await) {
 				Some(ns) => ns,
 				None => {
@@ -710,7 +709,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the decoded authentication claims
 			trace!("Authenticating to root with access method `{}`", ac);
 			// Create a new readonly transaction
-			let tx = kvs.transaction(Read, Optimistic).await?;
+			let tx = kvs.transaction(Read).await?;
 			// Get the root access method
 			let de = catch!(tx, tx.get_root_access(ac, None).await);
 
@@ -798,7 +797,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the decoded authentication claims
 			trace!("Authenticating to root level with user `{}`", id);
 			// Create a new readonly transaction
-			let tx = kvs.transaction(Read, Optimistic).await?;
+			let tx = kvs.transaction(Read).await?;
 			// Get the namespace user
 			let de = catch!(
 				tx,
@@ -842,7 +841,7 @@ pub async fn verify_root_creds(
 	pass: &str,
 ) -> Result<catalog::UserDefinition> {
 	// Create a new readonly transaction
-	let tx = ds.transaction(Read, Optimistic).await?;
+	let tx = ds.transaction(Read).await?;
 	// Fetch the specified user from storage
 	let user = catch!(
 		tx,
@@ -868,7 +867,7 @@ pub async fn verify_ns_creds(
 	pass: &str,
 ) -> Result<catalog::UserDefinition> {
 	// Create a new readonly transaction
-	let tx = ds.transaction(Read, Optimistic).await?;
+	let tx = ds.transaction(Read).await?;
 	let ns_def = match catch!(tx, tx.get_ns_by_name(ns, None).await) {
 		Some(ns) => ns,
 		None => {
@@ -914,7 +913,7 @@ pub async fn verify_db_creds(
 	pass: &str,
 ) -> Result<catalog::UserDefinition> {
 	// Create a new readonly transaction
-	let tx = ds.transaction(Read, Optimistic).await?;
+	let tx = ds.transaction(Read).await?;
 	let db_def = match catch!(tx, tx.get_db_by_name(ns, db, None).await) {
 		Some(db) => db,
 		None => {
@@ -1013,7 +1012,7 @@ pub async fn scram_lookup(
 	ns: Option<&str>,
 	db: Option<&str>,
 ) -> Result<Option<ScramAuth>> {
-	let tx = kvs.transaction(Read, Optimistic).await?;
+	let tx = kvs.transaction(Read).await?;
 	let result = scram_lookup_inner(&tx, user, ns, db).await;
 	let _ = tx.cancel().await;
 	result

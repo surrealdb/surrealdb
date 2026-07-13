@@ -17,7 +17,6 @@ use crate::dbs::{Capabilities, Session};
 use crate::key::root::rc::{ReclaimKey, ReclaimPrefix, ReclaimState};
 use crate::key::{KVKeyDecode, KVRange, KVValue, KeyRange};
 use crate::kvs::Datastore;
-use crate::kvs::LockType::Optimistic;
 
 async fn mem_ds() -> Arc<Datastore> {
 	Arc::new(
@@ -31,7 +30,7 @@ async fn mem_ds() -> Arc<Datastore> {
 
 /// Count the keys currently stored under a half-open byte range.
 async fn count_range(ds: &Datastore, range: KeyRange<'_>) -> usize {
-	let tx = ds.transaction(Read, Optimistic).await.unwrap();
+	let tx = ds.transaction(Read).await.unwrap();
 	let res = tx.getr(range, None).await.unwrap();
 	let _ = tx.cancel().await;
 	res.len()
@@ -47,7 +46,7 @@ async fn reclaim_queue_len(ds: &Datastore) -> usize {
 /// exactly one). `0` means the reclaim task has not yet observed it.
 async fn reclaim_entry_observed_ms(ds: &Datastore) -> u64 {
 	let range = ReclaimPrefix {}.encode_range().unwrap();
-	let tx = ds.transaction(Read, Optimistic).await.unwrap();
+	let tx = ds.transaction(Read).await.unwrap();
 	let items = tx.getr(range, None).await.unwrap();
 	let _ = tx.cancel().await;
 	assert_eq!(items.len(), 1, "expected exactly one reclaim queue entry");
@@ -74,7 +73,7 @@ async fn remove_database_defers_data_reclaim() {
 
 	// Resolve the internal ids and confirm data exists under the db prefix.
 	let (ns_id, db_id) = {
-		let tx = ds.transaction(Read, Optimistic).await.unwrap();
+		let tx = ds.transaction(Read).await.unwrap();
 		let db = tx.get_db_by_name("test", "tenant", None).await.unwrap().unwrap();
 		let _ = tx.cancel().await;
 		(db.namespace_id, db.database_id)
@@ -95,7 +94,7 @@ async fn remove_database_defers_data_reclaim() {
 
 	// The database is immediately invisible in the catalog...
 	{
-		let tx = ds.transaction(Read, Optimistic).await.unwrap();
+		let tx = ds.transaction(Read).await.unwrap();
 		let gone = tx.get_db_by_name("test", "tenant", None).await.unwrap();
 		let _ = tx.cancel().await;
 		assert!(gone.is_none(), "database must be invisible immediately after REMOVE");
@@ -129,7 +128,7 @@ async fn remove_database_defers_data_reclaim() {
 	// Recreating the same name yields a fresh, empty database with a new id.
 	ds.execute("DEFINE DATABASE tenant;", &ses, None).await.unwrap();
 	let new_db_id = {
-		let tx = ds.transaction(Read, Optimistic).await.unwrap();
+		let tx = ds.transaction(Read).await.unwrap();
 		let db = tx.get_db_by_name("test", "tenant", None).await.unwrap().unwrap();
 		let _ = tx.cancel().await;
 		db.database_id
@@ -185,7 +184,7 @@ async fn reclaim_respects_grace_period() {
 	.unwrap();
 
 	let (ns_id, db_id) = {
-		let tx = ds.transaction(Read, Optimistic).await.unwrap();
+		let tx = ds.transaction(Read).await.unwrap();
 		let db = tx.get_db_by_name("test", "tenant", None).await.unwrap().unwrap();
 		let _ = tx.cancel().await;
 		(db.namespace_id, db.database_id)
@@ -199,7 +198,7 @@ async fn reclaim_respects_grace_period() {
 	// An in-flight reader: a transaction opened *before* the removal. It must
 	// still be able to read the data afterwards, because the reclaim task must not have
 	// destroyed it yet.
-	let reader = ds.transaction(Read, Optimistic).await.unwrap();
+	let reader = ds.transaction(Read).await.unwrap();
 	let reader_seen_before = reader.getr(range.as_borrowed(), None).await.unwrap().len();
 	assert!(reader_seen_before > 0, "reader should see the data before removal");
 
@@ -278,7 +277,7 @@ async fn reclaim_runs_once_observation_ages_past_grace() {
 	.unwrap();
 
 	let (ns_id, db_id) = {
-		let tx = ds.transaction(Read, Optimistic).await.unwrap();
+		let tx = ds.transaction(Read).await.unwrap();
 		let db = tx.get_db_by_name("test", "tenant", None).await.unwrap().unwrap();
 		let _ = tx.cancel().await;
 		(db.namespace_id, db.database_id)
@@ -296,7 +295,7 @@ async fn reclaim_runs_once_observation_ages_past_grace() {
 	// entry the reclaim task observed long before the grace elapsed.
 	{
 		let range = ReclaimPrefix {}.encode_range().unwrap();
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		let items = tx.getr(range, None).await.unwrap();
 		assert_eq!(items.len(), 1);
 		let rc = ReclaimKey::decode_key(&items[0].0).unwrap();

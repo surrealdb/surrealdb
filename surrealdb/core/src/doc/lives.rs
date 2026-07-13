@@ -634,7 +634,6 @@ mod tests {
 	use crate::channel::Receiver;
 	use crate::dbs::{Capabilities, Session};
 	use crate::kvs::Datastore;
-	use crate::kvs::LockType::Optimistic;
 	use crate::types::{
 		PublicAction, PublicNotification, PublicRecordId, PublicRecordIdKey, PublicValue,
 	};
@@ -651,7 +650,7 @@ mod tests {
 	}
 
 	async fn setup_ns_db_table(ds: &Datastore, ns: &str, db: &str, tb: &str) {
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		tx.ensure_ns_db(None, ns, db).await.unwrap();
 		tx.commit().await.unwrap();
 		let ses = Session::owner().with_ns(ns).with_db(db);
@@ -772,7 +771,7 @@ mod tests {
 	async fn test_live_create_does_not_leak_restricted_computed_field() {
 		let (recv, ds) = new_ds_with_broker().await.unwrap();
 		let (ns, db) = ("test", "test");
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		tx.ensure_ns_db(None, ns, db).await.unwrap();
 		tx.commit().await.unwrap();
 
@@ -818,7 +817,7 @@ mod tests {
 	async fn test_live_delete_does_not_leak_restricted_computed_field() {
 		let (recv, ds) = new_ds_with_broker().await.unwrap();
 		let (ns, db) = ("test", "test");
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		tx.ensure_ns_db(None, ns, db).await.unwrap();
 		tx.commit().await.unwrap();
 
@@ -866,7 +865,7 @@ mod tests {
 	async fn test_live_diff_does_not_leak_restricted_computed_field() {
 		let (recv, ds) = new_ds_with_broker().await.unwrap();
 		let (ns, db) = ("test", "test");
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		tx.ensure_ns_db(None, ns, db).await.unwrap();
 		tx.commit().await.unwrap();
 
@@ -922,7 +921,7 @@ mod tests {
 	async fn test_live_conditional_permission_filters_computed_field() {
 		let (recv, ds) = new_ds_with_broker().await.unwrap();
 		let (ns, db) = ("test", "test");
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		tx.ensure_ns_db(None, ns, db).await.unwrap();
 		tx.commit().await.unwrap();
 
@@ -989,7 +988,7 @@ mod tests {
 	async fn test_live_diff_does_not_leak_restricted_field_name() {
 		let (recv, ds) = new_ds_with_broker().await.unwrap();
 		let (ns, db) = ("test", "test");
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		tx.ensure_ns_db(None, ns, db).await.unwrap();
 		tx.commit().await.unwrap();
 
@@ -1049,7 +1048,7 @@ mod tests {
 	async fn test_live_diff_delete_does_not_leak_restricted_field_name() {
 		let (recv, ds) = new_ds_with_broker().await.unwrap();
 		let (ns, db) = ("test", "test");
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		tx.ensure_ns_db(None, ns, db).await.unwrap();
 		tx.commit().await.unwrap();
 
@@ -1184,7 +1183,7 @@ mod tests {
 	async fn test_live_field_permission_error_does_not_abort_create() {
 		let (_, ds) = new_ds_with_broker().await.unwrap();
 		let (ns, db) = ("test", "test");
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		tx.ensure_ns_db(None, ns, db).await.unwrap();
 		tx.commit().await.unwrap();
 

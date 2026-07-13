@@ -171,7 +171,6 @@ mod tests {
 	use crate::iam::{Actor, Auth, Level, Role};
 	use crate::key::database::all::DatabaseRoot;
 	use crate::kvs::Datastore;
-	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
 	use crate::types::{PublicNotification, PublicRecordId, PublicRecordIdKey, PublicValue};
 
@@ -215,7 +214,7 @@ mod tests {
 	}
 
 	async fn setup_table(ds: &Datastore, ns: &str, db: &str, tb: &str) {
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		tx.ensure_ns_db(None, ns, db).await.unwrap();
 		tx.commit().await.unwrap();
 		let ses = Session::owner().with_ns(ns).with_db(db);
@@ -392,7 +391,7 @@ mod tests {
 
 		// Simulate a legacy live query by clearing auth on the stored SubscriptionDefinition.
 		{
-			let txn = ds.transaction(Write, Optimistic).await.unwrap();
+			let txn = ds.transaction(Write).await.unwrap();
 			let db_def = txn.ensure_ns_db(None, ns, db).await.unwrap();
 			let tb_name = crate::val::TableName::from(tb);
 			let key = crate::key::table::lq::Lq {
@@ -437,7 +436,7 @@ mod tests {
 
 		// Simulate a legacy live query by clearing auth on the stored SubscriptionDefinition.
 		{
-			let txn = ds.transaction(Write, Optimistic).await.unwrap();
+			let txn = ds.transaction(Write).await.unwrap();
 			let db_def = txn.ensure_ns_db(None, ns, db).await.unwrap();
 			let tb_name = crate::val::TableName::from(tb);
 			let key = crate::key::table::lq::Lq {
@@ -486,7 +485,7 @@ mod tests {
 		// Delete the table-level subscription record to simulate data corruption or a
 		// concurrent cleanup race, then verify that KILL is denied for a non-root user.
 		{
-			let txn = ds.transaction(Write, Optimistic).await.unwrap();
+			let txn = ds.transaction(Write).await.unwrap();
 			let db_def = txn.ensure_ns_db(None, ns, db).await.unwrap();
 			let tb_name = crate::val::TableName::from(tb);
 			let key = crate::key::table::lq::Lq {

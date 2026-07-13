@@ -171,7 +171,7 @@ use surrealdb_core::dbs::{QueryResult, QueryResultBuilder, Session};
 use surrealdb_core::iam;
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_core::kvs::export::Config as DbExportConfig;
-use surrealdb_core::kvs::{Datastore, LockType, Transaction, TransactionType};
+use surrealdb_core::kvs::{Datastore, Transaction, TransactionType};
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealdb_core::{
 	iam::{Action, ResourceKind, check::check_ns_db},
@@ -737,7 +737,7 @@ async fn router(
 		}
 		Command::Begin => {
 			let query_result = QueryResultBuilder::started_now();
-			let result = match kvs.transaction(TransactionType::Write, LockType::Optimistic).await {
+			let result = match kvs.transaction(TransactionType::Write).await {
 				Ok(txn) => {
 					let id = Uuid::now_v7();
 					state.transactions.insert(id, Arc::new(txn));

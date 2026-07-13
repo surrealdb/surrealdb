@@ -16,7 +16,6 @@ use crate::ctx::FrozenContext;
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
 use crate::key::{KVKey, KVValue};
-use crate::kvs::LockType::Optimistic;
 use crate::kvs::TransactionType;
 #[cfg(test)]
 use crate::kvs::testing::{NonRetryableErrorSite, maybe_inject_non_retryable_error};
@@ -214,10 +213,8 @@ impl IndexBuilder {
 		admission: &DurableAdmission,
 		release: IndexBuildReservationRelease,
 	) -> Result<DurableAdmissionFence> {
-		let tx = self
-			.tf
-			.transaction(TransactionType::Read, Optimistic, ctx.try_get_sequences()?.clone())
-			.await?;
+		let tx =
+			self.tf.transaction(TransactionType::Read, ctx.try_get_sequences()?.clone()).await?;
 		let state = catch!(tx, tx.get_key(&ikb.new_bs_key(), None).await);
 		tx.cancel().await?;
 		let Some(state) = state else {
@@ -273,10 +270,8 @@ impl IndexBuilder {
 		ix: &IndexDefinition,
 		cached_generation: super::BuildGeneration,
 	) -> Result<()> {
-		let tx = self
-			.tf
-			.transaction(TransactionType::Read, Optimistic, ctx.try_get_sequences()?.clone())
-			.await?;
+		let tx =
+			self.tf.transaction(TransactionType::Read, ctx.try_get_sequences()?.clone()).await?;
 		let state = catch!(tx, tx.get_key(&ikb.new_bs_key(), None).await);
 		tx.cancel().await?;
 		let Some(state) = state else {
@@ -324,7 +319,7 @@ impl IndexBuilder {
 			}
 			let tx = self
 				.tf
-				.transaction(TransactionType::Write, Optimistic, ctx.try_get_sequences()?.clone())
+				.transaction(TransactionType::Write, ctx.try_get_sequences()?.clone())
 				.await?;
 			let state_key = ikb.new_bs_key();
 			let Some(state) = tx.get_key(&state_key, None).await? else {

@@ -33,7 +33,6 @@ use crate::idx::IndexKeyBase;
 use crate::idx::index::IndexOperation;
 use crate::key::index::all as index_all;
 use crate::key::{KVKey, KVKeyDecode, KVRange, record};
-use crate::kvs::LockType::Optimistic;
 use crate::kvs::ds::TransactionFactory;
 #[cfg(test)]
 use crate::kvs::testing::{
@@ -954,15 +953,13 @@ impl Building {
 	}
 
 	pub(super) async fn new_read_tx(&self) -> Result<Transaction> {
-		self.tf
-			.transaction(TransactionType::Read, Optimistic, self.ctx.try_get_sequences()?.clone())
-			.await
+		self.tf.transaction(TransactionType::Read, self.ctx.try_get_sequences()?.clone()).await
 	}
 
 	pub(super) async fn new_write_tx_ctx(&self) -> Result<FrozenContext> {
 		let tx = self
 			.tf
-			.transaction(TransactionType::Write, Optimistic, self.ctx.try_get_sequences()?.clone())
+			.transaction(TransactionType::Write, self.ctx.try_get_sequences()?.clone())
 			.await?
 			.into();
 		let mut ctx = Context::new_child(&self.ctx);
@@ -974,7 +971,7 @@ impl Building {
 	pub(super) async fn new_read_tx_ctx(&self) -> Result<FrozenContext> {
 		let tx = self
 			.tf
-			.transaction(TransactionType::Read, Optimistic, self.ctx.try_get_sequences()?.clone())
+			.transaction(TransactionType::Read, self.ctx.try_get_sequences()?.clone())
 			.await?
 			.into();
 		let mut ctx = Context::new_child(&self.ctx);

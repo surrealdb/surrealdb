@@ -77,7 +77,6 @@ use crate::idx::trees::store::IndexStores;
 use crate::key::root::ic::{IndexCompactionKey, IndexCompactionPrefix};
 use crate::key::root::rc::{Expunge, ReclaimKey, ReclaimKind, ReclaimPrefix, ReclaimState};
 use crate::key::{KVKeyDecode, KVRange, KVValue, Key, KeyRange};
-use crate::kvs::LockType::*;
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::clock::SystemClock;
 use crate::kvs::ds::requirements::TransactionBuilderFactoryRequirements;
@@ -87,7 +86,7 @@ use crate::kvs::slowlog::SlowLog;
 use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 #[cfg(test)]
 use crate::kvs::testing::{RetryableConflictSite, maybe_inject_retryable_conflict};
-use crate::kvs::{LockType, NORMAL_BATCH_SIZE, is_retryable_transaction_conflict};
+use crate::kvs::{NORMAL_BATCH_SIZE, is_retryable_transaction_conflict};
 use crate::lq::LiveQueryRouter;
 use crate::observe::{ExecutionObserver, NoopObserver};
 use crate::sql::Ast;
@@ -329,16 +328,10 @@ impl TransactionFactory {
 	pub async fn transaction(
 		&self,
 		write: TransactionType,
-		lock: LockType,
 		sequences: Sequences,
 	) -> Result<Transaction> {
-		// Specify if the transaction is lockable
-		let lock = match lock {
-			Pessimistic => true,
-			Optimistic => false,
-		};
 		// Create a new transaction on the datastore
-		let (inner, local) = self.builder.new_transaction(write, lock).await?;
+		let (inner, local) = self.builder.new_transaction(write).await?;
 		Ok(Transaction::new(
 			local,
 			sequences,
@@ -757,7 +750,7 @@ impl Datastore {
 	/// resolve the target node's address at delivery time without consulting
 	/// any in-memory cluster topology.
 	pub async fn lookup_node_endpoint(&self, node_id: Uuid) -> Result<Option<String>> {
-		let txn = self.transaction(Read, Optimistic).await?;
+		let txn = self.transaction(Read).await?;
 		let key = crate::key::root::nd::Nd {
 			nd: node_id,
 		};
@@ -870,7 +863,7 @@ impl Datastore {
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn get_version(&self) -> Result<(MajorVersion, bool)> {
 		// Start a new writeable transaction
-		let txn = self.transaction(Write, Optimistic).await?.enclose();
+		let txn = self.transaction(Write).await?.enclose();
 		// Create the key where the version is stored
 		let key = crate::key::version::Version {};
 		// Check if a version is already set in storage
@@ -932,7 +925,7 @@ impl Datastore {
 	/// Separated from `initialise_credentials` so it can be wrapped in the retry loop.
 	async fn initialise_credentials_attempt(&self, user: &str, pass: &str) -> Result<()> {
 		// Start a new writeable transaction
-		let txn = self.transaction(Write, Optimistic).await?.enclose();
+		let txn = self.transaction(Write).await?.enclose();
 		// Fetch the root users from the storage
 		let users = catch!(txn, txn.all_root_users(None).await);
 		// Process credentials, depending on existing users
@@ -1109,7 +1102,7 @@ impl Datastore {
 		use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 		use crate::surrealism::cache::SurrealismCacheLookup;
 
-		let txn = match self.transaction(Read, Optimistic).await {
+		let txn = match self.transaction(Read).await {
 			Ok(txn) => Arc::new(txn),
 			Err(e) => {
 				warn!(target: TARGET, error = %e, "Surrealism eager load: failed to open transaction");
@@ -1366,7 +1359,7 @@ impl Datastore {
 		// Refresh system usage metrics
 		crate::sys::refresh().await;
 		// Open transaction and set node data
-		let txn = self.transaction(Write, Optimistic).await?;
+		let txn = self.transaction(Write).await?;
 		let key = crate::key::root::nd::Nd {
 			nd: self.id,
 		};
@@ -1389,7 +1382,7 @@ impl Datastore {
 		// Refresh system usage metrics
 		crate::sys::refresh().await;
 		// Open transaction and set node data
-		let txn = self.transaction(Write, Optimistic).await?;
+		let txn = self.transaction(Write).await?;
 		let key = crate::key::root::nd::Nd {
 			nd: self.id,
 		};
@@ -1416,13 +1409,9 @@ impl Datastore {
 		})
 		.await?;
 
-		let txn = await_node_step(
-			deadline,
-			timeout_duration,
-			Some(canceller),
-			self.transaction(Write, Optimistic),
-		)
-		.await?;
+		let txn =
+			await_node_step(deadline, timeout_duration, Some(canceller), self.transaction(Write))
+				.await?;
 		let key = crate::key::root::nd::Nd {
 			nd: self.id,
 		};
@@ -1452,7 +1441,7 @@ impl Datastore {
 		// Log when this method is run
 		trace!(target: TARGET, id = %self.id, "Archiving node in the cluster");
 		// Open transaction and set node data
-		let txn = self.transaction(Write, Optimistic).await?;
+		let txn = self.transaction(Write).await?;
 		let key = crate::key::root::nd::Nd {
 			nd: self.id,
 		};
@@ -1469,8 +1458,7 @@ impl Datastore {
 
 		let deadline = Instant::now() + timeout_duration;
 		let txn =
-			await_node_step(deadline, timeout_duration, None, self.transaction(Write, Optimistic))
-				.await?;
+			await_node_step(deadline, timeout_duration, None, self.transaction(Write)).await?;
 		let key = crate::key::root::nd::Nd {
 			nd: self.id,
 		};
@@ -1496,7 +1484,7 @@ impl Datastore {
 		trace!(target: TARGET, "Archiving expired nodes in the cluster");
 		// Fetch all of the inactive nodes
 		let inactive = {
-			let txn = self.transaction(Read, Optimistic).await?;
+			let txn = self.transaction(Read).await?;
 			let nds = catch!(txn, txn.all_nodes().await);
 			let now = self.clock_now();
 			catch!(txn, txn.cancel().await);
@@ -1514,7 +1502,7 @@ impl Datastore {
 		// Check if there are inactive nodes
 		if !inactive.is_empty() {
 			// Open a writeable transaction
-			let txn = self.transaction(Write, Optimistic).await?;
+			let txn = self.transaction(Write).await?;
 			// Archive the inactive nodes
 			for nd in inactive.iter() {
 				// Log the live query scanning
@@ -1548,7 +1536,7 @@ impl Datastore {
 		trace!(target: TARGET, "Cleaning up archived nodes in the cluster");
 		// Fetch all of the archived nodes
 		let archived = {
-			let txn = self.transaction(Read, Optimistic).await?;
+			let txn = self.transaction(Read).await?;
 			let nds = catch!(txn, txn.all_nodes().await);
 			catch!(txn, txn.cancel().await);
 			// Filter the archived nodes
@@ -1563,7 +1551,7 @@ impl Datastore {
 				}
 				.encode_range()?,
 			);
-			let txn = self.transaction(Write, Optimistic).await?;
+			let txn = self.transaction(Write).await?;
 			{
 				// Log the live query scanning
 				trace!(target: TARGET, id = %id, "Deleting live queries for node");
@@ -1631,7 +1619,7 @@ impl Datastore {
 		trace!(target: TARGET, "Garbage collecting all miscellaneous data");
 		// Fetch archived nodes
 		let archived = {
-			let txn = self.transaction(Read, Optimistic).await?;
+			let txn = self.transaction(Read).await?;
 			let nds = catch!(txn, txn.all_nodes().await);
 			txn.cancel().await?;
 			// Filter the archived nodes
@@ -1639,7 +1627,7 @@ impl Datastore {
 		};
 		// Fetch all namespaces
 		let nss = {
-			let txn = self.transaction(Read, Optimistic).await?;
+			let txn = self.transaction(Read).await?;
 			let res = catch!(txn, txn.all_ns(None).await);
 			txn.cancel().await?;
 			res
@@ -1650,7 +1638,7 @@ impl Datastore {
 			trace!(target: TARGET, "Garbage collecting data in namespace {}", ns.name);
 			// Fetch all databases
 			let dbs = {
-				let txn = self.transaction(Read, Optimistic).await?;
+				let txn = self.transaction(Read).await?;
 				let res = catch!(txn, txn.all_db(ns.namespace_id, None).await);
 				txn.cancel().await?;
 				res
@@ -1661,7 +1649,7 @@ impl Datastore {
 				trace!(target: TARGET, "Garbage collecting data in database {}/{}", ns.name, db.name);
 				// Fetch all tables
 				let tbs = {
-					let txn = self.transaction(Read, Optimistic).await?;
+					let txn = self.transaction(Read).await?;
 					let res = catch!(txn, txn.all_tb(ns.namespace_id, db.database_id, None).await);
 					txn.cancel().await?;
 					res
@@ -1681,7 +1669,7 @@ impl Datastore {
 						}
 						.encode_range()?,
 					);
-					let txn = self.transaction(Write, Optimistic).await?;
+					let txn = self.transaction(Write).await?;
 					while let Some(rng) = next {
 						// Fetch the next batch of keys and values
 						let max = NORMAL_BATCH_SIZE;
@@ -1736,7 +1724,7 @@ impl Datastore {
 		// Log the node deletion
 		trace!(target: TARGET, "Deleting live queries for a connection");
 		// Fetch expired nodes
-		let txn = self.transaction(Write, Optimistic).await?;
+		let txn = self.transaction(Write).await?;
 		// Loop over the live query unique ids
 		for id in ids {
 			// Get the key for this node live query
@@ -1809,7 +1797,7 @@ impl Datastore {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running changefeed garbage collection");
 		// Create a new transaction
-		let txn = self.transaction(Write, Optimistic).await?;
+		let txn = self.transaction(Write).await?;
 		// Perform the changefeed garbage collection
 		catch!(txn, crate::cf::gc_all_at(&lh, &txn).await);
 		// When the Router engine is active, also garbage-collect the dedicated
@@ -1931,7 +1919,7 @@ impl Datastore {
 		// build-state checks below don't hold the catalog transaction open.
 		let mut candidates = Vec::new();
 		{
-			let txn = self.transaction(Read, Optimistic).await?;
+			let txn = self.transaction(Read).await?;
 			let res: Result<()> = async {
 				for ns in txn.all_ns(None).await?.iter() {
 					for db in txn.all_db(ns.namespace_id, None).await?.iter() {
@@ -2035,7 +2023,7 @@ impl Datastore {
 			// to avoid holding a write lock across the entire compaction cycle
 			let range = IndexCompactionPrefix {}.encode_range()?;
 			let items = {
-				let txn = dbs.transaction(Read, Optimistic).await?;
+				let txn = dbs.transaction(Read).await?;
 				let res = txn.getr(range, None).await;
 				let _ = txn.cancel().await;
 				res?
@@ -2058,7 +2046,7 @@ impl Datastore {
 			// write to the affected index will naturally trigger a new
 			// compaction request.
 			loop {
-				let txn = dbs.transaction(Write, Optimistic).await?;
+				let txn = dbs.transaction(Write).await?;
 				if let Err(e) = Self::ensure_not_cancelled(&canceller) {
 					let _ = txn.cancel().await;
 					return Err(e);
@@ -2172,7 +2160,7 @@ impl Datastore {
 			// holding a write lock across the entire reclaim cycle.
 			let range = ReclaimPrefix {}.encode_range()?;
 			let items = {
-				let txn = dbs.transaction(Read, Optimistic).await?;
+				let txn = dbs.transaction(Read).await?;
 				let res = txn.getr(range, None).await;
 				let _ = txn.cancel().await;
 				res?
@@ -2251,7 +2239,7 @@ impl Datastore {
 			// newly-observed entries and delete reclaimed ones. Done separately
 			// from the read scan so we don't conflict with concurrent enqueues.
 			if !done.is_empty() || !to_stamp.is_empty() {
-				let txn = dbs.transaction(Write, Optimistic).await?;
+				let txn = dbs.transaction(Write).await?;
 				if let Err(e) = Self::ensure_not_cancelled(&canceller) {
 					let _ = txn.cancel().await;
 					return Err(e);
@@ -2336,7 +2324,7 @@ impl Datastore {
 		// Non-TiKV backends: delete the prefix transactionally. This runs off
 		// the user request path, so even a large prefix delete here cannot trip
 		// a client deadline.
-		let txn = self.transaction(Write, Optimistic).await?;
+		let txn = self.transaction(Write).await?;
 		let res = if expunge {
 			txn.clr_prefix_key(prefix).await
 		} else {
@@ -2495,7 +2483,7 @@ impl Datastore {
 	) -> Result<()> {
 		Self::ensure_not_cancelled(&canceller)?;
 		let ix = {
-			let txn = self.transaction(Read, Optimistic).await?;
+			let txn = self.transaction(Read).await?;
 			let res =
 				txn.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None).await;
 			let _ = txn.cancel().await;
@@ -2544,7 +2532,7 @@ impl Datastore {
 		loop {
 			Self::ensure_not_cancelled(canceller)?;
 			let prepared = {
-				let txn = Arc::new(self.transaction(Read, Optimistic).await?);
+				let txn = Arc::new(self.transaction(Read).await?);
 				let res: Result<
 					Option<(
 						crate::catalog::TableId,
@@ -2581,7 +2569,7 @@ impl Datastore {
 			let has_more = plan.has_more();
 			Self::ensure_not_cancelled(canceller)?;
 
-			let txn = Arc::new(self.transaction(Write, Optimistic).await?);
+			let txn = Arc::new(self.transaction(Write).await?);
 			let res: Result<bool> = async {
 				match txn
 					.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
@@ -2706,7 +2694,7 @@ impl Datastore {
 		loop {
 			Self::ensure_not_cancelled(canceller)?;
 			let prepared = {
-				let txn = Arc::new(self.transaction(Read, Optimistic).await?);
+				let txn = Arc::new(self.transaction(Read).await?);
 				let res: Result<
 					Option<(
 						crate::catalog::TableId,
@@ -2746,7 +2734,7 @@ impl Datastore {
 			let has_more = plan.has_more();
 			Self::ensure_not_cancelled(canceller)?;
 
-			let txn = Arc::new(self.transaction(Write, Optimistic).await?);
+			let txn = Arc::new(self.transaction(Write).await?);
 			let res: Result<bool> = async {
 				match txn
 					.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
@@ -2809,7 +2797,7 @@ impl Datastore {
 		loop {
 			Self::ensure_not_cancelled(canceller)?;
 			let plan = {
-				let txn = self.transaction(Read, Optimistic).await?;
+				let txn = self.transaction(Read).await?;
 				let res = IndexOperation::prepare_fulltext_compaction(
 					&self.index_stores,
 					ikb,
@@ -2827,7 +2815,7 @@ impl Datastore {
 			let has_more = plan.has_more();
 			Self::ensure_not_cancelled(canceller)?;
 
-			let txn = self.transaction(Write, Optimistic).await?;
+			let txn = self.transaction(Write).await?;
 			let res = async {
 				match txn
 					.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
@@ -2935,7 +2923,7 @@ impl Datastore {
 		loop {
 			Self::ensure_not_cancelled(canceller)?;
 			let plan = {
-				let txn = self.transaction(Read, Optimistic).await?;
+				let txn = self.transaction(Read).await?;
 				let res = IndexOperation::prepare_count_compaction(ikb, &txn).await;
 				let _ = txn.cancel().await;
 				res?
@@ -2946,7 +2934,7 @@ impl Datastore {
 			let has_more = plan.has_more();
 			Self::ensure_not_cancelled(canceller)?;
 
-			let txn = self.transaction(Write, Optimistic).await?;
+			let txn = self.transaction(Write).await?;
 			let res = async {
 				match txn
 					.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
@@ -3061,19 +3049,19 @@ impl Datastore {
 	/// Create a new transaction on this datastore
 	///
 	/// ```rust,no_run
-	/// use surrealdb_core::kvs::{Datastore, TransactionType::*, LockType::*};
+	/// use surrealdb_core::kvs::{Datastore, TransactionType::*};
 	/// use anyhow::Error;
 	///
 	/// #[tokio::main]
 	/// async fn main() -> Result<(),Error> {
 	///     let ds = Datastore::new("rocksdb://database.db").await?;
-	///     let mut tx = ds.transaction(Write, Optimistic).await?;
+	///     let mut tx = ds.transaction(Write).await?;
 	///     tx.cancel().await?;
 	///     Ok(())
 	/// }
 	/// ```
-	pub async fn transaction(&self, write: TransactionType, lock: LockType) -> Result<Transaction> {
-		self.transaction_factory.transaction(write, lock, self.sequences.clone()).await
+	pub async fn transaction(&self, write: TransactionType) -> Result<Transaction> {
+		self.transaction_factory.transaction(write, self.sequences.clone()).await
 	}
 
 	pub(crate) fn sequences(&self) -> &Sequences {
@@ -3094,7 +3082,7 @@ impl Datastore {
 	}
 
 	pub async fn health_check(&self) -> Result<()> {
-		let tx = self.transaction(Read, Optimistic).await?;
+		let tx = self.transaction(Read).await?;
 
 		// Cancel the transaction
 		trace!("Cancelling health check transaction");
@@ -3128,7 +3116,7 @@ impl Datastore {
 	pub async fn node_heartbeat_age(&self) -> Result<Duration> {
 		// Open a fresh read transaction so the lookup misses the per-transaction
 		// cache and actually reads the node key from storage.
-		let tx = self.transaction(Read, Optimistic).await?;
+		let tx = self.transaction(Read).await?;
 		let res = tx.get_node(self.id).await;
 		// Always release the transaction, regardless of the lookup result.
 		let _ = tx.cancel().await;
@@ -3683,7 +3671,7 @@ impl Datastore {
 		// emitted [`crate::observe::TransactionEvent`] carries the session's
 		// namespace, database, user, etc.
 		let txn = self
-			.transaction(txn_type, Optimistic)
+			.transaction(txn_type)
 			.await?
 			.with_tenant_identity(Some(Arc::new(crate::observe::TenantIdentity::from_session(
 				sess,
@@ -3762,7 +3750,7 @@ impl Datastore {
 		// Retrieve the provided NS and DB
 		let (ns, db) = crate::iam::check::check_ns_db(sess)?;
 		// Create a new readonly transaction
-		let txn = self.transaction(Read, Optimistic).await?;
+		let txn = self.transaction(Read).await?;
 		let batch_size = self.config.export_batch_size;
 		// Return an async export job
 		Ok(async move {
@@ -3902,9 +3890,7 @@ impl Datastore {
 		database: Option<String>,
 	) -> std::result::Result<QueryResult, TypesError> {
 		let new_tx = || async {
-			self.transaction(Write, Optimistic)
-				.await
-				.map_err(|err| TypesError::internal(err.to_string()))
+			self.transaction(Write).await.map_err(|err| TypesError::internal(err.to_string()))
 		};
 		let commit_tx = |txn: Transaction| async move {
 			txn.commit().await.map_err(|err| TypesError::internal(err.to_string()))
@@ -4006,7 +3992,7 @@ impl Datastore {
 		model_name: &str,
 		model_version: &str,
 	) -> Result<Option<Arc<crate::catalog::MlModelDefinition>>> {
-		let tx = self.transaction(Read, Optimistic).await?;
+		let tx = self.transaction(Read).await?;
 		let db = tx.expect_db_by_name(ns, db).await?;
 		let model = tx
 			.get_db_model(db.namespace_id, db.database_id, model_name, model_version, None)
@@ -4043,7 +4029,7 @@ impl Datastore {
 			return Ok(ApiResponse::from_error(ApiError::PermissionDenied, req.request_id.clone()));
 		}
 
-		let tx = Arc::new(self.transaction(TransactionType::Write, LockType::Optimistic).await?);
+		let tx = Arc::new(self.transaction(TransactionType::Write).await?);
 
 		let db = tx.ensure_ns_db(None, ns, db).await?;
 
@@ -4194,11 +4180,8 @@ impl crate::dbs::NodeEndpointResolver for CatalogNodeEndpointResolver {
 	) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + '_>> {
 		Box::pin(async move {
 			let uuid = Uuid::from_bytes(target_node);
-			let txn = self
-				.transaction_factory
-				.transaction(Read, Optimistic, self.sequences.clone())
-				.await
-				.ok()?;
+			let txn =
+				self.transaction_factory.transaction(Read, self.sequences.clone()).await.ok()?;
 			let key = crate::key::root::nd::Nd {
 				nd: uuid,
 			};
@@ -4228,7 +4211,7 @@ mod test {
 	async fn new_index_compaction_test_ds() -> Result<(Datastore, Session)> {
 		let ds = Datastore::new("memory").await?;
 		let session = Session::owner().with_ns("test").with_db("test");
-		let txn = ds.transaction(Write, Pessimistic).await?;
+		let txn = ds.transaction(Write).await?;
 		txn.ensure_ns_db(None, "test", "test").await?;
 		txn.commit().await?;
 		Ok((ds, session))
@@ -4263,7 +4246,7 @@ mod test {
 			.build_with_path("memory")
 			.await?;
 		let ses = Session::owner().with_ns("test").with_db("test");
-		let txn = ds.transaction(Write, Pessimistic).await?;
+		let txn = ds.transaction(Write).await?;
 		txn.ensure_ns_db(None, "test", "test").await?;
 		txn.commit().await?;
 		execute_all(&ds, &ses, "CREATE person:tobie SET name = 'Tobie';").await?;
@@ -4290,7 +4273,7 @@ mod test {
 			.build_with_path("memory")
 			.await?;
 		let ses = Session::owner().with_ns("test").with_db("test");
-		let txn = ds.transaction(Write, Pessimistic).await?;
+		let txn = ds.transaction(Write).await?;
 		txn.ensure_ns_db(None, "test", "test").await?;
 		txn.commit().await?;
 		Ok((ds, ses))
@@ -4854,7 +4837,7 @@ mod test {
 	}
 
 	async fn index_key_base(ds: &Datastore, table: &str, index: &str) -> Result<IndexKeyBase> {
-		let txn = ds.transaction(Read, Optimistic).await?;
+		let txn = ds.transaction(Read).await?;
 		let ns = txn.get_ns_by_name("test", None).await?.unwrap();
 		let db = txn.get_db_by_name("test", "test", None).await?.unwrap();
 		let table = TableName::from(table);
@@ -4987,7 +4970,7 @@ mod test {
 	#[tokio::test]
 	async fn node_tx_step_cancels_after_timeout() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let txn = ds.transaction(Write, Optimistic).await.unwrap();
+		let txn = ds.transaction(Write).await.unwrap();
 		let timeout_duration = Duration::from_millis(10);
 
 		let err = await_node_tx_step(
@@ -5007,7 +4990,7 @@ mod test {
 	#[tokio::test]
 	async fn node_tx_step_cancels_after_cancellation() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let txn = ds.transaction(Write, Optimistic).await.unwrap();
+		let txn = ds.transaction(Write).await.unwrap();
 		let canceller = CancellationToken::new();
 		canceller.cancel();
 
@@ -5028,7 +5011,7 @@ mod test {
 	#[tokio::test]
 	async fn node_tx_step_cancels_after_error() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let txn = ds.transaction(Write, Optimistic).await.unwrap();
+		let txn = ds.transaction(Write).await.unwrap();
 
 		let err = await_node_tx_step(
 			&txn,
@@ -5047,7 +5030,7 @@ mod test {
 	#[tokio::test]
 	async fn node_tx_step_success_leaves_transaction_open() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let txn = ds.transaction(Write, Optimistic).await.unwrap();
+		let txn = ds.transaction(Write).await.unwrap();
 
 		await_node_tx_step(
 			&txn,
@@ -5088,7 +5071,7 @@ mod test {
 		let key = crate::key::root::nd::Nd {
 			nd: ds.id(),
 		};
-		let txn = ds.transaction(Write, Optimistic).await.unwrap();
+		let txn = ds.transaction(Write).await.unwrap();
 		txn.set_key(&key, &stale).await.unwrap();
 		txn.commit().await.unwrap();
 		// The reported age should reflect the stale heartbeat.
@@ -5104,13 +5087,13 @@ mod test {
 
 		// Setup the initial user if there are no root users
 		{
-			let txn = ds.transaction(Read, Optimistic).await.unwrap();
+			let txn = ds.transaction(Read).await.unwrap();
 			assert_eq!(txn.all_root_users(None).await.unwrap().len(), 0);
 			txn.cancel().await.unwrap();
 		}
 		ds.initialise_credentials(username, password).await.unwrap();
 		{
-			let txn = ds.transaction(Read, Optimistic).await.unwrap();
+			let txn = ds.transaction(Read).await.unwrap();
 			assert_eq!(txn.all_root_users(None).await.unwrap().len(), 1);
 			txn.cancel().await.unwrap();
 		}
@@ -5122,7 +5105,7 @@ mod test {
 		let sess = Session::owner();
 		ds.execute(sql, &sess, None).await.unwrap();
 		let pass_hash = {
-			let txn = ds.transaction(Read, Optimistic).await.unwrap();
+			let txn = ds.transaction(Read).await.unwrap();
 			let res = txn.expect_root_user(username).await.unwrap().hash.clone();
 			txn.cancel().await.unwrap();
 			res
@@ -5130,7 +5113,7 @@ mod test {
 
 		ds.initialise_credentials(username, password).await.unwrap();
 		{
-			let txn = ds.transaction(Read, Optimistic).await.unwrap();
+			let txn = ds.transaction(Read).await.unwrap();
 			assert_eq!(pass_hash, txn.expect_root_user(username).await.unwrap().hash.clone());
 			txn.cancel().await.unwrap();
 		}
@@ -5178,7 +5161,7 @@ mod test {
 		// Create a default context
 		let mut ctx = dbs.setup_ctx()?;
 		// Start a new transaction
-		let txn = dbs.transaction(TransactionType::Read, Optimistic).await?.enclose();
+		let txn = dbs.transaction(TransactionType::Read).await?.enclose();
 		// Store the transaction
 		ctx.set_transaction(Arc::clone(&txn));
 		// Freeze the context
@@ -5208,7 +5191,7 @@ mod test {
 		let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
 
 		let db = {
-			let txn = ds.transaction(TransactionType::Write, LockType::Pessimistic).await?;
+			let txn = ds.transaction(TransactionType::Write).await?;
 			let db = txn.ensure_ns_db(None, "test", "test").await?;
 			txn.commit().await?;
 			db
@@ -5221,7 +5204,7 @@ mod test {
 			assert_eq!(res.len(), 1);
 			res.remove(0).result.unwrap();
 			// Obtain the initial uuids
-			let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
+			let txn = ds.transaction(TransactionType::Read).await?;
 			let tb = TableName::from("test");
 			let initial = txn.get_tb(db.namespace_id, db.database_id, &tb, None).await?.unwrap();
 			let initial_live_query_version =
@@ -5253,7 +5236,7 @@ mod test {
 
 		// Obtain the uuids after definitions
 		let (after_define, after_define_live_query_version) = {
-			let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
+			let txn = ds.transaction(TransactionType::Read).await?;
 			let tb = TableName::from("test");
 			let after_define =
 				txn.get_tb(db.namespace_id, db.database_id, &tb, None).await?.unwrap();
@@ -5291,7 +5274,7 @@ mod test {
 		}
 		// Obtain the uuids after definitions
 		{
-			let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
+			let txn = ds.transaction(TransactionType::Read).await?;
 			let tb = TableName::from("test");
 			let after_remove =
 				txn.get_tb(db.namespace_id, db.database_id, &tb, None).await?.unwrap();

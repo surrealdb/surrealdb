@@ -25,7 +25,7 @@ use crate::key::{KVKeyDecode, KVRange, KVValue, impl_kv_value_revisioned};
 use crate::kvs::sequences::Sequences;
 use crate::kvs::tasklease::LeaseHandler;
 use crate::kvs::{
-	Datastore, LockType, NORMAL_BATCH_SIZE, Transaction, TransactionFactory, TransactionType, Val,
+	Datastore, NORMAL_BATCH_SIZE, Transaction, TransactionFactory, TransactionType, Val,
 };
 use crate::val::{RecordId, Value};
 
@@ -303,7 +303,7 @@ impl AsyncEventRecord {
 			if let Some(lh) = lh.as_ref() {
 				lh.try_maintain_lease().await?;
 			}
-			let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
+			let tx = ds.transaction(TransactionType::Read).await?;
 			let range = EventQueuePrefix {}.encode_range()?;
 			// Read a bounded batch without holding a write transaction.
 			let res = catch!(tx, tx.scan(range, NORMAL_BATCH_SIZE, 0, None).await);
@@ -428,7 +428,7 @@ impl AsyncEventContext {
 	}
 
 	async fn new_write_tx(&self) -> Result<Transaction> {
-		self.tf.transaction(Write, LockType::Optimistic, self.sequences.clone()).await
+		self.tf.transaction(Write, self.sequences.clone()).await
 	}
 
 	async fn run_event(&mut self, stk: &mut Stk, mut ctx: Context, v: Val) -> Result<()> {

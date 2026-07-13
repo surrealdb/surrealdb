@@ -349,12 +349,7 @@ async fn check_retained_keys(dbs: &Datastore) -> Result<Vec<Vec<u8>>> {
 	// infrastructure that legitimately persists, not leaked test data.
 	const ALLOWED_KEY_PREFIXES: &[&[u8]] = &[b"/!ni", b"/!nh", b"/!nd", b"/!ic", b"/!tl"];
 
-	let txn = dbs
-		.transaction(
-			surrealdb_core::kvs::TransactionType::Read,
-			surrealdb_core::kvs::LockType::Pessimistic,
-		)
-		.await?;
+	let txn = dbs.transaction(surrealdb_core::kvs::TransactionType::Read).await?;
 	let res = txn.keys(([0].as_slice()..[0xff].as_slice()).into(), 1000, 0, None).await?;
 	txn.cancel().await?;
 	Ok(res

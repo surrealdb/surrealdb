@@ -35,14 +35,6 @@ mod multiwriter_same_keys_putc;
 mod raw;
 mod snapshot;
 
-/// Mirrors the locking half of `TransactionBuilder::new_transaction`'s `lock`
-/// flag. See [`TransactionType`].
-#[derive(Clone, Copy, Debug)]
-pub enum LockType {
-	Optimistic,
-	Pessimistic,
-}
-
 /// A backend datastore under test, wrapping the boxed [`TransactionBuilder`]
 /// produced by [`surrealdb_kvs_any::new_transaction_builder`].
 pub struct TestDs(Box<dyn TransactionBuilder>);
@@ -63,13 +55,8 @@ impl TestDs {
 	}
 
 	/// Start a new transaction on the underlying backend.
-	async fn transaction(
-		&self,
-		write: TransactionType,
-		lock: LockType,
-	) -> Result<Box<dyn Transactable>> {
-		let lock = matches!(lock, LockType::Pessimistic);
-		let (tx, _) = self.0.new_transaction(write, lock).await?;
+	async fn transaction(&self, write: TransactionType) -> Result<Box<dyn Transactable>> {
+		let (tx, _) = self.0.new_transaction(write).await?;
 		Ok(tx)
 	}
 
@@ -170,13 +157,13 @@ mod surrealkv {
 mod tikv {
 	use surrealdb_kvs::TransactionType;
 
-	use super::{LockType, TestDs};
+	use super::TestDs;
 
 	async fn new_ds() -> TestDs {
 		// Setup the TiKV datastore from the cluster connection string
 		let ds = TestDs::new("tikv:127.0.0.1:2379").await;
 		// Clear any previous test entries
-		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
 		tx.delr((vec![0u8]..vec![0xffu8]).into()).await.unwrap();
 		tx.commit().await.unwrap();
 		// Return the datastore

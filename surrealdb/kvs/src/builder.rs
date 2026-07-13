@@ -43,7 +43,6 @@ pub trait TransactionBuilder: TransactionBuilderRequirements {
 	/// Create a new backend transaction.
 	///
 	/// - `write`: whether the transaction is writable (Write vs Read)
-	/// - `lock`: whether pessimistic locking is requested
 	///
 	/// Returns the backend transaction object and a flag indicating if the
 	/// transaction is local to the process (true) or requires external resources
@@ -51,7 +50,6 @@ pub trait TransactionBuilder: TransactionBuilderRequirements {
 	fn new_transaction(
 		&self,
 		write: TransactionType,
-		lock: bool,
 	) -> BoxFut<'_, Result<(Box<dyn Transactable>, bool)>>;
 
 	/// Perform any backend-specific shutdown/cleanup.

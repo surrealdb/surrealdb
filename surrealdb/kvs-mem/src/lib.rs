@@ -155,11 +155,7 @@ impl Datastore {
 	}
 
 	/// Start a new transaction
-	pub async fn transaction(
-		&self,
-		write: TransactionType,
-		_: bool,
-	) -> Result<Box<dyn Transactable>> {
+	pub async fn transaction(&self, write: TransactionType) -> Result<Box<dyn Transactable>> {
 		let write = matches!(write, TransactionType::Write);
 		// Create a new transactio
 		let txn = self.db.transaction(write).with_snapshot_isolation();

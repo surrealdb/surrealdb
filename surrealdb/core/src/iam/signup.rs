@@ -16,7 +16,6 @@ use crate::iam::issue::{config, expiration};
 use crate::iam::token::{Claims, Token};
 use crate::iam::{Actor, Auth, Level, Role, algorithm_to_jwt_algorithm};
 use crate::kvs::Datastore;
-use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::types::PublicVariables;
 use crate::val::Value;
@@ -173,7 +172,7 @@ pub async fn db_access(
 	vars: PublicVariables,
 ) -> Result<Token> {
 	// Create a new readonly transaction
-	let tx = kvs.transaction(Read, Optimistic).await?;
+	let tx = kvs.transaction(Read).await?;
 	let db_def = match catch!(tx, tx.get_db_by_name(&ns, &db, None).await) {
 		Some(db) => db,
 		None => {

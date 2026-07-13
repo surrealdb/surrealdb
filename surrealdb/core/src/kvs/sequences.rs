@@ -54,7 +54,7 @@ use crate::key::table::ih::{IndexIdGeneratorBatchKey, IndexIdGeneratorBatchPrefi
 use crate::key::table::is::IndexIdGeneratorStateKey;
 use crate::key::{KVKey, KVRange, Key, KeyRange, impl_kv_value_revisioned};
 use crate::kvs::ds::TransactionFactory;
-use crate::kvs::{LockType, Transaction, TransactionType};
+use crate::kvs::{Transaction, TransactionType};
 use crate::val::TableName;
 
 type SequencesMap = Arc<RwLock<HashMap<Arc<SequenceDomain>, Arc<Mutex<Sequence>>>>>;
@@ -532,8 +532,7 @@ impl Sequence {
 		let state_key = seq.new_state_key(sqs.nid)?;
 		// Create a separate transaction for reading sequence state to avoid conflicts
 		// with the parent transaction in strict serialization mode (e.g., FDB)
-		let tx =
-			sqs.tf.transaction(TransactionType::Read, LockType::Optimistic, sqs.clone()).await?;
+		let tx = sqs.tf.transaction(TransactionType::Read, sqs.clone()).await?;
 		let mut st: SequenceState = if let Some(v) = tx.get(state_key.as_borrowed(), None).await? {
 			revision::from_slice(&v)?
 		} else {
@@ -623,8 +622,7 @@ impl Sequence {
 		let v = self.st.next;
 		self.st.next += 1;
 		// write the state on the KV store
-		let tx =
-			self.tf.transaction(TransactionType::Write, LockType::Optimistic, sqs.clone()).await?;
+		let tx = self.tf.transaction(TransactionType::Write, sqs.clone()).await?;
 
 		// Execute operations and ensure transaction is cancelled on error
 		let data = revision::to_vec(&self.st)?;
@@ -719,8 +717,7 @@ impl Sequence {
 		next: i64,
 		batch: u32,
 	) -> Result<(i64, i64)> {
-		let tx =
-			sqs.tf.transaction(TransactionType::Write, LockType::Optimistic, sqs.clone()).await?;
+		let tx = sqs.tf.transaction(TransactionType::Write, sqs.clone()).await?;
 
 		// Execute operations and ensure transaction is cancelled on error
 		let result = async {
@@ -790,7 +787,7 @@ mod tests {
 		NamespaceId, TableDefinition, TableId,
 	};
 	use crate::kvs::sequences::{Sequence, SequenceDomain};
-	use crate::kvs::{Datastore, LockType, TransactionType};
+	use crate::kvs::{Datastore, TransactionType};
 	use crate::val::TableName;
 
 	#[tokio::test]
@@ -800,7 +797,7 @@ mod tests {
 		let db_id = DatabaseId(11);
 		let tb_name: TableName = "tb".into();
 
-		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
 		tx.put_ns(NamespaceDefinition {
 			namespace_id: ns_id,
 			name: "ns".into(),
@@ -843,7 +840,7 @@ mod tests {
 		.unwrap();
 		tx.commit().await.unwrap();
 
-		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+		let tx = ds.transaction(TransactionType::Read).await.unwrap();
 
 		// Seeds past the highest existing ID in each catalog domain.
 		assert_eq!(
@@ -901,7 +898,7 @@ mod tests {
 	#[tokio::test]
 	async fn seed_start_from_catalog_returns_start_on_empty_store() {
 		let ds = Datastore::new("memory").await.unwrap();
-		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+		let tx = ds.transaction(TransactionType::Read).await.unwrap();
 
 		assert_eq!(
 			Sequence::seed_start_from_catalog(&tx, &SequenceDomain::NameSpacesIds, 0)
@@ -940,7 +937,7 @@ mod tikv_concurrency {
 	use crate::CommunityComposer;
 	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::kvs::ds::TransactionFactory;
-	use crate::kvs::{Datastore, LockType, TransactionType};
+	use crate::kvs::{Datastore, TransactionType};
 	use crate::val::TableName;
 
 	/// Build a datastore against the local TiKV cluster, clear the keyspace so
@@ -951,7 +948,7 @@ mod tikv_concurrency {
 			.build_with_factory_path("tikv:127.0.0.1:2379", CommunityComposer())
 			.await
 			.unwrap();
-		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
 		tx.delr((vec![0u8]..vec![0xffu8]).into()).await.unwrap();
 		tx.commit().await.unwrap();
 		ds.transaction_factory().clone()

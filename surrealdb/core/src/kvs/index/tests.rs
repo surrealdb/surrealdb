@@ -23,7 +23,6 @@ use crate::idx::IndexKeyBase;
 use crate::key::index::all as index_all;
 use crate::key::index::iu::{IndexCountKey, IndexPrefix};
 use crate::key::{KVKey, KVKeyDecode, KVRange, KVValue, Key};
-use crate::kvs::LockType::Optimistic;
 use crate::kvs::testing::{
 	NonRetryableErrorSite, RetryableConflictGuard, RetryableConflictSite,
 	inject_non_retryable_error, inject_retryable_conflict, inject_retryable_conflicts,
@@ -40,7 +39,7 @@ const REPEATED_RETRY_CONFLICTS: usize = 1000;
 async fn new_index_test_ds() -> Result<(Datastore, Session)> {
 	let ds = Datastore::new("memory").await?;
 	let session = Session::owner().with_ns("test").with_db("test");
-	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
 	tx.ensure_ns_db(None, "test", "test").await?;
 	tx.commit().await?;
 	Ok((ds, session))
@@ -219,7 +218,7 @@ async fn index_building_status(
 }
 
 async fn durable_build_state(ds: &Datastore, ikb: &IndexKeyBase) -> Result<IndexBuildState> {
-	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
 	let state = catch!(tx, tx.get_key(&ikb.new_bs_key(), None).await)
 		.ok_or_else(|| anyhow::anyhow!("durable build state should exist"))?;
 	tx.cancel().await?;
@@ -231,7 +230,7 @@ async fn set_durable_build_state(
 	ikb: &IndexKeyBase,
 	state: IndexBuildState,
 ) -> Result<()> {
-	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
 	tx.set_key(&ikb.new_bs_key(), &state).await?;
 	tx.commit().await
 }
@@ -260,7 +259,7 @@ fn durable_build_state_for_phase(
 }
 
 async fn durable_build_state_exists(ds: &Datastore, ikb: &IndexKeyBase) -> Result<bool> {
-	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
 	let state: Option<IndexBuildState> = catch!(tx, tx.get_key(&ikb.new_bs_key(), None).await);
 	tx.cancel().await?;
 	Ok(state.is_some())
@@ -274,7 +273,7 @@ async fn new_building_for_index(
 	table: &TableName,
 	ix: Arc<IndexDefinition>,
 ) -> Result<Building> {
-	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
 	let table_def = catch!(tx, tx.get_tb(ns, db, table, None).await).expect("table should exist");
 	let mut ctx = ds.setup_ctx()?;
 	let tx = Arc::new(tx);
@@ -441,7 +440,7 @@ async fn get_table_index(
 	index: &str,
 ) -> Result<(NamespaceId, DatabaseId, TableName, Arc<IndexDefinition>)> {
 	let table = TableName::from(table);
-	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
 	let ns = catch!(tx, tx.get_ns_by_name("test", None).await).expect("namespace should exist");
 	let db =
 		catch!(tx, tx.get_db_by_name("test", "test", None).await).expect("database should exist");
@@ -455,7 +454,7 @@ async fn get_table_ids(
 	table: &str,
 ) -> Result<(NamespaceId, DatabaseId, TableName)> {
 	let table = TableName::from(table);
-	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
 	let ns = catch!(tx, tx.get_ns_by_name("test", None).await).expect("namespace should exist");
 	let db =
 		catch!(tx, tx.get_db_by_name("test", "test", None).await).expect("database should exist");
@@ -526,7 +525,7 @@ async fn index_prefix_key_count(
 	table: &TableName,
 	ix: IndexId,
 ) -> Result<usize> {
-	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
 	let key = index_all::AllIndexRoot {
 		prefix: crate::key::database::all::DatabaseRoot {
 			ns,
@@ -545,7 +544,7 @@ async fn seed_durable_queue_generation(
 	ikb: &IndexKeyBase,
 	generation: BuildGeneration,
 ) -> Result<()> {
-	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
 	let id = RecordIdKey::from(format!("stale-{generation}"));
 	let ticket = generation;
 	let mutation_seq = 0;
@@ -582,7 +581,7 @@ async fn seed_uncommitted_index_build_artifacts(
 	ix: IndexId,
 ) -> Result<()> {
 	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix);
-	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
 	tx.set_key(
 		&ikb.new_bs_key(),
 		&durable_build_state_for_phase(IndexBuildPhase::Building, 1, Some(ds.id())),
@@ -630,7 +629,7 @@ async fn durable_queue_generation_count(
 	ikb: &IndexKeyBase,
 	generation: BuildGeneration,
 ) -> Result<usize> {
-	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
 	let bg = catch!(tx, tx.keys(ikb.new_bg_range(generation)?, u32::MAX, 0, None).await);
 	let bp = catch!(tx, tx.keys(ikb.new_bp_range(generation)?, u32::MAX, 0, None).await);
 	let br = catch!(tx, tx.keys(ikb.new_br_range(generation)?, u32::MAX, 0, None).await);
@@ -639,7 +638,7 @@ async fn durable_queue_generation_count(
 }
 
 async fn durable_queue_all_generations_count(ds: &Datastore, ikb: &IndexKeyBase) -> Result<usize> {
-	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
 	let bg = catch!(tx, tx.keys(ikb.new_bg_all_generations_range()?, u32::MAX, 0, None).await);
 	let bp = catch!(tx, tx.keys(ikb.new_bp_all_generations_range()?, u32::MAX, 0, None).await);
 	let br = catch!(tx, tx.keys(ikb.new_br_all_generations_range()?, u32::MAX, 0, None).await);
@@ -765,7 +764,7 @@ async fn define_index_import_changed_definition_rebuilds_with_fresh_index_id() -
 	)
 	.await?;
 
-	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
 	let old_lookup = catch!(tx, tx.get_tb_index_by_id(ns, db, &table, old_ix.index_id, None).await);
 	tx.cancel().await?;
 	assert!(old_lookup.is_none(), "old index id lookup should be retired");
@@ -1245,7 +1244,7 @@ async fn define_index_overwrite_commits_new_id_and_retires_old_lookup() -> Resul
 	)
 	.await?;
 
-	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
 	let old_lookup = catch!(tx, tx.get_tb_index_by_id(ns, db, &table, old_ix.index_id, None).await);
 	let current_lookup =
 		catch!(tx, tx.get_tb_index_by_id(ns, db, &table, current_ix.index_id, None).await);
@@ -1296,7 +1295,7 @@ async fn missing_durable_state_filters_retired_cached_index_definitions() -> Res
 	// Exercise every branch in one cached catalog slice: durable online stays
 	// visible, durable building is hidden, missing current state is legacy-ready,
 	// and missing retired state is filtered.
-	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
 	tx.set_key(
 		&online_ikb.new_bs_key(),
 		&durable_build_state_for_phase(IndexBuildPhase::Online, 1, None),
@@ -1312,7 +1311,7 @@ async fn missing_durable_state_filters_retired_cached_index_definitions() -> Res
 
 	execute_all(&ds, &session, "DEFINE INDEX OVERWRITE stale ON user FIELDS score").await?;
 
-	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
 	let indexes: Arc<[IndexDefinition]> = Arc::from(vec![
 		online_ix.as_ref().clone(),
 		building_ix.as_ref().clone(),
@@ -1349,7 +1348,7 @@ async fn filter_online_indexes_batches_durable_state_reads() -> Result<()> {
 	let (_, _, _, two_ix) = get_table_index(&ds, "user", "two").await?;
 	let (_, _, _, three_ix) = get_table_index(&ds, "user", "three").await?;
 
-	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
 	for ix in [&one_ix, &two_ix, &three_ix] {
 		let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
 		tx.set_key(
@@ -1360,7 +1359,7 @@ async fn filter_online_indexes_batches_durable_state_reads() -> Result<()> {
 	}
 	tx.commit().await?;
 
-	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
 	let indexes: Arc<[IndexDefinition]> = Arc::from(vec![
 		one_ix.as_ref().clone(),
 		two_ix.as_ref().clone(),
@@ -1391,7 +1390,7 @@ async fn consume_skips_retired_cached_index_definition() -> Result<()> {
 
 	execute_all(&ds, &session, "DEFINE INDEX OVERWRITE test ON user FIELDS account").await?;
 
-	let tx = Arc::new(ds.transaction(TransactionType::Write, Optimistic).await?);
+	let tx = Arc::new(ds.transaction(TransactionType::Write).await?);
 	let db_def = tx.get_db_by_name("test", "test", None).await?.expect("database should exist");
 	let mut ctx = ds.setup_ctx()?;
 	ctx.set_transaction(Arc::clone(&tx));
@@ -1438,7 +1437,7 @@ async fn compaction_write_fence_rejects_committed_index_removal() -> Result<()> 
 	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
 	let generation = durable_build_state(&ds, &ikb).await?.generation;
 
-	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
 	let table_def = catch!(tx, tx.get_tb(ns, db, &table, None).await).expect("table should exist");
 	let mut ctx = ds.setup_ctx()?;
 	let tx = Arc::new(tx);
@@ -1455,13 +1454,13 @@ async fn compaction_write_fence_rejects_committed_index_removal() -> Result<()> 
 	build.build_generation.store(generation, Ordering::Release);
 	tx.cancel().await?;
 
-	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
 	assert!(build.compaction_write_still_owns_index(&tx, generation).await?);
 	tx.cancel().await?;
 
 	execute_all(&ds, &session, "REMOVE INDEX test ON user").await?;
 
-	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
 	assert!(
 		!build.compaction_write_still_owns_index(&tx, generation).await?,
 		"retired indexes must not accept post-online builder compaction writes"
@@ -1487,7 +1486,7 @@ async fn compaction_write_fence_rejects_previous_rebuild_generation() -> Result<
 	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
 	let generation = durable_build_state(&ds, &ikb).await?.generation;
 
-	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
 	let table_def = catch!(tx, tx.get_tb(ns, db, &table, None).await).expect("table should exist");
 	let mut ctx = ds.setup_ctx()?;
 	let tx = Arc::new(tx);
@@ -1504,7 +1503,7 @@ async fn compaction_write_fence_rejects_previous_rebuild_generation() -> Result<
 	build.build_generation.store(generation, Ordering::Release);
 	tx.cancel().await?;
 
-	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
 	assert!(build.compaction_write_still_owns_index(&tx, generation).await?);
 	tx.cancel().await?;
 
@@ -1518,7 +1517,7 @@ async fn compaction_write_fence_rejects_previous_rebuild_generation() -> Result<
 	assert_eq!(rebuilt_state.generation, generation.saturating_add(1));
 	assert_eq!(rebuilt_state.phase, IndexBuildPhase::Online);
 
-	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
 	assert!(
 		!build.compaction_write_still_owns_index(&tx, generation).await?,
 		"previous build generations must not accept post-online compaction writes after rebuild"
@@ -1549,7 +1548,7 @@ async fn fresh_build_cleans_stale_durable_queue_generations() -> Result<()> {
 	for generation in 1..=3 {
 		seed_durable_queue_generation(&ds, &ikb, generation).await?;
 	}
-	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
 	tx.set_key(
 		&ikb.new_bs_key(),
 		&IndexBuildState {
@@ -1571,7 +1570,7 @@ async fn fresh_build_cleans_stale_durable_queue_generations() -> Result<()> {
 	.await?;
 	tx.commit().await?;
 
-	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
 	let table_def = tx.get_tb(ns, db, &table, None).await?.expect("table should exist");
 	let mut ctx = ds.setup_ctx()?;
 	let tx = Arc::new(tx);
@@ -1666,7 +1665,7 @@ async fn count_index_duplicate_initial_build_does_not_overcount() -> Result<()> 
 
 	let table_name = TableName::from("user");
 	let (ns_id, db_id, table_id, index) = {
-		let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
 		let ns = tx.get_ns_by_name("test", None).await?.expect("namespace should exist");
 		let db = tx.get_db_by_name("test", "test", None).await?.expect("database should exist");
 		let table = tx
@@ -1691,7 +1690,7 @@ async fn count_index_duplicate_initial_build_does_not_overcount() -> Result<()> 
 	let index_key = Arc::new(IndexKey::new(ns_id, db_id, &table_name, index.index_id));
 	let opt = ds.setup_options(&session);
 	let mut ctx = ds.setup_ctx()?;
-	let read_tx = Arc::new(ds.transaction(TransactionType::Read, Optimistic).await?);
+	let read_tx = Arc::new(ds.transaction(TransactionType::Read).await?);
 	ctx.set_transaction(Arc::clone(&read_tx));
 	let ctx = ctx.freeze();
 	let build_a = Building::new(
@@ -1908,7 +1907,7 @@ async fn takeover_preserves_durable_progress_counts() -> Result<()> {
 
 	for (phase, generation, initial, updated) in cases {
 		let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
-		let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
 		tx.set_key(
 			&ikb.new_bs_key(),
 			&IndexBuildState {
@@ -1982,7 +1981,7 @@ async fn takeover_resumes_initial_scan_from_checkpoint() -> Result<()> {
 	// records) and strand a `Building` generation whose durable checkpoint
 	// says the scan committed through `user:c`.
 	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
-	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
 	tx.del_prefix_key(&index_all::AllIndexRoot {
 		prefix: crate::key::database::all::DatabaseRoot {
 			ns,
@@ -2067,7 +2066,7 @@ async fn takeover_resumes_count_initial_scan_from_checkpoint() -> Result<()> {
 	// survives for the stranded generation, and the checkpoint says the
 	// baseline scan committed through `user:c`.
 	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
-	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
 	tx.del_prefix_key(&index_all::AllIndexRoot {
 		prefix: crate::key::database::all::DatabaseRoot {
 			ns,
@@ -2147,7 +2146,7 @@ async fn count_tail_crash_after_commit_does_not_double_count_on_takeover() -> Re
 	// wiping the data of the completed blocking build, so the takeover below
 	// runs a full initial scan including the tail pass.
 	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
-	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
 	tx.del_prefix_key(&index_all::AllIndexRoot {
 		prefix: crate::key::database::all::DatabaseRoot {
 			ns,
@@ -2212,7 +2211,7 @@ async fn count_tail_crash_after_commit_does_not_double_count_on_takeover() -> Re
 	assert_eq!(state.initial_cursor, None);
 
 	// Expire the dead builder's heartbeat so a second takeover can proceed.
-	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
 	let mut state = tx
 		.get_key(&ikb.new_bs_key(), None)
 		.await?
@@ -2267,7 +2266,7 @@ async fn abort_mid_scan_never_checkpoints_unindexed_records() -> Result<()> {
 	// Strand a resumable generation: no index data, checkpoint at `user:1`,
 	// so the takeover scans `user:2..1000` without a cleanup phase.
 	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
-	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
 	tx.del_prefix_key(&index_all::AllIndexRoot {
 		prefix: crate::key::database::all::DatabaseRoot {
 			ns,
@@ -2364,7 +2363,7 @@ async fn abort_during_count_tail_pass_never_commits_partial_baselines() -> Resul
 	// Strand a resumable generation whose checkpoint claims `user:1..=500`
 	// were scanned, with no surviving index data.
 	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
-	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
 	tx.del_prefix_key(&index_all::AllIndexRoot {
 		prefix: crate::key::database::all::DatabaseRoot {
 			ns,
@@ -2418,7 +2417,7 @@ async fn abort_during_count_tail_pass_never_commits_partial_baselines() -> Resul
 
 	// Ground truth: committed baseline = signed sum of count-delta entries;
 	// outstanding replay work = queued `!bg` mutations still present.
-	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
 	let rng = IndexPrefix {
 		prefix: crate::key::database::all::DatabaseRoot {
 			ns,
@@ -2484,7 +2483,7 @@ async fn resume_scan_adopts_stalled_concurrent_build() -> Result<()> {
 	// Simulate an ungraceful crash mid-build: a `Building` generation whose owner
 	// lease has expired and whose initial scan never completed.
 	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
-	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
 	tx.set_key(
 		&ikb.new_bs_key(),
 		&IndexBuildState {
@@ -2571,7 +2570,7 @@ async fn periodic_task_resumes_stalled_build() -> Result<()> {
 	// Strand a `Building` generation with an expired owner lease, as an
 	// ungraceful crash mid-build would leave it.
 	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
-	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
 	tx.set_key(
 		&ikb.new_bs_key(),
 		&IndexBuildState {
@@ -2669,7 +2668,7 @@ async fn distributed_writer_admission_does_not_extend_builder_lease() -> Result<
 		pending: None,
 		initial_cursor: None,
 	};
-	let tx = ds_a.transaction(TransactionType::Write, Optimistic).await?;
+	let tx = ds_a.transaction(TransactionType::Write).await?;
 	tx.set_key(&ikb.new_bs_key(), &stale_state).await?;
 	tx.commit().await?;
 
@@ -2682,7 +2681,7 @@ async fn distributed_writer_admission_does_not_extend_builder_lease() -> Result<
 		.await?;
 	}
 
-	let tx = ds_a.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds_a.transaction(TransactionType::Read).await?;
 	let admitted_state: IndexBuildState =
 		tx.get_key(&ikb.new_bs_key(), None).await?.expect("build state should exist");
 	tx.cancel().await?;
@@ -2697,7 +2696,7 @@ async fn distributed_writer_admission_does_not_extend_builder_lease() -> Result<
 		"writer admission must not refresh builder lease"
 	);
 
-	let tx = ds_a.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds_a.transaction(TransactionType::Read).await?;
 	let table_def = tx.get_tb(ns, db, &table, None).await?.expect("table should exist");
 	let mut ctx = ds_a.setup_ctx()?;
 	let tx = Arc::new(tx);
@@ -2721,7 +2720,7 @@ async fn distributed_writer_admission_does_not_extend_builder_lease() -> Result<
 	assert_eq!(acquired.phase, IndexBuildPhase::Building);
 	assert!(!acquired.initial_complete);
 
-	let tx = ds_a.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds_a.transaction(TransactionType::Read).await?;
 	let taken_over: IndexBuildState =
 		tx.get_key(&ikb.new_bs_key(), None).await?.expect("build state should exist");
 	tx.cancel().await?;
@@ -2769,7 +2768,7 @@ async fn writer_admission_batches_reservations_per_user_transaction() -> Result<
 		pending: None,
 		initial_cursor: None,
 	};
-	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
 	tx.set_key(&ikb.new_bs_key(), &building).await?;
 	tx.commit().await?;
 
@@ -2793,7 +2792,7 @@ async fn writer_admission_batches_reservations_per_user_transaction() -> Result<
 
 	// Exactly one ticket should have been allocated by the whole user
 	// transaction's batch.
-	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
 	let after: IndexBuildState =
 		tx.get_key(&ikb.new_bs_key(), None).await?.expect("build state should exist");
 	tx.cancel().await?;
@@ -2803,7 +2802,7 @@ async fn writer_admission_batches_reservations_per_user_transaction() -> Result<
 	);
 
 	// Five `!bg` entries, one per mutation, all sharing the same `(generation, ticket)`.
-	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
 	let bg_keys = tx.keys(ikb.new_bg_range(generation)?, u32::MAX, 0, None).await?;
 	let bp_keys = tx.keys(ikb.new_bp_range(generation)?, u32::MAX, 0, None).await?;
 	let br_keys = tx.keys(ikb.new_br_range(generation)?, u32::MAX, 0, None).await?;
@@ -2863,7 +2862,7 @@ async fn writer_admission_cancelled_batch_clears_durable_queue() -> Result<()> {
 		pending: None,
 		initial_cursor: None,
 	};
-	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
 	tx.set_key(&ikb.new_bs_key(), &building).await?;
 	tx.commit().await?;
 
@@ -2883,7 +2882,7 @@ async fn writer_admission_cancelled_batch_clears_durable_queue() -> Result<()> {
 	)
 	.await?;
 
-	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
 	let after: IndexBuildState =
 		tx.get_key(&ikb.new_bs_key(), None).await?.expect("build state should exist");
 	let bg_keys = tx.keys(ikb.new_bg_range(generation)?, u32::MAX, 0, None).await?;
@@ -2918,7 +2917,7 @@ async fn cached_index_build_reservation_remove_clears_entry() -> Result<()> {
 	// a released ticket. Verify the underlying mechanic: insert, lookup hits
 	// with an incrementing `mutation_seq`, remove, lookup misses.
 	let (ds, _) = new_index_test_ds().await?;
-	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
 	let key = CachedIndexBuildReservationKey {
 		ns: NamespaceId(1),
 		db: DatabaseId(1),
@@ -2987,7 +2986,7 @@ async fn cached_index_build_reservation_lookup_errors_on_seq_overflow() -> Resul
 	// after `mutation_seq` clamps; the cache must instead surface an error
 	// so the user transaction is aborted before any data loss occurs.
 	let (ds, _) = new_index_test_ds().await?;
-	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
 	let key = CachedIndexBuildReservationKey {
 		ns: NamespaceId(1),
 		db: DatabaseId(1),
@@ -3073,7 +3072,7 @@ async fn recheck_cached_admission_rejects_mid_transaction_state_changes() -> Res
 	);
 
 	// Missing state — recheck aborts.
-	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
 	tx.del_key(&ikb.new_bs_key()).await?;
 	tx.commit().await?;
 	let err = run_recheck_cached_admission(&ds, &ikb, ix.as_ref(), 1)
@@ -3110,7 +3109,7 @@ async fn seed_build_state(
 		state.error = Some("seeded test failure".to_string());
 		state.report_status = Some(IndexBuildReportStatus::Error);
 	}
-	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
 	tx.set_key(&ikb.new_bs_key(), &state).await?;
 	tx.commit().await?;
 	Ok(())
@@ -3123,7 +3122,7 @@ async fn run_recheck_cached_admission(
 	ix: &IndexDefinition,
 	cached_generation: u64,
 ) -> Result<Result<()>> {
-	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
 	let mut ctx = ds.setup_ctx()?;
 	let tx = Arc::new(tx);
 	ctx.set_transaction(Arc::clone(&tx));
@@ -3174,7 +3173,7 @@ async fn acquire_build_state_waits_for_prior_generation_reservations() -> Result
 		pending: None,
 		initial_cursor: None,
 	};
-	let seed_tx = ds_a.transaction(TransactionType::Write, Optimistic).await?;
+	let seed_tx = ds_a.transaction(TransactionType::Write).await?;
 	seed_tx.set_key(&ikb.new_bs_key(), &errored).await?;
 	let reservation = IndexBuildReservation {
 		node: ds_a.id(),
@@ -3197,7 +3196,7 @@ async fn acquire_build_state_waits_for_prior_generation_reservations() -> Result
 
 	// Simulate ds_a's deferred release firing (e.g. user transaction committed
 	// or cancelled, removing its `!br`).
-	let release_tx = ds_a.transaction(TransactionType::Write, Optimistic).await?;
+	let release_tx = ds_a.transaction(TransactionType::Write).await?;
 	release_tx.del_key(&br_key).await?;
 	release_tx.commit().await?;
 
@@ -3211,7 +3210,7 @@ async fn acquire_build_state_waits_for_prior_generation_reservations() -> Result
 		building.acquire_build_state().await?.expect("takeover should succeed after drain");
 	assert_eq!(acquired.generation, 2);
 	assert!(matches!(acquired.phase, IndexBuildPhase::Building));
-	let tx = ds_a.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds_a.transaction(TransactionType::Read).await?;
 	let br_keys = tx.keys(ikb.new_br_all_generations_range()?, u32::MAX, 0, None).await?;
 	tx.cancel().await?;
 	assert!(br_keys.is_empty(), "no `!br` should remain after a clean takeover");
@@ -3247,7 +3246,7 @@ async fn drain_prior_generation_reservations_cleans_dead_writers() -> Result<()>
 		expires_at: Utc::now() - chrono::Duration::seconds(1),
 	};
 	let br_key = ikb.new_br_key(1, 0);
-	let seed_tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let seed_tx = ds.transaction(TransactionType::Write).await?;
 	seed_tx.set_key(&br_key, &reservation).await?;
 	seed_tx.commit().await?;
 
@@ -3256,7 +3255,7 @@ async fn drain_prior_generation_reservations_cleans_dead_writers() -> Result<()>
 		.await
 		.expect("drain must complete promptly for a dead writer's reservation")?;
 
-	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
 	let br_keys = tx.keys(ikb.new_br_all_generations_range()?, u32::MAX, 0, None).await?;
 	tx.cancel().await?;
 	assert!(br_keys.is_empty(), "stale `!br` from a dead writer should have been removed");
@@ -3350,7 +3349,7 @@ async fn distributed_blocking_rebuild_takes_over_expired_remote_owner() -> Resul
 	let ikb = IndexKeyBase::new(ns, db, table, ix.index_id);
 	let generation = 2;
 	let now = Utc::now();
-	let tx = ds_a.transaction(TransactionType::Write, Optimistic).await?;
+	let tx = ds_a.transaction(TransactionType::Write).await?;
 	tx.set_key(
 		&ikb.new_bs_key(),
 		&IndexBuildState {
@@ -3383,7 +3382,7 @@ async fn distributed_blocking_rebuild_takes_over_expired_remote_owner() -> Resul
 	);
 
 	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
-	let tx = ds_a.transaction(TransactionType::Write, Optimistic).await?;
+	let tx = ds_a.transaction(TransactionType::Write).await?;
 	let mut state: IndexBuildState =
 		tx.get_key(&ikb.new_bs_key(), None).await?.expect("build state should exist");
 	state.updated_at = expired;
@@ -3591,12 +3590,12 @@ async fn commit_failure_preserves_primary_error_when_reservation_cleanup_fails()
 	let br_key = br.encode_key()?;
 	let br_val = reservation.kv_encode_value()?;
 
-	let seed_tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let seed_tx = ds.transaction(TransactionType::Write).await?;
 	seed_tx.set_key(&br, &reservation).await?;
 	(*seed_tx).set("commit-conflict".as_bytes().into(), b"initial".as_slice()).await?;
 	seed_tx.commit().await?;
 
-	let user_tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let user_tx = ds.transaction(TransactionType::Write).await?;
 	(*user_tx).set("commit-conflict".as_bytes().into(), b"user-write".as_slice()).await?;
 	user_tx
 		.register_index_build_reservation_release(IndexBuildReservationRelease::new(
@@ -3608,7 +3607,7 @@ async fn commit_failure_preserves_primary_error_when_reservation_cleanup_fails()
 		))
 		.await;
 
-	let conflicting_tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let conflicting_tx = ds.transaction(TransactionType::Write).await?;
 	(*conflicting_tx)
 		.set("commit-conflict".as_bytes().into(), b"conflicting-write".as_slice())
 		.await?;
@@ -3650,7 +3649,7 @@ async fn commit_failure_cleans_uncommitted_index_build_artifacts() -> Result<()>
 	let ix = IndexId(42);
 	seed_uncommitted_index_build_artifacts(&ds, ns, db, &table, ix).await?;
 
-	let user_tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let user_tx = ds.transaction(TransactionType::Write).await?;
 	(*user_tx).set("commit-conflict".as_bytes().into(), b"user-write".as_slice()).await?;
 	let ctx = ds.setup_ctx()?;
 	let builder = ctx.get_index_builder().expect("index builder should exist").clone();
@@ -3665,7 +3664,7 @@ async fn commit_failure_cleans_uncommitted_index_build_artifacts() -> Result<()>
 		)
 		.await;
 
-	let conflicting_tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let conflicting_tx = ds.transaction(TransactionType::Write).await?;
 	(*conflicting_tx)
 		.set("commit-conflict".as_bytes().into(), b"conflicting-write".as_slice())
 		.await?;
@@ -3695,11 +3694,11 @@ async fn store_changes_failure_preserves_primary_error_when_cleanup_fails() -> R
 	let br_key = br.encode_key()?;
 	let br_val = reservation.kv_encode_value()?;
 
-	let seed_tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let seed_tx = ds.transaction(TransactionType::Write).await?;
 	seed_tx.set_key(&br, &reservation).await?;
 	seed_tx.commit().await?;
 
-	let user_tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let user_tx = ds.transaction(TransactionType::Read).await?;
 	let table = TableName::from("user");
 	let record = RecordId {
 		table: table.clone(),
@@ -4361,7 +4360,7 @@ async fn datastore_drop_releases_index_builder_after_build() -> Result<()> {
 /// keys (which deliberately survive a purge) are excluded from the counts.
 #[cfg(feature = "kv-mem")]
 async fn count_doc_id_mappings(ds: &Datastore, table: &str) -> Result<(usize, usize)> {
-	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
 	let ns = tx.get_ns_by_name("test", None).await?.expect("namespace should exist");
 	let db = tx.get_db_by_name("test", "test", None).await?.expect("database should exist");
 	let tb: TableName = table.into();
@@ -4731,7 +4730,7 @@ async fn read_shared_doc_id(
 	docs: &crate::idx::docids::TableDocIds,
 	id: &RecordIdKey,
 ) -> Result<Option<crate::idx::docids::DocId>> {
-	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
 	let d = docs.get_doc_id(&tx, id).await?;
 	tx.cancel().await?;
 	Ok(d)
@@ -4742,7 +4741,7 @@ async fn read_shared_record_id(
 	docs: &crate::idx::docids::TableDocIds,
 	doc_id: crate::idx::docids::DocId,
 ) -> Result<Option<RecordIdKey>> {
-	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
 	let id = docs.get_record_id(&tx, doc_id).await?;
 	tx.cancel().await?;
 	Ok(id)
@@ -4756,7 +4755,7 @@ async fn assign_shared_doc_id(
 	id: &RecordIdKey,
 ) -> Result<crate::idx::docids::DocId> {
 	let mut ctx = ds.setup_ctx()?;
-	ctx.set_transaction(ds.transaction(TransactionType::Write, Optimistic).await?.into());
+	ctx.set_transaction(ds.transaction(TransactionType::Write).await?.into());
 	let ctx = ctx.freeze();
 	let d = docs.resolve_or_assign(&ctx, id).await?;
 	ctx.tx().commit().await?;
@@ -4772,7 +4771,7 @@ async fn seed_pending_reclaim(
 	table: &TableName,
 	id: &RecordIdKey,
 ) -> Result<()> {
-	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
 	tx.set_key(&crate::key::table::dp::Dp::new(ns, db, table, id), &()).await?;
 	tx.commit().await
 }
@@ -4784,7 +4783,7 @@ async fn count_pending_reclaims(
 	db: DatabaseId,
 	table: &TableName,
 ) -> Result<usize> {
-	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let tx = ds.transaction(TransactionType::Read).await?;
 	let rng = crate::key::table::dp::Prefix::new(ns, db, table).encode_range()?;
 	let keys = tx.keys(rng, u32::MAX, 0, None).await?;
 	tx.cancel().await?;

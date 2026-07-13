@@ -79,8 +79,6 @@ impl GraphQLSchemaCache {
 	) -> Result<Schema, GraphqlError> {
 		use surrealdb_kvs::TransactionType;
 
-		use crate::kvs::LockType;
-
 		let ns = session.ns.as_ref().ok_or(GraphqlError::UnspecifiedNamespace)?;
 		let db = session.db.as_ref().ok_or(GraphqlError::UnspecifiedDatabase)?;
 
@@ -88,7 +86,7 @@ impl GraphQLSchemaCache {
 		// the fingerprint computation. `generate_schema` opens its own
 		// transaction on miss.
 		let kvs = datastore;
-		let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
+		let tx = kvs.transaction(TransactionType::Read).await?;
 
 		let db_def = match tx.get_db_by_name(ns, db, None).await? {
 			Some(db) => db,

@@ -163,7 +163,7 @@ mod tikv_concurrency {
 	use crate::dbs::Session;
 	use crate::key::KVRange;
 	use crate::key::table::{dd, di};
-	use crate::kvs::{Datastore, LockType, TransactionType};
+	use crate::kvs::{Datastore, TransactionType};
 	use crate::val::TableName;
 
 	async fn fresh_tikv_ds() -> Arc<Datastore> {
@@ -172,7 +172,7 @@ mod tikv_concurrency {
 			.build_with_factory_path("tikv:127.0.0.1:2379", CommunityComposer())
 			.await
 			.unwrap();
-		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
 		tx.delr((vec![0u8]..vec![0xffu8]).into()).await.unwrap();
 		tx.commit().await.unwrap();
 		Arc::new(ds)
@@ -240,7 +240,7 @@ mod tikv_concurrency {
 			b.await.unwrap();
 
 			// The shared doc-ID mappings for this table must be fully reclaimed.
-			let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+			let tx = ds.transaction(TransactionType::Read).await.unwrap();
 			let ns = tx.get_ns_by_name("test", None).await.unwrap().unwrap().namespace_id;
 			let db = tx.get_db_by_name("test", "test", None).await.unwrap().unwrap().database_id;
 			let tb_name: TableName = tb.as_str().into();
@@ -322,7 +322,7 @@ mod tikv_concurrency {
 			b.await.unwrap();
 
 			// With no doc-ID consumer left, the shared space must be reclaimed.
-			let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
+			let tx = ds.transaction(TransactionType::Read).await.unwrap();
 			let ns = tx.get_ns_by_name("test", None).await.unwrap().unwrap().namespace_id;
 			let db = tx.get_db_by_name("test", "test", None).await.unwrap().unwrap().database_id;
 			let tb_name: TableName = tb.as_str().into();

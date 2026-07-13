@@ -1230,7 +1230,6 @@ mod tests {
 	use crate::key::KVRange;
 	use crate::key::database::all::DatabaseRoot;
 	use crate::key::index::dc::DcPrefix;
-	use crate::kvs::LockType::*;
 	use crate::kvs::{Datastore, Transaction, TransactionType};
 	use crate::sql::Expr;
 	use crate::sql::statements::DefineStatement;
@@ -1330,7 +1329,7 @@ mod tests {
 		}
 
 		async fn new_tx(&self, tt: TransactionType) -> Arc<Transaction> {
-			Arc::new(self.ds.transaction(tt, Optimistic).await.unwrap())
+			Arc::new(self.ds.transaction(tt).await.unwrap())
 		}
 
 		async fn remove_insert_task(&self, stk: &mut Stk, rid: &RecordId) {

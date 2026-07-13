@@ -51,7 +51,7 @@ use crate::graphql::mutations::process_mutations;
 use crate::graphql::relations::collect_relations;
 use crate::graphql::subscriptions::process_subscriptions;
 use crate::graphql::tables::{process_tbs, register_filter_helper_types};
-use crate::kvs::{Datastore, LockType, Transaction};
+use crate::kvs::{Datastore, Transaction};
 use crate::val::{
 	Array as SurArray, Geometry as SurGeometry, Number as SurNumber, Object as SurObject,
 	RecordId as SurRecordId, RecordIdKey as SurRecordIdKey, Set as SurSet, TableName,
@@ -90,7 +90,7 @@ pub async fn generate_schema(
 	graphql_config: GraphQLConfig,
 ) -> Result<Schema, GraphqlError> {
 	let kvs = datastore;
-	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
+	let tx = kvs.transaction(TransactionType::Read).await?;
 	let ns = session.ns.as_ref().ok_or(GraphqlError::UnspecifiedNamespace)?;
 	let db = session.db.as_ref().ok_or(GraphqlError::UnspecifiedDatabase)?;
 

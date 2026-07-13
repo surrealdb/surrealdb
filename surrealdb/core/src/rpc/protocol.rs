@@ -10,7 +10,7 @@ use crate::ctx::CancelHandle;
 use crate::dbs::capabilities::{ExperimentalTarget, MethodTarget};
 use crate::dbs::{QueryResult, QueryType, Session};
 use crate::iam::token::Token;
-use crate::kvs::{Datastore, LockType, TransactionType};
+use crate::kvs::{Datastore, TransactionType};
 use crate::observe::{
 	AuthAction, AuthEvent, AuthEventSafe, AuthScope, Outcome, RpcEvent, RpcEventSafe,
 	TenantIdentity,
@@ -575,7 +575,7 @@ pub trait RpcProtocol {
 				// Fetch defaults from database configuration
 				let kvs = self.kvs();
 				let tx = kvs
-					.transaction(TransactionType::Write, LockType::Optimistic)
+					.transaction(TransactionType::Write)
 					.await
 					.map_err(types_error_from_anyhow)?;
 				let (ns, db) = if let Some(x) = match tx.get_default_config().await {
@@ -636,7 +636,7 @@ pub trait RpcProtocol {
 				PublicValue::String(ns) => {
 					let kvs = self.kvs();
 					let tx = kvs
-						.transaction(TransactionType::Write, LockType::Optimistic)
+						.transaction(TransactionType::Write)
 						.await
 						.map_err(types_error_from_anyhow)?;
 					let create = kvs
@@ -674,7 +674,7 @@ pub trait RpcProtocol {
 					};
 					let kvs = self.kvs();
 					let tx = kvs
-						.transaction(TransactionType::Write, LockType::Optimistic)
+						.transaction(TransactionType::Write)
 						.await
 						.map_err(types_error_from_anyhow)?;
 					let create = kvs

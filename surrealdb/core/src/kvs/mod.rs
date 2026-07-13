@@ -64,7 +64,7 @@ pub use timestamp::{
 	BoxTimeStamp, BoxTimeStampImpl, HlcTimeStamp, HlcTimeStampImpl, IncTimeStampImpl,
 	MAX_TIMESTAMP_BYTES, TimeStamp, TimeStampImpl,
 };
-pub use tr::{LockType, Transactor};
+pub use tr::Transactor;
 pub(crate) use tx::CachePolicy;
 pub use tx::Transaction;
 

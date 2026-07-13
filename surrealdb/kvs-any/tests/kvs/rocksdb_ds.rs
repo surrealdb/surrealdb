@@ -8,7 +8,6 @@ use rand::{RngCore, SeedableRng};
 use surrealdb_kvs::TransactionType::*;
 use temp_dir::TempDir;
 
-use super::LockType::Optimistic;
 use super::TestDs;
 
 #[tokio::test]
@@ -47,13 +46,13 @@ pub async fn read_and_deletion_only() {
 
 	// Phase 1: Initial writes in normal mode (before reaching space limit)
 	{
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		tx.set("initial_key".as_bytes().into(), "initial_value".as_bytes().to_vec()).await.unwrap();
 		tx.commit().await.unwrap();
 	}
 
 	// Start a transaction that will be left uncommitted until after mode transition
-	let ongoing_tx = ds.transaction(Write, Optimistic).await.unwrap();
+	let ongoing_tx = ds.transaction(Write).await.unwrap();
 	ongoing_tx
 		.set("ongoing_key".as_bytes().into(), "ongoing_value".as_bytes().to_vec())
 		.await
@@ -70,7 +69,7 @@ pub async fn read_and_deletion_only() {
 	let mut rng = StdRng::seed_from_u64(0xA5A5_A5A5_A5A5_A5A5);
 	let mut count_err = 0;
 	for j in 0..200 {
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		for i in 0..100 {
 			let key = format!("unlimited_key_{}_{}", i, j);
 			let mut value = vec![0u8; 1024]; // 1KB per value
@@ -95,7 +94,7 @@ pub async fn read_and_deletion_only() {
 
 	// Confirm new write transactions are blocked
 	{
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		let res = tx.put("other_key".as_bytes().into(), "other_value".as_bytes().to_vec()).await;
 		assert!(
 			res.unwrap_err().to_string().contains("read-and-deletion-only mode"),
@@ -115,7 +114,7 @@ pub async fn read_and_deletion_only() {
 
 	// Confirm read operations still work
 	{
-		let tx = ds.transaction(Read, Optimistic).await.unwrap();
+		let tx = ds.transaction(Read).await.unwrap();
 		let val = tx.get("initial_key".as_bytes().into(), None).await.unwrap();
 		assert!(matches!(val.as_deref(), Some(b"initial_value")));
 		tx.cancel().await.unwrap();
@@ -124,7 +123,7 @@ pub async fn read_and_deletion_only() {
 	// Phase 4: Delete data to free space and trigger recovery to normal mode
 	// Delete all keys that were successfully written (this frees space below the limit)
 	for j in 0..200 {
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		for i in 0..100 {
 			let key = format!("unlimited_key_{}_{}", i, j);
 			tx.del(key.as_bytes().into()).await.unwrap();
@@ -135,7 +134,7 @@ pub async fn read_and_deletion_only() {
 	// Phase 5: Verify recovery to normal mode
 	// Confirm writes are allowed again after space usage drops below limit
 	{
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write).await.unwrap();
 		tx.put("other_key".as_bytes().into(), "other_value".as_bytes().to_vec()).await.unwrap();
 		tx.commit().await.unwrap();
 	}
@@ -187,7 +186,7 @@ async fn memtable_merge_count_clamp_inner(versioned: bool) {
 	// ran and was applied to whichever CF RocksDB ended up using (the
 	// implicit default for the non-versioned case, or the explicit
 	// `ColumnFamilyDescriptor` for the versioned case).
-	let tx = ds.transaction(Write, Optimistic).await.unwrap();
+	let tx = ds.transaction(Write).await.unwrap();
 	tx.set("clamp_key".as_bytes().into(), "clamp_value".as_bytes().to_vec()).await.unwrap();
 	tokio::time::timeout(std::time::Duration::from_secs(10), tx.commit())
 		.await
@@ -243,7 +242,7 @@ async fn universal_compaction_options_wired() {
 		.expect("universal compaction options should not break the open path");
 
 	// A round-trip write proves the configured CF is healthy.
-	let tx = ds.transaction(Write, Optimistic).await.unwrap();
+	let tx = ds.transaction(Write).await.unwrap();
 	tx.set("universal_key".as_bytes().into(), "universal_value".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 }

@@ -168,11 +168,7 @@ impl Datastore {
 	}
 
 	/// Start a new transaction
-	pub async fn transaction(
-		&self,
-		write: TransactionType,
-		_: bool,
-	) -> Result<Box<dyn Transactable>> {
+	pub async fn transaction(&self, write: TransactionType) -> Result<Box<dyn Transactable>> {
 		// Create a new transaction
 		let mut txn = match write {
 			TransactionType::Write => self.db.begin_with_mode(Mode::ReadWrite),

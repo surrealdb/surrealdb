@@ -457,18 +457,10 @@ impl Datastore {
 	}
 
 	/// Start a new transaction
-	pub async fn transaction(
-		&self,
-		ty: TransactionType,
-		lock: bool,
-	) -> Result<Box<dyn Transactable>> {
+	pub async fn transaction(&self, ty: TransactionType) -> Result<Box<dyn Transactable>> {
 		let cfg = &self.handle.config;
-		// Set whether this should be an optimistic or pessimistic transaction
-		let mut opt = if lock {
-			TransactionOptions::new_pessimistic()
-		} else {
-			TransactionOptions::new_optimistic()
-		};
+		// All transactions are optimistic
+		let mut opt = TransactionOptions::new_optimistic();
 		// Use async commit to determine transaction state earlier
 		if cfg.async_commit {
 			opt = opt.use_async_commit();

@@ -26,7 +26,6 @@ use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 use crate::key::database::all::DatabaseRoot;
 use crate::key::{KVKeyDecode, KVRange, KVValue, lqe};
 use crate::kvs::Datastore;
-use crate::kvs::LockType::Optimistic;
 use crate::lq::event::{LiveEvent, LiveEvents};
 use crate::lq::subscriber::replay_table_live_events;
 use crate::val::TableName;
@@ -106,7 +105,7 @@ pub(crate) async fn process(ds: &Datastore, router: &LiveQueryRouter) -> Result<
 	let Some(broker) = ds.live_query_broker() else {
 		return Ok(());
 	};
-	let txn = Arc::new(ds.transaction(Read, Optimistic).await?);
+	let txn = Arc::new(ds.transaction(Read).await?);
 	let ts_impl = txn.timestamp_impl();
 	// The safe/closed watermark: deliver and advance only up to here.
 	let safe_vs = txn.safe_timestamp().await?.as_versionstamp();

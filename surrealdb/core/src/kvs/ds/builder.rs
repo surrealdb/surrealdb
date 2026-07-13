@@ -323,9 +323,7 @@ impl Builder {
 		// would otherwise discard events captured in the startup window. Inline
 		// mode never runs the router, so it skips this entirely.
 		if datastore.config.live_query_engine == crate::cnf::LiveQueryEngine::Router {
-			let txn = datastore
-				.transaction(crate::kvs::TransactionType::Read, crate::kvs::LockType::Optimistic)
-				.await?;
+			let txn = datastore.transaction(crate::kvs::TransactionType::Read).await?;
 			let baseline = txn.safe_timestamp().await?.as_versionstamp();
 			txn.cancel().await?;
 			datastore.live_query_router.set_baseline(baseline);
@@ -412,7 +410,6 @@ mod tests {
 		fn new_transaction(
 			&self,
 			_write: TransactionType,
-			_lock: bool,
 		) -> BoxFut<'_, crate::kvs::err::Result<(Box<dyn Transactable>, bool)>> {
 			Box::pin(async move { unreachable!("test does not open transactions") })
 		}

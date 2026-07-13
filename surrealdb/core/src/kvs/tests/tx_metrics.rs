@@ -5,7 +5,6 @@ use crate::CommunityComposer;
 use crate::idx::planner::ScanDirection;
 use crate::key::KeyRange;
 use crate::kvs::Datastore;
-use crate::kvs::LockType::*;
 
 #[cfg(feature = "kv-mem")]
 #[tokio::test]
@@ -93,7 +92,7 @@ pub async fn cursor_for_each_metrics_match_next_batch(ds: Datastore) {
 		(b"b".to_vec(), b"v3".to_vec()),
 		(b"c".to_vec(), b"value-four".to_vec()),
 	];
-	let tx = ds.transaction(Write, Optimistic).await.unwrap();
+	let tx = ds.transaction(Write).await.unwrap();
 	for (k, v) in &pairs {
 		tx.set(k.into(), v).await.unwrap();
 	}
@@ -101,7 +100,7 @@ pub async fn cursor_for_each_metrics_match_next_batch(ds: Datastore) {
 	let rng = KeyRange::from(b"a"..b"d");
 
 	// Drain via next_batch and snapshot the transaction's scan metrics.
-	let tx1 = ds.transaction(Read, Optimistic).await.unwrap();
+	let tx1 = ds.transaction(Read).await.unwrap();
 	{
 		let mut c =
 			tx1.open_vals_cursor(rng.as_borrowed(), ScanDirection::Forward, 0, None).await.unwrap();
@@ -116,7 +115,7 @@ pub async fn cursor_for_each_metrics_match_next_batch(ds: Datastore) {
 	tx1.cancel().await.unwrap();
 
 	// Drain via for_each (visitor ignores every row) and snapshot.
-	let tx2 = ds.transaction(Read, Optimistic).await.unwrap();
+	let tx2 = ds.transaction(Read).await.unwrap();
 	{
 		let mut c = tx2.open_vals_cursor(rng, ScanDirection::Forward, 0, None).await.unwrap();
 		loop {

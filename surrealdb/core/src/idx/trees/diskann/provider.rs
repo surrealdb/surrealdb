@@ -948,7 +948,7 @@ mod tests {
 	use super::*;
 	use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableId};
 	use crate::idx::trees::diskann::cache::DiskAnnCache;
-	use crate::kvs::{Datastore, LockType, TransactionType};
+	use crate::kvs::{Datastore, TransactionType};
 
 	fn ikb() -> IndexKeyBase {
 		IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(3))
@@ -956,7 +956,7 @@ mod tests {
 
 	async fn provider_and_context() -> Result<(DiskAnnProvider, DiskAnnProviderContext)> {
 		let ds = Datastore::new("memory").await?;
-		let tx = Arc::new(ds.transaction(TransactionType::Write, LockType::Optimistic).await?);
+		let tx = Arc::new(ds.transaction(TransactionType::Write).await?);
 		let ikb = ikb();
 		let provider =
 			DiskAnnProvider::new(ikb, TableId(4), DiskAnnCache::new(1024 * 1024), 2, Metric::L2);

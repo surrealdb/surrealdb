@@ -9,7 +9,6 @@ use crate::err::Error;
 use crate::expr::statements::access;
 use crate::expr::{Base, Expr};
 use crate::kvs::Datastore;
-use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::types::{PublicRecordId, PublicValue};
 use crate::val::RecordId;
@@ -116,7 +115,7 @@ pub(crate) async fn create_refresh_token_record(
 	let opt = kvs.setup_options(&sess);
 	// Create a new context with a writeable transaction
 	let mut ctx = kvs.setup_ctx()?;
-	let tx = kvs.transaction(Write, Optimistic).await?.enclose();
+	let tx = kvs.transaction(Write).await?.enclose();
 	ctx.set_transaction(Arc::clone(&tx));
 	let ctx = ctx.freeze();
 	// Create a bearer grant to act as the refresh token
@@ -154,7 +153,7 @@ pub async fn revoke_refresh_token_record(
 	let opt = kvs.setup_options(&sess);
 	// Create a new context with a writeable transaction
 	let mut ctx = kvs.setup_ctx()?;
-	let tx = kvs.transaction(Write, Optimistic).await?.enclose();
+	let tx = kvs.transaction(Write).await?.enclose();
 	ctx.set_transaction(Arc::clone(&tx));
 	let ctx = ctx.freeze();
 	// Create a bearer grant to act as the refresh token

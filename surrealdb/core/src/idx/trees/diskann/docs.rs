@@ -169,7 +169,7 @@ impl DiskAnnDocs {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::kvs::{Datastore, LockType, TransactionType};
+	use crate::kvs::{Datastore, TransactionType};
 
 	fn ikb() -> IndexKeyBase {
 		IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(3))
@@ -185,7 +185,7 @@ mod tests {
 		let ikb = ikb();
 		let cache = DiskAnnCache::new(1024 * 1024);
 		{
-			let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
+			let tx = ds.transaction(TransactionType::Write).await?;
 			tx.set_key(
 				&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 1),
 				&RecordIdKey::Number(11),
@@ -199,7 +199,7 @@ mod tests {
 			tx.commit().await?;
 		}
 
-		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Read).await?;
 		let got = DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[1, 2, 3], Some(5))
 			.await?;
 		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(11));
@@ -216,10 +216,10 @@ mod tests {
 		);
 		tx.cancel().await?;
 
-		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
 		tx.del_key(&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 1)).await?;
 		tx.commit().await?;
-		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Read).await?;
 		let missing: Option<RecordIdKey> = tx
 			.get_key(&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 1), None)
 			.await?;
@@ -234,7 +234,7 @@ mod tests {
 	#[tokio::test]
 	async fn diskann_docs_batch_does_not_cache_write_transaction_mappings() -> Result<()> {
 		let ds = Datastore::new("memory").await?;
-		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
 		let ikb = ikb();
 		let cache = DiskAnnCache::new(1024 * 1024);
 		tx.set_key(
@@ -249,7 +249,7 @@ mod tests {
 		assert!(cache.get_doc_id(cache_index(), 9, Some(5)).is_none());
 		tx.cancel().await?;
 
-		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Read).await?;
 		assert_eq!(
 			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[9], Some(5)).await?,
 			vec![None]
@@ -265,7 +265,7 @@ mod tests {
 		let ikb = ikb();
 		let cache = DiskAnnCache::new(1024 * 1024);
 		{
-			let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
+			let tx = ds.transaction(TransactionType::Write).await?;
 			tx.set_key(
 				&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 1),
 				&RecordIdKey::Number(11),
@@ -274,14 +274,14 @@ mod tests {
 			tx.commit().await?;
 		}
 
-		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Read).await?;
 		let got =
 			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[1], Some(5)).await?;
 		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(11));
 		tx.cancel().await?;
 		assert!(cache.get_doc_id(cache_index(), 1, Some(6)).is_none());
 
-		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
 		tx.set_key(
 			&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 1),
 			&RecordIdKey::Number(22),
@@ -289,7 +289,7 @@ mod tests {
 		.await?;
 		tx.commit().await?;
 
-		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Read).await?;
 		let got =
 			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[1], Some(6)).await?;
 		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(22));
@@ -304,20 +304,20 @@ mod tests {
 		let cache = DiskAnnCache::new(1024 * 1024);
 		let id = RecordIdKey::Number(77);
 		{
-			let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
+			let tx = ds.transaction(TransactionType::Write).await?;
 			tx.set_key(&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 7), &id)
 				.await?;
 			tx.commit().await?;
 		}
 
-		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Read).await?;
 		let got =
 			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[7], Some(5)).await?;
 		assert_eq!(&got[0].as_ref().unwrap().key, &id);
 		assert!(cache.get_doc_id(cache_index(), 7, Some(5)).is_some());
 		tx.cancel().await?;
 
-		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
 		let docs = DiskAnnDocs::new(ikb.clone());
 		// `remove` is cache-only now: it evicts the process-local doc-id cache and never
 		// recycles ids (the shared record↔doc-id mapping is deleted centrally at record
@@ -335,7 +335,7 @@ mod tests {
 	#[tokio::test]
 	async fn diskann_vec_docs_populates_and_uses_doc_set_cache() -> Result<()> {
 		let ds = Datastore::new("memory").await?;
-		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
 		let ikb = ikb();
 		let cache = DiskAnnCache::new(1024 * 1024);
 		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), false);
@@ -369,7 +369,7 @@ mod tests {
 	#[tokio::test]
 	async fn diskann_vec_docs_resolves_warmed_element_docs_without_vector_mapping() -> Result<()> {
 		let ds = Datastore::new("memory").await?;
-		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
 		let ikb = ikb();
 		let cache = DiskAnnCache::new(1024 * 1024);
 		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), false);
@@ -410,7 +410,7 @@ mod tests {
 	#[tokio::test]
 	async fn diskann_vec_docs_resolves_element_doc_cache_misses_in_order() -> Result<()> {
 		let ds = Datastore::new("memory").await?;
-		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
 		let ikb = ikb();
 		let cache = DiskAnnCache::new(1024 * 1024);
 		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), false);
@@ -451,7 +451,7 @@ mod tests {
 	#[tokio::test]
 	async fn diskann_vec_docs_caches_hashed_docs_after_disambiguating_vector() -> Result<()> {
 		let ds = Datastore::new("memory").await?;
-		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
 		let ikb = ikb();
 		let cache = DiskAnnCache::new(1024 * 1024);
 		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), true);
@@ -500,7 +500,7 @@ mod tests {
 	#[tokio::test]
 	async fn diskann_vec_docs_resolves_hashed_element_doc_cache_misses() -> Result<()> {
 		let ds = Datastore::new("memory").await?;
-		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
 		let ikb = ikb();
 		let cache = DiskAnnCache::new(1024 * 1024);
 		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), true);
@@ -549,7 +549,7 @@ mod tests {
 	#[tokio::test]
 	async fn diskann_vec_docs_missing_element_doc_candidate_returns_none() -> Result<()> {
 		let ds = Datastore::new("memory").await?;
-		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
 		let ikb = ikb();
 		let cache = DiskAnnCache::new(1024 * 1024);
 		let vec_docs = DiskAnnVecDocs::new(ikb, TableId(4), cache.clone(), false);
