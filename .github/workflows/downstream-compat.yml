@@ -213,6 +213,92 @@ jobs:
         with:
           preset: test
 
+      # The downstream pulls in surrealdb-librocksdb-sys (the rust-rocksdb fork)
+      # with its `cloud`+`aws` cargo features — from the downstream's own
+      # dependency graph, not this engine (this engine's rocksdb is the crates.io
+      # `surrealdb-rocksdb` with only lz4+snappy). Those features compile RocksDB's
+      # cloud glue against the AWS C++ SDK (`#include <aws/core/Aws.h>`), and the
+      # fork's build.rs expects a prebuilt SDK at $AWS_SDK_INSTALL_DIR. The runner
+      # image ships none, so without this the downstream `cargo check` aborts at
+      # the C++ stage (issue #614). Build the same components the fork's
+      # scripts/init_deps.sh does (s3;transfer;core, static) and cache them; the
+      # pinned version makes the artifact immutable, so a cache hit is ~free.
+      - name: Restore cached AWS C++ SDK
+        id: aws-sdk-cache
+        if: steps.preflight.outputs.configured == 'true'
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # (Actions must be pinned by commit hash) v4.2.3
+        with:
+          path: ${{ runner.temp }}/aws-sdk-install
+          key: aws-sdk-cpp-${{ runner.os }}-${{ runner.arch }}-1.11.845-v1
+
+      - name: Provision AWS C++ SDK for the downstream build
+        if: steps.preflight.outputs.configured == 'true'
+        env:
+          # rust-rocksdb's init_deps.sh clones aws-sdk-cpp at HEAD; pin a recent
+          # tag here so the cache key is stable and the build reproducible. Bump
+          # this (and the -vN cache suffix above) if the fork needs a newer SDK.
+          AWS_SDK_VERSION: "1.11.845"
+          AWS_SDK_INSTALL: ${{ runner.temp }}/aws-sdk-install
+        run: |
+          set -euo pipefail
+
+          # Use sudo only when present and not already root (self-hosted runners
+          # vary). Best-effort: if apt/sudo are absent or a package is already
+          # present, proceed and let any genuine gap surface in the build below.
+          SUDO=""
+          if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then SUDO="sudo"; fi
+
+          # Build deps (cmake + a C++ toolchain) and the SDK core's own link deps
+          # (libcurl for HTTP, openssl for crypto, zlib). curl/ssl/crypto are also
+          # what the fork's build.rs links at the `cargo nextest` step, and they
+          # live outside the cached SDK dir — so install them on cache hits too.
+          if command -v apt-get >/dev/null 2>&1; then
+            $SUDO apt-get -qq -y update || true
+            $SUDO apt-get -qq -y install --no-install-recommends \
+              cmake g++ git libcurl4-openssl-dev libssl-dev zlib1g-dev || true
+          fi
+
+          # Reuse the cached build when present (mirrors init_deps.sh's guard;
+          # lib64/ on some distros, lib/ on others).
+          if [ -f "${AWS_SDK_INSTALL}/lib/libaws-cpp-sdk-s3.a" ] || \
+             [ -f "${AWS_SDK_INSTALL}/lib64/libaws-cpp-sdk-s3.a" ]; then
+            echo "AWS C++ SDK ${AWS_SDK_VERSION} restored from cache at ${AWS_SDK_INSTALL}"
+          else
+            echo "Building AWS C++ SDK ${AWS_SDK_VERSION} from source (cache miss)..."
+            src="${RUNNER_TEMP}/aws-sdk-cpp"
+            build="${RUNNER_TEMP}/aws-sdk-build"
+            rm -rf "$src" "$build"
+            git clone --branch "${AWS_SDK_VERSION}" --depth 1 \
+              --recurse-submodules \
+              https://github.com/aws/aws-sdk-cpp.git "$src"
+            # Match the fork's scripts/init_deps.sh: only s3;transfer;core, static.
+            cmake -S "$src" -B "$build" \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_INSTALL_PREFIX="${AWS_SDK_INSTALL}" \
+              -DBUILD_ONLY="s3;transfer;core" \
+              -DBUILD_SHARED_LIBS=OFF \
+              -DENABLE_TESTING=OFF \
+              -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+              -DMINIMIZE_SIZE=ON
+            cmake --build "$build" --parallel "$(nproc)"
+            cmake --install "$build"
+            rm -rf "$src" "$build" # free disk; only the install prefix is cached
+            echo "AWS C++ SDK installed at ${AWS_SDK_INSTALL}"
+          fi
+
+          # Hand the prebuilt SDK to the fork's build.rs for the cargo steps below.
+          echo "AWS_SDK_INSTALL_DIR=${AWS_SDK_INSTALL}" >> "$GITHUB_ENV"
+
+      # Save right after a successful build (inline, not a post-step) so a genuine
+      # downstream compat failure in the cargo steps below never discards the
+      # freshly-built SDK. Skipped on a cache hit.
+      - name: Save AWS C++ SDK to cache
+        if: steps.preflight.outputs.configured == 'true' && steps.aws-sdk-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # (Actions must be pinned by commit hash) v4.2.3
+        with:
+          path: ${{ runner.temp }}/aws-sdk-install
+          key: aws-sdk-cpp-${{ runner.os }}-${{ runner.arch }}-1.11.845-v1
+
       # Redirect the downstream's `surrealdb-server` git dependency to this
       # checkout. Its in-repo deps (surrealdb-core/-types/surrealdb) are workspace
       # path deps, so they follow transitively from the same checkout — only
