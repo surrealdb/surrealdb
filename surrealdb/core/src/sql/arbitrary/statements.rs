@@ -248,7 +248,7 @@ impl<'a> arbitrary::Arbitrary<'a> for DefineAnalyzerStatement {
 
 impl<'a> arbitrary::Arbitrary<'a> for DefineFieldStatement {
 	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-		let field_kind = u.arbitrary()?;
+		let field_kind: Option<Kind> = u.arbitrary()?;
 
 		let flexible = if let Some(kind) = &field_kind
 			&& crate::expr::statements::define::kind_contains_object(&kind.clone().into())

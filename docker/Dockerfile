@@ -47,7 +47,7 @@ RUN apk add --no-cache tzdata
 #
 # Development image (built on the CI environment)
 #
-FROM cgr.dev/chainguard/glibc-dynamic:latest-dev@sha256:9f2379c134b72a7fdd73694db2adec6d524a35b19bc346507e9e4685abeff459 AS dev-ci
+FROM cgr.dev/chainguard/glibc-dynamic:latest-dev@sha256:6d00a134118686aca478cbf82315be37c38fba5e8608f1f1b215f5dad8cfdfd2 AS dev-ci
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -111,7 +111,7 @@ ENTRYPOINT ["/surreal"]
 #
 # Development image (built locally)
 #
-FROM cgr.dev/chainguard/glibc-dynamic:latest-dev@sha256:9f2379c134b72a7fdd73694db2adec6d524a35b19bc346507e9e4685abeff459 AS dev
+FROM cgr.dev/chainguard/glibc-dynamic:latest-dev@sha256:6d00a134118686aca478cbf82315be37c38fba5e8608f1f1b215f5dad8cfdfd2 AS dev
 
 ARG SURREALDB_BINARY=target/release/surreal
 

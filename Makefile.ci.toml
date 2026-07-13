@@ -833,8 +833,11 @@ args = [
     "lcov.info",
     "--locked",
     "--no-default-features",
+    # Mirror the `ci-integration-all` feature set so the integration suites
+    # (cli/http/ws/ml/graphql/gql) run under coverage, plus the coverage-only
+    # allocator features. `cli` is required for the `sql` subcommand.
     "--features",
-    "allocator,allocation-tracking,storage-mem,scripting,http,jwks",
+    "allocator,allocation-tracking,storage-mem,storage-surrealkv,scripting,http,jwks,cli,ml,graphql,gql",
     "--workspace",
     # Exclude surrealism packages due to wasmtime complexity and stdin loops
     "--exclude", "surrealism-runtime",
