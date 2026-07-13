@@ -17,6 +17,7 @@ categories.workspace = true
 affinitypool = { workspace = true }
 chrono = { workspace = true }
 common = { workspace = true }
+surrealdb-cnf = { workspace = true }
 parking_lot = { workspace = true }
 surrealdb-kvs = { workspace = true }
 surrealkv = { workspace = true }

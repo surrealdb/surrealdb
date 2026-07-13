@@ -6717,7 +6717,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
- "surrealdb-common",
  "surrealdb-core",
  "surrealdb-kvs",
  "surrealdb-types",
@@ -6753,6 +6752,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "surrealdb-cnf"
+version = "3.3.0-nightly"
+dependencies = [
+ "num-traits",
+ "path-clean",
+ "surrealdb-common",
+ "tracing",
+]
+
+[[package]]
 name = "surrealdb-collections"
 version = "3.3.0-nightly"
 dependencies = [
@@ -6770,7 +6779,6 @@ dependencies = [
  "parking_lot",
  "sysinfo",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -6825,7 +6833,6 @@ dependencies = [
  "mime",
  "ndarray",
  "ndarray-stats",
- "num-traits",
  "num_cpus",
  "object_store",
  "parking_lot",
@@ -6860,6 +6867,7 @@ dependencies = [
  "stringprep",
  "strsim",
  "subtle",
+ "surrealdb-cnf",
  "surrealdb-collections",
  "surrealdb-common",
  "surrealdb-kvs",
@@ -6899,7 +6907,7 @@ dependencies = [
  "affinitypool",
  "chrono",
  "num_cpus",
- "surrealdb-common",
+ "surrealdb-cnf",
  "thiserror 2.0.18",
  "tracing",
  "web-time",
@@ -6911,7 +6919,7 @@ version = "3.3.0-nightly"
 dependencies = [
  "rand 0.9.4",
  "serial_test",
- "surrealdb-common",
+ "surrealdb-cnf",
  "surrealdb-kvs",
  "surrealdb-kvs-indxdb",
  "surrealdb-kvs-mem",
@@ -6941,7 +6949,7 @@ version = "3.3.0-nightly"
 dependencies = [
  "affinitypool",
  "chrono",
- "surrealdb-common",
+ "surrealdb-cnf",
  "surrealdb-kvs",
  "surrealmx",
  "tokio",
@@ -6957,6 +6965,7 @@ dependencies = [
  "num_cpus",
  "parking_lot",
  "rand 0.9.4",
+ "surrealdb-cnf",
  "surrealdb-common",
  "surrealdb-kvs",
  "surrealdb-rocksdb",
@@ -6973,6 +6982,7 @@ dependencies = [
  "affinitypool",
  "chrono",
  "parking_lot",
+ "surrealdb-cnf",
  "surrealdb-common",
  "surrealdb-kvs",
  "surrealkv",
@@ -6985,7 +6995,7 @@ name = "surrealdb-kvs-tikv"
 version = "3.3.0-nightly"
 dependencies = [
  "chrono",
- "surrealdb-common",
+ "surrealdb-cnf",
  "surrealdb-kvs",
  "surrealdb-tikv-client",
  "tokio",
@@ -7019,6 +7029,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "surrealdb-cnf",
  "surrealdb-core",
  "surrealdb-types",
  "thiserror 2.0.18",
@@ -7142,6 +7153,7 @@ dependencies = [
  "serde_json",
  "serial_test",
  "surrealdb",
+ "surrealdb-cnf",
  "surrealdb-core",
  "surrealdb-mcp",
  "surrealdb-types",

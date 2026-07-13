@@ -88,8 +88,9 @@ pub(crate) async fn replay_table_live_events(
 mod tests {
 	use std::time::Duration;
 
+	use surrealdb_cnf::ConfigMap;
+
 	use crate::channel::Receiver;
-	use crate::cnf::ConfigMap;
 	use crate::dbs::{Capabilities, Session};
 	use crate::kvs::Datastore;
 	use crate::types::{PublicNotification, PublicValue};

@@ -894,10 +894,10 @@ impl BenchStatement {
 /// `|record:N|` ids are identical across runs and independent of benchmark
 /// order. Override with `SURREAL_RAND_SEED` to sanity-check results against a
 /// different, but still fixed, dataset draw; the variable is parsed once by
-/// `surrealdb_core::cnf::RAND_SEED` (which warns on a malformed value).
+/// `surrealdb_cnf::RAND_SEED` (which warns on a malformed value).
 fn dataset_seed() -> u64 {
 	const DEFAULT_DATASET_SEED: u64 = 0x5EED_B0A7;
-	surrealdb_core::cnf::RAND_SEED.unwrap_or(DEFAULT_DATASET_SEED)
+	surrealdb_cnf::RAND_SEED.unwrap_or(DEFAULT_DATASET_SEED)
 }
 
 /// Builds a fresh datastore, reseeds the engine RNG, runs the (effective) import

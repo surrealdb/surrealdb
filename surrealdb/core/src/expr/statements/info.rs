@@ -438,6 +438,19 @@ pub(crate) trait InfoStructure {
 	fn structure(self) -> Value;
 }
 
+impl InfoStructure for surrealdb_cnf::DynamicConfiguration {
+	/// Expose the dynamic configuration as a value for the `INFO` statement.
+	fn structure(self) -> Value {
+		let object = map! {
+			"QUERY_TIMEOUT" => match self.get_query_timeout() {
+				None => Value::None,
+				Some(d) => d.into(),
+			}
+		};
+		Value::Object(Object::from(object))
+	}
+}
+
 fn process<T>(a: &Arc<[T]>) -> Value
 where
 	T: InfoStructure + Clone,

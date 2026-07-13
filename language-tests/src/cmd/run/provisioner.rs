@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::Result;
 use surrealdb_core::channel;
-use surrealdb_core::cnf::ConfigMap;
+use surrealdb_cnf::ConfigMap;
 use surrealdb_core::dbs::Capabilities;
 use surrealdb_core::dbs::capabilities::Targets;
 use surrealdb_core::kvs::Datastore;

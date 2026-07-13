@@ -2,9 +2,9 @@
 //! and behaviour through the `surrealdb-kvs-any` facade (connection-string
 //! paths, config maps, read-and-deletion-only mode).
 
-use common::config::ConfigMap;
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
+use surrealdb_cnf::ConfigMap;
 use surrealdb_kvs::TransactionType::*;
 use temp_dir::TempDir;
 

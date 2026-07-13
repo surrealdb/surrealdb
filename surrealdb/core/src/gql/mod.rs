@@ -35,9 +35,9 @@ pub mod token;
 
 use anyhow::{Result, bail, ensure};
 use reblessive::Stack;
+use surrealdb_cnf::CommonConfig;
 
 pub use self::lower::PreparedGqlQuery;
-use crate::cnf::CommonConfig;
 use crate::dbs::Capabilities;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;

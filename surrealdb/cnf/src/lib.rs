@@ -1,4 +1,23 @@
-pub(crate) mod dynamic;
+//! # Surrealdb Config
+//!
+//! Server-wide configuration constants, environment-variable defaults, and
+//! the [`CommonConfig`] struct used to tune SurrealDB's runtime limits.
+//!
+//! <section class="warning">
+//! <h3>Unstable!</h3>
+//! This crate is <b>SurrealDB internal API</b>. It does not adhere to SemVer and its API is
+//! free to change and break code even between patch versions. If you are looking for a stable
+//! interface to the SurrealDB library please have a look at
+//! <a href="https://crates.io/crates/surrealdb">the Rust SDK</a>.
+//! </section>
+
+#[macro_use]
+extern crate tracing;
+#[macro_use]
+extern crate common;
+
+pub mod config;
+pub mod dynamic;
 
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -6,8 +25,9 @@ use std::sync::LazyLock;
 use std::time::Duration;
 use std::{fmt, fs};
 
-pub use common::config::{Config, ConfigMap};
 use common::str::ParseBytes;
+pub use config::{Config, ConfigMap, format_duration, parse_duration};
+pub use dynamic::DynamicConfiguration;
 use path_clean::PathClean;
 
 /// The publicly visible name of the server
@@ -38,12 +58,8 @@ pub const DEFAULT_SCAN_BATCH_SIZE: usize = 1000;
 /// to its canonical form; entries that fail to canonicalize are dropped with a
 /// warning. `subject` names the allowlist for log messages (e.g. `"file"`).
 /// Enforcement of a resolved path against the allowlist lives in
-/// [`crate::iam::file::check_is_path_allowed`].
-pub(crate) fn extract_allowed_paths(
-	input: &str,
-	canonicalize: bool,
-	subject: &str,
-) -> Vec<PathBuf> {
+/// `surrealdb_core::iam::file::check_is_path_allowed`.
+pub fn extract_allowed_paths(input: &str, canonicalize: bool, subject: &str) -> Vec<PathBuf> {
 	let delimiter = if cfg!(target_os = "windows") {
 		";"
 	} else {
@@ -78,9 +94,9 @@ pub(crate) fn extract_allowed_paths(
 
 /// Selects which live-query execution engine the datastore uses.
 ///
-/// See [`crate::lq`] for the architecture. Defaults to [`LiveQueryEngine::Inline`]
-/// (the historical behaviour) so the new pipeline can be rolled out behind this
-/// flag without changing existing deployments.
+/// See `surrealdb_core::lq` for the architecture. Defaults to
+/// [`LiveQueryEngine::Inline`] (the historical behaviour) so the new pipeline
+/// can be rolled out behind this flag without changing existing deployments.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum LiveQueryEngine {
 	/// Legacy engine: per-subscriber matching, permission checks, and projection
@@ -411,7 +427,7 @@ impl Config for CommonConfig {
 			})
 			.parse_key("live_query_engine", &mut self.live_query_engine)
 			.parse_key_with("live_query_retention", &mut self.live_query_retention, |x| {
-				common::config::parse_duration(x).ok()
+				config::parse_duration(x).ok()
 			});
 	}
 }
@@ -462,7 +478,7 @@ pub static HNSW_BUILD_SEED: LazyLock<Option<u64>> = LazyLock::new(|| {
 });
 
 /// Optional fixed seed for the deterministic data-generation RNG (see
-/// `crate::rnd`).
+/// `surrealdb_core::rnd`).
 ///
 /// Unset (the default) leaves `rand::*` and generated record ids drawing from
 /// the per-thread RNG, exactly as in production. Set `SURREAL_RAND_SEED=<u64>`

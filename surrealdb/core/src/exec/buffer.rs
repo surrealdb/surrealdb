@@ -38,7 +38,7 @@ use crate::expr::FlowResult;
 /// overlap meaningful work. Cooperative prefetch is used instead.
 ///
 /// This matches the default scan batch size used by most operators (see
-/// [`crate::cnf::DEFAULT_SCAN_BATCH_SIZE`]).
+/// [`surrealdb_cnf::DEFAULT_SCAN_BATCH_SIZE`]).
 #[cfg(not(target_family = "wasm"))]
 const SMALL_BOUNDED_THRESHOLD: usize = 1000;
 

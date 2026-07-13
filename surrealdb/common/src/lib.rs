@@ -12,12 +12,13 @@
 
 #[macro_use]
 pub mod ids;
+#[macro_use]
+pub mod mac;
 
 mod error;
 
 pub use error::{Error, ErrorCode, ErrorTrait, TypedError, source as source_error};
 
-pub mod config;
 pub mod future;
 pub mod mem_registry;
 pub mod non_max;

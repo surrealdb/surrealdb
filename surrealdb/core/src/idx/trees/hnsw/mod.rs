@@ -196,7 +196,7 @@ where
 			// A fixed seed (via SURREAL_HNSW_BUILD_SEED) makes graph construction
 			// deterministic so search benchmarks are reproducible across runs;
 			// unset, the RNG is seeded from entropy as before.
-			rng: match *crate::cnf::HNSW_BUILD_SEED {
+			rng: match *surrealdb_cnf::HNSW_BUILD_SEED {
 				Some(seed) => SmallRng::seed_from_u64(seed),
 				None => SmallRng::from_rng(&mut rand::rng()),
 			},

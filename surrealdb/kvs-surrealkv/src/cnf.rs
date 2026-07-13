@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use common::config::{Config, parse_duration};
 use common::sys::TOTAL_SYSTEM_MEMORY;
+use surrealdb_cnf::{Config, parse_duration};
 use surrealdb_kvs::config::SyncMode;
 
 /// Configuration for the SurrealKV storage engine, parsed from query parameters.
@@ -106,7 +106,7 @@ impl Default for SurrealKvConfig {
 }
 
 impl Config for SurrealKvConfig {
-	fn parse(&mut self, map: &common::config::ConfigMap) {
+	fn parse(&mut self, map: &surrealdb_cnf::ConfigMap) {
 		map.parse_key("datastore_versioned", &mut self.versioned)
 			.parse_key_with("datastore_retention", &mut self.retention, |x| parse_duration(x).ok())
 			.parse_key("surrealkv_enable_vlog", &mut self.enable_vlog)
@@ -138,7 +138,7 @@ impl Config for SurrealKvConfig {
 mod test {
 	use std::time::Duration;
 
-	use common::config::ConfigMap;
+	use surrealdb_cnf::ConfigMap;
 	use surrealdb_kvs::config::SyncMode;
 
 	use crate::cnf::SurrealKvConfig;

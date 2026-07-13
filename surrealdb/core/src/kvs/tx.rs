@@ -21,6 +21,7 @@ use std::time::Duration;
 use anyhow::Result;
 use chrono::Utc;
 use futures::future::try_join_all;
+use surrealdb_cnf::CommonConfig;
 use surrealdb_kvs::timestamp::{BoxTimeStamp, BoxTimeStampImpl};
 use tokio::sync::{Mutex, Notify};
 use tokio::time::sleep;
@@ -42,7 +43,6 @@ use crate::catalog::{
 	NamespaceDefinition, NamespaceId, Record, TableDefinition, TableId,
 };
 use crate::cf::Changefeed;
-use crate::cnf::CommonConfig;
 use crate::ctx::Context;
 use crate::dbs::node::Node;
 use crate::doc::CursorRecord;

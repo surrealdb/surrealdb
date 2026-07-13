@@ -536,7 +536,7 @@ mod tests {
 
 	#[cfg(feature = "kv-mem")]
 	use chrono::Utc;
-	use common::config::ConfigMap;
+	use surrealdb_cnf::ConfigMap;
 	use surrealdb_kvs::TransactionBuilder;
 	#[cfg(feature = "kv-rocksdb")]
 	use temp_dir::TempDir;

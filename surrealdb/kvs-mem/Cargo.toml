@@ -16,7 +16,7 @@ categories.workspace = true
 [dependencies]
 affinitypool = { workspace = true }
 chrono = { workspace = true }
-common = { workspace = true }
+surrealdb-cnf = { workspace = true }
 surrealdb-kvs = { workspace = true }
 surrealmx = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }

@@ -4333,6 +4333,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
+name = "surrealdb-cnf"
+version = "3.3.0-nightly"
+dependencies = [
+ "num-traits",
+ "path-clean",
+ "surrealdb-common",
+ "tracing",
+]
+
+[[package]]
 name = "surrealdb-collections"
 version = "3.3.0-nightly"
 dependencies = [
@@ -4348,7 +4358,6 @@ dependencies = [
  "hashbrown 0.16.1",
  "parking_lot",
  "sysinfo",
- "tracing",
 ]
 
 [[package]]
@@ -4397,7 +4406,6 @@ dependencies = [
  "mime",
  "ndarray",
  "ndarray-stats",
- "num-traits",
  "num_cpus",
  "object_store",
  "parking_lot",
@@ -4427,6 +4435,7 @@ dependencies = [
  "stringprep",
  "strsim",
  "subtle",
+ "surrealdb-cnf",
  "surrealdb-collections",
  "surrealdb-common",
  "surrealdb-kvs",
@@ -4457,7 +4466,7 @@ dependencies = [
  "affinitypool",
  "chrono",
  "num_cpus",
- "surrealdb-common",
+ "surrealdb-cnf",
  "thiserror",
  "tracing",
  "web-time",
@@ -4467,6 +4476,7 @@ dependencies = [
 name = "surrealdb-kvs-any"
 version = "3.3.0-nightly"
 dependencies = [
+ "surrealdb-cnf",
  "surrealdb-common",
  "surrealdb-kvs",
  "surrealdb-kvs-mem",
@@ -4483,7 +4493,7 @@ version = "3.3.0-nightly"
 dependencies = [
  "affinitypool",
  "chrono",
- "surrealdb-common",
+ "surrealdb-cnf",
  "surrealdb-kvs",
  "surrealmx",
  "tokio",
@@ -4498,6 +4508,7 @@ dependencies = [
  "futures",
  "num_cpus",
  "parking_lot",
+ "surrealdb-cnf",
  "surrealdb-common",
  "surrealdb-kvs",
  "surrealdb-rocksdb",
@@ -4513,6 +4524,7 @@ dependencies = [
  "affinitypool",
  "chrono",
  "parking_lot",
+ "surrealdb-cnf",
  "surrealdb-common",
  "surrealdb-kvs",
  "surrealkv",
@@ -4525,7 +4537,7 @@ name = "surrealdb-kvs-tikv"
 version = "3.3.0-nightly"
 dependencies = [
  "chrono",
- "surrealdb-common",
+ "surrealdb-cnf",
  "surrealdb-kvs",
  "surrealdb-tikv-client",
  "tokio",
@@ -4722,6 +4734,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "similar",
+ "surrealdb-cnf",
  "surrealdb-core",
  "surrealdb-types",
  "tokio",

@@ -3,10 +3,10 @@ use chrono::{TimeZone, Utc};
 use rand::Rng;
 use rand::distr::{Alphanumeric, SampleString};
 use rand::seq::{IndexedRandom, IteratorRandom};
+use surrealdb_cnf::ID_CHARS;
 use ulid::Ulid;
 
 use super::args::{Any, Args, Arity, FromArg, Optional};
-use crate::cnf::ID_CHARS;
 use crate::err::Error;
 use crate::val::{Datetime, Duration, Number, Uuid, Value};
 

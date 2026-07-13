@@ -1,8 +1,8 @@
 use std::str::FromStr;
 use std::time::Duration;
 
-use common::config::{Config, parse_duration};
 use common::sys::TOTAL_SYSTEM_MEMORY;
+use surrealdb_cnf::{Config, parse_duration};
 use surrealdb_kvs::config::SyncMode;
 
 const KIB: u64 = 1024;
@@ -654,7 +654,7 @@ impl Default for RocksDbConfig {
 }
 
 impl Config for RocksDbConfig {
-	fn parse(&mut self, map: &common::config::ConfigMap) {
+	fn parse(&mut self, map: &surrealdb_cnf::ConfigMap) {
 		map.parse_key_bool("datastore_versioned", &mut self.versioned)
 			.parse_key_with("datastore_retention", &mut self.retention, |x| parse_duration(x).ok())
 			.parse_key("rocksdb_thread_count", &mut self.thread_count)
@@ -767,7 +767,7 @@ impl Config for RocksDbConfig {
 mod test {
 	use std::time::Duration;
 
-	use common::config::ConfigMap;
+	use surrealdb_cnf::ConfigMap;
 	use surrealdb_kvs::config::SyncMode;
 
 	use crate::RocksDbConfig;

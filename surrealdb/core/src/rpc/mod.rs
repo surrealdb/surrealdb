@@ -17,8 +17,7 @@ pub use method::Method;
 pub use protocol::RpcProtocol;
 pub use request::Request;
 pub use response::{DbResponse, DbResult, DbResultStats};
-
-use crate::cnf::PROTECTED_PARAM_NAMES;
+use surrealdb_cnf::PROTECTED_PARAM_NAMES;
 
 pub fn check_protected_param(key: &str) -> Result<(), surrealdb_types::Error> {
 	if PROTECTED_PARAM_NAMES.contains(&key) {

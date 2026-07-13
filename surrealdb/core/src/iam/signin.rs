@@ -7,6 +7,7 @@ use jsonwebtoken::{EncodingKey, Header, encode};
 use md5::Digest;
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
+use surrealdb_cnf::SERVER_NAME;
 use surrealdb_types::ToSql;
 use uuid::Uuid;
 
@@ -21,7 +22,6 @@ use crate::catalog::providers::{
 	AuthorisationProvider, DatabaseProvider, NamespaceProvider, UserProvider,
 };
 use crate::catalog::{DatabaseDefinition, NamespaceDefinition};
-use crate::cnf::SERVER_NAME;
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::expr::access_type;

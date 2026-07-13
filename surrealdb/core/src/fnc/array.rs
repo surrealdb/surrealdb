@@ -5,9 +5,9 @@ use std::ops::Bound;
 use anyhow::Result;
 use rand::seq::SliceRandom;
 use reblessive::tree::Stk;
+use surrealdb_cnf::GENERATION_ALLOCATION_LIMIT;
 
 use super::args::{Optional, Rest};
-use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;

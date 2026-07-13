@@ -3,7 +3,8 @@
 
 use std::collections::HashSet;
 
-use crate::cnf::CommonConfig;
+use surrealdb_cnf::CommonConfig;
+
 use crate::dbs::Capabilities;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;

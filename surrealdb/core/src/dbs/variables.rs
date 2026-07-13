@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 use std::convert::Infallible;
 
+use surrealdb_cnf::PROTECTED_PARAM_NAMES;
 use surrealdb_strand::Strand;
 
-use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::FrozenContext;
 use crate::expr::Param;
 use crate::expr::visit::{Visit, Visitor};

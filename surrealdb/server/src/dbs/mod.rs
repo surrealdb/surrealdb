@@ -7,9 +7,9 @@ use anyhow::Result;
 use clap::Args;
 use rand::Rng;
 use surrealdb::opt::capabilities::Capabilities as SdkCapabilities;
+use surrealdb_cnf::ConfigMap;
 use surrealdb_core::buc::BucketStoreProvider;
 use surrealdb_core::channel::Receiver;
-use surrealdb_core::cnf::ConfigMap;
 use surrealdb_core::kvs::{Datastore, TransactionBuilderFactory};
 use surrealdb_core::observe::ExecutionObserver;
 use surrealdb_types::Notification;
@@ -854,8 +854,7 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 	// Log the specified server capabilities
 	debug!("Server capabilities: {capabilities}");
 
-	let (send, recv) =
-		surrealdb_core::channel::bounded(surrealdb_core::cnf::NOTIFICATIONS_CHANNEL_SIZE);
+	let (send, recv) = surrealdb_core::channel::bounded(surrealdb_cnf::NOTIFICATIONS_CHANNEL_SIZE);
 
 	let config = ConfigMap::from_env();
 	// Parse and setup the desired kv datastore

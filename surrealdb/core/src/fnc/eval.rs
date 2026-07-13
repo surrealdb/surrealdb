@@ -120,7 +120,7 @@ pub(crate) fn prepare(
 	// dialects are normalised to a `LogicalPlan`: SurrealQL parses to a `sql::Ast`
 	// (converted via `From`); GQL lowers directly to a `PreparedGqlQuery`
 	// wrapping a `LogicalPlan`.
-	let config = crate::cnf::CommonConfig::default();
+	let config = surrealdb_cnf::CommonConfig::default();
 	let plan: LogicalPlan = match dialect {
 		Dialect::Surql => crate::syn::parse_with_capabilities(query, caps, &config)
 			.map_err(|e| Error::InvalidFunction {

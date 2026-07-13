@@ -25,9 +25,9 @@ use rand::rngs::StdRng;
 static ACTIVE: AtomicBool = AtomicBool::new(false);
 
 /// The shared seeded RNG. Only locked when [`ACTIVE`] is set. The seed comes from
-/// [`crate::cnf::RAND_SEED`] (read once from `SURREAL_RAND_SEED`); its absence
+/// [`surrealdb_cnf::RAND_SEED`] (read once from `SURREAL_RAND_SEED`); its absence
 /// leaves [`ACTIVE`] unset and this RNG untouched unless [`reseed`] is called.
-static SEEDED: LazyLock<Mutex<StdRng>> = LazyLock::new(|| match *crate::cnf::RAND_SEED {
+static SEEDED: LazyLock<Mutex<StdRng>> = LazyLock::new(|| match *surrealdb_cnf::RAND_SEED {
 	Some(seed) => {
 		ACTIVE.store(true, Ordering::Relaxed);
 		Mutex::new(StdRng::seed_from_u64(seed))

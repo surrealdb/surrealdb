@@ -23,6 +23,8 @@ use bytes::{Bytes, BytesMut};
 use futures::{Future, Stream};
 use rand::Rng;
 use reblessive::TreeStack;
+use surrealdb_cnf::dynamic::DynamicConfiguration;
+use surrealdb_cnf::{CommonConfig, ConfigMap, LiveQueryEngine};
 use surrealdb_kvs::TransactionType;
 use surrealdb_kvs::TransactionType::*;
 use surrealdb_types::{AuthError, Error as TypesError, SurrealValue, object};
@@ -48,8 +50,6 @@ use crate::catalog::providers::{
 	UserProvider,
 };
 use crate::catalog::{ApiDefinition, Index, NodeLiveQuery, SubscriptionDefinition};
-use crate::cnf::dynamic::DynamicConfiguration;
-use crate::cnf::{CommonConfig, ConfigMap, LiveQueryEngine};
 use crate::ctx::{CancelHandle, Context};
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
@@ -5181,7 +5181,7 @@ mod test {
 
 	#[tokio::test]
 	async fn cross_transaction_caching_uuids_updated() -> Result<()> {
-		let (send, _recv) = crate::channel::bounded(crate::cnf::NOTIFICATIONS_CHANNEL_SIZE);
+		let (send, _recv) = crate::channel::bounded(surrealdb_cnf::NOTIFICATIONS_CHANNEL_SIZE);
 		let ds = Datastore::builder()
 			.with_capabilities(Capabilities::all())
 			.with_notify(send)

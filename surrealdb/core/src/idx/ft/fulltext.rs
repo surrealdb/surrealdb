@@ -1214,13 +1214,13 @@ mod tests {
 	use std::time::{Duration, Instant};
 
 	use reblessive::tree::Stk;
+	use surrealdb_cnf::CommonConfig;
 	use test_log::test;
 	use tokio::time::sleep;
 	use uuid::Uuid;
 
 	use super::{FullTextIndex, TermDocument};
 	use crate::catalog::{DatabaseId, FullTextParams, IndexId, NamespaceId};
-	use crate::cnf::CommonConfig;
 	use crate::ctx::{Context, FrozenContext};
 	use crate::dbs::Options;
 	use crate::expr::statements::DefineAnalyzerStatement;

@@ -87,7 +87,7 @@ mod tests {
 			delimiter,
 			dir2.path().to_string_lossy()
 		);
-		let allowlist = crate::cnf::extract_allowed_paths(&combined, true, "file");
+		let allowlist = surrealdb_cnf::extract_allowed_paths(&combined, true, "file");
 
 		// Create a file in the first allowed directory.
 		let allowed_file1 = dir1.path().join("file1.txt");

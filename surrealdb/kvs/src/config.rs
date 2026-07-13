@@ -47,7 +47,7 @@ impl fmt::Display for SyncMode {
 		match self {
 			Self::Never => f.write_str("never"),
 			Self::Every => f.write_str("every"),
-			Self::Interval(d) => f.write_str(&common::config::format_duration(*d)),
+			Self::Interval(d) => f.write_str(&surrealdb_cnf::format_duration(*d)),
 		}
 	}
 }
@@ -62,7 +62,7 @@ impl FromStr for SyncMode {
 		match s.to_lowercase().as_str() {
 			"never" => Ok(SyncMode::Never),
 			"every" => Ok(SyncMode::Every),
-			v => match common::config::parse_duration(v) {
+			v => match surrealdb_cnf::parse_duration(v) {
 				Ok(dur) if dur.as_millis() > 100 => Ok(SyncMode::Interval(dur)),
 				_ => Err(format!(
 					"Invalid sync mode: '{v}'. Expected 'never', 'every', or a duration larger than 100ms (e.g. '1s')"
@@ -129,7 +129,7 @@ impl fmt::Display for SnapshotMode {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			Self::Never => f.write_str("never"),
-			Self::Interval(d) => f.write_str(&common::config::format_duration(*d)),
+			Self::Interval(d) => f.write_str(&surrealdb_cnf::format_duration(*d)),
 		}
 	}
 }
@@ -140,7 +140,7 @@ impl FromStr for SnapshotMode {
 	fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
 		match s.to_lowercase().as_str() {
 			"never" => Ok(SnapshotMode::Never),
-			v => match common::config::parse_duration(v) {
+			v => match surrealdb_cnf::parse_duration(v) {
 				Ok(dur) if dur.as_secs() > 30 => Ok(SnapshotMode::Interval(dur)),
 				_ => Err(format!(
 					"Invalid snapshot mode: '{v}'. Expected 'never', or a duration larger than 30s (e.g. '5m')"

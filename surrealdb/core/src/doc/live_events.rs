@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_cnf::LiveQueryEngine;
 use tokio::sync::OnceCell;
 
 use super::document::Extras;
-use crate::cnf::LiveQueryEngine;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::{Action, CursorDoc, Document, DocumentContext};
@@ -141,11 +141,11 @@ impl Document {
 mod tests {
 	use std::time::Duration;
 
+	use surrealdb_cnf::ConfigMap;
 	use surrealdb_kvs::TransactionType::{Read, Write};
 
 	use crate::catalog::providers::CatalogProvider;
 	use crate::catalog::{DatabaseId, NamespaceId};
-	use crate::cnf::ConfigMap;
 	use crate::dbs::{Capabilities, Session};
 	use crate::key::database::all::DatabaseRoot;
 	use crate::key::{KVRange, KVValue, lqe};

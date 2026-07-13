@@ -1,10 +1,10 @@
 use std::ops::Bound;
 
 use anyhow::{Result, ensure};
+use surrealdb_cnf::{GENERATION_ALLOCATION_LIMIT, STRING_SIMILARITY_LIMIT};
 use surrealdb_types::ToSql;
 
 use super::args::{Any, Cast, Optional};
-use crate::cnf::{GENERATION_ALLOCATION_LIMIT, STRING_SIMILARITY_LIMIT};
 use crate::err::Error;
 use crate::fnc::util::string;
 use crate::val::range::TypedRange;

@@ -20,6 +20,7 @@ transport-io = ["rmcp/transport-io"]
 [dependencies]
 rmcp = { workspace = true, features = ["server", "macros"] }
 surrealdb-core = { workspace = true, features = ["graphql", "gql"] }
+surrealdb-cnf = { workspace = true }
 surrealdb-types = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }

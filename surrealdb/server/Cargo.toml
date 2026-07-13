@@ -82,6 +82,7 @@ surrealdb = { workspace = true, features = [
     "rustls",
 ] }
 surrealdb-core.workspace = true
+surrealdb-cnf.workspace = true
 surrealdb-types.workspace = true
 
 # Crates only used by the root surrealdb crate

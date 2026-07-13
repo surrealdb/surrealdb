@@ -2,9 +2,9 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
+use surrealdb_cnf::CommonConfig;
 
 use crate::catalog;
-use crate::cnf::CommonConfig;
 use crate::err::Error;
 use crate::expr::Base;
 use crate::iam::Auth;

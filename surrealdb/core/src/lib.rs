@@ -22,6 +22,10 @@
 #[macro_use]
 extern crate tracing;
 
+// Re-exported so `use surrealdb_core::lazy_env_parse;` keeps resolving for
+// downstream crates (the macro itself now lives in `surrealdb-common`).
+pub use common::lazy_env_parse;
+
 #[macro_use]
 mod mac;
 
@@ -47,7 +51,9 @@ mod sys;
 
 pub mod api;
 pub mod catalog;
-pub mod cnf;
+// Downstream-compat alias only (enterprise still imports `surrealdb_core::cnf::…`);
+// core-internal code and in-repo crates import `surrealdb_cnf` directly.
+pub use surrealdb_cnf as cnf;
 pub mod ctx;
 pub mod dbs;
 pub mod env;

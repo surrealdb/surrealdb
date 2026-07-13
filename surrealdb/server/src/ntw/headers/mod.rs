@@ -10,7 +10,7 @@ use axum_extra::typed_header::{TypedHeaderRejection, TypedHeaderRejectionReason}
 use http::header::{InvalidHeaderValue, SERVER};
 use http::{HeaderName, HeaderValue};
 use surrealdb::headers::VERSION;
-use surrealdb_core::cnf::SERVER_NAME;
+use surrealdb_cnf::SERVER_NAME;
 use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::cnf::{PKG_NAME, PKG_VERSION};

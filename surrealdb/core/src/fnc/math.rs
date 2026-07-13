@@ -1,9 +1,9 @@
 use core::f64;
 
 use anyhow::{Result, bail, ensure};
+use surrealdb_cnf::GENERATION_ALLOCATION_LIMIT;
 use surrealdb_types::ToSql;
 
-use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::err::Error;
 use crate::fnc::util;
 use crate::fnc::util::math::bottom::Bottom;

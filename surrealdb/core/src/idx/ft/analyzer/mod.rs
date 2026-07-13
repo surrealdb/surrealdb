@@ -180,8 +180,9 @@ impl Analyzer {
 mod tests {
 	use std::sync::Arc;
 
+	use surrealdb_cnf::CommonConfig;
+
 	use super::Analyzer;
-	use crate::cnf::CommonConfig;
 	use crate::ctx::Context;
 	use crate::dbs::Options;
 	use crate::expr::DefineAnalyzerStatement;

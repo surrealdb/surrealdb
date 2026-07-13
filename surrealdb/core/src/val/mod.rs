@@ -1724,7 +1724,7 @@ mod tests {
 		#[case] expected: Json,
 		#[case] expected_deserialized: PublicValue,
 	) {
-		use crate::cnf::CommonConfig;
+		use surrealdb_cnf::CommonConfig;
 
 		let json_value = value.into_json_value();
 		assert_eq!(json_value, expected);

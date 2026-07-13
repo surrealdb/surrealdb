@@ -3,13 +3,13 @@ use std::sync::Arc;
 use anyhow::{Result, bail};
 use chrono::Utc;
 use jsonwebtoken::{Header, encode};
+use surrealdb_cnf::SERVER_NAME;
 use surrealdb_types::ToSql;
 use uuid::Uuid;
 
 use super::access::{authenticate_record, create_refresh_token_record};
 use crate::catalog;
 use crate::catalog::providers::{AuthorisationProvider, DatabaseProvider};
-use crate::cnf::SERVER_NAME;
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::issue::{config, expiration};

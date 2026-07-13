@@ -1,11 +1,11 @@
-use common::config::Config;
+use surrealdb_cnf::Config;
 
 /// Per-datastore TiKV configuration, parsed from the workspace
-/// [`common::config::ConfigMap`] via [`Config::parse`].
+/// [`surrealdb_cnf::ConfigMap`] via [`Config::parse`].
 ///
 /// Sources, in increasing precedence:
 /// - Built-in defaults below.
-/// - `SURREAL_TIKV_*` environment variables (collected by [`common::config::ConfigMap::from_env`],
+/// - `SURREAL_TIKV_*` environment variables (collected by [`surrealdb_cnf::ConfigMap::from_env`],
 ///   which lower-cases the suffix to produce keys like `tikv_gc_lifetime`).
 /// - URL query parameters on the datastore path (prefixed with `datastore_` by the composer; not
 ///   used by any TiKV-specific keys today, so this is currently a no-op for TiKV).
@@ -146,7 +146,7 @@ impl Default for TikvConfig {
 }
 
 impl Config for TikvConfig {
-	fn parse(&mut self, map: &common::config::ConfigMap) {
+	fn parse(&mut self, map: &surrealdb_cnf::ConfigMap) {
 		map.parse_key("tikv_api_version", &mut self.api_version)
 			.parse_key_option("tikv_keyspace", &mut self.keyspace)
 			.parse_key("tikv_request_timeout", &mut self.request_timeout_secs)
@@ -174,7 +174,7 @@ impl Config for TikvConfig {
 
 #[cfg(test)]
 mod test {
-	use common::config::ConfigMap;
+	use surrealdb_cnf::ConfigMap;
 
 	use super::TikvConfig;
 

@@ -11,7 +11,7 @@ use surrealdb::engine::any::{self, connect};
 use surrealdb::method::WithStats;
 use surrealdb::opt::Config;
 use surrealdb::{IndexedResults, Notification, Stats};
-use surrealdb_core::cnf::CommonConfig;
+use surrealdb_cnf::CommonConfig;
 use surrealdb_core::dbs::Capabilities as CoreCapabilities;
 use surrealdb_types::{SurrealValue, ToSql, Value, object};
 

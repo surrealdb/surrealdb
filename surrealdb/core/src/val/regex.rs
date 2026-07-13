@@ -11,9 +11,8 @@ use revision::revisioned;
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_cnf::{REGEX_CACHE_SIZE, REGEX_SIZE_LIMIT};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
-
-use crate::cnf::{REGEX_CACHE_SIZE, REGEX_SIZE_LIMIT};
 
 pub(crate) const REGEX_TOKEN: &str = "$surrealdb::private::Regex";
 

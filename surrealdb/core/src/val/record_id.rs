@@ -5,10 +5,10 @@ use rand::seq::IndexedRandom;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use storekey::{BorrowDecode, Encode};
+use surrealdb_cnf::ID_CHARS;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use ulid::Ulid;
 
-use crate::cnf::ID_CHARS;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;

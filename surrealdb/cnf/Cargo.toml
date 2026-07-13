@@ -1,8 +1,8 @@
 [package]
-name = "surrealdb-kvs-tikv"
+name = "surrealdb-cnf"
 publish = true
 readme = "README.md"
-documentation = "https://docs.rs/surrealdb-kvs-tikv/"
+documentation = "https://docs.rs/surrealdb-cnf/"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
@@ -14,12 +14,10 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-chrono = { workspace = true }
-surrealdb-cnf = { workspace = true }
-surrealdb-kvs = { workspace = true }
-tikv = { workspace = true }
-tokio = { workspace = true, features = ["sync"] }
-tracing = { workspace = true }
+common.workspace = true
+num-traits.workspace = true
+path-clean.workspace = true
+tracing.workspace = true
 
 [lints]
 workspace = true

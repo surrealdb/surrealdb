@@ -6,6 +6,7 @@ members = [
     # SurrealDB crates
     "surrealdb",
     "surrealdb/ast",
+    "surrealdb/cnf",
     "surrealdb/collections",
     "surrealdb/common",
     "surrealdb/core",
@@ -66,6 +67,7 @@ ast = { version = "3.3.0-nightly", package = "surrealdb-ast", path = "surrealdb/
 token = { version = "3.3.0-nightly", package = "surrealdb-token", path = "surrealdb/token" }
 parser = { version = "3.3.0-nightly", package = "surrealdb-parser", path = "surrealdb/parser" }
 common = { version = "3.3.0-nightly", package = "surrealdb-common", path = "surrealdb/common" }
+surrealdb-cnf = { version = "3.3.0-nightly", path = "surrealdb/cnf" }
 surrealdb-kvs = { version = "3.3.0-nightly", path = "surrealdb/kvs" }
 surrealdb-kvs-any = { version = "3.3.0-nightly", path = "surrealdb/kvs-any", default-features = false }
 surrealdb-kvs-indxdb = { version = "3.3.0-nightly", path = "surrealdb/kvs-indxdb" }

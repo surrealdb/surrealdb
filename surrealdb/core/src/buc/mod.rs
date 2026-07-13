@@ -17,13 +17,14 @@ mod controller;
 use anyhow::{Result, bail};
 pub(crate) use controller::BucketController;
 pub use controller::BucketOperation;
+use surrealdb_cnf as cnf;
 
+use crate::CommunityComposer;
 use crate::buc::store::ObjectStore;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::buc::store::file::FileStore;
 use crate::buc::store::memory::MemoryStore;
 use crate::err::Error;
-use crate::{CommunityComposer, cnf};
 
 pub mod manager;
 pub mod store;

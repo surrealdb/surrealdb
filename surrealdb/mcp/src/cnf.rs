@@ -1,7 +1,7 @@
 //! Configuration for the MCP server.
 //!
 //! Mirrors the `Config` / `ConfigMap` pattern used by
-//! [`surrealdb_core::cnf`]: every knob is a regular field on [`McpConfig`]
+//! [`surrealdb_cnf`]: every knob is a regular field on [`McpConfig`]
 //! with a default, and an instance is loaded once from a [`ConfigMap`] at
 //! service-construction time. The loaded `Arc<McpConfig>` is then plumbed
 //! through [`crate::service::McpService`] and [`crate::session::McpSession`]
@@ -18,7 +18,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use surrealdb_core::cnf::{Config, ConfigMap};
+use surrealdb_cnf::{Config, ConfigMap};
 
 /// Default outer timeout, in seconds, for a single MCP `execute` call.
 ///
@@ -237,7 +237,7 @@ fn positive_usize(x: &str) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
-	use surrealdb_core::cnf::ConfigMap;
+	use surrealdb_cnf::ConfigMap;
 
 	use super::*;
 

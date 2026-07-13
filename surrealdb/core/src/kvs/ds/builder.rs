@@ -6,6 +6,8 @@ use std::time::Duration;
 use anyhow::Context as _;
 use anyhow::Result;
 use async_channel::Sender;
+use surrealdb_cnf::dynamic::DynamicConfiguration;
+use surrealdb_cnf::{CommonConfig, ConfigMap};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -13,8 +15,6 @@ use uuid::Uuid;
 use crate::CommunityComposer;
 use crate::buc::BucketStoreProvider;
 use crate::buc::manager::BucketsManager;
-use crate::cnf::dynamic::DynamicConfiguration;
-use crate::cnf::{CommonConfig, ConfigMap};
 use crate::dbs::{Capabilities, MessageBroker};
 use crate::exec::function::FunctionRegistry;
 #[cfg(feature = "http")]
@@ -322,7 +322,7 @@ impl Builder {
 		// strictly after the baseline. A lazy baseline on the first router tick
 		// would otherwise discard events captured in the startup window. Inline
 		// mode never runs the router, so it skips this entirely.
-		if datastore.config.live_query_engine == crate::cnf::LiveQueryEngine::Router {
+		if datastore.config.live_query_engine == surrealdb_cnf::LiveQueryEngine::Router {
 			let txn = datastore.transaction(crate::kvs::TransactionType::Read).await?;
 			let baseline = txn.safe_timestamp().await?.as_versionstamp();
 			txn.cancel().await?;
@@ -340,6 +340,7 @@ mod tests {
 	use std::sync::Arc;
 
 	use anyhow::{Result, bail};
+	use surrealdb_cnf::ConfigMap;
 	use surrealdb_kvs::TransactionType;
 	use tokio_util::sync::CancellationToken;
 
@@ -348,7 +349,6 @@ mod tests {
 	use crate::buc::{
 		BucketStoreProvider, BucketStoreProviderRequirements, Config as BucketConfig,
 	};
-	use crate::cnf::ConfigMap;
 	use crate::kvs::api::BoxFut;
 	use crate::kvs::{
 		Metrics, Transactable, TransactionBuilder, TransactionBuilderFactory,

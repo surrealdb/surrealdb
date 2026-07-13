@@ -9,6 +9,8 @@ use std::time::Duration;
 #[cfg(feature = "surrealism")]
 use anyhow::Context as _;
 use anyhow::{Result, bail};
+use surrealdb_cnf::dynamic::DynamicConfiguration;
+use surrealdb_cnf::{CommonConfig, PROTECTED_PARAM_NAMES};
 use surrealdb_strand::Strand;
 #[cfg(feature = "surrealism")]
 use surrealism_runtime::package::{SurrealismPackage, UnpackOptions};
@@ -25,8 +27,6 @@ use crate::buc::store::ObjectKey;
 use crate::buc::store::ObjectStore;
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider, NamespaceProvider};
 use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
-use crate::cnf::dynamic::DynamicConfiguration;
-use crate::cnf::{CommonConfig, PROTECTED_PARAM_NAMES};
 use crate::ctx::cancel::CancelHandle;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
@@ -1382,12 +1382,12 @@ mod tests {
 	use std::str::FromStr;
 	use std::time::Duration;
 
+	use surrealdb_cnf::CommonConfig;
+	#[cfg(all(feature = "allocation-tracking", feature = "allocator"))]
+	use surrealdb_cnf::MEMORY_THRESHOLD;
 	#[cfg(feature = "http")]
 	use url::Url;
 
-	use crate::cnf::CommonConfig;
-	#[cfg(all(feature = "allocation-tracking", feature = "allocator"))]
-	use crate::cnf::MEMORY_THRESHOLD;
 	use crate::ctx::Context;
 	use crate::ctx::reason::Reason;
 	#[cfg(feature = "http")]

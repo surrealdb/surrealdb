@@ -1774,8 +1774,8 @@ fn idiom_name_to_normal(kind: &str, name: &str) -> String {
 #[cfg(test)]
 mod tests {
 	use regex::Regex;
+	use surrealdb_cnf::CommonConfig;
 
-	use crate::cnf::CommonConfig;
 	use crate::dbs::Capabilities;
 	use crate::sql::{Expr, Function};
 

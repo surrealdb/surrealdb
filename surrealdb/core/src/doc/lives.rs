@@ -8,11 +8,11 @@ use chrono::Utc;
 use futures::future::try_join_all;
 use reblessive::TreeStack;
 use reblessive::tree::Stk;
+use surrealdb_cnf::LiveQueryEngine;
 use tracing::instrument;
 
 use super::IgnoreError;
 use crate::catalog::{Permission, SubscriptionDefinition, SubscriptionFields};
-use crate::cnf::LiveQueryEngine;
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{MessageBroker, Options, RoutedNotification};
 use crate::doc::{Action, CursorDoc, Document};

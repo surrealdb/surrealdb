@@ -59,7 +59,6 @@ targets = []
 # workspace internal dependencies
 surrealdb-core = { workspace = true, default-features = false }
 surrealdb-kvs = { workspace = true }
-common = { workspace = true }
 surrealdb-types = { workspace = true, features = ["convert"] }
 surrealdb-types-derive = { workspace = true, features = ["sdk-path"] }
 

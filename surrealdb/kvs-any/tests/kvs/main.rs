@@ -10,7 +10,7 @@
 
 use std::future::Future;
 
-use common::config::ConfigMap;
+use surrealdb_cnf::ConfigMap;
 use surrealdb_kvs::{Result, Transactable, TransactionBuilder, TransactionType};
 use tokio_util::sync::CancellationToken;
 

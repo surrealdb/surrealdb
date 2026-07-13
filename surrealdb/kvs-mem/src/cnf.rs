@@ -1,4 +1,4 @@
-use common::config::{Config, parse_duration};
+use surrealdb_cnf::{Config, parse_duration};
 use surrealdb_kvs::config::{AolMode, SnapshotMode, SyncMode};
 
 /// Configuration for the in-memory storage engine, parsed from query parameters.
@@ -33,7 +33,7 @@ impl Default for MemoryConfig {
 }
 
 impl Config for MemoryConfig {
-	fn parse(&mut self, map: &common::config::ConfigMap) {
+	fn parse(&mut self, map: &surrealdb_cnf::ConfigMap) {
 		map.parse_key_with("datastore_persist", &mut self.persist_path, |x| {
 			let x = x.trim();
 			if x.is_empty() {
@@ -61,7 +61,7 @@ impl Config for MemoryConfig {
 mod test {
 	use std::time::Duration;
 
-	use common::config::ConfigMap;
+	use surrealdb_cnf::ConfigMap;
 	use surrealdb_kvs::config::{AolMode, SnapshotMode, SyncMode};
 
 	use crate::MemoryConfig;

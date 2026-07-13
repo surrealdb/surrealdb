@@ -4,10 +4,10 @@ use std::str::FromStr as _;
 
 use geo::Point;
 use rust_decimal::Decimal;
+use surrealdb_cnf::GENERATION_ALLOCATION_LIMIT;
 use surrealdb_types::ToSql;
 
 use super::coerce::ElementPosition;
-use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::expr::Kind;
 use crate::expr::kind::{GeometryKind, HasKind, KindLiteral};
 use crate::syn;

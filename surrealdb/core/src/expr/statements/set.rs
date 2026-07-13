@@ -1,8 +1,8 @@
 use reblessive::tree::Stk;
+use surrealdb_cnf::PROTECTED_PARAM_NAMES;
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;

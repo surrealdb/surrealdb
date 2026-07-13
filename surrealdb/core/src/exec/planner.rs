@@ -1372,7 +1372,7 @@ impl<'ctx> Planner<'ctx> {
 		// `SetStatement::compute` and the top-level `Expr::Let` executor arm —
 		// both raise `Error::InvalidParam` at runtime; we error one step
 		// earlier so callers in blocks / FOR bodies see the same rejection.
-		if crate::cnf::PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
+		if surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
 			return Err(Error::InvalidParam {
 				name: name.to_string(),
 			});

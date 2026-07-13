@@ -1378,7 +1378,7 @@ impl DiskAnnIndex {
 		// body is unchanged (only iterated by reference), so results are identical.
 		let mut idx = 0usize;
 		let mut window =
-			(*crate::cnf::DISKANN_FILTER_PREFETCH_MIN_CHUNK).max(state.search.k).max(1);
+			(*surrealdb_cnf::DISKANN_FILTER_PREFETCH_MIN_CHUNK).max(state.search.k).max(1);
 		'windows: while idx < docs.len() {
 			let end = idx.saturating_add(window).min(docs.len());
 			let slice = &docs[idx..end];
@@ -1434,7 +1434,8 @@ impl DiskAnnIndex {
 				}
 			}
 			idx = end;
-			window = window.saturating_mul(2).min(*crate::cnf::DISKANN_FILTER_PREFETCH_MAX_CHUNK);
+			window =
+				window.saturating_mul(2).min(*surrealdb_cnf::DISKANN_FILTER_PREFETCH_MAX_CHUNK);
 		}
 		Ok(())
 	}

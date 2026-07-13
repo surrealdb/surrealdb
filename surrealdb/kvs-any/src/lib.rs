@@ -18,7 +18,7 @@ use std::any::{Any, TypeId};
 use std::fmt::{self, Display};
 use std::sync::Arc;
 
-use common::config::ConfigMap;
+use surrealdb_cnf::ConfigMap;
 use surrealdb_kvs::api::{BoxFut, Transactable};
 use surrealdb_kvs::builder::requirements::TransactionBuilderRequirements;
 use surrealdb_kvs::err::{Error, Result};

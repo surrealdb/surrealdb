@@ -21,7 +21,7 @@ kv-surrealkv = ["dep:surrealdb-kvs-surrealkv"]
 kv-indxdb = ["dep:surrealdb-kvs-indxdb"]
 
 [dependencies]
-common = { workspace = true }
+surrealdb-cnf = { workspace = true }
 surrealdb-kvs = { workspace = true }
 surrealdb-kvs-indxdb = { workspace = true, optional = true }
 surrealdb-kvs-mem = { workspace = true, optional = true }

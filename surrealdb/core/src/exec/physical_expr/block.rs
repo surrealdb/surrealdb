@@ -12,10 +12,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use surrealdb_cnf::PROTECTED_PARAM_NAMES;
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::FrozenContext;
 use crate::dbs::NewPlannerStrategy;
 use crate::doc::CursorDoc;

@@ -3,9 +3,9 @@ use http::Method;
 #[cfg(not(target_family = "wasm"))]
 use reqwest::redirect::{Action, Attempt};
 use reqwest::{Client, RequestBuilder};
+use surrealdb_cnf::CommonConfig;
 use url::Url;
 
-use crate::cnf::CommonConfig;
 use crate::dbs::capabilities::{NetTarget, Targets};
 
 pub struct HttpClient {

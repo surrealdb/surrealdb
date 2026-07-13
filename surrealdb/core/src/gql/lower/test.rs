@@ -1614,7 +1614,8 @@ fn prepared_query_debug_renders_via_match_plan() {
 
 #[test]
 fn parse_with_capabilities_renders_errors_like_surrealql() {
-	use crate::cnf::CommonConfig;
+	use surrealdb_cnf::CommonConfig;
+
 	use crate::dbs::Capabilities;
 	use crate::dbs::capabilities::Targets;
 	let error = crate::gql::parse_with_capabilities(
@@ -1630,7 +1631,8 @@ fn parse_with_capabilities_renders_errors_like_surrealql() {
 
 #[test]
 fn parse_with_capabilities_enforces_the_experimental_gate() {
-	use crate::cnf::CommonConfig;
+	use surrealdb_cnf::CommonConfig;
+
 	use crate::dbs::Capabilities;
 	let error = crate::gql::parse_with_capabilities(
 		"MATCH (n:person) RETURN n",
