@@ -696,6 +696,21 @@ impl FullTextIndex {
 		None
 	}
 
+	/// Returns the merged posting bitmap for the query terms — the set of
+	/// doc-IDs matching the query under the given boolean operator — without
+	/// resolving record IDs or computing scores.
+	///
+	/// This is the branch output for bitmap candidate plans (issue #547):
+	/// the caller composes it with other candidate bitmaps (AND/OR/AND-NOT)
+	/// over the table's shared doc-ID space and defers BM25 scoring to the
+	/// surviving documents. Returns `None` when no document matches.
+	pub(crate) fn merged_postings(qt: &QueryTerms, bo: BooleanOperator) -> Option<RoaringTreemap> {
+		match bo {
+			BooleanOperator::And => Self::intersection_operation(&qt.docs),
+			BooleanOperator::Or => Self::union_operation(&qt.docs),
+		}
+	}
+
 	fn intersection_operation(docs: &[Option<RoaringTreemap>]) -> Option<RoaringTreemap> {
 		// Early return for empty input
 		if docs.is_empty() {

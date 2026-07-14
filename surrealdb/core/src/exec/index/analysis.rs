@@ -6,7 +6,7 @@
 use std::ops::Bound;
 use std::sync::Arc;
 
-use super::access_path::{AccessPath, BTreeAccess, IndexRef, select_access_path};
+use super::access_path::{AccessPath, BTreeAccess, BitmapPlan, IndexRef, select_access_path};
 use crate::catalog::{Index, IndexDefinition};
 use crate::exec::planner::util::try_literal_to_value;
 use crate::expr::operator::{MatchesOperator, NearestNeighbor, PrefixOperator};
@@ -252,6 +252,446 @@ impl<'a> IndexAnalyzer<'a> {
 		}
 
 		best
+	}
+
+	/// Try to build a bitmap fusion plan for an AND-composed WHERE clause
+	/// (issue #547).
+	///
+	/// The plan intersects per-branch candidate bitmaps over the table's
+	/// shared doc-ID space instead of driving from a single index and
+	/// filtering per row. Members of the intersection are:
+	///
+	/// - the standard per-index candidates from [`Self::analyze`] (equality, merged ranges,
+	///   compound prefixes, MATCHES), greedily deduplicated so a branch is only kept when it pins
+	///   at least one column no earlier (higher-scoring) branch already pins;
+	/// - AND-conjuncts that are themselves ORs / `IN [...]` / containment expansions whose every
+	///   branch is independently bitmap-capable ([`BitmapPlan::Or`]);
+	/// - `NOT <predicate>` conjuncts composed via [`BitmapPlan::AndNot`] — only when the subtracted
+	///   bitmap provably equals the predicate's truth set (see [`Self::bitmap_exact_plan`]); an
+	///   inexact subtraction would drop rows the residual filter can never restore.
+	///
+	/// Every b-tree branch requires an index whose entries carry doc-IDs
+	/// ([`IndexDefinition::has_entry_doc_ids`]); full-text branches require
+	/// the current index format. Conjuncts that don't qualify simply stay
+	/// out of the plan — the caller keeps the whole WHERE clause as the
+	/// residual filter, so the bitmap only needs to over-approximate the
+	/// result per omitted conjunct.
+	///
+	/// Returns `None` (caller falls back to the streaming plans) unless the
+	/// plan has at least two positive members, or one positive member plus a
+	/// subtraction. Order/limit/version gating is the caller's
+	/// responsibility; `not_exact_col` reports whether a column's declared
+	/// field kind guarantees scalar values (array values fan out to one
+	/// index entry per element, making b-tree bitmaps over-approximate and
+	/// therefore unusable for subtraction).
+	pub(crate) fn try_bitmap_fusion(
+		&self,
+		cond: Option<&Cond>,
+		candidates: &[IndexCandidate],
+		not_exact_col: &dyn Fn(&Idiom) -> bool,
+	) -> Option<BitmapPlan> {
+		let cond = cond?;
+		// Explicit hints pin the plan (NOINDEX is handled before analysis).
+		if self.with_hints.is_some() {
+			return None;
+		}
+		// A KNN operator must be consumed by its KnnScan (see
+		// `try_and_nested_or_union`); pre-filtered vector search is a
+		// separate follow-up (#548).
+		if Self::expr_contains_knn(&cond.0) {
+			return None;
+		}
+		let mut conjuncts = Vec::new();
+		Self::flatten_and(&cond.0, &mut conjuncts);
+		if conjuncts.len() < 2 {
+			return None;
+		}
+		// A provably-empty candidate empties the whole conjunction; leave
+		// that to the EmptyScan path.
+		if candidates.iter().any(|c| c.empty) {
+			return None;
+		}
+
+		// Positive single-index branches, most selective (by score) first —
+		// the leading AND child anchors the intersection and is drained
+		// without a drained-entry budget.
+		let mut leaves: Vec<&IndexCandidate> =
+			candidates.iter().filter(|c| Self::bitmap_capable_candidate(c)).collect();
+		leaves.sort_by_key(|c| std::cmp::Reverse(c.score()));
+
+		let mut and_children: Vec<BitmapPlan> = Vec::new();
+		let mut covered: Vec<&Idiom> = Vec::new();
+		for c in leaves {
+			let cols = Self::candidate_pinned_columns(c);
+			if cols.is_empty() || cols.iter().all(|col| covered.contains(col)) {
+				// Redundant with an already-selected branch (e.g. a
+				// single-column index shadowed by a selected compound
+				// prefix): another intersection cannot narrow the result.
+				continue;
+			}
+			covered.extend(cols);
+			if let Some(leaf) = Self::bitmap_leaf_from_candidate(c) {
+				and_children.push(leaf);
+			}
+		}
+
+		// OR / IN / containment conjuncts become union members when every
+		// branch is independently bitmap-capable.
+		for conjunct in &conjuncts {
+			let path = match conjunct {
+				Expr::Binary {
+					op: BinaryOperator::Or,
+					..
+				} => self.or_union_from_expr(conjunct, ScanDirection::Forward).map(|(p, _)| p),
+				Expr::Binary {
+					op:
+						BinaryOperator::Inside
+						| BinaryOperator::ContainAll
+						| BinaryOperator::ContainAny
+						| BinaryOperator::AllInside
+						| BinaryOperator::AnyInside,
+					..
+				} => {
+					let single = Cond((*conjunct).clone());
+					self.try_in_expansion(Some(&single), ScanDirection::Forward).or_else(|| {
+						self.try_containment_expansion(Some(&single), ScanDirection::Forward)
+					})
+				}
+				_ => None,
+			};
+			if let Some(path) = path
+				&& let Some(node) = Self::bitmap_plan_from_access_path(&path)
+			{
+				and_children.push(node);
+			}
+		}
+
+		// `NOT <predicate>` conjuncts, folded into one subtraction:
+		// `A AND NOT B AND NOT C` ⇒ `A \ (B ∪ C)`.
+		let mut nots: Vec<BitmapPlan> = Vec::new();
+		for conjunct in &conjuncts {
+			if let Some(inner) = Self::as_negated_expr(conjunct)
+				&& let Some(node) = self.bitmap_exact_plan(inner, not_exact_col)
+			{
+				nots.push(node);
+			}
+		}
+
+		// Worth fusing only with ≥2 positive members, or one positive plus a
+		// subtraction; a single positive member is better served by the
+		// streaming single-index plan, and a subtraction with no positive
+		// anchor would need a table-universe bitmap we don't maintain.
+		if and_children.is_empty() || (and_children.len() < 2 && nots.is_empty()) {
+			return None;
+		}
+
+		let base = if and_children.len() == 1 {
+			and_children.pop().expect("checked non-empty")
+		} else {
+			BitmapPlan::And(and_children)
+		};
+		Some(if nots.is_empty() {
+			base
+		} else {
+			let subtract = if nots.len() == 1 {
+				nots.pop().expect("checked non-empty")
+			} else {
+				BitmapPlan::Or(nots)
+			};
+			BitmapPlan::AndNot {
+				base: Box::new(base),
+				subtract: Box::new(subtract),
+			}
+		})
+	}
+
+	/// Match a negated expression: the `!` prefix operator, or the builtin
+	/// `not()` function — the parsed form of `NOT (...)`. Both negate
+	/// truthiness identically.
+	pub(crate) fn as_negated_expr(expr: &Expr) -> Option<&Expr> {
+		match expr {
+			Expr::Prefix {
+				op: PrefixOperator::Not,
+				expr: inner,
+			} => Some(inner),
+			Expr::FunctionCall(call)
+				if call.arguments.len() == 1
+					&& matches!(
+						&call.receiver,
+						crate::expr::function::Function::Normal(name) if name == "not"
+					) =>
+			{
+				Some(&call.arguments[0])
+			}
+			_ => None,
+		}
+	}
+
+	/// Whether a candidate can produce a bitmap branch: b-tree accesses need
+	/// entry doc-IDs, full-text needs the current format, KNN never
+	/// participates (#548), and a full-range scan (no WHERE selectivity)
+	/// contributes nothing to an intersection.
+	fn bitmap_capable_candidate(c: &IndexCandidate) -> bool {
+		if c.empty {
+			return false;
+		}
+		match &c.access {
+			BTreeAccess::Equality(_)
+			| BTreeAccess::Compound {
+				..
+			} => c.index_ref.definition().has_entry_doc_ids(),
+			BTreeAccess::Range {
+				range,
+			} => {
+				!matches!((&range.start, &range.end), (Bound::Unbounded, Bound::Unbounded))
+					&& c.index_ref.definition().has_entry_doc_ids()
+			}
+			BTreeAccess::FullText {
+				..
+			} => c.index_ref.definition().ensure_current_format().is_ok(),
+			BTreeAccess::Knn {
+				..
+			} => false,
+		}
+	}
+
+	/// The index columns a candidate pins, used to skip branches made
+	/// redundant by an already-selected candidate.
+	fn candidate_pinned_columns(c: &IndexCandidate) -> Vec<&Idiom> {
+		let cols = &c.index_ref.definition().cols;
+		match &c.access {
+			BTreeAccess::Equality(_)
+			| BTreeAccess::Range {
+				..
+			}
+			| BTreeAccess::FullText {
+				..
+			} => cols.first().into_iter().collect(),
+			BTreeAccess::Compound {
+				prefix,
+				range,
+			} => {
+				let n = (prefix.len() + usize::from(range.is_some())).min(cols.len());
+				cols[..n].iter().collect()
+			}
+			BTreeAccess::Knn {
+				..
+			} => Vec::new(),
+		}
+	}
+
+	/// Convert a positive candidate into a bitmap leaf.
+	fn bitmap_leaf_from_candidate(c: &IndexCandidate) -> Option<BitmapPlan> {
+		match &c.access {
+			BTreeAccess::Equality(_)
+			| BTreeAccess::Range {
+				..
+			}
+			| BTreeAccess::Compound {
+				..
+			} => Some(BitmapPlan::BTree {
+				index_ref: c.index_ref.clone(),
+				access: c.access.clone(),
+			}),
+			BTreeAccess::FullText {
+				query,
+				operator,
+			} => Some(BitmapPlan::FullText {
+				index_ref: c.index_ref.clone(),
+				query: query.clone(),
+				operator: operator.clone(),
+			}),
+			BTreeAccess::Knn {
+				..
+			} => None,
+		}
+	}
+
+	/// Convert an OR-union access path into a bitmap union.
+	///
+	/// Returns `None` when any branch is not bitmap-capable — a union
+	/// missing a branch would silently drop rows, so partial conversion is
+	/// never allowed. `EmptyScan` converts to an empty union (a provably
+	/// empty conjunct).
+	fn bitmap_plan_from_access_path(path: &AccessPath) -> Option<BitmapPlan> {
+		match path {
+			AccessPath::BTreeScan {
+				index_ref,
+				access,
+				..
+			} => {
+				if !index_ref.definition().has_entry_doc_ids() {
+					return None;
+				}
+				Some(BitmapPlan::BTree {
+					index_ref: index_ref.clone(),
+					access: access.clone(),
+				})
+			}
+			AccessPath::FullTextSearch {
+				index_ref,
+				query,
+				operator,
+			} => {
+				if index_ref.definition().ensure_current_format().is_err() {
+					return None;
+				}
+				Some(BitmapPlan::FullText {
+					index_ref: index_ref.clone(),
+					query: query.clone(),
+					operator: operator.clone(),
+				})
+			}
+			AccessPath::Union {
+				paths,
+				..
+			} => {
+				let mut children = Vec::with_capacity(paths.len());
+				for p in paths {
+					children.push(Self::bitmap_plan_from_access_path(p)?);
+				}
+				Some(BitmapPlan::Or(children))
+			}
+			AccessPath::EmptyScan => Some(BitmapPlan::Or(Vec::new())),
+			AccessPath::TableScan
+			| AccessPath::KnnSearch {
+				..
+			}
+			| AccessPath::BitmapFusion {
+				..
+			} => None,
+		}
+	}
+
+	/// Build an *exact* bitmap fusion plan for an index-only COUNT
+	/// (issue #547): `SELECT count() FROM t WHERE <fully index-backed AND>
+	/// GROUP ALL` becomes the cardinality of the fused bitmap, with zero
+	/// record fetches.
+	///
+	/// Unlike [`Self::try_bitmap_fusion`] there is no residual filter to
+	/// correct any approximation, so *every* conjunct must be exactly
+	/// represented by its branch bitmap (see [`Self::bitmap_exact_plan`]);
+	/// a single non-qualifying conjunct disqualifies the plan. Single-conjunct
+	/// WHERE clauses are left to the existing single-index key-only count.
+	pub(crate) fn try_bitmap_count_fusion(
+		&self,
+		cond: &Cond,
+		exact_col: &dyn Fn(&Idiom) -> bool,
+	) -> Option<BitmapPlan> {
+		if self.with_hints.is_some() {
+			return None;
+		}
+		if Self::expr_contains_knn(&cond.0) {
+			return None;
+		}
+		let mut conjuncts = Vec::new();
+		Self::flatten_and(&cond.0, &mut conjuncts);
+		if conjuncts.len() < 2 {
+			return None;
+		}
+		let mut positives: Vec<BitmapPlan> = Vec::new();
+		let mut nots: Vec<BitmapPlan> = Vec::new();
+		for conjunct in conjuncts {
+			if let Some(inner) = Self::as_negated_expr(conjunct) {
+				nots.push(self.bitmap_exact_plan(inner, exact_col)?);
+			} else {
+				positives.push(self.bitmap_exact_plan(conjunct, exact_col)?);
+			}
+		}
+		// A subtraction needs a positive base; `NOT`-only clauses would need
+		// a table-universe bitmap that is deliberately not maintained.
+		if positives.is_empty() {
+			return None;
+		}
+		let base = if positives.len() == 1 {
+			positives.pop().expect("checked non-empty")
+		} else {
+			BitmapPlan::And(positives)
+		};
+		Some(if nots.is_empty() {
+			base
+		} else {
+			let subtract = if nots.len() == 1 {
+				nots.pop().expect("checked non-empty")
+			} else {
+				BitmapPlan::Or(nots)
+			};
+			BitmapPlan::AndNot {
+				base: Box::new(base),
+				subtract: Box::new(subtract),
+			}
+		})
+	}
+
+	/// Build a bitmap plan that *exactly* equals a predicate's truth set —
+	/// `bitmap(B) == truth(B)` — as required wherever no residual filter can
+	/// correct an approximation: the subtract side of an AND-NOT (an inexact
+	/// subtraction would drop rows where `NOT B` holds) and every branch of
+	/// an index-only COUNT. That admits:
+	///
+	/// - full-text MATCHES leaves — the posting bitmap *is* the operator's truth set (the MATCHES
+	///   filter path evaluates membership on the same bitmaps);
+	/// - b-tree equality/range/compound leaves whose pinned columns are declared with an array-free
+	///   field kind (`exact_col`) — array values fan out to one index entry per element, which
+	///   would make the bitmap a superset of the predicate's truth set;
+	/// - an OR of such leaves (`B OR C` is exactly `B ∪ C`).
+	///
+	/// Anything else returns `None`.
+	fn bitmap_exact_plan(
+		&self,
+		inner: &Expr,
+		not_exact_col: &dyn Fn(&Idiom) -> bool,
+	) -> Option<BitmapPlan> {
+		// `NOT (B OR C)` — subtract the union when every branch is exact.
+		if let Expr::Binary {
+			op: BinaryOperator::Or,
+			..
+		} = inner
+		{
+			let mut branches = Vec::new();
+			Self::flatten_or(inner, &mut branches);
+			let mut children = Vec::with_capacity(branches.len());
+			for branch in branches {
+				children.push(self.bitmap_exact_plan(branch, not_exact_col)?);
+			}
+			return Some(BitmapPlan::Or(children));
+		}
+
+		// Only a single simple predicate can be subtracted exactly from the
+		// analyzer's output. `NOT (A AND B)` is out: `analyze` may cover the
+		// conjunction only partially (one candidate per index), and a
+		// partially-covering bitmap is a superset of `A AND B` — subtracting
+		// it would drop rows where only one conjunct holds.
+		if matches!(
+			inner,
+			Expr::Binary {
+				op: BinaryOperator::And,
+				..
+			}
+		) {
+			return None;
+		}
+
+		// A single predicate: analyze it in isolation and keep the best
+		// exact candidate.
+		let single = Cond(inner.clone());
+		let candidates = self.analyze(Some(&single), None);
+		candidates
+			.into_iter()
+			.filter(|c| {
+				if !Self::bitmap_capable_candidate(c) {
+					return false;
+				}
+				match &c.access {
+					BTreeAccess::FullText {
+						..
+					} => true,
+					_ => Self::candidate_pinned_columns(c).iter().all(|col| not_exact_col(col)),
+				}
+			})
+			.max_by_key(|c| c.score())
+			.as_ref()
+			.and_then(Self::bitmap_leaf_from_candidate)
 	}
 
 	/// Maximum number of array elements to expand for `field IN [...]`.
@@ -1697,6 +2137,153 @@ mod tests {
 
 	// ------------------------------------------------------------------
 	// 1. Equality / single-column
+	// ------------------------------------------------------------------
+	// 0. Bitmap fusion (issue #547)
+	// ------------------------------------------------------------------
+	mod bitmap_fusion {
+		use super::*;
+		use crate::catalog::BTREE_ENTRY_DOC_IDS_FORMAT_VERSION;
+
+		/// A b-tree index at the doc-ID entry format (bitmap-capable).
+		fn idx_v2(id: u32, name: &str, cols: &[&str]) -> IndexDefinition {
+			let mut def = idx_basic(id, name, cols);
+			def.format_version = BTREE_ENTRY_DOC_IDS_FORMAT_VERSION;
+			def
+		}
+
+		/// Run `try_bitmap_fusion` the way `resolve_access_path` does: analyze
+		/// without ORDER BY, then attempt the fusion. `exact` stands in for
+		/// the field-kind check gating NOT subtraction.
+		fn fuse(az: &IndexAnalyzer<'_>, cond: &Cond, exact: bool) -> Option<BitmapPlan> {
+			let candidates = az.analyze(Some(cond), None);
+			az.try_bitmap_fusion(Some(cond), &candidates, &move |_| exact)
+		}
+
+		#[test]
+		fn two_equality_branches_fuse() {
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_v2(2, "idx_b", &["b"])], None);
+			let cond = parse_cond("a = 1 AND b = 2");
+			let plan = fuse(&az, &cond, false).expect("two capable branches fuse");
+			assert!(matches!(plan, BitmapPlan::And(ref children) if children.len() == 2));
+		}
+
+		#[test]
+		fn pre_doc_id_indexes_do_not_fuse() {
+			// format_version 1 b-tree entries carry no doc-IDs.
+			let az =
+				analyzer(vec![idx_basic(1, "idx_a", &["a"]), idx_basic(2, "idx_b", &["b"])], None);
+			let cond = parse_cond("a = 1 AND b = 2");
+			assert!(fuse(&az, &cond, false).is_none());
+		}
+
+		#[test]
+		fn single_branch_does_not_fuse() {
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"])], None);
+			let cond = parse_cond("a = 1 AND unindexed = 2");
+			assert!(fuse(&az, &cond, false).is_none(), "one branch is a streaming plan");
+		}
+
+		#[test]
+		fn with_hint_pins_the_plan() {
+			let with = With::Index(vec!["idx_a".to_owned()]);
+			let az =
+				analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_v2(2, "idx_b", &["b"])], Some(&with));
+			let cond = parse_cond("a = 1 AND b = 2");
+			assert!(fuse(&az, &cond, false).is_none());
+		}
+
+		#[test]
+		fn conjunctive_not_subtracts_when_exact() {
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_v2(2, "idx_b", &["b"])], None);
+			let cond = parse_cond("a = 1 AND !(b = 2)");
+			let plan = fuse(&az, &cond, true).expect("exact NOT subtracts");
+			assert!(matches!(plan, BitmapPlan::AndNot { .. }));
+			// Without the field-kind exactness guarantee the NOT stays a
+			// residual-only filter, and a single positive branch is not
+			// worth fusing.
+			assert!(fuse(&az, &cond, false).is_none());
+		}
+
+		#[test]
+		fn standalone_not_never_fuses() {
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_v2(2, "idx_b", &["b"])], None);
+			let cond = parse_cond("!(a = 1) AND !(b = 2)");
+			assert!(fuse(&az, &cond, true).is_none(), "a subtraction needs a positive anchor");
+		}
+
+		#[test]
+		fn not_of_conjunction_is_not_subtracted() {
+			// `NOT (b = 2 AND c = 3)` cannot be subtracted from partial
+			// candidates — a partially-covering bitmap over-subtracts.
+			let az = analyzer(
+				vec![
+					idx_v2(1, "idx_a", &["a"]),
+					idx_v2(2, "idx_b", &["b"]),
+					idx_v2(3, "idx_c", &["c"]),
+				],
+				None,
+			);
+			let cond = parse_cond("a = 1 AND !(b = 2 AND c = 3)");
+			assert!(fuse(&az, &cond, true).is_none());
+		}
+
+		#[test]
+		fn or_conjunct_becomes_union_member() {
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_v2(2, "idx_b", &["b"])], None);
+			let cond = parse_cond("a = 1 AND (b = 2 OR b = 3)");
+			let plan = fuse(&az, &cond, false).expect("indexable OR conjunct fuses");
+			let BitmapPlan::And(children) = plan else {
+				panic!("expected And root");
+			};
+			assert!(
+				children
+					.iter()
+					.any(|c| matches!(c, BitmapPlan::Or(branches) if branches.len() == 2))
+			);
+		}
+
+		#[test]
+		fn or_with_unindexed_branch_stays_residual() {
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_v2(2, "idx_b", &["b"])], None);
+			let cond = parse_cond("a = 1 AND (b = 2 OR unindexed = 3)");
+			assert!(fuse(&az, &cond, false).is_none(), "partial OR would drop rows");
+		}
+
+		#[test]
+		fn knn_condition_never_fuses() {
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_v2(2, "idx_b", &["b"])], None);
+			let cond = parse_cond("a = 1 AND b = 2 AND vec <|2|> [1, 2]");
+			assert!(fuse(&az, &cond, false).is_none());
+		}
+
+		#[test]
+		fn redundant_same_column_branch_is_skipped() {
+			// Two indexes with the same leading column: intersecting both is
+			// pointless; the second is skipped so only one branch remains,
+			// which is below the fusion threshold.
+			let az =
+				analyzer(vec![idx_v2(1, "idx_a1", &["a"]), idx_v2(2, "idx_a2", &["a", "b"])], None);
+			let cond = parse_cond("a = 1 AND unindexed = 2");
+			assert!(fuse(&az, &cond, false).is_none());
+		}
+
+		#[test]
+		fn count_fusion_requires_every_conjunct_exact() {
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_v2(2, "idx_b", &["b"])], None);
+			// Fully covered: eligible.
+			let cond = parse_cond("a = 1 AND b = 2");
+			assert!(az.try_bitmap_count_fusion(&cond, &|_| true).is_some());
+			// One conjunct not index-covered: ineligible (no residual filter
+			// exists to repair the count).
+			let cond = parse_cond("a = 1 AND b = 2 AND unindexed = 3");
+			assert!(az.try_bitmap_count_fusion(&cond, &|_| true).is_none());
+			// Array-admitting field kinds are ineligible (entry fan-out
+			// would inflate the count).
+			let cond = parse_cond("a = 1 AND b = 2");
+			assert!(az.try_bitmap_count_fusion(&cond, &|_| false).is_none());
+		}
+	}
+
 	// ------------------------------------------------------------------
 	mod equality {
 		use super::*;

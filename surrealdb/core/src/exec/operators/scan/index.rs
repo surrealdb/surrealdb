@@ -4,7 +4,6 @@
 //! supporting equality lookups, range scans, and union operations.
 
 use std::collections::HashSet;
-use std::ops::Bound;
 use std::sync::Arc;
 
 use surrealdb_types::ToSql;
@@ -132,45 +131,7 @@ impl ExecOperator for IndexScan {
 	}
 
 	fn attrs(&self) -> Vec<(String, String)> {
-		let access_str = match &self.access {
-			BTreeAccess::Equality(v) => format!("= {}", v.to_sql()),
-			BTreeAccess::Range {
-				range,
-			} => {
-				let from_str = match range.start.as_ref() {
-					Bound::Included(x) => format!(">={}", x.to_sql()),
-					Bound::Excluded(x) => format!(">{}", x.to_sql()),
-					Bound::Unbounded => String::new(),
-				};
-				let to_str = match range.end.as_ref() {
-					Bound::Included(x) => format!("<={}", x.to_sql()),
-					Bound::Excluded(x) => format!("<{}", x.to_sql()),
-					Bound::Unbounded => String::new(),
-				};
-				format!("{from_str} {to_str}").trim().to_string()
-			}
-			BTreeAccess::Compound {
-				prefix,
-				range,
-			} => {
-				let prefix_str = prefix.iter().map(|v| v.to_sql()).collect::<Vec<_>>().join(", ");
-				if let Some((op, val)) = range {
-					let val_sql = val.to_sql();
-					format!("[{prefix_str}] {op:?} {val_sql}")
-				} else {
-					format!("[{prefix_str}]")
-				}
-			}
-			// FullText and KNN should use dedicated operators
-			BTreeAccess::FullText {
-				..
-			}
-			| BTreeAccess::Knn {
-				..
-			} => {
-				unreachable!("IndexScan does not support FullText or KNN access")
-			}
-		};
+		let access_str = self.access.describe();
 		let mut attrs = vec![
 			("index".to_string(), self.index_ref.name.to_string()),
 			("access".to_string(), access_str),

@@ -79,11 +79,13 @@ pub use project::{FieldSelection, Project, Projection, SelectProject};
 pub use project_value::ProjectValue;
 pub use recursion::RecursionOp;
 pub use r#return::ReturnPlan;
+pub(crate) use scan::BitmapNode;
 // Scan operators (storage I/O)
 pub use scan::CountScan;
 pub use scan::{
-	DynamicScan, EdgeTableSpec, EmptyScan, FullTextScan, GraphEdgeScan, GraphScanOutput, IndexScan,
-	KnnScan, RecordIdScan, ReferenceScan, ReferenceScanOutput, TableScan, UnionIndexScan,
+	BitmapResolve, DynamicScan, EdgeTableSpec, EmptyScan, FullTextScan, GraphEdgeScan,
+	GraphScanOutput, IndexScan, KnnScan, RecordIdScan, ReferenceScan, ReferenceScanOutput,
+	TableScan, UnionIndexScan,
 };
 pub use sequence::SequencePlan;
 pub use sleep::SleepPlan;

@@ -37,14 +37,16 @@ use super::util::{
 use crate::catalog::Index;
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::err::Error;
-use crate::exec::index::access_path::{AccessPath, BTreeAccess, IndexRef, select_access_path};
+use crate::exec::index::access_path::{
+	AccessPath, BTreeAccess, BitmapPlan, IndexRef, select_access_path,
+};
 use crate::exec::index::analysis::IndexAnalyzer;
 use crate::exec::operators::scan::determine_scan_direction;
 use crate::exec::operators::scan::resolved::{ResolvedTableContext, resolve_table_context};
 use crate::exec::operators::{
-	AnalyzePlan, DynamicScan, ExplainPlan, Fetch, FetchStep, Filter, KnnTopK, KnnVectorSource,
-	Limit, RecordIdScan, SortDirection, SourceExpr, TableScan, Timeout, Union, UnionIndexScan,
-	UnwrapExactlyOne, VersionScope,
+	AnalyzePlan, BitmapNode, BitmapResolve, DynamicScan, ExplainPlan, Fetch, FetchStep, Filter,
+	KnnTopK, KnnVectorSource, Limit, RecordIdScan, SortDirection, SourceExpr, TableScan, Timeout,
+	Union, UnionIndexScan, UnwrapExactlyOne, VersionScope,
 };
 use crate::exec::pre_decode_filter::pre_decode_filter_status_at_plan_time;
 use crate::exec::{ExecOperator, OperatorMetrics};
@@ -739,15 +741,30 @@ impl<'ctx> Planner<'ctx> {
 			&& !matches!(with, Some(crate::expr::with::With::NoIndex))
 			&& !self.cond_touches_restricted_select_field(&what, &cond).await
 		{
-			// Try COUNT index first, then B-tree index for key-only counting.
+			// Try COUNT index first, then B-tree index for key-only counting,
+			// then an exact bitmap fusion (multi-index AND) count.
 			let has_count_idx = self.has_matching_count_index(&what, &cond).await;
 			let btree_access = if !has_count_idx {
 				self.resolve_count_btree_access(&what, &cond, with.as_ref()).await
 			} else {
 				None
 			};
+			// Never planned for versioned queries (a statement-level VERSION
+			// or an enclosing version context): doc-ID mappings and index
+			// entries are not time-travel-aware, so the fused bitmap would
+			// reflect current state rather than the requested version. The
+			// remaining fallback (scan + filter + count) is version-aware.
+			let bitmap_plan = if !has_count_idx
+				&& btree_access.is_none()
+				&& version.is_none()
+				&& self.version.is_none()
+			{
+				self.resolve_count_bitmap_plan(&what, &cond, with.as_ref()).await
+			} else {
+				None
+			};
 
-			if has_count_idx || btree_access.is_some() {
+			if has_count_idx || btree_access.is_some() || bitmap_plan.is_some() {
 				use crate::exec::operators::scan::index_count::IndexCountScan;
 				// `is_indexed_count_eligible` proves that `what` is non-empty
 				// and `cond` is `Some`. Either invariant breaking would be a
@@ -776,7 +793,8 @@ impl<'ctx> Planner<'ctx> {
 						version.clone(),
 						field_names,
 					)
-					.with_btree_access(btree_access),
+					.with_btree_access(btree_access)
+					.with_bitmap_plan(bitmap_plan),
 				);
 				return self.wrap_select_tail(index_count_scan, timeout, version, only, true).await;
 			}
@@ -1443,8 +1461,22 @@ impl<'ctx> Planner<'ctx> {
 				other => other,
 			};
 
-			let resolved =
-				self.resolve_access_path(txn, ns, db, table_name, cond, order, with).await;
+			let resolved = self
+				.resolve_access_path(
+					txn,
+					ns,
+					db,
+					table_name,
+					cond,
+					order,
+					with,
+					scan_limit.is_some(),
+					// A statement-level VERSION or an enclosing version
+					// context both disqualify bitmap fusion: doc-ID mappings
+					// and index entries are not time-travel-aware.
+					version.is_some() || self.version.is_some(),
+				)
+				.await;
 			if let Ok(Some((access_path, direction))) = resolved {
 				let table = table_name.clone();
 				let knn_ctx = self.ctx.get_knn_context().cloned();
@@ -1546,6 +1578,16 @@ impl<'ctx> Planner<'ctx> {
 								&restricted_select,
 							)
 							.await;
+					}
+					AccessPath::BitmapFusion {
+						root,
+					} => {
+						return Self::plan_bitmap_fusion_source(
+							table,
+							root,
+							needed_fields,
+							table_ctx,
+						);
 					}
 					AccessPath::EmptyScan => {
 						return Ok(Self::plan_empty_source());
@@ -1797,6 +1839,32 @@ impl<'ctx> Planner<'ctx> {
 			residual_cond,
 			Some(needed_fields),
 		);
+		if let Some(tc) = table_ctx {
+			scan = scan.with_resolved(tc);
+		}
+		Ok(PlannedSource {
+			operator: Arc::new(scan) as Arc<dyn ExecOperator>,
+			filter_action: FilterAction::UseOriginal,
+			limit_pushed: false,
+			topk_pushdown: None,
+		})
+	}
+
+	/// Build a `BitmapResolve` for [`AccessPath::BitmapFusion`].
+	///
+	/// The whole WHERE clause stays as the residual filter
+	/// (`FilterAction::UseOriginal`, as for KNN scans): the bitmap
+	/// intersection is a candidate pre-filter, and re-evaluating the full
+	/// predicate per surviving row keeps the plan's results identical to the
+	/// streaming plans by construction — including when a range branch is
+	/// dropped at runtime for exceeding its drained-entry budget.
+	fn plan_bitmap_fusion_source(
+		table: crate::val::TableName,
+		root: BitmapPlan,
+		needed_fields: Option<std::collections::HashSet<String>>,
+		table_ctx: Option<ResolvedTableContext>,
+	) -> Result<PlannedSource, Error> {
+		let mut scan = BitmapResolve::new(table, bitmap_plan_to_node(root), needed_fields);
 		if let Some(tc) = table_ctx {
 			scan = scan.with_resolved(tc);
 		}
@@ -2548,10 +2616,51 @@ impl<'ctx> Planner<'ctx> {
 		None
 	}
 
-	/// Resolve the optimal access path for a table at plan time.
+	/// Resolve an exact bitmap fusion plan for an index-only COUNT
+	/// (issue #547): an AND of two or more index-backed predicates whose
+	/// every conjunct is exactly represented by a candidate bitmap. The
+	/// count is then the fused bitmap's cardinality — zero record fetches.
 	///
-	/// Performs index analysis using the WHERE condition and ORDER BY clause.
-	/// Returns `None` if the namespace/database/table cannot be resolved.
+	/// Exactness needs the declared field kinds (array values fan out to one
+	/// index entry per element, which would inflate the count), so the
+	/// table's fields are resolved here; see
+	/// [`IndexAnalyzer::try_bitmap_count_fusion`] for the structural rules.
+	async fn resolve_count_bitmap_plan(
+		&self,
+		what: &[Expr],
+		cond: &Option<Cond>,
+		with: Option<&With>,
+	) -> Option<Arc<BitmapNode>> {
+		let txn = self.txn.as_ref()?;
+		let table_name = match what.first() {
+			Some(Expr::Table(t)) => t,
+			_ => return None,
+		};
+		let cond = cond.as_ref()?;
+
+		let (ns_id, db_id) = self.ns_db_ids().await?;
+		let indexes = txn.all_tb_indexes(ns_id, db_id, table_name, None).await.ok()?;
+		// Bitmap count drains index data directly, so restrict candidates to
+		// durable-online indexes.
+		let indexes = filter_online_indexes(txn, ns_id, db_id, indexes).await.ok()?;
+		if indexes.len() < 2 {
+			return None;
+		}
+
+		let fields = txn.all_tb_fields(ns_id, db_id, table_name, None).await.ok()?;
+		let exact_col = |col: &Idiom| -> bool {
+			fields
+				.iter()
+				.find(|fd| &fd.name == col)
+				.and_then(|fd| fd.field_kind.as_ref())
+				.is_some_and(field_kind_excludes_arrays)
+		};
+
+		let analyzer = IndexAnalyzer::new(indexes, with);
+		let root = analyzer.try_bitmap_count_fusion(cond, &exact_col)?;
+		Some(bitmap_plan_to_node(root))
+	}
+
 	/// Resolve the optimal access path for a table at plan time.
 	///
 	/// Performs index analysis using the WHERE condition and ORDER BY clause.
@@ -2567,6 +2676,8 @@ impl<'ctx> Planner<'ctx> {
 		cond: Option<&Cond>,
 		order: Option<&OrderClause>,
 		with: Option<&With>,
+		has_limit: bool,
+		has_version: bool,
 	) -> Result<Option<(AccessPath, ScanDirection)>, Error> {
 		let direction = determine_scan_direction(order);
 
@@ -2626,6 +2737,41 @@ impl<'ctx> Planner<'ctx> {
 
 		let analyzer = IndexAnalyzer::new(indexes, with);
 		let candidates = analyzer.analyze(analysis_cond, order);
+
+		// Bitmap candidate fusion (issue #547): when the WHERE clause is an
+		// AND of several index-backed predicates, intersect per-branch
+		// candidate bitmaps over the table's shared doc-ID space instead of
+		// driving from one index and filtering the rest per row. Chosen
+		// conservatively — the streaming plans keep every case where they
+		// have a structural advantage:
+		// - an index covers ORDER BY → keep sort elimination / sorted-merge early termination;
+		// - LIMIT without ORDER BY → any streaming plan terminates early, a bitmap plan
+		//   materializes every branch first;
+		// - VERSION queries → doc-ID mappings are not time-travel-aware.
+		let order_covered = candidates.iter().any(|c| c.covers_order);
+		if with.is_none()
+			&& !has_version
+			&& !order_covered
+			&& (order.is_some() || !has_limit)
+			&& let Some(root) = self
+				.try_bitmap_fusion_plan(
+					txn,
+					ns_def.namespace_id,
+					db_def.database_id,
+					table_name,
+					&analyzer,
+					analysis_cond,
+					&candidates,
+				)
+				.await
+		{
+			return Ok(Some((
+				AccessPath::BitmapFusion {
+					root,
+				},
+				direction,
+			)));
+		}
 
 		if candidates.is_empty() {
 			if let Some(path) = analyzer.try_or_union(analysis_cond, direction) {
@@ -2720,6 +2866,134 @@ impl<'ctx> Planner<'ctx> {
 		}
 
 		Ok(Some((path, direction)))
+	}
+
+	/// Attempt to build the bitmap fusion plan for `resolve_access_path`.
+	///
+	/// Resolves the table's declared field kinds so `NOT` subtraction can be
+	/// restricted to columns that provably never hold arrays (see
+	/// [`IndexAnalyzer::bitmap_exact_plan`]); the structural work is delegated
+	/// to [`IndexAnalyzer::try_bitmap_fusion`]. Any catalog error simply
+	/// disables the fusion — this is an optimization, never a correctness
+	/// gate.
+	#[allow(clippy::too_many_arguments)]
+	async fn try_bitmap_fusion_plan(
+		&self,
+		txn: &Transaction,
+		ns_id: crate::catalog::NamespaceId,
+		db_id: crate::catalog::DatabaseId,
+		table_name: &TableName,
+		analyzer: &IndexAnalyzer<'_>,
+		cond: Option<&Cond>,
+		candidates: &[crate::exec::index::analysis::IndexCandidate],
+	) -> Option<BitmapPlan> {
+		// Cheap structural pre-check before touching the catalog: fusion
+		// needs a conjunction and at least one NOT for the field-kind lookup
+		// to matter — but `try_bitmap_fusion` re-checks everything, so only
+		// skip the obviously-impossible case here.
+		let cond = cond?;
+		if !matches!(
+			cond.0,
+			Expr::Binary {
+				op: crate::expr::BinaryOperator::And,
+				..
+			}
+		) {
+			return None;
+		}
+		// Field kinds gate NOT subtraction exactness. Fetch lazily: only
+		// when the WHERE clause actually contains a negated conjunct.
+		let has_not = {
+			let mut found = false;
+			let mut stack = vec![&cond.0];
+			while let Some(e) = stack.pop() {
+				match e {
+					Expr::Binary {
+						left,
+						op: crate::expr::BinaryOperator::And,
+						right,
+					} => {
+						stack.push(left);
+						stack.push(right);
+					}
+					e if IndexAnalyzer::as_negated_expr(e).is_some() => {
+						found = true;
+						break;
+					}
+					_ => {}
+				}
+			}
+			found
+		};
+		let fields = if has_not {
+			txn.all_tb_fields(ns_id, db_id, table_name, None).await.ok()
+		} else {
+			None
+		};
+		let not_exact_col = |col: &Idiom| -> bool {
+			let Some(fields) = &fields else {
+				return false;
+			};
+			fields
+				.iter()
+				.find(|fd| &fd.name == col)
+				.and_then(|fd| fd.field_kind.as_ref())
+				.is_some_and(field_kind_excludes_arrays)
+		};
+		analyzer.try_bitmap_fusion(Some(cond), candidates, &not_exact_col)
+	}
+}
+
+/// Convert a plan-level [`BitmapPlan`] tree into the executable
+/// [`BitmapNode`] operator tree.
+fn bitmap_plan_to_node(plan: BitmapPlan) -> Arc<BitmapNode> {
+	match plan {
+		BitmapPlan::BTree {
+			index_ref,
+			access,
+		} => BitmapNode::btree(index_ref, access),
+		BitmapPlan::FullText {
+			index_ref,
+			query,
+			operator,
+		} => BitmapNode::fulltext(index_ref, query, operator),
+		BitmapPlan::And(children) => {
+			BitmapNode::and(children.into_iter().map(bitmap_plan_to_node).collect())
+		}
+		BitmapPlan::Or(children) => {
+			BitmapNode::or(children.into_iter().map(bitmap_plan_to_node).collect())
+		}
+		BitmapPlan::AndNot {
+			base,
+			subtract,
+		} => BitmapNode::and_not(bitmap_plan_to_node(*base), bitmap_plan_to_node(*subtract)),
+	}
+}
+
+/// Whether a declared field kind guarantees the stored value is never an
+/// array (or set). Array values fan out to one b-tree index entry per
+/// element, so a column admitting arrays cannot back an *exact* bitmap —
+/// required for `NOT` subtraction in bitmap fusion plans. Conservative: any
+/// kind not on the allowlist (including `any`, objects, literals and
+/// geometry) reports `false`.
+fn field_kind_excludes_arrays(kind: &crate::expr::Kind) -> bool {
+	use crate::expr::Kind;
+	match kind {
+		Kind::None
+		| Kind::Null
+		| Kind::Bool
+		| Kind::Bytes
+		| Kind::Datetime
+		| Kind::Decimal
+		| Kind::Duration
+		| Kind::Float
+		| Kind::Int
+		| Kind::Number
+		| Kind::String
+		| Kind::Uuid
+		| Kind::Record(_) => true,
+		Kind::Either(kinds) => kinds.iter().all(field_kind_excludes_arrays),
+		_ => false,
 	}
 }
 

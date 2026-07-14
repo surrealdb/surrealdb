@@ -126,6 +126,13 @@ impl OperatorMetrics {
 		self.skipped_rows.fetch_add(n, Ordering::Relaxed);
 	}
 
+	/// Record `n` output rows directly, for operators that produce their
+	/// result outside a monitored stream (the bitmap candidate nodes, whose
+	/// "rows" are candidate doc-IDs computed during the parent's execution).
+	pub(crate) fn add_output_rows(&self, n: u64) {
+		self.output_rows.fetch_add(n, Ordering::Relaxed);
+	}
+
 	/// Total graph adjacency-key entries scanned so far.
 	pub(crate) fn edges_scanned(&self) -> u64 {
 		self.edges_scanned.load(Ordering::Relaxed)

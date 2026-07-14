@@ -884,11 +884,15 @@ fn create_index_operator(
 		}
 		// Provably empty: emit a single EmptyScan operator.
 		AccessPath::EmptyScan => Arc::new(super::EmptyScan::new()),
-		// TableScan and nested Union should not appear as sub-paths.
-		// Fall back to a table scan operator which will produce all
-		// records (safe but sub-optimal).
+		// TableScan, nested Union and BitmapFusion should not appear as
+		// sub-paths (bitmap fusion is a plan-time-only path; the runtime
+		// analyzer never emits it). Fall back to a table scan operator
+		// which will produce all records (safe but sub-optimal).
 		AccessPath::TableScan
 		| AccessPath::Union {
+			..
+		}
+		| AccessPath::BitmapFusion {
 			..
 		} => Arc::new(super::TableScan::new(
 			cfg.table_name.clone(),

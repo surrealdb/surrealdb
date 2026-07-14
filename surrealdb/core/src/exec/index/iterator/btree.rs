@@ -58,12 +58,15 @@ use crate::val::{Array, RecordId, Value};
 /// per-batch memory usage.  Range iterators request exactly this many
 /// entries; unique-index iterators request `INDEX_BATCH_SIZE + 1` so
 /// they can detect exhaustion in a single round-trip.
-const INDEX_BATCH_SIZE: u32 = 1000;
+pub(crate) const INDEX_BATCH_SIZE: u32 = 1000;
 
 /// Decode a batch of KV pairs into [`RecordId`]s.
 ///
-/// The key is ignored; only the value (a revision-encoded `RecordId`) is
-/// deserialized.  Used by iterators that do not need per-key filtering.
+/// The key is ignored; only the value is deserialized: a revision-encoded
+/// `RecordId`, optionally followed by an appended doc-ID which
+/// `revision::from_slice` ignores (see
+/// [`crate::key::index::IndexEntryValue`]).  Used by iterators that do not
+/// need per-key filtering.
 fn decode_record_ids(res: Vec<(Vec<u8>, Val)>) -> Result<Vec<RecordId>> {
 	let mut records = Vec::with_capacity(res.len());
 	for (_, val) in res {
@@ -71,6 +74,34 @@ fn decode_record_ids(res: Vec<(Vec<u8>, Val)>) -> Result<Vec<RecordId>> {
 		records.push(rid);
 	}
 	Ok(records)
+}
+
+/// Decode a batch of KV pairs into entry doc-IDs for bitmap candidate plans.
+///
+/// Doc-IDs found in the entry values are inserted into `docs`. Entries whose
+/// value predates the doc-ID format (see
+/// [`crate::key::index::IndexEntryValue`]) are pushed onto `missing` so the
+/// caller can resolve their doc-ID through the table's shared `!di` mapping.
+/// Returns the number of entries decoded.
+pub(crate) fn decode_entry_doc_ids(
+	res: Vec<(Vec<u8>, Val)>,
+	docs: &mut roaring::RoaringTreemap,
+	missing: &mut Vec<RecordId>,
+) -> Result<usize> {
+	use crate::key::KVValue;
+	use crate::key::index::IndexEntryValue;
+
+	let count = res.len();
+	for (_, val) in res {
+		let entry = IndexEntryValue::kv_decode_value(&val, ())?;
+		match entry.doc_id {
+			Some(doc_id) => {
+				docs.insert(doc_id);
+			}
+			None => missing.push(entry.rid),
+		}
+	}
+	Ok(count)
 }
 
 /// Iterator for equality lookups on non-unique (`Idx`) indexes.
@@ -815,6 +846,52 @@ impl CompoundRangeBackwardIterator {
 
 		decode_record_ids(res)
 	}
+}
+
+/// Compute the KV range covering a B-tree access shape, for consumers that
+/// drain raw entries directly (bitmap candidate scans).
+///
+/// Reuses the same range construction as the streaming iterators above, so a
+/// drain sees exactly the entries the equivalent streaming scan would.
+/// `FullText`/`Knn` access shapes are not B-tree scans and return an error.
+pub(crate) fn bitmap_scan_range(
+	ns: NamespaceId,
+	db: DatabaseId,
+	ix: &IndexDefinition,
+	access: &crate::exec::index::access_path::BTreeAccess,
+) -> Result<KeyRange<'static>> {
+	use crate::exec::index::access_path::BTreeAccess;
+	let unique = matches!(ix.index, crate::catalog::Index::Uniq);
+	Ok(match access {
+		BTreeAccess::Equality(v) => {
+			if unique {
+				UniqueEqualIterator::new(ns, db, ix, v)?.range
+			} else {
+				IndexEqualIterator::new(ns, db, ix, v)?.range
+			}
+		}
+		BTreeAccess::Range {
+			range,
+		} => {
+			if unique {
+				compute_unique_range(ns, db, ix, range.start.as_ref(), range.end.as_ref())?
+			} else {
+				compute_index_range(ns, db, ix, range.start.as_ref(), range.end.as_ref())?
+			}
+		}
+		BTreeAccess::Compound {
+			prefix,
+			range,
+		} => compute_compound_key_range(ns, db, ix, prefix, range.as_ref())?,
+		BTreeAccess::FullText {
+			..
+		}
+		| BTreeAccess::Knn {
+			..
+		} => {
+			return Err(anyhow::anyhow!("Access shape is not a B-tree scan and has no key range"));
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------

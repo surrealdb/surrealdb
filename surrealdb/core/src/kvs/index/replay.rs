@@ -908,7 +908,7 @@ impl Building {
 		// `other_doc_id_index_building` below).
 		let reclaim_doc_id = appending.new_values.is_none()
 			&& appending.old_values.is_some()
-			&& matches!(self.ix.index, Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_));
+			&& self.ix.uses_doc_ids();
 		let rid = RecordId {
 			table: self.ikb.table().clone(),
 			key: rid_key.clone(),
@@ -984,9 +984,7 @@ impl Building {
 		let indexes =
 			tx.all_tb_indexes(self.ix_key.ns, self.ix_key.db, self.ikb.table(), None).await?;
 		for other in indexes.iter() {
-			if other.index_id == self.ix.index_id
-				|| !matches!(other.index, Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_))
-			{
+			if other.index_id == self.ix.index_id || !other.uses_doc_ids() {
 				continue;
 			}
 			let other_ikb = IndexKeyBase::new(
@@ -1052,7 +1050,7 @@ impl Building {
 	pub(super) async fn reclaim_deferred_doc_ids(&self) -> Result<()> {
 		// Only doc-ID-consuming index builds sweep; other index kinds never
 		// defer and skip the range probe entirely.
-		if !matches!(self.ix.index, Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_)) {
+		if !self.ix.uses_doc_ids() {
 			return Ok(());
 		}
 		let docs = TableDocIds::new(self.ix_key.ns, self.ix_key.db, self.ikb.table().clone());

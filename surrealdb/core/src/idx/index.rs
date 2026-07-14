@@ -31,6 +31,7 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Cond, Part};
 use crate::idx::IndexKeyBase;
+use crate::idx::docids::{DocId, TableDocIds};
 use crate::idx::ft::fulltext::{FullTextCompactionPlan, FullTextIndex};
 use crate::idx::planner::iterators::{IndexCountCompactionPlan, IndexCountThingIterator};
 #[cfg(diskann)]
@@ -39,6 +40,7 @@ use crate::idx::trees::hnsw::index::{HnswCompactionPlan, HnswIndex};
 use crate::idx::trees::store::IndexStores;
 use crate::key;
 use crate::key::database::all::DatabaseRoot;
+use crate::key::index::IndexEntryValue;
 use crate::key::index::iu::IndexCountKey;
 use crate::kvs::Transaction;
 use crate::val::{Array, RecordId, Value};
@@ -165,8 +167,63 @@ impl<'a> IndexOperation<'a> {
 		}
 	}
 
+	/// The value stored in this index's entries: the record ID, plus the
+	/// record's table-level doc-ID when the index format carries it (see
+	/// [`IndexDefinition::has_entry_doc_ids`]). The doc-ID is resolved — or
+	/// assigned on first use — through the table's shared doc-ID space, so all
+	/// of a table's indexes agree on the record's doc-ID.
+	async fn entry_value(&self) -> Result<IndexEntryValue> {
+		let doc_id: Option<DocId> = if self.ix.has_entry_doc_ids() {
+			let doc_ids = TableDocIds::new(self.ns, self.db, self.ix.table_name.clone());
+			Some(doc_ids.resolve_or_assign(self.ctx, &self.rid.key).await?)
+		} else {
+			None
+		};
+		Ok(IndexEntryValue {
+			rid: self.rid.clone(),
+			doc_id,
+		})
+	}
+
+	/// Delete an index entry with a guarded (compare) delete, tolerating an
+	/// absent or foreign entry.
+	///
+	/// When the expected value carries a doc-ID and the guarded delete misses,
+	/// the delete is retried against the bare record-ID encoding: an entry may
+	/// predate the index's doc-ID format (e.g. written by an older binary
+	/// during a rolling upgrade) and must still be removable.
+	async fn del_entry<K>(txn: &Transaction, key: &K, expected: &IndexEntryValue) -> Result<()>
+	where
+		K: key::KVKey<Value = IndexEntryValue> + std::fmt::Debug,
+	{
+		fn is_condition_not_met(e: &anyhow::Error) -> bool {
+			matches!(
+				e.downcast_ref::<Error>(),
+				Some(Error::Kvs(crate::kvs::Error::TransactionConditionNotMet))
+			)
+		}
+		match txn.del_compare_key(key, Some(expected)).await {
+			Err(e) if is_condition_not_met(&e) => {
+				if expected.doc_id.is_some() {
+					let bare = IndexEntryValue {
+						rid: expected.rid.clone(),
+						doc_id: None,
+					};
+					match txn.del_compare_key(key, Some(&bare)).await {
+						Err(e) if is_condition_not_met(&e) => Ok(()),
+						other => other,
+					}
+				} else {
+					Ok(())
+				}
+			}
+			other => other,
+		}
+	}
+
 	async fn index_unique(&mut self) -> Result<()> {
 		let txn = self.ctx.tx();
+		let value = self.entry_value().await?;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
@@ -175,26 +232,10 @@ impl<'a> IndexOperation<'a> {
 					// NONE/NULL tuples use the non-unique key format (with
 					// record ID suffix) so multiple such entries can coexist.
 					let key = self.get_non_unique_index_key(&o);
-					match txn.del_compare_key(&key, Some(self.rid)).await {
-						Err(e)
-							if matches!(
-								e.downcast_ref::<Error>(),
-								Some(Error::Kvs(crate::kvs::Error::TransactionConditionNotMet))
-							) => {}
-						Err(e) => return Err(e),
-						Ok(()) => {}
-					}
+					Self::del_entry(&txn, &key, &value).await?;
 				} else {
 					let key = self.get_unique_index_key(&o);
-					match txn.del_compare_key(&key, Some(self.rid)).await {
-						Err(e)
-							if matches!(
-								e.downcast_ref::<Error>(),
-								Some(Error::Kvs(crate::kvs::Error::TransactionConditionNotMet))
-							) => {}
-						Err(e) => return Err(e),
-						Ok(()) => {}
-					}
+					Self::del_entry(&txn, &key, &value).await?;
 				}
 			}
 		}
@@ -207,14 +248,14 @@ impl<'a> IndexOperation<'a> {
 					// format so they remain visible to index scans. No
 					// uniqueness check — NULL != NULL per SQL convention.
 					let key = self.get_non_unique_index_key(&n);
-					txn.set_key(&key, self.rid).await?;
+					txn.set_key(&key, &value).await?;
 				} else {
 					let key = self.get_unique_index_key(&n);
-					if txn.put_compare_key(&key, self.rid, None).await.is_err() {
+					if txn.put_compare_key(&key, &value, None).await.is_err() {
 						let key = self.get_unique_index_key(&n);
-						let rid: RecordId =
+						let entry: IndexEntryValue =
 							txn.get_key(&key, None).await?.expect("record should exist");
-						return self.err_index_exists(rid, n);
+						return self.err_index_exists(entry.rid, n);
 					}
 				}
 			}
@@ -225,24 +266,13 @@ impl<'a> IndexOperation<'a> {
 	async fn index_non_unique(&mut self) -> Result<()> {
 		// Lock the transaction
 		let txn = self.ctx.tx();
+		let value = self.entry_value().await?;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
 			for o in i {
 				let key = self.get_non_unique_index_key(&o);
-				match txn.del_compare_key(&key, Some(self.rid)).await {
-					Err(e) => {
-						if matches!(
-							e.downcast_ref::<Error>(),
-							Some(Error::Kvs(crate::kvs::Error::TransactionConditionNotMet))
-						) {
-							Ok(())
-						} else {
-							Err(e)
-						}
-					}
-					Ok(v) => Ok(v),
-				}?
+				Self::del_entry(&txn, &key, &value).await?;
 			}
 		}
 		// Create the new index data
@@ -250,7 +280,7 @@ impl<'a> IndexOperation<'a> {
 			let i = Indexable::new(n, self.ix);
 			for n in i {
 				let key = self.get_non_unique_index_key(&n);
-				txn.set_key(&key, self.rid).await?;
+				txn.set_key(&key, &value).await?;
 			}
 		}
 		Ok(())

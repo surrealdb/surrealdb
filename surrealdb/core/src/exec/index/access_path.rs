@@ -112,6 +112,19 @@ pub enum AccessPath {
 		ef: u32,
 	},
 
+	/// Roaring-bitmap candidate fusion over the table's shared doc-ID space
+	/// (issue #547).
+	///
+	/// Chosen for an AND-composed WHERE clause with at least two index-backed
+	/// members (or one plus a subtractable `NOT`), when every participating
+	/// index carries doc-IDs, no index covers the ORDER BY, and no
+	/// early-termination (LIMIT without ORDER BY) or VERSION constraints
+	/// apply. Surfaces as a `BitmapResolve` operator over a `BitmapNode`
+	/// tree; the whole WHERE clause stays as the residual filter.
+	BitmapFusion {
+		root: BitmapPlan,
+	},
+
 	/// Union of multiple index scans (OR-union, scalar IN-expansion,
 	/// or array-containment expansion).
 	///
@@ -156,6 +169,39 @@ impl AccessPath {
 	}
 }
 
+/// Plan-level bitmap candidate expression tree (issue #547).
+///
+/// Built by [`crate::exec::index::analysis::IndexAnalyzer::try_bitmap_fusion`]
+/// and converted into `BitmapNode` operators by the SELECT planner. Leaves
+/// produce a candidate bitmap over the table's shared doc-ID space; inner
+/// nodes compose them with set algebra. `NOT` appears only as the subtract
+/// side of [`BitmapPlan::AndNot`] — never standalone (a standalone NOT would
+/// need a table-universe bitmap that is deliberately not maintained).
+#[derive(Debug, Clone)]
+pub enum BitmapPlan {
+	/// Drain a b-tree index range, reading the doc-ID appended to each entry.
+	BTree {
+		index_ref: IndexRef,
+		access: BTreeAccess,
+	},
+	/// A full-text query's merged posting bitmap (scoring deferred to the
+	/// surviving documents).
+	FullText {
+		index_ref: IndexRef,
+		query: String,
+		operator: MatchesOperator,
+	},
+	/// Intersection of all children.
+	And(Vec<BitmapPlan>),
+	/// Union of all children. An empty union is a provably-empty conjunct.
+	Or(Vec<BitmapPlan>),
+	/// `base AND NOT subtract`.
+	AndNot {
+		base: Box<BitmapPlan>,
+		subtract: Box<BitmapPlan>,
+	},
+}
+
 /// How to access an index.
 #[derive(Debug, Clone)]
 pub enum BTreeAccess {
@@ -195,6 +241,55 @@ pub enum BTreeAccess {
 		/// ANN search expansion factor
 		ef: u32,
 	},
+}
+
+impl BTreeAccess {
+	/// Human-readable description of the access shape for EXPLAIN output.
+	///
+	/// Shared by [`crate::exec::operators::IndexScan`] and the bitmap
+	/// candidate operators so the `access:` attribute renders identically.
+	/// `FullText`/`Knn` shapes are described by their dedicated operators.
+	pub(crate) fn describe(&self) -> String {
+		use surrealdb_types::ToSql;
+		match self {
+			BTreeAccess::Equality(v) => format!("= {}", v.to_sql()),
+			BTreeAccess::Range {
+				range,
+			} => {
+				let from_str = match range.start.as_ref() {
+					Bound::Included(x) => format!(">={}", x.to_sql()),
+					Bound::Excluded(x) => format!(">{}", x.to_sql()),
+					Bound::Unbounded => String::new(),
+				};
+				let to_str = match range.end.as_ref() {
+					Bound::Included(x) => format!("<={}", x.to_sql()),
+					Bound::Excluded(x) => format!("<{}", x.to_sql()),
+					Bound::Unbounded => String::new(),
+				};
+				format!("{from_str} {to_str}").trim().to_string()
+			}
+			BTreeAccess::Compound {
+				prefix,
+				range,
+			} => {
+				let prefix_str = prefix.iter().map(|v| v.to_sql()).collect::<Vec<_>>().join(", ");
+				if let Some((op, val)) = range {
+					let val_sql = val.to_sql();
+					format!("[{prefix_str}] {op:?} {val_sql}")
+				} else {
+					format!("[{prefix_str}]")
+				}
+			}
+			BTreeAccess::FullText {
+				query,
+				..
+			} => format!("@@ {query}"),
+			BTreeAccess::Knn {
+				k,
+				..
+			} => format!("knn {k}"),
+		}
+	}
 }
 
 /// Select the best access path from candidates based on hints and heuristics.

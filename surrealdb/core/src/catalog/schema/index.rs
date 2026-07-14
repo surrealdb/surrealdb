@@ -71,11 +71,24 @@ impl From<u32> for IndexId {
 	}
 }
 
-/// Current on-disk format version for indexes that use the table-level doc-ID
-/// space (full-text, HNSW, DiskAnn). Bump when their persisted layout changes in
-/// a way that requires `REBUILD INDEX` after an upgrade. Index kinds that do not
-/// use doc-IDs (b-tree, count) are format-agnostic and stay at `0`.
-pub(crate) const INDEX_FORMAT_VERSION: u16 = 1;
+/// Current on-disk format version stamped on newly defined or rebuilt indexes.
+/// Bump when any index kind's persisted layout changes. Each kind's *required*
+/// version (see [`IndexDefinition::required_format_version`]) stays at the
+/// version that introduced its current mandatory layout, so bumping this
+/// constant does not invalidate existing indexes of other kinds.
+pub(crate) const INDEX_FORMAT_VERSION: u16 = 2;
+
+/// Format version at which full-text, HNSW and DiskAnn indexes migrated onto
+/// the shared table-level doc-ID space. These kinds cannot be read below this
+/// version and require `REBUILD INDEX` after an upgrade.
+pub(crate) const DOC_IDS_FORMAT_VERSION: u16 = 1;
+
+/// Format version at which b-tree (`Idx`/`Uniq`) index entry values carry the
+/// record's table-level doc-ID appended to the record ID (8 bytes big-endian).
+/// Older b-tree indexes remain readable (their entries simply lack doc-IDs);
+/// this version only gates eligibility for doc-ID-based plans such as roaring
+/// bitmap candidate fusion.
+pub(crate) const BTREE_ENTRY_DOC_IDS_FORMAT_VERSION: u16 = 2;
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -140,14 +153,44 @@ impl IndexDefinition {
 
 	/// The on-disk format version required to read this index kind.
 	///
-	/// Only the doc-ID-backed kinds (full-text, HNSW, DiskAnn) share the
-	/// table-level doc-ID space and therefore gate on [`INDEX_FORMAT_VERSION`];
-	/// b-tree and count indexes are format-agnostic.
+	/// Only the doc-ID-backed kinds (full-text, HNSW, DiskAnn) mandate a
+	/// minimum format ([`DOC_IDS_FORMAT_VERSION`], the table-level doc-ID
+	/// space migration); b-tree and count indexes are readable at any format.
+	/// B-tree entries gain appended doc-IDs at
+	/// [`BTREE_ENTRY_DOC_IDS_FORMAT_VERSION`], but older entries stay
+	/// readable, so that version is opt-in (see [`Self::has_entry_doc_ids`])
+	/// rather than required.
 	fn required_format_version(&self) -> u16 {
 		match self.index {
-			Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_) => INDEX_FORMAT_VERSION,
+			Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_) => DOC_IDS_FORMAT_VERSION,
 			Index::Idx | Index::Uniq | Index::Count(_) => 0,
 		}
+	}
+
+	/// Whether this b-tree index's entry values carry the record's table-level
+	/// doc-ID appended to the record ID.
+	///
+	/// True for `Idx`/`Uniq` indexes defined or rebuilt at
+	/// [`BTREE_ENTRY_DOC_IDS_FORMAT_VERSION`] or later. Both the write path
+	/// (append the doc-ID to new entries) and the planner (eligibility for
+	/// bitmap candidate plans) gate on this so a given index only ever
+	/// contains entries of a single format.
+	pub(crate) fn has_entry_doc_ids(&self) -> bool {
+		matches!(self.index, Index::Idx | Index::Uniq)
+			&& self.format_version >= BTREE_ENTRY_DOC_IDS_FORMAT_VERSION
+	}
+
+	/// Whether this index consumes the table's shared doc-ID space
+	/// (`!di`/`!dd` mappings).
+	///
+	/// True for the doc-ID-backed kinds (full-text, HNSW, DiskAnn) and for
+	/// b-tree indexes whose entries carry doc-IDs. Tables with at least one
+	/// such index maintain the shared mapping for every record; the mapping's
+	/// lifecycle (removal on record delete, deferred reclaim during builds)
+	/// is gated on this.
+	pub(crate) fn uses_doc_ids(&self) -> bool {
+		matches!(self.index, Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_))
+			|| self.has_entry_doc_ids()
 	}
 
 	/// Rejects an index whose persisted data predates the running binary's format.

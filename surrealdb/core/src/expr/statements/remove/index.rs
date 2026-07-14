@@ -2,8 +2,8 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 use uuid::Uuid;
 
+use crate::catalog::TableDefinition;
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{Index, TableDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -67,18 +67,15 @@ impl RemoveIndexStatement {
 		// Get the table definition
 		let tb = txn.expect_tb(ns, db, &table_name).await?;
 		// Determine — before the definition is removed — whether this is the last
-		// doc-ID-consuming index (full-text / HNSW / DiskAnn) on the table. If so,
-		// the shared table-level doc-ID mappings must be reclaimed once it is gone
-		// (see the purge below).
-		let removed_last_doc_id_index =
-			matches!(ix.index, Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_))
-				&& !txn.all_tb_indexes(ns, db, &table_name, None).await?.iter().any(|other| {
-					other.index_id != ix.index_id
-						&& matches!(
-							other.index,
-							Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_)
-						)
-				});
+		// doc-ID-consuming index (full-text / HNSW / DiskAnn / doc-ID-format
+		// b-tree) on the table. If so, the shared table-level doc-ID mappings
+		// must be reclaimed once it is gone (see the purge below).
+		let removed_last_doc_id_index = ix.uses_doc_ids()
+			&& !txn
+				.all_tb_indexes(ns, db, &table_name, None)
+				.await?
+				.iter()
+				.any(|other| other.index_id != ix.index_id && other.uses_doc_ids());
 		// Clear process-local index wrappers immediately, then retire durable
 		// build state in the same transaction that removes the catalog
 		// definition. The builder abort is deferred until this transaction

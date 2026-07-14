@@ -564,6 +564,14 @@ pub static REGEX_CACHE_SIZE: LazyLock<usize> =
 pub static SURREALISM_MAX_POOL_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_SURREALISM_MAX_POOL_SIZE", usize, 8);
 
+/// Drained-entry budget for one range branch of a bitmap candidate plan
+/// (default: 250000). A non-anchor range branch that drains more index
+/// entries than this is abandoned — its predicate is instead enforced by the
+/// residual WHERE filter — so an unselective range cannot make the bitmap
+/// plan slower than the streaming plan it replaced. `0` disables the budget.
+pub static BITMAP_BRANCH_BUDGET: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_BITMAP_BRANCH_BUDGET", usize, 250_000);
+
 // The GQL v2 MATCH resource limits (`gql_max_join_build_rows`,
 // `gql_max_path_rows`, `gql_max_output_rows`) live on `CommonConfig` above, not
 // as global statics: every operator that reads them already has the execution

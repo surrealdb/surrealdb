@@ -70,6 +70,13 @@ pub struct IndexCountScan {
 	/// matching COUNT index exists.  The planner resolves this from the
 	/// same index analysis it performs for regular queries.
 	pub(crate) btree_access: Option<(IndexRef, BTreeAccess)>,
+	/// Optional exact bitmap fusion plan (issue #547) for multi-index AND
+	/// conditions no single index covers: the count is the fused bitmap's
+	/// cardinality, with zero record fetches. Only set when every conjunct
+	/// is exactly represented (see `IndexAnalyzer::try_bitmap_count_fusion`).
+	pub(crate) bitmap_plan: Option<Arc<super::bitmap::BitmapNode>>,
+	/// The `bitmap_plan` root coerced for `children()` / EXPLAIN.
+	pub(crate) bitmap_plan_dyn: Option<Arc<dyn ExecOperator>>,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -90,6 +97,8 @@ impl IndexCountScan {
 			version,
 			field_names,
 			btree_access: None,
+			bitmap_plan: None,
+			bitmap_plan_dyn: None,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
@@ -97,6 +106,13 @@ impl IndexCountScan {
 	/// Set the B-tree index access path for key-only counting.
 	pub(crate) fn with_btree_access(mut self, access: Option<(IndexRef, BTreeAccess)>) -> Self {
 		self.btree_access = access;
+		self
+	}
+
+	/// Set the exact bitmap fusion plan for multi-index counting.
+	pub(crate) fn with_bitmap_plan(mut self, plan: Option<Arc<super::bitmap::BitmapNode>>) -> Self {
+		self.bitmap_plan_dyn = plan.clone().map(|p| p as Arc<dyn ExecOperator>);
+		self.bitmap_plan = plan;
 		self
 	}
 }
@@ -118,6 +134,12 @@ impl ExecOperator for IndexCountScan {
 			.required_context()
 			.max(self.predicate.required_context())
 			.max(ContextLevel::Database)
+	}
+
+	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
+		// The bitmap plan (when present) is evaluated by this operator, but
+		// surfaces as a child so EXPLAIN shows how the count is computed.
+		self.bitmap_plan_dyn.iter().collect()
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {
@@ -148,6 +170,7 @@ impl ExecOperator for IndexCountScan {
 		let version = self.version.clone();
 		let field_names = self.field_names.clone();
 		let btree_access = self.btree_access.clone();
+		let bitmap_plan = self.bitmap_plan.clone();
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
@@ -274,6 +297,12 @@ impl ExecOperator for IndexCountScan {
 				)
 				.await?;
 				yield make_count_batch(count, &field_names);
+			} else if let Some(ref plan) = bitmap_plan {
+				// Bitmap path (issue #547): the count is the cardinality of
+				// the exact fused bitmap over the table's shared doc-ID
+				// space — index entries only, zero record fetches.
+				let count = plan.build_exact_cardinality(&ctx, &table_name).await?;
+				yield make_count_batch(count as usize, &field_names);
 			} else {
 				// No matching COUNT index found: fall back to full scan + filter + count.
 				let perm = PhysicalPermission::Allow;

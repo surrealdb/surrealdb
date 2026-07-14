@@ -37,7 +37,7 @@ use crate::err::Error;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, BoxFut, ContextLevel};
 use crate::expr::idiom::Idiom;
-use crate::expr::operator::{BinaryOperator, MatchesOperator};
+use crate::expr::operator::{BinaryOperator, MatchesOperator, PrefixOperator};
 use crate::expr::{Expr, FlowResult, Kind};
 use crate::iam::Action;
 use crate::idx::IndexKeyBase;
@@ -52,9 +52,12 @@ use crate::val::{TableName, Value};
 /// The legacy tree walks the WHERE condition through `Expr::Binary` nodes
 /// only — a MATCHES nested inside a function argument, an idiom part filter,
 /// or appearing in a projection is never registered and errors at runtime on
-/// executor-table rows. `allowlist` reproduces that reachable set (built from
-/// both the original condition and its param-resolved/constant-folded form so
-/// plan-time rewrites don't break node identity), and `executor_tables` lists
+/// executor-table rows. `allowlist` reproduces that reachable set, plus the
+/// operand of a logical NOT so the bitmap-fusion planner's negated full-text
+/// branch (`!(body @@ 'x')`) stays evaluable in the residual filter (see
+/// [`collect_cond_matches`]). It is built from both the original condition and
+/// its param-resolved/constant-folded form so plan-time rewrites don't break
+/// node identity, and `executor_tables` lists
 /// the tables the legacy executor would have created a `QueryExecutor` for:
 /// full table sources only — record-id sources never get one (see
 /// `Iterator::prepare_record_id`), so their rows evaluate MATCHES to `false`
@@ -68,20 +71,36 @@ pub(crate) struct MatchesScope {
 }
 
 /// Collect MATCHES expressions reachable from `expr` through `Expr::Binary`
-/// nodes only, matching the legacy `Tree::eval_value` traversal (function
-/// calls, arrays, idioms and every other node type are opaque leaves there).
+/// nodes and logical-NOT (`Expr::Prefix { Not, .. }`) nodes.
+///
+/// The legacy `Tree::eval_value` traversal walks `Expr::Binary` only and treats
+/// every other node (function calls, arrays, idioms, prefixes) as an opaque
+/// leaf. The new executor's bitmap-fusion planner additionally turns a negated
+/// full-text branch (`... AND !(body @@ 'x')`) into a `BitmapAndNot` over the
+/// term's posting bitmap and keeps the negated MATCHES in the residual `Filter`
+/// for per-row re-evaluation — so the inner MATCHES must be registered too, or
+/// it would raise [`Error::NoIndexFoundForMatch`]. Descending through the `Not`
+/// prefix (a deliberate extension past the legacy walk) registers it.
 pub(crate) fn collect_cond_matches(expr: &Expr, out: &mut HashSet<Expr>) {
-	if let Expr::Binary {
-		left,
-		op,
-		right,
-	} = expr
-	{
-		if matches!(op, BinaryOperator::Matches(_)) {
-			out.insert(expr.clone());
+	match expr {
+		Expr::Binary {
+			left,
+			op,
+			right,
+		} => {
+			if matches!(op, BinaryOperator::Matches(_)) {
+				out.insert(expr.clone());
+			}
+			collect_cond_matches(left, out);
+			collect_cond_matches(right, out);
 		}
-		collect_cond_matches(left, out);
-		collect_cond_matches(right, out);
+		Expr::Prefix {
+			op: PrefixOperator::Not,
+			expr: inner,
+		} => {
+			collect_cond_matches(inner, out);
+		}
+		_ => {}
 	}
 }
 

@@ -182,29 +182,25 @@ impl DefineIndexStatement {
 		if let Some(ix) = existing.as_ref() {
 			// Decide up front — before the catalog is mutated — whether this
 			// destructive replacement drops the table's LAST doc-ID-consuming
-			// index (full-text / HNSW / DiskAnn) with no replacement consumer
-			// taking its place. If so, reclaim the shared table-level doc-ID
-			// space here, exactly as RemoveIndexStatement does; otherwise the
-			// `!di`/`!dd` mappings leak (record deletes stop calling
-			// `remove_doc_id` once no consumer remains, and a doc-ID index defined
-			// later could reuse a deleted record's id). A replacement that is
-			// itself a doc-ID index keeps consuming the space, so it is preserved.
-			let purge_table_doc_ids =
-				matches!(ix.index, Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_))
-					&& !matches!(
-						self.index,
-						Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_)
-					) && !txn
+			// index (full-text / HNSW / DiskAnn / doc-ID-format b-tree) with no
+			// replacement consumer taking its place. If so, reclaim the shared
+			// table-level doc-ID space here, exactly as RemoveIndexStatement
+			// does; otherwise the `!di`/`!dd` mappings leak (record deletes stop
+			// calling `remove_doc_id` once no consumer remains, and a doc-ID
+			// index defined later could reuse a deleted record's id). A
+			// replacement that is itself a doc-ID consumer keeps consuming the
+			// space, so it is preserved. The replacement is stamped with the
+			// current INDEX_FORMAT_VERSION, so every kind except COUNT is a
+			// consumer (b-tree entries carry doc-IDs from
+			// BTREE_ENTRY_DOC_IDS_FORMAT_VERSION).
+			let replacement_uses_doc_ids = !matches!(self.index, Index::Count(_));
+			let purge_table_doc_ids = ix.uses_doc_ids()
+				&& !replacement_uses_doc_ids
+				&& !txn
 					.all_tb_indexes(tb.namespace_id, tb.database_id, &tb.name, None)
 					.await?
 					.iter()
-					.any(|other| {
-						other.index_id != ix.index_id
-							&& matches!(
-								other.index,
-								Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_)
-							)
-					});
+					.any(|other| other.index_id != ix.index_id && other.uses_doc_ids());
 			// Clear process-local index wrappers without aborting the current
 			// durable builder here. Durable state and catalog entries are
 			// retired atomically in this schema transaction below, and the

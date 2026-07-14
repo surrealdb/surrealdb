@@ -4,6 +4,7 @@
 //! (table scans, index scans, full-text search, KNN, graph traversals, etc.)
 //! and handle table/field-level permissions.
 
+pub(crate) mod bitmap;
 pub(crate) mod common;
 mod count;
 mod dynamic;
@@ -22,6 +23,8 @@ pub(crate) mod resolved;
 mod table;
 mod union_index;
 
+pub(crate) use bitmap::BitmapNode;
+pub use bitmap::BitmapResolve;
 pub use count::CountScan;
 pub use dynamic::DynamicScan;
 pub use empty::EmptyScan;

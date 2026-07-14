@@ -64,10 +64,68 @@ use anyhow::Result;
 use storekey::{BorrowDecode, DecodeError, Encode, EncodeError, Writer};
 
 use crate::catalog::IndexId;
+use crate::idx::docids::DocId;
 use crate::key::category::{Categorise, Category};
 use crate::key::database::all::DatabaseRoot;
-use crate::key::{KVKey, KVKeyDecode, KVRange, Key, key};
+use crate::key::{KVKey, KVKeyDecode, KVRange, KVValue, Key, key};
 use crate::val::{IndexFormat, RecordId, RecordIdKey, TableName, Value};
+
+/// Value stored in b-tree index entries ([`Index`] non-unique /
+/// [`UniqueIndex`]).
+///
+/// The base encoding is the revision-encoded [`RecordId`]. Indexes at
+/// [`crate::catalog::BTREE_ENTRY_DOC_IDS_FORMAT_VERSION`] or later append the
+/// record's table-level doc-ID as 8 big-endian bytes, so doc-ID-based plans
+/// (roaring bitmap candidate fusion) can read the doc-ID straight from the
+/// entry without probing the `!di` mapping.
+///
+/// The format is self-describing on decode: a revision-encoded `RecordId`
+/// followed by either nothing (pre-doc-ID entry) or exactly 8 bytes. Readers
+/// that only need the `RecordId` (including older binaries) can keep using
+/// `revision::from_slice`, which ignores the trailing bytes.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct IndexEntryValue {
+	pub rid: RecordId,
+	pub doc_id: Option<DocId>,
+}
+
+impl KVValue for IndexEntryValue {
+	type KeyContext = ();
+
+	fn kv_encode_value(&self) -> Result<Vec<u8>> {
+		let mut buf = Vec::new();
+		revision::to_writer(&mut buf, &self.rid)
+			.map_err(|e| anyhow::anyhow!("Failed to encode index entry value: {e}"))?;
+		if let Some(doc_id) = self.doc_id {
+			buf.extend_from_slice(&doc_id.to_be_bytes());
+		}
+		Ok(buf)
+	}
+
+	fn kv_decode_value(bytes: &[u8], _: ()) -> Result<Self> {
+		let mut reader = bytes;
+		let rid: RecordId = revision::from_reader(&mut reader)
+			.map_err(|e| anyhow::anyhow!("Failed to decode index entry value: {e}"))?;
+		let doc_id = match reader.len() {
+			0 => None,
+			8 => {
+				let mut arr = [0u8; 8];
+				arr.copy_from_slice(reader);
+				Some(DocId::from_be_bytes(arr))
+			}
+			n => {
+				return Err(anyhow::Error::new(crate::err::Error::Corrupted(
+					"Index entry value has an invalid trailing doc-ID segment",
+				))
+				.context(format!("{n} trailing bytes after the record ID")));
+			}
+		};
+		Ok(Self {
+			rid,
+			doc_id,
+		})
+	}
+}
 
 key! {
 	#[derive(Clone, Debug, PartialEq, PartialOrd)]
@@ -175,7 +233,7 @@ pub(crate) struct Index<'a> {
 }
 
 impl KVKey for Index<'_> {
-	type Value = RecordId;
+	type Value = IndexEntryValue;
 
 	fn encode_buffer(&self, buffer: &mut Vec<u8>) -> ::anyhow::Result<()> {
 		storekey::encode_format::<IndexFormat, _, _>(buffer, self)
@@ -321,7 +379,7 @@ impl<'de> BorrowDecode<'de, IndexFormat> for UniqueIndex<'de> {
 }
 
 impl KVKey for UniqueIndex<'_> {
-	type Value = RecordId;
+	type Value = IndexEntryValue;
 
 	fn encode_buffer(&self, buffer: &mut Vec<u8>) -> ::anyhow::Result<()> {
 		storekey::encode_format::<IndexFormat, _, _>(buffer, self)
@@ -392,5 +450,48 @@ mod tests {
 			&*enc,
 			b"/*\0\0\0\x01*\0\0\0\x02*testtb\0+\0\0\0\x03*\x06testfd1\0\x06testfd2\0\0\x02"
 		);
+	}
+
+	fn test_rid() -> RecordId {
+		RecordId {
+			table: TableName::from("testtb"),
+			key: RecordIdKey::String(Strand::new_static("testid")),
+		}
+	}
+
+	#[test]
+	fn entry_value_roundtrip_without_doc_id() {
+		let value = IndexEntryValue {
+			rid: test_rid(),
+			doc_id: None,
+		};
+		let bytes = value.kv_encode_value().unwrap();
+		// A pre-doc-ID entry is exactly the revision-encoded RecordId.
+		assert_eq!(bytes, revision::to_vec(&test_rid()).unwrap());
+		let decoded = IndexEntryValue::kv_decode_value(&bytes, ()).unwrap();
+		assert_eq!(decoded, value);
+	}
+
+	#[test]
+	fn entry_value_roundtrip_with_doc_id() {
+		let value = IndexEntryValue {
+			rid: test_rid(),
+			doc_id: Some(0x0102030405060708),
+		};
+		let bytes = value.kv_encode_value().unwrap();
+		// The doc-ID is appended big-endian after the RecordId encoding.
+		assert_eq!(bytes[bytes.len() - 8..], [1, 2, 3, 4, 5, 6, 7, 8]);
+		let decoded = IndexEntryValue::kv_decode_value(&bytes, ()).unwrap();
+		assert_eq!(decoded, value);
+		// Readers that only need the RecordId ignore the trailing doc-ID.
+		let rid: RecordId = revision::from_slice(&bytes).unwrap();
+		assert_eq!(rid, test_rid());
+	}
+
+	#[test]
+	fn entry_value_rejects_invalid_trailing_segment() {
+		let mut bytes = revision::to_vec(&test_rid()).unwrap();
+		bytes.extend_from_slice(&[0xFF; 3]);
+		assert!(IndexEntryValue::kv_decode_value(&bytes, ()).is_err());
 	}
 }

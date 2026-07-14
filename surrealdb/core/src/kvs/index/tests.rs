@@ -4414,6 +4414,215 @@ async fn table_doc_ids_purged_only_when_last_consumer_removed() -> Result<()> {
 	Ok(())
 }
 
+/// B-tree indexes at the current format version append the record's shared
+/// doc-ID to every entry value and consume the table's doc-ID space: mappings
+/// are created on insert, reclaimed when the record is deleted, and purged
+/// when the last consumer index is removed.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn btree_index_entries_carry_doc_ids() -> Result<()> {
+	use crate::key::index::IndexEntryValue;
+
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX idx_a ON t FIELDS a;
+		 DEFINE INDEX uniq_b ON t FIELDS b UNIQUE;
+		 CREATE t:1 SET a = 'alpha', b = 1;
+		 CREATE t:2 SET a = 'beta',  b = 2;",
+	)
+	.await?;
+	// Both b-tree indexes share one doc-ID per record.
+	assert_eq!(count_doc_id_mappings(&ds, "t").await?, (2, 2), "one shared doc-ID per record");
+
+	// Every index entry value carries the record's shared doc-ID.
+	let tx = ds.transaction(TransactionType::Read).await?;
+	let ns = tx.get_ns_by_name("test", None).await?.expect("namespace should exist");
+	let db = tx.get_db_by_name("test", "test", None).await?.expect("database should exist");
+	let tb: TableName = "t".into();
+	let docids = crate::idx::docids::TableDocIds::new(ns.namespace_id, db.database_id, tb.clone());
+	let indexes = tx.all_tb_indexes(ns.namespace_id, db.database_id, &tb, None).await?;
+	assert_eq!(indexes.len(), 2);
+	let mut entries = 0;
+	for ix in indexes.iter() {
+		assert!(ix.has_entry_doc_ids(), "fresh b-tree indexes carry entry doc-IDs");
+		let rng = crate::key::index::IndexPrefix {
+			prefix: crate::key::database::all::DatabaseRoot {
+				ns: ns.namespace_id,
+				db: db.database_id,
+			},
+			tb: Cow::Borrowed(&tb),
+			ix: ix.index_id,
+		}
+		.encode_range()?;
+		for (_, val) in tx.scan(rng, u32::MAX, 0, None).await? {
+			let entry = IndexEntryValue::kv_decode_value(&val, ())?;
+			let expected = docids.get_doc_id(&tx, &entry.rid.key).await?;
+			assert!(expected.is_some(), "indexed record has a shared doc-ID mapping");
+			assert_eq!(entry.doc_id, expected, "entry doc-ID matches the shared mapping");
+			entries += 1;
+		}
+	}
+	assert_eq!(entries, 4, "one entry per record per index");
+	tx.cancel().await?;
+
+	// Record deletion removes the index entries and reclaims the mapping.
+	execute_all(&ds, &session, "DELETE t:1;").await?;
+	assert_eq!(count_doc_id_mappings(&ds, "t").await?, (1, 1), "mapping reclaimed on delete");
+
+	// Removing one consumer keeps the space; removing the last reclaims it.
+	execute_all(&ds, &session, "REMOVE INDEX idx_a ON t;").await?;
+	assert_eq!(
+		count_doc_id_mappings(&ds, "t").await?,
+		(1, 1),
+		"mappings survive while another b-tree consumer remains"
+	);
+	execute_all(&ds, &session, "REMOVE INDEX uniq_b ON t;").await?;
+	assert_eq!(
+		count_doc_id_mappings(&ds, "t").await?,
+		(0, 0),
+		"mappings purged once the last consumer is removed"
+	);
+	Ok(())
+}
+
+/// An index-only bitmap COUNT (`SELECT count() … WHERE <AND of indexed
+/// predicates> GROUP ALL`, issue #547) reads index entries only — zero
+/// record fetches. Proved behaviorally: after deleting the record *values*
+/// directly at the KV layer (leaving index entries and doc-ID mappings
+/// intact), the bitmap count still reports the indexed cardinality, while a
+/// NOINDEX count — which must fetch records — reports zero.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn bitmap_count_performs_zero_record_fetches() -> Result<()> {
+	use surrealdb_types::Value as PublicValue;
+
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE FIELD a ON t TYPE string;
+		 DEFINE FIELD b ON t TYPE bool;
+		 DEFINE INDEX idx_a ON t FIELDS a;
+		 DEFINE INDEX idx_b ON t FIELDS b;
+		 CREATE t:1 SET a = 'x', b = true;
+		 CREATE t:2 SET a = 'x', b = true;
+		 CREATE t:3 SET a = 'x', b = false;
+		 CREATE t:4 SET a = 'y', b = true;",
+	)
+	.await?;
+
+	let count = |sql: &'static str| {
+		let ds = &ds;
+		let session = &session;
+		async move {
+			let mut results = ds.execute(sql, session, None).await?;
+			let value = results.remove(0).result?;
+			match value {
+				PublicValue::Array(rows) if rows.len() == 1 => match rows.into_iter().next() {
+					Some(PublicValue::Object(obj)) => match obj.get("count") {
+						Some(PublicValue::Number(n)) => {
+							n.to_int().ok_or_else(|| anyhow::anyhow!("non-integer count"))
+						}
+						other => anyhow::bail!("unexpected count value: {other:?}"),
+					},
+					other => anyhow::bail!("unexpected count row: {other:?}"),
+				},
+				other => anyhow::bail!("unexpected count result: {other:?}"),
+			}
+		}
+	};
+
+	const BITMAP_COUNT: &str = "SELECT count() FROM t WHERE a = 'x' AND b = true GROUP ALL";
+	const NOINDEX_COUNT: &str =
+		"SELECT count() FROM t WITH NOINDEX WHERE a = 'x' AND b = true GROUP ALL";
+	assert_eq!(count(BITMAP_COUNT).await?, 2);
+	assert_eq!(count(NOINDEX_COUNT).await?, 2);
+
+	// Delete the record values directly at the KV layer, leaving the index
+	// entries and the shared doc-ID mappings untouched.
+	{
+		let tx = ds.transaction(TransactionType::Write).await?;
+		let ns = tx.get_ns_by_name("test", None).await?.expect("namespace should exist");
+		let db = tx.get_db_by_name("test", "test", None).await?.expect("database should exist");
+		let tb: TableName = "t".into();
+		let rng = crate::key::record::RecordKeyPrefix {
+			root: crate::key::database::all::DatabaseRoot {
+				ns: ns.namespace_id,
+				db: db.database_id,
+			},
+			table: std::borrow::Cow::Borrowed(&tb),
+		}
+		.encode_range()?;
+		for key in tx.keys(rng, u32::MAX, 0, None).await? {
+			tx.del(key.into()).await?;
+		}
+		tx.commit().await?;
+	}
+
+	// The bitmap count never fetched a record, so it still reports the
+	// indexed cardinality; the NOINDEX count reads records and finds none.
+	assert_eq!(count(BITMAP_COUNT).await?, 2, "bitmap count reads index entries only");
+	assert_eq!(count(NOINDEX_COUNT).await?, 0, "record-fetching count sees the deletions");
+	Ok(())
+}
+
+/// An index defined before the doc-ID entry format (simulated by downgrading
+/// `format_version`) keeps working with bare record-ID entry values: writes,
+/// guarded deletes and index-backed queries stay consistent, and the table
+/// never allocates shared doc-ID mappings for it.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn btree_index_pre_doc_id_format_stays_maintainable() -> Result<()> {
+	use crate::catalog::BTREE_ENTRY_DOC_IDS_FORMAT_VERSION;
+
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(&ds, &session, "DEFINE INDEX idx_a ON t FIELDS a;").await?;
+
+	// Downgrade the (empty) index definition to the pre-doc-ID format,
+	// simulating an index defined by an older binary.
+	{
+		let tx = ds.transaction(TransactionType::Write).await?;
+		let ns = tx.get_ns_by_name("test", None).await?.expect("namespace should exist");
+		let db = tx.get_db_by_name("test", "test", None).await?.expect("database should exist");
+		let tb: TableName = "t".into();
+		let ix = tx
+			.get_tb_index(ns.namespace_id, db.database_id, &tb, "idx_a", None)
+			.await?
+			.expect("index should exist");
+		let mut old = (*ix).clone();
+		old.format_version = BTREE_ENTRY_DOC_IDS_FORMAT_VERSION - 1;
+		assert!(!old.uses_doc_ids());
+		tx.put_tb_index(ns.namespace_id, db.database_id, &tb, &old).await?;
+		// Bump the table definition so cached index lists are refreshed.
+		let tb_def = tx.expect_tb(ns.namespace_id, db.database_id, &tb).await?;
+		tx.put_tb("test", "test", &tb_def).await?;
+		tx.commit().await?;
+	}
+
+	// Writes through the old-format definition keep the index consistent
+	// (bare record-ID values, guarded deletes still match)...
+	execute_all(
+		&ds,
+		&session,
+		"CREATE t:1 SET a = 'alpha';
+		 CREATE t:2 SET a = 'gamma';
+		 UPDATE t:1 SET a = 'beta';
+		 DELETE t:2;",
+	)
+	.await?;
+	assert_eq!(query_array_len(&ds, &session, "SELECT * FROM t WHERE a = 'beta'").await?, 1);
+	assert_eq!(query_array_len(&ds, &session, "SELECT * FROM t WHERE a = 'alpha'").await?, 0);
+	assert_eq!(query_array_len(&ds, &session, "SELECT * FROM t WHERE a = 'gamma'").await?, 0);
+	// ...and no shared doc-ID mappings are allocated for it.
+	assert_eq!(count_doc_id_mappings(&ds, "t").await?, (0, 0));
+	Ok(())
+}
+
 /// Concurrent removal of the *only* two consumers must not leak the shared
 /// space. Each REMOVE independently checks whether another consumer remains, so
 /// without serialization both could observe the other still present and skip the
@@ -4597,9 +4806,18 @@ async fn overwrite_last_doc_id_index_with_plain_index_purges_mappings() -> Resul
 	.await?;
 	assert_eq!(count_doc_id_mappings(&ds, "t").await?, (2, 2));
 
-	// Overwrite the only doc-ID index with a plain (non-doc-ID) index of the same
-	// name: the last consumer is gone, so the shared space must be reclaimed.
+	// Overwriting the only doc-ID index with a plain b-tree index keeps the
+	// space: b-tree indexes at the current format are doc-ID consumers too.
 	execute_all(&ds, &session, "DEFINE INDEX OVERWRITE ix ON t FIELDS a;").await?;
+	assert_eq!(
+		count_doc_id_mappings(&ds, "t").await?,
+		(2, 2),
+		"mappings kept when OVERWRITE replaces the consumer with a b-tree consumer"
+	);
+
+	// Overwriting with a COUNT index — the only non-consumer kind — drops the
+	// last consumer, so the shared space must be reclaimed.
+	execute_all(&ds, &session, "DEFINE INDEX OVERWRITE ix ON t COUNT;").await?;
 	assert_eq!(
 		count_doc_id_mappings(&ds, "t").await?,
 		(0, 0),
