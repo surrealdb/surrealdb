@@ -13,6 +13,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::CommunityComposer;
+use crate::buc::BucketStoreProvider;
 use crate::buc::manager::BucketsManager;
 use crate::dbs::{Capabilities, MessageBroker};
 use crate::exec::function::FunctionRegistry;
@@ -53,6 +54,11 @@ pub struct Builder {
 	temporary_directory: Option<Arc<PathBuf>>,
 	authenticate: bool,
 	config: ConfigMap,
+	/// Object store provider for file buckets. When unset the datastore uses the
+	/// built-in [`CommunityComposer`] (memory, and — off wasm — file/S3/GCS/Azure).
+	/// Embedders on platforms the built-in backends can't reach (e.g. a wasm
+	/// Durable Object backing buckets with an R2 binding) install their own here.
+	bucket_store_provider: Option<Box<dyn BucketStoreProvider>>,
 	#[cfg(feature = "surrealism")]
 	lazy_surrealism: bool,
 	observer: Arc<dyn ExecutionObserver>,
@@ -79,6 +85,7 @@ impl Builder {
 			temporary_directory: None,
 			authenticate: false,
 			config: ConfigMap::empty(),
+			bucket_store_provider: None,
 			#[cfg(feature = "surrealism")]
 			lazy_surrealism: false,
 			observer: Arc::new(NoopObserver),
@@ -191,6 +198,15 @@ impl Builder {
 		self
 	}
 
+	/// Install a custom [`BucketStoreProvider`] backing file buckets, overriding
+	/// the default [`CommunityComposer`]. Use this on platforms whose object
+	/// store the built-in backends can't reach — e.g. a wasm Durable Object that
+	/// serves buckets from an R2 binding.
+	pub fn with_bucket_store_provider(mut self, provider: Box<dyn BucketStoreProvider>) -> Self {
+		self.bucket_store_provider = Some(provider);
+		self
+	}
+
 	pub async fn build_with_path(self, path: &str) -> Result<Datastore> {
 		self.build_with_factory_path(path, CommunityComposer()).await
 	}
@@ -240,8 +256,10 @@ impl Builder {
 		{
 			this.live_query_broker = Some(composer.live_query_broker(channel.clone()));
 		}
+		let bucket_store_provider =
+			this.bucket_store_provider.take().unwrap_or_else(|| Box::new(CommunityComposer()));
 		let buckets = BucketsManager::new(
-			Box::new(CommunityComposer()),
+			bucket_store_provider,
 			this.config.load(),
 			Arc::clone(&this.observer),
 		);
