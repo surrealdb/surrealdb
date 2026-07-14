@@ -8,7 +8,6 @@ use std::sync::Arc;
 use anyhow::Result;
 use clap::Args;
 use surrealdb::engine::any;
-use surrealdb_core::buc::BucketStoreProvider;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::TransactionBuilderFactory;
 use surrealdb_core::options::EngineOptions;
@@ -64,11 +63,7 @@ pub struct McpCommandArguments {
 
 /// Start the MCP server over stdio.
 pub async fn init<
-	C: TransactionBuilderFactory
-		+ RouterFactory
-		+ ConfigCheck
-		+ BucketStoreProvider
-		+ crate::observe::ObservabilityProvider,
+	C: TransactionBuilderFactory + RouterFactory + ConfigCheck + crate::observe::ObservabilityProvider,
 >(
 	composer: C,
 	McpCommandArguments {

@@ -13,7 +13,6 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::CommunityComposer;
-use crate::buc::BucketStoreProvider;
 use crate::buc::manager::BucketsManager;
 use crate::dbs::{Capabilities, MessageBroker};
 use crate::exec::function::FunctionRegistry;
@@ -198,7 +197,7 @@ impl Builder {
 
 	pub async fn build_with_factory_path<F>(self, path: &str, composer: F) -> Result<Datastore>
 	where
-		F: TransactionBuilderFactory + BucketStoreProvider + 'static,
+		F: TransactionBuilderFactory + 'static,
 	{
 		let (datastore, _) = self.build_with_factory_path_and_router_state(path, composer).await?;
 		Ok(datastore)
@@ -215,7 +214,7 @@ impl Builder {
 		composer: F,
 	) -> Result<(Datastore, F::RouterState)>
 	where
-		F: TransactionBuilderFactory + BucketStoreProvider + 'static,
+		F: TransactionBuilderFactory + 'static,
 	{
 		let mut this = self;
 		let TransactionBuilderParts {
@@ -241,7 +240,11 @@ impl Builder {
 		{
 			this.live_query_broker = Some(composer.live_query_broker(channel.clone()));
 		}
-		let buckets = BucketsManager::new(Box::new(composer), this.config.load());
+		let buckets = BucketsManager::new(
+			Box::new(CommunityComposer()),
+			this.config.load(),
+			Arc::clone(&this.observer),
+		);
 
 		let datastore = this.build_with_tx_builder_buckets(builder, buckets).await?;
 

@@ -936,6 +936,76 @@ pub struct NetworkBytesEvent {
 	pub ctx: NetworkBytesEventCtx,
 }
 
+// --- BucketOperationEvent ---
+
+/// Bounded classification of a bucket object-storage operation. Fixed at
+/// compile time so the metric attribute cardinality stays closed.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub enum BucketOp {
+	Put,
+	PutIfNotExists,
+	Get,
+	Head,
+	Delete,
+	Exists,
+	Copy,
+	CopyIfNotExists,
+	Rename,
+	RenameIfNotExists,
+	List,
+}
+
+impl BucketOp {
+	/// Stable lower-case label safe for use as a metric attribute value.
+	pub const fn as_label(self) -> &'static str {
+		match self {
+			Self::Put => "put",
+			Self::PutIfNotExists => "put_if_not_exists",
+			Self::Get => "get",
+			Self::Head => "head",
+			Self::Delete => "delete",
+			Self::Exists => "exists",
+			Self::Copy => "copy",
+			Self::CopyIfNotExists => "copy_if_not_exists",
+			Self::Rename => "rename",
+			Self::RenameIfNotExists => "rename_if_not_exists",
+			Self::List => "list",
+		}
+	}
+}
+
+/// Safe portion of a [`BucketOperationEvent`]. Every field is a bounded enum
+/// or a non-identifying byte scalar; `backend` is a fixed provider label
+/// (`s3` / `gcs` / `azure` / `file` / `memory`), never a user-defined bucket
+/// name. Suitable for unauthenticated, low-cardinality aggregate counters.
+#[derive(Clone, Copy, Debug)]
+pub struct BucketOperationEventSafe {
+	/// Storage backend the operation ran against.
+	pub backend: &'static str,
+	/// Which object-store operation ran.
+	pub op: BucketOp,
+	/// Whether the operation succeeded or errored.
+	pub outcome: Outcome,
+	/// Bytes uploaded to the backend (non-zero only for successful writes).
+	pub sent: u64,
+	/// Bytes downloaded from the backend (non-zero only for successful reads).
+	pub received: u64,
+}
+
+/// Contextual portion of a [`BucketOperationEvent`]. Bucket operations run
+/// below the session layer, so no tenant identity is attached; kept for
+/// symmetry with the other events and to leave room for future context.
+#[derive(Clone, Debug, Default)]
+pub struct BucketOperationEventCtx {}
+
+/// Emitted once per bucket object-storage operation. See
+/// [`ExecutionObserver::on_bucket_operation`](super::observer::ExecutionObserver::on_bucket_operation).
+#[derive(Clone, Debug)]
+pub struct BucketOperationEvent {
+	pub safe: BucketOperationEventSafe,
+	pub ctx: BucketOperationEventCtx,
+}
+
 // --- HttpRequestEvent ---
 
 /// Safe portion of an [`HttpRequestStartEvent`] / [`HttpRequestEvent`].

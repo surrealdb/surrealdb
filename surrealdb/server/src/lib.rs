@@ -66,7 +66,6 @@ pub use surrealdb as sdk;
 /// Re-export `core` for convenience so embedders can `use surrealdb_server::core::...`.
 #[doc(inline)]
 pub use surrealdb_core as core;
-use surrealdb_core::buc::BucketStoreProvider;
 use surrealdb_core::kvs::TransactionBuilderFactory;
 
 // Re-export the core crate in the same path used across internal modules
@@ -85,11 +84,7 @@ use surrealdb_core::kvs::TransactionBuilderFactory;
 ///   - `RouterFactory` (constructs the HTTP router)
 ///   - `ConfigCheck` (validates configuration before initialization)
 pub fn init<
-	C: TransactionBuilderFactory
-		+ RouterFactory
-		+ ConfigCheck
-		+ BucketStoreProvider
-		+ observe::ObservabilityProvider,
+	C: TransactionBuilderFactory + RouterFactory + ConfigCheck + observe::ObservabilityProvider,
 >(
 	composer: C,
 ) -> ExitCode {

@@ -48,9 +48,9 @@ use std::sync::Arc;
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram, UpDownCounter};
 use surrealdb_core::observe::{
-	AuthEvent, ExecutionObserver, HttpRequestEvent, HttpRequestStartEvent, NetworkBytesEvent,
-	NetworkDirection, QueryEvent, RpcEvent, SessionAction, SessionEvent, StatementEvent,
-	TransactionEvent, process_snapshot,
+	AuthEvent, BucketOperationEvent, ExecutionObserver, HttpRequestEvent, HttpRequestStartEvent,
+	NetworkBytesEvent, NetworkDirection, QueryEvent, RpcEvent, SessionAction, SessionEvent,
+	StatementEvent, TransactionEvent, process_snapshot,
 };
 
 use super::instruments::{NONE_LABEL, attrs, names, scope};
@@ -124,6 +124,10 @@ pub struct MetricsObserver {
 	// Network (scope: surrealdb.network)
 	network_received: Counter<u64>,
 	network_sent: Counter<u64>,
+	// Bucket object storage (scope: surrealdb.bucket)
+	bucket_sent: Counter<u64>,
+	bucket_received: Counter<u64>,
+	bucket_operations: Counter<u64>,
 	// HTTP (scope: surrealdb.http)
 	http_request_total: Counter<u64>,
 	http_request_duration: Histogram<f64>,
@@ -167,6 +171,7 @@ impl MetricsObserver {
 		let auth = runtime.meter(scope::AUTH);
 		let sess = runtime.meter(scope::SESSION);
 		let net = runtime.meter(scope::NETWORK);
+		let buc = runtime.meter(scope::BUCKET);
 		let http = runtime.meter(scope::HTTP);
 		let lq = runtime.meter(scope::LIVE_QUERY);
 		let slow = runtime.meter(scope::SLOW_QUERY);
@@ -286,6 +291,20 @@ impl MetricsObserver {
 					"Cumulative outbound bytes written at the HTTP / WebSocket egress",
 				)
 				.with_unit("By")
+				.build(),
+			bucket_sent: buc
+				.u64_counter(names::BUCKET_SENT_BYTES)
+				.with_description("Cumulative bytes uploaded to bucket object storage")
+				.with_unit("By")
+				.build(),
+			bucket_received: buc
+				.u64_counter(names::BUCKET_RECEIVED_BYTES)
+				.with_description("Cumulative bytes downloaded from bucket object storage")
+				.with_unit("By")
+				.build(),
+			bucket_operations: buc
+				.u64_counter(names::BUCKET_OPERATIONS)
+				.with_description("Cumulative count of bucket object-storage operations")
 				.build(),
 			http_request_total: http
 				.u64_counter(names::HTTP_REQUEST_TOTAL)
@@ -763,6 +782,21 @@ impl ExecutionObserver for MetricsObserver {
 		match event.safe.direction {
 			NetworkDirection::Received => self.network_received.add(event.safe.bytes, &attrs),
 			NetworkDirection::Sent => self.network_sent.add(event.safe.bytes, &attrs),
+		}
+	}
+
+	fn on_bucket_operation(&self, event: &BucketOperationEvent) {
+		let attrs = [
+			KeyValue::new(attrs::BACKEND, event.safe.backend),
+			KeyValue::new(attrs::BUCKET_OP, event.safe.op.as_label()),
+			KeyValue::new(attrs::OUTCOME, event.safe.outcome.as_label()),
+		];
+		self.bucket_operations.add(1, &attrs);
+		if event.safe.sent > 0 {
+			self.bucket_sent.add(event.safe.sent, &attrs);
+		}
+		if event.safe.received > 0 {
+			self.bucket_received.add(event.safe.received, &attrs);
 		}
 	}
 

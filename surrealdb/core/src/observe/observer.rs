@@ -1,8 +1,8 @@
 //! The [`ExecutionObserver`] trait and the no-op default implementation.
 
 use super::events::{
-	AuthEvent, HttpRequestEvent, HttpRequestStartEvent, NetworkBytesEvent, QueryEvent, RpcEvent,
-	SessionEvent, StatementEvent, TransactionEvent,
+	AuthEvent, BucketOperationEvent, HttpRequestEvent, HttpRequestStartEvent, NetworkBytesEvent,
+	QueryEvent, RpcEvent, SessionEvent, StatementEvent, TransactionEvent,
 };
 
 /// Hook surface for receiving structured observability events from the core
@@ -41,6 +41,12 @@ pub trait ExecutionObserver: Send + Sync + 'static {
 	/// half plus a `ctx` half that may carry tenant identity; community
 	/// observers read only `safe`, enterprise observers read both.
 	fn on_network_bytes(&self, _event: &NetworkBytesEvent) {}
+
+	/// Called once per bucket object-storage operation (`file::*` functions).
+	/// Carries the bounded backend/op/outcome labels and the bytes moved, so
+	/// observers can maintain `surrealdb.bucket.*` traffic counters. The event
+	/// has no tenant `ctx` — bucket ops run below the session layer.
+	fn on_bucket_operation(&self, _event: &BucketOperationEvent) {}
 
 	/// Called immediately after an HTTP request enters the tower stack,
 	/// before the inner service runs. Pairs with
@@ -98,7 +104,8 @@ mod tests {
 	use std::time::Duration;
 
 	use super::super::events::{
-		AuthAction, AuthEvent, AuthEventCtx, AuthEventSafe, AuthScope, HttpMethod,
+		AuthAction, AuthEvent, AuthEventCtx, AuthEventSafe, AuthScope, BucketOp,
+		BucketOperationEvent, BucketOperationEventCtx, BucketOperationEventSafe, HttpMethod,
 		HttpRequestEvent, HttpRequestEventCtx, HttpRequestEventSafe, HttpRequestStartEvent,
 		HttpRequestStartEventSafe, HttpVersion, NetworkBytesEvent, NetworkBytesEventCtx,
 		NetworkBytesEventSafe, NetworkDirection, Outcome, QueryCounters, QueryEvent, QueryEventCtx,
@@ -182,6 +189,16 @@ mod tests {
 				bytes: 64,
 			},
 			ctx: NetworkBytesEventCtx::default(),
+		});
+		obs.on_bucket_operation(&BucketOperationEvent {
+			safe: BucketOperationEventSafe {
+				backend: "s3",
+				op: BucketOp::Put,
+				outcome: Outcome::Success,
+				sent: 64,
+				received: 0,
+			},
+			ctx: BucketOperationEventCtx::default(),
 		});
 		obs.on_http_request_started(&HttpRequestStartEvent {
 			safe: HttpRequestStartEventSafe {

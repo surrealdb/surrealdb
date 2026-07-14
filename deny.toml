@@ -73,10 +73,19 @@ yanked = "warn"
 #
 # Cleared by the wasmtime 44 bump on main (RUSTSEC-2026-0149, wasmtime-wasi 43.0.2
 # `path_open(TRUNCATE)` host-perm bypass).
+#
+# - for RUSTSEC-2026-0194 / -0195, quick-xml <0.41 has XML-parsing DoS bugs (quadratic
+#   duplicate-attribute check + unbounded namespace-declaration allocation). It is pulled
+#   only by `object_store`, which uses it to parse the S3/GCS/Azure XML API responses from
+#   the operator-configured cloud endpoint — not arbitrary attacker input. `object_store`
+#   0.13.2 pins `quick-xml = "0.39"` (<0.40), so reaching the patched >=0.41 requires an
+#   `object_store` 0.14 major bump (tracked separately, as it also touches the `obs` module).
 ignore = [
     "RUSTSEC-2025-0141",
     "RUSTSEC-2023-0071",
     "RUSTSEC-2024-0436",
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
 ]
 
 # --------------------------------------------------

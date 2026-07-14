@@ -34,6 +34,9 @@ audit-as-crates-io = false
 [policy.surrealdb]
 audit-as-crates-io = false
 
+[policy.surrealdb-ast]
+audit-as-crates-io = false
+
 [policy.surrealdb-collections]
 audit-as-crates-io = false
 
@@ -41,15 +44,6 @@ audit-as-crates-io = false
 audit-as-crates-io = false
 
 [policy.surrealdb-core]
-audit-as-crates-io = false
-
-[policy.surrealdb-parser]
-audit-as-crates-io = false
-
-[policy.surrealdb-ast]
-audit-as-crates-io = false
-
-[policy.surrealdb-token]
 audit-as-crates-io = false
 
 [policy.surrealdb-kvs]
@@ -76,6 +70,9 @@ audit-as-crates-io = false
 [policy.surrealdb-mcp]
 audit-as-crates-io = false
 
+[policy.surrealdb-parser]
+audit-as-crates-io = false
+
 [policy.surrealdb-profiling]
 audit-as-crates-io = false
 
@@ -83,6 +80,9 @@ audit-as-crates-io = false
 audit-as-crates-io = false
 
 [policy.surrealdb-strand]
+audit-as-crates-io = false
+
+[policy.surrealdb-token]
 audit-as-crates-io = false
 
 [policy.surrealdb-types]
@@ -1238,6 +1238,10 @@ criteria = "safe-to-deploy"
 version = "0.1.4"
 criteria = "safe-to-deploy"
 
+[[exemptions.quick-xml]]
+version = "0.39.4"
+criteria = "safe-to-deploy"
+
 [[exemptions.quick_cache]]
 version = "0.6.22"
 criteria = "safe-to-deploy"
@@ -1752,6 +1756,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.wasm-opt-sys]]
 version = "0.116.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.wasm-streams]]
+version = "0.4.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.wasm-streams]]

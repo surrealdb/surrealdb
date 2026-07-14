@@ -32,7 +32,8 @@ pub use error_class::{
 	TXN_TIMEOUT as ERROR_TXN_TIMEOUT,
 };
 pub use events::{
-	AuthAction, AuthEvent, AuthEventCtx, AuthEventSafe, AuthScope, HttpMethod, HttpRequestEvent,
+	AuthAction, AuthEvent, AuthEventCtx, AuthEventSafe, AuthScope, BucketOp, BucketOperationEvent,
+	BucketOperationEventCtx, BucketOperationEventSafe, HttpMethod, HttpRequestEvent,
 	HttpRequestEventCtx, HttpRequestEventSafe, HttpRequestStartEvent, HttpRequestStartEventSafe,
 	HttpVersion, NetworkBytesEvent, NetworkBytesEventCtx, NetworkBytesEventSafe, NetworkDirection,
 	Outcome, QueryCounters, QueryEvent, QueryEventCtx, QueryEventSafe, RpcEvent, RpcEventCtx,

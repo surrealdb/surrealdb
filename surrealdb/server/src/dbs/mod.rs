@@ -8,7 +8,6 @@ use clap::Args;
 use rand::Rng;
 use surrealdb::opt::capabilities::Capabilities as SdkCapabilities;
 use surrealdb_cnf::ConfigMap;
-use surrealdb_core::buc::BucketStoreProvider;
 use surrealdb_core::channel::Receiver;
 use surrealdb_core::kvs::{Datastore, TransactionBuilderFactory};
 use surrealdb_core::observe::ExecutionObserver;
@@ -789,7 +788,7 @@ where
 ///
 /// # Generic parameters
 /// - `F`: Transaction builder factory type implementing `TransactionBuilderFactory`
-pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
+pub async fn init<C: TransactionBuilderFactory>(
 	composer: C,
 	opt: &Config,
 	canceller: CancellationToken,

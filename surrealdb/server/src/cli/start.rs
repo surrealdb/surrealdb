@@ -7,7 +7,6 @@ use std::time::Duration;
 use anyhow::Result;
 use clap::Args;
 use surrealdb::engine::{any, tasks};
-use surrealdb_core::buc::BucketStoreProvider;
 use surrealdb_core::kvs::TransactionBuilderFactory;
 use surrealdb_core::observe::{ExecutionObserver, FanOutObserver};
 use surrealdb_core::options::EngineOptions;
@@ -218,11 +217,7 @@ struct StartCommandWebTlsOptions {
 ///   - `RouterFactory` (HTTP router factory for route/middleware customization)
 ///   - `ConfigCheck` (validates configuration before initialization)
 pub async fn init<
-	C: TransactionBuilderFactory
-		+ RouterFactory
-		+ ConfigCheck
-		+ BucketStoreProvider
-		+ ObservabilityProvider,
+	C: TransactionBuilderFactory + RouterFactory + ConfigCheck + ObservabilityProvider,
 >(
 	mut composer: C,
 	StartCommandArguments {

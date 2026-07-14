@@ -4,6 +4,7 @@ use anyhow::{Result, bail};
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry;
 
+use crate::buc::store::metered::MeteredObjectStore;
 use crate::buc::store::prefixed::PrefixedStore;
 use crate::buc::store::{ObjectKey, ObjectStore};
 use crate::buc::{BucketStoreProvider, Config};
@@ -11,11 +12,30 @@ use crate::catalog::providers::BucketProvider;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::err::Error;
 use crate::kvs::Transaction;
+use crate::observe::ExecutionObserver;
 
 struct Inner {
 	connections: DashMap<BucketConnectionKey, Arc<dyn ObjectStore>>,
 	provider: Box<dyn BucketStoreProvider>,
 	config: Config,
+	observer: Arc<dyn ExecutionObserver>,
+}
+
+/// Map a backend URL to a fixed, low-cardinality provider label for metrics.
+fn backend_label(url: &str) -> &'static str {
+	let scheme = url
+		.split_once("://")
+		.map(|(s, _)| s)
+		.or_else(|| url.split_once(':').map(|(s, _)| s))
+		.unwrap_or(url);
+	match scheme {
+		"s3" | "s3+http" | "s3+https" => "s3",
+		"gs" | "gcs" => "gcs",
+		"az" | "azure" => "azure",
+		"file" => "file",
+		"memory" => "memory",
+		_ => "other",
+	}
 }
 
 /// Manages bucket storage connections with caching.
@@ -35,12 +55,26 @@ impl BucketsManager {
 	///
 	/// # Arguments
 	/// * `provider` - The bucket store provider used to create new connections
-	pub(crate) fn new(provider: Box<dyn BucketStoreProvider>, config: Config) -> Self {
+	/// * `config` - Bucket configuration (allowlist, global bucket, …)
+	/// * `observer` - Execution observer that receives per-operation traffic metrics; connections
+	///   are wrapped in a [`MeteredObjectStore`]
+	pub(crate) fn new(
+		provider: Box<dyn BucketStoreProvider>,
+		config: Config,
+		observer: Arc<dyn ExecutionObserver>,
+	) -> Self {
 		BucketsManager(Arc::new(Inner {
 			connections: DashMap::new(),
 			provider,
 			config,
+			observer,
 		}))
+	}
+
+	/// Wrap a freshly-connected store so its operations are reported to the
+	/// datastore observer as `surrealdb.bucket.*` metrics.
+	fn meter(&self, store: Arc<dyn ObjectStore>, url: &str) -> Arc<dyn ObjectStore> {
+		Arc::new(MeteredObjectStore::new(store, Arc::clone(&self.0.observer), backend_label(url)))
 	}
 
 	/// Clears all cached bucket connections.
@@ -64,7 +98,8 @@ impl BucketsManager {
 		if !global && self.0.config.only_global {
 			bail!(Error::GlobalBucketEnforced);
 		}
-		self.0.provider.connect(url, global, readonly, self.0.config.clone()).await
+		let store = self.0.provider.connect(url, global, readonly, self.0.config.clone()).await?;
+		Ok(self.meter(store, url))
 	}
 
 	/// Connects to a global bucket with automatic namespacing.
@@ -88,7 +123,8 @@ impl BucketsManager {
 
 		// Create a prefixstore for the specified bucket
 		let key = ObjectKey::new(format!("/{ns}/{db}/{bu}"));
-		Ok(Arc::new(PrefixedStore::new(global, key)))
+		let prefixed: Arc<dyn ObjectStore> = Arc::new(PrefixedStore::new(global, key));
+		Ok(self.meter(prefixed, url))
 	}
 
 	/// Gets or creates a connection to a bucket's object store.

@@ -17,8 +17,11 @@ use crate::err::Error;
 use crate::val::{CoerceError, Datetime, File, Number, Object, Value};
 
 #[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod cloud;
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod file;
 pub(crate) mod memory;
+pub(crate) mod metered;
 pub(crate) mod path;
 pub(crate) mod prefixed;
 

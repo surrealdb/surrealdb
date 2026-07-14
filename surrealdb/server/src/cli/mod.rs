@@ -43,7 +43,6 @@ use semver::Version;
 #[cfg(feature = "cli")]
 use sql::SqlCommandArguments;
 use start::StartCommandArguments;
-use surrealdb_core::buc::BucketStoreProvider;
 use surrealdb_core::kvs::TransactionBuilderFactory;
 use upgrade::UpgradeCommandArguments;
 use validate::ValidateCommandArguments;
@@ -237,11 +236,7 @@ impl LogFileRotation {
 ///   - `RouterFactory` (constructs the HTTP router, allowing embedders to customize server routes)
 ///   - `ConfigCheck` (validates configuration before initialization)
 pub async fn init<
-	C: TransactionBuilderFactory
-		+ RouterFactory
-		+ ConfigCheck
-		+ BucketStoreProvider
-		+ crate::observe::ObservabilityProvider,
+	C: TransactionBuilderFactory + RouterFactory + ConfigCheck + crate::observe::ObservabilityProvider,
 >(
 	composer: C,
 ) -> ExitCode {

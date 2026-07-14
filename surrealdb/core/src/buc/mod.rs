@@ -66,9 +66,10 @@ type BoxFuture<'a, R> = Pin<Box<dyn Future<Output = R> + 'a + Send + Sync>>;
 /// Trait for creating connections to bucket storage backends.
 ///
 /// Implementors of this trait can parse storage URLs and create appropriate
-/// [`ObjectStore`] instances. The community edition supports `memory://` and
-/// `file://` backends, while enterprise editions may support additional backends
-/// like S3, GCS, or Azure Blob Storage.
+/// [`ObjectStore`] instances. Supported backends are `memory://`, `file://`,
+/// and cloud object storage via the `object_store` crate: S3 / S3-compatible
+/// (`s3://`, `s3+http://`, `s3+https://`), Google Cloud Storage (`gs://`,
+/// `gcs://`), and Azure Blob Storage (`az://`, `azure://`).
 pub trait BucketStoreProvider: BucketStoreProviderRequirements {
 	/// Connect to a bucket storage backend.
 	///
@@ -109,6 +110,15 @@ impl BucketStoreProvider for CommunityComposer {
 			#[cfg(not(target_arch = "wasm32"))]
 			if let Some(opts) = FileStore::parse_url(url, &config).await? {
 				return Ok(Arc::new(FileStore::new(opts, config)) as Arc<dyn ObjectStore>);
+			}
+
+			// Cloud object storage — AWS S3 (and S3-compatible services like
+			// MinIO, Backblaze B2, Wasabi, Cloudflare R2), Google Cloud Storage,
+			// and Azure Blob Storage — all via the `object_store` crate. See
+			// `store::cloud` for the supported URL formats.
+			#[cfg(not(target_arch = "wasm32"))]
+			if let Some(store) = crate::buc::store::cloud::connect(url)? {
+				return Ok(store);
 			}
 
 			bail!(Error::UnsupportedBackend)

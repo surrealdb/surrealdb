@@ -65,6 +65,8 @@ pub mod scope {
 	pub static SLOW_QUERY: &str = "surrealdb.slow_query";
 	/// Storage-backend manifest gauges.
 	pub static STORAGE: &str = "surrealdb.storage";
+	/// Object-storage bucket traffic (`file::*`: bytes in/out, operation counts).
+	pub static BUCKET: &str = "surrealdb.bucket";
 	/// GraphQL operation lifecycle counters / histograms.
 	pub static GRAPHQL: &str = "surrealdb.graphql";
 	/// MCP (Model Context Protocol) tool invocation counters / histograms.
@@ -75,6 +77,7 @@ pub mod scope {
 	pub static ALL: &[&str] = &[
 		AUDIT,
 		AUTH,
+		BUCKET,
 		DS,
 		GRAPHQL,
 		HTTP,
@@ -161,6 +164,12 @@ pub mod names {
 	pub static NETWORK_RECEIVED: &str = "surrealdb.network.received";
 	pub static NETWORK_SENT: &str = "surrealdb.network.sent";
 
+	// --- Bucket (scope: BUCKET) ----------------------------------------
+
+	pub static BUCKET_SENT_BYTES: &str = "surrealdb.bucket.sent_bytes";
+	pub static BUCKET_RECEIVED_BYTES: &str = "surrealdb.bucket.received_bytes";
+	pub static BUCKET_OPERATIONS: &str = "surrealdb.bucket.operations";
+
 	// --- HTTP (scope: HTTP) --------------------------------------------
 
 	pub static HTTP_REQUEST_TOTAL: &str = "surrealdb.http.request";
@@ -234,6 +243,10 @@ pub mod attrs {
 	pub static HTTP_STATUS_CODE: &str = "http.response.status_code";
 	/// Inbound / outbound (`received` / `sent`) on network byte counters.
 	pub static NETWORK_DIRECTION: &str = "direction";
+	/// Bucket storage backend label (`s3` / `gcs` / `azure` / `file` / `memory`).
+	pub static BACKEND: &str = "backend";
+	/// Bucket object-store operation (`put` / `get` / `list` / …).
+	pub static BUCKET_OP: &str = "op";
 	/// Bounded error classification recorded only when `outcome="error"`. Sourced
 	/// from [`error_class`] constants so cardinality stays closed.
 	pub static ERROR_CLASS: &str = "error_class";
@@ -271,6 +284,9 @@ mod tests {
 	fn every_instrument_name_starts_with_surrealdb_prefix() {
 		const NAMES: &[&str] = &[
 			names::AUTH_TOTAL,
+			names::BUCKET_OPERATIONS,
+			names::BUCKET_RECEIVED_BYTES,
+			names::BUCKET_SENT_BYTES,
 			names::BUILD_INFO,
 			names::GRAPHQL_OPERATION_DURATION,
 			names::GRAPHQL_OPERATION_TOTAL,
