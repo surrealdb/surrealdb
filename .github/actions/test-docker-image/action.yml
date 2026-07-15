@@ -1,0 +1,101 @@
+name: 'Test Docker image'
+description: 'Standardised image gate: Trivy scan + smoke test (version, startup, HTTP health) for the engine and downstream images'
+
+inputs:
+  image-ref:
+    description: 'Image reference to scan and smoke-test (local tag or registry ref)'
+    required: true
+  platform:
+    description: 'Platform to run the smoke test on'
+    required: false
+    default: 'linux/amd64'
+  start-args:
+    description: 'Arguments passed to the image entrypoint to start the server'
+    required: false
+    default: 'start --log trace memory'
+  container-port:
+    description: 'Container port the server listens on. It is published to an EPHEMERAL host port (chosen by Docker), so parallel smoke tests on the same host never collide.'
+    required: false
+    default: '8000'
+  ready-timeout-seconds:
+    description: 'How long to wait for /health to respond before failing'
+    required: false
+    default: '60'
+  trivy-severity:
+    description: 'Trivy severities that fail the scan'
+    required: false
+    default: 'CRITICAL,HIGH'
+  trivy-vuln-type:
+    description: 'Trivy vulnerability types to scan'
+    required: false
+    default: 'os,library'
+
+runs:
+  using: 'composite'
+  steps:
+    # OS/library scan. Fail on CRITICAL/HIGH so a vulnerable image never becomes
+    # a promotable artifact (the pushed engine image / the stitched downstream manifest).
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+      with:
+        image-ref: ${{ inputs.image-ref }}
+        format: 'table'
+        exit-code: '1'
+        vuln-type: ${{ inputs.trivy-vuln-type }}
+        severity: ${{ inputs.trivy-severity }}
+
+    # Functional smoke test: the entrypoint is the server binary, so `version`
+    # runs it directly; then boot the server and wait for the HTTP /health
+    # endpoint. Polling /health (rather than exec-ing the binary's readiness
+    # subcommand) is binary-agnostic, so the same test works for the engine and
+    # downstream images, whose entrypoint binaries and readiness subcommands differ.
+    - name: Smoke test the image
+      shell: bash
+      env:
+        IMAGE_REF: ${{ inputs.image-ref }}
+        PLATFORM: ${{ inputs.platform }}
+        START_ARGS: ${{ inputs.start-args }}
+        CONTAINER_PORT: ${{ inputs.container-port }}
+        READY_TIMEOUT: ${{ inputs.ready-timeout-seconds }}
+      run: |
+        set -euo pipefail
+
+        echo "== ${IMAGE_REF}: version =="
+        docker run --platform "$PLATFORM" --rm "$IMAGE_REF" version
+
+        echo "== ${IMAGE_REF}: startup =="
+        # Publish to an EPHEMERAL host port (127.0.0.1:0) rather than a fixed one:
+        # this action's two matrix legs (prod/dev) can land on the same self-hosted
+        # host sharing one Docker daemon, and a fixed host port would collide.
+        # START_ARGS is intentionally word-split into separate CLI arguments.
+        # shellcheck disable=SC2086
+        cid=$(docker run -d -p "127.0.0.1:0:${CONTAINER_PORT}" --platform "$PLATFORM" "$IMAGE_REF" ${START_ARGS})
+        trap 'docker stop "$cid" >/dev/null 2>&1 || true; docker rm "$cid" >/dev/null 2>&1 || true' EXIT
+
+        # Ask Docker which host port it mapped the container port to.
+        hostport=$(docker port "$cid" "${CONTAINER_PORT}/tcp" | head -n1 | sed 's/.*://')
+        if [ -z "$hostport" ]; then
+          echo "::error::Could not determine the mapped host port for ${IMAGE_REF}"
+          docker logs "$cid" || true
+          exit 1
+        fi
+        health="http://127.0.0.1:${hostport}/health"
+
+        echo "Waiting up to ${READY_TIMEOUT}s for ${health} ..."
+        ready=false
+        for _ in $(seq 1 "$READY_TIMEOUT"); do
+          code=$(curl -s -o /dev/null -w '%{http_code}' "$health" || echo 000)
+          if [ "$code" = "200" ]; then
+            ready=true
+            echo "Container is healthy (HTTP ${code})"
+            break
+          fi
+          sleep 1
+        done
+
+        if [ "$ready" != "true" ]; then
+          echo "::error::${IMAGE_REF} did not become healthy within ${READY_TIMEOUT}s"
+          echo "---- container logs ----"
+          docker logs "$cid" || true
+          exit 1
+        fi

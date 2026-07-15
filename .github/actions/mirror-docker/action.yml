@@ -1,0 +1,127 @@
+name: 'Mirror Docker image'
+description: 'Faithfully mirror a prebuilt multi-arch image from private ECR to the public DockerHub, stripping build attestations'
+
+inputs:
+  ecr-registry:
+    description: 'ECR registry host (e.g. <account>.dkr.ecr.<region>.amazonaws.com)'
+    required: true
+  ecr-repository:
+    description: 'ECR repository name holding the rolling images'
+    required: true
+  source-tag:
+    description: 'Rolling source tag (without the -dev suffix), e.g. rolling-<branch-slug>-<sha>'
+    required: true
+  tag-prefix:
+    description: 'Public image tag prefix (sanitized release name), e.g. v3.1.2 or nightly'
+    required: true
+  tag-suffix:
+    description: 'Public image tag suffix (e.g. -dev)'
+    required: false
+    default: ''
+  environment:
+    description: 'Release environment (nightly, alpha, beta, stable)'
+    required: true
+  latest:
+    description: 'Whether to also publish the :latest tag'
+    required: false
+    default: 'false'
+  docker-user:
+    description: 'DockerHub username'
+    required: true
+  docker-pass:
+    description: 'DockerHub password'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Buildx
+      uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+    # Ambient auth: the private runner's IAM instance role provides ECR
+    # credentials, so no configure-aws-credentials / static keys are needed.
+    - name: Login to Amazon ECR
+      shell: bash
+      env:
+        ECR_REGISTRY: ${{ inputs.ecr-registry }}
+      run: |
+        set -euo pipefail
+        region="$(printf '%s' "$ECR_REGISTRY" | cut -d. -f4)"
+        aws ecr get-login-password --region "$region" \
+          | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+
+    - name: Login to DockerHub
+      uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+      with:
+        username: ${{ inputs.docker-user }}
+        password: ${{ inputs.docker-pass }}
+
+    # Mirror the multi-arch image from ECR to DockerHub by recreating the index
+    # from the per-platform manifests ONLY. This deliberately omits the
+    # BuildKit attestation manifests (provenance/SBOM), whose in-toto
+    # subject/materials encode the ECR registry host and AWS account ID. The
+    # per-platform manifest digests (and therefore the layers) are preserved, so
+    # the public image is byte-identical to run; only the build attestations are
+    # dropped. Image/binary signing + clean attestation regeneration is planned
+    # as a follow-up.
+    - name: Mirror image (strip attestations)
+      shell: bash
+      env:
+        ECR_REGISTRY: ${{ inputs.ecr-registry }}
+        ECR_REPOSITORY: ${{ inputs.ecr-repository }}
+        SOURCE_TAG: ${{ inputs.source-tag }}
+        TAG_PREFIX: ${{ inputs.tag-prefix }}
+        TAG_SUFFIX: ${{ inputs.tag-suffix }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        LATEST: ${{ inputs.latest }}
+      run: |
+        set -euo pipefail
+
+        src="${ECR_REGISTRY}/${ECR_REPOSITORY}:${SOURCE_TAG}${TAG_SUFFIX}"
+        raw=$(docker buildx imagetools inspect "$src" --raw)
+
+        # Per-platform manifest digests. The arch filter naturally excludes the
+        # attestation manifests (which report platform unknown/unknown).
+        amd64=$(echo "$raw" | jq -r '.manifests[] | select(.platform.os=="linux" and .platform.architecture=="amd64") | .digest' | head -n1)
+        arm64=$(echo "$raw" | jq -r '.manifests[] | select(.platform.os=="linux" and .platform.architecture=="arm64") | .digest' | head -n1)
+
+        if [[ -z "$amd64" || -z "$arm64" ]]; then
+          echo "::error::Could not resolve linux/amd64 + linux/arm64 platform digests from ${SOURCE_TAG}${TAG_SUFFIX}"
+          exit 1
+        fi
+
+        # Public tag matrix (mirrors the previous docker-build behaviour).
+        dest="surrealdb/surrealdb"
+        tags=("${dest}:${TAG_PREFIX}${TAG_SUFFIX}")
+        if [[ "$ENVIRONMENT" == "stable" ]]; then
+          major=$(echo "$TAG_PREFIX" | cut -d. -f1)
+          minor=$(echo "$TAG_PREFIX" | cut -d. -f2)
+          tags+=("${dest}:${major}.${minor}${TAG_SUFFIX}" "${dest}:${major}${TAG_SUFFIX}")
+        fi
+        if [[ "$LATEST" == "true" ]]; then
+          tags+=("${dest}:latest${TAG_SUFFIX}")
+        fi
+
+        tag_args=()
+        for t in "${tags[@]}"; do
+          tag_args+=(--tag "$t")
+        done
+
+        echo "Mirroring ${SOURCE_TAG}${TAG_SUFFIX} -> ${tags[*]}"
+        docker buildx imagetools create "${tag_args[@]}" \
+          "${ECR_REGISTRY}/${ECR_REPOSITORY}@${amd64}" \
+          "${ECR_REGISTRY}/${ECR_REPOSITORY}@${arm64}"
+
+        # Faithful-mirror check: every public tag must resolve to the SAME
+        # per-platform digests as the ECR source. (The top-level index digest
+        # intentionally differs because the attestation manifests were dropped.)
+        for t in "${tags[@]}"; do
+          draw=$(docker buildx imagetools inspect "$t" --raw)
+          d_amd=$(echo "$draw" | jq -r '.manifests[] | select(.platform.os=="linux" and .platform.architecture=="amd64") | .digest' | head -n1)
+          d_arm=$(echo "$draw" | jq -r '.manifests[] | select(.platform.os=="linux" and .platform.architecture=="arm64") | .digest' | head -n1)
+          if [[ "$d_amd" != "$amd64" || "$d_arm" != "$arm64" ]]; then
+            echo "::error::Mirror verification failed for ${t} (amd64 ${d_amd} vs ${amd64}; arm64 ${d_arm} vs ${arm64})"
+            exit 1
+          fi
+          echo "Verified ${t} mirrors the ECR source faithfully"
+        done

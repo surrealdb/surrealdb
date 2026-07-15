@@ -20,45 +20,61 @@ runs:
     - name: Setup environment
       uses: ./.github/actions/setup-environment
       with:
-        # `cargo publish --workspace` rebuilds the full workspace (rocksdb +
-        # wasm-opt C/C++ builds) in debug to verify each tarball; on the
-        # GitHub-hosted ubuntu-latest runner that exhausts the disk, so reclaim
-        # the pre-installed toolchains first (Linux-only, no-op elsewhere).
+        # Precautionary headroom on the GitHub-hosted ubuntu-latest runner
+        # (Linux-only, no-op elsewhere). Publishing now runs with --no-verify
+        # (the rolling `package` gate already verify-built the workspace on this
+        # SHA), so this no longer needs to fit a full rocksdb + wasm-opt rebuild;
+        # it's kept as cheap insurance against packaging many large crates.
         free-disk-space: 'true'
 
     - name: Install release-plz
-      uses: taiki-e/install-action@80e6af7a2ec7f280fffe2d0a9d3a12a9d11d86e9 # (Actions must be pinned by commit hash) v2.75.1
+      uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # (Actions must be pinned by commit hash) v2.81.11
       with:
-        tool: release-plz@0.3.30
+        tool: release-plz@0.3.159
 
     - name: Configure release-plz
       shell: bash
       run: |
+        # publish_no_verify passes `--no-verify` to `cargo publish`, so release
+        # does NOT rebuild each crate to verify its tarball before upload. That
+        # verification already happened at rolling-build time (the `package`
+        # channel gate runs `cargo package --locked --workspace` on this exact
+        # SHA and gates the manifest), so re-doing the full workspace rebuild
+        # here — rocksdb + wasm-opt C/C++ builds and all — is pure duplication.
+        # This is the build-once / promote-many contract for crates: verify once
+        # on push, upload the already-verified crates at promote time.
         cat << EOF > /tmp/release-plz.toml
         [workspace]
         changelog_update = false
         git_release_enable = false
         semver_check = false
         git_tag_enable = false
+        publish_no_verify = true
         EOF
 
+    # No CARGO_REGISTRY_TOKEN here: `cargo publish --dry-run` never contacts the
+    # registry to upload, so the crates.io token is deliberately kept OUT of
+    # scope for dry-runs (and for the nightly path, which only ever dry-runs).
+    # The token is only injected into the real publish step below.
     - name: Publish the crate (dry-run)
       if: ${{ inputs.publish == 'false' || inputs.nightly-release == 'true' }}
       shell: bash
-      env:
-        CARGO_REGISTRY_TOKEN: ${{ inputs.cargo-registry-token }}
       run: |
         set -x
         
         # Create a temporary branch in case the git ref is not a branch
         git checkout -b crate
         
-        echo "Running cargo publish --workspace --dry-run"
+        echo "Running cargo publish --workspace --dry-run --no-verify"
         echo "Note: Failures here are informational and do not block nightly builds"
         echo "Common cause: workspace crates with new APIs not yet published"
-        
+
+        # --no-verify: the rolling `package` gate already ran
+        # `cargo package --locked --workspace` on this SHA (build-once /
+        # promote-many), so skip the redundant per-crate rebuild. This stays a
+        # cheap name/version/registry sanity check on top of that gate.
         # Let this fail naturally - workflow will handle continuation
-        cargo publish --workspace --dry-run
+        cargo publish --workspace --dry-run --no-verify
 
     - name: Publish the crate
       if: ${{ inputs.publish == 'true' && inputs.nightly-release != 'true' }}

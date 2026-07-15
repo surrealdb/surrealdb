@@ -3,6 +3,12 @@
 # Scheduled and manual runs update main from surrealdb/surrealdb. A manual "push"
 # run sends any missing releases (and their tags) to surrealdb/surrealdb; the
 # variant that includes main also pushes main (which may carry unreleased fixes).
+#
+# A "push" dispatch is gated by the `upstream` environment. Because the approval
+# happens BEFORE the gated job runs, an ungated `plan` preflight computes exactly
+# what would be published (the main commit range and the new/updated releases +
+# tags) and writes it to the run summary, so the reviewer can see precisely what
+# they are approving or rejecting before releasing the gate.
 
 name: Sync with upstream
 
@@ -14,7 +20,12 @@ run-name: >-
           || 'Sync releases → surrealdb/surrealdb (manual)')
       || (github.event_name == 'workflow_dispatch'
           && 'Pull surrealdb/surrealdb main → main (manual)'
-          || 'Pull surrealdb/surrealdb main → main') }}
+          || 'Pull surrealdb/surrealdb main → main') }}${{
+      (github.event_name == 'workflow_dispatch'
+       && startsWith(inputs.direction, 'push')
+       && contains(inputs.direction, 'main')
+       && inputs.main_commit != '')
+      && format(' (main up to {0})', inputs.main_commit) || '' }}
 
 on:
   schedule:
@@ -29,6 +40,11 @@ on:
           - pull
           - push (releases)
           - push (releases + main)
+      main_commit:
+        description: "Commit to sync main up to (push + main only; blank = entire main)"
+        type: string
+        default: ""
+        required: false
       dry_run:
         description: "Dry run (validate but make no changes)"
         type: boolean
@@ -47,7 +63,7 @@ permissions: {}
 jobs:
   pull:
     name: Sync main from surrealdb/surrealdb
-    if: github.repository != 'surrealdb/surrealdb'
+    if: github.repository == vars.PRIVATE_ENGINE_REPO
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -66,8 +82,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      # Defaults to an installation token for this repo (no owner/repositories),
-      # which also keeps this repo's name out of this publicly-synced file.
+      # Defaults to an installation token for this repo (no owner/repositories).
       - name: Generate a token
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -219,14 +234,171 @@ jobs:
             --label "upstream-sync" \
             --body "$body"
 
-  push:
-    name: Sync releases and main back to surrealdb/surrealdb
+  # Preflight (ungated): compute and publish, to the run summary, exactly what a
+  # "push" dispatch would send to the public repo — the main commit range (the
+  # unreleased code that would become public) and the new/updated releases and
+  # tags. It runs BEFORE the `upstream` environment gate on `push`, so the
+  # reviewer can read the plan and know precisely what they are approving. It is
+  # read-only (no write token, no pushes) and reads only public data on the
+  # destination, so it is safe to run before approval.
+  plan:
+    name: Plan sync to surrealdb/surrealdb
     needs: [pull]
     if: >-
-      github.repository != 'surrealdb/surrealdb'
+      github.repository == vars.PRIVATE_ENGINE_REPO
       && github.event_name == 'workflow_dispatch'
       && startsWith(inputs.direction, 'push')
       && needs.pull.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Harden the runner (audit egress)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      # github.token reads this repo's releases (private, authorized) and the
+      # destination's public releases/tags (public, so no write token needed).
+      - name: Build sync plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SRC_REPO: ${{ github.repository }}
+          DST_REPO: surrealdb/surrealdb
+          DIRECTION: ${{ inputs.direction }}
+          MAIN_COMMIT: ${{ inputs.main_commit }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          S="$GITHUB_STEP_SUMMARY"
+
+          {
+            echo "## Sync plan → ${DST_REPO}"
+            echo ""
+            if [ "${DRY_RUN:-false}" = "true" ]; then
+              echo "> **Dry run** — nothing will be pushed even if approved."
+              echo ""
+            fi
+            echo "Approving this run publishes the items below to the **public** \`${DST_REPO}\` repository."
+            echo ""
+            echo "- **Direction:** \`${DIRECTION}\`"
+          } >> "$S"
+
+          git remote add public https://github.com/surrealdb/surrealdb.git
+          git fetch --quiet public main || true
+          git fetch --quiet --tags public || true
+
+          # ---- main plan (only when the "+ main" variant is selected) ----
+          if printf '%s' "$DIRECTION" | grep -q main; then
+            if [ -n "${MAIN_COMMIT:-}" ]; then
+              if ! target="$(git rev-parse --verify --quiet "${MAIN_COMMIT}^{commit}")"; then
+                { echo ""; echo "### main → ${DST_REPO}@main"; echo ""; echo "> ❌ ERROR: requested commit \`${MAIN_COMMIT}\` does not exist in this repository."; } >> "$S"
+                echo "::error::commit '${MAIN_COMMIT}' could not be resolved to a commit in this repository"
+                exit 1
+              fi
+              if ! git merge-base --is-ancestor "$target" HEAD; then
+                { echo ""; echo "### main → ${DST_REPO}@main"; echo ""; echo "> ❌ ERROR: \`${MAIN_COMMIT}\` is not an ancestor of main; only work merged into main can be synced."; } >> "$S"
+                echo "::error::commit '${MAIN_COMMIT}' is not an ancestor of main"
+                exit 1
+              fi
+            else
+              target="$(git rev-parse HEAD)"
+            fi
+            {
+              echo ""
+              echo "### main → ${DST_REPO}@main"
+              echo ""
+              echo "Target commit: \`$(git rev-parse --short "$target")\` — $(git log -1 --pretty=%s "$target")"
+            } >> "$S"
+            if git merge-base --is-ancestor public/main "$target" 2>/dev/null; then
+              count="$(git rev-list --count "public/main..$target")"
+              if [ "$count" -eq 0 ]; then
+                { echo ""; echo "Fast-forward: yes. \`${DST_REPO}@main\` is already up to date — no commits to publish."; } >> "$S"
+              else
+                {
+                  echo ""
+                  echo "Fast-forward: yes. **${count} commit(s)** would become public:"
+                  echo ""
+                  echo '```'
+                  git log --pretty='%h %s' "public/main..$target" | head -n 200
+                  [ "$count" -gt 200 ] && echo "... (showing first 200 of ${count})"
+                  echo '```'
+                } >> "$S"
+              fi
+            else
+              { echo ""; echo "> ⚠️ WARNING: not a fast-forward from \`${DST_REPO}@main\` (or its main could not be read). A real push would be rejected until this repo pulls upstream again."; } >> "$S"
+            fi
+          else
+            { echo ""; echo "### main"; echo ""; echo "_Not included in this run (releases only)._"; } >> "$S"
+          fi
+
+          # ---- releases plan ----
+          # New releases are the real new exposures (a new tag reaches new
+          # commits); existing releases are only reconciled for metadata/asset
+          # drift, so they are summarized as a count.
+          { echo ""; echo "### Releases → ${DST_REPO}"; echo ""; } >> "$S"
+
+          source_tags="$(gh api --paginate "repos/$SRC_REPO/releases?per_page=100" \
+            --jq '.[] | select(.draft | not) | .tag_name' | sort -u)"
+          if [ -z "$source_tags" ]; then
+            echo "_No source releases to sync._" >> "$S"
+            exit 0
+          fi
+          dst_tags="$(gh api --paginate "repos/$DST_REPO/releases?per_page=100" \
+            --jq '.[] | select(.draft | not) | .tag_name' 2>/dev/null | sort -u || true)"
+          public_tags="$(git ls-remote --tags public \
+            | awk '{print $2}' | sed -e 's#^refs/tags/##' -e 's/\^{}$//' | sort -u)"
+
+          new_tags="$(comm -23 <(printf '%s\n' "$source_tags") <(printf '%s\n' "$dst_tags"))"
+          n_new="$(printf '%s' "$new_tags" | grep -c . || true)"
+          n_existing="$(comm -12 <(printf '%s\n' "$source_tags") <(printf '%s\n' "$dst_tags") | grep -c . || true)"
+
+          if [ "$n_new" -eq 0 ]; then
+            echo "No new releases — the ${n_existing} shared release(s) will be reconciled only if their metadata or assets have drifted." >> "$S"
+            exit 0
+          fi
+
+          {
+            echo "**${n_new} new release(s)** would be created (and ${n_existing} existing release(s) reconciled if drifted):"
+            echo ""
+            echo "| Tag | Title | Pre-release | Assets | Tag push |"
+            echo "| --- | --- | --- | --- | --- |"
+          } >> "$S"
+
+          while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
+            meta="$(gh release view --repo "$SRC_REPO" --json name,isPrerelease,assets -- "$tag" 2>/dev/null || true)"
+            if [ -z "$meta" ]; then
+              echo "| \`$tag\` | (could not read source metadata) | ? | ? | ? |" >> "$S"
+              continue
+            fi
+            title="$(printf '%s' "$meta" | jq -r '.name // ""')"; [ -z "$title" ] && title="$tag"
+            is_pre="$(printf '%s' "$meta" | jq -r '.isPrerelease')"
+            n_assets="$(printf '%s' "$meta" | jq -r '.assets | length')"
+            if printf '%s\n' "$public_tags" | grep -qxF "$tag"; then tagnote="exists"; else tagnote="**new tag**"; fi
+            echo "| \`$tag\` | ${title//|/\\|} | $is_pre | $n_assets | $tagnote |" >> "$S"
+          done <<< "$new_tags"
+
+  push:
+    name: >-
+      ${{ contains(inputs.direction, 'main')
+          && 'Sync releases and main back to surrealdb/surrealdb'
+          || 'Sync releases back to surrealdb/surrealdb' }}
+    needs: [pull, plan]
+    if: >-
+      github.repository == vars.PRIVATE_ENGINE_REPO
+      && github.event_name == 'workflow_dispatch'
+      && startsWith(inputs.direction, 'push')
+      && needs.pull.result == 'success'
+      && needs.plan.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     environment: upstream
@@ -283,25 +455,46 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           DRY_RUN: ${{ inputs.dry_run }}
+          MAIN_COMMIT: ${{ inputs.main_commit }}
         run: |
           set -euo pipefail
           git fetch public main
+          # Resolve which commit on main to publish. With no commit supplied the
+          # whole main branch (HEAD) is synced; otherwise only history up to the
+          # given commit is pushed and anything merged after it is ignored, so
+          # the operator keeps full control of what is sent upstream. The commit
+          # must already be on main (an ancestor of HEAD) so only work that has
+          # actually been merged here can ever be published.
+          if [ -n "${MAIN_COMMIT:-}" ]; then
+            if ! target="$(git rev-parse --verify --quiet "${MAIN_COMMIT}^{commit}")"; then
+              echo "::error::commit '${MAIN_COMMIT}' could not be resolved to a commit in this repository"
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "$target" HEAD; then
+              echo "::error::commit '${MAIN_COMMIT}' is not an ancestor of main; only commits merged into main can be synced"
+              exit 1
+            fi
+            echo "Syncing main up to commit ${target} (requested: ${MAIN_COMMIT})"
+          else
+            target="$(git rev-parse HEAD)"
+            echo "Syncing entire main branch (${target})"
+          fi
           if [ "${DRY_RUN:-false}" = "true" ]; then
             echo "[dry-run] preflight: push main to surrealdb/surrealdb (no changes will be made)"
             problems=0
             # Assert the push would be a fast-forward; never rewrite history.
-            if git merge-base --is-ancestor public/main HEAD; then
+            if git merge-base --is-ancestor public/main "$target"; then
               echo "[dry-run] fast-forward check: OK"
             else
-              echo "::error::[dry-run] public/main is not an ancestor of HEAD; a real push would be rejected (non-fast-forward; pull first)"
+              echo "::error::[dry-run] public/main is not an ancestor of the target commit; a real push would be rejected (non-fast-forward; pull first)"
               problems=$((problems + 1))
             fi
             # Client-side check: auth works and the update is a fast-forward. It
             # cannot see branch rules, so the ruleset probe below covers those.
-            if git push --dry-run public HEAD:main; then
+            if git push --dry-run public "$target":main; then
               echo "[dry-run] client-side push check: OK"
             else
-              echo "::error::[dry-run] 'git push --dry-run public HEAD:main' failed (auth or non-fast-forward)"
+              echo "::error::[dry-run] 'git push --dry-run public <target>:main' failed (auth or non-fast-forward)"
               problems=$((problems + 1))
             fi
             # Confirm the app can bypass any pull_request rule on main. Unlike the
@@ -333,11 +526,11 @@ jobs:
             exit 0
           fi
           # Assert the push is a fast-forward; never rewrite remote history.
-          if ! git merge-base --is-ancestor public/main HEAD; then
-            echo "::error::public main is not an ancestor of HEAD; re-run after pulling again."
+          if ! git merge-base --is-ancestor public/main "$target"; then
+            echo "::error::public main is not an ancestor of the target commit; re-run after pulling again."
             exit 1
           fi
-          git push public HEAD:main
+          git push public "$target":main
 
       - name: Sync releases (and their tags) to surrealdb/surrealdb
         env:

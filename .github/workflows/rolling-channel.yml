@@ -1,0 +1,507 @@
+# Rolling channel (reusable)
+#
+# Builds and stores ONE channel's release-ready engine artifact set for a single
+# commit: the binary matrix (+ macOS universal), the multi-arch Docker images
+# (scanned before push to the registry), and the
+# rolling-builds/<slug>/<sha>/engine.json manifest that marks the engine side of
+# the commit as releasable for that channel. The downstream side records its own
+# separate downstream.json (see rolling-downstream.yml), built by the separate
+# rolling-downstream-build.yml workflow.
+#
+# rolling-build.yml calls this once per push for the branch's channel (the
+# `nightly` channel on main, or the line's channel on releases/*), with its
+# version, artifact name and S3/registry namespace.
+#
+# Crate packaging / version-drift checks run as channel gates here (in parallel
+# with the artifact matrix, see check-versions/package below). They don't block
+# the build, but they gate the engine.json manifest, so a commit that fails a
+# gate produces artifacts that can never be promoted.
+
+name: Rolling channel
+
+on:
+  workflow_call:
+    inputs:
+      name:
+        description: 'Artifact/file name prefix (e.g. rolling-<sha>)'
+        required: true
+        type: string
+      build-metadata:
+        description: 'Build metadata baked into the binary (date.rev)'
+        required: true
+        type: string
+      version-override:
+        description: 'SURREAL_BUILD_VERSION override; empty falls back to the Cargo.toml version'
+        required: false
+        default: ''
+        type: string
+      branch-slug:
+        description: 'Slug the artifacts are namespaced under (e.g. main or releases-4-0)'
+        required: true
+        type: string
+      branch:
+        description: 'Branch name the artifacts were built from (e.g. main or releases/4.0)'
+        required: true
+        type: string
+      s3-prefix:
+        description: 'S3 prefix for this channel (rolling-builds/<slug>/<sha>)'
+        required: true
+        type: string
+      release-version:
+        description: 'Version recorded in the manifests (e.g. 4.0.0-nightly or 4.0.0-alpha.3)'
+        required: true
+        type: string
+      git-ref:
+        description: 'The exact commit to build, tag and key artifacts under. Normally the pushed commit; a manual rebuild passes the target sha so it reproduces that commit rather than the branch tip.'
+        required: true
+        type: string
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }} binary
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64-unknown-linux-gnu
+            platform: amd64
+            os: linux
+            runner: [runner-amd-32-cores]
+          - arch: aarch64-unknown-linux-gnu
+            platform: arm64
+            os: linux
+            runner: [runner-arm-32-cores]
+          - arch: x86_64-apple-darwin
+            platform: amd64
+            os: macos
+            runner: macos-15-xlarge
+          - arch: aarch64-apple-darwin
+            platform: arm64
+            os: macos
+            runner: macos-15-xlarge
+          - arch: x86_64-pc-windows-msvc
+            platform: amd64
+            os: windows
+            runner: windows-latest-32-cores
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.git-ref }}
+
+      - name: Build Linux binary
+        if: matrix.os == 'linux'
+        uses: ./.github/actions/build-linux
+        with:
+          arch: ${{ matrix.arch }}
+          platform: ${{ matrix.platform }}
+          name: ${{ inputs.name }}
+          version-override: ${{ inputs.version-override }}
+          build-metadata: ${{ inputs.build-metadata }}
+          upload: true
+          release: true
+
+      - name: Build macOS binary
+        if: matrix.os == 'macos'
+        uses: ./.github/actions/build-macos
+        with:
+          arch: ${{ matrix.arch }}
+          platform: ${{ matrix.platform }}
+          name: ${{ inputs.name }}
+          version-override: ${{ inputs.version-override }}
+          build-metadata: ${{ inputs.build-metadata }}
+          upload: true
+          release: true
+
+      - name: Build Windows binary
+        if: matrix.os == 'windows'
+        uses: ./.github/actions/build-windows
+        with:
+          arch: ${{ matrix.arch }}
+          platform: ${{ matrix.platform }}
+          name: ${{ inputs.name }}
+          version-override: ${{ inputs.version-override }}
+          build-metadata: ${{ inputs.build-metadata }}
+          upload: true
+          release: true
+
+  macos-universal:
+    name: Package macOS universal binary
+    needs: [build]
+    runs-on: macos-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.git-ref }}
+
+      - name: Package macOS universal binary
+        uses: ./.github/actions/package-macos-universal
+        with:
+          name: ${{ inputs.name }}
+
+  publish-s3:
+    name: Publish binaries to S3
+    # Waits on the crate gates: never upload binaries to S3 for a commit that a
+    # failed gate would make unpromotable. `build` still runs in parallel with
+    # the gates; only this persisting step waits.
+    needs: [build, macos-universal, check-versions, package]
+    # Private runner: rolling artifacts are transient build outputs kept in the
+    # private CI bucket, reached via the runner's ambient IAM role (no static
+    # keys). The label comes from a repo/org variable.
+    runs-on: ${{ vars.RUNNER_AMD }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      # Only this channel's artifacts, keeping the per-artifact directory layout.
+      - name: Download artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: artifacts
+          pattern: surreal-${{ inputs.name }}.*
+
+      # Rolling binaries are transient build outputs, so they go to the private
+      # CI bucket (not the public download bucket). Ambient IAM creds from the
+      # private runner; region is the bucket's home region.
+      - name: Upload to the rolling prefix
+        env:
+          ROLLING_BUCKET: ${{ secrets.AWS_S3_GITHUB_ACTIONS_BUCKET_NAME }}
+          S3_PREFIX: ${{ inputs.s3-prefix }}
+          AWS_REGION: us-east-1
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+          for file in artifacts/**/*.tgz artifacts/**/*.txt artifacts/**/*.exe; do
+            aws s3 cp --cache-control 'no-store' "$file" "s3://${ROLLING_BUCKET}/${S3_PREFIX}/"
+          done
+
+  docker:
+    name: Docker ${{ matrix.name }}
+    # Waits on the crate gates: never build/push an image to ECR for a commit a
+    # failed gate would make unpromotable. `build` overlaps the gates, so this
+    # adds no latency (the image build already waits for the binaries anyway).
+    needs: [build, check-versions, package]
+    # Private runner: pushes to ECR using the runner's ambient IAM instance role
+    # (no static keys). Label comes from a repo/org variable.
+    runs-on: ${{ vars.RUNNER_AMD }}
+    env:
+      ECR_REGISTRY: ${{ secrets.AWS_ECR_REGISTRY }}
+      ECR_REPOSITORY: ${{ secrets.AWS_ECR_REPOSITORY }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Prod image
+            build-target: prod-ci
+            tag-suffix: ''
+          - name: Dev image
+            build-target: dev-ci
+            tag-suffix: -dev
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.git-ref }}
+
+      - name: Download artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: artifacts
+          pattern: surreal-${{ inputs.name }}.*
+
+      # binfmt/QEMU for the arm64 image: the Dockerfile's CI targets have RUN
+      # steps that execute in the target arch, so the multi-arch build emulates
+      # arm64 on this amd64 runner. GitHub-hosted runners ship binfmt, but a
+      # self-hosted private runner may not, so register it explicitly.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      # Ambient auth: the private runner's IAM instance role provides ECR
+      # credentials, so no configure-aws-credentials / static keys are needed.
+      - name: Login to Amazon ECR
+        run: |
+          set -euo pipefail
+          # Region is derived from the registry host
+          # (<account>.dkr.ecr.<region>.amazonaws.com) so it can never drift from
+          # AWS_ECR_REGISTRY: an auth token for the wrong region is rejected on push.
+          region="$(printf '%s' "$ECR_REGISTRY" | cut -d. -f4)"
+          aws ecr get-login-password --region "$region" \
+            | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+
+      # Build the amd64 image locally first (no attestations, so it can be
+      # loaded into the docker daemon) so it can be smoke-tested and scanned
+      # BEFORE anything is pushed to ECR. A vulnerable image never reaches the
+      # registry, and therefore can never be promoted to a release.
+      - name: Build image locally for scanning (amd64)
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
+        with:
+          context: artifacts
+          load: true
+          platforms: linux/amd64
+          file: docker/Dockerfile
+          target: ${{ matrix.build-target }}
+          provenance: false
+          sbom: false
+          tags: surrealdb-rolling-local:amd64
+          build-args: |
+            ARTIFACT_PREFIX=surreal-${{ inputs.name }}
+
+      # Scan + smoke-test the local amd64 image BEFORE pushing to ECR, so a
+      # vulnerable or non-booting image never reaches the registry (and hence can
+      # never be promoted). amd64-only: the runtime base digest is shared across
+      # arches, so arm64 findings would match. Uses the shared test-docker-image
+      # action so the engine and downstream images run the identical gate (Trivy +
+      # version + startup + HTTP health).
+      - name: Test the Docker image (scan + smoke test)
+        uses: ./.github/actions/test-docker-image
+        with:
+          image-ref: surrealdb-rolling-local:amd64
+
+      - name: Build and push rolling image to ECR
+        # NOTE: provenance (mode=max) / SBOM attestations are stored in the
+        # *private* ECR here, which is fine and gives us an internal audit trail.
+        # The public DockerHub copy (release.yml) MUST NOT copy these attestations
+        # verbatim: their in-toto subject/materials encode the ECR registry host
+        # (and therefore the AWS account ID). The mirror strips them by
+        # recreating the index from the per-platform manifests only.
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
+        with:
+          context: artifacts
+          push: true
+          platforms: linux/amd64,linux/arm64
+          file: docker/Dockerfile
+          target: ${{ matrix.build-target }}
+          provenance: mode=max
+          sbom: true
+          tags: |
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:rolling-${{ inputs.branch-slug }}-${{ inputs.git-ref }}${{ matrix.tag-suffix }}
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ inputs.branch-slug }}${{ matrix.tag-suffix }}
+          build-args: |
+            ARTIFACT_PREFIX=surreal-${{ inputs.name }}
+
+      # Advisory audit-trail check that the engine image we just pushed carries the
+      # provenance + SBOM attestations we expect. Warning-only (and
+      # continue-on-error) so a missing attestation never blocks a release.
+      - name: Verify engine image attestations
+        continue-on-error: true
+        uses: ./.github/actions/verify-attestations
+        with:
+          image-ref: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:rolling-${{ inputs.branch-slug }}-${{ inputs.git-ref }}${{ matrix.tag-suffix }}
+
+  # Channel quality gates. These run in PARALLEL with the binary compile (the
+  # `build` matrix) — the two most expensive jobs overlap instead of running
+  # back-to-back. But every job that PERSISTS an artifact (publish-s3, docker)
+  # waits on these gates, so a commit that fails a gate — a publishable crate
+  # changed without a version bump, or a crate that no longer packages cleanly
+  # for crates.io — never has binaries pushed to S3 or images pushed to a
+  # registry. `finalize` also waits on them, so no engine.json is written and the
+  # commit is unpromotable.
+  check-versions:
+    name: Check crate versions (rolling)
+    runs-on: ubuntu-latest-4-cores
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.git-ref }}
+          # release-plz compares against history to detect changed crates.
+          fetch-depth: 0
+
+      - name: Check crate versions
+        uses: ./.github/actions/check-crate-versions
+
+  package:
+    name: Package crates (rolling)
+    # `cargo package` verifies each crate by compiling the whole workspace + deps.
+    # That overflows a hosted runner's default disk, so quality-package frees space
+    # first (see its setup-environment step). A bigger self-hosted runner was tried
+    # but didn't cut wall-clock: the verify compile is the bottleneck regardless of
+    # core count (it runs about as long as the per-target binary builds), so it
+    # never gated overall release time. The small hosted runner + disk cleanup is
+    # the cheaper choice.
+    runs-on: ubuntu-latest-4-cores
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.git-ref }}
+
+      - name: Package crates
+        uses: ./.github/actions/quality-package
+
+  # Single source of truth for "the engine side of this commit is releasable" on
+  # this channel. Runs after every engine artifact-producing job AND both channel
+  # gates have succeeded, then writes engine.json — the manifest the promote
+  # workflow looks for to release the engine. If any engine job or gate fails,
+  # this job is skipped and no engine.json is written, so the engine cannot be
+  # released.
+  #
+  # Release lines only: the manifest is written for main (nightly) and releases/*.
+  # A manual dispatch against any other branch still builds, scans and pushes (so
+  # you can test that branch builds a correct image), but writes NO manifest — it
+  # is never promotable — and the cleanup-test job below deletes its artifacts.
+  # github.ref here is the caller's triggering ref.
+  #
+  # The downstream image is built by a separate workflow
+  # (rolling-downstream-build.yml) and records its own downstream.json under the
+  # same prefix, so the two sides never share an object and finalize never waits
+  # on or records downstream state. The promote workflow decides what to release
+  # from which manifests exist for the commit.
+  finalize:
+    name: Finalize channel
+    needs: [build, macos-universal, publish-s3, docker, check-versions, package]
+    # Run once the engine side is green. !cancelled() keeps the manifest from
+    # being written when the run was cancelled. The ref check keeps throwaway test
+    # builds (dispatched against non-release branches) unpromotable.
+    if: >-
+      ${{ !cancelled()
+      && needs.build.result == 'success'
+      && needs.macos-universal.result == 'success'
+      && needs.publish-s3.result == 'success'
+      && needs.docker.result == 'success'
+      && needs.check-versions.result == 'success'
+      && needs.package.result == 'success'
+      && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/releases/')) }}
+    # Private runner: the manifest lives next to the rolling binaries in the
+    # private CI bucket, reached via the runner's ambient IAM role (no static
+    # keys). Label from a repo/org variable so it is not hardcoded here.
+    runs-on: ${{ vars.RUNNER_AMD }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      # engine.json lives in the private CI bucket alongside the rolling binaries.
+      # It carries the engine side only — zero downstream metadata — and only
+      # public-safe fields (no registry/account/repo): the registry coordinates
+      # are reconstructed at promote time from secrets plus the deterministic
+      # rolling-<branch>-<sha> tag. The downstream side records its own separate
+      # downstream.json (written by rolling-downstream-build), so the two never
+      # share an object.
+      - name: Write engine manifest
+        env:
+          ROLLING_BUCKET: ${{ secrets.AWS_S3_GITHUB_ACTIONS_BUCKET_NAME }}
+          AWS_REGION: us-east-1
+          BRANCH: ${{ inputs.branch }}
+          BUILD_METADATA: ${{ inputs.build-metadata }}
+          S3_PREFIX: ${{ inputs.s3-prefix }}
+          VERSION: ${{ inputs.release-version }}
+          GIT_SHA: ${{ inputs.git-ref }}
+        run: |
+          set -euo pipefail
+          # Store the branch name (lossless), not the slug: the slug is derived
+          # from the branch (non-alphanumerics -> '-') and cannot be reversed
+          # (branches containing '-' are ambiguous). Consumers recompute the slug
+          # from the branch when they need it.
+          jq -n \
+            --arg sha "${GIT_SHA}" \
+            --arg branch "${BRANCH}" \
+            --arg ver "${VERSION}" \
+            --arg meta "${BUILD_METADATA}" \
+            --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{sha: $sha, branch: $branch, version: $ver, build_metadata: $meta, created_at: $created}' \
+            > engine.json
+          cat engine.json
+          aws s3 cp --cache-control 'no-store' engine.json "s3://${ROLLING_BUCKET}/${S3_PREFIX}/engine.json"
+
+  # Throwaway test builds: a manual dispatch against a branch that is neither main
+  # nor a releases/* line produces no manifest (finalize above is skipped), so the
+  # artifacts can never be promoted. Delete them so we don't accumulate unusable
+  # rolling binaries/images. Runs regardless of build outcome (always()) so it also
+  # clears partial artifacts from a failed test build, and is keyed strictly by
+  # this run's slug + sha, so it can only ever remove what this run created.
+  cleanup-test:
+    name: Clean up test artifacts
+    needs: [build, macos-universal, publish-s3, docker]
+    if: ${{ always() && github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/heads/releases/') }}
+    # Private runner: reaches the private CI bucket and the ECR via the runner's
+    # ambient IAM role (no static keys). Label from a repo/org variable.
+    runs-on: ${{ vars.RUNNER_AMD }}
+    env:
+      ECR_REGISTRY: ${{ secrets.AWS_ECR_REGISTRY }}
+      ECR_REPOSITORY: ${{ secrets.AWS_ECR_REPOSITORY }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Delete rolling binaries from S3
+        env:
+          ROLLING_BUCKET: ${{ secrets.AWS_S3_GITHUB_ACTIONS_BUCKET_NAME }}
+          AWS_REGION: us-east-1
+          S3_PREFIX: ${{ inputs.s3-prefix }}
+        run: |
+          set -euo pipefail
+          echo "Removing s3://${ROLLING_BUCKET}/${S3_PREFIX}/ (throwaway test build)"
+          # Best-effort: cleanup of throwaway test artifacts must never fail the run.
+          # The most common cause of a non-zero exit here is the runner role lacking
+          # s3:DeleteObject (uploads are permitted, deletes are not), which would leave
+          # orphaned test objects but has no bearing on any promotable build.
+          if ! aws s3 rm --recursive "s3://${ROLLING_BUCKET}/${S3_PREFIX}/"; then
+            echo "::warning::Could not delete throwaway test binaries under ${S3_PREFIX} (often a missing s3:DeleteObject grant on the runner role). Leaving them in place; this does not affect releases."
+          fi
+
+      - name: Delete rolling images from ECR
+        # Always attempt ECR cleanup even if the S3 step above failed, so the two
+        # resources are cleaned independently rather than the first failure skipping
+        # the second.
+        if: ${{ always() }}
+        env:
+          SLUG: ${{ inputs.branch-slug }}
+          SHA: ${{ inputs.git-ref }}
+        run: |
+          set -euo pipefail
+          # Region derived from the registry host so it can't drift from the secret.
+          region="$(printf '%s' "$ECR_REGISTRY" | cut -d. -f4)"
+          # The docker job pushes both the immutable rolling-<slug>-<sha> tag and
+          # the floating <slug> tag, each in prod ('') and dev ('-dev') variants.
+          # batch-delete-image is a no-op (not an error) for tags already absent.
+          aws ecr batch-delete-image --region "$region" \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids \
+              imageTag="rolling-${SLUG}-${SHA}" \
+              imageTag="rolling-${SLUG}-${SHA}-dev" \
+              imageTag="${SLUG}" \
+              imageTag="${SLUG}-dev" \
+            || echo "::warning::ECR cleanup returned non-zero; some tags may have been absent."

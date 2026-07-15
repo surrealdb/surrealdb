@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
-RELEASE_BRANCH="$1"
+RELEASE_BRANCH="${1:-}"
 PUBLISH="${2:-false}"
 
 if [[ -z "$RELEASE_BRANCH" ]]; then
@@ -11,7 +11,7 @@ if [[ -z "$RELEASE_BRANCH" ]]; then
 fi
 
 if [[ "$RELEASE_BRANCH" == "main" ]]; then
-	echo "Error: refusing to bump a patch version on main (use bump-nightly-version.sh instead)"
+	echo "Error: refusing to bump a patch version on main (main bumps happen at cut time via cut.yml / cut-release.sh)"
 	exit 1
 fi
 
@@ -79,6 +79,7 @@ PACKAGES=$(cargo metadata --format-version 1 --no-deps | \
 	tr '\n' ' ')
 
 # Bump version for surrealdb packages only
+# shellcheck disable=SC2086 # PACKAGES is an intentional list of --package args
 cargo set-version $PACKAGES "${NEXT_VERSION}"
 cargo update -p surrealdb -p surrealdb-core -p surrealdb-server
 
@@ -93,21 +94,20 @@ fi
 
 # Create a branch for the PR
 PR_BRANCH="dev/ci/v${NEXT_VERSION}"
+git checkout -B "${PR_BRANCH}"
 
-# Delete PR branch if it exists (idempotency)
-if git ls-remote --exit-code --heads origin "${PR_BRANCH}" >/dev/null 2>&1; then
-	echo "PR branch ${PR_BRANCH} already exists, deleting it"
-	git push origin --delete "${PR_BRANCH}" || true
-fi
-if git show-ref --verify --quiet "refs/heads/${PR_BRANCH}"; then
-	git branch -D "${PR_BRANCH}"
-fi
-
-git checkout -b "${PR_BRANCH}"
-
-# Only push and create PR if publishing
+# Only push and create/update the PR if publishing
 if [[ "$PUBLISH" == "true" ]]; then
-	git push origin "${PR_BRANCH}"
+	# Update the remote PR branch IN PLACE rather than deleting + recreating it,
+	# so an existing PR keeps its identity and review state across retries.
+	# --force-with-lease, leased to the tip we just observed, makes the overwrite
+	# safe (it refuses if the branch moved since); a missing branch is a plain
+	# create.
+	if remote_sha="$(git ls-remote --exit-code origin "refs/heads/${PR_BRANCH}" 2>/dev/null | cut -f1)"; then
+		git push --force-with-lease="${PR_BRANCH}:${remote_sha}" origin "HEAD:${PR_BRANCH}"
+	else
+		git push origin "HEAD:${PR_BRANCH}"
+	fi
 
 	# Define PR title and body (avoid duplication)
 	PR_TITLE="Bump version to ${NEXT_VERSION}"
@@ -128,15 +128,24 @@ Review and merge this PR to prepare \`${RELEASE_BRANCH}\` for the next patch rel
 		gh pr edit "${existing_pr}" \
 			--title "${PR_TITLE}" \
 			--body "${PR_BODY}"
+		PR_URL=$(gh pr view "${existing_pr}" --json url -q '.url')
 	else
 		# Create PR
-		gh pr create \
+		PR_URL=$(gh pr create \
 			--base "${RELEASE_BRANCH}" \
 			--head "${PR_BRANCH}" \
 			--title "${PR_TITLE}" \
-			--body "${PR_BODY}"
+			--body "${PR_BODY}")
 
 		echo "Created PR to bump ${RELEASE_BRANCH} to ${NEXT_VERSION}"
+	fi
+
+	echo "PR: ${PR_URL}"
+
+	# Surface the PR URL as a step output when running in GitHub Actions so the
+	# release summary can list it.
+	if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+		echo "pr-url=${PR_URL}" >> "$GITHUB_OUTPUT"
 	fi
 else
 	echo "[Dry-run] Would create PR to bump ${RELEASE_BRANCH} to ${NEXT_VERSION}"

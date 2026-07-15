@@ -1,0 +1,243 @@
+name: 'Promote binaries'
+description: 'Promote prebuilt rolling binaries from S3 to a release name (copy + rename), set pointers, and optionally create a GitHub release'
+
+inputs:
+  name:
+    description: 'Release name (e.g., nightly or v3.1.2)'
+    required: true
+  source-name:
+    description: 'Rolling build name the artifacts were stored under (e.g., rolling-<sha>)'
+    required: true
+  rolling-bucket:
+    description: 'Private CI bucket the rolling artifacts live in'
+    required: true
+  rolling-prefix:
+    description: 'S3 prefix the rolling artifacts live under (e.g., rolling-builds/<branch-slug>/<sha>)'
+    required: true
+  version:
+    description: 'Version number'
+    required: true
+  pre-release:
+    description: 'Whether this is a pre-release'
+    required: true
+  release-name:
+    description: 'Release environment name (nightly, alpha, beta, stable)'
+    required: true
+  publish:
+    description: 'Whether to publish (false for dry-run)'
+    required: false
+    default: 'false'
+  create-release:
+    description: 'Whether to create a GitHub release'
+    required: false
+    default: 'false'
+  latest:
+    description: 'Whether this is the latest release'
+    required: false
+    default: 'false'
+  git-ref:
+    description: 'Git ref (commit SHA) for the release'
+    required: true
+  aws-access-key-id:
+    description: 'AWS access key ID'
+    required: false
+  aws-secret-access-key:
+    description: 'AWS secret access key'
+    required: false
+
+runs:
+  using: 'composite'
+  steps:
+    # Download the prebuilt rolling artifacts FIRST, using the private runner's
+    # ambient IAM creds: the rolling set lives in the private CI bucket, which is
+    # a different account from the static keys that write the public download
+    # bucket below. Doing it before `Configure AWS` avoids the static keys (env
+    # vars, highest priority in the credential chain) shadowing the ambient role.
+    # This also proves the artifact set exists, so a dry-run still validates the
+    # commit is promotable.
+    - name: Download rolling artifacts
+      shell: bash
+      env:
+        ROLLING_BUCKET: ${{ inputs.rolling-bucket }}
+        ROLLING_PREFIX: ${{ inputs.rolling-prefix }}
+        AWS_REGION: us-east-1
+      run: |
+        set -euo pipefail
+        mkdir -p rolling
+        aws s3 cp --recursive "s3://${ROLLING_BUCKET}/${ROLLING_PREFIX}/" rolling/
+
+    # Build a durable, release-scoped manifest and release notes from the rolling
+    # manifest. The rolling manifest is pruned once a later release on the same
+    # line supersedes this commit, so without this the engine + downstream commits
+    # a release was built from would be lost. The downstream repo is no longer
+    # tagged, so this manifest is the record of what to check out to rebuild.
+    - name: Build release manifest and notes
+      shell: bash
+      env:
+        NAME: ${{ inputs.name }}
+        VERSION: ${{ inputs.version }}
+        GIT_REF: ${{ inputs.git-ref }}
+      run: |
+        set -euo pipefail
+        # The engine and downstream sides write SEPARATE rolling manifests keyed
+        # by the same engine sha. engine.json is required (this action only runs
+        # for the engine side); downstream.json is optional and its mere presence
+        # means a promotable downstream image was built for this commit.
+        if [[ ! -f rolling/engine.json ]]; then
+          # prepare-vars (locate) already guarantees engine.json exists for the
+          # promoted SHA, so its absence here means the rolling prefix is
+          # incomplete/corrupt (or it was removed independently of its binaries).
+          # Fail closed rather than fabricating a manifest that would hide the
+          # problem and record unverified provenance.
+          echo "::error::rolling/engine.json is missing for ${GIT_REF} under the rolling prefix. The rolling build for this commit is incomplete or its manifest was removed; refusing to promote."
+          exit 1
+        fi
+        engine_sha=$(jq -r '.sha // ""' rolling/engine.json)
+
+        # Optional downstream provenance, reconstructed from downstream.json.
+        ds_built=false
+        ds_sha=""
+        ds_branch=""
+        if [[ -f rolling/downstream.json ]]; then
+          ds_built=true
+          ds_sha=$(jq -r '.sha // ""' rolling/downstream.json)
+          ds_branch=$(jq -r '.branch // ""' rolling/downstream.json)
+          downstream=$(jq -nc --arg b "${ds_branch}" --arg s "${ds_sha}" '{built: true, branch: $b, sha: $s}')
+        else
+          downstream='{"built": false}'
+        fi
+
+        # Marry the two sides into one durable manifest: engine.json + a
+        # reconstructed downstream block + a release block. The release block
+        # stores only what isn't already present: git_ref is omitted (it always
+        # equals the top-level .sha) and channel is omitted (implied by version).
+        jq \
+          --arg name "${NAME}" \
+          --arg ver "${VERSION}" \
+          --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          --argjson downstream "${downstream}" \
+          '. + {downstream: $downstream, release: {name: $name, version: $ver, released_at: $at}}' \
+          rolling/engine.json > release-manifest.json
+
+        {
+          echo "Release v${VERSION}"
+          echo ""
+          echo "### Build provenance"
+          echo "- Engine (surrealdb) commit: \`${engine_sha}\`"
+          if [[ "${ds_built}" == "true" && -n "${ds_sha}" ]]; then
+            echo "- Downstream commit: \`${ds_branch:-unknown}@${ds_sha}\`"
+          else
+            echo "- Downstream image: not built for this release"
+          fi
+        } > release-body.md
+
+        echo "---- release-manifest.json ----"; cat release-manifest.json
+        echo "---- release-body.md ----"; cat release-body.md
+
+    # Persist the release-scoped manifest to the PRIVATE CI bucket (not the
+    # public download bucket): it's an internal rebuild/audit record, not
+    # something download clients fetch, and it names the downstream branch/sha.
+    # Written here, before `Configure AWS`, so it uses the private runner's
+    # ambient IAM role (the private bucket lives in that account); the static
+    # keys configured below are for the public download bucket only. Unlike the
+    # rolling manifest, this lives under releases/<name>/ and is never pruned, so
+    # the engine + downstream commits a release shipped from stay recoverable.
+    - name: Publish release manifest (private bucket)
+      if: ${{ inputs.publish == 'true' }}
+      shell: bash
+      env:
+        ROLLING_BUCKET: ${{ inputs.rolling-bucket }}
+        NAME: ${{ inputs.name }}
+        AWS_REGION: us-east-1
+      run: |
+        set -euo pipefail
+        aws s3 cp --cache-control 'no-store' release-manifest.json "s3://${ROLLING_BUCKET}/releases/${NAME}/release.json"
+
+    # Static keys for the PUBLIC download bucket writes below. Runs after the
+    # ambient rolling download + private manifest write so it doesn't shadow
+    # those creds.
+    - name: Configure AWS
+      uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
+      with:
+        aws-region: us-east-2
+        aws-access-key-id: ${{ inputs.aws-access-key-id }}
+        aws-secret-access-key: ${{ inputs.aws-secret-access-key }}
+
+    # Copy + rename surreal-<source-name>.* -> surreal-<name>.*. The binary
+    # contents (including the baked version) are unchanged; only the filename
+    # changes to the release name that download clients expect.
+    - name: Rename artifacts to release name
+      shell: bash
+      env:
+        SOURCE_NAME: ${{ inputs.source-name }}
+        NAME: ${{ inputs.name }}
+      run: |
+        set -euo pipefail
+        shopt -s nullglob
+        mkdir -p publish
+        prefix="surreal-${SOURCE_NAME}."
+        count=0
+        for f in rolling/"${prefix}"*; do
+          base=$(basename "$f")
+          suffix=${base#"$prefix"}
+          cp "$f" "publish/surreal-${NAME}.${suffix}"
+          count=$((count + 1))
+        done
+        if [[ "$count" -eq 0 ]]; then
+          echo "::error::No rolling artifacts found for surreal-${SOURCE_NAME}.* under the rolling prefix"
+          exit 1
+        fi
+        ls -l publish
+
+    - name: Create GitHub release
+      uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
+      if: ${{ inputs.publish == 'true' && inputs.create-release == 'true' }}
+      with:
+        tag_name: v${{ inputs.version }}
+        name: "Release ${{ inputs.version }}"
+        body_path: release-body.md
+        target_commitish: ${{ inputs.git-ref }}
+        prerelease: ${{ inputs.pre-release }}
+        make_latest: ${{ inputs.latest }}
+        fail_on_unmatched_files: true
+        files: |
+          LICENSE
+          publish/*.tgz
+          publish/*.exe
+
+    - name: Set latest release version
+      if: ${{ inputs.publish == 'true' && inputs.create-release == 'true' && inputs.latest == 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "v${{ inputs.version }}" > latest.txt
+        aws s3 cp --cache-control 'no-store' latest.txt s3://download.surrealdb.com/latest.txt
+
+    - name: Set stable major-version pointer (e.g. v3.txt)
+      if: ${{ inputs.publish == 'true' && inputs.pre-release != 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        version="${{ inputs.version }}"
+        major="${version%%.*}"
+        echo "v${version}" > "v${major}.txt"
+        aws s3 cp --cache-control 'no-store' "v${major}.txt" "s3://download.surrealdb.com/v${major}.txt"
+
+    - name: Set latest alpha or beta version
+      if: ${{ inputs.publish == 'true' && inputs.pre-release == 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "v${{ inputs.version }}" > ${{ inputs.release-name }}.txt
+        aws s3 cp --cache-control 'no-store' ${{ inputs.release-name }}.txt s3://download.surrealdb.com/${{ inputs.release-name }}.txt
+
+    - name: Publish binaries to the release name
+      if: ${{ inputs.publish == 'true' }}
+      shell: bash
+      env:
+        NAME: ${{ inputs.name }}
+      run: |
+        set -euo pipefail
+        for file in publish/*; do
+          aws s3 cp --cache-control 'no-store' "$file" "s3://download.surrealdb.com/${NAME}/"
+        done

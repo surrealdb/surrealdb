@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
-CARGO_VERSION="$1"
+CARGO_VERSION="${1:-}"
 
 if [[ -z "$CARGO_VERSION" ]]; then
 	echo "Error: Cargo version argument required"

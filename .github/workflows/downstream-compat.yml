@@ -65,9 +65,7 @@ env:
 jobs:
   compat:
     name: Build + test
-    # Never run on the public mirror. Guarding on the public repo name (rather
-    # than this one) keeps this repository unnamed in this mirrored file.
-    if: github.repository != 'surrealdb/surrealdb'
+    if: github.repository == vars.PRIVATE_ENGINE_REPO
     # On-demand (not spot): spot preemption shows up as "runner lost
     # communication" failures, and this is a soft signal we don't want flaking.
     runs-on: runner-arm-16-cores
@@ -102,8 +100,7 @@ jobs:
           persist-credentials: false
 
       # Mint a short-lived token scoped to the downstream repo only. The owner
-      # defaults to this repository's owner; the repo name comes from a secret so
-      # it is never written into this publicly-mirrored file.
+      # defaults to this repository's owner; the repo name comes from a secret.
       - name: Generate a token for the downstream repo
         id: app-token
         if: steps.preflight.outputs.configured == 'true'
@@ -303,8 +300,8 @@ jobs:
       # checkout. Its in-repo deps (surrealdb-core/-types/surrealdb) are workspace
       # path deps, so they follow transitively from the same checkout — only
       # surrealdb-server needs patching. The git source URL is read from the
-      # downstream manifest so this repo's git URL is not hardcoded here. This
-      # rewrites Cargo.lock, so the cargo steps below intentionally omit --locked.
+      # downstream manifest. This rewrites Cargo.lock, so the cargo steps below
+      # intentionally omit --locked.
       - name: Point downstream at this engine checkout
         if: steps.preflight.outputs.configured == 'true'
         env:

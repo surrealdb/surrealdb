@@ -787,8 +787,11 @@ pub(crate) enum Error {
 
 	/// Network target is not allowed
 	#[error("Access to network target '{0}' is not allowed")]
+	// Constructed by the capability-aware `net` module (non-wasm, `http` or
+	// `jwks`) and the `http`-gated clients. It is only truly dead when `http` is
+	// off and the `net` module is not compiled (no `jwks`, or on wasm).
 	#[cfg_attr(
-		not(any(feature = "http", all(not(target_family = "wasm"), feature = "jwks"))),
+		all(not(feature = "http"), any(target_family = "wasm", not(feature = "jwks"))),
 		expect(dead_code)
 	)]
 	NetTargetNotAllowed(String),

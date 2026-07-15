@@ -192,8 +192,8 @@ async fn shutdown_compacts_to_bottommost_when_opted_in() {
 /// Verifies that many concurrent scan cursors can be opened on the same
 /// transaction without interfering with each other.
 ///
-/// This is the regression test for the LRU-thrash failure mode in PR 179
-/// (`surrealdb/surrealdb-private#179`): a bounded iterator cache at
+/// This is the regression test for the LRU-thrash failure mode in PR #179:
+/// a bounded iterator cache at
 /// capacity 4 evicts the outer iterator when 5+ inner prefixes are walked
 /// concurrently, e.g. `SELECT ->knows FROM person` with > 4 outer rows. In
 /// the cursor design the caller owns the iterator for the duration of

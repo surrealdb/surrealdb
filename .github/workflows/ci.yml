@@ -323,6 +323,23 @@ jobs:
       - name: Check unused dependencies
         run: cargo make ci-unused-deps
 
+  check-versions:
+    name: Check crate versions
+    runs-on: ubuntu-latest-4-cores
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # release-plz inspects git history to detect which crates changed.
+          fetch-depth: 0
+
+      # Catches PRs that change a published crate (e.g. surrealism, surrealml)
+      # without bumping its version, so it's surfaced at review time instead of
+      # only on main / at release time. Reads crates.io only (no secrets), so
+      # this also runs on fork PRs.
+      - name: Check crate versions
+        uses: ./.github/actions/check-crate-versions
+
   # ----------------------------------------
   # Integration tests
   # ----------------------------------------
@@ -632,6 +649,7 @@ jobs:
       - feature-check
       - check-tokio-console
       - unused-deps
+      - check-versions
       # Integration tests
       - integration-tests
       # Workspace tests
@@ -664,6 +682,7 @@ jobs:
             "${{ needs.feature-check.result }}"
             "${{ needs.check-tokio-console.result }}"
             "${{ needs.unused-deps.result }}"
+            "${{ needs.check-versions.result }}"
             "${{ needs.integration-tests.result }}"
             "${{ needs.test.result }}"
             "${{ needs.sdk-build.result }}"

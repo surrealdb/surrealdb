@@ -1,0 +1,96 @@
+name: 'Check crate versions'
+description: 'Fail when a publishable crate has unreleased changes but was not version-bumped'
+
+# This action always exits non-zero when it finds version drift, so the step
+# (and its job) shows a red X — there is no "soft" green-with-a-warning mode that
+# is easy to miss. Whether that failure *blocks* is decided by the caller:
+#   - blocking gate (CI, rolling): use this job in `needs` / required checks.
+#   - visible-but-non-blocking (nightly): set `continue-on-error: true` on the
+#     job, so the job still shows a red X but does not fail the workflow run.
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup environment
+      uses: ./.github/actions/setup-environment
+
+    - name: Install release-plz
+      uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # (Actions must be pinned by commit hash) v2.81.11
+      with:
+        tool: release-plz@0.3.159
+
+    - name: Detect unreleased crate version drift
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        # release-plz refuses to run on a detached HEAD, which is how CI checks
+        # out a commit. Put it on a throwaway branch first.
+        git checkout -b crate-version-check >/dev/null 2>&1 || true
+
+        # Version-only run: no changelog, tag, or release side effects. We rely
+        # on release-plz comparing each publishable crate's source against what
+        # is published on crates.io (NOT git tags) and bumping any crate that
+        # has unreleased changes. Crates whose current version isn't published
+        # yet (e.g. the -nightly workspace version) have no registry baseline at
+        # that version, so release-plz treats them as the pending release and
+        # leaves them untouched.
+        cfg="${RUNNER_TEMP:-/tmp}/release-plz-version-check.toml"
+        {
+          echo "[workspace]"
+          echo "changelog_update = false"
+          echo "git_release_enable = false"
+          echo "git_tag_enable = false"
+          echo "semver_check = false"
+        } > "$cfg"
+
+        release-plz update --config "$cfg"
+
+        # A changed `version = ` line means release-plz wants to bump a crate
+        # that has unreleased changes — i.e. a forgotten version bump. We match
+        # on the version line specifically (via `git diff -G`) because release-plz
+        # also rewrites manifests cosmetically (e.g. normalising a missing
+        # trailing newline) on crates it leaves "up to date"; those must NOT be
+        # reported as drift. release-plz only touches publishable crates, so
+        # publish = false crates never show here.
+        drift=$(git diff -G'^version[[:space:]]*=' --name-only | grep -E '(^|/)Cargo\.toml$' || true)
+
+        if [[ -z "$drift" ]]; then
+          echo "No version drift: every publishable crate with changes is already bumped."
+          exit 0
+        fi
+
+        # Turn the drifting manifests into a human-readable list of crate names
+        # with their proposed old -> new versions, so the failure names the exact
+        # crates that need bumping instead of a generic example.
+        summary=""
+        names=""
+        while IFS= read -r manifest; do
+          [[ -z "$manifest" ]] && continue
+          # Crate name from the [package] table (not the directory, which can differ).
+          name=$(awk '
+            /^\[/ { in_pkg = ($0 ~ /^\[package\]/) }
+            in_pkg && /^[[:space:]]*name[[:space:]]*=/ {
+              sub(/^[^=]*=[[:space:]]*/, "")
+              gsub(/^"|"[[:space:]]*$/, "")
+              print; exit
+            }' "$manifest")
+          [[ -z "$name" ]] && name="$manifest"
+          old=$(git diff -- "$manifest" | sed -nE 's/^-version[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' | head -n1)
+          new=$(git diff -- "$manifest" | sed -nE 's/^\+version[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' | head -n1)
+          if [[ -n "$old" && -n "$new" ]]; then
+            summary+="  - ${name} (${manifest}): ${old} -> ${new}"$'\n'
+          else
+            summary+="  - ${name} (${manifest})"$'\n'
+          fi
+          names+="${name}, "
+        done <<< "$drift"
+        names=${names%, }
+
+        echo "Publishable crates have unreleased changes but no version bump:"
+        printf '%s' "$summary"
+        echo "----- proposed version changes -----"
+        git --no-pager diff -- '*Cargo.toml'
+
+        echo "::error::Publishable crates changed without a version bump: ${names}. Bump them before this commit can produce a publishable release."
+        exit 1

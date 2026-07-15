@@ -47,6 +47,16 @@ args = [
     "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-rocksdb,kv-tikv,http,scripting,jwks",
 ]
 
+[tasks.ci-package]
+category = "CI - CHECK"
+description = "Verify all publishable workspace crates package cleanly for crates.io"
+command = "cargo"
+args = [
+    "package",
+    "--locked",
+    "--workspace",
+]
+
 [tasks.ci-fmt]
 category = "CI - CHECK"
 description = "Run code formatting checks"

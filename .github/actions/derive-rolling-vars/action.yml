@@ -1,0 +1,59 @@
+name: 'Derive rolling build vars'
+description: 'Derive the channel identity (name, slug, S3 prefix, version, build metadata) for a rolling build of the checked-out commit'
+
+# Shared by the engine and downstream rolling entry points so the two stay in
+# lockstep: both key their artifacts under the SAME rolling-builds/<slug>/<sha>/
+# prefix, computed the one way here. Assumes the caller has already checked out
+# the commit to build (needs Cargo.toml + git history on disk).
+
+outputs:
+  build-metadata:
+    description: 'Build metadata baked into the binary (date.rev)'
+    value: ${{ steps.vars.outputs.build-metadata }}
+  name:
+    description: 'Artifact/file name prefix (rolling-<sha>)'
+    value: ${{ steps.vars.outputs.name }}
+  slug:
+    description: 'Branch slug (non-alphanumerics -> -, lowercased)'
+    value: ${{ steps.vars.outputs.slug }}
+  s3-prefix:
+    description: 'S3 prefix the artifacts live under (rolling-builds/<slug>/<sha>)'
+    value: ${{ steps.vars.outputs.s3-prefix }}
+  version:
+    description: 'Workspace version read from Cargo.toml at the checked-out commit'
+    value: ${{ steps.vars.outputs.version }}
+  branch:
+    description: 'Branch name the artifacts were built from (e.g. main or releases/4.0)'
+    value: ${{ steps.vars.outputs.branch }}
+  sha:
+    description: 'Full commit sha of the checked-out HEAD (the commit being built)'
+    value: ${{ steps.vars.outputs.sha }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Derive vars
+      id: vars
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Derive everything from the checked-out commit (HEAD), NOT github.sha, so
+        # a manual rebuild that checks out an arbitrary ancestor keys its artifacts
+        # under that ancestor (github.sha would be the branch tip on dispatch).
+        full_sha=$(git rev-parse HEAD)
+        date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
+        rev=$(git rev-parse --short HEAD)
+        build_metadata="${date}.${rev}"
+        # Slug the branch for namespacing: non-alphanumerics -> '-', lowercased.
+        ref_slug=$(echo "${GITHUB_REF_NAME}" | sed -e 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
+        name="rolling-${full_sha}"
+        cargo_version=$(awk '/^\[workspace.package\]/{f=1} f&&/^version[[:space:]]*=/{gsub(/version[[:space:]]*=[[:space:]]*"|"/,""); print; exit}' Cargo.toml)
+        {
+          echo "build-metadata=${build_metadata}"
+          echo "name=${name}"
+          echo "slug=${ref_slug}"
+          echo "s3-prefix=rolling-builds/${ref_slug}/${full_sha}"
+          echo "version=${cargo_version}"
+          echo "branch=${GITHUB_REF_NAME}"
+          echo "sha=${full_sha}"
+        } >> "$GITHUB_OUTPUT"

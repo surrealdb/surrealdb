@@ -1820,7 +1820,7 @@ mod tests {
 	}
 
 	/// Regression test for the explicit-`begin`-on-cancel leak (Codex P2,
-	/// PR #286 [discussion_r3311900647](https://github.com/surrealdb/surrealdb-private/pull/286#discussion_r3311900647)).
+	/// PR #286).
 	///
 	/// `begin` does NOT go through the executor (it calls
 	/// `kvs().transaction(...)` directly), so the executor cancellation

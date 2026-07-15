@@ -33,7 +33,7 @@ jobs:
   bench:
     name: Nightly benchmark
     runs-on: runner-arm-bench
-    if: ${{ github.repository == 'surrealdb/surrealdb-private' }} # Don't run outside the private repo
+    if: ${{ github.repository == vars.PRIVATE_ENGINE_REPO }}
     timeout-minutes: 240
     steps:
       - name: Checkout sources
@@ -67,7 +67,7 @@ jobs:
   regression-7318:
     name: DiskANN #7318 regression
     runs-on: ubuntu-latest-8-cores
-    if: ${{ github.repository == 'surrealdb/surrealdb-private' }}
+    if: ${{ github.repository == vars.PRIVATE_ENGINE_REPO }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

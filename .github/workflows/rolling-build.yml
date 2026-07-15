@@ -1,26 +1,66 @@
-# Rolling build
+# Rolling build (engine)
 #
-# Builds and publishes release artifacts on every push to main and to release
-# branches, so a promotable build is always ready. Binaries go to S3 under
-# rolling/<sha>/ and Docker images are pushed as :rolling-<sha> (+ moving
-# :<branch-slug>). The eventual tag-triggered release promotes these in place.
+# Builds and stores release-ready ENGINE artifacts for release branches (every
+# push) and for the nightly (main) channel (once daily on a schedule), so a later
+# release just *promotes* an existing build instead of rebuilding (build-once /
+# promote-many).
+#
+# For each commit this workflow builds the branch's *channel* of engine artifacts
+# (see rolling-channel.yml): the binary matrix (+ macOS universal), the scanned
+# multi-arch Docker images in the private registry, and a
+# rolling-builds/<slug>/<sha>/engine.json manifest. Each channel verifies the
+# workspace crates package cleanly and that no publishable crate changed without a
+# version bump; these gates run in parallel with the binary compile (the two slow
+# jobs overlap) but every job that persists an artifact — the S3 upload and the
+# Docker push — waits on them, as does the manifest. So a failed gate stores
+# nothing and yields no manifest. The manifest is what marks a commit as
+# releasable; the promote workflow refuses to release a commit that has no
+# manifest.
+#
+# The downstream image is built by a SEPARATE workflow (rolling-downstream-build.yml)
+# that also runs on push, and can additionally be triggered on its own so a
+# downstream-only change becomes promotable without a new engine commit. The two
+# sides write separate manifests (engine.json here, downstream.json there) keyed
+# by the same commit, and are married at promote time.
+#
+# Channel (slug = the branch name):
+#   * releases/* — every push builds that line's channel at the branch's
+#     Cargo.toml version (alpha/beta/rc/stable), so any commit is promotable.
+#   * main — the `nightly` channel is NOT built per push (only one nightly is
+#     promoted per day). It is built on a schedule a few hours before the nightly
+#     promote, and can also be dispatched manually. The nightly promote walks main
+#     history for the newest built commit, so it doesn't need HEAD pre-built.
+#   * A manual dispatch against any OTHER branch builds a throwaway test set: no
+#     manifest is written (not promotable) and the artifacts are cleaned up after.
 #
 # Correctness is gated by ci.yml on the same commit, so this workflow does not
 # re-run the quality/test matrix. It does NOT publish crates (crates.io versions
 # are write-once; that happens only at release time).
-#
-# Guarded against the public mirror via `github.repository`, so it never runs in
-# (or leaks intent to) surrealdb/surrealdb.
 
 name: Rolling build
 
-run-name: "Rolling build (${{ github.ref_name }} @ ${{ github.sha }})"
+run-name: "Rolling build (${{ github.ref_name }} @ ${{ inputs.git-sha || github.sha }})"
 
 on:
   push:
     branches:
-      - main
       - 'releases/*'
+  # Nightly (main) channel: build once a day, a few hours ahead of the release
+  # workflow's 00:00 UTC promote, so there's a buffer to notice and re-run a failed
+  # build before promotion. main is deliberately NOT built per push.
+  schedule:
+    - cron: "0 20 * * *"
+  # Manual build/rebuild: dispatch against the branch line and pass the exact
+  # commit — or a branch/ref, which resolves to its tip — to (re)build. On main /
+  # releases/* it reproduces (and overwrites) that commit's promotable artifacts.
+  # On any other branch it is a throwaway test build — no manifest is written and
+  # the artifacts are deleted afterwards. Omit git-sha to build the branch tip.
+  workflow_dispatch:
+    inputs:
+      git-sha:
+        description: 'Commit SHA or branch/ref to (re)build (a branch resolves to its tip). Defaults to the dispatched branch tip. The artifact line/slug follows the DISPATCHED ref, so pass a commit or ref that belongs to the branch you dispatched against.'
+        required: false
+        type: string
 
 defaults:
   run:
@@ -29,19 +69,26 @@ defaults:
 permissions:
   contents: read
 
+# Keyed per COMMIT being built, not per branch: every commit on main / releases/*
+# must produce its own complete, promotable artifact set, so distinct commits
+# build in PARALLEL and never cancel or queue behind one another (the unit of
+# promotion is the commit, not "the latest"). We key on the exact target commit
+# (inputs.git-sha on a manual rebuild, else github.sha) rather than github.sha
+# alone: on a workflow_dispatch github.sha is the branch TIP, so two rebuilds of
+# different old commits would otherwise share a group and cancel each other.
+# cancel-in-progress then only supersedes a redundant re-run of the SAME target.
 concurrency:
-  group: rolling-${{ github.ref }}
+  group: rolling-engine-${{ inputs.git-sha || github.sha }}
   cancel-in-progress: true
 
 jobs:
   prepare:
     name: Prepare
-    if: ${{ github.repository != 'surrealdb/surrealdb' }}
+    if: ${{ github.repository == vars.PRIVATE_ENGINE_REPO }}
     runs-on: ubuntu-latest
     outputs:
       build-metadata: ${{ steps.vars.outputs.build-metadata }}
-      rolling-name: ${{ steps.vars.outputs.rolling-name }}
-      branch-slug: ${{ steps.vars.outputs.branch-slug }}
+      channels: ${{ steps.channels.outputs.channels }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
@@ -50,172 +97,64 @@ jobs:
 
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # The pushed commit, or the exact sha/ref for a manual (re)build (a
+          # branch resolves to its tip).
+          ref: ${{ inputs.git-sha || github.sha }}
 
-      - name: Derive vars
+      - name: Derive rolling build vars
         id: vars
-        run: |
-          set -euo pipefail
-          date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
-          rev=$(git rev-parse --short HEAD)
-          branch_slug=$(echo "${GITHUB_REF_NAME}" | sed -e 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
-          {
-            echo "build-metadata=${date}.${rev}"
-            echo "rolling-name=rolling-${GITHUB_SHA}"
-            echo "branch-slug=${branch_slug}"
-          } >> "$GITHUB_OUTPUT"
+        uses: ./.github/actions/derive-rolling-vars
 
-  build:
-    name: Build ${{ matrix.arch }} binary
-    if: ${{ github.repository != 'surrealdb/surrealdb' }}
-    needs: [prepare]
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x86_64-unknown-linux-gnu
-            platform: amd64
-            os: linux
-            runner: [runner-amd-32-cores]
-          - arch: aarch64-unknown-linux-gnu
-            platform: arm64
-            os: linux
-            runner: [runner-arm-32-cores]
-          - arch: x86_64-apple-darwin
-            platform: amd64
-            os: macos
-            runner: macos-15-xlarge
-          - arch: aarch64-apple-darwin
-            platform: arm64
-            os: macos
-            runner: macos-15-xlarge
-          - arch: x86_64-pc-windows-msvc
-            platform: amd64
-            os: windows
-            runner: windows-latest-32-cores
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Build Linux binary
-        if: matrix.os == 'linux'
-        uses: ./.github/actions/build-linux
-        with:
-          arch: ${{ matrix.arch }}
-          platform: ${{ matrix.platform }}
-          name: ${{ needs.prepare.outputs.rolling-name }}
-          build-metadata: ${{ needs.prepare.outputs.build-metadata }}
-          upload: true
-          release: true
-
-      - name: Build macOS binary
-        if: matrix.os == 'macos'
-        uses: ./.github/actions/build-macos
-        with:
-          arch: ${{ matrix.arch }}
-          platform: ${{ matrix.platform }}
-          name: ${{ needs.prepare.outputs.rolling-name }}
-          build-metadata: ${{ needs.prepare.outputs.build-metadata }}
-          upload: true
-          release: true
-
-      - name: Build Windows binary
-        if: matrix.os == 'windows'
-        uses: ./.github/actions/build-windows
-        with:
-          arch: ${{ matrix.arch }}
-          platform: ${{ matrix.platform }}
-          name: ${{ needs.prepare.outputs.rolling-name }}
-          build-metadata: ${{ needs.prepare.outputs.build-metadata }}
-          upload: true
-          release: true
-
-  publish-s3:
-    name: Publish binaries to S3 (rolling)
-    if: ${{ github.repository != 'surrealdb/surrealdb' }}
-    needs: [prepare, build]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
-      - name: Download artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          path: artifacts
-
-      - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
-        with:
-          aws-region: us-east-2
-          aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
-          aws-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
-
-      - name: Upload to rolling/<sha>/
+      # The branch's own channel (nightly on main, the line's channel on
+      # releases/*). version-override is empty so the binary keeps the
+      # Cargo.toml version.
+      - name: Assemble channels
+        id: channels
         env:
-          SHA: ${{ github.sha }}
+          NAME: ${{ steps.vars.outputs.name }}
+          SLUG: ${{ steps.vars.outputs.slug }}
+          S3_PREFIX: ${{ steps.vars.outputs.s3-prefix }}
+          VERSION: ${{ steps.vars.outputs.version }}
+          BRANCH: ${{ steps.vars.outputs.branch }}
+          SHA: ${{ steps.vars.outputs.sha }}
         run: |
           set -euo pipefail
-          shopt -s globstar nullglob
-          for file in artifacts/**/*.tgz artifacts/**/*.txt artifacts/**/*.exe; do
-            aws s3 cp --cache-control 'no-store' "$file" "s3://download.surrealdb.com/rolling/${SHA}/"
-          done
+          channels=$(jq -nc \
+            --arg name "$NAME" \
+            --arg slug "$SLUG" \
+            --arg s3 "$S3_PREFIX" \
+            --arg ver "$VERSION" \
+            --arg label "$BRANCH" \
+            --arg sha "$SHA" \
+            '[{name:$name, versionOverride:"", slug:$slug, s3Prefix:$s3, version:$ver, label:$label, sha:$sha}]')
+          echo "Channels for ${GITHUB_SHA}:"
+          echo "$channels" | jq .
+          echo "channels=${channels}" >> "$GITHUB_OUTPUT"
 
-  docker:
-    name: Docker ${{ matrix.name }} (rolling)
-    if: ${{ github.repository != 'surrealdb/surrealdb' }}
-    needs: [prepare, build]
-    runs-on: ubuntu-latest
+  # Build and store the channel's engine artifact set for this branch. The crate
+  # packaging / version-drift gates run INSIDE this channel (rolling-channel.yml)
+  # in parallel with the binary compile — the two slow jobs overlap instead of
+  # running back-to-back. The gates don't block the compile, but every persisting
+  # job (S3 upload, Docker push) and the engine.json manifest do wait on them, so
+  # an un-bumped or unpackageable crate never gets artifacts stored anywhere and
+  # can never be promoted.
+  channels:
+    name: Build ${{ matrix.channel.label }}
+    if: ${{ github.repository == vars.PRIVATE_ENGINE_REPO }}
+    needs: [prepare]
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: Prod image
-            build-target: prod-ci
-            tag-suffix: ''
-          - name: Dev image
-            build-target: dev-ci
-            tag-suffix: -dev
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Download artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          path: artifacts
-
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
-
-      - name: Login to DockerHub
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
-        with:
-          username: ${{ secrets.DOCKER_USER }}
-          password: ${{ secrets.DOCKER_PASS }}
-
-      - name: Build and push rolling image
-        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
-        with:
-          context: artifacts
-          push: true
-          platforms: linux/amd64,linux/arm64
-          file: docker/Dockerfile
-          target: ${{ matrix.build-target }}
-          tags: |
-            surrealdb/surrealdb:${{ needs.prepare.outputs.rolling-name }}${{ matrix.tag-suffix }}
-            surrealdb/surrealdb:${{ needs.prepare.outputs.branch-slug }}${{ matrix.tag-suffix }}
-          build-args: |
-            ARTIFACT_PREFIX=surreal-${{ needs.prepare.outputs.rolling-name }}
+        channel: ${{ fromJson(needs.prepare.outputs.channels) }}
+    uses: ./.github/workflows/rolling-channel.yml
+    with:
+      name: ${{ matrix.channel.name }}
+      build-metadata: ${{ needs.prepare.outputs.build-metadata }}
+      version-override: ${{ matrix.channel.versionOverride }}
+      branch-slug: ${{ matrix.channel.slug }}
+      branch: ${{ matrix.channel.label }}
+      s3-prefix: ${{ matrix.channel.s3Prefix }}
+      release-version: ${{ matrix.channel.version }}
+      git-ref: ${{ matrix.channel.sha }}
+    secrets: inherit

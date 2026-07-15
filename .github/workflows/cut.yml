@@ -1,0 +1,89 @@
+# Cut a release line
+#
+# Source-mutating counterpart to the promote-only release workflow. A cut never
+# builds or promotes anything: it moves source (and lets the rolling build
+# produce the artifacts), then you promote the resulting commit with release.yml.
+#
+#   * minor: create `releases/X.Y` from main at `X.Y.0-beta.1` and open a PR
+#     moving main to `X.(Y+1).0-nightly`. main moves on immediately because the
+#     X.Y line is branched at the end of its development cycle (beta).
+#   * major: create `releases/(X+1).0` from main at `(X+1).0.0-alpha.1` and open a
+#     PR moving main to `(X+1).0.0-nightly`. The new major is branched at the
+#     start of its cycle (alpha), so main stays on `(X+1).0.0-nightly` and only
+#     advances to `(X+1).1.0-nightly` once `(X+1).0.0` ships stable (release.yml).
+#
+# See doc/RELEASING.md for the full model.
+
+name: Cut release
+
+run-name: "Cut ${{ inputs.cut-type }} release (publish: ${{ inputs.publish }})"
+
+on:
+  workflow_dispatch:
+    inputs:
+      cut-type:
+        required: true
+        type: choice
+        description: "What to cut"
+        options:
+          - minor
+          - major
+      git-sha:
+        required: false
+        type: string
+        description: "Commit on main to cut from (defaults to main HEAD)"
+      publish:
+        required: false
+        type: boolean
+        default: false
+        description: "Create the branch/PR (false performs a dry-run)"
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+jobs:
+  cut:
+    name: Cut ${{ inputs.cut-type }} release
+    if: ${{ github.repository == vars.PRIVATE_ENGINE_REPO }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.git-sha || 'main' }}
+          fetch-depth: 0
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+
+      # A cut must come from main: the new version (and, for minor cuts, the new
+      # release branch) is derived from main's development version.
+      - name: Verify the commit is on main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main >/dev/null 2>&1 || true
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::$(git rev-parse HEAD) is not on main; cuts can only be made from main."
+            exit 1
+          fi
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+
+      - name: Install cargo-edit
+        run: cargo install cargo-edit
+
+      - name: Cut release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .github/scripts/cut-release.sh "${{ inputs.cut-type }}" "${{ inputs.publish }}"

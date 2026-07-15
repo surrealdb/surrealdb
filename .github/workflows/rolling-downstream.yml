@@ -1,0 +1,531 @@
+# Rolling downstream (reusable)
+#
+# Builds the downstream multi-arch Docker image for ONE channel of a single commit
+# and stores it in the downstream's private ECR, tagged with this engine's rolling
+# identity (rolling-<slug>-<sha>). This is the downstream half of build-once /
+# promote-many: the image is built here, from this exact commit, so a later
+# release just re-tags + mirrors it (see release.yml) instead of rebuilding.
+#
+# The downstream is built from a *colocated* checkout of this engine (a Cargo path
+# patch redirects the engine dependency to it), so the downstream image can never
+# drift from the engine commit it ships with — the cause of late, release-time
+# breakage this whole pipeline exists to remove. The downstream repo keeps owning
+# its build logic: we only invoke its Docker composite actions from a mounted
+# checkout.
+#
+# Registry coordinates, credentials and the downstream repo all come from
+# DOWNSTREAM_* secrets, and every job no-ops green when those secrets are absent.
+
+name: Rolling downstream
+
+on:
+  workflow_call:
+    inputs:
+      branch-slug:
+        description: 'Slug the artifacts are namespaced under (e.g. main or releases-4-0)'
+        required: true
+        type: string
+      s3-prefix:
+        description: 'S3 prefix for this channel/commit (rolling-builds/<slug>/<engine-sha>), where downstream.json is written'
+        required: true
+        type: string
+      release-version:
+        description: 'Version baked into the downstream binary (e.g. 4.0.0-nightly or 4.0.0-alpha.3)'
+        required: true
+        type: string
+      build-metadata:
+        description: 'Build metadata baked into the binary (date.rev)'
+        required: true
+        type: string
+      engine-ref:
+        description: 'Engine commit to build against, tag under and record. Normally the pushed/dispatched engine sha; a rebuild passes the target sha so it reproduces that commit rather than the branch tip.'
+        required: true
+        type: string
+      downstream-ref:
+        description: 'Override: downstream branch OR commit to build. A branch name resolves to its tip; anything else is treated as an exact commit sha. Empty resolves the branch matching the engine line (falling back to main). Used both for a reproduce/rebuild (the sha read from a recorded downstream.json) and for a manual pairing override.'
+        required: false
+        default: ''
+        type: string
+      downstream-branch:
+        description: 'Branch label recorded alongside downstream-ref when the override is a bare commit sha (informational; the slug/prefix come from the engine side). Ignored when downstream-ref is itself a branch name.'
+        required: false
+        default: ''
+        type: string
+    outputs:
+      configured:
+        description: 'Whether the downstream build is configured (secrets present)'
+        value: ${{ jobs.preflight.outputs.configured }}
+      branch:
+        description: 'The downstream branch that was built'
+        value: ${{ jobs.preflight.outputs.branch }}
+      sha:
+        description: 'The downstream commit that was built'
+        value: ${{ jobs.preflight.outputs.sha }}
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+jobs:
+  # Resolve whether the downstream build is wired up, and which downstream commit
+  # to build. Until the downstream App + secrets are provisioned this whole
+  # workflow is a green no-op.
+  preflight:
+    name: Resolve downstream
+    if: github.repository == vars.PRIVATE_ENGINE_REPO
+    runs-on: ubuntu-latest
+    outputs:
+      configured: ${{ steps.preflight.outputs.configured }}
+      branch: ${{ steps.branch.outputs.ref }}
+      sha: ${{ steps.branch.outputs.sha }}
+      # Whether this build is promotable, i.e. it was built from the downstream
+      # branch that MATCHES the engine line (or is an explicit rebuild). A build
+      # that fell back to the downstream's 'main' is not promotable — finalize
+      # skips writing downstream.json so a stable engine release is never paired
+      # with the downstream's unreleased main.
+      promotable: ${{ steps.branch.outputs.promotable }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Check whether the downstream build is configured
+        id: preflight
+        env:
+          CLIENT_ID: ${{ secrets.DOWNSTREAM_APP_CLIENT_ID }}
+        run: |
+          if [ -n "${CLIENT_ID}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Rolling downstream::Not configured (DOWNSTREAM_* secrets absent) — skipping the downstream image build."
+          fi
+
+      - name: Generate a token for the downstream repo
+        id: app-token
+        if: steps.preflight.outputs.configured == 'true'
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.DOWNSTREAM_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DOWNSTREAM_APP_PRIVATE_KEY }}
+          repositories: ${{ secrets.DOWNSTREAM_REPO }}
+
+      # Resolve which downstream commit to build. An explicit override (a branch
+      # or a bare sha, from a reproduce or a manual pairing) wins; otherwise build
+      # the matching release-line branch tip, falling back to main (a missing
+      # counterpart branch is a warning, not a failure — the downstream may
+      # iterate on main only).
+      - name: Resolve downstream branch + sha
+        id: branch
+        if: steps.preflight.outputs.configured == 'true'
+        env:
+          TOKEN: ${{ steps.app-token.outputs.token }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ secrets.DOWNSTREAM_REPO }}
+          WANT: ${{ github.ref_name }}
+          OVERRIDE_REF: ${{ inputs.downstream-ref }}
+          OVERRIDE_BRANCH: ${{ inputs.downstream-branch }}
+        run: |
+          set -euo pipefail
+          # Read refs over https with the App token supplied via GIT_CONFIG so it
+          # never lands in argv. Requires the App's Contents:read on the repo.
+          #
+          # Run from RUNNER_TEMP, NOT the workspace: if an engine checkout is ever
+          # present here, its repo config carries a host-scoped http.extraHeader
+          # for this repo's GITHUB_TOKEN, which also matches the downstream URL —
+          # git would then send that token (which can't see the private downstream
+          # repo) and GitHub returns "Repository not found". Running outside any
+          # repo means only the installation token below is used.
+          workdir="${RUNNER_TEMP:-/tmp}"
+          url="https://github.com/${OWNER}/${REPO}.git"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraHeader
+          GIT_CONFIG_VALUE_0="Authorization: Basic $(printf 'x-access-token:%s' "$TOKEN" | base64 | tr -d '\n')"
+          export GIT_CONFIG_VALUE_0
+
+          # Override: an explicit downstream ref was supplied — either a reproduce
+          # (the sha recorded in a downstream.json) or a manual pairing override.
+          # If it names a branch on the downstream, build that branch's tip; else
+          # treat it as an exact commit sha. Either way it is an intentional
+          # pairing, so it is marked promotable (finalize still requires the
+          # dispatch to target a release line before writing downstream.json).
+          if [ -n "${OVERRIDE_REF}" ]; then
+            set +e
+            out="$(git -C "$workdir" ls-remote --exit-code --heads "$url" "refs/heads/${OVERRIDE_REF}" 2>/dev/null)"
+            rc=$?
+            set -e
+            if [ "$rc" -eq 0 ]; then
+              ref="${OVERRIDE_REF}"
+              sha="$(printf '%s\n' "$out" | head -n1 | cut -f1)"
+            elif [ "$rc" -eq 2 ]; then
+              # Reachable, but no such branch — treat the override as a commit sha.
+              ref="${OVERRIDE_BRANCH}"
+              sha="${OVERRIDE_REF}"
+            else
+              echo "::error title=Rolling downstream::could not read refs on ${OWNER}/${REPO} to resolve downstream override '${OVERRIDE_REF}'. If this is an auth/permission error, the App is missing Contents:read on the repo (approve it on the installation, not just the App)."
+              exit 1
+            fi
+            {
+              echo "ref=${ref}"
+              echo "sha=${sha}"
+              echo "promotable=true"
+            } >> "$GITHUB_OUTPUT"
+            echo "Override: building the downstream from ${ref:-<recorded>} (${sha})"
+            exit 0
+          fi
+
+          # Default: build the downstream branch that MATCHES the engine line (the
+          # same release line) when it exists, else fall back to main. A missing
+          # counterpart branch is a warning, not a failure: the downstream may
+          # iterate on main only.
+          ref=""
+          sha=""
+          last_err=""
+          for cand in "${WANT}" main; do
+            out="$(git -C "$workdir" ls-remote --exit-code --heads "$url" "refs/heads/${cand}" 2>/dev/null)" && rc=0 || rc=$?
+            if [ "$rc" -eq 0 ]; then
+              ref="${cand}"
+              sha="$(printf '%s\n' "$out" | head -n1 | cut -f1)"
+              break
+            elif [ "$rc" -ne 2 ]; then
+              # exit 2 = reachable but no such ref; anything else = access/auth error
+              last_err="git error reading refs/heads/${cand}"
+            fi
+          done
+          if [ -z "${ref}" ]; then
+            echo "::error title=Rolling downstream::could not read '${WANT}' or 'main' on ${OWNER}/${REPO}. ${last_err:+(${last_err}) }If this is an auth/permission error, the App is missing Contents:read on the repo (approve it on the installation, not just the App)."
+            exit 1
+          fi
+          # Promotable only when the downstream branch MATCHES the engine line
+          # (parallel releases/X.Y). A fallback to the downstream's 'main' still
+          # builds + scans + pushes the image (so you can inspect it), but is NOT
+          # promotable: a stable engine release must not be paired with the
+          # downstream's unreleased main. Create the matching downstream release
+          # branch and re-trigger to make it promotable.
+          promotable=true
+          if [ "${ref}" != "${WANT}" ]; then
+            echo "::warning title=Rolling downstream::no matching downstream branch '${WANT}'; built against '${ref}' — NOT marking this build promotable. Create downstream '${WANT}' and re-trigger to promote it."
+            promotable=false
+          fi
+          {
+            echo "ref=${ref}"
+            echo "sha=${sha}"
+            echo "promotable=${promotable}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Building the downstream from ${ref} (${sha})"
+
+  # Pre-build the heavy builder image (Rust + aws-sdk-cpp + sources) once per arch
+  # and cache it in the downstream ECR, so the per-target image builds below are
+  # incremental. Runs on private runners only.
+  builder:
+    name: Builder (${{ matrix.arch }})
+    needs: preflight
+    if: needs.preflight.outputs.configured == 'true'
+    # Private runner per arch: the downstream image is fed only by a private
+    # pipeline. Labels come from repo/org variables.
+    runs-on: ${{ matrix.arch == 'amd64' && vars.RUNNER_AMD || vars.RUNNER_ARM }}
+    env:
+      DOCKER_REPO: ${{ secrets.AWS_ECR_REGISTRY }}/${{ secrets.DOWNSTREAM_ECR_REPOSITORY }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            arch: amd64
+          - platform: linux/arm64
+            arch: arm64
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      # Mint a short-lived, repo-scoped token for the downstream, check it out,
+      # and colocate this engine inside it so the downstream Dockerfile can build
+      # the engine from a path (engine-path) instead of fetching it.
+      - name: Generate a token for the downstream repo
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.DOWNSTREAM_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DOWNSTREAM_APP_PRIVATE_KEY }}
+          repositories: ${{ secrets.DOWNSTREAM_REPO }}
+
+      - name: Checkout downstream
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ github.repository_owner }}/${{ secrets.DOWNSTREAM_REPO }}
+          ref: ${{ needs.preflight.outputs.sha }}
+          token: ${{ steps.app-token.outputs.token }}
+          path: downstream
+          persist-credentials: false
+
+      - name: Colocate engine source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.engine-ref }}
+          path: downstream/engine
+          persist-credentials: false
+
+      # Ambient auth: the private runner's IAM instance role provides downstream
+      # ECR credentials, so no configure-aws-credentials / static keys are
+      # needed. The registry comes from a secret; the region is derived from the
+      # registry host.
+      - name: Login to the downstream ECR
+        env:
+          REGISTRY: ${{ secrets.AWS_ECR_REGISTRY }}
+        run: |
+          set -euo pipefail
+          region="$(printf '%s' "$REGISTRY" | cut -d. -f4)"
+          aws ecr get-login-password --region "$region" \
+            | docker login --username AWS --password-stdin "$REGISTRY"
+
+      - name: Build builder image
+        uses: ./downstream/.github/actions/build-docker-builder
+        with:
+          context-dir: downstream
+          dockerfile: downstream/docker/Dockerfile
+          git-ref: ${{ needs.preflight.outputs.sha }}
+          platform: ${{ matrix.platform }}
+          arch: ${{ matrix.arch }}
+          docker-repo: ${{ env.DOCKER_REPO }}
+          tag-branch: ${{ inputs.branch-slug }}
+          build-metadata: ${{ inputs.build-metadata }}
+          release-version: ${{ inputs.release-version }}
+
+  # Build + push each per-arch, per-target downstream image to the downstream ECR,
+  # built from the colocated engine checkout (no git/SSH). Runs on private runners.
+  image:
+    name: Image (${{ matrix.image.target }}, ${{ matrix.platform.arch }})
+    needs: [preflight, builder]
+    if: needs.preflight.outputs.configured == 'true'
+    # Private runner per arch (downstream pipeline); label from a
+    # repo/org variable.
+    runs-on: ${{ matrix.platform.arch == 'amd64' && vars.RUNNER_AMD || vars.RUNNER_ARM }}
+    env:
+      DOCKER_REPO: ${{ secrets.AWS_ECR_REGISTRY }}/${{ secrets.DOWNSTREAM_ECR_REPOSITORY }}
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - target: prod
+            suffix: ''
+          - target: dev
+            suffix: -dev
+        platform:
+          - platform: linux/amd64
+            arch: amd64
+          - platform: linux/arm64
+            arch: arm64
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      # Mint a short-lived, repo-scoped token for the downstream, check it out,
+      # and colocate this engine inside it so the downstream Dockerfile can build
+      # the engine from a path (engine-path) instead of fetching it.
+      - name: Generate a token for the downstream repo
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.DOWNSTREAM_APP_CLIENT_ID }}
+          private-key: ${{ secrets.DOWNSTREAM_APP_PRIVATE_KEY }}
+          repositories: ${{ secrets.DOWNSTREAM_REPO }}
+
+      - name: Checkout downstream
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ github.repository_owner }}/${{ secrets.DOWNSTREAM_REPO }}
+          ref: ${{ needs.preflight.outputs.sha }}
+          token: ${{ steps.app-token.outputs.token }}
+          path: downstream
+          persist-credentials: false
+
+      - name: Colocate engine source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.engine-ref }}
+          path: downstream/engine
+          persist-credentials: false
+
+      # Ambient auth: the private runner's IAM instance role provides downstream
+      # ECR credentials, so no configure-aws-credentials / static keys are
+      # needed. The registry comes from a secret; the region is derived from the
+      # registry host.
+      - name: Login to the downstream ECR
+        env:
+          REGISTRY: ${{ secrets.AWS_ECR_REGISTRY }}
+        run: |
+          set -euo pipefail
+          region="$(printf '%s' "$REGISTRY" | cut -d. -f4)"
+          aws ecr get-login-password --region "$region" \
+            | docker login --username AWS --password-stdin "$REGISTRY"
+
+      # Build the engine from the colocated checkout (engine-path), so no git fetch
+      # / SSH deploy key is needed. Pushes both the base rolling tag and the
+      # per-arch tag the manifest step stitches together.
+      - name: Build + push downstream image
+        uses: ./downstream/.github/actions/build-docker-image
+        with:
+          context-dir: downstream
+          dockerfile: downstream/docker/Dockerfile
+          git-ref: ${{ needs.preflight.outputs.sha }}
+          docker-repo: ${{ env.DOCKER_REPO }}
+          docker-tag: rolling-${{ inputs.branch-slug }}-${{ inputs.engine-ref }}
+          tag-suffix: ${{ matrix.image.suffix }}
+          tag-branch: ${{ inputs.branch-slug }}
+          build-metadata: ${{ inputs.build-metadata }}
+          release-version: ${{ inputs.release-version }}
+          target: ${{ matrix.image.target }}
+          platform: ${{ matrix.platform.platform }}
+          publish: 'true'
+          engine-path: engine
+
+  # Stitch the per-arch images into a multi-arch manifest under the base rolling
+  # tag, after an amd64 vulnerability scan. A CRITICAL/HIGH finding fails the job,
+  # so the multi-arch rolling tag is never created and the commit is not
+  # promotable for the downstream (the per-arch images stay in the private ECR only).
+  manifest:
+    name: Manifest (${{ matrix.image.name }})
+    needs: [preflight, image]
+    if: needs.preflight.outputs.configured == 'true'
+    # Private runner (downstream pipeline); label from a repo/org
+    # variable.
+    runs-on: ${{ vars.RUNNER_AMD }}
+    env:
+      DOCKER_REPO: ${{ secrets.AWS_ECR_REGISTRY }}/${{ secrets.DOWNSTREAM_ECR_REPOSITORY }}
+      ROLLING_TAG: rolling-${{ inputs.branch-slug }}-${{ inputs.engine-ref }}
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - name: prod
+            suffix: ''
+          - name: dev
+            suffix: -dev
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      # Check out the engine repo so the shared ./.github/actions/test-docker-image
+      # composite action is available on this runner.
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      # Ambient auth: the private runner's IAM instance role provides downstream
+      # ECR credentials, so no configure-aws-credentials / static keys are
+      # needed. The registry comes from a secret; the region is derived from the
+      # registry host.
+      - name: Login to the downstream ECR
+        env:
+          REGISTRY: ${{ secrets.AWS_ECR_REGISTRY }}
+        run: |
+          set -euo pipefail
+          region="$(printf '%s' "$REGISTRY" | cut -d. -f4)"
+          aws ecr get-login-password --region "$region" \
+            | docker login --username AWS --password-stdin "$REGISTRY"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      # Scan + smoke-test the amd64 image BEFORE stitching the multi-arch rolling
+      # manifest, so a vulnerable or non-booting image never becomes promotable.
+      # amd64-only: the runtime base digest is shared across arches, so arm64
+      # findings would match. Same shared gate as the engine image (Trivy +
+      # version + startup + HTTP health).
+      - name: Test the image (scan + smoke test)
+        uses: ./.github/actions/test-docker-image
+        with:
+          image-ref: ${{ env.DOCKER_REPO }}:${{ env.ROLLING_TAG }}-linux-amd64${{ matrix.image.suffix }}
+
+      # Advisory audit-trail check that the downstream per-arch image carries the
+      # provenance + SBOM attestations we expect. Warning-only (and
+      # continue-on-error) so a missing attestation never blocks a release.
+      - name: Verify downstream image attestations
+        continue-on-error: true
+        uses: ./.github/actions/verify-attestations
+        with:
+          image-ref: ${{ env.DOCKER_REPO }}:${{ env.ROLLING_TAG }}-linux-amd64${{ matrix.image.suffix }}
+
+      - name: Create multi-arch rolling manifest
+        env:
+          BASE: ${{ env.DOCKER_REPO }}:${{ env.ROLLING_TAG }}${{ matrix.image.suffix }}
+          ARM64: ${{ env.DOCKER_REPO }}:${{ env.ROLLING_TAG }}-linux-arm64${{ matrix.image.suffix }}
+          AMD64: ${{ env.DOCKER_REPO }}:${{ env.ROLLING_TAG }}-linux-amd64${{ matrix.image.suffix }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create --tag "${BASE}" "${ARM64}" "${AMD64}"
+          echo "Created multi-arch rolling manifest ${BASE}"
+
+  # Record that a promotable downstream image exists for this engine commit, by
+  # writing downstream.json next to the engine's engine.json in the private CI
+  # bucket (keyed by the SAME engine sha). This is the downstream half of the
+  # decoupled manifests: engine.json (from the engine rolling build) and this file
+  # are written by different sides and never share an object, so builds that land
+  # close together can't clobber each other.
+  #
+  # PRESENCE is the signal: this job only runs after every per-target multi-arch
+  # manifest succeeded, so the mere existence of downstream.json means "a
+  # promotable downstream image exists for this engine sha". A not-configured /
+  # failed / absent downstream build simply leaves no downstream.json. The file
+  # carries only public-safe provenance (which downstream branch/sha it built
+  # against, and the engine sha it belongs to) — no registry/account/repo, which
+  # the promote workflow reconstructs from secrets + the rolling tag.
+  #
+  # Only promotable builds get a downstream.json. Two guards:
+  #   * Release lines + main only: a build on a releases/* line (a versioned
+  #     release) or on main (the nightly channel — the scheduled nightly build, or
+  #     a manual dispatch against main to test the downstream image in the cloud)
+  #     is promotable. A
+  #     dispatch against any OTHER branch still builds, scans and pushes the
+  #     rolling image above — so you CAN test that an arbitrary branch builds a
+  #     correct image — but is never marked promotable.
+  #   * Matched branch only (preflight.promotable): a build that fell back to the
+  #     downstream's 'main' because the matching release branch was absent is not
+  #     promotable, so a stable engine release can't be paired with the
+  #     downstream's unreleased main. (On the engine's main line the matched
+  #     downstream branch IS main, so a nightly pairing is itself promotable.)
+  # github.ref here is the caller's triggering ref.
+  finalize:
+    name: Finalize downstream manifest
+    needs: [preflight, manifest]
+    if: ${{ needs.preflight.outputs.configured == 'true' && needs.manifest.result == 'success' && needs.preflight.outputs.promotable == 'true' && (startsWith(github.ref, 'refs/heads/releases/') || github.ref == 'refs/heads/main') }}
+    # Private runner: the manifest lives in the private CI bucket, reached via the
+    # runner's ambient IAM role (no static keys). Label from a repo/org variable.
+    runs-on: ${{ vars.RUNNER_AMD }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Write downstream manifest
+        env:
+          ROLLING_BUCKET: ${{ secrets.AWS_S3_GITHUB_ACTIONS_BUCKET_NAME }}
+          AWS_REGION: us-east-1
+          S3_PREFIX: ${{ inputs.s3-prefix }}
+          ENGINE_REF: ${{ inputs.engine-ref }}
+          DS_BRANCH: ${{ needs.preflight.outputs.branch }}
+          DS_SHA: ${{ needs.preflight.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # engine_sha is redundant with the prefix (which is keyed by the engine
+          # sha), but recording it lets promote assert this downstream image was
+          # built against the engine commit it is being married to.
+          jq -n \
+            --arg engine_sha "${ENGINE_REF}" \
+            --arg branch "${DS_BRANCH}" \
+            --arg sha "${DS_SHA}" \
+            --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{engine_sha: $engine_sha, branch: $branch, sha: $sha, created_at: $created}' \
+            > downstream.json
+          cat downstream.json
+          aws s3 cp --cache-control 'no-store' downstream.json "s3://${ROLLING_BUCKET}/${S3_PREFIX}/downstream.json"

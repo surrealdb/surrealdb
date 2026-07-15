@@ -1,0 +1,198 @@
+# Rolling build (downstream)
+#
+# Builds and stores the downstream image for a commit and records it as
+# promotable by writing rolling-builds/<slug>/<sha>/downstream.json next to the
+# engine's engine.json (keyed by the SAME commit). This is the downstream half of
+# build-once / promote-many; the reusable rolling-downstream.yml does the actual
+# build and push.
+#
+# The downstream image is released from a release line (versioned) or from main
+# (the nightly channel). Both are marked PROMOTABLE (they write downstream.json).
+# A dispatch against any OTHER branch still builds, scans and pushes the rolling
+# image (so you can verify that branch builds a correct image) but is deliberately
+# never marked promotable, so it can't leak an off-policy release. The engine and
+# downstream nightly builds run independently and are decoupled: if either fails,
+# the other is unaffected.
+#
+# Triggers:
+#   * push to releases/* — runs alongside the engine rolling build so a release
+#     commit produces both an engine and a downstream artifact set.
+#   * schedule (nightly) — builds the downstream image off main once a day, a few
+#     hours ahead of the release workflow's downstream promote, mirroring the
+#     engine rolling build's nightly cadence. main is NOT built per push.
+#   * workflow_dispatch — lets the downstream repo (via `gh workflow run`) or a
+#     maintainer (re)build the downstream image. Dispatch against the engine
+#     branch to pair with (--ref releases/X.Y, or main to test). Two optional
+#     inputs override the engine<->downstream pairing; either or both can be set:
+#       - engine-git-sha: the engine commit to build/pair against. Empty = the
+#         dispatched branch tip.
+#       - downstream-git-sha: the downstream branch OR commit to build. A branch
+#         resolves to its tip.
+#     Behaviour:
+#       - neither set (push / tip dispatch): build the engine tip against the
+#         matching downstream branch tip (how a downstream-only change becomes
+#         promotable without a new engine commit).
+#       - engine-git-sha only: REPRODUCE — rebuild the exact downstream commit
+#         recorded in that engine sha's downstream.json and overwrite its
+#         artifacts (handy if they were pruned/lost before promotion).
+#       - downstream-git-sha set (with or without engine-git-sha): OVERRIDE the
+#         pairing — build that specific downstream branch/commit against the
+#         chosen (or tip) engine commit. This is how you pick the exact downstream
+#         commit a release ships, independent of the recorded pairing.
+#
+# The engine and downstream sides are fully decoupled: this workflow writes only
+# downstream.json and never touches engine.json. It deliberately does NOT run the
+# engine crate gates (version-drift / crates.io packaging) — those gate the
+# engine crate release, not the downstream image, which ships the engine as a
+# compiled binary. The promote workflow decides what to release from which
+# manifests exist for the commit.
+
+name: Rolling downstream build
+
+run-name: "Rolling downstream build (${{ github.ref_name }} @ ${{ inputs.engine-git-sha || github.sha }}${{ inputs.downstream-git-sha != '' && format(' ⇢ ds:{0}', inputs.downstream-git-sha) || '' }})"
+
+on:
+  push:
+    branches:
+      - 'releases/*'
+  # Nightly (main) channel: build the downstream image once a day, a few hours
+  # ahead of the release workflow's 00:30 UTC downstream promote, so there's a
+  # buffer to notice and re-run a failed build before promotion. Mirrors the
+  # engine rolling build's 20:00 nightly. main is deliberately NOT built per push.
+  schedule:
+    - cron: "0 20 * * *"
+  workflow_dispatch:
+    inputs:
+      engine-git-sha:
+        description: 'Engine commit SHA or branch/ref to (re)build the downstream image for (a branch resolves to its tip). Defaults to the dispatched branch tip; the artifact line follows the DISPATCHED ref, so pass a commit or ref on the branch you dispatched against. Set on its own (no downstream-git-sha) to REPRODUCE the downstream commit recorded in that engine sha''s downstream.json.'
+        required: false
+        type: string
+      downstream-git-sha:
+        description: 'Downstream branch OR commit to build, overriding the pairing (a branch resolves to its tip). Empty uses the recorded pairing on a reproduce, else the matching downstream branch tip. Set this to pick the exact downstream commit a release ships.'
+        required: false
+        type: string
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+# Keyed per COMMIT being built, not per branch: every commit on a release branch
+# must produce its own promotable downstream image, so distinct commits never
+# cancel or queue behind one another (the unit of promotion is the commit, not
+# "the latest"). We key on the exact target engine commit (inputs.engine-git-sha
+# on a manual rebuild, else github.sha) rather than github.sha alone: on a
+# workflow_dispatch github.sha is the branch TIP, so two rebuilds of different old
+# commits would otherwise share a group and cancel each other. The downstream
+# override is folded into the key too, so pairing the SAME engine commit with
+# DIFFERENT downstream commits doesn't cancel across dispatches. The key is
+# separate from the engine build's key, so the two sides never contend.
+# cancel-in-progress only supersedes a redundant rebuild of the SAME target (e.g.
+# a re-dispatch picking up a newer downstream tip), which is what we want.
+concurrency:
+  group: rolling-downstream-${{ inputs.engine-git-sha || github.sha }}-${{ inputs.downstream-git-sha }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    name: Prepare
+    if: ${{ github.repository == vars.PRIVATE_ENGINE_REPO }}
+    runs-on: ubuntu-latest
+    outputs:
+      build-metadata: ${{ steps.vars.outputs.build-metadata }}
+      slug: ${{ steps.vars.outputs.slug }}
+      s3-prefix: ${{ steps.vars.outputs.s3-prefix }}
+      version: ${{ steps.vars.outputs.version }}
+      sha: ${{ steps.vars.outputs.sha }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # The pushed commit, or the exact engine sha/ref for a manual (re)build.
+          ref: ${{ inputs.engine-git-sha || github.sha }}
+
+      - name: Derive rolling build vars
+        id: vars
+        uses: ./.github/actions/derive-rolling-vars
+
+  # Rebuild only: resolve the exact downstream commit this engine sha was
+  # originally built against, from the recorded downstream.json (retained even
+  # when heavy binaries are pruned), so the rebuild reproduces the same pairing
+  # instead of picking up the current downstream tip. Reads the private CI bucket
+  # via the runner's ambient IAM role, so it runs on a private runner. Skipped for
+  # normal pushes / tip dispatches, which resolve the downstream branch tip.
+  resolve:
+    name: Resolve downstream ref (rebuild)
+    # Reproduce path only: an engine sha was given WITHOUT a downstream override,
+    # so recover the downstream commit that engine sha was originally paired with.
+    # A downstream override skips this — we build exactly what was asked for.
+    if: ${{ github.repository == vars.PRIVATE_ENGINE_REPO && inputs.engine-git-sha != '' && inputs.downstream-git-sha == '' }}
+    needs: [prepare]
+    runs-on: ${{ vars.RUNNER_AMD }}
+    outputs:
+      downstream-ref: ${{ steps.read.outputs.ds-ref }}
+      downstream-branch: ${{ steps.read.outputs.ds-branch }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Read recorded downstream commit
+        id: read
+        env:
+          ROLLING_BUCKET: ${{ secrets.AWS_S3_GITHUB_ACTIONS_BUCKET_NAME }}
+          AWS_REGION: us-east-1
+          S3_PREFIX: ${{ needs.prepare.outputs.s3-prefix }}
+          ENGINE_SHA: ${{ inputs.engine-git-sha }}
+        run: |
+          set -euo pipefail
+          json="$(aws s3 cp "s3://${ROLLING_BUCKET}/${S3_PREFIX}/downstream.json" - 2>/dev/null || true)"
+          if [ -z "${json}" ]; then
+            echo "::error::No downstream.json at ${S3_PREFIX}; cannot determine which downstream commit to reproduce for ${ENGINE_SHA} (a downstream image may never have been built for this engine sha)."
+            exit 1
+          fi
+          ds_sha="$(printf '%s' "$json" | jq -r '.sha // ""')"
+          ds_branch="$(printf '%s' "$json" | jq -r '.branch // ""')"
+          if [ -z "${ds_sha}" ]; then
+            echo "::error::downstream.json at ${S3_PREFIX} records no downstream sha."
+            exit 1
+          fi
+          echo "ds-ref=${ds_sha}" >> "$GITHUB_OUTPUT"
+          echo "ds-branch=${ds_branch}" >> "$GITHUB_OUTPUT"
+          echo "Reproducing downstream ${ds_branch:-<recorded>} (${ds_sha}) against engine ${ENGINE_SHA}"
+
+  # Build + push the downstream image and write downstream.json under the same
+  # rolling-builds/<slug>/<sha>/ prefix as the engine build. Normally
+  # rolling-downstream resolves the downstream branch tip; a rebuild passes the
+  # recorded downstream ref so it reproduces the original pairing. No-ops green
+  # when the downstream secrets are absent.
+  downstream:
+    name: Downstream image
+    # Run once prepare is green; resolve is skipped for non-rebuilds (its outputs
+    # are then empty) but must not have FAILED (we won't build against an unknown
+    # downstream commit).
+    if: ${{ github.repository == vars.PRIVATE_ENGINE_REPO && !cancelled() && needs.prepare.result == 'success' && needs.resolve.result != 'failure' }}
+    needs: [prepare, resolve]
+    uses: ./.github/workflows/rolling-downstream.yml
+    with:
+      branch-slug: ${{ needs.prepare.outputs.slug }}
+      release-version: ${{ needs.prepare.outputs.version }}
+      build-metadata: ${{ needs.prepare.outputs.build-metadata }}
+      s3-prefix: ${{ needs.prepare.outputs.s3-prefix }}
+      engine-ref: ${{ needs.prepare.outputs.sha }}
+      # The reproduce path supplies the recorded sha via resolve; a manual
+      # override supplies the branch/sha directly. They are mutually exclusive
+      # (resolve is skipped when an override is set), so the recorded value wins
+      # when present and the override is the fallback. Both empty => the reusable
+      # resolves the matching downstream branch tip.
+      downstream-ref: ${{ needs.resolve.outputs.downstream-ref || inputs.downstream-git-sha }}
+      downstream-branch: ${{ needs.resolve.outputs.downstream-branch }}
+    secrets: inherit

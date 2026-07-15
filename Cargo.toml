@@ -80,10 +80,10 @@ surrealdb-collections = { version = "3.3.0-nightly", path = "surrealdb/collectio
 # SurrealML crates
 surrealml-core = { version = "0.1", path = "surrealml/core" }
 # Surrealism crates
-surrealism = { version = "0.5.0-beta.1", path = "surrealism" }
-surrealism-macros = { version = "0.5.0-beta.1", path = "surrealism/macros", default-features = false }
-surrealism-runtime = { version = "0.5.0-beta.1", path = "surrealism/runtime" }
-surrealism-types = { version = "0.5.0-beta.1", path = "surrealism/types", default-features = false }
+surrealism = { version = "0.5", path = "surrealism" }
+surrealism-macros = { version = "0.5", path = "surrealism/macros", default-features = false }
+surrealism-runtime = { version = "0.5", path = "surrealism/runtime" }
+surrealism-types = { version = "0.5", path = "surrealism/types", default-features = false }
 # External surreal crates
 affinitypool = "0.7.0"
 dmp = "0.2.3"

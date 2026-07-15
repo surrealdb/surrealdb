@@ -1,0 +1,51 @@
+# Confidentiality guard
+#
+# Scans every PR for confidential strings (see .github/scripts/check-
+# confidentiality.sh) so nothing that must stay private can be merged into a
+# branch that is mirrored to the public engine repo. Squash-merging keeps a
+# fixed-up PR out of the permanent history.
+#
+# The denylist is built from repository secrets and variables at runtime; this
+# workflow names nothing confidential itself. It runs only on the private
+# engine repo and fails closed if the terms are unavailable.
+
+name: Confidentiality
+
+run-name: "Confidentiality '${{ github.head_ref || github.ref_name }}'"
+
+on:
+  pull_request:
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+concurrency:
+  group: confidentiality-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: Scan for confidential references
+    if: ${{ github.repository == vars.PRIVATE_ENGINE_REPO }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Scan tracked files
+        env:
+          AWS_ECR_REGISTRY: ${{ secrets.AWS_ECR_REGISTRY }}
+          DOWNSTREAM_APP_CLIENT_ID: ${{ secrets.DOWNSTREAM_APP_CLIENT_ID }}
+          CONFIDENTIAL_TERMS: ${{ vars.CONFIDENTIAL_TERMS }}
+        run: .github/scripts/check-confidentiality.sh
