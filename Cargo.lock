@@ -6859,6 +6859,7 @@ dependencies = [
  "ammonia",
  "anyhow",
  "arbitrary",
+ "arc-swap",
  "argon2",
  "async-channel",
  "async-graphql",

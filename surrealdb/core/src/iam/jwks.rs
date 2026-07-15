@@ -314,7 +314,7 @@ fn build_jwks_client(kvs: &Datastore) -> Result<Client> {
 
 	// Snapshot the capabilities and redirect budget so the policy closure (which
 	// must be `'static + Send + Sync`) does not borrow the datastore.
-	let capabilities = Arc::new(kvs.get_capabilities().clone());
+	let capabilities = kvs.get_capabilities();
 	let max_redirects = kvs.config().max_http_redirects;
 
 	// Build the DNS-level filter from the same capability snapshot before the

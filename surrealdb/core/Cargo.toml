@@ -80,6 +80,7 @@ common = { workspace = true }
 surrealdb-kvs-any = { workspace = true }
 surrealml-core = { workspace = true, optional = true }
 
+arc-swap = "1"
 async-trait = { workspace = true, optional = true }
 dmp.workspace = true
 js = { workspace = true, features = [

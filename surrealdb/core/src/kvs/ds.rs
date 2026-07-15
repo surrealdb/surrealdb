@@ -18,6 +18,7 @@ use std::time::Duration;
 #[allow(unused_imports)]
 use anyhow::bail;
 use anyhow::{Context as _, Result, ensure};
+use arc_swap::ArcSwap;
 use async_channel::Sender;
 use bytes::{Bytes, BytesMut};
 use futures::{Future, Stream};
@@ -241,7 +242,7 @@ pub struct Datastore {
 	/// transaction.
 	transaction_timeout: Option<Duration>,
 	/// The security and feature capabilities for this datastore.
-	capabilities: Arc<Capabilities>,
+	capabilities: ArcSwap<Capabilities>,
 	/// Broker used to deliver live-query notifications after their write commits.
 	///
 	/// `Some` iff live-query subscribers exist for this datastore (the broker owns the sender
@@ -295,7 +296,7 @@ pub struct Datastore {
 	config: Arc<CommonConfig>,
 	// Http client used to make requests.
 	#[cfg(feature = "http")]
-	http_client: Arc<HttpClient>,
+	http_client: ArcSwap<HttpClient>,
 	/// Observer invoked on significant events. Defaults to [`NoopObserver`].
 	observer: Arc<dyn ExecutionObserver>,
 }
@@ -651,7 +652,7 @@ impl Datastore {
 			dynamic_configuration: DynamicConfiguration::default(),
 			slow_log: self.slow_log,
 			transaction_timeout: self.transaction_timeout,
-			capabilities: Arc::clone(&self.capabilities),
+			capabilities: ArcSwap::new(self.capabilities.load_full()),
 			live_query_broker: self.live_query_broker,
 			// Fresh router cursor: a restarted node re-establishes its baseline.
 			live_query_router: Arc::new(LiveQueryRouter::new()),
@@ -701,7 +702,7 @@ impl Datastore {
 			dynamic_configuration: self.dynamic_configuration.clone(),
 			slow_log: self.slow_log.clone(),
 			transaction_timeout: self.transaction_timeout,
-			capabilities: Arc::clone(&self.capabilities),
+			capabilities: ArcSwap::new(self.capabilities.load_full()),
 			live_query_broker: self.live_query_broker.clone(),
 			// A fork models a separate node, so it gets its own router cursor.
 			live_query_router: Arc::new(LiveQueryRouter::new()),
@@ -726,7 +727,7 @@ impl Datastore {
 			#[cfg(feature = "surrealism")]
 			lazy_surrealism: self.lazy_surrealism,
 			#[cfg(feature = "http")]
-			http_client: Arc::clone(&self.http_client),
+			http_client: ArcSwap::new(self.http_client.load_full()),
 			observer: Arc::clone(&self.observer),
 			config: Arc::clone(&self.config),
 		}
@@ -820,34 +821,63 @@ impl Datastore {
 
 	/// Does the datastore allow excecuting an RPC method?
 	pub(crate) fn allows_rpc_method(&self, method_target: &MethodTarget) -> bool {
-		self.capabilities.allows_rpc_method(method_target)
+		self.capabilities.load().allows_rpc_method(method_target)
 	}
 
 	/// Does the datastore allow requesting an HTTP route?
 	/// This function needs to be public to allow access from the CLI crate.
 	pub fn allows_http_route(&self, route_target: &RouteTarget) -> bool {
-		self.capabilities.allows_http_route(route_target)
+		self.capabilities.load().allows_http_route(route_target)
 	}
 
 	/// Is the user allowed to query?
 	pub fn allows_query_by_subject(&self, subject: impl Into<ArbitraryQueryTarget>) -> bool {
-		self.capabilities.allows_query(&subject.into())
+		self.capabilities.load().allows_query(&subject.into())
 	}
 
 	/// Is the user allowed to invoke the `eval::*` functions?
 	pub fn allows_eval_query_by_subject(&self, subject: impl Into<EvalQueryTarget>) -> bool {
-		self.capabilities.allows_eval_query(&subject.into())
+		self.capabilities.load().allows_eval_query(&subject.into())
 	}
 
 	/// Does the datastore allow connections to a network target?
 	#[cfg(feature = "jwks")]
 	pub(crate) fn allows_network_target(&self, net_target: &NetTarget) -> bool {
-		self.capabilities.allows_network_target(net_target)
+		self.capabilities.load().allows_network_target(net_target)
 	}
 
-	/// Set specific capabilities for this Datastore
-	pub fn get_capabilities(&self) -> &Capabilities {
-		&self.capabilities
+	/// The datastore's current capabilities snapshot.
+	pub fn get_capabilities(&self) -> Arc<Capabilities> {
+		self.capabilities.load_full()
+	}
+
+	/// Replace the datastore's capabilities at runtime.
+	///
+	/// The swap is atomic and lock-free. In-flight queries keep the snapshot
+	/// they captured when they started (the executor clones the `Arc` once at
+	/// query start), so only queries begun after this call observe the new
+	/// capabilities. This cannot exceed what the binary was compiled to
+	/// support — a capability whose machinery is not compiled in stays inert
+	/// regardless of what is set here.
+	///
+	/// When the `http` feature is enabled this also rebuilds the outbound HTTP
+	/// client so its redirect and DNS net filter track the new `allow_net` /
+	/// `deny_net`. Without that, a runtime net *tightening* would be enforced on
+	/// a request's initial URL (checked against the live snapshot) but not on
+	/// redirect hops, whose filter is baked in at client construction. Building
+	/// the client can fail, hence the `Result`; on failure the capabilities are
+	/// left unchanged.
+	pub fn set_capabilities(&self, capabilities: Capabilities) -> anyhow::Result<()> {
+		#[cfg(feature = "http")]
+		let http_client = HttpClient::new(
+			capabilities.allow_net.clone(),
+			capabilities.deny_net.clone(),
+			&self.config,
+		)?;
+		self.capabilities.store(Arc::new(capabilities));
+		#[cfg(feature = "http")]
+		self.http_client.store(Arc::new(http_client));
+		Ok(())
 	}
 
 	#[cfg(feature = "jwks")]
@@ -3528,7 +3558,7 @@ impl Datastore {
 		vars: Option<PublicVariables>,
 	) -> std::result::Result<Vec<QueryResult>, TypesError> {
 		// Parse the SQL query text
-		let ast = syn::parse_with_capabilities(txt, &self.capabilities, &self.config)
+		let ast = syn::parse_with_capabilities(txt, &self.capabilities.load(), &self.config)
 			.map_err(|e| TypesError::validation(e.to_string(), None))?;
 		// Process the AST
 		self.process(ast, sess, vars).await
@@ -3543,14 +3573,14 @@ impl Datastore {
 		// (`surrealism`, `files`) rather than naming the server's
 		// `--allow-experimental` flag: core is also used embedded, where the
 		// capability is enabled programmatically and no CLI flag exists.
-		if !self.capabilities.allows_experimental(&ExperimentalTarget::Gql) {
+		if !self.capabilities.load().allows_experimental(&ExperimentalTarget::Gql) {
 			return Err(TypesError::not_allowed(
 				"Experimental capability `gql` is not enabled".to_string(),
 				None,
 			));
 		}
 		// Parse and lower the GQL query text
-		crate::gql::parse_with_capabilities(txt, &self.capabilities, &self.config)
+		crate::gql::parse_with_capabilities(txt, &self.capabilities.load(), &self.config)
 			.map_err(|e| TypesError::validation(e.to_string(), None))
 	}
 
@@ -3642,7 +3672,7 @@ impl Datastore {
 		cancel: CancelHandle,
 	) -> std::result::Result<Vec<QueryResult>, TypesError> {
 		// Parse the SQL query text
-		let ast = syn::parse_with_capabilities(txt, &self.capabilities, &self.config)
+		let ast = syn::parse_with_capabilities(txt, &self.capabilities.load(), &self.config)
 			.map_err(|e| TypesError::validation(e.to_string(), None))?;
 		// Process the AST
 		self.process_with_cancel(ast, sess, vars, cancel).await
@@ -3658,7 +3688,7 @@ impl Datastore {
 		tx: Arc<Transaction>,
 	) -> std::result::Result<Vec<QueryResult>, TypesError> {
 		// Parse the SQL query text
-		let ast = syn::parse_with_capabilities(txt, &self.capabilities, &self.config)
+		let ast = syn::parse_with_capabilities(txt, &self.capabilities.load(), &self.config)
 			.map_err(|e| TypesError::validation(e.to_string(), None))?;
 		// Process the AST with the transaction
 		self.process_with_transaction(ast, sess, vars, tx).await
@@ -3677,7 +3707,7 @@ impl Datastore {
 		cancel: CancelHandle,
 	) -> std::result::Result<Vec<QueryResult>, TypesError> {
 		// Parse the SQL query text
-		let ast = syn::parse_with_capabilities(txt, &self.capabilities, &self.config)
+		let ast = syn::parse_with_capabilities(txt, &self.capabilities.load(), &self.config)
 			.map_err(|e| TypesError::validation(e.to_string(), None))?;
 		// Process the AST with the transaction
 		self.process_with_transaction_and_cancel(ast, sess, vars, tx, cancel).await
@@ -4167,14 +4197,14 @@ impl Datastore {
 			self.dynamic_configuration.clone(),
 			self.dynamic_configuration.get_query_timeout(),
 			self.slow_log.clone(),
-			Arc::clone(&self.capabilities),
+			self.capabilities.load_full(),
 			self.index_stores.clone(),
 			self.index_builder.clone(),
 			self.sequences.clone(),
 			Arc::clone(&self.cache),
 			Arc::clone(&self.function_registry),
 			#[cfg(feature = "http")]
-			Arc::clone(&self.http_client),
+			self.http_client.load_full(),
 			#[cfg(storage)]
 			self.temporary_directory.clone(),
 			self.buckets.clone(),
@@ -4187,7 +4217,8 @@ impl Datastore {
 
 	/// check for disallowed anonymous users
 	pub fn check_anon(&self, sess: &Session) -> Result<(), IamError> {
-		if self.auth_enabled && sess.au.is_anon() && !self.capabilities.allows_guest_access() {
+		if self.auth_enabled && sess.au.is_anon() && !self.capabilities.load().allows_guest_access()
+		{
 			Err(IamError::NotAllowed {
 				actor: "anonymous".to_string(),
 				action: String::new(),
@@ -4511,7 +4542,7 @@ impl Datastore {
 
 	#[cfg(feature = "http")]
 	pub fn http_client(&self) -> Arc<HttpClient> {
-		Arc::clone(&self.http_client)
+		self.http_client.load_full()
 	}
 
 	/// Builds a [`NodeEndpointResolver`] backed by this datastore's catalog. Used by the
@@ -4637,6 +4668,39 @@ mod test {
 		// capability error
 		let err = ds.execute_gql("MATCH RETURN", &ses, None).await.unwrap_err();
 		assert!(!err.to_string().contains("experimental"), "unexpected error: {err}");
+		Ok(())
+	}
+
+	/// `set_capabilities` must take effect on an already-built datastore without
+	/// a rebuild: the `gql` experimental gate flips from denied to allowed after
+	/// a live swap, proving the executor observes the new `ArcSwap` snapshot.
+	#[cfg(feature = "gql")]
+	#[tokio::test]
+	async fn set_capabilities_swaps_live() -> Result<()> {
+		use crate::dbs::capabilities::Targets;
+		let ds = Datastore::new("memory").await?;
+		let ses = Session::owner().with_ns("test").with_db("test");
+		let txn = ds.transaction(Write).await?;
+		txn.ensure_ns_db(None, "test", "test").await?;
+		txn.commit().await?;
+
+		// Default capabilities: the `gql` experimental target is disabled.
+		let err = ds.execute_gql("MATCH (n:person) RETURN n", &ses, None).await.unwrap_err();
+		assert!(
+			err.to_string().contains("Experimental capability `gql` is not enabled"),
+			"unexpected error before swap: {err}"
+		);
+
+		// Swap in capabilities that enable it — no rebuild, same datastore.
+		ds.set_capabilities(Capabilities::all().with_experimental(Targets::All))?;
+
+		// The same datastore now permits `gql` (a malformed query fails to parse
+		// rather than being rejected for the capability), and a valid one runs.
+		let err = ds.execute_gql("MATCH RETURN", &ses, None).await.unwrap_err();
+		assert!(!err.to_string().contains("experimental"), "unexpected error after swap: {err}");
+		execute_all(&ds, &ses, "CREATE person:tobie SET name = 'Tobie';").await?;
+		let res = ds.execute_gql("MATCH (n:person) RETURN n.name AS name", &ses, None).await?;
+		assert_eq!(res.len(), 1);
 		Ok(())
 	}
 

@@ -5,6 +5,7 @@ use std::time::Duration;
 #[cfg(feature = "http")]
 use anyhow::Context as _;
 use anyhow::Result;
+use arc_swap::ArcSwap;
 use async_channel::Sender;
 use surrealdb_cnf::dynamic::DynamicConfiguration;
 use surrealdb_cnf::{CommonConfig, ConfigMap};
@@ -297,7 +298,7 @@ impl Builder {
 			TransactionFactory::new(Arc::clone(&async_event_trigger), builder, Arc::clone(&config))
 				.with_observer(Arc::clone(&observer));
 		let id = self.id.unwrap_or_else(Uuid::new_v4);
-		let capabilities = Arc::new(self.capabilities);
+		let capabilities = self.capabilities;
 		let dynamic_configuration = DynamicConfiguration::default();
 		dynamic_configuration.set_query_timeout(self.query_timeout);
 		#[cfg(feature = "http")]
@@ -316,7 +317,7 @@ impl Builder {
 			live_query_broker: self.live_query_broker,
 			live_query_router: Arc::new(LiveQueryRouter::new()),
 			http_endpoint: self.http_endpoint,
-			capabilities,
+			capabilities: ArcSwap::from_pointee(capabilities),
 			index_stores: IndexStores::new(config.hnsw_cache_size, config.diskann_cache_size),
 			index_builder: IndexBuilder::new(tf.clone()),
 			#[cfg(storage)]
@@ -333,7 +334,7 @@ impl Builder {
 			#[cfg(feature = "surrealism")]
 			lazy_surrealism: self.lazy_surrealism,
 			#[cfg(feature = "http")]
-			http_client,
+			http_client: ArcSwap::new(http_client),
 			observer,
 			config,
 		};
