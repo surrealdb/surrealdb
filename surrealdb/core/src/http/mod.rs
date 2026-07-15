@@ -111,15 +111,20 @@ impl HttpClient {
 	/// NOT re-validated — see the WASM exception in `SECURITY_GUIDE.md` §11.
 	/// `allow`/`deny` are accepted for signature parity with the native
 	/// constructor.
+	///
+	/// The configured `User-Agent` is still applied — reqwest's wasm client
+	/// merges client default headers into every request, and the Workers `fetch`
+	/// runtime (unlike a browser) permits setting it — so hosts that reject
+	/// requests lacking a `User-Agent`, such as the GitHub API, are reachable.
 	#[cfg(target_family = "wasm")]
 	pub fn new(
 		allow: Targets<NetTarget>,
 		deny: Targets<NetTarget>,
-		_config: &CommonConfig,
+		config: &CommonConfig,
 	) -> Result<Self> {
 		let _ = allow;
 		let _ = deny;
-		let client = Client::builder().build()?;
+		let client = Client::builder().user_agent(config.surrealdb_user_agent.as_str()).build()?;
 		Ok(HttpClient {
 			client,
 		})
