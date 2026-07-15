@@ -100,6 +100,17 @@ impl HttpClient {
 		})
 	}
 
+	/// On `wasm32` the client cannot enforce network capabilities itself: the
+	/// `fetch` runtime exposes no DNS-resolver hook and no redirect-policy
+	/// control (unlike the native `reqwest` client, which installs a
+	/// `FilteringResolver` and a per-hop `redirect::Policy`). Enforcement
+	/// therefore lives entirely in
+	/// [`Context::check_allowed_net`](crate::ctx::Context), which validates the
+	/// initial request URL's host against `allow`/`deny` before the request is
+	/// made. Redirect hops are followed transparently by the runtime and are
+	/// NOT re-validated — see the WASM exception in `SECURITY_GUIDE.md` §11.
+	/// `allow`/`deny` are accepted for signature parity with the native
+	/// constructor.
 	#[cfg(target_family = "wasm")]
 	pub fn new(
 		allow: Targets<NetTarget>,

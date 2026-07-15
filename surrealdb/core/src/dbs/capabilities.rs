@@ -2,8 +2,6 @@ use std::collections::HashSet;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
-#[cfg(all(target_family = "wasm", feature = "http"))]
-use std::net::ToSocketAddrs;
 #[cfg(feature = "surrealism")]
 use std::str::FromStr;
 
@@ -231,18 +229,17 @@ impl NetTarget {
 		}
 	}
 
+	/// `wasm32-unknown-unknown` has no synchronous DNS resolver: `ToSocketAddrs`
+	/// is unsupported there and fails with "operation not supported on this
+	/// platform". The hostname allow/deny check in
+	/// [`Context::check_allowed_net`](crate::ctx::Context) has already run
+	/// against this target; the IP-level pass only exists to catch a host that
+	/// resolves to a denied address, and the sole wasm deployment target (a
+	/// Cloudflare Worker) cannot reach loopback/link-local/private ranges — the
+	/// runtime enforces that. So skip IP resolution rather than error.
 	#[cfg(target_family = "wasm")]
 	pub(crate) fn resolve(&self) -> Result<Vec<Self>, std::io::Error> {
-		match self {
-			NetTarget::Host(h, p) => {
-				let r = (h.to_string(), p.unwrap_or(80))
-					.to_socket_addrs()?
-					.map(|a| NetTarget::IPNet(a.ip().into()))
-					.collect();
-				Ok(r)
-			}
-			NetTarget::IPNet(_) => Ok(vec![]),
-		}
+		Ok(Vec::new())
 	}
 }
 

@@ -525,6 +525,16 @@ Surrealism/WASM
   initial URL and all DNS-resolved IP addresses must be validated. The DNS filtering
   resolver must validate every resolution result.
 - Redirect targets must be validated against capabilities.
+- **WASM target exception (Cloudflare Worker / Durable Object):** on `wasm32`
+  there is no synchronous DNS resolver (`ToSocketAddrs` is unsupported) and the
+  `fetch` runtime follows redirects transparently with no policy hook, so the
+  DNS-resolved-IP validation and per-hop redirect validation above cannot be
+  performed — only the initial request URL's host is validated against
+  allow/deny. This is acceptable only because the sole wasm deployment target is
+  a Cloudflare Worker, whose egress cannot reach loopback/link-local/RFC1918
+  addresses (the runtime enforces the IP-level restriction). Restoring per-hop
+  redirect validation on wasm (a web-sys `redirect: "manual"` client) is a
+  tracked follow-up.
 - JavaScript runtime must enforce memory, stack, and time limits per invocation.
   Each invocation must create a new runtime (no state persistence).
 - Crypto compare operations must enforce cost allowance bounds.
