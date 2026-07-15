@@ -362,6 +362,8 @@ jobs:
 
   test:
     name: Test workspace (${{ matrix.arch }})
+    env:
+      RUST_MIN_STACK: "8388608" # 8 MiB — some debug tests overflow nextest's default thread stack
     # ARM on every trigger; amd64 added only on merge-queue and push to main.
     runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
