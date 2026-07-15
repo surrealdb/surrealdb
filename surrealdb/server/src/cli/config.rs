@@ -55,4 +55,7 @@ pub struct Config {
 	pub engine: EngineOptions,
 	pub no_identification_headers: bool,
 	pub allow_origin: Vec<String>,
+	/// When set, client-attached HTTP RPC sessions are persisted in the
+	/// datastore and expire after this idle TTL. `None` disables persistence.
+	pub durable_session_ttl: Option<std::time::Duration>,
 }

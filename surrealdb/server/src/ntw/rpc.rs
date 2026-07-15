@@ -206,6 +206,37 @@ async fn post_handler(
 			// (if any) so HTTP responses match the WebSocket convention.
 			let req_id = req.id;
 			let method = req.method;
+			// When sessions are durable, serialize dispatch per client-named
+			// session id, as `RpcProtocol::PERSIST_SESSIONS` requires: the
+			// persist happens after the handler releases the session write
+			// lock, so two concurrent mutations of the same session could
+			// otherwise persist out of order (e.g. an `invalidate` racing a
+			// `signin`). The lock spans the ownership gate below as well as
+			// dispatch, closing the verify-then-execute window. Ephemeral
+			// requests and the collision-probe case (the client happening to
+			// name this request's own ephemeral id) are exempt, matching the
+			// gate.
+			// Held for the rest of this block: the guard must outlive both the
+			// ownership gate and dispatch, so it is bound (not dropped) here.
+			let dispatch_guard = match client_session {
+				Some(cid) if cid != request_session_id && rpc.persist_sessions_enabled() => {
+					Some(rpc.session_locks().acquire(cid).await)
+				}
+				_ => None,
+			};
+			// Reconcile a cached durable session against the authoritative
+			// datastore copy before the gate and dispatch use it: `get_session`
+			// serves a cached session without re-checking storage, so a session
+			// detached, invalidated, mutated, or idle-expired on another node
+			// would otherwise be used with stale auth/`USE` state (or accepted
+			// after its TTL). This reloads the current value into the cache, or
+			// drops it so the gate returns `session_not_found`. Held under the
+			// dispatch lock acquired above.
+			if dispatch_guard.is_some()
+				&& let Some(cid) = client_session
+			{
+				rpc.revalidate_cached_session(&cid).await;
+			}
 			// Ownership gate: if the client supplied a session id that targets an existing attached
 			// session, the caller's request-level auth principal must match the
 			// session's stored principal. `Method::Attach` is the only
@@ -242,6 +273,17 @@ async fn post_handler(
 				}
 				Err(err) => Err(err),
 			};
+			// After a successful request on a durably-tracked session,
+			// refresh the durable copy's idle TTL if it is running low.
+			// Read-only methods persist nothing (persistence is
+			// change-detected), so without this an actively used session
+			// would expire TTL after its last mutation.
+			if res.is_ok()
+				&& dispatch_guard.is_some()
+				&& let Some(cid) = client_session
+			{
+				rpc.touch_durable_session(&cid).await;
+			}
 			// Build the HTTP response. Do not use `?` here: a failure from
 			// `res_http` would short-circuit the function and bypass the
 			// ephemeral-session cleanup below, leaking an entry per failed

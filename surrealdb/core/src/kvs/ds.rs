@@ -58,7 +58,8 @@ use crate::dbs::capabilities::{
 };
 use crate::dbs::node::{Node, Timestamp};
 use crate::dbs::{
-	Capabilities, Executor, MessageBroker, Options, QueryResult, QueryResultBuilder, Session,
+	Capabilities, DurableSession, Executor, MessageBroker, Options, QueryResult,
+	QueryResultBuilder, Session,
 };
 use crate::doc::AsyncEventRecord;
 use crate::err::Error;
@@ -86,7 +87,7 @@ use crate::kvs::slowlog::SlowLog;
 use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 #[cfg(test)]
 use crate::kvs::testing::{RetryableConflictSite, maybe_inject_retryable_conflict};
-use crate::kvs::{NORMAL_BATCH_SIZE, is_retryable_transaction_conflict};
+use crate::kvs::{Error as KvsError, NORMAL_BATCH_SIZE, is_retryable_transaction_conflict};
 use crate::lq::LiveQueryRouter;
 use crate::observe::{ExecutionObserver, NoopObserver};
 use crate::sql::Ast;
@@ -106,6 +107,29 @@ const NODE_DELETE_TIMEOUT: Duration = Duration::from_secs(60);
 /// The role assigned to the initial user created when starting the server with
 /// credentials for the first time
 const INITIAL_USER_ROLE: &str = "owner";
+
+/// Whether a conditional write (`put_compare_key` / `del_compare_key`) failed
+/// because its condition was not met — the key already existed, was deleted,
+/// or changed since the guard value was read. On last-writer-wins backends
+/// (TiKV) the condition is validated at commit, so this can surface from the
+/// conditional call itself or from the subsequent `commit`; callers must check
+/// both. This is how the durable RPC session writes stay atomic on TiKV, where
+/// a blind `set`/`clr` is last-writer-wins (see the `multiwriter_same_keys_*`
+/// KV coverage).
+///
+/// The error arrives either as a bare [`KvsError`] (e.g. from `commit()`, which
+/// returns the backend error directly) or wrapped as [`Error::Kvs`] (from the
+/// transaction helpers' `map_err(Error::from)`), so both forms are checked —
+/// mirroring [`is_retryable_transaction_conflict`].
+fn is_conditional_write_conflict(err: &anyhow::Error) -> bool {
+	fn is_condition_error(e: &KvsError) -> bool {
+		matches!(e, KvsError::TransactionConditionNotMet | KvsError::TransactionKeyAlreadyExists)
+	}
+	if let Some(e) = err.downcast_ref::<KvsError>() {
+		return is_condition_error(e);
+	}
+	matches!(err.downcast_ref::<Error>(), Some(Error::Kvs(e)) if is_condition_error(e))
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ShutdownNodeDeleteOutcome {
@@ -1598,6 +1622,359 @@ impl Datastore {
 			}
 			// Commit the changes
 			catch!(txn, txn.commit().await);
+		}
+		// Everything was successful
+		Ok(())
+	}
+
+	// ------------------------------
+	// Durable RPC session functions
+	// ------------------------------
+
+	/// Creates or replaces the durable copy of a client-attached RPC session,
+	/// expiring `ttl` from now (an unconditional upsert).
+	///
+	/// Session creation goes through [`create_rpc_session`](Self::create_rpc_session)
+	/// (insert-if-absent), local changes through
+	/// [`update_rpc_session`](Self::update_rpc_session) (update-if-present),
+	/// and cross-node reconciliation through
+	/// [`load_rpc_session`](Self::load_rpc_session), so none resurrects or
+	/// duplicates a session across nodes. This blind upsert is retained as a
+	/// primitive for callers that own the id exclusively (and for test setup).
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self, session))]
+	pub async fn persist_rpc_session(
+		&self,
+		id: Uuid,
+		session: &Session,
+		ttl: Duration,
+	) -> Result<()> {
+		// Log when this method is run
+		trace!(target: TARGET, id = %id, "Persisting durable RPC session");
+		// Capture the durable form with a refreshed expiry
+		let expires_at = self.clock_now().value + ttl.as_millis() as u64;
+		let value = DurableSession::from_session(session, expires_at);
+		// Open transaction and set the session data
+		let key = crate::key::root::se::Se {
+			id,
+		};
+		let txn = self.transaction(Write).await?;
+		run!(txn, txn.set_key(&key, &value).await)
+	}
+
+	/// Creates the durable copy of a client-attached RPC session, but only if
+	/// one does not already exist. Returns `true` if it created the entry,
+	/// `false` if a session with this id already exists.
+	///
+	/// Uses a conditional insert (`put_compare_key` with no expected value),
+	/// which is atomic even on last-writer-wins backends (TiKV) — a blind
+	/// `set` is not — so two concurrent `attach`es for the same id on
+	/// different nodes cannot both create it: one wins and the other is
+	/// reported as an existing session, letting `attach` return
+	/// `session_exists` instead of silently overwriting.
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self, session))]
+	pub async fn create_rpc_session(
+		&self,
+		id: Uuid,
+		session: &Session,
+		ttl: Duration,
+	) -> Result<bool> {
+		trace!(target: TARGET, id = %id, "Creating durable RPC session");
+		let key = crate::key::root::se::Se {
+			id,
+		};
+		let expires_at = self.clock_now().value + ttl.as_millis() as u64;
+		let value = DurableSession::from_session(session, expires_at);
+		let txn = self.transaction(Write).await?;
+		// `put_compare_key(.., None)` writes only if the key is absent.
+		match txn.put_compare_key(&key, &value, None).await {
+			Ok(()) => match txn.commit().await {
+				Ok(()) => Ok(true),
+				// Cancel after any failed commit (a conflict or otherwise), so
+				// the transaction is rolled back consistently with the `run!`
+				// macro; only the error classification differs.
+				Err(e) if is_conditional_write_conflict(&e) => {
+					let _ = txn.cancel().await;
+					Ok(false)
+				}
+				Err(e) => {
+					let _ = txn.cancel().await;
+					Err(e)
+				}
+			},
+			Err(e) => {
+				let _ = txn.cancel().await;
+				if is_conditional_write_conflict(&e) {
+					Ok(false)
+				} else {
+					Err(e)
+				}
+			}
+		}
+	}
+
+	/// Refreshes the durable copy of an *existing* RPC session with the given
+	/// value, expiring `ttl` from now, **without recreating it** if it is gone.
+	///
+	/// Returns `true` if the entry was present and updated, `false` if it no
+	/// longer exists (or was changed on another node). Uses a conditional
+	/// write (`put_compare_key` guarded by the value just read), so it is
+	/// atomic on last-writer-wins backends (TiKV): a session deleted elsewhere
+	/// between the read and the write is neither resurrected nor clobbered — a
+	/// blind `set` would be last-writer-wins and could resurrect it. This is
+	/// the "push a local change to storage" path (a session-mutating method);
+	/// the authoritative *reload* path is
+	/// [`load_rpc_session`](Self::load_rpc_session).
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self, session))]
+	pub async fn update_rpc_session(
+		&self,
+		id: Uuid,
+		session: &Session,
+		ttl: Duration,
+	) -> Result<bool> {
+		trace!(target: TARGET, id = %id, "Updating durable RPC session");
+		let key = crate::key::root::se::Se {
+			id,
+		};
+		let txn = self.transaction(Write).await?;
+		// Read the current stored value to use as the conditional-write guard.
+		let Some(current) = catch!(txn, txn.get_key(&key, None).await) else {
+			let _ = txn.cancel().await;
+			return Ok(false);
+		};
+		let expires_at = self.clock_now().value + ttl.as_millis() as u64;
+		let value = DurableSession::from_session(session, expires_at);
+		// Write only if the stored value is still the one we read, so a delete
+		// or change committed on another node in between wins (no resurrection,
+		// no clobber) instead of being overwritten by this blind write.
+		match txn.put_compare_key(&key, &value, Some(&current)).await {
+			Ok(()) => match txn.commit().await {
+				Ok(()) => Ok(true),
+				// Cancel after any failed commit (a conflict or otherwise), so
+				// the transaction is rolled back consistently with the `run!`
+				// macro; only the error classification differs.
+				Err(e) if is_conditional_write_conflict(&e) => {
+					let _ = txn.cancel().await;
+					Ok(false)
+				}
+				Err(e) => {
+					let _ = txn.cancel().await;
+					Err(e)
+				}
+			},
+			Err(e) => {
+				let _ = txn.cancel().await;
+				if is_conditional_write_conflict(&e) {
+					Ok(false)
+				} else {
+					Err(e)
+				}
+			}
+		}
+	}
+
+	/// Loads the current durable copy of a client-attached RPC session — the
+	/// authoritative cross-node state — returning the restored session and its
+	/// absolute expiry (ms since the UNIX epoch), or `None` if it is gone or
+	/// expired.
+	///
+	/// This is a pure read plus lazy expiry: an entry past its `expires_at` is
+	/// deleted and reported as a miss, but a live entry is returned **without**
+	/// being rewritten. It never extends a session's life, so it is safe to
+	/// call before the caller is authorized — both when `get_session`
+	/// rehydrates an evicted session and when the transport reconciles a
+	/// cached session against storage before dispatch. The TTL is slid only
+	/// after authorization, by [`update_rpc_session`](Self::update_rpc_session).
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn load_rpc_session(&self, id: Uuid) -> Result<Option<(Session, u64)>> {
+		// Log when this method is run
+		trace!(target: TARGET, id = %id, "Loading durable RPC session");
+		let key = crate::key::root::se::Se {
+			id,
+		};
+		let now = self.clock_now().value;
+		// Pure read.
+		let durable = {
+			let txn = self.transaction(Read).await?;
+			let val = catch!(txn, txn.get_key(&key, None).await);
+			catch!(txn, txn.cancel().await);
+			val
+		};
+		let Some(durable) = durable else {
+			return Ok(None);
+		};
+		// Lazily delete an expired entry with a conditional delete guarded by
+		// the value we read, so a refresh committed on another node between the
+		// read and the delete is not clobbered (a blind `clr` is
+		// last-writer-wins on TiKV). On a condition conflict the entry changed
+		// — leave it and report a miss for this request; it rehydrates fresh on
+		// the next one.
+		if durable.expires_at <= now {
+			trace!(target: TARGET, id = %id, "Durable RPC session has expired");
+			let txn = self.transaction(Write).await?;
+			match txn.del_compare_key(&key, Some(&durable)).await {
+				Ok(()) => match txn.commit().await {
+					Ok(()) => {}
+					Err(e) if is_conditional_write_conflict(&e) => {
+						let _ = txn.cancel().await;
+					}
+					Err(e) => {
+						let _ = txn.cancel().await;
+						return Err(e);
+					}
+				},
+				Err(e) => {
+					let _ = txn.cancel().await;
+					if !is_conditional_write_conflict(&e) {
+						return Err(e);
+					}
+				}
+			}
+			return Ok(None);
+		}
+		// Restore the in-memory session without touching the durable copy,
+		// handing back the stored expiry so the caller can enforce the TTL.
+		let expires_at = durable.expires_at;
+		durable.into_session().map(|session| Some((session, expires_at)))
+	}
+
+	/// Deletes the durable copy of a client-attached RPC session, when it is
+	/// still the value being torn down.
+	///
+	/// Run on detach/teardown so the session cannot be rehydrated. It reads the
+	/// current value and deletes only that (`del_compare_key`), rather than
+	/// clearing the key blindly: a blind `clr` is last-writer-wins on TiKV, so
+	/// a slow detach could otherwise delete a *newer* session that another node
+	/// re-attached under the same id after the old one was removed. An entry
+	/// already absent is a no-op.
+	///
+	/// A condition conflict — the stored value changed between the read and the
+	/// delete (a concurrent refresh/re-attach on another node) — is surfaced as
+	/// an **error**, not swallowed: the durable copy was *not* removed, so
+	/// reporting success would let [`RpcProtocol::forget_session`]/`detach`
+	/// claim the session was torn down while it remains rehydratable. The
+	/// caller (whose `del_session` removes the durable copy before local state)
+	/// then fails the teardown and can retry, keeping detach fail-closed. In
+	/// the supported single-node-per-session model such a conflict does not
+	/// arise (the owning node serializes the session's writes).
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn delete_rpc_session(&self, id: Uuid) -> Result<()> {
+		// Log when this method is run
+		trace!(target: TARGET, id = %id, "Deleting durable RPC session");
+		let key = crate::key::root::se::Se {
+			id,
+		};
+		let txn = self.transaction(Write).await?;
+		// Read the value we intend to remove; if it is already gone, done.
+		let Some(current) = catch!(txn, txn.get_key(&key, None).await) else {
+			let _ = txn.cancel().await;
+			return Ok(());
+		};
+		// Delete only if the stored value is still the one we read. A conflict
+		// (value changed concurrently) means the delete did not happen, so it
+		// is surfaced as an error rather than reported as a successful teardown.
+		match txn.del_compare_key(&key, Some(&current)).await {
+			Ok(()) => match txn.commit().await {
+				Ok(()) => Ok(()),
+				Err(e) => {
+					let _ = txn.cancel().await;
+					Err(e)
+				}
+			},
+			Err(e) => {
+				let _ = txn.cancel().await;
+				Err(e)
+			}
+		}
+	}
+
+	/// Purges expired durable RPC sessions.
+	///
+	/// This function should be run periodically at a regular interval.
+	///
+	/// It uses a distributed task lease so only one node in the cluster
+	/// performs the purge per interval. Entries are scanned in batches, and
+	/// only entries whose expiry has passed are deleted; an entry that fails
+	/// to decode (for example one written by a newer node during a rolling
+	/// upgrade) is skipped, never deleted.
+	///
+	/// # Arguments
+	/// * `interval` - The interval between purge runs, to calculate the lease duration
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn purge_expired_rpc_sessions(&self, interval: &Duration) -> Result<()> {
+		// Output function invocation details to logs
+		trace!(target: TARGET, "Attempting expired RPC session purge");
+		// Create a new lease handler
+		let lh = LeaseHandler::new(
+			self.sequences.clone(),
+			self.id,
+			self.transaction_factory.clone(),
+			TaskLeaseType::RpcSessionCleanup,
+			*interval * 2,
+		)?;
+		// If we don't get the lease, another node is handling this task
+		if !lh.has_lease().await? {
+			return Ok(());
+		}
+		// Output function invocation details to logs
+		trace!(target: TARGET, "Purging expired RPC sessions");
+		let now = self.clock_now().value;
+		// Scan the durable session entries in batches under read transactions,
+		// deleting each expired entry in its own conditional-delete write
+		// transaction. The delete is guarded by the value read
+		// (`del_compare_key`), so a request that refreshed the session after
+		// the scan read the old expired value is not clobbered — a blind `clr`
+		// is last-writer-wins on TiKV. A per-entry transaction keeps one such
+		// conflict from aborting the whole purge.
+		let mut next = Some(crate::key::root::se::SePrefix {}.encode_range()?);
+		while let Some(rng) = next {
+			// Fetch the next batch of keys and values under a read transaction.
+			let batch = {
+				let txn = self.transaction(Read).await?;
+				let res = catch!(txn, txn.batch_keys_vals(rng, NORMAL_BATCH_SIZE, None).await);
+				catch!(txn, txn.cancel().await);
+				res
+			};
+			next = batch.next;
+			for (k, v) in batch.result.iter() {
+				// Decode the data for this session entry. Skip (but never
+				// delete) an entry we cannot decode: it may have been written
+				// by a newer node during a rolling upgrade.
+				let val: DurableSession = match KVValue::kv_decode_value(v, ()) {
+					Ok(val) => val,
+					Err(e) => {
+						warn!(target: TARGET, "Skipping undecodable durable RPC session entry: {e}");
+						continue;
+					}
+				};
+				// Only delete an expired entry, and only if it is still the
+				// value we read.
+				if val.expires_at <= now {
+					let key = crate::key::root::se::Se::decode_key(k)?;
+					trace!(target: TARGET, id = %key.id, "Purging expired RPC session");
+					let txn = self.transaction(Write).await?;
+					match txn.del_compare_key(&key, Some(&val)).await {
+						Ok(()) => match txn.commit().await {
+							Ok(()) => {}
+							// Refreshed concurrently at commit (TiKV): leave it.
+							Err(e) if is_conditional_write_conflict(&e) => {
+								let _ = txn.cancel().await;
+							}
+							Err(e) => {
+								let _ = txn.cancel().await;
+								return Err(e);
+							}
+						},
+						Err(e) => {
+							let _ = txn.cancel().await;
+							if !is_conditional_write_conflict(&e) {
+								return Err(e);
+							}
+						}
+					}
+				}
+			}
+			// Pause and yield execution
+			yield_now!();
 		}
 		// Everything was successful
 		Ok(())

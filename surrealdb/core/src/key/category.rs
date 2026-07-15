@@ -39,6 +39,8 @@ pub enum Category {
 	Reclaim,
 	/// crate::key::root::eq                 /!eq{ns}{db}{tb}{ev}{ts}{nid}
 	EventQueue,
+	/// crate::key::root::se                 /!se{id}
+	RpcSession,
 	///
 	/// ------------------------------
 	///
@@ -309,6 +311,7 @@ impl Display for Category {
 			Self::IndexBuildAppending => "IndexBuildAppending",
 			Self::IndexBuildPrimaryAppending => "IndexBuildPrimaryAppending",
 			Self::EventQueue => "EventQueue",
+			Self::RpcSession => "RpcSession",
 			Self::TableIndexIdentifierBatch => "TableIndexIdentifierBatch",
 			Self::TableIndexIdentifierState => "TableIndexIdentifierState",
 			Self::TableDocIdGeneratorBatch => "TableDocIdGeneratorBatch",

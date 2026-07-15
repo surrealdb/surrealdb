@@ -112,6 +112,29 @@ SurrealDB's security model rests on four pillars:
   state.
 - Refresh token revocation and reissuance must be atomic within a single
   transaction. Concurrent reuse must result in at most one successful refresh.
+- Durable RPC sessions (`--durable-sessions`) must be opt-in, and every persisted
+  entry must carry a finite absolute expiry, enforced both lazily on load and by
+  the periodic purge task. The durable copy contains the session's authentication
+  state at rest, so only client-named (attached) sessions may ever be persisted —
+  never ephemeral per-request sessions.
+- Deleting a session (`detach`, teardown) must delete its durable copy in the same
+  operation, so a torn-down session cannot be rehydrated. A failed durable delete
+  must fail the teardown (leaving the session intact for retry), never report
+  success while the durable copy survives. A durable session must never be
+  recreated by a persist/refresh (only `attach` creates it, via a conditional
+  insert), so a delete on one node cannot be undone by a stale cached copy on
+  another. Each node revalidates a cached durable session against storage **before**
+  dispatching each request — reloading the authoritative value, or evicting it when
+  the durable copy is gone — so a detach, invalidation, or auth/USE change made on
+  another node takes effect on the next request routed to a stale node, instead of
+  that request running on cached state or the change lasting the node's cache
+  lifetime. Durable sessions target deployments that route a given session to one
+  node at a time (sticky routing / one runtime per session, per the `RpcProtocol`
+  durable-session seam's design). Concurrently *mutating the same session id from
+  multiple nodes* is best-effort: durable writes are compare-guarded so they never
+  resurrect or clobber across nodes, but under such a race a losing mutation may be
+  dropped rather than merged, so security-critical revocation should be driven from
+  the session's owning node.
 
 ### Review Triggers
 
@@ -124,6 +147,8 @@ Flag for detailed review when changes touch:
 - Session expiration checking in any query execution path
 - New RPC methods or HTTP endpoints interacting with session state
 - The role model (new roles, new privilege levels, `is_allowed`)
+- Durable RPC session storage (`/!se` keys, `DurableSession`, the
+  `load_session`/`persist_session`/`forget_session` hooks and their TTL handling)
 
 ---
 
@@ -346,6 +371,14 @@ transaction management, notification routing
   trim) before protection checks. The check must apply in all code paths that set
   session variables.
 - Each HTTP RPC request must operate on an isolated session copy.
+- A session rehydrated from durable storage must pass the same caller-principal
+  verification (`verify_caller_for_session`) as an in-memory one; rehydration
+  happens inside `get_session`, so no code path may reach a rehydrated session
+  without going through the ownership gate.
+- When durable sessions are enabled, dispatch must be serialized per client-named
+  session id (one in-flight RPC per session id), otherwise concurrent mutations can
+  persist out of order and resurrect overwritten auth state (e.g. an `invalidate`
+  lost to a racing `signin`).
 - Live query notification delivery must verify the target WebSocket still exists and
   the live query is still registered to that connection/session.
 - Messages in the wrong frame type for the negotiated format must be rejected before
@@ -364,6 +397,8 @@ Flag when changes touch:
 - Transaction methods (begin/commit/cancel) or transaction map
 - Notification routing or LiveQueries map structure
 - HTTP RPC handler session management
+- Durable session persistence (`Http::load_session`/`persist_session`/
+  `forget_session`, `SessionLocks`, the `post_handler` dispatch guard)
 - `check_protected_param` or `PROTECTED_PARAM_NAMES`
 - WebSocket upgrade handler (Origin validation, protocol negotiation)
 - Default values for message size, buffer size, or memory threshold

@@ -142,7 +142,7 @@ pub trait RpcProtocol {
 
 	/// Detaches a session from the given ID
 	async fn detach(&self, session_id: Uuid) -> Result<DbResult, surrealdb_types::Error> {
-		self.del_session(&session_id).await;
+		self.del_session(&session_id).await?;
 		Ok(DbResult::Other(PublicValue::None))
 	}
 
@@ -162,6 +162,7 @@ pub trait RpcProtocol {
 			return Ok(session);
 		}
 		if Self::PERSIST_SESSIONS
+			&& self.persist_sessions_enabled()
 			&& let Some(restored) = self.load_session(id).await
 		{
 			self.set_session(*id, Arc::new(RwLock::new(restored)));
@@ -177,16 +178,24 @@ pub trait RpcProtocol {
 		self.session_map().insert(id, session);
 	}
 
-	/// Deletes a session
-	async fn del_session(&self, id: &Uuid) {
-		self.session_map().remove(id);
-		// Remove the durable copy too, so `detach`/logout is not silently
-		// undone by a later rehydrate. Const-gated to nothing for
-		// in-memory-only implementations.
-		if Self::PERSIST_SESSIONS {
-			self.forget_session(id).await;
+	/// Deletes a session.
+	///
+	/// The durable copy is removed **first**, and a failure there aborts the
+	/// teardown with the local session left intact, so a caller (e.g.
+	/// [`detach`](Self::detach) / logout) never reports success while a
+	/// durable copy survives that could be rehydrated on this or another node.
+	/// The durable removal is const-gated to nothing for in-memory-only
+	/// implementations, whose teardown cannot fail.
+	async fn del_session(&self, id: &Uuid) -> Result<(), surrealdb_types::Error> {
+		// Remove the durable copy first, propagating any failure before we
+		// touch local state — otherwise a `detach`/logout could return success
+		// with the session still resurrectable.
+		if Self::PERSIST_SESSIONS && self.persist_sessions_enabled() {
+			self.forget_session(id).await?;
 		}
+		self.session_map().remove(id);
 		self.cleanup_lqs(id).await;
+		Ok(())
 	}
 
 	/// Lists all sessions
@@ -236,7 +245,25 @@ pub trait RpcProtocol {
 	/// losing one (e.g. an `invalidate` racing a `signin`). A per-connection
 	/// runtime — one Durable Object or Worker per session — satisfies this by
 	/// construction.
+	///
+	/// This const is the compile-time *capability* gate; the runtime switch is
+	/// [`persist_sessions_enabled`](Self::persist_sessions_enabled). Every
+	/// durability branch checks both, so an implementation whose const is
+	/// `false` pays nothing, while one that exposes persistence behind
+	/// operator configuration sets the const to `true` and overrides the
+	/// method.
 	const PERSIST_SESSIONS: bool = false;
+
+	/// Runtime companion to [`PERSIST_SESSIONS`](Self::PERSIST_SESSIONS),
+	/// consulted only when the const is `true`. The default returns the
+	/// const, so a compile-time-only implementation needs no override; an
+	/// implementation that exposes persistence behind operator configuration
+	/// (e.g. a CLI flag) overrides this with its runtime setting. When it
+	/// returns `false`, sessions behave exactly as if the const were `false`:
+	/// no snapshot, no rehydration, no persistence.
+	fn persist_sessions_enabled(&self) -> bool {
+		Self::PERSIST_SESSIONS
+	}
 
 	/// Load a session from durable storage. Called by
 	/// [`get_session`](Self::get_session) on a `session_map` miss to
@@ -255,10 +282,16 @@ pub trait RpcProtocol {
 	/// Remove a session's durable copy, called from
 	/// [`del_session`](Self::del_session) so teardown (`detach`, logout) is
 	/// symmetric with persistence — a deleted session must not resurrect on
-	/// a later [`load_session`](Self::load_session). The default is a no-op,
-	/// and it is only ever called when
+	/// a later [`load_session`](Self::load_session). An `Err` aborts the
+	/// teardown so the caller does not report success while the durable copy
+	/// survives; unlike [`persist_session`](Self::persist_session) (which is
+	/// best-effort — a lost persist merely fails to save state), a lost
+	/// forget is fail-open and must be surfaced. The default is a no-op that
+	/// succeeds, and it is only ever called when
 	/// [`PERSIST_SESSIONS`](Self::PERSIST_SESSIONS) is set.
-	async fn forget_session(&self, _id: &Uuid) {}
+	async fn forget_session(&self, _id: &Uuid) -> Result<(), surrealdb_types::Error> {
+		Ok(())
+	}
 
 	// ------------------------------
 	// Transactions
@@ -371,15 +404,17 @@ pub trait RpcProtocol {
 			// the way, so this also covers the "evicted, first request" case.
 			// Const-gated to nothing for in-memory-only implementations, which
 			// never clone.
-			let tracked: Option<Option<Session>> =
-				if Self::PERSIST_SESSIONS && client_session.is_some() {
-					Some(match self.get_session(&session).await {
-						Ok(lock) => Some(lock.read().await.clone()),
-						Err(_) => None,
-					})
-				} else {
-					None
-				};
+			let tracked: Option<Option<Session>> = if Self::PERSIST_SESSIONS
+				&& self.persist_sessions_enabled()
+				&& client_session.is_some()
+			{
+				Some(match self.get_session(&session).await {
+					Ok(lock) => Some(lock.read().await.clone()),
+					Err(_) => None,
+				})
+			} else {
+				None
+			};
 			// Execute the desired method
 			let dispatched = match method {
 				Method::Ping => Ok(DbResult::Other(PublicValue::None)),
@@ -2191,6 +2226,7 @@ where
 #[cfg(test)]
 mod tests {
 	use std::collections::HashMap as StdHashMap;
+	use std::sync::atomic::{AtomicBool, Ordering};
 	use std::sync::{Arc, Mutex};
 
 	use surrealdb_types::HashMap;
@@ -2209,6 +2245,20 @@ mod tests {
 		ds: Arc<Datastore>,
 		sessions: HashMap<Uuid, Arc<RwLock<Session>>>,
 		durable: Mutex<StdHashMap<Uuid, Vec<u8>>>,
+		/// When set, [`forget_session`] fails, simulating a durable-storage
+		/// error during teardown.
+		fail_forget: AtomicBool,
+	}
+
+	impl DurableRpc {
+		fn new(ds: Arc<Datastore>) -> Self {
+			Self {
+				ds,
+				sessions: HashMap::new(),
+				durable: Mutex::new(StdHashMap::new()),
+				fail_forget: AtomicBool::new(false),
+			}
+		}
 	}
 
 	impl RpcProtocol for DurableRpc {
@@ -2241,8 +2291,12 @@ mod tests {
 			let bytes = serde_json::to_vec(session).unwrap();
 			self.durable.lock().unwrap().insert(*id, bytes);
 		}
-		async fn forget_session(&self, id: &Uuid) {
+		async fn forget_session(&self, id: &Uuid) -> Result<(), surrealdb_types::Error> {
+			if self.fail_forget.load(Ordering::SeqCst) {
+				return Err(surrealdb_types::Error::internal("durable delete failed".to_owned()));
+			}
 			self.durable.lock().unwrap().remove(id);
+			Ok(())
 		}
 	}
 
@@ -2253,11 +2307,7 @@ mod tests {
 	#[tokio::test]
 	async fn mutations_persist_and_an_evicted_session_is_rehydrated() {
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
-		let rpc = DurableRpc {
-			ds,
-			sessions: HashMap::new(),
-			durable: Mutex::new(StdHashMap::new()),
-		};
+		let rpc = DurableRpc::new(ds);
 		let sid = Uuid::from_u128(7);
 
 		// An attached, authenticated session (as `signin` would leave it).
@@ -2287,11 +2337,7 @@ mod tests {
 	#[tokio::test]
 	async fn attach_persists_so_a_bare_session_survives_eviction() {
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
-		let rpc = DurableRpc {
-			ds,
-			sessions: HashMap::new(),
-			durable: Mutex::new(StdHashMap::new()),
-		};
+		let rpc = DurableRpc::new(ds);
 		let sid = Uuid::from_u128(13);
 
 		// `attach` creates the session; the change-detection treats a
@@ -2310,11 +2356,7 @@ mod tests {
 	#[tokio::test]
 	async fn read_only_methods_do_not_persist() {
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
-		let rpc = DurableRpc {
-			ds,
-			sessions: HashMap::new(),
-			durable: Mutex::new(StdHashMap::new()),
-		};
+		let rpc = DurableRpc::new(ds);
 		let sid = Uuid::from_u128(9);
 		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
 
@@ -2326,11 +2368,7 @@ mod tests {
 	#[tokio::test]
 	async fn detach_deletes_the_durable_copy() {
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
-		let rpc = DurableRpc {
-			ds,
-			sessions: HashMap::new(),
-			durable: Mutex::new(StdHashMap::new()),
-		};
+		let rpc = DurableRpc::new(ds);
 		let sid = Uuid::from_u128(11);
 		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
 		rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await.unwrap();
@@ -2347,5 +2385,34 @@ mod tests {
 		// A later request for the same id finds nothing to rehydrate.
 		let err = rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await;
 		assert!(err.is_err(), "a detached session was still usable");
+	}
+
+	#[tokio::test]
+	async fn detach_fails_and_keeps_the_session_when_the_durable_delete_fails() {
+		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let rpc = DurableRpc::new(ds);
+		let sid = Uuid::from_u128(15);
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+		rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await.unwrap();
+		assert!(rpc.durable.lock().unwrap().contains_key(&sid));
+
+		// A failing durable delete must abort the detach with an error, and
+		// leave the session fully intact (both the durable copy and the local
+		// entry) so a client cannot believe a still-resurrectable session was
+		// torn down.
+		rpc.fail_forget.store(true, Ordering::SeqCst);
+		let err = rpc.execute(None, sid, Some(sid), Method::Detach, PublicArray::new()).await;
+		assert!(err.is_err(), "detach must fail when the durable delete fails");
+		assert!(
+			rpc.durable.lock().unwrap().contains_key(&sid),
+			"durable copy must survive a failed detach"
+		);
+		assert!(rpc.session_map().contains_key(&sid), "local session must survive a failed detach");
+
+		// Once the durable store recovers, the detach succeeds and tears down.
+		rpc.fail_forget.store(false, Ordering::SeqCst);
+		rpc.execute(None, sid, Some(sid), Method::Detach, PublicArray::new()).await.unwrap();
+		assert!(rpc.durable.lock().unwrap().is_empty());
+		assert!(!rpc.session_map().contains_key(&sid));
 	}
 }

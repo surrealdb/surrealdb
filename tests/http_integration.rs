@@ -3820,6 +3820,297 @@ mod http_integration {
 		Ok(())
 	}
 
+	// ------------------------------
+	// Durable RPC sessions (`--durable-sessions`)
+	// ------------------------------
+
+	/// A JSON `/rpc` client for the durable-session tests.
+	#[cfg(feature = "storage-surrealkv")]
+	fn durable_rpc_client() -> Result<Client, Box<dyn std::error::Error>> {
+		let mut headers = reqwest::header::HeaderMap::new();
+		headers.insert(header::CONTENT_TYPE, "application/json".parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		Ok(reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?)
+	}
+
+	/// POST one authenticated RPC request and return the JSON response body.
+	#[cfg(feature = "storage-surrealkv")]
+	async fn durable_rpc_send(
+		client: &Client,
+		addr: &str,
+		body: serde_json::Value,
+	) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+		let res = client
+			.post(format!("http://{addr}/rpc"))
+			.basic_auth(USER, Some(PASS))
+			.body(body.to_string())
+			.send()
+			.await?;
+		assert!(res.status().is_success(), "http status: {}", res.status());
+		Ok(res.json().await?)
+	}
+
+	/// Attach `sid`, sign it in as root, and select `ns`/`db` on it — the
+	/// session state the durable-session tests expect to find (or not find)
+	/// again after a server restart.
+	#[cfg(feature = "storage-surrealkv")]
+	async fn durable_rpc_setup_session(
+		client: &Client,
+		addr: &str,
+		sid: uuid::Uuid,
+		ns: &str,
+		db: &str,
+	) -> Result<(), Box<dyn std::error::Error>> {
+		let body = json!({"id": "attach", "method": "attach", "session": sid});
+		let res = durable_rpc_send(client, addr, body).await?;
+		assert!(res.get("error").is_none(), "attach must succeed: {res}");
+		let body = json!({
+			"id": "signin",
+			"method": "signin",
+			"session": sid,
+			"params": [{"user": USER, "pass": PASS}],
+		});
+		let res = durable_rpc_send(client, addr, body).await?;
+		assert!(res.get("error").is_none(), "signin must succeed: {res}");
+		let body = json!({
+			"id": "use",
+			"method": "use",
+			"session": sid,
+			"params": [ns, db],
+		});
+		let res = durable_rpc_send(client, addr, body).await?;
+		assert!(res.get("error").is_none(), "use must succeed: {res}");
+		Ok(())
+	}
+
+	/// A client-attached session survives a full server restart when
+	/// `--durable-sessions` is enabled: the same session id resumes with its
+	/// authentication and selected namespace/database intact, and stays
+	/// bound to the principal that authenticated it.
+	#[cfg(feature = "storage-surrealkv")]
+	#[test(tokio::test)]
+	async fn rpc_durable_session_survives_restart() -> Result<(), Box<dyn std::error::Error>> {
+		let dir = tempfile::tempdir()?;
+		let path = format!("surrealkv:{}", dir.path().display());
+		let args = "--durable-sessions".to_string();
+		let (addr, server) = common::start_server(StartServerArguments {
+			path: Some(path.clone()),
+			args: args.clone(),
+			..Default::default()
+		})
+		.await?;
+		let client = durable_rpc_client()?;
+		let sid = uuid::Uuid::new_v4();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		durable_rpc_setup_session(&client, &addr, sid, &ns, &db).await?;
+
+		// Restart the server on the same datastore.
+		server.kill();
+		let (addr, _server) = common::start_server(StartServerArguments {
+			path: Some(path),
+			args,
+			..Default::default()
+		})
+		.await?;
+
+		// The rehydrated session still refuses anonymous callers, exactly
+		// like an in-memory one (and indistinguishably from a missing
+		// session).
+		let body = json!({
+			"id": "anon",
+			"method": "query",
+			"session": sid,
+			"params": ["RETURN 1"],
+		});
+		let res = client.post(format!("http://{addr}/rpc")).body(body.to_string()).send().await?;
+		let res: serde_json::Value = res.json().await?;
+		assert!(res.get("error").is_some(), "anonymous resume must be refused: {res}");
+
+		// The owning principal resumes the session with its `USE` state
+		// intact.
+		let body = json!({
+			"id": "resume",
+			"method": "query",
+			"session": sid,
+			"params": ["RETURN $session.ns"],
+		});
+		let res = durable_rpc_send(&client, &addr, body).await?;
+		assert!(res.get("error").is_none(), "resume after restart must succeed: {res}");
+		assert!(
+			res.to_string().contains(&ns),
+			"restored session should still be on namespace {ns}: {res}"
+		);
+
+		// Attaching the same id again correctly reports that the session
+		// already exists — the durable copy is the session.
+		let body = json!({"id": "re-attach", "method": "attach", "session": sid});
+		let res = durable_rpc_send(&client, &addr, body).await?;
+		assert!(
+			res.get("error").is_some(),
+			"attach on a live durable session must report it exists: {res}"
+		);
+		Ok(())
+	}
+
+	/// A persisted session expires: past the configured TTL it can no longer
+	/// be resumed, even by the principal that owned it.
+	#[cfg(feature = "storage-surrealkv")]
+	#[test(tokio::test)]
+	async fn rpc_durable_session_expires_after_ttl() -> Result<(), Box<dyn std::error::Error>> {
+		let dir = tempfile::tempdir()?;
+		let path = format!("surrealkv:{}", dir.path().display());
+		let args = "--durable-sessions --durable-session-ttl 1s".to_string();
+		let (addr, server) = common::start_server(StartServerArguments {
+			path: Some(path.clone()),
+			args: args.clone(),
+			..Default::default()
+		})
+		.await?;
+		let client = durable_rpc_client()?;
+		let sid = uuid::Uuid::new_v4();
+		durable_rpc_setup_session(&client, &addr, sid, "test", "test").await?;
+
+		// Let the durable copy expire before the restart.
+		server.kill();
+		tokio::time::sleep(Duration::from_millis(1500)).await;
+		let (addr, _server) = common::start_server(StartServerArguments {
+			path: Some(path),
+			args,
+			..Default::default()
+		})
+		.await?;
+
+		let body = json!({
+			"id": "expired",
+			"method": "query",
+			"session": sid,
+			"params": ["RETURN 1"],
+		});
+		let res = durable_rpc_send(&client, &addr, body).await?;
+		assert!(res.get("error").is_some(), "an expired session must not resume: {res}");
+		Ok(())
+	}
+
+	/// The TTL is enforced for a session still cached in the *running* server,
+	/// not only after a restart: a client idle past `--durable-session-ttl`
+	/// must be rejected on its next request even though the server never
+	/// evicted the in-memory session.
+	#[cfg(feature = "storage-surrealkv")]
+	#[test(tokio::test)]
+	async fn rpc_durable_session_expires_while_cached() -> Result<(), Box<dyn std::error::Error>> {
+		let dir = tempfile::tempdir()?;
+		let path = format!("surrealkv:{}", dir.path().display());
+		let (addr, _server) = common::start_server(StartServerArguments {
+			path: Some(path),
+			args: "--durable-sessions --durable-session-ttl 1s".to_string(),
+			..Default::default()
+		})
+		.await?;
+		let client = durable_rpc_client()?;
+		let sid = uuid::Uuid::new_v4();
+		durable_rpc_setup_session(&client, &addr, sid, "test", "test").await?;
+
+		// No restart: the session stays cached in the running server. Once it
+		// has sat idle past the TTL, the next request must be rejected rather
+		// than served the stale cached copy.
+		tokio::time::sleep(Duration::from_millis(2500)).await;
+		let body = json!({
+			"id": "idle",
+			"method": "query",
+			"session": sid,
+			"params": ["RETURN 1"],
+		});
+		let res = durable_rpc_send(&client, &addr, body).await?;
+		assert!(
+			res.get("error").is_some(),
+			"an idle-past-TTL cached session must be rejected: {res}"
+		);
+		Ok(())
+	}
+
+	/// `detach` removes the durable copy immediately: the session cannot be
+	/// resumed after a restart even though its TTL has not elapsed.
+	#[cfg(feature = "storage-surrealkv")]
+	#[test(tokio::test)]
+	async fn rpc_detached_durable_session_cannot_be_resumed()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let dir = tempfile::tempdir()?;
+		let path = format!("surrealkv:{}", dir.path().display());
+		let args = "--durable-sessions".to_string();
+		let (addr, server) = common::start_server(StartServerArguments {
+			path: Some(path.clone()),
+			args: args.clone(),
+			..Default::default()
+		})
+		.await?;
+		let client = durable_rpc_client()?;
+		let sid = uuid::Uuid::new_v4();
+		durable_rpc_setup_session(&client, &addr, sid, "test", "test").await?;
+		let body = json!({"id": "detach", "method": "detach", "session": sid});
+		let res = durable_rpc_send(&client, &addr, body).await?;
+		assert!(res.get("error").is_none(), "detach must succeed: {res}");
+
+		server.kill();
+		let (addr, _server) = common::start_server(StartServerArguments {
+			path: Some(path),
+			args,
+			..Default::default()
+		})
+		.await?;
+
+		let body = json!({
+			"id": "resume",
+			"method": "query",
+			"session": sid,
+			"params": ["RETURN 1"],
+		});
+		let res = durable_rpc_send(&client, &addr, body).await?;
+		assert!(res.get("error").is_some(), "a detached session must not resume: {res}");
+		Ok(())
+	}
+
+	/// Without `--durable-sessions`, attached sessions stay in-memory only:
+	/// a restart on the same datastore loses them (the pre-existing
+	/// behaviour).
+	#[cfg(feature = "storage-surrealkv")]
+	#[test(tokio::test)]
+	async fn rpc_sessions_are_not_durable_by_default() -> Result<(), Box<dyn std::error::Error>> {
+		let dir = tempfile::tempdir()?;
+		let path = format!("surrealkv:{}", dir.path().display());
+		let (addr, server) = common::start_server(StartServerArguments {
+			path: Some(path.clone()),
+			..Default::default()
+		})
+		.await?;
+		let client = durable_rpc_client()?;
+		let sid = uuid::Uuid::new_v4();
+		durable_rpc_setup_session(&client, &addr, sid, "test", "test").await?;
+
+		server.kill();
+		let (addr, _server) = common::start_server(StartServerArguments {
+			path: Some(path),
+			..Default::default()
+		})
+		.await?;
+
+		let body = json!({
+			"id": "resume",
+			"method": "query",
+			"session": sid,
+			"params": ["RETURN 1"],
+		});
+		let res = durable_rpc_send(&client, &addr, body).await?;
+		assert!(
+			res.get("error").is_some(),
+			"sessions must not survive a restart without --durable-sessions: {res}"
+		);
+		Ok(())
+	}
+
 	/// Regression coverage: the `attach` -> `signup` -> `signin` sequence
 	/// over HTTP `/rpc` must succeed when the caller forwards the bearer
 	/// token returned by `signup` on the subsequent `signin` request.

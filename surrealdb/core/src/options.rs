@@ -105,6 +105,16 @@ pub struct EngineOptions {
 	///
 	/// Default: 60 seconds
 	pub tikv_lock_cleanup_interval: Duration,
+	/// Interval for purging expired durable RPC sessions.
+	///
+	/// When RPC session persistence is enabled, client-attached sessions are
+	/// mirrored to the KV store with an absolute expiry. Expired entries are
+	/// already dropped lazily on load; this task additionally sweeps the
+	/// session keyspace so entries that are never loaded again do not
+	/// accumulate. Set to `Duration::ZERO` to disable the sweep.
+	///
+	/// Default: 60 seconds
+	pub rpc_session_gc_interval: Duration,
 }
 
 impl Default for EngineOptions {
@@ -123,6 +133,7 @@ impl Default for EngineOptions {
 			tikv_gc_interval: Duration::from_secs(600),
 			tikv_gc_lifetime: Duration::from_secs(600),
 			tikv_lock_cleanup_interval: Duration::from_secs(60),
+			rpc_session_gc_interval: Duration::from_secs(60),
 		}
 	}
 }
@@ -187,6 +198,11 @@ impl EngineOptions {
 
 	pub fn with_tikv_lock_cleanup_interval(mut self, interval: Duration) -> Self {
 		self.tikv_lock_cleanup_interval = interval;
+		self
+	}
+
+	pub fn with_rpc_session_gc_interval(mut self, interval: Duration) -> Self {
+		self.rpc_session_gc_interval = interval;
 		self
 	}
 }

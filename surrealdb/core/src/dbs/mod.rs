@@ -34,6 +34,7 @@ pub(crate) use self::executor::Executor;
 pub(crate) use self::iterator::{Iterable, Iterator, Operable, Processable};
 pub(crate) use self::options::{Force, Options};
 pub use self::response::{QueryResult, QueryResultBuilder, QueryType, Status};
+pub(crate) use self::session::DurableSession;
 pub use self::session::{NewPlannerStrategy, Session};
 pub(crate) use self::statement::Statement;
 pub(crate) use self::statement_counters::StatementCounters;

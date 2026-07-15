@@ -67,8 +67,11 @@ pub fn init(dbs: Arc<Datastore>, canceller: CancellationToken, opts: &EngineOpti
 	let task8 = spawn_task_tikv_lock_cleanup(Arc::clone(&dbs), canceller.clone(), opts);
 	let task9 = spawn_task_reclaim_tombstones(Arc::clone(&dbs), canceller.clone(), opts);
 	let task10 = spawn_task_resume_index_builds(Arc::clone(&dbs), canceller.clone(), opts);
-	let task11 = spawn_task_live_query_router(dbs, canceller, opts);
-	Tasks(vec![task1, task2, task3, task4, task5, task6, task7, task8, task9, task10, task11])
+	let task11 = spawn_task_rpc_session_gc(Arc::clone(&dbs), canceller.clone(), opts);
+	let task12 = spawn_task_live_query_router(dbs, canceller, opts);
+	Tasks(vec![
+		task1, task2, task3, task4, task5, task6, task7, task8, task9, task10, task11, task12,
+	])
 }
 
 /// Spawns the per-node live-query router task.
@@ -415,6 +418,43 @@ fn spawn_task_event_processing(
 /// On non-TiKV backends `Datastore::run_mvcc_gc` is a no-op and the task
 /// loops harmlessly. A configured interval of `Duration::ZERO` is treated
 /// as "disabled" so operators can opt out without recompiling.
+/// Spawns the periodic purge of expired durable RPC sessions.
+///
+/// When RPC session persistence is enabled, client-attached sessions are
+/// mirrored to the KV store with an absolute expiry; this task sweeps out
+/// entries whose expiry has passed (expired entries that are loaded again are
+/// already dropped lazily). The sweep runs on every deployment — an empty
+/// session keyspace costs one scan per interval — so leftovers are also
+/// cleaned up after an operator disables session persistence. A distributed
+/// task lease inside the datastore method makes it cluster-singleton.
+fn spawn_task_rpc_session_gc(
+	dbs: Arc<Datastore>,
+	canceller: CancellationToken,
+	opts: &EngineOptions,
+) -> Task {
+	let interval = opts.rpc_session_gc_interval;
+	Box::pin(spawn(async move {
+		if interval.is_zero() {
+			trace!("RPC session GC task disabled (interval=0)");
+			return;
+		}
+		trace!("Purging expired RPC sessions every {interval:?}");
+		let mut ticker = interval_ticker(interval).await;
+		loop {
+			tokio::select! {
+				biased;
+				_ = canceller.cancelled() => break,
+				Some(_) = ticker.next() => {
+					if let Err(e) = dbs.purge_expired_rpc_sessions(&interval).await {
+						error!("Error purging expired RPC sessions: {e}");
+					}
+				}
+			}
+		}
+		trace!("Background task exited: Purging expired RPC sessions");
+	}))
+}
+
 fn spawn_task_tikv_gc(
 	dbs: Arc<Datastore>,
 	canceller: CancellationToken,

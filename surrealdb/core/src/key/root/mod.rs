@@ -9,5 +9,6 @@ pub mod ni;
 pub mod ns;
 pub mod rc;
 pub mod root_config;
+pub mod se;
 pub mod task_lease;
 pub mod us;

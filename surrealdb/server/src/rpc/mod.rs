@@ -70,10 +70,21 @@ impl RpcState {
 		datastore: Arc<surrealdb_core::kvs::Datastore>,
 		metrics_observer: Option<Arc<crate::observe::metrics::MetricsObserver>>,
 	) -> Self {
+		Self::new_with_options(datastore, metrics_observer, None)
+	}
+
+	pub fn new_with_options(
+		datastore: Arc<surrealdb_core::kvs::Datastore>,
+		metrics_observer: Option<Arc<crate::observe::metrics::MetricsObserver>>,
+		durable_session_ttl: Option<std::time::Duration>,
+	) -> Self {
 		Self {
 			web_sockets: RwLock::new(HashMap::new()),
 			live_queries: RwLock::new(HashMap::new()),
-			http: Arc::new(crate::rpc::http::Http::new(datastore)),
+			http: Arc::new(crate::rpc::http::Http::new_with_durability(
+				datastore,
+				durable_session_ttl,
+			)),
 			metrics_observer,
 			#[cfg(feature = "graphql")]
 			notification_router: Arc::new(NotificationRouter::new(

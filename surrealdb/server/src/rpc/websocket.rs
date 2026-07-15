@@ -793,7 +793,7 @@ impl RpcProtocol for Websocket {
 				"Cannot detach the implicit connection session",
 			));
 		}
-		self.del_session(&session_id).await;
+		self.del_session(&session_id).await?;
 		Ok(DbResult::Other(Value::None))
 	}
 
