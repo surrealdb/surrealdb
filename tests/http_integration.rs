@@ -3824,6 +3824,34 @@ mod http_integration {
 	// Durable RPC sessions (`--durable-sessions`)
 	// ------------------------------
 
+	/// `--durable-session-ttl` (in seconds) for the two expiry tests below
+	/// (`rpc_durable_session_expires_after_ttl` and
+	/// `rpc_durable_session_expires_while_cached`).
+	///
+	/// Those tests need a TTL short enough to watch a session expire within the
+	/// test, but it must stay comfortably longer than [`durable_rpc_setup_session`]
+	/// takes: `attach` (a durable KV write), a root `signin` (a deliberately
+	/// CPU-slow argon2 verification) and `use`, each a full HTTP round-trip. A
+	/// durable session's expiry is baked at write time (`now + ttl`) and only
+	/// slid *after* a request is authorized, so if setup outruns the TTL the
+	/// attached session expires mid-setup and the next request is rejected with
+	/// `session_not_found` — the helper then panics at its `signin must succeed`
+	/// assertion. The original 1s window was narrow enough that on a loaded CI
+	/// runner (the merge queue, where the server alone took ~2.5s to boot)
+	/// setup's round-trips overran it and both tests failed across every nextest
+	/// retry. Five seconds gives setup ample headroom while staying short enough
+	/// to sleep past. See also [`DURABLE_EXPIRY_WAIT`].
+	#[cfg(feature = "storage-surrealkv")]
+	const DURABLE_EXPIRY_TTL_SECS: u64 = 5;
+
+	/// How long to idle before asserting a session has expired. Must exceed
+	/// [`DURABLE_EXPIRY_TTL_SECS`] with margin so the session is unambiguously
+	/// past its (write-time, slid-on-use) expiry regardless of when the last
+	/// setup request last refreshed it — decoupling the assertion from how long
+	/// setup took.
+	#[cfg(feature = "storage-surrealkv")]
+	const DURABLE_EXPIRY_WAIT: Duration = Duration::from_secs(7);
+
 	/// A JSON `/rpc` client for the durable-session tests.
 	#[cfg(feature = "storage-surrealkv")]
 	fn durable_rpc_client() -> Result<Client, Box<dyn std::error::Error>> {
@@ -3963,7 +3991,7 @@ mod http_integration {
 	async fn rpc_durable_session_expires_after_ttl() -> Result<(), Box<dyn std::error::Error>> {
 		let dir = tempfile::tempdir()?;
 		let path = format!("surrealkv:{}", dir.path().display());
-		let args = "--durable-sessions --durable-session-ttl 1s".to_string();
+		let args = format!("--durable-sessions --durable-session-ttl {DURABLE_EXPIRY_TTL_SECS}s");
 		let (addr, server) = common::start_server(StartServerArguments {
 			path: Some(path.clone()),
 			args: args.clone(),
@@ -3974,9 +4002,12 @@ mod http_integration {
 		let sid = uuid::Uuid::new_v4();
 		durable_rpc_setup_session(&client, &addr, sid, "test", "test").await?;
 
-		// Let the durable copy expire before the restart.
+		// Kill the server, then idle past the TTL so the durable copy is expired
+		// before the restart. The wait exceeds the TTL (which was itself sized to
+		// clear setup), so expiry is driven by the idle window, not by how long
+		// the argon2-bearing setup happened to take.
 		server.kill();
-		tokio::time::sleep(Duration::from_millis(1500)).await;
+		tokio::time::sleep(DURABLE_EXPIRY_WAIT).await;
 		let (addr, _server) = common::start_server(StartServerArguments {
 			path: Some(path),
 			args,
@@ -4006,7 +4037,7 @@ mod http_integration {
 		let path = format!("surrealkv:{}", dir.path().display());
 		let (addr, _server) = common::start_server(StartServerArguments {
 			path: Some(path),
-			args: "--durable-sessions --durable-session-ttl 1s".to_string(),
+			args: format!("--durable-sessions --durable-session-ttl {DURABLE_EXPIRY_TTL_SECS}s"),
 			..Default::default()
 		})
 		.await?;
@@ -4014,10 +4045,12 @@ mod http_integration {
 		let sid = uuid::Uuid::new_v4();
 		durable_rpc_setup_session(&client, &addr, sid, "test", "test").await?;
 
-		// No restart: the session stays cached in the running server. Once it
-		// has sat idle past the TTL, the next request must be rejected rather
-		// than served the stale cached copy.
-		tokio::time::sleep(Duration::from_millis(2500)).await;
+		// No restart: the session stays cached in the running server. Once it has
+		// sat idle past the TTL, the next request must be rejected rather than
+		// served the stale cached copy. The idle wait exceeds the TTL (sized to
+		// clear the argon2-bearing setup), so the rejection is driven by the idle
+		// window, not by a setup that happened to overrun a tight TTL.
+		tokio::time::sleep(DURABLE_EXPIRY_WAIT).await;
 		let body = json!({
 			"id": "idle",
 			"method": "query",
