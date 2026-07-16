@@ -668,8 +668,6 @@ impl IndexKeyBase {
 		}
 	}
 
-	#[cfg(test)]
-	#[cfg_attr(not(feature = "kv-mem"), allow(dead_code))]
 	/// Range covering primary-appending markers for one build generation.
 	pub(crate) fn new_bp_range(&self, generation: BuildGeneration) -> Result<KeyRange<'static>> {
 		use crate::key::table::bp::BpIdPrefix;

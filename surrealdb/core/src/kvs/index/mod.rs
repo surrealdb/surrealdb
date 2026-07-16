@@ -20,6 +20,9 @@
 //! Generation numbers fence stale queued work. Builder owner heartbeats fence
 //! stale builders. Query planning only sees durable-`Online` indexes, while
 //! document writes still see building indexes so they can enqueue mutations.
+//! A build in durable `Error` keeps admitting writes the same way, so a failed
+//! background build never blocks user writes: the errored generation's queue
+//! is never replayed — `REBUILD INDEX` wipes it and rescans the table.
 //! Legacy `!ig`/`!ip` appendings are still drained for committed work from older
 //! code paths, but new writes use the durable queue.
 
@@ -74,7 +77,6 @@ const BUILD_OWNER_LEASE_SECS: i64 = 60;
 /// Poll cadence while writer admission waits for `Closing` to become `Online`
 /// or `Error`. The caller's context deadline is the only timeout budget.
 const BUILD_CLOSING_SLEEP: Duration = Duration::from_millis(100);
-
 type IndexBuilding = std::sync::Arc<builder::Building>;
 
 #[derive(Clone)]

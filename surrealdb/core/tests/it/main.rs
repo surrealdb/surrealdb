@@ -26,6 +26,7 @@ mod field;
 mod function;
 mod future;
 mod index;
+mod index_build_shutdown;
 mod info;
 mod insert;
 mod live;

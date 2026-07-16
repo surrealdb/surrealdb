@@ -1084,6 +1084,12 @@ impl Transaction {
 		}
 		// Commit the transaction
 		if let Err(e) = self.tr.commit().await {
+			// A commit refused because the datastore is shutting down was
+			// rejected before it applied (the engine gate blocks it ahead of
+			// `inner.commit()`), so the cleanup below is correct: nothing was
+			// written. All other cleanup writes it triggers are refused the
+			// same way while shutdown is in progress, so a shutting-down
+			// datastore stays consistent without special-casing here.
 			let cleanup_result = self.cleanup_uncommitted_index_builds().await;
 			let release_result = self.release_index_build_reservations().await;
 			self.discard_index_builder_aborts().await;

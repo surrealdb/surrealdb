@@ -4477,7 +4477,6 @@ name = "surrealdb-kvs-any"
 version = "3.3.0-nightly"
 dependencies = [
  "surrealdb-cnf",
- "surrealdb-common",
  "surrealdb-kvs",
  "surrealdb-kvs-mem",
  "surrealdb-kvs-rocksdb",

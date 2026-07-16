@@ -3018,10 +3018,11 @@ async fn cached_index_build_reservation_lookup_errors_on_seq_overflow() -> Resul
 #[tokio::test(flavor = "multi_thread")]
 async fn recheck_cached_admission_rejects_mid_transaction_state_changes() -> Result<()> {
 	// Cache reuse must revalidate the live `!bs` state every time. A
-	// generation rotation, an Online/Error transition, or vanished build
-	// state must abort the user transaction with `IndexingBuildingCancelled`
-	// — otherwise later mutations write `!bg` against a generation no
-	// builder will replay.
+	// generation rotation, an Online transition, or vanished build state
+	// must abort the user transaction with `IndexingBuildingCancelled` —
+	// otherwise later mutations write `!bg` against a generation no builder
+	// will replay. An Error transition keeps queueing instead: the errored
+	// generation's queue is wiped and the table rescanned on `REBUILD`.
 	let (ds, session) = new_index_test_ds().await?;
 	execute_all(
 		&ds,
@@ -3061,15 +3062,13 @@ async fn recheck_cached_admission_rejects_mid_transaction_state_changes() -> Res
 		.expect_err("online phase must abort cached admission");
 	assert!(err.to_string().contains("online"), "unexpected error: {err}");
 
-	// Error phase — same.
+	// Error phase — keeps queueing: a failed build must not abort user
+	// writes. The queued mutations die with the errored generation's wipe
+	// and the records are rescanned by the recovering `REBUILD INDEX`.
 	seed_build_state(&ds, &ikb, IndexBuildPhase::Error, 1).await?;
-	let err = run_recheck_cached_admission(&ds, &ikb, ix.as_ref(), 1)
+	run_recheck_cached_admission(&ds, &ikb, ix.as_ref(), 1)
 		.await?
-		.expect_err("error phase must abort cached admission");
-	assert!(
-		matches!(err.downcast_ref::<Error>(), Some(Error::IndexingBuildingCancelled { .. })),
-		"unexpected error: {err}"
-	);
+		.expect("recheck on matching Error state should keep queueing");
 
 	// Missing state — recheck aborts.
 	let tx = ds.transaction(TransactionType::Write).await?;
@@ -3140,10 +3139,11 @@ async fn run_recheck_cached_admission(
 #[tokio::test(flavor = "multi_thread")]
 async fn acquire_build_state_waits_for_prior_generation_reservations() -> Result<()> {
 	// A new-generation takeover on one node must drain in-flight `!br` from
-	// writers on *other* nodes before wiping durable build state. Without the
+	// writers on *other* nodes before wiping the stale queues. Without the
 	// drain, the wipe destroys the writer's anchor and the new build's
 	// initial scan can start before the writer's commit, missing main-table
-	// writes.
+	// writes. (The takeover installs the new generation before draining, so
+	// no further old-generation reservations can appear while it waits.)
 	let (ds_a, ds_b, session) = new_distributed_index_test_ds().await?;
 	execute_all(
 		&ds_a,
@@ -3187,7 +3187,7 @@ async fn acquire_build_state_waits_for_prior_generation_reservations() -> Result
 	// live `!br`.
 	let building = new_building_for_index(&ds_b, &session, ns, db, &table, Arc::clone(&ix)).await?;
 	let timeout_result =
-		timeout(Duration::from_millis(200), building.wait_for_prior_generation_reservations())
+		timeout(Duration::from_millis(200), building.wait_for_prior_generation_reservations(2))
 			.await;
 	assert!(
 		timeout_result.is_err(),
@@ -3201,7 +3201,7 @@ async fn acquire_build_state_waits_for_prior_generation_reservations() -> Result
 	release_tx.commit().await?;
 
 	// Drain should now return promptly.
-	timeout(Duration::from_secs(5), building.wait_for_prior_generation_reservations())
+	timeout(Duration::from_secs(5), building.wait_for_prior_generation_reservations(2))
 		.await
 		.expect("drain must complete after !br is removed")?;
 
@@ -3251,7 +3251,7 @@ async fn drain_prior_generation_reservations_cleans_dead_writers() -> Result<()>
 	seed_tx.commit().await?;
 
 	let building = new_building_for_index(&ds, &session, ns, db, &table, Arc::clone(&ix)).await?;
-	timeout(Duration::from_secs(5), building.wait_for_prior_generation_reservations())
+	timeout(Duration::from_secs(5), building.wait_for_prior_generation_reservations(2))
 		.await
 		.expect("drain must complete promptly for a dead writer's reservation")?;
 
@@ -3442,20 +3442,15 @@ async fn distributed_info_reports_durable_error_from_second_node() -> Result<()>
 		error_reason.contains("already contains"),
 		"unexpected durable index build error: {building}"
 	);
-	let mut results = ds_b
-		.execute(
-			"CREATE user:three SET account = 'tesla', email = 'three@surrealdb.com' RETURN NONE",
-			&session,
-			None,
-		)
-		.await?;
-	let write_error =
-		results.remove(0).result.expect_err("write against errored durable index should fail");
-	let write_error = write_error.to_string();
-	assert!(
-		write_error.contains(error_reason),
-		"write error should include durable build reason {error_reason:?}, got {write_error:?}"
-	);
+	// A failed build must not block user writes on any node: the mutation is
+	// admitted (queued under the errored generation, to be wiped and
+	// rescanned by a recovering `REBUILD INDEX`) and the statement succeeds.
+	execute_all_retrying_conflicts(
+		&ds_b,
+		&session,
+		"CREATE user:three SET account = 'tesla', email = 'three@surrealdb.com' RETURN NONE",
+	)
+	.await?;
 	Ok(())
 }
 
@@ -5378,5 +5373,463 @@ async fn diskann_pending_search_returns_recreated_record() -> Result<()> {
 		knn_result(&ds, &session, knn).await?.contains("t:1"),
 		"a record re-created before compaction must remain visible to KNN"
 	);
+	Ok(())
+}
+
+/// A shutdown-class commit failure must not poison the durable build state.
+///
+/// Reproduces the incident behind the PR #553 regression report: the storage
+/// engine begins graceful shutdown while a build is mid-scan, the batch
+/// commit fails with the engines' shutdown error, and the builder task dies.
+/// Durable state must stay `Building` — with no durable error — so the
+/// periodic resume scan adopts the build after restart and finishes it.
+/// Before this fix the state was durably `Error`, the resume scan skipped it
+/// forever, and every write to the table failed on admission with the stale
+/// shutdown message.
+#[tokio::test(flavor = "multi_thread")]
+async fn shutdown_error_does_not_poison_durable_build_state() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:one SET email = 'one@example.com' RETURN NONE;
+			CREATE user:two SET email = 'two@example.com' RETURN NONE;
+			DEFINE INDEX test ON user FIELDS email CONCURRENTLY;
+			",
+	)
+	.await?;
+	wait_for_index_ready(&ds, &session, "user", "test").await?;
+
+	// Fail the rebuild's first initial-scan batch commit with the error the
+	// storage engines return once graceful shutdown has begun.
+	let _guard = inject_non_retryable_error(
+		NonRetryableErrorSite::ConcurrentIndexInitialBatchShutdown,
+		ds.id(),
+	);
+	// A blocking REBUILD surfaces the builder task's failure synchronously.
+	let err = ds
+		.execute("REBUILD INDEX test ON user", &session, None)
+		.await?
+		.remove(0)
+		.result
+		.expect_err("rebuild should fail with the injected shutdown error");
+	assert!(err.to_string().contains("shutting down"), "unexpected rebuild error: {err}");
+
+	// The interrupted generation stays adoptable: still `Building`, no
+	// durable error, no error report status.
+	let (ns, db, table, ix) = get_table_index(&ds, "user", "test").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.phase, IndexBuildPhase::Building);
+	assert_eq!(state.error, None);
+	assert_eq!(state.report_status, Some(IndexBuildReportStatus::Indexing));
+
+	// Writes are still admitted (queued) while the build awaits adoption.
+	execute_all_retrying_conflicts(
+		&ds,
+		&session,
+		"CREATE user:three SET email = 'three@example.com' RETURN NONE",
+	)
+	.await?;
+
+	// Expire the dead builder's lease; the periodic resume scan must adopt
+	// the generation and drive the build to `Online`.
+	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
+	let mut stranded = durable_build_state(&ds, &ikb).await?;
+	stranded.updated_at = expired;
+	stranded.owner_heartbeat_at = Some(expired);
+	set_durable_build_state(&ds, &ikb, stranded).await?;
+	let resumed = ds
+		.resume_stalled_index_builds(
+			Duration::from_secs(30),
+			tokio_util::sync::CancellationToken::new(),
+		)
+		.await?;
+	assert_eq!(resumed, 1, "the interrupted build should be adopted");
+	wait_for_index_ready(&ds, &session, "user", "test").await?;
+	Ok(())
+}
+
+/// A genuine (non-shutdown) build failure must still publish a durable error:
+/// the shutdown classification must not swallow real failures.
+#[tokio::test(flavor = "multi_thread")]
+async fn non_shutdown_build_error_still_publishes_durable_error() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:one SET email = 'one@example.com' RETURN NONE;
+			CREATE user:two SET email = 'two@example.com' RETURN NONE;
+			DEFINE INDEX test ON user FIELDS email CONCURRENTLY;
+			",
+	)
+	.await?;
+	wait_for_index_ready(&ds, &session, "user", "test").await?;
+
+	let _guard = inject_non_retryable_error(
+		NonRetryableErrorSite::ConcurrentIndexInitialBatchCommit,
+		ds.id(),
+	);
+	let err = ds
+		.execute("REBUILD INDEX test ON user", &session, None)
+		.await?
+		.remove(0)
+		.result
+		.expect_err("rebuild should fail with the injected error");
+	assert!(err.to_string().contains("injected non-retryable error"), "unexpected error: {err}");
+
+	let (ns, db, table, ix) = get_table_index(&ds, "user", "test").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.phase, IndexBuildPhase::Error);
+	assert_eq!(state.report_status, Some(IndexBuildReportStatus::Error));
+	assert!(
+		state.error.as_deref().is_some_and(|e| e.contains("injected non-retryable error")),
+		"durable error should carry the failure reason: {:?}",
+		state.error
+	);
+
+	// A failed build must not block user writes: the mutation queues under
+	// the errored generation instead of failing the statement.
+	execute_all_retrying_conflicts(
+		&ds,
+		&session,
+		"CREATE user:three SET email = 'three@example.com' RETURN NONE",
+	)
+	.await?;
+
+	// A `REBUILD INDEX` recovers from the durable error state by starting a
+	// fresh generation (the documented operator remediation), and its rescan
+	// indexes the write that was admitted while the build was errored.
+	execute_all(&ds, &session, "REBUILD INDEX test ON user").await?;
+	assert_eq!(index_building_status(&ds, &session, "user", "test").await?, "ready");
+	assert_eq!(
+		index_prefix_key_count(&ds, ns, db, &table, ix.index_id).await?,
+		3,
+		"the rebuild rescan must index the write admitted during the error state"
+	);
+	Ok(())
+}
+
+#[test]
+fn shutdown_error_classification() {
+	use crate::kvs::is_shutdown_error;
+	let direct: anyhow::Error = crate::kvs::Error::Shutdown.into();
+	assert!(is_shutdown_error(&direct));
+	let wrapped: anyhow::Error = Error::Kvs(crate::kvs::Error::Shutdown).into();
+	assert!(is_shutdown_error(&wrapped));
+	let internal: anyhow::Error = crate::kvs::Error::Internal("boom".to_string()).into();
+	assert!(!is_shutdown_error(&internal));
+	let conflict: anyhow::Error = crate::kvs::Error::TransactionConflict("busy".to_string()).into();
+	assert!(!is_shutdown_error(&conflict));
+}
+
+/// A memory-threshold failure must not poison the durable build state.
+///
+/// On memory-constrained instances the builder can cross the process memory
+/// threshold mid-scan (`Building::is_beyond_threshold`). That is a
+/// load-transient condition, so — like a shutdown — it must leave the build
+/// adoptable: durable state stays `Building` with its checkpoint, and the
+/// resume scan retries the build once the owner lease expires (typically
+/// after the pressure has receded or the instance was resized). Before this
+/// fix the build was durably `Error` and every write to the table failed on
+/// admission.
+#[tokio::test(flavor = "multi_thread")]
+async fn memory_threshold_error_does_not_poison_durable_build_state() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:one SET email = 'one@example.com' RETURN NONE;
+			CREATE user:two SET email = 'two@example.com' RETURN NONE;
+			DEFINE INDEX test ON user FIELDS email CONCURRENTLY;
+			",
+	)
+	.await?;
+	wait_for_index_ready(&ds, &session, "user", "test").await?;
+
+	// Fail the rebuild's first initial-scan batch commit with the error the
+	// builder raises when the process crosses the memory threshold.
+	let _guard = inject_non_retryable_error(
+		NonRetryableErrorSite::ConcurrentIndexInitialBatchMemoryThreshold,
+		ds.id(),
+	);
+	let err = ds
+		.execute("REBUILD INDEX test ON user", &session, None)
+		.await?
+		.remove(0)
+		.result
+		.expect_err("rebuild should fail with the injected memory threshold error");
+	assert!(err.to_string().contains("memory threshold"), "unexpected rebuild error: {err}");
+
+	// The interrupted generation stays adoptable: still `Building`, no
+	// durable error, no error report status.
+	let (ns, db, table, ix) = get_table_index(&ds, "user", "test").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.phase, IndexBuildPhase::Building);
+	assert_eq!(state.error, None);
+	assert_eq!(state.report_status, Some(IndexBuildReportStatus::Indexing));
+
+	// Expire the dead builder's lease; the resume scan retries the build.
+	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
+	let mut stranded = durable_build_state(&ds, &ikb).await?;
+	stranded.updated_at = expired;
+	stranded.owner_heartbeat_at = Some(expired);
+	set_durable_build_state(&ds, &ikb, stranded).await?;
+	let resumed = ds
+		.resume_stalled_index_builds(
+			Duration::from_secs(30),
+			tokio_util::sync::CancellationToken::new(),
+		)
+		.await?;
+	assert_eq!(resumed, 1, "the interrupted build should be adopted");
+	wait_for_index_ready(&ds, &session, "user", "test").await?;
+	Ok(())
+}
+
+/// The resume scan recovers several stranded builds one at a time.
+///
+/// A restart with multiple stalled builds (the incident shape: two FULLTEXT
+/// indexes on a small instance) must not start every initial scan at once:
+/// a pass adopts at most one build, and no pass adopts anything while a
+/// local builder task is still running. Every stalled build is still
+/// recovered — one scan pass after the previous build finishes.
+#[tokio::test(flavor = "multi_thread")]
+async fn resume_scan_adopts_one_stalled_build_at_a_time() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:one SET email = 'one@example.com', name = 'One' RETURN NONE;
+			CREATE user:two SET email = 'two@example.com', name = 'Two' RETURN NONE;
+			DEFINE INDEX test_email ON user FIELDS email;
+			DEFINE INDEX test_name ON user FIELDS name;
+			",
+	)
+	.await?;
+
+	// Strand both indexes as expired `Building` generations, as a crash mid
+	// build of both would leave them.
+	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
+	let mut ikbs = Vec::new();
+	for index in ["test_email", "test_name"] {
+		let (ns, db, table, ix) = get_table_index(&ds, "user", index).await?;
+		let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+		let tx = ds.transaction(TransactionType::Write).await?;
+		tx.del_prefix_key(&index_all::AllIndexRoot {
+			prefix: crate::key::database::all::DatabaseRoot {
+				ns,
+				db,
+			},
+			tb: Cow::Borrowed(&table),
+			ix: ix.index_id,
+		})
+		.await?;
+		tx.set_key(
+			&ikb.new_bs_key(),
+			&IndexBuildState {
+				generation: 2,
+				phase: IndexBuildPhase::Building,
+				owner: Some(Uuid::new_v4()),
+				next_ticket: 0,
+				initial_complete: false,
+				updated_at: expired,
+				owner_heartbeat_at: Some(expired),
+				error: None,
+				report_status: Some(IndexBuildReportStatus::Indexing),
+				initial: Some(0),
+				updated: None,
+				pending: None,
+				initial_cursor: None,
+			},
+		)
+		.await?;
+		tx.commit().await?;
+		ikbs.push(ikb);
+	}
+
+	// Park whichever build gets adopted in its batch-commit retry loop, so
+	// the deferral while a build is running can be observed deterministically.
+	let guard = inject_retryable_conflicts(
+		RetryableConflictSite::ConcurrentIndexInitialBatch,
+		ds.id(),
+		REPEATED_RETRY_CONFLICTS,
+	);
+
+	// The first pass adopts exactly one of the two stranded builds.
+	let resumed = ds
+		.resume_stalled_index_builds(
+			Duration::from_secs(30),
+			tokio_util::sync::CancellationToken::new(),
+		)
+		.await?;
+	assert_eq!(resumed, 1, "a pass must adopt at most one stalled build");
+
+	// Wait until the adopted build is demonstrably mid-scan (it consumed an
+	// injected conflict), then verify a pass adopts nothing while it runs.
+	timeout(Duration::from_secs(10), async {
+		while retryable_conflict_count(RetryableConflictSite::ConcurrentIndexInitialBatch, ds.id())
+			== REPEATED_RETRY_CONFLICTS
+		{
+			sleep(Duration::from_millis(5)).await;
+		}
+	})
+	.await
+	.map_err(|_| anyhow::anyhow!("adopted build never reached its batch commit"))?;
+	let resumed_while_running = ds
+		.resume_stalled_index_builds(
+			Duration::from_secs(30),
+			tokio_util::sync::CancellationToken::new(),
+		)
+		.await?;
+	assert_eq!(resumed_while_running, 0, "no adoption while a local build is running");
+
+	// Un-park the running build and let recovery converge: a later pass
+	// adopts the second build, and both indexes come back ready.
+	drop(guard);
+	let deadline = Instant::now() + Duration::from_secs(30);
+	loop {
+		let mut online = 0;
+		for ikb in &ikbs {
+			if durable_build_state(&ds, ikb).await?.phase == IndexBuildPhase::Online {
+				online += 1;
+			}
+		}
+		if online == 2 {
+			break;
+		}
+		assert!(Instant::now() < deadline, "stranded builds were not recovered sequentially");
+		let _ = ds
+			.resume_stalled_index_builds(
+				Duration::from_secs(30),
+				tokio_util::sync::CancellationToken::new(),
+			)
+			.await?;
+		sleep(Duration::from_millis(20)).await;
+	}
+	assert_eq!(index_building_status(&ds, &session, "user", "test_email").await?, "ready");
+	assert_eq!(index_building_status(&ds, &session, "user", "test_name").await?, "ready");
+	Ok(())
+}
+
+/// A new-generation takeover installs the next generation BEFORE it waits
+/// for prior-generation reservations, and wipes the stale queues after.
+///
+/// With `Error` builds admitting writers like `Building`, draining before
+/// the flip would race a writer that reserves a ticket between the drain and
+/// the state commit: its queued mutation would be wiped while its main-table
+/// write could land after the new initial scan had already passed the
+/// record. Installing the generation first fences those admissions (ticket
+/// allocation CASes `!bs` and the fence rejects generation mismatches), so
+/// the drain's empty state is stable.
+#[tokio::test(flavor = "multi_thread")]
+async fn takeover_installs_generation_before_draining_reservations() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:one SET email = 'one@example.com' RETURN NONE;
+			DEFINE INDEX test ON user FIELDS email;
+			",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "user", "test").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	// Seed an errored generation 1 with a live writer reservation (TTL in the
+	// future, so the drain must wait) and a stale queue entry.
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.set_key(
+		&ikb.new_bs_key(),
+		&IndexBuildState {
+			generation: 1,
+			phase: IndexBuildPhase::Error,
+			owner: None,
+			next_ticket: 1,
+			initial_complete: false,
+			updated_at: Utc::now(),
+			owner_heartbeat_at: None,
+			error: Some("seeded test failure".to_string()),
+			report_status: Some(IndexBuildReportStatus::Error),
+			initial: None,
+			updated: None,
+			pending: None,
+			initial_cursor: None,
+		},
+	)
+	.await?;
+	let br_key = ikb.new_br_key(1, 0);
+	tx.set_key(
+		&br_key,
+		&IndexBuildReservation {
+			node: ds.id(),
+			expires_at: Utc::now() + chrono::Duration::seconds(BUILD_RESERVATION_TTL_SECS),
+		},
+	)
+	.await?;
+	// A different ticket than the live reservation: a queue entry under the
+	// same ticket would mark that writer as already committed and let the
+	// drain retire the reservation instead of blocking on it.
+	tx.set_key(
+		&ikb.new_bg_key(1, 5, 0),
+		&Appending::new(None, None, RecordIdKey::from("one".to_string())),
+	)
+	.await?;
+	tx.commit().await?;
+
+	// The takeover must block draining the live reservation...
+	let building =
+		Arc::new(new_building_for_index(&ds, &session, ns, db, &table, Arc::clone(&ix)).await?);
+	let acquire = {
+		let building = Arc::clone(&building);
+		tokio::spawn(async move { building.acquire_build_state().await })
+	};
+	// ...but only after the next generation is already installed, fencing
+	// off further old-generation admissions while it waits.
+	timeout(Duration::from_secs(5), async {
+		while durable_build_state(&ds, &ikb).await?.generation != 2 {
+			sleep(Duration::from_millis(10)).await;
+		}
+		Ok::<_, anyhow::Error>(())
+	})
+	.await
+	.map_err(|_| anyhow::anyhow!("takeover never installed the next generation"))??;
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.phase, IndexBuildPhase::Building);
+	sleep(Duration::from_millis(200)).await;
+	assert!(
+		!acquire.is_finished(),
+		"acquire must keep draining the live prior-generation reservation"
+	);
+
+	// Releasing the writer's reservation lets the takeover finish, and the
+	// stale generation-1 queue entries are wiped.
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.del_key(&br_key).await?;
+	tx.commit().await?;
+	let acquired = timeout(Duration::from_secs(5), acquire)
+		.await
+		.map_err(|_| {
+			anyhow::anyhow!("acquire did not finish after the reservation was released")
+		})???
+		.expect("takeover should acquire the new generation");
+	assert_eq!(acquired.generation, 2);
+	let tx = ds.transaction(TransactionType::Read).await?;
+	let stale_bg = tx.keys(ikb.new_bg_all_generations_range()?, u32::MAX, 0, None).await?;
+	let stale_br = tx.keys(ikb.new_br_all_generations_range()?, u32::MAX, 0, None).await?;
+	tx.cancel().await?;
+	assert!(stale_bg.is_empty(), "stale generation-1 queue entries should be wiped");
+	assert!(stale_br.is_empty(), "no reservations should remain after the takeover");
 	Ok(())
 }

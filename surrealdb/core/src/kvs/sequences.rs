@@ -293,6 +293,7 @@ impl Sequences {
 			nid,
 		}
 	}
+
 	/// Cleans up all sequences associated with a removed namespace.
 	///
 	/// This method is called when a namespace is deleted to remove all cached

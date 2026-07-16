@@ -17,7 +17,7 @@ use wasm_bindgen_futures::spawn_local as spawn;
 use web_time::Instant;
 
 use super::state::{
-	build_owner_expired, delete_durable_build_queues, durable_index_error_reason,
+	build_owner_expired, delete_stale_build_queues, durable_index_error_reason,
 	durable_report_count, is_condition_not_met, report_status_from_phase,
 };
 use super::{
@@ -40,13 +40,45 @@ use crate::kvs::testing::{
 	maybe_inject_retryable_conflict,
 };
 use crate::kvs::{
-	INDEXING_BATCH_SIZE, Transaction, TransactionType, is_retryable_transaction_conflict,
+	INDEXING_BATCH_MAX_BYTES, INDEXING_BATCH_SIZE, INDEXING_PROBE_BATCH_SIZE, Transaction,
+	TransactionType, is_retryable_transaction_conflict, is_shutdown_error,
 };
 use crate::mem::ALLOC;
 use crate::val::{RecordId, RecordIdKey, TableName, Value};
 
 /// Process-local key used only to deduplicate active builder tasks.
 pub(super) type SharedIndexKey = Arc<IndexKey>;
+
+/// Whether an error reports that the build crossed the process memory
+/// threshold (see [`Building::is_beyond_threshold`]).
+///
+/// Memory pressure is load-transient: the interrupted build is safe to retry
+/// later — typically after the resume scan re-adopts it once the owner lease
+/// expires, when the pressure has receded or the process was restarted with
+/// more memory — so it must not be recorded as a permanent build failure.
+fn is_memory_threshold_error(err: &anyhow::Error) -> bool {
+	matches!(err.downcast_ref::<Error>(), Some(Error::QueryBeyondMemoryThreshold))
+}
+
+/// Probe the initial-batch commit injection sites, so tests can fail the
+/// commit with a generic non-retryable error, with the shutdown-class error
+/// the storage engines return during graceful shutdown, or with the memory
+/// threshold error.
+#[cfg(test)]
+fn maybe_inject_initial_batch_commit_error(node_id: Uuid) -> Result<()> {
+	maybe_inject_non_retryable_error(
+		NonRetryableErrorSite::ConcurrentIndexInitialBatchCommit,
+		node_id,
+	)?;
+	maybe_inject_non_retryable_error(
+		NonRetryableErrorSite::ConcurrentIndexInitialBatchShutdown,
+		node_id,
+	)?;
+	maybe_inject_non_retryable_error(
+		NonRetryableErrorSite::ConcurrentIndexInitialBatchMemoryThreshold,
+		node_id,
+	)
+}
 
 #[derive(Hash, PartialEq, Eq)]
 pub(super) struct IndexKey {
@@ -112,6 +144,16 @@ impl IndexBuilder {
 		self.tf.clone()
 	}
 
+	/// Whether any local builder task is still running.
+	///
+	/// Used by the stalled-build resume scan to serialize recovery: while a
+	/// build is active on this node, further adoptions are deferred to a
+	/// later scan pass so concurrent initial scans cannot multiply the
+	/// node's memory and CPU footprint.
+	pub(crate) async fn has_unfinished_build(&self) -> bool {
+		self.indexes.read().await.values().any(|building| !building.is_finished())
+	}
+
 	#[allow(clippy::too_many_arguments)]
 	async fn start_building(
 		&self,
@@ -156,9 +198,33 @@ impl IndexBuilder {
 			let r = b.run_acquired(acquired).await;
 			let generation = b.build_generation.load(Ordering::Acquire);
 			if let Err(err) = &r {
-				let reason = err.to_string();
-				if generation != 0 {
-					let _ = b.mark_durable_error(generation, reason.clone()).await;
+				// Shutdown and memory-threshold failures are transient: the
+				// storage engine went away under this builder, or the process
+				// was under memory pressure — the build itself did not fail.
+				// The durable state is deliberately left in
+				// `Building`/`Closing` with its last committed checkpoint:
+				// once the owner lease expires, the periodic resume scan (or
+				// a blocking statement takeover) continues the build from
+				// there. Recording a durable `Error` here would instead stop
+				// the build permanently and fail every subsequent write to
+				// the table on admission.
+				if is_shutdown_error(err) {
+					info!(
+						index = %b.ix.name,
+						table = %b.ix.table_name,
+						"index build interrupted by datastore shutdown; \
+						 it will resume after restart"
+					);
+				} else if is_memory_threshold_error(err) {
+					warn!(
+						index = %b.ix.name,
+						table = %b.ix.table_name,
+						"index build interrupted by the memory threshold; \
+						 it will resume from its checkpoint once the owner \
+						 lease expires"
+					);
+				} else if generation != 0 {
+					let _ = b.mark_durable_error(generation, err.to_string()).await;
 				}
 			} else if b.aborted.load(Ordering::Acquire) && generation != 0 {
 				let _ = b.mark_durable_aborted(generation).await;
@@ -200,7 +266,12 @@ impl IndexBuilder {
 				IndexBuildPhase::Online => return Ok(()),
 				IndexBuildPhase::Error => {
 					return Err(Error::IndexingBuildingCancelled {
-						reason: durable_index_error_reason(&building.ix, &state),
+						reason: format!(
+							"{}. Run `REBUILD INDEX {} ON {}` to retry the build",
+							durable_index_error_reason(&building.ix, &state),
+							building.ix.name,
+							building.ix.table_name
+						),
 					}
 					.into());
 				}
@@ -429,20 +500,18 @@ impl Building {
 					}
 				}
 			}
-			// New-generation takeover: drain any prior-generation `!br` from
-			// in-flight writers (possibly on other cluster nodes) before
-			// wiping durable build state. Otherwise the wipe destroys the
-			// `!br` anchor of a writer mid-transaction and the new build's
-			// initial scan can start before that writer's commit lands —
-			// leaving its main-table writes invisible to the scan and its
-			// `!bg(prior_gen, *)` orphaned by the wipe.
+			// New-generation takeover. The next generation's state is
+			// installed FIRST: ticket allocation CASes the `!bs` key and the
+			// admission fence rejects generation mismatches, so committing
+			// the new state fences off any further old-generation admissions
+			// (builds in `Error` admit like `Building`). Only after that
+			// fence can the prior-generation reservation drain converge to a
+			// stable empty state; draining before the flip would race a
+			// writer that reserves between the drain and the state commit —
+			// its queued mutation would be wiped while its main-table write
+			// could land after the new initial scan had already passed the
+			// record.
 			tx.cancel().await?;
-			self.wait_for_prior_generation_reservations().await?;
-
-			// Re-read state in a fresh transaction; another node in the
-			// cluster may have completed its own takeover while we were
-			// draining. If state is now `Building`/`Closing`, restart so the
-			// takeover-same-gen branch above handles it.
 			let ctx = self.new_write_tx_ctx().await?;
 			let tx = ctx.tx();
 			let existing = tx.get_key(&state_key, None).await?;
@@ -470,7 +539,6 @@ impl Building {
 				pending: None,
 				initial_cursor: None,
 			};
-			delete_durable_build_queues(&tx, &self.ikb).await?;
 			let res = tx.put_compare_key(&state_key, &state, existing.as_ref()).await;
 			match res {
 				Ok(()) => {
@@ -483,15 +551,6 @@ impl Building {
 					{
 						continue;
 					}
-					self.build_generation.store(generation, Ordering::Release);
-					return Ok(Some(AcquiredBuild {
-						generation,
-						phase: IndexBuildPhase::Building,
-						initial_complete: false,
-						initial_count: 0,
-						updates_count: 0,
-						initial_cursor: None,
-					}));
 				}
 				Err(err) if is_condition_not_met(&err) => {
 					let _ = tx.cancel().await;
@@ -499,6 +558,74 @@ impl Building {
 				}
 				Err(err) => {
 					let _ = tx.cancel().await;
+					return Err(err);
+				}
+			}
+			self.build_generation.store(generation, Ordering::Release);
+			// Old-generation writers holding tickets either commit their
+			// queue entries (their rows become visible before the initial
+			// scan starts) or fail their admission fence on the generation
+			// change; wait for the stragglers, then wipe the stale queues
+			// they can no longer extend. A brand-new index (generation 1,
+			// no prior durable state) has no prior generations, so skip the
+			// extra transactions: they would only widen the window between
+			// installing `!bs` and registering the local task, which a
+			// racing cancel-path cleanup uses to abort the build.
+			if generation > 1 {
+				self.wait_for_prior_generation_reservations(generation).await?;
+				self.wipe_stale_build_queues(generation).await?;
+			}
+			return Ok(Some(AcquiredBuild {
+				generation,
+				phase: IndexBuildPhase::Building,
+				initial_complete: false,
+				initial_count: 0,
+				updates_count: 0,
+				initial_cursor: None,
+			}));
+		}
+	}
+
+	/// Delete the queues of every generation below `below`, in its own
+	/// retry-looped transaction.
+	///
+	/// Runs after [`Self::wait_for_prior_generation_reservations`], so no
+	/// old-generation writer can re-create the deleted entries. Idempotent: a
+	/// crash in between leaves only unreferenced keys, and the restarting
+	/// initial scan re-runs both steps.
+	async fn wipe_stale_build_queues(&self, below: BuildGeneration) -> Result<()> {
+		loop {
+			if self.is_aborted().await {
+				return Ok(());
+			}
+			let ctx = self.new_write_tx_ctx().await?;
+			let tx = ctx.tx();
+			if let Err(err) = delete_stale_build_queues(&tx, &self.ikb, below).await {
+				if self
+					.cancel_and_retryable_conflict(
+						&tx,
+						&err,
+						"transient conflict wiping stale build queues, retrying",
+					)
+					.await
+				{
+					continue;
+				}
+				return Err(err);
+			}
+			match tx.commit().await {
+				Ok(()) => return Ok(()),
+				Err(err) => {
+					if self
+						.cancel_and_retryable_conflict(
+							&tx,
+							&err,
+							"transient conflict wiping stale build queues, retrying",
+						)
+						.await
+					{
+						continue;
+					}
 					return Err(err);
 				}
 			}
@@ -1125,6 +1252,14 @@ impl Building {
 				None,
 			)
 			.await?;
+			// A restarted scan can follow a crash between the generation flip
+			// and the stale-queue wipe in `acquire_build_state`. Prior
+			// generations' writers may then still hold live reservations
+			// whose main-table writes must become visible before this scan
+			// starts; re-run the drain and the wipe — both are cheap no-ops
+			// when the previous owner already completed them.
+			self.wait_for_prior_generation_reservations(generation).await?;
+			self.wipe_stale_build_queues(generation).await?;
 			loop {
 				if self.is_aborted().await {
 					return Ok(());
@@ -1235,6 +1370,14 @@ impl Building {
 			// atomically with the batch that covered them.
 			let mut count_primary_cursor =
 				matches!(self.ix.index, Index::Count(_)).then(|| resume_cursor.clone());
+			// Batches are fetched by record count, so their memory footprint is
+			// unbounded for large documents. The scan starts with a small probe
+			// batch and then sizes each batch from the record sizes observed so
+			// far, keeping a batch's raw record data around
+			// `INDEXING_BATCH_MAX_BYTES` (small records keep using full
+			// `INDEXING_BATCH_SIZE` batches). The checkpoint protocol is
+			// per-batch and does not depend on a fixed batch size.
+			let mut scan_batch_size = INDEXING_PROBE_BATCH_SIZE;
 			// Set the initial status.
 			self.mark_durable_report(
 				generation,
@@ -1259,7 +1402,7 @@ impl Building {
 							.await
 					);
 					// Get the next batch of records.
-					let res = catch!(tx, tx.batch_keys_vals(rng, INDEXING_BATCH_SIZE, None).await);
+					let res = catch!(tx, tx.batch_keys_vals(rng, scan_batch_size, None).await);
 					tx.cancel().await?;
 					res
 				};
@@ -1269,6 +1412,14 @@ impl Building {
 				if batch.result.is_empty() {
 					// If not, initial indexing is complete.
 					break;
+				}
+				// Size the next batch from the average record size seen in this
+				// one, so the scan converges on the byte budget within one batch.
+				{
+					let bytes: usize = batch.result.iter().map(|(k, v)| k.len() + v.len()).sum();
+					let avg = (bytes / batch.result.len()).max(1);
+					scan_batch_size = (INDEXING_BATCH_MAX_BYTES / avg)
+						.clamp(1, INDEXING_BATCH_SIZE as usize) as u32;
 				}
 				// Create a new context with a write transaction.
 				{
@@ -1372,6 +1523,23 @@ impl Building {
 							RetryableConflictSite::ConcurrentIndexInitialBatch,
 							self.ctx.node_id(),
 						) {
+							count_primary_cursor = saved_count_primary_cursor;
+							if self
+								.cancel_and_retryable_conflict(
+									&tx,
+									&err,
+									"transient conflict on initial index batch commit, retrying",
+								)
+								.await
+							{
+								continue;
+							}
+							return Err(err);
+						}
+						#[cfg(test)]
+						if let Err(err) =
+							maybe_inject_initial_batch_commit_error(self.ctx.node_id())
+						{
 							count_primary_cursor = saved_count_primary_cursor;
 							if self
 								.cancel_and_retryable_conflict(
@@ -1744,7 +1912,12 @@ impl Building {
 		self.aborted.store(true, Ordering::Relaxed);
 	}
 
-	/// Check if the indexing process is aborting.
+	/// Check if the indexing process should stop at the next check point.
+	///
+	/// Set by a user abort (`REMOVE INDEX`). A datastore shutdown does not use
+	/// this: the commit coordinator's shutdown refuses the builder's commits
+	/// before they apply, so the task exits on that error without any durable
+	/// change and the build resumes after restart.
 	pub(super) async fn is_aborted(&self) -> bool {
 		// We use `Ordering::Relaxed` as there are no shared data accesses requiring
 		// synchronization. This method is only called by the single thread building
