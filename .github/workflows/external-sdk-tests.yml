@@ -242,7 +242,9 @@ jobs:
         run: uv sync --group dev
 
       - name: Run Python tests (${{ matrix.protocol }})
-        timeout-minutes: 5
+        # The ws leg legitimately takes ~5 minutes on loaded runners; a 5-minute
+        # timeout was killing fully green runs at the finish line.
+        timeout-minutes: 10
         run: uv run pytest --ignore=tests/unit_tests/connections/embedded
         env:
           PYTHONPATH: ./src
