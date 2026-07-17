@@ -201,6 +201,7 @@ env_logger.workspace = true
 jsonwebtoken.workspace = true
 serial_test.workspace = true
 test-log = { workspace = true, features = ["trace"] }
+tokio = { workspace = true, features = ["test-util"] }
 ulid.workspace = true
 wiremock.workspace = true
 rstest.workspace = true

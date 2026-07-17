@@ -1094,7 +1094,7 @@ mod tests {
 		assert_eq!(cli.dbs.startup_operation_timeout, Duration::from_secs(75));
 	}
 
-	#[test(tokio::test(flavor = "multi_thread"))]
+	#[test(tokio::test(start_paused = true))]
 	async fn startup_retry_times_out_attempt_without_retrying() {
 		let attempts = Arc::new(AtomicUsize::new(0));
 
@@ -1113,7 +1113,7 @@ mod tests {
 		assert_eq!(attempts.load(Ordering::SeqCst), 1);
 	}
 
-	#[test(tokio::test(flavor = "multi_thread"))]
+	#[test(tokio::test(start_paused = true))]
 	async fn startup_retry_returns_permanent_errors_immediately() {
 		let attempts = Arc::new(AtomicUsize::new(0));
 
