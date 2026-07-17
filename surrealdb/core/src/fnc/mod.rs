@@ -88,6 +88,7 @@ pub async fn run(
 		|| name.eq("set::reduce")
 		|| name.eq("type::field")
 		|| name.eq("type::fields")
+		|| name.eq("value::chain")
 		|| name.eq("value::diff")
 		|| name.eq("value::expect")
 		|| name.eq("value::patch")
@@ -651,6 +652,7 @@ pub async fn asynchronous(
 		"type::field" => r#type::field((stk, ctx, Some(opt), doc)).await,
 		"type::fields" => r#type::fields((stk, ctx, Some(opt), doc)).await,
 		//
+		"value::chain" => value::chain((stk, ctx, Some(opt), doc)).await,
 		"value::diff" => value::diff.await,
 		"value::expect" => value::expect((stk, ctx, Some(opt), doc)).await,
 		"value::patch" => value::patch.await,

@@ -51,10 +51,17 @@ pub trait Angle {
 impl Angle for Vec<Number> {
 	fn angle(&self, other: &Self) -> Result<Number> {
 		check_same_dimension("vector::angle", self, other)?;
+		let m1 = self.magnitude();
+		let m2 = other.magnitude();
+		ensure!(
+			!m1.is_zero() && !m2.is_zero(),
+			Error::InvalidFunctionArguments {
+				name: String::from("vector::angle"),
+				message: String::from("The two vectors must not have a magnitude of zero."),
+			}
+		);
 		let dp = dot(self, other);
-		let m = self.magnitude() * other.magnitude();
-		let d = vector_div(&dp, &m);
-		Ok(d.acos())
+		Ok((dp / (m1 * m2)).acos())
 	}
 }
 
@@ -87,18 +94,17 @@ pub trait Divide {
 	fn divide(&self, other: &Self) -> Result<Vec<Number>>;
 }
 
-fn vector_div(a: &Number, b: &Number) -> Number {
-	if a.is_nan() || b.is_nan() || b.is_zero() {
-		Number::NAN
-	} else {
-		a / b
-	}
-}
-
 impl Divide for Vec<Number> {
 	fn divide(&self, other: &Self) -> Result<Vec<Number>> {
 		check_same_dimension("vector::divide", self, other)?;
-		Ok(self.iter().zip(other.iter()).map(|(a, b)| vector_div(a, b)).collect())
+		ensure!(
+			!other.iter().any(Number::is_zero),
+			Error::InvalidFunctionArguments {
+				name: String::from("vector::divide"),
+				message: String::from("The second vector must not contain a value of zero."),
+			}
+		);
+		Ok(self.iter().zip(other.iter()).map(|(a, b)| a / b).collect())
 	}
 }
 
@@ -204,9 +210,16 @@ pub trait Project {
 impl Project for Vec<Number> {
 	fn project(&self, other: &Self) -> Result<Vec<Number>> {
 		check_same_dimension("vector::project", self, other)?;
+		let m: Number = magnitude_squared(other).into();
+		ensure!(
+			!m.is_zero(),
+			Error::InvalidFunctionArguments {
+				name: String::from("vector::project"),
+				message: String::from("The second vector must not have a magnitude of zero."),
+			}
+		);
 		let d = dot(self, other);
-		let m = magnitude_squared(other).into();
-		let s = vector_div(&d, &m);
+		let s = d / m;
 		Ok(other.iter().map(|x| &s * x).collect())
 	}
 }
@@ -222,7 +235,7 @@ impl ChebyshevDistance for Vec<Number> {
 			.iter()
 			.zip(other.iter())
 			.map(|(a, b)| (a.to_float() - b.to_float()).abs())
-			.fold(f64::MIN, f64::max)
+			.fold(0.0, f64::max)
 			.into())
 	}
 }
@@ -315,12 +328,19 @@ impl Magnitude for Vec<Number> {
 
 pub trait Normalize {
 	/// Normalize a vector
-	fn normalize(&self) -> Vec<Number>;
+	fn normalize(&self) -> Result<Vec<Number>>;
 }
 
 impl Normalize for Vec<Number> {
-	fn normalize(&self) -> Vec<Number> {
+	fn normalize(&self) -> Result<Vec<Number>> {
 		let m = self.magnitude();
-		self.iter().map(|a| vector_div(a, &m)).collect()
+		ensure!(
+			!m.is_zero(),
+			Error::InvalidFunctionArguments {
+				name: String::from("vector::normalize"),
+				message: String::from("The vector must not have a magnitude of zero."),
+			}
+		);
+		Ok(self.iter().map(|a| a / &m).collect())
 	}
 }

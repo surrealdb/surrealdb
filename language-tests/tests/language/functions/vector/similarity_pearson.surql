@@ -15,10 +15,13 @@ value = "0.9999999999999998f"
 value = "0.7999999999999998f"
 
 [[test.results]]
-value = "NaN"
+error = "Incorrect arguments for function vector::similarity::pearson(). The two vectors must not have a variance of zero."
 
 [[test.results]]
-value = "NaN"
+error = "Incorrect arguments for function vector::similarity::pearson(). The two vectors must have a dimension of at least 2."
+
+[[test.results]]
+error = "Incorrect arguments for function vector::similarity::pearson(). The two vectors must have a dimension of at least 2."
 
 [[test.results]]
 error = "Incorrect arguments for function vector::similarity::pearson(). The two vectors must be of the same dimension."
@@ -32,5 +35,6 @@ vector::similarity::pearson([1, 2, 3, 4, 5], [2, 4, 6, 8, 10]);
 vector::similarity::pearson([1, 2, 3, 4, 5], [1, 3, 2, 5, 4]);
 vector::similarity::pearson([1, 1, 1], [1, 2, 3]);
 vector::similarity::pearson([], []);
+vector::similarity::pearson([1], [1]);
 vector::similarity::pearson([1, 2], [1, 2, 3]);
 vector::similarity::pearson("a", [1, 2]);

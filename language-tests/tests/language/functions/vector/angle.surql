@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "Tests the angle between two vectors at exact special points, zero-vector NaN behavior, and dimension mismatch errors"
+reason = "Tests the angle between two vectors at exact special points, zero-magnitude errors, and dimension mismatch errors"
 
 [[test.results]]
 value = "0f"
@@ -12,10 +12,10 @@ value = "3.141592653589793f"
 value = "1.5707963267948966f"
 
 [[test.results]]
-value = "NaN"
+error = "Incorrect arguments for function vector::angle(). The two vectors must not have a magnitude of zero."
 
 [[test.results]]
-value = "NaN"
+error = "Incorrect arguments for function vector::angle(). The two vectors must not have a magnitude of zero."
 
 [[test.results]]
 error = "Incorrect arguments for function vector::angle(). The two vectors must be of the same dimension."

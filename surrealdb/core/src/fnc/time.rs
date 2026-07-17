@@ -170,10 +170,11 @@ pub fn month((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 }
 
 pub fn nano((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
-	Ok(match val {
-		Some(v) => v.timestamp_nanos_opt().unwrap_or_default().into(),
-		None => Datetime::now().timestamp_nanos_opt().unwrap_or_default().into(),
-	})
+	let val = val.unwrap_or_else(Datetime::now);
+	val.timestamp_nanos_opt()
+		.map(|x| x.into())
+		.ok_or_else(|| Error::ArithmeticOverflow(format!("time::nano({val})")))
+		.map_err(anyhow::Error::new)
 }
 
 pub fn millis((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {

@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "Tests vector normalization to unit length, including zero-vector NaN behavior, empty vectors, and invalid argument types"
+reason = "Tests vector normalization to unit length, including zero-magnitude errors, empty vectors, and invalid argument types"
 
 [[test.results]]
 value = "[0.6f, 0.8f]"
@@ -12,10 +12,10 @@ value = "[-0.6f, 0.8f]"
 value = "[1f]"
 
 [[test.results]]
-value = "[NaN, NaN]"
+error = "Incorrect arguments for function vector::normalize(). The vector must not have a magnitude of zero."
 
 [[test.results]]
-value = "[]"
+error = "Incorrect arguments for function vector::normalize(). The vector must not have a magnitude of zero."
 
 [[test.results]]
 value = "[1f, 0f, 0f]"

@@ -134,6 +134,9 @@ define_array_closure_function!(ArrayAll, "array::all", crate::fnc::array::all, a
 // array::any - Check if any element matches a condition
 define_array_closure_function!(ArrayAny, "array::any", crate::fnc::array::any, array: Any, check: Any => Any);
 
+// array::every - Alias for array::all
+define_array_closure_function!(ArrayEvery, "array::every", crate::fnc::array::all, array: Any, check: Any => Any);
+
 // array::filter - Filter elements by closure/value
 define_array_closure_function!(ArrayFilter, "array::filter", crate::fnc::array::filter, array: Any, check: Any => Any);
 
@@ -149,11 +152,20 @@ define_array_closure_function!(ArrayFindIndex, "array::find_index", crate::fnc::
 // array::fold - Fold with accumulator and closure
 define_array_closure_function!(ArrayFold, "array::fold", crate::fnc::array::fold, array: Any, init: Any, mapper: Any => Any);
 
+// array::includes - Alias for array::any
+define_array_closure_function!(ArrayIncludes, "array::includes", crate::fnc::array::any, array: Any, check: Any => Any);
+
+// array::index_of - Alias for array::find_index
+define_array_closure_function!(ArrayIndexOf, "array::index_of", crate::fnc::array::find_index, array: Any, check: Any => Any);
+
 // array::map - Transform elements with closure
 define_array_closure_function!(ArrayMap, "array::map", crate::fnc::array::map, array: Any, mapper: Any => Any);
 
 // array::reduce - Reduce array with closure
 define_array_closure_function!(ArrayReduce, "array::reduce", crate::fnc::array::reduce, array: Any, mapper: Any => Any);
+
+// array::some - Alias for array::any
+define_array_closure_function!(ArraySome, "array::some", crate::fnc::array::any, array: Any, check: Any => Any);
 
 pub fn register(registry: &mut FunctionRegistry) {
 	register_functions!(
@@ -212,11 +224,15 @@ pub fn register(registry: &mut FunctionRegistry) {
 	// Register closure-based functions
 	registry.register(ArrayAll);
 	registry.register(ArrayAny);
+	registry.register(ArrayEvery);
 	registry.register(ArrayFilter);
 	registry.register(ArrayFilterIndex);
 	registry.register(ArrayFind);
 	registry.register(ArrayFindIndex);
 	registry.register(ArrayFold);
+	registry.register(ArrayIncludes);
+	registry.register(ArrayIndexOf);
 	registry.register(ArrayMap);
 	registry.register(ArrayReduce);
+	registry.register(ArraySome);
 }

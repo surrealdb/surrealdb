@@ -35,7 +35,7 @@ pub fn multiply((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
 }
 
 pub fn normalize((a,): (Vec<Number>,)) -> Result<Value> {
-	Ok(a.normalize().into_iter().map(Value::from).collect::<Vec<_>>().into())
+	Ok(a.normalize()?.into_iter().map(Value::from).collect::<Vec<_>>().into())
 }
 
 pub fn project((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
@@ -51,7 +51,7 @@ pub fn scale((a, b): (Vec<Number>, Number)) -> Result<Value> {
 }
 
 pub mod distance {
-	use anyhow::Result;
+	use anyhow::{Result, ensure};
 
 	use crate::ctx::FrozenContext;
 	use crate::doc::CursorDoc;
@@ -59,7 +59,8 @@ pub mod distance {
 	use crate::fnc::args::Optional;
 	use crate::fnc::get_execution_context;
 	use crate::fnc::util::math::vector::{
-		ChebyshevDistance, EuclideanDistance, HammingDistance, ManhattanDistance, MinkowskiDistance,
+		ChebyshevDistance, EuclideanDistance, HammingDistance, ManhattanDistance,
+		MinkowskiDistance, check_same_dimension,
 	};
 	use crate::idx::planner::IterationStage;
 	use crate::val::{Number, Value};
@@ -100,10 +101,67 @@ pub mod distance {
 		Ok(Value::None)
 	}
 
-	pub fn mahalanobis((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value> {
-		Err(anyhow::Error::new(Error::Unimplemented(
-			"vector::distance::mahalanobis() function".to_string(),
-		)))
+	pub fn mahalanobis((a, b, c): (Vec<Number>, Vec<Number>, Vec<Vec<Number>>)) -> Result<Value> {
+		check_same_dimension("vector::distance::mahalanobis", &a, &b)?;
+		ensure!(
+			!a.is_empty(),
+			Error::InvalidFunctionArguments {
+				name: String::from("vector::distance::mahalanobis"),
+				message: String::from("The two vectors must not be empty."),
+			}
+		);
+		let n = a.len();
+		ensure!(
+			c.len() == n && c.iter().all(|row| row.len() == n),
+			Error::InvalidFunctionArguments {
+				name: String::from("vector::distance::mahalanobis"),
+				message: String::from(
+					"The covariance matrix must be a square matrix of the same dimension as the vectors."
+				),
+			}
+		);
+		let cov: Vec<Vec<f64>> =
+			c.iter().map(|row| row.iter().map(|v| v.to_float()).collect()).collect();
+		for (i, row) in cov.iter().enumerate() {
+			for (j, v) in row.iter().enumerate().take(i) {
+				ensure!(
+					*v == cov[j][i],
+					Error::InvalidFunctionArguments {
+						name: String::from("vector::distance::mahalanobis"),
+						message: String::from(
+							"The covariance matrix must be symmetric positive-definite."
+						),
+					}
+				);
+			}
+		}
+		let mut l = vec![vec![0.0; n]; n];
+		for i in 0..n {
+			for j in 0..=i {
+				let s = (0..j).map(|k| l[i][k] * l[j][k]).sum::<f64>();
+				if i == j {
+					let d = cov[i][i] - s;
+					ensure!(
+						d > 0.0,
+						Error::InvalidFunctionArguments {
+							name: String::from("vector::distance::mahalanobis"),
+							message: String::from(
+								"The covariance matrix must be symmetric positive-definite."
+							),
+						}
+					);
+					l[i][j] = d.sqrt();
+				} else {
+					l[i][j] = (cov[i][j] - s) / l[j][j];
+				}
+			}
+		}
+		let mut y = vec![0.0; n];
+		for i in 0..n {
+			let s = (0..i).map(|k| l[i][k] * y[k]).sum::<f64>();
+			y[i] = (a[i].to_float() - b[i].to_float() - s) / l[i][i];
+		}
+		Ok(y.iter().map(|v| v * v).sum::<f64>().sqrt().into())
 	}
 
 	pub fn manhattan((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
@@ -117,10 +175,12 @@ pub mod distance {
 
 pub mod similarity {
 
-	use anyhow::Result;
+	use std::collections::HashSet;
+
+	use anyhow::{Result, ensure};
 
 	use crate::err::Error;
-	use crate::fnc::util::math::vector::{CosineSimilarity, JaccardSimilarity, PearsonSimilarity};
+	use crate::fnc::util::math::vector::{CosineSimilarity, check_same_dimension, deviation};
 	use crate::val::{Number, Value};
 
 	pub fn cosine((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
@@ -128,17 +188,71 @@ pub mod similarity {
 	}
 
 	pub fn jaccard((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
-		Ok(a.jaccard_similarity(&b)?.into())
+		let a: HashSet<&Number> = HashSet::from_iter(a.iter());
+		let b: HashSet<&Number> = HashSet::from_iter(b.iter());
+		let union = a.union(&b).count();
+		if union == 0 {
+			return Ok(1.0.into());
+		}
+		let intersection = a.intersection(&b).count();
+		Ok((intersection as f64 / union as f64).into())
 	}
 
 	pub fn pearson((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
-		Ok(a.pearson_similarity(&b)?.into())
+		check_same_dimension("vector::similarity::pearson", &a, &b)?;
+		let a: Vec<f64> = a.iter().map(|n| n.to_float()).collect();
+		let b: Vec<f64> = b.iter().map(|n| n.to_float()).collect();
+		Ok(correlate("vector::similarity::pearson", &a, &b)?.into())
 	}
 
-	pub fn spearman((_, _): (Vec<Number>, Vec<Number>)) -> Result<Value> {
-		Err(anyhow::Error::new(Error::Unimplemented(
-			"vector::similarity::spearman() function".to_string(),
-		)))
+	pub fn spearman((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
+		check_same_dimension("vector::similarity::spearman", &a, &b)?;
+		let a = rank(&a);
+		let b = rank(&b);
+		Ok(correlate("vector::similarity::spearman", &a, &b)?.into())
+	}
+
+	fn correlate(fnc: &str, a: &[f64], b: &[f64]) -> Result<f64> {
+		ensure!(
+			a.len() >= 2,
+			Error::InvalidFunctionArguments {
+				name: String::from(fnc),
+				message: String::from("The two vectors must have a dimension of at least 2."),
+			}
+		);
+		let m1 = a.iter().sum::<f64>() / a.len() as f64;
+		let m2 = b.iter().sum::<f64>() / b.len() as f64;
+		let std_dev1 = deviation(a, m1, false);
+		let std_dev2 = deviation(b, m2, false);
+		ensure!(
+			std_dev1 != 0.0 && std_dev2 != 0.0,
+			Error::InvalidFunctionArguments {
+				name: String::from(fnc),
+				message: String::from("The two vectors must not have a variance of zero."),
+			}
+		);
+		let covar: f64 = a.iter().zip(b.iter()).map(|(x, y)| (x - m1) * (y - m2)).sum();
+		let covar = covar / a.len() as f64;
+		Ok(covar / (std_dev1 * std_dev2))
+	}
+
+	fn rank(v: &[Number]) -> Vec<f64> {
+		let mut idx: Vec<usize> = (0..v.len()).collect();
+		idx.sort_by(|&a, &b| v[a].cmp(&v[b]));
+		let mut ranks = vec![0.0; v.len()];
+		let mut i = 0;
+		while i < idx.len() {
+			let mut j = i;
+			while j + 1 < idx.len() && v[idx[j + 1]] == v[idx[i]] {
+				j += 1;
+			}
+			let rank = (i + j) as f64 / 2.0 + 1.0;
+			for &k in &idx[i..=j] {
+				ranks[k] = rank;
+			}
+			i = j + 1;
+		}
+		ranks
 	}
 }
 

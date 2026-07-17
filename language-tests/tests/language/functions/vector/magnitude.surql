@@ -18,6 +18,9 @@ value = "1f"
 value = "1f"
 
 [[test.results]]
+value = "0f"
+
+[[test.results]]
 error = "Incorrect arguments for function vector::magnitude(). Argument 1 was the wrong type. Expected `array<number>` but found `'not a vector'`"
 
 [[test.results]]
@@ -28,5 +31,6 @@ vector::magnitude([-3, 4]);
 vector::magnitude([0, 0, 0]);
 vector::magnitude([1]);
 vector::magnitude([0.5, 0.5, 0.5, 0.5]);
+vector::magnitude([]);
 vector::magnitude("not a vector");
 vector::magnitude(NONE);

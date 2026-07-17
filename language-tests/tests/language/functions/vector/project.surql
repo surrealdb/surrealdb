@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "Tests vector projection of one vector onto another, including projection onto a zero vector, empty vectors, and dimension mismatch errors"
+reason = "Tests vector projection of one vector onto another, including zero-magnitude errors, empty vectors, and dimension mismatch errors"
 
 [[test.results]]
 value = "[1f, 0f, 0f]"
@@ -12,10 +12,10 @@ value = "[3f, 0f]"
 value = "[2f, 0f]"
 
 [[test.results]]
-value = "[NaN, NaN]"
+error = "Incorrect arguments for function vector::project(). The second vector must not have a magnitude of zero."
 
 [[test.results]]
-value = "[]"
+error = "Incorrect arguments for function vector::project(). The second vector must not have a magnitude of zero."
 
 [[test.results]]
 error = "Incorrect arguments for function vector::project(). The two vectors must be of the same dimension."

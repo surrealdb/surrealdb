@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "Tests element-wise vector division, including division by zero producing NaN, empty vectors, and dimension mismatch errors"
+reason = "Tests element-wise vector division, including division by zero errors, empty vectors, and dimension mismatch errors"
 
 [[test.results]]
 value = "[2, 2]"
@@ -9,10 +9,10 @@ value = "[2, 2]"
 value = "[0.5f, 0.5f]"
 
 [[test.results]]
-value = "[NaN, 1]"
+error = "Incorrect arguments for function vector::divide(). The second vector must not contain a value of zero."
 
 [[test.results]]
-value = "[NaN, NaN]"
+error = "Incorrect arguments for function vector::divide(). The second vector must not contain a value of zero."
 
 [[test.results]]
 value = "[]"

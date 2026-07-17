@@ -3349,12 +3349,22 @@ async fn function_vector_magnitude() -> Result<()> {
 async fn function_vector_normalize() -> Result<()> {
 	test_queries(
 		r#"
-		RETURN vector::normalize([]);
 		RETURN vector::normalize([1]);
 		RETURN vector::normalize([5]);
 		RETURN vector::normalize([4,3]);
 	"#,
-		&["[]", "[1f]", "[1f]", "[0.8,0.6]"],
+		&["[1f]", "[1f]", "[0.8,0.6]"],
+	)
+	.await?;
+	check_test_is_error(
+		r#"
+		RETURN vector::normalize([]);
+		RETURN vector::normalize([0, 0]);
+	"#,
+		&[
+			"Incorrect arguments for function vector::normalize(). The vector must not have a magnitude of zero.",
+			"Incorrect arguments for function vector::normalize(). The vector must not have a magnitude of zero.",
+		],
 	)
 	.await?;
 	Ok(())
@@ -3417,20 +3427,23 @@ async fn function_vector_project() -> Result<()> {
 async fn function_vector_divide() -> Result<()> {
 	test_queries(
 		r#"
-		RETURN vector::divide([10, NaN, 20, 30, 0], [0, 1, 2, 0, 4]);
-		RETURN vector::divide([10, -20, 30, 0], [0, -1, 2, -3]);
+		RETURN vector::divide([10, -20, 30, 0], [5, -1, 2, -3]);
 	"#,
-		&["[NaN, NaN, 10, NaN, 0]", "[NaN, 20, 15, 0]"],
+		&["[2, 20, 15, 0]"],
 	)
 	.await?;
 	check_test_is_error(
 		r#"
 		RETURN vector::divide([1, 2, 3], [4, 5]);
 		RETURN vector::divide([1, 2], [4, 5, 5]);
+		RETURN vector::divide([10, NaN, 20, 30, 0], [0, 1, 2, 0, 4]);
+		RETURN vector::divide([10, -20, 30, 0], [0, -1, 2, -3]);
 	"#,
 		&[
 			"Incorrect arguments for function vector::divide(). The two vectors must be of the same dimension.",
-			"Incorrect arguments for function vector::divide(). The two vectors must be of the same dimension."
+			"Incorrect arguments for function vector::divide(). The two vectors must be of the same dimension.",
+			"Incorrect arguments for function vector::divide(). The second vector must not contain a value of zero.",
+			"Incorrect arguments for function vector::divide(). The second vector must not contain a value of zero."
 		],
 	)
 		.await?;
