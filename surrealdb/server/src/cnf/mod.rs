@@ -78,6 +78,20 @@ pub static HTTP_MAX_ATTACHED_SESSIONS: LazyLock<usize> =
 pub static WEBSOCKET_MAX_ATTACHED_SESSIONS: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_WEBSOCKET_MAX_ATTACHED_SESSIONS", usize, 256);
 
+/// The maximum number of concurrently open client-managed transactions on a
+/// WebSocket connection's implicit default session (default: 64). Bounds
+/// resource use by a client that opens transactions without committing or
+/// cancelling them.
+pub static MAX_TRANSACTIONS_PER_CONNECTION: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_MAX_TRANSACTIONS_PER_CONNECTION", usize, 64);
+
+/// The maximum number of concurrently open client-managed transactions within a
+/// single attached session on a WebSocket connection (default: 64). Session
+/// transactions are counted per session and do not count towards the
+/// connection limit.
+pub static MAX_TRANSACTIONS_PER_SESSION: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_MAX_TRANSACTIONS_PER_SESSION", usize, 64);
+
 /// The maximum HTTP body size of the HTTP /key endpoints (default: 16 KiB)
 pub static HTTP_MAX_KEY_BODY_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_HTTP_MAX_KEY_BODY_SIZE", usize, 16 << 10);
