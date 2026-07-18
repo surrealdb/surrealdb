@@ -309,10 +309,13 @@ impl NsDbTbMutCtx {
 					}
 				}
 			};
-			// Fetch the live queries
+			// Fetch the live queries. Keyed on the table's committed
+			// `cache_lives_ts` (bumped transactionally by LIVE/KILL), exactly
+			// like fields/events/indexes above — so the cache key travels in the
+			// same snapshot as the read and cannot be poisoned by a concurrent
+			// writer holding a pre-commit snapshot.
 			let lives = async || -> Result<_> {
-				let lvv = cache.get_live_queries_version(ns, db, table)?;
-				let key = cache::ds::Lookup::Lvs(ns, db, table, lvv);
+				let key = cache::ds::Lookup::Lvs(ns, db, table, tb.cache_lives_ts);
 				match cache.get(&key) {
 					Some(val) => Ok(val.try_into_lvs()?),
 					None => {

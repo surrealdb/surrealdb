@@ -3,7 +3,6 @@ use uuid::Uuid;
 
 use super::key::Key;
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::val::TableName;
 
 #[derive(Hash, Eq, PartialEq)]
 pub(crate) enum Lookup<'a> {
@@ -20,8 +19,6 @@ pub(crate) enum Lookup<'a> {
 	Ixs(NamespaceId, DatabaseId, &'a str, Uuid),
 	/// A cache key for live queries (on a table)
 	Lvs(NamespaceId, DatabaseId, &'a str, Uuid),
-	/// A cache key for live queries version (on a table)
-	Lvv(NamespaceId, DatabaseId, &'a TableName),
 }
 
 impl Equivalent<Key> for Lookup<'_> {
@@ -35,7 +32,6 @@ impl Equivalent<Key> for Lookup<'_> {
 			(Self::Fts(la, lb, lc, ld), Key::Fts(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
 			(Self::Ixs(la, lb, lc, ld), Key::Ixs(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
 			(Self::Lvs(la, lb, lc, ld), Key::Lvs(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
-			(Self::Lvv(la, lb, lc), Key::Lvv(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			_ => false,
 		}
 	}

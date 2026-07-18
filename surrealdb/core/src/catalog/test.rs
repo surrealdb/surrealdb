@@ -64,9 +64,10 @@ use crate::val::{Datetime, TableName, Value};
 	cache_events_ts: Uuid::default(),
 	cache_tables_ts: Uuid::default(),
 	cache_indexes_ts: Uuid::default(),
+	cache_lives_ts: Uuid::default(),
 	graphql_alias: None,
 	graphql_deprecated: None,
-}, 151)]
+}, 167)]
 #[case::subscription(SubscriptionDefinition {
 	id: Uuid::default(),
 	node: Uuid::default(),

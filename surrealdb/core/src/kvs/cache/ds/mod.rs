@@ -3,17 +3,12 @@ mod key;
 mod lookup;
 mod weight;
 
-use anyhow::Result;
 #[cfg(feature = "jwks")]
 pub(crate) use entry::CachedJwks;
 pub(crate) use entry::Entry;
 pub(crate) use lookup::Lookup;
 use quick_cache::sync::DefaultLifecycle;
 use quick_cache::{DefaultHashBuilder, OptionsBuilder};
-use uuid::Uuid;
-
-use crate::catalog::{DatabaseId, NamespaceId};
-use crate::val::TableName;
 
 /// Concurrent cache for values that should be shared across transactions on
 /// this datastore (schema slices, live-query versions, JWKS payloads, etc.).
@@ -68,31 +63,5 @@ impl DatastoreCache {
 	/// Clear all items from the datastore cache
 	pub(crate) fn clear(&self) {
 		self.cache.clear();
-	}
-
-	/// Set the latest libe query version for a table
-	pub(crate) fn set_live_queries_version(&self, ns: NamespaceId, db: DatabaseId, tb: &TableName) {
-		let key = Lookup::Lvv(ns, db, tb);
-		self.insert(key, Entry::Lvv(Uuid::now_v7()));
-	}
-
-	/// Get the latest live query version for a table
-	pub fn get_live_queries_version(
-		&self,
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &TableName,
-	) -> Result<Uuid> {
-		let key = Lookup::Lvv(ns, db, tb);
-		let version = match self.get(&key) {
-			Some(val) => val.try_info_lvv()?,
-			None => {
-				let version = Uuid::now_v7();
-				let val = Entry::Lvv(version);
-				self.insert(key, val);
-				version
-			}
-		};
-		Ok(version)
 	}
 }

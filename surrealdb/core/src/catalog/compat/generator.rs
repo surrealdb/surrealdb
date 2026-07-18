@@ -1221,5 +1221,5 @@ fn test_v3_3_0_remains_unchanged() {
 	let v3_3_0 = include_bytes!("v3_3_0.rs");
 	let hash = Sha256::digest(v3_3_0);
 	let hash_str = hex::encode(hash);
-	assert_eq!(hash_str, "eb621e435db73117b2de45b6c5f2bd3909135dc75cda7cb36b4b36694802818d");
+	assert_eq!(hash_str, "5fdd379450602822feaeffd8e29d0ec2dac82f170ee6bf86680776bc5d3b3b9f");
 }

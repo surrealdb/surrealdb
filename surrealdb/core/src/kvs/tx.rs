@@ -2202,6 +2202,45 @@ impl Transaction {
 	// Cache functions
 	// --------------------------------------------------
 
+	/// Bump the given table's `cache_lives_ts`, committing the change with this
+	/// transaction. The live-query cache keys on this committed timestamp (see
+	/// [`crate::catalog::TableDefinition::cache_lives_ts`]), so callers that
+	/// change the set of live queries on a table (LIVE / KILL) must call this in
+	/// the same transaction as the live-query row write. The table's committed
+	/// IDs are taken from `tb`, so no namespace/database name lookup is needed.
+	pub(crate) async fn bump_table_lives_cache(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<()> {
+		let Some(existing) = self.get_tb(ns, db, tb, None).await? else {
+			// The table is gone (e.g. removed in the same batch); nothing to do.
+			return Ok(());
+		};
+		let mut updated = (*existing).clone();
+		updated.cache_lives_ts = uuid::Uuid::now_v7();
+		let key = crate::key::database::tb::TableKey {
+			prefix: crate::key::database::all::DatabaseRoot {
+				ns: updated.namespace_id,
+				db: updated.database_id,
+			},
+			tb: Cow::Borrowed(&updated.name),
+		};
+		self.set_key(&key, &updated).await?;
+		// Keep the transaction-local by-id table cache consistent with the
+		// write, so a re-read within this transaction sees the bumped value.
+		let cached = std::sync::Arc::new(updated);
+		let lookup = cache::tx::Lookup::Tb(cached.namespace_id, cached.database_id, &cached.name);
+		self.cache.insert(
+			lookup,
+			cache::tx::Entry::Any(
+				std::sync::Arc::clone(&cached) as std::sync::Arc<dyn Any + Send + Sync>
+			),
+		);
+		Ok(())
+	}
+
 	/// Clears all keys from the transaction cache.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub fn clear_cache(&self) {

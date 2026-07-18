@@ -60,7 +60,7 @@ impl revision::WalkRevisioned for TableId {
 	}
 }
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct TableDefinition {
 	pub(crate) namespace_id: NamespaceId,
@@ -83,6 +83,16 @@ pub struct TableDefinition {
 	pub(crate) cache_tables_ts: Uuid,
 	/// The last time that a DEFINE INDEX was added to this table
 	pub(crate) cache_indexes_ts: Uuid,
+
+	/// The last time the set of LIVE queries on this table changed (a LIVE was
+	/// registered or a KILL removed one). Bumped transactionally with the
+	/// live-query row write, so the live-query cache keys on committed state —
+	/// exactly like `cache_fields_ts` etc. A free-floating in-memory version
+	/// (bumped before commit) allowed a concurrent writer with a pre-commit
+	/// snapshot to poison the cache with a stale subscriber list. Old tables
+	/// default to the nil UUID; the first LIVE/KILL bumps it to a real value.
+	#[revision(start = 3)]
+	pub(crate) cache_lives_ts: Uuid,
 
 	/// Optional alias used as the GraphQL type / query / mutation prefix for
 	/// this table. See GitHub issue #4537. `Option<String>::default()` is
@@ -122,6 +132,7 @@ impl TableDefinition {
 			cache_events_ts: now,
 			cache_tables_ts: now,
 			cache_indexes_ts: now,
+			cache_lives_ts: now,
 			graphql_alias: None,
 			graphql_deprecated: None,
 		}

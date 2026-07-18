@@ -5,7 +5,6 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 #[cfg(feature = "jwks")]
 use jsonwebtoken::jwk::JwkSet;
-use uuid::Uuid;
 
 use crate::catalog::{self};
 
@@ -32,8 +31,6 @@ pub(crate) enum Entry {
 	Ixs(Arc<[catalog::IndexDefinition]>),
 	/// A slice of LiveStatement specified on a table.
 	Lvs(Arc<[catalog::SubscriptionDefinition]>),
-	/// An Uuid.
-	Lvv(Uuid),
 }
 
 impl Entry {
@@ -86,15 +83,6 @@ impl Entry {
 		match self {
 			Entry::Lvs(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Lvs"),
-		}
-	}
-
-	/// Converts this cache entry into a uuid.
-	/// This panics if called on a cache entry that is not an [`Entry::Lvv`].
-	pub(crate) fn try_info_lvv(self) -> Result<Uuid> {
-		match self {
-			Entry::Lvv(v) => Ok(v),
-			_ => fail!("Unable to convert type into Entry::Lvv"),
 		}
 	}
 }
