@@ -1630,20 +1630,18 @@ fn parse_with_capabilities_renders_errors_like_surrealql() {
 }
 
 #[test]
-fn parse_with_capabilities_enforces_the_experimental_gate() {
+fn parse_with_capabilities_available_without_experimental_flag() {
 	use surrealdb_cnf::CommonConfig;
 
 	use crate::dbs::Capabilities;
-	let error = crate::gql::parse_with_capabilities(
-		"MATCH (n:person) RETURN n",
+	// GQL is on by default: parsing lowers successfully without any experimental
+	// capability being enabled.
+	crate::gql::parse_with_capabilities(
+		"MATCH (n:person) RETURN n AS n",
 		&Capabilities::all(),
 		&CommonConfig::default(),
 	)
-	.expect_err("should fail");
-	assert!(
-		format!("{error}").contains("Experimental capability `gql` is not enabled"),
-		"unexpected error: {error}"
-	);
+	.expect("GQL should lower without an experimental capability");
 }
 
 #[test]

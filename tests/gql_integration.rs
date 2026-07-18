@@ -40,11 +40,11 @@ mod gql_integration {
 	/// ORDER BY references the items by that same text.
 	const MATCH_QUERY: &str = "MATCH (a:person)-[k:knows]->(b:person) WHERE k.since > 2020 RETURN a.name, b.name ORDER BY a.name";
 
-	/// Start a server with the GQL experimental capability enabled,
-	/// plus any extra CLI flags.
+	/// Start a server for GQL tests. GQL is available by default (no longer an
+	/// experimental capability), so this passes only the caller's extra flags.
 	async fn start_gql_server(extra_args: &str) -> Result<(String, common::Child), Box<dyn Error>> {
 		common::start_server(StartServerArguments {
-			args: format!("--allow-experimental gql {extra_args}"),
+			args: extra_args.to_string(),
 			..Default::default()
 		})
 		.await
@@ -168,23 +168,21 @@ mod gql_integration {
 	}
 
 	#[test(tokio::test)]
-	async fn gql_requires_experimental_capability() -> Result<(), Box<dyn Error>> {
-		// `--allow-all` deliberately does NOT enable experimental
-		// capabilities, so even a fully permissive server must reject GQL
-		// until `--allow-experimental gql` is passed explicitly.
-		let (addr, _server) = common::start_server(StartServerArguments {
-			args: "--allow-all".to_string(),
-			..Default::default()
-		})
-		.await
-		.unwrap();
+	async fn gql_available_without_experimental_flag() -> Result<(), Box<dyn Error>> {
+		// GQL is on by default: a plain server (no `--allow-experimental`)
+		// serves the `/gql` endpoint. It must NOT reject with the old
+		// experimental-gate error.
+		let (addr, _server) = common::start_server(StartServerArguments::default()).await.unwrap();
 		let url = &format!("http://{addr}/gql");
 		let client = http_client(&Ulid::new().to_string(), &Ulid::new().to_string())?;
 
 		let res = client.post(url).basic_auth(USER, Some(PASS)).body(MATCH_QUERY).send().await?;
-		assert_eq!(res.status(), 403);
+		assert_ne!(res.status(), 403, "GQL should not be gated behind an experimental flag");
 		let body = res.text().await?;
-		assert!(body.contains("Experimental capability `gql` is not enabled"), "body: {body}");
+		assert!(
+			!body.contains("Experimental capability `gql` is not enabled"),
+			"GQL was still gated: {body}"
+		);
 
 		Ok(())
 	}
@@ -398,16 +396,10 @@ mod gql_integration {
 	}
 
 	#[test(tokio::test)]
-	async fn gql_rpc_requires_experimental_capability() -> Result<(), Box<dyn Error>> {
-		// `--allow-all` deliberately does NOT enable experimental
-		// capabilities, so the `gql` RPC method must surface the
-		// not-allowed error class, distinguishable from a parse failure.
-		let (addr, _server) = common::start_server(StartServerArguments {
-			args: "--allow-all".to_string(),
-			..Default::default()
-		})
-		.await
-		.unwrap();
+	async fn gql_rpc_available_without_experimental_flag() -> Result<(), Box<dyn Error>> {
+		// GQL is on by default: the `gql` RPC method must NOT surface the old
+		// not-allowed experimental-gate error on a plain server.
+		let (addr, _server) = common::start_server(StartServerArguments::default()).await.unwrap();
 		// Connect to WebSocket
 		let mut socket = Socket::connect(&addr, Some(Format::Json), Format::Json).await?;
 		// Authenticate the connection
@@ -416,18 +408,19 @@ mod gql_integration {
 		let ns = Ulid::new().to_string();
 		let db = Ulid::new().to_string();
 		socket.send_message_use(Some(&ns), Some(&db)).await?;
-		// A valid GQL query must fail with the not-allowed error kind
+		// A valid GQL query must not be refused as an experimental capability.
 		let res = socket.send_request("gql", json!([MATCH_QUERY])).await?;
 		let err = &res["error"];
-		assert!(err.is_object(), "result: {res:?}");
-		assert_eq!(err["kind"], "NotAllowed", "error: {err}");
-		assert!(
-			err["message"]
-				.as_str()
-				.unwrap_or_default()
-				.contains("Experimental capability `gql` is not enabled"),
-			"error: {err}"
-		);
+		if err.is_object() {
+			assert_ne!(err["kind"], "NotAllowed", "GQL RPC was gated: {err}");
+			assert!(
+				!err["message"]
+					.as_str()
+					.unwrap_or_default()
+					.contains("Experimental capability `gql` is not enabled"),
+				"GQL RPC was still gated: {err}"
+			);
+		}
 
 		Ok(())
 	}

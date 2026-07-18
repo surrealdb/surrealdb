@@ -33,13 +33,12 @@ mod lower;
 pub mod parser;
 pub mod token;
 
-use anyhow::{Result, bail, ensure};
+use anyhow::{Result, ensure};
 use reblessive::Stack;
 use surrealdb_cnf::CommonConfig;
 
 pub use self::lower::PreparedGqlQuery;
 use crate::dbs::Capabilities;
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
 use crate::syn::error::{SyntaxError, syntax_error};
 use crate::syn::token::Span;
@@ -113,13 +112,10 @@ pub fn settings_from_capabilities_config(
 
 /// Parses a GQL query and lowers it into a [`PreparedGqlQuery`] (a
 /// [`MatchPlan`](crate::expr::match_plan::MatchPlan) embedded in a logical
-/// plan), enforcing the experimental capability gate.
+/// plan).
 ///
-/// The whole language is gated behind the `gql` experimental capability,
-/// so unlike [`crate::syn::parse_with_capabilities`] (which only derives
-/// syntax gating from the capabilities) this enforces the gate itself: every
-/// caller routing untrusted input through the capabilities-aware entry point
-/// is covered, whether or not it adds its own check.
+/// Like [`crate::syn::parse_with_capabilities`], this derives syntax gating
+/// from the capabilities.
 ///
 /// During parsing the nesting depth of expressions counts against the
 /// configured limit; exceeding it is a parse error rather than unbounded
@@ -133,13 +129,6 @@ pub fn parse_with_capabilities(
 ) -> Result<PreparedGqlQuery> {
 	trace!(target: TARGET, "Parsing GQL query");
 
-	if !capabilities.allows_experimental(&ExperimentalTarget::Gql) {
-		// Deliberately matches the wording of the existing experimental-gate
-		// errors (`surrealism`, `files`) rather than naming the server's
-		// `--allow-experimental` flag: core is also used embedded, where the
-		// capability is enabled programmatically and no CLI flag exists.
-		bail!("Experimental capability `gql` is not enabled");
-	}
 	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
 	parse_to_plan_with_settings(input, settings_from_capabilities_config(capabilities, config))
 		.map_err(|e| e.render_on(input))

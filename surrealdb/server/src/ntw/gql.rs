@@ -1,9 +1,8 @@
-//! Experimental ISO GQL (ISO/IEC 39075) query endpoint. Accepts a raw GQL
-//! query via `POST /gql` and executes it through the same session, capability,
-//! and output-negotiation plumbing as the `/sql` endpoint. The language itself
-//! is gated by the `gql` experimental capability at the datastore layer,
-//! so requests fail with a clear error unless the server is started with
-//! `--allow-experimental gql`.
+//! ISO GQL (ISO/IEC 39075) query endpoint. Accepts a raw GQL query via
+//! `POST /gql` and executes it through the same session, capability, and
+//! output-negotiation plumbing as the `/sql` endpoint. Enabled by default,
+//! gated only by the `RouteTarget::Gql` route capability like the other
+//! query endpoints.
 
 use std::collections::BTreeMap;
 

@@ -12,8 +12,8 @@
 //! 3. the dedicated eval subject gate ([`Capabilities::allows_eval_query`]), which defaults to
 //!    denied for every subject.
 //!
-//! `eval::gql` additionally inherits the `gql` experimental gate, which
-//! [`crate::gql::parse_with_capabilities`] enforces itself.
+//! `eval::gql` routes through [`crate::gql::parse_with_capabilities`], which
+//! derives syntax gating from the live capabilities.
 //!
 //! ## Subject derivation
 //!
@@ -114,8 +114,8 @@ pub(crate) fn prepare(
 		bail!(Error::FunctionNotAllowed(name.to_string()));
 	}
 
-	// --- Parse with the live capabilities (so the `gql` experimental gate
-	// and any SurrealQL experimental gates are honoured) and default parser
+	// --- Parse with the live capabilities (so any SurrealQL experimental
+	// gates are honoured) and default parser
 	// limits (matching the embedded-scripting `surrealdb.query()` bridge). Both
 	// dialects are normalised to a `LogicalPlan`: SurrealQL parses to a `sql::Ast`
 	// (converted via `From`); GQL lowers directly to a `PreparedGqlQuery`

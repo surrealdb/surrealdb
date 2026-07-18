@@ -247,10 +247,11 @@ async fn stdio_call_graphql_returns_envelope() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn stdio_call_gql_reports_disabled_capability() {
-	// The default in-memory datastore does not enable the experimental
-	// `gql` capability. The `gql` tool must still be registered and return
-	// a clear in-band error rather than being absent from the tool surface.
+async fn stdio_call_gql_runs_without_experimental_capability() {
+	// GQL is enabled by default: the `gql` tool is registered and executes the
+	// query in-band, rather than being absent from the tool surface or refused
+	// as an experimental capability. (This query is a GQL parse error, which is
+	// itself an acceptable in-band result — the point is it is not gated.)
 	let (client, server) = spawn_server().await;
 
 	let args = json!({ "query": "MATCH (n) RETURN n" }).as_object().cloned().unwrap();
@@ -260,8 +261,8 @@ async fn stdio_call_gql_reports_disabled_capability() {
 		.expect("gql tool call");
 	let text = tool_text(&result);
 	assert!(
-		text.contains("gql") && text.contains("not enabled"),
-		"expected an experimental-capability error: {text}"
+		!text.contains("Experimental capability"),
+		"gql must no longer be gated as an experimental capability: {text}"
 	);
 
 	client.cancel().await.expect("client cancel");

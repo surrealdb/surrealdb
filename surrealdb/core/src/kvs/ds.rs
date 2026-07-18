@@ -3595,21 +3595,9 @@ impl Datastore {
 		self.process(ast, sess, vars).await
 	}
 
-	/// Parse and lower a GQL query into a [`PreparedGqlQuery`], checking that
-	/// the `gql` experimental capability is enabled.
+	/// Parse and lower a GQL query into a [`PreparedGqlQuery`].
 	#[cfg(feature = "gql")]
 	pub(crate) fn parse_gql(&self, txt: &str) -> std::result::Result<PreparedGqlQuery, TypesError> {
-		// Check if the experimental GQL capability is enabled. The
-		// wording deliberately matches the existing experimental-gate errors
-		// (`surrealism`, `files`) rather than naming the server's
-		// `--allow-experimental` flag: core is also used embedded, where the
-		// capability is enabled programmatically and no CLI flag exists.
-		if !self.capabilities.load().allows_experimental(&ExperimentalTarget::Gql) {
-			return Err(TypesError::not_allowed(
-				"Experimental capability `gql` is not enabled".to_string(),
-				None,
-			));
-		}
 		// Parse and lower the GQL query text
 		crate::gql::parse_with_capabilities(txt, &self.capabilities.load(), &self.config)
 			.map_err(|e| TypesError::validation(e.to_string(), None))
@@ -4665,14 +4653,17 @@ mod test {
 
 	#[cfg(feature = "gql")]
 	#[tokio::test]
-	async fn execute_gql_requires_experimental_capability() -> Result<()> {
+	async fn execute_gql_available_without_experimental_capability() -> Result<()> {
 		let ds = Datastore::new("memory").await?;
 		let ses = Session::owner().with_ns("test").with_db("test");
-		let err = ds.execute_gql("MATCH (n:person) RETURN n", &ses, None).await.unwrap_err();
-		assert!(
-			err.to_string().contains("Experimental capability `gql` is not enabled"),
-			"unexpected error: {err}"
-		);
+		// GQL is on by default: it must not be refused as an experimental
+		// capability (any other error — e.g. missing namespace — is irrelevant).
+		if let Err(err) = ds.execute_gql("MATCH (n:person) RETURN n", &ses, None).await {
+			assert!(
+				!err.to_string().contains("Experimental capability `gql` is not enabled"),
+				"GQL was still gated: {err}"
+			);
+		}
 		Ok(())
 	}
 
@@ -4703,35 +4694,35 @@ mod test {
 	}
 
 	/// `set_capabilities` must take effect on an already-built datastore without
-	/// a rebuild: the `gql` experimental gate flips from denied to allowed after
-	/// a live swap, proving the executor observes the new `ArcSwap` snapshot.
-	#[cfg(feature = "gql")]
+	/// a rebuild: a capability-gated operation (scripting) flips from denied to
+	/// allowed after a live swap, proving the executor observes the new
+	/// `ArcSwap` snapshot.
+	#[cfg(feature = "scripting")]
 	#[tokio::test]
 	async fn set_capabilities_swaps_live() -> Result<()> {
-		use crate::dbs::capabilities::Targets;
 		let ds = Datastore::new("memory").await?;
 		let ses = Session::owner().with_ns("test").with_db("test");
 		let txn = ds.transaction(Write).await?;
 		txn.ensure_ns_db(None, "test", "test").await?;
 		txn.commit().await?;
 
-		// Default capabilities: the `gql` experimental target is disabled.
-		let err = ds.execute_gql("MATCH (n:person) RETURN n", &ses, None).await.unwrap_err();
+		// Default capabilities: scripting functions are denied.
+		let mut before = ds.execute("RETURN function() { return 1; }", &ses, None).await?;
 		assert!(
-			err.to_string().contains("Experimental capability `gql` is not enabled"),
-			"unexpected error before swap: {err}"
+			before.remove(0).result.is_err(),
+			"scripting should be denied under default capabilities"
 		);
 
-		// Swap in capabilities that enable it — no rebuild, same datastore.
-		ds.set_capabilities(Capabilities::all().with_experimental(Targets::All))?;
+		// Swap in capabilities that enable scripting — no rebuild, same datastore.
+		ds.set_capabilities(Capabilities::all())?;
 
-		// The same datastore now permits `gql` (a malformed query fails to parse
-		// rather than being rejected for the capability), and a valid one runs.
-		let err = ds.execute_gql("MATCH RETURN", &ses, None).await.unwrap_err();
-		assert!(!err.to_string().contains("experimental"), "unexpected error after swap: {err}");
-		execute_all(&ds, &ses, "CREATE person:tobie SET name = 'Tobie';").await?;
-		let res = ds.execute_gql("MATCH (n:person) RETURN n.name AS name", &ses, None).await?;
-		assert_eq!(res.len(), 1);
+		// The same datastore now permits scripting, proving the executor
+		// observes the new `ArcSwap` snapshot.
+		let mut after = ds.execute("RETURN function() { return 1; }", &ses, None).await?;
+		assert!(
+			after.remove(0).result.is_ok(),
+			"scripting should be allowed after the capability swap"
+		);
 		Ok(())
 	}
 
