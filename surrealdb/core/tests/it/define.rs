@@ -11,7 +11,11 @@ use web_time::SystemTime;
 use crate::helpers::*;
 
 fn is_concurrent_index_status_retryable_conflict(error: &str) -> bool {
-	error.starts_with("Transaction conflict:")
+	// A write-conflict now surfaces as a typed `Error::Kvs(TransactionConflict)`
+	// ("There was a problem with the key-value store: Transaction conflict: …")
+	// rather than the bare "Transaction conflict: …" it used to, so match the
+	// conflict substring rather than a fixed prefix.
+	error.contains("Transaction conflict:")
 }
 
 #[tokio::test]
