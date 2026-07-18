@@ -58,7 +58,10 @@ on:
   workflow_dispatch:
     inputs:
       git-sha:
-        description: 'Commit SHA or branch/ref to (re)build (a branch resolves to its tip). Defaults to the dispatched branch tip. The artifact line/slug follows the DISPATCHED ref, so pass a commit or ref that belongs to the branch you dispatched against.'
+        # A branch/ref resolves to its tip. The artifact line/slug follows the
+        # DISPATCHED ref, so pass a commit or ref that belongs to the branch you
+        # dispatched against. Empty = the dispatched branch tip.
+        description: 'Commit or branch to (re)build (empty = branch tip)'
         required: false
         type: string
 

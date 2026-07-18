@@ -186,7 +186,7 @@ jobs:
       # private runner; region is the bucket's home region.
       - name: Upload to the rolling prefix
         env:
-          ROLLING_BUCKET: ${{ secrets.AWS_S3_GITHUB_ACTIONS_BUCKET_NAME }}
+          ROLLING_BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
           S3_PREFIX: ${{ inputs.s3-prefix }}
           AWS_REGION: us-east-1
         run: |
@@ -420,7 +420,7 @@ jobs:
       # share an object.
       - name: Write engine manifest
         env:
-          ROLLING_BUCKET: ${{ secrets.AWS_S3_GITHUB_ACTIONS_BUCKET_NAME }}
+          ROLLING_BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
           AWS_REGION: us-east-1
           BRANCH: ${{ inputs.branch }}
           BUILD_METADATA: ${{ inputs.build-metadata }}
@@ -468,7 +468,7 @@ jobs:
 
       - name: Delete rolling binaries from S3
         env:
-          ROLLING_BUCKET: ${{ secrets.AWS_S3_GITHUB_ACTIONS_BUCKET_NAME }}
+          ROLLING_BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
           AWS_REGION: us-east-1
           S3_PREFIX: ${{ inputs.s3-prefix }}
         run: |

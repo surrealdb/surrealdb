@@ -80,9 +80,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
 
-      - name: Install cargo-edit
-        run: cargo install cargo-edit
-
       - name: Cut release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

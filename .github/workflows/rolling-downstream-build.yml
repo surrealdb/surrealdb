@@ -64,11 +64,19 @@ on:
   workflow_dispatch:
     inputs:
       engine-git-sha:
-        description: 'Engine commit SHA or branch/ref to (re)build the downstream image for (a branch resolves to its tip). Defaults to the dispatched branch tip; the artifact line follows the DISPATCHED ref, so pass a commit or ref on the branch you dispatched against. Set on its own (no downstream-git-sha) to REPRODUCE the downstream commit recorded in that engine sha''s downstream.json.'
+        # See the workflow_dispatch behaviour notes above for the full pairing
+        # rules. A branch/ref resolves to its tip and the artifact line follows the
+        # DISPATCHED ref. Empty = the dispatched branch tip; set on its own (no
+        # downstream-git-sha) to REPRODUCE the downstream commit recorded in that
+        # engine sha's downstream.json.
+        description: 'Engine commit or branch to build against (empty = branch tip)'
         required: false
         type: string
       downstream-git-sha:
-        description: 'Downstream branch OR commit to build, overriding the pairing (a branch resolves to its tip). Empty uses the recorded pairing on a reproduce, else the matching downstream branch tip. Set this to pick the exact downstream commit a release ships.'
+        # Overrides the engine<->downstream pairing (see the notes above). A branch
+        # resolves to its tip. Empty uses the recorded pairing on a reproduce, else
+        # the matching downstream branch tip.
+        description: 'Downstream commit or branch to build (empty = default pairing)'
         required: false
         type: string
 
@@ -148,7 +156,7 @@ jobs:
       - name: Read recorded downstream commit
         id: read
         env:
-          ROLLING_BUCKET: ${{ secrets.AWS_S3_GITHUB_ACTIONS_BUCKET_NAME }}
+          ROLLING_BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
           AWS_REGION: us-east-1
           S3_PREFIX: ${{ needs.prepare.outputs.s3-prefix }}
           ENGINE_SHA: ${{ inputs.engine-git-sha }}

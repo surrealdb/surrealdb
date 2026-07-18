@@ -56,8 +56,12 @@ on:
       git-sha:
         required: false
         default: ''
+        # A branch (e.g. releases/3.2) resolves to its tip; a commit is used as-is.
+        # Empty depends on release-type: nightly defaults to the tip of main,
+        # versioned to the tip of the latest releases/* branch. The commit must
+        # have a completed rolling build.
         type: string
-        description: "Commit SHA or branch to release (must have a completed rolling build). A branch (e.g. releases/3.2) resolves to its tip; leave empty to default to the tip of the latest release branch."
+        description: "Commit or branch to release (empty: nightly=main, versioned=latest release branch)"
       publish:
         required: false
         type: boolean
@@ -67,12 +71,20 @@ on:
         required: false
         type: boolean
         default: false
-        description: "Allow re-releasing a version that was already published (clobbers its binaries, Docker tags and GitHub release). Ignored for nightly."
+        # Clobbers an existing version's binaries, Docker tags and GitHub release
+        # — needed both to intentionally re-release and to resume/repair a release
+        # that half-completed (promote already wrote artifacts, a later job
+        # failed). Ignored for nightly.
+        description: "Allow overwriting existing release artifacts"
       build-wait-minutes:
         required: false
         type: string
         default: '120'
-        description: "For a versioned (release-branch) release only: how many minutes to wait for an in-progress rolling build of the commit to finish before giving up. The build must be present (or complete within this window) or the release fails. Nightly never waits (it walks back to the newest already-built commit)."
+        # Versioned (release-branch) releases only: minutes to wait for an
+        # in-progress rolling build of the commit before failing. The build must be
+        # present or complete within this window. Nightly never waits (it walks
+        # back to the newest already-built commit).
+        description: "Minutes to wait for an in-progress build (versioned only)"
   # Two nightly channels, decoupled so a failure on one never blocks the other:
   #   00:00 UTC -> engine nightly (promotes the newest built main commit).
   #   00:30 UTC -> downstream nightly (mirrors the newest built downstream image).
@@ -235,7 +247,7 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           CHANNEL: ${{ steps.config.outputs.release-channel }}
-          ROLLING_BUCKET: ${{ secrets.AWS_S3_GITHUB_ACTIONS_BUCKET_NAME }}
+          ROLLING_BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
           AWS_REGION: us-east-1
           # Requested sides (before `resolve` refines downstream). The engine.json
           # + binaries checks below only matter when the engine side is released;
@@ -1149,7 +1161,7 @@ jobs:
         with:
           name: ${{ needs.prepare-vars.outputs.name }}
           source-name: ${{ needs.prepare-vars.outputs.source-name }}
-          rolling-bucket: ${{ secrets.AWS_S3_GITHUB_ACTIONS_BUCKET_NAME }}
+          rolling-bucket: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
           rolling-prefix: ${{ needs.prepare-vars.outputs.s3-prefix }}
           version: ${{ needs.prepare-vars.outputs.version }}
           pre-release: ${{ needs.prepare-vars.outputs.pre-release }}
@@ -1514,8 +1526,17 @@ jobs:
     # shipped successfully before we delete anything it supersedes. This is what
     # lets a later release of a side clean up artifacts an earlier partial release
     # deliberately left behind.
+    #
+    # prepare-vars MUST have succeeded: `publish` is emitted by its early
+    # "Determine configuration" step, so it is already 'true' even when a later
+    # prepare-vars step (e.g. "Locate rolling build") fails. Without the explicit
+    # result check this job would still run on a failed prepare-vars — with empty
+    # SLUG/RELEASED/RELEASE_ENGINE — and only avoid deleting anything by luck (an
+    # empty RELEASED makes the merge-base ancestry check fail for every entry).
+    # Gate on success so a failed release never reaches the prune logic at all.
     if: >-
-      ${{ always() && needs.prepare-vars.outputs.publish == 'true'
+      ${{ always() && needs.prepare-vars.result == 'success'
+      && needs.prepare-vars.outputs.publish == 'true'
       && (needs.prepare-vars.outputs.release-engine != 'true'
           || (needs.promote.result == 'success'
               && needs.mirror-docker.result == 'success'
@@ -1554,7 +1575,7 @@ jobs:
       - name: Prune superseded S3 artifacts
         id: prune-s3
         env:
-          ROLLING_BUCKET: ${{ secrets.AWS_S3_GITHUB_ACTIONS_BUCKET_NAME }}
+          ROLLING_BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
           AWS_REGION: us-east-1
         run: |
           set -euo pipefail

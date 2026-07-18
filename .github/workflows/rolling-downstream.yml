@@ -509,7 +509,7 @@ jobs:
 
       - name: Write downstream manifest
         env:
-          ROLLING_BUCKET: ${{ secrets.AWS_S3_GITHUB_ACTIONS_BUCKET_NAME }}
+          ROLLING_BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
           AWS_REGION: us-east-1
           S3_PREFIX: ${{ inputs.s3-prefix }}
           ENGINE_REF: ${{ inputs.engine-ref }}

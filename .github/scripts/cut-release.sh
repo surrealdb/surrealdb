@@ -73,17 +73,36 @@ git config user.email "github-actions[bot]@users.noreply.github.com"
 # The commit we cut from (main HEAD).
 BASE_SHA=$(git rev-parse HEAD)
 
-# Dynamically build the list of surrealdb-* packages (excludes surrealism-*).
-PACKAGES=$(cargo metadata --format-version 1 --no-deps | \
-	jq -r '.packages[].name' | \
-	grep '^surrealdb' | \
-	sed 's/^/--package /' | \
-	tr '\n' ' ')
-
 set_workspace_version() {
 	local new_version="$1"
-	# shellcheck disable=SC2086 # PACKAGES is an intentional list of --package args
-	cargo set-version $PACKAGES "${new_version}"
+
+	# The current on-disk workspace version. Both call sites run against a fresh
+	# checkout of BASE_SHA, so this is always main's X.Y.0-nightly.
+	local current_version
+	current_version=$(cargo metadata --format-version 1 --no-deps | \
+		jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
+	if [[ -z "$current_version" || "$current_version" == "null" ]]; then
+		echo "Error: could not determine the current workspace version"
+		exit 1
+	fi
+
+	# Rewrite the workspace version wherever it appears in the root manifest:
+	# [workspace.package].version and every surrealdb* entry in
+	# [workspace.dependencies] carry it verbatim, while the independently
+	# versioned crates (surrealism*, surrealml-*) use their own distinct version
+	# strings and are left untouched. A direct rewrite is used because it is
+	# direction-agnostic: a minor cut moves nightly -> beta, which is a semver
+	# "downgrade" (nightly sorts above beta) that version-bumping tools refuse to
+	# perform.
+	if [[ "$current_version" != "$new_version" ]]; then
+		perl -pi -e "s/\"\Q${current_version}\E\"/\"${new_version}\"/g" Cargo.toml
+		if grep -q "\"${current_version}\"" Cargo.toml; then
+			echo "Error: '${current_version}' still present in Cargo.toml after rewrite"
+			exit 1
+		fi
+	fi
+
+	# Sync the lockfile to the rewritten versions.
 	cargo update -p surrealdb -p surrealdb-core -p surrealdb-server
 }
 
