@@ -585,6 +585,19 @@ async fn parse_relate_expr(parser: &mut Parser<'_, '_>) -> ParseResult<NodeId<Ex
 			Ok(parser.push(expr))
 		}
 		BaseTokenKind::OpenParen => parser.parse_enter().await,
+		T![RETURN]
+		| T![SELECT]
+		| T![CREATE]
+		| T![UPSERT]
+		| T![UPDATE]
+		| T![DELETE]
+		| T![RELATE]
+		| T![DEFINE]
+		| T![ALTER]
+		| T![REMOVE]
+		| T![REBUILD]
+		| T![INFO]
+		| T![IF] => parser.parse_enter().await,
 		_ => {
 			let expr = parser.parse().await.map(Expr::RecordId)?;
 			Ok(parser.push(expr))
@@ -675,7 +688,7 @@ impl Parse for ast::Relate {
 			return Err(parser.unexpected("`<-`"));
 		}
 
-		let last = parser.parse_enter().await?;
+		let last = parse_relate_expr(parser).await?;
 
 		let (from, to) = if rightward {
 			(first, last)

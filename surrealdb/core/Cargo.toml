@@ -243,6 +243,8 @@ mimalloc = { workspace = true, optional = true }
 # DEVELOPMENT DEPENDENCIES
 [dev-dependencies]
 surrealdb-kvs = { workspace = true, features = ["test-inc-timestamp"] }
+ast = { workspace = true }
+parser = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio"] }
 env_logger.workspace = true
 flate2.workspace = true

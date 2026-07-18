@@ -60,6 +60,28 @@ fn ann_keywords_parse_as_identifiers() {
 }
 
 #[test]
+fn callable_keywords_parse_as_function_calls() {
+	for source in
+		["RETURN sleep(1ms);", "RETURN sleep(1ms, 1ms);", "RETURN count(1);", "RETURN not(true);"]
+	{
+		assert_parses(source);
+	}
+}
+
+#[test]
+fn keyword_record_ids_parse_as_relate_targets() {
+	for source in [
+		"RELATE a:1->edge->sleep:b;",
+		"RELATE sleep:a->sleep->sleep:b;",
+		"RELATE sleep:b<-edge<-a:1;",
+		"RELATE a:1->edge->(SELECT * FROM b);",
+		"RELATE a:1->edge->SELECT * FROM b;",
+	] {
+		assert_parses(source);
+	}
+}
+
+#[test]
 fn ann_keywords_keep_diskann_index_syntax() {
 	assert_parses(
 		"DEFINE INDEX pts_embedding_diskann ON pts FIELDS embedding DISKANN DIMENSION 4 DEGREE 16 L_BUILD 64 ALPHA 1.2 TYPE F32 DIST EUCLIDEAN;",

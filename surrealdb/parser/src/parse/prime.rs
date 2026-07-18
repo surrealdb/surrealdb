@@ -689,8 +689,15 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 			Ok(Expr::Break(parser.push(peek.span)))
 		}
 		T![SLEEP] => {
-			let _ = parser.next();
-			Ok(Expr::Sleep(parser.parse_sync()?))
+			if let Some(peek1) = parser.peek1()?
+				&& let BaseTokenKind::OpenParen = peek1.token
+			{
+				let path = parser.parse_sync()?;
+				Ok(Expr::Path(path))
+			} else {
+				let _ = parser.next();
+				Ok(Expr::Sleep(parser.parse_sync()?))
+			}
 		}
 		T![DELETE] => Ok(Expr::Delete(parser.parse().await?)),
 		T![CREATE] => Ok(Expr::Create(parser.parse().await?)),

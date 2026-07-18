@@ -680,7 +680,7 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod test {
-	use super::{MAX_FUNCTION_NAME_LEN, PATHS};
+	use super::{MAX_FUNCTION_NAME_LEN, PATHS, PathKind};
 
 	#[test]
 	fn function_name_constant_up_to_date() {
@@ -698,5 +698,62 @@ mod test {
 	fn function_suggestion() {
 		assert_eq!(super::levenshtein(b"    book", b"    ook", 5), 1);
 		assert_eq!(super::find_suggestion("string::start_with"), Some("string::starts_with"));
+	}
+
+	#[test]
+	fn paths_parse_in_both_parsers() {
+		let mut failures = Vec::new();
+		for (path, (kind, _)) in PATHS.entries() {
+			let path = path.into_inner();
+			let source = match kind {
+				PathKind::Constant(_) => format!("RETURN {path};"),
+				PathKind::Function => format!("RETURN {path}(0);"),
+			};
+			if let Err(e) = crate::syn::parse(&source) {
+				failures.push(format!("`{path}` failed to parse in the core parser: {e}"));
+			}
+			if let Err(e) =
+				parser::Parser::enter_parse::<ast::Query>(&source, parser::Config::all_features())
+			{
+				failures.push(format!(
+					"`{path}` failed to parse in the new parser:\n{}",
+					e.render_char_buffer().write_to_string()
+				));
+			}
+		}
+		assert!(
+			failures.is_empty(),
+			"builtin function/constant paths diverged between the parsers:\n{}",
+			failures.join("\n")
+		);
+	}
+
+	#[test]
+	fn keyword_relate_targets_parse_in_both_parsers() {
+		let mut failures = Vec::new();
+		for source in [
+			"RELATE a:1->edge->sleep:b;",
+			"RELATE sleep:a->sleep->sleep:b;",
+			"RELATE sleep:b<-edge<-a:1;",
+			"RELATE a:1->edge->(SELECT * FROM b);",
+			"RELATE a:1->edge->SELECT * FROM b;",
+		] {
+			if let Err(e) = crate::syn::parse(source) {
+				failures.push(format!("`{source}` failed to parse in the core parser: {e}"));
+			}
+			if let Err(e) =
+				parser::Parser::enter_parse::<ast::Query>(source, parser::Config::all_features())
+			{
+				failures.push(format!(
+					"`{source}` failed to parse in the new parser:\n{}",
+					e.render_char_buffer().write_to_string()
+				));
+			}
+		}
+		assert!(
+			failures.is_empty(),
+			"RELATE keyword-target parsing diverged between the parsers:\n{}",
+			failures.join("\n")
+		);
 	}
 }
