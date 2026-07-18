@@ -63,6 +63,26 @@ impl FunctionRegistry {
 		self.functions.contains_key(name)
 	}
 
+	/// Iterate all registered scalar functions.
+	#[cfg(all(test, feature = "kv-mem"))]
+	pub(crate) fn scalar_functions(&self) -> impl Iterator<Item = &Arc<dyn ScalarFunction>> {
+		self.functions.values()
+	}
+
+	/// Iterate all registered projection functions.
+	#[cfg(all(test, feature = "kv-mem"))]
+	pub(crate) fn projection_functions(
+		&self,
+	) -> impl Iterator<Item = &Arc<dyn ProjectionFunction>> {
+		self.projections.values()
+	}
+
+	/// Iterate all registered index functions.
+	#[cfg(all(test, feature = "kv-mem"))]
+	pub(crate) fn index_functions(&self) -> impl Iterator<Item = &Arc<dyn IndexFunction>> {
+		self.index_functions.values()
+	}
+
 	/// Get the number of registered scalar functions.
 	#[cfg(test)]
 	pub fn len(&self) -> usize {

@@ -20,6 +20,7 @@ use crate::exec::function::index::{IndexContext, IndexContextKind, IndexFunction
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
 use crate::exec::physical_expr::EvalContext;
 use crate::expr::Kind;
+use crate::fnc::args::{FromArgs, Optional};
 use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::highlighter::HighlightParams;
 use crate::val::{Array, Number, Object, Value};
@@ -70,38 +71,11 @@ impl ScalarFunction for SearchAnalyze {
 		args: Vec<Value>,
 	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
-			let mut args = args.into_iter();
-
-			// Get analyzer name
-			let az = match args.next() {
-				Some(Value::String(s)) => s,
-				Some(v) => {
-					return Err(anyhow::anyhow!(
-						"Function 'search::analyze' expects a string analyzer name, got: {}",
-						v.kind_of()
-					));
-				}
-				None => {
-					return Err(anyhow::anyhow!(
-						"Function 'search::analyze' expects two arguments: analyzer name and value"
-					));
-				}
-			};
-
-			// Get value to analyze
-			let val = match args.next() {
-				Some(Value::String(s)) => s,
-				Some(v) => {
-					return Err(anyhow::anyhow!(
-						"Function 'search::analyze' expects a string value, got: {}",
-						v.kind_of()
-					));
-				}
-				None => {
-					return Err(anyhow::anyhow!(
-						"Function 'search::analyze' expects two arguments: analyzer name and value"
-					));
-				}
+			// Same argument handling as the legacy dispatch: exactly two
+			// arguments, returning NONE when either is not a string.
+			let (az, val): (Value, Value) = FromArgs::from_args("search::analyze", args)?;
+			let (Value::String(az), Value::String(val)) = (az, val) else {
+				return Ok(Value::None);
 			};
 
 			// Get the options - if not available, return NONE (matching original behavior)
@@ -442,40 +416,28 @@ impl ScalarFunction for SearchRrf {
 	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
 			let frozen = ctx.exec_ctx.ctx();
-			let mut args = args.into_iter();
 
-			let results = match args.next() {
-				Some(Value::Array(a)) => a,
-				_ => return Ok(Value::Array(Array::new())),
-			};
-			let limit = match args.next() {
-				Some(Value::Number(n)) => {
-					let l = n.as_int();
-					if l < 1 {
-						anyhow::bail!(Error::InvalidFunctionArguments {
-							name: "search::rrf".to_string(),
-							message: "limit must be at least 1".to_string(),
-						});
-					}
-					l as usize
-				}
-				_ => anyhow::bail!(Error::InvalidFunctionArguments {
+			// Same argument handling as the legacy dispatch.
+			let (results, limit, Optional(rrf_constant)): (Array, i64, Optional<i64>) =
+				FromArgs::from_args("search::rrf", args)?;
+			let limit = if limit < 1 {
+				anyhow::bail!(Error::InvalidFunctionArguments {
 					name: "search::rrf".to_string(),
-					message: "limit must be a number".to_string(),
-				}),
+					message: "limit must be at least 1".to_string(),
+				});
+			} else {
+				limit as usize
 			};
-			let rrf_constant = match args.next() {
-				Some(Value::Number(n)) => {
-					let k = n.as_int();
-					if k < 0 {
-						anyhow::bail!(Error::InvalidFunctionArguments {
-							name: "search::rrf".to_string(),
-							message: "RRF constant must be at least 0".to_string(),
-						});
-					}
-					k as f64
+			let rrf_constant = if let Some(rrf_constant) = rrf_constant {
+				if rrf_constant < 0 {
+					anyhow::bail!(Error::InvalidFunctionArguments {
+						name: "search::rrf".to_string(),
+						message: "RRF constant must be at least 0".to_string(),
+					});
 				}
-				_ => 60.0,
+				rrf_constant as f64
+			} else {
+				60.0
 			};
 
 			if results.is_empty() {
@@ -594,50 +556,18 @@ impl ScalarFunction for SearchLinear {
 	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
 			let frozen = ctx.exec_ctx.ctx();
-			let mut args = args.into_iter();
 
-			let results = match args.next() {
-				Some(Value::Array(a)) => a,
-				_ => return Ok(Value::Array(Array::new())),
-			};
-			let weights = match args.next() {
-				Some(Value::Array(a)) => a,
-				_ => anyhow::bail!(Error::InvalidFunctionArguments {
+			// Same argument handling as the legacy dispatch.
+			let (results, weights, limit, norm): (Array, Array, i64, String) =
+				FromArgs::from_args("search::linear", args)?;
+			let limit = if limit < 1 {
+				anyhow::bail!(Error::InvalidFunctionArguments {
 					name: "search::linear".to_string(),
-					message: "weights must be an array".to_string(),
-				}),
+					message: "Limit must be at least 1".to_string(),
+				});
+			} else {
+				limit as usize
 			};
-			let limit = match args.next() {
-				Some(Value::Number(n)) => {
-					let l = n.as_int();
-					if l < 1 {
-						anyhow::bail!(Error::InvalidFunctionArguments {
-							name: "search::linear".to_string(),
-							message: "Limit must be at least 1".to_string(),
-						});
-					}
-					l as usize
-				}
-				_ => anyhow::bail!(Error::InvalidFunctionArguments {
-					name: "search::linear".to_string(),
-					message: "limit must be a number".to_string(),
-				}),
-			};
-			let norm = match args.next() {
-				Some(Value::String(s)) => match s.as_str() {
-					"minmax" => LinearNorm::MinMax,
-					"zscore" => LinearNorm::ZScore,
-					_ => anyhow::bail!(Error::InvalidFunctionArguments {
-						name: "search::linear".to_string(),
-						message: "Norm must be 'minmax' or 'zscore'".to_string(),
-					}),
-				},
-				_ => anyhow::bail!(Error::InvalidFunctionArguments {
-					name: "search::linear".to_string(),
-					message: "norm must be a string".to_string(),
-				}),
-			};
-
 			if weights.len() != results.len() {
 				anyhow::bail!(Error::InvalidFunctionArguments {
 					name: "search::linear".to_string(),
@@ -653,6 +583,14 @@ impl ScalarFunction for SearchLinear {
 					});
 				}
 			}
+			let norm = match norm.as_str() {
+				"minmax" => LinearNorm::MinMax,
+				"zscore" => LinearNorm::ZScore,
+				_ => anyhow::bail!(Error::InvalidFunctionArguments {
+					name: "search::linear".to_string(),
+					message: "Norm must be 'minmax' or 'zscore'".to_string(),
+				}),
+			};
 
 			if results.is_empty() {
 				return Ok(Value::Array(Array::new()));

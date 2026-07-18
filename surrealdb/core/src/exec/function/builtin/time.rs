@@ -6,21 +6,21 @@ use crate::{define_pure_function, register_functions};
 // No argument functions
 define_pure_function!(TimeNow, "time::now", () -> Datetime, crate::fnc::time::now);
 
-// Single datetime argument functions
-define_pure_function!(TimeDay, "time::day", (value: Datetime) -> Int, crate::fnc::time::day);
-define_pure_function!(TimeHour, "time::hour", (value: Datetime) -> Int, crate::fnc::time::hour);
-define_pure_function!(TimeMicros, "time::micros", (value: Datetime) -> Int, crate::fnc::time::micros);
-define_pure_function!(TimeMillis, "time::millis", (value: Datetime) -> Int, crate::fnc::time::millis);
-define_pure_function!(TimeMinute, "time::minute", (value: Datetime) -> Int, crate::fnc::time::minute);
-define_pure_function!(TimeMonth, "time::month", (value: Datetime) -> Int, crate::fnc::time::month);
-define_pure_function!(TimeNano, "time::nano", (value: Datetime) -> Int, crate::fnc::time::nano);
-define_pure_function!(TimeSecond, "time::second", (value: Datetime) -> Int, crate::fnc::time::second);
-define_pure_function!(TimeTimezone, "time::timezone", (value: Datetime) -> String, crate::fnc::time::timezone);
-define_pure_function!(TimeUnix, "time::unix", (value: Datetime) -> Int, crate::fnc::time::unix);
-define_pure_function!(TimeWday, "time::wday", (value: Datetime) -> Int, crate::fnc::time::wday);
-define_pure_function!(TimeWeek, "time::week", (value: Datetime) -> Int, crate::fnc::time::week);
-define_pure_function!(TimeYday, "time::yday", (value: Datetime) -> Int, crate::fnc::time::yday);
-define_pure_function!(TimeYear, "time::year", (value: Datetime) -> Int, crate::fnc::time::year);
+// Optional datetime argument functions (default to the current time)
+define_pure_function!(TimeDay, "time::day", (?value: Datetime) -> Int, crate::fnc::time::day);
+define_pure_function!(TimeHour, "time::hour", (?value: Datetime) -> Int, crate::fnc::time::hour);
+define_pure_function!(TimeMicros, "time::micros", (?value: Datetime) -> Int, crate::fnc::time::micros);
+define_pure_function!(TimeMillis, "time::millis", (?value: Datetime) -> Int, crate::fnc::time::millis);
+define_pure_function!(TimeMinute, "time::minute", (?value: Datetime) -> Int, crate::fnc::time::minute);
+define_pure_function!(TimeMonth, "time::month", (?value: Datetime) -> Int, crate::fnc::time::month);
+define_pure_function!(TimeNano, "time::nano", (?value: Datetime) -> Int, crate::fnc::time::nano);
+define_pure_function!(TimeSecond, "time::second", (?value: Datetime) -> Int, crate::fnc::time::second);
+define_pure_function!(TimeTimezone, "time::timezone", () -> String, crate::fnc::time::timezone);
+define_pure_function!(TimeUnix, "time::unix", (?value: Datetime) -> Int, crate::fnc::time::unix);
+define_pure_function!(TimeWday, "time::wday", (?value: Datetime) -> Int, crate::fnc::time::wday);
+define_pure_function!(TimeWeek, "time::week", (?value: Datetime) -> Int, crate::fnc::time::week);
+define_pure_function!(TimeYday, "time::yday", (?value: Datetime) -> Int, crate::fnc::time::yday);
+define_pure_function!(TimeYear, "time::year", (?value: Datetime) -> Int, crate::fnc::time::year);
 
 // Two argument time functions
 define_pure_function!(TimeCeil, "time::ceil", (value: Datetime, duration: Duration) -> Datetime, crate::fnc::time::ceil);
@@ -33,7 +33,7 @@ define_pure_function!(TimeSetMonth, "time::set_month", (dt: Datetime, month: Num
 define_pure_function!(TimeSetDay, "time::set_day", (dt: Datetime, day: Number) -> Datetime, crate::fnc::time::set_day);
 define_pure_function!(TimeSetHour, "time::set_hour", (dt: Datetime, hour: Number) -> Datetime, crate::fnc::time::set_hour);
 define_pure_function!(TimeSetMinute, "time::set_minute", (dt: Datetime, minute: Number) -> Datetime, crate::fnc::time::set_minute);
-define_pure_function!(TimeSetSecond, "time::set_second", (dt: Datetime, minute: Number) -> Datetime, crate::fnc::time::set_second);
+define_pure_function!(TimeSetSecond, "time::set_second", (dt: Datetime, second: Number) -> Datetime, crate::fnc::time::set_second);
 define_pure_function!(TimeSetNanosecond, "time::set_nanosecond", (dt: Datetime, nanos: Number) -> Datetime, crate::fnc::time::set_nanosecond);
 
 // Array argument functions
@@ -50,7 +50,7 @@ define_pure_function!(TimeFromUnix, "time::from_unix", (value: Int) -> Datetime,
 define_pure_function!(TimeFromUuid, "time::from_uuid", (value: Uuid) -> Datetime, crate::fnc::time::from::uuid);
 
 // Time is:: functions
-define_pure_function!(TimeIsLeapYear, "time::is_leap_year", (value: Datetime) -> Bool, crate::fnc::time::is::leap_year);
+define_pure_function!(TimeIsLeapYear, "time::is_leap_year", (?value: Datetime) -> Bool, crate::fnc::time::is::leap_year);
 
 pub fn register(registry: &mut FunctionRegistry) {
 	register_functions!(

@@ -217,6 +217,34 @@ macro_rules! define_pure_function {
 		}
 	};
 
+	// Single optional argument: (?name: Type) -> ReturnType
+	(
+		$struct_name:ident,
+		$func_name:literal,
+		(? $arg_name:ident : $arg_type:ident) -> $ret:ident,
+		$impl_path:path
+	) => {
+		#[derive(Debug, Clone, Copy, Default)]
+		pub struct $struct_name;
+
+		impl $crate::exec::function::ScalarFunction for $struct_name {
+			fn name(&self) -> &'static str {
+				$func_name
+			}
+
+			fn signature(&self) -> $crate::exec::function::Signature {
+				$crate::exec::function::Signature::new()
+					.optional(stringify!($arg_name), $crate::expr::Kind::$arg_type)
+					.returns($crate::expr::Kind::$ret)
+			}
+
+			fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
+				let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
+				$impl_path(args)
+			}
+		}
+	};
+
 	// One required + one optional: (req: Type1, ?opt: Type2) -> ReturnType
 	(
 		$struct_name:ident,
@@ -266,6 +294,67 @@ macro_rules! define_pure_function {
 					.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
 					.arg(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
 					.optional(stringify!($arg3_name), $crate::expr::Kind::$arg3_type)
+					.returns($crate::expr::Kind::$ret)
+			}
+
+			fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
+				let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
+				$impl_path(args)
+			}
+		}
+	};
+
+	// One required + two optional: (a: T1, ?b: T2, ?c: T3) -> ReturnType
+	(
+		$struct_name:ident,
+		$func_name:literal,
+		($arg1_name:ident : $arg1_type:ident, ? $arg2_name:ident : $arg2_type:ident, ? $arg3_name:ident : $arg3_type:ident) -> $ret:ident,
+		$impl_path:path
+	) => {
+		#[derive(Debug, Clone, Copy, Default)]
+		pub struct $struct_name;
+
+		impl $crate::exec::function::ScalarFunction for $struct_name {
+			fn name(&self) -> &'static str {
+				$func_name
+			}
+
+			fn signature(&self) -> $crate::exec::function::Signature {
+				$crate::exec::function::Signature::new()
+					.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
+					.optional(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
+					.optional(stringify!($arg3_name), $crate::expr::Kind::$arg3_type)
+					.returns($crate::expr::Kind::$ret)
+			}
+
+			fn invoke(&self, args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
+				let args = $crate::fnc::args::FromArgs::from_args($func_name, args)?;
+				$impl_path(args)
+			}
+		}
+	};
+
+	// Two required + two optional: (a: T1, b: T2, ?c: T3, ?d: T4) -> ReturnType
+	(
+		$struct_name:ident,
+		$func_name:literal,
+		($arg1_name:ident : $arg1_type:ident, $arg2_name:ident : $arg2_type:ident, ? $arg3_name:ident : $arg3_type:ident, ? $arg4_name:ident : $arg4_type:ident) -> $ret:ident,
+		$impl_path:path
+	) => {
+		#[derive(Debug, Clone, Copy, Default)]
+		pub struct $struct_name;
+
+		impl $crate::exec::function::ScalarFunction for $struct_name {
+			fn name(&self) -> &'static str {
+				$func_name
+			}
+
+			fn signature(&self) -> $crate::exec::function::Signature {
+				$crate::exec::function::Signature::new()
+					.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
+					.arg(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
+					.optional(stringify!($arg3_name), $crate::expr::Kind::$arg3_type)
+					.optional(stringify!($arg4_name), $crate::expr::Kind::$arg4_type)
 					.returns($crate::expr::Kind::$ret)
 			}
 
@@ -376,9 +465,12 @@ macro_rules! define_context_function {
 			fn invoke_async<'a>(
 				&'a self,
 				ctx: &'a $crate::exec::physical_expr::EvalContext<'_>,
-				_args: Vec<$crate::val::Value>,
+				args: Vec<$crate::val::Value>,
 			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
-				Box::pin(async move { $impl_fn(ctx) })
+				Box::pin(async move {
+					$crate::exec::function::check_arity($func_name, &args, 0, Some(0))?;
+					$impl_fn(ctx)
+				})
 			}
 		}
 	};
@@ -446,9 +538,12 @@ macro_rules! define_async_function {
 			fn invoke_async<'a>(
 				&'a self,
 				ctx: &'a $crate::exec::physical_expr::EvalContext<'_>,
-				_args: Vec<$crate::val::Value>,
+				args: Vec<$crate::val::Value>,
 			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
-				Box::pin(async move { $impl_fn(ctx).await })
+				Box::pin(async move {
+					$crate::exec::function::check_arity($func_name, &args, 0, Some(0))?;
+					$impl_fn(ctx).await
+				})
 			}
 		}
 	};
@@ -491,7 +586,10 @@ macro_rules! define_async_function {
 				ctx: &'a $crate::exec::physical_expr::EvalContext<'_>,
 				args: Vec<$crate::val::Value>,
 			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
-				Box::pin(async move { $impl_fn(ctx, args).await })
+				Box::pin(async move {
+					$crate::exec::function::check_arity($func_name, &args, 1, Some(1))?;
+					$impl_fn(ctx, args).await
+				})
 			}
 		}
 	};
@@ -535,7 +633,10 @@ macro_rules! define_async_function {
 				ctx: &'a $crate::exec::physical_expr::EvalContext<'_>,
 				args: Vec<$crate::val::Value>,
 			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
-				Box::pin(async move { $impl_fn(ctx, args).await })
+				Box::pin(async move {
+					$crate::exec::function::check_arity($func_name, &args, 2, Some(2))?;
+					$impl_fn(ctx, args).await
+				})
 			}
 		}
 	};
@@ -579,7 +680,10 @@ macro_rules! define_async_function {
 				ctx: &'a $crate::exec::physical_expr::EvalContext<'_>,
 				args: Vec<$crate::val::Value>,
 			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
-				Box::pin(async move { $impl_fn(ctx, args).await })
+				Box::pin(async move {
+					$crate::exec::function::check_arity($func_name, &args, 1, Some(2))?;
+					$impl_fn(ctx, args).await
+				})
 			}
 		}
 	};
@@ -624,7 +728,10 @@ macro_rules! define_async_function {
 				ctx: &'a $crate::exec::physical_expr::EvalContext<'_>,
 				args: Vec<$crate::val::Value>,
 			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
-				Box::pin(async move { $impl_fn(ctx, args).await })
+				Box::pin(async move {
+					$crate::exec::function::check_arity($func_name, &args, 1, Some(3))?;
+					$impl_fn(ctx, args).await
+				})
 			}
 		}
 	};

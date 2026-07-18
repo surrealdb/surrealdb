@@ -27,9 +27,9 @@ define_pure_function!(TypeGeometry, "type::geometry", (value: Any) -> Any, crate
 define_pure_function!(TypeInt, "type::int", (value: Any) -> Int, crate::fnc::r#type::int);
 define_pure_function!(TypeNumber, "type::number", (value: Any) -> Number, crate::fnc::r#type::number);
 define_pure_function!(TypeOf, "type::of", (value: Any) -> String, crate::fnc::r#type::type_of);
-define_pure_function!(TypePoint, "type::point", (value: Any, ?y: Any) -> Any, crate::fnc::r#type::point);
+define_pure_function!(TypePoint, "type::point", (value: Any) -> Any, crate::fnc::r#type::point);
 define_pure_function!(TypeRange, "type::range", (value: Any) -> Any, crate::fnc::r#type::range);
-define_pure_function!(TypeRecord, "type::record", (value: Any, ?table: String) -> Any, crate::fnc::r#type::record);
+define_pure_function!(TypeRecord, "type::record", (value: Any, ?table: Any) -> Any, crate::fnc::r#type::record);
 define_pure_function!(TypeSet, "type::set", (value: Any) -> Any, crate::fnc::r#type::set);
 define_pure_function!(TypeString, "type::string", (value: Any) -> String, crate::fnc::r#type::string);
 define_pure_function!(TypeStringLossy, "type::string_lossy", (value: Any) -> String, crate::fnc::r#type::string_lossy);
@@ -58,7 +58,7 @@ define_pure_function!(TypeIsObject, "type::is_object", (value: Any) -> Bool, cra
 define_pure_function!(TypeIsPoint, "type::is_point", (value: Any) -> Bool, crate::fnc::r#type::is::point);
 define_pure_function!(TypeIsPolygon, "type::is_polygon", (value: Any) -> Bool, crate::fnc::r#type::is::polygon);
 define_pure_function!(TypeIsRange, "type::is_range", (value: Any) -> Bool, crate::fnc::r#type::is::range);
-define_pure_function!(TypeIsRecord, "type::is_record", (value: Any, ?table: Any) -> Bool, crate::fnc::r#type::is::record);
+define_pure_function!(TypeIsRecord, "type::is_record", (value: Any, ?table: String) -> Bool, crate::fnc::r#type::is::record);
 define_pure_function!(TypeIsSet, "type::is_set", (value: Any) -> Bool, crate::fnc::r#type::is::set);
 define_pure_function!(TypeIsString, "type::is_string", (value: Any) -> Bool, crate::fnc::r#type::is::string);
 define_pure_function!(TypeIsUuid, "type::is_uuid", (value: Any) -> Bool, crate::fnc::r#type::is::uuid);

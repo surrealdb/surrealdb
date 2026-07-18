@@ -6,6 +6,7 @@ use crate::err::Error;
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
 use crate::exec::physical_expr::EvalContext;
 use crate::expr::Kind;
+use crate::fnc::args::FromArgs;
 use crate::val::Value;
 
 // =========================================================================
@@ -50,9 +51,9 @@ impl ScalarFunction for SequenceNextval {
 			})?;
 
 			// Get the sequence name from args
-			let seq = args.into_iter().next().unwrap_or(Value::None);
+			let args = FromArgs::from_args("sequence::nextval", args)?;
 
-			crate::fnc::sequence::nextval((frozen, opt), (seq,)).await
+			crate::fnc::sequence::nextval((frozen, opt), args).await
 		})
 	}
 }

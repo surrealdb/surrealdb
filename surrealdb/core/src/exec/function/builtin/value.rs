@@ -156,7 +156,7 @@ impl ScalarFunction for ValueExpect {
 		Signature::new()
 			.arg("value", Kind::Any)
 			.arg("closure", Kind::Any)
-			.optional("message", Kind::String)
+			.optional("message", Kind::Any)
 			.returns(Kind::Any)
 	}
 

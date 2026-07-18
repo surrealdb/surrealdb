@@ -43,7 +43,7 @@ fn extract_uri(args: &[Value], fn_name: &str) -> Result<String> {
 fn extract_opts(args: &[Value], index: usize, fn_name: &str) -> Result<Object> {
 	match args.get(index) {
 		Some(Value::Object(o)) => Ok(o.clone()),
-		Some(Value::None) | None => Ok(Object::default()),
+		None => Ok(Object::default()),
 		Some(v) => Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
 			name: fn_name.to_owned(),
 			message: format!("Options argument should be an object, got: {}", v.kind_of()),

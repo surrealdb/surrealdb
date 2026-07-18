@@ -15,6 +15,8 @@ mod builtin;
 mod index;
 mod macros;
 mod method;
+#[cfg(all(test, feature = "kv-mem"))]
+mod parity_tests;
 mod projection;
 mod registry;
 mod signature;
@@ -35,6 +37,42 @@ use crate::exec::physical_expr::EvalContext;
 use crate::exec::{BoxFut, SendSyncRequirement};
 use crate::expr::Kind;
 use crate::val::Value;
+
+/// Enforce an argument-count range, producing the same error shape and
+/// messages as the `fnc::args::FromArgs` machinery. Used by builtins that
+/// decode their arguments by hand instead of going through `FromArgs`.
+pub(crate) fn check_arity(
+	name: &str,
+	args: &[Value],
+	lower: usize,
+	upper: Option<usize>,
+) -> Result<()> {
+	if args.len() < lower || upper.map(|x| args.len() > x).unwrap_or(false) {
+		let message = if let Some(upper) = upper {
+			if upper == lower {
+				if upper == 0 {
+					"Expected no arguments".to_string()
+				} else if upper == 1 {
+					"Expected 1 argument".to_string()
+				} else {
+					format!("Expected {upper} arguments")
+				}
+			} else {
+				format!("Expected {lower} to {upper} arguments")
+			}
+		} else if lower == 0 {
+			"Expected zero or more arguments".to_string()
+		} else {
+			format!("Expected {lower} or more arguments")
+		};
+
+		anyhow::bail!(crate::err::Error::InvalidFunctionArguments {
+			name: name.to_owned(),
+			message,
+		});
+	}
+	Ok(())
+}
 
 /// A scalar function that can be invoked during query execution.
 ///

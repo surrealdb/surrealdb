@@ -22,8 +22,8 @@ define_pure_function!(StringSplit, "string::split", (value: String, delimiter: S
 define_pure_function!(StringStartsWith, "string::starts_with", (value: String, prefix: String) -> Bool, crate::fnc::string::starts_with);
 
 // Three argument string functions
-define_pure_function!(StringReplace, "string::replace", (value: String, search: String, replacement: String) -> String, crate::fnc::string::replace);
-define_pure_function!(StringSlice, "string::slice", (value: String, start: Int, ?length: Int) -> String, crate::fnc::string::slice);
+define_pure_function!(StringReplace, "string::replace", (value: String, search: Any, replacement: String) -> String, crate::fnc::string::replace);
+define_pure_function!(StringSlice, "string::slice", (value: String, ?start: Any, ?end: Int) -> String, crate::fnc::string::slice);
 
 // Variadic string functions
 define_pure_function!(StringConcat, "string::concat", (...values: Any) -> String, crate::fnc::string::concat);
@@ -45,7 +45,7 @@ define_pure_function!(StringHtmlSanitize, "string::html::sanitize", (value: Stri
 define_pure_function!(StringIsAlpha, "string::is_alpha", (value: String) -> Bool, crate::fnc::string::is::alpha);
 define_pure_function!(StringIsAlphanum, "string::is_alphanum", (value: String) -> Bool, crate::fnc::string::is::alphanum);
 define_pure_function!(StringIsAscii, "string::is_ascii", (value: String) -> Bool, crate::fnc::string::is::ascii);
-define_pure_function!(StringIsDatetime, "string::is_datetime", (value: String, format: String) -> Bool, crate::fnc::string::is::datetime);
+define_pure_function!(StringIsDatetime, "string::is_datetime", (value: String, ?format: String) -> Bool, crate::fnc::string::is::datetime);
 define_pure_function!(StringIsDomain, "string::is_domain", (value: String) -> Bool, crate::fnc::string::is::domain);
 define_pure_function!(StringIsEmail, "string::is_email", (value: String) -> Bool, crate::fnc::string::is::email);
 define_pure_function!(StringIsHexadecimal, "string::is_hexadecimal", (value: String) -> Bool, crate::fnc::string::is::hexadecimal);
@@ -55,7 +55,7 @@ define_pure_function!(StringIsIpv6, "string::is_ipv6", (value: String) -> Bool, 
 define_pure_function!(StringIsLatitude, "string::is_latitude", (value: String) -> Bool, crate::fnc::string::is::latitude);
 define_pure_function!(StringIsLongitude, "string::is_longitude", (value: String) -> Bool, crate::fnc::string::is::longitude);
 define_pure_function!(StringIsNumeric, "string::is_numeric", (value: String) -> Bool, crate::fnc::string::is::numeric);
-define_pure_function!(StringIsRecord, "string::is_record", (value: String) -> Bool, crate::fnc::string::is::record);
+define_pure_function!(StringIsRecord, "string::is_record", (value: String, ?table: Any) -> Bool, crate::fnc::string::is::record);
 define_pure_function!(StringIsSemver, "string::is_semver", (value: String) -> Bool, crate::fnc::string::is::semver);
 define_pure_function!(StringIsUlid, "string::is_ulid", (value: String) -> Bool, crate::fnc::string::is::ulid);
 define_pure_function!(StringIsUrl, "string::is_url", (value: String) -> Bool, crate::fnc::string::is::url);
@@ -65,7 +65,7 @@ define_pure_function!(StringIsUuid, "string::is_uuid", (value: String) -> Bool, 
 define_pure_function!(StringSimilarityFuzzy, "string::similarity::fuzzy", (a: String, b: String) -> Int, crate::fnc::string::similarity::fuzzy);
 define_pure_function!(StringSimilarityJaro, "string::similarity::jaro", (a: String, b: String) -> Float, crate::fnc::string::similarity::jaro);
 define_pure_function!(StringSimilarityJaroWinkler, "string::similarity::jaro_winkler", (a: String, b: String) -> Float, crate::fnc::string::similarity::jaro_winkler);
-define_pure_function!(StringSimilaritySmithwaterman, "string::similarity::smithwaterman", (a: String, b: String) -> Float, crate::fnc::string::similarity::smithwaterman);
+define_pure_function!(StringSimilaritySmithwaterman, "string::similarity::smithwaterman", (a: String, b: String) -> Int, crate::fnc::string::similarity::smithwaterman);
 define_pure_function!(StringSimilaritySorensenDice, "string::similarity::sorensen_dice", (a: String, b: String) -> Float, crate::fnc::string::similarity::sorensen_dice);
 
 // String semver functions

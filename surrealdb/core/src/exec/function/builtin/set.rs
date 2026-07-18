@@ -31,7 +31,7 @@ define_pure_function!(SetRemove, "set::remove", (set: Any, value: Any) -> Any, c
 define_pure_function!(SetUnion, "set::union", (a: Any, b: Any) -> Any, crate::fnc::set::union);
 
 // Three argument set functions
-define_pure_function!(SetSlice, "set::slice", (set: Any, start: Int, ?length: Int) -> Any, crate::fnc::set::slice);
+define_pure_function!(SetSlice, "set::slice", (set: Any, ?start: Any, ?end: Int) -> Any, crate::fnc::set::slice);
 
 // =========================================================================
 // Closure-based set functions (require async execution with TreeStack)
@@ -39,6 +39,57 @@ define_pure_function!(SetSlice, "set::slice", (set: Any, start: Int, ?length: In
 
 /// Helper macro for creating closure-based set functions
 macro_rules! define_set_closure_function {
+	($struct_name:ident, $func_name:literal, $impl_path:path, $($arg:ident: $kind:ident),+, ?$oarg:ident: $okind:ident => $ret:ident) => {
+		#[derive(Debug, Clone, Copy, Default)]
+		pub struct $struct_name;
+
+		impl ScalarFunction for $struct_name {
+			fn name(&self) -> &'static str {
+				$func_name
+			}
+
+			fn signature(&self) -> Signature {
+				Signature::new()
+					$(.arg(stringify!($arg), Kind::$kind))+
+					.optional(stringify!($oarg), Kind::$okind)
+					.returns(Kind::$ret)
+			}
+
+			fn is_pure(&self) -> bool {
+				false
+			}
+
+			fn is_async(&self) -> bool {
+				true
+			}
+
+			fn invoke(&self, _args: Vec<Value>) -> Result<Value> {
+				Err(anyhow::anyhow!("Function '{}' requires async execution", self.name()))
+			}
+
+			fn invoke_async<'a>(
+				&'a self,
+				ctx: &'a EvalContext<'_>,
+				args: Vec<Value>,
+			) -> crate::exec::BoxFut<'a, Result<Value>> {
+				Box::pin(async move {
+					use crate::doc::CursorDoc;
+					let args = FromArgs::from_args($func_name, args)?;
+					let frozen = ctx.exec_ctx.ctx();
+					let opt = ctx.exec_ctx.options();
+					let doc = ctx.document_root.or(ctx.current_value)
+						.map(|v| CursorDoc::new(None, None, v.clone()));
+					let mut stack = TreeStack::new();
+					stack
+						.enter(|stk| async move {
+							$impl_path((stk, frozen, opt, doc.as_ref()), args).await
+						})
+						.finish()
+						.await
+				})
+			}
+		}
+	};
 	($struct_name:ident, $func_name:literal, $impl_path:path, $($arg:ident: $kind:ident),+ => $ret:ident) => {
 		#[derive(Debug, Clone, Copy, Default)]
 		pub struct $struct_name;
@@ -92,10 +143,10 @@ macro_rules! define_set_closure_function {
 }
 
 // array::all - Check if all elements match a condition
-define_set_closure_function!(SetAll, "set::all", crate::fnc::set::all, set: Any, check: Any => Any);
+define_set_closure_function!(SetAll, "set::all", crate::fnc::set::all, set: Any, ?check: Any => Any);
 
 // set::any - Check if any element matches a condition
-define_set_closure_function!(SetAny, "set::any", crate::fnc::set::any, set: Any, check: Any => Any);
+define_set_closure_function!(SetAny, "set::any", crate::fnc::set::any, set: Any, ?check: Any => Any);
 
 // set::filter - Filter elements by closure/value
 define_set_closure_function!(SetFilter, "set::filter", crate::fnc::set::filter, set: Any, check: Any => Any);
