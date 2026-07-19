@@ -1,0 +1,25 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "surrealdb-conformance-js",
+      "dependencies": {
+        "surrealdb": "^2.0.4",
+      },
+    },
+  },
+  "packages": {
+    "@surrealdb/cbor": ["@surrealdb/cbor@2.0.0-alpha.4", "", {}, "sha512-l/hNZ3ZCOJq8rzwx1y5ZV/8b2bYCWdhGqRVY33Pu50NAHyAW5qLsMn3ZBkZow77mAKwNCsbDsRGnyYEuU95mjw=="],
+
+    "@surrealdb/sqon": ["@surrealdb/sqon@0.1.0", "", { "dependencies": { "@surrealdb/cbor": "2.0.0-alpha.4", "uuidv7": "^1.0.1" }, "peerDependencies": { "tslib": "^2.6.3", "typescript": "^5.0.0" } }, "sha512-pooKLZ0W6mN8XHzJQavGOdfZOZksycmIjhwFwvG0kdCAt4I5U6KKPHcXQwFkTDNKFKFKdufczLRnzHapPIslQw=="],
+
+    "surrealdb": ["surrealdb@2.0.4", "", { "dependencies": { "@surrealdb/sqon": "0.1.0" }, "peerDependencies": { "tslib": "^2.6.3", "typescript": "^5.0.0 || ^6.0.0" } }, "sha512-tCmMzcsLB/CVDZtxsj/xOWY6NWy9MrX2abMuwnVpAI5xj7kvnq9noRtc1nhjuDihei/Njfkxe/NYMxy7ZLLl4g=="],
+
+    "tslib": ["tslib@2.8.1", "", {}, "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w=="],
+
+    "typescript": ["typescript@6.0.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw=="],
+
+    "uuidv7": ["uuidv7@1.2.1", "", { "bin": { "uuidv7": "cli.js" } }, "sha512-4kPkK3/XTQW9Hbm4CaqfICn+kY9LJtDVEOfgsRRra/+n2Ofg4NqzRFceAkxvQ/Ud/6BpHOPzj8cirqM7TzTN5Q=="],
+  }
+}
