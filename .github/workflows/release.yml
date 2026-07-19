@@ -275,8 +275,16 @@ jobs:
           # (irreversible) would run and only then promote would fail on the
           # missing binaries, leaving a half-published release. Fail fast here.
           binaries_exist() {
-            aws s3 ls "s3://${ROLLING_BUCKET}/rolling-builds/$1/$2/" 2>/dev/null \
-              | grep -qE 'surreal-.*\.(tgz|exe)$'
+            # Capture the listing first, THEN match. Piping `aws s3 ls | grep -q`
+            # under `set -o pipefail` is a false-negative trap: `grep -q` exits on
+            # the first match and closes the pipe, `aws` (which streams its output
+            # object-by-object) then dies with SIGPIPE (141), and pipefail
+            # propagates that as the pipeline's status — reporting "no binaries"
+            # for a prefix that is full of them. Reading into a variable removes
+            # the pipe entirely so only the presence of a match decides the result.
+            local listing
+            listing=$(aws s3 ls "s3://${ROLLING_BUCKET}/rolling-builds/$1/$2/" 2>/dev/null) || return 1
+            printf '%s\n' "$listing" | grep -qE 'surreal-.*\.(tgz|exe)$'
           }
           # A downstream image is promotable for a commit iff its downstream.json
           # manifest exists (written only by a promotable downstream build).
