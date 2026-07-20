@@ -55,6 +55,11 @@ on:
         description: 'The exact commit to build, tag and key artifacts under. Normally the pushed commit; a manual rebuild passes the target sha so it reproduces that commit rather than the branch tip.'
         required: true
         type: string
+      engine-promotable:
+        description: 'Sha half of promotability: whether the built commit is on a promotion line (main or releases/*). Defaults true (push/schedule/tip build the dispatched ref tip); a git-sha override that points off-line passes false. finalize also requires the workflow ref itself to be a release line or main.'
+        required: false
+        default: 'true'
+        type: string
 
 defaults:
   run:
@@ -375,11 +380,16 @@ jobs:
   # this job is skipped and no engine.json is written, so the engine cannot be
   # released.
   #
-  # Release lines only: the manifest is written for main (nightly) and releases/*.
-  # A manual dispatch against any other branch still builds, scans and pushes (so
-  # you can test that branch builds a correct image), but writes NO manifest — it
-  # is never promotable — and the cleanup-test job below deletes its artifacts.
-  # github.ref here is the caller's triggering ref.
+  # Release lines only, on both axes: the manifest is written only when the
+  # triggering workflow ref is main (nightly) or a releases/* line and the commit
+  # being built is itself reachable from a promotion line (inputs.engine-promotable
+  # — see prepare in rolling-build.yml). The branches need not match: a main
+  # dispatch may rebuild a releases/3.2 commit and vice versa. A manual dispatch
+  # against any other branch, or a git-sha override pointing at an off-line commit,
+  # still builds, scans and pushes (so you can test that a branch/commit builds a
+  # correct image), but writes no manifest — it is never promotable — and the
+  # cleanup-test job below deletes its artifacts. github.ref here is the caller's
+  # triggering ref.
   #
   # The downstream image is built by a separate workflow
   # (rolling-downstream-build.yml) and records its own downstream.json under the
@@ -400,6 +410,7 @@ jobs:
       && needs.docker.result == 'success'
       && needs.check-versions.result == 'success'
       && needs.package.result == 'success'
+      && inputs.engine-promotable == 'true'
       && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/releases/')) }}
     # Private runner: the manifest lives next to the rolling binaries in the
     # private CI bucket, reached via the runner's ambient IAM role (no static

@@ -51,6 +51,11 @@ on:
         required: false
         default: ''
         type: string
+      engine-promotable:
+        description: 'Engine-sha half of promotability: whether the engine commit being shipped is on a promotion line (main or releases/*). Defaults true (push/schedule/tip build the dispatched engine tip); an engine-git-sha override pointing off-line passes false. finalize also requires the workflow ref to be a release line or main, and preflight requires the downstream ref to be one too.'
+        required: false
+        default: 'true'
+        type: string
     outputs:
       configured:
         description: 'Whether the downstream build is configured (secrets present)'
@@ -150,31 +155,67 @@ jobs:
           # Override: an explicit downstream ref was supplied — either a reproduce
           # (the sha recorded in a downstream.json) or a manual pairing override.
           # If it names a branch on the downstream, build that branch's tip; else
-          # treat it as an exact commit sha. Either way it is an intentional
-          # pairing, so it is marked promotable (finalize still requires the
-          # dispatch to target a release line before writing downstream.json).
+          # treat it as an exact commit sha. It is promotable only when the
+          # downstream ref is itself a release line or main (same rule as the
+          # matched-branch default below): a dispatch pointed at any other
+          # downstream branch (e.g. a feature/backport branch under test) still
+          # builds, scans and pushes the rolling image so you can verify it, but is
+          # never paired with an engine release. For a bare-sha reproduce the
+          # recorded branch label (downstream-branch) is what gets checked, and the
+          # sha is additionally verified to actually be on that labelled line.
           if [ -n "${OVERRIDE_REF}" ]; then
             set +e
             out="$(git -C "$workdir" ls-remote --exit-code --heads "$url" "refs/heads/${OVERRIDE_REF}" 2>/dev/null)"
             rc=$?
             set -e
+            bare_sha=false
             if [ "$rc" -eq 0 ]; then
+              # A branch name: build its tip, which is by construction on the branch.
               ref="${OVERRIDE_REF}"
               sha="$(printf '%s\n' "$out" | head -n1 | cut -f1)"
             elif [ "$rc" -eq 2 ]; then
               # Reachable, but no such branch — treat the override as a commit sha.
               ref="${OVERRIDE_BRANCH}"
               sha="${OVERRIDE_REF}"
+              bare_sha=true
             else
               echo "::error title=Rolling downstream::could not read refs on ${OWNER}/${REPO} to resolve downstream override '${OVERRIDE_REF}'. If this is an auth/permission error, the App is missing Contents:read on the repo (approve it on the installation, not just the App)."
               exit 1
             fi
+            # Promotable only when the (resolved) downstream branch is a release
+            # line or main; any other branch builds for inspection but must never
+            # be paired with an engine release.
+            case "${ref}" in
+              main | releases/*) promotable=true ;;
+              *)
+                promotable=false
+                echo "::warning title=Rolling downstream::downstream override '${ref:-${sha}}' is not a release line or main — building it for inspection but not marking it promotable."
+                ;;
+            esac
+            # Defence in depth for the bare-sha path: the branch label is trusted
+            # input (a recorded reproduce label, or one day a manual override), so a
+            # release/main label alone does not prove the sha is on that line.
+            # Verify the commit is actually reachable from the labelled branch's tip
+            # before allowing promotion; a branch-name override skips this (its sha
+            # is that branch's tip).
+            if [ "${promotable}" = true ] && [ "${bare_sha}" = true ]; then
+              vdir="$(mktemp -d)"
+              git -C "$vdir" init -q
+              if git -C "$vdir" fetch --no-tags --quiet "$url" "refs/heads/${ref}" 2>/dev/null \
+                && git -C "$vdir" merge-base --is-ancestor "${sha}" FETCH_HEAD 2>/dev/null; then
+                echo "Verified downstream commit ${sha} is on '${ref}'."
+              else
+                promotable=false
+                echo "::warning title=Rolling downstream::downstream commit ${sha} is not reachable from '${ref}' — building it for inspection but not marking it promotable."
+              fi
+              rm -rf "$vdir"
+            fi
             {
               echo "ref=${ref}"
               echo "sha=${sha}"
-              echo "promotable=true"
+              echo "promotable=${promotable}"
             } >> "$GITHUB_OUTPUT"
-            echo "Override: building the downstream from ${ref:-<recorded>} (${sha})"
+            echo "Override: building the downstream from ${ref:-<recorded>} (${sha}) (promotable=${promotable})"
             exit 0
           fi
 
@@ -480,24 +521,33 @@ jobs:
   # against, and the engine sha it belongs to) — no registry/account/repo, which
   # the promote workflow reconstructs from secrets + the rolling tag.
   #
-  # Only promotable builds get a downstream.json. Two guards:
-  #   * Release lines + main only: a build on a releases/* line (a versioned
-  #     release) or on main (the nightly channel — the scheduled nightly build, or
-  #     a manual dispatch against main to test the downstream image in the cloud)
-  #     is promotable. A
-  #     dispatch against any OTHER branch still builds, scans and pushes the
-  #     rolling image above — so you CAN test that an arbitrary branch builds a
-  #     correct image — but is never marked promotable.
-  #   * Matched branch only (preflight.promotable): a build that fell back to the
-  #     downstream's 'main' because the matching release branch was absent is not
-  #     promotable, so a stable engine release can't be paired with the
-  #     downstream's unreleased main. (On the engine's main line the matched
-  #     downstream branch IS main, so a nightly pairing is itself promotable.)
+  # Only promotable builds get a downstream.json. Three guards, one per "ref" the
+  # build is pinned by — all must be on a promotion line, but they need not match
+  # each other (a main dispatch may pair a releases/3.2 engine + downstream and
+  # vice versa):
+  #   * Workflow ref (github.ref): the triggering ref must be a releases/* line (a
+  #     versioned release) or main (the nightly channel — the scheduled nightly
+  #     build, or a manual dispatch against main to test the image in the cloud). A
+  #     dispatch against any other branch still builds, scans and pushes the rolling
+  #     image above — so you can test that an arbitrary branch builds a correct
+  #     image — but is never marked promotable.
+  #   * Engine sha (inputs.engine-promotable): the engine commit being shipped must
+  #     itself be reachable from a promotion line. Only an engine-git-sha override
+  #     can point off-line (a push/schedule/tip builds the dispatched ref's tip),
+  #     so this catches a dispatch that pairs a real release line with an off-line
+  #     engine commit. Verified in rolling-downstream-build.yml's prepare.
+  #   * Downstream ref (preflight.promotable): the downstream branch/commit must be
+  #     a release line or main too — a build that fell back to the downstream's
+  #     'main' because the matching release branch was absent, or an override
+  #     pointed at some other downstream branch, is not promotable, so a stable
+  #     engine release can't be paired with the downstream's unreleased main. (On
+  #     the engine's main line the matched downstream branch is main, so a nightly
+  #     pairing is itself promotable.)
   # github.ref here is the caller's triggering ref.
   finalize:
     name: Finalize downstream manifest
     needs: [preflight, manifest]
-    if: ${{ needs.preflight.outputs.configured == 'true' && needs.manifest.result == 'success' && needs.preflight.outputs.promotable == 'true' && (startsWith(github.ref, 'refs/heads/releases/') || github.ref == 'refs/heads/main') }}
+    if: ${{ needs.preflight.outputs.configured == 'true' && needs.manifest.result == 'success' && needs.preflight.outputs.promotable == 'true' && inputs.engine-promotable == 'true' && (startsWith(github.ref, 'refs/heads/releases/') || github.ref == 'refs/heads/main') }}
     # Private runner: the manifest lives in the private CI bucket, reached via the
     # runner's ambient IAM role (no static keys). Label from a repo/org variable.
     runs-on: ${{ vars.RUNNER_AMD }}

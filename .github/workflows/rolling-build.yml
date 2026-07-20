@@ -92,6 +92,14 @@ jobs:
     outputs:
       build-metadata: ${{ steps.vars.outputs.build-metadata }}
       channels: ${{ steps.channels.outputs.channels }}
+      # Promotability, sha half: a build is only promotable when the commit it was
+      # built from is reachable from a promotion line (main or a releases/* line).
+      # A push/schedule/tip dispatch (no git-sha override) builds the dispatched
+      # ref's own tip, whose release/main gating finalize already enforces — so it
+      # is promotable without the (history-deepening) reachability check. Only an
+      # explicit git-sha override can point at an off-line commit, so we verify
+      # just that case. The workflow ref is gated separately in finalize.
+      engine-promotable: ${{ inputs.git-sha == '' && 'true' || steps.promotable.outputs.promotable }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
@@ -108,6 +116,54 @@ jobs:
       - name: Derive rolling build vars
         id: vars
         uses: ./.github/actions/derive-rolling-vars
+
+      # A manual dispatch may build an arbitrary commit for inspection, but it is
+      # only promotable when that commit lives on a promotion line. Reachability
+      # (not branch-name equality) is what's checked, so the dispatched workflow
+      # ref and the built commit need not share a branch (a main dispatch may
+      # rebuild a releases/3.2 commit and vice versa) and an older ancestor being
+      # rebuilt still counts.
+      #
+      # This is duplicated (verbatim) in rolling-downstream-build.yml's prepare on
+      # purpose: it must stay inline rather than become a shared local action. A
+      # `uses: ./…` action is read from the checked-out tree, and prepare checks
+      # out the target commit, so the action would be missing whenever an override
+      # reproduces a commit that predates it (every current release). An inline
+      # run: comes from the workflow definition, so it is always present.
+      - name: Assert built commit is on a release line
+        id: promotable
+        if: ${{ inputs.git-sha != '' }}
+        env:
+          SHA: ${{ steps.vars.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # Ancestry tests need full history connecting the target commit to the
+          # promotion lines; a rolling checkout is shallow, so deepen first (a
+          # no-op if already complete), then bring in main + every releases/* tip.
+          if [ -f "$(git rev-parse --git-dir)/shallow" ]; then
+            git fetch --no-tags --quiet --unshallow origin 2>/dev/null \
+              || git fetch --no-tags --quiet --deepen=2147483647 origin 2>/dev/null \
+              || true
+          fi
+          git fetch --no-tags --quiet origin \
+            '+refs/heads/main:refs/remotes/origin/main' \
+            '+refs/heads/releases/*:refs/remotes/origin/releases/*'
+          promotable=false
+          on=""
+          for ref in $(git for-each-ref --format='%(refname)' \
+            refs/remotes/origin/main 'refs/remotes/origin/releases/*'); do
+            if git merge-base --is-ancestor "${SHA}" "${ref}" 2>/dev/null; then
+              promotable=true
+              on="${ref#refs/remotes/origin/}"
+              break
+            fi
+          done
+          if [ "${promotable}" = true ]; then
+            echo "Commit ${SHA} is on '${on}' — promotable."
+          else
+            echo "::warning title=Rolling build::commit ${SHA} is not reachable from main or any releases/* line — building it for inspection but not marking it promotable."
+          fi
+          echo "promotable=${promotable}" >> "$GITHUB_OUTPUT"
 
       # The branch's own channel (nightly on main, the line's channel on
       # releases/*). version-override is empty so the binary keeps the
@@ -160,4 +216,7 @@ jobs:
       s3-prefix: ${{ matrix.channel.s3Prefix }}
       release-version: ${{ matrix.channel.version }}
       git-ref: ${{ matrix.channel.sha }}
+      # Sha half of promotability (see prepare): gates whether this channel may
+      # write engine.json. The workflow ref half is gated inside the channel.
+      engine-promotable: ${{ needs.prepare.outputs.engine-promotable }}
     secrets: inherit
