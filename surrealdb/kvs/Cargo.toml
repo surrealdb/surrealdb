@@ -31,5 +31,10 @@ web-time = { workspace = true }
 affinitypool = { workspace = true }
 num_cpus = { workspace = true }
 
+[dev-dependencies]
+# Tests call `Utc::now()`, which requires chrono's `now` feature. Keep it a
+# dev-dependency so the published crate does not pull in a system clock.
+chrono = { workspace = true, features = ["now"] }
+
 [lints]
 workspace = true

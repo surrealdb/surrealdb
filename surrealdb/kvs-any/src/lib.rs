@@ -4,7 +4,9 @@
 //! constructs the right datastore from a connection path string (e.g.
 //! `memory`, `rocksdb://path`, `tikv://...`), exposing it behind the
 //! [`TransactionBuilder`] abstraction. Each backend is gated behind a
-//! matching `kv-*` cargo feature.
+//! matching `kv-*` cargo feature. The IndexedDB backend additionally only
+//! exists on WASM targets: on native targets the `kv-indxdb` feature is
+//! inert and `indxdb:` paths fail with a "not enabled" error.
 //!
 //! <section class="warning">
 //! <h3>Unstable!</h3>
@@ -23,7 +25,7 @@ use surrealdb_kvs::api::{BoxFut, Transactable};
 use surrealdb_kvs::builder::requirements::TransactionBuilderRequirements;
 use surrealdb_kvs::err::{Error, Result};
 use surrealdb_kvs::{Metrics, TransactionBuilder, TransactionType};
-#[cfg(feature = "kv-indxdb")]
+#[cfg(all(feature = "kv-indxdb", target_family = "wasm"))]
 pub use surrealdb_kvs_indxdb as indxdb;
 #[cfg(feature = "kv-mem")]
 pub use surrealdb_kvs_mem as mem;
@@ -45,7 +47,7 @@ pub enum DatastoreFlavor {
 	Mem(mem::Datastore),
 	#[cfg(feature = "kv-rocksdb")]
 	RocksDB(rocksdb::Datastore),
-	#[cfg(feature = "kv-indxdb")]
+	#[cfg(all(feature = "kv-indxdb", target_family = "wasm"))]
 	IndxDB(indxdb::Datastore),
 	#[cfg(feature = "kv-tikv")]
 	TiKV(tikv::Datastore),
@@ -164,13 +166,13 @@ pub async fn new_transaction_builder(
 		}
 		// Initiate an IndxDB database
 		(flavour @ "indxdb", path) => {
-			#[cfg(feature = "kv-indxdb")]
+			#[cfg(all(feature = "kv-indxdb", target_family = "wasm"))]
 			{
 				let v = indxdb::Datastore::new(&path).await.map(DatastoreFlavor::IndxDB)?;
 				info!(target: TARGET, "Started {flavour} kvs store");
 				Ok(Box::new(v) as Box<dyn TransactionBuilder>)
 			}
-			#[cfg(not(feature = "kv-indxdb"))]
+			#[cfg(not(all(feature = "kv-indxdb", target_family = "wasm")))]
 			Err(Error::Datastore("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()))
 		}
 		// Initiate a TiKV datastore
@@ -236,7 +238,7 @@ impl TransactionBuilder for DatastoreFlavor {
 					let tx = v.transaction(write).await?;
 					(tx, true)
 				}
-				#[cfg(feature = "kv-indxdb")]
+				#[cfg(all(feature = "kv-indxdb", target_family = "wasm"))]
 				Self::IndxDB(v) => {
 					let tx = v.transaction(write).await?;
 					(tx, true)
@@ -285,7 +287,7 @@ impl TransactionBuilder for DatastoreFlavor {
 				Self::Mem(v) => v.shutdown().await,
 				#[cfg(feature = "kv-rocksdb")]
 				Self::RocksDB(v) => v.shutdown().await,
-				#[cfg(feature = "kv-indxdb")]
+				#[cfg(all(feature = "kv-indxdb", target_family = "wasm"))]
 				Self::IndxDB(v) => v.shutdown().await,
 				#[cfg(feature = "kv-tikv")]
 				Self::TiKV(v) => v.shutdown().await,
@@ -319,7 +321,7 @@ impl Display for DatastoreFlavor {
 			Self::Mem(_) => write!(f, "memory"),
 			#[cfg(feature = "kv-rocksdb")]
 			Self::RocksDB(_) => write!(f, "rocksdb"),
-			#[cfg(feature = "kv-indxdb")]
+			#[cfg(all(feature = "kv-indxdb", target_family = "wasm"))]
 			Self::IndxDB(_) => write!(f, "indxdb"),
 			#[cfg(feature = "kv-tikv")]
 			Self::TiKV(_) => write!(f, "tikv"),
