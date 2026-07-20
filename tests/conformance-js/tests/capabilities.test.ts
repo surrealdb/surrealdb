@@ -426,3 +426,119 @@ test("--unauthenticated + --deny-guests: auth off overrides deny-guests, guest q
 		await server.stop();
 	}
 }, 30000);
+
+// ---------------------------------------------------------------------------
+// eval::surql / eval::gql capability gate. `eval` evaluates a nested query and
+// is protected by a DEDICATED eval-query subject gate on top of the ordinary
+// function-family and arbitrary-query gates. That eval gate DEFAULTS TO DENIED
+// for every subject and — unlike arbitrary-query — is NOT enabled by
+// --allow-all; it must be turned on explicitly with --allow-eval-query=<targets>
+// (guest|record|system, "*"/empty = all). Denial surfaces exactly like any
+// other denied function: a per-statement ERR envelope, kind NotAllowed,
+// details.kind Function, message "Function 'eval::surql' is not allowed".
+// ---------------------------------------------------------------------------
+
+test("default caps: eval::surql is denied even though ordinary functions run", async () => {
+	const server = await startServer();
+	try {
+		// A plain function runs under default caps...
+		const ok = firstEnv(await rootQuery(server, "RETURN string::len('123');"));
+		expect(ok.status).toBe("OK");
+		expect(ok.result).toBe(3);
+
+		// ...but eval is off by default: denied as a FUNCTION, not a query error.
+		const env = firstEnv(await rootQuery(server, "RETURN eval::surql('RETURN 1');"));
+		expect(env.status).toBe("ERR");
+		expect(env.kind).toBe("NotAllowed");
+		expect(env.details?.kind).toBe("Function");
+		expect(env.details?.details?.name).toBe("eval::surql");
+		expect(String(env.result)).toContain("Function 'eval::surql' is not allowed");
+	} finally {
+		await server.stop();
+	}
+}, 30000);
+
+test("--allow-all does NOT rescue eval::surql — it stays denied", async () => {
+	// The headline of the eval gate: --allow-all opens every other capability
+	// (guests, scripting, net) but eval-query stays denied for every subject.
+	const server = await startServer({ args: ["--allow-all"] });
+	try {
+		const env = firstEnv(await rootQuery(server, "RETURN eval::surql('RETURN 1');"));
+		expect(env.status).toBe("ERR");
+		expect(env.kind).toBe("NotAllowed");
+		expect(env.details?.kind).toBe("Function");
+		expect(String(env.result)).toContain("Function 'eval::surql' is not allowed");
+	} finally {
+		await server.stop();
+	}
+}, 30000);
+
+test("--allow-eval-query=system: root eval::surql runs, including with bindings", async () => {
+	const server = await startServer({ args: ["--allow-eval-query=system"] });
+	try {
+		const env = firstEnv(await rootQuery(server, "RETURN eval::surql('RETURN 1 + 2');"));
+		expect(env.status).toBe("OK");
+		expect(env.result).toBe(3);
+
+		// The second argument is a bindings object seen by the nested query.
+		const bound = firstEnv(
+			await rootQuery(server, "RETURN eval::surql('RETURN $x', { x: 5 });"),
+		);
+		expect(bound.status).toBe("OK");
+		expect(bound.result).toBe(5);
+	} finally {
+		await server.stop();
+	}
+}, 30000);
+
+test("--allow-eval-query=system: eval::gql reaches the GQL parser (needs a MATCH clause)", async () => {
+	// With the eval gate satisfied for `system`, eval::gql is reached and the
+	// argument is handed to the GQL parser. A trivial SurrealQL-looking body is
+	// not valid GQL: GQL requires a MATCH clause, so the call fails inside the
+	// function with kind "Internal" — NOT a NotAllowed denial. This pins that the
+	// eval capability itself is satisfied and the failure is a GQL-parse limit.
+	const server = await startServer({ args: ["--allow-eval-query=system"] });
+	try {
+		const env = firstEnv(await rootQuery(server, "RETURN eval::gql('RETURN 1');"));
+		expect(env.status).toBe("ERR");
+		expect(env.kind).toBe("Internal");
+		expect(env.kind).not.toBe("NotAllowed");
+		expect(String(env.result)).toContain("eval::gql()");
+		expect(String(env.result)).toContain("A query without a MATCH clause is not supported yet");
+	} finally {
+		await server.stop();
+	}
+}, 30000);
+
+test("--allow-eval-query=system + --deny-eval-query=system: the deny removes it again", async () => {
+	const server = await startServer({
+		args: ["--allow-eval-query=system", "--deny-eval-query=system"],
+	});
+	try {
+		const env = firstEnv(await rootQuery(server, "RETURN eval::surql('RETURN 1');"));
+		expect(env.status).toBe("ERR");
+		expect(env.kind).toBe("NotAllowed");
+		expect(env.details?.kind).toBe("Function");
+		expect(String(env.result)).toContain("Function 'eval::surql' is not allowed");
+	} finally {
+		await server.stop();
+	}
+}, 30000);
+
+test("--allow-eval-query=system does NOT cover a guest subject", async () => {
+	// The eval gate is per-subject: allowing `system` leaves `guest` denied.
+	// Guests are enabled so the query itself reaches eval (a per-statement ERR),
+	// rather than being refused at the door as a top-level -32002.
+	const server = await startServer({
+		args: ["--allow-guests", "--allow-eval-query=system"],
+	});
+	try {
+		const env = firstEnv(await guestQuery(server, "RETURN eval::surql('RETURN 1');"));
+		expect(env.status).toBe("ERR");
+		expect(env.kind).toBe("NotAllowed");
+		expect(env.details?.kind).toBe("Function");
+		expect(String(env.result)).toContain("Function 'eval::surql' is not allowed");
+	} finally {
+		await server.stop();
+	}
+}, 30000);

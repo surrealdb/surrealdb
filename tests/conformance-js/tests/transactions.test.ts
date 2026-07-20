@@ -2,6 +2,8 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import {
 	AlreadyExistsError,
 	QueryError,
+	RecordId,
+	Table,
 	ThrownError,
 	ValidationError,
 	isRetryableConflict,
@@ -299,6 +301,167 @@ test("concurrent transactions writing the same record: first commit wins, second
 	const [final] = await db.query<[Array<{ who: string }>]>("SELECT * FROM ti:1").json();
 	expect(final).toHaveLength(1);
 	expect(final[0].who).toBe("a");
+
+	await db.close();
+});
+
+// The SDK's bound CRUD verbs (create / update / merge / delete / insert /
+// relate / select) each carry the transaction's UUID, so a write made through
+// them stays inside the transaction: read-your-write holds on the txn handle,
+// but the outer session sees nothing until commit(). Note there is no standalone
+// merge() verb — merge is a builder on update()/upsert(). Bound verbs resolve to
+// rich values (RecordId etc.); .json() maps them to plain shapes below.
+
+test("txn.create(): visible to txn.select, invisible to outer session until commit", async () => {
+	const { db } = await rootClient(server);
+	await db.query("DEFINE TABLE tj");
+
+	const txn = await db.beginTransaction();
+
+	// create(recordId) resolves to a single record (not an array).
+	const created = await txn.create(new RecordId("tj", 1)).content({ n: 1 }).json();
+	expect(created).toEqual({ id: "tj:1", n: 1 });
+
+	// Read-your-write inside the txn via the bound select verb.
+	const inside = await txn.select(new RecordId("tj", 1)).json();
+	expect(inside).toEqual({ id: "tj:1", n: 1 });
+
+	// The outer session's bound select carries no txn UUID and sees nothing.
+	const outside = await db.select(new Table("tj")).json();
+	expect(outside).toHaveLength(0);
+
+	await txn.commit();
+	const after = await db.select(new Table("tj")).json();
+	expect(after).toEqual([{ id: "tj:1", n: 1 }]);
+
+	await db.close();
+});
+
+test("txn.update / txn.update().merge(): changes invisible outside until commit", async () => {
+	const { db } = await rootClient(server);
+	await db.query("DEFINE TABLE tk; CREATE tk:1 SET label = 'orig1'; CREATE tk:2 SET label = 'orig2'");
+
+	const txn = await db.beginTransaction();
+
+	// content() replaces the whole record; merge() keeps existing fields.
+	const upd = await txn.update(new RecordId("tk", 1)).content({ label: "new1", extra: 1 }).json();
+	expect(upd).toEqual({ id: "tk:1", label: "new1", extra: 1 });
+	const mrg = await txn.update(new RecordId("tk", 2)).merge({ merged: true }).json();
+	expect(mrg).toEqual({ id: "tk:2", label: "orig2", merged: true });
+
+	// The outer session still sees the untouched originals.
+	const [outside] = await db
+		.query<[Array<Record<string, unknown>>]>("SELECT * FROM tk ORDER BY id")
+		.json();
+	expect(outside).toEqual([
+		{ id: "tk:1", label: "orig1" },
+		{ id: "tk:2", label: "orig2" },
+	]);
+
+	await txn.commit();
+	const [after] = await db
+		.query<[Array<Record<string, unknown>>]>("SELECT * FROM tk ORDER BY id")
+		.json();
+	expect(after).toEqual([
+		{ id: "tk:1", label: "new1", extra: 1 },
+		{ id: "tk:2", label: "orig2", merged: true },
+	]);
+
+	await db.close();
+});
+
+test("txn.delete(): the row is gone inside the txn but still visible outside until commit", async () => {
+	const { db } = await rootClient(server);
+	await db.query("DEFINE TABLE tl; CREATE tl:1 SET n = 1");
+
+	const txn = await db.beginTransaction();
+
+	// delete(recordId) returns the deleted record.
+	const del = await txn.delete(new RecordId("tl", 1)).json();
+	expect(del).toEqual({ id: "tl:1", n: 1 });
+
+	// Inside the txn the record is gone: select(recordId) resolves to undefined.
+	const insideSel = await txn.select(new RecordId("tl", 1)).json();
+	expect(insideSel).toBeUndefined();
+
+	// The outer session still sees the row.
+	const [outside] = await db.query<[unknown[]]>("SELECT * FROM tl").json();
+	expect(outside).toHaveLength(1);
+
+	await txn.commit();
+	const [after] = await db.query<[unknown[]]>("SELECT * FROM tl").json();
+	expect(after).toHaveLength(0);
+
+	await db.close();
+});
+
+test("txn.insert() (batch): rows invisible outside until commit", async () => {
+	const { db } = await rootClient(server);
+	await db.query("DEFINE TABLE tm");
+
+	const txn = await db.beginTransaction();
+
+	const ins = await txn
+		.insert(new Table("tm"), [
+			{ id: new RecordId("tm", 1), a: 1 },
+			{ id: new RecordId("tm", 2), a: 2 },
+		])
+		.json();
+	expect(ins).toEqual([
+		{ id: "tm:1", a: 1 },
+		{ id: "tm:2", a: 2 },
+	]);
+
+	const [outside] = await db.query<[unknown[]]>("SELECT * FROM tm").json();
+	expect(outside).toHaveLength(0);
+
+	await txn.commit();
+	const [after] = await db.query<[unknown[]]>("SELECT * FROM tm ORDER BY id").json();
+	expect(after).toHaveLength(2);
+
+	await db.close();
+});
+
+test("txn.relate(): the edge is invisible outside until commit", async () => {
+	const { db } = await rootClient(server);
+	await db.query(
+		"DEFINE TABLE tn; DEFINE TABLE tn_edge TYPE RELATION; CREATE tn:a; CREATE tn:b",
+	);
+
+	const txn = await db.beginTransaction();
+
+	// A RecordId edge argument pins the edge id; the result carries in/out links.
+	const rel = await txn
+		.relate(new RecordId("tn", "a"), new RecordId("tn_edge", "e1"), new RecordId("tn", "b"))
+		.json();
+	expect(rel).toEqual({ id: "tn_edge:e1", in: "tn:a", out: "tn:b" });
+
+	const [outside] = await db.query<[unknown[]]>("SELECT * FROM tn_edge").json();
+	expect(outside).toHaveLength(0);
+
+	await txn.commit();
+	const [after] = await db.query<[unknown[]]>("SELECT * FROM tn_edge").json();
+	expect(after).toHaveLength(1);
+
+	await db.close();
+});
+
+test("cancel() discards a bound-verb write", async () => {
+	const { db } = await rootClient(server);
+	await db.query("DEFINE TABLE tp");
+
+	const txn = await db.beginTransaction();
+	const created = await txn.create(new RecordId("tp", 1)).content({ n: 1 }).json();
+	expect(created).toEqual({ id: "tp:1", n: 1 });
+
+	// Read-your-write holds inside the txn before cancel.
+	const [inside] = await txn.query<[unknown[]]>("SELECT * FROM tp").json();
+	expect(inside).toHaveLength(1);
+
+	await txn.cancel();
+
+	const [after] = await db.query<[unknown[]]>("SELECT * FROM tp").json();
+	expect(after).toHaveLength(0);
 
 	await db.close();
 });

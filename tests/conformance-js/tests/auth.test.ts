@@ -269,3 +269,255 @@ test(
 	},
 	20000,
 );
+
+// §4 — access-method types beyond RECORD: BEARER grants, external JWT, AUTHENTICATE.
+
+// Mint an HS256 JWT with WebCrypto (no JWT dependency is available in this suite).
+function base64url(input: string | Uint8Array): string {
+	const bytes = typeof input === "string" ? new TextEncoder().encode(input) : input;
+	let bin = "";
+	for (const b of bytes) bin += String.fromCharCode(b);
+	return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function mintHs256(payload: Record<string, unknown>, secret: string): Promise<string> {
+	const header = base64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
+	const body = base64url(JSON.stringify(payload));
+	const signingInput = `${header}.${body}`;
+	const key = await crypto.subtle.importKey(
+		"raw",
+		new TextEncoder().encode(secret),
+		{ name: "HMAC", hash: "SHA-256" },
+		false,
+		["sign"],
+	);
+	const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(signingInput));
+	return `${signingInput}.${base64url(new Uint8Array(sig))}`;
+}
+
+test("bearer access: a GRANT yields a usable key that signs in at the user's role", async () => {
+	const { db, namespace, database } = await rootClient(server);
+	await db.query(`
+		DEFINE ACCESS api ON DATABASE TYPE BEARER FOR USER DURATION FOR GRANT 4w, FOR TOKEN 1h, FOR SESSION 1h;
+		DEFINE USER tobie ON DATABASE PASSWORD 'secret' ROLES EDITOR;
+	`);
+
+	// The GRANT returns a grant object; the one-time secret key lives at grant.key.
+	// Shape: { ac, creation, expiration, grant: { id, key }, id, subject: { user }, type: "bearer" }.
+	// The key is formatted "surreal-bearer-<id>-<secret>".
+	const [grant] = await db
+		.query<[{ ac: string; type: string; subject: { user: string }; grant: { id: string; key: string } }]>(
+			"ACCESS api ON DATABASE GRANT FOR USER tobie",
+		)
+		.json();
+	expect(grant.ac).toBe("api");
+	expect(grant.type).toBe("bearer");
+	expect(grant.subject).toEqual({ user: "tobie" });
+	expect(grant.grant.id).toBeString();
+	expect(grant.grant.key).toStartWith("surreal-bearer-");
+
+	const client = await guestClient(server, namespace, database);
+	const tokens = await client.signin({ namespace, database, access: "api", key: grant.grant.key });
+	expect(tokens.access).toBeString();
+
+	// The bearer subject is a system user, not a record — $auth is NONE, but the
+	// session carries the access name and the user's role (EDITOR).
+	const [auth] = await client.query<[unknown]>("RETURN $auth").json();
+	expect(auth).toBeUndefined();
+	const [session] = await client
+		.query<[{ ac: string; tk: { AC: string; RL: string[] } }]>("RETURN $session")
+		.json();
+	expect(session.ac).toBe("api");
+	expect(session.tk.RL).toEqual(["EDITOR"]);
+
+	// EDITOR powers: INFO FOR DB reads fine; an owner-only schema write is rejected.
+	const [info] = await client.query<[unknown]>("INFO FOR DB").json();
+	expect(info).toBeDefined();
+	const err = await rejects(client.query("DEFINE USER sneaky ON DATABASE PASSWORD 'x' ROLES OWNER").collect());
+	expect(String(err)).toMatch(/not allowed|permission|IamError/i);
+
+	await client.close();
+	await db.close();
+});
+
+test("bearer access: a bogus key is rejected", async () => {
+	const { db, namespace, database } = await rootClient(server);
+	await db.query(`
+		DEFINE ACCESS api ON DATABASE TYPE BEARER FOR USER DURATION FOR GRANT 4w, FOR TOKEN 1h, FOR SESSION 1h;
+		DEFINE USER tobie ON DATABASE PASSWORD 'secret' ROLES EDITOR;
+	`);
+
+	const client = await guestClient(server, namespace, database);
+	const err = await rejects(
+		client.signin({
+			namespace,
+			database,
+			access: "api",
+			key: "surreal-bearer-AAAAAAAAAAAA-notarealsecretkeyvalue00",
+		}),
+	);
+	expect(String(err)).toMatch(/authentication|not allowed|invalid/i);
+
+	await client.close();
+	await db.close();
+});
+
+test("jwt access: an HS256 token with a roles claim authenticates at that role", async () => {
+	const { db, namespace, database } = await rootClient(server);
+	const secret = "a-shared-secret-that-is-long-enough";
+	await db.query(`DEFINE ACCESS token ON DATABASE TYPE JWT ALGORITHM HS256 KEY '${secret}';`);
+
+	const now = Math.floor(Date.now() / 1000);
+	const jwt = await mintHs256(
+		{ ns: namespace, db: database, ac: "token", rl: ["Owner"], iat: now, exp: now + 3600 },
+		secret,
+	);
+
+	const client = await guestClient(server, namespace, database);
+	await client.authenticate(jwt);
+
+	// A JWT user-level token maps to a system role, not a record: $auth is NONE.
+	// The claims are echoed under $session.tk and the access name under $access.
+	const [auth] = await client.query<[unknown]>("RETURN $auth").json();
+	expect(auth).toBeUndefined();
+	const [access] = await client.query<[string]>("RETURN $access").json();
+	expect(access).toBe("token");
+	const [session] = await client
+		.query<[{ ac: string; tk: { AC: string; RL: string[] } }]>("RETURN $session")
+		.json();
+	expect(session.ac).toBe("token");
+	expect(session.tk.RL).toEqual(["Owner"]);
+
+	// Owner powers: a schema write succeeds (DEFINE returns NONE -> undefined).
+	const [defined] = await client.query<[unknown]>("DEFINE TABLE t1 SCHEMALESS").json();
+	expect(defined).toBeUndefined();
+	const [tables] = await client.query<[{ tables: Record<string, unknown> }]>("INFO FOR DB").json();
+	expect(tables.tables).toHaveProperty("t1");
+
+	await client.close();
+	await db.close();
+});
+
+test("jwt access: a token with no roles claim silently authenticates as VIEWER", async () => {
+	const { db, namespace, database } = await rootClient(server);
+	const secret = "a-shared-secret-that-is-long-enough";
+	await db.query(`DEFINE ACCESS token ON DATABASE TYPE JWT ALGORITHM HS256 KEY '${secret}';`);
+
+	const now = Math.floor(Date.now() / 1000);
+	// Same token as above but with the rl claim omitted entirely.
+	const jwt = await mintHs256(
+		{ ns: namespace, db: database, ac: "token", iat: now, exp: now + 3600 },
+		secret,
+	);
+
+	const client = await guestClient(server, namespace, database);
+	await client.authenticate(jwt);
+
+	// Observed: a valid token missing rl authenticates rather than being rejected,
+	// and lands at VIEWER — reads succeed but any write is denied.
+	const [info] = await client.query<[unknown]>("INFO FOR DB").json();
+	expect(info).toBeDefined();
+	const err = await rejects(client.query("DEFINE TABLE t2 SCHEMALESS").collect());
+	expect(String(err)).toMatch(/not allowed|permission|IamError/i);
+
+	await client.close();
+	await db.close();
+});
+
+test("jwt access: a token signed with the wrong key is rejected", async () => {
+	const { db, namespace, database } = await rootClient(server);
+	const secret = "a-shared-secret-that-is-long-enough";
+	await db.query(`DEFINE ACCESS token ON DATABASE TYPE JWT ALGORITHM HS256 KEY '${secret}';`);
+
+	const now = Math.floor(Date.now() / 1000);
+	const jwt = await mintHs256(
+		{ ns: namespace, db: database, ac: "token", rl: ["Owner"], iat: now, exp: now + 3600 },
+		"a-different-secret-that-is-also-long-enough",
+	);
+
+	const client = await guestClient(server, namespace, database);
+	const err = await rejects(client.authenticate(jwt));
+	expect(String(err)).toMatch(/authentication|not allowed|invalid|token/i);
+
+	await client.close();
+	await db.close();
+});
+
+const AUTHENTICATE_ACCESS_SETUP = `
+	DEFINE TABLE user SCHEMALESS PERMISSIONS FOR select WHERE id = $auth;
+	DEFINE ACCESS account ON DATABASE TYPE RECORD
+		SIGNUP ( CREATE user SET email = $email, enabled = $enabled )
+		SIGNIN ( SELECT * FROM user WHERE email = $email )
+		AUTHENTICATE { IF !$auth.enabled { THROW 'account disabled' }; RETURN $auth; }
+		DURATION FOR TOKEN 15m, FOR SESSION 12h;
+`;
+
+test("authenticate clause: signin succeeds for an enabled account and is rejected for a disabled one", async () => {
+	const { db, namespace, database } = await rootClient(server);
+	await db.query(AUTHENTICATE_ACCESS_SETUP);
+
+	// The AUTHENTICATE clause runs on signup too, so a disabled account cannot even
+	// be created through the access method — seed the rows directly as root instead.
+	await db.query(`
+		CREATE user SET email = 'enabled@example.com', enabled = true;
+		CREATE user SET email = 'disabled@example.com', enabled = false;
+	`);
+
+	// $auth inside AUTHENTICATE is the record returned by SIGNIN; a false enabled
+	// flag makes the clause THROW and the signin fails with the thrown message.
+	const denied = await guestClient(server, namespace, database);
+	const err = await rejects(
+		denied.signin({
+			namespace,
+			database,
+			access: "account",
+			variables: { email: "disabled@example.com" },
+		}),
+	);
+	expect(String(err)).toMatch(/account disabled/i);
+	await denied.close();
+
+	const allowed = await guestClient(server, namespace, database);
+	const tokens = await allowed.signin({
+		namespace,
+		database,
+		access: "account",
+		variables: { email: "enabled@example.com" },
+	});
+	expect(tokens.access).toBeString();
+	const [auth] = await allowed.query<[string]>("RETURN $auth").json();
+	expect(String(auth)).toMatch(/^user:/);
+
+	await allowed.close();
+	await db.close();
+});
+
+test("authenticate clause: a THROW blocks signup as well as signin", async () => {
+	const { db, namespace, database } = await rootClient(server);
+	await db.query(AUTHENTICATE_ACCESS_SETUP);
+
+	// Because AUTHENTICATE runs on the freshly-created record during signup, a
+	// disabled signup is rejected with the same thrown message.
+	const client = await guestClient(server, namespace, database);
+	const err = await rejects(
+		client.signup({
+			namespace,
+			database,
+			access: "account",
+			variables: { email: "newbie@example.com", enabled: false },
+		}),
+	);
+	expect(String(err)).toMatch(/account disabled/i);
+
+	// An enabled signup passes the clause and yields a token.
+	const tokens = await client.signup({
+		namespace,
+		database,
+		access: "account",
+		variables: { email: "welcome@example.com", enabled: true },
+	});
+	expect(tokens.access).toBeString();
+
+	await client.close();
+	await db.close();
+});

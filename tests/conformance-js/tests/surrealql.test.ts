@@ -456,3 +456,201 @@ test("UPDATE ... CONTENT replaces the whole record body", async () => {
 		await db.close();
 	});
 });
+
+test("DEFINE FIELD ASSERT rejects a violating write and admits a conforming one", async () => {
+	await withServer(async (server) => {
+		const { db } = await rootClient(server);
+		await db
+			.query("DEFINE FIELD age ON person TYPE int ASSERT $value >= 0")
+			.collect();
+
+		// A value that fails the assertion aborts the statement with the
+		// field/record/constraint triple.
+		const boom = db
+			.query("CREATE person:test SET age = -1")
+			.collect()
+			.then(() => null)
+			.catch((e) => e as Error);
+		const err = await boom;
+		expect(err).toBeInstanceOf(Error);
+		expect((err as Error).message).toContain(
+			"Found -1 for field `age`, with record `person:test`, but field must conform to: $value >= 0",
+		);
+
+		// A conforming value is stored unchanged.
+		const [rows] = (await db.query("CREATE person:ok SET age = 5").json()) as [
+			Array<{ id: string; age: number }>,
+		];
+		expect(rows).toEqual([{ id: "person:ok", age: 5 }]);
+
+		await db.close();
+	});
+});
+
+test("DEFINE FIELD READONLY refuses an update after creation", async () => {
+	await withServer(async (server) => {
+		const { db } = await rootClient(server);
+		await db
+			.query(
+				`DEFINE TABLE person SCHEMAFULL;
+				 DEFINE FIELD code ON person TYPE string READONLY;
+				 DEFINE FIELD name ON person TYPE string;`,
+			)
+			.collect();
+
+		// The readonly field is settable on the initial CREATE.
+		const [created] = (await db
+			.query("CREATE person:test SET code = 'abc', name = 'A'")
+			.json()) as [Array<{ id: string; code: string; name: string }>];
+		expect(created).toEqual([{ id: "person:test", code: "abc", name: "A" }]);
+
+		// Any subsequent write that changes it is refused.
+		const boom = db
+			.query("UPDATE person:test SET code = 'xyz'")
+			.collect()
+			.then(() => null)
+			.catch((e) => e as Error);
+		const err = await boom;
+		expect(err).toBeInstanceOf(Error);
+		expect((err as Error).message).toContain(
+			"Found changed value for field `code`, with record `person:test`, but field is readonly",
+		);
+
+		// The stored value is untouched, and a non-readonly field still updates.
+		const [after] = (await db
+			.query("UPDATE person:test SET name = 'B'")
+			.json()) as [Array<{ id: string; code: string; name: string }>];
+		expect(after).toEqual([{ id: "person:test", code: "abc", name: "B" }]);
+
+		await db.close();
+	});
+});
+
+test("DEFINE FIELD VALUE computes the field from other fields on write", async () => {
+	await withServer(async (server) => {
+		const { db } = await rootClient(server);
+		await db
+			.query(
+				`DEFINE FIELD name ON t TYPE string;
+				 DEFINE FIELD slug ON t VALUE string::lowercase(name);`,
+			)
+			.collect();
+
+		// The computed field ignores any supplied value and derives from `name`.
+		const [created] = (await db
+			.query("CREATE t:1 SET name = 'Hello World', slug = 'ignored'")
+			.json()) as [Array<{ id: string; name: string; slug: string }>];
+		expect(created).toEqual([
+			{ id: "t:1", name: "Hello World", slug: "hello world" },
+		]);
+
+		// It recomputes when the source field changes on update.
+		const [updated] = (await db
+			.query("UPDATE t:1 SET name = 'GOODBYE'")
+			.json()) as [Array<{ id: string; name: string; slug: string }>];
+		expect(updated).toEqual([{ id: "t:1", name: "GOODBYE", slug: "goodbye" }]);
+
+		await db.close();
+	});
+});
+
+test("DEFINE FIELD DEFAULT fills a missing field on CREATE", async () => {
+	await withServer(async (server) => {
+		const { db } = await rootClient(server);
+		await db
+			.query("DEFINE FIELD status ON t DEFAULT 'active';")
+			.collect();
+
+		// Omitting the field takes the default.
+		const [defaulted] = (await db.query("CREATE t:1 SET n = 1").json()) as [
+			Array<{ id: string; n: number; status: string }>,
+		];
+		expect(defaulted).toEqual([{ id: "t:1", n: 1, status: "active" }]);
+
+		// An explicit value overrides the default.
+		const [explicit] = (await db
+			.query("CREATE t:2 SET n = 2, status = 'archived'")
+			.json()) as [Array<{ id: string; n: number; status: string }>];
+		expect(explicit).toEqual([{ id: "t:2", n: 2, status: "archived" }]);
+
+		await db.close();
+	});
+});
+
+test("multi-hop forward traversal follows the edge chain across nodes", async () => {
+	await withServer(async (server) => {
+		const { db } = await rootClient(server);
+		await db
+			.query(
+				`CREATE person:a SET name = 'A';
+				 CREATE person:b SET name = 'B';
+				 CREATE person:c SET name = 'C';
+				 RELATE person:a->knows->person:b;
+				 RELATE person:b->knows->person:c;`,
+			)
+			.collect();
+
+		// Two hops from a reach c.
+		const [reached] = (await db
+			.query("SELECT VALUE ->knows->person->knows->person.name FROM person:a")
+			.json()) as [string[][]];
+		expect(reached).toEqual([["C"]]);
+
+		await db.close();
+	});
+});
+
+test("reverse traversal follows edges inbound", async () => {
+	await withServer(async (server) => {
+		const { db } = await rootClient(server);
+		await db
+			.query(
+				`CREATE person:a SET name = 'A';
+				 CREATE person:b SET name = 'B';
+				 CREATE person:c SET name = 'C';
+				 RELATE person:a->knows->person:b;
+				 RELATE person:b->knows->person:c;`,
+			)
+			.collect();
+
+		// One reverse hop from c reaches b.
+		const [oneBack] = (await db
+			.query("SELECT VALUE <-knows<-person.name FROM person:c")
+			.json()) as [string[][]];
+		expect(oneBack).toEqual([["B"]]);
+
+		// Two reverse hops from c reach a.
+		const [twoBack] = (await db
+			.query("SELECT VALUE <-knows<-person<-knows<-person.name FROM person:c")
+			.json()) as [string[][]];
+		expect(twoBack).toEqual([["A"]]);
+
+		await db.close();
+	});
+});
+
+test("bidirectional traversal reaches neighbours on either side", async () => {
+	await withServer(async (server) => {
+		const { db } = await rootClient(server);
+		await db
+			.query(
+				`CREATE person:a SET name = 'A';
+				 CREATE person:b SET name = 'B';
+				 CREATE person:c SET name = 'C';
+				 RELATE person:a->knows->person:b;
+				 RELATE person:b->knows->person:c;`,
+			)
+			.collect();
+
+		// Each `<->knows` from b matches both its inbound (a->b) and outbound
+		// (b->c) edge, and the trailing `<->person` resolves BOTH endpoints of
+		// every matched edge — so b itself surfaces twice alongside a and c.
+		const [network] = (await db
+			.query("SELECT VALUE <->knows<->person.name FROM person:b")
+			.json()) as [string[][]];
+		expect(network).toHaveLength(1);
+		expect([...network[0]].sort()).toEqual(["A", "B", "B", "C"]);
+
+		await db.close();
+	});
+});

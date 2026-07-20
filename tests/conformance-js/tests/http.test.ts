@@ -1222,4 +1222,119 @@ let counter = 0;
 			await server.stop();
 		}
 	}, 30000);
+
+	// ---------------------------------------------------------------------------
+	// Custom API endpoint: /api/{ns}/{db}/{*path} (DEFINE API)
+	// ---------------------------------------------------------------------------
+
+	test("/api/{ns}/{db}/{path} serves a DEFINE API handler; the HTTP body is the handler body itself", async () => {
+		// The custom-endpoint route takes ns/db from the URL path (not headers) and
+		// dispatches to a matching DEFINE API handler for that method.
+		const server = await startServer();
+		try {
+			const { ns, db } = await defineNsDb(server);
+
+			// A handler whose `body` is a structured value must opt into serialization
+			// with the api::res::body middleware; the HTTP layer only accepts a None,
+			// bytes, or string body straight from the handler.
+			await sql(
+				server,
+				`DEFINE API "/hello" FOR get MIDDLEWARE api::res::body("json")
+					THEN { { status: 200, body: { message: "Hello, World!" } } };`,
+				{ ns, db },
+			);
+
+			const res = await send(server, "GET", `/api/${ns}/${db}/hello`);
+			expect(res.status).toBe(200);
+			expect(res.headers.get("content-type")).toMatch(/^application\/json/);
+			// The response body is the handler's `body` value directly — NOT wrapped in
+			// the { status, body, headers } object the handler returns.
+			expect(await res.json()).toEqual({ message: "Hello, World!" });
+
+			// Surprising: without a serializing middleware, a structured (object) body
+			// is a 500 — the HTTP layer cannot encode it and refuses the response.
+			await sql(
+				server,
+				`DEFINE API "/raw" FOR get THEN { { status: 200, body: { nope: true } } };`,
+				{ ns, db },
+			);
+			const raw = await send(server, "GET", `/api/${ns}/${db}/raw`);
+			expect(raw.status).toBe(500);
+			expect(String((await raw.json()).description)).toMatch(
+				/HTTP API response body must be None, bytes, or string/,
+			);
+
+			// A string body needs no middleware: it is returned verbatim as octet-stream.
+			await sql(
+				server,
+				`DEFINE API "/str" FOR get THEN { { status: 200, body: "plain text hi" } };`,
+				{ ns, db },
+			);
+			const str = await send(server, "GET", `/api/${ns}/${db}/str`);
+			expect(str.status).toBe(200);
+			expect(await str.text()).toBe("plain text hi");
+
+			// Method mismatch (handler is FOR get, called with POST) is a 404, not a 405.
+			const wrongMethod = await send(server, "POST", `/api/${ns}/${db}/hello`);
+			expect(wrongMethod.status).toBe(404);
+		} finally {
+			await server.stop();
+		}
+	}, 30000);
+
+	test("/api routes are per-(ns,db): a handler defined in one tenant is 404 in another", async () => {
+		// The API handler is scoped to the ns/db it was defined in. Requesting the
+		// same path under a different (existing) ns/db must not find it.
+		const server = await startServer();
+		try {
+			const one = await defineNsDb(server);
+			const two = await defineNsDb(server);
+
+			await sql(
+				server,
+				`DEFINE API "/hello" FOR get MIDDLEWARE api::res::body("json")
+					THEN { { status: 200, body: { message: "Hello, World!" } } };`,
+				{ ns: one.ns, db: one.db },
+			);
+
+			// Defined tenant: found.
+			const found = await send(server, "GET", `/api/${one.ns}/${one.db}/hello`);
+			expect(found.status).toBe(200);
+
+			// Different existing tenant where it was NOT defined: not found.
+			const cross = await send(server, "GET", `/api/${two.ns}/${two.db}/hello`);
+			expect(cross.status).toBe(404);
+			expect(await cross.text()).toBe("Not found");
+		} finally {
+			await server.stop();
+		}
+	}, 30000);
+
+	test("--deny-http=api forbids the custom-endpoint route while leaving other routes reachable", async () => {
+		// The /api route is default-ON and gated by RouteTarget::Api; denying it
+		// yields the standard forbidden-route 403, but /sql and /health still serve.
+		const server = await startServer({ args: ["--deny-http=api"] });
+		try {
+			const { ns, db } = await defineNsDb(server);
+			await sql(
+				server,
+				`DEFINE API "/hello" FOR get MIDDLEWARE api::res::body("json")
+					THEN { { status: 200, body: { message: "Hello, World!" } } };`,
+				{ ns, db },
+			);
+
+			const denied = await send(server, "GET", `/api/${ns}/${db}/hello`);
+			expect(denied.status).toBe(403);
+			expect(String((await denied.json()).information)).toBe("The HTTP route 'api' is forbidden");
+
+			// Other routes on the same server are unaffected.
+			const query = await sql(server, "RETURN 1", { ns, db });
+			expect(query.status).toBe(200);
+			const [queryEnv] = (await query.json()) as Envelope[];
+			expect(queryEnv).toMatchObject({ status: "OK", result: 1 });
+			expect((await send(server, "GET", "/health")).status).toBe(200);
+		} finally {
+			await server.stop();
+		}
+	}, 30000);
 }

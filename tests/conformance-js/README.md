@@ -3,10 +3,13 @@
 Server-behavior conformance tests driven through the JavaScript SDK. This is
 **not** an SDK test suite: the SDK is the driver, the server is the subject.
 It covers connection-level behavior that `.surql` language tests cannot
-express — authentication and refresh-token lifecycle, live queries, session
-semantics (including multiplexed sessions), transactions and concurrent-writer
-conflicts, wire-level value mapping, and the HTTP, GraphQL, and ISO GQL
-endpoints (driven with raw `fetch` where the SDK has no surface for them).
+express — authentication (record, BEARER, external JWT, the `AUTHENTICATE`
+clause) and refresh-token lifecycle, live queries, session semantics (including
+multiplexed sessions), transactions and concurrent-writer conflicts, capability
+gating, schema-constraint enforcement (`DEFINE FIELD`/`INDEX`/`EVENT`),
+full-text and vector search, wire-level value mapping, and the HTTP, GraphQL,
+ISO GQL, and custom-API endpoints (driven with raw `fetch` where the SDK has no
+surface for them).
 
 ## Running
 
@@ -110,16 +113,56 @@ landed on `main` but is not yet in a stable release.
     envelope (`kind: "NotAllowed"`, `details.kind` `Function`/`Target`) inside a
     successful `query` RPC, whereas an anonymous guest denial is a TOP-LEVEL
     JSON-RPC error (code `-32002`) (`capabilities`).
+  - `eval::surql` / `eval::gql` are denied for every subject by default and are
+    NOT rescued by `--allow-all`; they need `--allow-eval-query=<subject>` on
+    top of the arbitrary-query gate. Once the eval gate passes, `eval::gql`
+    reaches the GQL parser, so a query with no `MATCH` clause fails there with a
+    kind `Internal` parse error, not a capability denial (`capabilities`).
+  - The arbitrary-query subject gate (`--deny-arbitrary-query=system`) denies
+    the RPC verbs themselves — `query`, the CRUD verbs, `run`, and even `use` —
+    with a TOP-LEVEL `-32602` "Method not allowed" (the same surface as
+    `--deny-rpc`), while `ping`/`version`/`signin` still run (`websocket`).
+  - Custom APIs: the `/api/{ns}/{db}/{*path}` route is default-on, and
+    `DEFINE API` defaults to `PERMISSIONS FULL`, so an anonymous caller reaches
+    a FULL handler. The HTTP response body is the handler's `body` value itself,
+    not the `{status, body, headers}` object; a structured (object) body needs
+    `MIDDLEWARE api::res::body("json")` (a string body is returned verbatim as
+    `application/octet-stream`) or the layer answers 500; a method mismatch is
+    404, not 405; a path is per-`(ns, db)` (404 under a different database)
+    (`http`).
+  - Access methods: a user-level JWT missing the `rl` (roles) claim silently
+    authenticates as VIEWER rather than being rejected; the `AUTHENTICATE`
+    clause runs on signup as well as signin; for user-level BEARER/JWT auth
+    `$auth` is NONE and the role/claims live under `$session.tk` (`auth`).
+  - A `UNIQUE` index on an array field indexes each ELEMENT independently — two
+    rows collide when they share any single element, and the violation (an
+    `InternalError`: "Database index `X` already contains VALUE, with record
+    `RID`") names the one overlapping element, not the array (`indexes`).
+  - Full-text BM25 uses a Robertson IDF clamped at 0, so a term present in a
+    majority (> half) of documents scores exactly 0 for every matched row even
+    though the rows still match and are returned (`search`).
+  - `DEFINE EVENT`: `$event` is exactly `CREATE`/`UPDATE`/`DELETE`; `$before` is
+    absent on CREATE and `$after` absent on DELETE; inside a nested `CREATE` in
+    the event body a bare `$this` rebinds to the row being created, so the
+    triggering document must be captured with `LET $doc = $this` (`$value`
+    always tracks the triggering doc) (`events`).
+  - Wire types: a bound `Uint8Array` (and a `<bytes>` cast) decodes back as an
+    `ArrayBuffer`, not a `Uint8Array`; a `BigInt` beyond 2^53 roundtrips as a
+    native `bigint` exactly, including as a record-id key part — no float
+    precision loss (`surrealql-wire`).
 
 ## Scope grown so far / next
 
 - [x] Auth: root/system users, roles, record access (signup/signin),
-      token authenticate/invalidate, session expiry
+      token authenticate/invalidate, session expiry; BEARER access grants +
+      `signin({access, key})`, external JWT access (roles→level mapping, the
+      missing-`rl`→VIEWER default), and the `AUTHENTICATE` clause (`auth`)
 - [x] Refresh tokens: `WITH REFRESH` definitions, rotation via
       `authenticate({access, refresh})`, single-use reuse detection, grant
       revocation and `DURATION FOR GRANT` expiry, `invalidate()` scope
 - [x] Live queries: CRUD actions, cross-connection delivery, kill,
-      permission-filtered delivery, multi-subscriber
+      permission-filtered delivery (CREATE, UPDATE, and DELETE arms),
+      `WHERE`-filtered live streams, multi-subscriber
 - [x] Sessions: use, set/unset, per-connection isolation, binding scope
 - [x] Multiplexed sessions: newSession/forkSession/sessions/closeSession,
       per-session auth + ns/db + params on one WebSocket, live-query
@@ -160,6 +203,24 @@ landed on `main` but is not yet in a stable release.
       HTTP, incl. hostile-identifier escaping), and query-result shapes —
       bindings, ORDER BY/START/LIMIT, record-id ranges, FETCH, DELETE ranges,
       decimal coercion, UPDATE CONTENT (`changefeeds`, `backup`, `surrealql`)
+- [x] Schema-constraint enforcement: `DEFINE FIELD` `ASSERT`/`READONLY`/`VALUE`/
+      `DEFAULT`, `DEFINE INDEX ... UNIQUE` (single/composite/array), and
+      `DEFINE EVENT` triggers (`$before`/`$after`/`$event`) (`surrealql`,
+      `indexes`, `events`)
+- [x] Search: full-text (`DEFINE ANALYZER`, `SEARCH ... BM25` index, `@@`,
+      `search::score`/`search::highlight`) and vector KNN (`HNSW` index,
+      `<|K|>`, `vector::distance::*`) (`search`)
+- [x] Graph traversal: multi-hop and reverse/bidirectional edge walks
+      (`->e->n`, `<-e<-n`, `<->e<->n`) (`surrealql`)
+- [x] `eval::surql` / `eval::gql` capability gate (`capabilities`) and the
+      arbitrary-query subject gate on the RPC verbs, not just `/sql`
+      (`websocket`)
+- [x] Custom API endpoints: `DEFINE API` + the `/api/{ns}/{db}/{*path}` route —
+      handler dispatch, body serialization middleware, cross-tenant isolation,
+      and `--deny-http=api` route gating (`http`)
+- [x] SDK transaction bound CRUD: `create`/`update`/`merge`/`delete`/`insert`/
+      `relate`/`select` on a `beginTransaction()` handle stay isolated until
+      commit and never auto-commit (`transactions`)
 - [ ] Access-grant purge (`ACCESS ... PURGE REVOKED` — note it applies an
       implicit grace window; pass an explicit `FOR <duration>` when testing)
 

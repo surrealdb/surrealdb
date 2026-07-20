@@ -3,6 +3,14 @@ import {
 	DateTime,
 	Decimal,
 	Duration,
+	Geometry,
+	GeometryCollection,
+	GeometryLine,
+	GeometryMultiLine,
+	GeometryMultiPoint,
+	GeometryMultiPolygon,
+	GeometryPoint,
+	GeometryPolygon,
 	RecordId,
 	StringRecordId,
 	Uuid,
@@ -363,6 +371,148 @@ test("NONE vs NULL distinction survives both typed collect and .json()", async (
 		.json();
 	expect(rec[0]).toEqual({ id: "nn_probe:one", b: null });
 	expect("a" in rec[0]).toBe(false);
+
+	await db.close();
+});
+
+test("binary values roundtrip as ArrayBuffer through bindings, casts, and storage", async () => {
+	const { db } = await rootClient(server);
+
+	const bytes = new Uint8Array([0, 1, 2, 254, 255, 127, 128]);
+
+	// The server sees SurrealQL `bytes`.
+	const [t] = await db.query<[string]>("RETURN type::of($b)", { b: bytes }).json();
+	expect(t).toBe("bytes");
+
+	// Surprising but observed: a bound Uint8Array decodes back as an
+	// ArrayBuffer, NOT a Uint8Array. Wrap in a view to compare contents.
+	const [out] = (await db.query("RETURN $b", { b: bytes })) as [unknown];
+	expect(out).toBeInstanceOf(ArrayBuffer);
+	expect(out).not.toBeInstanceOf(Uint8Array);
+	expect(new Uint8Array(out as ArrayBuffer)).toEqual(bytes);
+
+	// A <bytes> cast produces the same wire type and ArrayBuffer decode.
+	const [castT] = await db.query<[string]>("RETURN type::of(<bytes>'hello')").json();
+	expect(castT).toBe("bytes");
+	const [castOut] = (await db.query("RETURN <bytes>'hello'")) as [unknown];
+	expect(castOut).toBeInstanceOf(ArrayBuffer);
+	expect(new Uint8Array(castOut as ArrayBuffer)).toEqual(
+		new Uint8Array([104, 101, 108, 108, 111]),
+	);
+
+	// Stored in a record and read back, still ArrayBuffer with identical bytes.
+	await db.query("CREATE bin_probe:one SET data = $b", { b: bytes });
+	const [rows] = (await db.query("SELECT * FROM bin_probe:one")) as [
+		Array<{ data: unknown }>,
+	];
+	expect(rows).toHaveLength(1);
+	expect(rows[0].data).toBeInstanceOf(ArrayBuffer);
+	expect(new Uint8Array(rows[0].data as ArrayBuffer)).toEqual(bytes);
+
+	await db.close();
+});
+
+test("the seven GeoJSON geometry shapes roundtrip with class and structure intact", async () => {
+	const { db } = await rootClient(server);
+
+	const p1 = new GeometryPoint([1, 2]);
+	const p2 = new GeometryPoint([3, 4]);
+	const p3 = new GeometryPoint([5, 6]);
+	const line = new GeometryLine([p1, p2]);
+	const line2 = new GeometryLine([p2, p3]);
+	const ring = new GeometryLine([
+		new GeometryPoint([0, 0]),
+		new GeometryPoint([0, 1]),
+		new GeometryPoint([1, 1]),
+		new GeometryPoint([1, 0]),
+		new GeometryPoint([0, 0]),
+	]);
+	const poly = new GeometryPolygon([ring]);
+	const mpoint = new GeometryMultiPoint([p1, p2]);
+	const mline = new GeometryMultiLine([line, line2]);
+	const mpoly = new GeometryMultiPolygon([poly]);
+	const coll = new GeometryCollection([p1, line]);
+
+	// type::of surfaces the specific kind as `geometry<kind>`.
+	const cases: Array<[Geometry, string, unknown, new (...a: never[]) => Geometry]> = [
+		[p1, "geometry<point>", p1.toJSON(), GeometryPoint],
+		[line, "geometry<line>", line.toJSON(), GeometryLine],
+		[poly, "geometry<polygon>", poly.toJSON(), GeometryPolygon],
+		[mpoint, "geometry<multipoint>", mpoint.toJSON(), GeometryMultiPoint],
+		[mline, "geometry<multiline>", mline.toJSON(), GeometryMultiLine],
+		[mpoly, "geometry<multipolygon>", mpoly.toJSON(), GeometryMultiPolygon],
+		[coll, "geometry<collection>", coll.toJSON(), GeometryCollection],
+	];
+
+	for (const [g, kind, geojson, cls] of cases) {
+		const [t] = await db.query<[string]>("RETURN type::of($g)", { g }).json();
+		expect(t).toBe(kind);
+
+		// Value class: comes back as the specific Geometry subclass.
+		const [out] = (await db.query("RETURN $g", { g })) as [Geometry];
+		expect(out).toBeInstanceOf(Geometry);
+		expect(out).toBeInstanceOf(cls);
+		expect(out.toJSON()).toEqual(geojson);
+
+		// .json() flattens to the GeoJSON object.
+		const [outJson] = await db.query("RETURN $g", { g }).json();
+		expect(outJson).toEqual(geojson);
+	}
+
+	// GeoJSON `type` tags surface with their canonical spelling.
+	expect((p1.toJSON() as { type: string }).type).toBe("Point");
+	expect((line.toJSON() as { type: string }).type).toBe("LineString");
+	expect((coll.toJSON() as { type: string }).type).toBe("GeometryCollection");
+
+	// A geometry stored in a record survives the storage trip structurally.
+	await db.query("CREATE geo_probe:one SET loc = $g", { g: poly });
+	const [rows] = (await db.query("SELECT * FROM geo_probe:one")) as [
+		Array<{ loc: Geometry }>,
+	];
+	expect(rows).toHaveLength(1);
+	expect(rows[0].loc).toBeInstanceOf(GeometryPolygon);
+	expect(rows[0].loc.toJSON()).toEqual(poly.toJSON());
+
+	await db.close();
+});
+
+test("BigInt beyond 2^53 roundtrips exactly as a native bigint, including in record ids", async () => {
+	const { db } = await rootClient(server);
+
+	const big = 9007199254740993n; // 2^53 + 1 — not representable as an f64
+
+	// The server sees SurrealQL `int`.
+	const [t] = await db.query<[string]>("RETURN type::of($n)", { n: big }).json();
+	expect(t).toBe("int");
+
+	// The SDK returns a native JS bigint (not a lossy number) and the value is
+	// exactly preserved.
+	const [out] = (await db.query("RETURN $n", { n: big })) as [unknown];
+	expect(typeof out).toBe("bigint");
+	expect(out).toBe(big);
+
+	// .json() preserves it as a bigint too.
+	const [outJson] = await db.query("RETURN $n", { n: big }).json();
+	expect(typeof outJson).toBe("bigint");
+	expect(outJson).toBe(big);
+
+	// As a record-id key part it roundtrips exactly — no silent float coercion.
+	const bigId = new RecordId("bignum", big);
+	await db.query("CREATE $r SET v = 1", { r: bigId });
+	const [rows] = (await db.query("SELECT * FROM $r", { r: bigId })) as [
+		Array<{ id: RecordId }>,
+	];
+	expect(rows).toHaveLength(1);
+	expect(rows[0].id).toBeInstanceOf(RecordId);
+	expect(typeof rows[0].id.id).toBe("bigint");
+	expect(rows[0].id.id).toBe(big);
+
+	// And the same when reached by full-table scan rather than by bound id.
+	const [all] = (await db.query("SELECT * FROM bignum")) as [
+		Array<{ id: RecordId }>,
+	];
+	expect(all).toHaveLength(1);
+	expect(all[0].id.id).toBe(big);
 
 	await db.close();
 });

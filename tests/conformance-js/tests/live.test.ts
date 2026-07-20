@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { Table, type LiveMessage } from "surrealdb";
+import { Table, type Uuid, type LiveMessage } from "surrealdb";
 import {
 	EventCollector,
 	guestClient,
@@ -175,3 +175,125 @@ test("two subscribers on one table each receive their own stream", async () => {
 	await other.close();
 	await db.close();
 }, 25000);
+
+test("live query WHERE filter delivers only matching records", async () => {
+	const { db } = await rootClient(server);
+	await db.query("DEFINE TABLE metric SCHEMALESS");
+
+	// A WHERE-filtered LIVE SELECT run through query() returns the live-query
+	// UUID; liveOf() attaches an unmanaged subscription to that id.
+	const [uuid] = await db.query<[Uuid]>("LIVE SELECT * FROM metric WHERE n > 10");
+
+	const events = new EventCollector<LiveMessage>();
+	const sub = await db.liveOf(uuid);
+	pump(sub, events);
+
+	// A matching record is delivered.
+	await db.query("CREATE metric:high SET n = 20");
+	const matched = await events.waitFor((e) => e.action === "CREATE");
+	expect(String(matched.recordId)).toBe("metric:high");
+	expect(matched.value.n).toBe(20);
+
+	// A non-matching record is filtered out server-side.
+	await db.query("CREATE metric:low SET n = 5");
+	await events.assertSilence((e) => String(e.recordId) === "metric:low");
+
+	await sub.kill();
+	await db.close();
+}, 30000);
+
+test("live notifications respect row-level permissions on UPDATE", async () => {
+	const { db, namespace, database } = await rootClient(server);
+	await db.query(`
+		DEFINE TABLE user SCHEMALESS PERMISSIONS FOR select WHERE id = $auth;
+		DEFINE ACCESS account ON DATABASE TYPE RECORD
+			SIGNUP ( CREATE user SET email = $email )
+			SIGNIN ( SELECT * FROM user WHERE email = $email )
+			DURATION FOR TOKEN 15m, FOR SESSION 12h;
+		DEFINE TABLE post SCHEMALESS PERMISSIONS FOR select WHERE owner = $auth;
+	`);
+
+	const subscriber = await guestClient(server, namespace, database);
+	await subscriber.signup({
+		namespace,
+		database,
+		access: "account",
+		variables: { email: "updater@example.com" },
+	});
+	const [me] = await subscriber.query<[string]>("RETURN $auth").json();
+
+	const events = new EventCollector<LiveMessage>();
+	const sub = await subscriber.live(new Table("post"));
+	pump(sub, events);
+
+	await db.query("CREATE post:mine SET title = 'mine', owner = <record>$owner", {
+		owner: String(me),
+	});
+	await db.query("CREATE post:other SET title = 'other', owner = user:someone_else");
+	await events.waitFor((e) => String(e.recordId) === "post:mine");
+
+	// An UPDATE to a row the subscriber can SELECT is delivered.
+	await db.query("UPDATE post:mine SET title = 'mine v2'");
+	const updated = await events.waitFor(
+		(e) => e.action === "UPDATE" && String(e.recordId) === "post:mine",
+	);
+	expect(updated.value.title).toBe("mine v2");
+
+	// An UPDATE to a row the subscriber cannot SELECT is never delivered.
+	await db.query("UPDATE post:other SET title = 'other v2'");
+	await events.assertSilence(
+		(e) => e.action === "UPDATE" && String(e.recordId) === "post:other",
+	);
+
+	await sub.kill();
+	await subscriber.close();
+	await db.close();
+}, 30000);
+
+test("live notifications respect row-level permissions on DELETE", async () => {
+	const { db, namespace, database } = await rootClient(server);
+	await db.query(`
+		DEFINE TABLE user SCHEMALESS PERMISSIONS FOR select WHERE id = $auth;
+		DEFINE ACCESS account ON DATABASE TYPE RECORD
+			SIGNUP ( CREATE user SET email = $email )
+			SIGNIN ( SELECT * FROM user WHERE email = $email )
+			DURATION FOR TOKEN 15m, FOR SESSION 12h;
+		DEFINE TABLE post SCHEMALESS PERMISSIONS FOR select WHERE owner = $auth;
+	`);
+
+	const subscriber = await guestClient(server, namespace, database);
+	await subscriber.signup({
+		namespace,
+		database,
+		access: "account",
+		variables: { email: "deleter@example.com" },
+	});
+	const [me] = await subscriber.query<[string]>("RETURN $auth").json();
+
+	const events = new EventCollector<LiveMessage>();
+	const sub = await subscriber.live(new Table("post"));
+	pump(sub, events);
+
+	await db.query("CREATE post:mine SET title = 'mine', owner = <record>$owner", {
+		owner: String(me),
+	});
+	await db.query("CREATE post:other SET title = 'other', owner = user:someone_else");
+	await events.waitFor((e) => String(e.recordId) === "post:mine");
+
+	// A DELETE of a row the subscriber can SELECT is delivered.
+	await db.query("DELETE post:mine");
+	const deleted = await events.waitFor(
+		(e) => e.action === "DELETE" && String(e.recordId) === "post:mine",
+	);
+	expect(String(deleted.recordId)).toBe("post:mine");
+
+	// A DELETE of a row the subscriber cannot SELECT is never delivered.
+	await db.query("DELETE post:other");
+	await events.assertSilence(
+		(e) => e.action === "DELETE" && String(e.recordId) === "post:other",
+	);
+
+	await sub.kill();
+	await subscriber.close();
+	await db.close();
+}, 30000);

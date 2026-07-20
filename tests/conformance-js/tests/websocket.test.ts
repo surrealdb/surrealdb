@@ -616,6 +616,96 @@ test("--deny-rpc with --allow-rpc=version,use denies everything else with -32602
 });
 
 // ---------------------------------------------------------------------------
+// Arbitrary-query subject gating — from protocol.rs: the same
+// `allows_query_by_subject` gate that fronts /sql also guards the RPC verb
+// methods (use / set / query / select / create / insert / update / upsert /
+// delete / relate / run / …). This is distinct from --deny-rpc: it keys off the
+// session's auth SUBJECT (system = root/ns/db users), so --deny-arbitrary-query
+// =system denies query-bearing verbs for a signed-in root user while leaving
+// connection-level RPCs untouched. Denial is the same method_not_allowed error
+// as --deny-rpc: top-level -32602 "Method not allowed".
+// ---------------------------------------------------------------------------
+
+test("--deny-arbitrary-query=system denies query-bearing RPC verbs for a signed-in root, as a top-level -32602", async () => {
+	// Own server: the subject gate is scoped to the `system` auth subject, so a
+	// root signin is allowed but every query-bearing verb it then issues is not.
+	const capServer = await startServer({ args: ["--deny-arbitrary-query=system"] });
+	try {
+		const rpc = await RpcClient.connect(capServer);
+		// signin is a connection/auth verb — NOT gated — and succeeds as root.
+		const signin = await rpc.rpc("signin", [{ user: "root", pass: "root" }]);
+		expect(signin.error).toBeUndefined();
+
+		// With the gate on, even `use` is denied, so we cannot select ns/db first;
+		// assert the denial on each verb from the bare signed-in connection.
+		for (const [method, params] of [
+			["use", ["cap_ns", "cap_db"]],
+			["query", ["SELECT * FROM 1"]],
+			["select", ["tester"]],
+			["create", ["tester", { value: "bar" }]],
+			["insert", ["tester", { name: "foo", value: "bar" }]],
+			["update", ["tester", { value: "bar" }]],
+			["delete", ["tester"]],
+			["relate", ["foo:a", "bar", "foo:b", { val: 42 }]],
+			["run", ["math::abs", null, [42]]],
+			["set", ["set_var", "set_value"]],
+		] as Array<[string, unknown[]]>) {
+			const res = await rpc.rpc(method, params);
+			// The gate surfaces as a top-level JSON-RPC error, not a per-statement
+			// ERR — identical shape to a --deny-rpc denial.
+			expect(res.error?.code).toBe(-32602);
+			expect(res.error?.message).toBe("Method not allowed");
+			expect(res.result).toBeUndefined();
+		}
+		await rpc.close();
+	} finally {
+		await capServer.stop();
+	}
+});
+
+test("--deny-arbitrary-query=system leaves connection-level RPCs (ping / version / signin) working", async () => {
+	// The deny is scoped to query-bearing verbs; the connection/auth surface of
+	// the protocol stays fully available to a root user.
+	const capServer = await startServer({ args: ["--deny-arbitrary-query=system"] });
+	try {
+		const rpc = await RpcClient.connect(capServer);
+		expect((await rpc.rpc("ping", [])).error).toBeUndefined();
+		expect((await rpc.rpc("version", [])).error).toBeUndefined();
+		// signin (auth verb) still succeeds even though every query verb is denied.
+		expect((await rpc.rpc("signin", [{ user: "root", pass: "root" }])).error).toBeUndefined();
+		// And repeated after signin — the gate never touches these.
+		expect((await rpc.rpc("ping", [])).error).toBeUndefined();
+		expect((await rpc.rpc("version", [])).error).toBeUndefined();
+		await rpc.close();
+	} finally {
+		await capServer.stop();
+	}
+});
+
+test("--allow-arbitrary-query=system (default posture) lets a signed-in root run query verbs", async () => {
+	// Contrast: with the system subject allowed, the very verbs denied above run
+	// normally once ns/db is selected.
+	const capServer = await startServer({ args: ["--allow-arbitrary-query=system"] });
+	try {
+		const rpc = await RpcClient.connect(capServer);
+		await rpc.call("signin", [{ user: "root", pass: "root" }]);
+		await rpc.call("query", ["DEFINE NAMESPACE aq_ns"]);
+		await rpc.call("use", ["aq_ns", null]);
+		await rpc.call("query", ["DEFINE DATABASE aq_db"]);
+		await rpc.call("use", ["aq_ns", "aq_db"]);
+		const rec = (await rpc.rpc("create", ["tester", { value: "bar" }])).result as {
+			id: string;
+			value: string;
+		};
+		expect(rec.value).toBe("bar");
+		expect(rec.id).toMatch(/^tester:/);
+		await rpc.close();
+	} finally {
+		await capServer.stop();
+	}
+});
+
+// ---------------------------------------------------------------------------
 // Live queries over RPC — from ws_integration.rs: live_rpc, kill,
 // live_query_preserved_on_same_identity_resignin,
 // live_query_cleared_on_principal_change. Raw notification frames are pinned
