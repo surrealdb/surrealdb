@@ -584,7 +584,7 @@ impl Executor {
 
 		// Execute the plan
 		// Handle control flow signals from execute()
-		let stream = match plan.execute(&exec_ctx) {
+		let mut stream = match plan.execute(&exec_ctx) {
 			Ok(s) => s,
 			Err(crate::expr::ControlFlow::Return(v)) => {
 				// RETURN - propagate as control flow signal
@@ -603,7 +603,6 @@ impl Executor {
 
 		// Collect all results
 		let mut results = Vec::new();
-		futures::pin_mut!(stream);
 		while let Some(batch_result) = stream.next().await {
 			match batch_result {
 				Ok(batch) => {

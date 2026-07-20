@@ -149,9 +149,8 @@ impl ExecOperator for LetPlan {
 }
 
 /// Collect all values from a stream into a Vec
-async fn collect_stream(stream: ValueBatchStream) -> anyhow::Result<Vec<Value>> {
+async fn collect_stream(mut stream: ValueBatchStream) -> anyhow::Result<Vec<Value>> {
 	let mut results = Vec::new();
-	futures::pin_mut!(stream);
 
 	while let Some(batch_result) = stream.next().await {
 		match batch_result {

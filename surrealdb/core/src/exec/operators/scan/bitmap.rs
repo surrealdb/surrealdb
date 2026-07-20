@@ -28,6 +28,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use common::future::stream::{self, Yielder};
 use reblessive::TreeStack;
 use roaring::RoaringTreemap;
 
@@ -634,7 +635,7 @@ impl ExecOperator for BitmapResolve {
 		let needed_fields = self.needed_fields.clone();
 		let ctx = ctx.clone();
 
-		let stream = async_stream::try_stream! {
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			// The planner never emits a bitmap plan for versioned queries; if
 			// a version context reaches this operator anyway, fail loudly
 			// rather than return current-state rows for a historical query.
@@ -648,10 +649,8 @@ impl ExecOperator for BitmapResolve {
 			let select_permission = if let Some(ref res) = resolved {
 				res.select_permission(check_perms)
 			} else if check_perms {
-				let table_def = db_ctx
-					.get_table_def(&table_name, None)
-					.await
-					.context("Failed to get table")?;
+				let table_def =
+					db_ctx.get_table_def(&table_name, None).await.context("Failed to get table")?;
 				if let Some(def) = &table_def {
 					convert_permission_to_physical_runtime(&def.permissions.select, ctx.ctx())
 						.await
@@ -667,7 +666,7 @@ impl ExecOperator for BitmapResolve {
 
 			// Early exit if denied.
 			if matches!(select_permission, PhysicalPermission::Deny) {
-				return;
+				return Ok(());
 			}
 
 			// Field state for computed fields and field-level permissions.
@@ -689,8 +688,7 @@ impl ExecOperator for BitmapResolve {
 			);
 
 			// Evaluate the bitmap expression tree over the shared doc-ID space.
-			let doc_ids =
-				TableDocIds::new(ns.namespace_id, db.database_id, table_name.clone());
+			let doc_ids = TableDocIds::new(ns.namespace_id, db.database_id, table_name.clone());
 			let bctx = BitmapBuildContext {
 				ctx: &ctx,
 				txn: txn.as_ref(),
@@ -753,10 +751,15 @@ impl ExecOperator for BitmapResolve {
 				.await?;
 				pipeline.process_batch(&mut values, &ctx).await?;
 				if !values.is_empty() {
-					yield ValueBatch { values };
+					yielder
+						.emit(ValueBatch {
+							values,
+						})
+						.await;
 				}
 			}
-		};
+			Ok(())
+		});
 
 		Ok(monitor_stream(Box::pin(stream), "BitmapResolve", &self.metrics))
 	}

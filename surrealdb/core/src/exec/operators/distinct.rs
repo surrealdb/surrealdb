@@ -25,6 +25,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
+use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 
 use crate::exec::{
@@ -80,7 +81,7 @@ impl ExecOperator for Distinct {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
@@ -89,9 +90,8 @@ impl ExecOperator for Distinct {
 		let max_rows = ctx.root().ctx.config.gql_max_join_build_rows;
 		let ctx = ctx.clone();
 
-		let deduped = async_stream::try_stream! {
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			let mut seen = SeenSet::new();
-			futures::pin_mut!(input_stream);
 			while let Some(batch_result) = input_stream.next().await {
 				crate::exec::operators::check_cancelled(&ctx)?;
 				let batch = batch_result?;
@@ -102,12 +102,17 @@ impl ExecOperator for Distinct {
 					}
 				}
 				if !values.is_empty() {
-					yield ValueBatch { values };
+					yielder
+						.emit(ValueBatch {
+							values,
+						})
+						.await;
 				}
 			}
-		};
+			Ok(())
+		});
 
-		Ok(monitor_stream(Box::pin(deduped), "Distinct", &self.metrics))
+		Ok(monitor_stream(Box::pin(stream), "Distinct", &self.metrics))
 	}
 }
 

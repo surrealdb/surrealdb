@@ -7,6 +7,7 @@
 
 use std::sync::Arc;
 
+use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 
 use crate::err::Error;
@@ -79,7 +80,7 @@ impl ExecOperator for UnwrapExactlyOne {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
@@ -87,9 +88,7 @@ impl ExecOperator for UnwrapExactlyOne {
 		);
 		let none_on_empty = self.none_on_empty;
 
-		let unwrap_stream = async_stream::try_stream! {
-			futures::pin_mut!(input_stream);
-
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			// Collect all values from the input stream
 			let mut collected: Vec<Value> = Vec::new();
 
@@ -108,9 +107,11 @@ impl ExecOperator for UnwrapExactlyOne {
 			if collected.is_empty() {
 				if none_on_empty {
 					// Table scan with no results → return NONE
-					yield ValueBatch {
-						values: vec![Value::None],
-					};
+					yielder
+						.emit(ValueBatch {
+							values: vec![Value::None],
+						})
+						.await;
 				} else {
 					// Array source with no elements → error
 					Err(ControlFlow::Err(anyhow::anyhow!(Error::SingleOnlyOutput)))?;
@@ -119,12 +120,15 @@ impl ExecOperator for UnwrapExactlyOne {
 				let result = collected.pop().expect("collected has exactly one element");
 
 				// Emit the single result
-				yield ValueBatch {
-					values: vec![result],
-				};
+				yielder
+					.emit(ValueBatch {
+						values: vec![result],
+					})
+					.await;
 			}
-		};
+			Ok(())
+		});
 
-		Ok(monitor_stream(Box::pin(unwrap_stream), "UnwrapExactlyOne", &self.metrics))
+		Ok(monitor_stream(Box::pin(stream), "UnwrapExactlyOne", &self.metrics))
 	}
 }

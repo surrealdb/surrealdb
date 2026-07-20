@@ -7,6 +7,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use common::future::stream::{self, Yielder};
 use reblessive::TreeStack;
 use surrealdb_types::ToSql;
 
@@ -180,7 +181,7 @@ impl ExecOperator for KnnScan {
 		let needed_fields = self.needed_fields.clone();
 		let ctx = ctx.clone();
 
-		let stream = async_stream::try_stream! {
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			// Get namespace and database context
 			let db_ctx = ctx.database().context("KnnScan requires database context")?;
 			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
@@ -226,12 +227,9 @@ impl ExecOperator for KnnScan {
 				};
 
 				let select_permission = if check_perms {
-					convert_permission_to_physical_runtime(
-						&table_def.permissions.select,
-						ctx.ctx(),
-					)
-					.await
-					.context("Failed to convert permission")?
+					convert_permission_to_physical_runtime(&table_def.permissions.select, ctx.ctx())
+						.await
+						.context("Failed to convert permission")?
 				} else {
 					PhysicalPermission::Allow
 				};
@@ -240,7 +238,7 @@ impl ExecOperator for KnnScan {
 
 			// Early exit if denied
 			if matches!(select_permission, PhysicalPermission::Deny) {
-				return;
+				return Ok(());
 			}
 
 			// Resolve field state for computed fields and field-level
@@ -251,9 +249,7 @@ impl ExecOperator for KnnScan {
 					if let Some(ref res) = resolved {
 						res.field_state_for_projection(nf.as_ref())
 					} else {
-						build_field_state(
-							&ctx, &table_name, check_perms, nf.as_ref(),
-						).await?
+						build_field_state(&ctx, &table_name, check_perms, nf.as_ref()).await?
 					}
 				}
 				None => super::pipeline::FieldState::empty(),
@@ -341,7 +337,10 @@ impl ExecOperator for KnnScan {
 						.await
 						.context("Failed to get DiskANN index")?;
 
-					diskann_index.check_state().await.context("Failed to check DiskANN index state")?;
+					diskann_index
+						.check_state()
+						.await
+						.context("Failed to check DiskANN index state")?;
 
 					let mut stack = TreeStack::new();
 					stack
@@ -418,14 +417,20 @@ impl ExecOperator for KnnScan {
 				check_perms,
 				version,
 				CachePolicy::ReadWrite,
-			).await?;
+			)
+			.await?;
 
 			pipeline.process_batch(&mut values, &ctx).await?;
 
 			if !values.is_empty() {
-				yield ValueBatch { values };
+				yielder
+					.emit(ValueBatch {
+						values,
+					})
+					.await;
 			}
-		};
+			Ok(())
+		});
 
 		Ok(monitor_stream(Box::pin(stream), "KnnScan", &self.metrics))
 	}

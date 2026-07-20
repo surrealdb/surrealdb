@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 
 use crate::err::Error;
@@ -90,7 +91,7 @@ impl ExecOperator for Timeout {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
@@ -106,7 +107,7 @@ impl ExecOperator for Timeout {
 		let timeout_expr = Arc::clone(timeout_expr);
 		let ctx = ctx.clone();
 
-		let timeout_stream = async_stream::try_stream! {
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			use crate::exec::EvalContext;
 
 			// Evaluate the timeout expression (no row context needed)
@@ -114,9 +115,8 @@ impl ExecOperator for Timeout {
 			let timeout_value = timeout_expr.evaluate(eval_ctx).await?;
 
 			// Convert to duration
-			let duration: Duration = timeout_value
-				.coerce_to::<Duration>()
-				.context("Invalid timeout value")?;
+			let duration: Duration =
+				timeout_value.coerce_to::<Duration>().context("Invalid timeout value")?;
 
 			// Convert our Duration to std::time::Duration for tokio
 			let std_duration: std::time::Duration = duration.0;
@@ -124,24 +124,20 @@ impl ExecOperator for Timeout {
 			// Create a timeout future
 			let timeout_instant = tokio::time::Instant::now() + std_duration;
 
-			futures::pin_mut!(input_stream);
-
 			loop {
 				// Check if we've exceeded the timeout
-				let remaining = timeout_instant.saturating_duration_since(tokio::time::Instant::now());
+				let remaining =
+					timeout_instant.saturating_duration_since(tokio::time::Instant::now());
 				if remaining.is_zero() {
 					Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryTimedout(duration))))?;
 				}
 
 				// Wait for next batch with timeout
-				let batch_result = tokio::time::timeout(
-					remaining,
-					input_stream.next()
-				).await;
+				let batch_result = tokio::time::timeout(remaining, input_stream.next()).await;
 
 				match batch_result {
 					Ok(Some(batch)) => {
-						yield batch?;
+						yielder.emit(batch?).await;
 					}
 					Ok(None) => {
 						// Stream completed normally
@@ -153,8 +149,9 @@ impl ExecOperator for Timeout {
 					}
 				}
 			}
-		};
+			Ok(())
+		});
 
-		Ok(monitor_stream(Box::pin(timeout_stream), "Timeout", &self.metrics))
+		Ok(monitor_stream(Box::pin(stream), "Timeout", &self.metrics))
 	}
 }

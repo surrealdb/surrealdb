@@ -1,7 +1,23 @@
 
 # cargo-vet audits file
 
-[audits]
+[[audits.wasm-bindgen-test]]
+who = "Mees Delzenne <mees.delzenne@gmail.com>"
+criteria = "safe-to-run"
+delta = "0.3.49 -> 0.3.58"
+notes = "Changes seem to mostly be a vendoring of the criterion crate for benchmarking."
+
+[[audits.wasm-bindgen-test-macro]]
+who = "Mees Delzenne <mees.delzenne@gmail.com>"
+criteria = "safe-to-run"
+delta = "0.3.49 -> 0.3.58"
+notes = "Small proc-macro crate only manipulating tokens."
+
+[[audits.wasm-bindgen-test-shared]]
+who = "Mees Delzenne <mees.delzenne@gmail.com>"
+criteria = "safe-to-run"
+version = "0.2.108"
+notes = "Tiny, single function crate that is no_std and does not include any unsafe."
 
 [[trusted.addr]]
 criteria = "safe-to-deploy"
@@ -656,6 +672,12 @@ criteria = "safe-to-deploy"
 user-id = 359 # Sean McArthur (seanmonstar)
 start = "2019-09-09"
 end = "2025-08-06"
+
+[[trusted.minicov]]
+criteria = "safe-to-run"
+user-id = 2915 # Amanieu d'Antras (Amanieu)
+start = "2020-04-20"
+end = "2027-07-16"
 
 [[trusted.mio]]
 criteria = "safe-to-deploy"
@@ -1478,6 +1500,18 @@ criteria = "safe-to-deploy"
 user-id = 1 # Alex Crichton (alexcrichton)
 start = "2019-03-04"
 end = "2026-10-30"
+
+[[trusted.wasm-bindgen-test]]
+criteria = "safe-to-run"
+user-id = 1 # Alex Crichton (alexcrichton)
+start = "2019-03-04"
+end = "2027-07-16"
+
+[[trusted.wasm-bindgen-test-macro]]
+criteria = "safe-to-run"
+user-id = 1 # Alex Crichton (alexcrichton)
+start = "2019-03-04"
+end = "2027-07-16"
 
 [[trusted.web-sys]]
 criteria = "safe-to-deploy"

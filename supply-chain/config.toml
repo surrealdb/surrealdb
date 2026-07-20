@@ -178,14 +178,6 @@ criteria = "safe-to-deploy"
 version = "1.1.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.async-stream]]
-version = "0.3.6"
-criteria = "safe-to-deploy"
-
-[[exemptions.async-stream-impl]]
-version = "0.3.6"
-criteria = "safe-to-deploy"
-
 [[exemptions.asynk-strim]]
 version = "0.1.5"
 criteria = "safe-to-deploy"
@@ -420,10 +412,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.curve25519-dalek-derive]]
 version = "0.1.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.cxxbridge-flags]]
-version = "1.0.194"
 criteria = "safe-to-deploy"
 
 [[exemptions.darling]]
@@ -826,10 +814,6 @@ criteria = "safe-to-deploy"
 version = "2.3.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.idb]]
-version = "0.6.5"
-criteria = "safe-to-deploy"
-
 [[exemptions.idna_adapter]]
 version = "1.2.2"
 criteria = "safe-to-deploy"
@@ -1016,10 +1000,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.num-bigint-dig]]
 version = "0.8.6"
-criteria = "safe-to-deploy"
-
-[[exemptions.num-conv]]
-version = "0.2.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.objc2-io-kit]]
@@ -1288,10 +1268,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.rend]]
 version = "0.4.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.rexie]]
-version = "0.6.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.rfc6979]]

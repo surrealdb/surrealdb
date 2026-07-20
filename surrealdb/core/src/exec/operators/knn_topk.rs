@@ -192,7 +192,7 @@ impl ExecOperator for KnnTopK {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
@@ -224,7 +224,6 @@ impl ExecOperator for KnnTopK {
 				BinaryHeap::with_capacity(k + 1);
 			let mut seq: u64 = 0;
 
-			futures::pin_mut!(input_stream);
 			while let Some(batch_result) = input_stream.next().await {
 				if cancellation.is_cancelled() {
 					return Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(

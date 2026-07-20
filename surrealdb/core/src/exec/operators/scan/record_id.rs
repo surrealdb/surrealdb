@@ -7,6 +7,7 @@
 
 use std::sync::Arc;
 
+use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 use tracing::instrument;
 
@@ -180,7 +181,7 @@ impl ExecOperator for RecordIdScan {
 		let pre_decode_filter_status = self.pre_decode_filter_status.clone();
 		let ctx = ctx.clone();
 
-		let stream = async_stream::try_stream! {
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			// 1. Evaluate the record_id expression to get the RecordId value
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
 			let rid_value = record_id_expr.evaluate(eval_ctx).await?;
@@ -190,27 +191,44 @@ impl ExecOperator for RecordIdScan {
 				other => {
 					// If the expression didn't produce a RecordId, yield as-is
 					// (defensive fallback — the planner should only route RecordIds here)
-					yield ValueBatch { values: vec![other] };
-					return;
+					yielder
+						.emit(ValueBatch {
+							values: vec![other],
+						})
+						.await;
+					return Ok(());
 				}
 			};
 
-			// 2. Resolve VERSION timestamp; see [`resolve_version_stamp`]
-			//    for why we prefer the stamp already set by the enclosing
-			//    `VersionScope` over re-evaluating `version_expr` here.
+			// 2. Resolve VERSION timestamp; see [`resolve_version_stamp`] for why we prefer the
+			//    stamp already set by the enclosing `VersionScope` over re-evaluating
+			//    `version_expr` here.
 			let version: Option<u64> = resolve_version_stamp(&ctx, version_expr.as_ref()).await?;
 
 			// 3. Delegate to the shared lookup helper
 			let results = execute_record_lookup(
-				&rid, version, check_perms, needed_fields.as_ref(), &ctx,
-				predicate.as_ref(), None, 0, resolved.as_ref(),
+				&rid,
+				version,
+				check_perms,
+				needed_fields.as_ref(),
+				&ctx,
+				predicate.as_ref(),
+				None,
+				0,
+				resolved.as_ref(),
 				&pre_decode_filter_status,
-			).await?;
+			)
+			.await?;
 
 			if !results.is_empty() {
-				yield ValueBatch { values: results };
+				yielder
+					.emit(ValueBatch {
+						values: results,
+					})
+					.await;
 			}
-		};
+			Ok(())
+		});
 
 		Ok(monitor_stream(Box::pin(stream), "RecordLookup", &self.metrics))
 	}

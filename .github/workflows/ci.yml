@@ -164,6 +164,23 @@ jobs:
       - name: Run clippy release
         run: cargo make ci-clippy-release
 
+  miri:
+    name: Test unsafe code with miri
+    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          toolchain: nightly
+          components: miri
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Run miri
+        run: cargo +nightly miri test -p surrealdb-common --lib
+
   check-debug:
     name: Check workspace (debug)
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
@@ -240,6 +257,28 @@ jobs:
 
       - name: Check wasm
         run: cargo make ci-check-wasm
+
+  test-wasm:
+    name: Test Wasm (IndexedDB)
+    # GitHub-hosted runner: Chrome and chromedriver come preinstalled, which
+    # the wasm-bindgen-test browser harness needs.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          targets: wasm32-unknown-unknown
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack@=0.15.0
+
+      - name: Test the IndexedDB backend in headless Chrome
+        working-directory: surrealdb/kvs-indxdb
+        run: wasm-pack test --headless --chrome
 
   check-revision:
     name: Check revision
@@ -644,6 +683,7 @@ jobs:
       - check-release
       - check-msrv
       - check-wasm
+      - test-wasm
       - check-revision
       - check-docs
       - feature-check

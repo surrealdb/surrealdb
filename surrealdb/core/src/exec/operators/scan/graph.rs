@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 
 use super::common::{extract_record_ids_into, resolve_record_batch, resolve_version_stamp};
@@ -243,7 +244,7 @@ impl ExecOperator for GraphEdgeScan {
 		// field-level SELECT permissions and computed fields, matching a
 		// direct `SELECT *` on the edge table.
 		let check_perms = should_check_perms(&db_ctx, Action::View)?;
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
@@ -269,7 +270,7 @@ impl ExecOperator for GraphEdgeScan {
 		let metrics = Arc::clone(&self.metrics);
 		let record_metrics = metrics.is_enabled();
 
-		let stream = async_stream::try_stream! {
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			let txn = ctx.txn();
 			let ns_id = db_ctx.ns_ctx.ns.namespace_id;
 			let db_id = db_ctx.db.database_id;
@@ -289,20 +290,18 @@ impl ExecOperator for GraphEdgeScan {
 				LookupDirection::Out => vec![Dir::Out],
 				LookupDirection::In => vec![Dir::In],
 				LookupDirection::Both => vec![Dir::In, Dir::Out],
-				LookupDirection::Reference => {
-					Err(ControlFlow::Err(anyhow::anyhow!(
-						"Reference lookups should use ReferenceScan, not GraphEdgeScan"
-					)))?
-				}
+				LookupDirection::Reference => Err(ControlFlow::Err(anyhow::anyhow!(
+					"Reference lookups should use ReferenceScan, not GraphEdgeScan"
+				)))?,
 			};
 
 			// Read from the child operator stream and extract RecordIds
-			futures::pin_mut!(input_stream);
 			let mut rid_batch: Vec<RecordId> = Vec::with_capacity(scan_batch_size);
 
 			while let Some(batch_result) = input_stream.next().await {
 				let batch = batch_result?;
-				let source_rids: Vec<RecordId> = batch.values
+				let source_rids: Vec<RecordId> = batch
+					.values
 					.into_iter()
 					.flat_map(|v| {
 						let mut rids = Vec::new();
@@ -315,9 +314,9 @@ impl ExecOperator for GraphEdgeScan {
 				for rid in &source_rids {
 					let mut edges_yielded: usize = 0;
 					'dir_loop: for &dir in &directions {
-						let ranges = compute_graph_ranges(
-							ns_id, db_id, rid, dir, &edge_tables, &ctx,
-						).await?;
+						let ranges =
+							compute_graph_ranges(ns_id, db_id, rid, dir, &edge_tables, &ctx)
+								.await?;
 
 						for r in ranges {
 							// Outer cursor over the source vertex's adjacency.
@@ -410,12 +409,9 @@ impl ExecOperator for GraphEdgeScan {
 														// un-migrated edges
 														// doesn't OOM the scan.
 														legacy_edges.push(decoded.edge);
-														if legacy_edges.len()
-															>= scan_batch_size
-														{
+														if legacy_edges.len() >= scan_batch_size {
 															chunk_bound_hit = true;
-															last_processed_key =
-																Some(key.to_vec());
+															last_processed_key = Some(key.to_vec());
 															break;
 														}
 													}
@@ -483,14 +479,18 @@ impl ExecOperator for GraphEdgeScan {
 												}
 												edges_yielded += values.len();
 												if !values.is_empty() {
-													yield ValueBatch {
-														values,
-													};
+													yielder
+														.emit(ValueBatch {
+															values,
+														})
+														.await;
 												}
 											} else {
-												yield ValueBatch {
-													values,
-												};
+												yielder
+													.emit(ValueBatch {
+														values,
+													})
+													.await;
 											}
 										}
 										if limit_hit || chunk_bound_hit {
@@ -585,9 +585,11 @@ impl ExecOperator for GraphEdgeScan {
 														&mut perm_cache,
 													)
 													.await?;
-													yield ValueBatch {
-														values,
-													};
+													yielder
+														.emit(ValueBatch {
+															values,
+														})
+														.await;
 													rid_batch.clear();
 												}
 												if limit_hit {
@@ -631,16 +633,29 @@ impl ExecOperator for GraphEdgeScan {
 			// no predicate.
 			if !rid_batch.is_empty() {
 				let values = resolve_and_filter_batch(
-					&ctx, &txn, ns_id, db_id, &rid_batch, fetch_full, check_perms,
-					version, &mut perm_cache, key_predicate.as_ref(),
+					&ctx,
+					&txn,
+					ns_id,
+					db_id,
+					&rid_batch,
+					fetch_full,
+					check_perms,
+					version,
+					&mut perm_cache,
+					key_predicate.as_ref(),
 					record_predicate.as_ref(),
 				)
 				.await?;
 				if !values.is_empty() {
-					yield ValueBatch { values };
+					yielder
+						.emit(ValueBatch {
+							values,
+						})
+						.await;
 				}
 			}
-		};
+			Ok(())
+		});
 
 		Ok(monitor_stream(Box::pin(stream), "GraphEdgeScan", &self.metrics))
 	}

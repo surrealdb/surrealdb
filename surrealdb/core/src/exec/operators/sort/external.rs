@@ -135,7 +135,7 @@ impl ExecOperator for ExternalSort {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
@@ -159,7 +159,6 @@ impl ExecOperator for ExternalSort {
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
 			let mut count = 0usize;
 
-			futures::pin_mut!(input_stream);
 			while let Some(batch_result) = input_stream.next().await {
 				// Check for cancellation between batches
 				if ctx.cancellation().is_cancelled() {

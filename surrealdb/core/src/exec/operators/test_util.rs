@@ -69,10 +69,9 @@ impl ExecOperator for ValuesOperator {
 
 	fn execute(&self, _ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let values = self.values.clone();
-		let stream = async_stream::try_stream! {
-			yield ValueBatch { values };
-		};
-		Ok(Box::pin(stream))
+		Ok(Box::pin(futures::stream::once(std::future::ready(Ok(ValueBatch {
+			values,
+		})))))
 	}
 }
 
@@ -99,8 +98,7 @@ pub(crate) fn root_ctx() -> ExecutionContext {
 /// Drain an operator's output stream into a flat list of rows.
 pub(crate) async fn collect(op: &Arc<dyn ExecOperator>, ctx: &ExecutionContext) -> Vec<Value> {
 	use futures::StreamExt;
-	let stream = op.execute(ctx).expect("execute should succeed");
-	futures::pin_mut!(stream);
+	let mut stream = op.execute(ctx).expect("execute should succeed");
 	let mut out = Vec::new();
 	while let Some(batch) = stream.next().await {
 		out.extend(batch.expect("batch should be Ok").values);

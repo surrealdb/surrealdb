@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
+use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 
 use crate::exec::function::{Accumulator, AggregateFunction};
@@ -436,7 +437,7 @@ impl ExecOperator for Aggregate {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
@@ -447,12 +448,13 @@ impl ExecOperator for Aggregate {
 		let ctx = ctx.clone();
 
 		// Collect all input batches, then group and aggregate
-		let aggregate_stream = async_stream::try_stream! {
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			// Pre-evaluate extra_args for each aggregate (evaluated once, not per-row)
 			// This is needed for functions like array::join(txt, " ") where " " is evaluated once
 			// Structure: evaluated_extra_args[field_idx][aggregate_idx] = Vec<Value>
 			let eval_ctx_for_args = EvalContext::from_exec_ctx(&ctx);
-			let mut evaluated_extra_args: Vec<Vec<Vec<Value>>> = Vec::with_capacity(aggregates.len());
+			let mut evaluated_extra_args: Vec<Vec<Vec<Value>>> =
+				Vec::with_capacity(aggregates.len());
 			for agg in &aggregates {
 				if let Some(info) = &agg.aggregate_expr_info {
 					let mut field_args = Vec::with_capacity(info.aggregates.len());
@@ -477,13 +479,12 @@ impl ExecOperator for Aggregate {
 			let mut groups = GroupMap::new();
 
 			// Consume all input batches
-			futures::pin_mut!(input_stream);
 			while let Some(batch_result) = input_stream.next().await {
 				// Check for cancellation between batches
 				if ctx.cancellation().is_cancelled() {
-					Err(crate::expr::ControlFlow::Err(
-						anyhow::anyhow!(crate::err::Error::QueryCancelled),
-					))?;
+					Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(
+						crate::err::Error::QueryCancelled
+					)))?;
 				}
 				let batch = batch_result?;
 				let eval_ctx = EvalContext::from_exec_ctx(&ctx);
@@ -492,23 +493,18 @@ impl ExecOperator for Aggregate {
 				let mut group_key_columns: Vec<Vec<Value>> =
 					Vec::with_capacity(group_by_exprs.len());
 				for expr in &group_by_exprs {
-					let keys = match expr
-						.evaluate_batch(eval_ctx.clone(), &batch.values)
-						.await
-					{
+					let keys = match expr.evaluate_batch(eval_ctx.clone(), &batch.values).await {
 						Ok(v) => v,
-					Err(_) => {
-						// Fallback: evaluate per-row, replacing ignorable errors with None
-						let mut keys = Vec::with_capacity(batch.values.len());
-						for value in &batch.values {
-							let v = expr
-								.evaluate(eval_ctx.with_value(value))
-								.await
-								.or_none()?;
-							keys.push(v);
+						Err(_) => {
+							// Fallback: evaluate per-row, replacing ignorable errors with None
+							let mut keys = Vec::with_capacity(batch.values.len());
+							for value in &batch.values {
+								let v =
+									expr.evaluate(eval_ctx.with_value(value)).await.or_none()?;
+								keys.push(v);
+							}
+							keys
 						}
-						keys
-					}
 					};
 					group_key_columns.push(keys);
 				}
@@ -525,21 +521,21 @@ impl ExecOperator for Aggregate {
 								.evaluate_batch(eval_ctx.clone(), &batch.values)
 								.await
 							{
-							Ok(v) => v,
-							Err(_) => {
-								// Fallback: evaluate per-row, replacing ignorable errors with None
-								let mut col =
-									Vec::with_capacity(batch.values.len());
-								for value in &batch.values {
-									let v = extracted
-										.argument_expr
-										.evaluate(eval_ctx.with_value(value))
-										.await
-										.or_none()?;
-									col.push(v);
+								Ok(v) => v,
+								Err(_) => {
+									// Fallback: evaluate per-row, replacing ignorable errors with
+									// None
+									let mut col = Vec::with_capacity(batch.values.len());
+									for value in &batch.values {
+										let v = extracted
+											.argument_expr
+											.evaluate(eval_ctx.with_value(value))
+											.await
+											.or_none()?;
+										col.push(v);
+									}
+									col
 								}
-								col
-							}
 							};
 							field_cols.push(col);
 						}
@@ -553,9 +549,8 @@ impl ExecOperator for Aggregate {
 				if group_by_exprs.is_empty() {
 					// GROUP ALL fast path: single group, pass entire columns
 					// to update_batch to avoid per-row virtual dispatch.
-					let state = groups.entry_for_empty(|| {
-						create_group_state(&aggregates, &evaluated_extra_args)
-					});
+					let state = groups
+						.entry_for_empty(|| create_group_state(&aggregates, &evaluated_extra_args));
 
 					for (field_idx, agg) in aggregates.iter().enumerate() {
 						if agg.is_group_key {
@@ -563,11 +558,9 @@ impl ExecOperator for Aggregate {
 						}
 
 						if agg.aggregate_expr_info.is_some() {
-							for (agg_idx, arg_col) in
-								agg_arg_columns[field_idx].iter().enumerate()
+							for (agg_idx, arg_col) in agg_arg_columns[field_idx].iter().enumerate()
 							{
-								if let Some(acc) =
-									state.accumulators[field_idx].get_mut(agg_idx)
+								if let Some(acc) = state.accumulators[field_idx].get_mut(agg_idx)
 									&& let Err(e) = acc.update_batch(arg_col)
 								{
 									tracing::debug!(error = %e, "Accumulator batch update failed, skipping batch");
@@ -576,16 +569,17 @@ impl ExecOperator for Aggregate {
 						} else if let Some(expr) = &agg.fallback_expr {
 							// Non-aggregate field - store first value
 							if state.first_values[field_idx].is_none()
-								&& let Some(first_value) = batch.values.first() {
-									match expr.evaluate(eval_ctx.with_value(first_value)).await {
-										Ok(field_value) => {
-											state.first_values[field_idx] = field_value;
-										}
-										Err(cf) if cf.is_ignorable() => {
-											tracing::debug!(error = %cf, "Fallback expression evaluation failed (ignorable)");
-										}
-										Err(cf) => Err(cf)?,
+								&& let Some(first_value) = batch.values.first()
+							{
+								match expr.evaluate(eval_ctx.with_value(first_value)).await {
+									Ok(field_value) => {
+										state.first_values[field_idx] = field_value;
 									}
+									Err(cf) if cf.is_ignorable() => {
+										tracing::debug!(error = %cf, "Fallback expression evaluation failed (ignorable)");
+									}
+									Err(cf) => Err(cf)?,
+								}
 							}
 						}
 					}
@@ -594,11 +588,9 @@ impl ExecOperator for Aggregate {
 					// hash-keyed `GroupMap` looks up by reference and only
 					// clones the group-by values on a cache miss.
 					for (row_idx, value) in batch.values.iter().enumerate() {
-						let state = groups.entry_for_row(
-							&group_key_columns,
-							row_idx,
-							|| create_group_state(&aggregates, &evaluated_extra_args),
-						);
+						let state = groups.entry_for_row(&group_key_columns, row_idx, || {
+							create_group_state(&aggregates, &evaluated_extra_args)
+						});
 
 						for (field_idx, agg) in aggregates.iter().enumerate() {
 							if agg.is_group_key {
@@ -642,9 +634,7 @@ impl ExecOperator for Aggregate {
 			// context.  When permission checks are active and 0 rows passed
 			// filtering the old compute path returns [] — replicate that.
 			if group_by_exprs.is_empty() && groups.is_empty() {
-				let perms_active = ctx
-					.should_check_perms(crate::iam::Action::View)
-					.unwrap_or(true);
+				let perms_active = ctx.should_check_perms(crate::iam::Action::View).unwrap_or(true);
 				if !perms_active {
 					let state = create_group_state(&aggregates, &evaluated_extra_args);
 					groups.insert(Vec::new(), state);
@@ -657,19 +647,20 @@ impl ExecOperator for Aggregate {
 			let sorted_groups = groups.into_sorted();
 			let mut results = Vec::with_capacity(sorted_groups.len());
 			for (group_key, state) in sorted_groups {
-				let result = compute_group_result_async(
-					&group_key,
-					state,
-					&aggregates,
-					&ctx,
-				).await?;
+				let result =
+					compute_group_result_async(&group_key, state, &aggregates, &ctx).await?;
 				results.push(result);
 			}
 
-			yield ValueBatch { values: results };
-		};
+			yielder
+				.emit(ValueBatch {
+					values: results,
+				})
+				.await;
+			Ok(())
+		});
 
-		Ok(monitor_stream(Box::pin(aggregate_stream), "Aggregate", &self.metrics))
+		Ok(monitor_stream(Box::pin(stream), "Aggregate", &self.metrics))
 	}
 }
 

@@ -87,7 +87,6 @@ surrealism-types = { version = "0.5", path = "surrealism/types", default-feature
 # External surreal crates
 affinitypool = "0.7.0"
 dmp = "0.2.3"
-indxdb = "0.12.0"
 lexicmp = "0.2.0"
 revision = { version = "0.30.0", features = [
     "bytes",
@@ -121,7 +120,6 @@ anyhow = "1.0.102"
 arbitrary = "1.4.2"
 argon2 = "0.5.3"
 async-channel = "2.5.0"
-async-stream = "0.3.6"
 async-graphql = { version = "7.2.1", default-features = false, features = ["custom-error-conversion"] }
 async-graphql-axum = "7.2.1"
 async-trait = "0.1.89"
@@ -163,6 +161,7 @@ indexmap = "2.14.0"
 ipnet = "2.12.0"
 jemallocator = { version = "0.6.1", package = "tikv-jemallocator" }
 jsonwebtoken = { version = "10.3.0", default-features = false, features = ["use_pem"] }
+js-sys = { version = "0.3.85", default-features = false }
 logos = "0.16.1" # TODO: pin version
 md-5 = "0.10.6"
 memchr = "2.8.0"
@@ -220,7 +219,9 @@ ulid = "1.2.1"
 unicase = "2.9.0"
 url = "2.5.8"
 uuid = "1.23.1"
+wasm-bindgen = "0.2.108"
 wasm-bindgen-futures = "0.4.58"
+wasm-bindgen-test = "0.3.58"
 wasmtimer = { version = "0.4.3", default-features = false }
 
 # Dev dependencies

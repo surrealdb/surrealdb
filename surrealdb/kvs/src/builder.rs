@@ -83,16 +83,12 @@ pub trait TransactionBuilder: TransactionBuilderRequirements {
 }
 
 pub mod requirements {
-	//! Target-dependent trait requirements for transaction builders. See
+	//! Trait requirements for transaction builders. See
 	//! [`crate::api::requirements`] for the rationale.
 
 	use std::fmt::Display;
 
-	/// This trait defines WASM requirements for a transaction builder.
-	#[cfg(target_family = "wasm")]
-	pub trait TransactionBuilderRequirements: Display {}
-
-	/// This trait defines non-WASM requirements for a transaction builder.
-	#[cfg(not(target_family = "wasm"))]
+	/// This trait defines the requirements for a transaction builder. All
+	/// backends, including WASM ones, must be `Send + Sync`.
 	pub trait TransactionBuilderRequirements: Display + Send + Sync + 'static {}
 }

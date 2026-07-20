@@ -16,17 +16,7 @@ use crate::types::{Key, KeyRange};
 use crate::{Direction, Val};
 
 /// A boxed future returned by `Transactable` / `ScanCursorKeys` /
-/// `ScanCursorVals` trait methods. `Send` only on non-WASM targets — mirrors
-/// the `?Send` async-trait variant used previously.
-///
-/// The bound matches the trait's `TransactionRequirements`
-/// (`Send + Sync` natively, empty on WASM), so a `BoxFut` returned from a
-/// trait method satisfies whatever the caller expects.
-#[cfg(target_family = "wasm")]
-pub type BoxFut<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
-/// A boxed future returned by `Transactable` / `ScanCursorKeys` /
 /// `ScanCursorVals` trait methods.
-#[cfg(not(target_family = "wasm"))]
 pub type BoxFut<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// The result of a [`Transactable::keys`] or [`Transactable::keysr`] operation.
@@ -95,35 +85,13 @@ pub struct GetMultiResult {
 
 pub mod requirements {
 	//! This module defines the trait requirements for a transaction.
-	//!
-	//! The reason this exists is to allow for swapping out the `Send`
-	//! requirement for WASM targets, where we don't want to require `Send` for
-	//! transactions. But for non-WASM targets, we do want to require `Send`
-	//! for transactions.
-	//!
-	//! There is no `cfg` / `cfg_attr` support for trait requirements, so we use
-	//! this dependent trait to conditionally require `Send` based on the
-	//! target family.
-	//!
-	//! Without this, we would have had to duplicate the entire `Transaction`
-	//! trait for WASM and non-WASM targets, which would have been a pain to
-	//! maintain.
 
-	/// This trait defines WASM requirements for a transaction.
-	#[cfg(target_family = "wasm")]
-	pub trait TransactionRequirements {}
-
-	/// Implements the `TransactionRequirements` trait for all types.
-	#[cfg(target_family = "wasm")]
-	impl<T> TransactionRequirements for T {}
-
-	/// This trait defines non-WASM requirements for a transaction.
-	#[cfg(not(target_family = "wasm"))]
+	/// This trait defines the requirements for a transaction. All backends,
+	/// including WASM ones, must be `Send + Sync`.
 	pub trait TransactionRequirements: Send + Sync {}
 
 	/// Implements the `TransactionRequirements` trait for all types that are
-	/// `Send`.
-	#[cfg(not(target_family = "wasm"))]
+	/// `Send + Sync`.
 	impl<T: Send + Sync> TransactionRequirements for T {}
 }
 
@@ -372,30 +340,15 @@ impl ExactSizeIterator for ValsIter<'_> {}
 /// `LIMIT`) — this does **not** mark the range exhausted, so the cursor stays
 /// resumable. The closure must be synchronous (no `.await`).
 ///
-/// `Send` is required only on non-WASM targets, mirroring [`BoxFut`]: a
-/// `for_each` future is `Send` there and captures the `&mut dyn ValVisitor`.
-#[cfg(not(target_family = "wasm"))]
+/// `Send` is required as a `for_each` future is `Send` and captures the
+/// `&mut dyn ValVisitor`.
 pub trait ValVisitor: FnMut(&[u8], &[u8]) -> Result<std::ops::ControlFlow<()>> + Send {}
-#[cfg(not(target_family = "wasm"))]
 impl<T: FnMut(&[u8], &[u8]) -> Result<std::ops::ControlFlow<()>> + Send> ValVisitor for T {}
-/// Per-`(key, value)` visitor for [`ScanCursorVals::for_each`]. See the
-/// non-WASM definition for the contract.
-#[cfg(target_family = "wasm")]
-pub trait ValVisitor: FnMut(&[u8], &[u8]) -> Result<std::ops::ControlFlow<()>> {}
-#[cfg(target_family = "wasm")]
-impl<T: FnMut(&[u8], &[u8]) -> Result<std::ops::ControlFlow<()>>> ValVisitor for T {}
 
 /// Per-key visitor for [`ScanCursorKeys::for_each`]. See [`ValVisitor`] for the
 /// contract (this variant receives only the key).
-#[cfg(not(target_family = "wasm"))]
 pub trait KeyVisitor: FnMut(&[u8]) -> Result<std::ops::ControlFlow<()>> + Send {}
-#[cfg(not(target_family = "wasm"))]
 impl<T: FnMut(&[u8]) -> Result<std::ops::ControlFlow<()>> + Send> KeyVisitor for T {}
-/// Per-key visitor for [`ScanCursorKeys::for_each`].
-#[cfg(target_family = "wasm")]
-pub trait KeyVisitor: FnMut(&[u8]) -> Result<std::ops::ControlFlow<()>> {}
-#[cfg(target_family = "wasm")]
-impl<T: FnMut(&[u8]) -> Result<std::ops::ControlFlow<()>>> KeyVisitor for T {}
 
 /// A stateful keys-only scan cursor. Returned by [`Transactable::open_keys_cursor`].
 ///

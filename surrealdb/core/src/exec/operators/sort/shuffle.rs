@@ -82,7 +82,7 @@ impl ExecOperator for RandomShuffle {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
@@ -94,7 +94,6 @@ impl ExecOperator for RandomShuffle {
 		let shuffled_stream = futures::stream::once(async move {
 			// Collect all values from input
 			let mut all_values: Vec<Value> = Vec::new();
-			futures::pin_mut!(input_stream);
 			while let Some(batch_result) = input_stream.next().await {
 				// Check for cancellation between batches
 				if cancellation.is_cancelled() {

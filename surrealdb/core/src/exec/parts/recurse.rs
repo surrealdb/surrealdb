@@ -77,13 +77,12 @@ impl PhysicalExpr for RecursePart {
 			};
 
 			// Execute the recursion operator
-			let stream = self.op.execute(&bound_ctx).map_err(|e| match e {
+			let mut stream = self.op.execute(&bound_ctx).map_err(|e| match e {
 				crate::expr::ControlFlow::Err(e) => crate::expr::ControlFlow::Err(e),
 				other => other,
 			})?;
 
 			// Collect results from the stream
-			futures::pin_mut!(stream);
 			let mut result = Value::None;
 			while let Some(batch_result) = stream.next().await {
 				let batch = batch_result?;

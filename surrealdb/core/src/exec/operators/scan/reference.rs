@@ -8,6 +8,7 @@ use std::borrow::Cow;
 use std::ops::Bound;
 use std::sync::Arc;
 
+use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 
 use super::common::{
@@ -157,7 +158,7 @@ impl ExecOperator for ReferenceScan {
 		// additionally applies field-level SELECT permissions and computed
 		// fields, matching a direct `SELECT *` on the referencing table.
 		let check_perms = should_check_perms(&db_ctx, Action::View)?;
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
@@ -173,7 +174,7 @@ impl ExecOperator for ReferenceScan {
 		let fetch_full = output_mode == ReferenceScanOutput::FullRecord;
 		let version_expr = self.version.clone();
 
-		let stream = async_stream::try_stream! {
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			let txn = ctx.txn();
 			let ns_id = db_ctx.ns_ctx.ns.namespace_id;
 			let db_id = db_ctx.db.database_id;
@@ -188,12 +189,12 @@ impl ExecOperator for ReferenceScan {
 			let version: Option<u64> = resolve_version_stamp(&ctx, version_expr.as_ref()).await?;
 
 			// Read from the child operator stream and extract RecordIds
-			futures::pin_mut!(input_stream);
 			let mut rid_batch: Vec<RecordId> = Vec::with_capacity(scan_batch_size);
 
 			while let Some(batch_result) = input_stream.next().await {
 				let batch = batch_result?;
-				let target_rids: Vec<RecordId> = batch.values
+				let target_rids: Vec<RecordId> = batch
+					.values
 					.into_iter()
 					.flat_map(|v| {
 						let mut rids = Vec::new();
@@ -205,12 +206,16 @@ impl ExecOperator for ReferenceScan {
 				// Scan references for each target record
 				for rid in &target_rids {
 					let range = compute_ref_key_range(
-						ns_id, db_id, rid,
+						ns_id,
+						db_id,
+						rid,
 						referencing_table.as_ref(),
 						referencing_field.as_deref(),
-						&range_start, &range_end,
+						&range_start,
+						&range_end,
 						&ctx,
-					).await?;
+					)
+					.await?;
 
 					let mut cursor = txn
 						.open_keys_cursor(range, ScanDirection::Forward, 0, version)
@@ -221,9 +226,8 @@ impl ExecOperator for ReferenceScan {
 						// bytes into an owned `RecordId` — no per-key buffer copy.
 						let mut decode_err: Option<anyhow::Error> = None;
 						let stats = cursor
-							.for_each(
-								crate::kvs::NORMAL_BATCH_SIZE,
-								&mut |key| match crate::key::r#ref::Ref::decode_key(key) {
+							.for_each(crate::kvs::NORMAL_BATCH_SIZE, &mut |key| {
+								match crate::key::r#ref::Ref::decode_key(key) {
 									Ok(decoded) => {
 										rid_batch.push(RecordId {
 											table: decoded.foreign_table.into_owned(),
@@ -235,8 +239,8 @@ impl ExecOperator for ReferenceScan {
 										decode_err = Some(e);
 										Ok(std::ops::ControlFlow::Break(()))
 									}
-								},
-							)
+								}
+							})
 							.await
 							.context("Failed to scan reference")?;
 						if let Some(e) = decode_err {
@@ -250,10 +254,23 @@ impl ExecOperator for ReferenceScan {
 						// free for the next call and bounds memory.
 						if rid_batch.len() >= scan_batch_size {
 							let values = resolve_record_batch(
-								&ctx, &txn, ns_id, db_id, &rid_batch, fetch_full, check_perms,
-								version, CachePolicy::ReadWrite, &mut perm_cache,
-							).await?;
-							yield ValueBatch { values };
+								&ctx,
+								&txn,
+								ns_id,
+								db_id,
+								&rid_batch,
+								fetch_full,
+								check_perms,
+								version,
+								CachePolicy::ReadWrite,
+								&mut perm_cache,
+							)
+							.await?;
+							yielder
+								.emit(ValueBatch {
+									values,
+								})
+								.await;
 							rid_batch.clear();
 						}
 					}
@@ -263,12 +280,26 @@ impl ExecOperator for ReferenceScan {
 			// Yield remaining batch
 			if !rid_batch.is_empty() {
 				let values = resolve_record_batch(
-					&ctx, &txn, ns_id, db_id, &rid_batch, fetch_full, check_perms, version,
-					CachePolicy::ReadWrite, &mut perm_cache,
-				).await?;
-				yield ValueBatch { values };
+					&ctx,
+					&txn,
+					ns_id,
+					db_id,
+					&rid_batch,
+					fetch_full,
+					check_perms,
+					version,
+					CachePolicy::ReadWrite,
+					&mut perm_cache,
+				)
+				.await?;
+				yielder
+					.emit(ValueBatch {
+						values,
+					})
+					.await;
 			}
-		};
+			Ok(())
+		});
 
 		Ok(monitor_stream(Box::pin(stream), "ReferenceScan", &self.metrics))
 	}

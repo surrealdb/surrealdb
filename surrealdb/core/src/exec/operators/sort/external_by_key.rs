@@ -112,7 +112,7 @@ impl ExecOperator for ExternalSortByKey {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
@@ -132,7 +132,6 @@ impl ExecOperator for ExternalSortByKey {
 				TempFileWriter::new(&dir).context("Failed to create temp file writer")?;
 			let mut count = 0usize;
 
-			futures::pin_mut!(input_stream);
 			while let Some(batch_result) = input_stream.next().await {
 				if ctx.cancellation().is_cancelled() {
 					return Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(

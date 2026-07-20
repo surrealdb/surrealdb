@@ -7,7 +7,8 @@
 use std::fmt::Write;
 use std::sync::Arc;
 
-use futures::{StreamExt, stream};
+use common::future::stream::{self, Yielder};
+use futures::StreamExt;
 use surrealdb_types::ToSql;
 
 use crate::exec::context::{ContextLevel, ExecutionContext};
@@ -71,11 +72,9 @@ impl ExecOperator for ExplainPlan {
 			}
 		};
 
-		Ok(Box::pin(stream::once(async move {
-			Ok(ValueBatch {
-				values: vec![output],
-			})
-		})))
+		Ok(Box::pin(futures::stream::once(std::future::ready(Ok(ValueBatch {
+			values: vec![output],
+		})))))
 	}
 
 	fn is_scalar(&self) -> bool {
@@ -152,7 +151,7 @@ impl ExecOperator for AnalyzePlan {
 		let redact_volatile_explain_attrs = self.redact_volatile_explain_attrs;
 
 		// Create a stream that first drains the inner plan, then formats output
-		let analyze_stream = async_stream::try_stream! {
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			// Drain all batches from the inner plan so metrics are populated
 			let mut total_rows: u64 = 0;
 			while let Some(batch_result) = inner_stream.next().await {
@@ -174,24 +173,33 @@ impl ExecOperator for AnalyzePlan {
 			let output = match format {
 				ExplainFormat::Text => {
 					let mut plan_text = String::new();
-					format_analyze_plan(plan.as_ref(), &mut plan_text, "", redact_volatile_explain_attrs);
+					format_analyze_plan(
+						plan.as_ref(),
+						&mut plan_text,
+						"",
+						redact_volatile_explain_attrs,
+					);
 					let _ = writeln!(plan_text);
 					let _ = write!(plan_text, "Total rows: {}", total_rows);
 					Value::String(plan_text.into())
 				}
 				ExplainFormat::Json => {
-					let mut plan_json = format_analyze_plan_json(plan.as_ref(), redact_volatile_explain_attrs);
+					let mut plan_json =
+						format_analyze_plan_json(plan.as_ref(), redact_volatile_explain_attrs);
 					plan_json.insert("total_rows", Value::from(total_rows as i64));
 					Value::Object(plan_json)
 				}
 			};
 
-			yield ValueBatch {
-				values: vec![output],
-			};
-		};
+			yielder
+				.emit(ValueBatch {
+					values: vec![output],
+				})
+				.await;
+			Ok(())
+		});
 
-		Ok(Box::pin(analyze_stream))
+		Ok(Box::pin(stream))
 	}
 
 	fn is_scalar(&self) -> bool {

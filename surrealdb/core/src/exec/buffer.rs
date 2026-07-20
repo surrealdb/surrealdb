@@ -103,10 +103,9 @@ pub(crate) fn buffer_stream(
 /// Safe to use when the operator pipeline's `RootContext.ctx` is a snapshot
 /// (independent `Arc<Context>`) rather than a clone of the executor's Arc.
 #[cfg(not(target_family = "wasm"))]
-fn spawn_buffered(stream: ValueBatchStream, buffer_size: usize) -> ValueBatchStream {
+fn spawn_buffered(mut stream: ValueBatchStream, buffer_size: usize) -> ValueBatchStream {
 	let (tx, rx) = async_channel::bounded(buffer_size);
 	let handle = tokio::spawn(async move {
-		futures::pin_mut!(stream);
 		while let Some(item) = futures::StreamExt::next(&mut stream).await {
 			if tx.send(item).await.is_err() {
 				break; // consumer dropped

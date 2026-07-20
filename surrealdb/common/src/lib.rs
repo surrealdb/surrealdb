@@ -15,6 +15,9 @@ pub mod ids;
 #[macro_use]
 pub mod mac;
 
+#[cfg(feature = "sys")]
+pub mod sys;
+
 mod error;
 
 pub use error::{Error, ErrorCode, ErrorTrait, TypedError, source as source_error};
@@ -24,4 +27,3 @@ pub mod mem_registry;
 pub mod non_max;
 pub mod span;
 pub mod str;
-pub mod sys;

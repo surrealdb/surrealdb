@@ -11,6 +11,7 @@
 
 use std::sync::Arc;
 
+use common::future::stream::{self, Yielder};
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::exec::context::{ContextLevel, ExecutionContext};
@@ -76,7 +77,7 @@ impl ExecOperator for SourceExpr {
 		let expr = Arc::clone(&self.expr);
 		let ctx = ctx.clone();
 
-		let stream = async_stream::try_stream! {
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			// In a correlated subquery, ScalarSubquery binds the outer document
 			// as `$this`. Use it as current_value so that bare field paths in
 			// the FROM expression resolve against the outer row (e.g.
@@ -102,7 +103,11 @@ impl ExecOperator for SourceExpr {
 						super::fetch::batch_fetch_in_place(&ctx, &mut values).await?;
 						values.retain(|v| !matches!(v, Value::None | Value::Null));
 						if !values.is_empty() {
-							yield ValueBatch { values };
+							yielder
+								.emit(ValueBatch {
+									values,
+								})
+								.await;
 						}
 					}
 				}
@@ -110,14 +115,23 @@ impl ExecOperator for SourceExpr {
 				Value::RecordId(ref rid) => {
 					let fetched = super::fetch::fetch_record(&ctx, rid).await?;
 					if !matches!(fetched, Value::None) {
-						yield ValueBatch { values: vec![fetched] };
+						yielder
+							.emit(ValueBatch {
+								values: vec![fetched],
+							})
+							.await;
 					}
 				}
 				other => {
-					yield ValueBatch { values: vec![other] };
+					yielder
+						.emit(ValueBatch {
+							values: vec![other],
+						})
+						.await;
 				}
 			}
-		};
+			Ok(())
+		});
 
 		Ok(monitor_stream(Box::pin(stream), "SourceExpr", &self.metrics))
 	}

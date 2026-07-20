@@ -6,6 +6,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use common::future::stream::{self, Yielder};
 use reblessive::TreeStack;
 
 use super::common::fetch_and_filter_records_batch;
@@ -134,7 +135,7 @@ impl ExecOperator for FullTextScan {
 		let needed_fields = self.needed_fields.clone();
 		let ctx = ctx.clone();
 
-		let stream = async_stream::try_stream! {
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			// Get namespace and database IDs
 			let db_ctx = ctx.database().context("FullTextScan requires database context")?;
 			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
@@ -184,7 +185,7 @@ impl ExecOperator for FullTextScan {
 
 			// Early exit if denied
 			if matches!(select_permission, PhysicalPermission::Deny) {
-				return;
+				return Ok(());
 			}
 
 			// Resolve field state for computed fields and field-level
@@ -195,9 +196,7 @@ impl ExecOperator for FullTextScan {
 					if let Some(ref res) = resolved {
 						res.field_state_for_projection(nf.as_ref())
 					} else {
-						build_field_state(
-							&ctx, &table_name, check_perms, nf.as_ref(),
-						).await?
+						build_field_state(&ctx, &table_name, check_perms, nf.as_ref()).await?
 					}
 				}
 				None => super::pipeline::FieldState::empty(),
@@ -222,16 +221,19 @@ impl ExecOperator for FullTextScan {
 			index_def.ensure_current_format()?;
 			let ft_params = match &index_def.index {
 				Index::FullText(params) => params,
-				_ => {
-					Err(ControlFlow::Err(anyhow::anyhow!(
-						"Index '{}' is not a full-text index",
-						index_def.name
-					)))?
-				}
+				_ => Err(ControlFlow::Err(anyhow::anyhow!(
+					"Index '{}' is not a full-text index",
+					index_def.name
+				)))?,
 			};
 
 			// Create the index key base
-			let ikb = IndexKeyBase::new(ns.namespace_id, db.database_id, table_name.clone(), index_def.index_id);
+			let ikb = IndexKeyBase::new(
+				ns.namespace_id,
+				db.database_id,
+				table_name.clone(),
+				index_def.index_id,
+			);
 
 			// Open the full-text index
 			let fti = FullTextIndex::new(
@@ -239,7 +241,7 @@ impl ExecOperator for FullTextScan {
 				txn.as_ref(),
 				ikb,
 				ft_params,
-				&frozen_ctx.config.file_allowlist
+				&frozen_ctx.config.file_allowlist,
 			)
 			.await
 			.context("Failed to open full-text index")?;
@@ -256,7 +258,7 @@ impl ExecOperator for FullTextScan {
 
 			// If query terms are empty, no results
 			if query_terms.is_empty() {
-				return;
+				return Ok(());
 			}
 
 			// Get the boolean operator from the MATCHES operator
@@ -267,7 +269,7 @@ impl ExecOperator for FullTextScan {
 				Some(iter) => iter,
 				None => {
 					// No matching documents
-					return;
+					return Ok(());
 				}
 			};
 
@@ -278,8 +280,7 @@ impl ExecOperator for FullTextScan {
 
 			loop {
 				// Collect up to BATCH_SIZE record IDs from the hits iterator
-				let hit = hits_iter.next(txn.as_ref()).await
-					.context("Failed to get next hit")?;
+				let hit = hits_iter.next(txn.as_ref()).await.context("Failed to get next hit")?;
 
 				match hit {
 					Some((rid, _doc_id)) => {
@@ -296,10 +297,15 @@ impl ExecOperator for FullTextScan {
 								check_perms,
 								version,
 								CachePolicy::ReadOnly,
-							).await?;
+							)
+							.await?;
 							pipeline.process_batch(&mut values, &ctx).await?;
 							if !values.is_empty() {
-								yield ValueBatch { values };
+								yielder
+									.emit(ValueBatch {
+										values,
+									})
+									.await;
 							}
 							rid_batch.clear();
 						}
@@ -323,13 +329,19 @@ impl ExecOperator for FullTextScan {
 					check_perms,
 					version,
 					CachePolicy::ReadOnly,
-				).await?;
+				)
+				.await?;
 				pipeline.process_batch(&mut values, &ctx).await?;
 				if !values.is_empty() {
-					yield ValueBatch { values };
+					yielder
+						.emit(ValueBatch {
+							values,
+						})
+						.await;
 				}
 			}
-		};
+			Ok(())
+		});
 
 		Ok(monitor_stream(Box::pin(stream), "FullTextScan", &self.metrics))
 	}

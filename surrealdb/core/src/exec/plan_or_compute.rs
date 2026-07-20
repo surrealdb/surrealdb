@@ -232,10 +232,9 @@ pub(crate) async fn evaluate_body_expr(
 ///
 /// Propagates control flow signals (BREAK, CONTINUE, RETURN, errors).
 pub(crate) async fn collect_single_value(
-	stream: ValueBatchStream,
+	mut stream: ValueBatchStream,
 ) -> crate::expr::FlowResult<Value> {
 	let mut values = Vec::new();
-	futures::pin_mut!(stream);
 
 	while let Some(batch_result) = stream.next().await {
 		match batch_result {
@@ -256,9 +255,8 @@ pub(crate) async fn collect_single_value(
 /// Collect all values from a stream into a `Vec`.
 ///
 /// Propagates control flow signals directly.
-pub(crate) async fn collect_stream(stream: ValueBatchStream) -> FlowResult<Vec<Value>> {
+pub(crate) async fn collect_stream(mut stream: ValueBatchStream) -> FlowResult<Vec<Value>> {
 	let mut results = Vec::new();
-	futures::pin_mut!(stream);
 
 	while let Some(batch_result) = stream.next().await {
 		match batch_result {

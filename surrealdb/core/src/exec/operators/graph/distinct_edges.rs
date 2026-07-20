@@ -38,6 +38,7 @@
 
 use std::sync::Arc;
 
+use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 
 use crate::exec::{
@@ -100,7 +101,7 @@ impl ExecOperator for DistinctEdges {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
@@ -109,8 +110,7 @@ impl ExecOperator for DistinctEdges {
 		let edge_bindings = self.edge_bindings.clone();
 		let ctx = ctx.clone();
 
-		let filtered = async_stream::try_stream! {
-			futures::pin_mut!(input_stream);
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			while let Some(batch_result) = input_stream.next().await {
 				crate::exec::operators::check_cancelled(&ctx)?;
 				let batch = batch_result?;
@@ -121,12 +121,17 @@ impl ExecOperator for DistinctEdges {
 					}
 				}
 				if !values.is_empty() {
-					yield ValueBatch { values };
+					yielder
+						.emit(ValueBatch {
+							values,
+						})
+						.await;
 				}
 			}
-		};
+			Ok(())
+		});
 
-		Ok(monitor_stream(Box::pin(filtered), "DistinctEdges", &self.metrics))
+		Ok(monitor_stream(Box::pin(stream), "DistinctEdges", &self.metrics))
 	}
 }
 

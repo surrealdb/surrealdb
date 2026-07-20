@@ -94,6 +94,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
+use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 
 use crate::exec::{
@@ -321,7 +322,7 @@ impl ExecOperator for HashJoin {
 		let max_output_rows = ctx.root().ctx.config.gql_max_output_rows;
 		let ctx = ctx.clone();
 
-		let joined = async_stream::try_stream! {
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			// ---- Pre-drain phase (`probe_first` only): drain the mutating probe so
 			// its writes land before the reading build side is constructed. The
 			// probe is a pipeline breaker, so draining it executes all of its
@@ -330,8 +331,7 @@ impl ExecOperator for HashJoin {
 			// must be materialised from this single drain — bounded by the same
 			// build-row budget.)
 			let prebuffered_probe: Option<Vec<ValueBatch>> = if probe_first {
-				let probe_stream = probe.stream(&ctx, buffer_size)?;
-				futures::pin_mut!(probe_stream);
+				let mut probe_stream = probe.stream(&ctx, buffer_size)?;
 				let mut batches: Vec<ValueBatch> = Vec::new();
 				let mut total: usize = 0;
 				while let Some(batch_result) = probe_stream.next().await {
@@ -339,12 +339,12 @@ impl ExecOperator for HashJoin {
 					let batch = batch_result?;
 					total += batch.values.len();
 					if total > max_rows {
-						Err(ControlFlow::Err(anyhow::anyhow!(crate::err::Error::InvalidStatement(
-							format!(
+						Err(ControlFlow::Err(anyhow::anyhow!(
+							crate::err::Error::InvalidStatement(format!(
 								"GQL MATCH join exceeded the maximum of {max_rows} buffered \
 								 probe-side rows (configurable via SURREAL_GQL_MAX_JOIN_BUILD_ROWS)"
-							),
-						))))?;
+							),)
+						)))?;
 					}
 					batches.push(batch);
 				}
@@ -356,23 +356,19 @@ impl ExecOperator for HashJoin {
 			// ---- Build phase: drain the build side fully into the hash table.
 			// Constructed now (after the probe pre-drain when `probe_first`) so a
 			// post-write build reads the live transaction state.
-			let build_stream = match eager_build {
+			let mut build_stream = match eager_build {
 				Some(stream) => stream,
 				None => build.stream(&ctx, buffer_size)?,
 			};
 			let mut table = BuildTable::new();
-			futures::pin_mut!(build_stream);
 			while let Some(batch_result) = build_stream.next().await {
 				// Draining the whole build side can run long without yielding;
 				// poll cancellation so a client disconnect / timeout interrupts.
 				crate::exec::operators::check_cancelled(&ctx)?;
 				let batch = batch_result?;
 				for row in batch.values {
-					match join_key(&row, &keys) {
-						// A null/none/missing key never joins ⇒ excluded from the
-						// build table (it can match no probe row).
-						Some(key) => table.insert(key, row, max_rows)?,
-						None => {}
+					if let Some(key) = join_key(&row, &keys) {
+						table.insert(key, row, max_rows)?
 					}
 				}
 			}
@@ -381,7 +377,7 @@ impl ExecOperator for HashJoin {
 			// Either replay the pre-drained (post-write) probe rows, or construct
 			// the probe now — deferred past the build phase when `build_mutates` so
 			// its scans read the live, post-write transaction state.
-			let probe_stream: ValueBatchStream = match prebuffered_probe {
+			let mut probe_stream: ValueBatchStream = match prebuffered_probe {
 				Some(batches) => Box::pin(futures::stream::iter(batches.into_iter().map(Ok))),
 				None => match eager_probe {
 					Some(stream) => stream,
@@ -393,7 +389,6 @@ impl ExecOperator for HashJoin {
 			// high-fan-out equi-join can emit far more rows than either side holds).
 			let base_eval = EvalContext::from_exec_ctx(&ctx);
 			let mut emitted: usize = 0;
-			futures::pin_mut!(probe_stream);
 			while let Some(batch_result) = probe_stream.next().await {
 				crate::exec::operators::check_cancelled(&ctx)?;
 				let batch = batch_result?;
@@ -405,7 +400,8 @@ impl ExecOperator for HashJoin {
 							// build row that passes the residual.
 							for build_row in table.all_rows() {
 								let merged = merge_rows(build_row, &row);
-								if residual_passes(residual.as_deref(), &base_eval, &merged).await? {
+								if residual_passes(residual.as_deref(), &base_eval, &merged).await?
+								{
 									emit(&mut out, &mut emitted, max_output_rows, merged)?;
 								}
 							}
@@ -419,7 +415,9 @@ impl ExecOperator for HashJoin {
 							{
 								for build_row in matches {
 									let merged = merge_rows(build_row, &row);
-									if residual_passes(residual.as_deref(), &base_eval, &merged).await? {
+									if residual_passes(residual.as_deref(), &base_eval, &merged)
+										.await?
+									{
 										emit(&mut out, &mut emitted, max_output_rows, merged)?;
 									}
 								}
@@ -437,7 +435,9 @@ impl ExecOperator for HashJoin {
 							{
 								for build_row in matches {
 									let merged = merge_rows(build_row, &row);
-									if residual_passes(residual.as_deref(), &base_eval, &merged).await? {
+									if residual_passes(residual.as_deref(), &base_eval, &merged)
+										.await?
+									{
 										emit(&mut out, &mut emitted, max_output_rows, merged)?;
 										matched = true;
 									}
@@ -455,12 +455,17 @@ impl ExecOperator for HashJoin {
 					}
 				}
 				if !out.is_empty() {
-					yield ValueBatch { values: out };
+					yielder
+						.emit(ValueBatch {
+							values: out,
+						})
+						.await;
 				}
 			}
-		};
+			Ok(())
+		});
 
-		Ok(monitor_stream(Box::pin(joined), "HashJoin", &self.metrics))
+		Ok(monitor_stream(Box::pin(stream), "HashJoin", &self.metrics))
 	}
 }
 

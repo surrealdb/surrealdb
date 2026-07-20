@@ -15,6 +15,8 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use common::future::stream::{self, Yielder};
+
 use crate::catalog::providers::TableProvider;
 use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
@@ -224,7 +226,7 @@ pub(crate) fn kv_scan_stream(
 	topk_probe: Option<Arc<TopKThresholdProbe>>,
 ) -> ValueBatchStream {
 	let skip = pre_skip.min(u32::MAX as usize) as u32;
-	let stream = async_stream::try_stream! {
+	let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 		let mut cursor = txn
 			.open_vals_cursor(range, direction, skip, version)
 			.await
@@ -239,9 +241,7 @@ pub(crate) fn kv_scan_stream(
 			// need to over-fetch when row filtering reduces the visible
 			// count downstream, so the hint applies only once).
 			let mut batch_size = crate::kvs::NORMAL_BATCH_SIZE;
-			if first
-				&& let Some(h) = limit_hint
-			{
+			if first && let Some(h) = limit_hint {
 				batch_size = batch_size.min(h);
 			}
 			if let Some(cap) = storage_limit {
@@ -321,10 +321,16 @@ pub(crate) fn kv_scan_stream(
 				break;
 			}
 			if !decoded.is_empty() {
-				yield ValueBatch { values: decoded };
+				yielder
+					.emit(ValueBatch {
+						values: decoded,
+					})
+					.await;
 			}
 		}
-	};
+		Ok(())
+	});
+
 	Box::pin(stream)
 }
 

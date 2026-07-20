@@ -21,7 +21,8 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use futures::{StreamExt, stream};
+use common::future::stream::{self, Yielder};
+use futures::StreamExt;
 use surrealdb_types::ToSql;
 
 use crate::catalog::{DatabaseId, NamespaceId};
@@ -96,7 +97,7 @@ impl ExecOperator for UpdateBinding {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
@@ -107,8 +108,7 @@ impl ExecOperator for UpdateBinding {
 		let data = self.data.clone();
 		let ctx = ctx.clone();
 
-		let stream = async_stream::try_stream! {
-			futures::pin_mut!(input_stream);
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			// Pipeline breaker: drain the whole input before writing.
 			let mut rows = Vec::new();
 			while let Some(batch) = input_stream.next().await {
@@ -129,8 +129,13 @@ impl ExecOperator for UpdateBinding {
 				}
 				out.push(row);
 			}
-			yield ValueBatch { values: out };
-		};
+			yielder
+				.emit(ValueBatch {
+					values: out,
+				})
+				.await;
+			Ok(())
+		});
 
 		Ok(monitor_stream(Box::pin(stream), "UpdateBinding", &self.metrics))
 	}
@@ -196,7 +201,7 @@ impl ExecOperator for DeleteBinding {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
@@ -214,8 +219,7 @@ impl ExecOperator for DeleteBinding {
 		let is_edge = self.is_edge;
 		let ctx = ctx.clone();
 
-		let stream = async_stream::try_stream! {
-			futures::pin_mut!(input_stream);
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			let mut rows = Vec::new();
 			while let Some(batch) = input_stream.next().await {
 				check_cancelled(&ctx)?;
@@ -242,8 +246,13 @@ impl ExecOperator for DeleteBinding {
 				}
 				out.push(row);
 			}
-			yield ValueBatch { values: out };
-		};
+			yielder
+				.emit(ValueBatch {
+					values: out,
+				})
+				.await;
+			Ok(())
+		});
 
 		Ok(monitor_stream(Box::pin(stream), "DeleteBinding", &self.metrics))
 	}
@@ -518,7 +527,7 @@ impl ExecOperator for InsertGraph {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
@@ -529,8 +538,7 @@ impl ExecOperator for InsertGraph {
 		let edges = self.edges.clone();
 		let ctx = ctx.clone();
 
-		let stream = async_stream::try_stream! {
-			futures::pin_mut!(input_stream);
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			let mut rows = Vec::new();
 			while let Some(batch) = input_stream.next().await {
 				check_cancelled(&ctx)?;
@@ -542,8 +550,13 @@ impl ExecOperator for InsertGraph {
 				insert_row(&nodes, &edges, &mut row, &frozen, &opt).await?;
 				out.push(row);
 			}
-			yield ValueBatch { values: out };
-		};
+			yielder
+				.emit(ValueBatch {
+					values: out,
+				})
+				.await;
+			Ok(())
+		});
 
 		Ok(monitor_stream(Box::pin(stream), "InsertGraph", &self.metrics))
 	}
@@ -644,7 +657,7 @@ impl ExecOperator for SingleRowScan {
 		let batch = ValueBatch {
 			values: vec![Value::Object(Object::default())],
 		};
-		let stream = stream::once(async move { Ok(batch) });
+		let stream = futures::stream::once(async move { Ok(batch) });
 		Ok(monitor_stream(Box::pin(stream), "SingleRowScan", &self.metrics))
 	}
 }
@@ -693,25 +706,21 @@ impl ExecOperator for DrainSink {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
 			ctx.root().ctx.config.operator_buffer_size,
 		);
 		let ctx = ctx.clone();
-		let stream = async_stream::try_stream! {
-			futures::pin_mut!(input_stream);
+		let stream = stream::try_async_stream(async move |_: Yielder<_>| {
 			while let Some(batch) = input_stream.next().await {
 				check_cancelled(&ctx)?;
 				// Drive the writes; discard the rows.
 				let _ = batch?;
 			}
-			// Yield one empty batch: contributes no result rows, but pins the
-			// stream's item type (a `try_stream!` that never yields cannot infer
-			// it).
-			yield ValueBatch { values: Vec::new() };
-		};
+			Ok(())
+		});
 		Ok(monitor_stream(Box::pin(stream), "DrainSink", &self.metrics))
 	}
 }

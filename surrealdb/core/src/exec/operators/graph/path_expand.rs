@@ -81,6 +81,7 @@
 
 use std::sync::Arc;
 
+use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 use tracing::debug;
 
@@ -437,7 +438,7 @@ impl ExecOperator for PathExpand {
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let db_ctx = ctx.database()?.clone();
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
@@ -464,7 +465,7 @@ impl ExecOperator for PathExpand {
 		let tgt_field = target_field(direction);
 		let ctx = ctx.clone();
 
-		let stream = async_stream::try_stream! {
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			let txn = ctx.txn();
 			let ns_id = db_ctx.ns_ctx.ns.namespace_id;
 			let db_id = db_ctx.db.database_id;
@@ -480,7 +481,6 @@ impl ExecOperator for PathExpand {
 			// Output batch, flushed when it reaches the configured batch size.
 			let mut out: Vec<Value> = Vec::with_capacity(scan_batch_size);
 
-			futures::pin_mut!(input_stream);
 			while let Some(batch_result) = input_stream.next().await {
 				crate::exec::operators::check_cancelled(&ctx)?;
 				let batch = batch_result?;
@@ -524,7 +524,11 @@ impl ExecOperator for PathExpand {
 						);
 						out.push(assembled);
 						if out.len() >= scan_batch_size {
-							yield ValueBatch { values: std::mem::take(&mut out) };
+							yielder
+								.emit(ValueBatch {
+									values: std::mem::take(&mut out),
+								})
+								.await;
 							out = Vec::with_capacity(scan_batch_size);
 						}
 					}
@@ -556,15 +560,20 @@ impl ExecOperator for PathExpand {
 						// skipping edges already used on this path
 						// (DIFFERENT-EDGES). The cursor must be dropped before
 						// the FieldState fetch can borrow `txn` again.
-						let ranges = compute_graph_ranges(
-							ns_id, db_id, &path.tip, dir, &edge_specs, &ctx,
-						).await?;
+						let ranges =
+							compute_graph_ranges(ns_id, db_id, &path.tip, dir, &edge_specs, &ctx)
+								.await?;
 
 						let mut edge_ids: Vec<RecordId> = Vec::new();
 						let mut decoded_targets: Vec<Option<RecordId>> = Vec::new();
 						for r in ranges {
 							let mut cursor = txn
-								.open_keys_cursor(r.as_borrowed(), ScanDirection::Forward, 0, version)
+								.open_keys_cursor(
+									r.as_borrowed(),
+									ScanDirection::Forward,
+									0,
+									version,
+								)
 								.await
 								.context("Failed to open PathExpand graph cursor")?;
 							loop {
@@ -608,8 +617,8 @@ impl ExecOperator for PathExpand {
 							let Some(edge_obj) = edge_obj else {
 								continue;
 							};
-							let next_id = decoded_target
-								.or_else(|| edge_target(&edge_obj, tgt_field));
+							let next_id =
+								decoded_target.or_else(|| edge_target(&edge_obj, tgt_field));
 							let Some(next_id) = next_id else {
 								// No usable endpoint ⇒ this edge can't extend the
 								// path; prune the branch.
@@ -631,8 +640,7 @@ impl ExecOperator for PathExpand {
 						// emission given a fixed adjacency order.
 						let new_depth = depth + 1;
 						let mut successors: Vec<PartialPath> = Vec::new();
-						for ((edge_id, edge_obj), node_obj) in
-							step_edges.into_iter().zip(node_objs)
+						for ((edge_id, edge_obj), node_obj) in step_edges.into_iter().zip(node_objs)
 						{
 							let Some(node_obj) = node_obj else {
 								// Permission-denied / missing next node prunes the
@@ -682,7 +690,11 @@ impl ExecOperator for PathExpand {
 								);
 								out.push(assembled);
 								if out.len() >= scan_batch_size {
-									yield ValueBatch { values: std::mem::take(&mut out) };
+									yielder
+										.emit(ValueBatch {
+											values: std::mem::take(&mut out),
+										})
+										.await;
 									out = Vec::with_capacity(scan_batch_size);
 								}
 							}
@@ -713,9 +725,14 @@ impl ExecOperator for PathExpand {
 			}
 
 			if !out.is_empty() {
-				yield ValueBatch { values: out };
+				yielder
+					.emit(ValueBatch {
+						values: out,
+					})
+					.await;
 			}
-		};
+			Ok(())
+		});
 
 		Ok(monitor_stream(Box::pin(stream), "PathExpand", &self.metrics))
 	}

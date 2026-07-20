@@ -11,12 +11,14 @@ keywords.workspace = true
 categories.workspace = true
 license-file.workspace = true
 
+[features]
+sys = ["dep:sysinfo"]
+
 [dependencies]
 hashbrown.workspace = true
 futures.workspace = true
 parking_lot.workspace = true
-sysinfo.workspace = true
-
+sysinfo = { workspace = true, optional = true }
 
 [dev-dependencies]
 hashbrown.workspace = true

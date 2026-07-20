@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
+use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 use tracing::instrument;
 
@@ -231,7 +232,7 @@ impl ExecOperator for DynamicScan {
 		let pre_decode_filter_status = self.pre_decode_filter_status.clone();
 		let ctx = ctx.clone();
 
-		let stream = async_stream::try_stream! {
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			let db_ctx = ctx.database().context("Scan requires database context")?;
 			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
 			let db = Arc::clone(&db_ctx.db);
@@ -243,146 +244,167 @@ impl ExecOperator for DynamicScan {
 			// Determine scan target: either a table name or a record ID
 			let table_name = match table_value {
 				Value::Table(t) => t,
-			Value::RecordId(rid) => {
-				// === RECORD LOOKUP (point or range) ===
-				// Delegate to the shared execute_record_lookup helper which
-				// handles both point lookups and range scans. For plan-time-
-				// known RecordIds the planner emits RecordLookup directly;
-				// this path handles runtime-discovered RecordIds (e.g. from
-				// `type::thing(...)` or other dynamic expressions).
-				//
-				// The planner marks predicate/limit/start as consumed for
-				// FunctionCall/Postfix sources, so the outer Filter/Limit
-				// operators are removed. We must forward the pushdowns here
-				// to ensure WHERE/LIMIT/START are still applied.
+				Value::RecordId(rid) => {
+					// === RECORD LOOKUP (point or range) ===
+					// Delegate to the shared execute_record_lookup helper which
+					// handles both point lookups and range scans. For plan-time-
+					// known RecordIds the planner emits RecordLookup directly;
+					// this path handles runtime-discovered RecordIds (e.g. from
+					// `type::thing(...)` or other dynamic expressions).
+					//
+					// The planner marks predicate/limit/start as consumed for
+					// FunctionCall/Postfix sources, so the outer Filter/Limit
+					// operators are removed. We must forward the pushdowns here
+					// to ensure WHERE/LIMIT/START are still applied.
 
-				// Evaluate VERSION expression
-				let version: Option<u64> = match &version {
-					Some(expr) => {
-						let eval_ctx = EvalContext::from_exec_ctx(&ctx);
-						let v = expr.evaluate(eval_ctx).await?;
-						Some(
-							v.cast_to::<crate::val::Datetime>()
-								.map_err(|e| anyhow::anyhow!("{e}"))?
-								.to_version_stamp(ctx.txn().timestamp_impl().as_ref())?,
-						)
+					// Evaluate VERSION expression
+					let version: Option<u64> = match &version {
+						Some(expr) => {
+							let eval_ctx = EvalContext::from_exec_ctx(&ctx);
+							let v = expr.evaluate(eval_ctx).await?;
+							Some(
+								v.cast_to::<crate::val::Datetime>()
+									.map_err(|e| anyhow::anyhow!("{e}"))?
+									.to_version_stamp(ctx.txn().timestamp_impl().as_ref())?,
+							)
+						}
+						None => ctx.version_stamp(),
+					};
+
+					// Evaluate pushed-down LIMIT and START expressions
+					let limit_val: Option<usize> = match &limit_expr {
+						Some(expr) => Some(eval_limit_expr(&**expr, &ctx).await?),
+						None => None,
+					};
+					let start_val: usize = match &start_expr {
+						Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
+						None => 0,
+					};
+
+					// Early exit if limit is 0
+					if limit_val == Some(0) {
+						return Ok(());
 					}
-					None => ctx.version_stamp(),
-				};
 
-				// Evaluate pushed-down LIMIT and START expressions
-				let limit_val: Option<usize> = match &limit_expr {
-					Some(expr) => Some(eval_limit_expr(&**expr, &ctx).await?),
-					None => None,
-				};
-				let start_val: usize = match &start_expr {
-					Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
-					None => 0,
-				};
+					let results = super::record_id::execute_record_lookup(
+						&rid,
+						version,
+						check_perms,
+						needed_fields.as_ref(),
+						&ctx,
+						predicate.as_ref(),
+						limit_val,
+						start_val,
+						None,
+						&pre_decode_filter_status,
+					)
+					.await?;
 
-				// Early exit if limit is 0
-				if limit_val == Some(0) {
-					return;
+					if !results.is_empty() {
+						yielder
+							.emit(ValueBatch {
+								values: results,
+							})
+							.await;
+					}
+					return Ok(());
 				}
+				Value::Array(arr) => {
+					// === ARRAY SOURCE ===
+					// The planner marks predicate/limit/start as consumed for
+					// FunctionCall/Postfix sources, so the outer Filter/Limit
+					// operators are removed. We must apply them here.
 
-				let results = super::record_id::execute_record_lookup(
-					&rid, version, check_perms, needed_fields.as_ref(), &ctx,
-					predicate.as_ref(), limit_val, start_val, None,
-					&pre_decode_filter_status,
-				).await?;
+					// Evaluate pushed-down LIMIT and START expressions
+					let limit_val: Option<usize> = match &limit_expr {
+						Some(expr) => Some(eval_limit_expr(&**expr, &ctx).await?),
+						None => None,
+					};
+					let start_val: usize = match &start_expr {
+						Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
+						None => 0,
+					};
 
-				if !results.is_empty() {
-					yield ValueBatch { values: results };
-				}
-				return;
-			}
-			Value::Array(arr) => {
-				// === ARRAY SOURCE ===
-				// The planner marks predicate/limit/start as consumed for
-				// FunctionCall/Postfix sources, so the outer Filter/Limit
-				// operators are removed. We must apply them here.
+					// Early exit if limit is 0
+					if limit_val == Some(0) {
+						return Ok(());
+					}
 
-				// Evaluate pushed-down LIMIT and START expressions
-				let limit_val: Option<usize> = match &limit_expr {
-					Some(expr) => Some(eval_limit_expr(&**expr, &ctx).await?),
-					None => None,
-				};
-				let start_val: usize = match &start_expr {
-					Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
-					None => 0,
-				};
-
-				// Early exit if limit is 0
-				if limit_val == Some(0) {
-					return;
-				}
-
-				// Apply pushed-down predicate
-				let mut values = arr.0;
-				if let Some(ref pred) = predicate {
-					let mut write_idx = 0;
-					for read_idx in 0..values.len() {
-						let eval_ctx = EvalContext::from_exec_ctx(&ctx).with_value(&values[read_idx]);
-						if pred.evaluate(eval_ctx).await?.is_truthy() {
-							if write_idx != read_idx {
-								values.swap(write_idx, read_idx);
+					// Apply pushed-down predicate
+					let mut values = arr.0;
+					if let Some(ref pred) = predicate {
+						let mut write_idx = 0;
+						for read_idx in 0..values.len() {
+							let eval_ctx =
+								EvalContext::from_exec_ctx(&ctx).with_value(&values[read_idx]);
+							if pred.evaluate(eval_ctx).await?.is_truthy() {
+								if write_idx != read_idx {
+									values.swap(write_idx, read_idx);
+								}
+								write_idx += 1;
 							}
-							write_idx += 1;
+						}
+						values.truncate(write_idx);
+					}
+
+					// Apply start offset
+					if start_val > 0 {
+						if start_val >= values.len() {
+							return Ok(());
+						}
+						values.drain(..start_val);
+					}
+
+					// Apply limit
+					if let Some(limit) = limit_val {
+						values.truncate(limit);
+					}
+
+					if !values.is_empty() {
+						yielder
+							.emit(ValueBatch {
+								values,
+							})
+							.await;
+					}
+					return Ok(());
+				}
+				// For any other value type, yield as a single row.
+				// This matches legacy FROM behavior for non-table values.
+				other => {
+					// === SCALAR SOURCE ===
+					// Same pushdown logic as the array branch above.
+
+					// Evaluate pushed-down LIMIT and START expressions
+					let limit_val: Option<usize> = match &limit_expr {
+						Some(expr) => Some(eval_limit_expr(&**expr, &ctx).await?),
+						None => None,
+					};
+					let start_val: usize = match &start_expr {
+						Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
+						None => 0,
+					};
+
+					// Early exit if limit is 0 or start skips past the single value
+					if limit_val == Some(0) || start_val > 0 {
+						return Ok(());
+					}
+
+					// Apply pushed-down predicate
+					if let Some(ref pred) = predicate {
+						let eval_ctx = EvalContext::from_exec_ctx(&ctx).with_value(&other);
+						if !pred.evaluate(eval_ctx).await?.is_truthy() {
+							return Ok(());
 						}
 					}
-					values.truncate(write_idx);
+
+					yielder
+						.emit(ValueBatch {
+							values: vec![other],
+						})
+						.await;
+					return Ok(());
 				}
-
-				// Apply start offset
-				if start_val > 0 {
-					if start_val >= values.len() {
-						return;
-					}
-					values.drain(..start_val);
-				}
-
-				// Apply limit
-				if let Some(limit) = limit_val {
-					values.truncate(limit);
-				}
-
-				if !values.is_empty() {
-					yield ValueBatch { values };
-				}
-				return;
-			}
-			// For any other value type, yield as a single row.
-			// This matches legacy FROM behavior for non-table values.
-			other => {
-				// === SCALAR SOURCE ===
-				// Same pushdown logic as the array branch above.
-
-				// Evaluate pushed-down LIMIT and START expressions
-				let limit_val: Option<usize> = match &limit_expr {
-					Some(expr) => Some(eval_limit_expr(&**expr, &ctx).await?),
-					None => None,
-				};
-				let start_val: usize = match &start_expr {
-					Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
-					None => 0,
-				};
-
-				// Early exit if limit is 0 or start skips past the single value
-				if limit_val == Some(0) || start_val > 0 {
-					return;
-				}
-
-				// Apply pushed-down predicate
-				if let Some(ref pred) = predicate {
-					let eval_ctx = EvalContext::from_exec_ctx(&ctx).with_value(&other);
-					if !pred.evaluate(eval_ctx).await?.is_truthy() {
-						return;
-					}
-				}
-
-				yield ValueBatch { values: vec![other] };
-				return;
-			}
 			};
 
 			// === TABLE SCAN PATH ===
@@ -438,15 +460,16 @@ impl ExecOperator for DynamicScan {
 
 			// Early exit if denied
 			if matches!(select_permission, PhysicalPermission::Deny) {
-				return;
+				return Ok(());
 			}
 
 			if limit_val == Some(0) {
-				return;
+				return Ok(());
 			}
 
 			// Eagerly initialize field state (computed fields + field permissions)
-			let field_state = build_field_state(&ctx, &table_name, check_perms, needed_fields.as_ref()).await?;
+			let field_state =
+				build_field_state(&ctx, &table_name, check_perms, needed_fields.as_ref()).await?;
 
 			// SECURITY (value-ordering oracle): runtime counterpart to the
 			// plan-time guard in `planner/select`. The plan-time guard only
@@ -474,12 +497,19 @@ impl ExecOperator for DynamicScan {
 
 			// Row-filtering (permissions, WHERE) prevents positional pushdown;
 			// row-modifying ops (computed fields, field perms) do not.
-			let needs_row_filtering = ScanPipeline::compute_needs_row_filtering(
-				&select_permission, predicate.as_ref(),
-			);
+			let needs_row_filtering =
+				ScanPipeline::compute_needs_row_filtering(&select_permission, predicate.as_ref());
 
-			let pre_skip = if !needs_row_filtering { start_val } else { 0 };
-			let effective_storage_limit = if !needs_row_filtering { limit_val } else { None };
+			let pre_skip = if !needs_row_filtering {
+				start_val
+			} else {
+				0
+			};
+			let effective_storage_limit = if !needs_row_filtering {
+				limit_val
+			} else {
+				None
+			};
 
 			let direction = determine_scan_direction(order.as_ref());
 
@@ -496,7 +526,8 @@ impl ExecOperator for DynamicScan {
 			let (mut source, applied_pre_skip) = {
 				// Table scan (with runtime index selection)
 				resolve_table_scan_stream(
-					&ctx, TableScanConfig {
+					&ctx,
+					TableScanConfig {
 						ns_id: ns.namespace_id,
 						db_id: db.database_id,
 						table_name,
@@ -508,37 +539,46 @@ impl ExecOperator for DynamicScan {
 						storage_limit: effective_storage_limit,
 						pre_skip,
 						has_pushed_limit: effective_storage_limit.is_some(),
-						limit_hint: limit_val.map(|l| (l + start_val).min(u32::MAX as usize) as u32),
+						limit_hint: limit_val
+							.map(|l| (l + start_val).min(u32::MAX as usize) as u32),
 						knn_context: knn_context.clone(),
 						pre_decode_filter,
 					},
-				).await?
+				)
+				.await?
 			};
 
 			// Build the pipeline with start adjusted for any pre-skipping.
 			let mut pipeline = ScanPipeline::new(
-				select_permission, predicate, field_state,
-				check_perms, limit_val, start_val.saturating_sub(applied_pre_skip),
+				select_permission,
+				predicate,
+				field_state,
+				check_perms,
+				limit_val,
+				start_val.saturating_sub(applied_pre_skip),
 			);
 
 			// Unified consumption loop for all stream-based sources.
 			while let Some(batch_result) = source.next().await {
 				// Check for cancellation between batches
 				if ctx.cancellation().is_cancelled() {
-					Err(ControlFlow::Err(
-						anyhow::anyhow!(crate::err::Error::QueryCancelled),
-					))?;
+					Err(ControlFlow::Err(anyhow::anyhow!(crate::err::Error::QueryCancelled)))?;
 				}
 				let mut batch = batch_result?;
 				let cont = pipeline.process_batch(&mut batch.values, &ctx).await?;
 				if !batch.values.is_empty() {
-					yield ValueBatch { values: batch.values };
+					yielder
+						.emit(ValueBatch {
+							values: batch.values,
+						})
+						.await;
 				}
 				if !cont {
 					break;
 				}
 			}
-		};
+			Ok(())
+		});
 
 		Ok(monitor_stream(Box::pin(stream), "Scan", &self.metrics))
 	}

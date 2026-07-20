@@ -79,6 +79,7 @@
 
 use std::sync::Arc;
 
+use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 use tracing::debug;
 
@@ -305,7 +306,7 @@ impl ExecOperator for Expand {
 		// permissions must be enforced (once, internally) and applies table +
 		// field SELECT permissions and computed fields per record. The operator
 		// therefore does not re-derive the permission-check flag itself.
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
@@ -324,7 +325,7 @@ impl ExecOperator for Expand {
 		let max_output_rows = ctx.root().ctx.config.gql_max_output_rows;
 		let ctx = ctx.clone();
 
-		let stream = async_stream::try_stream! {
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			let txn = ctx.txn();
 			let ns_id = db_ctx.ns_ctx.ns.namespace_id;
 			let db_id = db_ctx.db.database_id;
@@ -345,8 +346,6 @@ impl ExecOperator for Expand {
 			// optional null-fills are 1-per-row and bounded by the input, so only
 			// the survivor pushes inside `expand_row` are counted.
 			let mut emitted: usize = 0;
-
-			futures::pin_mut!(input_stream);
 
 			while let Some(batch_result) = input_stream.next().await {
 				crate::exec::operators::check_cancelled(&ctx)?;
@@ -406,10 +405,15 @@ impl ExecOperator for Expand {
 				}
 
 				if !out.is_empty() {
-					yield ValueBatch { values: out };
+					yielder
+						.emit(ValueBatch {
+							values: out,
+						})
+						.await;
 				}
 			}
-		};
+			Ok(())
+		});
 
 		Ok(monitor_stream(Box::pin(stream), self.name(), &self.metrics))
 	}

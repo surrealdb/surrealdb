@@ -166,7 +166,7 @@ impl ExecOperator for SortTopK {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
@@ -185,7 +185,6 @@ impl ExecOperator for SortTopK {
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
 
 			// Process all input values
-			futures::pin_mut!(input_stream);
 			while let Some(batch_result) = input_stream.next().await {
 				// Check for cancellation between batches
 				if ctx.cancellation().is_cancelled() {
@@ -532,7 +531,7 @@ impl ExecOperator for SortTopKByKey {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
@@ -546,7 +545,6 @@ impl ExecOperator for SortTopKByKey {
 		let sorted_stream = futures::stream::once(async move {
 			let mut acc = TopKByKeyAccumulator::new(sort_keys, limit, threshold_cell);
 
-			futures::pin_mut!(input_stream);
 			while let Some(batch_result) = input_stream.next().await {
 				if cancellation.is_cancelled() {
 					return Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(

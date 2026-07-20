@@ -200,7 +200,7 @@ async fn evaluate_lookup_for_value(
 	};
 
 	// Execute the lookup plan
-	let stream = lookup.plan.execute(&bound_ctx).map_err(|e| match e {
+	let mut stream = lookup.plan.execute(&bound_ctx).map_err(|e| match e {
 		crate::expr::ControlFlow::Err(e) => e,
 		crate::expr::ControlFlow::Return(v) => {
 			anyhow::anyhow!("Unexpected return in lookup: {:?}", v)
@@ -211,7 +211,6 @@ async fn evaluate_lookup_for_value(
 
 	// Collect all results into an array
 	let mut results = Vec::new();
-	futures::pin_mut!(stream);
 
 	while let Some(batch_result) = stream.next().await {
 		let batch = batch_result.map_err(|e| match e {

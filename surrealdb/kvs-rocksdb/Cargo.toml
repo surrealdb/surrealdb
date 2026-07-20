@@ -15,7 +15,7 @@ categories.workspace = true
 
 [dependencies]
 affinitypool = { workspace = true }
-common = { workspace = true }
+common = { workspace = true, features = ["sys"] }
 surrealdb-cnf = { workspace = true }
 futures = { workspace = true }
 num_cpus = { workspace = true }

@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 use tracing::instrument;
 
@@ -118,7 +119,7 @@ impl ExecOperator for Limit {
 
 	#[instrument(name = "Limit::execute", level = "trace", skip_all)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(
+		let mut input_stream = buffer_stream(
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
@@ -129,7 +130,7 @@ impl ExecOperator for Limit {
 		let offset_expr = self.offset.clone();
 		let ctx = ctx.clone();
 
-		let limited = async_stream::try_stream! {
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
 
 			// Evaluate limit expression
@@ -139,7 +140,10 @@ impl ExecOperator for Limit {
 						ControlFlow::Err(anyhow::anyhow!("Failed to evaluate LIMIT: {}", e))
 					})?;
 					Some(Limit::coerce_to_usize(&value).map_err(|e| {
-						ControlFlow::Err(anyhow::anyhow!("LIMIT must be a non-negative integer: {}", e))
+						ControlFlow::Err(anyhow::anyhow!(
+							"LIMIT must be a non-negative integer: {}",
+							e
+						))
 					})?)
 				}
 				None => None,
@@ -152,7 +156,10 @@ impl ExecOperator for Limit {
 						ControlFlow::Err(anyhow::anyhow!("Failed to evaluate START: {}", e))
 					})?;
 					Limit::coerce_to_usize(&value).map_err(|e| {
-						ControlFlow::Err(anyhow::anyhow!("START must be a non-negative integer: {}", e))
+						ControlFlow::Err(anyhow::anyhow!(
+							"START must be a non-negative integer: {}",
+							e
+						))
 					})?
 				}
 				None => 0,
@@ -160,8 +167,6 @@ impl ExecOperator for Limit {
 
 			let mut skipped = 0usize;
 			let mut emitted = 0usize;
-
-			futures::pin_mut!(input_stream);
 
 			while let Some(batch_result) = input_stream.next().await {
 				let mut batch = batch_result?;
@@ -187,7 +192,7 @@ impl ExecOperator for Limit {
 
 				// Only emit non-empty batches
 				if !batch.values.is_empty() {
-					yield batch;
+					yielder.emit(batch).await;
 				}
 
 				// Stop once the limit is exhausted (also handles limit == 0)
@@ -195,8 +200,9 @@ impl ExecOperator for Limit {
 					break;
 				}
 			}
-		};
+			Ok(())
+		});
 
-		Ok(monitor_stream(Box::pin(limited), "Limit", &self.metrics))
+		Ok(monitor_stream(Box::pin(stream), "Limit", &self.metrics))
 	}
 }

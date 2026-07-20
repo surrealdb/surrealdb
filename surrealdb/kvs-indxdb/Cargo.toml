@@ -14,10 +14,15 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-indxdb = { workspace = true }
 surrealdb-kvs = { workspace = true }
-tokio = { workspace = true, features = ["sync"] }
+js-sys = { workspace = true }
 tracing = { workspace = true }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+
+[dev-dependencies]
+wasm-bindgen-test = { workspace = true }
 
 [lints]
 workspace = true

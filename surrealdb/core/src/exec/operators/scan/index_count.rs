@@ -25,6 +25,7 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
+use common::future::stream::{self, Yielder};
 use tracing::instrument;
 
 use crate::catalog::{DatabaseId, Index, NamespaceId, Permission};
@@ -173,7 +174,7 @@ impl ExecOperator for IndexCountScan {
 		let bitmap_plan = self.bitmap_plan.clone();
 		let ctx = ctx.clone();
 
-		let stream = async_stream::try_stream! {
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			let db_ctx = ctx.database().context("IndexCountScan requires database context")?;
 			let txn = ctx.txn();
 			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
@@ -208,10 +209,8 @@ impl ExecOperator for IndexCountScan {
 			};
 
 			// Verify table exists.
-			let table_def = db_ctx
-				.get_table_def(&table_name, version)
-				.await
-				.context("Failed to get table")?;
+			let table_def =
+				db_ctx.get_table_def(&table_name, version).await.context("Failed to get table")?;
 
 			if table_def.is_none() {
 				Err(ControlFlow::Err(anyhow::Error::new(Error::TbNotFound {
@@ -235,22 +234,22 @@ impl ExecOperator for IndexCountScan {
 			match select_permission {
 				PhysicalPermission::Deny => {
 					// Table is invisible.
-					return;
+					return Ok(());
 				}
 				PhysicalPermission::Conditional(_) => {
 					// Per-record permissions: fall back to full scan + filter + count.
-				let count = count_with_filter_fallback(
-					&ctx,
-					ns.namespace_id,
-					db.database_id,
-					&table_name,
-					version,
-					&select_permission,
-					&predicate_expr,
-				)
-				.await?;
-				yield make_count_batch(count, &field_names);
-				return;
+					let count = count_with_filter_fallback(
+						&ctx,
+						ns.namespace_id,
+						db.database_id,
+						&table_name,
+						version,
+						&select_permission,
+						&predicate_expr,
+					)
+					.await?;
+					yielder.emit(make_count_batch(count, &field_names)).await;
+					return Ok(());
 				}
 				PhysicalPermission::Allow => {
 					// Proceed to look for a matching COUNT index.
@@ -283,7 +282,7 @@ impl ExecOperator for IndexCountScan {
 					ix_def.index_id,
 				)
 				.await?;
-				yield make_count_batch(count, &field_names);
+				yielder.emit(make_count_batch(count, &field_names)).await;
 			} else if let Some((ref ix_ref, ref access)) = btree_access {
 				// Medium path: count entries by iterating B-tree index
 				// keys only — no record value deserialization.
@@ -296,13 +295,13 @@ impl ExecOperator for IndexCountScan {
 					access,
 				)
 				.await?;
-				yield make_count_batch(count, &field_names);
+				yielder.emit(make_count_batch(count, &field_names)).await;
 			} else if let Some(ref plan) = bitmap_plan {
 				// Bitmap path (issue #547): the count is the cardinality of
 				// the exact fused bitmap over the table's shared doc-ID
 				// space — index entries only, zero record fetches.
 				let count = plan.build_exact_cardinality(&ctx, &table_name).await?;
-				yield make_count_batch(count as usize, &field_names);
+				yielder.emit(make_count_batch(count as usize, &field_names)).await;
 			} else {
 				// No matching COUNT index found: fall back to full scan + filter + count.
 				let perm = PhysicalPermission::Allow;
@@ -316,9 +315,10 @@ impl ExecOperator for IndexCountScan {
 					&predicate_expr,
 				)
 				.await?;
-				yield make_count_batch(count, &field_names);
+				yielder.emit(make_count_batch(count, &field_names)).await;
 			}
-		};
+			Ok(())
+		});
 
 		Ok(monitor_stream(Box::pin(stream), "IndexCountScan", &self.metrics))
 	}

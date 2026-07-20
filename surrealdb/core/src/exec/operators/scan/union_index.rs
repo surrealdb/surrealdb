@@ -13,6 +13,7 @@ use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 use tracing::instrument;
 
@@ -391,7 +392,7 @@ impl ExecOperator for UnionIndexScan {
 		let merge = self.merge.clone();
 		let ctx = ctx.clone();
 
-		let stream: ValueBatchStream = Box::pin(async_stream::try_stream! {
+		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			let db_ctx = ctx.database().context("UnionIndexScan requires database context")?;
 			let version = ctx.version_stamp();
 
@@ -425,22 +426,20 @@ impl ExecOperator for UnionIndexScan {
 					PhysicalPermission::Allow
 				};
 
-				let field_state = build_field_state(
-					&ctx, &table_name, check_perms, needed_fields.as_ref(),
-				).await?;
+				let field_state =
+					build_field_state(&ctx, &table_name, check_perms, needed_fields.as_ref())
+						.await?;
 				(select_permission, field_state)
 			};
 
 			// Early exit if denied
 			if matches!(select_permission, PhysicalPermission::Deny) {
-				return;
+				return Ok(());
 			}
 
 			// Build the pipeline (no predicate/limit/start — outer operators handle those)
-			let mut pipeline = ScanPipeline::new(
-				select_permission, None, field_state,
-				check_perms, None, 0,
-			);
+			let mut pipeline =
+				ScanPipeline::new(select_permission, None, field_state, check_perms, None, 0);
 
 			if let Some(merge_mode) = merge {
 				// ─── K-way merge of sub-streams ────────────────────────
@@ -498,9 +497,7 @@ impl ExecOperator for UnionIndexScan {
 				loop {
 					// Check for cancellation
 					if ctx.cancellation().is_cancelled() {
-						Err(ControlFlow::Err(
-							anyhow::anyhow!(crate::err::Error::QueryCancelled),
-						))?;
+						Err(ControlFlow::Err(anyhow::anyhow!(crate::err::Error::QueryCancelled)))?;
 					}
 
 					// Find the cursor with the best key.
@@ -512,10 +509,7 @@ impl ExecOperator for UnionIndexScan {
 						if positions[i] >= buffers[i].len() {
 							continue; // stream exhausted or buffer drained
 						}
-						let key = match extract_merge_key(
-							&merge_mode,
-							&buffers[i][positions[i]],
-						) {
+						let key = match extract_merge_key(&merge_mode, &buffers[i][positions[i]]) {
 							Some(k) => k,
 							None => continue,
 						};
@@ -577,10 +571,14 @@ impl ExecOperator for UnionIndexScan {
 					let mut batch = vec![value];
 					let cont = pipeline.process_batch(&mut batch, &ctx).await?;
 					if !batch.is_empty() {
-						yield ValueBatch { values: batch };
+						yielder
+							.emit(ValueBatch {
+								values: batch,
+							})
+							.await;
 					}
 					if !cont {
-						return;
+						return Ok(());
 					}
 				}
 			} else {
@@ -590,9 +588,9 @@ impl ExecOperator for UnionIndexScan {
 					while let Some(batch_result) = sub_stream.next().await {
 						// Check for cancellation between batches
 						if ctx.cancellation().is_cancelled() {
-							Err(ControlFlow::Err(
-								anyhow::anyhow!(crate::err::Error::QueryCancelled),
-							))?;
+							Err(ControlFlow::Err(anyhow::anyhow!(
+								crate::err::Error::QueryCancelled
+							)))?;
 						}
 
 						let batch: ValueBatch = batch_result?;
@@ -609,17 +607,22 @@ impl ExecOperator for UnionIndexScan {
 							// Apply permission pipeline (computed fields, field permissions)
 							let cont = pipeline.process_batch(&mut deduped, &ctx).await?;
 							if !deduped.is_empty() {
-								yield ValueBatch { values: deduped };
+								yielder
+									.emit(ValueBatch {
+										values: deduped,
+									})
+									.await;
 							}
 							if !cont {
-								return;
+								return Ok(());
 							}
 						}
 					}
 				}
 			}
+			Ok(())
 		});
 
-		Ok(monitor_stream(stream, "UnionIndexScan", &self.metrics))
+		Ok(monitor_stream(Box::pin(stream), "UnionIndexScan", &self.metrics))
 	}
 }
