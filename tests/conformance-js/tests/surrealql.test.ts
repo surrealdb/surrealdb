@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
+import { RecordId } from "surrealdb";
 import { rootClient, startServer, type TestServer } from "../src/harness";
 
 // SurrealQL dialect conformance — the query-language surface itself, executed
@@ -17,6 +18,18 @@ beforeAll(async () => {
 afterAll(async () => {
 	await server.stop();
 });
+
+// The query-result cases at the end run against their own fresh server via
+// withServer(); the language-surface tests above share the beforeAll server
+// (each with a unique ns/db).
+async function withServer<T>(fn: (server: TestServer) => Promise<T>): Promise<T> {
+	const server = await startServer();
+	try {
+		return await fn(server);
+	} finally {
+		await server.stop();
+	}
+}
 
 test("CREATE returns the created record with its fields and id", async () => {
 	const { db } = await rootClient(server);
@@ -217,4 +230,229 @@ test("a failing statement does not abort earlier successes outside a transaction
 	const [rows] = await db.query<[Array<{ n: number }>]>("SELECT VALUE n FROM dup").json();
 	expect(rows).toEqual([1]);
 	await db.close();
+});
+
+test("query bindings: CREATE ... SET name = $name is readable back, and a bound record id resolves", async () => {
+	await withServer(async (server) => {
+		const { db } = await rootClient(server);
+
+		const [created] = (await db
+			.query("CREATE user:john SET name = $name", { name: "John Doe" })
+			.json()) as [Array<{ id: string; name: string }>];
+		expect(created).toEqual([{ id: "user:john", name: "John Doe" }]);
+
+		const [selected] = (await db.query("SELECT name FROM user:john").json()) as [
+			Array<{ name: string }>,
+		];
+		expect(selected).toEqual([{ name: "John Doe" }]);
+
+		// A record id supplied as a binding resolves as the FROM target.
+		const [byRid] = (await db
+			.query("SELECT * FROM $record_id", { record_id: new RecordId("user", "john") })
+			.json()) as [Array<{ id: string; name: string }>];
+		expect(byRid).toEqual([{ id: "user:john", name: "John Doe" }]);
+
+		await db.close();
+	});
+});
+
+test("SELECT ... ORDER BY DESC honors START and LIMIT", async () => {
+	await withServer(async (server) => {
+		const { db } = await rootClient(server);
+		await db
+			.query(
+				`CREATE user:john SET name = 'John';
+				 CREATE user:zoey SET name = 'Zoey';
+				 CREATE user:amos SET name = 'Amos';
+				 CREATE user:jane SET name = 'Jane';`,
+			)
+			.collect();
+
+		const names = async (q: string) => {
+			const [rows] = (await db.query(q).json()) as [Array<{ name: string }>];
+			return rows.map((r) => r.name);
+		};
+
+		expect(await names("SELECT name FROM user ORDER BY name DESC")).toEqual([
+			"Zoey",
+			"John",
+			"Jane",
+			"Amos",
+		]);
+		expect(await names("SELECT name FROM user ORDER BY name DESC START 1 LIMIT 2")).toEqual([
+			"John",
+			"Jane",
+		]);
+		expect(await names("SELECT name FROM user ORDER BY name DESC START 1")).toEqual([
+			"John",
+			"Jane",
+			"Amos",
+		]);
+		// START past the end yields nothing.
+		expect(await names("SELECT name FROM user ORDER BY name DESC START 4")).toEqual([]);
+		expect(await names("SELECT name FROM user ORDER BY name DESC LIMIT 2")).toEqual([
+			"Zoey",
+			"John",
+		]);
+
+		await db.close();
+	});
+});
+
+test("record-id range SELECTs honor inclusive and exclusive bounds", async () => {
+	await withServer(async (server) => {
+		const { db } = await rootClient(server);
+		await db
+			.query("CREATE user:amos; CREATE user:jane; CREATE user:john; CREATE user:zoey;")
+			.collect();
+
+		const ids = async (q: string) => {
+			const [rows] = (await db.query(q).json()) as [Array<{ id: string }>];
+			return rows.map((r) => r.id);
+		};
+
+		expect(await ids("SELECT id FROM user:..")).toEqual([
+			"user:amos",
+			"user:jane",
+			"user:john",
+			"user:zoey",
+		]);
+		// `..john` is exclusive of the upper bound; `..=john` is inclusive.
+		expect(await ids("SELECT id FROM user:..john")).toEqual(["user:amos", "user:jane"]);
+		expect(await ids("SELECT id FROM user:..=john")).toEqual([
+			"user:amos",
+			"user:jane",
+			"user:john",
+		]);
+		// The lower bound is inclusive by default.
+		expect(await ids("SELECT id FROM user:jane..")).toEqual([
+			"user:jane",
+			"user:john",
+			"user:zoey",
+		]);
+		expect(await ids("SELECT id FROM user:jane..john")).toEqual(["user:jane"]);
+		expect(await ids("SELECT id FROM user:jane..=john")).toEqual(["user:jane", "user:john"]);
+
+		await db.close();
+	});
+});
+
+test("FETCH resolves linked record ids into inline objects", async () => {
+	await withServer(async (server) => {
+		const { db } = await rootClient(server);
+		await db
+			.query(
+				`CREATE tag:rs SET name = 'Rust';
+				 CREATE tag:go SET name = 'Golang';
+				 CREATE tag:js SET name = 'JavaScript';
+				 CREATE person:tobie SET tags = [tag:rs, tag:go, tag:js];
+				 CREATE person:jaime SET tags = [tag:js];`,
+			)
+			.collect();
+
+		const [all] = (await db.query("SELECT * FROM person ORDER BY id FETCH tags").json()) as [
+			Array<{ id: string; tags: Array<{ id: string; name: string }> }>,
+		];
+		expect(all).toEqual([
+			{ id: "person:jaime", tags: [{ id: "tag:js", name: "JavaScript" }] },
+			{
+				id: "person:tobie",
+				tags: [
+					{ id: "tag:rs", name: "Rust" },
+					{ id: "tag:go", name: "Golang" },
+					{ id: "tag:js", name: "JavaScript" },
+				],
+			},
+		]);
+
+		// LIMIT 1 (default id order) fetches only the first person, tags inlined.
+		const [limited] = (await db.query("SELECT * FROM person LIMIT 1 FETCH tags").json()) as [
+			Array<{ id: string; tags: Array<{ id: string; name: string }> }>,
+		];
+		expect(limited).toEqual([
+			{ id: "person:jaime", tags: [{ id: "tag:js", name: "JavaScript" }] },
+		]);
+
+		await db.close();
+	});
+});
+
+test("DELETE ... range returns the deleted rows and leaves the rest", async () => {
+	await withServer(async (server) => {
+		const { db } = await rootClient(server);
+		await db
+			.query(
+				`CREATE user:amos SET name = 'Amos';
+				 CREATE user:jane SET name = 'Jane';
+				 CREATE user:john SET name = 'John';
+				 CREATE user:zoey SET name = 'Zoey';`,
+			)
+			.collect();
+
+		// DELETE over a [jane, zoey) range returns the two deleted rows.
+		const [deleted] = (await db.query("DELETE user:jane..zoey RETURN BEFORE").json()) as [
+			Array<{ id: string; name: string }>,
+		];
+		expect(deleted).toEqual([
+			{ id: "user:jane", name: "Jane" },
+			{ id: "user:john", name: "John" },
+		]);
+
+		// The rows outside the range survive.
+		const [remaining] = (await db.query("SELECT * FROM user ORDER BY id").json()) as [
+			Array<{ id: string; name: string }>,
+		];
+		expect(remaining).toEqual([
+			{ id: "user:amos", name: "Amos" },
+			{ id: "user:zoey", name: "Zoey" },
+		]);
+
+		await db.close();
+	});
+});
+
+test("typed field coercion: TYPE decimal stores and returns a decimal", async () => {
+	await withServer(async (server) => {
+		const { db } = await rootClient(server);
+		await db
+			.query(
+				`DEFINE TABLE foo;
+				 DEFINE FIELD bar ON foo TYPE decimal;
+				 CREATE foo:x CONTENT { bar: 42.69 };`,
+			)
+			.collect();
+
+		// The field is stored as a decimal (not a float): type::of reports
+		// "decimal" and .json() renders the value as its exact string form.
+		const [rows] = (await db
+			.query("SELECT bar, type::of(bar) AS t FROM foo:x")
+			.json()) as [Array<{ bar: string; t: string }>];
+		expect(rows).toEqual([{ bar: "42.69", t: "decimal" }]);
+
+		await db.close();
+	});
+});
+
+test("UPDATE ... CONTENT replaces the whole record body", async () => {
+	await withServer(async (server) => {
+		const { db } = await rootClient(server);
+		await db
+			.query(
+				`CREATE user:a SET name = 'A', extra = 1;
+				 CREATE user:b SET name = 'B', extra = 2;`,
+			)
+			.collect();
+
+		// CONTENT is a full replace: pre-existing fields not in the new content
+		// (here `extra`) are dropped from every affected row.
+		const [updated] = (await db.query("UPDATE user CONTENT { name: 'X' } RETURN AFTER").json()) as [
+			Array<Record<string, unknown>>,
+		];
+		expect(updated).toEqual([
+			{ id: "user:a", name: "X" },
+			{ id: "user:b", name: "X" },
+		]);
+
+		await db.close();
+	});
 });

@@ -7,6 +7,13 @@
 		"test": "bun test"
 	},
 	"dependencies": {
-		"surrealdb": "^2.0.4"
+		"graphql": "^17.0.2",
+		"graphql-request": "^7.4.0",
+		"graphql-ws": "^6.1.0",
+		"surrealdb": "^2.0.6",
+		"ws": "^8.21.1"
+	},
+	"devDependencies": {
+		"@types/ws": "^8.18.1"
 	}
 }

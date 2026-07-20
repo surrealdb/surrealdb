@@ -660,6 +660,45 @@ jobs:
         run: cargo check --package surrealdb-server --features tokio-console
 
   # ----------------------------------------
+  # JS SDK conformance suite
+  # ----------------------------------------
+
+  conformance-js:
+    name: JS SDK conformance
+    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    needs: build
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Download server binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: surreal-arm64
+          path: ${{ github.workspace }}/artifacts
+
+      - name: Set file permissions
+        run: chmod +x ${{ github.workspace }}/artifacts/surreal
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: tests/conformance-js
+        run: bun install --frozen-lockfile
+
+      # The downloaded server is a debug build, so its per-request startup is
+      # slow enough that the default 5s test timeout flakes under the suite's
+      # parallel per-file servers; 30s is generous headroom, not a real budget.
+      - name: Run conformance suite
+        working-directory: tests/conformance-js
+        env:
+          SURREAL_BIN: ${{ github.workspace }}/artifacts/surreal
+        run: bun test --timeout 30000
+
+  # ----------------------------------------
   # Required checks
   # ----------------------------------------
 

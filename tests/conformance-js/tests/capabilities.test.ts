@@ -1,10 +1,7 @@
-// Capability enforcement matrix — ported from the Rust CLI integration test
-// `test_capabilities` (tests/cli_integration.rs, lines ~1280-1882). That test
-// spawns a server per capability-flag combination and asserts on the `surreal
-// sql` CLI stdout. Here we port each sub-case to WIRE assertions: every test
-// spawns its own server via startServer({ args }) and drives queries over raw
-// JSON-RPC (RpcClient) so we can pin the exact capability-denied surface the
-// SDK would otherwise wrap.
+// Capability enforcement matrix. Every test spawns its own server via
+// startServer({ args }) for a specific capability-flag combination and drives
+// queries over raw JSON-RPC (RpcClient) to pin the exact capability-denied
+// surface the SDK would otherwise wrap.
 //
 // Behavioral facts (all pinned below):
 //  - A capability denial on a *function* or *network target* comes back as a
@@ -16,18 +13,17 @@
 //    whole `query` RPC fails with a TOP-LEVEL JSON-RPC error, code -32002,
 //    message "Anonymous access not allowed: Not enough permissions to perform
 //    this action".
-//  - Message drift from the Rust source: the server says "Function '<f>' is not
-//    allowed to be executed" (the Rust test asserts the shorter substring
-//    "Function '<f>' is not allowed"); we match the substring so both hold.
+//  - The server says "Function '<f>' is not allowed to be executed"; we match
+//    the shorter substring "Function '<f>' is not allowed".
 //  - Scripting is compiled into this binary, so the refusal is always
-//    "Scripting functions are not allowed" (the Rust test also accepts the
-//    build-without-scripting message "Embedded functions are not enabled";
-//    we match either, loosely).
-//  - Precedence rule observed: a target is DENIED whenever any deny-target
-//    matches it, regardless of how specific a competing allow-target is; it is
-//    ALLOWED only when some allow-target matches AND no deny-target matches.
-//    (The Rust comments frame this as "specificity"; on the wire it is simply
-//    "deny wins on match" — see the `deny family / allow specific` test, where
+//    "Scripting functions are not allowed"; we also accept the
+//    build-without-scripting message "Embedded functions are not enabled",
+//    matching either loosely.
+//  - Precedence rule: a target is DENIED whenever any deny-target matches it,
+//    regardless of how specific a competing allow-target is; it is ALLOWED only
+//    when some allow-target matches AND no deny-target matches. On the wire this
+//    is simply "deny wins on match" — see the `deny family / allow specific`
+//    test, where
 //    a specific `--allow-funcs=string::lowercase` does NOT rescue the function
 //    from a broad `--deny-funcs=string`.)
 //

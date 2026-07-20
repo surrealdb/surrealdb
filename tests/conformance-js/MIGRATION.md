@@ -10,7 +10,7 @@ This document is the accounting artifact that makes the eventual Phase-3
 deletion safe. Deletion happens only after the JS suite has run green in CI for
 1–2 weeks (see the deletion manifest at the bottom) and is a separate change.
 
-SDK under test: **surrealdb.js 2.0.4**. Server behavior is pinned against the
+SDK under test: **surrealdb.js**. Server behavior is pinned against the
 current `main`.
 
 ---
@@ -19,13 +19,13 @@ current `main`.
 
 | Rust source | Primary JS port | Also covered by (pre-existing JS) | Driver |
 | --- | --- | --- | --- |
-| `tests/ws_integration.rs` | `tests/conformance-js/tests/ws-port.test.ts` | `live.test.ts`, `sessions-multiplex.test.ts`, `session.test.ts`, `concurrency.test.ts`, `auth.test.ts` | raw JSON-RPC over `WebSocket` (`RpcClient`) |
-| `tests/http_integration.rs` | `tests/conformance-js/tests/http-port.test.ts` | `http.test.ts` | raw `fetch` (+ WS-upgrade headers) |
-| `tests/graphql_integration.rs` | `tests/conformance-js/tests/graphql-port.test.ts` | `graphql.test.ts` | `fetch` POST `/graphql` + `graphql` RPC |
-| `tests/gql_integration.rs` | `tests/conformance-js/tests/gql-port.test.ts` | `gql.test.ts` | `fetch` POST `/gql` + `gql` RPC (`RpcClient`) |
-| `surrealdb/tests/api_integration/basic.rs` | `tests/conformance-js/tests/sdk-wire-port.test.ts` | `surrealql-wire.test.ts`, `transactions.test.ts` | SurrealDB JS SDK over `ws` |
-| `surrealdb/tests/api_integration/backup.rs` | `tests/conformance-js/tests/sdk-wire-port.test.ts` | — | JS SDK `export()`/`import()` + `/export` `/import` HTTP |
-| `tests/cli_integration.rs` (`test_capabilities` only) | `tests/conformance-js/tests/capabilities-port.test.ts` | `capabilities` also touched by `http.test.ts`/`ws-port.test.ts` | raw JSON-RPC (`RpcClient`) |
+| `tests/ws_integration.rs` | `tests/conformance-js/tests/websocket.test.ts` | `live.test.ts`, `sessions.test.ts`, `concurrency.test.ts`, `auth.test.ts` | raw JSON-RPC over `WebSocket` (`RpcClient`) |
+| `tests/http_integration.rs` | `tests/conformance-js/tests/http.test.ts` | `http.test.ts` | raw `fetch` (+ WS-upgrade headers) |
+| `tests/graphql_integration.rs` | `tests/conformance-js/tests/graphql.test.ts` | `graphql.test.ts` | `fetch` POST `/graphql` + `graphql` RPC |
+| `tests/gql_integration.rs` | `tests/conformance-js/tests/gql.test.ts` | `gql.test.ts` | `fetch` POST `/gql` + `gql` RPC (`RpcClient`) |
+| `surrealdb/tests/api_integration/basic.rs` | `tests/conformance-js/tests/changefeeds.test.ts`, `surrealql.test.ts` | `surrealql-wire.test.ts`, `transactions.test.ts` | SurrealDB JS SDK over `ws` |
+| `surrealdb/tests/api_integration/backup.rs` | `tests/conformance-js/tests/backup.test.ts` | — | JS SDK `export()`/`import()` + `/export` `/import` HTTP |
+| `tests/cli_integration.rs` (`test_capabilities` only) | `tests/conformance-js/tests/capabilities.test.ts` | `capabilities` also touched by `http.test.ts`/`websocket.test.ts` | raw JSON-RPC (`RpcClient`) |
 | `tests/pg_integration.rs` | **(none — DEFERRED)** | — | Postgres wire; not built in the server test binary |
 
 Not in migration scope (left entirely in Rust): `tests/cli_integration.rs`
@@ -64,7 +64,7 @@ Each test runs in a **×3 protocol-format matrix** (`none`, `json`, `cbor`). The
 JS port covers the `json` subprotocol only. See the deletion manifest for why a
 small Rust CBOR/FlatBuffers smoke must be added before the matrix is deleted.
 
-COVERED → `ws-port.test.ts`:
+COVERED → `websocket.test.ts`:
 
 - `ping`, `version`, `info`
 - `signup`, `signin`, `invalidate`, `authenticate`
@@ -83,9 +83,9 @@ COVERED elsewhere (SDK-driven, pre-existing JS):
 - `live_query`, `live_second_connection` → `live.test.ts`
 - `variable_auth_live_query` → `live.test.ts` (permission-filtered delivery)
 - `multi_session_isolation`, `multi_session_authentication`,
-  `multi_session_management` → `sessions-multiplex.test.ts`
+  `multi_session_management` → `sessions.test.ts`
 - `concurrency` → `concurrency.test.ts`
-- `session_use_change_database` → `session.test.ts` (`use()` switch)
+- `session_use_change_database` → `websocket.test.ts` (`use()` switch)
 
 KEEP-RUST:
 
@@ -97,7 +97,7 @@ KEEP-RUST:
 - `detach_connection_session_rejected`, `websocket_attach_session_cap` —
   **handshake-header** (raw per-connection `attach`/`detach` framing + a
   `SURREAL_WEBSOCKET_MAX_ATTACHED_SESSIONS` cap; the SDK exercises multiplex
-  functionally in `sessions-multiplex.test.ts` but not this raw cap)
+  functionally in `sessions.test.ts` but not this raw cap)
 - `live_query_diff` — **not-yet-ported** (LIVE SELECT DIFF patch payloads;
   envelope shape stable but noisy — deprioritized)
 - `temporary_directory` — **CLI-process**
@@ -108,7 +108,7 @@ KEEP-RUST:
 
 ### `tests/http_integration.rs`
 
-COVERED → `http-port.test.ts`:
+COVERED → `http.test.ts`:
 
 - `key_endpoint_rejects_executable_body`
 - `rpc_session_hijack_prevention`, `rpc_session_isolation_under_concurrency`
@@ -136,7 +136,7 @@ KEEP-RUST:
   `sql_endpoint_with_compression` (gzip `Content-Encoding`),
   `signup_mal` (FlatBuffers Accept / Content-Type) — **protocol-byte**
 - `sql_websocket_round_trip` — **handshake-header** (WS-upgrade happy path;
-  the deny/subject checks for the upgrade ARE covered in `http-port.test.ts`)
+  the deny/subject checks for the upgrade ARE covered in `http.test.ts`)
 - `rpc_durable_session_survives_restart`,
   `rpc_durable_session_expires_after_ttl`,
   `rpc_durable_session_expires_while_cached`,
@@ -159,7 +159,7 @@ KEEP-RUST:
 
 ### `tests/graphql_integration.rs`
 
-COVERED → `graphql-port.test.ts` (Rust fn → the porting JS test may fold several
+COVERED → `graphql.test.ts` (Rust fn → the porting JS test may fold several
 Rust fns into one):
 
 - `basic_auth`, `error_message_safety`
@@ -198,11 +198,10 @@ COVERED elsewhere (pre-existing `graphql.test.ts`):
 KEEP-RUST:
 
 - `subscriptions_live_query_stream`, `subscriptions_live_query_shape_filter_and_id`,
-  `subscriptions_live_query_shape_with_variables` — **handshake-header /
-  protocol** (`graphql-transport-ws` upgrade; surrealdb.js 2.0.4 exposes NO
-  GraphQL subscription surface — HTTP query/mutation only). Left as one
-  `test.skip` in `graphql-port.test.ts`; that is the acceptance test for when
-  the SDK grows a subscription API.
+  `subscriptions_live_query_shape_with_variables` — the `graphql-transport-ws`
+  subscription surface. Now covered in `graphql.test.ts` via the `graphql-ws`
+  client (surrealdb.js itself exposes no GraphQL subscription API, so a standard
+  client drives the upgrade + `connection_init`/`subscribe`/`next` flow).
 - `geometry`, `introspection_depth_geometry`, `introspection_depth_nested_array`,
   `vector_similarity_filter`, `vector_knn_filter`, `fulltext_matches_filter`,
   `reserved_word_field_names`, `self_referential_relations`,
@@ -224,13 +223,15 @@ JS port re-pins the **wire-observable** behavior for regression convenience, but
 the Rust tests **must remain** — they are the only coverage of the embedded
 engine and the typed SDK API. **Deletion-eligible from this file: 0.**
 
-Wire behavior now ALSO covered → `sdk-wire-port.test.ts`:
+Wire behavior now ALSO covered:
 
-- `backup.rs`: `export_escaped_table_names`, `export_import`, `export_with_config`
-- `basic.rs`: `changefeed`, `query`, `query_raw`, `query_binds`, `query_decimals`,
+- `backup.rs` (`export_escaped_table_names`, `export_import`, `export_with_config`)
+  → `backup.test.ts`
+- `basic.rs` `changefeed` → `changefeeds.test.ts`
+- `basic.rs` `query`, `query_raw`, `query_binds`, `query_decimals`,
   `select_records_order_by`, `select_records_order_by_start_limit`,
   `select_record_ranges`, `select_records_fetch`, `delete_record_range`,
-  `update_table_with_content`
+  `update_table_with_content` → `surrealql.test.ts`
 
 KEEP-RUST — **embedded-engine + SDK-API** (all remaining `basic.rs`):
 `connect`, `yuse`, `invalidate`, `signup_record`, `signin_ns`, `signin_db`,
@@ -248,7 +249,7 @@ KEEP-RUST — **embedded-engine + SDK-API** (all remaining `basic.rs`):
 
 ### `tests/cli_integration.rs` — `test_capabilities` only
 
-COVERED (enforcement) → `capabilities-port.test.ts` (21 wire tests spanning the
+COVERED (enforcement) → `capabilities.test.ts` (21 wire tests spanning the
 default/deny-all/allow-all/deny-scripting matrices, the function and network
 allow/deny precedence matrices — including the "deny wins on match" finding —
 and the guest-access matrix).

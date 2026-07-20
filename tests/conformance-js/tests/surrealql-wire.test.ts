@@ -14,7 +14,7 @@ import { rootClient, startServer, type TestServer } from "../src/harness";
 // response anatomy (per-statement isolation, BEGIN/COMMIT retro-failure)
 // is pinned in tests/transactions.test.ts.
 //
-// NOTE on error assertions: errors surfaced by surrealdb.js 2.0.4 carry the
+// NOTE on error assertions: errors surfaced by surrealdb.js carry the
 // right constructor *name* (ThrownError, QueryError, ...) but fail
 // `instanceof` checks against the classes exported from the package root
 // (two copies of the class hierarchy exist in the bundle). We therefore
@@ -143,7 +143,7 @@ test("complex record ids (array and object id parts) roundtrip through bindings"
 	expect(got.table.name).toBe("multi");
 	// The array id part comes back structurally intact.
 	expect(got.id).toEqual(["2026-07-17", 42]);
-	// NOTE: got.equals(arrId) is NOT asserted here — surrealdb.js 2.0.4
+	// NOTE: got.equals(arrId) is NOT asserted here — surrealdb.js
 	// crashes with "Cannot access invalid private field" when comparing a
 	// decoded RecordId with a locally constructed one (two class copies in
 	// the bundle). SDK bug, not server behavior.

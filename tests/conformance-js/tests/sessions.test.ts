@@ -304,10 +304,8 @@ test(
 		await db.query("CREATE watched:after SET v = 2");
 		await events.assertSilence((e) => String(e.recordId) === "watched:after", 1500);
 
-		// Pinned SDK wart: the ManagedLiveSubscription still claims to be alive
-		// after its owning session was disposed — the client-side flag is not
-		// synchronized with session closure (surrealdb.js 2.0.4).
-		expect(sub.isAlive).toBe(true);
+		// The subscription is no longer alive: its owning session was disposed.
+		expect(sub.isAlive).toBe(false);
 
 		// The primary session's own queries are unaffected throughout.
 		const [rows] = await db.query<[unknown[]]>("SELECT * FROM watched").json();

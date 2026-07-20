@@ -88,29 +88,28 @@ landed on `main` but is not yet in a stable release.
   - `$auth`/`$session`/`$token` bindings are rejected as protected, but
     `$this`/`$parent` are accepted as wire bindings (document context still
     shadows them per-record) (`surrealql-wire`).
-  - surrealdb.js 2.0.4 bundles two copies of its value/error classes:
+  - surrealdb.js bundles two copies of its value/error classes:
     `RecordId.equals` across copies throws "Cannot access invalid private
-    field", server errors fail `instanceof` against package-root classes,
-    and `LiveSubscription.isAlive` stays `true` after its owning session is
-    closed (`surrealql-wire`, `sessions-multiplex` — SDK bugs, noted in
-    passing; the server behaves correctly).
+    field", and server errors fail `instanceof` against package-root classes
+    (`surrealql-wire` — an SDK bundling bug, noted in passing; the server
+    behaves correctly).
   - Changefeeds: `SHOW CHANGES FOR TABLE ... SINCE <versionstamp>` is
     INCLUSIVE of the supplied versionstamp — the change AT the boundary is
     re-delivered, so an incremental poller must dedup (or poll `SINCE last+1`).
     Also, `CREATE`s surface in the feed as `update` actions (not `create`), and
     the `DEFINE TABLE` itself is recorded as the first feed entry
-    (`sdk-wire-port`).
+    (`changefeeds`).
   - GraphQL: a permission-denied `deleteX` mutation returns `true` (no error)
     even though nothing is deleted, and `deleteManyX` returns `0` — the
     silently-filtered pattern that role-denied data writes follow, surfaced
-    through the resolver (`graphql-port`).
+    through the resolver (`graphql`).
   - Capabilities: precedence is "deny wins on match" — a broad `--deny-funcs`
     (or `--deny-net`) target is NOT rescued by a strictly more specific
     competing `--allow-...`; a target runs only when some allow matches AND no
     deny matches. Function/network denials arrive as a per-statement `ERR`
     envelope (`kind: "NotAllowed"`, `details.kind` `Function`/`Target`) inside a
     successful `query` RPC, whereas an anonymous guest denial is a TOP-LEVEL
-    JSON-RPC error (code `-32002`) (`capabilities-port`).
+    JSON-RPC error (code `-32002`) (`capabilities`).
 
 ## Scope grown so far / next
 
@@ -141,26 +140,26 @@ landed on `main` but is not yet in a stable release.
 - [x] ISO GQL dialect (default-on): `/gql`, RPC `gql`,
       `eval::gql`, route gating, parser limits; multi-hop MATCH with edge
       predicates, MATCH..SET/REMOVE/DELETE mutations, HTTP Accept negotiation,
-      WebSocket-RPC `$vars` + txn interop (`gql-port`)
+      WebSocket-RPC `$vars` + txn interop (`gql`)
 - [x] WebSocket JSON-RPC wire conformance (raw `json` subprotocol): connection
       RPCs (ping/version/signin/signup/invalidate/authenticate), CRUD verb
       envelope shapes, run/relate/info, session reauthentication + the expired-
       session per-method matrix, RPC capability gating, live/kill raw
-      notification frames (`ws-port`, ported from `ws_integration.rs`)
+      notification frames (`ws`, ported from `ws_integration.rs`)
 - [x] Capability enforcement matrix: default / `--deny-all` / `--allow-all` /
       `--deny-scripting`, function and network allow/deny precedence
-      ("deny wins on match"), and the guest-access matrix (`capabilities-port`,
+      ("deny wins on match"), and the guest-access matrix (`capabilities`,
       ported from `cli_integration.rs::test_capabilities`)
 - [x] HTTP endpoint security cases: `/key` injection guard, RPC-over-HTTP
       session hijack/isolation, `--deny-http`/`--allow-http` + `--*-arbitrary-
       query` route matrices, `/signin` level inference, `--client-ip` modes,
       the readiness gate, `surreal-id`/identification headers, `/sync`
-      (`http-port`, ported from `http_integration.rs`)
+      (`http`, ported from `http_integration.rs`)
 - [x] SDK wire subset ported from `api_integration`: changefeeds over RPC
       (`SHOW CHANGES` polling), `export()`/`import()` round-trips (SDK + raw
       HTTP, incl. hostile-identifier escaping), and query-result shapes —
       bindings, ORDER BY/START/LIMIT, record-id ranges, FETCH, DELETE ranges,
-      decimal coercion, UPDATE CONTENT (`sdk-wire-port`)
+      decimal coercion, UPDATE CONTENT (`changefeeds`, `backup`, `surrealql`)
 - [ ] Access-grant purge (`ACCESS ... PURGE REVOKED` — note it applies an
       implicit grace window; pass an explicit `FOR <duration>` when testing)
 
