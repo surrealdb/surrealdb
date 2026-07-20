@@ -31,7 +31,9 @@ use crate::expr::statements::{OptionStatement, UseStatement};
 use crate::expr::{Base, ControlFlow, Expr, FlowResult, TopLevelExpr};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::slowlog::SlowLogVisit;
-use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
+use crate::kvs::{
+	Datastore, LockType, Transaction, TransactionType, is_retryable_transaction_conflict,
+};
 use crate::observe::{
 	Outcome, QueryCounters, QueryEvent, QueryEventSafe, StatementEvent, StatementEventCtx,
 	StatementEventSafe, StatementType,
@@ -1482,19 +1484,23 @@ impl Executor {
 						));
 					}
 
+					let details = if is_retryable_transaction_conflict(&e) {
+						QueryError::TransactionConflict
+					} else {
+						QueryError::NotExecuted
+					};
+					let commit_error = TypesError::query(format!("Cannot COMMIT: {e}"), details);
+					let error_class =
+						crate::observe::error_class::classify_types_error(&commit_error);
 					self.results.push(QueryResult {
 						time: before.elapsed(),
-						result: Err(TypesError::query(
-							format!("Cannot COMMIT: {e}"),
-							Some(QueryError::NotExecuted),
-						)),
+						result: Err(commit_error),
 						query_type: QueryType::Other,
 					});
 
-					// `Cannot COMMIT` surfaces as a NotExecuted query error on
-					// the COMMIT row -- a caller-visible failure ("the
-					// transaction your statements ran inside could not
-					// commit"), not an internal fault.
+					// `Cannot COMMIT` surfaces on the COMMIT row. Retryable storage conflicts
+					// retain their typed classification; other commit failures remain
+					// `NotExecuted` query errors.
 					self.emit_statement_event_cached(
 						kvs,
 						statement_type,
@@ -1503,7 +1509,7 @@ impl Executor {
 						&before,
 						Outcome::Error,
 						0,
-						Some(crate::observe::error_class::CLIENT),
+						Some(error_class),
 					);
 
 					return Ok(());

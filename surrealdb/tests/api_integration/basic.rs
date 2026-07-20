@@ -1758,6 +1758,30 @@ pub async fn field_and_index_methods(new_db: impl CreateDb) {
 	assert_eq!(inside.clone().into_option::<Value>().unwrap(), None);
 }
 
+/// Regression test for https://github.com/surrealdb/surrealdb/issues/7428.
+pub async fn issue_7428_retryable_query_transaction_conflict(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+	db.query("UPSERT transaction_conflict:test SET value = 0").await.unwrap().check().unwrap();
+
+	let sql = "BEGIN; \
+		LET $current = (SELECT VALUE value FROM transaction_conflict:test)[0]; \
+		UPDATE transaction_conflict:test SET value = $current + 1; \
+		SLEEP 500ms; \
+		COMMIT;";
+	let (first, second) = tokio::join!(db.query(sql), db.query(sql));
+	let mut responses = [first.unwrap(), second.unwrap()];
+	let retryable = responses
+		.iter_mut()
+		.map(|response| response.take_errors().values().any(|error| error.is_retryable()))
+		.filter(|retryable| *retryable)
+		.count();
+	assert_eq!(retryable, 1, "expected exactly one retryable transaction conflict: {responses:?}");
+
+	drop(permit);
+}
+
 #[cfg(not(feature = "protocol-http"))]
 pub async fn client_side_transactions(new_db: impl CreateDb) {
 	#[derive(Debug, Clone, SurrealValue, PartialEq)]
