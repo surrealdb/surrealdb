@@ -1,8 +1,11 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import {
+	BoundExcluded,
+	BoundIncluded,
 	DateTime,
 	Decimal,
 	Duration,
+	FileRef,
 	Geometry,
 	GeometryCollection,
 	GeometryLine,
@@ -11,7 +14,9 @@ import {
 	GeometryMultiPolygon,
 	GeometryPoint,
 	GeometryPolygon,
+	Range,
 	RecordId,
+	RecordIdRange,
 	StringRecordId,
 	Uuid,
 } from "surrealdb";
@@ -513,6 +518,342 @@ test("BigInt beyond 2^53 roundtrips exactly as a native bigint, including in rec
 	];
 	expect(all).toHaveLength(1);
 	expect(all[0].id.id).toBe(big);
+
+	await db.close();
+});
+
+test("ranges decode as Range with correct inclusive/exclusive/unbounded bounds", async () => {
+	const { db } = await rootClient(server);
+
+	// `..` is end-exclusive, `..=` end-inclusive; a missing side is unbounded.
+	const cases: Array<{
+		expr: string;
+		begin: { cls: typeof BoundIncluded | typeof BoundExcluded; value: unknown } | null;
+		end: { cls: typeof BoundIncluded | typeof BoundExcluded; value: unknown } | null;
+		json: string;
+	}> = [
+		{
+			expr: "1..5",
+			begin: { cls: BoundIncluded, value: 1 },
+			end: { cls: BoundExcluded, value: 5 },
+			json: "1..5",
+		},
+		{
+			expr: "1..=5",
+			begin: { cls: BoundIncluded, value: 1 },
+			end: { cls: BoundIncluded, value: 5 },
+			json: "1..=5",
+		},
+		{
+			expr: "'a'..'z'",
+			begin: { cls: BoundIncluded, value: "a" },
+			end: { cls: BoundExcluded, value: "z" },
+			json: "a..z",
+		},
+		{
+			expr: "1..",
+			begin: { cls: BoundIncluded, value: 1 },
+			end: null,
+			json: "1..",
+		},
+		{
+			expr: "..10",
+			begin: null,
+			end: { cls: BoundExcluded, value: 10 },
+			json: "..10",
+		},
+	];
+
+	for (const c of cases) {
+		const [t] = await db.query<[string]>(`RETURN type::of(${c.expr})`).json();
+		expect(t).toBe("range");
+
+		const [out] = (await db.query(`RETURN ${c.expr}`)) as [Range<unknown, unknown>];
+		expect(out).toBeInstanceOf(Range);
+		if (c.begin === null) {
+			// An unbounded side decodes as `undefined`, not a Bound.
+			expect(out.begin).toBeUndefined();
+		} else {
+			expect(out.begin).toBeInstanceOf(c.begin.cls);
+			expect((out.begin as BoundIncluded<unknown>).value).toEqual(c.begin.value);
+		}
+		if (c.end === null) {
+			expect(out.end).toBeUndefined();
+		} else {
+			expect(out.end).toBeInstanceOf(c.end.cls);
+			expect((out.end as BoundExcluded<unknown>).value).toEqual(c.end.value);
+		}
+
+		// .json() flattens the range to its SurrealQL string form.
+		const [j] = await db.query(`RETURN ${c.expr}`).json();
+		expect(j).toBe(c.json);
+	}
+
+	// A Range constructed on the SDK side roundtrips back as an equal Range —
+	// and Range.equals works across the bundle's two class copies (unlike
+	// RecordId.equals, which crashes on a cross-copy compare).
+	const local = new Range(new BoundIncluded(1), new BoundExcluded(5));
+	const [bt] = await db.query<[string]>("RETURN type::of($r)", { r: local }).json();
+	expect(bt).toBe("range");
+	const [bout] = (await db.query("RETURN $r", { r: local })) as [Range<number, number>];
+	expect(bout).toBeInstanceOf(Range);
+	expect(bout.equals(local)).toBe(true);
+	expect((bout.begin as BoundIncluded<number>).value).toBe(1);
+	expect((bout.end as BoundExcluded<number>).value).toBe(5);
+
+	await db.close();
+});
+
+test("record-id ranges select the correct id subset; a bound RecordIdRange reports type record", async () => {
+	const { db } = await rootClient(server);
+
+	await db.query("CREATE |person:1..=10| SET n = 1 RETURN NONE");
+
+	// An inline record-id range target selects exactly the inclusive subset.
+	const [rows] = (await db.query("SELECT * FROM person:1..=5")) as [
+		Array<{ id: RecordId }>,
+	];
+	expect(rows).toHaveLength(5);
+	expect(rows.map((r) => String(r.id))).toEqual([
+		"person:1",
+		"person:2",
+		"person:3",
+		"person:4",
+		"person:5",
+	]);
+	for (const row of rows) expect(row.id).toBeInstanceOf(RecordId);
+
+	// A RecordIdRange bound from the SDK works as a scan target too. Surprising
+	// but observed: type::of on a bound record-id range reports "record", NOT
+	// "range" — a record-id range is a record target, not a plain range value.
+	const rr = new RecordIdRange("person", new BoundIncluded(1), new BoundIncluded(3));
+	const [rrt] = await db.query<[string]>("RETURN type::of($rr)", { rr }).json();
+	expect(rrt).toBe("record");
+
+	const [rrRows] = (await db.query("SELECT * FROM $rr", { rr })) as [
+		Array<{ id: RecordId }>,
+	];
+	expect(rrRows.map((r) => String(r.id))).toEqual(["person:1", "person:2", "person:3"]);
+
+	await db.close();
+});
+
+test("closures cannot cross the wire, but type::of still reports function", async () => {
+	const { db } = await rootClient(server);
+
+	// A closure has no public value representation: the whole response fails at
+	// the core->public conversion, before any CBOR is produced.
+	const bareErr = await rejects(db.query("RETURN |$x| $x + 1").collect());
+	expect(bareErr.constructor.name).toBe("InternalError");
+	expect(String(bareErr)).toMatch(/Closure values cannot be converted to public value/);
+
+	// Nesting the closure inside an object does not help — the same conversion
+	// failure takes down the entire response.
+	const nestedErr = await rejects(db.query("RETURN { f: |$x| $x + 1 }").collect());
+	expect(nestedErr.constructor.name).toBe("InternalError");
+	expect(String(nestedErr)).toMatch(/Closure values cannot be converted to public value/);
+
+	// The value still exists server-side: type::of names it without returning it.
+	const [t] = await db.query<[string]>("RETURN type::of(|$x| $x)").json();
+	expect(t).toBe("function");
+
+	await db.close();
+});
+
+test("regex is never representable as a wire value; it exists only as an operand", async () => {
+	const { db } = await rootClient(server);
+
+	// A regex literal is only parsed as an operand of an expression. Any attempt
+	// to surface one as a standalone value — returned, wrapped, or stored — is a
+	// PARSE error, so a regex never reaches the CBOR encoder at all.
+	for (const stmt of [
+		"RETURN /abc/",
+		"RETURN (/abc/)",
+		"RETURN [/abc/]",
+		"RETURN { r: /abc/ }",
+		"CREATE re_probe:one SET r = /abc/",
+	]) {
+		const err = await rejects(db.query(stmt).collect());
+		expect(err.constructor.name).toBe("ValidationError");
+		expect(String(err)).toMatch(/Parse error/);
+	}
+
+	// As an operand it is fully live: type::of names it, and it matches.
+	const [t] = await db.query<[string]>("RETURN type::of(/abc/)").json();
+	expect(t).toBe("regex");
+	const [matched] = await db.query<[boolean]>("RETURN 'abcd' = /abc/").json();
+	expect(matched).toBe(true);
+
+	await db.close();
+});
+
+test("<set> decodes as a native Set with dedup, distinct from a plain array", async () => {
+	const { db } = await rootClient(server);
+
+	// The server sees SurrealQL `set`; duplicates are collapsed.
+	const [t] = await db.query<[string]>("RETURN type::of(<set>[1, 1, 2, 3])").json();
+	expect(t).toBe("set");
+
+	// The SDK decodes a set as a native JS Set (deduped), not an array — both
+	// through the value path and through .json().
+	const [out] = (await db.query("RETURN <set>[1, 1, 2, 3]")) as [unknown];
+	expect(out).toBeInstanceOf(Set);
+	expect(Array.isArray(out)).toBe(false);
+	expect(Array.from(out as Set<number>)).toEqual([1, 2, 3]);
+
+	const [outJson] = (await db.query("RETURN <set>[1, 1, 2, 3]").json()) as [unknown];
+	expect(outJson).toBeInstanceOf(Set);
+	expect(Array.from(outJson as Set<number>)).toEqual([1, 2, 3]);
+
+	// A plain array literal keeps its duplicates and decodes as an Array.
+	const [arr] = (await db.query("RETURN [1, 1, 2, 3]")) as [unknown];
+	expect(Array.isArray(arr)).toBe(true);
+	expect(arr).toEqual([1, 1, 2, 3]);
+
+	// Stored in a record and read back, still a deduped Set.
+	await db.query("CREATE set_probe:one SET s = <set>[1, 1, 2, 3]");
+	const [rows] = (await db.query("SELECT * FROM set_probe:one")) as [
+		Array<{ s: unknown }>,
+	];
+	expect(rows[0].s).toBeInstanceOf(Set);
+	expect(Array.from(rows[0].s as Set<number>)).toEqual([1, 2, 3]);
+
+	await db.close();
+});
+
+test("file references roundtrip as FileRef; the <file> cast and slashless literals are rejected", async () => {
+	// The `f"bucket:/key"` literal is gated behind an experimental feature.
+	const fileServer = await startServer({ args: ["--allow-experimental=files"] });
+	try {
+		const { db } = await rootClient(fileServer);
+
+		// A file literal requires a `/`-prefixed key; the bucket and key survive.
+		const [t] = await db.query<[string]>('RETURN type::of(f"docs:/readme.md")').json();
+		expect(t).toBe("file");
+		const [out] = (await db.query('RETURN f"docs:/readme.md"')) as [FileRef];
+		expect(out).toBeInstanceOf(FileRef);
+		expect(out.bucket).toBe("docs");
+		expect(out.key).toBe("/readme.md");
+
+		// .json() flattens a file to its `bucket:/key` string form.
+		const [j] = await db.query('RETURN f"docs:/readme.md"').json();
+		expect(j).toBe("docs:/readme.md");
+
+		// A FileRef bound from the SDK roundtrips, and FileRef.equals works across
+		// the bundle's class copies. A key given without a leading slash comes
+		// back normalized WITH one.
+		const bound = new FileRef("bucket", "key");
+		const [bt] = await db.query<[string]>("RETURN type::of($f)", { f: bound }).json();
+		expect(bt).toBe("file");
+		const [bout] = (await db.query("RETURN $f", { f: bound })) as [FileRef];
+		expect(bout).toBeInstanceOf(FileRef);
+		expect(bout.bucket).toBe("bucket");
+		expect(bout.key).toBe("/key");
+		const slashed = new FileRef("bucket", "/key");
+		expect(bout.equals(slashed)).toBe(true);
+
+		// Stored in a record and read back, still a FileRef with parts intact.
+		await db.query('CREATE file_probe:one SET f = f"docs:/readme.md"');
+		const [rows] = (await db.query("SELECT * FROM file_probe:one")) as [
+			Array<{ f: FileRef }>,
+		];
+		expect(rows[0].f).toBeInstanceOf(FileRef);
+		expect(rows[0].f.bucket).toBe("docs");
+		expect(rows[0].f.key).toBe("/readme.md");
+
+		// A `<file>` cast from a string is NOT a valid path to a file value: it
+		// fails at runtime regardless of whether the string carries a `/`.
+		const castErr = await rejects(db.query('RETURN <file>"bucket:/key"').collect());
+		expect(castErr.constructor.name).toBe("InternalError");
+		expect(String(castErr)).toMatch(/Could not cast into `file`/);
+
+		// A file literal whose key lacks a leading `/` is a parse error.
+		const slashErr = await rejects(db.query('RETURN f"bucket:key"').collect());
+		expect(slashErr.constructor.name).toBe("ValidationError");
+		expect(String(slashErr)).toMatch(/Parse error/);
+
+		await db.close();
+	} finally {
+		await fileServer.stop();
+	}
+
+	// Without the experimental feature the literal is rejected at parse time.
+	const { db } = await rootClient(server);
+	const gatedErr = await rejects(db.query('RETURN f"docs:/readme.md"').collect());
+	expect(gatedErr.constructor.name).toBe("ValidationError");
+	expect(String(gatedErr)).toMatch(/experimental files feature to be enabled/);
+	await db.close();
+});
+
+test("the cast matrix decodes rich SurrealQL types as their SDK value classes", async () => {
+	const { db } = await rootClient(server);
+
+	// <datetime> -> DateTime
+	const [dtT] = await db.query<[string]>("RETURN type::of(<datetime>'2026-07-17T12:34:56Z')").json();
+	expect(dtT).toBe("datetime");
+	const [dt] = (await db.query("RETURN <datetime>'2026-07-17T12:34:56Z'")) as [DateTime];
+	expect(dt).toBeInstanceOf(DateTime);
+	expect(dt.toISOString()).toBe("2026-07-17T12:34:56.000Z");
+
+	// <duration> -> Duration
+	const [durT] = await db.query<[string]>("RETURN type::of(<duration>'1h30m')").json();
+	expect(durT).toBe("duration");
+	const [dur] = (await db.query("RETURN <duration>'1h30m'")) as [Duration];
+	expect(dur).toBeInstanceOf(Duration);
+	expect(String(dur)).toBe("1h30m");
+
+	// <uuid> -> Uuid
+	const [uuidT] = await db
+		.query<[string]>("RETURN type::of(<uuid>'018f2a2b-3c4d-7e5f-8a9b-0c1d2e3f4a5b')")
+		.json();
+	expect(uuidT).toBe("uuid");
+	const [uuid] = (await db.query(
+		"RETURN <uuid>'018f2a2b-3c4d-7e5f-8a9b-0c1d2e3f4a5b'",
+	)) as [Uuid];
+	expect(uuid).toBeInstanceOf(Uuid);
+	expect(String(uuid)).toBe("018f2a2b-3c4d-7e5f-8a9b-0c1d2e3f4a5b");
+
+	// <decimal> -> Decimal (full precision beyond f64)
+	const [decT] = await db
+		.query<[string]>("RETURN type::of(<decimal>'12345678901234567890.123456789')")
+		.json();
+	expect(decT).toBe("decimal");
+	const [dec] = (await db.query(
+		"RETURN <decimal>'12345678901234567890.123456789'",
+	)) as [Decimal];
+	expect(dec).toBeInstanceOf(Decimal);
+	expect(String(dec)).toBe("12345678901234567890.123456789");
+
+	// <record> -> RecordId
+	const [recT] = await db.query<[string]>("RETURN type::of(<record>'thing:alpha')").json();
+	expect(recT).toBe("record");
+	const [rec] = (await db.query("RETURN <record>'thing:alpha'")) as [RecordId];
+	expect(rec).toBeInstanceOf(RecordId);
+	expect(String(rec)).toBe("thing:alpha");
+
+	// <geometry> -> the concrete Geometry subclass
+	const [geoT] = await db
+		.query<[string]>("RETURN type::of(<geometry>{ type: 'Point', coordinates: [1, 2] })")
+		.json();
+	expect(geoT).toBe("geometry<point>");
+	const [geo] = (await db.query(
+		"RETURN <geometry>{ type: 'Point', coordinates: [1, 2] }",
+	)) as [Geometry];
+	expect(geo).toBeInstanceOf(GeometryPoint);
+	expect(geo.toJSON()).toEqual({ type: "Point", coordinates: [1, 2] });
+
+	// Numeric casts decode as plain JS numbers, distinguished only by type::of.
+	// Surprising but observed: <number> of an integer yields `int`, not a
+	// dedicated "number" type; <number> of a fractional value yields `float`.
+	const [floatT] = await db.query<[string]>("RETURN type::of(<float>3)").json();
+	expect(floatT).toBe("float");
+	const [numIntT] = await db.query<[string]>("RETURN type::of(<number>3)").json();
+	expect(numIntT).toBe("int");
+	const [numFloatT] = await db.query<[string]>("RETURN type::of(<number>3.5)").json();
+	expect(numFloatT).toBe("float");
+	const [numVal] = (await db.query("RETURN <number>3.5")) as [unknown];
+	expect(typeof numVal).toBe("number");
+	expect(numVal).toBe(3.5);
 
 	await db.close();
 });

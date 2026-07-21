@@ -888,3 +888,282 @@ test("query bindings do not leak into session state", async () => {
 	expect(after).toBeUndefined();
 	await db.close();
 });
+
+// ---------------------------------------------------------------------------
+// insert_relation RPC — params are [table, edgeData]. Unlike `relate` (single
+// object), insert_relation returns an array. The edge data must carry `in` and
+// `out`; the resulting edge is readable via graph traversal.
+// ---------------------------------------------------------------------------
+
+test("insert_relation RPC creates an edge from explicit in/out and returns it in an array", async () => {
+	const { rpc } = await rootRpc();
+	await rpc.call("query", ["CREATE person:a, person:b"]);
+
+	const res = await rpc.rpc("insert_relation", [
+		"likes",
+		{ in: "person:a", out: "person:b", since: 2020 },
+	]);
+	expect(res.error).toBeUndefined();
+	// A single edge object still comes back wrapped in a one-element array.
+	expect(Array.isArray(res.result)).toBe(true);
+	const rows = res.result as Array<{ id: string; in: string; out: string; since: number }>;
+	expect(rows).toHaveLength(1);
+	expect(rows[0].in).toBe("person:a");
+	expect(rows[0].out).toBe("person:b");
+	expect(rows[0].since).toBe(2020);
+	expect(rows[0].id).toMatch(/^likes:/);
+
+	// The edge is reachable by traversing the graph from the source record.
+	const to = (await rpc.call("query", ["RETURN person:a->likes->person"])) as StmtEnvelope[];
+	expect(to[0].result).toEqual(["person:b"]);
+	await rpc.close();
+});
+
+test("insert_relation RPC inserts a batch and rejects edge data missing in/out", async () => {
+	const { rpc } = await rootRpc();
+	await rpc.call("query", ["CREATE person:a, person:b"]);
+
+	// A batch of edge objects yields one element per edge.
+	const batch = await rpc.rpc("insert_relation", [
+		"likes",
+		[
+			{ in: "person:a", out: "person:b" },
+			{ in: "person:b", out: "person:a" },
+		],
+	]);
+	expect(batch.error).toBeUndefined();
+	expect(batch.result as unknown[]).toHaveLength(2);
+
+	// An explicit `id` on the edge object is honoured.
+	const withId = await rpc.rpc("insert_relation", [
+		"likes",
+		{ id: "likes:custom", in: "person:a", out: "person:b" },
+	]);
+	expect((withId.result as Array<{ id: string }>)[0].id).toBe("likes:custom");
+
+	// Edge data without `in` fails at the RPC level (relations require both ends).
+	const missing = await rpc.rpc("insert_relation", ["likes", { note: "x" }]);
+	expect(missing.error?.code).toBe(-32000);
+	expect(missing.error?.message).toBe(
+		"Cannot execute INSERT statement where property 'in' is: NONE",
+	);
+	await rpc.close();
+});
+
+// ---------------------------------------------------------------------------
+// reset RPC — clears the session's auth, USE (ns/db), and params in place,
+// without dropping the socket. It returns null and the connection stays usable.
+// ---------------------------------------------------------------------------
+
+test("reset RPC clears session params, auth, and USE while keeping the socket usable", async () => {
+	const { rpc, ns, db } = await rootRpc();
+	await rpc.call("set", ["myvar", "hello"]);
+	const before = (await rpc.call("query", ["RETURN $myvar"])) as StmtEnvelope[];
+	expect(before[0].result).toBe("hello");
+
+	// reset returns null.
+	const resetRes = await rpc.rpc("reset", []);
+	expect(resetRes.error).toBeUndefined();
+	expect(resetRes.result).toBeNull();
+
+	// Auth is cleared: the connection is now anonymous, so a query is rejected
+	// as a whole-request RPC error.
+	const anon = await rpc.rpc("query", ["RETURN $myvar"]);
+	expect(anon.error?.message).toBe(
+		"Anonymous access not allowed: Not enough permissions to perform this action",
+	);
+
+	// ping is connection-level and still works — the socket was never dropped.
+	expect((await rpc.rpc("ping", [])).result).toBeNull();
+
+	// Re-authenticate and re-select ns/db (reset cleared USE too). The param is
+	// gone — it reads back null — confirming reset wiped session variables.
+	await rpc.call("signin", [{ user: "root", pass: "root" }]);
+	await rpc.call("use", [ns, db]);
+	const after = (await rpc.call("query", ["RETURN $myvar"])) as StmtEnvelope[];
+	expect(after[0].result).toBeNull();
+	await rpc.close();
+});
+
+// ---------------------------------------------------------------------------
+// revoke RPC — params are [token]. Given an access+refresh token pair from a
+// `WITH REFRESH` record access, revoke removes the refresh grant: the refresh
+// token can no longer mint new tokens, while the still-unexpired access token
+// keeps authenticating. An access-only token cannot be revoked.
+// ---------------------------------------------------------------------------
+
+test("revoke RPC invalidates a refresh grant while leaving the access token valid", async () => {
+	const { rpc, ns, db } = await rootRpc();
+	// A record access that issues a refresh token alongside the access token.
+	await rpc.call("query", [
+		`DEFINE ACCESS user ON DATABASE TYPE RECORD
+			SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+			SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+			WITH REFRESH DURATION FOR SESSION 1d, FOR TOKEN 15s;`,
+	]);
+
+	// A WITH REFRESH signup returns an { access, refresh } pair, not a bare string.
+	const token = (await rpc.call("signup", [
+		{ ns, db, ac: "user", email: "a@example.com", pass: "pass" },
+	])) as { access: string; refresh: string };
+	expect(typeof token.access).toBe("string");
+	expect(typeof token.refresh).toBe("string");
+
+	// An access-only token has no refresh component to revoke.
+	const accessOnly = await rpc.rpc("revoke", [token.access]);
+	expect(accessOnly.error?.code).toBe(-32000);
+	expect(accessOnly.error?.message).toBe(
+		"Incorrect arguments for function refresh(). Token is an access token, cannot revoke refresh token",
+	);
+
+	// Revoking the pair succeeds and returns null.
+	const revoked = await rpc.rpc("revoke", [token]);
+	expect(revoked.error).toBeUndefined();
+	expect(revoked.result).toBeNull();
+
+	// The access token itself is independent and still authenticates.
+	const reauth = await rpc.rpc("authenticate", [token.access]);
+	expect(reauth.error).toBeUndefined();
+
+	// But the revoked refresh token can no longer mint a fresh token pair.
+	const refresh = await rpc.rpc("refresh", [token]);
+	expect(refresh.error?.code).toBe(-32002);
+	expect(refresh.error?.message).toBe("There was a problem with authentication");
+	await rpc.close();
+});
+
+// ---------------------------------------------------------------------------
+// detach RPC — the durable-session teardown counterpart to `attach`. It keys
+// off a per-connection session id supplied via a connection request header. The
+// harness RpcClient is built on the browser `WebSocket`, which cannot set
+// arbitrary request headers, so detach has no session to act on: it rejects
+// with -32603 InvalidParams. The full durable-session teardown path is
+// exercised through the SDK in sessions.test.ts.
+// ---------------------------------------------------------------------------
+
+test("detach RPC without a connection session id is rejected as invalid params", async () => {
+	const { rpc } = await rootRpc();
+	const res = await rpc.rpc("detach", []);
+	expect(res.error?.code).toBe(-32603);
+	expect(res.error?.message).toBe("Expected a session ID");
+	expect(res.result).toBeUndefined();
+	await rpc.close();
+});
+
+test.skip("detach RPC tears down the durable session copy so it cannot be resurrected", async () => {
+	// The durable teardown requires a connection session id, delivered by a
+	// connection request header the JS WebSocket driver cannot set. Covered by
+	// the SDK-driven multi-session tests in sessions.test.ts.
+});
+
+// ---------------------------------------------------------------------------
+// INFO introspection shape over the wire — the SDK/tooling consume the exact
+// object shape a `query` RPC of INFO FOR ... returns. Plain INFO renders each
+// definition as its DDL string; the STRUCTURE variant renders typed objects
+// (and arrays) instead. User definitions redact their password material either
+// way.
+// ---------------------------------------------------------------------------
+
+test("INFO FOR TABLE returns DDL-string maps; the STRUCTURE variant returns typed field objects", async () => {
+	const { rpc } = await rootRpc();
+	await rpc.call("query", [
+		"DEFINE TABLE tbl SCHEMAFULL; DEFINE FIELD f ON tbl TYPE int; DEFINE INDEX idx ON tbl FIELDS f;",
+	]);
+
+	// Plain INFO: keyed maps whose values are the definition DDL strings.
+	const plain = (await rpc.call("query", ["INFO FOR TABLE tbl"])) as StmtEnvelope[];
+	const info = plain[0].result as {
+		fields: Record<string, string>;
+		indexes: Record<string, string>;
+		events: Record<string, unknown>;
+		lives: Record<string, unknown>;
+		tables: Record<string, unknown>;
+	};
+	expect(info.fields.f).toBe("DEFINE FIELD f ON tbl TYPE int PERMISSIONS FULL");
+	expect(info.indexes.idx).toBe("DEFINE INDEX idx ON tbl FIELDS f");
+
+	// STRUCTURE: the same collections become arrays of typed objects.
+	const structured = (await rpc.call("query", [
+		"INFO FOR TABLE tbl STRUCTURE",
+	])) as StmtEnvelope[];
+	const struct = structured[0].result as {
+		fields: Array<{ name: string; kind: string; readonly: boolean; permissions: unknown }>;
+		indexes: Array<{ name: string; cols: string[] }>;
+	};
+	expect(Array.isArray(struct.fields)).toBe(true);
+	const field = struct.fields.find((x) => x.name === "f")!;
+	expect(field.kind).toBe("int");
+	expect(field.readonly).toBe(false);
+	expect(typeof field.permissions).toBe("object");
+	expect(struct.indexes[0].name).toBe("idx");
+	expect(struct.indexes[0].cols).toEqual(["f"]);
+	await rpc.close();
+});
+
+test("INFO FOR USER returns a redacted DDL string; the STRUCTURE variant returns a typed object", async () => {
+	const { rpc } = await rootRpc();
+	await rpc.call("query", ["DEFINE USER bob ON DATABASE PASSWORD 'secret' ROLES VIEWER"]);
+
+	// Plain INFO: a single DDL string with password material redacted.
+	const plain = (await rpc.call("query", ["INFO FOR USER bob"])) as StmtEnvelope[];
+	expect(typeof plain[0].result).toBe("string");
+	expect(plain[0].result as string).toBe(
+		"DEFINE USER bob ON DATABASE PASSHASH '[REDACTED]' PASSSCRAM '[REDACTED]' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE",
+	);
+
+	// STRUCTURE: a typed object; the secrets stay redacted string placeholders.
+	const structured = (await rpc.call("query", ["INFO FOR USER bob STRUCTURE"])) as StmtEnvelope[];
+	const user = structured[0].result as {
+		name: string;
+		roles: string[];
+		hash: string;
+		scram: string;
+		duration: { session: string | null; token: string };
+	};
+	expect(user.name).toBe("bob");
+	expect(user.roles).toEqual(["VIEWER"]);
+	expect(user.hash).toBe("[REDACTED]");
+	expect(user.scram).toBe("[REDACTED]");
+	expect(user.duration.token).toBe("1h");
+	expect(user.duration.session).toBeNull();
+	await rpc.close();
+});
+
+test("INFO FOR DB STRUCTURE returns typed catalog arrays with typed table entries", async () => {
+	const { rpc } = await rootRpc();
+	await rpc.call("query", ["DEFINE TABLE person SCHEMAFULL PERMISSIONS FOR select FULL"]);
+
+	const structured = (await rpc.call("query", ["INFO FOR DB STRUCTURE"])) as StmtEnvelope[];
+	const db = structured[0].result as {
+		tables: Array<{
+			name: string;
+			schemafull: boolean;
+			drop: boolean;
+			kind: { kind: string };
+			permissions: { create: boolean; select: boolean; update: boolean; delete: boolean };
+		}>;
+		accesses: unknown[];
+		analyzers: unknown[];
+		functions: unknown[];
+		params: unknown[];
+		users: unknown[];
+	};
+	// Catalog collections are arrays (empty ones included).
+	expect(Array.isArray(db.tables)).toBe(true);
+	expect(Array.isArray(db.accesses)).toBe(true);
+	expect(Array.isArray(db.analyzers)).toBe(true);
+	expect(Array.isArray(db.functions)).toBe(true);
+	expect(Array.isArray(db.params)).toBe(true);
+
+	const table = db.tables.find((t) => t.name === "person")!;
+	expect(table.schemafull).toBe(true);
+	expect(table.drop).toBe(false);
+	expect(table.kind.kind).toBe("NORMAL");
+	// The `select FULL` permission is a boolean-true; the unspecified verbs
+	// default to a denying `false` in the STRUCTURE shape.
+	expect(table.permissions.select).toBe(true);
+	expect(table.permissions.create).toBe(false);
+	expect(table.permissions.update).toBe(false);
+	expect(table.permissions.delete).toBe(false);
+	await rpc.close();
+});

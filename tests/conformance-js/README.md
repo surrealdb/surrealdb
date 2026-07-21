@@ -183,6 +183,31 @@ landed on `main` but is not yet in a stable release.
   - `ACCESS … PURGE` returns a flat grant array while `REVOKE GRANT` nests one
     level deeper (`[[grant]]`); the default purge grace is 0s but eligibility is
     a strict `>` at whole-second granularity (`auth-refresh`).
+  - Wire value types: closures are not representable — `RETURN |$x| $x` fails the
+    whole response with "Closure values cannot be converted to public value"
+    (`type::of` still reports `function`); a regex literal is a parse error, so
+    it never reaches the encoder; `<set>` decodes as a native JS `Set`; a `<file>`
+    value needs `--allow-experimental=files` and the `f"bucket:/key"` form (the
+    `<file>"…"` cast fails); a bound record-id range reports `type::of` `record`,
+    not `range` (`surrealql-wire`).
+  - RPC surface: `insert_relation` returns an array even for a single edge
+    (unlike `relate`, which returns one object); `reset` clears the `ns`/`db`
+    selection as well as auth + params; `revoke` of an access-only token leaks
+    the internal `refresh()` function name in its error; in `INFO … STRUCTURE`
+    a per-field permission map omits the `delete` key while per-table maps carry
+    all four (`websocket`).
+  - HTTP: a CBOR-body `/rpc` request must set an explicit `Accept: application/cbor`
+    (fetch's implicit `*/*` maps to JSON → 415); an empty `{}` export config
+    exports everything (the default), not nothing; the anonymous `/metrics`
+    scrape is filtered to public metric families (build/process gauges), with
+    per-route/tenant families withheld (`http`).
+  - Cross-transport error shapes diverge by design: GraphQL reports schema-layer
+    failures as HTTP 200 with the error in `errors[]` (but missing ns/db as a
+    transport-level 400, resolved from headers); a bad-credentials failure is a
+    bare `text/plain` 401 on `/sql`, `/graphql`, and `/gql` even under
+    `Accept: application/json`; and a WebSocket parse error fails the whole
+    request as a top-level `-32000` while runtime errors arrive as per-statement
+    `ERR` envelopes (`errors`).
 
 ## Scope grown so far / next
 
@@ -276,6 +301,15 @@ landed on `main` but is not yet in a stable release.
       emits `KILLED`) (`live`)
 - [x] Grant/session lifecycle: `ACCESS ... PURGE EXPIRED/REVOKED` and system-user
       `DURATION FOR SESSION` / `FOR TOKEN` expiry (`auth-refresh`, `auth`)
+- [x] Wire value types: ranges & record-id ranges, closures and regex
+      (non-representable), sets, files, and the rich `<cast>` matrix
+      (`surrealql-wire`)
+- [x] RPC surface: `insert_relation`, `reset`, `revoke`, the `detach` guard, and
+      `INFO … STRUCTURE` wire shapes (`websocket`)
+- [x] HTTP: `/rpc` CBOR content negotiation, `export(options)` selective export,
+      and the anonymous `/metrics` scrape (`http`)
+- [x] Cross-transport error-shape consistency across WS-RPC, `/sql`, GraphQL,
+      and `/gql` (`errors`)
 
 ### Rust → JS test migration
 

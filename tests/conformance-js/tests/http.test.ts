@@ -6,6 +6,10 @@
 // /import round-trips, and RPC-over-HTTP (query/version, unknown-method
 // errors, and session ownership/isolation).
 //
+// It pins the /rpc content negotiation (CBOR round-trip of rich wire types and
+// the Content-Type/Accept matching rule), selective /export config bodies over
+// both db.export() and POST /export, and the anonymous /metrics scrape.
+//
 // It also pins server-flag behavior: --deny-http / --allow-http route gating
 // (including the /sql WebSocket upgrade), the --*-arbitrary-query matrix,
 // --client-ip source modes into $session.ip, the startup-import readiness
@@ -22,6 +26,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, test } from "bun:test";
+import { CborCodec, Duration, RecordId, Uuid } from "surrealdb";
 import { guestClient, rootClient, startServer, type TestServer } from "../src/harness";
 
 const ROOT_AUTH = `Basic ${btoa("root:root")}`;
@@ -457,6 +462,167 @@ let counter = 0;
 		expect(unknownBody.id).toBe(3);
 		expect(unknownBody.error.code).toBe(-32601);
 		expect(unknownBody.error.message).toBe("Method not found");
+	});
+
+	test("POST /rpc negotiates CBOR: rich wire types round-trip; Content-Type must match Accept", async () => {
+		const { ns, db } = await freshNsDb();
+		const codec = CborCodec.DEFAULT;
+
+		// A CBOR-encoded `query` frame whose result carries a record id, a
+		// duration, and a UUID — the rich types JSON cannot represent losslessly.
+		const frame = {
+			id: 1,
+			method: "query",
+			params: [
+				"RETURN { rid: person:tobie, dur: 1h30m, uid: <uuid> 'ffffffff-ffff-4fff-8fff-ffffffffffff', num: 42 }",
+			],
+		};
+
+		// A CBOR exchange requires application/cbor on BOTH Content-Type and Accept.
+		const ok = await fetch(`${server.httpUrl}/rpc`, {
+			method: "POST",
+			headers: {
+				Authorization: ROOT_AUTH,
+				"Content-Type": "application/cbor",
+				Accept: "application/cbor",
+				"surreal-ns": ns,
+				"surreal-db": db,
+			},
+			body: codec.encode(frame),
+		});
+		expect(ok.status).toBe(200);
+		expect(ok.headers.get("content-type")).toMatch(/^application\/cbor/);
+		const decoded = codec.decode(new Uint8Array(await ok.arrayBuffer())) as {
+			id: number;
+			result: Envelope[];
+		};
+		expect(decoded.id).toBe(1);
+		expect(decoded.result[0].status).toBe("OK");
+		const row = decoded.result[0].result as { rid: unknown; dur: unknown; uid: unknown; num: unknown };
+		// CBOR tags decode back into the SDK's rich value classes.
+		expect(row.rid).toBeInstanceOf(RecordId);
+		expect(String(row.rid)).toBe("person:tobie");
+		expect(row.dur).toBeInstanceOf(Duration);
+		expect(String(row.dur)).toBe("1h30m");
+		expect(row.uid).toBeInstanceOf(Uuid);
+		expect(String(row.uid)).toBe("ffffffff-ffff-4fff-8fff-ffffffffffff");
+		expect(row.num).toBe(42);
+
+		// Content-Type and Accept must agree: a CBOR body asked to answer as JSON
+		// (and the reverse) is a 415 with a JSON problem body — the request is
+		// refused before dispatch, so neither direction silently transcodes.
+		const mismatch = async (contentType: string, accept: string, body: BodyInit) => {
+			const res = await fetch(`${server.httpUrl}/rpc`, {
+				method: "POST",
+				headers: {
+					Authorization: ROOT_AUTH,
+					"Content-Type": contentType,
+					Accept: accept,
+					"surreal-ns": ns,
+					"surreal-db": db,
+				},
+				body,
+			});
+			expect(res.status).toBe(415);
+			expect(await res.json()).toMatchObject({ code: 415, details: "Unsupported media type" });
+		};
+		await mismatch("application/cbor", "application/json", codec.encode(frame));
+		await mismatch("application/json", "application/cbor", JSON.stringify(frame));
+
+		// Surprising: the server maps Accept: */* (fetch's implicit default when
+		// no Accept is set) to JSON, so a CBOR body without an explicit
+		// Accept: application/cbor is a 415 — the CBOR path opts in on both headers.
+		const wildcard = await fetch(`${server.httpUrl}/rpc`, {
+			method: "POST",
+			headers: {
+				Authorization: ROOT_AUTH,
+				"Content-Type": "application/cbor",
+				Accept: "*/*",
+				"surreal-ns": ns,
+				"surreal-db": db,
+			},
+			body: codec.encode(frame),
+		});
+		expect(wildcard.status).toBe(415);
+	});
+
+	test("selective export: db.export() and POST /export honor records/tables/users/accesses toggles", async () => {
+		const { db: client, namespace: ns, database: db } = await rootClient(server);
+		try {
+			await client.query(`
+				DEFINE TABLE alpha SCHEMALESS; DEFINE TABLE beta SCHEMALESS;
+				CREATE alpha:1 SET v = 1; CREATE beta:1 SET v = 2;
+				DEFINE PARAM $myparam VALUE 99;
+				DEFINE FUNCTION fn::myfn() { RETURN 1; };
+				DEFINE ANALYZER myanalyzer TOKENIZERS blank;
+				DEFINE USER exuser ON DATABASE PASSWORD 'p' ROLES OWNER;
+				DEFINE ACCESS myacc ON DATABASE TYPE RECORD
+					SIGNUP ( CREATE alpha ) SIGNIN ( SELECT * FROM alpha );
+			`);
+
+			// The full export (no config) carries every category, records included.
+			const full = (await client.export()) as string;
+			expect(full).toContain("DEFINE TABLE alpha");
+			expect(full).toContain("INSERT [ { id: alpha:1");
+			expect(full).toContain("DEFINE USER exuser");
+			expect(full).toContain("DEFINE ACCESS myacc");
+			expect(full).toContain("DEFINE PARAM $myparam");
+			expect(full).toContain("DEFINE FUNCTION fn::myfn");
+
+			// db.export({ records: false }) keeps the schema but drops row data.
+			const noRecords = (await client.export({ records: false })) as string;
+			expect(noRecords).toContain("DEFINE TABLE alpha");
+			expect(noRecords).not.toContain("INSERT [ { id: alpha:1");
+
+			// POST /export with a JSON config body is the same contract over HTTP.
+			const exportPost = (config: Record<string, unknown>) =>
+				send("POST", "/export", {
+					ns,
+					db,
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify(config),
+				});
+
+			// tables: ["alpha"] restricts to one table (schema + its data); beta drops out.
+			const onlyAlpha = await exportPost({ tables: ["alpha"] });
+			expect(onlyAlpha.status).toBe(200);
+			const onlyAlphaText = await onlyAlpha.text();
+			expect(onlyAlphaText).toContain("DEFINE TABLE alpha");
+			expect(onlyAlphaText).toContain("INSERT [ { id: alpha:1");
+			expect(onlyAlphaText).not.toContain("DEFINE TABLE beta");
+			expect(onlyAlphaText).not.toContain("beta:1");
+
+			// users/accesses toggles exclude just those categories; tables remain.
+			const noAuth = await exportPost({ users: false, accesses: false });
+			const noAuthText = await noAuth.text();
+			expect(noAuthText).not.toContain("DEFINE USER exuser");
+			expect(noAuthText).not.toContain("DEFINE ACCESS myacc");
+			expect(noAuthText).toContain("DEFINE TABLE alpha");
+
+			// An empty config body is the default: every category included.
+			const empty = await exportPost({});
+			const emptyText = await empty.text();
+			expect(emptyText).toContain("DEFINE TABLE alpha");
+			expect(emptyText).toContain("INSERT [ { id: alpha:1");
+			expect(emptyText).toContain("DEFINE USER exuser");
+		} finally {
+			await client.close();
+		}
+	});
+
+	test("GET /metrics serves the anonymous Prometheus scrape (public process + build metrics)", async () => {
+		// Metrics are enabled by default; the scrape needs no authentication.
+		const res = await fetch(`${server.httpUrl}/metrics`);
+		expect(res.status).toBe(200);
+		// Prometheus text exposition format.
+		expect(res.headers.get("content-type")).toMatch(/^text\/plain; ?version=0\.0\.4/);
+		const body = await res.text();
+		// The unauthenticated scrape is filtered to public metric families: the
+		// static build-info gauge and the process gauges. Per-route/tenant metric
+		// families are withheld from anonymous callers.
+		expect(body).toContain("# TYPE surrealdb_build_info gauge");
+		expect(body).toMatch(/surrealdb_build_info\{[^}]*build_version="[^"]+"[^}]*\} 1/);
+		expect(body).toContain("surrealdb_process_uptime_seconds");
 	});
 }
 
