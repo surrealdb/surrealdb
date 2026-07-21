@@ -120,6 +120,89 @@ test("changefeed: SHOW CHANGES SINCE <versionstamp> is inclusive of the boundary
 	});
 });
 
+test("changefeed INCLUDE ORIGINAL: the define_table feed entry reports changefeed original:true", async () => {
+	await withServer(async (server) => {
+		const { db } = await rootClient(server);
+
+		// INCLUDE ORIGINAL flips the table's changefeed into store-diff mode,
+		// which the recorded define_table entry advertises via `original: true`
+		// (the default feed records `original: false`).
+		await db.query("DEFINE TABLE t CHANGEFEED 1h INCLUDE ORIGINAL").collect();
+
+		const [entries] = (await db
+			.query("SHOW CHANGES FOR TABLE t SINCE 0 LIMIT 10")
+			.json()) as [
+			Array<{ versionstamp: bigint; changes: Array<Record<string, unknown>> }>,
+		];
+
+		expect(entries).toHaveLength(1);
+		expect(entries[0].changes).toEqual([
+			{
+				define_table: {
+					id: 0,
+					name: "t",
+					changefeed: { expiry: "1h", original: true },
+					drop: false,
+					kind: { kind: "ANY" },
+					permissions: { create: false, delete: false, select: false, update: false },
+					schemafull: false,
+				},
+			},
+		]);
+
+		await db.close();
+	});
+});
+
+test("changefeed INCLUDE ORIGINAL: UPDATE carries the after-image plus reverse patches, DELETE carries the before-image", async () => {
+	await withServer(async (server) => {
+		const { db } = await rootClient(server);
+
+		await db.query("DEFINE TABLE t CHANGEFEED 1h INCLUDE ORIGINAL").collect();
+		await db.query("CREATE t:a SET n = 1").collect();
+		await db.query("UPDATE t:a SET n = 2, extra = 'x'").collect();
+		await db.query("DELETE t:a").collect();
+
+		const [entries] = (await db
+			.query("SHOW CHANGES FOR TABLE t SINCE 0 LIMIT 10")
+			.json()) as [
+			Array<{ versionstamp: bigint; changes: Array<Record<string, unknown>> }>,
+		];
+
+		// define_table + create + update + delete.
+		expect(entries).toHaveLength(4);
+
+		// A CREATE has no prior image, so store-diff mode still records it as a
+		// plain `update` with the full after-image — there is no before-image to
+		// surface.
+		expect(entries[1].changes).toEqual([{ update: { id: "t:a", n: 1 } }]);
+
+		// An UPDATE does NOT surface the before-image directly. Instead the entry
+		// carries `current` (the after-image) and an `update` array of JSON-patch
+		// operations recorded in REVERSE (current -> previous), so applying them
+		// to `current` reconstructs the original. Ops arrive in sorted-key order:
+		// `extra` (added by this UPDATE) is removed, `n` is replaced back to 1.
+		expect(entries[2].changes).toEqual([
+			{
+				current: { id: "t:a", n: 2, extra: "x" },
+				update: [
+					{ op: "remove", path: "/extra" },
+					{ op: "replace", path: "/n", value: 1 },
+				],
+			},
+		]);
+
+		// A DELETE surfaces the before-image directly: the deleted record is
+		// carried verbatim under `delete.original` (the default feed records only
+		// `{ delete: { id } }`).
+		expect(entries[3].changes).toEqual([
+			{ delete: { id: "t:a", original: { id: "t:a", n: 2, extra: "x" } } },
+		]);
+
+		await db.close();
+	});
+});
+
 test("changefeed: SHOW CHANGES on a table without CHANGEFEED returns an empty result, not an error", async () => {
 	await withServer(async (server) => {
 		const { db } = await rootClient(server);

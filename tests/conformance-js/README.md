@@ -208,6 +208,23 @@ landed on `main` but is not yet in a stable release.
     `Accept: application/json`; and a WebSocket parse error fails the whole
     request as a top-level `-32000` while runtime errors arrive as per-statement
     `ERR` envelopes (`errors`).
+  - Time-travel: `SELECT … VERSION` works on a versioned datastore
+    (`memory?versioned=true`) without a changefeed; versioned reads resolve
+    against commit timestamps, so a boundary-exact `time::now()` capture is racy
+    (bracket writes with a small sleep). `VERSION` on a subquery source is
+    rejected — it must be placed inside the subquery (`versioning`).
+  - `FROM ONLY` collapses the result to a bare object/scalar across
+    SELECT/CREATE/UPDATE/DELETE (and `EXPLAIN` returns a bare plan-object the
+    same way); an `UPDATE` on a missing id returns `[]` only when the table
+    already exists, otherwise it errors "table does not exist" (`surrealql`).
+  - `CHANGEFEED … INCLUDE ORIGINAL`: an UPDATE entry carries the after-image
+    under `current` plus an `update` array of REVERSE JSON-patch ops (applying
+    them to `current` reconstructs the prior value); a DELETE carries the
+    before-image verbatim under `delete.original`; a CREATE is still a plain
+    `{ update: { …after } }` (`changefeeds`).
+  - `search::offsets(n)` decodes as an object keyed by the indexed FIELD
+    position (not the `@n@` matchref) — `"0"` for a single-field FULLTEXT index
+    — each value an array of `{s, e}` char spans sorted by start (`search`).
 
 ## Scope grown so far / next
 
@@ -310,6 +327,14 @@ landed on `main` but is not yet in a stable release.
       and the anonymous `/metrics` scrape (`http`)
 - [x] Cross-transport error-shape consistency across WS-RPC, `/sql`, GraphQL,
       and `/gql` (`errors`)
+- [x] Time-travel: `SELECT … VERSION` on a versioned datastore, including the
+      subquery-source rejection (`versioning`)
+- [x] Query surface: `FROM ONLY` + `SingleOnlyOutput`, CREATE/UPDATE/UPSERT
+      id-existence semantics, query `TIMEOUT`, and `EXPLAIN` plan decode
+      (`surrealql`)
+- [x] `CHANGEFEED … INCLUDE ORIGINAL` before-image / reverse-patch feed shape
+      (`changefeeds`)
+- [x] `search::offsets` wire shape and bound-parameter `<|K|>` KNN (`search`)
 
 ### Rust → JS test migration
 

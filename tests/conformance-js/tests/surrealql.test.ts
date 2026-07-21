@@ -654,3 +654,175 @@ test("bidirectional traversal reaches neighbours on either side", async () => {
 		await db.close();
 	});
 });
+
+test("FROM ONLY collapses a single row to a bare value; >1 row without LIMIT 1 errors", async () => {
+	await withServer(async (server) => {
+		const { db } = await rootClient(server);
+		await db.query("CREATE only_t:a SET n = 1; CREATE only_t:b SET n = 2;").collect();
+
+		// A single-row target returns the record itself, not a 1-element array.
+		const [one] = (await db.query("SELECT * FROM ONLY only_t:a").json()) as [
+			{ id: string; n: number },
+		];
+		expect(Array.isArray(one)).toBe(false);
+		expect(one).toEqual({ id: "only_t:a", n: 1 });
+
+		// A LIMIT 1 over a many-row table is also collapsed to a bare record.
+		const [limited] = (await db.query("SELECT * FROM ONLY only_t LIMIT 1").json()) as [
+			{ id: string; n: number },
+		];
+		expect(Array.isArray(limited)).toBe(false);
+		expect(limited.id).toMatch(/^only_t:/);
+
+		// CREATE/UPDATE/DELETE ONLY likewise yield the bare affected record.
+		const [created] = (await db.query("CREATE ONLY only_t:c SET n = 3").json()) as [
+			{ id: string; n: number },
+		];
+		expect(created).toEqual({ id: "only_t:c", n: 3 });
+		const [updated] = (await db.query("UPDATE ONLY only_t:c SET n = 4").json()) as [
+			{ id: string; n: number },
+		];
+		expect(updated).toEqual({ id: "only_t:c", n: 4 });
+		const [deleted] = (await db.query("DELETE ONLY only_t:c RETURN BEFORE").json()) as [
+			{ id: string; n: number },
+		];
+		expect(deleted).toEqual({ id: "only_t:c", n: 4 });
+
+		// More than one matched row without a LIMIT 1 cannot collapse: the
+		// statement is rejected with the single-output error.
+		const boom = db
+			.query("SELECT * FROM ONLY only_t")
+			.collect()
+			.then(() => null)
+			.catch((e) => e as Error);
+		const err = await boom;
+		expect(err).toBeInstanceOf(Error);
+		expect((err as Error).message).toContain(
+			"Expected a single result output when using the ONLY keyword",
+		);
+
+		await db.close();
+	});
+});
+
+test("CREATE / UPDATE / UPSERT differ on id existence", async () => {
+	await withServer(async (server) => {
+		const { db } = await rootClient(server);
+
+		// CREATE materialises a new id and returns it as a 1-element array.
+		const [created] = (await db.query("CREATE thing:1 SET n = 1").json()) as [
+			Array<{ id: string; n: number }>,
+		];
+		expect(created).toEqual([{ id: "thing:1", n: 1 }]);
+
+		// CREATE on an id that already exists is rejected; the record is unchanged.
+		const boom = db
+			.query("CREATE thing:1 SET n = 99")
+			.collect()
+			.then(() => null)
+			.catch((e) => e as Error);
+		const err = await boom;
+		expect(err).toBeInstanceOf(Error);
+		expect((err as Error).message).toContain("Database record `thing:1` already exists");
+
+		// UPDATE on a missing id (in a table that already exists) is a no-op:
+		// it returns an empty array and creates nothing.
+		const [missed] = (await db.query("UPDATE thing:absent SET n = 2").json()) as [unknown[]];
+		expect(missed).toEqual([]);
+		const [ids] = (await db.query("SELECT VALUE id FROM thing").json()) as [string[]];
+		expect(ids.map(String)).toEqual(["thing:1"]);
+
+		// UPSERT creates a missing id…
+		const [made] = (await db.query("UPSERT thing:2 SET n = 5").json()) as [
+			Array<{ id: string; n: number }>,
+		];
+		expect(made).toEqual([{ id: "thing:2", n: 5 }]);
+		// …and updates it in place on a second call.
+		const [again] = (await db.query("UPSERT thing:2 SET n = 6").json()) as [
+			Array<{ id: string; n: number }>,
+		];
+		expect(again).toEqual([{ id: "thing:2", n: 6 }]);
+
+		await db.close();
+	});
+});
+
+test("statement-level TIMEOUT aborts a slow scan with the timeout error", async () => {
+	await withServer(async (server) => {
+		const { db } = await rootClient(server);
+		// Enough rows that any per-row work exceeds a 1ns budget.
+		await db.query("FOR $i IN 0..2000 { CREATE big SET n = $i }").collect();
+
+		// TIMEOUT 1ns trips before the scan can complete; the error carries the
+		// exact configured duration.
+		const boom = db
+			.query("SELECT * FROM big WHERE n >= 0 ORDER BY n TIMEOUT 1ns")
+			.collect()
+			.then(() => null)
+			.catch((e) => e as Error);
+		const err = await boom;
+		expect(err).toBeInstanceOf(Error);
+		expect((err as Error).message).toContain(
+			"The query was not executed because it exceeded the timeout: 1ns",
+		);
+
+		await db.close();
+	});
+});
+
+test("EXPLAIN and EXPLAIN FULL return a plan tree that decodes over the wire", async () => {
+	await withServer(async (server) => {
+		const { db } = await rootClient(server);
+		await db.query("CREATE person:a SET name = 'A'; CREATE person:b SET name = 'B';").collect();
+
+		// EXPLAIN collapses to a single plan-tree root (a bare object, not an
+		// array): a projecting node over a table-scan child, each carrying its
+		// operator, execution context, and attributes.
+		const [root] = (await db.query("SELECT * FROM person EXPLAIN").json()) as [
+			{
+				operator: string;
+				context: string;
+				attributes: Record<string, unknown>;
+				children?: Array<{ operator: string; attributes: Record<string, unknown> }>;
+			},
+		];
+		expect(Array.isArray(root)).toBe(false);
+		expect(root.operator).toBe("SelectProject");
+		expect(root.context).toBe("Db");
+		expect(root.attributes.projections).toBe("*");
+		expect(root.children).toHaveLength(1);
+		expect(root.children![0].operator).toBe("TableScan");
+		expect(root.children![0].attributes.table).toBe("person");
+
+		// EXPLAIN FULL runs the plan and annotates each node with metrics.
+		const [full] = (await db.query("SELECT * FROM person EXPLAIN FULL").json()) as [
+			{
+				operator: string;
+				total_rows?: number;
+				metrics?: { output_rows: number };
+				children?: Array<{ metrics?: { output_rows: number } }>;
+			},
+		];
+		expect(full.operator).toBe("SelectProject");
+		expect(full.total_rows).toBe(2);
+		expect(full.metrics?.output_rows).toBe(2);
+		expect(full.children![0].metrics?.output_rows).toBe(2);
+
+		// A WHERE that hits an index reports an IndexScan child in place of the
+		// table scan, naming the index and its access predicate.
+		await db.query("DEFINE INDEX byname ON person FIELDS name").collect();
+		const [indexed] = (await db
+			.query("SELECT * FROM person WHERE name = 'A' EXPLAIN")
+			.json()) as [
+			{
+				children?: Array<{ operator: string; attributes: Record<string, unknown> }>;
+			},
+		];
+		const child = indexed.children![0];
+		expect(child.operator).toBe("IndexScan");
+		expect(child.attributes.index).toBe("byname");
+		expect(child.attributes.access).toBe("= 'A'");
+
+		await db.close();
+	});
+});

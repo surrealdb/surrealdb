@@ -145,6 +145,53 @@ test("search::highlight wraps the matched terms in the surrounding markers", asy
 	});
 }, 30000);
 
+test("search::offsets(n) returns matched-term char spans keyed by the indexed field position", async () => {
+	await withServer(async (server) => {
+		const { db } = await rootClient(server);
+		await db
+			.query(
+				`CREATE book:1 SET title = 'The Rust Programming Language and more rust';
+				 DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase;
+				 DEFINE INDEX ft ON TABLE book FIELDS title FULLTEXT ANALYZER simple BM25 HIGHLIGHTS;`,
+			)
+			.collect();
+
+		// The value decodes over the wire as an OBJECT, not a flat span array. Its
+		// keys are numeric strings for the position of the matched field within the
+		// index's FIELDS list — a single-field FULLTEXT index always keys under "0",
+		// independent of the @1@ matchref. Each value is the list of {s, e} half-open
+		// char offsets of every occurrence of the matched term, ordered by start.
+		const [single] = (await db
+			.query("SELECT VALUE search::offsets(1) FROM book WHERE title @1@ 'rust'")
+			.json()) as [Array<Record<string, Array<{ s: number; e: number }>>>];
+		expect(single).toEqual([
+			{
+				"0": [
+					{ s: 4, e: 8 },
+					{ s: 39, e: 43 },
+				],
+			},
+		]);
+
+		// A multi-term query collapses every matched term's occurrences into the same
+		// field-keyed bucket, merged and sorted by start position.
+		const [multi] = (await db
+			.query("SELECT VALUE search::offsets(1) FROM book WHERE title @1@ 'rust programming'")
+			.json()) as [Array<Record<string, Array<{ s: number; e: number }>>>];
+		expect(multi).toEqual([
+			{
+				"0": [
+					{ s: 4, e: 8 },
+					{ s: 9, e: 20 },
+					{ s: 39, e: 43 },
+				],
+			},
+		]);
+
+		await db.close();
+	});
+}, 30000);
+
 // --- Vector KNN (HNSW) ------------------------------------------------------
 
 test("HNSW <|K|> returns the K nearest neighbours in ascending-distance order", async () => {
@@ -200,6 +247,42 @@ test("vector::distance::euclidean reads the exact distance to the query vector",
 		expect(rows[0].dist).toBeCloseTo(0, 5);
 		// [3,4,0] is at euclidean distance 5 from the origin.
 		expect(rows[1].dist).toBeCloseTo(5, 5);
+
+		await db.close();
+	});
+}, 30000);
+
+test("KNN <|K|> with a bound-param query vector matches the inline float-array literal", async () => {
+	await withServer(async (server) => {
+		const { db } = await rootClient(server);
+		await db
+			.query(
+				`CREATE pt:1 SET embedding = [0.1, 0.1, 0.1];
+				 CREATE pt:2 SET embedding = [0.2, 0.2, 0.2];
+				 CREATE pt:3 SET embedding = [0.9, 0.9, 0.9];
+				 CREATE pt:4 SET embedding = [5.0, 5.0, 5.0];
+				 DEFINE INDEX vec ON TABLE pt FIELDS embedding HNSW DIMENSION 3 DIST EUCLIDEAN;`,
+			)
+			.collect();
+
+		const KNN = `SELECT VALUE { id: id, dist: vector::distance::knn() }
+			 FROM pt WHERE embedding <|2,100|>`;
+
+		// Inline float-array literal drives the KNN operator directly.
+		const [inline] = (await db
+			.query(`${KNN} [0.1, 0.1, 0.1] ORDER BY dist`)
+			.json()) as [Array<{ id: string; dist: number }>];
+
+		// A JS number[] bound as a query parameter resolves to the same query vector,
+		// so the K=2 neighbours and their distances are identical to the literal form.
+		const [bound] = (await db
+			.query(`${KNN} $q ORDER BY dist`, { q: [0.1, 0.1, 0.1] })
+			.json()) as [Array<{ id: string; dist: number }>];
+
+		expect(inline.map((r) => String(r.id))).toEqual(["pt:1", "pt:2"]);
+		expect(bound.map((r) => String(r.id))).toEqual(inline.map((r) => String(r.id)));
+		expect(bound.map((r) => r.dist)).toEqual(inline.map((r) => r.dist));
+		expect(bound[0].dist).toBeCloseTo(0, 5);
 
 		await db.close();
 	});
