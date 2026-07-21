@@ -45,4 +45,4 @@ pub use events::{
 pub use fan_out::FanOutObserver;
 pub use observer::{ExecutionObserver, NoopObserver};
 pub use process::{ProcessSnapshot, process_snapshot, refresh_process_snapshot};
-pub use provider::{ObservabilityProvider, requirements};
+pub use provider::ObservabilityProvider;

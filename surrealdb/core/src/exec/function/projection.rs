@@ -17,7 +17,7 @@ use anyhow::Result;
 
 use super::Signature;
 use crate::exec::physical_expr::EvalContext;
-use crate::exec::{BoxFut, ContextLevel, SendSyncRequirement};
+use crate::exec::{BoxFut, ContextLevel};
 use crate::expr::Kind;
 use crate::expr::idiom::Idiom;
 use crate::val::Value;
@@ -29,7 +29,7 @@ use crate::val::Value;
 ///
 /// For example, `SELECT type::field("name") FROM person` produces `{ name: "value" }`
 /// rather than `{ "type::field": "value" }`.
-pub trait ProjectionFunction: SendSyncRequirement + Debug {
+pub trait ProjectionFunction: Send + Sync + Debug {
 	/// The fully qualified function name (e.g., "type::field", "type::fields")
 	fn name(&self) -> &'static str;
 

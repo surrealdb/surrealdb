@@ -4,10 +4,11 @@
 use std::any::{Any, TypeId};
 use std::sync::Arc;
 
+use common::future::BoxFut;
 pub use requirements::TransactionBuilderRequirements;
 
 use crate::TransactionType;
-use crate::api::{BoxFut, Transactable};
+use crate::api::Transactable;
 use crate::err::Result;
 
 /// Represents a collection of metrics for a specific datastore flavor.

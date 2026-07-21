@@ -12,7 +12,7 @@ alwaysApply: true
 
 ## 2. Async and concurrency
 - Keep long-running or blocking work off async tasks; push blocking work to tokios blocking threadpool or `affinitypool` when needed
-- Maintain `#[cfg_attr]` patterns for WASM compatibility (e.g., `async_trait(?Send)`)
+- WASM compatibility: wasm cfgs cover executor mechanics only (e.g. `spawn_local`). Gate browser-wasm-only mechanisms on `all(target_arch = "wasm32", any(target_os = "unknown", target_os = "none"), not(target_feature = "atomics")`, not `target_family = "wasm"`
 - Avoid spawning background tasks without cancellation paths; tie task lifetime to owners
 
 ## 3. Tracing and logging

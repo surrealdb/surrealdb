@@ -33,8 +33,8 @@ pub use projection::ProjectionFunction;
 pub use registry::FunctionRegistry;
 pub use signature::Signature;
 
+use crate::exec::BoxFut;
 use crate::exec::physical_expr::EvalContext;
-use crate::exec::{BoxFut, SendSyncRequirement};
 use crate::expr::Kind;
 use crate::val::Value;
 
@@ -81,7 +81,7 @@ pub(crate) fn check_arity(
 /// - Pure: operate only on their arguments with no side effects
 /// - Context-aware: need access to session/database state
 /// - Async: perform I/O operations
-pub trait ScalarFunction: SendSyncRequirement + Debug {
+pub trait ScalarFunction: Send + Sync + Debug {
 	/// The fully qualified function name (e.g., "math::abs", "string::len")
 	fn name(&self) -> &'static str;
 

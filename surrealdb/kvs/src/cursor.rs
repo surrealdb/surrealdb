@@ -13,8 +13,10 @@
 //! path. The cursor traits, batch/visitor types, and `ScanChunkStats` they build
 //! on are defined alongside the transaction API in [`super::api`].
 
+use common::future::BoxFut;
+
 use crate::api::{
-	BoxFut, KeySpan, KeyValSpan, KeyVisitor, KeysBatch, KeysResult, ScanChunkStats, ScanCursorKeys,
+	KeySpan, KeyValSpan, KeyVisitor, KeysBatch, KeysResult, ScanChunkStats, ScanCursorKeys,
 	ScanCursorVals, ScanResult, Transactable, ValVisitor, ValsBatch,
 };
 use crate::err::Result;

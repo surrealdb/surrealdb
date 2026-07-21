@@ -20,6 +20,7 @@ categories.workspace = true
 test-inc-timestamp = []
 
 [dependencies]
+common.workspace = true
 surrealdb-cnf.workspace = true
 
 chrono = { workspace = true }

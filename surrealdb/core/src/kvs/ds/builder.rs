@@ -374,8 +374,7 @@ mod tests {
 	use crate::kvs::api::BoxFut;
 	use crate::kvs::{
 		Metrics, Transactable, TransactionBuilder, TransactionBuilderFactory,
-		TransactionBuilderFactoryRequirements, TransactionBuilderParts,
-		TransactionBuilderRequirements,
+		TransactionBuilderParts, TransactionBuilderRequirements,
 	};
 
 	#[derive(Clone)]
@@ -394,12 +393,10 @@ mod tests {
 			_global: bool,
 			_readonly: bool,
 			_config: BucketConfig,
-		) -> Pin<Box<dyn Future<Output = Result<Arc<dyn ObjectStore>>> + 'a + Send + Sync>> {
+		) -> Pin<Box<dyn Future<Output = Result<Arc<dyn ObjectStore>>> + 'a + Send>> {
 			Box::pin(async { bail!("test bucket connections are not used") })
 		}
 	}
-
-	impl TransactionBuilderFactoryRequirements for TestComposer {}
 
 	impl TransactionBuilderFactory for TestComposer {
 		type RouterState = TestRouterState;

@@ -5,20 +5,10 @@
 //! `Uint32Array` buffers to keep the number of wasm<->js crossings and
 //! marshalled objects to a minimum.
 
+use std::future::IntoFuture;
+
 use js_sys::{Uint8Array, Uint32Array};
 use wasm_bindgen::prelude::*;
-
-use crate::send_future::SendFuture;
-
-/// Marks a JS handle as `Send + Sync`.
-///
-/// SAFETY: wasm32-unknown-unknown without the `atomics` target feature is
-/// single-threaded; every wrapped handle is created and used on the one and
-/// only thread, so no data race can occur.
-struct SendJs<T>(T);
-
-unsafe impl<T> Send for SendJs<T> {}
-unsafe impl<T> Sync for SendJs<T> {}
 
 mod bindings {
 	use js_sys::{JsString, Promise, Uint8Array, Uint32Array};
@@ -28,7 +18,7 @@ mod bindings {
 	extern "C" {
 		pub fn to_string(name: JsValue) -> JsString;
 
-		pub fn open(name: &str) -> Promise;
+		pub fn open(name: &str) -> Promise<Db>;
 
 		pub type Db;
 
@@ -41,10 +31,10 @@ mod bindings {
 		pub type Tx;
 
 		#[wasm_bindgen(method)]
-		pub fn read(this: &Tx, key: &[u8]) -> Promise;
+		pub fn read(this: &Tx, key: &[u8]) -> Promise<Option<Uint8Array>>;
 
 		#[wasm_bindgen(method)]
-		pub fn has(this: &Tx, key: &[u8]) -> Promise;
+		pub fn has(this: &Tx, key: &[u8]) -> Promise<bool>;
 
 		#[wasm_bindgen(method)]
 		pub fn scan(
@@ -54,7 +44,7 @@ mod bindings {
 			reverse: bool,
 			limit: u32,
 			keys_only: bool,
-		) -> Promise;
+		) -> Promise<ScanBatch>;
 
 		#[wasm_bindgen(method)]
 		pub fn commit(
@@ -66,7 +56,7 @@ mod bindings {
 			written: &[u8],
 			written_slices: &[u32],
 			flags: &[u8],
-		) -> Promise;
+		) -> Promise<bool>;
 	}
 
 	// The object returned by `Tx::scan`: entry bytes concatenated into single
@@ -116,29 +106,29 @@ pub struct ScanBatch {
 
 /// An open IndexedDB database.
 pub struct Db {
-	inner: SendJs<bindings::Db>,
+	inner: bindings::Db,
 }
 
 impl Db {
 	/// Open (creating if necessary) the IndexedDB database with the given
 	/// name.
 	pub async fn open(name: &str) -> Result<Db, JsValue> {
-		let val = SendFuture::new(bindings::open(name)).await?;
+		let val = common::future::assert_send(bindings::open(name).into_future()).await?;
 		Ok(Db {
-			inner: SendJs(val.unchecked_into()),
+			inner: val.unchecked_into(),
 		})
 	}
 
 	/// Begin a new transaction handle.
 	pub fn begin(&self) -> Result<Tx, JsValue> {
 		Ok(Tx {
-			inner: SendJs(self.inner.0.begin()?),
+			inner: self.inner.begin()?,
 		})
 	}
 
 	/// Close the database handle.
 	pub fn close(&self) -> Result<(), JsValue> {
-		self.inner.0.close()
+		self.inner.close()
 	}
 }
 
@@ -149,27 +139,22 @@ impl Db {
 /// microtask, so each read opens a short-lived transaction and consistency is
 /// enforced by validating the read-set inside [`Tx::commit`].
 pub struct Tx {
-	inner: SendJs<bindings::Tx>,
+	inner: bindings::Tx,
 }
 
 impl Tx {
 	/// Read a single key.
 	pub async fn read(&self, key: &[u8]) -> Result<Option<Vec<u8>>, JsValue> {
-		let val = SendFuture::new(self.inner.0.read(key)).await?;
-		if val.is_null() || val.is_undefined() {
-			Ok(None)
+		if let Some(val) = common::future::assert_send(self.inner.read(key).into_future()).await? {
+			Ok(Some(val.to_vec()))
 		} else {
-			Ok(Some(val.unchecked_into::<Uint8Array>().to_vec()))
+			Ok(None)
 		}
 	}
 
 	/// Check whether a key exists without fetching its value.
 	pub async fn has(&self, key: &[u8]) -> Result<bool, JsValue> {
-		let val = SendFuture::new(self.inner.0.has(key)).await?;
-		// A non-boolean can only mean a driver bug: surface it instead of
-		// silently treating the key as absent.
-		val.as_bool()
-			.ok_or_else(|| JsValue::from_str("indexeddb driver returned a non-boolean from has()"))
+		common::future::assert_send(self.inner.has(key).into_future()).await
 	}
 
 	/// Fetch up to `limit` entries in `start..end` (start inclusive, end
@@ -183,7 +168,10 @@ impl Tx {
 		limit: u32,
 		keys_only: bool,
 	) -> Result<ScanBatch, JsValue> {
-		let val = SendFuture::new(self.inner.0.scan(start, end, reverse, limit, keys_only)).await?;
+		let val = common::future::assert_send(
+			self.inner.scan(start, end, reverse, limit, keys_only).into_future(),
+		)
+		.await?;
 		let batch: bindings::ScanBatch = val.unchecked_into();
 		let keys = split_packed(&batch.keys(), &batch.key_ends());
 		let values = match (batch.values(), batch.value_ends()) {
@@ -217,28 +205,12 @@ impl Tx {
 		written_slices: &[u32],
 		flags: &[u8],
 	) -> Result<bool, JsValue> {
-		let val = SendFuture::new(self.inner.0.commit(
-			keys,
-			key_slices,
-			read,
-			read_slices,
-			written,
-			written_slices,
-			flags,
-		))
-		.await?;
-		// Anything but the two defined return codes is a driver bug: surface
-		// it instead of misreporting it as a (retryable) conflict.
-		let code = val.as_f64();
-		if code == Some(0.0) {
-			Ok(true)
-		} else if code == Some(1.0) {
-			Ok(false)
-		} else {
-			Err(JsValue::from_str(
-				"indexeddb driver returned an unexpected result code from commit()",
-			))
-		}
+		common::future::assert_send(
+			self.inner
+				.commit(keys, key_slices, read, read_slices, written, written_slices, flags)
+				.into_future(),
+		)
+		.await
 	}
 }
 

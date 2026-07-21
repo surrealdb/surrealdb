@@ -67,94 +67,83 @@ async fn request(
 	method: Method,
 	uri: String,
 	body: Option<Value>,
-	opts: impl Into<Object>,
+	opts: Object,
 ) -> Result<Value> {
-	// Check if the URI is valid and allowed
-	let url = Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.clone()))?;
-	ctx.check_allowed_net(&url).await?;
+	// On browser WASM the reqwest futures and response held across the awaits
+	// below are not `Send`; the wrapper asserts `Send` for the whole block.
+	common::future::assert_send(async move {
+		// Check if the URI is valid and allowed
+		let url = Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.clone()))?;
+		ctx.check_allowed_net(&url).await?;
 
-	let body = match body {
-		Some(v) => Some(crate::val::convert_value_to_public_value(v)?),
-		None => None,
-	};
+		let body = match body {
+			Some(v) => Some(crate::val::convert_value_to_public_value(v)?),
+			None => None,
+		};
 
-	let is_head = matches!(method, Method::HEAD);
+		let is_head = matches!(method, Method::HEAD);
 
-	let cli = ctx.http_client();
-	// Start a new HTTP request using the shared client
-	let mut req = cli.request(method.clone(), url);
-	// Add specified header values
-	for (k, v) in opts.into().iter() {
-		req = req.header(k.as_str(), v.to_raw_string());
-	}
-
-	if let Some(b) = body {
-		// Submit the request body
-		req = encode_body(req, b);
-	}
-
-	// Send the request and wait
-	let res = match ctx.timeout() {
-		#[cfg(not(target_family = "wasm"))]
-		Some(d) => req.timeout(d).send().await.map_err(Error::from)?,
-		_ => req.send().await.map_err(Error::from)?,
-	};
-
-	if is_head {
-		// Check the response status
-		match res.error_for_status() {
-			Ok(_) => Ok(Value::None),
-			Err(err) => match err.status() {
-				Some(s) => bail!(Error::Http(format!(
-					"{} {}",
-					s.as_u16(),
-					s.canonical_reason().unwrap_or_default(),
-				))),
-				None => bail!(Error::Http(err.to_string())),
-			},
+		let cli = ctx.http_client();
+		// Start a new HTTP request using the shared client
+		let mut req = cli.request(method, url);
+		// Add specified header values
+		for (k, v) in opts.iter() {
+			req = req.header(k.as_str(), v.to_raw_string());
 		}
-	} else {
-		// Receive the response as a value
-		let val = decode_response(res).await?;
-		Ok(convert_public_value_to_internal(val))
-	}
+
+		if let Some(b) = body {
+			// Submit the request body
+			req = encode_body(req, b);
+		}
+
+		// Send the request and wait
+		let res = match ctx.timeout() {
+			Some(d) => req.timeout(d).send().await.map_err(Error::from)?,
+			_ => req.send().await.map_err(Error::from)?,
+		};
+
+		if is_head {
+			// Check the response status
+			match res.error_for_status() {
+				Ok(_) => Ok(Value::None),
+				Err(err) => match err.status() {
+					Some(s) => bail!(Error::Http(format!(
+						"{} {}",
+						s.as_u16(),
+						s.canonical_reason().unwrap_or_default(),
+					))),
+					None => bail!(Error::Http(err.to_string())),
+				},
+			}
+		} else {
+			// Receive the response as a value
+			let val = decode_response(res).await?;
+			Ok(convert_public_value_to_internal(val))
+		}
+	})
+	.await
 }
 
-pub async fn head(ctx: &FrozenContext, uri: String, opts: impl Into<Object>) -> Result<Value> {
+pub async fn head(ctx: &FrozenContext, uri: String, opts: Object) -> Result<Value> {
 	request(ctx, Method::HEAD, uri, None, opts).await
 }
 
-pub async fn get(ctx: &FrozenContext, uri: String, opts: impl Into<Object>) -> Result<Value> {
+pub async fn get(ctx: &FrozenContext, uri: String, opts: Object) -> Result<Value> {
 	request(ctx, Method::GET, uri, None, opts).await
 }
 
-pub async fn put(
-	ctx: &FrozenContext,
-	uri: String,
-	body: Value,
-	opts: impl Into<Object>,
-) -> Result<Value> {
+pub async fn put(ctx: &FrozenContext, uri: String, body: Value, opts: Object) -> Result<Value> {
 	request(ctx, Method::PUT, uri, Some(body), opts).await
 }
 
-pub async fn post(
-	ctx: &FrozenContext,
-	uri: String,
-	body: Value,
-	opts: impl Into<Object>,
-) -> Result<Value> {
+pub async fn post(ctx: &FrozenContext, uri: String, body: Value, opts: Object) -> Result<Value> {
 	request(ctx, Method::POST, uri, Some(body), opts).await
 }
 
-pub async fn patch(
-	ctx: &FrozenContext,
-	uri: String,
-	body: Value,
-	opts: impl Into<Object>,
-) -> Result<Value> {
+pub async fn patch(ctx: &FrozenContext, uri: String, body: Value, opts: Object) -> Result<Value> {
 	request(ctx, Method::PATCH, uri, Some(body), opts).await
 }
 
-pub async fn delete(ctx: &FrozenContext, uri: String, opts: impl Into<Object>) -> Result<Value> {
+pub async fn delete(ctx: &FrozenContext, uri: String, opts: Object) -> Result<Value> {
 	request(ctx, Method::DELETE, uri, None, opts).await
 }

@@ -8,9 +8,7 @@ use surrealdb_types::ToSql;
 
 use crate::dbs::Capabilities;
 use crate::exec::context::SessionInfo;
-use crate::exec::{
-	AccessMode, BoxFut, ContextLevel, ExecOperator, ExecutionContext, SendSyncRequirement,
-};
+use crate::exec::{AccessMode, BoxFut, ContextLevel, ExecOperator, ExecutionContext};
 use crate::expr::FlowResult;
 use crate::expr::idiom::Idiom;
 use crate::kvs::Transaction;
@@ -273,7 +271,7 @@ impl<'a> EvalContext<'a> {
 
 type ProjectionEvalFut<'a> = BoxFut<'a, FlowResult<Option<Vec<(Idiom, Value)>>>>;
 
-pub trait PhysicalExpr: ToSql + SendSyncRequirement + Debug + 'static {
+pub trait PhysicalExpr: ToSql + Send + Sync + Debug + 'static {
 	fn name(&self) -> &'static str;
 
 	/// The minimum context level required to evaluate this expression.

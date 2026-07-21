@@ -82,7 +82,7 @@ pub async fn head(
 ) -> Result<Value> {
 	let uri = try_as_uri("http::head", uri)?;
 	let opts = try_as_opts("http::head", "The second argument should be an object.", opts)?;
-	crate::fnc::util::http::head(ctx, uri, opts).await
+	crate::fnc::util::http::head(ctx, uri, opts.unwrap_or_default()).await
 }
 
 #[cfg(feature = "http")]
@@ -92,7 +92,7 @@ pub async fn get(
 ) -> Result<Value> {
 	let uri = try_as_uri("http::get", uri)?;
 	let opts = try_as_opts("http::get", "The second argument should be an object.", opts)?;
-	crate::fnc::util::http::get(ctx, uri, opts).await
+	crate::fnc::util::http::get(ctx, uri, opts.unwrap_or_default()).await
 }
 
 #[cfg(feature = "http")]
@@ -102,7 +102,8 @@ pub async fn put(
 ) -> Result<Value> {
 	let uri = try_as_uri("http::put", uri)?;
 	let opts = try_as_opts("http::put", "The third argument should be an object.", opts)?;
-	crate::fnc::util::http::put(ctx, uri, body.unwrap_or(Value::Null), opts).await
+	crate::fnc::util::http::put(ctx, uri, body.unwrap_or(Value::Null), opts.unwrap_or_default())
+		.await
 }
 
 #[cfg(feature = "http")]
@@ -112,7 +113,8 @@ pub async fn post(
 ) -> Result<Value> {
 	let uri = try_as_uri("http::post", uri)?;
 	let opts = try_as_opts("http::post", "The third argument should be an object.", opts)?;
-	crate::fnc::util::http::post(ctx, uri, body.unwrap_or(Value::Null), opts).await
+	crate::fnc::util::http::post(ctx, uri, body.unwrap_or(Value::Null), opts.unwrap_or_default())
+		.await
 }
 
 #[cfg(feature = "http")]
@@ -122,7 +124,8 @@ pub async fn patch(
 ) -> Result<Value> {
 	let uri = try_as_uri("http::patch", uri)?;
 	let opts = try_as_opts("http::patch", "The third argument should be an object.", opts)?;
-	crate::fnc::util::http::patch(ctx, uri, body.unwrap_or(Value::Null), opts).await
+	crate::fnc::util::http::patch(ctx, uri, body.unwrap_or(Value::Null), opts.unwrap_or_default())
+		.await
 }
 
 #[cfg(feature = "http")]
@@ -132,5 +135,5 @@ pub async fn delete(
 ) -> Result<Value> {
 	let uri = try_as_uri("http::delete", uri)?;
 	let opts = try_as_opts("http::delete", "The second argument should be an object.", opts)?;
-	crate::fnc::util::http::delete(ctx, uri, opts).await
+	crate::fnc::util::http::delete(ctx, uri, opts.unwrap_or_default()).await
 }

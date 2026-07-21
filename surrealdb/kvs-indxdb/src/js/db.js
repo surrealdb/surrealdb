@@ -283,9 +283,9 @@ export class Tx {
 		}
 
 		const applied = await new Promise((resolve, reject) => {
-			tx.oncomplete = () => resolve(0);
+			tx.oncomplete = () => resolve(true);
 			tx.onabort = () =>
-				conflict ? resolve(1) : reject(tx.error ?? new Error("transaction aborted"));
+				conflict ? resolve(false) : reject(tx.error ?? new Error("transaction aborted"));
 			// Swallow per-request error events (an abort after a failed
 			// validation errors every later queued request) without
 			// cancelling their default action, so a genuine request failure

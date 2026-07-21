@@ -1,9 +1,7 @@
 //! This module defines the API for a transaction in a key-value store.
 #![warn(clippy::missing_docs_in_private_items)]
 
-use std::future::Future;
-use std::pin::Pin;
-
+pub use common::future::BoxFut;
 use tracing::instrument;
 
 use crate::consts::{COUNT_BATCH_SIZE, NORMAL_BATCH_SIZE};
@@ -14,10 +12,6 @@ use crate::timestamp::{
 };
 use crate::types::{Key, KeyRange};
 use crate::{Direction, Val};
-
-/// A boxed future returned by `Transactable` / `ScanCursorKeys` /
-/// `ScanCursorVals` trait methods.
-pub type BoxFut<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// The result of a [`Transactable::keys`] or [`Transactable::keysr`] operation.
 ///

@@ -44,29 +44,8 @@ use crate::err::Error;
 pub(crate) use crate::expr::{ControlFlowExt, FlowResult, FlowResultExt};
 use crate::val::Value;
 
-// =========================================================================
-// WASM-compat helpers: conditional Send/Sync bounds
-// =========================================================================
-
-/// Conditional `Send + Sync` requirement.
-///
-/// On non-WASM targets this requires `Send + Sync`; on WASM (single-threaded)
-/// it is a blanket trait satisfied by every type.
-#[cfg(target_family = "wasm")]
-pub(crate) trait SendSyncRequirement {}
-#[cfg(target_family = "wasm")]
-impl<T> SendSyncRequirement for T {}
-
-#[cfg(not(target_family = "wasm"))]
-pub(crate) trait SendSyncRequirement: Send + Sync {}
-#[cfg(not(target_family = "wasm"))]
-impl<T: Send + Sync> SendSyncRequirement for T {}
-
-/// A boxed future that is `Send` only on non-WASM targets.
-#[cfg(target_family = "wasm")]
-pub(crate) type BoxFut<'a, T> = Pin<Box<dyn std::future::Future<Output = T> + 'a>>;
-/// A boxed future that is `Send` only on non-WASM targets.
-#[cfg(not(target_family = "wasm"))]
+/// A boxed `Send` future, used at trait boundaries to keep async state
+/// machines from inflating the parent future.
 pub(crate) type BoxFut<'a, T> = Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
 
 pub(crate) mod access_mode;
@@ -118,9 +97,6 @@ pub struct ValueBatch {
 	pub(crate) values: Vec<Value>,
 }
 
-#[cfg(target_family = "wasm")]
-pub(crate) type ValueBatchStream = Pin<Box<dyn Stream<Item = FlowResult<ValueBatch>>>>;
-#[cfg(not(target_family = "wasm"))]
 pub(crate) type ValueBatchStream = Pin<Box<dyn Stream<Item = FlowResult<ValueBatch>> + Send>>;
 
 /// A trait for execution plans that can be executed and produce a stream of value batches.
@@ -128,7 +104,7 @@ pub(crate) type ValueBatchStream = Pin<Box<dyn Stream<Item = FlowResult<ValueBat
 /// Execution plans form a tree structure where each node declares its minimum required
 /// context level via `required_context()`. The executor validates that the current session
 /// meets these requirements before execution begins.
-pub(crate) trait ExecOperator: Debug + SendSyncRequirement {
+pub(crate) trait ExecOperator: Debug + Send + Sync {
 	fn name(&self) -> &'static str;
 
 	fn attrs(&self) -> Vec<(String, String)> {

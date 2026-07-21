@@ -45,7 +45,7 @@ pub mod tls;
 use std::future::Future;
 use std::process::ExitCode;
 
-pub use cli::{Config, ConfigCheck, ConfigCheckRequirements};
+pub use cli::{Config, ConfigCheck};
 /// Re-export `RouterFactory` for convenience so embedders can `use
 /// surrealdb_server::RouterFactory`.
 #[doc(inline)]

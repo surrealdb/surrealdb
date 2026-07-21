@@ -1391,20 +1391,6 @@ user-id = 1
 user-login = "alexcrichton"
 user-name = "Alex Crichton"
 
-[[publisher.wasm-bindgen-test]]
-version = "0.3.49"
-when = "2024-12-07"
-user-id = 1
-user-login = "alexcrichton"
-user-name = "Alex Crichton"
-
-[[publisher.wasm-bindgen-test-macro]]
-version = "0.3.49"
-when = "2024-12-07"
-user-id = 1
-user-login = "alexcrichton"
-user-name = "Alex Crichton"
-
 [[publisher.wasm-encoder]]
 version = "0.244.0"
 when = "2026-01-06"

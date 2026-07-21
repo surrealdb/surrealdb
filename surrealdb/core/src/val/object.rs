@@ -116,12 +116,6 @@ impl From<HashMap<String, Value>> for Object {
 	}
 }
 
-impl From<Option<Self>> for Object {
-	fn from(v: Option<Self>) -> Self {
-		v.unwrap_or_default()
-	}
-}
-
 impl TryFrom<Object> for crate::types::PublicObject {
 	type Error = anyhow::Error;
 

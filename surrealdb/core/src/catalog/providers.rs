@@ -26,25 +26,11 @@ use crate::val::{RecordId, RecordIdKey, TableName};
 /// Boxes at the trait boundary so deep async chains
 /// (executor → catalog provider → transaction) don't inflate the parent
 /// state machine past the 2 MB tokio thread stack.
-#[cfg(target_family = "wasm")]
-pub(crate) type BoxProviderFut<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
-#[cfg(not(target_family = "wasm"))]
 pub(crate) type BoxProviderFut<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-/// On native targets, catalog provider futures are `Send`, so default bodies
-/// that capture `&Self` need `Self: Sync`. On WASM those futures are not `Send`,
-/// so this is a blanket no-op bound.
-#[cfg(not(target_family = "wasm"))]
-pub(crate) trait ProviderFutureSendRequirement: Sync {}
-#[cfg(not(target_family = "wasm"))]
-impl<T: Sync + ?Sized> ProviderFutureSendRequirement for T {}
-
-#[cfg(target_family = "wasm")]
-pub(crate) trait ProviderFutureSendRequirement {}
-#[cfg(target_family = "wasm")]
-impl<T: ?Sized> ProviderFutureSendRequirement for T {}
-
-pub(crate) trait NodeProvider: ProviderFutureSendRequirement {
+// Provider traits require `Self: Sync` because their futures are `Send` and
+// default method bodies capture `&Self`.
+pub(crate) trait NodeProvider: Sync {
 	/// Retrieve all node definitions in a datastore.
 	fn all_nodes(&self) -> BoxProviderFut<'_, Result<Arc<[Node]>>>;
 
@@ -52,7 +38,7 @@ pub(crate) trait NodeProvider: ProviderFutureSendRequirement {
 	fn get_node(&self, id: Uuid) -> BoxProviderFut<'_, Result<Arc<Node>>>;
 }
 
-pub(crate) trait RootProvider: ProviderFutureSendRequirement {
+pub(crate) trait RootProvider: Sync {
 	/// Retrieve a specific root definition.
 	fn get_default_config(&self) -> BoxProviderFut<'_, Result<Option<Arc<DefaultConfig>>>>;
 
@@ -79,7 +65,7 @@ pub(crate) trait RootProvider: ProviderFutureSendRequirement {
 	}
 }
 
-pub(crate) trait NamespaceProvider: ProviderFutureSendRequirement {
+pub(crate) trait NamespaceProvider: Sync {
 	/// Retrieve all namespace definitions in a datastore.
 	fn all_ns(
 		&self,
@@ -373,7 +359,7 @@ pub(crate) trait DatabaseProvider: NamespaceProvider {
 	}
 }
 
-pub(crate) trait TableProvider: ProviderFutureSendRequirement {
+pub(crate) trait TableProvider: Sync {
 	/// Retrieve all table definitions for a specific database.
 	fn all_tb(
 		&self,
@@ -670,7 +656,7 @@ pub(crate) trait TableProvider: ProviderFutureSendRequirement {
 	) -> BoxProviderFut<'a, Result<()>>;
 }
 
-pub(crate) trait UserProvider: ProviderFutureSendRequirement {
+pub(crate) trait UserProvider: Sync {
 	/// Retrieve all user definitions in a namespace.
 	fn all_root_users(
 		&self,
@@ -789,7 +775,7 @@ pub(crate) trait UserProvider: ProviderFutureSendRequirement {
 	}
 }
 
-pub(crate) trait AuthorisationProvider: ProviderFutureSendRequirement {
+pub(crate) trait AuthorisationProvider: Sync {
 	/// Retrieve all ROOT level accesses in a datastore.
 	fn all_root_accesses(
 		&self,
@@ -916,7 +902,7 @@ pub(crate) trait AuthorisationProvider: ProviderFutureSendRequirement {
 	) -> BoxProviderFut<'a, Result<()>>;
 }
 
-pub(crate) trait ApiProvider: ProviderFutureSendRequirement {
+pub(crate) trait ApiProvider: Sync {
 	/// Retrieve all api definitions for a specific database.
 	fn all_db_apis(
 		&self,
@@ -943,7 +929,7 @@ pub(crate) trait ApiProvider: ProviderFutureSendRequirement {
 	) -> BoxProviderFut<'a, Result<()>>;
 }
 
-pub(crate) trait BucketProvider: ProviderFutureSendRequirement {
+pub(crate) trait BucketProvider: Sync {
 	/// Retrieve all bucket definitions for a specific database.
 	fn all_db_buckets(
 		&self,

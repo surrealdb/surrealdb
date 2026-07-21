@@ -81,7 +81,6 @@ use crate::key::root::rc::{Expunge, ReclaimKey, ReclaimKind, ReclaimPrefix, Recl
 use crate::key::{KVKeyDecode, KVRange, KVValue, Key, KeyRange};
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::clock::SystemClock;
-use crate::kvs::ds::requirements::TransactionBuilderFactoryRequirements;
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
@@ -417,7 +416,7 @@ impl TransactionBuilderParts<()> {
 ///
 /// The `path_valid` helper is used by the CLI to validate the path early and
 /// provide better error messages before starting the runtime.
-pub trait TransactionBuilderFactory: TransactionBuilderFactoryRequirements {
+pub trait TransactionBuilderFactory: Send + Sync + 'static {
 	/// Immutable state threaded into router construction after datastore startup.
 	type RouterState: Clone + Send + Sync + 'static;
 
@@ -426,22 +425,12 @@ pub trait TransactionBuilderFactory: TransactionBuilderFactoryRequirements {
 	/// # Parameters
 	/// - `path`: Database connection path string
 	/// - `canceller`: Token for graceful shutdown and cancellation of long-running operations
-	#[cfg(not(target_family = "wasm"))]
 	fn new_transaction_builder(
 		&self,
 		path: &str,
 		canceller: CancellationToken,
 		config: ConfigMap,
 	) -> impl Future<Output = Result<TransactionBuilderParts<Self::RouterState>>> + Send;
-
-	/// Create a new transaction builder for the datastore (WASM: no `Send` bound on the future).
-	#[cfg(target_family = "wasm")]
-	fn new_transaction_builder(
-		&self,
-		path: &str,
-		canceller: CancellationToken,
-		config: ConfigMap,
-	) -> impl Future<Output = Result<TransactionBuilderParts<Self::RouterState>>>;
 
 	/// Validate a datastore path string.
 	fn path_valid(v: &str) -> Result<String>;
@@ -477,15 +466,7 @@ pub trait TransactionBuilderFactory: TransactionBuilderFactoryRequirements {
 
 pub mod requirements {
 	pub use surrealdb_kvs::builder::requirements::TransactionBuilderRequirements;
-
-	#[cfg(target_family = "wasm")]
-	pub trait TransactionBuilderFactoryRequirements {}
-
-	#[cfg(not(target_family = "wasm"))]
-	pub trait TransactionBuilderFactoryRequirements: Send + Sync + 'static {}
 }
-
-impl TransactionBuilderFactoryRequirements for CommunityComposer {}
 
 impl TransactionBuilderFactory for CommunityComposer {
 	type RouterState = ();

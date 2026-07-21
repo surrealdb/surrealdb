@@ -28,7 +28,7 @@ use anyhow::Result;
 use super::Signature;
 use crate::catalog::Index;
 use crate::exec::physical_expr::EvalContext;
-use crate::exec::{BoxFut, ContextLevel, SendSyncRequirement};
+use crate::exec::{BoxFut, ContextLevel};
 use crate::expr::Kind;
 use crate::expr::idiom::Idiom;
 use crate::idx::IndexKeyBase;
@@ -92,7 +92,7 @@ impl Debug for IndexContext {
 ///
 /// The planner dispatches generically based on [`index_context_kind()`] to
 /// resolve the appropriate [`IndexContext`], without hardcoding function names.
-pub trait IndexFunction: SendSyncRequirement + Debug {
+pub trait IndexFunction: Send + Sync + Debug {
 	/// The fully qualified function name (e.g., "search::highlight", "search::score")
 	fn name(&self) -> &'static str;
 

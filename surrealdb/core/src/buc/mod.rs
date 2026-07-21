@@ -10,13 +10,10 @@
 //! - [`store`] - Object store trait and implementations
 
 use std::path::PathBuf;
-use std::pin::Pin;
 use std::sync::Arc;
 
-mod controller;
 use anyhow::{Result, bail};
-pub(crate) use controller::BucketController;
-pub use controller::BucketOperation;
+use common::future::BoxFut;
 use surrealdb_cnf as cnf;
 
 use crate::CommunityComposer;
@@ -26,8 +23,12 @@ use crate::buc::store::file::FileStore;
 use crate::buc::store::memory::MemoryStore;
 use crate::err::Error;
 
+mod controller;
 pub mod manager;
 pub mod store;
+
+pub(crate) use controller::BucketController;
+pub use controller::BucketOperation;
 
 #[derive(Clone, Debug, Default)]
 pub struct Config {
@@ -61,8 +62,6 @@ impl Config {
 /// Marker trait for bucket store provider requirements.
 pub trait BucketStoreProviderRequirements: Send + Sync + 'static {}
 
-type BoxFuture<'a, R> = Pin<Box<dyn Future<Output = R> + 'a + Send + Sync>>;
-
 /// Trait for creating connections to bucket storage backends.
 ///
 /// Implementors of this trait can parse storage URLs and create appropriate
@@ -87,7 +86,7 @@ pub trait BucketStoreProvider: BucketStoreProviderRequirements {
 		global: bool,
 		readonly: bool,
 		config: Config,
-	) -> BoxFuture<'a, Result<Arc<dyn ObjectStore>>>;
+	) -> BoxFut<'a, Result<Arc<dyn ObjectStore>>>;
 }
 
 impl BucketStoreProviderRequirements for CommunityComposer {}
@@ -99,7 +98,7 @@ impl BucketStoreProvider for CommunityComposer {
 		_global: bool,
 		_readonly: bool,
 		config: Config,
-	) -> BoxFuture<'a, Result<Arc<dyn ObjectStore>>> {
+	) -> BoxFut<'a, Result<Arc<dyn ObjectStore>>> {
 		Box::pin(async {
 			#[cfg(target_arch = "wasm32")]
 			let _ = config;

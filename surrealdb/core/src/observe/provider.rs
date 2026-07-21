@@ -12,22 +12,10 @@ use crate::CommunityComposer;
 /// composers override this to return an audit observer which, in turn, wraps
 /// the community metrics observer so both concerns fan out from a single
 /// dispatch site.
-pub trait ObservabilityProvider: requirements::ObservabilityProviderRequirements {
+pub trait ObservabilityProvider: Send + Sync + 'static {
 	/// Create the observer to install on the datastore at startup.
 	fn create_observer(&self) -> Arc<dyn ExecutionObserver>;
 }
-
-/// Platform-specific auto-trait bounds required of [`ObservabilityProvider`]
-/// implementations.
-pub mod requirements {
-	#[cfg(target_family = "wasm")]
-	pub trait ObservabilityProviderRequirements {}
-
-	#[cfg(not(target_family = "wasm"))]
-	pub trait ObservabilityProviderRequirements: Send + Sync + 'static {}
-}
-
-impl requirements::ObservabilityProviderRequirements for CommunityComposer {}
 
 impl ObservabilityProvider for CommunityComposer {
 	fn create_observer(&self) -> Arc<dyn ExecutionObserver> {

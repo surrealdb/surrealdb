@@ -46,7 +46,7 @@ pub use consts::{
 	INDEXING_BATCH_SIZE, INDEXING_PROBE_BATCH_SIZE, NORMAL_BATCH_SIZE,
 };
 pub(crate) use ds::TransactionFactory;
-pub use ds::requirements::{TransactionBuilderFactoryRequirements, TransactionBuilderRequirements};
+pub use ds::requirements::TransactionBuilderRequirements;
 pub use ds::{
 	Builder, Datastore, Metric, Metrics, TransactionBuilder, TransactionBuilderFactory,
 	TransactionBuilderParts,

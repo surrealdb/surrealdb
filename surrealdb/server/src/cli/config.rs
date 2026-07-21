@@ -13,9 +13,8 @@ use crate::ntw::client_ip::ClientIp;
 /// validation checks on the configuration before the datastore and network
 /// components are initialized. Implementations can verify that the configuration
 /// is valid for the specific backend and features being used.
-#[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
-pub trait ConfigCheck: ConfigCheckRequirements {
+#[async_trait::async_trait]
+pub trait ConfigCheck: Send + Sync + 'static {
 	/// Validates the provided configuration.
 	///
 	/// # Parameters
@@ -27,20 +26,12 @@ pub trait ConfigCheck: ConfigCheckRequirements {
 	async fn check_config(&mut self, _cfg: &Config) -> Result<()>;
 }
 
-#[cfg(target_family = "wasm")]
-pub trait ConfigCheckRequirements {}
-
-#[cfg(not(target_family = "wasm"))]
-pub trait ConfigCheckRequirements: Send + Sync + 'static {}
-
-#[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
+#[async_trait::async_trait]
 impl ConfigCheck for CommunityComposer {
 	async fn check_config(&mut self, _cfg: &Config) -> Result<()> {
 		Ok(())
 	}
 }
-impl ConfigCheckRequirements for CommunityComposer {}
 
 #[derive(Clone, Debug)]
 pub struct Config {

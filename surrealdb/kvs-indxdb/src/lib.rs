@@ -23,7 +23,6 @@ compile_error!(
 );
 
 mod ffi;
-mod send_future;
 mod tx;
 
 use surrealdb_kvs::api::Transactable;
