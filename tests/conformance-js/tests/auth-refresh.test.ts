@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
+import type { Surreal } from "surrealdb";
 import { guestClient, rootClient, startServer, type TestServer } from "../src/harness";
 
 // Refresh-token rotation.
@@ -397,3 +398,120 @@ test("invalidate() clears the session but does not revoke the refresh grant serv
 	await client.close();
 	await db.close();
 });
+
+// Grant purging.
+//
+// `ACCESS <ac> ON DATABASE PURGE EXPIRED, REVOKED [FOR <grace>]` deletes bearer
+// grants that are expired and/or revoked. The purge is gated by a grace window:
+// a grant is only removed when `(now - expiration|revocation)` (compared at
+// whole-second granularity) is STRICTLY GREATER than the grace duration. The
+// grace defaults to 0s when no `FOR` clause is given, so a grant expired or
+// revoked within the current second is retained and only becomes purgeable once
+// the server clock has advanced past it.
+//
+// PURGE returns a flat array of the purged grants (keys redacted), whereas
+// REVOKE GRANT wraps its grants in an extra array level.
+
+/** Bearer access for a database user, with a configurable grant lifetime. */
+function bearerAccess(grantDuration: string): string {
+	return `
+		DEFINE USER api_user ON DATABASE PASSWORD 'api-pw' ROLES EDITOR;
+		DEFINE ACCESS api ON DATABASE TYPE BEARER FOR USER
+			DURATION FOR GRANT ${grantDuration};
+	`;
+}
+
+/** Issue one bearer grant and return its id. */
+async function issueGrant(db: Surreal): Promise<string> {
+	const [g] = await db
+		.query<[{ id: string }]>("ACCESS api ON DATABASE GRANT FOR USER api_user")
+		.json();
+	return g.id;
+}
+
+/** Poll the server clock until `when` is at least `bufferSecs` in its past. */
+async function waitPastServerTime(db: Surreal, when: string, bufferSecs: number): Promise<void> {
+	const deadline = Date.now() + 15000;
+	while (Date.now() < deadline) {
+		const [past] = await db
+			.query<[boolean]>(`RETURN time::now() > (<datetime> $t + ${bufferSecs}s)`, { t: when })
+			.json();
+		if (past) return;
+		await Bun.sleep(200);
+	}
+	throw new Error("server clock did not advance past the expected time");
+}
+
+test("PURGE EXPIRED, REVOKED removes expired and revoked grants while an active grant remains", async () => {
+	const { db } = await rootClient(server);
+	await db.query(bearerAccess("2s"));
+
+	// One grant we revoke explicitly; one we let expire on its own.
+	const revokedId = await issueGrant(db);
+	const expiredId = await issueGrant(db);
+	await db.query(`ACCESS api ON DATABASE REVOKE GRANT ${revokedId}`);
+
+	// Wait until the expiring grant is comfortably past its own expiration so
+	// the whole-second grace test (`> 0s`) is satisfied.
+	const [shown] = await db
+		.query<[Array<{ id: string; expiration: string }>]>("ACCESS api ON DATABASE SHOW ALL")
+		.json();
+	const expiring = shown.find((g) => g.id === expiredId);
+	expect(expiring).toBeDefined();
+	await waitPastServerTime(db, expiring!.expiration, 2);
+
+	// A fresh grant issued now is still active and must survive the purge.
+	const activeId = await issueGrant(db);
+
+	// The explicit FOR 0s defeats the default grace; both stale grants go.
+	const [purged] = await db
+		.query<[Array<{ id: string }>]>("ACCESS api ON DATABASE PURGE EXPIRED, REVOKED FOR 0s")
+		.json();
+	expect(purged.map((g) => g.id).sort()).toEqual([revokedId, expiredId].sort());
+
+	const [remaining] = await db
+		.query<[Array<{ id: string }>]>("ACCESS api ON DATABASE SHOW ALL")
+		.json();
+	expect(remaining).toHaveLength(1);
+	expect(remaining[0].id).toBe(activeId);
+
+	await db.close();
+}, 30000);
+
+test("PURGE REVOKED without FOR keeps a just-revoked grant, then removes it once past the grace", async () => {
+	const { db } = await rootClient(server);
+	// Long grant lifetime so nothing expires on its own during the test.
+	await db.query(bearerAccess("1h"));
+	const id = await issueGrant(db);
+
+	// Revoke and purge in a single batched request: the revocation timestamp
+	// and the purge clock land in the same wall-clock second, so
+	// `(now - revocation)` is 0 and the strict `> grace` test (default grace
+	// 0s) does not match. The revoked grant is therefore retained.
+	const [, purgeRes, showRes] = await db
+		.query<[unknown, unknown[], Array<{ id: string; revocation: string }>]>(
+			`ACCESS api ON DATABASE REVOKE GRANT ${id};
+			 ACCESS api ON DATABASE PURGE REVOKED;
+			 ACCESS api ON DATABASE SHOW ALL`,
+		)
+		.json();
+	expect(purgeRes).toHaveLength(0);
+	expect(showRes).toHaveLength(1);
+	expect(showRes[0].id).toBe(id);
+	// The grant is flagged revoked even though it survived the no-grace purge.
+	expect(showRes[0].revocation).toBeString();
+
+	// Once the revocation is safely in the server's past, an explicit short
+	// grace removes it.
+	await waitPastServerTime(db, showRes[0].revocation, 2);
+	const [purged] = await db
+		.query<[Array<{ id: string }>]>("ACCESS api ON DATABASE PURGE REVOKED FOR 0s")
+		.json();
+	expect(purged).toHaveLength(1);
+	expect(purged[0].id).toBe(id);
+
+	const [after] = await db.query<[unknown[]]>("ACCESS api ON DATABASE SHOW ALL").json();
+	expect(after).toHaveLength(0);
+
+	await db.close();
+}, 30000);

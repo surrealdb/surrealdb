@@ -10,7 +10,7 @@
 		"graphql": "^17.0.2",
 		"graphql-request": "^7.4.0",
 		"graphql-ws": "^6.1.0",
-		"surrealdb": "^2.0.7",
+		"surrealdb": "^2.0.8",
 		"ws": "^8.21.1"
 	},
 	"devDependencies": {

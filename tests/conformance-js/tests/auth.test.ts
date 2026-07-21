@@ -756,3 +756,102 @@ test("signin level is inferred from the scope supplied, not the user's own level
 
 	await db.close();
 });
+
+// §7 — system-user DURATION: DEFINE USER ... DURATION FOR SESSION / FOR TOKEN
+// enforcement for root/namespace/database users (distinct from record-access
+// session expiry). Every scenario stays within one namespace/database.
+
+test(
+	"a system database user session expires after DURATION FOR SESSION elapses",
+	async () => {
+		const { db, namespace, database } = await rootClient(server);
+		await db.query(
+			"DEFINE USER shortlived ON DATABASE PASSWORD 'shortlived-pass' ROLES OWNER DURATION FOR SESSION 1s",
+		);
+
+		const client = new Surreal();
+		await client.connect(server.url, { namespace, database });
+		await client.signin({
+			namespace,
+			database,
+			username: "shortlived",
+			password: "shortlived-pass",
+		});
+
+		// Immediately after signin the session works at its OWNER role.
+		const [info] = await client.query<[unknown]>("INFO FOR DB").json();
+		expect(info).toBeDefined();
+
+		// Poll until the session is rejected as expired (bounded, flake-tolerant).
+		// The default token duration outlives the poll window, so the SDK's own
+		// token-expiry renewal never fires; the server rejects the live session
+		// itself once DURATION FOR SESSION lapses.
+		const deadline = Date.now() + 10000;
+		let expired = false;
+		while (Date.now() < deadline) {
+			await Bun.sleep(500);
+			try {
+				await client.query("INFO FOR DB").collect();
+			} catch (e) {
+				expect(String(e)).toMatch(/session has expired/i);
+				expired = true;
+				break;
+			}
+		}
+		expect(expired).toBe(true);
+
+		await client.close();
+		await db.close();
+	},
+	20000,
+);
+
+test(
+	"a system user's live session outlives its shorter token; the expired token cannot re-authenticate",
+	async () => {
+		const { db, namespace, database } = await rootClient(server);
+		await db.query(
+			"DEFINE USER dualdur ON DATABASE PASSWORD 'dualdur-pass' ROLES OWNER DURATION FOR TOKEN 1s, FOR SESSION 1h",
+		);
+
+		// Sign in over the raw wire: the SDK renews (and, lacking a refresh token,
+		// invalidates) a password session the moment its token lapses, which would
+		// mask the server's own token/session split. The raw connection does not.
+		const rc = await RpcClient.connect(server);
+		await rc.use(namespace, database);
+		const token = (await rc.call("signin", [
+			{ ns: namespace, db: database, user: "dualdur", pass: "dualdur-pass" },
+		])) as string;
+		expect(token).toStartWith("eyJ");
+
+		// Poll a FRESH connection authenticating with the issued token until the
+		// server rejects it as expired — DURATION FOR TOKEN governs the token, and
+		// the rejection surfaces as "The token has expired".
+		const deadline = Date.now() + 10000;
+		let tokenErr: { code: number; message: string } | undefined;
+		while (Date.now() < deadline) {
+			await Bun.sleep(400);
+			const fresh = await RpcClient.connect(server);
+			await fresh.use(namespace, database);
+			const res = await fresh.rpc("authenticate", [token]);
+			await fresh.close();
+			if (res.error) {
+				tokenErr = res.error;
+				break;
+			}
+		}
+		expect(tokenErr).toBeDefined();
+		expect(tokenErr!.message).toMatch(/token has expired/i);
+
+		// The already-established session is governed by DURATION FOR SESSION, not
+		// FOR TOKEN: it keeps executing queries after its token has lapsed.
+		const res = await rc.rpc("query", ["INFO FOR DB"]);
+		expect(res.error).toBeUndefined();
+		const rows = res.result as Array<{ status: string }>;
+		expect(rows[0].status).toBe("OK");
+
+		await rc.close();
+		await db.close();
+	},
+	20000,
+);

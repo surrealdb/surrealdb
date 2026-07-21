@@ -167,6 +167,22 @@ landed on `main` but is not yet in a stable release.
     selecting the K nearest with no backfill, so a `<|2|>` whose nearest point
     the user cannot see returns fewer than K rows — it never leaks the hidden
     row (`search`).
+  - View read-only enforcement is permission-ordered: a direct write to a
+    `DEFINE TABLE ... AS SELECT` view errors loudly with `TableIsView` only when
+    permissions are bypassed (owner); for a record user the permission check
+    runs first, so a denied write is silently filtered — no view-ness leak. A
+    view's non-select permissions normalize to `NONE` (`views`).
+  - `sequence::nextval` stays contiguous and duplicate-free across concurrent
+    connections on one node — `BATCH` is a KV reservation size, not a
+    per-connection stride (cross-node dedup is a separate TiKV concern)
+    (`sequences`).
+  - `ON DELETE UNSET` requires an `option<record<…>>` field and removes the key
+    entirely (absent, not null); a non-optional reference field refuses the
+    parent delete. In a non-transactional batch a rejected `ON DELETE REJECT`
+    statement does not abort later statements (`references`).
+  - `ACCESS … PURGE` returns a flat grant array while `REVOKE GRANT` nests one
+    level deeper (`[[grant]]`); the default purge grace is 0s but eligibility is
+    a strict `>` at whole-second granularity (`auth-refresh`).
 
 ## Scope grown so far / next
 
@@ -250,8 +266,16 @@ landed on `main` but is not yet in a stable release.
       level/role scoping, and signin level inference (`auth`)
 - [x] Search permission enforcement: `@@` full-text and `<|K|>` vector KNN
       honour a record user's row and field permissions (`search`)
-- [ ] Access-grant purge (`ACCESS ... PURGE REVOKED` — note it applies an
-      implicit grace window; pass an explicit `FOR <duration>` when testing)
+- [x] Data integrity: `DEFINE SEQUENCE` / `sequence::nextval` (contiguous,
+      duplicate-free under concurrent connections), record references
+      `ON DELETE` CASCADE / REJECT / UNSET (+ cascade live-notify, non-txn batch
+      partials), and computed/materialized view read-only enforcement
+      (`TableIsView`, permission-before-view ordering) (`sequences`,
+      `references`, `views`)
+- [x] `REMOVE TABLE` terminates live subscriptions on other connections (server
+      emits `KILLED`) (`live`)
+- [x] Grant/session lifecycle: `ACCESS ... PURGE EXPIRED/REVOKED` and system-user
+      `DURATION FOR SESSION` / `FOR TOKEN` expiry (`auth-refresh`, `auth`)
 
 ### Rust → JS test migration
 

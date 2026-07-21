@@ -4,6 +4,7 @@ import {
 	EventCollector,
 	guestClient,
 	rootClient,
+	RpcClient,
 	startServer,
 	type TestServer,
 } from "../src/harness";
@@ -295,5 +296,66 @@ test("live notifications respect row-level permissions on DELETE", async () => {
 
 	await sub.kill();
 	await subscriber.close();
+	await db.close();
+}, 30000);
+
+test("REMOVE TABLE sends a KILLED notification and re-creating the table does not revive the subscription", async () => {
+	const { db, namespace, database } = await rootClient(server);
+	await db.query("DEFINE TABLE widget SCHEMALESS");
+
+	// A KILLED frame carries a null record and null value, which fail the SDK's
+	// live-message guard, so it is dropped before reaching an SDK subscription.
+	// The raw JSON-RPC wire is used to observe the notification the server sends.
+	const rpc = await RpcClient.connect(server);
+	await rpc.signinRoot();
+	await rpc.use(namespace, database);
+	const liveId = String(await rpc.call("live", ["widget"]));
+
+	// A separate authenticated connection removes the table.
+	const other = await guestClient(server, namespace, database);
+	await other.signin({ username: "root", password: "root" });
+	await other.use({ namespace, database });
+	await other.query("REMOVE TABLE widget");
+
+	// The subscription's id receives a KILLED frame with no record or value.
+	const killed = await rpc.notifications.waitFor(
+		(n) => n.action === "KILLED" && n.id === liveId,
+	);
+	expect(killed.result).toBeNull();
+	expect(killed.record).toBeNull();
+
+	// A re-created same-name table starts a fresh live-query cache generation, so
+	// writes to it produce no notifications on the dead subscription id.
+	await other.query("DEFINE TABLE widget SCHEMALESS; CREATE widget:one SET n = 1");
+	await rpc.notifications.assertSilence(
+		(n) => n.id === liveId && n.action !== "KILLED",
+	);
+
+	await rpc.close();
+	await other.close();
+	await db.close();
+}, 30000);
+
+// The SDK surfaces the server's KILLED frame as a live message so a subscriber
+// learns its query was terminated by a REMOVE TABLE, and flips isAlive to false.
+test("SDK surfaces a KILLED live message when the table is removed", async () => {
+	const { db, namespace, database } = await rootClient(server);
+	await db.query("DEFINE TABLE gizmo SCHEMALESS");
+
+	const events = new EventCollector<LiveMessage>();
+	const sub = await db.live(new Table("gizmo"));
+	pump(sub, events);
+
+	const other = await guestClient(server, namespace, database);
+	await other.signin({ username: "root", password: "root" });
+	await other.use({ namespace, database });
+	await other.query("REMOVE TABLE gizmo");
+
+	const killed = await events.waitFor((e) => e.action === "KILLED");
+	expect(String(killed.queryId)).toBe(String(sub.id));
+	expect(sub.isAlive).toBe(false);
+
+	await sub.kill();
+	await other.close();
 	await db.close();
 }, 30000);
