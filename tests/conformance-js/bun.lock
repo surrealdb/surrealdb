@@ -8,7 +8,7 @@
         "graphql": "^17.0.2",
         "graphql-request": "^7.4.0",
         "graphql-ws": "^6.1.0",
-        "surrealdb": "^2.0.6",
+        "surrealdb": "^2.0.7",
         "ws": "^8.21.1",
       },
       "devDependencies": {
@@ -33,7 +33,7 @@
 
     "graphql-ws": ["graphql-ws@6.1.0", "", { "peerDependencies": { "@fastify/websocket": "^10 || ^11", "crossws": "~0.3", "graphql": "^15.10.1 || ^16 || ^17", "ws": "^8" }, "optionalPeers": ["@fastify/websocket", "crossws", "ws"] }, "sha512-7ft6KWkuaLnLABwzEIimjUMeF0iByo2ThD6q0MICgsvp6nDuT5ppubKzEHniu8Kmlp5GNsLgr5dil8JMrIwUEQ=="],
 
-    "surrealdb": ["surrealdb@2.0.6", "", { "dependencies": { "@surrealdb/sqon": "0.1.0" }, "peerDependencies": { "tslib": "^2.6.3", "typescript": "^5.0.0 || ^6.0.0" } }, "sha512-6IC5gntiUIgfzF6kg0Ly+ZpxGMU6xqR6ug6PMFT0Eh1PYGU7vQ/AJQhZMb8IjMFatp61ZsYV9tcuvU6FjEZupQ=="],
+    "surrealdb": ["surrealdb@2.0.7", "", { "dependencies": { "@surrealdb/sqon": "0.1.0" }, "peerDependencies": { "tslib": "^2.6.3", "typescript": "^5.0.0 || ^6.0.0" } }, "sha512-XjSAfTxFUzLexwWDXzsWTw1uDWyn4cVdlak2O3DIvWDjhwDG+ze83qU1rOOuqYmjeYkssDZI1JDJ4GtUt963wA=="],
 
     "tslib": ["tslib@2.8.1", "", {}, "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w=="],
 

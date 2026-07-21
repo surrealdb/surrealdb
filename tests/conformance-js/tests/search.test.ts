@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { rootClient, startServer, type TestServer } from "../src/harness";
+import { guestClient, rootClient, startServer, type TestServer } from "../src/harness";
 
 // Search subsystem conformance — full-text search (analyzers, the @@ / @N@
 // match operators, search::score / search::highlight) and vector KNN over an
@@ -7,6 +7,12 @@ import { rootClient, startServer, type TestServer } from "../src/harness";
 // against its own fresh server on a unique ns/db; the exhaustive spec lives in
 // language-tests/*.surql. Observed shapes (BM25 scores, KNN ordering) are
 // pinned here.
+//
+// The permission section pins that index-backed search paths (@@ FTS and <|K|>
+// KNN) are still gated by table and field PERMISSIONS when driven by a real
+// record-user session (db.signin on a DEFINE ACCESS TYPE RECORD): a matched row
+// the session may not SELECT is filtered out, and a field the session may not
+// read is redacted.
 
 async function withServer<T>(fn: (server: TestServer) => Promise<T>): Promise<T> {
 	const server = await startServer();
@@ -195,6 +201,166 @@ test("vector::distance::euclidean reads the exact distance to the query vector",
 		// [3,4,0] is at euclidean distance 5 from the origin.
 		expect(rows[1].dist).toBeCloseTo(5, 5);
 
+		await db.close();
+	});
+}, 30000);
+
+// --- Search results honour record-user permissions (§7) ---------------------
+
+// A DATABASE RECORD access whose users each own only their own `user` row. Rows
+// in the searched tables link back to a user via an `owner` field, and the
+// tables grant SELECT only WHERE owner = $auth — so the same @@ / <|K|> query
+// yields different rows for different signed-in record users.
+const RECORD_ACCESS = `
+	DEFINE TABLE user SCHEMALESS
+		PERMISSIONS FOR select, update, delete WHERE id = $auth FOR create NONE;
+	DEFINE ACCESS account ON DATABASE TYPE RECORD
+		SIGNUP ( CREATE user SET email = $email )
+		SIGNIN ( SELECT * FROM user WHERE email = $email )
+		DURATION FOR TOKEN 15m, FOR SESSION 12h;
+`;
+
+test("FTS @@ over an owner-scoped table filters matches to the signed-in record user", async () => {
+	await withServer(async (server) => {
+		const { db, namespace, database } = await rootClient(server);
+		await db.query(
+			RECORD_ACCESS +
+				`DEFINE TABLE book SCHEMALESS PERMISSIONS FOR select WHERE owner = $auth;
+				 DEFINE FIELD owner ON book TYPE record<user>;
+				 DEFINE FIELD title ON book TYPE string;
+				 DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase;
+				 DEFINE INDEX ft ON book FIELDS title FULLTEXT ANALYZER simple BM25 HIGHLIGHTS;`,
+		);
+
+		const alice = await guestClient(server, namespace, database);
+		await alice.signup({ namespace, database, access: "account", variables: { email: "alice@example.com" } });
+		const bob = await guestClient(server, namespace, database);
+		await bob.signup({ namespace, database, access: "account", variables: { email: "bob@example.com" } });
+
+		// Two matching books ("rust") owned by different users, plus a non-match
+		// owned by alice. Owner is resolved from the user table (record ids do not
+		// round-trip as bindable RecordIds through .json()).
+		await db.query(`
+			LET $alice = (SELECT VALUE id FROM ONLY user WHERE email = 'alice@example.com' LIMIT 1);
+			LET $bob = (SELECT VALUE id FROM ONLY user WHERE email = 'bob@example.com' LIMIT 1);
+			CREATE book:1 SET title = 'Rust programming', owner = $alice;
+			CREATE book:2 SET title = 'Rust in action', owner = $bob;
+			CREATE book:3 SET title = 'Cooking food', owner = $alice;
+		`);
+
+		// Root has no row filter and sees every matching book.
+		const [rootRows] = (await db
+			.query("SELECT VALUE id FROM book WHERE title @@ 'rust' ORDER BY id")
+			.json()) as [string[]];
+		expect(rootRows.map(String)).toEqual(["book:1", "book:2"]);
+
+		// Alice's matching book survives; Bob's equally-matching book:2 is filtered
+		// out by the row permission even though the FTS index matched it.
+		const [aliceRows] = (await alice
+			.query("SELECT VALUE id FROM book WHERE title @@ 'rust' ORDER BY id")
+			.json()) as [string[]];
+		expect(aliceRows.map(String)).toEqual(["book:1"]);
+
+		await alice.close();
+		await bob.close();
+		await db.close();
+	});
+}, 30000);
+
+test("HNSW <|K|> KNN filters the K nearest to the rows the record user may SELECT", async () => {
+	await withServer(async (server) => {
+		const { db, namespace, database } = await rootClient(server);
+		await db.query(
+			RECORD_ACCESS +
+				`DEFINE TABLE pt SCHEMALESS PERMISSIONS FOR select WHERE owner = $auth;
+				 DEFINE FIELD owner ON pt TYPE record<user>;
+				 DEFINE FIELD embedding ON pt TYPE array<float>;
+				 DEFINE INDEX vec ON pt FIELDS embedding HNSW DIMENSION 3 DIST EUCLIDEAN;`,
+		);
+
+		const alice = await guestClient(server, namespace, database);
+		await alice.signup({ namespace, database, access: "account", variables: { email: "alice@example.com" } });
+		const bob = await guestClient(server, namespace, database);
+		await bob.signup({ namespace, database, access: "account", variables: { email: "bob@example.com" } });
+
+		// Bob owns the point nearest the query [0,0,0]; alice owns the next three.
+		await db.query(`
+			LET $alice = (SELECT VALUE id FROM ONLY user WHERE email = 'alice@example.com' LIMIT 1);
+			LET $bob = (SELECT VALUE id FROM ONLY user WHERE email = 'bob@example.com' LIMIT 1);
+			CREATE pt:1 SET embedding = [0.1, 0.1, 0.1], owner = $bob;
+			CREATE pt:2 SET embedding = [0.2, 0.2, 0.2], owner = $alice;
+			CREATE pt:3 SET embedding = [0.3, 0.3, 0.3], owner = $alice;
+			CREATE pt:4 SET embedding = [0.4, 0.4, 0.4], owner = $alice;
+		`);
+
+		// Root's K=2 nearest to the origin are pt:1 then pt:2.
+		const [rootRows] = (await db
+			.query("SELECT VALUE id FROM pt WHERE embedding <|2,100|> [0.0, 0.0, 0.0] ORDER BY id")
+			.json()) as [string[]];
+		expect(rootRows.map(String)).toEqual(["pt:1", "pt:2"]);
+
+		// The KNN operator selects the K nearest candidates and THEN applies the row
+		// permission — it does not backfill to K after filtering. So alice's K=2
+		// search picks {pt:1, pt:2} and drops bob's closer pt:1, leaving a single
+		// row. Critically pt:1 (a closer neighbour alice may not SELECT) never
+		// leaks, and pt:3 is not pulled in to refill the K slot.
+		const [aliceK2] = (await alice
+			.query("SELECT VALUE id FROM pt WHERE embedding <|2,100|> [0.0, 0.0, 0.0] ORDER BY id")
+			.json()) as [string[]];
+		expect(aliceK2.map(String)).toEqual(["pt:2"]);
+
+		// Widening K to 3 selects {pt:1, pt:2, pt:3}; filtering bob's pt:1 leaves
+		// alice's two nearest owned points.
+		const [aliceK3] = (await alice
+			.query("SELECT VALUE id FROM pt WHERE embedding <|3,100|> [0.0, 0.0, 0.0] ORDER BY id")
+			.json()) as [string[]];
+		expect(aliceK3.map(String)).toEqual(["pt:2", "pt:3"]);
+
+		await alice.close();
+		await bob.close();
+		await db.close();
+	});
+}, 30000);
+
+test("FTS @@ match redacts a FOR select NONE field for the record user", async () => {
+	await withServer(async (server) => {
+		const { db, namespace, database } = await rootClient(server);
+		await db.query(
+			RECORD_ACCESS +
+				`DEFINE TABLE book SCHEMALESS PERMISSIONS FOR select WHERE owner = $auth;
+				 DEFINE FIELD owner ON book TYPE record<user>;
+				 DEFINE FIELD title ON book TYPE string;
+				 DEFINE FIELD secret ON book TYPE string PERMISSIONS FOR select NONE;
+				 DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase;
+				 DEFINE INDEX ft ON book FIELDS title FULLTEXT ANALYZER simple BM25 HIGHLIGHTS;`,
+		);
+
+		const alice = await guestClient(server, namespace, database);
+		await alice.signup({ namespace, database, access: "account", variables: { email: "alice@example.com" } });
+
+		await db.query(`
+			LET $alice = (SELECT VALUE id FROM ONLY user WHERE email = 'alice@example.com' LIMIT 1);
+			CREATE book:1 SET title = 'Rust programming', secret = 'top-secret', owner = $alice;
+		`);
+
+		// Alice owns and may SELECT the matched row, so it is returned — but `secret`
+		// carries FOR select NONE and is omitted from her projection entirely.
+		const [aliceRow] = (await alice
+			.query("SELECT id, title, secret FROM book WHERE title @@ 'rust'")
+			.json()) as [Array<{ id: string; title: string; secret?: string }>];
+		expect(aliceRow).toHaveLength(1);
+		expect(String(aliceRow[0].id)).toBe("book:1");
+		expect(aliceRow[0].title).toBe("Rust programming");
+		expect(aliceRow[0].secret).toBeUndefined();
+
+		// Root reads the same matched row with the redacted field intact.
+		const [rootRow] = (await db
+			.query("SELECT id, title, secret FROM book WHERE title @@ 'rust'")
+			.json()) as [Array<{ id: string; secret?: string }>];
+		expect(rootRow).toHaveLength(1);
+		expect(rootRow[0].secret).toBe("top-secret");
+
+		await alice.close();
 		await db.close();
 	});
 }, 30000);

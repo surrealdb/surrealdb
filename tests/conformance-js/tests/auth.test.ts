@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { Surreal } from "surrealdb";
-import { rootClient, guestClient, startServer, type TestServer } from "../src/harness";
+import { rootClient, guestClient, startServer, RpcClient, type TestServer } from "../src/harness";
 
 let server: TestServer;
 
@@ -519,5 +519,240 @@ test("authenticate clause: a THROW blocks signup as well as signin", async () =>
 	expect(tokens.access).toBeString();
 
 	await client.close();
+	await db.close();
+});
+
+// §6 — auth LEVEL: system access (BEARER/JWT) and system users at ROOT and
+// NAMESPACE scope, plus how the signin level is inferred from what is supplied.
+// Every scenario stays within one namespace/database; only the auth LEVEL varies.
+
+test("namespace bearer access: a wire signin yields a key that authorizes at the namespace level", async () => {
+	const { db, namespace } = await rootClient(server);
+	await db.query(`
+		DEFINE ACCESS api ON NAMESPACE TYPE BEARER FOR USER DURATION FOR GRANT 4w, FOR TOKEN 1h, FOR SESSION 1h;
+		DEFINE USER nsbear ON NAMESPACE PASSWORD 'secret' ROLES EDITOR;
+	`);
+
+	// Grant shape mirrors the database-level bearer grant; the one-time key lives
+	// at grant.key and is formatted "surreal-bearer-<id>-<secret>".
+	const [grant] = await db
+		.query<[{ ac: string; type: string; subject: { user: string }; grant: { id: string; key: string } }]>(
+			"ACCESS api ON NAMESPACE GRANT FOR USER nsbear",
+		)
+		.json();
+	expect(grant.ac).toBe("api");
+	expect(grant.type).toBe("bearer");
+	expect(grant.subject).toEqual({ user: "nsbear" });
+	expect(grant.grant.key).toStartWith("surreal-bearer-");
+
+	// Namespace bearer signin over the wire carries { ns, ac, key } with NO db key.
+	// (The signin dispatch routes on which of ns/db/ac are present, so a db key
+	// here — even a null one — would misroute the request; see the SDK test below.)
+	const rc = await RpcClient.connect(server);
+	const res = await rc.rpc("signin", [{ ns: namespace, ac: "api", key: grant.grant.key }]);
+	expect(res.error).toBeUndefined();
+	const token = res.result as string;
+	expect(token).toBeString();
+	await rc.close();
+
+	// The issued token authorizes a fresh connection at the namespace level:
+	// INFO FOR NS reads fine, the session carries the access name and EDITOR role,
+	// and reaching up to the root level is denied.
+	const client = new Surreal();
+	await client.connect(server.url, { namespace });
+	await client.authenticate(token);
+	const [nsInfo] = await client.query<[unknown]>("INFO FOR NS").json();
+	expect(nsInfo).toBeDefined();
+	const [session] = await client
+		.query<[{ ac: string; ns: string; tk: { RL: string[] } }]>("RETURN $session")
+		.json();
+	expect(session.ac).toBe("api");
+	expect(session.ns).toBe(namespace);
+	expect(session.tk.RL).toEqual(["EDITOR"]);
+	const err = await rejects(client.query("INFO FOR ROOT").collect());
+	expect(String(err)).toMatch(/not allowed|permission|IamError|IAM/i);
+	await client.close();
+	await db.close();
+});
+
+test("namespace bearer signin authenticates through the SDK", async () => {
+	// A namespace bearer key authenticates at the namespace level: signing in with
+	// { namespace, access, key } and no database reaches the namespace-access path.
+	const { db, namespace } = await rootClient(server);
+	await db.query(`
+		DEFINE ACCESS api ON NAMESPACE TYPE BEARER FOR USER DURATION FOR GRANT 4w, FOR TOKEN 1h, FOR SESSION 1h;
+		DEFINE USER nsbear ON NAMESPACE PASSWORD 'secret' ROLES EDITOR;
+	`);
+	const [grant] = await db
+		.query<[{ grant: { key: string } }]>("ACCESS api ON NAMESPACE GRANT FOR USER nsbear")
+		.json();
+
+	const client = new Surreal();
+	await client.connect(server.url, { namespace });
+	const tokens = await client.signin({ namespace, access: "api", key: grant.grant.key });
+	expect(tokens.access).toBeString();
+	const [nsInfo] = await client.query<[unknown]>("INFO FOR NS").json();
+	expect(nsInfo).toBeDefined();
+	await client.close();
+	await db.close();
+});
+
+test("root bearer access signin grants root access", async () => {
+	// A root bearer key authenticates at the root level: signing in with
+	// { access, key } and no namespace/database reaches the root-access path and
+	// yields a session with root-level reach.
+	const { db } = await rootClient(server);
+	await db.query(`
+		DEFINE ACCESS api ON ROOT TYPE BEARER FOR USER DURATION FOR GRANT 4w, FOR TOKEN 1h, FOR SESSION 1h;
+		DEFINE USER rootbear ON ROOT PASSWORD 'secret' ROLES OWNER;
+	`);
+	const [grant] = await db
+		.query<[{ grant: { key: string } }]>("ACCESS api ON ROOT GRANT FOR USER rootbear")
+		.json();
+	const client = new Surreal();
+	await client.connect(server.url);
+	await client.signin({ access: "api", key: grant.grant.key });
+	const [rootInfo] = await client.query<[unknown]>("INFO FOR ROOT").json();
+	expect(rootInfo).toBeDefined();
+	await client.close();
+	await db.close();
+});
+
+test("root JWT access: a claimless-scope token authenticates at the root level", async () => {
+	const { db } = await rootClient(server);
+	const secret = "a-shared-secret-that-is-long-enough";
+	await db.query(`DEFINE ACCESS token ON ROOT TYPE JWT ALGORITHM HS256 KEY '${secret}';`);
+
+	// A root token carries no ns/db claim; the access name and roles come from the
+	// claims. Authenticate over a connection with no namespace/database selected.
+	const now = Math.floor(Date.now() / 1000);
+	const jwt = await mintHs256({ ac: "token", rl: ["Owner"], iat: now, exp: now + 3600 }, secret);
+
+	const client = new Surreal();
+	await client.connect(server.url);
+	await client.authenticate(jwt);
+
+	const [rootInfo] = await client.query<[unknown]>("INFO FOR ROOT").json();
+	expect(rootInfo).toBeDefined();
+	// The session is root-scoped: it echoes the access name and role and carries
+	// neither a namespace nor a database.
+	const [session] = await client
+		.query<[{ ac: string; ns?: string; db?: string; tk: { RL: string[] } }]>("RETURN $session")
+		.json();
+	expect(session.ac).toBe("token");
+	expect(session.ns).toBeUndefined();
+	expect(session.db).toBeUndefined();
+	expect(session.tk.RL).toEqual(["Owner"]);
+
+	await client.close();
+	await db.close();
+});
+
+test("namespace JWT access: an ns-scoped token authenticates at the namespace level", async () => {
+	const { db, namespace } = await rootClient(server);
+	const secret = "a-shared-secret-that-is-long-enough";
+	await db.query(`DEFINE ACCESS token ON NAMESPACE TYPE JWT ALGORITHM HS256 KEY '${secret}';`);
+
+	// A namespace token carries an ns claim but no db claim.
+	const now = Math.floor(Date.now() / 1000);
+	const jwt = await mintHs256(
+		{ ns: namespace, ac: "token", rl: ["Owner"], iat: now, exp: now + 3600 },
+		secret,
+	);
+
+	const client = new Surreal();
+	await client.connect(server.url, { namespace });
+	await client.authenticate(jwt);
+
+	const [nsInfo] = await client.query<[unknown]>("INFO FOR NS").json();
+	expect(nsInfo).toBeDefined();
+	const [session] = await client
+		.query<[{ ac: string; ns: string; db?: string; tk: { RL: string[] } }]>("RETURN $session")
+		.json();
+	expect(session.ac).toBe("token");
+	expect(session.ns).toBe(namespace);
+	expect(session.db).toBeUndefined();
+	expect(session.tk.RL).toEqual(["Owner"]);
+	// The token is namespace-scoped, so it cannot reach the root level.
+	const err = await rejects(client.query("INFO FOR ROOT").collect());
+	expect(String(err)).toMatch(/not allowed|permission|IamError|IAM/i);
+
+	await client.close();
+	await db.close();
+});
+
+test("a namespace OWNER cannot read root info or define a root user", async () => {
+	const { db, namespace } = await rootClient(server);
+	await db.query("DEFINE USER nsowner ON NAMESPACE PASSWORD 'ns-pass' ROLES OWNER");
+
+	const client = new Surreal();
+	await client.connect(server.url, { namespace });
+	await client.signin({ namespace, username: "nsowner", password: "ns-pass" });
+
+	// Full authority within the namespace, but nothing above it: reading root info
+	// and defining a root-level user are both rejected loudly as IAM violations.
+	const [nsInfo] = await client.query<[unknown]>("INFO FOR NS").json();
+	expect(nsInfo).toBeDefined();
+	const infoErr = await rejects(client.query("INFO FOR ROOT").collect());
+	expect(String(infoErr)).toMatch(/not allowed|permission|IamError|IAM/i);
+	const defineErr = await rejects(
+		client.query("DEFINE USER escalated ON ROOT PASSWORD 'x' ROLES OWNER").collect(),
+	);
+	expect(String(defineErr)).toMatch(/not allowed|permission|IamError|IAM/i);
+
+	await client.close();
+	await db.close();
+});
+
+test("a database OWNER cannot read namespace info", async () => {
+	const { db, namespace, database } = await rootClient(server);
+	await db.query("DEFINE USER dbowner ON DATABASE PASSWORD 'db-pass' ROLES OWNER");
+
+	const client = new Surreal();
+	await client.connect(server.url, { namespace, database });
+	await client.signin({ namespace, database, username: "dbowner", password: "db-pass" });
+
+	// Full authority within the database, but reading the enclosing namespace's
+	// info is rejected as an IAM violation.
+	const [dbInfo] = await client.query<[unknown]>("INFO FOR DB").json();
+	expect(dbInfo).toBeDefined();
+	const err = await rejects(client.query("INFO FOR NS").collect());
+	expect(String(err)).toMatch(/not allowed|permission|IamError|IAM/i);
+
+	await client.close();
+	await db.close();
+});
+
+test("signin level is inferred from the scope supplied, not the user's own level", async () => {
+	const { db, namespace, database } = await rootClient(server);
+	await db.query("DEFINE USER leveluser ON DATABASE PASSWORD 'lvl-pass' ROLES OWNER");
+
+	// Supplying the database scope the user was defined at authenticates at DB level.
+	const full = new Surreal();
+	await full.connect(server.url, { namespace, database });
+	await full.signin({ namespace, database, username: "leveluser", password: "lvl-pass" });
+	const [dbInfo] = await full.query<[unknown]>("INFO FOR DB").json();
+	expect(dbInfo).toBeDefined();
+	await full.close();
+
+	// The same credentials are NOT honored at a different (lower-scoped) level: the
+	// server looks the user up at the requested level and finds none, so a
+	// namespace-scoped signin with a database user is refused — never silently
+	// elevated to a namespace session.
+	const nsScoped = new Surreal();
+	await nsScoped.connect(server.url, { namespace });
+	const nsErr = await rejects(nsScoped.signin({ namespace, username: "leveluser", password: "lvl-pass" }));
+	expect(String(nsErr)).toMatch(/problem with authentication|not allowed|authentication/i);
+	await nsScoped.close();
+
+	// Likewise a root-scoped signin (no ns/db supplied) with the database user fails.
+	const rootScoped = new Surreal();
+	await rootScoped.connect(server.url);
+	const rootErr = await rejects(
+		rootScoped.signin({ username: "leveluser", password: "lvl-pass" } as never),
+	);
+	expect(String(rootErr)).toMatch(/problem with authentication|not allowed|authentication/i);
+	await rootScoped.close();
+
 	await db.close();
 });

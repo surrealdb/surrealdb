@@ -741,6 +741,8 @@ jobs:
       # SurrealQL language tests
       - lang-tests
       - lang-upgrade-tests
+      # JS SDK conformance
+      - conformance-js
     steps:
       - name: Check for failures
         run: |
@@ -769,6 +771,7 @@ jobs:
             "${{ needs.kvs-engines.result }}"
             "${{ needs.lang-tests.result }}"
             "${{ needs.lang-upgrade-tests.result }}"
+            "${{ needs.conformance-js.result }}"
           )
 
           # Check if any job failed (skipped is ok for conditional jobs)

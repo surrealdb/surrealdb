@@ -150,6 +150,23 @@ landed on `main` but is not yet in a stable release.
     `ArrayBuffer`, not a `Uint8Array`; a `BigInt` beyond 2^53 roundtrips as a
     native `bigint` exactly, including as a record-id key part — no float
     precision loss (`surrealql-wire`).
+  - Field-level `PERMISSIONS FOR select` denial drops the key entirely (absent,
+    not null) from a record user's decoded document, including a computed
+    `VALUE` field whose select predicate fails; root bypasses field permissions
+    (`permissions`, `http`).
+  - Record-user write denial is silent: a CREATE under `FOR create NONE` and an
+    UPDATE/DELETE of a row failing the per-action `WHERE` both return an empty
+    result with no error and no mutation — the same silent-filter pattern that
+    role-denied data writes follow (`permissions`).
+  - `DEFINE FUNCTION` / `DEFINE PARAM` permission denial is LOUD, not silent: a
+    non-root caller hitting `PERMISSIONS NONE` / a false predicate gets "You
+    don't have permission to run the fn::X function" / "view the $X parameter"
+    over both the `run` RPC and `query`; root bypasses (`programmability`).
+  - Search honours permissions: `@@` full-text and `<|K|>` vector KNN results
+    are filtered to the rows/fields a record user may select. KNN filters AFTER
+    selecting the K nearest with no backfill, so a `<|2|>` whose nearest point
+    the user cannot see returns fewer than K rows — it never leaks the hidden
+    row (`search`).
 
 ## Scope grown so far / next
 
@@ -221,6 +238,18 @@ landed on `main` but is not yet in a stable release.
 - [x] SDK transaction bound CRUD: `create`/`update`/`merge`/`delete`/`insert`/
       `relate`/`select` on a `beginTransaction()` handle stay isolated until
       commit and never auto-commit (`transactions`)
+- [x] Permission enforcement through a real record session: field-level `FOR
+      select` redaction (incl. computed `VALUE` fields), per-action write denial
+      (`FOR create NONE`, `FOR update`/`delete WHERE`), and cross-transport
+      parity — the same permissions redact identically over WS-RPC, `/sql`, and
+      `/key` (`permissions`, `http`)
+- [x] Programmability permissions: `DEFINE FUNCTION` and `DEFINE PARAM`
+      `PERMISSIONS` enforced by auth level over both `run` and `query`, plus
+      global-param cross-connection visibility (`programmability`)
+- [x] Auth at ROOT and NAMESPACE level: system BEARER/JWT access, system users,
+      level/role scoping, and signin level inference (`auth`)
+- [x] Search permission enforcement: `@@` full-text and `<|K|>` vector KNN
+      honour a record user's row and field permissions (`search`)
 - [ ] Access-grant purge (`ACCESS ... PURGE REVOKED` — note it applies an
       implicit grace window; pass an explicit `FOR <duration>` when testing)
 

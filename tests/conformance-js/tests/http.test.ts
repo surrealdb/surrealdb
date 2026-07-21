@@ -10,7 +10,9 @@
 // (including the /sql WebSocket upgrade), the --*-arbitrary-query matrix,
 // --client-ip source modes into $session.ip, the startup-import readiness
 // gate, --no-identification-headers, the surreal-id session header, and
-// bearer / basic-auth level scoping.
+// bearer / basic-auth level scoping. Finally it pins cross-transport
+// permission parity: identical table/field PERMISSIONS redact the same way for
+// a given record user over WS-RPC (SDK), HTTP /sql, and the /key REST route.
 //
 // Header/API facts:
 // - Namespace/database are selected with `surreal-ns` / `surreal-db` headers.
@@ -20,7 +22,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { startServer, type TestServer } from "../src/harness";
+import { guestClient, rootClient, startServer, type TestServer } from "../src/harness";
 
 const ROOT_AUTH = `Basic ${btoa("root:root")}`;
 
@@ -1334,6 +1336,111 @@ let counter = 0;
 			expect(queryEnv).toMatchObject({ status: "OK", result: 1 });
 			expect((await send(server, "GET", "/health")).status).toBe(200);
 		} finally {
+			await server.stop();
+		}
+	}, 30000);
+
+	// ---------------------------------------------------------------------------
+	// Cross-transport permission parity (same tenant)
+	// ---------------------------------------------------------------------------
+
+	test("table + field PERMISSIONS redact identically for a record user across WS-RPC, /sql, and /key", async () => {
+		// One record user, one logical read (every row of a table), issued three
+		// ways within a single ns/db: the SDK over WS-RPC, HTTP POST /sql, and the
+		// HTTP GET /key/:table REST route. The table's row filter (FOR select WHERE
+		// owner = $auth) and a field's FOR select NONE must be enforced identically
+		// on every transport — same row set, same field redaction — so permission
+		// enforcement cannot be sidestepped by choosing a different entry point.
+		const server = await startServer();
+		let sdkA: Awaited<ReturnType<typeof guestClient>> | undefined;
+		const { db: root, namespace: ns, database: db } = await rootClient(server);
+		try {
+			// A record-access method plus a table scoped to the authenticated owner,
+			// with one field hidden from select.
+			await root.query(`
+				DEFINE ACCESS account ON DATABASE TYPE RECORD
+					SIGNUP ( CREATE appuser SET email = $email, pass = crypto::argon2::generate($pass) )
+					SIGNIN ( SELECT * FROM appuser WHERE email = $email AND crypto::argon2::compare(pass, $pass) );
+				DEFINE TABLE item SCHEMAFULL PERMISSIONS FOR select WHERE owner = $auth;
+				DEFINE FIELD owner ON item TYPE record<appuser>;
+				DEFINE FIELD label ON item TYPE string;
+				DEFINE FIELD secret ON item TYPE string PERMISSIONS FOR select NONE;
+			`);
+
+			// Two record users; only A drives the reads below.
+			sdkA = await guestClient(server, ns, db);
+			const tokensA = await sdkA.signup({
+				namespace: ns,
+				database: db,
+				access: "account",
+				variables: { email: "a@example.com", pass: "a-pw" },
+			});
+			const [aId] = await sdkA.query<[string]>("RETURN $auth").json();
+
+			const sdkB = await guestClient(server, ns, db);
+			await sdkB.signup({
+				namespace: ns,
+				database: db,
+				access: "account",
+				variables: { email: "b@example.com", pass: "b-pw" },
+			});
+			const [bId] = await sdkB.query<[string]>("RETURN $auth").json();
+			await sdkB.close();
+
+			// Root seeds rows for both users; each carries a hidden `secret`.
+			await root.query(
+				`CREATE item:a1 SET owner = <record> $a, label = 'a-one', secret = 'sa1';
+				 CREATE item:a2 SET owner = <record> $a, label = 'a-two', secret = 'sa2';
+				 CREATE item:b1 SET owner = <record> $b, label = 'b-one', secret = 'sb1';`,
+				{ a: aId, b: bId },
+			);
+
+			// Normalize a row to what parity actually depends on: identity, the
+			// visible field, and whether the hidden field leaked.
+			const bearer = `Bearer ${tokensA.access}`;
+			type Row = { id: unknown; label: unknown; owner: unknown; secret?: unknown };
+			const norm = (rows: Row[]) =>
+				rows
+					.map((r) => ({
+						id: String(r.id),
+						label: r.label,
+						owner: String(r.owner),
+						hasSecret: "secret" in r,
+					}))
+					.sort((x, y) => x.id.localeCompare(y.id));
+
+			// (1) SDK over WS-RPC, authenticated as A.
+			const [wsRows] = await sdkA.query<[Row[]]>("SELECT * FROM item").json();
+
+			// (2) HTTP POST /sql with A's bearer token.
+			const sqlRes = await sql(server, "SELECT * FROM item", { auth: bearer, ns, db });
+			expect(sqlRes.status).toBe(200);
+			const [sqlEnv] = (await sqlRes.json()) as Envelope[];
+			expect(sqlEnv.status).toBe("OK");
+			const sqlRows = sqlEnv.result as Row[];
+
+			// (3) HTTP GET /key/:table with A's bearer token.
+			const keyRes = await send(server, "GET", "/key/item", { auth: bearer, ns, db });
+			expect(keyRes.status).toBe(200);
+			const [keyEnv] = (await keyRes.json()) as Envelope[];
+			expect(keyEnv.status).toBe("OK");
+			const keyRows = keyEnv.result as Row[];
+
+			// A's rows only, `secret` redacted everywhere.
+			const expected = [
+				{ id: "item:a1", label: "a-one", owner: String(aId), hasSecret: false },
+				{ id: "item:a2", label: "a-two", owner: String(aId), hasSecret: false },
+			];
+			const ws = norm(wsRows);
+			const via_sql = norm(sqlRows);
+			const via_key = norm(keyRows);
+			expect(ws).toEqual(expected);
+			// Every transport agrees, row-for-row and field-for-field.
+			expect(via_sql).toEqual(ws);
+			expect(via_key).toEqual(ws);
+		} finally {
+			if (sdkA) await sdkA.close();
+			await root.close();
 			await server.stop();
 		}
 	}, 30000);
