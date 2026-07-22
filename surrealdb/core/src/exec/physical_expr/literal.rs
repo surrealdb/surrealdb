@@ -4,7 +4,7 @@ use anyhow::bail;
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::catalog::providers::DatabaseProvider;
+use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 use crate::catalog::{DatabaseId, NamespaceId, Permission};
 use crate::err::Error;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
@@ -214,12 +214,30 @@ impl PhysicalExpr for Param {
 				};
 
 				let txn = ctx.exec_ctx.txn();
-				// Look up database definition by name to get the IDs
+				// Look up the database definition by name to get the IDs
 				if let Ok(Some(db_def)) =
 					txn.get_db_by_name(ns_name, db_name, ctx.exec_ctx.version_stamp()).await
 				{
 					let ns_id = db_def.namespace_id;
 					let db_id = db_def.database_id;
+
+					// A database-defined param's PERMISSIONS predicate may dereference
+					// records (e.g. `$auth.admin`), whose fetch needs a database-level
+					// context. Root/namespace-level execution carries none, so evaluate
+					// the param under a database context built from its own ns/db, as a
+					// function call already does. `with_database` clones the current
+					// root, preserving auth, session, options, and the permission-
+					// predicate isolation flags.
+					if let Ok(Some(ns_def)) =
+						txn.get_ns_by_name(ns_name, ctx.exec_ctx.version_stamp()).await
+					{
+						let db_level = ctx.exec_ctx.with_database(ns_def, db_def);
+						let db_ctx = EvalContext {
+							exec_ctx: &db_level,
+							..ctx.clone()
+						};
+						return Ok(self.fetch_db_param(db_ctx, &txn, ns_id, db_id).await?);
+					}
 
 					return Ok(self.fetch_db_param(ctx, &txn, ns_id, db_id).await?);
 				}
