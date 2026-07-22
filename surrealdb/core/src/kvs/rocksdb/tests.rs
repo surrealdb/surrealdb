@@ -1054,3 +1054,40 @@ async fn open_cursor_cancellation_releases_cursors_alive_slot() {
 		)
 		.expect("commit failed");
 }
+
+/// A commit attempted after the coordinator has begun shutting down must be
+/// refused before anything is applied.
+///
+/// Group commit applies the transaction on the caller thread and then waits
+/// for the coordinator's batched fsync. Once shutdown has begun the fsync can
+/// no longer confirm durability, so the pre-apply gate fails the commit with
+/// `Shutdown` — nothing is applied and the caller can safely retry after
+/// reconnecting. Shutdown is treated as a controlled crash: no commit runs
+/// past this point, which the datastore must already stay consistent against.
+#[tokio::test(flavor = "multi_thread")]
+async fn commit_after_coordinator_shutdown_is_refused_before_apply() {
+	use crate::kvs::err::Error;
+	use crate::kvs::rocksdb::{Datastore as RocksDbDatastore, RocksDbConfig};
+
+	let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
+	// The default configuration uses `sync=every`, which runs the coordinator.
+	let ds = RocksDbDatastore::new(&path, RocksDbConfig::default()).await.unwrap();
+
+	// Stage a write, then shut the coordinator down before committing, as a
+	// datastore shutdown racing an in-flight writer would.
+	let tx = ds.transaction(true, false).await.unwrap();
+	tx.set(b"refused/key".as_slice().into(), vec![1u8]).await.unwrap();
+	ds.commit_coordinator
+		.as_ref()
+		.expect("the default sync mode must run the commit coordinator")
+		.shutdown()
+		.unwrap();
+	let err = tx.commit().await.expect_err("a commit after coordinator shutdown must be refused");
+	assert!(matches!(err, Error::Shutdown), "expected Shutdown, got {err:?}");
+
+	// Nothing was applied: a later reader must not see the write.
+	let tx = ds.transaction(false, false).await.unwrap();
+	let val = tx.get(b"refused/key".as_slice().into(), None).await.unwrap();
+	assert_eq!(val, None, "a refused commit must not have applied anything");
+	tx.cancel().await.unwrap();
+}

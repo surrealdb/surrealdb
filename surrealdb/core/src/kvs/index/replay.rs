@@ -404,31 +404,46 @@ impl Building {
 		}
 	}
 
-	/// Drain prior-generation `!br` reservations before a fresh-generation
-	/// takeover wipes durable build state.
+	/// Drain `!br` reservations of every generation strictly below `below`,
+	/// after a fresh-generation takeover has installed the new state and
+	/// before it wipes the stale queues.
 	///
-	/// New-generation takeover (see `acquire_build_state` in `builder.rs`) calls
-	/// `delete_durable_build_queues`, which removes `!br/!bg/!bp` for every
-	/// generation. If a writer on **any** node in the cluster is mid-transaction
-	/// with a cached `!br(prior_gen, ticket)`, that wipe destroys the anchor
-	/// the protocol relies on to keep the writer's commit visible to the new
-	/// build's initial scan.
+	/// A new-generation takeover (see `acquire_build_state` in `builder.rs`)
+	/// deletes the old generations' `!br/!bg/!bp` entries. If a writer on
+	/// **any** node in the cluster is mid-transaction with a cached
+	/// `!br(prior_gen, ticket)`, that wipe destroys the anchor the protocol
+	/// relies on to keep the writer's commit visible to the new build's
+	/// initial scan. The takeover therefore installs the new generation
+	/// FIRST — ticket allocation CASes `!bs` and the admission fence rejects
+	/// generation mismatches, so no further old-generation reservations can
+	/// be created (builds in `Error` admit like `Building`) — and only then
+	/// drains, which makes the empty state this loop waits for stable.
 	///
-	/// This loop blocks the takeover until every prior-generation `!br` is
+	/// This loop blocks the takeover until every below-`below` `!br` is
 	/// either gone (the writer's user transaction committed, the deferred
 	/// release ran, or another drainer in the cluster removed it) or the
 	/// writer's node is confirmed dead via durable membership. Once the scan
 	/// returns empty, the new build's initial scan is guaranteed to start
 	/// after every surviving writer's commit — so the writer's main-table
 	/// writes are visible to the scan even though the `!bg(prior_gen, *)`
-	/// entries are about to be wiped.
+	/// entries are about to be wiped. A live writer holding a transaction
+	/// open can block this (and the takeover) until it closes; the new
+	/// generation's owner heartbeat is not refreshed while waiting, so a
+	/// long-blocked takeover can itself be taken over after lease expiry —
+	/// ownership CAS fencing keeps that safe.
 	///
 	/// Classification matches `wait_for_durable_reservations` and uses only
 	/// durable state, so it works cross-node without in-process coordination.
 	/// Concurrent drainers race safely: each `tx.del(&br)` is a no-op once
 	/// another node has already removed the entry.
-	pub(super) async fn wait_for_prior_generation_reservations(&self) -> Result<()> {
-		let rng = self.ikb.new_br_all_generations_range()?;
+	pub(super) async fn wait_for_prior_generation_reservations(
+		&self,
+		below: BuildGeneration,
+	) -> Result<()> {
+		// Reservations sort by generation, so the stale span is everything
+		// before the start of `below`'s own range.
+		let mut rng = self.ikb.new_br_all_generations_range()?;
+		rng.end = self.ikb.new_br_range(below)?.start;
 		loop {
 			if self.is_aborted().await {
 				return Ok(());

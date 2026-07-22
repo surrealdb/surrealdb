@@ -222,6 +222,17 @@ impl Transactable for Transaction {
 			if !self.writeable() {
 				return Err(Error::TransactionReadonly);
 			}
+			// Refuse the commit before applying anything once the datastore
+			// has begun shutting down: the grouped fsync can no longer
+			// confirm durability, so no new commit should run past this
+			// point. Shutdown is treated as a controlled crash — the store
+			// is required to be consistent after any crash — so failing here
+			// leaves the transaction un-applied and safely retryable.
+			if let Some(coordinator) = &self.commit_coordinator
+				&& coordinator.is_shutting_down()
+			{
+				return Err(Error::Shutdown);
+			}
 			// Load the inner transaction
 			let mut inner = self.inner.write().await;
 			// Commit the transaction (writes to WAL)

@@ -122,7 +122,6 @@ impl<'a> Bp<'a> {
 		}
 	}
 
-	#[cfg(test)]
 	/// Return the record-keyed range for primary appending markers in one generation.
 	pub(crate) fn range(
 		ns: NamespaceId,

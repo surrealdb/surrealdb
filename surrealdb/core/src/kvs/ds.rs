@@ -1316,6 +1316,13 @@ impl Datastore {
 	pub async fn shutdown(&self) -> Result<()> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running datastore shutdown operations");
+		// Local index builder tasks are deliberately left running: the storage
+		// engine shutdown below stops the commit coordinator first, after which
+		// every commit is refused before it applies (see the engine
+		// `Transaction::commit` gate). An in-flight build therefore makes no
+		// durable change during shutdown and stays at its last committed
+		// checkpoint, so the periodic resume scan continues it after restart —
+		// exactly as it would after a crash.
 		// Archive this datastore in the cluster, but don't let a blocked
 		// metadata transaction prevent storage engine shutdown.
 		let _ = archive_node_for_shutdown(
@@ -2131,6 +2138,14 @@ impl Datastore {
 	/// stalled builds manually (with `REBUILD INDEX`) can disable the scan by
 	/// setting its interval to zero.
 	///
+	/// Recovery is serialized: a pass adopts at most one stalled build, and
+	/// no pass adopts anything while a local builder task is still running.
+	/// A restart with several stranded builds (for example multiple full-text
+	/// indexes on a small instance) therefore rebuilds them one at a time
+	/// instead of multiplying the node's memory and CPU footprint; every
+	/// stalled build is still recovered, one scan pass after the previous one
+	/// finishes. User-initiated `REBUILD INDEX` is not throttled by this.
+	///
 	/// Returns the number of stalled builds adopted this pass.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self, canceller))]
 	pub async fn resume_stalled_index_builds(
@@ -2150,6 +2165,18 @@ impl Datastore {
 			canceller.clone(),
 		)?;
 		if !lh.has_lease().await? {
+			return Ok(0);
+		}
+		// Serialize recovery: while any local builder task is still running
+		// (a previously adopted build or a user-started one), defer further
+		// adoptions to a later pass. Without this, a restart with several
+		// stranded builds starts them all at once, and the concurrent initial
+		// scans can overwhelm a small instance's memory and CPU.
+		if self.index_builder.has_unfinished_build().await {
+			trace!(
+				target: TARGET,
+				"Deferring stalled index build adoption; a local index build is still running"
+			);
 			return Ok(0);
 		}
 		// Snapshot the (ns, db, table, index) hierarchy in a short read
@@ -2213,6 +2240,10 @@ impl Datastore {
 						"Resuming stalled index build '{}' on table '{}'",
 						ix.name, ix.table_name
 					);
+					// One adoption per pass: a later pass adopts the next
+					// stalled build once this one has finished, keeping
+					// recovery sequential on this node.
+					break;
 				}
 				Ok(false) => {}
 				Err(e) => {

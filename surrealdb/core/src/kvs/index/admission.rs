@@ -3,9 +3,7 @@ use chrono::Utc;
 use tokio::time::sleep;
 
 use super::builder::{IndexKey, IndexMutation};
-use super::state::{
-	catalog_still_references_index, durable_index_error_reason, is_condition_not_met,
-};
+use super::state::{catalog_still_references_index, is_condition_not_met};
 use super::{
 	Appending, BUILD_CLOSING_SLEEP, BUILD_RESERVATION_TTL_SECS, ConsumeResult, DurableAdmission,
 	DurableAdmissionDecision, DurableAdmissionFence, IndexBuildPhase, IndexBuildReservation,
@@ -102,7 +100,7 @@ impl IndexBuilder {
 			return self.write_admitted_mutation(ctx, &ikb, mutation, admitted).await;
 		}
 
-		match self.reserve_durable_admission(ctx, &ikb, ix).await? {
+		match self.reserve_durable_admission(ctx, &ikb).await? {
 			DurableAdmissionDecision::Admit(admission) => {
 				// Admission has already committed `!br`. Publish the prepared
 				// release and ticket into the per-user-txn cache before fence
@@ -199,12 +197,13 @@ impl IndexBuilder {
 
 	/// Re-read durable build state before writing a queued mutation.
 	///
-	/// If the generation changed or errored, the reservation is released and the
-	/// write fails. If the build became online, the reservation is released and
-	/// the caller indexes normally in the user transaction. This deliberately
-	/// avoids `ctx.tx()`: a user transaction can define a concurrent index and
-	/// then write to the same table before its snapshot can see the builder's
-	/// separately-committed `!bs` record.
+	/// If the generation changed, the reservation is released and the write
+	/// fails. If the build became online, the reservation is released and
+	/// the caller indexes normally in the user transaction. A build that
+	/// errored keeps queueing (see `reserve_durable_admission`). This
+	/// deliberately avoids `ctx.tx()`: a user transaction can define a
+	/// concurrent index and then write to the same table before its snapshot
+	/// can see the builder's separately-committed `!bs` record.
 	async fn fence_durable_admission(
 		&self,
 		ctx: &FrozenContext,
@@ -234,19 +233,17 @@ impl IndexBuilder {
 			.into());
 		}
 		match state.phase {
-			IndexBuildPhase::Building | IndexBuildPhase::Closing => {
+			// `Error` queues like `Building`: the ticket was reserved against
+			// this same generation, and the mutation either dies with the
+			// generation's queue wipe (the record is rescanned) or is
+			// re-queued under the recovering build — see the matching arm in
+			// `reserve_durable_admission`.
+			IndexBuildPhase::Building | IndexBuildPhase::Closing | IndexBuildPhase::Error => {
 				Ok(DurableAdmissionFence::Queue)
 			}
 			IndexBuildPhase::Online => {
 				release.release().await?;
 				Ok(DurableAdmissionFence::IndexNormally)
-			}
-			IndexBuildPhase::Error => {
-				release.release().await?;
-				Err(Error::IndexingBuildingCancelled {
-					reason: durable_index_error_reason(ix, &state),
-				}
-				.into())
 			}
 		}
 	}
@@ -255,14 +252,15 @@ impl IndexBuilder {
 	///
 	/// The first mutation in a user transaction pays the full fence (a fresh
 	/// short transaction reads `!bs`). Subsequent mutations reuse the cached
-	/// ticket, but the build can still rotate or transition `Online`/`Error`
-	/// in between — and a new-build takeover wipes any prior-generation `!br`
-	/// via [`super::state::delete_durable_build_queues`], removing the anchor
-	/// the protocol relies on. Without this recheck, the next mutation would
+	/// ticket, but the build can still rotate or transition `Online` in
+	/// between — and a new-build takeover wipes prior-generation `!br` via
+	/// [`super::state::delete_stale_build_queues`], removing the anchor the
+	/// protocol relies on. Without this recheck, the next mutation would
 	/// write `!bg(old_gen, *)` that no builder will replay.
 	///
-	/// On `Online`, `Error`, generation mismatch, or missing state, the user
-	/// transaction is aborted with `IndexingBuildingCancelled`. The cached
+	/// On `Online`, generation mismatch, or missing state, the user
+	/// transaction is aborted with `IndexingBuildingCancelled`; an errored
+	/// build keeps queueing (see `reserve_durable_admission`). The cached
 	/// ticket's `!br` is removed by the close-path release; an idempotent
 	/// `delc(key, val)` handles the case where it was already wiped.
 	pub(super) async fn recheck_cached_admission(
@@ -291,16 +289,18 @@ impl IndexBuilder {
 			.into());
 		}
 		match state.phase {
-			IndexBuildPhase::Building | IndexBuildPhase::Closing => Ok(()),
+			// `Error` keeps queueing under the cached ticket: earlier
+			// mutations in this user transaction are already queued to this
+			// generation, and the whole queue is wiped-and-rescanned by the
+			// recovering `REBUILD INDEX`, so consistency does not depend on
+			// replay. Aborting here would fail the user's write for a
+			// background build failure.
+			IndexBuildPhase::Building | IndexBuildPhase::Closing | IndexBuildPhase::Error => Ok(()),
 			IndexBuildPhase::Online => Err(Error::IndexingBuildingCancelled {
 				reason: format!(
 					"Index {} became online mid-transaction; queued mutations would be lost",
 					ix.name
 				),
-			}
-			.into()),
-			IndexBuildPhase::Error => Err(Error::IndexingBuildingCancelled {
-				reason: durable_index_error_reason(ix, &state),
 			}
 			.into()),
 		}
@@ -309,13 +309,15 @@ impl IndexBuilder {
 	/// Allocate a durable writer ticket while the index is building.
 	///
 	/// `Closing` rejects new tickets but may still have admitted writers in
-	/// flight, so callers poll durable state until the build becomes `Online`,
-	/// `Error`, or the request context is cancelled or timed out.
+	/// flight, so callers poll durable state until the build becomes `Online`
+	/// or `Error`, or the request context is cancelled or timed out. `Error`
+	/// admits like `Building` so a failed build never blocks user writes; the
+	/// queued mutations are wiped and the table rescanned when a `REBUILD
+	/// INDEX` recovers the index.
 	async fn reserve_durable_admission(
 		&self,
 		ctx: &FrozenContext,
 		ikb: &IndexKeyBase,
-		ix: &IndexDefinition,
 	) -> Result<DurableAdmissionDecision> {
 		loop {
 			if let Some(reason) = ctx.done(true)? {
@@ -335,13 +337,6 @@ impl IndexBuilder {
 					tx.cancel().await?;
 					return Ok(DurableAdmissionDecision::IndexNormally);
 				}
-				IndexBuildPhase::Error => {
-					tx.cancel().await?;
-					return Err(Error::IndexingBuildingCancelled {
-						reason: durable_index_error_reason(ix, &state),
-					}
-					.into());
-				}
 				IndexBuildPhase::Closing => {
 					tx.cancel().await?;
 					sleep(BUILD_CLOSING_SLEEP).await;
@@ -350,7 +345,16 @@ impl IndexBuilder {
 					}
 					continue;
 				}
-				IndexBuildPhase::Building => {
+				// A failed build must not fail user writes: mutations keep
+				// queueing under the errored generation. Nothing replays them
+				// (the generation is terminal), but the reservation still
+				// fences the recovery path — a `REBUILD INDEX` starts a new
+				// generation, and its takeover drains in-flight `!br` before
+				// wiping the stale queues and rescanning the table, so every
+				// write admitted here is either rescanned or re-queued under
+				// the new generation. Failing the write instead would turn a
+				// background build failure into a table-wide write outage.
+				IndexBuildPhase::Building | IndexBuildPhase::Error => {
 					let ticket = state.next_ticket;
 					let mut next = state.clone();
 					next.next_ticket = next.next_ticket.saturating_add(1);

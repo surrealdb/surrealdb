@@ -52,8 +52,8 @@ pub use api::{
 	GetMultiResult, KeysResult, ScanCursorKeys, ScanCursorVals, ScanLimit, ScanResult, Transactable,
 };
 pub use consts::{
-	COUNT_BATCH_SIZE, ESTIMATED_BYTES_PER_KEY, ESTIMATED_BYTES_PER_KV, INDEXING_BATCH_SIZE,
-	NORMAL_BATCH_SIZE,
+	COUNT_BATCH_SIZE, ESTIMATED_BYTES_PER_KEY, ESTIMATED_BYTES_PER_KV, INDEXING_BATCH_MAX_BYTES,
+	INDEXING_BATCH_SIZE, INDEXING_PROBE_BATCH_SIZE, NORMAL_BATCH_SIZE,
 };
 pub use direction::Direction;
 pub(crate) use ds::TransactionFactory;
@@ -92,6 +92,22 @@ pub(crate) fn is_retryable_transaction_conflict(err: &anyhow::Error) -> bool {
 	)
 }
 
+/// Whether an error reports that the storage engine is shutting down.
+///
+/// Shutdown-class failures are transient from the cluster's perspective: the
+/// interrupted work is safe to retry after the process restarts. Callers that
+/// persist failure state (such as the concurrent index builder) must not
+/// record them as permanent errors.
+pub(crate) fn is_shutdown_error(err: &anyhow::Error) -> bool {
+	if matches!(err.downcast_ref::<self::err::Error>(), Some(self::err::Error::Shutdown)) {
+		return true;
+	}
+	matches!(
+		err.downcast_ref::<crate::err::Error>(),
+		Some(crate::err::Error::Kvs(self::err::Error::Shutdown))
+	)
+}
+
 #[cfg(test)]
 pub(crate) mod testing {
 	use std::collections::HashMap;
@@ -119,6 +135,15 @@ pub(crate) mod testing {
 		ConcurrentIndexAfterReservationRegistration,
 		ConcurrentIndexReservationRelease,
 		ConcurrentIndexCountTailCommitted,
+		ConcurrentIndexInitialBatchCommit,
+		/// Simulates an initial-scan batch commit interrupted by datastore
+		/// shutdown (the `Shutdown` error the storage engines surface once
+		/// graceful shutdown has begun).
+		ConcurrentIndexInitialBatchShutdown,
+		/// Simulates the initial scan crossing the process memory threshold
+		/// (the error `Building::is_beyond_threshold` raises under memory
+		/// pressure).
+		ConcurrentIndexInitialBatchMemoryThreshold,
 	}
 
 	static RETRYABLE_CONFLICTS: OnceLock<Mutex<HashMap<(RetryableConflictSite, Uuid), usize>>> =
@@ -205,7 +230,24 @@ pub(crate) mod testing {
 		if *remaining == 0 {
 			errors.remove(&(site, node_id));
 		}
-		Err(super::Error::Internal(format!("injected non-retryable error at {site:?}")).into())
+		// Transient-interruption sites reproduce the exact errors the builder
+		// classifies specially, so tests exercise those paths end to end.
+		match site {
+			// The error a batch commit surfaces once graceful shutdown has
+			// begun: the pre-apply gate refuses the commit with `Shutdown`.
+			NonRetryableErrorSite::ConcurrentIndexInitialBatchShutdown => {
+				Err(super::Error::Shutdown.into())
+			}
+			// The error the builder raises when the process crosses the
+			// memory threshold.
+			NonRetryableErrorSite::ConcurrentIndexInitialBatchMemoryThreshold => {
+				Err(crate::err::Error::QueryBeyondMemoryThreshold.into())
+			}
+			_ => {
+				Err(super::Error::Internal(format!("injected non-retryable error at {site:?}"))
+					.into())
+			}
+		}
 	}
 
 	pub(crate) struct RetryableConflictGuard {

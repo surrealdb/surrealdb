@@ -24,6 +24,22 @@ pub enum Error {
 	)]
 	ReadAndDeleteOnly,
 
+	/// The operation was refused because the datastore is shutting down.
+	///
+	/// Storage engines report this when a commit is attempted after graceful
+	/// shutdown has begun. In the common case the pre-apply gate refuses the
+	/// commit before it applies, so nothing was written and the work is safe
+	/// to retry after reconnecting. In a narrow race the grouped-fsync wait
+	/// can also return this after the transaction already applied but before
+	/// its durability was confirmed; this is deliberately treated the same,
+	/// because shutdown is handled as a controlled crash — the datastore
+	/// must already be consistent after any crash, and a crash leaves the
+	/// same apply-but-unconfirmed ambiguity for an in-flight commit. Callers
+	/// that persist failure state must therefore not record this as a
+	/// permanent error.
+	#[error("The datastore is shutting down")]
+	Shutdown,
+
 	/// There was a problem with a datastore transaction
 	#[error("There was a problem with a transaction: {0}")]
 	Transaction(String),

@@ -1930,6 +1930,18 @@ impl Transactable for Transaction {
 				let ts = HlcTimeStamp::next();
 				inner.set_commit_timestamp(ts.0);
 			}
+			// Refuse the commit before applying anything once the datastore
+			// has begun shutting down: the grouped fsync can no longer
+			// confirm durability, so no new commit should run past this
+			// point. Shutdown is treated as a controlled crash — the store
+			// is required to be consistent after any crash — so failing here
+			// leaves the transaction un-applied (the taken `inner` rolls
+			// back on drop) and safely retryable.
+			if let Some(coordinator) = &self.commit_coordinator
+				&& coordinator.is_shutting_down()
+			{
+				return Err(Error::Shutdown);
+			}
 			// RocksDB commit may invoke `fsync` when sync writes are
 			// enabled, so it is the highest-latency synchronous call in
 			// the transaction lifecycle and must respect the

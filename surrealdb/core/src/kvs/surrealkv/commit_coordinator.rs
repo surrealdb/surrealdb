@@ -41,7 +41,9 @@ use crate::kvs::surrealkv::SurrealKvConfig;
 /// to ensure safe concurrent access from multiple threads. The condition variable prevents
 /// busy-waiting and ensures efficient wake-up semantics.
 struct SharedState {
-	/// Shutdown flag
+	/// Set once shutdown has begun. Checked before a commit applies (so no
+	/// new commit runs during shutdown) and by the batcher to stop enqueuing
+	/// new sync requests.
 	shutdown: Arc<AtomicBool>,
 	/// Buffer of pending sync requests awaiting batch processing
 	buffer: Mutex<Vec<SyncRequest>>,
@@ -149,6 +151,18 @@ impl CommitCoordinator {
 		})
 	}
 
+	/// Whether shutdown has begun.
+	///
+	/// Callers check this before applying a commit: once shutdown has begun
+	/// the grouped fsync can no longer confirm durability, so the commit is
+	/// refused before it applies rather than run while the datastore is
+	/// stopping. Treating shutdown as a controlled crash — no writes past
+	/// this point — keeps recovery simple: the store is already required to
+	/// be consistent after any crash.
+	pub fn is_shutting_down(&self) -> bool {
+		self.shared.shutdown.load(Ordering::Acquire)
+	}
+
 	/// Wait for the next grouped WAL flush.
 	///
 	/// This should be called after the transaction has been committed on the caller thread.
@@ -167,8 +181,16 @@ impl CommitCoordinator {
 			let mut buffer = self.shared.buffer.lock();
 			// If shutdown completed while the batcher exited, do not enqueue: the
 			// request would never be flushed and `rx.await` would hang forever.
-			if self.shared.shutdown.load(Ordering::Acquire) {
-				return Err(Error::Transaction("commit coordinator is shut down".into()));
+			// The pre-apply `is_shutting_down` check refuses almost all commits
+			// before they reach this point; this covers the narrow race where
+			// shutdown begins after that check but before the sync wait. The
+			// commit has already been applied by the caller thread, so
+			// `Error::Shutdown` marks a shutdown-induced interruption rather
+			// than a permanent transaction error, and background work (such as
+			// a concurrent index build) stays resumable after restart instead
+			// of recording a durable failure.
+			if self.is_shutting_down() {
+				return Err(Error::Shutdown);
 			}
 			// Check if buffer is currently empty
 			let was_empty = buffer.is_empty();
@@ -193,7 +215,9 @@ impl CommitCoordinator {
 		// be between its `buffer.is_empty()` check and `condvar.wait()`
 		// while shutdown sets the flag and calls `notify_all()` — with
 		// no waiter registered yet the notification is dropped and the
-		// batcher parks forever on the condvar.
+		// batcher parks forever on the condvar. Setting the flag here also
+		// makes `is_shutting_down` refuse any commit that has not applied
+		// yet, so no new commit runs once shutdown has begun.
 		{
 			let _guard = self.shared.buffer.lock();
 			self.shared.shutdown.store(true, Ordering::Release);

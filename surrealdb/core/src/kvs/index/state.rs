@@ -56,6 +56,10 @@ pub(crate) enum IndexBuildPhase {
 	/// The index has caught up with admitted writes and is queryable.
 	Online,
 	/// The build was aborted or failed; queries must not use the index.
+	///
+	/// Writers keep queueing mutations as in `Building`, so a failed build
+	/// never blocks user writes; the stale queue is wiped and the table
+	/// rescanned when a `REBUILD INDEX` starts the next generation.
 	Error,
 }
 
@@ -223,6 +227,32 @@ pub(super) async fn delete_durable_build_queues(
 	tx.delr(ikb.new_bg_all_generations_range()?).await?;
 	tx.delr(ikb.new_bp_all_generations_range()?).await?;
 	tx.delr(ikb.new_br_all_generations_range()?).await?;
+	Ok(())
+}
+
+/// Delete queued mutations, primary markers, and reservations for every
+/// generation strictly below `below`.
+///
+/// Used by a new-generation takeover after the next generation's state has
+/// been installed and the prior generations' reservations have drained: from
+/// that point no writer can re-create entries under the old generations
+/// (ticket allocation CASes `!bs` and the admission fence rejects generation
+/// mismatches), so the deletion is stable. Index retirement uses
+/// [`delete_durable_build_queues`] instead, which clears every generation.
+pub(super) async fn delete_stale_build_queues(
+	tx: &Transaction,
+	ikb: &IndexKeyBase,
+	below: super::BuildGeneration,
+) -> Result<()> {
+	let mut bg = ikb.new_bg_all_generations_range()?;
+	bg.end = ikb.new_bg_range(below)?.start;
+	tx.delr(bg).await?;
+	let mut bp = ikb.new_bp_all_generations_range()?;
+	bp.end = ikb.new_bp_range(below)?.start;
+	tx.delr(bp).await?;
+	let mut br = ikb.new_br_all_generations_range()?;
+	br.end = ikb.new_br_range(below)?.start;
+	tx.delr(br).await?;
 	Ok(())
 }
 

@@ -300,6 +300,15 @@ pub fn into_types_error(error: Error) -> TypesError {
 			}
 			KvsError::TransactionKeyAlreadyExists => TypesError::already_exists(message, None),
 			KvsError::ReadAndDeleteOnly => TypesError::not_allowed(message, None),
+			// The server is shutting down. Connection-class because the
+			// common case is a commit refused before it applied, which is
+			// safe to retry once the client reconnects. A shutdown is
+			// treated as a controlled crash, so the rare apply-but-
+			// unconfirmed race carries the same crash-equivalent ambiguity a
+			// client already has to tolerate on any unclean disconnect.
+			KvsError::Shutdown => {
+				TypesError::connection(message, ConnectionError::ConnectionFailed)
+			}
 			KvsError::TransactionTooLarge
 			| KvsError::TransactionKeyTooLarge
 			| KvsError::TransactionRangeTooLarge(_) => {
