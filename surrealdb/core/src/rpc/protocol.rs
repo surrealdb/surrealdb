@@ -155,7 +155,10 @@ pub trait RpcProtocol {
 	/// Deletes a session
 	async fn del_session(&self, id: &Uuid) {
 		self.session_map().remove(id);
+		// Cancel any live queries owned by this session
 		self.cleanup_lqs(id).await;
+		// Cancel any open transactions owned by this session
+		self.cleanup_txns(id).await;
 	}
 
 	/// Lists all sessions
@@ -226,6 +229,14 @@ pub trait RpcProtocol {
 
 	/// Handles the cleanup of all live queries
 	fn cleanup_all_lqs(&self) -> impl std::future::Future<Output = ()> + Send;
+
+	/// Handles the cleanup (cancellation) of any open transactions belonging to
+	/// a specific session, run when the session is detached or reset. Default
+	/// no-op: only transports that hold client-managed transactions (WebSocket)
+	/// override this.
+	fn cleanup_txns(&self, _session_id: &Uuid) -> impl std::future::Future<Output = ()> + Send {
+		async {}
+	}
 
 	// ------------------------------
 	// Method execution
@@ -791,6 +802,8 @@ pub trait RpcProtocol {
 		crate::iam::reset::reset(&mut session);
 		// Cleanup live queries
 		self.cleanup_lqs(&session_id).await;
+		// Cancel any open transactions owned by this session
+		self.cleanup_txns(&session_id).await;
 		// Return nothing on success
 		Ok(DbResult::Other(PublicValue::None))
 	}

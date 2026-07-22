@@ -1,5 +1,6 @@
 use core::fmt;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use axum::extract::ws::close_code::AGAIN;
@@ -30,9 +31,9 @@ use uuid::Uuid;
 
 use super::RpcState;
 use crate::cnf::{
-	PKG_NAME, PKG_VERSION, WEBSOCKET_MAX_ATTACHED_SESSIONS, WEBSOCKET_PING_FREQUENCY,
-	WEBSOCKET_RESPONSE_BUFFER_SIZE, WEBSOCKET_RESPONSE_CHANNEL_SIZE,
-	WEBSOCKET_RESPONSE_FLUSH_PERIOD,
+	MAX_TRANSACTIONS_PER_CONNECTION, MAX_TRANSACTIONS_PER_SESSION, PKG_NAME, PKG_VERSION,
+	WEBSOCKET_MAX_ATTACHED_SESSIONS, WEBSOCKET_PING_FREQUENCY, WEBSOCKET_RESPONSE_BUFFER_SIZE,
+	WEBSOCKET_RESPONSE_CHANNEL_SIZE, WEBSOCKET_RESPONSE_FLUSH_PERIOD,
 };
 use crate::rpc::CONN_CLOSED_ERR;
 use crate::rpc::format::WsFormat;
@@ -97,8 +98,15 @@ pub struct Websocket {
 	/// The attach count is additionally capped by [`WEBSOCKET_MAX_ATTACHED_SESSIONS`]
 	/// as defence-in-depth against a single misbehaving client.
 	pub(crate) sessions: HashMap<Uuid, Arc<RwLock<Session>>>,
-	/// The active transactions for this WebSocket connection
-	pub(crate) transactions: DashMap<Uuid, Arc<Transaction>>,
+	/// The active transactions for this WebSocket connection, each tracked with
+	/// the id of the session that opened it (the connection's implicit default
+	/// session is keyed by `self.id`). The session id drives per-session cleanup
+	/// and the per-session transaction limit.
+	pub(crate) transactions: DashMap<Uuid, (Uuid, Arc<Transaction>)>,
+	/// Per-session counts of currently open transactions, keyed by session id.
+	/// Enforces [`MAX_TRANSACTIONS_PER_CONNECTION`] /
+	/// [`MAX_TRANSACTIONS_PER_SESSION`].
+	pub(crate) counters: DashMap<Uuid, AtomicUsize>,
 	/// A cancellation token called when shutting down the server
 	pub(crate) shutdown: CancellationToken,
 	/// Connection-level cancellation handle. Bundles a hot-path
@@ -148,6 +156,7 @@ impl Websocket {
 			cancel: surrealdb_core::ctx::CancelHandle::new(),
 			sessions: HashMap::new(),
 			transactions: DashMap::new(),
+			counters: DashMap::new(),
 			channel: sender.clone(),
 			datastore,
 		});
@@ -804,9 +813,9 @@ impl RpcProtocol for Websocket {
 		debug!("WebSocket get_tx called for transaction {id}");
 		self.transactions
 			.get(&id)
-			.map(|tx| {
+			.map(|entry| {
 				debug!("Transaction {id} found in WebSocket transactions map");
-				tx.clone()
+				Arc::clone(&entry.value().1)
 			})
 			.ok_or_else(|| {
 				warn!(
@@ -823,7 +832,20 @@ impl RpcProtocol for Websocket {
 		id: Uuid,
 		tx: Arc<surrealdb_core::kvs::Transaction>,
 	) -> Result<(), surrealdb_types::Error> {
-		self.transactions.insert(id, tx);
+		// Tag the transaction with the connection's implicit default session and
+		// reserve a slot so the open-transaction counter stays consistent with a
+		// later `commit`/`cancel`/cleanup that releases it.
+		//
+		// NOTE: this has no callers today. Unlike `begin` it does NOT enforce the
+		// per-session cap (it always keys under `self.id` and never checks the
+		// limit); if it is ever wired up it should route through the same
+		// reservation-with-check that `begin` uses, or it will silently bypass the
+		// bound.
+		{
+			let counter = self.counters.entry(self.id).or_insert_with(|| AtomicUsize::new(0));
+			counter.value().fetch_add(1, Ordering::AcqRel);
+		}
+		self.transactions.insert(id, (self.id, tx));
 		Ok(())
 	}
 
@@ -958,6 +980,13 @@ impl RpcProtocol for Websocket {
 		self.cleanup_lqs_filtered(None).await;
 	}
 
+	/// Cancels and drops any transactions still open for a session that is
+	/// being detached or reset, so a client cannot leak transactions by
+	/// abandoning a session without committing or cancelling them.
+	async fn cleanup_txns(&self, session_id: &Uuid) {
+		self.cleanup_txns_filtered(Some(session_id)).await;
+	}
+
 	// ------------------------------
 	// Methods for transactions
 	// ------------------------------
@@ -966,8 +995,43 @@ impl RpcProtocol for Websocket {
 	async fn begin(
 		&self,
 		_txn: Option<Uuid>,
-		_session_id: Uuid,
+		session_id: Uuid,
 	) -> Result<DbResult, surrealdb_types::Error> {
+		// Reject a `begin` for a session that was never attached (the durable
+		// copy, if any, is consulted by `get_session`), matching every other
+		// handler's session guard. Without this a client could supply an endless
+		// stream of fabricated session ids — each getting its own independent
+		// per-session budget and its own `counters` entry — which would both
+		// defeat the per-session cap and grow the counter map without bound. The
+		// connection's implicit default session (`self.id`) is always registered,
+		// so it is exempt from the lookup. Done before the reservation so a
+		// rejected `begin` never touches `counters`, keeping its keyspace bounded
+		// to `{self.id}` plus the currently-attached sessions.
+		if session_id != self.id {
+			self.get_session(&session_id)?;
+		}
+		// Enforce the open-transaction cap before opening anything. The
+		// connection's implicit default session (keyed by `self.id`) is bounded
+		// by the per-connection limit; every attached session is bounded
+		// independently by the per-session limit. Reserve the slot up front with
+		// a `fetch_add` so two concurrent `begin`s on the same session cannot
+		// both observe a below-limit count and slip past; the reservation is
+		// released again on every failure path below.
+		let limit = if session_id == self.id {
+			*MAX_TRANSACTIONS_PER_CONNECTION
+		} else {
+			*MAX_TRANSACTIONS_PER_SESSION
+		};
+		let prev = {
+			let counter = self.counters.entry(session_id).or_insert_with(|| AtomicUsize::new(0));
+			counter.value().fetch_add(1, Ordering::AcqRel)
+		};
+		if prev >= limit {
+			// Roll back the reservation and reject: the session already holds the
+			// maximum number of concurrently open transactions.
+			self.release_txn_slot(&session_id);
+			return Err(surrealdb_core::rpc::too_many_transactions());
+		}
 		// `begin` bypasses the executor (which is where the
 		// `Context::done` cancel short-circuit lives), so the cancel
 		// handle has to be checked manually. `cancel_aware_transaction`
@@ -975,16 +1039,44 @@ impl RpcProtocol for Websocket {
 		// pattern; any future RPC method that needs to open its own
 		// transaction outside the executor SHOULD route through it.
 		let tx =
-			self.cancel_aware_transaction(TransactionType::Write, LockType::Optimistic).await?;
+			match self.cancel_aware_transaction(TransactionType::Write, LockType::Optimistic).await
+			{
+				Ok(tx) => tx,
+				Err(e) => {
+					// Opening the transaction failed, so give the reserved slot back.
+					self.release_txn_slot(&session_id);
+					return Err(e);
+				}
+			};
 		// Generate a unique transaction ID
 		let id = Uuid::now_v7();
 		debug!("WebSocket begin: created transaction {id}");
-		// Store the transaction in the map
-		self.transactions.insert(id, Arc::new(tx));
+		// Store the transaction in the map, tagged with the owning session so it
+		// can be cleaned up when that session is detached or reset.
+		self.transactions.insert(id, (session_id, Arc::new(tx)));
 		debug!(
 			"WebSocket begin: stored transaction {id}, map now has {} transactions",
 			self.transactions.len()
 		);
+		// Close the begin/detach race. RPCs on one connection run concurrently,
+		// so a `detach` can interleave with this `begin`: `del_session` removes
+		// the session from `session_map` *before* draining its transactions, so a
+		// `detach` that ran during the transaction-open await above would have
+		// drained the map before this txn was inserted — missing it — while its
+		// `remove_if` kept the counter entry alive (it still saw our reservation).
+		// That would strand an open transaction and a counter entry under a
+		// detached, never-reattached session id; a client rotating fresh ids could
+		// grow both maps without bound for the connection's lifetime. Now that the
+		// txn is published, re-check the session: if it is gone, undo — drain and
+		// cancel it and drop the counter — and reject. `del_session`'s
+		// remove-then-drain ordering pairs with this insert-then-recheck so one
+		// side always sees the other in both interleavings. `self.id` is never
+		// detached (exempt), and `reset` keeps the session attached, so a racing
+		// `reset` leaves the txn correctly tracked rather than undone.
+		if session_id != self.id && !self.session_map().contains_key(&session_id) {
+			self.cleanup_txns_filtered(Some(&session_id)).await;
+			return Err(surrealdb_core::rpc::session_not_found(session_id));
+		}
 		// Return the transaction ID to the client
 		Ok(DbResult::Other(Value::Uuid(surrealdb::types::Uuid::from(id))))
 	}
@@ -1005,9 +1097,11 @@ impl RpcProtocol for Websocket {
 		let txn_id = txn_id.into_inner();
 
 		// Retrieve and remove the transaction from the map
-		let Some((_, tx)) = self.transactions.remove(&txn_id) else {
+		let Some((_, (session_id, tx))) = self.transactions.remove(&txn_id) else {
 			return Err(surrealdb_core::rpc::invalid_params("Transaction not found"));
 		};
+		// The transaction is no longer open, so free its reserved slot.
+		self.release_txn_slot(&session_id);
 
 		// Commit the transaction
 		tx.commit().await.map_err(surrealdb_core::rpc::types_error_from_anyhow)?;
@@ -1032,9 +1126,11 @@ impl RpcProtocol for Websocket {
 		let txn_id = txn_id.into_inner();
 
 		// Retrieve and remove the transaction from the map
-		let Some((_, tx)) = self.transactions.remove(&txn_id) else {
+		let Some((_, (session_id, tx))) = self.transactions.remove(&txn_id) else {
 			return Err(surrealdb_core::rpc::invalid_params("Transaction not found"));
 		};
+		// The transaction is no longer open, so free its reserved slot.
+		self.release_txn_slot(&session_id);
 
 		// Cancel the transaction
 		tx.cancel().await.map_err(surrealdb_core::rpc::types_error_from_anyhow)?;
@@ -1126,45 +1222,93 @@ impl Websocket {
 		Ok(tx)
 	}
 
-	/// Cancel every client-managed transaction left in `self.transactions`.
+	/// Release one reserved open-transaction slot for a session, undoing the
+	/// `fetch_add` reservation made in [`Self::begin`] / [`Self::set_tx`]. Called
+	/// whenever a reservation is given back — an open transaction leaving the map
+	/// (`commit`, `cancel`, cleanup), or a `begin` that reserved then bailed
+	/// (over the limit, or the transaction failed to open). A missing counter
+	/// entry is treated as already-released, so this can never underflow.
 	///
-	/// Invoked from `serve()` at WS teardown (alongside `cleanup_all_lqs`)
-	/// to drain transactions opened via the explicit `begin` RPC whose
-	/// `commit` / `cancel` never arrived. Without this drain, a client
-	/// that calls `begin` and then disconnects (or whose `begin` request
-	/// is processed by a spawned handler that outlives the read loop)
-	/// would leave the `Arc<Transaction>` in the map until the
-	/// `Websocket` itself is dropped — at which point `Transactor::Drop`
-	/// would emit "A transaction was dropped without being committed or
-	/// cancelled".
+	/// Prunes the entry once it drains to zero (for any session other than the
+	/// connection's default `self.id`, whose counter is intentionally retained),
+	/// so no release path can strand a zeroed counter entry under a
+	/// detached/rotated session id. `remove_if` only fires while the count is
+	/// still zero, so a concurrent `begin` that re-reserved the slot keeps it.
+	fn release_txn_slot(&self, session_id: &Uuid) {
+		let Some(counter) = self.counters.get(session_id) else {
+			return;
+		};
+		let prev = counter.value().fetch_sub(1, Ordering::AcqRel);
+		// Drop the shard guard before touching the map again.
+		drop(counter);
+		if prev == 1 && *session_id != self.id {
+			self.counters.remove_if(session_id, |_, c| c.load(Ordering::Acquire) == 0);
+		}
+	}
+
+	/// Shared body for [`Self::cleanup_all_txns`] and the per-session
+	/// [`RpcProtocol::cleanup_txns`].
 	///
-	/// Adapted from <https://github.com/surrealdb/surrealdb/pull/6907>'s
-	/// `cleanup_all_txns`; intentionally scoped to just the drain (the
-	/// 6907 design also adds per-connection / per-session limits and a
-	/// counter map, which are out of scope here).
-	async fn cleanup_all_txns(&self) {
-		// Drain the map atomically into a local vec so we can release
-		// each DashMap shard lock before awaiting `tx.cancel()`. Holding
-		// shard locks across `.await` would risk a deadlock against any
-		// other code path that touches the map and then awaits.
-		let mut drained: Vec<(Uuid, Arc<Transaction>)> = Vec::new();
-		self.transactions.retain(|tid, tx| {
-			drained.push((*tid, Arc::clone(tx)));
+	/// `session_filter` narrows the drain to a single session id when `Some`
+	/// (session detach / reset), or drains every client-managed transaction on
+	/// this WebSocket when `None` (the connection-close path). Each drained
+	/// transaction is cancelled and its reserved slot released.
+	///
+	/// Drains transactions opened via the explicit `begin` RPC whose
+	/// `commit` / `cancel` never arrived. Without this drain, a client that
+	/// calls `begin` and then disconnects (or detaches the owning session)
+	/// would leave the `Arc<Transaction>` in the map until the `Websocket`
+	/// itself is dropped — at which point `Transactor::Drop` would emit "A
+	/// transaction was dropped without being committed or cancelled".
+	async fn cleanup_txns_filtered(&self, session_filter: Option<&Uuid>) {
+		// Drain the matching entries atomically into a local vec so we can
+		// release each DashMap shard lock before awaiting `tx.cancel()`. Holding
+		// shard locks across `.await` would risk a deadlock against any other
+		// code path that touches the map and then awaits.
+		let mut drained: Vec<(Uuid, Uuid, Arc<Transaction>)> = Vec::new();
+		self.transactions.retain(|tid, val| {
+			let sid = val.0;
+			if let Some(want) = session_filter
+				&& sid != *want
+			{
+				return true;
+			}
+			drained.push((*tid, sid, Arc::clone(&val.1)));
 			false
 		});
-		if drained.is_empty() {
-			return;
-		}
-		trace!(
-			"Cancelling {} client-managed transaction(s) left on closing WebSocket {}",
-			drained.len(),
-			self.id,
-		);
-		for (tid, tx) in drained {
-			if let Err(err) = tx.cancel().await {
-				error!("Error cancelling transaction {tid} during WebSocket teardown: {err}",);
+		if !drained.is_empty() {
+			trace!(
+				"Cancelling {} client-managed transaction(s) on WebSocket {}",
+				drained.len(),
+				self.id,
+			);
+			for (tid, sid, tx) in drained {
+				// Free the reserved slot first so the counter stays balanced even
+				// if the cancel below errors.
+				self.release_txn_slot(&sid);
+				if let Err(err) = tx.cancel().await {
+					error!("Error cancelling transaction {tid} during session cleanup: {err}",);
+				}
 			}
 		}
+		// Safety net: `release_txn_slot` already prunes an attached session's
+		// counter entry as it drains to zero, but sweep once more here to catch a
+		// stray zeroed entry that had no transaction to drain (e.g. left by a
+		// transiently-racing reservation). The connection's default-session
+		// counter (keyed by `self.id`) is intentionally retained.
+		if let Some(want) = session_filter
+			&& *want != self.id
+		{
+			self.counters.remove_if(want, |_, c| c.load(Ordering::Acquire) == 0);
+		}
+	}
+
+	/// Cancel every client-managed transaction left in `self.transactions`.
+	///
+	/// Invoked from `serve()` at WS teardown (alongside `cleanup_all_lqs`) to
+	/// drain all transactions regardless of the owning session.
+	async fn cleanup_all_txns(&self) {
+		self.cleanup_txns_filtered(None).await;
 	}
 }
 
@@ -1217,6 +1361,7 @@ mod tests {
 			datastore: ds,
 			sessions: HashMap::new(),
 			transactions: DashMap::new(),
+			counters: DashMap::new(),
 			shutdown: CancellationToken::new(),
 			cancel: surrealdb_core::ctx::CancelHandle::new(),
 			channel: tx,
@@ -1548,6 +1693,7 @@ mod tests {
 				datastore: ds,
 				sessions: HashMap::new(),
 				transactions: DashMap::new(),
+				counters: DashMap::new(),
 				shutdown: CancellationToken::new(),
 				cancel: surrealdb_core::ctx::CancelHandle::new(),
 				channel: chn_internal,
@@ -1669,6 +1815,7 @@ mod tests {
 				datastore: ds,
 				sessions: HashMap::new(),
 				transactions: DashMap::new(),
+				counters: DashMap::new(),
 				shutdown: CancellationToken::new(),
 				cancel: surrealdb_core::ctx::CancelHandle::new(),
 				channel: chn_internal,
@@ -1778,6 +1925,7 @@ mod tests {
 				datastore: ds,
 				sessions: HashMap::new(),
 				transactions: DashMap::new(),
+				counters: DashMap::new(),
 				shutdown: CancellationToken::new(),
 				cancel: surrealdb_core::ctx::CancelHandle::new(),
 				channel: chn_internal,
@@ -1850,6 +1998,7 @@ mod tests {
 				datastore: ds,
 				sessions: HashMap::new(),
 				transactions: DashMap::new(),
+				counters: DashMap::new(),
 				shutdown: CancellationToken::new(),
 				cancel: surrealdb_core::ctx::CancelHandle::new(),
 				channel: chn_internal,
@@ -1886,6 +2035,198 @@ mod tests {
 				 self.transactions: {} entries",
 				rpc.transactions.len(),
 			);
+		});
+	}
+
+	/// The per-connection open-transaction cap is enforced: once the
+	/// connection's implicit default session holds
+	/// `MAX_TRANSACTIONS_PER_CONNECTION` open transactions, further `begin`s
+	/// are rejected until one is committed or cancelled, without opening (and
+	/// leaking) a transaction for the rejected request.
+	#[test]
+	fn begin_enforces_per_connection_transaction_limit() {
+		with_big_stack(|| async {
+			let rpc = ws_with_observer(None).await;
+			let limit = *MAX_TRANSACTIONS_PER_CONNECTION;
+			// Open transactions up to the limit on the default session.
+			let mut first_id = None;
+			for _ in 0..limit {
+				let res =
+					rpc.begin(None, rpc.id).await.expect("begin under the limit should succeed");
+				if first_id.is_none() {
+					let DbResult::Other(Value::Uuid(id)) = res else {
+						panic!("begin should return a transaction uuid");
+					};
+					first_id = Some(id);
+				}
+			}
+			assert_eq!(
+				rpc.transactions.len(),
+				limit,
+				"every begin under the limit should be stored",
+			);
+			// The next begin must be rejected without opening a transaction.
+			let err =
+				rpc.begin(None, rpc.id).await.expect_err("begin over the limit should be rejected");
+			assert!(
+				err.to_string().contains("Too many open transactions"),
+				"unexpected error: {err}",
+			);
+			assert_eq!(
+				rpc.transactions.len(),
+				limit,
+				"a rejected begin must not add to the transactions map",
+			);
+			// Cancelling one frees a slot, so a subsequent begin succeeds again.
+			let id = first_id.expect("captured a transaction id");
+			let params = Array::from(vec![Value::Uuid(id)]);
+			rpc.cancel(None, rpc.id, params).await.expect("cancel should succeed");
+			assert_eq!(rpc.transactions.len(), limit - 1);
+			rpc.begin(None, rpc.id).await.expect("begin after a cancel frees a slot");
+			assert_eq!(rpc.transactions.len(), limit);
+			// Drain everything so no transaction is dropped uncommitted.
+			rpc.cleanup_all_txns().await;
+			assert!(rpc.transactions.is_empty());
+		});
+	}
+
+	/// `cleanup_txns` drains only the transactions belonging to the given
+	/// session (releasing their slots) and leaves other sessions' transactions,
+	/// and their counters, untouched.
+	#[test]
+	fn cleanup_txns_is_scoped_to_a_single_session() {
+		with_big_stack(|| async {
+			let rpc = ws_with_observer(None).await;
+			// Register the connection's default session and attach a second one;
+			// `begin` now rejects unknown sessions, so both must exist first.
+			rpc.set_session(rpc.id, Arc::new(RwLock::new(Session::default())));
+			let attached = Uuid::new_v4();
+			rpc.attach(attached).await.expect("attach a second session");
+			// Two transactions on the default session, one on an attached session.
+			rpc.begin(None, rpc.id).await.expect("default begin 1");
+			rpc.begin(None, rpc.id).await.expect("default begin 2");
+			rpc.begin(None, attached).await.expect("attached begin");
+			assert_eq!(rpc.transactions.len(), 3);
+			// Clean up just the attached session.
+			rpc.cleanup_txns(&attached).await;
+			// The attached transaction is gone; the default ones remain.
+			assert_eq!(rpc.transactions.len(), 2);
+			assert!(
+				rpc.transactions.iter().all(|e| e.value().0 == rpc.id),
+				"only the default session's transactions should remain",
+			);
+			// The attached session's counter entry is removed once fully drained.
+			assert!(rpc.counters.get(&attached).is_none());
+			// The default session's counter still reflects its two open txns.
+			assert_eq!(
+				rpc.counters.get(&rpc.id).map(|c| c.value().load(Ordering::Acquire)),
+				Some(2),
+			);
+			rpc.cleanup_all_txns().await;
+			assert!(rpc.transactions.is_empty());
+		});
+	}
+
+	/// `begin` rejects a session that was never attached, and — because the
+	/// check runs before the slot reservation — a rejected `begin` leaves no
+	/// `counters` entry behind. This is what keeps the per-session cap from
+	/// being bypassed (and the counter keyspace from growing) via fabricated
+	/// session ids.
+	#[test]
+	fn begin_rejects_an_unknown_session() {
+		with_big_stack(|| async {
+			let rpc = ws_with_observer(None).await;
+			let unknown = Uuid::new_v4();
+			let err = rpc
+				.begin(None, unknown)
+				.await
+				.expect_err("begin on an unattached session should be rejected");
+			assert!(
+				err.to_string().to_lowercase().contains("session"),
+				"expected a session-not-found error, got: {err}",
+			);
+			// No transaction opened, and — crucially — no counter entry minted for
+			// the bogus session, so it cannot accrete unbounded map entries.
+			assert!(rpc.transactions.is_empty());
+			assert!(rpc.counters.get(&unknown).is_none());
+		});
+	}
+
+	/// Releasing the last open transaction for an attached session prunes its
+	/// counter entry, so no release path — normal `commit`/`cancel` or `begin`'s
+	/// limit-rejection early return — can accrete zeroed counter entries under
+	/// rotated session ids. The connection's default-session counter is exempt.
+	#[test]
+	fn releasing_last_txn_prunes_attached_session_counter() {
+		with_big_stack(|| async {
+			let rpc = ws_with_observer(None).await;
+			let s = Uuid::new_v4();
+			rpc.attach(s).await.expect("attach a session");
+			// Open a transaction on the attached session: a counter entry appears.
+			let res = rpc.begin(None, s).await.expect("begin");
+			let DbResult::Other(Value::Uuid(id)) = res else {
+				panic!("begin should return a transaction uuid");
+			};
+			assert_eq!(rpc.counters.get(&s).map(|c| c.value().load(Ordering::Acquire)), Some(1),);
+			// Cancelling the last transaction must drop the counter entry, not
+			// leave a zeroed one behind.
+			rpc.cancel(None, s, Array::from(vec![Value::Uuid(id)])).await.expect("cancel");
+			assert!(
+				rpc.counters.get(&s).is_none(),
+				"a zeroed counter entry was left behind for an attached session",
+			);
+			// The default-session counter, by contrast, is retained across a
+			// begin/cancel cycle so the hot path does not churn its entry.
+			let res = rpc.begin(None, rpc.id).await.expect("default begin");
+			let DbResult::Other(Value::Uuid(did)) = res else {
+				panic!("begin should return a transaction uuid");
+			};
+			rpc.cancel(None, rpc.id, Array::from(vec![Value::Uuid(did)])).await.expect("cancel");
+			assert_eq!(
+				rpc.counters.get(&rpc.id).map(|c| c.value().load(Ordering::Acquire)),
+				Some(0),
+			);
+		});
+	}
+
+	/// The `begin`/`detach` race must not strand an orphan transaction or
+	/// counter entry under a detached session. RPCs on one connection run
+	/// concurrently, so without the post-insert session re-check a client
+	/// rotating fresh session ids could grow `transactions` and `counters`
+	/// without bound for the connection's lifetime. Runs many concurrent
+	/// `begin`/`detach` pairs (the harness uses a multi-threaded runtime) and
+	/// asserts that, whichever way each pair interleaves, nothing is left tagged
+	/// with the now-detached session.
+	#[test]
+	fn begin_racing_detach_does_not_strand_orphans() {
+		with_big_stack(|| async {
+			let rpc = ws_with_observer(None).await;
+			rpc.set_session(rpc.id, Arc::new(RwLock::new(Session::default())));
+			for _ in 0..200 {
+				let s = Uuid::new_v4();
+				rpc.attach(s).await.expect("attach a fresh session");
+				let r1 = Arc::clone(&rpc);
+				let r2 = Arc::clone(&rpc);
+				let begin = tokio::spawn(async move {
+					let _ = r1.begin(None, s).await;
+				});
+				let detach = tokio::spawn(async move {
+					let _ = r2.detach(s).await;
+				});
+				let _ = tokio::join!(begin, detach);
+				// Whichever order the two ran, `s` ends detached, so no
+				// transaction may remain tagged with it and its counter entry
+				// must be gone (drained by `detach`, or undone by `begin`).
+				assert!(
+					rpc.transactions.iter().all(|e| e.value().0 != s),
+					"a transaction was stranded under detached session {s}",
+				);
+				assert!(
+					rpc.counters.get(&s).is_none(),
+					"a counter entry was stranded under detached session {s}",
+				);
+			}
+			rpc.cleanup_all_txns().await;
 		});
 	}
 }
