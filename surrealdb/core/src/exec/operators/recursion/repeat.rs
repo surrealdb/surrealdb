@@ -75,7 +75,9 @@ use std::sync::Arc;
 
 use surrealdb_types::ToSql;
 
-use super::common::{self, discover_body_targets, eval_buffered_all, is_recursion_target};
+use super::common::{
+	self, RecursionBounds, discover_body_targets, eval_buffered_all, is_recursion_target,
+};
 use crate::exec::parts::recurse::value_hash;
 use crate::exec::parts::{clean_iteration, evaluate_physical_path, get_final, is_final};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr, RecursionCtx};
@@ -238,12 +240,13 @@ pub(crate) fn evaluate_repeat_recurse<'a>(
 pub(crate) async fn evaluate_recurse_iterative(
 	start: &Value,
 	path: &[Arc<dyn PhysicalExpr>],
-	min_depth: u32,
-	max_depth: u32,
+	bounds: RecursionBounds,
 	body: &Option<Arc<dyn crate::exec::ExecOperator>>,
 	exec_ctx: &ExecutionContext,
 	ctx: EvalContext<'_>,
 ) -> FlowResult<Value> {
+	let min_depth = bounds.min;
+	let max_depth = bounds.cap();
 	// Early exit: if start is a dead end, return immediately.
 	if is_final(start) {
 		return Ok(get_final(start));
@@ -348,6 +351,16 @@ pub(crate) async fn evaluate_recurse_iterative(
 	}
 
 	let num_levels = levels.len();
+
+	// Unbounded recursion with a non-empty level still discovered at the system
+	// limit (one level pushed per iteration): hard error, matching legacy (see
+	// `RecursionBounds`).
+	if bounds.errors_on_limit() && num_levels > max_depth as usize {
+		return Err(crate::err::Error::IdiomRecursionLimitExceeded {
+			limit: bounds.system_limit,
+		}
+		.into());
+	}
 
 	// ── Phase 2: Backward Assembly ──────────────────────────────────
 	//

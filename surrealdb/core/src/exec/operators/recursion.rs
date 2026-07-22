@@ -217,14 +217,17 @@ impl ExecOperator for RecursionOp {
 		let ctx = ctx.clone();
 		let value = ctx.current_value().cloned().unwrap_or(Value::None);
 
-		// Resolve the effective max depth once.
-		let system_limit = ctx.ctx().config.idiom_recursion_limit;
-		let max_depth = self.max_depth.unwrap_or(system_limit).min(system_limit);
+		// The parsed `{min..max}` range plus the system limit, resolved once;
+		// each strategy derives its cap and limit-error behaviour from this
+		// (see `RecursionBounds`).
+		let bounds = common::RecursionBounds {
+			min: self.min_depth,
+			max: self.max_depth,
+			system_limit: ctx.ctx().config.idiom_recursion_limit,
+		};
 
 		let path = self.path.clone();
 		let body = self.body.clone();
-		let min_depth = self.min_depth;
-		let user_specified_max = self.max_depth.is_some();
 		let inclusive = self.inclusive;
 		let instruction = self.instruction.clone();
 		let has_repeat_recurse = self.has_repeat_recurse;
@@ -239,8 +242,7 @@ impl ExecOperator for RecursionOp {
 				repeat::evaluate_recurse_iterative(
 					&value,
 					&path,
-					min_depth,
-					max_depth,
+					bounds,
 					&body,
 					&ctx,
 					eval_ctx.with_value(&value),
@@ -252,9 +254,7 @@ impl ExecOperator for RecursionOp {
 						default::evaluate_recurse_default(
 							&value,
 							&path,
-							min_depth,
-							max_depth,
-							user_specified_max,
+							bounds,
 							eval_ctx.with_value(&value),
 						)
 						.await?
@@ -263,8 +263,7 @@ impl ExecOperator for RecursionOp {
 						collect::evaluate_recurse_collect(
 							&value,
 							&path,
-							min_depth,
-							max_depth,
+							bounds,
 							inclusive,
 							eval_ctx.with_value(&value),
 						)
@@ -274,8 +273,7 @@ impl ExecOperator for RecursionOp {
 						path::evaluate_recurse_path(
 							&value,
 							&path,
-							min_depth,
-							max_depth,
+							bounds,
 							inclusive,
 							eval_ctx.with_value(&value),
 						)
@@ -289,8 +287,7 @@ impl ExecOperator for RecursionOp {
 							&value,
 							&target_value,
 							&path,
-							min_depth,
-							max_depth,
+							bounds,
 							inclusive,
 							eval_ctx.with_value(&value),
 						)

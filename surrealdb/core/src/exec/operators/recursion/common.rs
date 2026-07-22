@@ -14,6 +14,46 @@ use crate::val::Value;
 /// allowing progress when individual evaluations block on I/O.
 pub(crate) const RECURSION_CONCURRENCY: usize = 16;
 
+/// The `{min..max}` range of a recursive idiom (`.{min..max}`) plus the resolved
+/// system `idiom_recursion_limit`, shared by every recursion strategy and
+/// constructed once by the dispatching `RecursionOp`.
+///
+/// `max` carries the user-specified upper bound, or `None` when the user gave no
+/// bound. That distinction drives limit handling: an explicit bound stops the
+/// recursion silently at that depth, whereas an unbounded recursion is capped at
+/// the system limit and *exhausting* that cap is a hard error (matching the
+/// legacy `compute()` engine). The two cases are otherwise indistinguishable
+/// once the cap is resolved (a user bound equal to the system limit is legal),
+/// so the `Option` must be preserved rather than collapsed to a single depth
+/// value.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RecursionBounds {
+	/// Minimum successful traversals required (`{N..}`); 0 when unspecified.
+	pub(crate) min: u32,
+	/// User-specified maximum (`{..N}`); `None` when unbounded.
+	pub(crate) max: Option<u32>,
+	/// The system `idiom_recursion_limit`, resolved from the context config by
+	/// the dispatching operator.
+	pub(crate) system_limit: u32,
+}
+
+impl RecursionBounds {
+	/// The effective iteration cap: the user's max if given, otherwise the
+	/// system idiom-recursion limit; never above the system limit. The `.min()`
+	/// clamp is defence-in-depth only: the parser already rejects user bounds
+	/// above the system limit, and a hypothetically clamped bound would still
+	/// stop silently rather than error.
+	pub(crate) fn cap(&self) -> u32 {
+		self.max.unwrap_or(self.system_limit).min(self.system_limit)
+	}
+
+	/// Whether exhausting the cap is a hard error. True only when the user gave
+	/// no explicit upper bound, so the cap is the system limit.
+	pub(crate) fn errors_on_limit(&self) -> bool {
+		self.max.is_none()
+	}
+}
+
 /// Check if a value is a valid recursion target.
 ///
 /// Recursion is intended purely for RecordId traversal. Only `RecordId`
