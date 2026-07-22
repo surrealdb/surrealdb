@@ -523,6 +523,10 @@ impl Building {
 		let result = async {
 			// Index the records.
 			for (k, v) in values {
+				// Per-record analysis (deserialization, tokenization, filters)
+				// is synchronous CPU work with no other guaranteed await; yield
+				// so a long batch cannot starve the runtime worker.
+				yield_now!();
 				if self.is_aborted().await {
 					return Ok(count);
 				}
@@ -740,6 +744,9 @@ impl Building {
 			let batch = scan.lookup_tx.batch_keys(rng, INDEXING_BATCH_SIZE, None).await?;
 			next = batch.next;
 			for key in batch.result {
+				// Baseline indexing is synchronous CPU work; yield so a long
+				// batch cannot starve the runtime worker.
+				yield_now!();
 				if self.is_aborted().await {
 					return Ok(count);
 				}
@@ -924,6 +931,9 @@ impl Building {
 			IndexOperation::create_fulltext_index(ctx, self.ix_key.ns, self.ix_key.db, &self.ix)
 				.await?;
 		for k in keys {
+			// Replay analysis is synchronous CPU work; yield so a long batch
+			// cannot starve the runtime worker.
+			yield_now!();
 			if self.is_aborted().await {
 				return Ok(());
 			}
@@ -962,6 +972,9 @@ impl Building {
 			IndexOperation::create_fulltext_index(ctx, self.ix_key.ns, self.ix_key.db, &self.ix)
 				.await?;
 		for k in keys {
+			// Replay analysis is synchronous CPU work; yield so a long batch
+			// cannot starve the runtime worker.
+			yield_now!();
 			if self.is_aborted().await {
 				return Ok(());
 			}

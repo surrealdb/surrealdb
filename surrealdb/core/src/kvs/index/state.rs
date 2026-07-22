@@ -13,7 +13,7 @@ use crate::err::Error;
 use crate::idx::IndexKeyBase;
 use crate::key::table::bs::Bs;
 use crate::kvs::{Error as KvsError, Transaction, impl_kv_value_revisioned};
-use crate::val::{Object, TableName, Value};
+use crate::val::{Object, RecordIdKey, TableName, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -64,7 +64,7 @@ pub(crate) enum IndexBuildPhase {
 /// The state is used as an admission counter for writers and as a fencing token
 /// for the builder. Writers can update `updated_at` while allocating tickets;
 /// only builders refresh `owner_heartbeat_at`, which controls lease expiry.
-#[revisioned(revision = 3)]
+#[revisioned(revision = 4)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub(crate) struct IndexBuildState {
 	/// Build epoch. Stale generation-scoped keys are ignored by newer builds.
@@ -97,6 +97,26 @@ pub(crate) struct IndexBuildState {
 	/// Best-effort count of pending build updates visible to the builder.
 	#[revision(start = 3)]
 	pub(crate) pending: Option<u64>,
+	/// Initial-scan continuation cursor: the id of the last record whose
+	/// batch commit is durable for this generation.
+	///
+	/// The cursor is written in the same transaction as the batch it covers,
+	/// so a takeover can resume the scan right after this record instead of
+	/// wiping the partial index data and rescanning from the start. `None`
+	/// until the first batch commits, and cleared once the scan completes.
+	///
+	/// Durable persistence goes through `revision` (see
+	/// `impl_kv_value_revisioned`); the field is skipped for serde because
+	/// `RecordIdKey` does not implement the serde traits.
+	///
+	/// WARNING: `IndexBuildState` must only ever be persisted through the
+	/// revisioned `KVValue` path — never round-trip it through serde. A
+	/// serde round-trip silently drops this field, and writing the result
+	/// back would reset the checkpoint, forcing the next takeover to wipe
+	/// the partial index data and rescan the whole table from zero.
+	#[revision(start = 4)]
+	#[serde(skip)]
+	pub(crate) initial_cursor: Option<RecordIdKey>,
 }
 
 impl_kv_value_revisioned!(IndexBuildState);

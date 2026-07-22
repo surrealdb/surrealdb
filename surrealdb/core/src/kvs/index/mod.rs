@@ -9,7 +9,7 @@
 //! The durable protocol uses four key families:
 //!
 //! - `!bs`: one build-state record per index, including phase, owner, generation, report counters,
-//!   and error reason.
+//!   the initial-scan continuation checkpoint, and error reason.
 //! - `!bg`: generation-scoped queued mutations that the builder replays.
 //! - `!bp`: per-record pointers to the first queued mutation seen during the initial scan, so the
 //!   scan indexes the writer-observed old state.
@@ -77,7 +77,7 @@ const BUILD_CLOSING_SLEEP: Duration = Duration::from_millis(100);
 
 type IndexBuilding = std::sync::Arc<builder::Building>;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct AcquiredBuild {
 	generation: BuildGeneration,
 	phase: IndexBuildPhase,
@@ -86,6 +86,10 @@ struct AcquiredBuild {
 	initial_count: usize,
 	/// Persisted `INFO FOR INDEX` replayed-update count at the moment ownership was acquired.
 	updates_count: usize,
+	/// Persisted initial-scan continuation cursor at the moment ownership was
+	/// acquired. A same-generation takeover resumes the scan after this record
+	/// instead of wiping the partial index data and rescanning.
+	initial_cursor: Option<crate::val::RecordIdKey>,
 }
 
 struct DurableAdmission {

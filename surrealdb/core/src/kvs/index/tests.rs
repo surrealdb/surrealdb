@@ -19,6 +19,7 @@ use crate::dbs::Session;
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
 use crate::key::index::all as index_all;
+use crate::key::index::iu::IndexCountKey;
 use crate::kvs::LockType::Optimistic;
 use crate::kvs::testing::{
 	NonRetryableErrorSite, RetryableConflictGuard, RetryableConflictSite,
@@ -28,6 +29,7 @@ use crate::kvs::testing::{
 use crate::kvs::tx::{
 	CachedIndexBuildReservationKey, CachedIndexBuildReservationLookup, IndexBuildReservationRelease,
 };
+use crate::kvs::util::to_prefix_range;
 use crate::kvs::{
 	Datastore, KVKey, KVValue, Key, TransactionType, is_retryable_transaction_conflict,
 };
@@ -253,6 +255,7 @@ fn durable_build_state_for_phase(
 		initial: Some(1),
 		updated: Some(0),
 		pending: Some(0),
+		initial_cursor: None,
 	}
 }
 
@@ -1543,6 +1546,7 @@ async fn fresh_build_cleans_stale_durable_queue_generations() -> Result<()> {
 			initial: None,
 			updated: None,
 			pending: None,
+			initial_cursor: None,
 		},
 	)
 	.await?;
@@ -1900,6 +1904,7 @@ async fn takeover_preserves_durable_progress_counts() -> Result<()> {
 				initial: Some(initial),
 				updated: Some(updated),
 				pending: Some(5),
+				initial_cursor: None,
 			},
 		)
 		.await?;
@@ -1922,6 +1927,466 @@ async fn takeover_preserves_durable_progress_counts() -> Result<()> {
 		assert_eq!(building.get("status").and_then(|status| status.as_str()), Some("ready"));
 		assert_eq!(building.get("initial").and_then(|initial| initial.as_u64()), Some(initial));
 		assert_eq!(building.get("updated").and_then(|updated| updated.as_u64()), Some(updated));
+	}
+
+	Ok(())
+}
+
+/// A takeover of a `Building` generation whose owner committed at least one
+/// initial-scan batch resumes the scan right after the persisted checkpoint
+/// instead of wiping the partial index data and rescanning from the start.
+#[tokio::test(flavor = "multi_thread")]
+async fn takeover_resumes_initial_scan_from_checkpoint() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:a SET email = 'a@example.com' RETURN NONE;
+			CREATE user:b SET email = 'b@example.com' RETURN NONE;
+			CREATE user:c SET email = 'c@example.com' RETURN NONE;
+			CREATE user:d SET email = 'd@example.com' RETURN NONE;
+			CREATE user:e SET email = 'e@example.com' RETURN NONE;
+			CREATE user:f SET email = 'f@example.com' RETURN NONE;
+			DEFINE INDEX test ON user FIELDS email;
+			",
+	)
+	.await?;
+
+	let (ns, db, table, ix) = get_table_index(&ds, "user", "test").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	// Simulate an owner that crashed mid-scan: wipe the index data the
+	// blocking build produced (the crashed generation never reached these
+	// records) and strand a `Building` generation whose durable checkpoint
+	// says the scan committed through `user:c`.
+	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
+	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	tx.delp(&index_all::new(ns, db, &table, ix.index_id)).await?;
+	tx.set(
+		&ikb.new_bs_key(),
+		&IndexBuildState {
+			generation: 2,
+			phase: IndexBuildPhase::Building,
+			owner: Some(Uuid::new_v4()),
+			next_ticket: 0,
+			initial_complete: false,
+			updated_at: expired,
+			owner_heartbeat_at: Some(expired),
+			error: None,
+			report_status: Some(IndexBuildReportStatus::Indexing),
+			initial: Some(42),
+			updated: None,
+			pending: None,
+			initial_cursor: Some(RecordIdKey::from("c".to_string())),
+		},
+	)
+	.await?;
+	tx.commit().await?;
+
+	let build = new_building_for_index(&ds, &session, ns, db, &table, Arc::clone(&ix)).await?;
+	let acquired = build
+		.acquire_build_state()
+		.await?
+		.expect("expired build state should be available for takeover");
+	build.run_acquired(acquired).await?;
+
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.phase, IndexBuildPhase::Online);
+	// Resumed counters continue from the persisted value instead of being
+	// reset by a wipe-and-rescan: 42 checkpointed + `user:d..f` scanned.
+	assert_eq!(state.initial, Some(45));
+	assert_eq!(state.initial_cursor, None);
+
+	// Only the records after the checkpoint were indexed. A wipe-and-rescan
+	// would have re-indexed all six records.
+	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let rng = to_prefix_range(&index_all::new(ns, db, &table, ix.index_id))?;
+	let keys = catch!(tx, tx.keys(rng, 1000, 0, None).await);
+	tx.cancel().await?;
+	assert_eq!(keys.len(), 3, "only user:d..f should be indexed after a resumed scan");
+
+	Ok(())
+}
+
+/// A COUNT-index takeover resumes the baseline scan from the checkpoint: the
+/// primary-appending catch-up cursor continues from the same position, so
+/// records at or before the checkpoint are not baselined a second time.
+#[tokio::test(flavor = "multi_thread")]
+async fn takeover_resumes_count_initial_scan_from_checkpoint() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:a RETURN NONE;
+			CREATE user:b RETURN NONE;
+			CREATE user:c RETURN NONE;
+			CREATE user:d RETURN NONE;
+			CREATE user:e RETURN NONE;
+			CREATE user:f RETURN NONE;
+			DEFINE INDEX test ON user COUNT;
+			",
+	)
+	.await?;
+
+	let (ns, db, table, ix) = get_table_index(&ds, "user", "test").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	// Same crash simulation as above, for a COUNT index: no index data
+	// survives for the stranded generation, and the checkpoint says the
+	// baseline scan committed through `user:c`.
+	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
+	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	tx.delp(&index_all::new(ns, db, &table, ix.index_id)).await?;
+	tx.set(
+		&ikb.new_bs_key(),
+		&IndexBuildState {
+			generation: 2,
+			phase: IndexBuildPhase::Building,
+			owner: Some(Uuid::new_v4()),
+			next_ticket: 0,
+			initial_complete: false,
+			updated_at: expired,
+			owner_heartbeat_at: Some(expired),
+			error: None,
+			report_status: Some(IndexBuildReportStatus::Indexing),
+			initial: Some(4),
+			updated: None,
+			pending: None,
+			initial_cursor: Some(RecordIdKey::from("c".to_string())),
+		},
+	)
+	.await?;
+	tx.commit().await?;
+
+	let build = new_building_for_index(&ds, &session, ns, db, &table, Arc::clone(&ix)).await?;
+	let acquired = build
+		.acquire_build_state()
+		.await?
+		.expect("expired build state should be available for takeover");
+	build.run_acquired(acquired).await?;
+
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.phase, IndexBuildPhase::Online);
+	// 4 checkpointed + `user:d..f` scanned; a wipe-and-rescan would report 6.
+	assert_eq!(state.initial, Some(7));
+	assert_eq!(state.initial_cursor, None);
+	// The index-backed count only includes the post-checkpoint baseline.
+	assert_eq!(count_index_value(&ds, &session).await?, 3);
+
+	Ok(())
+}
+
+/// A COUNT build that dies right after the tail-pass transaction commits must
+/// already be durably `initial_complete`: the tail baselines `!bp` old states
+/// without deleting the markers, so a takeover that re-entered the tail pass
+/// would count the same records twice before publishing `Online`.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn count_tail_crash_after_commit_does_not_double_count_on_takeover() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:one RETURN NONE;
+			CREATE user:two RETURN NONE;
+			CREATE user:three RETURN NONE;
+			CREATE user:four RETURN NONE;
+			CREATE user:five RETURN NONE;
+			CREATE user:six RETURN NONE;
+			DEFINE INDEX test ON user COUNT;
+			",
+	)
+	.await?;
+
+	let (ns, db, table, ix) = get_table_index(&ds, "user", "test").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	// Strand a `Building` generation with an expired owner and no checkpoint,
+	// wiping the data of the completed blocking build, so the takeover below
+	// runs a full initial scan including the tail pass.
+	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
+	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	tx.delp(&index_all::new(ns, db, &table, ix.index_id)).await?;
+	tx.set(
+		&ikb.new_bs_key(),
+		&IndexBuildState {
+			generation: 2,
+			phase: IndexBuildPhase::Building,
+			owner: Some(Uuid::new_v4()),
+			next_ticket: 0,
+			initial_complete: false,
+			updated_at: expired,
+			owner_heartbeat_at: Some(expired),
+			error: None,
+			report_status: Some(IndexBuildReportStatus::Indexing),
+			initial: None,
+			updated: None,
+			pending: None,
+			initial_cursor: None,
+		},
+	)
+	.await?;
+	tx.commit().await?;
+
+	// Queue a delete for the record that sorts last (`two`), so its `!bp` old
+	// state is only reachable by the tail pass (`through = None`), not by any
+	// batch-scoped catch-up committed with a checkpoint.
+	execute_all_retrying_conflicts(&ds, &session, "DELETE user:two RETURN NONE").await?;
+
+	// First takeover: run the full scan and kill the builder right after the
+	// tail-pass transaction commits.
+	let _release_guard = inject_non_retryable_error(
+		NonRetryableErrorSite::ConcurrentIndexCountTailCommitted,
+		ds.id(),
+	);
+	let build = new_building_for_index(&ds, &session, ns, db, &table, Arc::clone(&ix)).await?;
+	let acquired = build
+		.acquire_build_state()
+		.await?
+		.expect("expired build state should be available for takeover");
+	let err = build
+		.run_acquired(acquired)
+		.await
+		.expect_err("builder should die at the injected crash site");
+	assert!(
+		err.to_string().contains("injected non-retryable error"),
+		"unexpected builder error: {err}"
+	);
+
+	// The tail-pass transaction committed, so the scan must already be
+	// durably complete: 5 live records + the queued old state of `user:two`.
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.phase, IndexBuildPhase::Building);
+	assert!(state.initial_complete, "tail commit must complete the scan atomically");
+	assert_eq!(state.initial, Some(6));
+	assert_eq!(state.initial_cursor, None);
+
+	// Expire the dead builder's heartbeat so a second takeover can proceed.
+	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	let mut state = tx
+		.get(&ikb.new_bs_key(), None)
+		.await?
+		.ok_or_else(|| anyhow::anyhow!("durable build state should exist"))?;
+	state.updated_at = expired;
+	state.owner_heartbeat_at = Some(expired);
+	tx.set(&ikb.new_bs_key(), &state).await?;
+	tx.commit().await?;
+
+	// Second takeover: the scan is complete, so it only replays the queued
+	// delete and publishes `Online` without re-running the tail pass.
+	let build = new_building_for_index(&ds, &session, ns, db, &table, Arc::clone(&ix)).await?;
+	let acquired = build
+		.acquire_build_state()
+		.await?
+		.expect("expired build state should be available for takeover");
+	build.run_acquired(acquired).await?;
+
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(state.phase, IndexBuildPhase::Online);
+	// Baseline 6 (5 live + deleted `user:two` old state) minus the replayed
+	// delete: a double-counted tail would report 6 here instead.
+	assert_eq!(count_index_value(&ds, &session).await?, 5);
+
+	Ok(())
+}
+
+/// An abort observed mid-batch must not commit that batch: the checkpoint
+/// would otherwise cover records that were never indexed, and a takeover
+/// would resume past them, leaving silent gaps in the index. The abort
+/// timing is racy by nature, so the assertion is timing-invariant: however
+/// far the durable state says the scan got, the index must contain exactly
+/// the records up to that point.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn abort_mid_scan_never_checkpoints_unindexed_records() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE user SCHEMALESS;
+			CREATE |user:1..=1000| SET email = 'user@example.com' RETURN NONE;
+			DEFINE INDEX test ON user FIELDS email;
+			",
+	)
+	.await?;
+
+	let (ns, db, table, ix) = get_table_index(&ds, "user", "test").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	// Strand a resumable generation: no index data, checkpoint at `user:1`,
+	// so the takeover scans `user:2..1000` without a cleanup phase.
+	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
+	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	tx.delp(&index_all::new(ns, db, &table, ix.index_id)).await?;
+	tx.set(
+		&ikb.new_bs_key(),
+		&IndexBuildState {
+			generation: 2,
+			phase: IndexBuildPhase::Building,
+			owner: Some(Uuid::new_v4()),
+			next_ticket: 0,
+			initial_complete: false,
+			updated_at: expired,
+			owner_heartbeat_at: Some(expired),
+			error: None,
+			report_status: Some(IndexBuildReportStatus::Indexing),
+			initial: Some(1),
+			updated: None,
+			pending: None,
+			initial_cursor: Some(RecordIdKey::from(1i64)),
+		},
+	)
+	.await?;
+	tx.commit().await?;
+
+	let building =
+		Arc::new(new_building_for_index(&ds, &session, ns, db, &table, Arc::clone(&ix)).await?);
+	let acquired = building
+		.acquire_build_state()
+		.await?
+		.expect("expired build state should be available for takeover");
+	// Abort concurrently with the scan; any landing point must be safe.
+	let aborter = Arc::clone(&building);
+	tokio::spawn(async move {
+		sleep(Duration::from_millis(3)).await;
+		aborter.abort();
+	});
+	building.run_acquired(acquired).await?;
+
+	// However far the durable state says the scan got, exactly that many
+	// records must be indexed. `user:1` is covered by the seeded checkpoint
+	// but carries no index key, hence the `- 1`.
+	let state = durable_build_state(&ds, &ikb).await?;
+	let expected = if state.initial_complete {
+		999
+	} else {
+		match &state.initial_cursor {
+			Some(RecordIdKey::Number(n)) => usize::try_from(n - 1).unwrap(),
+			other => panic!("unexpected checkpoint cursor after abort: {other:?}"),
+		}
+	};
+	assert_eq!(
+		index_prefix_key_count(&ds, ns, db, &table, ix.index_id).await?,
+		expected,
+		"durable checkpoint must cover exactly the indexed records (state: {state:?})"
+	);
+
+	Ok(())
+}
+
+/// Direct coverage for the COUNT tail-pass abort re-check: an abort observed
+/// during the tail pass must cancel the transaction rather than commit the
+/// completion marker over baselines the truncated pass never wrote. The
+/// abort timing is racy by nature, so the assertion is timing-invariant:
+/// while the scan is durably incomplete the committed baseline (signed sum
+/// of the count-delta entries) must be zero, and once the completion marker
+/// exists the sum must equal the number of still-queued deletes — every
+/// replayed delete decrements the sum and consumes its `!bg` entry in the
+/// same transaction, so a partial tail under a completion marker breaks the
+/// equality at any replay progress.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn abort_during_count_tail_pass_never_commits_partial_baselines() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE user SCHEMALESS;
+			CREATE |user:1..=3000| RETURN NONE;
+			DEFINE INDEX test ON user COUNT;
+			",
+	)
+	.await?;
+
+	let (ns, db, table, ix) = get_table_index(&ds, "user", "test").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	// Strand a resumable generation whose checkpoint claims `user:1..=500`
+	// were scanned, with no surviving index data.
+	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
+	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	tx.delp(&index_all::new(ns, db, &table, ix.index_id)).await?;
+	tx.set(
+		&ikb.new_bs_key(),
+		&IndexBuildState {
+			generation: 2,
+			phase: IndexBuildPhase::Building,
+			owner: Some(Uuid::new_v4()),
+			next_ticket: 0,
+			initial_complete: false,
+			updated_at: expired,
+			owner_heartbeat_at: Some(expired),
+			error: None,
+			report_status: Some(IndexBuildReportStatus::Indexing),
+			initial: Some(500),
+			updated: None,
+			pending: None,
+			initial_cursor: Some(RecordIdKey::from(500i64)),
+		},
+	)
+	.await?;
+	tx.commit().await?;
+
+	// Queue deletes for every record past the checkpoint while the build is
+	// in `Building`. No live record remains after `user:500`, so their `!bp`
+	// old states are reachable only by the tail pass (`through = None`).
+	execute_all_retrying_conflicts(&ds, &session, "DELETE user:501..=3000 RETURN NONE").await?;
+
+	let building =
+		Arc::new(new_building_for_index(&ds, &session, ns, db, &table, Arc::clone(&ix)).await?);
+	let acquired = building
+		.acquire_build_state()
+		.await?
+		.expect("expired build state should be available for takeover");
+	// Abort concurrently: the empty live scan reaches the tail pass almost
+	// immediately, so this usually lands mid-tail; any landing point must
+	// satisfy the invariant below.
+	let aborter = Arc::clone(&building);
+	tokio::spawn(async move {
+		sleep(Duration::from_millis(4)).await;
+		aborter.abort();
+	});
+	building.run_acquired(acquired).await?;
+
+	// Ground truth: committed baseline = signed sum of count-delta entries;
+	// outstanding replay work = queued `!bg` mutations still present.
+	let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+	let rng = IndexCountKey::range(ns, db, &table, ix.index_id)?;
+	let keys = catch!(tx, tx.keys(rng, u32::MAX, 0, None).await);
+	let mut sum: i64 = 0;
+	for key in &keys {
+		let iu = IndexCountKey::decode_key(key)?;
+		let delta = i64::try_from(iu.count).expect("count delta out of range");
+		sum += if iu.pos {
+			delta
+		} else {
+			-delta
+		};
+	}
+	let pending = catch!(tx, tx.keys(ikb.new_bg_range(2)?, u32::MAX, 0, None).await).len();
+	tx.cancel().await?;
+
+	let state = durable_build_state(&ds, &ikb).await?;
+	if state.initial_complete {
+		// The completion marker commits atomically with the full tail, so
+		// the baseline sum tracks the unreplayed queue exactly.
+		assert_eq!(
+			sum,
+			i64::try_from(pending).unwrap(),
+			"completion marker committed over a partial tail (state: {state:?})"
+		);
+	} else {
+		// The aborted tail pass must not have committed anything.
+		assert_eq!(sum, 0, "partial tail baselines committed (state: {state:?})");
+		assert_eq!(pending, 2500, "queued deletes must be untouched (state: {state:?})");
 	}
 
 	Ok(())
@@ -1967,6 +2432,7 @@ async fn resume_scan_adopts_stalled_concurrent_build() -> Result<()> {
 			initial: Some(0),
 			updated: None,
 			pending: None,
+			initial_cursor: None,
 		},
 	)
 	.await?;
@@ -2053,6 +2519,7 @@ async fn periodic_task_resumes_stalled_build() -> Result<()> {
 			initial: Some(0),
 			updated: None,
 			pending: None,
+			initial_cursor: None,
 		},
 	)
 	.await?;
@@ -2132,6 +2599,7 @@ async fn distributed_writer_admission_does_not_extend_builder_lease() -> Result<
 		initial: None,
 		updated: None,
 		pending: None,
+		initial_cursor: None,
 	};
 	let tx = ds_a.transaction(TransactionType::Write, Optimistic).await?;
 	tx.set(&ikb.new_bs_key(), &stale_state).await?;
@@ -2231,6 +2699,7 @@ async fn writer_admission_batches_reservations_per_user_transaction() -> Result<
 		initial: None,
 		updated: None,
 		pending: None,
+		initial_cursor: None,
 	};
 	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
 	tx.set(&ikb.new_bs_key(), &building).await?;
@@ -2324,6 +2793,7 @@ async fn writer_admission_cancelled_batch_clears_durable_queue() -> Result<()> {
 		initial: None,
 		updated: None,
 		pending: None,
+		initial_cursor: None,
 	};
 	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
 	tx.set(&ikb.new_bs_key(), &building).await?;
@@ -2566,6 +3036,7 @@ async fn seed_build_state(
 		initial: None,
 		updated: None,
 		pending: None,
+		initial_cursor: None,
 	};
 	if matches!(phase, IndexBuildPhase::Error) {
 		state.error = Some("seeded test failure".to_string());
@@ -2633,6 +3104,7 @@ async fn acquire_build_state_waits_for_prior_generation_reservations() -> Result
 		initial: None,
 		updated: None,
 		pending: None,
+		initial_cursor: None,
 	};
 	let seed_tx = ds_a.transaction(TransactionType::Write, Optimistic).await?;
 	seed_tx.set(&ikb.new_bs_key(), &errored).await?;
@@ -2826,6 +3298,7 @@ async fn distributed_blocking_rebuild_takes_over_expired_remote_owner() -> Resul
 			initial: Some(1),
 			updated: Some(0),
 			pending: Some(0),
+			initial_cursor: None,
 		},
 	)
 	.await?;

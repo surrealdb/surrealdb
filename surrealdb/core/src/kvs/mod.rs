@@ -112,9 +112,13 @@ pub(crate) mod testing {
 	}
 
 	#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+	// Site names follow the `RetryableConflictSite` convention of naming the
+	// subsystem and injection point, even when the prefixes coincide.
+	#[allow(clippy::enum_variant_names)]
 	pub(crate) enum NonRetryableErrorSite {
 		ConcurrentIndexAfterReservationRegistration,
 		ConcurrentIndexReservationRelease,
+		ConcurrentIndexCountTailCommitted,
 	}
 
 	static RETRYABLE_CONFLICTS: OnceLock<Mutex<HashMap<(RetryableConflictSite, Uuid), usize>>> =

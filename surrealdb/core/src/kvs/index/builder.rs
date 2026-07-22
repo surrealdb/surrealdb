@@ -35,12 +35,16 @@ use crate::key::record;
 use crate::kvs::LockType::Optimistic;
 use crate::kvs::ds::TransactionFactory;
 #[cfg(test)]
-use crate::kvs::testing::{RetryableConflictSite, maybe_inject_retryable_conflict};
+use crate::kvs::testing::{
+	NonRetryableErrorSite, RetryableConflictSite, maybe_inject_non_retryable_error,
+	maybe_inject_retryable_conflict,
+};
+use crate::kvs::util::advance_key;
 use crate::kvs::{
-	INDEXING_BATCH_SIZE, Transaction, TransactionType, is_retryable_transaction_conflict,
+	INDEXING_BATCH_SIZE, KVKey, Transaction, TransactionType, is_retryable_transaction_conflict,
 };
 use crate::mem::ALLOC;
-use crate::val::{RecordId, TableName, Value};
+use crate::val::{RecordId, RecordIdKey, TableName, Value};
 
 /// Process-local key used only to deduplicate active builder tasks.
 pub(super) type SharedIndexKey = Arc<IndexKey>;
@@ -413,6 +417,7 @@ impl Building {
 							initial_complete: current.initial_complete,
 							initial_count: durable_report_count(current.initial),
 							updates_count: durable_report_count(current.updated),
+							initial_cursor: current.initial_cursor.clone(),
 						}));
 					}
 					Err(err) if is_condition_not_met(&err) => {
@@ -464,6 +469,7 @@ impl Building {
 				initial: None,
 				updated: None,
 				pending: None,
+				initial_cursor: None,
 			};
 			delete_durable_build_queues(&tx, &self.ikb).await?;
 			let res = tx.putc(&state_key, &state, existing.as_ref()).await;
@@ -485,6 +491,7 @@ impl Building {
 						initial_complete: false,
 						initial_count: 0,
 						updates_count: 0,
+						initial_cursor: None,
 					}));
 				}
 				Err(err) if is_condition_not_met(&err) => {
@@ -555,6 +562,7 @@ impl Building {
 						initial_complete: current.initial_complete,
 						initial_count: durable_report_count(current.initial),
 						updates_count: durable_report_count(current.updated),
+						initial_cursor: current.initial_cursor.clone(),
 					}));
 				}
 				Err(err) if is_condition_not_met(&err) => {
@@ -676,11 +684,93 @@ impl Building {
 		self.update_owned_build_state(generation, |state| {
 			if state.phase == IndexBuildPhase::Building {
 				state.initial_complete = true;
+				state.initial_cursor = None;
 				state.error = None;
 			}
 		})
 		.await?;
 		Ok(())
+	}
+
+	/// Fenced, transaction-local update of the durable build state.
+	///
+	/// Reads the state through `tx` (observing writes already staged in the
+	/// same transaction, such as the ownership heartbeat), verifies this
+	/// builder still owns the generation, applies `update`, and stages the
+	/// CAS write so it commits atomically with the rest of the transaction.
+	///
+	/// Must run after [`Self::maintain_build_ownership`] in the same
+	/// transaction, which has already fenced this builder's ownership.
+	async fn update_build_state_in_tx<F>(
+		&self,
+		tx: &Transaction,
+		generation: BuildGeneration,
+		update: F,
+	) -> Result<()>
+	where
+		F: FnOnce(&mut IndexBuildState),
+	{
+		let state_key = self.ikb.new_bs_key();
+		let Some(current) = tx.get(&state_key, None).await? else {
+			return Err(Error::CorruptedIndex(
+				"Index build state is missing during build-state update",
+			)
+			.into());
+		};
+		if current.generation != generation || current.owner != Some(self.owner) {
+			return Err(Error::IndexingBuildingCancelled {
+				reason: format!("Index build ownership was lost for {}", self.ix.name),
+			}
+			.into());
+		}
+		let mut next = current.clone();
+		update(&mut next);
+		tx.putc(&state_key, &next, Some(&current)).await?;
+		Ok(())
+	}
+
+	/// Persist the initial-scan continuation cursor inside a batch transaction.
+	///
+	/// The cursor and the `initial` counter commit atomically with the batch
+	/// they describe, so the durable state never points into an uncommitted
+	/// span. A takeover that finds a cursor resumes the scan right after it
+	/// instead of wiping the partial index data and rescanning from the start.
+	async fn checkpoint_initial_scan(
+		&self,
+		tx: &Transaction,
+		generation: BuildGeneration,
+		cursor: &RecordIdKey,
+		initial_count: usize,
+	) -> Result<()> {
+		self.update_build_state_in_tx(tx, generation, |state| {
+			state.initial_cursor = Some(cursor.clone());
+			state.initial = Some(initial_count as u64);
+		})
+		.await
+	}
+
+	/// Complete the initial scan inside the COUNT tail-pass transaction.
+	///
+	/// The tail pass baselines `!bp` old states past the last checkpoint and
+	/// does not delete the markers it consumes, so it is not idempotent:
+	/// completion must commit atomically with it. If durable state still said
+	/// "incomplete, resume after cursor" once the tail baselines were
+	/// committed, a takeover would re-enter the tail pass and double-count
+	/// the same records. Non-COUNT builds have no tail pass and complete via
+	/// [`Self::mark_durable_initial_complete`] instead.
+	async fn complete_initial_scan(
+		&self,
+		tx: &Transaction,
+		generation: BuildGeneration,
+		initial_count: usize,
+	) -> Result<()> {
+		self.update_build_state_in_tx(tx, generation, |state| {
+			state.initial_complete = true;
+			state.initial_cursor = None;
+			state.initial = Some(initial_count as u64);
+			state.error = None;
+		})
+		.await
 	}
 
 	/// Enter `Closing`, which blocks new admissions before the final drain.
@@ -980,27 +1070,39 @@ impl Building {
 		let Some(acquired) = self.acquire_build_state().await? else {
 			return Ok(());
 		};
+		let generation = acquired.generation;
 		let res = self.run_acquired(acquired).await;
 		if res.is_ok() && self.aborted.load(Ordering::Acquire) {
-			let _ = self.mark_durable_aborted(acquired.generation).await;
+			let _ = self.mark_durable_aborted(generation).await;
 		}
 		res
 	}
 
 	/// Execute a build after durable ownership has already been acquired.
 	///
-	/// Takeover from `Building` with an incomplete initial scan restarts the
-	/// scan after cleaning index data for this generation. Takeover from
-	/// `Closing`, or from `Building` after `initial_complete`, skips the initial
-	/// scan and only drains durable appendings and reservations.
+	/// Takeover from `Building` with an incomplete initial scan resumes the
+	/// scan after the last per-batch checkpoint when one exists, and only
+	/// restarts it (after cleaning index data for this generation) when the
+	/// previous owner never committed a batch. Takeover from `Closing`, or
+	/// from `Building` after `initial_complete`, skips the initial scan and
+	/// only drains durable appendings and reservations.
 	pub(super) async fn run_acquired(&self, acquired: AcquiredBuild) -> Result<()> {
 		let mut last_prepare_remove_check = Instant::now();
 		let generation = acquired.generation;
-		let restarting_initial_scan =
+		let scanning_initial =
 			acquired.phase == IndexBuildPhase::Building && !acquired.initial_complete;
+		// Resume from the durable per-batch checkpoint when one exists: every
+		// record up to the cursor was committed atomically with the cursor, so
+		// the partial index data is consistent and does not need to be wiped.
+		let resume_cursor = if scanning_initial {
+			acquired.initial_cursor.clone()
+		} else {
+			None
+		};
+		let restarting_initial_scan = scanning_initial && resume_cursor.is_none();
 		// A restarted incomplete scan discards previous progress because it first
-		// cleans index data. Resumed builds skip the scan, so keep the durable
-		// counters that have already been reported for this generation.
+		// cleans index data. Resumed and checkpoint-continued builds keep the
+		// durable counters that have already been reported for this generation.
 		let mut initial_count = if restarting_initial_scan {
 			0
 		} else {
@@ -1092,13 +1194,28 @@ impl Building {
 					}
 				}
 			}
-
-			// First pass: index every record.
-			let beg = record::prefix(self.ix_key.ns, self.ix_key.db, self.ikb.table())?;
+		}
+		if scanning_initial {
+			// First pass: index every record, resuming immediately after the
+			// checkpointed record when the previous owner committed batches.
+			let beg = if let Some(cursor) = &resume_cursor {
+				// Same exclusive-successor idiom as `Bp::span_range`: the
+				// smallest key strictly greater than the cursor record's key.
+				let mut key = record::new(self.ix_key.ns, self.ix_key.db, self.ikb.table(), cursor)
+					.encode_key()?;
+				advance_key(&mut key);
+				key
+			} else {
+				record::prefix(self.ix_key.ns, self.ix_key.db, self.ikb.table())?
+			};
 			let end = record::suffix(self.ix_key.ns, self.ix_key.db, self.ikb.table())?;
 			let mut next = Some(beg..end);
 			let mut v1_appending_sentinel = false;
-			let mut count_primary_cursor = matches!(self.ix.index, Index::Count(_)).then_some(None);
+			// On resume the COUNT primary-appending catch-up also continues from
+			// the checkpoint: `!bp` markers at or before the cursor were baselined
+			// atomically with the batch that covered them.
+			let mut count_primary_cursor =
+				matches!(self.ix.index, Index::Count(_)).then(|| resume_cursor.clone());
 			// Set the initial status.
 			self.mark_durable_report(
 				generation,
@@ -1137,6 +1254,13 @@ impl Building {
 				// Create a new context with a write transaction.
 				{
 					let values = batch.result;
+					// Continuation checkpoint committed with this batch: the id
+					// of the last record in the batch.
+					let Some((last_key, _)) = values.last() else {
+						// Unreachable: emptiness was checked above.
+						break;
+					};
+					let batch_cursor = record::RecordKey::decode_key(last_key)?.id;
 					let indexed = loop {
 						if self.is_aborted().await {
 							return Ok(());
@@ -1189,6 +1313,41 @@ impl Building {
 								return Err(err);
 							}
 						};
+						// An abort observed inside `index_initial_batch` truncates
+						// the batch, but `batch_cursor` still points at its last
+						// record. Discard the transaction instead of committing a
+						// checkpoint that covers records that were never indexed.
+						// The abort flag is sticky, so this re-check cannot miss
+						// a mid-batch abort.
+						if self.is_aborted().await {
+							tx.cancel().await?;
+							return Ok(());
+						}
+						// Persist the continuation checkpoint atomically with the
+						// batch it covers, so a takeover resumes the scan here
+						// instead of wiping and rescanning from the start.
+						if let Err(err) = self
+							.checkpoint_initial_scan(
+								&tx,
+								generation,
+								&batch_cursor,
+								initial_count + indexed,
+							)
+							.await
+						{
+							count_primary_cursor = saved_count_primary_cursor;
+							if self
+								.cancel_and_retryable_conflict(
+									&tx,
+									&err,
+									"transient conflict checkpointing the initial scan, retrying",
+								)
+								.await
+							{
+								continue;
+							}
+							return Err(err);
+						}
 						#[cfg(test)]
 						if let Err(err) = maybe_inject_retryable_conflict(
 							RetryableConflictSite::ConcurrentIndexInitialBatch,
@@ -1288,8 +1447,43 @@ impl Building {
 							return Err(err);
 						}
 					};
+					// An abort observed inside the tail pass truncates the
+					// `!bp` catch-up. Discard the transaction instead of
+					// committing a completion marker over baselines that were
+					// never written.
+					if self.is_aborted().await {
+						tx.cancel().await?;
+						return Ok(());
+					}
+					// The tail baselines are not idempotent, so the scan must
+					// be marked complete atomically with them: a takeover that
+					// still saw "incomplete, resume after cursor" would replay
+					// the same `!bp` old states and double-count them.
+					if let Err(err) =
+						self.complete_initial_scan(&tx, generation, initial_count + indexed).await
+					{
+						count_primary_cursor = saved_count_primary_cursor;
+						if self
+							.cancel_and_retryable_conflict(
+								&tx,
+								&err,
+								"transient conflict completing the initial scan, retrying",
+							)
+							.await
+						{
+							continue;
+						}
+						return Err(err);
+					}
 					match tx.commit().await {
-						Ok(()) => break indexed,
+						Ok(()) => {
+							#[cfg(test)]
+							maybe_inject_non_retryable_error(
+								NonRetryableErrorSite::ConcurrentIndexCountTailCommitted,
+								self.ctx.node_id(),
+							)?;
+							break indexed;
+						}
 						Err(err) => {
 							count_primary_cursor = saved_count_primary_cursor;
 							if self
@@ -1307,9 +1501,12 @@ impl Building {
 					}
 				};
 				initial_count += indexed;
+			} else {
+				// Mark initial build as complete before entering the appending
+				// phase. COUNT builds completed above, atomically with the
+				// tail-pass transaction.
+				self.mark_durable_initial_complete(generation).await?;
 			}
-			// Mark initial build as complete before entering the appending phase.
-			self.mark_durable_initial_complete(generation).await?;
 		}
 		// First replay pass: catch up with writes that were admitted while the
 		// initial scan was running. The build is still in `Building`, so new
