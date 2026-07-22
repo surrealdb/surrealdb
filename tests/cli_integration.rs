@@ -2,6 +2,7 @@
 mod common;
 
 mod cli_integration {
+	use std::collections::HashMap;
 	use std::fs::File;
 	use std::io::Write;
 	#[cfg(unix)]
@@ -1970,6 +1971,29 @@ mod cli_integration {
 			"s - query: RETURN string::concat(`sleep`(1s200ms), '/', $public, '/', $secret) - params: [ $public='foo' ]"
 		));
 		println!("{stderr}");
+	}
+
+	/// `SURREAL_MEMORY_THRESHOLD` with a byte-suffix (e.g. `256m`) must start the
+	/// server without a config-parse warning (regression test for #7380).
+	///
+	/// A previous fix restored suffix parsing for the legacy env-var static but
+	/// missed the configmap path, leaving the warning intact for suffixed values.
+	#[test(tokio::test)]
+	async fn memory_threshold_suffix_no_parse_warning() {
+		let vars: HashMap<String, String> =
+			[("SURREAL_MEMORY_THRESHOLD".to_string(), "256m".to_string())].into();
+		let (_addr, mut server) = common::start_server(StartServerArguments {
+			vars: Some(vars),
+			..Default::default()
+		})
+		.await
+		.unwrap();
+
+		let stderr = server.finish().unwrap().stderr();
+		assert!(
+			!stderr.contains("Could not parse configuration value for key `MEMORY_THRESHOLD`"),
+			"byte-suffix memory threshold should parse without a warning; stderr:\n{stderr}"
+		);
 	}
 }
 

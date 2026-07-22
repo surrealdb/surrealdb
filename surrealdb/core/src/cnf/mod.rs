@@ -7,6 +7,7 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 use crate::iam::file::extract_allowed_paths;
+use crate::str::ParseBytes;
 
 /// The publicly visible name of the server
 pub const SERVER_NAME: &str = "SurrealDB";
@@ -351,61 +352,68 @@ impl Default for CommonConfig {
 
 impl Config for CommonConfig {
 	fn parse(&mut self, map: &ConfigMap) {
-		map.parse_key_with("memory_threshold", &mut self.memory_threshold, |x| {
-			x.parse::<usize>().map(|x| x.max(1024 * 1024)).ok()
-		})
-		.parse_key("max_concurrent_tasks", &mut self.max_concurrent_tasks)
-		.parse_key("max_computation_depth", &mut self.max_computation_depth)
-		.parse_key("max_object_parsing_depth", &mut self.max_object_parsing_depth)
-		.parse_key("max_query_parsing_depth", &mut self.max_query_parsing_depth)
-		.parse_key("max_expression_parsing_depth", &mut self.max_expression_parsing_depth)
-		.parse_key("regex_size_limit", &mut self.regex_size_limit)
-		.parse_key("regex_cache_size", &mut self.regex_cache_size)
-		.parse_key("transaction_cache_size", &mut self.transaction_cache_size)
-		.parse_key("datastore_cache_size", &mut self.datastore_cache_size)
-		.parse_key("surrealism_cache_size", &mut self.surrealism_cache_size)
-		.parse_key("export_batch_size", &mut self.export_batch_size)
-		.parse_key("operator_buffer_size", &mut self.operator_buffer_size)
-		.parse_key("scan_batch_size", &mut self.scan_batch_size)
-		.parse_key(
-			"max_order_limit_priority_queue_size",
-			&mut self.max_order_limit_priority_queue_size,
-		)
-		.parse_key("scripting_max_stack_size", &mut self.scripting_max_stack_size)
-		.parse_key("scripting_max_memory_limit", &mut self.scripting_max_memory_limit)
-		.parse_key_with("scripting_max_time_limit", &mut self.scripting_max_time_limit, |x| {
-			x.parse().map(Duration::from_millis).ok()
-		})
-		.parse_key("max_http_redirects", &mut self.max_http_redirects)
-		.parse_key(
-			"max_http_idle_connections_per_host",
-			&mut self.max_http_idle_connections_per_host,
-		)
-		.parse_key("max_http_idle_connections", &mut self.max_http_idle_connections)
-		.parse_key("http_idle_timeout_secs", &mut self.http_idle_timeout_secs)
-		.parse_key("http_connect_timeout_secs", &mut self.http_connect_timeout_secs)
-		.parse_key("insecure_forward_access_errors", &mut self.insecure_forward_access_errors)
-		.parse_key("external_sorting_buffer_limit", &mut self.external_sorting_buffer_limit)
-		.parse_key_with("generation_allocation_limit", &mut self.generation_allocation_limit, |x| {
-			x.parse::<usize>().ok().map(|x| 2 << x.min(28))
-		})
-		.parse_key("string_similarity_limit", &mut self.string_similarity_limit)
-		.parse_key("hnsw_cache_size", &mut self.hnsw_cache_size)
-		.parse_key("diskann_cache_size", &mut self.diskann_cache_size)
-		.parse_key_with("file_allowlist", &mut self.file_allowlist, |x| {
-			// FIXME: We really shouldn't be doing random, faillable, IO when reading configuration
-			// values. But no way to fix it without restructuring the datastore entirely.
-			Some(extract_allowed_paths(x, true, "file"))
-		})
-		.parse_key("surrealdb_user_agent", &mut self.surrealdb_user_agent)
-		.parse_key_option("surrealism_max_memory", &mut self.surrealism_max_memory)
-		.parse_key_option("surrealism_max_execution_time", &mut self.surrealism_max_execution_time)
-		.parse_key_option("surrealism_max_kv_entries", &mut self.surrealism_max_kv_entries)
-		.parse_key_option("surrealism_max_kv_value_bytes", &mut self.surrealism_max_kv_value_bytes)
-		.parse_key("surrealism_max_fs_bytes", &mut self.surrealism_max_fs_bytes)
-		.parse_key_with("surrealism_log_level", &mut self.surrealism_log_level, |s| {
-			Some(s.to_string())
-		});
+		map.parse_key_with("memory_threshold", &mut self.memory_threshold, parse_memory_threshold)
+			.parse_key("max_concurrent_tasks", &mut self.max_concurrent_tasks)
+			.parse_key("max_computation_depth", &mut self.max_computation_depth)
+			.parse_key("max_object_parsing_depth", &mut self.max_object_parsing_depth)
+			.parse_key("max_query_parsing_depth", &mut self.max_query_parsing_depth)
+			.parse_key("max_expression_parsing_depth", &mut self.max_expression_parsing_depth)
+			.parse_key("regex_size_limit", &mut self.regex_size_limit)
+			.parse_key("regex_cache_size", &mut self.regex_cache_size)
+			.parse_key("transaction_cache_size", &mut self.transaction_cache_size)
+			.parse_key("datastore_cache_size", &mut self.datastore_cache_size)
+			.parse_key("surrealism_cache_size", &mut self.surrealism_cache_size)
+			.parse_key("export_batch_size", &mut self.export_batch_size)
+			.parse_key("operator_buffer_size", &mut self.operator_buffer_size)
+			.parse_key("scan_batch_size", &mut self.scan_batch_size)
+			.parse_key(
+				"max_order_limit_priority_queue_size",
+				&mut self.max_order_limit_priority_queue_size,
+			)
+			.parse_key("scripting_max_stack_size", &mut self.scripting_max_stack_size)
+			.parse_key("scripting_max_memory_limit", &mut self.scripting_max_memory_limit)
+			.parse_key_with("scripting_max_time_limit", &mut self.scripting_max_time_limit, |x| {
+				x.parse().map(Duration::from_millis).ok()
+			})
+			.parse_key("max_http_redirects", &mut self.max_http_redirects)
+			.parse_key(
+				"max_http_idle_connections_per_host",
+				&mut self.max_http_idle_connections_per_host,
+			)
+			.parse_key("max_http_idle_connections", &mut self.max_http_idle_connections)
+			.parse_key("http_idle_timeout_secs", &mut self.http_idle_timeout_secs)
+			.parse_key("http_connect_timeout_secs", &mut self.http_connect_timeout_secs)
+			.parse_key("insecure_forward_access_errors", &mut self.insecure_forward_access_errors)
+			.parse_key("external_sorting_buffer_limit", &mut self.external_sorting_buffer_limit)
+			.parse_key_with(
+				"generation_allocation_limit",
+				&mut self.generation_allocation_limit,
+				|x| x.parse::<usize>().ok().map(|x| 2 << x.min(28)),
+			)
+			.parse_key("string_similarity_limit", &mut self.string_similarity_limit)
+			.parse_key("hnsw_cache_size", &mut self.hnsw_cache_size)
+			.parse_key("diskann_cache_size", &mut self.diskann_cache_size)
+			.parse_key_with("file_allowlist", &mut self.file_allowlist, |x| {
+				// FIXME: We really shouldn't be doing random, faillable, IO when reading
+				// configuration values. But no way to fix it without restructuring the
+				// datastore entirely.
+				Some(extract_allowed_paths(x, true, "file"))
+			})
+			.parse_key("surrealdb_user_agent", &mut self.surrealdb_user_agent)
+			.parse_key_option("surrealism_max_memory", &mut self.surrealism_max_memory)
+			.parse_key_option(
+				"surrealism_max_execution_time",
+				&mut self.surrealism_max_execution_time,
+			)
+			.parse_key_option("surrealism_max_kv_entries", &mut self.surrealism_max_kv_entries)
+			.parse_key_option(
+				"surrealism_max_kv_value_bytes",
+				&mut self.surrealism_max_kv_value_bytes,
+			)
+			.parse_key("surrealism_max_fs_bytes", &mut self.surrealism_max_fs_bytes)
+			.parse_key_with("surrealism_log_level", &mut self.surrealism_log_level, |s| {
+				Some(s.to_string())
+			});
 	}
 }
 
@@ -420,19 +428,22 @@ impl Config for CommonConfig {
 /// bytes). The default 0 bytes means that there is no memory threshold.
 /// Any other user-set memory threshold will default to at least 1 MiB.
 pub static MEMORY_THRESHOLD: LazyLock<usize> = LazyLock::new(|| {
-	std::env::var("SURREAL_MEMORY_THRESHOLD").ok().map(|s| parse_memory_threshold(&s)).unwrap_or(0)
+	std::env::var("SURREAL_MEMORY_THRESHOLD")
+		.ok()
+		.and_then(|x| parse_memory_threshold(&x))
+		.unwrap_or(0)
 });
 
 /// Parse a `SURREAL_MEMORY_THRESHOLD` value into a byte count. Accepts a plain
 /// byte count or a human-readable size suffix (`b`/`kb`/`kib`/`mb`/`mib`/
-/// `gb`/`gib`, case-insensitive). `0` (or an unparseable value) disables the
-/// threshold; any other value is floored to 1 MiB.
-fn parse_memory_threshold(value: &str) -> usize {
-	use crate::str::ParseBytes;
-	match value.parse_bytes::<usize>().unwrap_or(0) {
+/// `gb`/`gib`, case-insensitive). Returns `None` for unparseable values;
+/// `Some(0)` for `"0"` (disables the threshold); otherwise `Some(n)` floored
+/// to 1 MiB.
+fn parse_memory_threshold(value: &str) -> Option<usize> {
+	value.parse_bytes::<usize>().ok().map(|x| match x {
 		0 => 0,
-		specified => std::cmp::max(specified, 1024 * 1024),
-	}
+		x => x.max(1024 * 1024),
+	})
 }
 
 // Used in a lot of surrealql functions which randomly access this limit as well as casting
@@ -534,21 +545,56 @@ pub static KVS_THREADPOOL_SIZE: LazyLock<usize> = LazyLock::new(|| {
 mod tests {
 	use super::*;
 
+	/// `memory_threshold` in the config map must accept human-readable byte
+	/// suffixes, via the same `parse_memory_threshold` helper the
+	/// `SURREAL_MEMORY_THRESHOLD` env-var path uses.
+	#[test]
+	fn memory_threshold_configmap_parses_byte_suffixes() {
+		let mut config = CommonConfig::default();
+		assert_eq!(config.memory_threshold, 0, "default is no threshold");
+
+		// Human-readable suffix is honoured (the previously-regressed case).
+		let map = ConfigMap::empty().with_key_value("memory_threshold", "1792mb");
+		config.parse(&map);
+		assert_eq!(config.memory_threshold, 1792 * 1024 * 1024);
+
+		// Another suffix variant.
+		let map = ConfigMap::empty().with_key_value("memory_threshold", "1g");
+		config.parse(&map);
+		assert_eq!(config.memory_threshold, 1024 * 1024 * 1024);
+
+		// Plain byte count still works.
+		let map = ConfigMap::empty().with_key_value("memory_threshold", "1879048192");
+		config.parse(&map);
+		assert_eq!(config.memory_threshold, 1792 * 1024 * 1024);
+
+		// Any non-zero value is floored to at least 1 MiB.
+		let map = ConfigMap::empty().with_key_value("memory_threshold", "10");
+		config.parse(&map);
+		assert_eq!(config.memory_threshold, 1024 * 1024);
+
+		// An unparseable value leaves the field unchanged rather than panicking.
+		config.memory_threshold = 0;
+		let map = ConfigMap::empty().with_key_value("memory_threshold", "garbage");
+		config.parse(&map);
+		assert_eq!(config.memory_threshold, 0, "unparseable value must not change the field");
+	}
+
 	/// `SURREAL_MEMORY_THRESHOLD` must accept human-readable byte suffixes
 	/// (regression for #6860, which dropped suffix parsing and silently
 	/// disabled the guard for values like `1792mb`).
 	#[test]
 	fn memory_threshold_parses_byte_suffixes() {
 		// Human-readable suffix is honoured (the regressed case).
-		assert_eq!(parse_memory_threshold("1792mb"), 1792 * 1024 * 1024);
-		assert_eq!(parse_memory_threshold("1g"), 1024 * 1024 * 1024);
+		assert_eq!(parse_memory_threshold("1792mb"), Some(1792 * 1024 * 1024));
+		assert_eq!(parse_memory_threshold("1g"), Some(1024 * 1024 * 1024));
 		// A plain byte count still works.
-		assert_eq!(parse_memory_threshold("1879048192"), 1792 * 1024 * 1024);
+		assert_eq!(parse_memory_threshold("1879048192"), Some(1792 * 1024 * 1024));
 		// `0` disables the threshold.
-		assert_eq!(parse_memory_threshold("0"), 0);
+		assert_eq!(parse_memory_threshold("0"), Some(0));
 		// Any non-zero value is floored to at least 1 MiB.
-		assert_eq!(parse_memory_threshold("10"), 1024 * 1024);
-		// An unparseable value disables the threshold rather than panicking.
-		assert_eq!(parse_memory_threshold("garbage"), 0);
+		assert_eq!(parse_memory_threshold("10"), Some(1024 * 1024));
+		// An unparseable value returns None; callers map that to disabled (0).
+		assert_eq!(parse_memory_threshold("garbage"), None);
 	}
 }
