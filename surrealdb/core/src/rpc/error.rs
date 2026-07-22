@@ -136,10 +136,58 @@ pub fn types_error_from_anyhow(error: anyhow::Error) -> TypesError {
 				return api_error.to_types_error();
 			}
 			// Try to downcast to database Error
-			error
-				.downcast::<err::Error>()
-				.map(into_types_error)
-				.unwrap_or_else(TypesError::from_anyhow_with_chain)
+			let error = match error.downcast::<err::Error>() {
+				Ok(db_error) => return into_types_error(db_error),
+				Err(error) => error,
+			};
+			// A bare `kvs::Error` reaches here when the transactor bails one
+			// directly (e.g. a commit-time transaction conflict, which is not
+			// wrapped in `err::Error::Kvs`). Route it through the same mapping
+			// so its retry/UX classification — notably `TransactionConflict`
+			// (wire -32009) — is preserved instead of collapsing to a generic
+			// internal error.
+			match error.downcast::<crate::kvs::Error>() {
+				Ok(kvs_error) => into_types_error(err::Error::Kvs(kvs_error)),
+				Err(error) => TypesError::from_anyhow_with_chain(error),
+			}
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use surrealdb_types::{Error as TypesError, QueryError};
+
+	use super::types_error_from_anyhow;
+	use crate::err;
+	use crate::kvs::Error as KvsError;
+
+	#[test]
+	fn bare_kvs_conflict_maps_to_transaction_conflict() {
+		// A transaction conflict bailed directly from the transactor is a
+		// bare `kvs::Error` inside anyhow (not wrapped in `err::Error::Kvs`).
+		// It must still surface the structured TransactionConflict kind so
+		// SDK `.retry()` fires, rather than collapsing to a generic error.
+		let err = anyhow::Error::new(KvsError::TransactionConflict("write conflict".into()));
+		let te = types_error_from_anyhow(err);
+		assert_eq!(te.query_details(), Some(&QueryError::TransactionConflict));
+	}
+
+	#[test]
+	fn wrapped_kvs_conflict_still_maps_to_transaction_conflict() {
+		// Regression: the already-wrapped form must keep working.
+		let err = anyhow::Error::new(err::Error::Kvs(KvsError::TransactionConflict(
+			"write conflict".into(),
+		)));
+		let te = types_error_from_anyhow(err);
+		assert_eq!(te.query_details(), Some(&QueryError::TransactionConflict));
+	}
+
+	#[test]
+	fn existing_types_error_is_returned_verbatim() {
+		// A ready-made TypesError passes through unchanged (kind preserved).
+		let original = TypesError::query("boom".to_string(), QueryError::NotExecuted);
+		let te = types_error_from_anyhow(anyhow::Error::new(original));
+		assert_eq!(te.query_details(), Some(&QueryError::NotExecuted));
 	}
 }

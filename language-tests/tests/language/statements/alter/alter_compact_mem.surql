@@ -5,19 +5,19 @@ backend = ["mem"]
 [test]
 
 [[test.results]]
-error = "The storage layer does not support compaction requests."
+error = "There was a problem with the key-value store: The storage layer does not support compaction requests."
 
 [[test.results]]
-error = "The storage layer does not support compaction requests."
+error = "There was a problem with the key-value store: The storage layer does not support compaction requests."
 
 [[test.results]]
-error = "The storage layer does not support compaction requests."
+error = "There was a problem with the key-value store: The storage layer does not support compaction requests."
 
 [[test.results]]
 value = '[{ id: test:1 }]'
 
 [[test.results]]
-error = "The storage layer does not support compaction requests."
+error = "There was a problem with the key-value store: The storage layer does not support compaction requests."
 
 */
 

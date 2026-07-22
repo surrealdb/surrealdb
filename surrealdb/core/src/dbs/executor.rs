@@ -1060,6 +1060,15 @@ impl Executor {
 				}
 
 				if let Err(e) = txn.commit().await {
+					// Propagate a transaction conflict unwrapped so its
+					// structured kind (`TransactionConflict`, wire -32009)
+					// survives the conversion to a result row and SDK
+					// `.retry()` can recognise it. Wrapping it in
+					// `QueryNotExecuted` (as non-conflict commit failures are)
+					// would erase that signal.
+					if crate::kvs::is_retryable_transaction_conflict(&e) {
+						return Err(e);
+					}
 					bail!(Error::QueryNotExecuted {
 						message: e.to_string(),
 					});
@@ -1482,11 +1491,21 @@ impl Executor {
 						));
 					}
 
+					// A retryable write conflict keeps its structured
+					// TransactionConflict kind (wire -32009) so SDK
+					// `isRetryableConflict()`/`.retry()` fire; anything else
+					// (constraint failure, txn already finished) stays
+					// NotExecuted.
+					let commit_error_kind = if crate::kvs::is_retryable_transaction_conflict(&e) {
+						QueryError::TransactionConflict
+					} else {
+						QueryError::NotExecuted
+					};
 					self.results.push(QueryResult {
 						time: before.elapsed(),
 						result: Err(TypesError::query(
 							format!("Cannot COMMIT: {e}"),
-							Some(QueryError::NotExecuted),
+							Some(commit_error_kind),
 						)),
 						query_type: QueryType::Other,
 					});
