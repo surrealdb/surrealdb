@@ -34,6 +34,7 @@ pub use current_value_source::CurrentValueSource;
 pub use explain::{AnalyzePlan, ExplainPlan};
 pub use expr::ExprPlan;
 pub use fetch::Fetch;
+pub(crate) use fetch::FetchStep;
 pub use filter::Filter;
 pub use foreach::ForeachPlan;
 pub use ifelse::IfElsePlan;

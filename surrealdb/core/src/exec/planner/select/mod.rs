@@ -42,7 +42,7 @@ use crate::exec::index::analysis::IndexAnalyzer;
 use crate::exec::operators::scan::determine_scan_direction;
 use crate::exec::operators::scan::resolved::{ResolvedTableContext, resolve_table_context};
 use crate::exec::operators::{
-	AnalyzePlan, DynamicScan, ExplainPlan, Fetch, Filter, KnnTopK, Limit, RecordIdScan,
+	AnalyzePlan, DynamicScan, ExplainPlan, Fetch, FetchStep, Filter, KnnTopK, Limit, RecordIdScan,
 	SortDirection, SourceExpr, TableScan, Timeout, Union, UnionIndexScan, UnwrapExactlyOne,
 	VersionScope,
 };
@@ -185,12 +185,45 @@ impl<'ctx> Planner<'ctx> {
 			let mut idioms = self.resolve_field_idioms(fetch_item.0).await?;
 			fields.append(&mut idioms);
 		}
+		let (fields_sql, physical_fields) = self.convert_fetch_idioms(fields).await?;
 
 		Ok(Arc::new(Fetch {
 			input,
-			fields,
+			fields_sql,
+			physical_fields,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}) as Arc<dyn ExecOperator>)
+	}
+
+	/// Convert resolved FETCH idioms into `FetchStep`s, pre-planning each
+	/// `Part::Value` (a computed index/key, e.g. `refs[0]`, `refs[$i]`) into
+	/// a `PhysicalExpr` once here rather than re-planning it on every row.
+	/// Other part kinds are moved in as-is; the `Fetch` operator walks them
+	/// unchanged.
+	///
+	/// Consumes the idioms so no part is cloned; the returned string is their
+	/// SQL rendering, captured up front for EXPLAIN (`Fetch::attrs`).
+	pub(crate) async fn convert_fetch_idioms(
+		&self,
+		idioms: Vec<Idiom>,
+	) -> Result<(String, Vec<Vec<FetchStep>>), Error> {
+		use surrealdb_types::ToSql;
+		let fields_sql = idioms.iter().map(|f| f.to_sql()).collect::<Vec<_>>().join(", ");
+		let mut physical_fields = Vec::with_capacity(idioms.len());
+		for idiom in idioms {
+			let mut steps = Vec::with_capacity(idiom.0.len());
+			for part in idiom.0 {
+				let step = match part {
+					crate::expr::part::Part::Value(expr) => {
+						FetchStep::Index(self.physical_expr(expr).await?)
+					}
+					other => FetchStep::Static(other),
+				};
+				steps.push(step);
+			}
+			physical_fields.push(steps);
+		}
+		Ok((fields_sql, physical_fields))
 	}
 	// ========================================================================
 	// Field Resolution Helpers
