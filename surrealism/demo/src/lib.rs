@@ -280,11 +280,16 @@ async fn fetch_pokemon(api_base: String, name: String) -> Result<String> {
 	} else {
 		url.path().to_string()
 	};
-	write!(
-		stream,
+	// Build the whole request up front and send it in one `write_all` so it
+	// leaves as a single segment where possible, rather than the several small
+	// writes `write!` would emit.
+	let request = format!(
 		"GET {path} HTTP/1.1\r\nHost: {host}:{port}\r\nAccept: application/json\r\nConnection: close\r\n\r\n"
-	)
-	.map_err(|e| anyhow::anyhow!("HTTP request write failed: {e}"))?;
+	);
+	stream
+		.write_all(request.as_bytes())
+		.map_err(|e| anyhow::anyhow!("HTTP request write failed: {e}"))?;
+	stream.flush().map_err(|e| anyhow::anyhow!("HTTP request flush failed: {e}"))?;
 	let mut response = String::new();
 	stream
 		.read_to_string(&mut response)

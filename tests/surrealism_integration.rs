@@ -5,7 +5,7 @@ mod surrealism_integration {
 
 	use std::collections::HashMap;
 	use std::io::{Read, Write};
-	use std::net::{Ipv4Addr, SocketAddr, TcpListener};
+	use std::net::{Ipv4Addr, Shutdown, SocketAddr, TcpListener, TcpStream};
 	use std::path::{Path, PathBuf};
 	use std::process::Command;
 	use std::sync::{LazyLock, mpsc};
@@ -175,30 +175,11 @@ mod surrealism_integration {
 			}
 
 			match listener.accept() {
-				Ok((mut stream, _)) => {
-					let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-					let mut buf = [0; 1024];
-					let Ok(n) = stream.read(&mut buf) else {
-						continue;
-					};
-					let request = String::from_utf8_lossy(&buf[..n]);
-					let path = request
-						.lines()
-						.next()
-						.and_then(|line| line.split_whitespace().nth(1))
-						.unwrap_or("/");
-
-					let (status, reason, body) = match path {
-						"/pokemon/pikachu" => (200, "OK", serde_json::json!({ "name": "pikachu" })),
-						"/pokemon/1" => (200, "OK", serde_json::json!({ "name": "bulbasaur" })),
-						_ => (404, "Not Found", serde_json::json!({ "error": "not found" })),
-					};
-					let body = body.to_string();
-					let response = format!(
-						"HTTP/1.1 {status} {reason}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-						body.len()
-					);
-					let _ = stream.write_all(response.as_bytes());
+				// Handle each connection on its own thread so a slow or partial
+				// client never stalls the accept loop (which also polls the
+				// shutdown channel between connections).
+				Ok((stream, _)) => {
+					thread::spawn(move || handle_pokemon_connection(stream));
 				}
 				Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
 					thread::sleep(Duration::from_millis(10));
@@ -206,6 +187,58 @@ mod surrealism_integration {
 				Err(_) => return,
 			}
 		}
+	}
+
+	/// Serve a single request on an accepted connection.
+	///
+	/// The guest writes its request line and headers as several small writes,
+	/// which arrive as several TCP segments. We must drain the full request head
+	/// (up to the terminating `\r\n\r\n`) before replying: responding after a
+	/// single partial read and then closing a socket that still has inbound bytes
+	/// makes the kernel reset the connection, which surfaces in the guest as a
+	/// write failure ("Broken pipe" / "I/O error"). Reading to the end of the
+	/// headers first, then half-closing the write side, lets the client read a
+	/// clean EOF.
+	fn handle_pokemon_connection(mut stream: TcpStream) {
+		// Bound the handler so a misbehaving client can't wedge the thread.
+		let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+
+		let mut buf = Vec::with_capacity(1024);
+		let mut chunk = [0u8; 1024];
+		loop {
+			match stream.read(&mut chunk) {
+				Ok(0) => break, // client closed early
+				Ok(n) => {
+					buf.extend_from_slice(&chunk[..n]);
+					// GET requests have no body, so the header terminator marks
+					// the end of everything the client will send.
+					if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+						break;
+					}
+				}
+				Err(_) => return, // timeout or read error: drop quietly
+			}
+		}
+
+		let request = String::from_utf8_lossy(&buf);
+		let path =
+			request.lines().next().and_then(|line| line.split_whitespace().nth(1)).unwrap_or("/");
+
+		let (status, reason, body) = match path {
+			"/pokemon/pikachu" => (200, "OK", serde_json::json!({ "name": "pikachu" })),
+			"/pokemon/1" => (200, "OK", serde_json::json!({ "name": "bulbasaur" })),
+			_ => (404, "Not Found", serde_json::json!({ "error": "not found" })),
+		};
+		let body = body.to_string();
+		let response = format!(
+			"HTTP/1.1 {status} {reason}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+			body.len()
+		);
+		let _ = stream.write_all(response.as_bytes());
+		let _ = stream.flush();
+		// Half-close the write side so the client sees EOF cleanly; the read
+		// half is already drained, so the final close won't trigger an RST.
+		let _ = stream.shutdown(Shutdown::Write);
 	}
 
 	/// Execute one or more SurrealQL statements via the HTTP `/sql` endpoint and
