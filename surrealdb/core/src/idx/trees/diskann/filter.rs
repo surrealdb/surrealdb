@@ -45,9 +45,11 @@ pub(super) struct DiskAnnTruthyDocumentFilter<'a> {
 	cond: Arc<Cond>,
 	/// Query-local truthy/missing cache keyed by vector owner.
 	cache: FilterCache,
-	/// Table SELECT permission, resolved lazily on first candidate. All
-	/// candidates from this filter share the indexed table, so this caches
-	/// once for the lifetime of the filter and is reused across candidates.
+	/// Table SELECT permission gate. Pre-seeded by the streaming executor
+	/// (`KnnCondFilter::select_gate`), or resolved lazily on the first
+	/// candidate when driven by the legacy executor. All candidates from
+	/// this filter share the indexed table, so this caches once for the
+	/// lifetime of the filter and is reused across candidates.
 	permission: Option<CachedTableSelect>,
 }
 
@@ -60,6 +62,7 @@ impl<'a> DiskAnnTruthyDocumentFilter<'a> {
 		diskann_cache: DiskAnnCache,
 		pending_generation: Option<u64>,
 		cond: Arc<Cond>,
+		select_gate: Option<CachedTableSelect>,
 	) -> Self {
 		Self {
 			opt,
@@ -69,7 +72,7 @@ impl<'a> DiskAnnTruthyDocumentFilter<'a> {
 			pending_generation,
 			cond,
 			cache: Default::default(),
-			permission: None,
+			permission: select_gate,
 		}
 	}
 
