@@ -258,6 +258,62 @@ impl IndexBuilder {
 			BuildStart::RemoteOwner(_) => Ok(None),
 		}
 	}
+
+	/// Resume an index build left unfinished by a crashed or expired owner.
+	///
+	/// A `CONCURRENTLY` build is fire-and-forget: the initiating statement
+	/// returns as soon as the builder task is spawned. If the owning node then
+	/// dies mid-build, nothing ever waits on that generation again, so the
+	/// durable `!bs` state is stranded in `Building`/`Closing` and the index
+	/// reports `status: indexing` with a frozen counter indefinitely. This
+	/// performs the same expired-lease takeover the blocking path performs in
+	/// [`Self::wait_for_remote_building`], but proactively, driven by the
+	/// periodic resume scan rather than by a statement that is waiting.
+	///
+	/// Returns `Ok(true)` if this call adopted the generation and spawned a
+	/// resume task. It is a no-op (`Ok(false)`) when the durable state is
+	/// missing, already `Online`/`Error`, still covered by a live owner lease,
+	/// or already being built by a task in this process, so it is safe to call
+	/// for every index on every scan. The takeover is CAS-guarded, so racing
+	/// scans on other cluster nodes resolve to a single winner.
+	pub(crate) async fn resume_stalled(
+		&self,
+		ctx: &FrozenContext,
+		opt: Options,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: TableId,
+		ix: Arc<IndexDefinition>,
+	) -> Result<bool> {
+		let key = Arc::new(IndexKey::new(ns, db, &ix.table_name, ix.index_id));
+		// Skip if a builder task for this index is already running locally.
+		if let Some(existing) = self.indexes.read().await.get(&key)
+			&& !existing.is_finished()
+		{
+			return Ok(false);
+		}
+		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, tb, ix, key)?);
+		// Cheap read-only pre-check: only an unfinished build whose owner lease
+		// has expired is eligible. Healthy indexes and live builds bail out here
+		// without opening a write transaction.
+		let Some(state) = building.read_durable_build_state().await? else {
+			return Ok(false);
+		};
+		if !matches!(state.phase, IndexBuildPhase::Building | IndexBuildPhase::Closing)
+			|| !build_owner_expired(&state, Utc::now())
+		{
+			return Ok(false);
+		}
+		// Claim the expired generation and spawn the resume task. A no-op result
+		// (`None`) means another scanner or a concurrent statement won the race.
+		match building.takeover_expired_build_state().await? {
+			Some(acquired) => {
+				self.start_acquired_building(building, acquired, None).await?;
+				Ok(true)
+			}
+			None => Ok(false),
+		}
+	}
 }
 
 pub(super) struct Building {

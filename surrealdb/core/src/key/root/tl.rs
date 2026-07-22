@@ -29,6 +29,7 @@ impl Tl {
 			TaskLeaseType::ChangeFeedCleanup => 1,
 			TaskLeaseType::IndexCompaction => 2,
 			TaskLeaseType::EventProcessing => 3,
+			TaskLeaseType::IndexBuildResume => 4,
 		};
 		Self {
 			__: b'/',

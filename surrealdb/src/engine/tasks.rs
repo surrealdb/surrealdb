@@ -64,8 +64,9 @@ pub fn init(dbs: Arc<Datastore>, canceller: CancellationToken, opts: &EngineOpti
 	let task5 = spawn_task_index_compaction(Arc::clone(&dbs), canceller.clone(), opts);
 	let task6 = spawn_task_event_processing(Arc::clone(&dbs), canceller.clone(), opts);
 	let task7 = spawn_task_tikv_gc(Arc::clone(&dbs), canceller.clone(), opts);
-	let task8 = spawn_task_tikv_lock_cleanup(dbs, canceller, opts);
-	Tasks(vec![task1, task2, task3, task4, task5, task6, task7, task8])
+	let task8 = spawn_task_tikv_lock_cleanup(Arc::clone(&dbs), canceller.clone(), opts);
+	let task9 = spawn_task_resume_index_builds(dbs, canceller, opts);
+	Tasks(vec![task1, task2, task3, task4, task5, task6, task7, task8, task9])
 }
 
 fn spawn_task_node_membership_refresh(
@@ -250,6 +251,45 @@ fn spawn_task_index_compaction(
 			}
 		}
 		trace!("Background task exited: Running index compaction");
+	}))
+}
+
+/// Spawns the periodic task that resumes stalled index builds.
+///
+/// A `CONCURRENTLY` index build is a detached task, so if its owning node dies
+/// mid-build the durable build state is stranded in `Building`/`Closing` and the
+/// index reports `status: indexing` with a frozen counter forever. This task
+/// periodically adopts such builds (once the owner lease has expired) and drives
+/// them to completion. An interval of `Duration::ZERO` disables it so operators
+/// can recover stalled builds manually with `REBUILD INDEX`.
+fn spawn_task_resume_index_builds(
+	dbs: Arc<Datastore>,
+	canceller: CancellationToken,
+	opts: &EngineOptions,
+) -> Task {
+	let interval = opts.index_build_resume_interval;
+	Box::pin(spawn(async move {
+		if interval.is_zero() {
+			trace!("Index build resume task disabled (interval=0)");
+			return;
+		}
+		trace!("Resuming stalled index builds every {interval:?}");
+		let mut ticker = interval_ticker(interval).await;
+		loop {
+			tokio::select! {
+				biased;
+				_ = canceller.cancelled() => break,
+				Some(_) = ticker.next() => {
+					if let Err(e) = dbs.resume_stalled_index_builds(interval, canceller.clone()).await {
+						if canceller.is_cancelled() {
+							break;
+						}
+						error!("Error resuming stalled index builds: {e}");
+					}
+				}
+			}
+		}
+		trace!("Background task exited: Resuming stalled index builds");
 	}))
 }
 

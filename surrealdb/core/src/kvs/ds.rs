@@ -2114,6 +2114,119 @@ impl Datastore {
 	/// A tuple `(iterations, errors)` where `iterations` is the number of
 	/// compaction batches processed and `errors` is the total number of
 	/// individual index compaction failures across all batches.
+	/// Resume index builds stranded by a crashed or expired owner node.
+	///
+	/// A `CONCURRENTLY` index build runs as a detached task. If its owning node
+	/// dies mid-build, nothing waits on that generation again, so the durable
+	/// build state stays in `Building`/`Closing` and the index reports
+	/// `status: indexing` with a frozen counter indefinitely. This scan adopts
+	/// such builds — once their owner lease has expired — via the existing
+	/// expired-lease takeover (see [`IndexBuilder::resume_stalled`]) and drives
+	/// them to completion.
+	///
+	/// The scan is lease-guarded so a single node runs it per cluster; the
+	/// per-index takeover is additionally CAS-guarded, so correctness does not
+	/// depend on the lease. Enumeration walks the catalog, so cost is
+	/// proportional to the total index count; operators who prefer to recover
+	/// stalled builds manually (with `REBUILD INDEX`) can disable the scan by
+	/// setting its interval to zero.
+	///
+	/// Returns the number of stalled builds adopted this pass.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self, canceller))]
+	pub async fn resume_stalled_index_builds(
+		&self,
+		interval: Duration,
+		canceller: CancellationToken,
+	) -> Result<usize> {
+		Self::ensure_not_cancelled(&canceller)?;
+		// Single-node-per-cluster guard. The lease lasts two intervals so an
+		// in-flight scan isn't preempted between ticks.
+		let lh = LeaseHandler::new_with_canceller(
+			self.sequences.clone(),
+			self.id,
+			self.transaction_factory.clone(),
+			TaskLeaseType::IndexBuildResume,
+			interval * 2,
+			canceller.clone(),
+		)?;
+		if !lh.has_lease().await? {
+			return Ok(0);
+		}
+		// Snapshot the (ns, db, table, index) hierarchy in a short read
+		// transaction. Index definitions are cloned out so the per-index
+		// build-state checks below don't hold the catalog transaction open.
+		let mut candidates = Vec::new();
+		{
+			let txn = self.transaction(Read, Optimistic).await?;
+			let res: Result<()> = async {
+				for ns in txn.all_ns(None).await?.iter() {
+					for db in txn.all_db(ns.namespace_id, None).await?.iter() {
+						for tb in txn.all_tb(ns.namespace_id, db.database_id, None).await?.iter() {
+							for ix in txn
+								.all_tb_indexes(ns.namespace_id, db.database_id, &tb.name, None)
+								.await?
+								.iter()
+							{
+								// Indexes pending removal are cleared by the
+								// tombstone reaper, not resumed.
+								if ix.prepare_remove {
+									continue;
+								}
+								candidates.push((
+									ns.namespace_id,
+									ns.name.clone(),
+									db.database_id,
+									db.name.clone(),
+									tb.table_id,
+									Arc::new(ix.clone()),
+								));
+							}
+						}
+					}
+				}
+				Ok(())
+			}
+			.await;
+			let _ = txn.cancel().await;
+			res?;
+		}
+		// Attempt a takeover for each candidate. `resume_stalled` is a cheap
+		// no-op for healthy/online/live builds, so this is safe to call for
+		// every index every pass.
+		let index_builder = &self.index_builder;
+		let mut resumed = 0;
+		for (ns_id, ns_name, db_id, db_name, tb_id, ix) in candidates {
+			Self::ensure_not_cancelled(&canceller)?;
+			lh.try_maintain_lease().await?;
+			let ctx = self.setup_ctx()?.freeze();
+			let opt = self.setup_options(
+				&Session::owner().with_ns(ns_name.as_str()).with_db(db_name.as_str()),
+			);
+			match index_builder
+				.resume_stalled(&ctx, opt, ns_id, db_id, tb_id, Arc::clone(&ix))
+				.await
+			{
+				Ok(true) => {
+					resumed += 1;
+					info!(
+						target: TARGET,
+						"Resuming stalled index build '{}' on table '{}'",
+						ix.name, ix.table_name
+					);
+				}
+				Ok(false) => {}
+				Err(e) => {
+					warn!(
+						target: TARGET,
+						"Failed to resume stalled index build '{}' on table '{}': {e}",
+						ix.name, ix.table_name
+					);
+				}
+			}
+		}
+		Ok(resumed)
+	}
+
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(dbs, canceller))]
 	pub async fn index_compaction(
 		dbs: Arc<Datastore>,

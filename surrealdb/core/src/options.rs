@@ -23,6 +23,19 @@ pub struct EngineOptions {
 	///
 	/// Default: 5 seconds
 	pub index_compaction_interval: Duration,
+	/// Interval for resuming index builds stranded by a crashed or expired
+	/// owner node.
+	///
+	/// A `CONCURRENTLY` index build runs as a detached task; if its owning node
+	/// dies mid-build, nothing waits on that generation again, so the durable
+	/// build state is stuck in `Building`/`Closing` and the index reports
+	/// `status: indexing` with a frozen counter indefinitely. This task
+	/// periodically adopts such builds (once their owner lease has expired) and
+	/// drives them to completion. Set to `Duration::ZERO` to disable and recover
+	/// stalled builds manually with `REBUILD INDEX`.
+	///
+	/// Default: 30 seconds
+	pub index_build_resume_interval: Duration,
 	/// Interval for processing queued async events.
 	///
 	/// Default: 5 seconds
@@ -63,6 +76,7 @@ impl Default for EngineOptions {
 			node_membership_cleanup_interval: Duration::from_secs(300),
 			changefeed_gc_interval: Duration::from_secs(30),
 			index_compaction_interval: Duration::from_secs(5),
+			index_build_resume_interval: Duration::from_secs(30),
 			event_processing_interval: Duration::from_secs(5),
 			tikv_gc_interval: Duration::from_secs(600),
 			tikv_gc_lifetime: Duration::from_secs(600),
@@ -91,6 +105,11 @@ impl EngineOptions {
 
 	pub fn with_index_compaction_interval(mut self, interval: Duration) -> Self {
 		self.index_compaction_interval = interval;
+		self
+	}
+
+	pub fn with_index_build_resume_interval(mut self, interval: Duration) -> Self {
+		self.index_build_resume_interval = interval;
 		self
 	}
 

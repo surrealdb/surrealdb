@@ -1927,6 +1927,179 @@ async fn takeover_preserves_durable_progress_counts() -> Result<()> {
 	Ok(())
 }
 
+/// The periodic resume scan adopts a `CONCURRENTLY` build that a crashed owner
+/// left stranded (expired lease, `Building` phase) and drives it to `Online`,
+/// and is a no-op once the index is healthy again.
+#[tokio::test(flavor = "multi_thread")]
+async fn resume_scan_adopts_stalled_concurrent_build() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:one SET email = 'one@example.com' RETURN NONE;
+			CREATE user:two SET email = 'two@example.com' RETURN NONE;
+			DEFINE INDEX test ON user FIELDS email;
+			",
+	)
+	.await?;
+
+	let (ns, db, table, ix) = get_table_index(&ds, "user", "test").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	// Simulate an ungraceful crash mid-build: a `Building` generation whose owner
+	// lease has expired and whose initial scan never completed.
+	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
+	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	tx.set(
+		&ikb.new_bs_key(),
+		&IndexBuildState {
+			generation: 2,
+			phase: IndexBuildPhase::Building,
+			owner: Some(Uuid::new_v4()),
+			next_ticket: 0,
+			initial_complete: false,
+			updated_at: expired,
+			owner_heartbeat_at: Some(expired),
+			error: None,
+			report_status: Some(IndexBuildReportStatus::Indexing),
+			initial: Some(0),
+			updated: None,
+			pending: None,
+		},
+	)
+	.await?;
+	tx.commit().await?;
+
+	// The scan should adopt exactly this build.
+	let resumed = ds
+		.resume_stalled_index_builds(
+			Duration::from_secs(30),
+			tokio_util::sync::CancellationToken::new(),
+		)
+		.await?;
+	assert_eq!(resumed, 1, "scan should adopt the stalled build");
+
+	// The adopted build runs asynchronously; wait for it to reach `Online`.
+	let deadline = Instant::now() + Duration::from_secs(30);
+	loop {
+		let state = durable_build_state(&ds, &ikb).await?;
+		if state.phase == IndexBuildPhase::Online {
+			break;
+		}
+		assert!(
+			Instant::now() < deadline,
+			"resumed build did not complete; phase={:?}",
+			state.phase
+		);
+		sleep(Duration::from_millis(100)).await;
+	}
+	let building = index_building_json(&ds, &session, "user", "test").await?;
+	assert_eq!(building.get("status").and_then(|status| status.as_str()), Some("ready"));
+
+	// With the index healthy again, a second scan must be a no-op.
+	let resumed_again = ds
+		.resume_stalled_index_builds(
+			Duration::from_secs(30),
+			tokio_util::sync::CancellationToken::new(),
+		)
+		.await?;
+	assert_eq!(resumed_again, 0, "healthy index must not be re-adopted");
+
+	Ok(())
+}
+
+/// End-to-end check of the *periodic* path: an interval-driven loop calling
+/// `resume_stalled_index_builds` (exactly what `spawn_task_resume_index_builds`
+/// runs) must, on its own, adopt a stalled `CONCURRENTLY` build and drive it to
+/// `Online` — no manual `REBUILD`/`REMOVE`. This pins the behaviour in CI
+/// independently of a live server harness.
+#[tokio::test(flavor = "multi_thread")]
+async fn periodic_task_resumes_stalled_build() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	let ds = Arc::new(ds);
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:one SET email = 'one@example.com' RETURN NONE;
+			CREATE user:two SET email = 'two@example.com' RETURN NONE;
+			DEFINE INDEX test ON user FIELDS email;
+			",
+	)
+	.await?;
+
+	let (ns, db, table, ix) = get_table_index(&ds, "user", "test").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	// Strand a `Building` generation with an expired owner lease, as an
+	// ungraceful crash mid-build would leave it.
+	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
+	let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+	tx.set(
+		&ikb.new_bs_key(),
+		&IndexBuildState {
+			generation: 2,
+			phase: IndexBuildPhase::Building,
+			owner: Some(Uuid::new_v4()),
+			next_ticket: 0,
+			initial_complete: false,
+			updated_at: expired,
+			owner_heartbeat_at: Some(expired),
+			error: None,
+			report_status: Some(IndexBuildReportStatus::Indexing),
+			initial: Some(0),
+			updated: None,
+			pending: None,
+		},
+	)
+	.await?;
+	tx.commit().await?;
+
+	// Spawn the periodic resume loop, mirroring `spawn_task_resume_index_builds`:
+	// an interval timer that calls `resume_stalled_index_builds` until cancelled.
+	let canceller = tokio_util::sync::CancellationToken::new();
+	let task = {
+		let ds = Arc::clone(&ds);
+		let canceller = canceller.clone();
+		tokio::spawn(async move {
+			let tick = Duration::from_millis(200);
+			let mut interval = tokio::time::interval(tick);
+			loop {
+				tokio::select! {
+					biased;
+					_ = canceller.cancelled() => break,
+					_ = interval.tick() => {
+						let _ = ds.resume_stalled_index_builds(tick, canceller.clone()).await;
+					}
+				}
+			}
+		})
+	};
+
+	// The loop should adopt the stalled build and drive it to `Online` on its own.
+	let deadline = Instant::now() + Duration::from_secs(30);
+	loop {
+		if durable_build_state(&ds, &ikb).await?.phase == IndexBuildPhase::Online {
+			break;
+		}
+		assert!(
+			Instant::now() < deadline,
+			"the periodic resume task did not adopt and complete the stalled build"
+		);
+		sleep(Duration::from_millis(100)).await;
+	}
+	canceller.cancel();
+	let _ = task.await;
+
+	let building = index_building_json(&ds, &session, "user", "test").await?;
+	assert_eq!(building.get("status").and_then(|status| status.as_str()), Some("ready"));
+
+	Ok(())
+}
+
 #[cfg(feature = "kv-mem")]
 #[tokio::test(flavor = "multi_thread")]
 async fn distributed_writer_admission_does_not_extend_builder_lease() -> Result<()> {

@@ -71,6 +71,13 @@ pub struct StartCommandArguments {
 	#[arg(env = "SURREAL_INDEX_COMPACTION_INTERVAL", long = "index-compaction-interval", value_parser = super::validator::duration)]
 	#[arg(default_value = "5s")]
 	index_compaction_interval: Duration,
+	#[arg(
+		help = "The interval at which to resume index builds left unfinished by a crashed node (0 to disable)",
+		help_heading = "Database"
+	)]
+	#[arg(env = "SURREAL_INDEX_BUILD_RESUME_INTERVAL", long = "index-build-resume-interval", value_parser = super::validator::duration)]
+	#[arg(default_value = "30s")]
+	index_build_resume_interval: Duration,
 	#[arg(env = "SURREAL_ASYNC_EVENT_PROCESSING_INTERVAL", long = "async-event-interval", value_parser = super::validator::duration)]
 	#[arg(default_value = "5s")]
 	event_processing_interval: Duration,
@@ -212,6 +219,7 @@ pub async fn init<
 		node_membership_cleanup_interval,
 		changefeed_gc_interval,
 		index_compaction_interval,
+		index_build_resume_interval,
 		event_processing_interval,
 		tikv_gc_interval,
 		tikv_gc_lifetime,
@@ -249,6 +257,7 @@ pub async fn init<
 		.with_node_membership_cleanup_interval(node_membership_cleanup_interval)
 		.with_changefeed_gc_interval(changefeed_gc_interval)
 		.with_index_compaction_interval(index_compaction_interval)
+		.with_index_build_resume_interval(index_build_resume_interval)
 		.with_event_processing_interval(event_processing_interval)
 		.with_tikv_gc_interval(tikv_gc_interval)
 		.with_tikv_gc_lifetime(tikv_gc_lifetime)

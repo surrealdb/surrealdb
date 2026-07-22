@@ -26,6 +26,8 @@ pub(crate) enum TaskLeaseType {
 	ChangeFeedCleanup,
 	/// Index compaction
 	IndexCompaction,
+	/// Resuming index builds left unfinished by a crashed or expired owner node
+	IndexBuildResume,
 	/// Event processing
 	EventProcessing,
 }
