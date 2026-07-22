@@ -151,10 +151,10 @@ impl RemoveTableStatement {
 					.await;
 			}
 		}
-		// Refresh the table cache for lives
-		if let Some(cache) = ctx.get_cache() {
-			cache.set_live_queries_version(ns, db, &name);
-		}
+		// The table (and its committed `cache_lives_ts`) is being removed, so
+		// there is nothing to invalidate: open subscriptions were already sent a
+		// KILLED notification above, and a re-created table gets a fresh
+		// `cache_lives_ts`, so the live-query cache cannot serve stale entries.
 		// Clear the transaction cache
 		txn.clear_cache();
 		// Ok all good

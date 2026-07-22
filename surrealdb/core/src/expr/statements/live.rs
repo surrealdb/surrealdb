@@ -149,7 +149,7 @@ impl LiveStatement {
 				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 				// Get the transaction
 				let txn = ctx.tx();
-				// Ensure that the table definition exists
+				// Ensure that the table definition exists.
 				{
 					let (ns, db) = opt.ns_db()?;
 					txn.expect_tb_by_name(ns, db, &tb).await?;
@@ -180,10 +180,11 @@ impl LiveStatement {
 				// Insert the table live query
 				let key = crate::key::table::lq::new(ns, db, &tb, live_query_id);
 				txn.replace(&key, &subscription_definition).await?;
-				// Refresh the table cache for lives
-				if let Some(cache) = ctx.get_cache() {
-					cache.set_live_queries_version(ns, db, &tb);
-				}
+				// Bump the table's committed live-query cache timestamp, in the
+				// same transaction as the row write above, so writers observe the
+				// new subscription. A concurrent writer with a pre-commit snapshot
+				// reads the OLD timestamp and cannot poison the cache.
+				txn.bump_table_lives_cache(ns, db, &tb).await?;
 				// Clear the cache
 				txn.clear_cache();
 			}

@@ -141,6 +141,7 @@ impl DefineTableStatement {
 			cache_events_ts: cache_ts,
 			cache_indexes_ts: cache_ts,
 			cache_tables_ts: cache_ts,
+			cache_lives_ts: cache_ts,
 			graphql_alias: self.graphql_alias.clone(),
 			graphql_deprecated: self.graphql_deprecated.clone(),
 		};

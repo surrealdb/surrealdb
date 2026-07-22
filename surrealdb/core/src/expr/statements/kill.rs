@@ -101,10 +101,10 @@ impl KillStatement {
 				// Delete the table live query
 				let key = crate::key::table::lq::new(live.ns, live.db, &live.tb, lid);
 				txn.clr(&key).await?;
-				// Refresh the table cache for lives
-				if let Some(cache) = ctx.get_cache() {
-					cache.set_live_queries_version(live.ns, live.db, &live.tb);
-				}
+				// Bump the table's committed live-query cache timestamp so writers
+				// stop delivering to the removed subscription (same transaction as
+				// the row deletions above).
+				txn.bump_table_lives_cache(live.ns, live.db, &live.tb).await?;
 				// Clear the cache
 				txn.clear_cache();
 			}

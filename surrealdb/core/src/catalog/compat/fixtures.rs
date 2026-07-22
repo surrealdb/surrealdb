@@ -134,6 +134,7 @@ pub fn table_basic() -> TableDefinition {
 		cache_events_ts: UuidExt::nil(),
 		cache_tables_ts: UuidExt::nil(),
 		cache_indexes_ts: UuidExt::nil(),
+		cache_lives_ts: UuidExt::nil(),
 		graphql_alias: None,
 		graphql_deprecated: None,
 	}
@@ -168,6 +169,7 @@ pub fn table_with_view() -> TableDefinition {
 		cache_events_ts: UuidExt::nil(),
 		cache_tables_ts: UuidExt::nil(),
 		cache_indexes_ts: UuidExt::nil(),
+		cache_lives_ts: UuidExt::nil(),
 		graphql_alias: None,
 		graphql_deprecated: None,
 	}
@@ -194,6 +196,7 @@ pub fn table_schemafull() -> TableDefinition {
 		cache_events_ts: UuidExt::nil(),
 		cache_tables_ts: UuidExt::nil(),
 		cache_indexes_ts: UuidExt::nil(),
+		cache_lives_ts: UuidExt::nil(),
 		graphql_alias: None,
 		graphql_deprecated: None,
 	}
@@ -228,6 +231,7 @@ pub fn table_relation() -> TableDefinition {
 		cache_events_ts: UuidExt::nil(),
 		cache_tables_ts: UuidExt::nil(),
 		cache_indexes_ts: UuidExt::nil(),
+		cache_lives_ts: UuidExt::nil(),
 		graphql_alias: None,
 		graphql_deprecated: None,
 	}
@@ -255,6 +259,7 @@ pub fn table_with_materialized_view() -> TableDefinition {
 		cache_events_ts: UuidExt::nil(),
 		cache_tables_ts: UuidExt::nil(),
 		cache_indexes_ts: UuidExt::nil(),
+		cache_lives_ts: UuidExt::nil(),
 		graphql_alias: None,
 		graphql_deprecated: None,
 	}
@@ -278,6 +283,7 @@ pub fn table_any_type() -> TableDefinition {
 		cache_events_ts: UuidExt::nil(),
 		cache_tables_ts: UuidExt::nil(),
 		cache_indexes_ts: UuidExt::nil(),
+		cache_lives_ts: UuidExt::nil(),
 		graphql_alias: None,
 		graphql_deprecated: None,
 	}
