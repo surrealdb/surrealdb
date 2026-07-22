@@ -156,6 +156,13 @@ pub async fn signin(
 				_ => Err(anyhow::Error::new(Error::MissingUserOrPass)),
 			}
 		}
+		// ROOT signin with access method
+		(None, None, Some(ac)) => {
+			// Process the provided values
+			let ac = ac.into_string()?;
+			// Attempt to signin using the specified access method
+			super::signin::root_access(kvs, session, ac, vars).await
+		}
 		// ROOT signin with user credentials
 		(None, None, None) => {
 			// Get the provided user and pass
@@ -2425,6 +2432,67 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				},
 			}
 		}
+	}
+
+	#[tokio::test]
+	async fn test_signin_dispatch_bearer_above_database() {
+		// Bearer signin must route correctly through the public `signin()`
+		// entrypoint for namespace- and root-level access, not only through the
+		// level-specific helpers. Root bearer has its own dispatch arm, so drive
+		// `signin()` directly to guard that routing.
+		for (level, ns) in [("ROOT", None), ("NS", Some("test"))] {
+			let ds = Datastore::new("memory").await.unwrap();
+			let setup = Session::owner().with_ns("test").with_db("test");
+			let res = ds
+				.execute(
+					&format!(
+						r#"
+						DEFINE ACCESS api ON {level} TYPE BEARER FOR USER DURATION FOR SESSION 2h;
+						DEFINE USER tobie ON {level} ROLES EDITOR;
+						ACCESS api ON {level} GRANT FOR USER tobie;
+						"#
+					),
+					&setup,
+					None,
+				)
+				.await
+				.unwrap();
+			let result = res.last().unwrap().result.clone().unwrap();
+			let grant = result.get("grant").clone().into_object().unwrap();
+			let key = grant.get("key").unwrap().as_string().unwrap().clone();
+
+			// Route through signin() with only the params a correct client sends:
+			// { [ns], ac, key } and no database key.
+			let mut sess = Session::default();
+			let mut vars = PublicVariables::new();
+			if let Some(ns) = ns {
+				vars.insert("ns", ns);
+			}
+			vars.insert("ac", "api");
+			vars.insert("key", key);
+			let res = signin(&ds, &mut sess, vars).await;
+
+			assert!(res.is_ok(), "{level} bearer signin failed via dispatch: {res:?}");
+			assert_eq!(sess.ns.as_deref(), ns);
+			assert_eq!(sess.db, None);
+			match level {
+				"ROOT" => assert!(sess.au.is_root(), "expected root auth"),
+				"NS" => assert!(sess.au.is_ns(), "expected namespace auth"),
+				_ => unreachable!(),
+			}
+			assert!(sess.au.has_role(Role::Editor));
+			assert!(!sess.au.has_role(Role::Owner));
+			assert!(sess.exp.is_some(), "session must carry a finite expiry");
+		}
+
+		// A root access method that does not exist is rejected, not silently
+		// accepted: the dispatch reaches root_access, which errors.
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut sess = Session::default();
+		let mut vars = PublicVariables::new();
+		vars.insert("ac", "nonexistent");
+		vars.insert("key", "surreal-bearer-000000000000-000000000000000000000000");
+		assert!(signin(&ds, &mut sess, vars).await.is_err());
 	}
 
 	#[tokio::test]
