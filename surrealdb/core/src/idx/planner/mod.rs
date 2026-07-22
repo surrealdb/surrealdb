@@ -127,17 +127,24 @@ impl<'a> StatementContext<'a> {
 	/// Decide whether to fetch just record keys, keys and values, or only a
 	/// COUNT.
 	///
+	/// `index_covers_cond` must only be `true` when the plan's index access
+	/// returns exactly the records matching the WHERE clause: the Count and
+	/// KeysOnly strategies skip the per-record evaluation of the condition
+	/// (see `Document::check_where_condition`), so an index scan answering
+	/// only part of the clause (e.g. one conjunct of an AND) requires
+	/// fetching values.
+	///
 	/// This function evaluates the statement shape (UPDATE/DELETE/etc.),
 	/// WHERE/GROUP/ORDER clauses, selected fields, and table permissions to
 	/// select the most efficient record retrieval strategy:
 	/// - KeysAndValues: required when values must be read (e.g., UPDATE/DELETE; WHERE not fully
-	///   covered by indexes; GROUP BY with fields; ORDER BY with fields; non-count projections; or
-	///   when table permissions are Specific).
+	///   covered by the plan's index access; GROUP BY with fields; ORDER BY with fields; non-count
+	///   projections; or when table permissions are Specific).
 	/// - Count: when we only need COUNT(*) and GROUP ALL.
 	/// - KeysOnly: when none of the above apply, allowing index-only iteration.
 	pub(crate) fn check_record_strategy(
 		&self,
-		all_expressions_with_index: bool,
+		index_covers_cond: bool,
 		granted_permission: GrantedPermission,
 	) -> Result<RecordStrategy> {
 		// Update / Upsert / Delete need to retrieve the values:
@@ -146,10 +153,9 @@ impl<'a> StatementContext<'a> {
 		if matches!(self.stm, Statement::Update(_) | Statement::Upsert(_) | Statement::Delete(_)) {
 			return Ok(RecordStrategy::KeysAndValues);
 		}
-		// If there is an index backs a WHERE clause but not all expressions,
-		// then we need to fetch and process
-		// record content values too.
-		if !all_expressions_with_index && self.cond.is_some() {
+		// If the WHERE clause is not fully answered by the plan's index
+		// access, then we need to fetch and process record content values too.
+		if !index_covers_cond && self.cond.is_some() {
 			return Ok(RecordStrategy::KeysAndValues);
 		}
 
@@ -308,6 +314,7 @@ impl QueryPlanner {
 			all_and: tree.all_and,
 			all_expressions_with_index: tree.all_expressions_with_index,
 			all_and_groups: tree.all_and_groups,
+			has_and: tree.has_and,
 		};
 		match PlanBuilder::build(stm_ctx, p).await? {
 			Plan::SingleIndex(exp, io, rs) => {

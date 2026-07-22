@@ -9,7 +9,7 @@ use surrealdb_types::ToSql;
 use crate::catalog::Index;
 use crate::expr::operator::{MatchesOperator, NearestNeighbor};
 use crate::expr::with::With;
-use crate::expr::{BinaryOperator, Expr, Idiom};
+use crate::expr::{BinaryOperator, Expr, Idiom, Part};
 use crate::idx::planner::tree::{
 	CompoundIndexes, GroupRef, IdiomCol, IdiomPosition, IndexReference, Node, WithIndexes,
 };
@@ -39,6 +39,7 @@ pub(super) struct PlanBuilderParameters {
 	pub(super) all_and: bool,
 	pub(super) all_expressions_with_index: bool,
 	pub(super) all_and_groups: HashMap<GroupRef, bool>,
+	pub(super) has_and: bool,
 }
 
 impl PlanBuilder {
@@ -90,41 +91,65 @@ impl PlanBuilder {
 		//Optimisation path 1: All conditions connected by AND operators
 		// This enables single-index optimisations and compound index usage
 		if p.all_and {
+			// Number of index-backed expression occurrences collected from the
+			// WHERE clause. The Count and KeysOnly record strategies skip the
+			// per-record evaluation of the WHERE clause, so they are only sound
+			// when the single index access chosen below answers every one of
+			// these exactly. A plan that covers one conjunct of a multi-conjunct
+			// AND must fetch record values so the remaining conjuncts are
+			// checked per record.
+			let total_index_backed = b.non_range_indexes.len()
+				+ b.groups.values().map(Group::expressions_count).sum::<usize>();
+
 			// Priority 1: Find the best compound index that covers multiple queries
 			// conditions Compound indexes are highly efficient as they can satisfy
 			// multiple WHERE clauses in a single index scan, significantly reducing I/O
 			// operations
 			let mut compound_index = None;
 			for (ixr, vals) in p.compound_indexes {
-				if let Some((cols, io)) = b.check_compound_index_all_and(&ixr, &vals) {
+				if let Some((cols, io, covered)) = b.check_compound_index_all_and(&ixr, &vals) {
 					// Prefer indexes that cover more columns (higher selectivity)
-					if let Some((c, _)) = &compound_index
+					if let Some((c, _, _)) = &compound_index
 						&& cols <= *c
 					{
 						continue; // Skip if this index covers fewer columns
 					}
 					// Only consider true compound indexes (multiple columns)
 					if cols > 1 {
-						compound_index = Some((cols, io));
+						compound_index = Some((cols, io, covered));
 					}
 				}
 			}
 
-			if let Some((_, io)) = compound_index {
+			if let Some((_, io, covered)) = compound_index {
+				// The compound scan answers the whole WHERE clause only when
+				// every conjunct is index-backed and was incorporated into the
+				// scan exactly.
+				let covers_cond =
+					p.all_expressions_with_index && covered == Some(total_index_backed);
 				// Evaluate whether we can use index-only access (no table lookups needed)
-				let record_strategy =
-					ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
+				let record_strategy = ctx.check_record_strategy(covers_cond, p.gp)?;
 				// Return optimized single compound index plan
 				return Ok(Plan::SingleIndex(None, io, record_strategy));
 			}
+
+			// The range scan selected below merges every range expression of a
+			// single index: it answers the whole WHERE clause only when those
+			// are the only index-backed expressions of the condition (computed
+			// before `b.groups` is consumed).
+			let single_index_range = b.non_range_indexes.is_empty()
+				&& b.groups.len() == 1
+				&& b.groups.values().next().map(|g| g.ranges.len() == 1).unwrap_or(false);
 
 			// Select the first available range query (deterministic group order)
 			if let Some((_, group)) = b.groups.into_iter().next()
 				&& let Some((index_reference, rq)) = group.take_first_range()
 			{
+				let covers_cond = p.all_expressions_with_index
+					&& single_index_range
+					&& Self::range_scan_exact(&index_reference, &rq);
 				// Evaluate the record strategy
-				let record_strategy =
-					ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
+				let record_strategy = ctx.check_record_strategy(covers_cond, p.gp)?;
 				let (is_order, sc) = if let Some(io) = p.order_limit {
 					(
 						io.index_reference == index_reference,
@@ -146,17 +171,29 @@ impl PlanBuilder {
 			// Otherwise, pick a non-range single-index
 			// option (heuristic)
 			if let Some((e, i)) = b.non_range_indexes.pop() {
+				let (count_exact, keys_exact) = Self::scan_exactness(&e, &i);
+				// This scan answers a single expression: the whole WHERE clause
+				// is covered only when every conjunct is index-backed and this
+				// is the only index-backed expression.
+				let covers_cond =
+					p.all_expressions_with_index && total_index_backed == 1 && keys_exact;
 				// Evaluate the record strategy
+				let record_strategy = ctx.check_record_strategy(covers_cond, p.gp)?;
+				// A union scan (e.g. CONTAINSANY) can return the same record
+				// several times: counting must go through key deduplication.
 				let record_strategy =
-					ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
+					if matches!(record_strategy, RecordStrategy::Count) && !count_exact {
+						RecordStrategy::KeysOnly
+					} else {
+						record_strategy
+					};
 				// Return the plan
 				return Ok(Plan::SingleIndex(Some(e), i, record_strategy));
 			}
 			// If there is an order option
 			if let Some(o) = p.order_limit {
-				// Evaluate the record strategy
-				let record_strategy =
-					ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
+				// An order-backed scan does not evaluate the WHERE clause
+				let record_strategy = ctx.check_record_strategy(false, p.gp)?;
 				// Return the plan
 				return Ok(Plan::SingleIndex(None, o, record_strategy));
 			}
@@ -171,8 +208,23 @@ impl PlanBuilder {
 					group.take_intersect_ranges(&mut ranges);
 				}
 			}
+			// The union of the per-index scans matches the WHERE clause (as a
+			// deduplicated set) only when the condition is a pure disjunction
+			// of set-exact scans. Any AND makes a branch a superset of its
+			// conjunction, so record values must be fetched and the clause
+			// re-evaluated per record.
+			let covers_cond = !p.has_and
+				&& b.non_range_indexes.iter().all(|(e, io)| Self::scan_exactness(e, io).1)
+				&& ranges.iter().all(|(ixr, rq)| Self::range_scan_exact(ixr, rq));
 			// Evaluate the record strategy
-			let record_strategy = ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
+			let record_strategy = ctx.check_record_strategy(covers_cond, p.gp)?;
+			// Several scans can return the same record: counting must go
+			// through key deduplication.
+			let record_strategy = if matches!(record_strategy, RecordStrategy::Count) {
+				RecordStrategy::KeysOnly
+			} else {
+				record_strategy
+			};
 			// Return the plan
 			return Ok(Plan::MultiIndex(b.non_range_indexes, ranges, record_strategy));
 		}
@@ -201,12 +253,15 @@ impl PlanBuilder {
 	}
 
 	/// Check if a compound index can be used.
-	/// Returns the number of columns involved, and the index option
+	/// Returns the number of columns involved, the index option, and the
+	/// number of conjunct operators the scan incorporates exactly (`None`
+	/// when the scan is broader than the operators it consumed, in which
+	/// case the Count/KeysOnly record strategies must not trust it).
 	fn check_compound_index_all_and(
 		&self,
 		index_reference: &IndexReference,
 		columns: &[Vec<IndexOperator>],
-	) -> Option<(IdiomCol, IndexOption)> {
+	) -> Option<(IdiomCol, IndexOption, Option<usize>)> {
 		// Check the index can be used
 		if !self.with_indexes.allowed_index(index_reference.index_id) {
 			return None;
@@ -244,6 +299,9 @@ impl PlanBuilder {
 			continues_equals_values += 1;
 		}
 
+		let covered =
+			Self::compound_covered_operators(index_reference, columns, continues_equals_values);
+
 		if continues_equals_values == 0 {
 			if !range_parts.is_empty() {
 				return Some((
@@ -254,6 +312,7 @@ impl PlanBuilder {
 						IdiomPosition::None,
 						IndexOperator::Range(vec![], range_parts),
 					),
+					covered,
 				));
 			}
 			return None;
@@ -272,6 +331,7 @@ impl PlanBuilder {
 						IdiomPosition::None,
 						IndexOperator::Range(equals, range_parts),
 					),
+					covered,
 				));
 			}
 			return Some((
@@ -282,6 +342,7 @@ impl PlanBuilder {
 					IdiomPosition::None,
 					IndexOperator::Equality(Arc::new(Value::Array(Array(equals)))),
 				),
+				covered,
 			));
 		}
 		let vals: Vec<Value> = equal_combinations
@@ -299,7 +360,118 @@ impl PlanBuilder {
 				IdiomPosition::None,
 				IndexOperator::Union(Arc::new(Value::Array(Array(vals)))),
 			),
+			covered,
 		))
+	}
+
+	/// Count the conjunct operators that a compound scan over
+	/// `columns[0..prefix_len]` (plus an optional range on the next column)
+	/// incorporates exactly. Returns `None` when the scan is broader than
+	/// the operators it consumed: multi-valued or nullish equalities (which
+	/// build a union of prefixes), nullish or misplaced range parts,
+	/// operators left on columns beyond the scan, or an index column
+	/// targeting array elements (one index entry per element).
+	fn compound_covered_operators(
+		index_reference: &IndexReference,
+		columns: &[Vec<IndexOperator>],
+		prefix_len: IdiomCol,
+	) -> Option<usize> {
+		let mut covered = 0;
+		for (col, vals) in columns.iter().enumerate() {
+			if index_reference.cols.get(col).map(|i| i.contains(&Part::All)).unwrap_or(false) {
+				return None;
+			}
+			if col < prefix_len {
+				match vals.as_slice() {
+					[IndexOperator::Equality(v)] if !v.is_nullish() => covered += 1,
+					_ => return None,
+				}
+			} else if col == prefix_len
+				&& vals
+					.iter()
+					.all(|iop| matches!(iop, IndexOperator::RangePart(_, v) if !v.is_nullish()))
+			{
+				// The column right after the equality prefix contributes the
+				// range bounds of the scan.
+				covered += vals.len();
+			} else if !vals.is_empty() {
+				return None;
+			}
+		}
+		Some(covered)
+	}
+
+	/// Classify the index scan produced by `io` for the expression `exp`:
+	/// - `.1` (keys-exact): the scan returns exactly the records matching the expression (possibly
+	///   several times).
+	/// - `.0` (count-exact): additionally, each matching record is returned exactly once, so index
+	///   entries can be counted without deduplicating record ids.
+	///
+	/// The Count and KeysOnly record strategies skip the per-record
+	/// evaluation of the WHERE clause and therefore require these guarantees.
+	fn scan_exactness(exp: &Expr, io: &IndexOption) -> (bool, bool) {
+		// An index column targeting array elements stores one entry per element
+		let part_all =
+			io.index_reference().cols.first().map(|i| i.contains(&Part::All)).unwrap_or(false);
+		let exp_op = if let Expr::Binary {
+			op,
+			..
+		} = exp
+		{
+			Some(op)
+		} else {
+			None
+		};
+		match io.op() {
+			IndexOperator::Equality(_) => {
+				// `field[*] = v` compares each element to `v` in the index,
+				// but the expression compares the whole array: the scan is
+				// broader. (CONTAINS / INSIDE element lookups are exact.)
+				if part_all
+					&& matches!(exp_op, Some(BinaryOperator::Equal | BinaryOperator::ExactEqual))
+				{
+					(false, false)
+				} else {
+					(true, true)
+				}
+			}
+			IndexOperator::RangePart(_, v) => {
+				let exact = !part_all && !v.is_nullish();
+				(exact, exact)
+			}
+			IndexOperator::Matches(_, _) => (true, true),
+			// A union scan returns the records matching ANY of the values:
+			// exact as a set for the ANY/IN variants (a record matching
+			// several values is returned several times), but a superset of
+			// the expression for the ALL variants.
+			IndexOperator::Union(_) => match exp_op {
+				Some(
+					BinaryOperator::ContainAny | BinaryOperator::AnyInside | BinaryOperator::Inside,
+				) => (false, true),
+				_ => (false, false),
+			},
+			_ => (false, false),
+		}
+	}
+
+	/// Check that a merged range scan is exact: the bounds are non-nullish
+	/// (so the index order matches the comparison operators) and the index
+	/// column does not target array elements (which would return one entry
+	/// per matching element).
+	fn range_scan_exact(ixr: &IndexReference, rq: &UnionRangeQueryBuilder) -> bool {
+		if ixr.cols.first().map(|i| i.contains(&Part::All)).unwrap_or(false) {
+			return false;
+		}
+		// 3.2 represents each bound as a `RangeValue` (`value: None` is
+		// unbounded; `Some(v)` is an inclusive/exclusive bound) rather than
+		// the `std::ops::Bound` used on `main`. The exactness check is the
+		// same: a bound is fine when it is unbounded or its value is
+		// non-nullish.
+		let bound_ok = |b: &RangeValue| match &b.value {
+			Some(v) => !v.is_nullish(),
+			None => true,
+		};
+		bound_ok(&rq.from) && bound_ok(&rq.to)
 	}
 
 	fn cartesian_equals_product(
@@ -628,6 +800,11 @@ pub(super) struct Group {
 }
 
 impl Group {
+	/// Number of index-backed expression occurrences collected in this group
+	fn expressions_count(&self) -> usize {
+		self.ranges.values().map(Vec::len).sum()
+	}
+
 	fn take_first_range(self) -> Option<(IndexReference, UnionRangeQueryBuilder)> {
 		if let Some((ir, ri)) = self.ranges.into_iter().take(1).next() {
 			UnionRangeQueryBuilder::new_aggregate(ri).map(|rb| (ir, rb))
