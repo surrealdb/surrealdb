@@ -530,7 +530,7 @@ jobs:
   # ----------------------------------------
 
   lang-tests:
-    name: SurrealQL tests - ${{ matrix.engine }} (${{ matrix.arch }})
+    name: Language tests - ${{ matrix.engine }} (${{ matrix.arch }})
     runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       fail-fast: false
@@ -584,8 +584,8 @@ jobs:
   # SurrealQL language upgrade tests
   # ----------------------------------------
 
-  lang-upgrade-tests:
-    name: SurrealQL upgrade tests - ${{ matrix.engine }} (${{ matrix.arch }})
+  upgrade-tests:
+    name: Upgrade tests - ${{ matrix.engine }} (${{ matrix.arch }})
     runs-on: runner-${{ matrix.arch }}-32-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     strategy:
       fail-fast: false
@@ -663,8 +663,8 @@ jobs:
   # JS SDK conformance suite
   # ----------------------------------------
 
-  conformance-js:
-    name: JS SDK conformance
+  conformance-tests:
+    name: Conformance tests
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     needs: build
     steps:
@@ -740,9 +740,9 @@ jobs:
       - kvs-engines
       # SurrealQL language tests
       - lang-tests
-      - lang-upgrade-tests
+      - upgrade-tests
       # JS SDK conformance
-      - conformance-js
+      - conformance-tests
     steps:
       - name: Check for failures
         run: |
@@ -770,8 +770,8 @@ jobs:
             "${{ needs.sdk-engines.result }}"
             "${{ needs.kvs-engines.result }}"
             "${{ needs.lang-tests.result }}"
-            "${{ needs.lang-upgrade-tests.result }}"
-            "${{ needs.conformance-js.result }}"
+            "${{ needs.upgrade-tests.result }}"
+            "${{ needs.conformance-tests.result }}"
           )
 
           # Check if any job failed (skipped is ok for conditional jobs)
