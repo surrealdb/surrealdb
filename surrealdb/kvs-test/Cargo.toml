@@ -1,0 +1,30 @@
+[package]
+name = "surrealdb-kvs-test"
+publish = false
+readme = "README.md"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+inventory = { workspace = true }
+surrealdb-kvs = { workspace = true }
+web-time = { workspace = true }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+libtest-mimic = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
+
+# `time` is needed to compile the sleeps in `versioned.rs`; those tests are
+# gated to versioned backends and never run on wasm.
+[target.'cfg(target_family = "wasm")'.dependencies]
+tokio = { workspace = true, features = ["time"] }
+
+[lints]
+workspace = true

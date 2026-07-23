@@ -33,10 +33,14 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 rand = { workspace = true }
-serial_test = { workspace = true }
+surrealdb-kvs-test = { workspace = true }
 temp-dir = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
-web-time = { workspace = true }
+
+[[test]]
+name = "kvs"
+path = "tests/kvs/main.rs"
+harness = false
 
 [lints]
 workspace = true

@@ -76,7 +76,7 @@ pub async fn init<
 	}: McpCommandArguments,
 	runtime: ObservabilityRuntime,
 ) -> Result<()> {
-	C::path_valid(&path)?;
+	composer.path_valid(&path)?;
 
 	let endpoint = any::__into_endpoint(path)?;
 	let path = if endpoint.path.is_empty() {

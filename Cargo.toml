@@ -16,6 +16,7 @@ members = [
     "surrealdb/kvs-mem",
     "surrealdb/kvs-rocksdb",
     "surrealdb/kvs-surrealkv",
+    "surrealdb/kvs-test",
     "surrealdb/kvs-tikv",
     "surrealdb/mcp",
     "surrealdb/parser",
@@ -74,6 +75,7 @@ surrealdb-kvs-indxdb = { version = "3.3.0-nightly", path = "surrealdb/kvs-indxdb
 surrealdb-kvs-mem = { version = "3.3.0-nightly", path = "surrealdb/kvs-mem" }
 surrealdb-kvs-rocksdb = { version = "3.3.0-nightly", path = "surrealdb/kvs-rocksdb" }
 surrealdb-kvs-surrealkv = { version = "3.3.0-nightly", path = "surrealdb/kvs-surrealkv" }
+surrealdb-kvs-test = { version = "3.3.0-nightly", path = "surrealdb/kvs-test" }
 surrealdb-kvs-tikv = { version = "3.3.0-nightly", path = "surrealdb/kvs-tikv" }
 surrealdb-collections = { version = "3.3.0-nightly", path = "surrealdb/collections" }
 
@@ -115,7 +117,7 @@ tikv = { version = "0.5.0", default-features = false, package = "surrealdb-tikv-
 # Other crates
 addr = { version = "0.15.6", default-features = false, features = ["std"] }
 ahash = "0.8.12"
-ammonia = "4.1.2"
+ammonia = "4.1.4"
 anyhow = "1.0.102"
 arbitrary = "1.4.2"
 argon2 = "0.5.3"
@@ -158,6 +160,7 @@ http-body-util = "0.1.3"
 hyper = "1.9"
 humantime = "2.3.0"
 indexmap = "2.14.0"
+inventory = "0.3.24"
 ipnet = "2.12.0"
 jemallocator = { version = "0.6.1", package = "tikv-jemallocator" }
 jsonwebtoken = { version = "10.3.0", default-features = false, features = ["use_pem"] }
@@ -235,6 +238,7 @@ test-log = "0.2"
 time = "0.3"
 tracing-subscriber = "0.3"
 wiremock = "0.6"
+libtest-mimic = "0.8.2"
 
 # SurrealML specific dependencies
 ort = { version = "2.0.0-rc.12", features = ["cuda", "ndarray"] }
@@ -516,6 +520,16 @@ used_underscore_binding = "warn"
 [profile.dev]
 debug = "line-tables-only"
 split-debuginfo = "unpacked"
+
+# The suite crate registers its tests through `inventory` module
+# constructors. wasm-ld extracts archive members only to satisfy symbol
+# references (it has no special handling for init-array members, unlike
+# ELF linkers), so the registrations must share one object with the
+# `run_all` entry point the consumer references — i.e. one codegen unit —
+# or the browser test runner sees an empty registry.
+[profile.dev.package.surrealdb-kvs-test]
+codegen-units = 1
+incremental = false
 
 [profile.release]
 codegen-units = 1

@@ -433,7 +433,7 @@ pub trait TransactionBuilderFactory: Send + Sync + 'static {
 	) -> impl Future<Output = Result<TransactionBuilderParts<Self::RouterState>>> + Send;
 
 	/// Validate a datastore path string.
-	fn path_valid(v: &str) -> Result<String>;
+	fn path_valid(&self, v: &str) -> Result<String>;
 
 	/// Returns the stable datastore node id used for live-query ownership metadata.
 	///
@@ -464,10 +464,6 @@ pub trait TransactionBuilderFactory: Send + Sync + 'static {
 	}
 }
 
-pub mod requirements {
-	pub use surrealdb_kvs::builder::requirements::TransactionBuilderRequirements;
-}
-
 impl TransactionBuilderFactory for CommunityComposer {
 	type RouterState = ();
 
@@ -477,52 +473,20 @@ impl TransactionBuilderFactory for CommunityComposer {
 		canceller: CancellationToken,
 		config: ConfigMap,
 	) -> Result<TransactionBuilderParts<Self::RouterState>> {
-		cfg_select! {
-			any(
-				feature = "kv-mem",
-				feature = "kv-rocksdb",
-				feature = "kv-indxdb",
-				feature = "kv-tikv",
-				feature = "kv-surrealkv",
-			) => {
-				let builder =
-					surrealdb_kvs_any::new_transaction_builder(path, canceller, config).await?;
-				Ok(TransactionBuilderParts::without_router_state(builder))
-			}
-			_ => {
-				let _ = path;
-				let _ = canceller;
-				let _ = config;
-				bail!(Error::Kvs(crate::kvs::Error::Datastore(
-					"No storage engine is enabled in this build of SurrealDB".to_owned()
-				)))
-			}
-		}
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder(path, canceller, config)
+			.await?;
+		Ok(TransactionBuilderParts::without_router_state(builder))
 	}
 
-	fn path_valid(v: &str) -> Result<String> {
-		cfg_select! {
-			any(
-				feature = "kv-mem",
-				feature = "kv-rocksdb",
-				feature = "kv-indxdb",
-				feature = "kv-tikv",
-				feature = "kv-surrealkv",
-			) => {
-			surrealdb_kvs_any::path_valid(v)
-				.map_err(|_| anyhow::anyhow!("Provide a valid database path parameter"))
-			}
-			_ => {
-				let _ = v;
-				bail!("No storage engine is enabled in this build of SurrealDB")
-			}
-		}
+	fn path_valid(&self, v: &str) -> Result<String> {
+		Ok(surrealdb_kvs_any::Backends::community().path_valid(v)?)
 	}
 }
 
 impl Display for Datastore {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		self.transaction_factory.builder.fmt(f)
+		f.write_str(self.transaction_factory.builder.name())
 	}
 }
 

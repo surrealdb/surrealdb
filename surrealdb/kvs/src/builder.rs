@@ -5,7 +5,6 @@ use std::any::{Any, TypeId};
 use std::sync::Arc;
 
 use common::future::BoxFut;
-pub use requirements::TransactionBuilderRequirements;
 
 use crate::TransactionType;
 use crate::api::Transactable;
@@ -40,7 +39,9 @@ pub struct Metric {
 /// This was introduced to make the server more composable/embeddable. External
 /// crates can implement `TransactionBuilder` to plug in custom backends while
 /// reusing the rest of SurrealDB.
-pub trait TransactionBuilder: TransactionBuilderRequirements {
+pub trait TransactionBuilder: Send + Sync + 'static {
+	fn name(&self) -> &'static str;
+
 	/// Create a new backend transaction.
 	///
 	/// - `write`: whether the transaction is writable (Write vs Read)
@@ -81,15 +82,4 @@ pub trait TransactionBuilder: TransactionBuilderRequirements {
 	fn extension(&self, _: TypeId) -> Option<Arc<dyn Any + Send + Sync>> {
 		None
 	}
-}
-
-pub mod requirements {
-	//! Trait requirements for transaction builders. See
-	//! [`crate::api::requirements`] for the rationale.
-
-	use std::fmt::Display;
-
-	/// This trait defines the requirements for a transaction builder. All
-	/// backends, including WASM ones, must be `Send + Sync`.
-	pub trait TransactionBuilderRequirements: Display + Send + Sync + 'static {}
 }

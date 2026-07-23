@@ -118,16 +118,18 @@ impl State {
 		}
 	}
 
-	/// Undo every write recorded since the last savepoint.
-	fn rollback_to_savepoint(&mut self) {
+	/// Undo every write recorded since the last savepoint. Errors when no
+	/// savepoint is on the stack.
+	fn rollback_to_savepoint(&mut self) -> KvsResult<()> {
 		let Some(sp) = self.savepoints.pop() else {
-			return;
+			return Err(KvsError::Transaction("no savepoint to rollback to".to_owned()));
 		};
 		for (key, write) in sp {
 			if let Some(ent) = self.keys.get_mut(&key) {
 				ent.write = write;
 			}
 		}
+		Ok(())
 	}
 
 	/// The value of a key as visible to this transaction, reading through to
@@ -888,8 +890,7 @@ impl Transactable for IndxdbTx {
 			let Some(inner) = lock.as_mut() else {
 				return Err(KvsError::TransactionFinished);
 			};
-			inner.rollback_to_savepoint();
-			Ok(())
+			inner.rollback_to_savepoint()
 		})
 	}
 }

@@ -374,7 +374,7 @@ mod tests {
 	use crate::kvs::api::BoxFut;
 	use crate::kvs::{
 		Metrics, Transactable, TransactionBuilder, TransactionBuilderFactory,
-		TransactionBuilderParts, TransactionBuilderRequirements,
+		TransactionBuilderParts,
 	};
 
 	#[derive(Clone)]
@@ -410,7 +410,7 @@ mod tests {
 			Ok(TransactionBuilderParts::new(Box::new(TestTransactionBuilder), self.state.clone()))
 		}
 
-		fn path_valid(v: &str) -> Result<String> {
+		fn path_valid(&self, v: &str) -> Result<String> {
 			Ok(v.to_owned())
 		}
 	}
@@ -423,9 +423,11 @@ mod tests {
 		}
 	}
 
-	impl TransactionBuilderRequirements for TestTransactionBuilder {}
-
 	impl TransactionBuilder for TestTransactionBuilder {
+		fn name(&self) -> &'static str {
+			"test"
+		}
+
 		fn new_transaction(
 			&self,
 			_write: TransactionType,

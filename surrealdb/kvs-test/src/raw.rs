@@ -1,20 +1,24 @@
+//! Raw key/value operations: get/set/put/del and their conditional
+//! variants, range keys/scans in both directions, batches, and the
+//! scan-cursor battery.
+
 use surrealdb_kvs::TransactionType::*;
 use surrealdb_kvs::{Direction, KeyRange};
 
-use super::CreateDs;
+use crate::{TestBackend, kvs_test};
 
-pub async fn initialise(new_ds: impl CreateDs) {
+async fn initialise(b: &TestBackend) {
 	// Create a new datastore
-	let ds = new_ds.create_ds().await;
+	let ds = b.create_ds().await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write).await.unwrap();
 	tx.put("test".as_bytes().into(), "ok".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 }
 
-pub async fn exists(new_ds: impl CreateDs) {
+async fn exists(b: &TestBackend) {
 	// Create a new datastore
-	let ds = new_ds.create_ds().await;
+	let ds = b.create_ds().await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write).await.unwrap();
 	tx.put("test".as_bytes().into(), "ok".as_bytes().to_vec()).await.unwrap();
@@ -28,9 +32,9 @@ pub async fn exists(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 }
 
-pub async fn get(new_ds: impl CreateDs) {
+async fn get(b: &TestBackend) {
 	// Create a new datastore
-	let ds = new_ds.create_ds().await;
+	let ds = b.create_ds().await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write).await.unwrap();
 	tx.put("test".as_bytes().into(), "ok".as_bytes().to_vec()).await.unwrap();
@@ -44,9 +48,9 @@ pub async fn get(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 }
 
-pub async fn set(new_ds: impl CreateDs) {
+async fn set(b: &TestBackend) {
 	// Create a new datastore
-	let ds = new_ds.create_ds().await;
+	let ds = b.create_ds().await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write).await.unwrap();
 	tx.set("test".as_bytes().into(), "one".as_bytes().to_vec()).await.unwrap();
@@ -67,9 +71,9 @@ pub async fn set(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 }
 
-pub async fn put(new_ds: impl CreateDs) {
+async fn put(b: &TestBackend) {
 	// Create a new datastore
-	let ds = new_ds.create_ds().await;
+	let ds = b.create_ds().await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write).await.unwrap();
 	tx.put("test".as_bytes().into(), "one".as_bytes().to_vec()).await.unwrap();
@@ -90,9 +94,9 @@ pub async fn put(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 }
 
-pub async fn putc(new_ds: impl CreateDs) {
+async fn putc(b: &TestBackend) {
 	// Create a new datastore
-	let ds = new_ds.create_ds().await;
+	let ds = b.create_ds().await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write).await.unwrap();
 	tx.put("test".as_bytes().into(), "one".as_bytes().to_vec()).await.unwrap();
@@ -132,9 +136,9 @@ pub async fn putc(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 }
 
-pub async fn del(new_ds: impl CreateDs) {
+async fn del(b: &TestBackend) {
 	// Create a new datastore
-	let ds = new_ds.create_ds().await;
+	let ds = b.create_ds().await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write).await.unwrap();
 	tx.put("test".as_bytes().into(), "one".as_bytes().to_vec()).await.unwrap();
@@ -150,9 +154,9 @@ pub async fn del(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 }
 
-pub async fn delc(new_ds: impl CreateDs) {
+async fn delc(b: &TestBackend) {
 	// Create a new datastore
-	let ds = new_ds.create_ds().await;
+	let ds = b.create_ds().await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write).await.unwrap();
 	tx.put("test".as_bytes().into(), "one".as_bytes().to_vec()).await.unwrap();
@@ -177,9 +181,9 @@ pub async fn delc(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 }
 
-pub async fn keys(new_ds: impl CreateDs) {
+async fn keys(b: &TestBackend) {
 	// Create a new datastore
-	let ds = new_ds.create_ds().await;
+	let ds = b.create_ds().await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write).await.unwrap();
 	tx.put("test1".as_bytes().into(), "1".as_bytes().to_vec()).await.unwrap();
@@ -214,9 +218,9 @@ pub async fn keys(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 }
 
-pub async fn keysr(new_ds: impl CreateDs) {
+async fn keysr(b: &TestBackend) {
 	// Create a new datastore
-	let ds = new_ds.create_ds().await;
+	let ds = b.create_ds().await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write).await.unwrap();
 	tx.put("test1".as_bytes().into(), "1".as_bytes().to_vec()).await.unwrap();
@@ -251,9 +255,9 @@ pub async fn keysr(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 }
 
-pub async fn scan(new_ds: impl CreateDs) {
+async fn scan(b: &TestBackend) {
 	// Create a new datastore
-	let ds = new_ds.create_ds().await;
+	let ds = b.create_ds().await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write).await.unwrap();
 	tx.put("test1".as_bytes().into(), "1".as_bytes().to_vec()).await.unwrap();
@@ -297,9 +301,9 @@ pub async fn scan(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 }
 
-pub async fn scanr(new_ds: impl CreateDs) {
+async fn scanr(b: &TestBackend) {
 	// Create a new datastore
-	let ds = new_ds.create_ds().await;
+	let ds = b.create_ds().await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write).await.unwrap();
 	tx.put("test1".as_bytes().into(), "1".as_bytes().to_vec()).await.unwrap();
@@ -343,9 +347,9 @@ pub async fn scanr(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 }
 
-pub async fn skip(new_ds: impl CreateDs) {
+async fn skip(b: &TestBackend) {
 	// Create a new datastore
-	let ds = new_ds.create_ds().await;
+	let ds = b.create_ds().await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write).await.unwrap();
 	tx.put("test1".as_bytes().into(), "1".as_bytes().to_vec()).await.unwrap();
@@ -411,9 +415,9 @@ pub async fn skip(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 }
 
-pub async fn batch(new_ds: impl CreateDs) {
+async fn batch(b: &TestBackend) {
 	// Create a new datastore
-	let ds = new_ds.create_ds().await;
+	let ds = b.create_ds().await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write).await.unwrap();
 	tx.put("test1".as_bytes().into(), "1".as_bytes().to_vec()).await.unwrap();
@@ -477,8 +481,8 @@ pub async fn batch(new_ds: impl CreateDs) {
 /// inserts prefix-sharing keys (`a`, `a\0`, `a\x01`, `ab`, `b`) and
 /// pumps a cursor with `Count(1)` so every adjacent pair is a batch
 /// boundary; without the fix the cursor would return only `a` and `b`.
-pub async fn cursor_keys_resume_past_prefix(new_ds: impl CreateDs) {
-	let ds = new_ds.create_ds().await;
+async fn cursor_keys_resume_past_prefix(b: &TestBackend) {
+	let ds = b.create_ds().await;
 	let keys: Vec<Vec<u8>> =
 		vec![b"a".to_vec(), b"a\x00".to_vec(), b"a\x01".to_vec(), b"ab".to_vec(), b"b".to_vec()];
 	let tx = ds.transaction(Write).await.unwrap();
@@ -527,8 +531,8 @@ pub async fn cursor_keys_resume_past_prefix(new_ds: impl CreateDs) {
 
 /// Same as [`cursor_keys_resume_past_prefix`] for the vals cursor —
 /// `DefaultValsCursor` had the same `push(0xff)` bug.
-pub async fn cursor_vals_resume_past_prefix(new_ds: impl CreateDs) {
-	let ds = new_ds.create_ds().await;
+async fn cursor_vals_resume_past_prefix(b: &TestBackend) {
+	let ds = b.create_ds().await;
 	let pairs: Vec<(Vec<u8>, Vec<u8>)> = vec![
 		(b"a".to_vec(), b"v0".to_vec()),
 		(b"a\x00".to_vec(), b"v1".to_vec()),
@@ -570,8 +574,8 @@ pub async fn cursor_vals_resume_past_prefix(new_ds: impl CreateDs) {
 /// `next_batch` — across batch boundaries (including prefix-shared keys) and
 /// for every backend (resume-by-bound default cursors and the stateful rocksdb
 /// cursor). Also checks `stats.rows` equals the number of rows visited.
-pub async fn cursor_for_each_vals_matches_next_batch(new_ds: impl CreateDs) {
-	let ds = new_ds.create_ds().await;
+async fn cursor_for_each_vals_matches_next_batch(b: &TestBackend) {
+	let ds = b.create_ds().await;
 	let pairs: Vec<(Vec<u8>, Vec<u8>)> = vec![
 		(b"a".to_vec(), b"v0".to_vec()),
 		(b"a\x00".to_vec(), b"v1".to_vec()),
@@ -630,8 +634,8 @@ pub async fn cursor_for_each_vals_matches_next_batch(new_ds: impl CreateDs) {
 }
 
 /// Keys-cursor analogue of [`cursor_for_each_vals_matches_next_batch`].
-pub async fn cursor_for_each_keys_matches_next_batch(new_ds: impl CreateDs) {
-	let ds = new_ds.create_ds().await;
+async fn cursor_for_each_keys_matches_next_batch(b: &TestBackend) {
+	let ds = b.create_ds().await;
 	let pairs: Vec<(Vec<u8>, Vec<u8>)> = vec![
 		(b"k".to_vec(), b"v0".to_vec()),
 		(b"k\x00".to_vec(), b"v1".to_vec()),
@@ -686,8 +690,8 @@ pub async fn cursor_for_each_keys_matches_next_batch(new_ds: impl CreateDs) {
 /// Backward-scan analogue of [`cursor_for_each_vals_matches_next_batch`] —
 /// exercises each engine's backward resume logic (e.g. SurrealKV's
 /// `end = next·0x00` and the default cursor's `end = last`).
-pub async fn cursor_for_each_vals_matches_next_batch_reverse(new_ds: impl CreateDs) {
-	let ds = new_ds.create_ds().await;
+async fn cursor_for_each_vals_matches_next_batch_reverse(b: &TestBackend) {
+	let ds = b.create_ds().await;
 	let pairs: Vec<(Vec<u8>, Vec<u8>)> = vec![
 		(b"a".to_vec(), b"v0".to_vec()),
 		(b"a\x00".to_vec(), b"v1".to_vec()),
@@ -746,8 +750,8 @@ pub async fn cursor_for_each_vals_matches_next_batch_reverse(new_ds: impl Create
 /// A visitor that `Break`s after every row must still see each row exactly once,
 /// in order — exercises the `Break`-then-resume interaction (the broken row is
 /// counted and consumed; the cursor resumes strictly after it) on every engine.
-pub async fn cursor_for_each_break_resumes(new_ds: impl CreateDs) {
-	let ds = new_ds.create_ds().await;
+async fn cursor_for_each_break_resumes(b: &TestBackend) {
+	let ds = b.create_ds().await;
 	let pairs: Vec<(Vec<u8>, Vec<u8>)> = vec![
 		(b"a".to_vec(), b"v0".to_vec()),
 		(b"a\x00".to_vec(), b"v1".to_vec()),
@@ -797,8 +801,8 @@ pub async fn cursor_for_each_break_resumes(new_ds: impl CreateDs) {
 /// also split into more than one chunk — so a backend that ignored the limit
 /// and returned the whole range in one page would fail here rather than
 /// trivially match itself.
-pub async fn cursor_for_each_vals_limit_counts_match_next_batch(new_ds: impl CreateDs) {
-	let ds = new_ds.create_ds().await;
+async fn cursor_for_each_vals_limit_counts_match_next_batch(b: &TestBackend) {
+	let ds = b.create_ds().await;
 	// Varied key + value lengths so the byte totals are non-uniform.
 	let pairs: Vec<(Vec<u8>, Vec<u8>)> = vec![
 		(b"a".to_vec(), b"v0".to_vec()),
@@ -889,8 +893,8 @@ pub async fn cursor_for_each_vals_limit_counts_match_next_batch(new_ds: impl Cre
 /// per-chunk `stats.key_bytes` must sum to the keyspace total. Exercises the
 /// keys Break-then-resume path (production-reachable from `reference.rs`) on
 /// every engine.
-pub async fn cursor_for_each_keys_break_resumes(new_ds: impl CreateDs) {
-	let ds = new_ds.create_ds().await;
+async fn cursor_for_each_keys_break_resumes(b: &TestBackend) {
+	let ds = b.create_ds().await;
 	let pairs: Vec<(Vec<u8>, Vec<u8>)> = vec![
 		(b"a".to_vec(), b"v0".to_vec()),
 		(b"a\x00".to_vec(), b"v1".to_vec()),
@@ -933,8 +937,8 @@ pub async fn cursor_for_each_keys_break_resumes(new_ds: impl CreateDs) {
 }
 
 /// Backward-scan keys analogue of [`cursor_for_each_keys_matches_next_batch`].
-pub async fn cursor_for_each_keys_matches_next_batch_reverse(new_ds: impl CreateDs) {
-	let ds = new_ds.create_ds().await;
+async fn cursor_for_each_keys_matches_next_batch_reverse(b: &TestBackend) {
+	let ds = b.create_ds().await;
 	let pairs: Vec<(Vec<u8>, Vec<u8>)> = vec![
 		(b"k".to_vec(), b"v0".to_vec()),
 		(b"k\x00".to_vec(), b"v1".to_vec()),
@@ -993,8 +997,8 @@ pub async fn cursor_for_each_keys_matches_next_batch_reverse(new_ds: impl Create
 /// rocksdb `seek_and_skip` helper and the resume-by-bound cursors' skip burn,
 /// for the vals and keys cursors alike (production-reachable via
 /// `ORDER BY id DESC` + `START`).
-pub async fn cursor_for_each_respects_skip_both_directions(new_ds: impl CreateDs) {
-	let ds = new_ds.create_ds().await;
+async fn cursor_for_each_respects_skip_both_directions(b: &TestBackend) {
+	let ds = b.create_ds().await;
 	let pairs: Vec<(Vec<u8>, Vec<u8>)> = vec![
 		(b"a".to_vec(), b"v0".to_vec()),
 		(b"a\x00".to_vec(), b"v1".to_vec()),
@@ -1074,262 +1078,28 @@ pub async fn cursor_for_each_respects_skip_both_directions(new_ds: impl CreateDs
 		assert_eq!(keys_visit, expected_keys, "keys for_each skip diverged ({dir:?})");
 	}
 }
-/// Versioned scans through the cursor API: a cursor opened at a historical
-/// version must see exactly the rows visible at that timestamp — identically
-/// via `next_batch` and `for_each`, in both directions. Covers the versioned
-/// forward/backward iterator arms (e.g. `MemValsCursor::build_iter`), which no
-/// other cursor test reaches. Mem-only: it needs a datastore built with
-/// versioning enabled, which the shared per-engine harness doesn't provide.
-#[cfg(feature = "kv-mem")]
-#[tokio::test]
-#[serial_test::serial]
-async fn cursor_versioned_for_each_matches_next_batch() {
-	let ds = super::TestDs::new("memory?versioned=true").await;
 
-	// Batch A: the historical view.
-	let tx = ds.transaction(Write).await.unwrap();
-	let historical: Vec<(Vec<u8>, Vec<u8>)> = vec![
-		(b"a".to_vec(), b"v0".to_vec()),
-		(b"a\x00".to_vec(), b"v1".to_vec()),
-		(b"b".to_vec(), b"v2".to_vec()),
-	];
-	for (k, v) in &historical {
-		tx.set(k.into(), v.clone()).await.unwrap();
-	}
-	tx.commit().await.unwrap();
-
-	// Capture a version timestamp strictly between the two commits. Versions
-	// are wall-clock nanoseconds (SurrealQL `VERSION` semantics); the sleeps
-	// guard against clock granularity ties on either side.
-	tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-	let version = web_time::SystemTime::now()
-		.duration_since(web_time::SystemTime::UNIX_EPOCH)
-		.unwrap()
-		.as_nanos() as u64;
-	tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-
-	// Batch B: overwrite one row and add another — the current view.
-	let tx = ds.transaction(Write).await.unwrap();
-	tx.set(b"a".into(), b"v0-new".to_vec()).await.unwrap();
-	tx.set(b"c".into(), b"v3".to_vec()).await.unwrap();
-	tx.commit().await.unwrap();
-
-	let rng = KeyRange::from(b"a"..b"d");
-	for dir in [Direction::Forward, Direction::Backward] {
-		let tx = ds.transaction(Read).await.unwrap();
-
-		// Historical view via next_batch.
-		let mut c1 = tx.open_vals_cursor(rng.as_borrowed(), dir, 0, Some(version)).await.unwrap();
-		let mut via_batch: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
-		loop {
-			let batch = c1.next_batch(2).await.unwrap();
-			if batch.is_empty() {
-				break;
-			}
-			for (k, v) in &batch {
-				via_batch.push((k.to_vec(), v.to_vec()));
-			}
-		}
-		drop(c1);
-
-		// Historical view via for_each.
-		let mut c2 = tx.open_vals_cursor(rng.as_borrowed(), dir, 0, Some(version)).await.unwrap();
-		let mut via_visit: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
-		loop {
-			let s = c2
-				.for_each(2, &mut |k, v| {
-					via_visit.push((k.to_vec(), v.to_vec()));
-					Ok(std::ops::ControlFlow::Continue(()))
-				})
-				.await
-				.unwrap();
-			if s.rows == 0 {
-				break;
-			}
-		}
-		drop(c2);
-		tx.cancel().await.unwrap();
-
-		let mut expected = historical.clone();
-		if matches!(dir, Direction::Backward) {
-			expected.reverse();
-		}
-		assert_eq!(via_batch, expected, "versioned next_batch view mismatch ({dir:?})");
-		assert_eq!(via_visit, via_batch, "versioned for_each diverged from next_batch ({dir:?})");
-	}
-
-	// Sanity: the current view (no version) must reflect batch B.
-	let tx = ds.transaction(Read).await.unwrap();
-	let mut c = tx.open_vals_cursor(rng, Direction::Forward, 0, None).await.unwrap();
-	let mut current: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
-	loop {
-		let s = c
-			.for_each(10, &mut |k, v| {
-				current.push((k.to_vec(), v.to_vec()));
-				Ok(std::ops::ControlFlow::Continue(()))
-			})
-			.await
-			.unwrap();
-		if s.rows == 0 {
-			break;
-		}
-	}
-	drop(c);
-	tx.cancel().await.unwrap();
-	let expected_current: Vec<(Vec<u8>, Vec<u8>)> = vec![
-		(b"a".to_vec(), b"v0-new".to_vec()),
-		(b"a\x00".to_vec(), b"v1".to_vec()),
-		(b"b".to_vec(), b"v2".to_vec()),
-		(b"c".to_vec(), b"v3".to_vec()),
-	];
-	assert_eq!(current, expected_current, "current view should reflect the second commit");
-}
-
-macro_rules! define_tests {
-	($new_ds:ident) => {
-		#[tokio::test]
-		#[serial_test::serial]
-		async fn initialise() {
-			super::raw::initialise($new_ds).await;
-		}
-
-		#[tokio::test]
-		#[serial_test::serial]
-		async fn exists() {
-			super::raw::exists($new_ds).await;
-		}
-
-		#[tokio::test]
-		#[serial_test::serial]
-		async fn get() {
-			super::raw::get($new_ds).await;
-		}
-
-		#[tokio::test]
-		#[serial_test::serial]
-		async fn set() {
-			super::raw::set($new_ds).await;
-		}
-
-		#[tokio::test]
-		#[serial_test::serial]
-		async fn put() {
-			super::raw::put($new_ds).await;
-		}
-
-		#[tokio::test]
-		#[serial_test::serial]
-		async fn putc() {
-			super::raw::putc($new_ds).await;
-		}
-
-		#[tokio::test]
-		#[serial_test::serial]
-		async fn del() {
-			super::raw::del($new_ds).await;
-		}
-
-		#[tokio::test]
-		#[serial_test::serial]
-		async fn delc() {
-			super::raw::delc($new_ds).await;
-		}
-
-		#[tokio::test]
-		#[serial_test::serial]
-		async fn keys() {
-			super::raw::keys($new_ds).await;
-		}
-
-		#[tokio::test]
-		#[serial_test::serial]
-		async fn keysr() {
-			super::raw::keysr($new_ds).await;
-		}
-
-		#[tokio::test]
-		#[serial_test::serial]
-		async fn scan() {
-			super::raw::scan($new_ds).await;
-		}
-
-		#[tokio::test]
-		#[serial_test::serial]
-		async fn scanr() {
-			super::raw::scanr($new_ds).await;
-		}
-
-		#[tokio::test]
-		#[serial_test::serial]
-		async fn skip() {
-			super::raw::skip($new_ds).await;
-		}
-
-		#[tokio::test]
-		#[serial_test::serial]
-		async fn batch() {
-			super::raw::batch($new_ds).await;
-		}
-
-		#[tokio::test]
-		#[serial_test::serial]
-		async fn cursor_keys_resume_past_prefix() {
-			super::raw::cursor_keys_resume_past_prefix($new_ds).await;
-		}
-
-		#[tokio::test]
-		#[serial_test::serial]
-		async fn cursor_vals_resume_past_prefix() {
-			super::raw::cursor_vals_resume_past_prefix($new_ds).await;
-		}
-
-		#[tokio::test]
-		#[serial_test::serial]
-		async fn cursor_for_each_vals_matches_next_batch() {
-			super::raw::cursor_for_each_vals_matches_next_batch($new_ds).await;
-		}
-
-		#[tokio::test]
-		#[serial_test::serial]
-		async fn cursor_for_each_keys_matches_next_batch() {
-			super::raw::cursor_for_each_keys_matches_next_batch($new_ds).await;
-		}
-
-		#[tokio::test]
-		#[serial_test::serial]
-		async fn cursor_for_each_vals_matches_next_batch_reverse() {
-			super::raw::cursor_for_each_vals_matches_next_batch_reverse($new_ds).await;
-		}
-
-		#[tokio::test]
-		#[serial_test::serial]
-		async fn cursor_for_each_respects_skip_both_directions() {
-			super::raw::cursor_for_each_respects_skip_both_directions($new_ds).await;
-		}
-
-		#[tokio::test]
-		#[serial_test::serial]
-		async fn cursor_for_each_break_resumes() {
-			super::raw::cursor_for_each_break_resumes($new_ds).await;
-		}
-
-		#[tokio::test]
-		#[serial_test::serial]
-		async fn cursor_for_each_vals_limit_counts_match_next_batch() {
-			super::raw::cursor_for_each_vals_limit_counts_match_next_batch($new_ds).await;
-		}
-
-		#[tokio::test]
-		#[serial_test::serial]
-		async fn cursor_for_each_keys_break_resumes() {
-			super::raw::cursor_for_each_keys_break_resumes($new_ds).await;
-		}
-
-		#[tokio::test]
-		#[serial_test::serial]
-		async fn cursor_for_each_keys_matches_next_batch_reverse() {
-			super::raw::cursor_for_each_keys_matches_next_batch_reverse($new_ds).await;
-		}
-	};
-}
-pub(crate) use define_tests;
+kvs_test!(initialise);
+kvs_test!(exists);
+kvs_test!(get);
+kvs_test!(set);
+kvs_test!(put);
+kvs_test!(putc);
+kvs_test!(del);
+kvs_test!(delc);
+kvs_test!(keys);
+kvs_test!(keysr);
+kvs_test!(scan);
+kvs_test!(scanr);
+kvs_test!(skip);
+kvs_test!(batch);
+kvs_test!(cursor_keys_resume_past_prefix);
+kvs_test!(cursor_vals_resume_past_prefix);
+kvs_test!(cursor_for_each_vals_matches_next_batch);
+kvs_test!(cursor_for_each_keys_matches_next_batch);
+kvs_test!(cursor_for_each_vals_matches_next_batch_reverse);
+kvs_test!(cursor_for_each_break_resumes);
+kvs_test!(cursor_for_each_vals_limit_counts_match_next_batch);
+kvs_test!(cursor_for_each_keys_break_resumes);
+kvs_test!(cursor_for_each_keys_matches_next_batch_reverse);
+kvs_test!(cursor_for_each_respects_skip_both_directions);

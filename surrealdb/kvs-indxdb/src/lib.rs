@@ -25,8 +25,8 @@ compile_error!(
 mod ffi;
 mod tx;
 
-use surrealdb_kvs::api::Transactable;
-use surrealdb_kvs::{Error, Result, TransactionType};
+use surrealdb_kvs::api::{BoxFut, Transactable};
+use surrealdb_kvs::{Error, Metrics, Result, TransactionBuilder, TransactionType};
 use tracing::instrument;
 use wasm_bindgen::JsValue;
 
@@ -66,6 +66,32 @@ impl Datastore {
 	pub async fn transaction(&self, write: TransactionType) -> Result<Box<dyn Transactable>> {
 		let tx = self.db.begin().map_err(kvs_error)?;
 		Ok(Box::new(IndxdbTx::new(write, tx)))
+	}
+}
+
+impl TransactionBuilder for Datastore {
+	fn name(&self) -> &'static str {
+		"indxdb"
+	}
+
+	fn new_transaction(
+		&self,
+		write: TransactionType,
+	) -> BoxFut<'_, Result<(Box<dyn Transactable>, bool)>> {
+		// Transactions are local: the store runs in-process.
+		Box::pin(async move { Ok((self.transaction(write).await?, true)) })
+	}
+
+	fn shutdown(&self) -> BoxFut<'_, Result<()>> {
+		Box::pin(Datastore::shutdown(self))
+	}
+
+	fn register_metrics(&self) -> Option<Metrics> {
+		None
+	}
+
+	fn collect_u64_metric(&self, _metric: &str) -> Option<u64> {
+		None
 	}
 }
 

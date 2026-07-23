@@ -1,14 +1,38 @@
-//! RocksDB datastore-level tests: exercise RocksDB-specific configuration
-//! and behaviour through the `surrealdb-kvs-any` facade (connection-string
-//! paths, config maps, read-and-deletion-only mode).
+//! RocksDB-specific datastore tests: configuration wiring, space-limit
+//! modes, and metrics, exercised through the `surrealdb-kvs-any` facade.
+//! Generic backend behaviour lives in the shared `kvs` suite target.
+#![cfg(feature = "kv-rocksdb")]
+#![allow(clippy::unwrap_used)]
 
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
 use surrealdb_cnf::ConfigMap;
 use surrealdb_kvs::TransactionType::*;
+use surrealdb_kvs::{Result, Transactable, TransactionBuilder};
 use temp_dir::TempDir;
+use tokio_util::sync::CancellationToken;
 
-use super::TestDs;
+/// A RocksDB datastore under test, constructed from a connection path.
+pub struct TestDs(Box<dyn TransactionBuilder>);
+
+impl TestDs {
+	/// Construct the backend selected by the given connection path.
+	async fn new_with_config(path: &str, config: ConfigMap) -> Result<Self> {
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder(path, CancellationToken::new(), config)
+			.await?;
+		Ok(Self(builder))
+	}
+
+	/// Start a new transaction on the underlying backend.
+	async fn transaction(
+		&self,
+		write: surrealdb_kvs::TransactionType,
+	) -> Result<Box<dyn Transactable>> {
+		let (tx, _) = self.0.new_transaction(write).await?;
+		Ok(tx)
+	}
+}
 
 #[tokio::test]
 pub async fn read_and_deletion_only() {
@@ -245,4 +269,32 @@ async fn universal_compaction_options_wired() {
 	let tx = ds.transaction(Write).await.unwrap();
 	tx.set("universal_key".as_bytes().into(), "universal_value".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
+}
+
+#[tokio::test]
+async fn registers_rocksdb_metrics() {
+	// Create a new datastore
+	let dir = TempDir::new().unwrap();
+	let path = dir.path().to_string_lossy().to_string();
+	let ds = TestDs::new_with_config(&format!("rocksdb:{path}"), ConfigMap::empty()).await.unwrap();
+	let metrics = ds.0.register_metrics().expect("expected RocksDB metrics");
+	assert_eq!(metrics.name, "surrealdb.rocksdb");
+
+	let expected_metrics = [
+		"rocksdb.block_cache_usage",
+		"rocksdb.block_cache_pinned_usage",
+		"rocksdb.estimate_table_readers_mem",
+		"rocksdb.cur_size_all_mem_tables",
+	];
+
+	for metric_name in expected_metrics {
+		assert!(
+			metrics.u64_metrics.iter().any(|metric| metric.name == metric_name),
+			"missing expected metric {metric_name}"
+		);
+		assert!(
+			ds.0.collect_u64_metric(metric_name).is_some(),
+			"failed to collect metric {metric_name}"
+		);
+	}
 }

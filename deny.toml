@@ -169,6 +169,10 @@ name = "surrealdb-kvs-any"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
+name = "surrealdb-kvs-test"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
 name = "surrealdb-core"
 allow = ["BUSL-1.1"]
 
@@ -292,6 +296,11 @@ license-files = []
 
 [[licenses.clarify]]
 name = "surrealdb-kvs-any"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-kvs-test"
 expression = "BUSL-1.1"
 license-files = []
 

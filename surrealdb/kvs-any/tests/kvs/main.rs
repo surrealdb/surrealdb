@@ -1,181 +1,74 @@
-//! KV-store backend tests, run against every enabled `kv-*` backend through
-//! the `surrealdb-kvs-any` facade.
+//! Runs the shared KV-store behaviour suite (`surrealdb-kvs-test-suite`)
+//! against every first-party backend enabled by a `kv-*` feature, going
+//! through the `surrealdb-kvs-any` connection-string entry point so the
+//! parser is covered on every run.
 #![allow(clippy::unwrap_used)]
-#![cfg(any(
-	feature = "kv-mem",
-	feature = "kv-rocksdb",
-	feature = "kv-tikv",
-	feature = "kv-surrealkv",
-))]
 
-use std::future::Future;
+use std::process::ExitCode;
 
 use surrealdb_cnf::ConfigMap;
-use surrealdb_kvs::{Result, Transactable, TransactionBuilder, TransactionType};
+#[allow(unused_imports)]
+use surrealdb_kvs_test::TestBackend;
+use surrealdb_kvs_test::TestDs;
 use tokio_util::sync::CancellationToken;
 
-macro_rules! include_tests {
-	($new_ds:ident => $($name:ident),* $(,)?) => {
-		$(
-			super::$name::define_tests!($new_ds);
-		)*
-	};
+/// Construct the backend selected by the given connection path.
+#[allow(dead_code)]
+async fn ds_from_path(path: &str) -> TestDs {
+	let builder = surrealdb_kvs_any::Backends::community()
+		.new_transaction_builder(path, CancellationToken::new(), ConfigMap::empty())
+		.await
+		.unwrap();
+	TestDs::from_builder(builder)
 }
 
-#[cfg(feature = "kv-rocksdb")]
-mod metrics;
-#[cfg(feature = "kv-rocksdb")]
-mod rocksdb_ds;
+/// Construct an on-disk backend in a fresh temporary directory, kept alive
+/// for the lifetime of the datastore.
+#[cfg(any(feature = "kv-rocksdb", feature = "kv-surrealkv"))]
+async fn ds_on_disk(scheme: &str) -> TestDs {
+	let dir = temp_dir::TempDir::new().unwrap();
+	let path = dir.path().to_string_lossy().to_string();
+	let builder = surrealdb_kvs_any::Backends::community()
+		.new_transaction_builder(
+			&format!("{scheme}:{path}"),
+			CancellationToken::new(),
+			ConfigMap::empty(),
+		)
+		.await
+		.unwrap();
+	TestDs::from_builder_with_guard(builder, dir)
+}
 
-mod multireader;
-mod multiwriter_different_keys;
-mod multiwriter_same_keys_allow;
-mod multiwriter_same_keys_conflict;
-mod multiwriter_same_keys_putc;
-mod raw;
-mod snapshot;
+fn main() -> ExitCode {
+	#[allow(unused_mut)]
+	let mut backends = Vec::new();
 
-/// A backend datastore under test, wrapping the boxed [`TransactionBuilder`]
-/// produced by [`surrealdb_kvs_any::new_transaction_builder`].
-pub struct TestDs(Box<dyn TransactionBuilder>);
-
-impl TestDs {
-	/// Construct the backend selected by the given connection path with an
-	/// empty configuration.
-	async fn new(path: &str) -> Self {
-		Self::new_with_config(path, ConfigMap::empty()).await.unwrap()
+	#[cfg(feature = "kv-mem")]
+	{
+		backends.push(TestBackend::new("mem", || ds_from_path("memory")));
+		backends.push(TestBackend::new("mem_versioned", || ds_from_path("memory?versioned=true")));
 	}
 
-	/// Construct the backend selected by the given connection path.
-	async fn new_with_config(path: &str, config: ConfigMap) -> Result<Self> {
-		let builder =
-			surrealdb_kvs_any::new_transaction_builder(path, CancellationToken::new(), config)
-				.await?;
-		Ok(Self(builder))
-	}
-
-	/// Start a new transaction on the underlying backend.
-	async fn transaction(&self, write: TransactionType) -> Result<Box<dyn Transactable>> {
-		let (tx, _) = self.0.new_transaction(write).await?;
-		Ok(tx)
-	}
-
-	/// Register the backend's metrics, if it exposes any.
 	#[cfg(feature = "kv-rocksdb")]
-	fn register_metrics(&self) -> Option<surrealdb_kvs::Metrics> {
-		self.0.register_metrics()
-	}
+	backends.push(TestBackend::new("rocksdb", || ds_on_disk("rocksdb")));
 
-	/// Collect a single named `u64` metric from the backend, if supported.
-	#[cfg(feature = "kv-rocksdb")]
-	fn collect_u64_metric(&self, metric: &str) -> Option<u64> {
-		self.0.collect_u64_metric(metric)
-	}
-}
+	#[cfg(feature = "kv-surrealkv")]
+	backends.push(TestBackend::new("surrealkv", || ds_on_disk("surrealkv")));
 
-trait CreateDs {
-	async fn create_ds(&self) -> TestDs;
-}
-
-impl<F, Fut> CreateDs for F
-where
-	F: Fn() -> Fut,
-	Fut: Future<Output = TestDs>,
-{
-	async fn create_ds(&self) -> TestDs {
-		(self)().await
-	}
-}
-
-#[cfg(feature = "kv-mem")]
-mod mem {
-	use super::TestDs;
-
-	async fn new_ds() -> TestDs {
-		// Setup the in-memory datastore
-		TestDs::new("memory").await
-	}
-
-	include_tests!(new_ds =>
-		raw,
-		snapshot,
-		multireader,
-		multiwriter_different_keys,
-		multiwriter_same_keys_conflict,
-		multiwriter_same_keys_putc,
+	// The TiKV backend aliases one shared external cluster, so its tests run
+	// serially and each test starts by wiping the keyspace.
+	#[cfg(feature = "kv-tikv")]
+	backends.push(
+		TestBackend::new("tikv", || async {
+			let ds = ds_from_path("tikv:127.0.0.1:2379").await;
+			// Clear any previous test entries
+			let tx = ds.transaction(surrealdb_kvs::TransactionType::Write).await.unwrap();
+			tx.delr((vec![0u8]..vec![0xffu8]).into()).await.unwrap();
+			tx.commit().await.unwrap();
+			ds
+		})
+		.serial(),
 	);
-}
 
-#[cfg(feature = "kv-rocksdb")]
-mod rocksdb {
-	use temp_dir::TempDir;
-
-	use super::TestDs;
-
-	async fn new_ds() -> TestDs {
-		// Setup the temporary data storage path
-		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
-		// Setup the RocksDB datastore
-		TestDs::new(&format!("rocksdb:{path}")).await
-	}
-
-	include_tests!(new_ds =>
-		raw,
-		snapshot,
-		multireader,
-		multiwriter_different_keys,
-		multiwriter_same_keys_conflict,
-		multiwriter_same_keys_putc,
-		metrics
-	);
-}
-
-#[cfg(feature = "kv-surrealkv")]
-mod surrealkv {
-	use temp_dir::TempDir;
-
-	use super::TestDs;
-
-	async fn new_ds() -> TestDs {
-		// Setup the temporary data storage path
-		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
-		// Setup the SurrealKV datastore
-		TestDs::new(&format!("surrealkv:{path}")).await
-	}
-
-	include_tests!(new_ds =>
-		raw,
-		snapshot,
-		multireader,
-		multiwriter_different_keys,
-		multiwriter_same_keys_conflict,
-		multiwriter_same_keys_putc,
-	);
-}
-
-#[cfg(feature = "kv-tikv")]
-mod tikv {
-	use surrealdb_kvs::TransactionType;
-
-	use super::TestDs;
-
-	async fn new_ds() -> TestDs {
-		// Setup the TiKV datastore from the cluster connection string
-		let ds = TestDs::new("tikv:127.0.0.1:2379").await;
-		// Clear any previous test entries
-		let tx = ds.transaction(TransactionType::Write).await.unwrap();
-		tx.delr((vec![0u8]..vec![0xffu8]).into()).await.unwrap();
-		tx.commit().await.unwrap();
-		// Return the datastore
-		ds
-	}
-
-	include_tests!(new_ds =>
-		raw,
-		snapshot,
-		multireader,
-		multiwriter_different_keys,
-		multiwriter_same_keys_allow,
-		multiwriter_same_keys_putc,
-	);
+	surrealdb_kvs_test::run(backends)
 }

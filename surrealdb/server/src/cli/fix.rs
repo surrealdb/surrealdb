@@ -14,8 +14,11 @@ pub struct FixCommandArguments {
 ///
 /// Only the `TransactionBuilderFactory` bound is required here because this
 /// command does not need to start the HTTP server or build routes.
-pub async fn init<F: TransactionBuilderFactory>(args: FixCommandArguments) -> Result<()> {
+pub async fn init<F: TransactionBuilderFactory>(
+	composer: F,
+	args: FixCommandArguments,
+) -> Result<()> {
 	// All ok
-	F::path_valid(&args.path)?;
+	composer.path_valid(&args.path)?;
 	Err(anyhow::anyhow!("Fix is not implemented"))
 }

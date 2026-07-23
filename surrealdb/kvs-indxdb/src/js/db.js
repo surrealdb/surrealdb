@@ -124,11 +124,8 @@ export class Tx {
 				}
 
 				const keyEnds = new Uint32Array(resLength);
-				const valueEnds = new Uint32Array(resLength);
 
 				const keys = new Uint8Array(keysLen);
-				const values = new Uint8Array(valuesLen);
-
 
 				if (keysOnly) {
 					let offset = 0;
@@ -138,21 +135,34 @@ export class Tx {
 						offset += bytes.length;
 						keyEnds[i] = offset;
 					}
-				}else{
-					let koffset = 0;
-					let voffset = 0;
-					for(let i = 0;i < resLength;i++){
 
-						const kbytes = toBytes(results[i].key);
-						keys.set(kbytes,koffset);
-						koffset += kbytes.length;
-						keyEnds[i] = koffset;
+					// No values were read: signal that explicitly instead of
+					// returning empty buffers, which the Rust side would split
+					// into one empty value per key.
+					return resolve({
+						keys,
+						keyEnds,
+						values: null,
+						valueEnds: null,
+					});
+				}
 
-						const vbytes = toBytes(results[i].value);
-						values.set(vbytes,voffset);
-						voffset += vbytes.length;
-						valueEnds[i] = voffset;
-					}
+				const valueEnds = new Uint32Array(resLength);
+				const values = new Uint8Array(valuesLen);
+
+				let koffset = 0;
+				let voffset = 0;
+				for(let i = 0;i < resLength;i++){
+
+					const kbytes = toBytes(results[i].key);
+					keys.set(kbytes,koffset);
+					koffset += kbytes.length;
+					keyEnds[i] = koffset;
+
+					const vbytes = toBytes(results[i].value);
+					values.set(vbytes,voffset);
+					voffset += vbytes.length;
+					valueEnds[i] = voffset;
 				}
 
 				return resolve({

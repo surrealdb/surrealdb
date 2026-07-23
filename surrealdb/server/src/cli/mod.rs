@@ -314,7 +314,7 @@ pub async fn init<
 		Commands::Module(args) => module::init(args).await,
 		Commands::IsReady(args) => isready::init(args).await,
 		Commands::Validate(args) => validate::init(args).await,
-		Commands::Fix(args) => fix::init::<C>(args).await,
+		Commands::Fix(args) => fix::init::<C>(composer, args).await,
 		Commands::V2(args) => v2::init(args).await,
 	};
 	// Flush every provider's batch processor so audit / slow-query

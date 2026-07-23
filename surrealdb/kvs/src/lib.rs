@@ -26,7 +26,7 @@ mod types;
 pub use api::{
 	Batch, GetMultiResult, KeysResult, ScanCursorKeys, ScanCursorVals, ScanResult, Transactable,
 };
-pub use builder::{Metric, Metrics, TransactionBuilder, TransactionBuilderRequirements};
+pub use builder::{Metric, Metrics, TransactionBuilder};
 pub use err::{Error, Result};
 pub use types::{Key, KeyRange};
 

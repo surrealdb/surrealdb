@@ -22,6 +22,7 @@ wasm-bindgen = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
+surrealdb-kvs-test = { workspace = true }
 wasm-bindgen-test = { workspace = true }
 wasm-bindgen-futures = { workspace = true }
 

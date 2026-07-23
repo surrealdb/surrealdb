@@ -22,7 +22,7 @@ use surrealdb_kvs::err::{Error, Result};
 use surrealdb_kvs::timestamp::{
 	BoxTimeStamp, BoxTimeStampImpl, MAX_TIMESTAMP_BYTES, TimeStamp, TimeStampImpl,
 };
-use surrealdb_kvs::{Direction, Key, KeyRange, TransactionType, Val};
+use surrealdb_kvs::{Direction, Key, KeyRange, Metrics, TransactionBuilder, TransactionType, Val};
 
 /// Convert a SurrealMX engine error into the generic KVS error type.
 #[expect(
@@ -166,6 +166,32 @@ impl Datastore {
 			inner: RwLock::new(txn),
 			versioned: self.versioned,
 		}))
+	}
+}
+
+impl TransactionBuilder for Datastore {
+	fn name(&self) -> &'static str {
+		"memory"
+	}
+
+	fn new_transaction(
+		&self,
+		write: TransactionType,
+	) -> BoxFut<'_, Result<(Box<dyn Transactable>, bool)>> {
+		// Transactions are local: the store runs in-process.
+		Box::pin(async move { Ok((self.transaction(write).await?, true)) })
+	}
+
+	fn shutdown(&self) -> BoxFut<'_, Result<()>> {
+		Box::pin(Datastore::shutdown(self))
+	}
+
+	fn register_metrics(&self) -> Option<Metrics> {
+		None
+	}
+
+	fn collect_u64_metric(&self, _metric: &str) -> Option<u64> {
+		None
 	}
 }
 

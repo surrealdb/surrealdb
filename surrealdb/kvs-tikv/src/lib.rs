@@ -1,6 +1,7 @@
 mod cnf;
 mod savepoint;
 
+use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::ops::Range;
 use std::pin::Pin;
@@ -17,7 +18,7 @@ use surrealdb_kvs::err::{Error, Result};
 use surrealdb_kvs::timestamp::{
 	BoxTimeStamp, BoxTimeStampImpl, MAX_TIMESTAMP_BYTES, TimeStamp, TimeStampImpl,
 };
-use surrealdb_kvs::{Key, KeyRange, TransactionType, Val};
+use surrealdb_kvs::{Key, KeyRange, Metrics, TransactionBuilder, TransactionType, Val};
 use tikv::transaction::ResolveLocksOptions;
 use tikv::{CheckLevel, Config, TimestampExt, TransactionClient, TransactionOptions};
 use tokio::sync::RwLock;
@@ -502,6 +503,37 @@ impl Datastore {
 			}
 			Err(e) => Err(kvs_error(e)),
 		}
+	}
+}
+
+impl TransactionBuilder for Datastore {
+	fn name(&self) -> &'static str {
+		"tikv"
+	}
+
+	fn new_transaction(
+		&self,
+		write: TransactionType,
+	) -> BoxFut<'_, Result<(Box<dyn Transactable>, bool)>> {
+		// Transactions are remote: they hold resources in the external
+		// TiKV cluster.
+		Box::pin(async move { Ok((self.transaction(write).await?, false)) })
+	}
+
+	fn shutdown(&self) -> BoxFut<'_, Result<()>> {
+		Box::pin(Datastore::shutdown(self))
+	}
+
+	fn register_metrics(&self) -> Option<Metrics> {
+		None
+	}
+
+	fn collect_u64_metric(&self, _metric: &str) -> Option<u64> {
+		None
+	}
+
+	fn extension(&self, type_id: TypeId) -> Option<Arc<dyn Any + Send + Sync>> {
+		(type_id == TypeId::of::<TikvOpsHandle>()).then(|| self.ops_handle() as _)
 	}
 }
 

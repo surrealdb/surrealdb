@@ -77,18 +77,6 @@ pub struct GetMultiResult {
 	pub value_bytes: u64,
 }
 
-pub mod requirements {
-	//! This module defines the trait requirements for a transaction.
-
-	/// This trait defines the requirements for a transaction. All backends,
-	/// including WASM ones, must be `Send + Sync`.
-	pub trait TransactionRequirements: Send + Sync {}
-
-	/// Implements the `TransactionRequirements` trait for all types that are
-	/// `Send + Sync`.
-	impl<T: Send + Sync> TransactionRequirements for T {}
-}
-
 /// Position of a single key inside the cursor's reusable byte buffer.
 ///
 /// Backend-internal: backends fill a `Vec<KeySpan>` while iterating, and
@@ -369,7 +357,7 @@ impl<T: FnMut(&[u8]) -> Result<std::ops::ControlFlow<()>> + Send> KeyVisitor for
 /// thrashing failure mode of a bounded cache when there are more concurrent
 /// prefixes than cache slots (e.g. `SELECT ->knows FROM person` with many
 /// outer rows).
-pub trait ScanCursorKeys: requirements::TransactionRequirements {
+pub trait ScanCursorKeys: Send + Sync {
 	/// Advance the cursor and return up to `limit` more keys, borrowed
 	/// from the cursor's internal buffer. An empty batch signals end of
 	/// range. The cursor remains valid after an empty batch and may be
@@ -416,7 +404,7 @@ pub trait ScanCursorKeys: requirements::TransactionRequirements {
 /// thrashing failure mode of a bounded cache when there are more concurrent
 /// prefixes than cache slots (e.g. `SELECT ->knows FROM person` with many
 /// outer rows).
-pub trait ScanCursorVals: requirements::TransactionRequirements {
+pub trait ScanCursorVals: Send + Sync {
 	/// Advance the cursor and return up to `limit` more `(key, value)`
 	/// pairs, borrowed from the cursor's internal buffer. An empty batch
 	/// signals end of range.
@@ -465,7 +453,7 @@ type ValueBatch = Batch<(Vec<u8>, Vec<u8>)>;
 /// All keys and values are represented as byte arrays, encoding is handled
 /// one layer up, by the caller.
 #[allow(dead_code, reason = "Not used when none of the storage backends are enabled.")]
-pub trait Transactable: requirements::TransactionRequirements {
+pub trait Transactable: Send + Sync {
 	/// Get the name of the transaction type.
 	fn kind(&self) -> &'static str;
 

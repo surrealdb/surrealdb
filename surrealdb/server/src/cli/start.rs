@@ -273,7 +273,7 @@ pub async fn init<
 	runtime: ObservabilityRuntime,
 ) -> Result<()> {
 	// Check the path is valid
-	C::path_valid(&path)?;
+	composer.path_valid(&path)?;
 	// Persisted sessions must have a finite expiration
 	if durable_sessions && durable_session_ttl.is_zero() {
 		return Err(anyhow::anyhow!("The durable session TTL must be greater than zero"));

@@ -49,7 +49,9 @@ use surrealdb_kvs::config::SyncMode;
 use surrealdb_kvs::consts::{ESTIMATED_BYTES_PER_KEY, ESTIMATED_BYTES_PER_KV};
 use surrealdb_kvs::err::{Error, Result};
 use surrealdb_kvs::timestamp::HlcTimeStamp;
-use surrealdb_kvs::{Direction, Key, KeyRange, Metric, Metrics, TransactionType, Val};
+use surrealdb_kvs::{
+	Direction, Key, KeyRange, Metric, Metrics, TransactionBuilder, TransactionType, Val,
+};
 use tokio::sync::{Mutex, MutexGuard};
 use tracing::{error, info, instrument, warn};
 use web_time::Instant;
@@ -879,6 +881,32 @@ impl Datastore {
 			scan_verify_checksums: self.scan_verify_checksums,
 			inline_guard: Arc::clone(&self.inline_guard),
 		}))
+	}
+}
+
+impl TransactionBuilder for Datastore {
+	fn name(&self) -> &'static str {
+		"rocksdb"
+	}
+
+	fn new_transaction(
+		&self,
+		write: TransactionType,
+	) -> BoxFut<'_, Result<(Box<dyn Transactable>, bool)>> {
+		// Transactions are local: the store runs in-process.
+		Box::pin(async move { Ok((self.transaction(write).await?, true)) })
+	}
+
+	fn shutdown(&self) -> BoxFut<'_, Result<()>> {
+		Box::pin(Datastore::shutdown(self))
+	}
+
+	fn register_metrics(&self) -> Option<Metrics> {
+		Some(Datastore::register_metrics(self))
+	}
+
+	fn collect_u64_metric(&self, metric: &str) -> Option<u64> {
+		Datastore::collect_u64_metric(self, metric)
 	}
 }
 

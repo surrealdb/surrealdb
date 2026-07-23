@@ -681,13 +681,10 @@ mod tests {
 	#[cfg(feature = "kv-mem")]
 	#[tokio::test(flavor = "multi_thread")]
 	async fn task_lease_concurrency_memory() {
-		let builder = surrealdb_kvs_any::new_transaction_builder(
-			"mem://",
-			Default::default(),
-			ConfigMap::default(),
-		)
-		.await
-		.unwrap();
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
+			.await
+			.unwrap();
 		// Run the concurrency test with the in-memory datastore
 		task_lease_concurrency(builder).await;
 	}
@@ -706,13 +703,14 @@ mod tests {
 		// Create a temporary directory for the RocksDB datastore
 		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
 
-		let builder = surrealdb_kvs_any::new_transaction_builder(
-			&format!("rocksdb://{path}"),
-			Default::default(),
-			ConfigMap::default(),
-		)
-		.await
-		.unwrap();
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder(
+				&format!("rocksdb://{path}"),
+				Default::default(),
+				ConfigMap::default(),
+			)
+			.await
+			.unwrap();
 		// Run the concurrency test with the RocksDB datastore
 		task_lease_concurrency(builder).await;
 	}
@@ -732,13 +730,14 @@ mod tests {
 
 		use temp_dir::TempDir;
 		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
-		let builder = surrealdb_kvs_any::new_transaction_builder(
-			&format!("surrealkv://{path}"),
-			Default::default(),
-			ConfigMap::default(),
-		)
-		.await
-		.unwrap();
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder(
+				&format!("surrealkv://{path}"),
+				Default::default(),
+				ConfigMap::default(),
+			)
+			.await
+			.unwrap();
 		// Run the concurrency test with the SurrealKV datastore
 		task_lease_concurrency(builder).await;
 	}
@@ -754,13 +753,10 @@ mod tests {
 	#[cfg(feature = "kv-mem")]
 	#[tokio::test]
 	async fn test_lease_renewal_behavior() {
-		let builder = surrealdb_kvs_any::new_transaction_builder(
-			"mem://",
-			Default::default(),
-			ConfigMap::default(),
-		)
-		.await
-		.unwrap();
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
+			.await
+			.unwrap();
 		// Create an async event trigger
 		let async_event_trigger = Arc::new(Notify::new());
 		// Create the transaction factory
@@ -835,13 +831,10 @@ mod tests {
 	#[cfg(feature = "kv-mem")]
 	#[tokio::test]
 	async fn test_another_node_rejected_while_lease_valid() {
-		let builder = surrealdb_kvs_any::new_transaction_builder(
-			"mem://",
-			Default::default(),
-			ConfigMap::default(),
-		)
-		.await
-		.unwrap();
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
+			.await
+			.unwrap();
 		let async_event_trigger = Arc::new(Notify::new());
 		let tf =
 			TransactionFactory::new(async_event_trigger, builder, Arc::new(Default::default()));
@@ -893,13 +886,10 @@ mod tests {
 	#[cfg(feature = "kv-mem")]
 	#[tokio::test]
 	async fn test_min_lease_duration_floor() {
-		let builder = surrealdb_kvs_any::new_transaction_builder(
-			"mem://",
-			Default::default(),
-			ConfigMap::default(),
-		)
-		.await
-		.unwrap();
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
+			.await
+			.unwrap();
 		let async_event_trigger = Arc::new(Notify::new());
 		let tf =
 			TransactionFactory::new(async_event_trigger, builder, Arc::new(Default::default()));
@@ -941,13 +931,10 @@ mod tests {
 	#[cfg(feature = "kv-mem")]
 	#[tokio::test]
 	async fn test_different_task_types_are_independent() {
-		let builder = surrealdb_kvs_any::new_transaction_builder(
-			"mem://",
-			Default::default(),
-			ConfigMap::default(),
-		)
-		.await
-		.unwrap();
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
+			.await
+			.unwrap();
 		let async_event_trigger = Arc::new(Notify::new());
 		let tf =
 			TransactionFactory::new(async_event_trigger, builder, Arc::new(Default::default()));
@@ -999,13 +986,10 @@ mod tests {
 	#[cfg(feature = "kv-mem")]
 	#[tokio::test]
 	async fn test_try_maintain_lease_throttling() {
-		let builder = surrealdb_kvs_any::new_transaction_builder(
-			"mem://",
-			Default::default(),
-			ConfigMap::default(),
-		)
-		.await
-		.unwrap();
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
+			.await
+			.unwrap();
 		let async_event_trigger = Arc::new(Notify::new());
 		let tf =
 			TransactionFactory::new(async_event_trigger, builder, Arc::new(Default::default()));
@@ -1067,13 +1051,10 @@ mod tests {
 	#[cfg(feature = "kv-mem")]
 	#[tokio::test]
 	async fn test_lease_expiration_and_takeover() {
-		let builder = surrealdb_kvs_any::new_transaction_builder(
-			"mem://",
-			Default::default(),
-			ConfigMap::default(),
-		)
-		.await
-		.unwrap();
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
+			.await
+			.unwrap();
 		let async_event_trigger = Arc::new(Notify::new());
 		let tf =
 			TransactionFactory::new(async_event_trigger, builder, Arc::new(Default::default()));
@@ -1141,13 +1122,10 @@ mod tests {
 	#[cfg(feature = "kv-mem")]
 	#[tokio::test]
 	async fn test_try_maintain_lease_reports_lost_lease() {
-		let builder = surrealdb_kvs_any::new_transaction_builder(
-			"mem://",
-			Default::default(),
-			ConfigMap::default(),
-		)
-		.await
-		.unwrap();
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
+			.await
+			.unwrap();
 		let async_event_trigger = Arc::new(Notify::new());
 		let tf =
 			TransactionFactory::new(async_event_trigger, builder, Arc::new(Default::default()));
@@ -1207,13 +1185,10 @@ mod tests {
 	#[cfg(feature = "kv-mem")]
 	#[tokio::test]
 	async fn test_initial_lease_acquisition_from_empty_state() {
-		let builder = surrealdb_kvs_any::new_transaction_builder(
-			"mem://",
-			Default::default(),
-			ConfigMap::default(),
-		)
-		.await
-		.unwrap();
+		let builder = surrealdb_kvs_any::Backends::community()
+			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
+			.await
+			.unwrap();
 		let async_event_trigger = Arc::new(Notify::new());
 		let tf =
 			TransactionFactory::new(async_event_trigger, builder, Arc::new(Default::default()));
