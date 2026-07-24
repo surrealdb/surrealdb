@@ -503,6 +503,16 @@ impl<'a> IndexOperation<'a> {
 	/// later process this entry and perform the actual compaction via
 	/// [`Datastore::index_compaction`].
 	///
+	/// Every request writes its own unique key (node id plus a fresh UUIDv7)
+	/// rather than updating one shared per-index key: blind writes of
+	/// distinct keys never contend, whereas a shared key would put every
+	/// concurrent transaction touching the same index into write-write
+	/// conflict (and a read-modify-write dedup would be worse on
+	/// last-writer-wins backends). The queue therefore grows with indexed
+	/// write activity, and deduplication happens at drain time instead:
+	/// [`Datastore::index_compaction`] compacts each distinct index per
+	/// batch and deletes the batch's entries in bounded transactions.
+	///
 	/// Compaction helps optimize index performance after many mutations.
 	/// For full-text indexes it consolidates term frequency and document
 	/// length data; for HNSW indexes it processes pending vector operations;

@@ -61,6 +61,26 @@ key! {
 }
 impl_kv_range_storekey!(IndexCompactionPrefix);
 
+key! {
+	/// Prefix of every compaction-queue entry belonging to one index.
+	///
+	/// Its encoded range spans exactly the index's queue entries, so the
+	/// range end is the smallest key past them — the batched queue drain
+	/// seeks there to continue with the next index's entries.
+	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
+	pub(crate) struct IndexCompactionIndexPrefix<'key> {
+		b'/',
+		b'!',
+		b'i',
+		b'c',
+		pub ns: NamespaceId,
+		pub db: DatabaseId,
+		pub tb: Cow<'key, TableName>,
+		pub ix: IndexId,
+	}
+}
+impl_kv_range_storekey!(IndexCompactionIndexPrefix<'_>);
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -86,5 +106,34 @@ mod tests {
 		};
 		let enc = IndexCompactionKey::encode_key(&val).unwrap();
 		assert_eq!(&*enc, b"/!ic\x00\x00\x00\x01\x00\x00\x00\x02testtb\0\0\0\0\x03\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02");
+	}
+
+	#[test]
+	fn index_prefix_range_brackets_exactly_one_index() {
+		let entry = |tb: &str, ix: u32| {
+			IndexCompactionKey::encode_key(&IndexCompactionKey {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+				tb: Cow::Owned(TableName::from(tb)),
+				ix: IndexId(ix),
+				nid: Uuid::from_u128(1),
+				uid: Uuid::from_u128(2),
+			})
+			.unwrap()
+		};
+		let range = IndexCompactionIndexPrefix {
+			ns: NamespaceId(1),
+			db: DatabaseId(2),
+			tb: Cow::Owned(TableName::from("testtb")),
+			ix: IndexId(3),
+		}
+		.encode_range()
+		.unwrap();
+		// Entries of this index fall inside the range…
+		assert!(range.start.as_slice() <= &*entry("testtb", 3));
+		assert!(&*entry("testtb", 3) < range.end.as_slice());
+		// …while the next index and the next table start at or past its end.
+		assert!(&*entry("testtb", 4) >= range.end.as_slice());
+		assert!(&*entry("testtc", 0) >= range.end.as_slice());
 	}
 }

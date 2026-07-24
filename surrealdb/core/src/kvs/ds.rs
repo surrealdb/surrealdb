@@ -40,7 +40,7 @@ use uuid::Uuid;
 use super::tr::Transactor;
 use super::tx::Transaction;
 use super::version::MajorVersion;
-use super::{Val, export};
+use super::{INDEX_COMPACTION_QUEUE_BATCH_SIZE, export};
 use crate::api::err::ApiError;
 use crate::api::invocation::process_api_request;
 use crate::api::request::ApiRequest;
@@ -76,7 +76,7 @@ use crate::iam::{Action, Auth, Error as IamError, Resource, ResourceKind, Role};
 use crate::idx::IndexKeyBase;
 use crate::idx::index::IndexOperation;
 use crate::idx::trees::store::IndexStores;
-use crate::key::root::ic::{IndexCompactionKey, IndexCompactionPrefix};
+use crate::key::root::ic::{IndexCompactionIndexPrefix, IndexCompactionKey, IndexCompactionPrefix};
 use crate::key::root::rc::{Expunge, ReclaimKey, ReclaimKind, ReclaimPrefix, ReclaimState};
 use crate::key::{KVKeyDecode, KVRange, KVValue, Key, KeyRange};
 use crate::kvs::cache::ds::DatastoreCache;
@@ -2366,6 +2366,32 @@ impl Datastore {
 		Ok(resumed)
 	}
 
+	/// Drains the index-compaction queue (`/!ic` keys) in bounded batches.
+	///
+	/// Each iteration scans at most [`INDEX_COMPACTION_QUEUE_BATCH_SIZE`]
+	/// queue keys, compacts every distinct index they reference, and then
+	/// deletes exactly those keys in one write transaction, so no single
+	/// transaction's key cardinality exceeds the batch size regardless of how
+	/// many entries have accumulated. Entries enqueued after a batch's scan
+	/// are untouched by its cleanup and are picked up by a later iteration
+	/// (or a later invocation), so a queue entry is only ever removed after
+	/// its index has been compacted at-or-after the entry was written.
+	///
+	/// Batches rotate across indexes: each batch's scan resumes past the last
+	/// index the previous batch covered and wraps at the end of the queue
+	/// range, so every index with pending entries is visited once per
+	/// rotation regardless of relative enqueue and drain rates — an index
+	/// sustaining a full batch of new entries per iteration still cannot pin
+	/// the scan to itself (a start-anchored or key-successor scan only stays
+	/// fair while the drain outpaces the enqueue).
+	///
+	/// Under sustained enqueue the drain keeps running — every iteration
+	/// stays bounded — and stops when the queue empties, the lease is lost,
+	/// or the task is cancelled.
+	///
+	/// Coordinated across the cluster by a [`TaskLeaseType::IndexCompaction`]
+	/// lease. Returns the number of processed batches and the number of
+	/// indexes that failed to compact.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(dbs, canceller))]
 	pub async fn index_compaction(
 		dbs: Arc<Datastore>,
@@ -2385,6 +2411,16 @@ impl Datastore {
 		)?;
 		let mut count_iteration = 0;
 		let mut count_error = 0;
+		// The queue range and a rotating cursor within it. After each batch
+		// the cursor seeks past the last index that batch covered, so
+		// indexes later in the keyspace are reached even while an
+		// earlier-sorting index keeps enqueueing new entries (queue keys
+		// sort by ns/db/tb/ix before their time-ordered UUID, so a hot
+		// index would otherwise pin a start-anchored scan to itself). When
+		// the scan reaches the end of the range it wraps to the start, and
+		// a wrap that finds nothing means the queue is drained.
+		let queue = IndexCompactionPrefix {}.encode_range()?;
+		let mut cursor = queue.start.to_vec();
 		// We continue without interruptions while there are keys and the lease
 		'compaction: loop {
 			Self::ensure_not_cancelled(&canceller)?;
@@ -2396,32 +2432,77 @@ impl Datastore {
 			Self::ensure_not_cancelled(&canceller)?;
 			// Output function invocation details to logs
 			trace!(target: TARGET, "Running index compaction process");
-			// Read the compaction queue in a short-lived read transaction
-			// to avoid holding a write lock across the entire compaction cycle
-			let range = IndexCompactionPrefix {}.encode_range()?;
-			let items = {
+			// Read one bounded batch of queue keys in a short-lived read
+			// transaction. The queue holds one entry per indexed record
+			// write since it last drained, so an unbounded snapshot would
+			// make the cleanup transaction below arbitrarily large — every
+			// key it deletes is a per-replica write reservation on
+			// distributed backends. Queue values carry no payload, so a
+			// keys-only scan suffices.
+			let keys = {
+				let range = KeyRange {
+					start: cursor.clone().into(),
+					end: queue.end.to_vec().into(),
+				};
 				let txn = dbs.transaction(Read).await?;
-				let res = txn.getr(range, None).await;
+				let res = txn.keys(range, INDEX_COMPACTION_QUEUE_BATCH_SIZE, 0, None).await;
 				let _ = txn.cancel().await;
 				res?
 			};
 			Self::ensure_not_cancelled(&canceller)?;
-			if items.is_empty() {
-				return Ok((count_iteration, count_error));
+			if keys.is_empty() {
+				if cursor.as_slice() == queue.start.as_ref() {
+					// Nothing left anywhere in the queue.
+					return Ok((count_iteration, count_error));
+				}
+				// End of the range: wrap to re-scan entries that were
+				// skipped when the cursor seeked past a partially-drained
+				// index.
+				cursor = queue.start.to_vec();
+				continue;
 			}
-			// Collect the keys so we can delete them after processing
-			let keys: Vec<Vec<u8>> = items.iter().map(|(k, _)| k.clone()).collect();
-			// Process compaction for each index
+			// Compact each distinct index referenced by this batch before
+			// deleting the batch's queue entries: an entry may only be
+			// removed once its index has been compacted at-or-after the
+			// entry was enqueued.
 			count_iteration += 1;
 			count_error +=
-				Self::index_compaction_loop(Arc::clone(&dbs), &lh, items, canceller.clone())
+				Self::index_compaction_loop(Arc::clone(&dbs), &lh, &keys, canceller.clone())
 					.await?;
-			// Delete the processed queue entries in a separate write
-			// transaction. This avoids conflicts with concurrent user
-			// transactions that may enqueue new compaction requests.
-			// Failed indexes are not re-enqueued here; the next user
-			// write to the affected index will naturally trigger a new
-			// compaction request.
+			// Seek the next batch past the last index this batch covered.
+			// Entries of that index beyond this batch are picked up again
+			// after the cursor wraps, so a continuously-refilling index
+			// cannot starve later-sorting ones. A key that fails to decode
+			// cannot name an index to seek past: fall back to the raw
+			// successor of the key itself, so the scan still advances and
+			// the cleanup below still removes the undecodable entry (it
+			// references no valid index, so deleting it cannot violate the
+			// compact-before-delete invariant).
+			if let Some(last_key) = keys.last() {
+				cursor = match IndexCompactionKey::decode_key(last_key) {
+					Ok(last) => IndexCompactionIndexPrefix {
+						ns: last.ns,
+						db: last.db,
+						tb: Cow::Owned(last.tb.into_owned()),
+						ix: last.ix,
+					}
+					.encode_range()?
+					.end
+					.to_vec(),
+					Err(e) => {
+						warn!(target: TARGET, "Skipping undecodable index compaction queue entry: {e}");
+						let mut successor = last_key.clone();
+						successor.push(0x00);
+						successor
+					}
+				};
+			}
+			// Delete this batch's queue entries in a separate write
+			// transaction, bounded by the batch size. This avoids conflicts
+			// with concurrent user transactions that may enqueue new
+			// compaction requests. Failed indexes are not re-enqueued here;
+			// the next user write to the affected index will naturally
+			// trigger a new compaction request.
 			loop {
 				let txn = dbs.transaction(Write).await?;
 				if let Err(e) = Self::ensure_not_cancelled(&canceller) {
@@ -2746,7 +2827,7 @@ impl Datastore {
 		}
 	}
 
-	/// Compacts each distinct index found in the queue items.
+	/// Compacts each distinct index referenced by the given queue keys.
 	///
 	/// On native targets, compaction tasks are spawned in parallel — one per
 	/// distinct index — and joined afterwards. Duplicate queue entries for
@@ -2758,14 +2839,23 @@ impl Datastore {
 	async fn index_compaction_loop(
 		dbs: Arc<Datastore>,
 		lh: &LeaseHandler,
-		items: Vec<(Vec<u8>, Val)>,
+		keys: &[Vec<u8>],
 		canceller: CancellationToken,
 	) -> Result<usize> {
 		let mut compacted_indexes = HashMap::new();
-		for (k, _) in items {
+		for k in keys {
 			Self::ensure_not_cancelled(&canceller)?;
 			lh.try_maintain_lease().await?;
-			let ic = IndexCompactionKey::decode_key(&k)?;
+			// An undecodable entry names no index to compact; skip it here
+			// and let the batch cleanup delete it, so one corrupt key cannot
+			// wedge every future compaction cycle.
+			let ic = match IndexCompactionKey::decode_key(k) {
+				Ok(ic) => ic,
+				Err(e) => {
+					warn!(target: TARGET, "Skipping undecodable index compaction queue entry: {e}");
+					continue;
+				}
+			};
 			let ikb = IndexKeyBase::new(ic.ns, ic.db, ic.tb.as_ref().clone(), ic.ix);
 			if let Entry::Vacant(e) = compacted_indexes.entry(ikb) {
 				e.insert(());
@@ -2807,7 +2897,7 @@ impl Datastore {
 		Ok(error_count)
 	}
 
-	/// Compacts each distinct index found in the queue items.
+	/// Compacts each distinct index referenced by the given queue keys.
 	///
 	/// On wasm, `tokio::spawn` is unavailable so compactions run
 	/// sequentially. A [`HashSet`] is used to skip duplicate queue entries
@@ -2820,15 +2910,24 @@ impl Datastore {
 	async fn index_compaction_loop(
 		dbs: Arc<Datastore>,
 		lh: &LeaseHandler,
-		items: Vec<(Vec<u8>, Val)>,
+		keys: &[Vec<u8>],
 		canceller: CancellationToken,
 	) -> Result<usize> {
 		let mut seen = HashSet::new();
 		let mut error_count = 0;
-		for (k, _) in items {
+		for k in keys {
 			Self::ensure_not_cancelled(&canceller)?;
 			lh.try_maintain_lease().await?;
-			let ic = IndexCompactionKey::decode_key(&k)?;
+			// An undecodable entry names no index to compact; skip it here
+			// and let the batch cleanup delete it, so one corrupt key cannot
+			// wedge every future compaction cycle.
+			let ic = match IndexCompactionKey::decode_key(k) {
+				Ok(ic) => ic,
+				Err(e) => {
+					warn!(target: TARGET, "Skipping undecodable index compaction queue entry: {e}");
+					continue;
+				}
+			};
 			let ikb = IndexKeyBase::new(ic.ns, ic.db, ic.tb.as_ref().clone(), ic.ix);
 			if !seen.insert(ikb.clone()) {
 				continue;
@@ -5339,6 +5438,229 @@ mod test {
 
 		assert_eq!(errors, 0);
 		assert_eq!(retryable_conflict_count(site, node_id), 0);
+		Ok(())
+	}
+
+	/// Records the keys written by every write transaction, so tests can
+	/// assert per-transaction write cardinality.
+	#[derive(Default)]
+	struct WriteTxSizeObserver(std::sync::Mutex<Vec<u64>>);
+
+	impl ExecutionObserver for WriteTxSizeObserver {
+		fn on_transaction_complete(&self, event: &crate::observe::TransactionEvent) {
+			if event.safe.write {
+				self.0.lock().unwrap().push(event.safe.metrics.keys_written);
+			}
+		}
+	}
+
+	/// Strips task-lease maintenance writes (always single-key transactions)
+	/// from an observed write-transaction size sequence. In these tests the
+	/// remaining sizes are exactly the queue-cleanup batches: compacting an
+	/// index with no pending work writes nothing, so every substantive
+	/// transaction is a cleanup whose size equals the number of queue keys
+	/// it deleted.
+	fn cleanup_sizes(sizes: &[u64]) -> Vec<u64> {
+		sizes.iter().copied().filter(|&n| n > 1).collect()
+	}
+
+	/// The compaction-queue drain must never delete more than one batch of
+	/// `/!ic` entries per write transaction: the queue grows by one entry per
+	/// indexed record write, so an unbounded cleanup transaction would carry
+	/// one write per accumulated entry — the per-key reservation profile that
+	/// can starve distributed backends.
+	#[tokio::test]
+	async fn index_compaction_queue_cleanup_is_bounded() -> Result<()> {
+		let batch = INDEX_COMPACTION_QUEUE_BATCH_SIZE as usize;
+		// A backlog of 2.5 batches forces multiple drain iterations.
+		let backlog = batch * 2 + batch / 2;
+		let observer = Arc::new(WriteTxSizeObserver::default());
+		let ds = Datastore::builder()
+			.with_observer(Arc::clone(&observer) as Arc<dyn ExecutionObserver>)
+			.build_with_path("memory")
+			.await?;
+		let ds = Arc::new(ds);
+		let session = Session::owner().with_ns("test").with_db("test");
+		{
+			let txn = ds.transaction(Write).await?;
+			txn.ensure_ns_db(None, "test", "test").await?;
+			txn.commit().await?;
+		}
+		// A real index for the queue entries to reference. The table stays
+		// empty (no record writes, which would each enqueue an entry of
+		// their own), so compacting it performs no index writes and the
+		// cycle's only large write transactions are the queue cleanups.
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase;
+			 DEFINE TABLE doc SCHEMALESS;
+			 DEFINE INDEX ft_idx ON doc FIELDS text FULLTEXT ANALYZER simple BM25;",
+		)
+		.await?;
+		let ikb = index_key_base(&ds, "doc", "ft_idx").await?;
+		let node_id = ds.id();
+		// Enqueue the backlog directly: each key is unique, exactly as the
+		// per-record-write enqueue path produces them.
+		{
+			let txn = ds.transaction(Write).await?;
+			for _ in 0..backlog {
+				txn.set_key(&ikb.new_ic_key(node_id), &()).await?;
+			}
+			txn.commit().await?;
+		}
+		// Only observe the compaction cycle's own transactions.
+		observer.0.lock().unwrap().clear();
+
+		let (batches, errors) = Datastore::index_compaction(
+			Arc::clone(&ds),
+			Duration::from_secs(60),
+			CancellationToken::new(),
+		)
+		.await?;
+		assert_eq!(errors, 0);
+		assert_eq!(batches, 3, "expected the backlog to drain in ceil(2.5) batches");
+
+		// The queue is fully drained.
+		let remaining = {
+			let txn = ds.transaction(Read).await?;
+			let res = txn.keys(IndexCompactionPrefix {}.encode_range()?, u32::MAX, 0, None).await;
+			let _ = txn.cancel().await;
+			res?
+		};
+		assert!(remaining.is_empty(), "queue not drained: {} entries left", remaining.len());
+
+		// No write transaction exceeded the batch bound, and the cleanups
+		// were exactly [batch, batch, batch/2].
+		let sizes = observer.0.lock().unwrap();
+		assert!(
+			sizes.iter().all(|&n| n <= batch as u64),
+			"a write transaction exceeded the {batch}-key bound: {sizes:?}"
+		);
+		let cleanups = cleanup_sizes(&sizes);
+		assert_eq!(
+			cleanups,
+			vec![batch as u64, batch as u64, (batch / 2) as u64],
+			"unexpected cleanup transaction sizes"
+		);
+		Ok(())
+	}
+
+	/// Queue keys sort by index before their time-ordered UUID, so a
+	/// start-anchored scan would keep serving an early-sorting index for as
+	/// long as it has (or keeps receiving) entries. The drain must instead
+	/// rotate: after a batch, the scan resumes past that batch's last index,
+	/// reaching later-sorting indexes before returning for the remainder.
+	#[tokio::test]
+	async fn index_compaction_queue_drain_rotates_across_indexes() -> Result<()> {
+		let batch = INDEX_COMPACTION_QUEUE_BATCH_SIZE as usize;
+		let observer = Arc::new(WriteTxSizeObserver::default());
+		let ds = Datastore::builder()
+			.with_observer(Arc::clone(&observer) as Arc<dyn ExecutionObserver>)
+			.build_with_path("memory")
+			.await?;
+		let ds = Arc::new(ds);
+		let session = Session::owner().with_ns("test").with_db("test");
+		{
+			let txn = ds.transaction(Write).await?;
+			txn.ensure_ns_db(None, "test", "test").await?;
+			txn.commit().await?;
+		}
+		// Two empty indexed tables whose names order their queue entries:
+		// `aaa` sorts before `zzz`.
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase;
+			 DEFINE TABLE aaa SCHEMALESS;
+			 DEFINE TABLE zzz SCHEMALESS;
+			 DEFINE INDEX ft_a ON aaa FIELDS text FULLTEXT ANALYZER simple BM25;
+			 DEFINE INDEX ft_z ON zzz FIELDS text FULLTEXT ANALYZER simple BM25;",
+		)
+		.await?;
+		let ikb_a = index_key_base(&ds, "aaa", "ft_a").await?;
+		let ikb_z = index_key_base(&ds, "zzz", "ft_z").await?;
+		let node_id = ds.id();
+		// 1.5 batches for the early index, a handful for the late one.
+		{
+			let txn = ds.transaction(Write).await?;
+			for _ in 0..(batch + batch / 2) {
+				txn.set_key(&ikb_a.new_ic_key(node_id), &()).await?;
+			}
+			for _ in 0..10 {
+				txn.set_key(&ikb_z.new_ic_key(node_id), &()).await?;
+			}
+			txn.commit().await?;
+		}
+		observer.0.lock().unwrap().clear();
+
+		let (batches, errors) = Datastore::index_compaction(
+			Arc::clone(&ds),
+			Duration::from_secs(60),
+			CancellationToken::new(),
+		)
+		.await?;
+		assert_eq!(errors, 0);
+		assert_eq!(batches, 3);
+
+		// Rotation signature: after the first full batch of the early index,
+		// the late index is served before the early index's remainder.
+		let sizes = observer.0.lock().unwrap();
+		let cleanups = cleanup_sizes(&sizes);
+		assert_eq!(
+			cleanups,
+			vec![batch as u64, 10, (batch / 2) as u64],
+			"expected the late-sorting index to be drained between the early index's batches"
+		);
+		Ok(())
+	}
+
+	/// An undecodable `/!ic` entry must not wedge the drain: it names no
+	/// index to compact, so the cycle skips it with a warning, deletes it
+	/// with its batch, and continues serving the decodable entries.
+	#[tokio::test]
+	async fn index_compaction_quarantines_undecodable_queue_keys() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		let ds = Arc::new(ds);
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase;
+			 DEFINE TABLE doc SCHEMALESS;
+			 DEFINE INDEX ft_idx ON doc FIELDS text FULLTEXT ANALYZER simple BM25;",
+		)
+		.await?;
+		let ikb = index_key_base(&ds, "doc", "ft_idx").await?;
+		let node_id = ds.id();
+		{
+			let txn = ds.transaction(Write).await?;
+			// The corrupt entry's 0xff lead byte sorts it after every valid
+			// entry, so it lands last in the batch and exercises the
+			// cursor-seek decode fallback as well as the dedupe-loop skip.
+			for _ in 0..5 {
+				txn.set_key(&ikb.new_ic_key(node_id), &()).await?;
+			}
+			txn.set(Key::from(b"/!ic\xff-not-a-valid-entry".to_vec()), vec![]).await?;
+			txn.commit().await?;
+		}
+
+		let (batches, errors) = Datastore::index_compaction(
+			Arc::clone(&ds),
+			Duration::from_secs(60),
+			CancellationToken::new(),
+		)
+		.await?;
+		assert!(batches >= 1);
+		assert_eq!(errors, 0, "a corrupt queue entry must not count as a compaction failure");
+
+		// The queue is fully drained, corrupt entry included.
+		let remaining = {
+			let txn = ds.transaction(Read).await?;
+			let res = txn.keys(IndexCompactionPrefix {}.encode_range()?, u32::MAX, 0, None).await;
+			let _ = txn.cancel().await;
+			res?
+		};
+		assert!(remaining.is_empty(), "queue not drained: {} entries left", remaining.len());
 		Ok(())
 	}
 

@@ -296,12 +296,19 @@ jobs:
           path: ${{ runner.temp }}/aws-sdk-install
           key: aws-sdk-cpp-${{ runner.os }}-${{ runner.arch }}-1.11.845-v1
 
-      # Redirect the downstream's `surrealdb-server` git dependency to this
-      # checkout. Its in-repo deps (surrealdb-core/-types/surrealdb) are workspace
-      # path deps, so they follow transitively from the same checkout — only
-      # surrealdb-server needs patching. The git source URL is read from the
-      # downstream manifest. This rewrites Cargo.lock, so the cargo steps below
-      # intentionally omit --locked.
+      # Redirect every engine crate the downstream depends on DIRECTLY from
+      # this repo's git source to this checkout with a Cargo `[patch]`. The
+      # crate set is read from the downstream's own manifests (any Cargo.toml
+      # in its workspace): a direct git dependency left unpatched forces
+      # cargo to fetch the pinned private rev, which the runner cannot
+      # authenticate. Transitive engine crates are never patched — they
+      # follow as path dependencies of the patched crates. When the
+      # downstream-locked engine version differs from this checkout, the
+      # engine workspace version (and its internal version requirements) is
+      # stamped uniformly to the locked version, keeping the patch preferred
+      # for every crate without breaking the workspace's own internal edges.
+      # This rewrites Cargo.lock, so the cargo steps below intentionally
+      # omit --locked.
       - name: Point downstream at this engine checkout
         if: steps.preflight.outputs.configured == 'true'
         env:
@@ -315,39 +322,101 @@ jobs:
             exit 1
           fi
 
+          # Every crate the downstream declares as a direct dependency on
+          # this git source, across all manifests in its workspace. The URL
+          # is matched as a fixed string, so a different git source whose
+          # URL merely contains this repo's name can never sweep foreign
+          # crates into the set. A no-match grep must not kill the step
+          # under `set -o pipefail` — the empty-set branch below owns that
+          # diagnosis. The scan expects inline-table dependencies
+          # (`name = { git = ... }`): a table-form dependency would match on
+          # its bare `git = ...` line, so that token is filtered out and
+          # surfaces through the empty-set error rather than as a confusing
+          # missing-crate failure. Crate names contain no whitespace, so
+          # word-splitting the list is safe.
+          git_crates="$(grep -rh --include=Cargo.toml -F "git = \"${src_url}\"" downstream/ \
+            | sed -nE 's/^[[:space:]]*([A-Za-z0-9_-]+)[[:space:]]*=.*/\1/p' \
+            | grep -vx git | sort -u || true)"
+          if [ -z "$git_crates" ]; then
+            echo "::error title=Downstream compatibility::no direct inline-table dependencies on ${src_url} found in the downstream manifests"
+            exit 1
+          fi
+
+          # Authoritative name -> directory map of the engine workspace
+          # members (exact, no filesystem-order ambiguity from stray
+          # fixtures that happen to share a crate name).
+          engine_meta="$(cargo metadata --manifest-path "${ENGINE}/Cargo.toml" --no-deps --format-version 1)"
+          find_crate_dir() {
+            jq -r --arg name "$1" \
+              '.packages[] | select(.name == $name) | .manifest_path' <<<"$engine_meta" \
+              | head -n1 | xargs -r dirname
+          }
+          # Prints the downstream-locked version of crate $1 (empty if absent).
+          locked_version() {
+            awk -v crate="$1" '
+              /^\[\[package\]\]/ { name = ""; ver = "" }
+              /^name = / { name = $3; gsub(/"/, "", name) }
+              /^version = / { ver = $3; gsub(/"/, "", ver) }
+              name == crate && ver != "" { print ver; exit }
+            ' downstream/Cargo.lock
+          }
+          workspace_ver="$(jq -r '.packages[0].version' <<<"$engine_meta")"
+
           # Cargo records the git source's resolved version as an available
           # version and selects the newest semver-compatible one. When this
-          # engine is OLDER than the version downstream already locked from git
-          # (e.g. a release branch: 3.2.x here vs 3.3.0-nightly on main), cargo
-          # prefers the original git source over the path [patch] below and tries
-          # to fetch the pinned private rev — which the runner cannot
-          # authenticate, so the build fails before it starts. Stamp this
-          # engine's surrealdb-server crate to the exact version downstream
-          # locked, so the patch is the preferred (equal-version) source and the
-          # original git source is never fetched. Only the server crate's own
-          # version is rewritten; its path deps on -core/-types are unaffected,
-          # and on main (where the versions already match) this is a no-op.
-          want_ver="$(awk '
-            /^\[\[package\]\]/ { name = ""; ver = "" }
-            /^name = / { name = $3; gsub(/"/, "", name) }
-            /^version = / { ver = $3; gsub(/"/, "", ver) }
-            name == "surrealdb-server" && ver != "" { print ver; exit }
-          ' downstream/Cargo.lock)"
-          server_toml="${ENGINE}/surrealdb/server/Cargo.toml"
-          if [ -n "${want_ver}" ] && grep -qE '^version\.workspace = true$' "${server_toml}"; then
-            sed -i -E "s/^version\.workspace = true$/version = \"${want_ver}\"/" "${server_toml}"
-            echo "Stamped engine surrealdb-server version -> ${want_ver} (matches downstream lock)"
-          else
-            echo "::warning title=Downstream compatibility::could not stamp engine surrealdb-server version (want_ver='${want_ver}'); cargo may skip the [patch] if the engine version differs from the downstream lock"
+          # engine's version differs from what the downstream locked (e.g. a
+          # release branch vs main drift), cargo prefers the original git
+          # source over the path [patch] below and tries to fetch the pinned
+          # private rev — which the runner cannot authenticate. Stamping only
+          # some crates would break the workspace's own internal version
+          # requirements, so the stamp is uniform: rewrite the engine
+          # workspace version and its internal `[workspace.dependencies]`
+          # version requirements to the downstream-locked version, so every
+          # patched crate presents the locked version while internal edges
+          # stay mutually consistent. On main (where the versions already
+          # match) this is a no-op; mixed locked versions across the direct
+          # dependencies make a consistent stamp impossible and are surfaced
+          # as a warning instead.
+          stamp_ver=""
+          for crate in $git_crates; do
+            want_ver="$(locked_version "$crate")"
+            if [ -z "${want_ver}" ]; then
+              echo "::warning title=Downstream compatibility::could not read the downstream-locked version of ${crate}; cargo may skip the [patch] if the engine version differs from the downstream lock"
+            elif [ -z "${stamp_ver}" ]; then
+              stamp_ver="${want_ver}"
+            elif [ "${stamp_ver}" != "${want_ver}" ]; then
+              echo "::warning title=Downstream compatibility::downstream locks mixed engine versions (${stamp_ver} vs ${want_ver} for ${crate}); skipping the version stamp — cargo may prefer the original git source and fail to fetch it"
+              stamp_ver="mixed"
+            fi
+          done
+          if [ -n "${stamp_ver}" ] && [ "${stamp_ver}" != "mixed" ] && [ "${stamp_ver}" != "${workspace_ver}" ]; then
+            sed -i -E "s/^version = \"${workspace_ver}\"$/version = \"${stamp_ver}\"/" "${ENGINE}/Cargo.toml"
+            sed -i -E "/path = \"surrealdb/s/version = \"${workspace_ver}\"/version = \"${stamp_ver}\"/" "${ENGINE}/Cargo.toml"
+            echo "Stamped engine workspace version ${workspace_ver} -> ${stamp_ver} (matches downstream lock)"
           fi
 
           {
             echo ""
             echo "# CI-only (downstream-compat): build against this PR's engine checkout."
             echo "[patch.\"${src_url}\"]"
-            echo "surrealdb-server = { path = \"${ENGINE}/surrealdb/server\" }"
           } >> downstream/Cargo.toml
-          echo "Patched surrealdb-server (${src_url}) -> ${ENGINE}/surrealdb/server"
+          for crate in $git_crates; do
+            dir="$(find_crate_dir "$crate")"
+            if [ -z "$dir" ]; then
+              echo "::error title=Downstream compatibility::downstream depends on '${crate}' from ${src_url}, but this checkout has no workspace member with that name"
+              exit 1
+            fi
+            # A crate with an explicit (non workspace-inherited) version does
+            # not follow the uniform stamp; surface the mismatch so a
+            # patch-skip fetch failure explains itself.
+            want_ver="$(locked_version "$crate")"
+            if [ -n "${want_ver}" ] && [ "${want_ver}" != "${workspace_ver}" ] \
+              && ! grep -qE '^version\.workspace = true$' "${dir}/Cargo.toml"; then
+              echo "::warning title=Downstream compatibility::${crate} declares an explicit version (engine ${workspace_ver}, downstream lock ${want_ver}) that the workspace stamp does not cover; cargo may skip the [patch]"
+            fi
+            echo "${crate} = { path = \"${dir}\" }" >> downstream/Cargo.toml
+            echo "Patching ${crate} (${src_url}) -> ${dir}"
+          done
 
       - name: Build downstream (cargo check)
         if: steps.preflight.outputs.configured == 'true'
