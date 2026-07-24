@@ -1157,6 +1157,18 @@ pub(crate) enum Error {
 	#[error("Size of query script exceeded maximum supported size of 4,294,967,295 bytes.")]
 	QueryTooLarge,
 
+	/// The statement transaction buffered the configured maximum number of
+	/// individual key writes and was aborted before accumulating more. A
+	/// statement's physical write count can vastly exceed its logical row
+	/// count (cascaded deletes, full-text term maintenance, graph-edge
+	/// cleanup), and this guard bounds that fan-out with an atomic rollback.
+	#[error(
+		"Transaction exceeded the maximum number of key writes ({limit}). The statement's physical write fan-out (cascaded deletes, index maintenance, graph-edge cleanup) reached the `transaction_max_write_keys` limit and was rolled back. Reduce the operation's scope, or raise or disable the limit"
+	)]
+	TransactionWriteKeysExceeded {
+		limit: u64,
+	},
+
 	/// Represents a failure in timestamp arithmetic related to database
 	/// internals
 	#[error("Failed to compute: \"{0}\", as the operation results in an arithmetic overflow.")]

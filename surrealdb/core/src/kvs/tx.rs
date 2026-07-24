@@ -13,14 +13,14 @@ use std::any::Any;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
+use std::num::NonZeroU64;
 use std::ops::Deref;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use anyhow::Result;
 use chrono::Utc;
-use futures::future::try_join_all;
 use surrealdb_cnf::CommonConfig;
 use surrealdb_kvs::timestamp::{BoxTimeStamp, BoxTimeStampImpl};
 use tokio::sync::{Mutex, Notify};
@@ -133,6 +133,33 @@ pub struct Transaction {
 	async_event_trigger: Arc<Notify>,
 	/// Do we have to trigger async events after the commit?
 	trigger_async_event: AtomicBool,
+	/// Write-cardinality guard: maximum number of individual key writes this
+	/// transaction may buffer before further writes fail. Unset by default,
+	/// leaving the transaction unbounded. Armed once — by the executor for
+	/// its own statement transactions via [`Self::with_write_keys_limit`],
+	/// or through [`Self::arm_write_keys_limit`] for externally-supplied
+	/// (client-owned, `Arc`-wrapped) transactions when statements execute on
+	/// them. `OnceLock` for the same reason as `tenant_identity`: the
+	/// external path only sees the transaction after it is wrapped in an
+	/// `Arc`.
+	write_keys_limit: OnceLock<NonZeroU64>,
+	/// Set when the write-cardinality guard trips. A poisoned transaction
+	/// refuses COMMIT (rolling back instead), because the writes buffered
+	/// before the failing reservation are a partial statement; CANCEL
+	/// behaves as normal. This is what preserves the guard's atomic
+	/// rollback contract on client-owned (RPC/SDK) transactions, whose
+	/// lifecycle the executor does not manage.
+	write_guard_poisoned: AtomicBool,
+	/// Number of write slots reserved against the write-cardinality guard.
+	/// Each write operation atomically reserves its slot *before* the
+	/// storage call, so concurrent writes on the same transaction (e.g.
+	/// graph-pointer maintenance joining several deletes) can never admit
+	/// more writes than the limit through a stale read of the counter.
+	/// Independent of [`TransactionMetrics`], which records successful
+	/// operations for observability: a failed write keeps its reservation,
+	/// and a range delete reserves one slot regardless of its (unreported)
+	/// per-key expansion.
+	guarded_writes: AtomicU64,
 	/// Durable index-build reservations to release once this transaction is closed.
 	///
 	/// Writers enqueue index appendings for a durable concurrent index build after
@@ -775,11 +802,75 @@ impl Transaction {
 			live_events: OnceLock::new(),
 			async_event_trigger,
 			trigger_async_event: AtomicBool::new(false),
+			write_keys_limit: OnceLock::new(),
+			write_guard_poisoned: AtomicBool::new(false),
+			guarded_writes: AtomicU64::new(0),
 			pending_index_build_reservations: Mutex::new(Vec::new()),
 			cached_index_build_reservations: Mutex::new(HashMap::new()),
 			pending_index_builder_aborts: Mutex::new(Vec::new()),
 			pending_uncommitted_index_builds: Mutex::new(Vec::new()),
 		}
+	}
+
+	/// Arms the write-cardinality guard: once the transaction has buffered
+	/// `limit` individual key writes, every further write fails with
+	/// [`crate::err::Error::TransactionWriteKeysExceeded`], so a statement's
+	/// physical fan-out (cascaded deletes, index maintenance, graph-edge
+	/// cleanup) stops accumulating at the bound and the transaction rolls
+	/// back atomically. `None` leaves the transaction unbounded.
+	///
+	/// Armed on every statement-execution path (executor transactions,
+	/// externally-supplied client-owned transactions, record-access clause
+	/// evaluation); internal maintenance transactions (index builds,
+	/// compaction, garbage collection) are created without a limit and are
+	/// never guarded. Every write reserves one slot atomically before it is
+	/// issued, so concurrent writes within the transaction can never admit
+	/// more than the limit. The accounting rules (range deletes, commit-time
+	/// feed writes, reservations never being refunded) are documented on
+	/// `transaction_max_write_keys` in [`surrealdb_cnf::CommonConfig`].
+	pub fn with_write_keys_limit(self, limit: Option<NonZeroU64>) -> Self {
+		self.arm_write_keys_limit(limit);
+		self
+	}
+
+	/// Arms the write-cardinality guard on a transaction that is already
+	/// wrapped in an `Arc` — the externally-supplied (client-owned)
+	/// transactions that statements execute on via
+	/// [`crate::kvs::Datastore::process_with_transaction`] and its variants.
+	/// Same contract as [`Self::with_write_keys_limit`]. Idempotent: the
+	/// first arming wins and later calls are silently ignored, so repeated
+	/// statement executions on one transaction keep a single limit.
+	pub fn arm_write_keys_limit(&self, limit: Option<NonZeroU64>) {
+		if let Some(limit) = limit {
+			let _ = self.write_keys_limit.set(limit);
+		}
+	}
+
+	/// Reserves one write slot against the write-cardinality guard, failing
+	/// when the transaction has already reserved the configured maximum.
+	/// Called before every write operation; the reservation is atomic
+	/// (compare-and-increment), so writes issued concurrently on the same
+	/// transaction each take a distinct slot and the limit holds under any
+	/// interleaving.
+	fn reserve_write_slot(&self) -> Result<()> {
+		if let Some(limit) = self.write_keys_limit.get()
+			&& self
+				.guarded_writes
+				.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
+					(n < limit.get()).then_some(n + 1)
+				})
+				.is_err()
+		{
+			// Poison the transaction: the writes already buffered are a
+			// partial statement, so a later explicit COMMIT must be refused
+			// (see the check at the top of [`Self::commit`]).
+			self.write_guard_poisoned.store(true, Ordering::Relaxed);
+			return Err(crate::err::Error::TransactionWriteKeysExceeded {
+				limit: limit.get(),
+			}
+			.into());
+		}
+		Ok(())
 	}
 
 	/// Attach pre-resolved tenant identity so the emitted
@@ -1067,6 +1158,26 @@ impl Transaction {
 	/// This attempts to commit all changes made within the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn commit(&self) -> Result<()> {
+		// A tripped write-cardinality guard poisons the transaction: the
+		// writes buffered before the failing reservation are a partial
+		// statement, so committing them — reachable when a client-owned
+		// (RPC/SDK) transaction issues an explicit COMMIT after an
+		// over-limit statement error — would break the guard's atomic
+		// rollback contract. Refuse the commit and roll back instead;
+		// an explicit CANCEL behaves as normal.
+		if self.write_guard_poisoned.load(Ordering::Relaxed) {
+			let limit = self.write_keys_limit.get().map(|l| l.get()).unwrap_or_default();
+			if let Err(err) = self.cancel().await {
+				tracing::warn!(
+					target: "surrealdb::core::kvs::tx",
+					"transaction cleanup failed after a poisoned-guard commit was refused: {err}"
+				);
+			}
+			return Err(crate::err::Error::TransactionWriteKeysExceeded {
+				limit,
+			}
+			.into());
+		}
 		// Store any buffered changefeed entries. Failure here falls into
 		// `cancel`, which itself emits the transaction event, so avoid
 		// double-emission from this path.
@@ -1254,6 +1365,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
+		self.reserve_write_slot()?;
 		let key = key.encode_key()?;
 		let key_bytes = key.len() as u64;
 		self.tr.del(key).await.map_err(Error::from)?;
@@ -1264,6 +1376,7 @@ impl Transaction {
 	/// Delete a key from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn del(&self, key: Key<'_>) -> Result<()> {
+		self.reserve_write_slot()?;
 		let key_bytes = key.len() as u64;
 		self.tr.del(key).await.map_err(Error::from)?;
 		self.metrics.record_del(1, key_bytes);
@@ -1277,6 +1390,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
+		self.reserve_write_slot()?;
 		let key = key.encode_key()?;
 		let key_bytes = key.len() as u64;
 		let chk = chk.map(|v| v.kv_encode_value()).transpose()?;
@@ -1289,6 +1403,7 @@ impl Transaction {
 	/// condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn del_compare(&self, key: Key<'_>, chk: Option<&[u8]>) -> Result<()> {
+		self.reserve_write_slot()?;
 		let key_bytes = key.len() as u64;
 		self.tr.delc(key, chk).await.map_err(Error::from)?;
 		self.metrics.record_del(1, key_bytes);
@@ -1301,6 +1416,7 @@ impl Transaction {
 	/// batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn delr(&self, rng: KeyRange<'_>) -> Result<()> {
+		self.reserve_write_slot()?;
 		self.tr.delr(rng).await.map_err(Error::from)?;
 		// Range/prefix deletes don't report the number of affected keys or
 		// their byte size.
@@ -1327,6 +1443,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
+		self.reserve_write_slot()?;
 		let key = key.encode_key()?;
 		let key_bytes = key.len() as u64;
 		self.tr.clr(key).await.map_err(Error::from)?;
@@ -1341,6 +1458,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
+		self.reserve_write_slot()?;
 		let key = key.encode_key()?;
 		let key_bytes = key.len() as u64;
 		let chk = chk.map(|v| v.kv_encode_value()).transpose()?;
@@ -1355,6 +1473,7 @@ impl Transaction {
 	/// batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn clrr(&self, rng: KeyRange<'_>) -> Result<()> {
+		self.reserve_write_slot()?;
 		self.tr.clrr(rng).await.map_err(Error::from)?;
 		self.metrics.record_del(0, 0);
 		Ok(())
@@ -1369,6 +1488,7 @@ impl Transaction {
 	where
 		K: KVRange,
 	{
+		self.reserve_write_slot()?;
 		let range = key.encode_range()?;
 		self.tr.clrr(range).await.map_err(Error::from)?;
 		self.metrics.record_del(0, 0);
@@ -1542,6 +1662,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
+		self.reserve_write_slot()?;
 		let key = key.encode_key()?;
 		let val = val.kv_encode_value()?;
 		let key_bytes = key.len() as u64;
@@ -1557,6 +1678,7 @@ impl Transaction {
 	where
 		V: IntoBytes + Debug,
 	{
+		self.reserve_write_slot()?;
 		let key_bytes = key.len() as u64;
 		let val = val.into_bytes();
 		let value_bytes = val.len() as u64;
@@ -1571,6 +1693,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
+		self.reserve_write_slot()?;
 		let key = key.encode_key()?;
 		let val = val.kv_encode_value()?;
 		let key_bytes = key.len() as u64;
@@ -1586,6 +1709,7 @@ impl Transaction {
 	where
 		V: IntoBytes + Debug,
 	{
+		self.reserve_write_slot()?;
 		let key_bytes = key.len() as u64;
 		let val = val.into_bytes();
 		let value_bytes = val.len() as u64;
@@ -1605,6 +1729,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
+		self.reserve_write_slot()?;
 		let key = key.encode_key()?;
 		let val = val.kv_encode_value()?;
 		let chk = chk.map(|v| v.kv_encode_value()).transpose()?;
@@ -1621,6 +1746,7 @@ impl Transaction {
 	where
 		V: IntoBytes + Debug,
 	{
+		self.reserve_write_slot()?;
 		let val = val.into_bytes();
 		let key_bytes = key.len() as u64;
 		let value_bytes = val.len() as u64;
@@ -1635,6 +1761,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
+		self.reserve_write_slot()?;
 		let key = key.encode_key()?;
 		let val = val.kv_encode_value()?;
 		let key_bytes = key.len() as u64;
@@ -2033,8 +2160,15 @@ impl Transaction {
 		// Both keyspaces share this commit's versionstamp.
 		let buf = &mut [0u8; _];
 		let ts = self.timestamp().await?.encode(buf);
-		// Collect all changefeed write operations as futures
-		let cf_futures = cf_changes.into_iter().map(|(ns, db, tb, value)| async move {
+		// Write the buffered changefeed entries. These commit-time writes are
+		// part of the transaction's write set, so they are metered and
+		// checked against the write-cardinality guard like any other write.
+		// Writes are issued sequentially so each capacity check observes
+		// every previous write — concurrent checks against a stale count
+		// could otherwise admit more keys than the configured limit. Entries
+		// are few (one per table per keyspace), so sequencing costs no
+		// meaningful concurrency.
+		for (ns, db, tb, value) in cf_changes {
 			// Create the changefeed key with the current timestamp
 			let key = crate::key::change::ChangeFeed {
 				prefix: crate::key::database::all::DatabaseRoot {
@@ -2045,13 +2179,16 @@ impl Transaction {
 				tb: Cow::Borrowed(&tb),
 			}
 			.encode_key()?;
+			self.reserve_write_slot()?;
+			let key_bytes = key.len() as u64;
+			let value_bytes = value.len() as u64;
 			// Write the changefeed entry using the raw transactor API
 			self.tr.set(key, value).await.map_err(Error::from)?;
-			Ok::<(), anyhow::Error>(())
-		});
-		try_join_all(cf_futures).await?;
-		// Write the live-query event entries to the dedicated keyspace.
-		let lqe_futures = lqe_changes.into_iter().map(|(ns, db, tb, value)| async move {
+			self.metrics.record_set(key_bytes, value_bytes);
+		}
+		// Write the live-query event entries to the dedicated keyspace,
+		// metered, guarded, and sequenced like the changefeed writes above.
+		for (ns, db, tb, value) in lqe_changes {
 			let key = crate::key::lqe::Lqe {
 				prefix: DatabaseRoot {
 					ns,
@@ -2061,11 +2198,12 @@ impl Transaction {
 				ts: Cow::Borrowed(ts),
 			}
 			.encode_key()?;
-
+			self.reserve_write_slot()?;
+			let key_bytes = key.len() as u64;
+			let value_bytes = value.len() as u64;
 			self.tr.set(key, value).await.map_err(Error::from)?;
-			Ok::<(), anyhow::Error>(())
-		});
-		try_join_all(lqe_futures).await?;
+			self.metrics.record_set(key_bytes, value_bytes);
+		}
 		// All good
 		Ok(())
 	}

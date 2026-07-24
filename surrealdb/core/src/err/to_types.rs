@@ -132,6 +132,15 @@ pub fn into_types_error(error: Error) -> TypesError {
 		QueryNotExecuted {
 			message,
 		} => TypesError::query(message, QueryError::NotExecuted),
+		// An expected, caller-actionable resource limit (the statement's
+		// write fan-out crossed `transaction_max_write_keys`), not an
+		// internal fault. Deliberately carries no structured `QueryError`
+		// discriminator: that is a public-types addition, deferred until
+		// SDKs need machine-readable detection — callers today match on
+		// the message text.
+		TransactionWriteKeysExceeded {
+			..
+		} => TypesError::query(message, None),
 		AccessRecordSignupQueryFailed | AccessRecordSigninQueryFailed => {
 			TypesError::query(message, None)
 		}

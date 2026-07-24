@@ -296,6 +296,40 @@ pub struct CommonConfig {
 	/// rolling-upgrade windows during which a subscriber may need to replay missed
 	/// events. Independent of any user-defined `CHANGEFEED` retention (default: 1h).
 	pub live_query_retention: Duration,
+	/// Maximum number of write operations a single statement transaction may
+	/// buffer before it is aborted with an error; 0 disables the guard
+	/// (default: 0).
+	///
+	/// A statement's physical write count can vastly exceed its logical row
+	/// count: cascaded deletes, full-text term maintenance, and graph-edge
+	/// cleanup all multiply per-record work, and on distributed backends every
+	/// written key is reserved on every replica at prepare time while staying
+	/// far below byte-based write-set limits. The guard reserves one slot per
+	/// write before it is issued, so fan-out stops accumulating at the limit
+	/// and the transaction rolls back atomically. Tripping the guard poisons
+	/// the transaction: an explicit COMMIT (client-owned RPC/SDK
+	/// transactions) is refused and rolls back, so the partial statement can
+	/// never be persisted.
+	///
+	/// Accounting (canonical; the `Transaction` API docs defer here): per-key
+	/// writes count individually. Each range delete counts as one write — on
+	/// backends that expand a range delete into per-key writes inside the
+	/// same transaction (TiKV, bounded by `SURREAL_TIKV_DELR_MAX_KEYS`), the
+	/// effective key bound is therefore this limit multiplied by that
+	/// per-operation cap, and operators sizing distributed clusters need both
+	/// numbers. Commit-time changefeed and live-query event writes count like
+	/// any other write. Reservations are never refunded — neither by failed
+	/// writes nor by savepoint rollbacks — so a statement retried through
+	/// savepoints (e.g. under UPSERT contention) can fail earlier than its
+	/// final buffered size.
+	///
+	/// Applies to statement execution wherever it happens: executor-created
+	/// transactions, statements executed on explicit client-owned (RPC/SDK)
+	/// transactions, and record-access clause evaluation
+	/// (SIGNUP/SIGNIN/AUTHENTICATE). Internal maintenance transactions (index
+	/// builds, compaction, garbage collection) are not affected
+	/// (`SURREAL_TRANSACTION_MAX_WRITE_KEYS`).
+	pub transaction_max_write_keys: u64,
 }
 
 impl Default for CommonConfig {
@@ -352,6 +386,7 @@ impl Default for CommonConfig {
 			surrealism_log_level: "debug".to_string(),
 			live_query_engine: LiveQueryEngine::Inline,
 			live_query_retention: Duration::from_secs(3600),
+			transaction_max_write_keys: 0,
 		}
 	}
 }
@@ -428,7 +463,8 @@ impl Config for CommonConfig {
 			.parse_key("live_query_engine", &mut self.live_query_engine)
 			.parse_key_with("live_query_retention", &mut self.live_query_retention, |x| {
 				config::parse_duration(x).ok()
-			});
+			})
+			.parse_key("transaction_max_write_keys", &mut self.transaction_max_write_keys);
 	}
 }
 

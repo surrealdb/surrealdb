@@ -17,3 +17,5 @@ mod rpc_session_test;
 #[cfg(feature = "kv-mem")]
 mod tx_cache_test;
 mod tx_metrics;
+#[cfg(feature = "kv-mem")]
+mod write_guard_test;

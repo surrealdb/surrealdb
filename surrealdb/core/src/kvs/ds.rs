@@ -695,6 +695,12 @@ impl Datastore {
 		self.transaction_timeout
 	}
 
+	/// The configured write-cardinality limit for statement transactions
+	/// (`transaction_max_write_keys`), or `None` when the guard is disabled.
+	pub(crate) fn transaction_max_write_keys(&self) -> Option<std::num::NonZeroU64> {
+		std::num::NonZeroU64::new(self.config.transaction_max_write_keys)
+	}
+
 	/// Get the configured global query timeout, if any.
 	///
 	/// This is the deadline set by `--query-timeout` /
@@ -3890,6 +3896,13 @@ impl Datastore {
 			tx.set_tenant_identity(Arc::clone(identity));
 		}
 
+		// Arm the write-cardinality guard: statements executing on an
+		// explicit client-owned transaction (RPC `begin`, SDK-managed
+		// transactions) are subject to the same configured limit as
+		// executor-created statement transactions, so the guard cannot be
+		// bypassed by wrapping a statement in an explicit transaction.
+		tx.arm_write_keys_limit(self.transaction_max_write_keys());
+
 		// Set the transaction in the context
 		ctx.set_transaction(tx);
 
@@ -4133,13 +4146,18 @@ impl Datastore {
 		};
 		// Start a new transaction. Tenant identity is attached up-front so the
 		// emitted [`crate::observe::TransactionEvent`] carries the session's
-		// namespace, database, user, etc.
+		// namespace, database, user, etc. The write-cardinality guard is
+		// armed like any other statement execution: this path evaluates
+		// owner-defined record-access clauses (SIGNUP/SIGNIN/AUTHENTICATE)
+		// on behalf of unauthenticated callers, so its fan-out must be
+		// subject to the same configured limit.
 		let txn = self
 			.transaction(txn_type)
 			.await?
 			.with_tenant_identity(Some(Arc::new(crate::observe::TenantIdentity::from_session(
 				sess,
 			))))
+			.with_write_keys_limit(self.transaction_max_write_keys())
 			.enclose();
 		// Store the transaction
 		ctx.set_transaction(Arc::clone(&txn));

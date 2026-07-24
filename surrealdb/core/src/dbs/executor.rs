@@ -1023,7 +1023,8 @@ impl Executor {
 		let txn = Arc::new(
 			kvs.transaction(transaction_type)
 				.await?
-				.with_tenant_identity(self.ctx.tenant_identity().cloned()),
+				.with_tenant_identity(self.ctx.tenant_identity().cloned())
+				.with_write_keys_limit(kvs.transaction_max_write_keys()),
 		);
 		let receiver = self.prepare_broker(
 			matches!(transaction_type, TransactionType::Write),
@@ -1118,11 +1119,10 @@ impl Executor {
 	where
 		S: Stream<Item = Result<TopLevelExpr>>,
 	{
-		let Ok(txn) = kvs
-			.transaction(TransactionType::Write)
-			.await
-			.map(|tx| tx.with_tenant_identity(self.ctx.tenant_identity().cloned()))
-		else {
+		let Ok(txn) = kvs.transaction(TransactionType::Write).await.map(|tx| {
+			tx.with_tenant_identity(self.ctx.tenant_identity().cloned())
+				.with_write_keys_limit(kvs.transaction_max_write_keys())
+		}) else {
 			// couldn't create a transaction.
 			// Fast forward until we hit CANCEL or COMMIT
 			while let Some(stmt) = stream.next().await {
