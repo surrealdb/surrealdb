@@ -1060,12 +1060,27 @@ pub trait Transactable: requirements::TransactionRequirements {
 	/// Mirrors the same `cfg(test)` swap: deterministic incrementing counter
 	/// in tests, HLC in production. Callers that need to mint many
 	/// timestamps in a row can hold the impl and avoid re-dispatching.
+	///
+	/// This is the domain of the versionstamps written at commit time
+	/// (changefeed and live-query event keys). It is not necessarily the domain
+	/// of the backend's internal versioned storage; for that, use
+	/// [`Self::version_timestamp_impl`].
 	fn timestamp_impl(&self) -> BoxTimeStampImpl {
 		if cfg!(test) {
 			Box::new(IncTimeStampImpl)
 		} else {
 			Box::new(HlcTimeStampImpl)
 		}
+	}
+
+	/// Get a handle to the timestamp implementation for the backend's internal
+	/// versioned storage: the domain of the `version` arguments accepted by
+	/// key-value reads, and therefore of `VERSION` queries. Backends whose
+	/// storage engine versions entries in a different unit than
+	/// [`Self::timestamp`] (mem and surrealkv use nanoseconds since epoch) must
+	/// override this rather than [`Self::timestamp_impl`].
+	fn version_timestamp_impl(&self) -> BoxTimeStampImpl {
+		self.timestamp_impl()
 	}
 
 	/// Hint the backend to compact the given range (or the whole keyspace if

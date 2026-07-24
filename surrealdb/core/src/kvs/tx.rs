@@ -1889,6 +1889,11 @@ impl Transaction {
 		self.tr.timestamp_impl()
 	}
 
+	/// Returns the timestamp implementation for `VERSION` queries.
+	pub fn version_timestamp_impl(&self) -> BoxTimeStampImpl {
+		self.tr.version_timestamp_impl()
+	}
+
 	// --------------------------------------------------
 	// Changefeed functions
 	// --------------------------------------------------

@@ -185,7 +185,7 @@ impl ExecOperator for KnnScan {
 					Some(
 						v.cast_to::<crate::val::Datetime>()
 							.map_err(|e| anyhow::anyhow!("{e}"))?
-							.to_version_stamp(txn.timestamp_impl().as_ref())?,
+							.to_version_stamp(txn.version_timestamp_impl().as_ref())?,
 					)
 				}
 				None => ctx.version_stamp(),

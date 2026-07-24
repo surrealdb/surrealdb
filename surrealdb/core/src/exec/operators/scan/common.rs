@@ -112,7 +112,7 @@ pub(crate) async fn resolve_version_stamp(
 	let stamp = v
 		.cast_to::<crate::val::Datetime>()
 		.map_err(|e| anyhow::anyhow!("{e}"))?
-		.to_version_stamp(ctx.txn().timestamp_impl().as_ref())?;
+		.to_version_stamp(ctx.txn().version_timestamp_impl().as_ref())?;
 	Ok(Some(stamp))
 }
 

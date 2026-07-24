@@ -78,7 +78,7 @@ impl SelectStatement {
 		let mut iterator = Iterator::new();
 		// Ensure futures are stored and the version is set if specified
 
-		let ts_impl = ctx.tx().timestamp_impl();
+		let ts_impl = ctx.tx().version_timestamp_impl();
 		let version = stk
 			.run(|stk| self.version.compute(stk, ctx, opt, parent_doc))
 			.await
