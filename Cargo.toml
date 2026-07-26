@@ -75,7 +75,11 @@ surrealdb-kvs-indxdb = { version = "3.3.0-nightly", path = "surrealdb/kvs-indxdb
 surrealdb-kvs-mem = { version = "3.3.0-nightly", path = "surrealdb/kvs-mem" }
 surrealdb-kvs-rocksdb = { version = "3.3.0-nightly", path = "surrealdb/kvs-rocksdb" }
 surrealdb-kvs-surrealkv = { version = "3.3.0-nightly", path = "surrealdb/kvs-surrealkv" }
-surrealdb-kvs-test = { version = "3.3.0-nightly", path = "surrealdb/kvs-test" }
+# Dev-only, `publish = false`: declared WITHOUT a version so cargo strips it
+# from published manifests. A version here would make cargo package/publish
+# demand it from crates.io, where a publish=false crate can never appear -
+# breaking every crate that dev-depends on it (surrealdb-kvs-any, -kvs-indxdb).
+surrealdb-kvs-test = { path = "surrealdb/kvs-test" }
 surrealdb-kvs-tikv = { version = "3.3.0-nightly", path = "surrealdb/kvs-tikv" }
 surrealdb-collections = { version = "3.3.0-nightly", path = "surrealdb/collections" }
 

@@ -20,6 +20,12 @@ no-default-features = true
 highlight = "all"
 # The lint level for when a crate version requirement is set to `*`.
 wildcards = "deny"
+# Path dependencies on private (publish = false) workspace crates are declared
+# without a version on purpose - a version would keep them in published
+# manifests and break `cargo publish` (see surrealdb-kvs-test). Cargo reads a
+# version-less path dep as `*`, so allow that specifically for path deps while
+# still denying genuine registry wildcards.
+allow-wildcard-paths = true
 # Lint level for when multiple versions of the same crate are detected.
 multiple-versions = "allow"
 # The default lint level for `default` features for workspace crates.
