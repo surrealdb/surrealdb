@@ -169,7 +169,14 @@ impl Parse for ast::Info {
 			}
 			T![NAMESPACE] => {
 				let _ = parser.next();
-				ast::InfoKind::Namespace
+				let version = if parser.eat(T![VERSION])?.is_some() {
+					Some(parser.parse_enter().await?)
+				} else {
+					None
+				};
+				ast::InfoKind::Namespace {
+					version,
+				}
 			}
 			T![DATABASE] => {
 				let _ = parser.next();

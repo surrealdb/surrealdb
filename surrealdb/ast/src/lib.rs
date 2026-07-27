@@ -333,7 +333,9 @@ impl_vis_type! {
 	#[derive(Debug)]
 	pub enum InfoKind {
 		Root,
-		Namespace,
+		Namespace{
+			version: Option<NodeId<Expr>>,
+		},
 		Database {
 			version: Option<NodeId<Expr>>,
 		},
@@ -2162,6 +2164,7 @@ ast_type! {
 ast_type! {
 	pub struct SelectLookup{
 		pub fields: NodeId<Fields>,
+		pub only: bool,
 		pub from: Option<NodeListId<LookupSubject>>,
 		pub condition:  Option<NodeId<Expr>>,
 		pub split: Option<NodeListId<Expr>>,
@@ -2267,6 +2270,9 @@ ast_type! {
 		Field(NodeId<Ident>),
 		Member(MemberPlace),
 		Index(IndexPlace),
+		/// Marks that the rest of the place contains syntax which was allowed, but
+		/// doesn't actually do anything, nor make real sense.
+		Legacy(Span),
 	}
 }
 

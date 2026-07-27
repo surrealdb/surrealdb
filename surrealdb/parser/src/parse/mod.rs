@@ -12,7 +12,7 @@
 //! The general pattern for implementing parsing is peeking some token and then deciding ot advance
 //! or not based on that token.
 //!
-//! If an unexpect token is found you should create an error with the surrealdb_common::error api.
+//! If an unexpected token is found you should create an error with the surrealdb_common::error api.
 //! Error should be constructed within the closure in the `Parser::with_error` function. This way
 //! the parser can decide to not build an error when speculating for example.
 //!
@@ -113,6 +113,8 @@ pub struct Config {
 	pub quirk_block_first_no_semi: bool,
 	/// Does the parser allow specifying delete permissions of fields.
 	pub quirk_delete_permission_field: bool,
+	/// Does the parser allow place idioms which have previously allowed nonsensical syntax.
+	pub quirk_legacy_place_productions: bool,
 }
 
 impl Config {
@@ -135,6 +137,7 @@ impl Default for Config {
 			quirk_redefine: false,
 			quirk_block_first_no_semi: false,
 			quirk_delete_permission_field: false,
+			quirk_legacy_place_productions: false,
 		}
 	}
 }
@@ -142,7 +145,7 @@ impl Default for Config {
 bitflags! {
 	#[derive(Clone,Copy)]
 	struct ParserSettings: u8 {
-		/// Is the emmiting of warnings enabled.
+		/// Is the emission of warnings enabled.
 		const WARNINGS           = 1 << 0;
 		/// Is the parser parsing a partially available query.
 		const PARTIAL            = 1 << 1;
@@ -156,6 +159,8 @@ bitflags! {
 		const QUIRK_FIRST_SEMICOLON_BLOCK = 1 << 5;
 		/// Does the parser allow specifying delete permissions of fields.
 		const QUIRK_DELETE_PERMISSION_FIELD = 1 << 6;
+		/// Does the parser allow specifying delete permissions of fields.
+		const QUIRK_LEGACY_PLACE_PRODUCTIONS = 1 << 7;
 	}
 }
 
@@ -181,6 +186,9 @@ impl ParserSettings {
 		if cfg.quirk_block_first_no_semi {
 			settings |= ParserSettings::QUIRK_FIRST_SEMICOLON_BLOCK;
 		}
+		if cfg.quirk_legacy_place_productions {
+			settings |= ParserSettings::QUIRK_LEGACY_PLACE_PRODUCTIONS;
+		}
 
 		settings
 	}
@@ -189,12 +197,12 @@ impl ParserSettings {
 bitflags! {
 	#[derive(Clone,Copy)]
 	pub(crate) struct ParserState: u8 {
-		/// Is the parser in a cancelable transaction.
+		/// Is the parser in a cancellable transaction.
 		const TRANSACTION = 1 << 0;
 		/// Is the parser in a control flow loop.
 		/// Used to reject `break` and `continue` statements which are outside of a loop.
 		const LOOP = 1 << 1;
-		/// Is the parser speculativily parsing.
+		/// Is the parser speculatively parsing.
 		const SPECULATING = 1 << 2;
 	}
 }
@@ -263,7 +271,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		}
 
 		// We ignore the stk which is mostly just to ensure the no accidental panics or infinite
-		// loops because we can maintain it's savety guarentees within the parser.
+		// loops because we can maintain it's safety guarantees within the parser.
 		let mut runner = stack.enter(|_| parser.parse());
 
 		loop {
@@ -319,7 +327,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		}
 
 		// We ignore the stk which is mostly just to ensure the no accidental panics or infinite
-		// loops because we can maintain it's savety guarentees within the parser.
+		// loops because we can maintain it's safety guarantees within the parser.
 		let mut runner = stack.enter(|_| parser.parse());
 
 		loop {
@@ -348,11 +356,11 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		}
 	}
 
-	/// Speculativily parse a branch.
+	/// Speculatively parse a branch.
 	///
 	/// If the callback returns `Ok(_)` then the lexer state advances like it would normally
 	/// and the function will return `Ok(Some(_))`.
-	/// If the callback returns `Err(ParseError::speculate())` then it rollsback the lexer to
+	/// If the callback returns `Err(ParseError::speculate())` then it rolls back the lexer to
 	/// before the function was called and will return Ok(None), otherwise it will return the
 	/// error from the callback.
 	///
@@ -368,10 +376,10 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	/// errors.
 	///
 	/// # Usage
-	/// This function is very powerfull but also has the drawbacks.
-	/// - First it enables ambigous grammar, when implementing new syntax using this function please
-	///   first see if it is possible to implement the feature using the peek functions an otherwise
-	///   maybe consider redesigning the syntax so it is `LL(n)`.
+	/// This function is very powerful but also has the drawbacks.
+	/// - First it enables ambiguous grammar, when implementing new syntax using this function
+	///   please first see if it is possible to implement the feature using the peek functions an
+	///   otherwise maybe consider redesigning the syntax so it is `LL(n)`.
 	///
 	/// - Second because it doesn't provide feedback on what exactly happened it can result in
 	///   errors being unpredictable

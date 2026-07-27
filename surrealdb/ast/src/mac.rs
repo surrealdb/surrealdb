@@ -57,6 +57,7 @@ macro_rules! ast_type {
         $(#[$m:meta])*
         $vis:vis enum $name:ident {
             $(
+				$(#[$vm:meta])*
                 $variant:ident($ty:ty)
             ),*$(,)?
         }
@@ -69,6 +70,7 @@ macro_rules! ast_type {
 			#[derive(Debug)]
 			$vis enum $name {
 				$(
+					$(#[$vm])*
 					$variant($ty),
 				)*
 			}

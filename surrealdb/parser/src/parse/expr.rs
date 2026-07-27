@@ -990,6 +990,8 @@ impl Parse for ast::Lookup {
 
 					let _ = parser.expect(T![FROM])?;
 
+					let only = parser.eat(T![ONLY])?.is_some();
+
 					let from = parse_lookup_from(parser).await?;
 					let condition = if parser.eat(T![WHERE])?.is_some() {
 						Some(parser.parse_enter().await?)
@@ -1059,6 +1061,7 @@ impl Parse for ast::Lookup {
 					let span = parser.span_since(peek.span);
 					Ok(ast::Lookup::Select(ast::SelectLookup {
 						fields,
+						only,
 						from,
 						condition,
 						split,
