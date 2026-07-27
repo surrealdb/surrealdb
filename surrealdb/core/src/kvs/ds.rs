@@ -4513,6 +4513,11 @@ impl Datastore {
 		}
 
 		let tx = Arc::new(self.transaction(TransactionType::Write).await?);
+		// Custom API handlers evaluate owner-defined expressions on behalf of
+		// external callers — statement execution in everything but name — so
+		// the write-cardinality guard applies exactly as it does to executor
+		// statements and explicit client-owned transactions.
+		tx.arm_write_keys_limit(self.transaction_max_write_keys());
 
 		let db = tx.ensure_ns_db(None, ns, db).await?;
 

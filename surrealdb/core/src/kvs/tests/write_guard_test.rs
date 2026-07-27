@@ -260,6 +260,49 @@ async fn write_guard_poisons_external_transactions_on_trip() {
 	assert_intact(&ds, &ses, 10).await;
 }
 
+/// Custom API handlers (`DEFINE API`, invoked over HTTP) evaluate
+/// owner-defined expressions on behalf of external callers and are guarded
+/// like any other statement execution: an over-limit handler fails and
+/// leaves nothing behind.
+#[tokio::test(flavor = "multi_thread")]
+async fn write_guard_applies_to_api_handlers() {
+	use crate::api::request::ApiRequest;
+	use crate::catalog::ApiMethod;
+	let (ds, ses) = guarded_ds(5).await;
+	run(
+		&ds,
+		&ses,
+		r#"
+		DEFINE TABLE t;
+		DEFINE API "/spam" FOR get PERMISSIONS FULL THEN {
+			CREATE |t:50| RETURN NONE;
+			{ status: 200 };
+		};
+		"#,
+	)
+	.await;
+	let req = ApiRequest {
+		method: ApiMethod::Get,
+		request_id: "issue-715-guard".to_string(),
+		..Default::default()
+	};
+	let err = ds
+		.invoke_api_handler("test", "test", "spam", &ses, req)
+		.await
+		.expect_err("an over-limit API handler must fail");
+	assert!(
+		err.to_string().contains("maximum number of key writes (5)"),
+		"unexpected error: {err}"
+	);
+	// The failed handler left nothing behind.
+	let res = ds.execute("SELECT count() FROM t GROUP ALL;", &ses, None).await.unwrap();
+	let v = format!("{:?}", res.into_iter().next().unwrap().result.unwrap());
+	assert!(
+		v.contains("Int(0)") || v == "Array(Array([]))",
+		"rolled-back handler left records: {v}"
+	);
+}
+
 /// Writes issued concurrently on one transaction (as graph-pointer
 /// maintenance does with `try_join!`) each reserve a distinct slot, so the
 /// limit holds under any interleaving: with limit 2, joining three writes
