@@ -1499,7 +1499,7 @@ version = "2.15.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.spin]]
-version = "0.9.4"
+version = "0.9.9"
 criteria = "safe-to-deploy"
 
 [[exemptions.spki]]

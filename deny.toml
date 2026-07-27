@@ -167,10 +167,6 @@ name = "surrealdb-kvs-surrealkv"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
-name = "surrealdb-kvs-tikv"
-allow = ["BUSL-1.1"]
-
-[[licenses.exceptions]]
 name = "surrealdb-kvs-any"
 allow = ["BUSL-1.1"]
 
