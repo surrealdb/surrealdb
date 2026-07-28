@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -513,6 +513,11 @@ async fn assert_no_index_build_artifacts(
 	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix);
 	assert!(!durable_build_state_exists(ds, &ikb).await?);
 	assert_eq!(durable_queue_all_generations_count(ds, &ikb).await?, 0);
+	assert_eq!(
+		durable_ticket_counter_count(ds, &ikb).await?,
+		0,
+		"a retired or rolled-back build must not strand its generation ticket counter"
+	);
 	assert_eq!(index_prefix_key_count(ds, ns, db, table, ix).await?, 0);
 	assert!(local_builder_for_key(ds, ns, db, table, ix).await?.is_none());
 	Ok(())
@@ -635,6 +640,14 @@ async fn durable_queue_generation_count(
 	let br = catch!(tx, tx.keys(ikb.new_br_range(generation)?, u32::MAX, 0, None).await);
 	tx.cancel().await?;
 	Ok(bg.len() + bp.len() + br.len())
+}
+
+/// Count the ticket counters left behind across every generation of an index.
+async fn durable_ticket_counter_count(ds: &Datastore, ikb: &IndexKeyBase) -> Result<usize> {
+	let tx = ds.transaction(TransactionType::Read).await?;
+	let bt = catch!(tx, tx.keys(ikb.new_bt_all_generations_range()?, u32::MAX, 0, None).await);
+	tx.cancel().await?;
+	Ok(bt.len())
 }
 
 async fn durable_queue_all_generations_count(ds: &Datastore, ikb: &IndexKeyBase) -> Result<usize> {
@@ -2770,6 +2783,10 @@ async fn writer_admission_batches_reservations_per_user_transaction() -> Result<
 	};
 	let tx = ds.transaction(TransactionType::Write).await?;
 	tx.set_key(&ikb.new_bs_key(), &building).await?;
+	// Give the generation its ticket counter, so admission takes the same path
+	// production does. Without it the fabricated state looks like a generation
+	// predating the counter and the whole test runs on the legacy fallback.
+	tx.set_key(&ikb.new_bt_key(generation), &0u64).await?;
 	tx.commit().await?;
 
 	// Single user transaction that inserts five records — all go through
@@ -2792,12 +2809,9 @@ async fn writer_admission_batches_reservations_per_user_transaction() -> Result<
 
 	// Exactly one ticket should have been allocated by the whole user
 	// transaction's batch.
-	let tx = ds.transaction(TransactionType::Read).await?;
-	let after: IndexBuildState =
-		tx.get_key(&ikb.new_bs_key(), None).await?.expect("build state should exist");
-	tx.cancel().await?;
 	assert_eq!(
-		after.next_ticket, 1,
+		durable_ticket_counter(&ds, &ikb, generation).await?,
+		Some(1),
 		"a single user transaction must consume exactly one durable ticket regardless of mutation count"
 	);
 
@@ -2864,6 +2878,9 @@ async fn writer_admission_cancelled_batch_clears_durable_queue() -> Result<()> {
 	};
 	let tx = ds.transaction(TransactionType::Write).await?;
 	tx.set_key(&ikb.new_bs_key(), &building).await?;
+	// Give the generation its ticket counter, so admission takes the same path
+	// production does rather than the legacy `next_ticket` fallback.
+	tx.set_key(&ikb.new_bt_key(generation), &0u64).await?;
 	tx.commit().await?;
 
 	// Single user transaction that issues three indexed mutations then
@@ -2883,13 +2900,15 @@ async fn writer_admission_cancelled_batch_clears_durable_queue() -> Result<()> {
 	.await?;
 
 	let tx = ds.transaction(TransactionType::Read).await?;
-	let after: IndexBuildState =
-		tx.get_key(&ikb.new_bs_key(), None).await?.expect("build state should exist");
 	let bg_keys = tx.keys(ikb.new_bg_range(generation)?, u32::MAX, 0, None).await?;
 	let bp_keys = tx.keys(ikb.new_bp_range(generation)?, u32::MAX, 0, None).await?;
 	let br_keys = tx.keys(ikb.new_br_range(generation)?, u32::MAX, 0, None).await?;
 	tx.cancel().await?;
-	assert_eq!(after.next_ticket, 1, "cancelled batch still consumes one durable ticket");
+	assert_eq!(
+		durable_ticket_counter(&ds, &ikb, generation).await?,
+		Some(1),
+		"cancelled batch still consumes one durable ticket"
+	);
 	assert!(
 		bg_keys.is_empty(),
 		"cancelled user transaction must not leave any `!bg` entries; found {}",
@@ -5831,5 +5850,717 @@ async fn takeover_installs_generation_before_draining_reservations() -> Result<(
 	tx.cancel().await?;
 	assert!(stale_bg.is_empty(), "stale generation-1 queue entries should be wiped");
 	assert!(stale_br.is_empty(), "no reservations should remain after the takeover");
+	Ok(())
+}
+
+/// Budget for the under-load phase of [`concurrent_build_under_table_writes`].
+///
+/// Every arm shares it: a control given a larger budget than the arms it is a
+/// control for stops establishing that the harness completes a build at this
+/// write rate. Unstarved runs finish the scan in a couple of seconds, so the
+/// margin is for loaded CI. These are liveness tests, not throughput tests.
+const BUILD_UNDER_WRITES_TIMEOUT: Duration = Duration::from_secs(45);
+
+/// Budget for publishing once the writer has stopped.
+const BUILD_PUBLISH_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Outcome of a [`concurrent_build_under_table_writes`] run.
+struct BuildUnderWritesOutcome {
+	/// Whether the scan covered every seeded record while the writer ran.
+	scan_progressed: bool,
+	/// Whether the index published `Online` once the writer stopped.
+	published: bool,
+	/// Highest `initial` counter the durable state reported.
+	max_initial: u64,
+	/// Highest writer ticket allocated while the build was still `Building`.
+	/// Zero means the writes never produced an index mutation, so they never
+	/// entered admission. Sampling stops at `Closing`, whose transition
+	/// advances the counter itself to fence in-flight allocations.
+	max_ticket: u64,
+	/// Writes the writer committed while the build ran.
+	committed: u64,
+}
+
+/// Drive a concurrent FULLTEXT build while the table it indexes takes writes at
+/// a sustained rate, and report whether the initial scan ever completes.
+///
+/// `writer_sql` decides the shape of the concurrent write. The build is only
+/// defined once the writer is demonstrably committing, so the scan starts
+/// against established load instead of racing the writer's ramp-up. The writer
+/// runs for the whole build and is stopped before the assertions.
+async fn concurrent_build_under_table_writes(
+	writer_sql: fn(u64) -> String,
+	scan_timeout: Duration,
+) -> Result<BuildUnderWritesOutcome> {
+	/// Records seeded before the build starts. An unstarved build indexes
+	/// these in a couple of seconds, so the timeout is a wide margin.
+	const RECORDS: usize = 4000;
+	/// Writes the writer must commit before the build is defined.
+	const WRITES_BEFORE_BUILD: u64 = 50;
+
+	let (ds, session) = new_index_test_ds().await?;
+	let ds = Arc::new(ds);
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE doc SCHEMALESS;
+			DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase;
+			",
+	)
+	.await?;
+	execute_all(
+		&ds,
+		&session,
+		&format!(
+			"CREATE |doc:1..{RECORDS}| SET text = string::repeat('lorem ipsum dolor sit amet \
+			 consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore ', 4) + \
+			 <string>id RETURN NONE"
+		),
+	)
+	.await?;
+
+	let stop = Arc::new(AtomicBool::new(false));
+	let committed = Arc::new(AtomicU64::new(0));
+	let writer = {
+		let ds = Arc::clone(&ds);
+		let session = session.clone();
+		let stop = Arc::clone(&stop);
+		let committed = Arc::clone(&committed);
+		tokio::spawn(async move {
+			let mut n = 0u64;
+			while !stop.load(Ordering::Relaxed) {
+				n += 1;
+				// Statement-level conflicts are expected under this load and are
+				// not what these tests are about; only committed writes count as
+				// pressure the builder has to make progress against.
+				if execute_all(&ds, &session, &writer_sql(n)).await.is_ok() {
+					committed.fetch_add(1, Ordering::Relaxed);
+				}
+				sleep(Duration::from_millis(1)).await;
+			}
+		})
+	};
+
+	timeout(Duration::from_secs(10), async {
+		while committed.load(Ordering::Relaxed) < WRITES_BEFORE_BUILD {
+			sleep(Duration::from_millis(5)).await;
+		}
+	})
+	.await
+	.map_err(|_| anyhow::anyhow!("the writer never reached the pre-build write threshold"))?;
+
+	// The writer touches the table definition's cached index list, so the
+	// schema statement can hit statement-level conflicts under this load.
+	execute_all_retrying_conflicts(
+		&ds,
+		&session,
+		"DEFINE INDEX ft ON doc FIELDS text FULLTEXT ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS \
+		 CONCURRENTLY",
+	)
+	.await?;
+
+	let (ns, db, table, ix) = get_table_index(&ds, "doc", "ft").await?;
+	let ikb = IndexKeyBase::new(ns, db, table, ix.index_id);
+
+	// Phase one, the starvation check: with the writer at full rate the scan
+	// must cover at least every seeded record. A starved build sits at zero.
+	//
+	// The threshold is a count rather than completion because an insert writer
+	// keeps extending the scanned range, so "the scan finished" is not a fixed
+	// target and a fast enough writer can outrun it indefinitely on slower
+	// hardware. Covering the seeded records is bounded and is what
+	// distinguishes progress from starvation.
+	let mut max_initial = 0u64;
+	let mut max_ticket = 0u64;
+	let progressed = timeout(scan_timeout, async {
+		loop {
+			let state = durable_build_state(&ds, &ikb).await?;
+			max_initial = max_initial.max(state.initial.unwrap_or(0));
+			// Tickets are allocated from the generation's `!bt` counter;
+			// `next_ticket` only advances for a generation that predates it.
+			// Reading the build state alone would report zero for every
+			// admission and make the control assertion below vacuous.
+			//
+			// Only sample while the build is still `Building`: the transition
+			// out of it advances the counter itself, to fence allocations in
+			// flight, and that bump is not a writer admission.
+			if state.phase == IndexBuildPhase::Building {
+				let allocated = durable_ticket_counter(&ds, &ikb, state.generation)
+					.await?
+					.unwrap_or(state.next_ticket);
+				max_ticket = max_ticket.max(allocated);
+			}
+			if max_initial >= RECORDS as u64 || state.phase == IndexBuildPhase::Online {
+				return Ok::<_, anyhow::Error>(());
+			}
+			sleep(Duration::from_millis(20)).await;
+		}
+	})
+	.await;
+
+	stop.store(true, Ordering::Relaxed);
+	let _ = writer.await;
+
+	// `timeout` nests the polling result inside its own, so only the outer
+	// error means "it did not happen in time". A failure reading durable state
+	// is a broken test rather than a starved build, and collapsing the two
+	// would let these tests pass without ever observing progress.
+	let scan_progressed = match progressed {
+		Ok(Ok(())) => true,
+		Ok(Err(err)) => return Err(err),
+		Err(_elapsed) => false,
+	};
+
+	// Phase two: with the writer stopped the build must reach `Online`. The
+	// writer is stopped first so the target is bounded — `Closing` under live
+	// write pressure is covered deterministically by
+	// `closing_transition_fences_in_flight_ticket_allocation`, and folding both
+	// into one timing-sensitive test is what made this one fragile on slower
+	// runners.
+	let published = timeout(BUILD_PUBLISH_TIMEOUT, async {
+		loop {
+			let state = durable_build_state(&ds, &ikb).await?;
+			max_initial = max_initial.max(state.initial.unwrap_or(0));
+			if state.phase == IndexBuildPhase::Online {
+				return Ok::<_, anyhow::Error>(());
+			}
+			sleep(Duration::from_millis(20)).await;
+		}
+	})
+	.await;
+	let published = match published {
+		Ok(Ok(())) => true,
+		Ok(Err(err)) => return Err(err),
+		Err(_elapsed) => false,
+	};
+
+	let committed = committed.load(Ordering::Relaxed);
+	assert!(
+		committed > 100,
+		"the writer only committed {committed} writes — too little load for this test to mean \
+		 anything"
+	);
+	Ok(BuildUnderWritesOutcome {
+		scan_progressed,
+		published,
+		max_initial,
+		max_ticket,
+		committed,
+	})
+}
+
+/// Control for the two starvation tests below: writes that do not touch an
+/// indexed field must not disturb the build.
+///
+/// Such a write produces no index mutation, so it never enters writer
+/// admission and never allocates a ticket — asserted here, so the test cannot
+/// silently become a vacuous "writes are harmless" claim. It establishes that
+/// the harness drives a build to completion at this write rate, which is what
+/// makes the two failures below attributable to admission rather than to load.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_build_is_unaffected_by_writes_that_miss_the_index() -> Result<()> {
+	let outcome = concurrent_build_under_table_writes(
+		|n| format!("UPDATE doc:{} SET untracked = {n} RETURN NONE", n % 25 + 1),
+		BUILD_UNDER_WRITES_TIMEOUT,
+	)
+	.await?;
+	assert_eq!(
+		outcome.max_ticket, 0,
+		"writes that miss the index must not enter admission (allocated {} tickets)",
+		outcome.max_ticket
+	);
+	assert!(
+		outcome.scan_progressed,
+		"the scan stalled under {} writes that miss the index: {}/4000 records",
+		outcome.committed, outcome.max_initial
+	);
+	assert!(outcome.published, "the build did not publish after the writer stopped");
+	Ok(())
+}
+
+/// A concurrent index build must keep making progress while the table it is
+/// indexing takes writes that mutate the indexed field.
+///
+/// Every write that produces an index mutation allocates a durable admission
+/// ticket, and that allocation is a compare-and-swap on the index's single
+/// `!bs` build-state key. The builder's initial-scan batch reads and
+/// CAS-writes that same key twice in one transaction — the ownership heartbeat
+/// before the batch and the progress checkpoint after it — and holds that
+/// transaction open across the whole batch, analysis included. Any admitted
+/// write committing inside that window invalidates the builder's CAS, so the
+/// entire batch is discarded and retried after a fixed backoff.
+///
+/// Once a batch is long relative to the write inter-arrival time the builder
+/// loses every race: the initial scan never commits, the durable counter never
+/// advances, and each failed attempt still pays the full analysis and
+/// write-set cost for the batch. The stall also makes the generation look
+/// abandoned, because the heartbeat rides on the discarded transaction — a
+/// starved builder never refreshes `owner_heartbeat_at`, so its lease expires
+/// while the task is still running, leaving the generation open to a takeover
+/// that restarts the scan from its last committed checkpoint, or from zero
+/// when no batch of that generation ever committed.
+///
+/// Asserted in two phases. With the writer at full rate the scan must cover
+/// every seeded record — a starved build sits at zero, which is the defect.
+/// The writer is then stopped and the build must reach `Online`, which covers
+/// `Closing`, the reservation drain and the publish.
+///
+/// Progress is a count rather than "the scan finished" because an insert writer
+/// keeps extending the scanned range, so completion is not a fixed target and a
+/// fast writer can outrun it indefinitely on slower hardware.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_build_publishes_under_indexed_updates() -> Result<()> {
+	let outcome = concurrent_build_under_table_writes(
+		|n| format!("UPDATE doc:{} SET text = 'changed payload {n}' RETURN NONE", n % 25 + 1),
+		BUILD_UNDER_WRITES_TIMEOUT,
+	)
+	.await?;
+	assert!(
+		outcome.max_ticket > 0,
+		"indexed updates must enter writer admission, otherwise this test exercises nothing"
+	);
+	assert!(
+		outcome.scan_progressed,
+		"the scan stalled under {} indexed updates ({} tickets allocated): it indexed {}/4000 \
+		 records",
+		outcome.committed, outcome.max_ticket, outcome.max_initial
+	);
+	assert!(outcome.published, "the build did not publish after the writer stopped");
+	Ok(())
+}
+
+/// The insert-shaped counterpart of
+/// [`concurrent_build_publishes_under_indexed_updates`], and the
+/// shape reported from production: `RELATE` inserts new edge records, so a
+/// RELATION table under normal traffic starves any build against it.
+///
+/// Kept separate because an insert also extends the scanned key range and
+/// creates a fresh doc-ID mapping, so it exercises more of the write path than
+/// an in-place update of an indexed field.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_build_publishes_under_indexed_inserts() -> Result<()> {
+	let outcome = concurrent_build_under_table_writes(
+		|n| format!("CREATE doc:w{n} SET text = 'writer payload {n}' RETURN NONE"),
+		BUILD_UNDER_WRITES_TIMEOUT,
+	)
+	.await?;
+	assert!(
+		outcome.max_ticket > 0,
+		"indexed inserts must enter writer admission, otherwise this test exercises nothing"
+	);
+	assert!(
+		outcome.scan_progressed,
+		"the scan stalled under {} indexed inserts ({} tickets allocated): it indexed {}/4000 \
+		 records",
+		outcome.committed, outcome.max_ticket, outcome.max_initial
+	);
+	assert!(outcome.published, "the build did not publish after the writer stopped");
+	Ok(())
+}
+
+/// Read the ticket counter of one build generation, if it exists.
+async fn durable_ticket_counter(
+	ds: &Datastore,
+	ikb: &IndexKeyBase,
+	generation: BuildGeneration,
+) -> Result<Option<BuildTicket>> {
+	let tx = ds.transaction(TransactionType::Read).await?;
+	let counter = catch!(tx, tx.get_key(&ikb.new_bt_key(generation), None).await);
+	tx.cancel().await?;
+	Ok(counter)
+}
+
+/// The active generation always owns a `!bt` ticket counter, and installing the
+/// next generation removes the previous one.
+///
+/// Writer admission compare-and-swaps this counter, so both halves matter: the
+/// key must exist for a writer to CAS, and the flip must remove it under a
+/// conditional delete so an in-flight allocation conflicts instead of landing a
+/// reservation against a generation that is no longer current.
+#[tokio::test(flavor = "multi_thread")]
+async fn generation_flip_rotates_the_ticket_counter() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:one SET email = 'one@example.com' RETURN NONE;
+			DEFINE INDEX test ON user FIELDS email;
+			",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "user", "test").await?;
+	let ikb = IndexKeyBase::new(ns, db, table, ix.index_id);
+
+	let first = durable_build_state(&ds, &ikb).await?.generation;
+	assert!(
+		durable_ticket_counter(&ds, &ikb, first).await?.is_some(),
+		"the active generation must own a ticket counter for admission to CAS"
+	);
+
+	execute_all(&ds, &session, "REBUILD INDEX test ON user").await?;
+
+	let second = durable_build_state(&ds, &ikb).await?.generation;
+	assert_eq!(second, first.saturating_add(1));
+	assert!(
+		durable_ticket_counter(&ds, &ikb, second).await?.is_some(),
+		"the rebuilt generation must own a ticket counter"
+	);
+	assert!(
+		durable_ticket_counter(&ds, &ikb, first).await?.is_none(),
+		"the flip must remove the previous generation's counter, which is what fences writers \
+		 still admitting under it"
+	);
+
+	// Retiring the index clears every generation's counter along with the
+	// rest of the durable build state.
+	execute_all(&ds, &session, "REMOVE INDEX test ON user").await?;
+	assert!(durable_ticket_counter(&ds, &ikb, second).await?.is_none());
+	Ok(())
+}
+
+/// A generation that predates the `!bt` counter keeps allocating tickets from
+/// `!bs.next_ticket`.
+///
+/// This is the upgrade path: a build already in flight when the node restarts
+/// on a version that owns a counter has no `!bt`, and must keep issuing tickets
+/// exactly as before rather than restarting the sequence from zero and reusing
+/// reservations. Such a build only moves to the counter at its next generation.
+#[tokio::test(flavor = "multi_thread")]
+async fn admission_falls_back_to_build_state_ticket_without_a_counter() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:one SET email = 'one@example.com' RETURN NONE;
+			DEFINE INDEX test ON user FIELDS email;
+			",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "user", "test").await?;
+	let ikb = IndexKeyBase::new(ns, db, table, ix.index_id);
+
+	// Recreate a pre-counter build: `Building` with a ticket sequence already
+	// part-way through, and no `!bt` for the generation.
+	let generation = durable_build_state(&ds, &ikb).await?.generation;
+	let mut legacy = durable_build_state_for_phase(IndexBuildPhase::Building, generation, None);
+	legacy.next_ticket = 7;
+	set_durable_build_state(&ds, &ikb, legacy).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.del_key(&ikb.new_bt_key(generation)).await?;
+	tx.commit().await?;
+
+	execute_all_retrying_conflicts(
+		&ds,
+		&session,
+		"UPDATE user:one SET email = 'changed@example.com' RETURN NONE",
+	)
+	.await?;
+
+	let state = durable_build_state(&ds, &ikb).await?;
+	assert_eq!(
+		state.next_ticket, 8,
+		"a generation without a counter must advance the build state's own ticket"
+	);
+	assert!(
+		durable_ticket_counter(&ds, &ikb, generation).await?.is_none(),
+		"the legacy path must not create a counter mid-generation: nodes still running the \
+		 previous version would keep allocating from `!bs.next_ticket` and collide with it"
+	);
+	Ok(())
+}
+
+/// Entering `Closing` must invalidate a ticket allocation that is already in
+/// flight.
+///
+/// Admission reads the phase, allocates from the generation's counter, and
+/// commits its `!br` reservation. If `Closing` could commit in between, the
+/// reservation could land after the drain that follows had already seen an
+/// empty range, and the writer's fence — which queues on `Closing` — would
+/// write a `!bg` entry after the final replay pass. The build would then
+/// publish `Online` having never applied that mutation.
+///
+/// The phase transition therefore rewrites the counter in its own transaction,
+/// so the in-flight allocation loses the race and retries against `Closing`.
+#[tokio::test(flavor = "multi_thread")]
+async fn closing_transition_fences_in_flight_ticket_allocation() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:one SET email = 'one@example.com' RETURN NONE;
+			DEFINE INDEX test ON user FIELDS email;
+			",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "user", "test").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	// Strand a `Building` generation with an expired lease and a counter that
+	// has already issued tickets, then take it over so the transition below is
+	// owned by this builder.
+	const GENERATION: BuildGeneration = 9;
+	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
+	let mut state = durable_build_state_for_phase(IndexBuildPhase::Building, GENERATION, None);
+	state.updated_at = expired;
+	state.owner_heartbeat_at = Some(expired);
+	set_durable_build_state(&ds, &ikb, state).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.set_key(&ikb.new_bt_key(GENERATION), &5u64).await?;
+	tx.commit().await?;
+
+	let build = new_building_for_index(&ds, &session, ns, db, &table, Arc::clone(&ix)).await?;
+	let acquired = build
+		.acquire_build_state()
+		.await?
+		.expect("the expired generation should be available for takeover");
+	assert_eq!(acquired.generation, GENERATION);
+
+	// A writer mid-admission: it has allocated ticket 5 but not yet committed.
+	let writer = ds.transaction(TransactionType::Write).await?;
+	let bt = ikb.new_bt_key(GENERATION);
+	let ticket = catch!(writer, writer.get_key(&bt, None).await).expect("counter should exist");
+	assert_eq!(ticket, 5);
+	catch!(writer, writer.put_compare_key(&bt, &(ticket + 1), Some(&ticket)).await);
+
+	// The build closes while that allocation is still open.
+	build.mark_durable_closing(GENERATION).await?;
+	assert_eq!(durable_build_state(&ds, &ikb).await?.phase, IndexBuildPhase::Closing);
+
+	assert!(
+		writer.commit().await.is_err(),
+		"a ticket allocation in flight across the `Closing` transition must not commit: its \
+		 reservation could land after the drain and be missed"
+	);
+	Ok(())
+}
+
+/// Drive a takeover of a fabricated `Building` generation to completion and
+/// return the result, so the publish-time checks can be exercised directly.
+#[allow(clippy::too_many_arguments)]
+async fn run_takeover_of_generation(
+	ds: &Datastore,
+	session: &Session,
+	ns: NamespaceId,
+	db: DatabaseId,
+	table: &TableName,
+	ix: Arc<IndexDefinition>,
+	generation: BuildGeneration,
+	next_ticket: BuildTicket,
+	counter: Option<BuildTicket>,
+) -> Result<Result<()>> {
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
+	let mut state = durable_build_state_for_phase(IndexBuildPhase::Building, generation, None);
+	state.next_ticket = next_ticket;
+	state.initial_complete = false;
+	state.updated_at = expired;
+	state.owner_heartbeat_at = Some(expired);
+	set_durable_build_state(ds, &ikb, state).await?;
+
+	let tx = ds.transaction(TransactionType::Write).await?;
+	match counter {
+		Some(counter) => tx.set_key(&ikb.new_bt_key(generation), &counter).await?,
+		None => tx.del_key(&ikb.new_bt_key(generation)).await?,
+	}
+	tx.commit().await?;
+
+	let build = new_building_for_index(ds, session, ns, db, table, ix).await?;
+	let acquired = build
+		.acquire_build_state()
+		.await?
+		.expect("the expired generation should be available for takeover");
+	assert_eq!(acquired.generation, generation);
+	Ok(build.run_acquired(acquired).await)
+}
+
+/// A generation whose tickets were issued by two different allocators must not
+/// be published.
+///
+/// A `!bt` counter alongside a non-zero `next_ticket` is proof that a node
+/// predating the counter allocated against this generation. The two sequences
+/// both start at zero and never conflict, so they can issue the same ticket and
+/// one writer's queued mutation silently overwrites the other's. Publishing
+/// would leave an index reporting `ready` while missing writes, so the build
+/// fails and points at `REBUILD INDEX` instead.
+#[tokio::test(flavor = "multi_thread")]
+async fn cross_version_ticket_allocation_blocks_publishing() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:one SET email = 'one@example.com' RETURN NONE;
+			DEFINE INDEX test ON user FIELDS email;
+			",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "user", "test").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	let result =
+		run_takeover_of_generation(&ds, &session, ns, db, &table, ix, 4, 3, Some(7)).await?;
+
+	let err = result.expect_err("a generation with two ticket allocators must not publish");
+	let message = err.to_string();
+	assert!(
+		message.contains("REBUILD INDEX test ON user"),
+		"the failure must tell the operator how to recover, got: {message}"
+	);
+	assert_ne!(
+		durable_build_state(&ds, &ikb).await?.phase,
+		IndexBuildPhase::Online,
+		"the index must not be queryable when its queue may have lost mutations"
+	);
+	Ok(())
+}
+
+/// A generation that predates the counter still publishes normally.
+///
+/// Such a build legitimately advances `next_ticket`, and has no `!bt`. Treating
+/// that as a cross-version collision would fail every build that was already
+/// running when the node was upgraded.
+#[tokio::test(flavor = "multi_thread")]
+async fn legacy_generation_with_advanced_ticket_still_publishes() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:one SET email = 'one@example.com' RETURN NONE;
+			DEFINE INDEX test ON user FIELDS email;
+			",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "user", "test").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	run_takeover_of_generation(&ds, &session, ns, db, &table, ix, 4, 3, None).await??;
+
+	assert_eq!(durable_build_state(&ds, &ikb).await?.phase, IndexBuildPhase::Online);
+	Ok(())
+}
+
+/// Installing a new generation must invalidate a ticket allocation that is
+/// already in flight against the previous one.
+///
+/// The flip removes the previous generation's counter under a conditional
+/// delete, in the same transaction that installs the new state. That is the
+/// whole fence: allocation compare-and-swaps that counter, so a writer holding
+/// an open allocation loses and retries against the new generation.
+///
+/// Without it the writer's `!br` can commit *after* the flip — in the window
+/// while `wait_for_prior_generation_reservations` is draining — so the drain
+/// can return on an empty range that the late reservation then repopulates.
+/// The stale-queue wipe that follows destroys the writer's `!bg` while its
+/// main-table write survives, and the new scan may already have passed that
+/// record.
+///
+/// The later sweep in `delete_stale_build_queues` also removes the counter, so
+/// a test that only checks it is eventually gone passes either way. This one
+/// asserts the timing: gone *by the time the flip commits*.
+#[tokio::test(flavor = "multi_thread")]
+async fn generation_flip_fences_in_flight_ticket_allocation() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:one SET email = 'one@example.com' RETURN NONE;
+			DEFINE INDEX test ON user FIELDS email;
+			",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "user", "test").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	// An errored generation 1 that still owns its counter, plus a live
+	// reservation so the takeover's drain blocks after the flip. That pause is
+	// the window a late allocation would otherwise slip through.
+	let br_key = ikb.new_br_key(1, 0);
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.set_key(
+		&ikb.new_bs_key(),
+		&IndexBuildState {
+			generation: 1,
+			phase: IndexBuildPhase::Error,
+			owner: None,
+			next_ticket: 0,
+			initial_complete: false,
+			updated_at: Utc::now(),
+			owner_heartbeat_at: None,
+			error: Some("seeded test failure".to_string()),
+			report_status: Some(IndexBuildReportStatus::Error),
+			initial: None,
+			updated: None,
+			pending: None,
+			initial_cursor: None,
+		},
+	)
+	.await?;
+	tx.set_key(&ikb.new_bt_key(1), &5u64).await?;
+	tx.set_key(
+		&br_key,
+		&IndexBuildReservation {
+			node: ds.id(),
+			expires_at: Utc::now() + chrono::Duration::seconds(BUILD_RESERVATION_TTL_SECS),
+		},
+	)
+	.await?;
+	tx.commit().await?;
+
+	// A writer mid-admission against generation 1: ticket read, CAS staged,
+	// not yet committed.
+	let writer = ds.transaction(TransactionType::Write).await?;
+	let bt = ikb.new_bt_key(1);
+	let ticket = catch!(writer, writer.get_key(&bt, None).await).expect("counter should exist");
+	catch!(writer, writer.put_compare_key(&bt, &(ticket + 1), Some(&ticket)).await);
+
+	// The takeover installs generation 2 and then blocks draining the live
+	// reservation.
+	let building =
+		Arc::new(new_building_for_index(&ds, &session, ns, db, &table, Arc::clone(&ix)).await?);
+	let acquire = {
+		let building = Arc::clone(&building);
+		tokio::spawn(async move { building.acquire_build_state().await })
+	};
+	timeout(Duration::from_secs(5), async {
+		while durable_build_state(&ds, &ikb).await?.generation != 2 {
+			sleep(Duration::from_millis(10)).await;
+		}
+		Ok::<_, anyhow::Error>(())
+	})
+	.await
+	.map_err(|_| anyhow::anyhow!("takeover never installed the next generation"))??;
+	assert!(
+		!acquire.is_finished(),
+		"the takeover should still be draining, which is the window under test"
+	);
+
+	assert!(
+		writer.commit().await.is_err(),
+		"an allocation in flight across the generation flip must not commit: its reservation \
+		 would land after the drain and its queued mutation would be wiped"
+	);
+
+	// Let the takeover finish so the task does not outlive the test.
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.del_key(&br_key).await?;
+	tx.commit().await?;
+	timeout(Duration::from_secs(5), acquire)
+		.await
+		.map_err(|_| {
+			anyhow::anyhow!("takeover did not finish after the reservation was released")
+		})???
+		.expect("takeover should acquire the new generation");
 	Ok(())
 }

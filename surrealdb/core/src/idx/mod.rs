@@ -60,6 +60,7 @@ use crate::key::table::bg::{Bg, BgGenerationPrefix, BgPrefix, BgTicketPrefix};
 use crate::key::table::bp::{Bp, BpGenerationPrefix, BpIdPrefix};
 use crate::key::table::br::{Br, BrGenerationPrefix, BrTicketPrefix};
 use crate::key::table::bs::Bs;
+use crate::key::table::bt::{Bt, BtGenerationPrefix};
 use crate::key::{KVKey, KVRange, Key, KeyRange};
 use crate::kvs::index::{
 	AppendingId, BatchId, BuildGeneration, BuildTicket, BuildTicketMutationSeq,
@@ -539,6 +540,42 @@ impl IndexKeyBase {
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 		}
+	}
+
+	/// Key storing the writer-admission ticket counter for a build generation.
+	pub(crate) fn new_bt_key(&self, generation: BuildGeneration) -> Bt<'_> {
+		Bt {
+			prefix: DatabaseRoot {
+				ns: self.0.ns,
+				db: self.0.db,
+			},
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+			generation,
+		}
+	}
+
+	/// Range covering the ticket counter of one build generation.
+	pub(crate) fn new_bt_range(&self, generation: BuildGeneration) -> Result<KeyRange<'static>> {
+		let start = self.new_bt_key(generation).encode_key()?;
+		let end = start.clone().next();
+		Ok(KeyRange {
+			start,
+			end,
+		})
+	}
+
+	/// Range covering the ticket counters of every generation of this index.
+	pub(crate) fn new_bt_all_generations_range(&self) -> Result<KeyRange<'static>> {
+		BtGenerationPrefix {
+			prefix: DatabaseRoot {
+				ns: self.0.ns,
+				db: self.0.db,
+			},
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+		}
+		.encode_range()
 	}
 
 	/// Key storing one durable writer reservation for a build generation.

@@ -68,9 +68,10 @@ pub(crate) enum IndexBuildPhase {
 
 /// Durable per-index build state shared by all nodes.
 ///
-/// The state is used as an admission counter for writers and as a fencing token
-/// for the builder. Writers can update `updated_at` while allocating tickets;
-/// only builders refresh `owner_heartbeat_at`, which controls lease expiry.
+/// The state is the fencing token for the builder and the phase/generation
+/// source for writer admission. Writers only update this record on the legacy
+/// `next_ticket` path; only builders refresh `owner_heartbeat_at`, which
+/// controls lease expiry.
 #[revisioned(revision = 4)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub(crate) struct IndexBuildState {
@@ -80,7 +81,12 @@ pub(crate) struct IndexBuildState {
 	pub(crate) phase: IndexBuildPhase,
 	/// Concrete builder task that currently owns this generation.
 	pub(crate) owner: Option<Uuid>,
-	/// Next writer ticket to allocate while the build is in `Building`.
+	/// Next writer ticket for generations that predate the `!bt` counter.
+	///
+	/// Live generations keep their ticket counter on `!bt` so admission never
+	/// writes this record. This field is only read — and only advanced — for a
+	/// generation installed before that counter existed, which has no `!bt`;
+	/// such a build keeps allocating here until its next generation.
 	pub(crate) next_ticket: BuildTicket,
 	/// Whether initial record scanning has completed for this generation.
 	pub(crate) initial_complete: bool,
@@ -230,6 +236,7 @@ pub(super) async fn delete_durable_build_queues(
 	tx.delr(ikb.new_bg_all_generations_range()?).await?;
 	tx.delr(ikb.new_bp_all_generations_range()?).await?;
 	tx.delr(ikb.new_br_all_generations_range()?).await?;
+	tx.delr(ikb.new_bt_all_generations_range()?).await?;
 	Ok(())
 }
 
@@ -239,8 +246,9 @@ pub(super) async fn delete_durable_build_queues(
 /// Used by a new-generation takeover after the next generation's state has
 /// been installed and the prior generations' reservations have drained: from
 /// that point no writer can re-create entries under the old generations
-/// (ticket allocation CASes `!bs` and the admission fence rejects generation
-/// mismatches), so the deletion is stable. Index retirement uses
+/// (the flip removed the previous generation's `!bt` counter under a
+/// conditional delete, and the admission fence rejects generation mismatches),
+/// so the deletion is stable. Index retirement uses
 /// [`delete_durable_build_queues`] instead, which clears every generation.
 pub(super) async fn delete_stale_build_queues(
 	tx: &Transaction,
@@ -256,6 +264,14 @@ pub(super) async fn delete_stale_build_queues(
 	let mut br = ikb.new_br_all_generations_range()?;
 	br.end = ikb.new_br_range(below)?.start;
 	tx.delr(br).await?;
+	// The flip that installed `below` already removed its immediate
+	// predecessor's ticket counter under a conditional delete, which is what
+	// fenced the writers still admitting to it. This sweeps up counters left
+	// by generations further back, whose writers were fenced by their own
+	// flips and can no longer allocate.
+	let mut bt = ikb.new_bt_all_generations_range()?;
+	bt.end = ikb.new_bt_range(below)?.start;
+	tx.delr(bt).await?;
 	Ok(())
 }
 

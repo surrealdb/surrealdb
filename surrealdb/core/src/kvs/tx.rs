@@ -221,7 +221,7 @@ pub(crate) struct CachedIndexBuildReservationKey {
 /// Cached admission reservation reused across an entire user transaction.
 ///
 /// First admission for an index runs the short reservation transaction
-/// (CAS-incrementing `!bs.next_ticket` and committing `!br`), then stores
+/// (CAS-incrementing the generation's `!bt` counter and committing `!br`), then stores
 /// the resulting `generation`, `ticket`, `initial_complete`, and prepared
 /// release here. Subsequent admissions read the cache, take a fresh
 /// `mutation_seq`, and write a `!bg` keyed by `(generation, ticket, seq)`.
@@ -288,9 +288,11 @@ struct PendingUncommittedIndexBuild {
 
 impl PendingUncommittedIndexBuild {
 	async fn cleanup_once(&self) -> Result<()> {
-		// Stop the local task first. The durable `!bs` delete below is still the
-		// cross-node fence: any in-flight builder write has to read/update that key
-		// in the same transaction before it can commit index data.
+		// Stop the local task first. The durable `!bs` delete below is the
+		// cross-node fence against the builder: any in-flight builder write has to
+		// read/update that key in the same transaction before it can commit index
+		// data. Writer admission is fenced separately, by the `!bt` counter range
+		// deleted alongside it.
 		if let Err(err) = self.builder.remove_index(self.ns, self.db, &self.tb, self.ix).await {
 			tracing::warn!(
 				target: "surrealdb::core::kvs::tx",
@@ -314,6 +316,7 @@ impl PendingUncommittedIndexBuild {
 			tx.tr.delr(ikb.new_bg_all_generations_range()?).await.map_err(Error::from)?;
 			tx.tr.delr(ikb.new_bp_all_generations_range()?).await.map_err(Error::from)?;
 			tx.tr.delr(ikb.new_br_all_generations_range()?).await.map_err(Error::from)?;
+			tx.tr.delr(ikb.new_bt_all_generations_range()?).await.map_err(Error::from)?;
 			tx.tr.delr(index_prefix).await.map_err(Error::from)?;
 			tx.tr.commit().await.map_err(Error::from)?;
 			Ok(())

@@ -501,12 +501,13 @@ impl Building {
 				}
 			}
 			// New-generation takeover. The next generation's state is
-			// installed FIRST: ticket allocation CASes the `!bs` key and the
-			// admission fence rejects generation mismatches, so committing
-			// the new state fences off any further old-generation admissions
-			// (builds in `Error` admit like `Building`). Only after that
-			// fence can the prior-generation reservation drain converge to a
-			// stable empty state; draining before the flip would race a
+			// installed FIRST, in the same transaction that removes the
+			// previous generation's `!bt` ticket counter: allocation
+			// compare-and-swaps that counter, so committing this transaction
+			// fences off any further old-generation admissions (builds in
+			// `Error` admit like `Building`). Only after that fence can the
+			// prior-generation reservation drain converge to a stable empty
+			// state; draining before the flip would race a
 			// writer that reserves between the drain and the state commit —
 			// its queued mutation would be wiped while its main-table write
 			// could land after the new initial scan had already passed the
@@ -539,6 +540,22 @@ impl Building {
 				pending: None,
 				initial_cursor: None,
 			};
+			// Fence writers still admitting under the previous generation.
+			// Removing its ticket counter with a read-then-write delete
+			// conflicts with any concurrent allocation, so once this flip
+			// commits no further old-generation reservation can be created —
+			// which is what makes the prior-generation drain below converge on
+			// a stable empty state. A blind delete would not conflict on
+			// last-writer-wins backends.
+			if let Some(previous) = existing.as_ref().map(|s| s.generation) {
+				let previous_bt = self.ikb.new_bt_key(previous);
+				if let Some(current) = tx.get_key(&previous_bt, None).await? {
+					tx.del_compare_key(&previous_bt, Some(&current)).await?;
+				}
+			}
+			// Every active generation owns a counter, so writer admission always
+			// compare-and-swaps a key that is present.
+			tx.set_key(&self.ikb.new_bt_key(generation), &0).await?;
 			let res = tx.put_compare_key(&state_key, &state, existing.as_ref()).await;
 			match res {
 				Ok(()) => {
@@ -711,7 +728,27 @@ impl Building {
 	async fn update_owned_build_state<F>(
 		&self,
 		generation: BuildGeneration,
+		update: F,
+	) -> Result<IndexBuildState>
+	where
+		F: FnMut(&mut IndexBuildState),
+	{
+		self.update_owned_build_state_inner(generation, update, false).await
+	}
+
+	/// [`Self::update_owned_build_state`], additionally advancing the
+	/// generation's ticket counter in the same transaction when
+	/// `fence_ticket_allocation` is set.
+	///
+	/// Writer admission compare-and-swaps that key, so an allocation that has
+	/// read the current phase but not yet committed conflicts with this
+	/// transition and retries against the phase it publishes. The ticket it
+	/// burns is never issued, which is harmless.
+	async fn update_owned_build_state_inner<F>(
+		&self,
+		generation: BuildGeneration,
 		mut update: F,
+		fence_ticket_allocation: bool,
 	) -> Result<IndexBuildState>
 	where
 		F: FnMut(&mut IndexBuildState),
@@ -743,6 +780,29 @@ impl Building {
 			} else {
 				None
 			};
+			if fence_ticket_allocation {
+				let bt = self.ikb.new_bt_key(generation);
+				// A generation predating the counter has none; its admissions
+				// still CAS `!bs`, so the state write below fences them.
+				//
+				// The counter is advanced rather than rewritten: some backends
+				// validate a transaction by value rather than by version, and
+				// there a write that stores the value it read is invisible to
+				// a concurrent allocation, making the fence a silent no-op.
+				// Burning a ticket costs nothing, since tickets are opaque
+				// ordering tokens and nothing depends on them being contiguous.
+				//
+				// The compare reads this transaction's own view, so it cannot
+				// fail; a conflict with a concurrent allocation surfaces at
+				// commit instead, which is where the retry loop handles it.
+				if let Some(ticket) = tx.get_key(&bt, None).await?
+					&& let Err(err) =
+						tx.put_compare_key(&bt, &ticket.saturating_add(1), Some(&ticket)).await
+				{
+					let _ = tx.cancel().await;
+					return Err(err);
+				}
+			}
 			let res = tx.put_compare_key(&state_key, &next, Some(&current)).await;
 			match res {
 				Ok(()) => {
@@ -900,15 +960,72 @@ impl Building {
 	}
 
 	/// Enter `Closing`, which blocks new admissions before the final drain.
+	///
+	/// The transition advances the generation's ticket counter in the same
+	/// transaction. Allocation compare-and-swaps that counter, so an admission
+	/// that read `Building` but has not yet committed conflicts here and
+	/// retries, observing `Closing` and waiting instead of reserving. Without
+	/// that fence a reservation could commit after `Closing` is durable, be
+	/// missed by the drain that follows, and let the build publish `Online`
+	/// without ever replaying the write. The counter is advanced rather than
+	/// rewritten because a same-value write does not conflict on backends that
+	/// validate by value.
 	pub(super) async fn mark_durable_closing(&self, generation: BuildGeneration) -> Result<()> {
-		self.update_owned_build_state(generation, |state| {
-			if state.phase == IndexBuildPhase::Building {
-				state.phase = IndexBuildPhase::Closing;
-				state.error = None;
-				state.report_status = Some(IndexBuildReportStatus::Indexing);
-			}
-		})
+		self.update_owned_build_state_inner(
+			generation,
+			|state| {
+				if state.phase == IndexBuildPhase::Building {
+					state.phase = IndexBuildPhase::Closing;
+					state.error = None;
+					state.report_status = Some(IndexBuildReportStatus::Indexing);
+				}
+			},
+			true,
+		)
 		.await?;
+		Ok(())
+	}
+
+	/// Refuse to publish a generation whose tickets came from two allocators.
+	///
+	/// A generation that owns a `!bt` counter has `next_ticket` initialised to
+	/// zero, and nothing in this version advances it — only the legacy branch
+	/// of writer admission does, and that runs solely when the counter is
+	/// absent. A non-zero value therefore proves that a node predating the
+	/// counter allocated against this generation, from a sequence that also
+	/// starts at zero and cannot conflict with `!bt`. The two can hand out the
+	/// same ticket, in which case one writer's `!br` and `!bg` entries
+	/// overwrite the other's and its mutation is missing from the queue this
+	/// build has just replayed.
+	///
+	/// Publishing would leave a silently incomplete index reporting `ready`.
+	/// Failing instead records a durable error naming the rebuild, which starts
+	/// a fresh generation and rescans the table from the records themselves.
+	///
+	/// This cannot catch a generation that ran to completion entirely on a node
+	/// without the counter, which has no way to know `!bt` exists.
+	async fn ensure_single_ticket_allocator(&self, generation: BuildGeneration) -> Result<()> {
+		let tx = self.new_read_tx().await?;
+		let counter = catch!(tx, tx.get_key(&self.ikb.new_bt_key(generation), None).await);
+		let state = catch!(tx, tx.get_key(&self.ikb.new_bs_key(), None).await);
+		tx.cancel().await?;
+		// A rotated generation means this builder has already lost the build;
+		// `mark_durable_online` fails on its own fence. Reporting a version
+		// skew here would send the operator after the wrong problem.
+		let Some(state) = state.filter(|state| state.generation == generation) else {
+			return Ok(());
+		};
+		if counter.is_some() && state.next_ticket != 0 {
+			return Err(Error::IndexingBuildingCancelled {
+				reason: format!(
+					"Index {} was built while nodes of different versions allocated writer \
+					 tickets for build generation {generation}, so queued writes may have been \
+					 overwritten. Run `REBUILD INDEX {} ON {}` to rebuild it",
+					self.ix.name, self.ix.name, self.ix.table_name
+				),
+			}
+			.into());
+		}
 		Ok(())
 	}
 
@@ -1733,6 +1850,7 @@ impl Building {
 			&mut last_prepare_remove_check,
 		)
 		.await?;
+		self.ensure_single_ticket_allocator(generation).await?;
 		self.mark_durable_online(generation, initial_count, updates_count).await?;
 		// Drain the table's durable pending doc-ID reclaim markers, best-effort:
 		// it runs directly after the `Online` commit — before the fallible

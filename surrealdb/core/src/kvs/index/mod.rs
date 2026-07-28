@@ -10,6 +10,8 @@
 //!
 //! - `!bs`: one build-state record per index, including phase, owner, generation, report counters,
 //!   the initial-scan continuation checkpoint, and error reason.
+//! - `!bt`: the generation-scoped writer-admission ticket counter, kept off `!bs` so an admitted
+//!   write never invalidates the builder's in-flight batch.
 //! - `!bg`: generation-scoped queued mutations that the builder replays.
 //! - `!bp`: per-record pointers to the first queued mutation seen during the initial scan, so the
 //!   scan indexes the writer-observed old state.

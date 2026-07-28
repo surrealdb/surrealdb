@@ -424,10 +424,12 @@ impl Building {
 	/// `!br(prior_gen, ticket)`, that wipe destroys the anchor the protocol
 	/// relies on to keep the writer's commit visible to the new build's
 	/// initial scan. The takeover therefore installs the new generation
-	/// FIRST — ticket allocation CASes `!bs` and the admission fence rejects
-	/// generation mismatches, so no further old-generation reservations can
-	/// be created (builds in `Error` admit like `Building`) — and only then
-	/// drains, which makes the empty state this loop waits for stable.
+	/// FIRST, in the same transaction that removes the previous generation's
+	/// `!bt` ticket counter — allocation compare-and-swaps that counter, and
+	/// the admission fence rejects generation mismatches, so no further
+	/// old-generation reservations can be created (builds in `Error` admit
+	/// like `Building`) — and only then drains, which makes the empty state
+	/// this loop waits for stable.
 	///
 	/// This loop blocks the takeover until every below-`below` `!br` is
 	/// either gone (the writer's user transaction committed, the deferred
