@@ -103,6 +103,7 @@ pub(crate) mod testing {
 
 	#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 	pub(crate) enum RetryableConflictSite {
+		AsyncEventCompletionCommit,
 		ConcurrentIndexInitialCleanup,
 		ConcurrentIndexInitialBatch,
 		ConcurrentIndexReservationRelease,

@@ -440,9 +440,21 @@ impl AsyncEventContext {
 			Ok(_) => {
 				// Event processed successfully, delete the event from the queue.
 				catch!(tx, tx.del(&eq).await);
-				if let Err(e) = tx.commit().await {
-					// If the commit fails, requeue the event and commit that update.
+				#[cfg(test)]
+				let commit_result = if let Err(e) = crate::kvs::testing::maybe_inject_retryable_conflict(
+					crate::kvs::testing::RetryableConflictSite::AsyncEventCompletionCommit,
+					ctx.node_id(),
+				) {
 					tx.cancel().await?;
+					Err(e)
+				} else {
+					tx.commit().await
+				};
+				#[cfg(not(test))]
+				let commit_result = tx.commit().await;
+				if let Err(e) = commit_result {
+					// A commit attempt closes the transaction even on failure, so requeue in a
+					// fresh transaction.
 					let tx = self.new_write_tx().await?;
 					return Self::retry_attempt(tx, e, &eq, &mut ev).await;
 				}
@@ -524,5 +536,74 @@ impl AsyncEventContext {
 		let opt = ev.build_event_options(&ctx.tx(), opt, eq).await?;
 		let doc = ev.build_event_cursor_doc();
 		Document::process_event_sync(stk, ctx, opt, lh, &ev.event_definition, &doc).await
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::catalog::providers::CatalogProvider;
+	use crate::kvs::testing::{
+		RetryableConflictSite, inject_retryable_conflict, retryable_conflict_count,
+	};
+	use crate::types::PublicValue;
+
+	#[tokio::test]
+	async fn async_event_completion_commit_conflict_requeues() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
+		tx.ensure_ns_db(None, "test", "test").await?;
+		tx.commit().await?;
+		let session = Session::owner().with_ns("test").with_db("test");
+		let mut responses = ds
+			.execute(
+				"
+				UPSERT sink:counter SET counter = 0;
+				DEFINE EVENT increment ON source ASYNC RETRY 1 THEN (
+					UPDATE sink:counter SET counter += 1
+				);
+				CREATE source:one;
+				",
+				&session,
+				None,
+			)
+			.await?;
+		for response in responses.drain(..) {
+			response.result?;
+		}
+
+		let _conflict =
+			inject_retryable_conflict(RetryableConflictSite::AsyncEventCompletionCommit, ds.id());
+
+		assert_eq!(AsyncEventRecord::process_next_events_batch(&ds, None).await?, 1);
+
+		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
+		let (beg, end) = EventQueue::range();
+		let queued = tx.scan(beg..end, NORMAL_BATCH_SIZE, 0, None).await?;
+		tx.cancel().await?;
+		assert_eq!(queued.len(), 1);
+		let queued_event = AsyncEventRecord::kv_decode_value(&queued[0].1, ())?;
+		assert_eq!(queued_event.attempt, 1);
+
+		let mut responses = ds.execute("RETURN sink:counter.counter;", &session, None).await?;
+		assert_eq!(responses.remove(0).result?, PublicValue::Number(0.into()));
+		assert_eq!(
+			retryable_conflict_count(RetryableConflictSite::AsyncEventCompletionCommit, ds.id()),
+			0
+		);
+
+		assert_eq!(AsyncEventRecord::process_next_events_batch(&ds, None).await?, 1);
+		assert_eq!(AsyncEventRecord::process_next_events_batch(&ds, None).await?, 0);
+
+		let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
+		let (beg, end) = EventQueue::range();
+		let queued = tx.scan(beg..end, NORMAL_BATCH_SIZE, 0, None).await?;
+		tx.cancel().await?;
+		assert!(queued.is_empty());
+
+		let mut responses = ds.execute("RETURN sink:counter.counter;", &session, None).await?;
+		assert_eq!(responses.remove(0).result?, PublicValue::Number(1.into()));
+
+		Ok(())
 	}
 }
