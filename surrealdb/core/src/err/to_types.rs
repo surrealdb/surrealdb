@@ -329,6 +329,7 @@ pub fn into_types_error(error: Error) -> TypesError {
 			KvsError::UnsupportedVersionedQueries => TypesError::configuration(message, None),
 			KvsError::Datastore(_)
 			| KvsError::Transaction(_)
+			| KvsError::NoSavepoint
 			| KvsError::TimestampInvalid(_)
 			| KvsError::Internal(_)
 			| KvsError::CompactionNotSupported => TypesError::internal(message),

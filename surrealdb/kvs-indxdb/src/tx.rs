@@ -122,7 +122,7 @@ impl State {
 	/// savepoint is on the stack.
 	fn rollback_to_savepoint(&mut self) -> KvsResult<()> {
 		let Some(sp) = self.savepoints.pop() else {
-			return Err(KvsError::Transaction("no savepoint to rollback to".to_owned()));
+			return Err(KvsError::NoSavepoint);
 		};
 		for (key, write) in sp {
 			if let Some(ent) = self.keys.get_mut(&key) {

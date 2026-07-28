@@ -16,7 +16,9 @@ use surrealdb_kvs::err::{Error, Result};
 use surrealdb_kvs::timestamp::{
 	BoxTimeStamp, BoxTimeStampImpl, MAX_TIMESTAMP_BYTES, TimeStamp, TimeStampImpl,
 };
-use surrealdb_kvs::{Direction, Key, KeyRange, Metrics, TransactionBuilder, TransactionType, Val};
+use surrealdb_kvs::{
+	Direction, Key, KeyRange, Metrics, SavepointStack, TransactionBuilder, TransactionType, Val,
+};
 use surrealkv::{
 	Durability, HistoryOptions, LSMIterator, Mode, Transaction as Tx, Tree, TreeBuilder,
 };
@@ -58,6 +60,12 @@ pub struct Transaction {
 	versioned: bool,
 	/// The underlying datastore transaction
 	inner: RwLock<Tx>,
+	/// Engine savepoints backing each open savepoint.
+	///
+	/// Always acquired before `inner` and held across it, so the scope counts
+	/// and the engine's savepoint stack cannot drift apart between the two.
+	/// Nothing acquires the pair in the opposite order, so they cannot deadlock.
+	savepoints: RwLock<SavepointStack>,
 	/// Commit coordinator for grouped fsync (when sync=every)
 	commit_coordinator: Option<Arc<CommitCoordinator>>,
 }
@@ -184,6 +192,7 @@ impl Datastore {
 			write: matches!(write, TransactionType::Write),
 			versioned: self.versioned,
 			inner: RwLock::new(txn),
+			savepoints: RwLock::new(SavepointStack::default()),
 			commit_coordinator: self.commit_coordinator.clone(),
 		}))
 	}
@@ -836,7 +845,11 @@ impl Transactable for Transaction {
 	/// Set a new save point on the transaction.
 	fn new_save_point(&self) -> BoxFut<'_, Result<()>> {
 		Box::pin(async move {
+			let mut savepoints = self.savepoints.write().await;
 			self.inner.write().await.set_savepoint().map_err(kvs_error)?;
+			// Counted only once the engine has accepted the savepoint, so a
+			// refusal cannot leave a scope counted that the engine never took.
+			savepoints.open();
 			Ok(())
 		})
 	}
@@ -844,14 +857,26 @@ impl Transactable for Transaction {
 	/// Rollback to the last save point.
 	fn rollback_to_save_point(&self) -> BoxFut<'_, Result<()>> {
 		Box::pin(async move {
-			self.inner.write().await.rollback_to_savepoint().map_err(kvs_error)?;
+			// A scope that absorbed released savepoints needs one engine
+			// rollback per savepoint, as each reverts to the most recent. The
+			// stack guard is held across the unwind so the count and the engine
+			// cannot diverge partway through.
+			let mut savepoints = self.savepoints.write().await;
+			let unwind = savepoints.take()?;
+			let mut inner = self.inner.write().await;
+			for _ in 0..unwind {
+				inner.rollback_to_savepoint().map_err(kvs_error)?;
+			}
 			Ok(())
 		})
 	}
 
 	/// Release the last save point.
 	fn release_last_save_point(&self) -> BoxFut<'_, Result<()>> {
-		Box::pin(async move { Ok(()) })
+		Box::pin(async move {
+			self.savepoints.write().await.release();
+			Ok(())
+		})
 	}
 
 	fn timestamp_impl(&self) -> BoxTimeStampImpl {

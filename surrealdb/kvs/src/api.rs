@@ -890,13 +890,50 @@ pub trait Transactable: Send + Sync {
 	// Savepoint functions
 	// --------------------------------------------------
 
-	/// Set a new save point on the transaction.
+	/// Set a new save point on the transaction, opening a scope that subsequent
+	/// writes belong to.
+	///
+	/// Savepoints delimit a scope of writes that can be undone as a unit.
+	/// Exactly one [`Self::release_last_save_point`] or
+	/// [`Self::rollback_to_save_point`] closes the scope this opens. Scopes
+	/// nest, and every implementation must agree on the semantics of all three
+	/// methods, because callers rely on them regardless of which backend they
+	/// run against:
+	///
+	/// - Release keeps the scope's writes, but does not make them permanent: a rollback to an
+	///   *enclosing* scope must still undo them. Discarding a released scope's undo state is only
+	///   correct when no enclosing scope remains.
+	/// - Rollback undoes every write made since the scope was opened, including those inherited
+	///   from scopes released inside it, and leaves any enclosing scope open and still able to undo
+	///   its own writes.
+	/// - Rollback with no scope open fails with [`Error::NoSavepoint`]. Release with no scope open
+	///   is accepted and inert.
+	/// - The three methods must not be called concurrently on one transaction. Each pairs
+	///   bookkeeping about the open scopes with the engine state backing them, and implementations
+	///   only keep the two consistent within a single call. Core drives a transaction's savepoints
+	///   from one task.
+	///
+	/// Nesting is reachable in practice: a per-document savepoint is still open
+	/// while a synchronous `DEFINE EVENT` computes its `THEN` expression as a
+	/// full statement, which takes and releases a savepoint of its own.
+	///
+	/// Engines that expose a native savepoint but no release operation can get
+	/// the release-merge behaviour from [`crate::SavepointStack`]. Engines with
+	/// no native savepoint need an undo log keyed per open scope.
 	fn new_save_point(&self) -> BoxFut<'_, Result<()>>;
 
-	/// Release the last save point.
+	/// Release the last save point, keeping its writes undoable by any enclosing
+	/// save point.
+	///
+	/// Accepted and inert when no save point is open. See
+	/// [`Self::new_save_point`] for the full contract.
 	fn release_last_save_point(&self) -> BoxFut<'_, Result<()>>;
 
-	/// Rollback to the last save point.
+	/// Rollback to the last save point, undoing every write made since it was
+	/// taken.
+	///
+	/// Fails with [`Error::NoSavepoint`] when no save point is open. See
+	/// [`Self::new_save_point`] for the full contract.
 	fn rollback_to_save_point(&self) -> BoxFut<'_, Result<()>>;
 
 	// --------------------------------------------------

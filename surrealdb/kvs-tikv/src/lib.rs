@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 pub use cnf::TikvConfig;
-use savepoint::{Operation, Savepoint};
+use savepoint::{Operation, UndoLog};
 use surrealdb_kvs::api::{BoxFut, GetMultiResult, KeysResult, ScanResult, Transactable};
 use surrealdb_kvs::consts::COUNT_BATCH_SIZE;
 use surrealdb_kvs::err::{Error, Result};
@@ -186,7 +186,7 @@ impl Transaction {
 	/// range in `TIKV_DELR_BATCH_SIZE` increments, capped at
 	/// `tikv_delr_max_keys`. If the cap would be exceeded the call
 	/// returns [`Error::TransactionRangeTooLarge`] without writing the
-	/// over-cap deletes. Records `Operation::RestoreDeleted` against
+	/// over-cap deletes. Records `Operation::RestoreValue` against
 	/// the savepoint stack when one is active.
 	async fn delete_range_bounded(&self, rng: KeyRange<'_>) -> Result<()> {
 		// Check to see if transaction is closed
@@ -201,7 +201,7 @@ impl Transaction {
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Whether we need to record undo operations for the savepoint stack.
-		let track_ops = !inner.savepoints.is_empty() || !inner.operations.is_empty();
+		let track_ops = inner.undo.is_tracking();
 		let end = rng.end.to_vec();
 		let mut start = rng.start.to_vec();
 		let mut processed: u32 = 0;
@@ -257,7 +257,7 @@ impl Transaction {
 				};
 				inner.tx.delete(key.clone()).await.map_err(kvs_error)?;
 				if let Some(val) = old_val {
-					inner.operations.push(Operation::RestoreDeleted(key, val));
+					inner.undo.record(Operation::RestoreValue(key, val));
 				}
 				processed = processed.saturating_add(1);
 			}
@@ -299,10 +299,8 @@ impl Drop for Transaction {
 struct TransactionInner {
 	/// The underlying datastore transaction
 	tx: tikv::Transaction,
-	/// Stack of savepoints for nested rollback support
-	savepoints: Vec<Savepoint>,
-	/// Current undo operations since the last savepoint
-	operations: Vec<Operation>,
+	/// Undo log backing the savepoint stack
+	undo: UndoLog,
 }
 
 impl Datastore {
@@ -494,8 +492,7 @@ impl Datastore {
 					write: matches!(ty, TransactionType::Write),
 					inner: RwLock::new(TransactionInner {
 						tx: txn,
-						savepoints: Vec::new(),
-						operations: Vec::new(),
+						undo: UndoLog::default(),
 					}),
 					started_at: Instant::now(),
 					handle: Arc::clone(&self.handle),
@@ -927,26 +924,25 @@ impl Transactable for Transaction {
 			let key = key.to_vec();
 			// Load the inner transaction
 			let mut inner = self.inner.write().await;
-			// Get the old value if we need to track operations
-			let old_val = if !inner.savepoints.is_empty() || !inner.operations.is_empty() {
-				inner.tx.get(key.clone()).await.map_err(kvs_error)?
+			// Read the pre-image only when a savepoint could roll this back.
+			// The outer `Option` distinguishes "no read was made" from the
+			// inner `None`'s "the key did not exist", which need opposite
+			// undo operations.
+			let old_val = if inner.undo.is_tracking() {
+				Some(inner.tx.get(key.clone()).await.map_err(kvs_error)?)
 			} else {
 				None
 			};
 			// Set the key
 			inner.tx.put(key.clone(), val).await.map_err(kvs_error)?;
 			// Record operation after successful operation
-			if !inner.savepoints.is_empty() || !inner.operations.is_empty() {
-				match old_val {
-					Some(existing_val) => {
-						// Key existed, record operation to restore old value
-						inner.operations.push(Operation::RestoreValue(key, existing_val));
-					}
-					None => {
-						// Key didn't exist, record operation to delete it
-						inner.operations.push(Operation::DeleteKey(key));
-					}
-				}
+			if let Some(old_val) = old_val {
+				inner.undo.record(match old_val {
+					// Key existed, record operation to restore old value
+					Some(existing_val) => Operation::RestoreValue(key, existing_val),
+					// Key didn't exist, record operation to delete it
+					None => Operation::DeleteKey(key),
+				});
 			}
 			// Return result
 			Ok(())
@@ -976,11 +972,8 @@ impl Transactable for Transaction {
 			}
 			// Set the key
 			inner.tx.put(key.clone(), val).await.map_err(kvs_error)?;
-			// Record operation after successful operation
-			if !inner.savepoints.is_empty() || !inner.operations.is_empty() {
-				// Key didn't exist (we just checked), record operation to delete it
-				inner.operations.push(Operation::DeleteKey(key));
-			}
+			// Key didn't exist (we just checked), record operation to delete it
+			inner.undo.record(Operation::DeleteKey(key));
 			// Return result
 			Ok(())
 		})
@@ -1013,16 +1006,14 @@ impl Transactable for Transaction {
 			// Set the key
 			inner.tx.put(key.clone(), val).await.map_err(kvs_error)?;
 			// Record operation after successful operation
-			if !inner.savepoints.is_empty() || !inner.operations.is_empty() {
-				match current {
-					Some(existing_val) => {
-						// Key existed, record operation to restore old value
-						inner.operations.push(Operation::RestoreValue(key, existing_val));
-					}
-					None => {
-						// Key didn't exist, record operation to delete it
-						inner.operations.push(Operation::DeleteKey(key));
-					}
+			match current {
+				Some(existing_val) => {
+					// Key existed, record operation to restore old value
+					inner.undo.record(Operation::RestoreValue(key, existing_val));
+				}
+				None => {
+					// Key didn't exist, record operation to delete it
+					inner.undo.record(Operation::DeleteKey(key));
 				}
 			}
 			// Return result
@@ -1047,7 +1038,7 @@ impl Transactable for Transaction {
 			// Load the inner transaction
 			let mut inner = self.inner.write().await;
 			// Get the old value if we need to track operations
-			let old_val = if !inner.savepoints.is_empty() || !inner.operations.is_empty() {
+			let old_val = if inner.undo.is_tracking() {
 				inner.tx.get(key.clone()).await.map_err(kvs_error)?
 			} else {
 				None
@@ -1057,7 +1048,7 @@ impl Transactable for Transaction {
 			// Record operation after successful operation
 			if let Some(existing_val) = old_val {
 				// Key existed, record operation to restore it
-				inner.operations.push(Operation::RestoreDeleted(key, existing_val));
+				inner.undo.record(Operation::RestoreValue(key, existing_val));
 			}
 			// Return result
 			Ok(())
@@ -1093,7 +1084,7 @@ impl Transactable for Transaction {
 			// Record operation after successful operation
 			if let Some(existing_val) = current {
 				// Key existed, record operation to restore it
-				inner.operations.push(Operation::RestoreDeleted(key, existing_val));
+				inner.undo.record(Operation::RestoreValue(key, existing_val));
 			}
 			// Return result
 			Ok(())
@@ -1363,12 +1354,8 @@ impl Transactable for Transaction {
 			}
 			// Load the inner transaction
 			let mut inner = self.inner.write().await;
-			// Take the current operations
-			let operations = std::mem::take(&mut inner.operations);
-			// Create a new savepoint with those operations
-			inner.savepoints.push(Savepoint {
-				operations,
-			});
+			// Open a new scope for subsequent writes to record into
+			inner.undo.new_savepoint();
 			// Continue
 			Ok(())
 		})
@@ -1387,8 +1374,9 @@ impl Transactable for Transaction {
 			}
 			// Load the inner transaction
 			let mut inner = self.inner.write().await;
-			// Release the last savepoint
-			inner.savepoints.pop();
+			// Release the last savepoint, keeping its writes undoable by any
+			// enclosing savepoint
+			inner.undo.release_savepoint();
 			// Continue
 			Ok(())
 		})
@@ -1407,33 +1395,27 @@ impl Transactable for Transaction {
 			}
 			// Load the inner transaction
 			let mut inner = self.inner.write().await;
-			// Check if there are any savepoints
-			if inner.savepoints.is_empty() {
-				return Err(Error::Transaction("No savepoint to rollback to".to_string()));
-			}
-			// Get the most recent savepoint
-			let savepoint = inner.savepoints.pop().expect("No savepoint to rollback to");
-			// Take ownership of operations to avoid borrow checker issues
-			let operations = std::mem::take(&mut inner.operations);
-			// Execute undo operations in reverse order
-			for op in operations.iter().rev() {
+			// Take the most recent savepoint's operations, restoring the
+			// enclosing scope's log as the current one
+			let Some(operations) = inner.undo.take_savepoint() else {
+				return Err(Error::NoSavepoint);
+			};
+			// Execute undo operations in reverse order, moving the recorded
+			// keys and values straight into the client rather than cloning
+			// them: this path replays the whole pre-image of a failed create
+			// attempt, so it is hot for an UPSERT against an existing record.
+			for op in operations.into_iter().rev() {
 				match op {
 					// Delete the key that was inserted
 					Operation::DeleteKey(key) => {
-						inner.tx.delete(key.clone()).await.map_err(kvs_error)?;
+						inner.tx.delete(key).await.map_err(kvs_error)?;
 					}
-					// Restore the previous value
+					// Restore the key's previous value
 					Operation::RestoreValue(key, val) => {
-						inner.tx.put(key.clone(), val.clone()).await.map_err(kvs_error)?;
-					}
-					// Restore the deleted key
-					Operation::RestoreDeleted(key, val) => {
-						inner.tx.put(key.clone(), val.clone()).await.map_err(kvs_error)?;
+						inner.tx.put(key, val).await.map_err(kvs_error)?;
 					}
 				}
 			}
-			// Restore the savepoint's operations as the current ones
-			inner.operations = savepoint.operations;
 			// Continue
 			Ok(())
 		})

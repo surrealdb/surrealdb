@@ -19,6 +19,7 @@ pub mod config;
 pub mod consts;
 pub mod cursor;
 pub mod err;
+pub mod savepoint;
 pub mod threadpool;
 pub mod timestamp;
 mod types;
@@ -28,6 +29,7 @@ pub use api::{
 };
 pub use builder::{Metric, Metrics, TransactionBuilder};
 pub use err::{Error, Result};
+pub use savepoint::SavepointStack;
 pub use types::{Key, KeyRange};
 
 /// The value part of a key-value pair. An alias for [`Vec<u8>`].

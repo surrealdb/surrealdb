@@ -74,6 +74,18 @@ pub enum Error {
 	#[error("Couldn't write to a read only transaction")]
 	TransactionReadonly,
 
+	/// A rollback was requested with no savepoint open.
+	///
+	/// Savepoint calls must balance: a scope is opened by `new_save_point` and
+	/// closed by exactly one `release_last_save_point` or
+	/// `rollback_to_save_point`. Releasing with no scope open is accepted and
+	/// inert, but rolling back is refused — there is no scope to revert, and
+	/// the engine may still be holding savepoints for scopes that were
+	/// released, so reverting to one of those would discard writes the release
+	/// was meant to keep.
+	#[error("No savepoint to rollback to")]
+	NoSavepoint,
+
 	/// The conditional value in the request was not equal
 	#[error("Value being checked was not correct")]
 	TransactionConditionNotMet,

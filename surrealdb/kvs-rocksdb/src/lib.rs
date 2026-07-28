@@ -50,7 +50,8 @@ use surrealdb_kvs::consts::{ESTIMATED_BYTES_PER_KEY, ESTIMATED_BYTES_PER_KV};
 use surrealdb_kvs::err::{Error, Result};
 use surrealdb_kvs::timestamp::HlcTimeStamp;
 use surrealdb_kvs::{
-	Direction, Key, KeyRange, Metric, Metrics, TransactionBuilder, TransactionType, Val,
+	Direction, Key, KeyRange, Metric, Metrics, SavepointStack, TransactionBuilder, TransactionType,
+	Val,
 };
 use tokio::sync::{Mutex, MutexGuard};
 use tracing::{error, info, instrument, warn};
@@ -151,6 +152,12 @@ pub struct Transaction {
 	/// `TransactionInner: Send`), and `spawn_local`'s `'pool` lifetime
 	/// admits non-`'static` borrows from `&self`.
 	inner: Mutex<Option<TransactionInner>>,
+	/// Engine savepoints backing each open savepoint.
+	///
+	/// Always acquired before `inner` and held across it, so the scope counts
+	/// and the engine's savepoint stack cannot drift apart between the two.
+	/// Nothing acquires the pair in the opposite order, so they cannot deadlock.
+	savepoints: Mutex<SavepointStack>,
 	/// The current transaction state
 	transaction_state: Arc<AtomicU8>,
 	/// Reference to the disk space manager for checking current operational state during commit.
@@ -873,6 +880,7 @@ impl Datastore {
 				tx,
 				snapshot,
 			})),
+			savepoints: Mutex::new(SavepointStack::default()),
 			transaction_state: Arc::new(Default::default()),
 			disk_space_manager: self.disk_space_manager.clone(),
 			commit_coordinator: self.commit_coordinator.clone(),
@@ -2742,10 +2750,18 @@ impl Transactable for Transaction {
 	/// Set a new save point on the transaction.
 	fn new_save_point(&self) -> BoxFut<'_, Result<()>> {
 		Box::pin(async move {
-			let guard = self.inner.lock().await;
-			if let Some(state) = guard.as_ref() {
-				state.tx.set_savepoint();
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
 			}
+			let mut savepoints = self.savepoints.lock().await;
+			let guard = self.inner.lock().await;
+			let state =
+				guard.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
+			state.tx.set_savepoint();
+			// Counted only once the engine has accepted the savepoint, so a
+			// refusal cannot leave a scope counted that the engine never took.
+			savepoints.open();
 			Ok(())
 		})
 	}
@@ -2753,8 +2769,20 @@ impl Transactable for Transaction {
 	/// Rollback to the last save point.
 	fn rollback_to_save_point(&self) -> BoxFut<'_, Result<()>> {
 		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			// A scope that absorbed released savepoints needs one engine
+			// rollback per savepoint, as each reverts to the most recent. The
+			// stack guard is held across the unwind so the count and the engine
+			// cannot diverge partway through.
+			let mut savepoints = self.savepoints.lock().await;
 			let guard = self.inner.lock().await;
-			if let Some(state) = guard.as_ref() {
+			let state =
+				guard.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
+			let unwind = savepoints.take()?;
+			for _ in 0..unwind {
 				state.tx.rollback_to_savepoint().map_err(kvs_error)?;
 			}
 			Ok(())
@@ -2763,7 +2791,10 @@ impl Transactable for Transaction {
 
 	/// Release the last save point.
 	fn release_last_save_point(&self) -> BoxFut<'_, Result<()>> {
-		Box::pin(async move { Ok(()) })
+		Box::pin(async move {
+			self.savepoints.lock().await.release();
+			Ok(())
+		})
 	}
 
 	fn compact(&self, range: Option<KeyRange<'_>>) -> BoxFut<'_, Result<()>> {

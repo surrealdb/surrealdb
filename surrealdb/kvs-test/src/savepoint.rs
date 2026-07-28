@@ -1,6 +1,7 @@
 //! Savepoints: `new_save_point` / `rollback_to_save_point` /
 //! `release_last_save_point` are required trait methods on every backend.
 
+use surrealdb_kvs::Error;
 use surrealdb_kvs::TransactionType::*;
 
 use crate::{TestBackend, kvs_test};
@@ -83,14 +84,6 @@ async fn nested(b: &TestBackend) {
 kvs_test!(nested);
 
 /// Releasing a savepoint keeps its writes, which then commit normally.
-///
-/// This is the usage pattern core relies on (`new_save_point`, then either
-/// `release_last_save_point` on success or `rollback_to_save_point` on
-/// failure — never a rollback after a release). What a rollback *after* a
-/// release targets is currently backend-divergent: TiKV pops the released
-/// savepoint off its stack while mem/rocksdb/surrealkv treat release as a
-/// no-op, so that interleaving is deliberately not asserted here;
-/// standardising it is a tracked follow-up.
 async fn release_keeps_writes(b: &TestBackend) {
 	let ds = b.create_ds().await;
 	let tx = ds.transaction(Write).await.unwrap();
@@ -105,6 +98,64 @@ async fn release_keeps_writes(b: &TestBackend) {
 }
 
 kvs_test!(release_keeps_writes);
+
+/// Releasing a nested savepoint keeps its writes undoable by the savepoint
+/// that encloses it: rolling that one back reverts both scopes.
+///
+/// Core reaches this through a synchronous `DEFINE EVENT`. The per-document
+/// savepoint taken by an INSERT or UPSERT is still open while the event's own
+/// statement takes and releases one of its own, so a create attempt that fails
+/// after the event has run must still undo everything it wrote.
+async fn release_nested_then_rollback_enclosing(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	let tx = ds.transaction(Write).await.unwrap();
+	tx.new_save_point().await.unwrap();
+	tx.set(b"outer".into(), b"a".to_vec()).await.unwrap();
+	tx.new_save_point().await.unwrap();
+	tx.set(b"inner".into(), b"b".to_vec()).await.unwrap();
+	// Release keeps the inner write visible
+	tx.release_last_save_point().await.unwrap();
+	assert_eq!(tx.get(b"inner".into(), None).await.unwrap().as_deref(), Some(&b"b"[..]));
+	// Rolling back the enclosing savepoint reverts both scopes' writes
+	tx.rollback_to_save_point().await.unwrap();
+	assert!(
+		tx.get(b"inner".into(), None).await.unwrap().is_none(),
+		"a released savepoint's writes must still be undone by the enclosing rollback"
+	);
+	assert!(
+		tx.get(b"outer".into(), None).await.unwrap().is_none(),
+		"the enclosing savepoint's own writes must be undone"
+	);
+	tx.commit().await.unwrap();
+	let tx = ds.transaction(Read).await.unwrap();
+	assert!(tx.get(b"inner".into(), None).await.unwrap().is_none());
+	assert!(tx.get(b"outer".into(), None).await.unwrap().is_none());
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(release_nested_then_rollback_enclosing);
+
+/// Releasing the outermost savepoint closes the scope, leaving nothing to roll
+/// back to and no savepoint to reach past.
+async fn release_outermost_then_rollback_errors(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	let tx = ds.transaction(Write).await.unwrap();
+	tx.new_save_point().await.unwrap();
+	tx.set(b"test".into(), b"kept".to_vec()).await.unwrap();
+	tx.release_last_save_point().await.unwrap();
+	assert!(
+		matches!(tx.rollback_to_save_point().await, Err(Error::NoSavepoint)),
+		"rollback after releasing the only savepoint must report NoSavepoint"
+	);
+	// The released write is untouched by the refused rollback
+	assert_eq!(tx.get(b"test".into(), None).await.unwrap().as_deref(), Some(&b"kept"[..]));
+	tx.commit().await.unwrap();
+	let tx = ds.transaction(Read).await.unwrap();
+	assert_eq!(tx.get(b"test".into(), None).await.unwrap().as_deref(), Some(&b"kept"[..]));
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(release_outermost_then_rollback_errors);
 
 /// A transaction stays usable after a rollback: later writes commit.
 async fn rollback_then_continue(b: &TestBackend) {
@@ -122,18 +173,18 @@ async fn rollback_then_continue(b: &TestBackend) {
 
 kvs_test!(rollback_then_continue);
 
-/// Rolling back with no savepoint on the stack is an error.
-///
-/// The exact error variant currently differs between backends, so only
-/// `is_err` is asserted. Releasing with no savepoint is deliberately not
-/// asserted: backends where release is a no-op accept it while TiKV
-/// rejects it — standardising both is a tracked follow-up.
+/// Rolling back with no savepoint on the stack is an error, while releasing
+/// with none is accepted.
 async fn underflow_errors(b: &TestBackend) {
 	let ds = b.create_ds().await;
 	let tx = ds.transaction(Write).await.unwrap();
 	assert!(
-		tx.rollback_to_save_point().await.is_err(),
-		"rollback with no savepoint must be an error"
+		matches!(tx.rollback_to_save_point().await, Err(Error::NoSavepoint)),
+		"rollback with no savepoint must report NoSavepoint"
+	);
+	assert!(
+		tx.release_last_save_point().await.is_ok(),
+		"release with no savepoint must be accepted"
 	);
 	tx.cancel().await.unwrap();
 }
