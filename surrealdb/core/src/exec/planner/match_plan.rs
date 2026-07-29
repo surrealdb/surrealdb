@@ -56,8 +56,10 @@
 
 use std::sync::Arc;
 
+use surrealdb_strand::TableName;
+
 use super::Planner;
-use crate::err::Error;
+use crate::err::{EngineError, Error};
 use crate::exec::ExecOperator;
 use crate::exec::operators::{
 	Aggregate, AggregateField, Bind, DeleteBinding, Distinct, DistinctEdges, DrainSink,
@@ -72,7 +74,6 @@ use crate::expr::match_plan::{
 	PathSearch, PatternPlan,
 };
 use crate::expr::{Cond, Expr, Function, Idiom, Literal, Part};
-use crate::val::TableName;
 
 /// How a quantified step's path-search selector routes to a physical operator.
 enum SearchRouting {
@@ -171,9 +172,10 @@ impl<'ctx> Planner<'ctx> {
 
 		// Seed from the first unit.
 		let Some(first) = units.next() else {
-			return Err(Error::Internal(
+			return Err(EngineError::Internal(
 				"GQL planning: a MatchPlan must carry at least one stage".to_string(),
-			));
+			)
+			.into());
 		};
 		let (mut acc_op, mut acc_bound) = match first {
 			StageUnit::Mandatory(clause) => {
@@ -185,10 +187,10 @@ impl<'ctx> Planner<'ctx> {
 				(planned.operator, planned.bound)
 			}
 			StageUnit::Optional(_) => {
-				return Err(Error::Internal(
+				return Err(EngineError::Internal(
 					"GQL planning: a query cannot start with OPTIONAL (the lowering must reject it)"
 						.to_string(),
-				));
+				).into());
 			}
 			StageUnit::Mutation(stage) => {
 				// A leading mutation (an `INSERT` with no preceding `MATCH`): seed a
@@ -381,11 +383,12 @@ impl<'ctx> Planner<'ctx> {
 		let mut residual_exprs = Vec::with_capacity(subplan.deferred.len());
 		for predicate in subplan.deferred {
 			if !deps_subset(&predicate.deps, &merged_bound) {
-				return Err(Error::Internal(
+				return Err(EngineError::Internal(
 					"GQL MATCH planning: an OPTIONAL block's deferred predicate has deps \
 					 unsatisfied by the accumulator and block bindings combined"
 						.to_string(),
-				));
+				)
+				.into());
 			}
 			residual_exprs.push(predicate.expr);
 		}
@@ -474,11 +477,11 @@ impl<'ctx> Planner<'ctx> {
 		};
 		let predicates = drain_satisfiable(&mut pending, &step_bound);
 		if !pending.is_empty() {
-			return Err(Error::Internal(
+			return Err(EngineError::Internal(
 				"GQL MATCH planning: an OPTIONAL single-hop clause owns a predicate its hop cannot \
 				 satisfy; the lowering must scope inside-optional predicates to the clause"
 					.to_string(),
-			));
+			).into());
 		}
 		let predicate = match conjoin(predicates) {
 			Some(joined) => Some(self.physical_expr(joined).await?),
@@ -530,9 +533,10 @@ impl<'ctx> Planner<'ctx> {
 		clauses: &[&MatchClausePlan],
 	) -> Result<PlannedClause, Error> {
 		let Some((first, rest)) = clauses.split_first() else {
-			return Err(Error::Internal(
+			return Err(EngineError::Internal(
 				"GQL MATCH planning: an OPTIONAL block must carry at least one clause".to_string(),
-			));
+			)
+			.into());
 		};
 
 		// The block's leading clause seeds the block accumulator with NO outer
@@ -617,9 +621,10 @@ impl<'ctx> Planner<'ctx> {
 		seed: Option<(Arc<dyn ExecOperator>, Vec<BindingId>)>,
 	) -> Result<PlannedClause, Error> {
 		let Some((first_pattern, rest_patterns)) = clause.patterns.split_first() else {
-			return Err(Error::Internal(
+			return Err(EngineError::Internal(
 				"GQL MATCH planning: a clause must carry at least one pattern".to_string(),
-			));
+			)
+			.into());
 		};
 
 		// Conjuncts owned by this clause, drained as each is placed.
@@ -690,12 +695,12 @@ impl<'ctx> Planner<'ctx> {
 				// handled by the clause-combine join, so reaching here is a contract
 				// violation.
 				_ => {
-					return Err(Error::Internal(
+					return Err(EngineError::Internal(
 						"GQL MATCH planning: a clause's leading pattern is unanchorable (no labeled \
 						 element) and no expandable accumulator was supplied; the lowering must \
 						 reject it"
 							.to_string(),
-					));
+					).into());
 				}
 			},
 		}
@@ -750,11 +755,12 @@ impl<'ctx> Planner<'ctx> {
 				clause_op = stage.operator;
 				clause_bound = union_bindings(&clause_bound, &stage.bound);
 			} else {
-				return Err(Error::Internal(
+				return Err(EngineError::Internal(
 					"GQL MATCH planning: pattern is neither self-anchorable nor reuses a bound \
 					 variable (unanchorable); the lowering must reject it"
 						.to_string(),
-				));
+				)
+				.into());
 			}
 
 			// Cross-pattern conjuncts land here, as a Filter above the join /
@@ -775,11 +781,12 @@ impl<'ctx> Planner<'ctx> {
 		let mut deferred = Vec::new();
 		for predicate in pending {
 			if deps_subset(&predicate.deps, &clause_bound) {
-				return Err(Error::Internal(
+				return Err(EngineError::Internal(
 					"GQL MATCH planning: a clause predicate was not placed despite all its \
 					 dependencies being bound within the clause"
 						.to_string(),
-				));
+				)
+				.into());
 			}
 			deferred.push(predicate);
 		}
@@ -828,10 +835,11 @@ impl<'ctx> Planner<'ctx> {
 		pending: &mut Vec<MatchPredicate>,
 	) -> Result<ChainStage, Error> {
 		let Some(anchor_label) = pattern.start.label.clone() else {
-			return Err(Error::Internal(
+			return Err(EngineError::Internal(
 				"GQL MATCH planning: plan_node_anchored called on an unlabeled start node"
 					.to_string(),
-			));
+			)
+			.into());
 		};
 		let anchor_binding = pattern.start.binding;
 
@@ -1008,11 +1016,12 @@ impl<'ctx> Planner<'ctx> {
 				.await;
 		}
 
-		Err(Error::Internal(
+		Err(EngineError::Internal(
 			"GQL MATCH planning: bound-variable expansion found no shared anchor node \
 			 (multi-hop reverse anchoring is out of PR-B scope)"
 				.to_string(),
-		))
+		)
+		.into())
 	}
 
 	/// Place every pending predicate whose deps `bound` now satisfies as a
@@ -1048,11 +1057,12 @@ impl<'ctx> Planner<'ctx> {
 		let mut exprs: Vec<Expr> = Vec::with_capacity(predicates.len());
 		for predicate in predicates {
 			if !deps_subset(&predicate.deps, bound) {
-				return Err(Error::Internal(
+				return Err(EngineError::Internal(
 					"GQL MATCH planning: a deferred clause predicate's deps are unsatisfied at \
 					 the clause-combine join"
 						.to_string(),
-				));
+				)
+				.into());
 			}
 			exprs.push(predicate.expr);
 		}
@@ -1827,6 +1837,8 @@ fn prefix_strip(expr: &Expr, binding: &str) -> Option<Expr> {
 
 #[cfg(test)]
 mod tests {
+	use surrealdb_strand::TableName;
+
 	use super::*;
 	use crate::ctx::Context;
 	use crate::expr::match_plan::{
@@ -1834,7 +1846,6 @@ mod tests {
 	};
 	use crate::expr::{BinaryOperator, Literal};
 	use crate::kvs::{Datastore, TransactionType};
-	use crate::val::TableName;
 
 	// ---- shared builders ----
 

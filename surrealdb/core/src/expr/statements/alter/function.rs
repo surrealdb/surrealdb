@@ -45,7 +45,7 @@ impl AlterFunctionStatement {
 		};
 
 		match self.args {
-			AlterKind::Set(ref v) => fc.args.clone_from(v),
+			AlterKind::Set(ref v) => fc.args = v.clone(),
 			AlterKind::Drop => fc.args = vec![],
 			AlterKind::None => {}
 		}
@@ -82,7 +82,7 @@ impl AlterFunctionStatement {
 			},
 			fc: Cow::Borrowed(&self.name),
 		};
-		txn.set_key(&key, &fc).await?;
+		txn.set_key(&key, &fc.to_stored()).await?;
 		txn.clear_cache();
 		Ok(Value::None)
 	}

@@ -2,7 +2,6 @@
 
 use anyhow::Result;
 
-use crate::err::Error;
 use crate::val::Value;
 
 pub(crate) mod access;
@@ -15,8 +14,10 @@ pub(crate) mod changefeed;
 pub mod computed_deps;
 pub(crate) mod cond;
 pub(crate) mod constant;
+pub(crate) mod convert;
 pub(crate) mod data;
 pub(crate) mod dir;
+pub(crate) mod error;
 pub(crate) mod explain;
 pub(crate) mod expression;
 pub(crate) mod fetch;
@@ -71,6 +72,7 @@ pub(crate) use self::cond::Cond;
 pub(crate) use self::constant::Constant;
 pub(crate) use self::data::Data;
 pub(crate) use self::dir::Dir;
+pub(crate) use self::error::Error;
 pub(crate) use self::explain::Explain;
 pub(crate) use self::expression::{ExplainFormat, Expr};
 pub(crate) use self::fetch::{Fetch, Fetchs};
@@ -146,6 +148,22 @@ impl From<crate::err::Error> for ControlFlow {
 	}
 }
 
+impl From<crate::catalog::Error> for ControlFlow {
+	/// Boxes the catalog failure directly, so it stays the concrete type in the
+	/// `anyhow` slot and the downcasts that steer `IF EXISTS` keep matching it.
+	fn from(error: crate::catalog::Error) -> Self {
+		ControlFlow::Err(anyhow::Error::new(error))
+	}
+}
+
+impl From<Error> for ControlFlow {
+	/// Boxes the value-algebra failure directly, so it stays the concrete type
+	/// in the `anyhow` slot and [`ControlFlow::is_ignorable`] keeps matching it.
+	fn from(error: Error) -> Self {
+		ControlFlow::Err(anyhow::Error::new(error))
+	}
+}
+
 impl ControlFlow {
 	/// Returns true if this represents a data-shape error that can safely
 	/// be treated as `Value::None` (e.g., type mismatches, coercion failures).
@@ -156,14 +174,11 @@ impl ControlFlow {
 		match self {
 			// Control flow signals are never ignorable
 			ControlFlow::Break | ControlFlow::Continue | ControlFlow::Return(_) => false,
-			ControlFlow::Err(e) => {
-				// Check if the inner error is a known ignorable type
-				if let Some(err) = e.downcast_ref::<crate::err::Error>() {
-					err.is_ignorable()
-				} else {
-					false // Unknown error types are not ignorable
-				}
-			}
+			ControlFlow::Err(e) => match e.downcast_ref::<Error>() {
+				Some(err) => err.is_ignorable(),
+				// Unknown error types are not ignorable
+				None => false,
+			},
 		}
 	}
 }
@@ -187,7 +202,7 @@ impl FlowResultExt for FlowResult<Value> {
 	fn catch_return(self) -> Result<Value, anyhow::Error> {
 		match self {
 			Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
-				Err(anyhow::Error::new(Error::InvalidControlFlow))
+				Err(anyhow::Error::new(crate::exec::Error::InvalidControlFlow))
 			}
 			Err(ControlFlow::Return(x)) => Ok(x),
 			Err(ControlFlow::Err(e)) => Err(e),

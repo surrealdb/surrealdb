@@ -12,6 +12,7 @@ use std::sync::atomic::{self, AtomicU8};
 
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_strand::TableName;
 
 use crate::catalog::providers::TableProvider;
 use crate::ctx::FrozenContext;
@@ -25,7 +26,6 @@ use crate::idx::planner::iterators::IteratorRef;
 use crate::idx::planner::knn::KnnBruteForceResults;
 use crate::idx::planner::plan::{Plan, PlanBuilder, PlanBuilderParameters};
 use crate::idx::planner::tree::Tree;
-use crate::val::TableName;
 
 /// The goal of this structure is to cache parameters so they can be easily
 /// passed from one function to the other, so we don't pass too many arguments.
@@ -109,7 +109,16 @@ impl<'a> StatementContext<'a> {
 		let (ns, db) = self.ctx.get_ns_db_ids(self.opt).await?;
 		match self.ctx.tx().get_tb(ns, db, tb, None).await? {
 			Some(table) => {
-				let perms = self.stm.permissions(&table, self.stm.is_create());
+				// Pick the permission clause governing this statement type.
+				let perms = if self.stm.is_delete() {
+					&table.permissions.delete
+				} else if self.stm.is_select() {
+					&table.permissions.select
+				} else if self.stm.is_create() {
+					&table.permissions.create
+				} else {
+					&table.permissions.update
+				};
 				if perms.is_specific() {
 					return Ok(GrantedPermission::Specific);
 				}

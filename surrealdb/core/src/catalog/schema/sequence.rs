@@ -8,7 +8,6 @@ use crate::expr::statements::info::InfoStructure;
 use crate::key::impl_kv_value_revisioned;
 use crate::sql;
 use crate::sql::statements::define::{DefineKind, DefineSequenceStatement};
-use crate::types::PublicDuration;
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
@@ -30,9 +29,7 @@ impl SequenceDefinition {
 			batch: sql::Expr::Literal(sql::Literal::Integer(self.batch as i64)),
 			start: sql::Expr::Literal(sql::Literal::Integer(self.start)),
 			timeout: sql::Expr::Literal(
-				self.timeout
-					.map(|x| sql::Literal::Duration(PublicDuration::from_std(x)))
-					.unwrap_or(sql::Literal::None),
+				self.timeout.map(sql::Literal::Duration).unwrap_or(sql::Literal::None),
 			),
 		}
 	}

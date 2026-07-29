@@ -215,9 +215,14 @@ impl<'a> TreeBuilder<'a> {
 				if ix.prepare_remove {
 					continue;
 				}
-				if let Index::Count(cond) = &ix.index
-					&& self.ctx.cond.eq(&cond.as_ref())
-				{
+				// The index's guard condition (pre-parsed into `count_cond`,
+				// `None` for an unguarded count index) must match the query's
+				// WHERE clause structurally for the fast path to be used.
+				let cond_matches = match &ix.index {
+					Index::Count(_) => self.ctx.cond == ix.count_cond.as_ref(),
+					_ => false,
+				};
+				if cond_matches {
 					let index_reference = schema.new_reference(pos);
 					if self.check_allowed_by_with_indexes(&index_reference) {
 						self.index_map.index_count = Some(IndexOption::new(
@@ -378,7 +383,7 @@ impl<'a> TreeBuilder<'a> {
 		let i = Arc::new(i.clone());
 		// Try to detect if it matches an index
 		let n = {
-			let irs = self.resolve_indexes(self.table, &i, &schema);
+			let irs = self.resolve_indexes(self.table.as_str(), &i, &schema);
 			if !irs.is_empty() {
 				Node::IndexedField(Arc::clone(&i), irs)
 			} else if let Some(ro) =
@@ -406,7 +411,7 @@ impl<'a> TreeBuilder<'a> {
 			if ix.prepare_remove {
 				continue;
 			}
-			if let Some(idiom_index) = ix.cols.iter().position(|p| p.eq(i)) {
+			if let Some(idiom_index) = ix.cols.iter().position(|p| p == i) {
 				// SECURITY: when permissions are being enforced, refuse to use
 				// an index whose columns reference a field with a restrictive
 				// SELECT permission. Otherwise the index-only `Iterate Index
@@ -499,12 +504,12 @@ impl<'a> TreeBuilder<'a> {
 				}
 				let local_field = Idiom(local_field.to_vec());
 				let schema = self.lazy_load_schema_resolver(tx, self.table).await?;
-				let locals = self.resolve_indexes(self.table, &local_field, &schema);
+				let locals = self.resolve_indexes(self.table.as_str(), &local_field, &schema);
 				let remote_field = Arc::new(Idiom(remote_field.to_vec()));
 				let mut remotes = vec![];
 				for table in tables {
 					let schema = self.lazy_load_schema_resolver(tx, table).await?;
-					let remote_irs = self.resolve_indexes(table, &remote_field, &schema);
+					let remote_irs = self.resolve_indexes(table.as_str(), &remote_field, &schema);
 					remotes.push((Arc::clone(&remote_field), remote_irs));
 				}
 				let ro = RecordOptions {
@@ -751,12 +756,12 @@ impl<'a> TreeBuilder<'a> {
 					}
 				}
 				(BinaryOperator::Contain, v, IdiomPosition::Left) => {
-					if col == 0 && ixr.cols[0].contains(&Part::All) {
+					if col == 0 && ixr.cols[0].0.contains(&Part::All) {
 						return Some(IndexOperator::Equality(v));
 					}
 				}
 				(BinaryOperator::Inside, v, IdiomPosition::Right) => {
-					if col == 0 && ixr.cols[0].contains(&Part::All) {
+					if col == 0 && ixr.cols[0].0.contains(&Part::All) {
 						return Some(IndexOperator::Equality(v));
 					}
 				}

@@ -12,11 +12,13 @@ use surrealdb_cnf::LiveQueryEngine;
 use tracing::instrument;
 
 use super::IgnoreError;
-use crate::catalog::{Permission, SubscriptionDefinition, SubscriptionFields};
+use crate::catalog::{
+	CompiledSubscription, Permission, SubscriptionDefinition, SubscriptionFields,
+};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{MessageBroker, Options, RoutedNotification};
 use crate::doc::{Action, CursorDoc, Document};
-use crate::err::Error;
+use crate::err::EngineError;
 use crate::expr::FlowResultExt as _;
 use crate::expr::paths::{AC, ID, RD, TK};
 use crate::kvs::Transaction;
@@ -160,6 +162,13 @@ impl Document {
 		(met, initial, current): (Arc<Value>, Arc<Value>, Arc<Value>),
 		is_delete: bool,
 	) -> Result<()> {
+		// A subscription whose stored text no longer compiles can never match
+		// another document. It stays in the list so that teardown and `INFO`
+		// can still see it (and so its client can still be told it is dead),
+		// but there is nothing to evaluate here.
+		let Some(compiled) = live_subscription.query.compiled() else {
+			return Ok(());
+		};
 		// Ensure that a session exists on the LIVE query
 		let sess = match live_subscription.session.as_ref() {
 			Some(v) => v,
@@ -195,7 +204,7 @@ impl Document {
 			.id
 			.clone()
 			.ok_or_else(|| {
-				Error::unreachable("Processing live query for record without a Record ID")
+				EngineError::unreachable("Processing live query for record without a Record ID")
 			})
 			.map_err(anyhow::Error::new)?;
 
@@ -250,7 +259,7 @@ impl Document {
 		// First of all, let's check to see if the WHERE
 		// clause of the LIVE query is matched by this
 		// document. If it is then we can continue.
-		match self.lq_check(stk, &ctx, &opt, &live_subscription, &doc).await {
+		match self.lq_check(stk, &ctx, &opt, compiled, &doc).await {
 			Err(IgnoreError::Ignore) => return Ok(()),
 			Err(IgnoreError::Error(e)) => {
 				tracing::debug!(
@@ -286,7 +295,7 @@ impl Document {
 		// Let's check what type of statement
 		// caused this LIVE query to run, and obtain
 		// the relevant result.
-		let (action, mut result) = match live_subscription.fields {
+		let (action, mut result) = match &compiled.fields {
 			SubscriptionFields::Diff => {
 				// DIFF mode: return JSON patch operations instead of full document
 				if is_delete {
@@ -367,10 +376,14 @@ impl Document {
 		// Any evaluation error (invalid function arguments, unsupported
 		// expressions, etc.) skips this notification rather than
 		// aborting the triggering write transaction.
-		if let Some(fetchs) = live_subscription.fetch {
+		if let Some(fetchs) = &compiled.fetch {
 			let mut idioms = BTreeSet::new();
-			for fetch in fetchs.iter() {
-				if let Err(e) = fetch.compute(stk, &ctx, &opt, &mut idioms).await {
+			for expr in fetchs {
+				// On the expression directly: wrapping it in a `Fetch` would
+				// deep-clone the tree once per subscriber per record.
+				if let Err(e) =
+					crate::expr::Fetch::compute_expr(expr, stk, &ctx, &opt, &mut idioms).await
+				{
 					tracing::debug!(
 						target: "surrealdb::core::doc::lives",
 						subscription_id = %live_subscription.id,
@@ -529,11 +542,11 @@ impl Document {
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
-		live_subscription: &SubscriptionDefinition,
+		query: &CompiledSubscription,
 		doc: &CursorDoc,
 	) -> Result<(), IgnoreError> {
 		// Check where condition
-		if let Some(cond) = live_subscription.cond.as_ref() {
+		if let Some(cond) = query.cond.as_ref() {
 			// Check if the expression is truthy
 			if !stk
 				.run(|stk| cond.compute(stk, ctx, opt, Some(doc)))
@@ -559,10 +572,9 @@ impl Document {
 		// Should we run permissions checks?
 		// Live queries are always
 		if ctx.check_perms(opt, crate::iam::Action::View)? {
-			// Get the table
-			let tb = self.doc_ctx.tb()?;
-			// Process the table permissions
-			match &tb.permissions.select {
+			// Process the table permissions, compiled once per statement on
+			// the document context
+			match &self.doc_ctx.tb()?.permissions.select {
 				Permission::None => return Err(IgnoreError::Ignore),
 				Permission::Full => return Ok(()),
 				Permission::Specific(e) => {

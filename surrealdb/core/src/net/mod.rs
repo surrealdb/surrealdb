@@ -94,10 +94,9 @@ impl Resolve for FilteringResolver {
 				filter.allow.matches(&name_target) && !filter.deny.matches(&name_target);
 			// If the domain name itself is not allowed, return an error
 			if !name_is_allowed {
-				return Err(
-					Box::new(crate::err::Error::NetTargetNotAllowed(name_target.to_string()))
-						as Box<dyn Error + Send + Sync>,
-				);
+				return Err(Box::new(crate::dbs::capabilities::Error::NetTargetNotAllowed(
+					name_target.to_string(),
+				)) as Box<dyn Error + Send + Sync>);
 			}
 			// Resolve the addresses
 			let addrs: Vec<std::net::SocketAddr> = lookup_host((name_str, 0_u16))
@@ -135,8 +134,9 @@ impl Resolve for FilteringResolver {
 			if allowed.is_empty()
 				&& let Some(denied) = first_denied
 			{
-				return Err(Box::new(crate::err::Error::NetTargetNotAllowed(denied.to_string()))
-					as Box<dyn Error + Send + Sync>);
+				return Err(Box::new(crate::dbs::capabilities::Error::NetTargetNotAllowed(
+					denied.to_string(),
+				)) as Box<dyn Error + Send + Sync>);
 			}
 			Ok(Box::new(allowed.into_iter()) as Addrs)
 		}) as Resolving

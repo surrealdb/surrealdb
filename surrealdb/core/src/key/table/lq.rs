@@ -2,13 +2,13 @@
 use std::borrow::Cow;
 
 use anyhow::Result;
+use surrealdb_strand::TableName;
 use uuid::Uuid;
 
-use crate::catalog::SubscriptionDefinition;
+use crate::catalog::StoredSubscriptionDefinition;
 use crate::key::category::{Categorise, Category};
 use crate::key::database::all::DatabaseRoot;
 use crate::key::{impl_kv_key_storekey, impl_kv_range_storekey, key};
-use crate::val::TableName;
 
 key! {
 	/// Lv is used to track a live query and is cluster independent, i.e. it is tied
@@ -28,7 +28,7 @@ key! {
 	}
 }
 
-impl_kv_key_storekey!(Lq<'a> => SubscriptionDefinition);
+impl_kv_key_storekey!(Lq<'a> => StoredSubscriptionDefinition);
 
 impl Categorise for Lq<'_> {
 	fn categorise(&self) -> Category {

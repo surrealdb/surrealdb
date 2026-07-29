@@ -6,12 +6,12 @@
 
 // Common test setup helpers
 use surrealdb_kvs::TransactionType::Write;
+use surrealdb_strand::TableName;
 
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceDefinition, NamespaceId, TableId};
 use crate::dbs::{Capabilities, Session};
 use crate::kvs::Datastore;
-use crate::val::TableName;
 
 /// Helper to create a Datastore and write transaction with namespace and database set up
 async fn setup_tx_with_ns_db() -> (Datastore, crate::kvs::Transaction, NamespaceId, DatabaseId) {
@@ -93,6 +93,7 @@ async fn test_single_tx_cache_invalidation_on_index_put() {
 		table_name: tb.clone(),
 		cols: vec![],
 		index: Index::Idx,
+		count_cond: None,
 		comment: None,
 		prepare_remove: false,
 		format_version: 1,
@@ -127,6 +128,7 @@ async fn test_single_tx_cache_invalidation_on_index_delete() {
 		table_name: tb.clone(),
 		cols: vec![],
 		index: Index::Idx,
+		count_cond: None,
 		comment: None,
 		prepare_remove: false,
 		format_version: 1,
@@ -326,7 +328,7 @@ async fn test_single_tx_cache_invalidation_on_db_put_and_del() {
 /// Test cache invalidation for put_tb and del_tb (table list cache).
 #[tokio::test]
 async fn test_single_tx_cache_invalidation_on_tb_put_and_del() {
-	use crate::catalog::TableDefinition;
+	use crate::catalog::{FromStored, StoredTableDefinition, TableDefinition};
 
 	let (_ds, tx, ns, db) = setup_tx_with_ns_db().await;
 
@@ -335,7 +337,13 @@ async fn test_single_tx_cache_invalidation_on_tb_put_and_del() {
 	assert_eq!(tbs.len(), 0, "Initially there should be no tables");
 
 	// Add a table
-	let tb_def = TableDefinition::new(ns, db, TableId(1), TableName::from("test_table"));
+	let tb_def = TableDefinition::from_stored(&StoredTableDefinition::new(
+		ns,
+		db,
+		TableId(1),
+		TableName::from("test_table"),
+	))
+	.unwrap();
 	tx.put_tb("test", "test", &tb_def).await.unwrap();
 
 	// Query again — must see the new table
@@ -364,7 +372,7 @@ async fn test_single_tx_cache_invalidation_on_tb_put_and_del() {
 /// This also validates the pattern used for put_db_function, put_db_module, and put_db_api.
 #[tokio::test]
 async fn test_single_tx_cache_invalidation_on_param_put() {
-	use crate::catalog::ParamDefinition;
+	use crate::catalog::{FromStored, ParamDefinition, StoredParamDefinition};
 
 	let (_ds, tx, ns, db) = setup_tx_with_ns_db().await;
 
@@ -373,11 +381,12 @@ async fn test_single_tx_cache_invalidation_on_param_put() {
 	assert_eq!(pas.len(), 0, "Initially there should be no params");
 
 	// Add a param
-	let pa_def = ParamDefinition {
+	let pa_def = ParamDefinition::from_stored(&StoredParamDefinition {
 		name: "test_param".into(),
 		value: crate::val::Value::Bool(true),
 		..Default::default()
-	};
+	})
+	.unwrap();
 	tx.put_db_param(ns, db, &pa_def).await.unwrap();
 
 	// Query again — must see the new param

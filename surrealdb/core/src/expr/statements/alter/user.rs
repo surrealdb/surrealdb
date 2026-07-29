@@ -8,12 +8,11 @@ use tracing::instrument;
 
 use super::AlterKind;
 use crate::catalog;
-use crate::catalog::ScramCredential;
 use crate::catalog::providers::UserProvider;
+use crate::catalog::{Error, ScramCredential};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal};
 use crate::iam::{Action, ResourceKind};

@@ -65,10 +65,10 @@ use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
 use crate::ctx::{Context, FrozenContext};
-use crate::dbs::capabilities::{ArbitraryQueryTarget, EvalQueryTarget};
+use crate::dbs::capabilities::{ArbitraryQueryTarget, Error as CapabilitiesError, EvalQueryTarget};
 use crate::dbs::{Capabilities, Force, Options, Variables};
 use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::{Block, FlowResultExt as _, LogicalPlan, TopLevelExpr};
 use crate::fnc::args::Optional;
 use crate::iam::Auth;
@@ -111,7 +111,7 @@ pub(crate) fn prepare(
 	if !caps.allows_query(&ArbitraryQueryTarget::from(auth))
 		|| !caps.allows_eval_query(&EvalQueryTarget::from(auth))
 	{
-		bail!(Error::FunctionNotAllowed(name.to_string()));
+		bail!(CapabilitiesError::FunctionNotAllowed(name.to_string()));
 	}
 
 	// --- Parse with the live capabilities (so any SurrealQL experimental
@@ -123,7 +123,7 @@ pub(crate) fn prepare(
 	let config = surrealdb_cnf::CommonConfig::default();
 	let plan: LogicalPlan = match dialect {
 		Dialect::Surql => crate::syn::parse_with_capabilities(query, caps, &config)
-			.map_err(|e| Error::InvalidFunction {
+			.map_err(|e| ExecError::InvalidFunction {
 				name: name.to_string(),
 				message: e.to_string(),
 			})?
@@ -131,14 +131,14 @@ pub(crate) fn prepare(
 		#[cfg(feature = "gql")]
 		Dialect::Gql => {
 			crate::gql::parse_with_capabilities(query, caps, &config)
-				.map_err(|e| Error::InvalidFunction {
+				.map_err(|e| ExecError::InvalidFunction {
 					name: name.to_string(),
 					message: e.to_string(),
 				})?
 				.0
 		}
 		#[cfg(not(feature = "gql"))]
-		Dialect::Gql => bail!(Error::InvalidFunction {
+		Dialect::Gql => bail!(ExecError::InvalidFunction {
 			name: name.to_string(),
 			message: "GQL support was not enabled at compile time".to_string(),
 		}),
@@ -150,7 +150,7 @@ pub(crate) fn prepare(
 	for expr in plan.expressions {
 		match expr {
 			TopLevelExpr::Expr(expr) => statements.push(expr),
-			_ => bail!(Error::InvalidFunction {
+			_ => bail!(ExecError::InvalidFunction {
 				name: name.to_string(),
 				message: "only query statements may be evaluated; transaction-control and \
 				          session statements (BEGIN, CANCEL, COMMIT, USE, LIVE, KILL, OPTION, \
@@ -166,7 +166,7 @@ pub(crate) fn prepare(
 	// semantics. `eval::gql` is exempt: one GQL query lowers to several SurrealQL
 	// statements internally.
 	if matches!(dialect, Dialect::Surql) && statements.len() > 1 {
-		bail!(Error::InvalidFunction {
+		bail!(ExecError::InvalidFunction {
 			name: name.to_string(),
 			message: "eval::surql evaluates a single statement; wrap multiple statements in a \
 			          block, e.g. eval::surql(\"{ ... }\")"

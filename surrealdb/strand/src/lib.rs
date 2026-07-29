@@ -24,6 +24,14 @@
 //!
 //! This layout allows `as_str()` to be completely branchless, significantly improving the
 //! performance of equality and ordering comparisons for all variants.
+//!
+//! <section class="warning">
+//! <h3>Unstable!</h3>
+//! This crate is <b>SurrealDB internal API</b>. It does not adhere to SemVer and its API is
+//! free to change and break code even between patch versions. If you are looking for a stable
+//! interface to the SurrealDB library please have a look at
+//! <a href="https://crates.io/crates/surrealdb">the Rust SDK</a>.
+//! </section>
 
 use std::borrow::Borrow;
 use std::cmp::Ordering;
@@ -708,6 +716,10 @@ impl<'a> arbitrary::Arbitrary<'a> for Strand {
 		<&str as arbitrary::Arbitrary<'a>>::size_hint(depth)
 	}
 }
+
+mod table;
+
+pub use table::TableName;
 
 #[cfg(test)]
 mod tests {

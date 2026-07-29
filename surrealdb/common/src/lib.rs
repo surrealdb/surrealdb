@@ -11,7 +11,11 @@
 //! </section>
 
 #[macro_use]
+pub mod decimal;
+pub mod duration;
+pub mod fmt;
 pub mod ids;
+pub mod keywords;
 #[macro_use]
 pub mod mac;
 
@@ -20,10 +24,13 @@ pub mod sys;
 
 mod error;
 
-pub use error::{Error, ErrorCode, ErrorTrait, TypedError, source as source_error};
+pub use error::{
+	Error, ErrorCode, ErrorTrait, LeafError, TypedError, internal_todo, source as source_error,
+};
 
 pub mod future;
 pub mod mem_registry;
 pub mod non_max;
+pub mod range;
 pub mod span;
 pub mod str;

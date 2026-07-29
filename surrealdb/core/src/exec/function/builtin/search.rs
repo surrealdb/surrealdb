@@ -14,12 +14,11 @@ use anyhow::Result;
 use reblessive::tree::TreeStack;
 
 use crate::catalog::providers::DatabaseProvider;
-use crate::err::Error;
 use crate::exec::ContextLevel;
 use crate::exec::function::index::{IndexContext, IndexContextKind, IndexFunction};
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
 use crate::exec::physical_expr::EvalContext;
-use crate::expr::Kind;
+use crate::expr::{Error, Kind};
 use crate::fnc::args::{FromArgs, Optional};
 use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::highlighter::HighlightParams;

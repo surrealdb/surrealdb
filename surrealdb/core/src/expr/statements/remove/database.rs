@@ -2,12 +2,13 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 
 use super::retire_database_indexes;
+use crate::catalog::Error;
 use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
+use crate::expr::statements::subscriptions::kill_database_subscriptions;
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 
@@ -63,6 +64,10 @@ impl RemoveDatabaseStatement {
 		// Retire index state before deleting the database definition. Durable
 		// cleanup is transactional; local builder aborts are deferred until commit.
 		retire_database_indexes(ctx, &txn, db.namespace_id, db.database_id).await?;
+		// Tell every subscriber in the database that it is going away. The
+		// deferred delete below takes the whole `/*{ns}*{db}` prefix, `lq` rows
+		// included, so nothing else would ever wake these clients.
+		kill_database_subscriptions(ctx, &txn, db.namespace_id, db.database_id).await?;
 		// Remove the sequences
 		if let Some(seq) = ctx.get_sequences() {
 			seq.database_removed(&txn, db.namespace_id, db.database_id).await?;

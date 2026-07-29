@@ -23,7 +23,7 @@ use crate::err::Error;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::plan_or_compute::{block_required_context, legacy_compute};
 use crate::exec::planner::expr_to_physical_expr_at_depth;
-use crate::exec::{AccessMode, BoxFut};
+use crate::exec::{AccessMode, BoxFut, Error as ExecError};
 use crate::expr::{Block, ControlFlow, Expr, FlowResult};
 use crate::val::Value;
 
@@ -186,7 +186,7 @@ impl BlockPhysicalExpr {
 			Expr::Let(set_stmt) => {
 				// Check for protected parameter names
 				if PROTECTED_PARAM_NAMES.contains(&set_stmt.name.as_str()) {
-					return Err(Error::InvalidParam {
+					return Err(ExecError::InvalidParam {
 						name: set_stmt.name.to_string(),
 					}
 					.into());
@@ -219,24 +219,25 @@ impl BlockPhysicalExpr {
 							};
 							phys_expr.evaluate(eval_ctx).await?
 						}
-						Err(Error::PlannerUnimplemented(ref msg))
+						Err(Error::Exec(ExecError::PlannerUnimplemented(ref msg)))
 							if *frozen_ctx.new_planner_strategy()
 								== NewPlannerStrategy::AllReadOnlyStatements =>
 						{
-							return Err(ControlFlow::Err(anyhow::anyhow!(Error::Query {
+							return Err(ControlFlow::Err(anyhow::anyhow!(ExecError::Query {
 								message: format!("New executor does not support: {msg}"),
 							})));
 						}
-						Err(
-							e @ (Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_)),
-						) => {
+						Err(Error::Exec(
+							e @ (ExecError::PlannerUnsupported(_)
+							| ExecError::PlannerUnimplemented(_)),
+						)) => {
 							match &e {
-								Error::PlannerUnimplemented(msg) => {
+								ExecError::PlannerUnimplemented(msg) => {
 									tracing::warn!(
 										"PlannerUnimplemented fallback in block (LET): {msg}"
 									);
 								}
-								Error::PlannerUnsupported(msg) => {
+								ExecError::PlannerUnsupported(msg) => {
 									tracing::debug!(
 										"PlannerUnsupported fallback in block (LET): {msg}",
 									);
@@ -260,7 +261,7 @@ impl BlockPhysicalExpr {
 
 				// Apply type coercion if specified
 				let value = if let Some(kind) = &set_stmt.kind {
-					value.coerce_to_kind(kind).map_err(|e| Error::SetCoerce {
+					value.coerce_to_kind(kind).map_err(|e| ExecError::SetCoerce {
 						name: set_stmt.name.to_string(),
 						error: Box::new(e),
 					})?
@@ -307,22 +308,24 @@ impl BlockPhysicalExpr {
 						};
 						phys_expr.evaluate(eval_ctx).await
 					}
-					Err(Error::PlannerUnimplemented(ref msg))
+					Err(Error::Exec(ExecError::PlannerUnimplemented(ref msg)))
 						if *frozen_ctx.new_planner_strategy()
 							== NewPlannerStrategy::AllReadOnlyStatements =>
 					{
-						Err(ControlFlow::Err(anyhow::anyhow!(Error::Query {
+						Err(ControlFlow::Err(anyhow::anyhow!(ExecError::Query {
 							message: format!("New executor does not support: {msg}"),
 						})))
 					}
-					Err(e @ (Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_))) => {
+					Err(Error::Exec(
+						e @ (ExecError::PlannerUnsupported(_) | ExecError::PlannerUnimplemented(_)),
+					)) => {
 						match &e {
-							Error::PlannerUnimplemented(msg) => {
+							ExecError::PlannerUnimplemented(msg) => {
 								tracing::warn!(
 									"PlannerUnimplemented fallback in block (expr): {msg}"
 								);
 							}
-							Error::PlannerUnsupported(msg) => {
+							ExecError::PlannerUnsupported(msg) => {
 								tracing::debug!(
 									"PlannerUnsupported fallback in block (expr): {msg}",
 								);

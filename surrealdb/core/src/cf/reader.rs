@@ -1,15 +1,15 @@
 use std::borrow::Cow;
 
 use anyhow::Result;
+use surrealdb_strand::TableName;
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::cf::{ChangeSet, DatabaseMutation, TableMutations};
-use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::statements::show::ShowSince;
 use crate::key::database::all::DatabaseRoot;
 use crate::key::{KVKeyDecode, KVRange, KVValue, change};
 use crate::kvs::Transaction;
-use crate::val::TableName;
 
 // Reads the change feed for a specific database or a table,
 // starting from a specific timestamp or version number.
@@ -32,14 +32,14 @@ pub async fn read(
 	// Calculate the start of the changefeed range
 	let ts = match start {
 		ShowSince::Versionstamp(x) => {
-			ts_impl.create_from_versionstamp(x as u128).ok_or_else(|| Error::Query {
+			ts_impl.create_from_versionstamp(x as u128).ok_or_else(|| ExecError::Query {
 				message: format!(
 					"Invalid versionstamp `{x}`, outside of range for kv-store timestamps"
 				),
 			})?
 		}
 		ShowSince::Timestamp(x) => {
-			ts_impl.create_from_datetime(x.0).ok_or_else(|| Error::Query {
+			ts_impl.create_from_datetime(x.0).ok_or_else(|| ExecError::Query {
 				message: format!(
 					"Invalid versionstamp `{x}`, outside of range for kv-store timestamps"
 				),

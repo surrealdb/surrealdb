@@ -71,7 +71,7 @@ impl From<Datetime> for DateTime<Utc> {
 
 impl Display for Datetime {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		self.0.to_rfc3339_opts(SecondsFormat::AutoSi, true).fmt(f)
+		fmt_datetime_sql(self.0).fmt(f)
 	}
 }
 
@@ -80,6 +80,16 @@ impl ToSql for Datetime {
 		use crate as surrealdb_types;
 		write_sql!(f, fmt, "d{}", QuoteStr(&self.to_string()));
 	}
+}
+
+/// Format a [`DateTime<Utc>`] using the SurrealQL datetime rendering (RFC 3339,
+/// `Z`-suffixed, with automatic fractional-second precision).
+///
+/// This is the exact rendering [`Datetime`]'s [`Display`]/[`ToSql`] implementation
+/// uses; it is exposed so layers holding a raw `DateTime<Utc>` can print the same
+/// text without wrapping.
+pub fn fmt_datetime_sql(datetime: DateTime<Utc>) -> String {
+	datetime.to_rfc3339_opts(SecondsFormat::AutoSi, true)
 }
 
 impl TryFrom<(i64, u32)> for Datetime {

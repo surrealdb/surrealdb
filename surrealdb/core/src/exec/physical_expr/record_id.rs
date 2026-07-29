@@ -1,6 +1,7 @@
 use std::ops::Bound;
 use std::sync::Arc;
 
+use common::fmt::{EscapeIdent, EscapeRidKey};
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
@@ -8,7 +9,6 @@ use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, BoxFut, CombineAccessModes, ContextLevel};
 use crate::expr::FlowResult;
 use crate::expr::record_id::RecordIdKeyGen;
-use crate::fmt::EscapeRidKey;
 use crate::val::{Array, Object, RecordId, RecordIdKey, RecordIdKeyRange, TableName, Uuid, Value};
 
 // ============================================================================
@@ -201,8 +201,9 @@ impl PhysicalExpr for RecordIdExpr {
 
 impl ToSql for RecordIdExpr {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		// Use EscapeRidKey for the table name to match Value::RecordId rendering.
-		EscapeRidKey(&self.table).fmt_sql(f, fmt);
+		// Escaped as an identifier, matching `Value::RecordId`; see the note
+		// there for why the key half's escaper is wrong in table position.
+		EscapeIdent(self.table.as_str()).fmt_sql(f, fmt);
 		f.push(':');
 		self.key.fmt_sql(f, fmt);
 	}

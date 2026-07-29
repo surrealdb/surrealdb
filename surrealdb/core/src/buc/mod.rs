@@ -21,14 +21,15 @@ use crate::buc::store::ObjectStore;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::buc::store::file::FileStore;
 use crate::buc::store::memory::MemoryStore;
-use crate::err::Error;
 
 mod controller;
+mod error;
 pub mod manager;
 pub mod store;
 
 pub(crate) use controller::BucketController;
 pub use controller::BucketOperation;
+pub(crate) use error::Error;
 
 #[derive(Clone, Debug, Default)]
 pub struct Config {

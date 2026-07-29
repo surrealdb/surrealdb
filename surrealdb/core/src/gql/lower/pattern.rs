@@ -20,6 +20,7 @@
 //! traversal has no place to evaluate it.
 
 use reblessive::Stk;
+use surrealdb_strand::TableName;
 
 use crate::expr::match_plan::{
 	BindingId, EdgeQuantifier, EdgeStep, ExpandDirection, MatchClausePlan, MatchPredicate,
@@ -34,7 +35,6 @@ use crate::gql::lower::binding::{ClauseBindings, PatternBindings, Registry};
 use crate::gql::lower::expr::{self, Scope};
 use crate::syn::error::{SyntaxError, bail};
 use crate::syn::token::Span;
-use crate::val::TableName;
 
 /// Lowers one (flattened) MATCH clause into its [`MatchClausePlan`].
 ///

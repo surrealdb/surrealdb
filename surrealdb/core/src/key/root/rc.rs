@@ -20,12 +20,12 @@ use std::io;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use surrealdb_strand::TableName;
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::key::category::{Categorise, Category};
 use crate::key::{impl_kv_key_storekey, impl_kv_range_storekey, impl_kv_value_revisioned, key};
-use crate::val::TableName;
 
 /// Mutable state stored as the value of a [`ReclaimKey`].
 ///

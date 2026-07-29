@@ -7,11 +7,11 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use super::DefineKind;
 use crate::catalog::providers::DatabaseProvider;
-use crate::catalog::{MlModelDefinition, Permission};
+use crate::catalog::{Error as CatalogError, MlModelDefinition, Permission};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::{Base, Expr, FlowResultExt};
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::all::DatabaseRoot;
@@ -41,7 +41,7 @@ impl DefineModelStatement {
 		ctx.is_allowed(opt, Action::Edit, ResourceKind::Model, Base::Db)?;
 		// A PERMISSIONS clause must not perform writes (GHSA-66r2-5gwj-gxm2).
 		if self.permissions.has_direct_write() {
-			bail!(Error::PermissionClauseNotReadonly {
+			bail!(ExecError::PermissionClauseNotReadonly {
 				kind: "model",
 				name: self.name.to_string(),
 			});
@@ -54,7 +54,7 @@ impl DefineModelStatement {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
-						bail!(Error::MlAlreadyExists {
+						bail!(CatalogError::MlAlreadyExists {
 							name: model.name.to_string(),
 						});
 					}
@@ -87,7 +87,8 @@ impl DefineModelStatement {
 				version: self.version.clone(),
 				comment,
 				permissions: self.permissions.clone(),
-			},
+			}
+			.to_stored(),
 		)
 		.await?;
 		// Clear the cache

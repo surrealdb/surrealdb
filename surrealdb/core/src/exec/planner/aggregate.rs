@@ -7,6 +7,7 @@ use std::sync::Arc;
 use super::Planner;
 use super::util::{derive_field_name, idiom_to_field_path};
 use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::exec::field_path::FieldPathPart;
 use crate::exec::operators::{
 	AggregateExprInfo, AggregateField, ExtractedAggregate, aggregate_field_name,
@@ -127,10 +128,10 @@ impl<'ctx> Planner<'ctx> {
 				for field in field_list {
 					match field {
 						Field::All => {
-							return Err(Error::Query {
+							return Err(ExecError::Query {
 								message: "Incorrect selector for aggregate selection, expression `*` within in selector cannot be aggregated in a group."
 									.to_string(),
-							});
+							}.into());
 						}
 						Field::Single(selector) => {
 							// For an explicit alias, walk the idiom parts
@@ -352,9 +353,12 @@ impl MutVisitor for AggregateExtractor<'_> {
 
 			if self.registry.get_aggregate(name.as_str()).is_some() {
 				if self.inside_aggregate {
-					self.error = Some(Error::Query {
-						message: "Nested aggregate functions are not supported".to_string(),
-					});
+					self.error = Some(
+						ExecError::Query {
+							message: "Nested aggregate functions are not supported".to_string(),
+						}
+						.into(),
+					);
 					return Ok(());
 				}
 

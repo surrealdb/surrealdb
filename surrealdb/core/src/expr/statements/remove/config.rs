@@ -1,10 +1,10 @@
 use anyhow::Result;
 
+use crate::catalog::Error;
 use crate::catalog::base::Base;
 use crate::catalog::providers::{DatabaseProvider, RootProvider};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
-use crate::err::Error;
 use crate::expr::Value;
 use crate::iam::{Action, ConfigKind, ResourceKind};
 
@@ -17,7 +17,7 @@ pub(crate) struct RemoveConfigStatement {
 impl RemoveConfigStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(&self, ctx: &FrozenContext, opt: &Options) -> Result<Value> {
-		let base = self.kind.base();
+		let base = crate::expr::statements::define::config::config_kind_base(&self.kind);
 		// Allowed to run?
 		ctx.is_allowed(
 			opt,

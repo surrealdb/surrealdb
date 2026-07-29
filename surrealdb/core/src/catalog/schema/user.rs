@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use revision::revisioned;
+pub use surrealdb_iam::ScramCredential;
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -9,27 +10,6 @@ use crate::expr::statements::info::InfoStructure;
 use crate::key::impl_kv_value_revisioned;
 use crate::sql;
 use crate::val::{Array, Value};
-
-/// SCRAM-SHA-256 verifier material for a user.
-///
-/// This is stored alongside the Argon2 `hash` on [`UserDefinition`] so that
-/// transports which negotiate SCRAM (e.g. the Postgres wire protocol) can
-/// authenticate a user without SurrealDB ever holding the plaintext password.
-///
-/// The mechanism is fixed to SCRAM-SHA-256, so it is not stored. See
-/// [`crate::iam::scram`] for the derivation and verification logic.
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct ScramCredential {
-	/// PBKDF2 iteration count used to derive the salted password.
-	pub iterations: u32,
-	/// Random per-user salt.
-	pub salt: Vec<u8>,
-	/// `H(HMAC(SaltedPassword, "Client Key"))` — used to verify a client proof.
-	pub stored_key: Vec<u8>,
-	/// `HMAC(SaltedPassword, "Server Key")` — used to sign the server's final message.
-	pub server_key: Vec<u8>,
-}
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -88,19 +68,11 @@ impl UserDefinition {
 			roles: this.roles,
 			token_duration: this
 				.token_duration
-				.map(|d| {
-					sql::Expr::Literal(sql::Literal::Duration(crate::types::PublicDuration::from(
-						d,
-					)))
-				})
+				.map(|d| sql::Expr::Literal(sql::Literal::Duration(d)))
 				.unwrap_or_else(|| sql::Expr::Literal(sql::Literal::None)),
 			session_duration: this
 				.session_duration
-				.map(|d| {
-					sql::Expr::Literal(sql::Literal::Duration(crate::types::PublicDuration::from(
-						d,
-					)))
-				})
+				.map(|d| sql::Expr::Literal(sql::Literal::Duration(d)))
 				.unwrap_or_else(|| sql::Expr::Literal(sql::Literal::None)),
 			comment: this
 				.comment

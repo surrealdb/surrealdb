@@ -64,7 +64,8 @@ pub enum NewPlannerStrategy {
 	/// Skip the new planner entirely; always use the compute executor.
 	ComputeOnly,
 	/// Require the new planner for all read-only statements.
-	/// Promotes Error::PlannerUnimplemented to Error::Query (hard error) instead of falling back.
+	/// Promotes `exec::Error::PlannerUnimplemented` to `exec::Error::Query` (hard error)
+	/// instead of falling back.
 	AllReadOnlyStatements,
 }
 
@@ -149,7 +150,7 @@ impl Session {
 	}
 
 	pub(crate) fn values(&self) -> Vec<(&'static str, Value)> {
-		use crate::sql::expression::convert_public_value_to_internal;
+		use crate::val::convert_public::convert_public_value_to_internal;
 
 		let access = self.ac.as_deref().map(Value::from).unwrap_or(Value::None);
 		let auth = self.rd.clone().map(convert_public_value_to_internal).unwrap_or(Value::None);
@@ -286,7 +287,7 @@ impl DurableSession {
 	/// Capture the durable form of a session, expiring at `expires_at`
 	/// (milliseconds since the UNIX epoch).
 	pub(crate) fn from_session(session: &Session, expires_at: u64) -> Self {
-		use crate::sql::expression::convert_public_value_to_internal;
+		use crate::val::convert_public::convert_public_value_to_internal;
 		Self {
 			expires_at,
 			au: (*session.au).clone(),

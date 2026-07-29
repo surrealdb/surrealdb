@@ -15,6 +15,7 @@
 //! node that is neither a labelled new node nor a bound-variable reference.
 
 use reblessive::Stk;
+use surrealdb_strand::TableName;
 
 use crate::expr::match_plan::{
 	BindingId, BindingKind, DetachMode, InsertEdgePlan, InsertNodePlan, InsertStage, MutationStage,
@@ -28,7 +29,6 @@ use crate::gql::ast::{
 use crate::gql::lower::binding::Registry;
 use crate::gql::lower::expr::{Scope, lower_value};
 use crate::syn::error::{SyntaxError, bail, syntax_error};
-use crate::val::TableName;
 
 /// A new `INSERT` node awaiting property lowering: `(binding, table, raw props)`.
 type PendingNode<'ast> = (BindingId, TableName, &'ast [(Ident, GqlExpr)]);

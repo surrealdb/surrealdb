@@ -53,29 +53,23 @@ impl IndexStores {
 
 	pub(crate) async fn get_index_hnsw(
 		&self,
-		ns: NamespaceId,
-		db: DatabaseId,
 		ctx: &FrozenContext,
 		tb: TableId,
-		ix: &IndexDefinition,
+		ikb: &IndexKeyBase,
 		p: &HnswParams,
 	) -> Result<SharedHnswIndex> {
-		let ikb = IndexKeyBase::new(ns, db, ix.table_name.clone(), ix.index_id);
-		self.0.hnsw_indexes.get(ctx, tb, &ikb, p).await
+		self.0.hnsw_indexes.get(ctx, tb, ikb, p).await
 	}
 
 	/// Returns the process-local DiskANN wrapper for an index, creating it and sharing the cache.
 	#[cfg(diskann)]
 	pub(crate) async fn get_index_diskann(
 		&self,
-		ns: NamespaceId,
-		db: DatabaseId,
 		tb: TableId,
-		ix: &IndexDefinition,
+		ikb: &IndexKeyBase,
 		p: &DiskAnnParams,
 	) -> Result<SharedDiskAnnIndex> {
-		let ikb = IndexKeyBase::new(ns, db, ix.table_name.clone(), ix.index_id);
-		self.0.diskann_indexes.get(tb, &ikb, p, self.0.diskann_cache.clone()).await
+		self.0.diskann_indexes.get(tb, ikb, p, self.0.diskann_cache.clone()).await
 	}
 
 	/// Evict process-local index wrappers and caches for a retired index.

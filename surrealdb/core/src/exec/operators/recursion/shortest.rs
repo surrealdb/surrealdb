@@ -125,7 +125,7 @@ pub(crate) async fn evaluate_recurse_shortest(
 				// Non-RecordId values during recursion are an error --
 				// recursion is intended purely for record graph traversal.
 				if !is_recursion_target(&v) {
-					return Err(crate::err::Error::InvalidRecursionTarget {
+					return Err(crate::exec::Error::InvalidRecursionTarget {
 						value: v.to_sql(),
 					}
 					.into());
@@ -153,7 +153,7 @@ pub(crate) async fn evaluate_recurse_shortest(
 	// Unbounded recursion truncated at the system limit with the queue still
 	// non-empty: hard error, matching legacy (see `RecursionBounds`).
 	if bounds.errors_on_limit() && !queue.is_empty() {
-		return Err(crate::err::Error::IdiomRecursionLimitExceeded {
+		return Err(crate::exec::Error::IdiomRecursionLimitExceeded {
 			limit: bounds.system_limit,
 		}
 		.into());

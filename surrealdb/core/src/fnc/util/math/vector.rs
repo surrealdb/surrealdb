@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use anyhow::{Result, ensure};
 
-use crate::err::Error;
+use crate::expr::Error;
 use crate::fnc::util::math::ToFloat;
 use crate::val::Number;
 

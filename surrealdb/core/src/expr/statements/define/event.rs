@@ -6,11 +6,10 @@ use uuid::Uuid;
 
 use super::DefineKind;
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{EventDefinition, EventKind, TableDefinition};
+use crate::catalog::{Error, EventDefinition, EventKind, TableDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, FlowResultExt};
 use crate::iam::{Action, AuthLimit, ResourceKind};
@@ -85,22 +84,23 @@ impl DefineEventStatement {
 		};
 		txn.set_key(
 			&key,
-			&EventDefinition {
-				name: name.clone().into(),
-				target_table: target_table.clone(),
-				when: self.when.clone(),
-				then: self.then.clone(),
-				auth_limit: AuthLimit::new_from_auth(opt.auth.as_ref()).into(),
+			&EventDefinition::new(
+				name.clone().into(),
+				target_table.clone(),
+				self.when.clone(),
+				self.then.clone(),
+				self.event_kind.clone(),
+				AuthLimit::new_from_auth(opt.auth.as_ref()).into(),
 				comment,
-				kind: self.event_kind.clone(),
-			},
+			)
+			.to_stored(),
 		)
 		.await?;
 
 		// Refresh the table cache
 		let tb = TableDefinition {
 			cache_events_ts: Uuid::now_v7(),
-			..tb.as_ref().clone()
+			..(*tb).clone()
 		};
 		txn.put_tb(ns_name, db_name, &tb).await?;
 		// Clear the cache

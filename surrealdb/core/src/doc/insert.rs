@@ -1,12 +1,11 @@
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use reblessive::tree::Stk;
 
 use super::IgnoreError;
 use crate::catalog::providers::TableProvider;
 use crate::ctx::FrozenContext;
 use crate::dbs::{Options, Statement};
-use crate::doc::Document;
-use crate::err::Error;
+use crate::doc::{Document, Error as DocError};
 use crate::val::Value;
 
 impl Document {
@@ -50,33 +49,50 @@ impl Document {
 				}
 			}
 			// There was an error creating the record
-			Err(IgnoreError::Error(e)) => match e.downcast() {
-				// We got an index exists error
-				Ok(Error::IndexExists {
-					record,
-					..
-				}) if !self.is_specific_record_id() => record,
-				// This record already exists
-				Ok(Error::RecordExists {
-					record,
-				}) => record,
-				// There was a conflict error
-				Ok(e) => {
-					ctx.tx().rollback_to_save_point().await?;
-					self.mutated = false;
-					if stm.is_ignore() {
-						return Err(IgnoreError::Ignore);
-					} else {
-						return Err(IgnoreError::Error(anyhow!(e)));
+			Err(IgnoreError::Error(e)) => {
+				// Only two failures name an existing record the update can be
+				// retried against. A unique-index conflict is raised by the
+				// index layer and a duplicate record id by the document layer,
+				// so each is recovered on its own. Both recoveries only borrow,
+				// so `e` stays whole for the arm that re-raises it.
+				let conflict = match crate::idx::index_exists_record(&e) {
+					// An index conflict against a record id the statement named
+					// itself cannot be retried, so it is reported like any other
+					// create conflict
+					Some(record) if !self.is_specific_record_id() => Some(record),
+					Some(_) => None,
+					None => match e.downcast_ref::<DocError>() {
+						Some(DocError::RecordExists {
+							record,
+						}) => Some(record.clone()),
+						_ => None,
+					},
+				};
+				match conflict {
+					Some(record) => record,
+					// Every other create failure belongs to this row whichever
+					// layer raised it, so `INSERT IGNORE` skips the row exactly
+					// as it does when there is no `ON DUPLICATE KEY UPDATE`
+					// clause. Classifying by error type instead would silently
+					// stop ignoring a failure the moment it moved layers, which
+					// `reproductions/insert_ignore_on_duplicate_key_leaf_error`
+					// pins: a `VALUE (THROW ...)` is raised outside the document
+					// layer and must still be skipped.
+					//
+					// This is wider than the pre-split behaviour, which surfaced
+					// anything that did not downcast to `err::Error`. That is a
+					// deliberate behaviour change, not an oversight.
+					None => {
+						ctx.tx().rollback_to_save_point().await?;
+						self.mutated = false;
+						if stm.is_ignore() {
+							return Err(IgnoreError::Ignore);
+						} else {
+							return Err(IgnoreError::Error(e));
+						}
 					}
 				}
-				// Unrelated error — always surface
-				Err(e) => {
-					ctx.tx().rollback_to_save_point().await?;
-					self.mutated = false;
-					return Err(IgnoreError::Error(e));
-				}
-			},
+			}
 		};
 		// Roll back the create attempt before falling through to update
 		ctx.tx().rollback_to_save_point().await?;

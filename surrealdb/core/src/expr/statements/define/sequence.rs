@@ -4,12 +4,12 @@ use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
 use super::DefineKind;
-use crate::catalog::SequenceDefinition;
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider};
+use crate::catalog::{Error as CatalogError, SequenceDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, FlowResultExt, Literal, Value};
 use crate::iam::{Action, ResourceKind};
@@ -68,7 +68,7 @@ impl DefineSequenceStatement {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
-						bail!(Error::SeqAlreadyExists {
+						bail!(CatalogError::SeqAlreadyExists {
 							name: name.clone(),
 						});
 					}
@@ -101,7 +101,7 @@ impl DefineSequenceStatement {
 			.cast_to::<i64>()?;
 
 		let Ok(batch) = u32::try_from(batch) else {
-			bail!(Error::Query {
+			bail!(ExecError::Query {
 				message: format!(
 					"`{batch}` is not valid batch size for a sequence definition. A batch size must be within 0..={}",
 					u32::MAX

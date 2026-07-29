@@ -95,10 +95,10 @@ fn database_fixtures() -> TypeFixtures {
 	}
 }
 
-/// Generate all fixtures for TableDefinition
+/// Generate all fixtures for StoredTableDefinition
 fn table_fixtures() -> TypeFixtures {
 	TypeFixtures {
-		type_name: "TableDefinition",
+		type_name: "StoredTableDefinition",
 		fixtures: vec![
 			Fixture {
 				name: "TABLE_BASIC",
@@ -121,6 +121,11 @@ fn table_fixtures() -> TypeFixtures {
 				bytes: fix::table_relation().kv_encode_value().unwrap(),
 			},
 			Fixture {
+				name: "TABLE_WITH_STORED_CLAUSES",
+				description: "table with a view stored as its clauses",
+				bytes: fix::table_with_stored_clauses().kv_encode_value().unwrap(),
+			},
+			Fixture {
 				name: "TABLE_WITH_MATERIALIZED_VIEW",
 				description: "table with materialized view",
 				bytes: fix::table_with_materialized_view().kv_encode_value().unwrap(),
@@ -134,10 +139,10 @@ fn table_fixtures() -> TypeFixtures {
 	}
 }
 
-/// Generate all fixtures for SubscriptionDefinition
+/// Generate all fixtures for StoredSubscriptionDefinition
 fn subscription_fixtures() -> TypeFixtures {
 	TypeFixtures {
-		type_name: "SubscriptionDefinition",
+		type_name: "StoredSubscriptionDefinition",
 		fixtures: vec![
 			Fixture {
 				name: "SUBSCRIPTION_BASIC",
@@ -158,10 +163,10 @@ fn subscription_fixtures() -> TypeFixtures {
 	}
 }
 
-/// Generate all fixtures for AccessDefinition
+/// Generate all fixtures for StoredAccessDefinition
 fn access_definition_fixtures() -> TypeFixtures {
 	TypeFixtures {
-		type_name: "AccessDefinition",
+		type_name: "StoredAccessDefinition",
 		fixtures: vec![
 			Fixture {
 				name: "ACCESS_BEARER",
@@ -240,10 +245,10 @@ fn analyzer_fixtures() -> TypeFixtures {
 	}
 }
 
-/// Generate all fixtures for ApiDefinition
+/// Generate all fixtures for StoredApiDefinition
 fn api_fixtures() -> TypeFixtures {
 	TypeFixtures {
-		type_name: "ApiDefinition",
+		type_name: "StoredApiDefinition",
 		fixtures: vec![
 			Fixture {
 				name: "API_BASIC",
@@ -264,10 +269,10 @@ fn api_fixtures() -> TypeFixtures {
 	}
 }
 
-/// Generate all fixtures for BucketDefinition
+/// Generate all fixtures for StoredBucketDefinition
 fn bucket_fixtures() -> TypeFixtures {
 	TypeFixtures {
-		type_name: "BucketDefinition",
+		type_name: "StoredBucketDefinition",
 		fixtures: vec![
 			Fixture {
 				name: "BUCKET_BASIC",
@@ -283,10 +288,10 @@ fn bucket_fixtures() -> TypeFixtures {
 	}
 }
 
-/// Generate all fixtures for ConfigDefinition
+/// Generate all fixtures for StoredConfigDefinition
 fn config_fixtures() -> TypeFixtures {
 	TypeFixtures {
-		type_name: "ConfigDefinition",
+		type_name: "StoredConfigDefinition",
 		fixtures: vec![
 			Fixture {
 				name: "CONFIG_GRAPHQL",
@@ -312,10 +317,10 @@ fn config_fixtures() -> TypeFixtures {
 	}
 }
 
-/// Generate all fixtures for EventDefinition
+/// Generate all fixtures for StoredEventDefinition
 fn event_fixtures() -> TypeFixtures {
 	TypeFixtures {
-		type_name: "EventDefinition",
+		type_name: "StoredEventDefinition",
 		fixtures: vec![
 			Fixture {
 				name: "EVENT_BASIC",
@@ -331,10 +336,10 @@ fn event_fixtures() -> TypeFixtures {
 	}
 }
 
-/// Generate all fixtures for FieldDefinition
+/// Generate all fixtures for StoredFieldDefinition
 fn field_fixtures() -> TypeFixtures {
 	TypeFixtures {
-		type_name: "FieldDefinition",
+		type_name: "StoredFieldDefinition",
 		fixtures: vec![
 			Fixture {
 				name: "FIELD_BASIC",
@@ -370,10 +375,10 @@ fn field_fixtures() -> TypeFixtures {
 	}
 }
 
-/// Generate all fixtures for FunctionDefinition
+/// Generate all fixtures for StoredFunctionDefinition
 fn function_fixtures() -> TypeFixtures {
 	TypeFixtures {
-		type_name: "FunctionDefinition",
+		type_name: "StoredFunctionDefinition",
 		fixtures: vec![
 			Fixture {
 				name: "FUNCTION_BASIC",
@@ -389,10 +394,10 @@ fn function_fixtures() -> TypeFixtures {
 	}
 }
 
-/// Generate all fixtures for IndexDefinition
+/// Generate all fixtures for StoredIndexDefinition
 fn index_fixtures() -> TypeFixtures {
 	TypeFixtures {
-		type_name: "IndexDefinition",
+		type_name: "StoredIndexDefinition",
 		fixtures: vec![
 			Fixture {
 				name: "INDEX_BASIC",
@@ -423,10 +428,10 @@ fn index_fixtures() -> TypeFixtures {
 	}
 }
 
-/// Generate all fixtures for MlModelDefinition
+/// Generate all fixtures for StoredMlModelDefinition
 fn model_fixtures() -> TypeFixtures {
 	TypeFixtures {
-		type_name: "MlModelDefinition",
+		type_name: "StoredMlModelDefinition",
 		fixtures: vec![Fixture {
 			name: "MODEL_BASIC",
 			description: "ML model definition",
@@ -435,10 +440,10 @@ fn model_fixtures() -> TypeFixtures {
 	}
 }
 
-/// Generate all fixtures for ParamDefinition
+/// Generate all fixtures for StoredParamDefinition
 fn param_fixtures() -> TypeFixtures {
 	TypeFixtures {
-		type_name: "ParamDefinition",
+		type_name: "StoredParamDefinition",
 		fixtures: vec![
 			Fixture {
 				name: "PARAM_BOOL",
@@ -675,10 +680,10 @@ fn version_fixtures() -> TypeFixtures {
 	}
 }
 
-/// Generate all fixtures for ApiActionDefinition
+/// Generate all fixtures for StoredApiActionDefinition
 fn api_action_fixtures() -> TypeFixtures {
 	TypeFixtures {
-		type_name: "ApiActionDefinition",
+		type_name: "StoredApiActionDefinition",
 		fixtures: vec![
 			Fixture {
 				name: "API_ACTION_BASIC",
@@ -799,10 +804,10 @@ fn id_fixtures() -> TypeFixtures {
 	}
 }
 
-/// Generate all fixtures for ModuleDefinition
+/// Generate all fixtures for StoredModuleDefinition
 fn module_definition_fixtures() -> TypeFixtures {
 	TypeFixtures {
-		type_name: "ModuleDefinition",
+		type_name: "StoredModuleDefinition",
 		fixtures: vec![
 			Fixture {
 				name: "MODULE_SURREALISM",
@@ -1119,13 +1124,38 @@ fn generator_v3_1_1() {
 ///
 /// 3.3.0 bumps two definitions to revision 2: `UserDefinition` (adding the
 /// optional `scram` SCRAM-SHA-256 verifier field, plus a new `USER_WITH_SCRAM`
-/// fixture) and `IndexDefinition` (adding `format_version` for the shared
+/// fixture) and `StoredIndexDefinition` (adding `format_version` for the shared
 /// table-level doc-ID space). The `USER_*` and `INDEX_*` fixtures re-encode to
 /// new bytes; every other fixture is byte-identical to 3.1.1.
 #[test]
 #[ignore]
 fn generator_v3_3_0() {
 	run_generator("v3_3_0", "3.3.0");
+}
+
+/// Regenerates `v3_4_0.rs`.
+///
+/// ```text
+/// cargo test -p surrealdb-core --lib \
+///     catalog::compat::generator::generator_v3_4_0 -- --ignored --nocapture
+/// ```
+///
+/// Copy the output into `v3_4_0.rs`, then paste the printed hash into
+/// the assertion in `test_v3_4_0_remains_unchanged` below.
+///
+/// 3.4.0 is the snapshot the byte-exact wire-stability assertion compares the
+/// current encoder against, so it is the one version whose fixtures must
+/// re-encode to exactly these bytes. It bumps three definitions, which store
+/// their expression-bearing clauses as canonical SurrealQL text rather than
+/// structurally: `StoredFieldDefinition`, `StoredFunctionDefinition` and
+/// `StoredSubscriptionDefinition`. A table's view moved the same way but kept
+/// revision 1, adding a variant instead, so no table fixture changed and
+/// `TABLE_WITH_STORED_CLAUSES` was added to freeze the new shape's bytes; every
+/// other fixture is byte-identical to 3.3.0.
+#[test]
+#[ignore]
+fn generator_v3_4_0() {
+	run_generator("v3_4_0", "3.4.0");
 }
 
 #[test]
@@ -1211,7 +1241,7 @@ fn test_v3_3_0_remains_unchanged() {
 	//
 	// v3_3_0 captures the wire format after two revision-2 bumps landed in
 	// 3.3.0: `UserDefinition` gained the optional `scram` SCRAM-SHA-256 verifier
-	// (with a new `USER_WITH_SCRAM` fixture) and `IndexDefinition` gained
+	// (with a new `USER_WITH_SCRAM` fixture) and `StoredIndexDefinition` gained
 	// `format_version` for the shared table-level doc-ID space. The `USER_*` and
 	// `INDEX_*` fixtures re-encode; every other fixture is
 	// byte-identical to 3.1.1.

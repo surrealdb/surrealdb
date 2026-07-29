@@ -21,6 +21,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use parking_lot::Mutex;
 use surrealdb_kvs::TransactionType::Read;
+use surrealdb_strand::TableName;
 
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 use crate::key::database::all::DatabaseRoot;
@@ -28,7 +29,6 @@ use crate::key::{KVKeyDecode, KVRange, KVValue, lqe};
 use crate::kvs::Datastore;
 use crate::lq::event::{LiveEvent, LiveEvents};
 use crate::lq::subscriber::replay_table_live_events;
-use crate::val::TableName;
 
 /// Per-node live-query router state: the tail cursor over the global
 /// versionstamp space of the `lqe` keyspace.

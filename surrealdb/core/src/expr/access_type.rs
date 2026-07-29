@@ -2,9 +2,9 @@ use std::str::FromStr;
 
 use anyhow::Result;
 
-use crate::err::Error;
 use crate::expr::statements::DefineAccessStatement;
 use crate::expr::{Algorithm, Expr, Literal};
+use crate::iam::Error as AuthError;
 
 /// The type of access methods available
 
@@ -187,12 +187,12 @@ impl BearerAccessType {
 }
 
 impl FromStr for BearerAccessType {
-	type Err = Error;
+	type Err = AuthError;
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		match s.to_ascii_lowercase().as_str() {
 			"bearer" => Ok(Self::Bearer),
 			"refresh" => Ok(Self::Refresh),
-			_ => Err(Error::AccessGrantBearerInvalid),
+			_ => Err(AuthError::AccessGrantBearerInvalid),
 		}
 	}
 }

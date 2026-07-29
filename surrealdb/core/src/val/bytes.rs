@@ -76,3 +76,10 @@ mod tests {
 		assert_eq!(val, deserialized);
 	}
 }
+
+#[cfg(feature = "arbitrary")]
+impl<'a> arbitrary::Arbitrary<'a> for Bytes {
+	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+		Ok(Bytes(::bytes::Bytes::copy_from_slice(u.arbitrary()?)))
+	}
+}

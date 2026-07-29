@@ -1275,8 +1275,11 @@ implement_visitor! {
 		match p {
 			Permission::None |
 				Permission::Full => {},
-			Permission::Specific(e) => {
-				this.visit_expr(e)?;
+			Permission::Specific(expr) => {
+				// Walked directly: a statement's guard is an expression, not stored
+				// text, so a collecting pass sees it in full with nothing to parse
+				// and nothing that can fail.
+				this.visit_expr(expr)?;
 			},
 		}
 		Ok(())
@@ -2846,8 +2849,12 @@ implement_visitor_mut! {
 		match p {
 			Permission::None |
 				Permission::Full => {},
-			Permission::Specific(e) => {
-				this.visit_mut_expr(e)?;
+			Permission::Specific(expr) => {
+				// A statement's guard is an expression, so a mutating pass walks it
+				// directly. It becomes canonical text only when the definition it
+				// belongs to is written, which is why nothing here compiles, renders,
+				// or has to decide whether the tree changed.
+				this.visit_mut_expr(expr)?;
 			},
 		}
 		Ok(())
@@ -3275,5 +3282,62 @@ implement_visitor_mut! {
 			},
 		}
 		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::convert::Infallible;
+
+	use super::{MutVisitor, VisitMut};
+	use crate::catalog::Permission;
+	use crate::expr::{Expr, Literal};
+
+	fn guard(p: &Permission) -> &Expr {
+		let Permission::Specific(expr) = p else {
+			panic!("expected a specific permission");
+		};
+		expr
+	}
+
+	/// A mutating pass reaches the guard expression and its mutation sticks.
+	///
+	/// A statement's guard is an expression, so this is a plain walk. It used to
+	/// be a compile of stored text followed by a re-render, which is what made a
+	/// no-op pass able to rewrite persisted definition text and made the
+	/// rewrite depend on `Expr` equality.
+	#[test]
+	fn mutating_walk_reaches_the_guard() {
+		struct Increment;
+		impl MutVisitor for Increment {
+			type Error = Infallible;
+
+			fn visit_mut_expr(&mut self, e: &mut Expr) -> Result<(), Self::Error> {
+				if let Expr::Literal(Literal::Integer(i)) = e {
+					*i += 1;
+				}
+				e.visit_mut(self)
+			}
+		}
+
+		let mut p = Permission::Specific(Expr::Literal(Literal::Integer(1)));
+		p.visit_mut(&mut Increment).unwrap();
+		assert_eq!(guard(&p), &Expr::Literal(Literal::Integer(2)));
+	}
+
+	/// A pass that changes nothing leaves the guard untouched. There is no
+	/// render step to accidentally trigger, so this holds by construction — it
+	/// is pinned because the previous shape could not offer it.
+	#[test]
+	fn non_mutating_walk_leaves_the_guard_untouched() {
+		struct Noop;
+		impl MutVisitor for Noop {
+			type Error = Infallible;
+		}
+
+		let original = Expr::Literal(Literal::Integer(1));
+		let mut p = Permission::Specific(original.clone());
+		p.visit_mut(&mut Noop).unwrap();
+		assert_eq!(guard(&p), &original);
 	}
 }

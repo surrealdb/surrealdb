@@ -12,8 +12,7 @@ use reblessive::TreeStack;
 use super::common::fetch_and_filter_records_batch;
 use super::pipeline::{ScanPipeline, build_field_state};
 use super::resolved::ResolvedTableContext;
-use crate::catalog::Index;
-use crate::err::Error;
+use crate::catalog::{Error, Index};
 use crate::exec::index::access_path::IndexRef;
 use crate::exec::permission::{
 	PhysicalPermission, convert_permission_to_physical_runtime, should_check_perms,
@@ -51,7 +50,7 @@ pub struct FullTextScan {
 	/// The MATCHES operator configuration (reference number, scoring)
 	pub operator: MatchesOperator,
 	/// Table name for record fetching
-	pub table_name: crate::val::TableName,
+	pub table_name: surrealdb_strand::TableName,
 	/// Optional VERSION timestamp for time-travel queries.
 	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
 	/// Plan-time resolved table context. When present, `execute()` skips
@@ -70,7 +69,7 @@ impl FullTextScan {
 		index_ref: IndexRef,
 		query: String,
 		operator: MatchesOperator,
-		table_name: crate::val::TableName,
+		table_name: surrealdb_strand::TableName,
 		version: Option<Arc<dyn PhysicalExpr>>,
 		needed_fields: Option<Option<HashSet<String>>>,
 	) -> Self {

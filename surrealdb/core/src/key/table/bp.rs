@@ -35,7 +35,7 @@ impl KVKey for Bp<'_> {
 
 	fn encode_buffer(&self, buffer: &mut Vec<u8>) -> anyhow::Result<()> {
 		storekey::encode_format::<IndexFormat, _, _>(&mut *buffer, self)
-			.map_err(|_| crate::err::Error::Unencodable)?;
+			.map_err(|_| crate::key::Error::Unencodable)?;
 		Ok(())
 	}
 
@@ -44,7 +44,7 @@ impl KVKey for Bp<'_> {
 impl<'a> KVKeyDecode<'a> for Bp<'a> {
 	fn decode_key(bytes: &'a [u8]) -> anyhow::Result<Self> {
 		Ok(storekey::decode_borrow_format::<IndexFormat, _>(bytes).map_err(|_| {
-			crate::err::Error::Corrupted("Index build generation key cannot be decoded")
+			crate::key::Error::Corrupted("Index build generation key cannot be decoded")
 		})?)
 	}
 }
@@ -74,7 +74,7 @@ impl KVRange for BpIdPrefix<'_> {
 	fn encode_bound(&self) -> Result<Key<'static>> {
 		Ok(storekey::encode_vec_format::<IndexFormat, _>(self)
 			.map(Key::from)
-			.map_err(|_| crate::err::Error::Unencodable)?)
+			.map_err(|_| crate::key::Error::Unencodable)?)
 	}
 }
 
@@ -96,6 +96,6 @@ impl KVRange for BpGenerationPrefix<'_> {
 	fn encode_bound(&self) -> anyhow::Result<Key<'static>> {
 		Ok(storekey::encode_vec_format::<IndexFormat, _>(self)
 			.map(Key::from)
-			.map_err(|_| crate::err::Error::Unencodable)?)
+			.map_err(|_| crate::key::Error::Unencodable)?)
 	}
 }

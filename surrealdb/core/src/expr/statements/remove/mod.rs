@@ -128,7 +128,8 @@ async fn retire_table_indexes(
 	tb: &TableDefinition,
 ) -> Result<()> {
 	let index_builder = ctx.get_index_builder().cloned();
-	for ix in txn.all_tb_indexes(ns, db, &tb.name, None).await?.iter() {
+	let tb_name = tb.name.clone();
+	for ix in txn.all_tb_indexes(ns, db, &tb_name, None).await?.iter() {
 		// Local index wrappers can be evicted immediately, but the builder task
 		// is process memory and must only be aborted after this transaction commits.
 		ctx.get_index_stores().index_removed(ns, db, tb, ix).await?;
@@ -137,12 +138,12 @@ async fn retire_table_indexes(
 				index_builder.clone(),
 				ns,
 				db,
-				tb.name.clone(),
+				tb_name.clone(),
 				ix.index_id,
 			)
 			.await;
 		}
-		retire_durable_index(txn, ns, db, &tb.name, ix.index_id).await?;
+		retire_durable_index(txn, ns, db, &tb_name, ix.index_id).await?;
 	}
 	Ok(())
 }

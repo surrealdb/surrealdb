@@ -9,11 +9,12 @@ use tracing::instrument;
 
 use super::AlterKind;
 use crate::catalog;
+use crate::catalog::Error as CatalogError;
 use crate::catalog::providers::AuthorisationProvider;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal};
 use crate::iam::{Action, ResourceKind};
@@ -96,7 +97,7 @@ impl AlterAccessStatement {
 		// issued by record-access methods must expire, so reject ALTER paths
 		// that would leave the resulting `token_duration` as NONE.
 		if matches!(ac.access_type, catalog::AccessType::Record(_)) && ac.token_duration.is_none() {
-			bail!(Error::AccessRecordTokenDurationRequired);
+			bail!(ExecError::AccessRecordTokenDurationRequired);
 		}
 		Ok(())
 	}
@@ -109,13 +110,14 @@ impl AlterAccessStatement {
 				if self.if_exists {
 					return Ok(Value::None);
 				}
-				return Err(Error::AccessRootNotFound {
+				return Err(CatalogError::AccessRootNotFound {
 					ac: name.to_owned(),
 				}
 				.into());
 			}
 		};
 		self.apply(&mut ac)?;
+		let ac = ac.to_stored();
 		let key = crate::key::root::ac::AccessKey {
 			ac: Cow::Borrowed(name),
 		};
@@ -133,7 +135,7 @@ impl AlterAccessStatement {
 				if self.if_exists {
 					return Ok(Value::None);
 				}
-				return Err(Error::AccessNsNotFound {
+				return Err(CatalogError::AccessNsNotFound {
 					ac: name.to_owned(),
 					ns: opt.ns()?.to_string(),
 				}
@@ -141,6 +143,7 @@ impl AlterAccessStatement {
 			}
 		};
 		self.apply(&mut ac)?;
+		let ac = ac.to_stored();
 		let key = crate::key::namespace::ac::AccessKey {
 			ns,
 			ac: Cow::Borrowed(name),
@@ -160,7 +163,7 @@ impl AlterAccessStatement {
 					return Ok(Value::None);
 				}
 				let (ns_name, db_name) = opt.ns_db()?;
-				return Err(Error::AccessDbNotFound {
+				return Err(CatalogError::AccessDbNotFound {
 					ac: name.to_owned(),
 					ns: ns_name.to_string(),
 					db: db_name.to_string(),
@@ -169,6 +172,7 @@ impl AlterAccessStatement {
 			}
 		};
 		self.apply(&mut ac)?;
+		let ac = ac.to_stored();
 
 		let key = crate::key::database::ac::AccessKey {
 			prefix: DatabaseRoot {

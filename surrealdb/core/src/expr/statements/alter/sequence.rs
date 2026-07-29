@@ -6,11 +6,11 @@ use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 use tracing::instrument;
 
+use crate::catalog::Error;
 use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, FlowResultExt, Literal, Value};
 use crate::iam::{Action, ResourceKind};

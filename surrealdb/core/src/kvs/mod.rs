@@ -21,6 +21,7 @@ pub use surrealdb_kvs_any::{BackendProvider, Backends, ConnectContext};
 pub mod export;
 
 mod clock;
+mod datastore_error;
 mod ds;
 mod into;
 mod tr;
@@ -46,6 +47,9 @@ pub use consts::{
 	INDEX_COMPACTION_QUEUE_BATCH_SIZE, INDEXING_BATCH_MAX_BYTES, INDEXING_BATCH_SIZE,
 	INDEXING_PROBE_BATCH_SIZE, NORMAL_BATCH_SIZE,
 };
+// Named for the layer rather than re-exported as `Error`: `kvs::Error` above is
+// the storage backend's, and a datastore failure is a different thing.
+pub(crate) use datastore_error::DatastoreError;
 pub(crate) use ds::TransactionFactory;
 pub use ds::{
 	Builder, Datastore, Metric, Metrics, TransactionBuilder, TransactionBuilderFactory,
@@ -229,7 +233,7 @@ pub(crate) mod testing {
 			// The error the builder raises when the process crosses the
 			// memory threshold.
 			NonRetryableErrorSite::ConcurrentIndexInitialBatchMemoryThreshold => {
-				Err(crate::err::Error::QueryBeyondMemoryThreshold.into())
+				Err(super::DatastoreError::QueryBeyondMemoryThreshold.into())
 			}
 			_ => {
 				Err(super::Error::Internal(format!("injected non-retryable error at {site:?}"))

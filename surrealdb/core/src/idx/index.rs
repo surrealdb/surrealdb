@@ -23,14 +23,13 @@ use uuid::Uuid;
 
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{
-	DatabaseId, DiskAnnParams, FullTextParams, HnswParams, Index, IndexDefinition, NamespaceId,
-	TableId,
+	CondText, DatabaseId, DiskAnnParams, FullTextParams, HnswParams, Index, IndexDefinition,
+	NamespaceId, TableId,
 };
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::{Cond, Part};
-use crate::idx::IndexKeyBase;
+use crate::expr::Part;
 use crate::idx::docids::{DocId, TableDocIds};
 use crate::idx::ft::fulltext::{FullTextCompactionPlan, FullTextIndex};
 use crate::idx::planner::iterators::{IndexCountCompactionPlan, IndexCountThingIterator};
@@ -38,12 +37,13 @@ use crate::idx::planner::iterators::{IndexCountCompactionPlan, IndexCountThingIt
 use crate::idx::trees::diskann::index::{DiskAnnCompactionPlan, DiskAnnIndex};
 use crate::idx::trees::hnsw::index::{HnswCompactionPlan, HnswIndex};
 use crate::idx::trees::store::IndexStores;
+use crate::idx::{Error as IdxError, IndexKeyBase};
 use crate::key;
 use crate::key::database::all::DatabaseRoot;
 use crate::key::index::IndexEntryValue;
 use crate::key::index::iu::IndexCountKey;
 use crate::kvs::Transaction;
-use crate::val::{Array, RecordId, Value};
+use crate::val::{Array, RecordId, TableName, Value};
 
 pub(crate) struct IndexOperation<'a> {
 	ctx: &'a FrozenContext,
@@ -53,6 +53,12 @@ pub(crate) struct IndexOperation<'a> {
 	tb: TableId,
 	ix: &'a IndexDefinition,
 	ikb: IndexKeyBase,
+	/// `ix.table_name` wrapped as a `TableName`, resolved once here rather
+	/// than per key built below (`get_unique_index_key` /
+	/// `get_non_unique_index_key` run once per indexed value, i.e. per row
+	/// for a scalar column) so per-value key construction stays a cheap
+	/// borrow instead of a `Strand` clone per value.
+	table_name: TableName,
 	/// The old values (if existing)
 	o: Option<Vec<Value>>,
 	/// The new values (if existing)
@@ -77,6 +83,7 @@ impl<'a> IndexOperation<'a> {
 		n: Option<Vec<Value>>,
 		rid: &'a RecordId,
 	) -> Self {
+		let table_name = ix.table_name.clone();
 		Self {
 			ctx,
 			opt,
@@ -84,7 +91,8 @@ impl<'a> IndexOperation<'a> {
 			db,
 			tb,
 			ix,
-			ikb: IndexKeyBase::new(ns, db, ix.table_name.clone(), ix.index_id),
+			ikb: IndexKeyBase::new(ns, db, table_name.clone(), ix.index_id),
+			table_name,
 			o,
 			n,
 			rid,
@@ -145,7 +153,7 @@ impl<'a> IndexOperation<'a> {
 				ns: self.ns,
 				db: self.db,
 			},
-			tb: Cow::Borrowed(&self.ix.table_name),
+			tb: Cow::Borrowed(&self.table_name),
 			ix: self.ix.index_id,
 			fd: Cow::Borrowed(v),
 		}
@@ -160,7 +168,7 @@ impl<'a> IndexOperation<'a> {
 				ns: self.ns,
 				db: self.db,
 			},
-			tb: Cow::Borrowed(&self.ix.table_name),
+			tb: Cow::Borrowed(&self.table_name),
 			ix: self.ix.index_id,
 			fd: Cow::Borrowed(v),
 			id: Cow::Borrowed(&self.rid.key),
@@ -169,12 +177,12 @@ impl<'a> IndexOperation<'a> {
 
 	/// The value stored in this index's entries: the record ID, plus the
 	/// record's table-level doc-ID when the index format carries it (see
-	/// [`IndexDefinition::has_entry_doc_ids`]). The doc-ID is resolved — or
+	/// [`StoredIndexDefinition::has_entry_doc_ids`]). The doc-ID is resolved — or
 	/// assigned on first use — through the table's shared doc-ID space, so all
 	/// of a table's indexes agree on the record's doc-ID.
 	async fn entry_value(&self) -> Result<IndexEntryValue> {
 		let doc_id: Option<DocId> = if self.ix.has_entry_doc_ids() {
-			let doc_ids = TableDocIds::new(self.ns, self.db, self.ix.table_name.clone());
+			let doc_ids = TableDocIds::new(self.ns, self.db, self.table_name.clone());
 			Some(doc_ids.resolve_or_assign(self.ctx, &self.rid.key).await?)
 		} else {
 			None
@@ -289,7 +297,7 @@ impl<'a> IndexOperation<'a> {
 	async fn index_count(
 		&mut self,
 		_stk: &mut Stk,
-		cond: Option<&Cond>,
+		cond: Option<&CondText>,
 		require_compaction: &mut bool,
 	) -> Result<()> {
 		let mut relative_count: i8 = 0;
@@ -317,7 +325,7 @@ impl<'a> IndexOperation<'a> {
 				ns: self.ns,
 				db: self.db,
 			},
-			tb: std::borrow::Cow::Borrowed(&self.ix.table_name),
+			tb: std::borrow::Cow::Borrowed(&self.table_name),
 			ix: self.ix.index_id,
 			uid: Some((self.ctx.node_id(), uuid::Uuid::now_v7())),
 			pos: relative_count > 0,
@@ -375,13 +383,12 @@ impl<'a> IndexOperation<'a> {
 		ctx: &FrozenContext,
 		ixs: &IndexStores,
 		ikb: &IndexKeyBase,
-		ix: &IndexDefinition,
 		p: &HnswParams,
 		plan: HnswCompactionPlan,
 	) -> Result<bool> {
 		let tx = ctx.tx();
 		if let Some(tb) = tx.get_tb(ikb.ns(), ikb.db(), ikb.table(), None).await? {
-			let hnsw = ixs.get_index_hnsw(ikb.ns(), ikb.db(), ctx, tb.table_id, ix, p).await?;
+			let hnsw = ixs.get_index_hnsw(ctx, tb.table_id, ikb, p).await?;
 			return hnsw.apply_compaction(ctx, plan).await;
 		}
 		Ok(false)
@@ -402,13 +409,12 @@ impl<'a> IndexOperation<'a> {
 		ctx: &FrozenContext,
 		ixs: &IndexStores,
 		ikb: &IndexKeyBase,
-		ix: &IndexDefinition,
 		p: &DiskAnnParams,
 		plan: DiskAnnCompactionPlan,
 	) -> Result<bool> {
 		let tx = ctx.tx();
 		if let Some(tb) = tx.get_tb(ikb.ns(), ikb.db(), ikb.table(), None).await? {
-			let diskann = ixs.get_index_diskann(ikb.ns(), ikb.db(), tb.table_id, ix, p).await?;
+			let diskann = ixs.get_index_diskann(tb.table_id, ikb, p).await?;
 			return diskann.apply_compaction(ctx, plan).await;
 		}
 		Ok(false)
@@ -440,7 +446,7 @@ impl<'a> IndexOperation<'a> {
 	/// Formats the conflicting value as a single value or array depending on
 	/// the number of indexed fields.
 	fn err_index_exists(&self, rid: RecordId, mut n: Array) -> Result<()> {
-		bail!(Error::IndexExists {
+		bail!(IdxError::IndexExists {
 			record: rid,
 			index: self.ix.name.to_string(),
 			value: match n.0.len() {
@@ -528,11 +534,8 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	async fn index_hnsw(&mut self, p: &HnswParams, require_compaction: &mut bool) -> Result<()> {
-		let hnsw = self
-			.ctx
-			.get_index_stores()
-			.get_index_hnsw(self.ns, self.db, self.ctx, self.tb, self.ix, p)
-			.await?;
+		let hnsw =
+			self.ctx.get_index_stores().get_index_hnsw(self.ctx, self.tb, &self.ikb, p).await?;
 		let old_values = self.o.take();
 		let new_values = self.n.take();
 		if old_values.is_some() || new_values.is_some() {
@@ -554,11 +557,8 @@ impl<'a> IndexOperation<'a> {
 		}
 		#[cfg(diskann)]
 		{
-			let diskann = self
-				.ctx
-				.get_index_stores()
-				.get_index_diskann(self.ns, self.db, self.tb, self.ix, p)
-				.await?;
+			let diskann =
+				self.ctx.get_index_stores().get_index_diskann(self.tb, &self.ikb, p).await?;
 			let old_values = self.o.take();
 			let new_values = self.n.take();
 			if old_values.is_some() || new_values.is_some() {

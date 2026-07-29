@@ -9,7 +9,7 @@ use tokio::sync::RwLock;
 
 use crate::catalog::{Distance, HnswParams, TableId, VectorType};
 use crate::ctx::{Context, FrozenContext};
-use crate::err::Error;
+use crate::err::EngineError;
 use crate::idx::planner::ScanDirection;
 use crate::idx::planner::iterators::KnnIteratorResult;
 use crate::idx::trees::KnnCondFilter;
@@ -381,7 +381,7 @@ impl HnswIndex {
 				batch.iter().map(|(k, v)| (k.to_vec(), v.to_vec())).collect();
 			for (key, value) in owned {
 				if ctx.is_done(Some(*count)).await? {
-					bail!(Error::QueryCancelled)
+					bail!(EngineError::QueryCancelled)
 				}
 				let pending = VectorPendingUpdate::kv_decode_value(&value, ())?;
 				let pending = Self::append_pending_to_operation(pending);
@@ -419,7 +419,7 @@ impl HnswIndex {
 				batch.iter().map(|(k, v)| (k.to_vec(), v.to_vec())).collect();
 			for (key, value) in owned {
 				if ctx.is_done(Some(*count)).await? {
-					bail!(Error::QueryCancelled)
+					bail!(EngineError::QueryCancelled)
 				}
 				let hr = HnswRecordPending::decode_key(&key)?;
 				let pending = HnswRecordPendingUpdate::kv_decode_value(&value, ())?;
@@ -806,7 +806,7 @@ impl HnswIndex {
 			}
 			for (_, v) in &batch {
 				if ctx.is_done(Some(count)).await? {
-					bail!(Error::QueryCancelled)
+					bail!(EngineError::QueryCancelled)
 				}
 				let pending = VectorPendingUpdate::kv_decode_value(v, ())?;
 				collector(Self::append_pending_to_operation(pending));
@@ -824,7 +824,7 @@ impl HnswIndex {
 			}
 			for (key, value) in &batch {
 				if ctx.is_done(Some(count)).await? {
-					bail!(Error::QueryCancelled)
+					bail!(EngineError::QueryCancelled)
 				}
 				let hr = HnswRecordPending::decode_key(key)?;
 				let pending = HnswRecordPendingUpdate::kv_decode_value(value, ())?;

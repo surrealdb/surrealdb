@@ -6,7 +6,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::{ControlFlow, Expr, FlowResult, Kind, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -43,7 +43,7 @@ impl SetStatement {
 		assert!(ctx.is_some(), "SetStatement::compute must be called with a set option.");
 
 		if self.is_protected_set() {
-			return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidParam {
+			return Err(ControlFlow::from(anyhow::Error::new(ExecError::InvalidParam {
 				name: self.name.to_string(),
 			})));
 		}
@@ -61,7 +61,7 @@ impl SetStatement {
 		let result = match &self.kind {
 			Some(kind) => result
 				.coerce_to_kind(kind)
-				.map_err(|e| Error::SetCoerce {
+				.map_err(|e| ExecError::SetCoerce {
 					name: self.name.to_string(),
 					error: Box::new(e),
 				})

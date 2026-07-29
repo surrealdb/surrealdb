@@ -2,12 +2,13 @@
 
 use std::borrow::Cow;
 
+use surrealdb_strand::TableName;
+
 use crate::catalog::IndexId;
 use crate::idx::trees::diskann::docs::DiskAnnElementDocs;
 use crate::idx::trees::vector::SerializedVector;
 use crate::key::database::all::DatabaseRoot;
 use crate::key::{impl_kv_key_storekey, key};
-use crate::val::TableName;
 
 key! {
 	/// Maps a full serialized vector to the DiskANN graph element and document set that own it.

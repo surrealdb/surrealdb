@@ -18,8 +18,8 @@ use regex::Regex;
 use super::{FunctionRegistry, ScalarFunction, Signature};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
-use crate::err::Error;
-use crate::expr::Kind;
+use crate::exec::Error as ExecError;
+use crate::expr::{Error as ExprError, Kind};
 use crate::val::{Bytes, Datetime, Duration, Number, Object, Uuid, Value};
 
 /// How many argument counts beyond the declared maximum to probe, so that
@@ -72,12 +72,16 @@ fn classify(res: anyhow::Result<Value>) -> Probe {
 		Ok(_) => return Probe::Accepted,
 		Err(e) => e,
 	};
-	match err.downcast_ref::<Error>() {
-		Some(Error::InvalidFunctionArguments {
-			message,
-			..
-		}) if ARITY_MESSAGE.is_match(message) => Probe::ArityRejected,
-		Some(Error::InvalidFunction {
+	if let Some(ExprError::InvalidFunctionArguments {
+		message,
+		..
+	}) = err.downcast_ref::<ExprError>()
+		&& ARITY_MESSAGE.is_match(message)
+	{
+		return Probe::ArityRejected;
+	}
+	match crate::err::exec_error(&err) {
+		Some(ExecError::InvalidFunction {
 			message,
 			..
 		}) => {

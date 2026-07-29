@@ -4,11 +4,12 @@ use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
 use super::{CursorDoc, DefineKind};
+use crate::buc::Error as BucError;
 use crate::catalog::providers::BucketProvider;
-use crate::catalog::{BucketDefinition, Permission};
+use crate::catalog::{BucketDefinition, Error as CatalogError, Permission};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
-use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, FlowResultExt, Literal};
 use crate::iam::{Action, ResourceKind};
@@ -53,7 +54,7 @@ impl DefineBucketStatement {
 		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "bucket name").await?;
 		// A PERMISSIONS clause must not perform writes (GHSA-66r2-5gwj-gxm2).
 		if self.permissions.has_direct_write() {
-			bail!(Error::PermissionClauseNotReadonly {
+			bail!(ExecError::PermissionClauseNotReadonly {
 				kind: "bucket",
 				name: name.clone(),
 			});
@@ -66,7 +67,7 @@ impl DefineBucketStatement {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
-						bail!(Error::BuAlreadyExists {
+						bail!(CatalogError::BuAlreadyExists {
 							value: bucket.name.to_string(),
 						});
 					}
@@ -93,7 +94,7 @@ impl DefineBucketStatement {
 		if let Some(buckets) = ctx.get_buckets() {
 			buckets.new_backend(ns, db, &name, self.readonly, backend.as_deref()).await?;
 		} else {
-			bail!(Error::BucketUnavailable(name));
+			bail!(BucError::BucketUnavailable(name));
 		}
 
 		// Process the statement
@@ -119,7 +120,7 @@ impl DefineBucketStatement {
 			readonly: self.readonly,
 			comment,
 		};
-		txn.set_key(&key, &ap).await?;
+		txn.set_key(&key, &ap.to_stored()).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good

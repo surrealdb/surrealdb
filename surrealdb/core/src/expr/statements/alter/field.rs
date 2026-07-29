@@ -9,11 +9,11 @@ use uuid::Uuid;
 
 use super::AlterKind;
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{self, Permission, Permissions, TableDefinition};
+use crate::catalog::{self, Error as CatalogError, Permissions};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::parameterize::{expr_to_ident, expr_to_idiom};
 use crate::expr::reference::Reference;
 use crate::expr::statements::define::kind_contains_object;
@@ -94,7 +94,7 @@ impl AlterFieldStatement {
 					return Ok(Value::None);
 				}
 
-				return Err(Error::FdNotFound {
+				return Err(CatalogError::FdNotFound {
 					name,
 				}
 				.into());
@@ -143,18 +143,10 @@ impl AlterFieldStatement {
 			AlterDefault::Set(ref expr) => df.default = catalog::DefineDefault::Set(expr.clone()),
 		}
 
-		fn convert_permission(perm: &Permission) -> catalog::Permission {
-			match perm {
-				Permission::None => catalog::Permission::None,
-				Permission::Full => catalog::Permission::Full,
-				Permission::Specific(expr) => catalog::Permission::Specific(expr.clone()),
-			}
-		}
-
 		if let Some(permissions) = &self.permissions {
-			df.select_permission = convert_permission(&permissions.select);
-			df.create_permission = convert_permission(&permissions.create);
-			df.update_permission = convert_permission(&permissions.update);
+			df.select_permission = permissions.select.clone();
+			df.create_permission = permissions.create.clone();
+			df.update_permission = permissions.update.clone();
 		}
 
 		match self.comment {
@@ -181,17 +173,17 @@ impl AlterFieldStatement {
 		if df.flexible {
 			ensure!(
 				df.field_kind.as_ref().is_some_and(kind_contains_object),
-				Error::Thrown("FLEXIBLE can only be used with types containing object".into())
+				ExecError::Thrown("FLEXIBLE can only be used with types containing object".into())
 			);
 			let Some(tb) = txn.get_tb(ns, db, &what, None).await? else {
-				return Err(Error::TbNotFound {
+				return Err(CatalogError::TbNotFound {
 					name: what.clone(),
 				}
 				.into());
 			};
 			ensure!(
 				tb.schemafull,
-				Error::Thrown("FLEXIBLE can only be used in SCHEMAFULL tables".into())
+				ExecError::Thrown("FLEXIBLE can only be used in SCHEMAFULL tables".into())
 			);
 		}
 
@@ -203,7 +195,7 @@ impl AlterFieldStatement {
 			tb: Cow::Borrowed(&what),
 			fd: Cow::Borrowed(&name),
 		};
-		txn.set_key(&key, &df).await?;
+		txn.set_key(&key, &df.to_stored()).await?;
 		// Dropping the REFERENCE clause or narrowing/changing the record kind can
 		// strand reference keys under target tables the field no longer
 		// references. Purge them so the DELETE reference-purge gate stays sound.
@@ -221,7 +213,7 @@ impl AlterFieldStatement {
 		}
 		// Refresh the table cache
 		let Some(tb) = txn.get_tb(ns, db, &what, None).await? else {
-			return Err(Error::TbNotFound {
+			return Err(CatalogError::TbNotFound {
 				name: what.clone(),
 			}
 			.into());
@@ -229,9 +221,9 @@ impl AlterFieldStatement {
 		txn.put_tb(
 			ns_name,
 			db_name,
-			&TableDefinition {
+			&catalog::TableDefinition {
 				cache_fields_ts: Uuid::now_v7(),
-				..tb.as_ref().clone()
+				..(*tb).clone()
 			},
 		)
 		.await?;

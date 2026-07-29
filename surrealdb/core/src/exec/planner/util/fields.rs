@@ -10,6 +10,7 @@
 //!   projections, where the iteration document has been collapsed away.
 
 use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::exec::field_path::{FieldPath, FieldPathPart};
 use crate::expr::field::{Field, Fields};
 use crate::expr::{Expr, Idiom};
@@ -140,11 +141,11 @@ fn check_expr_for_forbidden_params(expr: &Expr) -> Result<(), Error> {
 	// `language/statements/select/group/parent.surql`.
 	match first_row_scoped_reference(expr, AnalysisScope::Recursive) {
 		None => Ok(()),
-		Some(RowScopeKind::This | RowScopeKind::Self_) => Err(Error::Query {
+		Some(RowScopeKind::This | RowScopeKind::Self_) => Err(ExecError::Query {
 			message: "Found a `$this` parameter refering to the document of a group by select statement\nSelect statements with a group by currently have no defined document to refer to".to_string(),
-		}),
-		Some(RowScopeKind::Parent) => Err(Error::Query {
+		}.into()),
+		Some(RowScopeKind::Parent) => Err(ExecError::Query {
 			message: "Found a `$parent` parameter refering to the document of a GROUP select statement\nSelect statements with a GROUP BY or GROUP ALL currently have no defined document to refer to".to_string(),
-		}),
+		}.into()),
 	}
 }

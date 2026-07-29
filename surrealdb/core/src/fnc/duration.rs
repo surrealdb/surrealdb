@@ -42,7 +42,7 @@ pub mod from {
 
 	use anyhow::Result;
 
-	use crate::err::Error;
+	use crate::expr::Error;
 	use crate::val::{Duration, Value};
 
 	fn to_unsigned(name: &str, val: i64) -> Result<u64> {

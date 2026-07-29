@@ -2,7 +2,7 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 use surrealdb_strand::Strand;
 
-use crate::catalog::{ApiConfigDefinition, MiddlewareDefinition, Permission};
+use crate::catalog::{MiddlewareDefinition, Permission};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -32,7 +32,7 @@ impl ApiConfig {
 		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<ApiConfigDefinition> {
+	) -> Result<crate::catalog::ApiConfig> {
 		let mut middleware = Vec::new();
 		for m in self.middleware.iter() {
 			let mut args = Vec::new();
@@ -47,14 +47,14 @@ impl ApiConfig {
 
 		// A PERMISSIONS clause must not perform writes (GHSA-66r2-5gwj-gxm2).
 		if self.permissions.has_direct_write() {
-			return Err(crate::err::Error::PermissionClauseNotReadonly {
+			return Err(crate::exec::Error::PermissionClauseNotReadonly {
 				kind: "config",
 				name: "api".to_string(),
 			}
 			.into());
 		}
 
-		Ok(ApiConfigDefinition {
+		Ok(crate::catalog::ApiConfig {
 			middleware,
 			permissions: self.permissions.clone(),
 		})

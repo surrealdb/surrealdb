@@ -644,7 +644,7 @@ mod tests {
 
 	use crate::catalog::providers::{CatalogProvider, TableProvider};
 	use crate::catalog::{
-		DatabaseId, Distance, HnswParams, IndexId, NamespaceId, TableDefinition, TableId,
+		DatabaseId, Distance, HnswParams, IndexId, NamespaceId, StoredTableDefinition, TableId,
 		VectorType,
 	};
 	use crate::ctx::FrozenContext;
@@ -663,7 +663,7 @@ mod tests {
 	use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
 	use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
 	use crate::kvs::{Datastore, TransactionType};
-	use crate::val::{Number, RecordIdKey, Value};
+	use crate::val::{Number, RecordIdKey, TableName, Value};
 
 	async fn insert_collection_hnsw(
 		ctx: &HnswContext<'_>,
@@ -744,13 +744,18 @@ mod tests {
 		let ns = NamespaceId(1);
 		let db = DatabaseId(2);
 		let tb = TableId(3);
-		let tb = TableDefinition::new(ns, db, tb, "tb".into());
+		let tb = StoredTableDefinition::new(ns, db, tb, "tb".into());
 		let ikb = IndexKeyBase::new(ns, db, "tb".into(), IndexId(4));
 		let vec_docs =
 			VecDocs::new(ikb.clone(), tb.table_id, ds.index_store().vector_cache().clone(), false);
 		let mut h = HnswFlavor::new(
 			tb.table_id,
-			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), tb.name.clone(), IndexId(4)),
+			IndexKeyBase::new(
+				NamespaceId(1),
+				DatabaseId(2),
+				TableName::from(tb.name.clone()),
+				IndexId(4),
+			),
 			p,
 			ds.index_store().vector_cache().clone(),
 		)

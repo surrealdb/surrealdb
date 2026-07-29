@@ -9,7 +9,9 @@
 mod access;
 pub(crate) mod aggregation;
 mod auth;
+mod compiled;
 mod database;
+mod error;
 mod module;
 mod namespace;
 pub(crate) mod providers;
@@ -18,6 +20,7 @@ mod schema;
 mod subscription;
 mod table;
 mod task;
+mod text;
 mod view;
 
 #[cfg(test)]
@@ -26,15 +29,19 @@ mod compat;
 mod test;
 
 pub(crate) use access::*;
+pub(crate) use compiled::*;
 pub(crate) use database::*;
+pub(crate) use error::Error;
 pub(crate) use module::*;
 pub(crate) use namespace::*;
 pub(crate) use record::*;
 pub use schema::ApiMethod;
 pub(crate) use schema::{
-	ApiDefinition, DiskAnnParams, Distance, FullTextParams, HnswParams, Scoring, VectorType, *,
+	DiskAnnParams, Distance, FullTextParams, HnswParams, Scoring, StoredApiDefinition, VectorType,
+	*,
 };
 pub(crate) use subscription::*;
 pub(crate) use table::*;
 pub(crate) use task::*;
+pub(crate) use text::*;
 pub(crate) use view::*;

@@ -1,5 +1,6 @@
 use anyhow::Result;
 use chrono::Utc;
+use surrealdb_strand::TableName;
 use tokio::time::sleep;
 
 use super::builder::{IndexKey, IndexMutation};
@@ -14,13 +15,12 @@ use crate::ctx::FrozenContext;
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
 use crate::key::{KVKey, KVValue};
-use crate::kvs::TransactionType;
 #[cfg(test)]
 use crate::kvs::testing::{NonRetryableErrorSite, maybe_inject_non_retryable_error};
 use crate::kvs::tx::{
 	CachedIndexBuildReservationKey, CachedIndexBuildReservationLookup, IndexBuildReservationRelease,
 };
-use crate::val::TableName;
+use crate::kvs::{DatastoreError, TransactionType};
 
 /// Resolved slot in a per-(user-txn, index) reservation under which a single
 /// indexed mutation will be written.
@@ -78,13 +78,14 @@ impl IndexBuilder {
 		ix: &IndexDefinition,
 		mutation: IndexMutation<'_>,
 	) -> Result<ConsumeResult> {
+		let table_name = &ix.table_name;
 		let ikb =
-			IndexKeyBase::new(db.namespace_id, db.database_id, ix.table_name.clone(), ix.index_id);
+			IndexKeyBase::new(db.namespace_id, db.database_id, table_name.clone(), ix.index_id);
 
 		let cache_key = CachedIndexBuildReservationKey {
 			ns: db.namespace_id,
 			db: db.database_id,
-			tb: ix.table_name.clone(),
+			tb: table_name.clone(),
 			ix: ix.index_id,
 		};
 
@@ -143,7 +144,16 @@ impl IndexBuilder {
 			}
 			DurableAdmissionDecision::MissingState => {
 				let tx = ctx.tx();
-				if catalog_still_references_index(&tx, db.namespace_id, db.database_id, ix).await? {
+				if catalog_still_references_index(
+					&tx,
+					db.namespace_id,
+					db.database_id,
+					&ix.table_name,
+					&ix.name,
+					ix.index_id,
+				)
+				.await?
+				{
 					Ok(ConsumeResult::Ignored(mutation.old_values, mutation.new_values))
 				} else {
 					Ok(ConsumeResult::Retired)
@@ -218,14 +228,14 @@ impl IndexBuilder {
 		tx.cancel().await?;
 		let Some(state) = state else {
 			release.release().await?;
-			return Err(Error::IndexingBuildingCancelled {
+			return Err(DatastoreError::IndexingBuildingCancelled {
 				reason: format!("Index {} build state no longer exists", ix.name),
 			}
 			.into());
 		};
 		if state.generation != admission.generation {
 			release.release().await?;
-			return Err(Error::IndexingBuildingCancelled {
+			return Err(DatastoreError::IndexingBuildingCancelled {
 				reason: format!("Index {} build generation changed", ix.name),
 			}
 			.into());
@@ -273,13 +283,13 @@ impl IndexBuilder {
 		let state = catch!(tx, tx.get_key(&ikb.new_bs_key(), None).await);
 		tx.cancel().await?;
 		let Some(state) = state else {
-			return Err(Error::IndexingBuildingCancelled {
+			return Err(DatastoreError::IndexingBuildingCancelled {
 				reason: format!("Index {} build state no longer exists", ix.name),
 			}
 			.into());
 		};
 		if state.generation != cached_generation {
-			return Err(Error::IndexingBuildingCancelled {
+			return Err(DatastoreError::IndexingBuildingCancelled {
 				reason: format!("Index {} build generation changed mid-transaction", ix.name),
 			}
 			.into());
@@ -292,7 +302,7 @@ impl IndexBuilder {
 			// replay. Aborting here would fail the user's write for a
 			// background build failure.
 			IndexBuildPhase::Building | IndexBuildPhase::Closing | IndexBuildPhase::Error => Ok(()),
-			IndexBuildPhase::Online => Err(Error::IndexingBuildingCancelled {
+			IndexBuildPhase::Online => Err(DatastoreError::IndexingBuildingCancelled {
 				reason: format!(
 					"Index {} became online mid-transaction; queued mutations would be lost",
 					ix.name

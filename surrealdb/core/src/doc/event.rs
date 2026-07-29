@@ -13,11 +13,10 @@ use surrealdb_strand::Strand;
 use tokio::spawn;
 
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
-use crate::catalog::{EventDefinition, Record};
+use crate::catalog::{EventDefinition, FromStored, Record, StoredEventDefinition};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Session};
-use crate::doc::{Action, CursorDoc, Document, DocumentContext};
-use crate::err::Error;
+use crate::doc::{Action, CursorDoc, Document, DocumentContext, Error};
 use crate::expr::FlowResultExt as _;
 use crate::iam::{Auth, AuthLimit};
 use crate::key::root::eq::{EventQueue, EventQueuePrefix};
@@ -84,7 +83,7 @@ impl Document {
 		// Loop through all event statements
 		for ev in self.doc_ctx.ev()?.iter() {
 			// Limit auth
-			let opt = AuthLimit::try_from(&ev.auth_limit)?.limit_opt(opt);
+			let opt = opt.limited_by(&AuthLimit::try_from(&ev.auth_limit)?);
 			// Get the event action
 			let evt = match action {
 				Action::Create => Value::from("CREATE"),
@@ -137,8 +136,8 @@ impl Document {
 		doc: &CursorDoc,
 	) -> Result<()> {
 		// Evaluate each THEN expression in order.
-		for v in ev.then.iter() {
-			stk.run(|stk| v.compute(stk, &ctx, &opt, Some(doc)))
+		for then in ev.then.iter() {
+			stk.run(|stk| then.compute(stk, &ctx, &opt, Some(doc)))
 				.await
 				.catch_return()
 				.map_err(|e| anyhow::anyhow!("Error while processing event {}: {e}", ev.name))?;
@@ -169,7 +168,9 @@ impl Document {
 			ts: ts.0,
 			node_id,
 		};
-		let event_record = AsyncEventRecord::new(&opt, &ctx, ev, cursor_doc)?;
+		// The queued payload persists the stored (text-form) definition,
+		// rendered from the compiled one the context carries.
+		let event_record = AsyncEventRecord::new(&opt, &ctx, ev.stored(), cursor_doc)?;
 		tx.put_key(&key, &event_record).await?;
 		tx.trigger_async_event();
 		Ok(())
@@ -205,7 +206,7 @@ pub struct AsyncEventRecord {
 	/// Auth context with any event-specific limits applied.
 	auth_with_limit: Arc<Auth>,
 	/// Snapshot of the event definition used for execution and retry policy.
-	event_definition: EventDefinition,
+	event_definition: StoredEventDefinition,
 }
 
 impl_kv_value_revisioned!(AsyncEventRecord);
@@ -215,7 +216,7 @@ impl AsyncEventRecord {
 	fn new(
 		opt: &Options,
 		ctx: &FrozenContext,
-		event_definition: &EventDefinition,
+		event_definition: &StoredEventDefinition,
 		cursor_doc: &CursorDoc,
 	) -> Result<Self> {
 		let (ns, db) = opt.arc_ns_db()?;
@@ -525,6 +526,9 @@ impl AsyncEventContext {
 		let ctx = ev.build_event_context(ctx);
 		let opt = ev.build_event_options(&ctx.tx(), opt, eq).await?;
 		let doc = ev.build_event_cursor_doc();
-		Document::process_event_sync(stk, ctx, opt, lh, &ev.event_definition, &doc).await
+		// The queued payload persists the stored (text-form) definition;
+		// compile it once per dequeued event before execution.
+		let compiled = EventDefinition::from_stored(&ev.event_definition)?;
+		Document::process_event_sync(stk, ctx, opt, lh, &compiled, &doc).await
 	}
 }

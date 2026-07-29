@@ -12,8 +12,8 @@ use tempfile::{Builder, TempDir};
 #[cfg(not(target_family = "wasm"))]
 use tokio::task::spawn_blocking;
 
+use crate::dbs::SortError;
 use crate::dbs::plan::Explanation;
-use crate::err::Error;
 use crate::expr::order::Ordering;
 use crate::val::Value;
 
@@ -39,7 +39,7 @@ impl FileCollector {
 		temp_dir: &Path,
 		orders: Option<Ordering>,
 		buffer_limit: usize,
-	) -> Result<Self, Error> {
+	) -> Result<Self, SortError> {
 		let dir = Builder::new().prefix("SURREAL").tempdir_in(temp_dir)?;
 		Ok(Self {
 			len: 0,
@@ -51,26 +51,26 @@ impl FileCollector {
 			buffer_limit,
 		})
 	}
-	pub(super) async fn push(&mut self, value: Value) -> Result<(), Error> {
+	pub(super) async fn push(&mut self, value: Value) -> Result<(), SortError> {
 		if let Some(mut writer) = self.writer.take() {
 			#[cfg(not(target_family = "wasm"))]
 			let writer = spawn_blocking(move || {
 				writer.push(&value)?;
-				Ok::<FileWriter, Error>(writer)
+				Ok::<FileWriter, SortError>(writer)
 			})
 			.await
-			.map_err(|e| Error::Internal(format!("{e}")))??;
+			.map_err(|e| SortError::OrderingError(format!("{e}")))??;
 			#[cfg(target_family = "wasm")]
 			writer.push(&value)?;
 			self.len += 1;
 			self.writer = Some(writer);
 			Ok(())
 		} else {
-			Err(Error::Internal("No FileWriter available.".to_string()))
+			Err(SortError::OrderingError("No FileWriter available.".to_string()))
 		}
 	}
 
-	fn check_reader(&mut self) -> Result<(), Error> {
+	fn check_reader(&mut self) -> Result<(), SortError> {
 		if self.reader.is_none()
 			&& let Some(writer) = self.writer.take()
 		{
@@ -89,7 +89,7 @@ impl FileCollector {
 		self.paging.limit = limit;
 	}
 
-	pub(super) async fn take_vec(&mut self) -> Result<Vec<Value>, Error> {
+	pub(super) async fn take_vec(&mut self) -> Result<Vec<Value>, SortError> {
 		self.check_reader()?;
 		if let Some(mut reader) = self.reader.take()
 			&& let Some((start, num)) = self.paging.get_start_num(reader.len as u32)
@@ -108,7 +108,7 @@ impl FileCollector {
 		orders: Ordering,
 		start: u32,
 		num: u32,
-	) -> Result<Vec<Value>, Error> {
+	) -> Result<Vec<Value>, SortError> {
 		match orders {
 			Ordering::Random => {
 				let f = move || {
@@ -169,7 +169,7 @@ impl FileCollector {
 				#[cfg(target_family = "wasm")]
 				let res = f();
 				#[cfg(not(target_family = "wasm"))]
-				let res = spawn_blocking(f).await.map_err(|e| Error::OrderingError(format!("{e}")))?;
+				let res = spawn_blocking(f).await.map_err(|e| SortError::OrderingError(format!("{e}")))?;
 				//
 				res
 			}
@@ -182,7 +182,7 @@ impl FileCollector {
 
 					let sorter: ExternalSorter<
 						Value,
-						Error,
+						SortError,
 						LimitedBufferBuilder,
 						ValueExternalChunk,
 					> = ExternalSorterBuilder::new()
@@ -198,7 +198,7 @@ impl FileCollector {
 				#[cfg(target_family = "wasm")]
 				let res = f();
 				#[cfg(not(target_family = "wasm"))]
-				let res = spawn_blocking(f).await.map_err(|e| Error::OrderingError(format!("{e}")))?;
+				let res = spawn_blocking(f).await.map_err(|e| SortError::OrderingError(format!("{e}")))?;
 				//
 				res
 			}
@@ -217,7 +217,7 @@ struct FileWriter {
 }
 
 impl FileWriter {
-	fn new(dir: &TempDir) -> Result<Self, Error> {
+	fn new(dir: &TempDir) -> Result<Self, SortError> {
 		let index = OpenOptions::new()
 			.create_new(true)
 			.append(true)
@@ -233,13 +233,13 @@ impl FileWriter {
 		})
 	}
 
-	fn write_usize<W: Write>(writer: &mut W, u: usize) -> Result<(), Error> {
+	fn write_usize<W: Write>(writer: &mut W, u: usize) -> Result<(), SortError> {
 		let buf = u.to_be_bytes();
 		writer.write_all(&buf)?;
 		Ok(())
 	}
 
-	fn write_value<W: Write>(writer: &mut W, value: &Value) -> Result<usize, Error> {
+	fn write_value<W: Write>(writer: &mut W, value: &Value) -> Result<usize, SortError> {
 		let mut val = Vec::new();
 		SerializeRevisioned::serialize_revisioned(value, &mut val)?;
 		// Write the size of the buffer in the index
@@ -249,7 +249,7 @@ impl FileWriter {
 		Ok(val.len())
 	}
 
-	fn push(&mut self, value: &Value) -> Result<(), Error> {
+	fn push(&mut self, value: &Value) -> Result<(), SortError> {
 		// Serialize the value in a buffer
 		let len = Self::write_value(&mut self.records, value)?;
 		// Increment the offset of the next record
@@ -258,7 +258,7 @@ impl FileWriter {
 		Ok(())
 	}
 
-	fn flush(mut self) -> Result<(), Error> {
+	fn flush(mut self) -> Result<(), SortError> {
 		self.records.flush()?;
 		self.index.flush()?;
 		Ok(())
@@ -273,7 +273,7 @@ struct FileReader {
 }
 
 impl FileReader {
-	fn new(len: usize, dir: &TempDir) -> Result<Self, Error> {
+	fn new(len: usize, dir: &TempDir) -> Result<Self, SortError> {
 		let index = dir.path().join(FileCollector::INDEX_FILE_NAME);
 		let records = dir.path().join(FileCollector::RECORDS_FILE_NAME);
 		Ok(Self {
@@ -283,11 +283,11 @@ impl FileReader {
 		})
 	}
 
-	fn read_value<R: Read>(reader: &mut R) -> Result<Value, Error> {
+	fn read_value<R: Read>(reader: &mut R) -> Result<Value, SortError> {
 		let len = FileReader::read_usize(reader)?;
 		let mut buf = vec![0u8; len];
 		if let Err(e) = reader.read_exact(&mut buf) {
-			return Err(Error::Io(e));
+			return Err(SortError::Io(e));
 		}
 		let val: Value = DeserializeRevisioned::deserialize_revisioned(&mut buf.as_slice())?;
 		Ok(val)
@@ -301,7 +301,7 @@ impl FileReader {
 		Ok(u)
 	}
 
-	fn take_vec(&mut self, start: u32, num: u32) -> Result<Vec<Value>, Error> {
+	fn take_vec(&mut self, start: u32, num: u32) -> Result<Vec<Value>, SortError> {
 		let mut iter = FileRecordsIterator::new(self.records.clone(), self.len);
 		if start > 0 {
 			// Get the start offset of the first record
@@ -328,7 +328,7 @@ impl FileReader {
 }
 
 impl IntoIterator for FileReader {
-	type Item = Result<Value, Error>;
+	type Item = Result<Value, SortError>;
 	type IntoIter = FileRecordsIterator;
 
 	fn into_iter(self) -> Self::IntoIter {
@@ -353,7 +353,7 @@ impl FileRecordsIterator {
 		}
 	}
 
-	fn check_reader(&mut self) -> Result<(), Error> {
+	fn check_reader(&mut self) -> Result<(), SortError> {
 		if self.reader.is_none() {
 			let f = OpenOptions::new().read(true).open(&self.path)?;
 			self.reader = Some(BufReader::new(f));
@@ -361,7 +361,7 @@ impl FileRecordsIterator {
 		Ok(())
 	}
 
-	fn seek(&mut self, seek_pos: usize, pos: usize) -> Result<(), Error> {
+	fn seek(&mut self, seek_pos: usize, pos: usize) -> Result<(), SortError> {
 		self.check_reader()?;
 		if let Some(reader) = &mut self.reader {
 			reader.seek(SeekFrom::Start(seek_pos as u64))?;
@@ -372,7 +372,7 @@ impl FileRecordsIterator {
 }
 
 impl Iterator for FileRecordsIterator {
-	type Item = Result<Value, Error>;
+	type Item = Result<Value, SortError>;
 
 	fn next(&mut self) -> Option<Self::Item> {
 		if self.pos == self.len {
@@ -432,8 +432,8 @@ struct ValueExternalChunk {
 }
 
 impl ExternalChunk<Value> for ValueExternalChunk {
-	type SerializationError = Error;
-	type DeserializationError = Error;
+	type SerializationError = SortError;
+	type DeserializationError = SortError;
 
 	fn new(reader: Take<BufReader<File>>) -> Self {
 		Self {
@@ -453,7 +453,7 @@ impl ExternalChunk<Value> for ValueExternalChunk {
 }
 
 impl Iterator for ValueExternalChunk {
-	type Item = Result<Value, Error>;
+	type Item = Result<Value, SortError>;
 
 	fn next(&mut self) -> Option<Self::Item> {
 		if self.reader.limit() == 0 {

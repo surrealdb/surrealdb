@@ -28,6 +28,7 @@ use anyhow::Result;
 use rand::Rng;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use surrealdb_strand::TableName;
 use tokio::sync::{Mutex, RwLock};
 use tokio::time::sleep;
 use uuid::Uuid;
@@ -36,7 +37,7 @@ use web_time::Instant;
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableId};
 use crate::ctx::Context;
-use crate::err::Error;
+use crate::err::EngineError;
 use crate::idx::docids::DocId;
 use crate::key::database::all::DatabaseRoot;
 use crate::key::database::th::{TableIdGeneratorBatchKey, TableIdGeneratorBatchPrefix};
@@ -55,7 +56,6 @@ use crate::key::table::is::IndexIdGeneratorStateKey;
 use crate::key::{KVKey, KVRange, Key, KeyRange, impl_kv_value_revisioned};
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::{Transaction, TransactionType};
-use crate::val::TableName;
 
 type SequencesMap = Arc<RwLock<HashMap<Arc<SequenceDomain>, Arc<Mutex<Sequence>>>>>;
 
@@ -682,8 +682,8 @@ impl Sequence {
 			if let (Some(ref start), Some(ref to)) = (start, to) {
 				// We check the time associated with the sequence
 				if start.elapsed().ge(to) {
-					let timeout = (*to).into();
-					return Err(anyhow::Error::new(Error::QueryTimedout(timeout)));
+					let timeout = *to;
+					return Err(anyhow::Error::new(EngineError::QueryTimedout(timeout)));
 				}
 			}
 			if let Ok(r) = Self::check_batch_allocation(sqs, seq, next, batch).await {
@@ -782,14 +782,15 @@ impl Sequence {
 
 #[cfg(test)]
 mod tests {
+	use surrealdb_strand::TableName;
+
 	use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 	use crate::catalog::{
-		DatabaseDefinition, DatabaseId, Index, IndexDefinition, IndexId, NamespaceDefinition,
-		NamespaceId, TableDefinition, TableId,
+		DatabaseDefinition, DatabaseId, FromStored, Index, IndexDefinition, IndexId,
+		NamespaceDefinition, NamespaceId, StoredTableDefinition, TableDefinition, TableId,
 	};
 	use crate::kvs::sequences::{Sequence, SequenceDomain};
 	use crate::kvs::{Datastore, TransactionType};
-	use crate::val::TableName;
 
 	#[tokio::test]
 	async fn seed_start_from_catalog_uses_max_existing_id() {
@@ -819,9 +820,14 @@ mod tests {
 		)
 		.await
 		.unwrap();
-		tx.put_tb("ns", "db", &TableDefinition::new(ns_id, db_id, TableId(13), tb_name.clone()))
-			.await
-			.unwrap();
+		let tb_def = TableDefinition::from_stored(&StoredTableDefinition::new(
+			ns_id,
+			db_id,
+			TableId(13),
+			tb_name.clone(),
+		))
+		.unwrap();
+		tx.put_tb("ns", "db", &tb_def).await.unwrap();
 		tx.put_tb_index(
 			ns_id,
 			db_id,
@@ -832,6 +838,7 @@ mod tests {
 				table_name: tb_name.clone(),
 				cols: vec![],
 				index: Index::Idx,
+				count_cond: None,
 				comment: None,
 				prepare_remove: false,
 				format_version: 1,
@@ -932,6 +939,7 @@ mod tikv_concurrency {
 	use std::collections::HashSet;
 	use std::sync::Arc;
 
+	use surrealdb_strand::TableName;
 	use uuid::Uuid;
 
 	use super::Sequences;
@@ -939,7 +947,6 @@ mod tikv_concurrency {
 	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::kvs::ds::TransactionFactory;
 	use crate::kvs::{Datastore, TransactionType};
-	use crate::val::TableName;
 
 	/// Build a datastore against the local TiKV cluster, clear the keyspace so
 	/// reruns are deterministic, and hand back its transaction factory.

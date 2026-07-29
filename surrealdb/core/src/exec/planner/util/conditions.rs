@@ -395,7 +395,7 @@ fn union_covers_leaf(
 /// BTree access pattern. Used as the leaf predicate by
 /// [`strip_index_conditions`].
 struct IndexConditionMatcher<'a> {
-	/// Index columns in definition order.
+	/// Index columns in definition order (`IndexDefinition.cols`).
 	cols: &'a [Idiom],
 	/// The chosen access pattern describing which conditions are covered.
 	access: &'a crate::exec::index::access_path::BTreeAccess,
@@ -729,13 +729,16 @@ fn extract_literal_vector(expr: &Expr) -> Option<Vec<Number>> {
 /// Only matches point-key RecordIds (not range keys like `table:1..5`).
 pub(crate) fn extract_record_id_point_lookup(
 	cond: &Cond,
-	table_name: &crate::val::TableName,
+	table_name: &surrealdb_strand::TableName,
 ) -> Option<Expr> {
 	find_id_equality_in_and_chain(&cond.0, table_name)
 }
 
 /// Walk the top-level AND chain looking for `id = <RecordId literal>`.
-fn find_id_equality_in_and_chain(expr: &Expr, table_name: &crate::val::TableName) -> Option<Expr> {
+fn find_id_equality_in_and_chain(
+	expr: &Expr,
+	table_name: &surrealdb_strand::TableName,
+) -> Option<Expr> {
 	match expr {
 		// AND: check both branches
 		Expr::Binary {
@@ -763,7 +766,7 @@ fn find_id_equality_in_and_chain(expr: &Expr, table_name: &crate::val::TableName
 fn check_id_recordid_pair(
 	idiom_side: &Expr,
 	lit_side: &Expr,
-	table_name: &crate::val::TableName,
+	table_name: &surrealdb_strand::TableName,
 ) -> Option<Expr> {
 	if let Expr::Idiom(idiom) = idiom_side
 		&& idiom.is_id()
@@ -874,11 +877,13 @@ impl Visitor for MatchesCollector<'_> {
 }
 
 /// Try to extract the primary table name from the frozen context.
-pub(crate) fn extract_table_from_context(ctx: &crate::ctx::FrozenContext) -> crate::val::TableName {
+pub(crate) fn extract_table_from_context(
+	ctx: &crate::ctx::FrozenContext,
+) -> surrealdb_strand::TableName {
 	if let Some(mc) = ctx.get_matches_context()
 		&& let Some(table) = mc.table()
 	{
 		return table.clone();
 	}
-	crate::val::TableName::from("unknown".to_string())
+	surrealdb_strand::TableName::from("unknown".to_string())
 }

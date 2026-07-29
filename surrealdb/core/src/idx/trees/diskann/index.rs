@@ -36,7 +36,7 @@ use tokio::sync::RwLock;
 
 use crate::catalog::{DiskAnnParams, Distance, TableId, VectorType};
 use crate::ctx::{Context, FrozenContext};
-use crate::err::Error;
+use crate::err::EngineError;
 use crate::idx::planner::ScanDirection;
 use crate::idx::planner::iterators::KnnIteratorResult;
 use crate::idx::trees::KnnCondFilter;
@@ -720,7 +720,7 @@ impl DiskAnnIndex {
 		}
 		drop(cursor);
 		if ctx.is_done(None).await? {
-			bail!(Error::QueryCancelled)
+			bail!(EngineError::QueryCancelled)
 		}
 		Ok(true)
 	}
@@ -981,7 +981,7 @@ impl DiskAnnIndex {
 				batch.iter().map(|(k, v)| (k.to_vec(), v.to_vec())).collect();
 			for (legacy_key, legacy_value) in owned {
 				if ctx.is_done(Some(*count)).await? {
-					bail!(Error::QueryCancelled)
+					bail!(EngineError::QueryCancelled)
 				}
 				let id = DiskAnnRecordPending::decode_key(&legacy_key)?.id.into_owned();
 				let legacy_update = DiskAnnRecordPendingUpdate::kv_decode_value(&legacy_value, ())?;
@@ -1048,7 +1048,7 @@ impl DiskAnnIndex {
 				batch.iter().map(|(k, v)| (k.to_vec(), v.to_vec())).collect();
 			for (key, value) in owned {
 				if ctx.is_done(Some(*count)).await? {
-					bail!(Error::QueryCancelled)
+					bail!(EngineError::QueryCancelled)
 				}
 				if folded_shard_keys.contains(&key) {
 					// Already folded next to its legacy counterpart in phase 1; the plan deletes
@@ -1561,7 +1561,7 @@ impl DiskAnnIndex {
 			}
 			for (key, value) in &batch {
 				if ctx.is_done(Some(*count)).await? {
-					bail!(Error::QueryCancelled)
+					bail!(EngineError::QueryCancelled)
 				}
 				let id = if sharded {
 					DiskAnnRecordPendingShard::decode_key(key)?.id.into_owned()
@@ -1959,7 +1959,7 @@ mod tests {
 		// intact — the committed candidate now resolves to a missing record.
 		{
 			let tx = ds.transaction(TransactionType::Write).await?;
-			let tb = crate::val::TableName::from("pts");
+			let tb = surrealdb_strand::TableName::from("pts");
 			let key = crate::key::record::RecordKey {
 				root: crate::key::database::all::DatabaseRoot {
 					ns: db_def.namespace_id,

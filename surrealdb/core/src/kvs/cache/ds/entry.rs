@@ -16,20 +16,25 @@ pub(crate) struct CachedJwks {
 	pub(crate) time: DateTime<Utc>,
 }
 
+/// Datastore-level cache entries hold the **compiled** definition forms
+/// (stored text already parsed back to ASTs), keyed by the owning table's
+/// `cache_*_ts` stamps, so the per-record document pipeline never reparses
+/// definition text between schema changes. The stored (text) forms are
+/// cached per transaction (see `cache::tx`), not here.
 #[derive(Clone, Debug)]
 pub(crate) enum Entry {
 	/// A cached JWKS document and the time it was stored
 	#[cfg(feature = "jwks")]
 	Jwk(Arc<CachedJwks>),
-	/// A slice of FieldDefinition specified on a table.
+	/// The compiled field definitions specified on a table.
 	Fds(Arc<[catalog::FieldDefinition]>),
-	/// A slice of DefineEventStatement specified on a table.
+	/// The compiled event definitions specified on a table.
 	Evs(Arc<[catalog::EventDefinition]>),
-	/// A slice of TableDefinition specified on a table.
+	/// The compiled foreign (view) table definitions specified on a table.
 	Fts(Arc<[catalog::TableDefinition]>),
-	/// A slice of DefineIndexStatement specified on a table.
+	/// The compiled index definitions specified on a table.
 	Ixs(Arc<[catalog::IndexDefinition]>),
-	/// A slice of LiveStatement specified on a table.
+	/// The compiled live-query subscriptions specified on a table.
 	Lvs(Arc<[catalog::SubscriptionDefinition]>),
 }
 

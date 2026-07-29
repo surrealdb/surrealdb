@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use common::future::stream::{self, Yielder};
 
+use crate::catalog::Permission;
 use crate::catalog::providers::TableProvider;
 use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
@@ -595,9 +596,7 @@ pub(crate) async fn build_field_state_raw(
 	// (deny) and Permission::Specific (conditional) require enforcement.
 	let has_computed = field_defs.iter().any(|fd| fd.computed.is_some());
 	let has_field_perms = check_perms
-		&& field_defs
-			.iter()
-			.any(|fd| !matches!(fd.select_permission, crate::catalog::Permission::Full));
+		&& field_defs.iter().any(|fd| !matches!(fd.select_permission, Permission::Full));
 	if !has_computed && !has_field_perms {
 		return Ok(FieldState::empty());
 	}
@@ -620,14 +619,7 @@ pub(crate) async fn build_field_state_raw(
 		if let Some(ref expr) = fd.computed {
 			let field_name = fd.name.to_raw_string();
 
-			let deps = if let Some(ref cd) = fd.computed_deps {
-				crate::expr::computed_deps::ComputedDeps {
-					fields: cd.fields.clone(),
-					is_complete: cd.is_complete,
-				}
-			} else {
-				crate::expr::computed_deps::extract_computed_deps(expr)
-			};
+			let deps = crate::expr::computed_deps::extract_computed_deps(expr);
 
 			dep_map.insert(field_name.clone(), deps.clone());
 
@@ -670,10 +662,10 @@ pub(crate) async fn build_field_state_raw(
 	let mut permission_deps_complete = true;
 	if check_perms {
 		for fd in field_defs.iter() {
-			if matches!(fd.select_permission, crate::catalog::Permission::Full) {
+			if matches!(fd.select_permission, Permission::Full) {
 				continue;
 			}
-			if let crate::catalog::Permission::Specific(ref expr) = fd.select_permission {
+			if let Permission::Specific(ref expr) = fd.select_permission {
 				let deps = crate::expr::computed_deps::extract_computed_deps(expr);
 				if !deps.is_complete {
 					// Read the flag *before* flipping it below so we only emit

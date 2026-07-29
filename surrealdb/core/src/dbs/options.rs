@@ -4,8 +4,8 @@ use std::sync::Arc;
 use anyhow::{Result, bail};
 use surrealdb_cnf::CommonConfig;
 
-use crate::catalog;
 use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::Base;
 use crate::iam::Auth;
 
@@ -53,7 +53,6 @@ pub struct Options {
 pub enum Force {
 	All,
 	None,
-	Table(Arc<[catalog::TableDefinition]>),
 }
 
 impl Options {
@@ -130,6 +129,11 @@ impl Options {
 	pub fn with_auth(mut self, auth: Arc<Auth>) -> Self {
 		self.auth = auth;
 		self
+	}
+
+	/// Return a copy of these options with the auth narrowed by the given limit.
+	pub fn limited_by(&self, limit: &crate::iam::AuthLimit) -> Options {
+		self.clone().with_auth(Arc::new(self.auth.new_limited(limit)))
 	}
 
 	/// Specify whether permissions should be run for
@@ -228,7 +232,7 @@ impl Options {
 			(None, None) => Ok(Base::Root),
 			(Some(_), None) => Ok(Base::Ns),
 			(Some(_), Some(_)) => Ok(Base::Db),
-			(None, Some(_)) => Err(Error::NsEmpty),
+			(None, Some(_)) => Err(ExecError::NsEmpty.into()),
 		}
 	}
 
@@ -238,7 +242,7 @@ impl Options {
 	/// stack frame it uses relative to a simple function call). When in doubt, use a value of 1.
 	pub(crate) fn dive(&self, cost: u8) -> Result<Self, Error> {
 		if self.dive < cost as u32 {
-			return Err(Error::ComputationDepthExceeded);
+			return Err(ExecError::ComputationDepthExceeded.into());
 		}
 		Ok(Self {
 			dive: self.dive - cost as u32,
@@ -251,21 +255,21 @@ impl Options {
 	/// Get currently selected NS
 	#[inline(always)]
 	pub fn ns(&self) -> Result<&str> {
-		self.ns.as_deref().ok_or_else(|| Error::NsEmpty).map_err(anyhow::Error::new)
+		self.ns.as_deref().ok_or_else(|| ExecError::NsEmpty).map_err(anyhow::Error::new)
 	}
 
 	pub(crate) fn arc_ns(&self) -> Result<Arc<str>> {
-		self.ns.clone().ok_or_else(|| Error::NsEmpty).map_err(anyhow::Error::new)
+		self.ns.clone().ok_or_else(|| ExecError::NsEmpty).map_err(anyhow::Error::new)
 	}
 
 	/// Get currently selected DB
 	#[inline(always)]
 	pub fn db(&self) -> Result<&str> {
-		self.db.as_deref().ok_or_else(|| Error::DbEmpty).map_err(anyhow::Error::new)
+		self.db.as_deref().ok_or_else(|| ExecError::DbEmpty).map_err(anyhow::Error::new)
 	}
 
 	pub(crate) fn arc_db(&self) -> Result<Arc<str>> {
-		self.db.clone().ok_or_else(|| Error::DbEmpty).map_err(anyhow::Error::new)
+		self.db.clone().ok_or_else(|| ExecError::DbEmpty).map_err(anyhow::Error::new)
 	}
 
 	/// Get currently selected NS and DB
@@ -286,7 +290,7 @@ impl Options {
 	#[inline(always)]
 	pub fn valid_for_ns(&self) -> Result<()> {
 		if self.ns.is_none() {
-			bail!(Error::NsEmpty);
+			bail!(ExecError::NsEmpty);
 		}
 		Ok(())
 	}
@@ -295,10 +299,10 @@ impl Options {
 	#[inline(always)]
 	pub fn valid_for_db(&self) -> Result<()> {
 		if self.ns.is_none() {
-			bail!(Error::NsEmpty);
+			bail!(ExecError::NsEmpty);
 		}
 		if self.db.is_none() {
-			bail!(Error::DbEmpty);
+			bail!(ExecError::DbEmpty);
 		}
 		Ok(())
 	}

@@ -66,7 +66,7 @@ pub(crate) fn check_arity(
 			format!("Expected {lower} or more arguments")
 		};
 
-		anyhow::bail!(crate::err::Error::InvalidFunctionArguments {
+		anyhow::bail!(crate::expr::Error::InvalidFunctionArguments {
 			name: name.to_owned(),
 			message,
 		});

@@ -6,13 +6,13 @@ use std::{ops, str};
 use anyhow::{Result, anyhow};
 use chrono::offset::LocalResult;
 use chrono::{DateTime, SecondsFormat, TimeZone, Utc};
+use common::fmt::QuoteStr;
 use revision::revisioned;
 use storekey::{BorrowDecode, Encode};
 use surrealdb_kvs::timestamp::TimeStampImpl;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::err::Error;
-use crate::fmt::QuoteStr;
+use crate::expr::Error;
 use crate::syn;
 use crate::val::{Duration, TrySub};
 

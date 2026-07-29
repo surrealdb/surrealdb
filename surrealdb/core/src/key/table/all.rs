@@ -1,9 +1,10 @@
 //! Stores the key prefix for all keys under a table
 use std::borrow::Cow;
 
+use surrealdb_strand::TableName;
+
 use crate::key::database::all::DatabaseRoot;
 use crate::key::{impl_kv_range_storekey, key};
-use crate::val::TableName;
 
 key! {
 	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]

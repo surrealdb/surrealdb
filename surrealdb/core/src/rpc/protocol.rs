@@ -34,7 +34,7 @@ use crate::types::{
 /// utility function converting a `Value::String` into a `Expr::Table`
 fn value_to_table(value: PublicValue) -> Expr {
 	match value {
-		PublicValue::String(s) => Expr::Table(crate::val::TableName::new(s)),
+		PublicValue::String(s) => Expr::Table(surrealdb_strand::TableName::new(s).into()),
 		x => Expr::from_public_value(x),
 	}
 }
@@ -527,7 +527,7 @@ pub trait RpcProtocol {
 		// error, keeping the metrics path infallible. We capture the
 		// scope inside the same lock acquisition to avoid a second
 		// lookup for auth events. Routing through
-		// `TenantIdentity::from_session` applies the documented
+		// `TenantIdentity::from(&Session)` applies the documented
 		// record/anonymous collapsing rule (anon -> `None`,
 		// record-access -> `<record>` sentinel) so per-tenant /
 		// dimensional dashboards stay bounded and audit destinations
@@ -536,7 +536,7 @@ pub trait RpcProtocol {
 			Ok(session_lock) => {
 				let s = session_lock.read().await;
 				let scope = AuthScope::from(s.au.level());
-				(TenantIdentity::from_session(&s), scope)
+				(TenantIdentity::from(&*s), scope)
 			}
 			Err(_) => (TenantIdentity::default(), AuthScope::None),
 		};
@@ -1150,7 +1150,7 @@ pub trait RpcProtocol {
 
 		// If value is a strand, handle it as if it was a table.
 		let what = match what {
-			PublicValue::String(x) => Expr::Table(crate::val::TableName::new(x)),
+			PublicValue::String(x) => Expr::Table(surrealdb_strand::TableName::new(x).into()),
 			x => Expr::from_public_value(x),
 		};
 
@@ -1211,7 +1211,7 @@ pub trait RpcProtocol {
 
 		// If value is a string, handle it as if it was a table.
 		let what = match what {
-			PublicValue::String(x) => Expr::Table(crate::val::TableName::new(x)),
+			PublicValue::String(x) => Expr::Table(surrealdb_strand::TableName::new(x).into()),
 			x => Expr::from_public_value(x),
 		};
 
@@ -1269,8 +1269,10 @@ pub trait RpcProtocol {
 
 		let into = match what {
 			PublicValue::Null | PublicValue::None => None,
-			PublicValue::Table(x) => Some(Expr::Table(crate::val::TableName::new(x.into_string()))),
-			PublicValue::String(x) => Some(Expr::Table(crate::val::TableName::new(x))),
+			PublicValue::Table(x) => {
+				Some(Expr::Table(surrealdb_strand::TableName::new(x.into_string()).into()))
+			}
+			PublicValue::String(x) => Some(Expr::Table(surrealdb_strand::TableName::new(x).into())),
 			x => Some(Expr::from_public_value(x)),
 		};
 
@@ -1314,8 +1316,10 @@ pub trait RpcProtocol {
 
 		let table_name = match what {
 			PublicValue::Null | PublicValue::None => None,
-			PublicValue::Table(x) => Some(Expr::Table(crate::val::TableName::new(x.into_string()))),
-			PublicValue::String(x) => Some(Expr::Table(crate::val::TableName::new(x))),
+			PublicValue::Table(x) => {
+				Some(Expr::Table(surrealdb_strand::TableName::new(x.into_string()).into()))
+			}
+			PublicValue::String(x) => Some(Expr::Table(surrealdb_strand::TableName::new(x).into())),
 			x => Some(Expr::from_public_value(x)),
 		};
 

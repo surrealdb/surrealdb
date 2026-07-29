@@ -5,12 +5,11 @@ use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
-use crate::catalog::FieldDefinition;
 use crate::catalog::providers::TableProvider;
+use crate::catalog::{Error, FieldDefinition};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
-use crate::doc::{CursorDoc, Document};
-use crate::err::Error;
+use crate::doc::{CursorDoc, Document, Error as DocError};
 use crate::expr::data::Assignment;
 use crate::expr::dir::Dir;
 use crate::expr::lookup::LookupKind;
@@ -440,7 +439,10 @@ impl Document {
 								key: key.foreign_key.into_owned(),
 							};
 
-							bail!(Error::DeleteRejectedByReference(rid.to_sql(), record.to_sql(),));
+							bail!(DocError::DeleteRejectedByReference(
+								rid.to_sql(),
+								record.to_sql(),
+							));
 						}
 						// Delete the remote record which referenced this record
 						ReferenceDeleteStrategy::Cascade => {
@@ -461,7 +463,7 @@ impl Document {
 								.await
 								// Wrap any error in an error explaining what went wrong
 								.map_err(|e| {
-									Error::RefsUpdateFailure(rid.to_sql(), e.to_string())
+									DocError::RefsUpdateFailure(rid.to_sql(), e.to_string())
 								})?;
 						}
 						// Delete only the reference on the remote record
@@ -513,13 +515,13 @@ impl Document {
 										.await
 										// Wrap any error in an error explaining what went wrong
 										.map_err(|e| {
-											Error::RefsUpdateFailure(rid.to_sql(), e.to_string())
+											DocError::RefsUpdateFailure(rid.to_sql(), e.to_string())
 										})?;
 								}
 							}
 						}
 						// Process a custom delete strategy
-						ReferenceDeleteStrategy::Custom(v) => {
+						ReferenceDeleteStrategy::Custom(expr) => {
 							// Value for the `$reference` variable is the current record
 							let reference = Value::from(rid.clone());
 							// Value for the document is the remote record
@@ -544,12 +546,12 @@ impl Document {
 							);
 
 							// Compute the custom instruction.
-							stk.run(|stk| v.compute(stk, &ctx, &opt, Some(&doc)))
+							stk.run(|stk| expr.compute(stk, &ctx, &opt, Some(&doc)))
 								.await
 								.catch_return()
 								// Wrap any error in an error explaining what went wrong
 								.map_err(|e| {
-									Error::RefsUpdateFailure(rid.to_sql(), e.to_string())
+									DocError::RefsUpdateFailure(rid.to_sql(), e.to_string())
 								})?;
 						}
 					}

@@ -22,6 +22,7 @@ pub(crate) use pipeline::{
 	FilterAction, PlannedSource, SelectPipelineConfig, TopKPushdownRequest, WhereClauseState,
 	compute_topk_pushdown_request, filter_action_for_predicate,
 };
+use surrealdb_strand::TableName;
 
 use super::Planner;
 use super::util::{
@@ -36,7 +37,7 @@ use super::util::{
 };
 use crate::catalog::Index;
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
-use crate::err::Error;
+use crate::err::{EngineError, Error};
 use crate::exec::index::access_path::{
 	AccessPath, BTreeAccess, BitmapPlan, IndexRef, select_access_path,
 };
@@ -49,7 +50,7 @@ use crate::exec::operators::{
 	Union, UnionIndexScan, UnwrapExactlyOne, VersionScope,
 };
 use crate::exec::pre_decode_filter::pre_decode_filter_status_at_plan_time;
-use crate::exec::{ExecOperator, OperatorMetrics};
+use crate::exec::{Error as ExecError, ExecOperator, OperatorMetrics};
 use crate::expr::field::{Field, Fields};
 use crate::expr::order::Ordering as OrderClause;
 use crate::expr::with::With;
@@ -57,7 +58,6 @@ use crate::expr::{Cond, Expr, Idiom, Literal};
 use crate::idx::planner::ScanDirection;
 use crate::kvs::Transaction;
 use crate::kvs::index::filter_online_indexes;
-use crate::val::TableName;
 
 impl<'ctx> Planner<'ctx> {
 	/// Resolve a parameter to its value at plan time.
@@ -243,11 +243,12 @@ impl<'ctx> Planner<'ctx> {
 			Expr::Param(ref param) => {
 				let value =
 					self.resolve_param(param.as_str()).await.unwrap_or(crate::val::Value::None);
-				let s = value.clone().coerce_to::<String>().map_err(|_| Error::InvalidFetch {
-					value: value.into_literal(),
-				})?;
+				let s =
+					value.clone().coerce_to::<String>().map_err(|_| ExecError::InvalidFetch {
+						value: value.into_literal(),
+					})?;
 				let idiom: Idiom = crate::syn::idiom(&s)
-					.map_err(|_| Error::InvalidFetch {
+					.map_err(|_| ExecError::InvalidFetch {
 						value: expr,
 					})?
 					.into();
@@ -263,7 +264,7 @@ impl<'ctx> Planner<'ctx> {
 						match self.resolve_expr_to_string(arg).await {
 							Ok(s) => {
 								let idiom: Idiom = crate::syn::idiom(&s)
-									.map_err(|e| Error::Query {
+									.map_err(|e| ExecError::Query {
 										message: format!(
 											"Failed to parse field path '{}': {}",
 											s, e
@@ -277,7 +278,7 @@ impl<'ctx> Planner<'ctx> {
 								let strings = self
 									.resolve_expr_to_string_array(arg)
 									.await
-									.map_err(|_| Error::Query {
+									.map_err(|_| ExecError::Query {
 										message: format!(
 											"Projection function '{}' argument could not \
 												 be resolved to a field path",
@@ -286,7 +287,7 @@ impl<'ctx> Planner<'ctx> {
 									})?;
 								for s in strings {
 									let idiom: Idiom = crate::syn::idiom(&s)
-										.map_err(|e| Error::Query {
+										.map_err(|e| ExecError::Query {
 											message: format!(
 												"Failed to parse field path '{}': {}",
 												s, e
@@ -299,22 +300,25 @@ impl<'ctx> Planner<'ctx> {
 						}
 					}
 					if idioms.is_empty() {
-						return Err(Error::Query {
+						return Err(ExecError::Query {
 							message: format!(
 								"Projection function '{}' requires at least one argument",
 								name
 							),
-						});
+						}
+						.into());
 					}
 					Ok(idioms)
 				}
-				_ => Err(Error::InvalidFetch {
+				_ => Err(ExecError::InvalidFetch {
 					value: expr,
-				}),
+				}
+				.into()),
 			},
-			other => Err(Error::InvalidFetch {
+			other => Err(ExecError::InvalidFetch {
 				value: other,
-			}),
+			}
+			.into()),
 		}
 	}
 
@@ -324,13 +328,17 @@ impl<'ctx> Planner<'ctx> {
 			Expr::Param(param) => {
 				let value =
 					self.resolve_param(param.as_str()).await.unwrap_or(crate::val::Value::None);
-				value.coerce_to::<String>().map_err(|_| Error::Query {
-					message: "OMIT/FETCH parameter did not resolve to a string".to_string(),
+				value.coerce_to::<String>().map_err(|_| {
+					ExecError::Query {
+						message: "OMIT/FETCH parameter did not resolve to a string".to_string(),
+					}
+					.into()
 				})
 			}
-			_ => Err(Error::Query {
+			_ => Err(ExecError::Query {
 				message: "OMIT/FETCH with computed expressions not yet supported".to_string(),
-			}),
+			}
+			.into()),
 		}
 	}
 
@@ -346,14 +354,18 @@ impl<'ctx> Planner<'ctx> {
 			Expr::Param(param) => {
 				let value =
 					self.resolve_param(param.as_str()).await.unwrap_or(crate::val::Value::None);
-				value.coerce_to::<Vec<String>>().map_err(|_| Error::Query {
-					message: "OMIT/FETCH parameter did not resolve to an array of strings"
-						.to_string(),
+				value.coerce_to::<Vec<String>>().map_err(|_| {
+					ExecError::Query {
+						message: "OMIT/FETCH parameter did not resolve to an array of strings"
+							.to_string(),
+					}
+					.into()
 				})
 			}
-			_ => Err(Error::Query {
+			_ => Err(ExecError::Query {
 				message: "OMIT/FETCH with computed expressions not yet supported".to_string(),
-			}),
+			}
+			.into()),
 		}
 	}
 
@@ -769,17 +781,17 @@ impl<'ctx> Planner<'ctx> {
 				// `is_indexed_count_eligible` proves that `what` is non-empty
 				// and `cond` is `Some`. Either invariant breaking would be a
 				// planner bug rather than user input — surface it as
-				// `Error::Internal` so the failure message points at the
+				// `EngineError::Internal` so the failure message points at the
 				// drift, instead of letting a future eligibility-rule edit
 				// silently turn into a panic on real queries.
 				let table_first = what.first().cloned().ok_or_else(|| {
-					Error::Internal(
+					EngineError::Internal(
 						"indexed COUNT fast path: `is_indexed_count_eligible` returned true but `what` is empty".into(),
 					)
 				})?;
 				let table_expr = self.physical_expr(table_first).await?;
 				let condition = cond.clone().ok_or_else(|| {
-					Error::Internal(
+					EngineError::Internal(
 						"indexed COUNT fast path: `is_indexed_count_eligible` returned true but `cond` is None".into(),
 					)
 				})?;
@@ -835,15 +847,16 @@ impl<'ctx> Planner<'ctx> {
 			// already proved this shape, but pattern-matching the owned value
 			// in a single place keeps the invariant local. If the guard
 			// changes and this destructure desynchronizes, the explicit
-			// `Error::Internal` fires with a useful message rather than an
+			// `EngineError::Internal` fires with a useful message rather than an
 			// `unreachable!` panic.
 			let rid_lit = match what.into_iter().next() {
 				Some(Expr::Literal(Literal::RecordId(rid_lit))) => rid_lit,
 				_ => {
-					return Err(Error::Internal(
+					return Err(EngineError::Internal(
 						"literal RecordId fast path entered without a literal RecordId source"
 							.into(),
-					));
+					)
+					.into());
 				}
 			};
 			let table_name_for_resolve = Some(rid_lit.table.clone());
@@ -1004,7 +1017,7 @@ impl<'ctx> Planner<'ctx> {
 			if let Some(ref c) = cond {
 				crate::exec::physical_expr::collect_cond_matches(&c.0, &mut cond_matches);
 			}
-			let executor_tables: Vec<crate::val::TableName> = what
+			let executor_tables: Vec<surrealdb_strand::TableName> = what
 				.iter()
 				.filter_map(|e| match e {
 					Expr::Table(t) => Some(t.clone()),
@@ -1046,9 +1059,10 @@ impl<'ctx> Planner<'ctx> {
 					 supported."
 						.to_string()
 				};
-				return Err(Error::Query {
+				return Err(ExecError::Query {
 					message,
-				});
+				}
+				.into());
 			}
 			if brute_force_knn.is_some() {
 				(stripped.clone(), stripped)
@@ -1304,9 +1318,10 @@ impl<'ctx> Planner<'ctx> {
 		topk_request: &TopKPushdownRequest,
 	) -> Result<PlannedSource, Error> {
 		if what.is_empty() {
-			return Err(Error::Query {
+			return Err(ExecError::Query {
 				message: "SELECT requires at least one source".to_string(),
-			});
+			}
+			.into());
 		}
 		// Multi-source FROM combines via Union: rows from one scan compete in
 		// the sort heap with rows from the others, so a per-scan threshold
@@ -1618,11 +1633,12 @@ impl<'ctx> Planner<'ctx> {
 			}
 			Expr::Select(inner_select) => {
 				if version.is_some() {
-					return Err(Error::Query {
+					return Err(ExecError::Query {
 						message: "VERSION clause cannot be used with a subquery source. \
 								  Place the VERSION clause inside the subquery instead."
 							.to_string(),
-					});
+					}
+					.into());
 				}
 				Ok(PlannedSource {
 					operator: self.plan_select_statement(*inner_select).await?,
@@ -1685,7 +1701,7 @@ impl<'ctx> Planner<'ctx> {
 	#[allow(clippy::too_many_arguments)]
 	async fn plan_btree_scan_source(
 		&self,
-		table: crate::val::TableName,
+		table: surrealdb_strand::TableName,
 		index_ref: crate::exec::index::access_path::IndexRef,
 		access: BTreeAccess,
 		direction: crate::idx::planner::ScanDirection,
@@ -1775,7 +1791,7 @@ impl<'ctx> Planner<'ctx> {
 	#[allow(clippy::too_many_arguments)]
 	async fn plan_fulltext_search_source(
 		&self,
-		table: crate::val::TableName,
+		table: surrealdb_strand::TableName,
 		index_ref: crate::exec::index::access_path::IndexRef,
 		query: String,
 		operator: crate::expr::operator::MatchesOperator,
@@ -1814,7 +1830,7 @@ impl<'ctx> Planner<'ctx> {
 	#[allow(clippy::too_many_arguments)]
 	async fn plan_knn_search_source(
 		&self,
-		table: crate::val::TableName,
+		table: surrealdb_strand::TableName,
 		index_ref: crate::exec::index::access_path::IndexRef,
 		vector: Vec<crate::val::Number>,
 		k: u32,
@@ -1859,7 +1875,7 @@ impl<'ctx> Planner<'ctx> {
 	/// streaming plans by construction — including when a range branch is
 	/// dropped at runtime for exceeding its drained-entry budget.
 	fn plan_bitmap_fusion_source(
-		table: crate::val::TableName,
+		table: surrealdb_strand::TableName,
 		root: BitmapPlan,
 		needed_fields: Option<std::collections::HashSet<String>>,
 		table_ctx: Option<ResolvedTableContext>,
@@ -1898,7 +1914,7 @@ impl<'ctx> Planner<'ctx> {
 	#[allow(clippy::too_many_arguments)]
 	async fn plan_table_scan_source(
 		&self,
-		table: crate::val::TableName,
+		table: surrealdb_strand::TableName,
 		direction: crate::idx::planner::ScanDirection,
 		order: Option<&crate::expr::order::Ordering>,
 		scan_predicate: Option<Arc<dyn crate::exec::PhysicalExpr>>,
@@ -2007,7 +2023,7 @@ impl<'ctx> Planner<'ctx> {
 	#[allow(clippy::too_many_arguments)]
 	async fn plan_union_index_source(
 		&self,
-		table: crate::val::TableName,
+		table: surrealdb_strand::TableName,
 		paths: Vec<AccessPath>,
 		dedupe: bool,
 		order: Option<&crate::expr::order::Ordering>,
@@ -2184,13 +2200,13 @@ impl<'ctx> Planner<'ctx> {
 	///
 	/// `select_access_path` only emits `BTreeScan` / `FullTextSearch` /
 	/// `KnnSearch` as union sub-paths; anything else is a planner bug
-	/// and surfaces as `Error::Internal` rather than silently returning a
+	/// and surfaces as `EngineError::Internal` rather than silently returning a
 	/// full table scan.
 	#[allow(clippy::too_many_arguments)]
 	fn build_union_sub_operator(
 		&self,
 		path: AccessPath,
-		table: &crate::val::TableName,
+		table: &surrealdb_strand::TableName,
 		cond: Option<&Cond>,
 		version: Option<&Arc<dyn crate::exec::PhysicalExpr>>,
 		table_ctx: Option<&ResolvedTableContext>,
@@ -2273,11 +2289,12 @@ impl<'ctx> Planner<'ctx> {
 					path = ?other,
 					"UnionIndexScan sub-path produced an unexpected access path"
 				);
-				Err(Error::Internal(
+				Err(EngineError::Internal(
 					"UnionIndexScan sub-path produced an unexpected access path; \
 					 only BTreeScan / FullTextSearch / KnnSearch are valid here"
 						.into(),
-				))
+				)
+				.into())
 			}
 		}
 	}
@@ -2452,12 +2469,10 @@ impl<'ctx> Planner<'ctx> {
 		let Ok(indexes) = filter_online_indexes(txn, ns_id, db_id, indexes).await else {
 			return false;
 		};
+		// The index's pre-parsed guard condition must match the query's WHERE
+		// clause structurally for the fast path to be used.
 		indexes.iter().any(|ix| {
-			if let Index::Count(ref idx_cond) = ix.index {
-				idx_cond.as_ref() == Some(cond)
-			} else {
-				false
-			}
+			matches!(&ix.index, Index::Count(Some(_))) && ix.count_cond.as_ref() == Some(cond)
 		})
 	}
 
@@ -2649,11 +2664,7 @@ impl<'ctx> Planner<'ctx> {
 
 		let fields = txn.all_tb_fields(ns_id, db_id, table_name, None).await.ok()?;
 		let exact_col = |col: &Idiom| -> bool {
-			fields
-				.iter()
-				.find(|fd| &fd.name == col)
-				.and_then(|fd| fd.field_kind.as_ref())
-				.is_some_and(field_kind_excludes_arrays)
+			fields.iter().find(|fd| &fd.name == col).is_some_and(field_def_excludes_arrays)
 		};
 
 		let analyzer = IndexAnalyzer::new(indexes, with);
@@ -2934,11 +2945,7 @@ impl<'ctx> Planner<'ctx> {
 			let Some(fields) = &fields else {
 				return false;
 			};
-			fields
-				.iter()
-				.find(|fd| &fd.name == col)
-				.and_then(|fd| fd.field_kind.as_ref())
-				.is_some_and(field_kind_excludes_arrays)
+			fields.iter().find(|fd| &fd.name == col).is_some_and(field_def_excludes_arrays)
 		};
 		analyzer.try_bitmap_fusion(Some(cond), candidates, &not_exact_col)
 	}
@@ -2968,6 +2975,16 @@ fn bitmap_plan_to_node(plan: BitmapPlan) -> Arc<BitmapNode> {
 			subtract,
 		} => BitmapNode::and_not(bitmap_plan_to_node(*base), bitmap_plan_to_node(*subtract)),
 	}
+}
+
+/// Like [`field_kind_excludes_arrays`], but starting from a field
+/// definition's declared kind. A definition with no declared `TYPE` is
+/// conservatively not exact.
+fn field_def_excludes_arrays(fd: &crate::catalog::FieldDefinition) -> bool {
+	let Some(kind) = fd.field_kind.as_ref() else {
+		return false;
+	};
+	field_kind_excludes_arrays(kind)
 }
 
 /// Whether a declared field kind guarantees the stored value is never an
@@ -3170,10 +3187,10 @@ fn adjust_direction_for_order(
 			.cols
 			.iter()
 			.take(prefix.len())
-			.filter_map(|idiom| FieldPath::try_from(idiom).ok())
+			.filter_map(|s| FieldPath::try_from(s).ok())
 			.collect(),
 		BTreeAccess::Equality(_) => {
-			ix_def.cols.iter().filter_map(|idiom| FieldPath::try_from(idiom).ok()).collect()
+			ix_def.cols.iter().filter_map(|s| FieldPath::try_from(s).ok()).collect()
 		}
 		_ => vec![],
 	};

@@ -6,21 +6,21 @@
 
 use std::sync::Arc;
 
+use common::range::IntegerRangeIter;
 use futures::stream;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::err::Error;
+use crate::err::EngineError;
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::plan_or_compute::{
 	block_required_context, evaluate_body_expr, evaluate_expr_at_depth, expr_required_context,
 };
 use crate::exec::{
-	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
-	ValueBatchStream,
+	AccessMode, CardinalityHint, Error as ExecError, ExecOperator, FlowResult, OperatorMetrics,
+	ValueBatch, ValueBatchStream,
 };
-use crate::expr::{Block, ControlFlow, ControlFlowExt, Expr, Param};
+use crate::expr::{Block, ControlFlow, ControlFlowExt, Error as ExprError, Expr, Param};
 use crate::val::Value;
-use crate::val::range::IntegerRangeIter;
 
 /// Foreach operator with deferred planning.
 ///
@@ -155,11 +155,12 @@ async fn execute_foreach(
 	let iter = match range_value {
 		Value::Array(arr) => ForeachIter::Array(arr.into_iter()),
 		Value::Range(r) => {
-			let r = r.coerce_to_typed::<i64>().map_err(Error::from).context("Invalid FOR range")?;
+			let r =
+				r.coerce_to_typed::<i64>().map_err(ExprError::from).context("Invalid FOR range")?;
 			ForeachIter::Range(r.iter().map(Value::from))
 		}
 		v => {
-			return Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidStatementTarget {
+			return Err(ControlFlow::Err(anyhow::Error::new(ExecError::InvalidStatementTarget {
 				value: v.to_raw_string(),
 			})));
 		}
@@ -174,7 +175,7 @@ async fn execute_foreach(
 		ctx.ctx().expect_not_timedout().await.map_err(ControlFlow::Err)?;
 		// Check for cancellation via the streaming executor's token
 		if ctx.cancellation().is_cancelled() {
-			return Err(ControlFlow::Err(anyhow::anyhow!(crate::err::Error::QueryCancelled)));
+			return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
 		}
 
 		// Create a new context with the loop variable bound

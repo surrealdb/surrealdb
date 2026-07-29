@@ -686,7 +686,8 @@ impl Value {
 			},
 			Kind::Table(t) => {
 				if t.is_empty() {
-					self.coerce_to::<String>().map(|s| Value::Table(crate::val::TableName::new(s)))
+					self.coerce_to::<String>()
+						.map(|s| Value::Table(surrealdb_strand::TableName::new(s)))
 				} else {
 					self.coerce_to_table_kind(t).map(Value::from)
 				}
@@ -746,7 +747,7 @@ impl Value {
 	pub(crate) fn coerce_to_table_kind(
 		self,
 		val: &[TableName],
-	) -> Result<crate::val::TableName, CoerceError> {
+	) -> Result<surrealdb_strand::TableName, CoerceError> {
 		let this = match self {
 			// Tables are allowed if correct type
 			Value::Table(v) => {
@@ -759,7 +760,7 @@ impl Value {
 			// Allow strings to be coerced to tables
 			Value::String(s) => {
 				if val.is_empty() {
-					return Ok(crate::val::TableName::new(s));
+					return Ok(surrealdb_strand::TableName::new(s));
 				}
 
 				let t = TableName::from(s);

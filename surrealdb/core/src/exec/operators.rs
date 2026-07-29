@@ -102,6 +102,7 @@ pub use union::Union;
 pub use unwrap_exactly_one::UnwrapExactlyOne;
 pub use version_scope::VersionScope;
 
+use crate::err::EngineError;
 use crate::exec::{ExecutionContext, FlowResult};
 
 // `check_cancelled` / `gql_output_rows_exceeded` are used only by the GQL v2
@@ -124,9 +125,7 @@ use crate::exec::{ExecutionContext, FlowResult};
 #[cfg_attr(not(feature = "gql"), allow(dead_code))]
 pub(crate) fn check_cancelled(ctx: &ExecutionContext) -> FlowResult<()> {
 	if ctx.cancellation().is_cancelled() {
-		return Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(
-			crate::err::Error::QueryCancelled
-		)));
+		return Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
 	}
 	Ok(())
 }
@@ -161,7 +160,7 @@ pub(crate) fn binding_record_id(
 /// count exceeds the configured ceiling. Names no user data.
 #[cfg_attr(not(feature = "gql"), allow(dead_code))]
 pub(crate) fn gql_output_rows_exceeded(max_rows: usize) -> crate::expr::ControlFlow {
-	crate::expr::ControlFlow::Err(anyhow::anyhow!(crate::err::Error::InvalidStatement(format!(
+	crate::expr::ControlFlow::Err(anyhow::anyhow!(crate::exec::Error::InvalidStatement(format!(
 		"GQL MATCH fan-out exceeded the maximum of {max_rows} output rows \
 		 (configurable via SURREAL_GQL_MAX_OUTPUT_ROWS)"
 	))))

@@ -18,6 +18,10 @@ use crate::dbs::session::NewPlannerStrategy;
 use crate::iam::{Auth, Level};
 use crate::rpc::Method;
 
+mod error;
+
+pub(crate) use self::error::Error;
+
 pub trait Target<Item: ?Sized = Self> {
 	fn matches(&self, elem: &Item) -> bool;
 }

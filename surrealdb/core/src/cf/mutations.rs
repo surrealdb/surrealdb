@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
+use anyhow::Result;
 use revision::revisioned;
 
-use crate::catalog::TableDefinition;
+use crate::catalog::{FromStored, StoredTableDefinition, TableDefinition};
 use crate::doc::CursorRecord;
 use crate::expr::Operation;
 use crate::expr::statements::info::InfoStructure;
@@ -17,7 +18,7 @@ pub enum TableMutation {
 	// we do include it in the first field for convenience.
 	Set(RecordId, Value),
 	Del(RecordId),
-	Def(Box<TableDefinition>),
+	Def(Box<StoredTableDefinition>),
 	/// Includes the ID, current value (after change), changes that can be
 	/// applied to get the original value
 	/// Example, ("mytb:tobie", {{"note": "surreal"}}, [{"op": "add", "path":
@@ -28,12 +29,12 @@ pub enum TableMutation {
 	DelWithOriginal(RecordId, Value),
 }
 
-impl From<TableDefinition> for Value {
+impl From<StoredTableDefinition> for Value {
 	#[inline]
-	fn from(v: TableDefinition) -> Self {
+	fn from(v: StoredTableDefinition) -> Self {
 		let mut h = HashMap::<&str, Value>::new();
 		h.insert("id", Value::Number(Number::Int(v.table_id.0 as i64)));
-		h.insert("name", Value::String(v.name.into()));
+		h.insert("name", Value::String(v.name));
 		Value::Object(Object::from(h))
 	}
 }
@@ -50,7 +51,7 @@ impl TableMutations {
 		Self(tb, Vec::new())
 	}
 	/// Push a table change to the table mutations
-	pub fn push_table_change(&mut self, dt: TableDefinition) {
+	pub fn push_table_change(&mut self, dt: StoredTableDefinition) {
 		// Push the table change to the entry
 		self.1.push(TableMutation::Def(Box::new(dt)));
 	}
@@ -119,8 +120,11 @@ pub struct ChangeSet(pub u128, pub DatabaseMutation);
 impl TableMutation {
 	/// Convert a stored change feed table mutation (record change) into a
 	/// Value that can be used in the storage of change feeds and their
-	/// transmission to consumers
-	pub fn into_value(self) -> Value {
+	/// transmission to consumers.
+	///
+	/// Fails only for `Def`, whose stored table definition is compiled so the
+	/// rendering matches every other reader's; see the arm.
+	pub fn into_value(self) -> Result<Value> {
 		let mut h = Object::default();
 		let h = match self {
 			TableMutation::Set(_thing, v) => {
@@ -144,7 +148,12 @@ impl TableMutation {
 				h
 			}
 			TableMutation::Def(t) => {
-				h.insert("define_table", t.structure());
+				// Rendered through the compiled definition, not the stored one:
+				// a definition's clauses are stored under weaker escaping than
+				// its rendering uses (`catalog::text`), so rendering the stored
+				// form directly would emit a `DEFINE TABLE` that does not read
+				// back. Compiling is the funnel every other reader goes through.
+				h.insert("define_table", TableDefinition::from_stored(&t)?.structure());
 				h
 			}
 			TableMutation::DelWithOriginal(id, val) => {
@@ -158,19 +167,19 @@ impl TableMutation {
 				h
 			}
 		};
-		Value::Object(h)
+		Ok(Value::Object(h))
 	}
 }
 
 impl DatabaseMutation {
-	pub fn into_value(self) -> Value {
+	pub fn into_value(self) -> Result<Value> {
 		let mut changes = Vec::<Value>::new();
 		for tbs in self.0 {
 			for tb in tbs.1 {
-				changes.push(tb.into_value());
+				changes.push(tb.into_value()?);
 			}
 		}
-		Value::Array(Array::from(changes))
+		Ok(Value::Array(Array::from(changes)))
 	}
 }
 
@@ -180,7 +189,7 @@ impl ChangeSet {
 		// The versionstamp is a u128; convert it losslessly (erroring rather
 		// than truncating if it is ever too large to represent as a Number).
 		m.insert("versionstamp", Value::try_from(self.0)?);
-		m.insert("changes", self.1.into_value());
+		m.insert("changes", self.1.into_value()?);
 		Ok(Value::Object(m))
 	}
 }
@@ -214,7 +223,7 @@ mod tests {
 						]))),
 					),
 					TableMutation::Del(RecordId::new("mytb".into(), "tobie".to_owned())),
-					TableMutation::Def(Box::new(TableDefinition::new(
+					TableMutation::Def(Box::new(StoredTableDefinition::new(
 						NamespaceId(1),
 						DatabaseId(2),
 						TableId(3),
@@ -267,7 +276,7 @@ mod tests {
 								"note" => Value::from("surreal"),
 						})),
 					),
-					TableMutation::Def(Box::new(TableDefinition::new(
+					TableMutation::Def(Box::new(StoredTableDefinition::new(
 						NamespaceId(1),
 						DatabaseId(2),
 						TableId(3),

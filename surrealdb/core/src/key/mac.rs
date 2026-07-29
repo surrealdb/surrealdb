@@ -169,7 +169,7 @@ macro_rules! impl_kv_range_storekey{
 		impl$(<$($tt)*>)? crate::key::KVRange for $t {
 
 			fn encode_bound(&self) -> ::anyhow::Result<crate::key::Key<'static>> {
-				let key = ::storekey::encode_vec(self).map_err(|_| crate::err::Error::Unencodable)?;
+				let key = ::storekey::encode_vec(self).map_err(|_| crate::key::Error::Unencodable)?;
 				Ok(crate::key::Key::from(key))
 			}
 
@@ -192,7 +192,7 @@ macro_rules! impl_kv_key_storekey {
 			type Value = $v;
 
 			fn encode_buffer(&self, buffer: &mut Vec<u8>) -> ::anyhow::Result<()> {
-				::storekey::encode(buffer, self).map_err(|_| crate::err::Error::Unencodable)?;
+				::storekey::encode(buffer, self).map_err(|_| crate::key::Error::Unencodable)?;
 				Ok(())
 			}
 
@@ -202,7 +202,7 @@ macro_rules! impl_kv_key_storekey {
 		impl<$lt> crate::key::KVKeyDecode<$lt> for $t<$lt> {
 			fn decode_key(bytes: & $lt [u8]) -> ::anyhow::Result<Self> {
 				Ok(::storekey::decode_borrow(bytes)
-					.map_err(|_| crate::err::Error::Corrupted("Cannot decode kv key"))?)
+					.map_err(|_| crate::key::Error::Corrupted("Cannot decode kv key"))?)
 			}
 		}
 	};
@@ -212,7 +212,7 @@ macro_rules! impl_kv_key_storekey {
 			type Value = $v;
 
 			fn encode_buffer(&self, buffer: &mut Vec<u8>) -> ::anyhow::Result<()> {
-				::storekey::encode(buffer, self).map_err(|_| crate::err::Error::Unencodable)?;
+				::storekey::encode(buffer, self).map_err(|_| crate::key::Error::Unencodable)?;
 				Ok(())
 			}
 
@@ -222,7 +222,7 @@ macro_rules! impl_kv_key_storekey {
 		impl crate::key::KVKeyDecode<'_> for $t {
 			fn decode_key(bytes: &[u8]) -> ::anyhow::Result<Self> {
 				Ok(::storekey::decode_borrow(bytes)
-					.map_err(|_| crate::err::Error::Corrupted("Cannot decode kv key"))?)
+					.map_err(|_| crate::key::Error::Corrupted("Cannot decode kv key"))?)
 			}
 		}
 	};

@@ -5,7 +5,8 @@
 //! deterministic, document-independent expressions in WHERE clauses to
 //! literals so the index analyzer can match them.
 
-use crate::err::Error;
+use crate::err::{EngineError, Error};
+use crate::exec::Error as ExecError;
 use crate::exec::function::FunctionRegistry;
 use crate::expr::visit::{MutVisitor, VisitMut};
 use crate::expr::{BinaryOperator, Cond, Expr};
@@ -258,7 +259,7 @@ fn try_eval_binary(
 ///
 /// Delegates to [`try_literal_to_value`] for common types, then handles
 /// planner-specific types (UnboundedRange, Bytes, Regex, Geometry, File).
-/// Returns `Error::Internal` for types that should have been handled upstream
+/// Returns `EngineError::Internal` for types that should have been handled upstream
 /// by `physical_expr()` (RecordId, Array, Object, Set).
 pub(crate) fn literal_to_value(
 	lit: crate::expr::literal::Literal,
@@ -279,10 +280,11 @@ pub(crate) fn literal_to_value(
 		Literal::Geometry(g) => Ok(Value::Geometry(g)),
 		Literal::File(f) => Ok(Value::File(f)),
 		// Everything else should be handled upstream in physical_expr()
-		other => Err(Error::Internal(format!(
+		other => Err(EngineError::Internal(format!(
 			"Literal should be handled upstream in physical_expr(): {:?}",
 			std::mem::discriminant(&other)
-		))),
+		))
+		.into()),
 	}
 }
 
@@ -301,12 +303,14 @@ pub(crate) fn key_lit_to_expr(lit: &crate::expr::RecordIdKeyLit) -> Result<Expr,
 		RecordIdKeyLit::Object(entries) => {
 			Ok(Expr::Literal(crate::expr::literal::Literal::Object(entries.clone())))
 		}
-		RecordIdKeyLit::Generate(_) => Err(Error::Query {
+		RecordIdKeyLit::Generate(_) => Err(ExecError::Query {
 			message: "Generated keys (rand, ulid, uuid) cannot be used in graph range bounds"
 				.to_string(),
-		}),
-		RecordIdKeyLit::Range(_) => Err(Error::Query {
+		}
+		.into()),
+		RecordIdKeyLit::Range(_) => Err(ExecError::Query {
 			message: "Nested range keys cannot be used in graph range bounds".to_string(),
-		}),
+		}
+		.into()),
 	}
 }

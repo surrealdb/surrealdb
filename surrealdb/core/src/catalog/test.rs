@@ -11,8 +11,7 @@ use crate::catalog::auth::AuthLimit;
 use crate::catalog::schema::base::Base;
 use crate::expr::field::Selector;
 use crate::expr::{
-	Block, ChangeFeed, Expr, Fetch, Fetchs, Field, Fields, Filter, Groups, Idiom, Kind, Literal,
-	Tokenizer,
+	ChangeFeed, Expr, Field, Fields, Filter, Groups, Idiom, Kind, Literal, Tokenizer,
 };
 use crate::iam::Auth;
 use crate::key::KVValue;
@@ -37,23 +36,23 @@ use crate::val::{Datetime, TableName, Value};
 		store_diff: false,
 	}),
 }, 25)]
-#[case::table(TableDefinition {
+#[case::table(StoredTableDefinition {
 	namespace_id: NamespaceId(123),
 	database_id: DatabaseId(456),
 	table_id: TableId(789),
-	name: TableName::from("test"),
+	name: "test".into(),
 	drop: false,
 	schemafull: false,
 	view: Some(ViewDefinition::Select {
-		fields: Fields::Select(vec![Field::All, Field::Single (crate::expr::field::Selector{
-			expr: Expr::Literal(Literal::String(Strand::new_static("expr"))),
-			alias: Some(Idiom::from_str("field[0]").unwrap()),
-		})]),
-		tables: vec![TableName::from("what")],
-		condition: Some(Expr::Literal(Literal::String(Strand::new_static("cond")))),
-		groups: Some(Groups::default()),
-	}),
-	permissions: Permissions::default(),
+			fields: Fields::Select(vec![Field::All, Field::Single (crate::expr::field::Selector{
+				expr: Expr::Literal(Literal::String(Strand::new_static("expr"))),
+				alias: Some(Idiom::from_str("field[0]").unwrap()),
+			})]),
+			tables: vec![TableName::from("what")],
+			condition: Some(Expr::Literal(Literal::String(Strand::new_static("cond")))),
+			groups: Some(Groups::default()),
+		}.to_stored()),
+	permissions: StoredPermissions::default(),
 	changefeed: Some(ChangeFeed {
 		expiry: Duration::from_secs(123),
 		store_diff: false,
@@ -67,22 +66,22 @@ use crate::val::{Datetime, TableName, Value};
 	cache_lives_ts: Uuid::default(),
 	graphql_alias: None,
 	graphql_deprecated: None,
-}, 167)]
-#[case::subscription(SubscriptionDefinition {
+}, 163)]
+#[case::subscription(StoredSubscriptionDefinition {
 	id: Uuid::default(),
 	node: Uuid::default(),
-	fields: SubscriptionFields::Select(Fields::Select(vec![Field::All, Field::Single(Selector{
+	fields: StoredSubscriptionFields::Select(FieldsText::new(&Fields::Select(vec![Field::All, Field::Single(Selector{
 		expr: Expr::Literal(Literal::String(Strand::new_static("expr"))),
 		alias: Some(Idiom::from_str("field[0]").unwrap()),
-	})])),
-	what: Expr::Literal(Literal::String(Strand::new_static("what"))),
-	cond: Some(Expr::Literal(Literal::String(Strand::new_static("cond")))),
-	fetch: Some(Fetchs::new(vec![Fetch(Expr::Literal(Literal::String(Strand::new_static("fetch"))))])),
+	})]))),
+	what: ExprText::new(&Expr::Literal(Literal::String(Strand::new_static("what")))),
+	cond: Some(ExprText::new(&Expr::Literal(Literal::String(Strand::new_static("cond"))))),
+	fetch: Some(vec![ExprText::new(&Expr::Literal(Literal::String(Strand::new_static("fetch"))))]),
 	auth: Some(Auth::default()),
 	session: Some(Value::default()),
 	vars: BTreeMap::new(),
-}, 101)]
-#[case::access(AccessDefinition {
+}, 96)]
+#[case::access(StoredAccessDefinition {
 	name: "access".into(),
 	access_type: AccessType::Bearer(BearerAccess {
 		kind: BearerAccessType::Bearer,
@@ -99,7 +98,7 @@ use crate::val::{Datetime, TableName, Value};
 		},
 	}),
 	base: Base::Root,
-	authenticate: Some(Expr::Literal(Literal::String(Strand::new_static("expr")))),
+	authenticate: Some(ExprText::from_raw("'expr'")),
 	grant_duration: Some(Duration::from_secs(123)),
 	token_duration: Some(Duration::from_secs(123)),
 	session_duration: Some(Duration::from_secs(123)),
@@ -124,48 +123,48 @@ use crate::val::{Datetime, TableName, Value};
 	filters: Some(vec![Filter::Ascii]),
 	comment: Some("comment".to_string()),
 }, 37)]
-#[case::api(ApiDefinition {
-	path: "/test".parse().unwrap(),
+#[case::api(StoredApiDefinition {
+	path: PathText::from_raw("/test"),
 	actions: vec![
-		ApiActionDefinition {
+		StoredApiActionDefinition {
 			methods: vec![ApiMethod::Get],
-			action: Expr::Literal(Literal::String(Strand::new_static("action"))),
-			config: ApiConfigDefinition::default(),
+			action: ExprText::from_raw("'action'"),
+			config: StoredApiConfigDefinition::default(),
 		},
 	],
 	fallback: None,
-	config: ApiConfigDefinition {
+	config: StoredApiConfigDefinition {
 		middleware: vec![
 			MiddlewareDefinition {
 				name: "middleware".into(),
 				args: vec![],
 			},
 		],
-		permissions: Permission::Full,
+		permissions: StoredPermission::Full,
 	},
 	comment: None,
 	auth_limit: AuthLimit::default(),
 }, 48)]
-#[case::bucket(BucketDefinition {
+#[case::bucket(StoredBucketDefinition {
 	id: Some(BucketId(123)),
 	readonly: false,
 	name: "bucket".into(),
 	backend: Some("backend".into()),
 	comment: Some("comment".to_string()),
-	permissions: Permission::Full,
+	permissions: StoredPermission::Full,
 }, 32)]
-#[case::config(ConfigDefinition::GraphQL(GraphQLConfig {
+#[case::config(StoredConfigDefinition::GraphQL(GraphQLConfig {
 	tables: GraphQLTablesConfig::default(),
 	functions: GraphQLFunctionsConfig::default(),
 	depth_limit: None,
 	complexity_limit: None,
 	introspection: GraphQLIntrospectionConfig::default(),
 }), 11)]
-#[case::event(EventDefinition {
+#[case::event(StoredEventDefinition {
 	name: "test".into(),
-	target_table: TableName::from("test"),
-	when: Expr::Literal(Literal::String(Strand::new_static("when"))),
-	then: vec![Expr::Literal(Literal::String(Strand::new_static("then")))],
+	target_table: "test".into(),
+	when: ExprText::from_raw("'when'"),
+	then: vec![ExprText::from_raw("'then'")],
 	comment: Some("comment".to_string()),
 	auth_limit: AuthLimit::default(),
     kind: EventKind::Async {
@@ -173,8 +172,8 @@ use crate::val::{Datetime, TableName, Value};
         max_depth: 5,
     },
 }, 43)]
-#[case::field(FieldDefinition {
-	name: Idiom::from_str("field[0]").unwrap(),
+#[case::field(StoredFieldDefinition {
+	name: IdiomText::from_raw("field[0]"),
 	table: TableName::from("what"),
 	field_kind: None,
 	readonly: false,
@@ -182,52 +181,49 @@ use crate::val::{Datetime, TableName, Value};
 	value: None,
 	assert: None,
 	computed: None,
-	default: DefineDefault::None,
-	select_permission: Permission::Full,
-	create_permission: Permission::Full,
-	update_permission: Permission::Full,
+	default: StoredDefineDefault::None,
+	select_permission: StoredPermission::Full,
+	create_permission: StoredPermission::Full,
+	update_permission: StoredPermission::Full,
 	comment: Some("comment".to_string()),
 	reference: None,
 	auth_limit: AuthLimit::default(),
-	computed_deps: None,
 	graphql_alias: None,
 	graphql_deprecated: None,
-}, 46)]
-#[case::function(FunctionDefinition {
+}, 45)]
+#[case::function(StoredFunctionDefinition {
 	name: "function".into(),
 	args: vec![],
-	block: Block(vec![
-		Expr::Literal(Literal::String(Strand::new_static("expr"))),
-	]),
+	block: BlockText::from_raw("{ 'expr' }"),
 	comment: Some("comment".to_string()),
-	permissions: Permission::Full,
-	returns: Some(Kind::Any),
+	permissions: StoredPermission::Full,
+	returns: Some(KindText::new(&Kind::Any)),
 	auth_limit: AuthLimit::default(),
 	graphql_alias: None,
 	graphql_deprecated: None,
-}, 42)]
-#[case::index(IndexDefinition {
+}, 44)]
+#[case::index(StoredIndexDefinition {
 	index_id: IndexId(123),
 	name: "test".into(),
-	table_name: TableName::from("what"),
-	cols: vec![Idiom::from_str("field[0]").unwrap()],
+	table_name: "what".into(),
+	cols: vec![IdiomText::from_raw("field[0]")],
 	index: Index::Idx,
 	comment: Some("comment".to_string()),
 	prepare_remove: false,
 	format_version: 1,
 }, 35)]
-#[case::model(MlModelDefinition {
+#[case::model(StoredMlModelDefinition {
 	name: "model".into(),
 	hash: "hash".into(),
 	version: "1.0.0".into(),
 	comment: Some("comment".to_string()),
-	permissions: Permission::Full,
+	permissions: StoredPermission::Full,
 }, 29)]
-#[case::param(ParamDefinition {
+#[case::param(StoredParamDefinition {
 	name: "param".into(),
 	value: Value::Bool(true),
 	comment: Some("comment".to_string()),
-	permissions: Permission::Full,
+	permissions: StoredPermission::Full,
 }, 21)]
 #[case::sequence(SequenceDefinition {
 	name: "sequence".into(),

@@ -3,7 +3,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::expr::Expr;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum UseStatement {
+pub(crate) enum UseStatement {
 	Ns(Expr),
 	Db(Expr),
 	NsDb(Expr, Expr),

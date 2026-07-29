@@ -8,7 +8,7 @@ use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 use crate::ctx::FrozenContext;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::{CursorDoc, NsDbCtx};
-use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::order::Ordering;
 use crate::expr::{
 	Cond, Explain, Expr, Fetchs, Fields, FlowResultExt as _, Groups, Limit, Splits, Start, With,
@@ -93,7 +93,7 @@ impl SelectStatement {
 		// Fail for multiple targets without a limit
 		ensure!(
 			!self.only || iterator.is_limit_one_or_zero() || self.what.len() <= 1,
-			Error::SingleOnlyOutput
+			ExecError::SingleOnlyOutput
 		);
 		// Check if there is a timeout
 		// This is calculated on the parent doc
@@ -116,7 +116,7 @@ impl SelectStatement {
 		if opt.version.is_some() {
 			for w in self.what.iter() {
 				if matches!(w, Expr::Select(_)) {
-					return Err(anyhow::Error::new(Error::Query {
+					return Err(anyhow::Error::new(ExecError::Query {
 						message: "VERSION clause cannot be used with a subquery source. \
 								  Place the VERSION clause inside the subquery instead."
 							.to_string(),
@@ -165,7 +165,7 @@ impl SelectStatement {
 						if array.is_empty() {
 							Ok(Value::None)
 						} else {
-							ensure!(array.len() == 1, Error::SingleOnlyOutput);
+							ensure!(array.len() == 1, ExecError::SingleOnlyOutput);
 							Ok(array.0.pop().expect("array has exactly one element"))
 						}
 					}

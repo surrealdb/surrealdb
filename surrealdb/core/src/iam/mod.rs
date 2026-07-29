@@ -1,28 +1,26 @@
 use std::sync::Once;
 
-pub use entities::Level;
-use thiserror::Error;
+pub use surrealdb_iam::*;
 pub use token::Token;
 
 pub mod access;
-pub mod auth;
+mod action_impls;
 pub mod base;
 pub mod check;
 pub mod clear;
-pub mod entities;
+mod error;
 pub(crate) mod file;
 pub mod issue;
 #[cfg(feature = "jwks")]
 pub mod jwks;
 pub mod reset;
-pub mod scram;
 pub mod signin;
 pub mod signup;
 pub mod token;
 pub mod verify;
 
-pub use self::auth::*;
-pub use self::entities::*;
+pub(crate) use error::Error;
+
 use crate::catalog;
 
 /// Derive an Argon2id hash of a plaintext password for storage.
@@ -39,20 +37,6 @@ pub(crate) fn hash_password(password: &str) -> String {
 		.hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))
 		.expect("password hashing should not fail")
 		.to_string()
-}
-
-#[derive(Error, Debug)]
-#[non_exhaustive]
-pub enum Error {
-	#[error("Invalid role '{0}'")]
-	InvalidRole(String),
-
-	#[error("Not enough permissions to perform this action")]
-	NotAllowed {
-		actor: String,
-		action: String,
-		resource: String,
-	},
 }
 
 fn algorithm_to_jwt_algorithm(alg: catalog::Algorithm) -> jsonwebtoken::Algorithm {
@@ -80,51 +64,9 @@ fn algorithm_to_jwt_algorithm(alg: catalog::Algorithm) -> jsonwebtoken::Algorith
 }
 
 /// Returns true if the error is an expired-token auth error (e.g. from `verify::token`).
+///
+/// Authentication failures are always raised bare into `anyhow` - no core
+/// `Error` variant wraps them - so a single downcast sees every occurrence.
 pub fn is_expired_token_error(e: &anyhow::Error) -> bool {
-	e.downcast_ref::<crate::err::Error>()
-		.is_some_and(|err| matches!(err, crate::err::Error::ExpiredToken))
-}
-
-pub fn is_allowed_check(actor: &Actor, action: &Action, resource: &Resource) -> bool {
-	match action {
-		Action::View => resource.level().sublevel_of(actor.level()),
-		Action::Edit => {
-			if actor.has_role(Role::Owner) {
-				resource.level().sublevel_of(actor.level())
-			} else if actor.has_role(Role::Editor) {
-				matches!(
-					resource.kind(),
-					ResourceKind::Namespace
-						| ResourceKind::Database
-						| ResourceKind::Record
-						| ResourceKind::Table
-						| ResourceKind::Document
-						| ResourceKind::Option
-						| ResourceKind::Function
-						| ResourceKind::Analyzer
-						| ResourceKind::Parameter
-						| ResourceKind::Event
-						| ResourceKind::Field
-						| ResourceKind::Index
-				) && resource.level().sublevel_of(actor.level())
-			} else {
-				false
-			}
-		}
-	}
-}
-
-pub fn is_allowed(actor: &Actor, action: &Action, resource: &Resource) -> Result<(), Error> {
-	if !is_allowed_check(actor, action, resource) {
-		let err = Error::NotAllowed {
-			actor: actor.to_string(),
-			action: action.to_string(),
-			resource: format!("{}", resource),
-		};
-
-		trace!("{}", err);
-		return Err(err);
-	}
-
-	Ok(())
+	matches!(e.downcast_ref::<Error>(), Some(Error::ExpiredToken))
 }

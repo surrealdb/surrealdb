@@ -4,10 +4,9 @@ use surrealdb_types::ToSql;
 
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
-use crate::err::Error;
 use crate::exe::try_join_all_buffered;
 use crate::expr::part::{DestructurePart, Next, Part};
-use crate::expr::{Expr, FlowResultExt as _, Literal};
+use crate::expr::{Error, Expr, FlowResultExt as _, Literal};
 use crate::val::Value;
 
 impl Value {

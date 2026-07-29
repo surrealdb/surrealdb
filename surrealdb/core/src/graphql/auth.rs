@@ -16,7 +16,7 @@ use async_graphql::{Name, Value as GraphqlValue};
 
 use super::error::{GraphqlError, auth_error, resolver_error};
 use super::utils::GraphqlValueUtils;
-use crate::catalog::{AccessDefinition, AccessType};
+use crate::catalog::AccessDefinition;
 use crate::dbs::Session;
 use crate::iam::token::Token;
 use crate::iam::{signin, signup};
@@ -42,15 +42,9 @@ pub fn add_auth_mutations(
 	db: &str,
 	datastore: &Arc<Datastore>,
 ) -> Object {
-	let has_signin = accesses.iter().any(|ac| match &ac.access_type {
-		AccessType::Record(rec) => rec.signin.is_some(),
-		_ => false,
-	});
+	let has_signin = accesses.iter().any(|ac| ac.signin.is_some());
 
-	let has_signup = accesses.iter().any(|ac| match &ac.access_type {
-		AccessType::Record(rec) => rec.signup.is_some(),
-		_ => false,
-	});
+	let has_signup = accesses.iter().any(|ac| ac.signup.is_some());
 
 	let mut mutation = mutation;
 

@@ -9,8 +9,8 @@ use super::pipeline::{
 	build_field_state, determine_scan_direction, eval_limit_expr, kv_scan_stream,
 };
 use super::{FullTextScan, IndexScan, KnnScan};
-use crate::catalog::{DatabaseId, NamespaceId, Permission};
-use crate::err::Error;
+use crate::catalog::{DatabaseId, Error, NamespaceId, Permission};
+use crate::err::EngineError;
 use crate::exec::index::access_path::{AccessPath, select_access_path};
 use crate::exec::index::analysis::IndexAnalyzer;
 use crate::exec::operators::scan::pipeline::ScanPipeline;
@@ -562,7 +562,7 @@ impl ExecOperator for DynamicScan {
 			while let Some(batch_result) = source.next().await {
 				// Check for cancellation between batches
 				if ctx.cancellation().is_cancelled() {
-					Err(ControlFlow::Err(anyhow::anyhow!(crate::err::Error::QueryCancelled)))?;
+					Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)))?;
 				}
 				let mut batch = batch_result?;
 				let cont = pipeline.process_batch(&mut batch.values, &ctx).await?;

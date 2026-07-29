@@ -28,6 +28,10 @@ pub use common::lazy_env_parse;
 
 #[macro_use]
 mod mac;
+#[cfg(test)]
+mod sql_test;
+#[cfg(test)]
+mod sql_to_sql_test;
 
 #[doc(hidden)]
 pub mod buc;
@@ -35,7 +39,8 @@ mod cf;
 #[doc(hidden)]
 pub mod doc;
 mod exe;
-mod fmt;
+#[cfg(test)]
+mod fmt_roundtrip_test;
 mod fnc;
 #[doc(hidden)]
 pub mod key;
@@ -54,6 +59,8 @@ pub mod catalog;
 // Downstream-compat alias only (enterprise still imports `surrealdb_core::cnf::…`);
 // core-internal code and in-repo crates import `surrealdb_cnf` directly.
 pub use surrealdb_cnf as cnf;
+/// The SurrealQL abstract syntax tree, as produced by [`syn`].
+pub use surrealdb_sql as sql;
 pub mod ctx;
 pub mod dbs;
 pub mod env;
@@ -80,7 +87,6 @@ pub mod observe;
 pub mod options;
 pub mod rnd;
 pub mod rpc;
-pub mod sql;
 pub mod syn;
 #[doc(hidden)]
 pub mod val;
@@ -95,8 +101,8 @@ pub(crate) mod types {
 		KindLiteral as PublicKindLiteral, Notification as PublicNotification,
 		Number as PublicNumber, Object as PublicObject, Range as PublicRange,
 		RecordId as PublicRecordId, RecordIdKey as PublicRecordIdKey,
-		RecordIdKeyRange as PublicRecordIdKeyRange, Regex as PublicRegex, Set as PublicSet,
-		SurrealValue, Table as PublicTable, Uuid as PublicUuid, Value as PublicValue,
+		RecordIdKeyRange as PublicRecordIdKeyRange, Set as PublicSet, SurrealValue,
+		Table as PublicTable, Uuid as PublicUuid, Value as PublicValue,
 		Variables as PublicVariables,
 	};
 }

@@ -1,7 +1,7 @@
 use anyhow::Result;
 
-use crate::err::Error;
 use crate::key::KVValue;
+use crate::kvs::DatastoreError;
 
 #[derive(Copy, Debug, Clone, PartialEq)]
 pub struct MajorVersion(u16);
@@ -34,7 +34,7 @@ impl KVValue for MajorVersion {
 
 	#[inline]
 	fn kv_decode_value(v: &[u8], _: ()) -> Result<Self> {
-		let bin = v.try_into().map_err(|_| Error::InvalidStorageVersion)?;
+		let bin = v.try_into().map_err(|_| DatastoreError::InvalidStorageVersion)?;
 		let val = u16::from_be_bytes(bin).into();
 		Ok(val)
 	}

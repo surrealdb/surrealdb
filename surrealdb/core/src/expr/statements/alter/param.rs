@@ -71,7 +71,7 @@ impl AlterParamStatement {
 			},
 			pa: Cow::Borrowed(&self.name),
 		};
-		txn.set_key(&key, &pa).await?;
+		txn.set_key(&key, &pa.to_stored()).await?;
 		txn.clear_cache();
 		Ok(Value::None)
 	}

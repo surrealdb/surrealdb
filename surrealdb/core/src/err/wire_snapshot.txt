@@ -1,0 +1,250 @@
+Engine	{ cause: NONE, code: -32005, details: { kind: 'Cancelled' }, kind: 'Query', message: 'The query was not executed due to a cancelled transaction' }
+Exec	{ cause: NONE, code: -32600, details: { kind: 'NamespaceEmpty' }, kind: 'Validation', message: 'Specify a namespace to use' }
+Kvs	{ cause: { cause: NONE, code: -32000, kind: 'Internal', message: 'There was an internal error: sample' }, code: -32000, kind: 'Internal', message: 'There was a problem with the key-value store: There was an internal error: sample' }
+IamError	{ cause: { cause: NONE, code: -32000, kind: 'Internal', message: "Invalid role 'sample'" }, code: -32002, details: { details: { details: { name: 'sample' }, kind: 'InvalidRole' }, kind: 'Auth' }, kind: 'NotAllowed', message: "IAM error: Invalid role 'sample'" }
+InvalidPath	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The string could not be parsed into a path: sample' }
+ApiError	{ cause: NONE, code: -32008, details: { kind: 'Deserialization' }, kind: 'Serialization', message: 'Failed to decode the request body' }
+InvalidUrl	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The URL `sample` is invalid' }
+Http	{ cause: NONE, code: -32001, details: { kind: 'ConnectionFailed' }, kind: 'Connection', message: 'There was an error processing a remote HTTP request: sample' }
+HttpDisabled	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Remote HTTP request functions are not enabled' }
+ScriptingNotAllowed	{ cause: NONE, code: -32602, details: { kind: 'Scripting' }, kind: 'NotAllowed', message: 'Scripting functions are not allowed' }
+FunctionNotAllowed	{ cause: NONE, code: -32602, details: { details: { name: 'sample' }, kind: 'Function' }, kind: 'NotAllowed', message: "Function 'sample' is not allowed to be executed" }
+NetTargetNotAllowed	{ cause: NONE, code: -32602, details: { details: { name: 'sample' }, kind: 'Target' }, kind: 'NotAllowed', message: "Access to network target 'sample' is not allowed" }
+Io	{ cause: { cause: NONE, code: -32000, kind: 'Internal', message: 'sample' }, code: -32000, kind: 'Internal', message: 'I/O error: sample' }
+Revision	{ cause: { cause: NONE, code: -32000, kind: 'Internal', message: 'A serialization error occured: sample' }, code: -32000, kind: 'Serialization', message: 'Versioned error: A serialization error occured: sample' }
+OrderingError	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Error while ordering a result: sample.' }
+QueryTooLarge	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Size of query script exceeded maximum supported size of 4,294,967,295 bytes.' }
+InvalidQuery	{ cause: NONE, code: -32000, kind: 'Validation', message: 'Parse error: sample\n' }
+InvalidRequestBody	{ cause: NONE, code: -32000, kind: 'Validation', message: 'Invalid request body: Expected data frame but received another frame type' }
+RequestBodyTooLarge	{ cause: NONE, code: -32000, kind: 'Validation', message: 'Invalid request body: The body exceeded the max payload size of 1kb' }
+BodyDecodeFailure	{ cause: NONE, code: -32008, details: { kind: 'Deserialization' }, kind: 'Serialization', message: 'Failed to decode the request body' }
+BodyEncodeFailure	{ cause: NONE, code: -32007, details: { kind: 'Serialization' }, kind: 'Serialization', message: 'Failed to encode the response body' }
+InvalidApiResponse	{ cause: NONE, code: -32008, details: { kind: 'Deserialization' }, kind: 'Serialization', message: 'Invalid API response: sample' }
+InvalidFormat	{ cause: NONE, code: -32000, kind: 'Validation', message: 'Invalid Accept or Content-Type header' }
+MissingFormat	{ cause: NONE, code: -32000, kind: 'Validation', message: 'Missing Accept or Content-Type header' }
+ApiUnreachable	{ cause: NONE, code: -32000, kind: 'Internal', message: 'An unreachable error occurred: sample' }
+InvalidStatusCode	{ cause: NONE, code: -32000, kind: 'Validation', message: 'Invalid HTTP status code: 1. Must be between 100 and 599' }
+InvalidHeaderName	{ cause: NONE, code: -32000, kind: 'Validation', message: 'Invalid header name: sample' }
+InvalidHeaderValue	{ cause: NONE, code: -32000, kind: 'Validation', message: 'Invalid header value for sample: sample' }
+HeaderInjectionAttempt	{ cause: NONE, code: -32000, kind: 'Validation', message: 'Header value contains invalid characters: sample' }
+MissingContentType	{ cause: NONE, code: -32000, kind: 'Validation', message: 'Missing required Content-Type header' }
+UnsupportedContentType	{ cause: NONE, code: -32000, kind: 'Validation', message: 'Unsupported Content-Type: sample' }
+InvalidContentType	{ cause: NONE, code: -32000, kind: 'Validation', message: 'Expected Content-Type to be sample' }
+NoOutputStrategy	{ cause: NONE, code: -32000, kind: 'Validation', message: 'No output strategy was possible for this API request' }
+InvalidRequestBodyType	{ cause: NONE, code: -32000, kind: 'Validation', message: 'Invalid request body: Expected sample but received sample' }
+MiddlewareRequestParseFailure	{ cause: NONE, code: -32000, kind: 'Validation', message: 'Failed to parse request in middleware: sample' }
+MiddlewareFunctionNotFound	{ cause: NONE, code: -32000, kind: 'Configuration', message: 'Failed to resolve middleware function: sample' }
+FinalActionRequestParseFailure	{ cause: NONE, code: -32000, kind: 'Validation', message: 'Failed to parse request in final action handler' }
+RequestBodyNotBinary	{ cause: NONE, code: -32000, kind: 'Validation', message: 'Request body must be binary data' }
+PermissionDenied	{ cause: NONE, code: -32000, kind: 'NotAllowed', message: 'Permission denied: You are not allowed to access this resource' }
+NotFound	{ cause: NONE, code: -32000, kind: 'NotFound', message: 'Not found' }
+Unreachable	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The database encountered unreachable logic: sample' }
+QueryTimedout	{ cause: NONE, code: -32004, details: { details: { duration: 1s }, kind: 'TimedOut' }, kind: 'Query', message: 'The query was not executed because it exceeded the timeout: 1s' }
+QueryCancelled	{ cause: NONE, code: -32005, details: { kind: 'Cancelled' }, kind: 'Query', message: 'The query was not executed due to a cancelled transaction' }
+Internal	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Internal database error: sample' }
+Unencodable	{ cause: NONE, code: -32000, kind: 'Serialization', message: 'Tried to serialize a value which cannot be serialized.' }
+Corrupted	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Encountered KV store corruption: sample' }
+InvalidContent	{ cause: NONE, code: -32600, details: { details: { value: 'NONE' }, kind: 'InvalidContent' }, kind: 'Validation', message: 'Cannot use NONE in a CONTENT clause' }
+InvalidMerge	{ cause: NONE, code: -32600, details: { details: { value: 'NONE' }, kind: 'InvalidMerge' }, kind: 'Validation', message: 'Cannot use NONE in a MERGE clause' }
+InvalidPatch	{ cause: NONE, code: -32000, kind: 'Validation', message: 'The JSON Patch contains invalid operations. Failed to parse JSON patch structure: sample' }
+PatchTest	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Given test operation failed for JSON Patch. Expected `sample`, but got `sample` instead.' }
+InvalidFunctionArguments	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Incorrect arguments for function sample(). sample' }
+InvalidRegex	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Invalid regular expression: "sample"' }
+IdInvalid	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Found sample for the Record ID but this is not a valid id' }
+Coerce	{ cause: { cause: NONE, code: -32000, kind: 'Internal', message: 'Expected `sample` but found `NONE`' }, code: -32000, kind: 'Validation', message: 'Expected `sample` but found `NONE`' }
+Cast	{ cause: { cause: NONE, code: -32000, kind: 'Internal', message: 'Could not cast into `sample` using input `NONE`' }, code: -32000, kind: 'Validation', message: 'Could not cast into `sample` using input `NONE`' }
+TryAdd	{ cause: NONE, code: -32000, kind: 'Validation', message: "Cannot perform addition with 'sample' and 'sample'" }
+TrySub	{ cause: NONE, code: -32000, kind: 'Validation', message: "Cannot perform subtraction with 'sample' and 'sample'" }
+TryMul	{ cause: NONE, code: -32000, kind: 'Validation', message: "Cannot perform multiplication with 'sample' and 'sample'" }
+TryDiv	{ cause: NONE, code: -32000, kind: 'Validation', message: "Cannot perform division with 'sample' and 'sample'" }
+TryRem	{ cause: NONE, code: -32000, kind: 'Validation', message: "Cannot perform remainder with 'sample' and 'sample'" }
+TryPow	{ cause: NONE, code: -32000, kind: 'Validation', message: "Cannot raise the value 'sample' with 'sample'" }
+TryNeg	{ cause: NONE, code: -32000, kind: 'Validation', message: "Cannot negate the value 'sample'" }
+TryExtend	{ cause: NONE, code: -32000, kind: 'Validation', message: "Cannot extend 'sample' as it is not an array" }
+TryFrom	{ cause: NONE, code: -32000, kind: 'Validation', message: "Cannot convert from 'sample' to 'sample'" }
+TimestampOverflow	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Timestamp arithmetic error: sample' }
+Serialization	{ cause: NONE, code: -32007, details: { kind: 'Serialization' }, kind: 'Serialization', message: 'Serialization error: sample' }
+TbInvalid	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Found sample for the Record ID but this is not a valid table name' }
+UnsupportedDestructure	{ cause: NONE, code: -32000, kind: 'Internal', message: 'sample destructuring method is not supported here' }
+ArithmeticOverflow	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Failed to compute: "sample", as the operation results in an arithmetic overflow.' }
+ArithmeticNegativeOverflow	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Failed to compute: "sample", as the operation results in a negative value.' }
+InvalidBytesize	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The string could not be parsed into a bytesize' }
+InvalidVectorDimension	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Incorrect vector dimension (1). Expected a vector of 1 dimension.' }
+InvalidVectorValue	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The value cannot be converted to a vector: sample' }
+IndexExists	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Database index `sample` already contains sample, with record `t:`1``' }
+NoIndexFoundForMatch	{ cause: NONE, code: -32000, kind: 'Internal', message: 'There was no suitable index supporting the expression: sample' }
+AnalyzerError	{ cause: NONE, code: -32000, kind: 'Internal', message: "A value can't be analyzed: sample" }
+HighlightError	{ cause: NONE, code: -32000, kind: 'Internal', message: "A value can't be highlighted: sample" }
+FstError	{ cause: { cause: NONE, code: -32000, kind: 'Internal', message: 'I/O error' }, code: -32000, kind: 'Internal', message: 'FstError error: I/O error' }
+DuplicatedMatchRef	{ cause: NONE, code: -32000, kind: 'Validation', message: 'Duplicated Match reference: 1' }
+ExpiredSession	{ cause: NONE, code: -32000, details: { details: { kind: 'SessionExpired' }, kind: 'Auth' }, kind: 'NotAllowed', message: 'The session has expired' }
+RealtimeDisabled	{ cause: NONE, code: -32604, details: { kind: 'LiveQueryNotSupported' }, kind: 'Configuration', message: 'Unable to perform the realtime query' }
+InvalidTimeout	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Invalid timeout: 1 seconds' }
+TransactionTimedout	{ cause: NONE, code: -32004, details: { details: { duration: 1s }, kind: 'TimedOut' }, kind: 'Query', message: 'The transaction was not completed because it exceeded the timeout: 1s' }
+QueryBeyondMemoryThreshold	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The query was not executed due to the memory threshold being reached' }
+TransactionWriteKeysExceeded	{ cause: NONE, code: -32000, kind: 'Query', message: "Transaction exceeded the maximum number of key writes (1). The statement's physical write fan-out (cascaded deletes, index maintenance, graph-edge cleanup) reached the `transaction_max_write_keys` limit and was rolled back. Reduce the operation's scope, or raise or disable the limit" }
+QueryNotExecuted	{ cause: NONE, code: -32003, details: { kind: 'NotExecuted' }, kind: 'Query', message: 'sample' }
+CorruptedIndex	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Index is corrupted: sample' }
+IndexAlreadyBuilding	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Database index `sample` is currently building' }
+IndexingBuildingCancelled	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Index building has been cancelled: sample' }
+InvalidStorageVersion	{ cause: NONE, code: -32000, kind: 'Internal', message: 'There was an invalid storage version stored in the database' }
+OutdatedStorageVersion	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The data stored on disk is out-of-date with this version (Expected: 1, Actual: 1). Please follow the upgrade guides in the documentation, or use a clean storage directory if this is intended to be a new instance' }
+BucketPermissions	{ cause: NONE, code: -32000, kind: 'Internal', message: "You don't have permission to get this file in the `sample` bucket" }
+ObsError	{ cause: { cause: NONE, code: -32000, kind: 'Internal', message: 'Operation not supported: sample' }, code: -32000, kind: 'Internal', message: 'Object Store error: Operation not supported: sample' }
+FileAccessDenied	{ cause: NONE, code: -32000, kind: 'Internal', message: 'File access denied: sample' }
+NoGlobalBucket	{ cause: NONE, code: -32000, kind: 'Internal', message: 'No global bucket has been configured' }
+BucketUnavailable	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Bucket `sample` is unavailable' }
+GlobalBucketEnforced	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Bucket is unavailable' }
+InvalidBucketUrl	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Bucket url could not be processed: sample' }
+UnsupportedBackend	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Bucket backend is not supported' }
+ReadonlyBucket	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Write operation is not supported, as bucket `sample` is in read-only mode' }
+ObjectStoreFailure	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Operation for bucket `sample` failed: sample' }
+RecordExists	{ cause: NONE, code: -32000, details: { details: { id: 't:`1`' }, kind: 'Record' }, kind: 'AlreadyExists', message: 'Database record `t:`1`` already exists' }
+IdNotFound	{ cause: NONE, code: -32000, details: { details: { id: 'sample' }, kind: 'Record' }, kind: 'NotFound', message: "The record 'sample' does not exist" }
+IdMismatch	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Found sample for the `id` field, but a specific record has been specified' }
+IdFieldGenerateUnsupported	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot generate a record id of type `sample` for the `sample` table; specify an explicit record id, or declare the `id` field as `uuid` or `string` to auto-generate one.' }
+InOverride	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Found sample for the `in` field, which does not match the existing field value' }
+OutOverride	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Found sample for the `out` field, which does not match the existing field value' }
+TableCheck	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Found record: `sample` which is a relation, but expected a sample' }
+TableIsView	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot write to the `sample` table, as it is a view (defined with `AS SELECT`); view tables are read-only and their records are computed from the source query' }
+FieldValue	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Found sample for field `f`, with record `sample`, but field must conform to: sample' }
+FieldReadonly	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Found changed value for field `f`, with record `sample`, but field is readonly' }
+FieldUndefined	{ cause: NONE, code: -32000, kind: 'Internal', message: "Found field 'f', but no such field exists for table 'sample'" }
+FieldCoerce	{ cause: NONE, code: -32000, kind: 'Internal', message: "Couldn't coerce value for field `sample` of `sample`: Expected `sample` but found `NONE`" }
+DeleteRejectedByReference	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot delete `sample` as it is referenced by `sample` with an ON DELETE REJECT clause' }
+RefsUpdateFailure	{ cause: NONE, code: -32000, kind: 'Internal', message: 'An error occurred while updating references for `sample`: sample' }
+EvNamespaceMismatch	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Error with the event sample. The ID of the namespace `sample` does not match the namespace this event has been generated from.' }
+EvDatabaseMismatch	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Error with the event sample. The ID of the database `sample` does not match the database this event has been generated from.' }
+EvReachMaxDepth	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The event sample reached the max async event nesting depth: 1.' }
+NsNotFound	{ cause: NONE, code: -32000, details: { details: { name: 'sample' }, kind: 'Namespace' }, kind: 'NotFound', message: "The namespace 'sample' does not exist" }
+DbNotFound	{ cause: NONE, code: -32000, details: { details: { name: 'sample' }, kind: 'Database' }, kind: 'NotFound', message: "The database 'sample' does not exist" }
+EvNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The event 'sample' does not exist" }
+FcNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The function 'sample' does not exist" }
+MdNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The module 'sample' does not exist" }
+FdNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The field 'sample' does not exist" }
+MlNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The model 'ml::sample' does not exist" }
+NdNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The node 'sample' does not exist" }
+PaNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The param '$sample' does not exist" }
+SeqNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The sequence 'sample' does not exist" }
+CgNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The config for sample does not exist' }
+TbNotFound	{ cause: NONE, code: -32000, details: { details: { name: 't' }, kind: 'Table' }, kind: 'NotFound', message: "The table 't' does not exist" }
+ApNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The api 'sample' does not exist" }
+AzNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The analyzer 'sample' does not exist" }
+BuNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The bucket 'sample' does not exist" }
+IxNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The index 'sample' does not exist" }
+UserRootNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The root user 'sample' does not exist" }
+UserNsNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The user 'sample' does not exist in the namespace 'sample'" }
+UserDbNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The user 'sample' does not exist in the database 'sample'" }
+AccessRootNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The root access method 'sample' does not exist" }
+AccessGrantRootNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The root access grant 'sample' does not exist for 'sample'" }
+AccessNsNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The access method 'sample' does not exist in the namespace 'sample'" }
+AccessGrantNsNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The access grant 'sample' does not exist for 'sample' in the namespace 'sample'" }
+AccessDbNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The access method 'sample' does not exist in the database 'sample'" }
+AccessGrantDbNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The access grant 'sample' does not exist for 'sample' in the database 'sample'" }
+ApAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The api 'sample' already exists" }
+AzAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The analyzer 'sample' already exists" }
+BuAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The bucket 'sample' already exists" }
+DbAlreadyExists	{ cause: NONE, code: -32000, details: { details: { name: 'sample' }, kind: 'Database' }, kind: 'AlreadyExists', message: "The database 'sample' already exists" }
+EvAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The event 'sample' already exists" }
+FdAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The field 'sample' already exists" }
+FcAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The function 'sample' already exists" }
+MdAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The module 'sample' already exists" }
+IxAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The index 'sample' already exists" }
+MlAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The model 'sample' already exists" }
+NsAlreadyExists	{ cause: NONE, code: -32000, details: { details: { name: 'sample' }, kind: 'Namespace' }, kind: 'AlreadyExists', message: "The namespace 'sample' already exists" }
+PaAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The param '$sample' already exists" }
+CgAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The config for sample already exists' }
+SeqAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The sequence 'sample' already exists" }
+TbAlreadyExists	{ cause: NONE, code: -32000, details: { details: { name: 'sample' }, kind: 'Table' }, kind: 'AlreadyExists', message: "The table 'sample' already exists" }
+UserRootAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The root user 'sample' already exists" }
+UserNsAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The user 'sample' already exists in the namespace 'sample'" }
+UserDbAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The user 'sample' already exists in the database 'sample'" }
+AccessRootAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The root access method 'sample' already exists" }
+AccessNsAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The access method 'sample' already exists in the namespace 'sample'" }
+AccessDbAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The access method 'sample' already exists in the database 'sample'" }
+AzInUse	{ cause: NONE, code: -32000, kind: 'Internal', message: "The analyzer 'sample' is in use by index 'sample' on table 'sample' and cannot be removed" }
+ApMethodDuplicate	{ cause: NONE, code: -32000, kind: 'Internal', message: "The method 'sample' is defined in more than one FOR clause on api 'sample'" }
+IndexRebuildRequired	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The index `sample` on table `sample` was built with an out-of-date on-disk format (Expected: 1, Actual: 1). Run `REBUILD INDEX sample ON sample` before querying it.' }
+TokenMakingFailed	{ cause: NONE, code: -32002, details: { details: { kind: 'TokenMakingFailed' }, kind: 'Auth' }, kind: 'NotAllowed', message: 'There was an error creating the token' }
+NoRecordFound	{ cause: NONE, code: -32000, kind: 'NotFound', message: 'No record was returned' }
+MissingUserOrPass	{ cause: NONE, code: -32002, details: { details: { kind: 'MissingUserOrPass' }, kind: 'Auth' }, kind: 'NotAllowed', message: 'Username or Password was not provided' }
+NoSigninTarget	{ cause: NONE, code: -32002, details: { details: { kind: 'NoSigninTarget' }, kind: 'Auth' }, kind: 'NotAllowed', message: 'No signin target to either SC or DB or NS or KV' }
+InvalidPass	{ cause: NONE, code: -32002, details: { details: { kind: 'InvalidPass' }, kind: 'Auth' }, kind: 'NotAllowed', message: 'The password did not verify' }
+InvalidAuth	{ cause: NONE, code: -32002, details: { details: { kind: 'InvalidAuth' }, kind: 'Auth' }, kind: 'NotAllowed', message: 'There was a problem with authentication' }
+UnexpectedAuth	{ cause: NONE, code: -32002, details: { details: { kind: 'UnexpectedAuth' }, kind: 'Auth' }, kind: 'NotAllowed', message: 'There was an unexpected error while performing authentication' }
+InvalidSignup	{ cause: NONE, code: -32002, details: { details: { kind: 'InvalidSignup' }, kind: 'Auth' }, kind: 'NotAllowed', message: 'There was a problem with signing up' }
+ExpiredToken	{ cause: NONE, code: -32002, details: { details: { kind: 'TokenExpired' }, kind: 'Auth' }, kind: 'NotAllowed', message: 'The token has expired' }
+AccessMethodMismatch	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The access method cannot be used in the requested operation' }
+AccessNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The access method does not exist' }
+AccessInvalidDuration	{ cause: NONE, code: -32000, kind: 'Internal', message: 'This access method has an invalid duration' }
+AccessInvalidExpiration	{ cause: NONE, code: -32000, kind: 'Internal', message: 'This access method results in an invalid expiration' }
+AccessRecordSignupQueryFailed	{ cause: NONE, code: -32000, kind: 'Query', message: 'The record access signup query failed' }
+AccessRecordSigninQueryFailed	{ cause: NONE, code: -32000, kind: 'Query', message: 'The record access signin query failed' }
+AccessRecordNoSignup	{ cause: NONE, code: -32000, kind: 'NotAllowed', message: 'This record access method does not allow signup' }
+AccessRecordNoSignin	{ cause: NONE, code: -32000, kind: 'NotAllowed', message: 'This record access method does not allow signin' }
+AccessBearerMissingKey	{ cause: NONE, code: -32000, kind: 'Internal', message: 'This bearer access method requires a key to be provided' }
+AccessGrantBearerInvalid	{ cause: NONE, code: -32000, kind: 'Internal', message: 'This bearer access grant has an invalid format' }
+Thrown	{ cause: NONE, code: -32006, kind: 'Thrown', message: 'An error occurred: sample' }
+NsEmpty	{ cause: NONE, code: -32600, details: { kind: 'NamespaceEmpty' }, kind: 'Validation', message: 'Specify a namespace to use' }
+DbEmpty	{ cause: NONE, code: -32600, details: { kind: 'DatabaseEmpty' }, kind: 'Validation', message: 'Specify a database to use' }
+Query	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Invalid query: sample' }
+InvalidParam	{ cause: NONE, code: -32600, details: { details: { name: 'sample' }, kind: 'InvalidParameter' }, kind: 'Validation', message: "'sample' is a protected variable and cannot be set" }
+InvalidFetch	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Found NONE on FETCH CLAUSE, but FETCH expects an idiom, a string or fields' }
+InvalidLimit	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Found sample but the LIMIT clause must evaluate to a positive integer' }
+InvalidStart	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Found sample but the START clause must evaluate to a positive integer' }
+InvalidScript	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Problem with embedded script function. sample' }
+InvalidModel	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Problem with machine learning computation. sample' }
+InvalidFunction	{ cause: NONE, code: -32000, kind: 'Internal', message: 'There was a problem running the sample() function. sample' }
+InvalidMethodArguments	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Incorrect arguments for method sample(). sample' }
+InvalidAggregation	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Invalid aggregation: sample' }
+InvalidAggregationSelector	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Incorrect selector for aggregate selection, expression `sample` within in selector cannot be aggregated in a group.' }
+InvalidControlFlow	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Invalid control flow statement, break or continue statement found outside of loop.' }
+NsNotAllowed	{ cause: NONE, code: -32000, kind: 'Internal', message: "You don't have permission to change to the sample namespace" }
+DbNotAllowed	{ cause: NONE, code: -32000, kind: 'Internal', message: "You don't have permission to change to the sample database" }
+ComputationDepthExceeded	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Reached excessive computation depth due to functions, subqueries, or computed values' }
+InvalidStatement	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Invalid statement: sample' }
+InvalidStatementTarget	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot execute statement using value: sample' }
+CreateStatement	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot execute CREATE statement using value: sample' }
+UpsertStatement	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot execute UPSERT statement using value: sample' }
+UpdateStatement	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot execute UPDATE statement using value: sample' }
+RelateStatementIn	{ cause: NONE, code: -32000, kind: 'Internal', message: "Cannot execute RELATE statement where property 'in' is: sample" }
+RelateStatementId	{ cause: NONE, code: -32000, kind: 'Internal', message: "Cannot execute RELATE statement where property 'id' is: sample" }
+RelateStatementOut	{ cause: NONE, code: -32000, kind: 'Internal', message: "Cannot execute RELATE statement where property 'out' is: sample" }
+DeleteStatement	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot execute DELETE statement using value: sample' }
+InsertStatement	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot execute INSERT statement using value: sample' }
+InsertStatementIn	{ cause: NONE, code: -32000, kind: 'Internal', message: "Cannot execute INSERT statement where property 'in' is: sample" }
+InsertStatementId	{ cause: NONE, code: -32000, kind: 'Internal', message: "Cannot execute INSERT statement where property 'id' is: sample" }
+InsertStatementOut	{ cause: NONE, code: -32000, kind: 'Internal', message: "Cannot execute INSERT statement where property 'out' is: sample" }
+LiveStatement	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot execute LIVE statement using value: sample' }
+KillStatement	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot execute KILL statement using id: sample' }
+SingleOnlyOutput	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Expected a single result output when using the ONLY keyword' }
+ParamPermissions	{ cause: NONE, code: -32000, kind: 'Internal', message: "You don't have permission to view the $sample parameter" }
+FunctionPermissions	{ cause: NONE, code: -32000, kind: 'Internal', message: "You don't have permission to run the sample function" }
+PermissionPredicateSideEffect	{ cause: NONE, code: -32000, kind: 'Internal', message: 'A PERMISSIONS clause cannot contain a statement that modifies data' }
+PermissionClauseNotReadonly	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Found a non-read-only expression in the PERMISSIONS clause for sample `sample`, but a PERMISSIONS clause must not modify data' }
+SetCoerce	{ cause: NONE, code: -32000, kind: 'Internal', message: "Tried to set `$sample`, but couldn't coerce value: Expected `sample` but found `NONE`" }
+ReturnCoerce	{ cause: NONE, code: -32000, kind: 'Internal', message: "Couldn't coerce return value from function `sample`: Expected `sample` but found `NONE`" }
+Unimplemented	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Unimplemented functionality: sample' }
+PlannerUnsupported	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Planner unsupported: sample' }
+PlannerUnimplemented	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Planner not yet implemented: sample' }
+AccessLevelMismatch	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The access method cannot be defined on the requested level' }
+AccessUnsupportedAlgorithm	{ cause: NONE, code: -32000, kind: 'Validation', message: 'The ES512 algorithm is not currently supported. Please use ES384 or another supported algorithm' }
+AccessRecordTokenDurationRequired	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Tokens issued by record access methods can be consumed by third parties and must have an expiration; DURATION FOR TOKEN cannot be NONE on TYPE RECORD access' }
+AccessGrantInvalidSubject	{ cause: NONE, code: -32000, kind: 'Internal', message: 'This access grant has an invalid subject' }
+AccessGrantRevoked	{ cause: NONE, code: -32000, kind: 'Internal', message: 'This access grant has been revoked' }
+InvalidBound	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Found sample for bound but expected sample.' }
+IdiomRecursionLimitExceeded	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Exceeded the idiom recursion limit of 1.' }
+UnsupportedRepeatRecurse	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Tried to use a `@` repeat recurse symbol in a position where it is not supported' }
+RecursionInstructionPlanConflict	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot construct a recursion plan when an instruction is provided' }
+InvalidRecursionTarget	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Expected a record ID during recursive graph traversal, but found `sample`' }
+ReferenceTypeConflict	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot use the `REFERENCE` keyword with `TYPE sample`. Specify only a `record` type, or a type containing only records, instead.' }
+ReferenceNestedField	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot use the `REFERENCE` keyword on nested field `sample`. Specify a referencing field at the root level instead.' }
+MismatchedFieldTypes	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot set field `sample` with type `sample` as it mismatched with field `sample` with type `sample`' }
+ComputedKeywordConflict	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot use the `sample` keyword with `COMPUTED`.' }
+ComputedNestedFieldConflict	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot define field `sample` as `COMPUTED` since a nested field `sample` already exists.' }
+ComputedParentFieldConflict	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot define nested field `sample` as parent field `sample` is a `COMPUTED` field.' }
+ComputedNestedField	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot define field `sample` as `COMPUTED` fields must be top-level.' }
+ComputedFieldCycle	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cyclic dependency detected among computed fields: sample' }
+IdFieldKeywordConflict	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot use the `sample` keyword on the `id` field.' }
+IdFieldUnsupportedKind	{ cause: NONE, code: -32000, kind: 'Internal', message: "Cannot use the `sample` type on the `id` field, as that's not a valid record id key." }
+ComputedFieldCannotBeIndexed	{ cause: NONE, code: -32000, kind: 'Internal', message: "Computed fields cannot be indexed. Index: 'sample' - Field: 'sample'" }

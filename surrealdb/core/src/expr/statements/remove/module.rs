@@ -1,11 +1,11 @@
 use anyhow::Result;
 
+use crate::catalog::Error;
 use crate::catalog::providers::DatabaseProvider;
 #[cfg_attr(not(feature = "surrealism"), allow(unused_imports))]
 use crate::catalog::{ModuleExecutable, ModuleName};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
-use crate::err::Error;
 use crate::expr::{Base, Value};
 use crate::iam::{Action, ResourceKind};
 #[cfg(feature = "surrealism")]

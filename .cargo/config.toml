@@ -1,3 +1,18 @@
+[target.wasm32-unknown-unknown]
+# getrandom 0.3 refuses to build for this target until a backend is named, and
+# the choice is a cfg rather than a feature so it cannot be expressed as a
+# dependency. The graph reaches getrandom through `geo` -> `rand`, so every
+# wasm build needs it.
+#
+# This line does NOT provide it to every wasm build. Cargo treats `RUSTFLAGS`,
+# `build.rustflags` and `target.<triple>.rustflags` as mutually exclusive
+# sources, checked in that order, first match wins — they are not concatenated.
+# So a build that sets `RUSTFLAGS` at all discards this, and both
+# `Makefile.local.toml` and CI set `-D warnings`. Such a build must carry the
+# cfg itself, as `ci-check-wasm` does; this line covers only the wasm builds
+# that set no `RUSTFLAGS`, such as `wasm-pack`.
+rustflags = ['--cfg', 'getrandom_backend="wasm_js"']
+
 [target.aarch64-unknown-linux-gnu]
 linker = "aarch64-linux-gnu-gcc"
 

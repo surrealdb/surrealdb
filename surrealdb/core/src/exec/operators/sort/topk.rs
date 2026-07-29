@@ -16,6 +16,7 @@ use std::sync::Arc;
 use futures::StreamExt;
 
 use super::common::{OrderByField, SortDirection, SortKey, compare_keys, compare_keys_by_sort_key};
+use crate::err::EngineError;
 use crate::exec::topk_pushdown::TopKThresholdCell;
 use crate::exec::{
 	AccessMode, CardinalityHint, CombineAccessModes, ContextLevel, EvalContext, ExecOperator,
@@ -189,7 +190,7 @@ impl ExecOperator for SortTopK {
 				// Check for cancellation between batches
 				if ctx.cancellation().is_cancelled() {
 					return Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(
-						crate::err::Error::QueryCancelled
+						EngineError::QueryCancelled
 					)));
 				}
 				let batch = match batch_result {
@@ -548,7 +549,7 @@ impl ExecOperator for SortTopKByKey {
 			while let Some(batch_result) = input_stream.next().await {
 				if cancellation.is_cancelled() {
 					return Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(
-						crate::err::Error::QueryCancelled
+						EngineError::QueryCancelled
 					)));
 				}
 				let batch = match batch_result {

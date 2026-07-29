@@ -2,12 +2,12 @@
 use std::borrow::Cow;
 
 use anyhow::Result;
+use surrealdb_strand::TableName;
 
-use crate::catalog::TableDefinition;
+use crate::catalog::StoredTableDefinition;
 use crate::key::category::{Categorise, Category};
 use crate::key::database::all::DatabaseRoot;
 use crate::key::{impl_kv_key_storekey, impl_kv_range_storekey, key};
-use crate::val::TableName;
 
 key! {
 	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
@@ -19,7 +19,7 @@ key! {
 		pub tb: Cow<'a, TableName>,
 	}
 }
-impl_kv_key_storekey!(TableKey<'a> => TableDefinition);
+impl_kv_key_storekey!(TableKey<'a> => StoredTableDefinition);
 impl Categorise for TableKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::DatabaseTable

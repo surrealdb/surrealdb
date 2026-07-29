@@ -129,7 +129,7 @@ pub(crate) fn collect_discovery_targets(
 					continue;
 				}
 				if !is_recursion_target(&inner) {
-					return Err(crate::err::Error::InvalidRecursionTarget {
+					return Err(crate::exec::Error::InvalidRecursionTarget {
 						value: inner.to_sql(),
 					}
 					.into());
@@ -142,7 +142,7 @@ pub(crate) fn collect_discovery_targets(
 			out.push(v);
 		}
 		v => {
-			return Err(crate::err::Error::InvalidRecursionTarget {
+			return Err(crate::exec::Error::InvalidRecursionTarget {
 				value: v.to_sql(),
 			}
 			.into());

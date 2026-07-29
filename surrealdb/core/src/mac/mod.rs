@@ -13,6 +13,21 @@ macro_rules! map {
     }};
 }
 
+/// Report a broken invariant and return from the enclosing function.
+///
+/// Expands to an [`EngineError::unreachable`](crate::err::EngineError::unreachable)
+/// carrying the call site, so the message points at the code that noticed
+/// rather than at this macro.
+macro_rules! fail {
+	($($arg:tt)+) => {
+		return ::core::result::Result::Err(
+			::core::convert::Into::into(
+				$crate::err::EngineError::unreachable(::core::format_args!($($arg)*))
+			)
+		)
+	};
+}
+
 /// Maps an optional value to a new value if the optional value is some, otherwise returns none.
 /// Useful when the computation is async
 macro_rules! map_opt {
@@ -33,13 +48,6 @@ macro_rules! mrg {
 		pairs.extend($x.iter().map(|(k, v)| (k.clone(), v.clone())));
 		pairs.into_iter().collect::<$crate::VecMap<_, _>>()
 	}};
-}
-
-/// Throws an unreachable error with location details
-macro_rules! fail {
-	($($arg:tt)+) => {
-		return Err(::anyhow::Error::new($crate::err::Error::unreachable(format_args!($($arg)*))))
-	};
 }
 
 /// Converts some text into a new line byte string
@@ -101,8 +109,7 @@ macro_rules! run {
 
 #[cfg(test)]
 mod test {
-
-	use crate::err::Error;
+	use crate::err::EngineError;
 
 	#[track_caller]
 	fn fail_func() -> Result<(), anyhow::Error> {
@@ -117,7 +124,7 @@ mod test {
 	#[test]
 	fn fail_literal() {
 		let line = line!();
-		let Ok(Error::Unreachable(msg)) = fail_func().unwrap_err().downcast() else {
+		let Ok(EngineError::Unreachable(msg)) = fail_func().unwrap_err().downcast() else {
 			panic!()
 		};
 		assert_eq!(
@@ -129,7 +136,8 @@ mod test {
 	#[test]
 	fn fail_call() {
 		let line = line!();
-		let Error::Unreachable(msg) = Error::unreachable("Reached unreachable code") else {
+		let EngineError::Unreachable(msg) = EngineError::unreachable("Reached unreachable code")
+		else {
 			panic!()
 		};
 		assert_eq!(
@@ -141,7 +149,7 @@ mod test {
 	#[test]
 	fn fail_arguments() {
 		let line = line!();
-		let Ok(Error::Unreachable(msg)) = fail_func_args().unwrap_err().downcast() else {
+		let Ok(EngineError::Unreachable(msg)) = fail_func_args().unwrap_err().downcast() else {
 			panic!()
 		};
 		assert_eq!(

@@ -13,9 +13,9 @@ use crate::api::middleware::common::{
 };
 use crate::api::response::ApiResponse;
 use crate::rpc::format;
-use crate::sql::expression::convert_public_value_to_internal;
 use crate::types::{PublicBytes, PublicValue};
 use crate::val::Bytes;
+use crate::val::convert_public::convert_public_value_to_internal;
 
 pub fn output_body_strategy(headers: &HeaderMap, strategy: BodyStrategy) -> Option<BodyStrategy> {
 	let Some(accepted) = headers.get(ACCEPT) else {

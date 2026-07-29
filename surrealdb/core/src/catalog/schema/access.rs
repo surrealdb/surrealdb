@@ -1,11 +1,13 @@
 use std::fmt;
 use std::time::Duration;
 
+use anyhow::Context as _;
 use revision::revisioned;
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::schema::base::Base;
+use crate::catalog::{ExprText, FromStored};
 use crate::expr::Expr;
 use crate::expr::statements::info::InfoStructure;
 use crate::key::impl_kv_value_revisioned;
@@ -55,8 +57,8 @@ impl InfoStructure for AccessType {
 			AccessType::Record(v) => Value::from(map! {
 				"kind" => "RECORD".into(),
 				"jwt" => v.jwt.structure(),
-				"signup", if let Some(v) = v.signup => v.structure(),
-				"signin", if let Some(v) = v.signin => v.structure(),
+				"signup", if let Some(v) = v.signup => v.into(),
+				"signin", if let Some(v) = v.signin => v.into(),
 				"refresh", if v.bearer.is_some() => true.into(),
 			}),
 			AccessType::Bearer(ac) => Value::from(map! {
@@ -74,8 +76,10 @@ impl InfoStructure for AccessType {
 #[revisioned(revision = 1)]
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub(crate) struct RecordAccess {
-	pub signup: Option<Expr>,
-	pub signin: Option<Expr>,
+	/// Canonical SurrealQL text of the `SIGNUP` clause's expression.
+	pub signup: Option<ExprText>,
+	/// Canonical SurrealQL text of the `SIGNIN` clause's expression.
+	pub signin: Option<ExprText>,
 	pub jwt: JwtAccess,
 	pub bearer: Option<BearerAccess>,
 }
@@ -221,52 +225,53 @@ impl ToSql for Algorithm {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct AccessDefinition {
+pub struct StoredAccessDefinition {
 	pub(crate) name: Strand,
 	pub(crate) access_type: AccessType,
 	pub(crate) base: Base,
-	pub(crate) authenticate: Option<Expr>,
+	/// Canonical SurrealQL text of the `AUTHENTICATE` clause's expression.
+	pub(crate) authenticate: Option<ExprText>,
 	pub(crate) grant_duration: Option<Duration>,
 	pub(crate) token_duration: Option<Duration>,
 	pub(crate) session_duration: Option<Duration>,
 	pub(crate) comment: Option<String>,
 }
-impl_kv_value_revisioned!(AccessDefinition);
+impl_kv_value_revisioned!(StoredAccessDefinition);
 
 impl AccessDefinition {
 	fn to_sql_definition(&self) -> sql::statements::define::DefineAccessStatement {
-		// Create a redacted version of the access type
-		let redacted_access_type = self.access_type.clone().redacted();
+		// Redact and lower the stored-form structure; the record-access
+		// signup/signin expressions come from the compiled side fields (the
+		// stored texts inside `access_type` are cleared first so the lowering
+		// never re-parses them).
+		let mut redacted_access_type = self.access_type.clone().redacted();
+		if let AccessType::Record(rec) = &mut redacted_access_type {
+			rec.signup = None;
+			rec.signin = None;
+		}
+		let mut access_type = crate::expr::AccessType::from(redacted_access_type);
+		if let crate::expr::AccessType::Record(rec) = &mut access_type {
+			rec.signup.clone_from(&self.signup);
+			rec.signin.clone_from(&self.signin);
+		}
 
 		sql::statements::define::DefineAccessStatement {
 			kind: sql::statements::define::DefineKind::Default,
 			name: sql::Expr::Idiom(sql::Idiom::field(self.name.clone())),
-			access_type: sql::AccessType::from(crate::expr::AccessType::from(redacted_access_type)),
-			authenticate: self.authenticate.clone().map(|e| e.into()),
+			access_type: sql::AccessType::from(access_type),
+			authenticate: self.authenticate.clone().map(Into::into),
 			duration: sql::access::AccessDuration {
 				grant: self
 					.grant_duration
-					.map(|d| {
-						sql::Expr::Literal(sql::Literal::Duration(
-							crate::types::PublicDuration::from(d),
-						))
-					})
+					.map(|d| sql::Expr::Literal(sql::Literal::Duration(d)))
 					.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
 				token: self
 					.token_duration
-					.map(|d| {
-						sql::Expr::Literal(sql::Literal::Duration(
-							crate::types::PublicDuration::from(d),
-						))
-					})
+					.map(|d| sql::Expr::Literal(sql::Literal::Duration(d)))
 					.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
 				session: self
 					.session_duration
-					.map(|d| {
-						sql::Expr::Literal(sql::Literal::Duration(
-							crate::types::PublicDuration::from(d),
-						))
-					})
+					.map(|d| sql::Expr::Literal(sql::Literal::Duration(d)))
 					.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
 			},
 			comment: self
@@ -345,15 +350,23 @@ impl BearerAccess {
 
 impl InfoStructure for AccessDefinition {
 	fn structure(self) -> Value {
+		// The record-access signup/signin expressions come from the compiled
+		// side fields: re-render them into the stored-form structure before
+		// serialising it (mirrors `AccessDefinition::to_stored`).
+		let mut access_type = self.access_type.clone();
+		if let AccessType::Record(rec) = &mut access_type {
+			rec.signup = self.signup.as_ref().map(ExprText::new);
+			rec.signin = self.signin.as_ref().map(ExprText::new);
+		}
 		Value::from(map! {
 			"name" => Value::String(self.name.clone()),
-			"authenticate", if let Some(v) = self.authenticate => v.structure(),
+			"authenticate", if let Some(v) = self.authenticate => Value::from(v.to_stored_sql()),
 			"duration" => Value::from(map!{
 				"session" => self.session_duration.map(Value::from).unwrap_or(Value::None),
-				"grant", if self.access_type.can_issue_grants() => self.grant_duration.map(Value::from).unwrap_or(Value::None),
-				"token", if self.access_type.can_issue_tokens() => self.token_duration.map(Value::from).unwrap_or(Value::None),
+				"grant", if access_type.can_issue_grants() => self.grant_duration.map(Value::from).unwrap_or(Value::None),
+				"token", if access_type.can_issue_tokens() => self.token_duration.map(Value::from).unwrap_or(Value::None),
 			}),
-			"kind" => self.access_type.structure(),
+			"kind" => access_type.structure(),
 			"comment", if let Some(v) = self.comment => v.into(),
 		})
 	}
@@ -388,9 +401,32 @@ impl From<crate::expr::AccessType> for AccessType {
 
 impl From<RecordAccess> for crate::expr::RecordAccess {
 	fn from(v: RecordAccess) -> Self {
+		// The stored text was already successfully parsed once, when the
+		// DEFINE that produced it ran, so a failure here is a stored-catalog
+		// invariant violation; drop the clause (fail closed: no signup/signin
+		// expression means that flow is unavailable) rather than panicking.
+		let compile_clause = |text: crate::catalog::ExprText, clause: &str| match text.compile() {
+			Ok(expr) => Some(expr),
+			Err(err) => {
+				debug_assert!(false, "stored access {clause} clause failed to parse: {text:?}");
+				// Warn, not silence: dropping the clause makes that
+				// authentication flow unavailable, and without a line here an
+				// operator sees only "signin stopped working" — no log, no
+				// metric, no error text. The clause name and the parse error
+				// are what makes it diagnosable; the clause text itself is
+				// left out, since it can carry credentials.
+				warn!(
+					target: "surrealdb::core::catalog",
+					clause = %clause,
+					error = %err,
+					"Stored access clause no longer parses; that authentication flow is disabled"
+				);
+				None
+			}
+		};
 		Self {
-			signup: v.signup,
-			signin: v.signin,
+			signup: v.signup.and_then(|text| compile_clause(text, "signup")),
+			signin: v.signin.and_then(|text| compile_clause(text, "signin")),
 			jwt: v.jwt.into(),
 			bearer: v.bearer.map(|b| b.into()),
 		}
@@ -400,8 +436,8 @@ impl From<RecordAccess> for crate::expr::RecordAccess {
 impl From<crate::expr::RecordAccess> for RecordAccess {
 	fn from(v: crate::expr::RecordAccess) -> Self {
 		Self {
-			signup: v.signup,
-			signin: v.signin,
+			signup: v.signup.map(|e| ExprText::new(&e)),
+			signin: v.signin.map(|e| ExprText::new(&e)),
 			jwt: v.jwt.into(),
 			bearer: v.bearer.map(|b| b.into()),
 		}
@@ -597,6 +633,80 @@ impl From<crate::expr::Algorithm> for Algorithm {
 			crate::expr::Algorithm::Rs256 => Self::Rs256,
 			crate::expr::Algorithm::Rs384 => Self::Rs384,
 			crate::expr::Algorithm::Rs512 => Self::Rs512,
+		}
+	}
+}
+
+/// Runtime form of [`StoredAccessDefinition`].
+///
+/// `access_type` stays in its stored form (JWT and bearer configuration is
+/// plain data); the expressions it may carry (record-access signup/signin)
+/// are compiled into the side fields here, which are `None` for non-record
+/// access types. Read structure from `access_type`, expressions from the
+/// side fields.
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub(crate) struct AccessDefinition {
+	pub name: Strand,
+	pub base: Base,
+	pub access_type: AccessType,
+	pub authenticate: Option<Expr>,
+	pub signup: Option<Expr>,
+	pub signin: Option<Expr>,
+	pub grant_duration: Option<Duration>,
+	pub token_duration: Option<Duration>,
+	pub session_duration: Option<Duration>,
+	pub comment: Option<String>,
+}
+
+impl FromStored for AccessDefinition {
+	type Stored = StoredAccessDefinition;
+
+	fn from_stored(stored: &StoredAccessDefinition) -> anyhow::Result<AccessDefinition> {
+		fn build(stored: &StoredAccessDefinition) -> anyhow::Result<AccessDefinition> {
+			let (signup, signin) = match &stored.access_type {
+				AccessType::Record(record) => (
+					record.signup.as_ref().map(|t| t.compile()).transpose()?,
+					record.signin.as_ref().map(|t| t.compile()).transpose()?,
+				),
+				_ => (None, None),
+			};
+			Ok(AccessDefinition {
+				name: stored.name.clone(),
+				base: stored.base.clone(),
+				access_type: stored.access_type.clone(),
+				authenticate: stored.authenticate.as_ref().map(|t| t.compile()).transpose()?,
+				signup,
+				signin,
+				grant_duration: stored.grant_duration,
+				token_duration: stored.token_duration,
+				session_duration: stored.session_duration,
+				comment: stored.comment.clone(),
+			})
+		}
+		build(stored).with_context(|| {
+			format!("the stored definition of access method `{}` no longer compiles", stored.name)
+		})
+	}
+}
+
+impl AccessDefinition {
+	pub(crate) fn to_stored(&self) -> StoredAccessDefinition {
+		// The stored-form clone in `access_type` may be stale if the compiled
+		// signup/signin expressions were mutated, so re-render them into it.
+		let mut access_type = self.access_type.clone();
+		if let AccessType::Record(record) = &mut access_type {
+			record.signup = self.signup.as_ref().map(ExprText::new);
+			record.signin = self.signin.as_ref().map(ExprText::new);
+		}
+		StoredAccessDefinition {
+			name: self.name.clone(),
+			access_type,
+			base: self.base.clone(),
+			authenticate: self.authenticate.as_ref().map(ExprText::new),
+			grant_duration: self.grant_duration,
+			token_duration: self.token_duration,
+			session_duration: self.session_duration,
+			comment: self.comment.clone(),
 		}
 	}
 }

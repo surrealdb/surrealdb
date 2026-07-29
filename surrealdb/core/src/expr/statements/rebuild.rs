@@ -5,12 +5,11 @@ use reblessive::tree::Stk;
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::catalog::INDEX_FORMAT_VERSION;
 use crate::catalog::providers::TableProvider;
+use crate::catalog::{Error, INDEX_FORMAT_VERSION};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::expr::Base;
 use crate::expr::statements::define::{refresh_table_index_cache, run_indexing};
 use crate::iam::{Action, ResourceKind};
@@ -78,7 +77,7 @@ impl RebuildIndexStatement {
 		// Stamp the definition with the current on-disk format version. The rebuild
 		// repopulates the index in the current layout, so once it completes queries
 		// must stop rejecting it as out-of-date (see
-		// `IndexDefinition::ensure_current_format`). Index kinds that don't use the
+		// `StoredIndexDefinition::ensure_current_format`). Index kinds that don't use the
 		// shared doc-ID space are already at the required version, so this is a no-op
 		// for them.
 		let ix = if ix.format_version != INDEX_FORMAT_VERSION {

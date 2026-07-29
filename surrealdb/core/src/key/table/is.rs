@@ -2,13 +2,13 @@
 
 use std::borrow::Cow;
 
+use surrealdb_strand::TableName;
 use uuid::Uuid;
 
 use crate::key::category::{Categorise, Category};
 use crate::key::database::all::DatabaseRoot;
 use crate::key::{impl_kv_key_storekey, key};
 use crate::kvs::sequences::SequenceState;
-use crate::val::TableName;
 
 key! {
 	/// Key structure for storing index ID generator state.

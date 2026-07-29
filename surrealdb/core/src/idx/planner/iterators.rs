@@ -10,7 +10,7 @@ use surrealdb_types::ToSql;
 
 use crate::catalog::{DatabaseId, IndexDefinition, IndexId, NamespaceId, Record};
 use crate::ctx::FrozenContext;
-use crate::err::Error;
+use crate::err::EngineError;
 use crate::exec::index::iterator::btree::compute_index_range;
 use crate::expr::BinaryOperator;
 use crate::idx::docids::DocId;
@@ -186,7 +186,7 @@ impl RecordIterator {
 			Self::IndexJoin(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
 			Self::UniqueJoin(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
 			Self::IndexCount(_) => {
-				bail!(Error::unreachable("IndexCount should not be used with next_batch"))
+				bail!(EngineError::unreachable("IndexCount should not be used with next_batch"))
 			}
 		}
 	}
@@ -446,7 +446,7 @@ impl IndexRangeThingIterator {
 					start = constrain_up(start, Bound::Included(v));
 				}
 				_ => {
-					bail!(Error::Unreachable(format!(
+					bail!(EngineError::Unreachable(format!(
 						"Invalid operator for range extraction {}",
 						op.to_sql()
 					)))

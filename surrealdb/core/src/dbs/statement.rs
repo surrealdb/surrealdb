@@ -4,7 +4,6 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::catalog::{Permission, TableDefinition};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -531,24 +530,6 @@ impl Statement<'_> {
 			Statement::Upsert(s) => s.explain.as_ref(),
 			Statement::Delete(s) => s.explain.as_ref(),
 			_ => None,
-		}
-	}
-
-	/// Returns a reference to the appropriate `Permission` field within the
-	/// `TableDefinition` structure based on the type of the statement.
-	pub(crate) fn permissions<'b>(
-		&self,
-		table: &'b TableDefinition,
-		doc_is_new: bool,
-	) -> &'b Permission {
-		if self.is_delete() {
-			&table.permissions.delete
-		} else if self.is_select() {
-			&table.permissions.select
-		} else if doc_is_new {
-			&table.permissions.create
-		} else {
-			&table.permissions.update
 		}
 	}
 

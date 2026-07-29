@@ -6,7 +6,7 @@ use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 
 use crate::ctx::Context;
-use crate::err::Error;
+use crate::err::EngineError;
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::ScanDirection;
 use crate::idx::trees::dynamicset::DynamicSet;
@@ -610,7 +610,7 @@ where
 				let chunk = tx
 					.get_key(&key, None)
 					.await?
-					.ok_or_else(|| Error::unreachable("Missing chunk"))?;
+					.ok_or_else(|| EngineError::unreachable("Missing chunk"))?;
 				val.extend(chunk);
 			}
 			self.graph.lecacy_reload(&val)?;
@@ -629,7 +629,7 @@ where
 			for (k, v) in &batch {
 				// Check if the context is finished
 				if ctx.is_done(Some(count)).await? {
-					bail!(Error::QueryCancelled);
+					bail!(EngineError::QueryCancelled);
 				}
 				let key = HnswNode::decode_key(k)?;
 				self.graph.load_node(key.node, v);

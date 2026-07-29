@@ -13,7 +13,7 @@ use uuid::Uuid;
 use web_time::Instant;
 
 use crate::catalog::TaskLease;
-use crate::err::Error;
+use crate::err::{EngineError, Error};
 use crate::key::root::task_lease::TaskLease as TaskLeaseKey;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::sequences::Sequences;
@@ -198,7 +198,7 @@ impl LeaseHandler {
 		if let Some(canceller) = &self.canceller
 			&& canceller.is_cancelled()
 		{
-			bail!(Error::QueryCancelled);
+			bail!(EngineError::QueryCancelled);
 		}
 		Ok(())
 	}
@@ -207,7 +207,7 @@ impl LeaseHandler {
 		if let Some(canceller) = &self.canceller {
 			tokio::select! {
 				_ = sleep(duration) => Ok(()),
-				_ = canceller.cancelled() => bail!(Error::QueryCancelled),
+				_ = canceller.cancelled() => bail!(EngineError::QueryCancelled),
 			}
 		} else {
 			sleep(duration).await;
@@ -240,7 +240,12 @@ impl LeaseHandler {
 			self.ensure_not_cancelled()?;
 			match self.check_lease().await {
 				Ok(r) => return Ok(r),
-				Err(e) if matches!(e.downcast_ref::<Error>(), Some(Error::QueryCancelled)) => {
+				Err(e)
+					if matches!(
+						crate::err::engine_error(&e),
+						Some(EngineError::QueryCancelled)
+					) =>
+				{
 					return Err(e);
 				}
 				Err(e) => {
@@ -255,7 +260,7 @@ impl LeaseHandler {
 			tempo *= 2;
 		}
 		// If we've reached maximum backoff without success, time out the operation
-		bail!(Error::QueryTimedout(start.elapsed().into()))
+		bail!(EngineError::QueryTimedout(start.elapsed()))
 	}
 
 	/// Attempts to maintain the current lease by checking and potentially renewing it.

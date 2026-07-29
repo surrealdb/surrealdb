@@ -5,10 +5,9 @@ use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
-use crate::catalog::{DatabaseId, NamespaceId, Permission};
-use crate::err::Error;
+use crate::catalog::{DatabaseId, Error as CatalogError, NamespaceId, Permission};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, BoxFut};
+use crate::exec::{AccessMode, BoxFut, Error as ExecError};
 use crate::expr::FlowResult;
 use crate::expr::mock::Mock;
 use crate::iam::Action;
@@ -72,41 +71,39 @@ impl Param {
 					match &param_def.permissions {
 						Permission::Full => {}
 						Permission::None => {
-							bail!(Error::ParamPermissions {
+							bail!(ExecError::ParamPermissions {
 								name: self.0.to_string()
 							})
 						}
 						Permission::Specific(perm_expr) => {
-							// Plan and evaluate the permission expression
+							// Plan and evaluate the permission expression.
 							match crate::exec::planner::expr_to_physical_expr(
 								perm_expr.clone(),
 								ctx.exec_ctx.ctx(),
 							)
 							.await
 							{
-								Ok(phys_expr) => {
-									match phys_expr.evaluate(ctx.clone()).await {
-										Ok(result) if result.is_truthy() => {
-											// Permission granted
-										}
-										Ok(_) => {
-											bail!(Error::ParamPermissions {
-												name: self.0.to_string()
-											})
-										}
-										Err(crate::expr::ControlFlow::Err(e)) => {
-											return Err(e);
-										}
-										Err(_) => {
-											bail!(Error::ParamPermissions {
-												name: self.0.to_string()
-											})
-										}
+								Ok(phys_expr) => match phys_expr.evaluate(ctx.clone()).await {
+									Ok(result) if result.is_truthy() => {
+										// Permission granted
 									}
-								}
+									Ok(_) => {
+										bail!(ExecError::ParamPermissions {
+											name: self.0.to_string()
+										})
+									}
+									Err(crate::expr::ControlFlow::Err(e)) => {
+										return Err(e);
+									}
+									Err(_) => {
+										bail!(ExecError::ParamPermissions {
+											name: self.0.to_string()
+										})
+									}
+								},
 								Err(_) => {
 									// If we can't plan the expression, deny by default
-									bail!(Error::ParamPermissions {
+									bail!(ExecError::ParamPermissions {
 										name: self.0.to_string()
 									})
 								}
@@ -117,7 +114,7 @@ impl Param {
 				Ok(param_def.value.clone())
 			}
 			Err(e) => {
-				if matches!(e.downcast_ref(), Some(Error::PaNotFound { .. })) {
+				if matches!(e.downcast_ref(), Some(CatalogError::PaNotFound { .. })) {
 					Ok(Value::None)
 				} else {
 					Err(e)
@@ -206,11 +203,11 @@ impl PhysicalExpr for Param {
 				// Check if namespace/database are set - if not, throw appropriate error
 				let ns_name = match opts.ns() {
 					Ok(ns) => ns,
-					Err(_) => return Err(Error::NsEmpty.into()),
+					Err(_) => return Err(ExecError::NsEmpty.into()),
 				};
 				let db_name = match opts.db() {
 					Ok(db) => db,
-					Err(_) => return Err(Error::DbEmpty.into()),
+					Err(_) => return Err(ExecError::DbEmpty.into()),
 				};
 
 				let txn = ctx.exec_ctx.txn();
@@ -258,7 +255,7 @@ impl PhysicalExpr for Param {
 
 impl ToSql for Param {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		use crate::fmt::EscapeKwFreeIdent;
+		use common::fmt::EscapeKwFreeIdent;
 		write_sql!(f, fmt, "${}", EscapeKwFreeIdent(self.0.as_str()))
 	}
 }

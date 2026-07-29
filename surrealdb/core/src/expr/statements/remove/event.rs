@@ -1,18 +1,17 @@
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_strand::TableName;
 use surrealdb_types::{SqlFormat, ToSql};
 use uuid::Uuid;
 
-use crate::catalog::TableDefinition;
 use crate::catalog::providers::TableProvider;
+use crate::catalog::{Error, TableDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
-use crate::val::TableName;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct RemoveEventStatement {
@@ -89,7 +88,7 @@ impl RemoveEventStatement {
 			db_name,
 			&TableDefinition {
 				cache_events_ts: Uuid::now_v7(),
-				..tb.as_ref().clone()
+				..(*tb).clone()
 			},
 		)
 		.await?;

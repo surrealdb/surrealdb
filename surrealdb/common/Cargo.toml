@@ -13,10 +13,17 @@ license-file.workspace = true
 
 [features]
 sys = ["dep:sysinfo"]
+arbitrary = ["dep:arbitrary"]
 
 [dependencies]
 hashbrown.workspace = true
 futures.workspace = true
+chrono = { workspace = true }
+surrealdb-types = { workspace = true }
+phf = { workspace = true, features = ["macros", "unicase"] }
+rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
+unicase.workspace = true
+arbitrary = { workspace = true, features = ["derive"], optional = true }
 parking_lot.workspace = true
 sysinfo = { workspace = true, optional = true }
 

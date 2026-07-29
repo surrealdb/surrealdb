@@ -3,7 +3,7 @@ use std::borrow::Cow;
 
 use anyhow::Result;
 
-use crate::catalog::ParamDefinition;
+use crate::catalog::StoredParamDefinition;
 use crate::key::category::{Categorise, Category};
 use crate::key::database::all::DatabaseRoot;
 use crate::key::{impl_kv_key_storekey, impl_kv_range_storekey, key};
@@ -19,7 +19,7 @@ key! {
 	}
 }
 
-impl_kv_key_storekey!(Pa<'a> => ParamDefinition);
+impl_kv_key_storekey!(Pa<'a> => StoredParamDefinition);
 
 impl Categorise for Pa<'_> {
 	fn categorise(&self) -> Category {

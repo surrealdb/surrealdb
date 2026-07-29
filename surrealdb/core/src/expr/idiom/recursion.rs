@@ -4,7 +4,7 @@ use reblessive::tree::Stk;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::part::{RecurseInstruction, RecursionPlan};
 use crate::expr::{FlowResultExt as _, Part};
 use crate::val::{Array, Value};
@@ -107,7 +107,7 @@ pub(crate) async fn compute_idiom_recursion(
 				return Ok(current);
 			}
 		} else if i >= limit {
-			bail!(Error::IdiomRecursionLimitExceeded {
+			bail!(ExecError::IdiomRecursionLimitExceeded {
 				limit,
 			});
 		}
@@ -185,7 +185,7 @@ pub(crate) async fn compute_idiom_recursion(
 				return Ok(output!());
 			}
 		} else if i >= limit {
-			bail!(Error::IdiomRecursionLimitExceeded {
+			bail!(ExecError::IdiomRecursionLimitExceeded {
 				limit,
 			});
 		}

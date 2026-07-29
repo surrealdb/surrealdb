@@ -37,10 +37,11 @@ pub async fn process_fns(
 	datastore: &Arc<Datastore>,
 ) -> Result<Object, GraphqlError> {
 	for fnd in fns.iter() {
-		let Some(kind) = &fnd.returns else {
-			// Skip functions without a declared return type
+		// Skip functions without a declared return type
+		let Some(return_kind) = fnd.returns.clone() else {
 			continue;
 		};
+		let arg_kinds: Vec<(String, Kind)> = fnd.args.clone();
 
 		// SECURITY: do NOT close over the schema-generation-time session. The
 		// schema is cached per (ns, db, graphql-config), so a session captured here
@@ -50,6 +51,8 @@ pub async fn process_fns(
 		// resolvers in this crate.
 		let kvs1 = Arc::clone(datastore);
 		let fnd1 = fnd.clone();
+		let return_kind1 = return_kind.clone();
+		let arg_kinds1 = arg_kinds.clone();
 
 		// Honour an explicit `GRAPHQL <ident>` alias when valid; otherwise fall
 		// back to the auto-derived `fn_<name>` form. See GitHub issue #4537.
@@ -62,7 +65,7 @@ pub async fn process_fns(
 		let mut field = Field::new(
 			field_name,
 			kind_to_type_with_enum_prefix(
-				kind.clone(),
+				return_kind.clone(),
 				types,
 				false,
 				Some(&format!("fn_{}_return", fnd.name)),
@@ -70,13 +73,15 @@ pub async fn process_fns(
 			move |ctx| {
 				let kvs1 = Arc::clone(&kvs1);
 				let fnd1 = fnd1.clone();
+				let return_kind1 = return_kind1.clone();
+				let arg_kinds1 = arg_kinds1.clone();
 				FieldFuture::new(async move {
 					let sess1 = ctx.data::<Arc<Session>>()?;
 					let graphql_args = ctx.args.as_index_map();
 					let mut args = Vec::new();
 
 					// Convert each GraphQL argument to its SurrealQL equivalent
-					for (arg_name, arg_kind) in fnd1.args.iter() {
+					for (arg_name, arg_kind) in arg_kinds1.iter() {
 						if let Some(arg_val) = graphql_args.get(arg_name.as_str()) {
 							let scope = format!("fn_{}_{}", fnd1.name, arg_name);
 							let arg_val = graphql_to_sql_kind_with_scope(
@@ -107,10 +112,8 @@ pub async fn process_fns(
 							let field_val = FieldValue::owned_any(rid.clone());
 							// Untyped record returns need `.with_type()` for
 							// interface resolution; typed `record<T>` do not.
-							let field_val = match &fnd1.returns {
-								Some(Kind::Record(ts)) if ts.is_empty() => {
-									field_val.with_type(rid.table)
-								}
+							let field_val = match &return_kind1 {
+								Kind::Record(ts) if ts.is_empty() => field_val.with_type(rid.table),
 								_ => field_val,
 							};
 							Some(field_val)
@@ -118,7 +121,7 @@ pub async fn process_fns(
 						Value::None => None,
 						_ => Some(FieldValue::value(sql_value_to_graphql_value_with_kind(
 							res,
-							fnd1.returns.as_ref(),
+							Some(&return_kind1),
 							Some(&format!("fn_{}_return", fnd1.name)),
 						)?)),
 					};
@@ -139,7 +142,7 @@ pub async fn process_fns(
 		}
 
 		// Register each function argument as a GraphQL input value
-		for (arg_name, arg_kind) in fnd.args.iter() {
+		for (arg_name, arg_kind) in arg_kinds.iter() {
 			let arg_ty = kind_to_type_with_enum_prefix(
 				arg_kind.clone(),
 				types,

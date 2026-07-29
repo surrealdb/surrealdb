@@ -16,13 +16,14 @@
 //! - Providing document-specific statistics for the full-text search engine
 use std::borrow::Cow;
 
+use surrealdb_strand::TableName;
+
 use crate::catalog::IndexId;
 use crate::idx::docids::DocId;
 use crate::idx::ft::DocLength;
 use crate::key::category::{Categorise, Category};
 use crate::key::database::all::DatabaseRoot;
 use crate::key::{impl_kv_key_storekey, key};
-use crate::val::TableName;
 
 key! {
 	/// Document length key

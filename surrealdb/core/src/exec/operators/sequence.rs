@@ -15,13 +15,13 @@ use futures::stream;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::ctx::FrozenContext;
-use crate::err::Error;
+use crate::err::{EngineError, Error};
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::plan_or_compute::{block_required_context, collect_stream, legacy_compute};
 use crate::exec::planner::try_plan_expr;
 use crate::exec::{
-	AccessMode, BoxFut, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
-	ValueBatchStream,
+	AccessMode, BoxFut, CardinalityHint, Error as ExecError, ExecOperator, FlowResult,
+	OperatorMetrics, ValueBatch, ValueBatchStream,
 };
 use crate::expr::{Block, ControlFlow, ControlFlowExt, Expr};
 use crate::val::{Array, Value};
@@ -110,16 +110,20 @@ impl ExecOperator for SequencePlan {
 	fn output_context<'a>(
 		&'a self,
 		input: &'a ExecutionContext,
-	) -> BoxFut<'a, Result<ExecutionContext, Error>> {
+	) -> BoxFut<'a, anyhow::Result<ExecutionContext>> {
 		Box::pin(async move {
 			let (_result, final_ctx) =
 				execute_block_with_context(&self.block, input, self.plan_depth + 1).await.map_err(
 					|ctrl| match ctrl {
 						ControlFlow::Break | ControlFlow::Continue | ControlFlow::Return(_) => {
 							// BREAK/CONTINUE/RETURN at top-level LET binding context is invalid
-							Error::InvalidControlFlow
+							anyhow::Error::new(ExecError::InvalidControlFlow)
 						}
-						ControlFlow::Err(e) => Error::Thrown(e.to_string()),
+						// Unchanged, not stringified: a write conflict raised in
+						// here has to stay downcastable or the transactor will
+						// not retry it, and a cancelled or timed-out block has
+						// to stay recognisable as such.
+						ControlFlow::Err(e) => e,
 					},
 				)?;
 			Ok(final_ctx)
@@ -159,7 +163,7 @@ async fn execute_block_with_context(
 	for expr in block.0.iter() {
 		// Check for cancellation between statements
 		if current_ctx.cancellation().is_cancelled() {
-			return Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryCancelled)));
+			return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
 		}
 
 		let frozen_ctx = Arc::clone(current_ctx.ctx());
@@ -183,12 +187,14 @@ async fn execute_block_with_context(
 					};
 				}
 			}
-			Err(e @ (Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_))) => {
+			Err(Error::Exec(
+				e @ (ExecError::PlannerUnsupported(_) | ExecError::PlannerUnimplemented(_)),
+			)) => {
 				match &e {
-					Error::PlannerUnimplemented(msg) => {
+					ExecError::PlannerUnimplemented(msg) => {
 						tracing::warn!("PlannerUnimplemented fallback in sequence: {msg}");
 					}
-					Error::PlannerUnsupported(msg) => {
+					ExecError::PlannerUnsupported(msg) => {
 						tracing::debug!("PlannerUnsupported fallback in sequence: {msg}",);
 					}
 					_ => {}
@@ -225,7 +231,7 @@ fn legacy_context_for_fallback(
 	exec_ctx: &ExecutionContext,
 ) -> Result<(crate::dbs::Options, FrozenContext), Error> {
 	let options = exec_ctx.options().ok_or_else(|| {
-		Error::Internal("Options not available for legacy compute fallback".into())
+		EngineError::Internal("Options not available for legacy compute fallback".into())
 	})?;
 	// Block write side effects when this sequence is evaluated inside a
 	// PERMISSIONS predicate (signalled by `skip_fetch_perms`), so a predicate

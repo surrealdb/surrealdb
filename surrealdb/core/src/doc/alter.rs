@@ -4,14 +4,13 @@ use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
-use crate::catalog::{DefineDefault, LATEST_EDGE_VARIANT, RecordType};
+use crate::catalog::{LATEST_EDGE_VARIANT, RecordType};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Statement};
-use crate::doc::{CursorDoc, Document, Extras};
-use crate::err::Error;
+use crate::doc::{CursorDoc, Document, Error as DocError, Extras};
 use crate::expr::data::Data;
 use crate::expr::paths::{ID, IN, OUT};
-use crate::expr::{AssignOperator, FlowResultExt, Idiom, Kind, KindLiteral, Part};
+use crate::expr::{AssignOperator, Error, FlowResultExt, Idiom, Kind, KindLiteral, Part};
 use crate::iam::AuthLimit;
 use crate::val::{RecordId, RecordIdKey, TableName, Value};
 
@@ -51,7 +50,7 @@ impl Document {
 		// broader privileges.
 		let id_opt;
 		let opt = if let Some(fd) = id_field {
-			id_opt = AuthLimit::try_from(&fd.auth_limit)?.limit_opt(opt);
+			id_opt = opt.limited_by(&AuthLimit::try_from(&fd.auth_limit)?);
 			&id_opt
 		} else {
 			opt
@@ -77,7 +76,9 @@ impl Document {
 			let id = if supplied.is_some() {
 				// A concrete id was supplied; use it.
 				supplied.generate(tb, false)?
-			} else if let Some(DefineDefault::Set(expr)) = id_field.map(|fd| &fd.default) {
+			} else if let Some(crate::catalog::DefineDefault::Set(expr)) =
+				id_field.map(|fd| &fd.default)
+			{
 				// No id supplied, but the `id` field declares a `DEFAULT`:
 				// evaluate it and use the result as the record id. Session
 				// params (`$auth`), functions (`time::now()`), and references to
@@ -144,7 +145,7 @@ impl Document {
 			// Anything else (int, number, array, object, a union, or a literal
 			// that is not a single concrete scalar) cannot be synthesised
 			// without an explicit value or sequence.
-			Some(other) => bail!(Error::IdFieldGenerateUnsupported {
+			Some(other) => bail!(DocError::IdFieldGenerateUnsupported {
 				table: tb.to_string(),
 				kind: other.to_sql(),
 			}),
@@ -175,7 +176,7 @@ impl Document {
 			// Rebuild the record id from the coerced value using the robust
 			// conversion that handles ints, uuids, arrays, and objects.
 			Ok(coerced) => coerced.generate(id.table, false),
-			Err(error) => Err(Error::FieldCoerce {
+			Err(error) => Err(DocError::FieldCoerce {
 				record: id.to_sql(),
 				field_name: "id".to_string(),
 				error: Box::new(error),
@@ -241,7 +242,7 @@ impl Document {
 				}
 				// Otherwise this is attempting to override the `in` field
 				(v, _) => {
-					bail!(Error::InOverride {
+					bail!(DocError::InOverride {
 						value: v.to_sql(),
 					})
 				}
@@ -258,7 +259,7 @@ impl Document {
 				}
 				// Otherwise this is attempting to override the `in` field
 				(v, _) => {
-					bail!(Error::OutOverride {
+					bail!(DocError::OutOverride {
 						value: v.to_sql(),
 					})
 				}

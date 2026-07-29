@@ -15,7 +15,6 @@ use std::borrow::Cow;
 use anyhow::Result;
 
 use crate::catalog::IndexId;
-use crate::err::Error;
 use crate::idx::trees::diskann::DiskAnnRecordPendingUpdate;
 use crate::key::database::all::DatabaseRoot;
 use crate::key::{KVKey, KVKeyDecode, impl_kv_range_storekey, key};
@@ -45,15 +44,16 @@ impl KVKey for DiskAnnRecordPendingShard<'_> {
 
 	fn encode_buffer(&self, buffer: &mut Vec<u8>) -> Result<()> {
 		storekey::encode_format::<IndexFormat, _, _>(buffer, self)
-			.map_err(|_| crate::err::Error::Unencodable)?;
+			.map_err(|_| crate::key::Error::Unencodable)?;
 		Ok(())
 	}
 }
 
 impl<'a> KVKeyDecode<'a> for DiskAnnRecordPendingShard<'a> {
 	fn decode_key(bytes: &'a [u8]) -> Result<Self> {
-		Ok(storekey::decode_borrow_format::<IndexFormat, _>(bytes)
-			.map_err(|_| Error::Corrupted("Cannot decode DiskAnnRecordPendingShard key"))?)
+		Ok(storekey::decode_borrow_format::<IndexFormat, _>(bytes).map_err(|_| {
+			crate::key::Error::Corrupted("Cannot decode DiskAnnRecordPendingShard key")
+		})?)
 	}
 }
 

@@ -7,10 +7,9 @@ use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use super::helpers::{args_access_mode, args_required_context, evaluate_args, validate_return};
-use crate::err::Error;
 use crate::exec::physical_expr::{BlockPhysicalExpr, EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, BoxFut};
-use crate::expr::{ControlFlow, FlowResult};
+use crate::exec::{AccessMode, BoxFut, Error as ExecError};
+use crate::expr::{ControlFlow, Error as ExprError, FlowResult};
 use crate::val::Value;
 
 // =============================================================================
@@ -110,7 +109,7 @@ impl PhysicalExpr for ClosureCallExec {
 			let closure = match target_value {
 				Value::Closure(c) => c,
 				other => {
-					return Err(Error::InvalidFunction {
+					return Err(ExecError::InvalidFunction {
 						name: "ANONYMOUS".to_string(),
 						message: format!("'{}' is not a function", other.kind_of()),
 					}
@@ -140,7 +139,7 @@ impl PhysicalExpr for ClosureCallExec {
 						&& let Some((param, kind)) =
 							arg_spec[evaluated_args.len()..].iter().find(|(_, k)| !k.can_be_none())
 					{
-						return Err(Error::InvalidFunctionArguments {
+						return Err(ExprError::InvalidFunctionArguments {
 							name: "ANONYMOUS".to_string(),
 							message: format!(
 								"Expected a value of type '{}' for argument {}",
@@ -155,7 +154,7 @@ impl PhysicalExpr for ClosureCallExec {
 					let mut local_params: HashMap<Strand, Value> = HashMap::new();
 					for ((param, kind), arg_value) in arg_spec.iter().zip(evaluated_args) {
 						let coerced = arg_value.coerce_to_kind(kind).map_err(|_| {
-							Error::InvalidFunctionArguments {
+							ExprError::InvalidFunctionArguments {
 								name: "ANONYMOUS".to_string(),
 								message: format!(
 									"Expected a value of type '{}' for argument {}",
@@ -194,7 +193,7 @@ impl PhysicalExpr for ClosureCallExec {
 						Err(ControlFlow::Return(v)) => v,
 						Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
 							// BREAK/CONTINUE inside a closure (outside of loop) is an error
-							return Err(Error::InvalidControlFlow.into());
+							return Err(ExecError::InvalidControlFlow.into());
 						}
 						Err(e) => return Err(e),
 					};

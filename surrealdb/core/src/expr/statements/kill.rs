@@ -1,16 +1,18 @@
 use std::borrow::Cow;
+use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
-use crate::catalog::SubscriptionDefinition;
+use crate::catalog::StoredSubscriptionDefinition;
 use crate::ctx::FrozenContext;
 use crate::dbs::{Options, RoutedNotification};
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::{Expr, FlowResultExt as _};
-use crate::iam::Error as IamError;
+use crate::iam::PolicyError;
 use crate::key::database::all::DatabaseRoot;
 use crate::types::{PublicAction, PublicNotification, PublicValue};
 use crate::val::{Uuid, Value};
@@ -44,7 +46,7 @@ impl KillStatement {
 			.cast_to::<Uuid>()
 		{
 			Err(_) => {
-				bail!(Error::KillStatement {
+				bail!(ExecError::KillStatement {
 					value: self.id.to_sql(),
 				})
 			}
@@ -76,7 +78,7 @@ impl KillStatement {
 						tb: Cow::Borrowed(&live.tb),
 						lq: lid,
 					};
-					let subscription: Option<SubscriptionDefinition> =
+					let subscription: Option<StoredSubscriptionDefinition> =
 						txn.get_key(&table_key, None).await?;
 					if let Some(sub) = subscription {
 						// For live queries created before auth tracking was introduced
@@ -92,7 +94,7 @@ impl KillStatement {
 							live_auth.id() == opt.auth.id() && live_auth.level() == opt.auth.level()
 						});
 						if !is_owner {
-							bail!(Error::IamError(IamError::NotAllowed {
+							bail!(Error::IamError(PolicyError::NotAllowed {
 								actor: opt.auth.id().to_string(),
 								action: "KILL".to_string(),
 								resource: lid.to_string(),
@@ -101,7 +103,7 @@ impl KillStatement {
 					} else {
 						// Deny when the subscription record is absent — fail closed
 						// to prevent ownership bypass via a missing or corrupted entry.
-						bail!(Error::IamError(IamError::NotAllowed {
+						bail!(Error::IamError(PolicyError::NotAllowed {
 							actor: opt.auth.id().to_string(),
 							action: "KILL".to_string(),
 							resource: lid.to_string(),
@@ -132,14 +134,19 @@ impl KillStatement {
 				txn.clear_cache();
 			}
 			None => {
-				bail!(Error::KillStatement {
+				bail!(ExecError::KillStatement {
 					value: self.id.to_sql(),
 				});
 			}
 		}
+		// Queued, not sent: the rows deleted above come back if this transaction
+		// is cancelled or loses a commit conflict, leaving the subscription
+		// registered and still receiving change notifications — but its client
+		// would already have been told it was killed and torn its handler down.
 		if let Some(sender) = ctx.broker() {
-			sender
-				.send(RoutedNotification::new(
+			txn.register_live_query_kill_after_commit(
+				Arc::clone(sender),
+				RoutedNotification::new(
 					nid,
 					PublicNotification::new(
 						lid.into(),
@@ -148,8 +155,9 @@ impl KillStatement {
 						PublicValue::None,
 						PublicValue::None,
 					),
-				))
-				.await;
+				),
+			)
+			.await;
 		}
 		// Return the query id
 		Ok(Value::None)
@@ -389,11 +397,11 @@ mod tests {
 			_ => panic!("expected uuid"),
 		};
 
-		// Simulate a legacy live query by clearing auth on the stored SubscriptionDefinition.
+		// Simulate a legacy live query by clearing auth on the stored StoredSubscriptionDefinition.
 		{
 			let txn = ds.transaction(Write).await.unwrap();
 			let db_def = txn.ensure_ns_db(None, ns, db).await.unwrap();
-			let tb_name = crate::val::TableName::from(tb);
+			let tb_name = surrealdb_strand::TableName::from(tb);
 			let key = crate::key::table::lq::Lq {
 				prefix: DatabaseRoot {
 					ns: db_def.namespace_id,
@@ -402,7 +410,7 @@ mod tests {
 				tb: Cow::Borrowed(&tb_name),
 				lq: live_uuid,
 			};
-			let mut sub: crate::catalog::SubscriptionDefinition =
+			let mut sub: crate::catalog::StoredSubscriptionDefinition =
 				txn.get_key(&key, None).await.unwrap().expect("subscription must exist");
 			sub.auth = None;
 			txn.set_key(&key, &sub).await.unwrap();
@@ -434,11 +442,11 @@ mod tests {
 			_ => panic!("expected uuid"),
 		};
 
-		// Simulate a legacy live query by clearing auth on the stored SubscriptionDefinition.
+		// Simulate a legacy live query by clearing auth on the stored StoredSubscriptionDefinition.
 		{
 			let txn = ds.transaction(Write).await.unwrap();
 			let db_def = txn.ensure_ns_db(None, ns, db).await.unwrap();
-			let tb_name = crate::val::TableName::from(tb);
+			let tb_name = surrealdb_strand::TableName::from(tb);
 			let key = crate::key::table::lq::Lq {
 				prefix: DatabaseRoot {
 					ns: db_def.namespace_id,
@@ -447,7 +455,7 @@ mod tests {
 				tb: Cow::Borrowed(&tb_name),
 				lq: live_uuid,
 			};
-			let mut sub: crate::catalog::SubscriptionDefinition =
+			let mut sub: crate::catalog::StoredSubscriptionDefinition =
 				txn.get_key(&key, None).await.unwrap().expect("subscription must exist");
 			sub.auth = None;
 			txn.set_key(&key, &sub).await.unwrap();
@@ -487,7 +495,7 @@ mod tests {
 		{
 			let txn = ds.transaction(Write).await.unwrap();
 			let db_def = txn.ensure_ns_db(None, ns, db).await.unwrap();
-			let tb_name = crate::val::TableName::from(tb);
+			let tb_name = surrealdb_strand::TableName::from(tb);
 			let key = crate::key::table::lq::Lq {
 				prefix: DatabaseRoot {
 					ns: db_def.namespace_id,

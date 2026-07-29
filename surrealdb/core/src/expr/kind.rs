@@ -12,6 +12,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Literal, Part, Value};
+use crate::val::table_name_public::{IntoPublicTable, IntoTableName};
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Range, RecordId, Regex, Set,
 	TableName, Uuid,
@@ -572,10 +573,10 @@ impl From<crate::types::PublicKind> for Kind {
 			crate::types::PublicKind::Regex => Kind::Regex,
 			crate::types::PublicKind::Range => Kind::Range,
 			crate::types::PublicKind::Table(table) => {
-				Kind::Table(table.into_iter().map(TableName::from).collect())
+				Kind::Table(table.into_iter().map(IntoTableName::into_table_name).collect())
 			}
 			crate::types::PublicKind::Record(tables) => {
-				Kind::Record(tables.into_iter().map(TableName::from).collect())
+				Kind::Record(tables.into_iter().map(IntoTableName::into_table_name).collect())
 			}
 			crate::types::PublicKind::Geometry(kinds) => {
 				Kind::Geometry(kinds.into_iter().map(Into::into).collect())
@@ -618,12 +619,12 @@ impl From<Kind> for crate::types::PublicKind {
 			Kind::Uuid => crate::types::PublicKind::Uuid,
 			Kind::Regex => crate::types::PublicKind::Regex,
 			Kind::Range => crate::types::PublicKind::Range,
-			Kind::Table(tables) => {
-				crate::types::PublicKind::Table(tables.into_iter().map(Into::into).collect())
-			}
-			Kind::Record(tables) => {
-				crate::types::PublicKind::Record(tables.into_iter().map(Into::into).collect())
-			}
+			Kind::Table(tables) => crate::types::PublicKind::Table(
+				tables.into_iter().map(IntoPublicTable::into_public_table).collect(),
+			),
+			Kind::Record(tables) => crate::types::PublicKind::Record(
+				tables.into_iter().map(IntoPublicTable::into_public_table).collect(),
+			),
 			Kind::Geometry(kinds) => {
 				crate::types::PublicKind::Geometry(kinds.into_iter().map(Into::into).collect())
 			}
@@ -1151,5 +1152,92 @@ mod reference_target_tests {
 		let (unbounded, tables) = collect(&Kind::String);
 		assert!(!unbounded);
 		assert!(tables.is_empty());
+	}
+}
+
+/// Exhaustive-over-variants render/parse round-trip corpus for `Kind`.
+///
+/// Catalog definitions store kinds as canonical SurrealQL text
+/// (`Kind::to_sql()`) and re-parse via `syn::kind_for_definition()` on read.
+/// Every variant (including recursive nestings) must survive that round trip
+/// byte-for-byte in structure, or a stored `DEFINE FIELD ... TYPE ...` would
+/// silently change meaning.
+#[cfg(test)]
+mod round_trip_tests {
+	use rstest::rstest;
+	use surrealdb_types::ToSql;
+
+	use super::*;
+
+	fn tb(name: &str) -> TableName {
+		name.into()
+	}
+
+	fn round_trip(k: &Kind) {
+		let text = k.to_sql();
+		let reparsed: Kind = crate::syn::kind_for_definition(&text)
+			.unwrap_or_else(|e| panic!("failed to reparse kind text {text:?}: {e}"))
+			.into();
+		assert_eq!(&reparsed, k, "round trip mismatch via text {text:?}");
+	}
+
+	#[rstest]
+	#[case::any(Kind::Any)]
+	#[case::none(Kind::None)]
+	#[case::null(Kind::Null)]
+	#[case::bool(Kind::Bool)]
+	#[case::bytes(Kind::Bytes)]
+	#[case::datetime(Kind::Datetime)]
+	#[case::decimal(Kind::Decimal)]
+	#[case::duration(Kind::Duration)]
+	#[case::float(Kind::Float)]
+	#[case::int(Kind::Int)]
+	#[case::number(Kind::Number)]
+	#[case::object(Kind::Object)]
+	#[case::string(Kind::String)]
+	#[case::uuid(Kind::Uuid)]
+	#[case::regex(Kind::Regex)]
+	#[case::range(Kind::Range)]
+	#[case::table_untyped(Kind::Table(vec![]))]
+	#[case::table_typed(Kind::Table(vec![tb("person"), tb("robot")]))]
+	#[case::record_untyped(Kind::Record(vec![]))]
+	#[case::record_typed(Kind::Record(vec![tb("person")]))]
+	#[case::geometry_untyped(Kind::Geometry(vec![]))]
+	#[case::geometry_typed(Kind::Geometry(vec![GeometryKind::Point, GeometryKind::MultiPolygon]))]
+	#[case::either(Kind::Either(vec![Kind::String, Kind::Int, Kind::None]))]
+	#[case::option_record(Kind::Either(vec![Kind::None, Kind::Record(vec![tb("person")])]))]
+	#[case::set_unbounded(Kind::Set(Box::new(Kind::String), None))]
+	#[case::set_bounded(Kind::Set(Box::new(Kind::Int), Some(10)))]
+	#[case::array_unbounded(Kind::Array(Box::new(Kind::Any), None))]
+	#[case::array_bounded(Kind::Array(Box::new(Kind::Record(vec![tb("a")])), Some(3)))]
+	#[case::nested_array(Kind::Array(Box::new(Kind::Array(Box::new(Kind::Int), None)), None))]
+	// `Kind::Function`'s argument/return payload has no surface grammar (the
+	// parser only ever produces `Function(None, None)` from the `function`
+	// keyword, and `ToSql` renders every payload as just `"function"`) — this
+	// predates the catalog text migration and is unrelated to it, so only the
+	// parseable/renderable shape is covered here.
+	#[case::function_untyped(Kind::Function(None, None))]
+	#[case::file_untyped(Kind::File(vec![]))]
+	#[case::file_typed(Kind::File(vec!["bucket1".to_string(), "bucket2".to_string()]))]
+	#[case::literal_string(Kind::Literal(KindLiteral::String(Strand::new_static("a"))))]
+	#[case::literal_integer(Kind::Literal(KindLiteral::Integer(42)))]
+	#[case::literal_float(Kind::Literal(KindLiteral::Float(1.5)))]
+	#[case::literal_decimal(Kind::Literal(KindLiteral::Decimal(Decimal::new(125, 2))))]
+	#[case::literal_duration(Kind::Literal(KindLiteral::Duration(Duration(
+		std::time::Duration::from_secs(3600)
+	))))]
+	#[case::literal_bool(Kind::Literal(KindLiteral::Bool(true)))]
+	#[case::literal_array(Kind::Literal(KindLiteral::Array(vec![Kind::String, Kind::Int])))]
+	#[case::literal_object(Kind::Literal(KindLiteral::Object(BTreeMap::from([(
+		Strand::new_static("a"),
+		Kind::String,
+	)]))))]
+	#[case::deeply_nested(Kind::Either(vec![
+		Kind::Array(Box::new(Kind::Record(vec![tb("a"), tb("b")])), Some(5)),
+		Kind::Set(Box::new(Kind::Literal(KindLiteral::Integer(1))), None),
+		Kind::None,
+	]))]
+	fn kind_round_trips_through_text(#[case] k: Kind) {
+		round_trip(&k);
 	}
 }

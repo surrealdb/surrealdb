@@ -35,8 +35,8 @@ use roaring::RoaringTreemap;
 use super::common::fetch_and_filter_records_batch;
 use super::pipeline::{ScanPipeline, build_field_state};
 use super::resolved::ResolvedTableContext;
-use crate::catalog::{DatabaseId, Index, NamespaceId};
-use crate::err::Error;
+use crate::catalog::{DatabaseId, Error, Index, NamespaceId};
+use crate::err::EngineError;
 use crate::exec::index::access_path::{BTreeAccess, IndexRef};
 use crate::exec::index::iterator::btree::{
 	INDEX_BATCH_SIZE, bitmap_scan_range, decode_entry_doc_ids,
@@ -380,7 +380,7 @@ impl BitmapNode {
 		let mut drained = 0usize;
 		loop {
 			if bctx.ctx.cancellation().is_cancelled() {
-				return Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryCancelled)));
+				return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
 			}
 			let res = scan(&mut range, bctx.txn, INDEX_BATCH_SIZE)
 				.await
@@ -714,7 +714,7 @@ impl ExecOperator for BitmapResolve {
 			let mut iter = bitmap.into_iter();
 			loop {
 				if ctx.cancellation().is_cancelled() {
-					Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryCancelled)))?;
+					Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)))?;
 				}
 				let chunk: Vec<u64> = iter.by_ref().take(RESOLVE_BATCH_SIZE).collect();
 				if chunk.is_empty() {

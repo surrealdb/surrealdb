@@ -3,12 +3,12 @@ use std::ops::Deref;
 use std::str;
 use std::str::FromStr;
 
+use common::fmt::QuoteStr;
 use revision::revisioned;
 use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::Datetime;
-use crate::fmt::QuoteStr;
 use crate::val::IndexFormat;
 
 #[revisioned(revision = 1)]

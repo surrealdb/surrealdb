@@ -2,15 +2,14 @@ use std::collections::{BTreeMap, HashMap};
 use std::ops::{Deref, DerefMut};
 
 use anyhow::Result;
+use common::fmt::EscapeObjectKey;
 use http::{HeaderMap, HeaderName, HeaderValue};
 use revision::revisioned;
 use storekey::{BorrowDecode, Encode};
 use surrealdb_collections::{Entry as VecMapEntry, VecMap, VecMapIntoIter};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::err::Error;
 use crate::expr::literal::ObjectEntry;
-use crate::fmt::EscapeObjectKey;
 use crate::val::{IndexFormat, RecordId, Strand, Value};
 
 /// Invariant: Keys never contain NUL bytes.
@@ -156,14 +155,14 @@ impl IntoIterator for Object {
 }
 
 impl TryInto<BTreeMap<String, String>> for Object {
-	type Error = Error;
+	type Error = anyhow::Error;
 	fn try_into(self) -> Result<BTreeMap<String, String>, Self::Error> {
 		self.into_iter().map(|(k, v)| Ok((k.into_string(), v.coerce_to()?))).collect()
 	}
 }
 
 impl TryInto<HeaderMap> for Object {
-	type Error = Error;
+	type Error = anyhow::Error;
 	fn try_into(self) -> Result<HeaderMap, Self::Error> {
 		let mut headermap = HeaderMap::new();
 		for (k, v) in self {

@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 
 use anyhow::Result;
+use common::fmt::EscapeKwFreeIdent;
 use reblessive::tree::Stk;
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
@@ -8,13 +9,12 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::err::EngineError;
 use crate::exe::try_join_all_buffered;
 use crate::expr::idiom::recursion::{
 	self, Recursion, clean_iteration, compute_idiom_recursion, is_final,
 };
 use crate::expr::{Expr, FlowResultExt as _, Idiom, Literal, Lookup, Value};
-use crate::fmt::EscapeKwFreeIdent;
 use crate::val::{Array, RecordId};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -308,7 +308,7 @@ impl<'a> RecursionPlan {
 						Ok(Value::Object(obj))
 					}
 					Value::None => Ok(Value::None),
-					v => Err(anyhow::Error::new(Error::unreachable(format_args!(
+					v => Err(anyhow::Error::new(EngineError::unreachable(format_args!(
 						"Expected an object or none, found {}.",
 						v.kind_of()
 					)))),

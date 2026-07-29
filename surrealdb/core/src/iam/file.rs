@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use crate::err::Error;
+use crate::buc::Error;
 
 /// Checks if the requested file path is within any of the allowed directories.
 pub(crate) fn check_is_path_allowed(path: &Path, allowed_paths: &[PathBuf]) -> Result<PathBuf> {

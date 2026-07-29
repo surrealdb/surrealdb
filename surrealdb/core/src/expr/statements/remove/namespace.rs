@@ -2,12 +2,13 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 
 use super::retire_namespace_indexes;
+use crate::catalog::Error;
 use crate::catalog::providers::NamespaceProvider;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
+use crate::expr::statements::subscriptions::kill_namespace_subscriptions;
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 
@@ -60,6 +61,10 @@ impl RemoveNamespaceStatement {
 		// Retire index state before deleting the namespace definition. Durable
 		// cleanup is transactional; local builder aborts are deferred until commit.
 		retire_namespace_indexes(ctx, &txn, ns.namespace_id).await?;
+		// Tell every subscriber in the namespace that it is going away. The
+		// deferred delete below takes the whole `/*{ns}` prefix, `lq` rows
+		// included, so nothing else would ever wake these clients.
+		kill_namespace_subscriptions(ctx, &txn, ns.namespace_id).await?;
 		// Remove the sequences
 		if let Some(seq) = ctx.get_sequences() {
 			seq.namespace_removed(&txn, ns.namespace_id).await?;

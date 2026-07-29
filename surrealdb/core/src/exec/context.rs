@@ -26,6 +26,7 @@ use crate::catalog::{DatabaseDefinition, IndexDefinition, NamespaceDefinition, T
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Capabilities, Options};
 use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::exec::function::FunctionRegistry;
 use crate::expr::Base;
 use crate::iam::{Action, Auth, ResourceKind};
@@ -395,7 +396,7 @@ impl ExecutionContext {
 	/// Returns an error if no namespace has been selected.
 	pub fn namespace(&self) -> Result<&NamespaceContext, Error> {
 		match self {
-			Self::Root(_) => Err(Error::NsEmpty),
+			Self::Root(_) => Err(ExecError::NsEmpty.into()),
 			Self::Namespace(n) => Ok(n),
 			Self::Database(d) => Ok(&d.ns_ctx),
 		}
@@ -406,7 +407,7 @@ impl ExecutionContext {
 	/// Returns an error if no database has been selected.
 	pub fn database(&self) -> Result<&DatabaseContext, Error> {
 		match self {
-			Self::Root(_) | Self::Namespace(_) => Err(Error::DbEmpty),
+			Self::Root(_) | Self::Namespace(_) => Err(ExecError::DbEmpty.into()),
 			Self::Database(d) => Ok(d),
 		}
 	}

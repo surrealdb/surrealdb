@@ -7,10 +7,9 @@ use crate::catalog::Permission;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::compute::DocKind;
-use crate::doc::{CursorDoc, Document, Extras};
-use crate::err::Error;
+use crate::doc::{CursorDoc, Document, Error as DocError, Extras};
 use crate::expr::paths::{ID, IN, OUT};
-use crate::expr::{Cond, FlowResultExt};
+use crate::expr::{Cond, Error, FlowResultExt};
 use crate::iam::Action;
 use crate::val::{RecordId, Value};
 
@@ -41,7 +40,7 @@ impl Document {
 		// Ensure the table allows normal records
 		ensure!(
 			tb.allows_normal(),
-			Error::TableCheck {
+			DocError::TableCheck {
 				record: self.id()?.to_sql(),
 				relation: false,
 				target_type: tb.table_type.to_sql(),
@@ -62,7 +61,7 @@ impl Document {
 		// Ensure the table allows normal records
 		ensure!(
 			tb.allows_normal(),
-			Error::TableCheck {
+			DocError::TableCheck {
 				record: self.id()?.to_sql(),
 				relation: false,
 				target_type: tb.table_type.to_sql(),
@@ -83,7 +82,7 @@ impl Document {
 		// Ensure the table allows normal records
 		ensure!(
 			tb.allows_relation(),
-			Error::TableCheck {
+			DocError::TableCheck {
 				record: self.id()?.to_sql(),
 				relation: true,
 				target_type: tb.table_type.to_sql(),
@@ -106,7 +105,7 @@ impl Document {
 			Extras::Relate(_, _, _) => {
 				ensure!(
 					tb.allows_relation(),
-					Error::TableCheck {
+					DocError::TableCheck {
 						record: self.id()?.to_sql(),
 						relation: true,
 						target_type: tb.table_type.to_sql(),
@@ -116,7 +115,7 @@ impl Document {
 			_ => {
 				ensure!(
 					tb.allows_normal(),
-					Error::TableCheck {
+					DocError::TableCheck {
 						record: self.id()?.to_sql(),
 						relation: false,
 						target_type: tb.table_type.to_sql(),
@@ -156,7 +155,7 @@ impl Document {
 		// Ensure the table is not a computed view
 		ensure!(
 			tb.view.is_none(),
-			Error::TableIsView {
+			DocError::TableIsView {
 				table: tb.name.to_string(),
 			}
 		);
@@ -239,7 +238,7 @@ impl Document {
 				v if expected.key == v => Ok(()),
 				// Anything else is an error
 				v => {
-					bail!(Error::IdMismatch {
+					bail!(DocError::IdMismatch {
 						value: v.to_sql()
 					})
 				}

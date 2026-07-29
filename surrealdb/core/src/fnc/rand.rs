@@ -7,7 +7,7 @@ use surrealdb_cnf::ID_CHARS;
 use ulid::Ulid;
 
 use super::args::{Any, Args, Arity, FromArg, Optional};
-use crate::err::Error;
+use crate::expr::Error;
 use crate::val::{Datetime, Duration, Number, Uuid, Value};
 
 pub fn rand(_: ()) -> Result<Value> {
@@ -365,7 +365,7 @@ pub mod uuid {
 				#[cfg(target_family = "wasm")]
 				anyhow::ensure!(
 					timestamp.0 >= chrono::DateTime::UNIX_EPOCH,
-					crate::err::Error::InvalidFunctionArguments {
+					crate::expr::Error::InvalidFunctionArguments {
 						name: String::from("rand::ulid"),
 						message: format!(
 							"To generate a ULID from a datetime, it must be a time beyond UNIX epoch."

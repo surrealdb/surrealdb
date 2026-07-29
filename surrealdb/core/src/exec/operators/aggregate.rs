@@ -12,6 +12,7 @@ use std::sync::Arc;
 use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 
+use crate::err::EngineError;
 use crate::exec::function::{Accumulator, AggregateFunction};
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
@@ -483,7 +484,7 @@ impl ExecOperator for Aggregate {
 				// Check for cancellation between batches
 				if ctx.cancellation().is_cancelled() {
 					Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(
-						crate::err::Error::QueryCancelled
+						EngineError::QueryCancelled
 					)))?;
 				}
 				let batch = batch_result?;

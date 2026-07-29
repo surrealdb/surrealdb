@@ -2,10 +2,10 @@ use std::fmt::{self, Display};
 
 use revision::revisioned;
 
-use crate::catalog::ModuleDefinition;
+use crate::catalog::StoredModuleDefinition;
 use crate::expr::statements::info::InfoStructure;
 use crate::sql;
-use crate::val::{File, Value};
+use crate::val::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -53,7 +53,10 @@ impl InfoStructure for SurrealismExecutable {
 
 impl From<SurrealismExecutable> for sql::module::SurrealismExecutable {
 	fn from(executable: SurrealismExecutable) -> Self {
-		Self(File::new(executable.bucket, executable.key))
+		Self(sql::file::File {
+			bucket: executable.bucket,
+			key: executable.key,
+		})
 	}
 }
 
@@ -134,9 +137,9 @@ impl From<ModuleName> for sql::module::ModuleName {
 	}
 }
 
-impl TryFrom<&ModuleDefinition> for ModuleName {
+impl TryFrom<&StoredModuleDefinition> for ModuleName {
 	type Error = anyhow::Error;
-	fn try_from(value: &ModuleDefinition) -> Result<Self, Self::Error> {
+	fn try_from(value: &StoredModuleDefinition) -> Result<Self, Self::Error> {
 		if let Some(name) = &value.name {
 			Ok(ModuleName::Module(name.clone()))
 		} else if let ModuleExecutable::Silo(silo) = &value.executable {

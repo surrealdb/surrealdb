@@ -458,8 +458,8 @@ pub(super) mod tests {
 	use crate::idx::trees::hnsw::VectorId;
 	use crate::idx::trees::knn::{DoublePriorityQueue, FloatKey, Ids64, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
-	use crate::sql::expression::convert_public_value_to_internal;
 	use crate::syn;
+	use crate::val::convert_public::convert_public_value_to_internal;
 	use crate::val::{Number, Value};
 
 	pub(crate) fn get_seed_rnd() -> SmallRng {

@@ -1,19 +1,18 @@
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_strand::TableName;
 use uuid::Uuid;
 
-use crate::catalog::TableDefinition;
 use crate::catalog::providers::TableProvider;
+use crate::catalog::{Error, TableDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::idx::docids::TableDocIds;
 use crate::kvs::index::retire_durable_index;
-use crate::val::TableName;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct RemoveIndexStatement {
@@ -134,7 +133,7 @@ impl RemoveIndexStatement {
 			db_name,
 			&TableDefinition {
 				cache_indexes_ts: Uuid::now_v7(),
-				..tb.as_ref().clone()
+				..(*tb).clone()
 			},
 		)
 		.await?;
@@ -153,6 +152,7 @@ impl RemoveIndexStatement {
 mod tikv_concurrency {
 	use std::sync::Arc;
 
+	use surrealdb_strand::TableName;
 	use uuid::Uuid;
 
 	use crate::CommunityComposer;
@@ -161,7 +161,6 @@ mod tikv_concurrency {
 	use crate::key::KVRange;
 	use crate::key::table::{dd, di};
 	use crate::kvs::{Datastore, TransactionType};
-	use crate::val::TableName;
 
 	async fn fresh_tikv_ds() -> Arc<Datastore> {
 		let ds = Datastore::builder()

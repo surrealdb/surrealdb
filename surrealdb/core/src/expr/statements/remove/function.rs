@@ -2,10 +2,10 @@ use anyhow::Result;
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
+use crate::catalog::Error;
 use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
-use crate::err::Error;
 use crate::expr::{Base, Value};
 use crate::iam::{Action, ResourceKind};
 

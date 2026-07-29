@@ -14,6 +14,7 @@ use tracing::instrument;
 use super::common::resolve_version_stamp;
 use super::pipeline::{ScanPipeline, build_field_state, filter_and_process_batch, kv_scan_stream};
 use super::resolved::ResolvedTableContext;
+use crate::err::EngineError;
 use crate::exec::operators::scan::count::record_key_range;
 use crate::exec::permission::{
 	PhysicalPermission, convert_permission_to_physical_runtime, should_check_perms,
@@ -283,7 +284,7 @@ pub(crate) async fn execute_record_lookup(
 			db_ctx.get_table_def(&rid.table, version).await.context("Failed to get table")?;
 
 		if table_def.is_none() {
-			return Err(ControlFlow::Err(anyhow::Error::new(crate::err::Error::TbNotFound {
+			return Err(ControlFlow::Err(anyhow::Error::new(crate::catalog::Error::TbNotFound {
 				name: rid.table.clone(),
 			})));
 		}
@@ -372,9 +373,7 @@ pub(crate) async fn execute_record_lookup(
 			let mut results = Vec::new();
 			while let Some(batch_result) = source.next().await {
 				if ctx.cancellation().is_cancelled() {
-					return Err(ControlFlow::Err(anyhow::anyhow!(
-						crate::err::Error::QueryCancelled
-					)));
+					return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
 				}
 				let mut batch = batch_result?;
 				let cont = pipeline.process_batch(&mut batch.values, ctx).await?;

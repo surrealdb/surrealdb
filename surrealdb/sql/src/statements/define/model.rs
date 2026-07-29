@@ -1,0 +1,45 @@
+use surrealdb_strand::Strand;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
+use super::DefineKind;
+use crate::{CoverStmts, Expr, Ident, Literal, Permission};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub struct DefineModelStatement {
+	pub kind: DefineKind,
+	pub hash: Strand,
+	pub name: Ident,
+	pub version: Strand,
+	pub comment: Expr,
+	pub permissions: Permission,
+}
+
+impl Default for DefineModelStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			hash: Strand::default(),
+			name: Ident::default(),
+			version: Strand::default(),
+			comment: Expr::Literal(Literal::None),
+			permissions: Permission::default(),
+		}
+	}
+}
+
+impl ToSql for DefineModelStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "DEFINE MODEL");
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write_sql!(f, fmt, " OVERWRITE"),
+			DefineKind::IfNotExists => write_sql!(f, fmt, " IF NOT EXISTS"),
+		}
+		write_sql!(f, fmt, " ml::{}<{}>", self.name, self.version.as_str());
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write_sql!(f, fmt, " COMMENT {}", CoverStmts(&self.comment));
+		}
+		write_sql!(f, fmt, " PERMISSIONS {}", self.permissions);
+	}
+}

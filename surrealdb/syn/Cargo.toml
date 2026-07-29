@@ -1,0 +1,43 @@
+[package]
+name = "surrealdb-syn"
+publish = true
+readme = "README.md"
+documentation = "https://docs.rs/surrealdb-syn/"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+surrealism = ["surrealdb-sql/surrealism"]
+
+[dependencies]
+common = { workspace = true }
+surrealdb-cnf = { workspace = true }
+surrealdb-iam = { workspace = true }
+surrealdb-sql = { workspace = true }
+surrealdb-strand = { workspace = true }
+surrealdb-types = { workspace = true }
+
+bytes.workspace = true
+chrono = { workspace = true, features = ["serde"] }
+geo = { workspace = true, features = ["use-serde"] }
+phf = { workspace = true, features = ["macros", "unicase"] }
+reblessive = { workspace = true }
+regex.workspace = true
+rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+unicase.workspace = true
+uuid = { workspace = true, features = ["serde"] }
+
+[dev-dependencies]
+rstest = { workspace = true }
+
+[lints]
+workspace = true

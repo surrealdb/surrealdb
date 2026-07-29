@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, HashMap};
 use anyhow::{Result, ensure};
 use surrealdb_strand::Strand;
 
-use crate::err::Error;
 use crate::expr::Idiom;
+use crate::idx::Error;
 use crate::idx::ft::Position;
 use crate::idx::ft::offset::Offset;
 use crate::val::{Array, Object, Value};

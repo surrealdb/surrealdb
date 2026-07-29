@@ -12,7 +12,6 @@ use crate::ctx::{Context, FrozenContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::{Iterable, Iterator, Operable, Options, Processable, Statement};
 use crate::doc::{DocumentContext, NsDbCtx};
-use crate::err::Error;
 use crate::expr::dir::Dir;
 use crate::expr::lookup::{ComputedLookupSubject, LookupKind};
 use crate::expr::statements::relate::RelateThrough;
@@ -20,7 +19,7 @@ use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, RecordIterato
 use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
 use crate::key::database::all::DatabaseRoot;
 use crate::key::{KVKey, KVKeyDecode, KVRange, KVValue, KeyRange, graph, record, r#ref};
-use crate::kvs::{NORMAL_BATCH_SIZE, Transaction, Val};
+use crate::kvs::{DatastoreError, NORMAL_BATCH_SIZE, Transaction, Val};
 use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange, TableName, Value};
 
 impl Iterable {
@@ -201,11 +200,11 @@ impl Collectable {
 		// SECURITY: when the surrounding statement carries a VERSION clause
 		// (`opt.version = Some(_)`), fetch the table definition AT that
 		// version. The table's SELECT permissions are taken from the
-		// resulting `TableDefinition`, so reading the current-catalog
+		// resulting `StoredTableDefinition`, so reading the current-catalog
 		// definition would apply the present-day permission clause to a
 		// historical query — bypassing any row-level WHERE that was in
 		// force when the version was captured.
-		if ft != doc_ctx.tb()?.name {
+		if ft.as_str() != doc_ctx.tb()?.name.as_str() {
 			let tb = txn
 				.get_or_add_tb(None, &doc_ctx.ns().name, &doc_ctx.db().name, &ft, opt.version)
 				.await?;
@@ -1220,7 +1219,7 @@ pub(super) trait Collector {
 		rs: RecordStrategy,
 	) -> Result<()> {
 		let Some(exe) = ctx.get_query_executor() else {
-			bail!(Error::QueryNotExecuted {
+			bail!(DatastoreError::QueryNotExecuted {
 				message: "No QueryExecutor has been found.".to_string(),
 			})
 		};
@@ -1228,7 +1227,7 @@ pub(super) trait Collector {
 		let Some(iterator) =
 			exe.new_iterator(doc_ctx.ns().namespace_id, doc_ctx.db().database_id, irf).await?
 		else {
-			bail!(Error::QueryNotExecuted {
+			bail!(DatastoreError::QueryNotExecuted {
 				message: "No iterator has been found.".to_string(),
 			})
 		};

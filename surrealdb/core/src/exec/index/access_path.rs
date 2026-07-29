@@ -18,7 +18,7 @@ use crate::val::{Number, Range, Value};
 ///
 /// This is a lightweight reference that can be cloned efficiently.
 #[derive(Debug, Clone)]
-pub struct IndexRef {
+pub(crate) struct IndexRef {
 	/// The full list of indexes for the table
 	pub(crate) indexes: Arc<[IndexDefinition]>,
 	/// The position of this index in the list

@@ -3,7 +3,7 @@ use std::borrow::Cow;
 
 use anyhow::Result;
 
-use crate::catalog::{ApiDefinition, DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseId, NamespaceId, StoredApiDefinition};
 use crate::key::category::{Categorise, Category};
 use crate::key::database::all::DatabaseRoot;
 use crate::key::{impl_kv_key_storekey, impl_kv_range_storekey, key};
@@ -19,7 +19,7 @@ key! {
 	}
 }
 
-impl_kv_key_storekey!(Api<'a> => ApiDefinition);
+impl_kv_key_storekey!(Api<'a> => StoredApiDefinition);
 impl Categorise for Api<'_> {
 	fn categorise(&self) -> Category {
 		Category::DatabaseApi

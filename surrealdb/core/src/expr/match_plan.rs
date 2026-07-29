@@ -7,10 +7,11 @@
 //!
 //! See `doc/gql/V2_DESIGN.md` §2 for the normative contract.
 
+use common::fmt::EscapeIdent;
+use surrealdb_strand::TableName;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::expr::{Expr, Idiom};
-use crate::val::TableName;
 
 /// Index into [`MatchPlan::bindings`]; identifies a binding by position.
 ///
@@ -525,7 +526,7 @@ impl MatchPlan {
 					f.push_str(" (");
 					f.push_str(self.binding_name(node.binding));
 					f.push(':');
-					node.label.fmt_sql(f, SqlFormat::SingleLine);
+					EscapeIdent(node.label.as_str()).fmt_sql(f, SqlFormat::SingleLine);
 					f.push(' ');
 					node.props.fmt_sql(f, SqlFormat::SingleLine);
 					f.push(')');
@@ -536,7 +537,7 @@ impl MatchPlan {
 					f.push_str("-[");
 					f.push_str(self.binding_name(edge.binding));
 					f.push(':');
-					edge.label.fmt_sql(f, SqlFormat::SingleLine);
+					EscapeIdent(edge.label.as_str()).fmt_sql(f, SqlFormat::SingleLine);
 					f.push_str("]->");
 					f.push_str(self.binding_name(edge.to));
 				}
@@ -616,7 +617,7 @@ impl MatchPlan {
 		}
 		if let Some(label) = node.label.as_ref() {
 			f.push(':');
-			label.fmt_sql(f, SqlFormat::SingleLine);
+			EscapeIdent(label.as_str()).fmt_sql(f, SqlFormat::SingleLine);
 		}
 		f.push(')');
 	}
@@ -636,7 +637,7 @@ impl MatchPlan {
 		}
 		if let Some(label) = edge.label.as_ref() {
 			f.push(':');
-			label.fmt_sql(f, SqlFormat::SingleLine);
+			EscapeIdent(label.as_str()).fmt_sql(f, SqlFormat::SingleLine);
 		}
 		f.push(']');
 		match edge.direction {
@@ -942,5 +943,39 @@ mod tests {
 			// debug tripwire.
 			assert!(outcome.is_ok());
 		}
+	}
+	/// MATCH labels are table names, so a name colliding with a reserved word
+	/// must render quoted or the plan text cannot be read back.
+	///
+	/// The engine's `TableName` deliberately has no `ToSql` and derefs to `str`,
+	/// which also implements it — so a bare `label.fmt_sql(..)` here compiles
+	/// and silently emits the unescaped name. This asserts the escaping, not
+	/// which impl supplies it.
+	#[test]
+	fn to_sql_escapes_labels_that_collide_with_keywords() {
+		let plan = MatchPlan {
+			bindings: vec![BindingDef {
+				name: "a".to_string(),
+				kind: BindingKind::Node,
+				user_named: true,
+			}],
+			stages: stages_of(vec![MatchClausePlan {
+				optional_group: None,
+				patterns: vec![PatternPlan {
+					search: None,
+					path_var: None,
+					start: NodeStep {
+						binding: 0,
+						label: Some(TableName::new("select".to_string())),
+					},
+					steps: Vec::new(),
+				}],
+				predicates: Vec::new(),
+			}]),
+			output: None,
+		};
+
+		let rendered = plan.to_sql();
+		assert!(rendered.contains("`select`"), "a keyword label must be quoted, got: {rendered}");
 	}
 }

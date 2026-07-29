@@ -278,7 +278,7 @@ impl ExecOperator for GraphEdgeScan {
 			// tables may have different permission policies, so we resolve
 			// lazily per table on first use.
 			let mut perm_cache: std::collections::HashMap<
-				crate::val::TableName,
+				surrealdb_strand::TableName,
 				PhysicalPermission,
 			> = std::collections::HashMap::new();
 

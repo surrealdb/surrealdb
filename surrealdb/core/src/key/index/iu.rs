@@ -27,13 +27,13 @@
 use std::borrow::Cow;
 
 use anyhow::Result;
+use surrealdb_strand::TableName;
 use uuid::Uuid;
 
 use crate::catalog::IndexId;
 use crate::key::category::{Categorise, Category};
 use crate::key::database::all::DatabaseRoot;
 use crate::key::{impl_kv_key_storekey, impl_kv_range_storekey, key};
-use crate::val::TableName;
 
 key! {
 	/// A key representing a delta applied to the total item count of an index.

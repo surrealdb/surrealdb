@@ -8,7 +8,7 @@ use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvid
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::{CursorDoc, DocumentContext, NsDbCtx};
-use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::relate::RelateThrough;
 use crate::expr::{Data, Expr, FlowResultExt as _, Output, Value};
@@ -64,7 +64,7 @@ impl InsertStatement {
 					Value::Table(into) => Some(into),
 					Value::String(into) => Some(TableName::new(into)),
 					_ => {
-						return Err(Error::InsertStatement {
+						return Err(ExecError::InsertStatement {
 							value: into.to_sql(),
 						}
 						.into());
@@ -107,7 +107,9 @@ impl InsertStatement {
 					let (tb, id) = extract_table_and_rid_key(&o, &tb)?;
 
 					doc_ctx = match doc_ctx {
-						Some(ref dc) if dc.tb().is_ok_and(|t| t.name == tb) => doc_ctx,
+						Some(ref dc) if dc.tb().is_ok_and(|t| t.name.as_str() == tb.as_str()) => {
+							doc_ctx
+						}
 						Some(_) | None => {
 							let tb_def =
 								txn.get_or_add_tb(Some(ctx), &ns.name, &db.name, &tb, None).await?;
@@ -145,7 +147,11 @@ impl InsertStatement {
 							let (tb, id) = extract_table_and_rid_key(&v, &tb)?;
 
 							doc_ctx = match doc_ctx {
-								Some(ref dc) if dc.tb().is_ok_and(|t| t.name == tb) => doc_ctx,
+								Some(ref dc)
+									if dc.tb().is_ok_and(|t| t.name.as_str() == tb.as_str()) =>
+								{
+									doc_ctx
+								}
 								Some(_) | None => {
 									let tb_def = txn
 										.get_or_add_tb(Some(ctx), &ns.name, &db.name, &tb, None)
@@ -179,7 +185,11 @@ impl InsertStatement {
 						let (tb, id) = extract_table_and_rid_key(&v, &tb)?;
 
 						doc_ctx = match doc_ctx {
-							Some(ref dc) if dc.tb().is_ok_and(|t| t.name == tb) => doc_ctx,
+							Some(ref dc)
+								if dc.tb().is_ok_and(|t| t.name.as_str() == tb.as_str()) =>
+							{
+								doc_ctx
+							}
 							Some(_) | None => {
 								let tb_def = txn
 									.get_or_add_tb(Some(ctx), &ns.name, &db.name, &tb, None)
@@ -208,7 +218,7 @@ impl InsertStatement {
 						)?)
 					}
 					v => {
-						bail!(Error::InsertStatement {
+						bail!(ExecError::InsertStatement {
 							value: v.to_sql(),
 						})
 					}
@@ -252,7 +262,7 @@ fn iterable(
 		let f = match v.pick(&IN) {
 			Value::RecordId(v) => v,
 			v => {
-				bail!(Error::InsertStatementIn {
+				bail!(ExecError::InsertStatementIn {
 					value: v.to_sql(),
 				})
 			}
@@ -260,7 +270,7 @@ fn iterable(
 		let w = match v.pick(&OUT) {
 			Value::RecordId(v) => v,
 			v => {
-				bail!(Error::InsertStatementOut {
+				bail!(ExecError::InsertStatementOut {
 					value: v.to_sql(),
 				})
 			}
@@ -287,7 +297,7 @@ fn extract_table_and_rid_key(
 	let Some(tb) = into else {
 		let record = record.rid();
 		let Value::RecordId(rid) = record else {
-			bail!(Error::InsertStatementId {
+			bail!(ExecError::InsertStatementId {
 				value: record.to_sql(),
 			});
 		};
@@ -301,7 +311,7 @@ fn extract_table_and_rid_key(
 		// conversions are rejected — see `Number::as_int_lossless`.
 		Value::Number(id) if id.is_float() => match id.as_int_lossless() {
 			Some(i) => Some(RecordIdKey::Number(i)),
-			None => bail!(Error::InsertStatementId {
+			None => bail!(ExecError::InsertStatementId {
 				value: Value::Number(id).to_sql(),
 			}),
 		},
@@ -326,7 +336,7 @@ fn extract_table_and_rid_key(
 		Value::None => None,
 		// Any other value cannot be converted to a record id key
 		v => {
-			bail!(Error::InsertStatementId {
+			bail!(ExecError::InsertStatementId {
 				value: v.to_sql(),
 			});
 		}

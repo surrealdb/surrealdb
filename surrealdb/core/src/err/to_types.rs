@@ -1,47 +1,59 @@
 //! Conversion from core [`Error`] to wire-friendly [`surrealdb_types::Error`].
 //!
-//! This is the single place that defines how embedded database errors are mapped to the
-//! public types-layer error used over RPC and in the SDK.
+//! This is the single place that defines how core's own failures are mapped to
+//! the public types-layer error used over RPC and in the SDK. Each of the
+//! layer errors decides its own mapping, in its own `LeafError` impl; the
+//! wrapper arms here delegate to those rather than re-deriving them.
 
-use std::error::Error as StdError;
+// The mapper below is the only place core's own failures become public.
+// A new variant must make that decision explicitly rather than inheriting
+// whatever the last arm happened to be.
+#![deny(clippy::wildcard_enum_match_arm)]
 
+use common::{LeafError, internal_todo};
 use surrealdb_types::{
-	AlreadyExistsError, AuthError, ConfigurationError, ConnectionError, Error as TypesError,
-	NotAllowedError, NotFoundError, QueryError, SerializationError, ToSql, ValidationError,
+	AuthError, ConnectionError, Error as TypesError, QueryError, ValidationError,
 };
 
 use crate::err::Error;
-use crate::iam::Error as IamErrorKind;
+use crate::iam::PolicyError;
 use crate::kvs::Error as KvsError;
 
+impl LeafError for Error {
+	/// Classifies a core database error.
+	///
+	/// Takes ownership so owned data (message strings, IAM details) can be moved
+	/// rather than cloned. The message and cause are supplied and attached by
+	/// [`LeafError::to_types_error`]; do not compute either here.
+	fn map_kind(self, message: String) -> TypesError {
+		into_types_error_inner(self, message)
+	}
+}
+
 /// Converts a core database error into the public wire-friendly error type.
-///
-/// Takes ownership so owned data (e.g. message strings, IAM details) can be moved instead of
-/// cloned. For `anyhow::Error`, use `downcast` to consume and recover the core `Error`:
-/// `e.downcast::<Error>().map(into_types_error).unwrap_or_else(|e|
-/// TypesError::internal(e.to_string()))`.
 pub fn into_types_error(error: Error) -> TypesError {
+	error.to_types_error()
+}
+
+fn into_types_error_inner(error: Error, message: String) -> TypesError {
 	use Error::*;
-	let message = error.to_string();
-	let source = error.source().map(|s| TypesError::internal(s.to_string()));
-	let mapped = match error {
-		// Auth
-		ExpiredSession => TypesError::not_allowed(message, AuthError::SessionExpired),
-		ExpiredToken => TypesError::not_allowed(message, AuthError::TokenExpired),
-		InvalidAuth => TypesError::not_allowed(message, AuthError::InvalidAuth),
-		UnexpectedAuth => TypesError::not_allowed(message, AuthError::UnexpectedAuth),
-		MissingUserOrPass => TypesError::not_allowed(message, AuthError::MissingUserOrPass),
-		NoSigninTarget => TypesError::not_allowed(message, AuthError::NoSigninTarget),
-		InvalidPass => TypesError::not_allowed(message, AuthError::InvalidPass),
-		TokenMakingFailed => TypesError::not_allowed(message, AuthError::TokenMakingFailed),
+	match error {
+		// Delegate, never `to_types_error`: the framing is applied once, above.
+		// Calling inward would frame twice and overwrite the cause.
+		Engine(error) => error.map_kind(message),
+		Exec(error) => error.map_kind(message),
+		ApiError(error) => error.map_kind(message),
+		InvalidPath(_) => internal_todo(message),
+
+		// Authorisation
 		IamError(iam_err) => match iam_err {
-			IamErrorKind::InvalidRole(name) => TypesError::not_allowed(
+			PolicyError::InvalidRole(name) => TypesError::not_allowed(
 				message,
 				AuthError::InvalidRole {
 					name,
 				},
 			),
-			IamErrorKind::NotAllowed {
+			PolicyError::NotAllowed {
 				actor,
 				action,
 				resource,
@@ -54,250 +66,12 @@ pub fn into_types_error(error: Error) -> TypesError {
 				},
 			),
 		},
-		InvalidSignup => TypesError::not_allowed(message, AuthError::InvalidSignup),
 
-		// Validation
-		NsEmpty => TypesError::validation(message, ValidationError::NamespaceEmpty),
-		DbEmpty => TypesError::validation(message, ValidationError::DatabaseEmpty),
-		InvalidQuery(_) => TypesError::validation(message, None),
-		InvalidParam {
-			name,
-		} => TypesError::validation(
-			message,
-			ValidationError::InvalidParameter {
-				name,
-			},
-		),
-		InvalidContent {
-			value,
-		} => TypesError::validation(
-			message,
-			ValidationError::InvalidContent {
-				value: value.to_sql(),
-			},
-		),
-		InvalidMerge {
-			value,
-		} => TypesError::validation(
-			message,
-			ValidationError::InvalidMerge {
-				value: value.to_sql(),
-			},
-		),
-		InvalidPatch(_) => TypesError::validation(message, None),
-		Coerce(_) => TypesError::validation(message, None),
-		Cast(_) => TypesError::validation(message, None),
-		TryAdd(..) | TrySub(..) | TryMul(..) | TryDiv(..) | TryRem(..) | TryPow(..) | TryNeg(_)
-		| TryExtend(_) => TypesError::validation(message, None),
-		TryFrom(..) => TypesError::validation(message, None),
-		DuplicatedMatchRef {
-			..
-		} => TypesError::validation(message, None),
-		AccessUnsupportedAlgorithm => TypesError::validation(message, None),
-
-		// Not allowed (method, scripting, function, net target)
-		ScriptingNotAllowed => TypesError::not_allowed(message, NotAllowedError::Scripting),
-		FunctionNotAllowed(name) => TypesError::not_allowed(
-			message,
-			NotAllowedError::Function {
-				name,
-			},
-		),
-		NetTargetNotAllowed(name) => TypesError::not_allowed(
-			message,
-			NotAllowedError::Target {
-				name,
-			},
-		),
-
-		// Configuration
-		RealtimeDisabled => {
-			TypesError::configuration(message, ConfigurationError::LiveQueryNotSupported)
-		}
-
-		// Query
-		QueryTimedout(duration) => TypesError::query(
-			message,
-			QueryError::TimedOut {
-				duration: duration.0,
-			},
-		),
-		TransactionTimedout(duration) => TypesError::query(
-			message,
-			QueryError::TimedOut {
-				duration: duration.0,
-			},
-		),
-		QueryCancelled => TypesError::query(message, QueryError::Cancelled),
-		QueryNotExecuted {
-			message,
-		} => TypesError::query(message, QueryError::NotExecuted),
-		// An expected, caller-actionable resource limit (the statement's
-		// write fan-out crossed `transaction_max_write_keys`), not an
-		// internal fault. Deliberately carries no structured `QueryError`
-		// discriminator: that is a public-types addition, deferred until
-		// SDKs need machine-readable detection — callers today match on
-		// the message text.
-		TransactionWriteKeysExceeded {
-			..
-		} => TypesError::query(message, None),
-		AccessRecordSignupQueryFailed | AccessRecordSigninQueryFailed => {
-			TypesError::query(message, None)
-		}
-		AccessRecordNoSignup | AccessRecordNoSignin => TypesError::not_allowed(message, None),
-
-		// Serialization
-		Unencodable => TypesError::serialization(message, None),
-		Storekey(_) => TypesError::serialization(message, None),
-		Revision(_) => TypesError::serialization(message, None),
-		Utf8Error(_) => TypesError::serialization(message, None),
-		Serialization(..) => TypesError::serialization(message, SerializationError::Serialization),
-
-		// Not found
-		NsNotFound {
-			name,
-		} => TypesError::not_found(
-			message,
-			NotFoundError::Namespace {
-				name,
-			},
-		),
-		DbNotFound {
-			name,
-		} => TypesError::not_found(
-			message,
-			NotFoundError::Database {
-				name,
-			},
-		),
-		TbNotFound {
-			name,
-		} => TypesError::not_found(
-			message,
-			NotFoundError::Table {
-				name: name.into_string(),
-			},
-		),
-		IdNotFound {
-			rid,
-		} => TypesError::not_found(
-			message,
-			NotFoundError::Record {
-				id: rid,
-			},
-		),
-
-		// Already exists
-		DbAlreadyExists {
-			name,
-		} => TypesError::already_exists(
-			message,
-			AlreadyExistsError::Database {
-				name,
-			},
-		),
-		NsAlreadyExists {
-			name,
-		} => TypesError::already_exists(
-			message,
-			AlreadyExistsError::Namespace {
-				name,
-			},
-		),
-		TbAlreadyExists {
-			name,
-		} => TypesError::already_exists(
-			message,
-			AlreadyExistsError::Table {
-				name,
-			},
-		),
-		RecordExists {
-			record,
-		} => TypesError::already_exists(
-			message,
-			AlreadyExistsError::Record {
-				id: record.to_sql(),
-			},
-		),
-		ClAlreadyExists {
-			..
-		} => TypesError::internal(message),
-		ApAlreadyExists {
-			..
-		} => TypesError::internal(message),
-		AzAlreadyExists {
-			..
-		} => TypesError::internal(message),
-		BuAlreadyExists {
-			..
-		} => TypesError::internal(message),
-		EvAlreadyExists {
-			..
-		}
-		| FdAlreadyExists {
-			..
-		}
-		| FcAlreadyExists {
-			..
-		}
-		| MdAlreadyExists {
-			..
-		}
-		| IxAlreadyExists {
-			..
-		}
-		| MlAlreadyExists {
-			..
-		}
-		| PaAlreadyExists {
-			..
-		}
-		| CgAlreadyExists {
-			..
-		}
-		| SeqAlreadyExists {
-			..
-		}
-		| NtAlreadyExists {
-			..
-		}
-		| DtAlreadyExists {
-			..
-		}
-		| UserRootAlreadyExists {
-			..
-		}
-		| UserNsAlreadyExists {
-			..
-		}
-		| UserDbAlreadyExists {
-			..
-		}
-		| AccessRootAlreadyExists {
-			..
-		}
-		| AccessNsAlreadyExists {
-			..
-		}
-		| AccessDbAlreadyExists {
-			..
-		}
-		| IndexAlreadyBuilding {
-			..
-		}
-		| IndexingBuildingCancelled {
-			..
-		} => TypesError::internal(message),
-
-		// Thrown
-		Thrown(..) => TypesError::thrown(message),
-
-		// Connection/transport (remote request failure)
+		// Outbound HTTP: a failed request is a connection failure the caller can
+		// retry, whereas a URL that will not parse is the caller's own input and
+		// no retry helps.
 		Http(..) => TypesError::connection(message, ConnectionError::ConnectionFailed),
-
-		// Not found (no record returned)
-		NoRecordFound => TypesError::not_found(message, None),
+		InvalidUrl(..) => internal_todo(message),
 
 		// KVS: preserve type information for wire and client retry/UX
 		Kvs(kvs_err) => match kvs_err {
@@ -334,29 +108,5 @@ pub fn into_types_error(error: Error) -> TypesError {
 			| KvsError::Internal(_)
 			| KvsError::CompactionNotSupported => TypesError::internal(message),
 		},
-
-		// Internal and everything else
-		Internal(..) => TypesError::internal(message),
-		Unimplemented(..) => TypesError::internal(message),
-		Io(..) => TypesError::internal(message),
-		Channel(..) => TypesError::internal(message),
-		CorruptedIndex(_) => TypesError::internal(message),
-		NoIndexFoundForMatch {
-			..
-		} => TypesError::internal(message),
-		AnalyzerError(..) => TypesError::internal(message),
-		HighlightError(..) => TypesError::internal(message),
-		FstError(_) => TypesError::internal(message),
-		ObsError(_) => TypesError::internal(message),
-		TimestampOverflow(..) => TypesError::internal(message),
-		ApiError(error) => error.into_types_error(),
-
-		_ => TypesError::internal(message),
-	};
-
-	if let Some(cause) = source {
-		mapped.with_cause(cause)
-	} else {
-		mapped
 	}
 }

@@ -379,7 +379,7 @@ impl PlanBuilder {
 	) -> Option<usize> {
 		let mut covered = 0;
 		for (col, vals) in columns.iter().enumerate() {
-			if index_reference.cols.get(col).map(|i| i.contains(&Part::All)).unwrap_or(false) {
+			if index_reference.cols.get(col).map(|s| s.0.contains(&Part::All)).unwrap_or(false) {
 				return None;
 			}
 			if col < prefix_len {
@@ -413,7 +413,7 @@ impl PlanBuilder {
 	fn scan_exactness(exp: &Expr, io: &IndexOption) -> (bool, bool) {
 		// An index column targeting array elements stores one entry per element
 		let part_all =
-			io.index_reference().cols.first().map(|i| i.contains(&Part::All)).unwrap_or(false);
+			io.index_reference().cols.first().map(|s| s.0.contains(&Part::All)).unwrap_or(false);
 		let exp_op = if let Expr::Binary {
 			op,
 			..
@@ -460,7 +460,7 @@ impl PlanBuilder {
 	/// column does not target array elements (which would return one entry
 	/// per matching element).
 	fn range_scan_exact(ixr: &IndexReference, rq: &UnionRangeQueryBuilder) -> bool {
-		if ixr.cols.first().map(|i| i.contains(&Part::All)).unwrap_or(false) {
+		if ixr.cols.first().map(|s| s.0.contains(&Part::All)).unwrap_or(false) {
 			return false;
 		}
 		let bound_ok = |b: &Bound<Arc<Value>>| match b {
@@ -697,7 +697,7 @@ impl IndexOption {
 			IndexOperator::Count => {
 				e.insert("operator", Value::from("Count"));
 				if let Index::Count(Some(c)) = &self.index_reference.index {
-					e.insert("where", Value::from(c.to_sql()));
+					e.insert("where", Value::from(c.0.clone()));
 				}
 			}
 		};

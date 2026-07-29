@@ -46,7 +46,7 @@ impl KVKey for Dp<'_> {
 
 	fn encode_buffer(&self, buffer: &mut Vec<u8>) -> anyhow::Result<()> {
 		storekey::encode_format::<IndexFormat, _, _>(buffer, self)
-			.map_err(|_| crate::err::Error::Unencodable)?;
+			.map_err(|_| crate::key::Error::Unencodable)?;
 		Ok(())
 	}
 
@@ -56,7 +56,7 @@ impl KVKey for Dp<'_> {
 impl<'a> KVKeyDecode<'a> for Dp<'a> {
 	fn decode_key(bytes: &'a [u8]) -> anyhow::Result<Self> {
 		Ok(storekey::decode_borrow_format::<IndexFormat, _>(bytes).map_err(|_| {
-			crate::err::Error::Corrupted("Table pending doc-ID reclaim key cannot be decoded")
+			crate::key::Error::Corrupted("Table pending doc-ID reclaim key cannot be decoded")
 		})?)
 	}
 }

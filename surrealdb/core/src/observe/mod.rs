@@ -1,48 +1,33 @@
-//! Execution-time observability hooks for SurrealDB.
+//! Facade over the leaf [`surrealdb_observe`] crate, plus the core-side residue
+//! that cannot live in the leaf.
 //!
-//! This module defines the [`ExecutionObserver`] trait and the event types it
-//! receives, plus the [`ObservabilityProvider`] composer extension used by the
-//! server to supply an observer at startup.
+//! The observability event types, the [`ExecutionObserver`] trait, the fan-out
+//! dispatcher, the error-class constants, and the provider trait all live in
+//! `surrealdb-observe` and are re-exported here so existing `crate::observe::*`
+//! (core) and `surrealdb_core::observe::*` (server) paths keep resolving
+//! unchanged.
 //!
-//! # Data safety
+//! What stays in core:
 //!
-//! Every event type is split into two sub-structs: `*Safe` and `*Ctx`.
-//!
-//! - `*Safe` fields have bounded cardinality and never contain customer data, identifiers, SQL
-//!   text, or values derived from user input. They are safe to use as attributes on metrics exposed
-//!   to unauthenticated consumers.
-//! - `*Ctx` fields may contain namespace/database/user identifiers or SQL text. They MUST NOT be
-//!   emitted to any unauthenticated sink. Enterprise audit destinations may consume them.
-//!
-//! This split is the primary defence-in-depth mechanism for the public
-//! `/metrics` endpoint.
+//! - [`process`]: the process resource snapshot reads `crate::sys`, a private core module.
+//! - The `impl`s of the observability provider traits for `CommunityComposer` (a core type, so the
+//!   orphan rule pins them here). The trait surface itself is re-exported from the leaf.
+//! - Session/expr/error glue that has to read core engine types lives next to those types
+//!   (statement classification and `anyhow` error classification in `crate::dbs::executor`;
+//!   event-context construction in `crate::dbs` as `From<&Session>`).
 
-pub mod error_class;
-pub mod events;
-pub mod fan_out;
-pub mod observer;
 pub mod process;
-pub mod provider;
 
-pub use error_class::{
-	AUTH as ERROR_AUTH, CLIENT as ERROR_CLIENT, CTX_CANCELLED as ERROR_CTX_CANCELLED,
-	CTX_TIMEOUT as ERROR_CTX_TIMEOUT, INTERNAL as ERROR_INTERNAL, PARSE as ERROR_PARSE,
-	PERMISSION as ERROR_PERMISSION, STORAGE as ERROR_STORAGE, TIMEOUT as ERROR_TIMEOUT,
-	TXN_CONFLICT as ERROR_TXN_CONFLICT, TXN_CREATE_FAILED as ERROR_TXN_CREATE_FAILED,
-	TXN_TIMEOUT as ERROR_TXN_TIMEOUT,
-};
-pub use events::{
-	AuthAction, AuthEvent, AuthEventCtx, AuthEventSafe, AuthScope, BucketOp, BucketOperationEvent,
-	BucketOperationEventCtx, BucketOperationEventSafe, HttpMethod, HttpRequestEvent,
-	HttpRequestEventCtx, HttpRequestEventSafe, HttpRequestStartEvent, HttpRequestStartEventSafe,
-	HttpVersion, NetworkBytesEvent, NetworkBytesEventCtx, NetworkBytesEventSafe, NetworkDirection,
-	Outcome, QueryCounters, QueryEvent, QueryEventCtx, QueryEventSafe, RpcEvent, RpcEventCtx,
-	RpcEventSafe, SessionAction, SessionEvent, SessionEventCtx, SessionEventSafe, SessionProtocol,
-	StatementEvent, StatementEventCtx, StatementEventSafe, StatementType, TenantIdentity,
-	TransactionEvent, TransactionEventCtx, TransactionEventSafe, TransactionMetrics,
-	TransactionMetricsSnapshot,
-};
-pub use fan_out::FanOutObserver;
-pub use observer::{ExecutionObserver, NoopObserver};
+// Core-side provider impls for `CommunityComposer`. No public items — the trait
+// surface is re-exported from the leaf below (as `provider`).
+mod provider_impls;
+
 pub use process::{ProcessSnapshot, process_snapshot, refresh_process_snapshot};
-pub use provider::ObservabilityProvider;
+pub use surrealdb_observe::*;
+
+/// Re-exported at its original path. The function had to move into `dbs` to
+/// keep the leaf crate free of `crate::kvs`, but it was the one item of this
+/// module's public surface that the move would otherwise have removed, and an
+/// observer outside this repo has no way to rebuild it: the sibling
+/// `classify_types_error` needs an already-converted `surrealdb_types::Error`.
+pub use crate::dbs::executor::classify_anyhow_error;

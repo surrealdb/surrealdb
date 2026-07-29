@@ -9,7 +9,7 @@ use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 use crate::ctx::FrozenContext;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::{CursorDoc, NsDbCtx};
-use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::{Data, Expr, Literal, Output};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::Value;
@@ -80,21 +80,15 @@ impl CreateStatement {
 			iterator
 				.prepare(stk, prepare_ctx.as_ref(), opt, doc, &mut planner, &stm_ctx, &doc_ctx, w)
 				.await
-				.map_err(|e| {
-					// double match to avoid allocation
-					if matches!(e.downcast_ref(), Some(Error::InvalidStatementTarget { .. })) {
-						let Ok(Error::InvalidStatementTarget {
-							value,
-						}) = e.downcast()
-						else {
-							unreachable!()
-						};
-						anyhow::Error::new(Error::CreateStatement {
-							value,
-						})
-					} else {
-						e
-					}
+				// `prepare` rejects a target generically; name the statement that
+				// rejected it.
+				.map_err(|e| match crate::err::exec_error(&e) {
+					Some(ExecError::InvalidStatementTarget {
+						value,
+					}) => anyhow::Error::new(ExecError::CreateStatement {
+						value: value.clone(),
+					}),
+					_ => e,
 				})?;
 		}
 
@@ -117,7 +111,7 @@ impl CreateStatement {
 					// compatibility with clients that expect a single value.
 					0 => Ok(Value::None),
 					// There were no results
-					_ => Err(anyhow::Error::new(Error::SingleOnlyOutput)),
+					_ => Err(anyhow::Error::new(ExecError::SingleOnlyOutput)),
 				},
 				// This is standard query result
 				v => Ok(v),

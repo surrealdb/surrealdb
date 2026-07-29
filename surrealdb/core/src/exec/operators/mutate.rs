@@ -369,7 +369,7 @@ async fn apply_delete(
 		&& matches!(detach, DetachMode::NoDetach)
 		&& has_connected_edges(rid, ns, db, frozen).await?
 	{
-		return Err(ControlFlow::Err(anyhow::anyhow!(crate::err::Error::InvalidStatement(
+		return Err(ControlFlow::Err(anyhow::anyhow!(crate::exec::Error::InvalidStatement(
 			format!(
 				"Cannot DELETE `{}` because it still has connected edges; use `DETACH DELETE` to \
 				 remove the edges as well",
@@ -605,7 +605,7 @@ async fn insert_row(
 /// The error for an `INSERT` edge whose endpoint binding does not resolve to a
 /// record (e.g. a referenced variable that is `NULL`).
 fn endpoint_error(name: &str) -> ControlFlow {
-	ControlFlow::Err(anyhow::anyhow!(crate::err::Error::InvalidStatement(format!(
+	ControlFlow::Err(anyhow::anyhow!(crate::exec::Error::InvalidStatement(format!(
 		"INSERT edge endpoint `{name}` did not resolve to a record"
 	))))
 }

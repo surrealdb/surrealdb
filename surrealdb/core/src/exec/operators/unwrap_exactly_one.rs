@@ -1,19 +1,18 @@
 //! UnwrapExactlyOne operator - implements SELECT ... FROM ONLY semantics.
 //!
 //! This operator enforces that exactly one result is produced:
-//! - 0 results → returns NONE (if `none_on_empty`) or `Error::SingleOnlyOutput`
+//! - 0 results → returns NONE (if `none_on_empty`) or `ExecError::SingleOnlyOutput`
 //! - 1 result → returns that value (unwrapped from array)
-//! - >1 results → returns `Error::SingleOnlyOutput`
+//! - >1 results → returns `ExecError::SingleOnlyOutput`
 
 use std::sync::Arc;
 
 use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 
-use crate::err::Error;
 use crate::exec::{
-	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
+	AccessMode, CardinalityHint, ContextLevel, Error as ExecError, ExecOperator, ExecutionContext,
+	FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
 use crate::expr::ControlFlow;
 use crate::val::Value;
@@ -23,9 +22,10 @@ use crate::val::Value;
 /// This operator implements the `ONLY` keyword in `SELECT ... FROM ONLY ...`.
 /// It collects all values from the input stream and:
 /// - Returns NONE if no results and `none_on_empty` is true (table scans)
-/// - Returns `Error::SingleOnlyOutput` if no results and `none_on_empty` is false (array sources)
+/// - Returns `ExecError::SingleOnlyOutput` if no results and `none_on_empty` is false (array
+///   sources)
 /// - Returns the single value (unwrapped) if exactly one result
-/// - Returns `Error::SingleOnlyOutput` if more than one result
+/// - Returns `ExecError::SingleOnlyOutput` if more than one result
 #[derive(Debug, Clone)]
 pub struct UnwrapExactlyOne {
 	pub(crate) input: Arc<dyn ExecOperator>,
@@ -98,7 +98,7 @@ impl ExecOperator for UnwrapExactlyOne {
 
 				// Early exit if we already have more than one value
 				if collected.len() > 1 {
-					Err(ControlFlow::Err(anyhow::anyhow!(Error::SingleOnlyOutput)))?;
+					Err(ControlFlow::Err(anyhow::anyhow!(ExecError::SingleOnlyOutput)))?;
 				}
 			}
 
@@ -114,7 +114,7 @@ impl ExecOperator for UnwrapExactlyOne {
 						.await;
 				} else {
 					// Array source with no elements → error
-					Err(ControlFlow::Err(anyhow::anyhow!(Error::SingleOnlyOutput)))?;
+					Err(ControlFlow::Err(anyhow::anyhow!(ExecError::SingleOnlyOutput)))?;
 				}
 			} else {
 				let result = collected.pop().expect("collected has exactly one element");

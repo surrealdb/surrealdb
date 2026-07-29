@@ -9,8 +9,7 @@ use crate::catalog::providers::{
 	ApiProvider, AuthorisationProvider, BucketProvider, DatabaseProvider, TableProvider,
 	UserProvider,
 };
-use crate::catalog::{DatabaseId, NamespaceId, Record, TableDefinition};
-use crate::err::Error;
+use crate::catalog::{DatabaseId, Error, NamespaceId, Record, TableDefinition};
 use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::define::{DefineAccessStatement, DefineUserStatement};
 use crate::expr::{Base, DefineAnalyzerStatement};
@@ -322,7 +321,7 @@ impl Transaction {
 		// Loop over all of the tables in order
 		for table in tables.iter() {
 			// Check if this table is included in the export config
-			if !cfg.tables.includes(&table.name) {
+			if !cfg.tables.includes(table.name.as_str()) {
 				continue;
 			}
 			// Export the table definition structure first
@@ -349,24 +348,23 @@ impl Transaction {
 		chn.send(bytes!("")).await?;
 		chn.send(bytes!(format!("{};", table.to_sql()))).await?;
 		chn.send(bytes!("")).await?;
+		let tb_name = table.name.clone();
 		// Export all table field definitions with OVERWRITE to ensure
 		// idempotent re-import (relation tables auto-generate in/out fields,
 		// and array types generate sub-field definitions that would conflict).
-		let fields = self.all_tb_fields(ns, db, &table.name, None).await?;
+		let fields = self.all_tb_fields(ns, db, &tb_name, None).await?;
 		for field in fields.iter() {
-			let mut stmt = field.to_sql_definition();
-			stmt.kind = crate::sql::statements::define::DefineKind::Overwrite;
-			chn.send(bytes!(format!("{};", stmt.to_sql()))).await?;
+			chn.send(bytes!(format!("{};", field.to_sql_overwrite()))).await?;
 		}
 		chn.send(bytes!("")).await?;
 		// Export all table index definitions for this table
-		let indexes = self.all_tb_indexes(ns, db, &table.name, None).await?;
+		let indexes = self.all_tb_indexes(ns, db, &tb_name, None).await?;
 		for index in indexes.iter() {
 			chn.send(bytes!(format!("{};", index.to_sql()))).await?;
 		}
 		chn.send(bytes!("")).await?;
 		// Export all table event definitions for this table
-		let events = self.all_tb_events(ns, db, &table.name, None).await?;
+		let events = self.all_tb_events(ns, db, &tb_name, None).await?;
 		for event in events.iter() {
 			chn.send(bytes!(format!("{};", event.to_sql()))).await?;
 		}
@@ -388,13 +386,14 @@ impl Transaction {
 		chn.send(bytes!("-- ------------------------------")).await?;
 		chn.send(bytes!("")).await?;
 
+		let tb_name = table.name.clone();
 		let mut next = Some(
 			crate::key::record::RecordKeyPrefix {
 				root: crate::key::database::all::DatabaseRoot {
 					ns,
 					db,
 				},
-				table: std::borrow::Cow::Borrowed(&table.name),
+				table: std::borrow::Cow::Borrowed(&tb_name),
 			}
 			.encode_range()?,
 		);

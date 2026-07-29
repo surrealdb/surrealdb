@@ -4,7 +4,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::err::EngineError;
 use crate::expr::{ControlFlow, Expr, FlowResult, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -40,7 +40,7 @@ impl IfelseStatement {
 	) -> FlowResult<Value> {
 		for (cond, then) in &self.exprs {
 			if let Some(d) = ctx.is_timedout().await? {
-				return Err(ControlFlow::from(anyhow::Error::new(Error::QueryTimedout(d.into()))));
+				return Err(ControlFlow::from(anyhow::Error::new(EngineError::QueryTimedout(d))));
 			}
 			let v = stk.run(|stk| cond.compute(stk, ctx, opt, doc)).await?;
 			if v.is_truthy() {

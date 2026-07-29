@@ -7,6 +7,7 @@ use std::time::Duration as StdDuration;
 
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
+use common::fmt::{EscapeIdent, QuoteStr};
 use geo::Point;
 use revision::revisioned;
 use rust_decimal::prelude::*;
@@ -15,16 +16,16 @@ use surrealdb_collections::VecMap;
 pub(crate) use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::err::Error;
 use crate::expr;
+use crate::expr::Error;
 use crate::expr::kind::GeometryKind;
 use crate::expr::statements::info::InfoStructure;
-use crate::fmt::QuoteStr;
-use crate::sql::expression::convert_public_value_to_internal;
+use crate::val::table_name_public::IntoPublicTable;
 
 pub(crate) mod array;
 pub(crate) mod bytes;
 pub(crate) mod closure;
+pub(crate) mod convert_public;
 pub(crate) mod datetime;
 pub(crate) mod duration;
 pub(crate) mod file;
@@ -36,24 +37,26 @@ pub(crate) mod range;
 pub(crate) mod record_id;
 pub(crate) mod regex;
 pub(crate) mod set;
-pub(crate) mod table;
+pub(crate) mod table_name_public;
 pub(crate) mod uuid;
 pub(crate) mod value;
+
+pub(crate) use surrealdb_strand::TableName;
 
 pub(crate) use self::array::Array;
 pub(crate) use self::bytes::Bytes;
 pub(crate) use self::closure::Closure;
+pub(crate) use self::convert_public::convert_public_value_to_internal;
 pub(crate) use self::datetime::Datetime;
 pub(crate) use self::duration::Duration;
 pub(crate) use self::file::File;
 pub(crate) use self::geometry::Geometry;
-pub(crate) use self::number::{DecimalExt, Number};
+pub(crate) use self::number::Number;
 pub(crate) use self::object::Object;
 pub(crate) use self::range::Range;
 pub(crate) use self::record_id::{RecordId, RecordIdKey, RecordIdKeyRange};
 pub(crate) use self::regex::Regex;
 pub(crate) use self::set::Set;
-pub(crate) use self::table::TableName;
 pub(crate) use self::uuid::Uuid;
 pub(crate) use self::value::{CastError, CoerceError};
 
@@ -620,7 +623,11 @@ impl ToSql for Value {
 			Value::Object(v) => v.fmt_sql(f, sql_fmt),
 			Value::Geometry(v) => v.fmt_sql(f, sql_fmt),
 			Value::Bytes(v) => v.fmt_sql(f, sql_fmt),
-			Value::Table(v) => v.fmt_sql(f, sql_fmt),
+			// Escaped explicitly rather than through the name's own `ToSql`: the
+			// engine's `TableName` deliberately has none, and it derefs to `str`,
+			// so a bare `fmt_sql` here would silently resolve to the unescaped
+			// string impl and emit a name that cannot be read back.
+			Value::Table(v) => EscapeIdent(v.as_str()).fmt_sql(f, sql_fmt),
 			Value::RecordId(v) => v.fmt_sql(f, sql_fmt),
 			Value::File(v) => v.fmt_sql(f, sql_fmt),
 			Value::Regex(v) => v.fmt_sql(f, sql_fmt),
@@ -1187,7 +1194,9 @@ pub(crate) fn convert_value_to_public_value(
 		crate::val::Value::File(value) => convert_file_to_public(value),
 		crate::val::Value::Range(value) => convert_range_to_public(*value),
 		crate::val::Value::Regex(value) => convert_regex_to_public(value),
-		crate::val::Value::Table(value) => Ok(surrealdb_types::Value::Table(value.into())),
+		crate::val::Value::Table(value) => {
+			Ok(surrealdb_types::Value::Table(value.into_public_table()))
+		}
 		crate::val::Value::Closure(_) => {
 			Err(anyhow::anyhow!("Closure values cannot be converted to public value"))
 		}
@@ -1284,7 +1293,7 @@ pub(crate) fn convert_object_to_public_map(
 fn convert_record_id_to_public(value: crate::val::RecordId) -> Result<surrealdb_types::Value> {
 	let key = convert_record_id_key_to_public(value.key)?;
 	Ok(surrealdb_types::Value::RecordId(surrealdb_types::RecordId {
-		table: value.table.into(),
+		table: value.table.into_public_table(),
 		key,
 	}))
 }
@@ -1348,6 +1357,21 @@ fn convert_range_to_public(value: crate::val::Range) -> Result<surrealdb_types::
 
 #[cfg(test)]
 mod tests {
+
+	/// A table name that collides with a keyword must render quoted, or the
+	/// output cannot be parsed back. `TableName` derefs to `str`, so the
+	/// rendering here cannot rely on method resolution finding an escaping
+	/// impl — this pins the escaping itself rather than which impl provides it.
+	#[test]
+	fn table_value_renders_escaped() {
+		use surrealdb_types::ToSql;
+
+		use crate::val::{TableName, Value};
+
+		assert_eq!(Value::Table(TableName::from("users")).to_sql(), "users");
+		assert_eq!(Value::Table(TableName::from("table")).to_sql(), "`table`");
+		assert_eq!(Value::Table(TableName::from("a b")).to_sql(), "`a b`");
+	}
 	use chrono::{TimeZone, Utc};
 	use geo::{MultiLineString, MultiPoint, MultiPolygon, line_string, point, polygon};
 	use rstest::rstest;

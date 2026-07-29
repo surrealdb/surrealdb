@@ -40,8 +40,8 @@ use crate::kvs::testing::{
 	maybe_inject_retryable_conflict,
 };
 use crate::kvs::{
-	INDEXING_BATCH_MAX_BYTES, INDEXING_BATCH_SIZE, INDEXING_PROBE_BATCH_SIZE, Transaction,
-	TransactionType, is_retryable_transaction_conflict, is_shutdown_error,
+	DatastoreError, INDEXING_BATCH_MAX_BYTES, INDEXING_BATCH_SIZE, INDEXING_PROBE_BATCH_SIZE,
+	Transaction, TransactionType, is_retryable_transaction_conflict, is_shutdown_error,
 };
 use crate::mem::ALLOC;
 use crate::val::{RecordId, RecordIdKey, TableName, Value};
@@ -57,7 +57,7 @@ pub(super) type SharedIndexKey = Arc<IndexKey>;
 /// expires, when the pressure has receded or the process was restarted with
 /// more memory — so it must not be recorded as a permanent build failure.
 fn is_memory_threshold_error(err: &anyhow::Error) -> bool {
-	matches!(err.downcast_ref::<Error>(), Some(Error::QueryBeyondMemoryThreshold))
+	matches!(err.downcast_ref::<DatastoreError>(), Some(DatastoreError::QueryBeyondMemoryThreshold))
 }
 
 /// Probe the initial-batch commit injection sites, so tests can fail the
@@ -185,7 +185,7 @@ impl IndexBuilder {
 			if let Some(existing) = indexes.get(&building.ix_key) {
 				ensure!(
 					existing.is_finished(),
-					Error::IndexAlreadyBuilding {
+					DatastoreError::IndexAlreadyBuilding {
 						name: building.ix.name.to_string(),
 					}
 				);
@@ -257,7 +257,7 @@ impl IndexBuilder {
 				return Err(Error::from(reason).into());
 			}
 			let Some(state) = building.read_durable_build_state().await? else {
-				return Err(Error::IndexingBuildingCancelled {
+				return Err(DatastoreError::IndexingBuildingCancelled {
 					reason: format!("Index {} build state no longer exists", building.ix.name),
 				}
 				.into());
@@ -265,7 +265,7 @@ impl IndexBuilder {
 			match state.phase {
 				IndexBuildPhase::Online => return Ok(()),
 				IndexBuildPhase::Error => {
-					return Err(Error::IndexingBuildingCancelled {
+					return Err(DatastoreError::IndexingBuildingCancelled {
 						reason: format!(
 							"{}. Run `REBUILD INDEX {} ON {}` to retry the build",
 							durable_index_error_reason(&building.ix, &state),
@@ -282,7 +282,7 @@ impl IndexBuilder {
 						let (s, r) = channel();
 						self.start_acquired_building(Arc::clone(&building), acquired, Some(s))
 							.await?;
-						return r.await.map_err(|_| Error::IndexingBuildingCancelled {
+						return r.await.map_err(|_| DatastoreError::IndexingBuildingCancelled {
 							reason: "Channel shutdown".to_string(),
 						})?;
 					}
@@ -308,7 +308,7 @@ impl IndexBuilder {
 	) -> Result<Option<Receiver<Result<()>>>> {
 		ix.expect_not_prepare_remove()?;
 		let (ns, db) = ctx.expect_ns_db_ids(&opt).await?;
-		let key = Arc::new(IndexKey::new(ns, db, &ix.table_name, ix.index_id));
+		let key = Arc::new(IndexKey::new(ns, db, &ix.table_name.clone(), ix.index_id));
 		let (rcv, sdr) = if blocking {
 			let (s, r) = channel();
 			(Some(r), Some(s))
@@ -318,7 +318,7 @@ impl IndexBuilder {
 		if let Some(existing) = self.indexes.read().await.get(&key) {
 			ensure!(
 				existing.is_finished(),
-				Error::IndexAlreadyBuilding {
+				DatastoreError::IndexAlreadyBuilding {
 					name: ix.name.to_string(),
 				}
 			);
@@ -359,7 +359,7 @@ impl IndexBuilder {
 		tb: TableId,
 		ix: Arc<IndexDefinition>,
 	) -> Result<bool> {
-		let key = Arc::new(IndexKey::new(ns, db, &ix.table_name, ix.index_id));
+		let key = Arc::new(IndexKey::new(ns, db, &ix.table_name.clone(), ix.index_id));
 		// Skip if a builder task for this index is already running locally.
 		if let Some(existing) = self.indexes.read().await.get(&key)
 			&& !existing.is_finished()
@@ -759,14 +759,14 @@ impl Building {
 			let state_key = self.ikb.new_bs_key();
 			let Some(current) = tx.get_key(&state_key, None).await? else {
 				tx.cancel().await?;
-				return Err(Error::CorruptedIndex(
+				return Err(DatastoreError::CorruptedIndex(
 					"Index build state is missing during state update",
 				)
 				.into());
 			};
 			if current.generation != generation || current.owner != Some(self.owner) {
 				tx.cancel().await?;
-				return Err(Error::IndexingBuildingCancelled {
+				return Err(DatastoreError::IndexingBuildingCancelled {
 					reason: format!("Index build ownership was lost for {}", self.ix.name),
 				}
 				.into());
@@ -898,13 +898,13 @@ impl Building {
 	{
 		let state_key = self.ikb.new_bs_key();
 		let Some(current) = tx.get_key(&state_key, None).await? else {
-			return Err(Error::CorruptedIndex(
+			return Err(DatastoreError::CorruptedIndex(
 				"Index build state is missing during build-state update",
 			)
 			.into());
 		};
 		if current.generation != generation || current.owner != Some(self.owner) {
-			return Err(Error::IndexingBuildingCancelled {
+			return Err(DatastoreError::IndexingBuildingCancelled {
 				reason: format!("Index build ownership was lost for {}", self.ix.name),
 			}
 			.into());
@@ -1016,7 +1016,7 @@ impl Building {
 			return Ok(());
 		};
 		if counter.is_some() && state.next_ticket != 0 {
-			return Err(Error::IndexingBuildingCancelled {
+			return Err(DatastoreError::IndexingBuildingCancelled {
 				reason: format!(
 					"Index {} was built while nodes of different versions allocated writer \
 					 tickets for build generation {generation}, so queued writes may have been \
@@ -1130,7 +1130,7 @@ impl Building {
 	) -> Result<()> {
 		let state_key = self.ikb.new_bs_key();
 		let Some(current) = tx.get_key(&state_key, None).await? else {
-			return Err(Error::CorruptedIndex(
+			return Err(DatastoreError::CorruptedIndex(
 				"Index build state is missing during ownership heartbeat",
 			)
 			.into());
@@ -1139,7 +1139,7 @@ impl Building {
 			|| current.owner != Some(self.owner)
 			|| !allowed.contains(&current.phase)
 		{
-			return Err(Error::IndexingBuildingCancelled {
+			return Err(DatastoreError::IndexingBuildingCancelled {
 				reason: format!("Index build ownership was lost for {}", self.ix.name),
 			}
 			.into());
@@ -1248,7 +1248,13 @@ impl Building {
 		// If the index is not found, we continue — the prepare_remove flag can only
 		// be set by REMOVE INDEX, which runs in a separate transaction.
 		if let Some(ix) = tx
-			.get_tb_index(self.ix_key.ns, self.ix_key.db, &self.ix.table_name, &self.ix.name, None)
+			.get_tb_index(
+				self.ix_key.ns,
+				self.ix_key.db,
+				&self.ix.table_name.clone(),
+				&self.ix.name,
+				None,
+			)
 			.await?
 		{
 			ix.expect_not_prepare_remove()?;
@@ -1917,7 +1923,6 @@ impl Building {
 				&ctx,
 				ctx.get_index_stores(),
 				&self.ikb,
-				&self.ix,
 				p,
 				plan,
 			)
@@ -2003,7 +2008,6 @@ impl Building {
 				&ctx,
 				ctx.get_index_stores(),
 				&self.ikb,
-				&self.ix,
 				p,
 				plan,
 			)
@@ -2050,7 +2054,7 @@ impl Building {
 			return Ok(());
 		}
 		if ALLOC.is_beyond_threshold() {
-			Err(anyhow::Error::new(Error::QueryBeyondMemoryThreshold))
+			Err(anyhow::Error::new(DatastoreError::QueryBeyondMemoryThreshold))
 		} else {
 			Ok(())
 		}

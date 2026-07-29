@@ -86,7 +86,7 @@ impl Document {
 	///
 	/// `doc_ctx` must be the mutating table context
 	/// ([`DocumentContext::NsDbTbMutCtx`]); it carries the table's
-	/// [`SubscriptionDefinition`](crate::catalog::SubscriptionDefinition)s that
+	/// [`StoredSubscriptionDefinition`](crate::catalog::StoredSubscriptionDefinition)s that
 	/// `process_table_lives` iterates. `ctx` must carry the (read) transaction
 	/// and the notification broker; `opt` only needs the namespace/database set,
 	/// because the per-subscription auth is applied inside the pipeline from each

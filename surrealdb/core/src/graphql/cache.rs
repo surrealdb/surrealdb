@@ -97,7 +97,7 @@ impl GraphQLSchemaCache {
 			.expect_db_config(db_def.namespace_id, db_def.database_id, "graphql")
 			.await
 			.map_err(|e| {
-				if matches!(e.downcast_ref(), Some(crate::err::Error::CgNotFound { .. })) {
+				if matches!(e.downcast_ref(), Some(crate::catalog::Error::CgNotFound { .. })) {
 					GraphqlError::NotConfigured
 				} else {
 					GraphqlError::DbError(e)
@@ -175,11 +175,11 @@ fn insert_bounded<V>(cache: &mut IndexMap<CacheKey, V>, key: CacheKey, value: V)
 /// Hash the catalog entries that influence GraphQL schema generation.
 ///
 /// Inputs hashed (must stay in sync with [`generate_schema`]):
-/// - Tables exposed by `graphql_config.tables`. Each `TableDefinition` already includes a
+/// - Tables exposed by `graphql_config.tables`. Each `StoredTableDefinition` already includes a
 ///   `cache_fields_ts` UUID that DEFINE/REMOVE FIELD bumps, so we don't need to fetch each table's
 ///   full field list — the timestamp is sufficient to invalidate the cache when any field changes.
 /// - Functions exposed by `graphql_config.functions` (and each
-///   [`crate::catalog::FunctionDefinition`]).
+///   [`crate::catalog::StoredFunctionDefinition`]).
 /// - All access definitions on the database (used for auth mutation generation).
 ///
 /// If a new piece of catalog state starts influencing schema generation,
@@ -193,18 +193,20 @@ async fn compute_schema_fingerprint(
 ) -> Result<u64> {
 	let mut hasher = std::collections::hash_map::DefaultHasher::new();
 
-	// Tables (post-config filtering). Hashing the `TableDefinition` itself
+	// Tables (post-config filtering). Hashing each compiled table definition
 	// covers `cache_fields_ts` (DEFINE/REMOVE FIELD), `graphql_alias`,
 	// `graphql_deprecated`, table_type, view, permissions, etc. — every
-	// catalog field that influences schema generation is part of the struct's
-	// `Hash` impl.
+	// catalog field that influences schema generation is part of the compiled
+	// struct's `Hash` impl.
 	let tbs = tx.all_tb(ns, db, None).await?;
 	let mut tables_to_hash: Vec<&crate::catalog::TableDefinition> = match &graphql_config.tables {
 		GraphQLTablesConfig::None => Vec::new(),
 		GraphQLTablesConfig::Auto => tbs.iter().collect(),
-		GraphQLTablesConfig::Include(inc) => tbs.iter().filter(|t| inc.contains(&t.name)).collect(),
+		GraphQLTablesConfig::Include(inc) => {
+			tbs.iter().filter(|t| inc.iter().any(|x| x.as_str() == t.name.as_str())).collect()
+		}
 		GraphQLTablesConfig::Exclude(exc) => {
-			tbs.iter().filter(|t| !exc.contains(&t.name)).collect()
+			tbs.iter().filter(|t| !exc.iter().any(|x| x.as_str() == t.name.as_str())).collect()
 		}
 	};
 	// Sort for stable hashing — `all_tb` already returns a deterministic order

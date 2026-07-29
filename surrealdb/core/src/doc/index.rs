@@ -18,7 +18,7 @@
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::catalog::{DatabaseDefinition, Index, IndexDefinition, TableDefinition};
+use crate::catalog::{DatabaseDefinition, IndexDefinition, TableDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::{Force, Options};
 use crate::doc::{CursorDoc, Document};
@@ -65,15 +65,16 @@ impl Document {
 			let o = Self::build_opt_values(stk, ctx, opt, ix, &self.initial).await?;
 			// Calculate new values
 			let n = Self::build_opt_values(stk, ctx, opt, ix, &self.current).await?;
-			// For COUNT indexes with a condition, evaluate against the full document
-			let count_cond_match = if let Index::Count(Some(cond)) = &ix.index {
+			// For COUNT indexes with a condition, evaluate against the full document.
+			let count_cond_match = if let Some(cond) = &ix.count_cond {
+				let expr = &cond.0;
 				let old_matches = stk
-					.run(|stk| cond.0.compute(stk, ctx, opt, Some(&self.initial)))
+					.run(|stk| expr.compute(stk, ctx, opt, Some(&self.initial)))
 					.await
 					.catch_return()?
 					.is_truthy();
 				let new_matches = stk
-					.run(|stk| cond.0.compute(stk, ctx, opt, Some(&self.current)))
+					.run(|stk| expr.compute(stk, ctx, opt, Some(&self.current)))
 					.await
 					.catch_return()?
 					.is_truthy();
@@ -223,8 +224,8 @@ impl Document {
 			return Ok(None);
 		}
 		let mut o = Vec::with_capacity(ix.cols.len());
-		for i in ix.cols.iter() {
-			let v = i.compute(stk, ctx, opt, Some(doc)).await.catch_return()?;
+		for idiom in ix.cols.iter() {
+			let v = idiom.compute(stk, ctx, opt, Some(doc)).await.catch_return()?;
 			o.push(v);
 		}
 		Ok(Some(o))

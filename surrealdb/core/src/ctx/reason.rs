@@ -1,6 +1,6 @@
 use std::{fmt, io};
 
-use crate::err::Error;
+use crate::err::{EngineError, Error};
 use crate::val::Duration;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -21,8 +21,8 @@ impl fmt::Display for Reason {
 impl From<Reason> for Error {
 	fn from(reason: Reason) -> Self {
 		match reason {
-			Reason::Timedout(d) => Error::QueryTimedout(d),
-			Reason::Canceled => Error::QueryCancelled,
+			Reason::Timedout(d) => EngineError::QueryTimedout(d.0).into(),
+			Reason::Canceled => EngineError::QueryCancelled.into(),
 		}
 	}
 }

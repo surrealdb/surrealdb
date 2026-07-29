@@ -8,20 +8,27 @@ use surrealdb_types::ToSql;
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::exe::try_join_all_buffered;
+use crate::exec::Error as ExecError;
 use crate::expr::field::Fields;
 use crate::expr::idiom::recursion::{Recursion, compute_idiom_recursion};
 use crate::expr::part::{FindRecursionPlan, Next, NextMethod, Part, Recurse, SplitByRepeatRecurse};
 use crate::expr::statements::select::SelectStatement;
-use crate::expr::{ControlFlow, Expr, FlowResult, FlowResultExt as _, Idiom, Literal, Lookup};
+use crate::expr::{
+	ControlFlow, Error as ExprError, Expr, FlowResult, FlowResultExt as _, Idiom, Literal, Lookup,
+};
 use crate::fnc::idiom;
 use crate::val::{Object, RecordIdKey, Value};
 
 macro_rules! fallback_function {
 	(if $first:expr => InvalidFunction($e:ident) then $second:expr) => {
 		match $first {
-			Err(e) if matches!(e.downcast_ref(), Some(Error::InvalidFunction { .. })) => {
+			Err(e)
+				if matches!(
+					$crate::err::exec_error(&e),
+					Some(ExecError::InvalidFunction { .. })
+				) =>
+			{
 				let $e = e;
 				$second
 			}
@@ -70,7 +77,7 @@ impl Value {
 	) -> FlowResult<Self> {
 		// Limit recursion depth.
 		if path.len() > ctx.config.max_computation_depth as usize {
-			return Err(ControlFlow::from(anyhow::Error::new(Error::ComputationDepthExceeded)));
+			return Err(ControlFlow::from(anyhow::Error::new(ExecError::ComputationDepthExceeded)));
 		}
 
 		let Some(first) = path.first() else {
@@ -103,7 +110,7 @@ impl Value {
 							match path.find_recursion_plan() {
 								Some(_) => {
 									return Err(ControlFlow::Err(anyhow::Error::new(
-										Error::RecursionInstructionPlanConflict,
+										ExecError::RecursionInstructionPlanConflict,
 									)));
 								}
 								_ => (path, None, after),
@@ -126,7 +133,7 @@ impl Value {
 				};
 
 				if min < 1 {
-					return Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidBound {
+					return Err(ControlFlow::Err(anyhow::Error::new(ExecError::InvalidBound {
 						found: min.to_string(),
 						expected: "at least 1".into(),
 					})));
@@ -135,7 +142,7 @@ impl Value {
 				if let Some(max) = max
 					&& max > ctx.config.idiom_recursion_limit
 				{
-					return Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidBound {
+					return Err(ControlFlow::Err(anyhow::Error::new(ExecError::InvalidBound {
 						found: max.to_string(),
 						expected: format!("{} at most", ctx.config.idiom_recursion_limit),
 					})));
@@ -167,7 +174,7 @@ impl Value {
 			// recursion part, it will find the repeat recurse part and handle
 			// it. If we find one in any unsupported scenario, we throw an error.
 			Part::RepeatRecurse => {
-				Err(ControlFlow::Err(anyhow::Error::new(Error::UnsupportedRepeatRecurse)))
+				Err(ControlFlow::Err(anyhow::Error::new(ExecError::UnsupportedRepeatRecurse)))
 			}
 			Part::Doc => {
 				// Try to obtain a Record ID from the document, otherwise we'll operate on NONE
@@ -400,7 +407,7 @@ impl Value {
 						Value::Range(r) => {
 							let v = r
 								.coerce_to_typed::<i64>()
-								.map_err(Error::from)
+								.map_err(ExprError::from)
 								.map_err(anyhow::Error::new)
 								.map_err(ControlFlow::Err)?
 								.slice(v.as_slice())
@@ -521,7 +528,7 @@ impl Value {
 							let values: Vec<_> = v.iter().cloned().collect();
 							let v = r
 								.coerce_to_typed::<i64>()
-								.map_err(Error::from)
+								.map_err(ExprError::from)
 								.map_err(anyhow::Error::new)
 								.map_err(ControlFlow::Err)?
 								.slice(values.as_slice())
@@ -615,7 +622,7 @@ impl Value {
 									}
 									Value::Array(_) => {
 										return Err(crate::expr::ControlFlow::Err(
-											anyhow::anyhow!(crate::err::Error::SingleOnlyOutput),
+											anyhow::anyhow!(crate::exec::Error::SingleOnlyOutput),
 										));
 									}
 									other => other,
@@ -874,7 +881,7 @@ mod tests {
 			.unwrap_err();
 
 		assert!(
-			matches!(err.downcast_ref(), Some(Error::ComputationDepthExceeded)),
+			matches!(crate::err::exec_error(&err), Some(ExecError::ComputationDepthExceeded)),
 			"expected computation depth exceeded, got {:?}",
 			err
 		);

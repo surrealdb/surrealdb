@@ -6,10 +6,9 @@ use super::config::api::ApiConfig;
 use super::{CursorDoc, DefineKind};
 use crate::api::path::Path;
 use crate::catalog::providers::ApiProvider;
-use crate::catalog::{ApiActionDefinition, ApiDefinition, ApiMethod};
+use crate::catalog::{ApiAction as CatalogApiAction, ApiDefinition, ApiMethod, Error};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
-use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, FlowResultExt as _, Value};
 use crate::iam::{Action, AuthLimit, ResourceKind};
@@ -82,7 +81,7 @@ impl DefineApiStatement {
 
 		let mut actions = Vec::new();
 		for action in self.actions.iter() {
-			actions.push(ApiActionDefinition {
+			actions.push(CatalogApiAction {
 				methods: action.methods.clone(),
 				action: action.action.clone(),
 				config: action.config.compute(stk, ctx, opt, doc).await?,

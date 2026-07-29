@@ -31,7 +31,7 @@ use crate::kvs::testing::{
 use crate::kvs::tx::{
 	CachedIndexBuildReservationKey, CachedIndexBuildReservationLookup, IndexBuildReservationRelease,
 };
-use crate::kvs::{Datastore, is_retryable_transaction_conflict};
+use crate::kvs::{Datastore, DatastoreError, is_retryable_transaction_conflict};
 use crate::val::{RecordId, RecordIdKey, TableName, Value};
 
 const REPEATED_RETRY_CONFLICTS: usize = 1000;
@@ -1685,19 +1685,20 @@ async fn count_index_duplicate_initial_build_does_not_overcount() -> Result<()> 
 			.get_tb(ns.namespace_id, db.database_id, &table_name, None)
 			.await?
 			.expect("table should exist");
-		let index = Arc::new(IndexDefinition {
+		let index = IndexDefinition {
 			index_id: IndexId(1),
 			name: "test".into(),
 			table_name: table_name.clone(),
 			cols: Vec::new(),
 			index: Index::Count(None),
+			count_cond: None,
 			comment: None,
 			prepare_remove: false,
 			format_version: 1,
-		});
-		tx.put_tb_index(ns.namespace_id, db.database_id, &table.name, &index).await?;
+		};
+		tx.put_tb_index(ns.namespace_id, db.database_id, &table_name, &index).await?;
 		tx.commit().await?;
-		(ns.namespace_id, db.database_id, table.table_id, index)
+		(ns.namespace_id, db.database_id, table.table_id, Arc::new(index))
 	};
 
 	let index_key = Arc::new(IndexKey::new(ns_id, db_id, &table_name, index.index_id));
@@ -3018,10 +3019,11 @@ async fn cached_index_build_reservation_lookup_errors_on_seq_overflow() -> Resul
 		.lookup_cached_index_build_reservation(&key)
 		.await
 		.expect_err("lookup at u32::MAX must surface an overflow error");
-	let downcast =
-		err.downcast_ref::<Error>().expect("error should be the typed IndexingBuildingCancelled");
+	let downcast = err
+		.downcast_ref::<DatastoreError>()
+		.expect("error should be the typed IndexingBuildingCancelled");
 	assert!(
-		matches!(downcast, Error::IndexingBuildingCancelled { .. }),
+		matches!(downcast, DatastoreError::IndexingBuildingCancelled { .. }),
 		"expected IndexingBuildingCancelled, got {downcast:?}"
 	);
 	assert!(

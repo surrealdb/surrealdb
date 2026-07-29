@@ -1,9 +1,10 @@
 use crate::err::Error;
+use crate::exec::Error as ExecError;
 
 impl From<js::CaughtError<'_>> for Error {
 	fn from(e: js::CaughtError) -> Error {
 		match e {
-			js::CaughtError::Exception(e) => Error::InvalidScript {
+			js::CaughtError::Exception(e) => ExecError::InvalidScript {
 				message: format!(
 					"An exception occurred: {}{}",
 					e.message().unwrap_or_default(),
@@ -13,12 +14,13 @@ impl From<js::CaughtError<'_>> for Error {
 					}
 				),
 			},
-			js::CaughtError::Error(js::Error::Unknown) => Error::InvalidScript {
+			js::CaughtError::Error(js::Error::Unknown) => ExecError::InvalidScript {
 				message: "An unknown error occurred".to_string(),
 			},
-			_ => Error::InvalidScript {
+			_ => ExecError::InvalidScript {
 				message: e.to_string(),
 			},
 		}
+		.into()
 	}
 }

@@ -9,13 +9,12 @@ use surrealdb_types::ToSql;
 use crate::catalog::{self, FieldDefinition};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Statement};
-use crate::doc::Document;
-use crate::err::Error;
-use crate::expr::FlowResultExt as _;
+use crate::doc::{Document, Error};
 use crate::expr::data::Data;
 use crate::expr::idiom::{Idiom, IdiomTrie, IdiomTrieContains};
 use crate::expr::kind::Kind;
 use crate::expr::statements::define::kind_contains_object;
+use crate::expr::{Expr, FlowResultExt as _};
 use crate::iam::{Action, AuthLimit};
 use crate::key::database::all::DatabaseRoot;
 use crate::val::value::every::ArrayBehaviour;
@@ -72,12 +71,13 @@ impl Document {
 
 			// Loop through all field definitions
 			for fd in self.doc_ctx.fd()?.iter() {
+				let field_kind = fd.field_kind.as_ref();
 				// Check if the field type is an any
-				let is_any = fd.field_kind.as_ref().is_some_and(Kind::is_any);
+				let is_any = field_kind.is_some_and(Kind::is_any);
 				// Check if the field type is a literal
-				let is_literal = fd.field_kind.as_ref().is_some_and(Kind::contains_literal);
+				let is_literal = field_kind.is_some_and(Kind::contains_literal);
 				// Check if the field type contains an object
-				let contains_object = fd.field_kind.as_ref().is_some_and(kind_contains_object);
+				let contains_object = field_kind.is_some_and(kind_contains_object);
 				// In SCHEMAFULL tables:
 				// - TYPE any: allows nested
 				// - TYPE literal: literal types allow nested
@@ -213,7 +213,7 @@ impl Document {
 		// Loop through all field statements
 		for fd in self.doc_ctx.fd()?.iter() {
 			// Limit auth
-			let opt = AuthLimit::try_from(&fd.auth_limit)?.limit_opt(opt);
+			let opt = opt.limited_by(&AuthLimit::try_from(&fd.auth_limit)?);
 			// Check if we should skip this field
 			let skipped = match skip {
 				// We are skipping a parent field
@@ -383,7 +383,7 @@ impl Document {
 			}
 
 			// Limit auth
-			let opt = AuthLimit::try_from(&fd.auth_limit)?.limit_opt(opt);
+			let opt = opt.limited_by(&AuthLimit::try_from(&fd.auth_limit)?);
 
 			// Loop over each field in the current document
 			for (k, val) in self.current.doc.as_ref().walk(&fd.name) {
@@ -433,7 +433,7 @@ impl Document {
 			}
 
 			// Limit auth
-			let opt = AuthLimit::try_from(&fd.auth_limit)?.limit_opt(opt);
+			let opt = opt.limited_by(&AuthLimit::try_from(&fd.auth_limit)?);
 
 			// Loop over each value in document
 			for (_, val) in self.current.doc.as_ref().walk(&fd.name) {
@@ -467,7 +467,7 @@ impl Document {
 struct FieldEditContext<'a> {
 	/// The mutable request context
 	context: Option<Context>,
-	/// The defined field statement
+	/// The compiled runtime form of the field definition
 	def: &'a FieldDefinition,
 	/// The current request stack
 	stk: &'a mut Stk,
@@ -528,8 +528,8 @@ impl FieldEditContext<'_> {
 			return Ok(val);
 		}
 		// Get the default value
-		let def = match &self.def.default {
-			catalog::DefineDefault::Set(v) | catalog::DefineDefault::Always(v) => Some(v),
+		let def: Option<&Expr> = match &self.def.default {
+			catalog::DefineDefault::Set(expr) | catalog::DefineDefault::Always(expr) => Some(expr),
 			_ => match &self.def.value {
 				// The VALUE clause doesn't
 				Some(v) if v.is_static() => Some(v),

@@ -10,6 +10,7 @@ members = [
     "surrealdb/collections",
     "surrealdb/common",
     "surrealdb/core",
+    "surrealdb/iam",
     "surrealdb/kvs",
     "surrealdb/kvs-any",
     "surrealdb/kvs-indxdb",
@@ -19,9 +20,13 @@ members = [
     "surrealdb/kvs-test",
     "surrealdb/kvs-tikv",
     "surrealdb/mcp",
+    "surrealdb/observe",
     "surrealdb/parser",
+    "surrealdb/rpc",
     "surrealdb/server",
+    "surrealdb/sql",
     "surrealdb/strand",
+    "surrealdb/syn",
     "surrealdb/token",
     "surrealdb/types",
     "surrealdb/types/derive",
@@ -58,7 +63,9 @@ categories = ["database-implementations", "data-structures", "embedded"]
 [workspace.dependencies]
 # SurrealDB crates
 surrealdb = { version = "3.3.0-nightly", path = "surrealdb", default-features = false }
+surrealdb-sql = { version = "3.3.0-nightly", path = "surrealdb/sql" }
 surrealdb-strand = { version = "3.3.0-nightly", path = "surrealdb/strand", default-features = false }
+surrealdb-syn = { version = "3.3.0-nightly", path = "surrealdb/syn" }
 surrealdb-core = { version = "3.3.0-nightly", path = "surrealdb/core", default-features = false }
 surrealdb-server = { version = "3.3.0-nightly", path = "surrealdb/server", default-features = false }
 surrealdb-mcp = { version = "3.3.0-nightly", path = "surrealdb/mcp", default-features = false }
@@ -69,6 +76,9 @@ token = { version = "3.3.0-nightly", package = "surrealdb-token", path = "surrea
 parser = { version = "3.3.0-nightly", package = "surrealdb-parser", path = "surrealdb/parser" }
 common = { version = "3.3.0-nightly", package = "surrealdb-common", path = "surrealdb/common" }
 surrealdb-cnf = { version = "3.3.0-nightly", path = "surrealdb/cnf" }
+surrealdb-rpc = { version = "3.3.0-nightly", path = "surrealdb/rpc" }
+surrealdb-iam = { version = "3.3.0-nightly", path = "surrealdb/iam" }
+surrealdb-observe = { version = "3.3.0-nightly", path = "surrealdb/observe" }
 surrealdb-kvs = { version = "3.3.0-nightly", path = "surrealdb/kvs" }
 surrealdb-kvs-any = { version = "3.3.0-nightly", path = "surrealdb/kvs-any", default-features = false }
 surrealdb-kvs-indxdb = { version = "3.3.0-nightly", path = "surrealdb/kvs-indxdb" }
@@ -156,6 +166,8 @@ half = "2.7.1"
 geo = { version = "0.32.0", default-features = false }
 geo-types = "0.7.19"
 getrandom = "0.3.4"
+# `geo` reaches `rand 0.8`, which needs getrandom 0.2 rather than the 0.3 above.
+getrandom_02 = { version = "0.2.17", package = "getrandom" }
 hashbrown = "0.16.1"
 hex = "0.4.3"
 hmac = "0.12"

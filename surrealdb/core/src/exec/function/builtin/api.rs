@@ -3,7 +3,7 @@
 use anyhow::Result;
 use reblessive::TreeStack;
 
-use crate::err::Error;
+use crate::err::EngineError;
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
 use crate::exec::physical_expr::EvalContext;
 use crate::expr::Kind;
@@ -46,7 +46,9 @@ impl ScalarFunction for ApiInvoke {
 		Box::pin(async move {
 			let frozen = ctx.exec_ctx.ctx();
 			let opt = ctx.exec_ctx.options().ok_or_else(|| {
-				anyhow::anyhow!(Error::Internal("No options available for api::invoke".to_string()))
+				anyhow::anyhow!(EngineError::Internal(
+					"No options available for api::invoke".to_string()
+				))
 			})?;
 
 			// Convert args using FromArgs (same conversion the legacy dispatch uses)
@@ -103,7 +105,7 @@ macro_rules! define_api_middleware_function {
 					use crate::doc::CursorDoc;
 					let frozen = ctx.exec_ctx.ctx();
 					let opt = ctx.exec_ctx.options().ok_or_else(|| {
-						anyhow::anyhow!(Error::Internal(format!(
+						anyhow::anyhow!(EngineError::Internal(format!(
 							"No options available for {}",
 							$func_name
 						)))

@@ -215,7 +215,7 @@ impl<'a> EvalContext<'a> {
 	/// Returns an error if the URL is not allowed by the capabilities.
 	#[cfg(feature = "http")]
 	pub async fn check_allowed_net(&self, url: &url::Url) -> anyhow::Result<()> {
-		use crate::dbs::capabilities::NetTarget;
+		use crate::dbs::capabilities::{Error as CapabilitiesError, NetTarget};
 		use crate::err::Error;
 
 		let capabilities = self.capabilities();
@@ -227,12 +227,12 @@ impl<'a> EvalContext<'a> {
 
 		// Check the domain name (if any) matches the allow list
 		if !capabilities.matches_any_allow_net(&target) {
-			return Err(Error::NetTargetNotAllowed(target.to_string()).into());
+			return Err(CapabilitiesError::NetTargetNotAllowed(target.to_string()).into());
 		}
 
 		// Check against the deny list by hostname
 		if capabilities.matches_any_deny_net(&target) {
-			return Err(Error::NetTargetNotAllowed(target.to_string()).into());
+			return Err(CapabilitiesError::NetTargetNotAllowed(target.to_string()).into());
 		}
 
 		// Resolve the domain name to IP addresses and check each against the deny list
@@ -243,7 +243,7 @@ impl<'a> EvalContext<'a> {
 
 		for t in &resolved {
 			if capabilities.matches_any_deny_net(t) {
-				return Err(Error::NetTargetNotAllowed(t.to_string()).into());
+				return Err(CapabilitiesError::NetTargetNotAllowed(t.to_string()).into());
 			}
 		}
 
@@ -254,10 +254,10 @@ impl<'a> EvalContext<'a> {
 	///
 	/// Returns an error if the function is not allowed.
 	pub fn check_allowed_function(&self, name: &str) -> anyhow::Result<()> {
-		use crate::err::Error;
+		use crate::dbs::capabilities::Error as CapabilitiesError;
 
 		if !self.capabilities().allows_function_name(name) {
-			return Err(Error::FunctionNotAllowed(name.to_string()).into());
+			return Err(CapabilitiesError::FunctionNotAllowed(name.to_string()).into());
 		}
 		Ok(())
 	}

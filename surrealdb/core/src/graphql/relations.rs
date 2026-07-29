@@ -7,8 +7,9 @@
 //! The relation fields themselves are constructed in [`super::tables`] where
 //! they have access to the query-building helpers.
 
+use surrealdb_strand::TableName;
+
 use crate::catalog::{TableDefinition, TableType};
-use crate::val::TableName;
 
 /// Information about a single relation table and which tables it connects.
 #[derive(Debug, Clone)]

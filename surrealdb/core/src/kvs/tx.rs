@@ -39,14 +39,15 @@ use crate::catalog::providers::{
 	DatabaseProvider, NamespaceProvider, NodeProvider, RootProvider, TableProvider, UserProvider,
 };
 use crate::catalog::{
-	self, ApiDefinition, ConfigDefinition, DatabaseDefinition, DatabaseId, DefaultConfig, IndexId,
-	NamespaceDefinition, NamespaceId, Record, TableDefinition, TableId,
+	self, DatabaseDefinition, DatabaseId, DefaultConfig, Error as CatalogError, FromStored,
+	IndexId, NamespaceDefinition, NamespaceId, Record, StoredConfigDefinition,
+	StoredTableDefinition, TableDefinition, TableId,
 };
 use crate::cf::Changefeed;
 use crate::ctx::Context;
 use crate::dbs::node::Node;
 use crate::doc::CursorRecord;
-use crate::err::Error;
+use crate::err::{EngineError, Error};
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::ScanDirection;
 use crate::key::database::all::DatabaseRoot;
@@ -70,7 +71,8 @@ use crate::kvs::testing::{
 	maybe_inject_retryable_conflict,
 };
 use crate::kvs::{
-	Direction, Error as KvsError, IntoBytes, Transactor, cache, is_retryable_transaction_conflict,
+	DatastoreError, Direction, Error as KvsError, IntoBytes, Transactor, cache,
+	is_retryable_transaction_conflict,
 };
 use crate::lq::writer::LiveEventBuffer;
 use crate::observe::{
@@ -187,6 +189,15 @@ pub struct Transaction {
 	/// build. These actions are intentionally discarded on cancel or commit
 	/// failure.
 	pending_index_builder_aborts: Mutex<Vec<PendingIndexBuilderAbort>>,
+	/// `KILLED` notifications owed to live subscribers whose subscription this
+	/// transaction removes.
+	///
+	/// Sending them before commit would tear a client's subscription down for a
+	/// removal that a rollback then undoes, leaving its `lq`/`lv` rows in storage
+	/// with nothing listening. Queued here so the notification and the deletion
+	/// succeed or fail together.
+	pending_live_query_kills:
+		Mutex<Vec<(Arc<dyn crate::dbs::MessageBroker>, crate::dbs::RoutedNotification)>>,
 	/// Index builds started before their catalog definition has committed.
 	///
 	/// `DEFINE INDEX` starts the builder while the schema transaction is still
@@ -711,6 +722,51 @@ impl ReferenceTargets {
 }
 
 impl Transaction {
+	/// Route a request path to the one `DEFINE API` that handles it, compiling
+	/// only that definition.
+	///
+	/// Routing is decidable on the stored form (see
+	/// [`catalog::StoredApiDefinition::route`]), so this reads the definitions
+	/// as stored, picks the most specific match, and compiles just that one.
+	/// Reading the compiled list instead would parse every handler body,
+	/// fallback and permission clause in the database on every request, of
+	/// which at most one is executed — and the caller opens a fresh
+	/// transaction per request, so the compiled cache is always cold.
+	///
+	/// Nothing stored escapes: the return is a compiled definition and the
+	/// matched path parameters.
+	pub(crate) async fn find_db_api(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		segments: &[&str],
+		method: catalog::ApiMethod,
+	) -> Result<Option<(catalog::ApiDefinition, crate::val::Object)>> {
+		let range = crate::key::database::ap::ApiPrefix {
+			ns,
+			db,
+		}
+		.encode_range()?;
+		let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+		let stored: Arc<[catalog::StoredApiDefinition]> =
+			util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+
+		let mut best: Option<(&catalog::StoredApiDefinition, crate::val::Object, u8)> = None;
+		for api in stored.iter() {
+			let Some((params, specificity)) = api.route(segments, method)? else {
+				continue;
+			};
+			if best.as_ref().is_none_or(|(_, _, s)| specificity > *s) {
+				best = Some((api, params, specificity));
+			}
+		}
+
+		let Some((api, params, _)) = best else {
+			return Ok(None);
+		};
+		Ok(Some((catalog::ApiDefinition::from_stored(api)?, params)))
+	}
+
 	/// Returns `true` if any `DEFINE FIELD ... REFERENCE` in this database could
 	/// target a record in `table` (so a record in `table` may have incoming
 	/// reference keys).
@@ -722,10 +778,9 @@ impl Transaction {
 	/// reference range scan entirely in that case — on a distributed backend
 	/// that scan is a read round-trip per deleted record.
 	///
-	/// The per-database answer is derived from the (transaction-cached) table
-	/// and field catalog and memoized for the transaction, so a batch delete
-	/// computes it at most once regardless of how many records or tables it
-	/// touches. It is conservative: any reference field whose kind is not
+	/// The per-database answer is memoized for the transaction, so a batch
+	/// delete computes it at most once regardless of how many records or tables
+	/// it touches. It is conservative: any reference field whose kind is not
 	/// provably unable to hold a record of `table` keeps the scan, so a record
 	/// that genuinely needs its references cleaned is never skipped.
 	pub(crate) async fn table_may_have_incoming_references(
@@ -751,15 +806,50 @@ impl Transaction {
 		}
 		let mut any = false;
 		let mut tables = HashSet::new();
-		for tb in self.all_tb(ns, db, None).await?.iter() {
-			for fd in self.all_tb_fields(ns, db, &tb.name, None).await?.iter() {
+		// Walk the stored catalog. Whether a field carries a `REFERENCE` is
+		// decidable on the stored form, and almost no field does, so only the
+		// `TYPE` text of an actual reference field is compiled.
+		//
+		// Compiling every definition instead would answer the same boolean while
+		// widening the blast radius: this runs from the DELETE purge gate for
+		// every record deleted, over every table in the database, and
+		// `FieldDefinition::from_stored` propagates on any clause it cannot
+		// parse. One unreadable `VALUE` on an unrelated table would then fail
+		// every delete in the database. Nothing leaves this function but a
+		// boolean and a set of names.
+		let tbs: Arc<[StoredTableDefinition]> = {
+			let range = crate::key::database::tb::TableKeyPrefix {
+				prefix: crate::key::database::all::DatabaseRoot {
+					ns,
+					db,
+				},
+			}
+			.encode_range()?;
+			let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+			util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?
+		};
+		for tb in tbs.iter() {
+			let tb_name = TableName::from(tb.name.clone());
+			let fds: Arc<[catalog::StoredFieldDefinition]> = {
+				let range = crate::key::table::fd::FdPrefix {
+					prefix: crate::key::database::all::DatabaseRoot {
+						ns,
+						db,
+					},
+					tb: Cow::Borrowed(&tb_name),
+				}
+				.encode_range()?;
+				let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+				util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?
+			};
+			for fd in fds.iter() {
 				// Only reference fields write reference keys.
 				if fd.reference.is_none() {
 					continue;
 				}
 				match &fd.field_kind {
 					Some(kind) => {
-						if kind.collect_reference_target_tables(&mut tables) {
+						if kind.compile()?.collect_reference_target_tables(&mut tables) {
 							any = true;
 						}
 					}
@@ -811,13 +901,14 @@ impl Transaction {
 			pending_index_build_reservations: Mutex::new(Vec::new()),
 			cached_index_build_reservations: Mutex::new(HashMap::new()),
 			pending_index_builder_aborts: Mutex::new(Vec::new()),
+			pending_live_query_kills: Mutex::new(Vec::new()),
 			pending_uncommitted_index_builds: Mutex::new(Vec::new()),
 		}
 	}
 
 	/// Arms the write-cardinality guard: once the transaction has buffered
 	/// `limit` individual key writes, every further write fails with
-	/// [`crate::err::Error::TransactionWriteKeysExceeded`], so a statement's
+	/// [`crate::kvs::DatastoreError::TransactionWriteKeysExceeded`], so a statement's
 	/// physical fan-out (cascaded deletes, index maintenance, graph-edge
 	/// cleanup) stops accumulating at the bound and the transaction rolls
 	/// back atomically. `None` leaves the transaction unbounded.
@@ -868,7 +959,7 @@ impl Transaction {
 			// partial statement, so a later explicit COMMIT must be refused
 			// (see the check at the top of [`Self::commit`]).
 			self.write_guard_poisoned.store(true, Ordering::Relaxed);
-			return Err(crate::err::Error::TransactionWriteKeysExceeded {
+			return Err(crate::kvs::DatastoreError::TransactionWriteKeysExceeded {
 				limit: limit.get(),
 			}
 			.into());
@@ -979,11 +1070,12 @@ impl Transaction {
 			return Ok(None);
 		};
 		let mutation_seq = entry.next_mutation_seq;
-		let next_seq =
-			mutation_seq.checked_add(1).ok_or_else(|| Error::IndexingBuildingCancelled {
+		let next_seq = mutation_seq.checked_add(1).ok_or_else(|| {
+			DatastoreError::IndexingBuildingCancelled {
 				reason: "Per-user-transaction index build mutation sequence overflowed u32::MAX"
 					.to_string(),
-			})?;
+			}
+		})?;
 		entry.next_mutation_seq = next_seq;
 		Ok(Some(CachedIndexBuildReservationLookup::Reused {
 			generation: entry.generation,
@@ -1149,6 +1241,7 @@ impl Transaction {
 		let cleanup_result = self.cleanup_uncommitted_index_builds().await;
 		let release_result = self.release_index_build_reservations().await;
 		self.discard_index_builder_aborts().await;
+		self.discard_live_query_kills().await;
 		self.emit_transaction_event(Outcome::from(&result));
 		result?;
 		cleanup_result?;
@@ -1176,7 +1269,7 @@ impl Transaction {
 					"transaction cleanup failed after a poisoned-guard commit was refused: {err}"
 				);
 			}
-			return Err(crate::err::Error::TransactionWriteKeysExceeded {
+			return Err(crate::kvs::DatastoreError::TransactionWriteKeysExceeded {
 				limit,
 			}
 			.into());
@@ -1207,6 +1300,11 @@ impl Transaction {
 			let cleanup_result = self.cleanup_uncommitted_index_builds().await;
 			let release_result = self.release_index_build_reservations().await;
 			self.discard_index_builder_aborts().await;
+			// The `lq` rows the queued KILLEDs were owed for are still there,
+			// so their clients must not be told otherwise. Nothing drains the
+			// queue on this path today, but leaving it full makes that a latent
+			// hazard rather than an impossibility.
+			self.discard_live_query_kills().await;
 			// Classify the commit failure so the surrealdb.transaction.* metric
 			// family can carry an `error_class` attribute. `e` is a concrete
 			// `kvs::Error` here -- the transactor's `commit` returns
@@ -1245,6 +1343,7 @@ impl Transaction {
 		}
 		self.discard_uncommitted_index_builds().await;
 		self.run_index_builder_aborts().await;
+		self.send_live_query_kills().await;
 		if self.trigger_async_event.load(Ordering::Relaxed) {
 			// Notify after commit so queued events are visible to workers.
 			self.async_event_trigger.notify_one();
@@ -1620,7 +1719,7 @@ impl Transaction {
 				ns,
 				db,
 			},
-			tb: Cow::Borrowed(tb),
+			tb: Cow::Borrowed(tb.as_str()),
 			ix: Cow::Borrowed(&ix_def.name),
 		};
 		self.del_key(&key).await?;
@@ -1630,7 +1729,7 @@ impl Transaction {
 				ns,
 				db,
 			},
-			tb: Cow::Borrowed(tb),
+			tb: Cow::Borrowed(tb.as_str()),
 			ix: ix_def.index_id,
 		};
 		self.del_key(&name_lookup_key).await?;
@@ -2072,7 +2171,7 @@ impl Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &TableName,
-		dt: &TableDefinition,
+		dt: &StoredTableDefinition,
 	) {
 		self.changefeed.get_or_init(Changefeed::new).buffer_table_change(ns, db, tb, dt)
 	}
@@ -2330,6 +2429,36 @@ impl Transaction {
 		}
 	}
 
+	/// Send a `KILLED` notification to a live subscriber once this transaction
+	/// commits. See [`Transaction::pending_live_query_kills`].
+	pub(crate) async fn register_live_query_kill_after_commit(
+		&self,
+		broker: Arc<dyn crate::dbs::MessageBroker>,
+		notification: crate::dbs::RoutedNotification,
+	) {
+		self.pending_live_query_kills.lock().await.push((broker, notification));
+	}
+
+	/// Deliver the queued `KILLED` notifications. Invoked after commit, so every
+	/// subscription they name is durably gone.
+	async fn send_live_query_kills(&self) {
+		let kills = {
+			let mut pending = self.pending_live_query_kills.lock().await;
+			std::mem::take(&mut *pending)
+		};
+		for (broker, notification) in kills {
+			broker.send(notification).await;
+		}
+	}
+
+	/// Drop the queued `KILLED` notifications without sending them.
+	///
+	/// Invoked on cancel and on commit failure: the subscriptions still exist,
+	/// so their clients must not be told otherwise.
+	async fn discard_live_query_kills(&self) {
+		self.pending_live_query_kills.lock().await.clear();
+	}
+
 	/// Discard queued in-process builder aborts without running them.
 	///
 	/// Invoked on the cancel path and on commit failure so a builder whose
@@ -2345,7 +2474,7 @@ impl Transaction {
 
 	/// Bump the given table's `cache_lives_ts`, committing the change with this
 	/// transaction. The live-query cache keys on this committed timestamp (see
-	/// [`crate::catalog::TableDefinition::cache_lives_ts`]), so callers that
+	/// [`crate::catalog::StoredTableDefinition::cache_lives_ts`]), so callers that
 	/// change the set of live queries on a table (LIVE / KILL) must call this in
 	/// the same transaction as the live-query row write. The table's committed
 	/// IDs are taken from `tb`, so no namespace/database name lookup is needed.
@@ -2366,19 +2495,18 @@ impl Transaction {
 				ns: updated.namespace_id,
 				db: updated.database_id,
 			},
-			tb: Cow::Borrowed(&updated.name),
+			tb: Cow::Borrowed(tb),
 		};
-		self.set_key(&key, &updated).await?;
-		// Keep the transaction-local by-id table cache consistent with the
-		// write, so a re-read within this transaction sees the bumped value.
-		let cached = std::sync::Arc::new(updated);
-		let lookup = cache::tx::Lookup::Tb(cached.namespace_id, cached.database_id, &cached.name);
-		self.cache.insert(
-			lookup,
-			cache::tx::Entry::Any(
-				std::sync::Arc::clone(&cached) as std::sync::Arc<dyn Any + Send + Sync>
-			),
-		);
+		self.set_key(&key, &updated.to_stored()).await?;
+		// Every cached view of this table now carries a stale `cache_lives_ts`:
+		// the by-id and by-name definitions, the database's table list, and the
+		// table's compiled live-query list. A re-read within this transaction
+		// serving any of them would key the datastore live-query cache on the
+		// pre-bump timestamp and fan notifications from the pre-bump subscriber
+		// list, so the whole transaction cache is dropped. A subset cannot be
+		// refreshed in any case: the by-name entry is keyed on the namespace and
+		// database *names*, which this call does not have.
+		self.clear_cache();
 		Ok(())
 	}
 
@@ -2448,10 +2576,11 @@ impl NodeProvider for Transaction {
 						let key = crate::key::root::nd::Nd {
 							nd: id,
 						};
-						let val =
-							self.get_key(&key, None).await?.ok_or_else(|| Error::NdNotFound {
+						let val = self.get_key(&key, None).await?.ok_or_else(|| {
+							CatalogError::NdNotFound {
 								uuid: id.to_string(),
-							})?;
+							}
+						})?;
 						let val = cache::tx::Entry::Any(Arc::new(val));
 						self.cache.insert(qey, val.clone());
 						val
@@ -2481,7 +2610,7 @@ impl RootProvider for Transaction {
 					let Some(val) = self.get_key(&key, None).await? else {
 						return Ok(None);
 					};
-					let ConfigDefinition::Default(val) = val else {
+					let StoredConfigDefinition::Default(val) = val else {
 						fail!("Expected a default config but found {val:?} instead");
 					};
 					let val = cache::tx::Entry::Any(Arc::new(val));
@@ -2498,7 +2627,7 @@ impl RootProvider for Transaction {
 	fn get_root_config<'a>(
 		&'a self,
 		cg: &'a str,
-	) -> BoxProviderFut<'a, Result<Option<Arc<ConfigDefinition>>>> {
+	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::ConfigDefinition>>>> {
 		Box::pin(
 			async move {
 				let qey = cache::tx::Lookup::Rcg(cg);
@@ -2509,7 +2638,7 @@ impl RootProvider for Transaction {
 							ty: Cow::Borrowed(cg),
 						};
 						if let Some(val) = self.get_key(&key, None).await? {
-							let val = Arc::new(val);
+							let val = Arc::new(catalog::ConfigDefinition::from_stored(&val)?);
 							let entr = cache::tx::Entry::Any(val.clone());
 							self.cache.insert(qey, entr);
 							Ok(Some(val))
@@ -2601,7 +2730,7 @@ impl NamespaceProvider for Transaction {
 		Box::pin(async move {
 			match self.get_ns_by_name(ns, None).await? {
 				Some(val) => Ok(val),
-				None => anyhow::bail!(Error::NsNotFound {
+				None => anyhow::bail!(CatalogError::NsNotFound {
 					name: ns.to_owned(),
 				}),
 			}
@@ -2763,7 +2892,7 @@ impl DatabaseProvider for Transaction {
 							match self.get_ns_by_name(ns, None).await? {
 								Some(ns_def) => ns_def,
 								None => {
-									return Err(Error::NsNotFound {
+									return Err(CatalogError::NsNotFound {
 										name: ns.to_owned(),
 									}
 									.into());
@@ -2929,7 +3058,9 @@ impl DatabaseProvider for Transaction {
 					}
 					.encode_range()?;
 					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
-					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
+					let stored: Arc<[catalog::StoredFunctionDefinition]> =
+						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+					return catalog::from_stored_all(&stored);
 				}
 				let qey = cache::tx::Lookup::Fcs(ns, db);
 				match self.cache.get(&qey) {
@@ -2943,8 +3074,9 @@ impl DatabaseProvider for Transaction {
 						}
 						.encode_range()?;
 						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
-						let val =
+						let stored: Arc<[catalog::StoredFunctionDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+						let val = catalog::from_stored_all(&stored)?;
 						let entry = cache::tx::Entry::Fcs(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -2973,7 +3105,9 @@ impl DatabaseProvider for Transaction {
 					}
 					.encode_range()?;
 					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
-					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
+					let stored: Arc<[catalog::StoredModuleDefinition]> =
+						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+					return catalog::from_stored_all(&stored);
 				}
 				let qey = cache::tx::Lookup::Mds(ns, db);
 				match self.cache.get(&qey) {
@@ -2987,8 +3121,9 @@ impl DatabaseProvider for Transaction {
 						}
 						.encode_range()?;
 						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
-						let val =
+						let stored: Arc<[catalog::StoredModuleDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+						let val = catalog::from_stored_all(&stored)?;
 						let entry = cache::tx::Entry::Mds(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -3017,7 +3152,9 @@ impl DatabaseProvider for Transaction {
 					}
 					.encode_range()?;
 					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
-					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
+					let stored: Arc<[catalog::StoredParamDefinition]> =
+						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+					return catalog::from_stored_all(&stored);
 				}
 				let qey = cache::tx::Lookup::Pas(ns, db);
 				match self.cache.get(&qey) {
@@ -3031,8 +3168,9 @@ impl DatabaseProvider for Transaction {
 						}
 						.encode_range()?;
 						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
-						let val =
+						let stored: Arc<[catalog::StoredParamDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+						let val = catalog::from_stored_all(&stored)?;
 						let entry = cache::tx::Entry::Pas(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -3061,7 +3199,9 @@ impl DatabaseProvider for Transaction {
 					}
 					.encode_range()?;
 					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
-					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
+					let stored: Arc<[catalog::StoredMlModelDefinition]> =
+						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+					return catalog::from_stored_all(&stored);
 				}
 				let qey = cache::tx::Lookup::Mls(ns, db);
 				match self.cache.get(&qey) {
@@ -3075,8 +3215,9 @@ impl DatabaseProvider for Transaction {
 						}
 						.encode_range()?;
 						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
-						let val =
+						let stored: Arc<[catalog::StoredMlModelDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+						let val = catalog::from_stored_all(&stored)?;
 						let entry = cache::tx::Entry::Mls(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -3093,7 +3234,7 @@ impl DatabaseProvider for Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		version: Option<u64>,
-	) -> BoxProviderFut<'_, Result<Arc<[ConfigDefinition]>>> {
+	) -> BoxProviderFut<'_, Result<Arc<[catalog::ConfigDefinition]>>> {
 		Box::pin(
 			async move {
 				if version.is_some() {
@@ -3105,7 +3246,9 @@ impl DatabaseProvider for Transaction {
 					}
 					.encode_range()?;
 					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
-					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
+					let stored: Arc<[StoredConfigDefinition]> =
+						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+					return catalog::from_stored_all(&stored);
 				}
 				let qey = cache::tx::Lookup::Cgs(ns, db);
 				match self.cache.get(&qey) {
@@ -3119,8 +3262,9 @@ impl DatabaseProvider for Transaction {
 						}
 						.encode_range()?;
 						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
-						let val =
+						let stored: Arc<[StoredConfigDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+						let val = catalog::from_stored_all(&stored)?;
 						let entry = cache::tx::Entry::Cgs(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -3154,7 +3298,7 @@ impl DatabaseProvider for Transaction {
 					let Some(val) = self.get_key(&key, version).await? else {
 						return Ok(None);
 					};
-					return Ok(Some(Arc::new(val)));
+					return Ok(Some(Arc::new(catalog::MlModelDefinition::from_stored(&val)?)));
 				}
 				let qey = cache::tx::Lookup::Ml(ns, db, ml, vn);
 				match self.cache.get(&qey) {
@@ -3171,7 +3315,7 @@ impl DatabaseProvider for Transaction {
 						let Some(val) = self.get_key(&key, None).await? else {
 							return Ok(None);
 						};
-						let val = Arc::new(val);
+						let val = Arc::new(catalog::MlModelDefinition::from_stored(&val)?);
 						let entry = cache::tx::Entry::Any(val.clone());
 						self.cache.insert(qey, entry);
 						Ok(Some(val))
@@ -3200,10 +3344,11 @@ impl DatabaseProvider for Transaction {
 						},
 						az: Cow::Borrowed(az),
 					};
-					let val =
-						self.get_key(&key, version).await?.ok_or_else(|| Error::AzNotFound {
+					let val = self.get_key(&key, version).await?.ok_or_else(|| {
+						CatalogError::AzNotFound {
 							name: az.to_owned(),
-						})?;
+						}
+					})?;
 					return Ok(Arc::new(val));
 				}
 				let qey = cache::tx::Lookup::Az(ns, db, az);
@@ -3217,10 +3362,11 @@ impl DatabaseProvider for Transaction {
 							},
 							az: Cow::Borrowed(az),
 						};
-						let val =
-							self.get_key(&key, None).await?.ok_or_else(|| Error::AzNotFound {
+						let val = self.get_key(&key, None).await?.ok_or_else(|| {
+							CatalogError::AzNotFound {
 								name: az.to_owned(),
-							})?;
+							}
+						})?;
 						let val = Arc::new(val);
 						let entry = cache::tx::Entry::Any(val.clone());
 						self.cache.insert(qey, entry);
@@ -3250,10 +3396,11 @@ impl DatabaseProvider for Transaction {
 						},
 						sq: Cow::Borrowed(sq),
 					};
-					let val =
-						self.get_key(&key, version).await?.ok_or_else(|| Error::SeqNotFound {
+					let val = self.get_key(&key, version).await?.ok_or_else(|| {
+						CatalogError::SeqNotFound {
 							name: sq.to_owned(),
-						})?;
+						}
+					})?;
 					return Ok(Arc::new(val));
 				}
 				let qey = cache::tx::Lookup::Sq(ns, db, sq);
@@ -3267,10 +3414,11 @@ impl DatabaseProvider for Transaction {
 							},
 							sq: Cow::Borrowed(sq),
 						};
-						let val =
-							self.get_key(&key, None).await?.ok_or_else(|| Error::SeqNotFound {
+						let val = self.get_key(&key, None).await?.ok_or_else(|| {
+							CatalogError::SeqNotFound {
 								name: sq.to_owned(),
-							})?;
+							}
+						})?;
 						let val = Arc::new(val);
 						let entry = cache::tx::Entry::Any(val.clone());
 						self.cache.insert(qey, entry);
@@ -3300,11 +3448,12 @@ impl DatabaseProvider for Transaction {
 						},
 						fc: Cow::Borrowed(fc),
 					};
-					let val =
-						self.get_key(&key, version).await?.ok_or_else(|| Error::FcNotFound {
+					let val = self.get_key(&key, version).await?.ok_or_else(|| {
+						CatalogError::FcNotFound {
 							name: format!("fn::{fc}"),
-						})?;
-					return Ok(Arc::new(val));
+						}
+					})?;
+					return Ok(Arc::new(catalog::FunctionDefinition::from_stored(&val)?));
 				}
 				let qey = cache::tx::Lookup::Fc(ns, db, fc);
 				match self.cache.get(&qey) {
@@ -3317,11 +3466,12 @@ impl DatabaseProvider for Transaction {
 							},
 							fc: Cow::Borrowed(fc),
 						};
-						let val =
-							self.get_key(&key, None).await?.ok_or_else(|| Error::FcNotFound {
+						let val = self.get_key(&key, None).await?.ok_or_else(|| {
+							CatalogError::FcNotFound {
 								name: format!("fn::{fc}"),
-							})?;
-						let val = Arc::new(val);
+							}
+						})?;
+						let val = Arc::new(catalog::FunctionDefinition::from_stored(&val)?);
 						let entry = cache::tx::Entry::Any(val.clone());
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -3350,11 +3500,12 @@ impl DatabaseProvider for Transaction {
 						},
 						md: Cow::Borrowed(md),
 					};
-					let val =
-						self.get_key(&key, version).await?.ok_or_else(|| Error::MdNotFound {
+					let val = self.get_key(&key, version).await?.ok_or_else(|| {
+						CatalogError::MdNotFound {
 							name: md.to_owned(),
-						})?;
-					return Ok(Arc::new(val));
+						}
+					})?;
+					return Ok(Arc::new(catalog::ModuleDefinition::from_stored(&val)?));
 				}
 				let qey = cache::tx::Lookup::Md(ns, db, md);
 				match self.cache.get(&qey) {
@@ -3367,11 +3518,12 @@ impl DatabaseProvider for Transaction {
 							},
 							md: Cow::Borrowed(md),
 						};
-						let val =
-							self.get_key(&key, None).await?.ok_or_else(|| Error::MdNotFound {
+						let val = self.get_key(&key, None).await?.ok_or_else(|| {
+							CatalogError::MdNotFound {
 								name: md.to_owned(),
-							})?;
-						let val = Arc::new(val);
+							}
+						})?;
+						let val = Arc::new(catalog::ModuleDefinition::from_stored(&val)?);
 						let entry = cache::tx::Entry::Any(val.clone());
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -3400,11 +3552,12 @@ impl DatabaseProvider for Transaction {
 						},
 						pa: Cow::Borrowed(pa),
 					};
-					let val =
-						self.get_key(&key, version).await?.ok_or_else(|| Error::PaNotFound {
+					let val = self.get_key(&key, version).await?.ok_or_else(|| {
+						CatalogError::PaNotFound {
 							name: pa.to_owned(),
-						})?;
-					return Ok(Arc::new(val));
+						}
+					})?;
+					return Ok(Arc::new(catalog::ParamDefinition::from_stored(&val)?));
 				}
 				let qey = cache::tx::Lookup::Pa(ns, db, pa);
 				match self.cache.get(&qey) {
@@ -3417,11 +3570,12 @@ impl DatabaseProvider for Transaction {
 							},
 							pa: Cow::Borrowed(pa),
 						};
-						let val =
-							self.get_key(&key, None).await?.ok_or_else(|| Error::PaNotFound {
+						let val = self.get_key(&key, None).await?.ok_or_else(|| {
+							CatalogError::PaNotFound {
 								name: pa.to_owned(),
-							})?;
-						let val = Arc::new(val);
+							}
+						})?;
+						let val = Arc::new(catalog::ParamDefinition::from_stored(&val)?);
 						let entry = cache::tx::Entry::Any(val.clone());
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -3439,7 +3593,7 @@ impl DatabaseProvider for Transaction {
 		db: DatabaseId,
 		cg: &'a str,
 		version: Option<u64>,
-	) -> BoxProviderFut<'a, Result<Option<Arc<ConfigDefinition>>>> {
+	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::ConfigDefinition>>>> {
 		Box::pin(
 			async move {
 				if version.is_some() {
@@ -3451,7 +3605,7 @@ impl DatabaseProvider for Transaction {
 						ty: Cow::Borrowed(cg),
 					};
 					if let Some(val) = self.get_key(&key, version).await? {
-						return Ok(Some(Arc::new(val)));
+						return Ok(Some(Arc::new(catalog::ConfigDefinition::from_stored(&val)?)));
 					} else {
 						return Ok(None);
 					}
@@ -3468,7 +3622,7 @@ impl DatabaseProvider for Transaction {
 							ty: Cow::Borrowed(cg),
 						};
 						if let Some(val) = self.get_key(&key, None).await? {
-							let val = Arc::new(val);
+							let val = Arc::new(catalog::ConfigDefinition::from_stored(&val)?);
 							let entr = cache::tx::Entry::Any(val.clone());
 							self.cache.insert(qey, entr);
 							Ok(Some(val))
@@ -3489,6 +3643,7 @@ impl DatabaseProvider for Transaction {
 		fc: &'a catalog::FunctionDefinition,
 	) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
+			let stored = fc.to_stored();
 			let key = crate::key::database::fc::Fc {
 				prefix: crate::key::database::all::DatabaseRoot {
 					ns,
@@ -3496,7 +3651,7 @@ impl DatabaseProvider for Transaction {
 				},
 				fc: Cow::Borrowed(&fc.name),
 			};
-			self.set_key(&key, fc).await?;
+			self.set_key(&key, &stored).await?;
 
 			// Invalidate the cached list of all functions for this database
 			let list_key = cache::tx::Lookup::Fcs(ns, db);
@@ -3518,7 +3673,8 @@ impl DatabaseProvider for Transaction {
 		md: &'a catalog::ModuleDefinition,
 	) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
-			let name = md.get_storage_name()?;
+			let stored = md.to_stored();
+			let name = stored.get_storage_name()?;
 			let key = crate::key::database::md::Md {
 				prefix: crate::key::database::all::DatabaseRoot {
 					ns,
@@ -3526,7 +3682,7 @@ impl DatabaseProvider for Transaction {
 				},
 				md: Cow::Borrowed(name.as_str()),
 			};
-			self.set_key(&key, md).await?;
+			self.set_key(&key, &stored).await?;
 
 			// Invalidate the cached list of all modules for this database
 			let list_key = cache::tx::Lookup::Mds(ns, db);
@@ -3548,6 +3704,7 @@ impl DatabaseProvider for Transaction {
 		pa: &'a catalog::ParamDefinition,
 	) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
+			let stored = pa.to_stored();
 			let key = crate::key::database::pa::Pa {
 				prefix: crate::key::database::all::DatabaseRoot {
 					ns,
@@ -3555,7 +3712,7 @@ impl DatabaseProvider for Transaction {
 				},
 				pa: Cow::Borrowed(&pa.name),
 			};
-			self.set_key(&key, pa).await?;
+			self.set_key(&key, &stored).await?;
 
 			// Invalidate the cached list of all params for this database
 			let list_key = cache::tx::Lookup::Pas(ns, db);
@@ -3574,6 +3731,60 @@ impl DatabaseProvider for Transaction {
 // --------------------------------------------------
 // Table implementation functions
 // --------------------------------------------------
+
+/// Compile stored live-query subscriptions.
+///
+/// Every stored subscription appears in the result, including one whose text
+/// no longer compiles: that is carried as
+/// [`catalog::SubscriptionQuery::Uncompilable`] rather than dropped. A
+/// subscription in that state can never match another document, but it still
+/// has `lq`/`lv` keys and a client waiting on them, so the statements that tear
+/// subscriptions down or report them must still see it. Dropping it here is
+/// what previously left such a client waiting on a `KILLED` that could never
+/// arrive, and hid the row from the `INFO` an operator would use to find it.
+///
+/// Compiling must also not fail the reading statement, which is the other half
+/// of the same requirement: the subscription belongs to some other client, and
+/// every write to the table reads this list, so an error would turn one
+/// unreadable row into an outage for the whole table.
+///
+/// Callers memoize the returned list against the table's `cache_lives_ts`. That
+/// cannot hide a subscription that would otherwise be delivered to: compiling is
+/// a pure function of the stored bytes, which never change for a given
+/// subscription, and the timestamp is bumped whenever the set of subscriptions
+/// on the table changes.
+fn compile_subscriptions(
+	tb: &TableName,
+	stored: &[catalog::StoredSubscriptionDefinition],
+) -> Arc<[catalog::SubscriptionDefinition]> {
+	stored
+		.iter()
+		.map(|lv| {
+			let compiled = catalog::SubscriptionDefinition::compile(lv);
+			if matches!(compiled.query, catalog::SubscriptionQuery::Uncompilable { .. }) {
+				// Debug, not warn, and without the compile error: this runs on
+				// every `Lookup::Lvs` cache miss, which is every mutation of the
+				// table, and the condition cannot self-heal because the stored
+				// bytes never change. At warn level one uncompilable row emits a
+				// line per write.
+				//
+				// The error is omitted because the parser renders a snippet of
+				// the offending source into it, and that is the user's own query
+				// text — a `WHERE` clause is exactly where a literal would sit.
+				// The id and table are what an operator needs to find and `KILL`
+				// it; `INFO ... STRUCTURE` carries the reason.
+				tracing::debug!(
+					target: "surrealdb::core::kvs",
+					subscription_id = %lv.id,
+					table = %tb,
+					"LIVE subscription is inert: its stored text no longer compiles, so it will \
+					 receive no further notifications until it is killed"
+				);
+			}
+			compiled
+		})
+		.collect()
+}
 
 impl TableProvider for Transaction {
 	/// Retrieve all table definitions for a specific database.
@@ -3594,7 +3805,9 @@ impl TableProvider for Transaction {
 					}
 					.encode_range()?;
 					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
-					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
+					let stored: Arc<[StoredTableDefinition]> =
+						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+					return catalog::from_stored_all(&stored);
 				}
 				let qey = cache::tx::Lookup::Tbs(ns, db);
 				match self.cache.get(&qey) {
@@ -3608,8 +3821,9 @@ impl TableProvider for Transaction {
 						}
 						.encode_range()?;
 						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
-						let val =
+						let stored: Arc<[StoredTableDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+						let val = catalog::from_stored_all(&stored)?;
 						let entry = cache::tx::Entry::Tbs(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -3627,7 +3841,7 @@ impl TableProvider for Transaction {
 		db: DatabaseId,
 		tb: &'a TableName,
 		version: Option<u64>,
-	) -> BoxProviderFut<'a, Result<Arc<[catalog::TableDefinition]>>> {
+	) -> BoxProviderFut<'a, Result<Arc<[TableDefinition]>>> {
 		Box::pin(
 			async move {
 				if version.is_some() {
@@ -3640,9 +3854,11 @@ impl TableProvider for Transaction {
 					}
 					.encode_range()?;
 					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
-					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
+					let stored: Arc<[StoredTableDefinition]> =
+						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+					return catalog::from_stored_all(&stored);
 				}
-				let qey = cache::tx::Lookup::Fts(ns, db, tb);
+				let qey = cache::tx::Lookup::Fts(ns, db, tb.as_str());
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_fts(),
 					None => {
@@ -3655,8 +3871,9 @@ impl TableProvider for Transaction {
 						}
 						.encode_range()?;
 						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
-						let val =
+						let stored: Arc<[StoredTableDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+						let val = catalog::from_stored_all(&stored)?;
 						let entry = cache::tx::Entry::Fts(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -3681,7 +3898,7 @@ impl TableProvider for Transaction {
 			async move {
 				if version.is_some() {
 					let Some(db_def) = self.get_db_by_name(ns, db, version).await? else {
-						return Err(anyhow::anyhow!(Error::DbNotFound {
+						return Err(anyhow::anyhow!(CatalogError::DbNotFound {
 							name: db.to_owned(),
 						}));
 					};
@@ -3693,21 +3910,21 @@ impl TableProvider for Transaction {
 						tb: Cow::Borrowed(tb),
 					};
 					if let Some(tb_def) = self.get_key(&table_key, version).await? {
-						return Ok(Arc::new(tb_def));
+						return Ok(Arc::new(TableDefinition::from_stored(&tb_def)?));
 					}
-					return Err(Error::TbNotFound {
+					return Err(CatalogError::TbNotFound {
 						name: tb.to_owned(),
 					}
 					.into());
 				}
-				let qey = cache::tx::Lookup::TbByName(ns, db, tb);
+				let qey = cache::tx::Lookup::TbByName(ns, db, tb.as_str());
 				match self.cache.get(&qey) {
 					// The entry is in the cache
 					Some(val) => val.try_into_type(),
 					// The entry is not in the cache
 					None => {
 						let Some(db_def) = self.get_db_by_name(ns, db, None).await? else {
-							return Err(anyhow::anyhow!(Error::DbNotFound {
+							return Err(anyhow::anyhow!(CatalogError::DbNotFound {
 								name: db.to_owned(),
 							}));
 						};
@@ -3720,7 +3937,7 @@ impl TableProvider for Transaction {
 							tb: Cow::Borrowed(tb),
 						};
 						if let Some(tb_def) = self.get_key(&table_key, None).await? {
-							let cached_tb = Arc::new(tb_def);
+							let cached_tb = Arc::new(TableDefinition::from_stored(&tb_def)?);
 							let cached_entry = cache::tx::Entry::Any(
 								Arc::clone(&cached_tb) as Arc<dyn Any + Send + Sync>
 							);
@@ -3729,19 +3946,20 @@ impl TableProvider for Transaction {
 						}
 
 						if db_def.strict {
-							return Err(Error::TbNotFound {
+							return Err(CatalogError::TbNotFound {
 								name: tb.to_owned(),
 							}
 							.into());
 						}
 
-						let tb_def = TableDefinition::new(
+						let stored = StoredTableDefinition::new(
 							db_def.namespace_id,
 							db_def.database_id,
 							self.get_next_tb_id(ctx, db_def.namespace_id, db_def.database_id)
 								.await?,
 							tb.clone(),
 						);
+						let tb_def = TableDefinition::from_stored(&stored)?;
 						self.put_tb(ns, db, &tb_def).await
 					}
 				}
@@ -3772,9 +3990,9 @@ impl TableProvider for Transaction {
 				let Some(tb) = self.get_key(&key, version).await? else {
 					return Ok(None);
 				};
-				return Ok(Some(Arc::new(tb)));
+				return Ok(Some(Arc::new(TableDefinition::from_stored(&tb)?)));
 			}
-			let qey = cache::tx::Lookup::TbByName(ns, db, tb);
+			let qey = cache::tx::Lookup::TbByName(ns, db, tb.as_str());
 			match self.cache.get(&qey) {
 				Some(val) => val.try_into_type().map(Some),
 				None => {
@@ -3793,7 +4011,7 @@ impl TableProvider for Transaction {
 						return Ok(None);
 					};
 
-					let tb = Arc::new(tb);
+					let tb = Arc::new(TableDefinition::from_stored(&tb)?);
 					let entr = cache::tx::Entry::Any(tb.clone());
 					self.cache.insert(qey, entr);
 					Ok(Some(tb))
@@ -3809,22 +4027,24 @@ impl TableProvider for Transaction {
 		tb: &'a TableDefinition,
 	) -> BoxProviderFut<'a, Result<Arc<TableDefinition>>> {
 		Box::pin(async move {
+			let stored = tb.to_stored();
+			let tb_name = tb.name.clone();
 			let key = crate::key::database::tb::TableKey {
 				prefix: crate::key::database::all::DatabaseRoot {
 					ns: tb.namespace_id,
 					db: tb.database_id,
 				},
-				tb: Cow::Borrowed(&tb.name),
+				tb: Cow::Borrowed(&tb_name),
 			};
-			match self.set_key(&key, tb).await {
+			match self.set_key(&key, &stored).await {
 				Ok(_) => {}
 				Err(e) => {
 					if matches!(
 						e.downcast_ref(),
 						Some(Error::Kvs(crate::kvs::Error::TransactionReadonly))
 					) {
-						return Err(Error::TbNotFound {
-							name: tb.name.clone(),
+						return Err(CatalogError::TbNotFound {
+							name: tb_name,
 						}
 						.into());
 					}
@@ -3841,10 +4061,10 @@ impl TableProvider for Transaction {
 			let cached_entry =
 				cache::tx::Entry::Any(Arc::clone(&cached_tb) as Arc<dyn Any + Send + Sync>);
 
-			let qey = cache::tx::Lookup::Tb(tb.namespace_id, tb.database_id, &tb.name);
+			let qey = cache::tx::Lookup::Tb(tb.namespace_id, tb.database_id, tb.name.as_str());
 			self.cache.insert(qey, cached_entry.clone());
 
-			let qey = cache::tx::Lookup::TbByName(ns, db, &tb.name);
+			let qey = cache::tx::Lookup::TbByName(ns, db, tb.name.as_str());
 			self.cache.insert(qey, cached_entry);
 
 			Ok(cached_tb)
@@ -3859,18 +4079,19 @@ impl TableProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
 			let Some(tb) = self.get_tb_by_name(ns, db, tb, None).await? else {
-				return Err(Error::TbNotFound {
+				return Err(CatalogError::TbNotFound {
 					name: tb.clone(),
 				}
 				.into());
 			};
 
+			let tb_name = tb.name.clone();
 			let key = crate::key::database::tb::TableKey {
 				prefix: crate::key::database::all::DatabaseRoot {
 					ns: tb.namespace_id,
 					db: tb.database_id,
 				},
-				tb: Cow::Borrowed(&tb.name),
+				tb: Cow::Borrowed(&tb_name),
 			};
 			self.del_key(&key).await?;
 
@@ -3879,9 +4100,9 @@ impl TableProvider for Transaction {
 			self.cache.remove(&list_key);
 
 			// Clear the cache
-			let qey = cache::tx::Lookup::Tb(tb.namespace_id, tb.database_id, &tb.name);
+			let qey = cache::tx::Lookup::Tb(tb.namespace_id, tb.database_id, tb.name.as_str());
 			self.cache.remove(&qey);
-			let qey = cache::tx::Lookup::TbByName(ns, db, &tb.name);
+			let qey = cache::tx::Lookup::TbByName(ns, db, tb.name.as_str());
 			self.cache.remove(&qey);
 
 			Ok(())
@@ -3896,18 +4117,19 @@ impl TableProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
 			let Some(tb) = self.get_tb_by_name(ns, db, tb, None).await? else {
-				return Err(Error::TbNotFound {
+				return Err(CatalogError::TbNotFound {
 					name: tb.clone(),
 				}
 				.into());
 			};
 
+			let tb_name = tb.name.clone();
 			let key = crate::key::database::tb::TableKey {
 				prefix: crate::key::database::all::DatabaseRoot {
 					ns: tb.namespace_id,
 					db: tb.database_id,
 				},
-				tb: Cow::Borrowed(&tb.name),
+				tb: Cow::Borrowed(&tb_name),
 			};
 			self.clr_key(&key).await?;
 
@@ -3916,9 +4138,9 @@ impl TableProvider for Transaction {
 			self.cache.remove(&list_key);
 
 			// Clear the cache
-			let qey = cache::tx::Lookup::Tb(tb.namespace_id, tb.database_id, &tb.name);
+			let qey = cache::tx::Lookup::Tb(tb.namespace_id, tb.database_id, tb.name.as_str());
 			self.cache.remove(&qey);
-			let qey = cache::tx::Lookup::TbByName(ns, db, &tb.name);
+			let qey = cache::tx::Lookup::TbByName(ns, db, tb.name.as_str());
 			self.cache.remove(&qey);
 
 			Ok(())
@@ -3945,9 +4167,11 @@ impl TableProvider for Transaction {
 					}
 					.encode_range()?;
 					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
-					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
+					let stored: Arc<[catalog::StoredEventDefinition]> =
+						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+					return catalog::from_stored_all(&stored);
 				}
-				let qey = cache::tx::Lookup::Evs(ns, db, tb);
+				let qey = cache::tx::Lookup::Evs(ns, db, tb.as_str());
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_evs(),
 					None => {
@@ -3960,8 +4184,9 @@ impl TableProvider for Transaction {
 						}
 						.encode_range()?;
 						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
-						let val =
+						let stored: Arc<[catalog::StoredEventDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+						let val = catalog::from_stored_all(&stored)?;
 						let entry = cache::tx::Entry::Evs(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -3992,9 +4217,11 @@ impl TableProvider for Transaction {
 					}
 					.encode_range()?;
 					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
-					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
+					let stored: Arc<[catalog::StoredFieldDefinition]> =
+						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+					return catalog::from_stored_all(&stored);
 				}
-				let qey = cache::tx::Lookup::Fds(ns, db, tb);
+				let qey = cache::tx::Lookup::Fds(ns, db, tb.as_str());
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_fds(),
 					None => {
@@ -4007,8 +4234,9 @@ impl TableProvider for Transaction {
 						}
 						.encode_range()?;
 						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
-						let val =
+						let stored: Arc<[catalog::StoredFieldDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+						let val = catalog::from_stored_all(&stored)?;
 						let entry = cache::tx::Entry::Fds(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -4035,13 +4263,15 @@ impl TableProvider for Transaction {
 							ns,
 							db,
 						},
-						tb: Cow::Borrowed(tb),
+						tb: Cow::Borrowed(tb.as_str()),
 					}
 					.encode_range()?;
 					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
-					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
+					let stored: Arc<[catalog::StoredIndexDefinition]> =
+						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+					return catalog::from_stored_all(&stored);
 				}
-				let qey = cache::tx::Lookup::Ixs(ns, db, tb);
+				let qey = cache::tx::Lookup::Ixs(ns, db, tb.as_str());
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_ixs(),
 					None => {
@@ -4050,12 +4280,13 @@ impl TableProvider for Transaction {
 								ns,
 								db,
 							},
-							tb: Cow::Borrowed(tb),
+							tb: Cow::Borrowed(tb.as_str()),
 						}
 						.encode_range()?;
 						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
-						let val =
+						let stored: Arc<[catalog::StoredIndexDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+						let val = catalog::from_stored_all(&stored)?;
 						let entry = cache::tx::Entry::Ixs(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -4086,9 +4317,11 @@ impl TableProvider for Transaction {
 					}
 					.encode_range()?;
 					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
-					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
+					let stored: Arc<[catalog::StoredSubscriptionDefinition]> =
+						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+					return Ok(compile_subscriptions(tb, &stored));
 				}
-				let qey = cache::tx::Lookup::Lvs(ns, db, tb);
+				let qey = cache::tx::Lookup::Lvs(ns, db, tb.as_str());
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_lvs(),
 					None => {
@@ -4101,8 +4334,9 @@ impl TableProvider for Transaction {
 						}
 						.encode_range()?;
 						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
-						let val =
+						let stored: Arc<[catalog::StoredSubscriptionDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+						let val = compile_subscriptions(tb, &stored);
 						let entry = cache::tx::Entry::Lvs(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -4134,9 +4368,9 @@ impl TableProvider for Transaction {
 					let Some(val) = self.get_key(&key, version).await? else {
 						return Ok(None);
 					};
-					return Ok(Some(Arc::new(val)));
+					return Ok(Some(Arc::new(TableDefinition::from_stored(&val)?)));
 				}
-				let qey = cache::tx::Lookup::Tb(ns, db, tb);
+				let qey = cache::tx::Lookup::Tb(ns, db, tb.as_str());
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
@@ -4150,7 +4384,7 @@ impl TableProvider for Transaction {
 						let Some(val) = self.get_key(&key, None).await? else {
 							return Ok(None);
 						};
-						let val = Arc::new(val);
+						let val = Arc::new(TableDefinition::from_stored(&val)?);
 						let entry = cache::tx::Entry::Any(val.clone());
 						self.cache.insert(qey, entry);
 						Ok(Some(val))
@@ -4181,13 +4415,14 @@ impl TableProvider for Transaction {
 						tb: Cow::Borrowed(tb),
 						ev: Cow::Borrowed(ev),
 					};
-					let val =
-						self.get_key(&key, version).await?.ok_or_else(|| Error::EvNotFound {
+					let val = self.get_key(&key, version).await?.ok_or_else(|| {
+						CatalogError::EvNotFound {
 							name: ev.to_owned(),
-						})?;
-					return Ok(Arc::new(val));
+						}
+					})?;
+					return Ok(Arc::new(catalog::EventDefinition::from_stored(&val)?));
 				}
-				let qey = cache::tx::Lookup::Ev(ns, db, tb, ev);
+				let qey = cache::tx::Lookup::Ev(ns, db, tb.as_str(), ev);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type(),
 					None => {
@@ -4199,11 +4434,12 @@ impl TableProvider for Transaction {
 							tb: Cow::Borrowed(tb),
 							ev: Cow::Borrowed(ev),
 						};
-						let val =
-							self.get_key(&key, None).await?.ok_or_else(|| Error::EvNotFound {
+						let val = self.get_key(&key, None).await?.ok_or_else(|| {
+							CatalogError::EvNotFound {
 								name: ev.to_owned(),
-							})?;
-						let val = Arc::new(val);
+							}
+						})?;
+						let val = Arc::new(catalog::EventDefinition::from_stored(&val)?);
 						let entry = cache::tx::Entry::Any(val.clone());
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -4237,9 +4473,9 @@ impl TableProvider for Transaction {
 					let Some(val) = self.get_key(&key, version).await? else {
 						return Ok(None);
 					};
-					return Ok(Some(Arc::new(val)));
+					return Ok(Some(Arc::new(catalog::FieldDefinition::from_stored(&val)?)));
 				}
-				let qey = cache::tx::Lookup::Fd(ns, db, tb, fd);
+				let qey = cache::tx::Lookup::Fd(ns, db, tb.as_str(), fd);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
@@ -4254,7 +4490,7 @@ impl TableProvider for Transaction {
 						let Some(val) = self.get_key(&key, None).await? else {
 							return Ok(None);
 						};
-						let val = Arc::new(val);
+						let val = Arc::new(catalog::FieldDefinition::from_stored(&val)?);
 						let entry = cache::tx::Entry::Any(val.clone());
 						self.cache.insert(qey, entry);
 						Ok(Some(val))
@@ -4273,6 +4509,7 @@ impl TableProvider for Transaction {
 		fd: &'a catalog::FieldDefinition,
 	) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
+			let stored = fd.to_stored();
 			let name = fd.name.to_raw_string();
 			let key = crate::key::table::fd::Fd {
 				prefix: crate::key::database::all::DatabaseRoot {
@@ -4282,7 +4519,7 @@ impl TableProvider for Transaction {
 				tb: Cow::Borrowed(tb),
 				fd: Cow::Borrowed(&name),
 			};
-			self.set_key(&key, fd).await?;
+			self.set_key(&key, &stored).await?;
 
 			// Invalidate the cached list of all fields for this table
 			let list_key = cache::tx::Lookup::Fds(ns, db, tb.as_ref());
@@ -4296,7 +4533,7 @@ impl TableProvider for Transaction {
 			self.cache.remove(&cache::tx::Lookup::DbReferenceTargets(ns, db));
 
 			// Set the entry in the cache
-			let qey = cache::tx::Lookup::Fd(ns, db, tb, &name);
+			let qey = cache::tx::Lookup::Fd(ns, db, tb.as_str(), &name);
 			let entry = cache::tx::Entry::Any(Arc::new(fd.clone()));
 			self.cache.insert(qey, entry);
 			Ok(())
@@ -4320,15 +4557,15 @@ impl TableProvider for Transaction {
 							ns,
 							db,
 						},
-						tb: Cow::Borrowed(tb),
+						tb: Cow::Borrowed(tb.as_str()),
 						ix: Cow::Borrowed(ix),
 					};
 					let Some(val) = self.get_key(&key, version).await? else {
 						return Ok(None);
 					};
-					return Ok(Some(Arc::new(val)));
+					return Ok(Some(Arc::new(catalog::IndexDefinition::from_stored(&val)?)));
 				}
-				let qey = cache::tx::Lookup::Ix(ns, db, tb, ix);
+				let qey = cache::tx::Lookup::Ix(ns, db, tb.as_str(), ix);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
@@ -4337,13 +4574,13 @@ impl TableProvider for Transaction {
 								ns,
 								db,
 							},
-							tb: Cow::Borrowed(tb),
+							tb: Cow::Borrowed(tb.as_str()),
 							ix: Cow::Borrowed(ix),
 						};
 						let Some(val) = self.get_key(&key, None).await? else {
 							return Ok(None);
 						};
-						let val = Arc::new(val);
+						let val = Arc::new(catalog::IndexDefinition::from_stored(&val)?);
 						let entry = cache::tx::Entry::Any(val.clone());
 						self.cache.insert(qey, entry);
 						Ok(Some(val))
@@ -4368,7 +4605,7 @@ impl TableProvider for Transaction {
 					ns,
 					db,
 				},
-				tb: Cow::Borrowed(tb),
+				tb: Cow::Borrowed(tb.as_str()),
 				ix,
 			};
 			let Some(index_name) = self.get_key(&key, version).await? else {
@@ -4387,22 +4624,23 @@ impl TableProvider for Transaction {
 		ix: &'a catalog::IndexDefinition,
 	) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
+			let stored = ix.to_stored();
 			let key = table_ix::IndexDefinitionKey {
 				prefix: crate::key::database::all::DatabaseRoot {
 					ns,
 					db,
 				},
-				tb: Cow::Borrowed(tb),
+				tb: Cow::Borrowed(tb.as_str()),
 				ix: Cow::Borrowed(&ix.name),
 			};
-			self.set_key(&key, ix).await?;
+			self.set_key(&key, &stored).await?;
 
 			let name_lookup_key = table_ix::IndexNameLookupKey {
 				prefix: crate::key::database::all::DatabaseRoot {
 					ns,
 					db,
 				},
-				tb: Cow::Borrowed(tb),
+				tb: Cow::Borrowed(tb.as_str()),
 				ix: ix.index_id,
 			};
 			self.set_key(&name_lookup_key, &ix.name.to_string()).await?;
@@ -4412,7 +4650,7 @@ impl TableProvider for Transaction {
 			self.cache.remove(&list_key);
 
 			// Set the entry in the cache
-			let qey = cache::tx::Lookup::Ix(ns, db, tb, &ix.name);
+			let qey = cache::tx::Lookup::Ix(ns, db, tb.as_str(), &ix.name);
 			let entry = cache::tx::Entry::Any(Arc::new(ix.clone()));
 			self.cache.insert(qey, entry);
 			Ok(())
@@ -4449,7 +4687,7 @@ impl TableProvider for Transaction {
 					ns,
 					db,
 				},
-				tb: Cow::Borrowed(tb),
+				tb: Cow::Borrowed(tb.as_str()),
 				ix: Cow::Borrowed(&ix.name),
 			};
 			self.del_key(&key).await?;
@@ -4460,7 +4698,7 @@ impl TableProvider for Transaction {
 					ns,
 					db,
 				},
-				tb: Cow::Borrowed(tb),
+				tb: Cow::Borrowed(tb.as_str()),
 				ix: ix.index_id,
 			};
 			self.del_key(&name_lookup_key).await?;
@@ -4509,7 +4747,7 @@ impl TableProvider for Transaction {
 						None => Ok(Arc::new(Default::default())),
 					}
 				} else {
-					let qey = cache::tx::Lookup::Record(ns, db, tb, id);
+					let qey = cache::tx::Lookup::Record(ns, db, tb.as_str(), id);
 					match self.cache.get(&qey) {
 						// The entry is in the cache
 						Some(val) => val.try_into_record(),
@@ -4636,7 +4874,7 @@ impl TableProvider for Transaction {
 				out.into_iter()
 					.map(|o| {
 						o.ok_or_else(|| {
-							Error::Internal("missing record in multi-get batch".into()).into()
+							EngineError::Internal("missing record in multi-get batch".into()).into()
 						})
 					})
 					.collect()
@@ -4686,7 +4924,7 @@ impl TableProvider for Transaction {
 				};
 				self.put_key(&key, record.as_ref()).await?;
 				// Set the value in the cache
-				let qey = cache::tx::Lookup::Record(ns, db, tb, id);
+				let qey = cache::tx::Lookup::Record(ns, db, tb.as_str(), id);
 				self.cache.insert(qey, cache::tx::Entry::Val(record));
 				// Return nothing
 				Ok(())
@@ -4716,7 +4954,7 @@ impl TableProvider for Transaction {
 				};
 				self.set_key(&key, record.as_ref()).await?;
 				// Clear the value from the cache
-				let qey = cache::tx::Lookup::Record(ns, db, tb, id);
+				let qey = cache::tx::Lookup::Record(ns, db, tb.as_str(), id);
 				self.cache.remove(&qey);
 				// Return nothing
 				Ok(())
@@ -4745,7 +4983,7 @@ impl TableProvider for Transaction {
 				};
 				self.del_key(&key).await?;
 				// Clear the value from the cache
-				let qey = cache::tx::Lookup::Record(ns, db, tb, id);
+				let qey = cache::tx::Lookup::Record(ns, db, tb.as_str(), id);
 				self.cache.remove(&qey);
 				// Return nothing
 				Ok(())
@@ -5102,7 +5340,9 @@ impl AuthorisationProvider for Transaction {
 				if version.is_some() {
 					let range = crate::key::root::ac::AccessKeyPrefix {}.encode_range()?;
 					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
-					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
+					let stored: Arc<[catalog::StoredAccessDefinition]> =
+						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+					return catalog::from_stored_all(&stored);
 				}
 				let qey = cache::tx::Lookup::Ras;
 				match self.cache.get(&qey) {
@@ -5110,8 +5350,9 @@ impl AuthorisationProvider for Transaction {
 					None => {
 						let range = crate::key::root::ac::AccessKeyPrefix {}.encode_range()?;
 						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
-						let val =
+						let stored: Arc<[catalog::StoredAccessDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+						let val = catalog::from_stored_all(&stored)?;
 						let entry = cache::tx::Entry::Ras(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -5173,7 +5414,9 @@ impl AuthorisationProvider for Transaction {
 					}
 					.encode_range()?;
 					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
-					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
+					let stored: Arc<[catalog::StoredAccessDefinition]> =
+						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+					return catalog::from_stored_all(&stored);
 				}
 				let qey = cache::tx::Lookup::Nas(ns);
 				match self.cache.get(&qey) {
@@ -5184,8 +5427,9 @@ impl AuthorisationProvider for Transaction {
 						}
 						.encode_range()?;
 						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
-						let val =
+						let stored: Arc<[catalog::StoredAccessDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+						let val = catalog::from_stored_all(&stored)?;
 						let entry = cache::tx::Entry::Nas(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -5254,7 +5498,9 @@ impl AuthorisationProvider for Transaction {
 					}
 					.encode_range()?;
 					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
-					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
+					let stored: Arc<[catalog::StoredAccessDefinition]> =
+						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+					return catalog::from_stored_all(&stored);
 				}
 				let qey = cache::tx::Lookup::Das(ns, db);
 				match self.cache.get(&qey) {
@@ -5268,8 +5514,9 @@ impl AuthorisationProvider for Transaction {
 						}
 						.encode_range()?;
 						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
-						let val =
+						let stored: Arc<[catalog::StoredAccessDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+						let val = catalog::from_stored_all(&stored)?;
 						let entry = cache::tx::Entry::Das(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -5342,7 +5589,7 @@ impl AuthorisationProvider for Transaction {
 					let Some(val) = self.get_key(&key, version).await? else {
 						return Ok(None);
 					};
-					return Ok(Some(Arc::new(val)));
+					return Ok(Some(Arc::new(catalog::AccessDefinition::from_stored(&val)?)));
 				}
 				let qey = cache::tx::Lookup::Ra(ra);
 				match self.cache.get(&qey) {
@@ -5354,7 +5601,7 @@ impl AuthorisationProvider for Transaction {
 						let Some(val) = self.get_key(&key, None).await? else {
 							return Ok(None);
 						};
-						let val = Arc::new(val);
+						let val = Arc::new(catalog::AccessDefinition::from_stored(&val)?);
 						let entry = cache::tx::Entry::Any(val.clone());
 						self.cache.insert(qey, entry);
 						Ok(Some(val))
@@ -5423,7 +5670,7 @@ impl AuthorisationProvider for Transaction {
 					let Some(val) = self.get_key(&key, version).await? else {
 						return Ok(None);
 					};
-					return Ok(Some(Arc::new(val)));
+					return Ok(Some(Arc::new(catalog::AccessDefinition::from_stored(&val)?)));
 				}
 				let qey = cache::tx::Lookup::Na(ns, na);
 				match self.cache.get(&qey) {
@@ -5436,7 +5683,7 @@ impl AuthorisationProvider for Transaction {
 						let Some(val) = self.get_key(&key, None).await? else {
 							return Ok(None);
 						};
-						let val = Arc::new(val);
+						let val = Arc::new(catalog::AccessDefinition::from_stored(&val)?);
 						let entry = cache::tx::Entry::Any(val.clone());
 						self.cache.insert(qey, entry);
 						Ok(Some(val))
@@ -5512,7 +5759,7 @@ impl AuthorisationProvider for Transaction {
 					let Some(val) = self.get_key(&key, version).await? else {
 						return Ok(None);
 					};
-					return Ok(Some(Arc::new(val)));
+					return Ok(Some(Arc::new(catalog::AccessDefinition::from_stored(&val)?)));
 				}
 				let qey = cache::tx::Lookup::Da(ns, db, da);
 				match self.cache.get(&qey) {
@@ -5528,7 +5775,7 @@ impl AuthorisationProvider for Transaction {
 						let Some(val) = self.get_key(&key, None).await? else {
 							return Ok(None);
 						};
-						let val = Arc::new(val);
+						let val = Arc::new(catalog::AccessDefinition::from_stored(&val)?);
 						let entry = cache::tx::Entry::Any(val.clone());
 						self.cache.insert(qey, entry);
 						Ok(Some(val))
@@ -5698,7 +5945,7 @@ impl ApiProvider for Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		version: Option<u64>,
-	) -> BoxProviderFut<'_, Result<Arc<[ApiDefinition]>>> {
+	) -> BoxProviderFut<'_, Result<Arc<[catalog::ApiDefinition]>>> {
 		Box::pin(
 			async move {
 				if version.is_some() {
@@ -5708,7 +5955,9 @@ impl ApiProvider for Transaction {
 					}
 					.encode_range()?;
 					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
-					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
+					let stored: Arc<[catalog::StoredApiDefinition]> =
+						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+					return catalog::from_stored_all(&stored);
 				}
 				let qey = cache::tx::Lookup::Aps(ns, db);
 				match self.cache.get(&qey) {
@@ -5720,9 +5969,9 @@ impl ApiProvider for Transaction {
 						}
 						.encode_range()?;
 						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
-						let val =
+						let stored: Arc<[catalog::StoredApiDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
-						let val = cache::tx::Entry::Aps(Arc::clone(&val));
+						let val = cache::tx::Entry::Aps(catalog::from_stored_all(&stored)?);
 						self.cache.insert(qey, val.clone());
 						val
 					}
@@ -5740,7 +5989,7 @@ impl ApiProvider for Transaction {
 		db: DatabaseId,
 		ap: &'a str,
 		version: Option<u64>,
-	) -> BoxProviderFut<'a, Result<Option<Arc<ApiDefinition>>>> {
+	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::ApiDefinition>>>> {
 		Box::pin(
 			async move {
 				if version.is_some() {
@@ -5754,7 +6003,7 @@ impl ApiProvider for Transaction {
 					let Some(val) = self.get_key(&key, version).await? else {
 						return Ok(None);
 					};
-					return Ok(Some(Arc::new(val)));
+					return Ok(Some(Arc::new(catalog::ApiDefinition::from_stored(&val)?)));
 				}
 				let qey = cache::tx::Lookup::Ap(ns, db, ap);
 				match self.cache.get(&qey) {
@@ -5770,7 +6019,7 @@ impl ApiProvider for Transaction {
 						let Some(val) = self.get_key(&key, None).await? else {
 							return Ok(None);
 						};
-						let val = Arc::new(val);
+						let val = Arc::new(catalog::ApiDefinition::from_stored(&val)?);
 						let entry = cache::tx::Entry::Any(val.clone());
 						self.cache.insert(qey, entry);
 						Ok(Some(val))
@@ -5788,6 +6037,7 @@ impl ApiProvider for Transaction {
 		ap: &'a catalog::ApiDefinition,
 	) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
+			let stored = ap.to_stored();
 			let name = ap.path.to_string();
 			let key = crate::key::database::ap::Api {
 				prefix: crate::key::database::all::DatabaseRoot {
@@ -5796,7 +6046,7 @@ impl ApiProvider for Transaction {
 				},
 				ap: Cow::Borrowed(&name),
 			};
-			self.set_key(&key, ap).await?;
+			self.set_key(&key, &stored).await?;
 
 			// Invalidate the cached list of all APIs for this database
 			let list_key = cache::tx::Lookup::Aps(ns, db);
@@ -5835,7 +6085,9 @@ impl BucketProvider for Transaction {
 					}
 					.encode_range()?;
 					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
-					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
+					let stored: Arc<[catalog::StoredBucketDefinition]> =
+						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+					return catalog::from_stored_all(&stored);
 				}
 				let qey = cache::tx::Lookup::Bus(ns, db);
 				match self.cache.get(&qey) {
@@ -5849,8 +6101,9 @@ impl BucketProvider for Transaction {
 						}
 						.encode_range()?;
 						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
-						let val =
+						let stored: Arc<[catalog::StoredBucketDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
+						let val = catalog::from_stored_all(&stored)?;
 						let entry = cache::tx::Entry::Bus(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)
@@ -5882,7 +6135,7 @@ impl BucketProvider for Transaction {
 					let Some(val) = self.get_key(&key, version).await? else {
 						return Ok(None);
 					};
-					return Ok(Some(Arc::new(val)));
+					return Ok(Some(Arc::new(catalog::BucketDefinition::from_stored(&val)?)));
 				}
 				let qey = cache::tx::Lookup::Bu(ns, db, bu);
 				match self.cache.get(&qey) {
@@ -5898,7 +6151,7 @@ impl BucketProvider for Transaction {
 						let Some(val) = self.get_key(&key, None).await? else {
 							return Ok(None);
 						};
-						let bucket_def = Arc::new(val);
+						let bucket_def = Arc::new(catalog::BucketDefinition::from_stored(&val)?);
 						let entr = cache::tx::Entry::Any(bucket_def.clone());
 						self.cache.insert(qey, entr);
 						Ok(Some(bucket_def))
@@ -5915,3 +6168,109 @@ impl BucketProvider for Transaction {
 // --------------------------------------------------
 
 impl CatalogProvider for Transaction {}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+	use super::*;
+	use crate::dbs::{Capabilities, Session};
+	use crate::kvs::Datastore;
+
+	async fn new_ds() -> Datastore {
+		Datastore::builder()
+			.with_capabilities(Capabilities::all())
+			.with_auth(false)
+			.build_with_path("memory")
+			.await
+			.unwrap()
+	}
+
+	async fn ensure_test_db(ds: &Datastore) -> Arc<DatabaseDefinition> {
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		let db = tx.ensure_ns_db(None, "test", "test").await.unwrap();
+		tx.commit().await.unwrap();
+		db
+	}
+
+	/// The reference-target summary is read off the stored catalog, so it must
+	/// still see a `REFERENCE` field and must not report a table that only
+	/// carries non-reference fields.
+	#[tokio::test]
+	async fn reference_targets_are_derived_from_the_stored_catalog() {
+		let ds = new_ds().await;
+		let db = ensure_test_db(&ds).await;
+		let ses = Session::owner().with_ns("test").with_db("test");
+		let mut res = ds
+			.execute(
+				"DEFINE FIELD author ON comment TYPE record<person> REFERENCE;
+				 DEFINE FIELD title ON comment TYPE string;",
+				&ses,
+				None,
+			)
+			.await
+			.unwrap();
+		for r in res.drain(..) {
+			r.result.unwrap();
+		}
+
+		let tx = ds.transaction(TransactionType::Read).await.unwrap();
+		let (ns, db) = (db.namespace_id, db.database_id);
+		assert!(
+			tx.table_may_have_incoming_references(ns, db, &TableName::from("person"))
+				.await
+				.unwrap(),
+			"`record<person> REFERENCE` can target `person`"
+		);
+		assert!(
+			!tx.table_may_have_incoming_references(ns, db, &TableName::from("comment"))
+				.await
+				.unwrap(),
+			"no reference field can target `comment`"
+		);
+		tx.cancel().await.unwrap();
+	}
+
+	/// A `LIVE` registered part-way through a transaction must be delivered to
+	/// by a write later in that same transaction: bumping `cache_lives_ts`
+	/// leaves no cached table definition (by id, by name, or in the database's
+	/// table list) carrying the pre-bump timestamp, and no cached compiled
+	/// live-query list from before the subscription was written.
+	#[tokio::test]
+	async fn live_registered_mid_transaction_is_notified_by_a_later_write() {
+		let (send, recv) = crate::channel::bounded(100);
+		let ds = Datastore::builder()
+			.with_capabilities(Capabilities::all())
+			.with_auth(false)
+			.with_notify(send)
+			.build_with_path("memory")
+			.await
+			.unwrap();
+		ensure_test_db(&ds).await;
+		let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+		ds.execute("DEFINE TABLE person", &ses, None).await.unwrap().remove(0).result.unwrap();
+
+		let mut res = ds
+			.execute(
+				"BEGIN; CREATE person:0; LIVE SELECT * FROM person; CREATE person:1; COMMIT;",
+				&ses,
+				None,
+			)
+			.await
+			.unwrap();
+		for r in res.drain(..) {
+			r.result.unwrap();
+		}
+
+		let notification =
+			tokio::time::timeout(std::time::Duration::from_secs(5), recv.recv()).await;
+		let notification =
+			notification.expect("the mid-transaction LIVE was not notified").unwrap();
+		assert_eq!(
+			notification.record,
+			crate::types::PublicValue::RecordId(crate::types::PublicRecordId {
+				table: "person".to_string().into(),
+				key: crate::types::PublicRecordIdKey::Number(1),
+			})
+		);
+	}
+}

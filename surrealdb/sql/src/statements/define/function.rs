@@ -1,0 +1,62 @@
+use common::fmt::EscapeKwFreeIdent;
+use surrealdb_strand::Strand;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
+use super::DefineKind;
+use crate::{Block, CoverStmts, Expr, Kind, Literal, Permission};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub struct DefineFunctionStatement {
+	pub kind: DefineKind,
+	pub name: Strand,
+	pub args: Vec<(String, Kind)>,
+	pub block: Block,
+	pub comment: Expr,
+	pub permissions: Permission,
+	pub returns: Option<Kind>,
+	/// Optional GraphQL alias declared via `GRAPHQL_ALIAS "..."`.
+	pub graphql_alias: Option<String>,
+	/// Optional GraphQL deprecation reason declared via
+	/// `GRAPHQL_DEPRECATED "..."`.
+	pub graphql_deprecated: Option<String>,
+}
+
+impl ToSql for DefineFunctionStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "DEFINE FUNCTION");
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write_sql!(f, fmt, " OVERWRITE"),
+			DefineKind::IfNotExists => write_sql!(f, fmt, " IF NOT EXISTS"),
+		}
+		write_sql!(f, fmt, " fn");
+		for s in self.name.as_str().split("::") {
+			write_sql!(f, fmt, "::");
+			EscapeKwFreeIdent(s).fmt_sql(f, fmt);
+		}
+		write_sql!(f, fmt, "(");
+		for (i, (name, kind)) in self.args.iter().enumerate() {
+			if i > 0 {
+				f.push_str(", ");
+			}
+			write_sql!(f, fmt, "${}: {kind}", EscapeKwFreeIdent(name));
+		}
+		f.push_str(") ");
+		if let Some(ref v) = self.returns {
+			write_sql!(f, fmt, "-> {v} ");
+		}
+		self.block.fmt_sql(f, fmt);
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write_sql!(f, fmt, " COMMENT {}", CoverStmts(&self.comment));
+		}
+		if let Some(ref alias) = self.graphql_alias {
+			write_sql!(f, fmt, " GRAPHQL_ALIAS {}", common::fmt::QuoteStr(alias));
+		}
+		if let Some(ref reason) = self.graphql_deprecated {
+			write_sql!(f, fmt, " GRAPHQL_DEPRECATED {}", common::fmt::QuoteStr(reason));
+		}
+		let fmt = fmt.increment();
+		write_sql!(f, fmt, " PERMISSIONS {}", self.permissions);
+	}
+}

@@ -62,6 +62,24 @@ rand.workspace = true
 # WASM DEPENDENCY CONFIGURATION
 [target.'cfg(target_family = "wasm")'.dependencies]
 uuid = { workspace = true, features = ["serde", "v4", "v7", "js"] }
+# Two majors of getrandom, because two majors of `rand` are in the graph and
+# neither getrandom builds for wasm*-unknown-unknown without being told which
+# backend to use:
+#
+#   0.2  <- rand_core 0.6 <- rand 0.8 <- geo
+#   0.3  <- rand_core 0.9 <- rand 0.9 <- ulid, and this crate directly
+#
+# So they cannot be deduplicated from here: it needs `geo` to move to rand 0.9,
+# which is upstream. These two lines are not the duplication — they are the
+# wasm fix for a duplication that exists either way, and they collapse to one
+# the moment `geo` upgrades.
+#
+# 0.2 selects the backend with a feature; 0.3 needs that feature AND the
+# `getrandom_backend` cfg (see `.cargo/config.toml`, and note the precedence
+# caveat there). Declared in this crate because it is where `geo` enters the
+# graph, so every wasm consumer inherits the fix rather than rediscovering it.
+getrandom = { workspace = true, features = ["wasm_js"] }
+getrandom_02 = { workspace = true, features = ["js"] }
 
 # NON-WASM DEPENDENCY CONFIGURATION
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
@@ -72,8 +90,9 @@ rstest.workspace = true
 serde_json = { workspace = true }
 
 [package.metadata.cargo-machete]
-# geo-types and js are optional dependencies tied to features
-ignored = ["geo-types", "js"]
+# geo-types and js are optional dependencies tied to features; getrandom_02 is
+# a wasm-only backend selection with no code reference
+ignored = ["geo-types", "js", "getrandom", "getrandom_02"]
 
 [lints]
 workspace = true

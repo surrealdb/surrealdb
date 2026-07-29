@@ -4,6 +4,7 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
+use crate::catalog::Error;
 use crate::catalog::providers::{
 	ApiProvider, AuthorisationProvider, BucketProvider, DatabaseProvider, NamespaceProvider,
 	NodeProvider, RootProvider, TableProvider, UserProvider,
@@ -11,7 +12,6 @@ use crate::catalog::providers::{
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, FlowResultExt};
 use crate::iam::{Action, ResourceKind};

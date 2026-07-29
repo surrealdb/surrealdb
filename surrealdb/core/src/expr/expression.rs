@@ -8,7 +8,7 @@ use super::SleepStatement;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::closure::ClosureExpr;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::statements::{
@@ -18,11 +18,13 @@ use crate::expr::statements::{
 	UpsertStatement,
 };
 use crate::expr::{
-	BinaryOperator, Block, Constant, ControlFlow, FlowResult, FunctionCall, Idiom, Literal, Mock,
-	ObjectEntry, Param, PostfixOperator, PrefixOperator, RecordIdKeyLit, RecordIdLit,
+	BinaryOperator, Block, Constant, ControlFlow, Error as ExprError, FlowResult, FunctionCall,
+	Idiom, Literal, Mock, ObjectEntry, Param, PostfixOperator, PrefixOperator, RecordIdKeyLit,
+	RecordIdLit,
 };
 use crate::fnc;
 use crate::types::PublicValue;
+use crate::val::table_name_public::IntoTableName;
 use crate::val::{Array, Range, TableName, Value};
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, Default)]
@@ -251,7 +253,7 @@ impl Expr {
 					})
 					.collect(),
 			)),
-			surrealdb_types::Value::Table(t) => Expr::Table(t.into()),
+			surrealdb_types::Value::Table(t) => Expr::Table(t.into_table_name()),
 			surrealdb_types::Value::RecordId(RecordId {
 				table,
 				key,
@@ -276,7 +278,7 @@ impl Expr {
 					_ => return Expr::Literal(Literal::None), // For unsupported key types
 				};
 				Expr::Literal(Literal::RecordId(RecordIdLit {
-					table: table.into(),
+					table: table.into_table_name(),
 					key: key_lit,
 				}))
 			}
@@ -443,7 +445,9 @@ impl Expr {
 					| Expr::Rebuild(_)
 					| Expr::Alter(_)
 			) {
-			return Err(ControlFlow::Err(anyhow::Error::new(Error::PermissionPredicateSideEffect)));
+			return Err(ControlFlow::Err(anyhow::Error::new(
+				ExecError::PermissionPredicateSideEffect,
+			)));
 		}
 
 		match self {
@@ -499,7 +503,7 @@ impl Expr {
 			Expr::Return(output_statement) => output_statement.compute(stk, ctx, &opt, doc).await,
 			Expr::Throw(expr) => {
 				let res = stk.run(|stk| expr.compute(stk, ctx, &opt, doc)).await?;
-				Err(ControlFlow::Err(anyhow::Error::new(Error::Thrown(res.to_raw_string()))))
+				Err(ControlFlow::Err(anyhow::Error::new(ExecError::Thrown(res.to_raw_string()))))
 			}
 			Expr::IfElse(ifelse_statement) => ifelse_statement.compute(stk, ctx, &opt, doc).await,
 			Expr::Select(select_statement) => {
@@ -541,7 +545,7 @@ impl Expr {
 			Expr::Foreach(foreach_statement) => {
 				foreach_statement.compute(stk, ctx, &opt, doc).await
 			}
-			Expr::Let(_) => Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidStatement(
+			Expr::Let(_) => Err(ControlFlow::Err(anyhow::Error::new(ExecError::InvalidStatement(
 				"LET statements can only appear at the top level of a query or inside a block \
 				 expression"
 					.to_string(),
@@ -551,11 +555,11 @@ impl Expr {
 			}
 			Expr::Explain {
 				..
-			} => Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidStatement(
+			} => Err(ControlFlow::Err(anyhow::Error::new(ExecError::InvalidStatement(
 				"EXPLAIN is only supported with the new execution model".to_string(),
 			)))),
 			#[cfg(feature = "gql")]
-			Expr::Match(_) => Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidStatement(
+			Expr::Match(_) => Err(ControlFlow::Err(anyhow::Error::new(ExecError::InvalidStatement(
 				"GQL MATCH requires the streaming execution engine; it cannot run under the \
 				 compute-only planner strategy"
 					.to_string(),
@@ -587,7 +591,7 @@ impl Expr {
 			}))),
 			PrefixOperator::Cast(kind) => res
 				.cast_to_kind(kind)
-				.map_err(Error::from)
+				.map_err(ExprError::from)
 				.map_err(anyhow::Error::new)
 				.map_err(ControlFlow::Err),
 		}
@@ -635,7 +639,7 @@ impl Expr {
 				if let Value::Closure(x) = res {
 					x.invoke(stk, ctx, opt, doc, args).await.map_err(ControlFlow::Err)
 				} else {
-					Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidFunction {
+					Err(ControlFlow::Err(anyhow::Error::new(ExecError::InvalidFunction {
 						name: "ANONYMOUS".to_string(),
 						message: format!("'{}' is not a function", res.kind_of()),
 					})))
@@ -909,6 +913,23 @@ impl ToSql for Expr {
 	}
 }
 
+impl Expr {
+	/// Renders the canonical SurrealQL text a catalog definition stores for
+	/// this expression (e.g. a `StoredFieldDefinition.value`), matching exactly
+	/// what the old `sql::Expr`-embedding definition used to render when
+	/// nested after a clause keyword (`VALUE`, `ASSERT`, `WHEN`, ...) —
+	/// including the parenthesization `CoverStmts` applies to statement-shaped
+	/// sub-expressions (e.g. a nested `SELECT`), so the stored text is safe to
+	/// splice back in after that keyword with no further wrapping.
+	///
+	/// `Expr::Match` never reaches a stored definition (see `ToSql`'s carve-out
+	/// above), so unlike `ToSql::fmt_sql` this does not special-case it.
+	pub(crate) fn to_stored_sql(&self) -> String {
+		let sql_expr: crate::sql::Expr = self.clone().into();
+		crate::sql::CoverStmts(&sql_expr).to_sql()
+	}
+}
+
 impl InfoStructure for Expr {
 	fn structure(self) -> Value {
 		self.to_sql().into()
@@ -953,17 +974,19 @@ impl DeserializeRevisioned for Expr {
 
 		let expr = crate::syn::parse_with_settings(
 			query.as_bytes(),
-			crate::syn::parser::ParserSettings {
-				files_enabled: true,
-				surrealism_enabled: true,
-				// At some point we parsed this query, so it fit in some kind of defined limit.
-				// So it should be relatively safe to parse this without a limit.
-				object_recursion_limit: usize::MAX,
-				query_recursion_limit: usize::MAX,
-				expr_recursion_limit: usize::MAX,
-				..Default::default()
+			// The wire format is engine-rendered SurrealQL text; see the
+			// constant for why decode is capability- and limit-independent.
+			crate::syn::parser::ParserSettings::STORED_TEXT,
+			// The whole of the stored text must be consumed, for the reason
+			// `syn::expr_for_definition` documents: the Pratt parser stops at
+			// the first token it cannot continue with, so trailing content
+			// would decode to a prefix and be evaluated as if that were the
+			// stored expression.
+			async |p, stk| {
+				let expr = p.parse_expr(stk).await?;
+				p.assert_finished()?;
+				Ok(expr)
 			},
-			async |p, stk| p.parse_expr(stk).await,
 		)
 		.map_err(|err| revision::Error::Conversion(err.to_string()))?;
 		Ok(expr.into())

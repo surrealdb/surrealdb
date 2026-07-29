@@ -8,7 +8,7 @@ use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvid
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::{CursorDoc, DocumentContext, NsDbCtx};
-use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::{Data, Expr, FlowResultExt as _, Output, Value};
 use crate::idx::planner::RecordStrategy;
 use crate::val::{Duration, RecordId, RecordIdKey, TableName};
@@ -74,13 +74,13 @@ impl RelateStatement {
 							Value::Object(v) => match v.rid() {
 								Some(v) => out.push(v),
 								_ => {
-									bail!(Error::RelateStatementIn {
+									bail!(ExecError::RelateStatementIn {
 										value: v.to_sql(),
 									})
 								}
 							},
 							v => {
-								bail!(Error::RelateStatementIn {
+								bail!(ExecError::RelateStatementIn {
 									value: v.to_sql(),
 								})
 							}
@@ -90,13 +90,13 @@ impl RelateStatement {
 				Value::Object(v) => match v.rid() {
 					Some(v) => out.push(v),
 					None => {
-						bail!(Error::RelateStatementIn {
+						bail!(ExecError::RelateStatementIn {
 							value: v.to_sql(),
 						})
 					}
 				},
 				v => {
-					bail!(Error::RelateStatementIn {
+					bail!(ExecError::RelateStatementIn {
 						value: v.to_sql(),
 					})
 				}
@@ -116,13 +116,13 @@ impl RelateStatement {
 							Value::Object(v) => match v.rid() {
 								Some(v) => out.push(v),
 								None => {
-									bail!(Error::RelateStatementId {
+									bail!(ExecError::RelateStatementId {
 										value: v.to_sql(),
 									})
 								}
 							},
 							v => {
-								bail!(Error::RelateStatementId {
+								bail!(ExecError::RelateStatementId {
 									value: v.to_sql(),
 								})
 							}
@@ -132,13 +132,13 @@ impl RelateStatement {
 				Value::Object(v) => match v.rid() {
 					Some(v) => out.push(v),
 					None => {
-						bail!(Error::RelateStatementId {
+						bail!(ExecError::RelateStatementId {
 							value: v.to_sql(),
 						})
 					}
 				},
 				v => {
-					bail!(Error::RelateStatementId {
+					bail!(ExecError::RelateStatementId {
 						value: v.to_sql(),
 					})
 				}
@@ -198,7 +198,7 @@ impl RelateStatement {
 					// compatibility with clients that expect a single value.
 					0 => Ok(Value::None),
 					// There were no results
-					_ => Err(anyhow::Error::new(Error::SingleOnlyOutput)),
+					_ => Err(anyhow::Error::new(ExecError::SingleOnlyOutput)),
 				},
 				// This is standard query result
 				v => Ok(v),
@@ -230,7 +230,7 @@ impl TryFrom<Value> for RelateThrough {
 		match value {
 			Value::RecordId(id) => Ok(RelateThrough::RecordId(id)),
 			Value::Table(table) => Ok(RelateThrough::Table(table)),
-			_ => bail!(Error::RelateStatementOut {
+			_ => bail!(ExecError::RelateStatementOut {
 				value: value.to_sql()
 			}),
 		}

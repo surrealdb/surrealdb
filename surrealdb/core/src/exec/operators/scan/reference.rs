@@ -179,7 +179,7 @@ impl ExecOperator for ReferenceScan {
 			let ns_id = db_ctx.ns_ctx.ns.namespace_id;
 			let db_id = db_ctx.db.database_id;
 			let mut perm_cache: std::collections::HashMap<
-				crate::val::TableName,
+				surrealdb_strand::TableName,
 				PhysicalPermission,
 			> = std::collections::HashMap::new();
 
@@ -373,7 +373,7 @@ async fn compute_ref_key_range(
 				prefix,
 				tb: Cow::Borrowed(&rid.table),
 				id: Cow::Borrowed(&rid.key),
-				ft: Cow::Borrowed(table),
+				ft: Cow::Borrowed(table.as_str()),
 				ff: Cow::Borrowed(field),
 			}
 			.encode_bound()?,
@@ -409,7 +409,7 @@ async fn compute_ref_key_range(
 				prefix,
 				tb: Cow::Borrowed(&rid.table),
 				id: Cow::Borrowed(&rid.key),
-				ft: Cow::Borrowed(table),
+				ft: Cow::Borrowed(table.as_str()),
 				ff: Cow::Borrowed(field),
 			}
 			.encode_bound()?
@@ -427,7 +427,7 @@ async fn compute_ref_key_range(
 				prefix,
 				tb: Cow::Borrowed(&rid.table),
 				id: Cow::Borrowed(&rid.key),
-				ft: Cow::Borrowed(table),
+				ft: Cow::Borrowed(table.as_str()),
 				ff: Cow::Borrowed(field),
 			}
 			.encode_range()?)
@@ -436,7 +436,7 @@ async fn compute_ref_key_range(
 				prefix,
 				tb: Cow::Borrowed(&rid.table),
 				id: Cow::Borrowed(&rid.key),
-				ft: Cow::Borrowed(table),
+				ft: Cow::Borrowed(table.as_str()),
 			}
 			.encode_range()?)
 		}

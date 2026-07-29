@@ -8,11 +8,11 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use super::DefineKind;
 use crate::catalog::providers::{AuthorisationProvider, NamespaceProvider};
-use crate::catalog::{self, AccessDefinition};
+use crate::catalog::{self, Error as CatalogError, ExprText};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::access::AccessDuration;
 use crate::expr::access_type::{
 	BearerAccess, BearerAccessSubject, BearerAccessType, JwtAccessIssue, JwtAccessVerify,
@@ -59,7 +59,7 @@ impl DefineAccessStatement {
 		Alphanumeric.sample_string(&mut rand::rng(), 128)
 	}
 
-	pub fn from_definition(base: Base, def: &AccessDefinition) -> Self {
+	pub fn from_definition(base: Base, def: &catalog::AccessDefinition) -> Self {
 		fn convert_algorithm(access: catalog::Algorithm) -> Algorithm {
 			match &access {
 				catalog::Algorithm::EdDSA => Algorithm::EdDSA,
@@ -139,8 +139,8 @@ impl DefineAccessStatement {
 			access_type: match &def.access_type {
 				catalog::AccessType::Record(record_access) => {
 					AccessType::Record(Box::new(RecordAccess {
-						signup: record_access.signup.clone(),
-						signin: record_access.signin.clone(),
+						signup: def.signup.clone(),
+						signin: def.signin.clone(),
 						jwt: convert_jwt_access(&record_access.jwt),
 						bearer: record_access.bearer.as_ref().map(convert_bearer_access),
 					}))
@@ -161,7 +161,7 @@ impl DefineAccessStatement {
 		ctx: &FrozenContext,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<AccessDefinition> {
+	) -> Result<catalog::AccessDefinition> {
 		fn convert_algorithm(access: Algorithm) -> catalog::Algorithm {
 			match &access {
 				Algorithm::EdDSA => catalog::Algorithm::EdDSA,
@@ -219,7 +219,7 @@ impl DefineAccessStatement {
 				&& ver.alg.is_symmetric()
 				&& ver.key != iss.key
 			{
-				bail!(Error::Query {
+				bail!(ExecError::Query {
 					message: format!(
 						"Symmetric algorithm {} requires the same key for signing and verification. \
 						Use the same key value for both KEY and WITH ISSUER KEY clauses, or omit WITH ISSUER KEY.",
@@ -271,7 +271,7 @@ impl DefineAccessStatement {
 		// reject `DURATION FOR TOKEN NONE` statically, but parameterized
 		// durations are only known after `compute`, so the check moved here.
 		if matches!(&self.access_type, AccessType::Record(_)) && token_duration.is_none() {
-			bail!(Error::AccessRecordTokenDurationRequired);
+			bail!(ExecError::AccessRecordTokenDurationRequired);
 		}
 		let session_duration = stk
 			.run(|stk| self.duration.session.compute(stk, ctx, opt, doc))
@@ -285,37 +285,48 @@ impl DefineAccessStatement {
 			.catch_return()?
 			.cast_to()?;
 
-		Ok(AccessDefinition {
+		let access_type = match &self.access_type {
+			AccessType::Record(record_access) => {
+				catalog::AccessType::Record(catalog::RecordAccess {
+					signup: record_access.signup.as_ref().map(ExprText::new),
+					signin: record_access.signin.as_ref().map(ExprText::new),
+					jwt: convert_jwt_access(stk, ctx, opt, doc, &record_access.jwt).await?,
+					bearer: map_opt!(x as &record_access.bearer => convert_bearer_access(stk, ctx, opt, doc, x).await?),
+				})
+			}
+			AccessType::Jwt(jwt_access) => {
+				catalog::AccessType::Jwt(convert_jwt_access(stk, ctx, opt, doc, jwt_access).await?)
+			}
+			AccessType::Bearer(bearer_access) => catalog::AccessType::Bearer(
+				convert_bearer_access(stk, ctx, opt, doc, bearer_access).await?,
+			),
+		};
+		// The compiled side expressions come straight from the statement ASTs;
+		// they are what the stored `access_type` text (built above) parses back to.
+		let (signup, signin) = match &self.access_type {
+			AccessType::Record(record_access) => {
+				(record_access.signup.clone(), record_access.signin.clone())
+			}
+			_ => (None, None),
+		};
+		Ok(catalog::AccessDefinition {
 			name: expr_to_ident(stk, ctx, opt, doc, &self.name, "access name").await?.into(),
 			base: self.base.into(),
+			access_type,
+			authenticate: self.authenticate.clone(),
+			signup,
+			signin,
 			grant_duration,
 			token_duration,
 			session_duration,
 			comment,
-			authenticate: self.authenticate.clone(),
-			access_type: match &self.access_type {
-				AccessType::Record(record_access) => {
-					catalog::AccessType::Record(catalog::RecordAccess {
-						signup: record_access.signup.clone(),
-						signin: record_access.signin.clone(),
-						jwt: convert_jwt_access(stk, ctx, opt, doc, &record_access.jwt).await?,
-						bearer: map_opt!(x as &record_access.bearer => convert_bearer_access(stk, ctx, opt, doc, x).await?),
-					})
-				}
-				AccessType::Jwt(jwt_access) => catalog::AccessType::Jwt(
-					convert_jwt_access(stk, ctx, opt, doc, jwt_access).await?,
-				),
-				AccessType::Bearer(bearer_access) => catalog::AccessType::Bearer(
-					convert_bearer_access(stk, ctx, opt, doc, bearer_access).await?,
-				),
-			},
 		})
 	}
 }
 
 impl DefineAccessStatement {
-	/// Returns true if the access definition uses ES512 in any JWT component.
-	fn uses_es512(definition: &AccessDefinition) -> bool {
+	/// Returns true if the access type uses ES512 in any JWT component.
+	fn uses_es512(access_type: &catalog::AccessType) -> bool {
 		fn jwt_uses_es512(jwt: &catalog::JwtAccess) -> bool {
 			if let catalog::JwtAccessVerify::Key(ref ver) = jwt.verify
 				&& matches!(ver.alg, catalog::Algorithm::Es512)
@@ -330,7 +341,7 @@ impl DefineAccessStatement {
 			false
 		}
 
-		match &definition.access_type {
+		match access_type {
 			catalog::AccessType::Jwt(jwt) => jwt_uses_es512(jwt),
 			catalog::AccessType::Record(rec) => {
 				jwt_uses_es512(&rec.jwt)
@@ -343,9 +354,9 @@ impl DefineAccessStatement {
 	/// Check if the access definition uses ES512, which is not currently supported.
 	/// This should only be called for new definitions (not during import/restore or
 	/// overwrite of an existing ES512 definition).
-	fn reject_es512(definition: &AccessDefinition) -> Result<()> {
-		if Self::uses_es512(definition) {
-			bail!(Error::AccessUnsupportedAlgorithm);
+	fn reject_es512(definition: &catalog::AccessDefinition) -> Result<()> {
+		if Self::uses_es512(&definition.access_type) {
+			bail!(ExecError::AccessUnsupportedAlgorithm);
 		}
 		Ok(())
 	}
@@ -371,11 +382,11 @@ impl DefineAccessStatement {
 				// Check if access method already exists
 				let mut existing_uses_es512 = false;
 				if let Some(access) = txn.get_root_access(definition.name.as_str(), None).await? {
-					existing_uses_es512 = Self::uses_es512(&access);
+					existing_uses_es512 = Self::uses_es512(&access.access_type);
 					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
-								bail!(Error::AccessRootAlreadyExists {
+								bail!(CatalogError::AccessRootAlreadyExists {
 									ac: access.name.to_string(),
 								});
 							}
@@ -393,7 +404,7 @@ impl DefineAccessStatement {
 				let key = crate::key::root::ac::AccessKey {
 					ac: Cow::Borrowed(definition.name.as_str()),
 				};
-				txn.set_key(&key, &definition).await?;
+				txn.set_key(&key, &definition.to_stored()).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -406,11 +417,11 @@ impl DefineAccessStatement {
 				let ns = ctx.get_ns_id(opt).await?;
 				let mut existing_uses_es512 = false;
 				if let Some(access) = txn.get_ns_access(ns, definition.name.as_str(), None).await? {
-					existing_uses_es512 = Self::uses_es512(&access);
+					existing_uses_es512 = Self::uses_es512(&access.access_type);
 					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
-								bail!(Error::AccessNsAlreadyExists {
+								bail!(CatalogError::AccessNsAlreadyExists {
 									ns: opt.ns()?.to_string(),
 									ac: access.name.to_string(),
 								});
@@ -431,7 +442,7 @@ impl DefineAccessStatement {
 					ac: Cow::Borrowed(definition.name.as_str()),
 				};
 				txn.get_or_add_ns(Some(ctx), opt.ns()?).await?;
-				txn.set_key(&key, &definition).await?;
+				txn.set_key(&key, &definition.to_stored()).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -446,11 +457,11 @@ impl DefineAccessStatement {
 				if let Some(access) =
 					txn.get_db_access(ns, db, definition.name.as_str(), None).await?
 				{
-					existing_uses_es512 = Self::uses_es512(&access);
+					existing_uses_es512 = Self::uses_es512(&access.access_type);
 					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
-								bail!(Error::AccessDbAlreadyExists {
+								bail!(CatalogError::AccessDbAlreadyExists {
 									ns: opt.ns()?.to_string(),
 									db: opt.db()?.to_string(),
 									ac: access.name.to_string(),
@@ -474,7 +485,7 @@ impl DefineAccessStatement {
 					},
 					ac: Cow::Borrowed(definition.name.as_str()),
 				};
-				txn.set_key(&key, &definition).await?;
+				txn.set_key(&key, &definition.to_stored()).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good

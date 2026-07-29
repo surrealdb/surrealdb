@@ -1,4 +1,5 @@
 pub mod docids;
+pub(crate) mod error;
 pub(crate) mod ft;
 pub(crate) mod index;
 pub mod planner;
@@ -11,8 +12,9 @@ use std::sync::Arc;
 use anyhow::Result;
 use uuid::Uuid;
 
+pub(crate) use self::error::{Error, index_exists_record};
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
-use crate::err::Error;
+use crate::err::Error as CoreError;
 use crate::idx::docids::DocId;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::vector::SerializedVector;
@@ -103,7 +105,10 @@ where
 
 /// Identifies the datastore error used for failed conditional writes/deletes.
 pub(in crate::idx) fn is_transaction_condition_not_met(e: &anyhow::Error) -> bool {
-	if matches!(e.downcast_ref::<Error>(), Some(Error::Kvs(KvsError::TransactionConditionNotMet))) {
+	if matches!(
+		e.downcast_ref::<CoreError>(),
+		Some(CoreError::Kvs(KvsError::TransactionConditionNotMet))
+	) {
 		return true;
 	}
 	matches!(e.downcast_ref::<KvsError>(), Some(KvsError::TransactionConditionNotMet))

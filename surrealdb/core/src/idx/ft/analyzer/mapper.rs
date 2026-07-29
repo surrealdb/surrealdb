@@ -14,8 +14,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use vart::VariableSizeKey;
 use vart::art::Tree;
 
-use crate::err::Error;
 use crate::iam::file::check_is_path_allowed;
+use crate::idx::Error;
 use crate::idx::ft::analyzer::filter::{FilterResult, Term};
 
 #[derive(Clone, Default)]

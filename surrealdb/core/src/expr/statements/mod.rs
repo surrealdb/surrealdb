@@ -1,6 +1,7 @@
 pub(crate) mod access;
 pub(crate) mod alter;
 pub(crate) mod create;
+pub(crate) mod subscriptions;
 // needs to be public because the RPC layer is accessing the kv store for api
 // definitions.
 pub mod define;

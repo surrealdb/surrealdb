@@ -78,7 +78,7 @@ impl AlterEventStatement {
 		}
 
 		match self.then {
-			AlterKind::Set(ref v) => ev.then.clone_from(v),
+			AlterKind::Set(ref v) => ev.then = v.clone(),
 			AlterKind::Drop => {}
 			AlterKind::None => {}
 		}
@@ -106,13 +106,13 @@ impl AlterEventStatement {
 			tb: Cow::Borrowed(&what),
 			ev: Cow::Borrowed(&name),
 		};
-		txn.set_key(&key, &ev).await?;
+		txn.set_key(&key, &ev.to_stored()).await?;
 
 		// Refresh the table cache
 		if let Some(tb) = txn.get_tb(ns, db, &what, None).await? {
 			let tb = TableDefinition {
 				cache_events_ts: Uuid::now_v7(),
-				..tb.as_ref().clone()
+				..(*tb).clone()
 			};
 			txn.put_tb(ns_name, db_name, &tb).await?;
 		}

@@ -3,6 +3,7 @@ use std::mem::{self};
 use std::ops::Bound;
 
 use anyhow::Result;
+use common::range::TypedRange;
 use rand::seq::SliceRandom;
 use reblessive::tree::Stk;
 use surrealdb_cnf::GENERATION_ALLOCATION_LIMIT;
@@ -11,11 +12,10 @@ use super::args::{Optional, Rest};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::expr::Error;
 use crate::val::array::{
 	Clump, Combine, Complement, Difference, Flatten, Intersect, Matches, Union, Uniq, Windows,
 };
-use crate::val::range::TypedRange;
 use crate::val::{Array, Closure, Value};
 
 /// Returns an error if an array of this length is too much to allocate.

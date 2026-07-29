@@ -2,11 +2,12 @@
 
 use std::borrow::Cow;
 
+use surrealdb_strand::TableName;
+
 use crate::catalog::IndexId;
 use crate::idx::trees::diskann::DiskAnnPendingState;
 use crate::key::database::all::DatabaseRoot;
 use crate::key::{impl_kv_key_storekey, key};
-use crate::val::TableName;
 
 key! {
 	/// Stores one shard of the distributed-safe pending-operation summary for one DiskANN index.

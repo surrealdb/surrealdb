@@ -9,6 +9,7 @@ use std::borrow::Cow;
 use std::fmt;
 
 use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::part::Part;
 use crate::expr::{Expr, Idiom, Literal};
 use crate::val::{Set, Value};
@@ -78,14 +79,14 @@ impl TryFrom<&Idiom> for FieldPath {
 				// Skip parts that don't affect output path structure
 				Part::Destructure(_) | Part::Start(_) => {}
 				_ => {
-					return Err(Error::Query {
+					return Err(ExecError::Query {
 						message: format!(
 							"FieldPath cannot contain complex parts like where clauses or method calls. \
 				 Only simple field access (a.b.c), literal indices ([0], [$]), and graph traversals are supported. \
 				 Got: {:?}",
 							idiom
 						),
-					});
+					}.into());
 				}
 			}
 		}

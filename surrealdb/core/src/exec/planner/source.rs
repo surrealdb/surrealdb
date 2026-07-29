@@ -4,18 +4,19 @@
 
 use std::sync::Arc;
 
+use surrealdb_strand::TableName;
+
 use super::Planner;
 use super::util::{extract_table_from_context, key_lit_to_expr};
 use crate::err::Error;
-use crate::exec::ExecOperator;
 use crate::exec::operators::{
 	CurrentValueSource, EdgeTableSpec, Filter, GraphEdgeScan, GraphScanOutput, Limit, OrderByField,
 	RandomShuffle, ReferenceScan, ReferenceScanOutput, SortDirection,
 };
 use crate::exec::parts::LookupDirection;
 use crate::exec::planner::select::SelectPipelineConfig;
+use crate::exec::{Error as ExecError, ExecOperator};
 use crate::expr::{Expr, Literal};
-use crate::val::TableName;
 
 /// Planned representation of a `->edge->vertex` fast-path collapse.
 pub(crate) struct TargetVertexPlan {
@@ -46,7 +47,7 @@ impl<'ctx> Planner<'ctx> {
 		use crate::exec::physical_expr::function::IndexFunctionExec;
 
 		let registry = self.function_registry();
-		let func = registry.get_index_function(name).ok_or_else(|| Error::Query {
+		let func = registry.get_index_function(name).ok_or_else(|| ExecError::Query {
 			message: format!("Index function '{}' not found in registry", name),
 		})?;
 
@@ -54,7 +55,7 @@ impl<'ctx> Planner<'ctx> {
 		let index_ctx = match func.index_context_kind() {
 			IndexContextKind::FullText => {
 				// FullText functions must declare which argument is the index ref
-				let ref_idx = func.index_ref_arg_index().ok_or_else(|| Error::Query {
+				let ref_idx = func.index_ref_arg_index().ok_or_else(|| ExecError::Query {
 					message: format!(
 						"Index function '{}': FullText functions must declare an index_ref_arg_index",
 						name
@@ -62,13 +63,14 @@ impl<'ctx> Planner<'ctx> {
 				})?;
 
 				if ref_idx >= ast_args.len() {
-					return Err(Error::Query {
+					return Err(ExecError::Query {
 						message: format!(
 							"Index function '{}' requires at least {} arguments",
 							name,
 							ref_idx + 1
 						),
-					});
+					}
+					.into());
 				}
 
 				// Extract the match_ref argument at plan time (not passed at runtime)
@@ -81,26 +83,28 @@ impl<'ctx> Planner<'ctx> {
 						n as u8
 					}
 					_ => {
-						return Err(Error::Query {
+						return Err(ExecError::Query {
 							message: format!(
 								"Index function '{}': index_ref argument must be a literal integer in range 0..255",
 								name
 							),
-						});
+						}
+						.into());
 					}
 				};
 
 				// Resolve the MatchContext from the MATCHES context
-				let matches_ctx = self.ctx.get_matches_context().ok_or_else(|| Error::Query {
-					message: format!(
-						"Index function '{}': no MATCHES clause found in WHERE condition",
-						name
-					),
-				})?;
+				let matches_ctx =
+					self.ctx.get_matches_context().ok_or_else(|| ExecError::Query {
+						message: format!(
+							"Index function '{}': no MATCHES clause found in WHERE condition",
+							name
+						),
+					})?;
 
 				let match_ctx = matches_ctx
 					.resolve(match_ref, extract_table_from_context(self.ctx))
-					.map_err(|e| Error::Query {
+					.map_err(|e| ExecError::Query {
 						message: format!("Index function '{}': {}", name, e),
 					})?;
 
@@ -115,7 +119,7 @@ impl<'ctx> Planner<'ctx> {
 					ast_args.remove(ref_idx);
 				}
 
-				let knn_ctx = self.ctx.get_knn_context().ok_or_else(|| Error::Query {
+				let knn_ctx = self.ctx.get_knn_context().ok_or_else(|| ExecError::Query {
 					message: format!(
 						"Index function '{}': no KNN operator found in WHERE condition",
 						name

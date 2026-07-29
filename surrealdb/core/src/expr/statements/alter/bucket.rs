@@ -7,12 +7,11 @@ use surrealdb_types::{SqlFormat, ToSql};
 use tracing::instrument;
 
 use super::AlterKind;
-use crate::catalog::Permission;
 use crate::catalog::providers::BucketProvider;
+use crate::catalog::{Error, Permission};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal};
 use crate::iam::{Action, ResourceKind};
@@ -99,7 +98,7 @@ impl AlterBucketStatement {
 			},
 			bu: Cow::Borrowed(&name),
 		};
-		txn.set_key(&key, &bu).await?;
+		txn.set_key(&key, &bu.to_stored()).await?;
 		txn.clear_cache();
 		Ok(Value::None)
 	}

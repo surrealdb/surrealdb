@@ -8,11 +8,10 @@ use tracing::instrument;
 
 use super::AlterKind;
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{Permissions, TableType};
+use crate::catalog::{Error, Permissions, TableType};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::statements::DefineTableStatement;
 use crate::expr::{Base, ChangeFeed, Expr, Literal};
@@ -149,7 +148,7 @@ impl AlterTableStatement {
 
 		// Record definition change
 		if changefeed_replaced {
-			txn.changefeed_buffer_table_change(ns, db, &name, &dt);
+			txn.changefeed_buffer_table_change(ns, db, &name, &dt.to_stored());
 		}
 
 		if self.compact {

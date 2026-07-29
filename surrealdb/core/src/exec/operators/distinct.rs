@@ -144,7 +144,7 @@ impl SeenSet {
 			return Ok(false);
 		}
 		if self.len >= max_rows {
-			return Err(ControlFlow::Err(anyhow::anyhow!(crate::err::Error::InvalidStatement(
+			return Err(ControlFlow::Err(anyhow::anyhow!(crate::exec::Error::InvalidStatement(
 				format!(
 					"GQL MATCH RETURN DISTINCT exceeded the maximum of {max_rows} distinct rows \
 					 (configurable via SURREAL_GQL_MAX_JOIN_BUILD_ROWS)"

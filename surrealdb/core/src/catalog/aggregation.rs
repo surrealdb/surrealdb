@@ -49,6 +49,7 @@ use surrealdb_strand::Strand;
 use surrealdb_types::ToSql;
 
 use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::field::Selector;
 use crate::expr::statements::define::DefineConfigStatement;
 use crate::expr::statements::{
@@ -57,7 +58,9 @@ use crate::expr::statements::{
 	UpdateStatement, UpsertStatement,
 };
 use crate::expr::visit::{MutVisitor, VisitMut};
-use crate::expr::{Expr, Field, Fields, Function, Groups, Idiom, Part, SelectStatement};
+use crate::expr::{
+	Error as ExprError, Expr, Field, Fields, Function, Groups, Idiom, Part, SelectStatement,
+};
 use crate::val::{Array, Datetime, Number, Object, TryAdd as _, TryFloatDiv, TryMul, Value};
 
 /// An expression which will be aggregated over for each group.
@@ -272,7 +275,7 @@ pub(crate) fn add_to_aggregation_stats(
 				max,
 			} => {
 				let Value::Number(ref n) = arguments[*arg] else {
-					bail!(Error::InvalidFunctionArguments {
+					bail!(ExprError::InvalidFunctionArguments {
 						name: "math::max".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `number` but found `{}`",
@@ -289,7 +292,7 @@ pub(crate) fn add_to_aggregation_stats(
 				min,
 			} => {
 				let Value::Number(ref n) = arguments[*arg] else {
-					bail!(Error::InvalidFunctionArguments {
+					bail!(ExprError::InvalidFunctionArguments {
 						name: "math::min".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `number` but found `{}`",
@@ -306,7 +309,7 @@ pub(crate) fn add_to_aggregation_stats(
 				sum,
 			} => {
 				let Value::Number(ref n) = arguments[*arg] else {
-					bail!(Error::InvalidFunctionArguments {
+					bail!(ExprError::InvalidFunctionArguments {
 						name: "math::sum".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `number` but found `{}`",
@@ -322,7 +325,7 @@ pub(crate) fn add_to_aggregation_stats(
 				count,
 			} => {
 				let Value::Number(ref n) = arguments[*arg] else {
-					bail!(Error::InvalidFunctionArguments {
+					bail!(ExprError::InvalidFunctionArguments {
 						name: "math::mean".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `number` but found `{}`",
@@ -341,7 +344,7 @@ pub(crate) fn add_to_aggregation_stats(
 				count,
 			} => {
 				let Value::Number(ref n) = arguments[*arg] else {
-					bail!(Error::InvalidFunctionArguments {
+					bail!(ExprError::InvalidFunctionArguments {
 						name: "math::stddev".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `number` but found `{}`",
@@ -361,7 +364,7 @@ pub(crate) fn add_to_aggregation_stats(
 				count,
 			} => {
 				let Value::Number(ref n) = arguments[*arg] else {
-					bail!(Error::InvalidFunctionArguments {
+					bail!(ExprError::InvalidFunctionArguments {
 						name: "math::variance".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `number` but found `{}`",
@@ -379,7 +382,7 @@ pub(crate) fn add_to_aggregation_stats(
 				max,
 			} => {
 				let Value::Datetime(ref d) = arguments[*arg] else {
-					bail!(Error::InvalidFunctionArguments {
+					bail!(ExprError::InvalidFunctionArguments {
 						name: "time::max".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `datetime` but found `{}`",
@@ -397,7 +400,7 @@ pub(crate) fn add_to_aggregation_stats(
 				min,
 			} => {
 				let Value::Datetime(ref d) = arguments[*arg] else {
-					bail!(Error::InvalidFunctionArguments {
+					bail!(ExprError::InvalidFunctionArguments {
 						name: "time::min".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `datetime` but found `{}`",
@@ -533,7 +536,7 @@ impl AggregateExprCollector<'_> {
 	) -> Result<()> {
 		ensure!(
 			args.len() == 1,
-			Error::InvalidFunctionArguments {
+			ExprError::InvalidFunctionArguments {
 				name: name.to_string(),
 				message: "Expected 1 argument".to_string()
 			}
@@ -640,7 +643,7 @@ impl MutVisitor for AggregateExprCollector<'_> {
 			}
 			Expr::Param(p) => {
 				if p.as_str() == "this" {
-					bail!(Error::Query{
+					bail!(ExecError::Query{
 						message: "Found a `$this` parameter refering to the document of a group by select statement\n\
 							Select statements with a group by currently have no defined document to refer to".to_string()
 					});
@@ -670,7 +673,7 @@ impl MutVisitor for AggregateExprCollector<'_> {
 								.or_insert_with(|| len);
 							self.aggregations.push(Aggregation::Accumulate(arg))
 						} else {
-							bail!(Error::Query {
+							bail!(ExecError::Query {
 								message: format!(
 									"Found idiom `{}` within the selector of a materialized aggregate view.\n\
 											 Selection of document fields which are not used within the argument of an optimized aggregate function is currently not supported",
@@ -860,10 +863,10 @@ impl MutVisitor for ParentRewritor {
 		if let Expr::Param(p) = e
 			&& p.as_str() == "parent"
 		{
-			return Err(Error::Query{
+			return Err(ExecError::Query{
 					message: "Found a `$parent` parameter refering to the document of a GROUP select statement\n\
 						Select statements with a GROUP BY or GROUP ALL currently have no defined document to refer to".to_string()
-				});
+				}.into());
 		}
 		e.visit_mut(self)
 	}
@@ -1047,7 +1050,7 @@ impl AggregationAnalysis {
 					}) = f
 					else {
 						// all is not a valid aggregate selector.
-						bail!(Error::InvalidAggregationSelector {
+						bail!(ExecError::InvalidAggregationSelector {
 							expr: f.to_sql()
 						})
 					};

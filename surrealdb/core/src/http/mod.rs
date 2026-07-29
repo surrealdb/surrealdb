@@ -71,7 +71,9 @@ impl HttpClient {
 			let target = NetTarget::Host(host.to_owned(), port);
 
 			if !filter_clone.allow.matches(&target) || filter_clone.deny.matches(&target) {
-				return attempt.error(crate::err::Error::NetTargetNotAllowed(target.to_string()));
+				return attempt.error(crate::dbs::capabilities::Error::NetTargetNotAllowed(
+					target.to_string(),
+				));
 			}
 
 			policy(attempt)

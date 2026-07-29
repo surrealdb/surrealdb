@@ -5,9 +5,8 @@ use std::sync::Arc;
 use futures::StreamExt;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::err::Error;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, BoxFut, ContextLevel, ExecOperator};
+use crate::exec::{AccessMode, BoxFut, ContextLevel, Error as ExecError, ExecOperator};
 use crate::expr::FlowResult;
 use crate::val::Value;
 
@@ -244,7 +243,7 @@ async fn evaluate_lookup_for_value(
 			return match results.len() {
 				0 => Ok(Value::None),
 				1 => Ok(results.into_iter().next().expect("Exactly one result in this branch")),
-				_ => Err(anyhow::anyhow!(Error::SingleOnlyOutput)),
+				_ => Err(anyhow::anyhow!(ExecError::SingleOnlyOutput)),
 			};
 		}
 		return Ok(Value::Array(results.into()));
@@ -254,7 +253,7 @@ async fn evaluate_lookup_for_value(
 		return match results.len() {
 			0 => Ok(Value::None),
 			1 => Ok(results.into_iter().next().expect("Exactly one result in this branch")),
-			_ => Err(anyhow::anyhow!(Error::SingleOnlyOutput)),
+			_ => Err(anyhow::anyhow!(ExecError::SingleOnlyOutput)),
 		};
 	}
 

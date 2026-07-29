@@ -3,7 +3,7 @@ use std::borrow::Cow;
 
 use anyhow::Result;
 
-use crate::catalog::FunctionDefinition;
+use crate::catalog::StoredFunctionDefinition;
 use crate::key::category::{Categorise, Category};
 use crate::key::database::all::DatabaseRoot;
 use crate::key::{impl_kv_key_storekey, impl_kv_range_storekey, key};
@@ -18,7 +18,7 @@ key! {
 		pub fc: Cow<'a, str>,
 	}
 }
-impl_kv_key_storekey!(Fc<'a> => FunctionDefinition);
+impl_kv_key_storekey!(Fc<'a> => StoredFunctionDefinition);
 impl Categorise for Fc<'_> {
 	fn categorise(&self) -> Category {
 		Category::DatabaseFunction

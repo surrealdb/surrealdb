@@ -6,8 +6,8 @@ use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
-use crate::catalog::Record;
 use crate::catalog::providers::TableProvider;
+use crate::catalog::{Error as CatalogError, Record};
 use crate::ctx::{Canceller, Context, FrozenContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::{Explanation, Plan};
@@ -15,7 +15,8 @@ use crate::dbs::result::Results;
 use crate::dbs::store::{MemoryOrdered, MemoryOrderedLimit, MemoryRandom};
 use crate::dbs::{Options, Statement};
 use crate::doc::{CursorDoc, Document, DocumentContext, IgnoreError, NsDbCtx};
-use crate::err::Error;
+use crate::err::EngineError;
+use crate::exec::Error as ExecError;
 use crate::expr::lookup::{ComputedLookupSubject, LookupKind};
 use crate::expr::order::Ordering;
 use crate::expr::statements::relate::RelateThrough;
@@ -273,7 +274,7 @@ impl Iterator {
 					let from = match from.compute(stk, ctx, opt, doc).await {
 						Ok(x) => x,
 						Err(ControlFlow::Err(e)) => return Err(e),
-						Err(_) => bail!(Error::InvalidControlFlow),
+						Err(_) => bail!(ExecError::InvalidControlFlow),
 					};
 					let mut what = Vec::new();
 					for s in lookup.what.iter() {
@@ -320,7 +321,7 @@ impl Iterator {
 				.get_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, table, opt.version)
 				.await?
 				.ok_or_else(|| {
-					anyhow::anyhow!(Error::TbNotFound {
+					anyhow::anyhow!(CatalogError::TbNotFound {
 						name: table.to_owned(),
 					})
 				})?
@@ -375,7 +376,7 @@ impl Iterator {
 				.get_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &rid.table, opt.version)
 				.await?
 				.ok_or_else(|| {
-					anyhow::anyhow!(Error::TbNotFound {
+					anyhow::anyhow!(CatalogError::TbNotFound {
 						name: rid.table.clone(),
 					})
 				})?
@@ -428,7 +429,7 @@ impl Iterator {
 		doc_ctx: &NsDbCtx,
 		mock: &Mock,
 	) -> Result<()> {
-		ensure!(!stm_ctx.stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
+		ensure!(!stm_ctx.stm.is_only() || self.is_limit_one_or_zero(), ExecError::SingleOnlyOutput);
 
 		// For deferable statements (CREATE, UPSERT without condition), auto-create the table
 		let tb = if stm_ctx.stm.is_deferable() {
@@ -446,7 +447,7 @@ impl Iterator {
 				.get_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, mock.table(), opt.version)
 				.await?
 				.ok_or_else(|| {
-					anyhow::anyhow!(Error::TbNotFound {
+					anyhow::anyhow!(CatalogError::TbNotFound {
 						name: mock.table().to_owned(),
 					})
 				})?
@@ -489,7 +490,7 @@ impl Iterator {
 		kind: LookupKind,
 		what: Vec<ComputedLookupSubject>,
 	) -> Result<()> {
-		ensure!(!stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
+		ensure!(!stm.is_only() || self.is_limit_one_or_zero(), ExecError::SingleOnlyOutput);
 		// Check if this is a create statement
 		if stm.is_create() {
 			// recreate the expression for the error.
@@ -503,7 +504,7 @@ impl Iterator {
 			])
 			.to_sql();
 
-			bail!(Error::InvalidStatementTarget {
+			bail!(ExecError::InvalidStatementTarget {
 				value,
 			})
 		}
@@ -513,7 +514,7 @@ impl Iterator {
 			txn.get_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &from.table, opt.version)
 				.await?
 				.ok_or_else(|| {
-					anyhow::anyhow!(Error::TbNotFound {
+					anyhow::anyhow!(CatalogError::TbNotFound {
 						name: from.table.clone(),
 					})
 				})?
@@ -564,7 +565,7 @@ impl Iterator {
 		// Check if this is a create statement
 		ensure!(
 			!stm_ctx.stm.is_create(),
-			Error::InvalidStatementTarget {
+			ExecError::InvalidStatementTarget {
 				value: rid.to_sql(),
 			}
 		);
@@ -617,13 +618,13 @@ impl Iterator {
 								self.prepare_record_id(ctx, opt, planner, stm_ctx, doc_ctx, id)
 									.await?;
 							} else {
-								bail!(Error::InvalidStatementTarget {
+								bail!(ExecError::InvalidStatementTarget {
 									value: Value::Object(o).to_sql(),
 								})
 							}
 						}
 						v => {
-							bail!(Error::InvalidStatementTarget {
+							bail!(ExecError::InvalidStatementTarget {
 								value: v.to_sql(),
 							})
 						}
@@ -635,13 +636,13 @@ impl Iterator {
 				if let Some(id) = o.rid() {
 					self.prepare_record_id(ctx, opt, planner, stm_ctx, doc_ctx, id).await?;
 				} else {
-					bail!(Error::InvalidStatementTarget {
+					bail!(ExecError::InvalidStatementTarget {
 						value: o.to_sql(),
 					})
 				}
 			}
 			v => {
-				bail!(Error::InvalidStatementTarget {
+				bail!(ExecError::InvalidStatementTarget {
 					value: v.to_sql(),
 				})
 			}
@@ -662,7 +663,7 @@ impl Iterator {
 		doc_ctx: &NsDbCtx,
 		v: &[Expr],
 	) -> Result<()> {
-		ensure!(!stm_ctx.stm.is_only() || self.is_limit_one_or_zero(), Error::SingleOnlyOutput);
+		ensure!(!stm_ctx.stm.is_only() || self.is_limit_one_or_zero(), ExecError::SingleOnlyOutput);
 		// Add the records to the iterator
 		for v in v {
 			match v {
@@ -686,7 +687,7 @@ impl Iterator {
 						let from = match from.compute(stk, ctx, opt, doc).await {
 							Ok(x) => x,
 							Err(ControlFlow::Err(e)) => return Err(e),
-							Err(_) => bail!(Error::InvalidControlFlow),
+							Err(_) => bail!(ExecError::InvalidControlFlow),
 						};
 						let mut what = Vec::new();
 						for s in lookup.what.iter() {
@@ -1242,9 +1243,11 @@ impl Iterator {
 						Statement::Delete(_) => doc.delete(stk, ctx, opt, stm).await,
 						Statement::Insert(_) => doc.insert(stk, ctx, opt, stm).await,
 						stm => {
-							return Err(IgnoreError::from(anyhow::Error::new(Error::unreachable(
-								format_args!("Unexpected statement type: {stm:?}"),
-							))));
+							return Err(IgnoreError::from(anyhow::Error::new(
+								EngineError::unreachable(format_args!(
+									"Unexpected statement type: {stm:?}"
+								)),
+							)));
 						}
 					};
 					// Bump the per-statement affected-row counter when a real

@@ -55,7 +55,7 @@ pub mod distance {
 
 	use crate::ctx::FrozenContext;
 	use crate::doc::CursorDoc;
-	use crate::err::Error;
+	use crate::expr::Error;
 	use crate::fnc::args::Optional;
 	use crate::fnc::get_execution_context;
 	use crate::fnc::util::math::vector::{
@@ -179,7 +179,7 @@ pub mod similarity {
 
 	use anyhow::{Result, ensure};
 
-	use crate::err::Error;
+	use crate::expr::Error;
 	use crate::fnc::util::math::vector::{CosineSimilarity, check_same_dimension, deviation};
 	use crate::val::{Number, Value};
 

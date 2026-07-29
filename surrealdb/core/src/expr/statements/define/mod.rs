@@ -43,7 +43,7 @@ pub(crate) use user::DefineUserStatement;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::val::Value;
 
 /// Validate a user-supplied `GRAPHQL_ALIAS "..."` value against the GraphQL
@@ -61,7 +61,7 @@ pub(crate) fn validate_graphql_alias(alias: &Option<String>, kind: &str) -> Resu
 	let first_ok = chars.next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
 	let rest_ok = chars.all(|c| c.is_ascii_alphanumeric() || c == '_');
 	if !first_ok || !rest_ok {
-		return Err(Error::InvalidStatement(format!(
+		return Err(ExecError::InvalidStatement(format!(
 			"GRAPHQL_ALIAS `{alias}` on {kind} is not a valid GraphQL Name; \
 			 expected /[_A-Za-z][_0-9A-Za-z]*/"
 		))
@@ -87,7 +87,9 @@ pub(crate) enum DefineStatement {
 	Param(DefineParamStatement),
 	Table(DefineTableStatement),
 	Event(DefineEventStatement),
-	Field(DefineFieldStatement),
+	/// Boxed, like its `sql` twin: it is by far the largest variant, so an
+	/// unboxed one sizes every `DefineStatement` allocation to it.
+	Field(Box<DefineFieldStatement>),
 	Index(DefineIndexStatement),
 	User(DefineUserStatement),
 	Model(DefineModelStatement),

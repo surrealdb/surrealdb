@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use parking_lot::Mutex;
 
-use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
+use crate::catalog::{DatabaseId, NamespaceId, StoredTableDefinition};
 use crate::cf::TableMutations;
 use crate::doc::CursorRecord;
 use crate::key::KVValue;
@@ -41,7 +41,7 @@ impl Changefeed {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &TableName,
-		dt: &TableDefinition,
+		dt: &StoredTableDefinition,
 	) {
 		// Acquire the buffer lock
 		let mut buffer = self.buffer.lock();
@@ -119,7 +119,8 @@ mod tests {
 
 	use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 	use crate::catalog::{
-		DatabaseDefinition, DatabaseId, NamespaceDefinition, NamespaceId, TableDefinition, TableId,
+		DatabaseDefinition, DatabaseId, FromStored, NamespaceDefinition, NamespaceId,
+		StoredTableDefinition, TableDefinition, TableId,
 	};
 	use crate::cf::ChangeSet;
 	use crate::expr::changefeed::ChangeFeed;
@@ -157,7 +158,7 @@ mod tests {
 		tx1.changefeed_buffer_record_change(
 			tb.namespace_id,
 			tb.database_id,
-			&tb.name,
+			&tb_name,
 			&record_a,
 			previous.clone().into(),
 			value_a.into(),
@@ -174,7 +175,7 @@ mod tests {
 		tx2.changefeed_buffer_record_change(
 			tb.namespace_id,
 			tb.database_id,
-			&tb.name,
+			&tb_name,
 			&record_c,
 			previous.clone().into(),
 			value_c.into(),
@@ -191,7 +192,7 @@ mod tests {
 		tx3.changefeed_buffer_record_change(
 			tb.namespace_id,
 			tb.database_id,
-			&tb.name,
+			&tb_name,
 			&record_b,
 			previous.clone().into(),
 			value_b.into(),
@@ -205,7 +206,7 @@ mod tests {
 		tx3.changefeed_buffer_record_change(
 			tb.namespace_id,
 			tb.database_id,
-			&tb.name,
+			&tb_name,
 			&record_c2,
 			previous.clone().into(),
 			value_c2.into(),
@@ -224,7 +225,7 @@ mod tests {
 			&tx4,
 			tb.namespace_id,
 			tb.database_id,
-			Some(&tb.name),
+			Some(&tb_name),
 			ShowSince::Versionstamp(start),
 			Some(10),
 		)
@@ -290,7 +291,7 @@ mod tests {
 			&tx,
 			tb.namespace_id,
 			tb.database_id,
-			Some(&tb.name),
+			Some(&tb.name.clone()),
 			ShowSince::Versionstamp(ts),
 			Some(10),
 		)
@@ -305,8 +306,9 @@ mod tests {
 		tb: &TableDefinition,
 		id: String,
 	) -> RecordId {
+		let tb_name = tb.name.clone();
 		let record_id = RecordId {
-			table: tb.name.clone(),
+			table: tb_name.clone(),
 			key: RecordIdKey::String(id.into()),
 		};
 		let value_a: Value = "a".into();
@@ -314,7 +316,7 @@ mod tests {
 		tx.changefeed_buffer_record_change(
 			tb.namespace_id,
 			tb.database_id,
-			&tb.name,
+			&tb_name,
 			&record_id,
 			previous,
 			value_a.into(),
@@ -344,12 +346,13 @@ mod tests {
 			comment: None,
 			strict: false,
 		};
-		let mut tb_def = TableDefinition::new(
+		let mut tb_def = TableDefinition::from_stored(&StoredTableDefinition::new(
 			namespace_id,
 			database_id,
 			table_id,
 			TableName::new(TB.to_owned()),
-		);
+		))
+		.unwrap();
 		tb_def.changefeed = Some(ChangeFeed {
 			expiry: Duration::from_secs(10 * 60),
 			store_diff,

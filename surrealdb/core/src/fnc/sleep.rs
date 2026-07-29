@@ -11,7 +11,7 @@ use crate::val::{Duration, Value};
 /// the executor's drain for the full duration. After the select
 /// returns, the executor's next `ctx.done(true)` check at the
 /// statement boundary observes the cancel flag and bails with
-/// `Error::QueryCancelled` on the normal error path.
+/// `EngineError::QueryCancelled` on the normal error path.
 pub async fn sleep(ctx: &FrozenContext, (dur,): (Duration,)) -> Result<Value> {
 	// Calculate the sleep duration
 	let dur = match (ctx.timeout(), dur.0) {

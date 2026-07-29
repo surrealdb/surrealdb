@@ -51,11 +51,11 @@
 //! crate::key::database::az             /*{ns}*{db}!az{az_name}
 //! crate::key::database::bu             /*{ns}*{db}!bu{bu_name}
 //! crate::key::database::fc             /*{ns}*{db}!fn{fc_name}
-//! crate::key::database::md             /*{ns}*{db}!md{md_name} -> ModuleDefinition
+//! crate::key::database::md             /*{ns}*{db}!md{md_name} -> StoredModuleDefinition
 //! crate::key::database::ml             /*{ns}*{db}!ml{ml_name}{vn}
 //! crate::key::database::pa             /*{ns}*{db}!pa{pa_name}
 //! crate::key::database::sq             /*{ns}*{db}!sq{sq_name}
-//! crate::key::database::tb             /*{ns}*{db}!tb{tb_name} -> TableDefinition
+//! crate::key::database::tb             /*{ns}*{db}!tb{tb_name} -> StoredTableDefinition
 //! crate::key::database::ti             /+{ns}*{db}!ti
 //! crate::key::database::ts             /*{ns}*{db}!ts{ts}
 //! crate::key::database::us             /*{ns}*{db}!us{us_name}
@@ -70,7 +70,7 @@
 //! crate::key::table::fd                /*{ns}*{db}*{tb_name}!fd{fd}
 //! crate::key::table::ft                /*{ns}*{db}*{tb_name}!ft{ft}
 //! crate::key::table::ix                /*{ns}*{db}*{tb_name}!il{ix} -> ix_name
-//! crate::key::table::ix                /*{ns}*{db}*{tb_name}!ix{ix_name} -> IndexDefinition
+//! crate::key::table::ix                /*{ns}*{db}*{tb_name}!ix{ix_name} -> StoredIndexDefinition
 //! crate::key::table::lq                /*{ns}*{db}*{tb_name}!lq{lq}
 //!
 //! crate::key::index::all               /*{ns}*{db}*{tb_name}+{ix}
@@ -116,6 +116,7 @@ use roaring::{RoaringBitmap, RoaringTreemap};
 pub(crate) mod category;
 pub(crate) mod change;
 pub(crate) mod database;
+pub(crate) mod error;
 pub(crate) mod graph;
 pub(crate) mod index;
 pub(crate) mod lqe;
@@ -129,6 +130,7 @@ pub(crate) mod sequence;
 pub(crate) mod table;
 pub(crate) mod version;
 
+pub(crate) use error::Error;
 pub(crate) use mac::{impl_kv_key_storekey, impl_kv_range_storekey, impl_kv_value_revisioned, key};
 // Needs to be public for the enterprise crate.
 pub use surrealdb_kvs::{Key, KeyRange};

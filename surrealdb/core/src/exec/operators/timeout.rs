@@ -9,7 +9,7 @@ use std::sync::Arc;
 use common::future::stream::{self, Yielder};
 use futures::StreamExt;
 
-use crate::err::Error;
+use crate::err::EngineError;
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
 	OperatorMetrics, PhysicalExpr, ValueBatchStream, buffer_stream, monitor_stream,
@@ -129,7 +129,7 @@ impl ExecOperator for Timeout {
 				let remaining =
 					timeout_instant.saturating_duration_since(tokio::time::Instant::now());
 				if remaining.is_zero() {
-					Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryTimedout(duration))))?;
+					Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryTimedout(duration.0))))?;
 				}
 
 				// Wait for next batch with timeout
@@ -145,7 +145,9 @@ impl ExecOperator for Timeout {
 					}
 					Err(_) => {
 						// Timeout expired
-						Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryTimedout(duration))))?;
+						Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryTimedout(
+							duration.0
+						))))?;
 					}
 				}
 			}

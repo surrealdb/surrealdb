@@ -1,14 +1,14 @@
 use std::ops::Bound;
 
 use anyhow::Result;
+use common::range::TypedRange;
 use reblessive::tree::Stk;
 
 use super::args::Optional;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::val::range::TypedRange;
+use crate::expr::Error;
 use crate::val::{Closure, Set, Value};
 
 /// Add value(s) to a set

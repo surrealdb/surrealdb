@@ -41,7 +41,7 @@ impl SleepStatement {
 	/// the executor's next `ctx.done` check could observe the cancel.
 	/// After the select returns the outer compute path falls through
 	/// to the executor's normal yield, which sees the cancel flag and
-	/// bails with `Error::QueryCancelled`.
+	/// bails with `EngineError::QueryCancelled`.
 	async fn sleep(&self, ctx: &FrozenContext) {
 		#[cfg(target_family = "wasm")]
 		let sleep_fut = wasmtimer::tokio::sleep(self.duration.0);

@@ -13,7 +13,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 
-use crate::err::Error;
+use crate::expr::Error;
 use crate::val::{CoerceError, Datetime, File, Number, Object, Value};
 
 #[cfg(not(target_arch = "wasm32"))]

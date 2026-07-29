@@ -10,8 +10,6 @@ use crate::api::format as api_format;
 use crate::api::invocation::process_api_request_with_stack;
 use crate::api::request::ApiRequest;
 use crate::api::response::ApiResponse;
-use crate::catalog::ApiDefinition;
-use crate::catalog::providers::ApiProvider;
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -69,7 +67,6 @@ pub async fn invoke(
 	trace!(request_id = %request_id, path = %path, "fnc::api::invoke called");
 
 	let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-	let apis = ctx.tx().all_db_apis(ns, db, None).await?;
 
 	if !path.starts_with('/') {
 		// align behaviour with the path provided in DEFINE API statement
@@ -89,10 +86,12 @@ pub async fn invoke(
 		req.headers.insert(ACCEPT, "application/vnd.surrealdb.native;q=0.9, */*;q=0.8".try_into()?);
 	}
 
+	// Routes on the stored definitions and compiles only the handler that
+	// matches; see `Transaction::find_db_api`.
 	let mut value: Value =
-		if let Some((api, params)) = ApiDefinition::find_definition(&apis, &segments, req.method) {
+		if let Some((api, params)) = ctx.tx().find_db_api(ns, db, &segments, req.method).await? {
 			req.params = params.try_into()?;
-			process_api_request_with_stack(stk, ctx, opt, api, req).await?.into()
+			process_api_request_with_stack(stk, ctx, opt, &api, req).await?.into()
 		} else {
 			trace!(request_id = %request_id, path = %path, "No API definition found for path");
 			ApiResponse::from_error(ApiError::NotFound, request_id).into()

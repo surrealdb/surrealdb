@@ -139,6 +139,7 @@ impl PartialEq for Literal {
 		match (self, other) {
 			(Literal::None, Literal::None) => true,
 			(Literal::Null, Literal::Null) => true,
+			(Literal::UnboundedRange, Literal::UnboundedRange) => true,
 			(Literal::Bool(a), Literal::Bool(b)) => a == b,
 			(Literal::Float(a), Literal::Float(b)) => a.to_bits() == b.to_bits(),
 			(Literal::Integer(a), Literal::Integer(b)) => a == b,
@@ -155,6 +156,11 @@ impl PartialEq for Literal {
 			(Literal::Uuid(a), Literal::Uuid(b)) => a == b,
 			(Literal::Geometry(a), Literal::Geometry(b)) => a == b,
 			(Literal::File(a), Literal::File(b)) => a == b,
+			// Every variant must appear above. This arm is for mismatched
+			// variants only: a variant missing from the list falls through to
+			// it and compares unequal to itself, which breaks the `Eq` asserted
+			// below and silently defeats every structural comparison of an
+			// expression tree containing it.
 			_ => false,
 		}
 	}
@@ -205,5 +211,86 @@ impl ToSql for ObjectEntry {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		let entry: crate::sql::literal::ObjectEntry = self.clone().into();
 		entry.fmt_sql(f, fmt);
+	}
+}
+
+#[cfg(test)]
+mod equality_tests {
+	use rust_decimal::Decimal;
+
+	use super::Literal;
+	use crate::val::Strand;
+
+	/// `Eq` is asserted for `Literal`, so every variant must equal itself.
+	///
+	/// The impl is hand-written with a `_ => false` fallthrough, so a variant
+	/// omitted from it compares unequal to itself rather than failing to
+	/// compile. That breaks any structural comparison of an expression
+	/// containing it: a change-detector sees a spurious difference, and an
+	/// index-guard match sees none.
+	#[test]
+	fn every_variant_equals_itself() {
+		// The exhaustive match is the point: it makes adding a variant a
+		// compile error here, so the sample list cannot fall behind the enum
+		// the way a hand-maintained subset does.
+		fn _forces_this_list_to_be_updated(l: &Literal) {
+			match l {
+				Literal::None
+				| Literal::Null
+				| Literal::UnboundedRange
+				| Literal::Bool(_)
+				| Literal::Float(_)
+				| Literal::Integer(_)
+				| Literal::Decimal(_)
+				| Literal::String(_)
+				| Literal::Bytes(_)
+				| Literal::Regex(_)
+				| Literal::RecordId(_)
+				| Literal::Array(_)
+				| Literal::Set(_)
+				| Literal::Object(_)
+				| Literal::Duration(_)
+				| Literal::Datetime(_)
+				| Literal::Uuid(_)
+				| Literal::Geometry(_)
+				| Literal::File(_) => {}
+			}
+		}
+		let samples = [
+			Literal::None,
+			Literal::Null,
+			Literal::UnboundedRange,
+			Literal::Bool(true),
+			Literal::Float(1.5),
+			Literal::Float(-0.0),
+			Literal::Integer(7),
+			Literal::Decimal(Decimal::new(150, 2)),
+			Literal::String(Strand::new("s")),
+			Literal::Bytes(crate::val::Bytes::from(vec![1u8])),
+			Literal::Regex("a".parse::<crate::val::Regex>().unwrap()),
+			Literal::RecordId(crate::expr::RecordIdLit {
+				table: "t".into(),
+				key: crate::expr::RecordIdKeyLit::Number(1),
+			}),
+			Literal::Array(vec![]),
+			Literal::Set(vec![]),
+			Literal::Object(vec![]),
+			Literal::Duration(crate::val::Duration::from_secs(1)),
+			Literal::Datetime(crate::val::Datetime::MIN_UTC),
+			Literal::Uuid(crate::val::Uuid::nil()),
+			Literal::Geometry(crate::val::Geometry::Point(geo::Point::new(1.0, 2.0))),
+			Literal::File(crate::val::File::new("b".to_owned(), "p".to_owned())),
+		];
+		for s in samples {
+			assert_eq!(s, s.clone(), "{s:?} must equal itself");
+		}
+	}
+
+	/// `Float` compares by bit pattern, so the two zeroes are distinct — they
+	/// render differently (`-0f` vs `0f`), and treating them as equal would let
+	/// a rewrite that changes one into the other be dropped as a no-op.
+	#[test]
+	fn signed_zero_is_not_equal_to_zero() {
+		assert_ne!(Literal::Float(-0.0), Literal::Float(0.0));
 	}
 }

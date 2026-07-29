@@ -2,6 +2,7 @@ use std::fmt;
 use std::ops::Bound;
 use std::str::FromStr as _;
 
+use common::decimal::DecimalExt;
 use geo::Point;
 use rust_decimal::Decimal;
 use surrealdb_cnf::GENERATION_ALLOCATION_LIMIT;
@@ -11,9 +12,10 @@ use super::coerce::ElementPosition;
 use crate::expr::Kind;
 use crate::expr::kind::{GeometryKind, HasKind, KindLiteral};
 use crate::syn;
+use crate::val::range::IntegerRangeExt;
 use crate::val::{
-	Array, Bytes, Closure, Datetime, DecimalExt, Duration, File, Geometry, Null, Number, Object,
-	Range, RecordId, Regex, Set, SqlNone, TableName, Uuid, Value,
+	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Null, Number, Object, Range,
+	RecordId, Regex, Set, SqlNone, TableName, Uuid, Value,
 };
 
 #[derive(Clone, Debug)]
@@ -700,7 +702,7 @@ impl Cast for RecordId {
 	}
 }
 
-impl Cast for crate::val::TableName {
+impl Cast for surrealdb_strand::TableName {
 	fn can_cast(v: &Value) -> bool {
 		matches!(v, Value::Table(_) | Value::String(_))
 	}
@@ -708,7 +710,7 @@ impl Cast for crate::val::TableName {
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
 			Value::Table(x) => Ok(x),
-			Value::String(x) => Ok(crate::val::TableName::new(x)),
+			Value::String(x) => Ok(surrealdb_strand::TableName::new(x)),
 			from => Err(CastError::InvalidKind {
 				from,
 				into: "table".to_string(),
@@ -926,9 +928,9 @@ impl Value {
 				None => self.cast_to_array(t).map(Value::from),
 			},
 			Kind::Table(t) => match t.is_empty() {
-				true => {
-					self.cast_to::<String>().map(|s| Value::Table(crate::val::TableName::new(s)))
-				}
+				true => self
+					.cast_to::<String>()
+					.map(|s| Value::Table(surrealdb_strand::TableName::new(s))),
 				false => self.cast_to_table(t).map(Value::from),
 			},
 			Kind::Record(t) => match t.is_empty() {
@@ -976,12 +978,12 @@ impl Value {
 	}
 
 	/// Try to convert this value to a Table of a certain type
-	fn cast_to_table(self, val: &[TableName]) -> Result<crate::val::TableName, CastError> {
+	fn cast_to_table(self, val: &[TableName]) -> Result<surrealdb_strand::TableName, CastError> {
 		match self {
 			Value::Table(v) if v.is_table_type(val) => Ok(v),
 			Value::String(v) => {
 				// Check if the string is a valid table name and matches the allowed types
-				let table = crate::val::TableName::new(v.clone());
+				let table = surrealdb_strand::TableName::new(v.clone());
 				if table.is_table_type(val) {
 					Ok(table)
 				} else {
@@ -1239,7 +1241,7 @@ mod tests {
 	#[test]
 	fn test_cast_table_to_table() {
 		// Test casting table value to table type
-		let value = Value::Table(crate::val::TableName::new("users".to_string()));
+		let value = Value::Table(surrealdb_strand::TableName::new("users".to_string()));
 		let kind = Kind::Table(vec!["users".into()]);
 		let result = value.cast_to_kind(&kind);
 		assert!(result.is_ok());
@@ -1253,12 +1255,12 @@ mod tests {
 		assert!(value.can_cast_to_kind(&kind));
 
 		// Table value can cast to table type
-		let value = Value::Table(crate::val::TableName::new("users".to_string()));
+		let value = Value::Table(surrealdb_strand::TableName::new("users".to_string()));
 		let kind = Kind::Table(vec!["users".into()]);
 		assert!(value.can_cast_to_kind(&kind));
 
 		// Table value cannot cast to wrong table type
-		let value = Value::Table(crate::val::TableName::new("posts".to_string()));
+		let value = Value::Table(surrealdb_strand::TableName::new("posts".to_string()));
 		let kind = Kind::Table(vec!["users".into()]);
 		assert!(!value.can_cast_to_kind(&kind));
 	}

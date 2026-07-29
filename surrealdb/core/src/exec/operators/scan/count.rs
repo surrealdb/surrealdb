@@ -21,8 +21,8 @@ use std::sync::Arc;
 use common::future::stream::{Yielder, try_async_stream};
 use tracing::instrument;
 
-use crate::catalog::{DatabaseId, Index, NamespaceId, Permission};
-use crate::err::Error;
+use crate::catalog::{DatabaseId, Error, Index, NamespaceId, Permission};
+use crate::err::EngineError;
 use crate::exec::operators::scan::index_count::sum_index_count_deltas;
 use crate::exec::permission::{
 	PhysicalPermission, convert_permission_to_physical_runtime, should_check_perms,
@@ -423,7 +423,7 @@ async fn count_with_perm_fallback(
 	let mut count = 0usize;
 	loop {
 		if ctx.cancellation().is_cancelled() {
-			return Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryCancelled)));
+			return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
 		}
 		let batch = cursor
 			.next_batch(crate::kvs::NORMAL_BATCH_SIZE)

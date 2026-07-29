@@ -1,12 +1,11 @@
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::catalog::Index;
 use crate::catalog::providers::{DatabaseProvider, TableProvider};
+use crate::catalog::{Error, Index};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
@@ -57,7 +56,8 @@ impl RemoveAnalyzerStatement {
 		// fails with AzNotFound if the analyzer is gone — refuse removal while
 		// any index still references it.
 		for tb in txn.all_tb(ns, db, None).await?.iter() {
-			for ix in txn.all_tb_indexes(ns, db, &tb.name, None).await?.iter() {
+			let tb_name = tb.name.clone();
+			for ix in txn.all_tb_indexes(ns, db, &tb_name, None).await?.iter() {
 				if let Index::FullText(p) = &ix.index
 					&& p.analyzer.as_str() == az.name.as_str()
 				{

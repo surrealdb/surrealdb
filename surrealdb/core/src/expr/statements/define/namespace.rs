@@ -3,12 +3,11 @@ use reblessive::tree::Stk;
 use surrealdb_strand::Strand;
 
 use super::DefineKind;
-use crate::catalog::NamespaceDefinition;
 use crate::catalog::providers::NamespaceProvider;
+use crate::catalog::{Error, NamespaceDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, FlowResultExt, Literal};
 use crate::iam::{Action, ResourceKind};

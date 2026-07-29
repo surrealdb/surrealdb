@@ -7,8 +7,8 @@ use surrealdb_strand::Strand;
 use crate::ctx::FrozenContext;
 use crate::expr::Param;
 use crate::expr::visit::{Visit, Visitor};
-use crate::sql::expression::convert_public_value_to_internal;
 use crate::types::PublicVariables;
+use crate::val::convert_public::convert_public_value_to_internal;
 use crate::val::{Object, Value};
 
 /// A visitor pass which will capture the value of parameters in the visited expression from the

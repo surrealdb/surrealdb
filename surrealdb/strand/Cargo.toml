@@ -17,7 +17,7 @@ categories.workspace = true
 revision.workspace = true
 serde.workspace = true
 storekey.workspace = true
-arbitrary = { workspace = true, optional = true }
+arbitrary = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["html_reports"] }

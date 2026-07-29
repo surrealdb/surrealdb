@@ -20,7 +20,7 @@ use crate::val::Value;
 ///
 /// This operator signals control flow changes to parent operators.
 /// - RETURN: Evaluates inner plan, returns `ControlFlow::Return(value)`
-/// - THROW: Evaluates inner plan, returns `ControlFlow::Err(Error::Thrown(...))`
+/// - THROW: Evaluates inner plan, returns `ControlFlow::Err(exec::Error::Thrown(...))`
 /// - BREAK: Returns `ControlFlow::Break` immediately
 /// - CONTINUE: Returns `ControlFlow::Continue` immediately
 #[derive(Debug)]

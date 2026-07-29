@@ -7,17 +7,20 @@ use chrono::Utc;
 use jsonwebtoken::{DecodingKey, TokenData, Validation, decode};
 use surrealdb_types::ToSql;
 
+use crate::catalog::Error as CatalogError;
 use crate::catalog::providers::{
 	AuthorisationProvider, DatabaseProvider, NamespaceProvider, UserProvider,
 };
 use crate::dbs::Session;
 use crate::err::Error;
+#[cfg(feature = "jwks")]
+use crate::expr::Error as ExprError;
 use crate::iam::access::{authenticate_generic, authenticate_record};
 use crate::iam::issue::expiration;
 #[cfg(feature = "jwks")]
 use crate::iam::jwks;
 use crate::iam::token::Claims;
-use crate::iam::{self, Actor, Auth, Level, Role};
+use crate::iam::{self, Actor, Auth, Error as AuthError, Level, Role};
 use crate::kvs::Datastore;
 use crate::kvs::TransactionType::*;
 use crate::{catalog, syn};
@@ -85,9 +88,15 @@ fn decode_key(alg: catalog::Algorithm, key: &[u8]) -> Result<(DecodingKey, Valid
 /// database, access method) needed to look up the correct verification key.
 /// The token MUST be fully verified via [`verify_token`] before any claims
 /// are trusted for authorization decisions.
-fn decode_claims_unverified(token: &str) -> Result<TokenData<Claims>> {
-	let data = jsonwebtoken::dangerous::insecure_decode::<Claims>(token)?;
-	Ok(data)
+///
+/// A malformed token yields [`AuthError::InvalidAuth`]: the decoder's own
+/// account of what was wrong with the token stays in the debug log and never
+/// reaches the caller.
+fn decode_claims_unverified(token: &str) -> Result<TokenData<Claims>, AuthError> {
+	jsonwebtoken::dangerous::insecure_decode::<Claims>(token).map_err(|err| {
+		debug!("Error decoding authentication token claims: {err}");
+		err.into()
+	})
 }
 
 pub async fn basic(
@@ -151,7 +160,7 @@ pub async fn basic(
 			debug!(
 				"Attempted basic authentication in database '{db}' without specifying a namespace"
 			);
-			Err(anyhow::Error::new(Error::InvalidAuth))
+			Err(anyhow::Error::new(AuthError::InvalidAuth))
 		}
 	}
 }
@@ -168,14 +177,14 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 		&& nbf > Utc::now().timestamp()
 	{
 		debug!("Token verification failed due to the 'nbf' claim containing a future time");
-		bail!(Error::InvalidAuth);
+		bail!(AuthError::InvalidAuth);
 	}
 	// Check if the auth token has expired
 	if let Some(exp) = token_data.claims.exp
 		&& exp < Utc::now().timestamp()
 	{
 		debug!("Token verification failed due to the 'exp' claim containing a past time");
-		bail!(Error::ExpiredToken);
+		bail!(AuthError::ExpiredToken);
 	}
 	// Check the token authentication claims
 	match &token_data.claims {
@@ -195,7 +204,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				Some(db) => db,
 				None => {
 					let _ = tx.cancel().await;
-					return Err(Error::DbNotFound {
+					return Err(CatalogError::DbNotFound {
 						name: db.clone(),
 					}
 					.into());
@@ -215,7 +224,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				tx.get_db_access(db_def.namespace_id, db_def.database_id, ac, None).await
 			) else {
 				let _ = tx.cancel().await;
-				return Err(Error::AccessDbNotFound {
+				return Err(CatalogError::AccessDbNotFound {
 					ac: ac.clone(),
 					ns: ns.clone(),
 					db: db.clone(),
@@ -235,16 +244,16 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						if let Some(kid) = token_data.header.kid {
 							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 						} else {
-							Err(anyhow::Error::new(Error::InvalidFunctionArguments {
+							Err(anyhow::Error::new(ExprError::InvalidFunctionArguments {
 								name: "token".to_string(),
 								message: "Missing token header 'kid'".to_string(),
 							}))
 						}
 					}
 					#[cfg(not(feature = "jwks"))]
-					_ => bail!(Error::AccessMethodMismatch),
+					_ => bail!(AuthError::AccessMethodMismatch),
 				}?,
-				_ => bail!(Error::AccessMethodMismatch),
+				_ => bail!(AuthError::AccessMethodMismatch),
 			};
 			// Verify the token
 			verify_token(token, &cf.0, &cf.1)?;
@@ -308,7 +317,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				Some(db) => db,
 				None => {
 					let _ = tx.cancel().await;
-					return Err(Error::DbNotFound {
+					return Err(CatalogError::DbNotFound {
 						name: db.clone(),
 					}
 					.into());
@@ -324,7 +333,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			tx.cancel().await?;
 
 			let Some(de) = de else {
-				return Err(Error::AccessDbNotFound {
+				return Err(CatalogError::AccessDbNotFound {
 					ac: ac.clone(),
 					ns: ns.clone(),
 					db: db.clone(),
@@ -349,14 +358,14 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 							if let Some(kid) = token_data.header.kid {
 								jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 							} else {
-								Err(anyhow::Error::new(Error::InvalidFunctionArguments {
+								Err(anyhow::Error::new(ExprError::InvalidFunctionArguments {
 									name: "token".to_string(),
 									message: "Missing token header 'kid'".to_string(),
 								}))
 							}
 						}
 						#[cfg(not(feature = "jwks"))]
-						_ => bail!(Error::AccessMethodMismatch),
+						_ => bail!(AuthError::AccessMethodMismatch),
 					}?;
 					// Verify the token
 					verify_token(token, &cf.0, &cf.1)?;
@@ -421,14 +430,14 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 								if let Some(kid) = token_data.header.kid {
 									jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 								} else {
-									Err(anyhow::Error::new(Error::InvalidFunctionArguments {
+									Err(anyhow::Error::new(ExprError::InvalidFunctionArguments {
 										name: "token".to_string(),
 										message: "Missing token header 'kid'".to_string(),
 									}))
 								}
 							}
 							#[cfg(not(feature = "jwks"))]
-							_ => bail!(Error::AccessMethodMismatch),
+							_ => bail!(AuthError::AccessMethodMismatch),
 						}?;
 
 						// Verify the token
@@ -468,7 +477,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 							Level::Record(ns.clone(), db.clone(), rid.to_sql()),
 						)));
 					}
-					_ => bail!(Error::AccessMethodMismatch),
+					_ => bail!(AuthError::AccessMethodMismatch),
 				},
 			};
 			Ok(())
@@ -488,7 +497,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				Some(db) => db,
 				None => {
 					let _ = tx.cancel().await;
-					return Err(Error::DbNotFound {
+					return Err(CatalogError::DbNotFound {
 						name: db.clone(),
 					}
 					.into());
@@ -501,14 +510,14 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				tx.get_db_user(db_def.namespace_id, db_def.database_id, id, None).await.map_err(
 					|e| {
 						debug!("Error while authenticating to database `{db}`: {e}");
-						anyhow::Error::new(Error::InvalidAuth)
+						anyhow::Error::new(AuthError::InvalidAuth)
 					}
 				)
 			) {
 				Some(de) => de,
 				None => {
 					let _ = tx.cancel().await;
-					return Err(Error::InvalidAuth.into());
+					return Err(AuthError::InvalidAuth.into());
 				}
 			};
 			// Ensure that the transaction is cancelled
@@ -551,7 +560,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				Some(ns) => ns,
 				None => {
 					let _ = tx.cancel().await;
-					return Err(Error::NsNotFound {
+					return Err(CatalogError::NsNotFound {
 						name: ns.clone(),
 					}
 					.into());
@@ -564,7 +573,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			tx.cancel().await?;
 
 			let Some(de) = de else {
-				return Err(Error::AccessNsNotFound {
+				return Err(CatalogError::AccessNsNotFound {
 					ac: ac.clone(),
 					ns: ns.clone(),
 				}
@@ -584,16 +593,16 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						if let Some(kid) = token_data.header.kid {
 							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 						} else {
-							bail!(Error::InvalidFunctionArguments {
+							bail!(ExprError::InvalidFunctionArguments {
 								name: "token".to_string(),
 								message: "Missing token header 'kid'".to_string()
 							})
 						}
 					}
 					#[cfg(not(feature = "jwks"))]
-					_ => bail!(Error::AccessMethodMismatch),
+					_ => bail!(AuthError::AccessMethodMismatch),
 				},
-				_ => bail!(Error::AccessMethodMismatch),
+				_ => bail!(AuthError::AccessMethodMismatch),
 			}?;
 			// Verify the token
 			verify_token(token, &cf.0, &cf.1)?;
@@ -656,7 +665,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				Some(ns) => ns,
 				None => {
 					let _ = tx.cancel().await;
-					return Err(Error::NsNotFound {
+					return Err(CatalogError::NsNotFound {
 						name: ns.clone(),
 					}
 					.into());
@@ -667,13 +676,13 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				tx,
 				tx.get_ns_user(ns_def.namespace_id, id, None).await.map_err(|e| {
 					debug!("Error while authenticating to namespace `{ns}`: {e}");
-					anyhow::Error::new(Error::InvalidAuth)
+					anyhow::Error::new(AuthError::InvalidAuth)
 				})
 			) {
 				Some(de) => de,
 				None => {
 					let _ = tx.cancel().await;
-					return Err(Error::InvalidAuth.into());
+					return Err(AuthError::InvalidAuth.into());
 				}
 			};
 			// Ensure that the transaction is cancelled
@@ -717,7 +726,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			tx.cancel().await?;
 
 			let Some(de) = de else {
-				return Err(Error::AccessRootNotFound {
+				return Err(CatalogError::AccessRootNotFound {
 					ac: ac.clone(),
 				}
 				.into());
@@ -736,16 +745,16 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						if let Some(kid) = token_data.header.kid {
 							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 						} else {
-							bail!(Error::InvalidFunctionArguments {
+							bail!(ExprError::InvalidFunctionArguments {
 								name: "token".to_string(),
 								message: "Missing token header 'kid'".to_string()
 							})
 						}
 					}
 					#[cfg(not(feature = "jwks"))]
-					_ => bail!(Error::AccessMethodMismatch),
+					_ => bail!(AuthError::AccessMethodMismatch),
 				},
-				_ => bail!(Error::AccessMethodMismatch),
+				_ => bail!(AuthError::AccessMethodMismatch),
 			}?;
 			// Verify the token
 			verify_token(token, &cf.0, &cf.1)?;
@@ -803,7 +812,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				tx,
 				tx.expect_root_user(id).await.map_err(|e| {
 					debug!("Error while authenticating to root: {e}");
-					anyhow::Error::new(Error::InvalidAuth)
+					anyhow::Error::new(AuthError::InvalidAuth)
 				})
 			);
 			// Ensure that the transaction is cancelled
@@ -831,7 +840,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			Ok(())
 		}
 		// There was an auth error
-		_ => Err(anyhow::Error::new(Error::InvalidAuth)),
+		_ => Err(anyhow::Error::new(AuthError::InvalidAuth)),
 	}
 }
 
@@ -847,7 +856,7 @@ pub async fn verify_root_creds(
 		tx,
 		tx.expect_root_user(user).await.map_err(|e| {
 			debug!("Error retrieving user for authentication to root: {e}");
-			anyhow::Error::new(Error::InvalidAuth)
+			anyhow::Error::new(AuthError::InvalidAuth)
 		})
 	);
 	// Ensure that the transaction is cancelled
@@ -872,7 +881,7 @@ pub async fn verify_ns_creds(
 		Some(ns) => ns,
 		None => {
 			let _ = tx.cancel().await;
-			return Err(Error::NsNotFound {
+			return Err(CatalogError::NsNotFound {
 				name: ns.to_string(),
 			}
 			.into());
@@ -884,14 +893,14 @@ pub async fn verify_ns_creds(
 		tx,
 		tx.get_ns_user(ns_def.namespace_id, user, None).await.map_err(|e| {
 			debug!("Error retrieving user for authentication to namespace `{ns}`: {e}");
-			anyhow::Error::new(Error::InvalidAuth)
+			anyhow::Error::new(AuthError::InvalidAuth)
 		})
 	);
 	let user = match user {
 		Some(user) => user,
 		None => {
 			let _ = tx.cancel().await;
-			return Err(Error::InvalidAuth.into());
+			return Err(AuthError::InvalidAuth.into());
 		}
 	};
 	// Ensure that the transaction is cancelled
@@ -918,7 +927,7 @@ pub async fn verify_db_creds(
 		Some(db) => db,
 		None => {
 			let _ = tx.cancel().await;
-			return Err(Error::DbNotFound {
+			return Err(CatalogError::DbNotFound {
 				name: db.to_string(),
 			}
 			.into());
@@ -930,14 +939,14 @@ pub async fn verify_db_creds(
 		tx,
 		tx.get_db_user(db_def.namespace_id, db_def.database_id, user, None).await.map_err(|e| {
 			debug!("Error retrieving user for authentication to database `{ns}/{db}`: {e}");
-			anyhow::Error::new(Error::InvalidAuth)
+			anyhow::Error::new(AuthError::InvalidAuth)
 		})
 	);
 	let user = match user {
 		Some(user) => user,
 		None => {
 			let _ = tx.cancel().await;
-			return Err(Error::InvalidAuth.into());
+			return Err(AuthError::InvalidAuth.into());
 		}
 	};
 	// Ensure that the transaction is cancelled
@@ -1068,7 +1077,7 @@ fn verify_pass(pass: &str, hash: &str) -> Result<()> {
 	// Attempt to verify the password using Argon2
 	match Argon2::default().verify_password(pass.as_ref(), &hash) {
 		Ok(_) => Ok(()),
-		_ => Err(anyhow::Error::new(Error::InvalidPass)),
+		_ => Err(anyhow::Error::new(AuthError::InvalidPass)),
 	}
 }
 
@@ -1079,11 +1088,11 @@ fn verify_token(token: &str, key: &DecodingKey, validation: &Validation) -> Resu
 			// Only transparently return certain token verification errors
 			match err.kind() {
 				jsonwebtoken::errors::ErrorKind::ExpiredSignature => {
-					Err(anyhow::Error::new(Error::ExpiredToken))
+					Err(anyhow::Error::new(AuthError::ExpiredToken))
 				}
 				_ => {
 					debug!("Error verifying authentication token: {err}");
-					Err(anyhow::Error::new(Error::InvalidAuth))
+					Err(anyhow::Error::new(AuthError::InvalidAuth))
 				}
 			}
 		}
@@ -1100,6 +1109,8 @@ mod tests {
 	use rstest::rstest;
 
 	use super::*;
+	use crate::err::exec_error;
+	use crate::exec::Error as ExecError;
 	use crate::iam::token::{Audience, HEADER};
 	use crate::sql::statements::define::DefineKind;
 	use crate::sql::statements::define::user::PassType;
@@ -1154,6 +1165,7 @@ mod tests {
 					Role::Viewer => "VIEWER",
 					Role::Editor => "EDITOR",
 					Role::Owner => "OWNER",
+					_ => unreachable!("unknown role"),
 				})
 				.collect();
 			format!("ROLES {}", roles.join(", "))
@@ -1220,7 +1232,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_basic_nonexistent_role() {
-		use crate::iam::Error as IamError;
+		use crate::iam::PolicyError;
 		use crate::sql::statements::define::{DefineStatement, DefineUserStatement};
 		use crate::sql::{Base, Expr, TopLevelExpr};
 		let test_levels = vec![
@@ -1288,8 +1300,8 @@ mod tests {
 
 			let e = res.unwrap_err();
 			match e.downcast().expect("Unexpected error kind") {
-				IamError::InvalidRole(_) => {}
-				e => panic!("Unexpected error, expected IamError(InvalidRole) found {e}"),
+				PolicyError::InvalidRole(_) => {}
+				e => panic!("Unexpected error, expected PolicyError::InvalidRole found {e}"),
 			}
 		}
 	}
@@ -1873,20 +1885,31 @@ mod tests {
 
 		let e = res.unwrap_err();
 		match e.downcast().expect("Unexpected error kind") {
-			Error::ExpiredToken => {}
+			AuthError::ExpiredToken => {}
 			e => panic!("Unexpected error, expected ExpiredToken found {e}"),
 		}
 	}
 
 	#[tokio::test]
 	async fn test_token_authenticate_clause() {
+		/// How `token` is expected to fail.
+		///
+		/// The AUTHENTICATE clause can reject a token two ways, and they are
+		/// two different error types: user SurrealQL raising `THROW`, or the
+		/// clause declining, which is a plain authentication failure.
+		#[derive(Debug)]
+		enum ExpectedError {
+			Thrown(&'static str),
+			InvalidAuth,
+		}
+
 		#[derive(Debug)]
 		struct TestCase {
 			title: &'static str,
 			iss_claim: Option<&'static str>,
 			aud_claim: Option<Audience>,
 			error_statement: &'static str,
-			expected_error: Option<Error>,
+			expected_error: Option<ExpectedError>,
 		}
 
 		let test_cases = vec![
@@ -1912,7 +1935,7 @@ mod tests {
 				iss_claim: Some("surrealdb-test"),
 				aud_claim: Some(Audience::Single("invalid".to_string())),
 				error_statement: "THROW",
-				expected_error: Some(Error::Thrown("Invalid token audience string".to_string())),
+				expected_error: Some(ExpectedError::Thrown("Invalid token audience string")),
 			},
 			TestCase {
 				title: "with correct 'iss' claim but invalid 'aud' claim, multiple audiences",
@@ -1922,14 +1945,14 @@ mod tests {
 					"surrealdb-test-different".to_string(),
 				])),
 				error_statement: "THROW",
-				expected_error: Some(Error::Thrown("Invalid token audience array".to_string())),
+				expected_error: Some(ExpectedError::Thrown("Invalid token audience array")),
 			},
 			TestCase {
 				title: "with correct 'iss' claim but invalid 'aud' claim, generic error",
 				iss_claim: Some("surrealdb-test"),
 				aud_claim: Some(Audience::Single("invalid".to_string())),
 				error_statement: "RETURN",
-				expected_error: Some(Error::InvalidAuth),
+				expected_error: Some(ExpectedError::InvalidAuth),
 			},
 		];
 
@@ -2010,13 +2033,16 @@ mod tests {
 
 				if let Some(expected_err) = &case.expected_error {
 					assert!(res.is_err(), "Unexpected success for case: {:?}", case);
-					let err = res.unwrap_err().downcast().expect("Unexpected error type");
-					match (expected_err, &err) {
-						(Error::InvalidAuth, Error::InvalidAuth) => {}
-						(Error::Thrown(expected_msg), Error::Thrown(msg))
-							if expected_msg == msg => {}
-						_ => panic!("Unexpected error for case: {:?}, got: {:?}", case, err),
-					}
+					let err = res.unwrap_err();
+					let matched = match expected_err {
+						ExpectedError::Thrown(expected_msg) => {
+							matches!(exec_error(&err), Some(ExecError::Thrown(msg)) if msg == expected_msg)
+						}
+						ExpectedError::InvalidAuth => {
+							matches!(err.downcast_ref::<AuthError>(), Some(AuthError::InvalidAuth))
+						}
+					};
+					assert!(matched, "Unexpected error for case: {:?}, got: {:?}", case, err);
 				} else {
 					assert!(res.is_ok(), "Failed to sign in with token for case: {:?}", case);
 					assert_eq!(sess.ns, level.ns.map(|s| s.to_string()));
@@ -2273,7 +2299,7 @@ mod tests {
 
 			let e = res.unwrap_err();
 			match e.downcast().expect("Unexpected error kind") {
-				Error::Thrown(e) => assert_eq!(e, "This user is not enabled"),
+				ExecError::Thrown(e) => assert_eq!(e, "This user is not enabled"),
 				e => panic!("Unexpected error, expected Thrown found {e:?}"),
 			}
 		}
@@ -2326,9 +2352,42 @@ mod tests {
 
 			let e = res.unwrap_err();
 			match e.downcast().expect("Unexpected error kind") {
-				Error::InvalidAuth => {}
+				AuthError::InvalidAuth => {}
 				e => panic!("Unexpected error, expected InvalidAuth found {e}"),
 			}
 		}
+	}
+
+	/// A token the decoder cannot even parse is an authentication refusal, not
+	/// an internal failure, and carries none of the decoder's own account of
+	/// what was wrong with it.
+	#[rstest]
+	#[case::not_a_jwt("garbage")]
+	#[case::wrong_segment_count("aaaa.bbbb")]
+	#[case::unparseable_segments("aaaa.bbbb.cccc")]
+	#[case::empty("")]
+	#[tokio::test]
+	async fn test_token_malformed(#[case] malformed: &'static str) {
+		let ds = Datastore::new("memory").await.unwrap();
+		let mut sess = Session::default();
+
+		let e = token(&ds, &mut sess, malformed).await.unwrap_err();
+		assert!(
+			matches!(e.downcast_ref::<AuthError>(), Some(AuthError::InvalidAuth)),
+			"expected InvalidAuth, got: {e}"
+		);
+
+		let public = crate::err::anyhow_to_types_error(e);
+		assert!(
+			public.is_not_allowed(),
+			"expected an auth refusal, got {} with message: {}",
+			public.kind_str(),
+			public.message()
+		);
+		assert_eq!(
+			public.message(),
+			AuthError::InvalidAuth.to_string(),
+			"the public message must not describe why the token failed to decode"
+		);
 	}
 }

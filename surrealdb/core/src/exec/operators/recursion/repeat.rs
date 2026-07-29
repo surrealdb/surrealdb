@@ -127,7 +127,7 @@ pub(crate) fn evaluate_repeat_recurse<'a>(
 			Some(rc) => rc.clone(),
 			None => {
 				// RepeatRecurse outside recursion context is an error
-				return Err(crate::err::Error::UnsupportedRepeatRecurse.into());
+				return Err(crate::exec::Error::UnsupportedRepeatRecurse.into());
 			}
 		};
 
@@ -144,7 +144,7 @@ pub(crate) fn evaluate_repeat_recurse<'a>(
 							continue;
 						}
 						if !is_recursion_target(v) {
-							return Err(crate::err::Error::InvalidRecursionTarget {
+							return Err(crate::exec::Error::InvalidRecursionTarget {
 								value: v.to_sql(),
 							}
 							.into());
@@ -156,7 +156,7 @@ pub(crate) fn evaluate_repeat_recurse<'a>(
 				v if is_final(v) => vec![],
 				v if is_recursion_target(v) => vec![v.clone()],
 				v => {
-					return Err(crate::err::Error::InvalidRecursionTarget {
+					return Err(crate::exec::Error::InvalidRecursionTarget {
 						value: v.to_sql(),
 					}
 					.into());
@@ -216,7 +216,7 @@ pub(crate) fn evaluate_repeat_recurse<'a>(
 		// Neither discovery_sink nor assembly_cache is set -- this should
 		// not happen in normal execution since RecursionOp always uses the
 		// iterative evaluator which sets one of these fields.
-		Err(crate::err::Error::UnsupportedRepeatRecurse.into())
+		Err(crate::exec::Error::UnsupportedRepeatRecurse.into())
 	})
 }
 
@@ -356,7 +356,7 @@ pub(crate) async fn evaluate_recurse_iterative(
 	// limit (one level pushed per iteration): hard error, matching legacy (see
 	// `RecursionBounds`).
 	if bounds.errors_on_limit() && num_levels > max_depth as usize {
-		return Err(crate::err::Error::IdiomRecursionLimitExceeded {
+		return Err(crate::exec::Error::IdiomRecursionLimitExceeded {
 			limit: bounds.system_limit,
 		}
 		.into());

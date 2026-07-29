@@ -33,15 +33,14 @@ use std::sync::Arc;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::catalog::{FieldDefinition, Index, Permission};
-use crate::err::Error;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, BoxFut, ContextLevel};
 use crate::expr::idiom::Idiom;
 use crate::expr::operator::{BinaryOperator, MatchesOperator, PrefixOperator};
 use crate::expr::{Expr, FlowResult, Kind};
 use crate::iam::Action;
-use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms};
+use crate::idx::{Error, IndexKeyBase};
 use crate::kvs::index::filter_online_indexes;
 use crate::val::{TableName, Value};
 
@@ -240,7 +239,7 @@ impl MatchesOp {
 		};
 		let local = indexes.iter().find(|idx| {
 			matches!(&idx.index, Index::FullText(_))
-				&& idx.cols.iter().any(|col| col.0 == self.idiom.0)
+				&& idx.cols.contains(&self.idiom)
 				&& !(check_perms && index_columns_touch_restricted(&idx.cols, &fields))
 		});
 		if let Some(index_def) = local {
@@ -323,10 +322,11 @@ impl MatchesOp {
 		// bitmaps, so build state cannot affect results (and the legacy
 		// planner registers remote indexes regardless of build state).
 		let indexes = tx.all_tb_indexes(ns_id, db_id, target, version).await?;
+		let remote_idiom = Idiom::from(remote_field.to_vec());
 		let index_def = indexes.iter().find(|idx| {
 			matches!(&idx.index, Index::FullText(_))
 				&& !idx.prepare_remove
-				&& idx.cols.first().is_some_and(|col| col.0 == remote_field)
+				&& idx.cols.first().is_some_and(|col| col == &remote_idiom)
 				&& !(check_perms && index_columns_touch_restricted(&idx.cols, &fields))
 		});
 		match index_def {

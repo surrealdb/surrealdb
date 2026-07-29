@@ -215,7 +215,7 @@ mod tests {
 			tb: Cow::Borrowed(&tb),
 			id: Cow::Owned("testid".to_owned().into()),
 			dir: Dir::Out,
-			foreign_table: Cow::Owned(fk.table.into()),
+			foreign_table: Cow::Owned(TableName::new(fk.table.into_string())),
 			foreign_key: Cow::Owned(fk.key.into()),
 		};
 		let enc = Graph::encode_key(&val).unwrap();

@@ -1,11 +1,11 @@
 use anyhow::Result;
 use reblessive::tree::Stk;
 
+use crate::catalog::Error;
 use crate::catalog::providers::AuthorisationProvider;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};

@@ -10,8 +10,7 @@ use url::Url;
 use web_time::SystemTime;
 
 use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
-use crate::buc::Config;
-use crate::err::Error;
+use crate::buc::{Config, Error};
 
 /// Options for configuring the FileStore
 #[derive(Clone, Debug)]

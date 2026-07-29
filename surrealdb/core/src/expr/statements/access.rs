@@ -6,6 +6,7 @@ use reblessive::tree::Stk;
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
+use crate::catalog::Error as CatalogError;
 use crate::catalog::providers::{
 	AuthorisationProvider, CatalogProvider, NamespaceProvider, UserProvider,
 };
@@ -13,8 +14,9 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::{Base, Cond, ControlFlow, FlowResult, FlowResultExt as _, RecordIdLit};
-use crate::iam::{Action, ResourceKind};
+use crate::iam::{Action, Error as AuthError, ResourceKind};
 use crate::key::database::all::DatabaseRoot;
 use crate::val::{Array, Datetime, Duration, Object, Value};
 use crate::{catalog, val};
@@ -199,16 +201,18 @@ pub async fn create_grant(
 		Base::Root => txn.expect_root_access(&access).await?,
 		Base::Ns => {
 			let ns = ctx.expect_ns_id(opt).await?;
-			txn.get_ns_access(ns, &access, None).await?.ok_or_else(|| Error::AccessNsNotFound {
-				ac: access.clone(),
-				// The namespace is expected above
-				ns: opt.ns.as_deref().expect("namespace validated by expect_ns_id").to_owned(),
+			txn.get_ns_access(ns, &access, None).await?.ok_or_else(|| {
+				CatalogError::AccessNsNotFound {
+					ac: access.clone(),
+					// The namespace is expected above
+					ns: opt.ns.as_deref().expect("namespace validated by expect_ns_id").to_owned(),
+				}
 			})?
 		}
 		Base::Db => {
 			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 			txn.get_db_access(ns, db, &access, None).await?.ok_or_else(|| {
-				Error::AccessDbNotFound {
+				CatalogError::AccessDbNotFound {
 					ac: access.clone(),
 					// The namespace and database is expected above
 					ns: opt
@@ -229,22 +233,22 @@ pub async fn create_grant(
 	// Verify the access type.
 	match &ac.access_type {
 		catalog::AccessType::Jwt(_) => {
-			Err(anyhow::Error::new(Error::Unimplemented(format!("Grants for JWT on {base}"))))
+			Err(anyhow::Error::new(ExecError::Unimplemented(format!("Grants for JWT on {base}"))))
 		}
 		catalog::AccessType::Record(at) => {
 			match &subject {
 				catalog::Subject::User(_) => {
-					bail!(Error::AccessGrantInvalidSubject);
+					bail!(ExecError::AccessGrantInvalidSubject);
 				}
 				catalog::Subject::Record(_) => {
 					// If the grant is being created for a record, a database must be selected.
-					ensure!(matches!(base, Base::Db), Error::DbEmpty);
+					ensure!(matches!(base, Base::Db), ExecError::DbEmpty);
 				}
 			};
 			// The record access type must allow issuing bearer grants.
 			let atb = match &at.bearer {
 				Some(bearer) => bearer,
-				None => bail!(Error::AccessMethodMismatch),
+				None => bail!(AuthError::AccessMethodMismatch),
 			};
 			// Create a new bearer key.
 			let grant = new_grant_bearer(atb.kind);
@@ -287,7 +291,7 @@ pub async fn create_grant(
 					};
 					txn.put_key(&key, &gr_store).await
 				}
-				_ => bail!(Error::AccessLevelMismatch),
+				_ => bail!(ExecError::AccessLevelMismatch),
 			};
 
 			// Check if a collision was found in order to log a specific error on the server.
@@ -327,7 +331,7 @@ pub async fn create_grant(
 					// Grant subject must match access method subject.
 					ensure!(
 						matches!(&at.subject, catalog::BearerAccessSubject::User),
-						Error::AccessGrantInvalidSubject
+						ExecError::AccessGrantInvalidSubject
 					);
 
 					// If the grant is being created for a user, the user must exist.
@@ -336,7 +340,7 @@ pub async fn create_grant(
 						Base::Ns => {
 							let ns_id = ctx.get_ns_id(opt).await?;
 							txn.get_ns_user(ns_id, user, None).await?.ok_or_else(|| {
-								Error::UserNsNotFound {
+								CatalogError::UserNsNotFound {
 									name: user.clone(),
 									// We just retrieved the ns_id above
 									ns: opt
@@ -349,7 +353,7 @@ pub async fn create_grant(
 						Base::Db => {
 							let (ns_id, db_id) = ctx.expect_ns_db_ids(opt).await?;
 							txn.get_db_user(ns_id, db_id, user, None).await?.ok_or_else(|| {
-								Error::UserDbNotFound {
+								CatalogError::UserDbNotFound {
 									name: user.clone(),
 									// We just retrieved the ns_id and db_id above
 									ns: opt
@@ -367,11 +371,11 @@ pub async fn create_grant(
 				}
 				catalog::Subject::Record(_) => {
 					// If the grant is being created for a record, a database must be selected.
-					ensure!(matches!(base, Base::Db), Error::DbEmpty);
+					ensure!(matches!(base, Base::Db), ExecError::DbEmpty);
 					// Grant subject must match access method subject.
 					ensure!(
 						matches!(&at.subject, catalog::BearerAccessSubject::Record),
-						Error::AccessGrantInvalidSubject
+						ExecError::AccessGrantInvalidSubject
 					);
 					// A grant can be created for a record that does not exist yet.
 				}
@@ -506,7 +510,7 @@ async fn compute_show(
 		Base::Ns => {
 			let ns = ctx.expect_ns_id(opt).await?;
 			if txn.get_ns_access(ns, stmt.ac.as_str(), None).await?.is_none() {
-				bail!(Error::AccessNsNotFound {
+				bail!(CatalogError::AccessNsNotFound {
 					ac: stmt.ac.to_string(),
 					// We expected a namespace above
 					ns: opt.ns.as_deref().expect("namespace validated by expect_ns_id").to_owned(),
@@ -517,7 +521,7 @@ async fn compute_show(
 			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 			// We expected a namespace above
 			if txn.get_db_access(ns, db, stmt.ac.as_str(), None).await?.is_none() {
-				bail!(Error::AccessDbNotFound {
+				bail!(CatalogError::AccessDbNotFound {
 					ac: stmt.ac.to_string(),
 					// We expected a namespace and database above
 					ns: opt
@@ -542,7 +546,7 @@ async fn compute_show(
 				Base::Root => {
 					match txn.get_root_access_grant(stmt.ac.as_str(), gr.as_str(), None).await? {
 						Some(val) => val,
-						None => bail!(Error::AccessGrantRootNotFound {
+						None => bail!(CatalogError::AccessGrantRootNotFound {
 							ac: stmt.ac.to_string(),
 							gr: gr.to_string(),
 						}),
@@ -552,7 +556,7 @@ async fn compute_show(
 					let ns = ctx.expect_ns_id(opt).await?;
 					match txn.get_ns_access_grant(ns, stmt.ac.as_str(), gr.as_str(), None).await? {
 						Some(val) => val,
-						None => bail!(Error::AccessGrantNsNotFound {
+						None => bail!(CatalogError::AccessGrantNsNotFound {
 							ac: stmt.ac.to_string(),
 							gr: gr.to_string(),
 							ns: ns.to_string(),
@@ -566,7 +570,7 @@ async fn compute_show(
 						.await?
 					{
 						Some(val) => val,
-						None => bail!(Error::AccessGrantDbNotFound {
+						None => bail!(CatalogError::AccessGrantDbNotFound {
 							ac: stmt.ac.to_string(),
 							gr: gr.to_string(),
 							ns: ns.to_string(),
@@ -669,7 +673,7 @@ pub async fn revoke_grant(
 				Base::Root => {
 					match txn.get_root_access_grant(stmt.ac.as_str(), gr.as_str(), None).await? {
 						Some(val) => (*val).clone(),
-						None => bail!(Error::AccessGrantRootNotFound {
+						None => bail!(CatalogError::AccessGrantRootNotFound {
 							ac: stmt.ac.to_string(),
 							gr: gr.to_string(),
 						}),
@@ -681,7 +685,7 @@ pub async fn revoke_grant(
 						Some(val) => (*val).clone(),
 						None => {
 							let ns = opt.ns()?;
-							bail!(Error::AccessGrantNsNotFound {
+							bail!(CatalogError::AccessGrantNsNotFound {
 								ac: stmt.ac.to_string(),
 								gr: gr.to_string(),
 								ns: ns.to_string(),
@@ -698,7 +702,7 @@ pub async fn revoke_grant(
 						Some(val) => (*val).clone(),
 						None => {
 							let (ns, db) = opt.ns_db()?;
-							bail!(Error::AccessGrantDbNotFound {
+							bail!(CatalogError::AccessGrantDbNotFound {
 								ac: stmt.ac.to_string(),
 								gr: gr.to_string(),
 								ns: ns.to_string(),
@@ -708,7 +712,7 @@ pub async fn revoke_grant(
 					}
 				}
 			};
-			ensure!(revoke.revocation.is_none(), Error::AccessGrantRevoked);
+			ensure!(revoke.revocation.is_none(), ExecError::AccessGrantRevoked);
 			revoke.revocation = Some(Datetime::now());
 
 			// Revoke the grant.

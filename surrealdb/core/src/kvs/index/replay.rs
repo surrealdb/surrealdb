@@ -18,10 +18,9 @@ use super::{
 	LEGACY_BATCH_ID,
 };
 use crate::catalog::providers::{NodeProvider, TableProvider};
-use crate::catalog::{Index, Record};
+use crate::catalog::{Error as CatalogError, Index, Record};
 use crate::ctx::FrozenContext;
 use crate::doc::{CursorDoc, Document};
-use crate::err::Error;
 use crate::expr::FlowResultExt as _;
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::{DocId, TableDocIds};
@@ -33,7 +32,9 @@ use crate::key::table::bp::Bp;
 use crate::key::table::br::Br;
 use crate::key::table::dp::{self, Dp};
 use crate::key::{KVKeyDecode, KVRange, impl_kv_value_revisioned, record};
-use crate::kvs::{INDEXING_BATCH_SIZE, Transaction, Val, is_retryable_transaction_conflict};
+use crate::kvs::{
+	DatastoreError, INDEXING_BATCH_SIZE, Transaction, Val, is_retryable_transaction_conflict,
+};
 use crate::val::{RecordId, RecordIdKey, Value};
 
 /// Maximum consecutive commit-conflict retries for one deferred doc-ID reclaim
@@ -517,7 +518,12 @@ impl Building {
 	async fn reservation_node_is_live(&self, tx: &Transaction, node: Uuid) -> Result<bool> {
 		match tx.get_node(node).await {
 			Ok(node) => Ok(node.is_active()),
-			Err(err) if matches!(err.downcast_ref::<Error>(), Some(Error::NdNotFound { .. })) => {
+			Err(err)
+				if matches!(
+					err.downcast_ref::<CatalogError>(),
+					Some(CatalogError::NdNotFound { .. })
+				) =>
+			{
 				Ok(false)
 			}
 			Err(err) => Err(err),
@@ -547,6 +553,9 @@ impl Building {
 			IndexOperation::create_fulltext_index(ctx, self.ix_key.ns, self.ix_key.db, &self.ix)
 				.await?;
 		let lookup_tx = self.new_read_tx().await?;
+		// COUNT WHERE predicate, already parsed once when the build started.
+		let count_cond_expr: Option<crate::expr::Expr> =
+			self.ix.count_cond.as_ref().map(|c| c.0.clone());
 		let result = async {
 			// Index the records.
 			for (k, v) in values {
@@ -588,9 +597,9 @@ impl Building {
 						.await?;
 					// COUNT WHERE indexes have no indexed values, so the
 					// initial scan carries the predicate result separately.
-					let count_cond_match = if let Index::Count(Some(cond)) = &self.ix.index {
+					let count_cond_match = if let Some(expr) = &count_cond_expr {
 						let new_matches = stack
-							.enter(|stk| cond.0.compute(stk, ctx, &self.opt, Some(&doc)))
+							.enter(|stk| expr.compute(stk, ctx, &self.opt, Some(&doc)))
 							.finish()
 							.await
 							.catch_return()?
@@ -787,7 +796,10 @@ impl Building {
 				};
 				let bg = self.ikb.new_bg_key(bp.generation, ptr.ticket, ptr.mutation_seq);
 				let Some(appending) = scan.lookup_tx.get_key(&bg, None).await? else {
-					return Err(Error::CorruptedIndex("Durable appending record is missing").into());
+					return Err(DatastoreError::CorruptedIndex(
+						"Durable appending record is missing",
+					)
+					.into());
 				};
 				let rid = RecordId {
 					table: self.ikb.table().clone(),
@@ -856,7 +868,10 @@ impl Building {
 			if let Some(ptr) = tx.get_key(&bp, None).await? {
 				let bg = self.ikb.new_bg_key(generation, ptr.ticket, ptr.mutation_seq);
 				let Some(appending) = tx.get_key(&bg, None).await? else {
-					return Err(Error::CorruptedIndex("Durable appending record is missing").into());
+					return Err(DatastoreError::CorruptedIndex(
+						"Durable appending record is missing",
+					)
+					.into());
 				};
 				return Ok(ExistingPrimaryAppending::Appending(appending));
 			}
@@ -871,7 +886,7 @@ impl Building {
 		}
 		let ig = self.ikb.new_ig_key(pa.0, pa.1);
 		let Some(appending) = tx.get_key(&ig, None).await? else {
-			return Err(Error::CorruptedIndex("Appending record is missing").into());
+			return Err(DatastoreError::CorruptedIndex("Appending record is missing").into());
 		};
 		Ok(ExistingPrimaryAppending::Appending(appending))
 	}

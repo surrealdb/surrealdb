@@ -1,7 +1,7 @@
 //! Stores a DEFINE CONFIG definition
 use std::borrow::Cow;
 
-use crate::catalog::ConfigDefinition;
+use crate::catalog::StoredConfigDefinition;
 use crate::key::category::{Categorise, Category};
 use crate::key::{impl_kv_key_storekey, key};
 
@@ -16,7 +16,7 @@ key! {
 	}
 }
 
-impl_kv_key_storekey!(RootConfig<'a> => ConfigDefinition);
+impl_kv_key_storekey!(RootConfig<'a> => StoredConfigDefinition);
 
 impl Categorise for RootConfig<'_> {
 	fn categorise(&self) -> Category {

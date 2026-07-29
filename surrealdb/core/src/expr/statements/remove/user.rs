@@ -1,12 +1,16 @@
 use anyhow::Result;
 use reblessive::tree::Stk;
 
+use crate::catalog::Error;
 use crate::catalog::providers::UserProvider;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
+use crate::expr::statements::subscriptions::{
+	kill_namespace_principal_subscriptions, kill_principal_subscriptions,
+	kill_root_principal_subscriptions,
+};
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 
@@ -61,6 +65,10 @@ impl RemoveUserStatement {
 				};
 
 				// Process the statement
+				// A subscription replays the `Auth` it captured at LIVE time on
+				// every notification, so revoking the principal does not stop
+				// delivery on its own.
+				kill_root_principal_subscriptions(ctx, &txn, &us.name).await?;
 				let key = crate::key::root::us::Us {
 					user: std::borrow::Cow::Borrowed(&us.name),
 				};
@@ -90,6 +98,8 @@ impl RemoveUserStatement {
 					}
 				};
 				// Delete the definition
+				// See the root arm.
+				kill_namespace_principal_subscriptions(ctx, &txn, ns, &us.name).await?;
 				let key = crate::key::namespace::us::Us {
 					ns,
 					user: std::borrow::Cow::Borrowed(&us.name),
@@ -121,6 +131,8 @@ impl RemoveUserStatement {
 					}
 				};
 				// Delete the definition
+				// See the root arm.
+				kill_principal_subscriptions(ctx, &txn, ns, db, &us.name).await?;
 				let key = crate::key::database::us::UserKey {
 					prefix: crate::key::database::all::DatabaseRoot {
 						ns,

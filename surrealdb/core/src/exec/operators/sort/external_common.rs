@@ -15,7 +15,7 @@ use ext_sort::ExternalChunk;
 use revision::{DeserializeRevisioned, SerializeRevisioned};
 use tempfile::TempDir;
 
-use crate::err::Error;
+use crate::dbs::SortError;
 use crate::val::Value;
 
 /// A value with pre-computed sort keys for external sorting.
@@ -35,7 +35,7 @@ pub(super) struct TempFileWriter {
 impl TempFileWriter {
 	const RECORDS_FILE_NAME: &'static str = "records";
 
-	pub(super) fn new(dir: &TempDir) -> Result<Self, Error> {
+	pub(super) fn new(dir: &TempDir) -> Result<Self, SortError> {
 		let records = OpenOptions::new()
 			.create_new(true)
 			.append(true)
@@ -45,13 +45,13 @@ impl TempFileWriter {
 		})
 	}
 
-	fn write_usize<W: Write>(writer: &mut W, u: usize) -> Result<(), Error> {
+	fn write_usize<W: Write>(writer: &mut W, u: usize) -> Result<(), SortError> {
 		let buf = u.to_be_bytes();
 		writer.write_all(&buf)?;
 		Ok(())
 	}
 
-	fn write_value<W: Write>(writer: &mut W, value: &Value) -> Result<usize, Error> {
+	fn write_value<W: Write>(writer: &mut W, value: &Value) -> Result<usize, SortError> {
 		let mut val = Vec::new();
 		SerializeRevisioned::serialize_revisioned(value, &mut val)?;
 		Self::write_usize(writer, val.len())?;
@@ -59,7 +59,7 @@ impl TempFileWriter {
 		Ok(val.len())
 	}
 
-	pub(super) fn push(&mut self, keyed: &KeyedValue) -> Result<(), Error> {
+	pub(super) fn push(&mut self, keyed: &KeyedValue) -> Result<(), SortError> {
 		Self::write_usize(&mut self.records, keyed.keys.len())?;
 		for key in &keyed.keys {
 			Self::write_value(&mut self.records, key)?;
@@ -68,7 +68,7 @@ impl TempFileWriter {
 		Ok(())
 	}
 
-	pub(super) fn flush(mut self) -> Result<(), Error> {
+	pub(super) fn flush(mut self) -> Result<(), SortError> {
 		self.records.flush()?;
 		Ok(())
 	}
@@ -81,7 +81,7 @@ pub(super) struct TempFileReader {
 }
 
 impl TempFileReader {
-	pub(super) fn new(len: usize, dir: &TempDir) -> Result<Self, Error> {
+	pub(super) fn new(len: usize, dir: &TempDir) -> Result<Self, SortError> {
 		Ok(Self {
 			len,
 			records_path: dir.path().join(TempFileWriter::RECORDS_FILE_NAME),
@@ -90,7 +90,7 @@ impl TempFileReader {
 }
 
 impl IntoIterator for TempFileReader {
-	type Item = Result<KeyedValue, Error>;
+	type Item = Result<KeyedValue, SortError>;
 	type IntoIter = TempFileIterator;
 
 	fn into_iter(self) -> Self::IntoIter {
@@ -116,7 +116,7 @@ impl TempFileIterator {
 		}
 	}
 
-	fn check_reader(&mut self) -> Result<(), Error> {
+	fn check_reader(&mut self) -> Result<(), SortError> {
 		if self.reader.is_none() {
 			let f = OpenOptions::new().read(true).open(&self.path)?;
 			self.reader = Some(BufReader::new(f));
@@ -130,7 +130,7 @@ impl TempFileIterator {
 		Ok(usize::from_be_bytes(buf.try_into().expect("buffer size matches usize")))
 	}
 
-	fn read_value<R: Read>(reader: &mut R) -> Result<Value, Error> {
+	fn read_value<R: Read>(reader: &mut R) -> Result<Value, SortError> {
 		let len = Self::read_usize(reader)?;
 		let mut buf = vec![0u8; len];
 		reader.read_exact(&mut buf)?;
@@ -138,7 +138,7 @@ impl TempFileIterator {
 		Ok(val)
 	}
 
-	fn read_keyed_value<R: Read>(reader: &mut R) -> Result<KeyedValue, Error> {
+	fn read_keyed_value<R: Read>(reader: &mut R) -> Result<KeyedValue, SortError> {
 		let num_keys = Self::read_usize(reader)?;
 		let mut keys = Vec::with_capacity(num_keys);
 		for _ in 0..num_keys {
@@ -153,7 +153,7 @@ impl TempFileIterator {
 }
 
 impl Iterator for TempFileIterator {
-	type Item = Result<KeyedValue, Error>;
+	type Item = Result<KeyedValue, SortError>;
 
 	fn next(&mut self) -> Option<Self::Item> {
 		if self.pos == self.len {
@@ -193,8 +193,8 @@ pub(super) struct KeyedValueExternalChunk {
 }
 
 impl ExternalChunk<KeyedValue> for KeyedValueExternalChunk {
-	type SerializationError = Error;
-	type DeserializationError = Error;
+	type SerializationError = SortError;
+	type DeserializationError = SortError;
 
 	fn new(reader: Take<BufReader<File>>) -> Self {
 		Self {
@@ -218,7 +218,7 @@ impl ExternalChunk<KeyedValue> for KeyedValueExternalChunk {
 }
 
 impl Iterator for KeyedValueExternalChunk {
-	type Item = Result<KeyedValue, Error>;
+	type Item = Result<KeyedValue, SortError>;
 
 	fn next(&mut self) -> Option<Self::Item> {
 		if self.reader.limit() == 0 {

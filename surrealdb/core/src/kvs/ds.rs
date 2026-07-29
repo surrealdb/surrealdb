@@ -47,10 +47,9 @@ use crate::api::request::ApiRequest;
 use crate::api::response::ApiResponse;
 use crate::buc::manager::BucketsManager;
 use crate::catalog::providers::{
-	ApiProvider, CatalogProvider, DatabaseProvider, NamespaceProvider, NodeProvider, TableProvider,
-	UserProvider,
+	CatalogProvider, DatabaseProvider, NamespaceProvider, NodeProvider, TableProvider, UserProvider,
 };
-use crate::catalog::{ApiDefinition, Index, NodeLiveQuery, SubscriptionDefinition};
+use crate::catalog::{Index, NodeLiveQuery, StoredSubscriptionDefinition};
 use crate::ctx::{CancelHandle, Context};
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
@@ -63,7 +62,7 @@ use crate::dbs::{
 	QueryResultBuilder, Session,
 };
 use crate::doc::AsyncEventRecord;
-use crate::err::Error;
+use crate::err::{EngineError, Error};
 use crate::exec::function::FunctionRegistry;
 use crate::expr::model::get_model_path;
 use crate::expr::statements::{DefineModelStatement, DefineStatement, DefineUserStatement};
@@ -72,7 +71,7 @@ use crate::expr::{Base, Expr, FlowResultExt as _, Literal, LogicalPlan, TopLevel
 use crate::gql::PreparedGqlQuery;
 #[cfg(feature = "http")]
 use crate::http::HttpClient;
-use crate::iam::{Action, Auth, Error as IamError, Resource, ResourceKind, Role};
+use crate::iam::{Action, Auth, PolicyError, Resource, ResourceKind, Role};
 use crate::idx::IndexKeyBase;
 use crate::idx::index::IndexOperation;
 use crate::idx::trees::store::IndexStores;
@@ -87,12 +86,15 @@ use crate::kvs::slowlog::SlowLog;
 use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 #[cfg(test)]
 use crate::kvs::testing::{RetryableConflictSite, maybe_inject_retryable_conflict};
-use crate::kvs::{Error as KvsError, NORMAL_BATCH_SIZE, is_retryable_transaction_conflict};
+use crate::kvs::{
+	DatastoreError, Error as KvsError, NORMAL_BATCH_SIZE, is_retryable_transaction_conflict,
+};
 use crate::lq::LiveQueryRouter;
 use crate::observe::{ExecutionObserver, NoopObserver};
 use crate::sql::Ast;
 #[cfg(feature = "surrealism")]
 use crate::surrealism::cache::SurrealismCache;
+use crate::syn::ParseError;
 use crate::syn::parser::{ParserSettings, StatementStream};
 use crate::types::{PublicNotification, PublicValue, PublicVariables};
 use crate::val::convert_value_to_public_value;
@@ -150,16 +152,16 @@ where
 	if let Some(canceller) = canceller {
 		tokio::select! {
 			biased;
-			_ = canceller.cancelled() => bail!(Error::QueryCancelled),
+			_ = canceller.cancelled() => bail!(EngineError::QueryCancelled),
 			result = timeout_at(deadline, step) => match result {
 				Ok(result) => result,
-				Err(_) => bail!(Error::QueryTimedout(timeout_duration.into())),
+				Err(_) => bail!(EngineError::QueryTimedout(timeout_duration)),
 			},
 		}
 	} else {
 		match timeout_at(deadline, step).await {
 			Ok(result) => result,
-			Err(_) => bail!(Error::QueryTimedout(timeout_duration.into())),
+			Err(_) => bail!(EngineError::QueryTimedout(timeout_duration)),
 		}
 	}
 }
@@ -179,7 +181,7 @@ where
 			biased;
 			_ = canceller.cancelled() => {
 				let _ = txn.cancel().await;
-				bail!(Error::QueryCancelled);
+				bail!(EngineError::QueryCancelled);
 			}
 			result = timeout_at(deadline, step) => result,
 		}
@@ -195,7 +197,7 @@ where
 		}
 		Err(_) => {
 			let _ = txn.cancel().await;
-			bail!(Error::QueryTimedout(timeout_duration.into()))
+			bail!(EngineError::QueryTimedout(timeout_duration))
 		}
 	}
 }
@@ -207,7 +209,7 @@ fn archive_node_for_shutdown(
 	match result {
 		Ok(()) => ShutdownNodeDeleteOutcome::Archived,
 		Err(e) => {
-			if matches!(e.downcast_ref::<Error>(), Some(Error::QueryTimedout(_))) {
+			if matches!(crate::err::engine_error(&e), Some(EngineError::QueryTimedout(_))) {
 				warn!(
 					target: TARGET,
 					timeout = ?timeout_duration,
@@ -848,7 +850,7 @@ impl Datastore {
 		let (version, is_new) = Self::retry("Check version", || self.get_version()).await?;
 		// Check we are running the latest version
 		if !version.is_latest() {
-			bail!(Error::OutdatedStorageVersion {
+			bail!(DatastoreError::OutdatedStorageVersion {
 				expected: MajorVersion::latest().into(),
 				actual: version.into(),
 			});
@@ -993,7 +995,7 @@ impl Datastore {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running datastore startup import script");
 		// Check if the session has expired
-		ensure!(!sess.expired(), Error::ExpiredSession);
+		ensure!(!sess.expired(), DatastoreError::ExpiredSession);
 		// Execute the SQL import
 		self.execute(sql, sess, None).await.map_err(|e| anyhow::anyhow!(e))
 	}
@@ -1319,8 +1321,14 @@ impl Datastore {
 				match result {
 					Ok(result) => return Ok(result),
 					Err(e) => {
-						// Only retry on transaction conflict errors
-						if let Some(crate::kvs::Error::TransactionConflict(_)) = e.downcast_ref() {
+						// Only retry on transaction conflict errors. Both the
+						// bare `kvs::Error` and the `err::Error::Kvs`-wrapped
+						// shape occur here: every `Transaction` write goes
+						// through `.map_err(Error::from)`, and the operations
+						// this loop retries all reach the store that way, so a
+						// backend that surfaces a conflict at set/delete time
+						// rather than at commit produces the wrapped one.
+						if crate::kvs::is_retryable_transaction_conflict(&e) {
 							last_error = Some(e);
 						} else {
 							return Err(e);
@@ -1346,7 +1354,9 @@ impl Datastore {
 		} else {
 			error!(target: TARGET, "{task} - All {attempt} attempts failed.");
 		}
-		bail!(Error::Internal(format!("{task} failed after {attempt} attempts due to timeout")));
+		bail!(EngineError::Internal(format!(
+			"{task} failed after {attempt} attempts due to timeout"
+		)));
 	}
 
 	/// Registers this node's cluster membership entry with a fresh heartbeat.
@@ -2018,13 +2028,14 @@ impl Datastore {
 					// Log the namespace
 					trace!(target: TARGET, "Garbage collecting data in table {}/{}/{}", ns.name, db.name, tb.name);
 					// Iterate over the table live queries
+					let tb_name = tb.name.clone();
 					let mut next = Some(
 						crate::key::table::lq::LqPrefix {
 							prefix: crate::key::database::all::DatabaseRoot {
 								ns: db.namespace_id,
 								db: db.database_id,
 							},
-							tb: Cow::Borrowed(&tb.name),
+							tb: Cow::Borrowed(&tb_name),
 						}
 						.encode_range()?,
 					);
@@ -2036,7 +2047,8 @@ impl Datastore {
 						next = res.next;
 						for (k, v) in res.result.iter() {
 							// Decode the LIVE query statement
-							let stm: SubscriptionDefinition = KVValue::kv_decode_value(v, ())?;
+							let stm: StoredSubscriptionDefinition =
+								KVValue::kv_decode_value(v, ())?;
 							// Get the node id and the live query id
 							let (nid, lid) = (stm.node, stm.id);
 							// Check that the node for this query is archived
@@ -2199,7 +2211,7 @@ impl Datastore {
 
 	fn ensure_not_cancelled(canceller: &CancellationToken) -> Result<()> {
 		if canceller.is_cancelled() {
-			bail!(Error::QueryCancelled);
+			bail!(EngineError::QueryCancelled);
 		}
 		Ok(())
 	}
@@ -2304,7 +2316,12 @@ impl Datastore {
 					for db in txn.all_db(ns.namespace_id, None).await?.iter() {
 						for tb in txn.all_tb(ns.namespace_id, db.database_id, None).await?.iter() {
 							for ix in txn
-								.all_tb_indexes(ns.namespace_id, db.database_id, &tb.name, None)
+								.all_tb_indexes(
+									ns.namespace_id,
+									db.database_id,
+									&tb.name.clone(),
+									None,
+								)
 								.await?
 								.iter()
 							{
@@ -2813,7 +2830,10 @@ impl Datastore {
 			Ok(Ok(())) => {}
 			Ok(Err(e))
 				if canceller.is_cancelled()
-					&& matches!(e.downcast_ref::<Error>(), Some(Error::QueryCancelled)) => {}
+					&& matches!(
+						crate::err::engine_error(&e),
+						Some(EngineError::QueryCancelled)
+					) => {}
 			Ok(Err(e)) => {
 				warn!("Index compaction {ikb} fails while awaiting cancellation: {e}");
 			}
@@ -2887,7 +2907,7 @@ impl Datastore {
 				_ = canceller.cancelled() => {
 					Self::await_index_compaction_handle(&ikb, &mut jh, &canceller).await;
 					Self::await_index_compaction_handles(&mut handles, &canceller).await;
-					bail!(Error::QueryCancelled);
+					bail!(EngineError::QueryCancelled);
 				}
 				res = &mut jh => res?,
 			};
@@ -3066,7 +3086,6 @@ impl Datastore {
 								&ctx,
 								&self.index_stores,
 								ikb,
-								&ix,
 								p,
 								plan,
 							)
@@ -3231,7 +3250,6 @@ impl Datastore {
 								&ctx,
 								&self.index_stores,
 								ikb,
-								&ix,
 								p,
 								plan,
 							)
@@ -3866,15 +3884,18 @@ impl Datastore {
 
 		// Create a default context
 		let mut ctx = self.setup_ctx().map_err(|e| {
-			e.downcast::<Error>()
-				.map(crate::err::into_types_error)
-				.unwrap_or_else(|e| TypesError::internal(e.to_string()))
+			// `anyhow_to_types_error`, not a downcast to `err::Error`: that
+			// enum now holds a handful of residual variants, so a bare layer
+			// error (`ExecError::DbEmpty` from `Options::ns_db()`, say) misses
+			// and reaches the client as `internal` where it used to be a
+			// validation failure. The helper walks the whole registry.
+			crate::err::anyhow_to_types_error(e)
 		})?;
 
 		// Install the external cancellation handle if one was supplied.
 		// The executor checks `Context::done` between statements and in
 		// iterator hot loops, so flipping the flag mid-query causes the
-		// next yield to return `Error::QueryCancelled` and the executor's
+		// next yield to return `EngineError::QueryCancelled` and the executor's
 		// error path finalises the transaction cleanly. Bare-await sites
 		// (`SLEEP`) `select!` against the handle's awaitable view.
 		if let Some(cancel) = cancel {
@@ -3908,9 +3929,12 @@ impl Datastore {
 
 		// Process all statements with the transaction
 		Executor::execute_plan_with_transaction(self, ctx.freeze(), opt, plan).await.map_err(|e| {
-			e.downcast::<Error>()
-				.map(crate::err::into_types_error)
-				.unwrap_or_else(|e| TypesError::internal(e.to_string()))
+			// `anyhow_to_types_error`, not a downcast to `err::Error`: that
+			// enum now holds a handful of residual variants, so a bare layer
+			// error (`ExecError::DbEmpty` from `Options::ns_db()`, say) misses
+			// and reaches the client as `internal` where it used to be a
+			// validation failure. The helper walks the whole registry.
+			crate::err::anyhow_to_types_error(e)
 		})
 	}
 
@@ -3925,12 +3949,12 @@ impl Datastore {
 		S: Stream<Item = Result<Bytes>>,
 	{
 		// Check if the session has expired
-		ensure!(!sess.expired(), Error::ExpiredSession);
+		ensure!(!sess.expired(), DatastoreError::ExpiredSession);
 
 		// Check if anonymous actors can execute queries when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
 		self.check_anon(sess).map_err(|_| {
-			Error::from(IamError::NotAllowed {
+			Error::from(PolicyError::NotAllowed {
 				actor: "anonymous".to_string(),
 				action: "process".to_string(),
 				resource: "query".to_string(),
@@ -3988,7 +4012,7 @@ impl Datastore {
 				if complete {
 					return match statements_stream.parse_complete(&mut buffer) {
 						Err(e) => {
-							Poll::Ready(Some(Err(anyhow::Error::new(Error::InvalidQuery(e)))))
+							Poll::Ready(Some(Err(anyhow::Error::new(ParseError::InvalidQuery(e)))))
 						}
 						Ok(None) => Poll::Ready(None),
 						Ok(Some(x)) => Poll::Ready(Some(Ok(x))),
@@ -3998,7 +4022,9 @@ impl Datastore {
 				// otherwise try to parse a single statement.
 				match statements_stream.parse_partial(&mut buffer) {
 					Err(e) => {
-						return Poll::Ready(Some(Err(anyhow::Error::new(Error::InvalidQuery(e)))));
+						return Poll::Ready(Some(Err(anyhow::Error::new(
+							ParseError::InvalidQuery(e),
+						))));
 					}
 					Ok(Some(x)) => return Poll::Ready(Some(Ok(x))),
 					Ok(None) => {
@@ -4087,9 +4113,12 @@ impl Datastore {
 
 		// Create a default context
 		let mut ctx = self.setup_ctx().map_err(|e| {
-			e.downcast::<Error>()
-				.map(crate::err::into_types_error)
-				.unwrap_or_else(|e| TypesError::internal(e.to_string()))
+			// `anyhow_to_types_error`, not a downcast to `err::Error`: that
+			// enum now holds a handful of residual variants, so a bare layer
+			// error (`ExecError::DbEmpty` from `Options::ns_db()`, say) misses
+			// and reaches the client as `internal` where it used to be a
+			// validation failure. The helper walks the whole registry.
+			crate::err::anyhow_to_types_error(e)
 		})?;
 
 		// Install the external cancellation flag if one was supplied. See
@@ -4108,9 +4137,12 @@ impl Datastore {
 
 		// Process all statements
 		Executor::execute_plan(self, ctx.freeze(), opt, plan).await.map_err(|e| {
-			e.downcast::<Error>()
-				.map(crate::err::into_types_error)
-				.unwrap_or_else(|e| TypesError::internal(e.to_string()))
+			// `anyhow_to_types_error`, not a downcast to `err::Error`: that
+			// enum now holds a handful of residual variants, so a bare layer
+			// error (`ExecError::DbEmpty` from `Options::ns_db()`, say) misses
+			// and reaches the client as `internal` where it used to be a
+			// validation failure. The helper walks the whole registry.
+			crate::err::anyhow_to_types_error(e)
 		})
 	}
 
@@ -4127,7 +4159,7 @@ impl Datastore {
 		vars: Option<PublicVariables>,
 	) -> Result<PublicValue> {
 		// Check if the session has expired
-		ensure!(!sess.expired(), Error::ExpiredSession);
+		ensure!(!sess.expired(), DatastoreError::ExpiredSession);
 		// Create a new memory stack
 		let mut stack = TreeStack::new();
 		// Create a new query options
@@ -4154,9 +4186,7 @@ impl Datastore {
 		let txn = self
 			.transaction(txn_type)
 			.await?
-			.with_tenant_identity(Some(Arc::new(crate::observe::TenantIdentity::from_session(
-				sess,
-			))))
+			.with_tenant_identity(Some(Arc::new(crate::observe::TenantIdentity::from(sess))))
 			.with_write_keys_limit(self.transaction_max_write_keys())
 			.enclose();
 		// Store the transaction
@@ -4190,7 +4220,7 @@ impl Datastore {
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<QueryResult>> {
 		// Check if the session has expired
-		ensure!(!sess.expired(), Error::ExpiredSession);
+		ensure!(!sess.expired(), DatastoreError::ExpiredSession);
 		// Execute the SQL import
 		self.execute(sql, sess, None).await.map_err(|e| anyhow::anyhow!(e))
 	}
@@ -4202,7 +4232,7 @@ impl Datastore {
 		S: Stream<Item = Result<Bytes>>,
 	{
 		// Check if the session has expired
-		ensure!(!sess.expired(), Error::ExpiredSession);
+		ensure!(!sess.expired(), DatastoreError::ExpiredSession);
 		// Execute the SQL import
 		self.execute_import(sess, None, stream).await
 	}
@@ -4228,7 +4258,7 @@ impl Datastore {
 		cfg: export::Config,
 	) -> Result<impl Future<Output = Result<()>> + 'static> {
 		// Check if the session has expired
-		ensure!(!sess.expired(), Error::ExpiredSession);
+		ensure!(!sess.expired(), DatastoreError::ExpiredSession);
 		// Retrieve the provided NS and DB
 		let (ns, db) = crate::iam::check::check_ns_db(sess)?;
 		// Create a new readonly transaction
@@ -4248,11 +4278,11 @@ impl Datastore {
 	#[allow(clippy::needless_pass_by_value)] // Public API: ergonomic for callers passing `ResourceKind::X.on_db(ns, db)` inline.
 	pub fn check(&self, sess: &Session, action: Action, resource: Resource) -> Result<()> {
 		// Check if the session has expired
-		ensure!(!sess.expired(), Error::ExpiredSession);
+		ensure!(!sess.expired(), DatastoreError::ExpiredSession);
 		// Skip auth for Anonymous users if auth is disabled
 		let skip_auth = !self.is_auth_enabled() && sess.au.is_anon();
 		if !skip_auth {
-			sess.au.is_allowed(action, &resource)?;
+			sess.au.is_allowed(action, &resource).map_err(crate::err::Error::from)?;
 		}
 		// All ok
 		Ok(())
@@ -4291,10 +4321,10 @@ impl Datastore {
 	}
 
 	/// check for disallowed anonymous users
-	pub fn check_anon(&self, sess: &Session) -> Result<(), IamError> {
+	pub fn check_anon(&self, sess: &Session) -> Result<(), PolicyError> {
 		if self.auth_enabled && sess.au.is_anon() && !self.capabilities.load().allows_guest_access()
 		{
-			Err(IamError::NotAllowed {
+			Err(PolicyError::NotAllowed {
 				actor: "anonymous".to_string(),
 				action: String::new(),
 				resource: String::new(),
@@ -4474,14 +4504,14 @@ impl Datastore {
 		db: &str,
 		model_name: &str,
 		model_version: &str,
-	) -> Result<Option<Arc<crate::catalog::MlModelDefinition>>> {
+	) -> Result<Option<Arc<crate::catalog::StoredMlModelDefinition>>> {
 		let tx = self.transaction(Read).await?;
 		let db = tx.expect_db_by_name(ns, db).await?;
 		let model = tx
 			.get_db_model(db.namespace_id, db.database_id, model_name, model_version, None)
 			.await?;
 		tx.cancel().await?;
-		Ok(model)
+		Ok(model.map(|m| Arc::new(m.to_stored())))
 	}
 
 	/// Invoke an API handler.
@@ -4521,37 +4551,42 @@ impl Datastore {
 
 		let db = tx.ensure_ns_db(None, ns, db).await?;
 
-		let apis = tx.all_db_apis(db.namespace_id, db.database_id, None).await?;
 		let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
 
-		let res = match ApiDefinition::find_definition(apis.as_ref(), &segments, req.method) {
-			Some((api, params)) => {
-				debug!(
-					request_id = %req.request_id,
-					path = %path,
-					"API definition found, dispatching to process_api_request"
-				);
-				req.params = params.try_into()?;
+		// Routes on the stored definitions and compiles only the one that
+		// handles this request: this transaction is opened per request, so the
+		// compiled catalog cache is always cold, and compiling the whole list
+		// would parse every handler body in the database to dispatch one.
+		let res =
+			match tx.find_db_api(db.namespace_id, db.database_id, &segments, req.method).await? {
+				Some((api, params)) => {
+					let api = &api;
+					debug!(
+						request_id = %req.request_id,
+						path = %path,
+						"API definition found, dispatching to process_api_request"
+					);
+					req.params = params.try_into()?;
 
-				let opt = self.setup_options(session);
+					let opt = self.setup_options(session);
 
-				let mut ctx = self.setup_ctx()?;
-				ctx.set_transaction(Arc::clone(&tx));
-				ctx.attach_session(session)?;
-				let ctx = &ctx.freeze();
+					let mut ctx = self.setup_ctx()?;
+					ctx.set_transaction(Arc::clone(&tx));
+					ctx.attach_session(session)?;
+					let ctx = &ctx.freeze();
 
-				process_api_request(ctx, &opt, api, req).await
-			}
-			None => {
-				trace!(
-					request_id = %req.request_id,
-					path = %path,
-					"No API definition found for path"
-				);
-				tx.cancel().await?;
-				return Ok(ApiResponse::from_error(ApiError::NotFound, req.request_id.clone()));
-			}
-		};
+					process_api_request(ctx, &opt, api, req).await
+				}
+				None => {
+					trace!(
+						request_id = %req.request_id,
+						path = %path,
+						"No API definition found for path"
+					);
+					tx.cancel().await?;
+					return Ok(ApiResponse::from_error(ApiError::NotFound, req.request_id.clone()));
+				}
+			};
 
 		// Handle committing or cancelling the transaction
 		if res.is_ok() {
@@ -4685,6 +4720,8 @@ mod test {
 	use std::collections::BTreeMap;
 	use std::future::pending;
 
+	use surrealdb_strand::TableName;
+
 	use super::*;
 	use crate::catalog::providers::{
 		CatalogProvider, DatabaseProvider, NamespaceProvider, TableProvider,
@@ -4694,7 +4731,6 @@ mod test {
 		RetryableConflictSite, inject_retryable_conflict, retryable_conflict_count,
 	};
 	use crate::types::{PublicValue, PublicVariables};
-	use crate::val::TableName;
 
 	async fn new_index_compaction_test_ds() -> Result<(Datastore, Session)> {
 		let ds = Datastore::new("memory").await?;
@@ -5708,7 +5744,7 @@ mod test {
 	async fn archive_node_for_shutdown_reports_timeout() {
 		let outcome = archive_node_for_shutdown(
 			Duration::from_millis(1),
-			Err(anyhow::Error::new(Error::QueryTimedout(Duration::from_millis(1).into()))),
+			Err(anyhow::Error::new(EngineError::QueryTimedout(Duration::from_millis(1)))),
 		);
 
 		assert_eq!(outcome, ShutdownNodeDeleteOutcome::TimedOut);
@@ -5730,7 +5766,7 @@ mod test {
 		.await
 		.unwrap_err();
 
-		assert!(matches!(err.downcast_ref::<Error>(), Some(Error::QueryTimedout(_))));
+		assert!(matches!(crate::err::engine_error(&err), Some(EngineError::QueryTimedout(_))));
 		assert!(txn.closed());
 	}
 
@@ -5751,7 +5787,7 @@ mod test {
 		.await
 		.unwrap_err();
 
-		assert!(matches!(err.downcast_ref::<Error>(), Some(Error::QueryCancelled)));
+		assert!(matches!(crate::err::engine_error(&err), Some(EngineError::QueryCancelled)));
 		assert!(txn.closed());
 	}
 

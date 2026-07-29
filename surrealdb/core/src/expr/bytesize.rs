@@ -6,7 +6,7 @@ use std::{fmt, ops};
 use anyhow::{Result, bail, ensure};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::err::Error;
+use crate::expr::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::val::{TryAdd, TrySub, Value};
 

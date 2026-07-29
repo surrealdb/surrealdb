@@ -9,14 +9,16 @@ use uuid::Uuid;
 
 use super::access::{authenticate_record, create_refresh_token_record};
 use crate::catalog;
+use crate::catalog::Error as CatalogError;
 use crate::catalog::providers::{AuthorisationProvider, DatabaseProvider};
 use crate::dbs::Session;
-use crate::err::Error;
+use crate::err::exec_error;
+use crate::exec::Error as ExecError;
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::{Claims, Token};
-use crate::iam::{Actor, Auth, Level, Role, algorithm_to_jwt_algorithm};
-use crate::kvs::Datastore;
+use crate::iam::{Actor, Auth, Error as AuthError, Level, Role, algorithm_to_jwt_algorithm};
 use crate::kvs::TransactionType::*;
+use crate::kvs::{Datastore, is_retryable_transaction_conflict};
 use crate::types::PublicVariables;
 use crate::val::Value;
 
@@ -95,7 +97,7 @@ pub async fn signup(
 			// Currently, signup is only supported at the database level
 			super::signup::db_access(kvs, session, ns, db, ac, vars).await
 		}
-		_ => Err(anyhow::Error::new(Error::InvalidSignup)),
+		_ => Err(anyhow::Error::new(AuthError::InvalidSignup)),
 	}
 }
 
@@ -177,7 +179,7 @@ pub async fn db_access(
 		Some(db) => db,
 		None => {
 			let _ = tx.cancel().await;
-			return Err(Error::DbNotFound {
+			return Err(CatalogError::DbNotFound {
 				name: db,
 			}
 			.into());
@@ -188,7 +190,7 @@ pub async fn db_access(
 		catch!(tx, tx.get_db_access(db_def.namespace_id, db_def.database_id, &ac, None).await)
 	else {
 		let _ = tx.cancel().await;
-		bail!(Error::AccessNotFound);
+		bail!(AuthError::AccessNotFound);
 	};
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
@@ -196,16 +198,16 @@ pub async fn db_access(
 	// Check the access method type
 	// Currently, only the record access method supports signup
 	let catalog::AccessType::Record(ref at) = av.access_type else {
-		bail!(Error::AccessMethodMismatch)
+		bail!(AuthError::AccessMethodMismatch)
 	};
 
 	// Check if the record access method supports issuing tokens
 	let Some(iss) = &at.jwt.issue else {
-		bail!(Error::AccessMethodMismatch)
+		bail!(AuthError::AccessMethodMismatch)
 	};
 
-	let Some(val) = &at.signup else {
-		bail!(Error::AccessRecordNoSignup);
+	let Some(val) = &av.signup else {
+		bail!(AuthError::AccessRecordNoSignup);
 	};
 	// Setup the query params
 	// Setup the system session for finding the signup record
@@ -218,7 +220,7 @@ pub async fn db_access(
 		Ok(val) => {
 			// There is a record returned
 			let Ok(mut rid) = val.into_record() else {
-				bail!(Error::NoRecordFound)
+				bail!(AuthError::NoRecordFound)
 			};
 			// Create the authentication key
 			let key = config(iss.alg, &iss.key)?;
@@ -300,27 +302,26 @@ pub async fn db_access(
 					},
 					None => Token::Access(token),
 				}),
-				_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
+				_ => Err(anyhow::Error::new(AuthError::TokenMakingFailed)),
 			}
 		}
-		Err(e) => match e.downcast_ref() {
-			// If the SIGNUP clause throws a specific error, authentication fails with that error
-			Some(Error::Thrown(_)) => Err(e),
+		// If the SIGNUP clause throws a specific error, authentication fails with that error
+		Err(e) if matches!(exec_error(&e), Some(ExecError::Thrown(_))) => Err(e),
+		Err(e) => {
 			// If the SIGNUP clause failed due to an unexpected error, be more specific
 			// This allows clients to handle these errors, which may be retryable
-			Some(Error::Kvs(kvs_err)) if kvs_err.is_retryable() => {
+			if is_retryable_transaction_conflict(&e) {
 				debug!("Unexpected error found while executing a SIGNUP clause: {e}");
-				Err(anyhow::Error::new(Error::UnexpectedAuth))
-			}
-			// Otherwise, return a generic error unless it should be forwarded
-			_ => {
+				Err(anyhow::Error::new(AuthError::UnexpectedAuth))
+			} else {
+				// Otherwise, return a generic error unless it should be forwarded
 				if kvs.config().insecure_forward_access_errors {
 					Err(e)
 				} else {
-					Err(anyhow::Error::new(Error::AccessRecordSignupQueryFailed))
+					Err(anyhow::Error::new(AuthError::AccessRecordSignupQueryFailed))
 				}
 			}
-		},
+		}
 	}
 }
 
@@ -647,7 +648,7 @@ mod tests {
 			.await;
 			let e = res.unwrap_err();
 			match e.downcast().expect("Unexpected error kind") {
-				Error::InvalidAuth => {}
+				AuthError::InvalidAuth => {}
 				e => panic!("Unexpected error, expected InvalidAuth found {e}"),
 			}
 		}
@@ -1029,7 +1030,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			let e = res.unwrap_err();
 			match e.downcast().expect("Unexpected error kind") {
-				Error::Thrown(e) => assert_eq!(e, "This user is not enabled"),
+				ExecError::Thrown(e) => assert_eq!(e, "This user is not enabled"),
 				e => panic!("Unexpected error, expected Thrown found {e:?}"),
 			}
 		}
@@ -1074,7 +1075,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			let e = res.unwrap_err();
 			match e.downcast().expect("Unexpected error kind") {
-				Error::InvalidAuth => {}
+				AuthError::InvalidAuth => {}
 				e => panic!("Unexpected error, expected InvalidAuth found {e}"),
 			}
 		}
@@ -1157,11 +1158,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					e1, e2
 				),
 				(Err(e1), Ok(_)) => match e1.downcast().expect("Unexpected error kind") {
-					Error::UnexpectedAuth => {}
+					AuthError::UnexpectedAuth => {}
 					e => panic!("Unexpected error, expected UnexpectedAuth found {e}"),
 				},
 				(Ok(_), Err(e2)) => match e2.downcast().expect("Unexpected error kind") {
-					Error::UnexpectedAuth => {}
+					AuthError::UnexpectedAuth => {}
 					e => panic!("Unexpected error, expected UnexpectedAuth found {e}"),
 				},
 			}
@@ -1237,11 +1238,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					e1, e2
 				),
 				(Err(e1), Ok(_)) => match e1.downcast().expect("Unexpected error kind") {
-					Error::UnexpectedAuth => {}
+					AuthError::UnexpectedAuth => {}
 					e => panic!("Unexpected error, expected UnexpectedAuth found {e}"),
 				},
 				(Ok(_), Err(e2)) => match e2.downcast().expect("Unexpected error kind") {
-					Error::UnexpectedAuth => {}
+					AuthError::UnexpectedAuth => {}
 					e => panic!("Unexpected error, expected UnexpectedAuth found {e}"),
 				},
 			}

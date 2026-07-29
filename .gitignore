@@ -66,3 +66,4 @@ history.txt
 surrealism/test/demo.surli
 surrealism/test/surrealism
 
+*.actual.txt

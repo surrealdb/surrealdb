@@ -12,12 +12,11 @@ use uuid::Uuid;
 
 use crate::catalog;
 use crate::catalog::{
-	DatabaseDefinition, DatabaseId, DefaultConfig, IndexId, NamespaceDefinition, NamespaceId,
-	Record, TableDefinition, TableId, UserDefinition,
+	DatabaseDefinition, DatabaseId, DefaultConfig, Error, IndexId, NamespaceDefinition,
+	NamespaceId, Record, TableDefinition, TableId, UserDefinition,
 };
 use crate::ctx::Context;
 use crate::dbs::node::Node;
-use crate::err::Error;
 use crate::kvs::CachePolicy;
 use crate::val::{RecordId, RecordIdKey, TableName};
 

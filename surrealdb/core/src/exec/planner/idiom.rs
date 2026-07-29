@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use super::Planner;
-use crate::err::Error;
+use crate::err::{EngineError, Error};
 use crate::exec::operators::{CurrentValueSource, RecursionOp};
 use crate::exec::parts::{
 	AllPart, ClosureFieldCallPart, DestructureField, DestructurePart, FieldPart, FirstPart,
@@ -14,7 +14,7 @@ use crate::exec::parts::{
 	PhysicalRecurseInstruction, RecursePart, RepeatRecursePart, WherePart,
 };
 use crate::exec::physical_expr::IdiomExpr;
-use crate::exec::{ExecOperator, PhysicalExpr};
+use crate::exec::{Error as ExecError, ExecOperator, PhysicalExpr};
 use crate::expr::part::{DestructurePart as AstDestructurePart, Part, RecurseInstruction};
 
 // ============================================================================
@@ -40,15 +40,15 @@ impl<'ctx> Planner<'ctx> {
 			// `peek + remove` instead of one destructure because we need
 			// the index check separately. The `else` arm is provably
 			// unreachable given the `peek` succeeded — degraded to a typed
-			// `Error::Internal` so a future Part::Start variant change
+			// `EngineError::Internal` so a future Part::Start variant change
 			// surfaces a useful planner-bug message rather than a panic on
 			// production user input.
 			let start_part = parts.remove(0);
 			let Part::Start(start_expr) = start_part else {
-				return Err(Error::Internal(
+				return Err(EngineError::Internal(
 					"convert_idiom: parts.first() reported Part::Start but parts.remove(0) was not Part::Start"
 						.into(),
-				));
+				).into());
 			};
 			let start_phys = self.physical_expr(start_expr).await?;
 			let remaining_parts = self.convert_parts(parts).await?;
@@ -86,18 +86,18 @@ impl<'ctx> Planner<'ctx> {
 
 					// Validate bounds (same checks as expr/part.rs)
 					if min_depth < 1 {
-						return Err(Error::InvalidBound {
+						return Err(Error::Exec(ExecError::InvalidBound {
 							found: min_depth.to_string(),
 							expected: "at least 1".into(),
-						});
+						}));
 					}
 					if let Some(max) = max_depth
 						&& max > system_limit
 					{
-						return Err(Error::InvalidBound {
+						return Err(Error::Exec(ExecError::InvalidBound {
 							found: max.to_string(),
 							expected: format!("{} at most", system_limit),
-						});
+						}));
 					}
 
 					let remaining: Vec<Part> = iter.collect();
@@ -107,7 +107,7 @@ impl<'ctx> Planner<'ctx> {
 					// AND the path contains a repeat recurse (@), the two
 					// conflict -- match the old compute path's check.
 					if instruction.is_some() && has_repeat_recurse {
-						return Err(Error::RecursionInstructionPlanConflict);
+						return Err(Error::Exec(ExecError::RecursionInstructionPlanConflict));
 					}
 
 					// When the path contains @, split at the @ marker.
@@ -186,10 +186,10 @@ impl<'ctx> Planner<'ctx> {
 					let mut lookups: Vec<crate::expr::lookup::Lookup> = vec![*first_lookup];
 					while matches!(iter.peek(), Some(Part::Lookup(_))) {
 						let Some(Part::Lookup(lu)) = iter.next() else {
-							return Err(Error::Internal(
+							return Err(EngineError::Internal(
 								"convert_parts lookup fusion: iter.peek() reported Part::Lookup but iter.next() did not yield one"
 									.into(),
-							));
+							).into());
 						};
 						lookups.push(*lu);
 					}
@@ -311,9 +311,10 @@ impl<'ctx> Planner<'ctx> {
 				}))
 			}
 
-			Part::Start(_) => Err(Error::Unreachable(
+			Part::Start(_) => Err(EngineError::Unreachable(
 				"Start parts should be handled at the idiom level".to_string(),
-			)),
+			)
+			.into()),
 
 			Part::Lookup(lookup) => {
 				// Extract metadata before consuming lookup
@@ -345,18 +346,20 @@ impl<'ctx> Planner<'ctx> {
 
 				// Validate bounds (same checks as expr/part.rs)
 				if min_depth < 1 {
-					return Err(Error::InvalidBound {
+					return Err(ExecError::InvalidBound {
 						found: min_depth.to_string(),
 						expected: "at least 1".into(),
-					});
+					}
+					.into());
 				}
 				if let Some(max) = max_depth
 					&& max > system_limit
 				{
-					return Err(Error::InvalidBound {
+					return Err(ExecError::InvalidBound {
 						found: max.to_string(),
 						expected: format!("{} at most", system_limit),
-					});
+					}
+					.into());
 				}
 
 				let (path, has_repeat_recurse) = if let Some(p) = inner_path {
@@ -412,14 +415,15 @@ impl<'ctx> Planner<'ctx> {
 						// to the path. This occurs when the parser wraps non-idiom
 						// expressions (like $this or level * 2) in Part::Start
 						// within destructure aliases. The `else` arm is provably
-						// unreachable; converted to `Error::Internal` for the
+						// unreachable; converted to `EngineError::Internal` for the
 						// same reason as the matching site in `convert_idiom`.
 						let start_expr = if matches!(parts.first(), Some(Part::Start(_))) {
 							let Part::Start(expr) = parts.remove(0) else {
-								return Err(Error::Internal(
+								return Err(EngineError::Internal(
 									"convert_destructure: parts.first() reported Part::Start but parts.remove(0) was not Part::Start"
 										.into(),
-								));
+								)
+								.into());
 							};
 							Some(self.physical_expr(expr).await?)
 						} else {

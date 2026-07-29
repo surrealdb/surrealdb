@@ -3,7 +3,7 @@ use std::borrow::Cow;
 
 use anyhow::Result;
 
-use crate::catalog::{AccessDefinition, NamespaceId};
+use crate::catalog::{NamespaceId, StoredAccessDefinition};
 use crate::key::category::{Categorise, Category};
 use crate::key::{impl_kv_key_storekey, impl_kv_range_storekey, key};
 
@@ -20,7 +20,7 @@ key! {
 	}
 }
 
-impl_kv_key_storekey!(AccessKey<'a> => AccessDefinition);
+impl_kv_key_storekey!(AccessKey<'a> => StoredAccessDefinition);
 impl Categorise for AccessKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::NamespaceAccess

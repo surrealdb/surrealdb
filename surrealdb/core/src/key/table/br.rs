@@ -7,11 +7,12 @@
 //! already admitted writer is still deciding whether to commit or roll back.
 use std::borrow::Cow;
 
+use surrealdb_strand::TableName;
+
 use crate::catalog::IndexId;
 use crate::key::database::all::DatabaseRoot;
 use crate::key::{impl_kv_key_storekey, impl_kv_range_storekey, key};
 use crate::kvs::index::{BuildGeneration, BuildTicket, IndexBuildReservation};
-use crate::val::TableName;
 
 key! {
 	/// A key for one writer reservation in a build generation.

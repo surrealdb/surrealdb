@@ -334,10 +334,10 @@ async fn write_guard_holds_under_concurrent_writes() {
 /// server error: it is an expected, caller-actionable limit violation.
 #[test]
 fn write_guard_error_is_a_query_error() {
-	let err = crate::err::Error::TransactionWriteKeysExceeded {
+	let err = crate::kvs::DatastoreError::TransactionWriteKeysExceeded {
 		limit: 5,
 	};
-	let types_err = crate::err::into_types_error(err);
+	let types_err = common::LeafError::to_types_error(err);
 	assert_eq!(
 		types_err.kind_str(),
 		"Query",

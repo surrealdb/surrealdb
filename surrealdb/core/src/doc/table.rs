@@ -11,11 +11,11 @@ use crate::catalog::{Metadata, Record, RecordType, ViewDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::{Action, CursorDoc, Document, DocumentContext, Extras, NsDbCtx};
-use crate::err::Error;
 use crate::expr::field::Selector;
 use crate::expr::statements::SelectStatement;
 use crate::expr::{
-	BinaryOperator, Cond, Expr, Fields, FlowResultExt as _, Function, FunctionCall, Groups, Literal,
+	BinaryOperator, Cond, Error, Expr, Fields, FlowResultExt as _, Function, FunctionCall, Groups,
+	Literal,
 };
 use crate::idx::planner::RecordStrategy;
 use crate::key;
@@ -64,7 +64,7 @@ impl Document {
 		let opt = &opt.new_with_perms(false);
 		// Loop through all foreign table statements
 		for ft in fts.iter() {
-			// Get the table definition
+			// Get the view definition
 			let Some(tb) = ft.view.as_ref() else {
 				fail!("Table stored as view table did not have a view");
 			};

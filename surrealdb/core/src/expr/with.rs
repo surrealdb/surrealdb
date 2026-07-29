@@ -1,6 +1,5 @@
+use common::fmt::{EscapeKwFreeIdent, Fmt};
 use surrealdb_types::{SqlFormat, ToSql};
-
-use crate::fmt::{EscapeKwFreeIdent, Fmt};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum With {

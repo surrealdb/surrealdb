@@ -1,7 +1,7 @@
 use std::fmt::{self, Display, Formatter};
 use std::hash::{Hash, Hasher};
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use revision::{
 	DeserializeRevisioned, Revisioned, SerializeRevisioned, SkipRevisioned, revisioned,
 };
@@ -9,7 +9,7 @@ use storekey::{BorrowDecode, Encode};
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::err::Error;
+use crate::catalog::{FromStored, IdiomText, SurqlText};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Idiom};
 use crate::key::impl_kv_value_revisioned;
@@ -73,7 +73,7 @@ impl From<u32> for IndexId {
 
 /// Current on-disk format version stamped on newly defined or rebuilt indexes.
 /// Bump when any index kind's persisted layout changes. Each kind's *required*
-/// version (see [`IndexDefinition::required_format_version`]) stays at the
+/// version (see [`StoredIndexDefinition::required_format_version`]) stays at the
 /// version that introduced its current mandatory layout, so bumping this
 /// constant does not invalidate existing indexes of other kinds.
 pub(crate) const INDEX_FORMAT_VERSION: u16 = 2;
@@ -93,11 +93,14 @@ pub(crate) const BTREE_ENTRY_DOC_IDS_FORMAT_VERSION: u16 = 2;
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[non_exhaustive]
-pub struct IndexDefinition {
+pub struct StoredIndexDefinition {
 	pub(crate) index_id: IndexId,
 	pub(crate) name: Strand,
-	pub(crate) table_name: TableName,
-	pub(crate) cols: Vec<Idiom>,
+	pub(crate) table_name: Strand,
+	/// Raw idiom-path text for each indexed column, in `Idiom::to_raw_string()`
+	/// form (e.g. `"address.city"`). Compiled on demand by consumers that
+	/// need the structured `Idiom` (index maintenance, planner analysis).
+	pub(crate) cols: Vec<IdiomText>,
 	pub(crate) index: Index,
 	pub(crate) comment: Option<String>,
 	/// Whether this index has been marked for removal via `REMOVE INDEX`.
@@ -107,22 +110,32 @@ pub struct IndexDefinition {
 	/// On-disk format version of this index's persisted data. Definitions written
 	/// by a binary predating the table-level doc-ID space decode this as `0`; the
 	/// doc-ID-backed kinds require [`INDEX_FORMAT_VERSION`] and are rejected with
-	/// [`Error::IndexRebuildRequired`](crate::err::Error::IndexRebuildRequired)
+	/// [`Error::IndexRebuildRequired`](crate::catalog::Error::IndexRebuildRequired)
 	/// until rebuilt.
 	#[revision(start = 2)]
 	pub(crate) format_version: u16,
 }
 
-impl_kv_value_revisioned!(IndexDefinition);
+impl_kv_value_revisioned!(StoredIndexDefinition);
 
 impl IndexDefinition {
-	pub(crate) fn to_sql_definition(&self) -> sql::DefineIndexStatement {
+	/// Lowers `index` to its sql-side form. The count index's guard condition
+	/// comes from the compiled `count_cond`; every other kind is plain data
+	/// and lowers via [`Index::to_sql_definition`].
+	fn index_to_sql_definition(&self) -> sql::index::Index {
+		match &self.index {
+			Index::Count(_) => sql::index::Index::Count(self.count_cond.clone().map(Into::into)),
+			other => other.to_sql_definition(),
+		}
+	}
+
+	fn to_sql_definition(&self) -> sql::DefineIndexStatement {
 		sql::DefineIndexStatement {
 			kind: DefineKind::Default,
 			name: sql::Expr::Idiom(sql::Idiom::field(self.name.clone())),
-			what: sql::Expr::Table(self.table_name.clone()),
-			cols: self.cols.iter().cloned().map(|x| sql::Expr::Idiom(x.into())).collect(),
-			index: self.index.to_sql_definition(),
+			what: sql::Expr::Table(self.table_name.clone().into()),
+			cols: self.cols.iter().map(|i| sql::Expr::Idiom(i.clone().into())).collect(),
+			index: self.index_to_sql_definition(),
 			comment: self
 				.comment
 				.clone()
@@ -131,99 +144,21 @@ impl IndexDefinition {
 			concurrently: false,
 		}
 	}
-
-	/// Checks if this index has been marked for removal and returns an error if so.
-	///
-	/// This method is used during index building to detect when an index has been
-	/// marked for removal via `REMOVE INDEX`, allowing the build process to be
-	/// cancelled gracefully.
-	///
-	/// # Errors
-	///
-	/// Returns `Error::IndexingBuildingCancelled` if `prepare_remove` is `true`.
-	pub(crate) fn expect_not_prepare_remove(&self) -> Result<()> {
-		if self.prepare_remove {
-			Err(anyhow::Error::new(Error::IndexingBuildingCancelled {
-				reason: "Prepare remove.".to_string(),
-			}))
-		} else {
-			Ok(())
-		}
-	}
-
-	/// The on-disk format version required to read this index kind.
-	///
-	/// Only the doc-ID-backed kinds (full-text, HNSW, DiskAnn) mandate a
-	/// minimum format ([`DOC_IDS_FORMAT_VERSION`], the table-level doc-ID
-	/// space migration); b-tree and count indexes are readable at any format.
-	/// B-tree entries gain appended doc-IDs at
-	/// [`BTREE_ENTRY_DOC_IDS_FORMAT_VERSION`], but older entries stay
-	/// readable, so that version is opt-in (see [`Self::has_entry_doc_ids`])
-	/// rather than required.
-	fn required_format_version(&self) -> u16 {
-		match self.index {
-			Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_) => DOC_IDS_FORMAT_VERSION,
-			Index::Idx | Index::Uniq | Index::Count(_) => 0,
-		}
-	}
-
-	/// Whether this b-tree index's entry values carry the record's table-level
-	/// doc-ID appended to the record ID.
-	///
-	/// True for `Idx`/`Uniq` indexes defined or rebuilt at
-	/// [`BTREE_ENTRY_DOC_IDS_FORMAT_VERSION`] or later. Both the write path
-	/// (append the doc-ID to new entries) and the planner (eligibility for
-	/// bitmap candidate plans) gate on this so a given index only ever
-	/// contains entries of a single format.
-	pub(crate) fn has_entry_doc_ids(&self) -> bool {
-		matches!(self.index, Index::Idx | Index::Uniq)
-			&& self.format_version >= BTREE_ENTRY_DOC_IDS_FORMAT_VERSION
-	}
-
-	/// Whether this index consumes the table's shared doc-ID space
-	/// (`!di`/`!dd` mappings).
-	///
-	/// True for the doc-ID-backed kinds (full-text, HNSW, DiskAnn) and for
-	/// b-tree indexes whose entries carry doc-IDs. Tables with at least one
-	/// such index maintain the shared mapping for every record; the mapping's
-	/// lifecycle (removal on record delete, deferred reclaim during builds)
-	/// is gated on this.
-	pub(crate) fn uses_doc_ids(&self) -> bool {
-		matches!(self.index, Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_))
-			|| self.has_entry_doc_ids()
-	}
-
-	/// Rejects an index whose persisted data predates the running binary's format.
-	///
-	/// Called when a doc-ID-backed index is opened for a query. An index built
-	/// before the table-level doc-ID space decodes as `format_version == 0` and
-	/// must be rebuilt with `REBUILD INDEX` before it can be read, otherwise its
-	/// posting lists / graph payloads reference doc-IDs that no longer resolve.
-	///
-	/// # Errors
-	/// Returns [`Error::IndexRebuildRequired`](crate::err::Error::IndexRebuildRequired)
-	/// when `format_version` is below the kind's requirement.
-	pub(crate) fn ensure_current_format(&self) -> Result<()> {
-		let required = self.required_format_version();
-		if self.format_version < required {
-			return Err(anyhow::Error::new(Error::IndexRebuildRequired {
-				index: self.name.to_string(),
-				table: self.table_name.to_string(),
-				expected: required,
-				actual: self.format_version,
-			}));
-		}
-		Ok(())
-	}
 }
 
 impl InfoStructure for IndexDefinition {
 	fn structure(self) -> Value {
+		let index = Value::from(self.index_to_sql_definition().to_sql());
 		Value::from(map! {
 			"name" => self.name.into(),
 			"table" => Value::String(self.table_name.into()),
-			"cols" => Value::Array(Array(self.cols.into_iter().map(|x| x.structure()).collect())),
-			"index" => self.index.structure(),
+			// `structure`, not `to_raw_string`: the latter escapes through
+			// `EscapeKwFreeIdent`, which leaves a reserved word bare, so a column
+			// named `value` would render here as `value` while the same
+			// definition's `index` key and plain `INFO FOR TABLE` both render it
+			// as `` `value` ``. The two INFO forms must agree.
+			"cols" => Value::Array(Array(self.cols.iter().map(|i| i.clone().structure()).collect())),
+			"index" => index,
 			"comment", if let Some(v) = self.comment => v.into(),
 			"prepare_remove", if self.prepare_remove => self.prepare_remove.into()
 		})
@@ -233,6 +168,47 @@ impl InfoStructure for IndexDefinition {
 impl ToSql for IndexDefinition {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		self.to_sql_definition().fmt_sql(f, fmt)
+	}
+}
+
+/// Canonical SurrealQL text of a Count index's optional guard condition
+/// (the bare expression following WHERE, no prefix) -- the stored-text
+/// counterpart to expr::Cond, kept as a revisioned single-field wrapper
+/// because the wire format it replaced (`Cond(Expr)`, a derived rev-1
+/// wrapper) carries a revision header that a bare `SurqlText` does not.
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub(crate) struct CondText(pub SurqlText<Cond>);
+
+impl CondText {
+	/// Compiles the stored condition text into a `sql::Cond` AST node, for
+	/// handing to `sql::index::Index::Count` at the INFO/export rendering
+	/// boundary. The text was already parsed successfully once, when the
+	/// `DEFINE INDEX` statement that produced it was executed, so a failure
+	/// here is a stored-catalog invariant violation, not bad user input.
+	/// This path is only reachable from cold, informational rendering;
+	/// query execution reads the stored text directly and never goes
+	/// through this conversion.
+	fn to_ast(&self) -> Option<sql::Cond> {
+		match self.0.compile() {
+			Ok(cond) => Some(cond.into()),
+			Err(err) => {
+				debug_assert!(false, "stored count-index condition failed to parse: {:?}", self.0);
+				// Warn, not silence: the rendered `DEFINE INDEX` loses its
+				// `WHERE`, so an export and re-import would rebuild the index
+				// unfiltered and it would return different counts.
+				// `IndexDefinition::from_stored` propagates for the same bytes,
+				// so the two paths disagree about whether the definition is
+				// readable at all — which is worth seeing in a log.
+				warn!(
+					target: "surrealdb::core::catalog",
+					error = %err,
+					"Stored count-index condition no longer parses; it is omitted from the \
+					 rendered definition, so an export of this index would be unfiltered"
+				);
+				None
+			}
+		}
 	}
 }
 
@@ -249,7 +225,7 @@ pub(crate) enum Index {
 	/// Index with Full-Text search capabilities
 	FullText(FullTextParams),
 	/// Count index
-	Count(Option<Cond>),
+	Count(Option<CondText>),
 	/// DiskANN index for distance-based metrics
 	#[revision(start = 2)]
 	DiskAnn(DiskAnnParams),
@@ -263,7 +239,7 @@ impl Index {
 			Self::Hnsw(params) => sql::index::Index::Hnsw(params.clone().into()),
 			Self::DiskAnn(params) => sql::index::Index::DiskAnn(params.clone().into()),
 			Self::FullText(params) => sql::index::Index::FullText(params.clone().into()),
-			Self::Count(cond) => sql::index::Index::Count(cond.clone().map(Into::into)),
+			Self::Count(cond) => sql::index::Index::Count(cond.as_ref().and_then(CondText::to_ast)),
 		}
 	}
 
@@ -294,7 +270,10 @@ impl From<sql::index::Index> for Index {
 			sql::index::Index::Hnsw(p) => Self::Hnsw(p.into()),
 			sql::index::Index::DiskAnn(p) => Self::DiskAnn(p.into()),
 			sql::index::Index::FullText(p) => Self::FullText(p.into()),
-			sql::index::Index::Count(c) => Self::Count(c.map(Into::into)),
+			sql::index::Index::Count(c) => Self::Count(c.map(|cond| {
+				let cond: Cond = cond.into();
+				CondText(SurqlText::new(&cond))
+			})),
 		}
 	}
 }
@@ -307,7 +286,7 @@ impl From<Index> for sql::index::Index {
 			Index::Hnsw(p) => Self::Hnsw(p.into()),
 			Index::DiskAnn(p) => Self::DiskAnn(p.into()),
 			Index::FullText(p) => Self::FullText(p.into()),
-			Index::Count(c) => Self::Count(c.map(Into::into)),
+			Index::Count(c) => Self::Count(c.as_ref().and_then(CondText::to_ast)),
 		}
 	}
 }
@@ -751,6 +730,123 @@ impl From<DiskAnnParams> for sql::index::DiskAnnParams {
 	}
 }
 
+/// Runtime form of [`StoredIndexDefinition`].
+///
+/// `index` stays in its stored form (all index parameters are plain data);
+/// the one expression it may carry, the count index's guard condition, is
+/// compiled into `count_cond`, which is `None` for every other index kind
+/// and for an unguarded count index. Read structure from `index`, the guard
+/// from `count_cond`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct IndexDefinition {
+	pub index_id: IndexId,
+	pub name: Strand,
+	pub table_name: TableName,
+	pub cols: Vec<Idiom>,
+	pub index: Index,
+	pub count_cond: Option<Cond>,
+	pub prepare_remove: bool,
+	pub format_version: u16,
+	pub comment: Option<String>,
+}
+
+impl IndexDefinition {
+	/// See [`StoredIndexDefinition::expect_not_prepare_remove`]; same check on the
+	/// compiled form.
+	pub(crate) fn expect_not_prepare_remove(&self) -> anyhow::Result<()> {
+		if self.prepare_remove {
+			Err(anyhow::Error::new(crate::kvs::DatastoreError::IndexingBuildingCancelled {
+				reason: "Prepare remove.".to_string(),
+			}))
+		} else {
+			Ok(())
+		}
+	}
+
+	/// See [`StoredIndexDefinition::has_entry_doc_ids`]; same predicate on the
+	/// compiled form.
+	pub(crate) fn has_entry_doc_ids(&self) -> bool {
+		matches!(self.index, Index::Idx | Index::Uniq)
+			&& self.format_version >= BTREE_ENTRY_DOC_IDS_FORMAT_VERSION
+	}
+
+	/// See [`StoredIndexDefinition::uses_doc_ids`]; same predicate on the
+	/// compiled form.
+	pub(crate) fn uses_doc_ids(&self) -> bool {
+		matches!(self.index, Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_))
+			|| self.has_entry_doc_ids()
+	}
+
+	/// See [`StoredIndexDefinition::ensure_current_format`]; same check on the
+	/// compiled form.
+	pub(crate) fn ensure_current_format(&self) -> anyhow::Result<()> {
+		let required = match self.index {
+			Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_) => DOC_IDS_FORMAT_VERSION,
+			Index::Idx | Index::Uniq | Index::Count(_) => 0,
+		};
+		if self.format_version < required {
+			return Err(anyhow::Error::new(crate::catalog::Error::IndexRebuildRequired {
+				index: self.name.to_string(),
+				table: self.table_name.to_string(),
+				expected: required,
+				actual: self.format_version,
+			}));
+		}
+		Ok(())
+	}
+}
+
+impl FromStored for IndexDefinition {
+	type Stored = StoredIndexDefinition;
+
+	fn from_stored(stored: &StoredIndexDefinition) -> anyhow::Result<IndexDefinition> {
+		fn build(stored: &StoredIndexDefinition) -> anyhow::Result<IndexDefinition> {
+			Ok(IndexDefinition {
+				index_id: stored.index_id,
+				name: stored.name.clone(),
+				table_name: TableName::from(stored.table_name.clone()),
+				cols: stored.cols.iter().map(|t| t.compile()).collect::<anyhow::Result<_>>()?,
+				index: stored.index.clone(),
+				count_cond: match &stored.index {
+					Index::Count(Some(cond)) => Some(cond.0.compile()?),
+					_ => None,
+				},
+				prepare_remove: stored.prepare_remove,
+				format_version: stored.format_version,
+				comment: stored.comment.clone(),
+			})
+		}
+		build(stored).with_context(|| {
+			format!(
+				"the stored definition of index `{}` on table `{}` no longer compiles",
+				stored.name, stored.table_name
+			)
+		})
+	}
+}
+
+impl IndexDefinition {
+	pub(crate) fn to_stored(&self) -> StoredIndexDefinition {
+		StoredIndexDefinition {
+			index_id: self.index_id,
+			name: self.name.clone(),
+			table_name: self.table_name.clone().into(),
+			cols: self.cols.iter().map(IdiomText::new).collect(),
+			// The stored-form clone in `index` may hold a stale guard text if
+			// the compiled `count_cond` was mutated, so re-render it.
+			index: match &self.index {
+				Index::Count(_) => {
+					Index::Count(self.count_cond.as_ref().map(|c| CondText(SurqlText::new(c))))
+				}
+				other => other.clone(),
+			},
+			comment: self.comment.clone(),
+			prepare_remove: self.prepare_remove,
+			format_version: self.format_version,
+		}
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
@@ -764,7 +860,9 @@ mod tests {
 		Uniq,
 		Hnsw(HnswParams),
 		FullText(FullTextParams),
-		Count(Option<Cond>),
+		// `CondText` is byte-identical to revision 1's `Cond(Expr)`, for the
+		// reason its own documentation gives; only the variant list matters here.
+		Count(Option<CondText>),
 	}
 
 	#[revisioned(revision = 1)]

@@ -31,7 +31,7 @@ impl KVKey for DiskAnnRecordPending<'_> {
 
 	fn encode_buffer(&self, buffer: &mut Vec<u8>) -> Result<()> {
 		storekey::encode_format::<IndexFormat, _, _>(buffer, self)
-			.map_err(|_| crate::err::Error::Unencodable)?;
+			.map_err(|_| crate::key::Error::Unencodable)?;
 		Ok(())
 	}
 
@@ -41,7 +41,7 @@ impl KVKey for DiskAnnRecordPending<'_> {
 impl<'a> KVKeyDecode<'a> for DiskAnnRecordPending<'a> {
 	fn decode_key(bytes: &'a [u8]) -> Result<Self> {
 		Ok(storekey::decode_borrow_format::<IndexFormat, _>(bytes).map_err(|_| {
-			crate::err::Error::Corrupted("DiskANNRecordPending key could not be decoded")
+			crate::key::Error::Corrupted("DiskANNRecordPending key could not be decoded")
 		})?)
 	}
 }

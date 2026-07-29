@@ -23,18 +23,17 @@ use super::super::*;
 use crate::catalog::auth::{AuthLevel, AuthLimit};
 use crate::catalog::record::{Record, RecordType};
 use crate::catalog::schema::base::Base;
+use crate::catalog::schema::{StoredReference, StoredReferenceDeleteStrategy};
 use crate::catalog::{
-	ApiActionDefinition, ApiConfigDefinition, ApiMethod, DatabaseId, IndexId, ModuleDefinition,
-	ModuleExecutable, NamespaceId, NodeLiveQuery, SiloExecutable, SurrealismExecutable, TableId,
-	TaskLease,
+	ApiMethod, DatabaseId, IndexId, ModuleExecutable, NamespaceId, NodeLiveQuery, SiloExecutable,
+	StoredApiActionDefinition, StoredApiConfigDefinition, StoredModuleDefinition,
+	SurrealismExecutable, TableId, TaskLease,
 };
 use crate::cf::mutations::{TableMutation, TableMutations};
 use crate::dbs::node::{Node, Timestamp};
 use crate::expr::field::Selector;
-use crate::expr::reference::{Reference, ReferenceDeleteStrategy};
 use crate::expr::{
-	Block, ChangeFeed, Cond, Expr, Fetch, Fetchs, Field, Fields, Filter, Groups, Idiom, Kind,
-	Literal, Operation, Tokenizer,
+	ChangeFeed, Expr, Field, Fields, Filter, Groups, Idiom, Kind, Literal, Operation, Tokenizer,
 };
 use crate::iam::Auth;
 use crate::idx::ft::fulltext::{DocLengthAndCount, TermDocument};
@@ -113,20 +112,20 @@ pub fn database_strict() -> DatabaseDefinition {
 }
 
 // ===========================================================================
-// TableDefinition fixtures
+// StoredTableDefinition fixtures
 // ===========================================================================
 
 /// Minimal table definition
-pub fn table_basic() -> TableDefinition {
-	TableDefinition {
+pub fn table_basic() -> StoredTableDefinition {
+	StoredTableDefinition {
 		namespace_id: NamespaceId(1),
 		database_id: DatabaseId(1),
 		table_id: TableId(1),
-		name: TableName::from("users"),
+		name: "users".into(),
 		drop: false,
 		schemafull: false,
 		view: None,
-		permissions: Permissions::default(),
+		permissions: StoredPermissions::default(),
 		changefeed: None,
 		comment: None,
 		table_type: TableType::Normal,
@@ -140,16 +139,17 @@ pub fn table_basic() -> TableDefinition {
 	}
 }
 
-/// Table with view definition
-pub fn table_with_view() -> TableDefinition {
-	TableDefinition {
+/// Table with a view, in the shape views were stored in before the clauses
+/// became text. These bytes decode to the legacy variant, unchanged.
+pub fn table_with_view() -> StoredTableDefinition {
+	StoredTableDefinition {
 		namespace_id: NamespaceId(123),
 		database_id: DatabaseId(456),
 		table_id: TableId(789),
-		name: TableName::from("user_stats"),
+		name: "user_stats".into(),
 		drop: false,
 		schemafull: false,
-		view: Some(ViewDefinition::Select {
+		view: Some(StoredViewDefinition::Select {
 			fields: Fields::Select(vec![
 				Field::All,
 				Field::Single(Selector {
@@ -161,7 +161,7 @@ pub fn table_with_view() -> TableDefinition {
 			condition: Some(Expr::Literal(Literal::String(Strand::new_static("active = true")))),
 			groups: Some(Groups::default()),
 		}),
-		permissions: Permissions::default(),
+		permissions: StoredPermissions::default(),
 		changefeed: None,
 		comment: Some("User statistics view".to_string()),
 		table_type: TableType::Normal,
@@ -176,16 +176,16 @@ pub fn table_with_view() -> TableDefinition {
 }
 
 /// Schemafull table with changefeed
-pub fn table_schemafull() -> TableDefinition {
-	TableDefinition {
+pub fn table_schemafull() -> StoredTableDefinition {
+	StoredTableDefinition {
 		namespace_id: NamespaceId(1),
 		database_id: DatabaseId(1),
 		table_id: TableId(2),
-		name: TableName::from("orders"),
+		name: "orders".into(),
 		drop: false,
 		schemafull: true,
 		view: None,
-		permissions: Permissions::default(),
+		permissions: StoredPermissions::default(),
 		changefeed: Some(ChangeFeed {
 			expiry: Duration::from_secs(86400),
 			store_diff: false,
@@ -203,22 +203,20 @@ pub fn table_schemafull() -> TableDefinition {
 }
 
 /// Relation table with drop and non-default permissions
-pub fn table_relation() -> TableDefinition {
-	TableDefinition {
+pub fn table_relation() -> StoredTableDefinition {
+	StoredTableDefinition {
 		namespace_id: NamespaceId(10),
 		database_id: DatabaseId(20),
 		table_id: TableId(30),
-		name: TableName::from("likes"),
+		name: "likes".into(),
 		drop: true,
 		schemafull: true,
 		view: None,
-		permissions: Permissions {
-			select: Permission::Full,
-			create: Permission::Specific(Expr::Literal(Literal::String(
-				"$auth.role = 'admin'".into(),
-			))),
-			update: Permission::None,
-			delete: Permission::None,
+		permissions: StoredPermissions {
+			select: StoredPermission::Full,
+			create: StoredPermission::Specific(ExprText::from_raw("\"$auth.role = 'admin'\"")),
+			update: StoredPermission::None,
+			delete: StoredPermission::None,
 		},
 		changefeed: None,
 		comment: Some("User likes relation".to_string()),
@@ -237,21 +235,54 @@ pub fn table_relation() -> TableDefinition {
 	}
 }
 
-/// Table with materialized view
-pub fn table_with_materialized_view() -> TableDefinition {
-	TableDefinition {
+/// Table with a view stored as its clauses — the shape every write produces.
+///
+/// The two fixtures above freeze the shapes that predate it; this one freezes
+/// the current one, so the byte-exact guard covers what the encoder actually
+/// emits rather than only what it can still read.
+pub fn table_with_stored_clauses() -> StoredTableDefinition {
+	StoredTableDefinition {
+		namespace_id: NamespaceId(7),
+		database_id: DatabaseId(9),
+		table_id: TableId(11),
+		name: "order_totals".into(),
+		drop: false,
+		schemafull: false,
+		view: Some(StoredViewDefinition::Clauses {
+			fields: FieldsText::from_raw("customer, math::sum(amount) AS total"),
+			tables: vec![TableName::from("orders")],
+			condition: Some(ExprText::from_raw("paid = true")),
+			groups: Some(vec![IdiomText::from_raw("customer")]),
+		}),
+		permissions: StoredPermissions::default(),
+		changefeed: None,
+		comment: Some("Order totals per customer".to_string()),
+		table_type: TableType::Normal,
+		cache_fields_ts: UuidExt::nil(),
+		cache_events_ts: UuidExt::nil(),
+		cache_tables_ts: UuidExt::nil(),
+		cache_indexes_ts: UuidExt::nil(),
+		cache_lives_ts: UuidExt::nil(),
+		graphql_alias: None,
+		graphql_deprecated: None,
+	}
+}
+
+/// Table with a materialized view, in the pre-`Clauses` shape.
+pub fn table_with_materialized_view() -> StoredTableDefinition {
+	StoredTableDefinition {
 		namespace_id: NamespaceId(1),
 		database_id: DatabaseId(1),
 		table_id: TableId(100),
-		name: TableName::from("active_users"),
+		name: "active_users".into(),
 		drop: false,
 		schemafull: false,
-		view: Some(ViewDefinition::Materialized {
+		view: Some(StoredViewDefinition::Materialized {
 			fields: Fields::Select(vec![Field::All]),
 			tables: vec![TableName::from("users")],
 			condition: Some(Expr::Literal(Literal::String(Strand::new_static("active = true")))),
 		}),
-		permissions: Permissions::default(),
+		permissions: StoredPermissions::default(),
 		changefeed: None,
 		comment: Some("Materialized view of active users".to_string()),
 		table_type: TableType::Normal,
@@ -266,16 +297,16 @@ pub fn table_with_materialized_view() -> TableDefinition {
 }
 
 /// Table with TableType::Any (default variant)
-pub fn table_any_type() -> TableDefinition {
-	TableDefinition {
+pub fn table_any_type() -> StoredTableDefinition {
+	StoredTableDefinition {
 		namespace_id: NamespaceId(1),
 		database_id: DatabaseId(1),
 		table_id: TableId(50),
-		name: TableName::from("flexible"),
+		name: "flexible".into(),
 		drop: false,
 		schemafull: false,
 		view: None,
-		permissions: Permissions::default(),
+		permissions: StoredPermissions::default(),
 		changefeed: None,
 		comment: None,
 		table_type: TableType::Any,
@@ -290,16 +321,16 @@ pub fn table_any_type() -> TableDefinition {
 }
 
 // ===========================================================================
-// SubscriptionDefinition fixtures
+// StoredSubscriptionDefinition fixtures
 // ===========================================================================
 
 /// Minimal subscription with diff fields
-pub fn subscription_basic() -> SubscriptionDefinition {
-	SubscriptionDefinition {
+pub fn subscription_basic() -> StoredSubscriptionDefinition {
+	StoredSubscriptionDefinition {
 		id: UuidExt::nil(),
 		node: UuidExt::nil(),
-		fields: SubscriptionFields::Diff,
-		what: Expr::Literal(Literal::String(Strand::new_static("users"))),
+		fields: StoredSubscriptionFields::Diff,
+		what: ExprText::new(&Expr::Literal(Literal::String(Strand::new_static("users")))),
 		cond: None,
 		fetch: None,
 		auth: None,
@@ -309,22 +340,24 @@ pub fn subscription_basic() -> SubscriptionDefinition {
 }
 
 /// Subscription with condition and fetch
-pub fn subscription_with_filters() -> SubscriptionDefinition {
-	SubscriptionDefinition {
+pub fn subscription_with_filters() -> StoredSubscriptionDefinition {
+	StoredSubscriptionDefinition {
 		id: UuidExt::nil(),
 		node: UuidExt::nil(),
-		fields: SubscriptionFields::Select(Fields::Select(vec![
+		fields: StoredSubscriptionFields::Select(FieldsText::new(&Fields::Select(vec![
 			Field::All,
 			Field::Single(Selector {
 				expr: Expr::Literal(Literal::String(Strand::new_static("name"))),
 				alias: None,
 			}),
-		])),
-		what: Expr::Literal(Literal::String(Strand::new_static("users"))),
-		cond: Some(Expr::Literal(Literal::String(Strand::new_static("active = true")))),
-		fetch: Some(Fetchs::new(vec![Fetch(Expr::Literal(Literal::String(Strand::new_static(
+		]))),
+		what: ExprText::new(&Expr::Literal(Literal::String(Strand::new_static("users")))),
+		cond: Some(ExprText::new(&Expr::Literal(Literal::String(Strand::new_static(
+			"active = true",
+		))))),
+		fetch: Some(vec![ExprText::new(&Expr::Literal(Literal::String(Strand::new_static(
 			"profile",
-		))))])),
+		))))]),
 		auth: Some(Auth::default()),
 		session: Some(Value::default()),
 		vars: BTreeMap::new(),
@@ -332,16 +365,18 @@ pub fn subscription_with_filters() -> SubscriptionDefinition {
 }
 
 /// Subscription with non-empty vars
-pub fn subscription_with_vars() -> SubscriptionDefinition {
+pub fn subscription_with_vars() -> StoredSubscriptionDefinition {
 	let mut vars = BTreeMap::new();
 	vars.insert("user_id".to_string(), Value::String(Strand::new_static("user:123")));
 	vars.insert("threshold".to_string(), Value::Number(Number::Int(50)));
-	SubscriptionDefinition {
+	StoredSubscriptionDefinition {
 		id: UuidExt::nil(),
 		node: UuidExt::nil(),
-		fields: SubscriptionFields::Diff,
-		what: Expr::Literal(Literal::String(Strand::new_static("orders"))),
-		cond: Some(Expr::Literal(Literal::String(Strand::new_static("amount > $threshold")))),
+		fields: StoredSubscriptionFields::Diff,
+		what: ExprText::new(&Expr::Literal(Literal::String(Strand::new_static("orders")))),
+		cond: Some(ExprText::new(&Expr::Literal(Literal::String(Strand::new_static(
+			"amount > $threshold",
+		))))),
 		fetch: None,
 		auth: Some(Auth::default()),
 		session: Some(Value::default()),
@@ -350,12 +385,12 @@ pub fn subscription_with_vars() -> SubscriptionDefinition {
 }
 
 // ===========================================================================
-// AccessDefinition fixtures
+// StoredAccessDefinition fixtures
 // ===========================================================================
 
 /// Bearer access with JWT
-pub fn access_bearer() -> AccessDefinition {
-	AccessDefinition {
+pub fn access_bearer() -> StoredAccessDefinition {
+	StoredAccessDefinition {
 		name: "api_access".into(),
 		access_type: AccessType::Bearer(BearerAccess {
 			kind: BearerAccessType::Bearer,
@@ -381,8 +416,8 @@ pub fn access_bearer() -> AccessDefinition {
 }
 
 /// Access with custom authenticate expression
-pub fn access_with_authenticate() -> AccessDefinition {
-	AccessDefinition {
+pub fn access_with_authenticate() -> StoredAccessDefinition {
+	StoredAccessDefinition {
 		name: "custom_auth".into(),
 		access_type: AccessType::Bearer(BearerAccess {
 			kind: BearerAccessType::Bearer,
@@ -396,9 +431,7 @@ pub fn access_with_authenticate() -> AccessDefinition {
 			},
 		}),
 		base: Base::Db,
-		authenticate: Some(Expr::Literal(Literal::String(
-			"SELECT * FROM user WHERE id = $auth.id".into(),
-		))),
+		authenticate: Some(ExprText::from_raw("'SELECT * FROM user WHERE id = $auth.id'")),
 		grant_duration: None,
 		token_duration: Some(Duration::from_secs(3600)),
 		session_duration: None,
@@ -407,17 +440,16 @@ pub fn access_with_authenticate() -> AccessDefinition {
 }
 
 /// Record-based access with signup/signin
-pub fn access_record() -> AccessDefinition {
-	AccessDefinition {
+pub fn access_record() -> StoredAccessDefinition {
+	StoredAccessDefinition {
 		name: "user_access".into(),
 		access_type: AccessType::Record(RecordAccess {
-			signup: Some(Expr::Literal(Literal::String(
-				"CREATE user SET email = $email, pass = crypto::argon2::generate($pass)".into(),
-			))),
-			signin: Some(Expr::Literal(Literal::String(
-				"SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass)"
-					.into(),
-			))),
+			signup: Some(ExprText::from_raw(
+				"'CREATE user SET email = $email, pass = crypto::argon2::generate($pass)'",
+			)),
+			signin: Some(ExprText::from_raw(
+				"'SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass)'",
+			)),
 			jwt: JwtAccess {
 				verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 					alg: Algorithm::Hs256,
@@ -441,9 +473,7 @@ pub fn access_record() -> AccessDefinition {
 			}),
 		}),
 		base: Base::Db,
-		authenticate: Some(Expr::Literal(Literal::String(
-			"SELECT * FROM user WHERE id = $auth.id".into(),
-		))),
+		authenticate: Some(ExprText::from_raw("'SELECT * FROM user WHERE id = $auth.id'")),
 		grant_duration: Some(Duration::from_secs(604800)),
 		token_duration: Some(Duration::from_secs(900)),
 		session_duration: Some(Duration::from_secs(86400)),
@@ -452,8 +482,8 @@ pub fn access_record() -> AccessDefinition {
 }
 
 /// JWT access with JWKS verification
-pub fn access_jwt_jwks() -> AccessDefinition {
-	AccessDefinition {
+pub fn access_jwt_jwks() -> StoredAccessDefinition {
+	StoredAccessDefinition {
 		name: "external_jwt".into(),
 		access_type: AccessType::Jwt(JwtAccess {
 			verify: JwtAccessVerify::Jwks(JwtAccessVerifyJwks {
@@ -471,8 +501,8 @@ pub fn access_jwt_jwks() -> AccessDefinition {
 }
 
 /// Bearer access with refresh type
-pub fn access_bearer_refresh() -> AccessDefinition {
-	AccessDefinition {
+pub fn access_bearer_refresh() -> StoredAccessDefinition {
+	StoredAccessDefinition {
 		name: "refresh_access".into(),
 		access_type: AccessType::Bearer(BearerAccess {
 			kind: BearerAccessType::Refresh,
@@ -593,44 +623,44 @@ pub fn analyzer_with_tokenizers() -> AnalyzerDefinition {
 }
 
 // ===========================================================================
-// ApiDefinition fixtures
+// StoredApiDefinition fixtures
 // ===========================================================================
 
 /// Minimal API endpoint
-pub fn api_basic() -> ApiDefinition {
-	ApiDefinition {
-		path: "/api/v1/users".parse().unwrap(),
-		actions: vec![ApiActionDefinition {
+pub fn api_basic() -> StoredApiDefinition {
+	StoredApiDefinition {
+		path: PathText::from_raw("/api/v1/users"),
+		actions: vec![StoredApiActionDefinition {
 			methods: vec![ApiMethod::Get],
-			action: Expr::Literal(Literal::String(Strand::new_static("SELECT * FROM users"))),
-			config: ApiConfigDefinition::default(),
+			action: ExprText::from_raw("'SELECT * FROM users'"),
+			config: StoredApiConfigDefinition::default(),
 		}],
 		fallback: None,
-		config: ApiConfigDefinition::default(),
+		config: StoredApiConfigDefinition::default(),
 		comment: None,
 		auth_limit: AuthLimit::new_no_limit(),
 	}
 }
 
 /// API with middleware and multiple methods
-pub fn api_with_middleware() -> ApiDefinition {
-	ApiDefinition {
+pub fn api_with_middleware() -> StoredApiDefinition {
+	StoredApiDefinition {
 		auth_limit: AuthLimit::new_no_limit(),
-		path: "/api/v1/orders".parse().unwrap(),
+		path: PathText::from_raw("/api/v1/orders"),
 		actions: vec![
-			ApiActionDefinition {
+			StoredApiActionDefinition {
 				methods: vec![ApiMethod::Get, ApiMethod::Post],
-				action: Expr::Literal(Literal::String(Strand::new_static("SELECT * FROM orders"))),
-				config: ApiConfigDefinition::default(),
+				action: ExprText::from_raw("'SELECT * FROM orders'"),
+				config: StoredApiConfigDefinition::default(),
 			},
-			ApiActionDefinition {
+			StoredApiActionDefinition {
 				methods: vec![ApiMethod::Delete],
-				action: Expr::Literal(Literal::String(Strand::new_static("DELETE FROM orders"))),
-				config: ApiConfigDefinition::default(),
+				action: ExprText::from_raw("'DELETE FROM orders'"),
+				config: StoredApiConfigDefinition::default(),
 			},
 		],
-		fallback: Some(Expr::Literal(Literal::String(Strand::new_static("RETURN 404")))),
-		config: ApiConfigDefinition {
+		fallback: Some(ExprText::from_raw("'RETURN 404'")),
+		config: StoredApiConfigDefinition {
 			middleware: vec![
 				MiddlewareDefinition {
 					name: "auth".into(),
@@ -641,39 +671,35 @@ pub fn api_with_middleware() -> ApiDefinition {
 					args: vec![Value::from(100)],
 				},
 			],
-			permissions: Permission::Full,
+			permissions: StoredPermission::Full,
 		},
 		comment: Some("Order management API".to_string()),
 	}
 }
 
 /// API with specific permissions, database-level auth limit, and more HTTP methods
-pub fn api_with_auth_limit() -> ApiDefinition {
-	ApiDefinition {
-		path: "/api/v1/admin".parse().unwrap(),
+pub fn api_with_auth_limit() -> StoredApiDefinition {
+	StoredApiDefinition {
+		path: PathText::from_raw("/api/v1/admin"),
 		actions: vec![
-			ApiActionDefinition {
+			StoredApiActionDefinition {
 				methods: vec![ApiMethod::Get, ApiMethod::Put, ApiMethod::Patch],
-				action: Expr::Literal(Literal::String(Strand::new_static(
-					"SELECT * FROM admin_data",
-				))),
-				config: ApiConfigDefinition {
+				action: ExprText::from_raw("'SELECT * FROM admin_data'"),
+				config: StoredApiConfigDefinition {
 					middleware: vec![],
-					permissions: Permission::Specific(Expr::Literal(Literal::String(
-						"$auth.role = 'admin'".into(),
-					))),
+					permissions: StoredPermission::Specific(ExprText::from_raw(
+						"\"$auth.role = 'admin'\"",
+					)),
 				},
 			},
-			ApiActionDefinition {
+			StoredApiActionDefinition {
 				methods: vec![ApiMethod::Delete, ApiMethod::Trace],
-				action: Expr::Literal(Literal::String(Strand::new_static(
-					"RETURN { status: 'ok' }",
-				))),
-				config: ApiConfigDefinition::default(),
+				action: ExprText::from_raw("\"RETURN { status: 'ok' }\""),
+				config: StoredApiConfigDefinition::default(),
 			},
 		],
 		fallback: None,
-		config: ApiConfigDefinition::default(),
+		config: StoredApiConfigDefinition::default(),
 		comment: Some("Admin API with restricted access".to_string()),
 		auth_limit: AuthLimit::new(
 			AuthLevel::Database("prod_ns".to_string(), "prod_db".to_string()),
@@ -683,66 +709,64 @@ pub fn api_with_auth_limit() -> ApiDefinition {
 }
 
 // ===========================================================================
-// BucketDefinition fixtures
+// StoredBucketDefinition fixtures
 // ===========================================================================
 
 /// Minimal bucket
-pub fn bucket_basic() -> BucketDefinition {
-	BucketDefinition {
+pub fn bucket_basic() -> StoredBucketDefinition {
+	StoredBucketDefinition {
 		id: None,
 		readonly: false,
 		name: "uploads".into(),
 		backend: None,
 		comment: None,
-		permissions: Permission::Full,
+		permissions: StoredPermission::Full,
 	}
 }
 
 /// Readonly bucket with backend
-pub fn bucket_readonly() -> BucketDefinition {
-	BucketDefinition {
+pub fn bucket_readonly() -> StoredBucketDefinition {
+	StoredBucketDefinition {
 		id: Some(BucketId(123)),
 		readonly: true,
 		name: "archives".into(),
 		backend: Some("s3://bucket/archives".into()),
 		comment: Some("Read-only archive storage".to_string()),
-		permissions: Permission::None,
+		permissions: StoredPermission::None,
 	}
 }
 
 // ===========================================================================
-// ConfigDefinition fixtures
+// StoredConfigDefinition fixtures
 // ===========================================================================
 
 /// GraphQL configuration (default)
-pub fn config_graphql() -> ConfigDefinition {
-	ConfigDefinition::GraphQL(GraphQLConfig::default())
+pub fn config_graphql() -> StoredConfigDefinition {
+	StoredConfigDefinition::GraphQL(GraphQLConfig::default())
 }
 
 /// Default config with namespace and database
-pub fn config_default() -> ConfigDefinition {
-	ConfigDefinition::Default(DefaultConfig {
+pub fn config_default() -> StoredConfigDefinition {
+	StoredConfigDefinition::Default(DefaultConfig {
 		namespace: Some("production".to_string()),
 		database: Some("main".to_string()),
 	})
 }
 
 /// API config definition
-pub fn config_api() -> ConfigDefinition {
-	ConfigDefinition::Api(ApiConfigDefinition {
+pub fn config_api() -> StoredConfigDefinition {
+	StoredConfigDefinition::Api(StoredApiConfigDefinition {
 		middleware: vec![MiddlewareDefinition {
 			name: "cors".into(),
 			args: vec![Value::String(Strand::new_static("*"))],
 		}],
-		permissions: Permission::Specific(Expr::Literal(Literal::String(
-			"$auth.role = 'admin'".into(),
-		))),
+		permissions: StoredPermission::Specific(ExprText::from_raw("\"$auth.role = 'admin'\"")),
 	})
 }
 
 /// GraphQL config with all non-default fields populated
-pub fn config_graphql_full() -> ConfigDefinition {
-	ConfigDefinition::GraphQL(GraphQLConfig {
+pub fn config_graphql_full() -> StoredConfigDefinition {
+	StoredConfigDefinition::GraphQL(GraphQLConfig {
 		tables: GraphQLTablesConfig::Include(vec![
 			TableName::from("users"),
 			TableName::from("posts"),
@@ -755,18 +779,16 @@ pub fn config_graphql_full() -> ConfigDefinition {
 }
 
 // ===========================================================================
-// EventDefinition fixtures
+// StoredEventDefinition fixtures
 // ===========================================================================
 
 /// Table event trigger
-pub fn event_basic() -> EventDefinition {
-	EventDefinition {
+pub fn event_basic() -> StoredEventDefinition {
+	StoredEventDefinition {
 		name: "on_create".into(),
-		target_table: TableName::from("users"),
-		when: Expr::Literal(Literal::String(Strand::new_static("$event = 'CREATE'"))),
-		then: vec![Expr::Literal(Literal::String(Strand::new_static(
-			"CREATE audit SET action = 'create'",
-		)))],
+		target_table: "users".into(),
+		when: ExprText::from_raw("\"$event = 'CREATE'\""),
+		then: vec![ExprText::from_raw("\"CREATE audit SET action = 'create'\"")],
 		comment: Some("Audit log on create".to_string()),
 		auth_limit: AuthLimit::new_no_limit(),
 		kind: EventKind::Sync,
@@ -774,14 +796,14 @@ pub fn event_basic() -> EventDefinition {
 }
 
 /// Async event with retry and max_depth
-pub fn event_async() -> EventDefinition {
-	EventDefinition {
+pub fn event_async() -> StoredEventDefinition {
+	StoredEventDefinition {
 		name: "on_update_async".into(),
-		target_table: TableName::from("orders"),
-		when: Expr::Literal(Literal::String(Strand::new_static("$event = 'UPDATE'"))),
-		then: vec![Expr::Literal(Literal::String(
-			"CREATE notification SET order = $after.id, type = 'updated'".into(),
-		))],
+		target_table: "orders".into(),
+		when: ExprText::from_raw("\"$event = 'UPDATE'\""),
+		then: vec![ExprText::from_raw(
+			"\"CREATE notification SET order = $after.id, type = 'updated'\"",
+		)],
 		comment: Some("Async notification on order update".to_string()),
 		auth_limit: AuthLimit::new_no_limit(),
 		kind: EventKind::Async {
@@ -792,13 +814,13 @@ pub fn event_async() -> EventDefinition {
 }
 
 // ===========================================================================
-// FieldDefinition fixtures
+// StoredFieldDefinition fixtures
 // ===========================================================================
 
 /// Minimal field
-pub fn field_basic() -> FieldDefinition {
-	FieldDefinition {
-		name: Idiom::from_str("name").unwrap(),
+pub fn field_basic() -> StoredFieldDefinition {
+	StoredFieldDefinition {
+		name: IdiomText::from_raw("name"),
 		table: TableName::from("users"),
 		field_kind: None,
 		readonly: false,
@@ -806,182 +828,160 @@ pub fn field_basic() -> FieldDefinition {
 		value: None,
 		assert: None,
 		computed: None,
-		default: DefineDefault::None,
-		select_permission: Permission::Full,
-		create_permission: Permission::Full,
-		update_permission: Permission::Full,
+		default: StoredDefineDefault::None,
+		select_permission: StoredPermission::Full,
+		create_permission: StoredPermission::Full,
+		update_permission: StoredPermission::Full,
 		comment: None,
 		reference: None,
 		auth_limit: AuthLimit::new_no_limit(),
-		computed_deps: None,
 		graphql_alias: None,
 		graphql_deprecated: None,
 	}
 }
 
 /// Field with type constraint and default
-pub fn field_with_type() -> FieldDefinition {
-	FieldDefinition {
-		name: Idiom::from_str("email").unwrap(),
+pub fn field_with_type() -> StoredFieldDefinition {
+	StoredFieldDefinition {
+		name: IdiomText::from_raw("email"),
 		table: TableName::from("users"),
-		field_kind: Some(Kind::String),
+		field_kind: Some(KindText::new(&Kind::String)),
 		readonly: false,
 		flexible: false,
-		value: Some(Expr::Literal(Literal::String(Strand::new_static(
-			"string::lowercase($value)",
-		)))),
-		assert: Some(Expr::Literal(Literal::String(Strand::new_static(
-			"string::is::email($value)",
-		)))),
+		value: Some(ExprText::from_raw("'string::lowercase($value)'")),
+		assert: Some(ExprText::from_raw("'string::is::email($value)'")),
 		computed: None,
-		default: DefineDefault::Always(Expr::Literal(Literal::String(Strand::new_static("")))),
-		select_permission: Permission::Full,
-		create_permission: Permission::Full,
-		update_permission: Permission::Full,
+		default: StoredDefineDefault::Always(ExprText::from_raw("''")),
+		select_permission: StoredPermission::Full,
+		create_permission: StoredPermission::Full,
+		update_permission: StoredPermission::Full,
 		comment: Some("User email address".to_string()),
 		reference: None,
 		auth_limit: AuthLimit::new_no_limit(),
-		computed_deps: None,
 		graphql_alias: None,
 		graphql_deprecated: None,
 	}
 }
 
 /// Readonly computed field
-pub fn field_readonly() -> FieldDefinition {
-	FieldDefinition {
-		name: Idiom::from_str("created_at").unwrap(),
+pub fn field_readonly() -> StoredFieldDefinition {
+	StoredFieldDefinition {
+		name: IdiomText::from_raw("created_at"),
 		table: TableName::from("users"),
-		field_kind: Some(Kind::Datetime),
+		field_kind: Some(KindText::new(&Kind::Datetime)),
 		readonly: true,
 		flexible: false,
 		value: None,
 		assert: None,
-		computed: Some(Expr::Literal(Literal::String(Strand::new_static("time::now()")))),
-		default: DefineDefault::None,
-		select_permission: Permission::Full,
-		create_permission: Permission::None,
-		update_permission: Permission::None,
+		computed: Some(ExprText::from_raw("'time::now()'")),
+		default: StoredDefineDefault::None,
+		select_permission: StoredPermission::Full,
+		create_permission: StoredPermission::None,
+		update_permission: StoredPermission::None,
 		comment: Some("Record creation timestamp".to_string()),
 		reference: None,
 		auth_limit: AuthLimit::new_no_limit(),
-		computed_deps: None,
 		graphql_alias: None,
 		graphql_deprecated: None,
 	}
 }
 
 /// Flexible field with reference and computed deps
-pub fn field_flexible_with_reference() -> FieldDefinition {
-	FieldDefinition {
-		name: Idiom::from_str("total_price").unwrap(),
+pub fn field_flexible_with_reference() -> StoredFieldDefinition {
+	StoredFieldDefinition {
+		name: IdiomText::from_raw("total_price"),
 		table: TableName::from("orders"),
-		field_kind: Some(Kind::Number),
+		field_kind: Some(KindText::new(&Kind::Number)),
 		readonly: false,
 		flexible: true,
-		value: Some(Expr::Literal(Literal::String(Strand::new_static("$price * $quantity")))),
+		value: Some(ExprText::from_raw("'$price * $quantity'")),
 		assert: None,
 		computed: None,
-		default: DefineDefault::None,
-		select_permission: Permission::Full,
-		create_permission: Permission::Full,
-		update_permission: Permission::Specific(Expr::Literal(Literal::String(
-			"$auth.role = 'admin'".into(),
-		))),
+		default: StoredDefineDefault::None,
+		select_permission: StoredPermission::Full,
+		create_permission: StoredPermission::Full,
+		update_permission: StoredPermission::Specific(ExprText::from_raw(
+			"\"$auth.role = 'admin'\"",
+		)),
 		comment: Some("Calculated total price".to_string()),
-		reference: Some(Reference {
-			on_delete: ReferenceDeleteStrategy::Cascade,
+		reference: Some(StoredReference {
+			on_delete: StoredReferenceDeleteStrategy::Cascade,
 		}),
 		auth_limit: AuthLimit::new_no_limit(),
-		computed_deps: Some(ComputedDeps {
-			fields: vec!["price".to_string(), "quantity".to_string()],
-			is_complete: true,
-		}),
 		graphql_alias: None,
 		graphql_deprecated: None,
 	}
 }
 
 /// Field with DefineDefault::Set, Permission::Specific, and incomplete computed deps
-pub fn field_with_default_set() -> FieldDefinition {
-	FieldDefinition {
-		name: Idiom::from_str("status").unwrap(),
+pub fn field_with_default_set() -> StoredFieldDefinition {
+	StoredFieldDefinition {
+		name: IdiomText::from_raw("status"),
 		table: TableName::from("orders"),
-		field_kind: Some(Kind::String),
+		field_kind: Some(KindText::new(&Kind::String)),
 		readonly: false,
 		flexible: false,
 		value: None,
-		assert: Some(Expr::Literal(Literal::String(
-			"$value INSIDE ['pending', 'active', 'closed']".into(),
-		))),
+		assert: Some(ExprText::from_raw("\"$value INSIDE ['pending', 'active', 'closed']\"")),
 		computed: None,
-		default: DefineDefault::Set(Expr::Literal(Literal::String(Strand::new_static(
-			"'pending'",
-		)))),
-		select_permission: Permission::Full,
-		create_permission: Permission::Full,
-		update_permission: Permission::Specific(Expr::Literal(Literal::String(
-			"$auth.role = 'manager'".into(),
-		))),
+		default: StoredDefineDefault::Set(ExprText::from_raw("\"'pending'\"")),
+		select_permission: StoredPermission::Full,
+		create_permission: StoredPermission::Full,
+		update_permission: StoredPermission::Specific(ExprText::from_raw(
+			"\"$auth.role = 'manager'\"",
+		)),
 		comment: None,
-		reference: Some(Reference {
-			on_delete: ReferenceDeleteStrategy::Reject,
+		reference: Some(StoredReference {
+			on_delete: StoredReferenceDeleteStrategy::Reject,
 		}),
 		auth_limit: AuthLimit::new_no_limit(),
-		computed_deps: Some(ComputedDeps {
-			fields: vec![],
-			is_complete: false,
-		}),
 		graphql_alias: None,
 		graphql_deprecated: None,
 	}
 }
 
 /// Field with record type kind and custom reference delete strategy
-pub fn field_record_type() -> FieldDefinition {
-	FieldDefinition {
-		name: Idiom::from_str("author").unwrap(),
+pub fn field_record_type() -> StoredFieldDefinition {
+	StoredFieldDefinition {
+		name: IdiomText::from_raw("author"),
 		table: TableName::from("posts"),
-		field_kind: Some(Kind::Record(vec![TableName::from("users")])),
+		field_kind: Some(KindText::new(&Kind::Record(vec![TableName::from("users")]))),
 		readonly: true,
 		flexible: false,
 		value: None,
 		assert: None,
 		computed: None,
-		default: DefineDefault::None,
-		select_permission: Permission::Full,
-		create_permission: Permission::Full,
-		update_permission: Permission::None,
+		default: StoredDefineDefault::None,
+		select_permission: StoredPermission::Full,
+		create_permission: StoredPermission::Full,
+		update_permission: StoredPermission::None,
 		comment: Some("Author reference".to_string()),
-		reference: Some(Reference {
-			on_delete: ReferenceDeleteStrategy::Custom(Expr::Literal(Literal::String(
-				"DELETE $parent".into(),
-			))),
+		reference: Some(StoredReference {
+			on_delete: StoredReferenceDeleteStrategy::Custom(ExprText::from_raw(
+				"'DELETE $parent'",
+			)),
 		}),
 		auth_limit: AuthLimit::new(
 			AuthLevel::Database("test_ns".to_string(), "test_db".to_string()),
 			Some("Editor".to_string()),
 		),
-		computed_deps: None,
 		graphql_alias: None,
 		graphql_deprecated: None,
 	}
 }
 
 // ===========================================================================
-// FunctionDefinition fixtures
+// StoredFunctionDefinition fixtures
 // ===========================================================================
 
 /// Simple function
-pub fn function_basic() -> FunctionDefinition {
-	FunctionDefinition {
+pub fn function_basic() -> StoredFunctionDefinition {
+	StoredFunctionDefinition {
 		name: "greet".into(),
 		args: vec![],
-		block: Block(vec![Expr::Literal(Literal::String(Strand::new_static(
-			"RETURN 'Hello, World!'",
-		)))]),
+		block: BlockText::from_raw("{ \"RETURN 'Hello, World!'\" }"),
 		comment: None,
-		permissions: Permission::Full,
+		permissions: StoredPermission::Full,
 		returns: None,
 		auth_limit: AuthLimit::new_no_limit(),
 		graphql_alias: None,
@@ -990,14 +990,17 @@ pub fn function_basic() -> FunctionDefinition {
 }
 
 /// Function with arguments and return type
-pub fn function_with_args() -> FunctionDefinition {
-	FunctionDefinition {
+pub fn function_with_args() -> StoredFunctionDefinition {
+	StoredFunctionDefinition {
 		name: "add_numbers".into(),
-		args: vec![("a".to_string(), Kind::Number), ("b".to_string(), Kind::Number)],
-		block: Block(vec![Expr::Literal(Literal::String(Strand::new_static("RETURN $a + $b")))]),
+		args: vec![
+			("a".to_string(), KindText::new(&Kind::Number)),
+			("b".to_string(), KindText::new(&Kind::Number)),
+		],
+		block: BlockText::from_raw("{ 'RETURN $a + $b' }"),
 		comment: Some("Add two numbers".to_string()),
-		permissions: Permission::Full,
-		returns: Some(Kind::Number),
+		permissions: StoredPermission::Full,
+		returns: Some(KindText::new(&Kind::Number)),
 		auth_limit: AuthLimit::new_no_limit(),
 		graphql_alias: None,
 		graphql_deprecated: None,
@@ -1005,16 +1008,16 @@ pub fn function_with_args() -> FunctionDefinition {
 }
 
 // ===========================================================================
-// IndexDefinition fixtures
+// StoredIndexDefinition fixtures
 // ===========================================================================
 
 /// Basic index
-pub fn index_basic() -> IndexDefinition {
-	IndexDefinition {
+pub fn index_basic() -> StoredIndexDefinition {
+	StoredIndexDefinition {
 		index_id: IndexId(1),
 		name: "idx_name".into(),
-		table_name: TableName::from("users"),
-		cols: vec![Idiom::from_str("name").unwrap()],
+		table_name: "users".into(),
+		cols: vec![IdiomText::from_raw("name")],
 		index: Index::Idx,
 		comment: None,
 		prepare_remove: false,
@@ -1023,12 +1026,12 @@ pub fn index_basic() -> IndexDefinition {
 }
 
 /// Unique index on multiple columns
-pub fn index_unique() -> IndexDefinition {
-	IndexDefinition {
+pub fn index_unique() -> StoredIndexDefinition {
+	StoredIndexDefinition {
 		index_id: IndexId(2),
 		name: "idx_email_unique".into(),
-		table_name: TableName::from("users"),
-		cols: vec![Idiom::from_str("email").unwrap()],
+		table_name: "users".into(),
+		cols: vec![IdiomText::from_raw("email")],
 		index: Index::Uniq,
 		comment: Some("Unique email constraint".to_string()),
 		prepare_remove: false,
@@ -1037,12 +1040,12 @@ pub fn index_unique() -> IndexDefinition {
 }
 
 /// HNSW vector index
-pub fn index_hnsw() -> IndexDefinition {
-	IndexDefinition {
+pub fn index_hnsw() -> StoredIndexDefinition {
+	StoredIndexDefinition {
 		index_id: IndexId(3),
 		name: "idx_embedding_hnsw".into(),
-		table_name: TableName::from("documents"),
-		cols: vec![Idiom::from_str("embedding").unwrap()],
+		table_name: "documents".into(),
+		cols: vec![IdiomText::from_raw("embedding")],
 		index: Index::Hnsw(HnswParams {
 			dimension: 1536,
 			distance: Distance::Cosine,
@@ -1062,12 +1065,12 @@ pub fn index_hnsw() -> IndexDefinition {
 }
 
 /// Full-text search index with BM25 scoring
-pub fn index_fulltext() -> IndexDefinition {
-	IndexDefinition {
+pub fn index_fulltext() -> StoredIndexDefinition {
+	StoredIndexDefinition {
 		index_id: IndexId(4),
 		name: "idx_content_search".into(),
-		table_name: TableName::from("articles"),
-		cols: vec![Idiom::from_str("title").unwrap(), Idiom::from_str("body").unwrap()],
+		table_name: "articles".into(),
+		cols: vec![IdiomText::from_raw("title"), IdiomText::from_raw("body")],
 		index: Index::FullText(FullTextParams {
 			analyzer: "english".into(),
 			highlight: true,
@@ -1083,15 +1086,16 @@ pub fn index_fulltext() -> IndexDefinition {
 }
 
 /// Count index with prepare_remove flag
-pub fn index_count() -> IndexDefinition {
-	IndexDefinition {
+pub fn index_count() -> StoredIndexDefinition {
+	StoredIndexDefinition {
 		index_id: IndexId(5),
 		name: "idx_status_count".into(),
-		table_name: TableName::from("orders"),
-		cols: vec![Idiom::from_str("status").unwrap()],
-		index: Index::Count(Some(Cond(Expr::Literal(Literal::String(Strand::new_static(
-			"status = 'active'",
-		)))))),
+		table_name: "orders".into(),
+		cols: vec![IdiomText::from_raw("status")],
+		// `status = 'active'` contains a single quote, so the canonical
+		// rendering of the old `Expr::Literal(Literal::String(..))` quotes it
+		// with double quotes (QuoteStr, core/src/fmt/escape.rs).
+		index: Index::Count(Some(CondText(SurqlText::from_raw("\"status = 'active'\"")))),
 		comment: None,
 		prepare_remove: true,
 		format_version: 0,
@@ -1099,41 +1103,41 @@ pub fn index_count() -> IndexDefinition {
 }
 
 // ===========================================================================
-// MlModelDefinition fixtures
+// StoredMlModelDefinition fixtures
 // ===========================================================================
 
 /// ML model definition
-pub fn model_basic() -> MlModelDefinition {
-	MlModelDefinition {
+pub fn model_basic() -> StoredMlModelDefinition {
+	StoredMlModelDefinition {
 		name: "sentiment".into(),
 		hash: "sha256:abc123def456".into(),
 		version: "1.0.0".into(),
 		comment: Some("Sentiment analysis model".to_string()),
-		permissions: Permission::Full,
+		permissions: StoredPermission::Full,
 	}
 }
 
 // ===========================================================================
-// ParamDefinition fixtures
+// StoredParamDefinition fixtures
 // ===========================================================================
 
 /// Boolean parameter
-pub fn param_bool() -> ParamDefinition {
-	ParamDefinition {
+pub fn param_bool() -> StoredParamDefinition {
+	StoredParamDefinition {
 		name: "debug".into(),
 		value: Value::Bool(true),
 		comment: Some("Debug mode flag".to_string()),
-		permissions: Permission::Full,
+		permissions: StoredPermission::Full,
 	}
 }
 
 /// String parameter
-pub fn param_string() -> ParamDefinition {
-	ParamDefinition {
+pub fn param_string() -> StoredParamDefinition {
+	StoredParamDefinition {
 		name: "app_name".into(),
 		value: Value::String(Strand::new_static("MyApp")),
 		comment: None,
-		permissions: Permission::Full,
+		permissions: StoredPermission::Full,
 	}
 }
 
@@ -1483,24 +1487,24 @@ pub fn version_3() -> MajorVersion {
 }
 
 // ===========================================================================
-// ApiActionDefinition fixtures
+// StoredApiActionDefinition fixtures
 // ===========================================================================
 
 /// Minimal API action definition
-pub fn api_action_basic() -> ApiActionDefinition {
-	ApiActionDefinition {
+pub fn api_action_basic() -> StoredApiActionDefinition {
+	StoredApiActionDefinition {
 		methods: vec![ApiMethod::Get],
-		action: Expr::Literal(Literal::String(Strand::new_static("SELECT * FROM users"))),
-		config: ApiConfigDefinition::default(),
+		action: ExprText::from_raw("'SELECT * FROM users'"),
+		config: StoredApiConfigDefinition::default(),
 	}
 }
 
 /// API action with multiple methods
-pub fn api_action_multi_method() -> ApiActionDefinition {
-	ApiActionDefinition {
+pub fn api_action_multi_method() -> StoredApiActionDefinition {
+	StoredApiActionDefinition {
 		methods: vec![ApiMethod::Get, ApiMethod::Post, ApiMethod::Put],
-		action: Expr::Literal(Literal::String(Strand::new_static("CREATE users CONTENT $body"))),
-		config: ApiConfigDefinition::default(),
+		action: ExprText::from_raw("'CREATE users CONTENT $body'"),
+		config: StoredApiConfigDefinition::default(),
 	}
 }
 
@@ -1529,15 +1533,15 @@ pub fn table_id_basic() -> TableId {
 }
 
 // ===========================================================================
-// ModuleDefinition fixtures
+// StoredModuleDefinition fixtures
 // ===========================================================================
 
 /// Module with Surrealism executable
-pub fn module_surrealism() -> ModuleDefinition {
-	ModuleDefinition {
+pub fn module_surrealism() -> StoredModuleDefinition {
+	StoredModuleDefinition {
 		name: Some("my_module".to_string()),
 		comment: Some("Custom module".to_string()),
-		permissions: Permission::Full,
+		permissions: StoredPermission::Full,
 		executable: ModuleExecutable::Surrealism(SurrealismExecutable {
 			bucket: "my_bucket".to_string(),
 			key: "module_key".to_string(),
@@ -1546,11 +1550,11 @@ pub fn module_surrealism() -> ModuleDefinition {
 }
 
 /// Module with Silo executable
-pub fn module_silo() -> ModuleDefinition {
-	ModuleDefinition {
+pub fn module_silo() -> StoredModuleDefinition {
+	StoredModuleDefinition {
 		name: Some("silo_module".to_string()),
 		comment: None,
-		permissions: Permission::Full,
+		permissions: StoredPermission::Full,
 		executable: ModuleExecutable::Silo(SiloExecutable {
 			organisation: "org".to_string(),
 			package: "pkg".to_string(),
@@ -1562,11 +1566,11 @@ pub fn module_silo() -> ModuleDefinition {
 }
 
 /// Module with no name and Permission::None
-pub fn module_no_name() -> ModuleDefinition {
-	ModuleDefinition {
+pub fn module_no_name() -> StoredModuleDefinition {
+	StoredModuleDefinition {
 		name: None,
 		comment: None,
-		permissions: Permission::None,
+		permissions: StoredPermission::None,
 		executable: ModuleExecutable::Surrealism(SurrealismExecutable {
 			bucket: "default_bucket".to_string(),
 			key: "anonymous_module".to_string(),

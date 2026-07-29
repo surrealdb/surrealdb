@@ -13,17 +13,18 @@ use crate::catalog::aggregation::{
 };
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::catalog::{
-	DatabaseId, FieldDefinition, Metadata, NamespaceId, Permissions, Record, RecordType,
-	TableDefinition, TableType, ViewDefinition,
+	DatabaseId, Error as CatalogError, FieldDefinition, Metadata, NamespaceId, Permissions, Record,
+	RecordType, TableDefinition, TableType, ViewDefinition,
 };
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::{self, CursorDoc, Document, DocumentContext, NsDbCtx};
-use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::changefeed::ChangeFeed;
 use crate::expr::field::Selector;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::paths::{ID, IN, OUT};
+use crate::expr::statements::subscriptions::kill_table_subscriptions;
 use crate::expr::{
 	Base, BinaryOperator, Cond, Expr, Field, Fields, FlowResultExt, Function, FunctionCall, Group,
 	Groups, Idiom, Kind, Literal, SelectStatement, View,
@@ -90,7 +91,7 @@ impl DefineTableStatement {
 
 		// A PERMISSIONS clause must not perform writes (GHSA-66r2-5gwj-gxm2).
 		if self.permissions.has_direct_write() {
-			bail!(Error::PermissionClauseNotReadonly {
+			bail!(ExecError::PermissionClauseNotReadonly {
 				kind: "table",
 				name: name.as_str().to_string(),
 			});
@@ -111,7 +112,7 @@ impl DefineTableStatement {
 				match self.kind {
 					DefineKind::Default => {
 						if !opt.import {
-							bail!(Error::TbAlreadyExists {
+							bail!(CatalogError::TbAlreadyExists {
 								name: name.as_str().to_string(),
 							});
 						}
@@ -141,7 +142,9 @@ impl DefineTableStatement {
 			drop: self.drop,
 			schemafull: self.full,
 			table_type: self.table_type.clone(),
-			view: self.view.clone().map(|v| v.to_definition()).transpose()?,
+			// `to_definition` validates the view (aggregation analysis,
+			// VALUE-selector rejection) before anything is stored.
+			view: self.view.as_ref().map(|v| v.to_definition()).transpose()?,
 			permissions: self.permissions.clone(),
 			comment,
 			changefeed: self.changefeed,
@@ -160,7 +163,12 @@ impl DefineTableStatement {
 
 		// Record definition change
 		if self.changefeed.is_some() {
-			txn.changefeed_buffer_table_change(ns.namespace_id, db.database_id, &name, &tb_def);
+			txn.changefeed_buffer_table_change(
+				ns.namespace_id,
+				db.database_id,
+				&name,
+				&tb_def.to_stored(),
+			);
 		}
 
 		// Update the catalog
@@ -174,10 +182,16 @@ impl DefineTableStatement {
 			db: Arc::clone(&db),
 		};
 		let doc_ctx =
-			DocumentContext::initialise(ctx, &parent, tb, &name, opt.version, true).await?;
+			DocumentContext::initialise(ctx, &parent, Arc::clone(&tb), &name, opt.version, true)
+				.await?;
 
 		// Check if table is a view
-		if let Some(view) = &tb_def.view {
+		if let Some(view) = &tb.view {
+			// Redefining a table as a view wipes its whole key range, which
+			// includes the `lq` rows of every subscription on it, so each of
+			// those clients is owed a KILLED exactly as it would be by a
+			// `REMOVE TABLE`.
+			kill_table_subscriptions(ctx, &txn, ns.namespace_id, db.database_id, &name).await?;
 			// Remove the table data
 			let key = crate::key::table::all::TableRoot {
 				prefix: DatabaseRoot {
@@ -188,18 +202,7 @@ impl DefineTableStatement {
 			};
 			txn.del_prefix_key(&key).await?;
 
-			let (ViewDefinition::Materialized {
-				tables,
-				..
-			}
-			| ViewDefinition::Aggregated {
-				tables,
-				..
-			}
-			| ViewDefinition::Select {
-				tables,
-				..
-			}) = &view;
+			let tables = view.source_tables();
 
 			// Process each foreign table
 			for ft in tables.iter() {
@@ -212,12 +215,12 @@ impl DefineTableStatement {
 					tb: Cow::Borrowed(ft),
 					ft: Cow::Borrowed(&name),
 				};
-				txn.set_key(&key, &tb_def).await?;
+				txn.set_key(&key, &tb_def.to_stored()).await?;
 				// Refresh the table cache
 				let Some(foreign_tb) =
 					txn.get_tb(ns.namespace_id, db.database_id, ft, None).await?
 				else {
-					bail!(Error::TbNotFound {
+					bail!(CatalogError::TbNotFound {
 						name: ft.clone(),
 					});
 				};
@@ -227,7 +230,7 @@ impl DefineTableStatement {
 					db_name,
 					&TableDefinition {
 						cache_tables_ts: Uuid::now_v7(),
-						..foreign_tb.as_ref().clone()
+						..(*foreign_tb).clone()
 					},
 				)
 				.await?;
@@ -823,6 +826,7 @@ impl DefineTableStatement {
 	) -> Result<()> {
 		// Add table relational fields
 		if let TableType::Relation(rel) = &tb.table_type {
+			let tb_name = tb.name.clone();
 			// Set the `in` field as a DEFINE FIELD definition
 			{
 				let key = crate::key::table::fd::Fd {
@@ -830,20 +834,16 @@ impl DefineTableStatement {
 						ns,
 						db,
 					},
-					tb: Cow::Borrowed(&tb.name),
+					tb: Cow::Borrowed(&tb_name),
 					fd: Cow::Borrowed("in"),
 				};
-				let val = Some(Kind::Record(rel.from.clone()));
-				txn.set_key(
-					&key,
-					&FieldDefinition {
-						name: Idiom::from(IN.to_vec()),
-						table: tb.name.clone(),
-						field_kind: val,
-						..Default::default()
-					},
-				)
-				.await?;
+				let fd = FieldDefinition {
+					name: Idiom::from(IN.to_vec()),
+					table: tb_name.clone(),
+					field_kind: Some(Kind::Record(rel.from.clone())),
+					..Default::default()
+				};
+				txn.set_key(&key, &fd.to_stored()).await?;
 			}
 			// Set the `out` field as a DEFINE FIELD definition
 			{
@@ -852,20 +852,16 @@ impl DefineTableStatement {
 						ns,
 						db,
 					},
-					tb: Cow::Borrowed(&tb.name),
+					tb: Cow::Borrowed(&tb_name),
 					fd: Cow::Borrowed("out"),
 				};
-				let val = Some(Kind::Record(rel.to.clone()));
-				txn.set_key(
-					&key,
-					&FieldDefinition {
-						name: Idiom::from(OUT.to_vec()),
-						table: tb.name.clone(),
-						field_kind: val,
-						..Default::default()
-					},
-				)
-				.await?;
+				let fd = FieldDefinition {
+					name: Idiom::from(OUT.to_vec()),
+					table: tb_name.clone(),
+					field_kind: Some(Kind::Record(rel.to.clone())),
+					..Default::default()
+				};
+				txn.set_key(&key, &fd.to_stored()).await?;
 			}
 			// Refresh the table cache for the fields
 			tb.cache_fields_ts = Uuid::now_v7();

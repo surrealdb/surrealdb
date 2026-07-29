@@ -9,13 +9,12 @@ use uuid::Uuid;
 use super::DefineKind;
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{
-	self, DatabaseId, FieldDefinition, NamespaceId, Permission, Permissions, Relation,
-	TableDefinition, TableType,
+	self, DatabaseId, Error as CatalogError, NamespaceId, Permissions, Relation, TableType,
 };
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::parameterize::{expr_to_ident, expr_to_idiom};
 use crate::expr::reference::Reference;
 use crate::expr::{
@@ -98,28 +97,11 @@ impl DefineFieldStatement {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<catalog::FieldDefinition> {
-		fn convert_permission(permission: &Permission) -> Permission {
-			match permission {
-				Permission::None => Permission::None,
-				Permission::Full => Permission::Full,
-				Permission::Specific(expr) => Permission::Specific(expr.clone()),
-			}
-		}
-
 		let comment = stk
 			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
 			.await
 			.catch_return()?
 			.cast_to()?;
-
-		// Extract computed field dependencies if this is a computed field.
-		let computed_deps = self.computed.as_ref().map(|expr| {
-			let deps = crate::expr::computed_deps::extract_computed_deps(expr);
-			catalog::ComputedDeps {
-				fields: deps.fields,
-				is_complete: deps.is_complete,
-			}
-		});
 
 		let name: Idiom = expr_to_idiom(stk, ctx, opt, doc, &self.name, "field name").await?;
 		let table: TableName =
@@ -130,7 +112,7 @@ impl DefineFieldStatement {
 			let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 			for ix in ctx.tx().all_tb_indexes(ns, db, &table, None).await?.iter() {
 				if ix.cols.iter().any(|col| col.starts_with(&name)) {
-					bail!(Error::ComputedFieldCannotBeIndexed {
+					bail!(ExecError::ComputedFieldCannotBeIndexed {
 						index: ix.name.to_string(),
 						field: name.to_raw_string(),
 					})
@@ -138,7 +120,7 @@ impl DefineFieldStatement {
 			}
 		}
 
-		Ok(FieldDefinition {
+		Ok(catalog::FieldDefinition {
 			name,
 			table,
 			field_kind: self.field_kind.clone(),
@@ -152,13 +134,12 @@ impl DefineFieldStatement {
 				DefineDefault::Set(x) => catalog::DefineDefault::Set(x.clone()),
 				DefineDefault::Always(x) => catalog::DefineDefault::Always(x.clone()),
 			},
-			select_permission: convert_permission(&self.permissions.select),
-			create_permission: convert_permission(&self.permissions.create),
-			update_permission: convert_permission(&self.permissions.update),
+			select_permission: self.permissions.select.clone(),
+			create_permission: self.permissions.create.clone(),
+			update_permission: self.permissions.update.clone(),
 			comment,
 			reference: self.reference.clone(),
 			auth_limit: AuthLimit::new_from_auth(opt.auth.as_ref()).into(),
-			computed_deps,
 			graphql_alias: self.graphql_alias.clone(),
 			graphql_deprecated: self.graphql_deprecated.clone(),
 		})
@@ -180,7 +161,7 @@ impl DefineFieldStatement {
 
 		// A PERMISSIONS clause must not perform writes (GHSA-66r2-5gwj-gxm2).
 		if self.permissions.has_direct_write() {
-			return Err(Error::PermissionClauseNotReadonly {
+			return Err(ExecError::PermissionClauseNotReadonly {
 				kind: "field",
 				name: definition.name.to_sql(),
 			}
@@ -217,6 +198,7 @@ impl DefineFieldStatement {
 		let txn = ctx.tx();
 
 		let tb = txn.get_or_add_tb(Some(ctx), ns_name, db_name, &definition.table, None).await?;
+		let tb_name = tb.name.clone();
 
 		// Get the name of the field. Use the resolved name (with parameterized
 		// indices substituted) so duplicate detection matches what `put_tb_field`
@@ -224,12 +206,12 @@ impl DefineFieldStatement {
 		// path silently overwrites the first.
 		let fd = definition.name.to_raw_string();
 		// Check if the definition exists
-		let existing = txn.get_tb_field(ns, db, &tb.name, &fd, None).await?;
+		let existing = txn.get_tb_field(ns, db, &tb_name, &fd, None).await?;
 		if let Some(existing) = &existing {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
-						bail!(Error::FdAlreadyExists {
+						bail!(CatalogError::FdAlreadyExists {
 							name: existing.name.to_sql(),
 						});
 					}
@@ -242,7 +224,7 @@ impl DefineFieldStatement {
 		}
 
 		// Process the statement
-		txn.put_tb_field(ns, db, &tb.name, &definition).await?;
+		txn.put_tb_field(ns, db, &tb_name, &definition).await?;
 
 		// Overwriting an existing reference field can drop target tables it used
 		// to reference (the REFERENCE clause removed, or the record kind narrowed
@@ -252,14 +234,14 @@ impl DefineFieldStatement {
 		if !opt.import
 			&& let Some(existing) = &existing
 		{
-			purge_dropped_reference_keys(&txn, ns, db, &tb.name, existing, Some(&definition))
+			purge_dropped_reference_keys(&txn, ns, db, &tb_name, existing, Some(&definition))
 				.await?;
 		}
 
 		// Refresh the table cache
-		let mut tb = TableDefinition {
+		let mut tb = catalog::TableDefinition {
 			cache_fields_ts: Uuid::now_v7(),
-			..tb.as_ref().clone()
+			..(*tb).clone()
 		};
 
 		// If this is an `in` field then check relation definitions
@@ -269,7 +251,7 @@ impl DefineFieldStatement {
 				// Check if a field TYPE has been specified
 				if let Some(kind) = self.field_kind.as_ref() {
 					let Kind::Record(field_kind) = kind else {
-						bail!(Error::Thrown("in field on a relation must be a record".into(),))
+						bail!(ExecError::Thrown("in field on a relation must be a record".into(),))
 					};
 
 					// Add the TYPE to the DEFINE TABLE statement
@@ -297,7 +279,7 @@ impl DefineFieldStatement {
 				if let Some(kind) = self.field_kind.as_ref() {
 					// The `out` field must be a record type
 					let Kind::Record(field_kind) = kind else {
-						bail!(Error::Thrown("out field on a relation must be a record".into(),))
+						bail!(ExecError::Thrown("out field on a relation must be a record".into(),))
 					};
 					// Add the TYPE to the DEFINE TABLE statement
 					if *field_kind != relation.to {
@@ -371,21 +353,21 @@ impl DefineFieldStatement {
 				let val = if let Some(existing) =
 					fields.as_ref().and_then(|x| x.iter().find(|x| x.name == name))
 				{
-					FieldDefinition {
-						field_kind: Some(cur_kind),
+					catalog::FieldDefinition {
+						field_kind: Some(cur_kind.clone()),
 						flexible: existing.flexible || definition.flexible,
 						..existing.clone()
 					}
 				} else {
-					FieldDefinition {
+					catalog::FieldDefinition {
 						name: name.clone(),
 						table: definition.table.clone(),
-						field_kind: Some(cur_kind),
+						field_kind: Some(cur_kind.clone()),
 						flexible: definition.flexible,
 						..Default::default()
 					}
 				};
-				txn.set_key(&key, &val).await?;
+				txn.set_key(&key, &val.to_stored()).await?;
 				// Process to any sub field
 				if let Some(new_kind) = new_kind {
 					cur_kind = new_kind;
@@ -409,28 +391,31 @@ impl DefineFieldStatement {
 		let fields = txn.all_tb_fields(ns, db, &definition.table, None).await?;
 		if self.computed.is_some() {
 			// Ensure the field is not the `id` field
-			ensure!(!definition.name.is_id(), Error::IdFieldKeywordConflict("COMPUTED".into()));
+			ensure!(!definition.name.is_id(), ExecError::IdFieldKeywordConflict("COMPUTED".into()));
 
 			// Ensure the field is top-level
 			ensure!(
 				definition.name.len() == 1,
-				Error::ComputedNestedField(definition.name.to_sql())
+				ExecError::ComputedNestedField(definition.name.to_sql())
 			);
 
 			// Ensure there are no conflicting clauses
-			ensure!(self.value.is_none(), Error::ComputedKeywordConflict("VALUE".into()));
-			ensure!(self.assert.is_none(), Error::ComputedKeywordConflict("ASSERT".into()));
-			ensure!(self.reference.is_none(), Error::ComputedKeywordConflict("REFERENCE".into()));
+			ensure!(self.value.is_none(), ExecError::ComputedKeywordConflict("VALUE".into()));
+			ensure!(self.assert.is_none(), ExecError::ComputedKeywordConflict("ASSERT".into()));
+			ensure!(
+				self.reference.is_none(),
+				ExecError::ComputedKeywordConflict("REFERENCE".into())
+			);
 			ensure!(
 				matches!(self.default, DefineDefault::None),
-				Error::ComputedKeywordConflict("DEFAULT".into())
+				ExecError::ComputedKeywordConflict("DEFAULT".into())
 			);
-			ensure!(!self.readonly, Error::ComputedKeywordConflict("READONLY".into()));
+			ensure!(!self.readonly, ExecError::ComputedKeywordConflict("READONLY".into()));
 
 			// Ensure no nested fields exist
 			for field in fields.iter() {
 				if field.name.starts_with(&definition.name) && field.name != definition.name {
-					bail!(Error::ComputedNestedFieldConflict(
+					bail!(ExecError::ComputedNestedFieldConflict(
 						definition.name.to_sql(),
 						field.name.to_sql()
 					));
@@ -443,7 +428,7 @@ impl DefineFieldStatement {
 					&& definition.name.starts_with(&field.name)
 					&& field.name != definition.name
 				{
-					bail!(Error::ComputedParentFieldConflict(
+					bail!(ExecError::ComputedParentFieldConflict(
 						definition.name.to_sql(),
 						field.name.to_sql()
 					));
@@ -475,8 +460,7 @@ impl DefineFieldStatement {
 		let field_name = definition.name.to_raw_string();
 
 		// Build adjacency list: field_name -> list of computed field dependencies.
-		// We use the stored computed_deps when available, falling back to on-the-fly
-		// extraction for legacy fields (computed_deps = None).
+		// Deps are always extracted on the fly (computed_deps is not stored).
 		// BTreeMap ensures deterministic iteration order for consistent cycle error messages.
 		let mut graph: std::collections::BTreeMap<String, Vec<String>> =
 			std::collections::BTreeMap::new();
@@ -490,10 +474,7 @@ impl DefineFieldStatement {
 			if name == field_name {
 				continue;
 			}
-			let deps = if let Some(ref cd) = fd.computed_deps {
-				cd.fields.clone()
-			} else if let Some(ref expr) = fd.computed {
-				// Legacy field without stored deps: extract on the fly
+			let deps = if let Some(ref expr) = fd.computed {
 				crate::expr::computed_deps::extract_computed_deps(expr).fields
 			} else {
 				Vec::new()
@@ -502,8 +483,11 @@ impl DefineFieldStatement {
 		}
 
 		// Insert/replace the field being defined with its freshly-extracted deps
-		let new_deps =
-			definition.computed_deps.as_ref().map(|cd| cd.fields.clone()).unwrap_or_default();
+		let new_deps = definition
+			.computed
+			.as_ref()
+			.map(|expr| crate::expr::computed_deps::extract_computed_deps(expr).fields)
+			.unwrap_or_default();
 		graph.insert(field_name, new_deps);
 
 		// Iterative DFS cycle detection.
@@ -543,7 +527,7 @@ impl DefineFieldStatement {
 							let cycle: Vec<String> =
 								path[cycle_start..].iter().map(|s| (*s).to_string()).collect();
 							let cycle_str = format!("{} -> {}", cycle.join(" -> "), neighbor);
-							bail!(Error::ComputedFieldCycle(cycle_str));
+							bail!(ExecError::ComputedFieldCycle(cycle_str));
 						}
 						Some(0) | None => {
 							// Unvisited: push onto stack
@@ -575,7 +559,7 @@ impl DefineFieldStatement {
 		if self.reference.is_some() {
 			ensure!(
 				definition.name.len() == 1,
-				Error::ReferenceNestedField(definition.name.to_sql())
+				ExecError::ReferenceNestedField(definition.name.to_sql())
 			);
 
 			fn valid(kind: &Kind, outer: bool) -> bool {
@@ -605,7 +589,7 @@ impl DefineFieldStatement {
 
 			ensure!(
 				is_record_id,
-				Error::ReferenceTypeConflict(
+				ExecError::ReferenceTypeConflict(
 					self.field_kind.as_ref().unwrap_or(&Kind::Any).to_sql()
 				)
 			);
@@ -631,7 +615,7 @@ impl DefineFieldStatement {
 				{
 					let path = definition.name[fd.name.len()..].to_vec();
 					if !fd_kind.allows_nested_kind(&path, self_kind) {
-						bail!(Error::MismatchedFieldTypes {
+						bail!(ExecError::MismatchedFieldTypes {
 							name: definition.name.to_sql(),
 							kind: self_kind.to_sql(),
 							existing_name: fd.name.to_sql(),
@@ -655,13 +639,13 @@ impl DefineFieldStatement {
 		if self.flexible {
 			ensure!(
 				self.field_kind.as_ref().is_some_and(kind_contains_object),
-				Error::Thrown("FLEXIBLE can only be used with types containing object".into())
+				ExecError::Thrown("FLEXIBLE can only be used with types containing object".into())
 			);
 
 			// Get the table definition
 			let txn = ctx.tx();
 			let Some(tb) = txn.get_tb(ns, db, &definition.table, None).await? else {
-				bail!(Error::TbNotFound {
+				bail!(CatalogError::TbNotFound {
 					name: definition.table.clone(),
 				});
 			};
@@ -669,7 +653,7 @@ impl DefineFieldStatement {
 			// FLEXIBLE can only be used in SCHEMAFULL tables
 			ensure!(
 				tb.schemafull,
-				Error::Thrown("FLEXIBLE can only be used in SCHEMAFULL tables".into())
+				ExecError::Thrown("FLEXIBLE can only be used in SCHEMAFULL tables".into())
 			);
 		}
 
@@ -715,23 +699,26 @@ pub(crate) fn validate_id_field_restrictions(def: &catalog::FieldDefinition) -> 
 	}
 	// `VALUE`, `REFERENCE`, and `COMPUTED` are meaningless or unsafe on an
 	// immutable primary key.
-	ensure!(def.value.is_none(), Error::IdFieldKeywordConflict("VALUE".into()));
-	ensure!(def.reference.is_none(), Error::IdFieldKeywordConflict("REFERENCE".into()));
-	ensure!(def.computed.is_none(), Error::IdFieldKeywordConflict("COMPUTED".into()));
+	ensure!(def.value.is_none(), ExecError::IdFieldKeywordConflict("VALUE".into()));
+	ensure!(def.reference.is_none(), ExecError::IdFieldKeywordConflict("REFERENCE".into()));
+	ensure!(def.computed.is_none(), ExecError::IdFieldKeywordConflict("COMPUTED".into()));
 	// A plain `DEFAULT` supplies the id when none is given; `DEFAULT ALWAYS`
 	// would recompute it on every update, which is nonsensical for an
 	// immutable id.
 	ensure!(
 		!matches!(def.default, catalog::DefineDefault::Always(_)),
-		Error::IdFieldKeywordConflict("DEFAULT ALWAYS".into())
+		ExecError::IdFieldKeywordConflict("DEFAULT ALWAYS".into())
 	);
 	// The id is implicitly immutable (`READONLY` is redundant) and a record-id
 	// key is not an object (`FLEXIBLE` is meaningless).
-	ensure!(!def.readonly, Error::IdFieldKeywordConflict("READONLY".into()));
-	ensure!(!def.flexible, Error::IdFieldKeywordConflict("FLEXIBLE".into()));
+	ensure!(!def.readonly, ExecError::IdFieldKeywordConflict("READONLY".into()));
+	ensure!(!def.flexible, ExecError::IdFieldKeywordConflict("FLEXIBLE".into()));
 	// The declared `TYPE` must be representable as a record-id key.
-	if let Some(ref kind) = def.field_kind {
-		ensure!(RecordIdKeyLit::kind_supported(kind), Error::IdFieldUnsupportedKind(kind.to_sql()));
+	if let Some(kind) = &def.field_kind {
+		ensure!(
+			RecordIdKeyLit::kind_supported(kind),
+			ExecError::IdFieldUnsupportedKind(kind.to_sql())
+		);
 	}
 	Ok(())
 }
@@ -741,8 +728,8 @@ pub(crate) async fn purge_dropped_reference_keys(
 	ns: NamespaceId,
 	db: DatabaseId,
 	ft: &TableName,
-	old: &FieldDefinition,
-	new: Option<&FieldDefinition>,
+	old: &catalog::FieldDefinition,
+	new: Option<&catalog::FieldDefinition>,
 ) -> Result<()> {
 	// Only a field that previously declared a REFERENCE wrote reference keys.
 	if old.reference.is_none() {
@@ -751,9 +738,11 @@ pub(crate) async fn purge_dropped_reference_keys(
 	// `ff` is the referencing field name exactly as `process_reference_clause`
 	// encoded it into each key's `ff` slot.
 	let ff = old.name.to_sql();
-	let old_kind = old.field_kind.as_ref();
+	let old_kind: Option<&Kind> = old.field_kind.as_ref();
+	let new_kind: Option<&Kind> = new.and_then(|n| n.field_kind.as_ref());
 	for target in txn.all_tb(ns, db, None).await?.iter() {
-		let target = &target.name;
+		let target = target.name.clone();
+		let target = &target;
 		// Reference keys live under their target table, so only tables the old
 		// kind could hold a record of can carry this field's keys (an untyped
 		// `record` could target any table).
@@ -763,8 +752,7 @@ pub(crate) async fn purge_dropped_reference_keys(
 		}
 		// Keep the keys the new definition still references.
 		let new_can_target = new.is_some_and(|n| {
-			n.reference.is_some()
-				&& n.field_kind.as_ref().is_none_or(|k| k.reference_can_target(target))
+			n.reference.is_some() && new_kind.is_none_or(|k| k.reference_can_target(target))
 		});
 		if new_can_target {
 			continue;

@@ -17,7 +17,8 @@ use tokio::task::spawn_blocking;
 
 use super::common::{OrderByField, SortDirection, compare_keys};
 use super::external_common::{KeyedValue, KeyedValueExternalChunk, TempFileReader, TempFileWriter};
-use crate::err::Error;
+use crate::dbs::SortError;
+use crate::err::EngineError;
 use crate::exec::{
 	AccessMode, CardinalityHint, CombineAccessModes, ContextLevel, EvalContext, ExecOperator,
 	ExecutionContext, FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream,
@@ -163,7 +164,7 @@ impl ExecOperator for ExternalSort {
 				// Check for cancellation between batches
 				if ctx.cancellation().is_cancelled() {
 					return Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(
-						Error::QueryCancelled
+						EngineError::QueryCancelled
 					)));
 				}
 				let batch = match batch_result {
@@ -199,7 +200,7 @@ impl ExecOperator for ExternalSort {
 					let mut w = writer;
 					w = spawn_blocking(move || {
 						w.push(&keyed)?;
-						Ok::<TempFileWriter, Error>(w)
+						Ok::<TempFileWriter, SortError>(w)
 					})
 					.await
 					.context("Write task join error")?
@@ -232,7 +233,7 @@ impl ExecOperator for ExternalSort {
 
 				let sorter: ExternalSorter<
 					KeyedValue,
-					Error,
+					SortError,
 					LimitedBufferBuilder,
 					KeyedValueExternalChunk,
 				> = ExternalSorterBuilder::new()
@@ -250,7 +251,7 @@ impl ExecOperator for ExternalSort {
 				let values: Vec<Value> =
 					sorted.map(|r| r.map(|kv| kv.value)).collect::<Result<Vec<_>, _>>()?;
 
-				Ok::<Vec<Value>, Error>(values)
+				Ok::<Vec<Value>, SortError>(values)
 			})
 			.await
 			.context("Sort task join error")?

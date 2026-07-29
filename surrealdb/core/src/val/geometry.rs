@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 use std::hash;
 use std::iter::once;
 
+use common::fmt::Fmt;
 use geo::algorithm::contains::Contains;
 use geo::algorithm::intersects::Intersects;
 use geo::{Coord, LineString, LinesIter, Point, Polygon};
@@ -12,7 +13,6 @@ use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::Object;
-use crate::fmt::Fmt;
 use crate::val::{Array, Value};
 
 #[revisioned(revision = 1)]
@@ -578,6 +578,30 @@ impl From<Geometry> for geo::Geometry<f64> {
 			Geometry::MultiLine(v) => v.into(),
 			Geometry::MultiPolygon(v) => v.into(),
 			Geometry::Collection(v) => v.into_iter().collect::<geo::Geometry<f64>>(),
+		}
+	}
+}
+
+impl From<geo::Geometry<f64>> for Geometry {
+	/// Convert from the upstream geometry enum.
+	///
+	/// `geo`'s enum is a superset of SurrealQL's geometry variants: `Rect` and
+	/// `Triangle` convert to their equivalent polygons, and a bare `Line`
+	/// (segment) becomes a two-point line string.
+	fn from(v: geo::Geometry<f64>) -> Self {
+		match v {
+			geo::Geometry::Point(v) => Geometry::Point(v),
+			geo::Geometry::Line(v) => Geometry::Line(LineString::from(vec![v.start, v.end])),
+			geo::Geometry::LineString(v) => Geometry::Line(v),
+			geo::Geometry::Polygon(v) => Geometry::Polygon(v),
+			geo::Geometry::MultiPoint(v) => Geometry::MultiPoint(v),
+			geo::Geometry::MultiLineString(v) => Geometry::MultiLine(v),
+			geo::Geometry::MultiPolygon(v) => Geometry::MultiPolygon(v),
+			geo::Geometry::GeometryCollection(v) => {
+				Geometry::Collection(v.0.into_iter().map(Geometry::from).collect())
+			}
+			geo::Geometry::Rect(v) => Geometry::Polygon(v.to_polygon()),
+			geo::Geometry::Triangle(v) => Geometry::Polygon(v.to_polygon()),
 		}
 	}
 }

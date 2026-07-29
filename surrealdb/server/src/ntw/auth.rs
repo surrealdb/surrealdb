@@ -90,7 +90,7 @@ where
 					// metrics layer can attribute the per-request
 					// telemetry (HttpRequestEvent + NetworkBytesEvent)
 					// without reaching back into request state.
-					let ctx = HttpRequestEventCtx::from_session(&sess);
+					let ctx = HttpRequestEventCtx::from(&sess);
 					parts.extensions.insert(sess);
 					let mut response = inner.call(Request::from_parts(parts, body)).await?;
 					response.extensions_mut().insert(ctx);

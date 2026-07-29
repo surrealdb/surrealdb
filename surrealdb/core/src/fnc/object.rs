@@ -4,7 +4,7 @@ use anyhow::{Result, bail};
 use surrealdb_strand::Strand;
 use surrealdb_types::ToSql;
 
-use crate::err::Error;
+use crate::expr::Error;
 use crate::val::{Array, Object, Value};
 
 pub fn entries((object,): (Object,)) -> Result<Value> {

@@ -3,11 +3,11 @@ use reblessive::tree::Stk;
 
 use super::DefineKind;
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider};
-use crate::catalog::{ModuleDefinition, ModuleName, Permission};
+use crate::catalog::{Error as CatalogError, ModuleDefinition, ModuleName, Permission};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::{Base, Expr, FlowResultExt as _, ModuleExecutable};
 use crate::iam::{Action, ResourceKind};
 #[cfg(feature = "surrealism")]
@@ -42,7 +42,7 @@ impl DefineModuleStatement {
 		let storage_name = ModuleName::try_from(self)?.get_storage_name();
 		// A PERMISSIONS clause must not perform writes (GHSA-66r2-5gwj-gxm2).
 		if self.permissions.has_direct_write() {
-			bail!(Error::PermissionClauseNotReadonly {
+			bail!(ExecError::PermissionClauseNotReadonly {
 				kind: "module",
 				name: storage_name.clone(),
 			});
@@ -51,7 +51,7 @@ impl DefineModuleStatement {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
-						bail!(Error::MdAlreadyExists {
+						bail!(CatalogError::MdAlreadyExists {
 							name: storage_name,
 						});
 					}

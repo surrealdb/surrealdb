@@ -10,9 +10,9 @@ use rayon::prelude::ParallelSliceMut;
 #[cfg(not(target_family = "wasm"))]
 use tokio::task::spawn_blocking;
 
-use crate::dbs::plan::Explanation;
 #[cfg(not(target_family = "wasm"))]
-use crate::err::Error;
+use crate::dbs::SortError;
+use crate::dbs::plan::Explanation;
 use crate::expr::order::OrderList;
 use crate::val::Value;
 
@@ -228,7 +228,7 @@ impl MemoryOrdered {
 	}
 
 	#[cfg(not(target_family = "wasm"))]
-	pub(super) async fn sort(&mut self) -> Result<(), Error> {
+	pub(super) async fn sort(&mut self) -> Result<(), SortError> {
 		// Make sure there is no pending batch
 		if !self.batch.is_empty() {
 			self.send_batch();
@@ -246,7 +246,7 @@ impl MemoryOrdered {
 			values
 		})
 		.await
-		.map_err(|e| Error::OrderingError(format!("{e}")))?;
+		.map_err(|e| SortError::OrderingError(format!("{e}")))?;
 		// ordered is already empty from mem::take, so it stays cleared
 		Ok(())
 	}

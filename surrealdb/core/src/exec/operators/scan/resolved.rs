@@ -11,12 +11,13 @@
 
 use std::sync::Arc;
 
+use surrealdb_strand::TableName;
+
 use super::pipeline::{FieldState, build_field_state_raw, filter_field_state_for_projection};
 use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
-use crate::err::Error;
+use crate::err::{EngineError, Error};
 use crate::exec::permission::{PhysicalPermission, convert_permission_to_physical};
 use crate::exec::planner::Planner;
-use crate::val::TableName;
 
 /// Plan-time resolved table metadata that replaces runtime KV lookups.
 ///
@@ -86,14 +87,14 @@ pub(crate) async fn resolve_table_context(
 	use crate::catalog::providers::TableProvider;
 
 	let txn = planner.txn().ok_or_else(|| {
-		Error::Internal("resolve_table_context requires a planner with txn".into())
+		EngineError::Internal("resolve_table_context requires a planner with txn".into())
 	})?;
 
 	// Look up table definition
 	let table_def = match txn
 		.get_tb_by_name(ns, db, table_name, None)
 		.await
-		.map_err(|e| Error::Internal(e.to_string()))?
+		.map_err(|e| EngineError::Internal(e.to_string()))?
 	{
 		Some(def) => def,
 		None => return Ok(None),
@@ -112,8 +113,8 @@ pub(crate) async fn resolve_table_context(
 	let field_state = build_field_state_raw(planner, ns_id, db_id, table_name, true, None)
 		.await
 		.map_err(|cf| match cf {
-			crate::expr::ControlFlow::Err(e) => Error::Internal(e.to_string()),
-			_ => Error::Internal("Unexpected control flow in field state resolution".into()),
+			crate::expr::ControlFlow::Err(e) => EngineError::Internal(e.to_string()),
+			_ => EngineError::Internal("Unexpected control flow in field state resolution".into()),
 		})?;
 
 	Ok(Some(ResolvedTableContext {

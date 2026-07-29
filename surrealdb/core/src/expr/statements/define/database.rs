@@ -2,12 +2,11 @@ use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
 use super::DefineKind;
-use crate::catalog::DatabaseDefinition;
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
+use crate::catalog::{DatabaseDefinition, Error};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::expr::changefeed::ChangeFeed;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::statements::info::InfoStructure;

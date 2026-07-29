@@ -19,10 +19,12 @@ use crate::catalog::providers::{
 };
 use crate::ctx::reason::Reason;
 use crate::ctx::{Context, FrozenContext};
-use crate::dbs::response::QueryResult;
-use crate::dbs::{Force, MessageBroker, Options, QueryType, RoutedNotification, StatementCounters};
+use crate::dbs::{
+	Force, MessageBroker, Options, QueryResult, QueryType, RoutedNotification, StatementCounters,
+};
 use crate::doc::DefaultBroker;
-use crate::err::Error;
+use crate::err::{EngineError, Error};
+use crate::exec::Error as ExecError;
 use crate::exec::planner::try_plan_expr;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::paths::{DB, NS};
@@ -31,7 +33,7 @@ use crate::expr::statements::{OptionStatement, UseStatement};
 use crate::expr::{Base, ControlFlow, Expr, FlowResult, TopLevelExpr};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::slowlog::SlowLogVisit;
-use crate::kvs::{Datastore, Transaction, TransactionType};
+use crate::kvs::{Datastore, DatastoreError, Transaction, TransactionType};
 use crate::observe::{
 	Outcome, QueryCounters, QueryEvent, QueryEventSafe, StatementEvent, StatementEventCtx,
 	StatementEventSafe, StatementType,
@@ -41,6 +43,131 @@ use crate::val::{Array, Value, convert_value_to_public_value};
 use crate::{err, expr, sql};
 
 const TARGET: &str = "surrealdb::core::dbs";
+
+/// Classify an [`anyhow::Error`] into one of the bounded `error_class`
+/// constants by downcasting to the well-known concrete error types
+/// produced by the executor / kvs layers.
+///
+/// Mapping rules (first match wins):
+///
+/// - Downcasts to [`crate::kvs::Error`]: retryable variants →
+///   [`crate::observe::error_class::TXN_CONFLICT`]; everything else from the kvs layer →
+///   [`crate::observe::error_class::STORAGE`].
+/// - Downcasts to [`surrealdb_types::Error`]: delegates to
+///   [`crate::observe::error_class::classify_types_error`].
+/// - Anything else: [`crate::observe::error_class::INTERNAL`].
+///
+/// Lives in `dbs` rather than the observe crate because it downcasts to
+/// [`crate::kvs::Error`], a core-only type the leaf crate cannot depend on.
+/// It stays `pub` and re-exported as `crate::observe::classify_anyhow_error`,
+/// which is where it used to live: an out-of-tree observer filling the
+/// `error_class` attribute has only an `anyhow::Error` to work from, and the
+/// alternative is re-deriving the kvs-is-retryable rule that this function
+/// exists to keep in one place.
+pub fn classify_anyhow_error(err: &anyhow::Error) -> &'static str {
+	use crate::observe::error_class::{INTERNAL, STORAGE, TXN_CONFLICT, classify_types_error};
+	// Both shapes reach here. A bare `kvs::Error` comes straight from the
+	// store; the `err::Error::Kvs`-wrapped one comes from every `Transaction`
+	// write, which goes through `map_err(Error::from)`. Matching only the bare
+	// one classified a write conflict as `internal`.
+	if let Some(kvs_err) = err.downcast_ref::<crate::kvs::Error>().or_else(|| {
+		match err.downcast_ref::<crate::err::Error>() {
+			Some(crate::err::Error::Kvs(kvs_err)) => Some(kvs_err),
+			_ => None,
+		}
+	}) {
+		if kvs_err.is_retryable() {
+			return TXN_CONFLICT;
+		}
+		return STORAGE;
+	}
+	if let Some(types_err) = err.downcast_ref::<surrealdb_types::Error>() {
+		return classify_types_error(types_err);
+	}
+	INTERNAL
+}
+
+/// Classify a [`TopLevelExpr`] into its bounded [`StatementType`] category.
+///
+/// Lives in `dbs` rather than the observe crate because it matches on
+/// [`crate::expr`] shapes, which the leaf observe crate cannot depend on.
+pub(crate) fn statement_type_from_top_level(expr: &TopLevelExpr) -> StatementType {
+	match expr {
+		TopLevelExpr::Begin => StatementType::Begin,
+		TopLevelExpr::Cancel => StatementType::Cancel,
+		TopLevelExpr::Commit => StatementType::Commit,
+		TopLevelExpr::Access(_) => StatementType::Access,
+		TopLevelExpr::Kill(_) => StatementType::Kill,
+		TopLevelExpr::Live(_) => StatementType::Live,
+		TopLevelExpr::Option(_) => StatementType::Option,
+		TopLevelExpr::Use(_) => StatementType::Use,
+		TopLevelExpr::Show(_) => StatementType::Show,
+		TopLevelExpr::Expr(expr) => statement_type_from_expr(expr),
+	}
+}
+
+/// Classify a bare [`Expr`] into its bounded [`StatementType`] category.
+fn statement_type_from_expr(expr: &Expr) -> StatementType {
+	match expr {
+		Expr::Select(_) => StatementType::Select,
+		Expr::Create(_) => StatementType::Create,
+		Expr::Update(_) => StatementType::Update,
+		Expr::Upsert(_) => StatementType::Upsert,
+		Expr::Delete(_) => StatementType::Delete,
+		Expr::Relate(_) => StatementType::Relate,
+		Expr::Insert(_) => StatementType::Insert,
+		Expr::Define(_) => StatementType::Define,
+		Expr::Remove(_) => StatementType::Remove,
+		Expr::Rebuild(_) => StatementType::Rebuild,
+		Expr::Alter(_) => StatementType::Alter,
+		Expr::Info(_) => StatementType::Info,
+		Expr::Foreach(_) => StatementType::Foreach,
+		Expr::IfElse(_) => StatementType::IfElse,
+		Expr::Sleep(_) => StatementType::Sleep,
+		Expr::Explain {
+			..
+		} => StatementType::Explain,
+		Expr::Let(_) => StatementType::Let,
+		Expr::Return(_) => StatementType::Return,
+		Expr::Break => StatementType::Break,
+		Expr::Continue => StatementType::Continue,
+		Expr::Throw(_) => StatementType::Throw,
+		Expr::Block(_) => StatementType::Block,
+		// Anything that isn't a recognised statement-shaped
+		// expression collapses to `Other`. Enumerated rather than
+		// using a wildcard so a new `Expr` variant forces a
+		// classification decision at compile time.
+		Expr::Literal(_)
+		| Expr::Param(_)
+		| Expr::Idiom(_)
+		| Expr::Table(_)
+		| Expr::Mock(_)
+		| Expr::Constant(_)
+		| Expr::Prefix {
+			..
+		}
+		| Expr::Postfix {
+			..
+		}
+		| Expr::Binary {
+			..
+		}
+		| Expr::FunctionCall(_)
+		| Expr::Closure(_) => StatementType::Other,
+		// GQL MATCH is not a SurrealQL statement-shaped expression.
+		#[cfg(feature = "gql")]
+		Expr::Match(_) => StatementType::Other,
+	}
+}
+
+/// Returns the query type for the given toplevel expression.
+fn query_type_for_toplevel_expr(expr: &TopLevelExpr) -> QueryType {
+	match expr {
+		TopLevelExpr::Live(_) => QueryType::Live,
+		TopLevelExpr::Kill(_) => QueryType::Kill,
+		_ => QueryType::Other,
+	}
+}
 
 struct PreparedBroker {
 	receiver: async_channel::Receiver<RoutedNotification>,
@@ -646,7 +773,9 @@ impl Executor {
 			() => {
 				Arc::get_mut(&mut self.ctx)
 					.ok_or_else(|| {
-						Error::unreachable("Tried to unfreeze a Context with multiple references")
+						EngineError::unreachable(
+							"Tried to unfreeze a Context with multiple references",
+						)
 					})
 					.map_err(anyhow::Error::new)?
 			};
@@ -810,7 +939,7 @@ impl Executor {
 				}))
 			}
 			TopLevelExpr::Option(_) => {
-				return Err(ControlFlow::Err(anyhow::Error::new(Error::unreachable(
+				return Err(ControlFlow::Err(anyhow::Error::new(EngineError::unreachable(
 					"TopLevelExpr::Option should have been handled by a calling function",
 				))));
 			}
@@ -819,7 +948,7 @@ impl Executor {
 				// Reject protected names first, before any work: avoids planning
 				// or computing a value we'll throw away.
 				if stm.is_protected_set() {
-					return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidParam {
+					return Err(ControlFlow::from(anyhow::Error::new(ExecError::InvalidParam {
 						name: stm.name.to_string(),
 					})));
 				}
@@ -844,8 +973,11 @@ impl Executor {
 					Some(Arc::clone(&self.opt.auth))
 				) {
 					Ok(plan) => self.execute_operator_plan(plan, Arc::clone(&txn)).await,
-					Err(err @ (Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_))) => {
-						if let Error::PlannerUnimplemented(msg) = &err {
+					Err(Error::Exec(
+						err @ (ExecError::PlannerUnsupported(_)
+						| ExecError::PlannerUnimplemented(_)),
+					)) => {
+						if let ExecError::PlannerUnimplemented(msg) = &err {
 							tracing::warn!("PlannerUnimplemented fallback in top-level LET: {msg}");
 						}
 						self.stack
@@ -860,7 +992,7 @@ impl Executor {
 				let result = match &stm.kind {
 					Some(kind) => res
 						.coerce_to_kind(kind)
-						.map_err(|e| Error::SetCoerce {
+						.map_err(|e| ExecError::SetCoerce {
 							name: stm.name.to_string(),
 							error: Box::new(e),
 						})
@@ -877,17 +1009,17 @@ impl Executor {
 				Ok(Value::None)
 			}
 			TopLevelExpr::Begin => {
-				return Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidStatement(
+				return Err(ControlFlow::Err(anyhow::Error::new(ExecError::InvalidStatement(
 					"Cannot BEGIN a transaction within a transaction".to_string(),
 				))));
 			}
 			TopLevelExpr::Commit => {
-				return Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidStatement(
+				return Err(ControlFlow::Err(anyhow::Error::new(ExecError::InvalidStatement(
 					"Cannot COMMIT without starting a transaction".to_string(),
 				))));
 			}
 			TopLevelExpr::Cancel => {
-				return Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidStatement(
+				return Err(ControlFlow::Err(anyhow::Error::new(ExecError::InvalidStatement(
 					"Cannot CANCEL without starting a transaction".to_string(),
 				))));
 			}
@@ -943,8 +1075,11 @@ impl Executor {
 						// exec_result is now FlowResult<Value>, propagate directly
 						exec_result
 					}
-					Err(err @ (Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_))) => {
-						if let Error::PlannerUnimplemented(msg) = &err {
+					Err(Error::Exec(
+						err @ (ExecError::PlannerUnsupported(_)
+						| ExecError::PlannerUnimplemented(_)),
+					)) => {
+						if let ExecError::PlannerUnimplemented(msg) = &err {
 							tracing::warn!("PlannerUnimplemented fallback in executor: {msg}");
 						}
 						// Fallback to existing compute path
@@ -966,10 +1101,10 @@ impl Executor {
 		match self.ctx.done(true)? {
 			None => res,
 			Some(Reason::Timedout(d)) => {
-				Err(ControlFlow::from(anyhow::anyhow!(Error::QueryTimedout(d))))
+				Err(ControlFlow::from(anyhow::anyhow!(EngineError::QueryTimedout(d.0))))
 			}
 			Some(Reason::Canceled) => {
-				Err(ControlFlow::from(anyhow::anyhow!(Error::QueryCancelled)))
+				Err(ControlFlow::from(anyhow::anyhow!(EngineError::QueryCancelled)))
 			}
 		}
 	}
@@ -985,10 +1120,10 @@ impl Executor {
 		match self.ctx.done(true)? {
 			None => {}
 			Some(Reason::Timedout(d)) => {
-				bail!(Error::QueryTimedout(d));
+				bail!(EngineError::QueryTimedout(d.0));
 			}
 			Some(Reason::Canceled) => {
-				bail!(Error::QueryCancelled);
+				bail!(EngineError::QueryCancelled);
 			}
 		}
 
@@ -1042,7 +1177,7 @@ impl Executor {
 					Ok(res) => res,
 					Err(_) => {
 						let _ = txn.cancel().await;
-						bail!(Error::TransactionTimedout(timeout.into()))
+						bail!(DatastoreError::TransactionTimedout(timeout.into()))
 					}
 				}
 			}
@@ -1069,7 +1204,7 @@ impl Executor {
 					if crate::kvs::is_retryable_transaction_conflict(&e) {
 						return Err(e);
 					}
-					bail!(Error::QueryNotExecuted {
+					bail!(DatastoreError::QueryNotExecuted {
 						message: e.to_string(),
 					});
 				}
@@ -1084,7 +1219,7 @@ impl Executor {
 			}
 			Err(ControlFlow::Continue) | Err(ControlFlow::Break) => {
 				let _ = txn.cancel().await;
-				bail!(Error::InvalidControlFlow)
+				bail!(ExecError::InvalidControlFlow)
 			}
 			Err(ControlFlow::Err(e)) => {
 				let _ = txn.cancel().await;
@@ -1132,7 +1267,7 @@ impl Executor {
 					return Ok(());
 				}
 
-				let kind = StatementType::from_top_level(&stmt);
+				let kind = statement_type_from_top_level(&stmt);
 				self.results.push(QueryResult {
 					time: Duration::ZERO,
 					result: Err(TypesError::query(
@@ -1194,7 +1329,7 @@ impl Executor {
 								crate::observe::error_class::TXN_TIMEOUT,
 							);
 						}
-						bail!(Error::TransactionTimedout(timeout.into()))
+						bail!(DatastoreError::TransactionTimedout(timeout.into()))
 					}
 				}
 			}
@@ -1254,7 +1389,7 @@ impl Executor {
 				while let Some(stmt) = stream.next().await {
 					yield_now!();
 					let stmt = stmt?;
-					let kind = StatementType::from_top_level(&stmt);
+					let kind = statement_type_from_top_level(&stmt);
 					match stmt {
 						TopLevelExpr::Commit => {
 							// After timeout/cancel the txn is already gone: COMMIT cannot succeed.
@@ -1328,7 +1463,7 @@ impl Executor {
 			// `StatementEvent` regardless of which control-flow branch the
 			// match below takes. The statement itself is moved into the
 			// match, so anything the observer needs must be derived here.
-			let statement_type = StatementType::from_top_level(&stmt);
+			let statement_type = statement_type_from_top_level(&stmt);
 			let statement_read_only = stmt.read_only();
 			let sql_text = kvs.observer().needs_statement_text().then(|| stmt.to_sql());
 
@@ -1567,7 +1702,7 @@ impl Executor {
 							Ok(value)
 						}
 						Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
-							Err(anyhow!(Error::InvalidControlFlow))
+							Err(anyhow!(ExecError::InvalidControlFlow))
 						}
 						Err(ControlFlow::Err(e)) => {
 							for res in &mut self.results[start_results..] {
@@ -1735,7 +1870,7 @@ impl Executor {
 			// matching `StatementEvent` regardless of which control-flow
 			// branch the result lands in (mirrors the cached helper
 			// pattern used in `execute_expr_stream`).
-			let statement_type = StatementType::from_top_level(&expr);
+			let statement_type = statement_type_from_top_level(&expr);
 			let statement_read_only = matches!(expr, TopLevelExpr::Use(_) | TopLevelExpr::Show(_))
 				|| matches!(
 					&expr,
@@ -1871,10 +2006,10 @@ impl Executor {
 					this.execute_option_statement(stmt)?;
 				}
 				Some(Err(e)) => {
-					bail!(Error::InvalidStatement(e.to_string()));
+					bail!(ExecError::InvalidStatement(e.to_string()));
 				}
 				_ => {
-					bail!(Error::InvalidStatement(
+					bail!(ExecError::InvalidStatement(
 						"Import requires `OPTION IMPORT;` as the first statement. \
 						 This disables events, live queries, field processing, and result \
 						 output for optimal import performance. To execute queries with \
@@ -1910,7 +2045,7 @@ impl Executor {
 			// customer values to an unauthenticated sink -- `StatementType`
 			// is a bounded enum and `to_sql` is only invoked when the
 			// installed observer explicitly opts in.
-			let statement_type = StatementType::from_top_level(&stmt);
+			let statement_type = statement_type_from_top_level(&stmt);
 			let statement_read_only = stmt.read_only();
 			let sql_text = kvs.observer().needs_statement_text().then(|| stmt.to_sql());
 			let start = Instant::now();
@@ -1918,7 +2053,7 @@ impl Executor {
 			match stmt {
 				TopLevelExpr::Option(stmt) => {
 					if skip_success_results && stmt.name.eq_ignore_ascii_case("IMPORT") {
-						bail!(Error::InvalidStatement(
+						bail!(ExecError::InvalidStatement(
 							"Cannot change OPTION IMPORT during an import stream. \
 						 Import mode is locked for the duration of the /import request."
 								.to_string()
@@ -2002,7 +2137,7 @@ impl Executor {
 					}
 				}
 				stmt => {
-					let query_type: QueryType = QueryType::for_toplevel_expr(&stmt);
+					let query_type: QueryType = query_type_for_toplevel_expr(&stmt);
 
 					// Install fresh per-statement counters so DML
 					// iterators can record affected rows independently of
@@ -2015,10 +2150,7 @@ impl Executor {
 						Some(counters.as_ref()),
 						result.as_ref().ok(),
 					);
-					let error_class = result
-						.as_ref()
-						.err()
-						.map(crate::observe::error_class::classify_anyhow_error);
+					let error_class = result.as_ref().err().map(classify_anyhow_error);
 					this.emit_statement_event_cached(
 						kvs,
 						statement_type,

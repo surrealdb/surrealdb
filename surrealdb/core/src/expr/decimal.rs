@@ -23,7 +23,7 @@ use fastnum::decimal::{Context, Sign};
 use fastnum::{D128, U128};
 use rust_decimal::Decimal;
 
-use crate::err::Error;
+use crate::expr::Error;
 
 /// Variable-length lexicographic encoding for D128 values that preserves sort
 /// order.

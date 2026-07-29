@@ -21,6 +21,7 @@ use futures::StreamExt;
 use surrealdb_types::ToSql;
 
 use crate::catalog::Distance;
+use crate::err::EngineError;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
@@ -227,7 +228,7 @@ impl ExecOperator for KnnTopK {
 			while let Some(batch_result) = input_stream.next().await {
 				if cancellation.is_cancelled() {
 					return Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(
-						crate::err::Error::QueryCancelled
+						EngineError::QueryCancelled
 					)));
 				}
 				let batch = match batch_result {

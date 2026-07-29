@@ -2,12 +2,11 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str::FromStr;
 
-use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
+use common::fmt::{Fmt, fmt_separated_by};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::err::Error;
+use crate::err::{EngineError, Error};
 use crate::expr::Kind;
-use crate::fmt::{Fmt, fmt_separated_by};
 use crate::syn;
 use crate::types::PublicKind;
 use crate::val::{Array, Object, Value};
@@ -184,9 +183,10 @@ impl FromStr for Path {
 				if let Some(c) = chars.next() {
 					scratch.push(c);
 				} else {
-					return Err(Error::Unreachable(
+					return Err(EngineError::Unreachable(
 						"Expected to find a character as we peeked it before".into(),
-					));
+					)
+					.into());
 				}
 			}
 
@@ -236,46 +236,6 @@ impl FromStr for Path {
 		Ok(Self(segments))
 	}
 }
-
-impl Revisioned for Path {
-	fn revision() -> u16 {
-		1
-	}
-}
-
-impl SerializeRevisioned for Path {
-	fn serialize_revisioned<W: std::io::Write>(
-		&self,
-		writer: &mut W,
-	) -> Result<(), revision::Error> {
-		SerializeRevisioned::serialize_revisioned(&self.to_string(), writer)
-	}
-}
-
-impl DeserializeRevisioned for Path {
-	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
-		let path: String = DeserializeRevisioned::deserialize_revisioned(reader)?;
-		path.parse().map_err(|err: Error| revision::Error::Conversion(err.to_string()))
-	}
-}
-
-impl revision::SkipRevisioned for Path {
-	fn skip_revisioned<R: std::io::Read>(reader: &mut R) -> Result<(), revision::Error> {
-		<String as revision::SkipRevisioned>::skip_revisioned(reader)
-	}
-}
-
-impl revision::WalkRevisioned for Path {
-	type Walker<'r, R: revision::BorrowedReader + 'r> = revision::LeafWalker<'r, Path, R>;
-
-	fn walk_revisioned<'r, R: revision::BorrowedReader>(
-		reader: &'r mut R,
-	) -> Result<Self::Walker<'r, R>, revision::Error> {
-		Ok(revision::LeafWalker::new(reader))
-	}
-}
-
-impl revision::LengthPrefixedBytes for Path {}
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Segment {
@@ -338,27 +298,5 @@ impl ToSql for Segment {
 			}
 			Self::Rest(v) => write_sql!(f, fmt, "*{v}"),
 		}
-	}
-}
-
-#[cfg(test)]
-mod length_prefixed_bytes_tests {
-	use std::str::FromStr;
-
-	use revision::{SerializeRevisioned, WalkRevisioned};
-
-	use super::Path;
-
-	#[test]
-	fn path_with_bytes_matches_serialize() {
-		let path = Path::from_str("/hello/world").unwrap();
-		let mut bytes = Vec::new();
-		path.serialize_revisioned(&mut bytes).unwrap();
-		let wire_text = path.to_string();
-		let mut r = bytes.as_slice();
-		let walker = Path::walk_revisioned(&mut r).unwrap();
-		let observed = walker.with_bytes(|raw| raw.to_vec()).unwrap();
-		assert_eq!(observed.as_slice(), wire_text.as_bytes());
-		assert!(r.is_empty());
 	}
 }

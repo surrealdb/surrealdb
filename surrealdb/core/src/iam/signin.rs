@@ -23,14 +23,15 @@ use crate::catalog::providers::{
 };
 use crate::catalog::{DatabaseDefinition, NamespaceDefinition};
 use crate::dbs::Session;
-use crate::err::Error;
+use crate::err::{Error, exec_error};
+use crate::exec::Error as ExecError;
 use crate::expr::access_type;
 use crate::expr::statements::access;
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::{Claims, HEADER, Token};
-use crate::iam::{self, Auth, algorithm_to_jwt_algorithm};
-use crate::kvs::Datastore;
+use crate::iam::{self, Auth, Error as AuthError, algorithm_to_jwt_algorithm};
 use crate::kvs::TransactionType::*;
+use crate::kvs::{Datastore, is_retryable_transaction_conflict};
 use crate::types::{PublicValue, PublicVariables};
 use crate::val::{Datetime, Value};
 
@@ -125,7 +126,7 @@ pub async fn signin(
 					// Attempt to signin to database
 					super::signin::db_user(kvs, session, ns, db, user, pass).await
 				}
-				_ => Err(anyhow::Error::new(Error::MissingUserOrPass)),
+				_ => Err(anyhow::Error::new(AuthError::MissingUserOrPass)),
 			}
 		}
 		// NS signin with access method
@@ -152,7 +153,7 @@ pub async fn signin(
 					// Attempt to signin to namespace
 					super::signin::ns_user(kvs, session, ns, user, pass).await
 				}
-				_ => Err(anyhow::Error::new(Error::MissingUserOrPass)),
+				_ => Err(anyhow::Error::new(AuthError::MissingUserOrPass)),
 			}
 		}
 		// ROOT signin with access method
@@ -177,10 +178,10 @@ pub async fn signin(
 					// Attempt to signin to root
 					super::signin::root_user(kvs, session, user, pass).await
 				}
-				_ => Err(anyhow::Error::new(Error::MissingUserOrPass)),
+				_ => Err(anyhow::Error::new(AuthError::MissingUserOrPass)),
 			}
 		}
-		_ => Err(anyhow::Error::new(Error::NoSigninTarget)),
+		_ => Err(anyhow::Error::new(AuthError::NoSigninTarget)),
 	}
 }
 
@@ -267,7 +268,7 @@ pub async fn db_access(
 		catch!(tx, tx.get_db_access(db_def.namespace_id, db_def.database_id, &ac, None).await)
 	else {
 		let _ = tx.cancel().await;
-		bail!(Error::AccessNotFound);
+		bail!(AuthError::AccessNotFound);
 	};
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
@@ -281,7 +282,7 @@ pub async fn db_access(
 			// Check if the record access method supports issuing tokens
 			let iss = match &at.jwt.issue {
 				Some(iss) => iss.clone(),
-				_ => bail!(Error::AccessMethodMismatch),
+				_ => bail!(AuthError::AccessMethodMismatch),
 			};
 			// Check if a refresh token is defined
 			if let Some(bearer) = &at.bearer {
@@ -295,12 +296,12 @@ pub async fn db_access(
 						Some(&db_def),
 						av,
 						bearer,
-						key.as_string().ok_or_else(|| Error::InvalidAuth)?.clone(),
+						key.as_string().ok_or(AuthError::InvalidAuth)?.clone(),
 					)
 					.await;
 				}
 			};
-			match &at.signin {
+			match &av.signin {
 				// This record access allows signin
 				Some(val) => {
 					// Setup the system session for finding the signin record
@@ -409,51 +410,52 @@ pub async fn db_access(
 											},
 											None => Token::Access(token),
 										}),
-										_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
+										_ => Err(anyhow::Error::new(AuthError::TokenMakingFailed)),
 									}
 								}
-								_ => Err(anyhow::Error::new(Error::NoRecordFound)),
+								_ => Err(anyhow::Error::new(AuthError::NoRecordFound)),
 							}
 						}
-						Err(e) => match e.downcast_ref() {
-							// If the SIGNIN clause throws a specific error, authentication
-							// fails with that error
-							Some(Error::Thrown(_)) => Err(e),
+						// If the SIGNIN clause throws a specific error, authentication
+						// fails with that error
+						Err(e) if matches!(exec_error(&e), Some(ExecError::Thrown(_))) => Err(e),
+						Err(e) => {
 							// If the SIGNIN clause failed due to an unexpected error, be
 							// more specific This allows clients to handle these
 							// errors, which may be retryable
-							Some(Error::Kvs(kvs_err)) if kvs_err.is_retryable() => {
+							if is_retryable_transaction_conflict(&e) {
 								debug!(
 									"Unexpected error found while executing a SIGNIN clause: {e}"
 								);
-								Err(anyhow::Error::new(Error::UnexpectedAuth))
-							}
-							// Otherwise, return a generic error unless it should be
-							// forwarded
-							_ => {
+								Err(anyhow::Error::new(AuthError::UnexpectedAuth))
+							} else {
+								// Otherwise, return a generic error unless it should be
+								// forwarded
 								debug!("Record user signin query failed: {e}");
 								if kvs.config().insecure_forward_access_errors {
 									Err(e)
 								} else {
-									Err(anyhow::Error::new(Error::AccessRecordSigninQueryFailed))
+									Err(anyhow::Error::new(
+										AuthError::AccessRecordSigninQueryFailed,
+									))
 								}
 							}
-						},
+						}
 					}
 				}
-				_ => Err(anyhow::Error::new(Error::AccessRecordNoSignin)),
+				_ => Err(anyhow::Error::new(AuthError::AccessRecordNoSignin)),
 			}
 		}
 		catalog::AccessType::Bearer(at) => {
 			// Extract key identifier and key from the provided variables.
 			let key = match vars.get("key") {
-				Some(key) => key.as_string().ok_or_else(|| Error::InvalidAuth)?.clone(),
-				None => return Err(anyhow::Error::new(Error::AccessBearerMissingKey)),
+				Some(key) => key.as_string().ok_or(AuthError::InvalidAuth)?.clone(),
+				None => return Err(anyhow::Error::new(AuthError::AccessBearerMissingKey)),
 			};
 
 			signin_bearer(kvs, session, Some(&ns_def), Some(&db_def), av, &at, key).await
 		}
-		_ => Err(anyhow::Error::new(Error::AccessMethodMismatch)),
+		_ => Err(anyhow::Error::new(AuthError::AccessMethodMismatch)),
 	}
 }
 
@@ -512,7 +514,7 @@ pub async fn db_user(
 			match enc {
 				// The auth token was created successfully
 				Ok(tk) => Ok(Token::Access(tk)),
-				_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
+				_ => Err(anyhow::Error::new(AuthError::TokenMakingFailed)),
 			}
 		}
 		// The password did not verify
@@ -520,7 +522,7 @@ pub async fn db_user(
 			debug!(
 				"Failed to verify signin credentials for user `{user}` in database `{ns}/{db}`: {e}"
 			);
-			Err(anyhow::Error::new(Error::InvalidAuth))
+			Err(anyhow::Error::new(AuthError::InvalidAuth))
 		}
 	}
 }
@@ -538,7 +540,7 @@ pub async fn ns_access(
 	// Fetch the specified access method from storage
 	let Some(av) = catch!(tx, tx.get_ns_access(ns_def.namespace_id, &ac, None).await) else {
 		let _ = tx.cancel().await;
-		bail!(Error::AccessNotFound);
+		bail!(AuthError::AccessNotFound);
 	};
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
@@ -548,13 +550,13 @@ pub async fn ns_access(
 		catalog::AccessType::Bearer(at) => {
 			// Extract key identifier and key from the provided variables.
 			let key = match vars.get("key") {
-				Some(key) => key.as_string().ok_or_else(|| Error::InvalidAuth)?.clone(),
-				None => bail!(Error::AccessBearerMissingKey),
+				Some(key) => key.as_string().ok_or(AuthError::InvalidAuth)?.clone(),
+				None => bail!(AuthError::AccessBearerMissingKey),
 			};
 
 			signin_bearer(kvs, session, Some(&ns_def), None, av, &at, key).await
 		}
-		_ => Err(anyhow::Error::new(Error::AccessMethodMismatch)),
+		_ => Err(anyhow::Error::new(AuthError::AccessMethodMismatch)),
 	}
 }
 
@@ -600,7 +602,7 @@ pub async fn ns_user(
 			match enc {
 				// The auth token was created successfully
 				Ok(tk) => Ok(Token::Access(tk)),
-				_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
+				_ => Err(anyhow::Error::new(AuthError::TokenMakingFailed)),
 			}
 		}
 		// The password did not verify
@@ -608,7 +610,7 @@ pub async fn ns_user(
 			debug!(
 				"Failed to verify signin credentials for user `{user}` in namespace `{ns}`: {e}"
 			);
-			Err(anyhow::Error::new(Error::InvalidAuth))
+			Err(anyhow::Error::new(AuthError::InvalidAuth))
 		}
 	}
 }
@@ -651,13 +653,13 @@ pub async fn root_user(
 			match enc {
 				// The auth token was created successfully
 				Ok(tk) => Ok(Token::Access(tk)),
-				_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
+				_ => Err(anyhow::Error::new(AuthError::TokenMakingFailed)),
 			}
 		}
 		// The password did not verify
 		Err(e) => {
 			debug!("Failed to verify signin credentials for user `{user}` in root: {e}");
-			Err(anyhow::Error::new(Error::InvalidAuth))
+			Err(anyhow::Error::new(AuthError::InvalidAuth))
 		}
 	}
 }
@@ -673,7 +675,7 @@ pub async fn root_access(
 	// Fetch the specified access method from storage
 	let Some(av) = catch!(tx, tx.get_root_access(&ac, None).await) else {
 		let _ = tx.cancel().await;
-		bail!(Error::AccessNotFound);
+		bail!(AuthError::AccessNotFound);
 	};
 
 	// Ensure that the transaction is cancelled
@@ -685,12 +687,12 @@ pub async fn root_access(
 			// Extract key identifier and key from the provided variables.
 			let key = match vars.get("key") {
 				Some(PublicValue::String(key)) => key.clone(),
-				_ => return Err(anyhow::Error::new(Error::AccessBearerMissingKey)),
+				_ => return Err(anyhow::Error::new(AuthError::AccessBearerMissingKey)),
 			};
 
 			signin_bearer(kvs, session, None, None, av, &at, key).await
 		}
-		_ => Err(anyhow::Error::new(Error::AccessMethodMismatch)),
+		_ => Err(anyhow::Error::new(AuthError::AccessMethodMismatch)),
 	}
 }
 
@@ -731,7 +733,7 @@ pub async fn root_access(
 /// - The grant doesn't exist, is revoked, or is expired
 /// - The bearer token doesn't match the stored grant
 /// - User roles cannot be retrieved (for system user grants)
-pub async fn signin_bearer(
+pub(crate) async fn signin_bearer(
 	kvs: &Datastore,
 	session: &mut Session,
 	ns: Option<&NamespaceDefinition>,
@@ -743,7 +745,7 @@ pub async fn signin_bearer(
 	// Check if the bearer access method supports issuing tokens.
 	let iss = match &at.jwt.issue {
 		Some(iss) => iss.clone(),
-		_ => bail!(Error::AccessMethodMismatch),
+		_ => bail!(AuthError::AccessMethodMismatch),
 	};
 	// Extract key identifier and key from the provided key.
 	let kid = validate_grant_bearer(&key)?;
@@ -764,7 +766,7 @@ pub async fn signin_bearer(
 		(None, None) => catch!(tx, tx.get_root_access_grant(&av.name, &kid, None).await),
 		(None, Some(_)) => {
 			let _ = tx.cancel().await;
-			bail!(Error::NsEmpty)
+			bail!(ExecError::NsEmpty)
 		}
 	};
 
@@ -772,7 +774,7 @@ pub async fn signin_bearer(
 		Some(gr) => gr,
 		None => {
 			let _ = tx.cancel().await;
-			bail!(Error::InvalidAuth);
+			bail!(AuthError::InvalidAuth);
 		}
 	};
 
@@ -798,7 +800,7 @@ pub async fn signin_bearer(
 								ns.name, db.name, e
 							);
 							// Return opaque error to avoid leaking grant subject existence.
-							anyhow::Error::new(Error::InvalidAuth)
+							anyhow::Error::new(AuthError::InvalidAuth)
 						}
 					)
 				);
@@ -806,7 +808,7 @@ pub async fn signin_bearer(
 					Some(v) => v,
 					None => {
 						let _ = tx.cancel().await;
-						bail!(Error::InvalidAuth);
+						bail!(AuthError::InvalidAuth);
 					}
 				}
 			}
@@ -819,14 +821,14 @@ pub async fn signin_bearer(
 							ns.name, e
 						);
 						// Return opaque error to avoid leaking grant subject existence.
-						anyhow::Error::new(Error::InvalidAuth)
+						anyhow::Error::new(AuthError::InvalidAuth)
 					})
 				);
 				match res {
 					Some(v) => v,
 					None => {
 						let _ = tx.cancel().await;
-						bail!(Error::InvalidAuth);
+						bail!(AuthError::InvalidAuth);
 					}
 				}
 			}
@@ -836,20 +838,20 @@ pub async fn signin_bearer(
 					tx.get_root_user(user, None).await.map_err(|e| {
 						debug!("Error retrieving user for bearer access to root: {e}");
 						// Return opaque error to avoid leaking grant subject existence.
-						anyhow::Error::new(Error::InvalidAuth)
+						anyhow::Error::new(AuthError::InvalidAuth)
 					})
 				);
 				match res {
 					Some(v) => v,
 					None => {
 						let _ = tx.cancel().await;
-						bail!(Error::InvalidAuth);
+						bail!(AuthError::InvalidAuth);
 					}
 				}
 			}
 			(None, Some(_)) => {
 				let _ = tx.cancel().await;
-				bail!(Error::NsEmpty)
+				bail!(ExecError::NsEmpty)
 			}
 		};
 		// Ensure that the transaction is cancelled.
@@ -892,7 +894,7 @@ pub async fn signin_bearer(
 				Session::for_level(Level::Namespace(ns.name.to_string()), Role::Editor)
 			}
 			(None, None) => Session::editor(),
-			(None, Some(_)) => bail!(Error::NsEmpty),
+			(None, Some(_)) => bail!(ExecError::NsEmpty),
 		};
 		sess.tk = Some(
 			crate::val::convert_value_to_public_value(claims.clone().into_claims_object().into())
@@ -931,14 +933,14 @@ pub async fn signin_bearer(
 						debug!(
 							"Invalid attempt to authenticate as a record without a namespace and database"
 						);
-						bail!(Error::InvalidAuth);
+						bail!(AuthError::InvalidAuth);
 					}
 				}
 				catalog::Subject::User(_) => {
 					debug!(
 						"Invalid attempt to authenticatea as a system user with a refresh token"
 					);
-					bail!(Error::InvalidAuth);
+					bail!(AuthError::InvalidAuth);
 				}
 			}
 		}
@@ -979,7 +981,7 @@ pub async fn signin_bearer(
 					}
 					(Some(ns), None) => Level::Namespace(ns.name.to_string()),
 					(None, None) => Level::Root,
-					(None, Some(_)) => bail!(Error::NsEmpty),
+					(None, Some(_)) => bail!(ExecError::NsEmpty),
 				},
 			)));
 		}
@@ -993,7 +995,7 @@ pub async fn signin_bearer(
 					debug!(
 						"Invalid attempt to authenticate as a record without a namespace and database"
 					);
-					bail!(Error::InvalidAuth);
+					bail!(AuthError::InvalidAuth);
 				},
 			)));
 			session.rd = Some(
@@ -1011,7 +1013,7 @@ pub async fn signin_bearer(
 			},
 			None => Token::Access(token),
 		}),
-		_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
+		_ => Err(anyhow::Error::new(AuthError::TokenMakingFailed)),
 	}
 }
 
@@ -1055,17 +1057,17 @@ pub async fn signin_bearer(
 /// ```
 pub fn validate_grant_bearer(key: &str) -> Result<String> {
 	let parts: Vec<&str> = key.split("-").collect();
-	ensure!(parts.len() == 4, Error::AccessGrantBearerInvalid);
+	ensure!(parts.len() == 4, AuthError::AccessGrantBearerInvalid);
 	// Check that the prefix type exists.
 	access_type::BearerAccessType::from_str(parts[1])?;
 	// Retrieve the key identifier from the provided key.
 	let kid = parts[2];
 	// Check the length of the key identifier.
-	ensure!(kid.len() == access::GRANT_BEARER_ID_LENGTH, Error::AccessGrantBearerInvalid);
+	ensure!(kid.len() == access::GRANT_BEARER_ID_LENGTH, AuthError::AccessGrantBearerInvalid);
 	// Retrieve the key from the provided key.
 	let key = parts[3];
 	// Check the length of the key.
-	ensure!(key.len() == access::GRANT_BEARER_KEY_LENGTH, Error::AccessGrantBearerInvalid);
+	ensure!(key.len() == access::GRANT_BEARER_KEY_LENGTH, AuthError::AccessGrantBearerInvalid);
 
 	Ok(kid.to_string())
 }
@@ -1083,12 +1085,12 @@ pub(crate) fn verify_grant_bearer(
 				// Return opaque error to avoid leaking revocation status.
 				debug!("Bearer access grant `{}` for method `{}` is expired", gr.id, gr.ac);
 
-				bail!(Error::InvalidAuth);
+				bail!(AuthError::InvalidAuth);
 			}
 		}
 		(_, Some(_)) => {
 			debug!("Bearer access grant `{}` for method `{}` is revoked", gr.id, gr.ac);
-			bail!(Error::InvalidAuth);
+			bail!(AuthError::InvalidAuth);
 		}
 	}
 	// Check if the provided key matches the bearer key in the grant.
@@ -1110,10 +1112,10 @@ pub(crate) fn verify_grant_bearer(
 				Ok(bearer)
 			} else {
 				debug!("Bearer access grant `{}` for method `{}` is invalid", gr.id, gr.ac);
-				Err(anyhow::Error::new(Error::InvalidAuth))
+				Err(anyhow::Error::new(AuthError::InvalidAuth))
 			}
 		}
-		_ => Err(anyhow::Error::new(Error::AccessMethodMismatch)),
+		_ => Err(anyhow::Error::new(AuthError::AccessMethodMismatch)),
 	}
 }
 
@@ -1456,7 +1458,7 @@ mod tests {
 
 			let e = res.unwrap_err();
 			match e.downcast().expect("Unexpected error kind") {
-				Error::InvalidAuth => {}
+				AuthError::InvalidAuth => {}
 				e => panic!("Unexpected error, expected InvalidAuth found {e}"),
 			}
 		}
@@ -1530,7 +1532,7 @@ mod tests {
 			// Should fail due to the refresh token being expired
 			let e = res.unwrap_err();
 			match e.downcast().expect("Unexpected error kind") {
-				Error::InvalidAuth => {}
+				AuthError::InvalidAuth => {}
 				e => panic!("Unexpected error, expected InvalidAuth found {e}"),
 			}
 		}
@@ -1849,6 +1851,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							Role::Viewer => "VIEWER",
 							Role::Editor => "EDITOR",
 							Role::Owner => "OWNER",
+							_ => unreachable!("unknown role"),
 						})
 						.collect();
 					format!("ROLES {}", roles.join(", "))
@@ -2205,7 +2208,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			let e = res.unwrap_err();
 			match e.downcast().expect("Unexpected error kind") {
-				Error::Thrown(e) => assert_eq!(e, "This user is not enabled"),
+				ExecError::Thrown(e) => assert_eq!(e, "This user is not enabled"),
 				e => panic!("Unexpected error, expected Thrown found {e:?}"),
 			}
 		}
@@ -2252,7 +2255,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			let e = res.unwrap_err();
 			match e.downcast().expect("Unexpected error kind") {
-				Error::InvalidAuth => {}
+				AuthError::InvalidAuth => {}
 				e => panic!("Unexpected error, expected InvalidAuth found {e}"),
 			}
 		}
@@ -2340,11 +2343,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					e1, e2
 				),
 				(Err(e1), Ok(_)) => match e1.downcast().expect("Unexpected error kind") {
-					Error::InvalidAuth => {}
+					AuthError::InvalidAuth => {}
 					e => panic!("Unexpected error, expected InvalidAuth found {e}"),
 				},
 				(Ok(_), Err(e2)) => match e2.downcast().expect("Unexpected error kind") {
-					Error::InvalidAuth => {}
+					AuthError::InvalidAuth => {}
 					e => panic!("Unexpected error, expected InvalidAuth found {e}"),
 				},
 			}
@@ -2422,11 +2425,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					e1, e2
 				),
 				(Err(e1), Ok(_)) => match e1.downcast().expect("Unexpected error kind") {
-					Error::InvalidAuth => {}
+					AuthError::InvalidAuth => {}
 					e => panic!("Unexpected error, expected InvalidAuth found {e:?}"),
 				},
 				(Ok(_), Err(e2)) => match e2.downcast().expect("Unexpected error kind") {
-					Error::InvalidAuth => {}
+					AuthError::InvalidAuth => {}
 					e => panic!("Unexpected error, expected InvalidAuth found {e:?}"),
 				},
 			}
@@ -2802,7 +2805,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 				let e = res.unwrap_err();
 				match e.downcast().expect("Unexpected error kind") {
-					Error::Thrown(e) => assert_eq!(e, "Test authentication error"),
+					ExecError::Thrown(e) => assert_eq!(e, "Test authentication error"),
 					e => panic!("Unexpected error, expected Thrown found {e:?}"),
 				}
 			}
@@ -2877,7 +2880,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 				let e = res.unwrap_err();
 				match e.downcast().expect("Unexpected error kind") {
-					Error::InvalidAuth => {}
+					AuthError::InvalidAuth => {}
 					e => panic!("Unexpected error, expected InvalidAuth found {e}"),
 				}
 			}
@@ -2961,7 +2964,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 				let e = res.unwrap_err();
 				match e.downcast().expect("Unexpected error kind") {
-					Error::InvalidAuth => {}
+					AuthError::InvalidAuth => {}
 					e => panic!("Unexpected error, expected InvalidAuth found {e}"),
 				}
 			}
@@ -3038,7 +3041,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 				let e = res.unwrap_err();
 				match e.downcast().expect("Unexpected error kind") {
-					Error::AccessNotFound => {}
+					AuthError::AccessNotFound => {}
 					e => panic!("Unexpected error, expected AccessNotFound found {e}"),
 				}
 			}
@@ -3112,7 +3115,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 				let e = res.unwrap_err();
 				match e.downcast().expect("Unexpected error kind") {
-					Error::AccessBearerMissingKey => {}
+					AuthError::AccessBearerMissingKey => {}
 					e => panic!("Unexpected error, expected AccessBearerMissingKey found {e}"),
 				}
 			}
@@ -3189,7 +3192,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 				let e = res.unwrap_err();
 				match e.downcast().expect("Unexpected error kind") {
-					Error::AccessGrantBearerInvalid => {}
+					AuthError::AccessGrantBearerInvalid => {}
 					e => panic!("Unexpected error, expected AccessGrantBearerInvalid found {e}"),
 				}
 			}
@@ -3266,7 +3269,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 				let e = res.unwrap_err();
 				match e.downcast().expect("Unexpected error kind") {
-					Error::AccessGrantBearerInvalid => {}
+					AuthError::AccessGrantBearerInvalid => {}
 					e => panic!("Unexpected error, expected AccessGrantBearerInvalid found {e}"),
 				}
 			}
@@ -3343,7 +3346,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 				let e = res.unwrap_err();
 				match e.downcast().expect("Unexpected error kind") {
-					Error::InvalidAuth => {}
+					AuthError::InvalidAuth => {}
 					e => panic!("Unexpected error, expected InvalidAuth found {e}"),
 				}
 			}
@@ -3420,7 +3423,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 				let e = res.unwrap_err();
 				match e.downcast().expect("Unexpected error kind") {
-					Error::InvalidAuth => {}
+					AuthError::InvalidAuth => {}
 					e => panic!("Unexpected error, expected InvalidAuth found {e}"),
 				}
 			}
@@ -3759,7 +3762,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			let e = res.unwrap_err();
 			match e.downcast().expect("Unexpected error kind") {
-				Error::Thrown(e) => assert_eq!(e, "Test authentication error"),
+				ExecError::Thrown(e) => assert_eq!(e, "Test authentication error"),
 				e => panic!("Unexpected error, expected Thrown found {e:?}"),
 			}
 		}
@@ -3814,7 +3817,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			let e = res.unwrap_err();
 			match e.downcast().expect("Unexpected error kind") {
-				Error::InvalidAuth => {}
+				AuthError::InvalidAuth => {}
 				e => panic!("Unexpected error, expected InvalidAuth found {e}"),
 			}
 		}
@@ -3874,7 +3877,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			let e = res.unwrap_err();
 			match e.downcast().expect("Unexpected error kind") {
-				Error::InvalidAuth => {}
+				AuthError::InvalidAuth => {}
 				e => panic!("Unexpected error, expected InvalidAuth found {e}"),
 			}
 		}
@@ -3929,7 +3932,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			let e = res.unwrap_err();
 			match e.downcast().expect("Unexpected error kind") {
-				Error::AccessNotFound => {}
+				AuthError::AccessNotFound => {}
 				e => panic!("Unexpected error, expected AccessNotFound found {e}"),
 			}
 		}
@@ -3982,7 +3985,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			let e = res.unwrap_err();
 			match e.downcast().expect("Unexpected error kind") {
-				Error::AccessBearerMissingKey => {}
+				AuthError::AccessBearerMissingKey => {}
 				e => panic!("Unexpected error, expected AccessBearerMissingKey found {e}"),
 			}
 		}
@@ -4039,7 +4042,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			let e = res.unwrap_err();
 			match e.downcast().expect("Unexpected error kind") {
-				Error::AccessGrantBearerInvalid => {}
+				AuthError::AccessGrantBearerInvalid => {}
 				e => panic!("Unexpected error, expected AccessGrantBearerInvalid found {e}"),
 			}
 		}
@@ -4096,7 +4099,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			let e = res.unwrap_err();
 			match e.downcast().expect("Unexpected error kind") {
-				Error::AccessGrantBearerInvalid => {}
+				AuthError::AccessGrantBearerInvalid => {}
 				e => panic!("Unexpected error, expected AccessGrantBearerInvalid found {e}"),
 			}
 		}
@@ -4153,7 +4156,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			let e = res.unwrap_err();
 			match e.downcast().expect("Unexpected error kind") {
-				Error::InvalidAuth => {}
+				AuthError::InvalidAuth => {}
 				e => panic!("Unexpected error, expected InvalidAuth found {e}"),
 			}
 		}
@@ -4210,7 +4213,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			let e = res.unwrap_err();
 			match e.downcast().expect("Unexpected error kind") {
-				Error::InvalidAuth => {}
+				AuthError::InvalidAuth => {}
 				e => panic!("Unexpected error, expected InvalidAuth found {e}"),
 			}
 		}
@@ -4268,7 +4271,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 	#[tokio::test]
 	async fn test_signin_nonexistent_role() {
-		use crate::iam::Error as IamError;
+		use crate::iam::PolicyError;
 		use crate::sql::Base;
 		use crate::sql::statements::define::{DefineStatement, DefineUserStatement};
 		let test_levels = vec![
@@ -4360,8 +4363,10 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			let e = res.unwrap_err();
 			match e.downcast().expect("Unexpected error kind") {
-				Error::IamError(IamError::InvalidRole(_)) => {}
-				e => panic!("Unexpected error, expected IamError(InvalidRole) found {e}"),
+				Error::IamError(PolicyError::InvalidRole(_)) => {}
+				e => panic!(
+					"Unexpected error, expected IamError(PolicyError::InvalidRole) found {e}"
+				),
 			}
 		}
 	}

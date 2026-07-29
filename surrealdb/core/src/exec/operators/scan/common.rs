@@ -146,7 +146,7 @@ pub(crate) async fn resolve_record_batch(
 	version: Option<u64>,
 	cache_policy: CachePolicy,
 	perm_cache: &mut std::collections::HashMap<
-		crate::val::TableName,
+		surrealdb_strand::TableName,
 		crate::exec::permission::PhysicalPermission,
 	>,
 ) -> Result<Vec<Value>, ControlFlow> {

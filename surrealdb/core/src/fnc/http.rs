@@ -2,17 +2,20 @@ use anyhow::Result;
 
 use super::args::Optional;
 use crate::ctx::FrozenContext;
-use crate::err::Error;
+#[cfg(not(feature = "http"))]
+use crate::dbs::capabilities::Error as CapabilitiesError;
+#[cfg(feature = "http")]
+use crate::expr::Error as ExprError;
 use crate::val::Value;
 
 #[cfg(not(feature = "http"))]
 pub async fn head(_: &FrozenContext, (_, _): (Value, Optional<Value>)) -> Result<Value> {
-	anyhow::bail!(Error::HttpDisabled)
+	anyhow::bail!(CapabilitiesError::HttpDisabled)
 }
 
 #[cfg(not(feature = "http"))]
 pub async fn get(_: &FrozenContext, (_, _): (Value, Optional<Value>)) -> Result<Value> {
-	anyhow::bail!(Error::HttpDisabled)
+	anyhow::bail!(CapabilitiesError::HttpDisabled)
 }
 
 #[cfg(not(feature = "http"))]
@@ -20,7 +23,7 @@ pub async fn put(
 	_: &FrozenContext,
 	(_, _, _): (Value, Optional<Value>, Optional<Value>),
 ) -> Result<Value> {
-	anyhow::bail!(Error::HttpDisabled)
+	anyhow::bail!(CapabilitiesError::HttpDisabled)
 }
 
 #[cfg(not(feature = "http"))]
@@ -28,7 +31,7 @@ pub async fn post(
 	_: &FrozenContext,
 	(_, _, _): (Value, Optional<Value>, Optional<Value>),
 ) -> Result<Value> {
-	anyhow::bail!(Error::HttpDisabled)
+	anyhow::bail!(CapabilitiesError::HttpDisabled)
 }
 
 #[cfg(not(feature = "http"))]
@@ -36,12 +39,12 @@ pub async fn patch(
 	_: &FrozenContext,
 	(_, _, _): (Value, Optional<Value>, Optional<Value>),
 ) -> Result<Value> {
-	anyhow::bail!(Error::HttpDisabled)
+	anyhow::bail!(CapabilitiesError::HttpDisabled)
 }
 
 #[cfg(not(feature = "http"))]
 pub async fn delete(_: &FrozenContext, (_, _): (Value, Optional<Value>)) -> Result<Value> {
-	anyhow::bail!(Error::HttpDisabled)
+	anyhow::bail!(CapabilitiesError::HttpDisabled)
 }
 
 #[cfg(feature = "http")]
@@ -51,7 +54,7 @@ fn try_as_uri(fn_name: &str, value: Value) -> Result<String> {
 		Value::String(uri) if crate::fnc::util::http::uri_is_valid(uri.as_str()) => {
 			Ok(uri.into_string())
 		}
-		_ => Err(anyhow::Error::new(Error::InvalidFunctionArguments {
+		_ => Err(anyhow::Error::new(ExprError::InvalidFunctionArguments {
 			name: fn_name.to_owned(),
 			// Assumption is that URI is first argument.
 			message: String::from("The first argument should be a string containing a valid URI."),
@@ -68,7 +71,7 @@ fn try_as_opts(
 	match value {
 		Some(Value::Object(opts)) => Ok(Some(opts)),
 		None => Ok(None),
-		Some(_) => Err(anyhow::Error::new(Error::InvalidFunctionArguments {
+		Some(_) => Err(anyhow::Error::new(ExprError::InvalidFunctionArguments {
 			name: fn_name.to_owned(),
 			message: error_message.to_owned(),
 		})),

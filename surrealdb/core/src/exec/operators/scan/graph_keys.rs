@@ -112,7 +112,7 @@ pub(crate) async fn compute_graph_ranges(
 					tb: Cow::Borrowed(&rid.table),
 					id: Cow::Borrowed(&rid.key),
 					dir,
-					foreign_table: Cow::Borrowed(&spec.table),
+					foreign_table: Cow::Borrowed(spec.table.as_str()),
 				}
 				.encode_bound()?,
 			};
@@ -160,7 +160,7 @@ pub(crate) async fn compute_graph_ranges(
 					tb: Cow::Borrowed(&rid.table),
 					id: Cow::Borrowed(&rid.key),
 					dir,
-					foreign_table: Cow::Borrowed(&spec.table),
+					foreign_table: Cow::Borrowed(spec.table.as_str()),
 				}
 				.encode_bound()?
 				.next_neighbour_expect(),

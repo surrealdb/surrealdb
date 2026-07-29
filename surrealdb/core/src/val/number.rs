@@ -34,7 +34,7 @@ use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql, fmt_non_finite_f64, write_sql};
 
 use super::IndexFormat;
-use crate::err::Error;
+use crate::expr::Error;
 use crate::expr::decimal::DecimalLexEncoder;
 use crate::fnc::util::math::ToFloat;
 use crate::val::{TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
@@ -1257,32 +1257,12 @@ impl<'de> BorrowDecode<'de, IndexFormat> for Number {
 	}
 }
 
-/// A trait to extend the Decimal type with additional functionality.
-pub trait DecimalExt {
-	/// Converts a string to a Decimal, normalizing it in the process.
-	///
-	/// This method is a convenience wrapper around
-	/// `rust_decimal::Decimal::from_str` which can parse a string into a
-	/// Decimal and normalize it. If the value has higher precision than the
-	/// Decimal type can handle, it will be rounded to the
-	/// nearest representable value.
-	fn from_str_normalized(s: &str) -> Result<Self, rust_decimal::Error>
-	where
-		Self: Sized;
-}
-
-impl DecimalExt for Decimal {
-	fn from_str_normalized(s: &str) -> Result<Decimal, rust_decimal::Error> {
-		#[allow(clippy::disallowed_methods)]
-		Ok(Decimal::from_str(s)?.normalize())
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use std::cmp::Ordering;
 
 	use ahash::HashSet;
+	use common::decimal::DecimalExt;
 	use rand::Rng;
 	use rand::seq::SliceRandom;
 	use rust_decimal::Decimal;

@@ -9,7 +9,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::exec::function::MethodDescriptor;
 use crate::exec::physical_expr::function::validate_return;
 use crate::exec::physical_expr::{BlockPhysicalExpr, EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, BoxFut, CombineAccessModes, ContextLevel};
+use crate::exec::{AccessMode, BoxFut, CombineAccessModes, ContextLevel, Error as ExecError};
 use crate::expr::FlowResult;
 use crate::val::{Closure, Value};
 
@@ -70,12 +70,12 @@ impl PhysicalExpr for MethodPart {
 			match result {
 				Ok(v) => Ok(v),
 				Err(e) => {
-					if let Some(crate::err::Error::InvalidFunctionArguments {
+					if let Some(crate::expr::Error::InvalidFunctionArguments {
 						message,
 						..
-					}) = e.downcast_ref::<crate::err::Error>()
+					}) = e.downcast_ref::<crate::expr::Error>()
 					{
-						Err(crate::err::Error::InvalidMethodArguments {
+						Err(crate::exec::Error::InvalidMethodArguments {
 							name: self.descriptor.name.to_string(),
 							message: message.clone(),
 						}
@@ -138,7 +138,7 @@ impl PhysicalExpr for ClosureFieldCallPart {
 
 	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
 		Box::pin(async move {
-			use crate::err::Error;
+			use crate::expr::Error as ExprError;
 
 			let value = ctx.current_value.cloned().unwrap_or(Value::None);
 
@@ -153,7 +153,7 @@ impl PhysicalExpr for ClosureFieldCallPart {
 				Some(Value::Closure(c)) => c,
 				_ => {
 					let type_name = value.kind_of().to_string();
-					return Err(Error::InvalidFunction {
+					return Err(ExecError::InvalidFunction {
 						name: self.field.clone(),
 						message: format!("no such method found for the {} type", type_name),
 					}
@@ -186,7 +186,7 @@ impl PhysicalExpr for ClosureFieldCallPart {
 						&& let Some((param, kind)) =
 							arg_spec[evaluated_args.len()..].iter().find(|(_, k)| !k.can_be_none())
 					{
-						return Err(Error::InvalidFunctionArguments {
+						return Err(ExprError::InvalidFunctionArguments {
 							name: "ANONYMOUS".to_string(),
 							message: format!(
 								"Expected a value of type '{}' for argument {}",
@@ -201,7 +201,7 @@ impl PhysicalExpr for ClosureFieldCallPart {
 					let mut local_params: HashMap<Strand, Value> = HashMap::new();
 					for ((param, kind), arg_value) in arg_spec.iter().zip(evaluated_args) {
 						let coerced = arg_value.coerce_to_kind(kind).map_err(|_| {
-							Error::InvalidFunctionArguments {
+							ExprError::InvalidFunctionArguments {
 								name: "ANONYMOUS".to_string(),
 								message: format!(
 									"Expected a value of type '{}' for argument {}",
@@ -240,7 +240,7 @@ impl PhysicalExpr for ClosureFieldCallPart {
 						Err(crate::expr::ControlFlow::Return(v)) => v,
 						Err(crate::expr::ControlFlow::Break)
 						| Err(crate::expr::ControlFlow::Continue) => {
-							return Err(Error::InvalidControlFlow.into());
+							return Err(ExecError::InvalidControlFlow.into());
 						}
 						Err(e) => return Err(e),
 					};

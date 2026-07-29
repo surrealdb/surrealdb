@@ -5,8 +5,8 @@ use url::Url;
 
 use crate::ctx::FrozenContext;
 use crate::err::Error;
-use crate::sql::expression::convert_public_value_to_internal;
 use crate::types::{PublicBytes, PublicValue};
+use crate::val::convert_public::convert_public_value_to_internal;
 use crate::val::{Object, Value};
 
 pub(crate) fn uri_is_valid(uri: &str) -> bool {

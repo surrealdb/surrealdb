@@ -106,7 +106,7 @@ pub(crate) async fn evaluate_recurse_default(
 		// Non-RecordId values during recursion are an error --
 		// recursion is intended purely for record graph traversal.
 		if !is_recursion_target(&next) {
-			return Err(crate::err::Error::InvalidRecursionTarget {
+			return Err(crate::exec::Error::InvalidRecursionTarget {
 				value: next.to_sql(),
 			}
 			.into());
@@ -117,7 +117,7 @@ pub(crate) async fn evaluate_recurse_default(
 
 	// Exhausted depth limit without resolving
 	if bounds.errors_on_limit() && depth >= bounds.system_limit {
-		return Err(crate::err::Error::IdiomRecursionLimitExceeded {
+		return Err(crate::exec::Error::IdiomRecursionLimitExceeded {
 			limit: bounds.system_limit,
 		}
 		.into());

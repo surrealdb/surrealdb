@@ -3,7 +3,7 @@ use anyhow::Result;
 use crate::catalog::providers::TableProvider;
 use crate::ctx::FrozenContext;
 use crate::dbs::Statement;
-use crate::doc::Document;
+use crate::doc::{Document, Error as DocError};
 use crate::err::Error;
 
 impl Document {
@@ -49,7 +49,7 @@ impl Document {
 							e.downcast_ref(),
 							Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
 						) {
-							Err(anyhow::Error::new(Error::RecordExists {
+							Err(anyhow::Error::new(DocError::RecordExists {
 								record: rid.as_ref().to_owned(),
 							}))
 						} else {
@@ -74,7 +74,7 @@ impl Document {
 							e.downcast_ref(),
 							Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
 						) {
-							Err(anyhow::Error::new(Error::RecordExists {
+							Err(anyhow::Error::new(DocError::RecordExists {
 								record: rid.as_ref().to_owned(),
 							}))
 						} else {
@@ -99,7 +99,7 @@ impl Document {
 							e.downcast_ref(),
 							Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
 						) {
-							Err(anyhow::Error::new(Error::RecordExists {
+							Err(anyhow::Error::new(DocError::RecordExists {
 								record: rid.as_ref().to_owned(),
 							}))
 						} else {
@@ -124,7 +124,7 @@ impl Document {
 							e.downcast_ref(),
 							Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
 						) {
-							Err(anyhow::Error::new(Error::RecordExists {
+							Err(anyhow::Error::new(DocError::RecordExists {
 								record: rid.as_ref().to_owned(),
 							}))
 						} else {

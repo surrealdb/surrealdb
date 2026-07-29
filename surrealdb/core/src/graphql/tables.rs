@@ -546,8 +546,8 @@ fn detect_nested_objects(
 
 		// Verify the parent is `TYPE object` or `TYPE array<object>` (or their
 		// option<...> variants). Also track whether the type is optional.
-		let parent_kind = parent_fd.and_then(|fd| fd.field_kind.as_ref());
-		let (kind_ok, optional) = match parent_kind {
+		let parent_kind: Option<Kind> = parent_fd.and_then(|fd| fd.field_kind.clone());
+		let (kind_ok, optional) = match &parent_kind {
 			Some(Kind::Object) if !is_array => (true, false),
 			Some(Kind::Array(inner, _)) if is_array => (matches!(**inner, Kind::Object), false),
 			// Handle option<object> = Either([None, Object])
@@ -1155,7 +1155,7 @@ fn build_table_type(
 	let nested_objects = detect_nested_objects(&tb_name_str, fds);
 
 	for fd in fds.iter() {
-		let Some(ref kind) = fd.field_kind else {
+		let Some(kind) = fd.field_kind.clone() else {
 			continue;
 		};
 		if fd.name.is_id() {
@@ -1223,7 +1223,7 @@ fn build_table_type(
 		});
 		if !filter_already_exists {
 			let type_filter = Type::InputObject(filter_from_type(
-				kind,
+				&kind,
 				type_filter_name.clone(),
 				types,
 				Some(&enum_scope),
@@ -1236,7 +1236,7 @@ fn build_table_type(
 		let mut field = Field::new(
 			fd_name.as_str(),
 			fd_type,
-			make_table_field_resolver(&lookup_name, fd.field_kind.clone(), Some(enum_scope)),
+			make_table_field_resolver(&lookup_name, Some(kind.clone()), Some(enum_scope)),
 		);
 		if let Some(desc) = super::naming::description_with_deprecation(
 			fd.comment.as_deref(),
@@ -1479,8 +1479,9 @@ pub async fn process_tbs(
 
 	for tb in tbs.iter() {
 		trace!("Adding table: {}", tb.name);
-		let fds = ctx.tx.all_tb_fields(ctx.ns, ctx.db, &tb.name, None).await?;
-		table_fields.insert(tb.name.clone(), Arc::clone(&fds));
+		let tb_name = tb.name.clone();
+		let fds = ctx.tx.all_tb_fields(ctx.ns, ctx.db, &tb_name, None).await?;
+		table_fields.insert(tb_name, Arc::clone(&fds));
 
 		// Build and register the table's type system. We need the relation
 		// filter list before constructing the runtime list/aggregate fields
@@ -2194,7 +2195,7 @@ fn binop(
 	// the alias only exists in the GraphQL surface.
 	let lookup_name = idiom_to_graphql_name(&fd.name);
 	// Fields without an explicit type accept any kind for filtering.
-	let field_kind = fd.field_kind.clone().unwrap_or(Kind::Any);
+	let field_kind: Kind = fd.field_kind.clone().unwrap_or(Kind::Any);
 	let enum_scope = format!("{tb_name}_{field_name}");
 	let mut exprs = Vec::with_capacity(obj.len());
 
@@ -2986,7 +2987,7 @@ fn build_aggregate_type(
 		let fname = idiom_to_graphql_name(&fd.name);
 		// Fields without an explicit type fall back to `Any` so the aggregate
 		// type-check below treats them as non-numeric.
-		let kind = fd.field_kind.clone().unwrap_or(Kind::Any);
+		let kind: Kind = fd.field_kind.clone().unwrap_or(Kind::Any);
 		if is_numeric_kind(&kind) {
 			let inner = numeric_kind(&kind);
 			let ty_min_max = match kind_to_type(inner.clone(), types, false) {

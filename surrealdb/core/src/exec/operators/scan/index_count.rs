@@ -28,8 +28,8 @@ use std::sync::Arc;
 use common::future::stream::{self, Yielder};
 use tracing::instrument;
 
-use crate::catalog::{DatabaseId, Index, NamespaceId, Permission};
-use crate::err::Error;
+use crate::catalog::{DatabaseId, Error, Index, NamespaceId, Permission};
+use crate::err::EngineError;
 use crate::exec::index::access_path::{BTreeAccess, IndexRef};
 use crate::exec::permission::{
 	PhysicalPermission, convert_permission_to_physical_runtime, should_check_perms,
@@ -262,14 +262,7 @@ impl ExecOperator for IndexCountScan {
 				.await
 				.context("Failed to fetch table indexes")?;
 
-			let matching_index = indexes.iter().find(|ix| {
-				if let Index::Count(ref idx_cond) = ix.index {
-					// The COUNT index condition must exactly match the WHERE clause.
-					idx_cond.as_ref() == Some(&condition)
-				} else {
-					false
-				}
-			});
+			let matching_index = indexes.iter().find(|ix| matches_count_guard(ix, &condition));
 
 			if let Some(ix_def) = matching_index {
 				// Fast path: sum delta counts from the COUNT index.
@@ -328,6 +321,19 @@ impl ExecOperator for IndexCountScan {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// True when `ix` is a guarded COUNT index whose guard is structurally the
+/// query's WHERE clause.
+///
+/// The guard is read from the compiled `count_cond`, never re-parsed from the
+/// stored text in `ix.index`: this is the same comparison the planner makes
+/// when it chooses the `IndexCount` plan
+/// (`exec::planner::select::has_matching_count_index`) and the classic planner
+/// makes in `idx::planner::tree`, so all three agree on which index services a
+/// given condition.
+fn matches_count_guard(ix: &crate::catalog::IndexDefinition, condition: &Cond) -> bool {
+	matches!(&ix.index, Index::Count(Some(_))) && ix.count_cond.as_ref() == Some(condition)
+}
+
 /// Build the single-row batch that the Aggregate operator would normally
 /// produce for `SELECT count() … GROUP ALL`.
 ///
@@ -373,7 +379,7 @@ pub(crate) async fn sum_index_count_deltas(
 	let mut count: i64 = 0;
 	loop {
 		if ctx.cancellation().is_cancelled() {
-			return Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryCancelled)));
+			return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
 		}
 		let batch = cursor
 			.next_batch(crate::kvs::NORMAL_BATCH_SIZE)
@@ -426,7 +432,7 @@ async fn count_with_filter_fallback(
 	let mut count = 0usize;
 	loop {
 		if ctx.cancellation().is_cancelled() {
-			return Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryCancelled)));
+			return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
 		}
 		let batch = cursor
 			.next_batch(crate::kvs::NORMAL_BATCH_SIZE)
@@ -506,7 +512,7 @@ async fn count_btree_index_keys(
 				.context("Failed to create unique equal iterator")?;
 			loop {
 				if ctx.cancellation().is_cancelled() {
-					return Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryCancelled)));
+					return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
 				}
 				let rids = iter.next_batch(txn).await.context("Failed to iterate index")?;
 				if rids.is_empty() {
@@ -521,7 +527,7 @@ async fn count_btree_index_keys(
 				.context("Failed to create index equal iterator")?;
 			loop {
 				if ctx.cancellation().is_cancelled() {
-					return Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryCancelled)));
+					return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
 				}
 				let rids = iter.next_batch(txn).await.context("Failed to iterate index")?;
 				if rids.is_empty() {
@@ -547,7 +553,7 @@ async fn count_btree_index_keys(
 			.context("Failed to create unique range iterator")?;
 			loop {
 				if ctx.cancellation().is_cancelled() {
-					return Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryCancelled)));
+					return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
 				}
 				let rids = iter.next_batch(txn).await.context("Failed to iterate index")?;
 				if rids.is_empty() {
@@ -573,7 +579,7 @@ async fn count_btree_index_keys(
 			.context("Failed to create index range iterator")?;
 			loop {
 				if ctx.cancellation().is_cancelled() {
-					return Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryCancelled)));
+					return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
 				}
 				let rids = iter.next_batch(txn).await.context("Failed to iterate index")?;
 				if rids.is_empty() {
@@ -594,7 +600,7 @@ async fn count_btree_index_keys(
 					.context("Failed to create compound range iterator")?;
 			loop {
 				if ctx.cancellation().is_cancelled() {
-					return Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryCancelled)));
+					return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
 				}
 				let rids = iter.next_batch(txn, 1000).await.context("Failed to iterate index")?;
 				if rids.is_empty() {
@@ -615,7 +621,7 @@ async fn count_btree_index_keys(
 					.context("Failed to create compound equal iterator")?;
 			loop {
 				if ctx.cancellation().is_cancelled() {
-					return Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryCancelled)));
+					return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
 				}
 				let rids = iter.next_batch(txn, 1000).await.context("Failed to iterate index")?;
 				if rids.is_empty() {
@@ -633,4 +639,91 @@ async fn count_btree_index_keys(
 	}
 
 	Ok(count)
+}
+
+#[cfg(test)]
+mod tests {
+	use surrealdb_strand::Strand;
+
+	use super::*;
+	use crate::catalog::{CondText, IndexDefinition, IndexId, SurqlText};
+	use crate::expr::{Expr, Literal};
+
+	fn cond(b: bool) -> Cond {
+		Cond(Expr::Literal(Literal::Bool(b)))
+	}
+
+	fn index_def(index: Index, count_cond: Option<Cond>) -> IndexDefinition {
+		IndexDefinition {
+			index_id: IndexId(1),
+			name: Strand::from("cnt"),
+			table_name: crate::val::TableName::from("t"),
+			cols: Vec::new(),
+			index,
+			count_cond,
+			prepare_remove: false,
+			format_version: 0,
+			comment: None,
+		}
+	}
+
+	fn stored_index_def(index: Index) -> crate::catalog::StoredIndexDefinition {
+		crate::catalog::StoredIndexDefinition {
+			index_id: IndexId(1),
+			name: Strand::from("cnt"),
+			table_name: Strand::from("t"),
+			cols: Vec::new(),
+			index,
+			prepare_remove: false,
+			format_version: 0,
+			comment: None,
+		}
+	}
+
+	/// The operator and the planner must reach the same verdict for a guard
+	/// built the way production builds one, which is through `from_stored`.
+	/// Constructing the runtime definition directly would let this pass even if
+	/// the operator went back to re-parsing the stored text.
+	#[test]
+	fn guard_match_agrees_with_the_planner_predicate() {
+		use crate::catalog::FromStored;
+
+		let guard = cond(true);
+		let stored = stored_index_def(Index::Count(Some(CondText(SurqlText::new(&guard)))));
+		let ix = IndexDefinition::from_stored(&stored).expect("a rendered guard re-parses");
+
+		// The planner's predicate, verbatim from exec/planner/select/mod.rs.
+		let planner_says =
+			matches!(&ix.index, Index::Count(Some(_))) && ix.count_cond.as_ref() == Some(&guard);
+
+		assert!(planner_says, "planner must select this index");
+		assert!(matches_count_guard(&ix, &guard), "operator must agree with the planner");
+	}
+
+	/// A guard whose stored text does not re-parse never reaches the operator:
+	/// `from_stored` fails first, so the whole query fails at catalog load. This
+	/// pins that boundary, so the operator is not expected to defend against a
+	/// state it cannot be handed.
+	#[test]
+	fn an_unparseable_guard_fails_before_the_operator_sees_it() {
+		use crate::catalog::FromStored;
+
+		let stored = stored_index_def(Index::Count(Some(CondText(SurqlText::from_raw(
+			"*** not surql ***",
+		)))));
+		assert!(IndexDefinition::from_stored(&stored).is_err());
+	}
+
+	#[test]
+	fn guard_match_rejects_a_different_condition() {
+		let ix =
+			index_def(Index::Count(Some(CondText(SurqlText::new(&cond(true))))), Some(cond(true)));
+		assert!(!matches_count_guard(&ix, &cond(false)));
+	}
+
+	#[test]
+	fn guard_match_rejects_an_unguarded_count_index() {
+		let ix = index_def(Index::Count(None), None);
+		assert!(!matches_count_guard(&ix, &cond(true)));
+	}
 }

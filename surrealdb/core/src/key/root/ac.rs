@@ -1,7 +1,7 @@
 //! Stores a DEFINE ACCESS ON ROOT configuration
 use std::borrow::Cow;
 
-use crate::catalog::AccessDefinition;
+use crate::catalog::StoredAccessDefinition;
 use crate::key::category::{Categorise, Category};
 use crate::key::{impl_kv_key_storekey, impl_kv_range_storekey, key};
 
@@ -16,7 +16,7 @@ key! {
 	}
 }
 
-impl_kv_key_storekey!(AccessKey<'a> => AccessDefinition);
+impl_kv_key_storekey!(AccessKey<'a> => StoredAccessDefinition);
 
 impl Categorise for AccessKey<'_> {
 	fn categorise(&self) -> Category {

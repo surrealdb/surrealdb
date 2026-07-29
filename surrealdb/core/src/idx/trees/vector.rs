@@ -22,8 +22,9 @@ use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, BorrowReader, DecodeError, Encode, EncodeError, Writer};
 
 use crate::catalog::{Distance, VectorType};
-use crate::err::Error;
+use crate::expr::Error;
 use crate::fnc::util::math::ToFloat;
+use crate::idx::Error as IdxError;
 use crate::key::KVValue;
 use crate::val::{Number, Value};
 
@@ -286,7 +287,7 @@ impl SerializedVector {
 				vec.push(f16::from_f32(n).to_bits());
 				Ok(())
 			}
-			_ => Err(anyhow::Error::new(Error::InvalidVectorValue(value.to_raw_string()))),
+			_ => Err(anyhow::Error::new(IdxError::InvalidVectorValue(value.to_raw_string()))),
 		}
 	}
 
@@ -305,7 +306,7 @@ impl SerializedVector {
 				vec.push(n.try_into()?);
 				Ok(())
 			}
-			_ => Err(anyhow::Error::new(Error::InvalidVectorValue(value.to_raw_string()))),
+			_ => Err(anyhow::Error::new(IdxError::InvalidVectorValue(value.to_raw_string()))),
 		}
 	}
 
@@ -1018,7 +1019,7 @@ impl Vector {
 	pub(super) fn check_expected_dimension(current: usize, expected: usize) -> Result<()> {
 		ensure!(
 			current == expected,
-			Error::InvalidVectorDimension {
+			IdxError::InvalidVectorDimension {
 				current,
 				expected,
 			}

@@ -3,7 +3,7 @@ use std::borrow::Cow;
 
 use anyhow::Result;
 
-use crate::catalog::ConfigDefinition;
+use crate::catalog::StoredConfigDefinition;
 use crate::key::category::{Categorise, Category};
 use crate::key::database::all::DatabaseRoot;
 use crate::key::{impl_kv_key_storekey, impl_kv_range_storekey, key};
@@ -18,7 +18,7 @@ key! {
 		pub ty: Cow<'a, str>,
 	}
 }
-impl_kv_key_storekey!(Config<'a> => ConfigDefinition);
+impl_kv_key_storekey!(Config<'a> => StoredConfigDefinition);
 impl Categorise for Config<'_> {
 	fn categorise(&self) -> Category {
 		Category::DatabaseConfig

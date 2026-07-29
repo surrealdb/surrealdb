@@ -117,71 +117,80 @@ impl Duration {
 	}
 
 	pub(crate) fn fmt_sql_internal(&self, f: &mut String) {
-		// Split up the duration
-		let secs = self.0.as_secs();
-		let nano = self.0.subsec_nanos();
-		// Ensure no empty output
-		if secs == 0 && nano == 0 {
-			return f.push_str("0ns");
-		}
-		// Calculate the total years
-		let year = secs / SECONDS_PER_YEAR;
-		let secs = secs % SECONDS_PER_YEAR;
-		// Calculate the total weeks
-		let week = secs / SECONDS_PER_WEEK;
-		let secs = secs % SECONDS_PER_WEEK;
-		// Calculate the total days
-		let days = secs / SECONDS_PER_DAY;
-		let secs = secs % SECONDS_PER_DAY;
-		// Calculate the total hours
-		let hour = secs / SECONDS_PER_HOUR;
-		let secs = secs % SECONDS_PER_HOUR;
-		// Calculate the total minutes
-		let mins = secs / SECONDS_PER_MINUTE;
-		let secs = secs % SECONDS_PER_MINUTE;
-		// Calculate the total milliseconds
-		let msec = nano / NANOSECONDS_PER_MILLISECOND;
-		let nano = nano % NANOSECONDS_PER_MILLISECOND;
-		// Calculate the total microseconds
-		let usec = nano / NANOSECONDS_PER_MICROSECOND;
-		let nano = nano % NANOSECONDS_PER_MICROSECOND;
-		// Write the different parts
-		if year > 0 {
-			f.push_str(&year.to_string());
-			f.push('y');
-		}
-		if week > 0 {
-			f.push_str(&week.to_string());
-			f.push('w');
-		}
-		if days > 0 {
-			f.push_str(&days.to_string());
-			f.push('d');
-		}
-		if hour > 0 {
-			f.push_str(&hour.to_string());
-			f.push('h');
-		}
-		if mins > 0 {
-			f.push_str(&mins.to_string());
-			f.push('m');
-		}
-		if secs > 0 {
-			f.push_str(&secs.to_string());
-			f.push('s');
-		}
-		if msec > 0 {
-			f.push_str(&msec.to_string());
-			f.push_str("ms");
-		}
-		if usec > 0 {
-			f.push_str(&usec.to_string());
-			f.push_str("µs");
-		}
-		if nano > 0 {
-			f.push_str(&nano.to_string());
-			f.push_str("ns");
-		}
+		fmt_duration_sql(self.0, f);
+	}
+}
+
+/// Format a [`std::time::Duration`] using SurrealQL duration syntax (e.g. `1h30m`).
+///
+/// This is the exact rendering [`Duration`]'s [`ToSql`] implementation uses;
+/// it is exposed so layers holding a raw [`std::time::Duration`] can print the
+/// public duration grammar without wrapping.
+pub fn fmt_duration_sql(duration: std::time::Duration, f: &mut String) {
+	// Split up the duration
+	let secs = duration.as_secs();
+	let nano = duration.subsec_nanos();
+	// Ensure no empty output
+	if secs == 0 && nano == 0 {
+		return f.push_str("0ns");
+	}
+	// Calculate the total years
+	let year = secs / SECONDS_PER_YEAR;
+	let secs = secs % SECONDS_PER_YEAR;
+	// Calculate the total weeks
+	let week = secs / SECONDS_PER_WEEK;
+	let secs = secs % SECONDS_PER_WEEK;
+	// Calculate the total days
+	let days = secs / SECONDS_PER_DAY;
+	let secs = secs % SECONDS_PER_DAY;
+	// Calculate the total hours
+	let hour = secs / SECONDS_PER_HOUR;
+	let secs = secs % SECONDS_PER_HOUR;
+	// Calculate the total minutes
+	let mins = secs / SECONDS_PER_MINUTE;
+	let secs = secs % SECONDS_PER_MINUTE;
+	// Calculate the total milliseconds
+	let msec = nano / NANOSECONDS_PER_MILLISECOND;
+	let nano = nano % NANOSECONDS_PER_MILLISECOND;
+	// Calculate the total microseconds
+	let usec = nano / NANOSECONDS_PER_MICROSECOND;
+	let nano = nano % NANOSECONDS_PER_MICROSECOND;
+	// Write the different parts
+	if year > 0 {
+		f.push_str(&year.to_string());
+		f.push('y');
+	}
+	if week > 0 {
+		f.push_str(&week.to_string());
+		f.push('w');
+	}
+	if days > 0 {
+		f.push_str(&days.to_string());
+		f.push('d');
+	}
+	if hour > 0 {
+		f.push_str(&hour.to_string());
+		f.push('h');
+	}
+	if mins > 0 {
+		f.push_str(&mins.to_string());
+		f.push('m');
+	}
+	if secs > 0 {
+		f.push_str(&secs.to_string());
+		f.push('s');
+	}
+	if msec > 0 {
+		f.push_str(&msec.to_string());
+		f.push_str("ms");
+	}
+	if usec > 0 {
+		f.push_str(&usec.to_string());
+		f.push_str("µs");
+	}
+	if nano > 0 {
+		f.push_str(&nano.to_string());
+		f.push_str("ns");
 	}
 }
 

@@ -17,6 +17,7 @@ use rayon::prelude::{IntoParallelIterator, ParallelIterator, ParallelSliceMut};
 use tokio::task::spawn_blocking;
 
 use super::common::{OrderByField, SortDirection, SortKey, compare_keys, compare_keys_by_sort_key};
+use crate::err::EngineError;
 use crate::exec::{
 	AccessMode, CardinalityHint, CombineAccessModes, ContextLevel, EvalContext, ExecOperator,
 	ExecutionContext, FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream,
@@ -147,7 +148,7 @@ impl ExecOperator for Sort {
 				// Check for cancellation between batches
 				if ctx.cancellation().is_cancelled() {
 					return Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(
-						crate::err::Error::QueryCancelled
+						EngineError::QueryCancelled
 					)));
 				}
 				match batch_result {
@@ -341,7 +342,7 @@ impl ExecOperator for SortByKey {
 				// Check for cancellation between batches
 				if cancellation.is_cancelled() {
 					return Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(
-						crate::err::Error::QueryCancelled
+						EngineError::QueryCancelled
 					)));
 				}
 				match batch_result {

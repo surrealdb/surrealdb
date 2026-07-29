@@ -1,13 +1,18 @@
+use anyhow::Context as _;
+use common::fmt::EscapeKwFreeIdent;
 use revision::{
 	DeserializeRevisioned, Revisioned, SerializeRevisioned, SkipRevisioned, revisioned,
 };
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use uuid::Uuid;
 
-use crate::catalog::{DatabaseId, NamespaceId, Permissions, ViewDefinition};
+use crate::catalog::{
+	DatabaseId, FromStored, NamespaceId, Permissions, StoredPermissions, StoredViewDefinition,
+	ViewDefinition,
+};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{ChangeFeed, Kind};
-use crate::fmt::EscapeKwFreeIdent;
 use crate::key::impl_kv_value_revisioned;
 use crate::sql;
 use crate::sql::statements::DefineTableStatement;
@@ -62,15 +67,15 @@ impl revision::WalkRevisioned for TableId {
 
 #[revisioned(revision = 3)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct TableDefinition {
+pub struct StoredTableDefinition {
 	pub(crate) namespace_id: NamespaceId,
 	pub(crate) database_id: DatabaseId,
 	pub(crate) table_id: TableId,
-	pub(crate) name: TableName,
+	pub(crate) name: Strand,
 	pub(crate) drop: bool,
 	pub(crate) schemafull: bool,
-	pub(crate) view: Option<ViewDefinition>,
-	pub(crate) permissions: Permissions,
+	pub(crate) view: Option<StoredViewDefinition>,
+	pub(crate) permissions: StoredPermissions,
 	pub(crate) changefeed: Option<ChangeFeed>,
 	pub(crate) comment: Option<String>,
 	pub(crate) table_type: TableType,
@@ -106,9 +111,9 @@ pub struct TableDefinition {
 	pub(crate) graphql_deprecated: Option<String>,
 }
 
-impl_kv_value_revisioned!(TableDefinition);
+impl_kv_value_revisioned!(StoredTableDefinition);
 
-impl TableDefinition {
+impl StoredTableDefinition {
 	pub fn new(
 		namespace_id: NamespaceId,
 		database_id: DatabaseId,
@@ -120,11 +125,11 @@ impl TableDefinition {
 			namespace_id,
 			database_id,
 			table_id,
-			name,
+			name: name.into(),
 			drop: false,
 			schemafull: false,
 			view: None,
-			permissions: Permissions::none(),
+			permissions: StoredPermissions::none(),
 			changefeed: None,
 			comment: None,
 			table_type: TableType::default(),
@@ -137,24 +142,17 @@ impl TableDefinition {
 			graphql_deprecated: None,
 		}
 	}
+}
 
-	/// Checks if this table allows normal records / documents
-	pub fn allows_normal(&self) -> bool {
-		matches!(self.table_type, TableType::Normal | TableType::Any)
-	}
-	/// Checks if this table allows graph edges / relations
-	pub fn allows_relation(&self) -> bool {
-		matches!(self.table_type, TableType::Relation(_) | TableType::Any)
-	}
-
+impl TableDefinition {
 	fn to_sql_definition(&self) -> DefineTableStatement {
 		DefineTableStatement {
 			id: Some(self.table_id.0),
-			name: sql::Expr::Table(self.name.clone()),
+			name: sql::Expr::Table(self.name.clone().into()),
 			drop: self.drop,
 			full: self.schemafull,
-			view: self.view.clone().map(|v| v.to_sql_definition()),
-			permissions: self.permissions.clone().into(),
+			view: self.view.as_ref().map(|v| v.to_sql_definition()),
+			permissions: self.permissions.to_sql_permissions(),
 			changefeed: self.changefeed.map(|v| v.into()),
 			comment: self
 				.comment
@@ -325,8 +323,8 @@ impl Relation {
 impl From<sql::table_type::Relation> for Relation {
 	fn from(v: sql::table_type::Relation) -> Self {
 		Self {
-			from: v.from,
-			to: v.to,
+			from: v.from.into_iter().map(Into::into).collect(),
+			to: v.to.into_iter().map(Into::into).collect(),
 			enforced: v.enforced,
 		}
 	}
@@ -335,9 +333,101 @@ impl From<sql::table_type::Relation> for Relation {
 impl From<Relation> for sql::table_type::Relation {
 	fn from(v: Relation) -> Self {
 		Self {
-			from: v.from,
-			to: v.to,
+			from: v.from.into_iter().map(Into::into).collect(),
+			to: v.to.into_iter().map(Into::into).collect(),
 			enforced: v.enforced,
+		}
+	}
+}
+
+/// Runtime form of [`StoredTableDefinition`].
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub(crate) struct TableDefinition {
+	pub namespace_id: NamespaceId,
+	pub database_id: DatabaseId,
+	pub table_id: TableId,
+	pub name: TableName,
+	pub drop: bool,
+	pub schemafull: bool,
+	pub view: Option<ViewDefinition>,
+	pub permissions: Permissions,
+	pub table_type: TableType,
+	pub changefeed: Option<ChangeFeed>,
+	pub comment: Option<String>,
+	pub cache_fields_ts: Uuid,
+	pub cache_events_ts: Uuid,
+	pub cache_tables_ts: Uuid,
+	pub cache_indexes_ts: Uuid,
+	pub cache_lives_ts: Uuid,
+	pub graphql_alias: Option<String>,
+	pub graphql_deprecated: Option<String>,
+}
+
+impl FromStored for TableDefinition {
+	type Stored = StoredTableDefinition;
+
+	fn from_stored(stored: &StoredTableDefinition) -> anyhow::Result<TableDefinition> {
+		fn build(stored: &StoredTableDefinition) -> anyhow::Result<TableDefinition> {
+			Ok(TableDefinition {
+				namespace_id: stored.namespace_id,
+				database_id: stored.database_id,
+				table_id: stored.table_id,
+				name: TableName::from(stored.name.clone()),
+				drop: stored.drop,
+				schemafull: stored.schemafull,
+				view: stored.view.as_ref().map(ViewDefinition::from_stored).transpose()?,
+				permissions: Permissions::from_stored(&stored.permissions)?,
+				table_type: stored.table_type.clone(),
+				changefeed: stored.changefeed,
+				comment: stored.comment.clone(),
+				cache_fields_ts: stored.cache_fields_ts,
+				cache_events_ts: stored.cache_events_ts,
+				cache_tables_ts: stored.cache_tables_ts,
+				cache_indexes_ts: stored.cache_indexes_ts,
+				cache_lives_ts: stored.cache_lives_ts,
+				graphql_alias: stored.graphql_alias.clone(),
+				graphql_deprecated: stored.graphql_deprecated.clone(),
+			})
+		}
+		build(stored).with_context(|| {
+			format!("the stored definition of table `{}` no longer compiles", stored.name)
+		})
+	}
+}
+
+impl TableDefinition {
+	/// See [`StoredTableDefinition::allows_normal`]; same predicate on the
+	/// compiled form.
+	pub(crate) fn allows_normal(&self) -> bool {
+		matches!(self.table_type, TableType::Normal | TableType::Any)
+	}
+
+	/// See [`StoredTableDefinition::allows_relation`]; same predicate on the
+	/// compiled form.
+	pub(crate) fn allows_relation(&self) -> bool {
+		matches!(self.table_type, TableType::Relation(_) | TableType::Any)
+	}
+
+	pub(crate) fn to_stored(&self) -> StoredTableDefinition {
+		StoredTableDefinition {
+			namespace_id: self.namespace_id,
+			database_id: self.database_id,
+			table_id: self.table_id,
+			name: self.name.clone().into(),
+			drop: self.drop,
+			schemafull: self.schemafull,
+			view: self.view.as_ref().map(ViewDefinition::to_stored),
+			permissions: self.permissions.to_stored(),
+			changefeed: self.changefeed,
+			comment: self.comment.clone(),
+			table_type: self.table_type.clone(),
+			cache_fields_ts: self.cache_fields_ts,
+			cache_events_ts: self.cache_events_ts,
+			cache_tables_ts: self.cache_tables_ts,
+			cache_indexes_ts: self.cache_indexes_ts,
+			cache_lives_ts: self.cache_lives_ts,
+			graphql_alias: self.graphql_alias.clone(),
+			graphql_deprecated: self.graphql_deprecated.clone(),
 		}
 	}
 }

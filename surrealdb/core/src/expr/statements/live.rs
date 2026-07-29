@@ -4,11 +4,14 @@ use surrealdb_types::ToSql;
 use uuid::Uuid;
 
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{NodeLiveQuery, SubscriptionDefinition, SubscriptionFields};
+use crate::catalog::{
+	CompiledSubscription, NodeLiveQuery, SubscriptionDefinition, SubscriptionFields,
+	SubscriptionQuery,
+};
 use crate::ctx::FrozenContext;
 use crate::dbs::{Options, ParameterCapturePass, Variables};
 use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::visit::{Visit, Visitor};
 use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _, Idiom, Param};
 use crate::val::Value;
@@ -58,7 +61,7 @@ fn is_document_dependent(expr: &Expr) -> bool {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum LiveFields {
+pub(crate) enum LiveFields {
 	Diff,
 	Select(Fields),
 }
@@ -113,14 +116,20 @@ impl LiveStatement {
 			LiveFields::Select(x) => SubscriptionFields::Select(x.clone()),
 		};
 
+		// The statement was just parsed, so its query is compiled by
+		// construction; the uncompilable form only arises reading storage back.
+		let query = SubscriptionQuery::Compiled(CompiledSubscription {
+			fields,
+			what: self.what.clone(),
+			cond: self.cond.clone().map(|c| c.0),
+			fetch: self.fetch.as_ref().map(|fs| fs.iter().map(|f| f.0.clone()).collect()),
+		});
+
 		// Check that auth has been set
 		let mut subscription_definition = SubscriptionDefinition {
 			id: self.id,
 			node: self.node,
-			fields,
-			what: self.what.clone(),
-			cond: self.cond.clone().map(|c| c.0),
-			fetch: self.fetch.clone(),
+			query,
 
 			// Use the current session authentication
 			// for when we store the LIVE Statement
@@ -129,19 +138,15 @@ impl LiveStatement {
 			// for when we store the LIVE Statement
 			session: ctx.value("session").cloned(),
 			// Add the variables to the subscription definition. Keys are
-			// copied out of `Strand` into owned `String` here because
-			// `SubscriptionDefinition` is persisted in the catalog and
-			// stores `BTreeMap<String, Value>`.
+			// copied out of `Strand` into owned `String` here because the
+			// subscription is persisted in the catalog and stores
+			// `BTreeMap<String, Value>`.
 			vars: vars.0.into_iter().map(|(k, v)| (k.into_string(), v)).collect(),
 		};
 		// Get the id
 		let live_query_id = subscription_definition.id;
 		// Process the live query table
-		match stk
-			.run(|stk| subscription_definition.what.compute(stk, ctx, opt, doc))
-			.await
-			.catch_return()?
-		{
+		match stk.run(|stk| self.what.compute(stk, ctx, opt, doc)).await.catch_return()? {
 			Value::Table(tb) => {
 				// Store the current Node ID
 				subscription_definition.node = nid;
@@ -189,7 +194,7 @@ impl LiveStatement {
 					tb: std::borrow::Cow::Borrowed(&tb),
 					lq: live_query_id,
 				};
-				txn.replace_key(&key, &subscription_definition).await?;
+				txn.replace_key(&key, &subscription_definition.to_stored()).await?;
 				// Bump the table's committed live-query cache timestamp, in the
 				// same transaction as the row write above, so writers observe the
 				// new subscription. A concurrent writer with a pre-commit snapshot
@@ -199,7 +204,7 @@ impl LiveStatement {
 				txn.clear_cache();
 			}
 			v => {
-				bail!(Error::LiveStatement {
+				bail!(ExecError::LiveStatement {
 					value: v.to_sql(),
 				});
 			}

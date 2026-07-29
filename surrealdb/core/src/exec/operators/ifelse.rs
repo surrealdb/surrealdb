@@ -9,7 +9,7 @@ use std::sync::Arc;
 use futures::stream;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::err::Error;
+use crate::err::EngineError;
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::plan_or_compute::{evaluate_expr_at_depth, expr_required_context};
 use crate::exec::{
@@ -144,7 +144,7 @@ async fn execute_ifelse(
 ) -> crate::expr::FlowResult<ValueBatch> {
 	for (cond, body) in branches {
 		if ctx.cancellation().is_cancelled() {
-			return Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryCancelled)));
+			return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
 		}
 		let cond_value = evaluate_expr_at_depth(cond, ctx, depth).await?;
 

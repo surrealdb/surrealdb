@@ -1,3 +1,4 @@
+use common::fmt::EscapeIdent;
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
@@ -5,7 +6,6 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::FlowResult;
-use crate::fmt::EscapeIdent;
 use crate::val::{RecordId, TableName};
 
 pub(crate) mod key;

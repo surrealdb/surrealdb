@@ -3,7 +3,7 @@ use std::vec::IntoIter;
 use anyhow::{Result, bail};
 use surrealdb_types::SurrealValue;
 
-use crate::err::Error;
+use crate::expr::Error;
 use crate::val::value::{Cast as CastTrait, Coerce};
 use crate::val::{Value, convert_value_to_public_value};
 

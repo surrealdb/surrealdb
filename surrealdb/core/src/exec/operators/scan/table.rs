@@ -9,9 +9,11 @@ use std::sync::Arc;
 
 use common::future::stream::Yielder;
 use futures::StreamExt;
+use surrealdb_strand::TableName;
 
 use super::pipeline::{ScanPipeline, build_field_state, eval_limit_expr, kv_scan_stream};
 use super::resolved::ResolvedTableContext;
+use crate::err::EngineError;
 use crate::exec::operators::scan::common::resolve_version_stamp;
 use crate::exec::permission::{
 	PhysicalPermission, convert_permission_to_physical_runtime, should_check_perms,
@@ -28,7 +30,6 @@ use crate::iam::Action;
 use crate::idx::planner::ScanDirection;
 use crate::key::database::all::DatabaseRoot;
 use crate::key::{KVRange, record};
-use crate::val::TableName;
 
 /// Direct KV range scan over a known table.
 ///
@@ -222,9 +223,11 @@ impl ExecOperator for TableScan {
 						.context("Failed to get table")?;
 
 					if table_def.is_none() {
-						Err(ControlFlow::Err(anyhow::Error::new(crate::err::Error::TbNotFound {
-							name: table_name.clone(),
-						})))?;
+						Err(ControlFlow::Err(anyhow::Error::new(
+							crate::catalog::Error::TbNotFound {
+								name: table_name.clone(),
+							},
+						)))?;
 					}
 
 					let perm = if check_perms {
@@ -316,7 +319,7 @@ impl ExecOperator for TableScan {
 
 				while let Some(batch_result) = source.next().await {
 					if ctx.cancellation().is_cancelled() {
-						Err(ControlFlow::Err(anyhow::anyhow!(crate::err::Error::QueryCancelled)))?;
+						Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)))?;
 					}
 					let mut batch = batch_result?;
 					let cont = pipeline.process_batch(&mut batch.values, &ctx).await?;

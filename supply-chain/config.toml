@@ -83,6 +83,9 @@ audit-as-crates-io = false
 [policy.surrealdb-server]
 audit-as-crates-io = false
 
+[policy.surrealdb-sql]
+audit-as-crates-io = false
+
 [policy.surrealdb-strand]
 audit-as-crates-io = false
 

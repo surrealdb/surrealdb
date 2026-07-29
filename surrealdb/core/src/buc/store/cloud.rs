@@ -32,7 +32,7 @@ use object_store::{ObjectStore as OsStore, ObjectStoreExt, PutPayload};
 use url::Url;
 
 use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
-use crate::err::Error;
+use crate::buc::Error;
 
 /// Attempt to connect to a cloud object-storage backend from a `BACKEND` URL.
 ///

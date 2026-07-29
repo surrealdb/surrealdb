@@ -340,7 +340,7 @@ impl ExecOperator for HashJoin {
 					total += batch.values.len();
 					if total > max_rows {
 						Err(ControlFlow::Err(anyhow::anyhow!(
-							crate::err::Error::InvalidStatement(format!(
+							crate::exec::Error::InvalidStatement(format!(
 								"GQL MATCH join exceeded the maximum of {max_rows} buffered \
 								 probe-side rows (configurable via SURREAL_GQL_MAX_JOIN_BUILD_ROWS)"
 							),)
@@ -601,7 +601,7 @@ impl BuildTable {
 	/// would exceed `max_rows`.
 	fn insert(&mut self, key: JoinKey, row: Value, max_rows: usize) -> Result<(), ControlFlow> {
 		if self.rows >= max_rows {
-			return Err(ControlFlow::Err(anyhow::anyhow!(crate::err::Error::InvalidStatement(
+			return Err(ControlFlow::Err(anyhow::anyhow!(crate::exec::Error::InvalidStatement(
 				format!(
 					"GQL MATCH join exceeded the maximum of {max_rows} build-side rows \
 					 (configurable via SURREAL_GQL_MAX_JOIN_BUILD_ROWS)"

@@ -88,7 +88,7 @@ impl PhysicalExpr for JsFunctionExec {
 	#[cfg(not(feature = "scripting"))]
 	fn evaluate<'a>(&'a self, _ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
 		Box::pin(async move {
-			Err(crate::err::Error::InvalidScript {
+			Err(crate::exec::Error::InvalidScript {
 				message: String::from("Embedded functions are not enabled."),
 			}
 			.into())

@@ -7,8 +7,7 @@ use super::args::Optional;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::expr::{FlowResultExt as _, Idiom};
+use crate::expr::{Error as ExprError, FlowResultExt as _, Idiom};
 use crate::syn;
 use crate::val::{
 	Array, Bytes, Datetime, Duration, File, Geometry, Number, Range, RecordId, RecordIdKey,
@@ -118,9 +117,11 @@ pub fn string_lossy((val,): (Value,)) -> Result<Value> {
 	match val {
 		//TODO: Replace with from_utf8_lossy_owned once stablized.
 		Value::Bytes(x) => Ok(String::from_utf8_lossy(&x).into_owned().into()),
-		x => {
-			x.cast_to::<String>().map(Value::from).map_err(Error::from).map_err(anyhow::Error::new)
-		}
+		x => x
+			.cast_to::<String>()
+			.map(Value::from)
+			.map_err(ExprError::from)
+			.map_err(anyhow::Error::new),
 	}
 }
 
@@ -129,7 +130,7 @@ pub fn table((val,): (Value,)) -> Result<Value> {
 		Value::Table(t) => t,
 		Value::RecordId(t) => t.table,
 		Value::String(t) => TableName::new(t),
-		v => bail!(Error::TbInvalid {
+		v => bail!(ExprError::TbInvalid {
 			value: v.into_raw_string(),
 		}),
 	};
@@ -139,7 +140,7 @@ pub fn table((val,): (Value,)) -> Result<Value> {
 pub fn record((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> {
 	match (arg1, arg2) {
 		// Empty table name
-		(Value::String(arg1), _) if arg1.is_empty() => bail!(Error::TbInvalid {
+		(Value::String(arg1), _) if arg1.is_empty() => bail!(ExprError::TbInvalid {
 			value: arg1.into_string(),
 		}),
 
@@ -153,7 +154,7 @@ pub fn record((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value>
 		// string. Other shapes fall through to the new semantic.
 		(Value::RecordId(rid), Some(Value::String(constraint))) => {
 			if rid.table.as_str() != constraint.as_str() {
-				bail!(Error::IdInvalid {
+				bail!(ExprError::IdInvalid {
 					value: format!(
 						"{}: expected a record in table '{}'",
 						Value::RecordId(rid).into_raw_string(),
@@ -180,7 +181,7 @@ pub fn record((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value>
 				Value::Range(v) => {
 					let res =
 						RecordIdKeyRange::from_value_range((*v).clone()).ok_or_else(|| {
-							Error::IdInvalid {
+							ExprError::IdInvalid {
 								value: Value::Range(v).into_raw_string(),
 							}
 						})?;
@@ -191,7 +192,7 @@ pub fn record((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value>
 					let s = v.to_raw_string();
 					ensure!(
 						!s.is_empty(),
-						Error::IdInvalid {
+						ExprError::IdInvalid {
 							value: arg2.into_raw_string(),
 						}
 					);
@@ -207,13 +208,13 @@ pub fn record((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value>
 		(arg1, None) => arg1
 			.cast_to::<RecordId>()
 			.map(Value::from)
-			.map_err(Error::from)
+			.map_err(ExprError::from)
 			.map_err(anyhow::Error::new),
 	}
 }
 
 pub fn uuid((val,): (Value,)) -> Result<Value> {
-	val.cast_to::<Uuid>().map(Value::from).map_err(Error::from).map_err(anyhow::Error::new)
+	val.cast_to::<Uuid>().map(Value::from).map_err(ExprError::from).map_err(anyhow::Error::new)
 }
 
 pub mod is {
@@ -334,7 +335,7 @@ pub mod is {
 mod tests {
 	use surrealdb_strand::Strand;
 
-	use crate::err::Error;
+	use crate::expr::Error as ExprError;
 	use crate::fnc::args::Optional;
 	use crate::val::Value;
 
@@ -355,7 +356,7 @@ mod tests {
 	#[test]
 	fn no_empty_record() {
 		let value = super::record(("".into(), Optional(None)));
-		let _expected = Error::TbInvalid {
+		let _expected = ExprError::TbInvalid {
 			value: "".into(),
 		};
 		if !matches!(value, Err(_expected)) {
@@ -363,7 +364,7 @@ mod tests {
 		}
 
 		let value = super::record(("table".into(), Optional(Some("".into()))));
-		let _expected = Error::IdInvalid {
+		let _expected = ExprError::IdInvalid {
 			value: "".into(),
 		};
 		if !matches!(value, Err(_expected)) {

@@ -3,7 +3,7 @@ use std::borrow::Cow;
 
 use anyhow::Result;
 
-use crate::catalog::{IndexDefinition, IndexId};
+use crate::catalog::{IndexId, StoredIndexDefinition};
 use crate::key::category::{Categorise, Category};
 use crate::key::database::all::DatabaseRoot;
 use crate::key::{impl_kv_key_storekey, impl_kv_range_storekey, key};
@@ -35,7 +35,7 @@ key! {
 		pub ix: Cow<'key, str>,
 	}
 }
-impl_kv_key_storekey!(IndexDefinitionKey<'a> => IndexDefinition);
+impl_kv_key_storekey!(IndexDefinitionKey<'a> => StoredIndexDefinition);
 
 key! {
 	#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -52,7 +52,7 @@ impl_kv_range_storekey!(IndexDefinitionPrefix<'_>);
 
 impl Categorise for IndexDefinitionKey<'_> {
 	fn categorise(&self) -> Category {
-		Category::IndexDefinition
+		Category::TableIndex
 	}
 }
 

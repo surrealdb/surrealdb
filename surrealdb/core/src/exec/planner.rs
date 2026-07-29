@@ -79,8 +79,7 @@ pub(crate) use cycle_guard::CycleGuard;
 use self::util::literal_to_value;
 use crate::ctx::FrozenContext;
 use crate::dbs::NewPlannerStrategy;
-use crate::err::Error;
-use crate::exec::ExecOperator;
+use crate::err::{EngineError, Error};
 use crate::exec::function::FunctionRegistry;
 use crate::exec::operators::{
 	AnalyzePlan, DatabaseInfoPlan, ExplainPlan, ExprPlan, Fetch, ForeachPlan, IfElsePlan,
@@ -94,6 +93,7 @@ use crate::exec::physical_expr::{
 	RecordIdExpr, ScalarSubquery, SetLiteral, SiloModuleExec, SurrealismModuleExec, UnaryOp,
 	UserDefinedFunctionExec,
 };
+use crate::exec::{Error as ExecError, ExecOperator};
 use crate::expr::statements::IfelseStatement;
 use crate::expr::{Expr, Function, FunctionCall};
 
@@ -387,7 +387,7 @@ impl<'ctx> Planner<'ctx> {
 	#[inline]
 	fn check_depth(&self) -> Result<(), Error> {
 		if self.depth > self.ctx.config.max_computation_depth {
-			return Err(Error::ComputationDepthExceeded);
+			return Err(ExecError::ComputationDepthExceeded.into());
 		}
 		Ok(())
 	}
@@ -432,6 +432,7 @@ impl<'ctx> Planner<'ctx> {
 		module: &str,
 		sub: Option<&str>,
 	) -> Result<bool, Error> {
+		use crate::catalog::Error as CatalogError;
 		use crate::catalog::providers::DatabaseProvider;
 		use crate::ctx::Context;
 		use crate::expr::module::ModuleExecutable;
@@ -442,8 +443,10 @@ impl<'ctx> Planner<'ctx> {
 		let (Some(ns), Some(db)) = (&self.ns, &self.db) else {
 			return Ok(false);
 		};
-		let Some(db_def) =
-			txn.get_db_by_name(ns, db, None).await.map_err(|e| Error::Internal(e.to_string()))?
+		let Some(db_def) = txn
+			.get_db_by_name(ns, db, None)
+			.await
+			.map_err(|e| EngineError::Internal(e.to_string()))?
 		else {
 			return Ok(false);
 		};
@@ -453,13 +456,13 @@ impl<'ctx> Planner<'ctx> {
 			{
 				Ok(v) => v,
 				Err(e) => {
-					if let Some(Error::MdNotFound {
+					if let Some(CatalogError::MdNotFound {
 						..
-					}) = e.downcast_ref::<Error>()
+					}) = e.downcast_ref::<CatalogError>()
 					{
 						return Ok(false);
 					}
-					return Err(Error::Internal(e.to_string()));
+					return Err(EngineError::Internal(e.to_string()).into());
 				}
 			};
 		let executable: ModuleExecutable = val.executable.clone().into();
@@ -473,7 +476,7 @@ impl<'ctx> Planner<'ctx> {
 		let sig = executable
 			.signature(&frozen, &db_def.namespace_id, &db_def.database_id, sub)
 			.await
-			.map_err(|e| Error::Internal(e.to_string()))?;
+			.map_err(|e| EngineError::Internal(e.to_string()))?;
 		Ok(sig.writeable)
 	}
 
@@ -517,8 +520,10 @@ impl<'ctx> Planner<'ctx> {
 		} else {
 			Arc::clone(self.ctx)
 		};
-		let sig =
-			executable.signature(&ctx, sub).await.map_err(|e| Error::Internal(e.to_string()))?;
+		let sig = executable
+			.signature(&ctx, sub)
+			.await
+			.map_err(|e| EngineError::Internal(e.to_string()))?;
 		Ok(sig.writeable)
 	}
 
@@ -644,17 +649,19 @@ impl<'ctx> Planner<'ctx> {
 
 			// LET is only valid as a top-level statement or inside a block; reject any
 			// other position (function arg, array element, object value, etc.).
-			Expr::Let(_) => Err(Error::InvalidStatement(
+			Expr::Let(_) => Err(ExecError::InvalidStatement(
 				"LET statements can only appear at the top level of a query or inside a block \
 				 expression"
 					.to_string(),
-			)),
+			)
+			.into()),
 
 			// DDL — cannot be used in expression context
 			Expr::Define(_) | Expr::Remove(_) | Expr::Rebuild(_) | Expr::Alter(_) => {
-				Err(Error::PlannerUnsupported(
+				Err(ExecError::PlannerUnsupported(
 					"DDL statements cannot be used in expression context".to_string(),
-				))
+				)
+				.into())
 			}
 
 			// DML subqueries — not yet implemented
@@ -663,16 +670,18 @@ impl<'ctx> Planner<'ctx> {
 			| Expr::Upsert(_)
 			| Expr::Delete(_)
 			| Expr::Relate(_)
-			| Expr::Insert(_) => Err(Error::PlannerUnsupported(
+			| Expr::Insert(_) => Err(ExecError::PlannerUnsupported(
 				"DML subqueries not yet supported in execution plans".to_string(),
-			)),
+			)
+			.into()),
 
 			// GQL MATCH is only ever planned as a top-level operator tree
 			// (`plan_match`), never as a scalar sub-expression.
 			#[cfg(feature = "gql")]
-			Expr::Match(_) => Err(Error::PlannerUnsupported(
+			Expr::Match(_) => Err(ExecError::PlannerUnsupported(
 				"GQL MATCH cannot be used as a sub-expression".to_string(),
-			)),
+			)
+			.into()),
 		}
 	}
 
@@ -766,7 +775,7 @@ impl<'ctx> Planner<'ctx> {
 						};
 						(scope.allowlist.contains(&key), Arc::clone(&scope.executor_tables))
 					}
-					None => (false, Arc::from(Vec::<crate::val::TableName>::new())),
+					None => (false, Arc::from(Vec::<surrealdb_strand::TableName>::new())),
 				};
 				let idiom_clone = idiom.clone();
 				let query_clone = query.clone();
@@ -872,7 +881,7 @@ impl<'ctx> Planner<'ctx> {
 			{
 				d += 1;
 				if d > self.ctx.config.max_computation_depth {
-					return Err(Error::ComputationDepthExceeded);
+					return Err(ExecError::ComputationDepthExceeded.into());
 				}
 				cur = inner;
 			}
@@ -1096,11 +1105,12 @@ impl<'ctx> Planner<'ctx> {
 					expr = ?other,
 					"physical_statement_subquery dispatched with non-statement expr"
 				);
-				return Err(Error::Internal(
+				return Err(EngineError::Internal(
 					"physical_statement_subquery dispatched with non-statement expr; \
 					 only Select/Info/Foreach/Sleep/Explain are valid here"
 						.into(),
-				));
+				)
+				.into());
 			}
 		};
 		Ok(Arc::new(ScalarSubquery {
@@ -1210,18 +1220,19 @@ impl<'ctx> Planner<'ctx> {
 	// Internal Planning
 	// ========================================================================
 
-	/// When `AllReadOnlyStatements` strategy is active, convert `Error::PlannerUnimplemented`
-	/// into `Error::Query` so it becomes a hard error instead of a silent fallback.
+	/// When `AllReadOnlyStatements` strategy is active, convert `ExecError::PlannerUnimplemented`
+	/// into `ExecError::Query` so it becomes a hard error instead of a silent fallback.
 	///
 	/// `PlannerUnsupported` (DML/DDL) is left untouched — those always fall back to compute.
 	fn require_planned<T>(&self, result: Result<T, Error>) -> Result<T, Error> {
 		match result {
-			Err(Error::PlannerUnimplemented(msg))
+			Err(Error::Exec(ExecError::PlannerUnimplemented(msg)))
 				if self.planner_strategy == NewPlannerStrategy::AllReadOnlyStatements =>
 			{
-				Err(Error::Query {
+				Err(ExecError::Query {
 					message: format!("New executor does not support: {msg}"),
-				})
+				}
+				.into())
 			}
 			other => other,
 		}
@@ -1279,13 +1290,15 @@ impl<'ctx> Planner<'ctx> {
 				| Expr::Upsert(_)
 				| Expr::Delete(_)
 				| Expr::Insert(_)
-				| Expr::Relate(_) => Err(Error::PlannerUnsupported(
+				| Expr::Relate(_) => Err(ExecError::PlannerUnsupported(
 					"DML statements not yet supported in execution plans".to_string(),
-				)),
+				)
+				.into()),
 				Expr::Define(_) | Expr::Remove(_) | Expr::Rebuild(_) | Expr::Alter(_) => {
-					Err(Error::PlannerUnsupported(
+					Err(ExecError::PlannerUnsupported(
 						"DDL statements not yet supported in execution plans".to_string(),
-					))
+					)
+					.into())
 				}
 
 				// GQL MATCH is planned into an operator tree by `plan_match`
@@ -1370,45 +1383,52 @@ impl<'ctx> Planner<'ctx> {
 
 		// Reject protected parameter names at plan time. Mirrors
 		// `SetStatement::compute` and the top-level `Expr::Let` executor arm —
-		// both raise `Error::InvalidParam` at runtime; we error one step
+		// both raise `ExecError::InvalidParam` at runtime; we error one step
 		// earlier so callers in blocks / FOR bodies see the same rejection.
 		if surrealdb_cnf::PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
-			return Err(Error::InvalidParam {
+			return Err(ExecError::InvalidParam {
 				name: name.to_string(),
-			});
+			}
+			.into());
 		}
 
 		let value: Arc<dyn ExecOperator> = match what {
 			Expr::Select(select) => self.plan_select_statement(*select).await?,
 			Expr::Create(_) => {
-				return Err(Error::PlannerUnsupported(
+				return Err(ExecError::PlannerUnsupported(
 					"CREATE statements in LET not yet supported in execution plans".to_string(),
-				));
+				)
+				.into());
 			}
 			Expr::Update(_) => {
-				return Err(Error::PlannerUnsupported(
+				return Err(ExecError::PlannerUnsupported(
 					"UPDATE statements in LET not yet supported in execution plans".to_string(),
-				));
+				)
+				.into());
 			}
 			Expr::Upsert(_) => {
-				return Err(Error::PlannerUnsupported(
+				return Err(ExecError::PlannerUnsupported(
 					"UPSERT statements in LET not yet supported in execution plans".to_string(),
-				));
+				)
+				.into());
 			}
 			Expr::Delete(_) => {
-				return Err(Error::PlannerUnsupported(
+				return Err(ExecError::PlannerUnsupported(
 					"DELETE statements in LET not yet supported in execution plans".to_string(),
-				));
+				)
+				.into());
 			}
 			Expr::Insert(_) => {
-				return Err(Error::PlannerUnsupported(
+				return Err(ExecError::PlannerUnsupported(
 					"INSERT statements in LET not yet supported in execution plans".to_string(),
-				));
+				)
+				.into());
 			}
 			Expr::Relate(_) => {
-				return Err(Error::PlannerUnsupported(
+				return Err(ExecError::PlannerUnsupported(
 					"RELATE statements in LET not yet supported in execution plans".to_string(),
-				));
+				)
+				.into());
 			}
 			other => {
 				let expr = Box::pin(self.physical_expr(other)).await?;
@@ -1547,9 +1567,9 @@ macro_rules! try_plan_expr {
 				| $crate::expr::Expr::Rebuild(_)
 				| $crate::expr::Expr::Alter(_)
 		) {
-			Err($crate::err::Error::PlannerUnsupported(String::new()))
+			Err($crate::err::Error::Exec($crate::exec::Error::PlannerUnsupported(String::new())))
 		} else if *$ctx.new_planner_strategy() == $crate::dbs::NewPlannerStrategy::ComputeOnly {
-			Err($crate::err::Error::PlannerUnsupported(String::new()))
+			Err($crate::err::Error::Exec($crate::exec::Error::PlannerUnsupported(String::new())))
 		} else {
 			$crate::exec::planner::plan_expr_inner(__expr, $ctx, $txn, $auth, $depth).await
 		}

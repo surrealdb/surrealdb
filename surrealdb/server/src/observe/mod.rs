@@ -42,8 +42,8 @@
 //! (`namespace`, `database`, `user`) collapse to a sentinel `"-"` when
 //! unset, matching the [`surrealdb_core::observe::TenantIdentity`]
 //! resolution rules. Record-access principals collapse to a fixed
-//! `<record>` sentinel rather than emitting raw record ids; see
-//! [`surrealdb_core::observe::events::TenantIdentity::from_session`].
+//! `<record>` sentinel rather than emitting raw record ids; see the
+//! `From<&Session>` impl for [`surrealdb_core::observe::TenantIdentity`].
 
 pub mod handler;
 pub mod http_tower;

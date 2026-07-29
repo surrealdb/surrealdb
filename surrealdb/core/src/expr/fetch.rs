@@ -7,7 +7,7 @@ use revision::revisioned;
 use super::FlowResultExt as _;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
-use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Function, Idiom};
 use crate::fnc::args::FromArgs;
@@ -82,7 +82,23 @@ impl Fetch {
 		opt: &Options,
 		idioms: &mut BTreeSet<Idiom>,
 	) -> Result<()> {
-		match &self.0 {
+		Self::compute_expr(&self.0, stk, ctx, opt, idioms).await
+	}
+
+	/// [`Fetch::compute`] on a bare expression.
+	///
+	/// The newtype carries nothing this needs, and a caller holding only the
+	/// expression would otherwise have to build one per call. Live-query
+	/// notification does exactly that, per subscriber per record, so the clone
+	/// was a deep `Expr` tree copy on the write path.
+	pub(crate) async fn compute_expr(
+		expr: &Expr,
+		stk: &mut Stk,
+		ctx: &FrozenContext,
+		opt: &Options,
+		idioms: &mut BTreeSet<Idiom>,
+	) -> Result<()> {
+		match expr {
 			Expr::Idiom(idiom) => {
 				idioms.insert(idiom.to_owned());
 				Ok(())
@@ -93,7 +109,7 @@ impl Fetch {
 					syn::idiom(
 						v.clone()
 							.coerce_to::<String>()
-							.map_err(|_| Error::InvalidFetch {
+							.map_err(|_| ExecError::InvalidFetch {
 								value: v.into_literal(),
 							})?
 							.as_str(),
@@ -148,12 +164,12 @@ impl Fetch {
 						}
 						Ok(())
 					}
-					_ => Err(anyhow::Error::new(Error::InvalidFetch {
+					_ => Err(anyhow::Error::new(ExecError::InvalidFetch {
 						value: Expr::FunctionCall(f.clone()),
 					})),
 				}
 			}
-			v => Err(anyhow::Error::new(Error::InvalidFetch {
+			v => Err(anyhow::Error::new(ExecError::InvalidFetch {
 				value: v.clone(),
 			})),
 		}

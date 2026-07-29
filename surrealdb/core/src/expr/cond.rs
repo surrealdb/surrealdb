@@ -1,9 +1,7 @@
-use revision::revisioned;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use super::Expr;
 
-#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct Cond(pub(crate) Expr);
 

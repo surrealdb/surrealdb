@@ -5,11 +5,10 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use super::DefineKind;
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider, UserProvider};
-use crate::catalog::{self, ScramCredential, UserDefinition};
+use crate::catalog::{self, Error, ScramCredential, UserDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::user::UserDuration;
 use crate::expr::{Base, Expr, FlowResultExt, Idiom, Literal};

@@ -61,7 +61,7 @@ pub mod hash {
 
 	use anyhow::{Result, bail};
 
-	use crate::err::Error;
+	use crate::expr::Error;
 	use crate::fnc::args::Optional;
 	use crate::fnc::util::geo;
 	use crate::val::{Geometry, Value};

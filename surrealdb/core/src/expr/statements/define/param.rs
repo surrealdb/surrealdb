@@ -4,11 +4,11 @@ use surrealdb_strand::Strand;
 
 use super::DefineKind;
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider};
-use crate::catalog::{ParamDefinition, Permission};
+use crate::catalog::{Error as CatalogError, ParamDefinition, Permission};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::{Base, Expr, FlowResultExt as _};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
@@ -37,7 +37,7 @@ impl DefineParamStatement {
 
 		// A PERMISSIONS clause must not perform writes (GHSA-66r2-5gwj-gxm2).
 		if self.permissions.has_direct_write() {
-			bail!(Error::PermissionClauseNotReadonly {
+			bail!(ExecError::PermissionClauseNotReadonly {
 				kind: "param",
 				name: self.name.to_string(),
 			});
@@ -54,7 +54,7 @@ impl DefineParamStatement {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
-						bail!(Error::PaAlreadyExists {
+						bail!(CatalogError::PaAlreadyExists {
 							name: self.name.to_string(),
 						});
 					}

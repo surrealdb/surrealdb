@@ -4,7 +4,7 @@ use anyhow::{Result, bail, ensure};
 use surrealdb_cnf::GENERATION_ALLOCATION_LIMIT;
 use surrealdb_types::ToSql;
 
-use crate::err::Error;
+use crate::expr::Error;
 use crate::fnc::util;
 use crate::fnc::util::math::bottom::Bottom;
 use crate::fnc::util::math::interquartile::Interquartile;

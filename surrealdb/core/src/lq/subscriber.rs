@@ -18,13 +18,13 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use reblessive::TreeStack;
+use surrealdb_strand::TableName;
 
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::dbs::{MessageBroker, Session};
 use crate::doc::{Document, DocumentContext, NsDbCtx};
 use crate::kvs::{Datastore, Transaction};
 use crate::lq::event::LiveEvent;
-use crate::val::TableName;
 
 /// Compute and deliver live-query notifications for a batch of captured
 /// [`LiveEvent`]s on a single table, entirely off the write path.

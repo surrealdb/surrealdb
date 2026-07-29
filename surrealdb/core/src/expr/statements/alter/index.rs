@@ -2,21 +2,20 @@ use std::ops::Deref;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_strand::TableName;
 use surrealdb_types::{SqlFormat, ToSql};
 use tracing::instrument;
 use uuid::Uuid;
 
-use crate::catalog::TableDefinition;
 use crate::catalog::providers::TableProvider;
+use crate::catalog::{Error, TableDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::statements::alter::AlterKind;
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
-use crate::val::TableName;
 
 /// Represents an `ALTER INDEX` statement.
 ///
@@ -103,7 +102,7 @@ impl AlterIndexStatement {
 			db_name,
 			&TableDefinition {
 				cache_indexes_ts: Uuid::now_v7(),
-				..tb.as_ref().clone()
+				..(*tb).clone()
 			},
 		)
 		.await?;

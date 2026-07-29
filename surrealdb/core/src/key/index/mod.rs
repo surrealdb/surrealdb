@@ -114,7 +114,7 @@ impl KVValue for IndexEntryValue {
 				Some(DocId::from_be_bytes(arr))
 			}
 			n => {
-				return Err(anyhow::Error::new(crate::err::Error::Corrupted(
+				return Err(anyhow::Error::new(crate::key::Error::Corrupted(
 					"Index entry value has an invalid trailing doc-ID segment",
 				))
 				.context(format!("{n} trailing bytes after the record ID")));
@@ -142,7 +142,7 @@ key! {
 impl KVRange for IndexPrefix<'_> {
 	fn encode_bound(&self) -> Result<super::Key<'static>> {
 		let data = storekey::encode_vec_format::<IndexFormat, _>(self)
-			.map_err(|_| crate::err::Error::Unencodable)?;
+			.map_err(|_| crate::key::Error::Unencodable)?;
 		Ok(Key::from(data))
 	}
 }
@@ -174,7 +174,7 @@ impl<'a> Encode<IndexFormat> for IndexPrefixTerminated<'a> {
 impl KVRange for IndexPrefixTerminated<'_> {
 	fn encode_bound(&self) -> Result<super::Key<'static>> {
 		let data = storekey::encode_vec_format::<IndexFormat, _>(self)
-			.map_err(|_| crate::err::Error::Unencodable)?;
+			.map_err(|_| crate::key::Error::Unencodable)?;
 		Ok(Key::from(data))
 	}
 }
@@ -210,7 +210,7 @@ impl Encode<IndexFormat> for IndexPrefixUnterminated<'_> {
 impl KVRange for IndexPrefixUnterminated<'_> {
 	fn encode_bound(&self) -> Result<crate::key::Key<'static>> {
 		let key = storekey::encode_vec_format::<IndexFormat, Self>(self)
-			.map_err(|_| crate::err::Error::Unencodable)?;
+			.map_err(|_| crate::key::Error::Unencodable)?;
 		Ok(crate::key::Key::from(key))
 	}
 }
@@ -237,7 +237,7 @@ impl KVKey for Index<'_> {
 
 	fn encode_buffer(&self, buffer: &mut Vec<u8>) -> ::anyhow::Result<()> {
 		storekey::encode_format::<IndexFormat, _, _>(buffer, self)
-			.map_err(|_| crate::err::Error::Unencodable)?;
+			.map_err(|_| crate::key::Error::Unencodable)?;
 		Ok(())
 	}
 
@@ -246,7 +246,7 @@ impl KVKey for Index<'_> {
 impl<'a> KVKeyDecode<'a> for Index<'a> {
 	fn decode_key(bytes: &'a [u8]) -> anyhow::Result<Self> {
 		Ok(storekey::decode_borrow_format::<IndexFormat, _>(bytes)
-			.map_err(|_| crate::err::Error::Corrupted("Index key cannot be decoded"))?)
+			.map_err(|_| crate::key::Error::Corrupted("Index key cannot be decoded"))?)
 	}
 }
 
@@ -383,7 +383,7 @@ impl KVKey for UniqueIndex<'_> {
 
 	fn encode_buffer(&self, buffer: &mut Vec<u8>) -> ::anyhow::Result<()> {
 		storekey::encode_format::<IndexFormat, _, _>(buffer, self)
-			.map_err(|_| crate::err::Error::Unencodable)?;
+			.map_err(|_| crate::key::Error::Unencodable)?;
 		Ok(())
 	}
 
@@ -392,7 +392,7 @@ impl KVKey for UniqueIndex<'_> {
 impl<'a> KVKeyDecode<'a> for UniqueIndex<'a> {
 	fn decode_key(bytes: &'a [u8]) -> anyhow::Result<Self> {
 		Ok(storekey::decode_borrow_format::<IndexFormat, _>(bytes)
-			.map_err(|_| crate::err::Error::Corrupted("Unique Index key cannot be decoded"))?)
+			.map_err(|_| crate::key::Error::Corrupted("Unique Index key cannot be decoded"))?)
 	}
 }
 

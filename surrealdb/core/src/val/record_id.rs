@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 use std::ops::Bound;
 
+use common::fmt::{EscapeIdent, EscapeRidKey};
 use rand::seq::IndexedRandom;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -13,8 +14,8 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{self, Expr, Field, Fields, Literal, SelectStatement};
-use crate::fmt::EscapeRidKey;
 use crate::key::impl_kv_value_revisioned;
+use crate::val::table_name_public::{IntoPublicTable, IntoTableName};
 use crate::val::{Array, IndexFormat, Number, Object, Range, Strand, TableName, Uuid, Value};
 
 #[revisioned(revision = 1)]
@@ -463,7 +464,7 @@ impl TryFrom<RecordId> for crate::types::PublicRecordId {
 
 	fn try_from(value: RecordId) -> Result<Self, Self::Error> {
 		Ok(crate::types::PublicRecordId {
-			table: value.table.into(),
+			table: value.table.into_public_table(),
 			key: value.key.try_into()?,
 		})
 	}
@@ -472,7 +473,7 @@ impl TryFrom<RecordId> for crate::types::PublicRecordId {
 impl From<crate::types::PublicRecordId> for RecordId {
 	fn from(value: crate::types::PublicRecordId) -> Self {
 		RecordId {
-			table: value.table.into(),
+			table: value.table.into_table_name(),
 			key: RecordIdKey::from(value.key),
 		}
 	}
@@ -480,6 +481,44 @@ impl From<crate::types::PublicRecordId> for RecordId {
 
 impl ToSql for RecordId {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		write_sql!(f, sql_fmt, "{}:{}", EscapeRidKey(&self.table), self.key)
+		// The table half is an identifier, so it escapes like one: `EscapeRidKey`
+		// is for the key half, where an all-digit name must be quoted to keep it
+		// from reading as an integer, and where a reserved word or a leading
+		// digit is harmless. In table position both of those must be quoted or
+		// the record id cannot be read back.
+		write_sql!(f, sql_fmt, "{}:{}", EscapeIdent(self.table.as_str()), self.key)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// A record id must render so that it reads back as the same record id.
+	///
+	/// The table half was rendered with `EscapeRidKey`, which is the escaper
+	/// for the *key* half: it backticks an all-digit key so it cannot be
+	/// mistaken for an integer, but it checks neither reserved words nor a
+	/// leading digit, which is what a table name needs. So `select:1` and
+	/// `1a:1` were emitted, and neither parses back.
+	///
+	/// This is not only a display concern. Export writes `record.data.to_sql()`
+	/// into `INSERT` statements, so a dump of such a table could not be
+	/// re-imported.
+	#[test]
+	fn record_ids_render_so_they_can_be_read_back() {
+		for name in ["select", "1a", "9lives", "table", "person", "_123", "a-b"] {
+			let rid = RecordId {
+				table: TableName::from(name),
+				key: RecordIdKey::Number(1),
+			};
+			let rendered = rid.to_sql();
+			let reparsed = crate::syn::expr(&rendered)
+				.unwrap_or_else(|e| panic!("{rendered} does not parse back: {e}"));
+			let crate::sql::Expr::Literal(crate::sql::Literal::RecordId(lit)) = &reparsed else {
+				panic!("{rendered} parsed as {reparsed:?}, not a record id");
+			};
+			assert_eq!(lit.table.as_str(), name, "{rendered} round-tripped to a different table");
+		}
 	}
 }

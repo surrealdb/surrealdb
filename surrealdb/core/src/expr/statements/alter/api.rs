@@ -7,11 +7,10 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use super::AlterKind;
 use crate::catalog::providers::ApiProvider;
-use crate::catalog::{ApiActionDefinition, ApiMethod};
+use crate::catalog::{ApiAction as CatalogApiAction, ApiMethod, Error};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::statements::define::ApiAction;
 use crate::expr::statements::define::config::api::ApiConfig;
@@ -57,7 +56,7 @@ impl Default for AlterApiStatement {
 
 /// Remove the given methods from existing action entries, splitting entries
 /// that partially overlap and removing entries that are fully consumed.
-fn remove_methods_from_actions(actions: &mut Vec<ApiActionDefinition>, drop_methods: &[ApiMethod]) {
+fn remove_methods_from_actions(actions: &mut Vec<CatalogApiAction>, drop_methods: &[ApiMethod]) {
 	let mut i = 0;
 	while i < actions.len() {
 		actions[i].methods.retain(|m| !drop_methods.contains(m));
@@ -114,7 +113,7 @@ impl AlterApiStatement {
 				}
 				AlterApiClause::SetAction(action) => {
 					remove_methods_from_actions(&mut ap.actions, &action.methods);
-					ap.actions.push(ApiActionDefinition {
+					ap.actions.push(CatalogApiAction {
 						methods: action.methods.clone(),
 						action: action.action.clone(),
 						config: action.config.compute(stk, ctx, opt, doc).await?,
@@ -144,7 +143,7 @@ impl AlterApiStatement {
 			},
 			ap: Cow::Borrowed(&path_name),
 		};
-		txn.set_key(&key, &ap).await?;
+		txn.set_key(&key, &ap.to_stored()).await?;
 		txn.clear_cache();
 		Ok(Value::None)
 	}

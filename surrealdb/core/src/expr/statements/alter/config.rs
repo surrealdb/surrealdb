@@ -71,7 +71,7 @@ impl AlterConfigStatement {
 			},
 			ty: Cow::Borrowed(config_name),
 		};
-		txn.set_key(&key, &new_def).await?;
+		txn.set_key(&key, &new_def.to_stored()).await?;
 		txn.clear_cache();
 		Ok(Value::None)
 	}

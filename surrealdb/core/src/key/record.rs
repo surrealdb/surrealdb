@@ -4,7 +4,6 @@ use std::borrow::Cow;
 use anyhow::Result;
 
 use crate::catalog::Record;
-use crate::err::Error;
 use crate::key::database::all::DatabaseRoot;
 use crate::key::{KVKey, KVKeyDecode, impl_kv_range_storekey, key};
 use crate::val::{RecordId, RecordIdKey, TableName};
@@ -24,7 +23,7 @@ impl KVKey for RecordKey<'_> {
 	type Value = Record;
 
 	fn encode_buffer(&self, buffer: &mut Vec<u8>) -> Result<()> {
-		storekey::encode(buffer, self).map_err(|_| Error::Unencodable)?;
+		storekey::encode(buffer, self).map_err(|_| crate::key::Error::Unencodable)?;
 		Ok(())
 	}
 
@@ -38,7 +37,8 @@ impl KVKey for RecordKey<'_> {
 
 impl<'a> KVKeyDecode<'a> for RecordKey<'a> {
 	fn decode_key(bytes: &'a [u8]) -> Result<Self> {
-		Ok(storekey::decode_borrow(bytes).map_err(|_| Error::Corrupted("Record id key"))?)
+		Ok(storekey::decode_borrow(bytes)
+			.map_err(|_| crate::key::Error::Corrupted("Record id key"))?)
 	}
 }
 

@@ -8,8 +8,8 @@ use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::expr::{Expr, Idiom, Kind, Model, ModuleExecutable, Script, Value};
+use crate::exec::Error as ExecError;
+use crate::expr::{Error as ExprError, Expr, Idiom, Kind, Model, ModuleExecutable, Script, Value};
 use crate::fnc;
 use crate::iam::{Action, AuthLimit};
 
@@ -102,7 +102,7 @@ impl Function {
 				}
 				#[cfg(not(feature = "scripting"))]
 				{
-					Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidScript {
+					Err(ControlFlow::Err(anyhow::Error::new(ExecError::InvalidScript {
 						message: String::from("Embedded functions are not enabled."),
 					})))
 				}
@@ -116,7 +116,7 @@ impl Function {
 				// Get the function definition
 				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 				let val = ctx.tx().get_db_function(ns, db, s, opt.version).await?;
-				let opt = AuthLimit::try_from(&val.auth_limit)?.limit_opt(opt);
+				let opt = opt.limited_by(&AuthLimit::try_from(&val.auth_limit)?);
 
 				// Check permissions
 				if ctx.check_perms(&opt, Action::View)? {
@@ -136,7 +136,7 @@ impl Function {
 					ctx.add_value(
 						param_name.clone(),
 						val.coerce_to_kind(kind)
-							.map_err(|e| Error::InvalidFunctionArguments {
+							.map_err(|e| ExprError::InvalidFunctionArguments {
 								name: name.clone(),
 								message: format!("Failed to coerce argument `${param_name}`: {e}"),
 							})
@@ -276,7 +276,7 @@ async fn check_perms(
 	match permissions {
 		Permission::Full => Ok(()),
 		Permission::None => {
-			Err(ControlFlow::from(anyhow::Error::new(Error::FunctionPermissions {
+			Err(ControlFlow::from(anyhow::Error::new(ExecError::FunctionPermissions {
 				name: name.to_string(),
 			})))
 		}
@@ -285,7 +285,7 @@ async fn check_perms(
 			let opt = &opt.new_for_permission_predicate();
 			// Process the PERMISSION clause
 			if !stk.run(|stk| e.compute(stk, ctx, opt, doc)).await?.is_truthy() {
-				Err(ControlFlow::from(anyhow::Error::new(Error::FunctionPermissions {
+				Err(ControlFlow::from(anyhow::Error::new(ExecError::FunctionPermissions {
 					name: name.to_string(),
 				})))
 			} else {
@@ -314,7 +314,7 @@ fn validate_args(name: &str, args: &[Value], sig: &[Kind]) -> FlowResult<()> {
 	// Check the necessary arguments are passed
 	//TODO(planner): Move this check out of the call.
 	if !(min_args_len..=max_args_len).contains(&args.len()) {
-		return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidFunctionArguments {
+		return Err(ControlFlow::from(anyhow::Error::new(ExprError::InvalidFunctionArguments {
 			name: name.to_string(),
 			message: match (min_args_len, max_args_len) {
 				(1, 1) => String::from("The function expects 1 argument."),
@@ -331,7 +331,7 @@ fn validate_return(name: &str, return_kind: Option<&Kind>, result: Value) -> Flo
 	match return_kind {
 		Some(kind) => result
 			.coerce_to_kind(kind)
-			.map_err(|e| Error::ReturnCoerce {
+			.map_err(|e| ExecError::ReturnCoerce {
 				name: name.to_string(),
 				error: Box::new(e),
 			})

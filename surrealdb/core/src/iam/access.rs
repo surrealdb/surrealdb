@@ -5,11 +5,13 @@ use reblessive;
 
 use crate::catalog;
 use crate::dbs::Session;
-use crate::err::Error;
+use crate::err::exec_error;
+use crate::exec::Error as ExecError;
 use crate::expr::statements::access;
 use crate::expr::{Base, Expr};
-use crate::kvs::Datastore;
+use crate::iam::Error as AuthError;
 use crate::kvs::TransactionType::*;
+use crate::kvs::{Datastore, is_retryable_transaction_conflict};
 use crate::types::{PublicRecordId, PublicValue};
 use crate::val::RecordId;
 
@@ -27,30 +29,27 @@ pub(crate) async fn authenticate_record(
 			// If the AUTHENTICATE clause returns anything else, authentication fails generically
 			_ => {
 				debug!("Authentication attempt as record user rejected by AUTHENTICATE clause");
-				Err(anyhow::Error::new(Error::InvalidAuth))
+				Err(anyhow::Error::new(AuthError::InvalidAuth))
 			}
 		},
+		// If the AUTHENTICATE clause throws a specific error, authentication fails with
+		// that error
+		Err(e) if matches!(exec_error(&e), Some(ExecError::Thrown(_))) => Err(e),
 		Err(e) => {
-			match e.downcast_ref() {
-				// If the AUTHENTICATE clause throws a specific error, authentication fails with
-				// that error
-				Some(Error::Thrown(_)) => Err(e),
-				// If the AUTHENTICATE clause failed due to an unexpected error, be more specific
-				// This allows clients to handle these errors, which may be retryable
-				Some(Error::Kvs(kvs_err)) if kvs_err.is_retryable() => {
-					debug!("Unexpected error found while executing AUTHENTICATE clause: {e}");
-					Err(anyhow::Error::new(Error::UnexpectedAuth))
-				}
+			// If the AUTHENTICATE clause failed due to an unexpected error, be more specific
+			// This allows clients to handle these errors, which may be retryable
+			if is_retryable_transaction_conflict(&e) {
+				debug!("Unexpected error found while executing AUTHENTICATE clause: {e}");
+				Err(anyhow::Error::new(AuthError::UnexpectedAuth))
+			} else {
 				// Otherwise, return a generic error unless it should be forwarded
-				_ => {
-					debug!(
-						"Authentication attempt failed due to an error in the AUTHENTICATE clause: {e}"
-					);
-					if kvs.config().insecure_forward_access_errors {
-						Err(e)
-					} else {
-						Err(anyhow::Error::new(Error::InvalidAuth))
-					}
+				debug!(
+					"Authentication attempt failed due to an error in the AUTHENTICATE clause: {e}"
+				);
+				if kvs.config().insecure_forward_access_errors {
+					Err(e)
+				} else {
+					Err(anyhow::Error::new(AuthError::InvalidAuth))
 				}
 			}
 		}
@@ -72,31 +71,28 @@ pub(crate) async fn authenticate_generic(
 				// generically
 				_ => {
 					debug!("Authentication attempt as system user rejected by AUTHENTICATE clause");
-					Err(anyhow::Error::new(Error::InvalidAuth))
+					Err(anyhow::Error::new(AuthError::InvalidAuth))
 				}
 			}
 		}
+		// If the AUTHENTICATE clause throws a specific error, authentication fails with
+		// that error
+		Err(e) if matches!(exec_error(&e), Some(ExecError::Thrown(_))) => Err(e),
 		Err(e) => {
-			match e.downcast_ref() {
-				// If the AUTHENTICATE clause throws a specific error, authentication fails with
-				// that error
-				Some(Error::Thrown(_)) => Err(e),
-				// If the AUTHENTICATE clause failed due to an unexpected error, be more specific
-				// This allows clients to handle these errors, which may be retryable
-				Some(Error::Kvs(kvs_err)) if kvs_err.is_retryable() => {
-					debug!("Unexpected error found while executing an AUTHENTICATE clause: {e}");
-					Err(anyhow::Error::new(Error::UnexpectedAuth))
-				}
+			// If the AUTHENTICATE clause failed due to an unexpected error, be more specific
+			// This allows clients to handle these errors, which may be retryable
+			if is_retryable_transaction_conflict(&e) {
+				debug!("Unexpected error found while executing an AUTHENTICATE clause: {e}");
+				Err(anyhow::Error::new(AuthError::UnexpectedAuth))
+			} else {
 				// Otherwise, return a generic error unless it should be forwarded
-				_ => {
-					debug!(
-						"Authentication attempt failed due to an error in the AUTHENTICATE clause: {e}"
-					);
-					if kvs.config().insecure_forward_access_errors {
-						Err(e)
-					} else {
-						Err(anyhow::Error::new(Error::InvalidAuth))
-					}
+				debug!(
+					"Authentication attempt failed due to an error in the AUTHENTICATE clause: {e}"
+				);
+				if kvs.config().insecure_forward_access_errors {
+					Err(e)
+				} else {
+					Err(anyhow::Error::new(AuthError::InvalidAuth))
 				}
 			}
 		}
@@ -125,13 +121,13 @@ pub(crate) async fn create_refresh_token_record(
 			.await
 			.map_err(|e| {
 				warn!("Unexpected error when attempting to create a refresh token: {e}");
-				anyhow::Error::new(Error::UnexpectedAuth)
+				anyhow::Error::new(AuthError::UnexpectedAuth)
 			})
 	)?;
 	// Return the key string from the bearer grant
 	match grant.grant {
 		catalog::Grant::Bearer(bearer) => Ok(bearer.key),
-		_ => Err(anyhow::Error::new(Error::AccessMethodMismatch)),
+		_ => Err(anyhow::Error::new(AuthError::AccessMethodMismatch)),
 	}
 }
 
@@ -164,7 +160,7 @@ pub async fn revoke_refresh_token_record(
 			.enter(|stk| async {
 				access::revoke_grant(&stmt, stk, &ctx, &opt).await.map_err(|e| {
 					warn!("Unexpected error when attempting to revoke a refresh token: {e}");
-					anyhow::Error::new(Error::UnexpectedAuth)
+					anyhow::Error::new(AuthError::UnexpectedAuth)
 				})
 			})
 			.finish()

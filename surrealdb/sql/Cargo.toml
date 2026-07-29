@@ -1,0 +1,59 @@
+[package]
+name = "surrealdb-sql"
+publish = true
+readme = "README.md"
+documentation = "https://docs.rs/surrealdb-sql/"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+surrealism = []
+arbitrary = [
+    "dep:arbitrary",
+    "dep:regex-syntax",
+    "regex-syntax/arbitrary",
+    "chrono/arbitrary",
+    "rust_decimal/rust-fuzz",
+    "uuid/arbitrary",
+    "surrealdb-types/arbitrary",
+    "common/arbitrary",
+    "surrealdb-strand/arbitrary",
+    "surrealdb-iam/arbitrary",
+]
+
+[dependencies]
+common = { workspace = true }
+surrealdb-iam = { workspace = true }
+surrealdb-strand = { workspace = true }
+surrealdb-types = { workspace = true }
+
+bytes.workspace = true
+chrono = { workspace = true, features = ["serde"] }
+geo = { workspace = true, features = ["use-serde"] }
+hex.workspace = true
+phf = { workspace = true, features = ["macros", "unicase"] }
+rand.workspace = true
+regex.workspace = true
+rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
+serde = { workspace = true, features = ["derive", "rc"] }
+unicase.workspace = true
+uuid = { workspace = true, features = ["serde"] }
+
+arbitrary = { workspace = true, features = ["derive"], optional = true }
+regex-syntax = { workspace = true, optional = true }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+getrandom = { workspace = true, features = ["wasm_js"] }
+
+[dev-dependencies]
+rstest = { workspace = true }
+
+[lints]
+workspace = true

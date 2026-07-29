@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 
-use crate::err::Error;
+use crate::err::EngineError;
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
 use crate::exec::physical_expr::EvalContext;
 use crate::expr::Kind;
@@ -45,7 +45,7 @@ impl ScalarFunction for SequenceNextval {
 		Box::pin(async move {
 			let frozen = ctx.exec_ctx.ctx();
 			let opt = ctx.exec_ctx.options().ok_or_else(|| {
-				anyhow::anyhow!(Error::Internal(
+				anyhow::anyhow!(EngineError::Internal(
 					"No options available for sequence operation".to_string()
 				))
 			})?;

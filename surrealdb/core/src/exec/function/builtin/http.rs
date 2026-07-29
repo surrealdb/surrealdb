@@ -18,21 +18,21 @@ use crate::{define_async_function, register_functions};
 
 #[cfg(not(feature = "http"))]
 async fn http_disabled() -> Result<Value> {
-	Err(anyhow::anyhow!(crate::err::Error::HttpDisabled))
+	Err(anyhow::anyhow!(crate::dbs::capabilities::Error::HttpDisabled))
 }
 
 #[cfg(feature = "http")]
 fn extract_uri(args: &[Value], fn_name: &str) -> Result<String> {
 	match args.first() {
 		Some(Value::String(s)) => Ok(s.as_str().to_owned()),
-		Some(v) => Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
+		Some(v) => Err(anyhow::anyhow!(crate::expr::Error::InvalidFunctionArguments {
 			name: fn_name.to_owned(),
 			message: format!(
 				"The first argument should be a string containing a valid URI, got: {}",
 				v.kind_of()
 			),
 		})),
-		None => Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
+		None => Err(anyhow::anyhow!(crate::expr::Error::InvalidFunctionArguments {
 			name: fn_name.to_owned(),
 			message: "Missing URI argument".to_string(),
 		})),
@@ -44,7 +44,7 @@ fn extract_opts(args: &[Value], index: usize, fn_name: &str) -> Result<Object> {
 	match args.get(index) {
 		Some(Value::Object(o)) => Ok(o.clone()),
 		None => Ok(Object::default()),
-		Some(v) => Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
+		Some(v) => Err(anyhow::anyhow!(crate::expr::Error::InvalidFunctionArguments {
 			name: fn_name.to_owned(),
 			message: format!("Options argument should be an object, got: {}", v.kind_of()),
 		})),
@@ -202,8 +202,8 @@ async fn http_request(
 	use http::header::CONTENT_TYPE;
 
 	use crate::err::Error;
-	use crate::sql::expression::convert_public_value_to_internal;
 	use crate::types::{PublicBytes, PublicValue};
+	use crate::val::convert_public::convert_public_value_to_internal;
 
 	// On browser WASM the reqwest futures and response held across the awaits
 	// below are not `Send`; the wrapper asserts `Send` for the whole block.

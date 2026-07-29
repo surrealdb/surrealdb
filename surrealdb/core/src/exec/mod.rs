@@ -39,7 +39,6 @@ use std::sync::Arc;
 
 use futures::Stream;
 
-use crate::err::Error;
 // Re-export FlowResult, FlowResultExt, and ControlFlowExt for operator implementations
 pub(crate) use crate::expr::{ControlFlowExt, FlowResult, FlowResultExt};
 use crate::val::Value;
@@ -52,6 +51,7 @@ pub(crate) mod access_mode;
 pub(crate) mod buffer;
 pub(crate) mod cardinality;
 pub(crate) mod context;
+pub(crate) mod error;
 pub(crate) mod expression_registry;
 pub(crate) mod field_path;
 pub(crate) mod function;
@@ -75,6 +75,7 @@ pub(crate) use buffer::buffer_stream;
 pub(crate) use cardinality::CardinalityHint;
 // Re-export context types
 pub(crate) use context::{ContextLevel, DatabaseContext, ExecutionContext};
+pub(crate) use error::Error;
 // Re-export metrics types
 pub(crate) use metrics::{OperatorMetrics, monitor_stream};
 // Re-export ordering types
@@ -157,10 +158,15 @@ pub(crate) trait ExecOperator: Debug + Send + Sync {
 	/// Only called if `mutates_context()` returns true.
 	/// This method may perform async operations (like looking up namespace/database
 	/// definitions or creating transactions).
+	/// The error is `anyhow` rather than a concrete enum so that a failure
+	/// raised while evaluating the bound expression reaches the boundary with
+	/// its type intact. Flattening it here cost the transactor's retry loop its
+	/// ability to see a write conflict, and cancellation and timeout their
+	/// classification.
 	fn output_context<'a>(
 		&'a self,
 		input: &'a ExecutionContext,
-	) -> BoxFut<'a, Result<ExecutionContext, Error>> {
+	) -> BoxFut<'a, anyhow::Result<ExecutionContext>> {
 		Box::pin(async move { Ok(input.clone()) })
 	}
 

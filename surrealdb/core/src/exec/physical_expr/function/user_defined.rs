@@ -11,10 +11,10 @@ use super::helpers::{
 	validate_return,
 };
 use crate::catalog::providers::DatabaseProvider;
-use crate::err::Error;
+use crate::dbs::capabilities::Error as CapabilitiesError;
 use crate::exec::physical_expr::{BlockPhysicalExpr, EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, BoxFut};
-use crate::expr::{ControlFlow, FlowResult};
+use crate::exec::{AccessMode, BoxFut, Error as ExecError};
+use crate::expr::{ControlFlow, Error as ExprError, FlowResult};
 use crate::val::Value;
 
 /// User-defined function expression - fn::my_function(), etc.
@@ -55,7 +55,9 @@ impl PhysicalExpr for UserDefinedFunctionExec {
 
 			// 2. Check if function is allowed by capabilities
 			if !ctx.capabilities().allows_function_name(&func_name) {
-				return Err(Error::FunctionNotAllowed(func_name).into());
+				return Err(
+					anyhow::Error::new(CapabilitiesError::FunctionNotAllowed(func_name)).into()
+				);
 			}
 
 			// 3. Retrieve function definition
@@ -100,7 +102,7 @@ impl PhysicalExpr for UserDefinedFunctionExec {
 			let mut local_params: HashMap<Strand, Value> = HashMap::new();
 			for ((param_name, kind), arg_value) in func_def.args.iter().zip(evaluated_args) {
 				let coerced = arg_value.coerce_to_kind(kind).map_err(|e| {
-					Error::InvalidFunctionArguments {
+					ExprError::InvalidFunctionArguments {
 						name: func_name.clone(),
 						message: format!("Failed to coerce argument `${param_name}`: {e}"),
 					}
@@ -114,7 +116,9 @@ impl PhysicalExpr for UserDefinedFunctionExec {
 				isolated_ctx = isolated_ctx.with_param(name.clone(), value.clone());
 			}
 
-			// 9. Execute the function block
+			// 9. Execute the function block. The block is re-planned into physical expressions on
+			//    every call (see `BlockPhysicalExpr`'s doc comment -- deliberately not cached, to
+			//    let the planner see resolved LET bindings).
 			let block_expr = BlockPhysicalExpr {
 				block: func_def.block.clone(),
 			};
@@ -136,7 +140,7 @@ impl PhysicalExpr for UserDefinedFunctionExec {
 				Err(ControlFlow::Return(v)) => v,
 				Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
 					// BREAK/CONTINUE inside a function (outside of loop) is an error
-					return Err(Error::InvalidControlFlow.into());
+					return Err(ExecError::InvalidControlFlow.into());
 				}
 				Err(e) => return Err(e),
 			};

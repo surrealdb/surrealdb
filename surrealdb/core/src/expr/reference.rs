@@ -1,11 +1,9 @@
-use revision::revisioned;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use super::Value;
 use super::statements::info::InfoStructure;
 use crate::expr::Expr;
 
-#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct Reference {
 	pub(crate) on_delete: ReferenceDeleteStrategy,
@@ -27,7 +25,6 @@ impl InfoStructure for Reference {
 	}
 }
 
-#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum ReferenceDeleteStrategy {
 	Reject,

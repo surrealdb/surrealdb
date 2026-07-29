@@ -97,7 +97,7 @@ pub(crate) fn index_covers_ordering(
 				.cols
 				.iter()
 				.take(prefix.len())
-				.filter_map(|idiom| crate::exec::field_path::FieldPath::try_from(idiom).ok())
+				.filter_map(|s| crate::exec::field_path::FieldPath::try_from(s).ok())
 				.collect();
 			(prefix.len(), paths)
 		}
@@ -105,7 +105,7 @@ pub(crate) fn index_covers_ordering(
 			let paths: Vec<_> = ix_def
 				.cols
 				.iter()
-				.filter_map(|idiom| crate::exec::field_path::FieldPath::try_from(idiom).ok())
+				.filter_map(|s| crate::exec::field_path::FieldPath::try_from(s).ok())
 				.collect();
 			(ix_def.cols.len(), paths)
 		}
@@ -127,8 +127,8 @@ pub(crate) fn index_covers_ordering(
 		.cols
 		.iter()
 		.skip(skip_cols)
-		.filter_map(|idiom| {
-			crate::exec::field_path::FieldPath::try_from(idiom).ok().map(|path| SortProperty {
+		.filter_map(|s| {
+			crate::exec::field_path::FieldPath::try_from(s).ok().map(|path| SortProperty {
 				path,
 				direction: dir,
 				collate: false,

@@ -19,6 +19,7 @@ use tracing::instrument;
 
 use super::pipeline::{ScanPipeline, build_field_state};
 use super::resolved::ResolvedTableContext;
+use crate::err::EngineError;
 use crate::exec::field_path::FieldPath;
 use crate::exec::operators::SortDirection;
 use crate::exec::ordering::{OutputOrdering, SortProperty};
@@ -409,7 +410,7 @@ impl ExecOperator for UnionIndexScan {
 					.context("Failed to get table")?;
 
 				if table_def.is_none() {
-					Err(ControlFlow::Err(anyhow::Error::new(crate::err::Error::TbNotFound {
+					Err(ControlFlow::Err(anyhow::Error::new(crate::catalog::Error::TbNotFound {
 						name: table_name.clone(),
 					})))?;
 				}
@@ -497,7 +498,7 @@ impl ExecOperator for UnionIndexScan {
 				loop {
 					// Check for cancellation
 					if ctx.cancellation().is_cancelled() {
-						Err(ControlFlow::Err(anyhow::anyhow!(crate::err::Error::QueryCancelled)))?;
+						Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)))?;
 					}
 
 					// Find the cursor with the best key.
@@ -588,9 +589,7 @@ impl ExecOperator for UnionIndexScan {
 					while let Some(batch_result) = sub_stream.next().await {
 						// Check for cancellation between batches
 						if ctx.cancellation().is_cancelled() {
-							Err(ControlFlow::Err(anyhow::anyhow!(
-								crate::err::Error::QueryCancelled
-							)))?;
+							Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)))?;
 						}
 
 						let batch: ValueBatch = batch_result?;

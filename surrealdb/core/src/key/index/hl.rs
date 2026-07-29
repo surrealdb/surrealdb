@@ -2,10 +2,11 @@
 use std::borrow::Cow;
 use std::fmt::Debug;
 
+use surrealdb_strand::TableName;
+
 use crate::catalog::IndexId;
 use crate::key::database::all::DatabaseRoot;
 use crate::key::{impl_kv_key_storekey, impl_kv_range_storekey, key};
-use crate::val::TableName;
 
 key! {
 	#[derive(Debug, Clone, PartialEq)]

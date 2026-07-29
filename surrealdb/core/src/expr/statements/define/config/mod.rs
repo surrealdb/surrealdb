@@ -10,15 +10,22 @@ use reblessive::tree::Stk;
 
 use crate::catalog::base::Base;
 use crate::catalog::providers::{DatabaseProvider, RootProvider};
-use crate::catalog::{ConfigDefinition, GraphQLConfig};
+use crate::catalog::{ConfigDefinition, Error, GraphQLConfig};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::expr::Value;
 use crate::expr::statements::define::DefineKind;
 use crate::iam::{Action, ConfigKind, ResourceKind};
 use crate::key::database::all::DatabaseRoot;
+
+/// Map a config kind to the base at which it is administered.
+pub(crate) fn config_kind_base(kind: &ConfigKind) -> Base {
+	match kind {
+		ConfigKind::Default => Base::Root,
+		ConfigKind::GraphQL | ConfigKind::Api => Base::Db,
+	}
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct DefineConfigStatement {
@@ -71,7 +78,7 @@ impl DefineConfigStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		let kind = self.inner.kind();
-		let base = kind.base();
+		let base = config_kind_base(&kind);
 		// Allowed to run?
 		ctx.is_allowed(opt, Action::Edit, ResourceKind::Config(kind), base.clone().into())?;
 		// Fetch the transaction
@@ -105,7 +112,7 @@ impl DefineConfigStatement {
 				};
 				let store = self.inner.compute(stk, ctx, opt, doc).await?;
 				// Put the config
-				txn.replace_key(&key, &store).await?;
+				txn.replace_key(&key, &store.to_stored()).await?;
 				// Clear the cache
 				txn.clear_cache();
 			}
@@ -139,7 +146,7 @@ impl DefineConfigStatement {
 				};
 				let store = self.inner.compute(stk, ctx, opt, doc).await?;
 				// Put the config
-				txn.replace_key(&key, &store).await?;
+				txn.replace_key(&key, &store.to_stored()).await?;
 				// Clear the cache
 				txn.clear_cache();
 			}

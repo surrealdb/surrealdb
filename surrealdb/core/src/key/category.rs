@@ -129,7 +129,7 @@ pub enum Category {
 	/// crate::key::table::ft                /*{ns}*{db}*{tb}!ft{ft}
 	TableView, // (ft = foreign table = view)
 	/// crate::key::table::ix                /*{ns}*{db}*{tb}!ix{ix}
-	IndexDefinition,
+	TableIndex,
 	/// crate::key::table::lq                /*{ns}*{db}*{tb}!lq{lq}
 	TableLiveQuery,
 	///
@@ -271,7 +271,7 @@ impl Display for Category {
 			Self::TableEvent => "TableEvent",
 			Self::TableField => "TableField",
 			Self::TableView => "TableView",
-			Self::IndexDefinition => "IndexDefinition",
+			Self::TableIndex => "TableIndex",
 			Self::TableLiveQuery => "TableLiveQuery",
 			Self::IndexRoot => "IndexRoot",
 			Self::IndexTermDocList => "IndexTermDocList",

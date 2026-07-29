@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 use surrealdb_types::SurrealValue;
 
 use crate::dbs::Session;
-use crate::err::Error;
+use crate::expr::Error;
 use crate::kvs::Datastore;
-use crate::sql::expression::convert_public_value_to_internal;
+use crate::val::convert_public::convert_public_value_to_internal;
 use crate::val::{Object, Value, convert_object_to_public_map};
 use crate::{iam, syn};
 pub static HEADER: LazyLock<Header> = LazyLock::new(|| Header::new(Algorithm::HS512));

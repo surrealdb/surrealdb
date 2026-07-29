@@ -5,11 +5,11 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use super::DefineKind;
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider};
-use crate::catalog::{FunctionDefinition, Permission};
+use crate::catalog::{Error as CatalogError, FunctionDefinition, Permission};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::{Base, Block, Expr, FlowResultExt, Kind};
 use crate::iam::{Action, AuthLimit, ResourceKind};
 use crate::val::Value;
@@ -44,7 +44,7 @@ impl DefineFunctionStatement {
 		super::validate_graphql_alias(&self.graphql_alias, "function")?;
 		// A PERMISSIONS clause must not perform writes (GHSA-66r2-5gwj-gxm2).
 		if self.permissions.has_direct_write() {
-			bail!(Error::PermissionClauseNotReadonly {
+			bail!(ExecError::PermissionClauseNotReadonly {
 				kind: "function",
 				name: format!("fn::{}", self.name),
 			});
@@ -57,7 +57,7 @@ impl DefineFunctionStatement {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
-						bail!(Error::FcAlreadyExists {
+						bail!(CatalogError::FcAlreadyExists {
 							name: format!("fn::{}", self.name),
 						});
 					}

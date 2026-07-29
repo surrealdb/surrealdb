@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use reblessive::tree::Stk;
@@ -7,8 +7,7 @@ use surrealdb_types::ToSql;
 use crate::catalog::FieldDefinition;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
-use crate::doc::{CursorDoc, Document};
-use crate::err::Error;
+use crate::doc::{CursorDoc, Document, Error};
 use crate::expr::FlowResultExt as _;
 use crate::val::RecordId;
 
@@ -100,31 +99,16 @@ impl Document {
 			.await;
 		};
 
-		// Build dependency metadata for computed fields only.
-		let mut dep_map: HashMap<String, crate::expr::computed_deps::ComputedDeps> = HashMap::new();
-		for fd in fields.iter() {
-			if fd.computed.is_none() {
-				continue;
-			}
-			let field_name = fd.name.to_raw_string();
-			let deps = if let Some(cd) = &fd.computed_deps {
-				crate::expr::computed_deps::ComputedDeps {
-					fields: cd.fields.clone(),
-					is_complete: cd.is_complete,
-				}
-			} else if let Some(expr) = &fd.computed {
-				crate::expr::computed_deps::extract_computed_deps(expr)
-			} else {
-				crate::expr::computed_deps::ComputedDeps::default()
-			};
-			dep_map.insert(field_name, deps);
-		}
+		// Derived once when the table context was built, not per document:
+		// extracting them walks every computed field's expression tree, and the
+		// result depends only on the field set.
+		let dep_map = self.doc_ctx.computed_deps()?;
 
 		// Resolve transitive computed-field requirements from the selected
 		// roots. Opaque dependencies trigger a safe full-compute fallback.
 		let required = match crate::expr::computed_deps::resolve_required_computed_fields(
 			needed_roots,
-			&dep_map,
+			dep_map,
 		) {
 			Some(required) => required,
 			None => {

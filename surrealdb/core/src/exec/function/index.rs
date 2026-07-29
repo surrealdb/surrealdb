@@ -228,8 +228,7 @@ impl MatchContext {
 					indexes
 				};
 				let index_def = match indexes.iter().find(|idx| {
-					matches!(&idx.index, Index::FullText(_))
-						&& idx.cols.iter().any(|col| col.0 == self.idiom.0)
+					matches!(&idx.index, Index::FullText(_)) && idx.cols.contains(&self.idiom)
 				}) {
 					Some(def) => def,
 					// No index on this table covers the idiom (e.g. the

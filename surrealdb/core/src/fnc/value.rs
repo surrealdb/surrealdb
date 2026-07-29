@@ -4,8 +4,8 @@ use reblessive::tree::Stk;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::expr::Operation;
+use crate::exec::Error as ExecError;
+use crate::expr::{Error as ExprError, Operation};
 use crate::fnc::args::Optional;
 use crate::val::{Closure, Value};
 
@@ -30,15 +30,15 @@ pub async fn expect(
 			Value::Bool(true) => Ok(value),
 			Value::Bool(false) => {
 				if let Some(Value::String(user_message)) = message {
-					bail!(Error::Thrown(format!(
+					bail!(ExecError::Thrown(format!(
 						"value::expect assertion failed with message: '{user_message}'"
 					)))
 				} else {
-					bail!(Error::Thrown("value::expect assertion failed".to_owned()))
+					bail!(ExecError::Thrown("value::expect assertion failed".to_owned()))
 				}
 			}
 			other => {
-				bail!(Error::InvalidFunctionArguments {
+				bail!(ExprError::InvalidFunctionArguments {
 					name: "value::expect".to_owned(),
 					message: format!(
 						"Assertion closure must return a bool, got {}",

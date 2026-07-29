@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::ops::Deref;
 use std::str::FromStr;
 
+use common::fmt::EscapeKwFreeIdent;
 use reblessive::Stack;
 use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
@@ -16,7 +17,6 @@ use crate::expr::part::{Next, NextMethod};
 use crate::expr::paths::{ID, IN, OUT};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, FlowResult, FlowResultExt, Literal, Part, Value};
-use crate::fmt::EscapeKwFreeIdent;
 use crate::val::Number;
 
 pub mod recursion;
@@ -271,12 +271,19 @@ impl ToSql for Idiom {
 	}
 }
 
-impl FromStr for Idiom {
-	type Err = revision::Error;
-	fn from_str(s: &str) -> Result<Self, Self::Err> {
+impl Idiom {
+	/// Shared parse for the two string forms of an idiom: fresh runtime
+	/// strings ([`FromStr`], default limits) and the engine-rendered wire
+	/// encoding ([`DeserializeRevisioned`],
+	/// [`crate::syn::parser::ParserSettings::STORED_TEXT`]). Parses a full
+	/// expression and requires it to be exactly an idiom.
+	fn parse_str_with_settings(
+		s: &str,
+		settings: crate::syn::parser::ParserSettings,
+	) -> Result<Self, revision::Error> {
 		let buf = s.as_bytes();
 		let mut stack = Stack::new();
-		let mut parser = crate::syn::parser::Parser::new_with_experimental(buf, true);
+		let mut parser = crate::syn::parser::Parser::new_with_settings(buf, settings);
 		let expr = stack
 			.enter(|stk| parser.parse_expr(stk))
 			.finish()
@@ -292,6 +299,18 @@ impl FromStr for Idiom {
 			crate::sql::Expr::Idiom(idiom) => Ok(idiom.into()),
 			_ => Err(revision::Error::Conversion("Expected an idiom".to_string())),
 		}
+	}
+}
+
+impl FromStr for Idiom {
+	type Err = revision::Error;
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		// Fresh input (e.g. a runtime-evaluated field name): parse under the
+		// default limits, not the stored-text profile.
+		Self::parse_str_with_settings(
+			s,
+			crate::syn::parser::ParserSettings::default_with_experimental(true),
+		)
 	}
 }
 
@@ -313,9 +332,9 @@ impl SerializeRevisioned for Idiom {
 impl DeserializeRevisioned for Idiom {
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
 		let s: String = DeserializeRevisioned::deserialize_revisioned(reader)?;
-		let idiom =
-			Idiom::from_str(&s).map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
-		Ok(idiom)
+		// The wire format is engine-rendered SurrealQL text; see the constant
+		// for why decode is capability- and limit-independent.
+		Idiom::parse_str_with_settings(&s, crate::syn::parser::ParserSettings::STORED_TEXT)
 	}
 }
 

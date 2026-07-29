@@ -12,10 +12,8 @@ use crate::catalog::{DatabaseId, Distance, Index, IndexDefinition, NamespaceId};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::{CursorDoc, DocumentContext};
-use crate::err::Error;
 use crate::expr::operator::{BooleanOperator, MatchesOperator};
 use crate::expr::{Cond, Expr, FlowResultExt as _, Idiom};
-use crate::idx::IndexKeyBase;
 use crate::idx::ft::MatchRef;
 use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms, Scorer};
 use crate::idx::ft::highlighter::HighlightParams;
@@ -35,6 +33,7 @@ use crate::idx::trees::KnnCondFilter;
 #[cfg(diskann)]
 use crate::idx::trees::store::diskann::SharedDiskAnnIndex;
 use crate::idx::trees::store::hnsw::SharedHnswIndex;
+use crate::idx::{Error, IndexKeyBase};
 use crate::val::{Array, Number, Object, RecordId, TableName, Value};
 
 pub(super) type KnnBruteForceEntry = (KnnPriorityList, Idiom, Arc<Vec<Number>>, Distance);
@@ -258,19 +257,18 @@ impl InnerQueryExecutor {
 									.expect_tb(
 										doc_ctx.ns().namespace_id,
 										doc_ctx.db().database_id,
-										&index_reference.table_name,
+										&index_reference.table_name.clone(),
 									)
 									.await?;
+								let ikb = crate::idx::IndexKeyBase::new(
+									doc_ctx.ns().namespace_id,
+									doc_ctx.db().database_id,
+									index_reference.table_name.clone(),
+									index_reference.index_id,
+								);
 								let hi = ctx
 									.get_index_stores()
-									.get_index_hnsw(
-										doc_ctx.ns().namespace_id,
-										doc_ctx.db().database_id,
-										ctx,
-										tb.table_id,
-										index_reference,
-										p,
-									)
+									.get_index_hnsw(ctx, tb.table_id, &ikb, p)
 									.await?;
 								// Ensure the local HNSW index is up to date with the KVS
 								hi.check_state(ctx).await?;
@@ -324,18 +322,18 @@ impl InnerQueryExecutor {
 									.expect_tb(
 										doc_ctx.ns().namespace_id,
 										doc_ctx.db().database_id,
-										&index_reference.table_name,
+										&index_reference.table_name.clone(),
 									)
 									.await?;
+								let ikb = crate::idx::IndexKeyBase::new(
+									doc_ctx.ns().namespace_id,
+									doc_ctx.db().database_id,
+									index_reference.table_name.clone(),
+									index_reference.index_id,
+								);
 								let di = ctx
 									.get_index_stores()
-									.get_index_diskann(
-										doc_ctx.ns().namespace_id,
-										doc_ctx.db().database_id,
-										tb.table_id,
-										index_reference,
-										p,
-									)
+									.get_index_diskann(tb.table_id, &ikb, p)
 									.await?;
 								// Ensure the local DiskANN index is up to date with the KVS
 								di.check_state().await?;
@@ -575,7 +573,7 @@ impl QueryExecutor {
 			IndexOperator::Count => Some(RecordIterator::IndexCount(IndexCountThingIterator::new(
 				ns,
 				db,
-				&ix.table_name,
+				&ix.table_name.clone(),
 				ix.index_id,
 			)?)),
 			_ => None,

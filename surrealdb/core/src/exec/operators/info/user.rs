@@ -8,8 +8,8 @@ use std::sync::Arc;
 use futures::stream;
 use surrealdb_types::ToSql;
 
+use crate::catalog::Error;
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, UserProvider};
-use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{

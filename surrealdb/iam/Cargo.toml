@@ -1,0 +1,33 @@
+[package]
+name = "surrealdb-iam"
+publish = true
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license-file.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+arbitrary = ["dep:arbitrary"]
+
+[dependencies]
+anyhow = { workspace = true }
+base64 = { workspace = true }
+hmac = { workspace = true }
+pbkdf2 = { workspace = true }
+rand_core = { workspace = true }
+revision = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+sha2 = { workspace = true }
+stringprep = { workspace = true }
+subtle = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+arbitrary = { workspace = true, features = ["derive"], optional = true }
+
+[lints]
+workspace = true

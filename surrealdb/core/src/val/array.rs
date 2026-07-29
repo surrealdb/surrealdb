@@ -6,8 +6,7 @@ use revision::revisioned;
 use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::err::Error;
-use crate::expr::Expr;
+use crate::expr::{Error, Expr};
 use crate::val::{IndexFormat, Set, Value};
 
 /// - **Rev 1** — `u16 revision || Vec<Value>` (length-prefixed). Byte-identical to the legacy

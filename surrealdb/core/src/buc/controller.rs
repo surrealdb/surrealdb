@@ -4,14 +4,14 @@ use std::sync::Arc;
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 
+use super::Error;
 use super::store::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
 use crate::catalog::providers::BucketProvider;
 use crate::catalog::{BucketDefinition, Permission};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err;
-use crate::expr::FlowResultExt;
+use crate::expr::{Error as ExprError, FlowResultExt};
 use crate::iam::Action;
 use crate::val::{Bytes, File, Value};
 
@@ -19,7 +19,7 @@ use crate::val::{Bytes, File, Value};
 ///
 /// Accepts `Bytes` or `String` values and converts them into `bytes::Bytes`.
 fn accept_payload(value: Value) -> Result<bytes::Bytes> {
-	value.cast_to::<Bytes>().map(|x| x.0).map_err(err::Error::from).map_err(anyhow::Error::new)
+	value.cast_to::<Bytes>().map(|x| x.0).map_err(ExprError::from).map_err(anyhow::Error::new)
 }
 
 /// Allows you to control a specific bucket in the context of the current user
@@ -73,7 +73,7 @@ impl<'a> BucketController<'a> {
 	/// Checks if the bucket allows writes, and if not, return an
 	/// `Error::ReadonlyBucket`
 	fn require_writeable(&self) -> Result<()> {
-		ensure!(!self.bucket.readonly, err::Error::ReadonlyBucket(self.bucket.name.to_string()));
+		ensure!(!self.bucket.readonly, Error::ReadonlyBucket(self.bucket.name.to_string()));
 		Ok(())
 	}
 
@@ -89,7 +89,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.put(key, payload)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
+			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
 
 		Ok(())
 	}
@@ -108,7 +108,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.put_if_not_exists(key, payload)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
+			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
 
 		Ok(())
 	}
@@ -122,7 +122,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.head(key)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.to_string(), e))
+			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_string(), e))
 			.map_err(anyhow::Error::new)
 	}
 
@@ -136,7 +136,7 @@ impl<'a> BucketController<'a> {
 			.store
 			.get(key)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?
+			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?
 		{
 			Some(v) => v,
 			None => return Ok(None),
@@ -155,7 +155,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.delete(key)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
+			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
 
 		Ok(())
 	}
@@ -170,7 +170,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.copy(key, &target)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
+			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
 
 		Ok(())
 	}
@@ -189,7 +189,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.copy_if_not_exists(key, &target)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
+			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
 
 		Ok(())
 	}
@@ -205,7 +205,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.rename(key, &target)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
+			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
 
 		Ok(())
 	}
@@ -224,7 +224,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.rename_if_not_exists(key, &target)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
+			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
 
 		Ok(())
 	}
@@ -235,7 +235,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.exists(key)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.to_string(), e))
+			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_string(), e))
 			.map_err(anyhow::Error::new)
 	}
 
@@ -248,7 +248,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.list(opts)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.to_string(), e))
+			.map_err(|e| Error::ObjectStoreFailure(self.bucket.name.to_string(), e))
 			.map_err(anyhow::Error::new)
 	}
 
@@ -272,7 +272,7 @@ impl<'a> BucketController<'a> {
 			// Guest and Record users are not allowed to list files in buckets
 			ensure!(
 				!op.is_list(),
-				err::Error::BucketPermissions {
+				Error::BucketPermissions {
 					name: self.bucket.name.to_string(),
 					op,
 				}
@@ -280,7 +280,7 @@ impl<'a> BucketController<'a> {
 
 			match &self.bucket.permissions {
 				Permission::None => {
-					bail!(err::Error::BucketPermissions {
+					bail!(Error::BucketPermissions {
 						name: self.bucket.name.to_string(),
 						op,
 					})
@@ -323,7 +323,7 @@ impl<'a> BucketController<'a> {
 						.catch_return()?;
 					ensure!(
 						res.is_truthy(),
-						err::Error::BucketPermissions {
+						Error::BucketPermissions {
 							name: self.bucket.name.to_string(),
 							op,
 						}

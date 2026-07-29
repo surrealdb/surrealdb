@@ -12,8 +12,8 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Variables};
 use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::expr::{ClosureExpr, Expr, FlowResultExt, Kind, Param};
+use crate::exec::Error as ExecError;
+use crate::expr::{ClosureExpr, Error as ExprError, Expr, FlowResultExt, Kind, Param};
 use crate::fnc::args::Any;
 use crate::val::Value;
 
@@ -158,7 +158,7 @@ impl Closure {
 				if arg_spec.len() > args.len()
 					&& let Some(x) = arg_spec[args.len()..].iter().find(|x| !x.1.can_be_none())
 				{
-					bail!(Error::InvalidFunctionArguments {
+					bail!(ExprError::InvalidFunctionArguments {
 						name: "ANONYMOUS".to_string(),
 						message: format!("Expected a value for {}", x.0.to_sql()),
 					})
@@ -168,7 +168,7 @@ impl Closure {
 					if let Ok(val) = val.coerce_to_kind(kind) {
 						ctx.add_value(name.as_str(), val.into());
 					} else {
-						bail!(Error::InvalidFunctionArguments {
+						bail!(ExprError::InvalidFunctionArguments {
 							name: "ANONYMOUS".to_string(),
 							message: format!(
 								"Expected a value of type '{}' for argument {}",
@@ -185,7 +185,7 @@ impl Closure {
 				if let Some(returns) = &returns {
 					result
 						.coerce_to_kind(returns)
-						.map_err(|e| Error::ReturnCoerce {
+						.map_err(|e| ExecError::ReturnCoerce {
 							name: "ANONYMOUS".to_string(),
 							error: Box::new(e),
 						})

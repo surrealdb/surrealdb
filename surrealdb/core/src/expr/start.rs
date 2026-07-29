@@ -6,7 +6,7 @@ use super::FlowResultExt as _;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::Expr;
 use crate::val::{Number, Value};
 
@@ -25,7 +25,7 @@ impl Start {
 			// This is a valid starting number
 			Ok(Value::Number(Number::Int(v))) if v >= 0 => {
 				if v > u32::MAX as i64 {
-					Err(anyhow::Error::new(Error::InvalidStart {
+					Err(anyhow::Error::new(ExecError::InvalidStart {
 						value: v.to_string(),
 					}))
 				} else {
@@ -33,7 +33,7 @@ impl Start {
 				}
 			}
 			// An invalid value was specified
-			Ok(v) => Err(anyhow::Error::new(Error::InvalidStart {
+			Ok(v) => Err(anyhow::Error::new(ExecError::InvalidStart {
 				value: v.into_raw_string(),
 			})),
 			// A different error occurred

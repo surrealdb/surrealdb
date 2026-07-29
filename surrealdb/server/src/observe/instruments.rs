@@ -216,8 +216,8 @@ pub mod attrs {
 	/// Resolved database identifier (sentinel `"-"` when unset).
 	pub static DATABASE: &str = "database";
 	/// Resolved user / actor identifier (sentinel `"-"` when unset, `<record>` for
-	/// record-access principals — see
-	/// [`surrealdb_core::observe::TenantIdentity::from_session`]).
+	/// record-access principals — see the `From<&Session>` impl for
+	/// [`surrealdb_core::observe::TenantIdentity`]).
 	pub static USER: &str = "user";
 	/// Bounded session protocol identifier (`websocket` / `http`).
 	pub static PROTOCOL: &str = "protocol";
@@ -264,7 +264,6 @@ pub mod attrs {
 /// classification, cancel/timeout paths), the kvs commit-failure path, and
 /// from the RPC dispatch shim. Server crates additionally use them via the
 /// shared classifier helpers ([`error_class::classify_types_error`],
-/// [`error_class::classify_anyhow_error`],
 /// [`error_class::classify_http_status`]) at the HTTP / GraphQL / MCP layers.
 pub use surrealdb_core::observe::error_class;
 

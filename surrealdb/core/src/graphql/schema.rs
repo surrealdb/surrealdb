@@ -108,12 +108,18 @@ pub async fn generate_schema(
 			match graphql_config.tables {
 				GraphQLTablesConfig::None => None,
 				GraphQLTablesConfig::Auto => Some(tbs),
-				GraphQLTablesConfig::Include(inc) => {
-					Some(tbs.iter().filter(|t| inc.contains(&t.name)).cloned().collect())
-				}
-				GraphQLTablesConfig::Exclude(exc) => {
-					Some(tbs.iter().filter(|t| !exc.contains(&t.name)).cloned().collect())
-				}
+				GraphQLTablesConfig::Include(inc) => Some(
+					tbs.iter()
+						.filter(|t| inc.iter().any(|x| x.as_str() == t.name.as_str()))
+						.cloned()
+						.collect(),
+				),
+				GraphQLTablesConfig::Exclude(exc) => Some(
+					tbs.iter()
+						.filter(|t| !exc.iter().any(|x| x.as_str() == t.name.as_str()))
+						.cloned()
+						.collect(),
+				),
 			}
 		}
 	};

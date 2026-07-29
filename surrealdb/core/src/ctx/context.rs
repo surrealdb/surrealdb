@@ -21,15 +21,17 @@ use url::Url;
 use uuid::Uuid;
 use web_time::Instant;
 
+use crate::buc::Error as BucError;
 use crate::buc::manager::BucketsManager;
 #[cfg(feature = "surrealism")]
 use crate::buc::store::ObjectKey;
 use crate::buc::store::ObjectStore;
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider, NamespaceProvider};
-use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseDefinition, DatabaseId, Error as CatalogError, NamespaceId};
 use crate::ctx::cancel::CancelHandle;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
+use crate::dbs::capabilities::Error as CapabilitiesError;
 #[cfg(feature = "surrealism")]
 use crate::dbs::capabilities::ExperimentalTarget;
 #[cfg(feature = "http")]
@@ -39,7 +41,8 @@ use crate::dbs::capabilities::Targets;
 use crate::dbs::{
 	Capabilities, MessageBroker, NewPlannerStrategy, Options, Session, StatementCounters, Variables,
 };
-use crate::err::Error;
+use crate::err::{EngineError, Error};
+use crate::exec::Error as ExecError;
 use crate::exec::function::FunctionRegistry;
 use crate::expr::Base;
 #[cfg(feature = "http")]
@@ -48,17 +51,17 @@ use crate::iam::{Action, ResourceKind};
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
-use crate::kvs::Transaction;
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
+use crate::kvs::{DatastoreError, Transaction};
 use crate::mem::ALLOC;
-use crate::sql::expression::convert_public_value_to_internal;
 #[cfg(feature = "surrealism")]
 use crate::surrealism::cache::{SurrealismCache, SurrealismCacheLookup, SurrealismCachedModule};
 use crate::types::PublicVariables;
 use crate::val::Value;
+use crate::val::convert_public::convert_public_value_to_internal;
 
 pub type FrozenContext = Arc<Context>;
 
@@ -571,7 +574,7 @@ impl Context {
 	/// applied in [`Context::attach_session`]).
 	pub(crate) fn realtime(&self) -> Result<()> {
 		if !self.live {
-			bail!(Error::RealtimeDisabled);
+			bail!(DatastoreError::RealtimeDisabled);
 		}
 		Ok(())
 	}
@@ -605,7 +608,7 @@ impl Context {
 			return Ok(());
 		}
 
-		opt.auth.is_allowed(action, &res)
+		Ok(opt.auth.is_allowed(action, &res).map_err(crate::err::Error::from)?)
 	}
 
 	/// Table-level permission check frequency (mirrors former [`Options::check_perms`]).
@@ -649,7 +652,7 @@ impl Context {
 	pub(crate) async fn expect_ns_id(&self, opt: &Options) -> Result<NamespaceId> {
 		let ns = opt.ns()?;
 		let Some(ns_def) = self.tx().get_ns_by_name(ns, None).await? else {
-			return Err(Error::NsNotFound {
+			return Err(CatalogError::NsNotFound {
 				name: ns.to_string(),
 			}
 			.into());
@@ -688,7 +691,7 @@ impl Context {
 	) -> Result<(NamespaceId, DatabaseId)> {
 		let (ns, db) = opt.ns_db()?;
 		let Some(db_def) = self.tx().get_db_by_name(ns, db, None).await? else {
-			return Err(Error::DbNotFound {
+			return Err(CatalogError::DbNotFound {
 				name: db.to_string(),
 			}
 			.into());
@@ -777,13 +780,13 @@ impl Context {
 	/// Add a timeout to the context. If the current timeout is sooner than
 	/// the provided timeout, this method does nothing. If the result of the
 	/// addition causes an overflow, this method returns an error.
-	pub(crate) fn add_timeout(&mut self, timeout: Duration) -> Result<(), Error> {
+	pub(crate) fn add_timeout(&mut self, timeout: Duration) -> Result<(), DatastoreError> {
 		match Instant::now().checked_add(timeout) {
 			Some(deadline) => {
 				self.add_deadline(deadline, timeout);
 				Ok(())
 			}
-			None => Err(Error::InvalidTimeout(timeout.as_secs())),
+			None => Err(DatastoreError::InvalidTimeout(timeout.as_secs())),
 		}
 	}
 
@@ -879,7 +882,9 @@ impl Context {
 		if let Some(sqs) = self.get_sequences() {
 			Ok(sqs)
 		} else {
-			bail!(Error::Internal("Sequences are not supported in this context.".to_string(),))
+			bail!(
+				EngineError::Internal("Sequences are not supported in this context.".to_string(),)
+			)
 		}
 	}
 
@@ -918,7 +923,7 @@ impl Context {
 		}
 		if deep_check {
 			if ALLOC.is_beyond_threshold() {
-				bail!(Error::QueryBeyondMemoryThreshold);
+				bail!(DatastoreError::QueryBeyondMemoryThreshold);
 			}
 			let now = Instant::now();
 			if let Some((deadline, timeout)) = self.deadline
@@ -981,7 +986,7 @@ impl Context {
 
 	pub(crate) async fn expect_not_timedout(&self) -> Result<()> {
 		if let Some(d) = self.is_timedout().await? {
-			bail!(Error::QueryTimedout(d.into()))
+			bail!(EngineError::QueryTimedout(d))
 		} else {
 			Ok(())
 		}
@@ -1056,8 +1061,7 @@ impl Context {
 		}
 		// Pre-resolve the tenant identity so emit sites do not need to
 		// re-walk the session value tree on every event dispatch.
-		self.tenant_identity =
-			Some(Arc::new(crate::observe::TenantIdentity::from_session(session)));
+		self.tenant_identity = Some(Arc::new(crate::observe::TenantIdentity::from(session)));
 		Ok(())
 	}
 
@@ -1070,9 +1074,10 @@ impl Context {
 	pub(crate) fn attach_variables(&mut self, vars: Variables) -> Result<(), Error> {
 		for (name, val) in vars {
 			if PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
-				return Err(Error::InvalidParam {
+				return Err(ExecError::InvalidParam {
 					name: name.into_string(),
-				});
+				}
+				.into());
 			}
 			self.add_value(name, Arc::new(val));
 		}
@@ -1082,9 +1087,10 @@ impl Context {
 	pub(crate) fn attach_public_variables(&mut self, vars: PublicVariables) -> Result<(), Error> {
 		for (name, val) in vars {
 			if PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
-				return Err(Error::InvalidParam {
+				return Err(ExecError::InvalidParam {
 					name,
-				});
+				}
+				.into());
 			}
 			self.add_value(name, Arc::new(convert_public_value_to_internal(val)));
 		}
@@ -1142,7 +1148,7 @@ impl Context {
 	pub(crate) fn check_allowed_scripting(&self) -> Result<()> {
 		if !self.capabilities.allows_scripting() {
 			warn!("Capabilities denied scripting attempt");
-			bail!(Error::ScriptingNotAllowed);
+			bail!(CapabilitiesError::ScriptingNotAllowed);
 		}
 		trace!("Capabilities allowed scripting");
 		Ok(())
@@ -1152,7 +1158,7 @@ impl Context {
 	pub(crate) fn check_allowed_function(&self, target: &str) -> Result<()> {
 		if !self.capabilities.allows_function_name(target) {
 			warn!("Capabilities denied function execution attempt, target: '{target}'");
-			bail!(Error::FunctionNotAllowed(target.to_string()));
+			bail!(CapabilitiesError::FunctionNotAllowed(target.to_string()));
 		}
 		trace!("Capabilities allowed function execution, target: '{target}'");
 		Ok(())
@@ -1199,7 +1205,7 @@ impl Context {
 		let match_any_deny_net = |t| {
 			if self.capabilities.matches_any_deny_net(t) {
 				warn!("Capabilities denied outgoing network connection attempt, target: '{t}'");
-				bail!(Error::NetTargetNotAllowed(t.to_string()));
+				bail!(CapabilitiesError::NetTargetNotAllowed(t.to_string()));
 			}
 			Ok(())
 		};
@@ -1212,7 +1218,7 @@ impl Context {
 					warn!(
 						"Capabilities denied outgoing network connection attempt, target: '{target}'"
 					);
-					bail!(Error::NetTargetNotAllowed(target.to_string()));
+					bail!(CapabilitiesError::NetTargetNotAllowed(target.to_string()));
 				}
 				// Check against the deny list
 				match_any_deny_net(&target)?;
@@ -1246,7 +1252,7 @@ impl Context {
 		if let Some(buckets) = &self.buckets {
 			buckets.get_bucket_store(&self.tx(), ns, db, bu).await
 		} else {
-			bail!(Error::BucketUnavailable(bu.into()))
+			bail!(BucError::BucketUnavailable(bu.into()))
 		}
 	}
 
@@ -1624,7 +1630,7 @@ mod tests {
 		// 3. Deadline (checked when deep_check=true, returns Reason::Timedout)
 
 		// When ALLOC.is_beyond_threshold() returns true, done() will bail with
-		// Error::QueryBeyondMemoryThreshold before checking the deadline.
+		// DatastoreError::QueryBeyondMemoryThreshold before checking the deadline.
 		// This ensures memory violations are always detected before timeout errors.
 
 		let ctx = Context::new_test();
@@ -1649,7 +1655,7 @@ mod tests {
 	#[cfg(all(feature = "allocation-tracking", feature = "allocator"))]
 	#[serial_test::serial]
 	async fn test_context_memory_threshold_integration() {
-		use crate::err::Error;
+		use crate::kvs::DatastoreError;
 		use crate::str::ParseBytes;
 
 		// Set a low memory threshold (1MB) before MEMORY_THRESHOLD is accessed
@@ -1694,8 +1700,8 @@ mod tests {
 		match result {
 			Err(e) => {
 				// Verify it's the correct error type
-				match e.downcast_ref::<Error>() {
-					Some(Error::QueryBeyondMemoryThreshold) => {
+				match e.downcast_ref::<DatastoreError>() {
+					Some(DatastoreError::QueryBeyondMemoryThreshold) => {
 						// Success! Memory threshold was properly detected
 						println!("✓ Memory threshold violation detected as expected");
 					}

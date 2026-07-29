@@ -3,7 +3,7 @@ use std::borrow::Cow;
 
 use anyhow::Result;
 
-use crate::catalog::ModuleDefinition;
+use crate::catalog::StoredModuleDefinition;
 use crate::key::category::{Categorise, Category};
 use crate::key::database::all::DatabaseRoot;
 use crate::key::{impl_kv_key_storekey, impl_kv_range_storekey, key};
@@ -18,7 +18,7 @@ key! {
 		pub md: Cow<'a, str>,
 	}
 }
-impl_kv_key_storekey!(Md<'a> => ModuleDefinition);
+impl_kv_key_storekey!(Md<'a> => StoredModuleDefinition);
 
 impl Categorise for Md<'_> {
 	fn categorise(&self) -> Category {

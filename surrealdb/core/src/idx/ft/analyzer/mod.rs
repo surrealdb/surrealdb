@@ -11,14 +11,15 @@ use surrealdb_types::ToSql;
 use crate::catalog;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
-use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::FlowResultExt as _;
+use crate::expr::convert::analyzer_function::function_from_storage;
 use crate::idx::ft::analyzer::filter::FilteringStage;
 use crate::idx::ft::analyzer::tokenizer::{Tokenizer, Tokens};
 use crate::idx::ft::offset::Offset;
 use crate::idx::ft::{DocLength, TermFrequency};
 use crate::idx::trees::store::IndexStores;
-use crate::sql::analyzer_function::{function_from_storage, qualified_name};
+use crate::sql::analyzer_function::qualified_name;
 use crate::val::Value;
 
 pub(in crate::idx::ft) mod filter;
@@ -106,7 +107,7 @@ impl Analyzer {
 			if let Value::String(val) = val {
 				val
 			} else {
-				bail!(Error::InvalidFunction {
+				bail!(ExecError::InvalidFunction {
 					name: display_name,
 					message: "The function should return a string.".to_string(),
 				});

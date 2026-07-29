@@ -353,3 +353,209 @@ async fn test_remove_table_invalidates_live_cache() -> Result<()> {
 
 	Ok(())
 }
+
+// REMOVE DATABASE destroys every `lq` row in the database as part of the
+// deferred prefix delete, so every subscriber in it is owed a Killed. Before
+// this was wired up the statement notified nobody and every LIVE client on
+// every table in the database waited forever on keys that no longer existed.
+#[tokio::test]
+async fn test_remove_database_kills_live_queries() -> Result<()> {
+	let (channel, dbs) = new_ds("test", "test", true).await?;
+
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+
+	// Two tables, one subscription each, so the walk over `all_tb` is exercised
+	// rather than just the single-table path.
+	let sql = "
+		DEFINE TABLE tb1;
+		DEFINE TABLE tb2;
+		LIVE SELECT * FROM tb1;
+		LIVE SELECT * FROM tb2;
+	";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 4);
+	skip_ok(res, 2)?;
+	let lq1 = res.remove(0).result?;
+	let lq2 = res.remove(0).result?;
+	assert_eq!(lq1.kind(), Kind::Uuid);
+	assert_eq!(lq2.kind(), Kind::Uuid);
+
+	let sql = "REMOVE DATABASE test;";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	skip_ok(res, 1)?;
+
+	// Exactly one Killed per subscription, in either order.
+	let mut killed = vec![];
+	for _ in 0..2 {
+		let tmp = channel.recv().await?;
+		assert_eq!(tmp.action, Action::Killed);
+		killed.push(Value::Uuid(tmp.id));
+	}
+	killed.sort();
+	let mut expected = vec![lq1, lq2];
+	expected.sort();
+	assert_eq!(killed, expected);
+
+	// And nothing further.
+	tokio::time::sleep(Duration::from_millis(500)).await;
+	assert!(channel.try_recv().is_err());
+
+	Ok(())
+}
+
+// The same for REMOVE NAMESPACE, which additionally walks `all_db`.
+#[tokio::test]
+async fn test_remove_namespace_kills_live_queries() -> Result<()> {
+	let (channel, dbs) = new_ds("test", "test", true).await?;
+
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	let sql = "
+		DEFINE TABLE tb;
+		LIVE SELECT * FROM tb;
+	";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	skip_ok(res, 1)?;
+	let lqid = res.remove(0).result?;
+	assert_eq!(lqid.kind(), Kind::Uuid);
+
+	let sql = "REMOVE NAMESPACE test;";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	skip_ok(res, 1)?;
+
+	let tmp = channel.recv().await?;
+	assert_eq!(tmp.action, Action::Killed);
+	assert_eq!(Value::Uuid(tmp.id), lqid);
+
+	tokio::time::sleep(Duration::from_millis(500)).await;
+	assert!(channel.try_recv().is_err());
+
+	Ok(())
+}
+
+// The Killed notifications are owed only if the removal becomes durable.
+// Sending them eagerly would tear down every subscription in the database for
+// a statement a later rollback undoes, leaving the restored `lq` rows with no
+// listener.
+#[tokio::test]
+async fn test_cancelled_remove_database_sends_no_kill() -> Result<()> {
+	let (channel, dbs) = new_ds("test", "test", true).await?;
+
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	let sql = "
+		DEFINE TABLE tb;
+		LIVE SELECT * FROM tb;
+	";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	skip_ok(res, 2)?;
+
+	let sql = "
+		BEGIN;
+		REMOVE DATABASE test;
+		CANCEL;
+	";
+	let _ = dbs.execute(sql, &ses, None).await?;
+
+	tokio::time::sleep(Duration::from_millis(500)).await;
+	assert!(
+		channel.try_recv().is_err(),
+		"a cancelled REMOVE DATABASE must not tell subscribers they are dead"
+	);
+
+	Ok(())
+}
+
+// Redefining a table as a view wipes its whole key range, `lq` rows included,
+// so it owes its subscribers a Killed for the same reason `REMOVE TABLE` does.
+// The obligation follows the key range rather than the statement, which is why
+// it was missed when the fan-out was first written at the REMOVE statements.
+#[tokio::test]
+async fn test_overwrite_table_as_view_kills_live_queries() -> Result<()> {
+	let (channel, dbs) = new_ds("test", "test", true).await?;
+
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	let sql = "
+		DEFINE TABLE src;
+		DEFINE TABLE tb;
+		LIVE SELECT * FROM tb;
+	";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	skip_ok(res, 2)?;
+	let lqid = res.remove(0).result?;
+	assert_eq!(lqid.kind(), Kind::Uuid);
+
+	let sql = "DEFINE TABLE OVERWRITE tb AS SELECT count() FROM src GROUP ALL;";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	skip_ok(res, 1)?;
+
+	let tmp = channel.recv().await?;
+	assert_eq!(tmp.action, Action::Killed);
+	assert_eq!(Value::Uuid(tmp.id), lqid);
+
+	tokio::time::sleep(Duration::from_millis(500)).await;
+	assert!(channel.try_recv().is_err());
+
+	Ok(())
+}
+
+// A subscription captures the `Auth` of whoever ran the LIVE and replays it on
+// every notification, so revoking that principal does not stop delivery on its
+// own: without teardown, `REMOVE USER u` leaves u's subscriptions streaming
+// rows to a still-open socket, evaluated under u's permissions.
+#[tokio::test]
+async fn test_remove_user_kills_their_live_queries() -> Result<()> {
+	let (channel, dbs) = new_ds("test", "test", true).await?;
+
+	let owner = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	let sql = "
+		DEFINE TABLE tb PERMISSIONS FULL;
+		DEFINE USER alice ON DATABASE PASSWORD 'x' ROLES OWNER;
+	";
+	let res = &mut dbs.execute(sql, &owner, None).await?;
+	assert_eq!(res.len(), 2);
+	skip_ok(res, 2)?;
+
+	// alice subscribes.
+	let alice = Session::for_level(
+		surrealdb_core::iam::Level::Database("test".into(), "test".into()),
+		surrealdb_core::iam::Role::Owner,
+	)
+	.with_ns("test")
+	.with_db("test")
+	.with_rt(true);
+	let alice = Session {
+		au: std::sync::Arc::new(surrealdb_core::iam::Auth::new(surrealdb_core::iam::Actor::new(
+			"alice".to_string(),
+			vec![surrealdb_core::iam::Role::Owner],
+			surrealdb_core::iam::Level::Database("test".into(), "test".into()),
+		))),
+		..alice
+	};
+	let res = &mut dbs.execute("LIVE SELECT * FROM tb", &alice, None).await?;
+	assert_eq!(res.len(), 1);
+	let lqid = res.remove(0).result?;
+	assert_eq!(lqid.kind(), Kind::Uuid);
+
+	// Revoking alice must tear her subscription down.
+	let res = &mut dbs.execute("REMOVE USER alice ON DATABASE", &owner, None).await?;
+	assert_eq!(res.len(), 1);
+	skip_ok(res, 1)?;
+
+	let tmp = channel.recv().await?;
+	assert_eq!(tmp.action, Action::Killed);
+	assert_eq!(Value::Uuid(tmp.id), lqid);
+
+	// And no further notification reaches her.
+	let res = &mut dbs.execute("CREATE tb:1", &owner, None).await?;
+	assert_eq!(res.len(), 1);
+	skip_ok(res, 1)?;
+	tokio::time::sleep(Duration::from_millis(500)).await;
+	assert!(channel.try_recv().is_err(), "a revoked principal must stop receiving rows");
+
+	Ok(())
+}

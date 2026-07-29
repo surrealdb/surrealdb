@@ -39,7 +39,7 @@ use crate::val::{Closure, Value};
 /// # Returns
 /// * `Ok(response)` - Processed request; includes 404/403 when no handler or permission denied
 /// * `Err(e)` - Error during processing (e.g. middleware or handler failure)
-pub async fn process_api_request(
+pub(crate) async fn process_api_request(
 	ctx: &FrozenContext,
 	opt: &Options,
 	api: &ApiDefinition,
@@ -64,7 +64,7 @@ pub async fn process_api_request(
 /// # Returns
 /// * `Ok(response)` - Processed request; 404/403 when no handler or permission denied
 /// * `Err(e)` - Error during processing (e.g. middleware or handler failure)
-pub async fn process_api_request_with_stack(
+pub(crate) async fn process_api_request_with_stack(
 	stk: &mut Stk,
 	ctx: &FrozenContext,
 	opt: &Options,
@@ -179,7 +179,7 @@ pub async fn process_api_request_with_stack(
 	});
 
 	// APIs run without permissions & limit auth
-	let opt = AuthLimit::try_from(&api.auth_limit)?.limit_opt(opt);
+	let opt = opt.limited_by(&AuthLimit::try_from(&api.auth_limit)?);
 	let opt = opt.new_with_perms(false);
 
 	debug!(

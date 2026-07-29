@@ -9,10 +9,10 @@ use super::helpers::{args_access_mode, args_required_context};
 use super::helpers::{check_permission, evaluate_args, validate_return};
 #[cfg(feature = "surrealism")]
 use crate::catalog::providers::DatabaseProvider;
-#[cfg(feature = "surrealism")]
-use crate::err::Error;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, BoxFut};
+#[cfg(feature = "surrealism")]
+use crate::expr::Error;
 use crate::expr::FlowResult;
 use crate::val::Value;
 

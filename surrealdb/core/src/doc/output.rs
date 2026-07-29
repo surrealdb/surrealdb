@@ -338,7 +338,7 @@ impl Document {
 			// PERMISSIONS FOR select so the predicate runs under the
 			// definer's downgraded auth, not the caller's. Mirrors the
 			// pluck.rs / field.rs paths.
-			let opt = AuthLimit::try_from(&fd.auth_limit)?.limit_opt(opt);
+			let opt = opt.limited_by(&AuthLimit::try_from(&fd.auth_limit)?);
 			// Process the field permissions
 			match &fd.select_permission {
 				Permission::Full => (),

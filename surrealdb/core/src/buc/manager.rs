@@ -7,10 +7,9 @@ use dashmap::mapref::entry::Entry;
 use crate::buc::store::metered::MeteredObjectStore;
 use crate::buc::store::prefixed::PrefixedStore;
 use crate::buc::store::{ObjectKey, ObjectStore};
-use crate::buc::{BucketStoreProvider, Config};
+use crate::buc::{BucketStoreProvider, Config, Error};
 use crate::catalog::providers::BucketProvider;
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::err::Error;
 use crate::kvs::Transaction;
 use crate::observe::ExecutionObserver;
 

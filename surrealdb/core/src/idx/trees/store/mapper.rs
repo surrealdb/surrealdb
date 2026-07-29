@@ -5,7 +5,7 @@ use anyhow::{Result, bail};
 use dashmap::DashMap;
 
 use crate::catalog;
-use crate::err::Error;
+use crate::err::EngineError;
 use crate::expr::Filter;
 use crate::iam::file::check_is_path_allowed;
 use crate::idx::ft::analyzer::mapper::Mapper;
@@ -54,7 +54,7 @@ impl Mappers {
 		// Check the path is allowed
 		check_is_path_allowed(p, allow_list)?;
 		if !p.exists() || !p.is_file() {
-			bail!(Error::Internal(format!("Invalid mapper path: {p:?}")));
+			bail!(EngineError::Internal(format!("Invalid mapper path: {p:?}")));
 		}
 		let mapper = Mapper::new(p, allow_list).await?;
 		self.0.insert(path.to_string(), mapper);
@@ -63,9 +63,9 @@ impl Mappers {
 
 	pub(in crate::idx) fn get(&self, path: &str) -> Result<Mapper> {
 		match self.0.get(path) {
-			None => {
-				Err(anyhow::Error::new(Error::Internal(format!("Mapper not found for {path}"))))
-			}
+			None => Err(anyhow::Error::new(EngineError::Internal(format!(
+				"Mapper not found for {path}"
+			)))),
 			Some(e) => Ok(e.value().clone()),
 		}
 	}

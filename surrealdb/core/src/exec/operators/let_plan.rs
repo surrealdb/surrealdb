@@ -12,8 +12,8 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::{
-	AccessMode, BoxFut, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics,
-	ValueBatchStream, buffer_stream,
+	AccessMode, BoxFut, CardinalityHint, Error as ExecError, ExecOperator, FlowResult,
+	OperatorMetrics, ValueBatchStream, buffer_stream,
 };
 use crate::expr::Kind;
 use crate::val::{Array, Value};
@@ -53,9 +53,12 @@ impl LetPlan {
 
 	fn coerce(&self, value: Value) -> Result<Value, Error> {
 		match &self.kind {
-			Some(kind) => value.coerce_to_kind(kind).map_err(|e| Error::SetCoerce {
-				name: self.name.to_string(),
-				error: Box::new(e),
+			Some(kind) => value.coerce_to_kind(kind).map_err(|e| {
+				ExecError::SetCoerce {
+					name: self.name.to_string(),
+					error: Box::new(e),
+				}
+				.into()
 			}),
 			None => Ok(value),
 		}
@@ -98,7 +101,7 @@ impl ExecOperator for LetPlan {
 	fn output_context<'a>(
 		&'a self,
 		input: &'a ExecutionContext,
-	) -> BoxFut<'a, Result<ExecutionContext, Error>> {
+	) -> BoxFut<'a, anyhow::Result<ExecutionContext>> {
 		Box::pin(async move {
 			// Execute the value plan and collect results
 			// Handle control flow signals explicitly
@@ -115,13 +118,12 @@ impl ExecOperator for LetPlan {
 					return Ok(input.with_param(self.name.clone(), coerced));
 				}
 				Err(crate::expr::ControlFlow::Break | crate::expr::ControlFlow::Continue) => {
-					return Err(Error::InvalidControlFlow);
+					return Err(Error::Exec(ExecError::InvalidControlFlow).into());
 				}
-				Err(crate::expr::ControlFlow::Err(e)) => {
-					return Err(Error::Thrown(e.to_string()));
-				}
+				// Propagated unchanged; see the trait's `output_context`.
+				Err(crate::expr::ControlFlow::Err(e)) => return Err(e),
 			};
-			let results = collect_stream(stream).await.map_err(|e| Error::Thrown(e.to_string()))?;
+			let results = collect_stream(stream).await?;
 
 			// If the value is a scalar expression, use the single result directly
 			// Otherwise, wrap the results in an array

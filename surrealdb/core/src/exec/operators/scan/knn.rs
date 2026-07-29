@@ -14,8 +14,7 @@ use surrealdb_types::ToSql;
 use super::common::fetch_and_filter_records_batch;
 use super::pipeline::{ScanPipeline, build_field_state};
 use super::resolved::ResolvedTableContext;
-use crate::catalog::Index;
-use crate::err::Error;
+use crate::catalog::{Error, Index};
 use crate::exec::index::access_path::IndexRef;
 use crate::exec::permission::{
 	CachedTableSelect, PhysicalPermission, convert_permission_to_physical_runtime,
@@ -46,7 +45,7 @@ pub struct KnnScan {
 	/// ANN search expansion factor
 	pub ef: u32,
 	/// Table name for record fetching
-	pub table_name: crate::val::TableName,
+	pub table_name: surrealdb_strand::TableName,
 	/// Optional VERSION timestamp for time-travel queries.
 	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
 	/// Plan-time resolved table context. When present, `execute()` skips
@@ -86,7 +85,7 @@ impl KnnScan {
 		vector: Vec<Number>,
 		k: u32,
 		ef: u32,
-		table_name: crate::val::TableName,
+		table_name: surrealdb_strand::TableName,
 		version: Option<Arc<dyn PhysicalExpr>>,
 		knn_context: Option<Arc<crate::exec::function::KnnContext>>,
 		residual_cond: Option<Cond>,
@@ -279,19 +278,18 @@ impl ExecOperator for KnnScan {
 			// serve KNN searches. Mirrors the plan-time gate in
 			// idx/planner/tree.rs.
 			index_def.ensure_current_format()?;
+			let ikb = crate::idx::IndexKeyBase::new(
+				ns.namespace_id,
+				db.database_id,
+				index_def.table_name.clone(),
+				index_def.index_id,
+			);
 			let knn_results = match &index_def.index {
 				Index::Hnsw(hnsw_params) => {
 					// Obtain the shared HNSW index
 					let hnsw_index = frozen_ctx
 						.get_index_stores()
-						.get_index_hnsw(
-							ns.namespace_id,
-							db.database_id,
-							frozen_ctx,
-							table_id,
-							index_def,
-							hnsw_params,
-						)
+						.get_index_hnsw(frozen_ctx, table_id, &ikb, hnsw_params)
 						.await
 						.context("Failed to get HNSW index")?;
 
@@ -327,13 +325,7 @@ impl ExecOperator for KnnScan {
 				Index::DiskAnn(diskann_params) => {
 					let diskann_index = frozen_ctx
 						.get_index_stores()
-						.get_index_diskann(
-							ns.namespace_id,
-							db.database_id,
-							table_id,
-							index_def,
-							diskann_params,
-						)
+						.get_index_diskann(table_id, &ikb, diskann_params)
 						.await
 						.context("Failed to get DiskANN index")?;
 

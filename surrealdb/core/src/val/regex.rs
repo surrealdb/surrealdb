@@ -100,6 +100,18 @@ impl ToSql for Regex {
 	}
 }
 
+impl From<regex::Regex> for Regex {
+	fn from(v: regex::Regex) -> Self {
+		Self(v)
+	}
+}
+
+impl From<Regex> for regex::Regex {
+	fn from(v: Regex) -> Self {
+		v.0
+	}
+}
+
 impl From<surrealdb_types::Regex> for Regex {
 	fn from(v: surrealdb_types::Regex) -> Self {
 		Self(v.into_inner())

@@ -5,6 +5,7 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use surrealdb_strand::Strand;
 use uuid::Uuid;
 
 use super::{BUILD_OWNER_LEASE_SECS, BuildGeneration, BuildTicket};
@@ -305,12 +306,15 @@ pub(super) async fn catalog_still_references_index(
 	tx: &Transaction,
 	ns: NamespaceId,
 	db: DatabaseId,
-	ix: &IndexDefinition,
+	table_name: &TableName,
+	index_name: &Strand,
+	index_id: IndexId,
 ) -> Result<bool> {
-	let Some(current) = tx.get_tb_index(ns, db, &ix.table_name, &ix.name, None).await? else {
+	let Some(current) = tx.get_tb_index(ns, db, &table_name.clone(), index_name, None).await?
+	else {
 		return Ok(false);
 	};
-	Ok(!current.prepare_remove && current.index_id == ix.index_id)
+	Ok(!current.prepare_remove && current.index_id == index_id)
 }
 
 /// Remove indexes that have a durable build state but are not online.
@@ -338,7 +342,7 @@ pub(crate) async fn filter_online_indexes(
 				ns,
 				db,
 			},
-			tb: Cow::Borrowed(&ix.table_name),
+			tb: Cow::Owned(ix.table_name.clone()),
 			ix: ix.index_id,
 		})
 		.collect();
@@ -348,7 +352,10 @@ pub(crate) async fn filter_online_indexes(
 	for (ix, state) in indexes.iter().zip(states) {
 		let online = match state {
 			Some(state) => state.phase == IndexBuildPhase::Online,
-			None => catalog_still_references_index(tx, ns, db, ix).await?,
+			None => {
+				catalog_still_references_index(tx, ns, db, &ix.table_name, &ix.name, ix.index_id)
+					.await?
+			}
 		};
 		if online {
 			filtered.push(ix.clone());

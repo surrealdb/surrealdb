@@ -1,0 +1,118 @@
+use std::ops::Bound;
+
+use common::fmt::{EscapeObjectKey, EscapeRidKey, Fmt, QuoteStr};
+use surrealdb_strand::Strand;
+use surrealdb_types::{RecordIdKey as PublicRecordIdKey, SqlFormat, ToSql, write_sql};
+
+use crate::literal::ObjectEntry;
+use crate::{CoverStmts, Expr, RecordIdKeyRangeLit};
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub enum RecordIdKeyGen {
+	Rand,
+	Ulid,
+	Uuid,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub enum RecordIdKeyLit {
+	Number(i64),
+	String(Strand),
+	Uuid(uuid::Uuid),
+	Array(Vec<Expr>),
+	Object(Vec<ObjectEntry>),
+	Generate(RecordIdKeyGen),
+	Range(Box<RecordIdKeyRangeLit>),
+}
+
+impl RecordIdKeyLit {
+	pub fn from_record_id_key(key: PublicRecordIdKey) -> Self {
+		match key {
+			PublicRecordIdKey::Number(x) => RecordIdKeyLit::Number(x),
+			PublicRecordIdKey::String(x) => RecordIdKeyLit::String(x.into()),
+			PublicRecordIdKey::Uuid(x) => RecordIdKeyLit::Uuid(x.into_inner()),
+			PublicRecordIdKey::Array(x) => {
+				RecordIdKeyLit::Array(x.into_iter().map(Expr::from_public_value).collect())
+			}
+			PublicRecordIdKey::Object(x) => RecordIdKeyLit::Object(
+				x.into_iter()
+					.map(|(k, v)| ObjectEntry {
+						key: k.into(),
+						value: Expr::from_public_value(v),
+					})
+					.collect(),
+			),
+			PublicRecordIdKey::Range(x) => {
+				let range = x.into_inner();
+				RecordIdKeyLit::Range(Box::new(RecordIdKeyRangeLit {
+					start: match range.0 {
+						Bound::Included(x) => Bound::Included(Self::from_record_id_key(x)),
+						Bound::Excluded(x) => Bound::Excluded(Self::from_record_id_key(x)),
+						Bound::Unbounded => Bound::Unbounded,
+					},
+					end: match range.1 {
+						Bound::Included(x) => Bound::Included(Self::from_record_id_key(x)),
+						Bound::Excluded(x) => Bound::Excluded(Self::from_record_id_key(x)),
+						Bound::Unbounded => Bound::Unbounded,
+					},
+				}))
+			}
+		}
+	}
+}
+
+impl ToSql for RecordIdKeyLit {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match self {
+			Self::Number(v) => write_sql!(f, fmt, "{v}"),
+			Self::String(v) => EscapeRidKey(v).fmt_sql(f, fmt),
+			Self::Uuid(v) => write_sql!(f, fmt, "u{}", QuoteStr(&v.to_string())),
+			Self::Array(v) => {
+				f.push('[');
+				if !v.is_empty() {
+					let fmt = fmt.increment();
+					write_sql!(f, fmt, "{}", Fmt::pretty_comma_separated(v.iter().map(CoverStmts)));
+				}
+				f.push(']');
+			}
+			Self::Object(v) => {
+				if fmt.is_pretty() {
+					f.push('{');
+				} else {
+					f.push_str("{ ");
+				}
+				if !v.is_empty() {
+					let fmt = fmt.increment();
+					write_sql!(
+						f,
+						fmt,
+						"{}",
+						Fmt::pretty_comma_separated(v.iter().map(|args| Fmt::new(
+							args,
+							|entry, f, fmt| write_sql!(
+								f,
+								fmt,
+								"{}: {}",
+								EscapeObjectKey(&entry.key),
+								CoverStmts(&entry.value)
+							)
+						)),)
+					);
+				}
+				if fmt.is_pretty() {
+					f.push('}');
+				} else {
+					f.push_str(" }");
+				}
+			}
+			Self::Generate(v) => match v {
+				RecordIdKeyGen::Rand => f.push_str("rand()"),
+				RecordIdKeyGen::Ulid => f.push_str("ulid()"),
+				RecordIdKeyGen::Uuid => f.push_str("uuid()"),
+			},
+			Self::Range(v) => v.fmt_sql(f, fmt),
+		}
+	}
+}

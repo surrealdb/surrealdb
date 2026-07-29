@@ -337,8 +337,8 @@ impl Websocket {
 					// double-counting on the error path above. `ctx` carries
 					// `(namespace, database, user)` from the bound session;
 					// record-access principals collapse to the `<record>`
-					// sentinel in `NetworkBytesEventCtx::from_session` to keep
-					// dimensional cardinality bounded.
+					// sentinel in `NetworkBytesEventCtx`'s `From<&Session>`
+					// impl to keep dimensional cardinality bounded.
 					if out_bytes > 0 {
 						let ctx = rpc.default_network_ctx().await;
 						rpc.datastore.observer().on_network_bytes(&NetworkBytesEvent {
@@ -717,7 +717,7 @@ impl Websocket {
 			return NetworkBytesEventCtx::default();
 		}
 		match self.get_session(&self.id).await {
-			Ok(lock) => NetworkBytesEventCtx::from_session(&*lock.read().await),
+			Ok(lock) => NetworkBytesEventCtx::from(&*lock.read().await),
 			Err(_) => NetworkBytesEventCtx::default(),
 		}
 	}

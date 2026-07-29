@@ -13,6 +13,7 @@ use rand::seq::SliceRandom;
 #[cfg(not(target_family = "wasm"))]
 use tokio::task::spawn_blocking;
 
+use crate::err::EngineError;
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
 	OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
@@ -98,7 +99,7 @@ impl ExecOperator for RandomShuffle {
 				// Check for cancellation between batches
 				if cancellation.is_cancelled() {
 					return Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(
-						crate::err::Error::QueryCancelled
+						EngineError::QueryCancelled
 					)));
 				}
 				match batch_result {

@@ -1,10 +1,9 @@
 use anyhow::{Result, bail, ensure};
 use surrealdb_types::ToSql;
 
-use crate::err::Error;
-use crate::expr::Operation;
 use crate::expr::operation::PatchError;
 use crate::expr::part::Part;
+use crate::expr::{Error, Operation};
 use crate::val::{Strand, Value};
 
 impl Value {

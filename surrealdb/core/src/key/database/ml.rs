@@ -3,7 +3,7 @@ use std::borrow::Cow;
 
 use anyhow::Result;
 
-use crate::catalog::MlModelDefinition;
+use crate::catalog::StoredMlModelDefinition;
 use crate::key::category::{Categorise, Category};
 use crate::key::database::all::DatabaseRoot;
 use crate::key::{impl_kv_key_storekey, impl_kv_range_storekey, key};
@@ -20,7 +20,7 @@ key! {
 	}
 }
 
-impl_kv_key_storekey!(Ml<'a> => MlModelDefinition);
+impl_kv_key_storekey!(Ml<'a> => StoredMlModelDefinition);
 impl Categorise for Ml<'_> {
 	fn categorise(&self) -> Category {
 		Category::DatabaseModel

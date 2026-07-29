@@ -126,7 +126,7 @@ macro_rules! dispatch {
                     $function_name => {
                         $(
                             if !$ctx.get_capabilities().allows_experimental(&ExperimentalTarget::$exp_target) {
-                                return Err(::anyhow::Error::new($crate::err::Error::InvalidFunction {
+                                return Err(::anyhow::Error::new($crate::exec::Error::InvalidFunction {
                                     name: String::from($name),
                                     message: format!("Experimental feature {} is not enabled", ExperimentalTarget::$exp_target),
                                 }));
@@ -138,7 +138,7 @@ macro_rules! dispatch {
                     },
                 )+
                 _ => {
-                    return Err(::anyhow::Error::new($crate::err::Error::InvalidFunction{
+                    return Err(::anyhow::Error::new($crate::exec::Error::InvalidFunction{
                         name: String::from($name),
                         message: $message.to_string()
                     }))

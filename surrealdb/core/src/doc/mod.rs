@@ -6,10 +6,12 @@
 //! - `id`: traditionally an integer but can be an object or collection such as an array
 
 pub(crate) use self::document::*;
+pub(crate) use self::error::Error;
 pub use self::event::AsyncEventRecord;
 pub(crate) use self::lives::DefaultBroker;
 
 mod document; // The entry point for a document to be processed
+mod error; // The failures raised while validating and writing a document
 
 mod create; // Processes a CREATE statement for this document
 mod delete; // Processes a DELETE statement for this document

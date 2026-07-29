@@ -39,7 +39,7 @@ use surrealdb_cnf::CommonConfig;
 
 pub use self::lower::PreparedGqlQuery;
 use crate::dbs::Capabilities;
-use crate::err::Error;
+use crate::syn::ParseError;
 use crate::syn::error::{SyntaxError, syntax_error};
 use crate::syn::token::Span;
 
@@ -60,7 +60,7 @@ pub fn parse_with_settings(
 	settings: GqlParserSettings,
 ) -> Result<ast::GqlQuery, SyntaxError> {
 	// `parse_with_capabilities` rejects oversized input with the dedicated
-	// `Error::QueryTooLarge` (mirroring `syn`); this guard keeps the `u32`
+	// `ParseError::QueryTooLarge` (mirroring `syn`); this guard keeps the `u32`
 	// span arithmetic safe for direct callers of the raw parser API.
 	if input.len() > u32::MAX as usize {
 		return Err(syntax_error!(
@@ -120,7 +120,7 @@ pub fn settings_from_capabilities_config(
 /// During parsing the nesting depth of expressions counts against the
 /// configured limit; exceeding it is a parse error rather than unbounded
 /// recursion. Errors render exactly like SurrealQL parse errors
-/// ([`Error::InvalidQuery`] with a [`crate::syn::error::RenderedError`]).
+/// ([`ParseError::InvalidQuery`] with a [`crate::syn::error::RenderedError`]).
 #[instrument(level = "trace", target = "surrealdb::core::gql", fields(length = input.len()))]
 pub fn parse_with_capabilities(
 	input: &str,
@@ -129,10 +129,10 @@ pub fn parse_with_capabilities(
 ) -> Result<PreparedGqlQuery> {
 	trace!(target: TARGET, "Parsing GQL query");
 
-	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
+	ensure!(input.len() <= u32::MAX as usize, ParseError::QueryTooLarge);
 	parse_to_plan_with_settings(input, settings_from_capabilities_config(capabilities, config))
 		.map_err(|e| e.render_on(input))
-		.map_err(Error::InvalidQuery)
+		.map_err(ParseError::InvalidQuery)
 		.map_err(anyhow::Error::new)
 }
 

@@ -12,7 +12,8 @@ use surrealdb_types::ToSql;
 use super::common::{fetch_and_filter_records_batch, resolve_version_stamp};
 use super::pipeline::{build_field_state, eval_limit_expr};
 use super::resolved::ResolvedTableContext;
-use crate::err::Error;
+use crate::catalog::Error;
+use crate::err::EngineError;
 use crate::exec::index::access_path::{BTreeAccess, IndexRef};
 use crate::exec::index::iterator::btree::{CompoundEqualIterator, CompoundRangeIterator};
 use crate::exec::index::iterator::{
@@ -48,7 +49,7 @@ pub struct IndexScan {
 	/// Scan direction (forward or backward)
 	pub direction: ScanDirection,
 	/// Table name for record fetching
-	pub table_name: crate::val::TableName,
+	pub table_name: surrealdb_strand::TableName,
 	/// Pushed-down LIMIT expression (evaluated at execution time).
 	pub(crate) limit: Option<Arc<dyn PhysicalExpr>>,
 	/// Pushed-down START expression (evaluated at execution time).
@@ -85,7 +86,7 @@ impl IndexScan {
 		index_ref: IndexRef,
 		access: BTreeAccess,
 		direction: ScanDirection,
-		table_name: crate::val::TableName,
+		table_name: surrealdb_strand::TableName,
 		limit: Option<Arc<dyn PhysicalExpr>>,
 		start: Option<Arc<dyn PhysicalExpr>>,
 		version: Option<Arc<dyn PhysicalExpr>>,
@@ -202,8 +203,8 @@ impl ExecOperator for IndexScan {
 			.cols
 			.iter()
 			.skip(skip_cols)
-			.filter_map(|idiom| {
-				crate::exec::field_path::FieldPath::try_from(idiom).ok().map(|path| SortProperty {
+			.filter_map(|s| {
+				crate::exec::field_path::FieldPath::try_from(s).ok().map(|path| SortProperty {
 					path,
 					direction: dir,
 					collate: false,
@@ -250,7 +251,7 @@ impl ExecOperator for IndexScan {
 			BTreeAccess::Equality(_) => ix_def
 				.cols
 				.iter()
-				.filter_map(|idiom| crate::exec::field_path::FieldPath::try_from(idiom).ok())
+				.filter_map(|s| crate::exec::field_path::FieldPath::try_from(s).ok())
 				.collect(),
 			// Compound prefix columns are all equality-pinned
 			BTreeAccess::Compound {
@@ -260,7 +261,7 @@ impl ExecOperator for IndexScan {
 				.cols
 				.iter()
 				.take(prefix.len())
-				.filter_map(|idiom| crate::exec::field_path::FieldPath::try_from(idiom).ok())
+				.filter_map(|s| crate::exec::field_path::FieldPath::try_from(s).ok())
 				.collect(),
 			_ => vec![],
 		}
@@ -400,9 +401,7 @@ impl ExecOperator for IndexScan {
 
 					loop {
 						if ctx.cancellation().is_cancelled() {
-							Err(ControlFlow::Err(anyhow::anyhow!(
-								crate::err::Error::QueryCancelled
-							)))?;
+							Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)))?;
 						}
 						let rids =
 							iter.next_batch(&txn).await.context("Failed to iterate index")?;
@@ -447,9 +446,7 @@ impl ExecOperator for IndexScan {
 
 					loop {
 						if ctx.cancellation().is_cancelled() {
-							Err(ControlFlow::Err(anyhow::anyhow!(
-								crate::err::Error::QueryCancelled
-							)))?;
+							Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)))?;
 						}
 						let rids =
 							iter.next_batch(&txn).await.context("Failed to iterate index")?;
@@ -510,7 +507,7 @@ impl ExecOperator for IndexScan {
 
 					loop {
 						if ctx.cancellation().is_cancelled() {
-							Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryCancelled)))?;
+							Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)))?;
 						}
 						let rids =
 							iter.next_batch(&txn).await.context("Failed to iterate index")?;
@@ -564,7 +561,7 @@ impl ExecOperator for IndexScan {
 
 					loop {
 						if ctx.cancellation().is_cancelled() {
-							Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryCancelled)))?
+							Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)))?
 						}
 						let rids =
 							iter.next_batch(&txn).await.context("Failed to iterate index")?;
@@ -636,9 +633,7 @@ impl ExecOperator for IndexScan {
 
 					while !rids.is_empty() {
 						if ctx.cancellation().is_cancelled() {
-							Err(ControlFlow::Err(anyhow::anyhow!(
-								crate::err::Error::QueryCancelled
-							)))?;
+							Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)))?;
 						}
 						remaining = remaining.saturating_sub(rids.len() as u32);
 
@@ -731,9 +726,7 @@ impl ExecOperator for IndexScan {
 
 					while !rids.is_empty() {
 						if ctx.cancellation().is_cancelled() {
-							Err(ControlFlow::Err(anyhow::anyhow!(
-								crate::err::Error::QueryCancelled
-							)))?;
+							Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)))?;
 						}
 						remaining = remaining.saturating_sub(rids.len() as u32);
 

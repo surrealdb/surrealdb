@@ -326,7 +326,7 @@ where
 		return HandleResult::Ok;
 	};
 
-	match DbResponse::from_bytes(binary) {
+	match surrealdb_core::rpc::db_response_from_bytes(binary) {
 		Ok(response) => handle_db_response::<M, S, E>(response, sessions, sink).await,
 		Err(error) => {
 			handle_parse_error(

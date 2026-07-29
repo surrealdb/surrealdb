@@ -271,7 +271,7 @@ impl<'a> IndexAnalyzer<'a> {
 	///   inexact subtraction would drop rows the residual filter can never restore.
 	///
 	/// Every b-tree branch requires an index whose entries carry doc-IDs
-	/// ([`IndexDefinition::has_entry_doc_ids`]); full-text branches require
+	/// ([`StoredIndexDefinition::has_entry_doc_ids`]); full-text branches require
 	/// the current index format. Conjuncts that don't qualify simply stay
 	/// out of the plan — the caller keeps the whole WHERE clause as the
 	/// residual filter, so the bitmap only needs to over-approximate the
@@ -320,7 +320,7 @@ impl<'a> IndexAnalyzer<'a> {
 		leaves.sort_by_key(|c| std::cmp::Reverse(c.score()));
 
 		let mut and_children: Vec<BitmapPlan> = Vec::new();
-		let mut covered: Vec<&Idiom> = Vec::new();
+		let mut covered: Vec<Idiom> = Vec::new();
 		for c in leaves {
 			let cols = Self::candidate_pinned_columns(c);
 			if cols.is_empty() || cols.iter().all(|col| covered.contains(col)) {
@@ -457,7 +457,7 @@ impl<'a> IndexAnalyzer<'a> {
 
 	/// The index columns a candidate pins, used to skip branches made
 	/// redundant by an already-selected candidate.
-	fn candidate_pinned_columns(c: &IndexCandidate) -> Vec<&Idiom> {
+	fn candidate_pinned_columns(c: &IndexCandidate) -> Vec<Idiom> {
 		let cols = &c.index_ref.definition().cols;
 		match &c.access {
 			BTreeAccess::Equality(_)
@@ -466,13 +466,13 @@ impl<'a> IndexAnalyzer<'a> {
 			}
 			| BTreeAccess::FullText {
 				..
-			} => cols.first().into_iter().collect(),
+			} => cols.first().cloned().into_iter().collect(),
 			BTreeAccess::Compound {
 				prefix,
 				range,
 			} => {
 				let n = (prefix.len() + usize::from(range.is_some())).min(cols.len());
-				cols[..n].iter().collect()
+				cols[..n].to_vec()
 			}
 			BTreeAccess::Knn {
 				..
@@ -686,7 +686,7 @@ impl<'a> IndexAnalyzer<'a> {
 					BTreeAccess::FullText {
 						..
 					} => true,
-					_ => Self::candidate_pinned_columns(c).iter().all(|col| not_exact_col(col)),
+					_ => Self::candidate_pinned_columns(c).iter().all(not_exact_col),
 				}
 			})
 			.max_by_key(|c| c.score())
@@ -2026,10 +2026,10 @@ mod tests {
 	//!
 	//! These lock in plan-choice behaviour against intentional changes and
 	//! act as regression cover for the analyzer + `select_access_path`
-	//! helpers.  They use small `IndexDefinition` fixtures and parse WHERE /
-	//! ORDER BY snippets via the SurrealQL parser, then drive the analyzer
-	//! directly and assert about the candidate set or the access path that
-	//! `select_access_path` picks.
+	//! helpers.  They use small `IndexDefinition` fixtures and parse
+	//! WHERE / ORDER BY snippets via the SurrealQL parser, then drive the
+	//! analyzer directly and assert about the candidate set or the access
+	//! path that `select_access_path` picks.
 	//!
 	//! Tests are grouped by concern in nested modules so a failure tells you
 	//! which category regressed at a glance.
@@ -2043,21 +2043,21 @@ mod tests {
 	use crate::expr::order::Ordering;
 	use crate::expr::with::With;
 	use crate::expr::{Cond, Expr, Idiom};
-	use crate::val::TableName;
 
 	// ------------------------------------------------------------------
 	// Fixture helpers
 	// ------------------------------------------------------------------
 
-	/// Build a minimal `IndexDefinition`.  Tests use synthetic `index_id`s
-	/// that don't have to match any real catalog state.
+	/// Build a minimal `IndexDefinition`.  Tests use synthetic
+	/// `index_id`s that don't have to match any real catalog state.
 	fn idx_def(id: u32, name: &str, cols: &[&str], kind: Index) -> IndexDefinition {
 		IndexDefinition {
 			index_id: IndexId(id),
 			name: Strand::from(name),
-			table_name: TableName::from("t"),
+			table_name: "t".into(),
 			cols: cols.iter().map(|c| Idiom::from_str(c).expect("valid idiom")).collect(),
 			index: kind,
+			count_cond: None,
 			comment: None,
 			prepare_remove: false,
 			format_version: 1,

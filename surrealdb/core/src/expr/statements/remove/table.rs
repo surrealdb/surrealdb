@@ -1,19 +1,19 @@
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_strand::TableName;
 use uuid::Uuid;
 
 use super::retire_table_indexes;
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{TableDefinition, ViewDefinition};
+use crate::catalog::{Error as CatalogError, TableDefinition};
 use crate::ctx::FrozenContext;
-use crate::dbs::{Options, RoutedNotification};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::exec::Error as ExecError;
 use crate::expr::parameterize::expr_to_ident;
+use crate::expr::statements::subscriptions::kill_table_subscriptions;
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
-use crate::types::{PublicAction, PublicNotification, PublicValue};
-use crate::val::TableName;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct RemoveTableStatement {
@@ -57,7 +57,7 @@ impl RemoveTableStatement {
 				return Ok(Value::None);
 			}
 
-			return Err(Error::TbNotFound {
+			return Err(CatalogError::TbNotFound {
 				name,
 			}
 			.into());
@@ -72,21 +72,24 @@ impl RemoveTableStatement {
 				if idx != 0 {
 					message.push_str("`, `")
 				}
-				message.push_str(&f.name);
+				message.push_str(f.name.as_str());
 			}
 
 			message.push_str("` are defined as a view on this table.");
 
-			bail!(Error::Query {
+			bail!(ExecError::Query {
 				message
 			});
 		}
 
-		// Get the live queries
-		let lvs = txn.all_tb_lives(ns, db, &name, None).await?;
 		// Retire index state before deleting the table definition. Durable
 		// cleanup is transactional; local builder aborts are deferred until commit.
 		retire_table_indexes(ctx, &txn, ns, db, &tb).await?;
+		// Every subscription on the table is about to lose its keys, so each one
+		// is owed a KILLED. Compiling is total, so this reaches subscriptions
+		// whose text no longer parses too: the clients most in need of being
+		// told, since nothing else will ever wake them.
+		kill_table_subscriptions(ctx, &txn, ns, db, &name).await?;
 
 		// Delete the definition
 		if self.expunge {
@@ -109,20 +112,7 @@ impl RemoveTableStatement {
 			txn.del_prefix_key(&key).await?
 		};
 		// Check if this is a foreign table
-		if let Some(view) = &tb.view {
-			let (ViewDefinition::Materialized {
-				tables,
-				..
-			}
-			| ViewDefinition::Aggregated {
-				tables,
-				..
-			}
-			| ViewDefinition::Select {
-				tables,
-				..
-			}) = &view;
-
+		if let Some(tables) = tb.view.as_ref().map(|v| v.source_tables()) {
 			// Process each foreign table
 			for ft in tables.iter() {
 				// Save the view config
@@ -142,31 +132,15 @@ impl RemoveTableStatement {
 					db_name,
 					&TableDefinition {
 						cache_tables_ts: Uuid::now_v7(),
-						..foreign_tb.as_ref().clone()
+						..(*foreign_tb).clone()
 					},
 				)
 				.await?;
 			}
 		}
-		if let Some(sender) = ctx.broker() {
-			for lv in lvs.iter() {
-				sender
-					.send(RoutedNotification::new(
-						lv.node,
-						PublicNotification::new(
-							lv.id.into(),
-							None,
-							PublicAction::Killed,
-							PublicValue::None,
-							PublicValue::None,
-						),
-					))
-					.await;
-			}
-		}
 		// The table (and its committed `cache_lives_ts`) is being removed, so
-		// there is nothing to invalidate: open subscriptions were already sent a
-		// KILLED notification above, and a re-created table gets a fresh
+		// there is nothing to invalidate: open subscriptions were queued a KILLED
+		// notification above, and a re-created table gets a fresh
 		// `cache_lives_ts`, so the live-query cache cannot serve stale entries.
 		// Clear the transaction cache
 		txn.clear_cache();

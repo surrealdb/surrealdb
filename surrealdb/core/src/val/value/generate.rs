@@ -1,7 +1,7 @@
 use anyhow::Result;
 use surrealdb_types::ToSql;
 
-use crate::err::Error;
+use crate::expr::Error;
 use crate::val::{RecordId, RecordIdKey, TableName, Value};
 
 impl Value {
@@ -62,7 +62,7 @@ impl Value {
 					})
 				} else {
 					// Let's use the specified record id
-					if *tb == id.table {
+					if tb == id.table {
 						// The record is from the same table
 						Ok(id)
 					} else {

@@ -1,13 +1,13 @@
 use std::ops::Bound;
 
 use anyhow::{Result, ensure};
+use common::range::TypedRange;
 use surrealdb_cnf::{GENERATION_ALLOCATION_LIMIT, STRING_SIMILARITY_LIMIT};
 use surrealdb_types::ToSql;
 
 use super::args::{Any, Cast, Optional};
-use crate::err::Error;
+use crate::expr::Error;
 use crate::fnc::util::string;
-use crate::val::range::TypedRange;
 use crate::val::{Regex, Value};
 
 /// Returns `true` if a string of this length is too much to allocate.
@@ -289,7 +289,7 @@ pub mod distance {
 	use anyhow::Result;
 	use strsim;
 
-	use crate::err::Error;
+	use crate::expr::Error;
 	use crate::val::Value;
 
 	/// Calculate the Damerau-Levenshtein distance between two strings.
@@ -402,7 +402,7 @@ pub mod is {
 	use url::Url;
 	use uuid::Uuid;
 
-	use crate::err::Error;
+	use crate::expr::Error;
 	use crate::fnc::args::Optional;
 	use crate::syn;
 	use crate::val::{Datetime, Value};
@@ -605,7 +605,7 @@ pub mod semver {
 	use anyhow::Result;
 	use semver::Version;
 
-	use crate::err::Error;
+	use crate::expr::Error;
 	use crate::val::Value;
 
 	fn parse_version(ver: &str, func: &str, msg: &str) -> Result<Version> {
@@ -687,7 +687,7 @@ pub mod semver {
 	pub mod set {
 		use anyhow::Result;
 
-		use crate::err::Error;
+		use crate::expr::Error;
 		use crate::fnc::string::semver::parse_version;
 		use crate::val::Value;
 

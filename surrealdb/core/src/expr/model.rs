@@ -14,11 +14,15 @@ use surrealml_core::ndarray as mlNdarray;
 use surrealml_core::storage::surml_file::SurMlFile;
 
 #[cfg(feature = "ml")]
-use crate::catalog::Permission;
+use crate::catalog::{Error as CatalogError, Permission};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
+#[cfg(feature = "ml")]
+use crate::err::EngineError;
+use crate::exec::Error as ExecError;
+#[cfg(feature = "ml")]
+use crate::expr::Error as ExprError;
 use crate::expr::{ControlFlow, FlowResult};
 #[cfg(feature = "ml")]
 use crate::iam::Action;
@@ -65,7 +69,7 @@ impl Model {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		let Some(val) = ctx.tx().get_db_model(ns, db, &self.name, &self.version, None).await?
 		else {
-			return Err(ControlFlow::from(anyhow::Error::new(Error::MlNotFound {
+			return Err(ControlFlow::from(anyhow::Error::new(CatalogError::MlNotFound {
 				name: format!("{}<{}>", self.name, self.version),
 			})));
 		};
@@ -81,7 +85,7 @@ impl Model {
 				Permission::Full => (),
 				Permission::None => {
 					return Err(ControlFlow::from(anyhow::Error::new(
-						Error::FunctionPermissions {
+						ExecError::FunctionPermissions {
 							name: self.name.to_string(),
 						},
 					)));
@@ -92,7 +96,7 @@ impl Model {
 					// Process the PERMISSION clause
 					if !stk.run(|stk| e.compute(stk, ctx, opt, doc)).await?.is_truthy() {
 						return Err(ControlFlow::from(anyhow::Error::new(
-							Error::FunctionPermissions {
+							ExecError::FunctionPermissions {
 								name: self.name.to_string(),
 							},
 						)));
@@ -103,10 +107,12 @@ impl Model {
 
 		// Check the minimum argument length
 		if args.len() != 1 {
-			return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidFunctionArguments {
-				name: format!("ml::{}<{}>", self.name, self.version),
-				message: ARGUMENTS.into(),
-			})));
+			return Err(ControlFlow::from(anyhow::Error::new(
+				ExprError::InvalidFunctionArguments {
+					name: format!("ml::{}<{}>", self.name, self.version),
+					message: ARGUMENTS.into(),
+				},
+			)));
 		}
 
 		// Take the first and only specified argument
@@ -119,7 +125,7 @@ impl Model {
 					.into_iter()
 					.map(|(k, v)| Ok((k.into_string(), v.coerce_to::<f64>()? as f32)))
 					.collect::<std::result::Result<HashMap<String, f32>, CoerceError>>()
-					.map_err(|_| Error::InvalidFunctionArguments {
+					.map_err(|_| ExprError::InvalidFunctionArguments {
 						name: format!("ml::{}<{}>", self.name, self.version),
 						message: ARGUMENTS.into(),
 					})
@@ -129,13 +135,13 @@ impl Model {
 				// Run the compute in a blocking task
 				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Thrown(err.message))
+						anyhow::Error::new(ExecError::Thrown(err.message))
 					})?;
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
 					compute_unit.buffered_compute(&mut args).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Internal(err.message))
+						anyhow::Error::new(EngineError::Internal(err.message))
 					})
 				})
 				.await
@@ -149,7 +155,7 @@ impl Model {
 				// Compute the model function arguments
 				let args: f32 = Value::Number(v)
 					.coerce_to::<f64>()
-					.map_err(|_| Error::InvalidFunctionArguments {
+					.map_err(|_| ExprError::InvalidFunctionArguments {
 						name: format!("ml::{}<{}>", self.name, self.version),
 						message: ARGUMENTS.into(),
 					})
@@ -161,13 +167,13 @@ impl Model {
 				// Run the compute in a blocking task
 				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Thrown(err.message))
+						anyhow::Error::new(ExecError::Thrown(err.message))
 					})?;
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
 					compute_unit.raw_compute(tensor, None).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Internal(err.message))
+						anyhow::Error::new(EngineError::Internal(err.message))
 					})
 				})
 				.await
@@ -183,7 +189,7 @@ impl Model {
 					.into_iter()
 					.map(|x| x.coerce_to::<f64>().map(|x| x as f32))
 					.collect::<std::result::Result<Vec<f32>, _>>()
-					.map_err(|_| Error::InvalidFunctionArguments {
+					.map_err(|_| ExprError::InvalidFunctionArguments {
 						name: format!("ml::{}<{}>", self.name, self.version),
 						message: ARGUMENTS.into(),
 					})
@@ -195,13 +201,13 @@ impl Model {
 				// Run the compute in a blocking task
 				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Thrown(err.message))
+						anyhow::Error::new(ExecError::Thrown(err.message))
 					})?;
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
 					compute_unit.raw_compute(tensor, None).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Internal(err.message))
+						anyhow::Error::new(EngineError::Internal(err.message))
 					})
 				})
 				.await
@@ -211,7 +217,7 @@ impl Model {
 				Ok(outcome.into_iter().map(|x| Value::Number(Number::Float(x as f64))).collect())
 			}
 			//
-			_ => Err(ControlFlow::from(anyhow::Error::new(Error::InvalidFunctionArguments {
+			_ => Err(ControlFlow::from(anyhow::Error::new(ExprError::InvalidFunctionArguments {
 				name: format!("ml::{}<{}>", self.name, self.version),
 				message: ARGUMENTS.into(),
 			}))),
@@ -227,7 +233,7 @@ impl Model {
 		_doc: Option<&CursorDoc>,
 		_args: Vec<Value>,
 	) -> FlowResult<Value> {
-		Err(ControlFlow::from(anyhow::Error::new(Error::InvalidModel {
+		Err(ControlFlow::from(anyhow::Error::new(ExecError::InvalidModel {
 			message: String::from("Machine learning computation is not enabled."),
 		})))
 	}

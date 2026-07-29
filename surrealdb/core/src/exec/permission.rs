@@ -13,10 +13,12 @@ use crate::catalog::{Permission, TableDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
+use crate::err::{EngineError, Error};
 use crate::exec::planner::Planner;
-use crate::exec::{DatabaseContext, EvalContext, ExecutionContext, PhysicalExpr};
-use crate::expr::FlowResultExt as _;
+use crate::exec::{
+	DatabaseContext, Error as ExecError, EvalContext, ExecutionContext, PhysicalExpr,
+};
+use crate::expr::{ControlFlow, FlowResultExt as _};
 use crate::iam::Action;
 use crate::val::Value;
 
@@ -31,8 +33,8 @@ pub enum PhysicalPermission {
 	Conditional(Arc<dyn PhysicalExpr>),
 }
 
-/// Convert a catalog Permission to a PhysicalPermission via the given
-/// planner. Inner subqueries inherit the planner's `CycleGuard`, so a
+/// Convert a catalog [`Permission`] to a PhysicalPermission via the
+/// given planner. Inner subqueries inherit the planner's `CycleGuard`, so a
 /// self-referential permission (`WHERE (SELECT FROM same_table) != NONE`)
 /// falls back to runtime resolution for that subtree instead of recursing.
 pub(crate) async fn convert_permission_to_physical(
@@ -142,16 +144,18 @@ pub(crate) fn validate_record_user_access(db_ctx: &DatabaseContext) -> Result<()
 
 	// Verify namespace matches
 	if root.auth.level().ns() != Some(ns) {
-		return Err(Error::NsNotAllowed {
+		return Err(ExecError::NsNotAllowed {
 			ns: ns.into(),
-		});
+		}
+		.into());
 	}
 
 	// Verify database matches
 	if root.auth.level().db() != Some(db) {
-		return Err(Error::DbNotAllowed {
+		return Err(ExecError::DbNotAllowed {
 			db: db.into(),
-		});
+		}
+		.into());
 	}
 
 	Ok(())
@@ -169,7 +173,7 @@ pub(crate) async fn check_permission_for_value(
 	value: &Value,
 	value_param: Option<&Value>,
 	ctx: &ExecutionContext,
-) -> Result<bool, Error> {
+) -> anyhow::Result<bool> {
 	match permission {
 		PhysicalPermission::Deny => Ok(false),
 		PhysicalPermission::Allow => Ok(true),
@@ -192,17 +196,28 @@ pub(crate) async fn check_permission_for_value(
 			let mut eval_ctx = EvalContext::from_exec_ctx(exec_ctx).with_value(value);
 			eval_ctx.skip_fetch_perms = true;
 
-			let result = physical_expr
-				.evaluate(eval_ctx)
-				.await
-				.map_err(|e| Error::Internal(e.to_string()))?;
+			// The concrete error is carried through rather than collapsed to
+			// `Internal`: this runs per permission-checked row, and a write
+			// conflict raised inside a predicate has to stay downcastable for
+			// the transactor to retry it, while a cancelled query has to keep
+			// reporting as cancelled rather than as an internal failure.
+			//
+			// A predicate that signals control flow has nowhere to send it —
+			// there is no surrounding block — so those stay an error, as
+			// before.
+			let result = physical_expr.evaluate(eval_ctx).await.map_err(|ctrl| match ctrl {
+				ControlFlow::Err(e) => e,
+				other => anyhow::Error::new(EngineError::Internal(format!(
+					"unexpected control flow in a permission predicate: {other}"
+				))),
+			})?;
 			Ok(result.is_truthy())
 		}
 	}
 }
 
-/// Evaluate a catalog SELECT [`Permission`] against a [`CursorDoc`] using the
-/// legacy compute path. Returns `true` when access is allowed.
+/// Evaluate a catalog SELECT [`Permission`] against a [`CursorDoc`] using
+/// the legacy compute path. Returns `true` when access is allowed.
 ///
 /// Used by KNN truthy-document filters (HNSW, DiskANN) when the search is
 /// driven by the legacy executor (`idx/planner/executor.rs`), where the
@@ -220,19 +235,42 @@ pub(crate) async fn evaluate_table_select_for_doc(
 	stk: &mut Stk,
 	ctx: &FrozenContext,
 	opt: &Options,
-	permission: &Permission,
+	resolved: &ResolvedTableSelect,
 	cursor_doc: &CursorDoc,
 ) -> anyhow::Result<bool> {
-	match permission {
-		Permission::None => Ok(false),
-		Permission::Full => Ok(true),
-		Permission::Specific(e) => {
+	match resolved {
+		ResolvedTableSelect::None => Ok(false),
+		ResolvedTableSelect::Full => Ok(true),
+		ResolvedTableSelect::Specific(e) => {
 			let opt_no_perms = opt.new_for_permission_predicate();
 			Ok(stk
 				.run(|stk| e.compute(stk, ctx, &opt_no_perms, Some(cursor_doc)))
 				.await
 				.catch_return()?
 				.is_truthy())
+		}
+	}
+}
+
+/// A table's SELECT permission, pre-resolved once for repeated per-candidate
+/// checks — the legacy-path counterpart to [`PhysicalPermission`]. Mirrors
+/// the catalog's [`Permission`] shape, owning a clone of the guard expression
+/// so the "resolve once per filter, reuse for every candidate" property
+/// [`CachedTableSelect`] is meant to provide holds without keeping the table
+/// definition alive.
+#[derive(Clone)]
+pub(crate) enum ResolvedTableSelect {
+	None,
+	Full,
+	Specific(crate::expr::Expr),
+}
+
+impl ResolvedTableSelect {
+	fn resolve(permission: &Permission) -> Self {
+		match permission {
+			Permission::None => Self::None,
+			Permission::Full => Self::Full,
+			Permission::Specific(expr) => Self::Specific(expr.clone()),
 		}
 	}
 }
@@ -249,7 +287,7 @@ pub(crate) enum CachedTableSelect {
 	Skip,
 	/// Permission must be evaluated against each candidate document via the
 	/// legacy compute path.
-	Apply(Permission),
+	Apply(ResolvedTableSelect),
 	/// Permission was pre-resolved by the streaming executor and must be
 	/// evaluated against each candidate document via
 	/// [`check_permission_for_value`] under the given execution context.
@@ -272,7 +310,7 @@ pub(crate) async fn resolve_cached_table_select(
 	if !ctx.check_perms(opt, Action::View)? {
 		return Ok(CachedTableSelect::Skip);
 	}
-	Ok(CachedTableSelect::Apply(resolve_select_permission(table_def).clone()))
+	Ok(CachedTableSelect::Apply(ResolvedTableSelect::resolve(resolve_select_permission(table_def))))
 }
 
 /// Check a previously-resolved [`CachedTableSelect`] against a [`CursorDoc`].

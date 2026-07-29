@@ -3,11 +3,10 @@
 use std::sync::Arc;
 
 use crate::catalog::Permission;
-use crate::err::Error;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::planner::expr_to_physical_expr;
-use crate::exec::{AccessMode, CombineAccessModes};
-use crate::expr::{FlowResult, Kind};
+use crate::exec::{AccessMode, CombineAccessModes, Error as ExecError};
+use crate::expr::{Error as ExprError, FlowResult, Kind};
 use crate::val::Value;
 
 /// Evaluate all argument expressions to values.
@@ -30,17 +29,17 @@ pub(crate) async fn check_permission(
 ) -> FlowResult<()> {
 	match permission {
 		Permission::Full => Ok(()),
-		Permission::None => Err(Error::FunctionPermissions {
+		Permission::None => Err(ExecError::FunctionPermissions {
 			name: func_name.to_string(),
 		}
 		.into()),
 		Permission::Specific(expr) => {
-			// Plan and evaluate the permission expression
+			// Plan and evaluate the permission expression.
 			match expr_to_physical_expr(expr.clone(), ctx.exec_ctx.ctx()).await {
 				Ok(phys_expr) => {
 					let result = phys_expr.evaluate(ctx.clone()).await?;
 					if !result.is_truthy() {
-						Err(Error::FunctionPermissions {
+						Err(ExecError::FunctionPermissions {
 							name: func_name.to_string(),
 						}
 						.into())
@@ -50,7 +49,7 @@ pub(crate) async fn check_permission(
 				}
 				Err(_) => {
 					// If we can't plan the expression, deny by default
-					Err(Error::FunctionPermissions {
+					Err(ExecError::FunctionPermissions {
 						name: func_name.to_string(),
 					}
 					.into())
@@ -77,7 +76,7 @@ pub(crate) fn validate_arg_count(
 	});
 
 	if !(min_args..=max_args).contains(&actual) {
-		return Err(Error::InvalidFunctionArguments {
+		return Err(ExprError::InvalidFunctionArguments {
 			name: func_name.to_string(),
 			message: match (min_args, max_args) {
 				(1, 1) => "The function expects 1 argument.".to_string(),
@@ -98,7 +97,7 @@ pub(crate) fn validate_return(
 ) -> anyhow::Result<Value> {
 	match return_kind {
 		Some(kind) => result.coerce_to_kind(kind).map_err(|e| {
-			Error::ReturnCoerce {
+			ExecError::ReturnCoerce {
 				name: func_name.to_string(),
 				error: Box::new(e),
 			}

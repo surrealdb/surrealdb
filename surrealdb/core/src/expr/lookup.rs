@@ -167,7 +167,7 @@ impl ComputedLookupSubject {
 					prefix,
 					tb: Cow::Borrowed(tb),
 					id: Cow::Borrowed(id),
-					ft: Cow::Borrowed(table),
+					ft: Cow::Borrowed(table.as_str()),
 				}
 				.encode_bound()
 				.map(|x| x.prefix_expect()),
@@ -179,7 +179,7 @@ impl ComputedLookupSubject {
 					prefix,
 					tb: Cow::Borrowed(tb),
 					id: Cow::Borrowed(id),
-					ft: Cow::Borrowed(table),
+					ft: Cow::Borrowed(table.as_str()),
 					ff: Cow::Borrowed(field),
 				}
 				.encode_bound()
@@ -201,7 +201,7 @@ impl ComputedLookupSubject {
 							prefix,
 							tb: Cow::Borrowed(tb),
 							id: Cow::Borrowed(id),
-							ft: Cow::Borrowed(table),
+							ft: Cow::Borrowed(table.as_str()),
 							ff: Cow::Borrowed(field),
 						}
 						.encode_bound()?,
@@ -231,7 +231,7 @@ impl ComputedLookupSubject {
 							prefix,
 							tb: Cow::Borrowed(tb),
 							id: Cow::Borrowed(id),
-							ft: Cow::Borrowed(table),
+							ft: Cow::Borrowed(table.as_str()),
 							ff: Cow::Borrowed(field),
 						}
 						.encode_bound()?
@@ -275,7 +275,7 @@ impl ComputedLookupSubject {
 					tb: Cow::Borrowed(tb),
 					id: Cow::Borrowed(id),
 					dir: *dir,
-					foreign_table: Cow::Borrowed(table),
+					foreign_table: Cow::Borrowed(table.as_str()),
 				}
 				.encode_range()?),
 				// Scan a specific range
@@ -290,7 +290,7 @@ impl ComputedLookupSubject {
 							tb: Cow::Borrowed(tb),
 							id: Cow::Borrowed(id),
 							dir: *dir,
-							foreign_table: Cow::Borrowed(table),
+							foreign_table: Cow::Borrowed(table.as_str()),
 						}
 						.encode_bound()?,
 						Bound::Included(v) => crate::key::graph::Graph {
@@ -323,7 +323,7 @@ impl ComputedLookupSubject {
 							tb: Cow::Borrowed(tb),
 							id: Cow::Borrowed(id),
 							dir: *dir,
-							foreign_table: Cow::Borrowed(table),
+							foreign_table: Cow::Borrowed(table.as_str()),
 						}
 						.encode_bound()?
 						.next_neighbour()

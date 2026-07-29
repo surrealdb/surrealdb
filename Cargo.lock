@@ -6811,11 +6811,17 @@ dependencies = [
 name = "surrealdb-common"
 version = "3.3.0-nightly"
 dependencies = [
+ "arbitrary",
+ "chrono",
  "futures",
  "hashbrown 0.16.1",
  "parking_lot",
+ "phf",
+ "rust_decimal",
+ "surrealdb-types",
  "sysinfo",
  "tokio",
+ "unicase",
 ]
 
 [[package]]
@@ -6858,9 +6864,7 @@ dependencies = [
  "half",
  "headers",
  "hex",
- "hmac 0.12.1",
  "http",
- "humantime",
  "ipnet",
  "jsonwebtoken",
  "lexicmp",
@@ -6901,18 +6905,22 @@ dependencies = [
  "sha1",
  "sha2 0.10.9",
  "storekey",
- "stringprep",
  "strsim",
  "subtle",
  "surrealdb-ast",
  "surrealdb-cnf",
  "surrealdb-collections",
  "surrealdb-common",
+ "surrealdb-iam",
  "surrealdb-kvs",
  "surrealdb-kvs-any",
+ "surrealdb-observe",
  "surrealdb-parser",
  "surrealdb-protocol",
+ "surrealdb-rpc",
+ "surrealdb-sql",
  "surrealdb-strand",
+ "surrealdb-syn",
  "surrealdb-types",
  "surrealism-runtime",
  "surrealml-core",
@@ -6937,6 +6945,25 @@ dependencies = [
  "wasmtimer",
  "web-time",
  "wiremock",
+]
+
+[[package]]
+name = "surrealdb-iam"
+version = "3.3.0-nightly"
+dependencies = [
+ "anyhow",
+ "arbitrary",
+ "base64 0.22.1",
+ "hmac 0.12.1",
+ "pbkdf2",
+ "rand_core 0.6.4",
+ "revision",
+ "serde",
+ "sha2 0.10.9",
+ "stringprep",
+ "subtle",
+ "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]
@@ -7095,6 +7122,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "surrealdb-observe"
+version = "3.3.0-nightly"
+dependencies = [
+ "surrealdb-iam",
+ "surrealdb-rpc",
+ "surrealdb-types",
+ "uuid",
+]
+
+[[package]]
 name = "surrealdb-parser"
 version = "3.3.0-nightly"
 dependencies = [
@@ -7156,6 +7193,20 @@ checksum = "02e8c3a004982458af159bcbf369e41663d538cd4a291a49c0d4a2fb373cbb7e"
 dependencies = [
  "libc",
  "surrealdb-librocksdb-sys",
+]
+
+[[package]]
+name = "surrealdb-rpc"
+version = "3.3.0-nightly"
+dependencies = [
+ "anyhow",
+ "humantime",
+ "revision",
+ "serde",
+ "surrealdb-types",
+ "tracing",
+ "uuid",
+ "web-time",
 ]
 
 [[package]]
@@ -7238,6 +7289,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "surrealdb-sql"
+version = "3.3.0-nightly"
+dependencies = [
+ "arbitrary",
+ "bytes",
+ "chrono",
+ "geo",
+ "getrandom 0.3.4",
+ "hex",
+ "phf",
+ "rand 0.9.4",
+ "regex",
+ "regex-syntax",
+ "rstest",
+ "rust_decimal",
+ "serde",
+ "surrealdb-common",
+ "surrealdb-iam",
+ "surrealdb-strand",
+ "surrealdb-types",
+ "unicase",
+ "uuid",
+]
+
+[[package]]
 name = "surrealdb-strand"
 version = "3.3.0-nightly"
 dependencies = [
@@ -7246,6 +7322,30 @@ dependencies = [
  "revision",
  "serde",
  "storekey",
+]
+
+[[package]]
+name = "surrealdb-syn"
+version = "3.3.0-nightly"
+dependencies = [
+ "bytes",
+ "chrono",
+ "geo",
+ "phf",
+ "reblessive",
+ "regex",
+ "rstest",
+ "rust_decimal",
+ "surrealdb-cnf",
+ "surrealdb-common",
+ "surrealdb-iam",
+ "surrealdb-sql",
+ "surrealdb-strand",
+ "surrealdb-types",
+ "thiserror 2.0.18",
+ "tracing",
+ "unicase",
+ "uuid",
 ]
 
 [[package]]
@@ -7297,6 +7397,8 @@ dependencies = [
  "flatbuffers",
  "geo",
  "geo-types",
+ "getrandom 0.2.17",
+ "getrandom 0.3.4",
  "hex",
  "http",
  "papaya",
