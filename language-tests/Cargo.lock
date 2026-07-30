@@ -4429,7 +4429,6 @@ dependencies = [
  "serde",
  "sha2",
  "storekey",
- "surrealdb-cnf",
  "surrealdb-collections",
  "surrealdb-common",
  "surrealdb-expr",
@@ -4501,9 +4500,7 @@ dependencies = [
  "diskann",
  "diskann-utils",
  "diskann-vector",
- "dmp",
  "ext-sort",
- "fastnum",
  "fst",
  "futures",
  "fuzzy-matcher",
@@ -4516,7 +4513,6 @@ dependencies = [
  "http",
  "ipnet",
  "jsonwebtoken",
- "lexicmp",
  "md-5",
  "memchr",
  "mime",
@@ -4527,7 +4523,6 @@ dependencies = [
  "parking_lot",
  "path-clean",
  "pbkdf2",
- "phf",
  "pin-project-lite",
  "quick_cache",
  "rand 0.9.4",
@@ -4573,7 +4568,6 @@ dependencies = [
  "tokio-util",
  "tracing",
  "ulid",
- "unicase",
  "url",
  "uuid",
  "vart",
@@ -4627,16 +4621,13 @@ dependencies = [
 name = "surrealdb-gql"
 version = "3.3.0-nightly"
 dependencies = [
- "anyhow",
  "phf",
  "reblessive",
- "surrealdb-cnf",
  "surrealdb-expr",
  "surrealdb-sql",
  "surrealdb-strand",
  "surrealdb-syn",
  "surrealdb-types",
- "tracing",
  "unicase",
 ]
 

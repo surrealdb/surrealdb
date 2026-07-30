@@ -17,7 +17,7 @@ use super::resolved::ResolvedTableContext;
 use crate::catalog::{Error, Index};
 use crate::exec::index::access_path::IndexRef;
 use crate::exec::permission::{
-	CachedTableSelect, PhysicalPermission, convert_permission_to_physical_runtime,
+	PhysicalPermission, PhysicalTableSelect, convert_permission_to_physical_runtime,
 	should_check_perms, validate_record_user_access,
 };
 use crate::exec::{
@@ -27,6 +27,7 @@ use crate::exec::{
 use crate::expr::{Cond, ControlFlow, ControlFlowExt};
 use crate::iam::Action;
 use crate::idx::trees::KnnCondFilter;
+use crate::idx::trees::gate::CachedTableSelect;
 use crate::kvs::CachePolicy;
 use crate::val::Number;
 
@@ -263,10 +264,10 @@ impl ExecOperator for KnnScan {
 				(Some(cond), Some(opt)) => Some(KnnCondFilter {
 					opt,
 					cond: Arc::new(cond),
-					select_gate: Some(CachedTableSelect::Physical(
+					select_gate: Some(CachedTableSelect::Gate(Arc::new(PhysicalTableSelect::new(
 						select_permission.clone(),
 						ctx.clone(),
-					)),
+					)))),
 				}),
 				_ => None,
 			};

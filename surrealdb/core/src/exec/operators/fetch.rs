@@ -3,9 +3,10 @@ use std::sync::Arc;
 use futures::StreamExt;
 
 use crate::catalog::providers::TableProvider;
+use crate::catalog::table_select_permission;
 use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, convert_permission_to_physical_runtime,
-	resolve_select_permission, should_check_perms,
+	should_check_perms,
 };
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{
@@ -336,7 +337,7 @@ pub(crate) async fn process_fetched_record(
 			.get_table_def(&rid.table, ctx.version_stamp())
 			.await
 			.context("Failed to get table definition")?;
-		let catalog_perm = resolve_select_permission(table_def.as_deref());
+		let catalog_perm = table_select_permission(table_def.as_deref());
 		let select_perm = convert_permission_to_physical_runtime(catalog_perm, ctx.ctx())
 			.await
 			.context("Failed to convert permission")?;

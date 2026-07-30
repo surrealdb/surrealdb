@@ -44,6 +44,7 @@ use anyhow::Result;
 
 use crate::catalog::{DatabaseId, IndexDefinition, NamespaceId};
 use crate::expr::BinaryOperator;
+use crate::idx::keys::compute_index_range;
 use crate::idx::planner::ScanDirection;
 use crate::key::database::all::DatabaseRoot;
 use crate::key::index::{IndexPrefix, IndexPrefixTerminated, IndexPrefixUnterminated, UniqueIndex};
@@ -226,77 +227,6 @@ impl UniqueEqualIterator {
 		let res = scan(&mut self.range, tx, INDEX_BATCH_SIZE).await?;
 		decode_record_ids(res)
 	}
-}
-
-/// Compute the begin key for a non-unique index range scan.
-///
-/// Returns `(key, inclusive)` where:
-/// - **inclusive bound** (`>=`): uses `prefix_ids_beg` so the scan starts at the first entry for
-///   the given value.
-/// - **exclusive bound** (`>`): uses `prefix_ids_end` so the scan starts *after* all entries for
-///   the given value.
-/// - **no bound**: uses the index-wide `prefix_beg` (start of index).
-pub(crate) fn compute_index_range(
-	ns: NamespaceId,
-	db: DatabaseId,
-	ix: &IndexDefinition,
-	from: Bound<&Value>,
-	to: Bound<&Value>,
-) -> Result<KeyRange<'static>> {
-	let prefix = DatabaseRoot {
-		ns,
-		db,
-	};
-
-	let start = match from {
-		Bound::Included(x) => IndexPrefixUnterminated {
-			prefix,
-			tb: Cow::Borrowed(&ix.table_name),
-			ix: ix.index_id,
-			fd: Cow::Borrowed(slice::from_ref(x)),
-		}
-		.encode_bound()?,
-		Bound::Excluded(x) => IndexPrefixUnterminated {
-			prefix,
-			tb: Cow::Borrowed(&ix.table_name),
-			ix: ix.index_id,
-			fd: Cow::Borrowed(slice::from_ref(x)),
-		}
-		.encode_bound()?
-		.next_neighbour_expect(),
-		Bound::Unbounded => IndexPrefix {
-			prefix,
-			tb: Cow::Borrowed(&ix.table_name),
-			ix: ix.index_id,
-		}
-		.encode_bound()?,
-	};
-
-	let end = match to {
-		Bound::Included(x) => IndexPrefixUnterminated {
-			prefix,
-			tb: Cow::Borrowed(&ix.table_name),
-			ix: ix.index_id,
-			fd: Cow::Borrowed(slice::from_ref(x)),
-		}
-		.encode_bound()?
-		.next_neighbour_expect(),
-		Bound::Excluded(x) => IndexPrefixUnterminated {
-			prefix,
-			tb: Cow::Borrowed(&ix.table_name),
-			ix: ix.index_id,
-			fd: Cow::Borrowed(slice::from_ref(x)),
-		}
-		.encode_bound()?,
-		Bound::Unbounded => IndexPrefix {
-			prefix,
-			tb: Cow::Borrowed(&ix.table_name),
-			ix: ix.index_id,
-		}
-		.encode_bound()?
-		.next_neighbour_expect(),
-	};
-	Ok((start..end).into())
 }
 
 /// Forward iterator for range scans on non-unique (`Idx`) indexes.

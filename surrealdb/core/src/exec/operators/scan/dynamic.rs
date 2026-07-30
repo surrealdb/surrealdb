@@ -9,7 +9,7 @@ use super::pipeline::{
 	build_field_state, determine_scan_direction, eval_limit_expr, kv_scan_stream,
 };
 use super::{FullTextScan, IndexScan, KnnScan};
-use crate::catalog::{DatabaseId, Error, NamespaceId, Permission};
+use crate::catalog::{DatabaseId, Error, NamespaceId, table_select_permission};
 use crate::err::EngineError;
 use crate::exec::index::access_path::{AccessPath, select_access_path};
 use crate::exec::index::analysis::IndexAnalyzer;
@@ -447,11 +447,8 @@ impl ExecOperator for DynamicScan {
 			}
 
 			let select_permission = if check_perms {
-				let catalog_perm = match &table_def {
-					Some(def) => def.permissions.select.clone(),
-					None => Permission::None,
-				};
-				convert_permission_to_physical_runtime(&catalog_perm, ctx.ctx())
+				let catalog_perm = table_select_permission(table_def.as_deref());
+				convert_permission_to_physical_runtime(catalog_perm, ctx.ctx())
 					.await
 					.context("Failed to convert permission")?
 			} else {

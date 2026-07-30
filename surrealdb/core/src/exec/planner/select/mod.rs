@@ -917,31 +917,19 @@ impl<'ctx> Planner<'ctx> {
 		});
 		let has_knn_early = cond.as_ref().is_some_and(|c| has_knn_operator(&c.0));
 
-		let planning_ctx: std::borrow::Cow<'_, crate::ctx::FrozenContext> =
-			if let Some(ref c) = cond {
-				let mc = extract_matches_context(c, Some(self.ctx));
-				let hm = !mc.is_empty();
-				if hm || has_knn_early {
-					let mut child = crate::ctx::Context::new_child(self.ctx);
-					if hm {
-						let mut mc = mc;
-						if let Some(ref t) = primary_table {
-							mc.set_table(t.clone());
-						}
-						child.set_matches_context(mc);
-					}
-					if has_knn_early {
-						child.set_knn_context(std::sync::Arc::new(
-							crate::exec::function::KnnContext::new(),
-						));
-					}
-					std::borrow::Cow::Owned(child.freeze())
-				} else {
-					std::borrow::Cow::Borrowed(self.ctx)
-				}
-			} else {
-				std::borrow::Cow::Borrowed(self.ctx)
-			};
+		// The MATCHES entries and KNN slot this SELECT's own WHERE declares.
+		// Either being present replaces what the enclosing planner had; what
+		// this SELECT does not declare is inherited below.
+		let own_matches_context = cond.as_ref().and_then(|c| {
+			let mut mc = extract_matches_context(c, Some(self.ctx));
+			if mc.is_empty() {
+				return None;
+			}
+			if let Some(ref t) = primary_table {
+				mc.set_table(t.clone());
+			}
+			Some(Arc::new(mc))
+		});
 
 		// Propagate txn, version, auth, and cycle guard to the inner
 		// planner. Inheriting the cycle guard means a self-referential
@@ -950,15 +938,16 @@ impl<'ctx> Planner<'ctx> {
 		// and fall back. Inheriting auth keeps fast-path eligibility
 		// decisions consistent with the outer statement.
 		let mut pp = if let Some(ref txn) = self.txn {
-			Planner::with_txn(&planning_ctx, Arc::clone(txn), self.ns.clone(), self.db.clone())
+			Planner::with_txn(self.ctx, Arc::clone(txn), self.ns.clone(), self.db.clone())
 		} else {
-			Planner::new(&planning_ctx)
+			Planner::new(self.ctx)
 		}
 		.with_version(version.clone())
 		.with_cycle_guard(self.cycle_guard());
 		if let Some(ref auth) = self.auth {
 			pp = pp.with_auth(Arc::clone(auth));
 		}
+		pp.set_planning_scopes(own_matches_context, has_knn_early, self);
 
 		let needed_fields = Self::extract_needed_fields(
 			&fields,
@@ -1256,7 +1245,7 @@ impl<'ctx> Planner<'ctx> {
 				}
 				WhereClauseState::None => planned.operator,
 			};
-			let knn_ctx = planning_ctx.get_knn_context().cloned();
+			let knn_ctx = pp.knn_context.clone();
 			let vector = match kp.vector {
 				BruteForceKnnVector::Literal(v) => KnnVectorSource::Literal(v),
 				BruteForceKnnVector::Deferred(expr) => {
@@ -1494,7 +1483,7 @@ impl<'ctx> Planner<'ctx> {
 				.await;
 			if let Ok(Some((access_path, direction))) = resolved {
 				let table = table_name.clone();
-				let knn_ctx = self.ctx.get_knn_context().cloned();
+				let knn_ctx = self.knn_context.clone();
 				match access_path {
 					AccessPath::BTreeScan {
 						index_ref,
@@ -1612,7 +1601,7 @@ impl<'ctx> Planner<'ctx> {
 		}
 
 		// Fallback: create the appropriate operator (index resolved at runtime)
-		let knn_ctx = self.ctx.get_knn_context().cloned();
+		let knn_ctx = self.knn_context.clone();
 
 		match expr {
 			Expr::Literal(crate::expr::literal::Literal::RecordId(rid)) => {

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use surrealdb_strand::TableName;
 
 use super::Planner;
-use super::util::{extract_table_from_context, key_lit_to_expr};
+use super::util::{extract_table_from_matches, key_lit_to_expr};
 use crate::err::Error;
 use crate::exec::operators::{
 	CurrentValueSource, EdgeTableSpec, Filter, GraphEdgeScan, GraphScanOutput, Limit, OrderByField,
@@ -95,7 +95,7 @@ impl<'ctx> Planner<'ctx> {
 
 				// Resolve the MatchContext from the MATCHES context
 				let matches_ctx =
-					self.ctx.get_matches_context().ok_or_else(|| ExecError::Query {
+					self.matches_context.as_ref().ok_or_else(|| ExecError::Query {
 						message: format!(
 							"Index function '{}': no MATCHES clause found in WHERE condition",
 							name
@@ -103,7 +103,7 @@ impl<'ctx> Planner<'ctx> {
 					})?;
 
 				let match_ctx = matches_ctx
-					.resolve(match_ref, extract_table_from_context(self.ctx))
+					.resolve(match_ref, extract_table_from_matches(matches_ctx))
 					.map_err(|e| ExecError::Query {
 						message: format!("Index function '{}': {}", name, e),
 					})?;
@@ -119,7 +119,7 @@ impl<'ctx> Planner<'ctx> {
 					ast_args.remove(ref_idx);
 				}
 
-				let knn_ctx = self.ctx.get_knn_context().ok_or_else(|| ExecError::Query {
+				let knn_ctx = self.knn_context.as_ref().ok_or_else(|| ExecError::Query {
 					message: format!(
 						"Index function '{}': no KNN operator found in WHERE condition",
 						name

@@ -11,7 +11,6 @@ use surrealdb_types::ToSql;
 use crate::catalog::{DatabaseId, IndexDefinition, IndexId, NamespaceId, Record};
 use crate::ctx::FrozenContext;
 use crate::err::EngineError;
-use crate::exec::index::iterator::btree::compute_index_range;
 use crate::expr::BinaryOperator;
 use crate::idx::docids::DocId;
 use crate::idx::ft::fulltext::FullTextHitsIterator;
@@ -463,7 +462,7 @@ impl IndexRangeThingIterator {
 		from: Bound<&Value>,
 		to: Bound<&Value>,
 	) -> Result<KeyRange<'static>> {
-		compute_index_range(ns, db, ix, from, to)
+		crate::idx::keys::compute_index_range(ns, db, ix, from, to)
 	}
 
 	/// Build a range scan over a composite index using a fixed `prefix` and

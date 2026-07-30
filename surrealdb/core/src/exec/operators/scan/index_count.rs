@@ -28,7 +28,7 @@ use std::sync::Arc;
 use common::future::stream::{self, Yielder};
 use tracing::instrument;
 
-use crate::catalog::{DatabaseId, Error, Index, NamespaceId, Permission};
+use crate::catalog::{DatabaseId, Error, Index, NamespaceId, table_select_permission};
 use crate::err::EngineError;
 use crate::exec::index::access_path::{BTreeAccess, IndexRef};
 use crate::exec::permission::{
@@ -220,11 +220,8 @@ impl ExecOperator for IndexCountScan {
 
 			// Resolve SELECT permission.
 			let select_permission = if check_perms {
-				let catalog_perm = match &table_def {
-					Some(def) => def.permissions.select.clone(),
-					None => Permission::None,
-				};
-				convert_permission_to_physical_runtime(&catalog_perm, ctx.ctx())
+				let catalog_perm = table_select_permission(table_def.as_deref());
+				convert_permission_to_physical_runtime(catalog_perm, ctx.ctx())
 					.await
 					.context("Failed to convert permission")?
 			} else {

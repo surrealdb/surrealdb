@@ -9,7 +9,7 @@ use super::pipeline::{
 	FieldState, build_field_state, compute_fields_for_value, filter_fields_by_permission,
 };
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseId, NamespaceId, table_select_permission};
 use crate::exec::{ControlFlowExt, EvalContext, ExecutionContext, PhysicalExpr};
 use crate::expr::ControlFlow;
 use crate::kvs::{CachePolicy, Transaction};
@@ -171,8 +171,7 @@ pub(crate) async fn resolve_record_batch(
 				.get_table_def(&rid.table, version)
 				.await
 				.context("Failed to get table definition")?;
-			let catalog_perm =
-				crate::exec::permission::resolve_select_permission(table_def.as_deref());
+			let catalog_perm = table_select_permission(table_def.as_deref());
 			let perm = crate::exec::permission::convert_permission_to_physical_runtime(
 				catalog_perm,
 				ctx.ctx(),

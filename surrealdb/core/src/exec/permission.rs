@@ -7,20 +7,17 @@
 
 use std::sync::Arc;
 
-use reblessive::tree::Stk;
-
-use crate::catalog::{Permission, TableDefinition};
+use crate::catalog::Permission;
 use crate::ctx::FrozenContext;
-use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::{EngineError, Error};
-use crate::exe::FlowResultExt as _;
 use crate::exec::planner::Planner;
 use crate::exec::{
 	DatabaseContext, Error as ExecError, EvalContext, ExecutionContext, PhysicalExpr,
 };
 use crate::expr::ControlFlow;
 use crate::iam::Action;
+use crate::idx::trees::gate::{BoxGateFut, TableSelectGate};
 use crate::val::Value;
 
 /// Result of a permission check.
@@ -71,17 +68,6 @@ pub(crate) async fn convert_permission_to_physical_runtime(
 	ctx: &FrozenContext,
 ) -> Result<PhysicalPermission, Error> {
 	convert_permission_to_physical(permission, &Planner::new(ctx)).await
-}
-
-/// Resolve the SELECT permission for a table.
-///
-/// If the table doesn't exist (schemaless mode), returns `Permission::None`
-/// which will deny access for record users.
-pub(crate) fn resolve_select_permission(table_def: Option<&TableDefinition>) -> &Permission {
-	match table_def {
-		Some(def) => &def.permissions.select,
-		None => &Permission::None,
-	}
 }
 
 /// Check if permission should be checked for the given action.
@@ -217,146 +203,40 @@ pub(crate) async fn check_permission_for_value(
 	}
 }
 
-/// Evaluate a catalog SELECT [`Permission`] against a [`CursorDoc`] using
-/// the legacy compute path. Returns `true` when access is allowed.
+/// The streaming executor's SELECT-permission gate for ANN truthy-document
+/// filters.
 ///
-/// Used by KNN truthy-document filters (HNSW, DiskANN) when the search is
-/// driven by the legacy executor (`idx/planner/executor.rs`), where the
-/// table's SELECT permission must be checked per candidate before the
-/// caller-supplied WHERE condition runs. Without this gate, a caller can
-/// probe restricted fields by crafting a WHERE on them and observing the
-/// resulting count / order / timing. The streaming executor's `KnnScan`
-/// supplies a pre-resolved [`CachedTableSelect::Physical`] gate instead, so
-/// this compute path is never reached from a successfully planned query.
-///
-/// `Specific` expressions are evaluated with `opt.new_with_perms(false)` so
-/// the permission expression itself doesn't recurse into permission checks
-/// against its own table.
-pub(crate) async fn evaluate_table_select_for_doc(
-	stk: &mut Stk,
-	ctx: &FrozenContext,
-	opt: &Options,
-	resolved: &ResolvedTableSelect,
-	cursor_doc: &CursorDoc,
-) -> anyhow::Result<bool> {
-	match resolved {
-		ResolvedTableSelect::None => Ok(false),
-		ResolvedTableSelect::Full => Ok(true),
-		ResolvedTableSelect::Specific(e) => {
-			let opt_no_perms = opt.new_for_permission_predicate();
-			Ok(stk
-				.run(|stk| {
-					crate::legacy::expr_compute(e, stk, ctx, &opt_no_perms, Some(cursor_doc))
-				})
+/// Pairs a permission already resolved for the surrounding scan with the
+/// context it is evaluated against, so the ANN search gates each candidate on
+/// exactly the permission that filters the fetched batch after the search and
+/// the two checks cannot disagree.
+pub(crate) struct PhysicalTableSelect {
+	permission: PhysicalPermission,
+	ctx: ExecutionContext,
+}
+
+impl PhysicalTableSelect {
+	pub(crate) fn new(permission: PhysicalPermission, ctx: ExecutionContext) -> Self {
+		Self {
+			permission,
+			ctx,
+		}
+	}
+}
+
+impl TableSelectGate for PhysicalTableSelect {
+	fn allows_every_doc(&self) -> Option<bool> {
+		match self.permission {
+			PhysicalPermission::Allow => Some(true),
+			PhysicalPermission::Deny => Some(false),
+			PhysicalPermission::Conditional(_) => None,
+		}
+	}
+
+	fn allows_doc<'a>(&'a self, cursor_doc: &'a CursorDoc) -> BoxGateFut<'a> {
+		Box::pin(async move {
+			check_permission_for_value(&self.permission, cursor_doc.doc.as_ref(), None, &self.ctx)
 				.await
-				.catch_return()?
-				.is_truthy())
-		}
+		})
 	}
-}
-
-/// A table's SELECT permission, pre-resolved once for repeated per-candidate
-/// checks — the legacy-path counterpart to [`PhysicalPermission`]. Mirrors
-/// the catalog's [`Permission`] shape, owning a clone of the guard expression
-/// so the "resolve once per filter, reuse for every candidate" property
-/// [`CachedTableSelect`] is meant to provide holds without keeping the table
-/// definition alive.
-#[derive(Clone)]
-pub(crate) enum ResolvedTableSelect {
-	None,
-	Full,
-	Specific(crate::expr::Expr),
-}
-
-impl ResolvedTableSelect {
-	fn resolve(permission: &Permission) -> Self {
-		match permission {
-			Permission::None => Self::None,
-			Permission::Full => Self::Full,
-			Permission::Specific(expr) => Self::Specific(expr.clone()),
-		}
-	}
-}
-
-/// Cached resolution of a table's SELECT permission check, for callers that
-/// need to evaluate the permission per candidate row (e.g. KNN truthy-doc
-/// filters). On the legacy path, resolve once per filter via
-/// [`resolve_cached_table_select`]; on the streaming path, the operator
-/// pre-seeds a [`CachedTableSelect::Physical`] gate. Either way, check each
-/// candidate via [`check_cached_table_select_for_doc`].
-#[derive(Clone)]
-pub(crate) enum CachedTableSelect {
-	/// Permission checks are bypassed (auth disabled / privileged session).
-	Skip,
-	/// Permission must be evaluated against each candidate document via the
-	/// legacy compute path.
-	Apply(ResolvedTableSelect),
-	/// Permission was pre-resolved by the streaming executor and must be
-	/// evaluated against each candidate document via
-	/// [`check_permission_for_value`] under the given execution context.
-	/// Callers pass the same [`PhysicalPermission`] that filters the fetched
-	/// batch after the search, so the in-search and post-search checks cannot
-	/// disagree.
-	Physical(PhysicalPermission, ExecutionContext),
-}
-
-/// Resolve a table's SELECT permission for caching across per-row checks in
-/// an ANN truthy-doc filter. Returns `Skip` when [`crate::ctx::Context::check_perms`]
-/// reports `false`; otherwise returns `Apply(p)` with the table's SELECT
-/// permission (or `Permission::None` if the table is missing — which denies
-/// access by design).
-pub(crate) async fn resolve_cached_table_select(
-	ctx: &FrozenContext,
-	opt: &Options,
-	table_def: Option<&TableDefinition>,
-) -> anyhow::Result<CachedTableSelect> {
-	if !ctx.check_perms(opt, Action::View)? {
-		return Ok(CachedTableSelect::Skip);
-	}
-	Ok(CachedTableSelect::Apply(ResolvedTableSelect::resolve(resolve_select_permission(table_def))))
-}
-
-/// Check a previously-resolved [`CachedTableSelect`] against a [`CursorDoc`].
-/// Companion to [`resolve_cached_table_select`].
-pub(crate) async fn check_cached_table_select_for_doc(
-	stk: &mut Stk,
-	ctx: &FrozenContext,
-	opt: &Options,
-	cached: &CachedTableSelect,
-	cursor_doc: &CursorDoc,
-) -> anyhow::Result<bool> {
-	match cached {
-		CachedTableSelect::Skip => Ok(true),
-		CachedTableSelect::Apply(p) => {
-			evaluate_table_select_for_doc(stk, ctx, opt, p, cursor_doc).await
-		}
-		CachedTableSelect::Physical(p, exec_ctx) => {
-			// The candidate value carries its canonical `id` (spliced in from
-			// the storage key on decode), so id-referencing permissions see
-			// the same document here as in the post-search batch check.
-			Ok(check_permission_for_value(p, cursor_doc.doc.as_ref(), None, exec_ctx).await?)
-		}
-	}
-}
-
-/// Populate `slot` with the table's cached SELECT permission on first call,
-/// then return a reference to it. Subsequent calls reuse the cached value
-/// without re-fetching the table definition. Shared between the HNSW and
-/// DiskANN truthy-doc filters, both of which resolve the permission once per
-/// filter and reuse it for every candidate. A slot pre-seeded with a
-/// [`CachedTableSelect::Physical`] gate (streaming executor) is returned
-/// as-is without touching the transaction.
-pub(crate) async fn ensure_cached_table_select<'a>(
-	ctx: &FrozenContext,
-	opt: &Options,
-	txn: &crate::kvs::Transaction,
-	ikb: &crate::idx::IndexKeyBase,
-	slot: &'a mut Option<CachedTableSelect>,
-) -> anyhow::Result<&'a CachedTableSelect> {
-	use crate::catalog::providers::TableProvider;
-	if slot.is_none() {
-		let table = txn.get_tb(ikb.ns(), ikb.db(), ikb.table(), None).await?;
-		*slot = Some(resolve_cached_table_select(ctx, opt, table.as_deref()).await?);
-	}
-	Ok(slot.as_ref().expect("just populated above"))
 }

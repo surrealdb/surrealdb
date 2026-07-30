@@ -184,6 +184,19 @@ pub struct Planner<'ctx> {
 	/// where the legacy executor has no query planner and MATCHES evaluates
 	/// to `false`.
 	pub(crate) matches_scope: Option<Arc<crate::exec::physical_expr::MatchesScope>>,
+	/// MATCHES clauses of the WHERE condition being planned, keyed by match
+	/// reference, resolved by index functions such as `search::highlight` into
+	/// the entry they report against. Written only by
+	/// [`Self::set_planning_scopes`], which owns the inherit-then-override rule.
+	/// `None` where no MATCHES is in scope, which is what makes those functions
+	/// report a missing MATCHES clause.
+	matches_context: Option<Arc<crate::exec::function::MatchesContext>>,
+	/// Shared KNN distance slot for the WHERE condition being planned, through
+	/// which the ANN scan publishes each candidate's distance and
+	/// `vector::distance::knn()` reads it back. Written only by
+	/// [`Self::set_planning_scopes`], and `None` when no KNN operator is in
+	/// scope.
+	knn_context: Option<Arc<crate::exec::function::KnnContext>>,
 	/// Re-entry nesting depth for this planner, the streaming engine's analogue
 	/// of the legacy executor's `Options::dive` (and bounded by the same
 	/// `max_computation_depth`).
@@ -222,6 +235,8 @@ impl<'ctx> Planner<'ctx> {
 			ns_db_ids_cache: tokio::sync::OnceCell::new(),
 			planner_strategy: *ctx.new_planner_strategy(),
 			matches_scope: None,
+			matches_context: None,
+			knn_context: None,
 			depth: 0,
 		}
 	}
@@ -250,6 +265,8 @@ impl<'ctx> Planner<'ctx> {
 			ns_db_ids_cache: tokio::sync::OnceCell::new(),
 			planner_strategy: *ctx.new_planner_strategy(),
 			matches_scope: None,
+			matches_context: None,
+			knn_context: None,
 			depth: 0,
 		}
 	}
@@ -357,6 +374,29 @@ impl<'ctx> Planner<'ctx> {
 		scope: Arc<crate::exec::physical_expr::MatchesScope>,
 	) {
 		self.matches_scope = Some(scope);
+	}
+
+	/// Establish the MATCHES and KNN planning scopes for the SELECT about to be
+	/// planned here (see the [`matches_context`](Self::matches_context) and
+	/// [`knn_context`](Self::knn_context) field docs).
+	///
+	/// `own_matches` is what this SELECT's own WHERE declares and `has_knn`
+	/// whether it declares a KNN operator; either one present replaces the
+	/// enclosing scope. What the SELECT does not declare is inherited from
+	/// `parent`, so an index function in a nested SELECT still resolves against
+	/// the MATCHES or KNN operator that introduced it.
+	pub(crate) fn set_planning_scopes(
+		&mut self,
+		own_matches: Option<Arc<crate::exec::function::MatchesContext>>,
+		has_knn: bool,
+		parent: &Planner<'_>,
+	) {
+		self.matches_context = own_matches.or_else(|| parent.matches_context.clone());
+		self.knn_context = if has_knn {
+			Some(Arc::new(crate::exec::function::KnnContext::new()))
+		} else {
+			parent.knn_context.clone()
+		};
 	}
 
 	/// Seed the re-entry nesting depth (see the `depth` field).
@@ -821,7 +861,7 @@ impl<'ctx> Planner<'ctx> {
 				left_phys,
 				right_phys,
 				op,
-				self.ctx.get_knn_context().cloned(),
+				self.knn_context.clone(),
 			)));
 		}
 

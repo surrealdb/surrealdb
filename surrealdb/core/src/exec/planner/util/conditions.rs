@@ -876,13 +876,17 @@ impl Visitor for MatchesCollector<'_> {
 	}
 }
 
-/// Try to extract the primary table name from the frozen context.
-pub(crate) fn extract_table_from_context(
-	ctx: &crate::ctx::FrozenContext,
+/// The primary table the in-scope MATCHES entries were collected against.
+///
+/// A scope only carries a table when the SELECT that built it had a literal
+/// table source, so this falls back to the placeholder `"unknown"` rather than
+/// naming a real table it cannot confirm. That placeholder matches no index, so
+/// the index function resolves against no full-text entry and yields `NONE` per
+/// row — the same outcome as a MATCHES whose index does not cover the idiom.
+pub(crate) fn extract_table_from_matches(
+	matches_context: &crate::exec::function::MatchesContext,
 ) -> surrealdb_strand::TableName {
-	if let Some(mc) = ctx.get_matches_context()
-		&& let Some(table) = mc.table()
-	{
+	if let Some(table) = matches_context.table() {
 		return table.clone();
 	}
 	surrealdb_strand::TableName::from("unknown".to_string())

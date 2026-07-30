@@ -16,15 +16,15 @@ use crate::catalog::{Record, TableId};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::exe::FlowResultExt as _;
-use crate::exec::permission::{
-	CachedTableSelect, check_cached_table_select_for_doc, ensure_cached_table_select,
-};
 use crate::expr::Cond;
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::trees::diskann::cache::DiskAnnCache;
 use crate::idx::trees::diskann::docs::DiskAnnDocs;
 use crate::idx::trees::diskann::index::DiskAnnContext;
+use crate::idx::trees::gate::{
+	CachedTableSelect, check_cached_table_select_for_doc, ensure_cached_table_select,
+};
 use crate::idx::trees::hnsw::VectorId;
 use crate::kvs::CachePolicy;
 use crate::val::RecordId;

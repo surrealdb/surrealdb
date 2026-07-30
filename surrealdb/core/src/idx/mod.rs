@@ -2,6 +2,7 @@ pub mod docids;
 pub(crate) mod error;
 pub(crate) mod ft;
 pub(crate) mod index;
+pub(crate) mod keys;
 pub mod planner;
 pub mod trees;
 

@@ -40,9 +40,10 @@ use super::pipeline::{
 	FieldState, build_field_state, compute_fields_for_value, filter_fields_by_permission,
 };
 use crate::catalog::providers::TableProvider;
+use crate::catalog::table_select_permission;
 use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, convert_permission_to_physical_runtime,
-	resolve_select_permission, should_check_perms,
+	should_check_perms,
 };
 use crate::exec::{ControlFlowExt, ExecutionContext};
 use crate::expr::ControlFlow;
@@ -129,7 +130,7 @@ impl FetchFieldStateCache {
 					.get_table_def(table, version)
 					.await
 					.context("Failed to get table definition")?;
-				let catalog_perm = resolve_select_permission(table_def.as_deref());
+				let catalog_perm = table_select_permission(table_def.as_deref());
 				convert_permission_to_physical_runtime(catalog_perm, ctx.ctx())
 					.await
 					.context("Failed to convert permission")?

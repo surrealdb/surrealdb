@@ -8,8 +8,8 @@ use surrealdb_types::{SqlFormat, ToSql};
 use uuid::Uuid;
 
 use crate::catalog::{
-	DatabaseId, FromStored, NamespaceId, Permissions, StoredPermissions, StoredViewDefinition,
-	ViewDefinition,
+	DatabaseId, FromStored, NamespaceId, Permission, Permissions, StoredPermissions,
+	StoredViewDefinition, ViewDefinition,
 };
 use crate::expr::ChangeFeed;
 use crate::expr::statements::info::InfoStructure;
@@ -212,6 +212,20 @@ pub struct TableDefinition {
 	pub cache_lives_ts: Uuid,
 	pub graphql_alias: Option<String>,
 	pub graphql_deprecated: Option<String>,
+}
+
+/// The SELECT permission guarding a table, for callers holding a table lookup
+/// that may have missed.
+///
+/// A missing definition resolves to [`Permission::None`]: a schemaless table
+/// has no recorded grant, and record users must be denied rather than allowed
+/// by default. Callers that gate row visibility share this resolution so the
+/// absent-table case cannot diverge between them.
+pub fn table_select_permission(table_def: Option<&TableDefinition>) -> &Permission {
+	match table_def {
+		Some(def) => &def.permissions.select,
+		None => &Permission::None,
+	}
 }
 
 impl FromStored for TableDefinition {

@@ -135,10 +135,6 @@ pub struct Context {
 	// `*Ctx` half of every emitted [`crate::observe`] event without
 	// re-walking the session value tree on every emit.
 	tenant_identity: Option<Arc<crate::observe::TenantIdentity>>,
-	// Matches context for index functions (search::highlight, search::score, etc.)
-	matches_context: Option<Arc<crate::exec::function::MatchesContext>>,
-	// KNN context for index functions (vector::distance::knn)
-	knn_context: Option<Arc<crate::exec::function::KnnContext>>,
 	/// Client for making http requests.
 	#[cfg(feature = "http")]
 	http_client: Arc<HttpClient>,
@@ -199,8 +195,6 @@ impl Context {
 			new_planner_strategy: NewPlannerStrategy::default(),
 			redact_volatile_explain_attrs: false,
 			statement_counters: None,
-			matches_context: None,
-			knn_context: None,
 			config: Arc::clone(&parent.config),
 			#[cfg(feature = "http")]
 			http_client: Arc::clone(&parent.http_client),
@@ -257,8 +251,6 @@ impl Context {
 			new_planner_strategy: parent.new_planner_strategy,
 			redact_volatile_explain_attrs: parent.redact_volatile_explain_attrs,
 			statement_counters: parent.statement_counters.clone(),
-			matches_context: parent.matches_context.clone(),
-			knn_context: parent.knn_context.clone(),
 			config: Arc::clone(&parent.config),
 			#[cfg(feature = "http")]
 			http_client,
@@ -301,8 +293,6 @@ impl Context {
 			new_planner_strategy: parent.new_planner_strategy,
 			redact_volatile_explain_attrs: parent.redact_volatile_explain_attrs,
 			statement_counters: parent.statement_counters.clone(),
-			matches_context: parent.matches_context.clone(),
-			knn_context: parent.knn_context.clone(),
 			config: Arc::clone(&parent.config),
 			#[cfg(feature = "http")]
 			http_client: Arc::clone(&parent.http_client),
@@ -362,8 +352,6 @@ impl Context {
 			new_planner_strategy: from.new_planner_strategy,
 			redact_volatile_explain_attrs: from.redact_volatile_explain_attrs,
 			statement_counters: from.statement_counters.clone(),
-			matches_context: from.matches_context.clone(),
-			knn_context: from.knn_context.clone(),
 			config: Arc::clone(&from.config),
 			#[cfg(feature = "http")]
 			http_client: Arc::clone(&from.http_client),
@@ -414,8 +402,6 @@ impl Context {
 			new_planner_strategy: from.new_planner_strategy,
 			redact_volatile_explain_attrs: from.redact_volatile_explain_attrs,
 			statement_counters: from.statement_counters.clone(),
-			matches_context: from.matches_context.clone(),
-			knn_context: from.knn_context.clone(),
 			config: Arc::clone(&from.config),
 			#[cfg(feature = "http")]
 			http_client: Arc::clone(&from.http_client),
@@ -475,8 +461,6 @@ impl Context {
 			new_planner_strategy: planner_strategy,
 			redact_volatile_explain_attrs: false,
 			statement_counters: None,
-			matches_context: None,
-			knn_context: None,
 			config,
 			#[cfg(feature = "http")]
 			http_client,
@@ -522,8 +506,6 @@ impl Context {
 			new_planner_strategy: NewPlannerStrategy::default(),
 			redact_volatile_explain_attrs: false,
 			statement_counters: None,
-			matches_context: None,
-			knn_context: None,
 			config: Default::default(),
 			#[cfg(feature = "http")]
 			http_client: Arc::new(
@@ -1109,28 +1091,6 @@ impl Context {
 	/// Get the function registry for this context
 	pub(crate) fn function_registry(&self) -> &Arc<FunctionRegistry> {
 		&self.function_registry
-	}
-
-	/// Set the matches context for index functions (search::highlight, etc.)
-	pub(crate) fn set_matches_context(&mut self, ctx: crate::exec::function::MatchesContext) {
-		self.matches_context = Some(Arc::new(ctx));
-	}
-
-	/// Get the matches context for index functions
-	pub(crate) fn get_matches_context(
-		&self,
-	) -> Option<&Arc<crate::exec::function::MatchesContext>> {
-		self.matches_context.as_ref()
-	}
-
-	/// Set the KNN context for index functions (vector::distance::knn)
-	pub(crate) fn set_knn_context(&mut self, ctx: Arc<crate::exec::function::KnnContext>) {
-		self.knn_context = Some(ctx);
-	}
-
-	/// Get the KNN context for index functions
-	pub(crate) fn get_knn_context(&self) -> Option<&Arc<crate::exec::function::KnnContext>> {
-		self.knn_context.as_ref()
 	}
 
 	/// Get the new planner strategy for this context

@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
 use crate::dbs::Options;
-use crate::exec::permission::CachedTableSelect;
 use crate::expr::Cond;
+use crate::idx::trees::gate::CachedTableSelect;
 
 #[cfg(diskann)]
 pub(crate) mod diskann;
 pub mod dynamicset;
+pub(crate) mod gate;
 mod graph;
 pub mod hnsw;
 pub(in crate::idx) mod knn;
@@ -23,7 +24,7 @@ pub(crate) struct KnnCondFilter<'a> {
 	/// The condition to evaluate against each candidate record.
 	pub(crate) cond: Arc<Cond>,
 	/// Pre-resolved SELECT-permission gate. `Some` on the streaming-executor
-	/// path, carrying the scan operator's own physical permission; `None` on
+	/// path, carrying the scan operator's own resolved permission; `None` on
 	/// the legacy path, where the filter resolves the catalog permission
 	/// lazily from the transaction and evaluates it via `Expr::compute`.
 	pub(crate) select_gate: Option<CachedTableSelect>,
