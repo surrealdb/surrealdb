@@ -17,7 +17,7 @@ surrealism-macros = { workspace = true, default-features = false }
 surrealism-types = { workspace = true, default-features = false }
 wit-bindgen.workspace = true
 inventory = "0.3.24"
-tokio = { workspace = true, default-features = false, features = ["rt", "net", "time"] }
+tokio = { workspace = true, default-features = false, features = ["rt", "time"] }
 
 [lints]
 workspace = true
