@@ -228,22 +228,4 @@ macro_rules! impl_kv_key_storekey {
 	};
 }
 pub(crate) use impl_kv_key_storekey;
-
-macro_rules! impl_kv_value_revisioned {
-	($name:ident) => {
-		impl crate::key::KVValue for $name {
-			type KeyContext = ();
-
-			#[inline]
-			fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
-				Ok(revision::to_vec(self)?)
-			}
-
-			#[inline]
-			fn kv_decode_value(bytes: &[u8], _: ()) -> anyhow::Result<Self> {
-				Ok(revision::from_slice(bytes)?)
-			}
-		}
-	};
-}
-pub(crate) use impl_kv_value_revisioned;
+pub(crate) use surrealdb_kvs::impl_kv_value_revisioned;

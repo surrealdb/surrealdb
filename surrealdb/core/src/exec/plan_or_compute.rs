@@ -93,7 +93,7 @@ pub(crate) async fn legacy_compute(
 	doc: Option<&crate::doc::CursorDoc>,
 ) -> crate::expr::FlowResult<Value> {
 	let mut stack = TreeStack::new();
-	stack.enter(|stk| expr.compute(stk, frozen, opt, doc)).finish().await
+	stack.enter(|stk| crate::legacy::expr_compute(expr, stk, frozen, opt, doc)).finish().await
 }
 
 // ============================================================================

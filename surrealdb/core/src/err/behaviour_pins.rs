@@ -16,8 +16,9 @@ use anyhow::anyhow;
 use super::Error;
 use crate::doc::Error as DocError;
 use crate::err::EngineError;
+use crate::exe::FlowResultExt;
 use crate::exec::Error as ExecError;
-use crate::expr::{ControlFlow, Error as ExprError, FlowResultExt};
+use crate::expr::{ControlFlow, Error as ExprError};
 use crate::kvs::Error as KvsError;
 use crate::val::Value;
 

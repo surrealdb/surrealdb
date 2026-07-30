@@ -661,7 +661,7 @@ mod tests {
 		RandomItemGenerator, TestCollection, get_seed_rnd, new_random_vec, new_vectors_from_file,
 	};
 	use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
-	use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
+	use crate::idx::trees::vector::{DistanceExt as _, SerializedVector, SharedVector, Vector};
 	use crate::kvs::{Datastore, TransactionType};
 	use crate::val::{Number, RecordIdKey, TableName, Value};
 

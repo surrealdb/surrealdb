@@ -27,71 +27,17 @@
 //! [`crate::syn::token::Span`] so GQL errors render identically to SurrealQL
 //! errors.
 
-pub mod ast;
-pub mod lexer;
-mod lower;
-pub mod parser;
-pub mod token;
-
 use anyhow::{Result, ensure};
-use reblessive::Stack;
 use surrealdb_cnf::CommonConfig;
+pub use surrealdb_gql::{
+	GqlParserSettings, PreparedGqlQuery, ast, lexer, lower, parse_str, parse_to_plan_with_settings,
+	parse_with_settings, parser, token,
+};
 
-pub use self::lower::PreparedGqlQuery;
 use crate::dbs::Capabilities;
 use crate::syn::ParseError;
-use crate::syn::error::{SyntaxError, syntax_error};
-use crate::syn::token::Span;
 
 const TARGET: &str = "surrealdb::core::gql";
-
-/// Parses a GQL query with the default parser settings.
-pub fn parse_str(input: &str) -> Result<ast::GqlQuery, SyntaxError> {
-	parse_with_settings(input, GqlParserSettings::default())
-}
-
-/// Parses a GQL query with the given parser settings.
-///
-/// During parsing the nesting depth of expressions counts against the limit
-/// in the settings; exceeding it is a parse error rather than unbounded
-/// recursion.
-pub fn parse_with_settings(
-	input: &str,
-	settings: GqlParserSettings,
-) -> Result<ast::GqlQuery, SyntaxError> {
-	// `parse_with_capabilities` rejects oversized input with the dedicated
-	// `ParseError::QueryTooLarge` (mirroring `syn`); this guard keeps the `u32`
-	// span arithmetic safe for direct callers of the raw parser API.
-	if input.len() > u32::MAX as usize {
-		return Err(syntax_error!(
-			"Cannot parse query, the query exceeded the maximum size of 4GB",
-			@Span::empty()
-		));
-	}
-	let mut parser = parser::Parser::new_with_settings(input, settings);
-	let mut stack = Stack::new();
-	stack.enter(|stk| parser.parse_query(stk)).finish()
-}
-
-/// Lowers a parsed GQL query into a [`PreparedGqlQuery`] (the declarative
-/// [`MatchPlan`](crate::expr::match_plan::MatchPlan) embedded in a logical
-/// plan; `doc/gql/V2_DESIGN.md` §8).
-///
-/// The returned plan executes through the streaming execution engine; no
-/// SurrealQL surface AST is generated.
-pub fn lower(query: ast::GqlQuery) -> Result<PreparedGqlQuery, SyntaxError> {
-	Ok(PreparedGqlQuery(lower::lower(query)?))
-}
-
-/// Parses a GQL query and lowers it into a [`PreparedGqlQuery`], with the given
-/// parser settings.
-pub fn parse_to_plan_with_settings(
-	input: &str,
-	settings: GqlParserSettings,
-) -> Result<PreparedGqlQuery, SyntaxError> {
-	let query = parse_with_settings(input, settings)?;
-	lower(query)
-}
 
 /// Creates the GQL parser settings from the global configuration values as
 /// well as the capabilities struct, mirroring
@@ -136,26 +82,37 @@ pub fn parse_with_capabilities(
 		.map_err(anyhow::Error::new)
 }
 
-/// Settings which control the behaviour of the GQL parser.
-#[derive(Clone, Debug)]
-pub struct GqlParserSettings {
-	/// Disallow a query to have objects/expressions nested deeper than the
-	/// limit. Lists and property maps count towards this limit.
-	pub object_recursion_limit: usize,
-	/// Bounds the depth of the expression operator tree, including flat
-	/// left-associative spines (`1 + 1 + 1 + …`) and prefix chains, which
-	/// are otherwise unbounded and overflow the call stack when the lowered
-	/// `sql::Expr` tree is later walked recursively (dropped, formatted, or
-	/// converted to `expr::Expr`). Mirrors
-	/// [`crate::syn::parser::ParserSettings::expr_recursion_limit`].
-	pub expr_recursion_limit: usize,
-}
+#[cfg(test)]
+mod tests {
+	#[test]
+	fn parse_with_capabilities_renders_errors_like_surrealql() {
+		use surrealdb_cnf::CommonConfig;
 
-impl Default for GqlParserSettings {
-	fn default() -> Self {
-		GqlParserSettings {
-			object_recursion_limit: 100,
-			expr_recursion_limit: 128,
-		}
+		use crate::dbs::Capabilities;
+		use crate::dbs::capabilities::Targets;
+		let error = crate::gql::parse_with_capabilities(
+			"MATCH (n:person) RETURN m",
+			&Capabilities::all().with_experimental(Targets::All),
+			&CommonConfig::default(),
+		)
+		.expect_err("should fail");
+		let rendered = format!("{error}");
+		assert!(rendered.contains("Parse error"), "unexpected error: {rendered}");
+		assert!(rendered.contains("Unknown variable `m`"), "unexpected error: {rendered}");
+	}
+
+	#[test]
+	fn parse_with_capabilities_available_without_experimental_flag() {
+		use surrealdb_cnf::CommonConfig;
+
+		use crate::dbs::Capabilities;
+		// GQL is on by default: parsing lowers successfully without any experimental
+		// capability being enabled.
+		crate::gql::parse_with_capabilities(
+			"MATCH (n:person) RETURN n AS n",
+			&Capabilities::all(),
+			&CommonConfig::default(),
+		)
+		.expect("GQL should lower without an experimental capability");
 	}
 }

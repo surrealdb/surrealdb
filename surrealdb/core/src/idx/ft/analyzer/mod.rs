@@ -11,8 +11,8 @@ use surrealdb_types::ToSql;
 use crate::catalog;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
+use crate::exe::FlowResultExt as _;
 use crate::exec::Error as ExecError;
-use crate::expr::FlowResultExt as _;
 use crate::expr::convert::analyzer_function::function_from_storage;
 use crate::idx::ft::analyzer::filter::FilteringStage;
 use crate::idx::ft::analyzer::tokenizer::{Tokenizer, Tokens};
@@ -100,10 +100,16 @@ impl Analyzer {
 	) -> Result<Tokens> {
 		let input = if let Some(function_name) = self.az.function.as_ref().map(|i| i.to_string()) {
 			let display_name = qualified_name(&function_name);
-			let val = function_from_storage(&function_name)
-				.compute(stk, ctx, opt, None, vec![Value::String(input)])
-				.await
-				.catch_return()?;
+			let val = crate::legacy::function_compute(
+				&function_from_storage(&function_name),
+				stk,
+				ctx,
+				opt,
+				None,
+				vec![Value::String(input)],
+			)
+			.await
+			.catch_return()?;
 			if let Value::String(val) = val {
 				val
 			} else {
@@ -217,10 +223,15 @@ mod tests {
 				let a = Analyzer::new(
 					ctx.get_index_stores(),
 					Arc::new(
-						DefineAnalyzerStatement::from(az)
-							.to_definition(stk, &ctx, &opts, None)
-							.await
-							.unwrap(),
+						crate::legacy::define_analyzer_statement_to_definition(
+							&DefineAnalyzerStatement::from(az),
+							stk,
+							&ctx,
+							&opts,
+							None,
+						)
+						.await
+						.unwrap(),
 					),
 				)
 				.unwrap();

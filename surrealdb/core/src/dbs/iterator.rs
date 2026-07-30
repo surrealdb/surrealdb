@@ -11,16 +11,17 @@ use crate::catalog::{Error as CatalogError, Record};
 use crate::ctx::{Canceller, Context, FrozenContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::{Explanation, Plan};
+use crate::dbs::processor::RelateThrough;
 use crate::dbs::result::Results;
 use crate::dbs::store::{MemoryOrdered, MemoryOrderedLimit, MemoryRandom};
 use crate::dbs::{Options, Statement};
 use crate::doc::{CursorDoc, Document, DocumentContext, IgnoreError, NsDbCtx};
 use crate::err::EngineError;
+use crate::exe::FlowResultExt;
 use crate::exec::Error as ExecError;
 use crate::expr::lookup::{ComputedLookupSubject, LookupKind};
 use crate::expr::order::Ordering;
-use crate::expr::statements::relate::RelateThrough;
-use crate::expr::{self, ControlFlow, Expr, Fields, FlowResultExt, Literal, Lookup, Mock, Part};
+use crate::expr::{self, ControlFlow, Expr, Fields, Literal, Lookup, Mock, Part};
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
 use crate::idx::planner::{
 	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, ScanDirection,
@@ -271,14 +272,18 @@ impl Iterator {
 					&& lookup.start.is_none()
 					&& lookup.expr.is_none()
 				{
-					let from = match from.compute(stk, ctx, opt, doc).await {
+					let from = match crate::legacy::record_id_lit_compute(from, stk, ctx, opt, doc)
+						.await
+					{
 						Ok(x) => x,
 						Err(ControlFlow::Err(e)) => return Err(e),
 						Err(_) => bail!(ExecError::InvalidControlFlow),
 					};
 					let mut what = Vec::new();
 					for s in lookup.what.iter() {
-						what.push(s.compute(stk, ctx, opt, doc).await?);
+						what.push(
+							crate::legacy::lookup_subject_compute(s, stk, ctx, opt, doc).await?,
+						);
 					}
 					self.prepare_lookup(
 						ctx,
@@ -592,7 +597,10 @@ impl Iterator {
 		doc_ctx: &NsDbCtx,
 		expr: &Expr,
 	) -> Result<()> {
-		let v = stk.run(|stk| expr.compute(stk, ctx, opt, doc)).await.catch_return()?;
+		let v = stk
+			.run(|stk| crate::legacy::expr_compute(expr, stk, ctx, opt, doc))
+			.await
+			.catch_return()?;
 		match v {
 			Value::Table(table_name) => {
 				self.prepare_table(ctx, opt, stk, planner, stm_ctx, doc_ctx, &table_name).await?
@@ -684,14 +692,20 @@ impl Iterator {
 						&& lookup.start.is_none()
 						&& lookup.expr.is_none()
 					{
-						let from = match from.compute(stk, ctx, opt, doc).await {
-							Ok(x) => x,
-							Err(ControlFlow::Err(e)) => return Err(e),
-							Err(_) => bail!(ExecError::InvalidControlFlow),
-						};
+						let from =
+							match crate::legacy::record_id_lit_compute(from, stk, ctx, opt, doc)
+								.await
+							{
+								Ok(x) => x,
+								Err(ControlFlow::Err(e)) => return Err(e),
+								Err(_) => bail!(ExecError::InvalidControlFlow),
+							};
 						let mut what = Vec::new();
 						for s in lookup.what.iter() {
-							what.push(s.compute(stk, ctx, opt, doc).await?);
+							what.push(
+								crate::legacy::lookup_subject_compute(s, stk, ctx, opt, doc)
+									.await?,
+							);
 						}
 						self.prepare_lookup(
 							ctx,
@@ -843,7 +857,7 @@ impl Iterator {
 		if self.limit.is_none()
 			&& let Some(v) = stm.limit()
 		{
-			self.limit = Some(v.process(stk, ctx, opt, None).await?);
+			self.limit = Some(crate::legacy::limit_process(v, stk, ctx, opt, None).await?);
 		}
 		Ok(())
 	}
@@ -862,7 +876,7 @@ impl Iterator {
 		stm: &Statement<'_>,
 	) -> Result<()> {
 		if let Some(v) = stm.start() {
-			self.start = Some(v.process(stk, ctx, opt, None).await?);
+			self.start = Some(crate::legacy::start_process(v, stk, ctx, opt, None).await?);
 		}
 		Ok(())
 	}
@@ -1041,7 +1055,8 @@ impl Iterator {
 								// Make a copy of object
 								let mut obj = obj.clone();
 								// Set the value at the path
-								obj.set(stk, ctx, opt, split, val).await?;
+								crate::legacy::value_set(&mut obj, stk, ctx, opt, split, val)
+									.await?;
 								// Add the object to the results
 								self.results.push(stk, ctx, opt, rs, obj).await?;
 							}
@@ -1051,7 +1066,8 @@ impl Iterator {
 								// Make a copy of object
 								let mut obj = obj.clone();
 								// Set the value at the path
-								obj.set(stk, ctx, opt, split, val).await?;
+								crate::legacy::value_set(&mut obj, stk, ctx, opt, split, val)
+									.await?;
 								// Add the object to the results
 								self.results.push(stk, ctx, opt, rs, obj).await?;
 							}
@@ -1060,7 +1076,7 @@ impl Iterator {
 							// Make a copy of object
 							let mut obj = obj.clone();
 							// Set the value at the path
-							obj.set(stk, ctx, opt, split, val).await?;
+							crate::legacy::value_set(&mut obj, stk, ctx, opt, split, val).await?;
 							// Add the object to the results
 							self.results.push(stk, ctx, opt, rs, obj).await?;
 						}
@@ -1144,7 +1160,7 @@ impl Iterator {
 		if let Some(fetchs) = stm.fetch() {
 			let mut idioms = BTreeSet::new();
 			for fetch in fetchs.iter() {
-				fetch.compute(stk, ctx, opt, &mut idioms).await?;
+				crate::legacy::fetch_compute(fetch, stk, ctx, opt, &mut idioms).await?;
 			}
 
 			for i in &idioms {
@@ -1152,7 +1168,7 @@ impl Iterator {
 				// Loop over each result value
 				for obj in &mut values {
 					// Fetch the value at the path
-					stk.run(|stk| obj.fetch(stk, ctx, opt, i)).await?;
+					stk.run(|stk| crate::legacy::value_fetch(obj, stk, ctx, opt, i)).await?;
 				}
 				self.results = values.into();
 			}

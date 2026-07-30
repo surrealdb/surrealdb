@@ -20,6 +20,9 @@ categories.workspace = true
 test-inc-timestamp = []
 
 [dependencies]
+anyhow.workspace = true
+roaring = { workspace = true, features = ["serde"] }
+revision = { workspace = true }
 common.workspace = true
 surrealdb-cnf.workspace = true
 
@@ -33,6 +36,7 @@ affinitypool = { workspace = true }
 num_cpus = { workspace = true }
 
 [dev-dependencies]
+rstest.workspace = true
 # Tests call `Utc::now()`, which requires chrono's `now` feature. Keep it a
 # dev-dependency so the published crate does not pull in a system clock.
 chrono = { workspace = true, features = ["now"] }

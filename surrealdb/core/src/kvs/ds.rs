@@ -23,6 +23,7 @@ use async_channel::Sender;
 use bytes::{Bytes, BytesMut};
 use futures::{Future, Stream};
 use rand::Rng;
+use rand::distr::{Alphanumeric, SampleString};
 use reblessive::TreeStack;
 use surrealdb_cnf::dynamic::DynamicConfiguration;
 use surrealdb_cnf::{CommonConfig, ConfigMap, LiveQueryEngine};
@@ -63,15 +64,18 @@ use crate::dbs::{
 };
 use crate::doc::AsyncEventRecord;
 use crate::err::{EngineError, Error};
+use crate::exe::FlowResultExt as _;
 use crate::exec::function::FunctionRegistry;
 use crate::expr::model::get_model_path;
+use crate::expr::statements::define::DefineKind;
 use crate::expr::statements::{DefineModelStatement, DefineStatement, DefineUserStatement};
-use crate::expr::{Base, Expr, FlowResultExt as _, Literal, LogicalPlan, TopLevelExpr};
+use crate::expr::user::UserDuration;
+use crate::expr::{Base, Expr, Idiom, Literal, LogicalPlan, TopLevelExpr};
 #[cfg(feature = "gql")]
 use crate::gql::PreparedGqlQuery;
 #[cfg(feature = "http")]
 use crate::http::HttpClient;
-use crate::iam::{Action, Auth, PolicyError, Resource, ResourceKind, Role};
+use crate::iam::{Action, Auth, PolicyError, Resource, ResourceKind, Role, ScramCredential};
 use crate::idx::IndexKeyBase;
 use crate::idx::index::IndexOperation;
 use crate::idx::trees::store::IndexStores;
@@ -934,7 +938,7 @@ impl Datastore {
 			// Display information in the logs
 			info!(target: TARGET, "Credentials were provided, and no root users were found. The root user '{user}' will be created");
 			// Create and new root user definition
-			let stm = DefineUserStatement::new_with_password(
+			let stm = define_user_statement_new_with_password(
 				Base::Root,
 				user.to_owned(),
 				pass,
@@ -946,7 +950,12 @@ impl Datastore {
 			ctx.set_transaction(Arc::clone(&txn));
 			let ctx = ctx.freeze();
 			let mut stack = TreeStack::new();
-			let res = stack.enter(|stk| stm.compute(stk, &ctx, &opt, None)).finish().await;
+			let res = stack
+				.enter(|stk| {
+					crate::legacy::define_user_statement_compute(&stm, stk, &ctx, &opt, None)
+				})
+				.finish()
+				.await;
 			catch!(txn, res);
 			// We added a user, so commit the transaction
 			txn.commit().await
@@ -4202,8 +4211,11 @@ impl Datastore {
 		// Freeze the context
 		let ctx = ctx.freeze();
 		// Compute the value
-		let res =
-			stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await.catch_return();
+		let res = stack
+			.enter(|stk| crate::legacy::expr_compute(val, stk, &ctx, &opt, None))
+			.finish()
+			.await
+			.catch_return();
 		// Store any data
 		if res.is_ok() && txn_type == TransactionType::Write {
 			// If the compute was successful, then commit if writeable
@@ -4397,7 +4409,7 @@ impl Datastore {
 
 	pub async fn process_use(
 		&self,
-		ctx: Option<&Context>,
+		ctx: Option<&dyn crate::catalog::providers::CancellationProbe>,
 		session: &mut Session,
 		namespace: Option<String>,
 		database: Option<String>,
@@ -4712,6 +4724,25 @@ impl crate::dbs::NodeEndpointResolver for CatalogNodeEndpointResolver {
 			let _ = txn.cancel().await;
 			node.and_then(|n| n.http_endpoint)
 		})
+	}
+}
+
+pub(crate) fn define_user_statement_new_with_password(
+	base: Base,
+	user: String,
+	pass: &str,
+	role: String,
+) -> DefineUserStatement {
+	DefineUserStatement {
+		kind: DefineKind::Default,
+		base,
+		name: Expr::Idiom(Idiom::field(user)),
+		hash: crate::iam::hash_password(pass),
+		code: Alphanumeric.sample_string(&mut rand::rng(), 128),
+		roles: vec![role],
+		duration: UserDuration::default(),
+		comment: Expr::Literal(Literal::None),
+		scram: Some(ScramCredential::generate(pass)),
 	}
 }
 
@@ -5952,7 +5983,7 @@ mod test {
 		// Compute the value
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack
-			.enter(|stk| val.compute(stk, &ctx, &opt, None))
+			.enter(|stk| crate::legacy::expr_compute(&val, stk, &ctx, &opt, None))
 			.finish()
 			.await
 			.catch_return()

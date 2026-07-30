@@ -20,11 +20,21 @@
 #![doc(html_logo_url = "https://surrealdb.s3.amazonaws.com/icon.png")]
 
 #[macro_use]
+extern crate surrealdb_collections;
+#[macro_use]
 extern crate tracing;
 
 // Re-exported so `use surrealdb_core::lazy_env_parse;` keeps resolving for
 // downstream crates (the macro itself now lives in `surrealdb-common`).
 pub use common::lazy_env_parse;
+
+// `fail!` lives in `surrealdb-common` so every layer of the engine reports a
+// broken invariant the same way. Imported crate-wide rather than per file
+// because it is used from nested modules, which do not inherit a file-level
+// `use`. Verified collision-free against `mac` below: common exports `fail`,
+// `lazy_env_parse` and `id`; `mac` defines none of those.
+#[macro_use]
+extern crate common;
 
 #[macro_use]
 mod mac;
@@ -44,6 +54,7 @@ mod fmt_roundtrip_test;
 mod fnc;
 #[doc(hidden)]
 pub mod key;
+mod legacy;
 mod lq;
 // `str` moved to `surrealdb-common`; re-exported here so the exported
 // `lazy_env_parse!` macro's `$crate::str::…` expansion keeps resolving in
@@ -55,7 +66,7 @@ mod surrealism;
 mod sys;
 
 pub mod api;
-pub mod catalog;
+pub use surrealdb_catalog as catalog;
 // Downstream-compat alias only (enterprise still imports `surrealdb_core::cnf::…`);
 // core-internal code and in-repo crates import `surrealdb_cnf` directly.
 pub use surrealdb_cnf as cnf;
@@ -66,7 +77,7 @@ pub mod dbs;
 pub mod env;
 pub mod err;
 pub mod exec;
-pub mod expr;
+pub use surrealdb_expr::expr;
 #[cfg(feature = "gql")]
 pub mod gql;
 #[cfg(feature = "graphql")]
@@ -85,11 +96,11 @@ mod net;
 pub mod obs;
 pub mod observe;
 pub mod options;
-pub mod rnd;
+pub use crate::val::rnd;
 pub mod rpc;
 pub mod syn;
 #[doc(hidden)]
-pub mod val;
+pub use surrealdb_expr::val;
 
 pub(crate) mod types {
 	//! Re-export the types from the types crate for internal use prefixed with Public.
@@ -97,19 +108,18 @@ pub(crate) mod types {
 	pub use surrealdb_types::{
 		Action as PublicAction, Array as PublicArray, Bytes as PublicBytes,
 		Datetime as PublicDatetime, Duration as PublicDuration, File as PublicFile,
-		Geometry as PublicGeometry, GeometryKind as PublicGeometryKind, Kind as PublicKind,
-		KindLiteral as PublicKindLiteral, Notification as PublicNotification,
-		Number as PublicNumber, Object as PublicObject, Range as PublicRange,
-		RecordId as PublicRecordId, RecordIdKey as PublicRecordIdKey,
-		RecordIdKeyRange as PublicRecordIdKeyRange, Set as PublicSet, SurrealValue,
-		Table as PublicTable, Uuid as PublicUuid, Value as PublicValue,
-		Variables as PublicVariables,
+		Geometry as PublicGeometry, Notification as PublicNotification, Number as PublicNumber,
+		Object as PublicObject, Range as PublicRange, RecordId as PublicRecordId,
+		RecordIdKey as PublicRecordIdKey, RecordIdKeyRange as PublicRecordIdKeyRange,
+		Set as PublicSet, SurrealValue, Table as PublicTable, Uuid as PublicUuid,
+		Value as PublicValue, Variables as PublicVariables,
 	};
 }
 
 /// Used by the `map!` macro (`$crate::VecMap`); not public API.
 #[doc(hidden)]
 pub use surrealdb_collections::VecMap;
+pub use surrealdb_collections::{map, map_opt};
 #[cfg(feature = "ml")]
 pub use surrealml_core as ml;
 

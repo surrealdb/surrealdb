@@ -5,12 +5,9 @@
 #![allow(clippy::needless_pass_by_value)]
 
 pub use main::run;
-
-mod classes;
+pub(crate) use surrealdb_expr::js::classes;
 mod error;
-mod from;
 mod globals;
-mod into;
 mod main;
 mod modules;
 

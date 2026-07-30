@@ -34,8 +34,11 @@ pub mod token;
 use common::{LeafError, internal_todo};
 use reblessive::{Stack, Stk};
 use surrealdb_cnf::CommonConfig;
-use surrealdb_sql::{Ast, Block, Expr};
-use surrealdb_types::Error as TypesError;
+use surrealdb_sql::{Ast, Block, Expr, Fields, Idiom, Kind};
+use surrealdb_types::{
+	Datetime as PublicDatetime, Duration as PublicDuration, Error as TypesError,
+	RecordId as PublicRecordId, Value as PublicValue,
+};
 use tracing::instrument;
 
 pub use self::error::RenderedError;
@@ -213,4 +216,180 @@ pub fn block_with_settings(
 			.with_span(found.span, error::MessageKind::Error)),
 		}
 	})
+}
+
+/// Parses a SurrealQL [`Idiom`]
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub fn idiom(input: &str) -> Result<Idiom, ParseError> {
+	parse_with(input.as_bytes(), async |parser, stk| parser.parse_plain_idiom(stk).await)
+}
+
+/// Parses a SurrealQL [`PublicValue`] and parses values within strings.
+///
+/// This function is for testing only, don't use it outside of tests!
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub fn value(input: &str) -> Result<PublicValue, ParseError> {
+	let settings = ParserSettings::default();
+
+	parse_with_settings(input.as_bytes(), settings, async |parser, stk| {
+		parser.parse_value(stk).await
+	})
+}
+
+/// Parse a record id.
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub fn record_id(input: &str) -> Result<PublicRecordId, ParseError> {
+	parse_with(input.as_bytes(), async |parser, stk| parser.parse_value_record_id(stk).await)
+}
+
+/// Re-parses the canonical kind-grammar text a catalog definition stores for
+/// one of its type-annotated fields (e.g. `StoredFieldDefinition.field_kind`,
+/// `StoredFunctionDefinition.args`/`.returns`). A kind can embed a `<file>` bucket
+/// restriction or other experimental-gated grammar, so this parses under
+/// [`ParserSettings::STORED_TEXT`] — the storage wire contract's parser
+/// profile — unlike [`kind`], which parses fresh input. The whole of `input`
+/// must be consumed, for the reason [`expr_for_definition`] documents.
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub fn kind_for_definition(input: &str) -> Result<Kind, ParseError> {
+	parse_with_settings(input.as_bytes(), ParserSettings::STORED_TEXT, async |parser, stk| {
+		let kind = parser.parse_inner_kind(stk).await?;
+		parser.assert_finished()?;
+		Ok(kind)
+	})
+}
+
+/// Parses a SurrealQL [`PublicValue`] and parses values within strings.
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub fn value_legacy_strand(input: &str, config: &CommonConfig) -> Result<PublicValue, ParseError> {
+	let settings = ParserSettings {
+		object_recursion_limit: config.max_object_parsing_depth as usize,
+		query_recursion_limit: config.max_query_parsing_depth as usize,
+		legacy_strands: true,
+		..Default::default()
+	};
+
+	parse_with_settings(input.as_bytes(), settings, async |parser, stk| {
+		parser.parse_value(stk).await
+	})
+}
+
+/// Re-parses the canonical SurrealQL text a catalog definition stores for one
+/// of its expression fields (e.g. `StoredFieldDefinition.value`, `Permission::Specific`).
+///
+/// Unlike [`expr`], which parses fresh input under the live capabilities and
+/// configured limits, this uses [`ParserSettings::STORED_TEXT`] — the storage
+/// wire contract's parser profile. See that constant for the full reasoning.
+///
+/// # Field context
+///
+/// This parses with [`Parser::parse_expr_field`], so a *top-level* bare
+/// identifier compiles to `Expr::Idiom([Part::Field(..)])`, never
+/// `Expr::Table`. That is the correct reading for every clause stored as
+/// expression text: `VALUE`, `ASSERT`, `DEFAULT`, `COMPUTED`, `WHEN`, `THEN`,
+/// permission guards, API actions and fetch targets all name a field of the
+/// document, and all are parsed in field context when the statement that
+/// defines them runs.
+///
+/// It is safe for *nested* table positions too, and the reason is worth
+/// stating because it is not obvious: the two context-setting entry points
+/// each save and restore the flag rather than latching it (see
+/// `Parser::parse_expr_table` and `Parser::parse_expr_field`). A statement
+/// inside stored text therefore re-establishes table context for its own
+/// source list regardless of how the parse was entered, so
+/// `StoredEventDefinition.then` holding `CREATE person` recovers
+/// `Expr::Table("person")` even though this funnel started in field context.
+///
+/// The consequence is that only a top-level bare identifier depends on which
+/// funnel is used. `crate::catalog::text` pins both halves of that.
+///
+/// The whole of `input` must be consumed. Every one of these `*_for_definition`
+/// funnels parses with a routine that stops at the first token it cannot
+/// continue with — the Pratt expression parser exits on a token with no
+/// continuation binding power, and the idiom/field-list/kind parsers stop at
+/// the first token that is not a further part, field or union arm — so without
+/// the [`Parser::assert_finished`] check a stored definition holding trailing
+/// content (`"a.b bogus"`) would silently compile to its prefix (`a.b`) and be
+/// used as if that were what the user defined.
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub fn expr_for_definition(input: &str) -> Result<Expr, ParseError> {
+	parse_with_settings(input.as_bytes(), ParserSettings::STORED_TEXT, async |parser, stk| {
+		let expr = parser.parse_expr_field(stk).await?;
+		parser.assert_finished()?;
+		Ok(expr)
+	})
+}
+
+/// Parse a duration from a string.
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub fn duration(input: &str) -> Result<PublicDuration, ParseError> {
+	if input.len() > u32::MAX as usize {
+		return Err(ParseError::QueryTooLarge);
+	}
+
+	let mut parser = Parser::new(input.as_bytes());
+	parser
+		.next_token_value::<PublicDuration>()
+		.and_then(|e| parser.assert_finished().map(|_| e))
+		.map_err(|e| e.render_on(input))
+		.map_err(ParseError::InvalidQuery)
+}
+
+/// Parse a datetime without enclosing delimiters from a string.
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub fn datetime(input: &str) -> Result<PublicDatetime, ParseError> {
+	if input.len() > u32::MAX as usize {
+		return Err(ParseError::QueryTooLarge);
+	}
+
+	match lexer::Lexer::lex_datetime(input) {
+		Ok(x) => Ok(x),
+		Err(e) => Err(ParseError::InvalidQuery(e.render_on(input))),
+	}
+}
+
+/// Re-parses canonical `{ ... }` block text this engine previously rendered:
+/// `Block`'s own text-on-the-wire encoding and the stored function-body text
+/// (`StoredFunctionDefinition.block`). Both are engine-authored, so this parses
+/// under [`ParserSettings::STORED_TEXT`] — the storage wire contract's parser
+/// profile — and requires the whole input to be consumed. Expects the input to
+/// be wrapped in `{}`.
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub fn block_for_definition(input: &str) -> Result<Block, ParseError> {
+	block(input)
+}
+
+/// Re-parses the canonical idiom-path text a catalog definition stores for
+/// one of its indexed-column fields (e.g. `StoredIndexDefinition.cols`). An idiom
+/// can embed arbitrary sub-expressions (a `[WHERE ...]` filter part, a
+/// computed bracket index), so this parses under
+/// [`ParserSettings::STORED_TEXT`] — the storage wire contract's parser
+/// profile — unlike [`idiom`], which parses fresh input. The whole of `input`
+/// must be consumed, for the reason [`expr_for_definition`] documents.
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub fn idiom_for_definition(input: &str) -> Result<Idiom, ParseError> {
+	parse_with_settings(input.as_bytes(), ParserSettings::STORED_TEXT, async |parser, stk| {
+		let idiom = parser.parse_plain_idiom(stk).await?;
+		parser.assert_finished()?;
+		Ok(idiom)
+	})
+}
+
+/// Re-parses the canonical `SELECT`-clause field-list text a catalog
+/// definition stores for one of its field-selection clauses (e.g.
+/// `StoredSubscriptionDefinition.fields`), under [`ParserSettings::STORED_TEXT`] —
+/// the storage wire contract's parser profile. The whole of `input` must be
+/// consumed, for the reason [`expr_for_definition`] documents.
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub fn fields_for_definition(input: &str) -> Result<Fields, ParseError> {
+	parse_with_settings(input.as_bytes(), ParserSettings::STORED_TEXT, async |parser, stk| {
+		let fields = parser.parse_fields(stk).await?;
+		parser.assert_finished()?;
+		Ok(fields)
+	})
+}
+
+/// Parse a kind from a string.
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub fn kind(input: &str) -> Result<Kind, ParseError> {
+	parse_with(input.as_bytes(), async |parser, stk| parser.parse_inner_kind(stk).await)
 }

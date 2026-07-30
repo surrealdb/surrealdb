@@ -30,6 +30,8 @@ mod tx;
 pub(crate) mod util;
 
 pub(crate) mod cache;
+#[cfg(test)]
+pub(crate) mod compat;
 pub(crate) mod index;
 pub(crate) mod sequences;
 pub(crate) mod slowlog;
@@ -69,8 +71,9 @@ pub use timestamp::{
 	MAX_TIMESTAMP_BYTES, TimeStamp, TimeStampImpl,
 };
 pub use tr::Transactor;
-pub(crate) use tx::CachePolicy;
 pub use tx::Transaction;
+
+pub(crate) use crate::catalog::providers::CachePolicy;
 
 pub(crate) fn is_retryable_transaction_conflict(err: &anyhow::Error) -> bool {
 	if let Some(kvs_err) = err.downcast_ref::<self::err::Error>() {

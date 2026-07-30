@@ -15,10 +15,11 @@ use crate::catalog::providers::TableProvider;
 use crate::catalog::{Record, TableId};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
+use crate::exe::FlowResultExt as _;
 use crate::exec::permission::{
 	CachedTableSelect, check_cached_table_select_for_doc, ensure_cached_table_select,
 };
-use crate::expr::{Cond, FlowResultExt as _};
+use crate::expr::Cond;
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::DocId;
 use crate::idx::trees::diskann::cache::DiskAnnCache;
@@ -250,7 +251,7 @@ impl<'a> DiskAnnTruthyDocumentFilter<'a> {
 			return Ok(None);
 		}
 		let truthy = stk
-			.run(|stk| cond.0.compute(stk, ctx.ctx, opt, Some(&cursor_doc)))
+			.run(|stk| crate::legacy::expr_compute(&cond.0, stk, ctx.ctx, opt, Some(&cursor_doc)))
 			.await
 			.catch_return()?
 			.is_truthy();

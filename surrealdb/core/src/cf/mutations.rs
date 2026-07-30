@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use anyhow::Result;
 use revision::revisioned;
 
@@ -8,7 +6,7 @@ use crate::doc::CursorRecord;
 use crate::expr::Operation;
 use crate::expr::statements::info::InfoStructure;
 use crate::key::impl_kv_value_revisioned;
-use crate::val::{Array, Number, Object, RecordId, TableName, Value};
+use crate::val::{Array, Object, RecordId, TableName, Value};
 
 // Mutation is a single mutation to a table.
 #[revisioned(revision = 1)]
@@ -27,16 +25,6 @@ pub enum TableMutation {
 	SetWithDiff(RecordId, Value, Vec<Operation>),
 	/// Delete a record where the ID is stored, and the now-deleted value
 	DelWithOriginal(RecordId, Value),
-}
-
-impl From<StoredTableDefinition> for Value {
-	#[inline]
-	fn from(v: StoredTableDefinition) -> Self {
-		let mut h = HashMap::<&str, Value>::new();
-		h.insert("id", Value::Number(Number::Int(v.table_id.0 as i64)));
-		h.insert("name", Value::String(v.name));
-		Value::Object(Object::from(h))
-	}
 }
 
 #[revisioned(revision = 1)]

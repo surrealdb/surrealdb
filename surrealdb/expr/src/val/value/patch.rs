@@ -1,0 +1,407 @@
+use anyhow::{Result, bail, ensure};
+use surrealdb_types::ToSql;
+
+use crate::expr::operation::PatchError;
+use crate::expr::part::Part;
+use crate::expr::{Error, Operation};
+use crate::val::{Strand, Value};
+
+impl Value {
+	pub fn patch(&mut self, ops: Value) -> Result<()> {
+		let mut this = self.clone();
+		// Create a new object for testing and patching
+		// Loop over the patch operations and apply them
+		for operation in Operation::value_to_operations(ops)
+			.map_err(Error::InvalidPatch)
+			.map_err(anyhow::Error::new)?
+		{
+			let to_parts = |path: Vec<Strand>| {
+				path.into_iter()
+					.map(|p| {
+						if let Ok(i) = p.as_str().parse::<i64>() {
+							Part::index_int(i)
+						} else {
+							Part::Field(p)
+						}
+					})
+					.collect::<Vec<_>>()
+			};
+
+			match operation {
+				// Add a value
+				Operation::Add {
+					path,
+					value,
+				} => {
+					// Split the last path part from the path
+					if let Some((last, left)) = path.split_last() {
+						if let Ok(x) = last.as_str().parse::<usize>() {
+							let path =
+								left.iter().map(|x| Part::Field(x.clone())).collect::<Vec<_>>();
+
+							match this.pick(&path) {
+								Value::Array(mut v) => {
+									// RFC 6902 §4.1: the index for `add` MUST NOT
+									// be greater than the number of elements in
+									// the array. `insert(len, _)` is the spec's
+									// append form; anything beyond is rejected.
+									if x > v.len() {
+										bail!(Error::InvalidPatch(PatchError {
+											message: format!(
+												"index {x} is out of bounds for array of length {len}",
+												len = v.len(),
+											),
+										}));
+									}
+									v.insert(x, value);
+									this.put(&path, Value::Array(v));
+								}
+								_ => this.put(&path, value),
+							}
+							continue;
+						}
+
+						if last.as_str() == "-" {
+							let path =
+								left.iter().map(|x| Part::Field(x.clone())).collect::<Vec<_>>();
+
+							match this.pick(&path) {
+								Value::Array(mut v) => {
+									v.push(value);
+									this.put(&path, Value::Array(v));
+								}
+								_ => this.put(&path, value),
+							}
+							continue;
+						}
+					}
+
+					let path = path.into_iter().map(Part::Field).collect::<Vec<_>>();
+					match this.pick(&path) {
+						Value::Array(_) => this.inc(&path, value)?,
+						_ => this.put(&path, value),
+					}
+				}
+				// Remove a value at the specified path
+				Operation::Remove {
+					path,
+				} => {
+					let path = to_parts(path);
+					this.cut(&path);
+				}
+				// Replace a value at the specified path
+				Operation::Replace {
+					path,
+					value,
+				} => {
+					let path = path.into_iter().map(Part::Field).collect::<Vec<_>>();
+					this.put(&path, value)
+				}
+				// Modify a string at the specified path
+				Operation::Change {
+					path,
+					value,
+				} => {
+					let path = path.into_iter().map(Part::Field).collect::<Vec<_>>();
+					if let Value::String(p) = value
+						&& let Value::String(v) = this.pick(&path)
+					{
+						let dmp = dmp::new();
+						let pch = dmp.patch_from_text(p.into_string()).map_err(|e| {
+							Error::InvalidPatch(PatchError {
+								message: format!("{e:?}"),
+							})
+						})?;
+						let (txt, _) = dmp.patch_apply(&pch, v.as_str()).map_err(|e| {
+							Error::InvalidPatch(PatchError {
+								message: format!("{e:?}"),
+							})
+						})?;
+						let txt = txt.into_iter().collect::<String>();
+						this.put(&path, Value::from(txt));
+					}
+				}
+				// Copy a value from one field to another
+				Operation::Copy {
+					path,
+					from,
+				} => {
+					let from = from.into_iter().map(Part::Field).collect::<Vec<_>>();
+					let path = path.into_iter().map(Part::Field).collect::<Vec<_>>();
+
+					let val = this.pick(&from);
+					this.put(&path, val);
+				}
+				// Move a value from one field to another
+				Operation::Move {
+					path,
+					from,
+				} => {
+					let from = from.into_iter().map(Part::Field).collect::<Vec<_>>();
+					let path = path.into_iter().map(Part::Field).collect::<Vec<_>>();
+
+					let val = this.pick(&from);
+					this.put(&path, val);
+					this.cut(&from);
+				}
+				// Test whether a value matches another value
+				Operation::Test {
+					path,
+					value,
+				} => {
+					let path = path.into_iter().map(Part::Field).collect::<Vec<_>>();
+					let val = this.pick(&path);
+					ensure!(
+						value == val,
+						Error::PatchTest {
+							expected: value.to_sql(),
+							got: val.to_sql(),
+						}
+					);
+				}
+			}
+		}
+		*self = this;
+		// Everything ok
+		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use crate::expr::Operation;
+	use crate::syn;
+
+	macro_rules! parse_val {
+		($input:expr) => {
+			crate::val::convert_public_value_to_internal(syn::value($input).unwrap())
+		};
+	}
+
+	#[tokio::test]
+	async fn patch_add_simple() {
+		let mut val = parse_val!("{ test: { other: null, something: 123 } }");
+		let ops = parse_val!("[{ op: 'add', path: '/temp', value: true }]");
+		let res = parse_val!("{ test: { other: null, something: 123 }, temp: true }");
+		val.patch(ops).unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn patch_remove_simple() {
+		let mut val = parse_val!("{ test: { other: null, something: 123 }, temp: true }");
+		let ops = parse_val!("[{ op: 'remove', path: '/temp' }]");
+		let res = parse_val!("{ test: { other: null, something: 123 } }");
+		val.patch(ops).unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn patch_replace_simple() {
+		let mut val = parse_val!("{ test: { other: null, something: 123 }, temp: true }");
+		let ops = parse_val!("[{ op: 'replace', path: '/temp', value: 'text' }]");
+		let res = parse_val!("{ test: { other: null, something: 123 }, temp: 'text' }");
+		val.patch(ops).unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn patch_change_simple() {
+		let mut val = parse_val!("{ test: { other: null, something: 123 }, temp: 'test' }");
+		let ops = parse_val!(
+			"[{ op: 'change', path: '/temp', value: '@@ -1,4 +1,4 @@\n te\n-s\n+x\n t\n' }]"
+		);
+		let res = parse_val!("{ test: { other: null, something: 123 }, temp: 'text' }");
+		val.patch(ops).unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn patch_copy_simple() {
+		let mut val = parse_val!("{ test: 123, temp: true }");
+		let ops = parse_val!("[{ op: 'copy', path: '/temp', from: '/test' }]");
+		let res = parse_val!("{ test: 123, temp: 123 }");
+		val.patch(ops).unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn patch_move_simple() {
+		let mut val = parse_val!("{ temp: true, some: 123 }");
+		let ops = parse_val!("[{ op: 'move', path: '/other', from: '/temp' }]");
+		let res = parse_val!("{ other: true, some: 123 }");
+		val.patch(ops).unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn patch_test_simple() {
+		let mut val = parse_val!("{ test: { other: 'test', something: 123 }, temp: true }");
+		let ops = parse_val!(
+			"[{ op: 'remove', path: '/test/something' }, { op: 'test', path: '/temp', value: true }]"
+		);
+		let res = parse_val!("{ test: { other: 'test' }, temp: true }");
+		val.patch(ops).unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn patch_add_embedded() {
+		let mut val = parse_val!("{ test: { other: null, something: 123 } }");
+		let ops = parse_val!("[{ op: 'add', path: '/temp/test', value: true }]");
+		let res = parse_val!("{ test: { other: null, something: 123 }, temp: { test: true } }");
+		val.patch(ops).unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn patch_remove_embedded() {
+		let mut val = parse_val!("{ test: { other: null, something: 123 }, temp: true }");
+		let ops = parse_val!("[{ op: 'remove', path: '/test/other' }]");
+		let res = parse_val!("{ test: { something: 123 }, temp: true }");
+		val.patch(ops).unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn patch_remove_array_index() {
+		let mut val = parse_val!("{ id: todo:1 }");
+		let add = parse_val!("[{ op: 'add', path: '/list', value: ['Item here'] }]");
+		let remove = parse_val!("[{ op: 'remove', path: '/list/0' }]");
+		let res = parse_val!("{ id: todo:1, list: [] }");
+		val.patch(add).unwrap();
+		val.patch(remove).unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn patch_add_array_index_append_at_length() {
+		// RFC 6902 §4.1: an index equal to the array length appends.
+		let mut val = parse_val!("{ list: ['a', 'b'] }");
+		let ops = parse_val!("[{ op: 'add', path: '/list/2', value: 'c' }]");
+		let res = parse_val!("{ list: ['a', 'b', 'c'] }");
+		val.patch(ops).unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn patch_add_array_index_out_of_bounds_errors() {
+		// RFC 6902 §4.1: an index greater than the array length is invalid.
+		let mut val = parse_val!("{ list: ['a', 'b'] }");
+		let ops = parse_val!("[{ op: 'add', path: '/list/5', value: 'c' }]");
+		let err = val.patch(ops).unwrap_err();
+		let msg = err.to_string();
+		assert!(
+			msg.contains("index 5 is out of bounds for array of length 2"),
+			"unexpected error message: {msg}"
+		);
+		// The value must be unchanged when a patch op fails.
+		assert_eq!(val, parse_val!("{ list: ['a', 'b'] }"));
+	}
+
+	#[tokio::test]
+	async fn patch_replace_embedded() {
+		let mut val = parse_val!("{ test: { other: null, something: 123 }, temp: true }");
+		let ops = parse_val!("[{ op: 'replace', path: '/test/other', value: 'text' }]");
+		let res = parse_val!("{ test: { other: 'text', something: 123 }, temp: true }");
+		val.patch(ops).unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn patch_change_embedded() {
+		let mut val = parse_val!("{ test: { other: 'test', something: 123 }, temp: true }");
+		let ops = parse_val!(
+			"[{ op: 'change', path: '/test/other', value: '@@ -1,4 +1,4 @@\n te\n-s\n+x\n t\n' }]"
+		);
+		let res = parse_val!("{ test: { other: 'text', something: 123 }, temp: true }");
+		val.patch(ops).unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn patch_copy_embedded() {
+		let mut val = parse_val!("{ test: { other: null }, temp: 123 }");
+		let ops = parse_val!("[{ op: 'copy', path: '/test/other', from: '/temp' }]");
+		let res = parse_val!("{ test: { other: 123 }, temp: 123 }");
+		val.patch(ops).unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn patch_move_embedded() {
+		let mut val = parse_val!("{ test: { other: ':3', some: 123 }}");
+		let ops = parse_val!("[{ op: 'move', path: '/temp', from: '/test/other' }]");
+		let res = parse_val!("{ test: { some: 123 }, temp: ':3' }");
+		val.patch(ops).unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn patch_test_embedded() {
+		let mut val = parse_val!("{ test: { other: 'test', something: 123 }, temp: true }");
+		let ops = parse_val!(
+			"[{ op: 'remove', path: '/test/other' }, { op: 'test', path: '/test/something', value: 123 }]"
+		);
+		let res = parse_val!("{ test: { something: 123 }, temp: true }");
+		val.patch(ops).unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn patch_change_invalid() {
+		// See https://github.com/surrealdb/surrealdb/issues/2001
+		let mut val = parse_val!("{ test: { other: 'test', something: 123 }, temp: true }");
+		let ops = parse_val!("[{ op: 'change', path: '/test/other', value: 'text' }]");
+		assert!(val.patch(ops).is_err());
+	}
+
+	#[tokio::test]
+	async fn patch_test_invalid() {
+		let mut val = parse_val!("{ test: { other: 'test', something: 123 }, temp: true }");
+		let should = val.clone();
+		let ops = parse_val!(
+			"[{ op: 'remove', path: '/test/other' }, { op: 'test', path: '/test/something', value: 'not same' }]"
+		);
+		assert!(val.patch(ops).is_err());
+		// It is important to test if patches applied even if test operation fails
+		assert_eq!(val, should);
+	}
+
+	#[tokio::test]
+	async fn patch_change_root() {
+		// Issue 7239: empty-path patch ops must target the root value.
+		let mut val = parse_val!("'Hello'");
+		let ops = parse_val!(
+			"[{ op: 'change', path: '', value: '@@ -1,5 +1,12 @@\n Hello\n+ there!\n' }]"
+		);
+		val.patch(ops).unwrap();
+		assert_eq!(val, parse_val!("'Hello there!'"));
+	}
+
+	#[tokio::test]
+	async fn patch_replace_root() {
+		let mut val = parse_val!("1");
+		let ops = parse_val!("[{ op: 'replace', path: '', value: 2 }]");
+		val.patch(ops).unwrap();
+		assert_eq!(val, parse_val!("2"));
+	}
+
+	#[tokio::test]
+	async fn patch_diff_roundtrip_string_root() {
+		let mut start = parse_val!("'Hello'");
+		let after = parse_val!("'Hello there!'");
+		let ops = Operation::operations_to_value(start.diff(&after));
+		start.patch(ops).unwrap();
+		assert_eq!(start, after);
+	}
+
+	#[tokio::test]
+	async fn patch_diff_roundtrip_number_root() {
+		let mut start = parse_val!("1");
+		let after = parse_val!("2");
+		let ops = Operation::operations_to_value(start.diff(&after));
+		start.patch(ops).unwrap();
+		assert_eq!(start, after);
+	}
+}

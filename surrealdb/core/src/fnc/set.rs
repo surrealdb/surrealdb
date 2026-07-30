@@ -99,7 +99,10 @@ pub async fn all(
 		Some(Value::Closure(closure)) => {
 			if let Some(opt) = opt {
 				for arg in set {
-					if closure.invoke(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
+					if crate::legacy::closure_invoke(&closure, stk, ctx, opt, doc, vec![arg])
+						.await?
+						.is_truthy()
+					{
 						continue;
 					} else {
 						return Ok(Value::Bool(false));
@@ -124,7 +127,10 @@ pub async fn any(
 		Some(Value::Closure(closure)) => {
 			if let Some(opt) = opt {
 				for arg in set {
-					if closure.invoke(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
+					if crate::legacy::closure_invoke(&closure, stk, ctx, opt, doc, vec![arg])
+						.await?
+						.is_truthy()
+					{
 						return Ok(Value::Bool(true));
 					} else {
 						continue;
@@ -162,7 +168,17 @@ pub async fn filter(
 			if let Some(opt) = opt {
 				let mut res = Set::new();
 				for arg in set {
-					if closure.invoke(stk, ctx, opt, doc, vec![arg.clone()]).await?.is_truthy() {
+					if crate::legacy::closure_invoke(
+						&closure,
+						stk,
+						ctx,
+						opt,
+						doc,
+						vec![arg.clone()],
+					)
+					.await?
+					.is_truthy()
+					{
 						res.insert(arg);
 					}
 				}
@@ -184,7 +200,17 @@ pub async fn find(
 		Value::Closure(closure) => {
 			if let Some(opt) = opt {
 				for arg in set {
-					if closure.invoke(stk, ctx, opt, doc, vec![arg.clone()]).await?.is_truthy() {
+					if crate::legacy::closure_invoke(
+						&closure,
+						stk,
+						ctx,
+						opt,
+						doc,
+						vec![arg.clone()],
+					)
+					.await?
+					.is_truthy()
+					{
 						return Ok(arg);
 					}
 				}
@@ -215,7 +241,8 @@ pub async fn fold(
 	if let Some(opt) = opt {
 		let mut accum = init;
 		for val in set {
-			accum = mapper.invoke(stk, ctx, opt, doc, vec![accum, val]).await?
+			accum =
+				crate::legacy::closure_invoke(&mapper, stk, ctx, opt, doc, vec![accum, val]).await?
 		}
 		Ok(accum)
 	} else {
@@ -241,7 +268,9 @@ pub async fn map(
 	if let Some(opt) = opt {
 		let mut res = Set::new();
 		for arg in set {
-			res.insert(mapper.invoke(stk, ctx, opt, doc, vec![arg]).await?);
+			res.insert(
+				crate::legacy::closure_invoke(&mapper, stk, ctx, opt, doc, vec![arg]).await?,
+			);
 		}
 		Ok(res.into())
 	} else {
@@ -284,7 +313,15 @@ pub async fn reduce(
 					return Ok(Value::None);
 				};
 				for val in iter {
-					accum = mapper.invoke(stk, ctx, opt, doc, vec![accum, val]).await?;
+					accum = crate::legacy::closure_invoke(
+						&mapper,
+						stk,
+						ctx,
+						opt,
+						doc,
+						vec![accum, val],
+					)
+					.await?;
 				}
 				Ok(accum)
 			}

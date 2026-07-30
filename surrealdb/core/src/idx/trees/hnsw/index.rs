@@ -21,7 +21,7 @@ use crate::idx::trees::hnsw::{
 	ElementId, HnswRecordPendingUpdate, HnswSearch, VectorId, VectorPendingUpdate,
 };
 use crate::idx::trees::knn::KnnResultBuilder;
-use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
+use crate::idx::trees::vector::{DistanceExt as _, SerializedVector, SharedVector, Vector};
 use crate::idx::{
 	IndexKeyBase, bump_compaction_generation, is_transaction_condition_not_met,
 	read_compaction_generation,

@@ -9,12 +9,11 @@ use surrealdb_types::ToSql;
 
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{self, DatabaseId, Index, IndexDefinition, IndexId, NamespaceId, Permission};
+use crate::exe::FlowResultExt as _;
 use crate::expr::operator::NearestNeighbor;
 use crate::expr::order::{OrderList, Ordering};
 use crate::expr::visit::MutVisitor;
-use crate::expr::{
-	BinaryOperator, Cond, Expr, FlowResultExt as _, Idiom, Kind, Literal, Order, Part, With,
-};
+use crate::expr::{BinaryOperator, Cond, Expr, Idiom, Kind, Literal, Order, Part, With};
 use crate::idx::planner::StatementContext;
 use crate::idx::planner::executor::{
 	KnnBruteForceExpression, KnnBruteForceExpressions, KnnExpressions,
@@ -325,7 +324,10 @@ impl<'a> TreeBuilder<'a> {
 
 	async fn compute(&self, stk: &mut Stk, v: &Expr, n: Node) -> Result<Node> {
 		Ok(if n == Node::Computable {
-			match stk.run(|stk| v.compute(stk, self.ctx.ctx, self.ctx.opt, None)).await {
+			match stk
+				.run(|stk| crate::legacy::expr_compute(v, stk, self.ctx.ctx, self.ctx.opt, None))
+				.await
+			{
 				Ok(v) => Node::Computed(v.into()),
 				Err(_) => Node::Unsupported(format!("Unsupported expression: {}", v.to_sql())),
 			}
@@ -339,9 +341,11 @@ impl<'a> TreeBuilder<'a> {
 		let mut values = Vec::with_capacity(a.len());
 		for v in a {
 			values.push(
-				stk.run(|stk| v.compute(stk, self.ctx.ctx, self.ctx.opt, None))
-					.await
-					.catch_return()?,
+				stk.run(|stk| {
+					crate::legacy::expr_compute(v, stk, self.ctx.ctx, self.ctx.opt, None)
+				})
+				.await
+				.catch_return()?,
 			);
 		}
 		Ok(Node::Computed(Arc::new(Value::Array(Array(values)))))
@@ -359,7 +363,7 @@ impl<'a> TreeBuilder<'a> {
 			&& matches!(x, Expr::Param(_))
 		{
 			let v = stk
-				.run(|stk| i.compute(stk, self.ctx.ctx, self.ctx.opt, None))
+				.run(|stk| crate::legacy::idiom_compute(i, stk, self.ctx.ctx, self.ctx.opt, None))
 				.await
 				.catch_return()?;
 			let v = v.into_literal();
@@ -662,7 +666,9 @@ impl<'a> TreeBuilder<'a> {
 
 		let (k, ef) = match &**nn {
 			NearestNeighbor::Approximate(k, ef) => (*k, *ef),
-			NearestNeighbor::K(k, d) if *d == hnsw.distance => {
+			NearestNeighbor::K(k, d)
+				if crate::catalog::Distance::from(d.clone()) == hnsw.distance =>
+			{
 				(*k, (*k).max(hnsw.ef_construction as u32))
 			}
 			_ => return Ok(None),
@@ -691,7 +697,9 @@ impl<'a> TreeBuilder<'a> {
 
 		let (k, l) = match &**nn {
 			NearestNeighbor::Approximate(k, l) => (*k, *l),
-			NearestNeighbor::K(k, d) if *d == diskann.distance => {
+			NearestNeighbor::K(k, d)
+				if crate::catalog::Distance::from(d.clone()) == diskann.distance =>
+			{
 				(*k, (*k).max(diskann.l_build as u32))
 			}
 			_ => return Ok(None),
@@ -731,7 +739,7 @@ impl<'a> TreeBuilder<'a> {
 			self.knn_expressions.insert(Arc::clone(exp));
 			self.knn_brute_force_expressions.insert(
 				Arc::clone(exp),
-				KnnBruteForceExpression::new(*k, id.clone(), vec, d.clone()),
+				KnnBruteForceExpression::new(*k, id.clone(), vec, d.clone().into()),
 			);
 		}
 		Ok(())

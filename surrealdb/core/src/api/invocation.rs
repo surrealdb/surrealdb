@@ -15,8 +15,10 @@ use crate::catalog::{ApiDefinition, MiddlewareDefinition, Permission};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::{Expr, FlowResultExt as _};
+use crate::exe::FlowResultExt as _;
+use crate::expr::Expr;
 use crate::fnc::args::{Any, FromArgs, FromPublic};
+use crate::fnc::closure::NativeClosure;
 use crate::iam::{Action, AuthLimit};
 use crate::syn::function_with_capabilities;
 use crate::val::{Closure, Value};
@@ -139,7 +141,7 @@ pub(crate) async fn process_api_request_with_stack(
 					let opt = &opt.new_for_permission_predicate();
 					// Process the PERMISSION clause
 					if !stk
-						.run(|stk| e.compute(stk, ctx, opt, None))
+						.run(|stk| crate::legacy::expr_compute(e, stk, ctx, opt, None))
 						.await
 						.catch_return()?
 						.is_truthy()
@@ -188,7 +190,9 @@ pub(crate) async fn process_api_request_with_stack(
 		"Executing API middleware chain"
 	);
 	let mut res: ApiResponse =
-		next.invoke(stk, ctx, &opt, None, vec![req.into()]).await?.try_into()?;
+		crate::legacy::closure_invoke(&next, stk, ctx, &opt, None, vec![req.into()])
+			.await?
+			.try_into()?;
 
 	// Ensure X-Surreal-Request-ID is present in final response headers (from res.request_id)
 	res.ensure_request_id_header();
@@ -204,7 +208,7 @@ pub(crate) async fn process_api_request_with_stack(
 /// # Arguments
 /// * `action_expr` - The expression to execute as the final action
 fn create_final_action_closure(request_id: String, action_expr: Expr) -> Closure {
-	Closure::Builtin(Arc::new(
+	Closure::Builtin(NativeClosure::new_obj(Box::new(
 		move |stk: &mut Stk,
 		      ctx: &FrozenContext,
 		      opt: &Options,
@@ -242,7 +246,9 @@ fn create_final_action_closure(request_id: String, action_expr: Expr) -> Closure
 			// Execute
 			Box::pin(stk.run(async move |stk| {
 				// Computed result
-				let res = action_expr.compute(stk, &ctx_frozen, opt, doc).await.catch_return();
+				let res = crate::legacy::expr_compute(&action_expr, stk, &ctx_frozen, opt, doc)
+					.await
+					.catch_return();
 
 				// Convert to ApiResponse; set request_id from request for all responses
 				let mut res = match res {
@@ -256,7 +262,7 @@ fn create_final_action_closure(request_id: String, action_expr: Expr) -> Closure
 				Ok(Value::from(res))
 			}))
 		},
-	))
+	)))
 }
 
 /// Creates a closure that executes a middleware function.
@@ -274,7 +280,7 @@ fn create_middleware_closure(
 	next: Closure,
 	is_initial: bool,
 ) -> Closure {
-	Closure::Builtin(Arc::new(
+	Closure::Builtin(NativeClosure::new_obj(Box::new(
 		move |stk: &mut Stk,
 		      ctx: &FrozenContext,
 		      opt: &Options,
@@ -337,8 +343,16 @@ fn create_middleware_closure(
 
 			Box::pin(stk.run(async move |stk| {
 				// Computed result
-				let res =
-					function.compute(stk, &ctx, &opt, doc.as_ref(), fn_args).await.catch_return();
+				let res = crate::legacy::function_compute(
+					&function,
+					stk,
+					&ctx,
+					&opt,
+					doc.as_ref(),
+					fn_args,
+				)
+				.await
+				.catch_return();
 
 				let mut res = match res {
 					Ok(res) => match ApiResponse::try_from(res) {
@@ -379,5 +393,5 @@ fn create_middleware_closure(
 				Ok(Value::from(res))
 			}))
 		},
-	))
+	)))
 }

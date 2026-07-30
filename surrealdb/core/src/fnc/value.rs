@@ -15,7 +15,7 @@ pub async fn chain(
 	(value, worker): (Value, Box<Closure>),
 ) -> Result<Value> {
 	if let Some(opt) = opt {
-		worker.invoke(stk, ctx, opt, doc, vec![value]).await
+		crate::legacy::closure_invoke(&worker, stk, ctx, opt, doc, vec![value]).await
 	} else {
 		Ok(Value::None)
 	}
@@ -26,7 +26,8 @@ pub async fn expect(
 	(value, worker, Optional(message)): (Value, Box<Closure>, Optional<Value>),
 ) -> Result<Value> {
 	if let Some(opt) = opt {
-		let got = worker.invoke(stk, ctx, opt, doc, vec![value.clone()]).await?;
+		let got =
+			crate::legacy::closure_invoke(&worker, stk, ctx, opt, doc, vec![value.clone()]).await?;
 		match got {
 			Value::Bool(true) => Ok(value),
 			Value::Bool(false) => {

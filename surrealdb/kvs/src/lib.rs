@@ -23,6 +23,7 @@ pub mod savepoint;
 pub mod threadpool;
 pub mod timestamp;
 mod types;
+pub mod value;
 
 pub use api::{
 	Batch, GetMultiResult, KeysResult, ScanCursorKeys, ScanCursorVals, ScanResult, Transactable,

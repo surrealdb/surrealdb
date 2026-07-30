@@ -66,7 +66,7 @@ pub(crate) fn index_covers_ordering(
 	let required: Vec<SortProperty> = order_list
 		.iter()
 		.filter_map(|field| {
-			crate::exec::field_path::FieldPath::try_from(&field.value).ok().map(|path| {
+			crate::exec::field_path_convert::field_path_from_idiom(&field.value).ok().map(|path| {
 				let direction = if field.direction {
 					SortDirection::Asc
 				} else {
@@ -97,7 +97,7 @@ pub(crate) fn index_covers_ordering(
 				.cols
 				.iter()
 				.take(prefix.len())
-				.filter_map(|s| crate::exec::field_path::FieldPath::try_from(s).ok())
+				.filter_map(|s| crate::exec::field_path_convert::field_path_from_idiom(s).ok())
 				.collect();
 			(prefix.len(), paths)
 		}
@@ -105,7 +105,7 @@ pub(crate) fn index_covers_ordering(
 			let paths: Vec<_> = ix_def
 				.cols
 				.iter()
-				.filter_map(|s| crate::exec::field_path::FieldPath::try_from(s).ok())
+				.filter_map(|s| crate::exec::field_path_convert::field_path_from_idiom(s).ok())
 				.collect();
 			(ix_def.cols.len(), paths)
 		}
@@ -128,11 +128,13 @@ pub(crate) fn index_covers_ordering(
 		.iter()
 		.skip(skip_cols)
 		.filter_map(|s| {
-			crate::exec::field_path::FieldPath::try_from(s).ok().map(|path| SortProperty {
-				path,
-				direction: dir,
-				collate: false,
-				numeric: false,
+			crate::exec::field_path_convert::field_path_from_idiom(s).ok().map(|path| {
+				SortProperty {
+					path,
+					direction: dir,
+					collate: false,
+					numeric: false,
+				}
 			})
 		})
 		.collect();

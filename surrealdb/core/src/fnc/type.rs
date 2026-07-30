@@ -7,7 +7,8 @@ use super::args::Optional;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::{Error as ExprError, FlowResultExt as _, Idiom};
+use crate::exe::FlowResultExt as _;
+use crate::expr::{Error as ExprError, Idiom};
 use crate::syn;
 use crate::val::{
 	Array, Bytes, Datetime, Duration, File, Geometry, Number, Range, RecordId, RecordIdKey,
@@ -60,7 +61,7 @@ pub async fn field(
 			// Parse the string as an Idiom
 			let idi: Idiom = syn::idiom(&val)?.into();
 			// Return the Idiom or fetch the field
-			idi.compute(stk, ctx, opt, doc).await.catch_return()
+			crate::legacy::idiom_compute(&idi, stk, ctx, opt, doc).await.catch_return()
 		}
 		_ => Ok(Value::None),
 	}
@@ -77,7 +78,9 @@ pub async fn fields(
 				// Parse the string as an Idiom
 				let idi: Idiom = syn::idiom(&v)?.into();
 				// Return the Idiom or fetch the field
-				args.push(idi.compute(stk, ctx, opt, doc).await.catch_return()?);
+				args.push(
+					crate::legacy::idiom_compute(&idi, stk, ctx, opt, doc).await.catch_return()?,
+				);
 			}
 			Ok(args.into())
 		}

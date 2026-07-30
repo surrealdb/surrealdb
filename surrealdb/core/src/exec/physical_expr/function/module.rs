@@ -86,8 +86,14 @@ impl PhysicalExpr for SurrealismModuleExec {
 			// Get the executable and signature
 			let executable: ModuleExecutable = val.executable.clone().into();
 			let frozen_ctx = ctx.exec_ctx.ctx();
-			let signature =
-				executable.signature(frozen_ctx, &ns_id, &db_id, self.sub.as_deref()).await?;
+			let signature = crate::legacy::module_executable_signature(
+				&executable,
+				frozen_ctx,
+				&ns_id,
+				&db_id,
+				self.sub.as_deref(),
+			)
+			.await?;
 
 			// Evaluate all arguments
 			let args = evaluate_args(&self.arguments, ctx.clone()).await?;
@@ -129,7 +135,8 @@ impl PhysicalExpr for SurrealismModuleExec {
 			let mut stack = TreeStack::new();
 			let result = stack
 				.enter(|stk| {
-					executable.run(
+					crate::legacy::module_executable_run(
+						&executable,
 						stk,
 						frozen_ctx,
 						opt,

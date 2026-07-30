@@ -58,5 +58,5 @@ pub async fn body(
 		BodyParser::new(&mut req, strategy, ctx.config.max_object_parsing_depth as usize);
 	parser.process().await?;
 
-	next.invoke(stk, ctx, opt, doc, vec![req.into()]).await
+	crate::legacy::closure_invoke(&next, stk, ctx, opt, doc, vec![req.into()]).await
 }

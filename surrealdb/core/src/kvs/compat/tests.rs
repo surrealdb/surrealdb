@@ -1,0 +1,1269 @@
+//! Catalog backwards compatibility tests.
+//!
+//! These tests verify that:
+//! 1. Serialized data from previous versions can be deserialized
+//! 2. The deserialized values EXACTLY match the expected fixtures
+//!
+//! Failing either check indicates a backwards compatibility regression.
+
+use super::{fixtures, v3_0_0, v3_0_0_beta_1, v3_0_0_beta_3, v3_1_0, v3_1_1, v3_3_0, v3_4_0};
+use crate::catalog::{TaskLease, *};
+use crate::cf::TableMutations;
+use crate::dbs::node::Node;
+use crate::idx::ft::fulltext::{DocLengthAndCount, TermDocument};
+use crate::key::KVValue;
+use crate::kvs::index::{Appending, PrimaryAppending};
+use crate::kvs::sequences::{BatchValue, SequenceState};
+use crate::kvs::version::MajorVersion;
+use crate::val::{RecordId, RecordIdKey};
+
+/// Whether a `(snapshot, type)` pair must re-encode to its frozen bytes.
+///
+/// [`compat_test!`] uses this to gate a byte-exact round-trip assertion on top
+/// of the decode-and-equals one: if the encoder produces different bytes than
+/// the frozen fixture, the test fails with "WIRE STABILITY BROKEN". It is the
+/// only check that pins the *encode* direction, so encoder drift is caught here
+/// or not at all.
+///
+/// The gate is per-type, not per-snapshot, and that distinction is the whole
+/// point. A revision bump excuses the families it bumped; it does not excuse
+/// the rest of the snapshot. Every family lists `v3_3_0`, so demoting that
+/// snapshot wholesale would silently drop the encode pin for the ~120 families
+/// no bump touched — and the newest snapshot cannot stand in for them, because
+/// it is captured from the same encoder any drift would be introduced by.
+///
+/// Per-snapshot reasoning, newest first:
+///
+/// * `v3_4_0` is the current-format snapshot, captured after the catalog text-expressions
+///   migration. Every fixture must match.
+/// * `v3_3_0` predates that migration, which bumped three definition types and the stored view (see
+///   `TEXT_MIGRATION_BUMPED`). Its fixtures for those still decode, via `convert_fn`s, but
+///   re-encode at the new revision. Everything else must still match.
+/// * `v3_1_1` additionally predates 3.3.0's bumps to `UserDefinition` (optional SCRAM verifier),
+///   `StoredIndexDefinition` (`format_version`) and `StoredTableDefinition` (`cache_lives_ts`).
+/// * `v3_1_0` and the `v3_0_0*` line predate encoder changes that are not tracked per-family —
+///   3.1.1 stopped stripping the top-level `id` from `Record` data, and the 3.0.0 line used an
+///   earlier encoding — so they stay decode-only.
+///
+/// When the write format changes again: capture a new snapshot, gate it `true`,
+/// and add the newly-bumped type names here rather than demoting a whole
+/// snapshot. Never mutate a frozen file.
+fn version_writes_current_format(version_name: &str, type_name: &str, fixture: &str) -> bool {
+	/// Types the catalog text-expressions migration bumped:
+	/// `StoredFieldDefinition` 4 -> 5, `StoredFunctionDefinition` 3 -> 4,
+	/// `StoredSubscriptionDefinition` 1 -> 2. Their pre-migration fixtures still
+	/// decode, via `convert_fn`s, but re-encode at the new revision.
+	///
+	/// `StoredTableDefinition` is deliberately absent: it kept revision 3, and
+	/// the migration's view change landed on `StoredViewDefinition`, which kept
+	/// revision 1 by adding a variant. So no table fixture re-encodes
+	/// differently — the shapes older snapshots hold still encode as themselves,
+	/// and the new one is frozen by `TABLE_WITH_STORED_CLAUSES` at `v3_4_0`.
+	const TEXT_MIGRATION_BUMPED: &[&str] =
+		&["StoredFieldDefinition", "StoredFunctionDefinition", "StoredSubscriptionDefinition"];
+	/// Additionally bumped by 3.3.0: `UserDefinition` gained an optional SCRAM
+	/// verifier, `StoredIndexDefinition` a `format_version`, and
+	/// `StoredTableDefinition` the `cache_lives_ts` field (2 -> 3).
+	const V3_3_0_BUMPED: &[&str] =
+		&["UserDefinition", "StoredIndexDefinition", "StoredTableDefinition"];
+	/// Fixtures of a type 3.3.0 did not bump that nonetheless *embed* one it
+	/// did, so they carry its revision byte. `TableMutation::Def` boxes a
+	/// `StoredTableDefinition`; the other `TableMutations` fixtures (`Set`,
+	/// `Del`, ...) embed no definition and keep their pin.
+	const V3_3_0_EMBEDS_A_BUMPED_TYPE: &[&str] = &["table_mutations_def"];
+
+	let text_migration_moved_it = TEXT_MIGRATION_BUMPED.contains(&type_name);
+	match version_name {
+		// Captured from the current encoder: everything must match.
+		"v3_4_0" => true,
+		"v3_3_0" => !text_migration_moved_it,
+		"v3_1_1" => {
+			!text_migration_moved_it
+				&& !V3_3_0_BUMPED.contains(&type_name)
+				&& !V3_3_0_EMBEDS_A_BUMPED_TYPE.contains(&fixture)
+		}
+		// Older snapshots predate encoder changes that are not tracked
+		// per-family (3.1.0's id-stripped records, and the 3.0.0 line's
+		// pre-`Strand` encoding), so they stay decode-only.
+		_ => false,
+	}
+}
+
+/// Macro to generate backwards compatibility tests for a fixture across multiple versions.
+///
+/// Decode goes through the real `KVValue::kv_decode_value` path so the
+/// test exercises the same code production uses. Two arms:
+/// * 5-arg form (default): for value types whose `KeyContext = ()`.
+/// * 6-arg form (with `ctx`): for `Record`, whose decode splices the `RecordId` argument into the
+///   resulting `data` Object. Pass `fixtures::test_record_rid()` for those; Object-data Record
+///   fixtures are built to include the same rid as their `id` field so the decode/expected
+///   comparison lines up.
+macro_rules! compat_test {
+	// 5-arg form: KeyContext = () (default context).
+	($base_name:ident, $type:ty, $const_name:ident, $expected:expr, [$($version:ident),+ $(,)?]) => {
+		compat_test!(@inner $base_name, $type, $const_name, $expected, (), [$($version),+]);
+	};
+	// 6-arg form: explicit context (for `Record`, with `RecordId`).
+	($base_name:ident, $type:ty, $const_name:ident, $expected:expr, $ctx:expr, [$($version:ident),+ $(,)?]) => {
+		compat_test!(@inner $base_name, $type, $const_name, $expected, $ctx, [$($version),+]);
+	};
+	// Internal generator.
+	(@inner $base_name:ident, $type:ty, $const_name:ident, $expected:expr, $ctx:expr, [$($version:ident),+ $(,)?]) => {
+		$(
+			paste::paste! {
+				#[test]
+				fn [<$version _ $base_name>]() {
+					let fixture_bytes = [<$version>]::$const_name;
+
+					// Attempt to decode - this MUST succeed for backwards compatibility
+					let decoded = <$type>::kv_decode_value(fixture_bytes, $ctx).unwrap_or_else(|e| {
+						panic!(
+							concat!(
+								"BACKWARDS COMPATIBILITY BROKEN: Failed to decode ",
+								stringify!([<$version _ $base_name>]),
+								" fixture.\n",
+								"Type: ",
+								stringify!($type),
+								"\n",
+								"Error: {}\n",
+								"Bytes: {:?}\n\n",
+								"This indicates that the serialization format has changed in an ",
+								"incompatible way. Old databases may fail to load.\n",
+								"If this change is intentional, you MUST implement a migration path."
+							),
+							e, fixture_bytes
+						)
+					});
+
+					// Get the expected value from fixtures
+					let expected = $expected;
+
+					// Assert that the decoded value matches the expected fixture
+					assert_eq!(
+						decoded, expected,
+						concat!(
+							"BACKWARDS COMPATIBILITY BROKEN: Decoded value does not match expected ",
+							"fixture for ",
+							stringify!([<$version _ $base_name>]),
+							".\n\n",
+							"This indicates that while deserialization succeeded, the data was ",
+							"interpreted differently than expected. This could cause data corruption ",
+							"or unexpected behavior when loading old databases.\n\n",
+							"If this change is intentional, update the fixture in fixtures.rs to ",
+							"reflect how old data should be interpreted by the current code."
+						)
+					);
+
+					// Verify re-encoding succeeds. For historical snapshots the
+					// re-encoded bytes may differ from the input because the
+					// encoder now writes the latest revision, but for fixtures
+					// captured under the current write format
+					// (see `version_writes_current_format`) we tighten this to
+					// a byte-exact assertion.
+					let re_encoded = decoded.kv_encode_value().unwrap_or_else(|e| {
+						panic!(
+							concat!(
+								"Failed to re-encode ",
+								stringify!([<$version _ $base_name>]),
+								" after successful decode.\n",
+								"Error: {}"
+							),
+							e
+						)
+					});
+
+					if version_writes_current_format(stringify!($version), stringify!($type), stringify!($base_name)) {
+						assert_eq!(
+							re_encoded.as_slice(),
+							fixture_bytes,
+							concat!(
+								"WIRE STABILITY BROKEN: re-encoded bytes do not match the frozen ",
+								stringify!([<$version _ $base_name>]),
+								" fixture.\n\n",
+								"The encoder is producing different bytes for the same value than ",
+								"what was captured under this version. If the change is intentional ",
+								"(e.g. revision crate format shift), capture a NEW version snapshot ",
+								"rather than mutating this one — the frozen file at ",
+								stringify!($version),
+								".rs must NEVER be modified after commit."
+							)
+						);
+					}
+				}
+			}
+		)+
+	};
+}
+
+// =============================================================================
+// Backwards Compatibility Tests
+// =============================================================================
+
+// NamespaceDefinition
+compat_test!(
+	namespace_basic,
+	NamespaceDefinition,
+	NAMESPACE_BASIC,
+	fixtures::namespace_basic(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	namespace_with_comment,
+	NamespaceDefinition,
+	NAMESPACE_WITH_COMMENT,
+	fixtures::namespace_with_comment(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// DatabaseDefinition
+compat_test!(
+	database_basic,
+	DatabaseDefinition,
+	DATABASE_BASIC,
+	fixtures::database_basic(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	database_with_changefeed,
+	DatabaseDefinition,
+	DATABASE_WITH_CHANGEFEED,
+	fixtures::database_with_changefeed(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	database_strict,
+	DatabaseDefinition,
+	DATABASE_STRICT,
+	fixtures::database_strict(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// StoredTableDefinition
+compat_test!(
+	table_basic,
+	StoredTableDefinition,
+	TABLE_BASIC,
+	fixtures::table_basic(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	table_with_view,
+	StoredTableDefinition,
+	TABLE_WITH_VIEW,
+	fixtures::table_with_view(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	table_schemafull,
+	StoredTableDefinition,
+	TABLE_SCHEMAFULL,
+	fixtures::table_schemafull(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	table_relation,
+	StoredTableDefinition,
+	TABLE_RELATION,
+	fixtures::table_relation(),
+	[v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+// Registered for the current snapshot only: earlier versions could not write
+// this shape, so there are no older bytes of it to freeze.
+compat_test!(
+	table_with_stored_clauses,
+	StoredTableDefinition,
+	TABLE_WITH_STORED_CLAUSES,
+	fixtures::table_with_stored_clauses(),
+	[v3_4_0]
+);
+compat_test!(
+	table_with_materialized_view,
+	StoredTableDefinition,
+	TABLE_WITH_MATERIALIZED_VIEW,
+	fixtures::table_with_materialized_view(),
+	[v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	table_any_type,
+	StoredTableDefinition,
+	TABLE_ANY_TYPE,
+	fixtures::table_any_type(),
+	[v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// StoredSubscriptionDefinition
+compat_test!(
+	subscription_basic,
+	StoredSubscriptionDefinition,
+	SUBSCRIPTION_BASIC,
+	fixtures::subscription_basic(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	subscription_with_filters,
+	StoredSubscriptionDefinition,
+	SUBSCRIPTION_WITH_FILTERS,
+	fixtures::subscription_with_filters(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	subscription_with_vars,
+	StoredSubscriptionDefinition,
+	SUBSCRIPTION_WITH_VARS,
+	fixtures::subscription_with_vars(),
+	[v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// StoredAccessDefinition
+compat_test!(
+	access_bearer,
+	StoredAccessDefinition,
+	ACCESS_BEARER,
+	fixtures::access_bearer(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	access_with_authenticate,
+	StoredAccessDefinition,
+	ACCESS_WITH_AUTHENTICATE,
+	fixtures::access_with_authenticate(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	access_record,
+	StoredAccessDefinition,
+	ACCESS_RECORD,
+	fixtures::access_record(),
+	[v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	access_jwt_jwks,
+	StoredAccessDefinition,
+	ACCESS_JWT_JWKS,
+	fixtures::access_jwt_jwks(),
+	[v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	access_bearer_refresh,
+	StoredAccessDefinition,
+	ACCESS_BEARER_REFRESH,
+	fixtures::access_bearer_refresh(),
+	[v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// AccessGrant
+compat_test!(
+	grant_jwt,
+	AccessGrant,
+	GRANT_JWT,
+	fixtures::grant_jwt(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	grant_revoked,
+	AccessGrant,
+	GRANT_REVOKED,
+	fixtures::grant_revoked(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	grant_record,
+	AccessGrant,
+	GRANT_RECORD,
+	fixtures::grant_record(),
+	[v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	grant_bearer,
+	AccessGrant,
+	GRANT_BEARER,
+	fixtures::grant_bearer(),
+	[v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// AnalyzerDefinition
+compat_test!(
+	analyzer_basic,
+	AnalyzerDefinition,
+	ANALYZER_BASIC,
+	fixtures::analyzer_basic(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	analyzer_with_tokenizers,
+	AnalyzerDefinition,
+	ANALYZER_WITH_TOKENIZERS,
+	fixtures::analyzer_with_tokenizers(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// StoredApiDefinition
+compat_test!(
+	api_basic,
+	StoredApiDefinition,
+	API_BASIC,
+	fixtures::api_basic(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	api_with_middleware,
+	StoredApiDefinition,
+	API_WITH_MIDDLEWARE,
+	fixtures::api_with_middleware(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	api_with_auth_limit,
+	StoredApiDefinition,
+	API_WITH_AUTH_LIMIT,
+	fixtures::api_with_auth_limit(),
+	[v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// StoredBucketDefinition
+compat_test!(
+	bucket_basic,
+	StoredBucketDefinition,
+	BUCKET_BASIC,
+	fixtures::bucket_basic(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	bucket_readonly,
+	StoredBucketDefinition,
+	BUCKET_READONLY,
+	fixtures::bucket_readonly(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// StoredConfigDefinition
+compat_test!(
+	config_graphql,
+	StoredConfigDefinition,
+	CONFIG_GRAPHQL,
+	fixtures::config_graphql(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	config_default,
+	StoredConfigDefinition,
+	CONFIG_DEFAULT,
+	fixtures::config_default(),
+	[v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	config_api,
+	StoredConfigDefinition,
+	CONFIG_API,
+	fixtures::config_api(),
+	[v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	config_graphql_full,
+	StoredConfigDefinition,
+	CONFIG_GRAPHQL_FULL,
+	fixtures::config_graphql_full(),
+	[v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// StoredEventDefinition
+compat_test!(
+	event_basic,
+	StoredEventDefinition,
+	EVENT_BASIC,
+	fixtures::event_basic(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	event_async,
+	StoredEventDefinition,
+	EVENT_ASYNC,
+	fixtures::event_async(),
+	[v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// StoredFieldDefinition
+compat_test!(
+	field_basic,
+	StoredFieldDefinition,
+	FIELD_BASIC,
+	fixtures::field_basic(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	field_with_type,
+	StoredFieldDefinition,
+	FIELD_WITH_TYPE,
+	fixtures::field_with_type(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	field_readonly,
+	StoredFieldDefinition,
+	FIELD_READONLY,
+	fixtures::field_readonly(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	field_flexible_with_reference,
+	StoredFieldDefinition,
+	FIELD_FLEXIBLE_WITH_REFERENCE,
+	fixtures::field_flexible_with_reference(),
+	[v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	field_with_default_set,
+	StoredFieldDefinition,
+	FIELD_WITH_DEFAULT_SET,
+	fixtures::field_with_default_set(),
+	[v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	field_record_type,
+	StoredFieldDefinition,
+	FIELD_RECORD_TYPE,
+	fixtures::field_record_type(),
+	[v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// StoredFunctionDefinition
+compat_test!(
+	function_basic,
+	StoredFunctionDefinition,
+	FUNCTION_BASIC,
+	fixtures::function_basic(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	function_with_args,
+	StoredFunctionDefinition,
+	FUNCTION_WITH_ARGS,
+	fixtures::function_with_args(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// StoredIndexDefinition
+compat_test!(
+	index_basic,
+	StoredIndexDefinition,
+	INDEX_BASIC,
+	fixtures::index_basic(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	index_unique,
+	StoredIndexDefinition,
+	INDEX_UNIQUE,
+	fixtures::index_unique(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	index_hnsw,
+	StoredIndexDefinition,
+	INDEX_HNSW,
+	fixtures::index_hnsw(),
+	[v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	index_fulltext,
+	StoredIndexDefinition,
+	INDEX_FULLTEXT,
+	fixtures::index_fulltext(),
+	[v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	index_count,
+	StoredIndexDefinition,
+	INDEX_COUNT,
+	fixtures::index_count(),
+	[v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// StoredMlModelDefinition
+compat_test!(
+	model_basic,
+	StoredMlModelDefinition,
+	MODEL_BASIC,
+	fixtures::model_basic(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// StoredParamDefinition
+compat_test!(
+	param_bool,
+	StoredParamDefinition,
+	PARAM_BOOL,
+	fixtures::param_bool(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	param_string,
+	StoredParamDefinition,
+	PARAM_STRING,
+	fixtures::param_string(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// SequenceDefinition
+compat_test!(
+	sequence_basic,
+	SequenceDefinition,
+	SEQUENCE_BASIC,
+	fixtures::sequence_basic(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	sequence_with_options,
+	SequenceDefinition,
+	SEQUENCE_WITH_OPTIONS,
+	fixtures::sequence_with_options(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// UserDefinition
+compat_test!(
+	user_basic,
+	UserDefinition,
+	USER_BASIC,
+	fixtures::user_basic(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	user_with_durations,
+	UserDefinition,
+	USER_WITH_DURATIONS,
+	fixtures::user_with_durations(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	user_db_base,
+	UserDefinition,
+	USER_DB_BASE,
+	fixtures::user_db_base(),
+	[v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+// New in v3_3_0: UserDefinition revision 2 with SCRAM verifier material.
+compat_test!(
+	user_with_scram,
+	UserDefinition,
+	USER_WITH_SCRAM,
+	fixtures::user_with_scram(),
+	[v3_3_0, v3_4_0]
+);
+
+// Record
+compat_test!(
+	record_none,
+	Record,
+	RECORD_NONE,
+	fixtures::record_none(),
+	fixtures::test_record_rid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	record_null,
+	Record,
+	RECORD_NULL,
+	fixtures::record_null(),
+	fixtures::test_record_rid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	record_bool,
+	Record,
+	RECORD_BOOL,
+	fixtures::record_bool(),
+	fixtures::test_record_rid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	record_number_int,
+	Record,
+	RECORD_NUMBER_INT,
+	fixtures::record_number_int(),
+	fixtures::test_record_rid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	record_number_float,
+	Record,
+	RECORD_NUMBER_FLOAT,
+	fixtures::record_number_float(),
+	fixtures::test_record_rid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	record_number_decimal,
+	Record,
+	RECORD_NUMBER_DECIMAL,
+	fixtures::record_number_decimal(),
+	fixtures::test_record_rid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	record_string,
+	Record,
+	RECORD_STRING,
+	fixtures::record_string(),
+	fixtures::test_record_rid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	record_bytes,
+	Record,
+	RECORD_BYTES,
+	fixtures::record_bytes(),
+	fixtures::test_record_rid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	record_duration,
+	Record,
+	RECORD_DURATION,
+	fixtures::record_duration(),
+	fixtures::test_record_rid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	record_datetime,
+	Record,
+	RECORD_DATETIME,
+	fixtures::record_datetime(),
+	fixtures::test_record_rid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	record_uuid,
+	Record,
+	RECORD_UUID,
+	fixtures::record_uuid(),
+	fixtures::test_record_rid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	record_geometry_point,
+	Record,
+	RECORD_GEOMETRY_POINT,
+	fixtures::record_geometry_point(),
+	fixtures::test_record_rid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	record_geometry_line,
+	Record,
+	RECORD_GEOMETRY_LINE,
+	fixtures::record_geometry_line(),
+	fixtures::test_record_rid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	record_geometry_polygon,
+	Record,
+	RECORD_GEOMETRY_POLYGON,
+	fixtures::record_geometry_polygon(),
+	fixtures::test_record_rid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	record_geometry_multi_point,
+	Record,
+	RECORD_GEOMETRY_MULTI_POINT,
+	fixtures::record_geometry_multi_point(),
+	fixtures::test_record_rid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	record_geometry_multi_line,
+	Record,
+	RECORD_GEOMETRY_MULTI_LINE,
+	fixtures::record_geometry_multi_line(),
+	fixtures::test_record_rid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	record_geometry_multi_polygon,
+	Record,
+	RECORD_GEOMETRY_MULTI_POLYGON,
+	fixtures::record_geometry_multi_polygon(),
+	fixtures::test_record_rid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	record_geometry_collection,
+	Record,
+	RECORD_GEOMETRY_COLLECTION,
+	fixtures::record_geometry_collection(),
+	fixtures::test_record_rid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	record_table,
+	Record,
+	RECORD_TABLE,
+	fixtures::record_table(),
+	fixtures::test_record_rid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	record_recordid,
+	Record,
+	RECORD_RECORDID,
+	fixtures::record_recordid(),
+	fixtures::test_record_rid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	record_file,
+	Record,
+	RECORD_FILE,
+	fixtures::record_file(),
+	fixtures::test_record_rid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	record_range_unbounded,
+	Record,
+	RECORD_RANGE_UNBOUNDED,
+	fixtures::record_range_unbounded(),
+	fixtures::test_record_rid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	record_range_bounded,
+	Record,
+	RECORD_RANGE_BOUNDED,
+	fixtures::record_range_bounded(),
+	fixtures::test_record_rid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	record_regex,
+	Record,
+	RECORD_REGEX,
+	fixtures::record_regex(),
+	fixtures::test_record_rid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	record_array,
+	Record,
+	RECORD_ARRAY,
+	fixtures::record_array(),
+	fixtures::test_record_rid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	record_object,
+	Record,
+	RECORD_OBJECT,
+	fixtures::record_object(),
+	fixtures::test_record_rid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	record_set,
+	Record,
+	RECORD_SET,
+	fixtures::record_set(),
+	fixtures::test_record_rid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	record_with_metadata,
+	Record,
+	RECORD_WITH_METADATA,
+	fixtures::record_with_metadata(),
+	fixtures::test_record_rid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	record_with_table_metadata,
+	Record,
+	RECORD_WITH_TABLE_METADATA,
+	fixtures::record_with_table_metadata(),
+	fixtures::test_record_rid(),
+	[v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// MajorVersion
+compat_test!(
+	version_1,
+	MajorVersion,
+	VERSION_1,
+	fixtures::version_1(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	version_3,
+	MajorVersion,
+	VERSION_3,
+	fixtures::version_3(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// StoredApiActionDefinition
+compat_test!(
+	api_action_basic,
+	StoredApiActionDefinition,
+	API_ACTION_BASIC,
+	fixtures::api_action_basic(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	api_action_multi_method,
+	StoredApiActionDefinition,
+	API_ACTION_MULTI_METHOD,
+	fixtures::api_action_multi_method(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// Appending
+compat_test!(
+	appending_none,
+	Appending,
+	APPENDING_NONE,
+	fixtures::appending_none(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	appending_old_values,
+	Appending,
+	APPENDING_OLD_VALUES,
+	fixtures::appending_old_values(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	appending_new_values,
+	Appending,
+	APPENDING_NEW_VALUES,
+	fixtures::appending_new_values(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	appending_both,
+	Appending,
+	APPENDING_BOTH,
+	fixtures::appending_both(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// DocLengthAndCount
+compat_test!(
+	doc_length_and_count_basic,
+	DocLengthAndCount,
+	DOC_LENGTH_AND_COUNT_BASIC,
+	fixtures::doc_length_and_count_basic(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// PrimaryAppending
+compat_test!(
+	primary_appending_basic,
+	PrimaryAppending,
+	PRIMARY_APPENDING_BASIC,
+	fixtures::primary_appending_basic(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// BatchValue
+compat_test!(
+	batch_value_basic,
+	BatchValue,
+	BATCH_VALUE_BASIC,
+	fixtures::batch_value_basic(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// SequenceState
+compat_test!(
+	sequence_state_basic,
+	SequenceState,
+	SEQUENCE_STATE_BASIC,
+	fixtures::sequence_state_basic(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// TaskLease
+compat_test!(
+	task_lease_basic,
+	TaskLease,
+	TASK_LEASE_BASIC,
+	fixtures::task_lease_basic(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// IDs
+compat_test!(
+	namespace_id_basic,
+	NamespaceId,
+	NAMESPACE_ID_BASIC,
+	fixtures::namespace_id_basic(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	database_id_basic,
+	DatabaseId,
+	DATABASE_ID_BASIC,
+	fixtures::database_id_basic(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	table_id_basic,
+	TableId,
+	TABLE_ID_BASIC,
+	fixtures::table_id_basic(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	index_id_basic,
+	IndexId,
+	INDEX_ID_BASIC,
+	fixtures::index_id_basic(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// StoredModuleDefinition
+compat_test!(
+	module_definition_surrealism,
+	StoredModuleDefinition,
+	MODULE_SURREALISM,
+	fixtures::module_surrealism(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	module_definition_silo,
+	StoredModuleDefinition,
+	MODULE_SILO,
+	fixtures::module_silo(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	module_no_name,
+	StoredModuleDefinition,
+	MODULE_NO_NAME,
+	fixtures::module_no_name(),
+	[v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// NodeLiveQuery
+compat_test!(
+	node_live_query_basic,
+	NodeLiveQuery,
+	NODE_LIVE_QUERY_BASIC,
+	fixtures::node_live_query_basic(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// TableMutations
+compat_test!(
+	table_mutations_set,
+	TableMutations,
+	TABLE_MUTATIONS_SET,
+	fixtures::table_mutations_set(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	table_mutations_del,
+	TableMutations,
+	TABLE_MUTATIONS_DEL,
+	fixtures::table_mutations_del(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	table_mutations_def,
+	TableMutations,
+	TABLE_MUTATIONS_DEF,
+	fixtures::table_mutations_def(),
+	[v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	table_mutations_set_with_diff,
+	TableMutations,
+	TABLE_MUTATIONS_SET_WITH_DIFF,
+	fixtures::table_mutations_set_with_diff(),
+	[v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	table_mutations_del_with_original,
+	TableMutations,
+	TABLE_MUTATIONS_DEL_WITH_ORIGINAL,
+	fixtures::table_mutations_del_with_original(),
+	[v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// Node
+compat_test!(
+	node_active,
+	Node,
+	NODE_ACTIVE,
+	fixtures::node_active(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	node_archived,
+	Node,
+	NODE_ARCHIVED,
+	fixtures::node_archived(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// RecordId
+compat_test!(
+	recordid_number,
+	RecordId,
+	RECORDID_NUMBER,
+	fixtures::recordid_number(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	recordid_string,
+	RecordId,
+	RECORDID_STRING,
+	fixtures::recordid_string(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	recordid_uuid,
+	RecordId,
+	RECORDID_UUID,
+	fixtures::recordid_uuid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// RecordIdKey
+compat_test!(
+	recordid_key_number,
+	RecordIdKey,
+	RECORDID_KEY_NUMBER,
+	fixtures::recordid_key_number(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	recordid_key_string,
+	RecordIdKey,
+	RECORDID_KEY_STRING,
+	fixtures::recordid_key_string(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	recordid_key_uuid,
+	RecordIdKey,
+	RECORDID_KEY_UUID,
+	fixtures::recordid_key_uuid(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	recordid_key_array,
+	RecordIdKey,
+	RECORDID_KEY_ARRAY,
+	fixtures::recordid_key_array(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	recordid_key_object,
+	RecordIdKey,
+	RECORDID_KEY_OBJECT,
+	fixtures::recordid_key_object(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+compat_test!(
+	recordid_key_range,
+	RecordIdKey,
+	RECORDID_KEY_RANGE,
+	fixtures::recordid_key_range(),
+	[v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+// TermDocument
+compat_test!(
+	term_document_basic,
+	TermDocument,
+	TERM_DOCUMENT_BASIC,
+	fixtures::term_document_basic(),
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0, v3_1_0, v3_1_1, v3_3_0, v3_4_0]
+);
+
+/// [`version_writes_current_format`] must name a registered snapshot.
+///
+/// The byte-exact "WIRE STABILITY BROKEN" assertion only runs for pairs this
+/// function accepts, so a gate that accepts nothing disables it for every
+/// fixture while leaving the whole suite green. Demoting the current snapshot
+/// is only correct together with capturing its replacement.
+#[test]
+fn byte_exact_gate_names_a_current_format_snapshot() {
+	assert!(
+		version_writes_current_format("v3_4_0", "StoredTableDefinition", "table_basic"),
+		"no snapshot is gated as current-format, so the byte-exact re-encode assertion \
+		 is unreachable: capture a snapshot from the current encoder and name it in \
+		 version_writes_current_format"
+	);
+}
+
+/// A revision bump must excuse only the families it bumped.
+///
+/// Demoting a whole snapshot is the easy mistake, and it is invisible: the
+/// suite stays green while the encode direction stops being pinned for every
+/// family that did not change. This asserts the shape of the gate rather than
+/// the outcome of any one fixture, so it fails on the mistake itself.
+#[test]
+fn a_revision_bump_excuses_only_the_families_it_bumped() {
+	// The three the text-expressions migration bumped are excused at v3_3_0...
+	for bumped in
+		["StoredFieldDefinition", "StoredFunctionDefinition", "StoredSubscriptionDefinition"]
+	{
+		assert!(
+			!version_writes_current_format("v3_3_0", bumped, "irrelevant"),
+			"{bumped} re-encodes at a new revision, so v3_3_0 cannot be byte-exact for it"
+		);
+	}
+	// ...and nothing else is. These kept their revision across the migration,
+	// so their v3_3_0 bytes must still round-trip exactly.
+	for unchanged in ["StoredEventDefinition", "StoredAccessDefinition", "Node", "RecordId"] {
+		assert!(
+			version_writes_current_format("v3_3_0", unchanged, "irrelevant"),
+			"{unchanged} did not change revision, so its v3_3_0 encode pin must stay"
+		);
+	}
+	// The stored view kept revision 1, so no table fixture is excused at v3_3_0 —
+	// including the two that store a view in a pre-`Clauses` shape.
+	for table in [
+		"table_basic",
+		"table_schemafull",
+		"table_relation",
+		"table_any_type",
+		"table_with_view",
+		"table_with_materialized_view",
+	] {
+		assert!(
+			version_writes_current_format("v3_3_0", "StoredTableDefinition", table),
+			"{table} did not change revision, so its v3_3_0 encode pin must stay"
+		);
+		// v3_1_1 predates the table's own 2 -> 3 bump, so none of them hold there.
+		assert!(
+			!version_writes_current_format("v3_1_1", "StoredTableDefinition", table),
+			"{table} re-encodes at revision 3, so v3_1_1 cannot be byte-exact for it"
+		);
+	}
+}
+
+/// Freeze `v3_4_0.rs` against edits.
+///
+/// `v3_4_0` is the current-format snapshot, so its fixtures are held to the
+/// byte-exact "WIRE STABILITY BROKEN" assertion. That assertion is only
+/// meaningful while the frozen bytes stay frozen: the correct response to it
+/// failing is to demote `v3_4_0` in [`version_writes_current_format`] and
+/// capture a new snapshot, never to rewrite this file to match the new
+/// encoder. This hash makes the wrong response fail too.
+///
+/// Snapshot files are produced by the ignored generator tests in
+/// [`super::generator`]; capturing a new version means adding a
+/// `generator_vX_Y_Z` entry there alongside its own freeze hash.
+#[test]
+fn test_v3_4_0_remains_unchanged() {
+	use sha2::{Digest, Sha256};
+
+	let v3_4_0 = include_bytes!("v3_4_0.rs");
+	let hash = Sha256::digest(v3_4_0);
+	let hash_str = hex::encode(hash);
+	assert_eq!(hash_str, "60b5b2601949817ab30558e45ed41ab2b263f524f7ef5234f24d84f28bce7415");
+}

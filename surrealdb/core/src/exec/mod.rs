@@ -39,8 +39,9 @@ use std::sync::Arc;
 
 use futures::Stream;
 
+use crate::exe::FlowResultExt;
 // Re-export FlowResult, FlowResultExt, and ControlFlowExt for operator implementations
-pub(crate) use crate::expr::{ControlFlowExt, FlowResult, FlowResultExt};
+pub(crate) use crate::expr::{ControlFlowExt, FlowResult};
 use crate::val::Value;
 
 /// A boxed `Send` future, used at trait boundaries to keep async state
@@ -53,10 +54,12 @@ pub(crate) mod cardinality;
 pub(crate) mod context;
 pub(crate) mod error;
 pub(crate) mod expression_registry;
-pub(crate) mod field_path;
+pub(crate) use crate::val::field_path;
+pub(crate) mod field_path_convert;
 pub(crate) mod function;
 pub(crate) mod index;
 pub(crate) mod metrics;
+pub(crate) mod object_extract;
 pub(crate) mod operators;
 pub(crate) mod ordering;
 pub(crate) mod parts;

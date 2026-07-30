@@ -18,8 +18,8 @@ use revision::{DeserializeRevisioned, Error as RevisionError, WalkRevisioned};
 
 use super::wire_literal::{LiteralSet, LiteralWire};
 use super::{Evidence, wire_cmp};
+use crate::exec::object_extract::wire_skip::{rev2_optimised_payload_unchecked, skip_value_wire};
 use crate::val::Value;
-use crate::val::object_extract::wire_skip::{rev2_optimised_payload_unchecked, skip_value_wire};
 
 /// Construct an [`IndexedSeqWalker`] directly from an [`Array`]'s rev-2
 /// wire bytes, **bypassing** the macro-generated
@@ -28,7 +28,7 @@ use crate::val::object_extract::wire_skip::{rev2_optimised_payload_unchecked, sk
 /// `Array` is `#[revisioned(revision(1), revision(2, optimised))]` with a
 /// single `#[revision(indexed_seq)]` field, so the rev-2 envelope payload
 /// IS the indexed-seq body — see
-/// [`rev2_optimised_payload`](crate::val::object_extract::wire_skip::rev2_optimised_payload)
+/// [`rev2_optimised_payload`](crate::exec::object_extract::wire_skip::rev2_optimised_payload)
 /// for the layout and rationale (same trick as
 /// `indexed_map_walker_from_object_bytes` in [`object_extract`]).
 ///
@@ -39,7 +39,7 @@ use crate::val::object_extract::wire_skip::{rev2_optimised_payload_unchecked, sk
 /// `OptimisedOffsetsNonMonotonic` error + graceful fall-through to full
 /// decode that the validating walker contract guarantees.
 ///
-/// [`object_extract`]: crate::val::object_extract
+/// [`object_extract`]: crate::exec::object_extract
 #[inline]
 fn indexed_seq_walker_from_array_bytes(
 	array_wire: &[u8],

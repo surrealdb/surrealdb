@@ -19,7 +19,7 @@ use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{MessageBroker, Options, RoutedNotification};
 use crate::doc::{Action, CursorDoc, Document};
 use crate::err::EngineError;
-use crate::expr::FlowResultExt as _;
+use crate::exe::FlowResultExt as _;
 use crate::expr::paths::{AC, ID, RD, TK};
 use crate::kvs::Transaction;
 use crate::types::{PublicAction, PublicNotification};
@@ -347,20 +347,22 @@ impl Document {
 				// BREAK, CONTINUE, closure result, etc.) skips this
 				// notification without aborting the write — the projection
 				// belongs to the LIVE query, not the triggering statement.
-				let result =
-					match x.compute(stk, &ctx, &opt, Some(&doc)).await.map_err(IgnoreError::from) {
-						Err(IgnoreError::Ignore) => return Ok(()),
-						Err(IgnoreError::Error(e)) => {
-							tracing::debug!(
-								target: "surrealdb::core::doc::lives",
-								subscription_id = %live_subscription.id,
-								error = %e,
-								"LIVE notification skipped: projection evaluation failed",
-							);
-							return Ok(());
-						}
-						Ok(x) => x,
-					};
+				let result = match crate::legacy::fields_compute(x, stk, &ctx, &opt, Some(&doc))
+					.await
+					.map_err(IgnoreError::from)
+				{
+					Err(IgnoreError::Ignore) => return Ok(()),
+					Err(IgnoreError::Error(e)) => {
+						tracing::debug!(
+							target: "surrealdb::core::doc::lives",
+							subscription_id = %live_subscription.id,
+							error = %e,
+							"LIVE notification skipped: projection evaluation failed",
+						);
+						return Ok(());
+					}
+					Ok(x) => x,
+				};
 				let action = if is_delete {
 					PublicAction::Delete
 				} else if self.is_new() {
@@ -382,7 +384,7 @@ impl Document {
 				// On the expression directly: wrapping it in a `Fetch` would
 				// deep-clone the tree once per subscriber per record.
 				if let Err(e) =
-					crate::expr::Fetch::compute_expr(expr, stk, &ctx, &opt, &mut idioms).await
+					crate::legacy::fetch_compute_expr(expr, stk, &ctx, &opt, &mut idioms).await
 				{
 					tracing::debug!(
 						target: "surrealdb::core::doc::lives",
@@ -394,7 +396,10 @@ impl Document {
 				}
 			}
 			for i in &idioms {
-				if let Err(e) = stk.run(|stk| result.fetch(stk, &ctx, &opt, &i.0)).await {
+				if let Err(e) = stk
+					.run(|stk| crate::legacy::value_fetch(&mut result, stk, &ctx, &opt, &i.0))
+					.await
+				{
 					tracing::debug!(
 						target: "surrealdb::core::doc::lives",
 						subscription_id = %live_subscription.id,
@@ -549,7 +554,7 @@ impl Document {
 		if let Some(cond) = query.cond.as_ref() {
 			// Check if the expression is truthy
 			if !stk
-				.run(|stk| cond.compute(stk, ctx, opt, Some(doc)))
+				.run(|stk| crate::legacy::expr_compute(cond, stk, ctx, opt, Some(doc)))
 				.await
 				.catch_return()?
 				.is_truthy()
@@ -589,7 +594,7 @@ impl Document {
 					let opt = &opt.new_for_permission_predicate();
 					// Process the PERMISSION clause
 					if !stk
-						.run(|stk| e.compute(stk, ctx, opt, Some(doc)))
+						.run(|stk| crate::legacy::expr_compute(e, stk, ctx, opt, Some(doc)))
 						.await
 						.catch_return()
 						.is_ok_and(|x| x.is_truthy())

@@ -1,7 +1,7 @@
 pub mod err;
 pub mod invocation;
 pub mod middleware;
-pub mod path;
+pub(crate) use crate::catalog::api_path as path;
 pub mod request;
 pub mod response;
 

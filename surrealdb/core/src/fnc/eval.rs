@@ -68,8 +68,9 @@ use crate::ctx::{Context, FrozenContext};
 use crate::dbs::capabilities::{ArbitraryQueryTarget, Error as CapabilitiesError, EvalQueryTarget};
 use crate::dbs::{Capabilities, Force, Options, Variables};
 use crate::doc::CursorDoc;
+use crate::exe::FlowResultExt as _;
 use crate::exec::Error as ExecError;
-use crate::expr::{Block, FlowResultExt as _, LogicalPlan, TopLevelExpr};
+use crate::expr::{Block, LogicalPlan, TopLevelExpr};
 use crate::fnc::args::Optional;
 use crate::iam::Auth;
 use crate::val::{Object, Value};
@@ -221,5 +222,5 @@ pub(crate) async fn run_eval(
 	// step against `max_computation_depth`, and the budget is carried in via
 	// `opt`, so a nested `eval` continues the count rather than resetting it.
 	let opt = opt.new_with_force(Force::None);
-	block.compute(stk, &child, &opt, doc).await.catch_return()
+	crate::legacy::block_compute(&block, stk, &child, &opt, doc).await.catch_return()
 }

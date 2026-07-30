@@ -116,6 +116,10 @@ RefsUpdateFailure	{ cause: NONE, code: -32000, kind: 'Internal', message: 'An er
 EvNamespaceMismatch	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Error with the event sample. The ID of the namespace `sample` does not match the namespace this event has been generated from.' }
 EvDatabaseMismatch	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Error with the event sample. The ID of the database `sample` does not match the database this event has been generated from.' }
 EvReachMaxDepth	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The event sample reached the max async event nesting depth: 1.' }
+InvalidPath	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The string could not be parsed into a path: sample' }
+Query	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Invalid query: sample' }
+InvalidAggregation	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Invalid aggregation: sample' }
+InvalidAggregationSelector	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Incorrect selector for aggregate selection, expression `sample` within in selector cannot be aggregated in a group.' }
 NsNotFound	{ cause: NONE, code: -32000, details: { details: { name: 'sample' }, kind: 'Namespace' }, kind: 'NotFound', message: "The namespace 'sample' does not exist" }
 DbNotFound	{ cause: NONE, code: -32000, details: { details: { name: 'sample' }, kind: 'Database' }, kind: 'NotFound', message: "The database 'sample' does not exist" }
 EvNotFound	{ cause: NONE, code: -32000, kind: 'Internal', message: "The event 'sample' does not exist" }
@@ -196,8 +200,6 @@ InvalidScript	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Problem w
 InvalidModel	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Problem with machine learning computation. sample' }
 InvalidFunction	{ cause: NONE, code: -32000, kind: 'Internal', message: 'There was a problem running the sample() function. sample' }
 InvalidMethodArguments	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Incorrect arguments for method sample(). sample' }
-InvalidAggregation	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Invalid aggregation: sample' }
-InvalidAggregationSelector	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Incorrect selector for aggregate selection, expression `sample` within in selector cannot be aggregated in a group.' }
 InvalidControlFlow	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Invalid control flow statement, break or continue statement found outside of loop.' }
 NsNotAllowed	{ cause: NONE, code: -32000, kind: 'Internal', message: "You don't have permission to change to the sample namespace" }
 DbNotAllowed	{ cause: NONE, code: -32000, kind: 'Internal', message: "You don't have permission to change to the sample database" }

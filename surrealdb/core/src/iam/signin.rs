@@ -1059,7 +1059,7 @@ pub fn validate_grant_bearer(key: &str) -> Result<String> {
 	let parts: Vec<&str> = key.split("-").collect();
 	ensure!(parts.len() == 4, AuthError::AccessGrantBearerInvalid);
 	// Check that the prefix type exists.
-	access_type::BearerAccessType::from_str(parts[1])?;
+	parse_bearer_access_type(parts[1])?;
 	// Retrieve the key identifier from the provided key.
 	let kid = parts[2];
 	// Check the length of the key identifier.
@@ -1116,6 +1116,15 @@ pub(crate) fn verify_grant_bearer(
 			}
 		}
 		_ => Err(anyhow::Error::new(AuthError::AccessMethodMismatch)),
+	}
+}
+
+/// Parses the access-type segment of a bearer grant key.
+fn parse_bearer_access_type(s: &str) -> Result<access_type::BearerAccessType, crate::iam::Error> {
+	match s.to_ascii_lowercase().as_str() {
+		"bearer" => Ok(access_type::BearerAccessType::Bearer),
+		"refresh" => Ok(access_type::BearerAccessType::Refresh),
+		_ => Err(crate::iam::Error::AccessGrantBearerInvalid),
 	}
 }
 

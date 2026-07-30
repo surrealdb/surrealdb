@@ -306,7 +306,7 @@ impl IndexBuilder {
 		ix: Arc<IndexDefinition>,
 		blocking: bool,
 	) -> Result<Option<Receiver<Result<()>>>> {
-		ix.expect_not_prepare_remove()?;
+		expect_not_prepare_remove(&ix)?;
 		let (ns, db) = ctx.expect_ns_db_ids(&opt).await?;
 		let key = Arc::new(IndexKey::new(ns, db, &ix.table_name.clone(), ix.index_id));
 		let (rcv, sdr) = if blocking {
@@ -1257,7 +1257,7 @@ impl Building {
 			)
 			.await?
 		{
-			ix.expect_not_prepare_remove()?;
+			expect_not_prepare_remove(&ix)?;
 		}
 		*last_prepare_remove_check = Instant::now();
 		Ok(())
@@ -2070,5 +2070,20 @@ struct BuildingFinishGuard(IndexBuilding);
 impl Drop for BuildingFinishGuard {
 	fn drop(&mut self) {
 		self.0.finished.store(true, Ordering::Relaxed);
+	}
+}
+
+/// Rejects an index that is staged for removal.
+///
+/// A definition with `prepare_remove` set is in the two-phase removal window;
+/// building or replaying against it would resurrect index state the removal
+/// is about to purge.
+fn expect_not_prepare_remove(ix: &IndexDefinition) -> anyhow::Result<()> {
+	if ix.prepare_remove {
+		Err(anyhow::Error::new(crate::kvs::DatastoreError::IndexingBuildingCancelled {
+			reason: "Prepare remove.".to_string(),
+		}))
+	} else {
+		Ok(())
 	}
 }

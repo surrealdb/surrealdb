@@ -11,7 +11,8 @@ use crate::dbs::plan::Explanation;
 use crate::dbs::store::MemoryCollector;
 use crate::dbs::{Options, Statement};
 use crate::doc::CursorDoc;
-use crate::expr::{FlowResultExt as _, Idiom};
+use crate::exe::FlowResultExt as _;
+use crate::expr::Idiom;
 use crate::idx::planner::RecordStrategy;
 use crate::val::{Number, TryFloatDiv, Value};
 
@@ -134,7 +135,10 @@ impl GroupCollector {
 		let doc = obj.into();
 		self.group_buffer.clear();
 		for g in self.analysis.group_expressions.iter() {
-			let v = stk.run(|stk| g.compute(stk, ctx, opt, Some(&doc))).await.catch_return()?;
+			let v = stk
+				.run(|stk| crate::legacy::expr_compute(g, stk, ctx, opt, Some(&doc)))
+				.await
+				.catch_return()?;
 			self.group_buffer.push(v);
 		}
 
@@ -164,7 +168,10 @@ impl GroupCollector {
 			// calculate the arguments for the aggregate functions
 			self.exprs_buffer.clear();
 			for v in self.analysis.aggregate_arguments.iter() {
-				let v = stk.run(|stk| v.compute(stk, ctx, opt, Some(&doc))).await.catch_return()?;
+				let v = stk
+					.run(|stk| crate::legacy::expr_compute(v, stk, ctx, opt, Some(&doc)))
+					.await
+					.catch_return()?;
 				self.exprs_buffer.push(v);
 			}
 
@@ -302,13 +309,13 @@ impl GroupCollector {
 			match &self.analysis.fields {
 				AggregateFields::Value(expr) => {
 					let mut res = stk
-						.run(|stk| expr.compute(stk, ctx, opt, Some(&doc)))
+						.run(|stk| crate::legacy::expr_compute(expr, stk, ctx, opt, Some(&doc)))
 						.await
 						.catch_return()?;
 
 					// Apply OMIT to the aggregated result
 					for field in &self.omit {
-						res.del(stk, ctx, opt, field).await?;
+						crate::legacy::value_del(&mut res, stk, ctx, opt, field).await?;
 					}
 
 					collector.push(res);
@@ -317,15 +324,16 @@ impl GroupCollector {
 					let mut obj = Value::empty_object();
 					for (name, expr) in items {
 						let res = stk
-							.run(|stk| expr.compute(stk, ctx, opt, Some(&doc)))
+							.run(|stk| crate::legacy::expr_compute(expr, stk, ctx, opt, Some(&doc)))
 							.await
 							.catch_return()?;
-						obj.set(stk, ctx, opt, name.as_ref(), res).await?;
+						crate::legacy::value_set(&mut obj, stk, ctx, opt, name.as_ref(), res)
+							.await?;
 					}
 
 					// Apply OMIT to the aggregated result
 					for field in &self.omit {
-						obj.del(stk, ctx, opt, field).await?;
+						crate::legacy::value_del(&mut obj, stk, ctx, opt, field).await?;
 					}
 
 					collector.push(obj);

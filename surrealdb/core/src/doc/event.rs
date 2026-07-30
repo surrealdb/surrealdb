@@ -17,7 +17,7 @@ use crate::catalog::{EventDefinition, FromStored, Record, StoredEventDefinition}
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Session};
 use crate::doc::{Action, CursorDoc, Document, DocumentContext, Error};
-use crate::expr::FlowResultExt as _;
+use crate::exe::FlowResultExt as _;
 use crate::iam::{Auth, AuthLimit};
 use crate::key::root::eq::{EventQueue, EventQueuePrefix};
 use crate::key::{KVKeyDecode, KVRange, KVValue, impl_kv_value_revisioned};
@@ -110,7 +110,7 @@ impl Document {
 			let ctx = ctx.freeze();
 			// Process conditional clause
 			let val = stk
-				.run(|stk| ev.when.compute(stk, &ctx, &opt, Some(doc)))
+				.run(|stk| crate::legacy::expr_compute(&ev.when, stk, &ctx, &opt, Some(doc)))
 				.await
 				.catch_return()
 				.map_err(|e| anyhow::anyhow!("Error while processing event {}: {e}", ev.name))?;
@@ -137,7 +137,7 @@ impl Document {
 	) -> Result<()> {
 		// Evaluate each THEN expression in order.
 		for then in ev.then.iter() {
-			stk.run(|stk| then.compute(stk, &ctx, &opt, Some(doc)))
+			stk.run(|stk| crate::legacy::expr_compute(then, stk, &ctx, &opt, Some(doc)))
 				.await
 				.catch_return()
 				.map_err(|e| anyhow::anyhow!("Error while processing event {}: {e}", ev.name))?;

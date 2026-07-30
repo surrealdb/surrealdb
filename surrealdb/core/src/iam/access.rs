@@ -117,7 +117,7 @@ pub(crate) async fn create_refresh_token_record(
 	// Create a bearer grant to act as the refresh token
 	let grant = run!(
 		tx,
-		access::create_grant(ac, Some(Base::Db), catalog::Subject::Record(rid), &ctx, &opt)
+		crate::legacy::create_grant(ac, Some(Base::Db), catalog::Subject::Record(rid), &ctx, &opt)
 			.await
 			.map_err(|e| {
 				warn!("Unexpected error when attempting to create a refresh token: {e}");
@@ -158,7 +158,7 @@ pub async fn revoke_refresh_token_record(
 		tx,
 		stack
 			.enter(|stk| async {
-				access::revoke_grant(&stmt, stk, &ctx, &opt).await.map_err(|e| {
+				crate::legacy::revoke_grant(&stmt, stk, &ctx, &opt).await.map_err(|e| {
 					warn!("Unexpected error when attempting to revoke a refresh token: {e}");
 					anyhow::Error::new(AuthError::UnexpectedAuth)
 				})

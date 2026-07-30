@@ -17,57 +17,7 @@ pub mod top;
 pub mod trimean;
 pub mod vector;
 
-pub(crate) trait ToFloat {
-	fn to_float(&self) -> f64;
-}
-
-impl ToFloat for f64 {
-	fn to_float(&self) -> f64 {
-		*self
-	}
-}
-
-impl ToFloat for f32 {
-	fn to_float(&self) -> f64 {
-		*self as f64
-	}
-}
-
-impl ToFloat for half::f16 {
-	fn to_float(&self) -> f64 {
-		self.to_f64()
-	}
-}
-
-impl ToFloat for i64 {
-	fn to_float(&self) -> f64 {
-		*self as f64
-	}
-}
-
-impl ToFloat for i32 {
-	fn to_float(&self) -> f64 {
-		*self as f64
-	}
-}
-
-impl ToFloat for i16 {
-	fn to_float(&self) -> f64 {
-		*self as f64
-	}
-}
-
-impl ToFloat for i8 {
-	fn to_float(&self) -> f64 {
-		*self as f64
-	}
-}
-
-impl ToFloat for u8 {
-	fn to_float(&self) -> f64 {
-		*self as f64
-	}
-}
+pub(crate) use crate::val::number::ToFloat;
 
 pub(crate) fn mean(array: &[Number]) -> Result<Number> {
 	if array.is_empty() {

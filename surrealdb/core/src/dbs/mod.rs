@@ -5,6 +5,7 @@
 //! operations. This module also gives a `context` to the transaction.
 
 mod broker;
+mod capture;
 mod distinct;
 pub mod executor;
 mod group;
@@ -12,26 +13,23 @@ mod iterator;
 mod observe_ctx;
 mod options;
 mod plan;
-mod processor;
+pub(crate) mod processor;
 mod result;
 mod session;
 mod sort_error;
 mod statement;
 mod statement_counters;
 mod store;
-mod variables;
 
 pub mod capabilities;
-pub mod node;
-
 pub use surrealdb_rpc::{QueryResult, QueryResultBuilder, QueryType, Status};
-pub(crate) use variables::{ParameterCapturePass, Variables};
 
 pub use self::broker::{
 	BrokerRoutingContext, LocalMessageBroker, MessageBroker, NodeEndpointResolver,
 	RoutedNotification,
 };
 pub use self::capabilities::Capabilities;
+pub(crate) use self::capture::ParameterCapturePass;
 pub(crate) use self::executor::Executor;
 pub(crate) use self::iterator::{Iterable, Iterator, Operable, Processable};
 pub(crate) use self::options::{Force, Options};
@@ -40,6 +38,8 @@ pub use self::session::{NewPlannerStrategy, Session};
 pub(crate) use self::sort_error::SortError;
 pub(crate) use self::statement::Statement;
 pub(crate) use self::statement_counters::StatementCounters;
+pub use crate::catalog::node;
+pub(crate) use crate::expr::variables::Variables;
 
 #[cfg(storage)]
 mod file;

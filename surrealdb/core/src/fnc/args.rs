@@ -140,7 +140,49 @@ impl<T: Coerce> FromArg for Rest<T> {
 	}
 }
 
-impl<T: Coerce> FromArg for T {
+/// Coerces the next argument to `T`, with the standard wrong-type framing.
+fn from_arg_coerce<T: Coerce>(name: &str, iter: &mut Args) -> Result<T> {
+	// The error should not happen when called with the FromArgs traits as the arity
+	// is already checked.
+	let (idx, x) = iter.next().ok_or_else(|| Error::InvalidFunctionArguments {
+		name: name.to_owned(),
+		message: "Missing an argument".to_string(),
+	})?;
+
+	let v = x.coerce_to::<T>().map_err(|e| Error::InvalidFunctionArguments {
+		name: name.to_owned(),
+		message: format!("Argument {idx} was the wrong type. {e}"),
+	})?;
+	Ok(v)
+}
+
+/// Implements `FromArg` through `Coerce` for a fixed list of argument types.
+///
+/// A blanket `impl<T: Coerce> FromArg for T` cannot coexist with the tuple
+/// impls once `Coerce` lives in another crate, so the coercible argument
+/// types are enumerated instead (with generic impls per container shape
+/// below).
+macro_rules! impl_from_arg_via_coerce {
+	($($t:ty),* $(,)?) => {
+		$(impl FromArg for $t {
+			fn arity() -> Arity {
+				Arity {
+					lower: 1,
+					upper: Some(1),
+				}
+			}
+
+			fn from_arg(name: &str, iter: &mut Args) -> Result<Self> {
+				from_arg_coerce::<$t>(name, iter)
+			}
+		})*
+	};
+}
+
+impl<T> FromArg for Vec<T>
+where
+	Vec<T>: Coerce,
+{
 	fn arity() -> Arity {
 		Arity {
 			lower: 1,
@@ -149,20 +191,79 @@ impl<T: Coerce> FromArg for T {
 	}
 
 	fn from_arg(name: &str, iter: &mut Args) -> Result<Self> {
-		// The error should not happen when called with the FromArgs traits as the arity
-		// is already checked.
-		let (idx, x) = iter.next().ok_or_else(|| Error::InvalidFunctionArguments {
-			name: name.to_owned(),
-			message: "Missing an argument".to_string(),
-		})?;
-
-		let v = x.coerce_to::<T>().map_err(|e| Error::InvalidFunctionArguments {
-			name: name.to_owned(),
-			message: format!("Argument {idx} was the wrong type. {e}"),
-		})?;
-		Ok(v)
+		from_arg_coerce::<Vec<T>>(name, iter)
 	}
 }
+
+impl<T> FromArg for Box<T>
+where
+	Box<T>: Coerce,
+{
+	fn arity() -> Arity {
+		Arity {
+			lower: 1,
+			upper: Some(1),
+		}
+	}
+
+	fn from_arg(name: &str, iter: &mut Args) -> Result<Self> {
+		from_arg_coerce::<Box<T>>(name, iter)
+	}
+}
+
+impl<T> FromArg for Option<T>
+where
+	Option<T>: Coerce,
+{
+	fn arity() -> Arity {
+		Arity {
+			lower: 1,
+			upper: Some(1),
+		}
+	}
+
+	fn from_arg(name: &str, iter: &mut Args) -> Result<Self> {
+		from_arg_coerce::<Option<T>>(name, iter)
+	}
+}
+
+impl<K, V> FromArg for std::collections::BTreeMap<K, V>
+where
+	std::collections::BTreeMap<K, V>: Coerce,
+{
+	fn arity() -> Arity {
+		Arity {
+			lower: 1,
+			upper: Some(1),
+		}
+	}
+
+	fn from_arg(name: &str, iter: &mut Args) -> Result<Self> {
+		from_arg_coerce::<std::collections::BTreeMap<K, V>>(name, iter)
+	}
+}
+
+impl_from_arg_via_coerce!(
+	Value,
+	bool,
+	i64,
+	f64,
+	String,
+	surrealdb_strand::Strand,
+	crate::val::Array,
+	crate::val::Object,
+	crate::val::Bytes,
+	crate::val::Datetime,
+	crate::val::Duration,
+	crate::val::File,
+	crate::val::Geometry,
+	crate::val::Number,
+	crate::val::Regex,
+	crate::val::RecordId,
+	crate::val::Uuid,
+	crate::val::Set,
+	crate::val::TableName,
+);
 
 /// Wrapper type for arguments which use coercing rules instead of coercing
 /// rules.

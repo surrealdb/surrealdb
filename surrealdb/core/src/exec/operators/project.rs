@@ -416,7 +416,7 @@ async fn compute_field_writes(
 			writes.push((field.output_path.clone(), value));
 		} else {
 			for (idiom, value) in bindings {
-				if let Ok(path) = FieldPath::try_from(&idiom)
+				if let Ok(path) = crate::exec::field_path_convert::field_path_from_idiom(&idiom)
 					&& !path.is_empty()
 				{
 					writes.push((path, value));
@@ -457,7 +457,7 @@ async fn evaluate_and_set_field(
 		} else {
 			// No alias - use the dynamic field names from the function
 			for (idiom, value) in bindings {
-				if let Ok(path) = FieldPath::try_from(&idiom)
+				if let Ok(path) = crate::exec::field_path_convert::field_path_from_idiom(&idiom)
 					&& !path.is_empty()
 				{
 					set_field_on_object(obj, &path, value);

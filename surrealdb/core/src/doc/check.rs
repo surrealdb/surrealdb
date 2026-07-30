@@ -8,8 +8,9 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::compute::DocKind;
 use crate::doc::{CursorDoc, Document, Error as DocError, Extras};
+use crate::exe::FlowResultExt;
 use crate::expr::paths::{ID, IN, OUT};
-use crate::expr::{Cond, Error, FlowResultExt};
+use crate::expr::{Cond, Error};
 use crate::iam::Action;
 use crate::val::{RecordId, Value};
 
@@ -324,7 +325,7 @@ impl Document {
 			let doc: &CursorDoc = self.current_reduced.as_ref().unwrap_or(&self.current);
 			// Check the WHERE clause against the reduced view
 			if !stk
-				.run(|stk| cond.0.compute(stk, ctx, opt, Some(doc)))
+				.run(|stk| crate::legacy::expr_compute(&cond.0, stk, ctx, opt, Some(doc)))
 				.await
 				.catch_return()?
 				.is_truthy()
@@ -336,7 +337,7 @@ impl Document {
 			self.compute_fields(stk, ctx, opt, DocKind::Current, None).await?;
 			// Check the WHERE clause against the computed document
 			if !stk
-				.run(|stk| cond.0.compute(stk, ctx, opt, Some(&self.current)))
+				.run(|stk| crate::legacy::expr_compute(&cond.0, stk, ctx, opt, Some(&self.current)))
 				.await
 				.catch_return()?
 				.is_truthy()
@@ -460,7 +461,7 @@ impl Document {
 				let opt = &opt.new_for_permission_predicate();
 				// Process the PERMISSION clause
 				if !stk
-					.run(|stk| e.compute(stk, ctx, opt, Some(doc)))
+					.run(|stk| crate::legacy::expr_compute(e, stk, ctx, opt, Some(doc)))
 					.await
 					.catch_return()?
 					.is_truthy()

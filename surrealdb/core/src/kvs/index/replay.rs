@@ -21,7 +21,7 @@ use crate::catalog::providers::{NodeProvider, TableProvider};
 use crate::catalog::{Error as CatalogError, Index, Record};
 use crate::ctx::FrozenContext;
 use crate::doc::{CursorDoc, Document};
-use crate::expr::FlowResultExt as _;
+use crate::exe::FlowResultExt as _;
 use crate::idx::IndexKeyBase;
 use crate::idx::docids::{DocId, TableDocIds};
 use crate::idx::ft::fulltext::FullTextIndex;
@@ -599,7 +599,9 @@ impl Building {
 					// initial scan carries the predicate result separately.
 					let count_cond_match = if let Some(expr) = &count_cond_expr {
 						let new_matches = stack
-							.enter(|stk| expr.compute(stk, ctx, &self.opt, Some(&doc)))
+							.enter(|stk| {
+								crate::legacy::expr_compute(expr, stk, ctx, &self.opt, Some(&doc))
+							})
 							.finish()
 							.await
 							.catch_return()?

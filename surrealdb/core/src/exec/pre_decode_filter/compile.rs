@@ -15,6 +15,7 @@ use super::{
 	FusedFlatClause, FusedFlatClauses, LeafFallback, PreDecodeFilter, PreDecodeFilterReason,
 	PreDecodeFilterStatus, PredNode,
 };
+use crate::exec::object_extract::PathSegment;
 use crate::exec::operators::scan::pipeline::FieldState;
 use crate::exec::permission::PhysicalPermission;
 use crate::exec::physical_expr::record_id::PhysicalRecordIdKey;
@@ -24,7 +25,6 @@ use crate::exec::physical_expr::{
 };
 use crate::exec::planner::is_simple_binary_eligible;
 use crate::expr::operator::{BinaryOperator, PrefixOperator};
-use crate::val::object_extract::PathSegment;
 use crate::val::{RecordId, RecordIdKey, Value};
 
 /// Compile the physical WHERE predicate into a fused predicate tree for KV-byte inspection.

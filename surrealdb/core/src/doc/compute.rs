@@ -8,7 +8,7 @@ use crate::catalog::FieldDefinition;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::{CursorDoc, Document, Error};
-use crate::expr::FlowResultExt as _;
+use crate::exe::FlowResultExt as _;
 use crate::val::RecordId;
 
 /// Identifies which of the four `CursorDoc` views on a [`Document`] to
@@ -166,7 +166,9 @@ impl Document {
 				}
 			}
 
-			let mut val = computed.compute(stk, ctx, opt, Some(doc)).await.catch_return()?;
+			let mut val = crate::legacy::expr_compute(computed, stk, ctx, opt, Some(doc))
+				.await
+				.catch_return()?;
 			if let Some(kind) = fd.field_kind.as_ref() {
 				val = val.coerce_to_kind(kind).map_err(|e| Error::FieldCoerce {
 					record: rid.to_sql(),

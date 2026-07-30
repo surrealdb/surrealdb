@@ -45,11 +45,11 @@ use std::sync::{Arc, RwLock};
 
 use crate::exec::OperatorMetrics;
 use crate::exec::field_path::{FieldPath, FieldPathPart};
+use crate::exec::object_extract::{Extracted, PathSegment, extract_field_from_record_bytes};
 use crate::exec::operators::scan::pipeline::FieldState;
 use crate::exec::operators::{SortDirection, SortKey, compare_values};
 use crate::exec::pre_decode_filter::{PreDecodeFilterReason, field_state_blocks_raw_read};
 use crate::val::Value;
-use crate::val::object_extract::{Extracted, PathSegment, extract_field_from_record_bytes};
 
 /// Shared, monotonically-tightening threshold between the sort operator (top
 /// of the buffered pipeline, possibly a separate task) and the KV scan visitor

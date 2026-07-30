@@ -1382,6 +1382,12 @@ impl Context {
 	}
 }
 
+impl crate::catalog::providers::CancellationProbe for Context {
+	fn expect_not_timedout(&self) -> crate::catalog::providers::BoxProviderFut<'_, Result<()>> {
+		Box::pin(Context::expect_not_timedout(self))
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	#[cfg(feature = "http")]

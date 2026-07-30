@@ -8,7 +8,7 @@ use crate::catalog::Permission;
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::{CursorDoc, Document};
-use crate::expr::FlowResultExt as _;
+use crate::exe::FlowResultExt as _;
 use crate::iam::{Action, AuthLimit};
 
 impl Document {
@@ -195,7 +195,15 @@ impl Document {
 						let child_ctx = child_ctx.freeze();
 						// Process the PERMISSION clause
 						if !stk
-							.run(|stk| e.compute(stk, &child_ctx, opt, Some(&original)))
+							.run(|stk| {
+								crate::legacy::expr_compute(
+									e,
+									stk,
+									&child_ctx,
+									opt,
+									Some(&original),
+								)
+							})
 							.await
 							.catch_return()?
 							.is_truthy()
@@ -256,7 +264,7 @@ impl Document {
 						let ctx = ctx.freeze();
 						// Process the PERMISSION clause
 						if !stk
-							.run(|stk| e.compute(stk, &ctx, opt, Some(full)))
+							.run(|stk| crate::legacy::expr_compute(e, stk, &ctx, opt, Some(full)))
 							.await
 							.catch_return()?
 							.is_truthy()

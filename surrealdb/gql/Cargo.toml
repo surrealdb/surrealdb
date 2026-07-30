@@ -1,0 +1,30 @@
+[package]
+name = "surrealdb-gql"
+publish = true
+readme = "README.md"
+documentation = "https://docs.rs/surrealdb-gql/"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+phf = { workspace = true, features = ["macros", "unicase"] }
+reblessive = { workspace = true, features = ["tree"] }
+surrealdb-expr = { workspace = true, features = ["gql"] }
+surrealdb-sql = { workspace = true }
+surrealdb-strand = { workspace = true }
+surrealdb-syn = { workspace = true }
+surrealdb-types = { workspace = true }
+unicase.workspace = true
+
+[dev-dependencies]
+rstest.workspace = true
+
+[lints]
+workspace = true

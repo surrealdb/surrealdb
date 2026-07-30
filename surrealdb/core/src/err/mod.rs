@@ -11,11 +11,12 @@ use crate::kvs::Error as KvsError;
 
 #[cfg(test)]
 mod behaviour_pins;
-mod engine;
 mod to_types;
 #[cfg(test)]
 mod wire_snapshot_test;
-pub use engine::EngineError;
+/// Re-exported so the engine names its universal failures under `err` like
+/// every other error type, wherever the type itself has to live.
+pub use common::EngineError;
 pub(crate) use to_types::into_types_error;
 
 /// The SurrealDB error types that can appear inside an [`anyhow::Error`],
@@ -523,6 +524,12 @@ impl From<ToStrError> for Error {
 impl From<reqwest::Error> for Error {
 	fn from(e: reqwest::Error) -> Error {
 		Error::Http(e.to_string())
+	}
+}
+
+impl From<Error> for crate::expr::ControlFlow {
+	fn from(error: Error) -> Self {
+		crate::expr::ControlFlow::Err(error.into())
 	}
 }
 

@@ -23,22 +23,6 @@ pub(crate) use error::Error;
 
 use crate::catalog;
 
-/// Derive an Argon2id hash of a plaintext password for storage.
-///
-/// Centralizes the hashing so every place that turns a `PASSWORD` clause into
-/// stored credentials (DEFINE/ALTER USER conversions and the root-user
-/// bootstrap) agrees on the algorithm, parameters, and salt policy.
-pub(crate) fn hash_password(password: &str) -> String {
-	use argon2::Argon2;
-	use argon2::password_hash::{PasswordHasher, SaltString};
-	use rand_core::OsRng;
-
-	Argon2::default()
-		.hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))
-		.expect("password hashing should not fail")
-		.to_string()
-}
-
 fn algorithm_to_jwt_algorithm(alg: catalog::Algorithm) -> jsonwebtoken::Algorithm {
 	match alg {
 		catalog::Algorithm::Hs256 => jsonwebtoken::Algorithm::HS256,

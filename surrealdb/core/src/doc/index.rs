@@ -22,7 +22,7 @@ use crate::catalog::{DatabaseDefinition, IndexDefinition, TableDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::{Force, Options};
 use crate::doc::{CursorDoc, Document};
-use crate::expr::FlowResultExt as _;
+use crate::exe::FlowResultExt as _;
 use crate::idx::docids::TableDocIds;
 use crate::idx::index::IndexOperation;
 use crate::kvs::index::{ConsumeResult, IndexMutation};
@@ -69,12 +69,16 @@ impl Document {
 			let count_cond_match = if let Some(cond) = &ix.count_cond {
 				let expr = &cond.0;
 				let old_matches = stk
-					.run(|stk| expr.compute(stk, ctx, opt, Some(&self.initial)))
+					.run(|stk| {
+						crate::legacy::expr_compute(expr, stk, ctx, opt, Some(&self.initial))
+					})
 					.await
 					.catch_return()?
 					.is_truthy();
 				let new_matches = stk
-					.run(|stk| expr.compute(stk, ctx, opt, Some(&self.current)))
+					.run(|stk| {
+						crate::legacy::expr_compute(expr, stk, ctx, opt, Some(&self.current))
+					})
 					.await
 					.catch_return()?
 					.is_truthy();
@@ -225,7 +229,9 @@ impl Document {
 		}
 		let mut o = Vec::with_capacity(ix.cols.len());
 		for idiom in ix.cols.iter() {
-			let v = idiom.compute(stk, ctx, opt, Some(doc)).await.catch_return()?;
+			let v = crate::legacy::idiom_compute(idiom, stk, ctx, opt, Some(doc))
+				.await
+				.catch_return()?;
 			o.push(v);
 		}
 		Ok(Some(o))

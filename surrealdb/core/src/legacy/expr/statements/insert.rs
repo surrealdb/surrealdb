@@ -1,0 +1,332 @@
+use std::sync::Arc;
+
+use anyhow::{Result, bail};
+use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
+
+use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
+use crate::ctx::{Context, FrozenContext};
+use crate::dbs::processor::RelateThrough;
+use crate::dbs::{Iterable, Iterator, Options, Statement};
+use crate::doc::{CursorDoc, DocumentContext, NsDbCtx};
+use crate::exe::FlowResultExt as _;
+use crate::exec::Error as ExecError;
+use crate::expr::Data;
+use crate::expr::paths::{IN, OUT};
+use crate::expr::statements::insert::InsertStatement;
+use crate::idx::planner::RecordStrategy;
+use crate::val::{Duration, RecordIdKey, TableName, Value};
+
+/// Process this type returning a computed simple Value
+#[instrument(level = "trace", name = "InsertStatement::compute", skip_all)]
+pub(crate) async fn insert_statement_compute(
+	this: &InsertStatement,
+	stk: &mut Stk,
+	ctx: &FrozenContext,
+	opt: &Options,
+	doc: Option<&CursorDoc>,
+) -> Result<Value> {
+	// Valid options?
+	opt.valid_for_db()?;
+	// Create a new iterator
+	let mut iterator = Iterator::new();
+	// Check if there is a timeout
+	let ctx_store;
+	let ctx = match stk
+		.run(|stk| crate::legacy::expr_compute(&this.timeout, stk, ctx, opt, doc))
+		.await
+		.catch_return()?
+		.cast_to::<Option<Duration>>()?
+	{
+		Some(timeout) => {
+			let mut ctx = Context::new_child(ctx);
+			ctx.add_timeout(timeout.0)?;
+			ctx_store = ctx.freeze();
+			&ctx_store
+		}
+		None => ctx,
+	};
+	// Parse the INTO expression
+	let tb = match &this.into {
+		Some(into) => {
+			match stk
+				.run(|stk| crate::legacy::expr_compute(into, stk, ctx, opt, doc))
+				.await
+				.catch_return()?
+			{
+				Value::Table(into) => Some(into),
+				Value::String(into) => Some(TableName::new(into)),
+				_ => {
+					return Err(ExecError::InsertStatement {
+						value: into.to_sql(),
+					}
+					.into());
+				}
+			}
+		}
+		None => None,
+	};
+
+	let txn = ctx.tx();
+	let ns = ctx.tx().expect_ns_by_name(opt.ns()?).await?;
+	let db = ctx.tx().expect_db_by_name(opt.ns()?, opt.db()?).await?;
+	let parent = NsDbCtx {
+		ns: Arc::clone(&ns),
+		db: Arc::clone(&db),
+	};
+
+	let mut doc_ctx = None;
+	if let Some(tb) = &tb {
+		let tb_def = ctx.tx().get_or_add_tb(Some(ctx), &ns.name, &db.name, tb, None).await?;
+		doc_ctx =
+			Some(DocumentContext::initialise(ctx, &parent, tb_def, tb, opt.version, true).await?);
+	}
+
+	// Parse the data expression
+	match &this.data {
+		// Check if this is a traditional statement
+		Data::ValuesExpression(v) => {
+			for v in v {
+				// Create a new empty base object
+				let mut o = Value::empty_object();
+				// Set each field from the expression
+				for (k, v) in v.iter() {
+					let v = stk
+						.run(|stk| crate::legacy::expr_compute(v, stk, ctx, opt, None))
+						.await
+						.catch_return()?;
+					crate::legacy::value_set(&mut o, stk, ctx, opt, k, v).await?;
+				}
+				// Specify the new table record id
+				let (tb, id) = extract_table_and_rid_key(&o, &tb)?;
+
+				doc_ctx = match doc_ctx {
+					Some(ref dc) if dc.tb().is_ok_and(|t| t.name.as_str() == tb.as_str()) => {
+						doc_ctx
+					}
+					Some(_) | None => {
+						let tb_def =
+							txn.get_or_add_tb(Some(ctx), &ns.name, &db.name, &tb, None).await?;
+						Some(
+							DocumentContext::initialise(
+								ctx,
+								&parent,
+								tb_def,
+								&tb,
+								opt.version,
+								true,
+							)
+							.await?,
+						)
+					}
+				};
+
+				// Pass the value to the iterator
+				iterator.ingest(iterable(
+					doc_ctx.clone().expect("doc_ctx must be set at this point"),
+					tb.clone(),
+					id,
+					o,
+					this.relation,
+				)?)
+			}
+		}
+		// Check if this is a modern statement
+		Data::SingleExpression(v) => {
+			let v = stk
+				.run(|stk| crate::legacy::expr_compute(v, stk, ctx, opt, doc))
+				.await
+				.catch_return()?;
+			match v {
+				Value::Array(v) => {
+					for v in v {
+						// Specify the new table record id
+						let (tb, id) = extract_table_and_rid_key(&v, &tb)?;
+
+						doc_ctx = match doc_ctx {
+							Some(ref dc)
+								if dc.tb().is_ok_and(|t| t.name.as_str() == tb.as_str()) =>
+							{
+								doc_ctx
+							}
+							Some(_) | None => {
+								let tb_def = txn
+									.get_or_add_tb(Some(ctx), &ns.name, &db.name, &tb, None)
+									.await?;
+								Some(
+									DocumentContext::initialise(
+										ctx,
+										&parent,
+										tb_def,
+										&tb,
+										opt.version,
+										true,
+									)
+									.await?,
+								)
+							}
+						};
+
+						// Pass the value to the iterator
+						iterator.ingest(iterable(
+							doc_ctx.clone().expect("doc_ctx must be set at this point"),
+							tb.clone(),
+							id,
+							v,
+							this.relation,
+						)?)
+					}
+				}
+				Value::Object(_) => {
+					// Specify the new table record id
+					let (tb, id) = extract_table_and_rid_key(&v, &tb)?;
+
+					doc_ctx = match doc_ctx {
+						Some(ref dc) if dc.tb().is_ok_and(|t| t.name.as_str() == tb.as_str()) => {
+							doc_ctx
+						}
+						Some(_) | None => {
+							let tb_def =
+								txn.get_or_add_tb(Some(ctx), &ns.name, &db.name, &tb, None).await?;
+							Some(
+								DocumentContext::initialise(
+									ctx,
+									&parent,
+									tb_def,
+									&tb,
+									opt.version,
+									true,
+								)
+								.await?,
+							)
+						}
+					};
+
+					// Pass the value to the iterator
+					iterator.ingest(iterable(
+						doc_ctx.clone().expect("doc_ctx must be set at this point"),
+						tb.clone(),
+						id,
+						v,
+						this.relation,
+					)?)
+				}
+				v => {
+					bail!(ExecError::InsertStatement {
+						value: v.to_sql(),
+					})
+				}
+			}
+		}
+		v => fail!("Unknown data clause type in INSERT statement: {v:?}"),
+	}
+	// Assign the statement
+	let stm = Statement::from(this);
+
+	// Ensure the database exists.
+	ctx.get_db(opt).await?;
+
+	CursorDoc::update_parent(ctx, doc, async |ctx| {
+		// Process the statement
+		let res = iterator.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
+		// Catch statement timeout
+		ctx.expect_not_timedout().await?;
+		// Output the results
+		Ok(res)
+	})
+	.await
+}
+
+pub(crate) fn iterable(
+	doc_ctx: DocumentContext,
+	tb: TableName,
+	id: Option<RecordIdKey>,
+	v: Value,
+	relation: bool,
+) -> Result<Iterable> {
+	if relation {
+		let f = match v.pick(&IN) {
+			Value::RecordId(v) => v,
+			v => {
+				bail!(ExecError::InsertStatementIn {
+					value: v.to_sql(),
+				})
+			}
+		};
+		let w = match v.pick(&OUT) {
+			Value::RecordId(v) => v,
+			v => {
+				bail!(ExecError::InsertStatementOut {
+					value: v.to_sql(),
+				})
+			}
+		};
+		// TODO(micha): Support table relations too?
+		// INSERT RELATION INTO likes (id, in, out, desc) VALUES (1, person:1, person:2, 'Somewhat
+		// likes'), (2, person:2, person:3, 'Really likes') f: person:1
+		// w: person:2
+		// v: { desc: 'Somewhat likes' }
+		Ok(Iterable::Relatable(doc_ctx, f, RelateThrough::from((tb, id)), w, Some(v)))
+	} else {
+		// INSERT INTO person (id, name) VALUES (1, 'John Doe')
+		// tb: person
+		// id: person:1
+		// v: { name: 'John Doe' }
+		Ok(Iterable::Mergeable(doc_ctx, tb, id, v))
+	}
+}
+
+pub(crate) fn extract_table_and_rid_key(
+	record: &Value,
+	into: &Option<TableName>,
+) -> Result<(TableName, Option<RecordIdKey>)> {
+	let Some(tb) = into else {
+		let record = record.rid();
+		let Value::RecordId(rid) = record else {
+			bail!(ExecError::InsertStatementId {
+				value: record.to_sql(),
+			});
+		};
+		return Ok((rid.table, Some(rid.key)));
+	};
+
+	let rid = match record.rid() {
+		// There is a floating point number for the id field. Only accept floats
+		// that round-trip exactly to an i64 (finite, no fractional part, within
+		// i64 range). Silent truncation, NaN, infinity and other lossy
+		// conversions are rejected — see `Number::as_int_lossless`.
+		Value::Number(id) if id.is_float() => match id.as_int_lossless() {
+			Some(i) => Some(RecordIdKey::Number(i)),
+			None => bail!(ExecError::InsertStatementId {
+				value: Value::Number(id).to_sql(),
+			}),
+		},
+		// There is an integer number for the id field
+		Value::Number(id) if id.is_int() => Some(RecordIdKey::Number(id.as_int())),
+		// There is a string for the id field
+		Value::String(id) if !id.is_empty() => Some(id.into()),
+		// There is an object for the id field
+		Value::Object(id) => Some(id.into()),
+		// There is an array for the id field
+		Value::Array(id) => Some(id.into()),
+		// There is a UUID for the id field
+		Value::Uuid(id) => Some(id.into()),
+		// There is a record id defined
+		Value::RecordId(id) => {
+			// The RID's table is intentionally discarded in favour of the `INTO`
+			// clause: this is what lets `INSERT INTO other (SELECT * FROM test)`
+			// migrate records from `test:*` to `other:*` while preserving keys.
+			Some(id.key)
+		}
+		// There is no record id field
+		Value::None => None,
+		// Any other value cannot be converted to a record id key
+		v => {
+			bail!(ExecError::InsertStatementId {
+				value: v.to_sql(),
+			});
+		}
+	};
+
+	Ok((tb.clone(), rid))
+}

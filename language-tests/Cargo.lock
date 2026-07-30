@@ -4418,6 +4418,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
+name = "surrealdb-catalog"
+version = "3.3.0-nightly"
+dependencies = [
+ "ahash 0.8.12",
+ "anyhow",
+ "chrono",
+ "md-5",
+ "revision 0.30.0",
+ "serde",
+ "sha2",
+ "storekey",
+ "surrealdb-cnf",
+ "surrealdb-collections",
+ "surrealdb-common",
+ "surrealdb-expr",
+ "surrealdb-iam",
+ "surrealdb-kvs",
+ "surrealdb-sql",
+ "surrealdb-strand",
+ "surrealdb-syn",
+ "surrealdb-types",
+ "thiserror",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "surrealdb-cnf"
 version = "3.3.0-nightly"
 dependencies = [
@@ -4447,6 +4474,7 @@ dependencies = [
  "rust_decimal",
  "surrealdb-types",
  "sysinfo",
+ "thiserror",
  "unicase",
 ]
 
@@ -4522,9 +4550,12 @@ dependencies = [
  "storekey",
  "strsim",
  "subtle",
+ "surrealdb-catalog",
  "surrealdb-cnf",
  "surrealdb-collections",
  "surrealdb-common",
+ "surrealdb-expr",
+ "surrealdb-gql",
  "surrealdb-iam",
  "surrealdb-kvs",
  "surrealdb-kvs-any",
@@ -4552,10 +4583,69 @@ dependencies = [
 ]
 
 [[package]]
+name = "surrealdb-expr"
+version = "3.3.0-nightly"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "chrono",
+ "dmp",
+ "fastnum",
+ "geo",
+ "geo-types",
+ "half",
+ "hex",
+ "http",
+ "jsonwebtoken",
+ "lexicmp",
+ "quick_cache",
+ "rand 0.9.4",
+ "reblessive",
+ "regex",
+ "revision 0.30.0",
+ "rquickjs",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "storekey",
+ "surrealdb-cnf",
+ "surrealdb-collections",
+ "surrealdb-common",
+ "surrealdb-iam",
+ "surrealdb-kvs",
+ "surrealdb-sql",
+ "surrealdb-strand",
+ "surrealdb-syn",
+ "surrealdb-types",
+ "thiserror",
+ "tracing",
+ "ulid",
+ "uuid",
+]
+
+[[package]]
+name = "surrealdb-gql"
+version = "3.3.0-nightly"
+dependencies = [
+ "anyhow",
+ "phf",
+ "reblessive",
+ "surrealdb-cnf",
+ "surrealdb-expr",
+ "surrealdb-sql",
+ "surrealdb-strand",
+ "surrealdb-syn",
+ "surrealdb-types",
+ "tracing",
+ "unicase",
+]
+
+[[package]]
 name = "surrealdb-iam"
 version = "3.3.0-nightly"
 dependencies = [
  "anyhow",
+ "argon2",
  "base64",
  "hmac",
  "pbkdf2",
@@ -4574,8 +4664,11 @@ name = "surrealdb-kvs"
 version = "3.3.0-nightly"
 dependencies = [
  "affinitypool",
+ "anyhow",
  "chrono",
  "num_cpus",
+ "revision 0.30.0",
+ "roaring",
  "surrealdb-cnf",
  "surrealdb-common",
  "thiserror",

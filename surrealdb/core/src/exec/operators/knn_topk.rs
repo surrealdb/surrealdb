@@ -244,7 +244,11 @@ impl ExecOperator for KnnTopK {
 					};
 
 					// Compute the distance
-					let dist = match distance.compute(&record_vec, &query_vector) {
+					let dist = match crate::idx::trees::vector::distance_compute(
+						&distance,
+						&record_vec,
+						&query_vector,
+					) {
 						Ok(d) => d,
 						Err(_) => continue, // Skip on dimension mismatch etc.
 					};

@@ -473,10 +473,15 @@ impl<'ctx> Planner<'ctx> {
 		let mut plan_ctx = Context::new_child(self.ctx);
 		plan_ctx.set_transaction(Arc::clone(txn));
 		let frozen = plan_ctx.freeze();
-		let sig = executable
-			.signature(&frozen, &db_def.namespace_id, &db_def.database_id, sub)
-			.await
-			.map_err(|e| EngineError::Internal(e.to_string()))?;
+		let sig = crate::legacy::module_executable_signature(
+			&executable,
+			&frozen,
+			&db_def.namespace_id,
+			&db_def.database_id,
+			sub,
+		)
+		.await
+		.map_err(|e| EngineError::Internal(e.to_string()))?;
 		Ok(sig.writeable)
 	}
 
@@ -520,8 +525,7 @@ impl<'ctx> Planner<'ctx> {
 		} else {
 			Arc::clone(self.ctx)
 		};
-		let sig = executable
-			.signature(&ctx, sub)
+		let sig = crate::legacy::silo_executable_signature(&executable, &ctx, sub)
 			.await
 			.map_err(|e| EngineError::Internal(e.to_string()))?;
 		Ok(sig.writeable)

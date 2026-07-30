@@ -5,6 +5,7 @@ use std::vec;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId, Record};
@@ -12,9 +13,9 @@ use crate::ctx::{Context, FrozenContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::{Iterable, Iterator, Operable, Options, Processable, Statement};
 use crate::doc::{DocumentContext, NsDbCtx};
+use crate::exec::Error as ExecError;
 use crate::expr::dir::Dir;
 use crate::expr::lookup::{ComputedLookupSubject, LookupKind};
-use crate::expr::statements::relate::RelateThrough;
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, RecordIterator};
 use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
 use crate::key::database::all::DatabaseRoot;
@@ -1172,14 +1173,28 @@ pub(super) trait Collector {
 				.iter()
 				.flat_map(|v| {
 					[
-						v.presuf(ns, db, tb, &from.key, &LookupKind::Graph(Dir::In)),
-						v.presuf(ns, db, tb, &from.key, &LookupKind::Graph(Dir::Out)),
+						computed_lookup_subject_presuf(
+							v,
+							ns,
+							db,
+							tb,
+							&from.key,
+							&LookupKind::Graph(Dir::In),
+						),
+						computed_lookup_subject_presuf(
+							v,
+							ns,
+							db,
+							tb,
+							&from.key,
+							&LookupKind::Graph(Dir::Out),
+						),
 					]
 				})
 				.collect::<Result<Vec<_>>>()?,
 			(false, kind) => what
 				.iter()
-				.map(|v| v.presuf(ns, db, tb, &from.key, kind))
+				.map(|v| computed_lookup_subject_presuf(v, ns, db, tb, &from.key, kind))
 				.collect::<Result<Vec<_>>>()?,
 		};
 		// Get the transaction
@@ -1314,5 +1329,264 @@ pub(super) trait Collector {
 			total_count += count;
 		}
 		self.collect(Collectable::Count(doc_ctx, total_count)).await
+	}
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub(crate) enum RelateThrough {
+	RecordId(RecordId),
+	Table(TableName),
+}
+
+impl From<(TableName, Option<RecordIdKey>)> for RelateThrough {
+	fn from((table, id): (TableName, Option<RecordIdKey>)) -> Self {
+		if let Some(id) = id {
+			RelateThrough::RecordId(RecordId::new(table, id))
+		} else {
+			RelateThrough::Table(table)
+		}
+	}
+}
+
+impl TryFrom<Value> for RelateThrough {
+	type Error = anyhow::Error;
+	fn try_from(value: Value) -> Result<Self> {
+		match value {
+			Value::RecordId(id) => Ok(RelateThrough::RecordId(id)),
+			Value::Table(table) => Ok(RelateThrough::Table(table)),
+			_ => bail!(ExecError::RelateStatementOut {
+				value: value.to_sql()
+			}),
+		}
+	}
+}
+
+impl From<RelateThrough> for Value {
+	fn from(v: RelateThrough) -> Self {
+		match v {
+			RelateThrough::RecordId(id) => Value::RecordId(id),
+			RelateThrough::Table(table) => Value::Table(table),
+		}
+	}
+}
+
+/// The presuf function generates the prefix and suffix keys for a lookup
+/// based on the lookup subject and the lookup kind
+pub(crate) fn computed_lookup_subject_presuf<'a>(
+	this: &'a ComputedLookupSubject,
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &'a TableName,
+	id: &'a RecordIdKey,
+	kind: &LookupKind,
+) -> Result<KeyRange<'a>> {
+	let prefix = DatabaseRoot {
+		ns,
+		db,
+	};
+	match kind {
+		// We're looking up record references
+		LookupKind::Reference => match this {
+			// Scan the entire range
+			ComputedLookupSubject::Table {
+				table,
+				referencing_field: None,
+			} => crate::key::r#ref::PrefixFt {
+				prefix,
+				tb: Cow::Borrowed(tb),
+				id: Cow::Borrowed(id),
+				ft: Cow::Borrowed(table.as_str()),
+			}
+			.encode_bound()
+			.map(|x| x.prefix_expect()),
+			// Scan the entire range with a referencing field
+			ComputedLookupSubject::Table {
+				table,
+				referencing_field: Some(field),
+			} => crate::key::r#ref::PrefixField {
+				prefix,
+				tb: Cow::Borrowed(tb),
+				id: Cow::Borrowed(id),
+				ft: Cow::Borrowed(table.as_str()),
+				ff: Cow::Borrowed(field),
+			}
+			.encode_bound()
+			.map(|x| x.prefix_expect()),
+			// Scan a specific range
+			ComputedLookupSubject::Range {
+				table,
+				range,
+				referencing_field,
+			} => {
+				let Some(field) = referencing_field else {
+					bail!(
+						"Cannot scan a specific range of record references without a referencing field"
+					);
+				};
+
+				let start = match &range.start {
+					Bound::Unbounded => crate::key::r#ref::PrefixField {
+						prefix,
+						tb: Cow::Borrowed(tb),
+						id: Cow::Borrowed(id),
+						ft: Cow::Borrowed(table.as_str()),
+						ff: Cow::Borrowed(field),
+					}
+					.encode_bound()?,
+					Bound::Included(v) => crate::key::r#ref::Ref {
+						prefix,
+						table: Cow::Borrowed(tb),
+						id: Cow::Borrowed(id),
+						foreign_table: Cow::Borrowed(table),
+						foreign_field: Cow::Borrowed(field),
+						foreign_key: Cow::Borrowed(v),
+					}
+					.encode_key()?,
+					Bound::Excluded(v) => crate::key::r#ref::Ref {
+						prefix,
+						table: Cow::Borrowed(tb),
+						id: Cow::Borrowed(id),
+						foreign_table: Cow::Borrowed(table),
+						foreign_field: Cow::Borrowed(field),
+						foreign_key: Cow::Borrowed(v),
+					}
+					.encode_key()?
+					.next(),
+				};
+				// Prepare the range end key
+				let end = match &range.end {
+					Bound::Unbounded => crate::key::r#ref::PrefixField {
+						prefix,
+						tb: Cow::Borrowed(tb),
+						id: Cow::Borrowed(id),
+						ft: Cow::Borrowed(table.as_str()),
+						ff: Cow::Borrowed(field),
+					}
+					.encode_bound()?
+					.next_neighbour()
+					.expect("Reference prefix to have a neighbour"),
+					Bound::Included(v) => crate::key::r#ref::Ref {
+						prefix,
+						table: Cow::Borrowed(tb),
+						id: Cow::Borrowed(id),
+						foreign_table: Cow::Borrowed(table),
+						foreign_field: Cow::Borrowed(field),
+						foreign_key: Cow::Borrowed(v),
+					}
+					.encode_key()?
+					.next(),
+					Bound::Excluded(v) => crate::key::r#ref::Ref {
+						prefix,
+						table: Cow::Borrowed(tb),
+						id: Cow::Borrowed(id),
+						foreign_table: Cow::Borrowed(table),
+						foreign_field: Cow::Borrowed(field),
+						foreign_key: Cow::Borrowed(v),
+					}
+					.encode_key()?,
+				};
+
+				Ok(KeyRange {
+					start,
+					end,
+				})
+			}
+		},
+		// We're looking up graph edges
+		LookupKind::Graph(dir) => match this {
+			// Scan the entire range
+			ComputedLookupSubject::Table {
+				table,
+				..
+			} => Ok(crate::key::graph::PrefixFt {
+				prefix,
+				tb: Cow::Borrowed(tb),
+				id: Cow::Borrowed(id),
+				dir: *dir,
+				foreign_table: Cow::Borrowed(table.as_str()),
+			}
+			.encode_range()?),
+			// Scan a specific range
+			ComputedLookupSubject::Range {
+				table,
+				range,
+				..
+			} => {
+				let start = match &range.start {
+					Bound::Unbounded => crate::key::graph::PrefixFt {
+						prefix,
+						tb: Cow::Borrowed(tb),
+						id: Cow::Borrowed(id),
+						dir: *dir,
+						foreign_table: Cow::Borrowed(table.as_str()),
+					}
+					.encode_bound()?,
+					Bound::Included(v) => crate::key::graph::Graph {
+						prefix,
+						tb: Cow::Borrowed(tb),
+						id: Cow::Borrowed(id),
+						dir: *dir,
+						foreign_table: Cow::Borrowed(table),
+						foreign_key: Cow::Borrowed(v),
+					}
+					.encode_key()?,
+					Bound::Excluded(v) => crate::key::graph::Graph {
+						prefix,
+						tb: Cow::Borrowed(tb),
+						id: Cow::Borrowed(id),
+						dir: *dir,
+						foreign_table: Cow::Borrowed(table),
+						foreign_key: Cow::Borrowed(v),
+					}
+					.encode_key()?
+					// We need next_neighbour because this key is only a prefix of the actual
+					// key stored in the KV store, next_neighbour will skip over any key which
+					// has this key as a prefix.
+					.next_neighbour_expect(),
+				};
+				// Prepare the range end key
+				let end = match &range.end {
+					Bound::Unbounded => crate::key::graph::PrefixFt {
+						prefix,
+						tb: Cow::Borrowed(tb),
+						id: Cow::Borrowed(id),
+						dir: *dir,
+						foreign_table: Cow::Borrowed(table.as_str()),
+					}
+					.encode_bound()?
+					.next_neighbour()
+					.expect("Expect the graph prefix to have a neighbour"),
+					Bound::Included(v) => crate::key::graph::Graph {
+						prefix,
+						tb: Cow::Borrowed(tb),
+						id: Cow::Borrowed(id),
+						dir: *dir,
+						foreign_table: Cow::Borrowed(table),
+						foreign_key: Cow::Borrowed(v),
+					}
+					.encode_key()?
+					// We need next_neighbour because this key is only a prefix of the actual
+					// key stored in the KV store, next_neighbour will skip over any key which
+					// has this key as a prefix.
+					.next_neighbour_expect(),
+					// Append `0xff` to include any new-format key for
+					// this fk (target bytes follow the legacy encoding).
+					Bound::Excluded(v) => crate::key::graph::Graph {
+						prefix,
+						tb: Cow::Borrowed(tb),
+						id: Cow::Borrowed(id),
+						dir: *dir,
+						foreign_table: Cow::Borrowed(table),
+						foreign_key: Cow::Borrowed(v),
+					}
+					.encode_key()?,
+				};
+
+				Ok(KeyRange {
+					start,
+					end,
+				})
+			}
+		},
 	}
 }

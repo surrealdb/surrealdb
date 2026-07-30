@@ -16,10 +16,9 @@ pub mod scram;
 pub use auth::*;
 pub use entities::*;
 pub use scram::{ScramCredential, ScramParseError};
-use thiserror::Error;
 use tracing::trace;
 
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum PolicyError {
 	#[error("Invalid role '{0}'")]
 	InvalidRole(String),
@@ -74,4 +73,20 @@ pub fn is_allowed(actor: &Actor, action: &Action, resource: &Resource) -> Result
 	}
 
 	Ok(())
+}
+
+/// Derive an Argon2id hash of a plaintext password for storage.
+///
+/// Centralizes the hashing so every place that turns a `PASSWORD` clause into
+/// stored credentials (DEFINE/ALTER USER conversions and the root-user
+/// bootstrap) agrees on the algorithm, parameters, and salt policy.
+pub fn hash_password(password: &str) -> String {
+	use argon2::Argon2;
+	use argon2::password_hash::{PasswordHasher, SaltString};
+	use rand_core::OsRng;
+
+	Argon2::default()
+		.hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))
+		.expect("password hashing should not fail")
+		.to_string()
 }

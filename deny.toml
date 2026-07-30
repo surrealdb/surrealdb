@@ -191,6 +191,18 @@ name = "surrealdb-rpc"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
+name = "surrealdb-catalog"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-expr"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-gql"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
 name = "surrealdb-sql"
 allow = ["BUSL-1.1"]
 
@@ -283,6 +295,21 @@ license-files = []
 
 [[licenses.clarify]]
 name = "surrealdb-rpc"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-catalog"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-expr"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-gql"
 expression = "BUSL-1.1"
 license-files = []
 

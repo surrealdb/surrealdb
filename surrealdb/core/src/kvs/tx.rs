@@ -35,8 +35,9 @@ use super::api::{
 };
 use super::{TransactionFactory, TransactionType, Val, util};
 use crate::catalog::providers::{
-	ApiProvider, AuthorisationProvider, BoxProviderFut, BucketProvider, CatalogProvider,
-	DatabaseProvider, NamespaceProvider, NodeProvider, RootProvider, TableProvider, UserProvider,
+	ApiProvider, AuthorisationProvider, BoxProviderFut, BucketProvider, CachePolicy,
+	CancellationProbe, CatalogProvider, DatabaseProvider, NamespaceProvider, NodeProvider,
+	RootProvider, TableProvider, UserProvider,
 };
 use crate::catalog::{
 	self, DatabaseDefinition, DatabaseId, DefaultConfig, Error as CatalogError, FromStored,
@@ -44,7 +45,6 @@ use crate::catalog::{
 	StoredTableDefinition, TableDefinition, TableId,
 };
 use crate::cf::Changefeed;
-use crate::ctx::Context;
 use crate::dbs::node::Node;
 use crate::doc::CursorRecord;
 use crate::err::{EngineError, Error};
@@ -80,22 +80,6 @@ use crate::observe::{
 	TransactionMetrics,
 };
 use crate::val::{RecordId, RecordIdKey, TableName};
-
-/// Controls whether `get_records` populates the transaction cache on miss.
-///
-/// Point lookups and graph traversals benefit from caching (records are
-/// likely re-accessed within the same transaction). Large sequential scans
-/// (index range scans, full-text hits) read each record once, so populating
-/// the cache wastes time and evicts useful entries.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CachePolicy {
-	/// Check cache on read **and** populate on miss.
-	/// Use for point lookups, graph traversal, KNN, and unique-index equality.
-	ReadWrite,
-	/// Check cache on read but **skip** population on miss.
-	/// Use for index range scans, non-unique equality scans, and full-text scans.
-	ReadOnly,
-}
 
 pub struct Transaction {
 	/// Is this is a local datastore transaction?
@@ -2764,7 +2748,7 @@ impl NamespaceProvider for Transaction {
 
 	fn get_next_ns_id<'a>(
 		&'a self,
-		ctx: Option<&'a Context>,
+		ctx: Option<&'a dyn CancellationProbe>,
 	) -> BoxProviderFut<'a, Result<NamespaceId>> {
 		Box::pin(async move { self.sequences.next_namespace_id(ctx).await })
 	}
@@ -2865,7 +2849,7 @@ impl DatabaseProvider for Transaction {
 	/// dynamic mode.
 	fn get_or_add_db_upwards<'a>(
 		&'a self,
-		ctx: Option<&'a Context>,
+		ctx: Option<&'a dyn CancellationProbe>,
 		ns: &'a str,
 		db: &'a str,
 		upwards: bool,
@@ -2919,7 +2903,7 @@ impl DatabaseProvider for Transaction {
 
 	fn get_next_db_id<'a>(
 		&'a self,
-		ctx: Option<&'a Context>,
+		ctx: Option<&'a dyn CancellationProbe>,
 		ns: NamespaceId,
 	) -> BoxProviderFut<'a, Result<DatabaseId>> {
 		Box::pin(async move { self.sequences.next_database_id(ctx, ns).await })
@@ -3888,7 +3872,7 @@ impl TableProvider for Transaction {
 	/// dynamic mode. When a version is specified, skips the auto-create path.
 	fn get_or_add_tb<'a>(
 		&'a self,
-		ctx: Option<&'a Context>,
+		ctx: Option<&'a dyn CancellationProbe>,
 		ns: &'a str,
 		db: &'a str,
 		tb: &'a TableName,
@@ -4994,7 +4978,7 @@ impl TableProvider for Transaction {
 
 	fn get_next_tb_id<'a>(
 		&'a self,
-		ctx: Option<&'a Context>,
+		ctx: Option<&'a dyn CancellationProbe>,
 		ns: NamespaceId,
 		db: DatabaseId,
 	) -> BoxProviderFut<'a, Result<TableId>> {

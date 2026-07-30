@@ -204,11 +204,13 @@ impl ExecOperator for IndexScan {
 			.iter()
 			.skip(skip_cols)
 			.filter_map(|s| {
-				crate::exec::field_path::FieldPath::try_from(s).ok().map(|path| SortProperty {
-					path,
-					direction: dir,
-					collate: false,
-					numeric: false,
+				crate::exec::field_path_convert::field_path_from_idiom(s).ok().map(|path| {
+					SortProperty {
+						path,
+						direction: dir,
+						collate: false,
+						numeric: false,
+					}
 				})
 			})
 			.collect();
@@ -251,7 +253,7 @@ impl ExecOperator for IndexScan {
 			BTreeAccess::Equality(_) => ix_def
 				.cols
 				.iter()
-				.filter_map(|s| crate::exec::field_path::FieldPath::try_from(s).ok())
+				.filter_map(|s| crate::exec::field_path_convert::field_path_from_idiom(s).ok())
 				.collect(),
 			// Compound prefix columns are all equality-pinned
 			BTreeAccess::Compound {
@@ -261,7 +263,7 @@ impl ExecOperator for IndexScan {
 				.cols
 				.iter()
 				.take(prefix.len())
-				.filter_map(|s| crate::exec::field_path::FieldPath::try_from(s).ok())
+				.filter_map(|s| crate::exec::field_path_convert::field_path_from_idiom(s).ok())
 				.collect(),
 			_ => vec![],
 		}

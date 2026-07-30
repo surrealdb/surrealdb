@@ -9,7 +9,7 @@ pub use surrealdb_syn::{ParseError, error, lexer, parser, token};
 use crate::dbs::Capabilities;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::sql::kind::KindLiteral;
-use crate::sql::{Ast, Block, Expr, Fields, Function, Idiom, Kind};
+use crate::sql::{Ast, Block, Expr, Function, Idiom, Kind};
 use crate::types::{PublicDatetime, PublicDuration, PublicRecordId, PublicValue};
 
 #[cfg(test)]
@@ -119,54 +119,6 @@ pub(crate) fn expr(input: &str) -> Result<Expr> {
 	expr_with_capabilities(input, &capabilities, &CommonConfig::default())
 }
 
-/// Re-parses the canonical SurrealQL text a catalog definition stores for one
-/// of its expression fields (e.g. `StoredFieldDefinition.value`, `Permission::Specific`).
-///
-/// Unlike [`expr`], which parses fresh input under the live capabilities and
-/// configured limits, this uses [`ParserSettings::STORED_TEXT`] — the storage
-/// wire contract's parser profile. See that constant for the full reasoning.
-///
-/// # Field context
-///
-/// This parses with [`Parser::parse_expr_field`], so a *top-level* bare
-/// identifier compiles to `Expr::Idiom([Part::Field(..)])`, never
-/// `Expr::Table`. That is the correct reading for every clause stored as
-/// expression text: `VALUE`, `ASSERT`, `DEFAULT`, `COMPUTED`, `WHEN`, `THEN`,
-/// permission guards, API actions and fetch targets all name a field of the
-/// document, and all are parsed in field context when the statement that
-/// defines them runs.
-///
-/// It is safe for *nested* table positions too, and the reason is worth
-/// stating because it is not obvious: the two context-setting entry points
-/// each save and restore the flag rather than latching it (see
-/// `Parser::parse_expr_table` and `Parser::parse_expr_field`). A statement
-/// inside stored text therefore re-establishes table context for its own
-/// source list regardless of how the parse was entered, so
-/// `StoredEventDefinition.then` holding `CREATE person` recovers
-/// `Expr::Table("person")` even though this funnel started in field context.
-///
-/// The consequence is that only a top-level bare identifier depends on which
-/// funnel is used. `crate::catalog::text` pins both halves of that.
-///
-/// The whole of `input` must be consumed. Every one of these `*_for_definition`
-/// funnels parses with a routine that stops at the first token it cannot
-/// continue with — the Pratt expression parser exits on a token with no
-/// continuation binding power, and the idiom/field-list/kind parsers stop at
-/// the first token that is not a further part, field or union arm — so without
-/// the [`Parser::assert_finished`] check a stored definition holding trailing
-/// content (`"a.b bogus"`) would silently compile to its prefix (`a.b`) and be
-/// used as if that were what the user defined.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub(crate) fn expr_for_definition(input: &str) -> Result<Expr> {
-	trace!(target: TARGET, "Parsing SurrealQL expression for a stored catalog definition");
-
-	parse_with_settings(input.as_bytes(), ParserSettings::STORED_TEXT, async |parser, stk| {
-		let expr = parser.parse_expr_field(stk).await?;
-		parser.assert_finished()?;
-		Ok(expr)
-	})
-}
-
 /// Parses a SurrealQL [`Value`].
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 #[allow(dead_code)]
@@ -223,40 +175,6 @@ pub(crate) fn idiom(input: &str) -> Result<Idiom> {
 	parse_with(input.as_bytes(), async |parser, stk| parser.parse_plain_idiom(stk).await)
 }
 
-/// Re-parses the canonical idiom-path text a catalog definition stores for
-/// one of its indexed-column fields (e.g. `StoredIndexDefinition.cols`). An idiom
-/// can embed arbitrary sub-expressions (a `[WHERE ...]` filter part, a
-/// computed bracket index), so this parses under
-/// [`ParserSettings::STORED_TEXT`] — the storage wire contract's parser
-/// profile — unlike [`idiom`], which parses fresh input. The whole of `input`
-/// must be consumed, for the reason [`expr_for_definition`] documents.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub(crate) fn idiom_for_definition(input: &str) -> Result<Idiom> {
-	trace!(target: TARGET, "Parsing SurrealQL idiom for a stored catalog definition");
-
-	parse_with_settings(input.as_bytes(), ParserSettings::STORED_TEXT, async |parser, stk| {
-		let idiom = parser.parse_plain_idiom(stk).await?;
-		parser.assert_finished()?;
-		Ok(idiom)
-	})
-}
-
-/// Re-parses the canonical `SELECT`-clause field-list text a catalog
-/// definition stores for one of its field-selection clauses (e.g.
-/// `StoredSubscriptionDefinition.fields`), under [`ParserSettings::STORED_TEXT`] —
-/// the storage wire contract's parser profile. The whole of `input` must be
-/// consumed, for the reason [`expr_for_definition`] documents.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub(crate) fn fields_for_definition(input: &str) -> Result<Fields> {
-	trace!(target: TARGET, "Parsing SurrealQL field list for a stored catalog definition");
-
-	parse_with_settings(input.as_bytes(), ParserSettings::STORED_TEXT, async |parser, stk| {
-		let fields = parser.parse_fields(stk).await?;
-		parser.assert_finished()?;
-		Ok(fields)
-	})
-}
-
 /// Parse a datetime without enclosing delimiters from a string.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn datetime(input: &str) -> Result<PublicDatetime> {
@@ -307,27 +225,14 @@ pub fn table(input: &str) -> Result<surrealdb_strand::TableName> {
 	})
 }
 
-/// Re-parses canonical `{ ... }` block text this engine previously rendered:
-/// `Block`'s own text-on-the-wire encoding and the stored function-body text
-/// (`StoredFunctionDefinition.block`). Both are engine-authored, so this parses
-/// under [`ParserSettings::STORED_TEXT`] — the storage wire contract's parser
-/// profile — and requires the whole input to be consumed. Expects the input to
-/// be wrapped in `{}`.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub(crate) fn block_for_definition(input: &str) -> Result<Block> {
-	trace!(target: TARGET, "Parsing SurrealQL block for a stored definition");
-
-	lift(surrealdb_syn::block(input))
-}
-
-/// Parses a `{ ... }` block of fresh input.
+/// Parses a `{ ... }` block of fresh input, under the configured depth limits.
 ///
-/// Distinct from [`block_for_definition`] because the unbounded stored-text
-/// profile must not be reachable from outside: this module is `pub`, so a
-/// caller elsewhere in the workspace (or out of tree) can hand it arbitrary
-/// input. Parsing that is heap-stacked and survives, but the lowering to
-/// `expr::Block` and the value's recursive `Drop` are not, and a stack
-/// overflow aborts the process instead of returning an error.
+/// Distinct from [`surrealdb_syn::block_for_definition`], which parses under the
+/// unbounded stored-text profile. That profile is safe only for text this engine
+/// wrote: parsing is heap-stacked and survives arbitrary nesting, but the
+/// lowering to `expr::Block` and the value's recursive `Drop` descend the call
+/// stack, and a stack overflow aborts the process instead of returning an error.
+/// Fresh input therefore keeps the limits, whoever hands it in.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn block(input: &str) -> Result<Block> {
 	trace!(target: TARGET, "Parsing SurrealQL block");
@@ -415,24 +320,6 @@ pub fn kind(input: &str) -> Result<Kind> {
 	trace!(target: TARGET, "Parsing SurrealQL duration");
 
 	parse_with(input.as_bytes(), async |parser, stk| parser.parse_inner_kind(stk).await)
-}
-
-/// Re-parses the canonical kind-grammar text a catalog definition stores for
-/// one of its type-annotated fields (e.g. `StoredFieldDefinition.field_kind`,
-/// `StoredFunctionDefinition.args`/`.returns`). A kind can embed a `<file>` bucket
-/// restriction or other experimental-gated grammar, so this parses under
-/// [`ParserSettings::STORED_TEXT`] — the storage wire contract's parser
-/// profile — unlike [`kind`], which parses fresh input. The whole of `input`
-/// must be consumed, for the reason [`expr_for_definition`] documents.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub(crate) fn kind_for_definition(input: &str) -> Result<Kind> {
-	trace!(target: TARGET, "Parsing SurrealQL kind for a stored catalog definition");
-
-	parse_with_settings(input.as_bytes(), ParserSettings::STORED_TEXT, async |parser, stk| {
-		let kind = parser.parse_inner_kind(stk).await?;
-		parser.assert_finished()?;
-		Ok(kind)
-	})
 }
 
 /// Extracts the tables from the given kind definition string.

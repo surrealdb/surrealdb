@@ -26,7 +26,6 @@ use crate::doc::DefaultBroker;
 use crate::err::{EngineError, Error};
 use crate::exec::Error as ExecError;
 use crate::exec::planner::try_plan_expr;
-use crate::expr::parameterize::expr_to_ident;
 use crate::expr::paths::{DB, NS};
 use crate::expr::plan::LogicalPlan;
 use crate::expr::statements::{OptionStatement, UseStatement};
@@ -34,6 +33,7 @@ use crate::expr::{Base, ControlFlow, Expr, FlowResult, TopLevelExpr};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::slowlog::SlowLogVisit;
 use crate::kvs::{Datastore, DatastoreError, Transaction, TransactionType};
+use crate::legacy::expr_to_ident;
 use crate::observe::{
 	Outcome, QueryCounters, QueryEvent, QueryEventSafe, StatementEvent, StatementEventCtx,
 	StatementEventSafe, StatementType,
@@ -981,7 +981,11 @@ impl Executor {
 							tracing::warn!("PlannerUnimplemented fallback in top-level LET: {msg}");
 						}
 						self.stack
-							.enter(|stk| stm.what.compute(stk, &self.ctx, &self.opt, None))
+							.enter(|stk| {
+								crate::legacy::expr_compute(
+									&stm.what, stk, &self.ctx, &self.opt, None,
+								)
+							})
 							.finish()
 							.await
 					}
@@ -1033,7 +1037,9 @@ impl Executor {
 					.map_err(anyhow::Error::new)?
 					.set_transaction(txn);
 				self.stack
-					.enter(|stk| s.compute(stk, &self.ctx, &self.opt, None))
+					.enter(|stk| {
+						crate::legacy::kill_statement_compute(&s, stk, &self.ctx, &self.opt, None)
+					})
 					.finish()
 					.await
 					.map_err(ControlFlow::Err)
@@ -1041,18 +1047,27 @@ impl Executor {
 			TopLevelExpr::Live(s) => {
 				ctx_mut!().set_transaction(txn);
 				self.stack
-					.enter(|stk| s.compute(stk, &self.ctx, &self.opt, None))
+					.enter(|stk| {
+						crate::legacy::live_statement_compute(&s, stk, &self.ctx, &self.opt, None)
+					})
 					.finish()
 					.await
 					.map_err(ControlFlow::Err)
 			}
 			TopLevelExpr::Show(s) => {
 				ctx_mut!().set_transaction(txn);
-				s.compute(&self.ctx, &self.opt, None).await.map_err(ControlFlow::Err)
+				crate::legacy::show_statement_compute(&s, &self.ctx, &self.opt, None)
+					.await
+					.map_err(ControlFlow::Err)
 			}
 			TopLevelExpr::Access(s) => {
 				ctx_mut!().set_transaction(txn);
-				self.stack.enter(|stk| s.compute(stk, &self.ctx, &self.opt, None)).finish().await
+				self.stack
+					.enter(|stk| {
+						crate::legacy::access_statement_compute(&s, stk, &self.ctx, &self.opt, None)
+					})
+					.finish()
+					.await
 			}
 			// Process all other normal statements
 			TopLevelExpr::Expr(e) => {
@@ -1086,7 +1101,9 @@ impl Executor {
 						ctx_mut!().set_transaction(txn);
 						let res = self
 							.stack
-							.enter(|stk| e.compute(stk, &self.ctx, &self.opt, None))
+							.enter(|stk| {
+								crate::legacy::expr_compute(&e, stk, &self.ctx, &self.opt, None)
+							})
 							.finish()
 							.await;
 						self.check_slow_log(start, &e);

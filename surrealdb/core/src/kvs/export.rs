@@ -10,11 +10,18 @@ use crate::catalog::providers::{
 	UserProvider,
 };
 use crate::catalog::{DatabaseId, Error, NamespaceId, Record, TableDefinition};
+use crate::expr::access::AccessDuration;
+use crate::expr::access_type::{
+	AccessType, BearerAccess, BearerAccessSubject, BearerAccessType, JwtAccess, JwtAccessIssue,
+	JwtAccessVerify, JwtAccessVerifyJwks, JwtAccessVerifyKey, RecordAccess,
+};
 use crate::expr::paths::{IN, OUT};
-use crate::expr::statements::define::{DefineAccessStatement, DefineUserStatement};
-use crate::expr::{Base, DefineAnalyzerStatement};
+use crate::expr::statements::define::{DefineAccessStatement, DefineKind, DefineUserStatement};
+use crate::expr::user::UserDuration;
+use crate::expr::{Algorithm, Base, DefineAnalyzerStatement, Expr, Idiom, Literal};
 use crate::key::{KVKeyDecode, KVRange, KVValue, record};
 use crate::sql::statements::OptionStatement;
+use crate::{catalog, val};
 
 #[derive(Clone, Debug, SurrealValue)]
 #[surreal(crate = "surrealdb_types")]
@@ -194,7 +201,7 @@ impl Transaction {
 			let users = self.all_db_users(ns, db, None).await?;
 			self.export_section(
 				"USERS",
-				users.iter().map(|x| DefineUserStatement::from_definition(Base::Db, x)),
+				users.iter().map(|x| define_user_statement_from_definition(Base::Db, x)),
 				chn,
 			)
 			.await?;
@@ -207,7 +214,7 @@ impl Transaction {
 				"ACCESSES",
 				accesses
 					.iter()
-					.map(|x| DefineAccessStatement::from_definition(Base::Db, x).redact()),
+					.map(|x| define_access_statement_from_definition(Base::Db, x).redact()),
 				chn,
 			)
 			.await?;
@@ -230,7 +237,7 @@ impl Transaction {
 			let analyzers = self.all_db_analyzers(ns, db, None).await?;
 			self.export_section(
 				"ANALYZERS",
-				analyzers.iter().map(DefineAnalyzerStatement::from_definition),
+				analyzers.iter().map(define_analyzer_statement_from_definition),
 				chn,
 			)
 			.await?;
@@ -501,5 +508,147 @@ impl Transaction {
 		}
 
 		Ok(())
+	}
+}
+
+pub(crate) fn define_access_statement_from_definition(
+	base: Base,
+	def: &catalog::AccessDefinition,
+) -> DefineAccessStatement {
+	fn convert_algorithm(access: catalog::Algorithm) -> Algorithm {
+		match &access {
+			catalog::Algorithm::EdDSA => Algorithm::EdDSA,
+			catalog::Algorithm::Es256 => Algorithm::Es256,
+			catalog::Algorithm::Es384 => Algorithm::Es384,
+			catalog::Algorithm::Es512 => Algorithm::Es512,
+			catalog::Algorithm::Hs256 => Algorithm::Hs256,
+			catalog::Algorithm::Hs384 => Algorithm::Hs384,
+			catalog::Algorithm::Hs512 => Algorithm::Hs512,
+			catalog::Algorithm::Ps256 => Algorithm::Ps256,
+			catalog::Algorithm::Ps384 => Algorithm::Ps384,
+			catalog::Algorithm::Ps512 => Algorithm::Ps512,
+			catalog::Algorithm::Rs256 => Algorithm::Rs256,
+			catalog::Algorithm::Rs384 => Algorithm::Rs384,
+			catalog::Algorithm::Rs512 => Algorithm::Rs512,
+		}
+	}
+
+	fn convert_jwt_access(access: &catalog::JwtAccess) -> JwtAccess {
+		JwtAccess {
+			verify: match &access.verify {
+				catalog::JwtAccessVerify::Key(k) => JwtAccessVerify::Key(JwtAccessVerifyKey {
+					alg: convert_algorithm(k.alg),
+					key: Expr::Literal(Literal::String(k.key.as_str().into())),
+				}),
+				catalog::JwtAccessVerify::Jwks(j) => JwtAccessVerify::Jwks(JwtAccessVerifyJwks {
+					url: Expr::Literal(Literal::String(j.url.as_str().into())),
+				}),
+			},
+			issue: access.issue.as_ref().map(|x| JwtAccessIssue {
+				alg: convert_algorithm(x.alg),
+				key: Expr::Literal(Literal::String(x.key.as_str().into())),
+			}),
+		}
+	}
+
+	fn convert_bearer_access(access: &catalog::BearerAccess) -> BearerAccess {
+		BearerAccess {
+			kind: match access.kind {
+				catalog::BearerAccessType::Bearer => BearerAccessType::Bearer,
+				catalog::BearerAccessType::Refresh => BearerAccessType::Refresh,
+			},
+			subject: match access.subject {
+				catalog::BearerAccessSubject::Record => BearerAccessSubject::Record,
+				catalog::BearerAccessSubject::User => BearerAccessSubject::User,
+			},
+			jwt: convert_jwt_access(&access.jwt),
+		}
+	}
+
+	DefineAccessStatement {
+		kind: DefineKind::Default,
+		base,
+		name: Expr::Idiom(Idiom::field(def.name.clone())),
+		duration: AccessDuration {
+			grant: def
+				.grant_duration
+				.map(|v| Expr::Literal(Literal::Duration(val::Duration(v))))
+				.unwrap_or(Expr::Literal(Literal::None)),
+			token: def
+				.token_duration
+				.map(|v| Expr::Literal(Literal::Duration(val::Duration(v))))
+				.unwrap_or(Expr::Literal(Literal::None)),
+			session: def
+				.session_duration
+				.map(|v| Expr::Literal(Literal::Duration(val::Duration(v))))
+				.unwrap_or(Expr::Literal(Literal::None)),
+		},
+		comment: def
+			.comment
+			.clone()
+			.map(|x| Expr::Literal(Literal::String(x.into())))
+			.unwrap_or(Expr::Literal(Literal::None)),
+		authenticate: def.authenticate.clone(),
+		access_type: match &def.access_type {
+			catalog::AccessType::Record(record_access) => {
+				AccessType::Record(Box::new(RecordAccess {
+					signup: def.signup.clone(),
+					signin: def.signin.clone(),
+					jwt: convert_jwt_access(&record_access.jwt),
+					bearer: record_access.bearer.as_ref().map(convert_bearer_access),
+				}))
+			}
+			catalog::AccessType::Jwt(jwt_access) => AccessType::Jwt(convert_jwt_access(jwt_access)),
+			catalog::AccessType::Bearer(bearer_access) => {
+				AccessType::Bearer(convert_bearer_access(bearer_access))
+			}
+		},
+	}
+}
+
+pub(crate) fn define_analyzer_statement_from_definition(
+	def: &catalog::AnalyzerDefinition,
+) -> DefineAnalyzerStatement {
+	DefineAnalyzerStatement {
+		kind: DefineKind::Default,
+		name: Expr::Idiom(Idiom::field(def.name.clone())),
+		function: def.function.clone(),
+		tokenizers: def.tokenizers.clone(),
+		filters: def.filters.clone(),
+		comment: def
+			.comment
+			.as_ref()
+			.map(|x| Expr::Literal(Literal::String(x.as_str().into())))
+			.unwrap_or(Expr::Literal(Literal::None)),
+	}
+}
+
+pub(crate) fn define_user_statement_from_definition(
+	base: Base,
+	def: &catalog::UserDefinition,
+) -> DefineUserStatement {
+	DefineUserStatement {
+		kind: DefineKind::Default,
+		base,
+		name: Expr::Idiom(Idiom::field(def.name.clone())),
+		hash: def.hash.clone(),
+		code: def.code.clone(),
+		roles: def.roles.clone(),
+		duration: UserDuration {
+			token: def
+				.token_duration
+				.map(|x| Expr::Literal(Literal::Duration(val::Duration(x))))
+				.unwrap_or(Expr::Literal(Literal::None)),
+			session: def
+				.session_duration
+				.map(|x| Expr::Literal(Literal::Duration(val::Duration(x))))
+				.unwrap_or(Expr::Literal(Literal::None)),
+		},
+		comment: def
+			.comment
+			.as_ref()
+			.map(|x| Expr::Idiom(Idiom::field(x.clone())))
+			.unwrap_or(Expr::Literal(Literal::None)),
+		scram: def.scram.clone(),
 	}
 }

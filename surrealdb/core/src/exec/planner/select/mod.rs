@@ -3187,18 +3187,20 @@ fn adjust_direction_for_order(
 			.cols
 			.iter()
 			.take(prefix.len())
-			.filter_map(|s| FieldPath::try_from(s).ok())
+			.filter_map(|s| crate::exec::field_path_convert::field_path_from_idiom(s).ok())
 			.collect(),
-		BTreeAccess::Equality(_) => {
-			ix_def.cols.iter().filter_map(|s| FieldPath::try_from(s).ok()).collect()
-		}
+		BTreeAccess::Equality(_) => ix_def
+			.cols
+			.iter()
+			.filter_map(|s| crate::exec::field_path_convert::field_path_from_idiom(s).ok())
+			.collect(),
 		_ => vec![],
 	};
 
 	// Skip leading ORDER BY fields that match equality-pinned columns.
 	let mut order_idx = 0;
 	for field in order_list.0.iter() {
-		if let Ok(fp) = FieldPath::try_from(&field.value)
+		if let Ok(fp) = crate::exec::field_path_convert::field_path_from_idiom(&field.value)
 			&& equality_col_paths.contains(&fp)
 		{
 			order_idx += 1;
@@ -3214,7 +3216,8 @@ fn adjust_direction_for_order(
 		return (path, default_direction);
 	};
 
-	let Ok(order_path) = FieldPath::try_from(&first_order.value) else {
+	let Ok(order_path) = crate::exec::field_path_convert::field_path_from_idiom(&first_order.value)
+	else {
 		return (path, default_direction);
 	};
 
@@ -3255,7 +3258,7 @@ fn adjust_direction_for_order(
 		return (path, default_direction);
 	};
 
-	let Ok(col_path) = FieldPath::try_from(target_col) else {
+	let Ok(col_path) = crate::exec::field_path_convert::field_path_from_idiom(target_col) else {
 		return (path, default_direction);
 	};
 
@@ -3385,7 +3388,6 @@ fn detect_order_for_composite_union(
 	order: Option<&crate::expr::order::Ordering>,
 	paths: &[AccessPath],
 ) -> Option<(crate::exec::field_path::FieldPath, SortDirection)> {
-	use crate::exec::field_path::FieldPath;
 	use crate::exec::index::access_path::BTreeAccess;
 	use crate::expr::order::Ordering;
 
@@ -3400,7 +3402,8 @@ fn detect_order_for_composite_union(
 	if order_field.collate || order_field.numeric {
 		return None;
 	}
-	let order_path = FieldPath::try_from(&order_field.value).ok()?;
+	let order_path =
+		crate::exec::field_path_convert::field_path_from_idiom(&order_field.value).ok()?;
 	let direction = if order_field.direction {
 		SortDirection::Asc
 	} else {
@@ -3431,7 +3434,8 @@ fn detect_order_for_composite_union(
 		return None;
 	}
 	let sort_col_idiom = ix_def.cols.get(first_prefix_len)?;
-	let sort_col_path = FieldPath::try_from(sort_col_idiom).ok()?;
+	let sort_col_path =
+		crate::exec::field_path_convert::field_path_from_idiom(sort_col_idiom).ok()?;
 	if sort_col_path != order_path {
 		return None;
 	}

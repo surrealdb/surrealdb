@@ -10,11 +10,12 @@ use crate::catalog::{self, FieldDefinition};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Statement};
 use crate::doc::{Document, Error};
+use crate::exe::FlowResultExt as _;
+use crate::expr::Expr;
 use crate::expr::data::Data;
 use crate::expr::idiom::{Idiom, IdiomTrie, IdiomTrieContains};
 use crate::expr::kind::Kind;
 use crate::expr::statements::define::kind_contains_object;
-use crate::expr::{Expr, FlowResultExt as _};
 use crate::iam::{Action, AuthLimit};
 use crate::key::database::all::DatabaseRoot;
 use crate::val::value::every::ArrayBehaviour;
@@ -264,11 +265,15 @@ impl Document {
 							// used, then we assume that the field was omitted
 							// and we revert the value to the old value.
 							Some(Data::ContentExpression(_)) if val.is_none() => {
-								self.current
-									.doc
-									.to_mut()
-									.set(stk, ctx, &opt, &k, old.as_ref().clone())
-									.await?;
+								crate::legacy::value_set(
+									self.current.doc.to_mut(),
+									stk,
+									ctx,
+									&opt,
+									&k,
+									old.as_ref().clone(),
+								)
+								.await?;
 								continue;
 							}
 							// If the field has been modified and the user
@@ -561,8 +566,11 @@ impl FieldEditContext<'_> {
 			// Freeze the new context
 			let ctx = ctx.freeze();
 			// Process the VALUE clause
-			let val =
-				self.stk.run(|stk| expr.compute(stk, &ctx, self.opt, doc)).await.catch_return()?;
+			let val = self
+				.stk
+				.run(|stk| crate::legacy::expr_compute(expr, stk, &ctx, self.opt, doc))
+				.await
+				.catch_return()?;
 			// Unfreeze the new context
 			self.context = Some(Context::unfreeze(ctx)?);
 			// Return the modified value
@@ -599,8 +607,11 @@ impl FieldEditContext<'_> {
 			// Freeze the new context
 			let ctx = ctx.freeze();
 			// Process the VALUE clause
-			let val =
-				self.stk.run(|stk| expr.compute(stk, &ctx, self.opt, doc)).await.catch_return()?;
+			let val = self
+				.stk
+				.run(|stk| crate::legacy::expr_compute(expr, stk, &ctx, self.opt, doc))
+				.await
+				.catch_return()?;
 			// Unfreeze the new context
 			self.context = Some(Context::unfreeze(ctx)?);
 			// Return the modified value
@@ -643,8 +654,11 @@ impl FieldEditContext<'_> {
 			// Freeze the new context
 			let ctx = ctx.freeze();
 			// Process the ASSERT clause
-			let res =
-				self.stk.run(|stk| expr.compute(stk, &ctx, self.opt, doc)).await.catch_return()?;
+			let res = self
+				.stk
+				.run(|stk| crate::legacy::expr_compute(expr, stk, &ctx, self.opt, doc))
+				.await
+				.catch_return()?;
 			// Unfreeze the new context
 			self.context = Some(Context::unfreeze(ctx)?);
 			// Check the ASSERT clause result
@@ -721,7 +735,7 @@ impl FieldEditContext<'_> {
 					// Process the PERMISSION clause
 					let res = self
 						.stk
-						.run(|stk| expr.compute(stk, &ctx, opt, doc))
+						.run(|stk| crate::legacy::expr_compute(expr, stk, &ctx, opt, doc))
 						.await
 						.catch_return()?;
 					// Unfreeze the new context

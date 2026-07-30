@@ -2791,7 +2791,7 @@ fn translate_nearest(field: Expr, val: &GraphqlValue) -> Result<Expr, GraphqlErr
 
 	Ok(Expr::Binary {
 		left: Box::new(field),
-		op: BinaryOperator::NearestNeighbor(Box::new(NearestNeighbor::K(k, dist))),
+		op: BinaryOperator::NearestNeighbor(Box::new(NearestNeighbor::K(k, dist.into()))),
 		right: Box::new(to.into_literal()),
 	})
 }

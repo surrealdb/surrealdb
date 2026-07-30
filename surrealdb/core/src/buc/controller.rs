@@ -11,7 +11,8 @@ use crate::catalog::{BucketDefinition, Permission};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::{Error as ExprError, FlowResultExt};
+use crate::exe::FlowResultExt;
+use crate::expr::Error as ExprError;
 use crate::iam::Action;
 use crate::val::{Bytes, File, Value};
 
@@ -318,7 +319,7 @@ impl<'a> BucketController<'a> {
 					// Process the PERMISSION clause
 					let res = self
 						.stk
-						.run(|stk| e.compute(stk, &ctx, opt, self.doc))
+						.run(|stk| crate::legacy::expr_compute(e, stk, &ctx, opt, self.doc))
 						.await
 						.catch_return()?;
 					ensure!(

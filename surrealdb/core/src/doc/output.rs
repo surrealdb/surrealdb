@@ -21,9 +21,10 @@ use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Statement};
 use crate::doc::compute::DocKind;
 use crate::doc::{CursorDoc, Document};
+use crate::exe::FlowResultExt;
 use crate::expr::field::Fields;
 use crate::expr::part::Part;
-use crate::expr::{FlowResultExt, Idiom, Operation, Output, SelectStatement};
+use crate::expr::{Idiom, Operation, Output, SelectStatement};
 use crate::iam::{Action, AuthLimit};
 use crate::val::Value;
 
@@ -112,7 +113,7 @@ impl Document {
 				&& let Some(Part::Field(name)) = alias.first()
 			{
 				let val = stk
-					.run(|stk| sel.expr.compute(stk, ctx, opt, Some(current)))
+					.run(|stk| crate::legacy::expr_compute(&sel.expr, stk, ctx, opt, Some(current)))
 					.await
 					.catch_return()?;
 				if let Value::Object(ref mut obj) = doc {
@@ -126,12 +127,13 @@ impl Document {
 			// omitted field resolves to NONE in the VALUE result.
 			let mut doc = current.doc.as_ref().clone();
 			for field in omit {
-				doc.del(stk, ctx, opt, field).await?;
+				crate::legacy::value_del(&mut doc, stk, ctx, opt, field).await?;
 			}
 			let projection_doc = CursorDoc::new(current.rid.clone(), None, doc);
-			stmt.fields.compute(stk, ctx, opt, Some(&projection_doc)).await?
+			crate::legacy::fields_compute(&stmt.fields, stk, ctx, opt, Some(&projection_doc))
+				.await?
 		} else {
-			stmt.fields.compute(stk, ctx, opt, Some(current)).await?
+			crate::legacy::fields_compute(&stmt.fields, stk, ctx, opt, Some(current)).await?
 		};
 		// Apply field-level select permissions to the output
 		self.apply_select_field_permissions(stk, ctx, opt, &mut out).await?;
@@ -141,7 +143,7 @@ impl Document {
 		// post-sort in `Results::project_value`).
 		if stmt.group.is_none() && !matches!(stmt.fields, Fields::Value(_)) {
 			for field in omit {
-				out.del(stk, ctx, opt, field).await?;
+				crate::legacy::value_del(&mut out, stk, ctx, opt, field).await?;
 			}
 		}
 		// Output the document
@@ -294,7 +296,7 @@ impl Document {
 		child_ctx.add_value("before", initial.doc.as_arc());
 		let child_ctx = child_ctx.freeze();
 		// Output the specified fields
-		fields.compute(stk, &child_ctx, opt, Some(current)).await
+		crate::legacy::fields_compute(fields, stk, &child_ctx, opt, Some(current)).await
 	}
 
 	/// Apply each field's `PERMISSIONS FOR select` clause to the
@@ -364,7 +366,15 @@ impl Document {
 						let child_ctx = child_ctx.freeze();
 						// Process the PERMISSION clause
 						if !stk
-							.run(|stk| e.compute(stk, &child_ctx, opt, Some(&self.current)))
+							.run(|stk| {
+								crate::legacy::expr_compute(
+									e,
+									stk,
+									&child_ctx,
+									opt,
+									Some(&self.current),
+								)
+							})
 							.await
 							.catch_return()?
 							.is_truthy()

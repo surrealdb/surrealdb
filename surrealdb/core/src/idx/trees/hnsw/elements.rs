@@ -4,7 +4,7 @@ use crate::catalog::{Distance, IndexId, TableId};
 use crate::idx::IndexKeyBase;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::hnsw::cache::VectorCache;
-use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
+use crate::idx::trees::vector::{DistanceExt as _, SerializedVector, SharedVector, Vector};
 use crate::kvs::Transaction;
 
 /// Manages storage and retrieval of element vectors in the HNSW graph.

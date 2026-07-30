@@ -1,0 +1,838 @@
+use std::borrow::Cow;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use anyhow::{Result, bail};
+use reblessive::tree::Stk;
+use uuid::Uuid;
+
+use crate::catalog::aggregation::{
+	self, AggregateFields, Aggregation, AggregationAnalysis, AggregationStat,
+};
+use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
+use crate::catalog::{
+	DatabaseId, Error as CatalogError, FieldDefinition, Metadata, NamespaceId, Record, RecordType,
+	TableDefinition, TableType, ViewDefinition,
+};
+use crate::ctx::FrozenContext;
+use crate::dbs::Options;
+use crate::doc::{self, CursorDoc, Document, DocumentContext, NsDbCtx};
+use crate::exe::FlowResultExt;
+use crate::exec::Error as ExecError;
+use crate::expr::field::Selector;
+use crate::expr::paths::{ID, IN, OUT};
+use crate::expr::statements::define::DefineKind;
+use crate::expr::statements::define::table::DefineTableStatement;
+use crate::expr::{
+	Base, BinaryOperator, Cond, Expr, Field, Fields, Function, FunctionCall, Group, Groups, Idiom,
+	Kind, Literal, SelectStatement,
+};
+use crate::iam::{Action, ResourceKind};
+use crate::key::database::all::DatabaseRoot;
+use crate::kvs::Transaction;
+use crate::legacy::{expr_to_ident, kill_table_subscriptions};
+use crate::val::{Array, Number, RecordId, RecordIdKey, TableName, Value};
+
+#[instrument(level = "trace", name = "DefineTableStatement::compute", skip_all)]
+pub(crate) async fn define_table_statement_compute(
+	this: &DefineTableStatement,
+	stk: &mut Stk,
+	ctx: &FrozenContext,
+	opt: &Options,
+	doc: Option<&CursorDoc>,
+) -> Result<Value> {
+	// Allowed to run?
+	ctx.is_allowed(opt, Action::Edit, ResourceKind::Table, Base::Db)?;
+
+	// Validate any GRAPHQL_ALIAS at definition time so typos surface here
+	// rather than silently falling back at schema-generation time.
+	crate::legacy::expr::statements::define::validate_graphql_alias(&this.graphql_alias, "table")?;
+
+	// Process the name
+	let name = TableName::new(expr_to_ident(stk, ctx, opt, doc, &this.name, "table name").await?);
+
+	// A PERMISSIONS clause must not perform writes (GHSA-66r2-5gwj-gxm2).
+	if this.permissions.has_direct_write() {
+		bail!(ExecError::PermissionClauseNotReadonly {
+			kind: "table",
+			name: name.as_str().to_string(),
+		});
+	}
+
+	// Get the NS and DB
+	let (ns_name, db_name) = opt.ns_db()?;
+
+	// Fetch the transaction
+	let txn = ctx.tx();
+
+	let ns = txn.expect_ns_by_name(ns_name).await?;
+	let db = txn.expect_db_by_name(ns_name, db_name).await?;
+
+	// Check if the definition exists
+	let table_id =
+		if let Some(tb) = txn.get_tb(ns.namespace_id, db.database_id, &name, None).await? {
+			match this.kind {
+				DefineKind::Default => {
+					if !opt.import {
+						bail!(CatalogError::TbAlreadyExists {
+							name: name.as_str().to_string(),
+						});
+					}
+				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => return Ok(Value::None),
+			}
+
+			tb.table_id
+		} else {
+			txn.get_next_tb_id(Some(ctx), ns.namespace_id, db.database_id).await?
+		};
+
+	let comment = stk
+		.run(|stk| crate::legacy::expr_compute(&this.comment, stk, ctx, opt, doc))
+		.await
+		.catch_return()?
+		.cast_to()?;
+
+	// Process the statement
+	let cache_ts = Uuid::now_v7();
+	let mut tb_def = TableDefinition {
+		namespace_id: ns.namespace_id,
+		database_id: db.database_id,
+		table_id,
+		name: name.clone(),
+		drop: this.drop,
+		schemafull: this.full,
+		table_type: this.table_type.clone(),
+		// `to_definition` validates the view (aggregation analysis,
+		// VALUE-selector rejection) before anything is stored.
+		view: this.view.as_ref().map(crate::catalog::view::view_to_definition).transpose()?,
+		permissions: this.permissions.clone(),
+		comment,
+		changefeed: this.changefeed,
+
+		cache_fields_ts: cache_ts,
+		cache_events_ts: cache_ts,
+		cache_indexes_ts: cache_ts,
+		cache_tables_ts: cache_ts,
+		cache_lives_ts: cache_ts,
+		graphql_alias: this.graphql_alias.clone(),
+		graphql_deprecated: this.graphql_deprecated.clone(),
+	};
+
+	// Add table relational fields
+	crate::legacy::define_table_statement_add_in_out_fields(
+		&txn,
+		ns.namespace_id,
+		db.database_id,
+		&mut tb_def,
+	)
+	.await?;
+
+	// Record definition change
+	if this.changefeed.is_some() {
+		txn.changefeed_buffer_table_change(
+			ns.namespace_id,
+			db.database_id,
+			&name,
+			&tb_def.to_stored(),
+		);
+	}
+
+	// Update the catalog
+	let tb = txn.put_tb(ns_name, db_name, &tb_def).await?;
+
+	// Clear the cache
+	txn.clear_cache();
+
+	let parent = NsDbCtx {
+		ns: Arc::clone(&ns),
+		db: Arc::clone(&db),
+	};
+	let doc_ctx =
+		DocumentContext::initialise(ctx, &parent, Arc::clone(&tb), &name, opt.version, true)
+			.await?;
+
+	// Check if table is a view
+	if let Some(view) = &tb.view {
+		// Redefining a table as a view wipes its whole key range, which
+		// includes the `lq` rows of every subscription on it, so each of
+		// those clients is owed a KILLED exactly as it would be by a
+		// `REMOVE TABLE`.
+		kill_table_subscriptions(ctx, &txn, ns.namespace_id, db.database_id, &name).await?;
+		// Remove the table data
+		let key = crate::key::table::all::TableRoot {
+			prefix: DatabaseRoot {
+				ns: ns.namespace_id,
+				db: db.database_id,
+			},
+			tb: Cow::Borrowed(&name),
+		};
+		txn.del_prefix_key(&key).await?;
+
+		let tables = view.source_tables();
+
+		// Process each foreign table
+		for ft in tables.iter() {
+			// Save the view config
+			let key = crate::key::table::ft::Ft {
+				prefix: DatabaseRoot {
+					ns: ns.namespace_id,
+					db: db.database_id,
+				},
+				tb: Cow::Borrowed(ft),
+				ft: Cow::Borrowed(&name),
+			};
+			txn.set_key(&key, &tb_def.to_stored()).await?;
+			// Refresh the table cache
+			let Some(foreign_tb) = txn.get_tb(ns.namespace_id, db.database_id, ft, None).await?
+			else {
+				bail!(CatalogError::TbNotFound {
+					name: ft.clone(),
+				});
+			};
+
+			txn.put_tb(
+				ns_name,
+				db_name,
+				&TableDefinition {
+					cache_tables_ts: Uuid::now_v7(),
+					..(*foreign_tb).clone()
+				},
+			)
+			.await?;
+
+			// Clear the cache
+			txn.clear_cache();
+		}
+
+		crate::legacy::define_table_statement_initialize_view(stk, ctx, opt, &doc_ctx, &name, view)
+			.await?;
+	}
+	// Clear the cache
+	txn.clear_cache();
+	// Ok all good
+	Ok(Value::None)
+}
+
+pub(crate) async fn define_table_statement_initialize_view(
+	stk: &mut Stk,
+	ctx: &FrozenContext,
+	opt: &Options,
+	doc_ctx: &DocumentContext,
+	view_table_name: &TableName,
+	view: &ViewDefinition,
+) -> Result<()> {
+	match view {
+		ViewDefinition::Select {
+			..
+		} => {}
+		ViewDefinition::Materialized {
+			fields,
+			tables,
+			condition,
+		} => {
+			crate::legacy::define_table_statement_initialize_materialized_view(
+				stk,
+				ctx,
+				opt,
+				doc_ctx,
+				view_table_name,
+				fields,
+				tables,
+				condition.as_ref(),
+			)
+			.await?;
+		}
+		ViewDefinition::Aggregated {
+			analysis,
+			tables,
+			condition,
+			..
+		} => {
+			crate::legacy::define_table_statement_initialize_aggregate_view(
+				stk,
+				ctx,
+				opt,
+				doc_ctx,
+				view_table_name,
+				analysis,
+				condition.as_ref(),
+				tables,
+			)
+			.await?;
+		}
+	}
+	Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn define_table_statement_initialize_materialized_view(
+	stk: &mut Stk,
+	ctx: &FrozenContext,
+	opt: &Options,
+	doc_ctx: &DocumentContext,
+	view_table_name: &TableName,
+	fields: &Fields,
+	tables: &[TableName],
+	condition: Option<&Expr>,
+) -> Result<()> {
+	// Build the initialization SELECT with `id` always included so we can
+	// extract the source record's key regardless of the user's field list.
+	let init_fields = match fields {
+		Fields::Select(user_fields) => {
+			let id_field = Field::Single(Selector {
+				expr: Expr::Idiom(Idiom::from(ID.to_vec())),
+				alias: None,
+			});
+			let mut all = vec![id_field];
+			all.extend(user_fields.iter().cloned());
+			Fields::Select(all)
+		}
+		other => other.clone(),
+	};
+
+	let select = SelectStatement {
+		fields: init_fields,
+		what: tables.iter().map(|x| Expr::Table(x.clone())).collect(),
+		cond: condition.cloned().map(Cond),
+		omit: vec![],
+		only: false,
+		with: None,
+		split: None,
+		group: None,
+		order: None,
+		limit: None,
+		start: None,
+		fetch: None,
+		version: Expr::Literal(Literal::None),
+		timeout: Expr::Literal(Literal::None),
+		explain: None,
+		tempfiles: false,
+	};
+
+	let Value::Array(Array(v)) =
+		crate::legacy::select_statement_compute(&select, stk, ctx, opt, None).await?
+	else {
+		fail!("initial select for view did not return an array");
+	};
+
+	let tx = ctx.tx();
+	let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+
+	for v in v {
+		let Value::Object(mut o) = v else {
+			fail!("initial select for view did not return an array of objects");
+		};
+
+		let Some(Value::RecordId(id)) = o.remove("id") else {
+			fail!("select results did not contain a record id");
+		};
+
+		let key = crate::key::record::RecordKey {
+			root: DatabaseRoot {
+				ns,
+				db,
+			},
+			tb: Cow::Borrowed(view_table_name),
+			id: Cow::Borrowed(&id.key),
+		};
+		let record = Arc::new(Record::new(Value::Object(o)));
+		tx.put_key(&key, &record).await?;
+
+		let ns = doc_ctx.ns();
+		let db = doc_ctx.db();
+		let tb =
+			ctx.tx().get_or_add_tb(Some(ctx), &ns.name, &db.name, view_table_name, None).await?;
+		let parent = NsDbCtx {
+			ns: Arc::clone(ns),
+			db: Arc::clone(db),
+		};
+		let doc_ctx =
+			DocumentContext::initialise(ctx, &parent, tb, view_table_name, opt.version, true)
+				.await?;
+
+		Document::run_triggers(
+			stk,
+			ctx,
+			opt,
+			doc_ctx.clone(),
+			id.into(),
+			doc::Action::Create,
+			None,
+			Some(record),
+		)
+		.await?;
+
+		yield_now!();
+	}
+
+	Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn define_table_statement_initialize_aggregate_view(
+	stk: &mut Stk,
+	ctx: &FrozenContext,
+	opt: &Options,
+	doc_ctx: &DocumentContext,
+	view_table_name: &TableName,
+	analysis: &AggregationAnalysis,
+	condition: Option<&Expr>,
+	tables: &[TableName],
+) -> Result<()> {
+	// To initialize the materialized aggregate view we not only need to initialize records in
+	// the view but also find the AggregationStat values.
+	// For math::max, and count this is easy, just run a select with the same aggregate.
+	// However for mean we don't need to know the mean itself but actually the sum and count.
+
+	#[derive(Clone, Eq, PartialEq, Hash)]
+	pub enum SelectAggr {
+		// Only used to do initial select.
+		PowSum(usize),
+		Base(Aggregation),
+	}
+
+	// Find out what we need to calculate to initialize the aggregation stats.
+	let mut required_values = HashMap::new();
+	for aggregation in analysis.aggregations.iter() {
+		match aggregation {
+			Aggregation::Count => {
+				let len = required_values.len();
+				required_values.entry(SelectAggr::Base(Aggregation::Count)).or_insert(len);
+			}
+			Aggregation::CountValue(arg) => {
+				let len = required_values.len();
+				required_values
+					.entry(SelectAggr::Base(Aggregation::CountValue(*arg)))
+					.or_insert(len);
+			}
+			Aggregation::NumberMax(arg) => {
+				let len = required_values.len();
+				required_values
+					.entry(SelectAggr::Base(Aggregation::NumberMax(*arg)))
+					.or_insert(len);
+			}
+			Aggregation::NumberMin(arg) => {
+				let len = required_values.len();
+				required_values
+					.entry(SelectAggr::Base(Aggregation::NumberMin(*arg)))
+					.or_insert(len);
+			}
+			Aggregation::Sum(arg) => {
+				let len = required_values.len();
+				required_values.entry(SelectAggr::Base(Aggregation::Sum(*arg))).or_insert(len);
+			}
+			Aggregation::Mean(arg) => {
+				// So here for example we need to know 2 things. First the sum for argument
+				// `arg` and the record count for the group.
+				let len = required_values.len();
+				required_values.entry(SelectAggr::Base(Aggregation::Sum(*arg))).or_insert(len);
+				let len = required_values.len();
+				required_values.entry(SelectAggr::Base(Aggregation::Count)).or_insert(len);
+			}
+			Aggregation::DatetimeMax(arg) => {
+				let len = required_values.len();
+				required_values
+					.entry(SelectAggr::Base(Aggregation::DatetimeMax(*arg)))
+					.or_insert(len);
+			}
+			Aggregation::DatetimeMin(arg) => {
+				let len = required_values.len();
+				required_values
+					.entry(SelectAggr::Base(Aggregation::DatetimeMin(*arg)))
+					.or_insert(len);
+			}
+			Aggregation::StdDev(arg) | Aggregation::Variance(arg) => {
+				let len = required_values.len();
+				required_values.entry(SelectAggr::Base(Aggregation::Sum(*arg))).or_insert(len);
+				let len = required_values.len();
+				required_values.entry(SelectAggr::PowSum(*arg)).or_insert(len);
+				let len = required_values.len();
+				required_values.entry(SelectAggr::Base(Aggregation::Count)).or_insert(len);
+			}
+			Aggregation::Accumulate(_) => {
+				fail!("Accumulate aggregation is not supported in materialized views")
+			}
+		}
+	}
+
+	let mut aggregate_value_expr = Vec::with_capacity(required_values.len());
+	for (aggregation, idx) in required_values.iter() {
+		let expr = Expr::FunctionCall(Box::new(match aggregation {
+			SelectAggr::PowSum(arg) => {
+				let expr = Expr::Binary {
+					left: Box::new(analysis.aggregate_arguments[*arg].clone()),
+					op: BinaryOperator::Power,
+					right: Box::new(Expr::Literal(Literal::Integer(2))),
+				};
+				FunctionCall {
+					receiver: Function::Normal("math::sum".to_string()),
+					arguments: vec![expr],
+				}
+			}
+			SelectAggr::Base(aggregation) => match aggregation {
+				Aggregation::Count => FunctionCall {
+					receiver: Function::Normal("count".to_string()),
+					arguments: Vec::new(),
+				},
+				Aggregation::CountValue(arg) => FunctionCall {
+					receiver: Function::Normal("count".to_string()),
+					arguments: vec![analysis.aggregate_arguments[*arg].clone()],
+				},
+				Aggregation::NumberMax(arg) => FunctionCall {
+					receiver: Function::Normal("math::max".to_string()),
+					arguments: vec![analysis.aggregate_arguments[*arg].clone()],
+				},
+				Aggregation::NumberMin(arg) => FunctionCall {
+					receiver: Function::Normal("math::min".to_string()),
+					arguments: vec![analysis.aggregate_arguments[*arg].clone()],
+				},
+				Aggregation::Sum(arg) => FunctionCall {
+					receiver: Function::Normal("math::sum".to_string()),
+					arguments: vec![analysis.aggregate_arguments[*arg].clone()],
+				},
+				Aggregation::Mean(arg) => FunctionCall {
+					receiver: Function::Normal("math::mean".to_string()),
+					arguments: vec![analysis.aggregate_arguments[*arg].clone()],
+				},
+				Aggregation::DatetimeMax(arg) => FunctionCall {
+					receiver: Function::Normal("time::max".to_string()),
+					arguments: vec![analysis.aggregate_arguments[*arg].clone()],
+				},
+				Aggregation::DatetimeMin(arg) => FunctionCall {
+					receiver: Function::Normal("time::min".to_string()),
+					arguments: vec![analysis.aggregate_arguments[*arg].clone()],
+				},
+				Aggregation::StdDev(_) | Aggregation::Variance(_) => {
+					// Not used for initialization.
+					unreachable!()
+				}
+				Aggregation::Accumulate(_) => {
+					fail!("Accumulate aggregation is not supported in materialized views")
+				}
+			},
+		}));
+
+		if aggregate_value_expr.len() > *idx {
+			aggregate_value_expr[*idx] = expr;
+		} else {
+			for _ in aggregate_value_expr.len()..*idx {
+				// Temp value, overwritten later
+				aggregate_value_expr.push(Expr::Break);
+			}
+			aggregate_value_expr.push(expr)
+		}
+	}
+
+	let mut fields = Vec::new();
+
+	let mut groups = Vec::new();
+	for (idx, g) in analysis.group_expressions.iter().enumerate() {
+		let alias = format!("g{}", idx);
+		fields.push(Field::Single(Selector {
+			expr: g.clone(),
+			alias: Some(Idiom::field(alias.clone())),
+		}));
+		groups.push(Group(Idiom::field(alias)));
+	}
+
+	// calculated aggregations return in field 'a'
+	fields.push(Field::Single(Selector {
+		expr: Expr::Literal(Literal::Array(aggregate_value_expr)),
+		alias: Some(Idiom::field("a".to_string())),
+	}));
+
+	let stmt = SelectStatement {
+		// SELECT [aggregate1, aggregate2, ..] as a, group_expr1 as g0, group_expr2 as g1, ..
+		fields: Fields::Select(fields),
+		// WHERE cond
+		cond: condition.cloned().map(Cond),
+		// GROUP BY g0,g1,..
+		group: Some(Groups(groups)),
+		what: tables.iter().map(|x| Expr::Table(x.clone())).collect(),
+		omit: vec![],
+		only: false,
+		with: None,
+		split: None,
+		order: None,
+		limit: None,
+		start: None,
+		fetch: None,
+		version: Expr::Literal(Literal::None),
+		timeout: Expr::Literal(Literal::None),
+		explain: None,
+		tempfiles: false,
+	};
+	let res = crate::legacy::select_statement_compute(&stmt, stk, ctx, opt, None).await?;
+	let Value::Array(res) = res else {
+		fail!("initial select for view did not return an array");
+	};
+
+	let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+	let tx = ctx.tx();
+
+	for r in res {
+		let Value::Object(mut obj) = r else {
+			fail!("select without VALUE did not return an object");
+		};
+
+		let mut group = Vec::with_capacity(analysis.group_expressions.len());
+		for g in 0..analysis.group_expressions.len() {
+			let Some(x) = obj.remove(&format!("g{g}")) else {
+				fail!("select result did not contain a field for a selection");
+			};
+			group.push(x);
+		}
+
+		let Some(Value::Array(Array(aggregate_stats))) = obj.remove("a") else {
+			fail!("select result did not contain a field for a selection");
+		};
+
+		let mut stats = Vec::with_capacity(analysis.aggregations.len());
+		for a in analysis.aggregations.iter() {
+			match *a {
+				Aggregation::Count => {
+					let idx = required_values[&SelectAggr::Base(Aggregation::Count)];
+					let Value::Number(Number::Int(i)) = &aggregate_stats[idx] else {
+						fail!("initial select statement did not return the right value")
+					};
+					stats.push(AggregationStat::Count {
+						count: *i,
+					});
+				}
+				Aggregation::CountValue(arg) => {
+					let idx = required_values[&SelectAggr::Base(Aggregation::CountValue(arg))];
+					let Value::Number(Number::Int(i)) = &aggregate_stats[idx] else {
+						fail!("initial select statement did not return the right value")
+					};
+					stats.push(AggregationStat::CountValue {
+						arg,
+						count: *i,
+					});
+				}
+				Aggregation::NumberMax(arg) => {
+					let idx = required_values[&SelectAggr::Base(Aggregation::NumberMax(arg))];
+					let Value::Number(n) = &aggregate_stats[idx] else {
+						fail!("initial select statement did not return the right value")
+					};
+					stats.push(AggregationStat::NumberMax {
+						arg,
+						max: *n,
+					});
+				}
+				Aggregation::NumberMin(arg) => {
+					let idx = required_values[&SelectAggr::Base(Aggregation::NumberMin(arg))];
+					let Value::Number(n) = &aggregate_stats[idx] else {
+						fail!("initial select statement did not return the right value")
+					};
+					stats.push(AggregationStat::NumberMin {
+						arg,
+						min: *n,
+					});
+				}
+				Aggregation::Sum(arg) => {
+					let idx = required_values[&SelectAggr::Base(Aggregation::Sum(arg))];
+					let Value::Number(n) = &aggregate_stats[idx] else {
+						fail!("initial select statement did not return the right value")
+					};
+
+					stats.push(AggregationStat::Sum {
+						arg,
+						sum: *n,
+					});
+				}
+				Aggregation::Mean(arg) => {
+					let idx = required_values[&SelectAggr::Base(Aggregation::Sum(arg))];
+					let Value::Number(n) = &aggregate_stats[idx] else {
+						fail!("initial select statement did not return the right value")
+					};
+					let idx = required_values[&SelectAggr::Base(Aggregation::Count)];
+					let Value::Number(Number::Int(i)) = &aggregate_stats[idx] else {
+						fail!("initial select statement did not return the right value")
+					};
+
+					stats.push(AggregationStat::Mean {
+						arg,
+						sum: *n,
+						count: *i,
+					});
+				}
+				Aggregation::DatetimeMax(arg) => {
+					let idx = required_values[&SelectAggr::Base(Aggregation::DatetimeMax(arg))];
+					let Value::Datetime(d) = &aggregate_stats[idx] else {
+						fail!("initial select statement did not return the right value")
+					};
+
+					stats.push(AggregationStat::TimeMax {
+						arg,
+						max: *d,
+					});
+				}
+				Aggregation::DatetimeMin(arg) => {
+					let idx = required_values[&SelectAggr::Base(Aggregation::DatetimeMin(arg))];
+					let Value::Datetime(d) = &aggregate_stats[idx] else {
+						fail!("initial select statement did not return the right value")
+					};
+
+					stats.push(AggregationStat::TimeMin {
+						arg,
+						min: *d,
+					});
+				}
+				Aggregation::StdDev(arg) => {
+					let idx = required_values[&SelectAggr::Base(Aggregation::Sum(arg))];
+					let Value::Number(sum) = &aggregate_stats[idx] else {
+						fail!("initial select statement did not return the right value")
+					};
+					let idx = required_values[&SelectAggr::PowSum(arg)];
+					let Value::Number(sum_of_squares) = &aggregate_stats[idx] else {
+						fail!("initial select statement did not return the right value")
+					};
+					let idx = required_values[&SelectAggr::Base(Aggregation::Count)];
+					let Value::Number(Number::Int(count)) = &aggregate_stats[idx] else {
+						fail!("initial select statement did not return the right value")
+					};
+
+					stats.push(AggregationStat::StdDev {
+						arg,
+						sum: *sum,
+						sum_of_squares: *sum_of_squares,
+						count: *count,
+					});
+				}
+				Aggregation::Variance(arg) => {
+					let idx = required_values[&SelectAggr::Base(Aggregation::Sum(arg))];
+					let Value::Number(sum) = &aggregate_stats[idx] else {
+						fail!("initial select statement did not return the right value")
+					};
+					let idx = required_values[&SelectAggr::PowSum(arg)];
+					let Value::Number(sum_of_squares) = &aggregate_stats[idx] else {
+						fail!("initial select statement did not return the right value")
+					};
+					let idx = required_values[&SelectAggr::Base(Aggregation::Count)];
+					let Value::Number(Number::Int(count)) = &aggregate_stats[idx] else {
+						fail!("initial select statement did not return the right value")
+					};
+
+					stats.push(AggregationStat::Variance {
+						arg,
+						sum: *sum,
+						sum_of_squares: *sum_of_squares,
+						count: *count,
+					});
+				}
+				Aggregation::Accumulate {
+					..
+				} => fail!("Accumulate aggregation is not supported in materialized views"),
+			}
+		}
+
+		// We have now computed the aggregation stats so now we need to insert the record.
+		// first calculate the actual value for the record.
+
+		let doc = Value::Object(aggregation::create_field_document(&group, &stats)).into();
+
+		let mut data = Value::empty_object();
+
+		match &analysis.fields {
+			AggregateFields::Value(_) => {
+				fail!("Value selectors are not supported on views");
+			}
+			AggregateFields::Fields(items) => {
+				for (name, expr) in items {
+					let res = stk
+						.run(|stk| crate::legacy::expr_compute(expr, stk, ctx, opt, Some(&doc)))
+						.await
+						.catch_return()?;
+					crate::legacy::value_set(&mut data, stk, ctx, opt, name.as_ref(), res).await?;
+				}
+			}
+		};
+
+		let record = Arc::new(Record {
+			metadata: Some(Metadata {
+				record_type: RecordType::Table,
+				aggregation_stats: stats,
+			}),
+			data,
+		});
+
+		let key = RecordIdKey::Array(Array(group));
+		tx.put_record(ns, db, view_table_name, &key, Arc::clone(&record)).await?;
+
+		let id = Arc::new(RecordId {
+			table: view_table_name.clone(),
+			key,
+		});
+		Document::run_triggers(
+			stk,
+			ctx,
+			opt,
+			doc_ctx.clone(),
+			id,
+			doc::Action::Create,
+			None,
+			Some(record),
+		)
+		.await?;
+
+		yield_now!();
+	}
+
+	Ok(())
+}
+
+/// Used to add relational fields to existing table records
+///
+/// Returns the cache key ts.
+pub(crate) async fn define_table_statement_add_in_out_fields(
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &mut TableDefinition,
+) -> Result<()> {
+	// Add table relational fields
+	if let TableType::Relation(rel) = &tb.table_type {
+		let tb_name = tb.name.clone();
+		// Set the `in` field as a DEFINE FIELD definition
+		{
+			let key = crate::key::table::fd::Fd {
+				prefix: DatabaseRoot {
+					ns,
+					db,
+				},
+				tb: Cow::Borrowed(&tb_name),
+				fd: Cow::Borrowed("in"),
+			};
+			let fd = FieldDefinition {
+				name: Idiom::from(IN.to_vec()),
+				table: tb_name.clone(),
+				field_kind: Some(Kind::Record(rel.from.clone())),
+				..Default::default()
+			};
+			txn.set_key(&key, &fd.to_stored()).await?;
+		}
+		// Set the `out` field as a DEFINE FIELD definition
+		{
+			let key = crate::key::table::fd::Fd {
+				prefix: DatabaseRoot {
+					ns,
+					db,
+				},
+				tb: Cow::Borrowed(&tb_name),
+				fd: Cow::Borrowed("out"),
+			};
+			let fd = FieldDefinition {
+				name: Idiom::from(OUT.to_vec()),
+				table: tb_name.clone(),
+				field_kind: Some(Kind::Record(rel.to.clone())),
+				..Default::default()
+			};
+			txn.set_key(&key, &fd.to_stored()).await?;
+		}
+		// Refresh the table cache for the fields
+		tb.cache_fields_ts = Uuid::now_v7();
+	}
+	Ok(())
+}

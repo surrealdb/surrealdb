@@ -25,7 +25,8 @@ pub mod sys;
 mod error;
 
 pub use error::{
-	Error, ErrorCode, ErrorTrait, LeafError, TypedError, internal_todo, source as source_error,
+	EngineError, Error, ErrorCode, ErrorTrait, LeafError, TypedError, internal_todo,
+	source as source_error,
 };
 
 pub mod future;

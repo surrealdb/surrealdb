@@ -154,7 +154,7 @@ async fn execute_database_info(
 			"analyzers" => process(&txn.all_db_analyzers(ns, db, version).await?),
 			"buckets" => process(&txn.all_db_buckets(ns, db, version).await?),
 			"functions" => process(&txn.all_db_functions(ns, db, version).await?),
-			"modules" => crate::expr::statements::info::process_modules(ctx.ctx(), ns, db, txn.all_db_modules(ns, db, version).await?).await,
+			"modules" => crate::legacy::process_modules(ctx.ctx(), ns, db, txn.all_db_modules(ns, db, version).await?).await,
 			"models" => process(&txn.all_db_models(ns, db, version).await?),
 			"params" => process(&txn.all_db_params(ns, db, version).await?),
 			"tables" => process(&txn.all_tb(ns, db, version).await?),

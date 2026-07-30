@@ -1662,7 +1662,7 @@ impl<'a> IndexAnalyzer<'a> {
 			let ef = match &ix_def.index {
 				Index::Hnsw(hnsw) => {
 					if let Some(d) = required_distance
-						&& *d != hnsw.distance
+						&& crate::catalog::Distance::from((*d).clone()) != hnsw.distance
 					{
 						continue;
 					}
@@ -1670,7 +1670,7 @@ impl<'a> IndexAnalyzer<'a> {
 				}
 				Index::DiskAnn(diskann) => {
 					if let Some(d) = required_distance
-						&& *d != diskann.distance
+						&& crate::catalog::Distance::from((*d).clone()) != diskann.distance
 					{
 						continue;
 					}

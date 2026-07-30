@@ -20,6 +20,7 @@ hashbrown.workspace = true
 futures.workspace = true
 chrono = { workspace = true }
 surrealdb-types = { workspace = true }
+thiserror = { workspace = true }
 phf = { workspace = true, features = ["macros", "unicase"] }
 rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
 unicase.workspace = true

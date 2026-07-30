@@ -41,13 +41,15 @@ kv-surrealkv = [
     "dep:tempfile",
     "dep:ext-sort",
 ]
-scripting = ["dep:js"]
+scripting = ["dep:js", "surrealdb-expr/scripting"]
 http = ["dep:reqwest"]
-ml = ["dep:surrealml-core"]
+ml = ["dep:surrealml-core", "surrealdb-expr/ml"]
 jwks = ["dep:reqwest"]
-surrealism = ["dep:surrealism-runtime", "dep:async-trait", "surrealdb-sql/surrealism", "surrealdb-syn/surrealism"]
+surrealism = ["dep:surrealism-runtime", "dep:async-trait", "surrealdb-sql/surrealism", "surrealdb-syn/surrealism", "surrealdb-expr/surrealism"]
 allocator = ["dep:jemallocator", "dep:mimalloc"]
 arbitrary = [
+    "surrealdb-expr/arbitrary",
+    "surrealdb-catalog/arbitrary",
     "dep:arbitrary",
     "dep:regex-syntax",
     "regex-syntax/arbitrary",
@@ -64,10 +66,10 @@ arbitrary = [
 allocation-tracking = []
 
 # GraphQL support
-graphql = ["dep:async-graphql"]
+graphql = ["dep:async-graphql", "surrealdb-catalog/graphql"]
 
 # GQL support
-gql = []
+gql = ["surrealdb-expr/gql", "dep:surrealdb-gql"]
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
@@ -75,6 +77,9 @@ features = ["kv-mem", "kv-rocksdb", "http", "scripting", "graphql", "gql"]
 targets = []
 
 [dependencies]
+surrealdb-catalog = { workspace = true }
+surrealdb-expr = { workspace = true }
+surrealdb-gql = { workspace = true, optional = true }
 surrealdb-sql = { workspace = true }
 surrealdb-strand = { workspace = true }
 surrealdb-syn = { workspace = true }
@@ -91,7 +96,6 @@ surrealml-core = { workspace = true, optional = true }
 
 arc-swap = "1"
 async-trait = { workspace = true, optional = true }
-dmp.workspace = true
 js = { workspace = true, features = [
     "array-buffer",
     "bindgen",
@@ -103,7 +107,6 @@ js = { workspace = true, features = [
     "properties",
     "rust-alloc",
 ], optional = true }
-lexicmp.workspace = true
 reblessive = { workspace = true, features = ["tree"] }
 revision = { workspace = true }
 storekey.workspace = true
@@ -129,7 +132,6 @@ chrono = { workspace = true, features = ["serde"] }
 ciborium.workspace = true
 dashmap.workspace = true
 deunicode.workspace = true
-fastnum.workspace = true
 fst.workspace = true
 futures.workspace = true
 fuzzy-matcher.workspace = true
@@ -147,7 +149,6 @@ object_store.workspace = true
 parking_lot.workspace = true
 path-clean.workspace = true
 pbkdf2 = { workspace = true, features = ["simple"] }
-phf = { workspace = true, features = ["macros", "unicase"] }
 pin-project-lite.workspace = true
 quick_cache.workspace = true
 rand.workspace = true
@@ -170,7 +171,6 @@ thiserror.workspace = true
 tracing.workspace = true
 web-time.workspace = true
 ulid = { workspace = true, features = ["serde"] }
-unicase.workspace = true
 url.workspace = true
 
 # Other optional crates

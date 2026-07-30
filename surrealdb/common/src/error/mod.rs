@@ -5,11 +5,13 @@ use std::ptr::NonNull;
 use std::result::Result as StdResult;
 
 mod code;
+mod engine;
 mod leaf;
 mod raw;
 pub mod source;
 
 pub use code::ErrorCode;
+pub use engine::EngineError;
 pub use leaf::{LeafError, internal_todo};
 use raw::{RawError, RawTypedError};
 

@@ -1281,10 +1281,15 @@ mod tests {
 			let az = stack
 				.enter(|stk| async move {
 					Arc::new(
-						DefineAnalyzerStatement::from(az)
-							.to_definition(stk, &stk_ctx, &opts, None)
-							.await
-							.unwrap(),
+						crate::legacy::define_analyzer_statement_to_definition(
+							&DefineAnalyzerStatement::from(az),
+							stk,
+							&stk_ctx,
+							&opts,
+							None,
+						)
+						.await
+						.unwrap(),
 					)
 				})
 				.finish()

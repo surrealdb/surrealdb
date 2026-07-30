@@ -12,8 +12,9 @@ use crate::catalog::{DatabaseId, Distance, Index, IndexDefinition, NamespaceId};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::{CursorDoc, DocumentContext};
+use crate::exe::FlowResultExt as _;
 use crate::expr::operator::{BooleanOperator, MatchesOperator};
-use crate::expr::{Cond, Expr, FlowResultExt as _, Idiom};
+use crate::expr::{Cond, Expr, Idiom};
 use crate::idx::ft::MatchRef;
 use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms, Scorer};
 use crate::idx::ft::highlighter::HighlightParams;
@@ -404,9 +405,11 @@ impl QueryExecutor {
 			if let Some(PerExpressionEntry::KnnBruteForce((p, id, val, dist))) =
 				self.0.exp_entries.get(exp)
 			{
-				let v = id.compute(stk, ctx, opt, doc).await.catch_return()?;
+				let v =
+					crate::legacy::idiom_compute(id, stk, ctx, opt, doc).await.catch_return()?;
 				if let Ok(v) = v.coerce_to()
-					&& let Ok(dist) = dist.compute(&v, val.as_ref())
+					&& let Ok(dist) =
+						crate::idx::trees::vector::distance_compute(dist, &v, val.as_ref())
 				{
 					p.add(dist, thg).await;
 					return Ok(Value::Bool(true));

@@ -14,11 +14,12 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::{EngineError, Error};
+use crate::exe::FlowResultExt as _;
 use crate::exec::planner::Planner;
 use crate::exec::{
 	DatabaseContext, Error as ExecError, EvalContext, ExecutionContext, PhysicalExpr,
 };
-use crate::expr::{ControlFlow, FlowResultExt as _};
+use crate::expr::ControlFlow;
 use crate::iam::Action;
 use crate::val::Value;
 
@@ -244,7 +245,9 @@ pub(crate) async fn evaluate_table_select_for_doc(
 		ResolvedTableSelect::Specific(e) => {
 			let opt_no_perms = opt.new_for_permission_predicate();
 			Ok(stk
-				.run(|stk| e.compute(stk, ctx, &opt_no_perms, Some(cursor_doc)))
+				.run(|stk| {
+					crate::legacy::expr_compute(e, stk, ctx, &opt_no_perms, Some(cursor_doc))
+				})
 				.await
 				.catch_return()?
 				.is_truthy())

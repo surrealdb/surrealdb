@@ -620,7 +620,7 @@ impl MutVisitor for BruteForceKnnExtractor {
 					field: idiom.clone(),
 					vector,
 					k: *k,
-					distance: dist.clone(),
+					distance: dist.clone().into(),
 				});
 				*expr = Expr::Literal(Literal::Bool(true));
 				return Ok(());

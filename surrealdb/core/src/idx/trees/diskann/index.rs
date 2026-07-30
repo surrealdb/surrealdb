@@ -52,7 +52,7 @@ use crate::idx::trees::diskann::{
 };
 use crate::idx::trees::hnsw::VectorId;
 use crate::idx::trees::knn::KnnResultBuilder;
-use crate::idx::trees::vector::{SerializedVector, Vector};
+use crate::idx::trees::vector::{DistanceExt as _, SerializedVector, Vector};
 use crate::idx::{
 	IndexKeyBase, bump_compaction_generation, is_transaction_condition_not_met,
 	read_compaction_generation,

@@ -1032,8 +1032,14 @@ impl Vector {
 	}
 }
 
-impl Distance {
-	pub(super) fn calculate(&self, a: &Vector, b: &Vector) -> f64 {
+/// Engine-side distance evaluation over shared vectors.
+pub(crate) trait DistanceExt {
+	fn calculate(&self, a: &Vector, b: &Vector) -> f64;
+	fn calculate_shared(&self, a: &SharedVector, b: &SharedVector) -> f64;
+}
+
+impl DistanceExt for Distance {
+	fn calculate(&self, a: &Vector, b: &Vector) -> f64 {
 		match self {
 			Distance::Chebyshev => a.chebyshev_distance(b),
 			Distance::Cosine => a.cosine_distance(b),
@@ -1056,7 +1062,7 @@ impl Distance {
 	/// query vectors are [`SharedVector`]s, each magnitude is computed at most
 	/// once and then reused across the whole traversal, turning cosine from three
 	/// sum-of-products passes into one.
-	pub(super) fn calculate_shared(&self, a: &SharedVector, b: &SharedVector) -> f64 {
+	fn calculate_shared(&self, a: &SharedVector, b: &SharedVector) -> f64 {
 		match self {
 			Distance::Cosine => a.cosine_distance_with_norms(b, a.norm(), b.norm()),
 			_ => self.calculate(a, b),
@@ -1064,10 +1070,40 @@ impl Distance {
 	}
 }
 
+pub(crate) fn distance_compute(d: &Distance, v1: &Vec<Number>, v2: &Vec<Number>) -> Result<Number> {
+	use crate::fnc::util::math::ToFloat;
+	use crate::fnc::util::math::vector::{
+		ChebyshevDistance, CosineDistance, EuclideanDistance, HammingDistance, JaccardSimilarity,
+		ManhattanDistance, MinkowskiDistance, PearsonSimilarity, check_same_dimension,
+	};
+	match d {
+		Distance::Cosine => v1.cosine_distance(v2),
+		Distance::CosineNormalized => {
+			check_same_dimension("vector::distance::cosine_normalized", v1, v2)?;
+			Ok((1.0
+				- v1.iter().zip(v2.iter()).map(|(a, b)| a.to_float() * b.to_float()).sum::<f64>())
+			.into())
+		}
+		Distance::Chebyshev => v1.chebyshev_distance(v2),
+		Distance::Euclidean => v1.euclidean_distance(v2),
+		Distance::Hamming => v1.hamming_distance(v2),
+		Distance::InnerProduct => {
+			check_same_dimension("vector::distance::inner_product", v1, v2)?;
+			Ok((-v1.iter().zip(v2.iter()).map(|(a, b)| a.to_float() * b.to_float()).sum::<f64>())
+				.into())
+		}
+		Distance::Jaccard => v1.jaccard_similarity(v2),
+		Distance::Manhattan => v1.manhattan_distance(v2),
+		Distance::Minkowski(r) => v1.minkowski_distance(v2, r),
+		Distance::Pearson => v1.pearson_similarity(v2),
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
 
+	use super::{DistanceExt as _, distance_compute};
 	use crate::catalog::{Distance, VectorType};
 	use crate::idx::trees::knn::tests::{RandomItemGenerator, get_seed_rnd, new_random_vec};
 	use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
@@ -1123,7 +1159,7 @@ mod tests {
 		a2.iter().for_each(|&n| v2.push(n.into()));
 
 		// Check the generic distance implementation
-		assert_eq!(dist.compute(&v1, &v2).unwrap(), res.into());
+		assert_eq!(distance_compute(dist, &v1, &v2).unwrap(), res.into());
 
 		// Check the "Vector" optimised implementations
 		let t = VectorType::F64;

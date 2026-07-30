@@ -7,6 +7,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
+use crate::exe::FlowResultExt;
 use crate::expr::cond::Cond;
 use crate::expr::data::Data;
 use crate::expr::fetch::Fetchs;
@@ -15,7 +16,6 @@ use crate::expr::group::Groups;
 use crate::expr::limit::Limit;
 use crate::expr::order::Ordering;
 use crate::expr::output::Output;
-use crate::expr::parameterize::exprs_to_fields;
 use crate::expr::split::Splits;
 use crate::expr::start::Start;
 use crate::expr::statements::LiveFields;
@@ -29,8 +29,9 @@ use crate::expr::statements::select::SelectStatement;
 use crate::expr::statements::show::ShowStatement;
 use crate::expr::statements::update::UpdateStatement;
 use crate::expr::statements::upsert::UpsertStatement;
-use crate::expr::{Explain, Expr, FlowResultExt, Idiom, With};
+use crate::expr::{Explain, Expr, Idiom, With};
 use crate::idx::planner::QueryPlanner;
+use crate::legacy::exprs_to_fields;
 use crate::val::Duration;
 
 #[derive(Clone, Debug)]
@@ -556,7 +557,7 @@ impl Statement<'_> {
 	) -> Result<Cow<'a, FrozenContext>> {
 		if let Some(t) = self.timeout() {
 			let Some(x) = stk
-				.run(|stk| t.compute(stk, ctx, opt, doc))
+				.run(|stk| crate::legacy::expr_compute(t, stk, ctx, opt, doc))
 				.await
 				.catch_return()?
 				.cast_to::<Option<Duration>>()?

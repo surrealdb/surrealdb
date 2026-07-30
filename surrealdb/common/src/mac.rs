@@ -85,3 +85,19 @@ macro_rules! lazy_env_parse {
 		})
 	};
 }
+
+/// Report a broken invariant and return from the enclosing function.
+///
+/// Expands to an [`EngineError::unreachable`](crate::EngineError::unreachable)
+/// carrying the call site, so the message points at the code that noticed
+/// rather than at this macro.
+#[macro_export]
+macro_rules! fail {
+	($($arg:tt)+) => {
+		return ::core::result::Result::Err(
+			::core::convert::Into::into(
+				$crate::EngineError::unreachable(::core::format_args!($($arg)*))
+			)
+		)
+	};
+}

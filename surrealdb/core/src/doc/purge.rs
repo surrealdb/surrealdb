@@ -10,13 +10,14 @@ use crate::catalog::{Error, FieldDefinition};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::{CursorDoc, Document, Error as DocError};
+use crate::exe::FlowResultExt as _;
 use crate::expr::data::Assignment;
 use crate::expr::dir::Dir;
 use crate::expr::lookup::LookupKind;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::reference::ReferenceDeleteStrategy;
 use crate::expr::statements::{DeleteStatement, UpdateStatement};
-use crate::expr::{AssignOperator, Data, Expr, FlowResultExt as _, Idiom, Literal, Lookup, Part};
+use crate::expr::{AssignOperator, Data, Expr, Idiom, Literal, Lookup, Part};
 use crate::idx::planner::ScanDirection;
 use crate::key::database::all::DatabaseRoot;
 use crate::key::r#ref::{self, Ref};
@@ -304,7 +305,7 @@ impl Document {
 			// deleting one of the endpoint vertices, otherwise an actor with
 			// vertex-delete permission could erase edges they are not
 			// allowed to remove directly.
-			stm.compute(stk, ctx, opt, None).await?;
+			crate::legacy::delete_statement_compute(&stm, stk, ctx, opt, None).await?;
 		}
 		// Carry on
 		Ok(())
@@ -459,12 +460,18 @@ impl Document {
 								..DeleteStatement::default()
 							};
 							// Execute the delete statement
-							stm.compute(stk, ctx, &opt.clone().with_perms(false), None)
-								.await
-								// Wrap any error in an error explaining what went wrong
-								.map_err(|e| {
-									DocError::RefsUpdateFailure(rid.to_sql(), e.to_string())
-								})?;
+							crate::legacy::delete_statement_compute(
+								&stm,
+								stk,
+								ctx,
+								&opt.clone().with_perms(false),
+								None,
+							)
+							.await
+							// Wrap any error in an error explaining what went wrong
+							.map_err(|e| {
+								DocError::RefsUpdateFailure(rid.to_sql(), e.to_string())
+							})?;
 						}
 						// Delete only the reference on the remote record
 						ReferenceDeleteStrategy::Unset => {
@@ -474,8 +481,14 @@ impl Document {
 								key: key.foreign_key.into_owned(),
 							};
 
-							if let Some(doc) =
-								record.clone().select_document(stk, ctx, &opt, None).await?
+							if let Some(doc) = crate::legacy::record_id_select_document(
+								record.clone(),
+								stk,
+								ctx,
+								&opt,
+								None,
+							)
+							.await?
 							{
 								let doc = Value::Object(doc);
 								let data = match doc.pick(&fd.name) {
@@ -511,12 +524,14 @@ impl Document {
 									};
 
 									// Execute the update statement
-									stm.compute(stk, ctx, &opt, None)
-										.await
-										// Wrap any error in an error explaining what went wrong
-										.map_err(|e| {
-											DocError::RefsUpdateFailure(rid.to_sql(), e.to_string())
-										})?;
+									crate::legacy::update_statement_compute(
+										&stm, stk, ctx, &opt, None,
+									)
+									.await
+									// Wrap any error in an error explaining what went wrong
+									.map_err(|e| {
+										DocError::RefsUpdateFailure(rid.to_sql(), e.to_string())
+									})?;
 								}
 							}
 						}
@@ -546,13 +561,15 @@ impl Document {
 							);
 
 							// Compute the custom instruction.
-							stk.run(|stk| expr.compute(stk, &ctx, &opt, Some(&doc)))
-								.await
-								.catch_return()
-								// Wrap any error in an error explaining what went wrong
-								.map_err(|e| {
-									DocError::RefsUpdateFailure(rid.to_sql(), e.to_string())
-								})?;
+							stk.run(|stk| {
+								crate::legacy::expr_compute(expr, stk, &ctx, &opt, Some(&doc))
+							})
+							.await
+							.catch_return()
+							// Wrap any error in an error explaining what went wrong
+							.map_err(|e| {
+								DocError::RefsUpdateFailure(rid.to_sql(), e.to_string())
+							})?;
 						}
 					}
 				}

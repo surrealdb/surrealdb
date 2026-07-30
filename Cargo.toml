@@ -10,6 +10,9 @@ members = [
     "surrealdb/collections",
     "surrealdb/common",
     "surrealdb/core",
+    "surrealdb/catalog",
+    "surrealdb/expr",
+    "surrealdb/gql",
     "surrealdb/iam",
     "surrealdb/kvs",
     "surrealdb/kvs-any",
@@ -63,6 +66,9 @@ categories = ["database-implementations", "data-structures", "embedded"]
 [workspace.dependencies]
 # SurrealDB crates
 surrealdb = { version = "3.3.0-nightly", path = "surrealdb", default-features = false }
+surrealdb-catalog = { version = "3.3.0-nightly", path = "surrealdb/catalog" }
+surrealdb-expr = { version = "3.3.0-nightly", path = "surrealdb/expr" }
+surrealdb-gql = { version = "3.3.0-nightly", path = "surrealdb/gql" }
 surrealdb-sql = { version = "3.3.0-nightly", path = "surrealdb/sql" }
 surrealdb-strand = { version = "3.3.0-nightly", path = "surrealdb/strand", default-features = false }
 surrealdb-syn = { version = "3.3.0-nightly", path = "surrealdb/syn" }

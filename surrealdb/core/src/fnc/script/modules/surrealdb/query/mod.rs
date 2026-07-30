@@ -8,13 +8,13 @@ use reblessive::tree::Stk;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::FlowResultExt as _;
 
 mod classes;
 
 pub(crate) use classes::Query;
 
 use crate::ctx::Context;
+use crate::exe::FlowResultExt as _;
 
 /// A class to carry the data to run subqueries.
 #[derive(JsLifetime)]
@@ -85,7 +85,15 @@ pub fn query<'js>(
 			let context = context.freeze();
 
 			Stk::enter_scope(|stk| {
-				stk.run(|stk| query.query.compute(stk, &context, query_ctx.opt, query_ctx.doc))
+				stk.run(|stk| {
+					crate::legacy::expr_compute(
+						&query.query,
+						stk,
+						&context,
+						query_ctx.opt,
+						query_ctx.doc,
+					)
+				})
 			})
 			.await
 			.catch_return()

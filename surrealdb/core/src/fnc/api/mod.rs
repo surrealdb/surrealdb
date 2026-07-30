@@ -139,5 +139,5 @@ pub async fn timeout(
 	ctx.add_timeout(*timeout)?;
 	let ctx = &ctx.freeze();
 
-	next.invoke(stk, ctx, opt, doc, vec![req]).await
+	crate::legacy::closure_invoke(&next, stk, ctx, opt, doc, vec![req]).await
 }

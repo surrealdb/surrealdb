@@ -14,6 +14,7 @@ pub mod api;
 pub mod args;
 pub mod array;
 pub mod bytes;
+pub(crate) mod closure;
 pub mod count;
 pub mod crypto;
 pub mod duration;

@@ -52,15 +52,15 @@ use revision::WalkRevisioned;
 pub(crate) use streaming::StreamingLeafEvaluator;
 use wire_literal::{LiteralSet, LiteralWire};
 
-use crate::expr::operator::BinaryOperator;
-use crate::fnc::operate;
-use crate::key::KVKeyDecode;
-use crate::key::record::RecordKey;
-use crate::val::object_extract::{
+use crate::exec::object_extract::{
 	DescendResult, Extracted, NeedleKey, PathSegment, SlotScanResult, WalkLeafErr,
 	descend_to_value_walker_parts, extract_field_from_record_bytes, record_data_bytes,
 	scan_record_object_at_path_with_slots,
 };
+use crate::expr::operator::BinaryOperator;
+use crate::fnc::operate;
+use crate::key::KVKeyDecode;
+use crate::key::record::RecordKey;
 use crate::val::{RecordId, Value};
 
 /// When a streaming leaf walk bails or misses, re-apply this op against a decoded leaf or
@@ -105,7 +105,7 @@ pub(crate) struct FusedFlatClause {
 	/// `key_utf8`, built once at construction. The fused object scan's
 	/// needle-driven branch uses it as the `find_value_bytes` needle so the
 	/// per-row hot loop never re-serialises the key. Mirrors
-	/// [`PathSegment`](crate::val::object_extract::PathSegment)'s pre-encoded
+	/// [`PathSegment`](crate::exec::object_extract::PathSegment)'s pre-encoded
 	/// `wire`.
 	pub(crate) key_wire: Box<[u8]>,
 	pub(crate) ops: Vec<FlatClauseOp>,
@@ -117,7 +117,7 @@ impl FusedFlatClause {
 	/// (`flat_clauses_from_specs`) and the test single-clause constructor.
 	pub(crate) fn new(key_utf8: Vec<u8>, ops: Vec<FlatClauseOp>) -> Self {
 		let key_wire =
-			crate::val::object_extract::strand_wire_bytes_from_utf8(&key_utf8).into_boxed_slice();
+			crate::exec::object_extract::strand_wire_bytes_from_utf8(&key_utf8).into_boxed_slice();
 		Self {
 			key_utf8,
 			key_wire,
@@ -156,7 +156,7 @@ impl FusedFlatClause {
 /// plus its plan-time pre-encoded `key_wire`, so evaluation can pass
 /// `&[FusedFlatClause]` directly with no per-row projection or re-encoding.
 ///
-/// [`scan_record_object_at_path_with_slots`]: crate::val::object_extract::scan_record_object_at_path_with_slots
+/// [`scan_record_object_at_path_with_slots`]: crate::exec::object_extract::scan_record_object_at_path_with_slots
 impl NeedleKey for FusedFlatClause {
 	#[inline]
 	fn key_utf8(&self) -> &[u8] {
@@ -333,7 +333,7 @@ pub(crate) struct PreDecodeFilter {
 	/// Hard cap on path-segment count for any pre-decode descent. Sourced
 	/// from `ctx.config.idiom_recursion_limit` at the planner; bounds the
 	/// stack and intermediate allocations done by
-	/// [`crate::val::object_extract`]'s walker descent. Paths longer than
+	/// [`crate::exec::object_extract`]'s walker descent. Paths longer than
 	/// the limit fall back to full-record decode + post-decode evaluation.
 	pub(crate) depth_limit: u32,
 }
@@ -1245,7 +1245,7 @@ mod tests {
 	/// only the *source* of the bytes changes, never the bytes.
 	#[test]
 	fn fused_clause_key_wire_matches_on_demand_encoding() {
-		use crate::val::object_extract::{NeedleKey, strand_wire_bytes_from_utf8};
+		use crate::exec::object_extract::{NeedleKey, strand_wire_bytes_from_utf8};
 		for key in [b"a".as_slice(), b"number", b"geography", b"a_longer_field_name_here"] {
 			let clause = fused_clause(key.to_vec(), BinaryOperator::Equal, Value::None, false);
 			assert_eq!(

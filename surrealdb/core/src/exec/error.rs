@@ -92,20 +92,6 @@ pub(crate) enum Error {
 		message: String,
 	},
 
-	/// The wrong quantity or magnitude of arguments was given for the specified
-	/// function
-	#[error("Invalid aggregation: {message}")]
-	InvalidAggregation {
-		message: String,
-	},
-
-	#[error(
-		"Incorrect selector for aggregate selection, expression `{expr}` within in selector cannot be aggregated in a group."
-	)]
-	InvalidAggregationSelector {
-		expr: String,
-	},
-
 	/// Invalid timeout
 	#[error("Invalid control flow statement, break or continue statement found outside of loop.")]
 	InvalidControlFlow,
@@ -437,12 +423,6 @@ impl LeafError for Error {
 				..
 			}
 			| Error::InvalidMethodArguments {
-				..
-			}
-			| Error::InvalidAggregation {
-				..
-			}
-			| Error::InvalidAggregationSelector {
 				..
 			}
 			| Error::InvalidControlFlow

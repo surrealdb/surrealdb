@@ -8,9 +8,10 @@ use crate::catalog::{LATEST_EDGE_VARIANT, RecordType};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Statement};
 use crate::doc::{CursorDoc, Document, Error as DocError, Extras};
+use crate::exe::FlowResultExt;
 use crate::expr::data::Data;
 use crate::expr::paths::{ID, IN, OUT};
-use crate::expr::{AssignOperator, Error, FlowResultExt, Idiom, Kind, KindLiteral, Part};
+use crate::expr::{AssignOperator, Error, Idiom, Kind, KindLiteral, Part};
 use crate::iam::AuthLimit;
 use crate::val::{RecordId, RecordIdKey, TableName, Value};
 
@@ -94,7 +95,10 @@ impl Document {
 				} else {
 					Some(&self.current)
 				};
-				let value = stk.run(|stk| expr.compute(stk, ctx, opt, doc)).await.catch_return()?;
+				let value = stk
+					.run(|stk| crate::legacy::expr_compute(expr, stk, ctx, opt, doc))
+					.await
+					.catch_return()?;
 				value.generate(tb, false)?
 			} else {
 				// No id and no `DEFAULT`: synthesise one for the declared kind.
@@ -401,19 +405,27 @@ impl Document {
 				Data::UnsetExpression(data) => ComputedData::Unset(data.clone()),
 				// This is a PATCH expression
 				Data::PatchExpression(data) => ComputedData::Patch(Arc::new(
-					data.compute(stk, ctx, opt, Some(doc)).await.catch_return()?,
+					crate::legacy::expr_compute(data, stk, ctx, opt, Some(doc))
+						.await
+						.catch_return()?,
 				)),
 				// This is a MERGE expression
 				Data::MergeExpression(data) => ComputedData::Merge(Arc::new(
-					data.compute(stk, ctx, opt, Some(doc)).await.catch_return()?,
+					crate::legacy::expr_compute(data, stk, ctx, opt, Some(doc))
+						.await
+						.catch_return()?,
 				)),
 				// This is a REPLACE expression
 				Data::ReplaceExpression(data) => ComputedData::Replace(Arc::new(
-					data.compute(stk, ctx, opt, Some(doc)).await.catch_return()?,
+					crate::legacy::expr_compute(data, stk, ctx, opt, Some(doc))
+						.await
+						.catch_return()?,
 				)),
 				// This is a CONTENT expression
 				Data::ContentExpression(data) => ComputedData::Content(Arc::new(
-					data.compute(stk, ctx, opt, Some(doc)).await.catch_return()?,
+					crate::legacy::expr_compute(data, stk, ctx, opt, Some(doc))
+						.await
+						.catch_return()?,
 				)),
 				// This is a SET or ON DUPLICATE KEY UPDATE expression
 				x @ Data::SetExpression(data) | x @ Data::UpdateExpression(data) => {
@@ -435,9 +447,7 @@ impl Document {
 						assignments.push(ComputedAssignment {
 							place: x.place.clone(),
 							operator: x.operator.clone(),
-							value: x
-								.value
-								.compute(stk, &ctx, opt, Some(doc))
+							value: crate::legacy::expr_compute(&x.value, stk, &ctx, opt, Some(doc))
 								.await
 								.catch_return()?,
 						});
@@ -629,14 +639,22 @@ async fn apply_assignments(
 	for x in assignments {
 		match &x.operator {
 			AssignOperator::Assign => match &x.value {
-				Value::None => doc.del(stk, ctx, opt, &x.place).await?,
-				_ => doc.set(stk, ctx, opt, &x.place, x.value.clone()).await?,
+				Value::None => crate::legacy::value_del(doc, stk, ctx, opt, &x.place).await?,
+				_ => {
+					crate::legacy::value_set(doc, stk, ctx, opt, &x.place, x.value.clone()).await?
+				}
 			},
-			AssignOperator::Add => doc.increment(stk, ctx, opt, &x.place, x.value.clone()).await?,
-			AssignOperator::Subtract => {
-				doc.decrement(stk, ctx, opt, &x.place, x.value.clone()).await?
+			AssignOperator::Add => {
+				crate::legacy::value_increment(doc, stk, ctx, opt, &x.place, x.value.clone())
+					.await?
 			}
-			AssignOperator::Extend => doc.extend(stk, ctx, opt, &x.place, x.value.clone()).await?,
+			AssignOperator::Subtract => {
+				crate::legacy::value_decrement(doc, stk, ctx, opt, &x.place, x.value.clone())
+					.await?
+			}
+			AssignOperator::Extend => {
+				crate::legacy::value_extend(doc, stk, ctx, opt, &x.place, x.value.clone()).await?
+			}
 		}
 	}
 	Ok(())
