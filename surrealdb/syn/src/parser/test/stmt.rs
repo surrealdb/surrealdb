@@ -2003,7 +2003,7 @@ fn parse_define_analyzer_module_function() {
 		async |parser, stk| parser.parse_expr_inherit(stk).await,
 	)
 	.unwrap_err();
-	assert!(err.to_string().contains("Experimental capability `surrealism` is not enabled"));
+	assert!(err.to_string().contains("Surrealism modules are not enabled"));
 }
 
 #[test]

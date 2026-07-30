@@ -222,7 +222,6 @@ pub static PATHS: phf::Map<UniCase<&'static str>, (PathKind, Option<UniCase<&'st
 		UniCase::ascii("object::is_empty") => (PathKind::Function, None),
 		UniCase::ascii("object::keys") => (PathKind::Function, None),
 		UniCase::ascii("object::len") => (PathKind::Function, None),
-		UniCase::ascii("object::matches") => (PathKind::Function, None),
 		UniCase::ascii("object::remove") => (PathKind::Function, None),
 		UniCase::ascii("object::values") => (PathKind::Function, None),
 		//

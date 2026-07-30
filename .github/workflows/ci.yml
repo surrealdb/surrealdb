@@ -71,10 +71,37 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          # The WASI target is needed to pack the Surrealism demo module below.
+          targets: wasm32-wasip2
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build binary
         run: cargo build --target ${{ matrix.target }}
+
+      # rust-toolchain.toml pins the toolchain every cargo invocation resolves
+      # to, which is not the one the setup action installs targets for, so the
+      # WASI target has to be added to the pinned toolchain as well.
+      - name: Install wasm32-wasip2 target
+        run: rustup target add wasm32-wasip2
+
+      # The Surrealism demo archive is the fixture the conformance suite loads
+      # via `DEFINE MODULE`. Every leg packs it: the archive itself is a WASM
+      # component and so portable, but packing exercises host-architecture code
+      # paths — compiling the guest's C dependencies for wasm32, and running the
+      # component through wasmtime to extract its exports — so each architecture
+      # covers its own. Packing here also keeps a failure attached to a job the
+      # required-checks gate already watches, and keeps the conformance job free
+      # of a Rust toolchain.
+      - name: Pack Surrealism demo module
+        run: >-
+          target/${{ matrix.target }}/debug/surreal module build --debug
+          -o ${{ github.workspace }}/demo.surli surrealism/demo
+
+      - name: Upload Surrealism demo module
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # (Actions must be pinned by commit hash) v7.0.0
+        with:
+          name: demo-surli-${{ matrix.name }}
+          path: demo.surli
 
       - name: sccache stats
         if: ${{ always() }}
@@ -680,6 +707,12 @@ jobs:
       - name: Set file permissions
         run: chmod +x ${{ github.workspace }}/artifacts/surreal
 
+      - name: Download Surrealism demo module
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: demo-surli-arm64
+          path: ${{ github.workspace }}/artifacts
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -696,6 +729,7 @@ jobs:
         working-directory: tests/conformance-js
         env:
           SURREAL_BIN: ${{ github.workspace }}/artifacts/surreal
+          SURREAL_DEMO_SURLI: ${{ github.workspace }}/artifacts/demo.surli
         run: bun test --timeout 30000
 
   # ----------------------------------------

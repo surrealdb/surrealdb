@@ -1,5 +1,6 @@
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
@@ -29,13 +30,13 @@ pub async fn expect(
 		match got {
 			Value::Bool(true) => Ok(value),
 			Value::Bool(false) => {
-				if let Some(Value::String(user_message)) = message {
-					bail!(ExecError::Thrown(format!(
-						"value::expect assertion failed with message: '{user_message}'"
-					)))
-				} else {
-					bail!(ExecError::Thrown("value::expect assertion failed".to_owned()))
-				}
+				let suffix = match message {
+					None | Some(Value::None) => String::new(),
+					Some(user_message) => {
+						format!(" with message: {}", user_message.to_sql())
+					}
+				};
+				bail!(ExecError::Thrown(format!("value::expect assertion failed{suffix}")))
 			}
 			other => {
 				bail!(ExprError::InvalidFunctionArguments {

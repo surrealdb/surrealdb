@@ -25,8 +25,8 @@ impl Parser<'_> {
 				self.pop_peek();
 				if !self.settings.surrealism_enabled {
 					bail!(
-						"Experimental capability `surrealism` is not enabled",
-						@self.last_span() => "Use of `mod::` is still experimental"
+						"Surrealism modules are not enabled",
+						@self.last_span() => "Use of `mod::` requires Surrealism modules"
 					)
 				}
 
@@ -49,8 +49,8 @@ impl Parser<'_> {
 				self.pop_peek();
 				if !self.settings.surrealism_enabled {
 					bail!(
-						"Experimental capability `surrealism` is not enabled",
-						@self.last_span() => "Use of `silo::` is still experimental"
+						"Surrealism modules are not enabled",
+						@self.last_span() => "Use of `silo::` requires Surrealism modules"
 					)
 				}
 
@@ -160,8 +160,8 @@ impl Parser<'_> {
 	) -> ParseResult<FunctionCall> {
 		if !self.settings.surrealism_enabled {
 			bail!(
-				"Experimental capability `surrealism` is not enabled",
-				@self.last_span() => "Use of `mod::` is still experimental"
+				"Surrealism modules are not enabled",
+				@self.last_span() => "Use of `mod::` requires Surrealism modules"
 			)
 		}
 
@@ -193,8 +193,8 @@ impl Parser<'_> {
 	pub(super) async fn parse_silo_function(&mut self, stk: &mut Stk) -> ParseResult<FunctionCall> {
 		if !self.settings.surrealism_enabled {
 			bail!(
-				"Experimental capability `surrealism` is not enabled",
-				@self.last_span() => "Use of `silo::` is still experimental"
+				"Surrealism modules are not enabled",
+				@self.last_span() => "Use of `silo::` requires Surrealism modules"
 			)
 		}
 

@@ -228,8 +228,8 @@ impl Parser<'_> {
 		_stk: &mut Stk,
 	) -> ParseResult<DefineModuleStatement> {
 		bail!(
-			"Surrealism modules are not supported in WASM environments",
-			@self.last_span() => "Use of `DEFINE MODULE` is not supported in WASM environments"
+			"Surrealism modules are not enabled",
+			@self.last_span() => "Use of `DEFINE MODULE` requires Surrealism modules"
 		)
 	}
 
@@ -240,8 +240,8 @@ impl Parser<'_> {
 	) -> ParseResult<DefineModuleStatement> {
 		if !self.settings.surrealism_enabled {
 			bail!(
-				"Experimental capability `surrealism` is not enabled",
-				@self.last_span() => "Use of `DEFINE MODULE` is still experimental"
+				"Surrealism modules are not enabled",
+				@self.last_span() => "Use of `DEFINE MODULE` requires Surrealism modules"
 			)
 		}
 

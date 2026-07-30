@@ -86,8 +86,8 @@ impl Parser<'_> {
 			t!("MODULE") => {
 				if !self.settings.surrealism_enabled {
 					bail!(
-						"Experimental capability `surrealism` is not enabled",
-						@self.last_span() => "Use of `REMOVE MODULE` is still experimental"
+						"Surrealism modules are not enabled",
+						@self.last_span() => "Use of `REMOVE MODULE` requires Surrealism modules"
 					)
 				}
 

@@ -25,6 +25,21 @@ Each test file spawns its own in-memory server on a random port; each test
 uses a unique namespace/database. No external network access, no shared
 state — files and tests are parallel-safe.
 
+### Surrealism fixture
+
+`tests/surrealism.test.ts` needs a packed demo module and skips itself when
+`SURREAL_DEMO_SURLI` is unset, so a local run is green without one. When `CI` is
+set the archive is mandatory and its absence fails the file, so a CI run that
+lost the packing step cannot report green on skipped coverage. Packing the
+archive needs a Rust toolchain with the `wasm32-wasip2` target and a Clang that
+can cross-compile to WASM (on macOS, upstream LLVM — Apple's Clang cannot):
+
+```sh
+rustup target add wasm32-wasip2
+surreal module build --debug -o /tmp/demo.surli surrealism/demo
+SURREAL_DEMO_SURLI=/tmp/demo.surli bun test tests/surrealism.test.ts
+```
+
 ### Target binary
 
 The suite pins the behavior of the current engine. Point `SURREAL_BIN` at a

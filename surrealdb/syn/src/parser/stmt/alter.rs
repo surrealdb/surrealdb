@@ -1129,8 +1129,8 @@ impl Parser<'_> {
 	pub async fn parse_alter_module(&mut self, stk: &mut Stk) -> ParseResult<AlterModuleStatement> {
 		if !self.settings.surrealism_enabled {
 			bail!(
-				"Experimental capability `surrealism` is not enabled",
-				@self.last_span() => "Use of `ALTER MODULE` is still experimental"
+				"Surrealism modules are not enabled",
+				@self.last_span() => "Use of `ALTER MODULE` requires Surrealism modules"
 			)
 		}
 

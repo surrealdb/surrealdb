@@ -162,6 +162,9 @@ fn text_test_quirk() {
 const IGNORE_TESTS: &[&str] = &[
 	"language/control_flow/transaction/cancel_behaviour.surql",
 	"language/control_flow/transaction/commit_behaviour.surql",
+	// Uses the silo module name form `silo::<org>::<pkg><major.minor.patch>`,
+	// whose version suffix this parser does not accept yet.
+	"language/statements/remove/module/not_exists_silo_name.surql",
 ];
 
 #[test]
