@@ -7,7 +7,6 @@ use surrealdb_core::dbs::capabilities::{
 	RouteTarget, Targets,
 };
 use surrealdb_core::kvs::export::{ExcludedTables, TableConfig};
-use surrealdb_types::Duration;
 
 pub(crate) mod parser;
 
@@ -68,7 +67,7 @@ pub(crate) fn key_valid(v: &str) -> Result<String, String> {
 }
 
 pub(crate) fn duration(v: &str) -> Result<std::time::Duration, String> {
-	Duration::from_str(v).map(|d| d.into_inner()).map_err(|_| String::from("invalid duration"))
+	parse_common::duration(v).map_err(|e| format!("Invalid duration: {}", e.message))
 }
 
 pub(crate) fn net_targets(value: &str) -> Result<Targets<NetTarget>, String> {

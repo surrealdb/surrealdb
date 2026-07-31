@@ -25,6 +25,7 @@ members = [
     "surrealdb/kvs-tikv",
     "surrealdb/mcp",
     "surrealdb/observe",
+    "surrealdb/parse-common",
     "surrealdb/parser",
     "surrealdb/rpc",
     "surrealdb/server",
@@ -81,6 +82,7 @@ surrealdb-types-derive = { version = "3.3.0-nightly", path = "surrealdb/types/de
 ast = { version = "3.3.0-nightly", package = "surrealdb-ast", path = "surrealdb/ast" }
 token = { version = "3.3.0-nightly", package = "surrealdb-token", path = "surrealdb/token" }
 parser = { version = "3.3.0-nightly", package = "surrealdb-parser", path = "surrealdb/parser" }
+parse-common = { version = "3.3.0-nightly", package = "surrealdb-parse-common", path = "surrealdb/parse-common" }
 common = { version = "3.3.0-nightly", package = "surrealdb-common", path = "surrealdb/common" }
 surrealdb-cnf = { version = "3.3.0-nightly", path = "surrealdb/cnf" }
 surrealdb-rpc = { version = "3.3.0-nightly", path = "surrealdb/rpc" }
@@ -108,6 +110,8 @@ surrealism = { version = "0.5", path = "surrealism" }
 surrealism-macros = { version = "0.5", path = "surrealism/macros", default-features = false }
 surrealism-runtime = { version = "0.5", path = "surrealism/runtime" }
 surrealism-types = { version = "0.5", path = "surrealism/types", default-features = false }
+
+
 # External surreal crates
 affinitypool = "0.7.0"
 dmp = "0.2.3"

@@ -1,12 +1,11 @@
 [package]
-name = "surrealdb-cnf"
-publish = true
-readme = "README.md"
-documentation = "https://docs.rs/surrealdb-cnf/"
-version.workspace = true
+name = "surrealdb-parse-common"
 authors.workspace = true
 edition.workspace = true
 license-file.workspace = true
+publish = true
+version.workspace = true
+#rust-version.workspace = true
 description.workspace = true
 repository.workspace = true
 homepage.workspace = true
@@ -14,11 +13,9 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-common.workspace = true
-num-traits.workspace = true
-path-clean.workspace = true
-tracing.workspace = true
-parse-common.workspace = true
+chrono.workspace = true
+logos.workspace = true
+uuid.workspace = true
 
 [lints]
 workspace = true

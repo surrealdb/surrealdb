@@ -16,9 +16,9 @@ categories.workspace = true
 common.workspace = true
 ast.workspace = true
 token.workspace = true
+parse-common.workspace = true
 
 bitflags.workspace = true
-chrono.workspace = true
 reblessive.workspace = true
 logos.workspace = true
 rust_decimal.workspace = true

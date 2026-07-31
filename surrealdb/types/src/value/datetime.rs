@@ -53,7 +53,7 @@ impl Datetime {
 impl FromStr for Datetime {
 	type Err = anyhow::Error;
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		Ok(Self(DateTime::parse_from_rfc3339(s)?.to_utc()))
+		parse_common::datetime(s).map(Self).map_err(|e| anyhow::Error::msg(e.message))
 	}
 }
 

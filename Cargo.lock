@@ -6822,6 +6822,7 @@ dependencies = [
  "num-traits",
  "path-clean",
  "surrealdb-common",
+ "surrealdb-parse-common",
  "tracing",
 ]
 
@@ -7234,17 +7235,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "surrealdb-parse-common"
+version = "3.3.0-nightly"
+dependencies = [
+ "chrono",
+ "logos",
+ "uuid",
+]
+
+[[package]]
 name = "surrealdb-parser"
 version = "3.3.0-nightly"
 dependencies = [
  "bitflags",
- "chrono",
  "criterion",
  "logos",
  "reblessive",
  "rust_decimal",
  "surrealdb-ast",
  "surrealdb-common",
+ "surrealdb-parse-common",
  "surrealdb-token",
  "uuid",
 ]
@@ -7364,6 +7374,7 @@ dependencies = [
  "surrealdb-cnf",
  "surrealdb-core",
  "surrealdb-mcp",
+ "surrealdb-parse-common",
  "surrealdb-types",
  "surrealism-runtime",
  "tempfile",
@@ -7514,6 +7525,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "surrealdb-parse-common",
  "surrealdb-protocol",
  "surrealdb-types-derive",
  "tracing",

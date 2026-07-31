@@ -219,6 +219,10 @@ name = "surrealdb-ast"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
+name = "surrealdb-parse-common"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
 name = "surrealdb-parser"
 allow = ["BUSL-1.1"]
 
@@ -334,6 +338,11 @@ license-files = []
 
 [[licenses.clarify]]
 name = "surrealdb-ast"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-parse-common"
 expression = "BUSL-1.1"
 license-files = []
 

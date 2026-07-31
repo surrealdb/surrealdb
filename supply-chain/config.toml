@@ -74,6 +74,9 @@ audit-as-crates-io = false
 [policy.surrealdb-mcp]
 audit-as-crates-io = false
 
+[policy.surrealdb-parse-common]
+audit-as-crates-io = false
+
 [policy.surrealdb-parser]
 audit-as-crates-io = false
 

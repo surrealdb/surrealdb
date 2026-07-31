@@ -6,39 +6,17 @@ use std::time::Duration;
 
 /// Parse a duration string in the form `<number><unit>`.
 ///
-/// Supported units:
-///   - `µs` / `us` (microseconds)
-///   - `ms` (milliseconds)
-///   - `s` (seconds)
-///   - `m` (minutes)
-///   - `h` (hours)
-///   - `d` (days)
-pub fn parse_duration(s: &str) -> std::result::Result<Duration, String> {
-	let s = s.trim();
-	if s.is_empty() {
-		return Err("Empty duration string".into());
-	}
-	// Plain numeric value (seconds)
-	if let Ok(secs) = s.parse::<u64>() {
-		return Ok(Duration::from_secs(secs));
-	}
-	// Split into numeric prefix and unit suffix
-	let num_end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
-	let (num_str, unit) = s.split_at(num_end);
-	if num_str.is_empty() {
-		return Err(format!("Invalid duration string: '{s}'"));
-	}
-	let n: u64 = num_str.parse().map_err(|_| format!("Invalid duration number in: '{s}'"))?;
-	match unit {
-		"µs" | "us" => Ok(Duration::from_micros(n)),
-		"ms" => Ok(Duration::from_millis(n)),
-		"s" => Ok(Duration::from_secs(n)),
-		"m" => Ok(Duration::from_secs(n * 60)),
-		"h" => Ok(Duration::from_secs(n * 3600)),
-		"d" => Ok(Duration::from_secs(n * 86400)),
-		_ => Err(format!(
-			"Unknown duration unit '{unit}' in: '{s}'. Expected µs, us, ms, s, m, h, or d"
-		)),
+/// Uses standard surrealql duration syntax with the special case that if the string does not
+/// contain any time unit it defaults to seconds
+pub fn parse_duration(s: &str) -> Result<Duration, String> {
+	if s.contains(|x: char| !x.is_ascii_digit()) {
+		parse_common::duration(s).map_err(|e| e.message)
+	} else {
+		s.parse()
+			.map_err(|_| {
+				"Duration value overflowed, value larger then maximum supported value".to_string()
+			})
+			.map(Duration::from_secs)
 	}
 }
 
@@ -97,7 +75,6 @@ mod test {
 		assert!(parse_duration("").is_err());
 		assert!(parse_duration("abc").is_err());
 		assert!(parse_duration("30x").is_err());
-		assert!(parse_duration("30d8h").is_err());
 	}
 
 	#[test]

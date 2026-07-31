@@ -60,30 +60,6 @@ macro_rules! lazy_env_parse {
 				.unwrap_or($default)
 		})
 	};
-	// With a closure for the default value, allowing for byte suffixes
-	(duration, $key:expr_2021, $t:ty, || $default:expr_2021) => {
-		std::sync::LazyLock::new(|| {
-			std::env::var($key)
-				.ok()
-				.and_then(|s| {
-					use $crate::str::ParseDuration;
-					s.parse_duration::<$t>().ok()
-				})
-				.unwrap_or_else(|| $default)
-		})
-	};
-	// With a static expression for the default value, allowing for byte suffixes
-	(duration, $key:expr_2021, $t:ty, $default:expr_2021) => {
-		std::sync::LazyLock::new(|| {
-			std::env::var($key)
-				.ok()
-				.and_then(|s| {
-					use $crate::str::ParseDuration;
-					s.parse_duration::<$t>().ok()
-				})
-				.unwrap_or($default)
-		})
-	};
 }
 
 /// Report a broken invariant and return from the enclosing function.

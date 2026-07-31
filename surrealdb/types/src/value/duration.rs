@@ -2,7 +2,6 @@ use std::fmt::Debug;
 use std::ops::Deref;
 use std::str::FromStr;
 
-use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 
 use crate::sql::{SqlFormat, ToSql};
@@ -198,133 +197,7 @@ impl FromStr for Duration {
 	type Err = anyhow::Error;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		let mut total_secs = 0u64;
-		let mut total_nanos = 0u32;
-		let mut remaining = s.trim();
-
-		// Handle empty string
-		if remaining.is_empty() {
-			return Err(anyhow!("Invalid duration string: {s}, empty string"));
-		}
-
-		// Handle special case for zero duration
-		if remaining == "0ns" || remaining == "0" {
-			return Ok(Duration::new(0, 0));
-		}
-
-		while !remaining.is_empty() {
-			// Find the end of the number part
-			let mut end = 0;
-			for (i, c) in remaining.char_indices() {
-				if !c.is_ascii_digit() {
-					end = i;
-					break;
-				}
-				end = i + c.len_utf8();
-			}
-
-			if end == 0 {
-				return Err(anyhow!("Invalid duration string: {s}, empty characters"));
-			}
-
-			let value_str = &remaining[..end];
-			let value: u64 = value_str.parse().map_err(|err| {
-				anyhow!("Invalid duration string: {s}, failed to parse value: {err}")
-			})?;
-
-			remaining = &remaining[end..];
-
-			// Parse the unit - check longer units first to avoid partial matches
-			let unit = if remaining.starts_with("ms") {
-				remaining = &remaining[2..];
-				"ms"
-			} else if remaining.starts_with("µs") {
-				remaining = &remaining[2..];
-				"µs"
-			} else if remaining.starts_with("us") {
-				remaining = &remaining[2..];
-				"us"
-			} else if remaining.starts_with("ns") {
-				remaining = &remaining[2..];
-				"ns"
-			} else if remaining.starts_with("y") {
-				remaining = &remaining[1..];
-				"y"
-			} else if remaining.starts_with("w") {
-				remaining = &remaining[1..];
-				"w"
-			} else if remaining.starts_with("d") {
-				remaining = &remaining[1..];
-				"d"
-			} else if remaining.starts_with("h") {
-				remaining = &remaining[1..];
-				"h"
-			} else if remaining.starts_with("m") {
-				remaining = &remaining[1..];
-				"m"
-			} else if remaining.starts_with("s") {
-				remaining = &remaining[1..];
-				"s"
-			} else {
-				return Err(anyhow!(
-					"Invalid duration string: {s}, unexpected remainder: {remaining}"
-				));
-			};
-
-			// Convert to seconds and nanoseconds based on unit
-			match unit {
-				"y" => {
-					total_secs = total_secs.saturating_add(value.saturating_mul(SECONDS_PER_YEAR));
-				}
-				"w" => {
-					total_secs = total_secs.saturating_add(value.saturating_mul(SECONDS_PER_WEEK));
-				}
-				"d" => {
-					total_secs = total_secs.saturating_add(value.saturating_mul(SECONDS_PER_DAY));
-				}
-				"h" => {
-					total_secs = total_secs.saturating_add(value.saturating_mul(SECONDS_PER_HOUR));
-				}
-				"m" => {
-					total_secs =
-						total_secs.saturating_add(value.saturating_mul(SECONDS_PER_MINUTE));
-				}
-				"s" => {
-					total_secs = total_secs.saturating_add(value);
-				}
-				"ms" => {
-					let millis = value.saturating_mul(NANOSECONDS_PER_MILLISECOND as u64);
-					let (secs, nanos) = (millis / 1_000_000_000, (millis % 1_000_000_000) as u32);
-					total_secs = total_secs.saturating_add(secs);
-					total_nanos = total_nanos.saturating_add(nanos);
-				}
-				"µs" | "us" => {
-					let micros = value.saturating_mul(NANOSECONDS_PER_MICROSECOND as u64);
-					let (secs, nanos) = (micros / 1_000_000_000, (micros % 1_000_000_000) as u32);
-					total_secs = total_secs.saturating_add(secs);
-					total_nanos = total_nanos.saturating_add(nanos);
-				}
-				"ns" => {
-					let (secs, nanos) = (value / 1_000_000_000, (value % 1_000_000_000) as u32);
-					total_secs = total_secs.saturating_add(secs);
-					total_nanos = total_nanos.saturating_add(nanos);
-				}
-				unexpected => {
-					return Err(anyhow!(
-						"Invalid duration string: {s}, unexpected unit: {unexpected}"
-					));
-				}
-			}
-		}
-
-		// Handle nanosecond overflow
-		if total_nanos >= 1_000_000_000 {
-			let additional_secs = total_nanos / 1_000_000_000;
-			total_secs = total_secs.saturating_add(additional_secs as u64);
-			total_nanos %= 1_000_000_000;
-		}
-
-		Ok(Duration::new(total_secs, total_nanos))
+		parse_common::duration(s).map(Self).map_err(|e| anyhow::Error::msg(e.message))
 	}
 }
 
@@ -379,7 +252,6 @@ mod tests {
 
 		// Test zero duration
 		assert_eq!(Duration::from_str("0ns").unwrap(), Duration::new(0, 0));
-		assert_eq!(Duration::from_str("0").unwrap(), Duration::new(0, 0));
 
 		// Test combined units
 		let combined = Duration::from_str("1h30m15s500ms").unwrap();
