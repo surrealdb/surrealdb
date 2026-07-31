@@ -10,7 +10,7 @@ use crate::expr::Base;
 use crate::expr::statements::alter::AlterKind;
 use crate::expr::statements::alter::function::AlterFunctionStatement;
 use crate::iam::{Action, AuthLimit, ResourceKind};
-use crate::key::database::all::DatabaseRoot;
+use crate::key::schema::FunctionKey;
 use crate::val::Value;
 
 #[instrument(level = "trace", name = "AlterFunctionStatement::compute", skip_all)]
@@ -65,11 +65,9 @@ pub(crate) async fn alter_function_statement_compute(
 	// Recompute auth_limit from the current principal to prevent privilege escalation
 	fc.auth_limit = AuthLimit::new_from_auth(&opt.auth).into();
 
-	let key = crate::key::database::fc::Fc {
-		prefix: DatabaseRoot {
-			ns,
-			db,
-		},
+	let key = FunctionKey {
+		ns,
+		db,
 		fc: Cow::Borrowed(&this.name),
 	};
 	txn.set_key(&key, &fc.to_stored()).await?;

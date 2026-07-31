@@ -31,6 +31,7 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::Part;
 use crate::idx::docids::{DocId, TableDocIds};
+use crate::idx::entry::IndexEntryValue;
 use crate::idx::ft::fulltext::{FullTextCompactionPlan, FullTextIndex};
 use crate::idx::planner::iterators::{IndexCountCompactionPlan, IndexCountThingIterator};
 #[cfg(diskann)]
@@ -39,9 +40,7 @@ use crate::idx::trees::hnsw::index::{HnswCompactionPlan, HnswIndex};
 use crate::idx::trees::store::IndexStores;
 use crate::idx::{Error as IdxError, IndexKeyBase};
 use crate::key;
-use crate::key::database::all::DatabaseRoot;
-use crate::key::index::IndexEntryValue;
-use crate::key::index::iu::IndexCountKey;
+use crate::key::schema::{EntryKey, IndexCountKey, UniqueKey};
 use crate::kvs::Transaction;
 use crate::val::{Array, RecordId, TableName, Value};
 
@@ -147,12 +146,10 @@ impl<'a> IndexOperation<'a> {
 	/// a canonical, lexicographically ordered byte form which normalizes numeric
 	/// types (Int/Float/Decimal). This means equal numeric values like 0, 0.0 and
 	/// 0dec map to the same index key and therefore conflict on UNIQUE indexes.
-	fn get_unique_index_key(&self, v: &'a [Value]) -> key::index::UniqueIndex<'_> {
-		key::index::UniqueIndex {
-			prefix: DatabaseRoot {
-				ns: self.ns,
-				db: self.db,
-			},
+	fn get_unique_index_key(&self, v: &'a [Value]) -> UniqueKey<'_> {
+		UniqueKey {
+			ns: self.ns,
+			db: self.db,
 			tb: Cow::Borrowed(&self.table_name),
 			ix: self.ix.index_id,
 			fd: Cow::Borrowed(v),
@@ -162,12 +159,10 @@ impl<'a> IndexOperation<'a> {
 	/// Build the KV key for a non-unique index. The record id is appended
 	/// to the encoded field values so multiple records can share the same field
 	/// bytes; numeric values inside fd are normalized via Array.
-	fn get_non_unique_index_key(&self, v: &'a [Value]) -> key::index::Index<'_> {
-		key::index::Index {
-			prefix: DatabaseRoot {
-				ns: self.ns,
-				db: self.db,
-			},
+	fn get_non_unique_index_key(&self, v: &'a [Value]) -> EntryKey<'_> {
+		EntryKey {
+			ns: self.ns,
+			db: self.db,
 			tb: Cow::Borrowed(&self.table_name),
 			ix: self.ix.index_id,
 			fd: Cow::Borrowed(v),
@@ -321,10 +316,8 @@ impl<'a> IndexOperation<'a> {
 			return Ok(());
 		}
 		let key = IndexCountKey {
-			prefix: crate::key::database::all::DatabaseRoot {
-				ns: self.ns,
-				db: self.db,
-			},
+			ns: self.ns,
+			db: self.db,
 			tb: std::borrow::Cow::Borrowed(&self.table_name),
 			ix: self.ix.index_id,
 			uid: Some((self.ctx.node_id(), uuid::Uuid::now_v7())),

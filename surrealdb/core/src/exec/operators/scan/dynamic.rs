@@ -32,8 +32,7 @@ use crate::expr::with::With;
 use crate::expr::{Cond, ControlFlow, ControlFlowExt};
 use crate::iam::Action;
 use crate::idx::planner::ScanDirection;
-use crate::key::database::all::DatabaseRoot;
-use crate::key::{KVRange, record};
+use crate::key::schema::RecordPrefix;
 use crate::val::{TableName, Value};
 
 /// Full table scan - iterates over all records in a table.
@@ -834,14 +833,12 @@ async fn resolve_table_scan_stream(
 		// Fall back to table KV scan (NOINDEX, BTree rejected by ordering
 		// check, etc.)
 		_ => {
-			let range = record::RecordKeyPrefix {
-				root: DatabaseRoot {
-					ns: cfg.ns_id,
-					db: cfg.db_id,
-				},
-				table: Cow::Borrowed(&cfg.table_name),
+			let range = RecordPrefix {
+				ns: cfg.ns_id,
+				db: cfg.db_id,
+				tb: Cow::Borrowed(&cfg.table_name),
 			}
-			.encode_range()?;
+			.range()?;
 
 			let stream = kv_scan_stream(
 				txn,

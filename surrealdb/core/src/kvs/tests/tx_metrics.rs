@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use crate::CommunityComposer;
 use crate::idx::planner::ScanDirection;
-use crate::key::KeyRange;
+use crate::key::RawRange;
 use crate::kvs::Datastore;
 
 #[cfg(feature = "kv-mem")]
@@ -97,13 +97,13 @@ pub async fn cursor_for_each_metrics_match_next_batch(ds: Datastore) {
 		tx.set(k.into(), v).await.unwrap();
 	}
 	tx.commit().await.unwrap();
-	let rng = KeyRange::from(b"a"..b"d");
+	let rng = RawRange::of_bytes(b"a", b"d");
 
 	// Drain via next_batch and snapshot the transaction's scan metrics.
 	let tx1 = ds.transaction(Read).await.unwrap();
 	{
 		let mut c =
-			tx1.open_vals_cursor(rng.as_borrowed(), ScanDirection::Forward, 0, None).await.unwrap();
+			tx1.open_vals_cursor_raw(rng.clone(), ScanDirection::Forward, 0, None).await.unwrap();
 		loop {
 			let b = c.next_batch(2).await.unwrap();
 			if b.is_empty() {
@@ -117,7 +117,7 @@ pub async fn cursor_for_each_metrics_match_next_batch(ds: Datastore) {
 	// Drain via for_each (visitor ignores every row) and snapshot.
 	let tx2 = ds.transaction(Read).await.unwrap();
 	{
-		let mut c = tx2.open_vals_cursor(rng, ScanDirection::Forward, 0, None).await.unwrap();
+		let mut c = tx2.open_vals_cursor_raw(rng, ScanDirection::Forward, 0, None).await.unwrap();
 		loop {
 			let s =
 				c.for_each(2, &mut |_k, _v| Ok(std::ops::ControlFlow::Continue(()))).await.unwrap();

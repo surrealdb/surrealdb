@@ -57,9 +57,8 @@ use crate::idx::{
 	IndexKeyBase, bump_compaction_generation, is_transaction_condition_not_met,
 	read_compaction_generation,
 };
-use crate::key::index::dr::DiskAnnRecordPending;
-use crate::key::index::dw::DiskAnnRecordPendingShard;
-use crate::key::{KVKey, KVKeyDecode, KVValue, Key, KeyRange};
+use crate::key::schema::{DiskannRecordPendingKey, DiskannRecordPendingShardKey};
+use crate::key::{KVKey, KVKeyDecode, KVValue, Key, TypedRange};
 use crate::kvs::{Transaction, Val};
 use crate::val::{Number, RecordId, RecordIdKey, Value};
 
@@ -708,10 +707,14 @@ impl DiskAnnIndex {
 		Ok(changed)
 	}
 
-	/// Returns whether a KV range holds no entries. Used to re-check emptiness inside the apply
-	/// transaction before advancing pending state.
-	async fn range_empty(ctx: &FrozenContext, tx: &Transaction, rng: KeyRange<'_>) -> Result<bool> {
-		let mut cursor = tx.open_vals_cursor(rng, ScanDirection::Forward, 0, None).await?;
+	/// Returns whether a pending-update range holds no entries. Used to re-check emptiness inside
+	/// the apply transaction before advancing pending state.
+	async fn range_empty(
+		ctx: &FrozenContext,
+		tx: &Transaction,
+		rng: TypedRange<DiskAnnRecordPendingUpdate>,
+	) -> Result<bool> {
+		let mut cursor = tx.open_vals_cursor_raw(rng, ScanDirection::Forward, 0, None).await?;
 		// The first non-empty batch is conclusive; we just need to know
 		// whether *any* entry exists in the range.
 		let batch = cursor.next_batch(1).await?;
@@ -971,7 +974,7 @@ impl DiskAnnIndex {
 		folded_shard_keys: &mut HashSet<Vec<u8>>,
 	) -> Result<bool> {
 		let mut cursor =
-			tx.open_vals_cursor(ikb.new_dr_range()?, ScanDirection::Forward, 0, None).await?;
+			tx.open_vals_cursor_raw(ikb.new_dr_range()?, ScanDirection::Forward, 0, None).await?;
 		loop {
 			let batch = cursor.next_batch(crate::kvs::NORMAL_BATCH_SIZE).await?;
 			if batch.is_empty() {
@@ -983,7 +986,7 @@ impl DiskAnnIndex {
 				if ctx.is_done(Some(*count)).await? {
 					bail!(EngineError::QueryCancelled)
 				}
-				let id = DiskAnnRecordPending::decode_key(&legacy_key)?.id.into_owned();
+				let id = DiskannRecordPendingKey::decode_key(&legacy_key)?.id.into_owned();
 				let legacy_update = DiskAnnRecordPendingUpdate::kv_decode_value(&legacy_value, ())?;
 				let legacy_op = Self::record_pending_to_operation(id.clone(), legacy_update);
 				// Probe the record's sharded `!dw` counterpart so a dual-layout record is folded in
@@ -1033,12 +1036,12 @@ impl DiskAnnIndex {
 	async fn capture_shard_range(
 		ctx: &FrozenContext,
 		tx: &Transaction,
-		rng: KeyRange<'_>,
+		rng: TypedRange<DiskAnnRecordPendingUpdate>,
 		count: &mut usize,
 		builder: &mut PendingPlanBuilder,
 		folded_shard_keys: &HashSet<Vec<u8>>,
 	) -> Result<bool> {
-		let mut cursor = tx.open_vals_cursor(rng, ScanDirection::Forward, 0, None).await?;
+		let mut cursor = tx.open_vals_cursor_raw(rng, ScanDirection::Forward, 0, None).await?;
 		loop {
 			let batch = cursor.next_batch(crate::kvs::NORMAL_BATCH_SIZE).await?;
 			if batch.is_empty() {
@@ -1055,7 +1058,7 @@ impl DiskAnnIndex {
 					// it.
 					continue;
 				}
-				let id = DiskAnnRecordPendingShard::decode_key(&key)?.id.into_owned();
+				let id = DiskannRecordPendingShardKey::decode_key(&key)?.id.into_owned();
 				let pending = DiskAnnRecordPendingUpdate::kv_decode_value(&value, ())?;
 				let pending = Self::record_pending_to_operation(id, pending);
 				if !builder.add(key, value, pending) {
@@ -1545,7 +1548,7 @@ impl DiskAnnIndex {
 	async fn scan_pending_range<F>(
 		ctx: &Context,
 		tx: &Transaction,
-		rng: KeyRange<'_>,
+		rng: TypedRange<DiskAnnRecordPendingUpdate>,
 		sharded: bool,
 		count: &mut usize,
 		collector: &mut F,
@@ -1553,7 +1556,7 @@ impl DiskAnnIndex {
 	where
 		F: FnMut(PendingOperation),
 	{
-		let mut cursor = tx.open_vals_cursor(rng, ScanDirection::Forward, 0, None).await?;
+		let mut cursor = tx.open_vals_cursor_raw(rng, ScanDirection::Forward, 0, None).await?;
 		loop {
 			let batch = cursor.next_batch(crate::kvs::NORMAL_BATCH_SIZE).await?;
 			if batch.is_empty() {
@@ -1564,9 +1567,9 @@ impl DiskAnnIndex {
 					bail!(EngineError::QueryCancelled)
 				}
 				let id = if sharded {
-					DiskAnnRecordPendingShard::decode_key(key)?.id.into_owned()
+					DiskannRecordPendingShardKey::decode_key(key)?.id.into_owned()
 				} else {
-					DiskAnnRecordPending::decode_key(key)?.id.into_owned()
+					DiskannRecordPendingKey::decode_key(key)?.id.into_owned()
 				};
 				let pending = DiskAnnRecordPendingUpdate::kv_decode_value(value, ())?;
 				collector(Self::record_pending_to_operation(id, pending));
@@ -1585,6 +1588,7 @@ mod tests {
 	use super::*;
 	use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 	use crate::idx::trees::diskann::cache::DiskAnnCache;
+	use crate::key::schema::RecordKey;
 	use crate::kvs::{Datastore, TransactionType};
 
 	fn ikb() -> IndexKeyBase {
@@ -1690,7 +1694,7 @@ mod tests {
 
 	/// The sharded `!dw` key a write for `id` lands on, for tests asserting on persisted pending
 	/// records (the write path stores under this key, not the legacy `!dr` key).
-	fn dw_key<'a>(ikb: &'a IndexKeyBase, id: &'a RecordIdKey) -> DiskAnnRecordPendingShard<'a> {
+	fn dw_key<'a>(ikb: &'a IndexKeyBase, id: &'a RecordIdKey) -> DiskannRecordPendingShardKey<'a> {
 		ikb.new_dw_key(DiskAnnIndex::pending_state_shard(id), id)
 	}
 
@@ -1960,11 +1964,9 @@ mod tests {
 		{
 			let tx = ds.transaction(TransactionType::Write).await?;
 			let tb = surrealdb_strand::TableName::from("pts");
-			let key = crate::key::record::RecordKey {
-				root: crate::key::database::all::DatabaseRoot {
-					ns: db_def.namespace_id,
-					db: db_def.database_id,
-				},
+			let key = RecordKey {
+				ns: db_def.namespace_id,
+				db: db_def.database_id,
 				tb: std::borrow::Cow::Borrowed(&tb),
 				id: std::borrow::Cow::Owned(RecordIdKey::Number(1)),
 			};

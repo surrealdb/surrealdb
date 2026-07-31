@@ -28,8 +28,7 @@ use crate::exec::{
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::iam::Action;
 use crate::idx::planner::ScanDirection;
-use crate::key::database::all::DatabaseRoot;
-use crate::key::{KVRange, record};
+use crate::key::schema::RecordPrefix;
 
 /// Direct KV range scan over a known table.
 ///
@@ -275,14 +274,12 @@ impl ExecOperator for TableScan {
 					None
 				};
 
-				let range = record::RecordKeyPrefix {
-					root: DatabaseRoot {
-						ns: ns.namespace_id,
-						db: db.database_id,
-					},
-					table: Cow::Borrowed(&table_name),
+				let range = RecordPrefix {
+					ns: ns.namespace_id,
+					db: db.database_id,
+					tb: Cow::Borrowed(&table_name),
 				}
-				.encode_range()?;
+				.range()?;
 				let limit_hint = limit_val.map(|l| (l + start_val).try_into().unwrap_or(u32::MAX));
 				let pre_decode_filter = pre_decode_filter_for_execute(
 					&pre_decode_filter_status,

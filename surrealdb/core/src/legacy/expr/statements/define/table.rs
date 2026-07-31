@@ -28,7 +28,7 @@ use crate::expr::{
 	Kind, Literal, SelectStatement,
 };
 use crate::iam::{Action, ResourceKind};
-use crate::key::database::all::DatabaseRoot;
+use crate::key::schema::{FieldKey, ForeignTableKey, RecordKey, TblRoot};
 use crate::kvs::Transaction;
 use crate::legacy::{expr_to_ident, kill_table_subscriptions};
 use crate::val::{Array, Number, RecordId, RecordIdKey, TableName, Value};
@@ -161,11 +161,9 @@ pub(crate) async fn define_table_statement_compute(
 		// `REMOVE TABLE`.
 		kill_table_subscriptions(ctx, &txn, ns.namespace_id, db.database_id, &name).await?;
 		// Remove the table data
-		let key = crate::key::table::all::TableRoot {
-			prefix: DatabaseRoot {
-				ns: ns.namespace_id,
-				db: db.database_id,
-			},
+		let key = TblRoot {
+			ns: ns.namespace_id,
+			db: db.database_id,
 			tb: Cow::Borrowed(&name),
 		};
 		txn.del_prefix_key(&key).await?;
@@ -175,11 +173,9 @@ pub(crate) async fn define_table_statement_compute(
 		// Process each foreign table
 		for ft in tables.iter() {
 			// Save the view config
-			let key = crate::key::table::ft::Ft {
-				prefix: DatabaseRoot {
-					ns: ns.namespace_id,
-					db: db.database_id,
-				},
+			let key = ForeignTableKey {
+				ns: ns.namespace_id,
+				db: db.database_id,
 				tb: Cow::Borrowed(ft),
 				ft: Cow::Borrowed(&name),
 			};
@@ -329,11 +325,9 @@ pub(crate) async fn define_table_statement_initialize_materialized_view(
 			fail!("select results did not contain a record id");
 		};
 
-		let key = crate::key::record::RecordKey {
-			root: DatabaseRoot {
-				ns,
-				db,
-			},
+		let key = RecordKey {
+			ns,
+			db,
 			tb: Cow::Borrowed(view_table_name),
 			id: Cow::Borrowed(&id.key),
 		};
@@ -797,11 +791,9 @@ pub(crate) async fn define_table_statement_add_in_out_fields(
 		let tb_name = tb.name.clone();
 		// Set the `in` field as a DEFINE FIELD definition
 		{
-			let key = crate::key::table::fd::Fd {
-				prefix: DatabaseRoot {
-					ns,
-					db,
-				},
+			let key = FieldKey {
+				ns,
+				db,
 				tb: Cow::Borrowed(&tb_name),
 				fd: Cow::Borrowed("in"),
 			};
@@ -815,11 +807,9 @@ pub(crate) async fn define_table_statement_add_in_out_fields(
 		}
 		// Set the `out` field as a DEFINE FIELD definition
 		{
-			let key = crate::key::table::fd::Fd {
-				prefix: DatabaseRoot {
-					ns,
-					db,
-				},
+			let key = FieldKey {
+				ns,
+				db,
 				tb: Cow::Borrowed(&tb_name),
 				fd: Cow::Borrowed("out"),
 			};

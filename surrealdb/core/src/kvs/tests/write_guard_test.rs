@@ -140,10 +140,7 @@ async fn write_guard_charges_range_deletes() {
 		.await
 		.unwrap()
 		.with_write_keys_limit(std::num::NonZeroU64::new(2));
-	let range = |a: &str, b: &str| crate::key::KeyRange {
-		start: Key::from(a.as_bytes().to_vec()),
-		end: Key::from(b.as_bytes().to_vec()),
-	};
+	let range = |a: &str, b: &str| crate::key::RawRange::of_bytes(a.as_bytes(), b.as_bytes());
 	tx.delr(range("za", "zb")).await.unwrap();
 	tx.delr(range("zb", "zc")).await.unwrap();
 	let err = tx.delr(range("zc", "zd")).await.expect_err("third range delete should trip");

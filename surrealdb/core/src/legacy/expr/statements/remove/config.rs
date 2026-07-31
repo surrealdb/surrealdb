@@ -7,6 +7,7 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::expr::statements::remove::config::RemoveConfigStatement;
 use crate::iam::{Action, ConfigKind, ResourceKind};
+use crate::key::schema::{DbConfigKey, RootConfigKey};
 use crate::val::Value;
 
 /// Process this type returning a computed simple Value
@@ -41,7 +42,7 @@ pub(crate) async fn remove_config_statement_compute(
 					.into());
 				}
 			}
-			let key = crate::key::root::root_config::RootConfig {
+			let key = RootConfigKey {
 				ty: std::borrow::Cow::Borrowed(cg),
 			};
 			txn.del_key(&key).await?;
@@ -58,11 +59,9 @@ pub(crate) async fn remove_config_statement_compute(
 					.into());
 				}
 			}
-			let key = crate::key::database::cg::Config {
-				prefix: crate::key::database::all::DatabaseRoot {
-					ns,
-					db,
-				},
+			let key = DbConfigKey {
+				ns,
+				db,
 				ty: std::borrow::Cow::Borrowed(cg),
 			};
 			txn.del_key(&key).await?;

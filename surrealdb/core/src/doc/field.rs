@@ -17,7 +17,7 @@ use crate::expr::idiom::{Idiom, IdiomTrie, IdiomTrieContains};
 use crate::expr::kind::Kind;
 use crate::expr::statements::define::kind_contains_object;
 use crate::iam::{Action, AuthLimit};
-use crate::key::database::all::DatabaseRoot;
+use crate::key::schema::ReferenceKey;
 use crate::val::value::every::ArrayBehaviour;
 use crate::val::{RecordId, Value};
 
@@ -803,12 +803,10 @@ impl FieldEditContext<'_> {
 				match action {
 					RefAction::Set(rid) => {
 						let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;
-						let key = crate::key::r#ref::Ref {
-							prefix: DatabaseRoot {
-								ns,
-								db,
-							},
-							table: Cow::Borrowed(&rid.table),
+						let key = ReferenceKey {
+							ns,
+							db,
+							tb: Cow::Borrowed(&rid.table),
 							id: Cow::Borrowed(&rid.key),
 							foreign_table: Cow::Borrowed(&self.rid.table),
 							foreign_field: Cow::Borrowed(&ff),
@@ -818,12 +816,10 @@ impl FieldEditContext<'_> {
 					}
 					RefAction::Delete(rid) => {
 						let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;
-						let key = crate::key::r#ref::Ref {
-							prefix: DatabaseRoot {
-								ns,
-								db,
-							},
-							table: Cow::Borrowed(&rid.table),
+						let key = ReferenceKey {
+							ns,
+							db,
+							tb: Cow::Borrowed(&rid.table),
 							id: Cow::Borrowed(&rid.key),
 							foreign_table: Cow::Borrowed(&self.rid.table),
 							foreign_field: Cow::Borrowed(&ff),

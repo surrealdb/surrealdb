@@ -34,15 +34,16 @@
 //! [`remove`]: TableDocIds::remove
 //! [`RecordIdKey`]: crate::val::RecordIdKey
 
+use std::borrow::Cow;
+
 use anyhow::Result;
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::FrozenContext;
 use crate::err::Error;
-use crate::key::KVRange;
-use crate::key::table::dd::{self, Dd};
-use crate::key::table::di::{self, Di};
-use crate::key::table::dp;
+use crate::key::schema::{
+	DocKeyKey, DocKeyPrefix, DocLookupKey, DocLookupPrefix, DocPendingPrefix,
+};
 use crate::kvs::{Error as KvsError, Transaction};
 use crate::val::{RecordIdKey, TableName};
 
@@ -77,7 +78,7 @@ impl TableDocIds {
 		tx: &Transaction,
 		id: &RecordIdKey,
 	) -> Result<Option<DocId>> {
-		let key = Di::new(self.ns, self.db, &self.tb, id);
+		let key = DocLookupKey::new(self.ns, self.db, Cow::Borrowed(&self.tb), Cow::Borrowed(id));
 		tx.get_key(&key, None).await
 	}
 
@@ -109,7 +110,7 @@ impl TableDocIds {
 		id: &RecordIdKey,
 	) -> Result<DocId> {
 		let tx = ctx.tx();
-		let di = Di::new(self.ns, self.db, &self.tb, id);
+		let di = DocLookupKey::new(self.ns, self.db, Cow::Borrowed(&self.tb), Cow::Borrowed(id));
 		// Fast path: the record already has an id in this table's space.
 		if let Some(doc_id) = tx.get_key(&di, None).await? {
 			return Ok(doc_id);
@@ -132,7 +133,7 @@ impl TableDocIds {
 				// We won the race: publish the reverse mapping too. Written only
 				// after the forward claim succeeds, so a loser leaves no dangling
 				// `!dd` entry to clean up.
-				let dd = Dd::new(self.ns, self.db, &self.tb, doc_id);
+				let dd = DocKeyKey::new(self.ns, self.db, Cow::Borrowed(&self.tb), doc_id);
 				tx.set_key(&dd, id).await?;
 				Ok(doc_id)
 			}
@@ -161,7 +162,7 @@ impl TableDocIds {
 		tx: &Transaction,
 		doc_id: DocId,
 	) -> Result<Option<RecordIdKey>> {
-		let key = Dd::new(self.ns, self.db, &self.tb, doc_id);
+		let key = DocKeyKey::new(self.ns, self.db, Cow::Borrowed(&self.tb), doc_id);
 		tx.get_key(&key, None).await
 	}
 
@@ -172,8 +173,10 @@ impl TableDocIds {
 		tx: &Transaction,
 		doc_ids: &[DocId],
 	) -> Result<Vec<Option<RecordIdKey>>> {
-		let keys: Vec<Dd<'_>> =
-			doc_ids.iter().map(|&doc_id| Dd::new(self.ns, self.db, &self.tb, doc_id)).collect();
+		let keys: Vec<DocKeyKey<'_>> = doc_ids
+			.iter()
+			.map(|&doc_id| DocKeyKey::new(self.ns, self.db, Cow::Borrowed(&self.tb), doc_id))
+			.collect();
 		tx.get_many_key(keys, None).await
 	}
 
@@ -186,10 +189,10 @@ impl TableDocIds {
 	/// mapping (already reclaimed) — the deferred-reclaim sweep uses it to
 	/// restore the mapping of a record re-created concurrently with the sweep.
 	pub(crate) async fn remove(&self, tx: &Transaction, id: &RecordIdKey) -> Result<Option<DocId>> {
-		let di = Di::new(self.ns, self.db, &self.tb, id);
+		let di = DocLookupKey::new(self.ns, self.db, Cow::Borrowed(&self.tb), Cow::Borrowed(id));
 		if let Some(doc_id) = tx.get_key(&di, None).await? {
 			tx.del_key(&di).await?;
-			let dd = Dd::new(self.ns, self.db, &self.tb, doc_id);
+			let dd = DocKeyKey::new(self.ns, self.db, Cow::Borrowed(&self.tb), doc_id);
 			tx.del_key(&dd).await?;
 			Ok(Some(doc_id))
 		} else {
@@ -214,10 +217,10 @@ impl TableDocIds {
 		id: &RecordIdKey,
 		doc_id: DocId,
 	) -> Result<bool> {
-		let di = Di::new(self.ns, self.db, &self.tb, id);
+		let di = DocLookupKey::new(self.ns, self.db, Cow::Borrowed(&self.tb), Cow::Borrowed(id));
 		match tx.put_key(&di, &doc_id).await {
 			Ok(()) => {
-				let dd = Dd::new(self.ns, self.db, &self.tb, doc_id);
+				let dd = DocKeyKey::new(self.ns, self.db, Cow::Borrowed(&self.tb), doc_id);
 				tx.set_key(&dd, id).await?;
 				Ok(true)
 			}
@@ -247,9 +250,9 @@ impl TableDocIds {
 	/// The monotonic sequence counter is deliberately left intact, so a doc-ID
 	/// index defined later keeps allocating fresh, never-reused ids.
 	pub(crate) async fn remove_all(&self, tx: &Transaction) -> Result<()> {
-		tx.delr(di::Prefix::new(self.ns, self.db, &self.tb).encode_range()?).await?;
-		tx.delr(dd::Prefix::new(self.ns, self.db, &self.tb).encode_range()?).await?;
-		tx.delr(dp::Prefix::new(self.ns, self.db, &self.tb).encode_range()?).await?;
+		tx.delr(DocLookupPrefix::new(self.ns, self.db, Cow::Borrowed(&self.tb)).range()?).await?;
+		tx.delr(DocKeyPrefix::new(self.ns, self.db, Cow::Borrowed(&self.tb)).range()?).await?;
+		tx.delr(DocPendingPrefix::new(self.ns, self.db, Cow::Borrowed(&self.tb)).range()?).await?;
 		Ok(())
 	}
 }
@@ -403,6 +406,7 @@ mod tests {
 #[cfg(test)]
 #[cfg(feature = "kv-tikv")]
 mod tikv_concurrency {
+	use std::borrow::Cow;
 	use std::collections::HashSet;
 	use std::sync::Arc;
 
@@ -411,8 +415,7 @@ mod tikv_concurrency {
 	use super::{DocId, TableDocIds};
 	use crate::CommunityComposer;
 	use crate::catalog::{DatabaseId, NamespaceId};
-	use crate::key::KVRange;
-	use crate::key::table::dd;
+	use crate::key::schema::{DocKeyPrefix, RootRoot, VersionKey};
 	use crate::kvs::{Datastore, TransactionType, is_retryable_transaction_conflict};
 	use crate::val::RecordIdKey;
 
@@ -426,7 +429,10 @@ mod tikv_concurrency {
 			.await
 			.unwrap();
 		let tx = ds.transaction(TransactionType::Write).await.unwrap();
-		tx.delr((vec![0u8]..vec![0xffu8]).into()).await.unwrap();
+		// Both top-level regions: everything under the root, and the storage
+		// version key, which sits outside it.
+		tx.delr(RootRoot {}.range_subtree().unwrap()).await.unwrap();
+		tx.del_key(&VersionKey {}).await.unwrap();
 		tx.commit().await.unwrap();
 		Arc::new(ds)
 	}
@@ -493,8 +499,10 @@ mod tikv_concurrency {
 		assert_eq!(d.get_doc_id(&tx, &rid).await.unwrap(), Some(doc_id));
 		assert_eq!(d.get_record_id(&tx, doc_id).await.unwrap(), Some(rid.clone()));
 		// ...and no loser leaked a stale reverse mapping: exactly one `!dd` entry.
-		let reverse =
-			tx.getr(dd::Prefix::new(NS, DB, &tb).encode_range().unwrap(), None).await.unwrap();
+		let reverse = tx
+			.getr(DocKeyPrefix::new(NS, DB, Cow::Borrowed(&tb)).range().unwrap(), None)
+			.await
+			.unwrap();
 		assert_eq!(
 			reverse.len(),
 			1,
@@ -548,8 +556,10 @@ mod tikv_concurrency {
 		let tx = ds.transaction(TransactionType::Read).await.unwrap();
 		let d = TableDocIds::new(NS, DB, "t".into());
 		let tb = "t".into();
-		let reverse =
-			tx.getr(dd::Prefix::new(NS, DB, &tb).encode_range().unwrap(), None).await.unwrap();
+		let reverse = tx
+			.getr(DocKeyPrefix::new(NS, DB, Cow::Borrowed(&tb)).range().unwrap(), None)
+			.await
+			.unwrap();
 		assert_eq!(d.get_doc_id(&tx, &rid).await.unwrap(), Some(a_doc));
 		assert_eq!(
 			reverse.len(),

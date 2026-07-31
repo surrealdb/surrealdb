@@ -19,13 +19,11 @@ use crate::dbs::{Options, Session};
 use crate::doc::{Action, CursorDoc, Document, DocumentContext, Error};
 use crate::exe::FlowResultExt as _;
 use crate::iam::{Auth, AuthLimit};
-use crate::key::root::eq::{EventQueue, EventQueuePrefix};
-use crate::key::{KVKeyDecode, KVRange, KVValue, impl_kv_value_revisioned};
+use crate::key::schema::{EventQueueKey, EventQueuePrefix};
+use crate::key::{KVKeyDecode, KVValue, impl_kv_value_revisioned};
 use crate::kvs::sequences::Sequences;
 use crate::kvs::tasklease::LeaseHandler;
-use crate::kvs::{
-	Datastore, NORMAL_BATCH_SIZE, Transaction, TransactionFactory, TransactionType, Val,
-};
+use crate::kvs::{Datastore, NORMAL_BATCH_SIZE, Transaction, TransactionFactory, TransactionType};
 use crate::val::{RecordId, Value};
 
 impl Document {
@@ -160,7 +158,7 @@ impl Document {
 		// Persist the event payload so it can be processed out-of-band.
 		// Use the current transaction so enqueue is atomic with the document change.
 		// HLC timestamp + node ID keep the queue key ordered and unique.
-		let key = EventQueue {
+		let key = EventQueueKey {
 			ns: db.namespace_id,
 			db: db.database_id,
 			tb: Cow::Borrowed(&ev.target_table),
@@ -256,7 +254,7 @@ impl AsyncEventRecord {
 		&self,
 		tx: &Transaction,
 		parent_opts: &Options,
-		eq: &EventQueue<'_>,
+		eq: &EventQueueKey<'_>,
 	) -> Result<Options> {
 		// Resolve namespace/database IDs and ensure they still match the queued key.
 		let ns = tx.expect_ns_by_name(&self.ns).await?;
@@ -305,9 +303,13 @@ impl AsyncEventRecord {
 				lh.try_maintain_lease().await?;
 			}
 			let tx = ds.transaction(TransactionType::Read).await?;
-			let range = EventQueuePrefix {}.encode_range()?;
-			// Read a bounded batch without holding a write transaction.
-			let res = catch!(tx, tx.scan(range, NORMAL_BATCH_SIZE, 0, None).await);
+			let range = EventQueuePrefix {}.range()?;
+			// Read a bounded batch without holding a write transaction. The values stay
+			// encoded so that an entry this binary cannot decode — one written by a newer
+			// node, or a partial write — is skipped per entry rather than failing the
+			// batch. Nothing but a successful run deletes a queue entry, so failing the
+			// batch would stall the queue for good.
+			let res = catch!(tx, tx.scan_raw(range, NORMAL_BATCH_SIZE, 0, None).await);
 			tx.cancel().await?;
 			res
 		};
@@ -319,7 +321,7 @@ impl AsyncEventRecord {
 	#[cfg(not(target_family = "wasm"))]
 	async fn process_events_batch(
 		ds: &Datastore,
-		res: Vec<(Vec<u8>, Val)>,
+		res: Vec<(Vec<u8>, Vec<u8>)>,
 		lh: Option<&LeaseHandler>,
 	) -> Result<()> {
 		if res.is_empty() {
@@ -354,6 +356,9 @@ impl AsyncEventRecord {
 
 		// Producer
 		for (k, v) in res {
+			let Some(v) = Self::decode_queued(&k, &v) else {
+				continue;
+			};
 			match AsyncEventContext::new(ds, lh.cloned(), k, v) {
 				Ok(event_context) => {
 					sender.send(event_context).await?;
@@ -381,7 +386,7 @@ impl AsyncEventRecord {
 	#[cfg(target_family = "wasm")]
 	async fn process_events_batch(
 		ds: &Datastore,
-		res: Vec<(Vec<u8>, Val)>,
+		res: Vec<(Vec<u8>, Vec<u8>)>,
 		lh: Option<&LeaseHandler>,
 	) -> Result<()> {
 		let mut stack = TreeStack::new();
@@ -389,10 +394,29 @@ impl AsyncEventRecord {
 			if let Some(lh) = lh {
 				lh.try_maintain_lease().await?;
 			}
+			let Some(v) = Self::decode_queued(&k, &v) else {
+				continue;
+			};
 			let event_context = AsyncEventContext::new(ds, lh.cloned(), k, v)?;
 			stack.enter(|stk| stk.run(|stk| event_context.run_event_checked(stk))).finish().await;
 		}
 		Ok(())
+	}
+
+	/// Decode one queued event, reporting and discarding an entry this binary
+	/// cannot read.
+	///
+	/// A queue entry is only removed once it has run, so an undecodable entry has
+	/// to be stepped over rather than propagated: returning an error here would
+	/// leave the entry in place and fail every later batch the same way.
+	fn decode_queued(k: &[u8], v: &[u8]) -> Option<AsyncEventRecord> {
+		match KVValue::kv_decode_value(v, ()) {
+			Ok(ev) => Some(ev),
+			Err(e) => {
+				error!("Skipping undecodable async event queue entry: {e} - Key: {k:?}");
+				None
+			}
+		}
 	}
 }
 
@@ -403,11 +427,16 @@ struct AsyncEventContext {
 	sequences: Sequences,
 	lh: Option<LeaseHandler>,
 	k: Vec<u8>,
-	v: Option<Val>,
+	v: Option<AsyncEventRecord>,
 }
 
 impl AsyncEventContext {
-	fn new(ds: &Datastore, lh: Option<LeaseHandler>, k: Vec<u8>, v: Val) -> Result<Self> {
+	fn new(
+		ds: &Datastore,
+		lh: Option<LeaseHandler>,
+		k: Vec<u8>,
+		v: AsyncEventRecord,
+	) -> Result<Self> {
 		Ok(Self {
 			ctx: Some(ds.setup_ctx()?),
 			opt: ds.setup_options(&Session::default()),
@@ -432,13 +461,17 @@ impl AsyncEventContext {
 		self.tf.transaction(Write, self.sequences.clone()).await
 	}
 
-	async fn run_event(&mut self, stk: &mut Stk, mut ctx: Context, v: Val) -> Result<()> {
+	async fn run_event(
+		&mut self,
+		stk: &mut Stk,
+		mut ctx: Context,
+		mut ev: AsyncEventRecord,
+	) -> Result<()> {
 		let tx = self.new_write_tx().await?;
 		ctx.set_transaction(Arc::new(tx));
 		let ctx = ctx.freeze();
 		let tx = ctx.tx();
-		let eq = EventQueue::decode_key(&self.k)?;
-		let mut ev = AsyncEventRecord::kv_decode_value(&v, ())?;
+		let eq = EventQueueKey::decode_key(&self.k)?;
 		match Self::process_event(stk, &ctx, &self.opt, self.lh.as_ref(), &eq, &ev).await {
 			Ok(_) => {
 				// Event processed successfully, delete the event from the queue.
@@ -469,7 +502,7 @@ impl AsyncEventContext {
 	async fn retry_attempt(
 		tx: Transaction,
 		e: anyhow::Error,
-		eq: &EventQueue<'_>,
+		eq: &EventQueueKey<'_>,
 		ev: &mut AsyncEventRecord,
 	) -> Result<()> {
 		// `attempt` is incremented when requeuing; `retry` counts retries, so requeue while
@@ -505,7 +538,7 @@ impl AsyncEventContext {
 		}
 	}
 
-	async fn final_error(tx: Transaction, eq: &EventQueue<'_>, e: &Error) -> Result<()> {
+	async fn final_error(tx: Transaction, eq: &EventQueueKey<'_>, e: &Error) -> Result<()> {
 		// The error is final, we log the final error message and remove the event from the queue
 		warn!("Event processing failed: {:?}", e);
 		catch!(tx, tx.del_key(eq).await);
@@ -520,7 +553,7 @@ impl AsyncEventContext {
 		ctx: &FrozenContext,
 		opt: &Options,
 		lh: Option<&LeaseHandler>,
-		eq: &EventQueue<'_>,
+		eq: &EventQueueKey<'_>,
 		ev: &AsyncEventRecord,
 	) -> Result<()> {
 		let ctx = ev.build_event_context(ctx);

@@ -1704,7 +1704,7 @@ mod tests {
 			tx.get_tb_index(db.namespace_id, db.database_id, &tb, "hnsw_pts", None).await?.unwrap();
 		let ikb = IndexKeyBase::new(db.namespace_id, db.database_id, tb, ix.index_id);
 		let pending_records = tx.getr(ikb.new_hr_range()?, None).await?;
-		let pending_appends = tx.getr(ikb.new_hp_range()?, None).await?;
+		let pending_appends = tx.getr_raw(ikb.new_hp_range()?, None).await?;
 		let state: HnswState = tx.get_key(&ikb.new_hs_key(), None).await?.unwrap();
 		tx.cancel().await?;
 

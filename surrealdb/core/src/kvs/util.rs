@@ -1,9 +1,9 @@
-use std::mem;
 use std::sync::Arc;
 
 use anyhow::Result;
 
-use crate::key::{KVValue, Key, KeyRange};
+use crate::idx::planner::ScanDirection;
+use crate::key::{AnyRange, KVValue, KeyRange, Resumable};
 use crate::kvs::Transaction;
 
 /// Takes an iterator of byte slices and deserializes the byte slices to the
@@ -32,12 +32,40 @@ fn range_is_single_key(range: &KeyRange<'_>) -> bool {
 		&& range.end.as_slice()[range.end.len() - 1] == 0
 }
 
-pub async fn scan(
-	range: &mut KeyRange<'static>,
-	tx: &Transaction,
-	limit: u32,
-) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
-	if range.is_empty() {
+/// Moves whichever end of `range` a scan in `dir` reads from past `key`, so the
+/// next read over it starts after the entry `key` addresses.
+fn resume<R>(range: &mut R, key: &[u8], dir: ScanDirection)
+where
+	R: Resumable + Clone,
+{
+	*range = range.clone().resume_after(key, dir);
+}
+
+/// Narrows `range` to nothing, so a later read over it returns no entries.
+///
+/// A forward scan is drained by moving its start past its end, a backward scan by
+/// pulling its end back to its start; either way the range can no longer contain a
+/// key, which is what the emptiness check each helper opens with reads.
+fn exhaust<R>(range: &mut R, bytes: &KeyRange<'_>, dir: ScanDirection)
+where
+	R: Resumable + Clone,
+{
+	let edge = match dir {
+		ScanDirection::Forward => bytes.end.as_slice(),
+		ScanDirection::Backward => bytes.start.as_slice(),
+	};
+	resume(range, edge, dir);
+}
+
+/// Reads up to `limit` entries from the start of `range` as bytes, narrowing it in
+/// place to what is left to read. Once the scan has drained the range it is left
+/// empty, so a further call over it reads nothing.
+pub async fn scan<R>(range: &mut R, tx: &Transaction, limit: u32) -> Result<Vec<(Vec<u8>, Vec<u8>)>>
+where
+	R: AnyRange + Resumable + Clone,
+{
+	let bytes = range.clone().into_key_range();
+	if bytes.is_empty() {
 		return Ok(Vec::new());
 	}
 
@@ -45,124 +73,125 @@ pub async fn scan(
 	// Avoids costly iterator creation on rocksdb.
 	//
 	// FIXME: The kvs themselves should probably be the one to implement this optimisation
-	if range_is_single_key(range) {
-		let key = mem::replace(&mut range.start, Key::empty());
-		let res = if let Some(res) = tx.get(key.as_borrowed(), None).await? {
-			vec![(key.into_vec(), res)]
+	if range_is_single_key(&bytes) {
+		let res = if let Some(res) = tx.get(bytes.start.as_borrowed(), None).await? {
+			vec![(bytes.start.as_slice().to_vec(), res)]
 		} else {
 			Vec::new()
 		};
-		range.end = Key::empty();
+		exhaust(range, &bytes, ScanDirection::Forward);
 		return Ok(res);
 	}
 
-	let res = tx.scan(range.as_borrowed(), limit, 0, None).await?;
+	let res = tx.scan_raw(range.clone(), limit, 0, None).await?;
 
 	if limit as usize != res.len() {
-		range.end = Key::empty();
+		exhaust(range, &bytes, ScanDirection::Forward);
 	} else if let Some((key, _)) = res.last() {
-		range.start.clone_from_slice(key);
-		range.start.advance();
+		resume(range, key, ScanDirection::Forward);
 	}
 
 	Ok(res)
 }
 
-pub async fn scan_keys(
-	range: &mut KeyRange<'static>,
-	tx: &Transaction,
-	limit: u32,
-) -> Result<Vec<Vec<u8>>> {
-	if range.is_empty() {
+/// As [`scan`], reading only the keys.
+pub async fn scan_keys<R>(range: &mut R, tx: &Transaction, limit: u32) -> Result<Vec<Vec<u8>>>
+where
+	R: AnyRange + Resumable + Clone,
+{
+	let bytes = range.clone().into_key_range();
+	if bytes.is_empty() {
 		return Ok(Vec::new());
 	}
 
 	// Fast path to avoid a full scan if the key can only be a single value.
 	// Avoids costly iterator creation on rocksdb.
-	if range_is_single_key(range) {
-		let key = mem::replace(&mut range.start, Key::empty());
-		let res = if tx.exists(key.as_borrowed(), None).await? {
-			vec![key.into_vec()]
+	if range_is_single_key(&bytes) {
+		let res = if tx.exists(bytes.start.as_borrowed(), None).await? {
+			vec![bytes.start.as_slice().to_vec()]
 		} else {
 			Vec::new()
 		};
-		range.end = Key::empty();
+		exhaust(range, &bytes, ScanDirection::Forward);
 		return Ok(res);
 	}
 
-	let res = tx.keys(range.as_borrowed(), limit, 0, None).await?;
+	let res = tx.keys_raw(range.clone(), limit, 0, None).await?;
 
 	if limit as usize != res.len() {
-		range.end = Key::empty();
+		exhaust(range, &bytes, ScanDirection::Forward);
 	} else if let Some(key) = res.last() {
-		range.start.clone_from_slice(key);
-		range.start.advance();
+		resume(range, key, ScanDirection::Forward);
 	}
 
 	Ok(res)
 }
 
-pub async fn scanr(
-	range: &mut KeyRange<'static>,
+/// As [`scan`], reading from the end of `range` backwards.
+pub async fn scanr<R>(
+	range: &mut R,
 	tx: &Transaction,
 	limit: u32,
-) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
-	if range.is_empty() {
+) -> Result<Vec<(Vec<u8>, Vec<u8>)>>
+where
+	R: AnyRange + Resumable + Clone,
+{
+	let bytes = range.clone().into_key_range();
+	if bytes.is_empty() {
 		return Ok(Vec::new());
 	}
 
 	// Fast path to avoid a full scan if the key can only be a single value.
 	// Avoids costly iterator creation on rocksdb.
-	if range_is_single_key(range) {
-		let key = mem::replace(&mut range.start, Key::empty());
-		let res = if let Some(res) = tx.get(key.as_borrowed(), None).await? {
-			vec![(key.into_vec(), res)]
+	if range_is_single_key(&bytes) {
+		let res = if let Some(res) = tx.get(bytes.start.as_borrowed(), None).await? {
+			vec![(bytes.start.as_slice().to_vec(), res)]
 		} else {
 			Vec::new()
 		};
-		range.end = Key::empty();
+		exhaust(range, &bytes, ScanDirection::Backward);
 		return Ok(res);
 	}
 
-	let res = tx.scanr(range.as_borrowed(), limit, 0, None).await?;
+	let res = tx.scanr_raw(range.clone(), limit, 0, None).await?;
 
 	if limit as usize != res.len() {
-		range.end = Key::empty();
+		exhaust(range, &bytes, ScanDirection::Backward);
 	} else if let Some((key, _)) = res.last() {
-		range.end.clone_from_slice(key);
+		resume(range, key, ScanDirection::Backward);
 	}
 
 	Ok(res)
 }
 
-pub async fn scanr_keys(
-	range: &mut KeyRange<'static>,
-	tx: &Transaction,
-	limit: u32,
-) -> Result<Vec<Vec<u8>>> {
-	if range.is_empty() {
+/// As [`scanr`], reading only the keys.
+pub async fn scanr_keys<R>(range: &mut R, tx: &Transaction, limit: u32) -> Result<Vec<Vec<u8>>>
+where
+	R: AnyRange + Resumable + Clone,
+{
+	let bytes = range.clone().into_key_range();
+	if bytes.is_empty() {
 		return Ok(Vec::new());
 	}
 
 	// Fast path to avoid a full scan if the key can only be a single value.
 	// Avoids costly iterator creation on rocksdb.
-	if range_is_single_key(range) {
-		let key = mem::replace(&mut range.start, Key::empty());
-		let res = if tx.exists(key.as_borrowed(), None).await? {
-			vec![key.into_vec()]
+	if range_is_single_key(&bytes) {
+		let res = if tx.exists(bytes.start.as_borrowed(), None).await? {
+			vec![bytes.start.as_slice().to_vec()]
 		} else {
 			Vec::new()
 		};
-		range.end = Key::empty();
+		exhaust(range, &bytes, ScanDirection::Backward);
 		return Ok(res);
 	}
 
-	let res = tx.keysr(range.as_borrowed(), limit, 0, None).await?;
+	let res = tx.keysr_raw(range.clone(), limit, 0, None).await?;
 
 	if limit as usize != res.len() {
-		range.end = Key::empty();
+		exhaust(range, &bytes, ScanDirection::Backward);
 	} else if let Some(key) = res.last() {
-		range.end.clone_from_slice(key);
+		resume(range, key, ScanDirection::Backward);
 	}
 
 	Ok(res)

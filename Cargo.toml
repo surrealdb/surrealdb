@@ -14,6 +14,7 @@ members = [
     "surrealdb/expr",
     "surrealdb/gql",
     "surrealdb/iam",
+    "surrealdb/keyspace-macro",
     "surrealdb/kvs",
     "surrealdb/kvs-any",
     "surrealdb/kvs-indxdb",
@@ -85,6 +86,7 @@ surrealdb-cnf = { version = "3.3.0-nightly", path = "surrealdb/cnf" }
 surrealdb-rpc = { version = "3.3.0-nightly", path = "surrealdb/rpc" }
 surrealdb-iam = { version = "3.3.0-nightly", path = "surrealdb/iam" }
 surrealdb-observe = { version = "3.3.0-nightly", path = "surrealdb/observe" }
+surrealdb-keyspace-macro = { version = "3.3.0-nightly", path = "surrealdb/keyspace-macro" }
 surrealdb-kvs = { version = "3.3.0-nightly", path = "surrealdb/kvs" }
 surrealdb-kvs-any = { version = "3.3.0-nightly", path = "surrealdb/kvs-any", default-features = false }
 surrealdb-kvs-indxdb = { version = "3.3.0-nightly", path = "surrealdb/kvs-indxdb" }

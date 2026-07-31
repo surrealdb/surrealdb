@@ -20,9 +20,11 @@ use crate::catalog::{DatabaseId, Index, IndexDefinition, IndexId, NamespaceId};
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
-use crate::key::index::all as index_all;
-use crate::key::index::iu::{IndexCountKey, IndexPrefix};
-use crate::key::{KVKey, KVKeyDecode, KVRange, KVValue, Key};
+use crate::key::schema::{
+	DocKeyPrefix, DocLookupPrefix, DocPendingKey, DocPendingPrefix, EntryPrefix, IdxRoot,
+	IndexCountKey, IndexCountPrefix, RecordPrefix,
+};
+use crate::key::{KVKey, KVKeyDecode, KVSubspace, KVValue, Key};
 use crate::kvs::testing::{
 	NonRetryableErrorSite, RetryableConflictGuard, RetryableConflictSite,
 	inject_non_retryable_error, inject_retryable_conflict, inject_retryable_conflicts,
@@ -531,11 +533,9 @@ async fn index_prefix_key_count(
 	ix: IndexId,
 ) -> Result<usize> {
 	let tx = ds.transaction(TransactionType::Read).await?;
-	let key = index_all::AllIndexRoot {
-		prefix: crate::key::database::all::DatabaseRoot {
-			ns,
-			db,
-		},
+	let key = IdxRoot {
+		ns,
+		db,
 		tb: Cow::Borrowed(table),
 		ix,
 	};
@@ -613,11 +613,9 @@ async fn seed_uncommitted_index_build_artifacts(
 		},
 	)
 	.await?;
-	let index_data_key = index_all::AllIndexRoot {
-		prefix: crate::key::database::all::DatabaseRoot {
-			ns,
-			db,
-		},
+	let index_data_key = IdxRoot {
+		ns,
+		db,
 		tb: Cow::Borrowed(table),
 		ix,
 	}
@@ -1996,11 +1994,9 @@ async fn takeover_resumes_initial_scan_from_checkpoint() -> Result<()> {
 	// says the scan committed through `user:c`.
 	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
 	let tx = ds.transaction(TransactionType::Write).await?;
-	tx.del_prefix_key(&index_all::AllIndexRoot {
-		prefix: crate::key::database::all::DatabaseRoot {
-			ns,
-			db,
-		},
+	tx.del_prefix_key(&IdxRoot {
+		ns,
+		db,
 		tb: Cow::Borrowed(&table),
 		ix: ix.index_id,
 	})
@@ -2081,11 +2077,9 @@ async fn takeover_resumes_count_initial_scan_from_checkpoint() -> Result<()> {
 	// baseline scan committed through `user:c`.
 	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
 	let tx = ds.transaction(TransactionType::Write).await?;
-	tx.del_prefix_key(&index_all::AllIndexRoot {
-		prefix: crate::key::database::all::DatabaseRoot {
-			ns,
-			db,
-		},
+	tx.del_prefix_key(&IdxRoot {
+		ns,
+		db,
 		tb: Cow::Borrowed(&table),
 		ix: ix.index_id,
 	})
@@ -2161,11 +2155,9 @@ async fn count_tail_crash_after_commit_does_not_double_count_on_takeover() -> Re
 	// runs a full initial scan including the tail pass.
 	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
 	let tx = ds.transaction(TransactionType::Write).await?;
-	tx.del_prefix_key(&index_all::AllIndexRoot {
-		prefix: crate::key::database::all::DatabaseRoot {
-			ns,
-			db,
-		},
+	tx.del_prefix_key(&IdxRoot {
+		ns,
+		db,
 		tb: Cow::Borrowed(&table),
 		ix: ix.index_id,
 	})
@@ -2281,11 +2273,9 @@ async fn abort_mid_scan_never_checkpoints_unindexed_records() -> Result<()> {
 	// so the takeover scans `user:2..1000` without a cleanup phase.
 	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
 	let tx = ds.transaction(TransactionType::Write).await?;
-	tx.del_prefix_key(&index_all::AllIndexRoot {
-		prefix: crate::key::database::all::DatabaseRoot {
-			ns,
-			db,
-		},
+	tx.del_prefix_key(&IdxRoot {
+		ns,
+		db,
 		tb: Cow::Borrowed(&table),
 		ix: ix.index_id,
 	})
@@ -2378,11 +2368,9 @@ async fn abort_during_count_tail_pass_never_commits_partial_baselines() -> Resul
 	// were scanned, with no surviving index data.
 	let expired = Utc::now() - chrono::Duration::seconds(BUILD_OWNER_LEASE_SECS + 5);
 	let tx = ds.transaction(TransactionType::Write).await?;
-	tx.del_prefix_key(&index_all::AllIndexRoot {
-		prefix: crate::key::database::all::DatabaseRoot {
-			ns,
-			db,
-		},
+	tx.del_prefix_key(&IdxRoot {
+		ns,
+		db,
 		tb: Cow::Borrowed(&table),
 		ix: ix.index_id,
 	})
@@ -2432,15 +2420,13 @@ async fn abort_during_count_tail_pass_never_commits_partial_baselines() -> Resul
 	// Ground truth: committed baseline = signed sum of count-delta entries;
 	// outstanding replay work = queued `!bg` mutations still present.
 	let tx = ds.transaction(TransactionType::Read).await?;
-	let rng = IndexPrefix {
-		prefix: crate::key::database::all::DatabaseRoot {
-			ns,
-			db,
-		},
+	let rng = IndexCountPrefix {
+		ns,
+		db,
 		tb: Cow::Borrowed(&table),
 		ix: ix.index_id,
 	}
-	.encode_range()?;
+	.range()?;
 	let keys = catch!(tx, tx.keys(rng, u32::MAX, 0, None).await);
 	let mut sum: i64 = 0;
 	for key in &keys {
@@ -4380,10 +4366,8 @@ async fn count_doc_id_mappings(ds: &Datastore, table: &str) -> Result<(usize, us
 	let ns = tx.get_ns_by_name("test", None).await?.expect("namespace should exist");
 	let db = tx.get_db_by_name("test", "test", None).await?.expect("database should exist");
 	let tb: TableName = table.into();
-	let di =
-		crate::key::table::di::Prefix::new(ns.namespace_id, db.database_id, &tb).encode_range()?;
-	let dd =
-		crate::key::table::dd::Prefix::new(ns.namespace_id, db.database_id, &tb).encode_range()?;
+	let di = DocLookupPrefix::new(ns.namespace_id, db.database_id, Cow::Borrowed(&tb)).range()?;
+	let dd = DocKeyPrefix::new(ns.namespace_id, db.database_id, Cow::Borrowed(&tb)).range()?;
 	let di_keys = tx.keys(di, u32::MAX, 0, None).await?;
 	let dd_keys = tx.keys(dd, u32::MAX, 0, None).await?;
 	tx.cancel().await?;
@@ -4438,8 +4422,6 @@ async fn table_doc_ids_purged_only_when_last_consumer_removed() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 #[test_log::test]
 async fn btree_index_entries_carry_doc_ids() -> Result<()> {
-	use crate::key::index::IndexEntryValue;
-
 	let (ds, session) = new_index_test_ds().await?;
 	execute_all(
 		&ds,
@@ -4464,17 +4446,14 @@ async fn btree_index_entries_carry_doc_ids() -> Result<()> {
 	let mut entries = 0;
 	for ix in indexes.iter() {
 		assert!(ix.has_entry_doc_ids(), "fresh b-tree indexes carry entry doc-IDs");
-		let rng = crate::key::index::IndexPrefix {
-			prefix: crate::key::database::all::DatabaseRoot {
-				ns: ns.namespace_id,
-				db: db.database_id,
-			},
+		let rng = EntryPrefix {
+			ns: ns.namespace_id,
+			db: db.database_id,
 			tb: Cow::Borrowed(&tb),
 			ix: ix.index_id,
 		}
-		.encode_range()?;
-		for (_, val) in tx.scan(rng, u32::MAX, 0, None).await? {
-			let entry = IndexEntryValue::kv_decode_value(&val, ())?;
+		.range()?;
+		for (_, entry) in tx.scan(rng, u32::MAX, 0, None).await? {
 			let expected = docids.get_doc_id(&tx, &entry.rid.key).await?;
 			assert!(expected.is_some(), "indexed record has a shared doc-ID mapping");
 			assert_eq!(entry.doc_id, expected, "entry doc-ID matches the shared mapping");
@@ -4565,15 +4544,13 @@ async fn bitmap_count_performs_zero_record_fetches() -> Result<()> {
 		let ns = tx.get_ns_by_name("test", None).await?.expect("namespace should exist");
 		let db = tx.get_db_by_name("test", "test", None).await?.expect("database should exist");
 		let tb: TableName = "t".into();
-		let rng = crate::key::record::RecordKeyPrefix {
-			root: crate::key::database::all::DatabaseRoot {
-				ns: ns.namespace_id,
-				db: db.database_id,
-			},
-			table: std::borrow::Cow::Borrowed(&tb),
+		let rng = RecordPrefix {
+			ns: ns.namespace_id,
+			db: db.database_id,
+			tb: std::borrow::Cow::Borrowed(&tb),
 		}
-		.encode_range()?;
-		for key in tx.keys(rng, u32::MAX, 0, None).await? {
+		.range()?;
+		for key in tx.keys_raw(rng, u32::MAX, 0, None).await? {
 			tx.del(key.into()).await?;
 		}
 		tx.commit().await?;
@@ -5006,7 +4983,7 @@ async fn seed_pending_reclaim(
 	id: &RecordIdKey,
 ) -> Result<()> {
 	let tx = ds.transaction(TransactionType::Write).await?;
-	tx.set_key(&crate::key::table::dp::Dp::new(ns, db, table, id), &()).await?;
+	tx.set_key(&DocPendingKey::new(ns, db, Cow::Borrowed(table), Cow::Borrowed(id)), &()).await?;
 	tx.commit().await
 }
 
@@ -5018,7 +4995,7 @@ async fn count_pending_reclaims(
 	table: &TableName,
 ) -> Result<usize> {
 	let tx = ds.transaction(TransactionType::Read).await?;
-	let rng = crate::key::table::dp::Prefix::new(ns, db, table).encode_range()?;
+	let rng = DocPendingPrefix::new(ns, db, Cow::Borrowed(table)).range()?;
 	let keys = tx.keys(rng, u32::MAX, 0, None).await?;
 	tx.cancel().await?;
 	Ok(keys.len())
@@ -5646,11 +5623,9 @@ async fn resume_scan_adopts_one_stalled_build_at_a_time() -> Result<()> {
 		let (ns, db, table, ix) = get_table_index(&ds, "user", index).await?;
 		let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
 		let tx = ds.transaction(TransactionType::Write).await?;
-		tx.del_prefix_key(&index_all::AllIndexRoot {
-			prefix: crate::key::database::all::DatabaseRoot {
-				ns,
-				db,
-			},
+		tx.del_prefix_key(&IdxRoot {
+			ns,
+			db,
 			tb: Cow::Borrowed(&table),
 			ix: ix.index_id,
 		})

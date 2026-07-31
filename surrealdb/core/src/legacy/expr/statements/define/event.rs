@@ -14,7 +14,7 @@ use crate::expr::Base;
 use crate::expr::statements::define::DefineKind;
 use crate::expr::statements::define::event::DefineEventStatement;
 use crate::iam::{Action, AuthLimit, ResourceKind};
-use crate::key::database::all::DatabaseRoot;
+use crate::key::schema::EventKey;
 use crate::legacy::expr_to_ident;
 use crate::val::{TableName, Value};
 
@@ -64,11 +64,9 @@ pub(crate) async fn define_event_statement_compute(
 		.cast_to()?;
 
 	// Process the statement
-	let key = crate::key::table::ev::Ev {
-		prefix: DatabaseRoot {
-			ns,
-			db,
-		},
+	let key = EventKey {
+		ns,
+		db,
 		tb: Cow::Borrowed(&target_table),
 		ev: Cow::Borrowed(&name),
 	};

@@ -109,6 +109,7 @@ js = { workspace = true, features = [
 ], optional = true }
 reblessive = { workspace = true, features = ["tree"] }
 revision = { workspace = true }
+surrealdb-keyspace-macro.workspace = true
 storekey.workspace = true
 surrealdb-types = { workspace = true }
 surrealdb-collections = { workspace = true }

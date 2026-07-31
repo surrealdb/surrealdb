@@ -19,9 +19,10 @@ use crate::expr::reference::ReferenceDeleteStrategy;
 use crate::expr::statements::{DeleteStatement, UpdateStatement};
 use crate::expr::{AssignOperator, Data, Expr, Idiom, Literal, Lookup, Part};
 use crate::idx::planner::ScanDirection;
-use crate::key::database::all::DatabaseRoot;
-use crate::key::r#ref::{self, Ref};
-use crate::key::{KVKeyDecode, KVRange, graph};
+use crate::key::KVKeyDecode;
+use crate::key::schema::{
+	GraphIdPrefix, GraphKey, GraphPointerKey, ReferenceIdPrefix, ReferenceKey,
+};
 use crate::kvs::NORMAL_BATCH_SIZE;
 use crate::val::{RecordId, TableName, Value};
 
@@ -127,22 +128,18 @@ impl Document {
 		// `etl` / `etr` are edge-side ("inner") keys: their adjacency
 		// already names the vertex in (ft, fk), so they keep the legacy
 		// layout without an embedded target — same across both variants.
-		let etl = graph::Graph {
-			prefix: DatabaseRoot {
-				ns,
-				db,
-			},
+		let etl = GraphKey {
+			ns,
+			db,
 			tb: Cow::Borrowed(&rid.table),
 			id: Cow::Borrowed(&rid.key),
 			dir: Dir::In,
 			foreign_table: Cow::Borrowed(&l.table),
 			foreign_key: Cow::Borrowed(&l.key),
 		};
-		let etr = graph::Graph {
-			prefix: DatabaseRoot {
-				ns,
-				db,
-			},
+		let etr = GraphKey {
+			ns,
+			db,
 			tb: Cow::Borrowed(&rid.table),
 			id: Cow::Borrowed(&rid.key),
 			dir: Dir::Out,
@@ -161,11 +158,9 @@ impl Document {
 		let variant = self.initial.doc.edge_variant().unwrap_or_default();
 		// Detect which variant the edge is currently
 		if variant == 1 {
-			let ltr = graph::Graph {
-				prefix: DatabaseRoot {
-					ns,
-					db,
-				},
+			let ltr = GraphKey {
+				ns,
+				db,
 				tb: Cow::Borrowed(&l.table),
 				id: Cow::Borrowed(&l.key),
 				dir: Dir::Out,
@@ -173,11 +168,9 @@ impl Document {
 				foreign_key: Cow::Borrowed(&rid.key),
 			};
 
-			let rtl = graph::Graph {
-				prefix: DatabaseRoot {
-					ns,
-					db,
-				},
+			let rtl = GraphKey {
+				ns,
+				db,
 				tb: Cow::Borrowed(&r.table),
 				id: Cow::Borrowed(&r.key),
 				dir: Dir::In,
@@ -191,11 +184,9 @@ impl Document {
 				txn.del_key(&rtl)
 			)?;
 		} else {
-			let ltr = graph::GraphWithTarget {
-				prefix: DatabaseRoot {
-					ns,
-					db,
-				},
+			let ltr = GraphPointerKey {
+				ns,
+				db,
 				tb: Cow::Borrowed(&l.table),
 				id: Cow::Borrowed(&l.key),
 				dir: Dir::Out,
@@ -204,11 +195,9 @@ impl Document {
 				target_table: Cow::Borrowed(&r.table),
 				target_key: Cow::Borrowed(&r.key),
 			};
-			let rtl = graph::GraphWithTarget {
-				prefix: DatabaseRoot {
-					ns,
-					db,
-				},
+			let rtl = GraphPointerKey {
+				ns,
+				db,
 				tb: Cow::Borrowed(&r.table),
 				id: Cow::Borrowed(&r.key),
 				dir: Dir::In,
@@ -271,17 +260,15 @@ impl Document {
 		// Get the database id
 		let db = self.doc_ctx.db().database_id;
 		// Get the key range of the graph keys
-		let range = crate::key::graph::Prefix {
-			prefix: DatabaseRoot {
-				ns,
-				db,
-			},
+		let range = GraphIdPrefix {
+			ns,
+			db,
 			tb: Cow::Borrowed(&rid.table),
 			id: Cow::Borrowed(&rid.key),
 		}
-		.encode_range()?;
+		.range()?;
 		// Open a cursor over the graph edge range so we can peek the first key.
-		let mut cursor = txn.open_keys_cursor(range, ScanDirection::Forward, 0, None).await?;
+		let mut cursor = txn.open_keys_cursor_raw(range, ScanDirection::Forward, 0, None).await?;
 		// Check if there are any edges to purge by fetching at most one key.
 		let batch = cursor.next_batch(1).await?;
 		// Only proceed if there are edges for this record.
@@ -367,15 +354,13 @@ impl Document {
 			return Ok(());
 		}
 
-		let range = r#ref::Prefix {
-			root: DatabaseRoot {
-				ns,
-				db,
-			},
+		let range = ReferenceIdPrefix {
+			ns,
+			db,
 			tb: Cow::Borrowed(&rid.table),
 			id: Cow::Borrowed(&rid.key),
 		}
-		.encode_range()?;
+		.range()?;
 
 		// Cache the last field definition to avoid redundant lookups
 		let mut prev: Option<(TableName, String, Arc<FieldDefinition>)> = None;
@@ -384,7 +369,7 @@ impl Document {
 		let mut saw_reference_key = false;
 		// Obtain a cursor over the reference range.
 		let mut cursor =
-			txn.open_keys_cursor(range.as_borrowed(), ScanDirection::Forward, 0, None).await?;
+			txn.open_keys_cursor_raw(range.clone(), ScanDirection::Forward, 0, None).await?;
 		// Loop until no more entries
 		loop {
 			// Pull the next batch of reference keys from the cursor.
@@ -404,7 +389,7 @@ impl Document {
 				// We saw a reference key
 				saw_reference_key = true;
 				// Decode the key into a reference
-				let key = Ref::decode_key(&key)?;
+				let key = ReferenceKey::decode_key(&key)?;
 				// Extract the foreign table name
 				let ft = key.foreign_table.as_ref();
 				// Extract the foreign field name
@@ -580,7 +565,7 @@ impl Document {
 		// keys were observed — there's nothing to clear and the empty
 		// range delete still records a transaction op.
 		if saw_reference_key {
-			txn.delr(range.as_borrowed()).await?;
+			txn.delr(range).await?;
 		}
 		// Carry on
 		Ok(())

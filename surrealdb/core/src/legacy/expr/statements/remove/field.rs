@@ -11,6 +11,7 @@ use crate::doc::CursorDoc;
 use crate::expr::Base;
 use crate::expr::statements::remove::field::RemoveFieldStatement;
 use crate::iam::{Action, ResourceKind};
+use crate::key::schema::FieldKey;
 use crate::legacy::{expr_to_ident, expr_to_idiom};
 use crate::val::Value;
 
@@ -51,11 +52,9 @@ pub(crate) async fn remove_field_statement_compute(
 		}
 	};
 	// Delete the definition
-	let key = crate::key::table::fd::Fd {
-		prefix: crate::key::database::all::DatabaseRoot {
-			ns,
-			db,
-		},
+	let key = FieldKey {
+		ns,
+		db,
 		tb: std::borrow::Cow::Borrowed(&table_name),
 		fd: std::borrow::Cow::Borrowed(&name),
 	};

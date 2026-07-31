@@ -11,6 +11,8 @@
 ))]
 
 #[cfg(feature = "kv-mem")]
+mod keyspace_test;
+#[cfg(feature = "kv-mem")]
 mod reclaim_test;
 #[cfg(feature = "kv-mem")]
 mod rpc_session_test;

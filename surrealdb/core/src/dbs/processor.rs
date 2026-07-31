@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::ops::Bound;
 use std::sync::Arc;
 use std::vec;
 
@@ -18,8 +17,12 @@ use crate::expr::dir::Dir;
 use crate::expr::lookup::{ComputedLookupSubject, LookupKind};
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, RecordIterator};
 use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
-use crate::key::database::all::DatabaseRoot;
-use crate::key::{KVKey, KVKeyDecode, KVRange, KVValue, KeyRange, graph, record, r#ref};
+use crate::key::schema::{
+	DbRoot, DecodedGraph, GraphDirPrefix, GraphForeignTablePrefix, GraphIdPrefix, RecordKey,
+	RecordPrefix, ReferenceForeignFieldPrefix, ReferenceForeignTablePrefix, ReferenceIdPrefix,
+	ReferenceKey,
+};
+use crate::key::{AnyRange, KVKeyDecode, KVValue, RawRange, Resumable, TypedRange};
 use crate::kvs::{DatastoreError, NORMAL_BATCH_SIZE, Transaction, Val};
 use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange, TableName, Value};
 
@@ -184,11 +187,11 @@ impl Collectable {
 		// Parse the data from the store
 		let (ft, fk) = match kind {
 			LookupKind::Graph(_) => {
-				let gra = graph::Graph::decode_graph_key(&key)?;
+				let gra = DecodedGraph::decode(&key)?;
 				(gra.edge.table, gra.edge.key)
 			}
 			LookupKind::Reference => {
-				let refe = r#ref::Ref::decode_key(&key)?;
+				let refe = ReferenceKey::decode_key(&key)?;
 				(refe.foreign_table.into_owned(), refe.foreign_key.into_owned())
 			}
 		};
@@ -254,7 +257,7 @@ impl Collectable {
 
 	#[instrument(level = "trace", skip_all)]
 	async fn process_range_key(doc_ctx: DocumentContext, key: &[u8]) -> Result<Processable> {
-		let key = record::RecordKey::decode_key(key)?;
+		let key = RecordKey::decode_key(key)?;
 		let val = Record::new(Value::Null);
 		let rid = RecordId {
 			table: key.tb.into_owned(),
@@ -276,7 +279,7 @@ impl Collectable {
 
 	#[instrument(level = "trace", skip_all)]
 	async fn process_table_key(doc_ctx: DocumentContext, key: &[u8]) -> Result<Processable> {
-		let key = record::RecordKey::decode_key(key)?;
+		let key = RecordKey::decode_key(key)?;
 		let rid = RecordId {
 			table: key.tb.into_owned(),
 			key: key.id.into_owned(),
@@ -478,7 +481,7 @@ impl Collectable {
 
 	#[instrument(level = "trace", skip_all)]
 	fn process_key_val(doc_ctx: DocumentContext, key: &[u8], val: &[u8]) -> Result<Processable> {
-		let key = record::RecordKey::decode_key(key)?;
+		let key = RecordKey::decode_key(key)?;
 		let rid = RecordId {
 			table: key.tb.into_owned(),
 			key: key.id.into_owned(),
@@ -748,13 +751,16 @@ pub(super) trait Collector {
 	}
 
 	#[instrument(level = "trace", skip_all)]
-	async fn start_skip(
+	async fn start_skip<R>(
 		&mut self,
 		ctx: &FrozenContext,
 		opt: &Options,
-		mut rng: KeyRange<'_>,
+		rng: R,
 		sc: ScanDirection,
-	) -> Result<Option<KeyRange<'static>>> {
+	) -> Result<Option<R>>
+	where
+		R: AnyRange + Resumable + Clone,
+	{
 		// Fast-forward a key range by skipping the first N keys when a START clause is
 		// active.
 		//
@@ -766,12 +772,12 @@ pub(super) trait Collector {
 		let skippable = ite.skippable();
 		if skippable == 0 {
 			// There is nothing to skip, we return the original range.
-			return Ok(Some(rng.into_static()));
+			return Ok(Some(rng));
 		}
 		// Get the transaction
 		let txn = ctx.tx();
 		// We only need to iterate over keys.
-		let mut cursor = txn.open_keys_cursor(rng.clone(), sc, 0, opt.version).await?;
+		let mut cursor = txn.open_keys_cursor_raw(rng.clone(), sc, 0, opt.version).await?;
 		let mut skipped = 0;
 		let mut last_key: Vec<u8> = vec![];
 		'outer: loop {
@@ -799,17 +805,8 @@ pub(super) trait Collector {
 		}
 		// Update the iterator about the number of skipped keys
 		ite.skipped(skipped);
-		// We set the range for the next iteration
-		match sc {
-			ScanDirection::Forward => {
-				rng.start.clone_from_slice(&last_key);
-				rng.start.advance();
-			}
-			ScanDirection::Backward => {
-				rng.end.clone_from_slice(&last_key);
-			}
-		}
-		Ok(Some(rng.into_static()))
+		// Resume the next iteration after the last key this one consumed.
+		Ok(Some(rng.resume_after(&last_key, sc)))
 	}
 
 	#[instrument(level = "trace", skip_all)]
@@ -825,14 +822,12 @@ pub(super) trait Collector {
 		let db = doc_ctx.db().database_id;
 
 		// Prepare the start and end keys
-		let range = record::RecordKeyPrefix {
-			root: DatabaseRoot {
-				ns,
-				db,
-			},
-			table: Cow::Borrowed(table),
+		let range = RecordPrefix {
+			ns,
+			db,
+			tb: Cow::Borrowed(table),
 		}
-		.encode_range()?;
+		.range()?;
 
 		// Optionally skip keys
 		let Some(rng) = self.start_skip(ctx, opt, range, sc).await? else {
@@ -841,7 +836,7 @@ pub(super) trait Collector {
 
 		// Create a new iterable range
 		let txn = ctx.tx();
-		let mut cursor = txn.open_vals_cursor(rng, sc, 0, opt.version).await?;
+		let mut cursor = txn.open_vals_cursor_raw(rng, sc, 0, opt.version).await?;
 		// Loop until no more entries
 		let mut count = 0;
 		'outer: loop {
@@ -880,14 +875,12 @@ pub(super) trait Collector {
 		let db = doc_ctx.db().database_id;
 
 		// Prepare the start and end keys
-		let range = record::RecordKeyPrefix {
-			root: DatabaseRoot {
-				ns,
-				db,
-			},
-			table: Cow::Borrowed(table),
+		let range = RecordPrefix {
+			ns,
+			db,
+			tb: Cow::Borrowed(table),
 		}
-		.encode_range()?;
+		.range()?;
 		// Optionally skip keys
 		let rng = if let Some(rng) = self.start_skip(ctx, opt, range, sc).await? {
 			// Returns the next range of keys
@@ -898,7 +891,7 @@ pub(super) trait Collector {
 		};
 		// Create a new iterable range
 		let txn = ctx.tx();
-		let mut cursor = txn.open_keys_cursor(rng, sc, 0, opt.version).await?;
+		let mut cursor = txn.open_keys_cursor_raw(rng, sc, 0, opt.version).await?;
 		// Loop until no more entries
 		let mut count = 0;
 		'outer: loop {
@@ -929,14 +922,12 @@ pub(super) trait Collector {
 	) -> Result<()> {
 		let ns = doc_ctx.ns().namespace_id;
 		let db = doc_ctx.db().database_id;
-		let range = record::RecordKeyPrefix {
-			root: DatabaseRoot {
-				ns,
-				db,
-			},
-			table: Cow::Borrowed(v),
+		let range = RecordPrefix {
+			ns,
+			db,
+			tb: Cow::Borrowed(v),
 		}
-		.encode_range()?;
+		.range()?;
 		// Create a new iterable range
 		let count = ctx.tx().count(range, opt.version).await?;
 		// Collect the count
@@ -945,64 +936,23 @@ pub(super) trait Collector {
 		Ok(())
 	}
 
+	/// The range of records of `tb` whose id falls inside `r`.
+	///
+	/// A record's `id` comes from its key, so the range is untyped: callers read the
+	/// bytes and decode each record against the key it was stored under.
 	#[instrument(level = "trace", skip_all)]
 	async fn range_prepare(
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &TableName,
 		r: RecordIdKeyRange,
-	) -> Result<KeyRange<'_>> {
-		let prefix = DatabaseRoot {
+	) -> Result<RawRange> {
+		RecordPrefix {
 			ns,
 			db,
-		};
-		let start = match &r.start {
-			Bound::Unbounded => record::RecordKeyPrefix {
-				root: prefix,
-				table: Cow::Borrowed(tb),
-			}
-			.encode_bound()?
-			.next(),
-			Bound::Included(v) => record::RecordKey {
-				root: prefix,
-				tb: Cow::Borrowed(tb),
-				id: Cow::Borrowed(v),
-			}
-			.encode_key()?,
-			Bound::Excluded(v) => record::RecordKey {
-				root: prefix,
-				tb: Cow::Borrowed(tb),
-				id: Cow::Borrowed(v),
-			}
-			.encode_key()?
-			.next(),
-		};
-		// Prepare the range end key
-		let end = match &r.end {
-			Bound::Unbounded => record::RecordKeyPrefix {
-				root: prefix,
-				table: Cow::Borrowed(tb),
-			}
-			.encode_bound()?
-			.next_neighbour_expect(),
-			Bound::Included(v) => record::RecordKey {
-				root: prefix,
-				tb: Cow::Borrowed(tb),
-				id: Cow::Borrowed(v),
-			}
-			.encode_key()?
-			.next(),
-			Bound::Excluded(v) => record::RecordKey {
-				root: prefix,
-				tb: Cow::Borrowed(tb),
-				id: Cow::Borrowed(v),
-			}
-			.encode_key()?,
-		};
-		Ok(KeyRange {
-			start,
-			end,
-		})
+			tb: Cow::Borrowed(tb),
+		}
+		.range_where((r.start.as_ref().map(Cow::Borrowed), r.end.as_ref().map(Cow::Borrowed)))
 	}
 
 	#[instrument(level = "trace", skip_all)]
@@ -1029,7 +979,7 @@ pub(super) trait Collector {
 		};
 		// Create a new iterable range
 		let txn = ctx.tx();
-		let mut cursor = txn.open_vals_cursor(rng, sc, 0, None).await?;
+		let mut cursor = txn.open_vals_cursor_raw(rng, sc, 0, None).await?;
 		// Loop until no more entries
 		let mut count = 0;
 		'outer: loop {
@@ -1077,7 +1027,7 @@ pub(super) trait Collector {
 			return Ok(());
 		};
 		// Create a new iterable range
-		let mut cursor = txn.open_keys_cursor(rng, sc, 0, opt.version).await?;
+		let mut cursor = txn.open_keys_cursor_raw(rng, sc, 0, opt.version).await?;
 		// Loop until no more entries
 		let mut count = 0;
 		'outer: loop {
@@ -1132,7 +1082,7 @@ pub(super) trait Collector {
 	) -> Result<()> {
 		let ns = doc_ctx.ns().namespace_id;
 		let db = doc_ctx.db().database_id;
-		let prefix = DatabaseRoot {
+		let prefix = DbRoot {
 			ns,
 			db,
 		};
@@ -1142,31 +1092,34 @@ pub(super) trait Collector {
 		// Fetch start and end key pairs
 		let ranges = match (what.is_empty(), &kind) {
 			(true, LookupKind::Reference) => vec![
-				r#ref::Prefix {
-					root: prefix,
+				ReferenceIdPrefix {
+					ns: prefix.ns,
+					db: prefix.db,
 					tb: Cow::Borrowed(tb),
 					id: Cow::Borrowed(&from.key),
 				}
-				.encode_range()?,
+				.range()?,
 			],
 			(true, LookupKind::Graph(dir)) => match dir {
 				// /ns/db/tb/id
 				Dir::Both => vec![
-					graph::Prefix {
-						prefix,
+					GraphIdPrefix {
+						ns: prefix.ns,
+						db: prefix.db,
 						tb: Cow::Borrowed(tb),
 						id: Cow::Borrowed(&from.key),
 					}
-					.encode_range()?,
+					.range()?,
 				],
 				x => vec![
-					graph::PrefixDir {
-						prefix,
+					GraphDirPrefix {
+						ns: prefix.ns,
+						db: prefix.db,
 						tb: Cow::Borrowed(tb),
 						id: Cow::Borrowed(&from.key),
 						dir: *x,
 					}
-					.encode_range()?,
+					.range()?,
 				],
 			},
 			(false, LookupKind::Graph(Dir::Both)) => what
@@ -1203,7 +1156,7 @@ pub(super) trait Collector {
 		'keys: for rng in ranges {
 			// Create a new iterable range
 			let mut cursor =
-				txn.open_keys_cursor(rng, ScanDirection::Forward, 0, opt.version).await?;
+				txn.open_keys_cursor_raw(rng, ScanDirection::Forward, 0, opt.version).await?;
 			// Loop until no more entries
 			let mut count = 0;
 			loop {
@@ -1370,17 +1323,17 @@ impl From<RelateThrough> for Value {
 	}
 }
 
-/// The presuf function generates the prefix and suffix keys for a lookup
-/// based on the lookup subject and the lookup kind
-pub(crate) fn computed_lookup_subject_presuf<'a>(
-	this: &'a ComputedLookupSubject,
+/// The range of edges or back-links a lookup reaches, from the lookup subject and
+/// the lookup kind.
+pub(crate) fn computed_lookup_subject_presuf(
+	this: &ComputedLookupSubject,
 	ns: NamespaceId,
 	db: DatabaseId,
-	tb: &'a TableName,
-	id: &'a RecordIdKey,
+	tb: &TableName,
+	id: &RecordIdKey,
 	kind: &LookupKind,
-) -> Result<KeyRange<'a>> {
-	let prefix = DatabaseRoot {
+) -> Result<TypedRange<()>> {
+	let prefix = DbRoot {
 		ns,
 		db,
 	};
@@ -1391,27 +1344,27 @@ pub(crate) fn computed_lookup_subject_presuf<'a>(
 			ComputedLookupSubject::Table {
 				table,
 				referencing_field: None,
-			} => crate::key::r#ref::PrefixFt {
-				prefix,
+			} => ReferenceForeignTablePrefix {
+				ns: prefix.ns,
+				db: prefix.db,
 				tb: Cow::Borrowed(tb),
 				id: Cow::Borrowed(id),
-				ft: Cow::Borrowed(table.as_str()),
+				foreign_table: Cow::Borrowed(table),
 			}
-			.encode_bound()
-			.map(|x| x.prefix_expect()),
+			.range(),
 			// Scan the entire range with a referencing field
 			ComputedLookupSubject::Table {
 				table,
 				referencing_field: Some(field),
-			} => crate::key::r#ref::PrefixField {
-				prefix,
+			} => ReferenceForeignFieldPrefix {
+				ns: prefix.ns,
+				db: prefix.db,
 				tb: Cow::Borrowed(tb),
 				id: Cow::Borrowed(id),
-				ft: Cow::Borrowed(table.as_str()),
-				ff: Cow::Borrowed(field),
+				foreign_table: Cow::Borrowed(table),
+				foreign_field: Cow::Borrowed(field),
 			}
-			.encode_bound()
-			.map(|x| x.prefix_expect()),
+			.range(),
 			// Scan a specific range
 			ComputedLookupSubject::Range {
 				table,
@@ -1424,72 +1377,18 @@ pub(crate) fn computed_lookup_subject_presuf<'a>(
 					);
 				};
 
-				let start = match &range.start {
-					Bound::Unbounded => crate::key::r#ref::PrefixField {
-						prefix,
-						tb: Cow::Borrowed(tb),
-						id: Cow::Borrowed(id),
-						ft: Cow::Borrowed(table.as_str()),
-						ff: Cow::Borrowed(field),
-					}
-					.encode_bound()?,
-					Bound::Included(v) => crate::key::r#ref::Ref {
-						prefix,
-						table: Cow::Borrowed(tb),
-						id: Cow::Borrowed(id),
-						foreign_table: Cow::Borrowed(table),
-						foreign_field: Cow::Borrowed(field),
-						foreign_key: Cow::Borrowed(v),
-					}
-					.encode_key()?,
-					Bound::Excluded(v) => crate::key::r#ref::Ref {
-						prefix,
-						table: Cow::Borrowed(tb),
-						id: Cow::Borrowed(id),
-						foreign_table: Cow::Borrowed(table),
-						foreign_field: Cow::Borrowed(field),
-						foreign_key: Cow::Borrowed(v),
-					}
-					.encode_key()?
-					.next(),
-				};
-				// Prepare the range end key
-				let end = match &range.end {
-					Bound::Unbounded => crate::key::r#ref::PrefixField {
-						prefix,
-						tb: Cow::Borrowed(tb),
-						id: Cow::Borrowed(id),
-						ft: Cow::Borrowed(table.as_str()),
-						ff: Cow::Borrowed(field),
-					}
-					.encode_bound()?
-					.next_neighbour()
-					.expect("Reference prefix to have a neighbour"),
-					Bound::Included(v) => crate::key::r#ref::Ref {
-						prefix,
-						table: Cow::Borrowed(tb),
-						id: Cow::Borrowed(id),
-						foreign_table: Cow::Borrowed(table),
-						foreign_field: Cow::Borrowed(field),
-						foreign_key: Cow::Borrowed(v),
-					}
-					.encode_key()?
-					.next(),
-					Bound::Excluded(v) => crate::key::r#ref::Ref {
-						prefix,
-						table: Cow::Borrowed(tb),
-						id: Cow::Borrowed(id),
-						foreign_table: Cow::Borrowed(table),
-						foreign_field: Cow::Borrowed(field),
-						foreign_key: Cow::Borrowed(v),
-					}
-					.encode_key()?,
-				};
-
-				Ok(KeyRange {
-					start,
-					end,
-				})
+				ReferenceForeignFieldPrefix {
+					ns: prefix.ns,
+					db: prefix.db,
+					tb: Cow::Borrowed(tb),
+					id: Cow::Borrowed(id),
+					foreign_table: Cow::Borrowed(table),
+					foreign_field: Cow::Borrowed(field),
+				}
+				.range_where((
+					range.start.as_ref().map(Cow::Borrowed),
+					range.end.as_ref().map(Cow::Borrowed),
+				))
 			}
 		},
 		// We're looking up graph edges
@@ -1498,95 +1397,33 @@ pub(crate) fn computed_lookup_subject_presuf<'a>(
 			ComputedLookupSubject::Table {
 				table,
 				..
-			} => Ok(crate::key::graph::PrefixFt {
-				prefix,
+			} => GraphForeignTablePrefix {
+				ns: prefix.ns,
+				db: prefix.db,
 				tb: Cow::Borrowed(tb),
 				id: Cow::Borrowed(id),
 				dir: *dir,
-				foreign_table: Cow::Borrowed(table.as_str()),
+				foreign_table: Cow::Borrowed(table),
 			}
-			.encode_range()?),
-			// Scan a specific range
+			.range(),
+			// Scan a specific range. An edge key is a prefix of the pointer keys that
+			// extend it, so a bound on the foreign key covers that whole run.
 			ComputedLookupSubject::Range {
 				table,
 				range,
 				..
-			} => {
-				let start = match &range.start {
-					Bound::Unbounded => crate::key::graph::PrefixFt {
-						prefix,
-						tb: Cow::Borrowed(tb),
-						id: Cow::Borrowed(id),
-						dir: *dir,
-						foreign_table: Cow::Borrowed(table.as_str()),
-					}
-					.encode_bound()?,
-					Bound::Included(v) => crate::key::graph::Graph {
-						prefix,
-						tb: Cow::Borrowed(tb),
-						id: Cow::Borrowed(id),
-						dir: *dir,
-						foreign_table: Cow::Borrowed(table),
-						foreign_key: Cow::Borrowed(v),
-					}
-					.encode_key()?,
-					Bound::Excluded(v) => crate::key::graph::Graph {
-						prefix,
-						tb: Cow::Borrowed(tb),
-						id: Cow::Borrowed(id),
-						dir: *dir,
-						foreign_table: Cow::Borrowed(table),
-						foreign_key: Cow::Borrowed(v),
-					}
-					.encode_key()?
-					// We need next_neighbour because this key is only a prefix of the actual
-					// key stored in the KV store, next_neighbour will skip over any key which
-					// has this key as a prefix.
-					.next_neighbour_expect(),
-				};
-				// Prepare the range end key
-				let end = match &range.end {
-					Bound::Unbounded => crate::key::graph::PrefixFt {
-						prefix,
-						tb: Cow::Borrowed(tb),
-						id: Cow::Borrowed(id),
-						dir: *dir,
-						foreign_table: Cow::Borrowed(table.as_str()),
-					}
-					.encode_bound()?
-					.next_neighbour()
-					.expect("Expect the graph prefix to have a neighbour"),
-					Bound::Included(v) => crate::key::graph::Graph {
-						prefix,
-						tb: Cow::Borrowed(tb),
-						id: Cow::Borrowed(id),
-						dir: *dir,
-						foreign_table: Cow::Borrowed(table),
-						foreign_key: Cow::Borrowed(v),
-					}
-					.encode_key()?
-					// We need next_neighbour because this key is only a prefix of the actual
-					// key stored in the KV store, next_neighbour will skip over any key which
-					// has this key as a prefix.
-					.next_neighbour_expect(),
-					// Append `0xff` to include any new-format key for
-					// this fk (target bytes follow the legacy encoding).
-					Bound::Excluded(v) => crate::key::graph::Graph {
-						prefix,
-						tb: Cow::Borrowed(tb),
-						id: Cow::Borrowed(id),
-						dir: *dir,
-						foreign_table: Cow::Borrowed(table),
-						foreign_key: Cow::Borrowed(v),
-					}
-					.encode_key()?,
-				};
-
-				Ok(KeyRange {
-					start,
-					end,
-				})
+			} => GraphForeignTablePrefix {
+				ns: prefix.ns,
+				db: prefix.db,
+				tb: Cow::Borrowed(tb),
+				id: Cow::Borrowed(id),
+				dir: *dir,
+				foreign_table: Cow::Borrowed(table),
 			}
+			.range_where((
+				range.start.as_ref().map(Cow::Borrowed),
+				range.end.as_ref().map(Cow::Borrowed),
+			)),
 		},
 	}
 }

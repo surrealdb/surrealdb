@@ -14,7 +14,7 @@ use crate::expr::Base;
 use crate::expr::statements::alter::AlterKind;
 use crate::expr::statements::alter::table::AlterTableStatement;
 use crate::iam::{Action, ResourceKind};
-use crate::key::database::all::DatabaseRoot;
+use crate::key::schema::TblRoot;
 use crate::legacy::expr_to_ident;
 use crate::val::{TableName, Value};
 
@@ -100,11 +100,9 @@ pub(crate) async fn alter_table_statement_compute(
 	}
 
 	if this.compact {
-		let key = crate::key::table::all::TableRoot {
-			prefix: DatabaseRoot {
-				ns,
-				db,
-			},
+		let key = TblRoot {
+			ns,
+			db,
 			tb: Cow::Borrowed(&name),
 		};
 		txn.compact(&key).await?;

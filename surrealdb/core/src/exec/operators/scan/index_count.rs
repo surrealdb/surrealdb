@@ -42,9 +42,8 @@ use crate::exec::{
 use crate::expr::cond::Cond;
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::iam::Action;
-use crate::key::database::all::DatabaseRoot;
-use crate::key::index::iu::{IndexCountKey, IndexPrefix};
-use crate::key::{KVKeyDecode, KVRange, KVValue, record};
+use crate::key::schema::{IndexCountKey, IndexCountPrefix, RecordKey, RecordPrefix};
+use crate::key::{KVKeyDecode, KVValue};
 use crate::val::{Number, Object, TableName, Value};
 
 /// Optimized operator for `SELECT count() FROM <table> WHERE <cond> GROUP ALL`
@@ -359,18 +358,16 @@ pub(crate) async fn sum_index_count_deltas(
 	tb: &TableName,
 	ix: crate::catalog::IndexId,
 ) -> Result<usize, ControlFlow> {
-	let range = IndexPrefix {
-		prefix: DatabaseRoot {
-			ns,
-			db,
-		},
+	let range = IndexCountPrefix {
+		ns,
+		db,
 		tb: Cow::Borrowed(tb),
 		ix,
 	}
-	.encode_range()?;
+	.range()?;
 
 	let mut cursor = txn
-		.open_keys_cursor(range, crate::idx::planner::ScanDirection::Forward, 0, None)
+		.open_keys_cursor_raw(range, crate::idx::planner::ScanDirection::Forward, 0, None)
 		.await
 		.context("Failed to open index-count cursor")?;
 	let mut count: i64 = 0;
@@ -413,17 +410,15 @@ async fn count_with_filter_fallback(
 	use crate::exec::permission::PhysicalPermission;
 
 	let txn = ctx.txn();
-	let range = record::RecordKeyPrefix {
-		root: DatabaseRoot {
-			ns: ns_id,
-			db: db_id,
-		},
-		table: Cow::Borrowed(table_name),
+	let range = RecordPrefix {
+		ns: ns_id,
+		db: db_id,
+		tb: Cow::Borrowed(table_name),
 	}
-	.encode_range()?;
+	.range()?;
 
 	let mut cursor = txn
-		.open_vals_cursor(range, crate::idx::planner::ScanDirection::Forward, 0, version)
+		.open_vals_cursor_raw(range, crate::idx::planner::ScanDirection::Forward, 0, version)
 		.await
 		.context("Failed to open scan cursor")?;
 	let mut count = 0usize;
@@ -439,8 +434,7 @@ async fn count_with_filter_fallback(
 			break;
 		}
 		for (key, val) in &batch {
-			let decoded_key = crate::key::record::RecordKey::decode_key(key)
-				.context("Failed to decode record key")?;
+			let decoded_key = RecordKey::decode_key(key).context("Failed to decode record key")?;
 			let rid_val = crate::val::RecordId {
 				table: decoded_key.tb.into_owned(),
 				key: decoded_key.id.into_owned(),

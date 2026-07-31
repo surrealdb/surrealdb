@@ -31,8 +31,9 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
 use crate::idx::index::IndexOperation;
-use crate::key::index::all as index_all;
-use crate::key::{KVKey, KVKeyDecode, KVRange, record};
+use crate::idx::planner::ScanDirection;
+use crate::key::schema::{IdxRoot, RecordKey, RecordPrefix};
+use crate::key::{KVKey, KVKeyDecode, Resumable};
 use crate::kvs::ds::TransactionFactory;
 #[cfg(test)]
 use crate::kvs::testing::{
@@ -1388,11 +1389,9 @@ impl Building {
 					return Ok(());
 				}
 				let ctx = self.new_write_tx_ctx().await?;
-				let key = index_all::AllIndexRoot {
-					prefix: crate::key::database::all::DatabaseRoot {
-						ns: self.ix_key.ns,
-						db: self.ix_key.db,
-					},
+				let key = IdxRoot {
+					ns: self.ix_key.ns,
+					db: self.ix_key.db,
 					tb: Cow::Borrowed(&self.ix_key.tb),
 					ix: self.ix_key.ix,
 				};
@@ -1464,27 +1463,23 @@ impl Building {
 		if scanning_initial {
 			// First pass: index every record, resuming immediately after the
 			// checkpointed record when the previous owner committed batches.
-			let mut range = record::RecordKeyPrefix {
-				root: crate::key::database::all::DatabaseRoot {
+			let mut range = RecordPrefix {
+				ns: self.ix_key.ns,
+				db: self.ix_key.db,
+				tb: Cow::Borrowed(self.ikb.table()),
+			}
+			.range()?;
+			if let Some(cursor) = &resume_cursor {
+				// Resume at the smallest key strictly greater than the cursor
+				// record's own key, so the checkpointed record is not re-indexed.
+				let checkpoint = RecordKey {
 					ns: self.ix_key.ns,
 					db: self.ix_key.db,
-				},
-				table: Cow::Borrowed(self.ikb.table()),
-			}
-			.encode_range()?;
-			if let Some(cursor) = &resume_cursor {
-				// Same exclusive-successor idiom as `Bp::span_range`: the
-				// smallest key strictly greater than the cursor record's key.
-				range.start = record::RecordKey {
-					root: crate::key::database::all::DatabaseRoot {
-						ns: self.ix_key.ns,
-						db: self.ix_key.db,
-					},
 					tb: Cow::Borrowed(self.ikb.table()),
 					id: Cow::Borrowed(cursor),
 				}
-				.encode_key()?
-				.next();
+				.encode_key()?;
+				range = range.resume_after(&checkpoint, ScanDirection::Forward);
 			}
 			let mut next = Some(range);
 			let mut v1_appending_sentinel = false;
@@ -1525,12 +1520,19 @@ impl Building {
 							.await
 					);
 					// Get the next batch of records.
-					let res = catch!(tx, tx.batch_keys_vals(rng, scan_batch_size, None).await);
+					let res = catch!(
+						tx,
+						tx.batch_keys_vals_raw(rng.clone(), scan_batch_size, None).await
+					);
 					tx.cancel().await?;
 					res
 				};
-				// Set the next scan range
-				next = batch.next;
+				// Set the next scan range: a full page resumes just after the last
+				// key it returned, while a short page ends the scan.
+				next = batch
+					.next
+					.and(batch.result.last())
+					.map(|(last, _)| rng.resume_after(last, ScanDirection::Forward));
 				// Check whether any records remain.
 				if batch.result.is_empty() {
 					// If not, initial indexing is complete.
@@ -1553,7 +1555,7 @@ impl Building {
 						// Unreachable: emptiness was checked above.
 						break;
 					};
-					let batch_cursor = record::RecordKey::decode_key(last_key)?.id.into_owned();
+					let batch_cursor = RecordKey::decode_key(last_key)?.id.into_owned();
 					let indexed = loop {
 						if self.is_aborted().await {
 							return Ok(());

@@ -14,6 +14,7 @@ use crate::exe::FlowResultExt as _;
 use crate::exec::Error as ExecError;
 use crate::expr::statements::live::{LiveFields, LiveStatement, is_document_dependent};
 use crate::expr::visit::Visit;
+use crate::key::schema::{NodeLiveQueryKey, SubscriptionKey};
 use crate::val::Value;
 
 /// Process this type returning a computed simple Value
@@ -117,7 +118,7 @@ pub(crate) async fn live_statement_compute(
 				bail!("LIVE query WHERE clause is invalid and will never match: {e}");
 			}
 			// Insert the node live query
-			let key = crate::key::node::lq::Lq {
+			let key = NodeLiveQueryKey {
 				nd: nid,
 				lq: live_query_id,
 			};
@@ -131,11 +132,9 @@ pub(crate) async fn live_statement_compute(
 			)
 			.await?;
 			// Insert the table live query
-			let key = crate::key::table::lq::Lq {
-				prefix: crate::key::database::all::DatabaseRoot {
-					ns,
-					db,
-				},
+			let key = SubscriptionKey {
+				ns,
+				db,
 				tb: std::borrow::Cow::Borrowed(&tb),
 				lq: live_query_id,
 			};

@@ -6,6 +6,7 @@ use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvid
 use crate::catalog::{self, DatabaseId, NamespaceId};
 use crate::ctx::FrozenContext;
 use crate::dbs::RoutedNotification;
+use crate::key::schema::{NodeLiveQueryKey, SubscriptionKey};
 use crate::kvs::Transaction;
 use crate::types::{PublicAction, PublicNotification, PublicValue};
 use crate::val::TableName;
@@ -139,16 +140,14 @@ pub(crate) async fn kill_principal_subscriptions(
 		};
 		let mut removed_any = false;
 		for lv in lvs.iter().filter(|lv| lv.auth.as_ref().is_some_and(|a| a.id() == actor)) {
-			txn.clr_key(&crate::key::table::lq::Lq {
-				prefix: crate::key::database::all::DatabaseRoot {
-					ns,
-					db,
-				},
+			txn.clr_key(&SubscriptionKey {
+				ns,
+				db,
 				tb: std::borrow::Cow::Borrowed(&tb.name),
 				lq: lv.id,
 			})
 			.await?;
-			txn.clr_key(&crate::key::node::lq::Lq {
+			txn.clr_key(&NodeLiveQueryKey {
 				nd: lv.node,
 				lq: lv.id,
 			})

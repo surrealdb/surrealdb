@@ -12,6 +12,7 @@ use crate::exec::Error as ExecError;
 use crate::expr::Base;
 use crate::expr::statements::remove::table::RemoveTableStatement;
 use crate::iam::{Action, ResourceKind};
+use crate::key::schema::{ForeignTableKey, TblRoot};
 use crate::legacy::expr::statements::remove::retire_table_indexes;
 use crate::legacy::{expr_to_ident, kill_table_subscriptions};
 use crate::val::Value;
@@ -81,11 +82,9 @@ pub(crate) async fn remove_table_statement_compute(
 	};
 
 	// Remove the resource data
-	let key = crate::key::table::all::TableRoot {
-		prefix: crate::key::database::all::DatabaseRoot {
-			ns,
-			db,
-		},
+	let key = TblRoot {
+		ns,
+		db,
 		tb: std::borrow::Cow::Borrowed(&name),
 	};
 	if this.expunge {
@@ -98,11 +97,9 @@ pub(crate) async fn remove_table_statement_compute(
 		// Process each foreign table
 		for ft in tables.iter() {
 			// Save the view config
-			let key = crate::key::table::ft::Ft {
-				prefix: crate::key::database::all::DatabaseRoot {
-					ns,
-					db,
-				},
+			let key = ForeignTableKey {
+				ns,
+				db,
 				tb: std::borrow::Cow::Borrowed(ft),
 				ft: std::borrow::Cow::Borrowed(&name),
 			};

@@ -98,7 +98,7 @@ pub(crate) struct BitmapNode {
 #[derive(Debug)]
 pub(crate) enum BitmapNodeKind {
 	/// Drain a b-tree index range, collecting the doc-ID appended to each
-	/// entry value (see [`crate::key::index::IndexEntryValue`]).
+	/// entry value (see [`crate::idx::entry::IndexEntryValue`]).
 	BTree {
 		index_ref: IndexRef,
 		access: BTreeAccess,

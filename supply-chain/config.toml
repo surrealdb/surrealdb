@@ -92,6 +92,9 @@ audit-as-crates-io = false
 [policy.surrealdb-token]
 audit-as-crates-io = false
 
+[policy.surrealdb-keyspace-macro]
+audit-as-crates-io = false
+
 [policy.surrealdb-types]
 audit-as-crates-io = false
 

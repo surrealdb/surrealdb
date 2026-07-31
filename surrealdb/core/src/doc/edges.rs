@@ -10,8 +10,7 @@ use crate::dbs::Options;
 use crate::doc::{Document, Error, Extras};
 use crate::expr::Dir;
 use crate::expr::paths::{IN, OUT};
-use crate::key::database::all::DatabaseRoot;
-use crate::key::graph::{self, GraphWithTarget};
+use crate::key::schema::{GraphKey, GraphPointerKey};
 
 impl Document {
 	/// Stores edge data for relation records in the graph database.
@@ -92,22 +91,18 @@ impl Document {
 			// `etl` / `etr` are edge-side ("inner") keys: their adjacency
 			// already names the vertex in (ft, fk), so they keep the legacy
 			// layout without an embedded target — same across variants.
-			let etl = graph::Graph {
-				prefix: DatabaseRoot {
-					ns,
-					db,
-				},
+			let etl = GraphKey {
+				ns,
+				db,
 				tb: Cow::Borrowed(&rid.table),
 				id: Cow::Borrowed(&rid.key),
 				dir: Dir::In,
 				foreign_table: Cow::Borrowed(&l.table),
 				foreign_key: Cow::Borrowed(&l.key),
 			};
-			let etr = graph::Graph {
-				prefix: DatabaseRoot {
-					ns,
-					db,
-				},
+			let etr = GraphKey {
+				ns,
+				db,
 				tb: Cow::Borrowed(&rid.table),
 				id: Cow::Borrowed(&rid.key),
 				dir: Dir::Out,
@@ -122,11 +117,9 @@ impl Document {
 			let variant = self.initial.doc.edge_variant().unwrap_or(LATEST_EDGE_VARIANT);
 			// Detect which variant the edge was originally
 			if variant == 1 {
-				let ltr_legacy = graph::Graph {
-					prefix: DatabaseRoot {
-						ns,
-						db,
-					},
+				let ltr_legacy = GraphKey {
+					ns,
+					db,
 					tb: Cow::Borrowed(&l.table),
 					id: Cow::Borrowed(&l.key),
 					dir: Dir::Out,
@@ -134,11 +127,9 @@ impl Document {
 					foreign_key: Cow::Borrowed(&rid.key),
 				};
 
-				let rtl_legacy = graph::Graph {
-					prefix: DatabaseRoot {
-						ns,
-						db,
-					},
+				let rtl_legacy = GraphKey {
+					ns,
+					db,
 					tb: Cow::Borrowed(&l.table),
 					id: Cow::Borrowed(&l.key),
 					dir: Dir::In,
@@ -147,11 +138,9 @@ impl Document {
 				};
 				futures::try_join!(txn.del_key(&ltr_legacy), txn.del_key(&rtl_legacy))?;
 			}
-			let ltr = GraphWithTarget {
-				prefix: DatabaseRoot {
-					ns,
-					db,
-				},
+			let ltr = GraphPointerKey {
+				ns,
+				db,
 				tb: Cow::Borrowed(&l.table),
 				id: Cow::Borrowed(&l.key),
 				dir: Dir::Out,
@@ -161,11 +150,9 @@ impl Document {
 				target_key: Cow::Borrowed(&r.key),
 			};
 
-			let rtl = GraphWithTarget {
-				prefix: DatabaseRoot {
-					ns,
-					db,
-				},
+			let rtl = GraphPointerKey {
+				ns,
+				db,
 				tb: Cow::Borrowed(&r.table),
 				id: Cow::Borrowed(&r.key),
 				dir: Dir::In,

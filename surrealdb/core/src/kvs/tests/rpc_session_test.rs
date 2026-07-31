@@ -13,8 +13,8 @@ use uuid::Uuid;
 use web_time::Duration;
 
 use crate::dbs::{Capabilities, DurableSession, Session};
-use crate::key::root::se::{Se, SePrefix};
-use crate::key::{KVRange, KeyRange};
+use crate::key::AnyRange;
+use crate::key::schema::{SessionKey, SessionPrefix};
 use crate::kvs::Datastore;
 
 async fn mem_ds() -> Arc<Datastore> {
@@ -27,17 +27,17 @@ async fn mem_ds() -> Arc<Datastore> {
 	)
 }
 
-/// Count the keys currently stored under a half-open byte range.
-async fn count_range(ds: &Datastore, range: KeyRange<'_>) -> usize {
+/// Count the keys currently stored in a range.
+async fn count_range(ds: &Datastore, range: impl AnyRange) -> usize {
 	let tx = ds.transaction(Read).await.unwrap();
-	let res = tx.getr(range, None).await.unwrap();
+	let count = tx.count(range, None).await.unwrap();
 	let _ = tx.cancel().await;
-	res.len()
+	count
 }
 
 /// Number of durable session entries currently stored.
 async fn durable_session_count(ds: &Datastore) -> usize {
-	let range = SePrefix {}.encode_range().unwrap();
+	let range = SessionPrefix {}.range().unwrap();
 	count_range(ds, range).await
 }
 
@@ -46,7 +46,7 @@ async fn durable_session_entry(ds: &Datastore, id: Uuid) -> Option<DurableSessio
 	let tx = ds.transaction(Read).await.unwrap();
 	let res = tx
 		.get_key(
-			&Se {
+			&SessionKey {
 				id,
 			},
 			None,
@@ -62,7 +62,7 @@ async fn put_entry_with_expiry(ds: &Datastore, id: Uuid, session: &Session, expi
 	let value = DurableSession::from_session(session, expires_at);
 	let tx = ds.transaction(Write).await.unwrap();
 	tx.set_key(
-		&Se {
+		&SessionKey {
 			id,
 		},
 		&value,

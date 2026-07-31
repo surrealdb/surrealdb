@@ -17,7 +17,7 @@ use crate::expr::statements::define::DefineKind;
 use crate::expr::statements::define::access::DefineAccessStatement;
 use crate::expr::{AccessType, Algorithm, Base, JwtAccess};
 use crate::iam::{Action, ResourceKind};
-use crate::key::database::all::DatabaseRoot;
+use crate::key::schema::{DbAccessMethodKey, NsAccessMethodKey, RootAccessMethodKey};
 use crate::legacy::expr_to_ident;
 use crate::val::{Duration, Value};
 
@@ -227,7 +227,7 @@ pub(crate) async fn define_access_statement_compute(
 				crate::legacy::define_access_statement_reject_es512(&definition)?;
 			}
 			// Process the statement
-			let key = crate::key::root::ac::AccessKey {
+			let key = RootAccessMethodKey {
 				ac: Cow::Borrowed(definition.name.as_str()),
 			};
 			txn.set_key(&key, &definition.to_stored()).await?;
@@ -264,7 +264,7 @@ pub(crate) async fn define_access_statement_compute(
 				crate::legacy::define_access_statement_reject_es512(&definition)?;
 			}
 			// Process the statement
-			let key = crate::key::namespace::ac::AccessKey {
+			let key = NsAccessMethodKey {
 				ns,
 				ac: Cow::Borrowed(definition.name.as_str()),
 			};
@@ -304,11 +304,9 @@ pub(crate) async fn define_access_statement_compute(
 				crate::legacy::define_access_statement_reject_es512(&definition)?;
 			}
 			// Process the statement
-			let key = crate::key::database::ac::AccessKey {
-				prefix: DatabaseRoot {
-					ns,
-					db,
-				},
+			let key = DbAccessMethodKey {
+				ns,
+				db,
 				ac: Cow::Borrowed(definition.name.as_str()),
 			};
 			txn.set_key(&key, &definition.to_stored()).await?;

@@ -11,6 +11,7 @@ use crate::doc::CursorDoc;
 use crate::expr::Base;
 use crate::expr::statements::remove::event::RemoveEventStatement;
 use crate::iam::{Action, ResourceKind};
+use crate::key::schema::EventKey;
 use crate::legacy::expr_to_ident;
 use crate::val::Value;
 
@@ -47,11 +48,9 @@ pub(crate) async fn remove_event_statement_compute(
 		}
 	};
 	// Delete the definition
-	let key = crate::key::table::ev::Ev {
-		prefix: crate::key::database::all::DatabaseRoot {
-			ns,
-			db,
-		},
+	let key = EventKey {
+		ns,
+		db,
 		tb: std::borrow::Cow::Borrowed(&ev.target_table),
 		ev: std::borrow::Cow::Borrowed(&ev.name),
 	};

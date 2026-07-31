@@ -9,6 +9,7 @@ use crate::doc::CursorDoc;
 use crate::expr::Base;
 use crate::expr::statements::remove::api::RemoveApiStatement;
 use crate::iam::{Action, ResourceKind};
+use crate::key::schema::ApiKey;
 use crate::legacy::expr_to_ident;
 use crate::val::Value;
 
@@ -42,11 +43,9 @@ pub(crate) async fn remove_api_statement_compute(
 
 	// Delete the definition
 	let name = ap.path.to_string();
-	let key = crate::key::database::ap::Api {
-		prefix: crate::key::database::all::DatabaseRoot {
-			ns,
-			db,
-		},
+	let key = ApiKey {
+		ns,
+		db,
 		ap: std::borrow::Cow::Borrowed(&name),
 	};
 	txn.del_key(&key).await?;

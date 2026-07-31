@@ -14,8 +14,7 @@ use crate::exe::FlowResultExt;
 use crate::expr::Base;
 use crate::expr::statements::alter::sequence::AlterSequenceStatement;
 use crate::iam::{Action, ResourceKind};
-use crate::key::database::all::DatabaseRoot;
-use crate::key::database::sq::Sq;
+use crate::key::schema::SequenceKey;
 use crate::legacy::expr_to_ident;
 use crate::val::{Duration, Value};
 
@@ -60,11 +59,9 @@ pub(crate) async fn alter_sequence_statement_compute(
 		}
 	}
 	// Set the sequence definition
-	let key = Sq {
-		prefix: DatabaseRoot {
-			ns,
-			db,
-		},
+	let key = SequenceKey {
+		ns,
+		db,
 		sq: Cow::Borrowed(&name),
 	};
 	txn.set_key(&key, &sq).await?;

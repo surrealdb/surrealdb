@@ -13,9 +13,8 @@ use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, IndexDefinition, IndexId, NamespaceId};
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
-use crate::key::database::all::DatabaseRoot;
 use crate::key::impl_kv_value_revisioned;
-use crate::key::table::bs::Bs;
+use crate::key::schema::BuildStateKey;
 use crate::kvs::{Error as KvsError, Transaction};
 use crate::val::{Object, RecordIdKey, TableName, Value};
 
@@ -256,23 +255,15 @@ pub(super) async fn delete_stale_build_queues(
 	ikb: &IndexKeyBase,
 	below: super::BuildGeneration,
 ) -> Result<()> {
-	let mut bg = ikb.new_bg_all_generations_range()?;
-	bg.end = ikb.new_bg_range(below)?.start;
-	tx.delr(bg).await?;
-	let mut bp = ikb.new_bp_all_generations_range()?;
-	bp.end = ikb.new_bp_range(below)?.start;
-	tx.delr(bp).await?;
-	let mut br = ikb.new_br_all_generations_range()?;
-	br.end = ikb.new_br_range(below)?.start;
-	tx.delr(br).await?;
+	tx.delr(ikb.new_bg_range_below(below)?).await?;
+	tx.delr(ikb.new_bp_range_below(below)?).await?;
+	tx.delr(ikb.new_br_range_below(below)?).await?;
 	// The flip that installed `below` already removed its immediate
 	// predecessor's ticket counter under a conditional delete, which is what
 	// fenced the writers still admitting to it. This sweeps up counters left
 	// by generations further back, whose writers were fenced by their own
 	// flips and can no longer allocate.
-	let mut bt = ikb.new_bt_all_generations_range()?;
-	bt.end = ikb.new_bt_range(below)?.start;
-	tx.delr(bt).await?;
+	tx.delr(ikb.new_bt_range_below(below)?).await?;
 	Ok(())
 }
 
@@ -337,11 +328,9 @@ pub(crate) async fn filter_online_indexes(
 	}
 	let state_keys: Vec<_> = indexes
 		.iter()
-		.map(|ix| Bs {
-			prefix: DatabaseRoot {
-				ns,
-				db,
-			},
+		.map(|ix| BuildStateKey {
+			ns,
+			db,
 			tb: Cow::Owned(ix.table_name.clone()),
 			ix: ix.index_id,
 		})

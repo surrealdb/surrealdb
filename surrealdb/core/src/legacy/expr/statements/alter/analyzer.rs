@@ -13,7 +13,7 @@ use crate::expr::Base;
 use crate::expr::statements::alter::AlterKind;
 use crate::expr::statements::alter::analyzer::AlterAnalyzerStatement;
 use crate::iam::{Action, ResourceKind};
-use crate::key::database::all::DatabaseRoot;
+use crate::key::schema::AnalyzerKey;
 use crate::legacy::expr_to_ident;
 use crate::val::Value;
 
@@ -65,11 +65,9 @@ pub(crate) async fn alter_analyzer_statement_compute(
 		AlterKind::None => {}
 	}
 
-	let key = crate::key::database::az::Analyzer {
-		prefix: DatabaseRoot {
-			ns,
-			db,
-		},
+	let key = AnalyzerKey {
+		ns,
+		db,
 		az: Cow::Borrowed(&name),
 	};
 	txn.set_key(&key, &az).await?;

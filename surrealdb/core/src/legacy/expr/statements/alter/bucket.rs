@@ -14,7 +14,7 @@ use crate::expr::Base;
 use crate::expr::statements::alter::AlterKind;
 use crate::expr::statements::alter::bucket::AlterBucketStatement;
 use crate::iam::{Action, ResourceKind};
-use crate::key::database::all::DatabaseRoot;
+use crate::key::schema::BucketKey;
 use crate::legacy::expr_to_ident;
 use crate::val::Value;
 
@@ -67,11 +67,9 @@ pub(crate) async fn alter_bucket_statement_compute(
 		AlterKind::None => {}
 	}
 
-	let key = crate::key::database::bu::BucketKey {
-		prefix: DatabaseRoot {
-			ns,
-			db,
-		},
+	let key = BucketKey {
+		ns,
+		db,
 		bu: Cow::Borrowed(&name),
 	};
 	txn.set_key(&key, &bu.to_stored()).await?;

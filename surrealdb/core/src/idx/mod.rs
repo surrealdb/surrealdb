@@ -1,4 +1,5 @@
 pub mod docids;
+pub(crate) mod entry;
 pub(crate) mod error;
 pub(crate) mod ft;
 pub(crate) mod index;
@@ -19,54 +20,28 @@ use crate::err::Error as CoreError;
 use crate::idx::docids::DocId;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::vector::SerializedVector;
-use crate::key::database::all::DatabaseRoot;
-use crate::key::index::dc::{Dc, DcPrefix};
+use crate::key::schema::{
+	BuildAppendGenerationPrefix, BuildAppendIxPrefix, BuildAppendKey, BuildAppendTicketPrefix,
+	BuildPrimaryGenerationPrefix, BuildPrimaryIxPrefix, BuildPrimaryKey,
+	BuildReservationGenerationPrefix, BuildReservationIxPrefix, BuildReservationKey, BuildStateKey,
+	BuildTicketIxPrefix, BuildTicketKey, DocCountKey, DocLengthKey, DocStatsDeltaKey, DocStatsKey,
+	HnswElementHashedKey, HnswElementKey, HnswGenerationKey, HnswLayerKey, HnswLayerLayerPrefix,
+	HnswNodeKey, HnswNodeLayerPrefix, HnswPendingRoot, HnswRecordPendingKey,
+	HnswRecordPendingPrefix, HnswStateKey, HnswVectorKey, IndexAppendKey, IndexAppendPrefix,
+	IndexCompactionKey, IndexPrimaryKey, IndexVersionKey, TermChangeKey, TermChangeSetKey,
+	TermChangesKey, TermDocsKey, TermGenerationKey, TermPostingKey,
+};
 #[cfg(diskann)]
-use crate::key::index::de::De;
-#[cfg(diskann)]
-use crate::key::index::dg::Dg;
-#[cfg(diskann)]
-use crate::key::index::dh::Dh;
-use crate::key::index::dl::Dl;
-#[cfg(diskann)]
-use crate::key::index::dn::Dn;
-#[cfg(diskann)]
-use crate::key::index::dp::Dp;
-#[cfg(diskann)]
-use crate::key::index::dq::Dq;
-#[cfg(diskann)]
-use crate::key::index::dr::{DiskAnnRecordPending, DiskAnnRecordPendingPrefix};
-#[cfg(diskann)]
-use crate::key::index::ds::Ds;
-use crate::key::index::dv::Dv;
-#[cfg(diskann)]
-use crate::key::index::dw::{DiskAnnRecordPendingShard, DiskAnnRecordPendingShardPrefix};
-#[cfg(diskann)]
-use crate::key::index::dy::Dy;
-use crate::key::index::he::He;
-use crate::key::index::hg::Hg;
-use crate::key::index::hh::Hh;
-use crate::key::index::hl::{Hl, HlPrefix};
-use crate::key::index::hn::{HnswNode, HnswNodePrefix};
-use crate::key::index::hp::HnswPendingPrefix;
-use crate::key::index::hr::{HnswRecordPending, HnswRecordPendingPrefix};
-use crate::key::index::hs::Hs;
-use crate::key::index::hv::Hv;
-use crate::key::index::ig::{IndexAppending, IndexAppendingPrefix};
-use crate::key::index::ip::Ip;
-use crate::key::index::iv::Iv;
-use crate::key::index::td::{Td, TdRoot};
-use crate::key::index::tt::{Tt, TtTermPrefix, TtTermsPrefix};
-use crate::key::index::tv::Tv;
-use crate::key::root::ic::IndexCompactionKey;
-use crate::key::table::bg::{Bg, BgGenerationPrefix, BgPrefix, BgTicketPrefix};
-use crate::key::table::bp::{Bp, BpGenerationPrefix, BpIdPrefix};
-use crate::key::table::br::{Br, BrGenerationPrefix, BrTicketPrefix};
-use crate::key::table::bs::Bs;
-use crate::key::table::bt::{Bt, BtGenerationPrefix};
-use crate::key::{KVKey, KVRange, Key, KeyRange};
+use crate::key::schema::{
+	DiskannElementDocsKey, DiskannElementHashedKey, DiskannElementKey, DiskannGenerationKey,
+	DiskannNodeKey, DiskannPendingKey, DiskannPendingLegacyKey, DiskannRecordPendingKey,
+	DiskannRecordPendingPrefix, DiskannRecordPendingShardKey, DiskannRecordPendingShardShardPrefix,
+	DiskannStateKey,
+};
+use crate::key::{KVKey, Key, RawRange, TypedRange};
 use crate::kvs::index::{
-	AppendingId, BatchId, BuildGeneration, BuildTicket, BuildTicketMutationSeq,
+	Appending, AppendingId, BatchId, BuildGeneration, BuildTicket, BuildTicketMutationSeq,
+	IndexBuildReservation, PrimaryAppendingTicket,
 };
 use crate::kvs::{Error as KvsError, Transaction};
 use crate::val::{RecordIdKey, TableName};
@@ -143,12 +118,10 @@ impl IndexKeyBase {
 		}))
 	}
 
-	fn new_he_key(&self, element_id: ElementId) -> He<'_> {
-		He {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_he_key(&self, element_id: ElementId) -> HnswVectorKey<'_> {
+		HnswVectorKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			element_id,
@@ -156,37 +129,31 @@ impl IndexKeyBase {
 	}
 
 	/// Range covering append-keyed HNSW pending updates.
-	fn new_hp_range(&self) -> Result<KeyRange<'static>> {
-		HnswPendingPrefix {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_hp_range(&self) -> Result<RawRange> {
+		HnswPendingRoot {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 		}
-		.encode_range()
+		.range()
 	}
 
 	/// Key storing the HNSW pending compaction generation.
-	fn new_hg_key(&self) -> Hg<'_> {
-		Hg {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_hg_key(&self) -> HnswGenerationKey<'_> {
+		HnswGenerationKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 		}
 	}
 
 	/// Key storing the pending HNSW update for one record.
-	fn new_hr_key<'a>(&'a self, id: &'a RecordIdKey) -> HnswRecordPending<'a> {
-		HnswRecordPending {
-			prefix: crate::key::database::all::DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_hr_key<'a>(&'a self, id: &'a RecordIdKey) -> HnswRecordPendingKey<'a> {
+		HnswRecordPendingKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			id: Cow::Borrowed(id),
@@ -194,24 +161,20 @@ impl IndexKeyBase {
 	}
 
 	/// Range covering record-keyed HNSW pending updates.
-	fn new_hr_range(&self) -> Result<crate::key::KeyRange<'static>> {
+	fn new_hr_range(&self) -> Result<TypedRange<crate::idx::trees::hnsw::HnswRecordPendingUpdate>> {
 		HnswRecordPendingPrefix {
-			prefix: crate::key::database::all::DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 		}
-		.encode_range()
+		.range()
 	}
 
-	fn new_hl_key(&self, layer: u16, chunk: u32) -> Hl<'_> {
-		Hl {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_hl_key(&self, layer: u16, chunk: u32) -> HnswLayerKey<'_> {
+		HnswLayerKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			layer,
@@ -219,27 +182,24 @@ impl IndexKeyBase {
 		}
 	}
 
-	/// Returns a key range covering all legacy `Hl` chunk entries for the given HNSW layer.
-	fn new_hl_layer_range(&self, layer: u16) -> Result<KeyRange<'static>> {
-		HlPrefix {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	/// Returns a key range covering all legacy `HnswLayerKey` chunk entries for the given HNSW
+	/// layer.
+	fn new_hl_layer_range(&self, layer: u16) -> Result<TypedRange<Vec<u8>>> {
+		HnswLayerLayerPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			layer,
 		}
-		.encode_range()
+		.range()
 	}
 
 	/// Creates a per-node `Hn` key for storing a single node's edge list in an HNSW layer.
-	fn new_hn_key(&self, layer: u16, node: ElementId) -> HnswNode<'_> {
-		HnswNode {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_hn_key(&self, layer: u16, node: ElementId) -> HnswNodeKey<'_> {
+		HnswNodeKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			layer,
@@ -248,49 +208,41 @@ impl IndexKeyBase {
 	}
 
 	/// Returns a key range covering all per-node `Hn` entries for the given HNSW layer.
-	fn new_hn_layer_range(&self, layer: u16) -> Result<KeyRange<'static>> {
-		HnswNodePrefix {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_hn_layer_range(&self, layer: u16) -> Result<TypedRange<Vec<u8>>> {
+		HnswNodeLayerPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			layer,
 		}
-		.encode_range()
+		.range()
 	}
 
-	fn new_hv_key<'a>(&'a self, vec: &'a SerializedVector) -> Hv<'a> {
-		Hv {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_hv_key<'a>(&'a self, vec: &'a SerializedVector) -> HnswElementKey<'a> {
+		HnswElementKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			vec: Cow::Borrowed(vec),
 		}
 	}
 
-	fn new_hh_key(&self, hash: [u8; 32]) -> Hh<'_> {
-		Hh {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_hh_key(&self, hash: [u8; 32]) -> HnswElementHashedKey<'_> {
+		HnswElementHashedKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			hash,
 		}
 	}
 
-	fn new_hs_key(&self) -> Hs<'_> {
-		Hs {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_hs_key(&self) -> HnswStateKey<'_> {
+		HnswStateKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 		}
@@ -298,12 +250,10 @@ impl IndexKeyBase {
 
 	/// Key storing a DiskANN graph element vector/status payload.
 	#[cfg(diskann)]
-	fn new_de_key(&self, element_id: ElementId) -> De<'_> {
-		De {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_de_key(&self, element_id: ElementId) -> DiskannElementKey<'_> {
+		DiskannElementKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			element_id,
@@ -312,28 +262,24 @@ impl IndexKeyBase {
 
 	/// Range covering all DiskANN graph element payloads.
 	#[cfg(diskann)]
-	fn new_de_range(&self) -> Result<KeyRange<'static>> {
-		use crate::key::index::de::DePrefix;
+	fn new_de_range(&self) -> Result<TypedRange<crate::idx::trees::diskann::DiskAnnElement>> {
+		use crate::key::schema::DiskannElementPrefix;
 
-		DePrefix {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+		DiskannElementPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 		}
-		.encode_range()
+		.range()
 	}
 
 	/// Key storing the DiskANN pending compaction generation.
 	#[cfg(diskann)]
-	fn new_dg_key(&self) -> Dg<'_> {
-		Dg {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_dg_key(&self) -> DiskannGenerationKey<'_> {
+		DiskannGenerationKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 		}
@@ -341,12 +287,10 @@ impl IndexKeyBase {
 
 	/// Key mapping a vector hash to DiskANN hashed-vector document mappings.
 	#[cfg(diskann)]
-	fn new_dh_key(&self, hash: [u8; 32]) -> Dh<'_> {
-		Dh {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_dh_key(&self, hash: [u8; 32]) -> DiskannElementHashedKey<'_> {
+		DiskannElementHashedKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			hash,
@@ -355,12 +299,10 @@ impl IndexKeyBase {
 
 	/// Key storing one DiskANN graph adjacency list.
 	#[cfg(diskann)]
-	fn new_dn_key(&self, element_id: ElementId) -> Dn<'_> {
-		Dn {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_dn_key(&self, element_id: ElementId) -> DiskannNodeKey<'_> {
+		DiskannNodeKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			element_id,
@@ -374,12 +316,10 @@ impl IndexKeyBase {
 	/// family; hence `dead_code` in a non-test build.
 	#[cfg(diskann)]
 	#[allow(dead_code)]
-	fn new_dp_key(&self, shard: u16) -> Dp<'_> {
-		Dp {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_dp_key(&self, shard: u16) -> DiskannPendingLegacyKey<'_> {
+		DiskannPendingLegacyKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			shard,
@@ -391,12 +331,10 @@ impl IndexKeyBase {
 	/// Separate from `!dp` so a pre-change node's compactor — which only knows `!dp`/`!dr` — cannot
 	/// clear the guard for sharded data it can't see during a mixed-version rolling upgrade.
 	#[cfg(diskann)]
-	fn new_dy_key(&self, shard: u16) -> Dy<'_> {
-		Dy {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_dy_key(&self, shard: u16) -> DiskannPendingKey<'_> {
+		DiskannPendingKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			shard,
@@ -405,12 +343,10 @@ impl IndexKeyBase {
 
 	/// Key mapping an exact serialized vector to its DiskANN document set.
 	#[cfg(diskann)]
-	fn new_dq_key<'a>(&'a self, vec: &'a SerializedVector) -> Dq<'a> {
-		Dq {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_dq_key<'a>(&'a self, vec: &'a SerializedVector) -> DiskannElementDocsKey<'a> {
+		DiskannElementDocsKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			vec: Cow::Borrowed(vec),
@@ -422,12 +358,14 @@ impl IndexKeyBase {
 	/// `shard` is the writer's pending-state shard (see `pending_state_shard`); prefixing it lets
 	/// compaction drain — and lookup scan — one shard at a time. New writes always use this layout.
 	#[cfg(diskann)]
-	fn new_dw_key<'a>(&'a self, shard: u16, id: &'a RecordIdKey) -> DiskAnnRecordPendingShard<'a> {
-		DiskAnnRecordPendingShard {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_dw_key<'a>(
+		&'a self,
+		shard: u16,
+		id: &'a RecordIdKey,
+	) -> DiskannRecordPendingShardKey<'a> {
+		DiskannRecordPendingShardKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			shard,
@@ -437,17 +375,18 @@ impl IndexKeyBase {
 
 	/// Range covering the sharded `!dw` pending updates for one shard.
 	#[cfg(diskann)]
-	fn new_dw_shard_range(&self, shard: u16) -> Result<KeyRange<'static>> {
-		DiskAnnRecordPendingShardPrefix {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_dw_shard_range(
+		&self,
+		shard: u16,
+	) -> Result<TypedRange<crate::idx::trees::diskann::DiskAnnRecordPendingUpdate>> {
+		DiskannRecordPendingShardShardPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			shard,
 		}
-		.encode_range()
+		.range()
 	}
 
 	/// Key storing the legacy unsharded pending DiskANN update for one record.
@@ -456,12 +395,10 @@ impl IndexKeyBase {
 	/// path's dual-read fold, and scanned/range-deleted by lookup and compaction, until the legacy
 	/// range drains empty.
 	#[cfg(diskann)]
-	fn new_dr_key<'a>(&'a self, id: &'a RecordIdKey) -> DiskAnnRecordPending<'a> {
-		DiskAnnRecordPending {
-			prefix: crate::key::database::all::DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_dr_key<'a>(&'a self, id: &'a RecordIdKey) -> DiskannRecordPendingKey<'a> {
+		DiskannRecordPendingKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			id: Cow::Borrowed(id),
@@ -470,26 +407,24 @@ impl IndexKeyBase {
 
 	/// Range covering legacy unsharded record-keyed DiskANN pending updates.
 	#[cfg(diskann)]
-	fn new_dr_range(&self) -> Result<crate::key::KeyRange<'static>> {
-		DiskAnnRecordPendingPrefix {
-			prefix: crate::key::database::all::DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_dr_range(
+		&self,
+	) -> Result<TypedRange<crate::idx::trees::diskann::DiskAnnRecordPendingUpdate>> {
+		DiskannRecordPendingPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 		}
-		.encode_range()
+		.range()
 	}
 
 	/// Key storing the DiskANN graph state.
 	#[cfg(diskann)]
-	fn new_ds_key(&self) -> Ds<'_> {
-		Ds {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_ds_key(&self) -> DiskannStateKey<'_> {
+		DiskannStateKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 		}
@@ -499,12 +434,10 @@ impl IndexKeyBase {
 		&self,
 		appending_id: AppendingId,
 		batch_id: BatchId,
-	) -> IndexAppending<'_> {
-		IndexAppending {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	) -> IndexAppendKey<'_> {
+		IndexAppendKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			appending_id,
@@ -512,24 +445,20 @@ impl IndexKeyBase {
 		}
 	}
 
-	pub(crate) fn new_ig_range(&self) -> Result<KeyRange<'static>> {
-		IndexAppendingPrefix {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	pub(crate) fn new_ig_range(&self) -> Result<TypedRange<Appending>> {
+		IndexAppendPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 		}
-		.encode_range()
+		.range()
 	}
 
-	pub(crate) fn new_ip_key(&self, id: RecordIdKey) -> Ip<'_> {
-		Ip {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	pub(crate) fn new_ip_key(&self, id: RecordIdKey) -> IndexPrimaryKey<'_> {
+		IndexPrimaryKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			id,
@@ -537,24 +466,20 @@ impl IndexKeyBase {
 	}
 
 	/// Key storing durable build state for this table index.
-	pub(crate) fn new_bs_key(&self) -> Bs<'_> {
-		Bs {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	pub(crate) fn new_bs_key(&self) -> BuildStateKey<'_> {
+		BuildStateKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 		}
 	}
 
 	/// Key storing the writer-admission ticket counter for a build generation.
-	pub(crate) fn new_bt_key(&self, generation: BuildGeneration) -> Bt<'_> {
-		Bt {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	pub(crate) fn new_bt_key(&self, generation: BuildGeneration) -> BuildTicketKey<'_> {
+		BuildTicketKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			generation,
@@ -562,35 +487,43 @@ impl IndexKeyBase {
 	}
 
 	/// Range covering the ticket counter of one build generation.
-	pub(crate) fn new_bt_range(&self, generation: BuildGeneration) -> Result<KeyRange<'static>> {
-		let start = self.new_bt_key(generation).encode_key()?;
-		let end = start.clone().next();
-		Ok(KeyRange {
-			start,
-			end,
-		})
-	}
-
-	/// Range covering the ticket counters of every generation of this index.
-	pub(crate) fn new_bt_all_generations_range(&self) -> Result<KeyRange<'static>> {
-		BtGenerationPrefix {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	/// Ticket counters of every generation below `below`.
+	///
+	/// The bound is on the generation field, so nothing has to reach into a range's
+	/// bytes to move its end.
+	pub(crate) fn new_bt_range_below(
+		&self,
+		below: BuildGeneration,
+	) -> Result<TypedRange<BuildTicket>> {
+		BuildTicketIxPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 		}
-		.encode_range()
+		.range_where(..below)
+	}
+
+	/// Range covering the ticket counters of every generation of this index.
+	pub(crate) fn new_bt_all_generations_range(&self) -> Result<TypedRange<BuildTicket>> {
+		BuildTicketIxPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+		}
+		.range()
 	}
 
 	/// Key storing one durable writer reservation for a build generation.
-	pub(crate) fn new_br_key(&self, generation: BuildGeneration, ticket: BuildTicket) -> Br<'_> {
-		Br {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	pub(crate) fn new_br_key(
+		&self,
+		generation: BuildGeneration,
+		ticket: BuildTicket,
+	) -> BuildReservationKey<'_> {
+		BuildReservationKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			generation,
@@ -599,30 +532,43 @@ impl IndexKeyBase {
 	}
 
 	/// Range covering writer reservations for one build generation.
-	pub(crate) fn new_br_range(&self, generation: BuildGeneration) -> Result<KeyRange<'static>> {
-		BrTicketPrefix {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	pub(crate) fn new_br_range(
+		&self,
+		generation: BuildGeneration,
+	) -> Result<TypedRange<IndexBuildReservation>> {
+		BuildReservationGenerationPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			generation,
 		}
-		.encode_range()
+		.range()
 	}
 
 	/// Range covering writer reservations across all generations of this index.
-	pub(crate) fn new_br_all_generations_range(&self) -> Result<KeyRange<'static>> {
-		BrGenerationPrefix {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	/// As `new_br_all_generations_range`, but only generations below `below`.
+	pub(crate) fn new_br_range_below(
+		&self,
+		below: BuildGeneration,
+	) -> Result<TypedRange<IndexBuildReservation>> {
+		BuildReservationIxPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 		}
-		.encode_range()
+		.range_where(..below)
+	}
+
+	pub(crate) fn new_br_all_generations_range(&self) -> Result<TypedRange<IndexBuildReservation>> {
+		BuildReservationIxPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+		}
+		.range()
 	}
 
 	/// Key storing one durable queued mutation for a build generation.
@@ -631,12 +577,10 @@ impl IndexKeyBase {
 		generation: BuildGeneration,
 		ticket: BuildTicket,
 		mutation_seq: BuildTicketMutationSeq,
-	) -> Bg<'_> {
-		Bg {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	) -> BuildAppendKey<'_> {
+		BuildAppendKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			generation,
@@ -646,17 +590,18 @@ impl IndexKeyBase {
 	}
 
 	/// Range covering durable queued mutations for one build generation.
-	pub(crate) fn new_bg_range(&self, generation: BuildGeneration) -> Result<KeyRange<'static>> {
-		BgGenerationPrefix {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	pub(crate) fn new_bg_range(
+		&self,
+		generation: BuildGeneration,
+	) -> Result<TypedRange<Appending>> {
+		BuildAppendGenerationPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			generation,
 		}
-		.encode_range()
+		.range()
 	}
 
 	/// Range covering every durable queued mutation that shares one reservation
@@ -666,31 +611,41 @@ impl IndexKeyBase {
 		&self,
 		generation: BuildGeneration,
 		ticket: BuildTicket,
-	) -> Result<KeyRange<'static>> {
-		BgTicketPrefix {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	) -> Result<TypedRange<Appending>> {
+		BuildAppendTicketPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			generation,
 			ticket,
 		}
-		.encode_range()
+		.range()
 	}
 
 	/// Range covering durable queued mutations across all generations of this index.
-	pub(crate) fn new_bg_all_generations_range(&self) -> Result<KeyRange<'static>> {
-		BgPrefix {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	/// As `new_bg_all_generations_range`, but only generations below `below`.
+	pub(crate) fn new_bg_range_below(
+		&self,
+		below: BuildGeneration,
+	) -> Result<TypedRange<Appending>> {
+		BuildAppendIxPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 		}
-		.encode_range()
+		.range_where(..below)
+	}
+
+	pub(crate) fn new_bg_all_generations_range(&self) -> Result<TypedRange<Appending>> {
+		BuildAppendIxPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+		}
+		.range()
 	}
 
 	/// Key mapping a record to its first queued mutation during the initial scan.
@@ -698,12 +653,10 @@ impl IndexKeyBase {
 		&'a self,
 		generation: BuildGeneration,
 		id: &'a RecordIdKey,
-	) -> Bp<'a> {
-		Bp {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	) -> BuildPrimaryKey<'a> {
+		BuildPrimaryKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			generation,
@@ -712,19 +665,26 @@ impl IndexKeyBase {
 	}
 
 	/// Range covering primary-appending markers for one build generation.
-	pub(crate) fn new_bp_range(&self, generation: BuildGeneration) -> Result<KeyRange<'static>> {
-		use crate::key::table::bp::BpIdPrefix;
+	///
+	/// Only the build tests read a whole generation's markers; the engine deletes
+	/// them by generation span instead, via [`Self::new_bp_range_below`]. Gated to
+	/// exactly the configuration that uses it, so it cannot quietly become an
+	/// unused bound.
+	#[cfg(all(test, feature = "kv-mem"))]
+	pub(crate) fn new_bp_range(
+		&self,
+		generation: BuildGeneration,
+	) -> Result<TypedRange<PrimaryAppendingTicket>> {
+		use crate::key::schema::BuildPrimaryGenerationPrefix;
 
-		BpIdPrefix {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+		BuildPrimaryGenerationPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			generation,
 		}
-		.encode_range()
+		.range()
 	}
 
 	/// Range covering a primary-appending record-id span for one build generation.
@@ -733,78 +693,52 @@ impl IndexKeyBase {
 		generation: BuildGeneration,
 		after: Option<&RecordIdKey>,
 		through: Option<&RecordIdKey>,
-	) -> Result<KeyRange<'static>> {
-		let start = if let Some(after) = after {
-			Bp {
-				prefix: DatabaseRoot {
-					ns: self.0.ns,
-					db: self.0.db,
-				},
-				tb: Cow::Borrowed(&self.0.tb),
-				ix: self.0.ix,
-				generation,
-				id: Cow::Borrowed(after),
-			}
-			.encode_key()?
-			.next()
-		} else {
-			BpIdPrefix {
-				prefix: DatabaseRoot {
-					ns: self.0.ns,
-					db: self.0.db,
-				},
-				tb: Cow::Borrowed(&self.0.tb),
-				ix: self.0.ix,
-				generation,
-			}
-			.encode_bound()?
-			.next()
-		};
+	) -> Result<TypedRange<PrimaryAppendingTicket>> {
+		use std::ops::Bound;
 
-		let end = if let Some(through) = through {
-			Bp {
-				prefix: DatabaseRoot {
-					ns: self.0.ns,
-					db: self.0.db,
-				},
-				tb: Cow::Borrowed(&self.0.tb),
-				ix: self.0.ix,
-				generation,
-				id: Cow::Borrowed(through),
-			}
-			.encode_key()?
-			.next()
-		} else {
-			BpIdPrefix {
-				prefix: DatabaseRoot {
-					ns: self.0.ns,
-					db: self.0.db,
-				},
-				tb: Cow::Borrowed(&self.0.tb),
-				ix: self.0.ix,
-				generation,
-			}
-			.encode_bound()?
-			.next_neighbour_expect()
+		let start = match after {
+			Some(after) => Bound::Excluded(Cow::Borrowed(after)),
+			None => Bound::Unbounded,
 		};
-
-		Ok(KeyRange {
-			start,
-			end,
-		})
+		let end = match through {
+			Some(through) => Bound::Included(Cow::Borrowed(through)),
+			None => Bound::Unbounded,
+		};
+		BuildPrimaryGenerationPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+			generation,
+		}
+		.range_where((start, end))
 	}
 
 	/// Range covering primary-appending markers across all generations of this index.
-	pub(crate) fn new_bp_all_generations_range(&self) -> Result<KeyRange<'static>> {
-		BpGenerationPrefix {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	/// As `new_bp_all_generations_range`, but only generations below `below`.
+	pub(crate) fn new_bp_range_below(
+		&self,
+		below: BuildGeneration,
+	) -> Result<TypedRange<PrimaryAppendingTicket>> {
+		BuildPrimaryIxPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 		}
-		.encode_range()
+		.range_where(..below)
+	}
+
+	pub(crate) fn new_bp_all_generations_range(
+		&self,
+	) -> Result<TypedRange<PrimaryAppendingTicket>> {
+		BuildPrimaryIxPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+		}
+		.range()
 	}
 
 	pub(crate) fn new_ic_key(&self, nid: Uuid) -> IndexCompactionKey<'_> {
@@ -818,24 +752,20 @@ impl IndexKeyBase {
 		}
 	}
 
-	fn new_td_root<'a>(&'a self, term: &'a str) -> TdRoot<'a> {
-		TdRoot {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_td_root<'a>(&'a self, term: &'a str) -> TermDocsKey<'a> {
+		TermDocsKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			term: Cow::Borrowed(term),
 		}
 	}
 
-	fn new_td<'a>(&'a self, term: &'a str, doc_id: DocId) -> Td<'a> {
-		Td {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_td<'a>(&'a self, term: &'a str, doc_id: DocId) -> TermPostingKey<'a> {
+		TermPostingKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			term: Cow::Borrowed(term),
@@ -850,12 +780,10 @@ impl IndexKeyBase {
 		nid: Uuid,
 		uid: Uuid,
 		add: bool,
-	) -> Tt<'a> {
-		Tt {
-			prefix: crate::key::database::all::DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	) -> TermChangeKey<'a> {
+		TermChangeKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			term: Cow::Borrowed(term),
@@ -866,49 +794,41 @@ impl IndexKeyBase {
 		}
 	}
 
-	fn new_tt_term_range<'a>(&'a self, term: &'a str) -> Result<crate::key::KeyRange<'a>> {
-		TtTermPrefix {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_tt_term_range<'a>(&'a self, term: &'a str) -> Result<TypedRange<String>> {
+		TermChangeSetKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			term: Cow::Borrowed(term),
 		}
-		.encode_range()
+		.range()
 	}
 
-	fn new_tt_terms_range(&self) -> Result<crate::key::KeyRange<'_>> {
-		TtTermsPrefix {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_tt_terms_range(&self) -> Result<TypedRange<String>> {
+		TermChangesKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 		}
-		.encode_range()
+		.range()
 	}
 
 	/// Generation guard for full-text term-document (`!tt`) compaction.
-	fn new_tv_key(&self) -> Tv<'_> {
-		Tv {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_tv_key(&self) -> TermGenerationKey<'_> {
+		TermGenerationKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 		}
 	}
 
-	fn new_dc_with_id(&self, doc_id: DocId, nid: Uuid, uid: Uuid) -> Dc<'_> {
-		Dc {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_dc_with_id(&self, doc_id: DocId, nid: Uuid, uid: Uuid) -> DocStatsDeltaKey<'_> {
+		DocStatsDeltaKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			doc_id,
@@ -918,11 +838,9 @@ impl IndexKeyBase {
 	}
 
 	fn new_dc_compacted(&self) -> Result<Key<'static>> {
-		DcPrefix {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+		DocStatsKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 		}
@@ -930,23 +848,19 @@ impl IndexKeyBase {
 	}
 
 	/// Generation guard for full-text document-stat (`!dc`) compaction.
-	fn new_dv_key(&self) -> Dv<'_> {
-		Dv {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_dv_key(&self) -> DocCountKey<'_> {
+		DocCountKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 		}
 	}
 
-	fn new_dl(&self, doc_id: DocId) -> Dl<'_> {
-		Dl {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	fn new_dl(&self, doc_id: DocId) -> DocLengthKey<'_> {
+		DocLengthKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 			id: doc_id,
@@ -954,12 +868,10 @@ impl IndexKeyBase {
 	}
 
 	/// Generation guard for count-index (`!iu`) compaction.
-	pub(crate) fn new_iv_key(&self) -> Iv<'_> {
-		Iv {
-			prefix: DatabaseRoot {
-				ns: self.0.ns,
-				db: self.0.db,
-			},
+	pub(crate) fn new_iv_key(&self) -> IndexVersionKey<'_> {
+		IndexVersionKey {
+			ns: self.0.ns,
+			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 		}

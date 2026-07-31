@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::expr::Base;
 use crate::expr::statements::alter::namespace::AlterNamespaceStatement;
 use crate::iam::{Action, ResourceKind};
+use crate::key::schema::NsRoot;
 use crate::val::Value;
 
 /// Computes the effect of the `ALTER NAMESPACE` statement.
@@ -22,7 +23,7 @@ pub(crate) async fn alter_namespace_statement_compute(
 	let namespace_id = ctx.expect_ns_id(opt).await?;
 	// Do we request compacting?
 	if this.compact {
-		let namespace_root = crate::key::namespace::all::NamespaceRoot {
+		let namespace_root = NsRoot {
 			ns: namespace_id,
 		};
 		ctx.tx().compact(&namespace_root).await?;

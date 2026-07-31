@@ -14,7 +14,7 @@ use crate::lq::event::{LiveAction, LiveEvent};
 
 impl Document {
 	/// Capture a live-query event for this record change into the dedicated
-	/// live-query keyspace ([`crate::key::lqe`]).
+	/// live-query keyspace ([`LiveEventsKey`](crate::key::schema::LiveEventsKey)).
 	///
 	/// This runs only when the Router engine is selected and the table currently
 	/// has at least one subscriber, so it is a no-op on the default (Inline) write
@@ -147,10 +147,9 @@ mod tests {
 	use crate::catalog::providers::CatalogProvider;
 	use crate::catalog::{DatabaseId, NamespaceId};
 	use crate::dbs::{Capabilities, Session};
-	use crate::key::database::all::DatabaseRoot;
-	use crate::key::{KVRange, KVValue, lqe};
+	use crate::key::schema::LiveEventsPrefix;
 	use crate::kvs::Datastore;
-	use crate::lq::event::{LiveAction, LiveEvent, LiveEvents};
+	use crate::lq::event::{LiveAction, LiveEvent};
 	use crate::types::PublicValue;
 
 	/// Build an in-memory datastore with the given live-query engine selected.
@@ -189,17 +188,15 @@ mod tests {
 	/// Read every live-query event persisted for the database's dedicated keyspace.
 	async fn live_events(ds: &Datastore, ns: NamespaceId, db: DatabaseId) -> Vec<LiveEvent> {
 		let tx = ds.transaction(Read).await.unwrap();
-		let range = lqe::LqePrefix {
-			prefix: DatabaseRoot {
-				ns,
-				db,
-			},
+		let range = LiveEventsPrefix {
+			ns,
+			db,
 		}
-		.encode_range()
+		.range()
 		.unwrap();
 		let mut events = Vec::new();
 		for (_k, v) in tx.scan(range, 1000, 0, None).await.unwrap() {
-			events.extend(LiveEvents::kv_decode_value(&v, ()).unwrap().0);
+			events.extend(v.0);
 		}
 		tx.cancel().await.unwrap();
 		events

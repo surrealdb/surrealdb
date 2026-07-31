@@ -40,21 +40,13 @@ use crate::catalog::providers::{
 use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableId};
 use crate::err::EngineError;
 use crate::idx::docids::DocId;
-use crate::key::database::all::DatabaseRoot;
-use crate::key::database::th::{TableIdGeneratorBatchKey, TableIdGeneratorBatchPrefix};
-use crate::key::database::ti::TableIdGeneratorStateKey;
-use crate::key::namespace::dh::{DatabaseIdGeneratorBatchKey, DatabaseIdGeneratorBatchPrefix};
-use crate::key::namespace::di::DatabaseIdGeneratorStateKey;
-use crate::key::root::nh::{NamespaceIdGeneratorBatchKey, NamespaceIdGeneratorBatchPrefix};
-use crate::key::root::ni::NamespaceIdGeneratorStateKey;
-use crate::key::sequence::BaPrefix;
-use crate::key::sequence::ba::Ba;
-use crate::key::sequence::st::St;
-use crate::key::table::dh::{DocIdGeneratorBatchKey, DocIdGeneratorBatchPrefix};
-use crate::key::table::ds::DocIdGeneratorStateKey;
-use crate::key::table::ih::{IndexIdGeneratorBatchKey, IndexIdGeneratorBatchPrefix};
-use crate::key::table::is::IndexIdGeneratorStateKey;
-use crate::key::{KVKey, KVRange, Key, KeyRange, impl_kv_value_revisioned};
+use crate::key::schema::{
+	DbIdBatchKey, DbIdBatchPrefix, DbIdStateKey, DocIdBatchKey, DocIdBatchPrefix, DocIdStateKey,
+	IndexIdBatchKey, IndexIdBatchPrefix, IndexIdStateKey, NsIdBatchKey, NsIdBatchPrefix,
+	NsIdStateKey, SeqBatchKey, SeqBatchPrefix, SeqStateKey, TbIdBatchKey, TbIdBatchPrefix,
+	TbIdStateKey,
+};
+use crate::key::{KVKey, Key, TypedRange, impl_kv_value_revisioned};
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::{Transaction, TransactionType};
 
@@ -117,78 +109,66 @@ impl SequenceDomain {
 		Self::IndexIds(ns, db, tb)
 	}
 
-	fn new_batch_range_keys(&self) -> Result<KeyRange<'static>> {
+	fn new_batch_range_keys(&self) -> Result<TypedRange<BatchValue>> {
 		match self {
-			Self::UserName(ns, db, sq) => BaPrefix {
-				prefix: DatabaseRoot {
-					ns: *ns,
-					db: *db,
-				},
+			Self::UserName(ns, db, sq) => SeqBatchPrefix {
+				ns: *ns,
+				db: *db,
 				sq: Cow::Borrowed(sq),
 			}
-			.encode_range(),
+			.range(),
 			Self::TableDocIds(ns, db, tb) => {
-				DocIdGeneratorBatchPrefix::new(*ns, *db, tb).encode_range()
+				DocIdBatchPrefix::new(*ns, *db, Cow::Borrowed(tb)).range()
 			}
-			Self::NameSpacesIds => NamespaceIdGeneratorBatchPrefix {}.encode_range(),
-			Self::DatabasesIds(ns) => DatabaseIdGeneratorBatchPrefix {
+			Self::NameSpacesIds => NsIdBatchPrefix {}.range(),
+			Self::DatabasesIds(ns) => DbIdBatchPrefix {
 				ns: *ns,
 			}
-			.encode_range(),
-			Self::TablesIds(ns, db) => TableIdGeneratorBatchPrefix {
-				prefix: DatabaseRoot {
-					ns: *ns,
-					db: *db,
-				},
+			.range(),
+			Self::TablesIds(ns, db) => TbIdBatchPrefix {
+				ns: *ns,
+				db: *db,
 			}
-			.encode_range(),
-			Self::IndexIds(ns, db, tb) => IndexIdGeneratorBatchPrefix {
-				prefix: DatabaseRoot {
-					ns: *ns,
-					db: *db,
-				},
+			.range(),
+			Self::IndexIds(ns, db, tb) => IndexIdBatchPrefix {
+				ns: *ns,
+				db: *db,
 				tb: Cow::Borrowed(tb),
 			}
-			.encode_range(),
+			.range(),
 		}
 	}
 
 	fn new_batch_key(&self, start: i64) -> Result<Key<'static>> {
 		match &self {
-			Self::UserName(ns, db, sq) => Ba {
-				prefix: DatabaseRoot {
-					ns: *ns,
-					db: *db,
-				},
+			Self::UserName(ns, db, sq) => SeqBatchKey {
+				ns: *ns,
+				db: *db,
 				sq: Cow::Borrowed(sq.as_str()),
 				start,
 			}
 			.encode_key(),
 			Self::TableDocIds(ns, db, tb) => {
-				DocIdGeneratorBatchKey::new(*ns, *db, tb, start).encode_key()
+				DocIdBatchKey::new(*ns, *db, Cow::Borrowed(tb), start).encode_key()
 			}
-			Self::NameSpacesIds => NamespaceIdGeneratorBatchKey {
+			Self::NameSpacesIds => NsIdBatchKey {
 				start,
 			}
 			.encode_key(),
-			Self::DatabasesIds(ns) => DatabaseIdGeneratorBatchKey {
+			Self::DatabasesIds(ns) => DbIdBatchKey {
 				ns: *ns,
 				start,
 			}
 			.encode_key(),
-			Self::TablesIds(ns, db) => TableIdGeneratorBatchKey {
-				prefix: DatabaseRoot {
-					ns: *ns,
-					db: *db,
-				},
+			Self::TablesIds(ns, db) => TbIdBatchKey {
+				ns: *ns,
+				db: *db,
 				start,
 			}
 			.encode_key(),
-			Self::IndexIds(ns, db, tb) => IndexIdGeneratorBatchKey {
-				prefix: DatabaseRoot {
-					ns: *ns,
-					db: *db,
-				},
+			Self::IndexIds(ns, db, tb) => IndexIdBatchKey {
+				ns: *ns,
+				db: *db,
 				tb: Cow::Borrowed(tb),
 				start,
 			}
@@ -198,40 +178,34 @@ impl SequenceDomain {
 
 	fn new_state_key(&self, nid: Uuid) -> Result<Key<'static>> {
 		match &self {
-			Self::UserName(ns, db, sq) => St {
-				root: DatabaseRoot {
-					ns: *ns,
-					db: *db,
-				},
+			Self::UserName(ns, db, sq) => SeqStateKey {
+				ns: *ns,
+				db: *db,
 				sq: Cow::Borrowed(sq.as_str()),
 				nid,
 			}
 			.encode_key(),
 			Self::TableDocIds(ns, db, tb) => {
-				DocIdGeneratorStateKey::new(*ns, *db, tb, nid).encode_key()
+				DocIdStateKey::new(*ns, *db, Cow::Borrowed(tb), nid).encode_key()
 			}
-			Self::NameSpacesIds => NamespaceIdGeneratorStateKey {
+			Self::NameSpacesIds => NsIdStateKey {
 				nid,
 			}
 			.encode_key(),
-			Self::DatabasesIds(ns) => DatabaseIdGeneratorStateKey {
+			Self::DatabasesIds(ns) => DbIdStateKey {
 				ns: *ns,
 				nid,
 			}
 			.encode_key(),
-			Self::TablesIds(ns, db) => TableIdGeneratorStateKey {
-				prefix: DatabaseRoot {
-					ns: *ns,
-					db: *db,
-				},
+			Self::TablesIds(ns, db) => TbIdStateKey {
+				ns: *ns,
+				db: *db,
 				nid,
 			}
 			.encode_key(),
-			Self::IndexIds(ns, db, tb) => IndexIdGeneratorStateKey {
-				prefix: DatabaseRoot {
-					ns: *ns,
-					db: *db,
-				},
+			Self::IndexIds(ns, db, tb) => IndexIdStateKey {
+				ns: *ns,
+				db: *db,
 				tb: Cow::Borrowed(tb),
 				nid,
 			}
@@ -727,11 +701,10 @@ impl Sequence {
 		// Execute operations and ensure transaction is cancelled on error
 		let result = async {
 			let batch_range = seq.new_batch_range_keys()?;
-			let val = tx.getr(batch_range, None).await?;
+			let batches = tx.getr(batch_range, None).await?;
 			let mut next_start = next;
 			// Scan every existing batch
-			for (key, val) in val.iter() {
-				let ba: BatchValue = revision::from_slice(val)?;
+			for (key, ba) in batches.iter() {
 				next_start = next_start.max(ba.to);
 				// The batch belongs to this node
 				if ba.owner == sqs.nid {
@@ -949,11 +922,18 @@ mod tikv_concurrency {
 	use super::Sequences;
 	use crate::CommunityComposer;
 	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::key::schema::{RootRoot, VersionKey};
 	use crate::kvs::ds::TransactionFactory;
 	use crate::kvs::{Datastore, TransactionType};
 
-	/// Build a datastore against the local TiKV cluster, clear the keyspace so
-	/// reruns are deterministic, and hand back its transaction factory.
+	/// Build a datastore against the local TiKV cluster, clear it so reruns are
+	/// deterministic, and hand back its transaction factory.
+	///
+	/// Two operations, because the keyspace has two top-level regions: everything
+	/// under the root, and the storage version key, which sits outside it so a
+	/// version probe can read it before any data exists. The version key has to go
+	/// too, or a version left by a differently-built binary survives the wipe and
+	/// the next run cannot open the store.
 	async fn fresh_tikv_tf() -> TransactionFactory {
 		let ds = Datastore::builder()
 			.with_id(Uuid::new_v4())
@@ -961,7 +941,8 @@ mod tikv_concurrency {
 			.await
 			.unwrap();
 		let tx = ds.transaction(TransactionType::Write).await.unwrap();
-		tx.delr((vec![0u8]..vec![0xffu8]).into()).await.unwrap();
+		tx.delr(RootRoot {}.range_subtree().unwrap()).await.unwrap();
+		tx.del_key(&VersionKey {}).await.unwrap();
 		tx.commit().await.unwrap();
 		ds.transaction_factory().clone()
 	}

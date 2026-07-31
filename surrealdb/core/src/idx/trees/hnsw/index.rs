@@ -26,7 +26,7 @@ use crate::idx::{
 	IndexKeyBase, bump_compaction_generation, is_transaction_condition_not_met,
 	read_compaction_generation,
 };
-use crate::key::index::hr::HnswRecordPending;
+use crate::key::schema::HnswRecordPendingKey;
 use crate::key::{KVKeyDecode, KVValue, Key};
 use crate::kvs::{Transaction, Val};
 use crate::val::{Number, RecordId, RecordIdKey, Value};
@@ -371,7 +371,7 @@ impl HnswIndex {
 		count: &mut usize,
 	) -> Result<()> {
 		let rng = ikb.new_hp_range()?;
-		let mut cursor = tx.open_vals_cursor(rng, ScanDirection::Forward, 0, None).await?;
+		let mut cursor = tx.open_vals_cursor_raw(rng, ScanDirection::Forward, 0, None).await?;
 		loop {
 			let batch = cursor.next_batch(crate::kvs::NORMAL_BATCH_SIZE).await?;
 			if batch.is_empty() {
@@ -409,7 +409,7 @@ impl HnswIndex {
 		count: &mut usize,
 	) -> Result<()> {
 		let rng = ikb.new_hr_range()?;
-		let mut cursor = tx.open_vals_cursor(rng, ScanDirection::Forward, 0, None).await?;
+		let mut cursor = tx.open_vals_cursor_raw(rng, ScanDirection::Forward, 0, None).await?;
 		loop {
 			let batch = cursor.next_batch(crate::kvs::NORMAL_BATCH_SIZE).await?;
 			if batch.is_empty() {
@@ -421,7 +421,7 @@ impl HnswIndex {
 				if ctx.is_done(Some(*count)).await? {
 					bail!(EngineError::QueryCancelled)
 				}
-				let hr = HnswRecordPending::decode_key(&key)?;
+				let hr = HnswRecordPendingKey::decode_key(&key)?;
 				let pending = HnswRecordPendingUpdate::kv_decode_value(&value, ())?;
 				let pending = Self::record_pending_to_operation(hr.id.into_owned(), pending);
 				if !builder.add(key, value, pending) {
@@ -797,7 +797,7 @@ impl HnswIndex {
 		F: FnMut(PendingOperation),
 	{
 		let rng = self.ikb.new_hp_range()?;
-		let mut cursor = tx.open_vals_cursor(rng, ScanDirection::Forward, 0, None).await?;
+		let mut cursor = tx.open_vals_cursor_raw(rng, ScanDirection::Forward, 0, None).await?;
 		let mut count = 0;
 		loop {
 			let batch = cursor.next_batch(crate::kvs::NORMAL_BATCH_SIZE).await?;
@@ -816,7 +816,7 @@ impl HnswIndex {
 		drop(cursor);
 
 		let rng = self.ikb.new_hr_range()?;
-		let mut cursor = tx.open_vals_cursor(rng, ScanDirection::Forward, 0, None).await?;
+		let mut cursor = tx.open_vals_cursor_raw(rng, ScanDirection::Forward, 0, None).await?;
 		loop {
 			let batch = cursor.next_batch(crate::kvs::NORMAL_BATCH_SIZE).await?;
 			if batch.is_empty() {
@@ -826,7 +826,7 @@ impl HnswIndex {
 				if ctx.is_done(Some(count)).await? {
 					bail!(EngineError::QueryCancelled)
 				}
-				let hr = HnswRecordPending::decode_key(key)?;
+				let hr = HnswRecordPendingKey::decode_key(key)?;
 				let pending = HnswRecordPendingUpdate::kv_decode_value(value, ())?;
 				collector(Self::record_pending_to_operation(hr.id.into_owned(), pending));
 				count += 1;

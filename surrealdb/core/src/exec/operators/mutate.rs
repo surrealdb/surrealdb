@@ -40,8 +40,7 @@ use crate::expr::match_plan::{DetachMode, UpdateData};
 use crate::expr::statements::{CreateStatement, DeleteStatement, RelateStatement, UpdateStatement};
 use crate::expr::{AssignOperator, ControlFlow, Data, Expr, Literal, Output};
 use crate::idx::planner::ScanDirection;
-use crate::key::database::all::DatabaseRoot;
-use crate::key::{KVRange, graph};
+use crate::key::schema::GraphIdPrefix;
 use crate::val::{Object, RecordId, TableName, Value};
 
 /// `SET` / `REMOVE` over the binding bound at `target`.
@@ -401,17 +400,15 @@ async fn has_connected_edges(
 	frozen: &FrozenContext,
 ) -> Result<bool, ControlFlow> {
 	let txn = frozen.tx();
-	let range = graph::Prefix {
-		prefix: DatabaseRoot {
-			ns,
-			db,
-		},
+	let range = GraphIdPrefix {
+		ns,
+		db,
 		tb: Cow::Borrowed(&rid.table),
 		id: Cow::Borrowed(&rid.key),
 	}
-	.encode_range()?;
+	.range()?;
 	let mut cursor = txn
-		.open_keys_cursor(range, ScanDirection::Forward, 0, None)
+		.open_keys_cursor_raw(range, ScanDirection::Forward, 0, None)
 		.await
 		.map_err(ControlFlow::Err)?;
 	let batch = cursor.next_batch(1).await.map_err(ControlFlow::Err)?;

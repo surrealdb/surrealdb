@@ -23,8 +23,11 @@ use crate::exec::{
 use crate::expr::ControlFlow;
 use crate::iam::Action;
 use crate::idx::planner::ScanDirection;
-use crate::key::database::all::DatabaseRoot;
-use crate::key::{KVKey, KVKeyDecode, KVRange, KeyRange};
+use crate::key::schema::{
+	DbRoot, ReferenceForeignFieldPrefix, ReferenceForeignTablePrefix, ReferenceIdPrefix,
+	ReferenceKey,
+};
+use crate::key::{KVKeyDecode, TypedRange};
 use crate::kvs::CachePolicy;
 use crate::val::{RecordId, TableName};
 
@@ -218,7 +221,7 @@ impl ExecOperator for ReferenceScan {
 					.await?;
 
 					let mut cursor = txn
-						.open_keys_cursor(range, ScanDirection::Forward, 0, version)
+						.open_keys_cursor_raw(range, ScanDirection::Forward, 0, version)
 						.await
 						.context("Failed to open reference cursor")?;
 					loop {
@@ -227,7 +230,7 @@ impl ExecOperator for ReferenceScan {
 						let mut decode_err: Option<anyhow::Error> = None;
 						let stats = cursor
 							.for_each(crate::kvs::NORMAL_BATCH_SIZE, &mut |key| {
-								match crate::key::r#ref::Ref::decode_key(key) {
+								match ReferenceKey::decode_key(key) {
 									Ok(decoded) => {
 										rid_batch.push(RecordId {
 											table: decoded.foreign_table.into_owned(),
@@ -309,10 +312,11 @@ impl ExecOperator for ReferenceScan {
 // Private helpers
 // ---------------------------------------------------------------------------
 
-/// Compute the KV key range `(beg, end)` for a reference scan.
+/// Compute the KV key range for a reference scan.
 ///
-/// Dispatches to the correct key prefix/suffix functions based on what
-/// combination of table, field, and range bounds was supplied.
+/// Dispatches to the bound matching the combination of table, field, and range
+/// bounds that was supplied: each of them narrows the scan by one more field of
+/// the reference key.
 #[allow(clippy::too_many_arguments)]
 async fn compute_ref_key_range(
 	ns_id: NamespaceId,
@@ -323,11 +327,11 @@ async fn compute_ref_key_range(
 	range_start: &Bound<Arc<dyn PhysicalExpr>>,
 	range_end: &Bound<Arc<dyn PhysicalExpr>>,
 	ctx: &ExecutionContext,
-) -> Result<KeyRange<'static>, ControlFlow> {
+) -> Result<TypedRange<()>, ControlFlow> {
 	let has_range =
 		!matches!(range_start, Bound::Unbounded) || !matches!(range_end, Bound::Unbounded);
 
-	let prefix = DatabaseRoot {
+	let prefix = DbRoot {
 		ns: ns_id,
 		db: db_id,
 	};
@@ -343,110 +347,58 @@ async fn compute_ref_key_range(
 			)
 		})?;
 
+		// The bounds are on the referencing record's key, which is the field the
+		// reference key carries after the referring field.
 		let start = match range_start {
-			Bound::Included(x) => {
-				let fk = evaluate_bound_key(x, ctx).await?;
-				crate::key::r#ref::Ref {
-					prefix,
-					table: Cow::Borrowed(&rid.table),
-					id: Cow::Borrowed(&rid.key),
-					foreign_table: Cow::Borrowed(table),
-					foreign_field: field.into(),
-					foreign_key: Cow::Owned(fk),
-				}
-				.encode_key()?
-			}
-			Bound::Excluded(x) => {
-				let fk = evaluate_bound_key(x, ctx).await?;
-				crate::key::r#ref::Ref {
-					prefix,
-					table: Cow::Borrowed(&rid.table),
-					id: Cow::Borrowed(&rid.key),
-					foreign_table: Cow::Borrowed(table),
-					foreign_field: field.into(),
-					foreign_key: Cow::Owned(fk),
-				}
-				.encode_key()?
-				.next()
-			}
-			Bound::Unbounded => crate::key::r#ref::PrefixField {
-				prefix,
-				tb: Cow::Borrowed(&rid.table),
-				id: Cow::Borrowed(&rid.key),
-				ft: Cow::Borrowed(table.as_str()),
-				ff: Cow::Borrowed(field),
-			}
-			.encode_bound()?,
+			Bound::Included(x) => Bound::Included(Cow::Owned(evaluate_bound_key(x, ctx).await?)),
+			Bound::Excluded(x) => Bound::Excluded(Cow::Owned(evaluate_bound_key(x, ctx).await?)),
+			Bound::Unbounded => Bound::Unbounded,
 		};
 
 		let end = match range_end {
-			Bound::Included(x) => {
-				let fk = evaluate_bound_key(x, ctx).await?;
-				crate::key::r#ref::Ref {
-					prefix,
-					table: Cow::Borrowed(&rid.table),
-					id: Cow::Borrowed(&rid.key),
-					foreign_table: Cow::Borrowed(table),
-					foreign_field: Cow::Borrowed(field),
-					foreign_key: Cow::Owned(fk),
-				}
-				.encode_key()?
-				.next()
-			}
-			Bound::Excluded(x) => {
-				let fk = evaluate_bound_key(x, ctx).await?;
-				crate::key::r#ref::Ref {
-					prefix,
-					table: Cow::Borrowed(&rid.table),
-					id: Cow::Borrowed(&rid.key),
-					foreign_table: Cow::Borrowed(table),
-					foreign_field: Cow::Borrowed(field),
-					foreign_key: Cow::Owned(fk),
-				}
-				.encode_key()?
-			}
-			Bound::Unbounded => crate::key::r#ref::PrefixField {
-				prefix,
-				tb: Cow::Borrowed(&rid.table),
-				id: Cow::Borrowed(&rid.key),
-				ft: Cow::Borrowed(table.as_str()),
-				ff: Cow::Borrowed(field),
-			}
-			.encode_bound()?
-			.next_neighbour()
-			.expect("Should have a valid prefix"),
+			Bound::Included(x) => Bound::Included(Cow::Owned(evaluate_bound_key(x, ctx).await?)),
+			Bound::Excluded(x) => Bound::Excluded(Cow::Owned(evaluate_bound_key(x, ctx).await?)),
+			Bound::Unbounded => Bound::Unbounded,
 		};
 
-		Ok(KeyRange {
-			start,
-			end,
-		})
+		Ok(ReferenceForeignFieldPrefix {
+			ns: prefix.ns,
+			db: prefix.db,
+			tb: Cow::Borrowed(&rid.table),
+			id: Cow::Borrowed(&rid.key),
+			foreign_table: Cow::Borrowed(table),
+			foreign_field: Cow::Borrowed(field),
+		}
+		.range_where((start, end))?)
 	} else if let Some(table) = referencing_table {
 		if let Some(field) = referencing_field {
-			Ok(crate::key::r#ref::PrefixField {
-				prefix,
+			Ok(ReferenceForeignFieldPrefix {
+				ns: prefix.ns,
+				db: prefix.db,
 				tb: Cow::Borrowed(&rid.table),
 				id: Cow::Borrowed(&rid.key),
-				ft: Cow::Borrowed(table.as_str()),
-				ff: Cow::Borrowed(field),
+				foreign_table: Cow::Borrowed(table),
+				foreign_field: Cow::Borrowed(field),
 			}
-			.encode_range()?)
+			.range()?)
 		} else {
-			Ok(crate::key::r#ref::PrefixFt {
-				prefix,
+			Ok(ReferenceForeignTablePrefix {
+				ns: prefix.ns,
+				db: prefix.db,
 				tb: Cow::Borrowed(&rid.table),
 				id: Cow::Borrowed(&rid.key),
-				ft: Cow::Borrowed(table.as_str()),
+				foreign_table: Cow::Borrowed(table),
 			}
-			.encode_range()?)
+			.range()?)
 		}
 	} else {
-		Ok(crate::key::r#ref::Prefix {
-			root: prefix,
+		Ok(ReferenceIdPrefix {
+			ns: prefix.ns,
+			db: prefix.db,
 			tb: Cow::Borrowed(&rid.table),
 			id: Cow::Borrowed(&rid.key),
 		}
-		.encode_range()?)
+		.range()?)
 	}
 }
 

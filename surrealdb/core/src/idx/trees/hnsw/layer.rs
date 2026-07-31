@@ -18,7 +18,7 @@ use crate::idx::trees::hnsw::{ElementId, HnswElements, HnswSearch, VectorId};
 use crate::idx::trees::knn::{DoublePriorityQueue, Ids64};
 use crate::idx::trees::vector::SharedVector;
 use crate::key::KVKeyDecode;
-use crate::key::index::hn::HnswNode;
+use crate::key::schema::HnswNodeKey;
 use crate::kvs::Transaction;
 
 #[revisioned(revision = 1)]
@@ -620,7 +620,7 @@ where
 		// for each node and take precedence over the Hl data loaded above.
 		let range = self.ikb.new_hn_layer_range(self.level)?;
 		let mut count = 0;
-		let mut cursor = tx.open_vals_cursor(range, ScanDirection::Forward, 0, None).await?;
+		let mut cursor = tx.open_vals_cursor_raw(range, ScanDirection::Forward, 0, None).await?;
 		loop {
 			let batch = cursor.next_batch(crate::kvs::NORMAL_BATCH_SIZE).await?;
 			if batch.is_empty() {
@@ -631,7 +631,7 @@ where
 				if ctx.is_done(Some(count)).await? {
 					bail!(EngineError::QueryCancelled);
 				}
-				let key = HnswNode::decode_key(k)?;
+				let key = HnswNodeKey::decode_key(k)?;
 				self.graph.load_node(key.node, v);
 				count += 1;
 			}

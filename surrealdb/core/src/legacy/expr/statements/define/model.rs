@@ -14,7 +14,7 @@ use crate::expr::Base;
 use crate::expr::statements::define::DefineKind;
 use crate::expr::statements::define::model::DefineModelStatement;
 use crate::iam::{Action, ResourceKind};
-use crate::key::database::all::DatabaseRoot;
+use crate::key::schema::MlModelKey;
 use crate::val::Value;
 
 /// Process this type returning a computed simple Value
@@ -60,11 +60,9 @@ pub(crate) async fn define_model_statement_compute(
 		.cast_to()?;
 
 	// Process the statement
-	let key = crate::key::database::ml::Ml {
-		prefix: DatabaseRoot {
-			ns,
-			db,
-		},
+	let key = MlModelKey {
+		ns,
+		db,
 		ml: Cow::Borrowed(&this.name),
 		vn: Cow::Borrowed(&this.version),
 	};

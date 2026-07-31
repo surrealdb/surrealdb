@@ -4552,6 +4552,7 @@ dependencies = [
  "surrealdb-expr",
  "surrealdb-gql",
  "surrealdb-iam",
+ "surrealdb-keyspace-macro",
  "surrealdb-kvs",
  "surrealdb-kvs-any",
  "surrealdb-observe",
@@ -4648,6 +4649,15 @@ dependencies = [
  "subtle",
  "thiserror",
  "tracing",
+]
+
+[[package]]
+name = "surrealdb-keyspace-macro"
+version = "3.3.0-nightly"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]

@@ -19,7 +19,8 @@ use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::define::{DefineAccessStatement, DefineKind, DefineUserStatement};
 use crate::expr::user::UserDuration;
 use crate::expr::{Algorithm, Base, DefineAnalyzerStatement, Expr, Idiom, Literal};
-use crate::key::{KVKeyDecode, KVRange, KVValue, record};
+use crate::key::schema::{RecordKey, RecordPrefix};
+use crate::key::{KVKeyDecode, KVSubspace, KVValue};
 use crate::sql::statements::OptionStatement;
 use crate::{catalog, val};
 
@@ -394,20 +395,20 @@ impl Transaction {
 		chn.send(bytes!("")).await?;
 
 		let tb_name = table.name.clone();
-		let mut next = Some(
-			crate::key::record::RecordKeyPrefix {
-				root: crate::key::database::all::DatabaseRoot {
-					ns,
-					db,
-				},
-				table: std::borrow::Cow::Borrowed(&tb_name),
-			}
-			.encode_range()?,
-		);
+		// A record's value decodes only with its own key's record id, so the table's
+		// records are read as bytes and decoded per key by `export_regular_data`.
+		let records = RecordPrefix {
+			ns,
+			db,
+			tb: std::borrow::Cow::Borrowed(&tb_name),
+		};
+		let mut next = Some(records.range()?);
 
 		while let Some(rng) = next {
-			let batch = self.batch_keys_vals(rng, batch_size, None).await?;
-			next = batch.next;
+			let batch = self.batch_keys_vals_raw(rng, batch_size, None).await?;
+			// What a batch leaves unread is a tail of the same region, so the bound that
+			// produced the range is the one that wraps the continuation.
+			next = batch.next.map(|rng| records.raw(rng));
 			// If there are no values, return early.
 			if batch.result.is_empty() {
 				break;
@@ -484,7 +485,7 @@ impl Transaction {
 
 		// Process each regular value.
 		for (k, v) in regular_values {
-			let k = record::RecordKey::decode_key(&k)?;
+			let k = RecordKey::decode_key(&k)?;
 			let rid = crate::val::RecordId {
 				table: k.tb.into_owned(),
 				key: k.id.into_owned(),

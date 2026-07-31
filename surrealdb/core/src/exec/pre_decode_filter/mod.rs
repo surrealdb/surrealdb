@@ -60,7 +60,7 @@ use crate::exec::object_extract::{
 use crate::expr::operator::BinaryOperator;
 use crate::fnc::operate;
 use crate::key::KVKeyDecode;
-use crate::key::record::RecordKey;
+use crate::key::schema::RecordKey;
 use crate::val::{RecordId, Value};
 
 /// When a streaming leaf walk bails or misses, re-apply this op against a decoded leaf or

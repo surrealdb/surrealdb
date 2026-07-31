@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -26,12 +27,12 @@ use crate::idx::IndexKeyBase;
 use crate::idx::docids::{DocId, TableDocIds};
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::index::IndexOperation;
-use crate::key::index::ig::IndexAppending;
-use crate::key::table::bg::Bg;
-use crate::key::table::bp::Bp;
-use crate::key::table::br::Br;
-use crate::key::table::dp::{self, Dp};
-use crate::key::{KVKeyDecode, KVRange, impl_kv_value_revisioned, record};
+use crate::idx::planner::ScanDirection;
+use crate::key::schema::{
+	BuildAppendKey, BuildPrimaryKey, BuildReservationKey, DocPendingKey, DocPendingPrefix,
+	IndexAppendKey, RecordKey,
+};
+use crate::key::{KVKeyDecode, Resumable, impl_kv_value_revisioned};
 use crate::kvs::{
 	DatastoreError, INDEXING_BATCH_SIZE, Transaction, Val, is_retryable_transaction_conflict,
 };
@@ -375,7 +376,7 @@ impl Building {
 				return Err(err);
 			}
 			for key in keys {
-				let br = Br::decode_key(&key)?;
+				let br = BuildReservationKey::decode_key(&key)?;
 				if let Some(reservation) = tx.get_key(&br, None).await? {
 					// One reservation now covers an entire user transaction's
 					// batch of mutations on this index, so existence of any
@@ -453,10 +454,9 @@ impl Building {
 		&self,
 		below: BuildGeneration,
 	) -> Result<()> {
-		// Reservations sort by generation, so the stale span is everything
-		// before the start of `below`'s own range.
-		let mut rng = self.ikb.new_br_all_generations_range()?;
-		rng.end = self.ikb.new_br_range(below)?.start;
+		// Reservations sort by generation, so the stale span is every
+		// reservation whose generation is below `below`.
+		let rng = self.ikb.new_br_range_below(below)?;
 		loop {
 			if self.is_aborted().await {
 				return Ok(());
@@ -475,7 +475,7 @@ impl Building {
 			let ctx = self.new_write_tx_ctx().await?;
 			let tx = ctx.tx();
 			for key in keys {
-				let br = Br::decode_key(&key)?;
+				let br = BuildReservationKey::decode_key(&key)?;
 				if let Some(reservation) = tx.get_key(&br, None).await? {
 					// Same retire test as `wait_for_durable_reservations`: any
 					// committed `!bg(gen, ticket, *)` means the writer's user
@@ -567,7 +567,7 @@ impl Building {
 					return Ok(count);
 				}
 				self.is_beyond_threshold(Some(initial_count + count))?;
-				let key = record::RecordKey::decode_key(k)?;
+				let key = RecordKey::decode_key(k)?;
 				// Parse the value.
 				let val: Record = revision::from_slice(v.as_slice())?;
 				let rid: Arc<RecordId> = RecordId {
@@ -767,7 +767,7 @@ impl Building {
 			return Ok(0);
 		}
 		let range = self.ikb.new_bp_span_range(generation, scan.cursor.as_ref(), scan.through)?;
-		if range.start >= range.end {
+		if range.start() >= range.end() {
 			if let Some(through) = scan.through {
 				*scan.cursor = Some(through.clone());
 			}
@@ -779,8 +779,13 @@ impl Building {
 			if self.is_aborted().await {
 				return Ok(count);
 			}
-			let batch = scan.lookup_tx.batch_keys(rng, INDEXING_BATCH_SIZE, None).await?;
-			next = batch.next;
+			let batch = scan.lookup_tx.batch_keys(rng.clone(), INDEXING_BATCH_SIZE, None).await?;
+			// A full page resumes just after the last key it returned; a short
+			// page means the span is drained.
+			next = batch
+				.next
+				.and(batch.result.last())
+				.map(|last| rng.resume_after(last, ScanDirection::Forward));
 			for key in batch.result {
 				// Baseline indexing is synchronous CPU work; yield so a long
 				// batch cannot starve the runtime worker.
@@ -789,7 +794,7 @@ impl Building {
 					return Ok(count);
 				}
 				self.is_beyond_threshold(Some(scan.initial_count + count))?;
-				let bp = Bp::decode_key(&key)?;
+				let bp = BuildPrimaryKey::decode_key(&key)?;
 				if scan.live_ids.contains(&bp.id) {
 					continue;
 				}
@@ -989,7 +994,12 @@ impl Building {
 				TableDocIds::new(self.ix_key.ns, self.ix_key.db, self.ikb.table().clone())
 					.remove(&tx, &rid_key)
 					.await?;
-				let dp = Dp::new(self.ix_key.ns, self.ix_key.db, self.ikb.table(), &rid_key);
+				let dp = DocPendingKey::new(
+					self.ix_key.ns,
+					self.ix_key.db,
+					Cow::Borrowed(self.ikb.table()),
+					Cow::Borrowed(&rid_key),
+				);
 				tx.del_key(&dp).await?;
 			}
 		}
@@ -1047,7 +1057,12 @@ impl Building {
 	/// crashes. It is consumed by
 	/// [`reclaim_deferred_doc_ids`](Self::reclaim_deferred_doc_ids).
 	async fn defer_doc_id_reclaim(&self, tx: &Transaction, id: &RecordIdKey) -> Result<()> {
-		let dp = Dp::new(self.ix_key.ns, self.ix_key.db, self.ikb.table(), id);
+		let dp = DocPendingKey::new(
+			self.ix_key.ns,
+			self.ix_key.db,
+			Cow::Borrowed(self.ikb.table()),
+			Cow::Borrowed(id),
+		);
 		tx.set_key(&dp, &()).await
 	}
 
@@ -1106,7 +1121,12 @@ impl Building {
 			// Fetch the next chunk of pending markers.
 			let rng = catch!(
 				tx,
-				dp::Prefix::new(self.ix_key.ns, self.ix_key.db, self.ikb.table()).encode_range()
+				DocPendingPrefix::new(
+					self.ix_key.ns,
+					self.ix_key.db,
+					Cow::Borrowed(self.ikb.table())
+				)
+				.range()
 			);
 			let keys = catch!(tx, tx.keys(rng, INDEXING_BATCH_SIZE, 0, None).await);
 			if keys.is_empty() {
@@ -1115,11 +1135,10 @@ impl Building {
 			}
 			let mut ids = Vec::with_capacity(keys.len());
 			for k in &keys {
-				ids.push(catch!(tx, Dp::decode_key(k)).into_id());
+				ids.push(catch!(tx, DocPendingKey::decode_key(k)).id.into_owned());
 			}
 			// One batched probe decides every record's fate in this chunk.
-			let record_keys: Vec<record::RecordKey> =
-				ids.iter().map(|id| self.record_key(id)).collect();
+			let record_keys: Vec<RecordKey> = ids.iter().map(|id| self.record_key(id)).collect();
 			let records = catch!(tx, tx.get_many_key(record_keys, None).await);
 			// Records reclaimed in this chunk, remembered for the post-commit
 			// re-probe that repairs concurrent re-creates.
@@ -1133,7 +1152,12 @@ impl Building {
 				// The marker is consumed whether the mapping was reclaimed
 				// (record absent), kept (record re-created during the build), or
 				// already gone (reclaimed by an earlier inline pass or sweep).
-				let dp = Dp::new(self.ix_key.ns, self.ix_key.db, self.ikb.table(), id);
+				let dp = DocPendingKey::new(
+					self.ix_key.ns,
+					self.ix_key.db,
+					Cow::Borrowed(self.ikb.table()),
+					Cow::Borrowed(id),
+				);
 				catch!(tx, tx.del_key(&dp).await);
 			}
 			if self
@@ -1166,12 +1190,10 @@ impl Building {
 	}
 
 	/// Builds the datastore key of one record on the indexed table.
-	fn record_key<'a>(&'a self, id: &'a RecordIdKey) -> record::RecordKey<'a> {
-		record::RecordKey {
-			root: crate::key::database::all::DatabaseRoot {
-				ns: self.ix_key.ns,
-				db: self.ix_key.db,
-			},
+	fn record_key<'a>(&'a self, id: &'a RecordIdKey) -> RecordKey<'a> {
+		RecordKey {
+			ns: self.ix_key.ns,
+			db: self.ix_key.db,
 			tb: std::borrow::Cow::Borrowed(self.ikb.table()),
 			id: std::borrow::Cow::Borrowed(id),
 		}
@@ -1198,7 +1220,7 @@ impl Building {
 		loop {
 			let ctx = self.new_write_tx_ctx().await?;
 			let tx = ctx.tx();
-			let record_keys: Vec<record::RecordKey> =
+			let record_keys: Vec<RecordKey> =
 				reclaimed.iter().map(|(id, _)| self.record_key(id)).collect();
 			let records = catch!(tx, tx.get_many_key(record_keys, None).await);
 			let mut restored = 0usize;
@@ -1261,7 +1283,7 @@ impl Building {
 				return Ok(());
 			}
 			self.is_beyond_threshold(Some(*count))?;
-			let ig = IndexAppending::decode_key(&k)?;
+			let ig = IndexAppendKey::decode_key(&k)?;
 			if let Some(appending) = tx.get_key(&ig, None).await? {
 				let rid_key = self
 					.apply_appending(ctx, &mut stack, &fulltext_index, appending, &mut rc)
@@ -1302,7 +1324,7 @@ impl Building {
 				return Ok(());
 			}
 			self.is_beyond_threshold(Some(*count))?;
-			let bg = Bg::decode_key(&k)?;
+			let bg = BuildAppendKey::decode_key(&k)?;
 			if let Some(appending) = tx.get_key(&bg, None).await? {
 				let rid_key = self
 					.apply_appending(ctx, &mut stack, &fulltext_index, appending, &mut rc)

@@ -9,6 +9,7 @@ use crate::doc::CursorDoc;
 use crate::expr::Base;
 use crate::expr::statements::remove::bucket::RemoveBucketStatement;
 use crate::iam::{Action, ResourceKind};
+use crate::key::schema::BucketKey;
 use crate::legacy::expr_to_ident;
 use crate::val::Value;
 
@@ -40,11 +41,9 @@ pub(crate) async fn remove_bucket_statement_compute(
 	};
 
 	// Delete the definition
-	let key = crate::key::database::bu::BucketKey {
-		prefix: crate::key::database::all::DatabaseRoot {
-			ns,
-			db,
-		},
+	let key = BucketKey {
+		ns,
+		db,
 		bu: std::borrow::Cow::Borrowed(&bu.name),
 	};
 	txn.del_key(&key).await?;

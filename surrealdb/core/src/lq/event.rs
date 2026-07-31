@@ -36,8 +36,8 @@ pub(crate) struct LiveEvent {
 
 /// All live-query events for a single table within one committed transaction.
 ///
-/// This is the value stored at each [`crate::key::lqe`] key — one entry per
-/// (table, commit), mirroring how the changefeed groups per-table mutations, so
+/// This is the value stored at each [`LiveEventsKey`](crate::key::schema::LiveEventsKey) key — one
+/// entry per (table, commit), mirroring how the changefeed groups per-table mutations, so
 /// the write cost stays O(1) per modified table per transaction.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq)]

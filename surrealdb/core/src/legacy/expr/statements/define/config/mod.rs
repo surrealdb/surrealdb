@@ -15,7 +15,7 @@ use crate::doc::CursorDoc;
 use crate::expr::statements::define::DefineKind;
 use crate::expr::statements::define::config::{ConfigInner, DefineConfigStatement};
 use crate::iam::{Action, ConfigKind, ResourceKind};
-use crate::key::database::all::DatabaseRoot;
+use crate::key::schema::{DbConfigKey, RootConfigKey};
 use crate::val::Value;
 
 pub(crate) async fn config_inner_compute(
@@ -74,7 +74,7 @@ pub(crate) async fn define_config_statement_compute(
 			}
 
 			// Compute the config
-			let key = crate::key::root::root_config::RootConfig {
+			let key = RootConfigKey {
 				ty: Cow::Borrowed(cg),
 			};
 			let store =
@@ -105,11 +105,9 @@ pub(crate) async fn define_config_statement_compute(
 			}
 
 			// Compute the config
-			let key = crate::key::database::cg::Config {
-				prefix: DatabaseRoot {
-					ns,
-					db,
-				},
+			let key = DbConfigKey {
+				ns,
+				db,
 				ty: Cow::Borrowed(cg),
 			};
 			let store =

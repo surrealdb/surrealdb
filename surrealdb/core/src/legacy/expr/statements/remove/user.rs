@@ -9,6 +9,7 @@ use crate::doc::CursorDoc;
 use crate::expr::Base;
 use crate::expr::statements::remove::user::RemoveUserStatement;
 use crate::iam::{Action, ResourceKind};
+use crate::key::schema::{DbUserKey, NsUserKey, RootUserKey};
 use crate::legacy::{
 	expr_to_ident, kill_namespace_principal_subscriptions, kill_principal_subscriptions,
 	kill_root_principal_subscriptions,
@@ -52,7 +53,7 @@ pub(crate) async fn remove_user_statement_compute(
 			// every notification, so revoking the principal does not stop
 			// delivery on its own.
 			kill_root_principal_subscriptions(ctx, &txn, &us.name).await?;
-			let key = crate::key::root::us::Us {
+			let key = RootUserKey {
 				user: std::borrow::Cow::Borrowed(&us.name),
 			};
 			txn.del_key(&key).await?;
@@ -83,7 +84,7 @@ pub(crate) async fn remove_user_statement_compute(
 			// Delete the definition
 			// See the root arm.
 			kill_namespace_principal_subscriptions(ctx, &txn, ns, &us.name).await?;
-			let key = crate::key::namespace::us::Us {
+			let key = NsUserKey {
 				ns,
 				user: std::borrow::Cow::Borrowed(&us.name),
 			};
@@ -116,11 +117,9 @@ pub(crate) async fn remove_user_statement_compute(
 			// Delete the definition
 			// See the root arm.
 			kill_principal_subscriptions(ctx, &txn, ns, db, &us.name).await?;
-			let key = crate::key::database::us::UserKey {
-				prefix: crate::key::database::all::DatabaseRoot {
-					ns,
-					db,
-				},
+			let key = DbUserKey {
+				ns,
+				db,
 				user: std::borrow::Cow::Borrowed(&us.name),
 			};
 			txn.del_key(&key).await?;

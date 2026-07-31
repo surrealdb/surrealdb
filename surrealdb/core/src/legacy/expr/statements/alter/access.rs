@@ -16,7 +16,7 @@ use crate::expr::Base;
 use crate::expr::statements::alter::AlterKind;
 use crate::expr::statements::alter::access::AlterAccessStatement;
 use crate::iam::{Action, ResourceKind};
-use crate::key::database::all::DatabaseRoot;
+use crate::key::schema::{DbAccessMethodKey, NsAccessMethodKey, RootAccessMethodKey};
 use crate::legacy::expr_to_ident;
 use crate::val::Value;
 
@@ -58,7 +58,7 @@ pub(crate) async fn alter_access_statement_compute_root(
 	};
 	crate::legacy::alter_access_statement_apply(this, &mut ac)?;
 	let ac = ac.to_stored();
-	let key = crate::key::root::ac::AccessKey {
+	let key = RootAccessMethodKey {
 		ac: Cow::Borrowed(name),
 	};
 	txn.set_key(&key, &ac).await?;
@@ -89,7 +89,7 @@ pub(crate) async fn alter_access_statement_compute_ns(
 	};
 	crate::legacy::alter_access_statement_apply(this, &mut ac)?;
 	let ac = ac.to_stored();
-	let key = crate::key::namespace::ac::AccessKey {
+	let key = NsAccessMethodKey {
 		ns,
 		ac: Cow::Borrowed(name),
 	};
@@ -124,11 +124,9 @@ pub(crate) async fn alter_access_statement_compute_db(
 	crate::legacy::alter_access_statement_apply(this, &mut ac)?;
 	let ac = ac.to_stored();
 
-	let key = crate::key::database::ac::AccessKey {
-		prefix: DatabaseRoot {
-			ns,
-			db,
-		},
+	let key = DbAccessMethodKey {
+		ns,
+		db,
 		ac: Cow::Borrowed(name),
 	};
 	txn.set_key(&key, &ac).await?;

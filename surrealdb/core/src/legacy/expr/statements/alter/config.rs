@@ -11,7 +11,7 @@ use crate::expr::Base;
 use crate::expr::statements::alter::config::AlterConfigStatement;
 use crate::expr::statements::define::config::ConfigInner;
 use crate::iam::{Action, ConfigKind, ResourceKind};
-use crate::key::database::all::DatabaseRoot;
+use crate::key::schema::DbConfigKey;
 use crate::val::Value;
 
 #[instrument(level = "trace", name = "AlterConfigStatement::compute", skip_all)]
@@ -45,11 +45,9 @@ pub(crate) async fn alter_config_statement_compute(
 	}
 
 	let new_def = crate::legacy::config_inner_compute(&this.inner, stk, ctx, opt, doc).await?;
-	let key = crate::key::database::cg::Config {
-		prefix: DatabaseRoot {
-			ns,
-			db,
-		},
+	let key = DbConfigKey {
+		ns,
+		db,
 		ty: Cow::Borrowed(config_name),
 	};
 	txn.set_key(&key, &new_def.to_stored()).await?;

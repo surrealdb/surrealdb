@@ -78,10 +78,17 @@ use crate::http::HttpClient;
 use crate::iam::{Action, Auth, PolicyError, Resource, ResourceKind, Role, ScramCredential};
 use crate::idx::IndexKeyBase;
 use crate::idx::index::IndexOperation;
+use crate::idx::planner::ScanDirection;
 use crate::idx::trees::store::IndexStores;
-use crate::key::root::ic::{IndexCompactionIndexPrefix, IndexCompactionKey, IndexCompactionPrefix};
-use crate::key::root::rc::{Expunge, ReclaimKey, ReclaimKind, ReclaimPrefix, ReclaimState};
-use crate::key::{KVKeyDecode, KVRange, KVValue, Key, KeyRange};
+#[cfg(feature = "kv-tikv")]
+use crate::key::AnyRange;
+use crate::key::reclaim::{Expunge, ReclaimKind, ReclaimState};
+use crate::key::schema::{
+	DbRoot, IdxRoot, IndexCompactionIxPrefix, IndexCompactionKey, IndexCompactionPrefix, NodeKey,
+	NodeLiveQueryKey, NodeLiveQueryPrefix, NsRoot, ReclaimKey, ReclaimPrefix, SessionKey,
+	SessionPrefix, SubscriptionKey, SubscriptionPrefix, VersionKey,
+};
+use crate::key::{KVKey, KVKeyDecode, KVSubspace, KVValue, Key, KeyRange, RawRange, Resumable};
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::clock::SystemClock;
 use crate::kvs::index::IndexBuilder;
@@ -733,7 +740,7 @@ impl Datastore {
 	/// any in-memory cluster topology.
 	pub async fn lookup_node_endpoint(&self, node_id: Uuid) -> Result<Option<String>> {
 		let txn = self.transaction(Read).await?;
-		let key = crate::key::root::nd::Nd {
+		let key = NodeKey {
 			nd: node_id,
 		};
 		let res = txn.get_key(&key, None).await?;
@@ -870,7 +877,7 @@ impl Datastore {
 		// Start a new writeable transaction
 		let txn = self.transaction(Write).await?.enclose();
 		// Create the key where the version is stored
-		let key = crate::key::version::Version {};
+		let key = VersionKey {};
 		// Check if a version is already set in storage
 		let val = match catch!(txn, txn.get_key(&key, None).await) {
 			// There is a version set in the storage
@@ -882,10 +889,13 @@ impl Datastore {
 			}
 			// There is no version set in the storage
 			None => {
-				// Fetch any keys immediately following the version key
-				let start = crate::key::version::Version {}.encode_bound()?;
-				let end = Key::from(&[0xff]);
-				let keys = catch!(txn, txn.keys((start..end).into(), 1, 0, None).await);
+				// Fetch any key at all, other than the version key itself. This has to
+				// span the whole byte space rather than the declared root: the point of
+				// the probe is data this release does not describe, which by definition
+				// need not sit under `/`. Finding any such key means the store predates
+				// versioning and must not be stamped as current.
+				let range = RawRange::every_key_after(&VersionKey {}.encode_key()?);
+				let keys = catch!(txn, txn.keys_raw(range, 1, 0, None).await);
 				// Check the storage if there are any other keys set
 				let version = if keys.is_empty() {
 					// There are no keys set in storage, so this is a new database
@@ -1385,7 +1395,7 @@ impl Datastore {
 		crate::sys::refresh().await;
 		// Open transaction and set node data
 		let txn = self.transaction(Write).await?;
-		let key = crate::key::root::nd::Nd {
+		let key = NodeKey {
 			nd: self.id,
 		};
 		let now = self.clock_now();
@@ -1408,7 +1418,7 @@ impl Datastore {
 		crate::sys::refresh().await;
 		// Open transaction and set node data
 		let txn = self.transaction(Write).await?;
-		let key = crate::key::root::nd::Nd {
+		let key = NodeKey {
 			nd: self.id,
 		};
 		let now = self.clock_now();
@@ -1437,7 +1447,7 @@ impl Datastore {
 		let txn =
 			await_node_step(deadline, timeout_duration, Some(canceller), self.transaction(Write))
 				.await?;
-		let key = crate::key::root::nd::Nd {
+		let key = NodeKey {
 			nd: self.id,
 		};
 		let now = self.clock_now();
@@ -1467,7 +1477,7 @@ impl Datastore {
 		trace!(target: TARGET, id = %self.id, "Archiving node in the cluster");
 		// Open transaction and set node data
 		let txn = self.transaction(Write).await?;
-		let key = crate::key::root::nd::Nd {
+		let key = NodeKey {
 			nd: self.id,
 		};
 		let val = catch!(txn, txn.get_node(self.id).await);
@@ -1484,7 +1494,7 @@ impl Datastore {
 		let deadline = Instant::now() + timeout_duration;
 		let txn =
 			await_node_step(deadline, timeout_duration, None, self.transaction(Write)).await?;
-		let key = crate::key::root::nd::Nd {
+		let key = NodeKey {
 			nd: self.id,
 		};
 		let val = await_node_tx_step(&txn, deadline, timeout_duration, None, txn.get_node(self.id))
@@ -1535,7 +1545,7 @@ impl Datastore {
 				// Mark the node as archived
 				let node = nd.archive();
 				// Get the key for the node entry
-				let key = crate::key::root::nd::Nd {
+				let key = NodeKey {
 					nd: nd.id,
 				};
 				// Update the node entry
@@ -1571,10 +1581,10 @@ impl Datastore {
 		for id in archived.iter() {
 			// Open a writeable transaction
 			let mut next = Some(
-				crate::key::node::lq::LqPrefix {
+				NodeLiveQueryPrefix {
 					nd: *id,
 				}
-				.encode_range()?,
+				.range()?,
 			);
 			let txn = self.transaction(Write).await?;
 			{
@@ -1583,21 +1593,29 @@ impl Datastore {
 				// Scan the live queries for this node
 				while let Some(rng) = next {
 					// Fetch the next batch of keys and values
-					let res = catch!(txn, txn.batch_keys_vals(rng, NORMAL_BATCH_SIZE, None).await);
-					next = res.next;
+					let res = catch!(
+						txn,
+						txn.batch_keys_vals_raw(rng.clone(), NORMAL_BATCH_SIZE, None).await
+					);
+					// A full page carries a continuation: resume the range after
+					// the last key this page returned.
+					next = match (&res.next, res.result.last()) {
+						(Some(_), Some((k, _))) => {
+							Some(rng.resume_after(k, ScanDirection::Forward))
+						}
+						_ => None,
+					};
 					for (k, v) in res.result.iter() {
 						// Decode the data for this live query
 						let val: NodeLiveQuery = KVValue::kv_decode_value(v, ())?;
 						// Get the key for this node live query
-						let nlq = catch!(txn, crate::key::node::lq::Lq::decode_key(k));
+						let nlq = catch!(txn, NodeLiveQueryKey::decode_key(k));
 						// Check that the node for this query is archived
 						if archived.contains(&nlq.nd) {
 							// Get the key for this table live query
-							let tlq = crate::key::table::lq::Lq {
-								prefix: crate::key::database::all::DatabaseRoot {
-									ns: val.ns,
-									db: val.db,
-								},
+							let tlq = SubscriptionKey {
+								ns: val.ns,
+								db: val.db,
 								tb: Cow::Borrowed(&val.tb),
 								lq: nlq.lq,
 							};
@@ -1615,7 +1633,7 @@ impl Datastore {
 				// Log the node deletion
 				trace!(target: TARGET, id = %id, "Deleting node from the cluster");
 				// Get the key for the node entry
-				let key = crate::key::root::nd::Nd {
+				let key = NodeKey {
 					nd: *id,
 				};
 				// Delete the cluster node entry
@@ -1655,7 +1673,7 @@ impl Datastore {
 		let expires_at = self.clock_now().value + ttl.as_millis() as u64;
 		let value = DurableSession::from_session(session, expires_at);
 		// Open transaction and set the session data
-		let key = crate::key::root::se::Se {
+		let key = SessionKey {
 			id,
 		};
 		let txn = self.transaction(Write).await?;
@@ -1680,7 +1698,7 @@ impl Datastore {
 		ttl: Duration,
 	) -> Result<bool> {
 		trace!(target: TARGET, id = %id, "Creating durable RPC session");
-		let key = crate::key::root::se::Se {
+		let key = SessionKey {
 			id,
 		};
 		let expires_at = self.clock_now().value + ttl.as_millis() as u64;
@@ -1733,7 +1751,7 @@ impl Datastore {
 		ttl: Duration,
 	) -> Result<bool> {
 		trace!(target: TARGET, id = %id, "Updating durable RPC session");
-		let key = crate::key::root::se::Se {
+		let key = SessionKey {
 			id,
 		};
 		let txn = self.transaction(Write).await?;
@@ -1789,7 +1807,7 @@ impl Datastore {
 	pub async fn load_rpc_session(&self, id: Uuid) -> Result<Option<(Session, u64)>> {
 		// Log when this method is run
 		trace!(target: TARGET, id = %id, "Loading durable RPC session");
-		let key = crate::key::root::se::Se {
+		let key = SessionKey {
 			id,
 		};
 		let now = self.clock_now().value;
@@ -1861,7 +1879,7 @@ impl Datastore {
 	pub async fn delete_rpc_session(&self, id: Uuid) -> Result<()> {
 		// Log when this method is run
 		trace!(target: TARGET, id = %id, "Deleting durable RPC session");
-		let key = crate::key::root::se::Se {
+		let key = SessionKey {
 			id,
 		};
 		let txn = self.transaction(Write).await?;
@@ -1926,16 +1944,24 @@ impl Datastore {
 		// the scan read the old expired value is not clobbered — a blind `clr`
 		// is last-writer-wins on TiKV. A per-entry transaction keeps one such
 		// conflict from aborting the whole purge.
-		let mut next = Some(crate::key::root::se::SePrefix {}.encode_range()?);
+		let mut next = Some(SessionPrefix {}.range()?);
 		while let Some(rng) = next {
 			// Fetch the next batch of keys and values under a read transaction.
 			let batch = {
 				let txn = self.transaction(Read).await?;
-				let res = catch!(txn, txn.batch_keys_vals(rng, NORMAL_BATCH_SIZE, None).await);
+				let res = catch!(
+					txn,
+					txn.batch_keys_vals_raw(rng.clone(), NORMAL_BATCH_SIZE, None).await
+				);
 				catch!(txn, txn.cancel().await);
 				res
 			};
-			next = batch.next;
+			// A full page carries a continuation: resume the range after the last
+			// key this page returned.
+			next = match (&batch.next, batch.result.last()) {
+				(Some(_), Some((k, _))) => Some(rng.resume_after(k, ScanDirection::Forward)),
+				_ => None,
+			};
 			for (k, v) in batch.result.iter() {
 				// Decode the data for this session entry. Skip (but never
 				// delete) an entry we cannot decode: it may have been written
@@ -1950,7 +1976,7 @@ impl Datastore {
 				// Only delete an expired entry, and only if it is still the
 				// value we read.
 				if val.expires_at <= now {
-					let key = crate::key::root::se::Se::decode_key(k)?;
+					let key = SessionKey::decode_key(k)?;
 					trace!(target: TARGET, id = %key.id, "Purging expired RPC session");
 					let txn = self.transaction(Write).await?;
 					match txn.del_compare_key(&key, Some(&val)).await {
@@ -2039,21 +2065,27 @@ impl Datastore {
 					// Iterate over the table live queries
 					let tb_name = tb.name.clone();
 					let mut next = Some(
-						crate::key::table::lq::LqPrefix {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns: db.namespace_id,
-								db: db.database_id,
-							},
+						SubscriptionPrefix {
+							ns: db.namespace_id,
+							db: db.database_id,
 							tb: Cow::Borrowed(&tb_name),
 						}
-						.encode_range()?,
+						.range()?,
 					);
 					let txn = self.transaction(Write).await?;
 					while let Some(rng) = next {
 						// Fetch the next batch of keys and values
 						let max = NORMAL_BATCH_SIZE;
-						let res = catch!(txn, txn.batch_keys_vals(rng, max, None).await);
-						next = res.next;
+						let res =
+							catch!(txn, txn.batch_keys_vals_raw(rng.clone(), max, None).await);
+						// A full page carries a continuation: resume the range
+						// after the last key this page returned.
+						next = match (&res.next, res.result.last()) {
+							(Some(_), Some((k, _))) => {
+								Some(rng.resume_after(k, ScanDirection::Forward))
+							}
+							_ => None,
+						};
 						for (k, v) in res.result.iter() {
 							// Decode the LIVE query statement
 							let stm: StoredSubscriptionDefinition =
@@ -2063,9 +2095,9 @@ impl Datastore {
 							// Check that the node for this query is archived
 							if archived.contains(&stm.node) {
 								// Get the key for this node live query
-								let tlq = catch!(txn, crate::key::table::lq::Lq::decode_key(k));
+								let tlq = catch!(txn, SubscriptionKey::decode_key(k));
 								// Get the key for this table live query
-								let nlq = crate::key::node::lq::Lq {
+								let nlq = NodeLiveQueryKey {
 									nd: nid,
 									lq: lid,
 								};
@@ -2108,23 +2140,21 @@ impl Datastore {
 		// Loop over the live query unique ids
 		for id in ids {
 			// Get the key for this node live query
-			let nlq = crate::key::node::lq::Lq {
+			let nlq = NodeLiveQueryKey {
 				nd: self.id(),
 				lq: id,
 			};
 			// Fetch the LIVE meta data node entry
 			if let Some(lq) = catch!(txn, txn.get_key(&nlq, None).await) {
 				// Get the key for this node live query
-				let nlq = crate::key::node::lq::Lq {
+				let nlq = NodeLiveQueryKey {
 					nd: self.id(),
 					lq: id,
 				};
 				// Get the key for this table live query
-				let tlq = crate::key::table::lq::Lq {
-					prefix: crate::key::database::all::DatabaseRoot {
-						ns: lq.ns,
-						db: lq.db,
-					},
+				let tlq = SubscriptionKey {
+					ns: lq.ns,
+					db: lq.db,
 					tb: Cow::Borrowed(&lq.tb),
 					lq: id,
 				};
@@ -2443,16 +2473,16 @@ impl Datastore {
 		)?;
 		let mut count_iteration = 0;
 		let mut count_error = 0;
-		// The queue range and a rotating cursor within it. After each batch
-		// the cursor seeks past the last index that batch covered, so
+		// The queue range and a rotating window within it. After each batch
+		// the window resumes past the last index that batch covered, so
 		// indexes later in the keyspace are reached even while an
 		// earlier-sorting index keeps enqueueing new entries (queue keys
 		// sort by ns/db/tb/ix before their time-ordered UUID, so a hot
 		// index would otherwise pin a start-anchored scan to itself). When
 		// the scan reaches the end of the range it wraps to the start, and
 		// a wrap that finds nothing means the queue is drained.
-		let queue = IndexCompactionPrefix {}.encode_range()?;
-		let mut cursor = queue.start.to_vec();
+		let queue = IndexCompactionPrefix {}.range()?;
+		let mut window = queue.clone();
 		// We continue without interruptions while there are keys and the lease
 		'compaction: loop {
 			Self::ensure_not_cancelled(&canceller)?;
@@ -2472,25 +2502,22 @@ impl Datastore {
 			// distributed backends. Queue values carry no payload, so a
 			// keys-only scan suffices.
 			let keys = {
-				let range = KeyRange {
-					start: cursor.clone().into(),
-					end: queue.end.to_vec().into(),
-				};
 				let txn = dbs.transaction(Read).await?;
-				let res = txn.keys(range, INDEX_COMPACTION_QUEUE_BATCH_SIZE, 0, None).await;
+				let res =
+					txn.keys(window.clone(), INDEX_COMPACTION_QUEUE_BATCH_SIZE, 0, None).await;
 				let _ = txn.cancel().await;
 				res?
 			};
 			Self::ensure_not_cancelled(&canceller)?;
 			if keys.is_empty() {
-				if cursor.as_slice() == queue.start.as_ref() {
+				if window.start() == queue.start() {
 					// Nothing left anywhere in the queue.
 					return Ok((count_iteration, count_error));
 				}
 				// End of the range: wrap to re-scan entries that were
-				// skipped when the cursor seeked past a partially-drained
+				// skipped when the window seeked past a partially-drained
 				// index.
-				cursor = queue.start.to_vec();
+				window = queue.clone();
 				continue;
 			}
 			// Compact each distinct index referenced by this batch before
@@ -2503,29 +2530,30 @@ impl Datastore {
 					.await?;
 			// Seek the next batch past the last index this batch covered.
 			// Entries of that index beyond this batch are picked up again
-			// after the cursor wraps, so a continuously-refilling index
+			// after the window wraps, so a continuously-refilling index
 			// cannot starve later-sorting ones. A key that fails to decode
-			// cannot name an index to seek past: fall back to the raw
-			// successor of the key itself, so the scan still advances and
+			// cannot name an index to seek past: fall back to resuming
+			// immediately after the key itself, so the scan still advances and
 			// the cleanup below still removes the undecodable entry (it
 			// references no valid index, so deleting it cannot violate the
 			// compact-before-delete invariant).
 			if let Some(last_key) = keys.last() {
-				cursor = match IndexCompactionKey::decode_key(last_key) {
-					Ok(last) => IndexCompactionIndexPrefix {
-						ns: last.ns,
-						db: last.db,
-						tb: Cow::Owned(last.tb.into_owned()),
-						ix: last.ix,
+				window = match IndexCompactionKey::decode_key(last_key) {
+					Ok(last) => {
+						// The first key ordering after the whole index's run of
+						// queue entries.
+						let covered = IndexCompactionIxPrefix {
+							ns: last.ns,
+							db: last.db,
+							tb: Cow::Owned(last.tb.into_owned()),
+							ix: last.ix,
+						}
+						.skip_extensions()?;
+						queue.clone().resume_after(&covered, ScanDirection::Forward)
 					}
-					.encode_range()?
-					.end
-					.to_vec(),
 					Err(e) => {
 						warn!(target: TARGET, "Skipping undecodable index compaction queue entry: {e}");
-						let mut successor = last_key.clone();
-						successor.push(0x00);
-						successor
+						queue.clone().resume_after(last_key, ScanDirection::Forward)
 					}
 				};
 			}
@@ -2647,11 +2675,13 @@ impl Datastore {
 			}
 			Self::ensure_not_cancelled(&canceller)?;
 			// Read the reclaim queue in a short-lived read transaction to avoid
-			// holding a write lock across the entire reclaim cycle.
-			let range = ReclaimPrefix {}.encode_range()?;
+			// holding a write lock across the entire reclaim cycle. Values are
+			// read as bytes so that an entry this node cannot decode is skipped
+			// with a warning rather than failing the whole pass.
+			let range = ReclaimPrefix {}.range()?;
 			let items = {
 				let txn = dbs.transaction(Read).await?;
-				let res = txn.getr(range, None).await;
+				let res = txn.getr_raw(range, None).await;
 				let _ = txn.cancel().await;
 				res?
 			};
@@ -2770,24 +2800,22 @@ impl Datastore {
 		let expunge = rc.expunge == Expunge::Expunge;
 		match rc.kind {
 			ReclaimKind::Namespace => {
-				let prefix = crate::key::namespace::all::NamespaceRoot {
+				let prefix = NsRoot {
 					ns: rc.ns,
 				};
 				self.reclaim_prefix(&prefix, expunge).await
 			}
 			ReclaimKind::Database => {
-				let prefix = crate::key::database::all::DatabaseRoot {
+				let prefix = DbRoot {
 					ns: rc.ns,
 					db: rc.db,
 				};
 				self.reclaim_prefix(&prefix, expunge).await
 			}
 			ReclaimKind::Index => {
-				let prefix = crate::key::index::all::AllIndexRoot {
-					prefix: crate::key::database::all::DatabaseRoot {
-						ns: rc.ns,
-						db: rc.db,
-					},
+				let prefix = IdxRoot {
+					ns: rc.ns,
+					db: rc.db,
 					tb: Cow::Borrowed(rc.tb.as_ref()),
 					ix: rc.ix,
 				};
@@ -2801,15 +2829,16 @@ impl Datastore {
 	/// re-run on an already-empty prefix is a no-op.
 	async fn reclaim_prefix<K>(&self, prefix: &K, expunge: bool) -> Result<()>
 	where
-		K: KVRange + std::fmt::Debug,
+		K: KVSubspace + std::fmt::Debug,
 	{
 		#[cfg(feature = "kv-tikv")]
 		if self.tikv_ops().is_some() {
 			// `unsafe_destroy_range` hard-removes every version in the range
 			// in a single out-of-transaction call, so it ignores `expunge`
 			// (the catalog entry is already gone — there is nothing to retain).
-			let range = prefix.encode_range()?;
-			return self.unsafe_destroy_range(range).await;
+			// It sits below the keyspace, so it takes the bytes themselves.
+			let range = prefix.raw_range()?;
+			return self.unsafe_destroy_range(range.into_key_range()).await;
 		}
 		// Non-TiKV backends: delete the prefix transactionally. This runs off
 		// the user request path, so even a large prefix delete here cannot trip
@@ -3595,8 +3624,9 @@ impl Datastore {
 
 		// Cancel the transaction
 		trace!("Cancelling health check transaction");
-		// Attempt to fetch data
-		match tx.get(Key::from(&[0x00]), None).await {
+		// Read a declared key rather than a probe byte: whether it is present says
+		// nothing here, only that the store answered.
+		match tx.get_key(&VersionKey {}, None).await {
 			Err(err) => {
 				// Ensure the transaction is cancelled
 				let _ = tx.cancel().await;
@@ -4717,7 +4747,7 @@ impl crate::dbs::NodeEndpointResolver for CatalogNodeEndpointResolver {
 			let uuid = Uuid::from_bytes(target_node);
 			let txn =
 				self.transaction_factory.transaction(Read, self.sequences.clone()).await.ok()?;
-			let key = crate::key::root::nd::Nd {
+			let key = NodeKey {
 				nd: uuid,
 			};
 			let node: Option<Node> = txn.get_key(&key, None).await.ok()?;
@@ -5614,7 +5644,7 @@ mod test {
 		// The queue is fully drained.
 		let remaining = {
 			let txn = ds.transaction(Read).await?;
-			let res = txn.keys(IndexCompactionPrefix {}.encode_range()?, u32::MAX, 0, None).await;
+			let res = txn.keys(IndexCompactionPrefix {}.range()?, u32::MAX, 0, None).await;
 			let _ = txn.cancel().await;
 			res?
 		};
@@ -5746,7 +5776,7 @@ mod test {
 		// The queue is fully drained, corrupt entry included.
 		let remaining = {
 			let txn = ds.transaction(Read).await?;
-			let res = txn.keys(IndexCompactionPrefix {}.encode_range()?, u32::MAX, 0, None).await;
+			let res = txn.keys(IndexCompactionPrefix {}.range()?, u32::MAX, 0, None).await;
 			let _ = txn.cancel().await;
 			res?
 		};
@@ -5882,7 +5912,7 @@ mod test {
 			},
 			false,
 		);
-		let key = crate::key::root::nd::Nd {
+		let key = NodeKey {
 			nd: ds.id(),
 		};
 		let txn = ds.transaction(Write).await.unwrap();

@@ -38,10 +38,8 @@ use crate::idx::ft::{DocLength, Score, TermFrequency};
 use crate::idx::planner::iterators::MatchesHitsIterator;
 use crate::idx::trees::store::IndexStores;
 use crate::idx::{IndexKeyBase, bump_compaction_generation, read_compaction_generation};
-use crate::key::database::all::DatabaseRoot;
-use crate::key::index::dc::DcPrefix;
-use crate::key::index::tt::Tt;
-use crate::key::{KVKey, KVKeyDecode, KVRange, impl_kv_value_revisioned};
+use crate::key::schema::{DocStatsKey, TermChangeKey};
+use crate::key::{KVKey, KVKeyDecode, impl_kv_value_revisioned};
 use crate::kvs::{COUNT_BATCH_SIZE, Transaction};
 use crate::val::{RecordId, Value};
 #[revisioned(revision = 1)]
@@ -464,7 +462,7 @@ impl FullTextIndex {
 			let range = self.ikb.new_tt_term_range(term)?;
 			let mut deltas: HashMap<DocId, i64> = HashMap::new();
 			for k in tx.keys(range, u32::MAX, 0, None).await? {
-				let tt = Tt::decode_key(&k)?;
+				let tt = TermChangeKey::decode_key(&k)?;
 				let entry = deltas.entry(tt.doc_id).or_default();
 				if tt.add {
 					*entry += 1;
@@ -595,7 +593,7 @@ impl FullTextIndex {
 		let mut deltas_by_term: HashMap<String, HashMap<DocId, i64>> = HashMap::new();
 		let batch = tx.batch_keys(range, limit.max(1), None).await?;
 		for k in batch.result {
-			let tt = Tt::decode_key(&k)?;
+			let tt = TermChangeKey::decode_key(&k)?;
 			let entry = deltas_by_term
 				.entry(tt.term.to_string())
 				.or_default()
@@ -801,28 +799,24 @@ impl FullTextIndex {
 		// terms (DocLength) This key list is supposed to be small, subject to
 		// compaction. The prefix key itself is the compacted values,
 		// and the child keys of the prefix are deltas from transaction not yet compacted.
-		let prefix_key = DcPrefix {
-			prefix: DatabaseRoot {
-				ns: self.ikb.ns(),
-				db: self.ikb.db(),
-			},
+		let prefix = DocStatsKey {
+			ns: self.ikb.ns(),
+			db: self.ikb.db(),
 			tb: Cow::Borrowed(self.ikb.table()),
 			ix: self.ikb.index(),
-		}
-		.encode_key()?;
-
-		let range = prefix_key.as_borrowed()..prefix_key.as_borrowed().next_neighbour_expect();
+		};
+		let prefix_len = prefix.encode_key()?.len();
 
 		let mut delta_keys = Vec::new();
-		for (idx, (k, v)) in tx.getr(range.into(), None).await?.into_iter().enumerate() {
-			let st: DocLengthAndCount = revision::from_slice(&v)?;
+		for (idx, (k, st)) in tx.getr(prefix.range_subtree()?, None).await?.into_iter().enumerate()
+		{
 			dlc.doc_count += st.doc_count;
 			dlc.total_docs_length += st.total_docs_length;
 
 			// The prefix key can only be the first key.
 			// All other keys are extensions of the prefix key so they must not have the same
 			// length.
-			if idx != 0 && k.len() != prefix_key.len() {
+			if idx != 0 && k.len() != prefix_len {
 				delta_keys.push(k);
 			}
 		}
@@ -836,18 +830,16 @@ impl FullTextIndex {
 		tx: &Transaction,
 		limit: u32,
 	) -> Result<(DocLengthAndCount, Vec<Vec<u8>>, bool)> {
-		let dc_prefix = DcPrefix {
-			prefix: DatabaseRoot {
-				ns: self.ikb.ns(),
-				db: self.ikb.db(),
-			},
+		let dc_prefix = DocStatsKey {
+			ns: self.ikb.ns(),
+			db: self.ikb.db(),
 			tb: Cow::Borrowed(self.ikb.table()),
 			ix: self.ikb.index(),
 		};
 		let mut dlc = tx.get_key(&dc_prefix, None).await?.unwrap_or_default();
 
-		let range = dc_prefix.encode_range()?;
-		let batch = tx.batch_keys_vals(range, limit.max(1), None).await?;
+		let range = dc_prefix.range()?;
+		let batch = tx.batch_keys_vals_raw(range, limit.max(1), None).await?;
 		let mut delta_keys = Vec::with_capacity(batch.result.len());
 		for (k, v) in batch.result {
 			let st: DocLengthAndCount = revision::from_slice(&v)?;
@@ -1242,9 +1234,7 @@ mod tests {
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::offset::Offset;
 	use crate::idx::index::IndexOperation;
-	use crate::key::KVRange;
-	use crate::key::database::all::DatabaseRoot;
-	use crate::key::index::dc::DcPrefix;
+	use crate::key::schema::DocStatsKey;
 	use crate::kvs::{Datastore, Transaction, TransactionType};
 	use crate::sql::Expr;
 	use crate::sql::statements::DefineStatement;
@@ -1390,15 +1380,13 @@ mod tests {
 		}
 
 		async fn dc_delta_count(&self, tx: &Transaction) -> usize {
-			let dc_range = DcPrefix {
-				prefix: DatabaseRoot {
-					ns: self.ikb.ns(),
-					db: self.ikb.db(),
-				},
+			let dc_range = DocStatsKey {
+				ns: self.ikb.ns(),
+				db: self.ikb.db(),
 				tb: Cow::Borrowed(self.ikb.table()),
 				ix: self.ikb.index(),
 			}
-			.encode_range()
+			.range()
 			.unwrap();
 			tx.keys(dc_range, u32::MAX, 0, None).await.unwrap().len()
 		}
@@ -1503,18 +1491,15 @@ mod tests {
 		let range = test.ikb.new_tt_terms_range().unwrap();
 		assert_eq!(tx.count(range, None).await.unwrap(), 0);
 		assert_eq!(test.dc_delta_count(&tx).await, 0);
-		let prefix_bound = DcPrefix {
-			prefix: DatabaseRoot {
-				ns: test.ikb.ns(),
-				db: test.ikb.db(),
-			},
+		let subtree = DocStatsKey {
+			ns: test.ikb.ns(),
+			db: test.ikb.db(),
 			tb: Cow::Borrowed(test.ikb.table()),
 			ix: test.ikb.index(),
 		}
-		.encode_bound()
+		.range_subtree()
 		.unwrap();
-		let range = prefix_bound.as_borrowed()..prefix_bound.as_borrowed().next_neighbour_expect();
-		assert_eq!(tx.count(range.into(), None).await.unwrap(), 1);
+		assert_eq!(tx.count(subtree, None).await.unwrap(), 1);
 	}
 
 	/// BM25 scores must remain non-zero after compaction.

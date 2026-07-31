@@ -14,7 +14,7 @@ use crate::exe::FlowResultExt as _;
 use crate::exec::Error as ExecError;
 use crate::expr::statements::kill::KillStatement;
 use crate::iam::PolicyError;
-use crate::key::database::all::DatabaseRoot;
+use crate::key::schema::{NodeLiveQueryKey, SubscriptionKey};
 use crate::types::{PublicAction, PublicNotification, PublicValue};
 use crate::val::{Uuid, Value};
 
@@ -52,7 +52,7 @@ pub(crate) async fn kill_statement_compute(
 	// Get the transaction
 	let txn = ctx.tx();
 	// Fetch the live query key
-	let key = crate::key::node::lq::Lq {
+	let key = NodeLiveQueryKey {
 		nd: nid,
 		lq: lid,
 	};
@@ -63,11 +63,9 @@ pub(crate) async fn kill_statement_compute(
 			// Root-level users may kill any live query; all other users may only
 			// kill live queries they themselves created.
 			if ctx.auth_enabled() && !opt.auth.is_root() {
-				let table_key = crate::key::table::lq::Lq {
-					prefix: DatabaseRoot {
-						ns: live.ns,
-						db: live.db,
-					},
+				let table_key = SubscriptionKey {
+					ns: live.ns,
+					db: live.db,
 					tb: Cow::Borrowed(&live.tb),
 					lq: lid,
 				};
@@ -104,17 +102,15 @@ pub(crate) async fn kill_statement_compute(
 				}
 			}
 			// Delete the node live query
-			let key = crate::key::node::lq::Lq {
+			let key = NodeLiveQueryKey {
 				nd: nid,
 				lq: lid,
 			};
 			txn.clr_key(&key).await?;
 			// Delete the table live query
-			let key = crate::key::table::lq::Lq {
-				prefix: DatabaseRoot {
-					ns: live.ns,
-					db: live.db,
-				},
+			let key = SubscriptionKey {
+				ns: live.ns,
+				db: live.db,
 				tb: Cow::Borrowed(&live.tb),
 				lq: lid,
 			};
@@ -169,7 +165,7 @@ mod tests {
 	use crate::channel::Receiver;
 	use crate::dbs::{Capabilities, Session};
 	use crate::iam::{Actor, Auth, Level, Role};
-	use crate::key::database::all::DatabaseRoot;
+	use crate::key::schema::SubscriptionKey;
 	use crate::kvs::Datastore;
 	use crate::kvs::TransactionType::Write;
 	use crate::types::{PublicNotification, PublicRecordId, PublicRecordIdKey, PublicValue};
@@ -394,11 +390,9 @@ mod tests {
 			let txn = ds.transaction(Write).await.unwrap();
 			let db_def = txn.ensure_ns_db(None, ns, db).await.unwrap();
 			let tb_name = surrealdb_strand::TableName::from(tb);
-			let key = crate::key::table::lq::Lq {
-				prefix: DatabaseRoot {
-					ns: db_def.namespace_id,
-					db: db_def.database_id,
-				},
+			let key = SubscriptionKey {
+				ns: db_def.namespace_id,
+				db: db_def.database_id,
 				tb: Cow::Borrowed(&tb_name),
 				lq: live_uuid,
 			};
@@ -439,11 +433,9 @@ mod tests {
 			let txn = ds.transaction(Write).await.unwrap();
 			let db_def = txn.ensure_ns_db(None, ns, db).await.unwrap();
 			let tb_name = surrealdb_strand::TableName::from(tb);
-			let key = crate::key::table::lq::Lq {
-				prefix: DatabaseRoot {
-					ns: db_def.namespace_id,
-					db: db_def.database_id,
-				},
+			let key = SubscriptionKey {
+				ns: db_def.namespace_id,
+				db: db_def.database_id,
 				tb: Cow::Borrowed(&tb_name),
 				lq: live_uuid,
 			};
@@ -488,11 +480,9 @@ mod tests {
 			let txn = ds.transaction(Write).await.unwrap();
 			let db_def = txn.ensure_ns_db(None, ns, db).await.unwrap();
 			let tb_name = surrealdb_strand::TableName::from(tb);
-			let key = crate::key::table::lq::Lq {
-				prefix: DatabaseRoot {
-					ns: db_def.namespace_id,
-					db: db_def.database_id,
-				},
+			let key = SubscriptionKey {
+				ns: db_def.namespace_id,
+				db: db_def.database_id,
 				tb: Cow::Borrowed(&tb_name),
 				lq: live_uuid,
 			};

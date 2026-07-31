@@ -15,6 +15,8 @@
 //! Range scans and lookups benefit because a single probe/range can be used for
 //! numeric predicates without fanning out per numeric variant.
 
+use std::borrow::Cow;
+
 use anyhow::Result;
 use reblessive::tree::Stk;
 
@@ -25,6 +27,7 @@ use crate::doc::{CursorDoc, Document};
 use crate::exe::FlowResultExt as _;
 use crate::idx::docids::TableDocIds;
 use crate::idx::index::IndexOperation;
+use crate::key::schema::DocPendingKey;
 use crate::kvs::index::{ConsumeResult, IndexMutation};
 use crate::val::{RecordId, Value};
 
@@ -115,8 +118,12 @@ impl Document {
 	pub(super) async fn defer_doc_id_removal(&self, ctx: &FrozenContext) -> Result<()> {
 		let db = self.doc_ctx.db();
 		let rid = self.id()?;
-		let dp =
-			crate::key::table::dp::Dp::new(db.namespace_id, db.database_id, &rid.table, &rid.key);
+		let dp = DocPendingKey::new(
+			db.namespace_id,
+			db.database_id,
+			Cow::Borrowed(&rid.table),
+			Cow::Borrowed(&rid.key),
+		);
 		ctx.tx().set_key(&dp, &()).await
 	}
 

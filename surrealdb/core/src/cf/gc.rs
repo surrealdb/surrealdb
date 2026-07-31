@@ -7,8 +7,7 @@ use surrealdb_kvs::timestamp::{BoxTimeStamp, BoxTimeStampImpl};
 
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::key::database::all::DatabaseRoot;
-use crate::key::{KVRange, KeyRange, change};
+use crate::key::schema::ChangeFeedPrefix;
 use crate::kvs::Transaction;
 use crate::kvs::tasklease::LeaseHandler;
 
@@ -86,35 +85,22 @@ pub async fn gc_range(
 	let mut buf = [0u8; _];
 	let end_ts = ts.encode(&mut buf);
 
-	let start = change::ChangeFeedTsPrefix {
-		prefix: DatabaseRoot {
-			ns,
-			db,
-		},
-		ts: Cow::Borrowed(beg_ts),
+	// Everything from the earliest timestamp up to, but not including, the
+	// watermark: the watermark's own changes are still needed.
+	let range = ChangeFeedPrefix {
+		ns,
+		db,
 	}
-	.encode_bound()?;
-	let end = change::ChangeFeedTsPrefix {
-		prefix: DatabaseRoot {
-			ns,
-			db,
-		},
-		ts: Cow::Borrowed(end_ts),
-	}
-	.encode_bound()?;
+	.range_where(Cow::Borrowed(beg_ts)..Cow::Borrowed(end_ts))?;
 
 	trace!(
 		"Performing garbage collection on {ns}:{db} for watermark time {}, between {:?} and {:?}",
 		ts.as_datetime().unwrap_or(DateTime::<Utc>::MIN_UTC),
-		start,
-		end
+		range.start(),
+		range.end()
 	);
 	// Delete the entire range in grouped batches
-	tx.delr(KeyRange {
-		start,
-		end,
-	})
-	.await?;
+	tx.delr(range).await?;
 	// Ok all good
 	Ok(())
 }

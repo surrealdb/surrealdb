@@ -8,6 +8,7 @@ use crate::expr::Base;
 use crate::expr::model::get_model_path;
 use crate::expr::statements::remove::model::RemoveModelStatement;
 use crate::iam::{Action, ResourceKind};
+use crate::key::schema::MlModelKey;
 use crate::val::Value;
 
 /// Process this type returning a computed simple Value
@@ -35,11 +36,9 @@ pub(crate) async fn remove_model_statement_compute(
 		}
 	};
 	// Delete the definition
-	let key = crate::key::database::ml::Ml {
-		prefix: crate::key::database::all::DatabaseRoot {
-			ns,
-			db,
-		},
+	let key = MlModelKey {
+		ns,
+		db,
 		ml: std::borrow::Cow::Borrowed(&ml.name),
 		vn: std::borrow::Cow::Borrowed(&ml.version),
 	};

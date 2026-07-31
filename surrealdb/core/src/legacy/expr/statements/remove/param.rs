@@ -7,6 +7,7 @@ use crate::dbs::Options;
 use crate::expr::Base;
 use crate::expr::statements::remove::param::RemoveParamStatement;
 use crate::iam::{Action, ResourceKind};
+use crate::key::schema::ParamKey;
 use crate::val::Value;
 
 /// Process this type returning a computed simple Value
@@ -32,11 +33,9 @@ pub(crate) async fn remove_param_statement_compute(
 		}
 	};
 	// Delete the definition
-	let key = crate::key::database::pa::Pa {
-		prefix: crate::key::database::all::DatabaseRoot {
-			ns,
-			db,
-		},
+	let key = ParamKey {
+		ns,
+		db,
 		pa: std::borrow::Cow::Borrowed(&pa.name),
 	};
 	txn.del_key(&key).await?;

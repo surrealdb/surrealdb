@@ -27,7 +27,8 @@ use crate::exec::topk_pushdown::TopKThresholdProbe;
 use crate::exec::{EvalContext, ExecutionContext, PhysicalExpr, ValueBatch, ValueBatchStream};
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::idx::planner::ScanDirection;
-use crate::key::{KVKeyDecode, KVValue, KeyRange};
+use crate::key::schema::RecordKey;
+use crate::key::{KVKeyDecode, KVValue, RawRange};
 use crate::kvs::Transaction;
 use crate::val::{TableName, Value};
 
@@ -203,6 +204,10 @@ pub(crate) fn determine_scan_direction(
 
 /// Produce a `ValueBatchStream` from a raw KV range scan.
 ///
+/// `range` is a record region rather than a typed range: a record's `id` comes
+/// from its key, so every value has to be decoded against the key it was stored
+/// under (see [`decode_record`]).
+///
 /// When `pre_skip > 0`, that many entries are skipped at the KV storage layer
 /// before any data is returned, avoiding I/O, allocation, and deserialization
 /// for rows that will be discarded anyway (the fast-path optimisation for
@@ -217,7 +222,7 @@ pub(crate) fn determine_scan_direction(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn kv_scan_stream(
 	txn: Arc<Transaction>,
-	range: KeyRange<'static>,
+	range: RawRange,
 	version: Option<u64>,
 	storage_limit: Option<usize>,
 	direction: ScanDirection,
@@ -229,7 +234,7 @@ pub(crate) fn kv_scan_stream(
 	let skip = pre_skip.min(u32::MAX as usize) as u32;
 	let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 		let mut cursor = txn
-			.open_vals_cursor(range, direction, skip, version)
+			.open_vals_cursor_raw(range, direction, skip, version)
 			.await
 			.context("Failed to open scan cursor")?;
 		let mut first = true;
@@ -338,8 +343,7 @@ pub(crate) fn kv_scan_stream(
 /// Decode a record from its key and value bytes.
 #[inline]
 pub(crate) fn decode_record(key: &[u8], val: &[u8]) -> Result<Value, ControlFlow> {
-	let decoded_key =
-		crate::key::record::RecordKey::decode_key(key).context("Failed to decode record key")?;
+	let decoded_key = RecordKey::decode_key(key).context("Failed to decode record key")?;
 
 	let rid = crate::val::RecordId {
 		table: decoded_key.tb.into_owned(),

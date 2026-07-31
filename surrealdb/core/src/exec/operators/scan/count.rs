@@ -34,8 +34,8 @@ use crate::exec::{
 };
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::iam::Action;
-use crate::key::database::all::DatabaseRoot;
-use crate::key::{KVKey, KVKeyDecode, KVRange, KVValue, KeyRange, record};
+use crate::key::schema::{RecordKey, RecordPrefix};
+use crate::key::{KVKeyDecode, KVValue, RawRange};
 use crate::val::{Number, Object, RecordIdKey, RecordIdKeyRange, TableName, Value};
 
 /// Optimized operator for `SELECT count() FROM <table> GROUP ALL`.
@@ -236,14 +236,12 @@ impl ExecOperator for CountScan {
 					.await?
 				} else {
 					// Fallback: iterate all KV keys
-					let range = record::RecordKeyPrefix {
-						root: DatabaseRoot {
-							ns: ns.namespace_id,
-							db: db.database_id,
-						},
-						table: Cow::Borrowed(&table_name),
+					let range = RecordPrefix {
+						ns: ns.namespace_id,
+						db: db.database_id,
+						tb: Cow::Borrowed(&table_name),
 					}
-					.encode_range()?;
+					.range()?;
 					txn.count(range, version).await.context("Failed to count table records")?
 				}
 			};
@@ -295,11 +293,9 @@ async fn count_range(
 		}
 		_ => {
 			// Single record ID: count is 0 or 1. Use a point lookup.
-			let record_key = record::RecordKey {
-				root: DatabaseRoot {
-					ns: ns_id,
-					db: db_id,
-				},
+			let record_key = RecordKey {
+				ns: ns_id,
+				db: db_id,
 				tb: Cow::Borrowed(table),
 				id: Cow::Borrowed(key),
 			};
@@ -312,64 +308,29 @@ async fn count_range(
 	}
 }
 
-/// Compute the start key for a range count (mirrors scan.rs helpers).
+/// The record keys a record-id range covers.
 pub(crate) fn record_key_range(
 	ns_id: NamespaceId,
 	db_id: DatabaseId,
 	table: &TableName,
 	range: &RecordIdKeyRange,
-) -> Result<KeyRange<'static>, ControlFlow> {
-	let prefix = DatabaseRoot {
+) -> Result<RawRange, ControlFlow> {
+	let start = match &range.start {
+		Bound::Unbounded => Bound::Unbounded,
+		Bound::Included(v) => Bound::Included(Cow::Borrowed(v)),
+		Bound::Excluded(v) => Bound::Excluded(Cow::Borrowed(v)),
+	};
+	let end = match &range.end {
+		Bound::Unbounded => Bound::Unbounded,
+		Bound::Included(v) => Bound::Included(Cow::Borrowed(v)),
+		Bound::Excluded(v) => Bound::Excluded(Cow::Borrowed(v)),
+	};
+	Ok(RecordPrefix {
 		ns: ns_id,
 		db: db_id,
-	};
-
-	let start = match &range.start {
-		Bound::Unbounded => record::RecordKeyPrefix {
-			root: prefix,
-			table: Cow::Borrowed(table),
-		}
-		.encode_bound()?,
-		Bound::Included(v) => record::RecordKey {
-			root: prefix,
-			tb: Cow::Borrowed(table),
-			id: Cow::Borrowed(v),
-		}
-		.encode_key()?,
-		Bound::Excluded(v) => record::RecordKey {
-			root: prefix,
-			tb: Cow::Borrowed(table),
-			id: Cow::Borrowed(v),
-		}
-		.encode_key()?
-		.next(),
-	};
-
-	let end = match &range.end {
-		Bound::Unbounded => record::RecordKeyPrefix {
-			root: prefix,
-			table: Cow::Borrowed(table),
-		}
-		.encode_bound()?
-		.next_neighbour_expect(),
-		Bound::Included(v) => record::RecordKey {
-			root: prefix,
-			tb: Cow::Borrowed(table),
-			id: Cow::Borrowed(v),
-		}
-		.encode_key()?
-		.next(),
-		Bound::Excluded(v) => record::RecordKey {
-			root: prefix,
-			tb: Cow::Borrowed(table),
-			id: Cow::Borrowed(v),
-		}
-		.encode_key()?,
-	};
-	Ok(KeyRange {
-		start,
-		end,
-	})
+		tb: Cow::Borrowed(table),
+	}
+	.range_where((start, end))?)
 }
 
 /// Fallback: scan all records, checking per-record permissions, and count
@@ -401,20 +362,18 @@ async fn count_with_perm_fallback(
 			}
 		}
 	} else {
-		record::RecordKeyPrefix {
-			root: DatabaseRoot {
-				ns: ns_id,
-				db: db_id,
-			},
-			table: Cow::Borrowed(table_name),
+		RecordPrefix {
+			ns: ns_id,
+			db: db_id,
+			tb: Cow::Borrowed(table_name),
 		}
-		.encode_range()?
+		.range()?
 	};
 
 	// Walk the cursor batch-by-batch, decoding records inline from
 	// borrowed bytes — no per-row `Vec<u8>` allocation.
 	let mut cursor = txn
-		.open_vals_cursor(range, crate::idx::planner::ScanDirection::Forward, 0, version)
+		.open_vals_cursor_raw(range, crate::idx::planner::ScanDirection::Forward, 0, version)
 		.await
 		.context("Failed to open scan cursor")?;
 	let mut count = 0usize;
@@ -430,8 +389,7 @@ async fn count_with_perm_fallback(
 			break;
 		}
 		for (key, val) in &batch {
-			let decoded_key = crate::key::record::RecordKey::decode_key(key)
-				.context("Failed to decode record key")?;
+			let decoded_key = RecordKey::decode_key(key).context("Failed to decode record key")?;
 			let rid_val = crate::val::RecordId {
 				table: decoded_key.tb.into_owned(),
 				key: decoded_key.id.into_owned(),

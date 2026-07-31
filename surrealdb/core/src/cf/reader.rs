@@ -7,8 +7,8 @@ use crate::catalog::{DatabaseId, NamespaceId};
 use crate::cf::{ChangeSet, DatabaseMutation, TableMutations};
 use crate::exec::Error as ExecError;
 use crate::expr::statements::show::ShowSince;
-use crate::key::database::all::DatabaseRoot;
-use crate::key::{KVKeyDecode, KVRange, KVValue, change};
+use crate::key::schema::{ChangeFeedKey, ChangeFeedPrefix};
+use crate::key::{KVKeyDecode, KVValue};
 use crate::kvs::Transaction;
 
 // Reads the change feed for a specific database or a table,
@@ -50,26 +50,12 @@ pub async fn read(
 	let buf = &mut [0u8; _];
 	let ts_bytes = ts.encode(buf);
 
-	let beg = change::ChangeFeedTsPrefix {
-		prefix: DatabaseRoot {
-			ns,
-			db,
-		},
-		ts: Cow::Borrowed(ts_bytes),
+	// Everything from the requested timestamp to the end of this database's feed.
+	let range = ChangeFeedPrefix {
+		ns,
+		db,
 	}
-	.encode_bound()?;
-
-	// Calculate the end of the changefeed range
-	let end = change::ChangeFeedPrefix {
-		prefix: DatabaseRoot {
-			ns,
-			db,
-		},
-	}
-	.encode_bound()?
-	.next_neighbour_expect();
-
-	let range = (beg..end).into();
+	.range_where(Cow::Borrowed(ts_bytes)..)?;
 
 	// Limit the changefeed results with a default
 	let limit = limit.unwrap_or(100).min(1000);
@@ -83,13 +69,15 @@ pub async fn read(
 	#[cfg(debug_assertions)]
 	let mut prev_ts: Option<Vec<u8>> = None;
 
-	// iterate over _x and put decoded elements to r
-	for (k, v) in tx.scan(range, limit, 0, None).await? {
+	// iterate over _x and put decoded elements to r. The values stay encoded until
+	// the table filter below has run, so an entry belonging to another table is
+	// never decoded and cannot fail a read of the table that was asked for.
+	for (k, v) in tx.scan_raw(range, limit, 0, None).await? {
 		#[cfg(debug_assertions)]
 		trace!("Reading change feed entry: {}", crate::key::Key::from(k.as_slice()));
 
 		// Decode the changefeed entry key
-		let key = crate::key::change::ChangeFeed::decode_key(&k)?;
+		let key = ChangeFeedKey::decode_key(&k)?;
 
 		// Invariant: scan order is ascending, so each entry's versionstamp must be
 		// >= the previous one. Process-local HLC stamping is monotonic within a node;
@@ -109,8 +97,8 @@ pub async fn read(
 		if tb.is_some_and(|tb| *tb != *key.tb) {
 			continue;
 		}
-		// Decode the byte array into a vector of operations
-		let tb_muts = TableMutations::kv_decode_value(&v, ())?;
+		// Decode the mutations now that this entry is known to be wanted
+		let v = TableMutations::kv_decode_value(&v, ())?;
 		// Get the timestamp of the changefeed entry
 		match current_ts {
 			Some(ref x) => {
@@ -127,7 +115,7 @@ pub async fn read(
 				current_ts = Some(key.ts.into_owned());
 			}
 		}
-		buf.push(tb_muts);
+		buf.push(v);
 	}
 	// Collect all mutations together
 	if !buf.is_empty() {

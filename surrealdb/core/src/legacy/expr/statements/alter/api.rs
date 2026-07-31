@@ -13,7 +13,7 @@ use crate::expr::Base;
 use crate::expr::statements::alter::AlterKind;
 use crate::expr::statements::alter::api::{AlterApiClause, AlterApiStatement};
 use crate::iam::{Action, AuthLimit, ResourceKind};
-use crate::key::database::all::DatabaseRoot;
+use crate::key::schema::ApiKey;
 use crate::legacy::expr_to_ident;
 use crate::sql::ApiMethod;
 use crate::val::Value;
@@ -86,11 +86,9 @@ pub(crate) async fn alter_api_statement_compute(
 	// Recompute auth_limit from the current principal to prevent privilege escalation
 	ap.auth_limit = AuthLimit::new_from_auth(opt.auth.as_ref()).into();
 
-	let key = crate::key::database::ap::Api {
-		prefix: DatabaseRoot {
-			ns,
-			db,
-		},
+	let key = ApiKey {
+		ns,
+		db,
 		ap: Cow::Borrowed(&path_name),
 	};
 	txn.set_key(&key, &ap.to_stored()).await?;

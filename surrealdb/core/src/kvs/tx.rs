@@ -14,7 +14,7 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::num::NonZeroU64;
-use std::ops::Deref;
+use std::ops::{ControlFlow, Deref};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -50,15 +50,21 @@ use crate::doc::CursorRecord;
 use crate::err::{EngineError, Error};
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::ScanDirection;
-use crate::key::database::all::DatabaseRoot;
-use crate::key::database::sq::Sq;
-use crate::key::index::all as index_all;
-use crate::key::root::rc::{Expunge, ReclaimKind};
-use crate::key::table::bg::BgMutationPrefix;
-use crate::key::table::br::Br;
-use crate::key::table::bs::Bs;
-use crate::key::table::ix as table_ix;
-use crate::key::{KVKey, KVKeyDecode, KVRange, KVValue, Key, KeyRange};
+use crate::key::reclaim::{Expunge, ReclaimKind};
+use crate::key::schema::{
+	AnalyzerKey, AnalyzerPrefix, ApiKey, ApiPrefix, BucketKey, BucketPrefix,
+	BuildAppendTicketPrefix, BuildReservationKey, BuildStateKey, ChangeFeedKey, DatabaseKey,
+	DatabasePrefix, DbAccessMethodKey, DbAccessMethodPrefix, DbAccessRoot, DbConfigKey,
+	DbConfigPrefix, DbGrantKey, DbGrantPrefix, DbUserKey, DbUserPrefix, EventKey, EventPrefix,
+	FieldKey, FieldPrefix, ForeignTablePrefix, FunctionKey, FunctionPrefix, IdxRoot, IndexDefKey,
+	IndexDefPrefix, IndexNameKey, LiveEventsKey, MlModelKey, MlModelPrefix, ModuleKey,
+	ModulePrefix, NamespaceKey, NamespacePrefix, NodeKey, NodePrefix, NsAccessMethodKey,
+	NsAccessMethodPrefix, NsAccessRoot, NsGrantKey, NsGrantPrefix, NsUserKey, NsUserPrefix,
+	ParamKey, ParamPrefix, ReclaimKey, RecordKey, RootAccessMethodKey, RootAccessMethodPrefix,
+	RootAccessRoot, RootConfigKey, RootGrantKey, RootGrantPrefix, RootUserKey, RootUserPrefix,
+	SequenceKey, SequencePrefix, SubscriptionPrefix, TableKey, TablePrefix,
+};
+use crate::key::{AnyRange, KVKey, KVKeyDecode, KVSubspace, KVValue, Key, KeyRange, TypedRange};
 use crate::kvs::cache::tx::TransactionCache;
 use crate::kvs::index::{
 	BuildGeneration, BuildTicket, BuildTicketMutationSeq, IndexBuildPhase, IndexBuildReportStatus,
@@ -71,7 +77,7 @@ use crate::kvs::testing::{
 	maybe_inject_retryable_conflict,
 };
 use crate::kvs::{
-	DatastoreError, Direction, Error as KvsError, IntoBytes, Transactor, cache,
+	DatastoreError, Direction, Error as KvsError, IntoBytes, NORMAL_BATCH_SIZE, Transactor, cache,
 	is_retryable_transaction_conflict,
 };
 use crate::lq::writer::LiveEventBuffer;
@@ -297,22 +303,32 @@ impl PendingUncommittedIndexBuild {
 
 		let tx = self.tf.transaction(TransactionType::Write, self.sequences.clone()).await?;
 		let ikb = IndexKeyBase::new(self.ns, self.db, self.tb.clone(), self.ix);
-		let index_prefix = index_all::AllIndexRoot {
-			prefix: crate::key::database::all::DatabaseRoot {
-				ns: self.ns,
-				db: self.db,
-			},
+		let index_prefix = IdxRoot {
+			ns: self.ns,
+			db: self.db,
 			tb: Cow::Borrowed(&self.tb),
 			ix: self.ix,
 		}
-		.encode_range()?;
+		.range()?;
 		let result: Result<()> = async {
 			tx.tr.del(ikb.new_bs_key().encode_key()?).await.map_err(Error::from)?;
-			tx.tr.delr(ikb.new_bg_all_generations_range()?).await.map_err(Error::from)?;
-			tx.tr.delr(ikb.new_bp_all_generations_range()?).await.map_err(Error::from)?;
-			tx.tr.delr(ikb.new_br_all_generations_range()?).await.map_err(Error::from)?;
-			tx.tr.delr(ikb.new_bt_all_generations_range()?).await.map_err(Error::from)?;
-			tx.tr.delr(index_prefix).await.map_err(Error::from)?;
+			tx.tr
+				.delr(ikb.new_bg_all_generations_range()?.into_key_range())
+				.await
+				.map_err(Error::from)?;
+			tx.tr
+				.delr(ikb.new_bp_all_generations_range()?.into_key_range())
+				.await
+				.map_err(Error::from)?;
+			tx.tr
+				.delr(ikb.new_br_all_generations_range()?.into_key_range())
+				.await
+				.map_err(Error::from)?;
+			tx.tr
+				.delr(ikb.new_bt_all_generations_range()?.into_key_range())
+				.await
+				.map_err(Error::from)?;
+			tx.tr.delr(index_prefix.into_key_range()).await.map_err(Error::from)?;
 			tx.tr.commit().await.map_err(Error::from)?;
 			Ok(())
 		}
@@ -424,7 +440,7 @@ impl IndexBuildReservationRelease {
 	}
 
 	async fn mark_build_error_if_uncommitted(&self, release_err: &anyhow::Error) -> Result<()> {
-		let br = Br::decode_key(&self.key)?;
+		let br = BuildReservationKey::decode_key(&self.key)?;
 		// One reservation now covers an entire user transaction's mutation
 		// batch on this index. Any committed `!bg(generation, ticket, *)`
 		// entry signals that at least one mutation in that batch became
@@ -432,17 +448,19 @@ impl IndexBuildReservationRelease {
 		// inclusive scan range, not a point exists check on `mutation_seq = 0`,
 		// because the first mutation may not be at index zero on retry paths
 		// that allocate a fresh ticket.
-		let range = BgMutationPrefix {
-			prefix: br.prefix,
+		let range = BuildAppendTicketPrefix {
+			ns: br.ns,
+			db: br.db,
 			tb: Cow::Borrowed(br.tb.as_ref()),
 			ix: br.ix,
 			generation: br.generation,
 			ticket: br.ticket,
 		}
-		.encode_range()?;
+		.range()?;
 
-		let bs = Bs {
-			prefix: br.prefix,
+		let bs = BuildStateKey {
+			ns: br.ns,
+			db: br.db,
 			tb: Cow::Borrowed(br.tb.as_ref()),
 			ix: br.ix,
 		};
@@ -467,7 +485,7 @@ impl IndexBuildReservationRelease {
 				return Ok(());
 			}
 
-			match tx.tr.keys(range.as_borrowed(), 1, 0, None).await {
+			match tx.tr.keys(range.clone().into_key_range(), 1, 0, None).await {
 				Ok(res) if !res.keys.is_empty() => {
 					let _ = tx.tr.cancel().await;
 					return Ok(());
@@ -726,12 +744,12 @@ impl Transaction {
 		segments: &[&str],
 		method: catalog::ApiMethod,
 	) -> Result<Option<(catalog::ApiDefinition, crate::val::Object)>> {
-		let range = crate::key::database::ap::ApiPrefix {
+		let range = ApiPrefix {
 			ns,
 			db,
 		}
-		.encode_range()?;
-		let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+		.range()?;
+		let val = self.tr.getr(range.into_key_range(), None).await.map_err(Error::from)?;
 		let stored: Arc<[catalog::StoredApiDefinition]> =
 			util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 
@@ -802,28 +820,24 @@ impl Transaction {
 		// every delete in the database. Nothing leaves this function but a
 		// boolean and a set of names.
 		let tbs: Arc<[StoredTableDefinition]> = {
-			let range = crate::key::database::tb::TableKeyPrefix {
-				prefix: crate::key::database::all::DatabaseRoot {
-					ns,
-					db,
-				},
+			let range = TablePrefix {
+				ns,
+				db,
 			}
-			.encode_range()?;
-			let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+			.range()?;
+			let val = self.tr.getr(range.into_key_range(), None).await.map_err(Error::from)?;
 			util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?
 		};
 		for tb in tbs.iter() {
 			let tb_name = TableName::from(tb.name.clone());
 			let fds: Arc<[catalog::StoredFieldDefinition]> = {
-				let range = crate::key::table::fd::FdPrefix {
-					prefix: crate::key::database::all::DatabaseRoot {
-						ns,
-						db,
-					},
+				let range = FieldPrefix {
+					ns,
+					db,
 					tb: Cow::Borrowed(&tb_name),
 				}
-				.encode_range()?;
-				let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+				.range()?;
+				let val = self.tr.getr(range.into_key_range(), None).await.map_err(Error::from)?;
 				util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?
 			};
 			for fd in fds.iter() {
@@ -1385,14 +1399,104 @@ impl Transaction {
 		Ok(val)
 	}
 
-	/// Fetch a key from the datastore.
+	/// Fetch every entry in a range, with its value decoded under the type the range
+	/// says it stores.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn getr(
+	pub async fn getr<V>(
 		&self,
-		key: KeyRange<'_>,
+		rng: TypedRange<V>,
+		version: Option<u64>,
+	) -> Result<Vec<(Vec<u8>, V)>>
+	where
+		V: KVValue<KeyContext = ()> + Send,
+	{
+		let (out, stats) =
+			self.decode_range(rng.into_key_range(), Direction::Forward, None, 0, version).await?;
+		self.metrics.record_get(stats.rows, stats.key_bytes, stats.value_bytes);
+		Ok(out)
+	}
+
+	/// Streams a range through the cursor, decoding each value from the bytes the
+	/// cursor lends rather than from a copy.
+	///
+	/// One pass and one output allocation. Nothing materialises the raw rows first,
+	/// so the range is never held twice: a backend whose cursor lends borrowed bytes
+	/// copies no value at all, and one whose cursor owns its rows owns a batch of
+	/// them rather than the whole range.
+	///
+	/// `limit` bounds the rows read; `None` reads to the end of the range.
+	async fn decode_range<V>(
+		&self,
+		rng: KeyRange<'static>,
+		dir: Direction,
+		limit: Option<u32>,
+		skip: u32,
+		version: Option<u64>,
+	) -> Result<(Vec<(Vec<u8>, V)>, ScanChunkStats)>
+	where
+		// `Send` because the decode happens inside the cursor's visitor, which the
+		// storage layer requires to be sendable.
+		V: KVValue<KeyContext = ()> + Send,
+	{
+		let mut cursor =
+			self.tr.open_vals_cursor(rng, dir, skip, version).await.map_err(Error::from)?;
+		let mut out: Vec<(Vec<u8>, V)> = match limit {
+			// A bounded read knows its ceiling, so size the output once. Unbounded
+			// reads grow, because the range's length is not known until it ends.
+			Some(limit) => Vec::with_capacity(limit.min(NORMAL_BATCH_SIZE) as usize),
+			None => Vec::new(),
+		};
+		let mut total = ScanChunkStats::default();
+		let mut failed: Option<anyhow::Error> = None;
+
+		let mut remaining = limit;
+		loop {
+			let chunk = remaining.map_or(NORMAL_BATCH_SIZE, |n| n.min(NORMAL_BATCH_SIZE));
+			if chunk == 0 {
+				break;
+			}
+			// The visitor's error type belongs to the storage layer, so a decode
+			// failure is carried out here and the cursor is abandoned: after a
+			// visitor error its resume position is not defined.
+			let stats = cursor
+				.for_each(chunk, &mut |key: &[u8], val: &[u8]| match V::kv_decode_value(val, ()) {
+					Ok(value) => {
+						out.push((key.to_vec(), value));
+						Ok(ControlFlow::Continue(()))
+					}
+					Err(e) => {
+						failed = Some(e);
+						Ok(ControlFlow::Break(()))
+					}
+				})
+				.await
+				.map_err(Error::from)?;
+			if let Some(e) = failed {
+				return Err(e);
+			}
+			total.rows += stats.rows;
+			total.key_bytes += stats.key_bytes;
+			total.value_bytes += stats.value_bytes;
+			// A short chunk means the range is exhausted.
+			if stats.rows < chunk as u64 {
+				break;
+			}
+			if let Some(n) = remaining.as_mut() {
+				*n -= chunk;
+			}
+		}
+
+		Ok((out, total))
+	}
+
+	/// Fetch every entry in a range or region as bytes.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn getr_raw(
+		&self,
+		rng: impl AnyRange,
 		version: Option<u64>,
 	) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
-		let val = self.tr.getr(key, version).await.map_err(Error::from)?;
+		let val = self.tr.getr(rng.into_key_range(), version).await.map_err(Error::from)?;
 		self.metrics.record_get(val.values.len() as u64, val.key_bytes, val.value_bytes);
 		Ok(val.values)
 	}
@@ -1435,10 +1539,10 @@ impl Transaction {
 		version: Option<u64>,
 	) -> Result<Vec<(Vec<u8>, Vec<u8>)>>
 	where
-		K: KVRange + Debug,
+		K: KVSubspace + Debug,
 	{
-		let range = key.encode_range()?;
-		let res = self.tr.getr(range, version).await.map_err(Error::from)?;
+		let range = key.raw_range()?;
+		let res = self.tr.getr(range.into_key_range(), version).await.map_err(Error::from)?;
 
 		self.metrics.record_scan(res.values.len() as u64, res.key_bytes, res.value_bytes);
 
@@ -1501,9 +1605,9 @@ impl Transaction {
 	/// This function deletes entries from the underlying datastore in grouped
 	/// batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn delr(&self, rng: KeyRange<'_>) -> Result<()> {
+	pub async fn delr(&self, rng: impl AnyRange) -> Result<()> {
 		self.reserve_write_slot()?;
-		self.tr.delr(rng).await.map_err(Error::from)?;
+		self.tr.delr(rng.into_key_range()).await.map_err(Error::from)?;
 		// Range/prefix deletes don't report the number of affected keys or
 		// their byte size.
 		self.metrics.record_del(0, 0);
@@ -1517,9 +1621,9 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn del_prefix_key<K>(&self, rng: &K) -> Result<()>
 	where
-		K: KVRange + Debug,
+		K: KVSubspace + Debug,
 	{
-		let rng = rng.encode_range()?;
+		let rng = rng.raw_range()?;
 		self.delr(rng).await
 	}
 
@@ -1558,9 +1662,9 @@ impl Transaction {
 	/// This function deletes entries from the underlying datastore in grouped
 	/// batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn clrr(&self, rng: KeyRange<'_>) -> Result<()> {
+	pub async fn clrr(&self, rng: impl AnyRange) -> Result<()> {
 		self.reserve_write_slot()?;
-		self.tr.clrr(rng).await.map_err(Error::from)?;
+		self.tr.clrr(rng.into_key_range()).await.map_err(Error::from)?;
 		self.metrics.record_del(0, 0);
 		Ok(())
 	}
@@ -1572,11 +1676,11 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn clr_prefix_key<K>(&self, key: &K) -> Result<()>
 	where
-		K: KVRange,
+		K: KVSubspace,
 	{
 		self.reserve_write_slot()?;
-		let range = key.encode_range()?;
-		self.tr.clrr(range).await.map_err(Error::from)?;
+		let range = key.raw_range()?;
+		self.tr.clrr(range.into_key_range()).await.map_err(Error::from)?;
 		self.metrics.record_del(0, 0);
 		Ok(())
 	}
@@ -1600,7 +1704,7 @@ impl Transaction {
 			return Ok(None);
 		};
 		// Delete only the catalog definition; defer the data deletion.
-		let key = crate::key::root::ns::NamespaceKey {
+		let key = NamespaceKey {
 			ns: Cow::Borrowed(&ns_def.name),
 		};
 		if expunge {
@@ -1609,14 +1713,10 @@ impl Transaction {
 			self.del_key(&key).await?;
 		}
 		// Enqueue background reclaim of the namespace data prefix.
-		let rc = crate::key::root::rc::ReclaimKey::namespace(
-			ns_def.namespace_id,
-			expunge,
-			Uuid::now_v7(),
-		);
+		let rc = ReclaimKey::namespace(ns_def.namespace_id, expunge, Uuid::now_v7());
 		self.set_key(
 			&rc,
-			&crate::key::root::rc::ReclaimState {
+			&crate::key::reclaim::ReclaimState {
 				observed_ms: 0,
 			},
 		)
@@ -1644,7 +1744,7 @@ impl Transaction {
 			return Ok(None);
 		};
 		// Delete only the catalog definition; defer the data deletion.
-		let key = crate::key::namespace::db::DatabaseKey {
+		let key = DatabaseKey {
 			ns: db_def.namespace_id,
 			db: Cow::Borrowed(&db_def.name),
 		};
@@ -1654,15 +1754,11 @@ impl Transaction {
 			self.del_key(&key).await?;
 		}
 		// Enqueue background reclaim of the database data prefix.
-		let rc = crate::key::root::rc::ReclaimKey::database(
-			db_def.namespace_id,
-			db_def.database_id,
-			expunge,
-			Uuid::now_v7(),
-		);
+		let rc =
+			ReclaimKey::database(db_def.namespace_id, db_def.database_id, expunge, Uuid::now_v7());
 		self.set_key(
 			&rc,
-			&crate::key::root::rc::ReclaimState {
+			&crate::key::reclaim::ReclaimState {
 				observed_ms: 0,
 			},
 		)
@@ -1698,27 +1794,23 @@ impl Transaction {
 			return Ok(());
 		};
 		// Delete the catalog definition; defer the index data deletion.
-		let key = crate::key::table::ix::IndexDefinitionKey {
-			prefix: crate::key::database::all::DatabaseRoot {
-				ns,
-				db,
-			},
-			tb: Cow::Borrowed(tb.as_str()),
+		let key = IndexDefKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
 			ix: Cow::Borrowed(&ix_def.name),
 		};
 		self.del_key(&key).await?;
 		// Delete the id-to-name lookup.
-		let name_lookup_key = crate::key::table::ix::IndexNameLookupKey {
-			prefix: crate::key::database::all::DatabaseRoot {
-				ns,
-				db,
-			},
-			tb: Cow::Borrowed(tb.as_str()),
+		let name_lookup_key = IndexNameKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
 			ix: ix_def.index_id,
 		};
 		self.del_key(&name_lookup_key).await?;
 		// Enqueue background reclaim of the index data prefix.
-		let rc = crate::key::root::rc::ReclaimKey {
+		let rc = ReclaimKey {
 			kind: ReclaimKind::Index,
 
 			ns,
@@ -1730,7 +1822,7 @@ impl Transaction {
 		};
 		self.set_key(
 			&rc,
-			&crate::key::root::rc::ReclaimState {
+			&crate::key::reclaim::ReclaimState {
 				observed_ms: 0,
 			},
 		)
@@ -1895,81 +1987,143 @@ impl Transaction {
 	// Range functions
 	// --------------------------------------------------
 
-	/// Retrieve a specific range of keys from the datastore.
+	/// Retrieve the keys in a range.
 	///
-	/// This function fetches the full range of keys, in a single request to the
-	/// underlying datastore.
+	/// The keys come back as bytes because a key *is* bytes until it is decoded;
+	/// what the typed range guarantees is which key type they all are, so the
+	/// caller's `decode_key` cannot be the wrong one.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn keys(
+	pub async fn keys<V>(
 		&self,
-		rng: KeyRange<'_>,
+		rng: TypedRange<V>,
 		limit: u32,
 		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Vec<u8>>> {
-		let res = self.tr.keys(rng, limit, skip, version).await.map_err(Error::from)?;
-		self.metrics.record_scan(res.keys.len() as u64, res.key_bytes, 0);
-		Ok(res.keys)
+		self.keys_raw(rng, limit, skip, version).await
 	}
 
-	/// Retrieve a specific range of keys from the datastore in reverse order.
-	///
-	/// This function fetches the full range of keys, in a single request to the
-	/// underlying datastore.
+	/// Retrieve the keys in a range, in reverse order.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn keysr(
+	pub async fn keysr<V>(
 		&self,
-		rng: KeyRange<'_>,
+		rng: TypedRange<V>,
 		limit: u32,
 		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Vec<u8>>> {
-		let res = self.tr.keysr(rng, limit, skip, version).await.map_err(Error::from)?;
+		self.keysr_raw(rng, limit, skip, version).await
+	}
+
+	/// Retrieve the keys in a region whose contents are of more than one type.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn keys_raw(
+		&self,
+		rng: impl AnyRange,
+		limit: u32,
+		skip: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Vec<u8>>> {
+		let res =
+			self.tr.keys(rng.into_key_range(), limit, skip, version).await.map_err(Error::from)?;
 		self.metrics.record_scan(res.keys.len() as u64, res.key_bytes, 0);
 		Ok(res.keys)
 	}
 
-	/// Retrieve a specific range of keys from the datastore.
-	///
-	/// This function fetches the full range of key-value pairs, in a single
-	/// request to the underlying datastore.
+	/// Retrieve the keys in a region, in reverse order. See [`Self::keys_raw`].
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn scan(
+	pub async fn keysr_raw(
 		&self,
-		rng: KeyRange<'_>,
+		rng: impl AnyRange,
+		limit: u32,
+		skip: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Vec<u8>>> {
+		let res =
+			self.tr.keysr(rng.into_key_range(), limit, skip, version).await.map_err(Error::from)?;
+		self.metrics.record_scan(res.keys.len() as u64, res.key_bytes, 0);
+		Ok(res.keys)
+	}
+
+	/// Retrieve a range of keys and their values, decoded under the type the range
+	/// says they store.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn scan<V>(
+		&self,
+		rng: TypedRange<V>,
+		limit: u32,
+		skip: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Vec<u8>, V)>>
+	where
+		V: KVValue<KeyContext = ()> + Send,
+	{
+		let (out, stats) = self
+			.decode_range(rng.into_key_range(), Direction::Forward, Some(limit), skip, version)
+			.await?;
+		self.metrics.record_scan(stats.rows, stats.key_bytes, stats.value_bytes);
+		Ok(out)
+	}
+
+	/// As [`Self::scan`], in reverse order.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn scanr<V>(
+		&self,
+		rng: TypedRange<V>,
+		limit: u32,
+		skip: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Vec<u8>, V)>>
+	where
+		V: KVValue<KeyContext = ()> + Send,
+	{
+		let (out, stats) = self
+			.decode_range(rng.into_key_range(), Direction::Backward, Some(limit), skip, version)
+			.await?;
+		self.metrics.record_scan(stats.rows, stats.key_bytes, stats.value_bytes);
+		Ok(out)
+	}
+
+	/// Retrieve a range of keys and their values as bytes.
+	///
+	/// For a region holding several kinds of key, and for the scan paths that
+	/// deliberately work on bytes — the pre-decode filter reads a value's wire form
+	/// without building it.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn scan_raw(
+		&self,
+		rng: impl AnyRange,
 		limit: u32,
 		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Vec<u8>, Val)>> {
-		let res = self.tr.scan(rng, limit, skip, version).await.map_err(Error::from)?;
+		let res =
+			self.tr.scan(rng.into_key_range(), limit, skip, version).await.map_err(Error::from)?;
 		self.metrics.record_scan(res.values.len() as u64, res.key_bytes, res.value_bytes);
 		Ok(res.values)
 	}
 
-	/// Retrieve a specific range of keys from the datastore, in reverse order.
-	///
-	/// This function fetches the full range of key-value pairs, in a single
-	/// request to the underlying datastore.
+	/// As [`Self::scan_raw`], in reverse order.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn scanr(
+	pub async fn scanr_raw(
 		&self,
-		rng: KeyRange<'_>,
+		rng: impl AnyRange,
 		limit: u32,
 		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Vec<u8>, Val)>> {
-		let res = self.tr.scanr(rng, limit, skip, version).await.map_err(Error::from)?;
+		let res =
+			self.tr.scanr(rng.into_key_range(), limit, skip, version).await.map_err(Error::from)?;
 		self.metrics.record_scan(res.values.len() as u64, res.key_bytes, res.value_bytes);
 		Ok(res.values)
 	}
 
-	/// Count the total number of keys within a range in the datastore.
+	/// Count the keys in a range or region.
 	///
-	/// This function fetches the total count, in batches, with multiple
-	/// requests to the underlying datastore.
+	/// Counting reads no values, so it takes either kind of range.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn count(&self, rng: KeyRange<'_>, version: Option<u64>) -> Result<usize> {
-		let n = self.tr.count(rng, version).await.map_err(Error::from)?;
+	pub async fn count(&self, rng: impl AnyRange, version: Option<u64>) -> Result<usize> {
+		let n = self.tr.count(rng.into_key_range(), version).await.map_err(Error::from)?;
 		// `count` only reports the number of keys, not their byte size.
 		self.metrics.record_scan(n as u64, 0, 0);
 		Ok(n)
@@ -1987,9 +2141,9 @@ impl Transaction {
 	/// call advances the same iterator instead of re-seeking from scratch.
 	/// `skip` is applied once on the first batch.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn open_keys_cursor<'a>(
+	pub async fn open_keys_cursor_raw<'a>(
 		&'a self,
-		rng: KeyRange<'a>,
+		rng: impl AnyRange,
 		dir: ScanDirection,
 		skip: u32,
 		version: Option<u64>,
@@ -1997,7 +2151,7 @@ impl Transaction {
 		let inner = self
 			.tr
 			.open_keys_cursor(
-				rng,
+				rng.into_key_range(),
 				match dir {
 					ScanDirection::Forward => Direction::Forward,
 					ScanDirection::Backward => Direction::Backward,
@@ -2016,9 +2170,9 @@ impl Transaction {
 	/// Open a stateful key+value scan cursor over a raw-byte range. See
 	/// [`Self::open_keys_cursor`].
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn open_vals_cursor<'a>(
+	pub async fn open_vals_cursor_raw<'a>(
 		&'a self,
-		rng: KeyRange<'a>,
+		rng: impl AnyRange,
 		dir: ScanDirection,
 		skip: u32,
 		version: Option<u64>,
@@ -2026,7 +2180,7 @@ impl Transaction {
 		let inner = self
 			.tr
 			.open_vals_cursor(
-				rng,
+				rng.into_key_range(),
 				match dir {
 					ScanDirection::Forward => Direction::Forward,
 					ScanDirection::Backward => Direction::Backward,
@@ -2051,13 +2205,25 @@ impl Transaction {
 	/// This function fetches the keys in batches, with multiple requests to the
 	/// underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn batch_keys(
+	pub async fn batch_keys<V>(
 		&self,
-		rng: KeyRange<'_>,
+		rng: TypedRange<V>,
 		batch: u32,
 		version: Option<u64>,
 	) -> Result<Batch<Vec<u8>>> {
-		Ok(self.tr.batch_keys(rng, batch, version).await.map_err(Error::from)?)
+		self.batch_keys_raw(rng, batch, version).await
+	}
+
+	/// Retrieve a batched scan over a region whose contents are of more than one
+	/// type.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn batch_keys_raw(
+		&self,
+		rng: impl AnyRange,
+		batch: u32,
+		version: Option<u64>,
+	) -> Result<Batch<Vec<u8>>> {
+		Ok(self.tr.batch_keys(rng.into_key_range(), batch, version).await.map_err(Error::from)?)
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
@@ -2065,13 +2231,17 @@ impl Transaction {
 	/// This function fetches the key-value pairs in batches, with multiple
 	/// requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn batch_keys_vals(
+	pub async fn batch_keys_vals_raw(
 		&self,
-		rng: KeyRange<'_>,
+		rng: impl AnyRange,
 		batch: u32,
 		version: Option<u64>,
 	) -> Result<Batch<(Vec<u8>, Val)>> {
-		Ok(self.tr.batch_keys_vals(rng, batch, version).await.map_err(Error::from)?)
+		Ok(self
+			.tr
+			.batch_keys_vals(rng.into_key_range(), batch, version)
+			.await
+			.map_err(Error::from)?)
 	}
 
 	// --------------------------------------------------
@@ -2129,14 +2299,12 @@ impl Transaction {
 		db: DatabaseId,
 		tb: &TableName,
 	) -> Result<bool> {
-		let range = crate::key::table::lq::LqPrefix {
-			prefix: DatabaseRoot {
-				ns,
-				db,
-			},
+		let range = SubscriptionPrefix {
+			ns,
+			db,
 			tb: Cow::Borrowed(tb),
 		}
-		.encode_range()?;
+		.range()?;
 		Ok(!self.keys(range, 1, 0, None).await?.is_empty())
 	}
 
@@ -2256,11 +2424,9 @@ impl Transaction {
 		// meaningful concurrency.
 		for (ns, db, tb, value) in cf_changes {
 			// Create the changefeed key with the current timestamp
-			let key = crate::key::change::ChangeFeed {
-				prefix: crate::key::database::all::DatabaseRoot {
-					ns,
-					db,
-				},
+			let key = ChangeFeedKey {
+				ns,
+				db,
 				ts: Cow::Borrowed(ts),
 				tb: Cow::Borrowed(&tb),
 			}
@@ -2275,11 +2441,9 @@ impl Transaction {
 		// Write the live-query event entries to the dedicated keyspace,
 		// metered, guarded, and sequenced like the changefeed writes above.
 		for (ns, db, tb, value) in lqe_changes {
-			let key = crate::key::lqe::Lqe {
-				prefix: DatabaseRoot {
-					ns,
-					db,
-				},
+			let key = LiveEventsKey {
+				ns,
+				db,
 				tb: Cow::Borrowed(&tb),
 				ts: Cow::Borrowed(ts),
 			}
@@ -2474,11 +2638,9 @@ impl Transaction {
 		};
 		let mut updated = (*existing).clone();
 		updated.cache_lives_ts = uuid::Uuid::now_v7();
-		let key = crate::key::database::tb::TableKey {
-			prefix: crate::key::database::all::DatabaseRoot {
-				ns: updated.namespace_id,
-				db: updated.database_id,
-			},
+		let key = TableKey {
+			ns: updated.namespace_id,
+			db: updated.database_id,
 			tb: Cow::Borrowed(tb),
 		};
 		self.set_key(&key, &updated.to_stored()).await?;
@@ -2503,10 +2665,10 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn compact<K>(&self, key: &K) -> Result<()>
 	where
-		K: KVRange + Debug,
+		K: KVSubspace + Debug,
 	{
-		let range = key.encode_range()?;
-		self.tr.inner.compact(Some(range)).await.map_err(Error::from)?;
+		let range = key.raw_range()?;
+		self.tr.inner.compact(Some(range.into_key_range())).await.map_err(Error::from)?;
 		Ok(())
 	}
 
@@ -2535,8 +2697,12 @@ impl NodeProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_nds(),
 					None => {
-						let range = crate::key::root::nd::NdPrefix {}.encode_range()?;
-						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let range = NodePrefix {}.range()?;
+						let val = self
+							.tr
+							.getr(range.into_key_range(), None)
+							.await
+							.map_err(Error::from)?;
 						let val =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Nds(Arc::clone(&val));
@@ -2557,7 +2723,7 @@ impl NodeProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val,
 					None => {
-						let key = crate::key::root::nd::Nd {
+						let key = NodeKey {
 							nd: id,
 						};
 						let val = self.get_key(&key, None).await?.ok_or_else(|| {
@@ -2588,7 +2754,7 @@ impl RootProvider for Transaction {
 			match self.cache.get(&qey) {
 				Some(val) => val,
 				None => {
-					let key = crate::key::root::root_config::RootConfig {
+					let key = RootConfigKey {
 						ty: Cow::Borrowed("default"),
 					};
 					let Some(val) = self.get_key(&key, None).await? else {
@@ -2618,7 +2784,7 @@ impl RootProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Option::Some),
 					None => {
-						let key = crate::key::root::root_config::RootConfig {
+						let key = RootConfigKey {
 							ty: Cow::Borrowed(cg),
 						};
 						if let Some(val) = self.get_key(&key, None).await? {
@@ -2650,16 +2816,21 @@ impl NamespaceProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let range = crate::key::root::ns::NamespacePrefix {}.encode_range()?;
-					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					let range = NamespacePrefix {}.range()?;
+					let val =
+						self.tr.getr(range.into_key_range(), version).await.map_err(Error::from)?;
 					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Nss;
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_nss(),
 					None => {
-						let range = crate::key::root::ns::NamespacePrefix {}.encode_range()?;
-						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let range = NamespacePrefix {}.range()?;
+						let val = self
+							.tr
+							.getr(range.into_key_range(), None)
+							.await
+							.map_err(Error::from)?;
 						let val =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Nss(Arc::clone(&val));
@@ -2679,7 +2850,7 @@ impl NamespaceProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<Option<Arc<NamespaceDefinition>>>> {
 		Box::pin(async move {
 			if version.is_some() {
-				let key = crate::key::root::ns::NamespaceKey {
+				let key = NamespaceKey {
 					ns: Cow::Borrowed(ns),
 				};
 				let Some(ns) = self.get_key(&key, version).await? else {
@@ -2691,7 +2862,7 @@ impl NamespaceProvider for Transaction {
 			match self.cache.get(&qey) {
 				Some(val) => val.try_into_type().map(Some),
 				None => {
-					let key = crate::key::root::ns::NamespaceKey {
+					let key = NamespaceKey {
 						ns: Cow::Borrowed(ns),
 					};
 					let Some(ns) = self.get_key(&key, None).await? else {
@@ -2726,7 +2897,7 @@ impl NamespaceProvider for Transaction {
 		ns: NamespaceDefinition,
 	) -> BoxProviderFut<'_, Result<Arc<NamespaceDefinition>>> {
 		Box::pin(async move {
-			let key = crate::key::root::ns::NamespaceKey {
+			let key = NamespaceKey {
 				ns: Cow::Borrowed(&ns.name),
 			};
 			self.set_key(&key, &ns).await?;
@@ -2768,22 +2939,27 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let range = crate::key::namespace::db::DatabasePrefix {
+					let range = DatabasePrefix {
 						ns,
 					}
-					.encode_range()?;
-					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					.range()?;
+					let val =
+						self.tr.getr(range.into_key_range(), version).await.map_err(Error::from)?;
 					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Dbs(ns);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_dbs(),
 					None => {
-						let range = crate::key::namespace::db::DatabasePrefix {
+						let range = DatabasePrefix {
 							ns,
 						}
-						.encode_range()?;
-						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						.range()?;
+						let val = self
+							.tr
+							.getr(range.into_key_range(), None)
+							.await
+							.map_err(Error::from)?;
 						let val =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Dbs(Arc::clone(&val));
@@ -2809,7 +2985,7 @@ impl DatabaseProvider for Transaction {
 					let Some(ns) = self.get_ns_by_name(ns, version).await? else {
 						return Ok(None);
 					};
-					let key = crate::key::namespace::db::DatabaseKey {
+					let key = DatabaseKey {
 						ns: ns.namespace_id,
 						db: Cow::Borrowed(db),
 					};
@@ -2826,7 +3002,7 @@ impl DatabaseProvider for Transaction {
 							return Ok(None);
 						};
 
-						let key = crate::key::namespace::db::DatabaseKey {
+						let key = DatabaseKey {
 							ns: ns.namespace_id,
 							db: Cow::Borrowed(db),
 						};
@@ -2915,7 +3091,7 @@ impl DatabaseProvider for Transaction {
 		db: DatabaseDefinition,
 	) -> BoxProviderFut<'a, Result<Arc<DatabaseDefinition>>> {
 		Box::pin(async move {
-			let key = crate::key::namespace::db::DatabaseKey {
+			let key = DatabaseKey {
 				ns: db.namespace_id,
 				db: Cow::Borrowed(&db.name),
 			};
@@ -2946,28 +3122,29 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let range = crate::key::database::az::AnalyzerPrefix {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let range = AnalyzerPrefix {
+						ns,
+						db,
 					}
-					.encode_range()?;
-					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					.range()?;
+					let val =
+						self.tr.getr(range.into_key_range(), version).await.map_err(Error::from)?;
 					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Azs(ns, db);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_azs(),
 					None => {
-						let range = crate::key::database::az::AnalyzerPrefix {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let range = AnalyzerPrefix {
+							ns,
+							db,
 						}
-						.encode_range()?;
-						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						.range()?;
+						let val = self
+							.tr
+							.getr(range.into_key_range(), None)
+							.await
+							.map_err(Error::from)?;
 						let val =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Azs(Arc::clone(&val));
@@ -2990,28 +3167,29 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let range = crate::key::database::sq::SqPrefix {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let range = SequencePrefix {
+						ns,
+						db,
 					}
-					.encode_range()?;
-					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					.range()?;
+					let val =
+						self.tr.getr(range.into_key_range(), version).await.map_err(Error::from)?;
 					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Sqs(ns, db);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_sqs(),
 					None => {
-						let range = crate::key::database::sq::SqPrefix {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let range = SequencePrefix {
+							ns,
+							db,
 						}
-						.encode_range()?;
-						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						.range()?;
+						let val = self
+							.tr
+							.getr(range.into_key_range(), None)
+							.await
+							.map_err(Error::from)?;
 						let val =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Sqs(Arc::clone(&val));
@@ -3034,14 +3212,13 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let range = crate::key::database::fc::FcPrefix {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let range = FunctionPrefix {
+						ns,
+						db,
 					}
-					.encode_range()?;
-					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					.range()?;
+					let val =
+						self.tr.getr(range.into_key_range(), version).await.map_err(Error::from)?;
 					let stored: Arc<[catalog::StoredFunctionDefinition]> =
 						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 					return catalog::from_stored_all(&stored);
@@ -3050,14 +3227,16 @@ impl DatabaseProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_fcs(),
 					None => {
-						let range = crate::key::database::fc::FcPrefix {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let range = FunctionPrefix {
+							ns,
+							db,
 						}
-						.encode_range()?;
-						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						.range()?;
+						let val = self
+							.tr
+							.getr(range.into_key_range(), None)
+							.await
+							.map_err(Error::from)?;
 						let stored: Arc<[catalog::StoredFunctionDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let val = catalog::from_stored_all(&stored)?;
@@ -3081,14 +3260,13 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let range = crate::key::database::md::MdPrefix {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let range = ModulePrefix {
+						ns,
+						db,
 					}
-					.encode_range()?;
-					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					.range()?;
+					let val =
+						self.tr.getr(range.into_key_range(), version).await.map_err(Error::from)?;
 					let stored: Arc<[catalog::StoredModuleDefinition]> =
 						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 					return catalog::from_stored_all(&stored);
@@ -3097,14 +3275,16 @@ impl DatabaseProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_mds(),
 					None => {
-						let range = crate::key::database::md::MdPrefix {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let range = ModulePrefix {
+							ns,
+							db,
 						}
-						.encode_range()?;
-						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						.range()?;
+						let val = self
+							.tr
+							.getr(range.into_key_range(), None)
+							.await
+							.map_err(Error::from)?;
 						let stored: Arc<[catalog::StoredModuleDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let val = catalog::from_stored_all(&stored)?;
@@ -3128,14 +3308,13 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let range = crate::key::database::pa::PaPrefix {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let range = ParamPrefix {
+						ns,
+						db,
 					}
-					.encode_range()?;
-					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					.range()?;
+					let val =
+						self.tr.getr(range.into_key_range(), version).await.map_err(Error::from)?;
 					let stored: Arc<[catalog::StoredParamDefinition]> =
 						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 					return catalog::from_stored_all(&stored);
@@ -3144,14 +3323,16 @@ impl DatabaseProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_pas(),
 					None => {
-						let range = crate::key::database::pa::PaPrefix {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let range = ParamPrefix {
+							ns,
+							db,
 						}
-						.encode_range()?;
-						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						.range()?;
+						let val = self
+							.tr
+							.getr(range.into_key_range(), None)
+							.await
+							.map_err(Error::from)?;
 						let stored: Arc<[catalog::StoredParamDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let val = catalog::from_stored_all(&stored)?;
@@ -3175,14 +3356,13 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let range = crate::key::database::ml::MlPrefix {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let range = MlModelPrefix {
+						ns,
+						db,
 					}
-					.encode_range()?;
-					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					.range()?;
+					let val =
+						self.tr.getr(range.into_key_range(), version).await.map_err(Error::from)?;
 					let stored: Arc<[catalog::StoredMlModelDefinition]> =
 						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 					return catalog::from_stored_all(&stored);
@@ -3191,14 +3371,16 @@ impl DatabaseProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_mls(),
 					None => {
-						let range = crate::key::database::ml::MlPrefix {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let range = MlModelPrefix {
+							ns,
+							db,
 						}
-						.encode_range()?;
-						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						.range()?;
+						let val = self
+							.tr
+							.getr(range.into_key_range(), None)
+							.await
+							.map_err(Error::from)?;
 						let stored: Arc<[catalog::StoredMlModelDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let val = catalog::from_stored_all(&stored)?;
@@ -3222,14 +3404,13 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let range = crate::key::database::cg::ConfigPrefix {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let range = DbConfigPrefix {
+						ns,
+						db,
 					}
-					.encode_range()?;
-					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					.range()?;
+					let val =
+						self.tr.getr(range.into_key_range(), version).await.map_err(Error::from)?;
 					let stored: Arc<[StoredConfigDefinition]> =
 						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 					return catalog::from_stored_all(&stored);
@@ -3238,14 +3419,16 @@ impl DatabaseProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_cgs(),
 					None => {
-						let range = crate::key::database::cg::ConfigPrefix {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let range = DbConfigPrefix {
+							ns,
+							db,
 						}
-						.encode_range()?;
-						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						.range()?;
+						let val = self
+							.tr
+							.getr(range.into_key_range(), None)
+							.await
+							.map_err(Error::from)?;
 						let stored: Arc<[StoredConfigDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let val = catalog::from_stored_all(&stored)?;
@@ -3271,11 +3454,9 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::database::ml::Ml {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let key = MlModelKey {
+						ns,
+						db,
 						ml: Cow::Borrowed(ml),
 						vn: Cow::Borrowed(vn),
 					};
@@ -3288,11 +3469,9 @@ impl DatabaseProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = crate::key::database::ml::Ml {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let key = MlModelKey {
+							ns,
+							db,
 							ml: Cow::Borrowed(ml),
 							vn: Cow::Borrowed(vn),
 						};
@@ -3321,11 +3500,9 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::database::az::Analyzer {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let key = AnalyzerKey {
+						ns,
+						db,
 						az: Cow::Borrowed(az),
 					};
 					let val = self.get_key(&key, version).await?.ok_or_else(|| {
@@ -3339,11 +3516,9 @@ impl DatabaseProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type(),
 					None => {
-						let key = crate::key::database::az::Analyzer {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let key = AnalyzerKey {
+							ns,
+							db,
 							az: Cow::Borrowed(az),
 						};
 						let val = self.get_key(&key, None).await?.ok_or_else(|| {
@@ -3373,11 +3548,9 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = Sq {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let key = SequenceKey {
+						ns,
+						db,
 						sq: Cow::Borrowed(sq),
 					};
 					let val = self.get_key(&key, version).await?.ok_or_else(|| {
@@ -3391,11 +3564,9 @@ impl DatabaseProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type(),
 					None => {
-						let key = Sq {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let key = SequenceKey {
+							ns,
+							db,
 							sq: Cow::Borrowed(sq),
 						};
 						let val = self.get_key(&key, None).await?.ok_or_else(|| {
@@ -3425,11 +3596,9 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::database::fc::Fc {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let key = FunctionKey {
+						ns,
+						db,
 						fc: Cow::Borrowed(fc),
 					};
 					let val = self.get_key(&key, version).await?.ok_or_else(|| {
@@ -3443,11 +3612,9 @@ impl DatabaseProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type(),
 					None => {
-						let key = crate::key::database::fc::Fc {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let key = FunctionKey {
+							ns,
+							db,
 							fc: Cow::Borrowed(fc),
 						};
 						let val = self.get_key(&key, None).await?.ok_or_else(|| {
@@ -3477,11 +3644,9 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::database::md::Md {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let key = ModuleKey {
+						ns,
+						db,
 						md: Cow::Borrowed(md),
 					};
 					let val = self.get_key(&key, version).await?.ok_or_else(|| {
@@ -3495,11 +3660,9 @@ impl DatabaseProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type(),
 					None => {
-						let key = crate::key::database::md::Md {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let key = ModuleKey {
+							ns,
+							db,
 							md: Cow::Borrowed(md),
 						};
 						let val = self.get_key(&key, None).await?.ok_or_else(|| {
@@ -3529,11 +3692,9 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::database::pa::Pa {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let key = ParamKey {
+						ns,
+						db,
 						pa: Cow::Borrowed(pa),
 					};
 					let val = self.get_key(&key, version).await?.ok_or_else(|| {
@@ -3547,11 +3708,9 @@ impl DatabaseProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type(),
 					None => {
-						let key = crate::key::database::pa::Pa {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let key = ParamKey {
+							ns,
+							db,
 							pa: Cow::Borrowed(pa),
 						};
 						let val = self.get_key(&key, None).await?.ok_or_else(|| {
@@ -3581,11 +3740,9 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::database::cg::Config {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let key = DbConfigKey {
+						ns,
+						db,
 						ty: Cow::Borrowed(cg),
 					};
 					if let Some(val) = self.get_key(&key, version).await? {
@@ -3598,11 +3755,9 @@ impl DatabaseProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Option::Some),
 					None => {
-						let key = crate::key::database::cg::Config {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let key = DbConfigKey {
+							ns,
+							db,
 							ty: Cow::Borrowed(cg),
 						};
 						if let Some(val) = self.get_key(&key, None).await? {
@@ -3628,11 +3783,9 @@ impl DatabaseProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
 			let stored = fc.to_stored();
-			let key = crate::key::database::fc::Fc {
-				prefix: crate::key::database::all::DatabaseRoot {
-					ns,
-					db,
-				},
+			let key = FunctionKey {
+				ns,
+				db,
 				fc: Cow::Borrowed(&fc.name),
 			};
 			self.set_key(&key, &stored).await?;
@@ -3659,11 +3812,9 @@ impl DatabaseProvider for Transaction {
 		Box::pin(async move {
 			let stored = md.to_stored();
 			let name = stored.get_storage_name()?;
-			let key = crate::key::database::md::Md {
-				prefix: crate::key::database::all::DatabaseRoot {
-					ns,
-					db,
-				},
+			let key = ModuleKey {
+				ns,
+				db,
 				md: Cow::Borrowed(name.as_str()),
 			};
 			self.set_key(&key, &stored).await?;
@@ -3689,11 +3840,9 @@ impl DatabaseProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
 			let stored = pa.to_stored();
-			let key = crate::key::database::pa::Pa {
-				prefix: crate::key::database::all::DatabaseRoot {
-					ns,
-					db,
-				},
+			let key = ParamKey {
+				ns,
+				db,
 				pa: Cow::Borrowed(&pa.name),
 			};
 			self.set_key(&key, &stored).await?;
@@ -3781,14 +3930,13 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let range = crate::key::database::tb::TableKeyPrefix {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let range = TablePrefix {
+						ns,
+						db,
 					}
-					.encode_range()?;
-					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					.range()?;
+					let val =
+						self.tr.getr(range.into_key_range(), version).await.map_err(Error::from)?;
 					let stored: Arc<[StoredTableDefinition]> =
 						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 					return catalog::from_stored_all(&stored);
@@ -3797,14 +3945,16 @@ impl TableProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_tbs(),
 					None => {
-						let range = crate::key::database::tb::TableKeyPrefix {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let range = TablePrefix {
+							ns,
+							db,
 						}
-						.encode_range()?;
-						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						.range()?;
+						let val = self
+							.tr
+							.getr(range.into_key_range(), None)
+							.await
+							.map_err(Error::from)?;
 						let stored: Arc<[StoredTableDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let val = catalog::from_stored_all(&stored)?;
@@ -3829,15 +3979,14 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let range = crate::key::table::ft::FtPrefix {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let range = ForeignTablePrefix {
+						ns,
+						db,
 						tb: Cow::Borrowed(tb),
 					}
-					.encode_range()?;
-					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					.range()?;
+					let val =
+						self.tr.getr(range.into_key_range(), version).await.map_err(Error::from)?;
 					let stored: Arc<[StoredTableDefinition]> =
 						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 					return catalog::from_stored_all(&stored);
@@ -3846,15 +3995,17 @@ impl TableProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_fts(),
 					None => {
-						let range = crate::key::table::ft::FtPrefix {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let range = ForeignTablePrefix {
+							ns,
+							db,
 							tb: Cow::Borrowed(tb),
 						}
-						.encode_range()?;
-						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						.range()?;
+						let val = self
+							.tr
+							.getr(range.into_key_range(), None)
+							.await
+							.map_err(Error::from)?;
 						let stored: Arc<[StoredTableDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let val = catalog::from_stored_all(&stored)?;
@@ -3886,11 +4037,9 @@ impl TableProvider for Transaction {
 							name: db.to_owned(),
 						}));
 					};
-					let table_key = crate::key::database::tb::TableKey {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns: db_def.namespace_id,
-							db: db_def.database_id,
-						},
+					let table_key = TableKey {
+						ns: db_def.namespace_id,
+						db: db_def.database_id,
 						tb: Cow::Borrowed(tb),
 					};
 					if let Some(tb_def) = self.get_key(&table_key, version).await? {
@@ -3913,11 +4062,9 @@ impl TableProvider for Transaction {
 							}));
 						};
 
-						let table_key = crate::key::database::tb::TableKey {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns: db_def.namespace_id,
-								db: db_def.database_id,
-							},
+						let table_key = TableKey {
+							ns: db_def.namespace_id,
+							db: db_def.database_id,
 							tb: Cow::Borrowed(tb),
 						};
 						if let Some(tb_def) = self.get_key(&table_key, None).await? {
@@ -3964,11 +4111,9 @@ impl TableProvider for Transaction {
 				let Some(db) = self.get_db_by_name(ns, db, version).await? else {
 					return Ok(None);
 				};
-				let key = crate::key::database::tb::TableKey {
-					prefix: crate::key::database::all::DatabaseRoot {
-						ns: db.namespace_id,
-						db: db.database_id,
-					},
+				let key = TableKey {
+					ns: db.namespace_id,
+					db: db.database_id,
 					tb: Cow::Borrowed(tb),
 				};
 				let Some(tb) = self.get_key(&key, version).await? else {
@@ -3984,11 +4129,9 @@ impl TableProvider for Transaction {
 						return Ok(None);
 					};
 
-					let key = crate::key::database::tb::TableKey {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns: db.namespace_id,
-							db: db.database_id,
-						},
+					let key = TableKey {
+						ns: db.namespace_id,
+						db: db.database_id,
 						tb: Cow::Borrowed(tb),
 					};
 					let Some(tb) = self.get_key(&key, None).await? else {
@@ -4013,11 +4156,9 @@ impl TableProvider for Transaction {
 		Box::pin(async move {
 			let stored = tb.to_stored();
 			let tb_name = tb.name.clone();
-			let key = crate::key::database::tb::TableKey {
-				prefix: crate::key::database::all::DatabaseRoot {
-					ns: tb.namespace_id,
-					db: tb.database_id,
-				},
+			let key = TableKey {
+				ns: tb.namespace_id,
+				db: tb.database_id,
 				tb: Cow::Borrowed(&tb_name),
 			};
 			match self.set_key(&key, &stored).await {
@@ -4070,11 +4211,9 @@ impl TableProvider for Transaction {
 			};
 
 			let tb_name = tb.name.clone();
-			let key = crate::key::database::tb::TableKey {
-				prefix: crate::key::database::all::DatabaseRoot {
-					ns: tb.namespace_id,
-					db: tb.database_id,
-				},
+			let key = TableKey {
+				ns: tb.namespace_id,
+				db: tb.database_id,
 				tb: Cow::Borrowed(&tb_name),
 			};
 			self.del_key(&key).await?;
@@ -4108,11 +4247,9 @@ impl TableProvider for Transaction {
 			};
 
 			let tb_name = tb.name.clone();
-			let key = crate::key::database::tb::TableKey {
-				prefix: crate::key::database::all::DatabaseRoot {
-					ns: tb.namespace_id,
-					db: tb.database_id,
-				},
+			let key = TableKey {
+				ns: tb.namespace_id,
+				db: tb.database_id,
 				tb: Cow::Borrowed(&tb_name),
 			};
 			self.clr_key(&key).await?;
@@ -4142,15 +4279,14 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let range = crate::key::table::ev::EvPrefix {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let range = EventPrefix {
+						ns,
+						db,
 						tb: Cow::Borrowed(tb),
 					}
-					.encode_range()?;
-					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					.range()?;
+					let val =
+						self.tr.getr(range.into_key_range(), version).await.map_err(Error::from)?;
 					let stored: Arc<[catalog::StoredEventDefinition]> =
 						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 					return catalog::from_stored_all(&stored);
@@ -4159,15 +4295,17 @@ impl TableProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_evs(),
 					None => {
-						let range = crate::key::table::ev::EvPrefix {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let range = EventPrefix {
+							ns,
+							db,
 							tb: Cow::Borrowed(tb),
 						}
-						.encode_range()?;
-						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						.range()?;
+						let val = self
+							.tr
+							.getr(range.into_key_range(), None)
+							.await
+							.map_err(Error::from)?;
 						let stored: Arc<[catalog::StoredEventDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let val = catalog::from_stored_all(&stored)?;
@@ -4192,15 +4330,14 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let range = crate::key::table::fd::FdPrefix {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let range = FieldPrefix {
+						ns,
+						db,
 						tb: Cow::Borrowed(tb),
 					}
-					.encode_range()?;
-					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					.range()?;
+					let val =
+						self.tr.getr(range.into_key_range(), version).await.map_err(Error::from)?;
 					let stored: Arc<[catalog::StoredFieldDefinition]> =
 						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 					return catalog::from_stored_all(&stored);
@@ -4209,15 +4346,17 @@ impl TableProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_fds(),
 					None => {
-						let range = crate::key::table::fd::FdPrefix {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let range = FieldPrefix {
+							ns,
+							db,
 							tb: Cow::Borrowed(tb),
 						}
-						.encode_range()?;
-						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						.range()?;
+						let val = self
+							.tr
+							.getr(range.into_key_range(), None)
+							.await
+							.map_err(Error::from)?;
 						let stored: Arc<[catalog::StoredFieldDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let val = catalog::from_stored_all(&stored)?;
@@ -4242,15 +4381,14 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let range = table_ix::IndexDefinitionPrefix {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
-						tb: Cow::Borrowed(tb.as_str()),
+					let range = IndexDefPrefix {
+						ns,
+						db,
+						tb: Cow::Borrowed(tb),
 					}
-					.encode_range()?;
-					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					.range()?;
+					let val =
+						self.tr.getr(range.into_key_range(), version).await.map_err(Error::from)?;
 					let stored: Arc<[catalog::StoredIndexDefinition]> =
 						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 					return catalog::from_stored_all(&stored);
@@ -4259,15 +4397,17 @@ impl TableProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_ixs(),
 					None => {
-						let range = table_ix::IndexDefinitionPrefix {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
-							tb: Cow::Borrowed(tb.as_str()),
+						let range = IndexDefPrefix {
+							ns,
+							db,
+							tb: Cow::Borrowed(tb),
 						}
-						.encode_range()?;
-						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						.range()?;
+						let val = self
+							.tr
+							.getr(range.into_key_range(), None)
+							.await
+							.map_err(Error::from)?;
 						let stored: Arc<[catalog::StoredIndexDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let val = catalog::from_stored_all(&stored)?;
@@ -4292,15 +4432,14 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let range = crate::key::table::lq::LqPrefix {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let range = SubscriptionPrefix {
+						ns,
+						db,
 						tb: Cow::Borrowed(tb),
 					}
-					.encode_range()?;
-					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					.range()?;
+					let val =
+						self.tr.getr(range.into_key_range(), version).await.map_err(Error::from)?;
 					let stored: Arc<[catalog::StoredSubscriptionDefinition]> =
 						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 					return Ok(compile_subscriptions(tb, &stored));
@@ -4309,15 +4448,17 @@ impl TableProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_lvs(),
 					None => {
-						let range = crate::key::table::lq::LqPrefix {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let range = SubscriptionPrefix {
+							ns,
+							db,
 							tb: Cow::Borrowed(tb),
 						}
-						.encode_range()?;
-						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						.range()?;
+						let val = self
+							.tr
+							.getr(range.into_key_range(), None)
+							.await
+							.map_err(Error::from)?;
 						let stored: Arc<[catalog::StoredSubscriptionDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let val = compile_subscriptions(tb, &stored);
@@ -4342,11 +4483,9 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::database::tb::TableKey {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let key = TableKey {
+						ns,
+						db,
 						tb: Cow::Borrowed(tb),
 					};
 					let Some(val) = self.get_key(&key, version).await? else {
@@ -4358,11 +4497,9 @@ impl TableProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = crate::key::database::tb::TableKey {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let key = TableKey {
+							ns,
+							db,
 							tb: Cow::Borrowed(tb),
 						};
 						let Some(val) = self.get_key(&key, None).await? else {
@@ -4391,11 +4528,9 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::table::ev::Ev {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let key = EventKey {
+						ns,
+						db,
 						tb: Cow::Borrowed(tb),
 						ev: Cow::Borrowed(ev),
 					};
@@ -4410,11 +4545,9 @@ impl TableProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type(),
 					None => {
-						let key = crate::key::table::ev::Ev {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let key = EventKey {
+							ns,
+							db,
 							tb: Cow::Borrowed(tb),
 							ev: Cow::Borrowed(ev),
 						};
@@ -4446,11 +4579,9 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::table::fd::Fd {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let key = FieldKey {
+						ns,
+						db,
 						tb: Cow::Borrowed(tb),
 						fd: Cow::Borrowed(fd),
 					};
@@ -4463,11 +4594,9 @@ impl TableProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = crate::key::table::fd::Fd {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let key = FieldKey {
+							ns,
+							db,
 							tb: Cow::Borrowed(tb),
 							fd: Cow::Borrowed(fd),
 						};
@@ -4495,11 +4624,9 @@ impl TableProvider for Transaction {
 		Box::pin(async move {
 			let stored = fd.to_stored();
 			let name = fd.name.to_raw_string();
-			let key = crate::key::table::fd::Fd {
-				prefix: crate::key::database::all::DatabaseRoot {
-					ns,
-					db,
-				},
+			let key = FieldKey {
+				ns,
+				db,
 				tb: Cow::Borrowed(tb),
 				fd: Cow::Borrowed(&name),
 			};
@@ -4536,12 +4663,10 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = table_ix::IndexDefinitionKey {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
-						tb: Cow::Borrowed(tb.as_str()),
+					let key = IndexDefKey {
+						ns,
+						db,
+						tb: Cow::Borrowed(tb),
 						ix: Cow::Borrowed(ix),
 					};
 					let Some(val) = self.get_key(&key, version).await? else {
@@ -4553,12 +4678,10 @@ impl TableProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = table_ix::IndexDefinitionKey {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
-							tb: Cow::Borrowed(tb.as_str()),
+						let key = IndexDefKey {
+							ns,
+							db,
+							tb: Cow::Borrowed(tb),
 							ix: Cow::Borrowed(ix),
 						};
 						let Some(val) = self.get_key(&key, None).await? else {
@@ -4584,12 +4707,10 @@ impl TableProvider for Transaction {
 		version: Option<u64>,
 	) -> BoxProviderFut<'a, Result<Option<Arc<catalog::IndexDefinition>>>> {
 		Box::pin(async move {
-			let key = table_ix::IndexNameLookupKey {
-				prefix: crate::key::database::all::DatabaseRoot {
-					ns,
-					db,
-				},
-				tb: Cow::Borrowed(tb.as_str()),
+			let key = IndexNameKey {
+				ns,
+				db,
+				tb: Cow::Borrowed(tb),
 				ix,
 			};
 			let Some(index_name) = self.get_key(&key, version).await? else {
@@ -4609,22 +4730,18 @@ impl TableProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
 			let stored = ix.to_stored();
-			let key = table_ix::IndexDefinitionKey {
-				prefix: crate::key::database::all::DatabaseRoot {
-					ns,
-					db,
-				},
-				tb: Cow::Borrowed(tb.as_str()),
+			let key = IndexDefKey {
+				ns,
+				db,
+				tb: Cow::Borrowed(tb),
 				ix: Cow::Borrowed(&ix.name),
 			};
 			self.set_key(&key, &stored).await?;
 
-			let name_lookup_key = table_ix::IndexNameLookupKey {
-				prefix: crate::key::database::all::DatabaseRoot {
-					ns,
-					db,
-				},
-				tb: Cow::Borrowed(tb.as_str()),
+			let name_lookup_key = IndexNameKey {
+				ns,
+				db,
+				tb: Cow::Borrowed(tb),
 				ix: ix.index_id,
 			};
 			self.set_key(&name_lookup_key, &ix.name.to_string()).await?;
@@ -4655,34 +4772,28 @@ impl TableProvider for Transaction {
 			};
 
 			// Remove the index data
-			let key = index_all::AllIndexRoot {
-				prefix: crate::key::database::all::DatabaseRoot {
-					ns,
-					db,
-				},
+			let key = IdxRoot {
+				ns,
+				db,
 				tb: Cow::Borrowed(tb),
 				ix: ix.index_id,
 			};
 			self.del_prefix_key(&key).await?;
 
 			// Delete the definition
-			let key = table_ix::IndexDefinitionKey {
-				prefix: crate::key::database::all::DatabaseRoot {
-					ns,
-					db,
-				},
-				tb: Cow::Borrowed(tb.as_str()),
+			let key = IndexDefKey {
+				ns,
+				db,
+				tb: Cow::Borrowed(tb),
 				ix: Cow::Borrowed(&ix.name),
 			};
 			self.del_key(&key).await?;
 
 			// Delete the id-to-name lookup
-			let name_lookup_key = table_ix::IndexNameLookupKey {
-				prefix: crate::key::database::all::DatabaseRoot {
-					ns,
-					db,
-				},
-				tb: Cow::Borrowed(tb.as_str()),
+			let name_lookup_key = IndexNameKey {
+				ns,
+				db,
+				tb: Cow::Borrowed(tb),
 				ix: ix.index_id,
 			};
 			self.del_key(&name_lookup_key).await?;
@@ -4718,11 +4829,9 @@ impl TableProvider for Transaction {
 					// using the storage key, so the canonical `id` is
 					// spliced back in automatically (see
 					// `RecordKey::value_context`).
-					let key = crate::key::record::RecordKey {
-						root: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let key = RecordKey {
+						ns,
+						db,
 						tb: Cow::Borrowed(tb),
 						id: Cow::Borrowed(id),
 					};
@@ -4737,11 +4846,9 @@ impl TableProvider for Transaction {
 						Some(val) => val.try_into_record(),
 						// The entry is not in the cache
 						None => {
-							let key = crate::key::record::RecordKey {
-								root: crate::key::database::all::DatabaseRoot {
-									ns,
-									db,
-								},
+							let key = RecordKey {
+								ns,
+								db,
 								tb: Cow::Borrowed(tb),
 								id: Cow::Borrowed(id),
 							};
@@ -4782,13 +4889,11 @@ impl TableProvider for Transaction {
 					// context (`RecordKey::value_context`), so the
 					// canonical `id` is spliced into the decoded record
 					// automatically.
-					let keys: Vec<crate::key::record::RecordKey<'_>> = rids
+					let keys: Vec<RecordKey<'_>> = rids
 						.iter()
-						.map(|rid| crate::key::record::RecordKey {
-							root: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						.map(|rid| RecordKey {
+							ns,
+							db,
 							tb: Cow::Borrowed(&rid.table),
 							id: Cow::Borrowed(&rid.key),
 						})
@@ -4817,13 +4922,11 @@ impl TableProvider for Transaction {
 				}
 				// Phase 2: batch fetch the uncached keys from the datastore
 				if !uncached_rids.is_empty() {
-					let keys: Vec<crate::key::record::RecordKey<'_>> = uncached_rids
+					let keys: Vec<RecordKey<'_>> = uncached_rids
 						.iter()
-						.map(|(_, rid)| crate::key::record::RecordKey {
-							root: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						.map(|(_, rid)| RecordKey {
+							ns,
+							db,
 							tb: Cow::Borrowed(&rid.table),
 							id: Cow::Borrowed(&rid.key),
 						})
@@ -4876,11 +4979,9 @@ impl TableProvider for Transaction {
 		version: Option<u64>,
 	) -> BoxProviderFut<'a, Result<bool>> {
 		Box::pin(async move {
-			let key = crate::key::record::RecordKey {
-				root: crate::key::database::all::DatabaseRoot {
-					ns,
-					db,
-				},
+			let key = RecordKey {
+				ns,
+				db,
 				tb: Cow::Borrowed(tb),
 				id: Cow::Borrowed(id),
 			};
@@ -4898,11 +4999,9 @@ impl TableProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(
 			async move {
-				let key = crate::key::record::RecordKey {
-					root: crate::key::database::all::DatabaseRoot {
-						ns,
-						db,
-					},
+				let key = RecordKey {
+					ns,
+					db,
 					tb: Cow::Borrowed(tb),
 					id: Cow::Borrowed(id),
 				};
@@ -4928,11 +5027,9 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				// Set the value in the datastore
-				let key = crate::key::record::RecordKey {
-					root: crate::key::database::all::DatabaseRoot {
-						ns,
-						db,
-					},
+				let key = RecordKey {
+					ns,
+					db,
 					tb: Cow::Borrowed(tb),
 					id: Cow::Borrowed(id),
 				};
@@ -4957,11 +5054,9 @@ impl TableProvider for Transaction {
 		Box::pin(
 			async move {
 				// Delete the value in the datastore
-				let key = crate::key::record::RecordKey {
-					root: crate::key::database::all::DatabaseRoot {
-						ns,
-						db,
-					},
+				let key = RecordKey {
+					ns,
+					db,
 					tb: Cow::Borrowed(tb),
 					id: Cow::Borrowed(id),
 				};
@@ -4999,16 +5094,21 @@ impl UserProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let range = crate::key::root::us::UsPrefix {}.encode_range()?;
-					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					let range = RootUserPrefix {}.range()?;
+					let val =
+						self.tr.getr(range.into_key_range(), version).await.map_err(Error::from)?;
 					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Rus;
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_rus(),
 					None => {
-						let range = crate::key::root::us::UsPrefix {}.encode_range()?;
-						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let range = RootUserPrefix {}.range()?;
+						let val = self
+							.tr
+							.getr(range.into_key_range(), None)
+							.await
+							.map_err(Error::from)?;
 						let val =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Rus(Arc::clone(&val));
@@ -5030,22 +5130,27 @@ impl UserProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let range = crate::key::namespace::us::UsPrefix {
+					let range = NsUserPrefix {
 						ns,
 					}
-					.encode_range()?;
-					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					.range()?;
+					let val =
+						self.tr.getr(range.into_key_range(), version).await.map_err(Error::from)?;
 					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Nus(ns);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_nus(),
 					None => {
-						let range = crate::key::namespace::us::UsPrefix {
+						let range = NsUserPrefix {
 							ns,
 						}
-						.encode_range()?;
-						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						.range()?;
+						let val = self
+							.tr
+							.getr(range.into_key_range(), None)
+							.await
+							.map_err(Error::from)?;
 						let val =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Nus(Arc::clone(&val));
@@ -5068,28 +5173,29 @@ impl UserProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let range = crate::key::database::us::UserKeyPrefix {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let range = DbUserPrefix {
+						ns,
+						db,
 					}
-					.encode_range()?;
-					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					.range()?;
+					let val =
+						self.tr.getr(range.into_key_range(), version).await.map_err(Error::from)?;
 					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Dus(ns, db);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_dus(),
 					None => {
-						let range = crate::key::database::us::UserKeyPrefix {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let range = DbUserPrefix {
+							ns,
+							db,
 						}
-						.encode_range()?;
-						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						.range()?;
+						let val = self
+							.tr
+							.getr(range.into_key_range(), None)
+							.await
+							.map_err(Error::from)?;
 						let val =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Dus(Arc::clone(&val));
@@ -5111,7 +5217,7 @@ impl UserProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::root::us::Us {
+					let key = RootUserKey {
 						user: Cow::Borrowed(us),
 					};
 					let Some(val) = self.get_key(&key, version).await? else {
@@ -5123,7 +5229,7 @@ impl UserProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = crate::key::root::us::Us {
+						let key = RootUserKey {
 							user: Cow::Borrowed(us),
 						};
 						let Some(val) = self.get_key(&key, None).await? else {
@@ -5150,7 +5256,7 @@ impl UserProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::namespace::us::Us {
+					let key = NsUserKey {
 						ns,
 						user: Cow::Borrowed(us),
 					};
@@ -5163,7 +5269,7 @@ impl UserProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = crate::key::namespace::us::Us {
+						let key = NsUserKey {
 							ns,
 							user: Cow::Borrowed(us),
 						};
@@ -5193,11 +5299,9 @@ impl UserProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::database::us::UserKey {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let key = DbUserKey {
+						ns,
+						db,
 						user: Cow::Borrowed(us),
 					};
 					let Some(val) = self.get_key(&key, version).await? else {
@@ -5209,11 +5313,9 @@ impl UserProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = crate::key::database::us::UserKey {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let key = DbUserKey {
+							ns,
+							db,
 							user: Cow::Borrowed(us),
 						};
 						let Some(val) = self.get_key(&key, None).await? else {
@@ -5236,7 +5338,7 @@ impl UserProvider for Transaction {
 		us: &'a catalog::UserDefinition,
 	) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
-			let key = crate::key::root::us::Us {
+			let key = RootUserKey {
 				user: Cow::Borrowed(&us.name),
 			};
 			self.set_key(&key, us).await?;
@@ -5260,7 +5362,7 @@ impl UserProvider for Transaction {
 		us: &'a catalog::UserDefinition,
 	) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
-			let key = crate::key::namespace::us::Us {
+			let key = NsUserKey {
 				ns,
 				user: Cow::Borrowed(&us.name),
 			};
@@ -5286,11 +5388,9 @@ impl UserProvider for Transaction {
 		us: &'a catalog::UserDefinition,
 	) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
-			let key = crate::key::database::us::UserKey {
-				prefix: crate::key::database::all::DatabaseRoot {
-					ns,
-					db,
-				},
+			let key = DbUserKey {
+				ns,
+				db,
 				user: Cow::Borrowed(&us.name),
 			};
 			self.set_key(&key, us).await?;
@@ -5322,8 +5422,9 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let range = crate::key::root::ac::AccessKeyPrefix {}.encode_range()?;
-					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					let range = RootAccessMethodPrefix {}.range()?;
+					let val =
+						self.tr.getr(range.into_key_range(), version).await.map_err(Error::from)?;
 					let stored: Arc<[catalog::StoredAccessDefinition]> =
 						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 					return catalog::from_stored_all(&stored);
@@ -5332,8 +5433,12 @@ impl AuthorisationProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_ras(),
 					None => {
-						let range = crate::key::root::ac::AccessKeyPrefix {}.encode_range()?;
-						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						let range = RootAccessMethodPrefix {}.range()?;
+						let val = self
+							.tr
+							.getr(range.into_key_range(), None)
+							.await
+							.map_err(Error::from)?;
 						let stored: Arc<[catalog::StoredAccessDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let val = catalog::from_stored_all(&stored)?;
@@ -5356,22 +5461,27 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let range = crate::key::root::access::gr::AccessGrantPrefix {
+					let range = RootGrantPrefix {
 						ac: Cow::Borrowed(ra),
 					}
-					.encode_range()?;
-					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					.range()?;
+					let val =
+						self.tr.getr(range.into_key_range(), version).await.map_err(Error::from)?;
 					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Rgs(ra);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_rag(),
 					None => {
-						let range = crate::key::root::access::gr::AccessGrantPrefix {
+						let range = RootGrantPrefix {
 							ac: Cow::Borrowed(ra),
 						}
-						.encode_range()?;
-						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						.range()?;
+						let val = self
+							.tr
+							.getr(range.into_key_range(), None)
+							.await
+							.map_err(Error::from)?;
 						let val =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Rag(Arc::clone(&val));
@@ -5393,11 +5503,12 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let range = crate::key::namespace::ac::AccessKeyPrefix {
+					let range = NsAccessMethodPrefix {
 						ns,
 					}
-					.encode_range()?;
-					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					.range()?;
+					let val =
+						self.tr.getr(range.into_key_range(), version).await.map_err(Error::from)?;
 					let stored: Arc<[catalog::StoredAccessDefinition]> =
 						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 					return catalog::from_stored_all(&stored);
@@ -5406,11 +5517,15 @@ impl AuthorisationProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_nas(),
 					None => {
-						let range = crate::key::namespace::ac::AccessKeyPrefix {
+						let range = NsAccessMethodPrefix {
 							ns,
 						}
-						.encode_range()?;
-						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						.range()?;
+						let val = self
+							.tr
+							.getr(range.into_key_range(), None)
+							.await
+							.map_err(Error::from)?;
 						let stored: Arc<[catalog::StoredAccessDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let val = catalog::from_stored_all(&stored)?;
@@ -5434,24 +5549,29 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let range = crate::key::namespace::access::gr::AccessGrantKeyPrefix {
+					let range = NsGrantPrefix {
 						ns,
 						ac: Cow::Borrowed(na),
 					}
-					.encode_range()?;
-					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					.range()?;
+					let val =
+						self.tr.getr(range.into_key_range(), version).await.map_err(Error::from)?;
 					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Ngs(ns, na);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_nag(),
 					None => {
-						let range = crate::key::namespace::access::gr::AccessGrantKeyPrefix {
+						let range = NsGrantPrefix {
 							ns,
 							ac: Cow::Borrowed(na),
 						}
-						.encode_range()?;
-						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						.range()?;
+						let val = self
+							.tr
+							.getr(range.into_key_range(), None)
+							.await
+							.map_err(Error::from)?;
 						let val =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Nag(Arc::clone(&val));
@@ -5474,14 +5594,13 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let range = crate::key::database::ac::AccessKeyPrefix {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let range = DbAccessMethodPrefix {
+						ns,
+						db,
 					}
-					.encode_range()?;
-					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					.range()?;
+					let val =
+						self.tr.getr(range.into_key_range(), version).await.map_err(Error::from)?;
 					let stored: Arc<[catalog::StoredAccessDefinition]> =
 						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 					return catalog::from_stored_all(&stored);
@@ -5490,14 +5609,16 @@ impl AuthorisationProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_das(),
 					None => {
-						let range = crate::key::database::ac::AccessKeyPrefix {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let range = DbAccessMethodPrefix {
+							ns,
+							db,
 						}
-						.encode_range()?;
-						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						.range()?;
+						let val = self
+							.tr
+							.getr(range.into_key_range(), None)
+							.await
+							.map_err(Error::from)?;
 						let stored: Arc<[catalog::StoredAccessDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let val = catalog::from_stored_all(&stored)?;
@@ -5522,30 +5643,31 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let range = crate::key::database::access::gr::AccessGrantKeyPrefix {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let range = DbGrantPrefix {
+						ns,
+						db,
 						ac: Cow::Borrowed(da),
 					}
-					.encode_range()?;
-					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					.range()?;
+					let val =
+						self.tr.getr(range.into_key_range(), version).await.map_err(Error::from)?;
 					return util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()));
 				}
 				let qey = cache::tx::Lookup::Dgs(ns, db, da);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_dag(),
 					None => {
-						let range = crate::key::database::access::gr::AccessGrantKeyPrefix {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let range = DbGrantPrefix {
+							ns,
+							db,
 							ac: Cow::Borrowed(da),
 						}
-						.encode_range()?;
-						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						.range()?;
+						let val = self
+							.tr
+							.getr(range.into_key_range(), None)
+							.await
+							.map_err(Error::from)?;
 						let val =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let entry = cache::tx::Entry::Dag(Arc::clone(&val));
@@ -5567,7 +5689,7 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::root::ac::AccessKey {
+					let key = RootAccessMethodKey {
 						ac: Cow::Borrowed(ra),
 					};
 					let Some(val) = self.get_key(&key, version).await? else {
@@ -5579,7 +5701,7 @@ impl AuthorisationProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = crate::key::root::ac::AccessKey {
+						let key = RootAccessMethodKey {
 							ac: Cow::Borrowed(ra),
 						};
 						let Some(val) = self.get_key(&key, None).await? else {
@@ -5606,7 +5728,7 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::root::access::gr::AccessGrantKey {
+					let key = RootGrantKey {
 						ac: Cow::Borrowed(ac),
 						gr: Cow::Borrowed(gr),
 					};
@@ -5619,7 +5741,7 @@ impl AuthorisationProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = crate::key::root::access::gr::AccessGrantKey {
+						let key = RootGrantKey {
 							ac: Cow::Borrowed(ac),
 							gr: Cow::Borrowed(gr),
 						};
@@ -5647,7 +5769,7 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::namespace::ac::AccessKey {
+					let key = NsAccessMethodKey {
 						ns,
 						ac: Cow::Borrowed(na),
 					};
@@ -5660,7 +5782,7 @@ impl AuthorisationProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = crate::key::namespace::ac::AccessKey {
+						let key = NsAccessMethodKey {
 							ns,
 							ac: Cow::Borrowed(na),
 						};
@@ -5689,7 +5811,7 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::namespace::access::gr::AccessGrantKey {
+					let key = NsGrantKey {
 						ns,
 						ac: Cow::Borrowed(ac),
 						gr: Cow::Borrowed(gr),
@@ -5703,7 +5825,7 @@ impl AuthorisationProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = crate::key::namespace::access::gr::AccessGrantKey {
+						let key = NsGrantKey {
 							ns,
 							ac: Cow::Borrowed(ac),
 							gr: Cow::Borrowed(gr),
@@ -5733,11 +5855,9 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::database::ac::AccessKey {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let key = DbAccessMethodKey {
+						ns,
+						db,
 						ac: Cow::Borrowed(da),
 					};
 					let Some(val) = self.get_key(&key, version).await? else {
@@ -5749,11 +5869,9 @@ impl AuthorisationProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = crate::key::database::ac::AccessKey {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let key = DbAccessMethodKey {
+							ns,
+							db,
 							ac: Cow::Borrowed(da),
 						};
 						let Some(val) = self.get_key(&key, None).await? else {
@@ -5782,11 +5900,9 @@ impl AuthorisationProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::database::access::gr::AccessGrantKey {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let key = DbGrantKey {
+						ns,
+						db,
 						ac: Cow::Borrowed(ac),
 						gr: Cow::Borrowed(gr),
 					};
@@ -5799,11 +5915,9 @@ impl AuthorisationProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = crate::key::database::access::gr::AccessGrantKey {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let key = DbGrantKey {
+							ns,
+							db,
 							ac: Cow::Borrowed(ac),
 							gr: Cow::Borrowed(gr),
 						};
@@ -5824,12 +5938,12 @@ impl AuthorisationProvider for Transaction {
 	fn del_root_access<'a>(&'a self, ra: &'a str) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Delete the definition
-			let key = crate::key::root::ac::AccessKey {
+			let key = RootAccessMethodKey {
 				ac: Cow::Borrowed(ra),
 			};
 			self.del_key(&key).await?;
 			// Delete any associated data including access grants.
-			let key = crate::key::root::access::all::AccessRoot {
+			let key = RootAccessRoot {
 				ac: Cow::Borrowed(ra),
 			};
 			self.del_prefix_key(&key).await?;
@@ -5851,13 +5965,13 @@ impl AuthorisationProvider for Transaction {
 	fn del_ns_access<'a>(&'a self, ns: NamespaceId, na: &'a str) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Delete the definition
-			let key = crate::key::namespace::ac::AccessKey {
+			let key = NsAccessMethodKey {
 				ns,
 				ac: Cow::Borrowed(na),
 			};
 			self.del_key(&key).await?;
 			// Delete any associated data including access grants.
-			let key = crate::key::namespace::access::all::AccessRoot {
+			let key = NsAccessRoot {
 				ns,
 				ac: Cow::Borrowed(na),
 			};
@@ -5885,20 +5999,16 @@ impl AuthorisationProvider for Transaction {
 	) -> BoxProviderFut<'a, Result<()>> {
 		Box::pin(async move {
 			// Delete the definition
-			let key = crate::key::database::ac::AccessKey {
-				prefix: crate::key::database::all::DatabaseRoot {
-					ns,
-					db,
-				},
+			let key = DbAccessMethodKey {
+				ns,
+				db,
 				ac: Cow::Borrowed(da),
 			};
 			self.del_key(&key).await?;
 			// Delete any associated data including access grants.
-			let key = crate::key::database::access::all::DbAccess {
-				prefix: crate::key::database::all::DatabaseRoot {
-					ns,
-					db,
-				},
+			let key = DbAccessRoot {
+				ns,
+				db,
 				ac: Cow::Borrowed(da),
 			};
 			self.del_prefix_key(&key).await?;
@@ -5933,12 +6043,13 @@ impl ApiProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let range = crate::key::database::ap::ApiPrefix {
+					let range = ApiPrefix {
 						ns,
 						db,
 					}
-					.encode_range()?;
-					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					.range()?;
+					let val =
+						self.tr.getr(range.into_key_range(), version).await.map_err(Error::from)?;
 					let stored: Arc<[catalog::StoredApiDefinition]> =
 						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 					return catalog::from_stored_all(&stored);
@@ -5947,12 +6058,16 @@ impl ApiProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val,
 					None => {
-						let range = crate::key::database::ap::ApiPrefix {
+						let range = ApiPrefix {
 							ns,
 							db,
 						}
-						.encode_range()?;
-						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						.range()?;
+						let val = self
+							.tr
+							.getr(range.into_key_range(), None)
+							.await
+							.map_err(Error::from)?;
 						let stored: Arc<[catalog::StoredApiDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let val = cache::tx::Entry::Aps(catalog::from_stored_all(&stored)?);
@@ -5977,11 +6092,9 @@ impl ApiProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::database::ap::Api {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let key = ApiKey {
+						ns,
+						db,
 						ap: Cow::Borrowed(ap),
 					};
 					let Some(val) = self.get_key(&key, version).await? else {
@@ -5993,11 +6106,9 @@ impl ApiProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = crate::key::database::ap::Api {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let key = ApiKey {
+							ns,
+							db,
 							ap: Cow::Borrowed(ap),
 						};
 						let Some(val) = self.get_key(&key, None).await? else {
@@ -6023,11 +6134,9 @@ impl ApiProvider for Transaction {
 		Box::pin(async move {
 			let stored = ap.to_stored();
 			let name = ap.path.to_string();
-			let key = crate::key::database::ap::Api {
-				prefix: crate::key::database::all::DatabaseRoot {
-					ns,
-					db,
-				},
+			let key = ApiKey {
+				ns,
+				db,
 				ap: Cow::Borrowed(&name),
 			};
 			self.set_key(&key, &stored).await?;
@@ -6061,14 +6170,13 @@ impl BucketProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let range = crate::key::database::bu::BucketKeyPrefix {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let range = BucketPrefix {
+						ns,
+						db,
 					}
-					.encode_range()?;
-					let val = self.tr.getr(range, version).await.map_err(Error::from)?;
+					.range()?;
+					let val =
+						self.tr.getr(range.into_key_range(), version).await.map_err(Error::from)?;
 					let stored: Arc<[catalog::StoredBucketDefinition]> =
 						util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 					return catalog::from_stored_all(&stored);
@@ -6077,14 +6185,16 @@ impl BucketProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_bus(),
 					None => {
-						let range = crate::key::database::bu::BucketKeyPrefix {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let range = BucketPrefix {
+							ns,
+							db,
 						}
-						.encode_range()?;
-						let val = self.tr.getr(range, None).await.map_err(Error::from)?;
+						.range()?;
+						let val = self
+							.tr
+							.getr(range.into_key_range(), None)
+							.await
+							.map_err(Error::from)?;
 						let stored: Arc<[catalog::StoredBucketDefinition]> =
 							util::deserialize_cache(val.values.iter().map(|x| x.1.as_slice()))?;
 						let val = catalog::from_stored_all(&stored)?;
@@ -6109,11 +6219,9 @@ impl BucketProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let key = crate::key::database::bu::BucketKey {
-						prefix: crate::key::database::all::DatabaseRoot {
-							ns,
-							db,
-						},
+					let key = BucketKey {
+						ns,
+						db,
 						bu: Cow::Borrowed(bu),
 					};
 					let Some(val) = self.get_key(&key, version).await? else {
@@ -6125,11 +6233,9 @@ impl BucketProvider for Transaction {
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_type().map(Some),
 					None => {
-						let key = crate::key::database::bu::BucketKey {
-							prefix: crate::key::database::all::DatabaseRoot {
-								ns,
-								db,
-							},
+						let key = BucketKey {
+							ns,
+							db,
 							bu: Cow::Borrowed(bu),
 						};
 						let Some(val) = self.get_key(&key, None).await? else {

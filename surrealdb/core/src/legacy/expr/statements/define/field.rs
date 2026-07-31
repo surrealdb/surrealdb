@@ -20,8 +20,8 @@ use crate::expr::statements::define::field::{
 use crate::expr::{Base, Idiom, Kind, KindLiteral, Part, RecordIdKeyLit};
 use crate::iam::{Action, AuthLimit, ResourceKind};
 use crate::idx::planner::ScanDirection;
-use crate::key::database::all::DatabaseRoot;
-use crate::key::{KVKeyDecode, KVRange};
+use crate::key::KVKeyDecode;
+use crate::key::schema::{FieldKey, ReferenceKey, ReferencePrefix};
 use crate::kvs::{NORMAL_BATCH_SIZE, Transaction};
 use crate::legacy::{expr_to_ident, expr_to_idiom};
 use crate::val::{TableName, Value};
@@ -369,11 +369,9 @@ pub(crate) async fn define_field_statement_process_recursive_definitions(
 			// Get the field name
 			let fd = name.to_sql();
 			// Set the subtype `DEFINE FIELD` definition
-			let key = crate::key::table::fd::Fd {
-				prefix: DatabaseRoot {
-					ns,
-					db,
-				},
+			let key = FieldKey {
+				ns,
+				db,
 				tb: Cow::Borrowed(&definition.table),
 				fd: Cow::Borrowed(&fd),
 			};
@@ -718,23 +716,21 @@ pub(crate) async fn purge_dropped_reference_keys(
 		}
 		// Collect the matching keys first, then delete them, so the range is
 		// never mutated while the cursor is still scanning it.
-		let range = crate::key::r#ref::PrefixTb {
-			prefix: DatabaseRoot {
-				ns,
-				db,
-			},
+		let range = ReferencePrefix {
+			ns,
+			db,
 			tb: Cow::Borrowed(target),
 		}
-		.encode_range()?;
+		.range()?;
 		let mut orphaned: Vec<Vec<u8>> = Vec::new();
-		let mut cursor = txn.open_keys_cursor(range, ScanDirection::Forward, 0, None).await?;
+		let mut cursor = txn.open_keys_cursor_raw(range, ScanDirection::Forward, 0, None).await?;
 		loop {
 			let batch = cursor.next_batch(NORMAL_BATCH_SIZE).await?;
 			if batch.is_empty() {
 				break;
 			}
 			for raw in batch.iter() {
-				let key = crate::key::r#ref::Ref::decode_key(raw)?;
+				let key = ReferenceKey::decode_key(raw)?;
 				if key.foreign_table.as_ref() == ft && key.foreign_field.as_ref() == ff.as_str() {
 					orphaned.push(raw.to_vec());
 				}
@@ -742,7 +738,7 @@ pub(crate) async fn purge_dropped_reference_keys(
 		}
 		drop(cursor);
 		for raw in &orphaned {
-			let key = crate::key::r#ref::Ref::decode_key(raw)?;
+			let key = ReferenceKey::decode_key(raw)?;
 			txn.del_key(&key).await?;
 		}
 	}

@@ -12,6 +12,7 @@ use crate::expr::Base;
 use crate::expr::statements::remove::index::RemoveIndexStatement;
 use crate::iam::{Action, ResourceKind};
 use crate::idx::docids::TableDocIds;
+use crate::key::schema::TableKey;
 use crate::kvs::index::retire_durable_index;
 use crate::legacy::expr_to_ident;
 use crate::val::Value;
@@ -102,11 +103,9 @@ pub(crate) async fn remove_index_statement_compute(
 	// rejected, its whole transaction rolls back (nothing removed, no leak),
 	// and it re-evaluates the decision on retry as the sole remover. On
 	// conflict-serializing backends the `put_tb` write already serializes them.
-	let tb_key = crate::key::database::tb::TableKey {
-		prefix: crate::key::database::all::DatabaseRoot {
-			ns,
-			db,
-		},
+	let tb_key = TableKey {
+		ns,
+		db,
 		tb: std::borrow::Cow::Borrowed(&table_name),
 	};
 	let _ = txn.get_key(&tb_key, None).await?;
@@ -129,6 +128,7 @@ pub(crate) async fn remove_index_statement_compute(
 #[cfg(test)]
 #[cfg(feature = "kv-tikv")]
 mod tikv_concurrency {
+	use std::borrow::Cow;
 	use std::sync::Arc;
 
 	use surrealdb_strand::TableName;
@@ -137,8 +137,7 @@ mod tikv_concurrency {
 	use crate::CommunityComposer;
 	use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 	use crate::dbs::Session;
-	use crate::key::KVRange;
-	use crate::key::table::{dd, di};
+	use crate::key::schema::{DocKeyPrefix, DocLookupPrefix, RootRoot, VersionKey};
 	use crate::kvs::{Datastore, TransactionType};
 
 	async fn fresh_tikv_ds() -> Arc<Datastore> {
@@ -148,7 +147,10 @@ mod tikv_concurrency {
 			.await
 			.unwrap();
 		let tx = ds.transaction(TransactionType::Write).await.unwrap();
-		tx.delr((vec![0u8]..vec![0xffu8]).into()).await.unwrap();
+		// Both top-level regions: everything under the root, and the storage
+		// version key, which sits outside it.
+		tx.delr(RootRoot {}.range_subtree().unwrap()).await.unwrap();
+		tx.del_key(&VersionKey {}).await.unwrap();
 		tx.commit().await.unwrap();
 		Arc::new(ds)
 	}
@@ -220,11 +222,11 @@ mod tikv_concurrency {
 			let db = tx.get_db_by_name("test", "test", None).await.unwrap().unwrap().database_id;
 			let tb_name: TableName = tb.as_str().into();
 			let forward = tx
-				.getr(di::Prefix::new(ns, db, &tb_name).encode_range().unwrap(), None)
+				.getr(DocLookupPrefix::new(ns, db, Cow::Borrowed(&tb_name)).range().unwrap(), None)
 				.await
 				.unwrap();
 			let reverse = tx
-				.getr(dd::Prefix::new(ns, db, &tb_name).encode_range().unwrap(), None)
+				.getr(DocKeyPrefix::new(ns, db, Cow::Borrowed(&tb_name)).range().unwrap(), None)
 				.await
 				.unwrap();
 			tx.cancel().await.unwrap();
@@ -302,11 +304,11 @@ mod tikv_concurrency {
 			let db = tx.get_db_by_name("test", "test", None).await.unwrap().unwrap().database_id;
 			let tb_name: TableName = tb.as_str().into();
 			let forward = tx
-				.getr(di::Prefix::new(ns, db, &tb_name).encode_range().unwrap(), None)
+				.getr(DocLookupPrefix::new(ns, db, Cow::Borrowed(&tb_name)).range().unwrap(), None)
 				.await
 				.unwrap();
 			let reverse = tx
-				.getr(dd::Prefix::new(ns, db, &tb_name).encode_range().unwrap(), None)
+				.getr(DocKeyPrefix::new(ns, db, Cow::Borrowed(&tb_name)).range().unwrap(), None)
 				.await
 				.unwrap();
 			tx.cancel().await.unwrap();

@@ -14,7 +14,7 @@ use web_time::Instant;
 
 use crate::catalog::TaskLease;
 use crate::err::{EngineError, Error};
-use crate::key::root::task_lease::TaskLease as TaskLeaseKey;
+use crate::key::schema::TaskLeaseKey;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::{Error as KvsError, Transaction, TransactionType};

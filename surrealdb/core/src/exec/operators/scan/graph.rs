@@ -25,7 +25,7 @@ use crate::exec::{
 use crate::expr::{ControlFlow, Dir};
 use crate::iam::Action;
 use crate::idx::planner::ScanDirection;
-use crate::key::Key;
+use crate::key::Resumable;
 use crate::kvs::{CachePolicy, Transaction};
 use crate::val::{RecordId, TableName, Value};
 
@@ -329,8 +329,7 @@ impl ExecOperator for GraphEdgeScan {
 							// range is exhausted, we drain it via inner
 							// scans and resume the outer cursor past the
 							// last processed key.
-							let mut current_beg = r.start.as_borrowed();
-							let end = r.end;
+							let mut chunk = r;
 							let mut limit_hit = false;
 							'range_chunks: loop {
 								let mut legacy_edges: Vec<RecordId> = Vec::new();
@@ -338,8 +337,8 @@ impl ExecOperator for GraphEdgeScan {
 								let mut last_processed_key: Option<Vec<u8>> = None;
 								{
 									let mut cursor = txn
-										.open_keys_cursor(
-											(current_beg..end.as_borrowed()).into(),
+										.open_keys_cursor_raw(
+											chunk.clone(),
 											ScanDirection::Forward,
 											0,
 											version,
@@ -533,7 +532,7 @@ impl ExecOperator for GraphEdgeScan {
 										.await?;
 										for r in inner_ranges {
 											let mut inner_cursor = txn
-												.open_keys_cursor(
+												.open_keys_cursor_raw(
 													r,
 													ScanDirection::Forward,
 													0,
@@ -607,16 +606,14 @@ impl ExecOperator for GraphEdgeScan {
 								// Continue chunking only when the cursor was
 								// suspended because the legacy buffer filled.
 								// `last_processed_key` is the legacy key that
-								// triggered the bound; resume past it with
-								// `0xff` (the same sentinel used by the range
-								// bounds, see `eval_graph_bound`).
+								// triggered the bound; the next chunk picks the
+								// range up immediately after it.
 								if !chunk_bound_hit || limit_hit {
 									break 'range_chunks;
 								}
-								let mut next_beg = last_processed_key
+								let resume_from = last_processed_key
 									.expect("chunk_bound_hit implies a key was processed");
-								next_beg.push(0xff);
-								current_beg = Key::from(next_beg);
+								chunk = chunk.resume_after(&resume_from, ScanDirection::Forward);
 							}
 
 							if limit_hit {

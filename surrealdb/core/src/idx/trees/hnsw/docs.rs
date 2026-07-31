@@ -147,9 +147,12 @@ impl HnswDocs {
 
 #[cfg(test)]
 mod tests {
+	use std::borrow::Cow;
+
 	use anyhow::Result;
 
 	use super::*;
+	use crate::key::schema::DocKeyKey;
 	use crate::kvs::{Datastore, TransactionType};
 
 	fn ikb() -> IndexKeyBase {
@@ -164,12 +167,12 @@ mod tests {
 		{
 			let tx = ds.transaction(TransactionType::Write).await?;
 			tx.set_key(
-				&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 1),
+				&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 1),
 				&RecordIdKey::Number(11),
 			)
 			.await?;
 			tx.set_key(
-				&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 2),
+				&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 2),
 				&RecordIdKey::Number(22),
 			)
 			.await?;
@@ -185,7 +188,7 @@ mod tests {
 		tx.cancel().await?;
 
 		let tx = ds.transaction(TransactionType::Write).await?;
-		tx.del_key(&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 1)).await?;
+		tx.del_key(&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 1)).await?;
 		tx.commit().await?;
 
 		let tx = ds.transaction(TransactionType::Read).await?;
@@ -211,7 +214,7 @@ mod tests {
 
 		let tx = ds.transaction(TransactionType::Write).await?;
 		tx.set_key(
-			&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 9),
+			&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 9),
 			&RecordIdKey::Number(99),
 		)
 		.await?;
@@ -235,7 +238,7 @@ mod tests {
 		{
 			let tx = ds.transaction(TransactionType::Write).await?;
 			tx.set_key(
-				&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 1),
+				&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 1),
 				&RecordIdKey::Number(11),
 			)
 			.await?;
@@ -255,7 +258,7 @@ mod tests {
 
 		let tx = ds.transaction(TransactionType::Write).await?;
 		tx.set_key(
-			&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 1),
+			&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 1),
 			&RecordIdKey::Number(22),
 		)
 		.await?;
@@ -276,7 +279,7 @@ mod tests {
 		let id = RecordIdKey::Number(77);
 		{
 			let tx = ds.transaction(TransactionType::Write).await?;
-			tx.set_key(&crate::key::table::dd::Dd::new(ikb.ns(), ikb.db(), ikb.table(), 7), &id)
+			tx.set_key(&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 7), &id)
 				.await?;
 			tx.commit().await?;
 		}

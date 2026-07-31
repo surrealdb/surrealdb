@@ -14,10 +14,7 @@ use crate::expr::Base;
 use crate::expr::statements::define::DefineKind;
 use crate::expr::statements::define::sequence::DefineSequenceStatement;
 use crate::iam::{Action, ResourceKind};
-use crate::key::KVRange;
-use crate::key::database::all::DatabaseRoot;
-use crate::key::database::sq::Sq;
-use crate::key::sequence::{BaPrefix, StPrefix};
+use crate::key::schema::{SeqBatchPrefix, SeqStatePrefix, SequenceKey};
 use crate::legacy::expr_to_ident;
 use crate::val::{Duration, Value};
 
@@ -66,11 +63,9 @@ pub(crate) async fn define_sequence_statement_compute(
 	};
 
 	// Process the statement
-	let key = Sq {
-		prefix: DatabaseRoot {
-			ns: db.namespace_id,
-			db: db.database_id,
-		},
+	let key = SequenceKey {
+		ns: db.namespace_id,
+		db: db.database_id,
 		sq: Cow::Borrowed(&name),
 	};
 
@@ -103,23 +98,19 @@ pub(crate) async fn define_sequence_statement_compute(
 	txn.set_key(&key, &sq).await?;
 
 	// Clear any pre-existing sequence records
-	let ba_range = BaPrefix {
-		prefix: DatabaseRoot {
-			ns: db.namespace_id,
-			db: db.database_id,
-		},
+	let ba_range = SeqBatchPrefix {
+		ns: db.namespace_id,
+		db: db.database_id,
 		sq: Cow::Borrowed(&sq.name),
 	}
-	.encode_range()?;
+	.range()?;
 	txn.delr(ba_range).await?;
-	let st_range = StPrefix {
-		prefix: DatabaseRoot {
-			ns: db.namespace_id,
-			db: db.database_id,
-		},
+	let st_range = SeqStatePrefix {
+		ns: db.namespace_id,
+		db: db.database_id,
 		sq: Cow::Borrowed(&sq.name),
 	}
-	.encode_range()?;
+	.range()?;
 	txn.delr(st_range).await?;
 
 	// Clear the cache

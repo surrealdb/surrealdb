@@ -52,6 +52,7 @@ use crate::idx::trees::vector::SerializedVector;
 #[cfg(test)]
 use crate::idx::trees::vector::Vector;
 use crate::key::KVValue;
+use crate::key::schema::DiskannElementKey;
 use crate::kvs::Transaction;
 
 /// Provider execution context passed through the upstream DiskANN trait calls.
@@ -362,7 +363,7 @@ impl DiskAnnProvider {
 			context.ikb.new_de_range().map_err(|e| ANNError::log_index_error(e.to_string()))?;
 		let mut cursor = context
 			.tx
-			.open_vals_cursor(rng, crate::idx::planner::ScanDirection::Forward, 0, None)
+			.open_vals_cursor_raw(rng, crate::idx::planner::ScanDirection::Forward, 0, None)
 			.await
 			.map_err(|e| ANNError::log_index_error(e.to_string()))?;
 		let cache_misses = !context.tx.writeable();
@@ -375,7 +376,7 @@ impl DiskAnnProvider {
 				break;
 			}
 			for (key, value) in &batch {
-				let key: crate::key::index::de::De<'_> = storekey::decode_borrow(key)
+				let key: DiskannElementKey<'_> = storekey::decode_borrow(key)
 					.map_err(|e| ANNError::log_index_error(e.to_string()))?;
 				let element = DiskAnnElement::kv_decode_value(value, ())
 					.map_err(|e| ANNError::log_index_error(e.to_string()))?;

@@ -14,7 +14,7 @@ use crate::expr::Base;
 use crate::expr::statements::define::DefineKind;
 use crate::expr::statements::define::analyzer::DefineAnalyzerStatement;
 use crate::iam::{Action, ResourceKind};
-use crate::key::database::all::DatabaseRoot;
+use crate::key::schema::AnalyzerKey;
 use crate::legacy::expr_to_ident;
 use crate::val::Value;
 
@@ -71,11 +71,9 @@ pub(crate) async fn define_analyzer_statement_compute(
 		}
 	}
 	// Process the statement
-	let key = crate::key::database::az::Analyzer {
-		prefix: DatabaseRoot {
-			ns,
-			db,
-		},
+	let key = AnalyzerKey {
+		ns,
+		db,
 		az: Cow::Borrowed(definition.name.as_str()),
 	};
 	ctx.get_index_stores().mappers().load(&definition, &ctx.config.file_allowlist).await?;

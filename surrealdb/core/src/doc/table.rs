@@ -18,8 +18,7 @@ use crate::expr::{
 	BinaryOperator, Cond, Error, Expr, Fields, Function, FunctionCall, Groups, Literal,
 };
 use crate::idx::planner::RecordStrategy;
-use crate::key;
-use crate::key::database::all::DatabaseRoot;
+use crate::key::schema::RecordKey;
 use crate::val::{Array, Number, RecordId, RecordIdKey, TableName, TryAdd, TryMul, TryPow, Value};
 struct Recalculation {
 	function: String,
@@ -326,11 +325,9 @@ impl Document {
 		let key = RecordIdKey::Array(Array(group.clone()));
 		let tx = ctx.tx();
 
-		let k = key::record::RecordKey {
-			root: DatabaseRoot {
-				ns: db.namespace_id,
-				db: db.database_id,
-			},
+		let k = RecordKey {
+			ns: db.namespace_id,
+			db: db.database_id,
 			tb: Cow::Borrowed(view_table_name),
 			id: Cow::Borrowed(&key),
 		};
@@ -450,11 +447,9 @@ impl Document {
 		let key = RecordIdKey::Array(Array(group.clone()));
 		let tx = ctx.tx();
 
-		let k = key::record::RecordKey {
-			root: DatabaseRoot {
-				ns: db.namespace_id,
-				db: db.database_id,
-			},
+		let k = RecordKey {
+			ns: db.namespace_id,
+			db: db.database_id,
 			tb: Cow::Borrowed(view_table_name),
 			id: Cow::Borrowed(&key),
 		};
@@ -838,11 +833,9 @@ impl Document {
 		let key = RecordIdKey::Array(Array(group.clone()));
 		let tx = ctx.tx();
 
-		let k = key::record::RecordKey {
-			root: DatabaseRoot {
-				ns: db.namespace_id,
-				db: db.database_id,
-			},
+		let k = RecordKey {
+			ns: db.namespace_id,
+			db: db.database_id,
 			tb: Cow::Borrowed(view_table_name),
 			id: Cow::Borrowed(&key),
 		};

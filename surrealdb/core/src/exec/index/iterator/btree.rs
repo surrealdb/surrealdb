@@ -44,11 +44,11 @@ use anyhow::Result;
 
 use crate::catalog::{DatabaseId, IndexDefinition, NamespaceId};
 use crate::expr::BinaryOperator;
-use crate::idx::keys::compute_index_range;
+use crate::idx::entry::IndexEntryValue;
+use crate::idx::keys::{compute_index_range, entry_range};
 use crate::idx::planner::ScanDirection;
-use crate::key::database::all::DatabaseRoot;
-use crate::key::index::{IndexPrefix, IndexPrefixTerminated, IndexPrefixUnterminated, UniqueIndex};
-use crate::key::{KVKey, KVRange, KeyRange};
+use crate::key::schema::{DbRoot, EntryFdOpenPrefix, EntryFdPrefix, EntryPrefix, UniqueKey};
+use crate::key::{KVKey, KVSubspace, KeyRange, TypedRange};
 use crate::kvs::util::{scan, scanr};
 use crate::kvs::{Transaction, Val};
 use crate::val::{Array, RecordId, Value};
@@ -66,7 +66,7 @@ pub(crate) const INDEX_BATCH_SIZE: u32 = 1000;
 /// The key is ignored; only the value is deserialized: a revision-encoded
 /// `RecordId`, optionally followed by an appended doc-ID which
 /// `revision::from_slice` ignores (see
-/// [`crate::key::index::IndexEntryValue`]).  Used by iterators that do not
+/// [`crate::idx::entry::IndexEntryValue`]).  Used by iterators that do not
 /// need per-key filtering.
 fn decode_record_ids(res: Vec<(Vec<u8>, Val)>) -> Result<Vec<RecordId>> {
 	let mut records = Vec::with_capacity(res.len());
@@ -81,7 +81,7 @@ fn decode_record_ids(res: Vec<(Vec<u8>, Val)>) -> Result<Vec<RecordId>> {
 ///
 /// Doc-IDs found in the entry values are inserted into `docs`. Entries whose
 /// value predates the doc-ID format (see
-/// [`crate::key::index::IndexEntryValue`]) are pushed onto `missing` so the
+/// [`crate::idx::entry::IndexEntryValue`]) are pushed onto `missing` so the
 /// caller can resolve their doc-ID through the table's shared `!di` mapping.
 /// Returns the number of entries decoded.
 pub(crate) fn decode_entry_doc_ids(
@@ -90,7 +90,6 @@ pub(crate) fn decode_entry_doc_ids(
 	missing: &mut Vec<RecordId>,
 ) -> Result<usize> {
 	use crate::key::KVValue;
-	use crate::key::index::IndexEntryValue;
 
 	let count = res.len();
 	for (_, val) in res {
@@ -112,8 +111,8 @@ pub(crate) fn decode_entry_doc_ids(
 /// half-open range `[prefix_ids_beg, prefix_ids_end)` in forward or
 /// backward order, advancing/retreating the cursor after each batch.
 pub(crate) struct IndexEqualIterator {
-	/// Lower bound of the remaining scan range (inclusive).
-	range: KeyRange<'static>,
+	/// The entries not yet returned, narrowed after each batch.
+	range: TypedRange<IndexEntryValue>,
 	/// Whether to scan in reverse (highest to lowest key order).
 	reverse: bool,
 }
@@ -140,16 +139,14 @@ impl IndexEqualIterator {
 		value: &Value,
 		reverse: bool,
 	) -> Result<Self> {
-		let range = IndexPrefixTerminated {
-			prefix: DatabaseRoot {
-				ns,
-				db,
-			},
+		let range = EntryFdPrefix {
+			ns,
+			db,
 			tb: Cow::Borrowed(&ix.table_name),
 			ix: ix.index_id,
 			fd: Cow::Borrowed(slice::from_ref(value)),
 		}
-		.encode_range()?;
+		.range()?;
 		Ok(Self {
 			range,
 			reverse,
@@ -160,10 +157,6 @@ impl IndexEqualIterator {
 	///
 	/// Returns an empty `Vec` when iteration is complete.
 	pub(crate) async fn next_batch(&mut self, tx: &Transaction) -> Result<Vec<RecordId>> {
-		if self.range.is_empty() {
-			return Ok(Vec::new());
-		}
-
 		let res = if self.reverse {
 			scanr(&mut self.range, tx, INDEX_BATCH_SIZE).await?
 		} else {
@@ -182,7 +175,7 @@ impl IndexEqualIterator {
 /// value).  NONE/NULL tuples are stored with the non-unique key format
 /// (record-ID suffix) so they require a prefix range scan instead.
 pub(crate) struct UniqueEqualIterator {
-	range: KeyRange<'static>,
+	range: TypedRange<IndexEntryValue>,
 }
 
 impl UniqueEqualIterator {
@@ -194,29 +187,27 @@ impl UniqueEqualIterator {
 	) -> Result<Self> {
 		let array = Array::from(vec![value.clone()]);
 		let range = if array.is_any_none_or_null() {
-			IndexPrefixTerminated {
-				prefix: DatabaseRoot {
-					ns,
-					db,
-				},
+			EntryFdPrefix {
+				ns,
+				db,
 				tb: Cow::Borrowed(&ix.table_name),
 				ix: ix.index_id,
 				fd: Cow::Borrowed(&array),
 			}
-			.encode_range()?
+			.range()?
 		} else {
-			let key = UniqueIndex {
-				prefix: DatabaseRoot {
-					ns,
-					db,
-				},
+			let key = UniqueKey {
+				ns,
+				db,
 				tb: Cow::Borrowed(&ix.table_name),
 				ix: ix.index_id,
 				fd: Cow::Borrowed(&array),
 			}
 			.encode_key()?;
+			// A unique key is a complete key, so the range covering it alone ends at
+			// its immediate successor.
 			let end = key.as_borrowed().next();
-			(key..end).into()
+			entry_range(ns, db, ix, (key..end).into())
 		};
 		Ok(Self {
 			range,
@@ -238,7 +229,7 @@ impl UniqueEqualIterator {
 /// no further filtering is needed because `beg` has already been advanced
 /// past the excluded key.
 pub(crate) struct IndexRangeForwardIterator {
-	range: KeyRange<'static>,
+	range: TypedRange<IndexEntryValue>,
 }
 
 impl IndexRangeForwardIterator {
@@ -280,7 +271,7 @@ impl IndexRangeForwardIterator {
 ///    iteration (only `end` moves).  Therefore the excluded key can appear in *any* batch and must
 ///    be filtered on *every* call.  `exclude_beg_key` holds the key to filter.
 pub(crate) struct IndexRangeBackwardIterator {
-	range: KeyRange<'static>,
+	range: TypedRange<IndexEntryValue>,
 }
 
 impl IndexRangeBackwardIterator {
@@ -353,7 +344,7 @@ impl IndexRangeIterator {
 // Unique-index range helpers
 // ---------------------------------------------------------------------------
 
-/// Compute the begin key for a unique index range scan.
+/// Compute the range of entries covered by a unique index range scan.
 ///
 /// Non-nullish values use the exact encoded unique key (no record-ID
 /// suffix).  NONE/NULL values are stored with the non-unique key format
@@ -364,8 +355,8 @@ fn compute_unique_range(
 	ix: &IndexDefinition,
 	from: Bound<&Value>,
 	to: Bound<&Value>,
-) -> Result<KeyRange<'static>> {
-	let prefix = DatabaseRoot {
+) -> Result<TypedRange<IndexEntryValue>> {
+	let prefix = DbRoot {
 		ns,
 		db,
 	};
@@ -377,16 +368,18 @@ fn compute_unique_range(
 			// However, for clearity, and because the end bound do have to be different we do use a
 			// different key type to create the bound.
 			if x.is_nullish() {
-				IndexPrefixUnterminated {
-					prefix,
+				EntryFdOpenPrefix {
+					ns: prefix.ns,
+					db: prefix.db,
 					tb: Cow::Borrowed(&ix.table_name),
 					ix: ix.index_id,
 					fd: Cow::Borrowed(slice),
 				}
 				.encode_bound()?
 			} else {
-				UniqueIndex {
-					prefix,
+				UniqueKey {
+					ns: prefix.ns,
+					db: prefix.db,
 					tb: Cow::Borrowed(&ix.table_name),
 					ix: ix.index_id,
 					fd: Cow::Borrowed(slice),
@@ -397,17 +390,18 @@ fn compute_unique_range(
 		Bound::Excluded(x) => {
 			let slice = slice::from_ref(x);
 			if x.is_nullish() {
-				IndexPrefixUnterminated {
-					prefix,
+				EntryFdOpenPrefix {
+					ns: prefix.ns,
+					db: prefix.db,
 					tb: Cow::Borrowed(&ix.table_name),
 					ix: ix.index_id,
 					fd: Cow::Borrowed(slice),
 				}
-				.encode_bound()?
-				.next_neighbour_expect()
+				.skip_extensions()?
 			} else {
-				UniqueIndex {
-					prefix,
+				UniqueKey {
+					ns: prefix.ns,
+					db: prefix.db,
 					tb: Cow::Borrowed(&ix.table_name),
 					ix: ix.index_id,
 					fd: Cow::Borrowed(slice),
@@ -416,8 +410,9 @@ fn compute_unique_range(
 				.next_neighbour_expect()
 			}
 		}
-		Bound::Unbounded => IndexPrefix {
-			prefix,
+		Bound::Unbounded => EntryPrefix {
+			ns: prefix.ns,
+			db: prefix.db,
 			tb: Cow::Borrowed(&ix.table_name),
 			ix: ix.index_id,
 		}
@@ -428,17 +423,18 @@ fn compute_unique_range(
 		Bound::Included(x) => {
 			let slice = slice::from_ref(x);
 			if x.is_nullish() {
-				IndexPrefixUnterminated {
-					prefix,
+				EntryFdOpenPrefix {
+					ns: prefix.ns,
+					db: prefix.db,
 					tb: Cow::Borrowed(&ix.table_name),
 					ix: ix.index_id,
 					fd: Cow::Borrowed(slice),
 				}
-				.encode_bound()?
-				.next_neighbour_expect()
+				.skip_extensions()?
 			} else {
-				UniqueIndex {
-					prefix,
+				UniqueKey {
+					ns: prefix.ns,
+					db: prefix.db,
 					tb: Cow::Borrowed(&ix.table_name),
 					ix: ix.index_id,
 					fd: Cow::Borrowed(slice),
@@ -450,16 +446,18 @@ fn compute_unique_range(
 		Bound::Excluded(x) => {
 			let slice = slice::from_ref(x);
 			if x.is_nullish() {
-				IndexPrefixUnterminated {
-					prefix,
+				EntryFdOpenPrefix {
+					ns: prefix.ns,
+					db: prefix.db,
 					tb: Cow::Borrowed(&ix.table_name),
 					ix: ix.index_id,
 					fd: Cow::Borrowed(slice),
 				}
 				.encode_bound()?
 			} else {
-				UniqueIndex {
-					prefix,
+				UniqueKey {
+					ns: prefix.ns,
+					db: prefix.db,
 					tb: Cow::Borrowed(&ix.table_name),
 					ix: ix.index_id,
 					fd: Cow::Borrowed(slice),
@@ -467,16 +465,16 @@ fn compute_unique_range(
 				.encode_key()?
 			}
 		}
-		Bound::Unbounded => IndexPrefix {
-			prefix,
+		Bound::Unbounded => EntryPrefix {
+			ns: prefix.ns,
+			db: prefix.db,
 			tb: Cow::Borrowed(&ix.table_name),
 			ix: ix.index_id,
 		}
-		.encode_bound()?
-		.next_neighbour_expect(),
+		.skip_extensions()?,
 	};
 
-	Ok((start..end).into())
+	Ok(entry_range(ns, db, ix, (start..end).into()))
 }
 
 /// Forward iterator for range scans on unique (`Uniq`) indexes.
@@ -491,7 +489,7 @@ fn compute_unique_range(
 /// exhausted (empty result), a final `tx.get(end)` is issued to retrieve
 /// the boundary value that the half-open range missed.
 pub(crate) struct UniqueRangeForwardIterator {
-	range: KeyRange<'static>,
+	range: TypedRange<IndexEntryValue>,
 }
 
 impl UniqueRangeForwardIterator {
@@ -531,7 +529,7 @@ impl UniqueRangeForwardIterator {
 /// - `end_checked` guards the first-batch-only filter for an exclusive `end`.
 /// - `exclude_beg_key` is checked on every batch for an exclusive `beg`.
 pub(crate) struct UniqueRangeBackwardIterator {
-	range: KeyRange<'static>,
+	range: TypedRange<IndexEntryValue>,
 }
 
 impl UniqueRangeBackwardIterator {
@@ -611,7 +609,7 @@ impl UniqueRangeIterator {
 /// Forward scans use `tx.scan()` and advance the `beg` cursor;
 /// backward scans use `tx.scanr()` and retreat the `end` cursor.
 pub(crate) struct CompoundEqualIterator {
-	range: KeyRange<'static>,
+	range: TypedRange<IndexEntryValue>,
 	/// Scan direction
 	direction: ScanDirection,
 }
@@ -664,7 +662,7 @@ impl CompoundEqualIterator {
 /// The key boundaries are computed by [`compute_compound_key_range`],
 /// which encodes the equality prefix together with the range value.
 pub(crate) struct CompoundRangeForwardIterator {
-	range: KeyRange<'static>,
+	range: TypedRange<IndexEntryValue>,
 }
 
 impl CompoundRangeForwardIterator {
@@ -745,7 +743,7 @@ impl CompoundRangeIterator {
 /// while `beg` stays fixed, following the same pattern as
 /// [`IndexRangeBackwardIterator`].
 pub(crate) struct CompoundRangeBackwardIterator {
-	range: KeyRange<'static>,
+	range: TypedRange<IndexEntryValue>,
 }
 
 impl CompoundRangeBackwardIterator {
@@ -789,7 +787,7 @@ pub(crate) fn bitmap_scan_range(
 	db: DatabaseId,
 	ix: &IndexDefinition,
 	access: &crate::exec::index::access_path::BTreeAccess,
-) -> Result<KeyRange<'static>> {
+) -> Result<TypedRange<IndexEntryValue>> {
 	use crate::exec::index::access_path::BTreeAccess;
 	let unique = matches!(ix.index, crate::catalog::Index::Uniq);
 	Ok(match access {
@@ -828,40 +826,41 @@ pub(crate) fn bitmap_scan_range(
 // Private helpers
 // ---------------------------------------------------------------------------
 
-/// Compute the KV key range `(beg, end)` for a compound index scan.
+/// Compute the range of entries covered by a compound index scan.
 ///
-/// Builds the appropriate prefix-based key boundaries depending on whether
-/// the scan is a pure equality prefix or has a range condition on the
-/// next column.
+/// The boundaries come from two bounds over the open field prefix: `prefix`, the
+/// equality values of the leading columns, and — where a range condition on the
+/// next column is present — `prefix ++ val`, those values followed by the range
+/// value.  A boundary is then the bound's own bytes (*at*), the first key
+/// strictly beneath it (*beneath*), or the first key after it and everything
+/// that extends it (*past*):
 ///
-/// For range conditions, the operator determines which `Index::prefix_ids_*`
-/// helper is used:
+/// | Operator | start                   | end                  |
+/// |----------|-------------------------|----------------------|
+/// | `=`      | beneath `prefix ++ val` | past `prefix ++ val` |
+/// | `>`      | past `prefix ++ val`    | past `prefix`        |
+/// | `>=`     | at `prefix ++ val`      | past `prefix`        |
+/// | `<`      | at `prefix`             | at `prefix ++ val`   |
+/// | `<=`     | at `prefix`             | past `prefix ++ val` |
 ///
-/// | Operator | `beg`                  | `end`                       |
-/// |----------|------------------------|-----------------------------|
-/// | `=`      | `prefix_ids_composite_beg(val)` | `prefix_ids_composite_end(val)` |
-/// | `>`      | `prefix_ids_end(val)`  | `prefix_ids_composite_end(prefix)` |
-/// | `>=`     | `prefix_ids_beg(val)`  | `prefix_ids_composite_end(prefix)` |
-/// | `<`      | `prefix_ids_composite_beg(prefix)` | `prefix_ids_beg(val)` |
-/// | `<=`     | `prefix_ids_composite_beg(prefix)` | `prefix_ids_end(val)` |
-///
-/// When no range is present, the scan covers the full composite prefix.
+/// When no range is present, the scan covers everything beneath `prefix`.
 fn compute_compound_key_range(
 	ns: NamespaceId,
 	db: DatabaseId,
 	ix: &IndexDefinition,
 	prefix: &[Value],
 	range: Option<&(BinaryOperator, Value)>,
-) -> Result<KeyRange<'static>> {
-	let db_prefix = DatabaseRoot {
+) -> Result<TypedRange<IndexEntryValue>> {
+	let db_prefix = DbRoot {
 		ns,
 		db,
 	};
 
 	// Returns a key which constains the prefix values, without the searched for value
 	let without_bound = || {
-		IndexPrefixUnterminated {
-			prefix: db_prefix,
+		EntryFdOpenPrefix {
+			ns: db_prefix.ns,
+			db: db_prefix.db,
 			tb: Cow::Borrowed(&ix.table_name),
 			ix: ix.index_id,
 			fd: Cow::Borrowed(prefix),
@@ -874,8 +873,9 @@ fn compute_compound_key_range(
 		let with_bound = || {
 			let mut key_values: Vec<Value> = prefix.to_vec();
 			key_values.push(val.clone());
-			IndexPrefixUnterminated {
-				prefix: db_prefix,
+			EntryFdOpenPrefix {
+				ns: db_prefix.ns,
+				db: db_prefix.db,
 				tb: Cow::Borrowed(&ix.table_name),
 				ix: ix.index_id,
 				fd: Cow::Borrowed(&key_values),
@@ -883,32 +883,33 @@ fn compute_compound_key_range(
 			.encode_bound()
 		};
 
-		match op {
-			BinaryOperator::Equal | BinaryOperator::ExactEqual => Ok(with_bound()?.prefix_expect()),
+		let key_range: KeyRange<'static> = match op {
+			BinaryOperator::Equal | BinaryOperator::ExactEqual => with_bound()?.prefix_expect(),
 			BinaryOperator::MoreThan => {
 				let start = with_bound()?.next_neighbour_expect();
 				let end = without_bound()?.next_neighbour_expect();
 
-				Ok((start..end).into())
+				(start..end).into()
 			}
 			BinaryOperator::MoreThanEqual => {
 				let start = with_bound()?;
 				let end = without_bound()?.next_neighbour_expect();
-				Ok((start..end).into())
+				(start..end).into()
 			}
 			BinaryOperator::LessThan => {
 				let start = without_bound()?;
 				let end = with_bound()?;
-				Ok((start..end).into())
+				(start..end).into()
 			}
 			BinaryOperator::LessThanEqual => {
 				let start = without_bound()?;
 				let end = with_bound()?.next_neighbour_expect();
-				Ok((start..end).into())
+				(start..end).into()
 			}
-			_ => Ok(without_bound()?.prefix_expect()),
-		}
+			_ => without_bound()?.prefix_expect(),
+		};
+		Ok(entry_range(ns, db, ix, key_range))
 	} else {
-		Ok(without_bound()?.prefix_expect())
+		Ok(entry_range(ns, db, ix, without_bound()?.prefix_expect()))
 	}
 }

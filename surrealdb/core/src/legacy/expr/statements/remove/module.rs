@@ -9,6 +9,7 @@ use crate::dbs::Options;
 use crate::expr::Base;
 use crate::expr::statements::remove::module::RemoveModuleStatement;
 use crate::iam::{Action, ResourceKind};
+use crate::key::schema::ModuleKey;
 #[cfg(feature = "surrealism")]
 use crate::surrealism::cache::SurrealismCacheLookup;
 use crate::val::Value;
@@ -38,11 +39,9 @@ pub(crate) async fn remove_module_statement_compute(
 		}
 	};
 	// Delete the definition
-	let key = crate::key::database::md::Md {
-		prefix: crate::key::database::all::DatabaseRoot {
-			ns,
-			db,
-		},
+	let key = ModuleKey {
+		ns,
+		db,
 		md: std::borrow::Cow::Borrowed(&storage_name),
 	};
 	txn.del_key(&key).await?;

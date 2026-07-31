@@ -21,6 +21,7 @@ use crate::expr::statements::define::index::DefineIndexStatement;
 use crate::expr::{Base, Idiom, Part};
 use crate::iam::{Action, ResourceKind};
 use crate::idx::docids::TableDocIds;
+use crate::key::schema::TableKey;
 use crate::kvs::index::{IndexBuilder, retire_durable_index};
 use crate::kvs::{DatastoreError, Transaction};
 use crate::legacy::{expr_to_ident, exprs_to_fields};
@@ -220,11 +221,9 @@ pub(crate) async fn define_index_statement_compute(
 		// rolls back, and it re-evaluates the decision on retry as the sole
 		// remaining replacer. On conflict-serializing backends the `put_tb`
 		// write already serializes them.
-		let tb_key = crate::key::database::tb::TableKey {
-			prefix: crate::key::database::all::DatabaseRoot {
-				ns: tb.namespace_id,
-				db: tb.database_id,
-			},
+		let tb_key = TableKey {
+			ns: tb.namespace_id,
+			db: tb.database_id,
 			tb: std::borrow::Cow::Borrowed(&tb_name),
 		};
 		let _ = txn.get_key(&tb_key, None).await?;

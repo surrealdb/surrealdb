@@ -9,6 +9,7 @@ use crate::doc::CursorDoc;
 use crate::expr::Base;
 use crate::expr::statements::remove::analyzer::RemoveAnalyzerStatement;
 use crate::iam::{Action, ResourceKind};
+use crate::key::schema::AnalyzerKey;
 use crate::legacy::expr_to_ident;
 use crate::val::Value;
 
@@ -56,11 +57,9 @@ pub(crate) async fn remove_analyzer_statement_compute(
 		}
 	}
 	// Delete the definition
-	let key = crate::key::database::az::Analyzer {
-		prefix: crate::key::database::all::DatabaseRoot {
-			ns,
-			db,
-		},
+	let key = AnalyzerKey {
+		ns,
+		db,
 		az: std::borrow::Cow::Borrowed(&az.name),
 	};
 	txn.del_key(&key).await?;

@@ -13,7 +13,7 @@ use crate::expr::Base;
 use crate::expr::statements::alter::AlterKind;
 use crate::expr::statements::alter::param::AlterParamStatement;
 use crate::iam::{Action, ResourceKind};
-use crate::key::database::all::DatabaseRoot;
+use crate::key::schema::ParamKey;
 use crate::val::Value;
 
 #[instrument(level = "trace", name = "AlterParamStatement::compute", skip_all)]
@@ -56,11 +56,9 @@ pub(crate) async fn alter_param_statement_compute(
 		pa.permissions = p.clone();
 	}
 
-	let key = crate::key::database::pa::Pa {
-		prefix: DatabaseRoot {
-			ns,
-			db,
-		},
+	let key = ParamKey {
+		ns,
+		db,
 		pa: Cow::Borrowed(&this.name),
 	};
 	txn.set_key(&key, &pa.to_stored()).await?;

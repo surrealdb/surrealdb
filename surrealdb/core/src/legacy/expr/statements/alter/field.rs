@@ -17,7 +17,7 @@ use crate::expr::statements::alter::AlterKind;
 use crate::expr::statements::alter::field::{AlterDefault, AlterFieldStatement};
 use crate::expr::statements::define::kind_contains_object;
 use crate::iam::{Action, AuthLimit, ResourceKind};
-use crate::key::database::all::DatabaseRoot;
+use crate::key::schema::FieldKey;
 use crate::legacy::{expr_to_ident, expr_to_idiom};
 use crate::val::{TableName, Value};
 
@@ -138,11 +138,9 @@ pub(crate) async fn alter_field_statement_compute(
 		);
 	}
 
-	let key = crate::key::table::fd::Fd {
-		prefix: DatabaseRoot {
-			ns,
-			db,
-		},
+	let key = FieldKey {
+		ns,
+		db,
 		tb: Cow::Borrowed(&what),
 		fd: Cow::Borrowed(&name),
 	};

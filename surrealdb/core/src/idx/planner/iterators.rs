@@ -13,13 +13,18 @@ use crate::ctx::FrozenContext;
 use crate::err::EngineError;
 use crate::expr::BinaryOperator;
 use crate::idx::docids::DocId;
+use crate::idx::entry::IndexEntryValue;
 use crate::idx::ft::fulltext::FullTextHitsIterator;
+use crate::idx::planner::ScanDirection;
 use crate::idx::planner::tree::IndexReference;
 use crate::idx::{IndexKeyBase, bump_compaction_generation, read_compaction_generation};
-use crate::key::database::all::DatabaseRoot;
-use crate::key::index::iu::IndexCountKey;
-use crate::key::index::{IndexPrefix, IndexPrefixTerminated, IndexPrefixUnterminated, UniqueIndex};
-use crate::key::{KVKey, KVKeyDecode, KVRange, KeyRange};
+use crate::key::schema::{
+	DbRoot, EntryFdOpenPrefix, EntryFdPrefix, EntryPrefix, IndexCountKey, IndexCountPrefix,
+	UniqueKey,
+};
+use crate::key::{
+	AnyRange, KVKey, KVKeyDecode, KVRange, KVSubspace, KeyRange, Resumable, TypedRange,
+};
 use crate::kvs::util::{scan, scan_keys, scanr, scanr_keys};
 use crate::kvs::{COUNT_BATCH_SIZE, Transaction};
 use crate::val::{Array, RecordId, TableName, Value};
@@ -247,7 +252,7 @@ impl IndexItemRecord {
 
 pub(crate) struct IndexEqualThingIterator {
 	irf: IteratorRef,
-	range: KeyRange<'static>,
+	range: TypedRange<IndexEntryValue>,
 }
 
 impl IndexEqualThingIterator {
@@ -265,43 +270,39 @@ impl IndexEqualThingIterator {
 		})
 	}
 
-	/// Computes the begin and end keys for scanning an equality index.
+	/// Computes the range to scan for an equality lookup on an index.
 	///
 	/// For single-column indexes, uses simple prefix key generation.
 	/// For composite indexes (multiple columns), uses composite key generation
 	/// which handles the ordering and encoding of multiple index values.
 	///
-	/// Returns a tuple of (begin_key, end_key) that defines the scan range
-	/// for finding all records that exactly match the provided array values.
+	/// The returned range covers every entry that exactly matches the provided
+	/// array values.
 	fn get_beg_end(
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
 		fd: &[Value],
-	) -> Result<KeyRange<'static>> {
+	) -> Result<TypedRange<IndexEntryValue>> {
 		if ix.cols.len() == 1 {
 			// Single column index: straightforward key prefix generation
-			IndexPrefixTerminated {
-				prefix: DatabaseRoot {
-					ns,
-					db,
-				},
+			EntryFdPrefix {
+				ns,
+				db,
 				tb: Cow::Borrowed(&ix.table_name),
 				ix: ix.index_id,
 				fd: Cow::Borrowed(fd),
 			}
-			.encode_range()
+			.range()
 		} else {
-			IndexPrefixUnterminated {
-				prefix: DatabaseRoot {
-					ns,
-					db,
-				},
+			EntryFdOpenPrefix {
+				ns,
+				db,
 				tb: Cow::Borrowed(&ix.table_name),
 				ix: ix.index_id,
 				fd: Cow::Borrowed(fd),
 			}
-			.encode_range()
+			.range()
 		}
 	}
 
@@ -321,7 +322,7 @@ impl IndexEqualThingIterator {
 
 pub(crate) struct IndexRangeThingIterator {
 	irf: IteratorRef,
-	r: KeyRange<'static>,
+	r: TypedRange<IndexEntryValue>,
 }
 
 impl IndexRangeThingIterator {
@@ -461,7 +462,7 @@ impl IndexRangeThingIterator {
 		ix: &IndexDefinition,
 		from: Bound<&Value>,
 		to: Bound<&Value>,
-	) -> Result<KeyRange<'static>> {
+	) -> Result<TypedRange<IndexEntryValue>> {
 		crate::idx::keys::compute_index_range(ns, db, ix, from, to)
 	}
 
@@ -479,13 +480,11 @@ impl IndexRangeThingIterator {
 		value_prefix: &[Value],
 		from: Bound<&Value>,
 		to: Bound<&Value>,
-	) -> Result<KeyRange<'static>> {
+	) -> Result<TypedRange<IndexEntryValue>> {
 		let unterminated_bound = |value_prefix: &[Value]| {
-			IndexPrefixUnterminated {
-				prefix: DatabaseRoot {
-					ns,
-					db,
-				},
+			EntryFdOpenPrefix {
+				ns,
+				db,
 				tb: Cow::Borrowed(&ix.table_name),
 				ix: ix.index_id,
 				fd: Cow::Borrowed(value_prefix),
@@ -494,11 +493,9 @@ impl IndexRangeThingIterator {
 		};
 
 		let terminated_bound = |value_prefix: &[Value]| {
-			IndexPrefixTerminated {
-				prefix: DatabaseRoot {
-					ns,
-					db,
-				},
+			EntryFdPrefix {
+				ns,
+				db,
 				tb: Cow::Borrowed(&ix.table_name),
 				ix: ix.index_id,
 				fd: Cow::Borrowed(value_prefix),
@@ -536,10 +533,19 @@ impl IndexRangeThingIterator {
 			Bound::Unbounded => unterminated_bound(value_prefix)?.next_neighbour_expect(),
 		};
 
-		Ok(KeyRange {
+		// The boundaries narrow the open bound over `value_prefix`, which is what the
+		// range is a slice of.
+		Ok(EntryFdOpenPrefix {
+			ns,
+			db,
+			tb: Cow::Borrowed(&ix.table_name),
+			ix: ix.index_id,
+			fd: Cow::Borrowed(value_prefix),
+		}
+		.typed(KeyRange {
 			start,
 			end,
-		})
+		}))
 	}
 
 	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction, limit: u32) -> Result<B> {
@@ -559,7 +565,7 @@ impl IndexRangeThingIterator {
 
 pub(crate) struct IndexRangeReverseThingIterator {
 	irf: IteratorRef,
-	r: KeyRange<'static>,
+	r: TypedRange<IndexEntryValue>,
 }
 
 impl IndexRangeReverseThingIterator {
@@ -604,7 +610,8 @@ impl IndexRangeReverseThingIterator {
 
 pub(crate) struct IndexUnionThingIterator {
 	irf: IteratorRef,
-	ranges: Vec<KeyRange<'static>>,
+	/// One range per value, each narrowed to what is left of its scan.
+	ranges: Vec<TypedRange<IndexEntryValue>>,
 }
 
 impl IndexUnionThingIterator {
@@ -653,7 +660,8 @@ impl IndexUnionThingIterator {
 				res.add_key(revision::from_slice(&v)?, self.irf.into());
 			}
 
-			if last.is_empty() {
+			// The scan narrows the range to nothing once it has drained it.
+			if last.clone().into_key_range().is_empty() {
 				self.ranges.pop();
 			}
 
@@ -684,7 +692,8 @@ impl IndexUnionThingIterator {
 
 			count += s.len();
 
-			if last.is_empty() {
+			// The scan narrows the range to nothing once it has drained it.
+			if last.clone().into_key_range().is_empty() {
 				self.ranges.pop();
 			}
 
@@ -865,7 +874,7 @@ impl IndexJoinThingIterator {
 /// suffix), so they require a prefix range scan instead of a point-get.
 pub(crate) struct UniqueEqualThingIterator {
 	irf: IteratorRef,
-	range: KeyRange<'static>,
+	range: TypedRange<IndexEntryValue>,
 }
 
 impl UniqueEqualThingIterator {
@@ -877,29 +886,37 @@ impl UniqueEqualThingIterator {
 		a: &Array,
 	) -> Result<Self> {
 		let inner = if a.is_any_none_or_null() {
-			IndexPrefixTerminated {
-				prefix: DatabaseRoot {
-					ns,
-					db,
-				},
+			EntryFdPrefix {
+				ns,
+				db,
 				tb: Cow::Borrowed(&ix.table_name),
 				ix: ix.index_id,
 				fd: Cow::Borrowed(a),
 			}
-			.encode_range()?
+			.range()?
 		} else {
-			let key = UniqueIndex {
-				prefix: DatabaseRoot {
-					ns,
-					db,
-				},
+			let bound = EntryFdPrefix {
+				ns,
+				db,
+				tb: Cow::Borrowed(&ix.table_name),
+				ix: ix.index_id,
+				fd: Cow::Borrowed(a),
+			};
+			let key = UniqueKey {
+				ns,
+				db,
 				tb: Cow::Borrowed(&ix.table_name),
 				ix: ix.index_id,
 				fd: Cow::Borrowed(a),
 			}
 			.encode_key()?;
 			let next = key.as_borrowed().next();
-			(key..next).into()
+			// The one key the unique tuple maps to, as a slice of the bound over
+			// that tuple.
+			bound.typed(KeyRange {
+				start: key,
+				end: next,
+			})
 		};
 		Ok(Self {
 			irf,
@@ -924,7 +941,7 @@ impl UniqueEqualThingIterator {
 
 pub(crate) struct UniqueRangeThingIterator {
 	irf: IteratorRef,
-	r: KeyRange<'static>,
+	r: TypedRange<IndexEntryValue>,
 }
 
 impl UniqueRangeThingIterator {
@@ -934,8 +951,8 @@ impl UniqueRangeThingIterator {
 		ix: &IndexDefinition,
 		from: Bound<&Value>,
 		to: Bound<&Value>,
-	) -> Result<KeyRange<'static>> {
-		let prefix = DatabaseRoot {
+	) -> Result<TypedRange<IndexEntryValue>> {
+		let prefix = DbRoot {
 			ns,
 			db,
 		};
@@ -943,16 +960,18 @@ impl UniqueRangeThingIterator {
 			Bound::Included(x) => {
 				let slice = slice::from_ref(x);
 				if x.is_nullish() {
-					IndexPrefixUnterminated {
-						prefix,
+					EntryFdOpenPrefix {
+						ns: prefix.ns,
+						db: prefix.db,
 						tb: Cow::Borrowed(&ix.table_name),
 						ix: ix.index_id,
 						fd: Cow::Borrowed(slice),
 					}
 					.encode_bound()?
 				} else {
-					UniqueIndex {
-						prefix,
+					UniqueKey {
+						ns: prefix.ns,
+						db: prefix.db,
 						tb: Cow::Borrowed(&ix.table_name),
 						ix: ix.index_id,
 						fd: Cow::Borrowed(slice),
@@ -963,8 +982,9 @@ impl UniqueRangeThingIterator {
 			Bound::Excluded(x) => {
 				let slice = slice::from_ref(x);
 				if x.is_nullish() {
-					IndexPrefixUnterminated {
-						prefix,
+					EntryFdOpenPrefix {
+						ns: prefix.ns,
+						db: prefix.db,
 						tb: Cow::Borrowed(&ix.table_name),
 						ix: ix.index_id,
 						fd: Cow::Borrowed(slice),
@@ -972,8 +992,9 @@ impl UniqueRangeThingIterator {
 					.encode_bound()?
 					.next_neighbour_expect()
 				} else {
-					UniqueIndex {
-						prefix,
+					UniqueKey {
+						ns: prefix.ns,
+						db: prefix.db,
 						tb: Cow::Borrowed(&ix.table_name),
 						ix: ix.index_id,
 						fd: Cow::Borrowed(slice),
@@ -982,8 +1003,9 @@ impl UniqueRangeThingIterator {
 					.next_neighbour_expect()
 				}
 			}
-			Bound::Unbounded => IndexPrefix {
-				prefix,
+			Bound::Unbounded => EntryPrefix {
+				ns: prefix.ns,
+				db: prefix.db,
 				tb: Cow::Borrowed(&ix.table_name),
 				ix: ix.index_id,
 			}
@@ -994,8 +1016,9 @@ impl UniqueRangeThingIterator {
 			Bound::Included(x) => {
 				let slice = slice::from_ref(x);
 				if x.is_nullish() {
-					IndexPrefixUnterminated {
-						prefix,
+					EntryFdOpenPrefix {
+						ns: prefix.ns,
+						db: prefix.db,
 						tb: Cow::Borrowed(&ix.table_name),
 						ix: ix.index_id,
 						fd: Cow::Borrowed(slice),
@@ -1003,8 +1026,9 @@ impl UniqueRangeThingIterator {
 					.encode_bound()?
 					.next_neighbour_expect()
 				} else {
-					UniqueIndex {
-						prefix,
+					UniqueKey {
+						ns: prefix.ns,
+						db: prefix.db,
 						tb: Cow::Borrowed(&ix.table_name),
 						ix: ix.index_id,
 						fd: Cow::Borrowed(slice),
@@ -1016,16 +1040,18 @@ impl UniqueRangeThingIterator {
 			Bound::Excluded(x) => {
 				let slice = slice::from_ref(x);
 				if x.is_nullish() {
-					IndexPrefixUnterminated {
-						prefix,
+					EntryFdOpenPrefix {
+						ns: prefix.ns,
+						db: prefix.db,
 						tb: Cow::Borrowed(&ix.table_name),
 						ix: ix.index_id,
 						fd: Cow::Borrowed(slice),
 					}
 					.encode_bound()?
 				} else {
-					UniqueIndex {
-						prefix,
+					UniqueKey {
+						ns: prefix.ns,
+						db: prefix.db,
 						tb: Cow::Borrowed(&ix.table_name),
 						ix: ix.index_id,
 						fd: Cow::Borrowed(slice),
@@ -1033,8 +1059,9 @@ impl UniqueRangeThingIterator {
 					.encode_key()?
 				}
 			}
-			Bound::Unbounded => IndexPrefix {
-				prefix,
+			Bound::Unbounded => EntryPrefix {
+				ns: prefix.ns,
+				db: prefix.db,
 				tb: Cow::Borrowed(&ix.table_name),
 				ix: ix.index_id,
 			}
@@ -1042,10 +1069,18 @@ impl UniqueRangeThingIterator {
 			.next_neighbour_expect(),
 		};
 
-		Ok(KeyRange {
+		// The boundaries narrow the index's entry bound, which is what the range is
+		// a slice of.
+		Ok(EntryPrefix {
+			ns: prefix.ns,
+			db: prefix.db,
+			tb: Cow::Borrowed(&ix.table_name),
+			ix: ix.index_id,
+		}
+		.typed(KeyRange {
 			start,
 			end,
-		})
+		}))
 	}
 
 	pub(super) fn new(
@@ -1107,7 +1142,7 @@ impl UniqueRangeThingIterator {
 
 pub(crate) struct UniqueRangeReverseThingIterator {
 	irf: IteratorRef,
-	r: KeyRange<'static>,
+	r: TypedRange<IndexEntryValue>,
 }
 
 impl UniqueRangeReverseThingIterator {
@@ -1154,7 +1189,8 @@ impl UniqueRangeReverseThingIterator {
 
 pub(crate) struct UniqueUnionThingIterator {
 	irf: IteratorRef,
-	entries: Vec<KeyRange<'static>>,
+	/// One range per value, each narrowed to what is left of its scan.
+	entries: Vec<TypedRange<IndexEntryValue>>,
 }
 
 impl UniqueUnionThingIterator {
@@ -1169,23 +1205,19 @@ impl UniqueUnionThingIterator {
 		// Iterate in reverse, so that the ranges end up in reverse order and can then be popped in
 		// the right order from the vec.
 		for fd in fds.iter().rev() {
+			let bound = EntryFdPrefix {
+				ns,
+				db,
+				tb: Cow::Borrowed(&ix.table_name),
+				ix: ix.index_id,
+				fd: Cow::Borrowed(fd),
+			};
 			if fd.is_any_none_or_null() {
-				let bound = IndexPrefixTerminated {
-					prefix: DatabaseRoot {
-						ns,
-						db,
-					},
-					tb: Cow::Borrowed(&ix.table_name),
-					ix: ix.index_id,
-					fd: Cow::Borrowed(fd),
-				};
-				entries.push(bound.encode_range()?)
+				entries.push(bound.range()?)
 			} else {
-				let start = UniqueIndex {
-					prefix: DatabaseRoot {
-						ns,
-						db,
-					},
+				let start = UniqueKey {
+					ns,
+					db,
 					tb: Cow::Borrowed(&ix.table_name),
 					ix: ix.index_id,
 					fd: Cow::Borrowed(fd),
@@ -1193,10 +1225,12 @@ impl UniqueUnionThingIterator {
 				.encode_key()?;
 				let end = start.as_borrowed().next();
 
-				entries.push(KeyRange {
+				// The one key the unique tuple maps to, as a slice of the bound
+				// over that tuple.
+				entries.push(bound.typed(KeyRange {
 					start,
 					end,
-				});
+				}));
 			}
 		}
 		Ok(Self {
@@ -1229,7 +1263,8 @@ impl UniqueUnionThingIterator {
 				results.add_key(rid, self.irf.into());
 			}
 
-			if next.is_empty() {
+			// The scan narrows the range to nothing once it has drained it.
+			if next.clone().into_key_range().is_empty() {
 				self.entries.pop();
 			}
 
@@ -1259,7 +1294,8 @@ impl UniqueUnionThingIterator {
 
 			res += keys.len() as usize;
 
-			if next.is_empty() {
+			// The scan narrows the range to nothing once it has drained it.
+			if next.clone().into_key_range().is_empty() {
 				self.entries.pop();
 			}
 
@@ -1457,7 +1493,7 @@ impl KnnIterator {
 	}
 }
 
-pub(crate) struct IndexCountThingIterator(Option<crate::key::KeyRange<'static>>);
+pub(crate) struct IndexCountThingIterator(Option<TypedRange<()>>);
 
 /// Snapshot gathered by the read phase of count-index compaction.
 ///
@@ -1493,15 +1529,13 @@ impl IndexCountThingIterator {
 		ix: IndexId,
 	) -> Result<Self> {
 		Ok(Self(Some(
-			crate::key::index::iu::IndexPrefix {
-				prefix: DatabaseRoot {
-					ns,
-					db,
-				},
+			IndexCountPrefix {
+				ns,
+				db,
 				tb: std::borrow::Cow::Borrowed(tb),
 				ix,
 			}
-			.encode_range()?,
+			.range()?,
 		)))
 	}
 
@@ -1516,7 +1550,7 @@ impl IndexCountThingIterator {
 			let mut loops = 0;
 			let mut current_range = Some(range);
 			while let Some(range) = current_range {
-				let batch = txn.batch_keys(range, COUNT_BATCH_SIZE, None).await?;
+				let batch = txn.batch_keys(range.clone(), COUNT_BATCH_SIZE, None).await?;
 				for key in batch.result.iter() {
 					loops += 1;
 					ctx.is_done(Some(loops)).await?;
@@ -1527,7 +1561,14 @@ impl IndexCountThingIterator {
 						count -= iu.count as i64;
 					}
 				}
-				current_range = batch.next;
+				// A continuation means the page was full, so the next one picks up
+				// after the last key this one returned.
+				current_range = match batch.result.last() {
+					Some(last) if batch.next.is_some() => {
+						Some(range.resume_after(last, ScanDirection::Forward))
+					}
+					_ => None,
+				};
 				ctx.is_done(None).await?;
 			}
 			Ok(count as usize)
@@ -1571,7 +1612,7 @@ impl IndexCountThingIterator {
 		let mut current_range = Some(range.clone());
 		let limit = limit.max(1);
 		while let Some(r) = current_range.take() {
-			let batch = txn.batch_keys(r, limit.saturating_add(1), None).await?;
+			let batch = txn.batch_keys(r.clone(), limit.saturating_add(1), None).await?;
 			for key in batch.result.iter() {
 				loops += 1;
 				if loops % 1000 == 0 {
@@ -1597,7 +1638,14 @@ impl IndexCountThingIterator {
 			if has_more {
 				break;
 			}
-			current_range = batch.next;
+			// A continuation means the page was full, so the next one picks up after
+			// the last key this one returned.
+			current_range = match batch.result.last() {
+				Some(last) if batch.next.is_some() => {
+					Some(r.resume_after(last, ScanDirection::Forward))
+				}
+				_ => None,
+			};
 		}
 		has_more |= current_range.is_some();
 		Ok(IndexCountCompactionPlan {
@@ -1629,10 +1677,8 @@ impl IndexCountThingIterator {
 		let pos = count.is_positive();
 		let count = count.unsigned_abs();
 		let compact_key = IndexCountKey {
-			prefix: DatabaseRoot {
-				ns: ikb.ns(),
-				db: ikb.db(),
-			},
+			ns: ikb.ns(),
+			db: ikb.db(),
 			tb: std::borrow::Cow::Borrowed(ikb.table()),
 			ix: ikb.index(),
 			uid: None,
@@ -1662,7 +1708,7 @@ mod tests {
 	use super::*;
 	use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 	use crate::idx::IndexKeyBase;
-	use crate::key::index::iu::IndexCountKey;
+	use crate::key::schema::IndexCountKey;
 	use crate::kvs::Datastore;
 	use crate::kvs::TransactionType::{Read, Write};
 
@@ -1676,10 +1722,8 @@ mod tests {
 		count: u64,
 	) -> IndexCountKey<'a> {
 		IndexCountKey {
-			prefix: crate::key::database::all::DatabaseRoot {
-				ns,
-				db,
-			},
+			ns,
+			db,
 			tb: std::borrow::Cow::Borrowed(tb),
 			ix,
 			uid,
@@ -1688,21 +1732,14 @@ mod tests {
 		}
 	}
 
-	fn count_range(
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &TableName,
-		ix: IndexId,
-	) -> crate::key::KeyRange<'static> {
-		crate::key::index::iu::IndexPrefix {
-			prefix: crate::key::database::all::DatabaseRoot {
-				ns,
-				db,
-			},
+	fn count_range(ns: NamespaceId, db: DatabaseId, tb: &TableName, ix: IndexId) -> TypedRange<()> {
+		IndexCountPrefix {
+			ns,
+			db,
 			tb: std::borrow::Cow::Borrowed(tb),
 			ix,
 		}
-		.encode_range()
+		.range()
 		.unwrap()
 	}
 

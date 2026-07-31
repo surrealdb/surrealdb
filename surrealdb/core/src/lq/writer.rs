@@ -23,7 +23,8 @@ struct BufferKey {
 }
 
 /// Per-transaction buffer of live-query events, flushed to the dedicated
-/// [`crate::key::lqe`] keyspace at commit time.
+/// live-events keyspace ([`LiveEventsKey`](crate::key::schema::LiveEventsKey)) at
+/// commit time.
 ///
 /// This deliberately mirrors [`crate::cf::Changefeed`] but is a separate buffer
 /// writing a separate keyspace with a purpose-built value, so live queries and

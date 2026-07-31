@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::expr::Base;
 use crate::expr::statements::alter::database::AlterDatabaseStatement;
 use crate::iam::{Action, ResourceKind};
+use crate::key::schema::DbRoot;
 use crate::val::Value;
 
 /// Computes the effect of the `ALTER DATABASE` statement.
@@ -22,7 +23,7 @@ pub(crate) async fn alter_database_statement_compute(
 	let (namespace_id, database_id) = ctx.expect_ns_db_ids(opt).await?;
 	// Do we request compacting?
 	if this.compact {
-		let database_root = crate::key::database::all::DatabaseRoot {
+		let database_root = DbRoot {
 			ns: namespace_id,
 			db: database_id,
 		};

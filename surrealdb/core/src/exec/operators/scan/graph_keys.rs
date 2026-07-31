@@ -17,12 +17,12 @@ use super::common::evaluate_bound_key;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::exec::{ControlFlowExt, ExecutionContext, PhysicalExpr};
 use crate::expr::{ControlFlow, Dir};
-use crate::key::database::all::DatabaseRoot;
+use crate::key::TypedRange;
 /// Adjacency key decode result, re-exported so callers of [`decode_graph_edge`]
 /// don't need to reach into the `key::graph` module directly.
-pub(crate) use crate::key::graph::DecodedGraph;
-use crate::key::{KVKey, KVRange, KeyRange};
-use crate::val::{RecordId, TableName};
+pub(crate) use crate::key::schema::DecodedGraph;
+use crate::key::schema::{GraphDirPrefix, GraphForeignTablePrefix};
+use crate::val::{RecordId, RecordIdKey, TableName};
 
 /// Specification for an edge table to scan, optionally with ID range bounds.
 ///
@@ -50,137 +50,66 @@ pub(crate) async fn compute_graph_ranges(
 	dir: Dir,
 	edge_tables: &[EdgeTableSpec],
 	ctx: &ExecutionContext,
-) -> Result<Vec<KeyRange<'static>>, ControlFlow> {
+) -> Result<Vec<TypedRange<()>>, ControlFlow> {
 	if edge_tables.is_empty() {
 		// Scan all edges in this direction
 		Ok(vec![
-			crate::key::graph::PrefixDir {
-				prefix: DatabaseRoot {
-					ns: ns_id,
-					db: db_id,
-				},
+			GraphDirPrefix {
+				ns: ns_id,
+				db: db_id,
 				tb: Cow::Borrowed(&rid.table),
 				id: Cow::Borrowed(&rid.key),
 				dir,
 			}
-			.encode_range()?,
+			.range()?,
 		])
 	} else {
 		let mut ranges = Vec::with_capacity(edge_tables.len());
 		for spec in edge_tables {
-			let start = match &spec.range_start {
-				Bound::Included(expr) => {
-					let fk = evaluate_bound_key(expr, ctx).await?;
-					crate::key::graph::Graph {
-						prefix: DatabaseRoot {
-							ns: ns_id,
-							db: db_id,
-						},
-						tb: Cow::Borrowed(&rid.table),
-						id: Cow::Borrowed(&rid.key),
-						dir,
-						foreign_table: Cow::Borrowed(&spec.table),
-						foreign_key: Cow::Owned(fk),
-					}
-					.encode_key()?
-				}
-				Bound::Excluded(expr) => {
-					let fk = evaluate_bound_key(expr, ctx).await?;
+			// The spec's bounds constrain the edge's foreign key, the field that
+			// follows the foreign table in the adjacency layout, so the range is
+			// cut on that field of the foreign-table bound.
+			let start = eval_fk_bound(&spec.range_start, ctx).await?;
+			let end = eval_fk_bound(&spec.range_end, ctx).await?;
 
-					crate::key::graph::Graph {
-						prefix: DatabaseRoot {
-							ns: ns_id,
-							db: db_id,
-						},
-						tb: Cow::Borrowed(&rid.table),
-						id: Cow::Borrowed(&rid.key),
-						dir,
-						foreign_table: Cow::Borrowed(&spec.table),
-						foreign_key: Cow::Owned(fk),
-					}
-					.encode_key()?
-					// We need next_neighbour because this key is only a prefix of the actual
-					// key stored in the KV store, next_neighbour will skip over any key which
-					// has this key as a prefix.
-					.next_neighbour_expect()
-				}
-				Bound::Unbounded => crate::key::graph::PrefixFt {
-					prefix: DatabaseRoot {
-						ns: ns_id,
-						db: db_id,
-					},
+			ranges.push(
+				GraphForeignTablePrefix {
+					ns: ns_id,
+					db: db_id,
 					tb: Cow::Borrowed(&rid.table),
 					id: Cow::Borrowed(&rid.key),
 					dir,
-					foreign_table: Cow::Borrowed(spec.table.as_str()),
+					foreign_table: Cow::Borrowed(&spec.table),
 				}
-				.encode_bound()?,
-			};
-
-			let end = match &spec.range_end {
-				Bound::Included(expr) => {
-					let fk = evaluate_bound_key(expr, ctx).await?;
-					crate::key::graph::Graph {
-						prefix: DatabaseRoot {
-							ns: ns_id,
-							db: db_id,
-						},
-						tb: Cow::Borrowed(&rid.table),
-						id: Cow::Borrowed(&rid.key),
-						dir,
-						foreign_table: Cow::Borrowed(&spec.table),
-						foreign_key: Cow::Owned(fk),
-					}
-					.encode_key()?
-					// We need next_neighbour because this key is only a prefix of the actual
-					// key stored in the KV store, next_neighbour will skip over any key which
-					// has this key as a prefix.
-					.next_neighbour_expect()
-				}
-				Bound::Excluded(expr) => {
-					let fk = evaluate_bound_key(expr, ctx).await?;
-					crate::key::graph::Graph {
-						prefix: DatabaseRoot {
-							ns: ns_id,
-							db: db_id,
-						},
-						tb: Cow::Borrowed(&rid.table),
-						id: Cow::Borrowed(&rid.key),
-						dir,
-						foreign_table: Cow::Borrowed(&spec.table),
-						foreign_key: Cow::Owned(fk),
-					}
-					.encode_key()?
-				}
-				Bound::Unbounded => crate::key::graph::PrefixFt {
-					prefix: DatabaseRoot {
-						ns: ns_id,
-						db: db_id,
-					},
-					tb: Cow::Borrowed(&rid.table),
-					id: Cow::Borrowed(&rid.key),
-					dir,
-					foreign_table: Cow::Borrowed(spec.table.as_str()),
-				}
-				.encode_bound()?
-				.next_neighbour_expect(),
-			};
-
-			ranges.push(KeyRange {
-				start,
-				end,
-			});
+				.range_where((start.map(Cow::Owned), end.map(Cow::Owned)))?,
+			);
 		}
 		Ok(ranges)
 	}
 }
 
+/// Evaluate one [`EdgeTableSpec`] bound into the foreign-key bound a graph range
+/// is cut on.
+///
+/// The bound kind carries over unchanged; only the expression inside it is
+/// evaluated, so an inclusive spec bound stays inclusive on the key.
+async fn eval_fk_bound(
+	bound: &Bound<Arc<dyn PhysicalExpr>>,
+	ctx: &ExecutionContext,
+) -> Result<Bound<RecordIdKey>, ControlFlow> {
+	Ok(match bound {
+		Bound::Included(expr) => Bound::Included(evaluate_bound_key(expr, ctx).await?),
+		Bound::Excluded(expr) => Bound::Excluded(evaluate_bound_key(expr, ctx).await?),
+		Bound::Unbounded => Bound::Unbounded,
+	})
+}
+
 /// Decode a graph key. For legacy keys, returns the edge id; for new-format
 /// keys, also returns the embedded target vertex.
 ///
-/// Thin wrapper over [`crate::key::graph::Graph::decode_key`] that converts
-/// the anyhow error into a [`ControlFlow`] with a consistent context string,
-/// so call sites in the scan pipeline can stay on `?`.
+/// Thin wrapper over [`DecodedGraph::decode`] that converts the anyhow error
+/// into a [`ControlFlow`] with a consistent context string, so call sites in the
+/// scan pipeline can stay on `?`.
 pub(crate) fn decode_graph_edge(key: &[u8]) -> Result<DecodedGraph, ControlFlow> {
-	crate::key::graph::Graph::decode_graph_key(key).context("Failed to decode graph key")
+	DecodedGraph::decode(key).context("Failed to decode graph key")
 }

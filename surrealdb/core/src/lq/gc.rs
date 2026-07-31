@@ -6,8 +6,7 @@ use surrealdb_kvs::timestamp::{BoxTimeStamp, BoxTimeStampImpl};
 
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::key::database::all::DatabaseRoot;
-use crate::key::{KVRange, lqe};
+use crate::key::schema::LiveEventsPrefix;
 use crate::kvs::Transaction;
 use crate::kvs::tasklease::LeaseHandler;
 
@@ -63,23 +62,15 @@ async fn gc_range(
 	let beg_ts = ts_impl.earliest().encode(&mut buf);
 	let mut buf = [0u8; _];
 	let end_ts = ts.encode(&mut buf);
-	let beg = lqe::LqeTsRange {
-		prefix: DatabaseRoot {
-			ns,
-			db,
-		},
-		ts: Cow::Borrowed(beg_ts),
-	}
-	.encode_bound()?;
-	let end = lqe::LqeTsRange {
-		prefix: DatabaseRoot {
-			ns,
-			db,
-		},
-		ts: Cow::Borrowed(end_ts),
-	}
-	.encode_bound()?;
 
-	tx.delr((beg..end).into()).await?;
+	// Everything from the earliest timestamp up to, but not including, the
+	// watermark: events at the watermark are still inside the retention window.
+	let range = LiveEventsPrefix {
+		ns,
+		db,
+	}
+	.range_where(Cow::Borrowed(beg_ts)..Cow::Borrowed(end_ts))?;
+
+	tx.delr(range).await?;
 	Ok(())
 }

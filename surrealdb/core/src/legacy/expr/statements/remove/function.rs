@@ -7,6 +7,7 @@ use crate::dbs::Options;
 use crate::expr::Base;
 use crate::expr::statements::remove::function::RemoveFunctionStatement;
 use crate::iam::{Action, ResourceKind};
+use crate::key::schema::FunctionKey;
 use crate::val::Value;
 
 /// Process this type returning a computed simple Value
@@ -32,11 +33,9 @@ pub(crate) async fn remove_function_statement_compute(
 		}
 	};
 	// Delete the definition
-	let key = crate::key::database::fc::Fc {
-		prefix: crate::key::database::all::DatabaseRoot {
-			ns,
-			db,
-		},
+	let key = FunctionKey {
+		ns,
+		db,
 		fc: std::borrow::Cow::Borrowed(&fc.name),
 	};
 	txn.del_key(&key).await?;

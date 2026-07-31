@@ -15,7 +15,7 @@ use crate::expr::Base;
 use crate::expr::statements::alter::AlterKind;
 use crate::expr::statements::alter::event::AlterEventStatement;
 use crate::iam::{Action, AuthLimit, ResourceKind};
-use crate::key::database::all::DatabaseRoot;
+use crate::key::schema::EventKey;
 use crate::legacy::expr_to_ident;
 use crate::val::{TableName, Value};
 
@@ -71,11 +71,9 @@ pub(crate) async fn alter_event_statement_compute(
 	// Recompute auth_limit from the current principal to prevent privilege escalation
 	ev.auth_limit = AuthLimit::new_from_auth(opt.auth.as_ref()).into();
 
-	let key = crate::key::table::ev::Ev {
-		prefix: DatabaseRoot {
-			ns,
-			db,
-		},
+	let key = EventKey {
+		ns,
+		db,
 		tb: Cow::Borrowed(&what),
 		ev: Cow::Borrowed(&name),
 	};

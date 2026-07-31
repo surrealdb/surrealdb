@@ -230,7 +230,7 @@ impl Session {
 }
 
 /// The durable form of a client-attached RPC [`Session`], stored under
-/// [`crate::key::root::se::Se`] (`/!se{id}`) so the session survives the
+/// [`crate::key::schema::SessionKey`] (`/!se{id}`) so the session survives the
 /// process that attached it and is reachable from any cluster node sharing
 /// the datastore.
 ///

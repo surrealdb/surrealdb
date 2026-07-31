@@ -350,7 +350,10 @@ async fn check_retained_keys(dbs: &Datastore) -> Result<Vec<Vec<u8>>> {
 	const ALLOWED_KEY_PREFIXES: &[&[u8]] = &[b"/!ni", b"/!nh", b"/!nd", b"/!ic", b"/!tl"];
 
 	let txn = dbs.transaction(surrealdb_core::kvs::TransactionType::Read).await?;
-	let res = txn.keys(([0].as_slice()..[0xff].as_slice()).into(), 1000, 0, None).await?;
+	// The point of this check is to find keys the declared keyspace does *not*
+	// describe, which is the one scan no key bound can express.
+	let range = surrealdb_core::key::RawRange::every_key();
+	let res = txn.keys_raw(range, 1000, 0, None).await?;
 	txn.cancel().await?;
 	Ok(res
 		.into_iter()
