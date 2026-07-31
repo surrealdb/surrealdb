@@ -41,9 +41,9 @@ impl Function {
 				sub,
 			} => match sub {
 				Some(s) => {
-					Idiom::field(format!("silo::{org}::{pkg}<{major}.{minor}.{patch}>::{s}"))
+					Idiom::field(format!("silo::{org}::{pkg}::<{major}.{minor}.{patch}>::{s}"))
 				}
-				None => Idiom::field(format!("silo::{org}::{pkg}<{major}.{minor}.{patch}>")),
+				None => Idiom::field(format!("silo::{org}::{pkg}::<{major}.{minor}.{patch}>")),
 			},
 		}
 	}

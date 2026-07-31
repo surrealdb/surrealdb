@@ -70,7 +70,7 @@ impl ModuleName {
 		match self {
 			ModuleName::Module(name) => format!("mod::{}", name),
 			ModuleName::Silo(org, pkg, major, minor, patch) => {
-				format!("silo::{org}::{pkg}<{major}.{minor}.{patch}>")
+				format!("silo::{org}::{pkg}::<{major}.{minor}.{patch}>")
 			}
 		}
 	}
@@ -126,7 +126,7 @@ impl Display for ModuleName {
 		match self {
 			ModuleName::Module(name) => write!(f, "mod::{}", name),
 			ModuleName::Silo(org, pkg, major, minor, patch) => {
-				write!(f, "silo::{org}::{pkg}<{major}.{minor}.{patch}>")
+				write!(f, "silo::{org}::{pkg}::<{major}.{minor}.{patch}>")
 			}
 		}
 	}

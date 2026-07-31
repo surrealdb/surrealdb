@@ -58,6 +58,7 @@ impl Parser<'_> {
 				let org = self.parse_ident()?.into_string();
 				expected!(self, t!("::"));
 				let pkg = self.parse_ident()?.into_string();
+				expected!(self, t!("::"));
 				expected!(self, t!("<"));
 				let major = self.parse_version_digits()?;
 				expected!(self, t!("."));
@@ -202,11 +203,12 @@ impl Parser<'_> {
 		let org = self.parse_ident()?.into_string();
 		expected!(self, t!("::"));
 		let pkg = self.parse_ident()?.into_string();
-		expected!(self, t!("<"));
+		expected!(self, t!("::"));
+		expected_whitespace!(self, t!("<"));
 		let major = self.parse_version_digits()?;
-		expected!(self, t!("."));
+		expected_whitespace!(self, t!("."));
 		let minor = self.parse_version_digits()?;
-		expected!(self, t!("."));
+		expected_whitespace!(self, t!("."));
 		let patch = self.parse_version_digits()?;
 		expected!(self, t!(">"));
 		let sub = if self.eat(t!("::")) {

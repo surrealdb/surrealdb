@@ -27,7 +27,7 @@ impl StoredModuleDefinition {
 			Ok(format!("mod::{}", name))
 		} else if let ModuleExecutable::Silo(silo) = &self.executable {
 			Ok(format!(
-				"silo::{}::{}<{}.{}.{}>",
+				"silo::{}::{}::<{}.{}.{}>",
 				silo.organisation, silo.package, silo.major, silo.minor, silo.patch
 			))
 		} else {
@@ -58,7 +58,7 @@ impl ModuleDefinition {
 			Ok(format!("mod::{}", name))
 		} else if let ModuleExecutable::Silo(silo) = &self.executable {
 			Ok(format!(
-				"silo::{}::{}<{}.{}.{}>",
+				"silo::{}::{}::<{}.{}.{}>",
 				silo.organisation, silo.package, silo.major, silo.minor, silo.patch
 			))
 		} else {

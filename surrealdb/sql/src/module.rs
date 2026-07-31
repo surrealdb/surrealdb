@@ -18,7 +18,7 @@ impl ToSql for ModuleName {
 				write_sql!(
 					f,
 					fmt,
-					"silo::{}::{}<{major}.{minor}.{patch}>",
+					"silo::{}::{}::<{major}.{minor}.{patch}>",
 					EscapeKwFreeIdent(org),
 					EscapeKwFreeIdent(pkg)
 				);
@@ -68,7 +68,7 @@ impl ToSql for SiloExecutable {
 		write_sql!(
 			f,
 			fmt,
-			"silo::{}::{}<{}.{}.{}>",
+			"silo::{}::{}::<{}.{}.{}>",
 			self.organisation,
 			self.package,
 			self.major,

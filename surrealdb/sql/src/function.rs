@@ -43,9 +43,9 @@ impl Function {
 				sub,
 			} => match sub {
 				Some(s) => {
-					format!("silo::{org}::{pkg}<{major}.{minor}.{patch}>::{s}")
+					format!("silo::{org}::{pkg}::<{major}.{minor}.{patch}>::{s}")
 				}
-				None => format!("silo::{org}::{pkg}<{major}.{minor}.{patch}>"),
+				None => format!("silo::{org}::{pkg}::<{major}.{minor}.{patch}>"),
 			},
 		}
 	}
@@ -115,7 +115,7 @@ impl ToSql for FunctionCall {
 				write_sql!(
 					f,
 					fmt,
-					"silo::{}::{}<{major}.{minor}.{patch}>",
+					"silo::{}::{}::<{major}.{minor}.{patch}>",
 					EscapeKwFreeIdent(org),
 					EscapeKwFreeIdent(pkg),
 				);

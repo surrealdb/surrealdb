@@ -238,6 +238,8 @@ impl Parser<'_> {
 		&mut self,
 		stk: &mut Stk,
 	) -> ParseResult<DefineModuleStatement> {
+		use crate::parser::mac::expected_whitespace;
+
 		if !self.settings.surrealism_enabled {
 			bail!(
 				"Surrealism modules are not enabled",
@@ -272,11 +274,12 @@ impl Parser<'_> {
 				let organisation = self.parse_ident()?.into_string();
 				expected!(self, t!("::"));
 				let package = self.parse_ident()?.into_string();
-				expected!(self, t!("<"));
+				expected!(self, t!("::"));
+				expected_whitespace!(self, t!("<"));
 				let major = self.next_token_value::<u32>()?;
-				expected!(self, t!("."));
+				expected_whitespace!(self, t!("."));
 				let minor = self.next_token_value::<u32>()?;
-				expected!(self, t!("."));
+				expected_whitespace!(self, t!("."));
 				let patch = self.next_token_value::<u32>()?;
 				expected!(self, t!(">"));
 

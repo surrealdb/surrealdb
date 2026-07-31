@@ -108,17 +108,18 @@ impl Parser<'_> {
 					}
 					t!("silo") => {
 						self.pop_peek();
-						expected_whitespace!(self, t!("::"));
+						expected!(self, t!("::"));
 						let organisation = self.parse_ident()?.into_string();
-						expected_whitespace!(self, t!("::"));
+						expected!(self, t!("::"));
 						let package = self.parse_ident()?.into_string();
+						expected!(self, t!("::"));
 						expected_whitespace!(self, t!("<"));
 						let major = self.parse_version_digits()?;
 						expected_whitespace!(self, t!("."));
 						let minor = self.parse_version_digits()?;
 						expected_whitespace!(self, t!("."));
 						let patch = self.parse_version_digits()?;
-						expected_whitespace!(self, t!(">"));
+						expected!(self, t!(">"));
 						ModuleName::Silo(organisation, package, major, minor, patch)
 					}
 					_ => unexpected!(self, peek, "a module name"),

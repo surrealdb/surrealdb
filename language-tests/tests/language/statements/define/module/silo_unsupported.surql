@@ -10,9 +10,9 @@ parsing-error = """
 Surrealism modules are not enabled
   --> [18:8]
    |
-18 | DEFINE MODULE silo::acme::pkg<1.0.0>;
+18 | DEFINE MODULE silo::acme::pkg::<1.0.0>;
    |        ^^^^^^ Use of `DEFINE MODULE` requires Surrealism modules
 """
 */
 
-DEFINE MODULE silo::acme::pkg<1.0.0>;
+DEFINE MODULE silo::acme::pkg::<1.0.0>;

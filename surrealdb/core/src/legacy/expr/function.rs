@@ -146,7 +146,7 @@ pub(crate) async fn function_compute(
 			patch,
 			sub,
 		} => {
-			let mod_name = format!("silo::{org}::{pkg}<{major}.{minor}.{patch}>");
+			let mod_name = format!("silo::{org}::{pkg}::<{major}.{minor}.{patch}>");
 			let fnc_name = match sub {
 				Some(sub) => format!("{mod_name}::{sub}"),
 				None => mod_name.clone(),

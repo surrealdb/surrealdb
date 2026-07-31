@@ -225,7 +225,7 @@ impl PhysicalExpr for SiloModuleExec {
 	fn evaluate<'a>(&'a self, _ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
 		Box::pin(async move {
 			let name = format!(
-				"silo::{}::{}<{}.{}.{}>",
+				"silo::{}::{}::<{}.{}.{}>",
 				self.org, self.pkg, self.major, self.minor, self.patch
 			);
 			Err(anyhow::anyhow!(
@@ -252,6 +252,7 @@ impl ToSql for SiloModuleExec {
 		f.push_str(&self.org);
 		f.push_str("::");
 		f.push_str(&self.pkg);
+		f.push_str("::");
 		f.push('<');
 		f.push_str(&self.major.to_string());
 		f.push('.');
