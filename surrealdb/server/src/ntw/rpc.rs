@@ -164,7 +164,7 @@ async fn post_handler(
 		return Err(NetError::ForbiddenRoute(RouteTarget::Rpc.to_string()).into());
 	}
 
-	let rec_limit = db.config().max_object_parsing_depth as usize;
+	let rec_limit = db.parser_config().max_object_parsing_depth as usize;
 	// Get the input format from the Content-Type header
 	let fmt: Format = (&content_type).into();
 	// Check that the input format is a valid format

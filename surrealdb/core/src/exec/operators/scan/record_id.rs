@@ -345,7 +345,7 @@ pub(crate) async fn execute_record_lookup(
 				pre_decode_filter_status,
 				&field_state,
 				check_perms,
-				ctx.ctx().config.idiom_recursion_limit,
+				ctx.ctx().config.exec.idiom_recursion_limit,
 			);
 
 			let mut source = kv_scan_stream(

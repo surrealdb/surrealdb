@@ -1,3 +1,4 @@
+pub(crate) mod config;
 pub mod docids;
 pub(crate) mod entry;
 pub(crate) mod error;

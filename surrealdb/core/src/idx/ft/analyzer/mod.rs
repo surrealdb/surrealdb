@@ -187,11 +187,10 @@ impl Analyzer {
 mod tests {
 	use std::sync::Arc;
 
-	use surrealdb_cnf::CommonConfig;
-
 	use super::Analyzer;
 	use crate::ctx::Context;
 	use crate::dbs::Options;
+	use crate::exec::config::ExecConfig;
 	use crate::expr::DefineAnalyzerStatement;
 	use crate::idx::ft::analyzer::filter::FilteringStage;
 	use crate::idx::ft::analyzer::tokenizer::{Token, Tokens};
@@ -217,7 +216,7 @@ mod tests {
 
 		let mut stack = reblessive::TreeStack::new();
 
-		let opts = Options::new(&CommonConfig::default());
+		let opts = Options::new(&ExecConfig::default());
 		stack
 			.enter(|stk| async move {
 				let a = Analyzer::new(

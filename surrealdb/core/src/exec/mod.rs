@@ -51,6 +51,7 @@ pub(crate) type BoxFut<'a, T> = Pin<Box<dyn std::future::Future<Output = T> + Se
 pub(crate) mod access_mode;
 pub(crate) mod buffer;
 pub(crate) mod cardinality;
+pub(crate) mod config;
 pub(crate) mod context;
 pub(crate) mod error;
 pub(crate) mod expression_registry;

@@ -516,7 +516,7 @@ impl ExecOperator for DynamicScan {
 				&pre_decode_filter_status,
 				&field_state,
 				check_perms,
-				ctx.ctx().config.idiom_recursion_limit,
+				ctx.ctx().config.exec.idiom_recursion_limit,
 			);
 
 			let (mut source, applied_pre_skip) = {

@@ -48,7 +48,7 @@ impl Results {
 			return Ok(Self::File(Box::new(FileCollector::new(
 				temp_dir,
 				stm.order().cloned(),
-				ctx.config.external_sorting_buffer_limit,
+				ctx.config.exec.external_sorting_buffer_limit,
 			)?)));
 		}
 		if let Some(ordering) = stm.order() {
@@ -64,7 +64,7 @@ impl Results {
 						//   records)
 						// Otherwise, fall back to full in-memory ordering.
 						if stm.split().is_none()
-							&& limit <= ctx.config.max_order_limit_priority_queue_size
+							&& limit <= ctx.config.exec.max_order_limit_priority_queue_size
 						{
 							return Ok(Self::MemoryOrderedLimit(MemoryOrderedLimit::new(
 								limit as usize,

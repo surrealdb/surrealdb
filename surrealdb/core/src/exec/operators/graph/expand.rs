@@ -310,7 +310,7 @@ impl ExecOperator for Expand {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 
 		let source = self.source.clone();
@@ -321,8 +321,8 @@ impl ExecOperator for Expand {
 		let target_label = self.target_label.clone();
 		let predicate = self.predicate.clone();
 		let optional = self.optional;
-		let scan_batch_size = ctx.root().ctx.config.scan_batch_size;
-		let max_output_rows = ctx.root().ctx.config.gql_max_output_rows;
+		let scan_batch_size = ctx.root().ctx.config.exec.scan_batch_size;
+		let max_output_rows = ctx.root().ctx.config.exec.gql_max_output_rows;
 		let ctx = ctx.clone();
 
 		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {

@@ -146,7 +146,7 @@ impl Websocket {
 		let connected_at = web_time::Instant::now();
 		// Create a channel for sending messages
 		let (sender, receiver) = channel(*WEBSOCKET_RESPONSE_CHANNEL_SIZE);
-		let rec_limit = datastore.config().max_object_parsing_depth as usize;
+		let rec_limit = datastore.parser_config().max_object_parsing_depth as usize;
 		// Create and store the RPC connection
 		let rpc = Arc::new(Websocket {
 			id,

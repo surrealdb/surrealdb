@@ -26,6 +26,7 @@
 //! <a href="https://crates.io/crates/surrealdb">the Rust SDK</a>.
 //! </section>
 
+pub mod config;
 pub mod error;
 pub mod lexer;
 pub mod parser;
@@ -33,7 +34,6 @@ pub mod token;
 
 use common::{LeafError, internal_todo};
 use reblessive::{Stack, Stk};
-use surrealdb_cnf::CommonConfig;
 use surrealdb_sql::{Ast, Block, Expr, Fields, Idiom, Kind};
 use surrealdb_types::{
 	Datetime as PublicDatetime, Duration as PublicDuration, Error as TypesError,
@@ -41,6 +41,7 @@ use surrealdb_types::{
 };
 use tracing::instrument;
 
+pub use self::config::ParserConfig;
 pub use self::error::RenderedError;
 pub use self::parser::{ParseResult, Parser, ParserSettings};
 
@@ -111,7 +112,7 @@ where
 impl ParserSettings {
 	/// Parser limits taken from configuration, with every optional grammar
 	/// disabled. Core layers the capability-gated grammars on top.
-	pub fn from_config(config: &CommonConfig) -> Self {
+	pub fn from_config(config: &ParserConfig) -> Self {
 		ParserSettings {
 			object_recursion_limit: config.max_object_parsing_depth as usize,
 			query_recursion_limit: config.max_query_parsing_depth as usize,
@@ -122,7 +123,7 @@ impl ParserSettings {
 
 	/// Configured limits with every optional grammar enabled, matching what an
 	/// unrestricted capability set produces.
-	pub fn all_features(config: &CommonConfig) -> Self {
+	pub fn all_features(config: &ParserConfig) -> Self {
 		ParserSettings {
 			files_enabled: true,
 			surrealism_enabled: true,
@@ -138,7 +139,7 @@ impl ParserSettings {
 pub fn parse(input: &str) -> Result<Ast, ParseError> {
 	parse_with_settings(
 		input.as_bytes(),
-		ParserSettings::all_features(&CommonConfig::default()),
+		ParserSettings::all_features(&ParserConfig::default()),
 		async |parser, stk| parser.parse_query(stk).await,
 	)
 }
@@ -148,7 +149,7 @@ pub fn parse(input: &str) -> Result<Ast, ParseError> {
 pub fn expr(input: &str) -> Result<Expr, ParseError> {
 	parse_with_settings(
 		input.as_bytes(),
-		ParserSettings::all_features(&CommonConfig::default()),
+		ParserSettings::all_features(&ParserConfig::default()),
 		async |parser, stk| parser.parse_expr_field(stk).await,
 	)
 }
@@ -260,7 +261,7 @@ pub fn kind_for_definition(input: &str) -> Result<Kind, ParseError> {
 
 /// Parses a SurrealQL [`PublicValue`] and parses values within strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn value_legacy_strand(input: &str, config: &CommonConfig) -> Result<PublicValue, ParseError> {
+pub fn value_legacy_strand(input: &str, config: &ParserConfig) -> Result<PublicValue, ParseError> {
 	let settings = ParserSettings {
 		object_recursion_limit: config.max_object_parsing_depth as usize,
 		query_recursion_limit: config.max_query_parsing_depth as usize,

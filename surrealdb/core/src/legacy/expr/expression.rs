@@ -70,7 +70,7 @@ pub(crate) async fn expr_compute(
 				.1
 				.map(|x| {
 					x.saturating_mul(std::mem::size_of::<Value>())
-						> ctx.config.generation_allocation_limit
+						> ctx.config.exec.generation_allocation_limit
 				})
 				.unwrap_or(true)
 			{

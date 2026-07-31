@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
-use surrealdb_cnf::LiveQueryEngine;
 use tokio::sync::OnceCell;
 
 use super::document::Extras;
@@ -10,6 +9,7 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::{Action, CursorDoc, Document, DocumentContext};
 use crate::idx::planner::RecordStrategy;
+use crate::kvs::LiveQueryEngine;
 use crate::lq::event::{LiveAction, LiveEvent};
 
 impl Document {
@@ -27,7 +27,7 @@ impl Document {
 		opt: &Options,
 	) -> Result<()> {
 		// Only the Router engine consumes live-query events.
-		if ctx.config.live_query_engine != LiveQueryEngine::Router {
+		if ctx.config.datastore.live_query_engine != LiveQueryEngine::Router {
 			return Ok(());
 		}
 		// Imports never produce live notifications.

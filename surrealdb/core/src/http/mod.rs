@@ -1,32 +1,45 @@
+#[cfg(feature = "http")]
 use anyhow::Result;
+#[cfg(feature = "http")]
 use http::Method;
-#[cfg(not(target_family = "wasm"))]
+#[cfg(all(feature = "http", not(target_family = "wasm")))]
 use reqwest::redirect::{Action, Attempt};
+#[cfg(feature = "http")]
 use reqwest::{Client, RequestBuilder};
-use surrealdb_cnf::CommonConfig;
+#[cfg(feature = "http")]
 use url::Url;
 
+#[cfg(feature = "http")]
 use crate::dbs::capabilities::{NetTarget, Targets};
+#[cfg(feature = "http")]
+use crate::http::config::HttpConfig;
 
+/// The knobs every outbound client is built from. Not gated on the `http`
+/// feature: the JWKS fetch client reads them under `jwks` alone, where the
+/// client below is absent.
+pub(crate) mod config;
+
+#[cfg(feature = "http")]
 pub struct HttpClient {
 	client: Client,
 }
 
+#[cfg(feature = "http")]
 impl HttpClient {
 	#[cfg(not(target_family = "wasm"))]
-	pub fn new(
+	pub(crate) fn new(
 		allow: Targets<NetTarget>,
 		deny: Targets<NetTarget>,
-		config: &CommonConfig,
+		config: &HttpConfig,
 	) -> Result<Self> {
 		Self::new_with_redirect_policy(allow, deny, config, |policy| policy.follow())
 	}
 
 	#[cfg(not(target_family = "wasm"))]
-	pub fn new_with_redirect_policy<F>(
+	pub(crate) fn new_with_redirect_policy<F>(
 		allow: Targets<NetTarget>,
 		deny: Targets<NetTarget>,
-		config: &CommonConfig,
+		config: &HttpConfig,
 		policy: F,
 	) -> Result<Self>
 	where
@@ -122,7 +135,7 @@ impl HttpClient {
 	pub fn new(
 		allow: Targets<NetTarget>,
 		deny: Targets<NetTarget>,
-		config: &CommonConfig,
+		config: &HttpConfig,
 	) -> Result<Self> {
 		let _ = allow;
 		let _ = deny;

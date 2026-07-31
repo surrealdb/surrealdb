@@ -2,10 +2,10 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
-use surrealdb_cnf::CommonConfig;
 
 use crate::err::Error;
 use crate::exec::Error as ExecError;
+use crate::exec::config::ExecConfig;
 use crate::expr::Base;
 use crate::iam::Auth;
 
@@ -56,7 +56,7 @@ pub enum Force {
 }
 
 impl Options {
-	pub(crate) fn new(config: &CommonConfig) -> Self {
+	pub(crate) fn new(config: &ExecConfig) -> Self {
 		Self {
 			ns: None,
 			db: None,

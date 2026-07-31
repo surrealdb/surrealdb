@@ -331,7 +331,7 @@ pub(crate) enum Evidence {
 pub(crate) struct PreDecodeFilter {
 	pub(crate) root: PredNode,
 	/// Hard cap on path-segment count for any pre-decode descent. Sourced
-	/// from `ctx.config.idiom_recursion_limit` at the planner; bounds the
+	/// from `ctx.config.exec.idiom_recursion_limit` at the planner; bounds the
 	/// stack and intermediate allocations done by
 	/// [`crate::exec::object_extract`]'s walker descent. Paths longer than
 	/// the limit fall back to full-record decode + post-decode evaluation.
@@ -861,7 +861,7 @@ mod tests {
 	use crate::val::{Number, Object, Value};
 
 	/// Depth limit used in test fixtures. Matches the default
-	/// `ctx.config.idiom_recursion_limit` (256) so test behaviour reflects
+	/// `ctx.config.exec.idiom_recursion_limit` (256) so test behaviour reflects
 	/// the production planner's wiring.
 	const TEST_DEPTH_LIMIT: u32 = 256;
 

@@ -22,7 +22,7 @@ pub struct GqlParams {
 }
 
 pub async fn execute(session: &McpSession, params: GqlParams) -> Result<CallToolResult, ErrorData> {
-	let core = session.datastore().config();
+	let core = session.datastore().parser_config();
 	let vars = match params.parameters {
 		Some(ref json) => Some(json_to_variables(json, session.config(), core.as_ref())?),
 		None => None,

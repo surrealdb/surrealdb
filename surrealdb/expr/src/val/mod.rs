@@ -1747,14 +1747,14 @@ mod tests {
 		#[case] expected: Json,
 		#[case] expected_deserialized: PublicValue,
 	) {
-		use surrealdb_cnf::CommonConfig;
+		use surrealdb_syn::ParserConfig;
 
 		let json_value = value.into_json_value();
 		assert_eq!(json_value, expected);
 
 		let json_str = serde_json::to_string(&json_value).expect("Failed to serialize to JSON");
 		let deserialized_sql_value =
-			crate::syn::value_legacy_strand(&json_str, &CommonConfig::default()).unwrap();
+			crate::syn::value_legacy_strand(&json_str, &ParserConfig::default()).unwrap();
 		assert_eq!(deserialized_sql_value, expected_deserialized);
 	}
 }

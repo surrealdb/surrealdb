@@ -3,8 +3,7 @@
 
 use std::collections::HashSet;
 
-use surrealdb_cnf::CommonConfig;
-pub use surrealdb_syn::{ParseError, error, lexer, parser, token};
+pub use surrealdb_syn::{ParseError, ParserConfig, error, lexer, parser, token};
 
 use crate::dbs::Capabilities;
 use crate::dbs::capabilities::ExperimentalTarget;
@@ -61,7 +60,7 @@ fn lift<T>(result: std::result::Result<T, ParseError>) -> Result<T> {
 /// wel as the capabilities  struct.
 pub fn settings_from_capabilities_config(
 	cap: &Capabilities,
-	config: &CommonConfig,
+	config: &ParserConfig,
 ) -> ParserSettings {
 	ParserSettings {
 		files_enabled: cap.allows_experimental(&ExperimentalTarget::Files),
@@ -83,7 +82,7 @@ pub fn settings_from_capabilities_config(
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn parse(input: &str) -> Result<Ast> {
 	let capabilities = Capabilities::all();
-	parse_with_capabilities(input, &capabilities, &CommonConfig::default())
+	parse_with_capabilities(input, &capabilities, &ParserConfig::default())
 }
 
 /// Parses a SurrealQL query.
@@ -100,7 +99,7 @@ pub fn parse(input: &str) -> Result<Ast> {
 pub fn parse_with_capabilities(
 	input: &str,
 	capabilities: &Capabilities,
-	config: &CommonConfig,
+	config: &ParserConfig,
 ) -> Result<Ast> {
 	trace!(target: TARGET, "Parsing SurrealQL query");
 
@@ -116,7 +115,7 @@ pub fn parse_with_capabilities(
 #[allow(dead_code)]
 pub(crate) fn expr(input: &str) -> Result<Expr> {
 	let capabilities = Capabilities::all();
-	expr_with_capabilities(input, &capabilities, &CommonConfig::default())
+	expr_with_capabilities(input, &capabilities, &ParserConfig::default())
 }
 
 /// Parses a SurrealQL [`Value`].
@@ -125,7 +124,7 @@ pub(crate) fn expr(input: &str) -> Result<Expr> {
 pub(crate) fn expr_with_capabilities(
 	input: &str,
 	capabilities: &Capabilities,
-	config: &CommonConfig,
+	config: &ParserConfig,
 ) -> Result<Expr> {
 	trace!(target: TARGET, "Parsing SurrealQL value");
 
@@ -141,7 +140,7 @@ pub(crate) fn expr_with_capabilities(
 pub fn function_with_capabilities(
 	input: &str,
 	capabilities: &Capabilities,
-	config: &CommonConfig,
+	config: &ParserConfig,
 ) -> Result<Function> {
 	trace!(target: TARGET, "Parsing SurrealQL function name");
 
@@ -239,7 +238,7 @@ pub fn block(input: &str) -> Result<Block> {
 
 	lift(surrealdb_syn::block_with_settings(
 		input,
-		ParserSettings::all_features(&CommonConfig::default()),
+		ParserSettings::all_features(&ParserConfig::default()),
 		false,
 	))
 }
@@ -279,7 +278,7 @@ pub fn value(input: &str) -> Result<PublicValue> {
 
 /// Parses a SurrealQL [`PublicValue`] and parses values within strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn value_legacy_strand(input: &str, config: &CommonConfig) -> Result<PublicValue> {
+pub fn value_legacy_strand(input: &str, config: &ParserConfig) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
 	let settings = ParserSettings {
@@ -297,7 +296,7 @@ pub fn value_legacy_strand(input: &str, config: &CommonConfig) -> Result<PublicV
 /// Parses JSON into an inert SurrealQL [`PublicValue`] and parses values within
 /// strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn json_legacy_strand(input: &str, config: &CommonConfig) -> Result<PublicValue> {
+pub fn json_legacy_strand(input: &str, config: &ParserConfig) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing inert JSON value, with legacy strings");
 
 	let settings = ParserSettings {

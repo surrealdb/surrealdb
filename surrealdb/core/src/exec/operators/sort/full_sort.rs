@@ -135,7 +135,7 @@ impl ExecOperator for Sort {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let order_by = self.order_by.clone();
 		let ctx = ctx.clone();
@@ -329,7 +329,7 @@ impl ExecOperator for SortByKey {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let sort_keys = self.sort_keys.clone();
 		let cancellation = ctx.cancellation().clone();

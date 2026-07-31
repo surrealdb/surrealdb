@@ -43,7 +43,7 @@ async fn post_handler(
 	content_type: TypedHeader<ContentType>,
 	body: Bytes,
 ) -> Result<impl IntoResponse, ResponseError> {
-	let rec_limit = state.datastore.config().max_object_parsing_depth;
+	let rec_limit = state.datastore.parser_config().max_object_parsing_depth;
 	let fmt = content_type.deref();
 	let fmt: Format = fmt.into();
 	let val = match fmt {

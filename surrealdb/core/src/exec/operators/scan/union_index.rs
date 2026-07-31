@@ -380,7 +380,7 @@ impl ExecOperator for UnionIndexScan {
 					stream,
 					input.access_mode(),
 					input.cardinality_hint(),
-					ctx.root().ctx.config.operator_buffer_size,
+					ctx.root().ctx.config.exec.operator_buffer_size,
 				)
 			};
 			sub_streams.push(sub_stream);

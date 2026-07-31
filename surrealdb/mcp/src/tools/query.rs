@@ -24,7 +24,7 @@ pub async fn execute(
 	session: &McpSession,
 	params: QueryParams,
 ) -> Result<CallToolResult, ErrorData> {
-	let core = session.datastore().config();
+	let core = session.datastore().parser_config();
 	let vars = match params.parameters {
 		Some(ref json) => Some(json_to_variables(json, session.config(), core.as_ref())?),
 		None => None,

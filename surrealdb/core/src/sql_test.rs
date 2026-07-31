@@ -104,7 +104,7 @@ fn parse_experimental(query: &str) -> crate::sql::Ast {
 	syn::parse_with_capabilities(
 		query,
 		&Capabilities::all().with_experimental(Targets::All),
-		&surrealdb_cnf::CommonConfig::default(),
+		&crate::syn::ParserConfig::default(),
 	)
 	.unwrap()
 }

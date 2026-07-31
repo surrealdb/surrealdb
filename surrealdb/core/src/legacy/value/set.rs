@@ -61,7 +61,7 @@ pub(crate) async fn value_set(
 									crate::legacy::value_set(v, stk, ctx, opt, prev, val.clone())
 								})
 							});
-							try_join_all_buffered(futs, ctx.config.max_concurrent_tasks)
+							try_join_all_buffered(futs, ctx.config.legacy.max_concurrent_tasks)
 						})
 						.await?;
 						return Ok(());
@@ -88,7 +88,7 @@ pub(crate) async fn value_set(
 									crate::legacy::value_set(v, stk, ctx, opt, prev, val.clone())
 								})
 							});
-							try_join_all_buffered(futs, ctx.config.max_concurrent_tasks)
+							try_join_all_buffered(futs, ctx.config.legacy.max_concurrent_tasks)
 						})
 						.await?;
 						return Ok(());
@@ -136,7 +136,10 @@ pub(crate) async fn value_set(
 											)
 										})
 									});
-									try_join_all_buffered(futs, ctx.config.max_concurrent_tasks)
+									try_join_all_buffered(
+										futs,
+										ctx.config.legacy.max_concurrent_tasks,
+									)
 								})
 								.await?;
 								return Ok(());
@@ -199,7 +202,7 @@ pub(crate) async fn value_set(
 									crate::legacy::value_set(v, stk, ctx, opt, path, val.clone())
 								})
 							});
-							try_join_all_buffered(futs, ctx.config.max_concurrent_tasks)
+							try_join_all_buffered(futs, ctx.config.legacy.max_concurrent_tasks)
 						})
 						.await?;
 					}
@@ -210,7 +213,7 @@ pub(crate) async fn value_set(
 									crate::legacy::value_set(v, stk, ctx, opt, path, val.clone())
 								})
 							});
-							try_join_all_buffered(futs, ctx.config.max_concurrent_tasks)
+							try_join_all_buffered(futs, ctx.config.legacy.max_concurrent_tasks)
 						})
 						.await?;
 					}

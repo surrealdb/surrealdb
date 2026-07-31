@@ -84,7 +84,7 @@ impl ExecOperator for UnwrapExactlyOne {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let none_on_empty = self.none_on_empty;
 

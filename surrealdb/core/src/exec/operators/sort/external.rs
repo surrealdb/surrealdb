@@ -140,7 +140,7 @@ impl ExecOperator for ExternalSort {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let order_by = Arc::new(self.order_by.clone());
 		let temp_dir = self.temp_dir.clone();
@@ -239,7 +239,7 @@ impl ExecOperator for ExternalSort {
 				> = ExternalSorterBuilder::new()
 					.with_tmp_dir(&sort_dir)
 					.with_buffer(LimitedBufferBuilder::new(
-						ctx.root().ctx.config.external_sorting_buffer_limit,
+						ctx.root().ctx.config.exec.external_sorting_buffer_limit,
 						true,
 					))
 					.build()?;

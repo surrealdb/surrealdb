@@ -72,6 +72,7 @@ pub use surrealdb_catalog as catalog;
 pub use surrealdb_cnf as cnf;
 /// The SurrealQL abstract syntax tree, as produced by [`syn`].
 pub use surrealdb_sql as sql;
+mod config;
 pub mod ctx;
 pub mod dbs;
 pub mod env;
@@ -82,7 +83,10 @@ pub use surrealdb_expr::expr;
 pub mod gql;
 #[cfg(feature = "graphql")]
 pub mod graphql;
-#[cfg(feature = "http")]
+// Gated on either feature: `jwks` builds need `http::config` for their fetch
+// client even when the `http::*` SurrealQL functions are compiled out. The
+// client itself is `http`-gated inside the module.
+#[cfg(any(feature = "http", feature = "jwks"))]
 mod http;
 pub mod iam;
 pub mod idx;

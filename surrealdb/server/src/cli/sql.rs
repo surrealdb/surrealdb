@@ -11,8 +11,8 @@ use surrealdb::engine::any::{self, connect};
 use surrealdb::method::WithStats;
 use surrealdb::opt::Config;
 use surrealdb::{IndexedResults, Notification, Stats};
-use surrealdb_cnf::CommonConfig;
 use surrealdb_core::dbs::Capabilities as CoreCapabilities;
+use surrealdb_core::syn::ParserConfig;
 use surrealdb_types::{SurrealValue, ToSql, Value, object};
 
 use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
@@ -203,7 +203,7 @@ pub async fn init(
 		match surrealdb_core::syn::parse_with_capabilities(
 			&line,
 			&capabilities,
-			&CommonConfig::default(),
+			&ParserConfig::default(),
 		) {
 			Ok(mut query) => {
 				let init_length = query.num_statements();

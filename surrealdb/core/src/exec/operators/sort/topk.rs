@@ -171,7 +171,7 @@ impl ExecOperator for SortTopK {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let order_by = Arc::new(self.order_by.clone());
 		let limit = self.limit;
@@ -536,7 +536,7 @@ impl ExecOperator for SortTopKByKey {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let sort_keys = Arc::new(self.sort_keys.clone());
 		let limit = self.limit;

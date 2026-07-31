@@ -144,7 +144,7 @@ impl ExecOperator for AnalyzePlan {
 			self.plan.execute(ctx)?,
 			self.plan.access_mode(),
 			self.plan.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let plan = Arc::clone(&self.plan);
 		let format = self.format;

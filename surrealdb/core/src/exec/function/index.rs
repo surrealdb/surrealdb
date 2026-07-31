@@ -256,7 +256,7 @@ impl MatchContext {
 					tx.as_ref(),
 					ikb,
 					ft_params,
-					&frozen.config.file_allowlist,
+					&frozen.config.idx.file_allowlist,
 				)
 				.await?;
 

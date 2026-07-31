@@ -29,7 +29,7 @@ pub(crate) async fn recursion_plan_compute<'a>(
 						crate::legacy::recursion_plan_compute_inner(this, stk, ctx, opt, doc, rec)
 					})
 				});
-				try_join_all_buffered(futs, ctx.config.max_concurrent_tasks)
+				try_join_all_buffered(futs, ctx.config.legacy.max_concurrent_tasks)
 			})
 			.await
 			.map(Into::into),

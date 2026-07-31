@@ -76,7 +76,7 @@ pub(crate) async fn define_analyzer_statement_compute(
 		db,
 		az: Cow::Borrowed(definition.name.as_str()),
 	};
-	ctx.get_index_stores().mappers().load(&definition, &ctx.config.file_allowlist).await?;
+	ctx.get_index_stores().mappers().load(&definition, &ctx.config.idx.file_allowlist).await?;
 	txn.set_key(&key, &definition).await?;
 	// Clear the cache
 	txn.clear_cache();

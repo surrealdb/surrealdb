@@ -1135,7 +1135,7 @@ impl<'ctx> Planner<'ctx> {
 			&start,
 			&limit,
 			tempfiles,
-			self.ctx.config.max_order_limit_priority_queue_size as usize,
+			self.ctx.config.exec.max_order_limit_priority_queue_size as usize,
 		);
 
 		// TopK threshold pushdown analysis: when the downstream sort will be
@@ -1143,7 +1143,7 @@ impl<'ctx> Planner<'ctx> {
 		// against the heap's worst entry before record decode. SPLIT, GROUP
 		// BY, and brute-force KNN duplicate, regroup, or rank rows between
 		// scan and sort, so they disqualify the request outright.
-		let topk_request = if self.ctx.config.topk_threshold_pushdown_enabled {
+		let topk_request = if self.ctx.config.exec.topk_threshold_pushdown_enabled {
 			compute_topk_pushdown_request(
 				order.as_ref(),
 				&start,
@@ -1151,7 +1151,7 @@ impl<'ctx> Planner<'ctx> {
 				&fields,
 				tempfiles,
 				split.is_some() || group.is_some() || brute_force_knn.is_some(),
-				self.ctx.config.max_order_limit_priority_queue_size as usize,
+				self.ctx.config.exec.max_order_limit_priority_queue_size as usize,
 			)
 		} else {
 			TopKPushdownRequest::NotApplicable
@@ -1957,7 +1957,7 @@ impl<'ctx> Planner<'ctx> {
 							spec.first_key.direction,
 							spec.key_count == 1,
 							Arc::clone(&cell),
-							self.ctx.config.idiom_recursion_limit,
+							self.ctx.config.exec.idiom_recursion_limit,
 						));
 						let status = topk_pushdown_status_at_plan_time(
 							probe,
@@ -2369,7 +2369,7 @@ impl<'ctx> Planner<'ctx> {
 		pre_decode_filter_status_at_plan_time(
 			predicate,
 			projected.as_ref(),
-			self.ctx.config.idiom_recursion_limit,
+			self.ctx.config.exec.idiom_recursion_limit,
 		)
 	}
 

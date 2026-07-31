@@ -17,7 +17,7 @@ pub(crate) async fn compute_idiom_recursion(
 	rec: Recursion<'_>,
 ) -> Result<Value> {
 	// Find the recursion limit
-	let limit = ctx.config.idiom_recursion_limit;
+	let limit = ctx.config.exec.idiom_recursion_limit;
 	// Do we recursion instead of looping?
 	let marked_recursive = rec.plan.is_some();
 

@@ -146,10 +146,10 @@ fn test_validate_table_name_rejects_record_ids_and_injection() {
 
 #[test]
 fn test_json_to_variables_object() {
-	use surrealdb_core::cnf::CommonConfig;
+	use surrealdb_core::syn::ParserConfig;
 	use surrealdb_mcp::cnf::McpConfig;
 	let mcp = McpConfig::default();
-	let core = CommonConfig::default();
+	let core = ParserConfig::default();
 	let json = serde_json::json!({"name": "John", "age": 30, "active": true});
 	let vars = surrealdb_mcp::tools::json_to_variables(&json, &mcp, &core);
 	assert!(vars.is_ok());
@@ -157,10 +157,10 @@ fn test_json_to_variables_object() {
 
 #[test]
 fn test_json_to_variables_rejects_non_object() {
-	use surrealdb_core::cnf::CommonConfig;
+	use surrealdb_core::syn::ParserConfig;
 	use surrealdb_mcp::cnf::McpConfig;
 	let mcp = McpConfig::default();
-	let core = CommonConfig::default();
+	let core = ParserConfig::default();
 	let json = serde_json::json!("not an object");
 	assert!(surrealdb_mcp::tools::json_to_variables(&json, &mcp, &core).is_err());
 

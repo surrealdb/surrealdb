@@ -198,7 +198,7 @@ relational frontend — see §10.)
 
 Conventions for all: `metrics: Arc<OperatorMetrics>` + `monitor_stream`;
 `buffer_stream(input.execute(ctx)?, input.access_mode(), input.cardinality_hint(),
-ctx.root().ctx.config.operator_buffer_size)`; `access_mode` combines children +
+ctx.root().ctx.config.exec.operator_buffer_size)`; `access_mode` combines children +
 embedded predicate exprs; `required_context` ≥ Database; WASM cfg patterns as in
 `scan/graph.rs`; EXPLAIN-stable `name()`/`attrs()` (predicates via PhysicalExpr
 ToSql). First: extract `compute_graph_ranges`/`decode_graph_edge`/cursor batching
@@ -383,10 +383,10 @@ Project [columns: p, b]
 ## 9. Guards (cnf knobs)
 
 `gql_max_path_rows` (1M), `gql_max_join_build_rows` (1M), `gql_max_output_rows`
-(1M) — `CommonConfig` fields in `surrealdb/core/src/cnf/mod.rs` (NOT global
-statics: every operator that reads them already holds the execution
-`CommonConfig` via `ctx.root().ctx.config`, so they are per-datastore and
-settable programmatically as well as via the `SURREAL_GQL_MAX_*` env vars, which
+(1M) — `ExecConfig` fields in `surrealdb/core/src/exec/config.rs` (NOT global
+statics: every operator that reads them already holds the execution config via
+`ctx.root().ctx.config.exec`, so they are per-datastore and settable
+programmatically as well as via the `SURREAL_GQL_MAX_*` env vars, which
 `ConfigMap::from_env` routes into the same fields). Errors name the env knob.
 `SURREAL_GQL_MAX_PATH_ROWS` is enforced **per source row** in `PathExpand` (the
 live+emitted counter resets for each input row), so it caps the single-source

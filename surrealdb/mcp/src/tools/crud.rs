@@ -25,7 +25,7 @@ use crate::session::McpSession;
 /// SurrealDB value. See [`json_to_surreal_value`] for the recognised
 /// shapes.
 fn bind_data(session: &McpSession, json: &serde_json::Value) -> Result<Variables, ErrorData> {
-	let core = session.datastore().config();
+	let core = session.datastore().parser_config();
 	let mut vars = Variables::new();
 	vars.insert("data", json_to_surreal_value(json, session.config(), core.as_ref())?);
 	Ok(vars)

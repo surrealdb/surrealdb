@@ -8,7 +8,6 @@ use chrono::Utc;
 use futures::future::try_join_all;
 use reblessive::TreeStack;
 use reblessive::tree::Stk;
-use surrealdb_cnf::LiveQueryEngine;
 use tracing::instrument;
 
 use super::IgnoreError;
@@ -21,7 +20,7 @@ use crate::doc::{Action, CursorDoc, Document};
 use crate::err::EngineError;
 use crate::exe::FlowResultExt as _;
 use crate::expr::paths::{AC, ID, RD, TK};
-use crate::kvs::Transaction;
+use crate::kvs::{LiveQueryEngine, Transaction};
 use crate::types::{PublicAction, PublicNotification};
 use crate::val::{Value, convert_value_to_public_value};
 
@@ -45,7 +44,7 @@ impl Document {
 		// this is the flip that removes per-subscriber cost from the mutator's
 		// transaction. (Capture into the `lqe` keyspace still happens; see
 		// `Document::process_live_events`.)
-		if ctx.config.live_query_engine == LiveQueryEngine::Router {
+		if ctx.config.datastore.live_query_engine == LiveQueryEngine::Router {
 			return Ok(());
 		}
 		self.process_table_lives_inner(stk, ctx, opt, action).await

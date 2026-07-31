@@ -432,7 +432,7 @@ pub async fn db_access(
 								// Otherwise, return a generic error unless it should be
 								// forwarded
 								debug!("Record user signin query failed: {e}");
-								if kvs.config().insecure_forward_access_errors {
+								if kvs.config().iam.insecure_forward_access_errors {
 									Err(e)
 								} else {
 									Err(anyhow::Error::new(

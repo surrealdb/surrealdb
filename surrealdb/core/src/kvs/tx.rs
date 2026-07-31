@@ -21,7 +21,6 @@ use std::time::Duration;
 
 use anyhow::Result;
 use chrono::Utc;
-use surrealdb_cnf::CommonConfig;
 use surrealdb_kvs::timestamp::{BoxTimeStamp, BoxTimeStampImpl};
 use tokio::sync::{Mutex, Notify};
 use tokio::time::sleep;
@@ -33,7 +32,7 @@ use super::api::{
 	Batch, KeyVisitor, KeysBatch, ScanChunkStats, ScanCursorKeys, ScanCursorVals, ValVisitor,
 	ValsBatch,
 };
-use super::{TransactionFactory, TransactionType, Val, util};
+use super::{TransactionConfig, TransactionFactory, TransactionType, Val, util};
 use crate::catalog::providers::{
 	ApiProvider, AuthorisationProvider, BoxProviderFut, BucketProvider, CachePolicy,
 	CancellationProbe, CatalogProvider, DatabaseProvider, NamespaceProvider, NodeProvider,
@@ -878,7 +877,7 @@ impl Transaction {
 		async_event_trigger: Arc<Notify>,
 		observer: Arc<dyn ExecutionObserver>,
 		tr: Transactor,
-		config: &CommonConfig,
+		config: &TransactionConfig,
 	) -> Transaction {
 		Transaction {
 			local,
@@ -919,7 +918,7 @@ impl Transaction {
 	/// issued, so concurrent writes within the transaction can never admit
 	/// more than the limit. The accounting rules (range deletes, commit-time
 	/// feed writes, reservations never being refunded) are documented on
-	/// `transaction_max_write_keys` in [`surrealdb_cnf::CommonConfig`].
+	/// `TransactionConfig::transaction_max_write_keys`.
 	pub fn with_write_keys_limit(self, limit: Option<NonZeroU64>) -> Self {
 		self.arm_write_keys_limit(limit);
 		self

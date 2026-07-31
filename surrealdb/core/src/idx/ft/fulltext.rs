@@ -1221,7 +1221,6 @@ mod tests {
 	use std::time::{Duration, Instant};
 
 	use reblessive::tree::Stk;
-	use surrealdb_cnf::CommonConfig;
 	use test_log::test;
 	use tokio::time::sleep;
 	use uuid::Uuid;
@@ -1230,6 +1229,7 @@ mod tests {
 	use crate::catalog::{DatabaseId, FullTextParams, IndexId, NamespaceId};
 	use crate::ctx::{Context, FrozenContext};
 	use crate::dbs::Options;
+	use crate::exec::config::ExecConfig;
 	use crate::expr::statements::DefineAnalyzerStatement;
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::offset::Offset;
@@ -1266,7 +1266,7 @@ mod tests {
 			};
 			let mut stack = reblessive::TreeStack::new();
 
-			let opts = Options::new(&CommonConfig::default());
+			let opts = Options::new(&ExecConfig::default());
 			let stk_ctx = Arc::clone(&ctx);
 			let az = stack
 				.enter(|stk| async move {
@@ -1318,7 +1318,7 @@ mod tests {
 			});
 			let nid = Uuid::new_v4();
 			let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "t".into(), IndexId(3));
-			let opt = Options::new(&CommonConfig::default())
+			let opt = Options::new(&ExecConfig::default())
 				.with_ns(Some("testns".into()))
 				.with_db(Some("testdb".into()));
 			let fti = Arc::new(

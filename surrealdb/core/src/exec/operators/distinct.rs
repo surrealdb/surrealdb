@@ -85,9 +85,9 @@ impl ExecOperator for Distinct {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
-		let max_rows = ctx.root().ctx.config.gql_max_join_build_rows;
+		let max_rows = ctx.root().ctx.config.exec.gql_max_join_build_rows;
 		let ctx = ctx.clone();
 
 		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {

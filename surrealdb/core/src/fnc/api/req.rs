@@ -55,7 +55,7 @@ pub async fn body(
 ) -> Result<Value> {
 	let strategy = strategy.map(|x| x.0).unwrap_or_default();
 	let mut parser =
-		BodyParser::new(&mut req, strategy, ctx.config.max_object_parsing_depth as usize);
+		BodyParser::new(&mut req, strategy, ctx.config.parser.max_object_parsing_depth as usize);
 	parser.process().await?;
 
 	crate::legacy::closure_invoke(&next, stk, ctx, opt, doc, vec![req.into()]).await

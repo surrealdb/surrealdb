@@ -100,7 +100,7 @@ impl ExecOperator for UpdateBinding {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let (opt, frozen) = legacy_handles(ctx)?;
 		let target = self.target.clone();
@@ -204,7 +204,7 @@ impl ExecOperator for DeleteBinding {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let (opt, frozen) = legacy_handles(ctx)?;
 		// Namespace/database ids for the connected-edge graph-key peek (resolved
@@ -528,7 +528,7 @@ impl ExecOperator for InsertGraph {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let (opt, frozen) = legacy_handles(ctx)?;
 		let nodes = self.nodes.clone();
@@ -707,7 +707,7 @@ impl ExecOperator for DrainSink {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let ctx = ctx.clone();
 		let stream = stream::try_async_stream(async move |_: Yielder<_>| {

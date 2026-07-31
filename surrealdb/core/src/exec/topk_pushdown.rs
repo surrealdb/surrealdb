@@ -102,7 +102,7 @@ pub(crate) struct TopKThresholdProbe {
 	/// `Less`). With multiple keys, `Equal` must fall through to full decode.
 	single_key: bool,
 	cell: Arc<TopKThresholdCell>,
-	/// Bounds walker descent; sourced from `ctx.config.idiom_recursion_limit`.
+	/// Bounds walker descent; sourced from `ctx.config.exec.idiom_recursion_limit`.
 	depth_limit: u32,
 	/// Present only when EXPLAIN ANALYZE enabled the scan's metrics; the
 	/// visitor flushes per-batch skip counts through it.
@@ -361,7 +361,7 @@ mod tests {
 	use crate::catalog::Record;
 	use crate::val::{Datetime, Number, Object};
 
-	/// Matches the default `ctx.config.idiom_recursion_limit` (256).
+	/// Matches the default `ctx.config.exec.idiom_recursion_limit` (256).
 	const TEST_DEPTH_LIMIT: u32 = 256;
 
 	fn wire_record(obj: Object) -> Vec<u8> {

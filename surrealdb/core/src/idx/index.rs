@@ -120,7 +120,7 @@ impl<'a> IndexOperation<'a> {
 				&ctx.tx(),
 				ikb,
 				p,
-				&ctx.config.file_allowlist,
+				&ctx.config.idx.file_allowlist,
 			)
 			.await?,
 		))
@@ -461,7 +461,7 @@ impl<'a> IndexOperation<'a> {
 			&self.ctx.tx(),
 			self.ikb.clone(),
 			p,
-			&self.ctx.config.file_allowlist,
+			&self.ctx.config.idx.file_allowlist,
 		)
 		.await?;
 		self.compute_fulltext_with_index(stk, &fti, require_compaction).await

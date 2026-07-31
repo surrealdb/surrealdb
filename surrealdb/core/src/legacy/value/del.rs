@@ -137,7 +137,7 @@ pub(crate) async fn value_del(
 							let futs = v.iter_mut().map(|v| {
 								scope.run(|stk| crate::legacy::value_del(v, stk, ctx, opt, path))
 							});
-							try_join_all_buffered(futs, ctx.config.max_concurrent_tasks)
+							try_join_all_buffered(futs, ctx.config.legacy.max_concurrent_tasks)
 						})
 						.await?;
 						Ok(())
@@ -290,7 +290,7 @@ pub(crate) async fn value_del(
 						let futs = v.iter_mut().map(|v| {
 							scope.run(|stk| crate::legacy::value_del(v, stk, ctx, opt, path))
 						});
-						try_join_all_buffered(futs, ctx.config.max_concurrent_tasks)
+						try_join_all_buffered(futs, ctx.config.legacy.max_concurrent_tasks)
 					})
 					.await?;
 					Ok(())

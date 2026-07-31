@@ -442,7 +442,7 @@ impl ExecOperator for Aggregate {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let group_by_exprs = self.group_by_exprs.clone();
 		let aggregates = self.aggregates.clone();

@@ -55,7 +55,7 @@ pub async fn run(session: &McpSession, p: RunParams) -> Result<CallToolResult, E
 		)));
 	}
 
-	let core = session.datastore().config();
+	let core = session.datastore().parser_config();
 	let mut vars = Variables::new();
 	let mut placeholders = Vec::with_capacity(args.len());
 	for (i, v) in args.iter().enumerate() {

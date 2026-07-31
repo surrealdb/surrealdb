@@ -222,7 +222,7 @@ pub(crate) fn record_data_bytes(record_bytes: &[u8]) -> Result<Cow<'_, [u8]>, Re
 /// [`Value`].
 ///
 /// `depth_limit` bounds the number of path segments we descend through. The
-/// pre-decode filter threads `ctx.config.idiom_recursion_limit` (default 256)
+/// pre-decode filter threads `ctx.config.exec.idiom_recursion_limit` (default 256)
 /// from the planner; paths longer than the limit return [`Extracted::Bail`],
 /// causing the caller to fall back to full-record decode + post-decode
 /// evaluation.
@@ -438,7 +438,7 @@ fn lookup_value_bytes_in_map<'p>(
 ///
 /// `depth_limit` is the hard upper bound on path segment count; paths longer
 /// than the limit return [`Extracted::Bail`]. Sourced from
-/// `ctx.config.idiom_recursion_limit` at the planner-side construction of
+/// `ctx.config.exec.idiom_recursion_limit` at the planner-side construction of
 /// [`crate::exec::pre_decode_filter::PreDecodeFilter`].
 ///
 /// **Iterative form** — earlier revisions used recursion because each level

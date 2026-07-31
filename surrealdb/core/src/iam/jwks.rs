@@ -316,7 +316,7 @@ fn build_jwks_client(kvs: &Datastore) -> Result<Client> {
 	// Snapshot the capabilities and redirect budget so the policy closure (which
 	// must be `'static + Send + Sync`) does not borrow the datastore.
 	let capabilities = kvs.get_capabilities();
-	let max_redirects = kvs.config().max_http_redirects;
+	let max_redirects = kvs.config().http.max_http_redirects;
 
 	// Build the DNS-level filter from the same capability snapshot before the
 	// `capabilities` handle is moved into the redirect policy closure below.
@@ -366,7 +366,7 @@ async fn fetch_jwks_from_url(kvs: &Datastore, url: &str) -> Result<JwkSet> {
 	let req = client.get(url);
 	// Add a User-Agent header so that WAF rules don't reject the request
 	#[cfg(not(target_family = "wasm"))]
-	let req = req.header(reqwest::header::USER_AGENT, &kvs.config().surrealdb_user_agent);
+	let req = req.header(reqwest::header::USER_AGENT, &kvs.config().http.surrealdb_user_agent);
 	#[cfg(not(target_family = "wasm"))]
 	let res = req.timeout((*REMOTE_TIMEOUT).to_std().expect("valid duration")).send().await?;
 	#[cfg(target_family = "wasm")]

@@ -94,7 +94,7 @@ impl ExecOperator for ProjectValue {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let expr = Arc::clone(&self.expr);
 		let omit = Arc::clone(&self.omit);

@@ -28,14 +28,13 @@
 //! errors.
 
 use anyhow::{Result, ensure};
-use surrealdb_cnf::CommonConfig;
 pub use surrealdb_gql::{
 	GqlParserSettings, PreparedGqlQuery, ast, lexer, lower, parse_str, parse_to_plan_with_settings,
 	parse_with_settings, parser, token,
 };
 
 use crate::dbs::Capabilities;
-use crate::syn::ParseError;
+use crate::syn::{ParseError, ParserConfig};
 
 const TARGET: &str = "surrealdb::core::gql";
 
@@ -44,9 +43,9 @@ const TARGET: &str = "surrealdb::core::gql";
 /// [`crate::syn::settings_from_capabilities_config`].
 pub fn settings_from_capabilities_config(
 	_capabilities: &Capabilities,
-	config: &CommonConfig,
+	config: &ParserConfig,
 ) -> GqlParserSettings {
-	// `CommonConfig::max_query_parsing_depth` has no GQL analog: a GQL v1
+	// `ParserConfig::max_query_parsing_depth` has no GQL analog: a GQL v1
 	// query is a single linear statement with no statement nesting, so all
 	// nesting is expression nesting, counted against `max_object_parsing_depth`
 	// via `object_recursion_limit`.
@@ -71,7 +70,7 @@ pub fn settings_from_capabilities_config(
 pub fn parse_with_capabilities(
 	input: &str,
 	capabilities: &Capabilities,
-	config: &CommonConfig,
+	config: &ParserConfig,
 ) -> Result<PreparedGqlQuery> {
 	trace!(target: TARGET, "Parsing GQL query");
 
@@ -86,14 +85,13 @@ pub fn parse_with_capabilities(
 mod tests {
 	#[test]
 	fn parse_with_capabilities_renders_errors_like_surrealql() {
-		use surrealdb_cnf::CommonConfig;
-
 		use crate::dbs::Capabilities;
 		use crate::dbs::capabilities::Targets;
+		use crate::syn::ParserConfig;
 		let error = crate::gql::parse_with_capabilities(
 			"MATCH (n:person) RETURN m",
 			&Capabilities::all().with_experimental(Targets::All),
-			&CommonConfig::default(),
+			&ParserConfig::default(),
 		)
 		.expect_err("should fail");
 		let rendered = format!("{error}");
@@ -103,15 +101,14 @@ mod tests {
 
 	#[test]
 	fn parse_with_capabilities_available_without_experimental_flag() {
-		use surrealdb_cnf::CommonConfig;
-
 		use crate::dbs::Capabilities;
+		use crate::syn::ParserConfig;
 		// GQL is on by default: parsing lowers successfully without any experimental
 		// capability being enabled.
 		crate::gql::parse_with_capabilities(
 			"MATCH (n:person) RETURN n AS n",
 			&Capabilities::all(),
-			&CommonConfig::default(),
+			&ParserConfig::default(),
 		)
 		.expect("GQL should lower without an experimental capability");
 	}

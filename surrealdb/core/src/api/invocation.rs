@@ -307,7 +307,7 @@ fn create_middleware_closure(
 			let function: crate::expr::Function = match function_with_capabilities(
 				def.name.as_str(),
 				ctx.get_capabilities().as_ref(),
-				&ctx.config,
+				&ctx.config.parser,
 			) {
 				Ok(f) => f.into(),
 				Err(_e) => {

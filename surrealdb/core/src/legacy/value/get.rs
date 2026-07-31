@@ -47,7 +47,7 @@ pub(crate) async fn value_get(
 	path: &[Part],
 ) -> FlowResult<Value> {
 	// Limit recursion depth.
-	if path.len() > ctx.config.max_computation_depth as usize {
+	if path.len() > ctx.config.exec.max_computation_depth as usize {
 		return Err(ControlFlow::from(anyhow::Error::new(ExecError::ComputationDepthExceeded)));
 	}
 
@@ -111,11 +111,11 @@ pub(crate) async fn value_get(
 			}
 
 			if let Some(max) = max
-				&& max > ctx.config.idiom_recursion_limit
+				&& max > ctx.config.exec.idiom_recursion_limit
 			{
 				return Err(ControlFlow::Err(anyhow::Error::new(ExecError::InvalidBound {
 					found: max.to_string(),
-					expected: format!("{} at most", ctx.config.idiom_recursion_limit),
+					expected: format!("{} at most", ctx.config.exec.idiom_recursion_limit),
 				})));
 			}
 
@@ -358,7 +358,7 @@ pub(crate) async fn value_get(
 								crate::legacy::value_get(v, stk, ctx, opt, doc, path)
 							})
 						});
-						try_join_all_buffered(futs, ctx.config.max_concurrent_tasks)
+						try_join_all_buffered(futs, ctx.config.legacy.max_concurrent_tasks)
 					})
 					.await
 					.map(Into::into)
@@ -369,7 +369,7 @@ pub(crate) async fn value_get(
 						let futs = v.iter().map(|v| {
 							scope.run(|stk| crate::legacy::value_get(v, stk, ctx, opt, doc, path))
 						});
-						try_join_all_buffered(futs, ctx.config.max_concurrent_tasks)
+						try_join_all_buffered(futs, ctx.config.legacy.max_concurrent_tasks)
 					})
 					.await
 					.map(Into::into)
@@ -487,7 +487,7 @@ pub(crate) async fn value_get(
 									crate::legacy::value_get(v, stk, ctx, opt, doc, path)
 								})
 							});
-							try_join_all_buffered(futs, ctx.config.max_concurrent_tasks)
+							try_join_all_buffered(futs, ctx.config.legacy.max_concurrent_tasks)
 						})
 						.await
 						.map(Value::from)?;
@@ -510,7 +510,7 @@ pub(crate) async fn value_get(
 								crate::legacy::value_get(v, stk, ctx, opt, doc, path)
 							})
 						});
-						try_join_all_buffered(futs, ctx.config.max_concurrent_tasks)
+						try_join_all_buffered(futs, ctx.config.legacy.max_concurrent_tasks)
 					})
 					.await
 					.map(|vals| Value::Set(vals.into_iter().collect())),
@@ -520,7 +520,7 @@ pub(crate) async fn value_get(
 						let futs = v.iter().map(|v| {
 							scope.run(|stk| crate::legacy::value_get(v, stk, ctx, opt, doc, path))
 						});
-						try_join_all_buffered(futs, ctx.config.max_concurrent_tasks)
+						try_join_all_buffered(futs, ctx.config.legacy.max_concurrent_tasks)
 					})
 					.await
 					.map(|vals| Value::Set(vals.into_iter().collect()))
@@ -635,7 +635,7 @@ pub(crate) async fn value_get(
 									crate::legacy::value_get(v, stk, ctx, opt, doc, path)
 								})
 							});
-							try_join_all_buffered(futs, ctx.config.max_concurrent_tasks)
+							try_join_all_buffered(futs, ctx.config.legacy.max_concurrent_tasks)
 						})
 						.await
 						.map(|vals| Value::Set(vals.into_iter().collect()))?;

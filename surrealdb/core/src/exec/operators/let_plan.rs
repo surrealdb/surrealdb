@@ -110,7 +110,7 @@ impl ExecOperator for LetPlan {
 					s,
 					self.value.access_mode(),
 					self.value.cardinality_hint(),
-					input.root().ctx.config.operator_buffer_size,
+					input.root().ctx.config.exec.operator_buffer_size,
 				),
 				Err(crate::expr::ControlFlow::Return(v)) => {
 					// If value expression returns early, use that value

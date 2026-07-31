@@ -165,14 +165,14 @@ impl ExecOperator for ReferenceScan {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let referencing_table = self.referencing_table.clone();
 		let referencing_field = self.referencing_field.clone();
 		let output_mode = self.output_mode;
 		let range_start = self.range_start.clone();
 		let range_end = self.range_end.clone();
-		let scan_batch_size = ctx.root().ctx.config.scan_batch_size;
+		let scan_batch_size = ctx.root().ctx.config.exec.scan_batch_size;
 		let ctx = ctx.clone();
 		let fetch_full = output_mode == ReferenceScanOutput::FullRecord;
 		let version_expr = self.version.clone();

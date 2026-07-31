@@ -315,7 +315,7 @@ pub async fn db_access(
 				Err(anyhow::Error::new(AuthError::UnexpectedAuth))
 			} else {
 				// Otherwise, return a generic error unless it should be forwarded
-				if kvs.config().insecure_forward_access_errors {
+				if kvs.config().iam.insecure_forward_access_errors {
 					Err(e)
 				} else {
 					Err(anyhow::Error::new(AuthError::AccessRecordSignupQueryFailed))

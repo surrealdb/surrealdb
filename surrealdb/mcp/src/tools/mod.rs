@@ -17,7 +17,7 @@ pub mod schema;
 use std::str::FromStr;
 
 use rmcp::ErrorData;
-use surrealdb_cnf::CommonConfig;
+use surrealdb_core::syn::ParserConfig;
 use surrealdb_types::{Decimal, Number, SurrealValue, Value, Variables};
 
 pub(crate) use self::output::{
@@ -202,9 +202,9 @@ pub(crate) const QL_SENTINEL: &str = "$ql";
 ///
 /// `mcp` carries the MCP-side caps (notably
 /// [`McpConfig::params_max_ql_bytes`]); `core` carries the datastore's
-/// own [`CommonConfig`] so the `$ql` pass-through parser honours the
+/// own [`ParserConfig`] so the `$ql` pass-through parser honours the
 /// running parser depth limits rather than silently falling back to
-/// `CommonConfig::default()`.
+/// `ParserConfig::default()`.
 ///
 /// Returns a structured `invalid_params` error if a `$ql` body is empty,
 /// exceeds the configured byte cap, is non-string, appears alongside
@@ -215,7 +215,7 @@ pub(crate) const QL_SENTINEL: &str = "$ql";
 pub(crate) fn json_to_surreal_value(
 	json: &serde_json::Value,
 	mcp: &McpConfig,
-	core: &CommonConfig,
+	core: &ParserConfig,
 ) -> Result<Value, ErrorData> {
 	match json {
 		serde_json::Value::Null => Ok(Value::Null),
@@ -289,14 +289,14 @@ fn json_number_to_value(n: &serde_json::Number) -> Result<Value, ErrorData> {
 /// The body must be a non-empty string within
 /// [`McpConfig::params_max_ql_bytes`]; it is then parsed as a single
 /// SurrealQL value via the production parser using the running
-/// datastore's [`CommonConfig`], so operator-set parser recursion
+/// datastore's [`ParserConfig`], so operator-set parser recursion
 /// limits actually apply. Any parse failure surfaces as
 /// `invalid_params` with the parser's message so the LLM can
 /// self-correct.
 fn parse_ql_passthrough(
 	body: &serde_json::Value,
 	mcp: &McpConfig,
-	core: &CommonConfig,
+	core: &ParserConfig,
 ) -> Result<Value, ErrorData> {
 	let s = body.as_str().ok_or_else(|| {
 		crate::error::invalid_params(format!("`{QL_SENTINEL}` value must be a string"))
@@ -331,7 +331,7 @@ fn parse_ql_passthrough(
 pub fn json_to_variables(
 	json: &serde_json::Value,
 	mcp: &McpConfig,
-	core: &CommonConfig,
+	core: &ParserConfig,
 ) -> Result<Variables, ErrorData> {
 	match json {
 		serde_json::Value::Object(map) => {
@@ -358,11 +358,11 @@ mod cap_tests {
 
 	use super::*;
 
-	/// Build a default `(McpConfig, CommonConfig)` pair for tests that
+	/// Build a default `(McpConfig, ParserConfig)` pair for tests that
 	/// don't care about overrides. Returning owned values keeps the
 	/// borrow checker happy for the duration of each test body.
-	fn default_configs() -> (McpConfig, CommonConfig) {
-		(McpConfig::default(), CommonConfig::default())
+	fn default_configs() -> (McpConfig, ParserConfig) {
+		(McpConfig::default(), ParserConfig::default())
 	}
 
 	#[test]

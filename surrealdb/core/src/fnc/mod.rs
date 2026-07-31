@@ -1777,10 +1777,10 @@ fn idiom_name_to_normal(kind: &str, name: &str) -> String {
 #[cfg(test)]
 mod tests {
 	use regex::Regex;
-	use surrealdb_cnf::CommonConfig;
 
 	use crate::dbs::Capabilities;
 	use crate::sql::{Expr, Function};
+	use crate::syn::ParserConfig;
 
 	#[tokio::test]
 	async fn implementations_are_present() {
@@ -1816,7 +1816,7 @@ mod tests {
 			let res = crate::syn::expr_with_capabilities(
 				&format!("{}()", name),
 				&Capabilities::all(),
-				&CommonConfig::default(),
+				&ParserConfig::default(),
 			);
 
 			if let Ok(Expr::FunctionCall(call)) = res {

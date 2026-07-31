@@ -248,7 +248,7 @@ impl ExecOperator for GraphEdgeScan {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 		let direction = self.direction;
 		let edge_tables = self.edge_tables.clone();
@@ -256,7 +256,7 @@ impl ExecOperator for GraphEdgeScan {
 		let target_tables = self.target_tables.clone();
 		let edge_limit = self.limit;
 		let version_expr = self.version.clone();
-		let scan_batch_size = ctx.root().ctx.config.scan_batch_size;
+		let scan_batch_size = ctx.root().ctx.config.exec.scan_batch_size;
 		let ctx = ctx.clone();
 		let fetch_full = output_mode == GraphScanOutput::FullEdge;
 		// A pushed-down `WHERE` predicate, replacing the downstream `Filter`.

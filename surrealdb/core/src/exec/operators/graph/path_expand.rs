@@ -442,7 +442,7 @@ impl ExecOperator for PathExpand {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
-			ctx.root().ctx.config.operator_buffer_size,
+			ctx.root().ctx.config.exec.operator_buffer_size,
 		);
 
 		let source = self.source.clone();
@@ -459,8 +459,8 @@ impl ExecOperator for PathExpand {
 		// Window predicates captured as closures so the stream body stays terse.
 		let emits_at = move |d: u32| d >= min && max.is_none_or(|m| d <= m);
 		let extends_past = move |d: u32| max.is_none_or(|m| d < m);
-		let scan_batch_size = ctx.root().ctx.config.scan_batch_size;
-		let path_row_limit = ctx.root().ctx.config.gql_max_path_rows;
+		let scan_batch_size = ctx.root().ctx.config.exec.scan_batch_size;
+		let path_row_limit = ctx.root().ctx.config.exec.gql_max_path_rows;
 		let dir = scan_dir(direction);
 		let tgt_field = target_field(direction);
 		let ctx = ctx.clone();

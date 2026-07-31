@@ -292,7 +292,7 @@ impl ExecOperator for HashJoin {
 		//    (post-write), then replay the buffered probe rows in the probe phase.
 		//  - neither mutates: construct both eagerly (one shared snapshot, so overlapping the reads
 		//    is safe and faster).
-		let buffer_size = ctx.root().ctx.config.operator_buffer_size;
+		let buffer_size = ctx.root().ctx.config.exec.operator_buffer_size;
 		let build = JoinSide::new(&self.build);
 		let probe = JoinSide::new(&self.probe);
 		let probe_first = probe.mutates() && !build.mutates();
@@ -318,8 +318,8 @@ impl ExecOperator for HashJoin {
 		let join_type = self.join_type;
 		let null_template = self.null_template.clone();
 		let residual = self.residual.clone();
-		let max_rows = ctx.root().ctx.config.gql_max_join_build_rows;
-		let max_output_rows = ctx.root().ctx.config.gql_max_output_rows;
+		let max_rows = ctx.root().ctx.config.exec.gql_max_join_build_rows;
+		let max_output_rows = ctx.root().ctx.config.exec.gql_max_output_rows;
 		let ctx = ctx.clone();
 
 		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {

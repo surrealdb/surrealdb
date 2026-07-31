@@ -497,7 +497,7 @@ impl<'ctx> Planner<'ctx> {
 
 				if let Some(effective_limit) = get_effective_limit_literal(start, limit)
 					&& effective_limit
-						<= self.ctx.config.max_order_limit_priority_queue_size as usize
+						<= self.ctx.config.exec.max_order_limit_priority_queue_size as usize
 				{
 					return Ok(Arc::new(SortTopK::new(input, order_by, effective_limit))
 						as Arc<dyn ExecOperator>);
@@ -651,7 +651,7 @@ impl<'ctx> Planner<'ctx> {
 				// Use heap-based TopK when the effective limit is small.
 				if let Some(effective_limit) = get_effective_limit_literal(start, limit)
 					&& effective_limit
-						<= self.ctx.config.max_order_limit_priority_queue_size as usize
+						<= self.ctx.config.exec.max_order_limit_priority_queue_size as usize
 				{
 					let mut topk = SortTopKByKey::new(computed, sort_keys, effective_limit);
 					// Install the TopK threshold publish side only when the

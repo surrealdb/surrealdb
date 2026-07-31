@@ -1114,7 +1114,9 @@ impl Iterator {
 						// Check if we should use the priority queue optimization
 						if let Some(limit) = self.limit {
 							let effective_limit = self.start.unwrap_or(0) + limit;
-							if effective_limit <= ctx.config.max_order_limit_priority_queue_size {
+							if effective_limit
+								<= ctx.config.exec.max_order_limit_priority_queue_size
+							{
 								let mut res = MemoryOrderedLimit::new(
 									effective_limit as usize,
 									orders.clone(),

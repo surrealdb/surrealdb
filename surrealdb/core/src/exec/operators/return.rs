@@ -76,7 +76,7 @@ impl ExecOperator for ReturnPlan {
 					s,
 					inner.access_mode(),
 					inner.cardinality_hint(),
-					ctx.root().ctx.config.operator_buffer_size,
+					ctx.root().ctx.config.exec.operator_buffer_size,
 				),
 				Err(ctrl) => return Err(ctrl),
 			};

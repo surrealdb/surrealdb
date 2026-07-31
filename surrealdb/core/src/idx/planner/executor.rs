@@ -202,7 +202,7 @@ impl InnerQueryExecutor {
 									&ctx.tx(),
 									ikb,
 									p,
-									&ctx.config.file_allowlist,
+									&ctx.config.idx.file_allowlist,
 								)
 								.await?;
 								let fte = FullTextEntry::new(stk, ctx, opt, &ft, io).await?;

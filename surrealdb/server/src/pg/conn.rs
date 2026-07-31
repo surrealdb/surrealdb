@@ -887,7 +887,7 @@ impl Connection {
 				// so syntax errors surface at Parse (as Postgres does) and the
 				// AST can be cached for repeated Execute without re-parsing.
 				let (query, positional) = rewrite_positional_params(query);
-				let config = self.ds.config();
+				let config = self.ds.parser_config();
 				let ast =
 					syn::parse_with_capabilities(&query, &self.ds.get_capabilities(), &config)
 						.map_err(|e| PgError::syntax(e.to_string()))?;
@@ -1357,7 +1357,7 @@ impl Connection {
 	/// which wraps a multi-statement simple query in an implicit transaction).
 	/// Wrap statements in an explicit `BEGIN..COMMIT` for all-or-nothing.
 	async fn run_surrealql_autocommit(&mut self, sql: &str, out: &mut BytesMut) -> Result<()> {
-		let config = self.ds.config();
+		let config = self.ds.parser_config();
 		let ast = match syn::parse_with_capabilities(sql, &self.ds.get_capabilities(), &config) {
 			Ok(ast) => ast,
 			Err(err) => {

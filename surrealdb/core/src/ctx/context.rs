@@ -9,8 +9,8 @@ use std::time::Duration;
 #[cfg(feature = "surrealism")]
 use anyhow::Context as _;
 use anyhow::{Result, bail};
+use surrealdb_cnf::PROTECTED_PARAM_NAMES;
 use surrealdb_cnf::dynamic::DynamicConfiguration;
-use surrealdb_cnf::{CommonConfig, PROTECTED_PARAM_NAMES};
 use surrealdb_strand::Strand;
 #[cfg(feature = "surrealism")]
 use surrealism_runtime::package::{SurrealismPackage, UnpackOptions};
@@ -28,6 +28,7 @@ use crate::buc::store::ObjectKey;
 use crate::buc::store::ObjectStore;
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider, NamespaceProvider};
 use crate::catalog::{DatabaseDefinition, DatabaseId, Error as CatalogError, NamespaceId};
+use crate::config::RuntimeConfig;
 use crate::ctx::cancel::CancelHandle;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
@@ -148,8 +149,9 @@ pub struct Context {
 	live: bool,
 	/// Optional broker for cross-node live query notifications.
 	broker: Option<Arc<dyn MessageBroker>>,
-	// Executor config
-	pub config: Arc<CommonConfig>,
+	/// The per-layer configuration a running query reads. Crate-internal: these
+	/// are operator knobs, not API.
+	pub(crate) config: Arc<RuntimeConfig>,
 }
 
 impl Debug for Context {
@@ -178,8 +180,8 @@ impl Context {
 			iteration_stage: None,
 			capabilities: Arc::clone(&parent.capabilities),
 			index_stores: IndexStores::new(
-				parent.config.hnsw_cache_size,
-				parent.config.diskann_cache_size,
+				parent.config.idx.hnsw_cache_size,
+				parent.config.idx.diskann_cache_size,
 			),
 			cache: None,
 			index_builder: None,
@@ -431,7 +433,7 @@ impl Context {
 		#[cfg(feature = "http")] http_client: Arc<HttpClient>,
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
 		buckets: BucketsManager,
-		config: Arc<CommonConfig>,
+		config: Arc<RuntimeConfig>,
 		#[cfg(feature = "surrealism")] surrealism_cache: Arc<SurrealismCache>,
 	) -> Result<Context> {
 		let planner_strategy = *capabilities.planner_strategy();
@@ -1235,14 +1237,14 @@ impl Context {
 		let Some(cache) = self.get_surrealism_cache() else {
 			bail!("Surrealism cache is not available");
 		};
-		let max_pool_size = self.config.surrealism_max_pool_size;
-		let max_memory = self.config.surrealism_max_memory;
+		let max_pool_size = self.config.surrealism.surrealism_max_pool_size;
+		let max_memory = self.config.surrealism.surrealism_max_memory;
 		let max_execution_time =
-			self.config.surrealism_max_execution_time.map(Duration::from_millis);
-		let max_kv_entries = self.config.surrealism_max_kv_entries;
-		let max_kv_value_bytes = self.config.surrealism_max_kv_value_bytes;
+			self.config.surrealism.surrealism_max_execution_time.map(Duration::from_millis);
+		let max_kv_entries = self.config.surrealism.surrealism_max_kv_entries;
+		let max_kv_value_bytes = self.config.surrealism.surrealism_max_kv_value_bytes;
 		#[cfg(feature = "http")]
-		let config = Arc::clone(&self.config);
+		let config = self.config.http.clone();
 
 		cache
 			.get_or_insert_with(&lookup, async || {
@@ -1269,7 +1271,7 @@ impl Context {
 					#[cfg(not(storage))]
 					temp_base: None,
 					temp_prefix: &temp_prefix,
-					max_fs_bytes: self.config.surrealism_max_fs_bytes,
+					max_fs_bytes: self.config.surrealism.surrealism_max_fs_bytes,
 				};
 				let package =
 					SurrealismPackage::from_reader(std::io::Cursor::new(surli), &unpack_opts)?;
@@ -1354,7 +1356,6 @@ mod tests {
 	use std::str::FromStr;
 	use std::time::Duration;
 
-	use surrealdb_cnf::CommonConfig;
 	#[cfg(all(feature = "allocation-tracking", feature = "allocator"))]
 	use surrealdb_cnf::MEMORY_THRESHOLD;
 	#[cfg(feature = "http")]
@@ -1372,7 +1373,7 @@ mod tests {
 
 	#[test]
 	fn is_allowed_respects_context_auth_toggle_and_base() {
-		let config = CommonConfig::default();
+		let config = crate::exec::config::ExecConfig::default();
 
 		// Auth disabled: anonymous allowed without IAM; still needs valid NS/DB for bases.
 		{

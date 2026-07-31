@@ -21,8 +21,9 @@ pub use surrealdb_kvs_any::{BackendProvider, Backends, ConnectContext};
 pub mod export;
 
 mod clock;
+mod config;
 mod datastore_error;
-mod ds;
+pub(crate) mod ds;
 mod into;
 mod tr;
 mod tx;
@@ -44,6 +45,7 @@ mod tests;
 pub use api::{
 	GetMultiResult, KeysResult, ScanCursorKeys, ScanCursorVals, ScanResult, Transactable,
 };
+pub(crate) use config::TransactionConfig;
 pub use consts::{
 	COUNT_BATCH_SIZE, ESTIMATED_BYTES_PER_KEY, ESTIMATED_BYTES_PER_KV,
 	INDEX_COMPACTION_QUEUE_BATCH_SIZE, INDEXING_BATCH_MAX_BYTES, INDEXING_BATCH_SIZE,
@@ -54,8 +56,8 @@ pub use consts::{
 pub(crate) use datastore_error::DatastoreError;
 pub(crate) use ds::TransactionFactory;
 pub use ds::{
-	Builder, Datastore, Metric, Metrics, TransactionBuilder, TransactionBuilderFactory,
-	TransactionBuilderParts,
+	Builder, Datastore, LiveQueryEngine, Metric, Metrics, TransactionBuilder,
+	TransactionBuilderFactory, TransactionBuilderParts,
 };
 pub use err::{Error, Result};
 pub use into::IntoBytes;

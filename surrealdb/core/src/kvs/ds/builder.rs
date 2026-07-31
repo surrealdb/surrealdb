@@ -7,8 +7,8 @@ use anyhow::Context as _;
 use anyhow::Result;
 use arc_swap::ArcSwap;
 use async_channel::Sender;
+use surrealdb_cnf::ConfigMap;
 use surrealdb_cnf::dynamic::DynamicConfiguration;
-use surrealdb_cnf::{CommonConfig, ConfigMap};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -16,6 +16,7 @@ use uuid::Uuid;
 use crate::CommunityComposer;
 use crate::buc::BucketStoreProvider;
 use crate::buc::manager::BucketsManager;
+use crate::config::RuntimeConfig;
 use crate::dbs::{Capabilities, MessageBroker};
 use crate::exec::function::FunctionRegistry;
 #[cfg(feature = "http")]
@@ -27,7 +28,7 @@ use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
 use crate::kvs::{
 	Datastore, TransactionBuilder, TransactionBuilderFactory, TransactionBuilderParts,
-	TransactionFactory,
+	TransactionConfig, TransactionFactory,
 };
 use crate::lq::LiveQueryRouter;
 use crate::observe::{ExecutionObserver, NoopObserver};
@@ -293,18 +294,25 @@ impl Builder {
 	) -> Result<Datastore> {
 		let async_event_trigger = Arc::new(Notify::new());
 		let observer = self.observer;
-		let config = Arc::new(self.config.load::<CommonConfig>());
-		let tf =
-			TransactionFactory::new(Arc::clone(&async_event_trigger), builder, Arc::clone(&config))
-				.with_observer(Arc::clone(&observer));
+		let config = Arc::new(RuntimeConfig::load(&self.config));
+		let tf = TransactionFactory::new(
+			Arc::clone(&async_event_trigger),
+			builder,
+			Arc::new(self.config.load::<TransactionConfig>()),
+		)
+		.with_observer(Arc::clone(&observer));
 		let id = self.id.unwrap_or_else(Uuid::new_v4);
 		let capabilities = self.capabilities;
 		let dynamic_configuration = DynamicConfiguration::default();
 		dynamic_configuration.set_query_timeout(self.query_timeout);
 		#[cfg(feature = "http")]
 		let http_client = Arc::new(
-			HttpClient::new(capabilities.allow_net.clone(), capabilities.deny_net.clone(), &config)
-				.context("Could not create http client")?,
+			HttpClient::new(
+				capabilities.allow_net.clone(),
+				capabilities.deny_net.clone(),
+				&config.http,
+			)
+			.context("Could not create http client")?,
 		);
 
 		let datastore = Datastore {
@@ -318,11 +326,14 @@ impl Builder {
 			live_query_router: Arc::new(LiveQueryRouter::new()),
 			http_endpoint: self.http_endpoint,
 			capabilities: ArcSwap::from_pointee(capabilities),
-			index_stores: IndexStores::new(config.hnsw_cache_size, config.diskann_cache_size),
+			index_stores: IndexStores::new(
+				config.idx.hnsw_cache_size,
+				config.idx.diskann_cache_size,
+			),
 			index_builder: IndexBuilder::new(tf.clone()),
 			#[cfg(storage)]
 			temporary_directory: self.temporary_directory,
-			cache: Arc::new(DatastoreCache::new(config.datastore_cache_size)),
+			cache: Arc::new(DatastoreCache::new(config.datastore.datastore_cache_size)),
 			#[cfg(all(feature = "graphql", not(target_family = "wasm")))]
 			graphql_schema_cache: crate::graphql::cache::GraphQLSchemaCache::default(),
 			function_registry: Arc::new(FunctionRegistry::with_builtins()),
@@ -330,12 +341,15 @@ impl Builder {
 			sequences: Sequences::new(tf, id),
 			async_event_trigger,
 			#[cfg(feature = "surrealism")]
-			surrealism_cache: Arc::new(SurrealismCache::new(config.surrealism_cache_size)),
+			surrealism_cache: Arc::new(SurrealismCache::new(
+				config.surrealism.surrealism_cache_size,
+			)),
 			#[cfg(feature = "surrealism")]
 			lazy_surrealism: self.lazy_surrealism,
 			#[cfg(feature = "http")]
 			http_client: ArcSwap::new(http_client),
 			observer,
+			parser_config: Arc::new(self.config.load::<crate::syn::ParserConfig>()),
 			config,
 		};
 		// Under the Router live-query engine, establish the router's baseline
@@ -344,7 +358,7 @@ impl Builder {
 		// strictly after the baseline. A lazy baseline on the first router tick
 		// would otherwise discard events captured in the startup window. Inline
 		// mode never runs the router, so it skips this entirely.
-		if datastore.config.live_query_engine == surrealdb_cnf::LiveQueryEngine::Router {
+		if datastore.config.datastore.live_query_engine == crate::kvs::LiveQueryEngine::Router {
 			let txn = datastore.transaction(crate::kvs::TransactionType::Read).await?;
 			let baseline = txn.safe_timestamp().await?.as_versionstamp();
 			txn.cancel().await?;

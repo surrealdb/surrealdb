@@ -451,7 +451,7 @@ impl BitmapNode {
 			bctx.txn,
 			ikb,
 			ft_params,
-			&frozen_ctx.config.file_allowlist,
+			&frozen_ctx.config.idx.file_allowlist,
 		)
 		.await
 		.context("Failed to open full-text index")?;

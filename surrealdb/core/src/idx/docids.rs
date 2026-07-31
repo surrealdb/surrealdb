@@ -88,7 +88,7 @@ impl TableDocIds {
 	/// Idempotent: concurrent callers on different indexes converge on the same id
 	/// because the `!di` mapping is read first and only a missing mapping triggers
 	/// a sequence allocation. The new id is drawn from the table-scoped
-	/// distributed sequence (batched via `config.table_doc_ids_batch_size`) and
+	/// distributed sequence (batched via `config.idx.table_doc_ids_batch_size`) and
 	/// both the forward (`!di`) and reverse (`!dd`) mappings are written.
 	///
 	/// The forward mapping is claimed with a conditional create (`putc`) rather
@@ -123,7 +123,7 @@ impl TableDocIds {
 				self.ns,
 				self.db,
 				self.tb.clone(),
-				ctx.config.table_doc_ids_batch_size,
+				ctx.config.idx.table_doc_ids_batch_size,
 			)
 			.await?;
 		// Claim the forward mapping. `putc` with no expected value only writes if

@@ -6,6 +6,7 @@
 
 pub use main::run;
 pub(crate) use surrealdb_expr::js::classes;
+pub(crate) mod config;
 mod error;
 mod globals;
 mod main;

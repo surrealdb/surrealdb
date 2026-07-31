@@ -426,7 +426,7 @@ impl<'ctx> Planner<'ctx> {
 	/// instead of growing the native stack.
 	#[inline]
 	fn check_depth(&self) -> Result<(), Error> {
-		if self.depth > self.ctx.config.max_computation_depth {
+		if self.depth > self.ctx.config.exec.max_computation_depth {
 			return Err(ExecError::ComputationDepthExceeded.into());
 		}
 		Ok(())
@@ -924,7 +924,7 @@ impl<'ctx> Planner<'ctx> {
 			} = cur
 			{
 				d += 1;
-				if d > self.ctx.config.max_computation_depth {
+				if d > self.ctx.config.exec.max_computation_depth {
 					return Err(ExecError::ComputationDepthExceeded.into());
 				}
 				cur = inner;

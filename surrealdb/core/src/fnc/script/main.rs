@@ -57,15 +57,15 @@ pub async fn run(
 	let opt = opt.dive(4)?;
 
 	let instant_start = Instant::now();
-	let time_limit = context.config.scripting_max_time_limit;
+	let time_limit = context.config.script.scripting_max_time_limit;
 
 	// Create a JavaScript context
 	let run = js::AsyncRuntime::new()
 		.map_err(|e| anyhow::anyhow!("Failed to create JavaScript runtime: {}", e))?;
 	// Explicitly set max stack size to 256 KiB
-	run.set_max_stack_size(context.config.scripting_max_stack_size).await;
+	run.set_max_stack_size(context.config.script.scripting_max_stack_size).await;
 	// Explicitly set max memory size to 2 MB
-	run.set_memory_limit(context.config.scripting_max_memory_limit).await;
+	run.set_memory_limit(context.config.script.scripting_max_memory_limit).await;
 	// Ensure scripts are cancelled with context
 	let cancellation = context.cancellation();
 	let handler = Box::new(move || cancellation.is_done() || instant_start.elapsed() > time_limit);

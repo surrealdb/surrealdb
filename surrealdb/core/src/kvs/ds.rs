@@ -25,8 +25,8 @@ use futures::{Future, Stream};
 use rand::Rng;
 use rand::distr::{Alphanumeric, SampleString};
 use reblessive::TreeStack;
+use surrealdb_cnf::ConfigMap;
 use surrealdb_cnf::dynamic::DynamicConfiguration;
-use surrealdb_cnf::{CommonConfig, ConfigMap, LiveQueryEngine};
 use surrealdb_kvs::TransactionType;
 use surrealdb_kvs::TransactionType::*;
 use surrealdb_types::{AuthError, Error as TypesError, SurrealValue, object};
@@ -51,6 +51,7 @@ use crate::catalog::providers::{
 	CatalogProvider, DatabaseProvider, NamespaceProvider, NodeProvider, TableProvider, UserProvider,
 };
 use crate::catalog::{Index, NodeLiveQuery, StoredSubscriptionDefinition};
+use crate::config::RuntimeConfig;
 use crate::ctx::{CancelHandle, Context};
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
@@ -65,6 +66,7 @@ use crate::dbs::{
 use crate::doc::AsyncEventRecord;
 use crate::err::{EngineError, Error};
 use crate::exe::FlowResultExt as _;
+use crate::exec::config::ExecConfig;
 use crate::exec::function::FunctionRegistry;
 use crate::expr::model::get_model_path;
 use crate::expr::statements::define::DefineKind;
@@ -98,21 +100,25 @@ use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 #[cfg(test)]
 use crate::kvs::testing::{RetryableConflictSite, maybe_inject_retryable_conflict};
 use crate::kvs::{
-	DatastoreError, Error as KvsError, NORMAL_BATCH_SIZE, is_retryable_transaction_conflict,
+	DatastoreError, Error as KvsError, NORMAL_BATCH_SIZE, TransactionConfig,
+	is_retryable_transaction_conflict,
 };
 use crate::lq::LiveQueryRouter;
 use crate::observe::{ExecutionObserver, NoopObserver};
 use crate::sql::Ast;
 #[cfg(feature = "surrealism")]
 use crate::surrealism::cache::SurrealismCache;
-use crate::syn::ParseError;
 use crate::syn::parser::{ParserSettings, StatementStream};
+use crate::syn::{ParseError, ParserConfig};
 use crate::types::{PublicNotification, PublicValue, PublicVariables};
 use crate::val::convert_value_to_public_value;
 use crate::{CommunityComposer, syn};
 
 mod builder;
+pub(crate) mod config;
+
 pub use builder::Builder;
+pub use config::LiveQueryEngine;
 
 const TARGET: &str = "surrealdb::core::kvs::ds";
 const NODE_DELETE_TIMEOUT: Duration = Duration::from_secs(60);
@@ -262,8 +268,9 @@ pub struct Datastore {
 	/// at the executor boundary.
 	live_query_broker: Option<Arc<dyn MessageBroker>>,
 	/// Per-node live-query router state (the tail cursor over the `lqe`
-	/// keyspace). Only used when `config.live_query_engine` is `Router`, where
-	/// the router is the sole notification delivery path. See [`crate::lq`].
+	/// keyspace). Only used when `config.datastore.live_query_engine` is
+	/// `Router`, where the router is the sole notification delivery path. See
+	/// [`crate::lq`].
 	live_query_router: Arc<LiveQueryRouter>,
 	/// Public HTTP endpoint this datastore publishes on its `Node` catalog row so other
 	/// cluster members can route cross-node messages (e.g. live-query relay) to it.
@@ -304,8 +311,13 @@ pub struct Datastore {
 	lazy_surrealism: bool,
 	// Async event processing trigger
 	async_event_trigger: Arc<Notify>,
-	/// Config
-	config: Arc<CommonConfig>,
+	/// The per-layer configuration every query executed on this datastore
+	/// reaches through its context, plus the datastore's own knobs.
+	config: Arc<RuntimeConfig>,
+	/// The parser depth limits applied to every query text parsed for this
+	/// datastore. Shared with the transports, which decode request bodies
+	/// against the same limits.
+	parser_config: Arc<ParserConfig>,
 	// Http client used to make requests.
 	#[cfg(feature = "http")]
 	http_client: ArcSwap<HttpClient>,
@@ -325,14 +337,15 @@ pub(crate) struct TransactionFactory {
 	/// [`NoopObserver`]; replaced by the datastore's observer when one is
 	/// configured.
 	observer: Arc<dyn ExecutionObserver>,
-	config: Arc<CommonConfig>,
+	/// Limits handed to every transaction this factory opens.
+	config: Arc<TransactionConfig>,
 }
 
 impl TransactionFactory {
 	pub(super) fn new(
 		async_event_trigger: Arc<Notify>,
 		builder: Box<dyn TransactionBuilder>,
-		config: Arc<CommonConfig>,
+		config: Arc<TransactionConfig>,
 	) -> Self {
 		Self {
 			builder: Arc::new(builder),
@@ -616,13 +629,13 @@ impl Datastore {
 			live_query_router: Arc::new(LiveQueryRouter::new()),
 			http_endpoint: self.http_endpoint,
 			index_stores: IndexStores::new(
-				self.config.hnsw_cache_size,
-				self.config.diskann_cache_size,
+				self.config.idx.hnsw_cache_size,
+				self.config.idx.diskann_cache_size,
 			),
 			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
 			#[cfg(storage)]
 			temporary_directory: self.temporary_directory,
-			cache: Arc::new(DatastoreCache::new(self.config.datastore_cache_size)),
+			cache: Arc::new(DatastoreCache::new(self.config.datastore.datastore_cache_size)),
 			#[cfg(all(feature = "graphql", not(target_family = "wasm")))]
 			graphql_schema_cache: crate::graphql::cache::GraphQLSchemaCache::default(),
 			function_registry: Arc::new(FunctionRegistry::with_builtins()),
@@ -631,13 +644,16 @@ impl Datastore {
 			transaction_factory: self.transaction_factory,
 			async_event_trigger: self.async_event_trigger,
 			#[cfg(feature = "surrealism")]
-			surrealism_cache: Arc::new(SurrealismCache::new(self.config.surrealism_cache_size)),
+			surrealism_cache: Arc::new(SurrealismCache::new(
+				self.config.surrealism.surrealism_cache_size,
+			)),
 			#[cfg(feature = "surrealism")]
 			lazy_surrealism: self.lazy_surrealism,
 			#[cfg(feature = "http")]
 			http_client: self.http_client,
 			observer: self.observer,
 			config: self.config,
+			parser_config: self.parser_config,
 		}
 	}
 
@@ -666,13 +682,13 @@ impl Datastore {
 			live_query_router: Arc::new(LiveQueryRouter::new()),
 			http_endpoint: self.http_endpoint.clone(),
 			index_stores: IndexStores::new(
-				self.config.hnsw_cache_size,
-				self.config.diskann_cache_size,
+				self.config.idx.hnsw_cache_size,
+				self.config.idx.diskann_cache_size,
 			),
 			index_builder: IndexBuilder::new(transaction_factory.clone()),
 			#[cfg(storage)]
 			temporary_directory: self.temporary_directory.clone(),
-			cache: Arc::new(DatastoreCache::new(self.config.datastore_cache_size)),
+			cache: Arc::new(DatastoreCache::new(self.config.datastore.datastore_cache_size)),
 			#[cfg(all(feature = "graphql", not(target_family = "wasm")))]
 			graphql_schema_cache: crate::graphql::cache::GraphQLSchemaCache::default(),
 			function_registry: Arc::new(FunctionRegistry::with_builtins()),
@@ -681,13 +697,16 @@ impl Datastore {
 			transaction_factory,
 			async_event_trigger: Arc::clone(&self.async_event_trigger),
 			#[cfg(feature = "surrealism")]
-			surrealism_cache: Arc::new(SurrealismCache::new(self.config.surrealism_cache_size)),
+			surrealism_cache: Arc::new(SurrealismCache::new(
+				self.config.surrealism.surrealism_cache_size,
+			)),
 			#[cfg(feature = "surrealism")]
 			lazy_surrealism: self.lazy_surrealism,
 			#[cfg(feature = "http")]
 			http_client: ArcSwap::new(self.http_client.load_full()),
 			observer: Arc::clone(&self.observer),
 			config: Arc::clone(&self.config),
+			parser_config: Arc::clone(&self.parser_config),
 		}
 	}
 
@@ -711,7 +730,7 @@ impl Datastore {
 	/// The configured write-cardinality limit for statement transactions
 	/// (`transaction_max_write_keys`), or `None` when the guard is disabled.
 	pub(crate) fn transaction_max_write_keys(&self) -> Option<std::num::NonZeroU64> {
-		std::num::NonZeroU64::new(self.config.transaction_max_write_keys)
+		std::num::NonZeroU64::new(self.transaction_factory.config.transaction_max_write_keys)
 	}
 
 	/// Get the configured global query timeout, if any.
@@ -836,7 +855,7 @@ impl Datastore {
 		let http_client = HttpClient::new(
 			capabilities.allow_net.clone(),
 			capabilities.deny_net.clone(),
-			&self.config,
+			&self.config.http,
 		)?;
 		self.capabilities.store(Arc::new(capabilities));
 		#[cfg(feature = "http")]
@@ -954,7 +973,7 @@ impl Datastore {
 				pass,
 				INITIAL_USER_ROLE.to_owned(),
 			);
-			let opt = Options::new(&CommonConfig::default())
+			let opt = Options::new(&ExecConfig::default())
 				.with_auth(Arc::new(Auth::for_root(Role::Owner)));
 			let mut ctx = self.setup_ctx()?;
 			ctx.set_transaction(Arc::clone(&txn));
@@ -2214,11 +2233,9 @@ impl Datastore {
 		// live-query event keyspace, retaining entries for the configured window so
 		// reconnecting/lagging subscribers can still replay. This rides the same
 		// lease and transaction as the changefeed GC above.
-		if self.config.live_query_engine == LiveQueryEngine::Router {
-			catch!(
-				txn,
-				crate::lq::gc::gc_all_at(&lh, &txn, self.config.live_query_retention).await
-			);
+		if self.config.datastore.live_query_engine == LiveQueryEngine::Router {
+			let retention = self.config.datastore.live_query_retention;
+			catch!(txn, crate::lq::gc::gc_all_at(&lh, &txn, retention).await);
 		}
 		// Commit the changes
 		catch!(txn, txn.commit().await);
@@ -2238,7 +2255,7 @@ impl Datastore {
 	#[instrument(level = "trace", target = "surrealdb::core::lq", skip(self))]
 	pub async fn live_query_router_process(&self) -> Result<()> {
 		// Only the Router engine delivers via the router.
-		if self.config.live_query_engine != LiveQueryEngine::Router {
+		if self.config.datastore.live_query_engine != LiveQueryEngine::Router {
 			return Ok(());
 		}
 		crate::lq::router::process(self, &self.live_query_router).await
@@ -3341,7 +3358,7 @@ impl Datastore {
 					ikb,
 					&txn,
 					p,
-					&self.config.file_allowlist,
+					&self.config.idx.file_allowlist,
 				)
 				.await;
 				let _ = txn.cancel().await;
@@ -3366,7 +3383,7 @@ impl Datastore {
 								ikb,
 								&txn,
 								p,
-								&self.config.file_allowlist,
+								&self.config.idx.file_allowlist,
 								plan,
 							)
 							.await
@@ -3690,7 +3707,7 @@ impl Datastore {
 		vars: Option<PublicVariables>,
 	) -> std::result::Result<Vec<QueryResult>, TypesError> {
 		// Parse the SQL query text
-		let ast = syn::parse_with_capabilities(txt, &self.capabilities.load(), &self.config)
+		let ast = syn::parse_with_capabilities(txt, &self.capabilities.load(), &self.parser_config)
 			.map_err(|e| TypesError::validation(e.to_string(), None))?;
 		// Process the AST
 		self.process(ast, sess, vars).await
@@ -3700,7 +3717,7 @@ impl Datastore {
 	#[cfg(feature = "gql")]
 	pub(crate) fn parse_gql(&self, txt: &str) -> std::result::Result<PreparedGqlQuery, TypesError> {
 		// Parse and lower the GQL query text
-		crate::gql::parse_with_capabilities(txt, &self.capabilities.load(), &self.config)
+		crate::gql::parse_with_capabilities(txt, &self.capabilities.load(), &self.parser_config)
 			.map_err(|e| TypesError::validation(e.to_string(), None))
 	}
 
@@ -3792,7 +3809,7 @@ impl Datastore {
 		cancel: CancelHandle,
 	) -> std::result::Result<Vec<QueryResult>, TypesError> {
 		// Parse the SQL query text
-		let ast = syn::parse_with_capabilities(txt, &self.capabilities.load(), &self.config)
+		let ast = syn::parse_with_capabilities(txt, &self.capabilities.load(), &self.parser_config)
 			.map_err(|e| TypesError::validation(e.to_string(), None))?;
 		// Process the AST
 		self.process_with_cancel(ast, sess, vars, cancel).await
@@ -3808,7 +3825,7 @@ impl Datastore {
 		tx: Arc<Transaction>,
 	) -> std::result::Result<Vec<QueryResult>, TypesError> {
 		// Parse the SQL query text
-		let ast = syn::parse_with_capabilities(txt, &self.capabilities.load(), &self.config)
+		let ast = syn::parse_with_capabilities(txt, &self.capabilities.load(), &self.parser_config)
 			.map_err(|e| TypesError::validation(e.to_string(), None))?;
 		// Process the AST with the transaction
 		self.process_with_transaction(ast, sess, vars, tx).await
@@ -3827,7 +3844,7 @@ impl Datastore {
 		cancel: CancelHandle,
 	) -> std::result::Result<Vec<QueryResult>, TypesError> {
 		// Parse the SQL query text
-		let ast = syn::parse_with_capabilities(txt, &self.capabilities.load(), &self.config)
+		let ast = syn::parse_with_capabilities(txt, &self.capabilities.load(), &self.parser_config)
 			.map_err(|e| TypesError::validation(e.to_string(), None))?;
 		// Process the AST with the transaction
 		self.process_with_transaction_and_cancel(ast, sess, vars, tx, cancel).await
@@ -4305,7 +4322,7 @@ impl Datastore {
 		let (ns, db) = crate::iam::check::check_ns_db(sess)?;
 		// Create a new readonly transaction
 		let txn = self.transaction(Read).await?;
-		let batch_size = self.config.export_batch_size;
+		let batch_size = self.config.datastore.export_batch_size;
 		// Return an async export job
 		Ok(async move {
 			// Process the export
@@ -4331,7 +4348,7 @@ impl Datastore {
 	}
 
 	pub fn setup_options(&self, sess: &Session) -> Options {
-		Options::new(&self.config)
+		Options::new(&self.config.exec)
 			.with_ns(sess.ns())
 			.with_db(sess.db())
 			.with_auth(Arc::clone(&sess.au))
@@ -4680,8 +4697,21 @@ impl Datastore {
 		Ok(())
 	}
 
-	pub fn config(&self) -> Arc<CommonConfig> {
+	/// The per-layer configuration this datastore was built with. Cheap to
+	/// clone; the inner handle is an `Arc`. Crate-internal: these are operator
+	/// knobs, not API — callers outside core take the specific settings they
+	/// need, as the server does through [`Self::parser_config`].
+	pub(crate) fn config(&self) -> Arc<RuntimeConfig> {
 		Arc::clone(&self.config)
+	}
+
+	/// The parser depth limits this datastore parses query text with.
+	///
+	/// Transports that decode request bodies (RPC, WebSocket, export) apply the
+	/// same limits, so they read them from here rather than from their own
+	/// defaults. Cheap to clone; the inner handle is an `Arc`.
+	pub fn parser_config(&self) -> Arc<ParserConfig> {
+		Arc::clone(&self.parser_config)
 	}
 
 	/// Retrieve (or generate and cache) the GraphQL schema for the namespace
@@ -5997,7 +6027,7 @@ mod test {
 			.await
 			.unwrap();
 
-		let opt = Options::new(&dbs.config())
+		let opt = Options::new(&dbs.config().exec)
 			.with_ns(Some("test".into()))
 			.with_db(Some("test".into()))
 			.with_max_computation_depth(u32::MAX);

@@ -223,7 +223,7 @@ impl ExecOperator for RecursionOp {
 		let bounds = common::RecursionBounds {
 			min: self.min_depth,
 			max: self.max_depth,
-			system_limit: ctx.ctx().config.idiom_recursion_limit,
+			system_limit: ctx.ctx().config.exec.idiom_recursion_limit,
 		};
 
 		let path = self.path.clone();

@@ -32,9 +32,10 @@ use crate::kvs::CachePolicy;
 
 /// Batch size for full-text result batching.
 ///
-/// Smaller than the default [`surrealdb_cnf::DEFAULT_SCAN_BATCH_SIZE`] because full-text
-/// results are ordered by relevance score, so smaller batches let downstream
-/// operators begin processing sooner.
+/// Smaller than the default
+/// [`ExecConfig::scan_batch_size`](crate::exec::config::ExecConfig::scan_batch_size) because
+/// full-text results are ordered by relevance score, so smaller batches let
+/// downstream operators begin processing sooner.
 const BATCH_SIZE: usize = 100;
 
 /// Full-text search scan operator.
@@ -240,7 +241,7 @@ impl ExecOperator for FullTextScan {
 				txn.as_ref(),
 				ikb,
 				ft_params,
-				&frozen_ctx.config.file_allowlist,
+				&frozen_ctx.config.idx.file_allowlist,
 			)
 			.await
 			.context("Failed to open full-text index")?;
