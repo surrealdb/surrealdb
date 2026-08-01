@@ -115,6 +115,36 @@ args = [
     "warnings",
 ]
 
+# `ci-clippy` lints with `${ALL_FEATURES}`, which enables `surrealism`. Every
+# `cfg(not(feature = "surrealism"))` item is therefore compiled out and never
+# linted by it. This task lints exactly those items by building the crates that
+# carry surrealism-conditional code with the feature off.
+#
+# `--no-default-features` is required, not merely dropping `surrealism` from the
+# feature list: `surrealdb-server`'s default set includes `surrealism`, and the
+# root package's default is `surrealdb-server/default`, so defaults would pull it
+# back in. Clippy only lints the packages named with `--package`, so a crate whose
+# surrealism-off arm needs covering must be listed here even when it is already
+# built as a dependency.
+[tasks.ci-clippy-no-surrealism]
+category = "CI - CHECK"
+description = "Run clippy linting with surrealism disabled"
+command = "cargo"
+args = [
+    "clippy",
+    "--package",
+    "surrealdb-core",
+    "--package",
+    "surrealdb-syn",
+    "--no-default-features",
+    "--features",
+    "surrealdb-core/kv-mem",
+    "--all-targets",
+    "--",
+    "-D",
+    "warnings",
+]
+
 [tasks.ci-clippy-fix]
 category = "CI - CHECK"
 description = "Fix clippy lint issues"

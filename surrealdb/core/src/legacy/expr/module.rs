@@ -99,7 +99,6 @@ pub(crate) async fn surrealism_executable_signature(
 }
 
 #[cfg(not(feature = "surrealism"))]
-
 pub(crate) async fn surrealism_executable_run(
 	_this: &SurrealismExecutable,
 	_stk: &mut Stk,
@@ -162,7 +161,6 @@ pub(crate) async fn silo_executable_signature(
 }
 
 #[cfg(not(feature = "surrealism"))]
-
 pub(crate) async fn silo_executable_run(
 	_this: &SiloExecutable,
 	_stk: &mut Stk,

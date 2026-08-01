@@ -171,6 +171,9 @@ jobs:
       - name: Run clippy
         run: cargo make ci-clippy
 
+      - name: Run clippy (surrealism off)
+        run: cargo make ci-clippy-no-surrealism
+
   clippy-release:
     name: Check clippy (release)
     if: github.ref == 'refs/heads/main'
