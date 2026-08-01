@@ -566,7 +566,9 @@ jobs:
       fail-fast: false
       matrix:
         arch: ${{ (github.event_name == 'merge_group' || github.event_name == 'push') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
-        engine: [mem, surrealkv, rocksdb, tikv]
+        # tikv takes ~30-45 min, far longer than the other engines, so it's
+        # excluded from pull_request and merge_group and only runs post-merge.
+        engine: ${{ github.event_name == 'push' && fromJSON('["mem", "surrealkv", "rocksdb", "tikv"]') || fromJSON('["mem", "surrealkv", "rocksdb"]') }}
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
