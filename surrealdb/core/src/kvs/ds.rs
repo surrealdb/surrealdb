@@ -40,8 +40,8 @@ use uuid::Uuid;
 
 use super::tr::Transactor;
 use super::tx::Transaction;
-use super::version::MajorVersion;
-use super::{INDEX_COMPACTION_QUEUE_BATCH_SIZE, export};
+use super::version::{MajorVersion, MigrationRecord, StorageVersion, VersionHistoryEntry};
+use super::{INDEX_COMPACTION_QUEUE_BATCH_SIZE, export, migration};
 use crate::api::err::ApiError;
 use crate::api::invocation::process_api_request;
 use crate::api::request::ApiRequest;
@@ -86,9 +86,10 @@ use crate::idx::trees::store::IndexStores;
 use crate::key::AnyRange;
 use crate::key::reclaim::{Expunge, ReclaimKind, ReclaimState};
 use crate::key::schema::{
-	DbRoot, IdxRoot, IndexCompactionIxPrefix, IndexCompactionKey, IndexCompactionPrefix, NodeKey,
-	NodeLiveQueryKey, NodeLiveQueryPrefix, NsRoot, ReclaimKey, ReclaimPrefix, SessionKey,
-	SessionPrefix, SubscriptionKey, SubscriptionPrefix, VersionKey,
+	DbRoot, IdxRoot, IndexCompactionIxPrefix, IndexCompactionKey, IndexCompactionPrefix,
+	MigrationKey, MigrationPrefix, NodeKey, NodeLiveQueryKey, NodeLiveQueryPrefix, NsRoot,
+	ReclaimKey, ReclaimPrefix, SessionKey, SessionPrefix, StorageVersionKey, SubscriptionKey,
+	SubscriptionPrefix, VersionHistoryPrefix, VersionKey,
 };
 use crate::key::{KVKey, KVKeyDecode, KVSubspace, KVValue, Key, KeyRange, RawRange, Resumable};
 use crate::kvs::cache::ds::DatastoreCache;
@@ -100,8 +101,7 @@ use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 #[cfg(test)]
 use crate::kvs::testing::{RetryableConflictSite, maybe_inject_retryable_conflict};
 use crate::kvs::{
-	DatastoreError, Error as KvsError, NORMAL_BATCH_SIZE, TransactionConfig,
-	is_retryable_transaction_conflict,
+	DatastoreError, NORMAL_BATCH_SIZE, TransactionConfig, is_retryable_transaction_conflict,
 };
 use crate::lq::LiveQueryRouter;
 use crate::observe::{ExecutionObserver, NoopObserver};
@@ -126,29 +126,6 @@ const NODE_DELETE_TIMEOUT: Duration = Duration::from_secs(60);
 /// The role assigned to the initial user created when starting the server with
 /// credentials for the first time
 const INITIAL_USER_ROLE: &str = "owner";
-
-/// Whether a conditional write (`put_compare_key` / `del_compare_key`) failed
-/// because its condition was not met — the key already existed, was deleted,
-/// or changed since the guard value was read. On last-writer-wins backends
-/// (TiKV) the condition is validated at commit, so this can surface from the
-/// conditional call itself or from the subsequent `commit`; callers must check
-/// both. This is how the durable RPC session writes stay atomic on TiKV, where
-/// a blind `set`/`clr` is last-writer-wins (see the `multiwriter_same_keys_*`
-/// KV coverage).
-///
-/// The error arrives either as a bare [`KvsError`] (e.g. from `commit()`, which
-/// returns the backend error directly) or wrapped as [`Error::Kvs`] (from the
-/// transaction helpers' `map_err(Error::from)`), so both forms are checked —
-/// mirroring [`is_retryable_transaction_conflict`].
-fn is_conditional_write_conflict(err: &anyhow::Error) -> bool {
-	fn is_condition_error(e: &KvsError) -> bool {
-		matches!(e, KvsError::TransactionConditionNotMet | KvsError::TransactionKeyAlreadyExists)
-	}
-	if let Some(e) = err.downcast_ref::<KvsError>() {
-		return is_condition_error(e);
-	}
-	matches!(err.downcast_ref::<Error>(), Some(Error::Kvs(e)) if is_condition_error(e))
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum ShutdownNodeDeleteOutcome {
@@ -250,6 +227,13 @@ pub struct Datastore {
 	transaction_factory: TransactionFactory,
 	/// The unique id of this datastore, used in notifications.
 	id: Uuid,
+	/// Whether this process created the datastore's storage.
+	///
+	/// Latched by [`Self::check_version`], because the underlying signal is
+	/// one-shot: it comes from writing the version key, and a caller that
+	/// retries after a later failure would otherwise see the key already there
+	/// and be told the datastore is pre-existing.
+	created_here: std::sync::atomic::AtomicBool,
 	/// Whether authentication is enabled on this datastore.
 	auth_enabled: bool,
 	/// The maximum duration timeout for running multiple statements in a query.
@@ -642,6 +626,7 @@ impl Datastore {
 			buckets: self.buckets,
 			sequences: Sequences::new(self.transaction_factory.clone(), self.id),
 			transaction_factory: self.transaction_factory,
+			created_here: std::sync::atomic::AtomicBool::new(false),
 			async_event_trigger: self.async_event_trigger,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new(
@@ -695,6 +680,7 @@ impl Datastore {
 			buckets: self.buckets.clone(),
 			sequences: Sequences::new(transaction_factory.clone(), id),
 			transaction_factory,
+			created_here: std::sync::atomic::AtomicBool::new(false),
 			async_event_trigger: Arc::clone(&self.async_event_trigger),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new(
@@ -872,8 +858,16 @@ impl Datastore {
 		SystemClock::new().now()
 	}
 
-	// Initialise the cluster and run bootstrap utilities
-	// Returns the current version and a flag indicating if this is a new datastore
+	/// Verifies the datastore's storage version and applies any data migrations
+	/// it owes, returning that version and whether this process created the
+	/// datastore.
+	///
+	/// **Call this before serving any query against a datastore that may
+	/// predate this build.** A datastore is not fully readable until its
+	/// migrations have run: [`Datastore::new`] and the builder do not call this,
+	/// so an embedder that skips it against pre-3.3 storage sees sequences that
+	/// appear not to exist — which `DEFINE SEQUENCE ... IF NOT EXISTS` will then
+	/// recreate, resetting an allocator that has already issued values.
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn check_version(&self) -> Result<(MajorVersion, bool)> {
 		// Retry because concurrent instances may conflict when writing the version key
@@ -885,8 +879,83 @@ impl Datastore {
 				actual: version.into(),
 			});
 		}
+		// `get_version` reports a datastore as new only on the start that wrote
+		// `!v`. Everything below can fail transiently and be retried by the
+		// caller, and that retry finds the key present — so the flag is latched on
+		// the datastore rather than re-derived, or a caller keying default
+		// namespace creation off it would silently skip that on the second pass.
+		let is_new =
+			self.created_here.fetch_or(is_new, std::sync::atomic::Ordering::SeqCst) || is_new;
+		// Bring the datastore's semantic version stamp up to this build, applying
+		// any data migrations the gap between the two calls for. Not wrapped in
+		// `retry`, which caps each attempt at ten seconds: a migration may run for
+		// much longer, and the driver handles contention itself through a task
+		// lease.
+		migration::run(self, is_new).await?;
 		// Everything ok
 		Ok((version, is_new))
+	}
+
+	/// The full semantic version the datastore has been advanced to.
+	///
+	/// `None` for a datastore last written before 3.3, the release that
+	/// introduced the stamp. Its major version is still available from
+	/// [`Self::get_version`].
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn storage_version(&self) -> Result<Option<StorageVersion>> {
+		let txn = self.transaction(Read).await?;
+		let version = catch!(txn, txn.get_key(&StorageVersionKey {}, None).await);
+		txn.cancel().await?;
+		Ok(version)
+	}
+
+	/// Every version this datastore has been advanced to, oldest first.
+	///
+	/// One entry per version transition, not per startup: a node that starts
+	/// against a datastore already stamped at its own version adds nothing.
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn version_history(&self) -> Result<Vec<VersionHistoryEntry>> {
+		let txn = self.transaction(Read).await?;
+		let range = catch!(txn, VersionHistoryPrefix {}.range());
+		let entries = catch!(txn, txn.getr(range, None).await);
+		txn.cancel().await?;
+		Ok(entries.into_iter().map(|(_, entry)| entry).collect())
+	}
+
+	/// Every data migration applied to this datastore, in the order they were
+	/// declared.
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
+	/// Paired with the ledger id the entry was filed under, which is a
+	/// migration's identity; the name in the record is documentation and may be
+	/// reworded between releases.
+	pub async fn applied_migrations(&self) -> Result<Vec<(u32, MigrationRecord)>> {
+		Ok(self
+			.applied_migration_ids()
+			.await?
+			.into_iter()
+			.filter_map(|(id, record)| record.map(|r| (id, r)))
+			.collect())
+	}
+
+	/// Every applied migration's ledger id, with its record when that record is
+	/// readable by this build.
+	///
+	/// A record written in a revision this build does not know decodes to
+	/// `None` rather than failing the call. The id comes from the key, and the
+	/// key's presence is what marks a migration as applied — so a record this
+	/// build cannot read must still be reportable, since that is exactly the
+	/// state a downgrade needs to be told about.
+	pub async fn applied_migration_ids(&self) -> Result<Vec<(u32, Option<MigrationRecord>)>> {
+		let txn = self.transaction(Read).await?;
+		let range = catch!(txn, MigrationPrefix {}.range());
+		let rows = catch!(txn, txn.getr_raw(range, None).await);
+		txn.cancel().await?;
+		rows.into_iter()
+			.map(|(key, value)| {
+				let id = MigrationKey::decode_key(&key)?.id;
+				Ok((id, MigrationRecord::kv_decode_value(&value, ()).ok()))
+			})
+			.collect()
 	}
 
 	// Initialise the cluster and run bootstrap utilities
@@ -1730,7 +1799,7 @@ impl Datastore {
 				// Cancel after any failed commit (a conflict or otherwise), so
 				// the transaction is rolled back consistently with the `run!`
 				// macro; only the error classification differs.
-				Err(e) if is_conditional_write_conflict(&e) => {
+				Err(e) if super::is_conditional_write_conflict(&e) => {
 					let _ = txn.cancel().await;
 					Ok(false)
 				}
@@ -1741,7 +1810,7 @@ impl Datastore {
 			},
 			Err(e) => {
 				let _ = txn.cancel().await;
-				if is_conditional_write_conflict(&e) {
+				if super::is_conditional_write_conflict(&e) {
 					Ok(false)
 				} else {
 					Err(e)
@@ -1790,7 +1859,7 @@ impl Datastore {
 				// Cancel after any failed commit (a conflict or otherwise), so
 				// the transaction is rolled back consistently with the `run!`
 				// macro; only the error classification differs.
-				Err(e) if is_conditional_write_conflict(&e) => {
+				Err(e) if super::is_conditional_write_conflict(&e) => {
 					let _ = txn.cancel().await;
 					Ok(false)
 				}
@@ -1801,7 +1870,7 @@ impl Datastore {
 			},
 			Err(e) => {
 				let _ = txn.cancel().await;
-				if is_conditional_write_conflict(&e) {
+				if super::is_conditional_write_conflict(&e) {
 					Ok(false)
 				} else {
 					Err(e)
@@ -1852,7 +1921,7 @@ impl Datastore {
 			match txn.del_compare_key(&key, Some(&durable)).await {
 				Ok(()) => match txn.commit().await {
 					Ok(()) => {}
-					Err(e) if is_conditional_write_conflict(&e) => {
+					Err(e) if super::is_conditional_write_conflict(&e) => {
 						let _ = txn.cancel().await;
 					}
 					Err(e) => {
@@ -1862,7 +1931,7 @@ impl Datastore {
 				},
 				Err(e) => {
 					let _ = txn.cancel().await;
-					if !is_conditional_write_conflict(&e) {
+					if !super::is_conditional_write_conflict(&e) {
 						return Err(e);
 					}
 				}
@@ -2002,7 +2071,7 @@ impl Datastore {
 						Ok(()) => match txn.commit().await {
 							Ok(()) => {}
 							// Refreshed concurrently at commit (TiKV): leave it.
-							Err(e) if is_conditional_write_conflict(&e) => {
+							Err(e) if super::is_conditional_write_conflict(&e) => {
 								let _ = txn.cancel().await;
 							}
 							Err(e) => {
@@ -2012,7 +2081,7 @@ impl Datastore {
 						},
 						Err(e) => {
 							let _ = txn.cancel().await;
-							if !is_conditional_write_conflict(&e) {
+							if !super::is_conditional_write_conflict(&e) {
 								return Err(e);
 							}
 						}

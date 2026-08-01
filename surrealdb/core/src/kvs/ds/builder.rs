@@ -316,6 +316,7 @@ impl Builder {
 		);
 
 		let datastore = Datastore {
+			created_here: std::sync::atomic::AtomicBool::new(false),
 			id,
 			transaction_factory: tf.clone(),
 			auth_enabled: self.authenticate,

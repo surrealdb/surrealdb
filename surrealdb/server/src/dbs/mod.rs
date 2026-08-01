@@ -773,6 +773,22 @@ where
 	}
 }
 
+/// Whether a startup failure is a permanent property of the data on disk.
+///
+/// Each of these tells an operator to run a different build or restore an
+/// export; none can be retried into success, and retrying only delays the
+/// message reaching them. Matched on the rendered text because the errors cross
+/// the core boundary as `anyhow::Error`.
+///
+/// `MigrationTimedOut` is deliberately absent: it means another live node is
+/// still applying migrations, which is the one startup condition that a retry
+/// can resolve on its own.
+fn is_permanent_storage_error(e: &anyhow::Error) -> bool {
+	let message = e.to_string();
+	// `OutdatedStorageVersion` and `MigratedBeyondStorageVersion`.
+	message.contains("out-of-date") || message.contains("cannot be read by this one")
+}
+
 #[instrument(level = "trace", target = "surreal::dbs", skip_all)]
 // The return tuple is the established shape of this internal startup
 // entrypoint; the pending import is just one more element on it.
@@ -887,14 +903,15 @@ pub async fn init<C: TransactionBuilderFactory>(
 	let (dbs, router_state) =
 		builder.build_with_factory_path_and_router_state::<C>(&opt.path, composer).await?;
 	// Ensure the storage version is up to date to prevent corruption.
-	// OutdatedStorageVersion is a permanent condition (the data on disk is from
-	// an older version), so retrying it would waste time and delay pod restarts
-	// in Kubernetes environments where operators need fast failure feedback.
+	// The storage-state conditions this can report are permanent — the data on
+	// disk is from another version — so retrying them would waste time and delay
+	// pod restarts in Kubernetes environments where operators need fast failure
+	// feedback.
 	let (_, is_new) = retry_with_timeout_check(
 		"check_version",
 		startup_operation_timeout,
 		|| async { dbs.check_version().await },
-		|e| e.to_string().contains("out-of-date"),
+		is_permanent_storage_error,
 	)
 	.await?;
 	// Create default namespace and database if not disabled

@@ -71,6 +71,31 @@ keyspace! {
 	version = ["!v"] => crate::kvs::version::MajorVersion (also_range);
 
 	root = ["/"] (format_generic) {
+		/// The full semantic version the datastore has been advanced to.
+		///
+		/// Distinct from the bare `!v` key above, which holds only the major
+		/// version and predates this one. Both are written: a node older than
+		/// 3.3 reads `!v` and does not know about this key.
+		storage_version = ["!vs"] => crate::kvs::version::StorageVersion;
+
+		/// One entry in the datastore's version history, written when a node
+		/// advances the stamp above.
+		///
+		/// Ordered by timestamp first so a scan reads the history in the order
+		/// it happened. The node id makes the key unique per writer, so two
+		/// nodes recording a transition never contend for one key — which is
+		/// what backends that resolve concurrent writes by last-writer-wins
+		/// rather than by conflict require.
+		version_history = ["!vh", @, ts: u64, nd: Uuid]
+			=> crate::kvs::version::VersionHistoryEntry;
+
+		/// The record of one applied data migration, keyed by its stable id.
+		///
+		/// The key's presence is what marks the migration as applied, so a
+		/// migration runs at most once per datastore however many nodes start
+		/// at the same moment.
+		migration = ["!mg", @, id: u32] => crate::kvs::version::MigrationRecord;
+
 		/// A namespace definition, keyed by name.
 		namespace = ["!ns", @, ns: Str] => crate::catalog::NamespaceDefinition;
 
@@ -174,19 +199,13 @@ keyspace! {
 
 				/// A sequence definition.
 				///
-				/// The `*sq` tag sits in the same position as a table name, so a
-				/// table whose name begins with `sq` encodes into this subspace and
-				/// a scan of sequence definitions reads that table's rows. The
-				/// waiver records the collision that is already on disk; removing it
-				/// means changing this tag and migrating existing data, at which
-				/// point the waiver must go too, because the checker rejects a
-				/// waiver that no longer matches anything.
-				#[waive(
-					overlaps = tbl,
-					at = "sq",
-					tracked = "sequence definitions share the table band"
-				)]
-				sequence = ["*sq", @, sq: Str] => crate::catalog::SequenceDefinition;
+				/// `!sd` rather than `!sq`, which the `seq` level below already
+				/// owns: a definition at `!sq{name}` would be a strict prefix of
+				/// that level's `!st` and `!ba` keys, so a scan of definitions
+				/// would read allocator state instead. Definitions therefore get a
+				/// subspace of their own, holding nothing else, and listing them
+				/// costs one scan of exactly the definitions.
+				sequence = ["!sd", @, sq: Str] => crate::catalog::SequenceDefinition;
 
 				/// Change-feed entries, ordered by timestamp then table.
 				///
@@ -203,9 +222,10 @@ keyspace! {
 				live_events = ["%", @, ts: Bytes, @, "*", tb: Table]
 					=> crate::lq::event::LiveEvents;
 
-				/// Per-sequence allocator state. The definition lives under `*sq`
+				/// Per-sequence allocator state. The definition lives under `!sd`
 				/// while its state lives here under `!sq`; the two are different
-				/// subspaces for the same logical entity.
+				/// subspaces for the same logical entity, kept apart so that
+				/// listing definitions does not scan allocator state.
 				seq = ["!sq", sq: Str] {
 					seq_batch = ["!ba", @, start: i64] => crate::kvs::sequences::BatchValue;
 					seq_state = ["!st", @, nid: Uuid] => crate::kvs::sequences::SequenceState;
@@ -681,9 +701,12 @@ mod tests {
 	/// decode — a bound names a position between keys.
 	const STORED_CORPUS: &[&[u8]] = &[
 			b"/!ac\0",
+			b"/!mg\x00\x00\x00\x01",
 			b"/!actestac\x00",
 			b"/!ad",
 			b"/!cgtestty\0",
+			b"/!vh\x00\x00\x00\x00\x00\x00\x00\x07\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0",
+			b"/!vs",
 			b"/!eq\x00\x00\x00\x01\x00\x00\x00\x02testtb\0testev\0\0\0\0\0\0\0\0\x01\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10",
 			b"/!ic\0",
 			b"/!id",
@@ -749,8 +772,8 @@ mod tests {
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02&testac\0!gr\0",
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02&testac\0!grtestgr\0",
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02&testac\0!gs",
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*sq\0",
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*sqtest\0",
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!sd\0",
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!sdtest\0",
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!di",
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!di\x03id\0",
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!dp",
@@ -821,7 +844,7 @@ mod tests {
 		// sit between keys, not on one.
 		assert_eq!(
 			(decoded, bounds.len()),
-			(73, 36),
+			(76, 36),
 			"the corpus split moved; entries read as bounds:\n{}",
 			bounds.join("\n")
 		);
@@ -1387,11 +1410,11 @@ mod tests {
 		assert_eq!(RootGrantKey::decode_key(&bytes).unwrap(), grant);
 	}
 
-	/// The waived overlap is real: a table named `sq…` encodes into the sequence
-	/// definitions' byte range. Pinning it here means the day the tag changes,
-	/// this test fails and the waiver comes out with it.
+	/// A table whose name begins with `sq` encodes outside the range that lists
+	/// sequence definitions, and so does a sequence's allocator state. Both are
+	/// adjacent to the `!sd` tag and neither may fall inside it.
 	#[test]
-	fn the_waived_overlap_is_still_real() {
+	fn a_table_named_sq_falls_outside_the_sequence_definitions() {
 		let range = SequencePrefix::new(NamespaceId(1), DatabaseId(2)).range().unwrap();
 		let table = TableName::from("sqfoo");
 		let record = RecordKey::new(
@@ -1404,9 +1427,21 @@ mod tests {
 		.unwrap();
 
 		assert!(
-			*range.start() <= record && record < *range.end(),
+			record < *range.start() || record >= *range.end(),
 			"a record of table `sqfoo` still falls inside the sequence definition range"
 		);
+
+		// `!sq{name}` is a strict prefix of the allocator state, so a definition
+		// tagged `!sq` would sit inside a scan of it; `!sd` keeps them apart.
+		let state = SeqStateKey::new(
+			NamespaceId(1),
+			DatabaseId(2),
+			Cow::Borrowed("foo"),
+			Uuid::from_u128(0),
+		)
+		.encode_key()
+		.unwrap();
+		assert!(state < *range.start() || state >= *range.end());
 	}
 
 	/// Bytes belonging to no declared key are reported, not guessed at.
@@ -1533,8 +1568,8 @@ mod tests {
 			"/**!ml",
 			"/**!pa",
 			"/**!th",
+			"/**!sd",
 			"/**!ti",
-			"/***sq",
 			"/**#*",
 			"/**%*",
 			"/**!sq!ba",

@@ -326,6 +326,20 @@ fn every_datastore_variant() -> Vec<(&'static str, DatastoreError)> {
 				actual: 1,
 			},
 		),
+		(
+			"MigratedBeyondStorageVersion",
+			DatastoreError::MigratedBeyondStorageVersion {
+				stored: "sample".to_string(),
+				running: "sample".to_string(),
+				migrations: "sample".to_string(),
+			},
+		),
+		(
+			"MigrationTimedOut",
+			DatastoreError::MigrationTimedOut {
+				migrations: "sample".to_string(),
+			},
+		),
 	]
 }
 
@@ -1320,7 +1334,13 @@ fn snapshot_covers_every_variant() {
 // (Query twin rationale:) catalog::Error carries a `Query` twin of exec::Error::Query with a
 // byte-identical message, so aggregation classification can raise it below
 // the executor; the wire output of the affected sites is unchanged.
-const UNTYPED_INTERNAL_BUDGET: usize = 170;
+// 172: DatastoreError::MigratedBeyondStorageVersion and MigrationTimedOut abort
+// startup before a client can connect, so they reach an operator through the
+// logs and never travel the wire. They join InvalidStorageVersion and
+// OutdatedStorageVersion, the storage-state errors already counted here; no
+// existing kind describes them, and minting a public ErrorKind for a condition
+// no client observes would be the worse trade.
+const UNTYPED_INTERNAL_BUDGET: usize = 172;
 
 /// Counts variants whose OWN kind is `Internal`.
 ///

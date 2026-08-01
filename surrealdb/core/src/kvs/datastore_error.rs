@@ -92,6 +92,28 @@ pub(crate) enum DatastoreError {
 		expected: u16,
 		actual: u16,
 	},
+
+	/// The data on disk has been migrated by a newer version than this build
+	#[error(
+		"The data stored on disk was migrated by a newer version of SurrealDB \
+		 (Stored: {stored}, Running: {running}) and cannot be read by this one. \
+		 The following data migrations have been applied that this version does not know about: {migrations}. \
+		 Run a version at or above {stored}, or restore from an export taken before the upgrade"
+	)]
+	MigratedBeyondStorageVersion {
+		stored: String,
+		running: String,
+		migrations: String,
+	},
+
+	/// Another node held the migration lease for too long
+	#[error(
+		"Timed out waiting for another node to apply pending data migrations ({migrations}). \
+		 Check whether the migrating node is still running, then restart this one"
+	)]
+	MigrationTimedOut {
+		migrations: String,
+	},
 }
 
 impl LeafError for DatastoreError {
@@ -128,6 +150,12 @@ impl LeafError for DatastoreError {
 			| DatastoreError::QueryBeyondMemoryThreshold
 			| DatastoreError::InvalidStorageVersion
 			| DatastoreError::OutdatedStorageVersion {
+				..
+			}
+			| DatastoreError::MigratedBeyondStorageVersion {
+				..
+			}
+			| DatastoreError::MigrationTimedOut {
 				..
 			} => internal_todo(message),
 		}

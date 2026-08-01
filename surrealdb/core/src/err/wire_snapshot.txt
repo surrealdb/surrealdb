@@ -89,6 +89,8 @@ IndexAlreadyBuilding	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Da
 IndexingBuildingCancelled	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Index building has been cancelled: sample' }
 InvalidStorageVersion	{ cause: NONE, code: -32000, kind: 'Internal', message: 'There was an invalid storage version stored in the database' }
 OutdatedStorageVersion	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The data stored on disk is out-of-date with this version (Expected: 1, Actual: 1). Please follow the upgrade guides in the documentation, or use a clean storage directory if this is intended to be a new instance' }
+MigratedBeyondStorageVersion	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The data stored on disk was migrated by a newer version of SurrealDB (Stored: sample, Running: sample) and cannot be read by this one. The following data migrations have been applied that this version does not know about: sample. Run a version at or above sample, or restore from an export taken before the upgrade' }
+MigrationTimedOut	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Timed out waiting for another node to apply pending data migrations (sample). Check whether the migrating node is still running, then restart this one' }
 BucketPermissions	{ cause: NONE, code: -32000, kind: 'Internal', message: "You don't have permission to get this file in the `sample` bucket" }
 ObsError	{ cause: { cause: NONE, code: -32000, kind: 'Internal', message: 'Operation not supported: sample' }, code: -32000, kind: 'Internal', message: 'Object Store error: Operation not supported: sample' }
 FileAccessDenied	{ cause: NONE, code: -32000, kind: 'Internal', message: 'File access denied: sample' }

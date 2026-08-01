@@ -6,6 +6,11 @@ Generated from the `keyspace!` schema; do not edit by hand.
 
 !v                                                                                                         VersionKey ->  crate::kvs::version::MajorVersion
 /                                                                                                            RootRoot ->  (subtree)
+/!vs                                                                                                StorageVersionKey ->  crate::kvs::version::StorageVersion
+/!vh{ts}{nd}                                                                                        VersionHistoryKey ->  crate::kvs::version::VersionHistoryEntry
+/!vh                                                                                             VersionHistoryPrefix ->  (range)
+/!mg{id}                                                                                                 MigrationKey ->  crate::kvs::version::MigrationRecord
+/!mg                                                                                                  MigrationPrefix ->  (range)
 /!ns{ns}                                                                                                 NamespaceKey ->  crate::catalog::NamespaceDefinition
 /!ns                                                                                                  NamespacePrefix ->  (range)
 /!nd{nd}                                                                                                      NodeKey ->  crate::dbs::node::Node
@@ -79,8 +84,8 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}*{db}!th                                                                                        TbIdBatchPrefix ->  (range)
 /*{ns}*{db}!ti{nid}                                                                                      TbIdStateKey ->  crate::kvs::sequences::SequenceState
 /*{ns}*{db}!ti                                                                                        TbIdStatePrefix ->  (range)
-/*{ns}*{db}*sq{sq}                                                                                        SequenceKey ->  crate::catalog::SequenceDefinition
-/*{ns}*{db}*sq                                                                                         SequencePrefix ->  (range)
+/*{ns}*{db}!sd{sq}                                                                                        SequenceKey ->  crate::catalog::SequenceDefinition
+/*{ns}*{db}!sd                                                                                         SequencePrefix ->  (range)
 /*{ns}*{db}#{ts}*{tb}                                                                                   ChangeFeedKey ->  crate::cf::TableMutations
 /*{ns}*{db}#                                                                                         ChangeFeedPrefix ->  (range)
 /*{ns}*{db}#{ts}                                                                                   ChangeFeedTsPrefix ->  (range)
@@ -205,7 +210,3 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}*{db}*{tb}+{ix}!dr                                                                   DiskannRecordPendingPrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!dw{shard}{id}                                                      DiskannRecordPendingShardKey ->  crate::idx::trees::diskann::DiskAnnRecordPendingUpdate
 /*{ns}*{db}*{tb}+{ix}!dw{shard}                                                  DiskannRecordPendingShardShardPrefix ->  (range)
-
-Waived overlaps
----------------
-sequence vs tbl at `sq`: sequence definitions share the table band

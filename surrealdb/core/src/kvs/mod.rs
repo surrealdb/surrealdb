@@ -34,6 +34,7 @@ pub(crate) mod cache;
 #[cfg(test)]
 pub(crate) mod compat;
 pub(crate) mod index;
+pub(crate) mod migration;
 pub(crate) mod sequences;
 pub(crate) mod slowlog;
 pub(crate) mod tasklease;
@@ -85,6 +86,33 @@ pub(crate) fn is_retryable_transaction_conflict(err: &anyhow::Error) -> bool {
 		err.downcast_ref::<crate::err::Error>(),
 		Some(crate::err::Error::Kvs(kvs_err)) if kvs_err.is_retryable()
 	)
+}
+
+/// Whether a conditional write (`put_compare_key` / `del_compare_key`) failed
+/// because its condition was not met — the key already existed, was deleted,
+/// or changed since the guard value was read. On last-writer-wins backends
+/// (TiKV) the condition is validated at commit, so this can surface from the
+/// conditional call itself or from the subsequent `commit`; callers must check
+/// both. This is how the durable RPC session writes stay atomic on TiKV, where
+/// a blind `set`/`clr` is last-writer-wins (see the `multiwriter_same_keys_*`
+/// KV coverage).
+///
+/// The error arrives either as a bare [`Error`] (e.g. from `commit()`, which
+/// returns the backend error directly) or wrapped as [`crate::err::Error::Kvs`] (from the
+/// transaction helpers' `map_err(Error::from)`), so both forms are checked —
+/// mirroring [`is_retryable_transaction_conflict`].
+pub(crate) fn is_conditional_write_conflict(err: &anyhow::Error) -> bool {
+	fn is_condition_error(e: &self::err::Error) -> bool {
+		matches!(
+			e,
+			self::err::Error::TransactionConditionNotMet
+				| self::err::Error::TransactionKeyAlreadyExists
+		)
+	}
+	if let Some(e) = err.downcast_ref::<self::err::Error>() {
+		return is_condition_error(e);
+	}
+	matches!(err.downcast_ref::<crate::err::Error>(), Some(crate::err::Error::Kvs(e)) if is_condition_error(e))
 }
 
 /// Whether an error reports that the storage engine is shutting down.

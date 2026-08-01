@@ -33,6 +33,8 @@ pub(crate) enum TaskLeaseType {
 	ReclaimTombstones,
 	/// Purging expired durable RPC sessions
 	RpcSessionCleanup,
+	/// Applying pending data migrations at startup
+	DataMigration,
 }
 
 impl Encode for TaskLeaseType {
@@ -44,6 +46,7 @@ impl Encode for TaskLeaseType {
 			TaskLeaseType::ReclaimTombstones => w.write_u16(4),
 			TaskLeaseType::IndexBuildResume => w.write_u16(5),
 			TaskLeaseType::RpcSessionCleanup => w.write_u16(6),
+			TaskLeaseType::DataMigration => w.write_u16(7),
 		}
 	}
 }
@@ -57,6 +60,7 @@ impl<'de> BorrowDecode<'de> for TaskLeaseType {
 			4 => TaskLeaseType::ReclaimTombstones,
 			5 => TaskLeaseType::IndexBuildResume,
 			6 => TaskLeaseType::RpcSessionCleanup,
+			7 => TaskLeaseType::DataMigration,
 			_ => return Err(DecodeError::InvalidFormat),
 		})
 	}
