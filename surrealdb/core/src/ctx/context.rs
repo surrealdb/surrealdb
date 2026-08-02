@@ -1352,6 +1352,37 @@ impl crate::catalog::providers::CancellationProbe for Context {
 	}
 }
 
+/// The context is the index engines' environment.
+///
+/// A `&FrozenContext` — what every caller into the engines already holds —
+/// coerces straight to `&dyn IndexEnv`: both `IndexEnv` and its supertrait
+/// `CancellationProbe` declare a blanket `Arc` forward beside the trait itself.
+impl crate::idx::env::IndexEnv for Context {
+	fn tx(&self) -> Arc<Transaction> {
+		Context::tx(self)
+	}
+
+	fn is_done(&self, count: Option<usize>) -> crate::idx::env::BoxEnvFut<'_> {
+		Box::pin(Context::is_done(self, count))
+	}
+
+	fn index_stores(&self) -> &IndexStores {
+		Context::get_index_stores(self)
+	}
+
+	fn node_id(&self) -> Uuid {
+		Context::node_id(self)
+	}
+
+	fn sequences(&self) -> Result<&Sequences> {
+		Context::try_get_sequences(self)
+	}
+
+	fn config(&self) -> &crate::idx::config::IdxConfig {
+		&self.config.idx
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	#[cfg(feature = "http")]

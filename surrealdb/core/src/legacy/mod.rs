@@ -10,8 +10,10 @@
 //! expression and value layers carry no dependency on the execution
 //! environment.
 
+pub(crate) mod analyzer_function;
 pub(crate) mod config;
 pub(crate) mod expr;
+pub(crate) mod knn;
 pub(crate) mod value;
 
 pub(crate) use self::expr::block::block_compute;

@@ -78,6 +78,7 @@ AnalyzerError	{ cause: NONE, code: -32000, kind: 'Internal', message: "A value c
 HighlightError	{ cause: NONE, code: -32000, kind: 'Internal', message: "A value can't be highlighted: sample" }
 FstError	{ cause: { cause: NONE, code: -32000, kind: 'Internal', message: 'I/O error' }, code: -32000, kind: 'Internal', message: 'FstError error: I/O error' }
 DuplicatedMatchRef	{ cause: NONE, code: -32000, kind: 'Validation', message: 'Duplicated Match reference: 1' }
+FileAccessDenied	{ cause: NONE, code: -32000, kind: 'Internal', message: 'File access denied: sample' }
 ExpiredSession	{ cause: NONE, code: -32000, details: { details: { kind: 'SessionExpired' }, kind: 'Auth' }, kind: 'NotAllowed', message: 'The session has expired' }
 RealtimeDisabled	{ cause: NONE, code: -32604, details: { kind: 'LiveQueryNotSupported' }, kind: 'Configuration', message: 'Unable to perform the realtime query' }
 InvalidTimeout	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Invalid timeout: 1 seconds' }

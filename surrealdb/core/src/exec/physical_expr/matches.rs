@@ -42,6 +42,7 @@ use crate::iam::Action;
 use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms};
 use crate::idx::{Error, IndexKeyBase};
 use crate::kvs::index::filter_online_indexes;
+use crate::legacy::analyzer_function::LegacyAnalyzerFunction;
 use crate::val::{TableName, Value};
 
 /// Per-SELECT registration scope for MATCHES expressions, mirroring which
@@ -381,9 +382,10 @@ impl MatchesOp {
 		.await?;
 
 		let query_terms = {
+			let az_fn = LegacyAnalyzerFunction::new(frozen, opt);
 			let mut stack = reblessive::TreeStack::new();
 			stack
-				.enter(|stk| fti.extract_querying_terms(stk, frozen, opt, self.query.clone()))
+				.enter(|stk| fti.extract_querying_terms(stk, frozen, &az_fn, self.query.clone()))
 				.finish()
 				.await?
 		};
@@ -465,17 +467,11 @@ impl PhysicalExpr for MatchesOp {
 						.as_ref()
 						.ok_or_else(|| anyhow::anyhow!("MatchesOp requires Options context"))?;
 					let matches = {
+						let az_fn = LegacyAnalyzerFunction::new(frozen, opt);
 						let mut stack = reblessive::TreeStack::new();
 						stack
 							.enter(|stk| {
-								fti.matches_value(
-									stk,
-									frozen,
-									opt,
-									qt,
-									self.operator.operator,
-									value,
-								)
+								fti.matches_value(stk, &az_fn, qt, self.operator.operator, value)
 							})
 							.finish()
 							.await?

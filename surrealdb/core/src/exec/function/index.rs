@@ -35,6 +35,7 @@ use crate::idx::IndexKeyBase;
 use crate::idx::ft::MatchRef;
 use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms, Scorer};
 use crate::kvs::index::filter_online_indexes;
+use crate::legacy::analyzer_function::LegacyAnalyzerFunction;
 use crate::val::{Number, RecordId, TableName, Value};
 
 // =========================================================================
@@ -262,10 +263,11 @@ impl MatchContext {
 
 				// Extract query terms
 				let query_terms = {
+					let az_fn = LegacyAnalyzerFunction::new(frozen, opt);
 					let mut stack = reblessive::TreeStack::new();
 					stack
 						.enter(|stk| {
-							fti.extract_querying_terms(stk, frozen, opt, self.query.clone())
+							fti.extract_querying_terms(stk, frozen, &az_fn, self.query.clone())
 						})
 						.finish()
 						.await?

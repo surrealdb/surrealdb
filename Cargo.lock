@@ -6755,7 +6755,8 @@ dependencies = [
  "serde_json",
  "serial_test",
  "surrealdb-cnf",
- "surrealdb-core",
+ "surrealdb-engine-api",
+ "surrealdb-engine-local",
  "surrealdb-iam",
  "surrealdb-kvs",
  "surrealdb-rpc",
@@ -6875,10 +6876,6 @@ dependencies = [
  "ciborium",
  "criterion",
  "dashmap",
- "deunicode",
- "diskann",
- "diskann-utils",
- "diskann-vector",
  "env_logger",
  "ext-sort",
  "flate2",
@@ -6887,7 +6884,6 @@ dependencies = [
  "geo",
  "geo-types",
  "getrandom 0.3.4",
- "half",
  "headers",
  "hex",
  "http",
@@ -6897,8 +6893,6 @@ dependencies = [
  "memchr",
  "mimalloc",
  "mime",
- "ndarray",
- "ndarray-stats",
  "num_cpus",
  "object_store",
  "parking_lot",
@@ -6918,7 +6912,6 @@ dependencies = [
  "roaring",
  "rquickjs",
  "rstest",
- "rust-stemmers",
  "rust_decimal",
  "scrypt",
  "semver",
@@ -6938,6 +6931,7 @@ dependencies = [
  "surrealdb-expr",
  "surrealdb-gql",
  "surrealdb-iam",
+ "surrealdb-idx",
  "surrealdb-kvs",
  "surrealdb-kvs-any",
  "surrealdb-observe",
@@ -6964,7 +6958,6 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
- "vart",
  "wasm-bindgen-futures",
  "wasmtimer",
  "web-time",
@@ -7009,6 +7002,40 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uuid",
+ "web-time",
+]
+
+[[package]]
+name = "surrealdb-engine-api"
+version = "3.3.0-nightly"
+dependencies = [
+ "async-channel",
+ "surrealdb-rpc",
+ "surrealdb-types",
+ "uuid",
+]
+
+[[package]]
+name = "surrealdb-engine-local"
+version = "3.3.0-nightly"
+dependencies = [
+ "anyhow",
+ "async-channel",
+ "criterion",
+ "futures",
+ "rand 0.9.4",
+ "surrealdb-cnf",
+ "surrealdb-core",
+ "surrealdb-engine-api",
+ "surrealdb-rpc",
+ "surrealdb-types",
+ "test-log",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+ "wasm-bindgen-futures",
+ "wasmtimer",
  "web-time",
 ]
 
@@ -7091,6 +7118,56 @@ dependencies = [
  "subtle",
  "thiserror 2.0.18",
  "tracing",
+]
+
+[[package]]
+name = "surrealdb-idx"
+version = "3.3.0-nightly"
+dependencies = [
+ "ahash 0.8.12",
+ "anyhow",
+ "bytes",
+ "dashmap",
+ "deunicode",
+ "diskann",
+ "diskann-utils",
+ "diskann-vector",
+ "flate2",
+ "fst",
+ "half",
+ "ndarray",
+ "ndarray-stats",
+ "parking_lot",
+ "quick_cache",
+ "rand 0.9.4",
+ "reblessive",
+ "revision",
+ "roaring",
+ "rstest",
+ "rust-stemmers",
+ "rust_decimal",
+ "storekey",
+ "surrealdb-catalog",
+ "surrealdb-cnf",
+ "surrealdb-common",
+ "surrealdb-datastore",
+ "surrealdb-expr",
+ "surrealdb-kvs",
+ "surrealdb-kvs-any",
+ "surrealdb-runtime",
+ "surrealdb-sql",
+ "surrealdb-strand",
+ "surrealdb-syn",
+ "surrealdb-types",
+ "temp-dir",
+ "tempfile",
+ "test-log",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "uuid",
+ "vart",
+ "web-time",
 ]
 
 [[package]]

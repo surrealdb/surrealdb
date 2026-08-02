@@ -29,6 +29,7 @@ use crate::iam::Action;
 use crate::idx::trees::KnnCondFilter;
 use crate::idx::trees::gate::CachedTableSelect;
 use crate::kvs::CachePolicy;
+use crate::legacy::knn::LegacyCondition;
 use crate::val::Number;
 
 /// KNN scan operator using an ANN index.
@@ -262,12 +263,11 @@ impl ExecOperator for KnnScan {
 			// `residual_cond` docs for the threat model).
 			let cond_filter = match (residual_cond, ctx.options()) {
 				(Some(cond), Some(opt)) => Some(KnnCondFilter {
-					opt,
-					cond: Arc::new(cond),
-					select_gate: Some(CachedTableSelect::Gate(Arc::new(PhysicalTableSelect::new(
+					select_gate: CachedTableSelect::Gate(Arc::new(PhysicalTableSelect::new(
 						select_permission.clone(),
 						ctx.clone(),
-					)))),
+					))),
+					cond: Arc::new(LegacyCondition::new(frozen_ctx, opt, Arc::new(cond))),
 				}),
 				_ => None,
 			};

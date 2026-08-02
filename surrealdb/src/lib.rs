@@ -73,6 +73,7 @@ use std::sync::{Arc, OnceLock};
 use async_channel::{Receiver, Sender};
 use method::BoxFuture;
 use semver::{Version, VersionReq};
+use surrealdb_engine_api::SessionId;
 #[doc(inline)]
 pub use surrealdb_types::Error;
 use surrealdb_types::NotAllowedError;
@@ -199,17 +200,6 @@ where
 pub(crate) enum ExtraFeatures {
 	Backup,
 	LiveQueries,
-}
-
-#[derive(Debug)]
-#[allow(dead_code)]
-enum SessionId {
-	Initial(Uuid),
-	Clone {
-		old: Uuid,
-		new: Uuid,
-	},
-	Drop(Uuid),
 }
 
 #[derive(Debug, Clone)]

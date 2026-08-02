@@ -187,12 +187,14 @@ category = "CI - CHECK"
 description = "Verify each feature compiles individually"
 run_task = { name = [
     "ci-feature-check-sdk",
+    "ci-feature-check-engine-local",
     "ci-feature-check-core",
     "ci-feature-check-server",
     "ci-feature-check-kvs",
     "ci-feature-check-kvs-any",
     "ci-feature-check-datastore",
     "ci-feature-check-runtime",
+    "ci-feature-check-idx",
 ], fork = true, parallel = true }
 
 [tasks.ci-feature-check-sdk]
@@ -210,6 +212,22 @@ args = [
     "--exclude-features",
     "kv-indxdb",
     "--exclude-no-default-features",
+]
+
+[tasks.ci-feature-check-engine-local]
+category = "CI - CHECK"
+description = "Verify each embedded engine feature compiles individually"
+install_crate = "cargo-hack"
+env = { RUSTFLAGS = "-D warnings" }
+command = "cargo"
+args = [
+    "hack",
+    "check",
+    "--package",
+    "surrealdb-engine-local",
+    "--each-feature",
+    "--exclude-features",
+    "kv-indxdb",
 ]
 
 [tasks.ci-feature-check-core]
@@ -284,6 +302,23 @@ args = [
     "--package",
     "surrealdb-runtime",
     "--each-feature",
+]
+
+[tasks.ci-feature-check-idx]
+category = "CI - CHECK"
+description = "Verify each surrealdb-idx feature compiles individually"
+install_crate = "cargo-hack"
+env = { RUSTFLAGS = "-D warnings" }
+command = "cargo"
+args = [
+    "hack",
+    "check",
+    "--package",
+    "surrealdb-idx",
+    "--each-feature",
+    # Needs a running TiKV cluster's client stack; the `tikv` lane covers it.
+    "--exclude-features",
+    "kv-tikv",
 ]
 
 [tasks.ci-feature-check-server]
@@ -1105,7 +1140,29 @@ args = [
     "${@}",
 ]
 
-[tasks.bench-target]
+# The `lib-*` targets drive the datastore directly and live with the embedded
+# engine; the `sdk-*` targets drive the SDK's public API. Each half is a
+# separate benchmark binary, so the two dispatch tasks below differ only in the
+# package, the bench name, and where the feature set comes from: the engine
+# crate takes one storage backend per target, the SDK takes `BENCH_FEATURES`
+# because `sdk-ws` needs a protocol feature rather than a backend.
+[tasks.bench-lib-target]
+private = true
+category = "CI - BENCHMARK"
+command = "cargo"
+args = [
+    "bench",
+    "--package",
+    "surrealdb-engine-local",
+    "--bench",
+    "datastore",
+    "--no-default-features",
+    "--features",
+    "${BENCH_LIB_FEATURES}",
+    "${@}",
+]
+
+[tasks.bench-sdk-target]
 private = true
 category = "CI - BENCHMARK"
 command = "cargo"
@@ -1124,44 +1181,44 @@ args = [
 [tasks.bench-lib-mem]
 category = "CI - BENCHMARK"
 description = "Run library benchmarks with the in-memory engine"
-env = { BENCH_DATASTORE_TARGET = "lib-mem" }
-run_task = { name = ["bench-target"] }
+env = { BENCH_DATASTORE_TARGET = "lib-mem", BENCH_LIB_FEATURES = "kv-mem" }
+run_task = { name = ["bench-lib-target"] }
 
 [tasks.bench-lib-rocksdb]
 category = "CI - BENCHMARK"
 description = "Run library benchmarks with the RocksDB engine"
-env = { BENCH_DATASTORE_TARGET = "lib-rocksdb" }
-run_task = { name = ["bench-target"] }
+env = { BENCH_DATASTORE_TARGET = "lib-rocksdb", BENCH_LIB_FEATURES = "kv-rocksdb" }
+run_task = { name = ["bench-lib-target"] }
 
 [tasks.bench-lib-surrealkv]
 category = "CI - BENCHMARK"
 description = "Run library benchmarks with the SurrealKV engine"
-env = { BENCH_DATASTORE_TARGET = "lib-surrealkv" }
-run_task = { name = ["bench-target"] }
+env = { BENCH_DATASTORE_TARGET = "lib-surrealkv", BENCH_LIB_FEATURES = "kv-surrealkv" }
+run_task = { name = ["bench-lib-target"] }
 
 [tasks.bench-sdk-mem]
 category = "CI - BENCHMARK"
 description = "Run SDK benchmarks with the in-memory engine"
 env = { BENCH_DATASTORE_TARGET = "sdk-mem" }
-run_task = { name = ["bench-target"] }
+run_task = { name = ["bench-sdk-target"] }
 
 [tasks.bench-sdk-rocksdb]
 category = "CI - BENCHMARK"
 description = "Run SDK benchmarks with the RocksDB engine"
 env = { BENCH_DATASTORE_TARGET = "sdk-rocksdb" }
-run_task = { name = ["bench-target"] }
+run_task = { name = ["bench-sdk-target"] }
 
 [tasks.bench-sdk-surrealkv]
 category = "CI - BENCHMARK"
 description = "Run SDK benchmarks with the SurrealKV engine"
 env = { BENCH_DATASTORE_TARGET = "sdk-surrealkv" }
-run_task = { name = ["bench-target"] }
+run_task = { name = ["bench-sdk-target"] }
 
 [tasks.bench-sdk-ws]
 category = "CI - BENCHMARK"
 description = "Run SDK benchmarks with the WebSocket engine"
 env = { BENCH_DATASTORE_TARGET = "sdk-ws" }
-run_task = { name = ["bench-target"] }
+run_task = { name = ["bench-sdk-target"] }
 
 # --------------------------------------------------
 # Run all required checks for PR merge

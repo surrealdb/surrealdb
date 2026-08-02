@@ -86,6 +86,7 @@ surrealdb-cnf = { workspace = true }
 surrealdb-rpc = { workspace = true }
 surrealdb-runtime = { workspace = true }
 surrealdb-iam = { workspace = true }
+surrealdb-idx = { workspace = true }
 surrealdb-observe = { workspace = true }
 surrealdb-kvs = { workspace = true }
 common = { workspace = true }
@@ -112,7 +113,6 @@ revision = { workspace = true }
 storekey.workspace = true
 surrealdb-types = { workspace = true }
 surrealdb-collections = { workspace = true }
-vart.workspace = true
 
 # Other crates
 ahash.workspace = true
@@ -128,8 +128,6 @@ bytes.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 ciborium.workspace = true
 dashmap.workspace = true
-deunicode.workspace = true
-fst.workspace = true
 futures.workspace = true
 geo = { workspace = true, features = ["use-serde"] }
 geo-types = { workspace = true }
@@ -138,8 +136,6 @@ hex.workspace = true
 ipnet.workspace = true
 md-5.workspace = true
 memchr.workspace = true
-ndarray.workspace = true
-ndarray-stats.workspace = true
 num_cpus.workspace = true
 object_store.workspace = true
 parking_lot.workspace = true
@@ -153,7 +149,6 @@ rayon.workspace = true
 regex.workspace = true
 roaring = { workspace = true, features = ["serde"] }
 rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
-rust-stemmers.workspace = true
 scrypt.workspace = true
 semver = { workspace = true, features = ["serde"] }
 serde = { workspace = true, features = ["derive", "rc"] }
@@ -177,7 +172,6 @@ reqwest = { workspace = true, default-features = false, features = [
 ], optional = true }
 tempfile = { workspace = true, optional = true }
 headers = "0.4.1"
-half.workspace = true
 mime = "0.3.17"
 
 # WASM DEPENDENCY CONFIGURATION
@@ -193,17 +187,6 @@ tokio-util.workspace = true
 uuid = { workspace = true, features = ["serde", "js", "v4", "v7"] }
 wasm-bindgen-futures.workspace = true
 wasmtimer = { workspace = true, default-features = false, features = ["tokio"] }
-
-# DISKANN DEPENDENCY CONFIGURATION
-# DiskANN (Microsoft's `diskann` crate) is 64-bit-only by design: its `IntoUsize`
-# trait is implemented only for `target_pointer_width = "64"` and panics on other
-# widths. Restrict the dependency to non-WASM 64-bit targets so `surrealdb-core` still
-# compiles on 32-bit targets (i686, armv7, …); HNSW remains the portable vector index
-# there. The matching source gate is the `diskann` cfg set in build.rs.
-[target.'cfg(all(not(target_family = "wasm"), target_pointer_width = "64"))'.dependencies]
-diskann.workspace = true
-diskann-utils.workspace = true
-diskann-vector.workspace = true
 
 # NON-WASM DEPENDENCY CONFIGURATION
 # Note: surrealism-runtime is only available on non-WASM targets
@@ -238,6 +221,7 @@ mimalloc = { workspace = true, optional = true }
 # DEVELOPMENT DEPENDENCIES
 [dev-dependencies]
 surrealdb-datastore = { workspace = true, features = ["test-hooks"] }
+fst.workspace = true
 surrealdb-kvs = { workspace = true, features = ["test-inc-timestamp"] }
 ast = { workspace = true }
 parser = { workspace = true }

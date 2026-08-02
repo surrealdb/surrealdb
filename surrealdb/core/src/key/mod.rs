@@ -29,11 +29,8 @@
 //! The layout itself, and the map generated from it, live with the keyspace
 //! in [`surrealdb_datastore::key`].
 
-pub(crate) mod mac;
-
 // The keyspace moved to the crate that owns the transaction; these keep every
 // `crate::key::schema::…` path in core resolving.
-pub(crate) use mac::impl_kv_value_revisioned;
 pub(crate) use surrealdb_datastore::key::{reclaim, schema};
 // `RawRange::every_key` is reached by the language-test harness from outside the
 // crate, so the type itself has to be nameable there.

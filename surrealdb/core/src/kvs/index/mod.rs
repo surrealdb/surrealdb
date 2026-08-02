@@ -47,9 +47,8 @@ pub(crate) use surrealdb_datastore::values::index_build::PrimaryAppending;
 // What a build persists is part of the keyspace, so it is declared below this
 // layer; the coordination protocol above reads it from there.
 pub(crate) use surrealdb_datastore::values::index_build::{
-	Appending, AppendingId, BatchId, BuildGeneration, BuildTicket, BuildTicketMutationSeq,
-	IndexBuildPhase, IndexBuildReportStatus, IndexBuildReservation, IndexBuildState,
-	PrimaryAppendingTicket,
+	Appending, BatchId, BuildGeneration, BuildTicket, BuildTicketMutationSeq, IndexBuildPhase,
+	IndexBuildReportStatus, IndexBuildReservation, IndexBuildState, PrimaryAppendingTicket,
 };
 use web_time::Instant;
 

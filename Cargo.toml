@@ -12,9 +12,12 @@ members = [
     "surrealdb/core",
     "surrealdb/datastore",
     "surrealdb/catalog",
+    "surrealdb/engine-api",
+    "surrealdb/engine-local",
     "surrealdb/expr",
     "surrealdb/gql",
     "surrealdb/iam",
+    "surrealdb/idx",
     "surrealdb/keyspace-macro",
     "surrealdb/kvs",
     "surrealdb/kvs-any",
@@ -78,6 +81,8 @@ surrealdb-strand = { version = "3.3.0-nightly", path = "surrealdb/strand", defau
 surrealdb-syn = { version = "3.3.0-nightly", path = "surrealdb/syn" }
 surrealdb-core = { version = "3.3.0-nightly", path = "surrealdb/core", default-features = false }
 surrealdb-datastore = { version = "3.3.0-nightly", path = "surrealdb/datastore" }
+surrealdb-engine-api = { version = "3.3.0-nightly", path = "surrealdb/engine-api" }
+surrealdb-engine-local = { version = "3.3.0-nightly", path = "surrealdb/engine-local", default-features = false }
 surrealdb-server = { version = "3.3.0-nightly", path = "surrealdb/server", default-features = false }
 surrealdb-mcp = { version = "3.3.0-nightly", path = "surrealdb/mcp", default-features = false }
 surrealdb-types = { version = "3.3.0-nightly", path = "surrealdb/types" }
@@ -91,6 +96,7 @@ surrealdb-cnf = { version = "3.3.0-nightly", path = "surrealdb/cnf" }
 surrealdb-runtime = { version = "3.3.0-nightly", path = "surrealdb/runtime" }
 surrealdb-rpc = { version = "3.3.0-nightly", path = "surrealdb/rpc" }
 surrealdb-iam = { version = "3.3.0-nightly", path = "surrealdb/iam" }
+surrealdb-idx = { version = "3.3.0-nightly", path = "surrealdb/idx" }
 surrealdb-observe = { version = "3.3.0-nightly", path = "surrealdb/observe" }
 surrealdb-keyspace-macro = { version = "3.3.0-nightly", path = "surrealdb/keyspace-macro" }
 surrealdb-kvs = { version = "3.3.0-nightly", path = "surrealdb/kvs" }

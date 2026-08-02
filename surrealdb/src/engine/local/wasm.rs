@@ -1,25 +1,13 @@
 use std::collections::HashSet;
-use std::sync::Arc;
-use std::task::Poll;
 
-use async_channel::{Receiver, Sender};
-use futures::stream::poll_fn;
-use futures::{FutureExt, StreamExt};
-use surrealdb_core::iam::Level;
-use surrealdb_core::kvs::Datastore;
-use surrealdb_core::options::EngineOptions;
 use tokio::sync::watch;
-use tokio_util::sync::CancellationToken;
 use wasm_bindgen_futures::spawn_local;
 
-use crate::conn::{self, Route, Router};
-use crate::engine::local::{Db, SessionError};
-use crate::engine::tasks;
+use crate::conn::{self, Router};
+use crate::engine::local::{Db, local_config};
 use crate::method::BoxFuture;
-use crate::opt::auth::Root;
 use crate::opt::{Endpoint, WaitFor};
-use crate::types::HashMap;
-use crate::{ExtraFeatures, Result, SessionClone, SessionId, Surreal};
+use crate::{ExtraFeatures, Result, SessionClone, Surreal};
 
 impl crate::Connection for Db {}
 impl conn::Sealed for Db {
@@ -39,7 +27,12 @@ impl conn::Sealed for Db {
 			let config = address.config.clone();
 			let session_clone = session_clone.unwrap_or_else(SessionClone::new);
 
-			spawn_local(run_router(address, conn_tx, route_rx, session_clone.receiver.clone()));
+			spawn_local(surrealdb_engine_local::wasm::run_router(
+				local_config(address),
+				conn_tx,
+				route_rx,
+				session_clone.receiver.clone(),
+			));
 
 			conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
 
@@ -56,184 +49,4 @@ impl conn::Sealed for Db {
 			Ok((router, waiter, session_clone).into())
 		})
 	}
-}
-
-pub(crate) async fn run_router(
-	address: Endpoint,
-	conn_tx: Sender<Result<()>>,
-	route_rx: Receiver<Route>,
-	session_rx: Receiver<SessionId>,
-) {
-	let configured_root = match address.config.auth {
-		Level::Root => Some(Root {
-			username: address.config.username,
-			password: address.config.password,
-		}),
-		_ => None,
-	};
-
-	let builder = Datastore::builder()
-		.with_query_timeout(address.config.query_timeout)
-		.with_transaction_timeout(address.config.transaction_timeout)
-		.with_auth(configured_root.is_some());
-
-	let (notify, builder) = if address.config.capabilities.allows_live_query_notifications() {
-		let (send, recv) =
-			surrealdb_core::channel::bounded(surrealdb_core::cnf::NOTIFICATIONS_CHANNEL_SIZE);
-		(Some(recv), builder.with_notify(send))
-	} else {
-		(None, builder)
-	};
-
-	let kvs = match builder.build_with_path(&address.path).await {
-		Ok(kvs) => {
-			if let Err(error) = kvs.check_version().await {
-				conn_tx.send(Err(crate::Error::internal(error.to_string()))).await.ok();
-				return;
-			};
-			if let Err(error) = kvs.bootstrap().await {
-				conn_tx.send(Err(crate::Error::internal(error.to_string()))).await.ok();
-				return;
-			}
-			// If a root user is specified, setup the initial datastore credentials
-			if let Some(root) = &configured_root
-				&& let Err(error) = kvs.initialise_credentials(&root.username, &root.password).await
-			{
-				conn_tx.send(Err(crate::Error::internal(error.to_string()))).await.ok();
-				return;
-			}
-			conn_tx.send(Ok(())).await.ok();
-			kvs
-		}
-		Err(error) => {
-			conn_tx.send(Err(crate::Error::internal(error.to_string()))).await.ok();
-			return;
-		}
-	};
-
-	let router_state = super::RouterState {
-		kvs: Arc::new(kvs),
-		sessions: HashMap::new(),
-	};
-
-	let canceller = CancellationToken::new();
-
-	let mut opt = EngineOptions::default();
-	if let Some(interval) = address.config.node_membership_refresh_interval {
-		opt.node_membership_refresh_interval = interval;
-	}
-	if let Some(interval) = address.config.node_membership_check_interval {
-		opt.node_membership_check_interval = interval;
-	}
-	if let Some(interval) = address.config.node_membership_cleanup_interval {
-		opt.node_membership_cleanup_interval = interval;
-	}
-	if let Some(interval) = address.config.changefeed_gc_interval {
-		opt.changefeed_gc_interval = interval;
-	}
-	let tasks = tasks::init(router_state.kvs.clone(), canceller.clone(), &opt);
-
-	let mut notify = notify.map(Box::pin);
-	let mut notification_stream = poll_fn(move |cx| match &mut notify {
-		Some(rx) => rx.poll_next_unpin(cx),
-		// return poll pending so that this future is never woken up again and therefore not
-		// constantly polled.
-		None => Poll::Pending,
-	});
-
-	#[allow(unreachable_code)]
-	loop {
-		// use the less ergonomic futures::select as tokio::select is not available.
-		futures::select! {
-			session = session_rx.recv().fuse() => {
-				let Ok(session_id) = session else {
-					break
-				};
-				router_state.handle_session(session_id).await;
-			}
-			route = route_rx.recv().fuse() => {
-				let Ok(route) = route else {
-					// termination requested
-					break
-				};
-				// `resolve_route_session` drains any session-lifecycle events enqueued
-				// before this route, so a freshly registered/cloned session is applied
-				// before the lookup (see its docs for the ordering guarantee).
-				match router_state
-					.resolve_route_session(&session_rx, route.request.session_id)
-					.await
-				{
-					Ok(state) => {
-						let kvs = router_state.kvs.clone();
-						spawn_local(async move {
-							match super::router(&kvs, &state, route.request.command)
-								.await
-							{
-								Ok(value) => {
-									route.response.send(Ok(value)).await.ok();
-								}
-								Err(error) => {
-									route.response.send(Err(error)).await.ok();
-								}
-							}
-						});
-					}
-					Err(error) => {
-						route.response
-							.send(Err(crate::engine::session_error_to_error(error)))
-							.await
-							.ok();
-					}
-				}
-			}
-			notification = notification_stream.next().fuse() => {
-				let Some(notification) = notification else {
-					continue
-				};
-				let Some(session_id) = notification.session.map(|x| x.into_inner()) else {
-					continue
-				};
-
-				let live_query_id = notification.id.into_inner();
-
-				match router_state.sessions.get(&session_id) {
-					Some(Ok(state)) => {
-						match state.live_queries.get(&live_query_id) {
-							Some(sender) => {
-								let kvs = router_state.kvs.clone();
-								let vars = state.vars.read().await.clone();
-								let session = state.session.read().await.clone();
-								spawn_local(async move {
-									if sender.send(Ok(notification)).await.is_err() {
-										state.live_queries.remove(&live_query_id);
-										if let Err(error) =
-											super::kill_live_query(&kvs, live_query_id, &session, vars).await
-										{
-											warn!("Failed to kill live query '{live_query_id}'; {error}");
-										}
-									}
-								});
-							}
-							None => {
-								warn!("Failed to find live query '{live_query_id}' for session '{session_id:?}'");
-							}
-						}
-					}
-					Some(Err(error)) => {
-						warn!("Failed to find session '{session_id:?}' for live query '{live_query_id}'; {error:?}");
-					}
-					None => {
-						let error = crate::engine::session_error_to_error(SessionError::NotFound(session_id));
-						warn!("Failed to find session '{session_id:?}' for live query '{live_query_id}'; {error}");
-					}
-				}
-			}
-		}
-	}
-	// Shutdown and stop closed tasks
-	canceller.cancel();
-	// Wait for background tasks to finish
-	tasks.resolve().await.ok();
-	// Delete this node from the cluster
-	router_state.kvs.shutdown().await.ok();
 }

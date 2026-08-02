@@ -54,6 +54,14 @@ pub use surrealdb_datastore::{IntoBytes, into};
 pub(crate) use surrealdb_datastore::{
 	TransactionConfig, TransactionFactory, cache, sequences, tasklease, tr, tx, util, version,
 };
+// Recognising a storage failure descends with the transaction layer: the code
+// that classifies one sits on both sides of the crate boundary. Both shapes stay
+// recognised from below because recognition follows the source chain instead of
+// naming `crate::err::Error::Kvs`, which is the wrapper the layer above puts on
+// a storage failure re-raised from a function typed on core's error.
+pub(crate) use surrealdb_datastore::{
+	is_retryable_transaction_conflict, is_shutdown_error, storage_error,
+};
 #[cfg(any(
 	feature = "kv-mem",
 	feature = "kv-rocksdb",
@@ -69,28 +77,6 @@ pub use tr::Transactor;
 pub use tx::Transaction;
 
 pub(crate) use crate::catalog::providers::CachePolicy;
-
-/// Recover a storage failure from an [`anyhow::Error`], whichever shape it took.
-///
-/// A storage error reaches `anyhow` two ways: raised bare by the transactor, or
-/// wrapped in [`crate::err::Error::Kvs`] by a function typed on core's error.
-/// Callers should not have to know which, so every check goes through here rather
-/// than matching one shape and quietly missing the other. Matching only the
-/// wrapped shape is the more dangerous mistake, because it compiles, reads
-/// correctly, and turns a recognised condition into an unrecognised one.
-pub(crate) fn storage_error(err: &anyhow::Error) -> Option<&self::err::Error> {
-	if let Some(kvs_err) = err.downcast_ref::<self::err::Error>() {
-		return Some(kvs_err);
-	}
-	match err.downcast_ref::<crate::err::Error>() {
-		Some(crate::err::Error::Kvs(kvs_err)) => Some(kvs_err),
-		_ => None,
-	}
-}
-
-pub(crate) fn is_retryable_transaction_conflict(err: &anyhow::Error) -> bool {
-	storage_error(err).is_some_and(self::err::Error::is_retryable)
-}
 
 /// Whether a conditional write (`put_compare_key` / `del_compare_key`) failed
 /// because its condition was not met — the key already existed, was deleted,
@@ -112,16 +98,6 @@ pub(crate) fn is_conditional_write_conflict(err: &anyhow::Error) -> bool {
 		)
 	}
 	storage_error(err).is_some_and(is_condition_error)
-}
-
-/// Whether an error reports that the storage engine is shutting down.
-///
-/// Shutdown-class failures are transient from the cluster's perspective: the
-/// interrupted work is safe to retry after the process restarts. Callers that
-/// persist failure state (such as the concurrent index builder) must not
-/// record them as permanent errors.
-pub(crate) fn is_shutdown_error(err: &anyhow::Error) -> bool {
-	matches!(storage_error(err), Some(self::err::Error::Shutdown))
 }
 
 // The fault-injection registry descends with the transaction layer: the code that

@@ -80,7 +80,8 @@ pub async fn clone_creates_new_session(new_db: impl CreateDb) {
 /// This is an end-to-end guard across every engine backend, not a deterministic
 /// reproducer: the router's `biased` select usually processes the session event
 /// first, so the race rarely fires here. The deterministic regression test for
-/// the fix is `engine::local::tests::resolve_route_session_drains_pending_events`,
+/// the fix is `surrealdb-engine-local`'s
+/// `router::tests::resolve_route_session_drains_pending_events`,
 /// which drives the router's actual route-resolution path.
 /// See https://github.com/surrealdb/spectron/pull/70.
 pub async fn clone_then_immediate_query(new_db: impl CreateDb) {

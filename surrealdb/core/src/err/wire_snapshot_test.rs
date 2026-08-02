@@ -286,6 +286,7 @@ fn every_idx_variant() -> Vec<(&'static str, IdxError)> {
 				mr: 1,
 			},
 		),
+		("FileAccessDenied", IdxError::FileAccessDenied("sample".to_string())),
 	]
 }
 
@@ -1262,7 +1263,7 @@ fn coverage() -> Vec<(usize, usize, &'static str)> {
 		),
 		(
 			every_idx_variant().len(),
-			declared_variants(include_str!("../idx/error.rs"), "Error"),
+			declared_variants(include_str!("../../../idx/src/error.rs"), "Error"),
 			"idx::Error",
 		),
 		(
@@ -1340,7 +1341,10 @@ fn snapshot_covers_every_variant() {
 // OutdatedStorageVersion, the storage-state errors already counted here; no
 // existing kind describes them, and minting a public ErrorKind for a condition
 // no client observes would be the worse trade.
-const UNTYPED_INTERNAL_BUDGET: usize = 172;
+// 173: idx::Error carries a `FileAccessDenied` twin of the buc variant with a
+// byte-identical message, so the mapper allowlist is enforced inside idx; the
+// wire output of the affected sites is unchanged.
+const UNTYPED_INTERNAL_BUDGET: usize = 173;
 
 /// Counts variants whose OWN kind is `Internal`.
 ///

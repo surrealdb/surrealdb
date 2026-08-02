@@ -119,7 +119,7 @@ use wasm_bindgen_futures::spawn_local;
 
 use crate::conn::{Command, RequestData};
 use crate::engine::SessionError;
-use crate::engine::remote::RouterRequest;
+use crate::engine::remote::{RemoteCommand, RouterRequest};
 use crate::headers::{AUTH_DB, AUTH_NS, DB, NS};
 use crate::opt::IntoEndpoint;
 use crate::opt::auth::{AccessToken, Token};

@@ -9,6 +9,7 @@ use url::Url;
 
 use super::{Client, RouterState};
 use crate::conn::{Route, Router};
+use crate::engine::remote::RemoteCommand;
 use crate::engine::{SessionError, session_error_to_error};
 use crate::method::BoxFuture;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]

@@ -22,6 +22,7 @@ use crate::expr::{Error, Kind};
 use crate::fnc::args::{FromArgs, Optional};
 use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::highlighter::HighlightParams;
+use crate::legacy::analyzer_function::LegacyAnalyzerFunction;
 use crate::val::{Array, Number, Object, Value};
 
 // =========================================================================
@@ -104,9 +105,10 @@ impl ScalarFunction for SearchAnalyze {
 
 			// Analyze the value using a TreeStack
 			let frozen = ctx.exec_ctx.ctx();
+			let az_fn = LegacyAnalyzerFunction::new(frozen, opt);
 			let mut stack = TreeStack::new();
 			stack
-				.enter(|stk| async move { analyzer.analyze(stk, frozen, opt, val).await })
+				.enter(|stk| async move { analyzer.analyze(stk, &az_fn, val).await })
 				.finish()
 				.await
 		})

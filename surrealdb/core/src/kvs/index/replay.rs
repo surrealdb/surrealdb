@@ -33,6 +33,7 @@ use crate::kvs::{
 	DatastoreError, Direction, INDEXING_BATCH_SIZE, Transaction, Val,
 	is_retryable_transaction_conflict,
 };
+use crate::legacy::analyzer_function::LegacyAnalyzerFunction;
 use crate::val::{RecordId, RecordIdKey, Value};
 
 /// Maximum consecutive commit-conflict retries for one deferred doc-ID reclaim
@@ -649,9 +650,9 @@ impl Building {
 			opt_values,
 			count_cond_match,
 		} = value;
+		let az_fn = LegacyAnalyzerFunction::new(ctx, &self.opt);
 		let mut io = IndexOperation::new(
 			ctx,
-			&self.opt,
 			self.ix_key.ns,
 			self.ix_key.db,
 			self.tb,
@@ -665,11 +666,11 @@ impl Building {
 		}
 		if let Some(fulltext_index) = fulltext_index {
 			stack
-				.enter(|stk| io.compute_fulltext_with_index(stk, fulltext_index, rc))
+				.enter(|stk| io.compute_fulltext_with_index(stk, &az_fn, fulltext_index, rc))
 				.finish()
 				.await
 		} else {
-			stack.enter(|stk| io.compute(stk, rc)).finish().await
+			stack.enter(|stk| io.compute(stk, &az_fn, rc)).finish().await
 		}
 	}
 
@@ -879,9 +880,9 @@ impl Building {
 			table: self.ikb.table().clone(),
 			key: rid_key.clone(),
 		};
+		let az_fn = LegacyAnalyzerFunction::new(ctx, &self.opt);
 		let mut io = IndexOperation::new(
 			ctx,
-			&self.opt,
 			self.ix_key.ns,
 			self.ix_key.db,
 			self.tb,
@@ -895,11 +896,11 @@ impl Building {
 		}
 		if let Some(fulltext_index) = fulltext_index {
 			stack
-				.enter(|stk| io.compute_fulltext_with_index(stk, fulltext_index, rc))
+				.enter(|stk| io.compute_fulltext_with_index(stk, &az_fn, fulltext_index, rc))
 				.finish()
 				.await?;
 		} else {
-			stack.enter(|stk| io.compute(stk, rc)).finish().await?;
+			stack.enter(|stk| io.compute(stk, &az_fn, rc)).finish().await?;
 		}
 		if reclaim_doc_id {
 			let tx = ctx.tx();

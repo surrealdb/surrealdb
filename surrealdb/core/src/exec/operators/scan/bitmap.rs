@@ -57,6 +57,7 @@ use crate::idx::docids::TableDocIds;
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::kvs::util::scan;
 use crate::kvs::{CachePolicy, Transaction};
+use crate::legacy::analyzer_function::LegacyAnalyzerFunction;
 use crate::val::{RecordId, TableName};
 
 /// Number of doc-IDs resolved and fetched per output batch.
@@ -456,9 +457,10 @@ impl BitmapNode {
 		.await
 		.context("Failed to open full-text index")?;
 		let query_terms = {
+			let az_fn = LegacyAnalyzerFunction::new(frozen_ctx, opt);
 			let mut stack = TreeStack::new();
 			stack
-				.enter(|stk| fti.extract_querying_terms(stk, frozen_ctx, opt, query.to_owned()))
+				.enter(|stk| fti.extract_querying_terms(stk, frozen_ctx, &az_fn, query.to_owned()))
 				.finish()
 				.await
 				.context("Failed to extract query terms")?

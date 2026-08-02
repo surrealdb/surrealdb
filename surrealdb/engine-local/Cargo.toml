@@ -1,0 +1,78 @@
+[package]
+name = "surrealdb-engine-local"
+publish = true
+documentation = "https://docs.rs/surrealdb-engine-local/"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+# Storage backends. At least one is required for the engine to be able to open
+# a datastore; which one is selected at runtime from the endpoint scheme.
+kv-mem = ["surrealdb-core/kv-mem"]
+kv-indxdb = ["surrealdb-core/kv-indxdb"]
+kv-rocksdb = ["surrealdb-core/kv-rocksdb"]
+kv-tikv = ["surrealdb-core/kv-tikv"]
+kv-surrealkv = ["surrealdb-core/kv-surrealkv"]
+# Optional engine capabilities, forwarded to the database core.
+allocator = ["surrealdb-core/allocator"]
+allocation-tracking = ["surrealdb-core/allocation-tracking"]
+arbitrary = ["surrealdb-core/arbitrary"]
+http = ["surrealdb-core/http"]
+jwks = ["surrealdb-core/jwks"]
+ml = ["surrealdb-core/ml"]
+scripting = ["surrealdb-core/scripting"]
+
+[dependencies]
+# workspace internal dependencies
+surrealdb-core = { workspace = true, default-features = false }
+surrealdb-engine-api = { workspace = true }
+surrealdb-rpc = { workspace = true }
+surrealdb-types = { workspace = true }
+
+# Other crates (anyhow used for import stream compat with core's execute_import)
+anyhow.workspace = true
+async-channel.workspace = true
+futures.workspace = true
+tokio-util = { workspace = true, features = ["compat"] }
+tracing.workspace = true
+uuid = { workspace = true, features = ["serde", "v4", "v7"] }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+tokio = { workspace = true, default-features = false, features = [
+    "rt",
+    "sync",
+] }
+wasm-bindgen-futures.workspace = true
+wasmtimer = { workspace = true, default-features = false, features = ["tokio"] }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+tokio = { workspace = true, default-features = false, features = [
+    "fs",
+    "io-util",
+    "macros",
+    "rt",
+    "sync",
+    "time",
+] }
+
+[dev-dependencies]
+surrealdb-cnf = { workspace = true }
+criterion.workspace = true
+rand.workspace = true
+test-log = { workspace = true, features = ["trace"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+web-time.workspace = true
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "datastore"
+harness = false

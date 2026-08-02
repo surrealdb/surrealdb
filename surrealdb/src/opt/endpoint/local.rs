@@ -112,7 +112,7 @@ impl<R> Connect<Db, R> {
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// use surrealdb::Surreal;
 	/// use surrealdb::engine::local::SurrealKv;
-	/// use surrealdb_core::kvs::config::SyncMode;
+	/// use surrealdb_kvs::config::SyncMode;
 	///
 	/// let db = Surreal::new::<SurrealKv>("path/to/database-folder")
 	///     .sync(SyncMode::Every)
@@ -127,7 +127,7 @@ impl<R> Connect<Db, R> {
 	/// use std::time::Duration;
 	/// use surrealdb::Surreal;
 	/// use surrealdb::engine::local::RocksDb;
-	/// use surrealdb_core::kvs::config::SyncMode;
+	/// use surrealdb_kvs::config::SyncMode;
 	///
 	/// let db = Surreal::new::<RocksDb>("path/to/database-folder")
 	///     .sync(SyncMode::Interval(Duration::from_millis(200)))

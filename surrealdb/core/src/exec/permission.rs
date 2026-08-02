@@ -7,9 +7,10 @@
 
 use std::sync::Arc;
 
-use crate::catalog::Permission;
+use reblessive::tree::Stk;
+
+use crate::catalog::{Permission, Record};
 use crate::ctx::FrozenContext;
-use crate::doc::CursorDoc;
 use crate::err::{EngineError, Error};
 use crate::exec::planner::Planner;
 use crate::exec::{
@@ -18,7 +19,7 @@ use crate::exec::{
 use crate::expr::ControlFlow;
 use crate::iam::Action;
 use crate::idx::trees::gate::{BoxGateFut, TableSelectGate};
-use crate::val::Value;
+use crate::val::{RecordId, Value};
 
 /// Result of a permission check.
 #[derive(Debug, Clone)]
@@ -233,10 +234,14 @@ impl TableSelectGate for PhysicalTableSelect {
 		}
 	}
 
-	fn allows_doc<'a>(&'a self, cursor_doc: &'a CursorDoc) -> BoxGateFut<'a> {
+	fn allows_doc<'a>(
+		&'a self,
+		_stk: &'a mut Stk,
+		_rid: &'a Arc<RecordId>,
+		record: &'a Arc<Record>,
+	) -> BoxGateFut<'a> {
 		Box::pin(async move {
-			check_permission_for_value(&self.permission, cursor_doc.doc.as_ref(), None, &self.ctx)
-				.await
+			check_permission_for_value(&self.permission, &record.data, None, &self.ctx).await
 		})
 	}
 }

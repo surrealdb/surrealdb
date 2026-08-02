@@ -29,6 +29,7 @@ use crate::idx::docids::TableDocIds;
 use crate::idx::index::IndexOperation;
 use crate::key::schema::DocPendingKey;
 use crate::kvs::index::{ConsumeResult, IndexMutation};
+use crate::legacy::analyzer_function::LegacyAnalyzerFunction;
 use crate::val::{RecordId, Value};
 
 impl Document {
@@ -194,17 +195,9 @@ impl Document {
 			(o, n)
 		};
 		// Store all the variables and parameters required by the index operation
-		let mut ic = IndexOperation::new(
-			ctx,
-			opt,
-			db.namespace_id,
-			db.database_id,
-			tb.table_id,
-			ix,
-			o,
-			n,
-			rid,
-		);
+		let az_fn = LegacyAnalyzerFunction::new(ctx, opt);
+		let mut ic =
+			IndexOperation::new(ctx, db.namespace_id, db.database_id, tb.table_id, ix, o, n, rid);
 		//
 		if let Some((old_matches, new_matches)) = count_cond_match {
 			ic = ic.with_count_cond_match(old_matches, new_matches);
@@ -212,7 +205,7 @@ impl Document {
 		// Keep track of compaction requests, we need to trigger them after the index operation
 		let mut require_compaction = false;
 		// Execute the index operation
-		ic.compute(stk, &mut require_compaction).await?;
+		ic.compute(stk, &az_fn, &mut require_compaction).await?;
 		// Did any compaction request have to be triggered?
 		if require_compaction {
 			ic.trigger_compaction().await?;

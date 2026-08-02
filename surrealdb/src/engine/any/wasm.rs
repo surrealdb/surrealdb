@@ -44,8 +44,8 @@ impl conn::Sealed for Any {
 					#[cfg(feature = "kv-indxdb")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						spawn_local(engine::local::wasm::run_router(
-							address,
+						spawn_local(surrealdb_engine_local::wasm::run_router(
+							engine::local::local_config(address),
 							conn_tx,
 							route_rx,
 							session_clone.receiver.clone(),
@@ -63,8 +63,8 @@ impl conn::Sealed for Any {
 					#[cfg(feature = "kv-mem")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						spawn_local(engine::local::wasm::run_router(
-							address,
+						spawn_local(surrealdb_engine_local::wasm::run_router(
+							engine::local::local_config(address),
 							conn_tx,
 							route_rx,
 							session_clone.receiver.clone(),
@@ -82,8 +82,8 @@ impl conn::Sealed for Any {
 					#[cfg(feature = "kv-rocksdb")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						spawn_local(engine::local::wasm::run_router(
-							address,
+						spawn_local(surrealdb_engine_local::wasm::run_router(
+							engine::local::local_config(address),
 							conn_tx,
 							route_rx,
 							session_clone.receiver.clone(),
@@ -99,8 +99,8 @@ impl conn::Sealed for Any {
 					#[cfg(feature = "kv-surrealkv")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						spawn_local(engine::local::wasm::run_router(
-							address,
+						spawn_local(surrealdb_engine_local::wasm::run_router(
+							engine::local::local_config(address),
 							conn_tx,
 							route_rx,
 							session_clone.receiver.clone(),
@@ -118,8 +118,8 @@ impl conn::Sealed for Any {
 					#[cfg(feature = "kv-tikv")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						spawn_local(engine::local::wasm::run_router(
-							address,
+						spawn_local(surrealdb_engine_local::wasm::run_router(
+							engine::local::local_config(address),
 							conn_tx,
 							route_rx,
 							session_clone.receiver.clone(),

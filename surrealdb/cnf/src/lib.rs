@@ -52,7 +52,7 @@ pub const NOTIFICATIONS_CHANNEL_SIZE: usize = 15_000;
 /// to its canonical form; entries that fail to canonicalize are dropped with a
 /// warning. `subject` names the allowlist for log messages (e.g. `"file"`).
 /// Enforcement of a resolved path against the allowlist lives in
-/// `surrealdb_core::iam::file::check_is_path_allowed`.
+/// `surrealdb_core::idx::file::check_is_path_allowed`.
 pub fn extract_allowed_paths(input: &str, canonicalize: bool, subject: &str) -> Vec<PathBuf> {
 	let delimiter = if cfg!(target_os = "windows") {
 		";"

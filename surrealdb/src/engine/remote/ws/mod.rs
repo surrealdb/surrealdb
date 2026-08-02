@@ -25,7 +25,7 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::conn::{Command, RequestData, Route};
-use crate::engine::remote::RouterRequest;
+use crate::engine::remote::{RemoteCommand, RouterRequest};
 use crate::engine::{SessionError, session_error_to_error};
 use crate::opt::IntoEndpoint;
 use crate::types::{Array, HashMap, Notification, Number, SurrealValue, Value};

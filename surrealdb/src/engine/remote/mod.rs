@@ -105,7 +105,7 @@ pub mod ws;
 use surrealdb_rpc::Token;
 use uuid::Uuid;
 
-use crate::conn::cmd::Command;
+use crate::conn::Command;
 use crate::types::{Array, SurrealValue, Value};
 
 /// A struct which will be serialized as a map to behave like the previously
@@ -123,7 +123,39 @@ pub(crate) struct RouterRequest {
 	pub(crate) session_id: Option<Uuid>,
 }
 
-impl Command {
+/// How a [`Command`] is presented to a remote server: the request it encodes
+/// to, and whether it belongs in the session replay log used to rebuild state
+/// after a reconnect.
+pub(crate) trait RemoteCommand: Sized {
+	/// The request to send for this command, or `None` when the remote
+	/// protocol has no equivalent (backups, live-query subscription).
+	fn into_router_request(
+		self,
+		id: Option<i64>,
+		session_id: Option<Uuid>,
+	) -> Option<RouterRequest>;
+
+	/// Whether replaying this command restores session state a reconnect lost.
+	fn replayable(&self) -> bool;
+
+	/// Whether `self` would be a no-op (replay-wise) if appended directly after
+	/// `prev` at the tail of the replay log. Used to coalesce idempotent
+	/// command runs (e.g. a `useDb` loop) so the replay log doesn't grow O(N).
+	///
+	/// Load-bearing invariant for the `Use(None, None)` -> `true` branch:
+	/// `Command::Use` carries `Option<String>` for each field, and
+	/// [`RemoteCommand::into_router_request`] encodes `None` as `Value::None`
+	/// (never `Value::Null`). The server-side `yuse` handler treats
+	/// `(None, None)` as a no-op when `session.ns` is already set — only the
+	/// `Value::Null` form (unreachable from the SDK) clears the session. If a
+	/// future change adds a clearing variant to `Command::Use` or maps `None`
+	/// to `Value::Null` on the wire, revisit this method and the corresponding
+	/// tests.
+	#[cfg(feature = "protocol-ws")]
+	fn is_replay_noop_after(&self, prev: &Command) -> bool;
+}
+
+impl RemoteCommand for Command {
 	fn into_router_request(
 		self,
 		id: Option<i64>,
@@ -365,18 +397,6 @@ impl Command {
 		)
 	}
 
-	/// Whether `self` would be a no-op (replay-wise) if appended directly after
-	/// `prev` at the tail of the replay log. Used to coalesce idempotent
-	/// command runs (e.g. a `useDb` loop) so the replay log doesn't grow O(N).
-	///
-	/// Load-bearing invariant for the `Use(None, None)` -> `true` branch:
-	/// `Command::Use` carries `Option<String>` for each field, and
-	/// [`Command::into_router_request`] encodes `None` as `Value::None` (never
-	/// `Value::Null`). The server-side `yuse` handler treats `(None, None)` as
-	/// a no-op when `session.ns` is already set — only the `Value::Null` form
-	/// (unreachable from the SDK) clears the session. If a future change adds
-	/// a clearing variant to `Command::Use` or maps `None` to `Value::Null` on
-	/// the wire, revisit this method and the corresponding tests.
 	#[cfg(feature = "protocol-ws")]
 	fn is_replay_noop_after(&self, prev: &Command) -> bool {
 		match (prev, self) {
@@ -486,7 +506,7 @@ mod test {
 // same feature that compiles `record_replayable` / `is_replay_noop_after`.
 #[cfg(all(test, feature = "protocol-ws"))]
 mod replay_test {
-	use super::{Command, record_replayable};
+	use super::{Command, RemoteCommand, record_replayable};
 
 	fn use_cmd(ns: Option<&str>, db: Option<&str>) -> Command {
 		Command::Use {

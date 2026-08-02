@@ -40,10 +40,21 @@ pub use error::DatastoreError;
 
 /// Recover a storage failure from an [`anyhow::Error`], whichever shape it took.
 ///
-/// Below this crate the wrapping variant does not exist, so only the bare shape
-/// can arrive; the layer above adds the wrapped one and delegates here.
+/// A storage failure reaches `anyhow` two ways: raised bare by the transactor,
+/// or held as the cause of a layer error, which is how a function typed on that
+/// layer's error re-raises it. Callers should not have to know which, so every
+/// check goes through here rather than matching one shape and quietly missing
+/// the other. Matching only the bare shape is the more dangerous mistake,
+/// because it compiles, reads correctly, and turns a recognised condition into
+/// an unrecognised one.
+///
+/// Recognition therefore walks the source chain instead of naming the wrappers:
+/// they are declared in crates above this one, so they cannot be named from
+/// here, and a wrapper that did not record the storage failure as its source
+/// would not carry the cause to the client either. Following `source` is the
+/// same link the wire mapping already depends on.
 pub fn storage_error(err: &anyhow::Error) -> Option<&surrealdb_kvs::Error> {
-	err.downcast_ref::<surrealdb_kvs::Error>()
+	err.chain().find_map(|e| e.downcast_ref::<surrealdb_kvs::Error>())
 }
 
 /// Whether a failure is a transaction conflict the caller may retry.
@@ -54,10 +65,71 @@ pub fn is_retryable_transaction_conflict(err: &anyhow::Error) -> bool {
 /// Whether a failure reports that the storage engine is shutting down.
 ///
 /// Transient from the cluster's perspective: the interrupted work is safe to
-/// retry after the process restarts, so callers that persist failure state must
-/// not record it as permanent.
+/// retry after the process restarts, so callers that persist failure state
+/// (such as the concurrent index builder) must not record it as permanent.
 pub fn is_shutdown_error(err: &anyhow::Error) -> bool {
 	matches!(storage_error(err), Some(surrealdb_kvs::Error::Shutdown))
+}
+
+#[cfg(test)]
+mod storage_error_tests {
+	use super::{is_retryable_transaction_conflict, is_shutdown_error, storage_error};
+
+	/// Stands in for the layer errors above this crate, which hold a storage
+	/// failure as their cause so a function typed on their own error can
+	/// re-raise it. Those types cannot be named from here, which is the whole
+	/// reason recognition follows `source` rather than matching them.
+	#[derive(Debug, thiserror::Error)]
+	#[error("There was a problem with the key-value store: {0}")]
+	struct Wrapped(#[from] surrealdb_kvs::Error);
+
+	#[derive(Debug, thiserror::Error)]
+	#[error("not a storage failure")]
+	struct Foreign;
+
+	#[test]
+	fn either_shape_is_recovered() {
+		for err in [
+			anyhow::Error::new(surrealdb_kvs::Error::TransactionKeyAlreadyExists),
+			anyhow::Error::new(Wrapped(surrealdb_kvs::Error::TransactionKeyAlreadyExists)),
+		] {
+			assert!(
+				matches!(
+					storage_error(&err),
+					Some(surrealdb_kvs::Error::TransactionKeyAlreadyExists)
+				),
+				"a key-already-exists failure went unrecognised: {err}"
+			);
+		}
+	}
+
+	#[test]
+	fn either_shape_classifies_the_same() {
+		for err in [
+			anyhow::Error::new(surrealdb_kvs::Error::TransactionConflict("busy".to_string())),
+			anyhow::Error::new(Wrapped(surrealdb_kvs::Error::TransactionConflict(
+				"busy".to_string(),
+			))),
+		] {
+			assert!(is_retryable_transaction_conflict(&err), "conflict not retryable: {err}");
+			assert!(!is_shutdown_error(&err), "conflict misread as a shutdown: {err}");
+		}
+		for err in [
+			anyhow::Error::new(surrealdb_kvs::Error::Shutdown),
+			anyhow::Error::new(Wrapped(surrealdb_kvs::Error::Shutdown)),
+		] {
+			assert!(is_shutdown_error(&err), "shutdown not recognised: {err}");
+			assert!(!is_retryable_transaction_conflict(&err), "shutdown misread as retryable");
+		}
+	}
+
+	#[test]
+	fn a_foreign_error_is_not_a_storage_failure() {
+		let err = anyhow::Error::new(Foreign);
+		assert!(storage_error(&err).is_none());
+		assert!(!is_retryable_transaction_conflict(&err));
+		assert!(!is_shutdown_error(&err));
+	}
 }
 
 pub use config::TransactionConfig;

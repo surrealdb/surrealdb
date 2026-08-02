@@ -16,17 +16,22 @@ license-file.workspace = true
 [features]
 # Public features
 default = ["protocol-ws", "rustls", "parse"]
-allocator = ["surrealdb-core/allocator"]
+# Tuning features for the embedded engine. They forward unconditionally, so
+# selecting one brings the engine (and with it the database core) into the
+# build even without a `kv-*` backend, as they always have.
+allocator = ["surrealdb-engine-local/allocator"]
 parse = ["dep:surrealdb-syn"]
 protocol-http = ["dep:reqwest", "surrealdb-types/reqwest"]
 protocol-ws = ["dep:tokio-tungstenite", "tokio/time"]
-kv-mem = ["surrealdb-core/kv-mem", "dep:surrealdb-kvs", "tokio/time"]
-kv-indxdb = ["surrealdb-core/kv-indxdb"]
-kv-rocksdb = ["surrealdb-core/kv-rocksdb", "dep:surrealdb-kvs", "tokio/time"]
-kv-tikv = ["surrealdb-core/kv-tikv", "tokio/time"]
-kv-surrealkv = ["surrealdb-core/kv-surrealkv", "dep:surrealdb-kvs", "tokio/time"]
-scripting = ["surrealdb-core/scripting"]
-http = ["surrealdb-core/http"]
+# The `kv-*` features select a storage backend for the embedded engine. The
+# engine crate is the only route from the SDK to the database core.
+kv-mem = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-mem", "dep:surrealdb-kvs", "tokio/time"]
+kv-indxdb = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-indxdb"]
+kv-rocksdb = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-rocksdb", "dep:surrealdb-kvs", "tokio/time"]
+kv-tikv = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-tikv", "tokio/time"]
+kv-surrealkv = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-surrealkv", "dep:surrealdb-kvs", "tokio/time"]
+scripting = ["surrealdb-engine-local/scripting"]
+http = ["surrealdb-engine-local/http"]
 native-tls = [
     "dep:native-tls",
     "reqwest?/native-tls",
@@ -37,10 +42,10 @@ rustls = [
     "reqwest?/default-tls",
     "tokio-tungstenite?/rustls-tls-webpki-roots",
 ]
-ml = ["surrealdb-core/ml"]
-jwks = ["surrealdb-core/jwks"]
-arbitrary = ["surrealdb-core/arbitrary"]
-allocation-tracking = ["surrealdb-core/allocation-tracking"]
+ml = ["surrealdb-engine-local/ml"]
+jwks = ["surrealdb-engine-local/jwks"]
+arbitrary = ["surrealdb-engine-local/arbitrary"]
+allocation-tracking = ["surrealdb-engine-local/allocation-tracking"]
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
@@ -59,7 +64,8 @@ targets = []
 
 [dependencies]
 # workspace internal dependencies
-surrealdb-core = { workspace = true, default-features = false, optional = true }
+surrealdb-engine-api = { workspace = true }
+surrealdb-engine-local = { workspace = true, default-features = false, optional = true }
 surrealdb-iam = { workspace = true }
 surrealdb-kvs = { workspace = true, optional = true }
 surrealdb-rpc = { workspace = true }

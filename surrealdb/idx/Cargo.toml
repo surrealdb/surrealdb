@@ -1,0 +1,98 @@
+[package]
+name = "surrealdb-idx"
+publish = true
+readme = "README.md"
+documentation = "https://docs.rs/surrealdb-idx/"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+# Backends for the engines' own concurrency tests. The library selects no
+# backend; the in-memory one is always available as a dev-dependency, and these
+# add the on-disk and distributed ones so the matching KVS CI lane runs the
+# race tests against its own store. Nothing in the library reads them.
+kv-rocksdb = ["surrealdb-kvs-any/kv-rocksdb"]
+kv-tikv = ["surrealdb-kvs-any/kv-tikv"]
+
+[dependencies]
+ahash.workspace = true
+anyhow.workspace = true
+bytes.workspace = true
+common.workspace = true
+dashmap.workspace = true
+deunicode.workspace = true
+fst.workspace = true
+half.workspace = true
+ndarray.workspace = true
+ndarray-stats.workspace = true
+parking_lot.workspace = true
+quick_cache.workspace = true
+rand.workspace = true
+reblessive = { workspace = true, features = ["tree"] }
+revision = { workspace = true }
+roaring = { workspace = true, features = ["serde"] }
+rust-stemmers.workspace = true
+storekey.workspace = true
+surrealdb-catalog.workspace = true
+surrealdb-cnf.workspace = true
+surrealdb-datastore.workspace = true
+surrealdb-expr.workspace = true
+surrealdb-kvs.workspace = true
+surrealdb-runtime.workspace = true
+surrealdb-strand.workspace = true
+surrealdb-types.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+uuid = { workspace = true }
+vart.workspace = true
+web-time.workspace = true
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+tokio = { workspace = true, default-features = false, features = ["rt", "sync"] }
+
+# The mapper reads its term file asynchronously off-wasm; on wasm it falls back
+# to `std::fs`, so `fs`/`io-util` are only named here.
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+tokio = { workspace = true, default-features = false, features = [
+    "fs",
+    "io-util",
+    "rt",
+    "sync",
+] }
+
+# DISKANN DEPENDENCY CONFIGURATION
+# DiskANN (Microsoft's `diskann` crate) is 64-bit-only by design: its `IntoUsize`
+# trait is implemented only for `target_pointer_width = "64"` and panics on other
+# widths. Restrict the dependency to non-WASM 64-bit targets so `surrealdb-idx` still
+# compiles on 32-bit targets (i686, armv7, …); HNSW remains the portable vector index
+# there. The matching source gate is the `diskann` cfg set in build.rs.
+[target.'cfg(all(not(target_family = "wasm"), target_pointer_width = "64"))'.dependencies]
+diskann.workspace = true
+diskann-utils.workspace = true
+diskann-vector.workspace = true
+
+[dev-dependencies]
+flate2.workspace = true
+rstest.workspace = true
+rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
+# The engines' own tests open a transaction against an in-memory backend.
+# Nothing in the library selects a backend.
+surrealdb-kvs-any = { workspace = true, features = ["kv-mem"] }
+# The analyzer helper parses a `DEFINE ANALYZER` statement rather than building
+# the definition by hand, so the tests keep the parser.
+surrealdb-sql.workspace = true
+surrealdb-syn.workspace = true
+temp-dir.workspace = true
+tempfile.workspace = true
+test-log = { workspace = true, features = ["trace"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true

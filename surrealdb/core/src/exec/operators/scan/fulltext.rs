@@ -26,9 +26,10 @@ use crate::expr::operator::MatchesOperator;
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::iam::Action;
 use crate::idx::IndexKeyBase;
+use crate::idx::ft::MatchesHitsIterator;
 use crate::idx::ft::fulltext::FullTextIndex;
-use crate::idx::planner::iterators::MatchesHitsIterator;
 use crate::kvs::CachePolicy;
+use crate::legacy::analyzer_function::LegacyAnalyzerFunction;
 
 /// Batch size for full-text result batching.
 ///
@@ -248,9 +249,10 @@ impl ExecOperator for FullTextScan {
 
 			// Extract query terms using TreeStack for stack management
 			let query_terms = {
+				let az_fn = LegacyAnalyzerFunction::new(frozen_ctx, opt);
 				let mut stack = TreeStack::new();
 				stack
-					.enter(|stk| fti.extract_querying_terms(stk, frozen_ctx, opt, query.clone()))
+					.enter(|stk| fti.extract_querying_terms(stk, frozen_ctx, &az_fn, query.clone()))
 					.finish()
 					.await
 					.context("Failed to extract query terms")?

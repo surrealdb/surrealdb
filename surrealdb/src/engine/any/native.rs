@@ -49,8 +49,8 @@ impl conn::Sealed for Any {
 					{
 						features.insert(ExtraFeatures::Backup);
 						features.insert(ExtraFeatures::LiveQueries);
-						tokio::spawn(engine::local::native::run_router(
-							address,
+						tokio::spawn(surrealdb_engine_local::native::run_router(
+							engine::local::local_config(address),
 							conn_tx,
 							route_rx,
 							session_clone.receiver.clone(),
@@ -70,8 +70,8 @@ impl conn::Sealed for Any {
 					{
 						features.insert(ExtraFeatures::Backup);
 						features.insert(ExtraFeatures::LiveQueries);
-						tokio::spawn(engine::local::native::run_router(
-							address,
+						tokio::spawn(surrealdb_engine_local::native::run_router(
+							engine::local::local_config(address),
 							conn_tx,
 							route_rx,
 							session_clone.receiver.clone(),
@@ -91,8 +91,8 @@ impl conn::Sealed for Any {
 					{
 						features.insert(ExtraFeatures::Backup);
 						features.insert(ExtraFeatures::LiveQueries);
-						tokio::spawn(engine::local::native::run_router(
-							address,
+						tokio::spawn(surrealdb_engine_local::native::run_router(
+							engine::local::local_config(address),
 							conn_tx,
 							route_rx,
 							session_clone.receiver.clone(),
@@ -111,8 +111,8 @@ impl conn::Sealed for Any {
 					{
 						features.insert(ExtraFeatures::Backup);
 						features.insert(ExtraFeatures::LiveQueries);
-						tokio::spawn(engine::local::native::run_router(
-							address,
+						tokio::spawn(surrealdb_engine_local::native::run_router(
+							engine::local::local_config(address),
 							conn_tx,
 							route_rx,
 							session_clone.receiver.clone(),

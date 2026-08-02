@@ -1,34 +1,17 @@
 use std::collections::HashSet;
 
 use async_channel::{Receiver, Sender};
+// The wire between this crate and the engines it drives. Both the in-tree
+// remote engines and the out-of-tree embedded one speak these types.
+pub(crate) use surrealdb_engine_api::{Command, MlExportConfig, RequestData, Route};
 use surrealdb_rpc::QueryResult;
 use uuid::Uuid;
 
+use super::opt::Config;
 use crate::method::BoxFuture;
 use crate::opt::Endpoint;
 use crate::types::{SurrealValue, Value};
 use crate::{Error, ExtraFeatures, Result, Surreal};
-
-pub(crate) mod cmd;
-pub(crate) use cmd::Command;
-
-use super::opt::Config;
-
-#[derive(Debug)]
-#[allow(dead_code, reason = "Used by the embedded and remote connections.")]
-pub struct RequestData {
-	pub(crate) command: Command,
-	pub(crate) session_id: Uuid,
-}
-
-#[derive(Debug)]
-#[allow(dead_code, reason = "Used by the embedded and remote connections.")]
-pub(crate) struct Route {
-	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
-	pub(crate) request: RequestData,
-	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
-	pub(crate) response: Sender<std::result::Result<Vec<QueryResult>, surrealdb_types::Error>>,
-}
 
 /// Message router
 #[derive(Debug, Clone)]
@@ -257,14 +240,6 @@ impl Router {
 			self.recv_results(rx).await
 		})
 	}
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct MlExportConfig {
-	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
-	pub(crate) name: String,
-	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
-	pub(crate) version: String,
 }
 
 /// Connection trait implemented by supported protocols

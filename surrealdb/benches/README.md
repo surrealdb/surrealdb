@@ -1,8 +1,9 @@
 # Benchmarks
 
 This directory contains some micro-benchmarks that can help objectively
-establish the performance implications of a change, and also benchmarks that
-test the performance of different datastores using both the library and the SDK
+establish the performance implications of a change, and the SDK half of the
+datastore benchmarks (the `sdk-*` targets). The matching `lib-*` targets, which
+drive the datastore directly, live in `surrealdb/engine-local/benches`.
 
 ## Manual usage
 
