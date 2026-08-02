@@ -46,6 +46,24 @@ pub enum Error {
 	#[error("There was a problem with a transaction: {0}")]
 	Transaction(String),
 
+	/// A commit failed in a way that leaves its outcome unknown: the
+	/// transaction may or may not have been applied.
+	///
+	/// Distributed backends commit in phases across the network. When a
+	/// phase fails at the transport level — a deadline elapsing, a connection
+	/// breaking — the failure says only that the client stopped hearing back,
+	/// not that the backend rejected the work. It may have durably applied it
+	/// first.
+	///
+	/// Callers must not report this as a failed write, because the write may
+	/// exist, and must not retry it, because a retry of a non-idempotent
+	/// statement would apply it twice. Reconciling requires reading the
+	/// affected records back.
+	#[error(
+		"The transaction's commit outcome is unknown; it may or may not have been applied: {0}"
+	)]
+	CommitOutcomeUnknown(String),
+
 	/// The transaction is too large
 	#[error("The transaction is too large")]
 	TransactionTooLarge,
@@ -127,5 +145,17 @@ impl Error {
 impl From<std::num::TryFromIntError> for Error {
 	fn from(e: std::num::TryFromIntError) -> Error {
 		Error::TimestampInvalid(e.to_string())
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::Error;
+
+	#[test]
+	fn an_unknown_commit_outcome_is_never_retryable() {
+		// Retrying a commit that may have applied would replay a
+		// non-idempotent statement against a write that already exists.
+		assert!(!Error::CommitOutcomeUnknown("cause".to_string()).is_retryable());
 	}
 }

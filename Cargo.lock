@@ -7299,6 +7299,7 @@ dependencies = [
  "surrealdb-kvs",
  "surrealdb-tikv-client",
  "tokio",
+ "tonic",
  "tracing",
 ]
 

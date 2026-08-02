@@ -482,6 +482,19 @@ pub trait Transactable: Send + Sync {
 	/// Commit a transaction.
 	///
 	/// This attempts to commit all changes made within the transaction.
+	///
+	/// An error is an assertion that nothing was written, so a backend that
+	/// cannot determine whether the transaction applied must return
+	/// [`crate::err::Error::CommitOutcomeUnknown`] rather than a definite
+	/// variant. Callers rely on that distinction: a definite failure is
+	/// reported to clients as work that did not happen, which is unsafe to
+	/// claim for a commit that may have landed. Determinate rejections — a
+	/// write conflict, an oversized entry, a key that already exists — must not
+	/// use it, because they carry classifications that retry paths depend on.
+	///
+	/// Any commit that completes in phases can reach this state; it is not
+	/// specific to networked backends, since a durability step that fails after
+	/// the write is already visible leaves the same ambiguity.
 	fn commit<'a>(&'a self) -> BoxFut<'a, Result<()>>;
 
 	/// Check if a key exists in the datastore.

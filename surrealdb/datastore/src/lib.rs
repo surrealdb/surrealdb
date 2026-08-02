@@ -72,6 +72,16 @@ pub fn is_shutdown_error(err: &anyhow::Error) -> bool {
 	matches!(storage_error(err), Some(surrealdb_kvs::Error::Shutdown))
 }
 
+/// Whether a failure reports a commit whose outcome is unknown — the
+/// transaction may or may not have been applied.
+///
+/// Callers must not describe it as work that did not happen, and must not
+/// retry it: the write may already exist, and replaying a non-idempotent
+/// statement would apply it twice.
+pub fn is_indeterminate_commit(err: &anyhow::Error) -> bool {
+	matches!(storage_error(err), Some(surrealdb_kvs::Error::CommitOutcomeUnknown(_)))
+}
+
 #[cfg(test)]
 mod storage_error_tests {
 	use super::{is_retryable_transaction_conflict, is_shutdown_error, storage_error};

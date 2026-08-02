@@ -26,6 +26,43 @@ use tracing::{debug, error, info, instrument, trace, warn};
 
 const TARGET: &str = "surrealdb::core::kvs::tikv";
 
+/// Convert a failure of `commit` into the generic KVS error type,
+/// distinguishing failures that leave the transaction's outcome unknown from
+/// those that definitely rejected it.
+///
+/// Two-phase commit runs over the network, so a transport-level failure means
+/// only that the client stopped hearing back. TiKV may have durably applied
+/// the transaction before the deadline elapsed or the connection broke, and
+/// the rollback attempted alongside cannot undo an already-committed primary.
+/// Reporting that as a definite failure would tell callers a write does not
+/// exist when it may.
+///
+/// Every other failure is a decision the cluster reached and reported — a
+/// write conflict, an oversized raft entry, a key that already exists — so it
+/// keeps the ordinary classification.
+///
+/// Only used at the commit call site: the same status arriving from a read
+/// carries no such ambiguity, because a failed read applies nothing.
+fn commit_error(e: tikv::Error) -> Error {
+	// `UndeterminedError` is the client's own verdict, but it only sets it for
+	// `Grpc`, so the transport variants are listed rather than relied upon.
+	// `GrpcAPI` is what every unary RPC produces, `Grpc` the channel-level one.
+	let indeterminate = matches!(
+		e,
+		tikv::Error::UndeterminedError(_) | tikv::Error::Grpc(_) | tikv::Error::GrpcAPI(_)
+	);
+	// Classify through `kvs_error` either way, so its logging still runs — the
+	// commit path is where the gRPC status code matters most, and it is
+	// recorded nowhere else.
+	let rendered = e.to_string();
+	let classified = kvs_error(e);
+	if indeterminate {
+		Error::CommitOutcomeUnknown(rendered)
+	} else {
+		classified
+	}
+}
+
 /// Convert a TiKV engine error into the generic KVS error type.
 #[expect(
 	clippy::needless_pass_by_value,
@@ -36,6 +73,24 @@ fn kvs_error(e: tikv::Error) -> Error {
 	match e {
 		tikv::Error::DuplicateKeyInsertion => Error::TransactionKeyAlreadyExists,
 		tikv::Error::Grpc(_) => Error::ConnectionFailed(e.to_string()),
+		// Failure of an individual RPC, reported as a gRPC status. Recorded at
+		// debug for the reason the `KeyError` and `RegionError` arms below give:
+		// `kvs_error` runs on every operation, so one unhealthy store can bring
+		// thousands at once, and a flood still has to stay traceable to a cause.
+		//
+		// The status code is the only signal separating a deadline from a
+		// transport reset from a cluster fault, and it is not recoverable from
+		// the returned error. No code is narrowed to a more specific variant:
+		// each has at least two causes a status cannot distinguish.
+		tikv::Error::GrpcAPI(ref status) => {
+			debug!(
+				target: TARGET,
+				grpc_code = ?status.code(),
+				grpc_message = status.message(),
+				"TiKV gRPC status",
+			);
+			Error::Transaction(e.to_string())
+		}
 		tikv::Error::KeyError(ref ke) => {
 			if let Some(conflict) = &ke.conflict {
 				Error::TransactionConflict(Key::from(conflict.key.as_slice()).to_string())
@@ -787,7 +842,7 @@ impl Transactable for Transaction {
 						"TiKV transaction commit failed; rollback succeeded",
 					);
 				}
-				return Err(kvs_error(err));
+				return Err(commit_error(err));
 			}
 			trace!(
 				target: TARGET,
@@ -1617,7 +1672,75 @@ mod tests {
 	use std::sync::atomic::{AtomicUsize, Ordering};
 	use std::time::Duration;
 
-	use super::{TikvConfig, safepoint_from, validate_tls_paths};
+	use surrealdb_kvs::err::Error;
+	use tonic::{Code, Status};
+
+	use super::{TikvConfig, commit_error, kvs_error, safepoint_from, validate_tls_paths};
+
+	#[test]
+	fn transport_failures_during_commit_leave_the_outcome_unknown() {
+		// A commit that fails at the transport level may still have been
+		// applied: the client stopped hearing back, which is not the same as
+		// the cluster rejecting the work. Reporting it as a definite failure
+		// would tell a caller a write does not exist when it may.
+		let transport = [
+			tikv::Error::GrpcAPI(Status::new(Code::Cancelled, "Timeout expired")),
+			tikv::Error::GrpcAPI(Status::new(Code::Unavailable, "no healthy store")),
+			tikv::Error::UndeterminedError(Box::new(tikv::Error::GrpcAPI(Status::new(
+				Code::Internal,
+				"h2 protocol error",
+			)))),
+		];
+		for err in transport {
+			let rendered = err.to_string();
+			let classified = commit_error(err);
+			let Error::CommitOutcomeUnknown(message) = classified else {
+				panic!("expected CommitOutcomeUnknown for {rendered}, got {classified:?}");
+			};
+			assert!(!message.is_empty(), "cause dropped for {rendered}");
+		}
+	}
+
+	#[test]
+	fn cluster_rejections_during_commit_stay_definite() {
+		// A decision the cluster reached and reported is unambiguous, so it must
+		// not be blurred into an unknown outcome.
+		let classified = commit_error(tikv::Error::DuplicateKeyInsertion);
+		assert!(matches!(classified, Error::TransactionKeyAlreadyExists), "got {classified:?}");
+	}
+
+	#[test]
+	fn grpc_statuses_classify_generically_and_keep_their_detail() {
+		// No gRPC code is narrowed to a more specific variant, because none can
+		// be attributed to one cause from the status alone. The codes below are
+		// the ones that look attributable and are not: `DeadlineExceeded` is
+		// only ever server-originated, since tonic's own timeout layer reports
+		// an expired local deadline as `Cancelled` — which is also what hyper
+		// connection loss and a peer reset produce. `Internal` is any HTTP/2
+		// reset reason, and `OutOfRange` is both an encode and a decode limit.
+		//
+		// What must hold is that the status text survives, because it is the
+		// only record of the cause that reaches the caller. The empty-message
+		// row covers a bare `grpc-status` trailer with no `grpc-message`, seen
+		// on mTLS misconfiguration.
+		for (code, message) in [
+			(Code::DeadlineExceeded, "h2 protocol error"),
+			(Code::Cancelled, "h2 protocol error"),
+			(Code::Internal, "h2 protocol error"),
+			(Code::Unavailable, "h2 protocol error"),
+			(Code::ResourceExhausted, "h2 protocol error"),
+			(Code::OutOfRange, "h2 protocol error"),
+			(Code::Unknown, "h2 protocol error"),
+			(Code::Unauthenticated, ""),
+		] {
+			let err = kvs_error(tikv::Error::GrpcAPI(Status::new(code, message)));
+			let Error::Transaction(rendered) = err else {
+				panic!("expected a generic transaction error for {code:?}, got {err:?}");
+			};
+			assert!(rendered.contains(message), "detail dropped for {code:?}");
+			assert!(!rendered.is_empty(), "content-free error for {code:?}");
+		}
+	}
 
 	#[test]
 	fn safepoint_from_subtracts_lifetime() {

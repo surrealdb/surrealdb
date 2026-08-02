@@ -97,6 +97,11 @@ fn into_types_error_inner(error: Error, message: String) -> TypesError {
 			| KvsError::TransactionRangeTooLarge(_) => {
 				TypesError::validation(message, ValidationError::InvalidParams)
 			}
+			// Kept out of connection-class deliberately: that marks the failure
+			// client-side and drives SDK reconnect-and-retry, which is the one
+			// thing a caller must not do with a commit that may have applied.
+			// The message carries the ambiguity.
+			KvsError::CommitOutcomeUnknown(_) => TypesError::internal(message),
 			KvsError::TransactionFinished
 			| KvsError::TransactionReadonly
 			| KvsError::TransactionConditionNotMet => TypesError::query(message, None),

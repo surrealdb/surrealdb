@@ -1225,6 +1225,14 @@ impl Executor {
 					if crate::kvs::is_retryable_transaction_conflict(&e) {
 						return Err(e);
 					}
+					// A commit whose outcome is unknown propagates unwrapped for
+					// the same reason: `QueryNotExecuted` asserts the work did
+					// not happen, and here it may have. Callers that read that
+					// as "safe to replay" would double-apply a non-idempotent
+					// statement.
+					if crate::kvs::is_indeterminate_commit(&e) {
+						return Err(e);
+					}
 					bail!(DatastoreError::QueryNotExecuted {
 						message: e.to_string(),
 					});
@@ -1638,37 +1646,57 @@ impl Executor {
 					// `txn.commit()` failed (e.g. constraint on commit, or txn already finished).
 					// Surface the failure on a dedicated COMMIT result row; mark prior statement
 					// slots as not executed so nothing implies a successful commit (#7207).
+					//
+					// Unless the commit's outcome is unknown, in which case "not
+					// executed" is a false statement about statements that may
+					// well have been applied.
+					let indeterminate = crate::kvs::is_indeterminate_commit(&e);
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
-						res.result = Err(TypesError::query(
-							"The query was not executed due to a failed transaction".to_string(),
-							Some(QueryError::NotExecuted),
-						));
+						res.result = Err(if indeterminate {
+							TypesError::query(
+								"The transaction's commit outcome is unknown, so whether this \
+								 query was applied is undetermined"
+									.to_string(),
+								None,
+							)
+						} else {
+							TypesError::query(
+								"The query was not executed due to a failed transaction"
+									.to_string(),
+								Some(QueryError::NotExecuted),
+							)
+						});
 					}
 
 					// A retryable write conflict keeps its structured
 					// TransactionConflict kind (wire -32009) so SDK
-					// `isRetryableConflict()`/`.retry()` fire; anything else
+					// `isRetryableConflict()`/`.retry()` fire. An unknown
+					// outcome carries no kind, so neither the conflict-retry
+					// path nor a not-executed reading applies. Anything else
 					// (constraint failure, txn already finished) stays
 					// NotExecuted.
 					let commit_error_kind = if crate::kvs::is_retryable_transaction_conflict(&e) {
-						QueryError::TransactionConflict
+						Some(QueryError::TransactionConflict)
+					} else if indeterminate {
+						None
 					} else {
-						QueryError::NotExecuted
+						Some(QueryError::NotExecuted)
 					};
 					self.results.push(QueryResult {
 						time: before.elapsed(),
 						result: Err(TypesError::query(
 							format!("Cannot COMMIT: {e}"),
-							Some(commit_error_kind),
+							commit_error_kind,
 						)),
 						query_type: QueryType::Other,
 					});
 
-					// `Cannot COMMIT` surfaces as a NotExecuted query error on
-					// the COMMIT row -- a caller-visible failure ("the
+					// `Cannot COMMIT` surfaces as a caller-visible failure ("the
 					// transaction your statements ran inside could not
-					// commit"), not an internal fault.
+					// commit"), not an internal fault. An unknown outcome still
+					// reaches storage alerting through the `surrealdb.transaction.*`
+					// family, which classifies the same error independently.
 					self.emit_statement_event_cached(
 						kvs,
 						statement_type,

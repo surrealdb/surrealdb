@@ -1180,6 +1180,43 @@ impl Transaction {
 		}
 		// Commit the transaction
 		if let Err(e) = self.tr.commit().await {
+			// Record the write-set size, which is what separates an over-large
+			// transaction from an unhealthy cluster and which storage-layer
+			// errors do not carry.
+			//
+			// Outcomes callers expect and already handle are excluded, so
+			// ordinary traffic cannot amplify into the level operators alert
+			// on: retryable conflicts are re-driven in a loop, `Shutdown`
+			// arrives once per draining transaction on every graceful restart,
+			// and the conditional-write misses are how `put_compare` and
+			// `del_compare` report a lost race, which on last-writer-wins
+			// backends surfaces here at commit rather than at the call.
+			//
+			// The error text is omitted rather than interpolated: backend
+			// errors can embed encoded record keys. The error itself reaches
+			// the caller, and the backend logs its own cause under this span.
+			let expected_outcome = e.is_retryable()
+				|| matches!(
+					e,
+					KvsError::Shutdown
+						| KvsError::TransactionConditionNotMet
+						| KvsError::TransactionKeyAlreadyExists
+				);
+			if !expected_outcome {
+				let written = self.metrics.snapshot();
+				tracing::warn!(
+					target: "surrealdb::core::kvs::tx",
+					keys_written = written.keys_written,
+					bytes_written = written.total_bytes_written,
+					// Write ops only: `ops_total` counts reads as well, which
+					// would make a read-heavy transaction look write-heavy.
+					write_ops = written
+						.ops_put
+						.saturating_add(written.ops_set)
+						.saturating_add(written.ops_del),
+					"transaction commit failed",
+				);
+			}
 			// A commit refused because the datastore is shutting down was
 			// rejected before it applied (the engine gate blocks it ahead of
 			// `inner.commit()`), so the cleanup below is correct: nothing was

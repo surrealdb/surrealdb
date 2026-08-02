@@ -60,7 +60,7 @@ pub(crate) use surrealdb_datastore::{
 // naming `crate::err::Error::Kvs`, which is the wrapper the layer above puts on
 // a storage failure re-raised from a function typed on core's error.
 pub(crate) use surrealdb_datastore::{
-	is_retryable_transaction_conflict, is_shutdown_error, storage_error,
+	is_indeterminate_commit, is_retryable_transaction_conflict, is_shutdown_error, storage_error,
 };
 #[cfg(any(
 	feature = "kv-mem",
