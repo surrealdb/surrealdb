@@ -7,7 +7,8 @@ use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
 use crate::exec::physical_expr::EvalContext;
 use crate::expr::Kind;
 use crate::fnc::args::FromArgs;
-use crate::val::Value;
+use crate::fnc::closure::LegacyClosureEvaluator;
+use crate::val::{ClosureEvaluator, Value};
 
 // =========================================================================
 // value::diff - Compute JSON patch diff between two values
@@ -131,11 +132,11 @@ impl ScalarFunction for ValueChain {
 				.document_root
 				.or(ctx.current_value)
 				.map(|v| CursorDoc::new(None, None, v.clone()));
+			let evaluator = opt.map(|o| LegacyClosureEvaluator::new(frozen, o, doc.as_ref()));
+			let ev = evaluator.as_ref().map(|e| e as &dyn ClosureEvaluator);
 			let mut stack = TreeStack::new();
 			stack
-				.enter(|stk| async move {
-					crate::fnc::value::chain((stk, frozen, opt, doc.as_ref()), args).await
-				})
+				.enter(|stk| async move { crate::fnc::value::chain((stk, ev), args).await })
 				.finish()
 				.await
 		})
@@ -186,11 +187,11 @@ impl ScalarFunction for ValueExpect {
 				.document_root
 				.or(ctx.current_value)
 				.map(|v| CursorDoc::new(None, None, v.clone()));
+			let evaluator = opt.map(|o| LegacyClosureEvaluator::new(frozen, o, doc.as_ref()));
+			let ev = evaluator.as_ref().map(|e| e as &dyn ClosureEvaluator);
 			let mut stack = TreeStack::new();
 			stack
-				.enter(|stk| async move {
-					crate::fnc::value::expect((stk, frozen, opt, doc.as_ref()), args).await
-				})
+				.enter(|stk| async move { crate::fnc::value::expect((stk, ev), args).await })
 				.finish()
 				.await
 		})

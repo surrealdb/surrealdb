@@ -7380,6 +7380,7 @@ dependencies = [
  "pbkdf2",
  "rand 0.9.4",
  "rand_core 0.6.4",
+ "reblessive",
  "regex",
  "rust_decimal",
  "scrypt",

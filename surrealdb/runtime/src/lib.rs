@@ -14,6 +14,7 @@
 //! unstable and changes without notice.
 
 pub mod args;
+pub mod array;
 pub mod bytes;
 pub mod count;
 pub mod crypto;
@@ -24,6 +25,7 @@ pub mod not;
 pub mod object;
 pub mod parse;
 pub mod rand;
+pub mod set;
 pub mod string;
 pub mod time;
 pub mod r#type;

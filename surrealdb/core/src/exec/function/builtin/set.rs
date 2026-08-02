@@ -7,7 +7,8 @@ use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
 use crate::exec::physical_expr::EvalContext;
 use crate::expr::Kind;
 use crate::fnc::args::FromArgs;
-use crate::val::Value;
+use crate::fnc::closure::LegacyClosureEvaluator;
+use crate::val::{ClosureEvaluator, Value};
 use crate::{define_pure_function, register_functions};
 
 // Single set argument functions
@@ -79,10 +80,13 @@ macro_rules! define_set_closure_function {
 					let opt = ctx.exec_ctx.options();
 					let doc = ctx.document_root.or(ctx.current_value)
 						.map(|v| CursorDoc::new(None, None, v.clone()));
+					let evaluator =
+						opt.map(|o| LegacyClosureEvaluator::new(frozen, o, doc.as_ref()));
+					let ev = evaluator.as_ref().map(|e| e as &dyn ClosureEvaluator);
 					let mut stack = TreeStack::new();
 					stack
 						.enter(|stk| async move {
-							$impl_path((stk, frozen, opt, doc.as_ref()), args).await
+							$impl_path((stk, ev), args).await
 						})
 						.finish()
 						.await
@@ -129,10 +133,13 @@ macro_rules! define_set_closure_function {
 					let opt = ctx.exec_ctx.options();
 					let doc = ctx.document_root.or(ctx.current_value)
 						.map(|v| CursorDoc::new(None, None, v.clone()));
+					let evaluator =
+						opt.map(|o| LegacyClosureEvaluator::new(frozen, o, doc.as_ref()));
+					let ev = evaluator.as_ref().map(|e| e as &dyn ClosureEvaluator);
 					let mut stack = TreeStack::new();
 					stack
 						.enter(|stk| async move {
-							$impl_path((stk, frozen, opt, doc.as_ref()), args).await
+							$impl_path((stk, ev), args).await
 						})
 						.finish()
 						.await

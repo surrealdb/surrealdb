@@ -3,13 +3,10 @@ use std::ops::Bound;
 use anyhow::Result;
 use common::range::TypedRange;
 use reblessive::tree::Stk;
+use surrealdb_expr::expr::Error;
+use surrealdb_expr::val::{Closure, ClosureEvaluator, Set, Value};
 
-use super::args::Optional;
-use crate::ctx::FrozenContext;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::expr::Error;
-use crate::val::{Closure, Set, Value};
+use crate::args::Optional;
 
 /// Add value(s) to a set
 pub fn add((mut set, value): (Set, Value)) -> Result<Value> {
@@ -92,17 +89,14 @@ pub fn contains((set, value): (Set, Value)) -> Result<Value> {
 
 /// Check if all elements in the set match a condition
 pub async fn all(
-	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
+	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
 	(set, Optional(check)): (Set, Optional<Value>),
 ) -> Result<Value> {
 	Ok(match check {
 		Some(Value::Closure(closure)) => {
-			if let Some(opt) = opt {
+			if let Some(ev) = ev {
 				for arg in set {
-					if crate::legacy::closure_invoke(&closure, stk, ctx, opt, doc, vec![arg])
-						.await?
-						.is_truthy()
-					{
+					if ev.invoke(stk, &closure, vec![arg]).await?.is_truthy() {
 						continue;
 					} else {
 						return Ok(Value::Bool(false));
@@ -120,17 +114,14 @@ pub async fn all(
 
 /// Check if any element in the set matches a condition
 pub async fn any(
-	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
+	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
 	(set, Optional(check)): (Set, Optional<Value>),
 ) -> Result<Value> {
 	Ok(match check {
 		Some(Value::Closure(closure)) => {
-			if let Some(opt) = opt {
+			if let Some(ev) = ev {
 				for arg in set {
-					if crate::legacy::closure_invoke(&closure, stk, ctx, opt, doc, vec![arg])
-						.await?
-						.is_truthy()
-					{
+					if ev.invoke(stk, &closure, vec![arg]).await?.is_truthy() {
 						return Ok(Value::Bool(true));
 					} else {
 						continue;
@@ -160,25 +151,15 @@ pub fn at((set, i): (Set, i64)) -> Result<Value> {
 
 /// Filter elements in the set that match a condition
 pub async fn filter(
-	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
+	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
 	(set, check): (Set, Value),
 ) -> Result<Value> {
 	Ok(match check {
 		Value::Closure(closure) => {
-			if let Some(opt) = opt {
+			if let Some(ev) = ev {
 				let mut res = Set::new();
 				for arg in set {
-					if crate::legacy::closure_invoke(
-						&closure,
-						stk,
-						ctx,
-						opt,
-						doc,
-						vec![arg.clone()],
-					)
-					.await?
-					.is_truthy()
-					{
+					if ev.invoke(stk, &closure, vec![arg.clone()]).await?.is_truthy() {
 						res.insert(arg);
 					}
 				}
@@ -193,24 +174,14 @@ pub async fn filter(
 
 /// Find the first element in the set matching a condition (in BTree order)
 pub async fn find(
-	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
+	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
 	(set, value): (Set, Value),
 ) -> Result<Value> {
 	Ok(match value {
 		Value::Closure(closure) => {
-			if let Some(opt) = opt {
+			if let Some(ev) = ev {
 				for arg in set {
-					if crate::legacy::closure_invoke(
-						&closure,
-						stk,
-						ctx,
-						opt,
-						doc,
-						vec![arg.clone()],
-					)
-					.await?
-					.is_truthy()
-					{
+					if ev.invoke(stk, &closure, vec![arg.clone()]).await?.is_truthy() {
 						return Ok(arg);
 					}
 				}
@@ -235,14 +206,13 @@ pub fn flatten((set,): (Set,)) -> Result<Value> {
 
 /// Fold over the set with an accumulator
 pub async fn fold(
-	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
+	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
 	(set, init, mapper): (Set, Value, Box<Closure>),
 ) -> Result<Value> {
-	if let Some(opt) = opt {
+	if let Some(ev) = ev {
 		let mut accum = init;
 		for val in set {
-			accum =
-				crate::legacy::closure_invoke(&mapper, stk, ctx, opt, doc, vec![accum, val]).await?
+			accum = ev.invoke(stk, &mapper, vec![accum, val]).await?
 		}
 		Ok(accum)
 	} else {
@@ -262,15 +232,13 @@ pub fn last((set,): (Set,)) -> Result<Value> {
 
 /// Map over the set elements, returning a new set
 pub async fn map(
-	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
+	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
 	(set, mapper): (Set, Box<Closure>),
 ) -> Result<Value> {
-	if let Some(opt) = opt {
+	if let Some(ev) = ev {
 		let mut res = Set::new();
 		for arg in set {
-			res.insert(
-				crate::legacy::closure_invoke(&mapper, stk, ctx, opt, doc, vec![arg]).await?,
-			);
+			res.insert(ev.invoke(stk, &mapper, vec![arg]).await?);
 		}
 		Ok(res.into())
 	} else {
@@ -290,10 +258,10 @@ pub fn min((set,): (Set,)) -> Result<Value> {
 
 /// Reduce the set using a closure (uses first element as initial value)
 pub async fn reduce(
-	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
+	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
 	(set, mapper): (Set, Box<Closure>),
 ) -> Result<Value> {
-	if let Some(opt) = opt {
+	if let Some(ev) = ev {
 		match set.len() {
 			0 => Ok(Value::None),
 			1 => {
@@ -313,15 +281,7 @@ pub async fn reduce(
 					return Ok(Value::None);
 				};
 				for val in iter {
-					accum = crate::legacy::closure_invoke(
-						&mapper,
-						stk,
-						ctx,
-						opt,
-						doc,
-						vec![accum, val],
-					)
-					.await?;
+					accum = ev.invoke(stk, &mapper, vec![accum, val]).await?;
 				}
 				Ok(accum)
 			}

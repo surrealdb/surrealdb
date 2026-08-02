@@ -19,6 +19,7 @@ common.workspace = true
 surrealdb-cnf.workspace = true
 surrealdb-expr.workspace = true
 surrealdb-strand.workspace = true
+reblessive = { workspace = true, features = ["tree"] }
 surrealdb-syn.workspace = true
 rand_core.workspace = true
 regex.workspace = true

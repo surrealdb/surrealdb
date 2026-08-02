@@ -18,8 +18,8 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::fnc::args::Any;
-use crate::val::Value;
 use crate::val::closure::BuiltinClosureObj;
+use crate::val::{BoxInvokeFut, Closure, ClosureEvaluator, Value};
 
 pub(crate) type BuiltinClosureFn = Box<
 	dyn for<'a> Fn(
@@ -48,5 +48,42 @@ impl NativeClosure {
 impl BuiltinClosureObj for NativeClosure {
 	fn as_any(&self) -> &dyn std::any::Any {
 		self
+	}
+}
+
+/// The execution layer's [`ClosureEvaluator`], holding the environment a
+/// closure body needs so that callers below this crate do not have to name it.
+///
+/// Borrowed rather than owned: every call site already has these in hand for
+/// the duration of the function call it is serving, so constructing one costs
+/// three pointer copies and no allocation.
+pub(crate) struct LegacyClosureEvaluator<'a> {
+	ctx: &'a FrozenContext,
+	opt: &'a Options,
+	doc: Option<&'a CursorDoc>,
+}
+
+impl<'a> LegacyClosureEvaluator<'a> {
+	pub(crate) fn new(
+		ctx: &'a FrozenContext,
+		opt: &'a Options,
+		doc: Option<&'a CursorDoc>,
+	) -> Self {
+		Self {
+			ctx,
+			opt,
+			doc,
+		}
+	}
+}
+
+impl ClosureEvaluator for LegacyClosureEvaluator<'_> {
+	fn invoke<'a>(
+		&'a self,
+		stk: &'a mut Stk,
+		closure: &'a Closure,
+		args: Vec<Value>,
+	) -> BoxInvokeFut<'a> {
+		Box::pin(crate::legacy::closure_invoke(closure, stk, self.ctx, self.opt, self.doc, args))
 	}
 }

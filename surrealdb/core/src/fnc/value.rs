@@ -2,32 +2,28 @@ use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
-use crate::ctx::FrozenContext;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
 use crate::exec::Error as ExecError;
 use crate::expr::{Error as ExprError, Operation};
 use crate::fnc::args::Optional;
-use crate::val::{Closure, Value};
+use crate::val::{Closure, ClosureEvaluator, Value};
 
 pub async fn chain(
-	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
+	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
 	(value, worker): (Value, Box<Closure>),
 ) -> Result<Value> {
-	if let Some(opt) = opt {
-		crate::legacy::closure_invoke(&worker, stk, ctx, opt, doc, vec![value]).await
+	if let Some(ev) = ev {
+		ev.invoke(stk, &worker, vec![value]).await
 	} else {
 		Ok(Value::None)
 	}
 }
 
 pub async fn expect(
-	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
+	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
 	(value, worker, Optional(message)): (Value, Box<Closure>, Optional<Value>),
 ) -> Result<Value> {
-	if let Some(opt) = opt {
-		let got =
-			crate::legacy::closure_invoke(&worker, stk, ctx, opt, doc, vec![value.clone()]).await?;
+	if let Some(ev) = ev {
+		let got = ev.invoke(stk, &worker, vec![value.clone()]).await?;
 		match got {
 			Value::Bool(true) => Ok(value),
 			Value::Bool(false) => {

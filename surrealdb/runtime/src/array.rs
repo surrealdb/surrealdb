@@ -3,20 +3,18 @@ use std::mem::{self};
 use std::ops::Bound;
 
 use anyhow::Result;
+use common::fail;
 use common::range::TypedRange;
 use rand::seq::SliceRandom;
 use reblessive::tree::Stk;
 use surrealdb_cnf::GENERATION_ALLOCATION_LIMIT;
-
-use super::args::{Optional, Rest};
-use crate::ctx::FrozenContext;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::expr::Error;
-use crate::val::array::{
+use surrealdb_expr::expr::Error;
+use surrealdb_expr::val::array::{
 	Clump, Combine, Complement, Difference, Flatten, Intersect, Matches, Union, Uniq, Windows,
 };
-use crate::val::{Array, Closure, Value};
+use surrealdb_expr::val::{Array, Closure, ClosureEvaluator, Value};
+
+use crate::args::{Optional, Rest};
 
 /// Returns an error if an array of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<(), Error> {
@@ -50,17 +48,14 @@ pub fn add((mut array, value): (Array, Value)) -> Result<Value> {
 }
 
 pub async fn all(
-	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
+	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
 	(array, Optional(check)): (Array, Optional<Value>),
 ) -> Result<Value> {
 	Ok(match check {
 		Some(Value::Closure(closure)) => {
-			if let Some(opt) = opt {
+			if let Some(ev) = ev {
 				for arg in array {
-					if crate::legacy::closure_invoke(&closure, stk, ctx, opt, doc, vec![arg])
-						.await?
-						.is_truthy()
-					{
+					if ev.invoke(stk, &closure, vec![arg]).await?.is_truthy() {
 						continue;
 					} else {
 						return Ok(Value::Bool(false));
@@ -77,17 +72,14 @@ pub async fn all(
 }
 
 pub async fn any(
-	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
+	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
 	(array, Optional(check)): (Array, Optional<Value>),
 ) -> Result<Value> {
 	Ok(match check {
 		Some(Value::Closure(closure)) => {
-			if let Some(opt) = opt {
+			if let Some(ev) = ev {
 				for arg in array {
-					if crate::legacy::closure_invoke(&closure, stk, ctx, opt, doc, vec![arg])
-						.await?
-						.is_truthy()
-					{
+					if ev.invoke(stk, &closure, vec![arg]).await?.is_truthy() {
 						return Ok(Value::Bool(true));
 					} else {
 						continue;
@@ -303,25 +295,15 @@ pub fn fill(
 }
 
 pub async fn filter(
-	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
+	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
 	(array, check): (Array, Value),
 ) -> Result<Value> {
 	Ok(match check {
 		Value::Closure(closure) => {
-			if let Some(opt) = opt {
+			if let Some(ev) = ev {
 				let mut res = Vec::with_capacity(array.len());
 				for arg in array {
-					if crate::legacy::closure_invoke(
-						&closure,
-						stk,
-						ctx,
-						opt,
-						doc,
-						vec![arg.clone()],
-					)
-					.await?
-					.is_truthy()
-					{
+					if ev.invoke(stk, &closure, vec![arg.clone()]).await?.is_truthy() {
 						res.push(arg)
 					}
 				}
@@ -335,18 +317,15 @@ pub async fn filter(
 }
 
 pub async fn filter_index(
-	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
+	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
 	(array, value): (Array, Value),
 ) -> Result<Value> {
 	Ok(match value {
 		Value::Closure(closure) => {
-			if let Some(opt) = opt {
+			if let Some(ev) = ev {
 				let mut res = Vec::with_capacity(array.len());
 				for (i, arg) in array.into_iter().enumerate() {
-					if crate::legacy::closure_invoke(&closure, stk, ctx, opt, doc, vec![arg])
-						.await?
-						.is_truthy()
-					{
+					if ev.invoke(stk, &closure, vec![arg]).await?.is_truthy() {
 						res.push(Value::from(i as i64));
 					}
 				}
@@ -371,24 +350,14 @@ pub async fn filter_index(
 }
 
 pub async fn find(
-	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
+	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
 	(array, value): (Array, Value),
 ) -> Result<Value> {
 	Ok(match value {
 		Value::Closure(closure) => {
-			if let Some(opt) = opt {
+			if let Some(ev) = ev {
 				for arg in array {
-					if crate::legacy::closure_invoke(
-						&closure,
-						stk,
-						ctx,
-						opt,
-						doc,
-						vec![arg.clone()],
-					)
-					.await?
-					.is_truthy()
-					{
+					if ev.invoke(stk, &closure, vec![arg.clone()]).await?.is_truthy() {
 						return Ok(arg);
 					}
 				}
@@ -402,17 +371,14 @@ pub async fn find(
 }
 
 pub async fn find_index(
-	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
+	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
 	(array, value): (Array, Value),
 ) -> Result<Value> {
 	Ok(match value {
 		Value::Closure(closure) => {
-			if let Some(opt) = opt {
+			if let Some(ev) = ev {
 				for (i, arg) in array.into_iter().enumerate() {
-					if crate::legacy::closure_invoke(&closure, stk, ctx, opt, doc, vec![arg])
-						.await?
-						.is_truthy()
-					{
+					if ev.invoke(stk, &closure, vec![arg]).await?.is_truthy() {
 						return Ok(i.into());
 					}
 				}
@@ -448,21 +414,13 @@ pub fn flatten((array,): (Array,)) -> Result<Value> {
 }
 
 pub async fn fold(
-	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
+	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
 	(array, init, mapper): (Array, Value, Box<Closure>),
 ) -> Result<Value> {
-	if let Some(opt) = opt {
+	if let Some(ev) = ev {
 		let mut accum = init;
 		for (i, val) in array.into_iter().enumerate() {
-			accum = crate::legacy::closure_invoke(
-				&mapper,
-				stk,
-				ctx,
-				opt,
-				doc,
-				vec![accum, val, i.into()],
-			)
-			.await?
+			accum = ev.invoke(stk, &mapper, vec![accum, val, i.into()]).await?
 		}
 		Ok(accum)
 	} else {
@@ -614,16 +572,13 @@ pub fn logical_xor((mut lh, mut rh): (Array, Array)) -> Result<Value> {
 }
 
 pub async fn map(
-	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
+	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
 	(array, mapper): (Array, Box<Closure>),
 ) -> Result<Value> {
-	if let Some(opt) = opt {
+	if let Some(ev) = ev {
 		let mut res = Vec::with_capacity(array.len());
 		for (i, arg) in array.into_iter().enumerate() {
-			res.push(
-				crate::legacy::closure_invoke(&mapper, stk, ctx, opt, doc, vec![arg, i.into()])
-					.await?,
-			);
+			res.push(ev.invoke(stk, &mapper, vec![arg, i.into()]).await?);
 		}
 		Ok(res.into())
 	} else {
@@ -718,10 +673,10 @@ pub fn sequence((offset_len, Optional(len)): (i64, Optional<i64>)) -> Result<Val
 }
 
 pub async fn reduce(
-	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, Option<&Options>, Option<&CursorDoc>),
+	(stk, ev): (&mut Stk, Option<&dyn ClosureEvaluator>),
 	(array, mapper): (Array, Box<Closure>),
 ) -> Result<Value> {
-	if let Some(opt) = opt {
+	if let Some(ev) = ev {
 		match array.len() {
 			0 => Ok(Value::None),
 			1 => {
@@ -737,15 +692,7 @@ pub async fn reduce(
 					return Ok(Value::None);
 				};
 				for (idx, val) in iter.enumerate() {
-					accum = crate::legacy::closure_invoke(
-						&mapper,
-						stk,
-						ctx,
-						opt,
-						doc,
-						vec![accum, val, idx.into()],
-					)
-					.await?;
+					accum = ev.invoke(stk, &mapper, vec![accum, val, idx.into()]).await?;
 				}
 				Ok(accum)
 			}
@@ -993,8 +940,7 @@ pub fn windows((array, window_size): (Array, i64)) -> Result<Value> {
 pub mod sort {
 
 	use anyhow::Result;
-
-	use crate::val::{Array, Value};
+	use surrealdb_expr::val::{Array, Value};
 
 	pub fn asc((mut array,): (Array,)) -> Result<Value> {
 		array.sort_unstable();
@@ -1009,9 +955,10 @@ pub mod sort {
 
 #[cfg(test)]
 mod tests {
+	use surrealdb_expr::val::{Array, Value};
+
 	use super::{at, first, join, last, slice};
-	use crate::fnc::args::Optional;
-	use crate::val::{Array, Value};
+	use crate::args::Optional;
 
 	#[test]
 	fn array_slice() {

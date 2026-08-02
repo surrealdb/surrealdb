@@ -8,10 +8,10 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
+use crate::fnc::closure::LegacyClosureEvaluator;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::val::{RecordId, Value};
 pub mod api;
-pub mod array;
 pub(crate) mod closure;
 pub mod encoding;
 pub mod eval;
@@ -24,14 +24,14 @@ pub mod script;
 pub mod search;
 pub mod sequence;
 pub mod session;
-pub mod set;
 pub mod sleep;
 pub mod r#type;
 pub mod util;
 // The pure families live one crate down; these keep every `fnc::math::…`
 // path in core, in exec's builtins and in the script bridge resolving.
 pub use surrealdb_runtime::{
-	args, bytes, count, crypto, duration, geo, math, not, object, parse, rand, string, time,
+	args, array, bytes, count, crypto, duration, geo, math, not, object, parse, rand, set, string,
+	time,
 };
 pub mod value;
 pub mod vector;
@@ -561,6 +561,11 @@ pub async fn asynchronous(
 		|| std::future::ready(function())
 	}
 
+	// The environment through which the closure-taking builtins invoke user
+	// closures. `dispatch!` evaluates each arm inside a closure, so the
+	// evaluator has to outlive that closure rather than be built inside an arm.
+	let ev = LegacyClosureEvaluator::new(ctx, opt, doc);
+
 	dispatch!(
 		ctx,
 		name,
@@ -578,19 +583,19 @@ pub async fn asynchronous(
 		"eval::surql" => eval::surql((stk, ctx, opt, doc)).await,
 		"eval::gql" => eval::gql((stk, ctx, opt, doc)).await,
 		//
-		"array::all" => array::all((stk, ctx, Some(opt), doc)).await,
-		"array::any" => array::any((stk, ctx, Some(opt), doc)).await,
-		"array::every" => array::all((stk, ctx, Some(opt), doc)).await,
-		"array::filter" => array::filter((stk, ctx, Some(opt), doc)).await,
-		"array::filter_index" => array::filter_index((stk, ctx, Some(opt), doc)).await,
-		"array::find" => array::find((stk, ctx, Some(opt), doc)).await,
-		"array::find_index" => array::find_index((stk, ctx, Some(opt), doc)).await,
-		"array::fold" => array::fold((stk, ctx, Some(opt), doc)).await,
-		"array::includes" => array::any((stk, ctx, Some(opt), doc)).await,
-		"array::index_of" => array::find_index((stk, ctx, Some(opt), doc)).await,
-		"array::map" => array::map((stk, ctx, Some(opt), doc)).await,
-		"array::reduce" => array::reduce((stk, ctx, Some(opt), doc)).await,
-		"array::some" => array::any((stk, ctx, Some(opt), doc)).await,
+		"array::all" => array::all((stk, Some(&ev))).await,
+		"array::any" => array::any((stk, Some(&ev))).await,
+		"array::every" => array::all((stk, Some(&ev))).await,
+		"array::filter" => array::filter((stk, Some(&ev))).await,
+		"array::filter_index" => array::filter_index((stk, Some(&ev))).await,
+		"array::find" => array::find((stk, Some(&ev))).await,
+		"array::find_index" => array::find_index((stk, Some(&ev))).await,
+		"array::fold" => array::fold((stk, Some(&ev))).await,
+		"array::includes" => array::any((stk, Some(&ev))).await,
+		"array::index_of" => array::find_index((stk, Some(&ev))).await,
+		"array::map" => array::map((stk, Some(&ev))).await,
+		"array::reduce" => array::reduce((stk, Some(&ev))).await,
+		"array::some" => array::any((stk, Some(&ev))).await,
 		//
 		"crypto::argon2::compare" => (cpu_intensive) crypto::argon2::cmp.await,
 		"crypto::argon2::generate" => (cpu_intensive) crypto::argon2::r#gen.await,
@@ -630,13 +635,13 @@ pub async fn asynchronous(
 		"search::highlight" => search::highlight((ctx, doc)).await,
 		"search::offsets" => search::offsets((ctx, doc)).await,
 		//
-		"set::all" => set::all((stk, ctx, Some(opt), doc)).await,
-		"set::any" => set::any((stk, ctx, Some(opt), doc)).await,
-		"set::filter" => set::filter((stk, ctx, Some(opt), doc)).await,
-		"set::find" => set::find((stk, ctx, Some(opt), doc)).await,
-		"set::fold" => set::fold((stk, ctx, Some(opt), doc)).await,
-		"set::map" => set::map((stk, ctx, Some(opt), doc)).await,
-		"set::reduce" => set::reduce((stk, ctx, Some(opt), doc)).await,
+		"set::all" => set::all((stk, Some(&ev))).await,
+		"set::any" => set::any((stk, Some(&ev))).await,
+		"set::filter" => set::filter((stk, Some(&ev))).await,
+		"set::find" => set::find((stk, Some(&ev))).await,
+		"set::fold" => set::fold((stk, Some(&ev))).await,
+		"set::map" => set::map((stk, Some(&ev))).await,
+		"set::reduce" => set::reduce((stk, Some(&ev))).await,
 		//
 		"sleep" => sleep::sleep(ctx).await,
 		//
@@ -645,9 +650,9 @@ pub async fn asynchronous(
 		"type::field" => r#type::field((stk, ctx, Some(opt), doc)).await,
 		"type::fields" => r#type::fields((stk, ctx, Some(opt), doc)).await,
 		//
-		"value::chain" => value::chain((stk, ctx, Some(opt), doc)).await,
+		"value::chain" => value::chain((stk, Some(&ev))).await,
 		"value::diff" => value::diff.await,
-		"value::expect" => value::expect((stk, ctx, Some(opt), doc)).await,
+		"value::expect" => value::expect((stk, Some(&ev))).await,
 		"value::patch" => value::patch.await,
 		"schema::table::exists" => schema::table::exists((ctx, Some(opt))).await,
 	)
@@ -664,6 +669,10 @@ pub async fn idiom(
 	mut args: Vec<Value>,
 ) -> Result<Value> {
 	ctx.check_allowed_function(&idiom_name_to_normal(value.kind_of(), name))?;
+	// The environment through which the closure-taking builtins invoke user
+	// closures. `dispatch!` evaluates each arm inside a closure, so the
+	// evaluator has to outlive that closure rather than be built inside an arm.
+	let ev = LegacyClosureEvaluator::new(ctx, opt, doc);
 	match value {
 		Value::Set(x) => {
 			args.insert(0, Value::Set(x));
@@ -674,25 +683,25 @@ pub async fn idiom(
 				"no such method found for the set type",
 				//
 				"add" => set::add,
-				"all" => set::all((stk, ctx, Some(opt), doc)).await,
-				"any" => set::any((stk, ctx, Some(opt), doc)).await,
+				"all" => set::all((stk, Some(&ev))).await,
+				"any" => set::any((stk, Some(&ev))).await,
 				"at" => set::at,
 				"complement" => set::complement,
 				"contains" => set::contains,
 				"difference" => set::difference,
-				"filter" => set::filter((stk, ctx, Some(opt), doc)).await,
-				"find" => set::find((stk, ctx, Some(opt), doc)).await,
+				"filter" => set::filter((stk, Some(&ev))).await,
+				"find" => set::find((stk, Some(&ev))).await,
 				"first" => set::first,
 				"flatten" => set::flatten,
-				"fold" => set::fold((stk, ctx, Some(opt), doc)).await,
+				"fold" => set::fold((stk, Some(&ev))).await,
 				"join" => set::join,
 				"intersect" => set::intersect,
 				"last" => set::last,
 				"len" => set::len,
-				"map" => set::map((stk, ctx, Some(opt), doc)).await,
+				"map" => set::map((stk, Some(&ev))).await,
 				"max" => set::max,
 				"min" => set::min,
-				"reduce" => set::reduce((stk, ctx, Some(opt), doc)).await,
+				"reduce" => set::reduce((stk, Some(&ev))).await,
 				"remove" => set::remove,
 				"slice" => set::slice,
 				"union" => set::union,
@@ -743,8 +752,8 @@ pub async fn idiom(
 				"to_string_lossy" => r#type::string_lossy,
 				"to_uuid" => r#type::uuid,
 				//
-				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"expect" => value::expect((stk, ctx, Some(opt), doc)).await,
+				"chain" => value::chain((stk, Some(&ev))).await,
+				"expect" => value::expect((stk, Some(&ev))).await,
 				"diff" => value::diff.await,
 				"patch" => value::patch.await,
 				//
@@ -760,8 +769,8 @@ pub async fn idiom(
 				"no such method found for the array type",
 				//
 				"add" => array::add,
-				"all" => array::all((stk, ctx, Some(opt), doc)).await,
-				"any" => array::any((stk, ctx, Some(opt), doc)).await,
+				"all" => array::all((stk, Some(&ev))).await,
+				"any" => array::any((stk, Some(&ev))).await,
 				"append" => array::append,
 				"at" => array::at,
 				"boolean_and" => array::boolean_and,
@@ -774,18 +783,18 @@ pub async fn idiom(
 				"concat" => array::concat,
 				"difference" => array::difference,
 				"distinct" => array::distinct,
-				"every" => array::all((stk, ctx, Some(opt), doc)).await,
+				"every" => array::all((stk, Some(&ev))).await,
 				"fill" => array::fill,
-				"filter" => array::filter((stk, ctx, Some(opt), doc)).await,
-				"filter_index" => array::filter_index((stk, ctx, Some(opt), doc)).await,
-				"find" => array::find((stk, ctx, Some(opt), doc)).await,
-				"find_index" => array::find_index((stk, ctx, Some(opt), doc)).await,
+				"filter" => array::filter((stk, Some(&ev))).await,
+				"filter_index" => array::filter_index((stk, Some(&ev))).await,
+				"find" => array::find((stk, Some(&ev))).await,
+				"find_index" => array::find_index((stk, Some(&ev))).await,
 				"first" => array::first,
-				"fold" => array::fold((stk, ctx, Some(opt), doc)).await,
+				"fold" => array::fold((stk, Some(&ev))).await,
 				"flatten" => array::flatten,
 				"group" => array::group,
-				"includes" => array::any((stk, ctx, Some(opt), doc)).await,
-				"index_of" => array::find_index((stk, ctx, Some(opt), doc)).await,
+				"includes" => array::any((stk, Some(&ev))).await,
+				"index_of" => array::find_index((stk, Some(&ev))).await,
 				"insert" => array::insert,
 				"intersect" => array::intersect,
 				"is_empty" => array::is_empty,
@@ -796,18 +805,18 @@ pub async fn idiom(
 				"logical_or" => array::logical_or,
 				"logical_xor" => array::logical_xor,
 				"matches" => array::matches,
-				"map" => array::map((stk, ctx, Some(opt), doc)).await,
+				"map" => array::map((stk, Some(&ev))).await,
 				"max" => array::max,
 				"min" => array::min,
 				"pop" => array::pop,
 				"prepend" => array::prepend,
 				"push" => array::push,
-				"reduce" => array::reduce((stk, ctx, Some(opt), doc)).await,
+				"reduce" => array::reduce((stk, Some(&ev))).await,
 				"remove" => array::remove,
 				"reverse" => array::reverse,
 				"shuffle" => array::shuffle,
 				"slice" => array::slice,
-				"some" => array::any((stk, ctx, Some(opt), doc)).await,
+				"some" => array::any((stk, Some(&ev))).await,
 				"sort" => array::sort,
 				"sort_natural" => array::sort_natural,
 				"sort_lexical" => array::sort_lexical,
@@ -887,8 +896,8 @@ pub async fn idiom(
 				"to_string_lossy" => r#type::string_lossy,
 				"to_uuid" => r#type::uuid,
 				//
-				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"expect" => value::expect((stk, ctx, Some(opt), doc)).await,
+				"chain" => value::chain((stk, Some(&ev))).await,
+				"expect" => value::expect((stk, Some(&ev))).await,
 				"diff" => value::diff.await,
 				"patch" => value::patch.await,
 				//
@@ -950,8 +959,8 @@ pub async fn idiom(
 				"to_string_lossy" => r#type::string_lossy,
 				"to_uuid" => r#type::uuid,
 				//
-				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"expect" => value::expect((stk, ctx, Some(opt), doc)).await,
+				"chain" => value::chain((stk, Some(&ev))).await,
+				"expect" => value::expect((stk, Some(&ev))).await,
 				"diff" => value::diff.await,
 				"patch" => value::patch.await,
 				//
@@ -1021,8 +1030,8 @@ pub async fn idiom(
 				"to_string_lossy" => r#type::string_lossy,
 				"to_uuid" => r#type::uuid,
 				//
-				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"expect" => value::expect((stk, ctx, Some(opt), doc)).await,
+				"chain" => value::chain((stk, Some(&ev))).await,
+				"expect" => value::expect((stk, Some(&ev))).await,
 				"diff" => value::diff.await,
 				"patch" => value::patch.await,
 				//
@@ -1091,8 +1100,8 @@ pub async fn idiom(
 				"to_string_lossy" => r#type::string_lossy,
 				"to_uuid" => r#type::uuid,
 				//
-				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"expect" => value::expect((stk, ctx, Some(opt), doc)).await,
+				"chain" => value::chain((stk, Some(&ev))).await,
+				"expect" => value::expect((stk, Some(&ev))).await,
 				"diff" => value::diff.await,
 				"patch" => value::patch.await,
 				//
@@ -1158,8 +1167,8 @@ pub async fn idiom(
 				"to_string_lossy" => r#type::string_lossy,
 				"to_uuid" => r#type::uuid,
 				//
-				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"expect" => value::expect((stk, ctx, Some(opt), doc)).await,
+				"chain" => value::chain((stk, Some(&ev))).await,
+				"expect" => value::expect((stk, Some(&ev))).await,
 				"diff" => value::diff.await,
 				"patch" => value::patch.await,
 				//
@@ -1228,8 +1237,8 @@ pub async fn idiom(
 				"to_string_lossy" => r#type::string_lossy,
 				"to_uuid" => r#type::uuid,
 				//
-				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"expect" => value::expect((stk, ctx, Some(opt), doc)).await,
+				"chain" => value::chain((stk, Some(&ev))).await,
+				"expect" => value::expect((stk, Some(&ev))).await,
 				"diff" => value::diff.await,
 				"patch" => value::patch.await,
 				//
@@ -1309,8 +1318,8 @@ pub async fn idiom(
 				"to_string_lossy" => r#type::string_lossy,
 				"to_uuid" => r#type::uuid,
 				//
-				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"expect" => value::expect((stk, ctx, Some(opt), doc)).await,
+				"chain" => value::chain((stk, Some(&ev))).await,
+				"expect" => value::expect((stk, Some(&ev))).await,
 				"diff" => value::diff.await,
 				"patch" => value::patch.await,
 				//
@@ -1425,8 +1434,8 @@ pub async fn idiom(
 				"to_string_lossy" => r#type::string_lossy,
 				"to_uuid" => r#type::uuid,
 				//
-				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"expect" => value::expect((stk, ctx, Some(opt), doc)).await,
+				"chain" => value::chain((stk, Some(&ev))).await,
+				"expect" => value::expect((stk, Some(&ev))).await,
 				"diff" => value::diff.await,
 				"patch" => value::patch.await,
 			)
@@ -1511,8 +1520,8 @@ pub async fn idiom(
 				"to_string_lossy" => r#type::string_lossy,
 				"to_uuid" => r#type::uuid,
 				//
-				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"expect" => value::expect((stk, ctx, Some(opt), doc)).await,
+				"chain" => value::chain((stk, Some(&ev))).await,
+				"expect" => value::expect((stk, Some(&ev))).await,
 				"diff" => value::diff.await,
 				"patch" => value::patch.await,
 				//
@@ -1586,8 +1595,8 @@ pub async fn idiom(
 				"to_string_lossy" => r#type::string_lossy,
 				"to_uuid" => r#type::uuid,
 				//
-				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"expect" => value::expect((stk, ctx, Some(opt), doc)).await,
+				"chain" => value::chain((stk, Some(&ev))).await,
+				"expect" => value::expect((stk, Some(&ev))).await,
 				"diff" => value::diff.await,
 				"patch" => value::patch.await,
 				//
@@ -1648,8 +1657,8 @@ pub async fn idiom(
 				"to_string_lossy" => r#type::string_lossy,
 				"to_uuid" => r#type::uuid,
 				//
-				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"expect" => value::expect((stk, ctx, Some(opt), doc)).await,
+				"chain" => value::chain((stk, Some(&ev))).await,
+				"expect" => value::expect((stk, Some(&ev))).await,
 				"diff" => value::diff.await,
 				"patch" => value::patch.await,
 				//
