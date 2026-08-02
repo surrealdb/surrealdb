@@ -110,11 +110,21 @@ pub(crate) struct SessionInfo {
 /// - Datastore handle (for root-level operations)
 /// - Cancellation token (tokio-based, supplements FrozenContext's AtomicBool)
 /// - Legacy Options (for fallback to compute path)
+/// - Function registry (name resolution for every planned function call)
 #[derive(Clone)]
 pub struct RootContext {
 	/// The underlying FrozenContext -- single source of truth for
 	/// params, txn, capabilities, and all legacy context fields.
 	pub ctx: FrozenContext,
+	/// Registry of built-in scalar, aggregate, projection and index
+	/// functions, plus the method-dispatch table.
+	///
+	/// Built once per datastore and shared by `Arc`; every planner and every
+	/// function-call physical expression resolves names through it. It lives
+	/// on the root so that the whole hierarchy — namespace, database, and
+	/// every child derived by `with_new_ctx` or `Clone` — sees the same
+	/// registry.
+	pub(crate) function_registry: Arc<FunctionRegistry>,
 	/// Legacy Options for fallback to compute path when streaming executor
 	/// encounters unimplemented expressions.
 	/// Remove this when the streaming executor has full coverage.
@@ -532,6 +542,7 @@ impl ExecutionContext {
 		match self {
 			Self::Root(r) => Self::Root(RootContext {
 				ctx,
+				function_registry: Arc::clone(&r.function_registry),
 				options: r.options.clone(),
 				datastore: r.datastore.clone(),
 				cancellation: r.cancellation.clone(),
@@ -544,6 +555,7 @@ impl ExecutionContext {
 			Self::Namespace(n) => Self::Namespace(NamespaceContext {
 				root: RootContext {
 					ctx,
+					function_registry: Arc::clone(&n.root.function_registry),
 					options: n.root.options.clone(),
 					datastore: n.root.datastore.clone(),
 					cancellation: n.root.cancellation.clone(),
@@ -559,6 +571,7 @@ impl ExecutionContext {
 				ns_ctx: NamespaceContext {
 					root: RootContext {
 						ctx,
+						function_registry: Arc::clone(&d.ns_ctx.root.function_registry),
 						options: d.ns_ctx.root.options.clone(),
 						datastore: d.ns_ctx.root.datastore.clone(),
 						cancellation: d.ns_ctx.root.cancellation.clone(),
@@ -719,11 +732,12 @@ impl ExecutionContext {
 
 	/// Get the function registry.
 	///
-	/// Returns the function registry from the underlying context.
-	/// This allows different contexts to have different registries,
-	/// enabling custom function registration (e.g., enterprise-only functions).
+	/// Returns the registry held by the root context, which every level of
+	/// the hierarchy shares. Carrying it per-root allows different roots to
+	/// have different registries, enabling custom function registration
+	/// (e.g., enterprise-only functions).
 	pub fn function_registry(&self) -> &Arc<FunctionRegistry> {
-		self.root().ctx.function_registry()
+		&self.root().function_registry
 	}
 
 	/// Get the session information (if available).

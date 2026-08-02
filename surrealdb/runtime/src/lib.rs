@@ -23,6 +23,7 @@ pub mod geo;
 pub mod math;
 pub mod not;
 pub mod object;
+pub mod operate;
 pub mod parse;
 pub mod rand;
 pub mod set;

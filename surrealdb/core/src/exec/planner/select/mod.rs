@@ -937,9 +937,15 @@ impl<'ctx> Planner<'ctx> {
 		// and fall back. Inheriting auth keeps fast-path eligibility
 		// decisions consistent with the outer statement.
 		let mut pp = if let Some(ref txn) = self.txn {
-			Planner::with_txn(self.ctx, Arc::clone(txn), self.ns.clone(), self.db.clone())
+			Planner::with_txn(
+				self.ctx,
+				self.function_registry,
+				Arc::clone(txn),
+				self.ns.clone(),
+				self.db.clone(),
+			)
 		} else {
-			Planner::new(self.ctx)
+			Planner::new(self.ctx, self.function_registry)
 		}
 		.with_version(version.clone())
 		.with_cycle_guard(self.cycle_guard());

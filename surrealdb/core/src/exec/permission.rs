@@ -10,7 +10,6 @@ use std::sync::Arc;
 use reblessive::tree::Stk;
 
 use crate::catalog::{Permission, Record};
-use crate::ctx::FrozenContext;
 use crate::err::{EngineError, Error};
 use crate::exec::planner::Planner;
 use crate::exec::{
@@ -66,9 +65,10 @@ pub(crate) async fn convert_permission_to_physical(
 #[inline]
 pub(crate) async fn convert_permission_to_physical_runtime(
 	permission: &Permission,
-	ctx: &FrozenContext,
+	ctx: &ExecutionContext,
 ) -> Result<PhysicalPermission, Error> {
-	convert_permission_to_physical(permission, &Planner::new(ctx)).await
+	convert_permission_to_physical(permission, &Planner::new(ctx.ctx(), ctx.function_registry()))
+		.await
 }
 
 /// Check if permission should be checked for the given action.

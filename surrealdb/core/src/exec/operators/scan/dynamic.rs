@@ -447,7 +447,7 @@ impl ExecOperator for DynamicScan {
 
 			let select_permission = if check_perms {
 				let catalog_perm = table_select_permission(table_def.as_deref());
-				convert_permission_to_physical_runtime(catalog_perm, ctx.ctx())
+				convert_permission_to_physical_runtime(catalog_perm, &ctx)
 					.await
 					.context("Failed to convert permission")?
 			} else {
@@ -949,9 +949,11 @@ mod tests {
 	/// Helper to create a Scan with all fields for testing
 	async fn create_test_scan(table_name: &str, with_index_hints: bool) -> DynamicScan {
 		let ctx = std::sync::Arc::new(Context::new_test());
+		let registry = crate::exec::function::FunctionRegistry::with_builtins();
 		let source = expr_to_physical_expr(
 			crate::expr::Expr::Literal(crate::expr::literal::Literal::String(table_name.into())),
 			&ctx,
+			&registry,
 		)
 		.await
 		.expect("Failed to create physical expression");

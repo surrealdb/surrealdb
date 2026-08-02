@@ -220,7 +220,7 @@ impl ExecOperator for IndexCountScan {
 			// Resolve SELECT permission.
 			let select_permission = if check_perms {
 				let catalog_perm = table_select_permission(table_def.as_deref());
-				convert_permission_to_physical_runtime(catalog_perm, ctx.ctx())
+				convert_permission_to_physical_runtime(catalog_perm, &ctx)
 					.await
 					.context("Failed to convert permission")?
 			} else {

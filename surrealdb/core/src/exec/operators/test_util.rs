@@ -13,6 +13,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::ctx::Context;
 use crate::exec::context::RootContext;
+use crate::exec::function::FunctionRegistry;
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
 	OutputOrdering, ValueBatch, ValueBatchStream,
@@ -84,6 +85,7 @@ impl ExecOperator for ValuesOperator {
 pub(crate) fn root_ctx() -> ExecutionContext {
 	ExecutionContext::Root(RootContext {
 		ctx: Context::new_test().freeze(),
+		function_registry: Arc::new(FunctionRegistry::with_builtins()),
 		options: None,
 		datastore: None,
 		cancellation: CancellationToken::new(),

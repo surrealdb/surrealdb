@@ -25,6 +25,7 @@ use crate::dbs::{
 use crate::doc::DefaultBroker;
 use crate::err::{EngineError, Error};
 use crate::exec::Error as ExecError;
+use crate::exec::function::FunctionRegistry;
 use crate::exec::planner::try_plan_expr;
 use crate::expr::paths::{DB, NS};
 use crate::expr::plan::LogicalPlan;
@@ -175,6 +176,10 @@ pub struct Executor {
 	results: Vec<QueryResult>,
 	opt: Options,
 	ctx: FrozenContext,
+	/// The datastore's function registry. Seated on the `RootContext` of every
+	/// statement this executor runs, so the streaming planner and every nested
+	/// context derived from it resolve function names through one registry.
+	function_registry: Arc<FunctionRegistry>,
 	/// Cached session info to avoid re-extracting from context on every query.
 	/// Session values don't change between statements in the same executor batch.
 	cached_session: Option<Arc<crate::exec::context::SessionInfo>>,
@@ -258,12 +263,13 @@ impl Executor {
 }
 
 impl Executor {
-	pub fn new(ctx: FrozenContext, opt: Options) -> Self {
+	pub fn new(kvs: &Datastore, ctx: FrozenContext, opt: Options) -> Self {
 		Executor {
 			stack: TreeStack::new(),
 			results: Vec::new(),
 			opt,
 			ctx,
+			function_registry: Arc::clone(kvs.function_registry()),
 			cached_session: None,
 			broker_owned_by_executor: false,
 		}
@@ -646,6 +652,7 @@ impl Executor {
 		// transaction reference which changes between statements.
 		let root_ctx = RootContext {
 			ctx: Context::snapshot(&self.ctx).freeze(),
+			function_registry: Arc::clone(&self.function_registry),
 			options: Some(self.opt.clone()),
 			datastore: None,
 			cancellation,
@@ -964,6 +971,7 @@ impl Executor {
 				let res = match try_plan_expr!(
 					&stm.what,
 					&self.ctx,
+					&self.function_registry,
 					Arc::clone(&txn),
 					Some(Arc::clone(&self.opt.auth))
 				) {
@@ -1070,6 +1078,7 @@ impl Executor {
 				match try_plan_expr!(
 					&e,
 					&self.ctx,
+					&self.function_registry,
 					Arc::clone(&txn),
 					Some(Arc::clone(&self.opt.auth))
 				) {
@@ -1872,7 +1881,7 @@ impl Executor {
 		// Execute each expression with the transaction
 		let tx = ctx.tx();
 		let batch_start = Instant::now();
-		let mut executor = Self::new(ctx, opt);
+		let mut executor = Self::new(kvs, ctx, opt);
 		let mut results = Vec::new();
 
 		for expr in plan.expressions {
@@ -2003,7 +2012,7 @@ impl Executor {
 		// of `QueryResult`s the executor produced is the source of
 		// truth for the per-batch counters.
 		let batch_start = Instant::now();
-		let mut this = Executor::new(ctx, opt);
+		let mut this = Executor::new(kvs, ctx, opt);
 		let batch_results_start = this.results.len();
 		let mut stream = pin!(stream);
 

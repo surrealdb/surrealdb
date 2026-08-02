@@ -112,7 +112,9 @@ impl<'a> StreamingBucketOps<'a> {
 				}
 				Permission::Full => (),
 				Permission::Specific(e) => {
-					let expr = Planner::new(self.exec_ctx.ctx()).physical_expr(e.clone()).await?;
+					let expr = Planner::new(self.exec_ctx.ctx(), self.exec_ctx.function_registry())
+						.physical_expr(e.clone())
+						.await?;
 					let mut exec_ctx =
 						self.exec_ctx.with_param("action", Value::from(op.to_string()));
 					if let Some(key) = key {

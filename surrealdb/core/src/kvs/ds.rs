@@ -273,8 +273,9 @@ pub struct Datastore {
 	/// Registry of built-in scalar, aggregate, projection and index
 	/// functions, along with the method-dispatch table. Built once when the
 	/// datastore is constructed and shared across all transactions via the
-	/// `Arc`. Every `Context` clones this `Arc` rather than rebuilding the
-	/// registry, which is otherwise the single biggest per-query cost.
+	/// `Arc`. The executor clones this `Arc` onto the `RootContext` of every
+	/// statement rather than rebuilding the registry, which is otherwise the
+	/// single biggest per-query cost.
 	function_registry: Arc<FunctionRegistry>,
 	// The index asynchronous builder
 	index_builder: IndexBuilder,
@@ -773,6 +774,13 @@ impl Datastore {
 	#[cfg(feature = "jwks")]
 	pub(crate) fn cache(&self) -> &Arc<DatastoreCache> {
 		&self.cache
+	}
+
+	/// The function registry every query on this datastore resolves names
+	/// through. Handed to the executor, which seats it on the `RootContext`
+	/// of each statement.
+	pub(crate) fn function_registry(&self) -> &Arc<FunctionRegistry> {
+		&self.function_registry
 	}
 
 	pub(super) fn clock_now(&self) -> Timestamp {
@@ -4353,7 +4361,6 @@ impl Datastore {
 			self.index_builder.clone(),
 			self.sequences.clone(),
 			Arc::clone(&self.cache),
-			Arc::clone(&self.function_registry),
 			#[cfg(feature = "http")]
 			self.http_client.load_full(),
 			#[cfg(storage)]

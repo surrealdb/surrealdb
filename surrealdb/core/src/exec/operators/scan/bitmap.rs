@@ -654,7 +654,7 @@ impl ExecOperator for BitmapResolve {
 				let table_def =
 					db_ctx.get_table_def(&table_name, None).await.context("Failed to get table")?;
 				if let Some(def) = &table_def {
-					convert_permission_to_physical_runtime(&def.permissions.select, ctx.ctx())
+					convert_permission_to_physical_runtime(&def.permissions.select, &ctx)
 						.await
 						.context("Failed to convert permission")?
 				} else {

@@ -2229,8 +2229,13 @@ mod tests {
 		ctx.set_transaction(Arc::clone(&txn));
 		let ctx = ctx.freeze();
 
-		let planner =
-			Planner::with_txn(&ctx, txn, Some("test".to_string()), Some("test".to_string()));
+		let planner = Planner::with_txn(
+			&ctx,
+			ds.function_registry(),
+			txn,
+			Some("test".to_string()),
+			Some("test".to_string()),
+		);
 		let operator = planner.plan_match(plan).await.expect("plan_match");
 
 		let mut out = String::new();

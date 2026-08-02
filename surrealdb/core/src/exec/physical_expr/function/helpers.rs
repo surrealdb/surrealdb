@@ -35,7 +35,13 @@ pub(crate) async fn check_permission(
 		.into()),
 		Permission::Specific(expr) => {
 			// Plan and evaluate the permission expression.
-			match expr_to_physical_expr(expr.clone(), ctx.exec_ctx.ctx()).await {
+			match expr_to_physical_expr(
+				expr.clone(),
+				ctx.exec_ctx.ctx(),
+				ctx.exec_ctx.function_registry(),
+			)
+			.await
+			{
 				Ok(phys_expr) => {
 					let result = phys_expr.evaluate(ctx.clone()).await?;
 					if !result.is_truthy() {

@@ -131,7 +131,7 @@ impl FetchFieldStateCache {
 					.await
 					.context("Failed to get table definition")?;
 				let catalog_perm = table_select_permission(table_def.as_deref());
-				convert_permission_to_physical_runtime(catalog_perm, ctx.ctx())
+				convert_permission_to_physical_runtime(catalog_perm, ctx)
 					.await
 					.context("Failed to convert permission")?
 			} else {

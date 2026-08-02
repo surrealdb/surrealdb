@@ -338,7 +338,7 @@ pub(crate) async fn process_fetched_record(
 			.await
 			.context("Failed to get table definition")?;
 		let catalog_perm = table_select_permission(table_def.as_deref());
-		let select_perm = convert_permission_to_physical_runtime(catalog_perm, ctx.ctx())
+		let select_perm = convert_permission_to_physical_runtime(catalog_perm, ctx)
 			.await
 			.context("Failed to convert permission")?;
 

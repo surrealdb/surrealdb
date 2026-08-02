@@ -27,6 +27,7 @@ pub mod cache;
 pub mod close;
 pub mod config;
 pub mod factory;
+pub mod index_state;
 pub mod into;
 pub mod key;
 pub mod sequences;

@@ -420,7 +420,7 @@ impl ExecOperator for UnionIndexScan {
 						Some(def) => def.permissions.select.clone(),
 						None => crate::catalog::Permission::None,
 					};
-					convert_permission_to_physical_runtime(&catalog_perm, ctx.ctx())
+					convert_permission_to_physical_runtime(&catalog_perm, &ctx)
 						.await
 						.context("Failed to convert permission")?
 				} else {

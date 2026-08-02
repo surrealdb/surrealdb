@@ -80,6 +80,7 @@ impl Param {
 							match crate::exec::planner::expr_to_physical_expr(
 								perm_expr.clone(),
 								ctx.exec_ctx.ctx(),
+								ctx.exec_ctx.function_registry(),
 							)
 							.await
 							{

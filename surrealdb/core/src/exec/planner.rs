@@ -21,7 +21,7 @@
 //! ```ignore
 //! use surrealdb_core::exec::planner::Planner;
 //!
-//! let planner = Planner::new(&ctx);
+//! let planner = Planner::new(&ctx, &registry);
 //! let plan = planner.plan(expr)?;
 //! ```
 //!
@@ -222,10 +222,14 @@ impl<'ctx> Planner<'ctx> {
 	/// Table sources will use the generic `Scan` operator that resolves
 	/// indexes at execution time. This is used by `physical_expr` for
 	/// scalar subqueries and by callers that don't have transaction access.
-	pub fn new(ctx: &'ctx FrozenContext) -> Self {
+	///
+	/// `registry` is the function registry every function name in the planned
+	/// expression resolves against; callers holding an `ExecutionContext` pass
+	/// its `function_registry()`.
+	pub fn new(ctx: &'ctx FrozenContext, registry: &'ctx FunctionRegistry) -> Self {
 		Self {
 			ctx,
-			function_registry: ctx.function_registry(),
+			function_registry: registry,
 			txn: None,
 			ns: None,
 			db: None,
@@ -247,15 +251,18 @@ impl<'ctx> Planner<'ctx> {
 	/// definitions and indexes at plan time, producing concrete scan
 	/// operators (IndexScan, TableScan, etc.) and enabling optimizations
 	/// like sort elimination.
+	///
+	/// `registry` is as in [`Planner::new`].
 	pub fn with_txn(
 		ctx: &'ctx FrozenContext,
+		registry: &'ctx FunctionRegistry,
 		txn: Arc<crate::kvs::Transaction>,
 		ns: Option<String>,
 		db: Option<String>,
 	) -> Self {
 		Self {
 			ctx,
-			function_registry: ctx.function_registry(),
+			function_registry: registry,
 			txn: Some(txn),
 			ns,
 			db,
@@ -288,10 +295,11 @@ impl<'ctx> Planner<'ctx> {
 	pub(crate) fn for_database(
 		ctx: &'ctx FrozenContext,
 		txn: Arc<crate::kvs::Transaction>,
-		db_ctx: &crate::exec::DatabaseContext,
+		db_ctx: &'ctx crate::exec::DatabaseContext,
 	) -> Self {
 		Self::with_txn(
 			ctx,
+			&db_ctx.ns_ctx.root.function_registry,
 			txn,
 			Some(db_ctx.ns_name().to_owned()),
 			Some(db_ctx.db_name().to_owned()),
@@ -1582,21 +1590,21 @@ impl<'ctx> Planner<'ctx> {
 // ============================================================================
 
 macro_rules! try_plan_expr {
-	// Three-arg form preserved for compilation contexts that don't have an
+	// Four-arg form preserved for compilation contexts that don't have an
 	// auth principal in scope (deep nested permission / computed-field
 	// compilation, planner tests, etc.). Delegates with `auth = None` so
 	// the planner stays on its conservative defaults.
-	($expr:expr, $ctx:expr, $txn:expr) => {{ $crate::exec::planner::try_plan_expr!($expr, $ctx, $txn, None) }};
-	// Four-arg form: caller has the session's `Arc<Auth>` available
+	($expr:expr, $ctx:expr, $registry:expr, $txn:expr) => {{ $crate::exec::planner::try_plan_expr!($expr, $ctx, $registry, $txn, None) }};
+	// Five-arg form: caller has the session's `Arc<Auth>` available
 	// (typically via `Options` or `ExecutionContext`) and forwards it so
 	// the planner can make plan-time decisions that depend on whether
 	// permissions will actually run at execute time.
-	($expr:expr, $ctx:expr, $txn:expr, $auth:expr) => {{ $crate::exec::planner::try_plan_expr!($expr, $ctx, $txn, $auth, 0u32) }};
-	// Five-arg form: as above, plus a seed for the expression-nesting depth
+	($expr:expr, $ctx:expr, $registry:expr, $txn:expr, $auth:expr) => {{ $crate::exec::planner::try_plan_expr!($expr, $ctx, $registry, $txn, $auth, 0u32) }};
+	// Six-arg form: as above, plus a seed for the expression-nesting depth
 	// counter. Non-zero only when re-planning a nested query at runtime (an
 	// `eval` string) so the depth limit continues across the re-entry rather
 	// than resetting — see `Planner::with_depth`.
-	($expr:expr, $ctx:expr, $txn:expr, $auth:expr, $depth:expr) => {{
+	($expr:expr, $ctx:expr, $registry:expr, $txn:expr, $auth:expr, $depth:expr) => {{
 		let __expr: &$crate::expr::Expr = $expr;
 		if matches!(
 			__expr,
@@ -1615,7 +1623,8 @@ macro_rules! try_plan_expr {
 		} else if *$ctx.new_planner_strategy() == $crate::dbs::NewPlannerStrategy::ComputeOnly {
 			Err($crate::err::Error::Exec($crate::exec::Error::PlannerUnsupported(String::new())))
 		} else {
-			$crate::exec::planner::plan_expr_inner(__expr, $ctx, $txn, $auth, $depth).await
+			$crate::exec::planner::plan_expr_inner(__expr, $ctx, $registry, $txn, $auth, $depth)
+				.await
 		}
 	}};
 }
@@ -1637,6 +1646,7 @@ pub(crate) use try_plan_expr;
 pub(crate) async fn plan_expr_inner(
 	expr: &Expr,
 	ctx: &FrozenContext,
+	registry: &FunctionRegistry,
 	txn: Arc<crate::kvs::Transaction>,
 	auth: Option<Arc<crate::iam::Auth>>,
 	depth: u32,
@@ -1656,7 +1666,7 @@ pub(crate) async fn plan_expr_inner(
 				_ => None,
 			}
 		});
-	let mut planner = Planner::with_txn(ctx, txn, ns, db).with_depth(depth);
+	let mut planner = Planner::with_txn(ctx, registry, txn, ns, db).with_depth(depth);
 	if let Some(auth) = auth {
 		planner = planner.with_auth(auth);
 	}
@@ -1707,8 +1717,9 @@ pub(crate) async fn plan_expr_inner(
 pub(crate) async fn expr_to_physical_expr(
 	expr: Expr,
 	ctx: &FrozenContext,
+	registry: &FunctionRegistry,
 ) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
-	Planner::new(ctx).physical_expr(expr).await
+	Planner::new(ctx, registry).physical_expr(expr).await
 }
 
 /// As [`expr_to_physical_expr`], but seeds the expression-nesting depth counter
@@ -1722,9 +1733,10 @@ pub(crate) async fn expr_to_physical_expr(
 pub(crate) async fn expr_to_physical_expr_at_depth(
 	expr: Expr,
 	ctx: &FrozenContext,
+	registry: &FunctionRegistry,
 	depth: u32,
 ) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
-	Planner::new(ctx).with_depth(depth).physical_expr(expr).await
+	Planner::new(ctx, registry).with_depth(depth).physical_expr(expr).await
 }
 
 // ============================================================================
@@ -1781,7 +1793,8 @@ mod planner_tests {
 		}));
 
 		let ctx = Arc::new(Context::new_test());
-		let plan = Planner::new(&ctx).plan(&expr).await.expect("Planning failed");
+		let registry = FunctionRegistry::with_builtins();
+		let plan = Planner::new(&ctx, &registry).plan(&expr).await.expect("Planning failed");
 
 		assert_eq!(plan.name(), "Let");
 		assert!(plan.mutates_context());
@@ -1792,7 +1805,8 @@ mod planner_tests {
 		let expr = Expr::Literal(crate::expr::literal::Literal::Integer(42));
 
 		let ctx = Arc::new(Context::new_test());
-		let plan = Planner::new(&ctx).plan(&expr).await.expect("Planning failed");
+		let registry = FunctionRegistry::with_builtins();
+		let plan = Planner::new(&ctx, &registry).plan(&expr).await.expect("Planning failed");
 
 		assert_eq!(plan.name(), "Expr");
 		assert!(plan.is_scalar());

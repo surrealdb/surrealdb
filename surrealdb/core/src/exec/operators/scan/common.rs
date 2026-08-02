@@ -172,12 +172,10 @@ pub(crate) async fn resolve_record_batch(
 				.await
 				.context("Failed to get table definition")?;
 			let catalog_perm = table_select_permission(table_def.as_deref());
-			let perm = crate::exec::permission::convert_permission_to_physical_runtime(
-				catalog_perm,
-				ctx.ctx(),
-			)
-			.await
-			.context("Failed to convert permission")?;
+			let perm =
+				crate::exec::permission::convert_permission_to_physical_runtime(catalog_perm, ctx)
+					.await
+					.context("Failed to convert permission")?;
 			perm_cache.insert(rid.table.clone(), perm);
 		}
 	}

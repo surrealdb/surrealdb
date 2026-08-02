@@ -171,7 +171,14 @@ async fn execute_block_with_context(
 
 		// Try to plan the expression with current context, continuing the depth
 		// count so re-entry nodes inside the block stay bounded.
-		match try_plan_expr!(expr, &frozen_ctx, current_ctx.txn(), auth, depth) {
+		match try_plan_expr!(
+			expr,
+			&frozen_ctx,
+			current_ctx.function_registry(),
+			current_ctx.txn(),
+			auth,
+			depth
+		) {
 			Ok(plan) => {
 				if plan.mutates_context() {
 					current_ctx = plan.output_context(&current_ctx).await?;

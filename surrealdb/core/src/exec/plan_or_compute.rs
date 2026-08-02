@@ -124,7 +124,7 @@ pub(crate) async fn evaluate_expr_at_depth(
 	depth: u32,
 ) -> crate::expr::FlowResult<Value> {
 	let auth = ctx.options().map(|o| Arc::clone(&o.auth));
-	match try_plan_expr!(expr, ctx.ctx(), ctx.txn(), auth, depth) {
+	match try_plan_expr!(expr, ctx.ctx(), ctx.function_registry(), ctx.txn(), auth, depth) {
 		Ok(plan) => {
 			let stream = plan.execute(ctx)?;
 			collect_single_value(stream).await
@@ -168,7 +168,7 @@ pub(crate) async fn evaluate_body_expr(
 	let frozen_ctx = Arc::clone(ctx.ctx());
 	let auth = ctx.options().map(|o| Arc::clone(&o.auth));
 
-	match try_plan_expr!(expr, &frozen_ctx, ctx.txn(), auth, depth) {
+	match try_plan_expr!(expr, &frozen_ctx, ctx.function_registry(), ctx.txn(), auth, depth) {
 		Ok(plan) => {
 			if plan.mutates_context() {
 				*ctx = plan.output_context(ctx).await.map_err(ControlFlow::Err)?;
