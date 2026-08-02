@@ -11,15 +11,28 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[features]
+arbitrary = ["dep:arbitrary"]
+
 [dependencies]
+common = { workspace = true }
+surrealdb-cnf = { workspace = true }
+surrealdb-iam = { workspace = true }
 surrealdb-types = { workspace = true }
 anyhow = { workspace = true }
+arbitrary = { workspace = true, features = ["derive"], optional = true }
 humantime = { workspace = true }
+ipnet = { workspace = true }
 revision = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
+thiserror = { workspace = true }
 tracing = { workspace = true }
+url = { workspace = true }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 web-time = { workspace = true }
+
+[dev-dependencies]
+test-log = { workspace = true, features = ["trace"] }
 
 [lints]
 workspace = true

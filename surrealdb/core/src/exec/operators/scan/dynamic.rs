@@ -31,8 +31,8 @@ use crate::expr::order::Ordering;
 use crate::expr::with::With;
 use crate::expr::{Cond, ControlFlow, ControlFlowExt};
 use crate::iam::Action;
-use crate::idx::planner::ScanDirection;
 use crate::key::schema::RecordPrefix;
+use crate::kvs::Direction;
 use crate::val::{TableName, Value};
 
 /// Full table scan - iterates over all records in a table.
@@ -624,7 +624,7 @@ struct TableScanConfig {
 	cond: Option<Cond>,
 	order: Option<Ordering>,
 	with: Option<With>,
-	direction: ScanDirection,
+	direction: Direction,
 	/// VERSION expression for time-travel queries (evaluated inside
 	/// [`resolve_table_scan_stream`] and passed to child operators).
 	version: Option<Arc<dyn PhysicalExpr>>,
@@ -1006,7 +1006,7 @@ mod tests {
 	fn test_determine_scan_direction_no_order() {
 		// No order -> Forward
 		let direction = determine_scan_direction(None);
-		assert!(matches!(direction, ScanDirection::Forward));
+		assert!(matches!(direction, Direction::Forward));
 	}
 
 	#[test]
@@ -1016,6 +1016,6 @@ mod tests {
 		// Random order -> Forward
 		let order = Ordering::Random;
 		let direction = determine_scan_direction(Some(&order));
-		assert!(matches!(direction, ScanDirection::Forward));
+		assert!(matches!(direction, Direction::Forward));
 	}
 }

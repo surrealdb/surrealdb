@@ -95,7 +95,7 @@ use crate::exec::{
 	FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
 use crate::expr::{ControlFlow, Dir};
-use crate::idx::planner::ScanDirection;
+use crate::kvs::Direction;
 use crate::val::{Array, Object, RecordId, TableName, Value};
 
 /// The storage-layer [`Dir`] scanned from a source vertex for an expand
@@ -568,7 +568,7 @@ impl ExecOperator for PathExpand {
 						let mut decoded_targets: Vec<Option<RecordId>> = Vec::new();
 						for r in ranges {
 							let mut cursor = txn
-								.open_keys_cursor_raw(r, ScanDirection::Forward, 0, version)
+								.open_keys_cursor_raw(r, Direction::Forward, 0, version)
 								.await
 								.context("Failed to open PathExpand graph cursor")?;
 							loop {

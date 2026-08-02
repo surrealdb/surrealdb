@@ -7,7 +7,6 @@ pub(in crate::idx) mod rewriter;
 pub(in crate::idx) mod tree;
 
 use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
 use std::sync::atomic::{self, AtomicU8};
 
 use anyhow::Result;
@@ -26,6 +25,7 @@ use crate::idx::planner::iterators::IteratorRef;
 use crate::idx::planner::knn::KnnBruteForceResults;
 use crate::idx::planner::plan::{Plan, PlanBuilder, PlanBuilderParameters};
 use crate::idx::planner::tree::Tree;
+use crate::kvs::Direction;
 
 /// The goal of this structure is to cache parameters so they can be easily
 /// passed from one function to the other, so we don't pass too many arguments.
@@ -47,21 +47,6 @@ pub(crate) enum RecordStrategy {
 	Count,
 	KeysOnly,
 	KeysAndValues,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ScanDirection {
-	Forward,
-	Backward,
-}
-
-impl Display for ScanDirection {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		match self {
-			ScanDirection::Forward => f.write_str("forward"),
-			ScanDirection::Backward => f.write_str("backward"),
-		}
-	}
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -229,15 +214,15 @@ impl<'a> StatementContext<'a> {
 	///
 	/// We reverse the direction when the first ORDER BY is `id DESC`.
 	/// Otherwise, we default to forward scan direction.
-	pub(crate) fn check_scan_direction(&self) -> ScanDirection {
+	pub(crate) fn check_scan_direction(&self) -> Direction {
 		if let Some(Ordering::Order(o)) = self.order
 			&& let Some(o) = o.first()
 			&& !o.direction
 			&& o.value.is_id()
 		{
-			return ScanDirection::Backward;
+			return Direction::Backward;
 		}
-		ScanDirection::Forward
+		Direction::Forward
 	}
 }
 
@@ -344,8 +329,7 @@ impl QueryPlanner {
 					it.ingest(Iterable::Index(doc_ctx.clone(), t.clone(), ir, rs));
 				}
 				for (ixr, rq) in ranges_indexes {
-					let ie =
-						IteratorEntry::Range(rq.exps, ixr, rq.from, rq.to, ScanDirection::Forward);
+					let ie = IteratorEntry::Range(rq.exps, ixr, rq.from, rq.to, Direction::Forward);
 					let ir = exe.add_iterator(ie);
 					it.ingest(Iterable::Index(doc_ctx.clone(), t.clone(), ir, rs));
 				}

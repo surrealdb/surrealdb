@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use surrealdb_core::doc::AsyncEventRecord;
+use surrealdb_core::doc::process_next_events_batch;
 use surrealdb_core::kvs::Datastore;
 use tokio::time::{sleep, timeout};
 
@@ -9,7 +9,7 @@ use crate::helpers::Test;
 
 async fn wait_for_events_processing(ds: &Datastore) -> Result<()> {
 	timeout(Duration::from_secs(10), async {
-		while AsyncEventRecord::process_next_events_batch(ds, None).await? != 0 {
+		while process_next_events_batch(ds, None).await? != 0 {
 			sleep(Duration::from_millis(100)).await;
 		}
 		Ok::<_, anyhow::Error>(())

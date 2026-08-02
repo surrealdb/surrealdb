@@ -6,9 +6,11 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
-use revision::revisioned;
 use roaring::RoaringTreemap;
 use roaring::treemap::IntoIter;
+// A posting and the index's document statistics are stored values, so both are
+// declared below this layer; the indexing and scoring code here maintains them.
+pub(crate) use surrealdb_datastore::values::fulltext::{DocLengthAndCount, TermDocument};
 use uuid::Uuid;
 
 use crate::catalog;
@@ -33,58 +35,14 @@ use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::analyzer::filter::FilteringStage;
 use crate::idx::ft::analyzer::tokenizer::Tokens;
 use crate::idx::ft::highlighter::{HighlightParams, Highlighter, Offseter};
-use crate::idx::ft::offset::Offset;
 use crate::idx::ft::{DocLength, Score, TermFrequency};
 use crate::idx::planner::iterators::MatchesHitsIterator;
 use crate::idx::trees::store::IndexStores;
 use crate::idx::{IndexKeyBase, bump_compaction_generation, read_compaction_generation};
 use crate::key::schema::{DocStatsKey, TermChangeKey};
-use crate::key::{KVKey, KVKeyDecode, impl_kv_value_revisioned};
+use crate::key::{KVKey, KVKeyDecode};
 use crate::kvs::{COUNT_BATCH_SIZE, Transaction};
 use crate::val::{RecordId, Value};
-#[revisioned(revision = 1)]
-#[derive(Debug, Default, PartialEq)]
-/// Represents a term occurrence within a document
-pub(crate) struct TermDocument {
-	/// The frequency of the term in the document
-	f: TermFrequency,
-	/// The offsets of the term occurrences in the document
-	o: Vec<Offset>,
-}
-
-impl_kv_value_revisioned!(TermDocument);
-
-impl TermDocument {
-	#[cfg(test)]
-	pub(crate) fn new(f: TermFrequency, o: Vec<Offset>) -> Self {
-		Self {
-			f,
-			o,
-		}
-	}
-}
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-/// Tracks document length and count statistics for the index
-pub(crate) struct DocLengthAndCount {
-	/// The total length of all documents in the index
-	total_docs_length: i128,
-	/// The total number of documents in the index
-	doc_count: i64,
-}
-impl_kv_value_revisioned!(DocLengthAndCount);
-
-impl DocLengthAndCount {
-	#[cfg(test)]
-	pub(crate) fn new(total_docs_length: i128, doc_count: i64) -> Self {
-		Self {
-			total_docs_length,
-			doc_count,
-		}
-	}
-}
-
 /// Represents the terms in a search query and their associated document sets
 pub(crate) struct QueryTerms {
 	/// The tokenized query terms

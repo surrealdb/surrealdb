@@ -1,26 +1,7 @@
-use revision::revisioned;
+//! Where a term's position inside a document is declared.
+//!
+//! The offset is stored inside a full-text posting, so its shape is part of the
+//! keyspace and is declared below this layer. The analyzer that produces offsets
+//! and the highlighter that consumes them stay here and read it downward.
 
-use crate::idx::ft::Position;
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Offset {
-	pub(super) index: u32,
-	// Start position of the original term
-	pub(super) start: Position,
-	// Start position of the generated term
-	pub(super) gen_start: Position,
-	// End position of the original term
-	pub(super) end: Position,
-}
-
-impl Offset {
-	pub(crate) fn new(index: u32, start: Position, gen_start: Position, end: Position) -> Self {
-		Self {
-			index,
-			start,
-			gen_start,
-			end,
-		}
-	}
-}
+pub(crate) use surrealdb_datastore::values::fulltext::Offset;

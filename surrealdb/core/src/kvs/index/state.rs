@@ -3,153 +3,15 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use surrealdb_strand::Strand;
-use uuid::Uuid;
 
-use super::{BUILD_OWNER_LEASE_SECS, BuildGeneration, BuildTicket};
+use super::{BUILD_OWNER_LEASE_SECS, IndexBuildPhase, IndexBuildReportStatus, IndexBuildState};
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, IndexDefinition, IndexId, NamespaceId};
-use crate::err::Error;
 use crate::idx::IndexKeyBase;
-use crate::key::impl_kv_value_revisioned;
 use crate::key::schema::BuildStateKey;
-use crate::kvs::{Error as KvsError, Transaction};
-use crate::val::{Object, RecordIdKey, TableName, Value};
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub(crate) enum IndexBuildReportStatus {
-	/// Build state was created but no index-data cleanup has started yet.
-	Started,
-	/// Existing index data is being removed before the initial scan.
-	Cleaning,
-	/// The builder is scanning records, replaying queued writes, or closing.
-	Indexing,
-	/// The durable build phase is online and queries may use the index.
-	Ready,
-	/// The local builder was aborted before completion.
-	Aborted,
-	/// The durable build phase failed with an optional stored error reason.
-	Error,
-}
-
-impl IndexBuildReportStatus {
-	fn as_str(self) -> &'static str {
-		match self {
-			Self::Started => "started",
-			Self::Cleaning => "cleaning",
-			Self::Indexing => "indexing",
-			Self::Ready => "ready",
-			Self::Aborted => "aborted",
-			Self::Error => "error",
-		}
-	}
-}
-
-/// Cluster-visible lifecycle for an index build generation.
-#[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub(crate) enum IndexBuildPhase {
-	/// The builder is scanning records and writers may reserve tickets.
-	Building,
-	/// Initial indexing has completed and new writer admissions are blocked.
-	Closing,
-	/// The index has caught up with admitted writes and is queryable.
-	Online,
-	/// The build was aborted or failed; queries must not use the index.
-	///
-	/// Writers keep queueing mutations as in `Building`, so a failed build
-	/// never blocks user writes; the stale queue is wiped and the table
-	/// rescanned when a `REBUILD INDEX` starts the next generation.
-	Error,
-}
-
-/// Durable per-index build state shared by all nodes.
-///
-/// The state is the fencing token for the builder and the phase/generation
-/// source for writer admission. Writers only update this record on the legacy
-/// `next_ticket` path; only builders refresh `owner_heartbeat_at`, which
-/// controls lease expiry.
-#[revisioned(revision = 4)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub(crate) struct IndexBuildState {
-	/// Build epoch. Stale generation-scoped keys are ignored by newer builds.
-	pub(crate) generation: BuildGeneration,
-	/// Current durable lifecycle phase.
-	pub(crate) phase: IndexBuildPhase,
-	/// Concrete builder task that currently owns this generation.
-	pub(crate) owner: Option<Uuid>,
-	/// Next writer ticket for generations that predate the `!bt` counter.
-	///
-	/// Live generations keep their ticket counter on `!bt` so admission never
-	/// writes this record. This field is only read — and only advanced — for a
-	/// generation installed before that counter existed, which has no `!bt`;
-	/// such a build keeps allocating here until its next generation.
-	pub(crate) next_ticket: BuildTicket,
-	/// Whether initial record scanning has completed for this generation.
-	pub(crate) initial_complete: bool,
-	/// Last durable state update time.
-	pub(crate) updated_at: DateTime<Utc>,
-	/// Last builder-owned lease heartbeat.
-	#[revision(start = 3)]
-	pub(crate) owner_heartbeat_at: Option<DateTime<Utc>>,
-	/// Durable error reason visible to every node once the build enters `Error`.
-	#[revision(start = 2)]
-	pub(crate) error: Option<String>,
-	/// User-facing status for `INFO FOR INDEX`.
-	#[revision(start = 3)]
-	pub(crate) report_status: Option<IndexBuildReportStatus>,
-	/// Number of records indexed during the initial scan.
-	#[revision(start = 3)]
-	pub(crate) initial: Option<u64>,
-	/// Number of appended updates replayed after the initial scan.
-	#[revision(start = 3)]
-	pub(crate) updated: Option<u64>,
-	/// Best-effort count of pending build updates visible to the builder.
-	#[revision(start = 3)]
-	pub(crate) pending: Option<u64>,
-	/// Initial-scan continuation cursor: the id of the last record whose
-	/// batch commit is durable for this generation.
-	///
-	/// The cursor is written in the same transaction as the batch it covers,
-	/// so a takeover can resume the scan right after this record instead of
-	/// wiping the partial index data and rescanning from the start. `None`
-	/// until the first batch commits, and cleared once the scan completes.
-	///
-	/// Durable persistence goes through `revision` (see
-	/// `impl_kv_value_revisioned`); the field is skipped for serde because
-	/// `RecordIdKey` does not implement the serde traits.
-	///
-	/// WARNING: `IndexBuildState` must only ever be persisted through the
-	/// revisioned `KVValue` path — never round-trip it through serde. A
-	/// serde round-trip silently drops this field, and writing the result
-	/// back would reset the checkpoint, forcing the next takeover to wipe
-	/// the partial index data and rescan the whole table from zero.
-	#[revision(start = 4)]
-	#[serde(skip)]
-	pub(crate) initial_cursor: Option<RecordIdKey>,
-}
-
-impl_kv_value_revisioned!(IndexBuildState);
-
-/// Durable admission marker written before the user transaction commits.
-///
-/// The builder cannot move from `Closing` to `Online` until every reservation
-/// for the generation has either been released after transaction close, produced
-/// a durable appending that the builder can replay, or expired after its writer
-/// node is no longer live.
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub(crate) struct IndexBuildReservation {
-	/// Node that reserved the ticket.
-	pub(crate) node: Uuid,
-	/// Deadline after which the reservation may be cleaned if the node is dead.
-	pub(crate) expires_at: DateTime<Utc>,
-}
-
-impl_kv_value_revisioned!(IndexBuildReservation);
+use crate::kvs::{Error as KvsError, Transaction, storage_error};
+use crate::val::{Object, TableName, Value};
 
 pub(super) fn report_status_from_phase(phase: IndexBuildPhase) -> IndexBuildReportStatus {
 	match phase {
@@ -275,10 +137,7 @@ pub(super) fn durable_report_count(count: Option<u64>) -> usize {
 }
 
 pub(super) fn is_condition_not_met(err: &anyhow::Error) -> bool {
-	if matches!(err.downcast_ref::<KvsError>(), Some(KvsError::TransactionConditionNotMet)) {
-		return true;
-	}
-	matches!(err.downcast_ref::<Error>(), Some(Error::Kvs(KvsError::TransactionConditionNotMet)))
+	matches!(storage_error(err), Some(KvsError::TransactionConditionNotMet))
 }
 
 pub(super) fn build_owner_expired(state: &IndexBuildState, now: DateTime<Utc>) -> bool {

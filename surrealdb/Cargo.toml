@@ -15,15 +15,16 @@ license-file.workspace = true
 
 [features]
 # Public features
-default = ["protocol-ws", "rustls"]
+default = ["protocol-ws", "rustls", "parse"]
 allocator = ["surrealdb-core/allocator"]
+parse = ["dep:surrealdb-syn"]
 protocol-http = ["dep:reqwest", "surrealdb-types/reqwest"]
 protocol-ws = ["dep:tokio-tungstenite", "tokio/time"]
-kv-mem = ["surrealdb-core/kv-mem", "tokio/time"]
+kv-mem = ["surrealdb-core/kv-mem", "dep:surrealdb-kvs", "tokio/time"]
 kv-indxdb = ["surrealdb-core/kv-indxdb"]
-kv-rocksdb = ["surrealdb-core/kv-rocksdb", "tokio/time"]
+kv-rocksdb = ["surrealdb-core/kv-rocksdb", "dep:surrealdb-kvs", "tokio/time"]
 kv-tikv = ["surrealdb-core/kv-tikv", "tokio/time"]
-kv-surrealkv = ["surrealdb-core/kv-surrealkv", "tokio/time"]
+kv-surrealkv = ["surrealdb-core/kv-surrealkv", "dep:surrealdb-kvs", "tokio/time"]
 scripting = ["surrealdb-core/scripting"]
 http = ["surrealdb-core/http"]
 native-tls = [
@@ -52,13 +53,17 @@ features = [
     "native-tls",
     "http",
     "scripting",
+    "parse",
 ]
 targets = []
 
 [dependencies]
 # workspace internal dependencies
-surrealdb-core = { workspace = true, default-features = false }
-surrealdb-kvs = { workspace = true }
+surrealdb-core = { workspace = true, default-features = false, optional = true }
+surrealdb-iam = { workspace = true }
+surrealdb-kvs = { workspace = true, optional = true }
+surrealdb-rpc = { workspace = true }
+surrealdb-syn = { workspace = true, optional = true }
 surrealdb-types = { workspace = true, features = ["convert"] }
 surrealdb-types-derive = { workspace = true, features = ["sdk-path"] }
 
@@ -118,6 +123,8 @@ uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 
 [dev-dependencies]
 ciborium.workspace = true
+surrealdb-cnf = { workspace = true }
+surrealdb-syn = { workspace = true }
 criterion = { workspace = true, features = ["async_tokio"] }
 env_logger.workspace = true
 flate2.workspace = true
@@ -149,31 +156,7 @@ name = "surrealdb" # Needed for the nightly crate as we will be renaming it
 bench = false
 
 [[bench]]
-name = "parser"
-harness = false
-
-[[bench]]
-name = "processor"
-harness = false
-
-[[bench]]
-name = "live_query_scaling"
-harness = false
-
-[[bench]]
-name = "hash_btree"
-harness = false
-
-[[bench]]
-name = "index_ann"
-harness = false
-
-[[bench]]
 name = "sdb"
-harness = false
-
-[[bench]]
-name = "hashset_vs_vector"
 harness = false
 
 [[bench]]

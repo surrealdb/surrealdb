@@ -143,6 +143,28 @@ impl Resolve for FilteringResolver {
 	}
 }
 
+/// Resolves a [`NetTarget`] to its associated IP address representations.
+///
+/// A `Host` target is resolved via DNS (port 80 when none is given) and each
+/// resolved address is returned as a `NetTarget::IPNet`, so callers can check
+/// every address a host actually points at against the deny rules. An `IPNet`
+/// target needs no resolution and yields an empty vector.
+#[cfg(feature = "http")]
+pub(crate) async fn resolve_net_target(
+	target: &NetTarget,
+) -> Result<Vec<NetTarget>, std::io::Error> {
+	match target {
+		NetTarget::Host(h, p) => {
+			let r = tokio::net::lookup_host((h.to_string(), p.unwrap_or(80)))
+				.await?
+				.map(|a| NetTarget::IPNet(a.ip().into()))
+				.collect();
+			Ok(r)
+		}
+		NetTarget::IPNet(_) => Ok(vec![]),
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -263,5 +285,23 @@ mod tests {
 		))));
 		// 100.128.0.0 is NOT in shared address space (RFC 6598 ends at 100.127.255.255)
 		assert!(!is_private_ip(IpAddr::V4(Ipv4Addr::new(100, 128, 0, 1))));
+	}
+
+	#[tokio::test]
+	#[cfg(feature = "http")]
+	async fn test_net_target_resolve_async() {
+		// This test is dependent on system configuration.
+		// Some systems don't configure localhost to have an ipv6 address, and some
+		// don't resolve it to ipv4 either. We only require at least one loopback
+		// address to be present.
+		let r =
+			super::resolve_net_target(&NetTarget::from_str("localhost").unwrap()).await.unwrap();
+		let has_ipv4 = r.contains(&NetTarget::from_str("127.0.0.1").unwrap());
+		let has_ipv6 = r.contains(&NetTarget::from_str("::1/128").unwrap());
+		assert!(
+			has_ipv4 || has_ipv6,
+			"Expected localhost to resolve to at least 127.0.0.1 or ::1, got: {:?}",
+			r
+		);
 	}
 }

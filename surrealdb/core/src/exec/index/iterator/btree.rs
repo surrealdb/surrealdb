@@ -46,11 +46,10 @@ use crate::catalog::{DatabaseId, IndexDefinition, NamespaceId};
 use crate::expr::BinaryOperator;
 use crate::idx::entry::IndexEntryValue;
 use crate::idx::keys::{compute_index_range, entry_range};
-use crate::idx::planner::ScanDirection;
 use crate::key::schema::{DbRoot, EntryFdOpenPrefix, EntryFdPrefix, EntryPrefix, UniqueKey};
 use crate::key::{KVKey, KVSubspace, KeyRange, TypedRange};
 use crate::kvs::util::{scan, scanr};
-use crate::kvs::{Transaction, Val};
+use crate::kvs::{Direction, Transaction, Val};
 use crate::val::{Array, RecordId, Value};
 
 /// Maximum number of KV entries fetched per batch in index scans.
@@ -304,7 +303,7 @@ impl IndexRangeBackwardIterator {
 /// Direction-dispatching wrapper for range scans on non-unique indexes.
 ///
 /// Delegates to [`IndexRangeForwardIterator`] or
-/// [`IndexRangeBackwardIterator`] depending on the [`ScanDirection`]
+/// [`IndexRangeBackwardIterator`] depending on the [`Direction`]
 /// provided at construction time.
 pub(crate) enum IndexRangeIterator {
 	Forward(IndexRangeForwardIterator),
@@ -319,13 +318,13 @@ impl IndexRangeIterator {
 		ix: &IndexDefinition,
 		from: Bound<&Value>,
 		to: Bound<&Value>,
-		direction: ScanDirection,
+		direction: Direction,
 	) -> Result<Self> {
 		match direction {
-			ScanDirection::Forward => {
+			Direction::Forward => {
 				Ok(Self::Forward(IndexRangeForwardIterator::new(ns, db, ix, from, to)?))
 			}
-			ScanDirection::Backward => {
+			Direction::Backward => {
 				Ok(Self::Backward(IndexRangeBackwardIterator::new(ns, db, ix, from, to)?))
 			}
 		}
@@ -563,7 +562,7 @@ impl UniqueRangeBackwardIterator {
 /// Direction-dispatching wrapper for range scans on unique indexes.
 ///
 /// Delegates to [`UniqueRangeForwardIterator`] or
-/// [`UniqueRangeBackwardIterator`] depending on the [`ScanDirection`]
+/// [`UniqueRangeBackwardIterator`] depending on the [`Direction`]
 /// provided at construction time.
 pub(crate) enum UniqueRangeIterator {
 	Forward(UniqueRangeForwardIterator),
@@ -578,13 +577,13 @@ impl UniqueRangeIterator {
 		ix: &IndexDefinition,
 		from: Bound<&Value>,
 		to: Bound<&Value>,
-		direction: ScanDirection,
+		direction: Direction,
 	) -> Result<Self> {
 		match direction {
-			ScanDirection::Forward => {
+			Direction::Forward => {
 				Ok(Self::Forward(UniqueRangeForwardIterator::new(ns, db, ix, from, to)?))
 			}
-			ScanDirection::Backward => {
+			Direction::Backward => {
 				Ok(Self::Backward(UniqueRangeBackwardIterator::new(ns, db, ix, from, to)?))
 			}
 		}
@@ -605,13 +604,13 @@ impl UniqueRangeIterator {
 
 /// Iterator for compound (multi-column) index equality scans.
 ///
-/// Supports both forward and backward scanning, controlled by [`ScanDirection`].
+/// Supports both forward and backward scanning, controlled by [`Direction`].
 /// Forward scans use `tx.scan()` and advance the `beg` cursor;
 /// backward scans use `tx.scanr()` and retreat the `end` cursor.
 pub(crate) struct CompoundEqualIterator {
 	range: TypedRange<IndexEntryValue>,
 	/// Scan direction
-	direction: ScanDirection,
+	direction: Direction,
 }
 
 impl CompoundEqualIterator {
@@ -626,7 +625,7 @@ impl CompoundEqualIterator {
 		ix: &IndexDefinition,
 		prefix: &[Value],
 		range: Option<&(BinaryOperator, Value)>,
-		direction: ScanDirection,
+		direction: Direction,
 	) -> Result<Self> {
 		let range = compute_compound_key_range(ns, db, ix, prefix, range)?;
 		Ok(Self {
@@ -647,8 +646,8 @@ impl CompoundEqualIterator {
 	) -> Result<Vec<RecordId>> {
 		let scan_limit = limit.clamp(1, INDEX_BATCH_SIZE);
 		let res = match self.direction {
-			ScanDirection::Forward => scan(&mut self.range, tx, scan_limit).await?,
-			ScanDirection::Backward => scanr(&mut self.range, tx, scan_limit).await?,
+			Direction::Forward => scan(&mut self.range, tx, scan_limit).await?,
+			Direction::Backward => scanr(&mut self.range, tx, scan_limit).await?,
 		};
 
 		decode_record_ids(res)
@@ -696,7 +695,7 @@ impl CompoundRangeForwardIterator {
 /// Direction-dispatching wrapper for compound range scans.
 ///
 /// Delegates to [`CompoundRangeForwardIterator`] or
-/// [`CompoundRangeBackwardIterator`] depending on the [`ScanDirection`]
+/// [`CompoundRangeBackwardIterator`] depending on the [`Direction`]
 /// provided at construction time.
 pub(crate) enum CompoundRangeIterator {
 	Forward(CompoundRangeForwardIterator),
@@ -711,13 +710,13 @@ impl CompoundRangeIterator {
 		ix: &IndexDefinition,
 		prefix: &[Value],
 		range: &(BinaryOperator, Value),
-		direction: ScanDirection,
+		direction: Direction,
 	) -> Result<Self> {
 		match direction {
-			ScanDirection::Forward => {
+			Direction::Forward => {
 				Ok(Self::Forward(CompoundRangeForwardIterator::new(ns, db, ix, prefix, range)?))
 			}
-			ScanDirection::Backward => {
+			Direction::Backward => {
 				Ok(Self::Backward(CompoundRangeBackwardIterator::new(ns, db, ix, prefix, range)?))
 			}
 		}

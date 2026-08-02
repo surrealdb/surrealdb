@@ -28,7 +28,6 @@ use crate::catalog::{
 };
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
-use crate::err::Error;
 use crate::expr::Part;
 use crate::idx::docids::{DocId, TableDocIds};
 use crate::idx::entry::IndexEntryValue;
@@ -41,7 +40,7 @@ use crate::idx::trees::store::IndexStores;
 use crate::idx::{Error as IdxError, IndexKeyBase};
 use crate::key;
 use crate::key::schema::{EntryKey, IndexCountKey, UniqueKey};
-use crate::kvs::Transaction;
+use crate::kvs::{Transaction, storage_error};
 use crate::val::{Array, RecordId, TableName, Value};
 
 pub(crate) struct IndexOperation<'a> {
@@ -200,10 +199,7 @@ impl<'a> IndexOperation<'a> {
 		K: key::KVKey<Value = IndexEntryValue> + std::fmt::Debug,
 	{
 		fn is_condition_not_met(e: &anyhow::Error) -> bool {
-			matches!(
-				e.downcast_ref::<Error>(),
-				Some(Error::Kvs(crate::kvs::Error::TransactionConditionNotMet))
-			)
+			matches!(storage_error(e), Some(crate::kvs::Error::TransactionConditionNotMet))
 		}
 		match txn.del_compare_key(key, Some(expected)).await {
 			Err(e) if is_condition_not_met(&e) => {

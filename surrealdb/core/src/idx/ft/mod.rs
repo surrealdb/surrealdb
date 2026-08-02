@@ -3,9 +3,8 @@ pub(crate) mod fulltext;
 pub(crate) mod highlighter;
 pub(crate) mod offset;
 
-pub(super) type Position = u32;
-pub(crate) type DocLength = u64;
-pub(crate) type TermFrequency = u64;
+pub(crate) use surrealdb_datastore::values::fulltext::{DocLength, Position, TermFrequency};
+
 pub(super) type Score = f32;
 
 pub(crate) use crate::expr::operator::MatchRef;

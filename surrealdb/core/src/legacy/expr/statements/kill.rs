@@ -7,7 +7,7 @@ use surrealdb_types::ToSql;
 
 use crate::catalog::StoredSubscriptionDefinition;
 use crate::ctx::FrozenContext;
-use crate::dbs::{Options, RoutedNotification};
+use crate::dbs::{Options, RoutedNotification, SendKill};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::exe::FlowResultExt as _;
@@ -133,7 +133,7 @@ pub(crate) async fn kill_statement_compute(
 	// registered and still receiving change notifications — but its client
 	// would already have been told it was killed and torn its handler down.
 	if let Some(sender) = ctx.broker() {
-		txn.register_live_query_kill_after_commit(
+		txn.on_commit(SendKill::boxed(
 			Arc::clone(sender),
 			RoutedNotification::new(
 				nid,
@@ -145,7 +145,7 @@ pub(crate) async fn kill_statement_compute(
 					PublicValue::None,
 				),
 			),
-		)
+		))
 		.await;
 	}
 	// Return the query id

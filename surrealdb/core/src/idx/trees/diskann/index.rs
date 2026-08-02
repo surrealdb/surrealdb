@@ -37,7 +37,6 @@ use tokio::sync::RwLock;
 use crate::catalog::{DiskAnnParams, Distance, TableId, VectorType};
 use crate::ctx::{Context, FrozenContext};
 use crate::err::EngineError;
-use crate::idx::planner::ScanDirection;
 use crate::idx::planner::iterators::KnnIteratorResult;
 use crate::idx::trees::KnnCondFilter;
 use crate::idx::trees::diskann::cache::DiskAnnCache;
@@ -52,14 +51,16 @@ use crate::idx::trees::diskann::{
 };
 use crate::idx::trees::hnsw::VectorId;
 use crate::idx::trees::knn::KnnResultBuilder;
-use crate::idx::trees::vector::{DistanceExt as _, SerializedVector, Vector};
+use crate::idx::trees::vector::{
+	DistanceExt as _, SerializedVector, Vector, serialized_vector_from_value,
+};
 use crate::idx::{
 	IndexKeyBase, bump_compaction_generation, is_transaction_condition_not_met,
 	read_compaction_generation,
 };
 use crate::key::schema::{DiskannRecordPendingKey, DiskannRecordPendingShardKey};
 use crate::key::{KVKey, KVKeyDecode, KVValue, Key, TypedRange};
-use crate::kvs::{Transaction, Val};
+use crate::kvs::{Direction, Transaction, Val};
 use crate::val::{Number, RecordId, RecordIdKey, Value};
 
 /// Soft per-batch limits for [`DiskAnnIndex::prepare_compaction`]. When either cap fires,
@@ -609,7 +610,7 @@ impl DiskAnnIndex {
 	fn content_to_vectors(&self, content: Vec<Value>) -> Result<Vec<SerializedVector>> {
 		let mut vectors = Vec::with_capacity(content.len());
 		for value in content.into_iter().filter(|v| !v.is_nullish()) {
-			let vector = SerializedVector::try_from_value(self.vector_type, self.dim, value)?;
+			let vector = serialized_vector_from_value(self.vector_type, self.dim, value)?;
 			Vector::check_expected_dimension(vector.dimension(), self.dim)?;
 			vectors.push(vector);
 		}
@@ -714,7 +715,7 @@ impl DiskAnnIndex {
 		tx: &Transaction,
 		rng: TypedRange<DiskAnnRecordPendingUpdate>,
 	) -> Result<bool> {
-		let mut cursor = tx.open_vals_cursor_raw(rng, ScanDirection::Forward, 0, None).await?;
+		let mut cursor = tx.open_vals_cursor_raw(rng, Direction::Forward, 0, None).await?;
 		// The first non-empty batch is conclusive; we just need to know
 		// whether *any* entry exists in the range.
 		let batch = cursor.next_batch(1).await?;
@@ -974,7 +975,7 @@ impl DiskAnnIndex {
 		folded_shard_keys: &mut HashSet<Vec<u8>>,
 	) -> Result<bool> {
 		let mut cursor =
-			tx.open_vals_cursor_raw(ikb.new_dr_range()?, ScanDirection::Forward, 0, None).await?;
+			tx.open_vals_cursor_raw(ikb.new_dr_range()?, Direction::Forward, 0, None).await?;
 		loop {
 			let batch = cursor.next_batch(crate::kvs::NORMAL_BATCH_SIZE).await?;
 			if batch.is_empty() {
@@ -1041,7 +1042,7 @@ impl DiskAnnIndex {
 		builder: &mut PendingPlanBuilder,
 		folded_shard_keys: &HashSet<Vec<u8>>,
 	) -> Result<bool> {
-		let mut cursor = tx.open_vals_cursor_raw(rng, ScanDirection::Forward, 0, None).await?;
+		let mut cursor = tx.open_vals_cursor_raw(rng, Direction::Forward, 0, None).await?;
 		loop {
 			let batch = cursor.next_batch(crate::kvs::NORMAL_BATCH_SIZE).await?;
 			if batch.is_empty() {
@@ -1556,7 +1557,7 @@ impl DiskAnnIndex {
 	where
 		F: FnMut(PendingOperation),
 	{
-		let mut cursor = tx.open_vals_cursor_raw(rng, ScanDirection::Forward, 0, None).await?;
+		let mut cursor = tx.open_vals_cursor_raw(rng, Direction::Forward, 0, None).await?;
 		loop {
 			let batch = cursor.next_batch(crate::kvs::NORMAL_BATCH_SIZE).await?;
 			if batch.is_empty() {

@@ -207,6 +207,13 @@ fn every_expr_variant() -> Vec<(&'static str, ExprError)> {
 				message: "sample".to_string(),
 			},
 		),
+		(
+			"InvalidMethodArguments",
+			ExprError::InvalidMethodArguments {
+				name: "sample".to_string(),
+				message: "sample".to_string(),
+			},
+		),
 		("InvalidRegex", ExprError::InvalidRegex("sample".to_string())),
 		(
 			"IdInvalid",
@@ -901,13 +908,6 @@ fn every_exec_variant() -> Vec<(&'static str, ExecError)> {
 				message: "sample".to_string(),
 			},
 		),
-		(
-			"InvalidMethodArguments",
-			ExecError::InvalidMethodArguments {
-				name: "sample".to_string(),
-				message: "sample".to_string(),
-			},
-		),
 		("InvalidControlFlow", ExecError::InvalidControlFlow),
 		(
 			"NsNotAllowed",
@@ -1242,7 +1242,7 @@ fn coverage() -> Vec<(usize, usize, &'static str)> {
 		),
 		(
 			every_key_variant().len(),
-			declared_variants(include_str!("../key/error.rs"), "Error"),
+			declared_variants(include_str!("../../../kvs/src/key/error.rs"), "Error"),
 			"key::Error",
 		),
 		(
@@ -1282,7 +1282,7 @@ fn coverage() -> Vec<(usize, usize, &'static str)> {
 		),
 		(
 			every_datastore_variant().len(),
-			declared_variants(include_str!("../kvs/datastore_error.rs"), "DatastoreError"),
+			declared_variants(include_str!("../../../datastore/src/error.rs"), "DatastoreError"),
 			"kvs::DatastoreError",
 		),
 		(
@@ -1292,7 +1292,7 @@ fn coverage() -> Vec<(usize, usize, &'static str)> {
 		),
 		(
 			every_capabilities_variant().len(),
-			declared_variants(include_str!("../dbs/capabilities/error.rs"), "Error"),
+			declared_variants(include_str!("../../../rpc/src/capabilities/error.rs"), "Error"),
 			"capabilities::Error",
 		),
 		(

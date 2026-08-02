@@ -49,6 +49,7 @@ InvalidMerge	{ cause: NONE, code: -32600, details: { details: { value: 'NONE' },
 InvalidPatch	{ cause: NONE, code: -32000, kind: 'Validation', message: 'The JSON Patch contains invalid operations. Failed to parse JSON patch structure: sample' }
 PatchTest	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Given test operation failed for JSON Patch. Expected `sample`, but got `sample` instead.' }
 InvalidFunctionArguments	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Incorrect arguments for function sample(). sample' }
+InvalidMethodArguments	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Incorrect arguments for method sample(). sample' }
 InvalidRegex	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Invalid regular expression: "sample"' }
 IdInvalid	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Found sample for the Record ID but this is not a valid id' }
 Coerce	{ cause: { cause: NONE, code: -32000, kind: 'Internal', message: 'Expected `sample` but found `NONE`' }, code: -32000, kind: 'Validation', message: 'Expected `sample` but found `NONE`' }
@@ -201,7 +202,6 @@ InvalidStart	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Found samp
 InvalidScript	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Problem with embedded script function. sample' }
 InvalidModel	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Problem with machine learning computation. sample' }
 InvalidFunction	{ cause: NONE, code: -32000, kind: 'Internal', message: 'There was a problem running the sample() function. sample' }
-InvalidMethodArguments	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Incorrect arguments for method sample(). sample' }
 InvalidControlFlow	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Invalid control flow statement, break or continue statement found outside of loop.' }
 NsNotAllowed	{ cause: NONE, code: -32000, kind: 'Internal', message: "You don't have permission to change to the sample namespace" }
 DbNotAllowed	{ cause: NONE, code: -32000, kind: 'Internal', message: "You don't have permission to change to the sample database" }

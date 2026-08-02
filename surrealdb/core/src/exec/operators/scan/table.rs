@@ -27,8 +27,8 @@ use crate::exec::{
 };
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::iam::Action;
-use crate::idx::planner::ScanDirection;
 use crate::key::schema::RecordPrefix;
+use crate::kvs::Direction;
 
 /// Direct KV range scan over a known table.
 ///
@@ -42,7 +42,7 @@ use crate::key::schema::RecordPrefix;
 #[derive(Debug, Clone)]
 pub struct TableScan {
 	pub(crate) table_name: TableName,
-	pub(crate) direction: ScanDirection,
+	pub(crate) direction: Direction,
 	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
 	pub(crate) predicate: Option<Arc<dyn PhysicalExpr>>,
 	pub(crate) limit: Option<Arc<dyn PhysicalExpr>>,
@@ -61,7 +61,7 @@ pub struct TableScan {
 impl TableScan {
 	pub(crate) fn new(
 		table_name: TableName,
-		direction: ScanDirection,
+		direction: Direction,
 		version: Option<Arc<dyn PhysicalExpr>>,
 		predicate: Option<Arc<dyn PhysicalExpr>>,
 		limit: Option<Arc<dyn PhysicalExpr>>,
@@ -154,8 +154,8 @@ impl ExecOperator for TableScan {
 		use crate::exec::ordering::SortProperty;
 
 		let dir = match self.direction {
-			ScanDirection::Forward => SortDirection::Asc,
-			ScanDirection::Backward => SortDirection::Desc,
+			Direction::Forward => SortDirection::Asc,
+			Direction::Backward => SortDirection::Desc,
 		};
 		OutputOrdering::Sorted(vec![SortProperty {
 			path: crate::exec::field_path::FieldPath::field("id"),

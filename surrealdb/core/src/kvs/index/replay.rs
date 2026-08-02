@@ -6,17 +6,14 @@ use std::sync::atomic::Ordering;
 use anyhow::Result;
 use chrono::Utc;
 use reblessive::TreeStack;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
 use uuid::Uuid;
 use web_time::Instant;
 
 use super::builder::Building;
 use super::{
-	AppendingId, BUILD_CLOSING_SLEEP, BatchId, BuildGeneration, BuildTicket,
-	BuildTicketMutationSeq, ExistingPrimaryAppending, IndexBuildPhase, IndexBuildReportStatus,
-	LEGACY_BATCH_ID,
+	Appending, BUILD_CLOSING_SLEEP, BuildGeneration, ExistingPrimaryAppending, IndexBuildPhase,
+	IndexBuildReportStatus, LEGACY_BATCH_ID,
 };
 use crate::catalog::providers::{NodeProvider, TableProvider};
 use crate::catalog::{Error as CatalogError, Index, Record};
@@ -27,14 +24,14 @@ use crate::idx::IndexKeyBase;
 use crate::idx::docids::{DocId, TableDocIds};
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::index::IndexOperation;
-use crate::idx::planner::ScanDirection;
 use crate::key::schema::{
 	BuildAppendKey, BuildPrimaryKey, BuildReservationKey, DocPendingKey, DocPendingPrefix,
 	IndexAppendKey, RecordKey,
 };
-use crate::key::{KVKeyDecode, Resumable, impl_kv_value_revisioned};
+use crate::key::{KVKeyDecode, Resumable};
 use crate::kvs::{
-	DatastoreError, INDEXING_BATCH_SIZE, Transaction, Val, is_retryable_transaction_conflict,
+	DatastoreError, Direction, INDEXING_BATCH_SIZE, Transaction, Val,
+	is_retryable_transaction_conflict,
 };
 use crate::val::{RecordId, RecordIdKey, Value};
 
@@ -47,76 +44,6 @@ use crate::val::{RecordId, RecordIdKey, Value};
 /// cannot wedge the finished build task (and, for a blocking `DEFINE INDEX`,
 /// the statement waiting on it).
 const DOC_ID_RECLAIM_MAX_RETRIES: usize = 10;
-
-#[revisioned(revision = 2)]
-#[derive(Debug, PartialEq)]
-pub(crate) struct Appending {
-	/// Values to remove from the index when replaying the write.
-	pub(super) old_values: Option<Vec<Value>>,
-	/// Values to add to the index when replaying the write.
-	pub(super) new_values: Option<Vec<Value>>,
-	/// Record id key whose index entries are being replayed.
-	pub(super) id: RecordIdKey,
-	/// Cached COUNT condition match state `(old_matches, new_matches)`.
-	///
-	/// Re-evaluating a conditional COUNT predicate during replay can observe a
-	/// different document state than the user write observed. Carrying both
-	/// booleans makes replay deterministic.
-	#[revision(start = 2)]
-	pub(super) count_cond_match: Option<(bool, bool)>,
-}
-
-impl_kv_value_revisioned!(Appending);
-
-impl Appending {
-	#[cfg(test)]
-	pub(crate) fn new(
-		old_values: Option<Vec<Value>>,
-		new_values: Option<Vec<Value>>,
-		id: RecordIdKey,
-	) -> Self {
-		Self {
-			old_values,
-			new_values,
-			id,
-			count_cond_match: None,
-		}
-	}
-}
-
-#[revisioned(revision = 2)]
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
-pub(crate) struct PrimaryAppending(
-	/// Appending id within the concurrent indexing queue.
-	AppendingId,
-	/// Batch id associated with this append.
-	#[revision(start = 2)]
-	BatchId,
-);
-
-impl_kv_value_revisioned!(PrimaryAppending);
-
-/// Pointer from a per-record `!bp` marker to the specific `!bg` entry that
-/// holds the writer-observed old state for that record.
-///
-/// One reservation is allocated per user transaction per index, so the same
-/// `ticket` can cover many `!bg` entries. The `mutation_seq` selects the
-/// first admitted mutation for the marker's record.
-#[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub(crate) struct PrimaryAppendingTicket {
-	pub(crate) ticket: BuildTicket,
-	pub(crate) mutation_seq: BuildTicketMutationSeq,
-}
-
-impl_kv_value_revisioned!(PrimaryAppendingTicket);
-
-impl PrimaryAppending {
-	#[cfg(test)]
-	pub(crate) fn new(appending_id: AppendingId, batch_id: BatchId) -> Self {
-		Self(appending_id, batch_id)
-	}
-}
 
 struct InitialIndexValue<'a> {
 	rid: &'a RecordId,
@@ -785,7 +712,7 @@ impl Building {
 			next = batch
 				.next
 				.and(batch.result.last())
-				.map(|last| rng.resume_after(last, ScanDirection::Forward));
+				.map(|last| rng.resume_after(last, Direction::Forward));
 			for key in batch.result {
 				// Baseline indexing is synchronous CPU work; yield so a long
 				// batch cannot starve the runtime worker.

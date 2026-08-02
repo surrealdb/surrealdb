@@ -191,6 +191,8 @@ run_task = { name = [
     "ci-feature-check-server",
     "ci-feature-check-kvs",
     "ci-feature-check-kvs-any",
+    "ci-feature-check-datastore",
+    "ci-feature-check-runtime",
 ], fork = true, parallel = true }
 
 [tasks.ci-feature-check-sdk]
@@ -254,6 +256,34 @@ args = [
     "--each-feature",
     "--exclude-features",
     "kv-indxdb",
+]
+
+[tasks.ci-feature-check-datastore]
+category = "CI - CHECK"
+description = "Verify each surrealdb-datastore feature compiles individually"
+install_crate = "cargo-hack"
+env = { RUSTFLAGS = "-D warnings" }
+command = "cargo"
+args = [
+    "hack",
+    "check",
+    "--package",
+    "surrealdb-datastore",
+    "--each-feature",
+]
+
+[tasks.ci-feature-check-runtime]
+category = "CI - CHECK"
+description = "Verify each surrealdb-runtime feature compiles individually"
+install_crate = "cargo-hack"
+env = { RUSTFLAGS = "-D warnings" }
+command = "cargo"
+args = [
+    "hack",
+    "check",
+    "--package",
+    "surrealdb-runtime",
+    "--each-feature",
 ]
 
 [tasks.ci-feature-check-server]
@@ -624,6 +654,22 @@ args = [
     "${_TEST_FEATURES}",
 ]
 
+# The datastore's lease-contention test runs once per on-disk backend. Its
+# in-memory run needs no feature and comes with the ordinary workspace suite.
+[tasks.test-datastore]
+private = true
+command = "cargo"
+env = { RUST_BACKTRACE = 1 }
+args = [
+    "nextest",
+    "run",
+    "--locked",
+    "--package",
+    "surrealdb-datastore",
+    "--features",
+    "${_TEST_FEATURES}",
+]
+
 [tasks.test-kvs-crate]
 private = true
 command = "cargo"
@@ -654,6 +700,7 @@ run_task = { name = [
     "test-kvs",
     "test-kvs-any",
     "test-kvs-crate",
+    "test-datastore",
 ], fork = true, parallel = true }
 
 [tasks.ci-kvs-surrealkv]
@@ -664,6 +711,7 @@ run_task = { name = [
     "test-kvs",
     "test-kvs-any",
     "test-kvs-crate",
+    "test-datastore",
 ], fork = true, parallel = false }
 
 [tasks.ci-kvs-tikv]

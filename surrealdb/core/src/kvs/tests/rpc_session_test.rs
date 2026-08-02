@@ -12,7 +12,7 @@ use surrealdb_kvs::TransactionType::{Read, Write};
 use uuid::Uuid;
 use web_time::Duration;
 
-use crate::dbs::{Capabilities, DurableSession, Session};
+use crate::dbs::{Capabilities, DurableSession, Session, durable_session};
 use crate::key::AnyRange;
 use crate::key::schema::{SessionKey, SessionPrefix};
 use crate::kvs::Datastore;
@@ -59,7 +59,7 @@ async fn durable_session_entry(ds: &Datastore, id: Uuid) -> Option<DurableSessio
 
 /// Store an entry with an explicit expiry, bypassing the TTL computation.
 async fn put_entry_with_expiry(ds: &Datastore, id: Uuid, session: &Session, expires_at: u64) {
-	let value = DurableSession::from_session(session, expires_at);
+	let value = durable_session(session, expires_at);
 	let tx = ds.transaction(Write).await.unwrap();
 	tx.set_key(
 		&SessionKey {

@@ -690,15 +690,20 @@ async fn router(
 						// If the access token is expired and we have a refresh token,
 						// automatically attempt to refresh and return new tokens.
 						if with_refresh && surrealdb_core::iam::is_expired_token_error(&error) {
-							let result =
-								match token.refresh(kvs, &mut *state.session.write().await).await {
-									Ok(token) => {
-										query_result.finish_with_result(Ok(token.into_value()))
-									}
-									Err(error) => query_result.finish_with_result(Err(
-										TypesError::internal(error.to_string()),
-									)),
-								};
+							let result = match surrealdb_core::iam::token::refresh(
+								token,
+								kvs,
+								&mut *state.session.write().await,
+							)
+							.await
+							{
+								Ok(token) => {
+									query_result.finish_with_result(Ok(token.into_value()))
+								}
+								Err(error) => query_result.finish_with_result(Err(
+									TypesError::internal(error.to_string()),
+								)),
+							};
 							return Ok(vec![result]);
 						}
 						// If authentication failed and automatic refresh isn't applicable,
@@ -716,7 +721,13 @@ async fn router(
 			// Refresh command: Exchange a refresh token for new access and refresh tokens
 			let query_result = QueryResultBuilder::started_now();
 			let result = {
-				match token.refresh(kvs, &mut *state.session.write().await).await {
+				match surrealdb_core::iam::token::refresh(
+					token,
+					kvs,
+					&mut *state.session.write().await,
+				)
+				.await
+				{
 					Ok(token) => query_result.finish_with_result(Ok(token.into_value())),
 					Err(error) => query_result
 						.finish_with_result(Err(TypesError::internal(error.to_string()))),
@@ -754,7 +765,7 @@ async fn router(
 		} => {
 			// Revoke command: Explicitly invalidate a refresh token to prevent future use
 			let query_result = QueryResultBuilder::started_now();
-			let result = match token.revoke_refresh_token(kvs).await {
+			let result = match surrealdb_core::iam::token::revoke_refresh_token(token, kvs).await {
 				Ok(_) => query_result.finish_with_result(Ok(Value::None)),
 				Err(error) => {
 					query_result.finish_with_result(Err(TypesError::internal(error.to_string())))

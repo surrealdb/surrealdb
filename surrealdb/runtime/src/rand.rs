@@ -1,0 +1,385 @@
+use anyhow::{Result, bail, ensure};
+use chrono::{TimeZone, Utc};
+use common::fail;
+use rand::Rng;
+use rand::distr::{Alphanumeric, SampleString};
+use rand::seq::{IndexedRandom, IteratorRandom};
+use surrealdb_cnf::ID_CHARS;
+use surrealdb_expr::expr::Error;
+use surrealdb_expr::val::{Datetime, Duration, Number, Uuid, Value};
+use ulid::Ulid;
+
+use super::args::{Any, Args, Arity, FromArg, Optional};
+
+pub fn rand(_: ()) -> Result<Value> {
+	Ok(surrealdb_expr::val::rnd::with_rng(|rng| rng.random::<f64>()).into())
+}
+
+pub fn bool(_: ()) -> Result<Value> {
+	Ok(surrealdb_expr::val::rnd::with_rng(|rng| rng.random::<bool>()).into())
+}
+
+pub fn r#enum(Any(mut args): Any) -> Result<Value> {
+	Ok(match args.len() {
+		0 => Value::None,
+		1 => match args.remove(0) {
+			Value::Array(v) => surrealdb_expr::val::rnd::with_rng(|rng| v.into_iter().choose(rng))
+				.unwrap_or(Value::None),
+			v => v,
+		},
+		_ => surrealdb_expr::val::rnd::with_rng(|rng| args.into_iter().choose(rng))
+			.expect("non-empty args"),
+	})
+}
+
+pub struct NoneOrRange<T>(Option<(T, T)>);
+
+impl<T: FromArg> FromArg for NoneOrRange<T> {
+	fn arity() -> Arity {
+		Arity {
+			lower: 0,
+			upper: Some(2),
+		}
+	}
+
+	fn from_arg(name: &str, args: &mut Args) -> Result<Self> {
+		if !args.has_next() {
+			return Ok(NoneOrRange(None));
+		}
+
+		let a = T::from_arg(name, args)?;
+
+		ensure!(
+			args.has_next(),
+			Error::InvalidFunctionArguments {
+				name: name.to_owned(),
+				message: "Expected 0 or 2 arguments".to_string(),
+			}
+		);
+
+		let b = T::from_arg(name, args)?;
+
+		Ok(NoneOrRange(Some((a, b))))
+	}
+}
+
+// TODO (Delskayn): Don't agree with the inclusive ranges in the functions here,
+// seems inconsistent with general use of ranges not including the upperbound.
+// These should probably all be exclusive.
+pub fn float((NoneOrRange(range),): (NoneOrRange<f64>,)) -> Result<Value> {
+	let v = if let Some((min, max)) = range {
+		ensure!(
+			min <= max,
+			Error::InvalidFunctionArguments {
+				name: String::from("rand::float"),
+				message: "Lowerbound of the range must be less than or equal to the upperbound."
+					.to_string(),
+			}
+		);
+		surrealdb_expr::val::rnd::with_rng(|rng| rng.random_range(min..=max))
+	} else {
+		surrealdb_expr::val::rnd::with_rng(|rng| rng.random::<f64>())
+	};
+	Ok(Value::from(v))
+}
+
+// Without this check, a negative length wraps to a huge `usize` and either
+// panics `random_range` ("cannot sample empty range") or OOMs the allocator
+// when used as a string length.
+fn to_random_len(name: &str, val: i64) -> Result<usize> {
+	usize::try_from(val).map_err(|_| {
+		anyhow::Error::new(Error::ArithmeticNegativeOverflow(format!("{name}({val})")))
+	})
+}
+
+pub fn id((Optional(arg1), Optional(arg2)): (Optional<i64>, Optional<i64>)) -> Result<Value> {
+	// Set a reasonable maximum length
+	const LIMIT: i64 = 64;
+
+	// rand::id(NULL,10) is not allowed by the calling infrastructure.
+	let lower = arg1.unwrap_or(20);
+	let len = if let Some(upper) = arg2 {
+		ensure!(
+			lower <= upper,
+			Error::InvalidFunctionArguments {
+				name: String::from("rand::id"),
+				message: "Lowerbound of number of characters must be less then the upperbound."
+					.to_string(),
+			}
+		);
+		ensure!(
+			upper <= LIMIT,
+			Error::InvalidFunctionArguments {
+				name: String::from("rand::id"),
+				message: format!(
+					"To generate a string of X characters in length, the argument must be a positive number and no higher than {LIMIT}."
+				),
+			}
+		);
+		let lower = to_random_len("rand::id", lower)?;
+		let upper = to_random_len("rand::id", upper)?;
+		surrealdb_expr::val::rnd::with_rng(|rng| rng.random_range(lower..=upper))
+	} else {
+		ensure!(
+			lower <= LIMIT,
+			Error::InvalidFunctionArguments {
+				name: String::from("rand::id"),
+				message: format!(
+					"To generate a string of X characters in length, the argument must be a positive number and no higher than {LIMIT}."
+				),
+			}
+		);
+		to_random_len("rand::id", lower)?
+	};
+
+	// Generate the random id
+	let id: String = surrealdb_expr::val::rnd::with_rng(|rng| {
+		(0..len).map(|_| *ID_CHARS[..].choose(&mut *rng).unwrap_or(&'0')).collect()
+	});
+	Ok(Value::from(id))
+}
+
+pub fn int((NoneOrRange(range),): (NoneOrRange<i64>,)) -> Result<Value> {
+	Ok(if let Some((min, max)) = range {
+		ensure!(
+			min <= max,
+			Error::InvalidFunctionArguments {
+				name: String::from("rand::int"),
+				message: "Lowerbound of the range must be less than or equal to the upperbound."
+					.to_string(),
+			}
+		);
+		surrealdb_expr::val::rnd::with_rng(|rng| rng.random_range(min..=max))
+	} else {
+		surrealdb_expr::val::rnd::with_rng(|rng| rng.random::<i64>())
+	}
+	.into())
+}
+
+pub fn string((Optional(arg1), Optional(arg2)): (Optional<i64>, Optional<i64>)) -> Result<Value> {
+	// Set a reasonable maximum length
+	const LIMIT: i64 = 65536;
+	// rand::string(NULL,10) is not allowed by the calling infrastructure.
+	let lower = arg1.unwrap_or(32);
+	let len = if let Some(upper) = arg2 {
+		ensure!(
+			lower <= upper,
+			Error::InvalidFunctionArguments {
+				name: String::from("rand::string"),
+				message: "Lowerbound of number of characters must be less then the upperbound."
+					.to_string(),
+			}
+		);
+		ensure!(
+			upper <= LIMIT,
+			Error::InvalidFunctionArguments {
+				name: String::from("rand::string"),
+				message: format!(
+					"To generate a string of X characters in length, the argument must be a positive number and no higher than {LIMIT}."
+				),
+			}
+		);
+		let lower = to_random_len("rand::string", lower)?;
+		let upper = to_random_len("rand::string", upper)?;
+		surrealdb_expr::val::rnd::with_rng(|rng| rng.random_range(lower..=upper))
+	} else {
+		ensure!(
+			lower <= LIMIT,
+			Error::InvalidFunctionArguments {
+				name: String::from("rand::string"),
+				message: format!(
+					"To generate a string of X characters in length, the argument must be a positive number and no higher than {LIMIT}."
+				),
+			}
+		);
+		to_random_len("rand::string", lower)?
+	};
+	// Generate the random string
+	Ok(surrealdb_expr::val::rnd::with_rng(|rng| Alphanumeric.sample_string(rng, len)).into())
+}
+
+pub fn duration((dur1, dur2): (Duration, Duration)) -> Result<Value> {
+	ensure!(
+		dur1 <= dur2,
+		Error::InvalidFunctionArguments {
+			name: String::from("rand::duration"),
+			message: "Lowerbound of the range must be less than or equal to the upperbound."
+				.to_string(),
+		}
+	);
+
+	let rand = surrealdb_expr::val::rnd::with_rng(|rng| {
+		rng.random_range(dur1.as_nanos()..=dur2.as_nanos())
+	});
+
+	let nanos = (rand % 1_000_000_000) as u32;
+
+	// Max Duration is made of (u64::MAX, NANOS_PER_SEC - 1) so will never overflow
+	let Ok(secs) = u64::try_from(rand / 1_000_000_000) else {
+		fail!("Overflow inside rand::duration()");
+	};
+
+	Ok(Value::Duration(Duration::new(secs, nanos)))
+}
+
+pub fn time((NoneOrRange(range),): (NoneOrRange<Value>,)) -> Result<Value> {
+	// Process the arguments
+	let range = match range {
+		None => None,
+		Some((Value::Number(Number::Int(min)), Value::Number(Number::Int(max)))) => {
+			Some((min, max))
+		}
+		Some((Value::Datetime(min), Value::Datetime(max))) => Some((min.to_secs(), max.to_secs())),
+		Some((Value::Number(Number::Int(min)), Value::Datetime(max))) => Some((min, max.to_secs())),
+		Some((Value::Datetime(min), Value::Number(Number::Int(max)))) => Some((min.to_secs(), max)),
+		_ => {
+			bail!(Error::InvalidFunctionArguments {
+				name: String::from("rand::time"),
+				message: String::from("Expected two arguments of type datetime or int"),
+			})
+		}
+	};
+
+	// Set the minimum valid seconds
+	const MINIMUM: i64 = -8334601228800;
+	// Set the maximum valid seconds
+	const LIMIT: i64 = 8210266876799;
+
+	// Check the function input arguments
+	let (min, max) = if let Some((min, max)) = range {
+		ensure!(
+			(MINIMUM..=LIMIT).contains(&min) && (MINIMUM..=LIMIT).contains(&max),
+			Error::InvalidFunctionArguments {
+				name: String::from("rand::time"),
+				message: format!(
+					"To generate a random time, the 2 arguments must be numbers between {MINIMUM} and {LIMIT} seconds from the UNIX epoch or a 'datetime' within the range d'-262143-01-01T00:00:00Z' and +262142-12-31T23:59:59Z'."
+				),
+			}
+		);
+		ensure!(
+			min <= max,
+			Error::InvalidFunctionArguments {
+				name: String::from("rand::time"),
+				message: "Lowerbound of the range must be less than or equal to the upperbound."
+					.to_string(),
+			}
+		);
+		(min, max)
+	} else {
+		// Datetime between d'0000-01-01T00:00:00Z' and d'9999-12-31T23:59:59Z'
+		(-62167219200, 253402300799)
+	};
+	// Generate the random time, try up to 5 times
+	for _ in 0..5 {
+		let val = surrealdb_expr::val::rnd::with_rng(|rng| rng.random_range(min..=max));
+		if let Some(v) = Utc.timestamp_opt(val, 0).earliest() {
+			return Ok(v.into());
+		}
+	}
+	// We were unable to generate a valid random datetime
+	fail!("Expected a valid datetime, but were unable to generate one")
+}
+
+pub fn ulid((Optional(timestamp),): (Optional<Datetime>,)) -> Result<Value> {
+	let ulid = match timestamp {
+		Some(timestamp) => {
+			#[cfg(target_family = "wasm")]
+			ensure!(
+				timestamp.0 >= chrono::DateTime::UNIX_EPOCH,
+				Error::InvalidFunctionArguments {
+					name: String::from("rand::ulid"),
+					message: format!(
+						"To generate a ULID from a datetime, it must be a time beyond UNIX epoch."
+					),
+				}
+			);
+
+			Ulid::from_datetime(timestamp.0.into())
+		}
+		None => Ulid::new(),
+	};
+
+	Ok(ulid.to_string().into())
+}
+
+pub fn uuid((Optional(timestamp),): (Optional<Datetime>,)) -> Result<Value> {
+	let uuid = match timestamp {
+		Some(timestamp) => {
+			#[cfg(target_family = "wasm")]
+			ensure!(
+				timestamp.0 >= chrono::DateTime::UNIX_EPOCH,
+				Error::InvalidFunctionArguments {
+					name: String::from("rand::ulid"),
+					message: format!(
+						"To generate a ULID from a datetime, it must be a time beyond UNIX epoch."
+					),
+				}
+			);
+
+			Uuid::new_v7_from_datetime(timestamp)
+		}
+		None => Uuid::new(),
+	};
+	Ok(uuid.into())
+}
+
+#[cfg(test)]
+mod tests {
+	use std::thread;
+
+	use super::*;
+
+	#[test]
+	fn test_rand_id_concurrency() {
+		let mut handles = vec![];
+		for _ in 0..100 {
+			handles.push(thread::spawn(|| {
+				for _ in 0..1000 {
+					let _ = id((Optional(Some(0)), Optional(Some(10)))).unwrap();
+				}
+			}));
+		}
+		for handle in handles {
+			handle.join().unwrap();
+		}
+	}
+
+	#[test]
+	fn test_rand_id_len_0() {
+		let res = id((Optional(Some(0)), Optional(Some(0)))).unwrap();
+		assert_eq!(res, Value::from(""));
+	}
+}
+
+pub mod uuid {
+
+	use anyhow::Result;
+	use surrealdb_expr::val::{Datetime, Uuid, Value};
+
+	use crate::args::Optional;
+
+	pub fn v4(_: ()) -> Result<Value> {
+		Ok(Uuid::new_v4().into())
+	}
+
+	pub fn v7((Optional(timestamp),): (Optional<Datetime>,)) -> Result<Value> {
+		let uuid = match timestamp {
+			Some(timestamp) => {
+				#[cfg(target_family = "wasm")]
+				anyhow::ensure!(
+					timestamp.0 >= chrono::DateTime::UNIX_EPOCH,
+					surrealdb_expr::expr::Error::InvalidFunctionArguments {
+						name: String::from("rand::ulid"),
+						message: format!(
+							"To generate a ULID from a datetime, it must be a time beyond UNIX epoch."
+						),
+					}
+				);
+
+				Uuid::new_v7_from_datetime(timestamp)
+			}
+			None => Uuid::new(),
+		};
+		Ok(uuid.into())
+	}
+}

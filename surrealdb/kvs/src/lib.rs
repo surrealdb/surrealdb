@@ -2,8 +2,13 @@
 //!
 //! Common types and traits shared by every SurrealDB key-value store backend:
 //! the [`Transactable`] transaction trait, the [`TransactionBuilder`] datastore
-//! abstraction, the raw [`Key`]/[`KeyRange`]/[`Val`] byte types, and the shared
-//! error, configuration, cursor, and timestamp machinery.
+//! abstraction, the raw [`Key`]/[`KeyRange`]/[`Val`] byte types, the
+//! [`key`]/[`value`] encoding contract a typed key and its stored value are
+//! written against, and the shared error, configuration, cursor, and timestamp
+//! machinery.
+//!
+//! This crate defines how a key and a value are *declared*; it does not declare
+//! any. Which keys exist is the keyspace, which lives above it.
 //!
 //! <section class="warning">
 //! <h3>Unstable!</h3>
@@ -19,6 +24,7 @@ pub mod config;
 pub mod consts;
 pub mod cursor;
 pub mod err;
+pub mod key;
 pub mod savepoint;
 pub mod threadpool;
 pub mod timestamp;
@@ -58,4 +64,16 @@ pub enum Direction {
 	Forward,
 	/// Iterate from `range.end - 1` toward `range.start` (lex-descending).
 	Backward,
+}
+
+/// Names the direction as a query plan reports it. These two strings reach
+/// clients in `EXPLAIN` output, so they are part of the engine's surface and
+/// cannot be spelled to taste.
+impl std::fmt::Display for Direction {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			Direction::Forward => f.write_str("forward"),
+			Direction::Backward => f.write_str("backward"),
+		}
+	}
 }

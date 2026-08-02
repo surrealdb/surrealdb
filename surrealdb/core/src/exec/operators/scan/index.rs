@@ -29,8 +29,7 @@ use crate::exec::{
 };
 use crate::expr::ControlFlow;
 use crate::iam::Action;
-use crate::idx::planner::ScanDirection;
-use crate::kvs::CachePolicy;
+use crate::kvs::{CachePolicy, Direction};
 
 /// Index scan operator for B-tree indexes (Idx and Uniq).
 ///
@@ -47,7 +46,7 @@ pub struct IndexScan {
 	/// How to access the index
 	pub access: BTreeAccess,
 	/// Scan direction (forward or backward)
-	pub direction: ScanDirection,
+	pub direction: Direction,
 	/// Table name for record fetching
 	pub table_name: surrealdb_strand::TableName,
 	/// Pushed-down LIMIT expression (evaluated at execution time).
@@ -85,7 +84,7 @@ impl IndexScan {
 	pub(crate) fn new(
 		index_ref: IndexRef,
 		access: BTreeAccess,
-		direction: ScanDirection,
+		direction: Direction,
 		table_name: surrealdb_strand::TableName,
 		limit: Option<Arc<dyn PhysicalExpr>>,
 		start: Option<Arc<dyn PhysicalExpr>>,
@@ -175,8 +174,8 @@ impl ExecOperator for IndexScan {
 		use crate::exec::ordering::SortProperty;
 
 		let dir = match self.direction {
-			ScanDirection::Forward => SortDirection::Asc,
-			ScanDirection::Backward => SortDirection::Desc,
+			Direction::Forward => SortDirection::Asc,
+			Direction::Backward => SortDirection::Desc,
 		};
 
 		// For compound access with an equality prefix, the prefix columns all
@@ -441,7 +440,7 @@ impl ExecOperator for IndexScan {
 
 				// Non-unique equality - multiple records possible
 				(BTreeAccess::Equality(value), false) => {
-					let reverse = matches!(direction, ScanDirection::Backward);
+					let reverse = matches!(direction, Direction::Backward);
 					let mut iter =
 						IndexEqualIterator::with_direction(ns_id, db_id, ix, value, reverse)
 							.context("Failed to create iterator")?;

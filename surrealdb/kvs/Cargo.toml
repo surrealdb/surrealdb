@@ -25,6 +25,7 @@ roaring = { workspace = true, features = ["serde"] }
 revision = { workspace = true }
 common.workspace = true
 surrealdb-cnf.workspace = true
+surrealdb-types.workspace = true
 
 chrono = { workspace = true }
 thiserror = { workspace = true }

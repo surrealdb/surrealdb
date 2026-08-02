@@ -7,9 +7,9 @@
 //! Failing either check indicates a backwards compatibility regression.
 
 use super::{fixtures, v3_0_0, v3_0_0_beta_1, v3_0_0_beta_3, v3_1_0, v3_1_1, v3_3_0, v3_4_0};
+use crate::catalog::node::Node;
 use crate::catalog::{TaskLease, *};
 use crate::cf::TableMutations;
-use crate::dbs::node::Node;
 use crate::idx::ft::fulltext::{DocLengthAndCount, TermDocument};
 use crate::key::KVValue;
 use crate::kvs::index::{Appending, PrimaryAppending};

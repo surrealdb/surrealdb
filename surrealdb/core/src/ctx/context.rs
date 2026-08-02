@@ -1186,9 +1186,9 @@ impl Context {
 				match_any_deny_net(&target)?;
 				// Resolve the domain name to a vector of IP addresses
 				#[cfg(not(target_family = "wasm"))]
-				let targets = target.resolve().await?;
+				let targets = crate::net::resolve_net_target(&target).await?;
 				#[cfg(target_family = "wasm")]
-				let targets = target.resolve()?;
+				let targets = crate::net::resolve_net_target(&target)?;
 				for t in &targets {
 					match_any_deny_net(t)?;
 				}
@@ -1276,8 +1276,10 @@ impl Context {
 				let package =
 					SurrealismPackage::from_reader(std::io::Cursor::new(surli), &unpack_opts)?;
 
-				self.get_capabilities()
-					.validate_surrealism_capabilities(&package.config.capabilities)?;
+				crate::surrealism::validate_surrealism_capabilities(
+					&self.get_capabilities(),
+					&package.config.capabilities,
+				)?;
 
 				let org = package.config.meta.organisation.clone();
 				let name = package.config.meta.name.clone();

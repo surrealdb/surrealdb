@@ -24,9 +24,9 @@ use crate::expr::order::Ordering;
 use crate::expr::{self, ControlFlow, Expr, Fields, Literal, Lookup, Mock, Part};
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
 use crate::idx::planner::{
-	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, ScanDirection,
-	StatementContext,
+	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, StatementContext,
 };
+use crate::kvs::Direction;
 use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange, TableName, Value};
 
 const TARGET: &str = "surrealdb::core::dbs";
@@ -75,12 +75,12 @@ pub(crate) enum Iterable {
 	/// Carries [`DocumentContext::NsDbTbMutCtx`] for write statements
 	/// (UPDATE / DELETE / UPSERT without a specific id) and
 	/// [`DocumentContext::NsDbTbCtx`] for SELECT.
-	Table(DocumentContext, TableName, RecordStrategy, ScanDirection),
+	Table(DocumentContext, TableName, RecordStrategy, Direction),
 	/// An iterable which fetches a specific range of records
 	/// from storage, used in range and time-series scenarios.
 	///
 	/// Carries the same variant as [`Iterable::Table`].
-	Range(DocumentContext, TableName, RecordIdKeyRange, RecordStrategy, ScanDirection),
+	Range(DocumentContext, TableName, RecordIdKeyRange, RecordStrategy, Direction),
 	/// An iterable which fetches a record from storage, and
 	/// which has the specific value to update the record with.
 	/// This is used in INSERT statements, where each value

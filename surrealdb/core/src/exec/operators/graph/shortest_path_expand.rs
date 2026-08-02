@@ -76,7 +76,7 @@ use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, ControlFlowExt, ExecOperator, ExecutionContext,
 	FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
-use crate::idx::planner::ScanDirection;
+use crate::kvs::Direction;
 use crate::val::{RecordId, TableName, Value};
 
 /// Which of the paths to each endpoint a path search keeps. Named for the
@@ -552,7 +552,7 @@ impl ExecOperator for ShortestPathExpand {
 						let mut decoded_targets: Vec<Option<RecordId>> = Vec::new();
 						for r in ranges {
 							let mut cursor = txn
-								.open_keys_cursor_raw(r, ScanDirection::Forward, 0, version)
+								.open_keys_cursor_raw(r, Direction::Forward, 0, version)
 								.await
 								.context("Failed to open ShortestPathExpand graph cursor")?;
 							loop {

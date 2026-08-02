@@ -17,7 +17,6 @@ use uuid::Uuid;
 
 pub(crate) use self::error::{Error, index_exists_record};
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
-use crate::err::Error as CoreError;
 use crate::idx::docids::DocId;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::vector::SerializedVector;
@@ -44,7 +43,7 @@ use crate::kvs::index::{
 	Appending, AppendingId, BatchId, BuildGeneration, BuildTicket, BuildTicketMutationSeq,
 	IndexBuildReservation, PrimaryAppendingTicket,
 };
-use crate::kvs::{Error as KvsError, Transaction};
+use crate::kvs::{Error as KvsError, Transaction, storage_error};
 use crate::val::{RecordIdKey, TableName};
 
 /// Reads a compaction generation key.
@@ -82,13 +81,7 @@ where
 
 /// Identifies the datastore error used for failed conditional writes/deletes.
 pub(in crate::idx) fn is_transaction_condition_not_met(e: &anyhow::Error) -> bool {
-	if matches!(
-		e.downcast_ref::<CoreError>(),
-		Some(CoreError::Kvs(KvsError::TransactionConditionNotMet))
-	) {
-		return true;
-	}
-	matches!(e.downcast_ref::<KvsError>(), Some(KvsError::TransactionConditionNotMet))
+	matches!(storage_error(e), Some(KvsError::TransactionConditionNotMet))
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]

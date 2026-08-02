@@ -7,7 +7,7 @@
 
 pub(crate) use self::document::*;
 pub(crate) use self::error::Error;
-pub use self::event::AsyncEventRecord;
+pub use self::event::{AsyncEventRecord, process_next_events_batch};
 pub(crate) use self::lives::DefaultBroker;
 
 mod document; // The entry point for a document to be processed

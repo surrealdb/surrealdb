@@ -13,9 +13,13 @@ use anyhow::Result;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 use reblessive::tree::Stk;
-use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
+use revision::revisioned;
 use roaring::RoaringTreemap;
-use serde::{Deserialize, Serialize};
+// The graph's state record, the queued per-record update and the element id they
+// address are keyspace values, so they are declared below this layer; the graph
+// built from them stays here.
+pub(crate) use surrealdb_datastore::values::hnsw::{HnswRecordPendingUpdate, HnswState};
+pub(crate) use surrealdb_datastore::values::vector::ElementId;
 
 use crate::catalog::{HnswParams, TableId};
 use crate::ctx::FrozenContext;
@@ -30,7 +34,7 @@ use crate::idx::trees::hnsw::index::HnswContext;
 use crate::idx::trees::hnsw::layer::{HnswLayer, LayerState};
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
-use crate::key::{KVValue, impl_kv_value_revisioned};
+use crate::key::impl_kv_value_revisioned;
 use crate::kvs::Transaction;
 use crate::val::RecordIdKey;
 
@@ -52,56 +56,6 @@ impl HnswSearch {
 			ef,
 		}
 	}
-}
-
-/// Persisted state of the HNSW graph, stored in the key-value store.
-///
-/// Tracks the current entry point, element ID counter, and per-layer state.
-/// This state is loaded at startup and saved after each mutation to ensure
-/// consistency across concurrent transactions.
-#[revisioned(revision = 1)]
-#[derive(Default, Serialize, Deserialize)]
-pub(crate) struct HnswState {
-	/// The entry point element for graph traversal, or `None` if the graph is empty.
-	enter_point: Option<ElementId>,
-	/// The next available element ID for new insertions.
-	next_element_id: ElementId,
-	/// State of layer 0 (the base layer containing all elements).
-	layer0: LayerState,
-	/// State of the upper layers (layers 1..N with progressively fewer elements).
-	layers: Vec<LayerState>,
-}
-
-impl KVValue for HnswState {
-	type KeyContext = ();
-
-	#[inline]
-	fn kv_encode_value(&self) -> Result<Vec<u8>> {
-		let mut val = Vec::new();
-		SerializeRevisioned::serialize_revisioned(self, &mut val)?;
-		Ok(val)
-	}
-
-	#[inline]
-	fn kv_decode_value(mut val: &[u8], _: ()) -> Result<Self> {
-		Ok(DeserializeRevisioned::deserialize_revisioned(&mut val)?)
-	}
-}
-
-/// Coalesced pending vector state for a single record.
-///
-/// This value is stored under the record-keyed `!hr` pending key. The key
-/// identifies the record; `doc_id` records the current graph document mapping
-/// when one already exists. `old_vectors` is the graph baseline to remove, and
-/// `new_vectors` is the latest desired indexed state for that record.
-#[revisioned(revision = 1)]
-pub(crate) struct HnswRecordPendingUpdate {
-	/// Existing internal document ID, if the record has already reached the graph.
-	doc_id: Option<DocId>,
-	/// Vectors currently represented in the graph for this pending record.
-	old_vectors: Vec<SerializedVector>,
-	/// Latest vectors that should represent the record after compaction.
-	new_vectors: Vec<SerializedVector>,
 }
 
 /// A pending vector update queued for later application to the HNSW graph.
@@ -132,7 +86,6 @@ pub(crate) enum VectorId {
 	RecordKey(Arc<RecordIdKey>),
 }
 
-impl_kv_value_revisioned!(HnswRecordPendingUpdate);
 impl_kv_value_revisioned!(VectorPendingUpdate);
 
 /// Core HNSW (Hierarchical Navigable Small World) graph implementation.
@@ -168,9 +121,6 @@ where
 	/// Heuristic strategy for neighbor selection.
 	heuristic: Heuristic,
 }
-
-/// Unique identifier for an element (vector) in the HNSW graph.
-pub(crate) type ElementId = u64;
 
 impl<L0, L> Hnsw<L0, L>
 where

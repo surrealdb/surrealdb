@@ -10,7 +10,6 @@ use tokio::sync::RwLock;
 use crate::catalog::{Distance, HnswParams, TableId, VectorType};
 use crate::ctx::{Context, FrozenContext};
 use crate::err::EngineError;
-use crate::idx::planner::ScanDirection;
 use crate::idx::planner::iterators::KnnIteratorResult;
 use crate::idx::trees::KnnCondFilter;
 use crate::idx::trees::hnsw::cache::VectorCache;
@@ -21,14 +20,16 @@ use crate::idx::trees::hnsw::{
 	ElementId, HnswRecordPendingUpdate, HnswSearch, VectorId, VectorPendingUpdate,
 };
 use crate::idx::trees::knn::KnnResultBuilder;
-use crate::idx::trees::vector::{DistanceExt as _, SerializedVector, SharedVector, Vector};
+use crate::idx::trees::vector::{
+	DistanceExt as _, SerializedVector, SharedVector, Vector, serialized_vector_from_value,
+};
 use crate::idx::{
 	IndexKeyBase, bump_compaction_generation, is_transaction_condition_not_met,
 	read_compaction_generation,
 };
 use crate::key::schema::HnswRecordPendingKey;
 use crate::key::{KVKeyDecode, KVValue, Key};
-use crate::kvs::{Transaction, Val};
+use crate::kvs::{Direction, Transaction, Val};
 use crate::val::{Number, RecordId, RecordIdKey, Value};
 
 /// Maximum number of pending key/value pairs captured by one compaction plan.
@@ -251,7 +252,7 @@ impl HnswIndex {
 		// Index the values
 		for value in content.into_iter().filter(|v| !v.is_nullish()) {
 			// Extract the vector
-			let vector = SerializedVector::try_from_value(self.vector_type, self.dim, value)?;
+			let vector = serialized_vector_from_value(self.vector_type, self.dim, value)?;
 			Vector::check_expected_dimension(vector.dimension(), self.dim)?;
 			// Insert the vector
 			vectors.push(vector);
@@ -371,7 +372,7 @@ impl HnswIndex {
 		count: &mut usize,
 	) -> Result<()> {
 		let rng = ikb.new_hp_range()?;
-		let mut cursor = tx.open_vals_cursor_raw(rng, ScanDirection::Forward, 0, None).await?;
+		let mut cursor = tx.open_vals_cursor_raw(rng, Direction::Forward, 0, None).await?;
 		loop {
 			let batch = cursor.next_batch(crate::kvs::NORMAL_BATCH_SIZE).await?;
 			if batch.is_empty() {
@@ -409,7 +410,7 @@ impl HnswIndex {
 		count: &mut usize,
 	) -> Result<()> {
 		let rng = ikb.new_hr_range()?;
-		let mut cursor = tx.open_vals_cursor_raw(rng, ScanDirection::Forward, 0, None).await?;
+		let mut cursor = tx.open_vals_cursor_raw(rng, Direction::Forward, 0, None).await?;
 		loop {
 			let batch = cursor.next_batch(crate::kvs::NORMAL_BATCH_SIZE).await?;
 			if batch.is_empty() {
@@ -797,7 +798,7 @@ impl HnswIndex {
 		F: FnMut(PendingOperation),
 	{
 		let rng = self.ikb.new_hp_range()?;
-		let mut cursor = tx.open_vals_cursor_raw(rng, ScanDirection::Forward, 0, None).await?;
+		let mut cursor = tx.open_vals_cursor_raw(rng, Direction::Forward, 0, None).await?;
 		let mut count = 0;
 		loop {
 			let batch = cursor.next_batch(crate::kvs::NORMAL_BATCH_SIZE).await?;
@@ -816,7 +817,7 @@ impl HnswIndex {
 		drop(cursor);
 
 		let rng = self.ikb.new_hr_range()?;
-		let mut cursor = tx.open_vals_cursor_raw(rng, ScanDirection::Forward, 0, None).await?;
+		let mut cursor = tx.open_vals_cursor_raw(rng, Direction::Forward, 0, None).await?;
 		loop {
 			let batch = cursor.next_batch(crate::kvs::NORMAL_BATCH_SIZE).await?;
 			if batch.is_empty() {

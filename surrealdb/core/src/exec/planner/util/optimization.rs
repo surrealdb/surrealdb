@@ -50,7 +50,7 @@ pub(crate) fn order_is_scan_compatible(order: Option<&crate::expr::order::Orderi
 pub(crate) fn index_covers_ordering(
 	index_ref: &crate::exec::index::access_path::IndexRef,
 	access: &crate::exec::index::access_path::BTreeAccess,
-	direction: crate::idx::planner::ScanDirection,
+	direction: crate::kvs::Direction,
 	order: &crate::expr::order::Ordering,
 ) -> bool {
 	use crate::exec::index::access_path::BTreeAccess;
@@ -120,8 +120,8 @@ pub(crate) fn index_covers_ordering(
 
 	// Build the index ordering (same as IndexScan::output_ordering())
 	let dir = match direction {
-		crate::idx::planner::ScanDirection::Forward => SortDirection::Asc,
-		crate::idx::planner::ScanDirection::Backward => SortDirection::Desc,
+		crate::kvs::Direction::Forward => SortDirection::Asc,
+		crate::kvs::Direction::Backward => SortDirection::Desc,
 	};
 	let mut cols: Vec<SortProperty> = ix_def
 		.cols

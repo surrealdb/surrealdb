@@ -373,7 +373,7 @@ async fn count_with_perm_fallback(
 	// Walk the cursor batch-by-batch, decoding records inline from
 	// borrowed bytes — no per-row `Vec<u8>` allocation.
 	let mut cursor = txn
-		.open_vals_cursor_raw(range, crate::idx::planner::ScanDirection::Forward, 0, version)
+		.open_vals_cursor_raw(range, crate::kvs::Direction::Forward, 0, version)
 		.await
 		.context("Failed to open scan cursor")?;
 	let mut count = 0usize;

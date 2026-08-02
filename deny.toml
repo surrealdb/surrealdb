@@ -183,6 +183,14 @@ name = "surrealdb-core"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
+name = "surrealdb-datastore"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-runtime"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
 name = "surrealdb-iam"
 allow = ["BUSL-1.1"]
 
@@ -288,6 +296,16 @@ license-files = []
 
 [[licenses.clarify]]
 name = "surrealdb-core"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-datastore"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-runtime"
 expression = "BUSL-1.1"
 license-files = []
 

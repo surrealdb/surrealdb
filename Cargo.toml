@@ -10,6 +10,7 @@ members = [
     "surrealdb/collections",
     "surrealdb/common",
     "surrealdb/core",
+    "surrealdb/datastore",
     "surrealdb/catalog",
     "surrealdb/expr",
     "surrealdb/gql",
@@ -28,6 +29,7 @@ members = [
     "surrealdb/parse-common",
     "surrealdb/parser",
     "surrealdb/rpc",
+    "surrealdb/runtime",
     "surrealdb/server",
     "surrealdb/sql",
     "surrealdb/strand",
@@ -75,6 +77,7 @@ surrealdb-sql = { version = "3.3.0-nightly", path = "surrealdb/sql" }
 surrealdb-strand = { version = "3.3.0-nightly", path = "surrealdb/strand", default-features = false }
 surrealdb-syn = { version = "3.3.0-nightly", path = "surrealdb/syn" }
 surrealdb-core = { version = "3.3.0-nightly", path = "surrealdb/core", default-features = false }
+surrealdb-datastore = { version = "3.3.0-nightly", path = "surrealdb/datastore" }
 surrealdb-server = { version = "3.3.0-nightly", path = "surrealdb/server", default-features = false }
 surrealdb-mcp = { version = "3.3.0-nightly", path = "surrealdb/mcp", default-features = false }
 surrealdb-types = { version = "3.3.0-nightly", path = "surrealdb/types" }
@@ -85,6 +88,7 @@ parser = { version = "3.3.0-nightly", package = "surrealdb-parser", path = "surr
 parse-common = { version = "3.3.0-nightly", package = "surrealdb-parse-common", path = "surrealdb/parse-common" }
 common = { version = "3.3.0-nightly", package = "surrealdb-common", path = "surrealdb/common" }
 surrealdb-cnf = { version = "3.3.0-nightly", path = "surrealdb/cnf" }
+surrealdb-runtime = { version = "3.3.0-nightly", path = "surrealdb/runtime" }
 surrealdb-rpc = { version = "3.3.0-nightly", path = "surrealdb/rpc" }
 surrealdb-iam = { version = "3.3.0-nightly", path = "surrealdb/iam" }
 surrealdb-observe = { version = "3.3.0-nightly", path = "surrealdb/observe" }

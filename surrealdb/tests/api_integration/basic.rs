@@ -9,7 +9,7 @@ use surrealdb::IndexedResults;
 use surrealdb::opt::auth::{Database, Namespace, Record as RecordAccess, Token};
 use surrealdb::opt::{Config, PatchOp, PatchOps, Resource};
 use surrealdb::types::{RecordId, RecordIdKey, SurrealValue, Value, array, object};
-use surrealdb_core::syn;
+use surrealdb_syn as syn;
 use surrealdb_types::Array;
 use ulid::Ulid;
 
@@ -891,7 +891,7 @@ pub async fn select_records_fetch(new_db: impl CreateDb) {
 
 	let check_fetch = |mut response: IndexedResults, expected: &str| {
 		let val: Value = response.take(0).unwrap();
-		let exp = surrealdb::parse::value(expected).unwrap();
+		let exp = surrealdb_syn::value(expected).unwrap();
 		assert_eq!(val, exp);
 	};
 
@@ -1538,7 +1538,7 @@ pub async fn changefeed(new_db: impl CreateDb) {
 	let changes = a.get("changes").unwrap().clone();
 	assert_eq!(
 		changes,
-		surrealdb::parse::value(
+		surrealdb_syn::value(
 			"[
         {
             define_table: {
@@ -1576,7 +1576,7 @@ pub async fn changefeed(new_db: impl CreateDb) {
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
 		changes,
-		surrealdb::parse::value(
+		surrealdb_syn::value(
 			"[
                  {
                       update: {
@@ -1600,7 +1600,7 @@ pub async fn changefeed(new_db: impl CreateDb) {
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
 		changes,
-		surrealdb::parse::value(
+		surrealdb_syn::value(
 			"[
                     {
                          update: {
@@ -1624,7 +1624,7 @@ pub async fn changefeed(new_db: impl CreateDb) {
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
 		changes,
-		surrealdb::parse::value(
+		surrealdb_syn::value(
 			"[
                     {
                         update: {
@@ -1648,7 +1648,7 @@ pub async fn changefeed(new_db: impl CreateDb) {
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
 		changes,
-		surrealdb::parse::value(
+		surrealdb_syn::value(
 			"[
         {
             update: {

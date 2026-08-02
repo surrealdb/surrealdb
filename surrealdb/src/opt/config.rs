@@ -2,8 +2,8 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use surrealdb_core::dbs::Capabilities as CoreCapabilities;
-use surrealdb_core::iam::Level;
+use surrealdb_iam::Level;
+use surrealdb_rpc::capabilities::Capabilities as CoreCapabilities;
 
 use crate::opt::capabilities::Capabilities;
 use crate::opt::websocket::WebsocketConfig;

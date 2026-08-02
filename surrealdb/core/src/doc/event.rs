@@ -5,26 +5,25 @@ use std::sync::Arc;
 use anyhow::{Result, bail};
 use reblessive::TreeStack;
 use reblessive::tree::Stk;
-use revision::revisioned;
+pub use surrealdb_datastore::values::event_queue::AsyncEventRecord;
 use surrealdb_kvs::TransactionType::Write;
 use surrealdb_kvs::timestamp::HlcTimeStamp;
-use surrealdb_strand::Strand;
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
-use crate::catalog::{EventDefinition, FromStored, Record, StoredEventDefinition};
+use crate::catalog::{EventDefinition, FromStored, StoredEventDefinition};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Session};
 use crate::doc::{Action, CursorDoc, Document, DocumentContext, Error};
 use crate::exe::FlowResultExt as _;
-use crate::iam::{Auth, AuthLimit};
+use crate::iam::AuthLimit;
 use crate::key::schema::{EventQueueKey, EventQueuePrefix};
-use crate::key::{KVKeyDecode, KVValue, impl_kv_value_revisioned};
+use crate::key::{KVKeyDecode, KVValue};
 use crate::kvs::sequences::Sequences;
 use crate::kvs::tasklease::LeaseHandler;
 use crate::kvs::{Datastore, NORMAL_BATCH_SIZE, Transaction, TransactionFactory, TransactionType};
-use crate::val::{RecordId, Value};
+use crate::val::Value;
 
 impl Document {
 	/// Processes any DEFINE EVENT clauses which
@@ -168,254 +167,215 @@ impl Document {
 		};
 		// The queued payload persists the stored (text-form) definition,
 		// rendered from the compiled one the context carries.
-		let event_record = AsyncEventRecord::new(&opt, &ctx, ev.stored(), cursor_doc)?;
+		let event_record = queue_async_event(&opt, &ctx, ev.stored(), cursor_doc)?;
 		tx.put_key(&key, &event_record).await?;
 		tx.trigger_async_event();
 		Ok(())
 	}
 }
 
-/// Persisted payload for processing DEFINE EVENT ... ASYNC.
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug)]
-pub struct AsyncEventRecord {
-	/// Number of processing attempts already recorded; incremented when a failed
-	/// run is requeued and compared against the event retry limit.
-	attempt: u16,
-	/// Async event nesting depth for this record (0 for top-level); used to enforce max_depth.
-	event_depth: u16,
-	/// Record id of the cursor document, if one exists.
-	rid: Option<Arc<RecordId>>,
-	/// Read-only snapshot of the cursor record captured at enqueue time.
-	cursor_record: Arc<Record>,
-	/// Whether computed fields were already evaluated in the snapshot.
-	fields_computed: bool,
-	/// Namespace name captured at enqueue time; re-resolved to validate the queue key.
-	ns: Arc<str>,
-	/// Database name captured at enqueue time; re-resolved to validate the queue key.
-	db: Arc<str>,
-	/// Whether permission checks should run when processing the event.
-	perms: bool,
-	/// Whether authentication is enabled for this event execution.
-	auth_enabled: bool,
-	/// Captured context values (session variables and event inputs like event, value, before,
-	/// after, and input) restored for processing.
-	values: HashMap<Strand, Arc<Value>>,
-	/// Auth context with any event-specific limits applied.
-	auth_with_limit: Arc<Auth>,
-	/// Snapshot of the event definition used for execution and retry policy.
-	event_definition: StoredEventDefinition,
+/// Build a queued event payload from the current cursor document and context.
+fn queue_async_event(
+	opt: &Options,
+	ctx: &FrozenContext,
+	event_definition: &StoredEventDefinition,
+	cursor_doc: &CursorDoc,
+) -> Result<AsyncEventRecord> {
+	let (ns, db) = opt.arc_ns_db()?;
+	// `async_event_depth` tracks the parent depth; refuse to enqueue above max.
+	if let Some(d) = opt.async_event_depth()
+		&& d >= event_definition.max_depth()
+	{
+		bail!(Error::EvReachMaxDepth(event_definition.name.to_string(), d))
+	}
+	Ok(AsyncEventRecord {
+		attempt: 0,
+		event_depth: opt.async_event_depth().map(|d| d + 1).unwrap_or(0),
+		rid: cursor_doc.rid.clone(),
+		cursor_record: cursor_doc.doc.clone().into_read_only(),
+		fields_computed: cursor_doc.fields_computed,
+		ns,
+		db,
+		perms: opt.perms,
+		auth_enabled: ctx.auth_enabled(),
+		values: ctx.collect_values(HashMap::new()),
+		auth_with_limit: Arc::clone(&opt.auth),
+		event_definition: event_definition.clone(),
+		// session: ctx.value("session").map(|v| Arc::new(v.clone())),
+	})
 }
 
-impl_kv_value_revisioned!(AsyncEventRecord);
+/// Rebuild the event context when processing a queued event.
+fn build_event_context(record: &AsyncEventRecord, ctx: &FrozenContext) -> FrozenContext {
+	let mut ctx = Context::new_child(ctx);
+	ctx.add_values(record.values.clone());
+	ctx.auth_enabled = record.auth_enabled;
+	ctx.freeze()
+}
 
-impl AsyncEventRecord {
-	/// Build a queued event payload from the current cursor document and context.
-	fn new(
-		opt: &Options,
-		ctx: &FrozenContext,
-		event_definition: &StoredEventDefinition,
-		cursor_doc: &CursorDoc,
-	) -> Result<Self> {
-		let (ns, db) = opt.arc_ns_db()?;
-		// `async_event_depth` tracks the parent depth; refuse to enqueue above max.
-		if let Some(d) = opt.async_event_depth()
-			&& d >= event_definition.max_depth()
-		{
-			bail!(Error::EvReachMaxDepth(event_definition.name.to_string(), d))
-		}
-		Ok(Self {
-			attempt: 0,
-			event_depth: opt.async_event_depth().map(|d| d + 1).unwrap_or(0),
-			rid: cursor_doc.rid.clone(),
-			cursor_record: cursor_doc.doc.clone().into_read_only(),
-			fields_computed: cursor_doc.fields_computed,
-			ns,
-			db,
-			perms: opt.perms,
-			auth_enabled: ctx.auth_enabled(),
-			values: ctx.collect_values(HashMap::new()),
-			auth_with_limit: Arc::clone(&opt.auth),
-			event_definition: event_definition.clone(),
-			// session: ctx.value("session").map(|v| Arc::new(v.clone())),
-		})
+/// Recreate options for queued event evaluation and validate ns/db IDs.
+async fn build_event_options(
+	record: &AsyncEventRecord,
+	tx: &Transaction,
+	parent_opts: &Options,
+	eq: &EventQueueKey<'_>,
+) -> Result<Options> {
+	// Resolve namespace/database IDs and ensure they still match the queued key.
+	let ns = tx.expect_ns_by_name(&record.ns).await?;
+	if ns.namespace_id != eq.ns {
+		bail!(Error::EvNamespaceMismatch(
+			record.event_definition.name.to_string(),
+			ns.name.to_string(),
+		));
 	}
-
-	/// Rebuild the event context when processing a queued event.
-	fn build_event_context(&self, ctx: &FrozenContext) -> FrozenContext {
-		let mut ctx = Context::new_child(ctx);
-		ctx.add_values(self.values.clone());
-		ctx.auth_enabled = self.auth_enabled;
-		ctx.freeze()
+	let db = tx.expect_db_by_name(&record.ns, &record.db).await?;
+	if db.database_id != eq.db {
+		bail!(Error::EvDatabaseMismatch(
+			record.event_definition.name.to_string(),
+			db.name.to_string(),
+		));
 	}
+	let opt = parent_opts.clone();
+	let opt = opt
+		.with_perms(record.perms)
+		.with_auth(Arc::clone(&record.auth_with_limit))
+		.with_async_event_depth(record.event_depth)
+		.with_ns(Some(Arc::clone(&record.ns)))
+		.with_db(Some(Arc::clone(&record.db)));
+	Ok(opt)
+}
 
-	/// Recreate options for queued event evaluation and validate ns/db IDs.
-	async fn build_event_options(
-		&self,
-		tx: &Transaction,
-		parent_opts: &Options,
-		eq: &EventQueueKey<'_>,
-	) -> Result<Options> {
-		// Resolve namespace/database IDs and ensure they still match the queued key.
-		let ns = tx.expect_ns_by_name(&self.ns).await?;
-		if ns.namespace_id != eq.ns {
-			bail!(Error::EvNamespaceMismatch(
-				self.event_definition.name.to_string(),
-				ns.name.to_string(),
-			));
-		}
-		let db = tx.expect_db_by_name(&self.ns, &self.db).await?;
-		if db.database_id != eq.db {
-			bail!(Error::EvDatabaseMismatch(
-				self.event_definition.name.to_string(),
-				db.name.to_string(),
-			));
-		}
-		let opt = parent_opts.clone();
-		let opt = opt
-			.with_perms(self.perms)
-			.with_auth(Arc::clone(&self.auth_with_limit))
-			.with_async_event_depth(self.event_depth)
-			.with_ns(Some(Arc::clone(&self.ns)))
-			.with_db(Some(Arc::clone(&self.db)));
-		Ok(opt)
+/// Recreate a cursor document from the persisted record snapshot.
+fn build_event_cursor_doc(record: &AsyncEventRecord) -> CursorDoc {
+	CursorDoc {
+		rid: record.rid.clone(),
+		ir: None,
+		doc: Arc::clone(&record.cursor_record).into(),
+		fields_computed: record.fields_computed,
 	}
+}
 
-	/// Recreate a cursor document from the persisted record snapshot.
-	fn build_event_cursor_doc(&self) -> CursorDoc {
-		CursorDoc {
-			rid: self.rid.clone(),
-			ir: None,
-			doc: Arc::clone(&self.cursor_record).into(),
-			fields_computed: self.fields_computed,
+/// Process a single batch of queued async events.
+/// Returns the number of events fetched (not necessarily successfully processed).
+pub async fn process_next_events_batch(ds: &Datastore, lh: Option<&LeaseHandler>) -> Result<usize> {
+	// Collect the next batch
+	let res = {
+		if let Some(lh) = lh.as_ref() {
+			lh.try_maintain_lease().await?;
 		}
-	}
+		let tx = ds.transaction(TransactionType::Read).await?;
+		let range = EventQueuePrefix {}.range()?;
+		// Read a bounded batch without holding a write transaction. The values stay
+		// encoded so that an entry this binary cannot decode — one written by a newer
+		// node, or a partial write — is skipped per entry rather than failing the
+		// batch. Nothing but a successful run deletes a queue entry, so failing the
+		// batch would stall the queue for good.
+		let res = catch!(tx, tx.scan_raw(range, NORMAL_BATCH_SIZE, 0, None).await);
+		tx.cancel().await?;
+		res
+	};
+	let count = res.len();
+	process_events_batch(ds, res, lh).await?;
+	Ok(count)
+}
 
-	/// Process a single batch of queued async events.
-	/// Returns the number of events fetched (not necessarily successfully processed).
-	pub async fn process_next_events_batch(
-		ds: &Datastore,
-		lh: Option<&LeaseHandler>,
-	) -> Result<usize> {
-		// Collect the next batch
-		let res = {
-			if let Some(lh) = lh.as_ref() {
-				lh.try_maintain_lease().await?;
+#[cfg(not(target_family = "wasm"))]
+async fn process_events_batch(
+	ds: &Datastore,
+	res: Vec<(Vec<u8>, Vec<u8>)>,
+	lh: Option<&LeaseHandler>,
+) -> Result<()> {
+	if res.is_empty() {
+		return Ok(());
+	}
+	// Best-effort parallel processing; queue order is not preserved.
+	// Limit in-flight event processing to avoid oversubscription.
+	let concurrency: usize = num_cpus::get().max(4);
+	// Cap workers by batch size and reuse one TreeStack per worker.
+	let workers = res.len().min(concurrency);
+	// Store the join handles
+	let mut join_handles = Vec::with_capacity(workers);
+	// Build a producer/consumer channel
+	let (sender, receiver) = async_channel::bounded::<AsyncEventContext>(workers);
+
+	// Start consumers
+	for _ in 0..workers {
+		let receiver = receiver.clone();
+		// Spawn a worker
+		let jh = spawn(async move {
+			// Reuse a stack per worker to amortize allocations.
+			let mut stack = TreeStack::new();
+			while let Ok(event_context) = receiver.recv().await {
+				stack
+					.enter(|stk| stk.run(|stk| event_context.run_event_checked(stk)))
+					.finish()
+					.await;
 			}
-			let tx = ds.transaction(TransactionType::Read).await?;
-			let range = EventQueuePrefix {}.range()?;
-			// Read a bounded batch without holding a write transaction. The values stay
-			// encoded so that an entry this binary cannot decode — one written by a newer
-			// node, or a partial write — is skipped per entry rather than failing the
-			// batch. Nothing but a successful run deletes a queue entry, so failing the
-			// batch would stall the queue for good.
-			let res = catch!(tx, tx.scan_raw(range, NORMAL_BATCH_SIZE, 0, None).await);
-			tx.cancel().await?;
-			res
+		});
+		join_handles.push(jh);
+	}
+
+	// Producer
+	for (k, v) in res {
+		let Some(v) = decode_queued(&k, &v) else {
+			continue;
 		};
-		let count = res.len();
-		Self::process_events_batch(ds, res, lh).await?;
-		Ok(count)
-	}
-
-	#[cfg(not(target_family = "wasm"))]
-	async fn process_events_batch(
-		ds: &Datastore,
-		res: Vec<(Vec<u8>, Vec<u8>)>,
-		lh: Option<&LeaseHandler>,
-	) -> Result<()> {
-		if res.is_empty() {
-			return Ok(());
-		}
-		// Best-effort parallel processing; queue order is not preserved.
-		// Limit in-flight event processing to avoid oversubscription.
-		let concurrency: usize = num_cpus::get().max(4);
-		// Cap workers by batch size and reuse one TreeStack per worker.
-		let workers = res.len().min(concurrency);
-		// Store the join handles
-		let mut join_handles = Vec::with_capacity(workers);
-		// Build a producer/consumer channel
-		let (sender, receiver) = async_channel::bounded::<AsyncEventContext>(workers);
-
-		// Start consumers
-		for _ in 0..workers {
-			let receiver = receiver.clone();
-			// Spawn a worker
-			let jh = spawn(async move {
-				// Reuse a stack per worker to amortize allocations.
-				let mut stack = TreeStack::new();
-				while let Ok(event_context) = receiver.recv().await {
-					stack
-						.enter(|stk| stk.run(|stk| event_context.run_event_checked(stk)))
-						.finish()
-						.await;
-				}
-			});
-			join_handles.push(jh);
-		}
-
-		// Producer
-		for (k, v) in res {
-			let Some(v) = Self::decode_queued(&k, &v) else {
-				continue;
-			};
-			match AsyncEventContext::new(ds, lh.cloned(), k, v) {
-				Ok(event_context) => {
-					sender.send(event_context).await?;
-				}
-				Err(e) => {
-					// Log and skip this entry so other events can still be processed.
-					error!("Unexpected Error while processing event: {e}");
-				}
-			};
-			if let Some(lh) = lh {
-				lh.try_maintain_lease().await?;
+		match AsyncEventContext::new(ds, lh.cloned(), k, v) {
+			Ok(event_context) => {
+				sender.send(event_context).await?;
 			}
-		}
-		sender.close();
-
-		// Wait for workers to be done
-		for jh in join_handles {
-			if let Err(e) = jh.await {
-				error!("Error while processing an event: {e}");
-			}
-		}
-		Ok(())
-	}
-
-	#[cfg(target_family = "wasm")]
-	async fn process_events_batch(
-		ds: &Datastore,
-		res: Vec<(Vec<u8>, Vec<u8>)>,
-		lh: Option<&LeaseHandler>,
-	) -> Result<()> {
-		let mut stack = TreeStack::new();
-		for (k, v) in res {
-			if let Some(lh) = lh {
-				lh.try_maintain_lease().await?;
-			}
-			let Some(v) = Self::decode_queued(&k, &v) else {
-				continue;
-			};
-			let event_context = AsyncEventContext::new(ds, lh.cloned(), k, v)?;
-			stack.enter(|stk| stk.run(|stk| event_context.run_event_checked(stk))).finish().await;
-		}
-		Ok(())
-	}
-
-	/// Decode one queued event, reporting and discarding an entry this binary
-	/// cannot read.
-	///
-	/// A queue entry is only removed once it has run, so an undecodable entry has
-	/// to be stepped over rather than propagated: returning an error here would
-	/// leave the entry in place and fail every later batch the same way.
-	fn decode_queued(k: &[u8], v: &[u8]) -> Option<AsyncEventRecord> {
-		match KVValue::kv_decode_value(v, ()) {
-			Ok(ev) => Some(ev),
 			Err(e) => {
-				error!("Skipping undecodable async event queue entry: {e} - Key: {k:?}");
-				None
+				// Log and skip this entry so other events can still be processed.
+				error!("Unexpected Error while processing event: {e}");
 			}
+		};
+		if let Some(lh) = lh {
+			lh.try_maintain_lease().await?;
+		}
+	}
+	sender.close();
+
+	// Wait for workers to be done
+	for jh in join_handles {
+		if let Err(e) = jh.await {
+			error!("Error while processing an event: {e}");
+		}
+	}
+	Ok(())
+}
+
+#[cfg(target_family = "wasm")]
+async fn process_events_batch(
+	ds: &Datastore,
+	res: Vec<(Vec<u8>, Vec<u8>)>,
+	lh: Option<&LeaseHandler>,
+) -> Result<()> {
+	let mut stack = TreeStack::new();
+	for (k, v) in res {
+		if let Some(lh) = lh {
+			lh.try_maintain_lease().await?;
+		}
+		let Some(v) = decode_queued(&k, &v) else {
+			continue;
+		};
+		let event_context = AsyncEventContext::new(ds, lh.cloned(), k, v)?;
+		stack.enter(|stk| stk.run(|stk| event_context.run_event_checked(stk))).finish().await;
+	}
+	Ok(())
+}
+
+/// Decode one queued event, reporting and discarding an entry this binary
+/// cannot read.
+///
+/// A queue entry is only removed once it has run, so an undecodable entry has
+/// to be stepped over rather than propagated: returning an error here would
+/// leave the entry in place and fail every later batch the same way.
+fn decode_queued(k: &[u8], v: &[u8]) -> Option<AsyncEventRecord> {
+	match KVValue::kv_decode_value(v, ()) {
+		Ok(ev) => Some(ev),
+		Err(e) => {
+			error!("Skipping undecodable async event queue entry: {e} - Key: {k:?}");
+			None
 		}
 	}
 }
@@ -556,9 +516,9 @@ impl AsyncEventContext {
 		eq: &EventQueueKey<'_>,
 		ev: &AsyncEventRecord,
 	) -> Result<()> {
-		let ctx = ev.build_event_context(ctx);
-		let opt = ev.build_event_options(&ctx.tx(), opt, eq).await?;
-		let doc = ev.build_event_cursor_doc();
+		let ctx = build_event_context(ev, ctx);
+		let opt = build_event_options(ev, &ctx.tx(), opt, eq).await?;
+		let doc = build_event_cursor_doc(ev);
 		// The queued payload persists the stored (text-form) definition;
 		// compile it once per dequeued event before execution.
 		let compiled = EventDefinition::from_stored(&ev.event_definition)?;

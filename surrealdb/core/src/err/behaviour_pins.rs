@@ -499,3 +499,73 @@ mod remove_if_exists {
 		assert!(err.contains("does not exist"), "unexpected error: {err}");
 	}
 }
+
+// ---------------------------------------------------------------------------
+// A storage failure is recognised whichever shape it arrives in
+//
+// A storage error reaches `anyhow` two ways: raised bare by the transactor, or
+// wrapped in `Error::Kvs` by a function typed on core's error. Nine call sites
+// once matched only the wrapped shape. That is the dangerous half - it compiles,
+// it reads correctly, and it turns a recognised condition into an unrecognised
+// one the moment a caller stops wrapping. These pin the consequence for the
+// conditions whose recognition changes what a statement does.
+// ---------------------------------------------------------------------------
+
+mod storage_error_shapes {
+	use super::*;
+	use crate::kvs::storage_error;
+
+	/// Both spellings of the same failure are recovered.
+	#[test]
+	fn either_shape_is_recovered() {
+		for err in [
+			anyhow!(KvsError::TransactionKeyAlreadyExists),
+			anyhow!(Error::Kvs(KvsError::TransactionKeyAlreadyExists)),
+		] {
+			assert!(
+				matches!(storage_error(&err), Some(KvsError::TransactionKeyAlreadyExists)),
+				"a key-already-exists failure went unrecognised; CREATE on an existing \
+				 record would surface a raw storage error instead of RecordExists"
+			);
+		}
+	}
+
+	/// `CREATE` on an existing record, and a doc-ID allocation race, both turn on
+	/// this variant being recognised.
+	#[test]
+	fn key_already_exists_is_recognised_bare() {
+		let err = anyhow!(KvsError::TransactionKeyAlreadyExists);
+		assert!(matches!(storage_error(&err), Some(KvsError::TransactionKeyAlreadyExists)));
+	}
+
+	/// A failed conditional write is what the index builder and the task lease
+	/// read to decide they lost a race, rather than that the store broke.
+	#[test]
+	fn condition_not_met_is_recognised_in_both_shapes() {
+		for err in [
+			anyhow!(KvsError::TransactionConditionNotMet),
+			anyhow!(Error::Kvs(KvsError::TransactionConditionNotMet)),
+		] {
+			assert!(matches!(storage_error(&err), Some(KvsError::TransactionConditionNotMet)));
+		}
+	}
+
+	/// A retryable conflict must be seen through either shape, or a retry loop
+	/// turns into a user-visible error.
+	#[test]
+	fn a_conflict_is_retryable_in_both_shapes() {
+		for err in [
+			anyhow!(KvsError::TransactionConflict("busy".to_string())),
+			anyhow!(Error::Kvs(KvsError::TransactionConflict("busy".to_string()))),
+		] {
+			assert!(crate::kvs::is_retryable_transaction_conflict(&err));
+		}
+	}
+
+	/// A foreign error is not mistaken for a storage failure.
+	#[test]
+	fn a_foreign_error_is_not_a_storage_failure() {
+		assert!(storage_error(&anyhow!(Foreign)).is_none());
+		assert!(!crate::kvs::is_retryable_transaction_conflict(&anyhow!(Foreign)));
+	}
+}

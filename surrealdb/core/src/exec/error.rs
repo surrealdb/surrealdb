@@ -84,14 +84,6 @@ pub(crate) enum Error {
 		message: String,
 	},
 
-	/// The wrong quantity or magnitude of arguments was given for the specified
-	/// method
-	#[error("Incorrect arguments for method {name}(). {message}")]
-	InvalidMethodArguments {
-		name: String,
-		message: String,
-	},
-
 	/// Invalid timeout
 	#[error("Invalid control flow statement, break or continue statement found outside of loop.")]
 	InvalidControlFlow,
@@ -420,9 +412,6 @@ impl LeafError for Error {
 				..
 			}
 			| Error::InvalidFunction {
-				..
-			}
-			| Error::InvalidMethodArguments {
 				..
 			}
 			| Error::InvalidControlFlow

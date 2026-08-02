@@ -15,7 +15,6 @@ use crate::expr::BinaryOperator;
 use crate::idx::docids::DocId;
 use crate::idx::entry::IndexEntryValue;
 use crate::idx::ft::fulltext::FullTextHitsIterator;
-use crate::idx::planner::ScanDirection;
 use crate::idx::planner::tree::IndexReference;
 use crate::idx::{IndexKeyBase, bump_compaction_generation, read_compaction_generation};
 use crate::key::schema::{
@@ -26,7 +25,7 @@ use crate::key::{
 	AnyRange, KVKey, KVKeyDecode, KVRange, KVSubspace, KeyRange, Resumable, TypedRange,
 };
 use crate::kvs::util::{scan, scan_keys, scanr, scanr_keys};
-use crate::kvs::{COUNT_BATCH_SIZE, Transaction};
+use crate::kvs::{COUNT_BATCH_SIZE, Direction, Transaction};
 use crate::val::{Array, RecordId, TableName, Value};
 
 pub(crate) type IteratorRef = usize;
@@ -1565,7 +1564,7 @@ impl IndexCountThingIterator {
 				// after the last key this one returned.
 				current_range = match batch.result.last() {
 					Some(last) if batch.next.is_some() => {
-						Some(range.resume_after(last, ScanDirection::Forward))
+						Some(range.resume_after(last, Direction::Forward))
 					}
 					_ => None,
 				};
@@ -1642,7 +1641,7 @@ impl IndexCountThingIterator {
 			// the last key this one returned.
 			current_range = match batch.result.last() {
 				Some(last) if batch.next.is_some() => {
-					Some(r.resume_after(last, ScanDirection::Forward))
+					Some(r.resume_after(last, Direction::Forward))
 				}
 				_ => None,
 			};

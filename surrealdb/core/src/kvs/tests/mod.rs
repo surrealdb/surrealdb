@@ -16,8 +16,12 @@ mod keyspace_test;
 mod reclaim_test;
 #[cfg(feature = "kv-mem")]
 mod rpc_session_test;
+#[cfg(feature = "kv-tikv")]
+mod sequences_tikv_test;
 #[cfg(feature = "kv-mem")]
 mod tx_cache_test;
+#[cfg(feature = "kv-mem")]
+mod tx_engine_test;
 mod tx_metrics;
 #[cfg(feature = "kv-mem")]
 mod write_guard_test;

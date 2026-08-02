@@ -181,7 +181,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -192,7 +192,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -990,7 +990,7 @@ dependencies = [
  "cap-primitives",
  "cap-std",
  "io-lifetimes",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1019,7 +1019,7 @@ dependencies = [
  "maybe-owned",
  "rustix",
  "rustix-linux-procfs",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
  "winx",
 ]
 
@@ -2052,7 +2052,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2305,7 +2305,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2396,7 +2396,7 @@ checksum = "0ce92ff622d6dadf7349484f42c93271a0d49b7cc4d466a936405bacbe10aa78"
 dependencies = [
  "cfg-if",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2518,7 +2518,7 @@ checksum = "94e7099f6313ecacbe1256e8ff9d617b75d1bcb16a6fddef94866d225a01a14a"
 dependencies = [
  "io-lifetimes",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3488,7 +3488,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2285ddfe3054097ef4b2fe909ef8c3bcd1ea52a8f0d274416caebeef39f04a65"
 dependencies = [
  "io-lifetimes",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4138,7 +4138,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5032,7 +5032,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27c6023962132f4b30eb4c172c91ce92d933da334c59c23cddee82358ddafb0b"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -5928,7 +5928,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5997,7 +5997,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6205,7 +6205,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b55fb86dfd3a2f5f76ea78310a88f96c4ea21a3031f8d212443d56123fd0521"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6502,7 +6502,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6754,8 +6754,12 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
+ "surrealdb-cnf",
  "surrealdb-core",
+ "surrealdb-iam",
  "surrealdb-kvs",
+ "surrealdb-rpc",
+ "surrealdb-syn",
  "surrealdb-types",
  "surrealdb-types-derive",
  "temp-dir",
@@ -6857,11 +6861,8 @@ dependencies = [
 name = "surrealdb-core"
 version = "3.3.0-nightly"
 dependencies = [
- "addr",
  "ahash 0.8.12",
- "ammonia",
  "anyhow",
- "arbitrary",
  "arc-swap",
  "argon2",
  "async-channel",
@@ -6869,7 +6870,6 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bcrypt",
- "blake3",
  "bytes",
  "chrono",
  "ciborium",
@@ -6884,7 +6884,6 @@ dependencies = [
  "flate2",
  "fst",
  "futures",
- "fuzzy-matcher",
  "geo",
  "geo-types",
  "getrandom 0.3.4",
@@ -6913,7 +6912,6 @@ dependencies = [
  "rayon",
  "reblessive",
  "regex",
- "regex-syntax",
  "reqwest 0.13.3",
  "revision",
  "ring",
@@ -6930,23 +6928,22 @@ dependencies = [
  "sha1",
  "sha2 0.10.9",
  "storekey",
- "strsim",
  "subtle",
  "surrealdb-ast",
  "surrealdb-catalog",
  "surrealdb-cnf",
  "surrealdb-collections",
  "surrealdb-common",
+ "surrealdb-datastore",
  "surrealdb-expr",
  "surrealdb-gql",
  "surrealdb-iam",
- "surrealdb-keyspace-macro",
  "surrealdb-kvs",
  "surrealdb-kvs-any",
  "surrealdb-observe",
  "surrealdb-parser",
- "surrealdb-protocol",
  "surrealdb-rpc",
+ "surrealdb-runtime",
  "surrealdb-sql",
  "surrealdb-strand",
  "surrealdb-syn",
@@ -6965,7 +6962,6 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
- "ulid",
  "url",
  "uuid",
  "vart",
@@ -6973,6 +6969,47 @@ dependencies = [
  "wasmtimer",
  "web-time",
  "wiremock",
+]
+
+[[package]]
+name = "surrealdb-datastore"
+version = "3.3.0-nightly"
+dependencies = [
+ "anyhow",
+ "blake3",
+ "bytes",
+ "chrono",
+ "jsonwebtoken",
+ "parking_lot",
+ "quick_cache",
+ "rand 0.9.4",
+ "revision",
+ "roaring",
+ "rstest",
+ "semver",
+ "serde",
+ "serde_json",
+ "storekey",
+ "surrealdb-catalog",
+ "surrealdb-cnf",
+ "surrealdb-collections",
+ "surrealdb-common",
+ "surrealdb-expr",
+ "surrealdb-iam",
+ "surrealdb-keyspace-macro",
+ "surrealdb-kvs",
+ "surrealdb-kvs-any",
+ "surrealdb-observe",
+ "surrealdb-rpc",
+ "surrealdb-strand",
+ "surrealdb-types",
+ "temp-dir",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+ "web-time",
 ]
 
 [[package]]
@@ -7078,6 +7115,7 @@ dependencies = [
  "rstest",
  "surrealdb-cnf",
  "surrealdb-common",
+ "surrealdb-types",
  "thiserror 2.0.18",
  "tracing",
  "web-time",
@@ -7284,16 +7322,11 @@ dependencies = [
  "bytes",
  "chrono",
  "flatbuffers",
- "futures",
  "geo",
- "prost 0.14.3",
- "prost-types",
  "rust_decimal",
  "semver",
  "serde",
  "serde_json",
- "tonic",
- "tonic-prost",
  "uuid",
 ]
 
@@ -7312,13 +7345,57 @@ name = "surrealdb-rpc"
 version = "3.3.0-nightly"
 dependencies = [
  "anyhow",
+ "arbitrary",
  "humantime",
+ "ipnet",
  "revision",
  "serde",
+ "surrealdb-cnf",
+ "surrealdb-common",
+ "surrealdb-iam",
  "surrealdb-types",
+ "test-log",
+ "thiserror 2.0.18",
  "tracing",
+ "url",
  "uuid",
  "web-time",
+]
+
+[[package]]
+name = "surrealdb-runtime"
+version = "3.3.0-nightly"
+dependencies = [
+ "addr",
+ "ammonia",
+ "anyhow",
+ "argon2",
+ "bcrypt",
+ "blake3",
+ "chrono",
+ "deunicode",
+ "fuzzy-matcher",
+ "geo",
+ "md-5 0.10.6",
+ "pbkdf2",
+ "rand 0.9.4",
+ "rand_core 0.6.4",
+ "regex",
+ "rust_decimal",
+ "scrypt",
+ "semver",
+ "sha1",
+ "sha2 0.10.9",
+ "strsim",
+ "surrealdb-cnf",
+ "surrealdb-common",
+ "surrealdb-expr",
+ "surrealdb-strand",
+ "surrealdb-syn",
+ "surrealdb-types",
+ "ulid",
+ "url",
+ "uuid",
 ]
 
 [[package]]
@@ -7773,7 +7850,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7802,7 +7879,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "230a1b821ccbd75b185820a1f1ff7b14d21da1e442e22c0863ea5f08771a8874"
 dependencies = [
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -9470,7 +9547,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -9802,7 +9879,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f3fd376f71958b862e7afb20cfe5a22830e1963462f3a17f49d82a6c1d1f42d"
 dependencies = [
  "bitflags",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

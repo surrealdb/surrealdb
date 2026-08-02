@@ -53,7 +53,7 @@ fn context_diagnostic() -> TokenStream {
 			note = "add `ctx = |k| ..` to this entry in `keyspace!` so the key supplies its \
 					`KVValue::KeyContext`"
 		)]
-		pub(crate) trait UnitKeyContext: KVValue<KeyContext = ()> {}
+		pub trait UnitKeyContext: KVValue<KeyContext = ()> {}
 
 		impl<T> UnitKeyContext for T where T: KVValue<KeyContext = ()> {}
 	}
@@ -76,7 +76,7 @@ fn enum_def(def: &ResolvedEnum) -> TokenStream {
 		#(#passthrough)*
 		#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 		#[repr(#repr)]
-		pub(crate) enum #ident {
+		pub enum #ident {
 			#(#names = #discriminants,)*
 		}
 
@@ -124,7 +124,7 @@ fn type_def(model: &Model, def: &TypeDef) -> TokenStream {
 		#[doc = #route_doc]
 		#(#attrs)*
 		#[derive(#(#derives),*)]
-		pub(crate) struct #name #lifetime {
+		pub struct #name #lifetime {
 			#(#fields)*
 		}
 	};
@@ -182,12 +182,12 @@ fn extension_bounds(model: &Model, def: &TypeDef) -> TokenStream {
 			///
 			/// This is the exclusive upper bound for a scan meant to cover one key
 			/// together with its extensions.
-			pub(crate) fn skip_extensions(&self) -> ::anyhow::Result<Key<'static>> {
+			pub fn skip_extensions(&self) -> ::anyhow::Result<Key<'static>> {
 				Ok(KVKey::encode_key(self)?.next_neighbour_expect())
 			}
 
 			/// The range covering this key and every key that extends it.
-			pub(crate) fn range_subtree(&self) -> ::anyhow::Result<#range_ty> {
+			pub fn range_subtree(&self) -> ::anyhow::Result<#range_ty> {
 				let start = KVKey::encode_key(self)?;
 				let end = start.clone().next_neighbour_expect();
 				let range = KeyRange { start, end };
@@ -417,7 +417,7 @@ fn constructor(def: &TypeDef) -> TokenStream {
 		impl #lifetime #name #lifetime {
 			#[doc = #doc]
 			#[allow(clippy::too_many_arguments)]
-			pub(crate) fn new(#(#params),*) -> Self {
+			pub fn new(#(#params),*) -> Self {
 				Self { #(#names,)* }
 			}
 		}
@@ -544,7 +544,7 @@ fn range_impls(model: &Model, def: &TypeDef) -> TokenStream {
 			///
 			/// Use this when entries live at the bound itself as well as under it;
 			/// [`Self::range`] starts one byte later and would skip the former.
-			pub(crate) fn range_subtree(&self) -> ::anyhow::Result<#range_ty> {
+			pub fn range_subtree(&self) -> ::anyhow::Result<#range_ty> {
 				let start = KVSubspace::encode_bound(self)?;
 				let end = start.clone().next_neighbour_expect();
 				let range = KeyRange { start, end };
@@ -557,7 +557,7 @@ fn range_impls(model: &Model, def: &TypeDef) -> TokenStream {
 			/// a prefix of longer keys; appending `0xff` is not, because
 			/// `0xff` is an ordinary byte in this encoding and
 			/// `bytes ++ 0xff ++ 0x00` would sort after it.
-			pub(crate) fn skip_extensions(&self) -> ::anyhow::Result<Key<'static>> {
+			pub fn skip_extensions(&self) -> ::anyhow::Result<Key<'static>> {
 				Ok(KVSubspace::encode_bound(self)?.next_neighbour_expect())
 			}
 		}
@@ -582,7 +582,7 @@ fn range_impls(model: &Model, def: &TypeDef) -> TokenStream {
 			/// `Key::next_neighbour`, so an inclusive end covers every key that
 			/// extends it.
 			#[allow(clippy::ptr_arg)]
-			pub(crate) fn range_where #method_lt (
+			pub fn range_where #method_lt (
 				&self,
 				bounds: impl ::std::ops::RangeBounds<#ty>,
 			) -> ::anyhow::Result<#range_ty> {
@@ -640,7 +640,7 @@ fn range_impls(model: &Model, def: &TypeDef) -> TokenStream {
 			/// excluded; the end is the successor of the bound's last non-`0xFF`
 			/// byte. Guaranteed to exist by the schema check, so this cannot fail
 			/// on the bound arithmetic.
-			pub(crate) fn range(&self) -> ::anyhow::Result<#range_ty> {
+			pub fn range(&self) -> ::anyhow::Result<#range_ty> {
 				#range_body
 			}
 
@@ -823,7 +823,7 @@ fn builders(model: &Model) -> TokenStream {
 			#(#cfgs)*
 			#[doc = #doc]
 			#[allow(clippy::too_many_arguments)]
-			pub(crate) fn #method #method_lt (&self, #(#params),*) -> #target #target_lt {
+			pub fn #method #method_lt (&self, #(#params),*) -> #target #target_lt {
 				#target { #(#inherited,)* #(#own,)* }
 			}
 		});
@@ -866,13 +866,13 @@ pub fn key_kind(model: &Model) -> TokenStream {
 	quote! {
 		/// Every kind of key the keyspace stores.
 		#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-		pub(crate) enum KeyKind {
+		pub enum KeyKind {
 			#(#variants)*
 		}
 
 		impl KeyKind {
 			/// The key's route in the keyspace map notation.
-			pub(crate) fn route(self) -> &'static str {
+			pub fn route(self) -> &'static str {
 				match self {
 					#(#arms)*
 				}

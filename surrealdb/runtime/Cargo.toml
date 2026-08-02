@@ -1,0 +1,54 @@
+[package]
+name = "surrealdb-runtime"
+publish = true
+readme = "README.md"
+documentation = "https://docs.rs/surrealdb-runtime/"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+common.workspace = true
+surrealdb-cnf.workspace = true
+surrealdb-expr.workspace = true
+surrealdb-strand.workspace = true
+surrealdb-syn.workspace = true
+rand_core.workspace = true
+regex.workspace = true
+surrealdb-types.workspace = true
+
+addr.workspace = true
+ammonia.workspace = true
+argon2.workspace = true
+blake3.workspace = true
+bcrypt.workspace = true
+chrono = { workspace = true, features = ["clock", "std"] }
+deunicode.workspace = true
+fuzzy-matcher.workspace = true
+geo = { workspace = true, features = ["use-serde"] }
+md-5.workspace = true
+pbkdf2 = { workspace = true, features = ["simple"] }
+rand.workspace = true
+rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
+scrypt.workspace = true
+semver = { workspace = true, features = ["serde"] }
+sha1.workspace = true
+sha2.workspace = true
+strsim.workspace = true
+ulid = { workspace = true, features = ["serde"] }
+url.workspace = true
+uuid = { workspace = true }
+
+[package.metadata.cargo-machete]
+# md-5 is imported as md5::
+ignored = ["md-5"]
+
+[lints]
+workspace = true

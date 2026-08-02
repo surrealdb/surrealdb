@@ -921,8 +921,9 @@ pub trait RpcProtocol {
 		// - Revoke the old refresh token
 		// - Create new access and refresh tokens
 		// - Update the session with the new authentication state
-		let out: Result<PublicValue> =
-			token.refresh(self.kvs(), &mut session).await.map(Token::into_value);
+		let out: Result<PublicValue> = crate::iam::token::refresh(token, self.kvs(), &mut session)
+			.await
+			.map(Token::into_value);
 		let principal_changed = snapshot.differs_from(&session);
 		drop(session);
 		if principal_changed {
@@ -983,7 +984,9 @@ pub trait RpcProtocol {
 		};
 		// Revoke the refresh token by removing the grant record from the database.
 		// This prevents the refresh token from being used to obtain new access tokens.
-		token.revoke_refresh_token(self.kvs()).await.map_err(types_error_from_anyhow)?;
+		crate::iam::token::revoke_refresh_token(token, self.kvs())
+			.await
+			.map_err(types_error_from_anyhow)?;
 		// Return nothing on success
 		Ok(DbResult::Other(PublicValue::None))
 	}

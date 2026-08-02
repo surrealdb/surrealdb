@@ -11,7 +11,7 @@ use crate::catalog::IndexDefinition;
 use crate::expr::BinaryOperator;
 use crate::expr::operator::MatchesOperator;
 use crate::expr::with::With;
-use crate::idx::planner::ScanDirection;
+use crate::kvs::Direction;
 use crate::val::{Number, Range, Value};
 
 /// A reference to an index definition with its position in the schema.
@@ -91,7 +91,7 @@ pub enum AccessPath {
 	BTreeScan {
 		index_ref: IndexRef,
 		access: BTreeAccess,
-		direction: ScanDirection,
+		direction: Direction,
 	},
 
 	/// Full-text search using MATCHES operator.
@@ -305,7 +305,7 @@ impl BTreeAccess {
 pub fn select_access_path(
 	candidates: Vec<IndexCandidate>,
 	with_hints: Option<&With>,
-	direction: ScanDirection,
+	direction: Direction,
 ) -> AccessPath {
 	// WITH NOINDEX forces table scan
 	if matches!(with_hints, Some(With::NoIndex)) {

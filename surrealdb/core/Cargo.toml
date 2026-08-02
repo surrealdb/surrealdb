@@ -44,15 +44,12 @@ kv-surrealkv = [
 scripting = ["dep:js", "surrealdb-expr/scripting"]
 http = ["dep:reqwest"]
 ml = ["dep:surrealml-core", "surrealdb-expr/ml"]
-jwks = ["dep:reqwest"]
+jwks = ["dep:reqwest", "surrealdb-datastore/jwks"]
 surrealism = ["dep:surrealism-runtime", "dep:async-trait", "surrealdb-sql/surrealism", "surrealdb-syn/surrealism", "surrealdb-expr/surrealism"]
 allocator = ["dep:jemallocator", "dep:mimalloc"]
 arbitrary = [
     "surrealdb-expr/arbitrary",
     "surrealdb-catalog/arbitrary",
-    "dep:arbitrary",
-    "dep:regex-syntax",
-    "regex-syntax/arbitrary",
     "chrono/arbitrary",
     "rust_decimal/rust-fuzz",
     "geo-types/arbitrary",
@@ -62,6 +59,7 @@ arbitrary = [
     "surrealdb-sql/arbitrary",
     "surrealdb-strand/arbitrary",
     "surrealdb-iam/arbitrary",
+    "surrealdb-rpc/arbitrary",
 ]
 allocation-tracking = []
 
@@ -78,6 +76,7 @@ targets = []
 
 [dependencies]
 surrealdb-catalog = { workspace = true }
+surrealdb-datastore = { workspace = true }
 surrealdb-expr = { workspace = true }
 surrealdb-gql = { workspace = true, optional = true }
 surrealdb-sql = { workspace = true }
@@ -85,6 +84,7 @@ surrealdb-strand = { workspace = true }
 surrealdb-syn = { workspace = true }
 surrealdb-cnf = { workspace = true }
 surrealdb-rpc = { workspace = true }
+surrealdb-runtime = { workspace = true }
 surrealdb-iam = { workspace = true }
 surrealdb-observe = { workspace = true }
 surrealdb-kvs = { workspace = true }
@@ -109,16 +109,13 @@ js = { workspace = true, features = [
 ], optional = true }
 reblessive = { workspace = true, features = ["tree"] }
 revision = { workspace = true }
-surrealdb-keyspace-macro.workspace = true
 storekey.workspace = true
 surrealdb-types = { workspace = true }
 surrealdb-collections = { workspace = true }
 vart.workspace = true
 
 # Other crates
-addr.workspace = true
 ahash.workspace = true
-ammonia.workspace = true
 anyhow.workspace = true
 argon2.workspace = true
 async-channel.workspace = true
@@ -127,7 +124,6 @@ async-graphql = { workspace = true, default-features = false, features = [
 ], optional = true }
 base64.workspace = true
 bcrypt.workspace = true
-blake3.workspace = true
 bytes.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 ciborium.workspace = true
@@ -135,7 +131,6 @@ dashmap.workspace = true
 deunicode.workspace = true
 fst.workspace = true
 futures.workspace = true
-fuzzy-matcher.workspace = true
 geo = { workspace = true, features = ["use-serde"] }
 geo-types = { workspace = true }
 http.workspace = true
@@ -165,19 +160,15 @@ serde = { workspace = true, features = ["derive", "rc"] }
 serde_json.workspace = true
 sha1.workspace = true
 sha2.workspace = true
-strsim.workspace = true
 subtle.workspace = true
 sysinfo.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 web-time.workspace = true
-ulid = { workspace = true, features = ["serde"] }
 url.workspace = true
 
 # Other optional crates
-arbitrary = { workspace = true, features = ["derive"], optional = true }
 ext-sort = { workspace = true, optional = true }
-regex-syntax = { workspace = true, optional = true }
 reqwest = { workspace = true, default-features = false, features = [
     "http2",
     "json",
@@ -194,7 +185,6 @@ mime = "0.3.17"
 getrandom = { workspace = true, features = ["wasm_js"] }
 jsonwebtoken = { workspace = true, features = ["rust_crypto"] }
 ring = { workspace = true, features = ["wasm32_unknown_unknown_js"] }
-surrealdb-protocol = { workspace = true, features = ["proto", "flatbuffers"] }
 tokio = { workspace = true, default-features = false, features = [
     "rt",
     "sync",
@@ -224,7 +214,6 @@ jsonwebtoken = { workspace = true, features = ["aws_lc_rs"] }
 # since these pull an HTTP/TLS stack. `tls-webpki-roots` gives object_store's
 # HTTP client a rustls backend regardless of what else configures reqwest.
 object_store = { workspace = true, features = ["aws", "gcp", "azure", "tls-webpki-roots"] }
-surrealdb-protocol = { workspace = true, features = ["proto", "flatbuffers", "rpc"] }
 tokio = { workspace = true, default-features = false, features = [
     "macros",
     "io-util",
@@ -248,6 +237,7 @@ mimalloc = { workspace = true, optional = true }
 
 # DEVELOPMENT DEPENDENCIES
 [dev-dependencies]
+surrealdb-datastore = { workspace = true, features = ["test-hooks"] }
 surrealdb-kvs = { workspace = true, features = ["test-inc-timestamp"] }
 ast = { workspace = true }
 parser = { workspace = true }
@@ -266,8 +256,8 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 wiremock.workspace = true
 
 [package.metadata.cargo-machete]
-# md-5 crate is imported as md5::, regex-syntax is optional (tied to arbitrary feature)
-ignored = ["md-5", "regex-syntax"]
+# md-5 crate is imported as md5::
+ignored = ["md-5"]
 
 [lints]
 workspace = true
@@ -295,6 +285,30 @@ harness = false
 name = "rocksdb_cursor"
 harness = false
 required-features = ["kv-rocksdb"]
+
+[[bench]]
+name = "parser"
+harness = false
+
+[[bench]]
+name = "processor"
+harness = false
+
+[[bench]]
+name = "live_query_scaling"
+harness = false
+
+[[bench]]
+name = "hash_btree"
+harness = false
+
+[[bench]]
+name = "index_ann"
+harness = false
+
+[[bench]]
+name = "hashset_vs_vector"
+harness = false
 
 [[bench]]
 name = "import_load"

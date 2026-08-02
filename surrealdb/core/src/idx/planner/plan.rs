@@ -14,7 +14,8 @@ use crate::expr::{BinaryOperator, Expr, Idiom, Part};
 use crate::idx::planner::tree::{
 	CompoundIndexes, GroupRef, IdiomCol, IdiomPosition, IndexReference, Node, WithIndexes,
 };
-use crate::idx::planner::{GrantedPermission, RecordStrategy, ScanDirection, StatementContext};
+use crate::idx::planner::{GrantedPermission, RecordStrategy, StatementContext};
+use crate::kvs::Direction;
 use crate::val::{Array, Number, Object, Value};
 
 /// The `PlanBuilder` struct represents a builder for constructing query plans.
@@ -157,7 +158,7 @@ impl PlanBuilder {
 						Self::check_range_scan_direction(io.op()),
 					)
 				} else {
-					(false, ScanDirection::Forward)
+					(false, Direction::Forward)
 				};
 				// Return the plan
 				return Ok(Plan::SingleIndexRange(
@@ -246,11 +247,11 @@ impl PlanBuilder {
 		Ok(Plan::TableIterator(reason, rs, sc))
 	}
 
-	fn check_range_scan_direction(op: &IndexOperator) -> ScanDirection {
+	fn check_range_scan_direction(op: &IndexOperator) -> Direction {
 		if matches!(op, IndexOperator::Order(true)) {
-			return ScanDirection::Backward;
+			return Direction::Backward;
 		}
-		ScanDirection::Forward
+		Direction::Forward
 	}
 
 	/// Check if a compound index can be used.
@@ -537,7 +538,7 @@ pub(super) enum Plan {
 	/// Table full scan
 	/// 1: An optional reason
 	/// 2: A record strategy
-	TableIterator(Option<String>, RecordStrategy, ScanDirection),
+	TableIterator(Option<String>, RecordStrategy, Direction),
 	/// Index scan filtered on records matching a given expression
 	/// 1: The optional expression associated with the index
 	/// 2: A record strategy
@@ -557,7 +558,7 @@ pub(super) enum Plan {
 	/// 3. A record strategy
 	/// 4. The scan direction
 	/// 5. True if it matches an order option
-	SingleIndexRange(IndexReference, UnionRangeQueryBuilder, RecordStrategy, ScanDirection, bool),
+	SingleIndexRange(IndexReference, UnionRangeQueryBuilder, RecordStrategy, Direction, bool),
 }
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]

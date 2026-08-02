@@ -353,7 +353,7 @@ pub(crate) async fn execute_record_lookup(
 				range,
 				version,
 				effective_storage_limit,
-				crate::idx::planner::ScanDirection::Forward,
+				crate::kvs::Direction::Forward,
 				pre_skip,
 				limit_hint,
 				pre_decode_filter,

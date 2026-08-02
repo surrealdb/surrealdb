@@ -1,115 +1,9 @@
-use std::collections::HashMap;
-
-use anyhow::Result;
-use parking_lot::Mutex;
-
-use crate::catalog::{DatabaseId, NamespaceId, StoredTableDefinition};
-use crate::cf::TableMutations;
-use crate::doc::CursorRecord;
-use crate::key::KVValue;
-use crate::val::{RecordId, TableName};
-
-// PreparedWrite is a tuple of (namespace, database, table, serialized table mutations).
-// The timestamp will be provided at commit time via Transaction::current_timestamp().
-type PreparedWrite = (NamespaceId, DatabaseId, TableName, crate::kvs::Val);
-
-#[derive(Hash, Eq, PartialEq, Debug)]
-pub struct ChangeKey {
-	pub ns: NamespaceId,
-	pub db: DatabaseId,
-	pub tb: TableName,
-}
-
-/// Changefeed is a per-transaction buffer of table mutations that are
-/// persisted to the database at commit time.
-pub struct Changefeed {
-	/// The buffer of table mutations to be written to the database.
-	buffer: Mutex<HashMap<ChangeKey, TableMutations>>,
-}
-
-impl Changefeed {
-	/// Create a new changefeed buffer
-	pub(crate) fn new() -> Self {
-		Self {
-			buffer: Mutex::new(HashMap::new()),
-		}
-	}
-
-	/// Record a table definition modification
-	pub(crate) fn buffer_table_change(
-		&self,
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &TableName,
-		dt: &StoredTableDefinition,
-	) {
-		// Acquire the buffer lock
-		let mut buffer = self.buffer.lock();
-		// Get or create the entry for the change key and push the table change
-		buffer
-			.entry(ChangeKey {
-				ns,
-				db,
-				tb: tb.clone(),
-			})
-			.or_insert_with(|| TableMutations::new(tb.clone()))
-			.push_table_change(dt.to_owned());
-	}
-
-	/// Record a record modification or deletion
-	#[expect(clippy::too_many_arguments)]
-	pub(crate) fn buffer_record_change(
-		&self,
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &TableName,
-		id: RecordId,
-		previous: CursorRecord,
-		current: CursorRecord,
-		store_difference: bool,
-	) {
-		// Acquire the buffer lock
-		let mut buffer = self.buffer.lock();
-		// Get or create the entry for the change key and push the record change
-		buffer
-			.entry(ChangeKey {
-				ns,
-				db,
-				tb: tb.clone(),
-			})
-			.or_insert_with(|| TableMutations::new(tb.clone()))
-			.push_record_change(id, previous, current, store_difference);
-	}
-
-	// get returns all the mutations buffered for this transaction.
-	// The timestamp will be provided at commit time.
-	pub(crate) fn changes(&self) -> Result<Vec<PreparedWrite>> {
-		// Acquire the buffer lock
-		let buffer = self.buffer.lock();
-		// For zero-length changes, return early
-		if buffer.is_empty() {
-			return Ok(Vec::new());
-		}
-		// Create a new change result set
-		let mut res = Vec::with_capacity(buffer.len());
-		// Iterate over the buffered mutations
-		for (key, mutations) in buffer.iter() {
-			// Encode the value
-			let value = mutations.kv_encode_value()?;
-			// Push the prepared write to the result (timestamp will be added at commit time)
-			res.push((key.ns, key.db, key.tb.clone(), value));
-		}
-		// Return the prepared writes
-		Ok(res)
-	}
-
-	// get returns all the mutations buffered for this transaction.
-	// The timestamp will be provided at commit time.
-	pub(crate) fn clear(&self) {
-		// Clear the internal buffer
-		self.buffer.lock().clear();
-	}
-}
+//! The change feed's write path, end to end.
+//!
+//! Buffering a record change and flushing it at commit both happen inside the
+//! transaction, one crate down. What these cover is the property that spans
+//! both crates: a change buffered here is readable through [`super::read`]
+//! afterwards, in commit order.
 
 #[cfg(test)]
 mod tests {
@@ -119,7 +13,7 @@ mod tests {
 
 	use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 	use crate::catalog::{
-		DatabaseDefinition, DatabaseId, FromStored, NamespaceDefinition, NamespaceId,
+		DatabaseDefinition, DatabaseId, FromStored, NamespaceDefinition, NamespaceId, Record,
 		StoredTableDefinition, TableDefinition, TableId,
 	};
 	use crate::cf::ChangeSet;
@@ -160,8 +54,8 @@ mod tests {
 			tb.database_id,
 			&tb_name,
 			&record_a,
-			previous.clone().into(),
-			value_a.into(),
+			Record::new(previous.clone()).into_read_only(),
+			Record::new(value_a).into_read_only(),
 			DONT_STORE_PREVIOUS,
 		);
 		tx1.commit().await.unwrap();
@@ -177,8 +71,8 @@ mod tests {
 			tb.database_id,
 			&tb_name,
 			&record_c,
-			previous.clone().into(),
-			value_c.into(),
+			Record::new(previous.clone()).into_read_only(),
+			Record::new(value_c).into_read_only(),
 			DONT_STORE_PREVIOUS,
 		);
 		tx2.commit().await.unwrap();
@@ -194,8 +88,8 @@ mod tests {
 			tb.database_id,
 			&tb_name,
 			&record_b,
-			previous.clone().into(),
-			value_b.into(),
+			Record::new(previous.clone()).into_read_only(),
+			Record::new(value_b).into_read_only(),
 			DONT_STORE_PREVIOUS,
 		);
 		let record_c2 = RecordId {
@@ -208,8 +102,8 @@ mod tests {
 			tb.database_id,
 			&tb_name,
 			&record_c2,
-			previous.clone().into(),
-			value_c2.into(),
+			Record::new(previous.clone()).into_read_only(),
+			Record::new(value_c2).into_read_only(),
 			DONT_STORE_PREVIOUS,
 		);
 		tx3.commit().await.unwrap();
@@ -312,14 +206,14 @@ mod tests {
 			key: RecordIdKey::String(id.into()),
 		};
 		let value_a: Value = "a".into();
-		let previous = Value::None.into();
+		let previous = Value::None;
 		tx.changefeed_buffer_record_change(
 			tb.namespace_id,
 			tb.database_id,
 			&tb_name,
 			&record_id,
-			previous,
-			value_a.into(),
+			Record::new(previous).into_read_only(),
+			Record::new(value_a).into_read_only(),
 			DONT_STORE_PREVIOUS,
 		);
 		tx.commit().await.unwrap();

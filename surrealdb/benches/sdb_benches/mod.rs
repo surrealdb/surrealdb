@@ -5,6 +5,7 @@ use std::sync::{LazyLock, OnceLock};
 use criterion::Criterion;
 use tokio::runtime::Runtime;
 
+#[cfg(any(feature = "kv-mem", feature = "kv-rocksdb", feature = "kv-surrealkv"))]
 mod lib;
 mod sdk;
 
@@ -38,6 +39,7 @@ pub(super) fn benchmark_group(c: &mut Criterion, target: String) {
 	);
 
 	match &target {
+		#[cfg(any(feature = "kv-mem", feature = "kv-rocksdb", feature = "kv-surrealkv"))]
 		t if t.starts_with("lib") => lib::benchmark_group(c, target),
 		t if t.starts_with("sdk") => sdk::benchmark_group(c, target),
 		t => panic!("Target '{}' not supported.", t),

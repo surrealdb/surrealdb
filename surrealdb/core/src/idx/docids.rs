@@ -37,19 +37,17 @@
 use std::borrow::Cow;
 
 use anyhow::Result;
+// A doc-ID is a stored value and a key field, so the number is declared below
+// this layer; the allocator that hands them out stays here.
+pub use surrealdb_datastore::values::ids::DocId;
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::FrozenContext;
-use crate::err::Error;
 use crate::key::schema::{
 	DocKeyKey, DocKeyPrefix, DocLookupKey, DocLookupPrefix, DocPendingPrefix,
 };
-use crate::kvs::{Error as KvsError, Transaction};
+use crate::kvs::{Error as KvsError, Transaction, storage_error};
 use crate::val::{RecordIdKey, TableName};
-
-/// A compact, internal document identifier for a record within a table's shared
-/// doc-ID space. Allocated monotonically and never reused.
-pub type DocId = u64;
 
 /// The table-level document-ID allocator and record ↔ doc-ID mapping store.
 ///
@@ -142,12 +140,7 @@ impl TableDocIds {
 			// one. (Under snapshot isolation the primary defence is the
 			// commit-time conflict above plus the caller's retry; this branch
 			// covers the mapping becoming visible between our two reads.)
-			Err(e)
-				if matches!(
-					e.downcast_ref::<Error>(),
-					Some(Error::Kvs(KvsError::TransactionKeyAlreadyExists))
-				) =>
-			{
+			Err(e) if matches!(storage_error(&e), Some(KvsError::TransactionKeyAlreadyExists)) => {
 				tx.get_key(&di, None).await?.ok_or_else(|| {
 					anyhow::anyhow!("doc-ID mapping missing after a conditional-create conflict")
 				})
@@ -225,12 +218,7 @@ impl TableDocIds {
 				Ok(true)
 			}
 			// The record already re-acquired a (fresh) id: leave it in place.
-			Err(e)
-				if matches!(
-					e.downcast_ref::<Error>(),
-					Some(Error::Kvs(KvsError::TransactionKeyAlreadyExists))
-				) =>
-			{
+			Err(e) if matches!(storage_error(&e), Some(KvsError::TransactionKeyAlreadyExists)) => {
 				Ok(false)
 			}
 			Err(e) => Err(e),

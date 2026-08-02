@@ -38,35 +38,21 @@ mod tests;
 
 use std::time::Duration;
 
-pub(crate) use builder::{IndexBuilder, IndexMutation};
-pub(crate) use replay::{Appending, PrimaryAppending, PrimaryAppendingTicket};
-pub(crate) use state::{
+pub(crate) use builder::{AbortLocalBuild, CleanUncommittedBuild, IndexBuilder, IndexMutation};
+pub(crate) use state::{filter_online_indexes, index_building_info, retire_durable_index};
+// Only the frozen-fixture corpus names this directly; the builder reaches a
+// primary appending through its ticket.
+#[cfg(test)]
+pub(crate) use surrealdb_datastore::values::index_build::PrimaryAppending;
+// What a build persists is part of the keyspace, so it is declared below this
+// layer; the coordination protocol above reads it from there.
+pub(crate) use surrealdb_datastore::values::index_build::{
+	Appending, AppendingId, BatchId, BuildGeneration, BuildTicket, BuildTicketMutationSeq,
 	IndexBuildPhase, IndexBuildReportStatus, IndexBuildReservation, IndexBuildState,
-	filter_online_indexes, index_building_info, retire_durable_index,
+	PrimaryAppendingTicket,
 };
 
 use crate::kvs::tx::IndexBuildReservationRelease;
-
-/// Monotonically increasing build epoch for a table index.
-///
-/// Durable appendings, primary appending sentinels, and reservations all carry
-/// this value so a replacement build never consumes work left behind by an
-/// older build attempt.
-pub(crate) type BuildGeneration = u64;
-/// Per-generation ordering token assigned to a writer admitted during a build.
-///
-/// A single user transaction reserves one `BuildTicket` per index it writes to;
-/// every indexed mutation in that transaction shares the ticket and is
-/// disambiguated by `BuildTicketMutationSeq`.
-pub(crate) type BuildTicket = u64;
-/// Per-ticket index of an admitted mutation, distinguishing the different
-/// `!bg` entries that share the same `(generation, ticket)` reservation.
-///
-/// The first mutation in a user transaction's batch uses `0`; subsequent
-/// mutations use `1`, `2`, ... A `u32` gives a per-user-transaction cap of
-/// ~4.3B mutations per index, which is well above any realistic single-txn
-/// indexed write count.
-pub(crate) type BuildTicketMutationSeq = u32;
 
 /// How long a writer admission reservation is considered owned by the writer.
 const BUILD_RESERVATION_TTL_SECS: i64 = 30;
@@ -134,8 +120,6 @@ pub(crate) enum ConsumeResult {
 	Retired,
 }
 
-pub(crate) type BatchId = u32;
-pub(crate) type AppendingId = u32;
 const LEGACY_BATCH_ID: BatchId = 0;
 
 enum ExistingPrimaryAppending {

@@ -11,7 +11,6 @@ use crate::catalog::providers::{
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::err::Error;
 use crate::exe::FlowResultExt as _;
 use crate::exec::Error as ExecError;
 use crate::expr::statements::access::{
@@ -22,6 +21,7 @@ use crate::expr::statements::access::{
 use crate::expr::{Base, ControlFlow, FlowResult};
 use crate::iam::{Action, Error as AuthError, ResourceKind};
 use crate::key::schema::{DbGrantKey, NsGrantKey, RootGrantKey};
+use crate::kvs::storage_error;
 use crate::val::{Array, Datetime, Object, Value};
 use crate::{catalog, val};
 
@@ -162,8 +162,8 @@ pub(crate) async fn create_grant(
 				Ok(_) => {}
 				Err(e) => {
 					if matches!(
-						e.downcast_ref(),
-						Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
+						storage_error(&e),
+						Some(crate::kvs::Error::TransactionKeyAlreadyExists)
 					) {
 						error!(
 							"A collision was found when attempting to create a new grant. Purging inactive grants is advised"
@@ -303,8 +303,8 @@ pub(crate) async fn create_grant(
 				Ok(_) => {}
 				Err(e) => {
 					if matches!(
-						e.downcast_ref(),
-						Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
+						storage_error(&e),
+						Some(crate::kvs::Error::TransactionKeyAlreadyExists)
 					) {
 						error!(
 							"A collision was found when attempting to create a new grant. Purging inactive grants is advised"

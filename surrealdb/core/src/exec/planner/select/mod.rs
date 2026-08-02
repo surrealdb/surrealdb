@@ -55,9 +55,8 @@ use crate::expr::field::{Field, Fields};
 use crate::expr::order::Ordering as OrderClause;
 use crate::expr::with::With;
 use crate::expr::{Cond, Expr, Idiom, Literal};
-use crate::idx::planner::ScanDirection;
-use crate::kvs::Transaction;
 use crate::kvs::index::filter_online_indexes;
+use crate::kvs::{Direction, Transaction};
 
 impl<'ctx> Planner<'ctx> {
 	/// Resolve a parameter to its value at plan time.
@@ -1693,7 +1692,7 @@ impl<'ctx> Planner<'ctx> {
 		table: surrealdb_strand::TableName,
 		index_ref: crate::exec::index::access_path::IndexRef,
 		access: BTreeAccess,
-		direction: crate::idx::planner::ScanDirection,
+		direction: crate::kvs::Direction,
 		cond: Option<&Cond>,
 		order: Option<&crate::expr::order::Ordering>,
 		scan_predicate: Option<Arc<dyn crate::exec::PhysicalExpr>>,
@@ -1904,7 +1903,7 @@ impl<'ctx> Planner<'ctx> {
 	async fn plan_table_scan_source(
 		&self,
 		table: surrealdb_strand::TableName,
-		direction: crate::idx::planner::ScanDirection,
+		direction: crate::kvs::Direction,
 		order: Option<&crate::expr::order::Ordering>,
 		scan_predicate: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 		scan_limit: Option<Arc<dyn crate::exec::PhysicalExpr>>,
@@ -2058,8 +2057,8 @@ impl<'ctx> Planner<'ctx> {
 		// already sorted by the suffix column in the merge's direction.
 		let paths = if let Some((_, dir)) = &merge_by_index_key {
 			let target = match dir {
-				SortDirection::Asc => crate::idx::planner::ScanDirection::Forward,
-				SortDirection::Desc => crate::idx::planner::ScanDirection::Backward,
+				SortDirection::Asc => crate::kvs::Direction::Forward,
+				SortDirection::Desc => crate::kvs::Direction::Backward,
 			};
 			paths
 				.into_iter()
@@ -2678,7 +2677,7 @@ impl<'ctx> Planner<'ctx> {
 		with: Option<&With>,
 		has_limit: bool,
 		has_version: bool,
-	) -> Result<Option<(AccessPath, ScanDirection)>, Error> {
+	) -> Result<Option<(AccessPath, Direction)>, Error> {
 		let direction = determine_scan_direction(order);
 
 		// If the entire WHERE clause folded to `false` (e.g. `field IN []`
@@ -3141,12 +3140,12 @@ impl crate::expr::visit::Visitor for RestrictedIdiomChecker<'_> {
 fn adjust_direction_for_order(
 	path: AccessPath,
 	order: Option<&crate::expr::order::Ordering>,
-	default_direction: crate::idx::planner::ScanDirection,
-) -> (AccessPath, crate::idx::planner::ScanDirection) {
+	default_direction: crate::kvs::Direction,
+) -> (AccessPath, crate::kvs::Direction) {
 	use crate::exec::field_path::FieldPath;
 	use crate::exec::index::access_path::BTreeAccess;
 	use crate::expr::order::Ordering;
-	use crate::idx::planner::ScanDirection;
+	use crate::kvs::Direction;
 
 	// Only adjust for BTreeScan paths that cover ORDER BY
 	let AccessPath::BTreeScan {
@@ -3229,9 +3228,9 @@ fn adjust_direction_for_order(
 		// All columns are equality-pinned.  Match `ORDER BY id`.
 		if order_path == FieldPath::field("id") {
 			let new_direction = if first_order.direction {
-				ScanDirection::Forward // ASC
+				Direction::Forward // ASC
 			} else {
-				ScanDirection::Backward // DESC
+				Direction::Backward // DESC
 			};
 			let new_path = AccessPath::BTreeScan {
 				index_ref: index_ref.clone(),
@@ -3255,9 +3254,9 @@ fn adjust_direction_for_order(
 	// set the direction based on the ORDER BY direction
 	if order_path == col_path {
 		let new_direction = if first_order.direction {
-			ScanDirection::Forward // ASC
+			Direction::Forward // ASC
 		} else {
-			ScanDirection::Backward // DESC
+			Direction::Backward // DESC
 		};
 
 		let new_path = AccessPath::BTreeScan {

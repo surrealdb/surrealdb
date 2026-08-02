@@ -75,7 +75,7 @@ impl PhysicalExpr for MethodPart {
 						..
 					}) = e.downcast_ref::<crate::expr::Error>()
 					{
-						Err(crate::exec::Error::InvalidMethodArguments {
+						Err(crate::expr::Error::InvalidMethodArguments {
 							name: self.descriptor.name.to_string(),
 							message: message.clone(),
 						}

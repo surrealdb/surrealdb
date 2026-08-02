@@ -9,8 +9,11 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
-use serde::{Deserialize, Serialize};
+// The vector-to-documents mapping is a stored value, and the bucket-mutation rule
+// that keeps one entry per distinct vector travels with it.
+pub(crate) use surrealdb_datastore::values::diskann::{
+	DiskAnnElementDocs, DiskAnnElementHashedDocs, RemoveResult,
+};
 
 #[cfg(not(target_family = "wasm"))]
 use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableId};
@@ -24,7 +27,6 @@ use crate::idx::trees::diskann::index::{DiskAnnContext, DiskAnnGraph};
 use crate::idx::trees::diskann::{DiskAnnElement, ElementId};
 use crate::idx::trees::knn::Ids64;
 use crate::idx::trees::vector::{SerializedVector, Vector};
-use crate::key::KVValue;
 use crate::kvs::Transaction;
 use crate::val::{RecordId, RecordIdKey};
 
@@ -164,562 +166,6 @@ impl DiskAnnDocs {
 
 	#[cfg(target_family = "wasm")]
 	pub(super) fn remove(&self, _doc_id: DocId) {}
-}
-
-#[cfg(test)]
-mod tests {
-	use std::borrow::Cow;
-
-	use super::*;
-	use crate::key::schema::DocKeyKey;
-	use crate::kvs::{Datastore, TransactionType};
-
-	fn ikb() -> IndexKeyBase {
-		IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(3))
-	}
-
-	fn cache_index() -> (NamespaceId, DatabaseId, TableId, IndexId) {
-		(NamespaceId(1), DatabaseId(2), TableId(4), IndexId(3))
-	}
-
-	#[tokio::test]
-	async fn diskann_docs_batch_populates_and_uses_doc_id_cache() -> Result<()> {
-		let ds = Datastore::new("memory").await?;
-		let ikb = ikb();
-		let cache = DiskAnnCache::new(1024 * 1024);
-		{
-			let tx = ds.transaction(TransactionType::Write).await?;
-			tx.set_key(
-				&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 1),
-				&RecordIdKey::Number(11),
-			)
-			.await?;
-			tx.set_key(
-				&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 3),
-				&RecordIdKey::Number(33),
-			)
-			.await?;
-			tx.commit().await?;
-		}
-
-		let tx = ds.transaction(TransactionType::Read).await?;
-		let got = DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[1, 2, 3], Some(5))
-			.await?;
-		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(11));
-		assert!(got[1].is_none());
-		assert_eq!(&got[2].as_ref().unwrap().key, &RecordIdKey::Number(33));
-		assert_eq!(
-			cache.get_doc_id(cache_index(), 1, Some(5)).unwrap().as_ref(),
-			&RecordIdKey::Number(11)
-		);
-		assert!(cache.get_doc_id(cache_index(), 2, Some(5)).is_none());
-		assert_eq!(
-			cache.get_doc_id(cache_index(), 3, Some(5)).unwrap().as_ref(),
-			&RecordIdKey::Number(33)
-		);
-		tx.cancel().await?;
-
-		let tx = ds.transaction(TransactionType::Write).await?;
-		tx.del_key(&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 1)).await?;
-		tx.commit().await?;
-		let tx = ds.transaction(TransactionType::Read).await?;
-		let missing: Option<RecordIdKey> = tx
-			.get_key(&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 1), None)
-			.await?;
-		assert!(missing.is_none());
-		let cached =
-			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[1], Some(5)).await?;
-		assert_eq!(&cached[0].as_ref().unwrap().key, &RecordIdKey::Number(11));
-		tx.cancel().await?;
-		Ok(())
-	}
-
-	#[tokio::test]
-	async fn diskann_docs_batch_does_not_cache_write_transaction_mappings() -> Result<()> {
-		let ds = Datastore::new("memory").await?;
-		let tx = ds.transaction(TransactionType::Write).await?;
-		let ikb = ikb();
-		let cache = DiskAnnCache::new(1024 * 1024);
-		tx.set_key(
-			&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 9),
-			&RecordIdKey::Number(99),
-		)
-		.await?;
-
-		let got =
-			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[9], Some(5)).await?;
-		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(99));
-		assert!(cache.get_doc_id(cache_index(), 9, Some(5)).is_none());
-		tx.cancel().await?;
-
-		let tx = ds.transaction(TransactionType::Read).await?;
-		assert_eq!(
-			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[9], Some(5)).await?,
-			vec![None]
-		);
-		assert!(cache.get_doc_id(cache_index(), 9, Some(5)).is_none());
-		tx.cancel().await?;
-		Ok(())
-	}
-
-	#[tokio::test]
-	async fn diskann_docs_batch_ignores_doc_id_cache_from_old_generation() -> Result<()> {
-		let ds = Datastore::new("memory").await?;
-		let ikb = ikb();
-		let cache = DiskAnnCache::new(1024 * 1024);
-		{
-			let tx = ds.transaction(TransactionType::Write).await?;
-			tx.set_key(
-				&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 1),
-				&RecordIdKey::Number(11),
-			)
-			.await?;
-			tx.commit().await?;
-		}
-
-		let tx = ds.transaction(TransactionType::Read).await?;
-		let got =
-			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[1], Some(5)).await?;
-		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(11));
-		tx.cancel().await?;
-		assert!(cache.get_doc_id(cache_index(), 1, Some(6)).is_none());
-
-		let tx = ds.transaction(TransactionType::Write).await?;
-		tx.set_key(
-			&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 1),
-			&RecordIdKey::Number(22),
-		)
-		.await?;
-		tx.commit().await?;
-
-		let tx = ds.transaction(TransactionType::Read).await?;
-		let got =
-			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[1], Some(6)).await?;
-		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(22));
-		tx.cancel().await?;
-		Ok(())
-	}
-
-	#[tokio::test]
-	async fn diskann_docs_remove_evicts_doc_id_cache() -> Result<()> {
-		let ds = Datastore::new("memory").await?;
-		let ikb = ikb();
-		let cache = DiskAnnCache::new(1024 * 1024);
-		let id = RecordIdKey::Number(77);
-		{
-			let tx = ds.transaction(TransactionType::Write).await?;
-			tx.set_key(&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 7), &id)
-				.await?;
-			tx.commit().await?;
-		}
-
-		let tx = ds.transaction(TransactionType::Read).await?;
-		let got =
-			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[7], Some(5)).await?;
-		assert_eq!(&got[0].as_ref().unwrap().key, &id);
-		assert!(cache.get_doc_id(cache_index(), 7, Some(5)).is_some());
-		tx.cancel().await?;
-
-		let tx = ds.transaction(TransactionType::Write).await?;
-		let docs = DiskAnnDocs::new(ikb.clone());
-		// `remove` is cache-only now: it evicts the process-local doc-id cache and never
-		// recycles ids (the shared record↔doc-id mapping is deleted centrally at record
-		// purge), so the KV mapping survives.
-		docs.remove(7, TableId(4), &cache);
-		assert!(cache.get_doc_id(cache_index(), 7, Some(5)).is_none());
-		// The mapping is still in KV, so a fresh lookup re-resolves it and re-warms the cache.
-		let reloaded =
-			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[7], Some(5)).await?;
-		assert_eq!(&reloaded[0].as_ref().unwrap().key, &id);
-		tx.cancel().await?;
-		Ok(())
-	}
-
-	#[tokio::test]
-	async fn diskann_vec_docs_populates_and_uses_doc_set_cache() -> Result<()> {
-		let ds = Datastore::new("memory").await?;
-		let tx = ds.transaction(TransactionType::Write).await?;
-		let ikb = ikb();
-		let cache = DiskAnnCache::new(1024 * 1024);
-		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), false);
-		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
-		let vector = Vector::from(ser_vec.clone());
-		tx.set_key(
-			&ikb.new_dq_key(&ser_vec),
-			&DiskAnnElementDocs {
-				e_id: 7,
-				docs: Ids64::One(42),
-			},
-		)
-		.await?;
-
-		assert_eq!(
-			vec_docs.get_docs_batch(&tx, &[(7, &vector)]).await?,
-			vec![Some(Ids64::One(42))]
-		);
-		assert_eq!(cache.get_doc_set(cache_index(), 7), Some(Ids64::One(42)));
-
-		tx.del_key(&ikb.new_dq_key(&ser_vec)).await?;
-		assert_eq!(
-			vec_docs.get_docs_batch(&tx, &[(7, &vector)]).await?,
-			vec![Some(Ids64::One(42))]
-		);
-		assert_eq!(vec_docs.get_docs_batch_uncached(&tx, &[(7, &vector)]).await?, vec![None]);
-		tx.cancel().await?;
-		Ok(())
-	}
-
-	#[tokio::test]
-	async fn diskann_vec_docs_resolves_warmed_element_docs_without_vector_mapping() -> Result<()> {
-		let ds = Datastore::new("memory").await?;
-		let tx = ds.transaction(TransactionType::Write).await?;
-		let ikb = ikb();
-		let cache = DiskAnnCache::new(1024 * 1024);
-		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), false);
-		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
-		tx.set_key(
-			&ikb.new_de_key(7),
-			&DiskAnnElement {
-				vector: ser_vec.clone(),
-				deleted: false,
-			},
-		)
-		.await?;
-		tx.set_key(
-			&ikb.new_dq_key(&ser_vec),
-			&DiskAnnElementDocs {
-				e_id: 7,
-				docs: Ids64::One(42),
-			},
-		)
-		.await?;
-
-		assert_eq!(
-			vec_docs.get_docs_by_element_batch(&tx, &[(7, 0.5)]).await?,
-			vec![(7, 0.5, Some(Ids64::One(42)))]
-		);
-		assert_eq!(cache.get_doc_set(cache_index(), 7), Some(Ids64::One(42)));
-
-		tx.del_key(&ikb.new_de_key(7)).await?;
-		tx.del_key(&ikb.new_dq_key(&ser_vec)).await?;
-		assert_eq!(
-			vec_docs.get_docs_by_element_batch(&tx, &[(7, 0.5)]).await?,
-			vec![(7, 0.5, Some(Ids64::One(42)))]
-		);
-		tx.cancel().await?;
-		Ok(())
-	}
-
-	#[tokio::test]
-	async fn diskann_vec_docs_resolves_element_doc_cache_misses_in_order() -> Result<()> {
-		let ds = Datastore::new("memory").await?;
-		let tx = ds.transaction(TransactionType::Write).await?;
-		let ikb = ikb();
-		let cache = DiskAnnCache::new(1024 * 1024);
-		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), false);
-		let first_vec = SerializedVector::F32(vec![1.0, 2.0]);
-		let second_vec = SerializedVector::F32(vec![3.0, 4.0]);
-		for (element_id, ser_vec, docs) in
-			[(7, first_vec.clone(), Ids64::One(70)), (9, second_vec.clone(), Ids64::One(90))]
-		{
-			tx.set_key(
-				&ikb.new_de_key(element_id),
-				&DiskAnnElement {
-					vector: ser_vec.clone(),
-					deleted: false,
-				},
-			)
-			.await?;
-			tx.set_key(
-				&ikb.new_dq_key(&ser_vec),
-				&DiskAnnElementDocs {
-					e_id: element_id,
-					docs,
-				},
-			)
-			.await?;
-		}
-
-		assert_eq!(
-			vec_docs.get_docs_by_element_batch(&tx, &[(9, 0.9), (8, 0.8), (7, 0.7)]).await?,
-			vec![(9, 0.9, Some(Ids64::One(90))), (8, 0.8, None), (7, 0.7, Some(Ids64::One(70)))]
-		);
-		assert_eq!(cache.get_doc_set(cache_index(), 9), Some(Ids64::One(90)));
-		assert_eq!(cache.get_doc_set(cache_index(), 7), Some(Ids64::One(70)));
-		assert!(cache.get_doc_set(cache_index(), 8).is_none());
-		tx.cancel().await?;
-		Ok(())
-	}
-
-	#[tokio::test]
-	async fn diskann_vec_docs_caches_hashed_docs_after_disambiguating_vector() -> Result<()> {
-		let ds = Datastore::new("memory").await?;
-		let tx = ds.transaction(TransactionType::Write).await?;
-		let ikb = ikb();
-		let cache = DiskAnnCache::new(1024 * 1024);
-		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), true);
-		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
-		let other_vec = SerializedVector::F32(vec![9.0, 9.0]);
-		let vector = Vector::from(ser_vec.clone());
-		tx.set_key(
-			&ikb.new_dh_key(ser_vec.compute_hash()),
-			&DiskAnnElementHashedDocs {
-				vectors: vec![
-					(
-						other_vec,
-						DiskAnnElementDocs {
-							e_id: 5,
-							docs: Ids64::One(5),
-						},
-					),
-					(
-						ser_vec.clone(),
-						DiskAnnElementDocs {
-							e_id: 9,
-							docs: Ids64::One(42),
-						},
-					),
-				],
-			},
-		)
-		.await?;
-
-		assert_eq!(
-			vec_docs.get_docs_batch(&tx, &[(9, &vector)]).await?,
-			vec![Some(Ids64::One(42))]
-		);
-		assert_eq!(cache.get_doc_set(cache_index(), 9), Some(Ids64::One(42)));
-
-		tx.del_key(&ikb.new_dh_key(ser_vec.compute_hash())).await?;
-		assert_eq!(
-			vec_docs.get_docs_batch(&tx, &[(9, &vector)]).await?,
-			vec![Some(Ids64::One(42))]
-		);
-		assert_eq!(vec_docs.get_docs_batch_uncached(&tx, &[(9, &vector)]).await?, vec![None]);
-		tx.cancel().await?;
-		Ok(())
-	}
-
-	#[tokio::test]
-	async fn diskann_vec_docs_resolves_hashed_element_doc_cache_misses() -> Result<()> {
-		let ds = Datastore::new("memory").await?;
-		let tx = ds.transaction(TransactionType::Write).await?;
-		let ikb = ikb();
-		let cache = DiskAnnCache::new(1024 * 1024);
-		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), true);
-		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
-		let other_vec = SerializedVector::F32(vec![9.0, 9.0]);
-		tx.set_key(
-			&ikb.new_de_key(9),
-			&DiskAnnElement {
-				vector: ser_vec.clone(),
-				deleted: false,
-			},
-		)
-		.await?;
-		tx.set_key(
-			&ikb.new_dh_key(ser_vec.compute_hash()),
-			&DiskAnnElementHashedDocs {
-				vectors: vec![
-					(
-						other_vec,
-						DiskAnnElementDocs {
-							e_id: 5,
-							docs: Ids64::One(5),
-						},
-					),
-					(
-						ser_vec,
-						DiskAnnElementDocs {
-							e_id: 9,
-							docs: Ids64::One(42),
-						},
-					),
-				],
-			},
-		)
-		.await?;
-
-		assert_eq!(
-			vec_docs.get_docs_by_element_batch(&tx, &[(9, 0.9)]).await?,
-			vec![(9, 0.9, Some(Ids64::One(42)))]
-		);
-		assert_eq!(cache.get_doc_set(cache_index(), 9), Some(Ids64::One(42)));
-		tx.cancel().await?;
-		Ok(())
-	}
-
-	#[tokio::test]
-	async fn diskann_vec_docs_missing_element_doc_candidate_returns_none() -> Result<()> {
-		let ds = Datastore::new("memory").await?;
-		let tx = ds.transaction(TransactionType::Write).await?;
-		let ikb = ikb();
-		let cache = DiskAnnCache::new(1024 * 1024);
-		let vec_docs = DiskAnnVecDocs::new(ikb, TableId(4), cache.clone(), false);
-
-		assert_eq!(
-			vec_docs.get_docs_by_element_batch(&tx, &[(99, 0.99)]).await?,
-			vec![(99, 0.99, None)]
-		);
-		assert!(cache.get_doc_set(cache_index(), 99).is_none());
-		tx.cancel().await?;
-		Ok(())
-	}
-}
-
-#[revisioned(revision = 1)]
-#[derive(Serialize, Deserialize)]
-pub(crate) struct DiskAnnElementDocs {
-	/// Graph element ID that owns this exact vector.
-	e_id: ElementId,
-	/// Compact document IDs currently sharing the vector.
-	docs: Ids64,
-}
-
-impl DiskAnnElementDocs {
-	fn new(element_id: ElementId, d: DocId) -> Self {
-		Self {
-			e_id: element_id,
-			docs: Ids64::One(d),
-		}
-	}
-}
-
-/// Soft cap on hashed-vector collision-bucket size. Real-world hash collisions across
-/// distinct full-fidelity vectors are vanishingly rare; if a bucket grows past this size we
-/// emit a `warn!` because every lookup of the bucket is O(bucket-size) full-vector compares
-/// (see [`DiskAnnElementHashedDocs::get_docs`]) and an adversarial or buggy hash distribution
-/// would otherwise silently scale the cost of every KNN search.
-const HASHED_BUCKET_WARN_THRESHOLD: usize = 16;
-
-#[revisioned(revision = 1)]
-pub(crate) struct DiskAnnElementHashedDocs {
-	/// Collision bucket keyed by vector hash; each entry retains the full vector for
-	/// disambiguation.
-	vectors: Vec<(SerializedVector, DiskAnnElementDocs)>,
-}
-
-/// Result of removing one document ID from a hashed vector collision bucket.
-enum RemoveResult {
-	/// The whole hash bucket became empty and its graph element should be removed.
-	Empty(ElementId),
-	/// The doc set of one bucket entry shrank, but the entry (and its graph element)
-	/// still has other docs sharing it. Caller must evict the cached doc set.
-	BucketShrunk {
-		e_id: ElementId,
-	},
-	/// One entry in the bucket was removed entirely (its last doc went away). The
-	/// graph element must be removed from the upstream graph; the rest of the bucket
-	/// is intact and must be persisted back to KV.
-	EntryRemoved {
-		e_id: ElementId,
-	},
-	/// The requested vector/document pair was not present.
-	Unchanged,
-}
-
-impl DiskAnnElementHashedDocs {
-	fn new(element_id: ElementId, vec: SerializedVector, doc_id: DocId) -> Self {
-		Self {
-			vectors: vec![(vec, DiskAnnElementDocs::new(element_id, doc_id))],
-		}
-	}
-
-	fn get_element_docs(&mut self, vec: &SerializedVector) -> Option<&mut DiskAnnElementDocs> {
-		self.vectors.iter_mut().find_map(|(vector, ed)| {
-			if *vec == *vector {
-				Some(ed)
-			} else {
-				None
-			}
-		})
-	}
-
-	fn get_docs(self, vec: &SerializedVector) -> Option<(ElementId, Ids64)> {
-		for (vector, ed) in self.vectors {
-			if vector == *vec {
-				return Some((ed.e_id, ed.docs));
-			}
-		}
-		None
-	}
-
-	fn add(&mut self, element_id: ElementId, vec: SerializedVector, doc_id: DocId) {
-		self.vectors.push((vec, DiskAnnElementDocs::new(element_id, doc_id)));
-		// Real-world vector-hash collisions across distinct full-fidelity vectors are
-		// vanishingly rare; warn loudly if we ever cross the soft cap so an unexpected hash
-		// distribution doesn't silently scale KNN search by bucket size. Fire on every
-		// power-of-two crossing at or above the threshold (16, 32, 64, …) so an operator
-		// sees runaway growth, not just the first crossing.
-		let len = self.vectors.len();
-		if len >= HASHED_BUCKET_WARN_THRESHOLD && len.is_power_of_two() {
-			warn!(
-				bucket_size = len,
-				new_element_id = element_id,
-				"DiskANN hashed-vector collision bucket exceeded soft warn threshold; \
-				 every lookup of this hash now does {len} full-vector compares",
-			);
-		}
-	}
-
-	fn remove(&mut self, vec: &SerializedVector, doc_id: DocId) -> RemoveResult {
-		let mut action = None;
-		for (i, (vector, ed)) in self.vectors.iter_mut().enumerate() {
-			if *vector == *vec
-				&& let Some(new_docs) = ed.docs.remove(doc_id)
-			{
-				if new_docs.is_empty() {
-					action = Some((i, ed.e_id));
-					break;
-				}
-				let e_id = ed.e_id;
-				ed.docs = new_docs;
-				return RemoveResult::BucketShrunk {
-					e_id,
-				};
-			}
-		}
-		if let Some((i, e_id)) = action {
-			self.vectors.remove(i);
-			if self.vectors.is_empty() {
-				return RemoveResult::Empty(e_id);
-			}
-			return RemoveResult::EntryRemoved {
-				e_id,
-			};
-		}
-		RemoveResult::Unchanged
-	}
-}
-
-impl KVValue for DiskAnnElementHashedDocs {
-	type KeyContext = ();
-
-	fn kv_encode_value(&self) -> Result<Vec<u8>> {
-		let mut val = Vec::new();
-		SerializeRevisioned::serialize_revisioned(self, &mut val)?;
-		Ok(val)
-	}
-
-	fn kv_decode_value(mut bytes: &[u8], _: ()) -> Result<Self> {
-		Ok(DeserializeRevisioned::deserialize_revisioned(&mut bytes)?)
-	}
-}
-
-impl KVValue for DiskAnnElementDocs {
-	type KeyContext = ();
-
-	#[inline]
-	fn kv_encode_value(&self) -> Result<Vec<u8>> {
-		let mut val = Vec::new();
-		SerializeRevisioned::serialize_revisioned(self, &mut val)?;
-		Ok(val)
-	}
-
-	#[inline]
-	fn kv_decode_value(mut bytes: &[u8], _: ()) -> Result<Self> {
-		Ok(DeserializeRevisioned::deserialize_revisioned(&mut bytes)?)
-	}
 }
 
 /// Manages vector-to-document mappings in the DiskANN index.
@@ -1030,6 +476,376 @@ impl DiskAnnVecDocs {
 				self.evict_cached_doc_set(ed.e_id);
 			}
 		}
+		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::borrow::Cow;
+
+	use super::*;
+	use crate::key::schema::DocKeyKey;
+	use crate::kvs::{Datastore, TransactionType};
+
+	fn ikb() -> IndexKeyBase {
+		IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(3))
+	}
+
+	fn cache_index() -> (NamespaceId, DatabaseId, TableId, IndexId) {
+		(NamespaceId(1), DatabaseId(2), TableId(4), IndexId(3))
+	}
+
+	#[tokio::test]
+	async fn diskann_docs_batch_populates_and_uses_doc_id_cache() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let ikb = ikb();
+		let cache = DiskAnnCache::new(1024 * 1024);
+		{
+			let tx = ds.transaction(TransactionType::Write).await?;
+			tx.set_key(
+				&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 1),
+				&RecordIdKey::Number(11),
+			)
+			.await?;
+			tx.set_key(
+				&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 3),
+				&RecordIdKey::Number(33),
+			)
+			.await?;
+			tx.commit().await?;
+		}
+
+		let tx = ds.transaction(TransactionType::Read).await?;
+		let got = DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[1, 2, 3], Some(5))
+			.await?;
+		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(11));
+		assert!(got[1].is_none());
+		assert_eq!(&got[2].as_ref().unwrap().key, &RecordIdKey::Number(33));
+		assert_eq!(
+			cache.get_doc_id(cache_index(), 1, Some(5)).unwrap().as_ref(),
+			&RecordIdKey::Number(11)
+		);
+		assert!(cache.get_doc_id(cache_index(), 2, Some(5)).is_none());
+		assert_eq!(
+			cache.get_doc_id(cache_index(), 3, Some(5)).unwrap().as_ref(),
+			&RecordIdKey::Number(33)
+		);
+		tx.cancel().await?;
+
+		let tx = ds.transaction(TransactionType::Write).await?;
+		tx.del_key(&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 1)).await?;
+		tx.commit().await?;
+		let tx = ds.transaction(TransactionType::Read).await?;
+		let missing: Option<RecordIdKey> = tx
+			.get_key(&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 1), None)
+			.await?;
+		assert!(missing.is_none());
+		let cached =
+			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[1], Some(5)).await?;
+		assert_eq!(&cached[0].as_ref().unwrap().key, &RecordIdKey::Number(11));
+		tx.cancel().await?;
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn diskann_docs_batch_does_not_cache_write_transaction_mappings() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
+		let ikb = ikb();
+		let cache = DiskAnnCache::new(1024 * 1024);
+		tx.set_key(
+			&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 9),
+			&RecordIdKey::Number(99),
+		)
+		.await?;
+
+		let got =
+			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[9], Some(5)).await?;
+		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(99));
+		assert!(cache.get_doc_id(cache_index(), 9, Some(5)).is_none());
+		tx.cancel().await?;
+
+		let tx = ds.transaction(TransactionType::Read).await?;
+		assert_eq!(
+			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[9], Some(5)).await?,
+			vec![None]
+		);
+		assert!(cache.get_doc_id(cache_index(), 9, Some(5)).is_none());
+		tx.cancel().await?;
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn diskann_docs_batch_ignores_doc_id_cache_from_old_generation() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let ikb = ikb();
+		let cache = DiskAnnCache::new(1024 * 1024);
+		{
+			let tx = ds.transaction(TransactionType::Write).await?;
+			tx.set_key(
+				&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 1),
+				&RecordIdKey::Number(11),
+			)
+			.await?;
+			tx.commit().await?;
+		}
+
+		let tx = ds.transaction(TransactionType::Read).await?;
+		let got =
+			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[1], Some(5)).await?;
+		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(11));
+		tx.cancel().await?;
+		assert!(cache.get_doc_id(cache_index(), 1, Some(6)).is_none());
+
+		let tx = ds.transaction(TransactionType::Write).await?;
+		tx.set_key(
+			&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 1),
+			&RecordIdKey::Number(22),
+		)
+		.await?;
+		tx.commit().await?;
+
+		let tx = ds.transaction(TransactionType::Read).await?;
+		let got =
+			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[1], Some(6)).await?;
+		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(22));
+		tx.cancel().await?;
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn diskann_docs_remove_evicts_doc_id_cache() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let ikb = ikb();
+		let cache = DiskAnnCache::new(1024 * 1024);
+		let id = RecordIdKey::Number(77);
+		{
+			let tx = ds.transaction(TransactionType::Write).await?;
+			tx.set_key(&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 7), &id)
+				.await?;
+			tx.commit().await?;
+		}
+
+		let tx = ds.transaction(TransactionType::Read).await?;
+		let got =
+			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[7], Some(5)).await?;
+		assert_eq!(&got[0].as_ref().unwrap().key, &id);
+		assert!(cache.get_doc_id(cache_index(), 7, Some(5)).is_some());
+		tx.cancel().await?;
+
+		let tx = ds.transaction(TransactionType::Write).await?;
+		let docs = DiskAnnDocs::new(ikb.clone());
+		// `remove` is cache-only now: it evicts the process-local doc-id cache and never
+		// recycles ids (the shared record↔doc-id mapping is deleted centrally at record
+		// purge), so the KV mapping survives.
+		docs.remove(7, TableId(4), &cache);
+		assert!(cache.get_doc_id(cache_index(), 7, Some(5)).is_none());
+		// The mapping is still in KV, so a fresh lookup re-resolves it and re-warms the cache.
+		let reloaded =
+			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[7], Some(5)).await?;
+		assert_eq!(&reloaded[0].as_ref().unwrap().key, &id);
+		tx.cancel().await?;
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn diskann_vec_docs_populates_and_uses_doc_set_cache() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
+		let ikb = ikb();
+		let cache = DiskAnnCache::new(1024 * 1024);
+		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), false);
+		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
+		let vector = Vector::from(ser_vec.clone());
+		tx.set_key(
+			&ikb.new_dq_key(&ser_vec),
+			&DiskAnnElementDocs {
+				e_id: 7,
+				docs: Ids64::One(42),
+			},
+		)
+		.await?;
+
+		assert_eq!(
+			vec_docs.get_docs_batch(&tx, &[(7, &vector)]).await?,
+			vec![Some(Ids64::One(42))]
+		);
+		assert_eq!(cache.get_doc_set(cache_index(), 7), Some(Ids64::One(42)));
+
+		tx.del_key(&ikb.new_dq_key(&ser_vec)).await?;
+		assert_eq!(
+			vec_docs.get_docs_batch(&tx, &[(7, &vector)]).await?,
+			vec![Some(Ids64::One(42))]
+		);
+		assert_eq!(vec_docs.get_docs_batch_uncached(&tx, &[(7, &vector)]).await?, vec![None]);
+		tx.cancel().await?;
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn diskann_vec_docs_resolves_warmed_element_docs_without_vector_mapping() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
+		let ikb = ikb();
+		let cache = DiskAnnCache::new(1024 * 1024);
+		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), false);
+		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
+		tx.set_key(
+			&ikb.new_de_key(7),
+			&DiskAnnElement {
+				vector: ser_vec.clone(),
+				deleted: false,
+			},
+		)
+		.await?;
+		tx.set_key(
+			&ikb.new_dq_key(&ser_vec),
+			&DiskAnnElementDocs {
+				e_id: 7,
+				docs: Ids64::One(42),
+			},
+		)
+		.await?;
+
+		assert_eq!(
+			vec_docs.get_docs_by_element_batch(&tx, &[(7, 0.5)]).await?,
+			vec![(7, 0.5, Some(Ids64::One(42)))]
+		);
+		assert_eq!(cache.get_doc_set(cache_index(), 7), Some(Ids64::One(42)));
+
+		tx.del_key(&ikb.new_de_key(7)).await?;
+		tx.del_key(&ikb.new_dq_key(&ser_vec)).await?;
+		assert_eq!(
+			vec_docs.get_docs_by_element_batch(&tx, &[(7, 0.5)]).await?,
+			vec![(7, 0.5, Some(Ids64::One(42)))]
+		);
+		tx.cancel().await?;
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn diskann_vec_docs_resolves_element_doc_cache_misses_in_order() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
+		let ikb = ikb();
+		let cache = DiskAnnCache::new(1024 * 1024);
+		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), false);
+		let first_vec = SerializedVector::F32(vec![1.0, 2.0]);
+		let second_vec = SerializedVector::F32(vec![3.0, 4.0]);
+		for (element_id, ser_vec, docs) in
+			[(7, first_vec.clone(), Ids64::One(70)), (9, second_vec.clone(), Ids64::One(90))]
+		{
+			tx.set_key(
+				&ikb.new_de_key(element_id),
+				&DiskAnnElement {
+					vector: ser_vec.clone(),
+					deleted: false,
+				},
+			)
+			.await?;
+			tx.set_key(
+				&ikb.new_dq_key(&ser_vec),
+				&DiskAnnElementDocs {
+					e_id: element_id,
+					docs,
+				},
+			)
+			.await?;
+		}
+
+		assert_eq!(
+			vec_docs.get_docs_by_element_batch(&tx, &[(9, 0.9), (8, 0.8), (7, 0.7)]).await?,
+			vec![(9, 0.9, Some(Ids64::One(90))), (8, 0.8, None), (7, 0.7, Some(Ids64::One(70)))]
+		);
+		assert_eq!(cache.get_doc_set(cache_index(), 9), Some(Ids64::One(90)));
+		assert_eq!(cache.get_doc_set(cache_index(), 7), Some(Ids64::One(70)));
+		assert!(cache.get_doc_set(cache_index(), 8).is_none());
+		tx.cancel().await?;
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn diskann_vec_docs_caches_hashed_docs_after_disambiguating_vector() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
+		let ikb = ikb();
+		let cache = DiskAnnCache::new(1024 * 1024);
+		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), true);
+		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
+		let other_vec = SerializedVector::F32(vec![9.0, 9.0]);
+		let vector = Vector::from(ser_vec.clone());
+		// Built through the bucket's own constructors, which is the only way in
+		// now that it owns the one-entry-per-vector invariant. The colliding
+		// vector is added first so the vector under test is not the first match.
+		let mut bucket = DiskAnnElementHashedDocs::new(5, other_vec, 5);
+		bucket.add(9, ser_vec.clone(), 42);
+		tx.set_key(&ikb.new_dh_key(ser_vec.compute_hash()), &bucket).await?;
+
+		assert_eq!(
+			vec_docs.get_docs_batch(&tx, &[(9, &vector)]).await?,
+			vec![Some(Ids64::One(42))]
+		);
+		assert_eq!(cache.get_doc_set(cache_index(), 9), Some(Ids64::One(42)));
+
+		tx.del_key(&ikb.new_dh_key(ser_vec.compute_hash())).await?;
+		assert_eq!(
+			vec_docs.get_docs_batch(&tx, &[(9, &vector)]).await?,
+			vec![Some(Ids64::One(42))]
+		);
+		assert_eq!(vec_docs.get_docs_batch_uncached(&tx, &[(9, &vector)]).await?, vec![None]);
+		tx.cancel().await?;
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn diskann_vec_docs_resolves_hashed_element_doc_cache_misses() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
+		let ikb = ikb();
+		let cache = DiskAnnCache::new(1024 * 1024);
+		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), true);
+		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
+		let other_vec = SerializedVector::F32(vec![9.0, 9.0]);
+		tx.set_key(
+			&ikb.new_de_key(9),
+			&DiskAnnElement {
+				vector: ser_vec.clone(),
+				deleted: false,
+			},
+		)
+		.await?;
+		// Built through the bucket's own constructors, which is the only way in
+		// now that it owns the one-entry-per-vector invariant. The colliding
+		// vector is added first so the vector under test is not the first match.
+		let key = ikb.new_dh_key(ser_vec.compute_hash());
+		let mut bucket = DiskAnnElementHashedDocs::new(5, other_vec, 5);
+		bucket.add(9, ser_vec, 42);
+		tx.set_key(&key, &bucket).await?;
+
+		assert_eq!(
+			vec_docs.get_docs_by_element_batch(&tx, &[(9, 0.9)]).await?,
+			vec![(9, 0.9, Some(Ids64::One(42)))]
+		);
+		assert_eq!(cache.get_doc_set(cache_index(), 9), Some(Ids64::One(42)));
+		tx.cancel().await?;
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn diskann_vec_docs_missing_element_doc_candidate_returns_none() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
+		let ikb = ikb();
+		let cache = DiskAnnCache::new(1024 * 1024);
+		let vec_docs = DiskAnnVecDocs::new(ikb, TableId(4), cache.clone(), false);
+
+		assert_eq!(
+			vec_docs.get_docs_by_element_batch(&tx, &[(99, 0.99)]).await?,
+			vec![(99, 0.99, None)]
+		);
+		assert!(cache.get_doc_set(cache_index(), 99).is_none());
+		tx.cancel().await?;
 		Ok(())
 	}
 }

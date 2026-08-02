@@ -53,6 +53,14 @@ pub enum Error {
 		message: String,
 	},
 
+	/// The wrong quantity or magnitude of arguments was given for the specified
+	/// method
+	#[error("Incorrect arguments for method {name}(). {message}")]
+	InvalidMethodArguments {
+		name: String,
+		message: String,
+	},
+
 	/// Invalid regular expression
 	#[error("Invalid regular expression: {0:?}")]
 	InvalidRegex(String),
@@ -190,6 +198,9 @@ impl LeafError for Error {
 				..
 			}
 			| Error::InvalidFunctionArguments {
+				..
+			}
+			| Error::InvalidMethodArguments {
 				..
 			}
 			| Error::InvalidRegex(_)

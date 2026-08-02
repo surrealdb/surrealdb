@@ -63,8 +63,8 @@ impl Document {
 				db.database_id,
 				&tb.name,
 				id.as_ref(),
-				self.initial.doc.clone(),
-				self.current.doc.clone(),
+				self.initial.doc.clone().into_owned(),
+				self.current.doc.clone().into_owned(),
 			);
 		}
 		Ok(())

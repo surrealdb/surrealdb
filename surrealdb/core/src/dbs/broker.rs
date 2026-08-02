@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use async_channel::Sender;
+use surrealdb_datastore::close::CommitAction;
 use surrealdb_types::Notification;
 
 /// A live-query notification paired with the datastore node that owns the subscription.
@@ -119,6 +120,38 @@ impl MessageBroker for LocalMessageBroker {
 	fn send(&self, item: RoutedNotification) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
 		Box::pin(async move {
 			let _ = self.0.send(item.into_notification()).await;
+		})
+	}
+}
+
+/// Tell a live subscriber its subscription is gone, once the removal has
+/// committed.
+///
+/// Sending before the commit would tear a client's subscription down for a
+/// removal that a rollback then undoes, leaving its rows in storage with nothing
+/// listening. Queued on the transaction so the notification and the deletion
+/// succeed or fail together.
+pub(crate) struct SendKill {
+	pub(crate) broker: Arc<dyn MessageBroker>,
+	pub(crate) notification: RoutedNotification,
+}
+
+impl SendKill {
+	pub(crate) fn boxed(
+		broker: Arc<dyn MessageBroker>,
+		notification: RoutedNotification,
+	) -> Box<dyn CommitAction> {
+		Box::new(Self {
+			broker,
+			notification,
+		})
+	}
+}
+
+impl CommitAction for SendKill {
+	fn run(self: Box<Self>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+		Box::pin(async move {
+			self.broker.send(self.notification).await;
 		})
 	}
 }

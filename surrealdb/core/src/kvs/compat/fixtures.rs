@@ -16,6 +16,7 @@ use std::time::Duration;
 use chrono::DateTime;
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon, coord};
 use rust_decimal::Decimal;
+use surrealdb_datastore::values::changefeed::{TableMutation, TableMutations};
 use surrealdb_strand::Strand;
 use uuid::Uuid as UuidExt;
 
@@ -28,7 +29,6 @@ use crate::catalog::{
 	StoredApiActionDefinition, StoredApiConfigDefinition, StoredModuleDefinition,
 	SurrealismExecutable, TableId, TaskLease, *,
 };
-use crate::cf::mutations::{TableMutation, TableMutations};
 use crate::dbs::node::{Node, Timestamp};
 use crate::expr::field::Selector;
 use crate::expr::{
@@ -1680,7 +1680,10 @@ pub fn node_archived() -> Node {
 
 /// Term document - basic default
 pub fn term_document_basic() -> TermDocument {
-	TermDocument::new(123, vec![Offset::new(1, 2, 3, 4)])
+	TermDocument {
+		f: 123,
+		o: vec![Offset::new(1, 2, 3, 4)],
+	}
 }
 
 // ===========================================================================
@@ -1689,7 +1692,10 @@ pub fn term_document_basic() -> TermDocument {
 
 /// Document length and count - basic default
 pub fn doc_length_and_count_basic() -> DocLengthAndCount {
-	DocLengthAndCount::new(123, 456)
+	DocLengthAndCount {
+		total_docs_length: 123,
+		doc_count: 456,
+	}
 }
 
 // ===========================================================================
@@ -1697,31 +1703,39 @@ pub fn doc_length_and_count_basic() -> DocLengthAndCount {
 // ===========================================================================
 
 pub fn appending_none() -> Appending {
-	Appending::new(None, None, RecordIdKey::Number(123))
+	Appending {
+		old_values: None,
+		new_values: None,
+		id: RecordIdKey::Number(123),
+		count_cond_match: None,
+	}
 }
 
 pub fn appending_old_values() -> Appending {
-	Appending::new(
-		Some(vec![Value::String(Strand::new_static("old value"))]),
-		None,
-		RecordIdKey::Number(123),
-	)
+	Appending {
+		old_values: Some(vec![Value::String(Strand::new_static("old value"))]),
+		new_values: None,
+		id: RecordIdKey::Number(123),
+		count_cond_match: None,
+	}
 }
 
 pub fn appending_new_values() -> Appending {
-	Appending::new(
-		None,
-		Some(vec![Value::String(Strand::new_static("new value"))]),
-		RecordIdKey::Number(123),
-	)
+	Appending {
+		old_values: None,
+		new_values: Some(vec![Value::String(Strand::new_static("new value"))]),
+		id: RecordIdKey::Number(123),
+		count_cond_match: None,
+	}
 }
 
 pub fn appending_both() -> Appending {
-	Appending::new(
-		Some(vec![Value::String(Strand::new_static("old value"))]),
-		Some(vec![Value::String(Strand::new_static("new value"))]),
-		RecordIdKey::Number(123),
-	)
+	Appending {
+		old_values: Some(vec![Value::String(Strand::new_static("old value"))]),
+		new_values: Some(vec![Value::String(Strand::new_static("new value"))]),
+		id: RecordIdKey::Number(123),
+		count_cond_match: None,
+	}
 }
 
 // ===========================================================================
@@ -1729,7 +1743,7 @@ pub fn appending_both() -> Appending {
 // ===========================================================================
 
 pub fn primary_appending_basic() -> PrimaryAppending {
-	PrimaryAppending::new(123, 0)
+	PrimaryAppending(123, 0)
 }
 
 // ===========================================================================

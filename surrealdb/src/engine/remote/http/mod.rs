@@ -39,7 +39,7 @@
 //! but its creator even though the server does not enforce ownership
 //! on it.
 //!
-//! [`Level`]: surrealdb_core::iam::Level
+//! [`Level`]: surrealdb_iam::Level
 //!
 //! # Multi-Node Deployments and Sticky Sessions
 //!
@@ -101,9 +101,7 @@ use futures::TryStreamExt;
 use reqwest::RequestBuilder;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
-use surrealdb_core::dbs::{QueryResult, QueryResultBuilder};
-use surrealdb_core::iam::Token as CoreToken;
-use surrealdb_core::rpc::{self, DbResponse, DbResult};
+use surrealdb_rpc::{DbResponse, DbResult, QueryResult, QueryResultBuilder, Token as CoreToken};
 use surrealdb_types::{AuthError, NotAllowedError};
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_types::{ConnectionError, SerializationError};
@@ -387,11 +385,19 @@ impl Surreal<Client> {
 	}
 }
 
+/// Serialize a `Value` as a JSON string for a REST body.
+///
+/// Cannot fail: the conversion goes through `serde_json::Value`, whose string
+/// serialization is infallible.
+fn json_encode_str(value: Value) -> String {
+	serde_json::to_string(&value.into_json_value())
+		.expect("serialization to json string should not fail")
+}
+
 pub(crate) fn default_headers() -> HeaderMap {
 	let mut headers = HeaderMap::new();
-	headers.insert(ACCEPT, HeaderValue::from_static(surrealdb_core::api::format::FLATBUFFERS));
-	headers
-		.insert(CONTENT_TYPE, HeaderValue::from_static(surrealdb_core::api::format::FLATBUFFERS));
+	headers.insert(ACCEPT, HeaderValue::from_static(surrealdb_rpc::format::FLATBUFFERS));
+	headers.insert(CONTENT_TYPE, HeaderValue::from_static(surrealdb_rpc::format::FLATBUFFERS));
 	headers
 }
 
@@ -523,7 +529,7 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 	};
 
 	let res = request
-		.header(ACCEPT, surrealdb_core::api::format::FLATBUFFERS)
+		.header(ACCEPT, surrealdb_rpc::format::FLATBUFFERS)
 		.body(file)
 		.send()
 		.await
@@ -554,7 +560,7 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 
 	let bytes = res.bytes().await.map_err(crate::std_error_to_types_error)?;
 
-	let value: Value = surrealdb_core::rpc::format::flatbuffers::decode(&bytes)
+	let value: Value = surrealdb_types::decode(&bytes)
 		.map_err(|x| format!("Failed to deserialize flatbuffers payload: {x:?}"))
 		.map_err(|e| {
 			crate::Error::serialization(
@@ -607,7 +613,7 @@ async fn send_request(
 	let url = base_url.join(RPC_PATH).expect("valid RPC path");
 
 	let req_value = req.into_value();
-	let body = surrealdb_core::rpc::format::flatbuffers::encode(&req_value)
+	let body = surrealdb_types::encode(&req_value)
 		.map_err(|x| format!("Failed to serialize to flatbuffers: {x}"))
 		.map_err(|e| {
 			crate::Error::internal(format!(
@@ -627,7 +633,7 @@ async fn send_request(
 		.map_err(crate::std_error_to_types_error)?;
 	let bytes = response.bytes().await.map_err(crate::std_error_to_types_error)?;
 
-	let response: DbResponse = surrealdb_core::rpc::format::flatbuffers::decode(&bytes)
+	let response: DbResponse = surrealdb_types::decode(&bytes)
 		.map_err(|x| format!("Failed to deserialize flatbuffers payload: {x}"))
 		.map_err(|e| {
 			crate::Error::internal(format!("The server returned an unexpected response: {e}"))
@@ -927,7 +933,7 @@ async fn router(
 			key,
 			value,
 		} => {
-			surrealdb_core::rpc::check_protected_param(&key)?;
+			surrealdb_rpc::check_protected_param(&key)?;
 			let req = Command::Set {
 				key,
 				value,
@@ -988,16 +994,13 @@ async fn router(
 			let config_value: Value = config.into_value();
 			let headers = session_state.headers.read().await;
 			let auth = session_state.auth.read().await;
-			let request =
-				client
-					.post(req_path)
-					.body(rpc::format::json::encode_str(config_value).map_err(|e| {
-						Error::internal(format!("failed to serialize Value: {}", e))
-					})?)
-					.headers(headers.clone())
-					.auth(&auth)
-					.header(CONTENT_TYPE, "application/json")
-					.header(ACCEPT, "application/octet-stream");
+			let request = client
+				.post(req_path)
+				.body(json_encode_str(config_value))
+				.headers(headers.clone())
+				.auth(&auth)
+				.header(CONTENT_TYPE, "application/json")
+				.header(ACCEPT, "application/octet-stream");
 			export_file(request, path).await?;
 			Ok(vec![QueryResultBuilder::instant_none()])
 		}
@@ -1010,16 +1013,13 @@ async fn router(
 			let config_value = config.into_value();
 			let headers = session_state.headers.read().await;
 			let auth = session_state.auth.read().await;
-			let request =
-				client
-					.post(req_path)
-					.body(rpc::format::json::encode_str(config_value).map_err(|e| {
-						Error::internal(format!("failed to serialize Value: {}", e))
-					})?)
-					.headers(headers.clone())
-					.auth(&auth)
-					.header(CONTENT_TYPE, "application/json")
-					.header(ACCEPT, "application/octet-stream");
+			let request = client
+				.post(req_path)
+				.body(json_encode_str(config_value))
+				.headers(headers.clone())
+				.auth(&auth)
+				.header(CONTENT_TYPE, "application/json")
+				.header(ACCEPT, "application/octet-stream");
 			export_bytes(request, bytes).await?;
 			Ok(vec![QueryResultBuilder::instant_none()])
 		}

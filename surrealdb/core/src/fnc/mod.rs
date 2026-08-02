@@ -11,24 +11,13 @@ use crate::doc::CursorDoc;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::val::{RecordId, Value};
 pub mod api;
-pub mod args;
 pub mod array;
-pub mod bytes;
 pub(crate) mod closure;
-pub mod count;
-pub mod crypto;
-pub mod duration;
 pub mod encoding;
 pub mod eval;
 pub mod file;
-pub mod geo;
 pub mod http;
-pub mod math;
-pub mod not;
-pub mod object;
 pub mod operate;
-pub mod parse;
-pub mod rand;
 pub mod record;
 pub mod schema;
 pub mod script;
@@ -37,10 +26,13 @@ pub mod sequence;
 pub mod session;
 pub mod set;
 pub mod sleep;
-pub mod string;
-pub mod time;
 pub mod r#type;
 pub mod util;
+// The pure families live one crate down; these keep every `fnc::math::…`
+// path in core, in exec's builtins and in the script bridge resolving.
+pub use surrealdb_runtime::{
+	args, bytes, count, crypto, duration, geo, math, not, object, parse, rand, string, time,
+};
 pub mod value;
 pub mod vector;
 

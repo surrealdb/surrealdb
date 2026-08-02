@@ -26,10 +26,9 @@ use crate::exec::pre_decode_filter::{PreDecodeFilter, PreDecodeFilterOutcome};
 use crate::exec::topk_pushdown::TopKThresholdProbe;
 use crate::exec::{EvalContext, ExecutionContext, PhysicalExpr, ValueBatch, ValueBatchStream};
 use crate::expr::{ControlFlow, ControlFlowExt};
-use crate::idx::planner::ScanDirection;
 use crate::key::schema::RecordKey;
 use crate::key::{KVKeyDecode, KVValue, RawRange};
-use crate::kvs::Transaction;
+use crate::kvs::{Direction, Transaction};
 use crate::val::{TableName, Value};
 
 /// A raw computed field entry before topological sorting:
@@ -183,18 +182,16 @@ impl ScanPipeline {
 
 /// Determine scan direction from ORDER BY clause.
 /// Returns Backward if the first ORDER BY is `id DESC`, otherwise Forward.
-pub(crate) fn determine_scan_direction(
-	order: Option<&crate::expr::order::Ordering>,
-) -> ScanDirection {
+pub(crate) fn determine_scan_direction(order: Option<&crate::expr::order::Ordering>) -> Direction {
 	use crate::expr::order::Ordering as OrderingType;
 	if let Some(OrderingType::Order(order_list)) = order
 		&& let Some(first) = order_list.0.first()
 		&& !first.direction
 		&& first.value.is_id()
 	{
-		ScanDirection::Backward
+		Direction::Backward
 	} else {
-		ScanDirection::Forward
+		Direction::Forward
 	}
 }
 
@@ -225,7 +222,7 @@ pub(crate) fn kv_scan_stream(
 	range: RawRange,
 	version: Option<u64>,
 	storage_limit: Option<usize>,
-	direction: ScanDirection,
+	direction: Direction,
 	pre_skip: usize,
 	limit_hint: Option<u32>,
 	pre_decode_filter: Option<Arc<PreDecodeFilter>>,

@@ -11,17 +11,16 @@ pub mod any;
 pub mod local;
 #[cfg(any(feature = "protocol-http", feature = "protocol-ws"))]
 pub mod remote;
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-tikv",
+	feature = "kv-rocksdb",
+	feature = "kv-indxdb",
+	feature = "kv-surrealkv",
+))]
 #[doc(hidden)]
 pub mod tasks;
 
-use std::pin::Pin;
-use std::task::{Context, Poll};
-
-use futures::Stream;
-#[cfg(not(target_family = "wasm"))]
-use tokio::time::Instant;
-#[cfg(not(target_family = "wasm"))]
-use tokio::time::Interval;
 #[cfg(any(
 	feature = "kv-mem",
 	feature = "kv-tikv",
@@ -32,30 +31,58 @@ use tokio::time::Interval;
 	feature = "protocol-ws",
 ))]
 use uuid::Uuid;
-#[cfg(target_family = "wasm")]
-use wasmtimer::std::Instant;
-#[cfg(target_family = "wasm")]
-use wasmtimer::tokio::Interval;
 
-struct IntervalStream {
-	inner: Interval,
-}
+/// Compiled only where something polls on an interval: the embedded
+/// maintenance tasks (kv-*) and the WS ping loop.
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-tikv",
+	feature = "kv-rocksdb",
+	feature = "kv-indxdb",
+	feature = "kv-surrealkv",
+	feature = "protocol-ws",
+))]
+mod interval {
+	use std::pin::Pin;
+	use std::task::{Context, Poll};
 
-impl IntervalStream {
-	fn new(interval: Interval) -> Self {
-		Self {
-			inner: interval,
+	use futures::Stream;
+	#[cfg(not(target_family = "wasm"))]
+	use tokio::time::{Instant, Interval};
+	#[cfg(target_family = "wasm")]
+	use wasmtimer::std::Instant;
+	#[cfg(target_family = "wasm")]
+	use wasmtimer::tokio::Interval;
+
+	pub(crate) struct IntervalStream {
+		inner: Interval,
+	}
+
+	impl IntervalStream {
+		pub(crate) fn new(interval: Interval) -> Self {
+			Self {
+				inner: interval,
+			}
+		}
+	}
+
+	impl Stream for IntervalStream {
+		type Item = Instant;
+
+		fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Instant>> {
+			self.inner.poll_tick(cx).map(Some)
 		}
 	}
 }
-
-impl Stream for IntervalStream {
-	type Item = Instant;
-
-	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Instant>> {
-		self.inner.poll_tick(cx).map(Some)
-	}
-}
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-tikv",
+	feature = "kv-rocksdb",
+	feature = "kv-indxdb",
+	feature = "kv-surrealkv",
+	feature = "protocol-ws",
+))]
+use interval::IntervalStream;
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]

@@ -40,8 +40,14 @@ pub mod channel {
 	pub use async_channel::{Receiver, Sender, bounded, unbounded};
 }
 
+#[cfg(feature = "parse")]
 pub mod parse {
-	pub use surrealdb_core::syn::value;
+	//! Parse SurrealQL text without connecting to a database.
+
+	/// Parses a SurrealQL value from its textual representation.
+	pub fn value(input: &str) -> anyhow::Result<crate::types::Value> {
+		surrealdb_syn::value(input).map_err(anyhow::Error::new)
+	}
 }
 
 #[doc(inline)]

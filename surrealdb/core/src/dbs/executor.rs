@@ -70,12 +70,7 @@ pub fn classify_anyhow_error(err: &anyhow::Error) -> &'static str {
 	// store; the `err::Error::Kvs`-wrapped one comes from every `Transaction`
 	// write, which goes through `map_err(Error::from)`. Matching only the bare
 	// one classified a write conflict as `internal`.
-	if let Some(kvs_err) = err.downcast_ref::<crate::kvs::Error>().or_else(|| {
-		match err.downcast_ref::<crate::err::Error>() {
-			Some(crate::err::Error::Kvs(kvs_err)) => Some(kvs_err),
-			_ => None,
-		}
-	}) {
+	if let Some(kvs_err) = crate::kvs::storage_error(err) {
 		if kvs_err.is_retryable() {
 			return TXN_CONFLICT;
 		}

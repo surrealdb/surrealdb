@@ -24,9 +24,8 @@ use crate::exec::{
 };
 use crate::expr::{ControlFlow, Dir};
 use crate::iam::Action;
-use crate::idx::planner::ScanDirection;
 use crate::key::Resumable;
-use crate::kvs::{CachePolicy, Transaction};
+use crate::kvs::{CachePolicy, Direction, Transaction};
 use crate::val::{RecordId, TableName, Value};
 
 /// What kind of output the GraphEdgeScan should produce.
@@ -339,7 +338,7 @@ impl ExecOperator for GraphEdgeScan {
 									let mut cursor = txn
 										.open_keys_cursor_raw(
 											chunk.clone(),
-											ScanDirection::Forward,
+											Direction::Forward,
 											0,
 											version,
 										)
@@ -534,7 +533,7 @@ impl ExecOperator for GraphEdgeScan {
 											let mut inner_cursor = txn
 												.open_keys_cursor_raw(
 													r,
-													ScanDirection::Forward,
+													Direction::Forward,
 													0,
 													version,
 												)
@@ -613,7 +612,7 @@ impl ExecOperator for GraphEdgeScan {
 								}
 								let resume_from = last_processed_key
 									.expect("chunk_bound_hit implies a key was processed");
-								chunk = chunk.resume_after(&resume_from, ScanDirection::Forward);
+								chunk = chunk.resume_after(&resume_from, Direction::Forward);
 							}
 
 							if limit_hit {

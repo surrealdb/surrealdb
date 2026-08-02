@@ -237,9 +237,9 @@ impl<'a> EvalContext<'a> {
 
 		// Resolve the domain name to IP addresses and check each against the deny list
 		#[cfg(not(target_family = "wasm"))]
-		let resolved = target.resolve().await?;
+		let resolved = crate::net::resolve_net_target(&target).await?;
 		#[cfg(target_family = "wasm")]
-		let resolved = target.resolve()?;
+		let resolved = crate::net::resolve_net_target(&target)?;
 
 		for t in &resolved {
 			if capabilities.matches_any_deny_net(t) {

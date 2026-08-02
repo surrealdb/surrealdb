@@ -845,9 +845,13 @@ impl BenchStatement {
 		}
 	}
 
-	/// Executes the bench statement once. GraphQL responses carry their
-	/// errors in-band, so they are checked here — a bench that errors every
-	/// iteration would otherwise silently measure nothing.
+	/// Executes the bench statement once.
+	///
+	/// Both SurrealQL and GraphQL carry statement errors in-band rather than
+	/// as a failed call, so both are checked here: a bench whose statement
+	/// errors every iteration measures the error path, and the cost of
+	/// failing is unrelated to — and usually far cheaper than — the work the
+	/// bench claims to time.
 	async fn execute(
 		&self,
 		run: &TestRun<BenchRunConfig>,
@@ -856,7 +860,12 @@ impl BenchStatement {
 	) -> Result<()> {
 		match self {
 			Self::SurrealQl => {
-				let _ = dbs.execute(&run.case.test.source, session, None).await?;
+				let results = dbs.execute(&run.case.test.source, session, None).await?;
+				for (idx, result) in results.iter().enumerate() {
+					if let Err(error) = &result.result {
+						bail!("bench statement {idx} returned an error: {error}");
+					}
+				}
 			}
 			Self::Gql {
 				plan,

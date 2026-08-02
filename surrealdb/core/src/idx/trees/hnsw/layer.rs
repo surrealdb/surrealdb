@@ -1,14 +1,12 @@
 use ahash::HashSet;
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use revision::revisioned;
 use roaring::RoaringTreemap;
-use serde::{Deserialize, Serialize};
+pub(super) use surrealdb_datastore::values::hnsw::LayerState;
 
 use crate::ctx::Context;
 use crate::err::EngineError;
 use crate::idx::IndexKeyBase;
-use crate::idx::planner::ScanDirection;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::graph::UndirectedGraph;
 use crate::idx::trees::hnsw::filter::HnswTruthyDocumentFilter;
@@ -19,14 +17,7 @@ use crate::idx::trees::knn::{DoublePriorityQueue, Ids64};
 use crate::idx::trees::vector::SharedVector;
 use crate::key::KVKeyDecode;
 use crate::key::schema::HnswNodeKey;
-use crate::kvs::Transaction;
-
-#[revisioned(revision = 1)]
-#[derive(Default, Debug, Serialize, Deserialize)]
-pub(super) struct LayerState {
-	pub(super) version: u64,
-	pub(super) chunks: u32,
-}
+use crate::kvs::{Direction, Transaction};
 
 #[derive(Debug)]
 pub(super) struct HnswLayer<S>
@@ -620,7 +611,7 @@ where
 		// for each node and take precedence over the Hl data loaded above.
 		let range = self.ikb.new_hn_layer_range(self.level)?;
 		let mut count = 0;
-		let mut cursor = tx.open_vals_cursor_raw(range, ScanDirection::Forward, 0, None).await?;
+		let mut cursor = tx.open_vals_cursor_raw(range, Direction::Forward, 0, None).await?;
 		loop {
 			let batch = cursor.next_batch(crate::kvs::NORMAL_BATCH_SIZE).await?;
 			if batch.is_empty() {

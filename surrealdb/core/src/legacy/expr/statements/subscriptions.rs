@@ -5,7 +5,7 @@ use anyhow::Result;
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::catalog::{self, DatabaseId, NamespaceId};
 use crate::ctx::FrozenContext;
-use crate::dbs::RoutedNotification;
+use crate::dbs::{RoutedNotification, SendKill};
 use crate::key::schema::{NodeLiveQueryKey, SubscriptionKey};
 use crate::kvs::Transaction;
 use crate::types::{PublicAction, PublicNotification, PublicValue};
@@ -50,7 +50,7 @@ pub(crate) async fn kill_table_subscriptions_where(
 		}
 	};
 	for lv in lvs.iter().filter(|lv| owned_by(lv)) {
-		txn.register_live_query_kill_after_commit(
+		txn.on_commit(SendKill::boxed(
 			Arc::clone(sender),
 			RoutedNotification::new(
 				lv.node,
@@ -62,7 +62,7 @@ pub(crate) async fn kill_table_subscriptions_where(
 					PublicValue::None,
 				),
 			),
-		)
+		))
 		.await;
 	}
 	Ok(())
@@ -154,7 +154,7 @@ pub(crate) async fn kill_principal_subscriptions(
 			.await?;
 			removed_any = true;
 			if let Some(sender) = ctx.broker() {
-				txn.register_live_query_kill_after_commit(
+				txn.on_commit(SendKill::boxed(
 					Arc::clone(sender),
 					RoutedNotification::new(
 						lv.node,
@@ -166,7 +166,7 @@ pub(crate) async fn kill_principal_subscriptions(
 							PublicValue::None,
 						),
 					),
-				)
+				))
 				.await;
 			}
 		}

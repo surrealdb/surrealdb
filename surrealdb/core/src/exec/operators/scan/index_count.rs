@@ -367,7 +367,7 @@ pub(crate) async fn sum_index_count_deltas(
 	.range()?;
 
 	let mut cursor = txn
-		.open_keys_cursor_raw(range, crate::idx::planner::ScanDirection::Forward, 0, None)
+		.open_keys_cursor_raw(range, crate::kvs::Direction::Forward, 0, None)
 		.await
 		.context("Failed to open index-count cursor")?;
 	let mut count: i64 = 0;
@@ -418,7 +418,7 @@ async fn count_with_filter_fallback(
 	.range()?;
 
 	let mut cursor = txn
-		.open_vals_cursor_raw(range, crate::idx::planner::ScanDirection::Forward, 0, version)
+		.open_vals_cursor_raw(range, crate::kvs::Direction::Forward, 0, version)
 		.await
 		.context("Failed to open scan cursor")?;
 	let mut count = 0usize;
@@ -491,7 +491,7 @@ async fn count_btree_index_keys(
 		CompoundEqualIterator, CompoundRangeIterator, IndexEqualIterator, IndexRangeIterator,
 		UniqueEqualIterator, UniqueRangeIterator,
 	};
-	use crate::idx::planner::ScanDirection;
+	use crate::kvs::Direction;
 
 	let ix = index_ref.definition();
 	let is_unique = index_ref.is_unique();
@@ -539,7 +539,7 @@ async fn count_btree_index_keys(
 				ix,
 				range.start.as_ref(),
 				range.end.as_ref(),
-				ScanDirection::Forward,
+				Direction::Forward,
 			)
 			.context("Failed to create unique range iterator")?;
 			loop {
@@ -565,7 +565,7 @@ async fn count_btree_index_keys(
 				ix,
 				range.start.as_ref(),
 				range.end.as_ref(),
-				ScanDirection::Forward,
+				Direction::Forward,
 			)
 			.context("Failed to create index range iterator")?;
 			loop {
@@ -587,7 +587,7 @@ async fn count_btree_index_keys(
 			_,
 		) => {
 			let mut iter =
-				CompoundRangeIterator::new(ns_id, db_id, ix, prefix, range, ScanDirection::Forward)
+				CompoundRangeIterator::new(ns_id, db_id, ix, prefix, range, Direction::Forward)
 					.context("Failed to create compound range iterator")?;
 			loop {
 				if ctx.cancellation().is_cancelled() {
@@ -608,7 +608,7 @@ async fn count_btree_index_keys(
 			_,
 		) => {
 			let mut iter =
-				CompoundEqualIterator::new(ns_id, db_id, ix, prefix, None, ScanDirection::Forward)
+				CompoundEqualIterator::new(ns_id, db_id, ix, prefix, None, Direction::Forward)
 					.context("Failed to create compound equal iterator")?;
 			loop {
 				if ctx.cancellation().is_cancelled() {

@@ -93,7 +93,7 @@ use crate::exec::{
 	buffer_stream, monitor_stream,
 };
 use crate::expr::{ControlFlow, Dir};
-use crate::idx::planner::ScanDirection;
+use crate::kvs::Direction;
 use crate::val::{Object, RecordId, TableName, Value};
 
 /// Direction of a single `Expand` hop.
@@ -520,7 +520,7 @@ async fn expand_row(
 
 	for range in ranges {
 		let mut cursor = txn
-			.open_keys_cursor_raw(range, ScanDirection::Forward, 0, version)
+			.open_keys_cursor_raw(range, Direction::Forward, 0, version)
 			.await
 			.context("Failed to open graph cursor")?;
 		loop {

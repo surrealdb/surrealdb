@@ -1,5 +1,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
@@ -7,6 +9,7 @@ use std::time::Duration;
 use anyhow::{Result, ensure};
 use chrono::Utc;
 use futures::channel::oneshot::{Receiver, Sender, channel};
+use surrealdb_datastore::close::{CommitAction, RollbackAction};
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 use tokio::sync::RwLock;
@@ -31,19 +34,23 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
 use crate::idx::index::IndexOperation;
-use crate::idx::planner::ScanDirection;
 use crate::key::schema::{IdxRoot, RecordKey, RecordPrefix};
 use crate::key::{KVKey, KVKeyDecode, Resumable};
-use crate::kvs::ds::TransactionFactory;
+use crate::kvs::sequences::Sequences;
 #[cfg(test)]
 use crate::kvs::testing::{
 	NonRetryableErrorSite, RetryableConflictSite, maybe_inject_non_retryable_error,
 	maybe_inject_retryable_conflict,
 };
 use crate::kvs::{
-	DatastoreError, INDEXING_BATCH_MAX_BYTES, INDEXING_BATCH_SIZE, INDEXING_PROBE_BATCH_SIZE,
-	Transaction, TransactionType, is_retryable_transaction_conflict, is_shutdown_error,
+	DatastoreError, Direction, INDEXING_BATCH_MAX_BYTES, INDEXING_BATCH_SIZE,
+	INDEXING_PROBE_BATCH_SIZE, Transaction, TransactionFactory, TransactionType,
+	is_retryable_transaction_conflict, is_shutdown_error,
 };
+/// How long to wait before retrying a conflicting cleanup of an uncommitted
+/// index build. Matches the reservation-release pause it runs beside.
+const UNCOMMITTED_BUILD_CLEANUP_RETRY_SLEEP: Duration = Duration::from_millis(100);
+
 use crate::mem::ALLOC;
 use crate::val::{RecordId, RecordIdKey, TableName, Value};
 
@@ -1479,7 +1486,7 @@ impl Building {
 					id: Cow::Borrowed(cursor),
 				}
 				.encode_key()?;
-				range = range.resume_after(&checkpoint, ScanDirection::Forward);
+				range = range.resume_after(&checkpoint, Direction::Forward);
 			}
 			let mut next = Some(range);
 			let mut v1_appending_sentinel = false;
@@ -1532,7 +1539,7 @@ impl Building {
 				next = batch
 					.next
 					.and(batch.result.last())
-					.map(|(last, _)| rng.resume_after(last, ScanDirection::Forward));
+					.map(|(last, _)| rng.resume_after(last, Direction::Forward));
 				// Check whether any records remain.
 				if batch.result.is_empty() {
 					// If not, initial indexing is complete.
@@ -2087,5 +2094,149 @@ fn expect_not_prepare_remove(ix: &IndexDefinition) -> anyhow::Result<()> {
 		}))
 	} else {
 		Ok(())
+	}
+}
+
+/// Stop a process-local index builder once a schema retirement has committed.
+///
+/// The durable side of retirement - deleting build state and the catalog entry -
+/// is staged in the schema transaction. The builder map is process memory and is
+/// not, so aborting before the commit would stop a build that a rollback then
+/// leaves valid.
+pub(crate) struct AbortLocalBuild {
+	pub(crate) builder: IndexBuilder,
+	pub(crate) ns: NamespaceId,
+	pub(crate) db: DatabaseId,
+	pub(crate) tb: TableName,
+	pub(crate) ix: IndexId,
+}
+
+impl AbortLocalBuild {
+	pub(crate) fn boxed(
+		builder: IndexBuilder,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: TableName,
+		ix: IndexId,
+	) -> Box<dyn CommitAction> {
+		Box::new(Self {
+			builder,
+			ns,
+			db,
+			tb,
+			ix,
+		})
+	}
+}
+
+impl CommitAction for AbortLocalBuild {
+	fn run(self: Box<Self>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+		Box::pin(async move {
+			if let Err(err) = self.builder.remove_index(self.ns, self.db, &self.tb, self.ix).await {
+				warn!(
+					"failed to abort local index builder after committed schema retirement: {err}"
+				);
+			}
+		})
+	}
+}
+
+/// Remove an index build whose catalog definition never committed.
+///
+/// `DEFINE INDEX` starts the builder while its schema transaction is still open,
+/// so by the time that transaction is cancelled the builder may already have
+/// committed build state and index data of its own, from separate transactions.
+/// This deletes that provisional state, so a retry sees a clean slate.
+///
+/// The deletes go through the transaction's ordinary write methods and so count
+/// against the write-cardinality guard, unlike the reservation release that runs
+/// beside it. Six writes is far below any limit an operator would set, and a
+/// cleanup that silently bypassed the guard would be the stranger choice.
+pub(crate) struct CleanUncommittedBuild {
+	pub(crate) builder: IndexBuilder,
+	pub(crate) tf: TransactionFactory,
+	pub(crate) sequences: Sequences,
+	pub(crate) ns: NamespaceId,
+	pub(crate) db: DatabaseId,
+	pub(crate) tb: TableName,
+	pub(crate) ix: IndexId,
+}
+
+impl CleanUncommittedBuild {
+	pub(crate) fn boxed(
+		builder: IndexBuilder,
+		tf: TransactionFactory,
+		sequences: Sequences,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: TableName,
+		ix: IndexId,
+	) -> Box<dyn RollbackAction> {
+		Box::new(Self {
+			builder,
+			tf,
+			sequences,
+			ns,
+			db,
+			tb,
+			ix,
+		})
+	}
+
+	async fn cleanup_once(&self) -> Result<()> {
+		// Stop the local task first. The durable `!bs` delete below is the
+		// cross-node fence against the builder: any in-flight builder write has to
+		// read/update that key in the same transaction before it can commit index
+		// data. Writer admission is fenced separately, by the `!bt` counter range
+		// deleted alongside it.
+		if let Err(err) = self.builder.remove_index(self.ns, self.db, &self.tb, self.ix).await {
+			warn!("failed to abort uncommitted local index builder during rollback cleanup: {err}");
+		}
+
+		let tx = self.tf.transaction(TransactionType::Write, self.sequences.clone()).await?;
+		let ikb = IndexKeyBase::new(self.ns, self.db, self.tb.clone(), self.ix);
+		let index_prefix = IdxRoot {
+			ns: self.ns,
+			db: self.db,
+			tb: Cow::Borrowed(&self.tb),
+			ix: self.ix,
+		}
+		.range()?;
+		let result: Result<()> = async {
+			tx.del_key(&ikb.new_bs_key()).await?;
+			tx.delr(ikb.new_bg_all_generations_range()?).await?;
+			tx.delr(ikb.new_bp_all_generations_range()?).await?;
+			tx.delr(ikb.new_br_all_generations_range()?).await?;
+			tx.delr(ikb.new_bt_all_generations_range()?).await?;
+			tx.delr(index_prefix).await?;
+			tx.commit_bare().await?;
+			Ok(())
+		}
+		.await;
+		if let Err(err) = result {
+			let _ = tx.cancel_bare().await;
+			return Err(err);
+		}
+		Ok(())
+	}
+}
+
+impl RollbackAction for CleanUncommittedBuild {
+	fn run(self: Box<Self>) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
+		Box::pin(async move {
+			loop {
+				match self.cleanup_once().await {
+					Ok(()) => return Ok(()),
+					Err(err) if is_retryable_transaction_conflict(&err) => {
+						debug!(
+							error = %err,
+							"retryable conflict while cleaning uncommitted index build, retrying"
+						);
+						sleep(UNCOMMITTED_BUILD_CLEANUP_RETRY_SLEEP).await;
+					}
+					Err(err) => return Err(err),
+				}
+			}
+		})
 	}
 }

@@ -97,6 +97,24 @@ pub mod mem;
 // WASM, where the clients are built without a custom DNS resolver.
 #[cfg(all(not(target_family = "wasm"), any(feature = "http", feature = "jwks")))]
 mod net;
+/// `wasm32-unknown-unknown` has no synchronous DNS resolver: `ToSocketAddrs`
+/// is unsupported there and fails with "operation not supported on this
+/// platform". The hostname allow/deny check in
+/// [`Context::check_allowed_net`](crate::ctx::Context) has already run before
+/// resolution; the IP-level pass only exists to catch a host that resolves to
+/// a denied address, and the sole wasm deployment target (a Cloudflare
+/// Worker) cannot reach loopback/link-local/private ranges — the runtime
+/// enforces that. So this stub skips IP resolution rather than erroring.
+#[cfg(all(target_family = "wasm", feature = "http"))]
+mod net {
+	use crate::dbs::capabilities::NetTarget;
+
+	pub(crate) fn resolve_net_target(
+		_target: &NetTarget,
+	) -> Result<Vec<NetTarget>, std::io::Error> {
+		Ok(Vec::new())
+	}
+}
 pub mod obs;
 pub mod observe;
 pub mod options;

@@ -38,7 +38,6 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, instrument, trace, warn};
 use uuid::Uuid;
 
-use super::tr::Transactor;
 use super::tx::Transaction;
 use super::version::{MajorVersion, MigrationRecord, StorageVersion, VersionHistoryEntry};
 use super::{INDEX_COMPACTION_QUEUE_BATCH_SIZE, export, migration};
@@ -61,9 +60,9 @@ use crate::dbs::capabilities::{
 use crate::dbs::node::{Node, Timestamp};
 use crate::dbs::{
 	Capabilities, DurableSession, Executor, MessageBroker, Options, QueryResult,
-	QueryResultBuilder, Session,
+	QueryResultBuilder, Session, durable_session, restore_session,
 };
-use crate::doc::AsyncEventRecord;
+use crate::doc::process_next_events_batch;
 use crate::err::{EngineError, Error};
 use crate::exe::FlowResultExt as _;
 use crate::exec::config::ExecConfig;
@@ -80,7 +79,6 @@ use crate::http::HttpClient;
 use crate::iam::{Action, Auth, PolicyError, Resource, ResourceKind, Role, ScramCredential};
 use crate::idx::IndexKeyBase;
 use crate::idx::index::IndexOperation;
-use crate::idx::planner::ScanDirection;
 use crate::idx::trees::store::IndexStores;
 #[cfg(feature = "kv-tikv")]
 use crate::key::AnyRange;
@@ -101,10 +99,11 @@ use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 #[cfg(test)]
 use crate::kvs::testing::{RetryableConflictSite, maybe_inject_retryable_conflict};
 use crate::kvs::{
-	DatastoreError, NORMAL_BATCH_SIZE, TransactionConfig, is_retryable_transaction_conflict,
+	DatastoreError, Direction, NORMAL_BATCH_SIZE, TransactionFactory,
+	is_retryable_transaction_conflict,
 };
 use crate::lq::LiveQueryRouter;
-use crate::observe::{ExecutionObserver, NoopObserver};
+use crate::observe::ExecutionObserver;
 use crate::sql::Ast;
 #[cfg(feature = "surrealism")]
 use crate::surrealism::cache::SurrealismCache;
@@ -311,84 +310,6 @@ pub struct Datastore {
 
 pub use surrealdb_kvs::{Metric, Metrics, TransactionBuilder};
 
-#[derive(Clone)]
-pub(crate) struct TransactionFactory {
-	// The inner datastore type
-	builder: Arc<Box<dyn TransactionBuilder>>,
-	// Async event processing trigger
-	async_event_trigger: Arc<Notify>,
-	/// Observer invoked on transaction lifecycle events. Defaults to
-	/// [`NoopObserver`]; replaced by the datastore's observer when one is
-	/// configured.
-	observer: Arc<dyn ExecutionObserver>,
-	/// Limits handed to every transaction this factory opens.
-	config: Arc<TransactionConfig>,
-}
-
-impl TransactionFactory {
-	pub(super) fn new(
-		async_event_trigger: Arc<Notify>,
-		builder: Box<dyn TransactionBuilder>,
-		config: Arc<TransactionConfig>,
-	) -> Self {
-		Self {
-			builder: Arc::new(builder),
-			async_event_trigger,
-			observer: Arc::new(NoopObserver),
-			config,
-		}
-	}
-
-	/// Replace the observer. Used by the datastore builder to propagate the
-	/// chosen observer to all transactions created after the swap.
-	pub(crate) fn with_observer(mut self, observer: Arc<dyn ExecutionObserver>) -> Self {
-		self.observer = observer;
-		self
-	}
-
-	/// Access the observer. Transaction instrumentation fires events through
-	/// this handle.
-	#[allow(dead_code)]
-	pub(crate) fn observer(&self) -> &Arc<dyn ExecutionObserver> {
-		&self.observer
-	}
-
-	#[allow(
-		unreachable_code,
-		unreachable_patterns,
-		unused_variables,
-		reason = "Some variables are unused when no backends are enabled."
-	)]
-	pub async fn transaction(
-		&self,
-		write: TransactionType,
-		sequences: Sequences,
-	) -> Result<Transaction> {
-		// Create a new transaction on the datastore
-		let (inner, local) = self.builder.new_transaction(write).await?;
-		Ok(Transaction::new(
-			local,
-			sequences,
-			Arc::clone(&self.async_event_trigger),
-			Arc::clone(&self.observer),
-			Transactor {
-				inner,
-			},
-			&self.config,
-		))
-	}
-
-	/// Registers metrics for the current datastore flavor if supported.
-	fn register_metrics(&self) -> Option<Metrics> {
-		self.builder.register_metrics()
-	}
-
-	/// Collects a specific u64 metric by name if supported by the datastore flavor.
-	fn collect_u64_metric(&self, metric: &str) -> Option<u64> {
-		self.builder.collect_u64_metric(metric)
-	}
-}
-
 /// Transaction-builder construction result with router startup state.
 ///
 /// The datastore consumes `builder`; server startup threads `router_state` into
@@ -496,7 +417,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 
 impl Display for Datastore {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.write_str(self.transaction_factory.builder.name())
+		f.write_str(self.transaction_factory.backend_name())
 	}
 }
 
@@ -716,7 +637,7 @@ impl Datastore {
 	/// The configured write-cardinality limit for statement transactions
 	/// (`transaction_max_write_keys`), or `None` when the guard is disabled.
 	pub(crate) fn transaction_max_write_keys(&self) -> Option<std::num::NonZeroU64> {
-		std::num::NonZeroU64::new(self.transaction_factory.config.transaction_max_write_keys)
+		std::num::NonZeroU64::new(self.transaction_factory.max_write_keys())
 	}
 
 	/// Get the configured global query timeout, if any.
@@ -1126,7 +1047,7 @@ impl Datastore {
 			self.delete_node_with_timeout(NODE_DELETE_TIMEOUT).await,
 		);
 		// Run any storage engine shutdown tasks
-		Ok(self.transaction_factory.builder.shutdown().await?)
+		self.transaction_factory.shutdown().await
 	}
 
 	/// Drop every version of every key in the half-open range `[start, end)`
@@ -1197,7 +1118,6 @@ impl Datastore {
 	fn tikv_ops(&self) -> Option<Arc<surrealdb_kvs_any::tikv::TikvOpsHandle>> {
 		let ext = self
 			.transaction_factory
-			.builder
 			.extension(TypeId::of::<surrealdb_kvs_any::tikv::TikvOpsHandle>())?;
 		ext.downcast::<surrealdb_kvs_any::tikv::TikvOpsHandle>().ok()
 	}
@@ -1688,9 +1608,7 @@ impl Datastore {
 					// A full page carries a continuation: resume the range after
 					// the last key this page returned.
 					next = match (&res.next, res.result.last()) {
-						(Some(_), Some((k, _))) => {
-							Some(rng.resume_after(k, ScanDirection::Forward))
-						}
+						(Some(_), Some((k, _))) => Some(rng.resume_after(k, Direction::Forward)),
 						_ => None,
 					};
 					for (k, v) in res.result.iter() {
@@ -1759,7 +1677,7 @@ impl Datastore {
 		trace!(target: TARGET, id = %id, "Persisting durable RPC session");
 		// Capture the durable form with a refreshed expiry
 		let expires_at = self.clock_now().value + ttl.as_millis() as u64;
-		let value = DurableSession::from_session(session, expires_at);
+		let value = durable_session(session, expires_at);
 		// Open transaction and set the session data
 		let key = SessionKey {
 			id,
@@ -1790,7 +1708,7 @@ impl Datastore {
 			id,
 		};
 		let expires_at = self.clock_now().value + ttl.as_millis() as u64;
-		let value = DurableSession::from_session(session, expires_at);
+		let value = durable_session(session, expires_at);
 		let txn = self.transaction(Write).await?;
 		// `put_compare_key(.., None)` writes only if the key is absent.
 		match txn.put_compare_key(&key, &value, None).await {
@@ -1849,7 +1767,7 @@ impl Datastore {
 			return Ok(false);
 		};
 		let expires_at = self.clock_now().value + ttl.as_millis() as u64;
-		let value = DurableSession::from_session(session, expires_at);
+		let value = durable_session(session, expires_at);
 		// Write only if the stored value is still the one we read, so a delete
 		// or change committed on another node in between wins (no resurrection,
 		// no clobber) instead of being overwritten by this blind write.
@@ -1941,7 +1859,7 @@ impl Datastore {
 		// Restore the in-memory session without touching the durable copy,
 		// handing back the stored expiry so the caller can enforce the TTL.
 		let expires_at = durable.expires_at;
-		durable.into_session().map(|session| Some((session, expires_at)))
+		restore_session(durable).map(|session| Some((session, expires_at)))
 	}
 
 	/// Deletes the durable copy of a client-attached RPC session, when it is
@@ -2047,7 +1965,7 @@ impl Datastore {
 			// A full page carries a continuation: resume the range after the last
 			// key this page returned.
 			next = match (&batch.next, batch.result.last()) {
-				(Some(_), Some((k, _))) => Some(rng.resume_after(k, ScanDirection::Forward)),
+				(Some(_), Some((k, _))) => Some(rng.resume_after(k, Direction::Forward)),
 				_ => None,
 			};
 			for (k, v) in batch.result.iter() {
@@ -2170,7 +2088,7 @@ impl Datastore {
 						// after the last key this page returned.
 						next = match (&res.next, res.result.last()) {
 							(Some(_), Some((k, _))) => {
-								Some(rng.resume_after(k, ScanDirection::Forward))
+								Some(rng.resume_after(k, Direction::Forward))
 							}
 							_ => None,
 						};
@@ -2635,11 +2553,11 @@ impl Datastore {
 							ix: last.ix,
 						}
 						.skip_extensions()?;
-						queue.clone().resume_after(&covered, ScanDirection::Forward)
+						queue.clone().resume_after(&covered, Direction::Forward)
 					}
 					Err(e) => {
 						warn!(target: TARGET, "Skipping undecodable index compaction queue entry: {e}");
-						queue.clone().resume_after(last_key, ScanDirection::Forward)
+						queue.clone().resume_after(last_key, Direction::Forward)
 					}
 				};
 			}
@@ -3658,7 +3576,7 @@ impl Datastore {
 			}
 			// Output function invocation details to logs
 			trace!(target: TARGET, "Running event processing process");
-			if AsyncEventRecord::process_next_events_batch(self, Some(&lh)).await? == 0 {
+			if process_next_events_batch(self, Some(&lh)).await? == 0 {
 				// The last batch didn't have any events to process,
 				// we can sleep until the next wake-up call
 				return Ok(());
@@ -4395,7 +4313,7 @@ impl Datastore {
 		// Return an async export job
 		Ok(async move {
 			// Process the export
-			let res = txn.export(&ns, &db, cfg, batch_size, chn).await;
+			let res = super::export::export(&txn, &ns, &db, cfg, batch_size, chn).await;
 			txn.cancel().await?;
 			res
 		})

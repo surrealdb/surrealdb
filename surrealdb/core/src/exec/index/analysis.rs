@@ -13,7 +13,7 @@ use crate::expr::operator::{MatchesOperator, NearestNeighbor, PrefixOperator};
 use crate::expr::order::Ordering;
 use crate::expr::with::With;
 use crate::expr::{BinaryOperator, Cond, Expr, Idiom};
-use crate::idx::planner::ScanDirection;
+use crate::kvs::Direction;
 use crate::val::{Number, Range, Value};
 
 /// Analyzes query conditions to find matching indexes.
@@ -84,11 +84,7 @@ impl<'a> IndexAnalyzer<'a> {
 	/// into an `AccessPath::Union`. If any branch lacks an index candidate, the
 	/// union cannot be used and `None` is returned (the caller should fall back
 	/// to a table scan).
-	pub fn try_or_union(
-		&self,
-		cond: Option<&Cond>,
-		direction: ScanDirection,
-	) -> Option<AccessPath> {
+	pub fn try_or_union(&self, cond: Option<&Cond>, direction: Direction) -> Option<AccessPath> {
 		let cond = cond?;
 
 		// Check for WITH NOINDEX
@@ -113,7 +109,7 @@ impl<'a> IndexAnalyzer<'a> {
 	fn or_union_from_expr(
 		&self,
 		or_expr: &Expr,
-		direction: ScanDirection,
+		direction: Direction,
 	) -> Option<(AccessPath, u32)> {
 		// Flatten OR branches from the expression tree
 		let mut branches = Vec::new();
@@ -203,7 +199,7 @@ impl<'a> IndexAnalyzer<'a> {
 	pub fn try_and_nested_or_union(
 		&self,
 		cond: Option<&Cond>,
-		direction: ScanDirection,
+		direction: Direction,
 	) -> Option<(AccessPath, u32)> {
 		let cond = cond?;
 
@@ -342,7 +338,7 @@ impl<'a> IndexAnalyzer<'a> {
 				Expr::Binary {
 					op: BinaryOperator::Or,
 					..
-				} => self.or_union_from_expr(conjunct, ScanDirection::Forward).map(|(p, _)| p),
+				} => self.or_union_from_expr(conjunct, Direction::Forward).map(|(p, _)| p),
 				Expr::Binary {
 					op:
 						BinaryOperator::Inside
@@ -353,8 +349,8 @@ impl<'a> IndexAnalyzer<'a> {
 					..
 				} => {
 					let single = Cond((*conjunct).clone());
-					self.try_in_expansion(Some(&single), ScanDirection::Forward).or_else(|| {
-						self.try_containment_expansion(Some(&single), ScanDirection::Forward)
+					self.try_in_expansion(Some(&single), Direction::Forward).or_else(|| {
+						self.try_containment_expansion(Some(&single), Direction::Forward)
 					})
 				}
 				_ => None,
@@ -724,7 +720,7 @@ impl<'a> IndexAnalyzer<'a> {
 	pub fn try_in_expansion(
 		&self,
 		cond: Option<&Cond>,
-		direction: ScanDirection,
+		direction: Direction,
 	) -> Option<AccessPath> {
 		let cond = cond?;
 
@@ -828,7 +824,7 @@ impl<'a> IndexAnalyzer<'a> {
 	pub fn try_containment_expansion(
 		&self,
 		cond: Option<&Cond>,
-		direction: ScanDirection,
+		direction: Direction,
 	) -> Option<AccessPath> {
 		let cond = cond?;
 
@@ -1766,10 +1762,10 @@ fn covers_ordering_either_direction<F>(
 	covers: F,
 ) -> bool
 where
-	F: Fn(&IndexRef, &BTreeAccess, ScanDirection, &Ordering) -> bool,
+	F: Fn(&IndexRef, &BTreeAccess, Direction, &Ordering) -> bool,
 {
-	covers(index_ref, access, ScanDirection::Forward, ordering)
-		|| covers(index_ref, access, ScanDirection::Backward, ordering)
+	covers(index_ref, access, Direction::Forward, ordering)
+		|| covers(index_ref, access, Direction::Backward, ordering)
 }
 
 /// A candidate index access path.
@@ -1890,7 +1886,7 @@ impl IndexCandidate {
 	}
 
 	/// Convert this candidate to an AccessPath.
-	pub fn to_access_path(&self, direction: ScanDirection) -> AccessPath {
+	pub fn to_access_path(&self, direction: Direction) -> AccessPath {
 		if self.empty {
 			return AccessPath::EmptyScan;
 		}
@@ -2320,7 +2316,7 @@ mod tests {
 			let path = super::super::super::access_path::select_access_path(
 				cands,
 				None,
-				crate::idx::planner::ScanDirection::Forward,
+				crate::kvs::Direction::Forward,
 			);
 			match path {
 				AccessPath::BTreeScan {
@@ -2658,7 +2654,7 @@ mod tests {
 			let path = super::super::super::access_path::select_access_path(
 				cands,
 				Some(&with),
-				crate::idx::planner::ScanDirection::Forward,
+				crate::kvs::Direction::Forward,
 			);
 			assert!(matches!(path, AccessPath::TableScan), "NOINDEX → TableScan");
 		}
@@ -2736,7 +2732,7 @@ mod tests {
 			let a = analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
 			let cond = parse_cond("a IN [1, 2, 3]");
 			let path = a
-				.try_in_expansion(Some(&cond), crate::idx::planner::ScanDirection::Forward)
+				.try_in_expansion(Some(&cond), crate::kvs::Direction::Forward)
 				.expect("IN expansion");
 			match path {
 				AccessPath::Union {
@@ -2756,7 +2752,7 @@ mod tests {
 			// 33 elements exceeds MAX_IN_EXPANSION_SIZE (32).
 			let lit = (1..=33).map(|n| n.to_string()).collect::<Vec<_>>().join(", ");
 			let cond = parse_cond(&format!("a IN [{lit}]"));
-			let path = a.try_in_expansion(Some(&cond), crate::idx::planner::ScanDirection::Forward);
+			let path = a.try_in_expansion(Some(&cond), crate::kvs::Direction::Forward);
 			assert!(path.is_none(), "33-element IN should not expand");
 		}
 
@@ -2766,7 +2762,7 @@ mod tests {
 			let lit = (1..=32).map(|n| n.to_string()).collect::<Vec<_>>().join(", ");
 			let cond = parse_cond(&format!("a IN [{lit}]"));
 			let path = a
-				.try_in_expansion(Some(&cond), crate::idx::planner::ScanDirection::Forward)
+				.try_in_expansion(Some(&cond), crate::kvs::Direction::Forward)
 				.expect("32-element IN expands");
 			match path {
 				AccessPath::Union {
@@ -2792,9 +2788,7 @@ mod tests {
 			let defs = vec![idx_basic(1, "ix_a", &["a"]), idx_basic(2, "ix_b", &["b"])];
 			let a = analyzer(defs, None);
 			let cond = parse_cond("a = 1 OR b = 2");
-			let path = a
-				.try_or_union(Some(&cond), crate::idx::planner::ScanDirection::Forward)
-				.expect("union");
+			let path = a.try_or_union(Some(&cond), crate::kvs::Direction::Forward).expect("union");
 			match path {
 				AccessPath::Union {
 					paths,
@@ -2812,7 +2806,7 @@ mod tests {
 			// b has no index → union fails → caller falls back to TableScan.
 			let a = analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
 			let cond = parse_cond("a = 1 OR b = 2");
-			let path = a.try_or_union(Some(&cond), crate::idx::planner::ScanDirection::Forward);
+			let path = a.try_or_union(Some(&cond), crate::kvs::Direction::Forward);
 			assert!(path.is_none(), "unindexed branch defeats union");
 		}
 
@@ -2827,7 +2821,7 @@ mod tests {
 				analyzer(vec![idx_basic(1, "ix_a", &["a"]), idx_basic(2, "ix_b", &["b"])], None);
 			let cond = parse_cond("(a > 10 AND a < 5) OR b = 1");
 			let path = a
-				.try_or_union(Some(&cond), crate::idx::planner::ScanDirection::Forward)
+				.try_or_union(Some(&cond), crate::kvs::Direction::Forward)
 				.expect("union or degenerate path");
 			match path {
 				AccessPath::BTreeScan {
@@ -2852,9 +2846,8 @@ mod tests {
 			// Every branch's range contradicts, so the OR is empty.
 			let a = analyzer(vec![idx_basic(1, "ix_a", &["a"])], None);
 			let cond = parse_cond("(a > 10 AND a < 5) OR (a > 100 AND a < 50)");
-			let path = a
-				.try_or_union(Some(&cond), crate::idx::planner::ScanDirection::Forward)
-				.expect("union path");
+			let path =
+				a.try_or_union(Some(&cond), crate::kvs::Direction::Forward).expect("union path");
 			assert!(matches!(path, AccessPath::EmptyScan));
 		}
 
@@ -2872,7 +2865,7 @@ mod tests {
 			let a = analyzer(defs, None);
 			let cond = parse_cond("type = 'doc' AND (title @@ 'q' OR body @@ 'q')");
 			let (path, score) = a
-				.try_and_nested_or_union(Some(&cond), crate::idx::planner::ScanDirection::Forward)
+				.try_and_nested_or_union(Some(&cond), crate::kvs::Direction::Forward)
 				.expect("nested OR union");
 			match path {
 				AccessPath::Union {
@@ -2902,8 +2895,7 @@ mod tests {
 			let a = analyzer(defs, Some(&with));
 			let cond = parse_cond("type = 'doc' AND (title @@ 'q' OR body @@ 'q')");
 			assert!(
-				a.try_and_nested_or_union(Some(&cond), crate::idx::planner::ScanDirection::Forward)
-					.is_none(),
+				a.try_and_nested_or_union(Some(&cond), crate::kvs::Direction::Forward).is_none(),
 				"WITH INDEX hint disables the nested-OR union"
 			);
 		}
@@ -2917,8 +2909,7 @@ mod tests {
 			let a = analyzer(defs, None);
 			let cond = parse_cond("type = 'doc' AND (title @@ 'q' OR note @@ 'q')");
 			assert!(
-				a.try_and_nested_or_union(Some(&cond), crate::idx::planner::ScanDirection::Forward)
-					.is_none(),
+				a.try_and_nested_or_union(Some(&cond), crate::kvs::Direction::Forward).is_none(),
 				"an unindexed OR branch defeats the union"
 			);
 		}
@@ -2930,8 +2921,7 @@ mod tests {
 			let a = analyzer(defs, None);
 			let cond = parse_cond("a = 1 AND b = 2");
 			assert!(
-				a.try_and_nested_or_union(Some(&cond), crate::idx::planner::ScanDirection::Forward)
-					.is_none(),
+				a.try_and_nested_or_union(Some(&cond), crate::kvs::Direction::Forward).is_none(),
 				"no OR conjunct means no nested-OR union"
 			);
 		}
@@ -2947,8 +2937,7 @@ mod tests {
 			let a = analyzer(defs, None);
 			let cond = parse_cond("vec <|2,100|> [0.0, 0.0] AND (email = 'a' OR email = 'b')");
 			assert!(
-				a.try_and_nested_or_union(Some(&cond), crate::idx::planner::ScanDirection::Forward)
-					.is_none(),
+				a.try_and_nested_or_union(Some(&cond), crate::kvs::Direction::Forward).is_none(),
 				"a KNN operator in the condition must disable the nested-OR union"
 			);
 		}
@@ -2959,14 +2948,10 @@ mod tests {
 	// ------------------------------------------------------------------
 	mod range_merge {
 		use super::*;
-		use crate::idx::planner::ScanDirection;
+		use crate::kvs::Direction;
 
 		fn select_path(cands: Vec<IndexCandidate>) -> AccessPath {
-			super::super::super::access_path::select_access_path(
-				cands,
-				None,
-				ScanDirection::Forward,
-			)
+			super::super::super::access_path::select_access_path(cands, None, Direction::Forward)
 		}
 
 		#[test]

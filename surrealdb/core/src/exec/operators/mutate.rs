@@ -39,8 +39,8 @@ use crate::expr::data::Assignment;
 use crate::expr::match_plan::{DetachMode, UpdateData};
 use crate::expr::statements::{CreateStatement, DeleteStatement, RelateStatement, UpdateStatement};
 use crate::expr::{AssignOperator, ControlFlow, Data, Expr, Literal, Output};
-use crate::idx::planner::ScanDirection;
 use crate::key::schema::GraphIdPrefix;
+use crate::kvs::Direction;
 use crate::val::{Object, RecordId, TableName, Value};
 
 /// `SET` / `REMOVE` over the binding bound at `target`.
@@ -408,7 +408,7 @@ async fn has_connected_edges(
 	}
 	.range()?;
 	let mut cursor = txn
-		.open_keys_cursor_raw(range, ScanDirection::Forward, 0, None)
+		.open_keys_cursor_raw(range, Direction::Forward, 0, None)
 		.await
 		.map_err(ControlFlow::Err)?;
 	let batch = cursor.next_batch(1).await.map_err(ControlFlow::Err)?;

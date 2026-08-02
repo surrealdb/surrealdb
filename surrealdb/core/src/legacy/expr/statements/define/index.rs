@@ -22,7 +22,9 @@ use crate::expr::{Base, Idiom, Part};
 use crate::iam::{Action, ResourceKind};
 use crate::idx::docids::TableDocIds;
 use crate::key::schema::TableKey;
-use crate::kvs::index::{IndexBuilder, retire_durable_index};
+use crate::kvs::index::{
+	AbortLocalBuild, CleanUncommittedBuild, IndexBuilder, retire_durable_index,
+};
 use crate::kvs::{DatastoreError, Transaction};
 use crate::legacy::{expr_to_ident, exprs_to_fields};
 use crate::val::{TableName, Value};
@@ -192,13 +194,13 @@ pub(crate) async fn define_index_statement_compute(
 		// process-local builder abort is deferred until commit.
 		ctx.get_index_stores().index_removed(tb.namespace_id, tb.database_id, &tb, ix).await?;
 		if let Some(index_builder) = ctx.get_index_builder() {
-			txn.register_index_builder_abort_after_commit(
+			txn.on_commit(AbortLocalBuild::boxed(
 				index_builder.clone(),
 				tb.namespace_id,
 				tb.database_id,
 				tb_name.clone(),
 				ix.index_id,
-			)
+			))
 			.await;
 		}
 		retire_durable_index(&txn, tb.namespace_id, tb.database_id, &tb_name, ix.index_id).await?;
@@ -256,14 +258,15 @@ pub(crate) async fn define_index_statement_compute(
 	refresh_table_index_cache(ctx, &txn, ns, db, &tb).await?;
 	let index_builder =
 		ctx.get_index_builder().ok_or_else(|| EngineError::unreachable("No Index Builder"))?;
-	txn.register_uncommitted_index_build_cleanup(
+	txn.on_rollback(CleanUncommittedBuild::boxed(
 		index_builder.clone(),
 		index_builder.transaction_factory(),
+		txn.sequences(),
 		tb.namespace_id,
 		tb.database_id,
 		tb_name.clone(),
 		index_id,
-	)
+	))
 	.await;
 	// Process the index
 	run_indexing_with_builder(

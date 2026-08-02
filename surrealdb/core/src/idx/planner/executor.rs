@@ -18,6 +18,7 @@ use crate::expr::{Cond, Expr, Idiom};
 use crate::idx::ft::MatchRef;
 use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms, Scorer};
 use crate::idx::ft::highlighter::HighlightParams;
+use crate::idx::planner::IterationStage;
 use crate::idx::planner::iterators::{
 	IndexCountThingIterator, IndexEqualThingIterator, IndexJoinThingIterator,
 	IndexRangeReverseThingIterator, IndexRangeThingIterator, IndexUnionThingIterator,
@@ -29,12 +30,12 @@ use crate::idx::planner::knn::{KnnBruteForceResult, KnnPriorityList};
 use crate::idx::planner::plan::IndexOperator::Matches;
 use crate::idx::planner::plan::{IndexOperator, IndexOption};
 use crate::idx::planner::tree::{IdiomPosition, IndexReference};
-use crate::idx::planner::{IterationStage, ScanDirection};
 use crate::idx::trees::KnnCondFilter;
 #[cfg(diskann)]
 use crate::idx::trees::store::diskann::SharedDiskAnnIndex;
 use crate::idx::trees::store::hnsw::SharedHnswIndex;
 use crate::idx::{Error, IndexKeyBase};
+use crate::kvs::Direction;
 use crate::val::{Array, Number, Object, RecordId, TableName, Value};
 
 pub(super) type KnnBruteForceEntry = (KnnPriorityList, Idiom, Arc<Vec<Number>>, Distance);
@@ -107,7 +108,7 @@ impl From<InnerQueryExecutor> for QueryExecutor {
 
 pub(super) enum IteratorEntry {
 	Single(Option<Arc<Expr>>, IndexOption),
-	Range(HashSet<Arc<Expr>>, IndexReference, Bound<Arc<Value>>, Bound<Arc<Value>>, ScanDirection),
+	Range(HashSet<Arc<Expr>>, IndexReference, Bound<Arc<Value>>, Bound<Arc<Value>>, Direction),
 }
 
 impl IteratorEntry {
@@ -602,7 +603,7 @@ impl QueryExecutor {
 		ix: &IndexDefinition,
 		from: Bound<&Value>,
 		to: Bound<&Value>,
-		sc: ScanDirection,
+		sc: Direction,
 	) -> Result<Option<RecordIterator>> {
 		match ix.index {
 			Index::Idx => {
@@ -623,13 +624,13 @@ impl QueryExecutor {
 		ix: &IndexDefinition,
 		from: Bound<&Value>,
 		to: Bound<&Value>,
-		sc: ScanDirection,
+		sc: Direction,
 	) -> Result<RecordIterator> {
 		Ok(match sc {
-			ScanDirection::Forward => {
+			Direction::Forward => {
 				RecordIterator::IndexRange(IndexRangeThingIterator::new(ir, ns, db, ix, from, to)?)
 			}
-			ScanDirection::Backward => RecordIterator::IndexRangeReverse(
+			Direction::Backward => RecordIterator::IndexRangeReverse(
 				IndexRangeReverseThingIterator::new(ir, ns, db, ix, from, to)?,
 			),
 		})
@@ -642,13 +643,13 @@ impl QueryExecutor {
 		ix: &IndexDefinition,
 		from: Bound<&Value>,
 		to: Bound<&Value>,
-		sc: ScanDirection,
+		sc: Direction,
 	) -> Result<RecordIterator> {
 		Ok(match sc {
-			ScanDirection::Forward => RecordIterator::UniqueRange(UniqueRangeThingIterator::new(
+			Direction::Forward => RecordIterator::UniqueRange(UniqueRangeThingIterator::new(
 				ir, ns, db, ix, from, to,
 			)?),
-			ScanDirection::Backward => RecordIterator::UniqueRangeReverse(
+			Direction::Backward => RecordIterator::UniqueRangeReverse(
 				UniqueRangeReverseThingIterator::new(ir, ns, db, ix, from, to)?,
 			),
 		})

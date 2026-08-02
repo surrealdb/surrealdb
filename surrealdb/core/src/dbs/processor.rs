@@ -16,14 +16,14 @@ use crate::exec::Error as ExecError;
 use crate::expr::dir::Dir;
 use crate::expr::lookup::{ComputedLookupSubject, LookupKind};
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, RecordIterator};
-use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
+use crate::idx::planner::{IterationStage, RecordStrategy};
 use crate::key::schema::{
 	DbRoot, DecodedGraph, GraphDirPrefix, GraphForeignTablePrefix, GraphIdPrefix, RecordKey,
 	RecordPrefix, ReferenceForeignFieldPrefix, ReferenceForeignTablePrefix, ReferenceIdPrefix,
 	ReferenceKey,
 };
 use crate::key::{AnyRange, KVKeyDecode, KVValue, RawRange, Resumable, TypedRange};
-use crate::kvs::{DatastoreError, NORMAL_BATCH_SIZE, Transaction, Val};
+use crate::kvs::{DatastoreError, Direction, NORMAL_BATCH_SIZE, Transaction, Val};
 use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange, TableName, Value};
 
 impl Iterable {
@@ -756,7 +756,7 @@ pub(super) trait Collector {
 		ctx: &FrozenContext,
 		opt: &Options,
 		rng: R,
-		sc: ScanDirection,
+		sc: Direction,
 	) -> Result<Option<R>>
 	where
 		R: AnyRange + Resumable + Clone,
@@ -816,7 +816,7 @@ pub(super) trait Collector {
 		opt: &Options,
 		doc_ctx: DocumentContext,
 		table: &TableName,
-		sc: ScanDirection,
+		sc: Direction,
 	) -> Result<()> {
 		let ns = doc_ctx.ns().namespace_id;
 		let db = doc_ctx.db().database_id;
@@ -869,7 +869,7 @@ pub(super) trait Collector {
 		opt: &Options,
 		doc_ctx: DocumentContext,
 		table: &TableName,
-		sc: ScanDirection,
+		sc: Direction,
 	) -> Result<()> {
 		let ns = doc_ctx.ns().namespace_id;
 		let db = doc_ctx.db().database_id;
@@ -963,7 +963,7 @@ pub(super) trait Collector {
 		doc_ctx: DocumentContext,
 		table_name: &TableName,
 		r: RecordIdKeyRange,
-		sc: ScanDirection,
+		sc: Direction,
 	) -> Result<()> {
 		let ns = doc_ctx.ns().namespace_id;
 		let db = doc_ctx.db().database_id;
@@ -1009,7 +1009,7 @@ pub(super) trait Collector {
 		doc_ctx: DocumentContext,
 		tb: &TableName,
 		r: RecordIdKeyRange,
-		sc: ScanDirection,
+		sc: Direction,
 	) -> Result<()> {
 		let ns = doc_ctx.ns().namespace_id;
 		let db = doc_ctx.db().database_id;
@@ -1156,7 +1156,7 @@ pub(super) trait Collector {
 		'keys: for rng in ranges {
 			// Create a new iterable range
 			let mut cursor =
-				txn.open_keys_cursor_raw(rng, ScanDirection::Forward, 0, opt.version).await?;
+				txn.open_keys_cursor_raw(rng, Direction::Forward, 0, opt.version).await?;
 			// Loop until no more entries
 			let mut count = 0;
 			loop {

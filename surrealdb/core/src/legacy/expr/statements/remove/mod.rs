@@ -26,7 +26,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::statements::remove::RemoveStatement;
 use crate::kvs::Transaction;
-use crate::kvs::index::retire_durable_index;
+use crate::kvs::index::{AbortLocalBuild, retire_durable_index};
 use crate::val::Value;
 
 /// Process this type returning a computed simple Value
@@ -129,13 +129,13 @@ pub(crate) async fn retire_table_indexes(
 		// is process memory and must only be aborted after this transaction commits.
 		ctx.get_index_stores().index_removed(ns, db, tb, ix).await?;
 		if let Some(index_builder) = &index_builder {
-			txn.register_index_builder_abort_after_commit(
+			txn.on_commit(AbortLocalBuild::boxed(
 				index_builder.clone(),
 				ns,
 				db,
 				tb_name.clone(),
 				ix.index_id,
-			)
+			))
 			.await;
 		}
 		retire_durable_index(txn, ns, db, &tb_name, ix.index_id).await?;

@@ -2,8 +2,8 @@ use std::borrow::Cow;
 use std::path::PathBuf;
 
 use async_channel::Sender;
-use surrealdb_core::iam::token::Token;
-use surrealdb_core::kvs::export::Config as DbExportConfig;
+use surrealdb_rpc::Token;
+use surrealdb_rpc::export::Config as DbExportConfig;
 use uuid::Uuid;
 
 use super::MlExportConfig;

@@ -1,0 +1,82 @@
+[package]
+name = "surrealdb-datastore"
+publish = true
+readme = "README.md"
+documentation = "https://docs.rs/surrealdb-datastore/"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+# The datastore cache's JWKS slot. Matches the crate above, which owns the
+# fetching and verification; only the cached document lives here.
+jwks = ["dep:jsonwebtoken"]
+# Backends for the lease-contention tests. The library selects no backend; the
+# in-memory one is always available as a dev-dependency, and these add the
+# on-disk ones so each KVS CI lane runs the contention test against its own
+# store. Nothing in the library reads them.
+kv-rocksdb = ["surrealdb-kvs-any/kv-rocksdb"]
+kv-surrealkv = ["surrealdb-kvs-any/kv-surrealkv"]
+# The fault-injection registry in `testing`. Off in a normal build; the crate
+# above turns it on as a dev-dependency so its tests and the code under test
+# share one registry.
+test-hooks = []
+
+[dependencies]
+anyhow.workspace = true
+blake3.workspace = true
+bytes = { workspace = true }
+chrono = { workspace = true }
+common.workspace = true
+revision = { workspace = true }
+roaring = { workspace = true, features = ["serde"] }
+parking_lot.workspace = true
+serde.workspace = true
+surrealdb-catalog.workspace = true
+surrealdb-expr.workspace = true
+surrealdb-iam.workspace = true
+surrealdb-rpc.workspace = true
+semver = { workspace = true, features = ["serde"] }
+surrealdb-strand.workspace = true
+surrealdb-kvs.workspace = true
+surrealdb-types.workspace = true
+thiserror = { workspace = true }
+tracing = { workspace = true }
+surrealdb-cnf.workspace = true
+surrealdb-keyspace-macro.workspace = true
+surrealdb-observe.workspace = true
+quick_cache = { workspace = true }
+rand = { workspace = true }
+storekey.workspace = true
+tokio = { workspace = true, default-features = false, features = ["rt", "sync", "time", "macros"] }
+tokio-util.workspace = true
+uuid = { workspace = true }
+web-time = { workspace = true }
+
+# jsonwebtoken picks its crypto backend by target, so the `jwks` feature has to
+# name it once per family rather than in [dependencies].
+[target.'cfg(target_family = "wasm")'.dependencies]
+jsonwebtoken = { workspace = true, optional = true, features = ["rust_crypto"] }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+jsonwebtoken = { workspace = true, optional = true, features = ["aws_lc_rs"] }
+
+[dev-dependencies]
+rstest.workspace = true
+serde_json.workspace = true
+# The on-disk lease-contention runs need somewhere to put a store.
+temp-dir.workspace = true
+surrealdb-collections.workspace = true
+# The allocator and lease tests need a real transaction, so they open one
+# against an in-memory backend. Nothing in the library selects a backend.
+surrealdb-kvs-any = { workspace = true, features = ["kv-mem"] }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+
+[lints]
+workspace = true

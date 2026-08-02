@@ -2,9 +2,8 @@ use surrealdb_kvs::TransactionType::*;
 use uuid::Uuid;
 
 use crate::CommunityComposer;
-use crate::idx::planner::ScanDirection;
 use crate::key::RawRange;
-use crate::kvs::Datastore;
+use crate::kvs::{Datastore, Direction};
 
 #[cfg(feature = "kv-mem")]
 #[tokio::test]
@@ -103,7 +102,7 @@ pub async fn cursor_for_each_metrics_match_next_batch(ds: Datastore) {
 	let tx1 = ds.transaction(Read).await.unwrap();
 	{
 		let mut c =
-			tx1.open_vals_cursor_raw(rng.clone(), ScanDirection::Forward, 0, None).await.unwrap();
+			tx1.open_vals_cursor_raw(rng.clone(), Direction::Forward, 0, None).await.unwrap();
 		loop {
 			let b = c.next_batch(2).await.unwrap();
 			if b.is_empty() {
@@ -117,7 +116,7 @@ pub async fn cursor_for_each_metrics_match_next_batch(ds: Datastore) {
 	// Drain via for_each (visitor ignores every row) and snapshot.
 	let tx2 = ds.transaction(Read).await.unwrap();
 	{
-		let mut c = tx2.open_vals_cursor_raw(rng, ScanDirection::Forward, 0, None).await.unwrap();
+		let mut c = tx2.open_vals_cursor_raw(rng, Direction::Forward, 0, None).await.unwrap();
 		loop {
 			let s =
 				c.for_each(2, &mut |_k, _v| Ok(std::ops::ControlFlow::Continue(()))).await.unwrap();

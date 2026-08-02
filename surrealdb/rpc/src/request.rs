@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 use std::str::FromStr;
 
+use surrealdb_cnf::PROTECTED_PARAM_NAMES;
 use surrealdb_types::{
 	Array as PublicArray, Error as TypesError, Number as PublicNumber, Object as PublicObject,
 	Uuid as PublicUuid, Value as PublicValue,
 };
 
-use crate::error::invalid_request;
+use crate::error::{invalid_params, invalid_request};
 use crate::method::Method;
 
 pub static ID: &str = "id";
@@ -140,6 +141,15 @@ impl Request {
 			trace_context,
 		})
 	}
+}
+
+/// Reject assignment to a protected parameter name — one the engine reserves
+/// and populates itself (`$auth`, `$session`, ...).
+pub fn check_protected_param(key: &str) -> Result<(), TypesError> {
+	if PROTECTED_PARAM_NAMES.contains(&key) {
+		return Err(invalid_params(format!("Cannot set protected variable: {key}")));
+	}
+	Ok(())
 }
 
 #[cfg(test)]

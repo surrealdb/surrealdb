@@ -13,7 +13,7 @@ use crate::expr::statements::remove::index::RemoveIndexStatement;
 use crate::iam::{Action, ResourceKind};
 use crate::idx::docids::TableDocIds;
 use crate::key::schema::TableKey;
-use crate::kvs::index::retire_durable_index;
+use crate::kvs::index::{AbortLocalBuild, retire_durable_index};
 use crate::legacy::expr_to_ident;
 use crate::val::Value;
 
@@ -65,13 +65,13 @@ pub(crate) async fn remove_index_statement_compute(
 	// commits so rollback/cancel keeps an in-flight build alive.
 	ctx.get_index_stores().index_removed(ns, db, &tb, &ix).await?;
 	if let Some(index_builder) = ctx.get_index_builder() {
-		txn.register_index_builder_abort_after_commit(
+		txn.on_commit(AbortLocalBuild::boxed(
 			index_builder.clone(),
 			ns,
 			db,
 			table_name.clone(),
 			ix.index_id,
-		)
+		))
 		.await;
 	}
 	retire_durable_index(&txn, ns, db, &table_name, ix.index_id).await?;

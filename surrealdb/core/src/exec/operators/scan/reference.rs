@@ -22,13 +22,12 @@ use crate::exec::{
 };
 use crate::expr::ControlFlow;
 use crate::iam::Action;
-use crate::idx::planner::ScanDirection;
 use crate::key::schema::{
 	DbRoot, ReferenceForeignFieldPrefix, ReferenceForeignTablePrefix, ReferenceIdPrefix,
 	ReferenceKey,
 };
 use crate::key::{KVKeyDecode, TypedRange};
-use crate::kvs::CachePolicy;
+use crate::kvs::{CachePolicy, Direction};
 use crate::val::{RecordId, TableName};
 
 /// What kind of output the ReferenceScan should produce.
@@ -221,7 +220,7 @@ impl ExecOperator for ReferenceScan {
 					.await?;
 
 					let mut cursor = txn
-						.open_keys_cursor_raw(range, ScanDirection::Forward, 0, version)
+						.open_keys_cursor_raw(range, Direction::Forward, 0, version)
 						.await
 						.context("Failed to open reference cursor")?;
 					loop {

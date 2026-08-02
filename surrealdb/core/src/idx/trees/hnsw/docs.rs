@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
-use serde::{Deserialize, Serialize};
+// The vector-to-documents mapping is a stored value, and the bucket-mutation rule
+// that keeps one entry per distinct vector travels with it.
+pub(crate) use surrealdb_datastore::values::hnsw::{ElementDocs, ElementHashedDocs, RemoveResult};
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableId};
 use crate::ctx::FrozenContext;
@@ -14,7 +15,6 @@ use crate::idx::trees::hnsw::flavor::HnswFlavor;
 use crate::idx::trees::hnsw::index::HnswContext;
 use crate::idx::trees::knn::Ids64;
 use crate::idx::trees::vector::{SerializedVector, Vector};
-use crate::key::KVValue;
 use crate::kvs::Transaction;
 use crate::val::{RecordId, RecordIdKey};
 
@@ -142,385 +142,6 @@ impl HnswDocs {
 	/// this only drops the process-local cache entry. Doc-IDs are never recycled.
 	pub(super) async fn remove(&self, doc_id: DocId, table_id: TableId, cache: &VectorCache) {
 		cache.remove_doc_id(Self::cache_index(&self.ikb, table_id), doc_id).await;
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use std::borrow::Cow;
-
-	use anyhow::Result;
-
-	use super::*;
-	use crate::key::schema::DocKeyKey;
-	use crate::kvs::{Datastore, TransactionType};
-
-	fn ikb() -> IndexKeyBase {
-		IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(3))
-	}
-
-	#[tokio::test]
-	async fn hnsw_docs_batch_preserves_order_and_uses_cache() -> Result<()> {
-		let ds = Datastore::new("memory").await?;
-		let ikb = ikb();
-		let cache = VectorCache::new(1024 * 1024);
-		{
-			let tx = ds.transaction(TransactionType::Write).await?;
-			tx.set_key(
-				&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 1),
-				&RecordIdKey::Number(11),
-			)
-			.await?;
-			tx.set_key(
-				&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 2),
-				&RecordIdKey::Number(22),
-			)
-			.await?;
-			tx.commit().await?;
-		}
-
-		let tx = ds.transaction(TransactionType::Read).await?;
-		let got =
-			HnswDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[2, 1, 3], Some(5)).await?;
-		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(22));
-		assert_eq!(&got[1].as_ref().unwrap().key, &RecordIdKey::Number(11));
-		assert!(got[2].is_none());
-		tx.cancel().await?;
-
-		let tx = ds.transaction(TransactionType::Write).await?;
-		tx.del_key(&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 1)).await?;
-		tx.commit().await?;
-
-		let tx = ds.transaction(TransactionType::Read).await?;
-		let cached =
-			HnswDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[1], Some(5)).await?;
-		assert_eq!(&cached[0].as_ref().unwrap().key, &RecordIdKey::Number(11));
-		tx.cancel().await?;
-		Ok(())
-	}
-
-	#[tokio::test]
-	async fn hnsw_docs_batch_does_not_cache_missing_or_write_transaction_mappings() -> Result<()> {
-		let ds = Datastore::new("memory").await?;
-		let ikb = ikb();
-		let cache = VectorCache::new(1024 * 1024);
-
-		let tx = ds.transaction(TransactionType::Read).await?;
-		assert_eq!(
-			HnswDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[9], Some(5)).await?,
-			vec![None]
-		);
-		tx.cancel().await?;
-
-		let tx = ds.transaction(TransactionType::Write).await?;
-		tx.set_key(
-			&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 9),
-			&RecordIdKey::Number(99),
-		)
-		.await?;
-		let got = HnswDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[9], Some(5)).await?;
-		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(99));
-		assert!(
-			cache
-				.get_doc_id((ikb.ns(), ikb.db(), TableId(4), ikb.index()), 9, Some(5))
-				.await
-				.is_none()
-		);
-		tx.cancel().await?;
-		Ok(())
-	}
-
-	#[tokio::test]
-	async fn hnsw_docs_batch_ignores_doc_id_cache_from_old_generation() -> Result<()> {
-		let ds = Datastore::new("memory").await?;
-		let ikb = ikb();
-		let cache = VectorCache::new(1024 * 1024);
-		{
-			let tx = ds.transaction(TransactionType::Write).await?;
-			tx.set_key(
-				&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 1),
-				&RecordIdKey::Number(11),
-			)
-			.await?;
-			tx.commit().await?;
-		}
-
-		let tx = ds.transaction(TransactionType::Read).await?;
-		let got = HnswDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[1], Some(5)).await?;
-		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(11));
-		tx.cancel().await?;
-		assert!(
-			cache
-				.get_doc_id((ikb.ns(), ikb.db(), TableId(4), ikb.index()), 1, Some(6))
-				.await
-				.is_none()
-		);
-
-		let tx = ds.transaction(TransactionType::Write).await?;
-		tx.set_key(
-			&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 1),
-			&RecordIdKey::Number(22),
-		)
-		.await?;
-		tx.commit().await?;
-
-		let tx = ds.transaction(TransactionType::Read).await?;
-		let got = HnswDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[1], Some(6)).await?;
-		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(22));
-		tx.cancel().await?;
-		Ok(())
-	}
-
-	#[tokio::test]
-	async fn hnsw_docs_remove_evicts_doc_id_cache() -> Result<()> {
-		let ds = Datastore::new("memory").await?;
-		let ikb = ikb();
-		let cache = VectorCache::new(1024 * 1024);
-		let id = RecordIdKey::Number(77);
-		{
-			let tx = ds.transaction(TransactionType::Write).await?;
-			tx.set_key(&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 7), &id)
-				.await?;
-			tx.commit().await?;
-		}
-
-		let tx = ds.transaction(TransactionType::Read).await?;
-		let got = HnswDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[7], Some(5)).await?;
-		assert_eq!(&got[0].as_ref().unwrap().key, &id);
-		assert!(
-			cache
-				.get_doc_id((ikb.ns(), ikb.db(), TableId(4), ikb.index()), 7, Some(5))
-				.await
-				.is_some()
-		);
-		tx.cancel().await?;
-
-		let tx = ds.transaction(TransactionType::Write).await?;
-		let docs = HnswDocs::new(ikb.clone());
-		docs.remove(7, TableId(4), &cache).await;
-		assert!(
-			cache
-				.get_doc_id((ikb.ns(), ikb.db(), TableId(4), ikb.index()), 7, Some(5))
-				.await
-				.is_none()
-		);
-		tx.cancel().await?;
-		Ok(())
-	}
-
-	#[tokio::test]
-	async fn hnsw_vec_docs_populates_and_uses_doc_set_cache() -> Result<()> {
-		let ds = Datastore::new("memory").await?;
-		let tx = ds.transaction(TransactionType::Write).await?;
-		let ikb = ikb();
-		let cache = VectorCache::new(1024 * 1024);
-		let vec_docs = VecDocs::new(ikb.clone(), TableId(4), cache.clone(), false);
-		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
-		let vector = Vector::from(ser_vec.clone());
-		tx.set_key(
-			&ikb.new_hv_key(&ser_vec),
-			&ElementDocs {
-				e_id: 7,
-				docs: Ids64::One(42),
-			},
-		)
-		.await?;
-
-		assert_eq!(vec_docs.get_docs_by_element(&tx, 7, &vector).await?, Some(Ids64::One(42)));
-		assert_eq!(
-			cache.get_doc_set((ikb.ns(), ikb.db(), TableId(4), ikb.index()), 7).await,
-			Some(Ids64::One(42))
-		);
-
-		tx.del_key(&ikb.new_hv_key(&ser_vec)).await?;
-		assert_eq!(vec_docs.get_docs_by_element(&tx, 7, &vector).await?, Some(Ids64::One(42)));
-		assert_eq!(vec_docs.get_docs_uncached(&tx, &vector).await?, None);
-		tx.cancel().await?;
-		Ok(())
-	}
-
-	#[tokio::test]
-	async fn hnsw_vec_docs_hashed_disambiguates_and_caches_by_element() -> Result<()> {
-		let ds = Datastore::new("memory").await?;
-		let tx = ds.transaction(TransactionType::Write).await?;
-		let ikb = ikb();
-		let cache = VectorCache::new(1024 * 1024);
-		let vec_docs = VecDocs::new(ikb.clone(), TableId(4), cache.clone(), true);
-		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
-		let other_vec = SerializedVector::F32(vec![3.0, 4.0]);
-		let vector = Vector::from(ser_vec.clone());
-		let key = ikb.new_hh_key(ser_vec.compute_hash());
-		tx.set_key(
-			&key,
-			&ElementHashedDocs {
-				vectors: vec![
-					(
-						other_vec,
-						ElementDocs {
-							e_id: 8,
-							docs: Ids64::One(88),
-						},
-					),
-					(
-						ser_vec,
-						ElementDocs {
-							e_id: 7,
-							docs: Ids64::One(42),
-						},
-					),
-				],
-			},
-		)
-		.await?;
-
-		assert_eq!(vec_docs.get_docs_by_element(&tx, 7, &vector).await?, Some(Ids64::One(42)));
-		tx.del_key(&key).await?;
-		assert_eq!(vec_docs.get_docs_by_element(&tx, 7, &vector).await?, Some(Ids64::One(42)));
-		tx.cancel().await?;
-		Ok(())
-	}
-
-	#[tokio::test]
-	async fn hnsw_vec_docs_missing_mapping_returns_none_without_caching() -> Result<()> {
-		let ds = Datastore::new("memory").await?;
-		let tx = ds.transaction(TransactionType::Write).await?;
-		let ikb = ikb();
-		let cache = VectorCache::new(1024 * 1024);
-		let vec_docs = VecDocs::new(ikb.clone(), TableId(4), cache.clone(), false);
-		let vector = Vector::from(SerializedVector::F32(vec![1.0, 2.0]));
-
-		assert_eq!(vec_docs.get_docs_by_element(&tx, 7, &vector).await?, None);
-		assert!(
-			cache.get_doc_set((ikb.ns(), ikb.db(), TableId(4), ikb.index()), 7).await.is_none()
-		);
-		tx.cancel().await?;
-		Ok(())
-	}
-}
-
-/// Contains the mapping between an element ID and the document IDs that share the same vector.
-#[revisioned(revision = 1)]
-#[derive(Serialize, Deserialize)]
-pub(crate) struct ElementDocs {
-	e_id: ElementId,
-	docs: Ids64,
-}
-
-impl ElementDocs {
-	fn new(element_id: ElementId, d: DocId) -> Self {
-		Self {
-			e_id: element_id,
-			docs: Ids64::One(d),
-		}
-	}
-}
-
-/// Contains a list of vectors and their associated document IDs that share the same hash.
-#[revisioned(revision = 1)]
-pub(crate) struct ElementHashedDocs {
-	vectors: Vec<(SerializedVector, ElementDocs)>,
-}
-
-/// Result of removing a document from an [`ElementHashedDocs`] entry.
-enum RemoveResult {
-	/// The vector has no remaining documents; the element should be removed from the graph.
-	Empty(ElementId),
-	/// A document set changed without removing the graph element.
-	Updated(ElementId, Ids64),
-	/// A colliding vector was removed while other vectors remain in the hash bucket.
-	RemovedElement(ElementId),
-	/// The document was not found; no changes were made.
-	Unchanged,
-}
-
-impl ElementHashedDocs {
-	fn new(element_id: ElementId, vec: SerializedVector, doc_id: DocId) -> Self {
-		let vectors = vec![(vec, ElementDocs::new(element_id, doc_id))];
-		Self {
-			vectors,
-		}
-	}
-
-	fn get_element_docs(&mut self, vec: &SerializedVector) -> Option<&mut ElementDocs> {
-		for (vector, ed) in self.vectors.iter_mut() {
-			if *vec == *vector {
-				return Some(ed);
-			}
-		}
-		None
-	}
-
-	/// Returns the documents for the given vector if it exists in the list.
-	fn get_docs(self, vec: &SerializedVector) -> Option<Ids64> {
-		for (vector, ed) in self.vectors {
-			if vector == *vec {
-				return Some(ed.docs);
-			}
-		}
-		None
-	}
-
-	fn add(&mut self, element_id: ElementId, vec: SerializedVector, doc_id: DocId) {
-		self.vectors.push((vec, ElementDocs::new(element_id, doc_id)));
-	}
-
-	fn remove(&mut self, vec: &SerializedVector, doc_id: DocId) -> RemoveResult {
-		let mut action = None;
-		for (i, (vector, ed)) in self.vectors.iter_mut().enumerate() {
-			if *vector == *vec
-				&& let Some(new_docs) = ed.docs.remove(doc_id)
-			{
-				if new_docs.is_empty() {
-					action = Some((i, ed.e_id));
-					break;
-				}
-				ed.docs = new_docs;
-				// The partition has been updated, but this vector has still connected document(s)
-				return RemoveResult::Updated(ed.e_id, ed.docs.clone());
-			}
-		}
-		if let Some((i, e_id)) = action {
-			// There are no more documents for this vector, remove it
-			self.vectors.remove(i);
-			if self.vectors.is_empty() {
-				// The vector partition is empty, remove the element and the hash entry
-				return RemoveResult::Empty(e_id);
-			}
-			return RemoveResult::RemovedElement(e_id);
-		}
-		RemoveResult::Unchanged
-	}
-}
-impl KVValue for ElementHashedDocs {
-	type KeyContext = ();
-
-	fn kv_encode_value(&self) -> Result<Vec<u8>> {
-		let mut val = Vec::new();
-		SerializeRevisioned::serialize_revisioned(self, &mut val)?;
-		Ok(val)
-	}
-
-	fn kv_decode_value(mut bytes: &[u8], _: ()) -> Result<Self>
-	where
-		Self: Sized,
-	{
-		Ok(DeserializeRevisioned::deserialize_revisioned(&mut bytes)?)
-	}
-}
-
-impl KVValue for ElementDocs {
-	type KeyContext = ();
-
-	#[inline]
-	fn kv_encode_value(&self) -> Result<Vec<u8>> {
-		let mut val = Vec::new();
-		SerializeRevisioned::serialize_revisioned(self, &mut val)?;
-		Ok(val)
-	}
-
-	#[inline]
-	fn kv_decode_value(mut bytes: &[u8], _: ()) -> anyhow::Result<Self> {
-		Ok(DeserializeRevisioned::deserialize_revisioned(&mut bytes)?)
 	}
 }
 
@@ -750,6 +371,243 @@ impl VecDocs {
 				self.insert_cached_doc_set(ed.e_id, ed.docs.clone()).await;
 			}
 		};
+		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::borrow::Cow;
+
+	use anyhow::Result;
+
+	use super::*;
+	use crate::key::schema::DocKeyKey;
+	use crate::kvs::{Datastore, TransactionType};
+
+	fn ikb() -> IndexKeyBase {
+		IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(3))
+	}
+
+	#[tokio::test]
+	async fn hnsw_docs_batch_preserves_order_and_uses_cache() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let ikb = ikb();
+		let cache = VectorCache::new(1024 * 1024);
+		{
+			let tx = ds.transaction(TransactionType::Write).await?;
+			tx.set_key(
+				&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 1),
+				&RecordIdKey::Number(11),
+			)
+			.await?;
+			tx.set_key(
+				&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 2),
+				&RecordIdKey::Number(22),
+			)
+			.await?;
+			tx.commit().await?;
+		}
+
+		let tx = ds.transaction(TransactionType::Read).await?;
+		let got =
+			HnswDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[2, 1, 3], Some(5)).await?;
+		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(22));
+		assert_eq!(&got[1].as_ref().unwrap().key, &RecordIdKey::Number(11));
+		assert!(got[2].is_none());
+		tx.cancel().await?;
+
+		let tx = ds.transaction(TransactionType::Write).await?;
+		tx.del_key(&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 1)).await?;
+		tx.commit().await?;
+
+		let tx = ds.transaction(TransactionType::Read).await?;
+		let cached =
+			HnswDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[1], Some(5)).await?;
+		assert_eq!(&cached[0].as_ref().unwrap().key, &RecordIdKey::Number(11));
+		tx.cancel().await?;
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn hnsw_docs_batch_does_not_cache_missing_or_write_transaction_mappings() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let ikb = ikb();
+		let cache = VectorCache::new(1024 * 1024);
+
+		let tx = ds.transaction(TransactionType::Read).await?;
+		assert_eq!(
+			HnswDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[9], Some(5)).await?,
+			vec![None]
+		);
+		tx.cancel().await?;
+
+		let tx = ds.transaction(TransactionType::Write).await?;
+		tx.set_key(
+			&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 9),
+			&RecordIdKey::Number(99),
+		)
+		.await?;
+		let got = HnswDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[9], Some(5)).await?;
+		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(99));
+		assert!(
+			cache
+				.get_doc_id((ikb.ns(), ikb.db(), TableId(4), ikb.index()), 9, Some(5))
+				.await
+				.is_none()
+		);
+		tx.cancel().await?;
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn hnsw_docs_batch_ignores_doc_id_cache_from_old_generation() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let ikb = ikb();
+		let cache = VectorCache::new(1024 * 1024);
+		{
+			let tx = ds.transaction(TransactionType::Write).await?;
+			tx.set_key(
+				&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 1),
+				&RecordIdKey::Number(11),
+			)
+			.await?;
+			tx.commit().await?;
+		}
+
+		let tx = ds.transaction(TransactionType::Read).await?;
+		let got = HnswDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[1], Some(5)).await?;
+		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(11));
+		tx.cancel().await?;
+		assert!(
+			cache
+				.get_doc_id((ikb.ns(), ikb.db(), TableId(4), ikb.index()), 1, Some(6))
+				.await
+				.is_none()
+		);
+
+		let tx = ds.transaction(TransactionType::Write).await?;
+		tx.set_key(
+			&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 1),
+			&RecordIdKey::Number(22),
+		)
+		.await?;
+		tx.commit().await?;
+
+		let tx = ds.transaction(TransactionType::Read).await?;
+		let got = HnswDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[1], Some(6)).await?;
+		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(22));
+		tx.cancel().await?;
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn hnsw_docs_remove_evicts_doc_id_cache() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let ikb = ikb();
+		let cache = VectorCache::new(1024 * 1024);
+		let id = RecordIdKey::Number(77);
+		{
+			let tx = ds.transaction(TransactionType::Write).await?;
+			tx.set_key(&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 7), &id)
+				.await?;
+			tx.commit().await?;
+		}
+
+		let tx = ds.transaction(TransactionType::Read).await?;
+		let got = HnswDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[7], Some(5)).await?;
+		assert_eq!(&got[0].as_ref().unwrap().key, &id);
+		assert!(
+			cache
+				.get_doc_id((ikb.ns(), ikb.db(), TableId(4), ikb.index()), 7, Some(5))
+				.await
+				.is_some()
+		);
+		tx.cancel().await?;
+
+		let tx = ds.transaction(TransactionType::Write).await?;
+		let docs = HnswDocs::new(ikb.clone());
+		docs.remove(7, TableId(4), &cache).await;
+		assert!(
+			cache
+				.get_doc_id((ikb.ns(), ikb.db(), TableId(4), ikb.index()), 7, Some(5))
+				.await
+				.is_none()
+		);
+		tx.cancel().await?;
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn hnsw_vec_docs_populates_and_uses_doc_set_cache() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
+		let ikb = ikb();
+		let cache = VectorCache::new(1024 * 1024);
+		let vec_docs = VecDocs::new(ikb.clone(), TableId(4), cache.clone(), false);
+		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
+		let vector = Vector::from(ser_vec.clone());
+		tx.set_key(
+			&ikb.new_hv_key(&ser_vec),
+			&ElementDocs {
+				e_id: 7,
+				docs: Ids64::One(42),
+			},
+		)
+		.await?;
+
+		assert_eq!(vec_docs.get_docs_by_element(&tx, 7, &vector).await?, Some(Ids64::One(42)));
+		assert_eq!(
+			cache.get_doc_set((ikb.ns(), ikb.db(), TableId(4), ikb.index()), 7).await,
+			Some(Ids64::One(42))
+		);
+
+		tx.del_key(&ikb.new_hv_key(&ser_vec)).await?;
+		assert_eq!(vec_docs.get_docs_by_element(&tx, 7, &vector).await?, Some(Ids64::One(42)));
+		assert_eq!(vec_docs.get_docs_uncached(&tx, &vector).await?, None);
+		tx.cancel().await?;
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn hnsw_vec_docs_hashed_disambiguates_and_caches_by_element() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
+		let ikb = ikb();
+		let cache = VectorCache::new(1024 * 1024);
+		let vec_docs = VecDocs::new(ikb.clone(), TableId(4), cache.clone(), true);
+		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
+		let other_vec = SerializedVector::F32(vec![3.0, 4.0]);
+		let vector = Vector::from(ser_vec.clone());
+		let key = ikb.new_hh_key(ser_vec.compute_hash());
+		// Built through the bucket's own constructors, which is the only way in
+		// now that it owns the one-entry-per-vector invariant. The colliding
+		// vector is added first so the vector under test is not the first match.
+		let mut bucket = ElementHashedDocs::new(8, other_vec, 88);
+		bucket.add(7, ser_vec, 42);
+		tx.set_key(&key, &bucket).await?;
+
+		assert_eq!(vec_docs.get_docs_by_element(&tx, 7, &vector).await?, Some(Ids64::One(42)));
+		tx.del_key(&key).await?;
+		assert_eq!(vec_docs.get_docs_by_element(&tx, 7, &vector).await?, Some(Ids64::One(42)));
+		tx.cancel().await?;
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn hnsw_vec_docs_missing_mapping_returns_none_without_caching() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let tx = ds.transaction(TransactionType::Write).await?;
+		let ikb = ikb();
+		let cache = VectorCache::new(1024 * 1024);
+		let vec_docs = VecDocs::new(ikb.clone(), TableId(4), cache.clone(), false);
+		let vector = Vector::from(SerializedVector::F32(vec![1.0, 2.0]));
+
+		assert_eq!(vec_docs.get_docs_by_element(&tx, 7, &vector).await?, None);
+		assert!(
+			cache.get_doc_set((ikb.ns(), ikb.db(), TableId(4), ikb.index()), 7).await.is_none()
+		);
+		tx.cancel().await?;
 		Ok(())
 	}
 }

@@ -18,12 +18,11 @@ use crate::expr::paths::{IN, OUT};
 use crate::expr::reference::ReferenceDeleteStrategy;
 use crate::expr::statements::{DeleteStatement, UpdateStatement};
 use crate::expr::{AssignOperator, Data, Expr, Idiom, Literal, Lookup, Part};
-use crate::idx::planner::ScanDirection;
 use crate::key::KVKeyDecode;
 use crate::key::schema::{
 	GraphIdPrefix, GraphKey, GraphPointerKey, ReferenceIdPrefix, ReferenceKey,
 };
-use crate::kvs::NORMAL_BATCH_SIZE;
+use crate::kvs::{Direction, NORMAL_BATCH_SIZE};
 use crate::val::{RecordId, TableName, Value};
 
 impl Document {
@@ -268,7 +267,7 @@ impl Document {
 		}
 		.range()?;
 		// Open a cursor over the graph edge range so we can peek the first key.
-		let mut cursor = txn.open_keys_cursor_raw(range, ScanDirection::Forward, 0, None).await?;
+		let mut cursor = txn.open_keys_cursor_raw(range, Direction::Forward, 0, None).await?;
 		// Check if there are any edges to purge by fetching at most one key.
 		let batch = cursor.next_batch(1).await?;
 		// Only proceed if there are edges for this record.
@@ -369,7 +368,7 @@ impl Document {
 		let mut saw_reference_key = false;
 		// Obtain a cursor over the reference range.
 		let mut cursor =
-			txn.open_keys_cursor_raw(range.clone(), ScanDirection::Forward, 0, None).await?;
+			txn.open_keys_cursor_raw(range.clone(), Direction::Forward, 0, None).await?;
 		// Loop until no more entries
 		loop {
 			// Pull the next batch of reference keys from the cursor.

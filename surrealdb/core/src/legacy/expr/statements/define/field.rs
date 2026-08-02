@@ -19,10 +19,9 @@ use crate::expr::statements::define::field::{
 };
 use crate::expr::{Base, Idiom, Kind, KindLiteral, Part, RecordIdKeyLit};
 use crate::iam::{Action, AuthLimit, ResourceKind};
-use crate::idx::planner::ScanDirection;
 use crate::key::KVKeyDecode;
 use crate::key::schema::{FieldKey, ReferenceKey, ReferencePrefix};
-use crate::kvs::{NORMAL_BATCH_SIZE, Transaction};
+use crate::kvs::{Direction, NORMAL_BATCH_SIZE, Transaction};
 use crate::legacy::{expr_to_ident, expr_to_idiom};
 use crate::val::{TableName, Value};
 
@@ -723,7 +722,7 @@ pub(crate) async fn purge_dropped_reference_keys(
 		}
 		.range()?;
 		let mut orphaned: Vec<Vec<u8>> = Vec::new();
-		let mut cursor = txn.open_keys_cursor_raw(range, ScanDirection::Forward, 0, None).await?;
+		let mut cursor = txn.open_keys_cursor_raw(range, Direction::Forward, 0, None).await?;
 		loop {
 			let batch = cursor.next_batch(NORMAL_BATCH_SIZE).await?;
 			if batch.is_empty() {

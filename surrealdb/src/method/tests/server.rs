@@ -1,5 +1,5 @@
 use async_channel::Receiver;
-use surrealdb_core::dbs::QueryResultBuilder;
+use surrealdb_rpc::QueryResultBuilder;
 
 use crate::conn::{Command, Route};
 use crate::types::{SurrealValue, Value};

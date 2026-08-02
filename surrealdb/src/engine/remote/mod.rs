@@ -102,7 +102,7 @@ pub mod http;
 #[cfg_attr(docsrs, doc(cfg(feature = "protocol-ws")))]
 pub mod ws;
 
-use surrealdb_core::iam::token::Token;
+use surrealdb_rpc::Token;
 use uuid::Uuid;
 
 use crate::conn::cmd::Command;
@@ -476,8 +476,8 @@ mod test {
 
 		assert_converts(
 			&request,
-			|i| surrealdb_core::rpc::format::flatbuffers::encode(i).unwrap(),
-			|b| surrealdb_core::rpc::format::flatbuffers::decode(&b).unwrap(),
+			|i| surrealdb_types::encode(i).unwrap(),
+			|b| surrealdb_types::decode(&b).unwrap(),
 		);
 	}
 }

@@ -16,7 +16,7 @@ use super::*;
 use crate::catalog::providers::{
 	CatalogProvider, DatabaseProvider, NamespaceProvider, TableProvider,
 };
-use crate::catalog::{DatabaseId, Index, IndexDefinition, IndexId, NamespaceId};
+use crate::catalog::{DatabaseId, Index, IndexDefinition, IndexId, NamespaceId, Record};
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
@@ -25,6 +25,7 @@ use crate::key::schema::{
 	IndexCountKey, IndexCountPrefix, RecordPrefix,
 };
 use crate::key::{KVKey, KVKeyDecode, KVSubspace, KVValue, Key};
+use crate::kvs::index::CleanUncommittedBuild;
 use crate::kvs::testing::{
 	NonRetryableErrorSite, RetryableConflictGuard, RetryableConflictSite,
 	inject_non_retryable_error, inject_retryable_conflict, inject_retryable_conflicts,
@@ -33,7 +34,7 @@ use crate::kvs::testing::{
 use crate::kvs::tx::{
 	CachedIndexBuildReservationKey, CachedIndexBuildReservationLookup, IndexBuildReservationRelease,
 };
-use crate::kvs::{Datastore, DatastoreError, is_retryable_transaction_conflict};
+use crate::kvs::{Datastore, DatastoreError, is_retryable_transaction_conflict, storage_error};
 use crate::val::{RecordId, RecordIdKey, TableName, Value};
 
 const REPEATED_RETRY_CONFLICTS: usize = 1000;
@@ -555,7 +556,12 @@ async fn seed_durable_queue_generation(
 	let mutation_seq = 0;
 	tx.set_key(
 		&ikb.new_bg_key(generation, ticket, mutation_seq),
-		&Appending::new(None, None, id.clone()),
+		&Appending {
+			old_values: None,
+			new_values: None,
+			id: id.clone(),
+			count_cond_match: None,
+		},
 	)
 	.await?;
 	tx.set_key(
@@ -595,8 +601,16 @@ async fn seed_uncommitted_index_build_artifacts(
 	let id = RecordIdKey::from("orphan".to_owned());
 	let ticket = 1;
 	let mutation_seq = 0;
-	tx.set_key(&ikb.new_bg_key(1, ticket, mutation_seq), &Appending::new(None, None, id.clone()))
-		.await?;
+	tx.set_key(
+		&ikb.new_bg_key(1, ticket, mutation_seq),
+		&Appending {
+			old_values: None,
+			new_values: None,
+			id: id.clone(),
+			count_cond_match: None,
+		},
+	)
+	.await?;
 	tx.set_key(
 		&ikb.new_bp_key(1, &id),
 		&PrimaryAppendingTicket {
@@ -3656,14 +3670,15 @@ async fn commit_failure_cleans_uncommitted_index_build_artifacts() -> Result<()>
 	let ctx = ds.setup_ctx()?;
 	let builder = ctx.get_index_builder().expect("index builder should exist").clone();
 	user_tx
-		.register_uncommitted_index_build_cleanup(
+		.on_rollback(CleanUncommittedBuild::boxed(
 			builder.clone(),
 			builder.transaction_factory(),
+			user_tx.sequences(),
 			ns,
 			db,
 			table.clone(),
 			ix,
-		)
+		))
 		.await;
 
 	let conflicting_tx = ds.transaction(TransactionType::Write).await?;
@@ -3712,8 +3727,8 @@ async fn store_changes_failure_preserves_primary_error_when_cleanup_fails() -> R
 		DatabaseId(1),
 		&table,
 		&record,
-		Value::None.into(),
-		current.into(),
+		Record::new(Value::None).into_read_only(),
+		Record::new(current).into_read_only(),
 		false,
 	);
 	user_tx
@@ -3735,7 +3750,7 @@ async fn store_changes_failure_preserves_primary_error_when_cleanup_fails() -> R
 		.await
 		.expect_err("store_changes failure should remain visible when cleanup also fails");
 	assert!(
-		matches!(err.downcast_ref(), Some(Error::Kvs(crate::kvs::Error::TransactionReadonly))),
+		matches!(storage_error(&err), Some(crate::kvs::Error::TransactionReadonly)),
 		"primary store_changes error was not preserved: {err}"
 	);
 	assert!(
@@ -5779,7 +5794,12 @@ async fn takeover_installs_generation_before_draining_reservations() -> Result<(
 	// drain retire the reservation instead of blocking on it.
 	tx.set_key(
 		&ikb.new_bg_key(1, 5, 0),
-		&Appending::new(None, None, RecordIdKey::from("one".to_string())),
+		&Appending {
+			old_values: None,
+			new_values: None,
+			id: RecordIdKey::from("one".to_string()),
+			count_cond_match: None,
+		},
 	)
 	.await?;
 	tx.commit().await?;

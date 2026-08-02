@@ -131,13 +131,13 @@ fn any_key_enum(stored: &[&TypeDef]) -> TokenStream {
 		/// Exhaustive by construction: the schema that generates the encoders
 		/// generates this enum, so a key type cannot exist without a variant here.
 		#[derive(Clone, Debug, PartialEq)]
-		pub(crate) enum AnyKey<'a> {
+		pub enum AnyKey<'a> {
 			#(#variants)*
 		}
 
 		impl AnyKey<'_> {
 			/// Which kind of key this is, without its fields.
-			pub(crate) fn kind(&self) -> KeyKind {
+			pub fn kind(&self) -> KeyKind {
 				match self {
 					#(#kind_arms)*
 				}
@@ -147,7 +147,7 @@ fn any_key_enum(stored: &[&TypeDef]) -> TokenStream {
 			///
 			/// Decoding and re-encoding a stored key must reproduce it exactly, which
 			/// is what makes a byte string from a scan safe to hand back to the store.
-			pub(crate) fn encode_key(&self) -> ::anyhow::Result<Key<'static>> {
+			pub fn encode_key(&self) -> ::anyhow::Result<Key<'static>> {
 				match self {
 					#(#encode_arms)*
 				}
@@ -221,7 +221,7 @@ fn any_value_enum(stored: &[&TypeDef]) -> TokenStream {
 		/// given caller reads the few variants it cares about, so the rest look
 		/// unread from where they are defined.
 		#[allow(dead_code)]
-		pub(crate) enum AnyValue {
+		pub enum AnyValue {
 			#(#variants)*
 		}
 
@@ -244,7 +244,7 @@ fn any_value_enum(stored: &[&TypeDef]) -> TokenStream {
 			/// The key supplies its own decode context, so value types that carry
 			/// part of their identity in the key (a record's id, for one) are
 			/// reconstructed correctly rather than guessed at.
-			pub(crate) fn decode_value(&self, bytes: &[u8]) -> ::anyhow::Result<AnyValue> {
+			pub fn decode_value(&self, bytes: &[u8]) -> ::anyhow::Result<AnyValue> {
 				Ok(match self {
 					#(#decode_arms)*
 				})
@@ -252,7 +252,7 @@ fn any_value_enum(stored: &[&TypeDef]) -> TokenStream {
 		}
 
 		/// Decodes one scanned entry: its key and the value stored under it.
-		pub(crate) fn decode_entry<'a>(
+		pub fn decode_entry<'a>(
 			key: &'a [u8],
 			value: &[u8],
 		) -> ::anyhow::Result<Option<(AnyKey<'a>, AnyValue)>> {
@@ -293,7 +293,7 @@ fn pattern_table(stored: &[&TypeDef]) -> TokenStream {
 	quote! {
 		/// One step of a key layout that sits at a statically known offset.
 		#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-		pub(crate) enum KeyProbe {
+		pub enum KeyProbe {
 			/// The byte that must appear at this offset.
 			Byte(u8),
 			/// A fixed-width field: this many bytes, whatever they are.
@@ -302,7 +302,7 @@ fn pattern_table(stored: &[&TypeDef]) -> TokenStream {
 
 		/// The layout of one key kind.
 		#[derive(Clone, Copy, Debug)]
-		pub(crate) struct KeyPattern {
+		pub struct KeyPattern {
 			pub kind: KeyKind,
 			/// Route in the keyspace map notation.
 			pub route: &'static str,
@@ -319,7 +319,7 @@ fn pattern_table(stored: &[&TypeDef]) -> TokenStream {
 			/// Stops at the first byte that disagrees, or at the end of the statically
 			/// addressable part of the layout. Never decodes, so it is safe on
 			/// arbitrary bytes.
-			pub(crate) fn matched(&self, key: &[u8]) -> usize {
+			pub fn matched(&self, key: &[u8]) -> usize {
 				let mut at = 0usize;
 				for probe in self.probes {
 					match probe {
@@ -342,7 +342,7 @@ fn pattern_table(stored: &[&TypeDef]) -> TokenStream {
 		}
 
 		/// Every key layout in the keyspace, in declaration order.
-		pub(crate) static PATTERNS: &[KeyPattern] = &[#(#rows)*];
+		pub static PATTERNS: &[KeyPattern] = &[#(#rows)*];
 	}
 }
 
@@ -361,7 +361,7 @@ fn decoder(stored: &[&TypeDef]) -> TokenStream {
 			/// Returns `None` for bytes that belong to no declared key, which is
 			/// the signal that a scan has run past the keyspace or that the data
 			/// predates a schema change.
-			pub(crate) fn decode(bytes: &'a [u8]) -> Option<Self> {
+			pub fn decode(bytes: &'a [u8]) -> Option<Self> {
 				#body
 				None
 			}
@@ -429,7 +429,7 @@ fn describe() -> TokenStream {
 	quote! {
 		/// What a run of key bytes turned out to be.
 		#[derive(Debug)]
-		pub(crate) enum KeyDescription {
+		pub enum KeyDescription {
 			/// The bytes decoded cleanly.
 			Known {
 				kind: KeyKind,
@@ -476,7 +476,7 @@ fn describe() -> TokenStream {
 		/// Never fails and never panics: a corrupt or foreign key still produces a
 		/// readable answer, which is the point. Intended for diagnostics, scans of
 		/// unknown data, and leaked-key reports.
-		pub(crate) fn describe(bytes: &[u8]) -> KeyDescription {
+		pub fn describe(bytes: &[u8]) -> KeyDescription {
 			if let Some(key) = AnyKey::decode(bytes) {
 				let kind = key.kind();
 				return KeyDescription::Known { kind, route: kind.route() };

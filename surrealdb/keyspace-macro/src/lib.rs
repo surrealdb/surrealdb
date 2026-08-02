@@ -46,6 +46,17 @@
 //!
 //! Everything else is referenced absolutely (`::storekey`, `::anyhow`, `::std`).
 //!
+//! # Visibility
+//!
+//! Every generated item is `pub`, so how far the keyspace reaches is decided by
+//! the visibility of the module the macro is invoked in, not here. A keyspace
+//! private to its own crate goes in a `pub(crate) mod`; one a crate above reads
+//! goes in a `pub mod` and is re-exported. Emitting `pub(crate)` would pin the
+//! keyspace to whichever crate happens to host it.
+//!
+//! The value types a schema binds must be at least as visible as the keyspace
+//! itself - a `pub` key exposing a crate-private value type is an `E0446`.
+//!
 //! # What it generates
 //!
 //! For every entry: the struct, `storekey::Encode`/`BorrowDecode`, `KVKey` with
@@ -97,7 +108,7 @@ fn expand(input: proc_macro2::TokenStream) -> syn::Result<proc_macro2::TokenStre
 
 	Ok(quote! {
 		#[doc = #map_doc]
-		pub(crate) const KEYSPACE_MAP: &str = #map;
+		pub const KEYSPACE_MAP: &str = #map;
 
 		#types
 		#kinds

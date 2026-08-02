@@ -6,4 +6,3 @@ pub(crate) mod writer;
 pub use self::gc::*;
 pub use self::mutations::*;
 pub use self::reader::read;
-pub use self::writer::Changefeed;

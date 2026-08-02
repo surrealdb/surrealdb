@@ -3,10 +3,9 @@
 use std::collections::HashSet;
 use std::mem;
 
-use surrealdb_core::dbs::NewPlannerStrategy;
-use surrealdb_core::dbs::capabilities::{
-	Capabilities as CoreCapabilities, ExperimentalTarget, FuncTarget, ParseFuncTargetError,
-	ParseNetTargetError, Targets,
+use surrealdb_rpc::capabilities::{
+	Capabilities as CoreCapabilities, ExperimentalTarget, FuncTarget, NewPlannerStrategy,
+	ParseFuncTargetError, ParseNetTargetError, Targets,
 };
 
 /// Strategy for the streaming query planner.
