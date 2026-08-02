@@ -55,7 +55,7 @@ pub async fn fetch<'js>(
 			Arc::new(
 				HttpClient::new_with_redirect_policy(
 					cap.allow_net.clone(),
-					cap.allow_net.clone(),
+					cap.deny_net.clone(),
 					&query_ctx.config.http,
 					|attempt| attempt.error("unexpected redirect"),
 				)
@@ -72,7 +72,7 @@ pub async fn fetch<'js>(
 			Arc::new(
 				HttpClient::new_with_redirect_policy(
 					cap.allow_net.clone(),
-					cap.allow_net.clone(),
+					cap.deny_net.clone(),
 					&query_ctx.config.http,
 					|attempt| attempt.stop(),
 				)
