@@ -15,6 +15,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use anyhow::Result;
+use web_time::Instant;
 
 /// Work owed once a transaction has committed.
 ///
@@ -35,6 +36,16 @@ pub trait CommitAction: Send + Sync + 'static {
 ///
 /// Fallible, and every registered action is attempted even when one fails: the
 /// first error is returned and the rest still run.
+///
+/// `drain_started_at` is when the transaction began running this queue. An
+/// action that has to wait for something — a task to notice it should stop, a
+/// lease to lapse — measures its allowance from there rather than from its own
+/// start, because the queue is drained one action at a time: a per-action
+/// allowance would let a transaction that registered many of them multiply into
+/// a close the client reads as a hang.
 pub trait RollbackAction: Send + Sync + 'static {
-	fn run(self: Box<Self>) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
+	fn run(
+		self: Box<Self>,
+		drain_started_at: Instant,
+	) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>;
 }

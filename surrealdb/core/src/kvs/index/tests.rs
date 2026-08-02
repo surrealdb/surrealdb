@@ -228,6 +228,24 @@ async fn durable_build_state(ds: &Datastore, ikb: &IndexKeyBase) -> Result<Index
 	Ok(state)
 }
 
+/// Read the build state and its generation's writer-ticket counter from one
+/// snapshot.
+///
+/// The `Building` -> `Closing` fence advances the counter in the same
+/// transaction as the phase write, so a caller that has to tell a writer
+/// admission from that fence must observe both keys at the same version.
+async fn durable_build_state_with_ticket_counter(
+	ds: &Datastore,
+	ikb: &IndexKeyBase,
+) -> Result<(IndexBuildState, Option<BuildTicket>)> {
+	let tx = ds.transaction(TransactionType::Read).await?;
+	let state = catch!(tx, tx.get_key(&ikb.new_bs_key(), None).await)
+		.ok_or_else(|| anyhow::anyhow!("durable build state should exist"))?;
+	let counter = catch!(tx, tx.get_key(&ikb.new_bt_key(state.generation), None).await);
+	tx.cancel().await?;
+	Ok((state, counter))
+}
+
 async fn set_durable_build_state(
 	ds: &Datastore,
 	ikb: &IndexKeyBase,
@@ -1172,6 +1190,101 @@ async fn define_index_concurrent_cancel_cleans_uncommitted_build_artifacts() -> 
 	let (ns, db, table, current_ix) = get_table_index(&ds, "user", "test").await?;
 	let cancelled_ix = previous_index_id(current_ix.index_id);
 	assert_no_index_build_artifacts(&ds, ns, db, &table, cancelled_ix).await?;
+	Ok(())
+}
+
+/// The rollback cleanup deletes an uncommitted build's durable state from its
+/// own transaction, so it must not return until the builder task has stopped
+/// writing: a builder write ordered after that delete re-creates state for a
+/// build the catalog never referenced, and nothing collects it.
+///
+/// `define_index_concurrent_cancel_cleans_uncommitted_build_artifacts` covers
+/// the same guarantee end to end but only fails when the race lands. Here the
+/// builder is held at an injected conflict site, so a signal-only abort leaves
+/// it demonstrably unfinished at the point the deletes would run.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn remove_index_and_wait_returns_only_after_the_builder_task_exits() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:one SET email = 'one@example.com' RETURN NONE;
+			CREATE user:two SET email = 'two@example.com' RETURN NONE;
+			",
+	)
+	.await?;
+
+	let _guard = start_index_build_paused(
+		&ds,
+		&session,
+		"DEFINE INDEX test ON user FIELDS email CONCURRENTLY",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "user", "test").await?;
+	let building = local_builder_for_key(&ds, ns, db, &table, ix.index_id)
+		.await?
+		.expect("local builder should be running");
+	assert!(!building.is_finished(), "the paused builder should still be running");
+
+	ds.index_builder()
+		.remove_index_and_wait(ns, db, &table, ix.index_id, build_abort_deadline(Instant::now()))
+		.await;
+
+	assert!(
+		building.is_finished(),
+		"remove_index_and_wait returned while the builder task was still writing"
+	);
+	assert!(
+		local_builder_for_key(&ds, ns, db, &table, ix.index_id).await?.is_none(),
+		"the aborted builder must be gone from the local task map"
+	);
+	Ok(())
+}
+
+/// The wait budget belongs to the whole transaction-close drain, so a cleanup
+/// that runs after the budget is spent must not wait again: N indexes in one
+/// rolled-back schema transaction cost one budget, not N.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn remove_index_and_wait_stops_waiting_once_the_drain_budget_is_spent() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:one SET email = 'one@example.com' RETURN NONE;
+			",
+	)
+	.await?;
+
+	let _guard = start_index_build_paused(
+		&ds,
+		&session,
+		"DEFINE INDEX test ON user FIELDS email CONCURRENTLY",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "user", "test").await?;
+	let building = local_builder_for_key(&ds, ns, db, &table, ix.index_id)
+		.await?
+		.expect("local builder should be running");
+
+	// A deadline in the past stands for an earlier cleanup in the same drain
+	// having consumed the budget.
+	let started = Instant::now();
+	ds.index_builder().remove_index_and_wait(ns, db, &table, ix.index_id, Instant::now()).await;
+	assert!(
+		started.elapsed() < Duration::from_secs(2),
+		"a spent budget must not buy another wait (took {:?})",
+		started.elapsed()
+	);
+	assert!(
+		building.aborted.load(Ordering::Relaxed),
+		"the builder must still be signalled to abort when the wait is skipped"
+	);
 	Ok(())
 }
 
@@ -5972,7 +6085,7 @@ async fn concurrent_build_under_table_writes(
 	let mut max_ticket = 0u64;
 	let progressed = timeout(scan_timeout, async {
 		loop {
-			let state = durable_build_state(&ds, &ikb).await?;
+			let (state, ticket) = durable_build_state_with_ticket_counter(&ds, &ikb).await?;
 			max_initial = max_initial.max(state.initial.unwrap_or(0));
 			// Tickets are allocated from the generation's `!bt` counter;
 			// `next_ticket` only advances for a generation that predates it.
@@ -5981,12 +6094,13 @@ async fn concurrent_build_under_table_writes(
 			//
 			// Only sample while the build is still `Building`: the transition
 			// out of it advances the counter itself, to fence allocations in
-			// flight, and that bump is not a writer admission.
+			// flight, and that bump is not a writer admission. Phase and
+			// counter therefore have to come from one snapshot, which `state`
+			// above provides — the fence writes both keys in a single
+			// transaction, so two reads can pair a `Building` phase with the
+			// post-fence counter and report that bump as an admission.
 			if state.phase == IndexBuildPhase::Building {
-				let allocated = durable_ticket_counter(&ds, &ikb, state.generation)
-					.await?
-					.unwrap_or(state.next_ticket);
-				max_ticket = max_ticket.max(allocated);
+				max_ticket = max_ticket.max(ticket.unwrap_or(state.next_ticket));
 			}
 			if max_initial >= RECORDS as u64 || state.phase == IndexBuildPhase::Online {
 				return Ok::<_, anyhow::Error>(());

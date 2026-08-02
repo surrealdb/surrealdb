@@ -1,14 +1,15 @@
 use anyhow::Result;
 use chrono::Utc;
 use surrealdb_strand::TableName;
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
+use web_time::Instant;
 
 use super::builder::{IndexKey, IndexMutation};
 use super::state::{catalog_still_references_index, is_condition_not_met};
 use super::{
 	Appending, BUILD_CLOSING_SLEEP, BUILD_RESERVATION_TTL_SECS, ConsumeResult, DurableAdmission,
 	DurableAdmissionDecision, DurableAdmissionFence, IndexBuildPhase, IndexBuildReservation,
-	IndexBuilder, PrimaryAppendingTicket,
+	IndexBuilder, IndexBuilding, PrimaryAppendingTicket,
 };
 use crate::catalog::{DatabaseDefinition, DatabaseId, IndexDefinition, IndexId, NamespaceId};
 use crate::ctx::FrozenContext;
@@ -430,6 +431,26 @@ impl IndexBuilder {
 		}
 	}
 
+	/// Drop an index's entry from the local task map and signal its builder to
+	/// abort, returning the build so a caller can wait for the task to exit.
+	///
+	/// The abort flag is only observed at the builder's next checkpoint, so the
+	/// task is still running when this returns.
+	async fn take_local_builder(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+	) -> Option<IndexBuilding> {
+		let key = IndexKey::new(ns, db, tb, ix);
+		let building = self.indexes.write().await.remove(&key);
+		if let Some(building) = &building {
+			building.abort();
+		}
+		building
+	}
+
 	/// Abort a builder task running in this process.
 	///
 	/// Schema statements retire durable state separately in their own
@@ -441,10 +462,49 @@ impl IndexBuilder {
 		tb: &TableName,
 		ix: IndexId,
 	) -> Result<()> {
-		let key = IndexKey::new(ns, db, tb, ix);
-		if let Some(b) = self.indexes.write().await.remove(&key) {
-			b.abort();
-		}
+		self.take_local_builder(ns, db, tb, ix).await;
 		Ok(())
+	}
+
+	/// Abort a builder task running in this process and wait for it to stop.
+	///
+	/// [`Self::remove_index`] only raises the abort flag; the task observes it at
+	/// its next checkpoint and keeps writing until then, including the durable
+	/// state and index data of the batch it is inside. A caller that deletes
+	/// those keys afterwards must order its delete after the task's last write,
+	/// so it waits here first: a builder write that lands after the delete
+	/// re-creates state for a build that no longer exists, and nothing ever
+	/// removes it.
+	///
+	/// `deadline` is the budget for the whole transaction-close drain, from
+	/// [`build_abort_deadline`](super::build_abort_deadline), so aborting several
+	/// builders costs one budget rather than one per builder. Once it passes the
+	/// caller still proceeds, leaving the compare-and-swap on `!bs` that every
+	/// builder write performs as the only fence. The task's map entry is already
+	/// gone by then, so a caller that retries its delete does so without a
+	/// second wait — the warning below is the only record of that degradation.
+	pub(crate) async fn remove_index_and_wait(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+		deadline: Instant,
+	) {
+		let Some(building) = self.take_local_builder(ns, db, tb, ix).await else {
+			return;
+		};
+		// A drain that has already spent its budget still polls the wait once,
+		// which is enough for a builder that has meanwhile finished.
+		let remaining = deadline.saturating_duration_since(Instant::now());
+		if timeout(remaining, building.wait_finished()).await.is_err() {
+			warn!(
+				target: "surrealdb::core::kvs::index",
+				index = %building.ix.name,
+				table = %building.ix.table_name,
+				"timed out waiting for an aborted index builder to stop; \
+				 its durable build state is being deleted while it may still write"
+			);
+		}
 	}
 }

@@ -2370,15 +2370,20 @@ impl Transaction {
 	/// Every action is attempted even when one fails, and the first error is
 	/// returned: each answers to durable state written by a different
 	/// transaction, so skipping the rest would leave that state orphaned.
+	///
+	/// The queue runs one action at a time, so they are all handed the instant
+	/// the drain began: an action that waits bounds itself against that, and a
+	/// transaction that queued several cannot turn one allowance into several.
 	async fn run_rollback_actions(&self) -> Result<()> {
 		// Take the queue under the lock to detach it from concurrent registrations
 		let actions = {
 			let mut pending = self.rollback_actions.lock().await;
 			std::mem::take(&mut *pending)
 		};
+		let drain_started_at = Instant::now();
 		let mut first_error = None;
 		for action in actions {
-			if let Err(err) = action.run().await
+			if let Err(err) = action.run(drain_started_at).await
 				&& first_error.is_none()
 			{
 				first_error = Some(err);

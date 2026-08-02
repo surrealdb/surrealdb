@@ -51,6 +51,7 @@ pub(crate) use surrealdb_datastore::values::index_build::{
 	IndexBuildPhase, IndexBuildReportStatus, IndexBuildReservation, IndexBuildState,
 	PrimaryAppendingTicket,
 };
+use web_time::Instant;
 
 use crate::kvs::tx::IndexBuildReservationRelease;
 
@@ -65,7 +66,31 @@ const BUILD_OWNER_LEASE_SECS: i64 = 60;
 /// Poll cadence while writer admission waits for `Closing` to become `Online`
 /// or `Error`. The caller's context deadline is the only timeout budget.
 const BUILD_CLOSING_SLEEP: Duration = Duration::from_millis(100);
+/// Total time one closing transaction may spend waiting for the local builders
+/// it aborted to stop, before deleting their durable state anyway.
+///
+/// A builder polls its abort flag per record during the initial scan and once
+/// per iteration in every replay, drain and retry loop, so the wait normally
+/// ends in microseconds. The budget only binds where a single uninterruptible
+/// stretch runs long, and the longest of those is one HNSW/DiskANN compaction
+/// plan, whose apply and commit carry no internal checkpoint. Overrunning it
+/// falls back to the compare-and-swap on `!bs` as the only ordering against the
+/// builder, which is exactly what the wait exists to replace, so the budget is
+/// deliberately generous: a cancelled statement stalls for at most this long,
+/// whereas falling short strands durable state that nothing collects.
+const BUILD_ABORT_STOP_BUDGET: Duration = Duration::from_secs(15);
 type IndexBuilding = std::sync::Arc<builder::Building>;
+
+/// Deadline for an abort-wait in a close drain that began at `drain_started_at`.
+///
+/// The budget is per drain, not per build: a schema transaction that defined
+/// several indexes and then rolled back queues one cleanup per index, they run
+/// one at a time, and their waits must not multiply into a close the client
+/// reads as a hang. Measuring every one of them from the same origin caps the
+/// whole drain at a single budget.
+pub(crate) fn build_abort_deadline(drain_started_at: Instant) -> Instant {
+	drain_started_at + BUILD_ABORT_STOP_BUDGET
+}
 
 #[derive(Clone)]
 struct AcquiredBuild {

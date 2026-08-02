@@ -12,7 +12,7 @@ use futures::channel::oneshot::{Receiver, Sender, channel};
 use surrealdb_datastore::close::{CommitAction, RollbackAction};
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
-use tokio::sync::RwLock;
+use tokio::sync::{Notify, RwLock};
 use tokio::time::sleep;
 use uuid::Uuid;
 #[cfg(target_family = "wasm")]
@@ -25,7 +25,7 @@ use super::state::{
 };
 use super::{
 	AcquiredBuild, BUILD_CLOSING_SLEEP, BuildGeneration, IndexBuildPhase, IndexBuildReportStatus,
-	IndexBuildState, IndexBuilding,
+	IndexBuildState, IndexBuilding, build_abort_deadline,
 };
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, Index, IndexDefinition, IndexId, NamespaceId, TableId};
@@ -201,8 +201,20 @@ impl IndexBuilder {
 			indexes.insert(Arc::clone(&building.ix_key), Arc::clone(&building));
 		}
 		let b = Arc::clone(&building);
+		// Created before the spawn and moved in, so a task the executor drops
+		// without ever polling it still marks the build finished. Waiters in
+		// `Building::wait_finished` and the `is_finished` checks above would
+		// otherwise never see a build that produced no writes at all.
+		//
+		// The `drop(guard)` below is what makes `async move` capture this, and it
+		// also has to stay where it is: it must run after the build's last durable
+		// write, so a waiter that sees the flag knows no further write is coming,
+		// and before the result is sent, so a blocking `DEFINE INDEX` that has
+		// returned cannot be rejected as `IndexAlreadyBuilding`. Letting the guard
+		// fall out of scope instead would drop it here, at the end of this
+		// function, and report every build finished before it had begun.
+		let guard = BuildingFinishGuard(Arc::clone(&building));
 		spawn(async move {
-			let guard = BuildingFinishGuard(Arc::clone(&b));
 			let r = b.run_acquired(acquired).await;
 			let generation = b.build_generation.load(Ordering::Acquire);
 			if let Err(err) = &r {
@@ -237,6 +249,9 @@ impl IndexBuilder {
 			} else if b.aborted.load(Ordering::Acquire) && generation != 0 {
 				let _ = b.mark_durable_aborted(generation).await;
 			}
+			// Publishes `finished` after the last durable write and before the
+			// result is sent; it is also the only reason the guard is captured by
+			// this future at all. See where the guard is constructed.
 			drop(guard);
 			if let Some(s) = sdr
 				&& s.send(r).is_err()
@@ -421,6 +436,10 @@ pub(super) struct Building {
 	pub(super) aborted: AtomicBool,
 	/// Set when the spawned task exits so a later local build can start.
 	pub(super) finished: AtomicBool,
+	/// Wakes [`Building::wait_finished`] once `finished` is set. Private because
+	/// the two must move together: a notification without the flag is a lost
+	/// wake-up for every waiter that has not registered yet.
+	finished_notify: Notify,
 }
 
 impl Building {
@@ -445,6 +464,7 @@ impl Building {
 			build_generation: AtomicU64::new(0),
 			aborted: AtomicBool::new(false),
 			finished: AtomicBool::new(false),
+			finished_notify: Notify::new(),
 		})
 	}
 
@@ -2069,8 +2089,37 @@ impl Building {
 		}
 	}
 
+	/// Whether the spawned task for this build has exited.
+	///
+	/// Loads `Acquire` to pair with the `Release` store in
+	/// [`BuildingFinishGuard`]: a caller that observes `true` also observes
+	/// everything the task did before it stopped, so this reads as "the builder
+	/// has stopped writing" without further reasoning about ordering.
 	pub(super) fn is_finished(&self) -> bool {
-		self.finished.load(Ordering::Relaxed)
+		self.finished.load(Ordering::Acquire)
+	}
+
+	/// Wait until the spawned task for this build has exited.
+	///
+	/// The task publishes its last durable write before it exits, so a caller
+	/// that deletes this index's durable build state waits here first to make
+	/// its delete the final write. Only a build reachable through
+	/// [`IndexBuilder::indexes`] has a task; waiting on a [`Building`] that was
+	/// never spawned never returns, so callers bound the wait with the drain's
+	/// deadline.
+	pub(super) async fn wait_finished(&self) {
+		loop {
+			// Register for the wake-up before re-checking the flag: the task can
+			// finish between the two, and `notify_waiters` only wakes waiters
+			// that are already registered.
+			let notified = self.finished_notify.notified();
+			tokio::pin!(notified);
+			notified.as_mut().enable();
+			if self.is_finished() {
+				return;
+			}
+			notified.await;
+		}
 	}
 }
 
@@ -2078,7 +2127,10 @@ struct BuildingFinishGuard(IndexBuilding);
 
 impl Drop for BuildingFinishGuard {
 	fn drop(&mut self) {
-		self.0.finished.store(true, Ordering::Relaxed);
+		// `Release` pairs with the `Acquire` load in `Building::wait_finished`,
+		// so a waiter woken by the notification observes the flag as set.
+		self.0.finished.store(true, Ordering::Release);
+		self.0.finished_notify.notify_waiters();
 	}
 }
 
@@ -2183,15 +2235,22 @@ impl CleanUncommittedBuild {
 		})
 	}
 
-	async fn cleanup_once(&self) -> Result<()> {
-		// Stop the local task first. The durable `!bs` delete below is the
-		// cross-node fence against the builder: any in-flight builder write has to
-		// read/update that key in the same transaction before it can commit index
-		// data. Writer admission is fenced separately, by the `!bt` counter range
-		// deleted alongside it.
-		if let Err(err) = self.builder.remove_index(self.ns, self.db, &self.tb, self.ix).await {
-			warn!("failed to abort uncommitted local index builder during rollback cleanup: {err}");
-		}
+	async fn cleanup_once(&self, abort_deadline: Instant) -> Result<()> {
+		// Stop the local builder and wait for it to exit, so the deletes below are
+		// the build's last writes: a builder write that lands after them re-creates
+		// state nothing will ever collect, because the catalog never referenced this
+		// index id, so no retirement and no resume scan can reach it. That same
+		// unreachability is why waiting for the local task is enough on a cluster:
+		// a remote node can only own a build it found through a committed catalog
+		// entry, which this index id never had. Writer admission is fenced
+		// separately, by the `!bt` counter range deleted alongside the rest.
+		//
+		// `abort_deadline` comes from the start of the close drain, so a schema
+		// transaction that defined several indexes waits once rather than once per
+		// index.
+		self.builder
+			.remove_index_and_wait(self.ns, self.db, &self.tb, self.ix, abort_deadline)
+			.await;
 
 		let tx = self.tf.transaction(TransactionType::Write, self.sequences.clone()).await?;
 		let ikb = IndexKeyBase::new(self.ns, self.db, self.tb.clone(), self.ix);
@@ -2222,10 +2281,14 @@ impl CleanUncommittedBuild {
 }
 
 impl RollbackAction for CleanUncommittedBuild {
-	fn run(self: Box<Self>) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
+	fn run(
+		self: Box<Self>,
+		drain_started_at: Instant,
+	) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
+		let abort_deadline = build_abort_deadline(drain_started_at);
 		Box::pin(async move {
 			loop {
-				match self.cleanup_once().await {
+				match self.cleanup_once(abort_deadline).await {
 					Ok(()) => return Ok(()),
 					Err(err) if is_retryable_transaction_conflict(&err) => {
 						debug!(
