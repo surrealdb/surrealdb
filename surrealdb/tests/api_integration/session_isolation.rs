@@ -106,6 +106,65 @@ pub async fn clone_then_immediate_query(new_db: impl CreateDb) {
 	drop(permit);
 }
 
+/// Regression: a clone inherits its parent's session state — namespace,
+/// database, authentication and variables — and every part of that state must
+/// be in place before the clone's first command runs. Remote engines carry the
+/// state over by replaying the parent's command log onto the new session, so a
+/// transport that applies those replayed commands out of order against the
+/// first command leaves the clone executing against a half-built session: here
+/// `$multiplier` is still NONE, which fails the query outright rather than
+/// quietly returning a wrong answer.
+///
+/// Every clone is created before any of them is used, so the replays and the
+/// first commands are all in flight on the connection together — the
+/// interleaving under which a concurrently-dispatching transport can reorder
+/// them.
+///
+/// This is an end-to-end guard across every engine backend, not a deterministic
+/// reproducer: whether the server interleaves a given pair depends on where its
+/// request handlers happen to yield, so on a fast machine the race rarely fires
+/// here. The deterministic regression test for the fix is
+/// `engine::remote::ws::tests::route_waits_for_replay_acknowledgement`, which
+/// drives the router's actual dispatch path.
+pub async fn clone_inherits_session_state_before_first_command(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+
+	let ns = Ulid::new().to_string();
+	let db_name = Ulid::new().to_string();
+	db.use_ns(&ns).use_db(&db_name).await.unwrap();
+	db.query(format!(
+		"DEFINE NAMESPACE IF NOT EXISTS `{ns}`; USE NS `{ns}`; DEFINE DATABASE IF NOT EXISTS `{db_name}`"
+	))
+	.await
+	.unwrap()
+	.check()
+	.unwrap();
+	db.set("multiplier", 10).await.unwrap();
+
+	// Each clone registers its own session, so build them all before any is used.
+	let clients: Vec<_> = (0..32).map(|_| db.clone()).collect();
+
+	let mut handles = Vec::with_capacity(clients.len());
+	for client in clients {
+		handles.push(tokio::spawn(async move {
+			let value: Option<i32> =
+				client.query("RETURN 3 * $multiplier").await.unwrap().take(0).unwrap();
+			value
+		}));
+	}
+
+	for handle in handles {
+		assert_eq!(
+			handle.await.unwrap(),
+			Some(30),
+			"a clone's first command must observe the session state it inherited"
+		);
+	}
+
+	drop(permit);
+}
+
 /// Test that multiple clients can use different namespaces/databases simultaneously
 pub async fn multiple_namespaces_databases(new_db: impl CreateDb) {
 	let config = Config::new();
@@ -653,6 +712,8 @@ define_include_tests!(
 		clone_creates_new_session,
 		#[test_log::test(tokio::test)]
 		clone_then_immediate_query,
+		#[test_log::test(tokio::test)]
+		clone_inherits_session_state_before_first_command,
 		#[test_log::test(tokio::test)]
 		multiple_namespaces_databases,
 		#[test_log::test(tokio::test)]

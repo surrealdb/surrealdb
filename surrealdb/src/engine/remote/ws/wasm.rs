@@ -229,7 +229,7 @@ pub(crate) async fn run_router(
 					match result {
 						Some(Ok(message)) => {
 							match handle_response::<Message, _, _>(
-								&message, &state.sessions, &state.sink
+								&message, None, &state.sessions, &state.sink
 							).await {
 								HandleResult::Ok => continue,
 								HandleResult::Disconnected => {
