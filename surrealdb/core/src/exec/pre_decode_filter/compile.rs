@@ -723,9 +723,11 @@ fn is_synthetic_id_path(path: &[PathSegment]) -> bool {
 /// wire-fast [`PredNode::LeafSetMembership`].
 ///
 /// `a = X OR a = Y` is semantically identical to `a IN [X, Y]` under SurrealQL's
-/// loose equality (`=` / [`operate::equal`]), which matches the `set.contains` probe
-/// used by `eval_set_membership`. Collapsing the chain pays one field descent + one
-/// hash probe per row instead of one descent + comparison per arm.
+/// loose equality (`=` / [`operate::equal`]). Collapsing the chain pays one field
+/// descent + one hash probe per row instead of one descent + comparison per arm;
+/// `eval_set_membership` keeps the two relations apart where hashing cannot
+/// decide loose equality (numbers — see
+/// [`value_hash_agrees_with_eq`](super::wire_literal::value_hash_agrees_with_eq)).
 ///
 /// Conservative — an arm only joins a fused group when it is:
 /// - a [`PredNode::Leaf`] with `op == Equal`, `reversed == false`, a hashset-safe literal (see

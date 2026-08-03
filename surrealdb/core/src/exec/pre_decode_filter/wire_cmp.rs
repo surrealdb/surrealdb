@@ -293,11 +293,10 @@ fn wire_cmp_int_number(value_bytes: &[u8], lit: &LiteralWire) -> Option<std::cmp
 /// their chance. See [`LiteralSet::has_strand_asymmetric_match`].
 ///
 /// **Number cross-variant safety:** `Number::PartialEq` treats
-/// `Int(1) == Float(1.0) == Decimal(1)` and `Number::Hash` agrees, so a
-/// `HashSet<Value>` containing those entries collapses to a single stored
-/// sub-variant per equivalence class. The wire-fast path inspects the
-/// runtime value's Number sub-variant against the set's stored
-/// sub-variants (via [`LiteralSet::number_sub_variants_mask`]):
+/// `Int(1) == Float(1.0) == Decimal(1)`, so one equivalence class can be spelled
+/// three ways and the partition holds whichever spellings the set listed. The
+/// wire-fast path inspects the runtime value's Number sub-variant against the
+/// set's stored sub-variants (via [`LiteralSet::number_sub_variants_mask`]):
 ///
 /// - Runtime sub-variant is the **only** one stored AND is byte-canonical (`Int` / `Decimal`) →
 ///   byte miss is definitive value miss.

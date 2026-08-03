@@ -5,8 +5,7 @@
 //! to each group. This is a pipeline-breaking operator: the entire
 //! input stream must be consumed before any output is produced.
 
-use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use common::future::stream::{self, Yielder};
@@ -205,114 +204,97 @@ struct GroupState {
 }
 
 // ---------------------------------------------------------------------------
-// Hash-keyed group map
+// Group map
 // ---------------------------------------------------------------------------
 //
-// `GroupMap` replaces what used to be a `BTreeMap<GroupKey, GroupState>`. The
-// old shape deep-cloned the per-row group-by values into the BTree key on
-// every row, even when the row's group already existed in the map; for a
-// `1M-row × 100-group` query that's ~1M clones into the map plus the per-row
-// `Ord` comparisons during navigation.
+// Two rows belong to the same group iff their group keys compare equal under
+// `Value: Ord`, so the map has to be *ordered*. Hash-partitioning the keys is
+// not an option, because `Value: Hash` is not consistent with `Value: Eq` for
+// numbers: `Number`'s comparison is cross-variant and, between `Float` and
+// `Decimal`, approximate — `0.1f == 0.1dec` while `0.11111f != 0.11111dec` —
+// whereas `Number: Hash` hashes each variant's exact decimal expansion. So
+// `0.1f` and `0.1dec` bucket apart and silently form two groups. No canonical
+// form reproduces that comparison, which is why the identity relation here is
+// `Ord` and not a hash.
 //
-// `GroupMap` hashes the row's group-by values *in place* (no clone), probes a
-// bucket, and only clones to build a canonical [`GroupKey`] on a cache miss
-// (one per actual group). Output is sorted by [`GroupKey`] at finalize so
-// downstream observers see the same key-sorted ordering the old BTreeMap
-// produced. Spill-to-disk for high-cardinality groups is a future change.
+// Ordered keys also make the group order deterministic, and they let the drain
+// feed results downstream already sorted by key.
+//
+// The map stores each key once against an index into `states`, so the per-row
+// cost is a single `O(log g)` probe against a *borrowed* row key: the row's
+// values are cloned only when the row opens a new group. Spill-to-disk for
+// high-cardinality groups is a future change.
 struct GroupMap {
-	buckets: HashMap<u64, Vec<(GroupKey, GroupState)>>,
+	index: BTreeMap<GroupKey, usize>,
+	states: Vec<GroupState>,
 }
 
 impl GroupMap {
 	fn new() -> Self {
 		Self {
-			buckets: HashMap::new(),
+			index: BTreeMap::new(),
+			states: Vec::new(),
 		}
 	}
 
 	fn is_empty(&self) -> bool {
-		self.buckets.is_empty()
+		self.states.is_empty()
 	}
 
-	/// Look up the state for the row's group key, creating it if absent.
+	/// Look up the state for `key`, creating it if absent.
 	///
-	/// `group_key_columns[expr_idx][row_idx]` is the pre-evaluated value for
-	/// group-by expression `expr_idx` at row `row_idx`. We hash + compare
-	/// against those references without cloning; only on miss do we build an
-	/// owned [`GroupKey`] for the new entry.
-	fn entry_for_row<F>(
-		&mut self,
-		group_key_columns: &[Vec<Value>],
-		row_idx: usize,
-		create: F,
-	) -> &mut GroupState
+	/// `key` borrows the row's already-evaluated group-by values — empty for
+	/// GROUP ALL. An owned [`GroupKey`] is built only when the row opens a new
+	/// group.
+	fn entry_for_row<F>(&mut self, key: &[Value], create: F) -> &mut GroupState
 	where
 		F: FnOnce() -> GroupState,
 	{
-		let hash = hash_values(group_key_columns.iter().map(|col| &col[row_idx]));
-		let bucket = self.buckets.entry(hash).or_default();
-		let matches = |(k, _): &(GroupKey, _)| -> bool {
-			k.len() == group_key_columns.len()
-				&& k.iter().zip(group_key_columns).all(|(stored, col)| *stored == col[row_idx])
+		let idx = match self.index.get(key) {
+			Some(idx) => *idx,
+			None => {
+				let idx = self.states.len();
+				self.states.push(create());
+				self.index.insert(key.to_vec(), idx);
+				idx
+			}
 		};
-		match bucket.iter().position(matches) {
-			Some(idx) => &mut bucket[idx].1,
-			None => {
-				let new_key: GroupKey =
-					group_key_columns.iter().map(|col| col[row_idx].clone()).collect();
-				bucket.push((new_key, create()));
-				&mut bucket.last_mut().expect("just pushed").1
-			}
-		}
-	}
-
-	/// Look up (or create) the state for the empty group key (GROUP ALL case).
-	fn entry_for_empty<F>(&mut self, create: F) -> &mut GroupState
-	where
-		F: FnOnce() -> GroupState,
-	{
-		let hash = hash_values(std::iter::empty::<&Value>());
-		let bucket = self.buckets.entry(hash).or_default();
-		match bucket.iter().position(|(k, _)| k.is_empty()) {
-			Some(idx) => &mut bucket[idx].1,
-			None => {
-				bucket.push((Vec::new(), create()));
-				&mut bucket.last_mut().expect("just pushed").1
-			}
-		}
+		&mut self.states[idx]
 	}
 
 	/// Insert a group directly (used by the GROUP ALL empty-input fallback).
 	fn insert(&mut self, key: GroupKey, state: GroupState) {
-		let hash = hash_values(key.iter());
-		self.buckets.entry(hash).or_default().push((key, state));
+		self.index.insert(key, self.states.len());
+		self.states.push(state);
 	}
 
-	/// Drain the map into a Vec sorted by [`GroupKey`].
-	///
-	/// Matches the key-sorted iteration order the old `BTreeMap` provided
-	/// without paying the per-row `Ord` comparisons; total cost is
-	/// `O(g log g)` where `g` is the group count.
-	fn into_sorted(self) -> Vec<(GroupKey, GroupState)> {
-		let mut all: Vec<(GroupKey, GroupState)> = self.buckets.into_values().flatten().collect();
-		all.sort_by(|a, b| a.0.cmp(&b.0));
-		all
+	/// Drain the map in group-key order.
+	fn into_key_order(self) -> impl ExactSizeIterator<Item = (GroupKey, GroupState)> {
+		let mut states: Vec<Option<GroupState>> = self.states.into_iter().map(Some).collect();
+		self.index
+			.into_iter()
+			.map(move |(key, idx)| (key, states[idx].take().expect("each state is claimed once")))
 	}
 }
 
-/// Hash a sequence of [`Value`] references into a single `u64`.
+/// Transpose per-expression group-key columns into one row-major buffer.
 ///
-/// Used for `GroupKey` bucket lookup. Deterministic within a process
-/// (`DefaultHasher` uses a fixed seed).
-fn hash_values<'a, I>(values: I) -> u64
-where
-	I: IntoIterator<Item = &'a Value>,
-{
-	let mut hasher = std::collections::hash_map::DefaultHasher::new();
-	for v in values {
-		v.hash(&mut hasher);
+/// `columns[expr_idx][row_idx]` is the evaluated value for group-by expression
+/// `expr_idx` at row `row_idx`; the result holds `row_count` consecutive runs of
+/// `columns.len()` values, so row `i`'s key is the slice
+/// `[i * columns.len() .. (i + 1) * columns.len()]`. Values are moved out of
+/// `columns`, which is left holding `Value::None` placeholders.
+///
+/// A single group-by expression needs no transpose — its column is already the
+/// row-major layout — so callers take `columns[0]` directly in that case.
+fn transpose_group_keys(columns: &mut [Vec<Value>], row_count: usize) -> Vec<Value> {
+	let mut flat = Vec::with_capacity(row_count * columns.len());
+	for row_idx in 0..row_count {
+		for col in columns.iter_mut() {
+			flat.push(std::mem::take(&mut col[row_idx]));
+		}
 	}
-	hasher.finish()
+	flat
 }
 
 impl ExecOperator for Aggregate {
@@ -550,8 +532,9 @@ impl ExecOperator for Aggregate {
 				if group_by_exprs.is_empty() {
 					// GROUP ALL fast path: single group, pass entire columns
 					// to update_batch to avoid per-row virtual dispatch.
-					let state = groups
-						.entry_for_empty(|| create_group_state(&aggregates, &evaluated_extra_args));
+					let state = groups.entry_for_row(&[], || {
+						create_group_state(&aggregates, &evaluated_extra_args)
+					});
 
 					for (field_idx, agg) in aggregates.iter().enumerate() {
 						if agg.is_group_key {
@@ -585,11 +568,19 @@ impl ExecOperator for Aggregate {
 						}
 					}
 				} else {
-					// GROUP BY: per-row dispatch to separate groups. The
-					// hash-keyed `GroupMap` looks up by reference and only
-					// clones the group-by values on a cache miss.
+					// GROUP BY: per-row dispatch to separate groups. Each row's
+					// key is a contiguous run in `group_key_rows`, so the probe
+					// borrows it and only clones when the row opens a new group.
+					let key_width = group_key_columns.len();
+					let group_key_rows = if key_width == 1 {
+						group_key_columns.swap_remove(0)
+					} else {
+						transpose_group_keys(&mut group_key_columns, batch.values.len())
+					};
+
 					for (row_idx, value) in batch.values.iter().enumerate() {
-						let state = groups.entry_for_row(&group_key_columns, row_idx, || {
+						let key = &group_key_rows[row_idx * key_width..(row_idx + 1) * key_width];
+						let state = groups.entry_for_row(key, || {
 							create_group_state(&aggregates, &evaluated_extra_args)
 						});
 
@@ -642,12 +633,10 @@ impl ExecOperator for Aggregate {
 				}
 			}
 
-			// Now compute final results for each group. Drain the hash-keyed
-			// map into a Vec sorted by GroupKey so output matches the old
-			// BTreeMap ordering.
-			let sorted_groups = groups.into_sorted();
-			let mut results = Vec::with_capacity(sorted_groups.len());
-			for (group_key, state) in sorted_groups {
+			// Now compute final results for each group, in group-key order.
+			let ordered_groups = groups.into_key_order();
+			let mut results = Vec::with_capacity(ordered_groups.len());
+			for (group_key, state) in ordered_groups {
 				let result =
 					compute_group_result_async(&group_key, state, &aggregates, &ctx).await?;
 				results.push(result);
@@ -846,5 +835,97 @@ async fn compute_aggregate_field_value(
 	} else {
 		// No post-expression means direct single aggregate - return first value
 		Ok(agg_doc.0.into_values().next().unwrap_or(Value::Null))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::collections::hash_map::DefaultHasher;
+	use std::hash::{Hash, Hasher};
+	use std::str::FromStr;
+
+	use rust_decimal::Decimal;
+
+	use super::*;
+	use crate::val::Number;
+
+	fn dec(s: &str) -> Value {
+		Value::Number(Number::Decimal(Decimal::from_str(s).unwrap()))
+	}
+
+	fn float(f: f64) -> Value {
+		Value::Number(Number::Float(f))
+	}
+
+	fn empty_state() -> GroupState {
+		create_group_state(&[], &[])
+	}
+
+	fn group_count(keys: &[Vec<Value>]) -> usize {
+		let mut map = GroupMap::new();
+		for key in keys {
+			map.entry_for_row(key, empty_state);
+		}
+		map.into_key_order().len()
+	}
+
+	/// Group identity is `Value: Ord`, so every numeric variant carrying the
+	/// same value shares one group.
+	#[test]
+	fn numerically_equal_keys_share_a_group() {
+		assert_eq!(
+			group_count(&[
+				vec![Value::from(1i64)],
+				vec![float(1.0)],
+				vec![dec("1")],
+				vec![dec("1.0")],
+			]),
+			1
+		);
+		assert_eq!(group_count(&[vec![float(0.1)], vec![dec("0.1")]]), 1);
+		assert_eq!(group_count(&[vec![float(1.5)], vec![dec("1.50")]]), 1);
+		// Multi-column keys collapse per column.
+		assert_eq!(
+			group_count(&[vec![Value::from(1i64), dec("2")], vec![dec("1.0"), float(2.0)],]),
+			1
+		);
+	}
+
+	/// The reason [`GroupMap`] is ordered rather than hash-partitioned:
+	/// `Number: Hash` hashes each variant's exact decimal expansion, so it
+	/// disagrees with the cross-variant `Number: PartialEq` that decides group
+	/// membership. Bucketing by hash splits one group in two.
+	#[test]
+	fn hash_disagrees_with_the_equality_that_decides_grouping() {
+		fn hash(v: &Value) -> u64 {
+			let mut hasher = DefaultHasher::new();
+			v.hash(&mut hasher);
+			hasher.finish()
+		}
+
+		for (a, b) in [(float(0.1), dec("0.1")), (float(1.5), dec("1.50"))] {
+			assert_eq!(a, b, "{a:?} and {b:?} are one group");
+			assert_ne!(hash(&a), hash(&b), "{a:?} and {b:?} would bucket apart");
+		}
+	}
+
+	/// Distinct keys stay distinct, and draining yields them in key order.
+	#[test]
+	fn distinct_keys_drain_in_key_order() {
+		let mut map = GroupMap::new();
+		for key in [dec("2"), float(1.5), Value::from(1i64), float(2.0), dec("1.50")] {
+			map.entry_for_row(&[key], empty_state);
+		}
+		let keys: Vec<Value> =
+			map.into_key_order().map(|(k, _)| k.into_iter().next().unwrap()).collect();
+		assert_eq!(keys, vec![Value::from(1i64), float(1.5), dec("2")]);
+	}
+
+	#[test]
+	fn transpose_lays_rows_out_contiguously() {
+		let mut columns =
+			vec![vec![Value::from(1i64), Value::from(2i64)], vec![Value::from(10i64), dec("20")]];
+		let flat = transpose_group_keys(&mut columns, 2);
+		assert_eq!(flat, vec![Value::from(1i64), Value::from(10i64), Value::from(2i64), dec("20")]);
 	}
 }

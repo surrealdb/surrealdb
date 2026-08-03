@@ -16,7 +16,7 @@ use memchr::memmem;
 use revision::optimised::IndexedSeqWalker;
 use revision::{DeserializeRevisioned, Error as RevisionError, WalkRevisioned};
 
-use super::wire_literal::{LiteralSet, LiteralWire};
+use super::wire_literal::{LiteralSet, LiteralWire, value_hash_agrees_with_eq};
 use super::{Evidence, wire_cmp};
 use crate::exec::object_extract::wire_skip::{rev2_optimised_payload_unchecked, skip_value_wire};
 use crate::val::Value;
@@ -359,9 +359,12 @@ impl StreamingLeafEvaluator for ArrayOverlapsLiteralSet {
 					heap_mask.as_mut_slice()
 				};
 				let result = for_each_array_element_bytes(&seq_walker, |elem_bytes| {
-					if let Some(idx) =
-						Self::element_set_index(elem_bytes, wire_to_idx, literal_to_idx)?
-					{
+					if let Some(idx) = Self::element_set_index(
+						elem_bytes,
+						wire_to_idx,
+						literal_to_idx,
+						literal_set,
+					)? {
 						mask[idx / 64] |= 1u64 << (idx % 64);
 						if Self::all_bits_set(mask, n_lit) {
 							return Ok(std::ops::ControlFlow::Break(()));
@@ -389,6 +392,11 @@ impl ArrayOverlapsLiteralSet {
 	/// Decide whether an array element's wire bytes match any literal in
 	/// `set`. Wire-fast path probes the Strand / Number partitions; on a
 	/// compound element tag, decodes the element and probes `literal_to_idx`.
+	///
+	/// `Err(())` means undecidable, which the caller turns into
+	/// [`Evidence::Unknown`] — including when a decoded miss cannot be trusted
+	/// because hashing disagrees with equality on both sides of the probe
+	/// (see [`hash_miss_is_decisive`]).
 	#[inline]
 	fn element_in_set(
 		elem_bytes: &[u8],
@@ -401,7 +409,11 @@ impl ArrayOverlapsLiteralSet {
 				let mut r: &[u8] = elem_bytes;
 				let v = <Value as DeserializeRevisioned>::deserialize_revisioned(&mut r)
 					.map_err(|_| ())?;
-				Ok(literal_to_idx.contains_key(&v))
+				let inside = literal_to_idx.contains_key(&v);
+				if !inside && !hash_miss_is_decisive(&v, set) {
+					return Err(());
+				}
+				Ok(inside)
 			}
 		}
 	}
@@ -409,11 +421,16 @@ impl ArrayOverlapsLiteralSet {
 	/// Look up an array element's bit index in the literal set (for `All`
 	/// mode). Wire-fast path uses the precomputed `wire_to_idx` table; on a
 	/// compound tag, decodes the element and probes `literal_to_idx`.
+	///
+	/// `Err(())` covers the same undecidable cases as [`Self::element_in_set`]:
+	/// an untrustworthy miss must not be reported as "this element sets no bit",
+	/// or `All` would conclude the array is missing a literal it contains.
 	#[inline]
 	fn element_set_index(
 		elem_bytes: &[u8],
 		wire_to_idx: &HashMap<Vec<u8>, usize>,
 		literal_to_idx: &HashMap<Value, usize>,
+		set: &LiteralSet,
 	) -> Result<Option<usize>, ()> {
 		// Peek the tag to decide whether the wire-byte lookup applies. For
 		// Strand and Number elements the full Value wire bytes (input
@@ -424,8 +441,25 @@ impl ArrayOverlapsLiteralSet {
 		}
 		let mut r: &[u8] = elem_bytes;
 		let v = <Value as DeserializeRevisioned>::deserialize_revisioned(&mut r).map_err(|_| ())?;
-		Ok(literal_to_idx.get(&v).copied())
+		let idx = literal_to_idx.get(&v).copied();
+		if idx.is_none() && !hash_miss_is_decisive(&v, set) {
+			return Err(());
+		}
+		Ok(idx)
 	}
+}
+
+/// Whether a `HashMap<Value, _>` miss on `value` proves the literal set does not
+/// hold it.
+///
+/// `Number: Hash` disagrees with `Number: PartialEq`, so a number can miss a set
+/// that contains an equal number spelled as another variant — `0.1f` against
+/// `0.1dec`. Equality requires matching variants at every level, so one
+/// number-free side of the probe is enough to trust the miss. See
+/// [`value_hash_agrees_with_eq`].
+#[inline]
+fn hash_miss_is_decisive(value: &Value, set: &LiteralSet) -> bool {
+	set.hash_agrees_with_eq() || value_hash_agrees_with_eq(value)
 }
 
 /// `WHERE array::len(field) <op> N` against an array leaf.
