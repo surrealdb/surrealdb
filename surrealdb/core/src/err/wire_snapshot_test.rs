@@ -1093,6 +1093,7 @@ fn every_exec_variant() -> Vec<(&'static str, ExecError)> {
 			ExecError::ComputedParentFieldConflict("sample".to_string(), "sample".to_string()),
 		),
 		("ComputedNestedField", ExecError::ComputedNestedField("sample".to_string())),
+		("ComputedWrite", ExecError::ComputedWrite("sample".to_string())),
 		("ComputedFieldCycle", ExecError::ComputedFieldCycle("sample".to_string())),
 		("IdFieldKeywordConflict", ExecError::IdFieldKeywordConflict("sample".to_string())),
 		("IdFieldUnsupportedKind", ExecError::IdFieldUnsupportedKind("sample".to_string())),

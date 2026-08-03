@@ -60,7 +60,9 @@ use crate::expr::visit::{MutVisitor, VisitMut};
 use crate::expr::{
 	Error as ExprError, Expr, Field, Fields, Function, Groups, Idiom, Part, SelectStatement,
 };
-use crate::val::{Array, Datetime, Number, Object, TryAdd as _, TryFloatDiv, TryMul, Value};
+use crate::val::{
+	Array, Datetime, Number, Object, TryAdd as _, TryFloatDiv, TryMul, TrySub as _, Value,
+};
 
 /// An expression which will be aggregated over for each group.
 #[revisioned(revision = 1)]
@@ -110,12 +112,14 @@ impl Aggregation {
 			},
 			Aggregation::StdDev(arg) => AggregationStat::StdDev {
 				arg,
+				shift: 0.0.into(),
 				sum: 0.0.into(),
 				sum_of_squares: 0.0.into(),
 				count: 0,
 			},
 			Aggregation::Variance(arg) => AggregationStat::Variance {
 				arg,
+				shift: 0.0.into(),
 				sum: 0.0.into(),
 				sum_of_squares: 0.0.into(),
 				count: 0,
@@ -137,7 +141,7 @@ impl Aggregation {
 }
 
 /// A enum containing the data for an aggregation.
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum AggregationStat {
 	Count {
@@ -167,12 +171,19 @@ pub enum AggregationStat {
 	},
 	StdDev {
 		arg: usize,
+		/// Assumed mean. `sum` and `sum_of_squares` accumulate `x - shift`
+		/// rather than `x`; see [`shifted_accumulate`].
+		#[revision(start = 2, default_fn = "default_shift")]
+		shift: Number,
 		sum: Number,
 		sum_of_squares: Number,
 		count: i64,
 	},
 	Variance {
 		arg: usize,
+		/// Assumed mean. See [`Self::StdDev`].
+		#[revision(start = 2, default_fn = "default_shift")]
+		shift: Number,
 		sum: Number,
 		sum_of_squares: Number,
 		count: i64,
@@ -191,7 +202,192 @@ pub enum AggregationStat {
 	},
 }
 
+/// Widen an integer difference so that squaring it cannot overflow.
+///
+/// `Number::Int * Number::Int` is a checked `i64` multiply, so squaring a
+/// difference larger than `sqrt(i64::MAX)` (~3.04e9) fails the whole statement:
+/// `math::variance` over a group holding `0` and `4_000_000_000` would error
+/// rather than return 8e18. Integer inputs therefore accumulate as `f64`, which
+/// is what the scalar `math::variance` already does -- it subtracts a `Float`
+/// mean, so its differences are never `Int`.
+///
+/// `Decimal` and `Float` differences are returned untouched, so a `Decimal`
+/// group keeps full precision. Nothing is lost by widening: the overflow
+/// threshold (~3.04e9) is far below the point where an `f64` stops representing
+/// integers exactly (2^53 ≈ 9.01e15).
+fn widen_difference(delta: Number) -> Number {
+	match delta {
+		Number::Int(v) => Number::Float(v as f64),
+		other => other,
+	}
+}
+
+/// Fold one value into shifted `sum` / `sum_of_squares` state.
+///
+/// Variance is invariant under translation, so the accumulators track
+/// `x - shift` instead of `x`. The finaliser is unchanged --
+/// `(Σd² - (Σd)²/n) / (n - 1)` -- but with `shift` near the data the two terms
+/// are small and their difference no longer cancels. Accumulating raw `x` makes
+/// both terms O(n·x²): at x ≈ 1e8 they agree to more digits than an `f64`
+/// carries, and the variance is lost entirely.
+///
+/// `shift` is chosen as the first value folded into an empty group, which needs
+/// no second pass and no knowledge of the group's spread. A group decoded from
+/// revision 1 has `shift = 0` and keeps accumulating that way, so its existing
+/// sums stay consistent; rebuilding the view re-picks a shift.
+///
+/// The state stays **invertible** -- removing `x` subtracts `x - shift` and
+/// `(x - shift)²` -- which is what lets materialized-view maintenance stay
+/// incremental. That is the property Welford would have cost.
+///
+/// Arithmetic goes through `Number`, so a group of `Decimal` inputs accumulates
+/// and finalises as `Decimal`.
+pub fn shifted_accumulate(
+	shift: &mut Number,
+	sum: &mut Number,
+	sum_of_squares: &mut Number,
+	count: &mut i64,
+	x: Number,
+) -> Result<()> {
+	if *count == 0 {
+		*shift = x;
+	}
+	let delta = widen_difference(x.try_sub(*shift)?);
+	*sum = (*sum).try_add(delta)?;
+	*sum_of_squares = (*sum_of_squares).try_add(delta.try_mul(delta)?)?;
+	*count += 1;
+	Ok(())
+}
+
+/// Re-base shifted state accumulated against `from_shift` onto `to_shift`.
+///
+/// Two partially-accumulated halves of one group can hold different shifts.
+/// With `d = from_shift - to_shift`, substituting
+/// `x - to_shift = (x - from_shift) + d` gives exactly
+///
+/// ```txt
+/// Σ(x - to_shift)  = Σ(x - from_shift) + n·d
+/// Σ(x - to_shift)² = Σ(x - from_shift)² + 2d·Σ(x - from_shift) + n·d²
+/// ```
+///
+/// Exact algebra, needing none of the original values back. Conditioning is
+/// preserved while the two shifts are close, which they are for halves of one
+/// group.
+pub fn shifted_rebase(
+	sum: Number,
+	sum_of_squares: Number,
+	count: i64,
+	from_shift: Number,
+	to_shift: Number,
+) -> Result<(Number, Number)> {
+	let n = Number::from(count);
+	let d = widen_difference(from_shift.try_sub(to_shift)?);
+	let rebased_sum = sum.try_add(n.try_mul(d)?)?;
+	let rebased_sum_of_squares = sum_of_squares
+		.try_add(Number::from(2).try_mul(d)?.try_mul(sum)?)?
+		.try_add(n.try_mul(d.try_mul(d)?)?)?;
+	Ok((rebased_sum, rebased_sum_of_squares))
+}
+
+/// Remove one value from shifted state, the exact inverse of
+/// [`shifted_accumulate`].
+///
+/// Emptying a group clears the shift so the next value picks a fresh one.
+pub fn shifted_remove(
+	shift: &mut Number,
+	sum: &mut Number,
+	sum_of_squares: &mut Number,
+	count: &mut i64,
+	x: Number,
+) -> Result<()> {
+	let delta = widen_difference(x.try_sub(*shift)?);
+	*sum = (*sum).try_sub(delta)?;
+	*sum_of_squares = (*sum_of_squares).try_sub(delta.try_mul(delta)?)?;
+	*count -= 1;
+	if *count == 0 {
+		*shift = 0.0.into();
+		*sum = 0.0.into();
+		*sum_of_squares = 0.0.into();
+	}
+	Ok(())
+}
+
+/// Build shifted state for a group that already exists, from its mean, sample
+/// variance and count.
+///
+/// Used when a materialized view is backfilled: the initial `SELECT` reports
+/// summary statistics rather than replaying rows, so the state is reconstructed
+/// from them -- `Σ(x - mean)` is zero and `Σ(x - mean)²` is `variance * (n - 1)`.
+/// Deriving them from `math::sum` and `math::sum(x * x)` instead would
+/// reintroduce, in the backfill, the very cancellation [`shifted_accumulate`]
+/// exists to avoid.
+///
+/// Those two identities hold for the *exact* mean. `math::mean` returns a
+/// rounded `f64`, so `Σ(x - shift)` is really on the order of `n · ulp(mean)`
+/// rather than zero, and `sum` is stored as an approximation. The finalised
+/// variance is unaffected at this point -- `sum = 0` collapses the formula to
+/// `sum_of_squares / (n - 1)`, which is the reported variance exactly -- but a
+/// later incremental insert accumulates only its own delta, so the group carries
+/// that residue for as long as it is maintained rather than rebuilt. It enters
+/// the finaliser as `sum² / n`, far below the variance itself for any realistic
+/// data. For the same reason the shift of a `Decimal` group is `f64`-precise:
+/// `math::mean` has no `Decimal` result.
+pub fn shifted_state_from_summary(
+	mean: Number,
+	variance: Number,
+	count: i64,
+) -> Result<(Number, Number, Number)> {
+	if count == 0 {
+		return Ok((0.0.into(), 0.0.into(), 0.0.into()));
+	}
+	if count == 1 {
+		// A single-element group has no spread, and its mean is that element.
+		return Ok((mean, 0.0.into(), 0.0.into()));
+	}
+	let sum_of_squares = variance.try_mul(Number::from(count - 1))?;
+	Ok((mean, 0.0.into(), sum_of_squares))
+}
+
+/// Sample variance from shifted state: NaN for an empty group, 0 for a single
+/// element, `(Σd² - (Σd)²/n) / (n - 1)` otherwise.
+///
+/// Shared by the materialized-view finaliser, the ad-hoc `GROUP BY` finaliser
+/// and the streaming aggregator so all three agree bit for bit.
+pub fn shifted_sample_variance(sum: Number, sum_of_squares: Number, count: i64) -> Number {
+	match count {
+		// A group cannot hold fewer than no rows. A negative count means the
+		// state was decremented more often than it was incremented, and the
+		// divisions below would silently return a plausible-looking number
+		// (`sum / -1`, then `/ -2`) from it, so report it as undefined instead.
+		i64::MIN..=0 => f64::NAN.into(),
+		1 => 0.0.into(),
+		_ => {
+			// `count` is at least 2 here, so both divisions are defined.
+			let mean = sum / Number::from(count);
+			(sum_of_squares - (sum * mean)) / Number::from(count - 1)
+		}
+	}
+}
+
+/// Sample standard deviation from shifted state.
+pub fn shifted_sample_deviation(sum: Number, sum_of_squares: Number, count: i64) -> Number {
+	let variance = shifted_sample_variance(sum, sum_of_squares, count);
+	if variance == Number::from(0.0) {
+		Number::from(0.0)
+	} else {
+		variance.sqrt()
+	}
+}
+
 impl AggregationStat {
+	/// Groups persisted before the shift existed accumulated raw values, which
+	/// is exactly `shift = 0`. The migration is lossless: their sums stay valid
+	/// as they are, and only their conditioning is unimproved until the view is
+	/// rebuilt.
+	fn default_shift(_revision: u16) -> Result<Number, revision::Error> {
+		Ok(0.0.into())
+	}
+
 	/// Returns a per group record count this aggregation list keeps track of, if any.
 	pub fn get_count(aggregation_stats: &[AggregationStat]) -> Option<i64> {
 		aggregation_stats.iter().find_map(|x| match x {
@@ -335,6 +531,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 			}
 			AggregationStat::StdDev {
 				arg,
+				shift,
 				sum,
 				sum_of_squares,
 				count,
@@ -349,12 +546,11 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 					})
 				};
 
-				*sum = (*sum).try_add(*n)?;
-				*sum_of_squares = (*sum_of_squares).try_add(n.try_mul(*n)?)?;
-				*count += 1;
+				shifted_accumulate(shift, sum, sum_of_squares, count, *n)?;
 			}
 			AggregationStat::Variance {
 				arg,
+				shift,
 				sum,
 				sum_of_squares,
 				count,
@@ -369,9 +565,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 					})
 				};
 
-				*sum = (*sum).try_add(*n)?;
-				*sum_of_squares = (*sum_of_squares).try_add(n.try_mul(*n)?)?;
-				*count += 1;
+				shifted_accumulate(shift, sum, sum_of_squares, count, *n)?;
 			}
 			AggregationStat::TimeMax {
 				arg,
@@ -456,40 +650,14 @@ pub fn create_field_document(group: &[Value], stats: &[AggregationStat]) -> Obje
 				sum_of_squares,
 				count,
 				..
-			} => {
-				// Match the scalar `math::stddev` and the streaming aggregator:
-				// NaN for an empty group, 0 for a single element.
-				let num = if *count == 0 {
-					Number::from(f64::NAN)
-				} else if *count == 1 {
-					Number::from(0.0)
-				} else {
-					let mean = *sum / Number::from(*count);
-					let variance = (*sum_of_squares - (*sum * mean)) / Number::from(*count - 1);
-					if variance == Number::from(0.0) {
-						Number::from(0.0)
-					} else {
-						variance.sqrt()
-					}
-				};
-				num.into()
-			}
+			} => shifted_sample_deviation(*sum, *sum_of_squares, *count).into(),
 			AggregationStat::Variance {
 				sum,
 				sum_of_squares,
 				count,
 				..
 			} => {
-				// Match the scalar `math::variance` and the streaming aggregator:
-				// NaN for an empty group, 0 for a single element.
-				let num = if *count == 0 {
-					Number::from(f64::NAN)
-				} else if *count == 1 {
-					Number::from(0.0)
-				} else {
-					let mean = *sum / Number::from(*count);
-					(*sum_of_squares - (*sum * mean)) / Number::from(*count - 1)
-				};
+				let num = shifted_sample_variance(*sum, *sum_of_squares, *count);
 				num.into()
 			}
 			AggregationStat::TimeMax {

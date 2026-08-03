@@ -413,7 +413,23 @@ pub(crate) async fn define_field_statement_validate_computed_options(
 ) -> Result<()> {
 	// Find all existing field definitions
 	let fields = txn.all_tb_fields(ns, db, &definition.table, None).await?;
-	if this.computed.is_some() {
+	if let Some(computed) = this.computed.as_ref() {
+		// A COMPUTED body is evaluated on every read of the field, inside the
+		// reading statement's own transaction — which is read-only for a plain
+		// SELECT. A write in the body can therefore never succeed; it only turns
+		// every later read of the field into an error, and the two execution
+		// engines report that error differently. Reject it here so the failure
+		// lands on the definition instead.
+		//
+		// `contains_mutation` walks the whole body — subqueries, idiom parts,
+		// blocks, closure bodies and call arguments — because unlike a
+		// PERMISSIONS clause a COMPUTED body has no runtime guard behind it. A
+		// function *call* stays opaque: the callee is stored separately and can
+		// be redefined after this field is, so definition time cannot be sound
+		// about it, and read-only helpers like `COMPUTED fn::score(n)` must keep
+		// working. A write reached through a call still fails at read time.
+		ensure!(!computed.contains_mutation(), ExecError::ComputedWrite(definition.name.to_sql()));
+
 		// Ensure the field is not the `id` field
 		ensure!(!definition.name.is_id(), ExecError::IdFieldKeywordConflict("COMPUTED".into()));
 

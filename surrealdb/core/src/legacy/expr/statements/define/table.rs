@@ -24,8 +24,8 @@ use crate::expr::paths::{ID, IN, OUT};
 use crate::expr::statements::define::DefineKind;
 use crate::expr::statements::define::table::DefineTableStatement;
 use crate::expr::{
-	Base, BinaryOperator, Cond, Expr, Field, Fields, Function, FunctionCall, Group, Groups, Idiom,
-	Kind, Literal, SelectStatement,
+	Base, Cond, Expr, Field, Fields, Function, FunctionCall, Group, Groups, Idiom, Kind, Literal,
+	SelectStatement,
 };
 use crate::iam::{Action, ResourceKind};
 use crate::key::schema::{FieldKey, ForeignTableKey, RecordKey, TblRoot};
@@ -382,8 +382,10 @@ pub(crate) async fn define_table_statement_initialize_aggregate_view(
 
 	#[derive(Clone, Eq, PartialEq, Hash)]
 	pub enum SelectAggr {
-		// Only used to do initial select.
-		PowSum(usize),
+		// Only used to do the initial select. `math::variance` is the accurate
+		// two-pass scalar, which together with the mean gives the shifted
+		// accumulators exactly -- see `shifted_state_from_summary`.
+		SampleVariance(usize),
 		Base(Aggregation),
 	}
 
@@ -439,9 +441,9 @@ pub(crate) async fn define_table_statement_initialize_aggregate_view(
 			}
 			Aggregation::StdDev(arg) | Aggregation::Variance(arg) => {
 				let len = required_values.len();
-				required_values.entry(SelectAggr::Base(Aggregation::Sum(*arg))).or_insert(len);
+				required_values.entry(SelectAggr::Base(Aggregation::Mean(*arg))).or_insert(len);
 				let len = required_values.len();
-				required_values.entry(SelectAggr::PowSum(*arg)).or_insert(len);
+				required_values.entry(SelectAggr::SampleVariance(*arg)).or_insert(len);
 				let len = required_values.len();
 				required_values.entry(SelectAggr::Base(Aggregation::Count)).or_insert(len);
 			}
@@ -454,17 +456,10 @@ pub(crate) async fn define_table_statement_initialize_aggregate_view(
 	let mut aggregate_value_expr = Vec::with_capacity(required_values.len());
 	for (aggregation, idx) in required_values.iter() {
 		let expr = Expr::FunctionCall(Box::new(match aggregation {
-			SelectAggr::PowSum(arg) => {
-				let expr = Expr::Binary {
-					left: Box::new(analysis.aggregate_arguments[*arg].clone()),
-					op: BinaryOperator::Power,
-					right: Box::new(Expr::Literal(Literal::Integer(2))),
-				};
-				FunctionCall {
-					receiver: Function::Normal("math::sum".to_string()),
-					arguments: vec![expr],
-				}
-			}
+			SelectAggr::SampleVariance(arg) => FunctionCall {
+				receiver: Function::Normal("math::variance".to_string()),
+				arguments: vec![analysis.aggregate_arguments[*arg].clone()],
+			},
 			SelectAggr::Base(aggregation) => match aggregation {
 				Aggregation::Count => FunctionCall {
 					receiver: Function::Normal("count".to_string()),
@@ -675,12 +670,12 @@ pub(crate) async fn define_table_statement_initialize_aggregate_view(
 					});
 				}
 				Aggregation::StdDev(arg) => {
-					let idx = required_values[&SelectAggr::Base(Aggregation::Sum(arg))];
-					let Value::Number(sum) = &aggregate_stats[idx] else {
+					let idx = required_values[&SelectAggr::Base(Aggregation::Mean(arg))];
+					let Value::Number(mean) = &aggregate_stats[idx] else {
 						fail!("initial select statement did not return the right value")
 					};
-					let idx = required_values[&SelectAggr::PowSum(arg)];
-					let Value::Number(sum_of_squares) = &aggregate_stats[idx] else {
+					let idx = required_values[&SelectAggr::SampleVariance(arg)];
+					let Value::Number(variance) = &aggregate_stats[idx] else {
 						fail!("initial select statement did not return the right value")
 					};
 					let idx = required_values[&SelectAggr::Base(Aggregation::Count)];
@@ -688,20 +683,23 @@ pub(crate) async fn define_table_statement_initialize_aggregate_view(
 						fail!("initial select statement did not return the right value")
 					};
 
+					let (shift, sum, sum_of_squares) =
+						aggregation::shifted_state_from_summary(*mean, *variance, *count)?;
 					stats.push(AggregationStat::StdDev {
 						arg,
-						sum: *sum,
-						sum_of_squares: *sum_of_squares,
+						shift,
+						sum,
+						sum_of_squares,
 						count: *count,
 					});
 				}
 				Aggregation::Variance(arg) => {
-					let idx = required_values[&SelectAggr::Base(Aggregation::Sum(arg))];
-					let Value::Number(sum) = &aggregate_stats[idx] else {
+					let idx = required_values[&SelectAggr::Base(Aggregation::Mean(arg))];
+					let Value::Number(mean) = &aggregate_stats[idx] else {
 						fail!("initial select statement did not return the right value")
 					};
-					let idx = required_values[&SelectAggr::PowSum(arg)];
-					let Value::Number(sum_of_squares) = &aggregate_stats[idx] else {
+					let idx = required_values[&SelectAggr::SampleVariance(arg)];
+					let Value::Number(variance) = &aggregate_stats[idx] else {
 						fail!("initial select statement did not return the right value")
 					};
 					let idx = required_values[&SelectAggr::Base(Aggregation::Count)];
@@ -709,10 +707,13 @@ pub(crate) async fn define_table_statement_initialize_aggregate_view(
 						fail!("initial select statement did not return the right value")
 					};
 
+					let (shift, sum, sum_of_squares) =
+						aggregation::shifted_state_from_summary(*mean, *variance, *count)?;
 					stats.push(AggregationStat::Variance {
 						arg,
-						sum: *sum,
-						sum_of_squares: *sum_of_squares,
+						shift,
+						sum,
+						sum_of_squares,
 						count: *count,
 					});
 				}

@@ -181,7 +181,15 @@ pub(crate) async fn check_permission_for_value(
 				}
 				None => ctx,
 			};
-			let mut eval_ctx = EvalContext::from_exec_ctx(exec_ctx).with_value(value);
+			// Bind the record as both the current value and the document root.
+			// The legacy path passes it as the `CursorDoc`
+			// (`doc/check.rs::process_permissions`, `doc/reduce.rs`), which is
+			// what lets `$parent` inside an idiom-level filter — e.g.
+			// `PERMISSIONS FOR select WHERE acl[WHERE $parent.owner = $auth.id]`
+			// — resolve to the row under test. `$parent` is the one reader that
+			// does not fall back to `current_value`, so binding only the value
+			// left it unresolved and the whole predicate falsy, denying every row.
+			let mut eval_ctx = EvalContext::from_exec_ctx(exec_ctx).with_value_and_doc(value);
 			eval_ctx.skip_fetch_perms = true;
 
 			// The concrete error is carried through rather than collapsed to

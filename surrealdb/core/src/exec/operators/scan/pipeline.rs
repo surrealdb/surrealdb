@@ -33,7 +33,13 @@ use crate::val::{TableName, Value};
 
 /// A raw computed field entry before topological sorting:
 /// `(field_name, physical_expr, optional_kind, dependency_field_names)`.
-type RawComputedField = (String, Arc<dyn PhysicalExpr>, Option<crate::expr::Kind>, Vec<String>);
+type RawComputedField = (
+	String,
+	Arc<dyn PhysicalExpr>,
+	Option<crate::expr::Kind>,
+	Vec<String>,
+	Option<crate::iam::AuthLimit>,
+);
 
 // =============================================================================
 // ScanPipeline
@@ -375,7 +381,10 @@ macro_rules! check_perm {
 				if $ctx.root().skip_fetch_perms {
 					Ok(true)
 				} else {
-					let mut eval_ctx = EvalContext::from_exec_ctx($ctx).with_value($value);
+					// Bind the record as both current value and document root,
+					// matching `check_permission_for_value` — see the note there
+					// on why `$parent` needs the root.
+					let mut eval_ctx = EvalContext::from_exec_ctx($ctx).with_value_and_doc($value);
 					eval_ctx.skip_fetch_perms = true;
 					expr.evaluate(eval_ctx).await.map(|v| v.is_truthy()).map_err(|e| {
 						ControlFlow::Err(anyhow::anyhow!("Failed to check permission: {e}"))
@@ -551,6 +560,12 @@ pub(crate) struct ComputedFieldDef {
 	expr: Arc<dyn PhysicalExpr>,
 	/// Optional type coercion
 	kind: Option<crate::expr::Kind>,
+	/// The definer's auth, recorded on the field by `DEFINE FIELD`. The body is
+	/// evaluated under this so it cannot exercise more privilege than the
+	/// identity that wrote it. `None` when the stamp cannot narrow anything
+	/// (root Owner, which is also what pre-`auth_limit` field records default
+	/// to), letting the common case skip the context clone.
+	auth_limit: Option<crate::iam::AuthLimit>,
 }
 
 impl ComputedFieldDef {
@@ -567,8 +582,25 @@ impl ComputedFieldDef {
 			field_name: field_name.into(),
 			expr: Arc::new(crate::exec::physical_expr::Literal(Value::None)),
 			kind: None,
+			auth_limit: None,
 		}
 	}
+}
+
+/// Convert a field's stored `AUTH LIMIT` into the narrowing to apply to its
+/// bodies, or `None` when the stamp cannot narrow any caller.
+///
+/// A root-`Owner` stamp is inert: `Level::Root` is a sublevel of nothing but
+/// `Level::Root`, so the caller keeps its own level, and retaining roles `<=
+/// Owner` keeps every role. Field records written before `auth_limit` existed
+/// default to exactly that stamp, so this is also the overwhelmingly common case.
+fn narrowing_auth_limit(
+	auth_limit: &crate::catalog::auth::AuthLimit,
+) -> Result<Option<crate::iam::AuthLimit>, anyhow::Error> {
+	if auth_limit == &crate::catalog::auth::AuthLimit::new_no_limit() {
+		return Ok(None);
+	}
+	Ok(Some(crate::iam::AuthLimit::try_from(auth_limit)?))
 }
 
 /// Build field state from raw transaction and context parameters.
@@ -628,22 +660,29 @@ pub(crate) async fn build_field_state_raw(
 				format!("Computed field '{field_name}' has unsupported expression")
 			})?;
 
-			raw_computed.push((field_name, physical_expr, fd.field_kind.clone(), deps.fields));
+			raw_computed.push((
+				field_name,
+				physical_expr,
+				fd.field_kind.clone(),
+				deps.fields,
+				narrowing_auth_limit(&fd.auth_limit)?,
+			));
 		}
 	}
 
 	// Topologically sort ALL computed fields for correct evaluation order
 	let topo_input: Vec<(String, Vec<String>)> =
-		raw_computed.iter().map(|(name, _, _, deps)| (name.clone(), deps.clone())).collect();
+		raw_computed.iter().map(|(name, _, _, deps, _)| (name.clone(), deps.clone())).collect();
 	let sorted_indices = crate::expr::computed_deps::topological_sort_computed_fields(&topo_input);
 
 	let mut computed_fields = Vec::with_capacity(sorted_indices.len());
 	for idx in sorted_indices {
-		let (field_name, expr, kind, _) = &raw_computed[idx];
+		let (field_name, expr, kind, _, auth_limit) = &raw_computed[idx];
 		computed_fields.push(ComputedFieldDef {
 			field_name: field_name.clone(),
 			expr: Arc::clone(expr),
 			kind: kind.clone(),
+			auth_limit: auth_limit.clone(),
 		});
 	}
 
@@ -851,9 +890,24 @@ pub(crate) async fn compute_fields_for_value(
 	};
 
 	for cf in &state.computed_fields {
+		// SECURITY: apply the field's AUTH LIMIT so the body runs under the
+		// definer's auth, not the reader's. Without it a low-privileged definer
+		// can plant a body that a high-privileged reader then executes with
+		// their own privilege. Mirrors `Document::computed_fields_inner`.
+		//
+		// The narrowed context is derived per field rather than hoisted because
+		// each field carries its own stamp; `narrowing_auth_limit` returns `None`
+		// for the inert root-Owner stamp so the common case pays nothing.
+		let limited_ctx = cf.auth_limit.as_ref().map(|limit| ctx.with_limited_auth(limit));
+		let narrowed_eval_ctx = limited_ctx.as_ref().map(|limited| {
+			let mut narrowed = EvalContext::from_exec_ctx(limited);
+			narrowed.skip_fetch_perms = skip_fetch_perms;
+			narrowed.computing_record.clone_from(&eval_ctx.computing_record);
+			narrowed
+		});
 		// Evaluate with the row as both current value and document root so
 		// nested subqueries see the same `$parent` as top-level projections (#7154).
-		let row_ctx = eval_ctx.with_value_and_doc(value);
+		let row_ctx = narrowed_eval_ctx.as_ref().unwrap_or(&eval_ctx).with_value_and_doc(value);
 		let computed_value = match cf.expr.evaluate(row_ctx).await {
 			Ok(v) => v,
 			Err(ControlFlow::Return(v)) => v,

@@ -346,6 +346,11 @@ pub(crate) enum Error {
 	#[error("Cannot define field `{0}` as `COMPUTED` fields must be top-level.")]
 	ComputedNestedField(String),
 
+	/// A `COMPUTED` body is evaluated on every read of the field, inside the
+	/// reading statement's transaction, so it must not modify data.
+	#[error("Cannot define field `{0}` as `COMPUTED` bodies must be read-only.")]
+	ComputedWrite(String),
+
 	/// Cyclic dependency detected among computed fields
 	#[error("Cyclic dependency detected among computed fields: {0}")]
 	ComputedFieldCycle(String),
@@ -380,6 +385,10 @@ impl LeafError for Error {
 				},
 			),
 			Error::AccessUnsupportedAlgorithm => TypesError::validation(message, None),
+			// The definition itself is malformed, so the client can act on it.
+			Error::ComputedWrite(_) => {
+				TypesError::validation(message, ValidationError::InvalidRequest)
+			}
 
 			// A `THROW`, reaching the client verbatim. The only kind in this
 			// type the query author chooses.

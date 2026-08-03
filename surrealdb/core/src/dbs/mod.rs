@@ -49,5 +49,7 @@ pub(crate) use crate::expr::variables::Variables;
 #[cfg(storage)]
 mod file;
 
+#[cfg(all(test, feature = "kv-mem"))]
+mod definer_rights_test;
 #[cfg(test)]
 pub(crate) mod test;

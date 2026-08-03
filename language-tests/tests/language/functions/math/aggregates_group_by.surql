@@ -21,10 +21,10 @@ value = "[{ category: 'a', smallest: 2 }, { category: 'b', smallest: 5 }]"
 value = "[{ category: 'a', largest: 5 }, { category: 'b', largest: 20 }]"
 
 [[test.results]]
-value = "[{ category: 'a', spread: 1.5275252316519465f }, { category: 'b', spread: 7.637626158259733f }]"
+value = "[{ category: 'a', spread: 1.5275252316519468f }, { category: 'b', spread: 7.637626158259733f }]"
 
 [[test.results]]
-value = "[{ category: 'a', variance: 2.333333333333333f }, { category: 'b', variance: 58.33333333333333f }]"
+value = "[{ category: 'a', variance: 2.3333333333333335f }, { category: 'b', variance: 58.33333333333333f }]"
 
 [[test.results]]
 value = "[{ category: 'a', mid: 3f }, { category: 'b', mid: 10f }]"

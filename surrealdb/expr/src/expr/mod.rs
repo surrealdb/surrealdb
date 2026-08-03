@@ -37,6 +37,7 @@ pub mod lookup;
 pub mod match_plan;
 pub mod mock;
 pub mod model;
+pub mod mutation;
 pub mod operation;
 pub mod operator;
 pub mod order;

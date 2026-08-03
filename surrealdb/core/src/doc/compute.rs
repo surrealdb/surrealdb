@@ -9,6 +9,7 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::{CursorDoc, Document, Error};
 use crate::exe::FlowResultExt as _;
+use crate::iam::AuthLimit;
 use crate::val::RecordId;
 
 /// Identifies which of the four `CursorDoc` views on a [`Document`] to
@@ -165,6 +166,14 @@ impl Document {
 					continue;
 				}
 			}
+
+			// SECURITY: apply the field's AUTH LIMIT so the body runs under the
+			// definer's auth, not the reader's. Without it a low-privileged
+			// definer can plant a body that a high-privileged reader then
+			// executes with their own privilege. Mirrors the write-side
+			// `process_table_fields` and the streaming
+			// `compute_fields_for_value`.
+			let opt = &opt.limited_by(&AuthLimit::try_from(&fd.auth_limit)?);
 
 			let mut val = crate::legacy::expr_compute(computed, stk, ctx, opt, Some(doc))
 				.await

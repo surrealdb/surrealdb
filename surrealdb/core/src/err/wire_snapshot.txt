@@ -249,6 +249,7 @@ ComputedKeywordConflict	{ cause: NONE, code: -32000, kind: 'Internal', message: 
 ComputedNestedFieldConflict	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot define field `sample` as `COMPUTED` since a nested field `sample` already exists.' }
 ComputedParentFieldConflict	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot define nested field `sample` as parent field `sample` is a `COMPUTED` field.' }
 ComputedNestedField	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot define field `sample` as `COMPUTED` fields must be top-level.' }
+ComputedWrite	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'Cannot define field `sample` as `COMPUTED` bodies must be read-only.' }
 ComputedFieldCycle	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cyclic dependency detected among computed fields: sample' }
 IdFieldKeywordConflict	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot use the `sample` keyword on the `id` field.' }
 IdFieldUnsupportedKind	{ cause: NONE, code: -32000, kind: 'Internal', message: "Cannot use the `sample` type on the `id` field, as that's not a valid record id key." }

@@ -19,7 +19,7 @@ use crate::expr::{
 };
 use crate::idx::planner::RecordStrategy;
 use crate::key::schema::RecordKey;
-use crate::val::{Array, Number, RecordId, RecordIdKey, TableName, TryAdd, TryMul, TryPow, Value};
+use crate::val::{Array, RecordId, RecordIdKey, TableName, TryAdd, Value};
 struct Recalculation {
 	function: String,
 	stat: usize,
@@ -625,12 +625,14 @@ impl Document {
 				}
 				AggregationStat::Variance {
 					arg,
+					shift,
 					sum,
 					sum_of_squares,
 					count,
 				}
 				| AggregationStat::StdDev {
 					arg,
+					shift,
 					sum,
 					sum_of_squares,
 					count,
@@ -639,9 +641,7 @@ impl Document {
 						fail!("Old record wasn't a number but was created with a number");
 					};
 
-					*count -= 1;
-					*sum = *sum - *n;
-					*sum_of_squares = *sum_of_squares - n.try_pow(Number::from(2))?;
+					aggregation::shifted_remove(shift, sum, sum_of_squares, count, *n)?;
 				}
 				AggregationStat::Accumulate {
 					..
@@ -1047,15 +1047,17 @@ impl Document {
 				}
 				AggregationStat::Variance {
 					arg,
+					shift,
 					sum,
 					sum_of_squares,
-					..
+					count,
 				}
 				| AggregationStat::StdDev {
 					arg,
+					shift,
 					sum,
 					sum_of_squares,
-					..
+					count,
 				} => {
 					let Value::Number(before) = &before_args[*arg] else {
 						fail!("Old record wasn't a number but was created with a number");
@@ -1065,10 +1067,12 @@ impl Document {
 						fail!("Old record wasn't a number but was created with a number");
 					};
 
-					*sum = *sum - *before;
-					*sum_of_squares = *sum_of_squares - before.try_mul(*before)?;
-					*sum = *sum + *after;
-					*sum_of_squares = *sum_of_squares + after.try_mul(*after)?;
+					// Remove-then-add rather than two in-place adjustments: the
+					// shift and count must move together with the sums, and
+					// `shifted_remove` resets an emptied group so the re-add
+					// picks a fresh shift.
+					aggregation::shifted_remove(shift, sum, sum_of_squares, count, *before)?;
+					aggregation::shifted_accumulate(shift, sum, sum_of_squares, count, *after)?;
 				}
 				AggregationStat::Accumulate {
 					..
