@@ -64,7 +64,7 @@ impl FunctionRegistry {
 	}
 
 	/// Iterate all registered scalar functions.
-	#[cfg(all(test, feature = "kv-mem"))]
+	#[cfg(test)]
 	pub(crate) fn scalar_functions(&self) -> impl Iterator<Item = &Arc<dyn ScalarFunction>> {
 		self.functions.values()
 	}
@@ -300,5 +300,43 @@ mod tests {
 
 		let fields = registry.get_projection("type::fields").expect("type::fields should exist");
 		assert_eq!(fields.name(), "type::fields");
+	}
+
+	/// Every clock- or entropy-backed builtin must report itself
+	/// non-deterministic, so the planner's literal folder leaves it to be
+	/// evaluated per row instead of freezing one value into the whole
+	/// statement. These are declared with `define_pure_function!` — correctly,
+	/// since they need no execution context — which makes the determinism flag
+	/// the only thing standing between them and the folder, and it is applied
+	/// by hand at each registration.
+	#[test]
+	fn volatile_builtins_are_non_deterministic() {
+		let registry = FunctionRegistry::with_builtins();
+
+		let volatile: Vec<&str> = registry
+			.scalar_functions()
+			.map(|f| f.name())
+			.filter(|name| *name == "rand" || name.starts_with("rand::") || *name == "time::now")
+			.collect();
+
+		// Guard the guard: a filter that matched nothing would pass silently.
+		assert!(
+			volatile.len() > 10,
+			"expected the whole rand::* family plus time::now, found {volatile:?}"
+		);
+
+		let offenders: Vec<&str> = volatile
+			.iter()
+			.filter(|name| {
+				registry.get(name).expect("just enumerated from the registry").is_deterministic()
+			})
+			.copied()
+			.collect();
+
+		assert!(
+			offenders.is_empty(),
+			"these must be registered behind `NonDeterministic`, or the planner will fold a \
+			 call to one constant reused for every row: {offenders:?}"
+		);
 	}
 }

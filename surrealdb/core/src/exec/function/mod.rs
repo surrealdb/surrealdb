@@ -122,6 +122,22 @@ pub trait ScalarFunction: Send + Sync + Debug {
 		false
 	}
 
+	/// Whether repeated calls with the same arguments produce the same value.
+	///
+	/// This is distinct from [`ScalarFunction::is_pure`], which reports only
+	/// whether a function can run without an execution context. A function can
+	/// need no context and still return a different value each call — the
+	/// `rand::*` family does.
+	///
+	/// The planner's literal folder evaluates a call once at plan time and
+	/// substitutes the result for the whole statement, so it must fold only
+	/// deterministic functions; everything else has to be evaluated per row.
+	/// `time::now()` is the one deliberate exception, folded per statement by
+	/// an explicit case in the folder rather than through this flag.
+	fn is_deterministic(&self) -> bool {
+		true
+	}
+
 	/// Synchronous invocation for pure functions.
 	///
 	/// This is the primary entry point for pure scalar functions.
@@ -141,5 +157,59 @@ pub trait ScalarFunction: Send + Sync + Debug {
 		args: Vec<Value>,
 	) -> BoxFut<'a, Result<Value>> {
 		Box::pin(async move { self.invoke(args) })
+	}
+}
+
+/// Wraps a scalar function to report it as non-deterministic.
+///
+/// Every other part of the [`ScalarFunction`] contract, including the name the
+/// registry keys on, is delegated to the wrapped function, so wrapping changes
+/// nothing but [`ScalarFunction::is_deterministic`].
+///
+/// This exists because the arity-specific `define_pure_function!` arms have no
+/// slot for per-function overrides; wrapping at registration keeps one
+/// declaration per function regardless of its signature.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NonDeterministic<F>(pub F);
+
+impl<F: ScalarFunction> ScalarFunction for NonDeterministic<F> {
+	fn name(&self) -> &'static str {
+		self.0.name()
+	}
+
+	fn signature(&self) -> Signature {
+		self.0.signature()
+	}
+
+	fn return_type(&self, arg_types: &[Kind]) -> Result<Kind> {
+		self.0.return_type(arg_types)
+	}
+
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		self.0.required_context()
+	}
+
+	fn is_pure(&self) -> bool {
+		self.0.is_pure()
+	}
+
+	fn is_async(&self) -> bool {
+		self.0.is_async()
+	}
+
+	fn is_deterministic(&self) -> bool {
+		false
+	}
+
+	fn invoke(&self, args: Vec<Value>) -> Result<Value> {
+		self.0.invoke(args)
+	}
+
+	fn invoke_async<'a>(
+		&'a self,
+		ctx: &'a EvalContext<'_>,
+		args: Vec<Value>,
+	) -> BoxFut<'a, Result<Value>> {
+		self.0.invoke_async(ctx, args)
 	}
 }

@@ -1,9 +1,14 @@
 //! Time functions
 
-use crate::exec::function::FunctionRegistry;
+use crate::exec::function::{FunctionRegistry, NonDeterministic};
 use crate::{define_pure_function, register_functions};
 
 // No argument functions
+//
+// `time::now` reads the clock, so it is registered behind `NonDeterministic`:
+// repeated calls disagree, whatever the arguments. The planner's literal folder
+// still folds it once per statement, but through an explicit case of its own
+// rather than through the determinism flag.
 define_pure_function!(TimeNow, "time::now", () -> Datetime, crate::fnc::time::now);
 
 // Optional datetime argument functions (default to the current time)
@@ -76,7 +81,7 @@ pub fn register(registry: &mut FunctionRegistry) {
 		TimeMinute,
 		TimeMonth,
 		TimeNano,
-		TimeNow,
+		NonDeterministic<TimeNow>,
 		TimeRound,
 		TimeSecond,
 		TimeTimezone,

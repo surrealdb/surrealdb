@@ -123,8 +123,9 @@ pub(crate) fn try_expr_to_value(expr: &Expr) -> Option<crate::val::Value> {
 ///
 /// Only folds expressions that:
 /// - Contain no field/idiom references (document-independent)
-/// - Are deterministic built-in functions or arithmetic on literals
-/// - Pure functions (math::*, string::*, type::*, etc.) where all args are literals
+/// - Are arithmetic on literals, or calls to a built-in that is both context-free and deterministic
+///   (math::*, string::*, type::*, etc.) with all arguments already literals. `rand::*` is
+///   context-free but not deterministic, so it is left for per-row evaluation.
 ///
 /// `time::now()` is evaluated once at plan time, consistent with how most
 /// databases evaluate `NOW()` once per statement/transaction.
@@ -168,18 +169,27 @@ impl MutVisitor for ExpressionFolder<'_> {
 /// Attempt to reduce a constant expression to an `Expr::Literal`.
 ///
 /// Handles:
-/// - `time::now()` → `Literal::Datetime(now)` (special case: non-pure but per-statement)
-/// - Pure function calls where all arguments are already literals (math::floor, string::lowercase,
-///   type::int, etc.)
+/// - `time::now()` → `Literal::Datetime(now)` (special case: non-deterministic, but folded once per
+///   statement by deliberate exception)
+/// - Calls to a context-free, deterministic function whose arguments are all already literals
+///   (math::floor, string::lowercase, type::int, etc.)
 /// - Binary arithmetic on two literals (datetime ± duration, number ± number, etc.)
+///
+/// Both conditions on a call matter and they are different questions:
+/// [`ScalarFunction::is_pure`] asks whether it can run without an execution
+/// context, [`ScalarFunction::is_deterministic`] whether repeated calls agree.
+/// `rand::*` answers yes then no, and folding it would freeze one draw into
+/// every row.
 fn try_fold_to_literal(expr: &Expr, registry: &FunctionRegistry) -> Option<Expr> {
 	use crate::expr::Function;
 	use crate::val::{Datetime, Value};
 
 	match expr {
 		// time::now() → current datetime literal
-		// Special case: time::now() is not pure (depends on clock) but we
-		// intentionally fold it once per statement, matching SQL semantics.
+		// Special case: time::now() is not deterministic (it reads the clock),
+		// so the generic branch below would refuse it. Folding it once per
+		// statement is intended, matching SQL semantics, hence this arm ahead
+		// of the determinism gate.
 		Expr::FunctionCall(fc)
 			if matches!(&fc.receiver, Function::Normal(name) if name == "time::now")
 				&& fc.arguments.is_empty() =>
@@ -187,7 +197,7 @@ fn try_fold_to_literal(expr: &Expr, registry: &FunctionRegistry) -> Option<Expr>
 			Some(Value::Datetime(Datetime::now()).into_literal())
 		}
 
-		// Pure function call where all arguments are already literals.
+		// Context-free, deterministic call whose arguments are all literals.
 		// After bottom-up folding, nested expressions like `math::floor(20 + 0.5)`
 		// will have their arguments folded first, so we only need to check
 		// whether the immediate arguments are literals.
@@ -196,13 +206,17 @@ fn try_fold_to_literal(expr: &Expr, registry: &FunctionRegistry) -> Option<Expr>
 				return None;
 			};
 			let func = registry.get(name.as_str())?;
-			if !func.is_pure() || func.is_async() {
+			// `is_pure` only says the call needs no context; folding also
+			// requires that repeated calls agree, or the single plan-time
+			// result would stand in for every row.
+			if !func.is_pure() || func.is_async() || !func.is_deterministic() {
 				return None;
 			}
 			// All arguments must be convertible to constant Values
 			let args: Option<Vec<Value>> = fc.arguments.iter().map(try_expr_to_value).collect();
 			let args = args?;
-			// Invoke the function synchronously — safe because it's pure
+			// Sound to invoke here and reuse for the statement: purity means no
+			// context is needed, determinism that one draw stands for all rows
 			let result = func.invoke(args).ok()?;
 			Some(result.into_literal())
 		}

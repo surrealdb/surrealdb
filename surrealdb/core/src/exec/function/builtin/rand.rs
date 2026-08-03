@@ -1,7 +1,13 @@
 //! Random functions
 
-use crate::exec::function::FunctionRegistry;
+use crate::exec::function::{FunctionRegistry, NonDeterministic};
 use crate::{define_pure_function, register_functions};
+
+// Every function here needs no execution context, so it is defined with
+// `define_pure_function!` and invoked synchronously. None of them are
+// deterministic, though, so each is registered behind `NonDeterministic` to
+// keep the planner's literal folder from collapsing a call to a single
+// constant reused for the whole statement.
 
 // No argument functions
 define_pure_function!(Rand, "rand", () -> Float, crate::fnc::rand::rand);
@@ -27,18 +33,18 @@ define_pure_function!(RandEnum, "rand::enum", (...values: Any) -> Any, crate::fn
 pub fn register(registry: &mut FunctionRegistry) {
 	register_functions!(
 		registry,
-		Rand,
-		RandBool,
-		RandDuration,
-		RandEnum,
-		RandFloat,
-		RandId,
-		RandInt,
-		RandString,
-		RandTime,
-		RandUlid,
-		RandUuid,
-		RandUuidV4,
-		RandUuidV7,
+		NonDeterministic<Rand>,
+		NonDeterministic<RandBool>,
+		NonDeterministic<RandDuration>,
+		NonDeterministic<RandEnum>,
+		NonDeterministic<RandFloat>,
+		NonDeterministic<RandId>,
+		NonDeterministic<RandInt>,
+		NonDeterministic<RandString>,
+		NonDeterministic<RandTime>,
+		NonDeterministic<RandUlid>,
+		NonDeterministic<RandUuid>,
+		NonDeterministic<RandUuidV4>,
+		NonDeterministic<RandUuidV7>,
 	);
 }
