@@ -339,6 +339,25 @@ same arguments, or drive the harness binary yourself:
 cargo run --features bench -- bench run [--save] [--dataset NAME] [--backend mem] [--quick] [--json PATH] [<filter>]
 ```
 
+### Determinism
+
+Two process-wide sources of randomness would otherwise make a bench measure a
+different amount of work on each run; the harness pins both, so a local run and a
+CI run see the same data and the same index structures:
+
+- **Generated data.** Every dataset build reseeds the engine RNG, so `rand::*`
+  values and `|record:N|` ids are identical across runs and independent of
+  benchmark order. Override with `SURREAL_RAND_SEED=<u64>` to redraw the datasets
+  from a different, still fixed, seed.
+- **HNSW graph construction.** HNSW picks each element's layer at random, so an
+  unseeded build gives the same kNN query a different graph to traverse on every
+  run — worth far more than any regression the suite could catch. The harness
+  pins the seed; override with `SURREAL_HNSW_BUILD_SEED=<u64>`.
+
+Re-run a surprising ANN result with a different `SURREAL_HNSW_BUILD_SEED` on both
+sides before trusting it: a fixed seed removes the variance between runs, but it
+does not prove the change generalises beyond that one graph.
+
 `scripts/bench/optimise.workflow.js` is a workflow recipe driving an AI
 optimisation loop: baseline → inspect the profile → propose & apply one engine
 change → re-measure → keep only if the harness reports a significant speedup. See

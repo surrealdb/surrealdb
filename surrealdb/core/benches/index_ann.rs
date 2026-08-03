@@ -106,7 +106,15 @@ impl BenchDb {
 	}
 }
 
+/// Fixed HNSW graph seed for this bench. Unseeded, every run assigns elements to
+/// different layers, so the same kNN query traverses a different graph and the
+/// run-to-run spread swamps the effect being measured. Changing the constant
+/// re-shapes the graph, so measurements taken before the change are no longer
+/// comparable with later ones. `SURREAL_HNSW_BUILD_SEED` overrides it.
+const HNSW_BUILD_SEED: u64 = 0x5EED_11A5;
+
 fn bench_hnsw_with_db(c: &mut Criterion) {
+	surrealdb_cnf::set_default_hnsw_build_seed(HNSW_BUILD_SEED);
 	bench_ann_with_db(c, AnnIndex::Hnsw, BenchStore::Memory);
 	#[cfg(feature = "kv-rocksdb")]
 	bench_ann_with_db(c, AnnIndex::Hnsw, BenchStore::RocksDb);

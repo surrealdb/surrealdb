@@ -108,7 +108,9 @@ jobs:
           # Read-only against the shared store (NO --save): the harness fetches the
           # latest `main` measurement (written by the nightly run) and compares this
           # PR's `--quick` run against it. quiet_system.py mirrors the nightly run's
-          # environment so the two are measured the same way.
+          # environment so the two are measured the same way, and the harness pins
+          # the HNSW graph seed, so the ANN benches compare against a nightly
+          # baseline built from an identical graph.
           sudo ./.github/scripts/quiet_system.py \
             language-tests/target/release/surrealql-test bench \
             --store-url ${{ secrets.BENCH_DS_URL }} \

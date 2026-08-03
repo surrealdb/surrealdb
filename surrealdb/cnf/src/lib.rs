@@ -23,6 +23,7 @@ pub mod dynamic;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::LazyLock;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use common::str::ParseBytes;
 pub use config::{Config, ConfigMap, format_duration, parse_duration};
@@ -115,21 +116,69 @@ fn parse_memory_threshold(value: &str) -> Option<usize> {
 	})
 }
 
-/// Optional fixed seed for the HNSW level-assignment RNG.
+/// `SURREAL_HNSW_BUILD_SEED`, read once at first use. A value that is set but not
+/// a valid `u64` is reported via `tracing::warn!` and ignored, rather than
+/// silently falling back to entropy — a typo'd seed would otherwise look like a
+/// pinned build while producing a different graph on every run.
+static HNSW_BUILD_SEED_ENV: LazyLock<Option<u64>> =
+	LazyLock::new(|| match std::env::var("SURREAL_HNSW_BUILD_SEED") {
+		Ok(v) => match v.parse::<u64>() {
+			Ok(seed) => Some(seed),
+			Err(_) => {
+				warn!("Ignoring invalid SURREAL_HNSW_BUILD_SEED value `{v}`; expected a u64");
+				None
+			}
+		},
+		Err(_) => None,
+	});
+
+/// In-process fallback seed, installed by [`set_default_hnsw_build_seed`]. Read
+/// only when [`HNSW_BUILD_SEED_ENV`] is absent.
+static HNSW_BUILD_SEED_DEFAULT: AtomicU64 = AtomicU64::new(0);
+
+/// Whether [`HNSW_BUILD_SEED_DEFAULT`] holds an installed seed. Separate from the
+/// seed itself so every `u64` remains a usable seed value.
+static HNSW_BUILD_SEED_DEFAULT_SET: AtomicBool = AtomicBool::new(false);
+
+/// The seed for the HNSW level-assignment RNG, or `None` to seed from entropy.
 ///
-/// Unset (the default) seeds the RNG from entropy, so every index build produces
-/// a different graph. Set `SURREAL_HNSW_BUILD_SEED=<u64>` to build a
-/// *deterministic* graph (the structure then depends only on insertion order and
-/// the vectors), which makes HNSW search benchmarks reproducible across runs — a
-/// prerequisite for a clean before/after comparison of search-path changes. It
-/// only affects graph construction, never search behaviour, results, or recall.
+/// Resolution order, highest priority first:
 ///
-/// Read once at first use, like the other knobs here: the benchmark harness sets
-/// the variable out-of-process before launch, so a read-once `LazyLock` is
-/// sufficient and avoids any in-process `set_var`.
-pub static HNSW_BUILD_SEED: LazyLock<Option<u64>> = LazyLock::new(|| {
-	std::env::var("SURREAL_HNSW_BUILD_SEED").ok().and_then(|s| s.parse::<u64>().ok())
-});
+/// 1. `SURREAL_HNSW_BUILD_SEED=<u64>`.
+/// 2. An in-process default installed by [`set_default_hnsw_build_seed`].
+/// 3. Neither: entropy, so every index build produces a different graph.
+///
+/// A fixed seed builds a *deterministic* graph — its structure then depends only
+/// on insertion order and the vectors — which makes HNSW build and search
+/// benchmarks reproducible across runs. Without one, graph-construction variance
+/// alone moves an HNSW search benchmark by far more than any regression worth
+/// catching, so a fixed seed is a prerequisite for a clean before/after
+/// comparison. The seed only affects graph construction, never search behaviour,
+/// results, or recall.
+pub fn hnsw_build_seed() -> Option<u64> {
+	if let Some(seed) = *HNSW_BUILD_SEED_ENV {
+		return Some(seed);
+	}
+	// `Acquire` pairs with the `Release` store in the setter, so the seed written
+	// before the flag is visible to any thread that observes the flag.
+	HNSW_BUILD_SEED_DEFAULT_SET
+		.load(Ordering::Acquire)
+		.then(|| HNSW_BUILD_SEED_DEFAULT.load(Ordering::Relaxed))
+}
+
+/// Install the process-wide fallback HNSW build seed used when
+/// `SURREAL_HNSW_BUILD_SEED` is unset, so a caller that wants reproducible graphs
+/// gets them without depending on its launcher exporting the variable. The
+/// environment variable still wins, which is what lets a single run be re-seeded
+/// from outside the process.
+///
+/// Only takes effect for indexes built after the call, and only affects graph
+/// construction. BENCHMARK AND TEST USE ONLY — the benchmark harness calls this
+/// at startup; a server has no reason to pin the seed.
+pub fn set_default_hnsw_build_seed(seed: u64) {
+	HNSW_BUILD_SEED_DEFAULT.store(seed, Ordering::Relaxed);
+	HNSW_BUILD_SEED_DEFAULT_SET.store(true, Ordering::Release);
+}
 
 /// Optional fixed seed for the deterministic data-generation RNG (see
 /// `surrealdb_core::rnd`).
@@ -245,5 +294,25 @@ mod tests {
 		assert_eq!(parse_memory_threshold("10"), Some(1024 * 1024));
 		// An unparseable value returns None; callers map that to disabled (0).
 		assert_eq!(parse_memory_threshold("garbage"), None);
+	}
+
+	/// The in-process HNSW seed default is off until installed, then answers every
+	/// later resolution. This is the only test that touches that process-global
+	/// state, so it can assert the uninstalled state without synchronising.
+	#[test]
+	fn hnsw_build_seed_honours_installed_default() {
+		// `SURREAL_HNSW_BUILD_SEED` outranks the default by design, so with it set
+		// there is nothing here for the default to answer.
+		if std::env::var_os("SURREAL_HNSW_BUILD_SEED").is_some() {
+			return;
+		}
+
+		assert_eq!(hnsw_build_seed(), None, "no seed until one is installed");
+
+		set_default_hnsw_build_seed(0);
+		assert_eq!(hnsw_build_seed(), Some(0), "zero is a seed, not 'unset'");
+
+		set_default_hnsw_build_seed(u64::MAX);
+		assert_eq!(hnsw_build_seed(), Some(u64::MAX), "a later install replaces the default");
 	}
 }

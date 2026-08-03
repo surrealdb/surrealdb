@@ -246,6 +246,10 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 		)
 	}
 
+	// Before any datastore is built, so every HNSW index in the run is built from
+	// the same graph seed.
+	pin_hnsw_build_seed();
+
 	let mut load_errors = Vec::new();
 
 	let cfg = CmdConfig::from_matches(parent, current);
@@ -907,6 +911,27 @@ impl BenchStatement {
 fn dataset_seed() -> u64 {
 	const DEFAULT_DATASET_SEED: u64 = 0x5EED_B0A7;
 	surrealdb_cnf::RAND_SEED.unwrap_or(DEFAULT_DATASET_SEED)
+}
+
+/// Pin HNSW graph construction to a fixed seed for the whole run.
+///
+/// HNSW assigns each element a random layer at insert time, so an unseeded build
+/// produces a different graph on every run and the same kNN query then traverses
+/// a different number of nodes. That variance dwarfs any regression the suite is
+/// meant to catch, which makes an unseeded ANN bench useless as a guardrail.
+///
+/// The harness owns this default rather than the CI workflows so a local
+/// `cargo make bench` and a nightly run build the same graph without anyone
+/// having to remember an environment variable. `SURREAL_HNSW_BUILD_SEED` still
+/// takes precedence (see [`surrealdb_cnf::hnsw_build_seed`]), so a single run can
+/// be re-seeded to check that a result is not an artefact of this one graph.
+///
+/// Changing the constant re-shapes every HNSW graph in the suite, so ANN
+/// measurements taken before the change are no longer comparable with ones taken
+/// after it.
+fn pin_hnsw_build_seed() {
+	const DEFAULT_HNSW_BUILD_SEED: u64 = 0x5EED_11A5;
+	surrealdb_cnf::set_default_hnsw_build_seed(DEFAULT_HNSW_BUILD_SEED);
 }
 
 /// Builds a fresh datastore, reseeds the engine RNG, runs the (effective) import

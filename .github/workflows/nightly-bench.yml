@@ -50,6 +50,10 @@ jobs:
 
           cargo build --release --features bench,bench-remote-store
 
+      # The harness pins the HNSW graph seed itself, so the ANN benches build the
+      # same graph here as in a local `cargo make bench` and their run-to-run
+      # spread reflects timing noise rather than graph-construction variance.
+      # Export `SURREAL_HNSW_BUILD_SEED` on this step to override it for a run.
       - name: Run language suite
         run: |
           sudo ./.github/scripts/quiet_system.py ./language-tests/target/release/surrealql-test bench \

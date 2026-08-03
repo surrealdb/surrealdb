@@ -14,9 +14,9 @@
 # Vectors and categories are DETERMINISTIC (derived from the record index, no
 # `rand`), and repeat with period 1000, so the 5000 rows carry 1000 distinct
 # vectors — the graph holds one element per distinct vector, each mapping to the
-# 5 documents that share it. Combined with `SURREAL_HNSW_BUILD_SEED`, the built
-# graph is identical across runs, so a before/after wall-clock comparison is not
-# confounded by graph variance. `run = false`.
+# 5 documents that share it. Combined with the HNSW build seed the bench harness
+# pins, the built graph is identical across runs, so a before/after wall-clock
+# comparison is not confounded by graph variance. `run = false`.
 
 [test]
 run = false

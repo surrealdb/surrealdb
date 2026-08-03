@@ -143,10 +143,11 @@ where
 			layer0: HnswLayer::new(ikb.clone(), 0, m0),
 			layers: Vec::default(),
 			elements: HnswElements::new(table_id, ikb.clone(), p.distance.clone(), vector_cache),
-			// A fixed seed (via SURREAL_HNSW_BUILD_SEED) makes graph construction
-			// deterministic so search benchmarks are reproducible across runs;
-			// unset, the RNG is seeded from entropy as before.
-			rng: match *surrealdb_cnf::HNSW_BUILD_SEED {
+			// A fixed seed makes graph construction deterministic so build and
+			// search benchmarks are reproducible across runs; with none resolved,
+			// the RNG is seeded from entropy. See `surrealdb_cnf::hnsw_build_seed`
+			// for where the seed comes from.
+			rng: match surrealdb_cnf::hnsw_build_seed() {
 				Some(seed) => SmallRng::seed_from_u64(seed),
 				None => SmallRng::from_rng(&mut rand::rng()),
 			},
