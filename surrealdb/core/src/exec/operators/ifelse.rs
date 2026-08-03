@@ -188,3 +188,27 @@ impl ToSql for IfElsePlan {
 		}
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::exec::operators::test_util::{drain_err, root_ctx};
+	use crate::expr::Literal;
+
+	#[tokio::test]
+	async fn a_context_without_a_transaction_yields_an_error_not_a_panic() {
+		// Conditions are planned at execute time, which needs a transaction to
+		// resolve catalog definitions. The executor always attaches one; a context
+		// assembled without one has to fail rather than panic on the way in.
+		let plan = IfElsePlan::new(
+			vec![(Expr::Literal(Literal::Bool(true)), Expr::Literal(Literal::Integer(1)))],
+			None,
+			0,
+		);
+		let err = drain_err(&plan, &root_ctx()).await;
+		assert!(
+			format!("{err}").contains("requires a transaction"),
+			"expected a missing-transaction error, got: {err}"
+		);
+	}
+}

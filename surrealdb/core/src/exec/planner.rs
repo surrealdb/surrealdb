@@ -1604,6 +1604,12 @@ macro_rules! try_plan_expr {
 	// counter. Non-zero only when re-planning a nested query at runtime (an
 	// `eval` string) so the depth limit continues across the re-entry rather
 	// than resetting — see `Planner::with_depth`.
+	//
+	// `$txn` is expanded only on the branch that plans, and must stay there: the
+	// DML/DDL and `ComputeOnly` branches hand the expression to the legacy
+	// `compute` path and need no transaction. Callers whose transaction lookup
+	// is fallible rely on that, passing a `?` expression that runs only when
+	// planning proceeds.
 	($expr:expr, $ctx:expr, $registry:expr, $txn:expr, $auth:expr, $depth:expr) => {{
 		let __expr: &$crate::expr::Expr = $expr;
 		if matches!(

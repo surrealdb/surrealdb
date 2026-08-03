@@ -225,3 +225,28 @@ impl ToSql for ForeachPlan {
 		self.body.fmt_sql(f, fmt);
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::exec::operators::test_util::{drain_err, root_ctx};
+	use crate::expr::Literal;
+
+	#[tokio::test]
+	async fn a_context_without_a_transaction_yields_an_error_not_a_panic() {
+		// The range expression is planned at execute time, which needs a
+		// transaction to resolve catalog definitions. The executor always attaches
+		// one; a context assembled without one has to fail rather than panic.
+		let plan = ForeachPlan::new(
+			Param::from("i".to_string()),
+			Expr::Literal(Literal::Array(vec![Expr::Literal(Literal::Integer(1))])),
+			Block(vec![Expr::Literal(Literal::Integer(1))]),
+			0,
+		);
+		let err = drain_err(&plan, &root_ctx()).await;
+		assert!(
+			format!("{err}").contains("requires a transaction"),
+			"expected a missing-transaction error, got: {err}"
+		);
+	}
+}

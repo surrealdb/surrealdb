@@ -107,3 +107,27 @@ pub(crate) async fn collect(op: &Arc<dyn ExecOperator>, ctx: &ExecutionContext) 
 	}
 	out
 }
+
+/// Run an operator expected to fail, and return the error it raised.
+///
+/// Covers both places a failure can surface — `execute()` itself and a later
+/// stream item — and panics if the operator instead produces rows. Control-flow
+/// signals other than [`ControlFlow::Err`] are not errors and panic too.
+pub(crate) async fn drain_err(op: &impl ExecOperator, ctx: &ExecutionContext) -> anyhow::Error {
+	use futures::StreamExt;
+
+	let unwrap = |ctrl| match ctrl {
+		crate::expr::ControlFlow::Err(e) => e,
+		other => panic!("expected an error, got the control-flow signal: {other:?}"),
+	};
+
+	let mut stream = match op.execute(ctx) {
+		Ok(stream) => stream,
+		Err(ctrl) => return unwrap(ctrl),
+	};
+	match stream.next().await {
+		Some(Ok(batch)) => panic!("expected an error, got rows: {:?}", batch.values),
+		Some(Err(ctrl)) => unwrap(ctrl),
+		None => panic!("expected an error, got an empty stream"),
+	}
+}

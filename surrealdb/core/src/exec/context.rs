@@ -442,8 +442,22 @@ impl ExecutionContext {
 	}
 
 	/// Get the transaction (delegates to FrozenContext).
+	///
+	/// Panics when the context carries no transaction. Callers that can be
+	/// reached under a transaction-less context must use [`Self::try_txn`] and
+	/// report the missing transaction as an error instead.
 	pub fn txn(&self) -> Arc<Transaction> {
 		self.root().ctx.tx()
+	}
+
+	/// Get the transaction, or `None` when this context carries none.
+	///
+	/// The executor always attaches one before running a plan, so operators
+	/// built by it can rely on [`Self::txn`]. Contexts assembled outside that
+	/// path — operator unit tests, for instance — may have none, and code
+	/// reachable from them uses this to fail rather than panic.
+	pub fn try_txn(&self) -> Option<Arc<Transaction>> {
+		self.root().ctx.try_tx().cloned()
 	}
 
 	/// Look up a parameter value by name (delegates to FrozenContext).

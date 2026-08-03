@@ -162,15 +162,22 @@ pub(crate) trait ExecOperator: Debug + Send + Sync {
 	/// Only called if `mutates_context()` returns true.
 	/// This method may perform async operations (like looking up namespace/database
 	/// definitions or creating transactions).
-	/// The error is `anyhow` rather than a concrete enum so that a failure
-	/// raised while evaluating the bound expression reaches the boundary with
-	/// its type intact. Flattening it here cost the transactor's retry loop its
-	/// ability to see a write conflict, and cancellation and timeout their
-	/// classification.
+	///
+	/// Returns `FlowResult` for the same reason `execute` does: computing the
+	/// context runs the bound expression, and a `BREAK` or `CONTINUE` raised in
+	/// there belongs to an enclosing loop, which sits above this call. Flattening
+	/// the signal into an error here would strand it at the binding site, so the
+	/// loop never sees it.
+	///
+	/// `ControlFlow::Err` carries an `anyhow::Error` rather than a concrete enum
+	/// so that a failure raised while evaluating the bound expression reaches the
+	/// boundary with its type intact. Flattening it cost the transactor's retry
+	/// loop its ability to see a write conflict, and cancellation and timeout
+	/// their classification.
 	fn output_context<'a>(
 		&'a self,
 		input: &'a ExecutionContext,
-	) -> BoxFut<'a, anyhow::Result<ExecutionContext>> {
+	) -> BoxFut<'a, crate::expr::FlowResult<ExecutionContext>> {
 		Box::pin(async move { Ok(input.clone()) })
 	}
 

@@ -17,7 +17,9 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::ctx::FrozenContext;
 use crate::err::{EngineError, Error};
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::plan_or_compute::{block_required_context, collect_stream, legacy_compute};
+use crate::exec::plan_or_compute::{
+	block_required_context, collect_stream, legacy_compute, planning_txn,
+};
 use crate::exec::planner::try_plan_expr;
 use crate::exec::{
 	AccessMode, BoxFut, CardinalityHint, Error as ExecError, ExecOperator, FlowResult,
@@ -110,20 +112,20 @@ impl ExecOperator for SequencePlan {
 	fn output_context<'a>(
 		&'a self,
 		input: &'a ExecutionContext,
-	) -> BoxFut<'a, anyhow::Result<ExecutionContext>> {
+	) -> BoxFut<'a, crate::expr::FlowResult<ExecutionContext>> {
 		Box::pin(async move {
 			let (_result, final_ctx) =
 				execute_block_with_context(&self.block, input, self.plan_depth + 1).await.map_err(
 					|ctrl| match ctrl {
 						ControlFlow::Break | ControlFlow::Continue | ControlFlow::Return(_) => {
 							// BREAK/CONTINUE/RETURN at top-level LET binding context is invalid
-							anyhow::Error::new(ExecError::InvalidControlFlow)
+							ControlFlow::Err(anyhow::Error::new(ExecError::InvalidControlFlow))
 						}
 						// Unchanged, not stringified: a write conflict raised in
 						// here has to stay downcastable or the transactor will
 						// not retry it, and a cancelled or timed-out block has
 						// to stay recognisable as such.
-						ControlFlow::Err(e) => e,
+						ControlFlow::Err(e) => ControlFlow::Err(e),
 					},
 				)?;
 			Ok(final_ctx)
@@ -170,12 +172,14 @@ async fn execute_block_with_context(
 		let auth = current_ctx.options().map(|o| Arc::clone(&o.auth));
 
 		// Try to plan the expression with current context, continuing the depth
-		// count so re-entry nodes inside the block stay bounded.
+		// count so re-entry nodes inside the block stay bounded. The transaction
+		// lookup is fallible and, per `try_plan_expr!`, runs only if the macro
+		// takes its planning branch.
 		match try_plan_expr!(
 			expr,
 			&frozen_ctx,
 			current_ctx.function_registry(),
-			current_ctx.txn(),
+			planning_txn(&current_ctx).map_err(|e| ControlFlow::Err(e.into()))?,
 			auth,
 			depth
 		) {
@@ -254,5 +258,25 @@ fn legacy_context_for_fallback(
 impl ToSql for SequencePlan {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		self.block.fmt_sql(f, fmt);
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::exec::operators::test_util::{drain_err, root_ctx};
+	use crate::expr::Literal;
+
+	#[tokio::test]
+	async fn a_context_without_a_transaction_yields_an_error_not_a_panic() {
+		// Each statement is planned at execute time, which needs a transaction to
+		// resolve catalog definitions. The executor always attaches one; a context
+		// assembled without one has to fail rather than panic.
+		let plan = SequencePlan::new(Block(vec![Expr::Literal(Literal::Integer(1))]), 0);
+		let err = drain_err(&plan, &root_ctx()).await;
+		assert!(
+			format!("{err}").contains("requires a transaction"),
+			"expected a missing-transaction error, got: {err}"
+		);
 	}
 }

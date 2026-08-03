@@ -100,6 +100,19 @@ pub(crate) async fn legacy_compute(
 // Plan-or-Compute Evaluation
 // ============================================================================
 
+/// The transaction the deferred-planning operators need to re-plan an
+/// expression at execute time.
+///
+/// Planning resolves table and index definitions through the transaction, so a
+/// context without one cannot plan at all. Reported as an error rather than
+/// read through [`ExecutionContext::txn`], whose missing-transaction case
+/// panics.
+pub(crate) fn planning_txn(ctx: &ExecutionContext) -> Result<Arc<crate::kvs::Transaction>, Error> {
+	ctx.try_txn().ok_or_else(|| {
+		Error::unreachable("Deferred planning requires a transaction, but the context has none")
+	})
+}
+
 /// Plan and evaluate an expression, falling back to legacy compute if the
 /// planner returns `PlannerUnsupported` or `PlannerUnimplemented`.
 ///
@@ -124,7 +137,16 @@ pub(crate) async fn evaluate_expr_at_depth(
 	depth: u32,
 ) -> crate::expr::FlowResult<Value> {
 	let auth = ctx.options().map(|o| Arc::clone(&o.auth));
-	match try_plan_expr!(expr, ctx.ctx(), ctx.function_registry(), ctx.txn(), auth, depth) {
+	// The transaction lookup is fallible and, per `try_plan_expr!`, runs only if
+	// the macro takes its planning branch.
+	match try_plan_expr!(
+		expr,
+		ctx.ctx(),
+		ctx.function_registry(),
+		planning_txn(ctx).map_err(|e| ControlFlow::Err(e.into()))?,
+		auth,
+		depth
+	) {
 		Ok(plan) => {
 			let stream = plan.execute(ctx)?;
 			collect_single_value(stream).await
@@ -168,10 +190,20 @@ pub(crate) async fn evaluate_body_expr(
 	let frozen_ctx = Arc::clone(ctx.ctx());
 	let auth = ctx.options().map(|o| Arc::clone(&o.auth));
 
-	match try_plan_expr!(expr, &frozen_ctx, ctx.function_registry(), ctx.txn(), auth, depth) {
+	// Fallible transaction lookup, evaluated only on the planning branch.
+	match try_plan_expr!(
+		expr,
+		&frozen_ctx,
+		ctx.function_registry(),
+		planning_txn(ctx).map_err(|e| ControlFlow::Err(e.into()))?,
+		auth,
+		depth
+	) {
 		Ok(plan) => {
 			if plan.mutates_context() {
-				*ctx = plan.output_context(ctx).await.map_err(ControlFlow::Err)?;
+				// A loop signal from the bound expression is the caller's to act
+				// on — `ForeachPlan` breaks or continues its loop on it.
+				*ctx = plan.output_context(ctx).await?;
 				Ok(Value::None)
 			} else {
 				let stream = plan.execute(ctx)?;
