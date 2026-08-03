@@ -880,10 +880,26 @@ impl Ord for Number {
 }
 
 impl hash::Hash for Number {
+	/// # This hash does not satisfy the `Hash`/`Eq` contract
+	///
+	/// It hashes the decimal buffer encoding, so numerically-equal values with an
+	/// identical decimal expansion agree across variants — `Int(1)`, `Float(1.0)`
+	/// and `Decimal(1)` share a hash. But [`Number`]'s equality is *approximate*
+	/// between `Float` and `Decimal`: it agrees to roughly sixteen significant
+	/// digits and then calls it equal, so `Float(0.1) == Decimal("0.1")` while the
+	/// buffers differ, `D128::from_f64(0.1)` being
+	/// `0.1000000000000000055511151231257827`. (Going the other way,
+	/// `Float(0.11111) != Decimal("0.11111")` — the relation is not even
+	/// transitive across the boundary.)
+	///
+	/// So `a == b` does **not** imply `hash(a) == hash(b)`, and an approximate,
+	/// non-transitive equality admits no canonical form that would fix it. Any
+	/// `HashMap`/`HashSet` keyed on a [`Number`] — or on any value that can hold
+	/// one — will therefore miss entries it contains. Key such structures on `Ord`
+	/// instead, or treat a miss as inconclusive; see
+	/// [`Value::hash_agrees_with_eq`](crate::val::Value::hash_agrees_with_eq) for
+	/// deciding when a miss can still be trusted.
 	fn hash<H: hash::Hasher>(&self, state: &mut H) {
-		// Use decimal buffer encoding to ensure numerically-equal values
-		// across variants (Int/Float/Decimal) produce identical hashes.
-		// This maintains the Hash/Eq contract: if a == b, then hash(a) == hash(b).
 		self.as_decimal_buf().hash(state);
 	}
 }

@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use revision::SerializeRevisioned;
 
-use crate::val::{Number, RecordIdKey, Value};
+use crate::val::{Number, Value};
 
 /// Inner [`Number`] discriminant on the rev-1 wire. Mirrors the
 /// declaration order of [`crate::val::Number`] and is what
@@ -70,64 +70,16 @@ impl NumberSubVariant {
 	}
 }
 
-/// Whether a `HashSet<Value>` / `HashMap<Value, _>` **miss** on `value` proves a
-/// value miss — i.e. whether `value`'s `Hash` is consistent with its `PartialEq`.
+/// Whether a `HashSet<Value>` / `HashMap<Value, _>` **miss** on `value` proves
+/// that `set` does not hold it.
 ///
-/// `Number` is the one leaf where the two disagree. Its comparison is
-/// cross-variant and, between `Float` and `Decimal`, approximate: it settles on
-/// roughly sixteen significant digits, so `0.1f == 0.1dec` while
-/// `0.11111f != 0.11111dec`. `Number: Hash` instead hashes the variant's *exact*
-/// decimal expansion, and `D128::from_f64(0.1)` is
-/// `0.1000000000000000055511151231257827`. Equal numbers therefore land in
-/// different buckets, and `contains` answers `false` for a value that is in the
-/// set. An approximate, non-transitive equality has no canonical form, so there
-/// is no hash to repair — the only sound move is to stop trusting a miss.
-///
-/// A probe is decisive as soon as *either* side is number-free: `PartialEq`
-/// requires matching variants at every level, so two values can only hash apart
-/// while comparing equal if both hold a `Number` in the same position. Callers
-/// combine this with [`LiteralSet::hash_agrees_with_eq`] accordingly.
-///
-/// Variants whose hash/equality pairing is not established — `Geometry` (hashes
-/// `f64` coordinates), `Regex` (equality with `String` is asymmetric), `Range`
-/// and `Closure` — report `false` so they take the same conservative path. The
-/// planner keeps all of them out of literal sets, so this only costs a value of
-/// that type its pre-decode rejection.
-pub(crate) fn value_hash_agrees_with_eq(value: &Value) -> bool {
-	match value {
-		Value::None
-		| Value::Null
-		| Value::Bool(_)
-		| Value::String(_)
-		| Value::Duration(_)
-		| Value::Datetime(_)
-		| Value::Uuid(_)
-		| Value::Bytes(_)
-		| Value::Table(_)
-		| Value::File(_) => true,
-		Value::Number(_)
-		| Value::Geometry(_)
-		| Value::Regex(_)
-		| Value::Range(_)
-		| Value::Closure(_) => false,
-		Value::Array(a) => a.iter().all(value_hash_agrees_with_eq),
-		Value::Set(s) => s.iter().all(value_hash_agrees_with_eq),
-		Value::Object(o) => o.values().all(value_hash_agrees_with_eq),
-		Value::RecordId(r) => record_id_key_hash_agrees_with_eq(&r.key),
-	}
-}
-
-/// [`value_hash_agrees_with_eq`] for the id half of a [`Value::RecordId`].
-///
-/// `RecordIdKey::Number` is an `i64`, not a [`Number`], so plain record ids stay
-/// decisive; only a compound id can smuggle a [`Number`] in.
-fn record_id_key_hash_agrees_with_eq(key: &RecordIdKey) -> bool {
-	match key {
-		RecordIdKey::Number(_) | RecordIdKey::String(_) | RecordIdKey::Uuid(_) => true,
-		RecordIdKey::Array(a) => a.iter().all(value_hash_agrees_with_eq),
-		RecordIdKey::Object(o) => o.values().all(value_hash_agrees_with_eq),
-		RecordIdKey::Range(_) => false,
-	}
+/// The single rule every decode-fallback membership probe in this module shares:
+/// a miss is decisive as soon as one side of the probe is number-free. See
+/// [`Value::hash_agrees_with_eq`] for why a number on both sides makes the miss
+/// meaningless, and [`LiteralSet::hash_agrees_with_eq`] for the set side.
+#[inline]
+pub(crate) fn hash_miss_is_decisive(value: &Value, set: &LiteralSet) -> bool {
+	set.hash_agrees_with_eq() || value.hash_agrees_with_eq()
 }
 
 /// One predicate literal, optionally pre-encoded into rev-2 wire bytes.
@@ -309,11 +261,17 @@ impl LiteralWire {
 /// trade buys per-row probes with zero allocation, which is the right call
 /// for the hot scan path but is worth knowing if a future change wants to
 /// drop the redundancy.
+/// **Invariant:** the three derived flags below ([`Self::strand_asymmetric`],
+/// [`Self::number_sub_variants`], [`Self::hash_eq_mismatch`]) describe the
+/// partitions and are computed once in [`Self::from_set`]. The partitions are
+/// private so no other code can add an element without the flags being
+/// recomputed — a stale flag would silently restore the wrong-results behaviour
+/// each flag exists to prevent. Readers use the accessors.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct LiteralSet {
-	pub(crate) strands: HashSet<Vec<u8>>,
-	pub(crate) numbers: HashSet<Vec<u8>>,
-	pub(crate) fallback: HashSet<Value>,
+	strands: HashSet<Vec<u8>>,
+	numbers: HashSet<Vec<u8>>,
+	fallback: HashSet<Value>,
 	/// True iff any element in `fallback` could equal-match a Strand-tagged
 	/// value asymmetrically via `Value::equal` (today: `Value::Regex`). When
 	/// set, `wire_cmp::wire_value_in_set` must hand a Strand-tag miss off to
@@ -337,7 +295,7 @@ pub(crate) struct LiteralSet {
 	number_sub_variants: u8,
 	/// True iff some element's `Hash` disagrees with its `PartialEq` — in
 	/// practice, iff some element holds a `Number` (see
-	/// [`value_hash_agrees_with_eq`] for why numbers break the contract). When
+	/// [`Value::hash_agrees_with_eq`] for why numbers break the contract). When
 	/// set, a `HashSet<Value>` miss against this set does **not** prove a value
 	/// miss, and the decode-fallback path must treat it as inconclusive unless
 	/// the probed value is itself number-free.
@@ -348,7 +306,7 @@ impl LiteralSet {
 	pub(crate) fn from_set(set: &HashSet<Value>) -> Self {
 		let mut out = LiteralSet::default();
 		for v in set {
-			out.hash_eq_mismatch |= !value_hash_agrees_with_eq(v);
+			out.hash_eq_mismatch |= !v.hash_agrees_with_eq();
 			match v {
 				Value::String(_) => {
 					let mut full = Vec::new();
@@ -400,10 +358,29 @@ impl LiteralSet {
 		self.number_sub_variants
 	}
 
+	/// Whether the Strand partition holds these exact rev-2 `Value` wire bytes.
+	#[inline]
+	pub(crate) fn strands_contain_wire(&self, wire: &[u8]) -> bool {
+		self.strands.contains(wire)
+	}
+
+	/// Whether the Number partition holds these exact rev-2 `Value` wire bytes.
+	#[inline]
+	pub(crate) fn numbers_contain_wire(&self, wire: &[u8]) -> bool {
+		self.numbers.contains(wire)
+	}
+
+	/// Whether the set holds no `Number` at all, in which case no stored entry
+	/// can match a Number-tagged value.
+	#[inline]
+	pub(crate) fn has_no_numbers(&self) -> bool {
+		self.numbers.is_empty()
+	}
+
 	/// True iff a `HashSet<Value>` miss against this set proves a value miss.
 	///
 	/// False once any element holds a `Number`, because `Number: Hash` and
-	/// `Number: PartialEq` disagree — see [`value_hash_agrees_with_eq`]. A
+	/// `Number: PartialEq` disagree — see [`Value::hash_agrees_with_eq`]. A
 	/// caller whose probed value is number-free may still trust a miss, since
 	/// equality requires matching variants on both sides.
 	#[inline]
@@ -443,49 +420,6 @@ mod tests {
 
 	use super::*;
 	use crate::val::Number;
-
-	#[test]
-	fn value_hash_agrees_with_eq_flags_numbers_at_any_depth() {
-		use std::collections::BTreeMap;
-
-		use surrealdb_strand::Strand;
-
-		use crate::val::{Object, RecordId, RecordIdKey};
-
-		let num = Value::Number(Number::Float(0.1));
-		let nested =
-			|v: Value| Value::Object(Object::from(BTreeMap::from([(Strand::from("v"), v)])));
-
-		// Hash-consistent: a miss on these proves absence.
-		for v in [
-			Value::None,
-			Value::Null,
-			Value::Bool(true),
-			Value::String("x".into()),
-			Value::from(vec![Value::String("x".into())]),
-			nested(Value::String("x".into())),
-			Value::RecordId(RecordId {
-				table: "t".into(),
-				key: RecordIdKey::Number(1),
-			}),
-		] {
-			assert!(value_hash_agrees_with_eq(&v), "{v:?}");
-		}
-
-		// Not hash-consistent: a number is reachable, at any depth.
-		for v in [
-			num.clone(),
-			Value::from(vec![num.clone()]),
-			nested(num.clone()),
-			nested(Value::from(vec![num.clone()])),
-			Value::RecordId(RecordId {
-				table: "t".into(),
-				key: RecordIdKey::Array(vec![num].into()),
-			}),
-		] {
-			assert!(!value_hash_agrees_with_eq(&v), "{v:?}");
-		}
-	}
 
 	#[test]
 	fn literal_set_reports_whether_a_miss_is_decisive() {

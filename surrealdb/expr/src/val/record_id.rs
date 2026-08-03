@@ -188,6 +188,19 @@ pub enum RecordIdKey {
 }
 
 impl RecordIdKey {
+	/// [`Value::hash_agrees_with_eq`] for a record id's key.
+	///
+	/// [`RecordIdKey::Number`] is an `i64`, not a [`crate::val::Number`], so plain
+	/// record ids are always decisive; only a compound id can hold one.
+	pub fn hash_agrees_with_eq(&self) -> bool {
+		match self {
+			RecordIdKey::Number(_) | RecordIdKey::String(_) | RecordIdKey::Uuid(_) => true,
+			RecordIdKey::Array(a) => a.iter().all(Value::hash_agrees_with_eq),
+			RecordIdKey::Object(o) => o.values().all(Value::hash_agrees_with_eq),
+			RecordIdKey::Range(_) => false,
+		}
+	}
+
 	/// Generate a new random ID
 	pub fn rand() -> Self {
 		let id: String = crate::rnd::with_rng(|rng| {

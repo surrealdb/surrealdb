@@ -50,7 +50,7 @@ pub(crate) use compile::{
 };
 use revision::WalkRevisioned;
 pub(crate) use streaming::StreamingLeafEvaluator;
-use wire_literal::{LiteralSet, LiteralWire};
+use wire_literal::{LiteralSet, LiteralWire, hash_miss_is_decisive};
 
 use crate::exec::object_extract::{
 	DescendResult, Extracted, NeedleKey, PathSegment, SlotScanResult, WalkLeafErr,
@@ -752,14 +752,11 @@ impl PreDecodeFilter {
 
 /// [`Evidence`] for a set-membership probe that went through a `HashSet<Value>`.
 ///
-/// A hit is always a hit. A **miss** only proves absence when the hash is
-/// consistent with equality on at least one side of the probe — numbers break
-/// that contract, so `0.1f` misses a set holding `0.1dec` even though the two
-/// compare equal (see
-/// [`value_hash_agrees_with_eq`](wire_literal::value_hash_agrees_with_eq)).
-/// Since equality requires matching variants at every level, one number-free
-/// side is enough; otherwise the miss is inconclusive and the row goes to the
-/// authoritative predicate.
+/// A hit is always a hit. A **miss** only proves absence when
+/// [`hash_miss_is_decisive`] says so —
+/// numbers break the `Hash`/`Eq` contract, so `0.1f` misses a set holding
+/// `0.1dec` even though the two compare equal. An inconclusive miss sends the
+/// row to the authoritative predicate.
 #[inline]
 fn hash_set_evidence_for(
 	op: &BinaryOperator,
@@ -767,10 +764,7 @@ fn hash_set_evidence_for(
 	value: &Value,
 	literal_set: &LiteralSet,
 ) -> Evidence {
-	if !inside
-		&& !literal_set.hash_agrees_with_eq()
-		&& !wire_literal::value_hash_agrees_with_eq(value)
-	{
+	if !inside && !hash_miss_is_decisive(value, literal_set) {
 		return Evidence::Unknown;
 	}
 	PreDecodeFilter::set_evidence_for(op, inside)
@@ -1439,6 +1433,7 @@ mod tests {
 			literal_to_idx: tables.literal_to_idx,
 			wire_to_idx: tables.wire_to_idx,
 			literal_set: tables.literal_set,
+			literal_count: tables.literal_count,
 			mode: OverlapMode::Any,
 		});
 		let root = PredNode::LeafStreaming {
@@ -1469,6 +1464,7 @@ mod tests {
 			literal_to_idx: tables.literal_to_idx,
 			wire_to_idx: tables.wire_to_idx,
 			literal_set: tables.literal_set,
+			literal_count: tables.literal_count,
 			mode: OverlapMode::All,
 		});
 		let root = PredNode::LeafStreaming {
@@ -1484,6 +1480,91 @@ mod tests {
 		let obj = Object::from(BTreeMap::from([(
 			Strand::from("a"),
 			Value::from(vec![Value::Number(Number::Int(1))]),
+		)]));
+		let rec = wire_record_plain_object(obj);
+		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
+	}
+
+	/// A bit index identifies a literal value, not a spelling of one. A set that
+	/// spells one value twice (`0.1f` and `0.1dec` compare equal but hash apart,
+	/// so a `HashSet` keeps both) asks for that value once, so an array holding
+	/// either spelling satisfies `ContainAll`.
+	#[test]
+	fn streaming_array_overlap_all_collapses_equal_literal_spellings() {
+		let float = Value::Number(Number::Float(0.1));
+		let decimal = Value::Number(Number::Decimal("0.1".parse().unwrap()));
+		let set = Arc::new(HashSet::from([float.clone(), decimal.clone()]));
+		// Precondition: the `HashSet` really did keep both spellings.
+		assert_eq!(set.len(), 2);
+
+		let tables = overlap_streaming_from_set(set.as_ref());
+		assert_eq!(tables.literal_count, 1, "both spellings share one bit");
+		assert_eq!(tables.literal_to_idx.len(), 2, "both spellings stay addressable");
+
+		for element in [&float, &decimal] {
+			let eval: Arc<dyn super::StreamingLeafEvaluator> = Arc::new(ArrayOverlapsLiteralSet {
+				literal_to_idx: Arc::clone(&tables.literal_to_idx),
+				wire_to_idx: Arc::clone(&tables.wire_to_idx),
+				literal_set: Arc::clone(&tables.literal_set),
+				literal_count: tables.literal_count,
+				mode: OverlapMode::All,
+			});
+			let root = PredNode::LeafStreaming {
+				path: vec!["tags".into()],
+				evaluator: eval,
+				fallback: LeafFallback {
+					op: BinaryOperator::ContainAll,
+					literal: Value::from(vec![float.clone(), decimal.clone()]),
+					reversed: false,
+				},
+			};
+			let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
+			let obj = Object::from(BTreeMap::from([(
+				Strand::from("tags"),
+				Value::from(vec![element.clone()]),
+			)]));
+			let rec = wire_record_plain_object(obj);
+			assert_eq!(
+				pf.apply(&[], &rec),
+				PreDecodeFilterOutcome::NeedFullDecode,
+				"element {element:?} satisfies the whole set"
+			);
+		}
+	}
+
+	/// Two genuinely distinct literals still need both present, so an array
+	/// holding one of them is provably rejected.
+	#[test]
+	fn streaming_array_overlap_all_still_rejects_a_missing_literal() {
+		let set = Arc::new(HashSet::from([
+			Value::Number(Number::Decimal("0.1".parse().unwrap())),
+			Value::Number(Number::Decimal("0.2".parse().unwrap())),
+		]));
+		let tables = overlap_streaming_from_set(set.as_ref());
+		assert_eq!(tables.literal_count, 2);
+		let eval: Arc<dyn super::StreamingLeafEvaluator> = Arc::new(ArrayOverlapsLiteralSet {
+			literal_to_idx: tables.literal_to_idx,
+			wire_to_idx: tables.wire_to_idx,
+			literal_set: tables.literal_set,
+			literal_count: tables.literal_count,
+			mode: OverlapMode::All,
+		});
+		let root = PredNode::LeafStreaming {
+			path: vec!["tags".into()],
+			evaluator: eval,
+			fallback: LeafFallback {
+				op: BinaryOperator::ContainAll,
+				literal: Value::from(vec![
+					Value::Number(Number::Decimal("0.1".parse().unwrap())),
+					Value::Number(Number::Decimal("0.2".parse().unwrap())),
+				]),
+				reversed: false,
+			},
+		};
+		let pf = PreDecodeFilter::new(root, TEST_DEPTH_LIMIT);
+		let obj = Object::from(BTreeMap::from([(
+			Strand::from("tags"),
+			Value::from(vec![Value::Number(Number::Decimal("0.1".parse().unwrap()))]),
 		)]));
 		let rec = wire_record_plain_object(obj);
 		assert_eq!(pf.apply(&[], &rec), PreDecodeFilterOutcome::Reject);
@@ -1511,6 +1592,7 @@ mod tests {
 				literal_to_idx: tables.literal_to_idx,
 				wire_to_idx: tables.wire_to_idx,
 				literal_set: tables.literal_set,
+				literal_count: tables.literal_count,
 				mode,
 			});
 			let root = PredNode::LeafStreaming {
@@ -1541,6 +1623,7 @@ mod tests {
 			literal_to_idx: tables.literal_to_idx,
 			wire_to_idx: tables.wire_to_idx,
 			literal_set: tables.literal_set,
+			literal_count: tables.literal_count,
 			mode: OverlapMode::None,
 		});
 		let root = PredNode::LeafStreaming {

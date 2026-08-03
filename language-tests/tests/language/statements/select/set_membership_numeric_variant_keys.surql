@@ -33,6 +33,24 @@ value = "[tenth:1, tenth:2]"
 value = "[]"
 
 [[test.results]]
+value = "[tenth:1, tenth:2]"
+
+[[test.results]]
+value = "[tenth:1, tenth:2]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[tenth:1, tenth:2]"
+
+[[test.results]]
+value = "'OK'"
+
+[[test.results]]
+value = "[pair:2]"
+
+[[test.results]]
 value = "'OK'"
 
 [[test.results]]
@@ -81,6 +99,22 @@ SELECT VALUE id FROM tenth WHERE k NOT IN [0.1dec];
 SELECT VALUE id FROM tenth WHERE ks CONTAINSANY [0.1dec];
 SELECT VALUE id FROM tenth WHERE ks CONTAINSALL [0.1dec];
 SELECT VALUE id FROM tenth WHERE ks CONTAINSNONE [0.1dec];
+
+-- A literal list that spells one value two ways asks for that value once, so a
+-- row holding either spelling satisfies CONTAINSALL.
+SELECT VALUE id FROM tenth WHERE ks CONTAINSALL [0.1f, 0.1dec];
+SELECT VALUE id FROM tenth WHERE ks CONTAINSANY [0.1f, 0.1dec];
+SELECT VALUE id FROM tenth WHERE ks CONTAINSNONE [0.1f, 0.1dec];
+SELECT VALUE id FROM tenth WHERE k IN [0.1f, 0.1dec];
+
+-- Two genuinely distinct literals still need both present.
+{
+	CREATE pair:1 SET ks = [0.1f];
+	CREATE pair:2 SET ks = [0.1dec, 0.2f];
+	RETURN "OK";
+};
+
+SELECT VALUE id FROM pair WHERE ks CONTAINSALL [0.1dec, 0.2dec];
 
 -- Integral values agree across all three numeric variants.
 {

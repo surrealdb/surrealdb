@@ -370,6 +370,7 @@ fn try_compile_leaf_streaming(
 				literal_to_idx: tables.literal_to_idx,
 				wire_to_idx: tables.wire_to_idx,
 				literal_set: tables.literal_set,
+				literal_count: tables.literal_count,
 				mode,
 			});
 			Some(PredNode::LeafStreaming {
@@ -727,7 +728,7 @@ fn is_synthetic_id_path(path: &[PathSegment]) -> bool {
 /// descent + one hash probe per row instead of one descent + comparison per arm;
 /// `eval_set_membership` keeps the two relations apart where hashing cannot
 /// decide loose equality (numbers — see
-/// [`value_hash_agrees_with_eq`](super::wire_literal::value_hash_agrees_with_eq)).
+/// [`Value::hash_agrees_with_eq`]).
 ///
 /// Conservative — an arm only joins a fused group when it is:
 /// - a [`PredNode::Leaf`] with `op == Equal`, `reversed == false`, a hashset-safe literal (see

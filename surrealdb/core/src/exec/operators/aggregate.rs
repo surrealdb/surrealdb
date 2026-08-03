@@ -220,10 +220,19 @@ struct GroupState {
 // Ordered keys also make the group order deterministic, and they let the drain
 // feed results downstream already sorted by key.
 //
-// The map stores each key once against an index into `states`, so the per-row
-// cost is a single `O(log g)` probe against a *borrowed* row key: the row's
-// values are cloned only when the row opens a new group. Spill-to-disk for
-// high-cardinality groups is a future change.
+// `Vec<Value>: Borrow<[Value]>`, so a row probes with the borrowed slice its key
+// values already live in and nothing is cloned unless the row opens a new group.
+//
+// The keys are held apart from the states, mapping each key to an index into
+// `states`, because a `BTreeMap<GroupKey, GroupState>` cannot answer
+// get-or-insert in one descent on stable Rust: returning the `get_mut` borrow
+// from the hit branch keeps it live across the insert branch (E0499, NLL problem
+// case 3), so a single map costs either two descents per row (`contains_key`
+// then `get_mut`) or a key clone per row (`entry(key.to_vec())`) — the clone
+// being the cost this layout exists to avoid. Copying the `usize` out ends the
+// borrow, so the hit path is one descent plus one indexed load.
+//
+// Spill-to-disk for high-cardinality groups is a future change.
 struct GroupMap {
 	index: BTreeMap<GroupKey, usize>,
 	states: Vec<GroupState>,
@@ -262,32 +271,33 @@ impl GroupMap {
 		&mut self.states[idx]
 	}
 
-	/// Insert a group directly (used by the GROUP ALL empty-input fallback).
-	fn insert(&mut self, key: GroupKey, state: GroupState) {
-		self.index.insert(key, self.states.len());
-		self.states.push(state);
-	}
-
 	/// Drain the map in group-key order.
+	///
+	/// `index` is the key-ordered side, so it drives the iteration and claims each
+	/// state by index; every index appears exactly once, which is what lets the
+	/// states be taken rather than cloned.
 	fn into_key_order(self) -> impl ExactSizeIterator<Item = (GroupKey, GroupState)> {
 		let mut states: Vec<Option<GroupState>> = self.states.into_iter().map(Some).collect();
 		self.index
 			.into_iter()
-			.map(move |(key, idx)| (key, states[idx].take().expect("each state is claimed once")))
+			.map(move |(key, idx)| (key, states[idx].take().expect("each index appears once")))
 	}
 }
 
-/// Transpose per-expression group-key columns into one row-major buffer.
+/// Lay per-expression group-key columns out row-major, so each row's key is a
+/// contiguous slice the group probe can borrow.
 ///
 /// `columns[expr_idx][row_idx]` is the evaluated value for group-by expression
-/// `expr_idx` at row `row_idx`; the result holds `row_count` consecutive runs of
-/// `columns.len()` values, so row `i`'s key is the slice
-/// `[i * columns.len() .. (i + 1) * columns.len()]`. Values are moved out of
-/// `columns`, which is left holding `Value::None` placeholders.
-///
-/// A single group-by expression needs no transpose — its column is already the
-/// row-major layout — so callers take `columns[0]` directly in that case.
-fn transpose_group_keys(columns: &mut [Vec<Value>], row_count: usize) -> Vec<Value> {
+/// `expr_idx` at row `row_idx`. The result holds `row_count` consecutive runs of
+/// `columns.len()` values, so row `i`'s key is
+/// `[i * columns.len() .. (i + 1) * columns.len()]` — the one caller-visible
+/// invariant, and the reason this function owns the layout rather than the call
+/// site. `columns` is consumed: values are moved out, and a single column is
+/// taken whole because it is already the row-major form.
+fn group_key_rows(columns: &mut Vec<Vec<Value>>, row_count: usize) -> Vec<Value> {
+	if columns.len() == 1 {
+		return columns.swap_remove(0);
+	}
 	let mut flat = Vec::with_capacity(row_count * columns.len());
 	for row_idx in 0..row_count {
 		for col in columns.iter_mut() {
@@ -456,9 +466,9 @@ impl ExecOperator for Aggregate {
 				}
 			}
 
-			// Accumulate all values into groups. See `GroupMap` for the
-			// hash-keyed bucket design that avoids per-row clones of
-			// group-by values into the map key.
+			// Accumulate all values into groups. See `GroupMap` for why the group
+			// identity relation has to be `Ord` rather than a hash, and how the
+			// per-row probe avoids cloning the group-by values.
 			let mut groups = GroupMap::new();
 
 			// Consume all input batches
@@ -569,17 +579,13 @@ impl ExecOperator for Aggregate {
 					}
 				} else {
 					// GROUP BY: per-row dispatch to separate groups. Each row's
-					// key is a contiguous run in `group_key_rows`, so the probe
-					// borrows it and only clones when the row opens a new group.
+					// key is a contiguous run in `key_rows`, so the probe borrows it
+					// and only clones when the row opens a new group.
 					let key_width = group_key_columns.len();
-					let group_key_rows = if key_width == 1 {
-						group_key_columns.swap_remove(0)
-					} else {
-						transpose_group_keys(&mut group_key_columns, batch.values.len())
-					};
+					let key_rows = group_key_rows(&mut group_key_columns, batch.values.len());
 
 					for (row_idx, value) in batch.values.iter().enumerate() {
-						let key = &group_key_rows[row_idx * key_width..(row_idx + 1) * key_width];
+						let key = &key_rows[row_idx * key_width..(row_idx + 1) * key_width];
 						let state = groups.entry_for_row(key, || {
 							create_group_state(&aggregates, &evaluated_extra_args)
 						});
@@ -628,8 +634,9 @@ impl ExecOperator for Aggregate {
 			if group_by_exprs.is_empty() && groups.is_empty() {
 				let perms_active = ctx.should_check_perms(crate::iam::Action::View).unwrap_or(true);
 				if !perms_active {
-					let state = create_group_state(&aggregates, &evaluated_extra_args);
-					groups.insert(Vec::new(), state);
+					groups.entry_for_row(&[], || {
+						create_group_state(&aggregates, &evaluated_extra_args)
+					});
 				}
 			}
 
@@ -922,10 +929,17 @@ mod tests {
 	}
 
 	#[test]
-	fn transpose_lays_rows_out_contiguously() {
+	fn group_key_rows_takes_a_single_column_whole() {
+		let mut columns = vec![vec![Value::from(1i64), dec("2")]];
+		let flat = group_key_rows(&mut columns, 2);
+		assert_eq!(flat, vec![Value::from(1i64), dec("2")]);
+	}
+
+	#[test]
+	fn group_key_rows_lays_rows_out_contiguously() {
 		let mut columns =
 			vec![vec![Value::from(1i64), Value::from(2i64)], vec![Value::from(10i64), dec("20")]];
-		let flat = transpose_group_keys(&mut columns, 2);
+		let flat = group_key_rows(&mut columns, 2);
 		assert_eq!(flat, vec![Value::from(1i64), Value::from(10i64), Value::from(2i64), dec("20")]);
 	}
 }

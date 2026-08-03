@@ -6,9 +6,12 @@
 //! preserving the input stream order so the downstream `Sort` orders only over
 //! the returned columns (R7).
 //!
-//! Dedup uses the same hash-keyed seen set the `Aggregate` operator uses for its
-//! group map (`aggregate.rs`): hash each row, probe its bucket, and compare
-//! candidates with `PartialEq`. The seen set grows with the number of *distinct*
+//! Dedup hashes each row, probes its bucket, and compares candidates with
+//! `PartialEq`. That treats two rows as distinct when they hash apart but compare
+//! equal, which `Value` allows for numbers — `0.1f` and `0.1dec` are one value to
+//! `=` and two rows here (see [`Value::hash_agrees_with_eq`]); the `Aggregate`
+//! operator keys its group map on `Ord` for exactly that reason. The seen set
+//! grows with the number of *distinct*
 //! rows; its size is bounded by `SURREAL_GQL_MAX_JOIN_BUILD_ROWS` (the shared
 //! GQL in-memory-build budget), and exceeding it fails the query with an error
 //! that names the knob. Spill to disk is a future change, matching the
@@ -116,10 +119,14 @@ impl ExecOperator for Distinct {
 	}
 }
 
-/// Hash-keyed set of seen rows, mirroring `aggregate::GroupMap`: each bucket is
-/// a `Vec` of rows that share a hash, and membership is decided by `PartialEq`
-/// over that bucket (linear probe). Only distinct rows are retained, so the
-/// total stored count is bounded by the configured build-row budget.
+/// Hash-keyed set of seen rows: each bucket is a `Vec` of rows that share a hash,
+/// and membership is decided by `PartialEq` over that bucket (linear probe). Only
+/// distinct rows are retained, so the total stored count is bounded by the
+/// configured build-row budget.
+///
+/// The bucket step means membership is `Hash`-then-`PartialEq`, which is a
+/// narrower relation than `PartialEq` alone for number-bearing rows — see the
+/// module docs.
 struct SeenSet {
 	buckets: HashMap<u64, Vec<Value>>,
 	len: usize,
@@ -158,7 +165,7 @@ impl SeenSet {
 }
 
 /// Hash a single [`Value`] into a `u64` for bucket lookup. Deterministic within
-/// a process (`DefaultHasher` uses a fixed seed), matching `aggregate.rs`.
+/// a process (`DefaultHasher` uses a fixed seed).
 fn hash_value(value: &Value) -> u64 {
 	let mut hasher = DefaultHasher::new();
 	value.hash(&mut hasher);

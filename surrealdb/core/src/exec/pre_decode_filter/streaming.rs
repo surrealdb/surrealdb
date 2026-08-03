@@ -16,7 +16,7 @@ use memchr::memmem;
 use revision::optimised::IndexedSeqWalker;
 use revision::{DeserializeRevisioned, Error as RevisionError, WalkRevisioned};
 
-use super::wire_literal::{LiteralSet, LiteralWire, value_hash_agrees_with_eq};
+use super::wire_literal::{LiteralSet, LiteralWire, hash_miss_is_decisive};
 use super::{Evidence, wire_cmp};
 use crate::exec::object_extract::wire_skip::{rev2_optimised_payload_unchecked, skip_value_wire};
 use crate::val::Value;
@@ -264,10 +264,12 @@ const STACK_MASK_WORDS: usize = 8;
 /// per evaluation.
 #[derive(Debug)]
 pub(crate) struct ArrayOverlapsLiteralSet {
-	/// Literal value → stable bit index. Source of truth for the `All`
-	/// bitmask; also the lookup table for the compound-element fallback.
+	/// Literal value → its equivalence class's bit index. Also the lookup table
+	/// for the compound-element fallback. Several entries share an index when
+	/// the set spells one value more than one way — see
+	/// [`overlap_streaming_from_set`].
 	pub(crate) literal_to_idx: Arc<HashMap<Value, usize>>,
-	/// Wire bytes (full rev-2 [`Value`] wire) → stable bit index. Indices
+	/// Wire bytes (full rev-2 [`Value`] wire) → bit index. Indices
 	/// match `literal_to_idx`. Covers Strand and Number literals so the
 	/// `All` mode hot path can resolve a bit without decoding the element.
 	pub(crate) wire_to_idx: Arc<HashMap<Vec<u8>, usize>>,
@@ -275,6 +277,10 @@ pub(crate) struct ArrayOverlapsLiteralSet {
 	/// contains check; identical content to `literal_to_idx` but indexed by
 	/// wire bytes for byte-eq probes.
 	pub(crate) literal_set: Arc<LiteralSet>,
+	/// Number of distinct bit indices, i.e. of literal *values* — not of
+	/// `literal_to_idx` entries, which count spellings. This is the bit count
+	/// `All` requires, so a set spelling one value twice still needs one match.
+	pub(crate) literal_count: usize,
 	pub(crate) mode: OverlapMode,
 }
 
@@ -297,7 +303,7 @@ impl ArrayOverlapsLiteralSet {
 
 impl StreamingLeafEvaluator for ArrayOverlapsLiteralSet {
 	fn evaluate(&self, leaf: ValueWalker<'_>) -> Evidence {
-		let n_lit = self.literal_to_idx.len();
+		let n_lit = self.literal_count;
 		if n_lit == 0 {
 			return match self.mode {
 				OverlapMode::Any => Evidence::ProvablyFalse,
@@ -449,19 +455,6 @@ impl ArrayOverlapsLiteralSet {
 	}
 }
 
-/// Whether a `HashMap<Value, _>` miss on `value` proves the literal set does not
-/// hold it.
-///
-/// `Number: Hash` disagrees with `Number: PartialEq`, so a number can miss a set
-/// that contains an equal number spelled as another variant — `0.1f` against
-/// `0.1dec`. Equality requires matching variants at every level, so one
-/// number-free side of the probe is enough to trust the miss. See
-/// [`value_hash_agrees_with_eq`].
-#[inline]
-fn hash_miss_is_decisive(value: &Value, set: &LiteralSet) -> bool {
-	set.hash_agrees_with_eq() || value_hash_agrees_with_eq(value)
-}
-
 /// `WHERE array::len(field) <op> N` against an array leaf.
 ///
 /// The rev-2 `Array` wire prologue carries the element count as a varint
@@ -575,11 +568,11 @@ mod array_len_missing_tests {
 
 /// Plan-time lookup tables for [`ArrayOverlapsLiteralSet`].
 ///
-/// All three tables share the same bit indices: a literal at position `i`
-/// in iteration order keys to `i` in both [`literal_to_idx`] (decoded form,
-/// used for compound-element fallback) and [`wire_to_idx`] (wire-byte form,
-/// used for the Strand / Number fast path). [`literal_set`] carries the
-/// same elements partitioned for membership probes by `Any` / `None` modes.
+/// All three tables share one bit index per literal *value*: every spelling of
+/// that value keys to it in both [`literal_to_idx`] (decoded form, used for
+/// compound-element fallback) and [`wire_to_idx`] (wire-byte form, used for the
+/// Strand / Number fast path). [`literal_set`] carries the same elements
+/// partitioned for membership probes by `Any` / `None` modes.
 ///
 /// Field names mirror [`ArrayOverlapsLiteralSet`]'s fields so plan-time
 /// construction is a flat move from this struct into the evaluator.
@@ -589,37 +582,59 @@ mod array_len_missing_tests {
 /// [`literal_set`]: Self::literal_set
 #[derive(Debug, Clone)]
 pub(crate) struct OverlapLookupTables {
-	/// Decoded literal → stable bit index. Source of truth for the `All`
-	/// bitmask; also the lookup table for compound-element decode fallback.
+	/// Decoded literal → its equivalence class's bit index; also the lookup
+	/// table for compound-element decode fallback.
 	pub(crate) literal_to_idx: Arc<HashMap<Value, usize>>,
-	/// Full rev-2 [`Value`] wire bytes → stable bit index (Strand / Number
+	/// Full rev-2 [`Value`] wire bytes → bit index (Strand / Number
 	/// literals only). Indices match [`Self::literal_to_idx`].
 	pub(crate) wire_to_idx: Arc<HashMap<Vec<u8>, usize>>,
 	/// Partitioned literal set used by `Any` / `None` modes' fast paths.
 	pub(crate) literal_set: Arc<LiteralSet>,
+	/// Number of distinct bit indices — see
+	/// [`ArrayOverlapsLiteralSet::literal_count`].
+	pub(crate) literal_count: usize,
 }
 
 /// Plan-time build for [`ArrayOverlapsLiteralSet`]: produce the decoded
 /// `value → bit_index` map, the wire-bytes `→ bit_index` map (covers Strand
 /// and Number literals), and the [`LiteralSet`] partitions used by the
 /// `Any` / `None` modes' fast paths. Indices are shared across all three.
+///
+/// A bit index identifies a literal **value**, not a spelling of one. The
+/// incoming `HashSet<Value>` can hold two elements that compare equal but hash
+/// apart — `0.1f` and `0.1dec`, see
+/// [`Value::hash_agrees_with_eq`]
+/// — and `All` mode demands every bit be set, so a bit per spelling would ask a
+/// single array element to match both spellings at once and reject the row.
+/// Indices are therefore assigned through an ordered map, which collapses each
+/// equivalence class to one bit. `Ord`-equality is the same relation as
+/// `PartialEq` for every element type a literal set may hold: the variants whose
+/// `partial_cmp` can return `None` (`Geometry`, `Regex`, `Range`, `Closure`) are
+/// excluded by `literal_hashset_element_safe`.
 pub(crate) fn overlap_streaming_from_set(set: &HashSet<Value>) -> OverlapLookupTables {
+	use std::collections::BTreeMap;
+
 	use revision::SerializeRevisioned;
 
+	let mut classes: BTreeMap<&Value, usize> = BTreeMap::new();
 	let mut value_map = HashMap::with_capacity(set.len());
 	let mut wire_map: HashMap<Vec<u8>, usize> = HashMap::new();
-	for (i, v) in set.iter().enumerate() {
+	for v in set.iter() {
+		let next = classes.len();
+		let idx = *classes.entry(v).or_insert(next);
 		if matches!(v, Value::String(_) | Value::Number(_)) {
 			let mut full = Vec::new();
 			v.serialize_revisioned(&mut full).expect("serialize into Vec");
-			wire_map.insert(full, i);
+			wire_map.insert(full, idx);
 		}
-		value_map.insert(v.clone(), i);
+		value_map.insert(v.clone(), idx);
 	}
+	let literal_count = classes.len();
 	let set = LiteralSet::from_set(set);
 	OverlapLookupTables {
 		literal_to_idx: Arc::new(value_map),
 		wire_to_idx: Arc::new(wire_map),
 		literal_set: Arc::new(set),
+		literal_count,
 	}
 }

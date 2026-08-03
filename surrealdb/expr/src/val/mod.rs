@@ -156,6 +156,52 @@ impl Ord for Value {
 }
 
 impl Value {
+	/// Whether a `HashMap`/`HashSet` **miss** on this value proves the collection
+	/// does not hold it — i.e. whether this value's [`Hash`](std::hash::Hash) is
+	/// consistent with its [`PartialEq`].
+	///
+	/// [`Number`] is the one leaf where the two disagree, and it cannot be
+	/// repaired: see [`Number`]'s `Hash` impl for why. A value that can reach a
+	/// [`Number`] may hash into a different bucket than an equal value, so
+	/// `contains` answers `false` for something the collection holds.
+	///
+	/// A probe is decisive as soon as *either* side is number-free, because
+	/// equality requires matching variants at every level: two values can only
+	/// hash apart while comparing equal if both carry a [`Number`] in the same
+	/// position. So a caller may trust a miss when this returns `true` for the
+	/// probed value, *or* when it returns `true` for every element of the
+	/// collection.
+	///
+	/// Variants whose hash/equality pairing is not established — [`Value::Geometry`]
+	/// (hashes `f64` coordinates), [`Value::Regex`] (equality with
+	/// [`Value::String`] is asymmetric), [`Value::Range`] and [`Value::Closure`] —
+	/// report `false` so they take the same conservative path.
+	pub fn hash_agrees_with_eq(&self) -> bool {
+		match self {
+			Value::None
+			| Value::Null
+			| Value::Bool(_)
+			| Value::String(_)
+			| Value::Duration(_)
+			| Value::Datetime(_)
+			| Value::Uuid(_)
+			| Value::Bytes(_)
+			| Value::Table(_)
+			| Value::File(_) => true,
+			Value::Number(_)
+			| Value::Geometry(_)
+			| Value::Regex(_)
+			| Value::Range(_)
+			| Value::Closure(_) => false,
+			Value::Array(a) => a.iter().all(Value::hash_agrees_with_eq),
+			Value::Set(s) => s.iter().all(Value::hash_agrees_with_eq),
+			// An `Object`'s equality covers its keys too, but those are `Strand`
+			// (hash is `as_str().hash`), so only the values can carry a `Number`.
+			Value::Object(o) => o.values().all(Value::hash_agrees_with_eq),
+			Value::RecordId(r) => r.key.hash_agrees_with_eq(),
+		}
+	}
+
 	pub const NONE: Self = Self::None;
 
 	// -----------------------------------
@@ -1363,6 +1409,47 @@ mod tests {
 	/// output cannot be parsed back. `TableName` derefs to `str`, so the
 	/// rendering here cannot rely on method resolution finding an escaping
 	/// impl — this pins the escaping itself rather than which impl provides it.
+	/// `Number: Hash` disagrees with `Number: PartialEq`, so any value that can
+	/// reach a number must report that a hash miss on it proves nothing.
+	#[test]
+	fn hash_agrees_with_eq_flags_numbers_at_any_depth() {
+		use std::collections::BTreeMap;
+
+		use crate::val::{Number, Object, RecordId, RecordIdKey, Value};
+
+		let num = Value::Number(Number::Float(0.1));
+		let nested =
+			|v: Value| Value::Object(Object::from(BTreeMap::from([(Strand::from("v"), v)])));
+
+		for v in [
+			Value::None,
+			Value::Null,
+			Value::Bool(true),
+			Value::String("x".into()),
+			Value::from(vec![Value::String("x".into())]),
+			nested(Value::String("x".into())),
+			Value::RecordId(RecordId {
+				table: "t".into(),
+				key: RecordIdKey::Number(1),
+			}),
+		] {
+			assert!(v.hash_agrees_with_eq(), "{v:?}");
+		}
+
+		for v in [
+			num.clone(),
+			Value::from(vec![num.clone()]),
+			nested(num.clone()),
+			nested(Value::from(vec![num.clone()])),
+			Value::RecordId(RecordId {
+				table: "t".into(),
+				key: RecordIdKey::Array(vec![num].into()),
+			}),
+		] {
+			assert!(!v.hash_agrees_with_eq(), "{v:?}");
+		}
+	}
+
 	#[test]
 	fn table_value_renders_escaped() {
 		use surrealdb_types::ToSql;

@@ -570,12 +570,15 @@ fn emit(out: &mut Vec<Value>, emitted: &mut usize, max_rows: usize, row: Value) 
 	Ok(())
 }
 
-/// Hash-keyed build table mirroring `aggregate::GroupMap` / `distinct::SeenSet`:
-/// each bucket is a `Vec` of `(key, rows)` entries that share a hash, and the
-/// matching key within the bucket is found by a linear probe over `PartialEq`
-/// (`Value` is `Hash` + `PartialEq`, not `Eq`). Rows sharing a key accumulate in
-/// that key's `rows` vector. The stored row count is bounded by the configured
-/// build-row budget.
+/// Hash-keyed build table: each bucket is a `Vec` of `(key, rows)` entries that
+/// share a hash, and the matching key within the bucket is found by a linear
+/// probe over `PartialEq`. Rows sharing a key accumulate in that key's `rows`
+/// vector. The stored row count is bounded by the configured build-row budget.
+///
+/// Keying on the hash makes the join relation `Hash`-then-`PartialEq`, which is
+/// narrower than `PartialEq` alone for number-bearing keys: a probe-side `0.1f`
+/// does not find a build-side `0.1dec` even though `=` calls them equal. See
+/// [`Value::hash_agrees_with_eq`].
 struct BuildTable {
 	buckets: HashMap<u64, Vec<(JoinKey, Vec<Value>)>>,
 	/// Build rows in insertion order, for deterministic `Cross` emission.
@@ -634,8 +637,7 @@ impl BuildTable {
 }
 
 /// Hash a join key into a `u64` for bucket lookup. Deterministic within a
-/// process (`DefaultHasher` uses a fixed seed), matching `aggregate.rs` /
-/// `distinct.rs`.
+/// process (`DefaultHasher` uses a fixed seed).
 fn hash_key(key: &JoinKey) -> u64 {
 	let mut hasher = DefaultHasher::new();
 	key.hash(&mut hasher);
