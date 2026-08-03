@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 use crate::ctx::FrozenContext;
@@ -10,10 +11,47 @@ use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::{CursorDoc, NsDbCtx};
 use crate::exe::FlowResultExt as _;
 use crate::exec::Error as ExecError;
-use crate::expr::Expr;
+use crate::expr::order::Ordering;
 use crate::expr::statements::select::SelectStatement;
+use crate::expr::{Expr, Field, Fields, Idiom};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::{Datetime, Value};
+
+/// Return the first `ORDER BY` idiom this statement sorts on that the
+/// projection does not carry, or `None` when every sort key survives
+/// projection.
+///
+/// `SELECT *` carries every field, and `SELECT VALUE` has its projection
+/// deferred until after the sort, so both are always covered.
+fn uncovered_order_idiom(stm: &SelectStatement) -> Option<String> {
+	let Some(Ordering::Order(orders)) = &stm.order else {
+		return None;
+	};
+	let Fields::Select(fields) = &stm.fields else {
+		return None;
+	};
+	if stm.fields.has_all_selection() {
+		return None;
+	}
+
+	let covered = |idiom: &Idiom| {
+		fields.iter().any(|field| {
+			let Field::Single(selector) = field else {
+				// `Field::All` is handled by `has_all_selection` above.
+				return true;
+			};
+			if selector.alias.as_ref().is_some_and(|alias| alias == idiom) {
+				return true;
+			}
+			match &selector.expr {
+				Expr::Idiom(x) => x == idiom,
+				v => v.to_idiom() == *idiom,
+			}
+		})
+	};
+
+	orders.iter().find(|order| !covered(&order.value)).map(|order| order.value.to_sql())
+}
 
 /// Process this type returning a computed simple Value
 #[instrument(level = "trace", name = "SelectStatement::compute", skip_all)]
@@ -65,6 +103,22 @@ pub(crate) async fn select_statement_compute(
 		ns: Arc::clone(&ns),
 		db: Arc::clone(&db),
 	};
+
+	// The legacy pipeline projects each document during iteration and only
+	// defers projection for `SELECT VALUE`, so a sort key outside the
+	// projection is already gone by the time `Results::sort` runs and the
+	// rows would come back in scan order. The streaming executor sorts the
+	// full record before projecting and has no such limit; reject the shape
+	// here rather than return a silently mis-ordered result.
+	if let Some(idiom) = uncovered_order_idiom(this) {
+		return Err(anyhow::Error::new(ExecError::Query {
+			message: format!(
+				"Cannot ORDER BY `{idiom}` because it is not in the statement selection. \
+				 Either add it to the selection, or use a planner strategy other than \
+				 'compute-only'."
+			),
+		}));
+	}
 
 	// Reject VERSION with subquery sources
 	if opt.version.is_some() {

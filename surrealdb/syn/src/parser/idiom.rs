@@ -629,7 +629,7 @@ impl Parser<'_> {
 					let split = self.try_parse_split(expr, fields_span)?;
 					let split_span = split.as_ref().map(|_| split_before.covers(self.last_span()));
 					let group = self.try_parse_group(expr, fields_span, split_span)?;
-					let order = self.try_parse_orders(expr, fields_span)?;
+					let order = self.try_parse_orders()?;
 					(split, group, order)
 				} else {
 					(None, None, None)

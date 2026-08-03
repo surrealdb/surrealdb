@@ -19,7 +19,6 @@ use crate::token::{DistanceKind, Span, TokenKind, VectorTypeKind, t};
 #[derive(Clone, Copy)]
 pub enum MissingKind {
 	Split,
-	Order,
 	Group,
 }
 
@@ -173,11 +172,6 @@ impl Parser<'_> {
 	) -> ParseResult<()> {
 		let is_group = matches!(kind, MissingKind::Group);
 
-		// ORDER BY on `SELECT VALUE ...` runs on the full row before VALUE projection.
-		if matches!(kind, MissingKind::Order) && matches!(fields, Fields::Value(_)) {
-			return Ok(());
-		}
-
 		match fields {
 			Fields::Value(field) => {
 				if let Some(alias) = &field.alias
@@ -234,14 +228,6 @@ impl Parser<'_> {
 			MissingKind::Split => {
 				bail!(
 					"Missing split idiom `{:?}` in statement selection",
-					idiom.to_sql(),
-					@idiom_span,
-					@field_span => "Idiom missing here",
-				)
-			}
-			MissingKind::Order => {
-				bail!(
-					"Missing order idiom `{}` in statement selection",
 					idiom.to_sql(),
 					@idiom_span,
 					@field_span => "Idiom missing here",

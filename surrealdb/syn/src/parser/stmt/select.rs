@@ -45,7 +45,7 @@ impl Parser<'_> {
 		let split = self.try_parse_split(&fields, fields_span)?;
 		let split_span = split.as_ref().map(|_| split_before.covers(self.last_span()));
 		let group = self.try_parse_group(&fields, fields_span, split_span)?;
-		let order = self.try_parse_orders(&fields, fields_span)?;
+		let order = self.try_parse_orders()?;
 		let (limit, start) = if let t!("START") = self.peek_kind() {
 			let start = self.try_parse_start(stk).await?;
 			let limit = self.try_parse_limit(stk).await?;
@@ -118,11 +118,7 @@ impl Parser<'_> {
 		Ok(Some(Splits(res)))
 	}
 
-	pub fn try_parse_orders(
-		&mut self,
-		fields: &Fields,
-		fields_span: Span,
-	) -> ParseResult<Option<Ordering>> {
+	pub fn try_parse_orders(&mut self) -> ParseResult<Option<Ordering>> {
 		if !self.eat(t!("ORDER")) {
 			return Ok(None);
 		}
@@ -136,30 +132,11 @@ impl Parser<'_> {
 			return Ok(Some(Ordering::Random));
 		};
 
-		let has_all = fields.contains_all();
-
-		let before = self.recent_span();
-		let order = self.parse_order()?;
-		let order_span = before.covers(self.last_span());
-		if !has_all {
-			Self::check_idiom(MissingKind::Order, fields, fields_span, &order.value, order_span)?;
-		}
-
-		let mut orders = vec![order];
+		// ORDER BY sorts the full record before the projection runs, so an
+		// ordering idiom does not need to appear in the projection.
+		let mut orders = vec![self.parse_order()?];
 		while self.eat(t!(",")) {
-			let before = self.recent_span();
-			let order = self.parse_order()?;
-			let order_span = before.covers(self.last_span());
-			if !has_all {
-				Self::check_idiom(
-					MissingKind::Order,
-					fields,
-					fields_span,
-					&order.value,
-					order_span,
-				)?;
-			}
-			orders.push(order)
+			orders.push(self.parse_order()?)
 		}
 
 		Ok(Some(Ordering::Order(OrderList(orders))))
