@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
-use crate::conn::Command;
+use crate::conn::ctx_txn;
 use crate::method::{BoxFuture, Live, OnceLockExt};
 use crate::opt::Resource;
 use crate::types::{RecordIdKeyRange, SurrealValue, Value, Variables};
@@ -66,12 +66,9 @@ macro_rules! into_future {
 
 				router
 					.$method(
-						client.session_id,
-						Command::Query {
-							txn,
-							query: Cow::Owned(format!("SELECT * FROM {what}")),
-							variables,
-						},
+						ctx_txn(client.session_id, txn),
+						Cow::Owned(format!("SELECT * FROM {what}")),
+						variables,
 					)
 					.await
 			})
@@ -86,7 +83,7 @@ where
 	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {execute_value}
+	into_future! {query_value}
 }
 
 impl<'r, Client, R> IntoFuture for Select<'r, Client, Option<R>>
@@ -97,7 +94,7 @@ where
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {execute_opt}
+	into_future! {query_opt}
 }
 
 impl<'r, Client, R> IntoFuture for Select<'r, Client, Vec<R>>
@@ -108,7 +105,7 @@ where
 	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {execute_vec}
+	into_future! {query_vec}
 }
 
 impl<C> Select<'_, C, Value>

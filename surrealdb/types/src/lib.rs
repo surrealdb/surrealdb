@@ -7,6 +7,8 @@ mod flatbuffers;
 mod hashmap;
 mod kind;
 mod notification;
+#[cfg(feature = "proto")]
+mod proto;
 #[macro_use]
 mod sql;
 mod traits;
@@ -19,6 +21,8 @@ pub use flatbuffers::*;
 pub use hashmap::HashMap;
 pub use kind::*;
 pub use notification::*;
+#[cfg(feature = "proto")]
+pub use proto::{decode as decode_proto, encode as encode_proto};
 pub use sql::{SqlFormat, ToSql, fmt_non_finite_f64, write_sql};
 // Re-export the derive macro
 pub use surrealdb_types_derive::{SurrealValue, kind};

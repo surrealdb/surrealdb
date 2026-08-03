@@ -1,6 +1,6 @@
 use std::future::IntoFuture;
 
-use crate::conn::Command;
+use crate::conn::ctx;
 use crate::method::{BoxFuture, Transaction};
 use crate::{Connection, OnceLockExt, Result, Surreal};
 
@@ -26,12 +26,9 @@ where
 		let client = self.client;
 		Box::pin(async move {
 			let router = client.inner.router.extract()?;
-			let result: crate::types::Value =
-				router.execute(client.session_id, Command::Begin).await?;
-			// Extract the UUID from the result
-			let uuid = result.into_uuid().map_err(|e| crate::Error::internal(e.to_string()))?;
+			let id = router.engine.begin(ctx(client.session_id)).await?;
 			Ok(Transaction {
-				id: uuid.into(),
+				id,
 				client,
 			})
 		})

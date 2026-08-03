@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 use uuid::Uuid;
 
 use super::validate_data;
-use crate::conn::Command;
+use crate::conn::QueryRequest;
 use crate::method::{BoxFuture, OnceLockExt};
 use crate::opt::Resource;
 use crate::types::{SurrealValue, Value, Variables};
@@ -83,7 +83,7 @@ macro_rules! into_future {
 					}
 				};
 
-				let cmd = Command::Query {
+				let cmd = QueryRequest {
 					txn,
 					query,
 					variables,
@@ -103,7 +103,7 @@ where
 	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {execute_value}
+	into_future! {run_query_value}
 }
 
 impl<'r, Client, D, R> IntoFuture for Merge<'r, Client, D, Option<R>>
@@ -115,7 +115,7 @@ where
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {execute_opt}
+	into_future! {run_query_opt}
 }
 
 impl<'r, Client, D, R> IntoFuture for Merge<'r, Client, D, Vec<R>>
@@ -127,5 +127,5 @@ where
 	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {execute_vec}
+	into_future! {run_query_vec}
 }

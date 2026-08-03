@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use crate::conn::Command;
+use crate::conn::ctx;
 use crate::method::{BoxFuture, OnceLockExt};
 use crate::types::{Array, SurrealValue, Value};
 use crate::{Connection, Result, Surreal};
@@ -55,16 +55,23 @@ where
 				value => Array::from(vec![value]),
 			};
 
-			router
-				.execute(
-					client.session_id,
-					Command::Run {
-						name,
-						version,
-						args,
-					},
+			let value = router.engine.run(ctx(client.session_id), name, version, args).await?;
+			// A function answering with a one-element list deserialises as that
+			// element. Engines differ on whether they wrap a single result, so
+			// the shape a caller sees must not depend on which one it is
+			// talking to.
+			let value = match value {
+				Value::Array(array) if array.len() == 1 => {
+					array.into_iter().next().expect("array has exactly one element")
+				}
+				value => value,
+			};
+			R::from_value(value).map_err(|e| {
+				crate::Error::serialization(
+					e.to_string(),
+					crate::types::SerializationError::Deserialization,
 				)
-				.await
+			})
 		})
 	}
 }

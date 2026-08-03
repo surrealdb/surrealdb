@@ -16,13 +16,28 @@
 //! should use the [`surrealdb`](https://docs.rs/surrealdb) crate.
 
 use std::borrow::Cow;
+use std::fmt::Debug;
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 
 use async_channel::Sender;
-use surrealdb_rpc::export::Config as DbExportConfig;
+pub use surrealdb_rpc::export::Config as DbExportConfig;
 use surrealdb_rpc::{QueryResult, Token};
-use surrealdb_types::{Array, Error, NotFoundError, Notification, Object, Value, Variables};
+use surrealdb_types::{
+	Array, ConnectionError, Error, NotFoundError, Notification, Object, SurrealValue, Value,
+	Variables,
+};
 use uuid::Uuid;
+
+/// A future boxed for storage behind a trait object, as
+/// [`SurrealEngine`]'s methods require.
+///
+/// `Send` but deliberately not `Sync`: an engine may await a future from a
+/// client library that is not itself `Sync` (tonic's are not), and requiring
+/// `Sync` here would rule those engines out entirely. Nothing polls one of
+/// these from two threads at once, so `Sync` buys nothing.
+pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// A request travelling from the SDK to an engine, tagged with the session it
 /// belongs to.
@@ -235,4 +250,623 @@ pub enum Command {
 		/// The arguments to pass.
 		args: Array,
 	},
+}
+
+/// Which session, and which explicit transaction, a request applies to.
+///
+/// Mirrors the `RequestContext` every request carries in the SurrealDB
+/// network protocol, minus the fields the SDK does not populate: an engine
+/// applies its own configured timeouts rather than being told them per call.
+#[derive(Debug, Clone, Copy)]
+pub struct EngineContext {
+	/// The session the request runs under.
+	pub session: Uuid,
+	/// The explicit transaction to run in, or `None` for an implicit one.
+	///
+	/// Only meaningful on [`SurrealEngine::query`]; the transaction-lifecycle
+	/// methods take the transaction they act on as an explicit argument.
+	pub transaction: Option<Uuid>,
+}
+
+impl EngineContext {
+	/// A context for a request outside any explicit transaction.
+	pub fn new(session: Uuid) -> Self {
+		Self {
+			session,
+			transaction: None,
+		}
+	}
+
+	/// A context for a request inside the given explicit transaction.
+	pub fn with_transaction(session: Uuid, transaction: Option<Uuid>) -> Self {
+		Self {
+			session,
+			transaction,
+		}
+	}
+}
+
+/// A boxed engine result.
+pub type EngineFuture<'a, T> = BoxFuture<'a, Result<T, Error>>;
+
+/// The interface every SurrealDB engine implements, and the only thing the
+/// Rust SDK calls to reach a database.
+///
+/// One method per operation, each taking and returning the types that
+/// operation actually deals in, so no engine has to encode a result into a
+/// generic [`Value`] purely for the SDK to take it apart again. An embedded
+/// engine hands its own values straight back; a remote engine converts once,
+/// from its wire format.
+///
+/// Methods for capabilities an engine may not have -- live queries, export
+/// and import -- default to reporting that they are unsupported, so an engine
+/// implements only what it serves. The SDK gates most of these on
+/// `ExtraFeatures` before calling, so the default is a backstop rather than
+/// the usual path.
+///
+/// # Stability
+///
+/// This is an internal interface between crates released together. It carries
+/// no stability guarantee and may change in any release, including a patch
+/// release.
+pub trait SurrealEngine: Debug + Send + Sync + 'static {
+	// ------------------------------------------------------------------
+	// Queries
+	// ------------------------------------------------------------------
+
+	/// Executes SurrealQL, returning one result per statement, in order.
+	fn query(
+		&self,
+		ctx: EngineContext,
+		query: Cow<'static, str>,
+		variables: Variables,
+	) -> EngineFuture<'_, Vec<QueryResult>>;
+
+	/// Calls a function, or a machine learning model when `version` is set.
+	fn run(
+		&self,
+		ctx: EngineContext,
+		name: String,
+		version: Option<String>,
+		args: Array,
+	) -> EngineFuture<'_, Value>;
+
+	// ------------------------------------------------------------------
+	// Session state
+	// ------------------------------------------------------------------
+
+	/// Selects the namespace and/or database, returning the resulting
+	/// selection. `None` for either argument leaves that one unchanged.
+	fn use_ns_db(
+		&self,
+		ctx: EngineContext,
+		namespace: Option<String>,
+		database: Option<String>,
+	) -> EngineFuture<'_, (Option<String>, Option<String>)>;
+
+	/// Binds a session variable.
+	fn set(&self, ctx: EngineContext, key: String, value: Value) -> EngineFuture<'_, ()>;
+
+	/// Removes a session variable.
+	fn unset(&self, ctx: EngineContext, key: String) -> EngineFuture<'_, ()>;
+
+	// ------------------------------------------------------------------
+	// Authentication
+	// ------------------------------------------------------------------
+
+	/// Registers a record user and authenticates the session as them.
+	fn signup(&self, ctx: EngineContext, credentials: Object) -> EngineFuture<'_, Token>;
+
+	/// Authenticates the session with credentials.
+	fn signin(&self, ctx: EngineContext, credentials: Object) -> EngineFuture<'_, Token>;
+
+	/// Authenticates the session with an existing token, returning the token
+	/// now in effect.
+	///
+	/// A server may hand back a token of its own rather than the one it was
+	/// given, so the result is what the session is authenticated with -- not
+	/// necessarily the argument.
+	fn authenticate(&self, ctx: EngineContext, token: Token) -> EngineFuture<'_, Token>;
+
+	/// Exchanges a refresh token for a fresh token pair.
+	fn refresh(&self, ctx: EngineContext, token: Token) -> EngineFuture<'_, Token>;
+
+	/// Invalidates a refresh token so it can no longer be redeemed.
+	fn revoke(&self, ctx: EngineContext, token: Token) -> EngineFuture<'_, ()>;
+
+	/// Drops the session's authentication.
+	fn invalidate(&self, ctx: EngineContext) -> EngineFuture<'_, ()>;
+
+	// ------------------------------------------------------------------
+	// Transactions
+	// ------------------------------------------------------------------
+
+	/// Opens an explicit transaction, returning its id.
+	fn begin(&self, ctx: EngineContext) -> EngineFuture<'_, Uuid>;
+
+	/// Commits an explicit transaction.
+	fn commit(&self, ctx: EngineContext, txn: Uuid) -> EngineFuture<'_, ()>;
+
+	/// Cancels an explicit transaction.
+	fn rollback(&self, ctx: EngineContext, txn: Uuid) -> EngineFuture<'_, ()>;
+
+	// ------------------------------------------------------------------
+	// Connection
+	// ------------------------------------------------------------------
+
+	/// Checks that the engine is reachable.
+	fn health(&self, ctx: EngineContext) -> EngineFuture<'_, ()>;
+
+	/// Reports the database version, as the server spells it (for example
+	/// `surrealdb-3.0.0`).
+	fn version(&self, ctx: EngineContext) -> EngineFuture<'_, String>;
+
+	// ------------------------------------------------------------------
+	// Live queries
+	// ------------------------------------------------------------------
+
+	/// Registers the channel a live query's notifications are delivered on.
+	fn subscribe_live(
+		&self,
+		_ctx: EngineContext,
+		_uuid: Uuid,
+		_notifications: Sender<Result<Notification, Error>>,
+	) -> EngineFuture<'_, ()> {
+		Box::pin(async { Err(unsupported("Live queries")) })
+	}
+
+	/// Kills a live query.
+	fn kill(&self, _ctx: EngineContext, _uuid: Uuid) -> EngineFuture<'_, ()> {
+		Box::pin(async { Err(unsupported("Live queries")) })
+	}
+
+	// ------------------------------------------------------------------
+	// Export and import
+	// ------------------------------------------------------------------
+
+	/// Exports the database to a file.
+	fn export_file(
+		&self,
+		_ctx: EngineContext,
+		_path: PathBuf,
+		_config: Option<DbExportConfig>,
+	) -> EngineFuture<'_, ()> {
+		Box::pin(async { Err(unsupported("Export")) })
+	}
+
+	/// Exports the database, streaming it to a channel.
+	fn export_bytes(
+		&self,
+		_ctx: EngineContext,
+		_bytes: Sender<Result<Vec<u8>, Error>>,
+		_config: Option<DbExportConfig>,
+	) -> EngineFuture<'_, ()> {
+		Box::pin(async { Err(unsupported("Export")) })
+	}
+
+	/// Exports a machine learning model to a file.
+	fn export_ml_file(
+		&self,
+		_ctx: EngineContext,
+		_path: PathBuf,
+		_config: MlExportConfig,
+	) -> EngineFuture<'_, ()> {
+		Box::pin(async { Err(unsupported("Machine learning model export")) })
+	}
+
+	/// Exports a machine learning model, streaming it to a channel.
+	fn export_ml_bytes(
+		&self,
+		_ctx: EngineContext,
+		_bytes: Sender<Result<Vec<u8>, Error>>,
+		_config: MlExportConfig,
+	) -> EngineFuture<'_, ()> {
+		Box::pin(async { Err(unsupported("Machine learning model export")) })
+	}
+
+	/// Imports a database export from a file.
+	fn import_file(&self, _ctx: EngineContext, _path: PathBuf) -> EngineFuture<'_, ()> {
+		Box::pin(async { Err(unsupported("Import")) })
+	}
+
+	/// Imports a machine learning model from a file.
+	fn import_ml_file(&self, _ctx: EngineContext, _path: PathBuf) -> EngineFuture<'_, ()> {
+		Box::pin(async { Err(unsupported("Machine learning model import")) })
+	}
+}
+
+/// The error an engine reports for an operation it does not serve.
+fn unsupported(what: &str) -> Error {
+	Error::configuration(format!("{what} is not supported by this engine"), None)
+}
+
+/// A [`SurrealEngine`] that drives an engine which consumes [`Route`]s.
+///
+/// The embedded, WebSocket and HTTP engines each run a task that reads
+/// `Route`s off a channel and answers on the response channel a `Route`
+/// carries. This adapter is the whole of what it takes to expose one of them
+/// through [`SurrealEngine`]: it turns each typed call back into the
+/// [`Command`] that task already understands, and unwraps the single response
+/// into the type the method promises.
+///
+/// [`Command`] is therefore an implementation detail of these three engines,
+/// not part of the interface: an engine with no route channel (the gRPC one)
+/// never constructs a `Command` at all.
+#[derive(Debug, Clone)]
+pub struct RouteChannelEngine(Sender<Route>);
+
+impl RouteChannelEngine {
+	/// Wraps a route sender as a [`SurrealEngine`].
+	pub fn new(sender: Sender<Route>) -> Self {
+		Self(sender)
+	}
+
+	/// Sends one command and awaits its single response, flattening the
+	/// engine's `Vec<QueryResult>` reply into the one value these
+	/// non-`query` operations return.
+	///
+	/// An empty reply reads as [`Value::None`]: the route protocol lets an
+	/// engine answer a no-result operation with either an empty vector or a
+	/// single `Value::None`, and both mean the same thing.
+	async fn value(&self, command: Command, session: Uuid) -> Result<Value, Error> {
+		let mut results = self.results(command, session).await?;
+		match results.len() {
+			0 => Ok(Value::None),
+			1 => results.remove(0).result,
+			_ => Err(Error::internal(
+				"expected the database to return one or no results".to_string(),
+			)),
+		}
+	}
+
+	/// Sends one command and awaits its single response.
+	async fn results(&self, command: Command, session: Uuid) -> Result<Vec<QueryResult>, Error> {
+		let (response, receiver) = async_channel::bounded(1);
+		let route = Route {
+			request: RequestData {
+				command,
+				session_id: session,
+			},
+			response,
+		};
+		// Both failure modes mean the engine task is gone, which callers
+		// distinguish from a database error with `Error::is_connection()` to
+		// decide whether reconnecting is worth trying.
+		self.0.send(route).await.map_err(|e| {
+			Error::connection(
+				format!("Failed to send command: {e}"),
+				ConnectionError::ConnectionFailed,
+			)
+		})?;
+		receiver.recv().await.map_err(|_| {
+			Error::connection(
+				"The engine dropped the request without answering".to_string(),
+				ConnectionError::ConnectionFailed,
+			)
+		})?
+	}
+
+	/// Sends one command whose response carries nothing of interest.
+	async fn unit(&self, command: Command, session: Uuid) -> Result<(), Error> {
+		match self.value(command, session).await? {
+			Value::None | Value::Null => Ok(()),
+			Value::Array(array) if array.is_empty() => Ok(()),
+			_ => Err(Error::internal("expected the database to return nothing".to_string())),
+		}
+	}
+}
+
+/// Converts the value an engine returns for signin/signup/refresh into a
+/// [`Token`].
+///
+/// These engines answer with the token's wire form (a bare string, or an
+/// object carrying `token` and `refresh`), which is exactly what `Token`
+/// deserialises from.
+fn value_to_token(value: Value) -> Result<Token, Error> {
+	// signin/signup answers historically arrive wrapped in a single-element
+	// array from some engines; unwrap that before converting.
+	let value = match value {
+		Value::Array(array) if array.len() == 1 => {
+			array.into_iter().next().expect("array has exactly one element")
+		}
+		value => value,
+	};
+	Token::from_value(value)
+}
+
+impl SurrealEngine for RouteChannelEngine {
+	fn query(
+		&self,
+		ctx: EngineContext,
+		query: Cow<'static, str>,
+		variables: Variables,
+	) -> EngineFuture<'_, Vec<QueryResult>> {
+		Box::pin(self.results(
+			Command::Query {
+				txn: ctx.transaction,
+				query,
+				variables,
+			},
+			ctx.session,
+		))
+	}
+
+	fn run(
+		&self,
+		ctx: EngineContext,
+		name: String,
+		version: Option<String>,
+		args: Array,
+	) -> EngineFuture<'_, Value> {
+		Box::pin(self.value(
+			Command::Run {
+				name,
+				version,
+				args,
+			},
+			ctx.session,
+		))
+	}
+
+	fn use_ns_db(
+		&self,
+		ctx: EngineContext,
+		namespace: Option<String>,
+		database: Option<String>,
+	) -> EngineFuture<'_, (Option<String>, Option<String>)> {
+		Box::pin(async move {
+			let value = self
+				.value(
+					Command::Use {
+						namespace,
+						database,
+					},
+					ctx.session,
+				)
+				.await?;
+			// Engines that predate reporting the resulting selection answer
+			// with something other than an object; report "unknown" rather
+			// than failing, as the SDK has always done.
+			let Value::Object(object) = value else {
+				return Ok((None, None));
+			};
+			let read = |key: &str| object.get(key).and_then(|v| v.as_string()).map(String::from);
+			Ok((read("namespace"), read("database")))
+		})
+	}
+
+	fn set(&self, ctx: EngineContext, key: String, value: Value) -> EngineFuture<'_, ()> {
+		Box::pin(self.unit(
+			Command::Set {
+				key,
+				value,
+			},
+			ctx.session,
+		))
+	}
+
+	fn unset(&self, ctx: EngineContext, key: String) -> EngineFuture<'_, ()> {
+		Box::pin(self.unit(
+			Command::Unset {
+				key,
+			},
+			ctx.session,
+		))
+	}
+
+	fn signup(&self, ctx: EngineContext, credentials: Object) -> EngineFuture<'_, Token> {
+		Box::pin(async move {
+			let value = self
+				.value(
+					Command::Signup {
+						credentials,
+					},
+					ctx.session,
+				)
+				.await?;
+			value_to_token(value)
+		})
+	}
+
+	fn signin(&self, ctx: EngineContext, credentials: Object) -> EngineFuture<'_, Token> {
+		Box::pin(async move {
+			let value = self
+				.value(
+					Command::Signin {
+						credentials,
+					},
+					ctx.session,
+				)
+				.await?;
+			value_to_token(value)
+		})
+	}
+
+	fn authenticate(&self, ctx: EngineContext, token: Token) -> EngineFuture<'_, Token> {
+		Box::pin(async move {
+			let value = self
+				.value(
+					Command::Authenticate {
+						token,
+					},
+					ctx.session,
+				)
+				.await?;
+			value_to_token(value)
+		})
+	}
+
+	fn refresh(&self, ctx: EngineContext, token: Token) -> EngineFuture<'_, Token> {
+		Box::pin(async move {
+			let value = self
+				.value(
+					Command::Refresh {
+						token,
+					},
+					ctx.session,
+				)
+				.await?;
+			value_to_token(value)
+		})
+	}
+
+	fn revoke(&self, ctx: EngineContext, token: Token) -> EngineFuture<'_, ()> {
+		Box::pin(self.unit(
+			Command::Revoke {
+				token,
+			},
+			ctx.session,
+		))
+	}
+
+	fn invalidate(&self, ctx: EngineContext) -> EngineFuture<'_, ()> {
+		Box::pin(self.unit(Command::Invalidate, ctx.session))
+	}
+
+	fn begin(&self, ctx: EngineContext) -> EngineFuture<'_, Uuid> {
+		Box::pin(async move {
+			let value = self.value(Command::Begin, ctx.session).await?;
+			let uuid = value.into_uuid().map_err(|e| Error::internal(e.to_string()))?;
+			Ok(uuid.into_inner())
+		})
+	}
+
+	fn commit(&self, ctx: EngineContext, txn: Uuid) -> EngineFuture<'_, ()> {
+		Box::pin(async move {
+			self.value(
+				Command::Commit {
+					txn,
+				},
+				ctx.session,
+			)
+			.await?;
+			Ok(())
+		})
+	}
+
+	fn rollback(&self, ctx: EngineContext, txn: Uuid) -> EngineFuture<'_, ()> {
+		Box::pin(async move {
+			self.value(
+				Command::Rollback {
+					txn,
+				},
+				ctx.session,
+			)
+			.await?;
+			Ok(())
+		})
+	}
+
+	fn health(&self, ctx: EngineContext) -> EngineFuture<'_, ()> {
+		Box::pin(self.unit(Command::Health, ctx.session))
+	}
+
+	fn version(&self, ctx: EngineContext) -> EngineFuture<'_, String> {
+		Box::pin(async move {
+			let value = self.value(Command::Version, ctx.session).await?;
+			value.into_string().map_err(|e| Error::internal(e.to_string()))
+		})
+	}
+
+	fn subscribe_live(
+		&self,
+		ctx: EngineContext,
+		uuid: Uuid,
+		notifications: Sender<Result<Notification, Error>>,
+	) -> EngineFuture<'_, ()> {
+		Box::pin(self.unit(
+			Command::SubscribeLive {
+				uuid,
+				notification_sender: notifications,
+			},
+			ctx.session,
+		))
+	}
+
+	fn kill(&self, ctx: EngineContext, uuid: Uuid) -> EngineFuture<'_, ()> {
+		Box::pin(self.unit(
+			Command::Kill {
+				uuid,
+			},
+			ctx.session,
+		))
+	}
+
+	fn export_file(
+		&self,
+		ctx: EngineContext,
+		path: PathBuf,
+		config: Option<DbExportConfig>,
+	) -> EngineFuture<'_, ()> {
+		Box::pin(self.unit(
+			Command::ExportFile {
+				path,
+				config,
+			},
+			ctx.session,
+		))
+	}
+
+	fn export_bytes(
+		&self,
+		ctx: EngineContext,
+		bytes: Sender<Result<Vec<u8>, Error>>,
+		config: Option<DbExportConfig>,
+	) -> EngineFuture<'_, ()> {
+		Box::pin(self.unit(
+			Command::ExportBytes {
+				bytes,
+				config,
+			},
+			ctx.session,
+		))
+	}
+
+	fn export_ml_file(
+		&self,
+		ctx: EngineContext,
+		path: PathBuf,
+		config: MlExportConfig,
+	) -> EngineFuture<'_, ()> {
+		Box::pin(self.unit(
+			Command::ExportMl {
+				path,
+				config,
+			},
+			ctx.session,
+		))
+	}
+
+	fn export_ml_bytes(
+		&self,
+		ctx: EngineContext,
+		bytes: Sender<Result<Vec<u8>, Error>>,
+		config: MlExportConfig,
+	) -> EngineFuture<'_, ()> {
+		Box::pin(self.unit(
+			Command::ExportBytesMl {
+				bytes,
+				config,
+			},
+			ctx.session,
+		))
+	}
+
+	fn import_file(&self, ctx: EngineContext, path: PathBuf) -> EngineFuture<'_, ()> {
+		Box::pin(self.unit(
+			Command::ImportFile {
+				path,
+			},
+			ctx.session,
+		))
+	}
+
+	fn import_ml_file(&self, ctx: EngineContext, path: PathBuf) -> EngineFuture<'_, ()> {
+		Box::pin(self.unit(
+			Command::ImportMl {
+				path,
+			},
+			ctx.session,
+		))
+	}
 }

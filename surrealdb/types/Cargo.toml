@@ -19,6 +19,8 @@ convert = ["dep:async-channel", "dep:url", "dep:semver"]
 # Enables From<reqwest::Error>; use with protocol-http or similar
 reqwest = ["dep:reqwest"]
 js = ["dep:js"]
+# Value <-> surrealdb_protocol::proto::v1::Value conversions, for gRPC engines.
+proto = ["dep:prost", "surrealdb-protocol/proto"]
 arbitrary = [
     "dep:arbitrary",
     "dep:regex-syntax",
@@ -40,7 +42,9 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 bytes.workspace = true
 castaway.workspace = true
 papaya.workspace = true
-chrono = { workspace = true, features = ["serde"] }
+# `now`/`wasmbind`: `Datetime::now()` reads the system clock natively and the
+# wasm32 JS Date API under wasm-bindgen.
+chrono = { workspace = true, features = ["serde", "now", "wasmbind"] }
 flatbuffers.workspace = true
 geo = { workspace = true, features = ["use-serde"] }
 geo-types = { workspace = true, optional = true }
@@ -59,6 +63,7 @@ parse-common.workspace = true
 tracing.workspace = true
 ulid.workspace = true
 rand.workspace = true
+prost = { workspace = true, optional = true }
 
 # WASM DEPENDENCY CONFIGURATION
 [target.'cfg(target_family = "wasm")'.dependencies]

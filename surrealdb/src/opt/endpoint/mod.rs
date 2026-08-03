@@ -1,3 +1,5 @@
+#[cfg(all(feature = "protocol-grpc", not(target_family = "wasm")))]
+mod grpc;
 #[cfg(feature = "protocol-http")]
 mod http;
 #[cfg(feature = "protocol-ws")]
@@ -147,6 +149,10 @@ pub enum EndpointKind {
 	Https,
 	Ws,
 	Wss,
+	#[cfg(not(target_family = "wasm"))]
+	Grpc,
+	#[cfg(not(target_family = "wasm"))]
+	Grpcs,
 	#[cfg(target_family = "wasm")]
 	IndxDb,
 	Memory,
@@ -163,6 +169,10 @@ impl From<&str> for EndpointKind {
 			"https" => Self::Https,
 			"ws" => Self::Ws,
 			"wss" => Self::Wss,
+			#[cfg(not(target_family = "wasm"))]
+			"grpc" => Self::Grpc,
+			#[cfg(not(target_family = "wasm"))]
+			"grpcs" => Self::Grpcs,
 			#[cfg(target_family = "wasm")]
 			"indxdb" => Self::IndxDb,
 			"mem" => Self::Memory,
@@ -180,7 +190,17 @@ impl EndpointKind {
 		matches!(
 			self,
 			EndpointKind::Http | EndpointKind::Https | EndpointKind::Ws | EndpointKind::Wss
-		)
+		) || self.is_grpc()
+	}
+
+	#[cfg(not(target_family = "wasm"))]
+	fn is_grpc(&self) -> bool {
+		matches!(self, EndpointKind::Grpc | EndpointKind::Grpcs)
+	}
+
+	#[cfg(target_family = "wasm")]
+	fn is_grpc(&self) -> bool {
+		false
 	}
 
 	pub fn is_local(&self) -> bool {

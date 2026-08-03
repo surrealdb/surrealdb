@@ -81,8 +81,14 @@ pub use version::Version;
 use super::opt::{CreateResource, IntoResource};
 
 /// An alias for an often used type of future returned by async methods in this
-/// library
-pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + Sync + 'a>>;
+/// library.
+///
+/// These futures are `Send` but not `Sync`. `Sync` was dropped in 3.3: an
+/// engine may await a future from a client library that is not itself `Sync`
+/// (tonic's are not), and requiring it here would rule those engines out.
+/// Awaiting, spawning and moving between threads are all unaffected; only
+/// code that explicitly demands `Sync` of a SurrealDB future needs changing.
+pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// Type-state marker for [`Export::ml`](Export::ml) on an [`Export`] from
 /// [`Surreal::export`](crate::Surreal::export).

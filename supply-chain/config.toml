@@ -49,9 +49,6 @@ audit-as-crates-io = false
 [policy.surrealdb-datastore]
 audit-as-crates-io = false
 
-[policy.surrealdb-runtime]
-audit-as-crates-io = false
-
 [policy.surrealdb-engine-api]
 audit-as-crates-io = false
 
@@ -99,6 +96,9 @@ audit-as-crates-io = false
 audit-as-crates-io = false
 
 [policy.surrealdb-profiling]
+audit-as-crates-io = false
+
+[policy.surrealdb-runtime]
 audit-as-crates-io = false
 
 [policy.surrealdb-server]

@@ -387,6 +387,38 @@ impl From<String> for Token {
 	}
 }
 
+/// Wraps the wire form an engine returns in the secrecy-preserving type the
+/// SDK hands to callers.
+impl From<surrealdb_rpc::Token> for Token {
+	fn from(token: surrealdb_rpc::Token) -> Self {
+		match token {
+			surrealdb_rpc::Token::Access(access) => Self {
+				access: AccessToken(SecureToken(access)),
+				refresh: None,
+			},
+			surrealdb_rpc::Token::WithRefresh {
+				access,
+				refresh,
+			} => Self {
+				access: AccessToken(SecureToken(access)),
+				refresh: Some(RefreshToken(SecureToken(refresh))),
+			},
+		}
+	}
+}
+
+impl From<Token> for surrealdb_rpc::Token {
+	fn from(token: Token) -> Self {
+		match token.refresh {
+			Some(refresh) => Self::WithRefresh {
+				access: token.access.0.0,
+				refresh: refresh.0.0,
+			},
+			None => Self::Access(token.access.0.0),
+		}
+	}
+}
+
 impl<'a> From<&'a String> for Token {
 	fn from(token: &'a String) -> Self {
 		Self {

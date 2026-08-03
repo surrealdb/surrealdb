@@ -7,6 +7,7 @@ pub mod export;
 pub mod gql;
 #[cfg(feature = "graphql")]
 pub mod graphql;
+pub mod grpc;
 pub(crate) mod headers;
 pub mod health;
 pub mod import;
@@ -162,6 +163,7 @@ pub fn community_router(exclude: &[&str]) -> Router<Arc<RpcState>> {
 		.merge(export::router())
 		.merge(import::router())
 		.merge(rpc::router())
+		.merge(grpc::router())
 		.merge(version::router())
 		.merge(sync::router())
 		.merge(sql::router())

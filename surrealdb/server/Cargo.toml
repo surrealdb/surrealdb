@@ -83,13 +83,15 @@ surrealdb = { workspace = true, features = [
 ] }
 surrealdb-core.workspace = true
 surrealdb-cnf.workspace = true
-surrealdb-types.workspace = true
+surrealdb-protocol = { workspace = true, features = ["rpc"] }
+surrealdb-types = { workspace = true, features = ["proto"] }
 parse-common.workspace = true
 
 # Crates only used by the root surrealdb crate
 anyhow.workspace = true
 async-trait.workspace = true
 axum = { version = "0.8.9", features = ["tracing", "ws"] }
+blake3.workspace = true
 axum-extra = { version = "0.12.6", features = [
     "query",
     "typed-routing",
@@ -207,6 +209,14 @@ ulid.workspace = true
 wiremock.workspace = true
 rstest.workspace = true
 surrealdb-types.workspace = true
+# The gRPC engine, so the transport can be tested against the client it
+# serves. A dev-dependency: the server has no reason to carry a gRPC *client*
+# in a release build.
+surrealdb = { workspace = true, features = ["protocol-grpc"] }
+futures.workspace = true
+reqwest = { workspace = true, default-features = false, features = ["http2"] }
+tempfile.workspace = true
+tokio-util.workspace = true
 
 [lints]
 workspace = true

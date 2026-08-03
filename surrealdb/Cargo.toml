@@ -23,6 +23,8 @@ allocator = ["surrealdb-engine-local/allocator"]
 parse = ["dep:surrealdb-syn"]
 protocol-http = ["dep:reqwest", "surrealdb-types/reqwest"]
 protocol-ws = ["dep:tokio-tungstenite", "tokio/time"]
+# Native only: tonic does not build for wasm32.
+protocol-grpc = ["dep:tonic", "dep:surrealdb-protocol", "surrealdb-types/proto", "tokio/time"]
 # The `kv-*` features select a storage backend for the embedded engine. The
 # engine crate is the only route from the SDK to the database core.
 kv-mem = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-mem", "dep:surrealdb-kvs", "tokio/time"]
@@ -41,6 +43,8 @@ rustls = [
     "dep:rustls",
     "reqwest?/default-tls",
     "tokio-tungstenite?/rustls-tls-webpki-roots",
+    "tonic?/tls-webpki-roots",
+    "tonic?/tls-aws-lc",
 ]
 ml = ["surrealdb-engine-local/ml"]
 jwks = ["surrealdb-engine-local/jwks"]
@@ -52,6 +56,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 features = [
     "protocol-ws",
     "protocol-http",
+    "protocol-grpc",
     "kv-mem",
     "kv-rocksdb",
     "rustls",
@@ -115,6 +120,7 @@ web-sys = { version = "0.3", features = ["Window", "Request", "RequestInit", "Re
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 rustls = { workspace = true, optional = true, features = ["aws_lc_rs"] }
+surrealdb-protocol = { workspace = true, optional = true, features = ["rpc"] }
 tokio = { workspace = true, default-features = false, features = [
     "macros",
     "io-util",
@@ -125,6 +131,7 @@ tokio = { workspace = true, default-features = false, features = [
     "sync",
 ] }
 tokio-tungstenite = { workspace = true, optional = true, features = ["url"] }
+tonic = { workspace = true, optional = true }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 
 [dev-dependencies]

@@ -1,4 +1,5 @@
 pub mod format;
+pub mod grpc;
 pub mod http;
 pub mod response;
 pub mod websocket;
@@ -11,7 +12,7 @@ use futures::stream::FuturesUnordered;
 use surrealdb_core::channel::Receiver;
 #[cfg(feature = "graphql")]
 use surrealdb_core::graphql::NotificationRouter;
-use surrealdb_core::rpc::{DbResponse, DbResult};
+use surrealdb_core::rpc::{DbResponse, DbResult, RpcProtocol};
 use surrealdb_types::Notification;
 use tokio::sync::RwLock;
 use tokio_stream::StreamExt;
@@ -53,6 +54,9 @@ pub struct RpcState {
 	pub live_queries: LiveQueries,
 	/// HTTP RPC handler with persistent sessions
 	pub http: Arc<crate::rpc::http::Http>,
+	/// gRPC RPC handler, holding the sessions, transactions and live query
+	/// subscriptions of the gRPC transport
+	pub grpc: Arc<crate::rpc::grpc::Grpc>,
 	/// Prometheus observer for per-protocol network byte counters. `None`
 	/// when `SURREAL_METRICS_ENABLED=false` so the byte counter path is
 	/// entirely inert for unconfigured deployments.
@@ -82,9 +86,10 @@ impl RpcState {
 			web_sockets: RwLock::new(HashMap::new()),
 			live_queries: RwLock::new(HashMap::new()),
 			http: Arc::new(crate::rpc::http::Http::new_with_durability(
-				datastore,
+				Arc::clone(&datastore),
 				durable_session_ttl,
 			)),
+			grpc: Arc::new(crate::rpc::grpc::Grpc::new(datastore, metrics_observer.clone())),
 			metrics_observer,
 			#[cfg(feature = "graphql")]
 			notification_router: Arc::new(NotificationRouter::new(
@@ -103,6 +108,13 @@ pub async fn dispatch_live_notification(notification: Notification, state: Arc<R
 	#[cfg(feature = "graphql")]
 	if state.notification_router.has_subscribers() {
 		state.notification_router.dispatch(&notification);
+	}
+	// A live query belongs to exactly one transport: whichever one's
+	// `handle_live` registered it. Ask gRPC first, and stop if it owns this
+	// one, so the WebSocket lookup below is only reached for live queries
+	// registered over a WebSocket.
+	if state.grpc.dispatch_notification(&notification).await {
+		return;
 	}
 	// Copy the lookup result out and drop the `live_queries` read guard BEFORE acquiring
 	// `web_sockets`. Keeping those locks independent prevents cleanup paths from being blocked
@@ -175,6 +187,15 @@ pub async fn notifications(
 /// Signals each connected WebSocket to shut down and then waits until all
 /// connections have been drained from the [`RpcState`].
 pub async fn graceful_shutdown(state: Arc<RpcState>) {
+	// End gRPC subscriptions with a reason, so a subscriber learns the server
+	// is going away and that re-subscribing later is reasonable, rather than
+	// seeing its stream close without explanation.
+	state.grpc.cleanup_all_lqs().await;
+	// Cancel the transactions gRPC clients left open. A WebSocket's are
+	// cancelled when its socket closes, but a gRPC session outlives any one
+	// connection, so shutdown is the only point at which they are all known to
+	// be finished with.
+	state.grpc.cleanup_all_txns().await;
 	// Close WebSocket connections, ensuring queued messages are processed
 	for (_, rpc) in state.web_sockets.read().await.iter() {
 		rpc.shutdown.cancel();

@@ -78,6 +78,29 @@ pub static HTTP_MAX_ATTACHED_SESSIONS: LazyLock<usize> =
 pub static WEBSOCKET_MAX_ATTACHED_SESSIONS: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_WEBSOCKET_MAX_ATTACHED_SESSIONS", usize, 256);
 
+/// The maximum number of explicitly attached sessions the gRPC transport will
+/// retain at once (default: 16384).
+///
+/// As with HTTP, the gRPC session map is process-global: a channel reconnects
+/// transparently and requests for one session may arrive on different
+/// connections, so sessions cannot be scoped to a connection. An uncapped map
+/// is therefore a denial-of-service target, and this bounds the memory
+/// attributable to attached gRPC sessions. Ephemeral per-request sessions do
+/// not count against this cap.
+pub static GRPC_MAX_ATTACHED_SESSIONS: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_GRPC_MAX_ATTACHED_SESSIONS", usize, 16384);
+
+/// How many live query notifications may be buffered for a gRPC subscription
+/// that is not keeping up (default: 1024).
+///
+/// This is a hard bound on what one subscription can hold: filling the buffer
+/// ends that subscription with a `RESOURCE_EXHAUSTED` frame rather than making
+/// the dispatcher wait. Waiting would not bound anything, because the
+/// notification dispatcher keeps receiving while a send is pending, so a busy
+/// live query would accumulate pending sends instead of queued frames.
+pub static GRPC_NOTIFICATION_BUFFER: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_GRPC_NOTIFICATION_BUFFER", usize, 1024);
+
 /// The maximum number of concurrently open client-managed transactions on a
 /// WebSocket connection's implicit default session (default: 64). Bounds
 /// resource use by a client that opens transactions without committing or

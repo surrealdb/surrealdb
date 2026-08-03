@@ -1,245 +1,211 @@
+use std::borrow::Cow;
 use std::collections::HashSet;
+use std::sync::Arc;
 
-use async_channel::{Receiver, Sender};
-// The wire between this crate and the engines it drives. Both the in-tree
-// remote engines and the out-of-tree embedded one speak these types.
-pub(crate) use surrealdb_engine_api::{Command, MlExportConfig, RequestData, Route};
+use async_channel::Sender;
+// The engine interface, and the route-channel adapter that lets the embedded,
+// WebSocket and HTTP engines serve it unchanged. `Command` is that adapter's
+// vocabulary, not this crate's: nothing outside it constructs one.
+// Which of these a build uses depends on which engines it enables.
+#[allow(unused_imports)]
+pub(crate) use surrealdb_engine_api::{
+	Command, EngineContext, MlExportConfig, RequestData, Route, RouteChannelEngine, SurrealEngine,
+};
 use surrealdb_rpc::QueryResult;
 use uuid::Uuid;
 
 use super::opt::Config;
 use crate::method::BoxFuture;
 use crate::opt::Endpoint;
-use crate::types::{SurrealValue, Value};
+use crate::types::{SurrealValue, Value, Variables};
 use crate::{Error, ExtraFeatures, Result, Surreal};
 
-/// Message router
+/// The engine a [`Surreal`] connection drives, plus what the SDK needs to
+/// know about it.
 #[derive(Debug, Clone)]
 pub struct Router {
-	pub(crate) sender: Sender<Route>,
+	pub(crate) engine: Arc<dyn SurrealEngine>,
 	#[allow(dead_code)]
 	pub(crate) config: Config,
 	pub(crate) features: HashSet<ExtraFeatures>,
 }
 
+/// A query the SDK has compiled but not yet run.
+///
+/// The builder methods (`content`, `merge`, `patch`, ...) assemble their
+/// SurrealQL before the caller awaits them, so they need somewhere to keep it
+/// meanwhile.
+#[derive(Debug)]
+pub(crate) struct QueryRequest {
+	pub(crate) txn: Option<Uuid>,
+	pub(crate) query: Cow<'static, str>,
+	pub(crate) variables: Variables,
+}
+
 impl Router {
-	#[allow(clippy::type_complexity)]
-	pub(crate) fn send_command(
+	/// Runs an already-compiled query, deserialising an optional record.
+	pub(crate) fn run_query_opt<R>(
 		&self,
-		session_id: Uuid,
-		command: Command,
-	) -> BoxFuture<
-		'_,
-		Result<Receiver<std::result::Result<Vec<QueryResult>, surrealdb_types::Error>>>,
-	> {
-		Box::pin(async move {
-			let (sender, receiver) = async_channel::bounded(1);
-			let route = Route {
-				request: RequestData {
-					command,
-					session_id,
-				},
-				response: sender,
-			};
-			self.sender.send(route).await.map_err(|e| {
-				crate::Error::connection(
-					format!("Failed to send command: {e}"),
-					crate::types::ConnectionError::ConnectionFailed,
-				)
-			})?;
-			Ok(receiver)
-		})
+		session: Uuid,
+		request: QueryRequest,
+	) -> BoxFuture<'_, Result<Option<R>>>
+	where
+		R: SurrealValue,
+	{
+		self.query_opt(ctx_txn(session, request.txn), request.query, request.variables)
 	}
 
-	/// Receive responses for all methods except `query`
-	pub(crate) fn recv_value(
+	/// Runs an already-compiled query, deserialising a list of records.
+	pub(crate) fn run_query_vec<R>(
 		&self,
-		receiver: Receiver<std::result::Result<Vec<QueryResult>, surrealdb_types::Error>>,
-	) -> BoxFuture<'_, std::result::Result<Value, Error>> {
-		Box::pin(async move {
-			let response = receiver.recv().await.map_err(|_| {
-				crate::Error::connection(
-					"Connection uninitialised".to_string(),
-					Some(crate::types::ConnectionError::Uninitialised),
-				)
-			})?;
-			let mut results = response?;
+		session: Uuid,
+		request: QueryRequest,
+	) -> BoxFuture<'_, Result<Vec<R>>>
+	where
+		R: SurrealValue,
+	{
+		self.query_vec(ctx_txn(session, request.txn), request.query, request.variables)
+	}
 
+	/// Runs an already-compiled query, returning its raw value.
+	pub(crate) fn run_query_value(
+		&self,
+		session: Uuid,
+		request: QueryRequest,
+	) -> BoxFuture<'_, Result<Value>> {
+		self.query_value(ctx_txn(session, request.txn), request.query, request.variables)
+	}
+
+	/// Builds a router around a [`Route`] channel, the shape the embedded,
+	/// WebSocket and HTTP engines each already produce.
+	pub(crate) fn from_route_sender(
+		sender: Sender<Route>,
+		features: HashSet<ExtraFeatures>,
+		config: Config,
+	) -> Self {
+		Self {
+			engine: Arc::new(RouteChannelEngine::new(sender)),
+			config,
+			features,
+		}
+	}
+
+	/// Builds a router around an engine that serves [`SurrealEngine`]
+	/// directly, with no route channel behind it.
+	#[cfg_attr(not(feature = "protocol-grpc"), allow(dead_code))]
+	pub(crate) fn from_engine(
+		engine: Arc<dyn SurrealEngine>,
+		features: HashSet<ExtraFeatures>,
+		config: Config,
+	) -> Self {
+		Self {
+			engine,
+			config,
+			features,
+		}
+	}
+
+	/// Runs a query and returns the single value its one statement produced.
+	///
+	/// The CRUD methods (`select`, `create`, `update`, ...) each compile to
+	/// exactly one statement, so anything else is a bug in the caller rather
+	/// than something to surface to the user.
+	pub(crate) fn query_value(
+		&self,
+		ctx: EngineContext,
+		query: Cow<'static, str>,
+		variables: Variables,
+	) -> BoxFuture<'_, Result<Value>> {
+		Box::pin(async move {
+			let mut results = self.engine.query(ctx, query, variables).await?;
 			match results.len() {
 				0 => Ok(Value::None),
-				1 => {
-					let result = results.remove(0);
-					result.result
-				}
-				_ => Err(crate::Error::internal(
+				1 => Ok(results.remove(0).result?),
+				_ => Err(Error::internal(
 					"expected the database to return one or no results".to_string(),
 				)),
 			}
 		})
 	}
 
-	/// Receive the response of the `query` method
-	pub(crate) fn recv_results(
+	/// Runs a query and deserialises its result as an optional record.
+	pub(crate) fn query_opt<R>(
 		&self,
-		receiver: Receiver<std::result::Result<Vec<QueryResult>, surrealdb_types::Error>>,
-	) -> BoxFuture<'_, Result<Vec<QueryResult>>> {
-		Box::pin(async move {
-			receiver.recv().await.map_err(|_| {
-				crate::Error::connection(
-					"Connection uninitialised".to_string(),
-					Some(crate::types::ConnectionError::Uninitialised),
-				)
-			})?
-		})
-	}
-
-	/// Execute all methods except `query`
-	pub(crate) fn execute<R>(&self, session_id: Uuid, command: Command) -> BoxFuture<'_, Result<R>>
-	where
-		R: SurrealValue,
-	{
-		Box::pin(async move {
-			let rx = self.send_command(session_id, command).await?;
-			let value = self.recv_value(rx).await?;
-			// Handle single-element arrays that might be returned from operations like
-			// signup/signin
-			let result = match value {
-				Value::Array(array) if array.len() == 1 => {
-					R::from_value(array.into_iter().next().expect("array has exactly one element"))
-				}
-				v => R::from_value(v),
-			};
-			result.map_err(|e| {
-				crate::Error::serialization(
-					e.to_string(),
-					crate::types::SerializationError::Deserialization,
-				)
-			})
-		})
-	}
-
-	/// Execute methods that return an optional single response
-	pub(crate) fn execute_opt<R>(
-		&self,
-		session_id: Uuid,
-		command: Command,
+		ctx: EngineContext,
+		query: Cow<'static, str>,
+		variables: Variables,
 	) -> BoxFuture<'_, Result<Option<R>>>
 	where
 		R: SurrealValue,
 	{
 		Box::pin(async move {
-			let rx = self.send_command(session_id, command).await?;
-			match self.recv_value(rx).await? {
+			match self.query_value(ctx, query, variables).await? {
 				Value::None | Value::Null => Ok(None),
 				Value::Array(array) => match array.len() {
-					// Empty array means no results
+					// No match is not an error for an `Option<R>` caller.
 					0 => Ok(None),
-					// Single-element array: extract and return the element
-					// This happens when operating on a record ID
-					1 => Ok(Some(
-						R::from_value(
-							array.into_iter().next().expect("array has exactly one element"),
-						)
-						.map_err(|e| {
-							crate::Error::serialization(
-								e.to_string(),
-								crate::types::SerializationError::Deserialization,
-							)
-						})?,
-					)),
-					// Multiple elements should not happen for operations expecting Option<T>
-					_ => Ok(Some(R::from_value(Value::Array(array)).map_err(|e| {
-						crate::Error::serialization(
-							e.to_string(),
-							crate::types::SerializationError::Deserialization,
-						)
-					})?)),
+					// Operating on a record id yields a one-element array.
+					1 => {
+						let value =
+							array.into_iter().next().expect("array has exactly one element");
+						Ok(Some(R::from_value(value).map_err(deserialization_error)?))
+					}
+					// More than one should not happen here, but deserialising
+					// the whole array gives a clearer error than truncating.
+					_ => {
+						Ok(Some(R::from_value(Value::Array(array)).map_err(deserialization_error)?))
+					}
 				},
-				value => Ok(Some(R::from_value(value).map_err(|e| {
-					crate::Error::serialization(
-						e.to_string(),
-						crate::types::SerializationError::Deserialization,
-					)
-				})?)),
+				value => Ok(Some(R::from_value(value).map_err(deserialization_error)?)),
 			}
 		})
 	}
 
-	/// Execute methods that return multiple responses
-	pub(crate) fn execute_vec<R>(
+	/// Runs a query and deserialises its result as a list of records.
+	pub(crate) fn query_vec<R>(
 		&self,
-		session_id: Uuid,
-		command: Command,
+		ctx: EngineContext,
+		query: Cow<'static, str>,
+		variables: Variables,
 	) -> BoxFuture<'_, Result<Vec<R>>>
 	where
 		R: SurrealValue,
 	{
 		Box::pin(async move {
-			let rx = self.send_command(session_id, command).await?;
-			match self.recv_value(rx).await? {
+			match self.query_value(ctx, query, variables).await? {
 				Value::None | Value::Null => Ok(Vec::new()),
 				Value::Array(array) => array
 					.into_iter()
-					.map(|v| {
-						R::from_value(v).map_err(|e| {
-							crate::Error::serialization(
-								e.to_string(),
-								crate::types::SerializationError::Deserialization,
-							)
-						})
-					})
-					.collect::<Result<Vec<R>>>(),
-				value => Ok(vec![R::from_value(value).map_err(|e| {
-					crate::Error::serialization(
-						e.to_string(),
-						crate::types::SerializationError::Deserialization,
-					)
-				})?]),
+					.map(|value| R::from_value(value).map_err(deserialization_error))
+					.collect(),
+				value => Ok(vec![R::from_value(value).map_err(deserialization_error)?]),
 			}
 		})
 	}
 
-	/// Execute methods that return nothing
-	pub(crate) fn execute_unit(
+	/// Runs a query, returning every statement's result.
+	pub(crate) fn query_results(
 		&self,
-		session_id: Uuid,
-		command: Command,
-	) -> BoxFuture<'_, Result<()>> {
-		Box::pin(async move {
-			let rx = self.send_command(session_id, command).await?;
-			match self.recv_value(rx).await? {
-				Value::None | Value::Null => Ok(()),
-				Value::Array(array) if array.is_empty() => Ok(()),
-				_value => Err(crate::Error::internal(
-					"expected the database to return nothing".to_string(),
-				)),
-			}
-		})
-	}
-
-	/// Execute methods that return a raw value
-	pub(crate) fn execute_value(
-		&self,
-		session_id: Uuid,
-		command: Command,
-	) -> BoxFuture<'_, Result<Value>> {
-		Box::pin(async move {
-			let rx = self.send_command(session_id, command).await?;
-			self.recv_value(rx).await
-		})
-	}
-
-	/// Execute the `query` method
-	pub(crate) fn execute_query(
-		&self,
-		session_id: Uuid,
-		command: Command,
+		ctx: EngineContext,
+		query: Cow<'static, str>,
+		variables: Variables,
 	) -> BoxFuture<'_, Result<Vec<QueryResult>>> {
-		Box::pin(async move {
-			let rx = self.send_command(session_id, command).await?;
-			self.recv_results(rx).await
-		})
+		Box::pin(async move { self.engine.query(ctx, query, variables).await })
 	}
+}
+
+fn deserialization_error(error: impl std::fmt::Display) -> Error {
+	Error::serialization(error.to_string(), crate::types::SerializationError::Deserialization)
+}
+
+/// A context for a request on `session`, outside any explicit transaction.
+pub(crate) fn ctx(session: Uuid) -> EngineContext {
+	EngineContext::new(session)
+}
+
+/// A context for a request on `session`, inside `txn` when there is one.
+pub(crate) fn ctx_txn(session: Uuid, txn: Option<Uuid>) -> EngineContext {
+	EngineContext::with_transaction(session, txn)
 }
 
 /// Connection trait implemented by supported protocols

@@ -9,7 +9,7 @@ pub mod any;
 	feature = "kv-surrealkv",
 ))]
 pub mod local;
-#[cfg(any(feature = "protocol-http", feature = "protocol-ws"))]
+#[cfg(any(feature = "protocol-http", feature = "protocol-ws", feature = "protocol-grpc"))]
 pub mod remote;
 /// The embedded engine's background maintenance tasks.
 #[cfg(any(

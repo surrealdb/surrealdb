@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use super::transaction::WithTransaction;
 use super::{Content, validate_data};
-use crate::conn::Command;
+use crate::conn::QueryRequest;
 use crate::method::{BoxFuture, OnceLockExt};
 use crate::opt::Resource;
 use crate::types::{SurrealValue, Value, Variables};
@@ -62,7 +62,7 @@ macro_rules! into_future {
 				let mut variables = Variables::new();
 				let what = what.for_sql_query(&mut variables)?;
 
-				let cmd = Command::Query {
+				let cmd = QueryRequest {
 					txn,
 					query: Cow::Owned(format!("CREATE {what}")),
 					variables,
@@ -80,7 +80,7 @@ where
 	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {execute_value}
+	into_future! {run_query_value}
 }
 
 impl<'r, Client, R> IntoFuture for Create<'r, Client, Option<R>>
@@ -91,7 +91,7 @@ where
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {execute_opt}
+	into_future! {run_query_opt}
 }
 
 impl<'r, C> Create<'r, C, Value>
@@ -117,7 +117,7 @@ where
 			let what = what.for_sql_query(&mut variables)?;
 			variables.insert("_content".to_string(), content);
 
-			Ok(Command::Query {
+			Ok(QueryRequest {
 				txn: self.txn,
 				query: Cow::Owned(format!("CREATE {what} CONTENT $_content")),
 				variables,
@@ -156,7 +156,7 @@ where
 				}
 			};
 
-			Ok(Command::Query {
+			Ok(QueryRequest {
 				txn: self.txn,
 				query,
 				variables,

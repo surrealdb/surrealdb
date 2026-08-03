@@ -203,17 +203,37 @@ impl conn::Sealed for Any {
 					None,
 				));
 				}
+				EndpointKind::Grpc | EndpointKind::Grpcs => {
+					#[cfg(feature = "protocol-grpc")]
+					{
+						// The gRPC engine serves `SurrealEngine` itself rather
+						// than consuming routes, so it builds its own router
+						// and returns here instead of falling through.
+						let (engine, grpc_features) = engine::remote::grpc::connect_engine(
+							&address,
+							session_clone.receiver.clone(),
+						)
+						.await?;
+						features.extend(grpc_features);
+						let router = Router::from_engine(engine, features, config);
+						let waiter = watch::channel(Some(WaitFor::Connection));
+						return Ok((router, waiter, session_clone).into());
+					}
+
+					#[cfg(not(feature = "protocol-grpc"))]
+					return Err(Error::configuration(
+						"Cannot connect to the `gRPC` remote engine as it is not enabled in this build of SurrealDB".to_string(),
+						None,
+					));
+				}
+
 				EndpointKind::Unsupported(v) => {
 					return Err(Error::configuration(format!("Unsupported scheme: {v}"), None));
 				}
 			}
 
 			let waiter = watch::channel(Some(WaitFor::Connection));
-			let router = Router {
-				features,
-				config,
-				sender: route_tx,
-			};
+			let router = Router::from_route_sender(route_tx, features, config);
 
 			Ok((router, waiter, session_clone).into())
 		})

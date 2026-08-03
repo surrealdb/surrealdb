@@ -94,6 +94,10 @@
 //! }
 //! ```
 
+#[cfg(all(feature = "protocol-grpc", not(target_family = "wasm")))]
+#[cfg_attr(docsrs, doc(cfg(feature = "protocol-grpc")))]
+pub mod grpc;
+
 #[cfg(feature = "protocol-http")]
 #[cfg_attr(docsrs, doc(cfg(feature = "protocol-http")))]
 pub mod http;
@@ -102,16 +106,25 @@ pub mod http;
 #[cfg_attr(docsrs, doc(cfg(feature = "protocol-ws")))]
 pub mod ws;
 
+#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 use surrealdb_rpc::Token;
+#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 use uuid::Uuid;
 
+#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 use crate::conn::Command;
+#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 use crate::types::{Array, SurrealValue, Value};
 
 /// A struct which will be serialized as a map to behave like the previously
 /// used BTreeMap.
 ///
 /// This struct serializes as if it is a crate::types::Value::Object.
+///
+/// This is the request shape of the JSON/CBOR/flatbuffers wire the WebSocket
+/// and HTTP engines speak; gRPC has its own generated messages and needs
+/// none of it.
+#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 #[derive(Clone, Debug, SurrealValue)]
 #[surreal(crate = "crate::types")]
 pub(crate) struct RouterRequest {
@@ -126,6 +139,7 @@ pub(crate) struct RouterRequest {
 /// How a [`Command`] is presented to a remote server: the request it encodes
 /// to, and whether it belongs in the session replay log used to rebuild state
 /// after a reconnect.
+#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 pub(crate) trait RemoteCommand: Sized {
 	/// The request to send for this command, or `None` when the remote
 	/// protocol has no equivalent (backups, live-query subscription).
@@ -155,6 +169,7 @@ pub(crate) trait RemoteCommand: Sized {
 	fn is_replay_noop_after(&self, prev: &Command) -> bool;
 }
 
+#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 impl RemoteCommand for Command {
 	fn into_router_request(
 		self,
@@ -447,7 +462,7 @@ fn record_replayable(replay: &boxcar::Vec<Command>, command: Command) {
 	replay.push(command);
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(feature = "protocol-ws", feature = "protocol-http")))]
 mod test {
 	use uuid::Uuid;
 

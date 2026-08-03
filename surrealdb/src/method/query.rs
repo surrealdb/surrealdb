@@ -14,7 +14,7 @@ use surrealdb_types::Error as TypesError;
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
-use crate::conn::Command;
+use crate::conn::ctx_txn;
 use crate::method::live::Stream;
 use crate::method::{BoxFuture, OnceLockExt, Stats, WithStats};
 use crate::notification::Notification;
@@ -140,14 +140,7 @@ where
 				.join("; ");
 
 			let results = router
-				.execute_query(
-					client.session_id,
-					Command::Query {
-						query: Cow::Owned(query),
-						txn,
-						variables: variables?,
-					},
-				)
+				.query_results(ctx_txn(client.session_id, txn), Cow::Owned(query), variables?)
 				.await?;
 
 			let mut indexed_results = IndexedResults::new();

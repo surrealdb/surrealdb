@@ -178,10 +178,20 @@ impl ToFlatbuffers for std::time::Duration {
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> anyhow::Result<Self::Output<'bldr>> {
+		// `seconds` is signed on the wire, and `std::time::Duration` counts it
+		// unsigned, so the largest durations it can hold have no representation
+		// here. Refusing beats wrapping the biggest possible duration into a
+		// negative one; the bound is around 292 billion years.
+		let seconds = i64::try_from(self.as_secs()).map_err(|_| {
+			anyhow::anyhow!(
+				"duration of {} seconds exceeds the signed range this protocol carries",
+				self.as_secs()
+			)
+		})?;
 		Ok(proto_fb::Duration::create(
 			builder,
 			&proto_fb::DurationArgs {
-				seconds: self.as_secs(),
+				seconds,
 				nanos: self.subsec_nanos(),
 			},
 		))
@@ -193,8 +203,19 @@ impl FromFlatbuffers for std::time::Duration {
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
-		let seconds = input.seconds();
+		// Both fields are wider than `std::time::Duration` accepts, and its
+		// constructor panics rather than saturating, so a peer's value is
+		// checked instead of trusted.
 		let nanos = input.nanos();
+		if nanos > 999_999_999 {
+			anyhow::bail!("invalid Duration: nanos must be in [0, 999999999], got {nanos}");
+		}
+		let seconds = u64::try_from(input.seconds()).map_err(|_| {
+			anyhow::anyhow!(
+				"invalid Duration: seconds must not be negative, got {}",
+				input.seconds()
+			)
+		})?;
 		Ok(std::time::Duration::new(seconds, nanos))
 	}
 }
@@ -222,16 +243,16 @@ impl FromFlatbuffers for Duration {
 }
 
 impl ToFlatbuffers for DateTime<Utc> {
-	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Timestamp<'bldr>>;
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Datetime<'bldr>>;
 
 	#[inline]
 	fn to_fb<'bldr>(
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> anyhow::Result<Self::Output<'bldr>> {
-		Ok(proto_fb::Timestamp::create(
+		Ok(proto_fb::Datetime::create(
 			builder,
-			&proto_fb::TimestampArgs {
+			&proto_fb::DatetimeArgs {
 				seconds: self.timestamp(),
 				nanos: self.timestamp_subsec_nanos(),
 			},
@@ -240,7 +261,7 @@ impl ToFlatbuffers for DateTime<Utc> {
 }
 
 impl FromFlatbuffers for DateTime<Utc> {
-	type Input<'a> = proto_fb::Timestamp<'a>;
+	type Input<'a> = proto_fb::Datetime<'a>;
 
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {

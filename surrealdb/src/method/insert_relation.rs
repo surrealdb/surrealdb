@@ -3,7 +3,7 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 
 use super::BoxFuture;
-use crate::conn::Command;
+use crate::conn::QueryRequest;
 use crate::method::OnceLockExt;
 use crate::types::{SurrealValue, Value};
 use crate::{Connection, Result, Surreal};
@@ -14,7 +14,7 @@ use crate::{Connection, Result, Surreal};
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct InsertRelation<'r, C: Connection, R> {
 	pub(super) client: Cow<'r, Surreal<C>>,
-	pub(super) command: Result<Command>,
+	pub(super) command: Result<QueryRequest>,
 	pub(super) response_type: PhantomData<R>,
 }
 
@@ -24,7 +24,7 @@ where
 {
 	pub(crate) fn from_closure<F>(client: Cow<'r, Surreal<C>>, f: F) -> Self
 	where
-		F: FnOnce() -> Result<Command>,
+		F: FnOnce() -> Result<QueryRequest>,
 	{
 		InsertRelation {
 			client,
@@ -66,7 +66,7 @@ where
 	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {execute_value}
+	into_future! {run_query_value}
 }
 
 impl<'r, Client, R> IntoFuture for InsertRelation<'r, Client, Option<R>>
@@ -77,7 +77,7 @@ where
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {execute_opt}
+	into_future! {run_query_opt}
 }
 
 impl<'r, Client, R> IntoFuture for InsertRelation<'r, Client, Vec<R>>
@@ -88,5 +88,5 @@ where
 	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {execute_vec}
+	into_future! {run_query_vec}
 }

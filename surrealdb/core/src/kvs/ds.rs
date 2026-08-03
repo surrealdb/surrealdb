@@ -711,7 +711,12 @@ impl Datastore {
 	}
 
 	/// Does the datastore allow excecuting an RPC method?
-	pub(crate) fn allows_rpc_method(&self, method_target: &MethodTarget) -> bool {
+	///
+	/// Dispatch enforces this itself, so a transport does not have to. It is
+	/// public so a transport can also *report* the answer ahead of time: the
+	/// gRPC service advertises the methods an operator has denied, so a client
+	/// can avoid calls it already knows will be refused.
+	pub fn allows_rpc_method(&self, method_target: &MethodTarget) -> bool {
 		self.capabilities.load().allows_rpc_method(method_target)
 	}
 

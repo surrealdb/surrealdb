@@ -1,6 +1,6 @@
 use std::future::IntoFuture;
 
-use crate::conn::Command;
+use crate::conn::ctx;
 use crate::method::{BoxFuture, Transaction};
 use crate::{Connection, OnceLockExt, Result, Surreal};
 
@@ -35,14 +35,7 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			let router = self.client.inner.router.extract()?;
-			let _: crate::types::Value = router
-				.execute(
-					self.client.session_id,
-					Command::Commit {
-						txn: self.txn,
-					},
-				)
-				.await?;
+			router.engine.commit(ctx(self.client.session_id), self.txn).await?;
 			Ok(self.client)
 		})
 	}

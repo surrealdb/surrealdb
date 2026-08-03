@@ -10,7 +10,7 @@ use futures::{Stream, StreamExt};
 use semver::Version;
 use surrealdb_rpc::export::{Config as DbExportConfig, TableConfig};
 
-use crate::conn::{Command, MlExportConfig};
+use crate::conn::{MlExportConfig, ctx};
 use crate::method::{BoxFuture, ExportConfig as Config, Model, OnceLockExt};
 use crate::{Connection, Error, ExtraFeatures, Result, Surreal};
 
@@ -210,24 +210,14 @@ where
 
 			if let Some(config) = self.ml_config {
 				return router
-					.execute_unit(
-						self.client.session_id,
-						Command::ExportMl {
-							path: self.target,
-							config,
-						},
-					)
+					.engine
+					.export_ml_file(ctx(self.client.session_id), self.target, config)
 					.await;
 			}
 
 			router
-				.execute_unit(
-					self.client.session_id,
-					Command::ExportFile {
-						path: self.target,
-						config: self.db_config,
-					},
-				)
+				.engine
+				.export_file(ctx(self.client.session_id), self.target, self.db_config)
 				.await
 		})
 	}
@@ -256,29 +246,13 @@ where
 			tracing::info!("Exporting bytes");
 
 			if let Some(config) = self.ml_config {
-				router
-					.execute_unit(
-						self.client.session_id,
-						Command::ExportBytesMl {
-							bytes: tx,
-							config,
-						},
-					)
-					.await?;
+				router.engine.export_ml_bytes(ctx(self.client.session_id), tx, config).await?;
 				return Ok(Backup {
 					rx,
 				});
 			}
 
-			router
-				.execute_unit(
-					self.client.session_id,
-					Command::ExportBytes {
-						bytes: tx,
-						config: self.db_config,
-					},
-				)
-				.await?;
+			router.engine.export_bytes(ctx(self.client.session_id), tx, self.db_config).await?;
 
 			Ok(Backup {
 				rx,

@@ -14,7 +14,7 @@ use uuid::Uuid;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
-use crate::conn::{Command, Router};
+use crate::conn::{Router, ctx, ctx_txn};
 use crate::engine::any::Any;
 use crate::method::{BoxFuture, Live, OnceLockExt, Select};
 use crate::notification::Notification;
@@ -131,14 +131,7 @@ where
 
 		// Execute the LIVE SELECT query directly to get the UUID
 		let results = router
-			.execute_query(
-				client.session_id,
-				Command::Query {
-					query: Cow::Owned(query),
-					txn: None,
-					variables,
-				},
-			)
+			.query_results(ctx_txn(client.session_id, None), Cow::Owned(query), variables)
 			.await?;
 
 		// Get the first result which should be the UUID
@@ -175,15 +168,7 @@ pub(crate) async fn register(
 	session_id: Uuid,
 ) -> Result<Receiver<Result<CoreNotification>>> {
 	let (tx, rx) = async_channel::unbounded();
-	router
-		.execute_unit(
-			session_id,
-			Command::SubscribeLive {
-				uuid: id,
-				notification_sender: tx,
-			},
-		)
-		.await?;
+	router.engine.subscribe_live(ctx(session_id), id, tx).await?;
 	Ok(rx)
 }
 
@@ -344,15 +329,7 @@ where
 	let client = client.clone();
 	spawn(async move {
 		if let Ok(router) = client.inner.router.extract() {
-			router
-				.execute_unit(
-					client.session_id,
-					Command::Kill {
-						uuid,
-					},
-				)
-				.await
-				.ok();
+			router.engine.kill(ctx(client.session_id), uuid).await.ok();
 		}
 	});
 }
