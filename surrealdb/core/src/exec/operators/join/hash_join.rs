@@ -26,7 +26,7 @@
 //! non-extractable key binding — means the row has no join key (SQL 3VL: null
 //! never equals anything, so it can never equi-join):
 //!
-//! - **Build side**: a null-keyed row is excluded from the hash table entirely.
+//! - **Build side**: a null-keyed row is excluded from the build table entirely.
 //! - **Probe side, [`Inner`]**: a null-keyed row is dropped (it can match nothing).
 //! - **Probe side, [`Left`]**: a null-keyed row passes through null-filled (its [`null_template`]
 //!   bindings set to `Value::Null`), exactly like a probe row whose key found no build match.
@@ -89,9 +89,7 @@
 // dead-code detection active in the default (gql-on) build.
 #![cfg_attr(not(feature = "gql"), allow(dead_code))]
 
-use std::collections::HashMap;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use common::future::stream::{self, Yielder};
@@ -353,7 +351,7 @@ impl ExecOperator for HashJoin {
 				None
 			};
 
-			// ---- Build phase: drain the build side fully into the hash table.
+			// ---- Build phase: drain the build side fully into the build table.
 			// Constructed now (after the probe pre-drain when `probe_first`) so a
 			// post-write build reads the live transaction state.
 			let mut build_stream = match eager_build {
@@ -570,32 +568,26 @@ fn emit(out: &mut Vec<Value>, emitted: &mut usize, max_rows: usize, row: Value) 
 	Ok(())
 }
 
-/// Hash-keyed build table: each bucket is a `Vec` of `(key, rows)` entries that
-/// share a hash, and the matching key within the bucket is found by a linear
-/// probe over `PartialEq`. Rows sharing a key accumulate in that key's `rows`
-/// vector. The stored row count is bounded by the configured build-row budget.
+/// Build table keyed by `JoinKey: Ord`, with the rows sharing a key accumulating
+/// in that key's `Vec` in insertion order. The stored row count is bounded by the
+/// configured build-row budget.
 ///
-/// Keying on the hash makes the join relation `Hash`-then-`PartialEq`, which is
-/// narrower than `PartialEq` alone for number-bearing keys: a probe-side `0.1f`
-/// does not find a build-side `0.1dec` even though `=` calls them equal. See
-/// [`Value::hash_agrees_with_eq`].
+/// **Ordered, not hashed.** A probe row joins a build row when their keys compare
+/// equal, and `Value: Hash` does not agree with `Value: PartialEq` for numbers —
+/// `0.1f == 0.1dec` while the two hash apart (see
+/// [`Value::hash_agrees_with_eq`]). Hash-bucketing the keys would drop such a
+/// match, reachable here through a compound record id holding a non-integral
+/// number (`t:[0.1f]` against `t:[0.1dec]`). Ordering also makes iteration
+/// deterministic, which is what [`Self::all_rows`] needs.
 struct BuildTable {
-	buckets: HashMap<u64, Vec<(JoinKey, Vec<Value>)>>,
-	/// Build rows in insertion order, for deterministic `Cross` emission.
-	/// `all_rows()` iterates this rather than the hash buckets, whose iteration
-	/// order is process-randomised (`HashMap` `RandomState`). Holds a second copy
-	/// of each build row, so peak build memory is ~2× — bounded by the same
-	/// `SURREAL_GQL_MAX_JOIN_BUILD_ROWS` budget; a future `Arc<Value>` share could
-	/// drop the duplication if it ever matters.
-	ordered: Vec<Value>,
+	keyed: BTreeMap<JoinKey, Vec<Value>>,
 	rows: usize,
 }
 
 impl BuildTable {
 	fn new() -> Self {
 		Self {
-			buckets: HashMap::new(),
-			ordered: Vec::new(),
+			keyed: BTreeMap::new(),
 			rows: 0,
 		}
 	}
@@ -611,37 +603,23 @@ impl BuildTable {
 				),
 			))));
 		}
-		let hash = hash_key(&key);
-		let bucket = self.buckets.entry(hash).or_default();
-		match bucket.iter_mut().find(|(stored, _)| *stored == key) {
-			Some((_, rows)) => rows.push(row.clone()),
-			None => bucket.push((key, vec![row.clone()])),
-		}
-		self.ordered.push(row);
+		self.keyed.entry(key).or_default().push(row);
 		self.rows += 1;
 		Ok(())
 	}
 
 	/// The build rows stored under `key`, if any.
 	fn get(&self, key: &JoinKey) -> Option<&[Value]> {
-		let hash = hash_key(key);
-		let bucket = self.buckets.get(&hash)?;
-		bucket.iter().find(|(stored, _)| stored == key).map(|(_, rows)| rows.as_slice())
+		self.keyed.get(key).map(|rows| rows.as_slice())
 	}
 
-	/// Every stored build row, in insertion order (used by `Cross`), so the
-	/// cartesian product is emitted deterministically across processes.
+	/// Every stored build row, used by `Cross`, in an order that is deterministic
+	/// across processes: by key, then insertion order within a key. `Cross` has no
+	/// join keys at all, so every row shares the one empty key and this is plain
+	/// insertion order.
 	fn all_rows(&self) -> impl Iterator<Item = &Value> {
-		self.ordered.iter()
+		self.keyed.values().flatten()
 	}
-}
-
-/// Hash a join key into a `u64` for bucket lookup. Deterministic within a
-/// process (`DefaultHasher` uses a fixed seed).
-fn hash_key(key: &JoinKey) -> u64 {
-	let mut hasher = DefaultHasher::new();
-	key.hash(&mut hasher);
-	hasher.finish()
 }
 
 #[cfg(test)]
@@ -744,6 +722,35 @@ mod tests {
 		assert_eq!(row_id(merged, "c"), Some(rid("person", "carol")));
 	}
 
+	/// A compound record id carrying a non-integral number is the shape that
+	/// reaches the `Hash`/`PartialEq` disagreement through a join key: `t:[0.1f]`
+	/// and `t:[0.1dec]` are the same id to `=` but hash apart, so a hash-bucketed
+	/// build table would never compare them and the join would miss.
+	#[tokio::test]
+	async fn inner_join_matches_cross_variant_compound_record_id() {
+		fn array_id(n: crate::val::Number) -> RecordId {
+			RecordId {
+				table: TableName::new("t".to_string()),
+				key: RecordIdKey::Array(vec![Value::Number(n)].into()),
+			}
+		}
+		let build_id = array_id(crate::val::Number::Decimal(
+			<rust_decimal::Decimal as common::decimal::DecimalExt>::from_str_normalized("0.1")
+				.unwrap(),
+		));
+		let probe_id = array_id(crate::val::Number::Float(0.1));
+		// Precondition: one id to `=`, two keys to `Hash`.
+		assert_eq!(Value::RecordId(build_id.clone()), Value::RecordId(probe_id.clone()));
+
+		let build = vec![node_row(&[("a", rid("person", "alice")), ("b", build_id)])];
+		let probe = vec![node_row(&[("c", rid("person", "carol")), ("b", probe_id)])];
+		let op: Arc<dyn ExecOperator> = Arc::new(join(build, probe, &["b"], JoinType::Inner, &[]));
+		let out = collect(&op, &root_ctx()).await;
+
+		assert_eq!(out.len(), 1, "equal ids must join: {out:?}");
+		assert_eq!(row_id(&out[0], "a"), Some(rid("person", "alice")));
+	}
+
 	#[tokio::test]
 	async fn inner_join_emits_one_row_per_build_match() {
 		// Two build rows share key b=x; one probe row with b=x ⇒ two output rows.
@@ -820,10 +827,10 @@ mod tests {
 
 	#[tokio::test]
 	async fn cross_join_output_order_is_deterministic() {
-		// `all_rows()` iterates the insertion-ordered vec, so the cartesian
-		// product is build-minor within each probe row, in build insertion order
-		// — deterministic across processes (regression for the HashMap-iteration
-		// nondeterminism).
+		// `Cross` stores every build row under the one empty key, so `all_rows()`
+		// yields them in insertion order and the cartesian product is build-minor
+		// within each probe row — deterministic across processes, which a hashed
+		// build table could not promise.
 		let build = vec![
 			node_row(&[("a", rid("t", "1"))]),
 			node_row(&[("a", rid("t", "2"))]),

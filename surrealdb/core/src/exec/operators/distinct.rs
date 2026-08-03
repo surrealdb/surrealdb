@@ -6,16 +6,17 @@
 //! preserving the input stream order so the downstream `Sort` orders only over
 //! the returned columns (R7).
 //!
-//! Dedup hashes each row, probes its bucket, and compares candidates with
-//! `PartialEq`. That treats two rows as distinct when they hash apart but compare
-//! equal, which `Value` allows for numbers — `0.1f` and `0.1dec` are one value to
-//! `=` and two rows here (see [`Value::hash_agrees_with_eq`]); the `Aggregate`
-//! operator keys its group map on `Ord` for exactly that reason. The seen set
-//! grows with the number of *distinct*
-//! rows; its size is bounded by `SURREAL_GQL_MAX_JOIN_BUILD_ROWS` (the shared
-//! GQL in-memory-build budget), and exceeding it fails the query with an error
-//! that names the knob. Spill to disk is a future change, matching the
-//! `Aggregate` stance.
+//! Two rows are the same row when they compare equal, so the seen set is
+//! **ordered** (`Value: Ord`) rather than hashed. `Value: Hash` disagrees with
+//! `Value: PartialEq` for numbers — `0.1f == 0.1dec` while the two hash apart, so
+//! a hash-bucketed set would never compare them and would emit one value as two
+//! rows (see [`Value::hash_agrees_with_eq`]). The `Aggregate` operator keys its
+//! group map on `Ord` for the same reason.
+//!
+//! The set grows with the number of *distinct* rows; its size is bounded by
+//! `SURREAL_GQL_MAX_JOIN_BUILD_ROWS` (the shared GQL in-memory-build budget), and
+//! exceeding it fails the query with an error that names the knob. Spill to disk
+//! is a future change, matching the `Aggregate` stance.
 
 // The GQL v2 MATCH operators are constructed only by the gql-gated
 // planner (`Expr::Match` is `#[cfg(feature = "gql")]`), so they are dead
@@ -23,9 +24,7 @@
 // dead-code detection active in the default (gql-on) build.
 #![cfg_attr(not(feature = "gql"), allow(dead_code))]
 
-use std::collections::HashMap;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use common::future::stream::{self, Yielder};
@@ -119,24 +118,18 @@ impl ExecOperator for Distinct {
 	}
 }
 
-/// Hash-keyed set of seen rows: each bucket is a `Vec` of rows that share a hash,
-/// and membership is decided by `PartialEq` over that bucket (linear probe). Only
-/// distinct rows are retained, so the total stored count is bounded by the
-/// configured build-row budget.
-///
-/// The bucket step means membership is `Hash`-then-`PartialEq`, which is a
-/// narrower relation than `PartialEq` alone for number-bearing rows — see the
-/// module docs.
+/// Set of seen rows, keyed by `Value: Ord` so membership is exactly the equality
+/// the language uses — see the module docs for why a hash-bucketed set is not
+/// equivalent. Only distinct rows are retained, so the stored count is bounded by
+/// the configured build-row budget.
 struct SeenSet {
-	buckets: HashMap<u64, Vec<Value>>,
-	len: usize,
+	seen: BTreeSet<Value>,
 }
 
 impl SeenSet {
 	fn new() -> Self {
 		Self {
-			buckets: HashMap::new(),
-			len: 0,
+			seen: BTreeSet::new(),
 		}
 	}
 
@@ -144,13 +137,14 @@ impl SeenSet {
 	/// is newly inserted (caller should emit it), `Ok(false)` when it is a
 	/// duplicate (caller should drop it). Fails when inserting would exceed
 	/// `max_rows`.
+	///
+	/// The duplicate case — the common one for a dedup — probes without cloning;
+	/// only a newly seen row is cloned into the set.
 	fn insert(&mut self, value: &Value, max_rows: usize) -> Result<bool, ControlFlow> {
-		let hash = hash_value(value);
-		let bucket = self.buckets.entry(hash).or_default();
-		if bucket.iter().any(|seen| seen == value) {
+		if self.seen.contains(value) {
 			return Ok(false);
 		}
-		if self.len >= max_rows {
+		if self.seen.len() >= max_rows {
 			return Err(ControlFlow::Err(anyhow::anyhow!(crate::exec::Error::InvalidStatement(
 				format!(
 					"GQL MATCH RETURN DISTINCT exceeded the maximum of {max_rows} distinct rows \
@@ -158,18 +152,9 @@ impl SeenSet {
 				),
 			))));
 		}
-		bucket.push(value.clone());
-		self.len += 1;
+		self.seen.insert(value.clone());
 		Ok(true)
 	}
-}
-
-/// Hash a single [`Value`] into a `u64` for bucket lookup. Deterministic within
-/// a process (`DefaultHasher` uses a fixed seed).
-fn hash_value(value: &Value) -> u64 {
-	let mut hasher = DefaultHasher::new();
-	value.hash(&mut hasher);
-	hasher.finish()
 }
 
 #[cfg(test)]
@@ -179,6 +164,52 @@ mod tests {
 
 	fn rows(ns: &[i64]) -> Vec<Value> {
 		ns.iter().map(|n| Value::from(*n)).collect()
+	}
+
+	fn dec(s: &str) -> Value {
+		use common::decimal::DecimalExt;
+		Value::Number(crate::val::Number::Decimal(
+			rust_decimal::Decimal::from_str_normalized(s).unwrap(),
+		))
+	}
+
+	fn float(f: f64) -> Value {
+		Value::Number(crate::val::Number::Float(f))
+	}
+
+	/// Rows that compare equal are one row, whichever numeric variant carries
+	/// them. `0.1f` and `0.1dec` compare equal but hash apart, so a hash-bucketed
+	/// seen set would never compare them and would emit both.
+	#[tokio::test]
+	async fn numerically_equal_rows_dedup_to_one() {
+		// Integral spellings hash alike, so they would collapse either way; the
+		// non-integral pair is the one that needs the ordered set.
+		let input = ValuesOperator::new(vec![
+			float(0.1),
+			dec("0.1"),
+			Value::from(1i64),
+			float(1.0),
+			dec("1"),
+			dec("1.0"),
+			float(1.5),
+			dec("1.50"),
+		]);
+		let distinct: Arc<dyn ExecOperator> = Arc::new(Distinct::new(input));
+
+		let out = collect(&distinct, &root_ctx()).await;
+		// One row per value, each the first spelling seen.
+		assert_eq!(out, vec![float(0.1), Value::from(1i64), float(1.5)]);
+	}
+
+	/// Distinct numbers stay distinct — the ordered set must not over-collapse.
+	#[tokio::test]
+	async fn numerically_distinct_rows_are_kept() {
+		let input =
+			ValuesOperator::new(vec![float(0.1), dec("0.2"), float(0.10001), dec("0.1000000001")]);
+		let distinct: Arc<dyn ExecOperator> = Arc::new(Distinct::new(input));
+
+		let out = collect(&distinct, &root_ctx()).await;
+		assert_eq!(out.len(), 4, "{out:?}");
 	}
 
 	#[tokio::test]
