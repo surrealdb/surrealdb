@@ -166,7 +166,13 @@ impl MutVisitor for ParamResolver<'_> {
 		if let Expr::Param(param) = expr
 			&& let Some(value) = self.values.get(param.as_str())
 		{
-			*expr = value.clone().into_literal();
+			// Leave the param in place when its literal form would evaluate
+			// to a different value (see `substitution_is_lossy`): runtime
+			// parameter resolution yields the correct value, whereas a lossy
+			// substitution changes results, not just the plan.
+			if !super::literals::substitution_is_lossy(value) {
+				*expr = value.clone().into_literal();
+			}
 			return Ok(());
 		}
 		expr.visit_mut(self)

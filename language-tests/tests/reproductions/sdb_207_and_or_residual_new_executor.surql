@@ -3,7 +3,7 @@
 planner-strategy = ["all-ro"]
 
 [test]
-reason = "SDB-207: pins streaming-executor behavior for AND + OR-residual conditions. With literal operands the compound index is used with the OR clause as a residual Filter (desired plan). With param-idiom operands ($scan.field record traversals) the values are not folded at plan time, so the same query falls back to a full table scan. Update the first EXPLAIN expectation when plan-time constant idiom folding lands."
+reason = "SDB-207: an AND condition with an OR residual uses the compound index prefix on the streaming executor, for both literal operands and $scan.field record traversals (folded to literals at plan time); the OR clause is applied as a residual Filter"
 
 [[test.results]]
 value = "NONE"
@@ -30,7 +30,7 @@ value = "[{ createdAt: d'2026-02-01T00:00:00Z', id: canonical_finding:f5, scanDe
 value = "NONE"
 
 [[test.results]]
-value = "{ attributes: { projections: 'id' }, children: [{ attributes: { direction: 'Forward', pre_decode_filter: 'no (unsupported predicate)', predicate: 'scanDefinition = (scan:one).scanDefinition AND createdAt <= (scan:one).task.finishedAt AND closedAt = NONE OR closedAt >= (scan:one).createdAt', table: 'canonical_finding' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'SelectProject' }"
+value = """{ attributes: { projections: 'id' }, children: [{ attributes: { predicate: "closedAt = NONE OR closedAt >= d'2026-01-10T00:00:00Z'" }, children: [{ attributes: { access: "[scan_definition:a] LessThanEqual d'2026-01-11T00:00:00Z'", direction: 'Forward', index: 'scanDefinition_compound_idx' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', expressions: [{ role: 'predicate', sql: "closedAt = NONE OR closedAt >= d'2026-01-10T00:00:00Z'" }], operator: 'Filter' }], context: 'Db', operator: 'SelectProject' }"""
 
 [[test.results]]
 value = "[{ id: canonical_finding:f1 }, { id: canonical_finding:f2 }]"

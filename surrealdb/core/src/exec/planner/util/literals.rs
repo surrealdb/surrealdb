@@ -5,12 +5,52 @@
 //! deterministic, document-independent expressions in WHERE clauses to
 //! literals so the index analyzer can match them.
 
+use std::ops::Bound;
+
 use crate::err::{EngineError, Error};
 use crate::exec::Error as ExecError;
 use crate::exec::function::FunctionRegistry;
 use crate::expr::visit::{MutVisitor, VisitMut};
 use crate::expr::{BinaryOperator, Cond, Expr};
-use crate::val::Number;
+use crate::val::{Number, RecordIdKey, Value};
+
+/// `true` when substituting `value`'s literal form into an expression would
+/// change evaluation results, at any nesting depth. `Value::into_literal` is
+/// lossy for two variants: a closure literal drops the closure's captures,
+/// and a set becomes an array literal, which evaluates to an array — and
+/// arrays compare unequal to sets at runtime. Callers must leave the original
+/// expression in place (runtime evaluation yields the correct value) instead
+/// of substituting a lossy form.
+pub(crate) fn substitution_is_lossy(value: &Value) -> bool {
+	fn bound_is_lossy(bound: &Bound<Value>) -> bool {
+		match bound {
+			Bound::Included(v) | Bound::Excluded(v) => substitution_is_lossy(v),
+			Bound::Unbounded => false,
+		}
+	}
+	fn key_bound_is_lossy(bound: &Bound<RecordIdKey>) -> bool {
+		match bound {
+			Bound::Included(k) | Bound::Excluded(k) => key_is_lossy(k),
+			Bound::Unbounded => false,
+		}
+	}
+	fn key_is_lossy(key: &RecordIdKey) -> bool {
+		match key {
+			RecordIdKey::Number(_) | RecordIdKey::String(_) | RecordIdKey::Uuid(_) => false,
+			RecordIdKey::Array(a) => a.iter().any(substitution_is_lossy),
+			RecordIdKey::Object(o) => o.values().any(substitution_is_lossy),
+			RecordIdKey::Range(r) => key_bound_is_lossy(&r.start) || key_bound_is_lossy(&r.end),
+		}
+	}
+	match value {
+		Value::Closure(_) | Value::Set(_) => true,
+		Value::Array(a) => a.iter().any(substitution_is_lossy),
+		Value::Object(o) => o.values().any(substitution_is_lossy),
+		Value::Range(r) => bound_is_lossy(&r.start) || bound_is_lossy(&r.end),
+		Value::RecordId(rid) => key_is_lossy(&rid.key),
+		_ => false,
+	}
+}
 
 /// Best-effort conversion of a `Literal` to a `Value`.
 ///

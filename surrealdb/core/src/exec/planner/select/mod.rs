@@ -15,6 +15,7 @@
 
 mod pipeline;
 mod projection;
+mod record_fold;
 
 use std::sync::Arc;
 
@@ -997,6 +998,30 @@ impl<'ctx> Planner<'ctx> {
 		let cond = match cond {
 			Some(mut c) => {
 				fold_condition_expressions(&mut c, self.function_registry());
+				Some(c)
+			}
+			None => None,
+		};
+
+		// Fold row-independent record-idiom traversals (`(scan:one).field`
+		// after param substitution) to literals so index analysis can match
+		// them. Versioned SELECTs are excluded — a statement-level VERSION or
+		// an enclosing version context both disqualify, because the plan-time
+		// walk reads current state, not the versioned snapshot. Statements
+		// with write side effects anywhere (projections, sources, condition)
+		// are excluded: a write can change a record between the plan-time
+		// read and the per-row evaluation the fold replaces. See
+		// `record_fold` for the runtime-parity contract.
+		let cond = match cond {
+			Some(mut c) => {
+				if version.is_none()
+					&& self.version.is_none()
+					&& fields.read_only()
+					&& what.iter().all(Expr::read_only)
+					&& c.0.read_only()
+				{
+					self.fold_constant_record_idioms(&mut c).await;
+				}
 				Some(c)
 			}
 			None => None,
