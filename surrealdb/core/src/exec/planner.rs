@@ -791,69 +791,75 @@ impl<'ctx> Planner<'ctx> {
 		op: crate::expr::operator::BinaryOperator,
 		right: Expr,
 	) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
-		// For MATCHES operators with idiom left and string-literal or
-		// bind-parameter right, create a MatchesOp that evaluates via
-		// the full-text index.
-		if let crate::expr::operator::BinaryOperator::Matches(ref matches_op) = op
-			&& let Expr::Idiom(idiom) = left
-		{
-			let resolved_query = match &right {
-				Expr::Literal(crate::expr::literal::Literal::String(s)) => {
-					Some(s.as_str().to_owned())
+		// Every MATCHES becomes a `MatchesOp`, which owns the operator's whole
+		// per-row decision tree (see that type's module docs). An idiom left
+		// with a plan-time-resolvable right additionally carries a
+		// `MatchProbe`, naming the field and query string an index can be
+		// resolved from; the shapes that cannot name an index carry none and so
+		// answer `false` for rows no legacy `QueryExecutor` would have seen and
+		// `NoIndexFoundForMatch` for the rest — the same two outcomes the legacy
+		// executor reaches for them, since its tree registers neither shape.
+		if let crate::expr::operator::BinaryOperator::Matches(ref matches_op) = op {
+			// Determine whether this exact expression is registered in the
+			// enclosing SELECT's WHERE condition (legacy executor parity — see
+			// `MatchesScope`). The lookup key is the node as written; the
+			// allowlist contains both the original and the
+			// param-resolved/folded condition forms, so both the
+			// projection-side and residual-cond-side conversions of the same
+			// source expression hit it.
+			let (registered, executor_tables) = match &self.matches_scope {
+				Some(scope) => {
+					let key = Expr::Binary {
+						left: Box::new(left.clone()),
+						op: crate::expr::operator::BinaryOperator::Matches(matches_op.clone()),
+						right: Box::new(right.clone()),
+					};
+					(scope.allowlist.contains(&key), Arc::clone(&scope.executor_tables))
 				}
-				Expr::Param(param) => self.ctx.value(param.as_str()).and_then(|v| {
-					if let crate::val::Value::String(s) = v {
-						Some(s.as_str().to_owned())
-					} else {
-						None
-					}
-				}),
+				None => (false, Arc::from(Vec::<surrealdb_strand::TableName>::new())),
+			};
+
+			// The probe mirrors legacy `Tree::eval_matches_operator`: an idiom
+			// left, and a right operand the legacy tree would see as a computed
+			// node, rendered with `Value::to_raw_string()`. That keeps a bare
+			// string literal as its own contents and renders every other value
+			// the way the legacy analyzer receives it — `title @@ 42` searches
+			// for the term `42`.
+			let probe = |query: &crate::val::Value, idiom: &crate::expr::Idiom| {
+				crate::exec::physical_expr::MatchProbe {
+					idiom: idiom.clone(),
+					query: query.to_raw_string(),
+				}
+			};
+			let probe = match (&left, &right) {
+				(Expr::Idiom(idiom), Expr::Literal(lit)) => {
+					util::try_literal_to_value(lit).map(|v| probe(&v, idiom))
+				}
+				(Expr::Idiom(idiom), Expr::Param(param)) => {
+					self.ctx.value(param.as_str()).map(|v| probe(v, idiom))
+				}
 				_ => None,
 			};
-			if let Some(query) = resolved_query {
-				// Determine whether this exact expression is registered in
-				// the enclosing SELECT's WHERE condition (legacy executor
-				// parity — see `MatchesScope`). The lookup key rebuilds the
-				// binary node; the allowlist contains both the original and
-				// the param-resolved/folded condition forms, so both the
-				// projection-side and residual-cond-side conversions of the
-				// same source expression hit it.
-				let (registered, executor_tables) = match &self.matches_scope {
-					Some(scope) => {
-						let key = Expr::Binary {
-							left: Box::new(Expr::Idiom(idiom.clone())),
-							op: crate::expr::operator::BinaryOperator::Matches(matches_op.clone()),
-							right: Box::new(right.clone()),
-						};
-						(scope.allowlist.contains(&key), Arc::clone(&scope.executor_tables))
-					}
-					None => (false, Arc::from(Vec::<surrealdb_strand::TableName>::new())),
-				};
-				let idiom_clone = idiom.clone();
-				let query_clone = query.clone();
-				let left_phys = Box::pin(self.physical_expr(Expr::Idiom(idiom))).await?;
-				let right_phys = Box::pin(self.physical_expr(Expr::Literal(
-					crate::expr::literal::Literal::String(query.into()),
-				)))
-				.await?;
-				return Ok(Arc::new(crate::exec::physical_expr::MatchesOp::new(
-					left_phys,
-					right_phys,
-					matches_op.clone(),
-					idiom_clone,
-					query_clone,
-					registered,
-					executor_tables,
-				)));
-			}
-			// Left was idiom but right wasn't resolvable — reassemble
-			let left_phys = Box::pin(self.physical_expr(Expr::Idiom(idiom))).await?;
-			let right_phys = Box::pin(self.physical_expr(right)).await?;
-			return Ok(Arc::new(BinaryOp {
-				left: left_phys,
-				op,
-				right: right_phys,
-			}));
+
+			// The right side is rendered from the resolved query when there is
+			// one, so `ToSql` shows what was actually searched for rather than
+			// the unresolved parameter.
+			let right_source = match &probe {
+				Some(probe) => {
+					Expr::Literal(crate::expr::literal::Literal::String(probe.query.clone().into()))
+				}
+				None => right,
+			};
+			let left_phys = Box::pin(self.physical_expr(left)).await?;
+			let right_phys = Box::pin(self.physical_expr(right_source)).await?;
+			return Ok(Arc::new(crate::exec::physical_expr::MatchesOp::new(
+				left_phys,
+				right_phys,
+				matches_op.clone(),
+				probe,
+				registered,
+				executor_tables,
+			)));
 		}
 
 		// KNN operators evaluated as expressions (projection position, a

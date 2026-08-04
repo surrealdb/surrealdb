@@ -172,3 +172,199 @@ pub(crate) async fn evaluate_recurse_shortest(
 		Ok(Value::Array(remaining_paths.into()))
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::super::tests::{
+		FIXTURES, Raise, SYSTEM_LIMIT, body_path, bounds, exec_error, raise_path,
+	};
+	use super::*;
+	use crate::exec::ExecutionContext;
+	use crate::exec::operators::test_util::{TestDb, val};
+	use crate::expr::ControlFlow;
+
+	/// Search the `next` record-link graph from `start` for `target`.
+	#[allow(clippy::too_many_arguments)]
+	async fn run(
+		start: &str,
+		target: &str,
+		src: &str,
+		min: u32,
+		max: Option<u32>,
+		inclusive: bool,
+		system_limit: u32,
+		ctx: &ExecutionContext,
+	) -> FlowResult<Value> {
+		let start = val(start).await;
+		let target = val(target).await;
+		let path = body_path(src, ctx).await;
+		let base = crate::exec::physical_expr::EvalContext::from_exec_ctx(ctx);
+		evaluate_recurse_shortest(
+			&start,
+			&target,
+			&path,
+			bounds(min, max, system_limit),
+			inclusive,
+			base.with_value(&start),
+		)
+		.await
+	}
+
+	async fn links(
+		start: &str,
+		target: &str,
+		min: u32,
+		max: Option<u32>,
+		inclusive: bool,
+		ctx: &ExecutionContext,
+	) -> FlowResult<Value> {
+		run(start, target, "link:a.next", min, max, inclusive, SYSTEM_LIMIT, ctx).await
+	}
+
+	#[tokio::test]
+	async fn the_first_walk_that_reaches_the_target_is_returned() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		// link:w closes both diamond branches; BFS reaches it first through
+		// link:y and returns immediately.
+		assert_eq!(
+			links("link:x", "link:w", 1, Some(9), false, &ctx).await.unwrap(),
+			val("[link:y, link:w]").await
+		);
+		assert_eq!(
+			links("link:x", "link:w", 1, Some(9), true, &ctx).await.unwrap(),
+			val("[link:x, link:y, link:w]").await
+		);
+	}
+
+	#[tokio::test]
+	async fn the_shorter_of_two_routes_to_the_target_wins() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		// link:o is reachable from link:m directly and via link:n. The level-based
+		// search returns the one-step route.
+		assert_eq!(
+			links("link:m", "link:o", 1, Some(9), false, &ctx).await.unwrap(),
+			val("[link:o]").await
+		);
+	}
+
+	#[tokio::test]
+	async fn the_target_is_only_matched_when_discovered_so_the_start_is_not_a_hit() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		// Searching for the start node itself does not return a zero-length walk:
+		// the match is tested against discovered successors only, so link:p is
+		// found by going round the cycle.
+		assert_eq!(
+			links("link:p", "link:p", 1, Some(4), false, &ctx).await.unwrap(),
+			val("[link:q, link:p]").await
+		);
+	}
+
+	#[tokio::test]
+	async fn a_target_reached_below_min_depth_is_not_matched() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		// link:y sits one step from link:x, below the minimum of two, and nothing
+		// in the diamond leads back to it — so the search finds nothing.
+		assert_eq!(links("link:x", "link:y", 2, Some(3), false, &ctx).await.unwrap(), Value::None);
+	}
+
+	#[tokio::test]
+	async fn an_exhausted_search_returns_none() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		// The chain runs out before the bound, leaving nothing queued.
+		assert_eq!(links("link:a", "link:zz", 1, Some(9), false, &ctx).await.unwrap(), Value::None);
+	}
+
+	#[tokio::test]
+	async fn a_search_cut_off_with_the_frontier_still_live_returns_the_frontier_walks() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		// Stopping at the bound with the queue non-empty returns the walks that
+		// were still in flight rather than NONE — they are not paths to the
+		// target, only the state the search stopped in.
+		assert_eq!(
+			links("link:a", "link:zz", 1, Some(2), false, &ctx).await.unwrap(),
+			val("[[link:b, link:c]]").await
+		);
+	}
+
+	#[tokio::test]
+	async fn a_cycle_is_closed_by_the_visited_set_so_an_unbounded_search_terminates() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		// `max: None` would raise the limit error if the queue were still live at
+		// the cap; the visited set empties it after one lap.
+		assert_eq!(
+			run("link:p", "link:zz", "link:a.next", 1, None, false, 8, &ctx).await.unwrap(),
+			Value::None
+		);
+	}
+
+	#[tokio::test]
+	async fn an_unbounded_search_with_a_live_queue_at_the_cap_raises_the_limit() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		let err =
+			run("link:a", "link:zz", "link:a.next", 1, None, false, 2, &ctx).await.unwrap_err();
+		assert!(matches!(
+			exec_error(err),
+			crate::exec::Error::IdiomRecursionLimitExceeded {
+				limit: 2
+			}
+		));
+	}
+
+	#[tokio::test]
+	async fn an_explicit_bound_truncates_silently_instead_of_raising() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		assert_eq!(
+			run("link:a", "link:zz", "link:a.next", 1, Some(2), false, 2, &ctx).await.unwrap(),
+			val("[[link:b, link:c]]").await
+		);
+	}
+
+	#[tokio::test]
+	async fn a_non_record_value_is_rejected_because_recursion_is_record_only() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		let err = run("link:a", "link:zz", "link:a.name", 1, Some(2), false, SYSTEM_LIMIT, &ctx)
+			.await
+			.unwrap_err();
+		match exec_error(err) {
+			crate::exec::Error::InvalidRecursionTarget {
+				value,
+			} => assert_eq!(value, "'A'"),
+			other => panic!("expected InvalidRecursionTarget, got {other:?}"),
+		}
+	}
+
+	#[tokio::test]
+	async fn control_flow_out_of_the_body_aborts_the_search() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		let start = val("link:a").await;
+		let target = val("link:d").await;
+		let base = crate::exec::physical_expr::EvalContext::from_exec_ctx(&ctx);
+
+		let path = raise_path(Raise::Error);
+		let err = evaluate_recurse_shortest(
+			&start,
+			&target,
+			&path,
+			bounds(1, Some(3), SYSTEM_LIMIT),
+			false,
+			base.with_value(&start),
+		)
+		.await
+		.unwrap_err();
+		match err {
+			ControlFlow::Err(e) => assert_eq!(e.to_string(), "body blew up"),
+			other => panic!("expected an error, got {other}"),
+		}
+	}
+}

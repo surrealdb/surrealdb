@@ -190,6 +190,9 @@ mod tests {
 		Break,
 		Continue,
 		Return(i64),
+		/// Raises a fresh `ExecError::Thrown` each time, so the arm stays `Copy`
+		/// even though `ControlFlow::Err` owns an `anyhow::Error`.
+		Throw(&'static str),
 	}
 
 	impl Signal {
@@ -198,6 +201,9 @@ mod tests {
 				Signal::Break => ControlFlow::Break,
 				Signal::Continue => ControlFlow::Continue,
 				Signal::Return(v) => ControlFlow::Return(Value::from(v)),
+				Signal::Throw(msg) => {
+					ControlFlow::Err(anyhow::Error::new(crate::exec::Error::Thrown(msg.to_owned())))
+				}
 			}
 		}
 	}
@@ -216,6 +222,8 @@ mod tests {
 		signal: Option<Signal>,
 		eager: bool,
 		scalar: bool,
+		access_mode: AccessMode,
+		required_context: ContextLevel,
 	}
 
 	impl StubValue {
@@ -226,6 +234,8 @@ mod tests {
 				signal: None,
 				eager: false,
 				scalar: true,
+				access_mode: AccessMode::ReadOnly,
+				required_context: ContextLevel::Root,
 			}
 		}
 
@@ -236,6 +246,8 @@ mod tests {
 				signal: Some(signal),
 				eager: true,
 				scalar: true,
+				access_mode: AccessMode::ReadOnly,
+				required_context: ContextLevel::Root,
 			}
 		}
 
@@ -246,11 +258,20 @@ mod tests {
 				signal: Some(signal),
 				eager: false,
 				scalar: true,
+				access_mode: AccessMode::ReadOnly,
+				required_context: ContextLevel::Root,
 			}
 		}
 
 		fn non_scalar(mut self) -> Self {
 			self.scalar = false;
+			self
+		}
+
+		/// Declare the metadata `LetPlan` is expected to inherit.
+		fn metadata(mut self, access_mode: AccessMode, required_context: ContextLevel) -> Self {
+			self.access_mode = access_mode;
+			self.required_context = required_context;
 			self
 		}
 
@@ -265,11 +286,11 @@ mod tests {
 		}
 
 		fn required_context(&self) -> ContextLevel {
-			ContextLevel::Root
+			self.required_context
 		}
 
 		fn access_mode(&self) -> AccessMode {
-			AccessMode::ReadOnly
+			self.access_mode
 		}
 
 		fn cardinality_hint(&self) -> CardinalityHint {
@@ -400,5 +421,110 @@ mod tests {
 			format!("{err}").contains("$x"),
 			"coercion failure should name the parameter, got: {err}"
 		);
+	}
+
+	// =========================================================================
+	// Binding publication, shadowing, and inherited metadata
+	// =========================================================================
+
+	#[tokio::test]
+	async fn the_binding_is_published_through_output_context_not_through_execute() {
+		let ctx = root_ctx();
+		let plan = let_plan(StubValue::rows(vec![Value::from(3i64)]).into_operator());
+
+		// The executor only asks for the modified context when this is true.
+		assert!(plan.mutates_context());
+
+		assert_eq!(bound_value(&plan).await.expect("binding should succeed"), Value::from(3i64));
+
+		// The input context is left alone; the binding travels only forward.
+		assert!(ctx.value("x").is_none());
+	}
+
+	#[tokio::test]
+	async fn execute_emits_a_single_none_row_whatever_the_bound_value_is() {
+		let ctx = root_ctx();
+		let plan: Arc<dyn ExecOperator> =
+			Arc::new(let_plan(StubValue::rows(vec![Value::from(3i64)]).into_operator()));
+		assert_eq!(
+			crate::exec::operators::test_util::collect(&plan, &ctx).await,
+			vec![Value::None],
+			"LET is not an expression: its own output is always NONE"
+		);
+	}
+
+	#[tokio::test]
+	async fn a_binding_shadows_an_outer_one_of_the_same_name_and_the_outer_stays_intact() {
+		let outer = root_ctx().with_param("x", Value::from(1i64));
+		let plan = let_plan(StubValue::rows(vec![Value::from(2i64)]).into_operator());
+
+		let inner = plan.output_context(&outer).await.expect("binding should succeed");
+		assert_eq!(inner.value("x").cloned(), Some(Value::from(2i64)));
+
+		// `output_context` layers a child context; the context it was given still
+		// resolves `$x` to the outer value.
+		assert_eq!(outer.value("x").cloned(), Some(Value::from(1i64)));
+	}
+
+	#[tokio::test]
+	async fn metadata_is_inherited_from_the_value_plan() {
+		// `access_mode` selects the transaction type, so `LET $x = (CREATE …)` has
+		// to report ReadWrite; `required_context` drives the executor's pre-flight
+		// level check.
+		let value = StubValue::rows(Vec::new())
+			.metadata(AccessMode::ReadWrite, ContextLevel::Database)
+			.into_operator();
+		let plan = let_plan(value);
+		assert_eq!(plan.access_mode(), AccessMode::ReadWrite);
+		assert_eq!(plan.required_context(), ContextLevel::Database);
+	}
+
+	// =========================================================================
+	// Coercion failure and error transparency
+	// =========================================================================
+
+	#[tokio::test]
+	async fn a_value_that_does_not_satisfy_the_declared_type_fails_naming_the_parameter() {
+		let ctx = root_ctx();
+		let plan = LetPlan::new(
+			Strand::new("x"),
+			Some(Kind::Int),
+			StubValue::rows(vec![Value::from("not a number")]).into_operator(),
+		);
+		let ctrl = plan.output_context(&ctx).await.expect_err("a string cannot coerce to int");
+		let ControlFlow::Err(err) = ctrl else {
+			panic!("a coercion failure is an error, not a control-flow signal");
+		};
+		assert!(
+			matches!(
+				err.downcast_ref::<crate::err::Error>(),
+				Some(crate::err::Error::Exec(crate::exec::Error::SetCoerce { name, .. }))
+					if name == "x"
+			),
+			"expected SetCoerce naming $x, got {err:?}"
+		);
+	}
+
+	/// An error must reach the caller as itself, not flattened into a string: the
+	/// transactor has to recognise a write conflict to retry it, and a cancelled
+	/// or timed-out query has to keep reporting as such.
+	#[tokio::test]
+	async fn an_error_reaches_the_caller_downcastable_from_either_raise_site() {
+		for value in [
+			StubValue::eager(Signal::Throw("boom")).into_operator(),
+			StubValue::rows_then(vec![Value::from(1i64)], Signal::Throw("boom")).into_operator(),
+		] {
+			let plan = let_plan(value);
+			let ControlFlow::Err(err) = propagated_signal(&plan).await else {
+				panic!("expected an error");
+			};
+			assert!(
+				matches!(
+					err.downcast_ref::<crate::exec::Error>(),
+					Some(crate::exec::Error::Thrown(msg)) if msg == "boom"
+				),
+				"expected the original Thrown error, got {err:?}"
+			);
+		}
 	}
 }

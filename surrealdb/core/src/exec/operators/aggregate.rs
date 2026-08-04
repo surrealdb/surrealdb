@@ -854,7 +854,1160 @@ mod tests {
 	use rust_decimal::Decimal;
 
 	use super::*;
+	use crate::exec::field_path::FieldPath;
+	use crate::exec::operators::test_util::{
+		ValuesOperator, collect, parse_expr, physical_expr, root_ctx, root_ctx_with_auth,
+		try_collect, val,
+	};
+	use crate::exec::operators::{SortDirection, Union};
+	use crate::exec::ordering::SortProperty;
+	use crate::exec::{CardinalityHint, OutputOrdering};
+	use crate::expr::{ControlFlow, Expr};
+	use crate::iam::{Action, Auth, Role};
 	use crate::val::Number;
+
+	// =========================================================================
+	// Builders
+	// =========================================================================
+
+	/// Build the operator over `input`. `group_by` holds the GROUP BY sources;
+	/// an empty slice is GROUP ALL. Non-idiom sources are given a display idiom
+	/// spelled from the source text, the way the planner does for computed keys.
+	async fn aggregate_over(
+		input: Arc<dyn ExecOperator>,
+		group_by: &[&str],
+		fields: Vec<AggregateField>,
+		ctx: &ExecutionContext,
+	) -> Arc<dyn ExecOperator> {
+		let mut idioms = Vec::with_capacity(group_by.len());
+		let mut exprs = Vec::with_capacity(group_by.len());
+		for src in group_by {
+			idioms.push(match parse_expr(src) {
+				Expr::Idiom(idiom) => idiom,
+				_ => Idiom::field(src.to_string()),
+			});
+			exprs.push(physical_expr(src, ctx).await);
+		}
+		Arc::new(Aggregate::new(input, idioms, exprs, fields))
+	}
+
+	/// Input rows from SurrealQL object literals.
+	async fn rows(srcs: &[&str]) -> Vec<Value> {
+		let mut out = Vec::with_capacity(srcs.len());
+		for src in srcs {
+			out.push(val(src).await);
+		}
+		out
+	}
+
+	/// A field holding one aggregate call and no post-expression — the shape the
+	/// planner produces for a bare `func(arg)` selector.
+	fn single(name: &str, extracted: ExtractedAggregate) -> AggregateField {
+		AggregateField::new(
+			name.to_string(),
+			false,
+			None,
+			Some(AggregateExprInfo {
+				aggregates: vec![extracted],
+				post_expr: None,
+			}),
+			None,
+		)
+	}
+
+	/// `count()` — the argument-less form. The planner compiles a NONE literal as
+	/// the per-row argument, so the accumulator ticks once per row whatever the
+	/// row holds.
+	async fn count_star(name: &str, ctx: &ExecutionContext) -> AggregateField {
+		single(
+			name,
+			ExtractedAggregate {
+				function: ctx.function_registry().get_count_aggregate(false),
+				argument_expr: physical_expr("NONE", ctx).await,
+				extra_args: vec![],
+			},
+		)
+	}
+
+	/// `count(arg)` — the truthy-counting form.
+	async fn count_of(name: &str, arg: &str, ctx: &ExecutionContext) -> AggregateField {
+		single(
+			name,
+			ExtractedAggregate {
+				function: ctx.function_registry().get_count_aggregate(true),
+				argument_expr: physical_expr(arg, ctx).await,
+				extra_args: vec![],
+			},
+		)
+	}
+
+	/// A registry aggregate applied to one per-row argument, e.g.
+	/// `agg_of("total", "math::sum", "score", ctx)`.
+	async fn agg_of(name: &str, func: &str, arg: &str, ctx: &ExecutionContext) -> AggregateField {
+		single(
+			name,
+			ExtractedAggregate {
+				function: aggregate_fn(func, ctx),
+				argument_expr: physical_expr(arg, ctx).await,
+				extra_args: vec![],
+			},
+		)
+	}
+
+	fn aggregate_fn(func: &str, ctx: &ExecutionContext) -> Arc<dyn AggregateFunction> {
+		Arc::clone(
+			ctx.function_registry().get_aggregate(func).expect("aggregate should be registered"),
+		)
+	}
+
+	/// A pass-through field that republishes group key `idx`.
+	fn key(name: &str, idx: usize) -> AggregateField {
+		AggregateField::new(name.to_string(), true, Some(idx), None, None)
+	}
+
+	/// A non-aggregate field: the first non-NONE value seen in the group.
+	async fn first_value(name: &str, src: &str, ctx: &ExecutionContext) -> AggregateField {
+		AggregateField::new(
+			name.to_string(),
+			false,
+			None,
+			None,
+			Some(physical_expr(src, ctx).await),
+		)
+	}
+
+	/// Read a top-level field from an output row.
+	fn field(row: &Value, name: &str) -> Value {
+		match row {
+			Value::Object(o) => o.get(name).cloned().unwrap_or(Value::None),
+			other => panic!("expected an object row, got {other:?}"),
+		}
+	}
+
+	/// A source that replays a fixed script of batches and signals. Single-use:
+	/// `execute` takes the script, so each instance may be executed once.
+	struct ScriptedSource {
+		script: std::sync::Mutex<Option<Vec<FlowResult<ValueBatch>>>>,
+		access_mode: AccessMode,
+	}
+
+	impl ScriptedSource {
+		/// Returns a trait object rather than `Self`: every operator builder in
+		/// exec hands back `Arc<dyn ExecOperator>`.
+		#[allow(clippy::new_ret_no_self)]
+		fn new(script: Vec<FlowResult<ValueBatch>>) -> Arc<dyn ExecOperator> {
+			Arc::new(Self {
+				script: std::sync::Mutex::new(Some(script)),
+				access_mode: AccessMode::ReadOnly,
+			})
+		}
+
+		fn read_write(script: Vec<FlowResult<ValueBatch>>) -> Arc<dyn ExecOperator> {
+			Arc::new(Self {
+				script: std::sync::Mutex::new(Some(script)),
+				access_mode: AccessMode::ReadWrite,
+			})
+		}
+	}
+
+	impl std::fmt::Debug for ScriptedSource {
+		fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+			f.write_str("ScriptedSource")
+		}
+	}
+
+	impl ExecOperator for ScriptedSource {
+		fn name(&self) -> &'static str {
+			"ScriptedSource"
+		}
+
+		fn required_context(&self) -> ContextLevel {
+			ContextLevel::Root
+		}
+
+		fn access_mode(&self) -> AccessMode {
+			self.access_mode
+		}
+
+		fn execute(&self, _ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
+			let script = self
+				.script
+				.lock()
+				.expect("script lock")
+				.take()
+				.expect("ScriptedSource is single-use");
+			Ok(Box::pin(futures::stream::iter(script)))
+		}
+	}
+
+	fn batch(values: Vec<Value>) -> FlowResult<ValueBatch> {
+		Ok(ValueBatch {
+			values,
+		})
+	}
+
+	// =========================================================================
+	// Grouping
+	// =========================================================================
+
+	#[tokio::test]
+	async fn rows_collapse_into_one_output_row_per_group_key() {
+		let ctx = root_ctx();
+		let input = ValuesOperator::new(
+			rows(&[
+				"{ country: 'us', score: 1 }",
+				"{ country: 'de', score: 2 }",
+				"{ country: 'us', score: 3 }",
+				"{ country: 'us', score: 4 }",
+			])
+			.await,
+		);
+		let op = aggregate_over(
+			input,
+			&["country"],
+			vec![
+				key("country", 0),
+				count_star("total", &ctx).await,
+				agg_of("sum", "math::sum", "score", &ctx).await,
+			],
+			&ctx,
+		)
+		.await;
+
+		let out = collect(&op, &ctx).await;
+		assert_eq!(
+			out,
+			rows(&["{ country: 'de', total: 1, sum: 2 }", "{ country: 'us', total: 3, sum: 8 }"])
+				.await
+		);
+	}
+
+	#[tokio::test]
+	async fn multi_field_group_keys_partition_on_the_whole_tuple() {
+		let ctx = root_ctx();
+		let input = ValuesOperator::new(
+			rows(&[
+				"{ c: 'us', y: 2020 }",
+				"{ c: 'us', y: 2021 }",
+				"{ c: 'de', y: 2020 }",
+				"{ c: 'us', y: 2020 }",
+			])
+			.await,
+		);
+		let op = aggregate_over(
+			input,
+			&["c", "y"],
+			vec![key("c", 0), key("y", 1), count_star("total", &ctx).await],
+			&ctx,
+		)
+		.await;
+
+		// Three distinct (c, y) tuples. The key tuple orders the output: the
+		// second component only breaks ties within an equal first component.
+		let out = collect(&op, &ctx).await;
+		assert_eq!(
+			out,
+			rows(&[
+				"{ c: 'de', y: 2020, total: 1 }",
+				"{ c: 'us', y: 2020, total: 2 }",
+				"{ c: 'us', y: 2021, total: 1 }",
+			])
+			.await
+		);
+	}
+
+	#[tokio::test]
+	async fn a_row_missing_a_group_field_groups_under_none() {
+		let ctx = root_ctx();
+		let input = ValuesOperator::new(
+			rows(&["{ c: 'us' }", "{ score: 1 }", "{ score: 2 }", "{ c: 'us' }"]).await,
+		);
+		let op =
+			aggregate_over(input, &["c"], vec![key("c", 0), count_star("total", &ctx).await], &ctx)
+				.await;
+
+		// The two rows without `c` share the NONE key, and NONE sorts before
+		// every other value.
+		let out = collect(&op, &ctx).await;
+		assert_eq!(out.len(), 2);
+		assert_eq!(field(&out[0], "c"), Value::None);
+		assert_eq!(field(&out[0], "total"), Value::from(2));
+		assert_eq!(field(&out[1], "c"), Value::from("us"));
+		assert_eq!(field(&out[1], "total"), Value::from(2));
+	}
+
+	#[tokio::test]
+	async fn none_and_null_group_keys_stay_distinct_groups() {
+		let ctx = root_ctx();
+		let input =
+			ValuesOperator::new(rows(&["{ c: NULL }", "{ }", "{ c: 'us' }", "{ c: NULL }"]).await);
+		let op =
+			aggregate_over(input, &["c"], vec![key("c", 0), count_star("total", &ctx).await], &ctx)
+				.await;
+
+		// NONE and NULL are different values, so they never share a group; the
+		// output follows Value's total order, NONE < NULL < string.
+		let out = collect(&op, &ctx).await;
+		assert_eq!(out.len(), 3);
+		assert_eq!(field(&out[0], "c"), Value::None);
+		assert_eq!(field(&out[0], "total"), Value::from(1));
+		assert_eq!(field(&out[1], "c"), Value::Null);
+		assert_eq!(field(&out[1], "total"), Value::from(2));
+		assert_eq!(field(&out[2], "c"), Value::from("us"));
+		assert_eq!(field(&out[2], "total"), Value::from(1));
+	}
+
+	// =========================================================================
+	// GROUP ALL
+	// =========================================================================
+
+	#[tokio::test]
+	async fn group_all_folds_every_row_into_a_single_output_row() {
+		let ctx = root_ctx();
+		let input =
+			ValuesOperator::new(rows(&["{ score: 1 }", "{ score: 2 }", "{ score: 3 }"]).await);
+		let op = aggregate_over(
+			input,
+			&[],
+			vec![count_star("total", &ctx).await, agg_of("sum", "math::sum", "score", &ctx).await],
+			&ctx,
+		)
+		.await;
+
+		let out = collect(&op, &ctx).await;
+		assert_eq!(out, rows(&["{ total: 3, sum: 6 }"]).await);
+	}
+
+	#[tokio::test]
+	async fn group_all_with_no_input_batches_emits_the_accumulator_identities_when_perms_are_off() {
+		// An input that never yields a batch leaves the group map empty. With
+		// permission enforcement off, the operator then synthesises the single
+		// group, so `count()` reports 0 rather than yielding no row at all.
+		let ctx = root_ctx_with_auth(Auth::for_root(Role::Owner));
+		assert!(!ctx.should_check_perms(Action::View).unwrap());
+
+		let op = aggregate_over(
+			ScriptedSource::new(vec![]),
+			&[],
+			vec![count_star("total", &ctx).await, agg_of("sum", "math::sum", "score", &ctx).await],
+			&ctx,
+		)
+		.await;
+
+		let out = collect(&op, &ctx).await;
+		assert_eq!(out, rows(&["{ total: 0, sum: 0 }"]).await);
+	}
+
+	#[tokio::test]
+	async fn group_all_with_no_input_batches_emits_nothing_when_perms_are_on() {
+		// Under an identity whose reads are permission-checked, zero rows cannot
+		// be distinguished from "everything was filtered out", so the identity
+		// row is suppressed and the output is empty.
+		let ctx = root_ctx();
+		assert!(ctx.should_check_perms(Action::View).unwrap());
+
+		let op = aggregate_over(
+			ScriptedSource::new(vec![]),
+			&[],
+			vec![count_star("total", &ctx).await],
+			&ctx,
+		)
+		.await;
+
+		assert!(collect(&op, &ctx).await.is_empty());
+	}
+
+	#[tokio::test]
+	async fn group_all_emits_the_identity_row_for_an_empty_batch_whatever_the_perms() {
+		// The permission gate above only guards the *no batch at all* case. As
+		// soon as one batch arrives the GROUP ALL branch creates its single group
+		// before looking at any row, so an input that yields one empty batch
+		// produces `count() = 0` even while permission checks are active.
+		let ctx = root_ctx();
+		assert!(ctx.should_check_perms(Action::View).unwrap());
+
+		let op = aggregate_over(
+			ScriptedSource::new(vec![batch(vec![])]),
+			&[],
+			vec![count_star("total", &ctx).await],
+			&ctx,
+		)
+		.await;
+
+		assert_eq!(collect(&op, &ctx).await, rows(&["{ total: 0 }"]).await);
+	}
+
+	#[tokio::test]
+	async fn group_by_over_empty_input_emits_nothing() {
+		// The identity-row fallback is GROUP ALL only: with grouping keys and no
+		// rows there is no group to report.
+		let ctx = root_ctx_with_auth(Auth::for_root(Role::Owner));
+		let op = aggregate_over(
+			ScriptedSource::new(vec![batch(vec![])]),
+			&["c"],
+			vec![key("c", 0), count_star("total", &ctx).await],
+			&ctx,
+		)
+		.await;
+
+		assert!(collect(&op, &ctx).await.is_empty());
+	}
+
+	// =========================================================================
+	// Group ordering
+	// =========================================================================
+
+	#[tokio::test]
+	async fn output_groups_are_ordered_by_group_key_not_by_arrival() {
+		let ctx = root_ctx();
+		let input = ValuesOperator::new(
+			rows(&["{ c: 'us' }", "{ c: 'de' }", "{ c: 'za' }", "{ c: 'fr' }", "{ c: 'de' }"])
+				.await,
+		);
+		let op =
+			aggregate_over(input, &["c"], vec![key("c", 0), count_star("total", &ctx).await], &ctx)
+				.await;
+
+		let keys: Vec<Value> = collect(&op, &ctx).await.iter().map(|r| field(r, "c")).collect();
+		assert_eq!(
+			keys,
+			vec![Value::from("de"), Value::from("fr"), Value::from("us"), Value::from("za")]
+		);
+	}
+
+	#[tokio::test]
+	async fn numerically_equal_group_keys_of_different_numeric_types_share_one_group() {
+		let ctx = root_ctx();
+		let input = ValuesOperator::new(rows(&["{ n: 1 }", "{ n: 1.0 }", "{ n: 1.0dec }"]).await);
+		let op =
+			aggregate_over(input, &["n"], vec![key("n", 0), count_star("total", &ctx).await], &ctx)
+				.await;
+
+		// Int 1, Float 1.0 and Decimal 1.0 are equal under Value's equality, and
+		// Value's hash canonicalises every numeric variant through the same
+		// decimal encoding, so all three rows hash into one bucket and fold into
+		// one group.
+		let out = collect(&op, &ctx).await;
+		assert_eq!(out.len(), 1);
+		assert_eq!(field(&out[0], "total"), Value::from(3));
+		// The published key is the value carried by the row that created the
+		// group — the first one seen, with its original numeric variant.
+		assert_eq!(field(&out[0], "n"), val("1").await);
+		assert!(matches!(field(&out[0], "n"), Value::Number(crate::val::Number::Int(1))));
+	}
+
+	// =========================================================================
+	// Field shapes
+	// =========================================================================
+
+	#[tokio::test]
+	async fn aggregate_and_group_key_fields_share_one_output_object_under_their_own_names() {
+		let ctx = root_ctx();
+		let input =
+			ValuesOperator::new(rows(&["{ c: 'us', score: 2 }", "{ c: 'us', score: 4 }"]).await);
+		// Output names are independent of the source fields: the group key is
+		// republished as `country` and the sum as `total`.
+		let op = aggregate_over(
+			input,
+			&["c"],
+			vec![key("country", 0), agg_of("total", "math::sum", "score", &ctx).await],
+			&ctx,
+		)
+		.await;
+
+		let out = collect(&op, &ctx).await;
+		assert_eq!(out, rows(&["{ country: 'us', total: 6 }"]).await);
+	}
+
+	#[tokio::test]
+	async fn output_paths_nest_while_a_single_dotted_key_stays_flat() {
+		let ctx = root_ctx();
+		let input = ValuesOperator::new(rows(&["{ score: 2 }", "{ score: 4 }"]).await);
+
+		// A multi-part path nests into objects; a one-element path is an opaque
+		// flat key even when the identifier contains a dot.
+		let sum = agg_of("ignored", "math::sum", "score", &ctx).await;
+		let nested = AggregateField::with_output_path(
+			vec!["stats".to_string(), "total".to_string()],
+			false,
+			None,
+			sum.aggregate_expr_info,
+			None,
+		);
+		let flat = count_star("stats.count", &ctx).await;
+
+		let op = aggregate_over(input, &[], vec![nested, flat], &ctx).await;
+		let out = collect(&op, &ctx).await;
+		assert_eq!(out.len(), 1);
+		assert_eq!(field(&out[0], "stats"), val("{ total: 6 }").await);
+		assert_eq!(field(&out[0], "stats.count"), Value::from(2));
+	}
+
+	#[tokio::test]
+	async fn a_single_empty_named_field_returns_the_bare_value_not_an_object() {
+		let ctx = root_ctx();
+		let input = ValuesOperator::new(rows(&["{ score: 2 }", "{ score: 4 }"]).await);
+		// SELECT VALUE with GROUP BY: exactly one field, with an empty name.
+		let only = agg_of("", "math::sum", "score", &ctx).await;
+		assert!(only.is_empty_name());
+
+		let op = aggregate_over(input, &[], vec![only], &ctx).await;
+		assert_eq!(collect(&op, &ctx).await, vec![Value::from(6)]);
+	}
+
+	#[tokio::test]
+	async fn an_aggregate_over_a_field_absent_from_some_rows_skips_the_missing_values() {
+		let ctx = root_ctx();
+		let input = ValuesOperator::new(
+			rows(&["{ c: 'us', score: 2 }", "{ c: 'us' }", "{ c: 'us', score: 5 }"]).await,
+		);
+		let op = aggregate_over(
+			input,
+			&["c"],
+			vec![
+				count_star("rows", &ctx).await,
+				count_of("scored", "score", &ctx).await,
+				agg_of("sum", "math::sum", "score", &ctx).await,
+			],
+			&ctx,
+		)
+		.await;
+
+		// `count()` counts rows, `count(score)` counts truthy values only, and
+		// the sum ignores the NONE that the missing field evaluates to.
+		let out = collect(&op, &ctx).await;
+		assert_eq!(out, rows(&["{ rows: 3, scored: 2, sum: 7 }"]).await);
+	}
+
+	#[tokio::test]
+	async fn several_aggregates_in_one_field_are_combined_by_the_post_expression() {
+		let ctx = root_ctx();
+		let input =
+			ValuesOperator::new(rows(&["{ score: 1 }", "{ score: 2 }", "{ score: 3 }"]).await);
+		// `math::sum(score) + count()`: both accumulate per row, then the
+		// post-expression runs once per group against `{ _a0: sum, _a1: count }`.
+		assert_eq!(aggregate_field_name(0), "_a0");
+		assert_eq!(aggregate_field_name(1), "_a1");
+		let combined = AggregateField::new(
+			"mixed".to_string(),
+			false,
+			None,
+			Some(AggregateExprInfo {
+				aggregates: vec![
+					ExtractedAggregate {
+						function: aggregate_fn("math::sum", &ctx),
+						argument_expr: physical_expr("score", &ctx).await,
+						extra_args: vec![],
+					},
+					ExtractedAggregate {
+						function: ctx.function_registry().get_count_aggregate(false),
+						argument_expr: physical_expr("NONE", &ctx).await,
+						extra_args: vec![],
+					},
+				],
+				post_expr: Some(physical_expr("_a0 + _a1", &ctx).await),
+			}),
+			None,
+		);
+
+		let op = aggregate_over(input, &[], vec![combined], &ctx).await;
+		assert_eq!(collect(&op, &ctx).await, rows(&["{ mixed: 9 }"]).await);
+	}
+
+	#[tokio::test]
+	async fn a_field_whose_aggregate_list_is_empty_yields_null() {
+		let ctx = root_ctx();
+		let input = ValuesOperator::new(rows(&["{ score: 1 }"]).await);
+		let empty = AggregateField::new(
+			"nothing".to_string(),
+			false,
+			None,
+			Some(AggregateExprInfo {
+				aggregates: vec![],
+				post_expr: None,
+			}),
+			None,
+		);
+
+		let op = aggregate_over(input, &[], vec![empty], &ctx).await;
+		let out = collect(&op, &ctx).await;
+		assert_eq!(field(&out[0], "nothing"), Value::Null);
+	}
+
+	#[tokio::test]
+	async fn extra_args_are_evaluated_once_and_reused_by_every_group() {
+		let ctx = root_ctx();
+		let input = ValuesOperator::new(
+			rows(&["{ c: 'a', w: 'x' }", "{ c: 'b', w: 'z' }", "{ c: 'a', w: 'y' }"]).await,
+		);
+		// `array::join(w, '-')`: the separator is an extra argument, evaluated
+		// once before any row is read and handed to each group's accumulator.
+		let joined = single(
+			"joined",
+			ExtractedAggregate {
+				function: aggregate_fn("array::join", &ctx),
+				argument_expr: physical_expr("w", &ctx).await,
+				extra_args: vec![physical_expr("'-'", &ctx).await],
+			},
+		);
+
+		let op = aggregate_over(input, &["c"], vec![key("c", 0), joined], &ctx).await;
+		let out = collect(&op, &ctx).await;
+		assert_eq!(out, rows(&["{ c: 'a', joined: 'x-y' }", "{ c: 'b', joined: 'z' }"]).await);
+	}
+
+	#[tokio::test]
+	async fn extra_args_are_evaluated_without_a_current_row() {
+		let ctx = root_ctx();
+		let input =
+			ValuesOperator::new(rows(&["{ w: 'x', sep: '-' }", "{ w: 'y', sep: '-' }"]).await);
+		// Extra arguments are evaluated against a row-less EvalContext, so a
+		// row-dependent separator resolves to NONE and the accumulator receives
+		// its raw string form.
+		let joined = single(
+			"joined",
+			ExtractedAggregate {
+				function: aggregate_fn("array::join", &ctx),
+				argument_expr: physical_expr("w", &ctx).await,
+				extra_args: vec![physical_expr("sep", &ctx).await],
+			},
+		);
+
+		let op = aggregate_over(input, &[], vec![joined], &ctx).await;
+		let out = collect(&op, &ctx).await;
+		assert_eq!(field(&out[0], "joined"), Value::from("xNONEy"));
+	}
+
+	#[tokio::test]
+	async fn a_non_aggregate_field_reports_the_first_non_none_value_in_the_group() {
+		let ctx = root_ctx();
+		let input = ValuesOperator::new(
+			rows(&["{ c: 'us' }", "{ c: 'us', label: 'second' }", "{ c: 'us', label: 'third' }"])
+				.await,
+		);
+		let op = aggregate_over(
+			input,
+			&["c"],
+			vec![key("c", 0), first_value("label", "label", &ctx).await],
+			&ctx,
+		)
+		.await;
+
+		// The per-row GROUP BY path keeps evaluating until it stores a non-NONE
+		// value, so the first row's missing `label` does not win.
+		let out = collect(&op, &ctx).await;
+		assert_eq!(out, rows(&["{ c: 'us', label: 'second' }"]).await);
+	}
+
+	#[tokio::test]
+	async fn group_all_first_value_fields_only_read_the_first_row_of_each_batch() {
+		let ctx = root_ctx();
+		// One batch whose first row lacks the field: the GROUP ALL path evaluates
+		// the first-value expression against `batch.values.first()` only, so the
+		// later row that does carry the field is never consulted for that batch.
+		let one_batch = ValuesOperator::new(rows(&["{ }", "{ label: 'second' }"]).await);
+		let op =
+			aggregate_over(one_batch, &[], vec![first_value("label", "label", &ctx).await], &ctx)
+				.await;
+		let out = collect(&op, &ctx).await;
+		assert_eq!(field(&out[0], "label"), Value::None);
+
+		// Split across two batches, the second batch's first row does fill it.
+		let two_batches = ScriptedSource::new(vec![
+			batch(rows(&["{ }"]).await),
+			batch(rows(&["{ label: 'second' }"]).await),
+		]);
+		let op =
+			aggregate_over(two_batches, &[], vec![first_value("label", "label", &ctx).await], &ctx)
+				.await;
+		let out = collect(&op, &ctx).await;
+		assert_eq!(field(&out[0], "label"), Value::from("second"));
+	}
+
+	// =========================================================================
+	// Batching
+	// =========================================================================
+
+	#[tokio::test]
+	async fn accumulator_state_carries_across_batch_boundaries() {
+		let ctx = root_ctx();
+		// Union emits each input's batch separately, so the aggregate sees two
+		// batches; groups and their accumulators must persist between them.
+		let input: Arc<dyn ExecOperator> = Arc::new(Union::new(vec![
+			ValuesOperator::new(rows(&["{ c: 'us', score: 1 }", "{ c: 'de', score: 2 }"]).await),
+			ValuesOperator::new(rows(&["{ c: 'us', score: 3 }"]).await),
+		]));
+		let op = aggregate_over(
+			input,
+			&["c"],
+			vec![
+				key("c", 0),
+				count_star("total", &ctx).await,
+				agg_of("sum", "math::sum", "score", &ctx).await,
+			],
+			&ctx,
+		)
+		.await;
+
+		// `us` appears in both batches and still yields a single group whose
+		// count and sum span them.
+		let out = collect(&op, &ctx).await;
+		assert_eq!(
+			out,
+			rows(&["{ c: 'de', total: 1, sum: 2 }", "{ c: 'us', total: 2, sum: 4 }"]).await
+		);
+	}
+
+	#[tokio::test]
+	async fn group_all_accumulates_over_every_batch_and_emits_one_row() {
+		let ctx = root_ctx();
+		let input: Arc<dyn ExecOperator> = Arc::new(Union::new(vec![
+			ValuesOperator::new(rows(&["{ score: 1 }", "{ score: 2 }"]).await),
+			ValuesOperator::new(rows(&["{ score: 3 }"]).await),
+			ValuesOperator::new(rows(&["{ score: 4 }"]).await),
+		]));
+		let op = aggregate_over(
+			input,
+			&[],
+			vec![count_star("total", &ctx).await, agg_of("sum", "math::sum", "score", &ctx).await],
+			&ctx,
+		)
+		.await;
+
+		// The GROUP ALL path feeds whole columns to `update_batch`; the single
+		// group's accumulators are reused for every batch.
+		assert_eq!(collect(&op, &ctx).await, rows(&["{ total: 4, sum: 10 }"]).await);
+	}
+
+	#[tokio::test]
+	async fn empty_batches_around_a_populated_one_do_not_disturb_the_groups() {
+		let ctx = root_ctx();
+		let input = ScriptedSource::new(vec![
+			batch(vec![]),
+			batch(rows(&["{ c: 'us' }", "{ c: 'us' }"]).await),
+			batch(vec![]),
+		]);
+		let op =
+			aggregate_over(input, &["c"], vec![key("c", 0), count_star("total", &ctx).await], &ctx)
+				.await;
+
+		assert_eq!(collect(&op, &ctx).await, rows(&["{ c: 'us', total: 2 }"]).await);
+	}
+
+	// =========================================================================
+	// Control flow and errors
+	// =========================================================================
+
+	#[tokio::test]
+	async fn an_input_error_aborts_the_aggregate_without_emitting_a_batch() {
+		let ctx = root_ctx();
+		let input = ScriptedSource::new(vec![
+			batch(rows(&["{ c: 'us' }"]).await),
+			Err(ControlFlow::Err(anyhow::anyhow!("input exploded"))),
+		]);
+		let op =
+			aggregate_over(input, &["c"], vec![key("c", 0), count_star("total", &ctx).await], &ctx)
+				.await;
+
+		// Pipeline-breaking: nothing has been emitted when the error arrives, so
+		// the partial groups are discarded rather than reported.
+		let err = try_collect(&op, &ctx).await.expect_err("input error propagates");
+		assert!(err.to_string().contains("input exploded"), "unexpected error: {err}");
+	}
+
+	#[tokio::test]
+	async fn control_flow_signals_from_the_input_propagate_unchanged() {
+		let ctx = root_ctx();
+		for signal in
+			[ControlFlow::Return(Value::from(7)), ControlFlow::Break, ControlFlow::Continue]
+		{
+			let expected = format!("{signal:?}");
+			let input = ScriptedSource::new(vec![batch(rows(&["{ c: 'us' }"]).await), Err(signal)]);
+			let op = aggregate_over(
+				input,
+				&["c"],
+				vec![key("c", 0), count_star("total", &ctx).await],
+				&ctx,
+			)
+			.await;
+
+			// RETURN/BREAK/CONTINUE are not errors and must not be converted into
+			// one, nor swallowed into an empty result.
+			let err = try_collect(&op, &ctx).await.expect_err("signal propagates");
+			assert_eq!(format!("{err:?}"), expected);
+		}
+	}
+
+	#[tokio::test]
+	async fn a_non_ignorable_error_in_an_aggregate_argument_propagates() {
+		let ctx = root_ctx();
+		let input = ValuesOperator::new(rows(&["{ score: 1 }"]).await);
+		let op = aggregate_over(
+			input,
+			&[],
+			vec![agg_of("sum", "math::sum", "THROW 'boom'", &ctx).await],
+			&ctx,
+		)
+		.await;
+
+		let err = try_collect(&op, &ctx).await.expect_err("a thrown error is not ignorable");
+		assert!(err.to_string().contains("boom"), "unexpected error: {err}");
+	}
+
+	#[tokio::test]
+	async fn a_non_ignorable_error_in_a_group_key_propagates() {
+		let ctx = root_ctx();
+		let input = ValuesOperator::new(rows(&["{ c: 'us' }"]).await);
+		let op = aggregate_over(
+			input,
+			&["THROW 'boom'"],
+			vec![key("c", 0), count_star("total", &ctx).await],
+			&ctx,
+		)
+		.await;
+
+		let err = try_collect(&op, &ctx).await.expect_err("a thrown error is not ignorable");
+		assert!(err.to_string().contains("boom"), "unexpected error: {err}");
+	}
+
+	#[tokio::test]
+	async fn an_ignorable_error_in_a_group_key_groups_the_row_under_none() {
+		let ctx = root_ctx();
+		let input =
+			ValuesOperator::new(rows(&["{ score: 'x' }", "{ score: 'y' }", "{ score: 2 }"]).await);
+		// `score * 2` fails with an arithmetic type error on the string rows.
+		// Batch evaluation gives up on the whole column, and the per-row retry
+		// resolves each ignorable failure to NONE — so both string rows land in
+		// one NONE group while the numeric row keeps its own.
+		let op = aggregate_over(
+			input,
+			&["score * 2"],
+			vec![key("doubled", 0), count_star("total", &ctx).await],
+			&ctx,
+		)
+		.await;
+
+		let out = collect(&op, &ctx).await;
+		assert_eq!(out.len(), 2);
+		assert_eq!(field(&out[0], "doubled"), Value::None);
+		assert_eq!(field(&out[0], "total"), Value::from(2));
+		assert_eq!(field(&out[1], "doubled"), Value::from(4));
+		assert_eq!(field(&out[1], "total"), Value::from(1));
+	}
+
+	#[tokio::test]
+	async fn an_ignorable_error_in_an_aggregate_argument_accumulates_as_none() {
+		let ctx = root_ctx();
+		let input = ValuesOperator::new(rows(&["{ score: 'x' }", "{ score: 3 }"]).await);
+		let op = aggregate_over(
+			input,
+			&[],
+			vec![
+				count_star("rows", &ctx).await,
+				agg_of("sum", "math::sum", "score * 2", &ctx).await,
+			],
+			&ctx,
+		)
+		.await;
+
+		// The failing row contributes NONE, which the sum accumulator skips; the
+		// row itself still counts.
+		assert_eq!(collect(&op, &ctx).await, rows(&["{ rows: 2, sum: 6 }"]).await);
+	}
+
+	#[tokio::test]
+	async fn cancellation_between_batches_fails_the_stream() {
+		let ctx = root_ctx();
+		ctx.cancellation().cancel();
+		let input = ValuesOperator::new(rows(&["{ c: 'us' }"]).await);
+		let op =
+			aggregate_over(input, &["c"], vec![key("c", 0), count_star("total", &ctx).await], &ctx)
+				.await;
+
+		let err = try_collect(&op, &ctx).await.expect_err("cancellation is reported");
+		let ControlFlow::Err(err) = err else {
+			panic!("cancellation surfaces as an error, not a control-flow signal");
+		};
+		assert!(crate::err::is_query_cancelled(&err), "unexpected error: {err}");
+	}
+
+	// =========================================================================
+	// Planner-visible metadata
+	// =========================================================================
+
+	#[tokio::test]
+	async fn required_context_lifts_to_database_when_a_key_or_argument_reads_a_field() {
+		let ctx = root_ctx();
+
+		// GROUP ALL count() reads no field, so Root is enough — the executor
+		// validates this level before it calls execute().
+		let op = aggregate_over(
+			ValuesOperator::new(vec![]),
+			&[],
+			vec![count_star("total", &ctx).await],
+			&ctx,
+		)
+		.await;
+		assert_eq!(op.required_context(), ContextLevel::Root);
+
+		// Field access may have to dereference a record id, which needs the
+		// database context, so grouping on a field lifts the requirement.
+		let key_expr = physical_expr("c", &ctx).await;
+		assert_eq!(key_expr.required_context(), ContextLevel::Database);
+		let op = aggregate_over(
+			ValuesOperator::new(vec![]),
+			&["c"],
+			vec![key("c", 0), count_star("total", &ctx).await],
+			&ctx,
+		)
+		.await;
+		assert_eq!(op.required_context(), ContextLevel::Database);
+
+		// An aggregate argument that reads a field lifts it just the same.
+		let op = aggregate_over(
+			ValuesOperator::new(vec![]),
+			&[],
+			vec![agg_of("sum", "math::sum", "score", &ctx).await],
+			&ctx,
+		)
+		.await;
+		assert_eq!(op.required_context(), ContextLevel::Database);
+	}
+
+	#[tokio::test]
+	async fn access_mode_promotes_to_read_write_from_the_input_or_from_any_expression() {
+		let ctx = root_ctx();
+
+		let read_only = aggregate_over(
+			ValuesOperator::new(vec![]),
+			&["c"],
+			vec![key("c", 0), count_star("total", &ctx).await],
+			&ctx,
+		)
+		.await;
+		assert_eq!(read_only.access_mode(), AccessMode::ReadOnly);
+
+		// A mutating input makes the whole aggregate read-write, which is what
+		// decides the transaction mode and the dependency-ordering barriers.
+		let from_input = aggregate_over(
+			ScriptedSource::read_write(vec![]),
+			&["c"],
+			vec![key("c", 0), count_star("total", &ctx).await],
+			&ctx,
+		)
+		.await;
+		assert_eq!(from_input.access_mode(), AccessMode::ReadWrite);
+
+		// So does a mutating expression, wherever it sits.
+		let writer = physical_expr("eval::surql('RETURN 1')", &ctx).await;
+		assert_eq!(writer.access_mode(), AccessMode::ReadWrite);
+
+		let from_key = aggregate_over(
+			ValuesOperator::new(vec![]),
+			&["eval::surql('RETURN 1')"],
+			vec![count_star("total", &ctx).await],
+			&ctx,
+		)
+		.await;
+		assert_eq!(from_key.access_mode(), AccessMode::ReadWrite);
+
+		let from_arg = aggregate_over(
+			ValuesOperator::new(vec![]),
+			&[],
+			vec![agg_of("sum", "math::sum", "eval::surql('RETURN 1')", &ctx).await],
+			&ctx,
+		)
+		.await;
+		assert_eq!(from_arg.access_mode(), AccessMode::ReadWrite);
+
+		let from_extra = aggregate_over(
+			ValuesOperator::new(vec![]),
+			&[],
+			vec![single(
+				"joined",
+				ExtractedAggregate {
+					function: aggregate_fn("array::join", &ctx),
+					argument_expr: physical_expr("w", &ctx).await,
+					extra_args: vec![physical_expr("eval::surql('RETURN 1')", &ctx).await],
+				},
+			)],
+			&ctx,
+		)
+		.await;
+		assert_eq!(from_extra.access_mode(), AccessMode::ReadWrite);
+
+		let from_post = aggregate_over(
+			ValuesOperator::new(vec![]),
+			&[],
+			vec![AggregateField::new(
+				"mixed".to_string(),
+				false,
+				None,
+				Some(AggregateExprInfo {
+					aggregates: vec![ExtractedAggregate {
+						function: aggregate_fn("math::sum", &ctx),
+						argument_expr: physical_expr("score", &ctx).await,
+						extra_args: vec![],
+					}],
+					post_expr: Some(physical_expr("eval::surql('RETURN 1')", &ctx).await),
+				}),
+				None,
+			)],
+			&ctx,
+		)
+		.await;
+		assert_eq!(from_post.access_mode(), AccessMode::ReadWrite);
+
+		let from_fallback = aggregate_over(
+			ValuesOperator::new(vec![]),
+			&[],
+			vec![first_value("label", "eval::surql('RETURN 1')", &ctx).await],
+			&ctx,
+		)
+		.await;
+		assert_eq!(from_fallback.access_mode(), AccessMode::ReadWrite);
+	}
+
+	#[tokio::test]
+	async fn output_ordering_is_unordered_so_a_sort_after_grouping_is_never_eliminated() {
+		let ctx = root_ctx();
+		let op = aggregate_over(
+			ValuesOperator::new(rows(&["{ c: 'us' }"]).await),
+			&["c"],
+			vec![key("c", 0), count_star("total", &ctx).await],
+			&ctx,
+		)
+		.await;
+
+		// Groups leave the operator sorted by group key, but that is not
+		// advertised. `Planner::can_eliminate_sort` reads exactly these two
+		// methods, and both deny elimination, so `ORDER BY c` after `GROUP BY c`
+		// always keeps its Sort operator.
+		assert_eq!(op.output_ordering(), OutputOrdering::Unordered);
+		assert!(op.constant_output_fields().is_empty());
+		let required = vec![SortProperty {
+			path: FieldPath::field("c"),
+			direction: SortDirection::Asc,
+			collate: false,
+			numeric: false,
+		}];
+		assert!(!op.output_ordering().satisfies(&required));
+	}
+
+	#[tokio::test]
+	async fn cardinality_hint_stays_unbounded_even_for_group_all() {
+		let ctx = root_ctx();
+		// `buffer_stream` picks a consumer's buffering strategy from this hint.
+		// GROUP ALL emits exactly one row yet still reports Unbounded, so the
+		// consumer buffers it through a spawned task rather than inline.
+		let group_all = aggregate_over(
+			ValuesOperator::new(vec![]),
+			&[],
+			vec![count_star("total", &ctx).await],
+			&ctx,
+		)
+		.await;
+		assert_eq!(group_all.cardinality_hint(), CardinalityHint::Unbounded);
+
+		let grouped = aggregate_over(
+			ValuesOperator::new(vec![]),
+			&["c"],
+			vec![key("c", 0), count_star("total", &ctx).await],
+			&ctx,
+		)
+		.await;
+		assert_eq!(grouped.cardinality_hint(), CardinalityHint::Unbounded);
+	}
+
+	#[tokio::test]
+	async fn attrs_report_group_all_only_when_there_are_no_keys() {
+		let ctx = root_ctx();
+		let group_all = aggregate_over(
+			ValuesOperator::new(vec![]),
+			&[],
+			vec![count_star("total", &ctx).await],
+			&ctx,
+		)
+		.await;
+		assert_eq!(group_all.attrs(), vec![("mode".to_string(), "GROUP ALL".to_string())]);
+
+		let grouped = aggregate_over(
+			ValuesOperator::new(vec![]),
+			&["c", "y"],
+			vec![key("c", 0), key("y", 1)],
+			&ctx,
+		)
+		.await;
+		assert_eq!(grouped.attrs(), vec![("by".to_string(), "c, y".to_string())]);
+	}
+
+	#[tokio::test]
+	async fn expressions_expose_every_sub_expression_for_explain() {
+		let ctx = root_ctx();
+		let combined = AggregateField::new(
+			"mixed".to_string(),
+			false,
+			None,
+			Some(AggregateExprInfo {
+				aggregates: vec![ExtractedAggregate {
+					function: aggregate_fn("array::join", &ctx),
+					argument_expr: physical_expr("w", &ctx).await,
+					extra_args: vec![physical_expr("'-'", &ctx).await],
+				}],
+				post_expr: Some(physical_expr("_a0", &ctx).await),
+			}),
+			None,
+		);
+		let op = aggregate_over(
+			ValuesOperator::new(vec![]),
+			&["c"],
+			vec![combined, first_value("label", "label", &ctx).await],
+			&ctx,
+		)
+		.await;
+
+		// EXPLAIN walks children + expressions; every compiled expression the
+		// operator holds must be reachable, under a label naming its role.
+		assert_eq!(op.children().len(), 1);
+		let labels: Vec<&str> = op.expressions().into_iter().map(|(label, _)| label).collect();
+		assert_eq!(
+			labels,
+			vec!["group_by", "agg_arg", "agg_extra", "agg_post_expr", "agg_fallback"]
+		);
+	}
+
+	// =========================================================================
+	// set_nested_value
+	// =========================================================================
+
+	#[test]
+	fn set_nested_value_creates_missing_levels_and_replaces_non_objects() {
+		let mut obj = Object::default();
+		set_nested_value(&mut obj, &["a".to_string(), "b".to_string()], Value::from(1));
+		assert_eq!(
+			obj.get("a").cloned(),
+			Some(Value::Object(Object::from_iter([("b".to_string(), Value::from(1))])))
+		);
+
+		// A scalar already sitting at a prefix of a later path is replaced by the
+		// object that path needs.
+		let mut obj = Object::default();
+		set_nested_value(&mut obj, &["a".to_string()], Value::from(7));
+		set_nested_value(&mut obj, &["a".to_string(), "b".to_string()], Value::from(1));
+		assert_eq!(
+			obj.get("a").cloned(),
+			Some(Value::Object(Object::from_iter([("b".to_string(), Value::from(1))])))
+		);
+
+		// An empty path is a no-op.
+		let mut obj = Object::default();
+		set_nested_value(&mut obj, &[], Value::from(1));
+		assert!(obj.is_empty());
+	}
+
+	// =========================================================================
+	// GroupMap — group identity and ordering
+	// =========================================================================
 
 	fn dec(s: &str) -> Value {
 		Value::Number(Number::Decimal(Decimal::from_str(s).unwrap()))

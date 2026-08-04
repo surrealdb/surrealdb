@@ -228,10 +228,13 @@ impl ToSql for ForeachPlan {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
-	use crate::exec::operators::test_util::{drain_err, root_ctx};
-	use crate::expr::Literal;
 
+	use super::*;
+	use crate::exec::operators::test_util::{
+		TestDb, collect, drain_err, parse_expr, root_ctx, try_collect,
+	};
+	use crate::expr::Literal;
+	use crate::expr::statements::ForeachStatement;
 	#[tokio::test]
 	async fn a_context_without_a_transaction_yields_an_error_not_a_panic() {
 		// The range expression is planned at execute time, which needs a
@@ -247,6 +250,235 @@ mod tests {
 		assert!(
 			format!("{err}").contains("requires a transaction"),
 			"expected a missing-transaction error, got: {err}"
+		);
+	}
+	/// A database-level context over a read transaction.
+	///
+	/// `ForeachPlan` re-plans its range and body at execute time, and the planner
+	/// reads the transaction out of the context unconditionally, so a
+	/// transaction-less root context cannot drive this operator.
+	async fn db_ctx() -> ExecutionContext {
+		TestDb::new("").await.exec_ctx().await
+	}
+
+	/// Build a `ForeachPlan` from SurrealQL source the way the planner does: the
+	/// range expression and the body block are stored unplanned and planned again
+	/// at execute time.
+	fn plan(src: &str) -> Arc<dyn ExecOperator> {
+		match parse_expr(src) {
+			Expr::Foreach(stmt) => {
+				let ForeachStatement {
+					param,
+					range,
+					block,
+				} = *stmt;
+				Arc::new(ForeachPlan::new(param, range, block, 0))
+			}
+			other => panic!("expected a FOR statement for {src:?}, got {other:?}"),
+		}
+	}
+
+	/// The message carried by a `THROW`n error. Because a completed loop always
+	/// emits the same single NONE row, the tests use `THROW` as the observable
+	/// side effect that names which iteration and statement actually ran.
+	fn thrown(flow: ControlFlow) -> String {
+		match flow {
+			ControlFlow::Err(e) => match e.downcast_ref::<ExecError>() {
+				Some(ExecError::Thrown(msg)) => msg.clone(),
+				_ => panic!("expected a THROWn error, got {e:?}"),
+			},
+			other => panic!("expected an error, got {other}"),
+		}
+	}
+
+	#[tokio::test]
+	async fn an_array_target_is_iterated_front_to_back() {
+		let ctx = db_ctx().await;
+
+		// The first iteration binds the first element.
+		let op = plan("FOR $i IN [10, 20, 30] { THROW $i }");
+		let flow = try_collect(&op, &ctx).await.expect_err("the body must run");
+		assert_eq!(thrown(flow), "10");
+
+		// Later elements are reached in order.
+		let op =
+			plan(r#"FOR $i IN [10, 20, 30] { IF $i = 30 { THROW "reached the last element" } }"#);
+		let flow = try_collect(&op, &ctx).await.expect_err("the last element must be reached");
+		assert_eq!(thrown(flow), "reached the last element");
+	}
+
+	#[tokio::test]
+	async fn an_integer_range_target_is_iterated_and_excludes_the_open_end() {
+		let ctx = db_ctx().await;
+
+		let op = plan("FOR $i IN 0..3 { THROW $i }");
+		let flow = try_collect(&op, &ctx).await.expect_err("the body must run");
+		assert_eq!(thrown(flow), "0");
+
+		// `0..3` yields 0, 1, 2 — the exclusive end is never bound.
+		let op = plan(r#"FOR $i IN 0..3 { IF $i = 3 { THROW "bound the exclusive end" } }"#);
+		assert_eq!(collect(&op, &ctx).await, vec![Value::None]);
+	}
+
+	#[tokio::test]
+	async fn an_empty_target_never_enters_the_body_and_still_emits_one_none_row() {
+		let ctx = db_ctx().await;
+		// FOR declares `is_scalar()` and `CardinalityHint::AtMostOne`, so it must
+		// always emit exactly one row; a loop that ran zero iterations is no
+		// exception.
+		for empty in ["[]", "0..0"] {
+			let op = plan(&format!(r#"FOR $i IN {empty} {{ THROW "body ran" }}"#));
+			assert_eq!(collect(&op, &ctx).await, vec![Value::None], "{empty} should be empty");
+		}
+	}
+
+	#[tokio::test]
+	async fn a_target_that_is_neither_array_nor_range_is_rejected() {
+		let ctx = db_ctx().await;
+		// Only Array and Range are iterable. A set is a distinct `Value` variant
+		// and is refused along with the scalars.
+		for target in ["3", r#""abc""#, "{ a: 1 }", "NONE", "NULL", "true", "<set>[1, 2]"] {
+			let op = plan(&format!(r#"FOR $i IN {target} {{ THROW "body ran" }}"#));
+			let ControlFlow::Err(e) = try_collect(&op, &ctx)
+				.await
+				.err()
+				.unwrap_or_else(|| panic!("{target} is not iterable and must fail"))
+			else {
+				panic!("expected an error for {target}");
+			};
+			assert!(
+				matches!(
+					e.downcast_ref::<ExecError>(),
+					Some(ExecError::InvalidStatementTarget { .. })
+				),
+				"expected InvalidStatementTarget for {target}, got {e:?}"
+			);
+		}
+	}
+
+	#[tokio::test]
+	async fn a_range_that_does_not_coerce_to_integers_is_rejected() {
+		let ctx = db_ctx().await;
+		let op = plan(r#"FOR $i IN "a".."z" { THROW "body ran" }"#);
+		let flow = try_collect(&op, &ctx).await.expect_err("a non-integer range must fail");
+		let ControlFlow::Err(e) = flow else {
+			panic!("expected an error, got {flow}");
+		};
+		assert!(
+			format!("{e:#}").contains("Invalid FOR range"),
+			"the coercion failure should be reported as an invalid FOR range, got {e:#}"
+		);
+	}
+
+	#[tokio::test]
+	async fn the_loop_variable_is_bound_in_the_body() {
+		let ctx = db_ctx().await;
+		let op = plan("FOR $item IN [7] { THROW $item }");
+		let flow = try_collect(&op, &ctx).await.expect_err("the body must run");
+		assert_eq!(thrown(flow), "7");
+	}
+
+	#[tokio::test]
+	async fn a_body_binding_lives_for_one_iteration_only() {
+		let ctx = db_ctx().await;
+
+		// Within an iteration, a LET is visible to the statements that follow it.
+		let op = plan(
+			r#"FOR $i IN [1] {
+				LET $carry = "kept";
+				IF $carry != "kept" { THROW "let not visible" };
+				THROW "let visible"
+			}"#,
+		);
+		let flow = try_collect(&op, &ctx).await.expect_err("the body must run");
+		assert_eq!(thrown(flow), "let visible");
+
+		// Each iteration rebuilds its context from the context the loop started
+		// with, so the binding does not survive into the next iteration.
+		let op = plan(
+			r#"FOR $i IN [1, 2] {
+				IF $i = 2 AND $carry = "kept" { THROW "binding carried over" };
+				IF $i = 2 { THROW "binding reset" };
+				LET $carry = "kept"
+			}"#,
+		);
+		let flow = try_collect(&op, &ctx).await.expect_err("the second iteration must run");
+		assert_eq!(thrown(flow), "binding reset");
+	}
+
+	#[tokio::test]
+	async fn the_loop_never_publishes_a_context_so_the_variable_cannot_escape() {
+		// The executor only threads a new context to following statements when
+		// `mutates_context()` is true. FOR leaves it false, which is what confines
+		// the loop variable (and any body LET) to the loop.
+		assert!(!plan("FOR $i IN [1] { LET $x = $i }").mutates_context());
+	}
+
+	#[tokio::test]
+	async fn break_stops_the_loop_and_reports_normal_completion() {
+		let ctx = db_ctx().await;
+		// If BREAK did not stop iteration, the second element would throw.
+		let op = plan("FOR $i IN [1, 2] { IF $i = 1 { BREAK }; THROW $i }");
+		assert_eq!(collect(&op, &ctx).await, vec![Value::None]);
+	}
+
+	#[tokio::test]
+	async fn continue_skips_the_rest_of_its_iteration_but_not_the_loop() {
+		let ctx = db_ctx().await;
+		// Iteration 1 continues before reaching the THROW; iteration 2 still runs
+		// it, so the loop was not abandoned.
+		let op = plan("FOR $i IN [1, 2] { IF $i = 1 { CONTINUE }; THROW $i }");
+		let flow = try_collect(&op, &ctx).await.expect_err("the second iteration must run");
+		assert_eq!(thrown(flow), "2");
+	}
+
+	#[tokio::test]
+	async fn a_return_in_the_body_escapes_the_whole_loop() {
+		let ctx = db_ctx().await;
+		let op = plan("FOR $i IN [1, 2] { RETURN $i }");
+		let flow = try_collect(&op, &ctx).await.expect_err("RETURN must propagate");
+		match flow {
+			ControlFlow::Return(v) => assert_eq!(v, Value::from(1i64)),
+			other => panic!("expected RETURN from the first iteration, got {other}"),
+		}
+	}
+
+	#[tokio::test]
+	async fn an_error_mid_iteration_aborts_the_loop() {
+		let ctx = db_ctx().await;
+		let op = plan(r#"FOR $i IN [1, 2, 3] { IF $i = 2 { THROW "failed on 2" } }"#);
+		let flow = try_collect(&op, &ctx).await.expect_err("the error must propagate");
+		assert_eq!(thrown(flow), "failed on 2");
+	}
+
+	#[tokio::test]
+	async fn access_mode_is_readwrite_when_the_range_or_the_body_can_write() {
+		// The executor picks the transaction type from the plan's access mode, so
+		// a write anywhere under the loop has to be reported here.
+		assert_eq!(plan("FOR $i IN [1] { $i }").access_mode(), AccessMode::ReadOnly);
+		assert_eq!(
+			plan("FOR $i IN [1] { CREATE foo SET n = $i }").access_mode(),
+			AccessMode::ReadWrite
+		);
+		assert_eq!(plan("FOR $i IN (CREATE foo) { $i }").access_mode(), AccessMode::ReadWrite);
+	}
+
+	#[tokio::test]
+	async fn required_context_is_the_maximum_of_the_range_and_the_body() {
+		// The executor validates the declared context level before execution, so
+		// under-reporting would let the body run without a database.
+		assert_eq!(plan("FOR $i IN [1] { $i }").required_context(), ContextLevel::Root);
+		assert_eq!(
+			plan("FOR $i IN [1] { SELECT * FROM foo }").required_context(),
+			ContextLevel::Database
+		);
+		assert_eq!(
+			plan("FOR $i IN (SELECT * FROM foo) { $i }").required_context(),
+			ContextLevel::Database
+		);
+		assert_eq!(
+			plan("FOR $i IN [1] { INFO FOR NS }").required_context(),
+			ContextLevel::Namespace
 		);
 	}
 }

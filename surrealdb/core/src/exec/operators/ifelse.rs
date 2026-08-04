@@ -191,10 +191,14 @@ impl ToSql for IfElsePlan {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
-	use crate::exec::operators::test_util::{drain_err, root_ctx};
-	use crate::expr::Literal;
 
+	use super::*;
+	use crate::exec::Error as ExecError;
+	use crate::exec::operators::test_util::{
+		TestDb, collect, drain_err, parse_expr, root_ctx, try_collect,
+	};
+	use crate::expr::Literal;
+	use crate::expr::statements::IfelseStatement;
 	#[tokio::test]
 	async fn a_context_without_a_transaction_yields_an_error_not_a_panic() {
 		// Conditions are planned at execute time, which needs a transaction to
@@ -210,5 +214,181 @@ mod tests {
 			format!("{err}").contains("requires a transaction"),
 			"expected a missing-transaction error, got: {err}"
 		);
+	}
+	/// A database-level context over a read transaction.
+	///
+	/// `IfElsePlan` re-plans its conditions and bodies at execute time, and the
+	/// planner reads the transaction out of the context unconditionally, so a
+	/// transaction-less root context cannot drive this operator.
+	async fn db_ctx() -> ExecutionContext {
+		TestDb::new("").await.exec_ctx().await
+	}
+
+	/// Build an `IfElsePlan` from SurrealQL source the way the planner does:
+	/// conditions, branch bodies and the ELSE body are stored unplanned and
+	/// planned again at execute time.
+	fn plan(src: &str) -> Arc<dyn ExecOperator> {
+		match parse_expr(src) {
+			Expr::IfElse(stmt) => {
+				let IfelseStatement {
+					exprs,
+					close,
+				} = *stmt;
+				Arc::new(IfElsePlan::new(exprs, close, 0))
+			}
+			other => panic!("expected an IF statement for {src:?}, got {other:?}"),
+		}
+	}
+
+	/// The message carried by a `THROW`n error. Tests use `THROW` as a probe: a
+	/// branch that must not run throws, so a thrown message names the branch that
+	/// actually executed.
+	fn thrown(flow: ControlFlow) -> String {
+		match flow {
+			ControlFlow::Err(e) => match e.downcast_ref::<ExecError>() {
+				Some(ExecError::Thrown(msg)) => msg.clone(),
+				_ => panic!("expected a THROWn error, got {e:?}"),
+			},
+			other => panic!("expected an error, got {other}"),
+		}
+	}
+
+	/// The value carried by a `ControlFlow::Return`.
+	fn returned(flow: ControlFlow) -> Value {
+		match flow {
+			ControlFlow::Return(v) => v,
+			other => panic!("expected RETURN, got {other}"),
+		}
+	}
+
+	#[tokio::test]
+	async fn a_truthy_condition_runs_its_body_and_leaves_the_else_body_unevaluated() {
+		let ctx = db_ctx().await;
+		let op = plan(r#"IF true { 1 } ELSE { THROW "else body ran" }"#);
+		assert_eq!(collect(&op, &ctx).await, vec![Value::from(1i64)]);
+	}
+
+	#[tokio::test]
+	async fn a_false_condition_leaves_its_body_unevaluated_and_falls_through_to_else() {
+		let ctx = db_ctx().await;
+		let op = plan(r#"IF false { THROW "if body ran" } ELSE { 2 }"#);
+		assert_eq!(collect(&op, &ctx).await, vec![Value::from(2i64)]);
+	}
+
+	#[tokio::test]
+	async fn an_else_if_chain_stops_at_the_first_truthy_condition() {
+		let ctx = db_ctx().await;
+		// Conditions are evaluated in order and evaluation stops at the first
+		// truthy one: neither the later condition nor any other body may run.
+		let op = plan(
+			r#"IF false { THROW "first body ran" }
+			ELSE IF true { "second" }
+			ELSE IF (THROW "third condition ran") { THROW "third body ran" }
+			ELSE { THROW "else body ran" }"#,
+		);
+		assert_eq!(collect(&op, &ctx).await, vec![Value::from("second")]);
+	}
+
+	#[tokio::test]
+	async fn no_else_and_no_truthy_condition_emits_exactly_one_none_row() {
+		let ctx = db_ctx().await;
+		// IfElse declares `is_scalar()` and `CardinalityHint::AtMostOne`, so
+		// consumers unwrap a single row. The no-match-no-ELSE case must therefore
+		// still emit one row, carrying NONE — not an empty stream.
+		let op = plan("IF false { 1 }");
+		assert_eq!(collect(&op, &ctx).await, vec![Value::None]);
+	}
+
+	#[tokio::test]
+	async fn condition_truthiness_follows_value_is_truthy() {
+		let ctx = db_ctx().await;
+		for falsy in ["NONE", "NULL", "false", "0", "0.0", r#""""#, "[]", "{}", "0s"] {
+			let op = plan(&format!("IF {falsy} {{ \"taken\" }} ELSE {{ \"not taken\" }}"));
+			assert_eq!(
+				collect(&op, &ctx).await,
+				vec![Value::from("not taken")],
+				"{falsy} should not be truthy"
+			);
+		}
+		for truthy in ["true", "1", "-1", "0.5", r#""x""#, "[0]", "{ a: 0 }", "1s"] {
+			let op = plan(&format!("IF {truthy} {{ \"taken\" }} ELSE {{ \"not taken\" }}"));
+			assert_eq!(
+				collect(&op, &ctx).await,
+				vec![Value::from("taken")],
+				"{truthy} should be truthy"
+			);
+		}
+	}
+
+	#[tokio::test]
+	async fn an_error_from_a_condition_aborts_before_any_body_runs() {
+		let ctx = db_ctx().await;
+		let op = plan(
+			r#"IF (THROW "bad condition") { THROW "if body ran" } ELSE { THROW "else body ran" }"#,
+		);
+		let flow = try_collect(&op, &ctx).await.expect_err("the condition error must propagate");
+		assert_eq!(thrown(flow), "bad condition");
+	}
+
+	#[tokio::test]
+	async fn an_error_from_the_taken_body_propagates() {
+		let ctx = db_ctx().await;
+		let op = plan(r#"IF true { THROW "body failed" } ELSE { 2 }"#);
+		let flow = try_collect(&op, &ctx).await.expect_err("the body error must propagate");
+		assert_eq!(thrown(flow), "body failed");
+	}
+
+	#[tokio::test]
+	async fn a_return_from_the_taken_body_propagates_as_control_flow() {
+		let ctx = db_ctx().await;
+		let op = plan("IF true { RETURN 7 }");
+		let flow = try_collect(&op, &ctx).await.expect_err("RETURN must propagate");
+		assert_eq!(returned(flow), Value::from(7i64));
+	}
+
+	#[tokio::test]
+	async fn a_break_from_the_taken_body_propagates_so_an_enclosing_loop_sees_it() {
+		let ctx = db_ctx().await;
+		let op = plan("IF true { BREAK }");
+		let flow = try_collect(&op, &ctx).await.expect_err("BREAK must propagate");
+		assert!(matches!(flow, ControlFlow::Break), "got {flow}");
+	}
+
+	#[tokio::test]
+	async fn a_return_from_a_condition_propagates_before_any_body_runs() {
+		let ctx = db_ctx().await;
+		let op = plan(r#"IF (RETURN 9) { THROW "if body ran" } ELSE { THROW "else body ran" }"#);
+		let flow = try_collect(&op, &ctx).await.expect_err("RETURN must propagate");
+		assert_eq!(returned(flow), Value::from(9i64));
+	}
+
+	#[tokio::test]
+	async fn access_mode_is_readwrite_when_any_condition_or_body_can_write() {
+		// The executor picks the transaction type from the plan's access mode, so
+		// a write hidden in a branch that is only sometimes taken must still be
+		// reported here.
+		assert_eq!(plan("IF true { 1 } ELSE { 2 }").access_mode(), AccessMode::ReadOnly);
+		assert_eq!(plan("IF true { CREATE foo } ELSE { 2 }").access_mode(), AccessMode::ReadWrite);
+		// The ELSE body is a separate field from the branch list; it must be
+		// included in the scan.
+		assert_eq!(plan("IF true { 1 } ELSE { CREATE foo }").access_mode(), AccessMode::ReadWrite);
+		// So must the conditions.
+		assert_eq!(plan("IF (CREATE foo) { 1 } ELSE { 2 }").access_mode(), AccessMode::ReadWrite);
+	}
+
+	#[tokio::test]
+	async fn required_context_is_the_maximum_over_conditions_bodies_and_else() {
+		// The executor validates the declared context level before execution, so
+		// under-reporting here would let a branch run without a database.
+		assert_eq!(plan("IF true { 1 } ELSE { 2 }").required_context(), ContextLevel::Root);
+		assert_eq!(
+			plan("IF true { 1 } ELSE { SELECT * FROM foo }").required_context(),
+			ContextLevel::Database
+		);
+		assert_eq!(
+			plan("IF true { SELECT * FROM foo } ELSE { 2 }").required_context(),
+			ContextLevel::Database
+		);
+		assert_eq!(plan("IF true { INFO FOR NS }").required_context(), ContextLevel::Namespace);
 	}
 }

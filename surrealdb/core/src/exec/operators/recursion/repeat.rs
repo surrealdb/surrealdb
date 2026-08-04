@@ -441,3 +441,450 @@ pub(crate) async fn evaluate_recurse_iterative(
 	let start_hash = value_hash(start);
 	Ok(next_cache.remove(&start_hash).unwrap_or(Value::None))
 }
+
+#[cfg(test)]
+mod tests {
+	use super::super::tests::{
+		FIXTURES, Raise, SYSTEM_LIMIT, body_operator, body_path, bounds, exec_error, raise_path,
+	};
+	use super::*;
+	use crate::exec::ExecutionContext;
+	use crate::exec::operators::test_util::{TestDb, root_ctx, val};
+
+	// =========================================================================
+	// evaluate_repeat_recurse — the two phases of the `@` protocol
+	// =========================================================================
+
+	/// A recursion context in discovery mode, sharing `sink`.
+	fn discovery(
+		depth: u32,
+		min_depth: u32,
+		sink: &Arc<parking_lot::Mutex<Vec<Value>>>,
+	) -> RecursionCtx {
+		RecursionCtx {
+			min_depth,
+			depth,
+			discovery_sink: Some(Arc::clone(sink)),
+			assembly_cache: None,
+		}
+	}
+
+	/// A recursion context in assembly mode over `entries`, keyed the way the
+	/// assembly loop keys them.
+	async fn assembly(depth: u32, min_depth: u32, entries: &[(&str, Value)]) -> RecursionCtx {
+		let mut cache = HashMap::new();
+		for (key, value) in entries {
+			cache.insert(value_hash(&val(key).await), value.clone());
+		}
+		RecursionCtx {
+			min_depth,
+			depth,
+			discovery_sink: None,
+			assembly_cache: Some(Arc::new(cache)),
+		}
+	}
+
+	/// Evaluate a `@` marker on `value` under `rec_ctx`.
+	async fn repeat_on(value: &Value, rec_ctx: RecursionCtx) -> FlowResult<Value> {
+		let exec = root_ctx();
+		let base = EvalContext::from_exec_ctx(&exec);
+		evaluate_repeat_recurse(value, base.with_value(value).with_recursion_ctx(rec_ctx)).await
+	}
+
+	/// Whether a failed `FlowResult` carries the path-elimination signal.
+	fn is_elimination(flow: &ControlFlow) -> bool {
+		match flow {
+			ControlFlow::Err(e) => e.downcast_ref::<PathEliminationSignal>().is_some(),
+			_ => false,
+		}
+	}
+
+	#[tokio::test]
+	async fn a_repeat_recurse_outside_a_recursion_context_is_rejected() {
+		let exec = root_ctx();
+		let base = EvalContext::from_exec_ctx(&exec);
+		let value = val("link:a").await;
+		let err = evaluate_repeat_recurse(&value, base.with_value(&value)).await.unwrap_err();
+		assert!(matches!(exec_error(err), crate::exec::Error::UnsupportedRepeatRecurse));
+	}
+
+	#[tokio::test]
+	async fn a_recursion_context_with_neither_phase_set_is_rejected() {
+		// Only the iterative evaluator builds these, and it always sets exactly
+		// one of the two fields.
+		let neither = RecursionCtx {
+			min_depth: 1,
+			depth: 0,
+			discovery_sink: None,
+			assembly_cache: None,
+		};
+		let err = repeat_on(&val("link:a").await, neither).await.unwrap_err();
+		assert!(matches!(exec_error(err), crate::exec::Error::UnsupportedRepeatRecurse));
+	}
+
+	#[tokio::test]
+	async fn discovery_writes_its_inputs_to_the_sink_and_returns_without_recursing() {
+		let sink = Arc::new(parking_lot::Mutex::new(Vec::new()));
+		let input = val("[link:a, NONE, link:b, NULL, []]").await;
+
+		// The return value is the input, untouched: the discovery phase discards
+		// results and reads the sink instead.
+		let out = repeat_on(&input, discovery(0, 1, &sink)).await.unwrap();
+		assert_eq!(out, input);
+		let expected = vec![val("link:a").await, val("link:b").await];
+		assert_eq!(&*sink.lock(), &expected);
+	}
+
+	#[tokio::test]
+	async fn discovery_of_a_scalar_writes_one_target_and_a_dead_end_writes_nothing() {
+		let sink = Arc::new(parking_lot::Mutex::new(Vec::new()));
+		assert_eq!(
+			repeat_on(&val("link:a").await, discovery(0, 1, &sink)).await.unwrap(),
+			val("link:a").await
+		);
+		assert_eq!(repeat_on(&Value::None, discovery(0, 1, &sink)).await.unwrap(), Value::None);
+		assert_eq!(repeat_on(&Value::Null, discovery(0, 1, &sink)).await.unwrap(), Value::Null);
+		let expected = vec![val("link:a").await];
+		assert_eq!(&*sink.lock(), &expected);
+	}
+
+	#[tokio::test]
+	async fn discovery_rejects_a_non_record_value_bare_or_inside_an_array() {
+		let sink = Arc::new(parking_lot::Mutex::new(Vec::new()));
+
+		let bare = repeat_on(&val("'sample'").await, discovery(0, 1, &sink)).await.unwrap_err();
+		assert!(matches!(exec_error(bare), crate::exec::Error::InvalidRecursionTarget { .. }));
+
+		let inside =
+			repeat_on(&val("[link:a, 'sample']").await, discovery(0, 1, &sink)).await.unwrap_err();
+		assert!(matches!(exec_error(inside), crate::exec::Error::InvalidRecursionTarget { .. }));
+	}
+
+	#[tokio::test]
+	async fn assembly_reads_the_pre_computed_result_out_of_the_cache() {
+		let cache = assembly(0, 1, &[("link:b", val("{ name: 'B' }").await)]).await;
+		// Scalar input: the cached sub-tree replaces the record id.
+		assert_eq!(
+			repeat_on(&val("link:b").await, cache.clone()).await.unwrap(),
+			val("{ name: 'B' }").await
+		);
+		// Array input: one cache lookup per element.
+		assert_eq!(
+			repeat_on(&val("[link:b]").await, cache).await.unwrap(),
+			val("[{ name: 'B' }]").await
+		);
+	}
+
+	#[tokio::test]
+	async fn assembly_skips_dead_ends_and_elements_that_were_never_discovered() {
+		let cache =
+			assembly(0, 1, &[("link:b", val("{ name: 'B' }").await), ("link:c", Value::None)])
+				.await;
+		// link:a was never discovered so it has no cache entry; NONE is a dead
+		// end; link:c assembled to a dead end and `clean_iteration` drops it.
+		assert_eq!(
+			repeat_on(&val("[link:a, NONE, link:b, link:c]").await, cache).await.unwrap(),
+			val("[{ name: 'B' }]").await
+		);
+	}
+
+	#[tokio::test]
+	async fn assembly_flattens_one_level_of_the_values_it_splices_in() {
+		// Each child assembled to an array, and the spliced result is flattened
+		// so a `contains.@` chain stays a flat list of nodes.
+		let cache =
+			assembly(0, 1, &[("link:b", val("[link:c]").await), ("link:d", val("[link:w]").await)])
+				.await;
+		assert_eq!(
+			repeat_on(&val("[link:b, link:d]").await, cache).await.unwrap(),
+			val("[link:c, link:w]").await
+		);
+	}
+
+	#[tokio::test]
+	async fn assembly_below_min_depth_eliminates_the_path_for_every_input_shape() {
+		// `depth + 1` is the depth the recursive call would have happened at, so
+		// a sub-tree that resolves to a dead end there is eliminated rather than
+		// returned empty. Depth 0 with a minimum of 2 is below the bound.
+		let below = || async { assembly(0, 2, &[("link:c", Value::None)]).await };
+
+		// Array input whose lookups all resolve to dead ends.
+		let arr = repeat_on(&val("[link:c]").await, below().await).await.unwrap_err();
+		assert!(is_elimination(&arr), "array arm should eliminate, got {arr}");
+
+		// Scalar input with no cache entry.
+		let scalar = repeat_on(&val("link:zz").await, below().await).await.unwrap_err();
+		assert!(is_elimination(&scalar), "scalar arm should eliminate, got {scalar}");
+
+		// A final input value.
+		let final_value = repeat_on(&Value::None, below().await).await.unwrap_err();
+		assert!(is_elimination(&final_value), "final arm should eliminate, got {final_value}");
+	}
+
+	#[tokio::test]
+	async fn assembly_at_or_above_min_depth_returns_the_dead_end_instead_of_eliminating() {
+		// Same three shapes one depth deeper, where `depth + 1` meets the minimum.
+		let at = || async { assembly(1, 2, &[("link:c", Value::None)]).await };
+
+		assert_eq!(repeat_on(&val("[link:c]").await, at().await).await.unwrap(), val("[]").await);
+		assert_eq!(repeat_on(&val("link:zz").await, at().await).await.unwrap(), Value::None);
+		assert_eq!(repeat_on(&Value::None, at().await).await.unwrap(), Value::None);
+	}
+
+	// =========================================================================
+	// evaluate_recurse_iterative — discovery + assembly end to end
+	// =========================================================================
+
+	/// Run the iterative evaluator over the body compiled from `src`, choosing
+	/// whether the discovery phase uses the body operator or the sink fallback.
+	async fn run(
+		start: &Value,
+		src: &str,
+		min: u32,
+		max: Option<u32>,
+		system_limit: u32,
+		use_body: bool,
+		ctx: &ExecutionContext,
+	) -> FlowResult<Value> {
+		let path = body_path(src, ctx).await;
+		let body = if use_body {
+			body_operator(&path)
+		} else {
+			None
+		};
+		let base = EvalContext::from_exec_ctx(ctx);
+		evaluate_recurse_iterative(
+			start,
+			&path,
+			bounds(min, max, system_limit),
+			&body,
+			ctx,
+			base.with_value(start),
+		)
+		.await
+	}
+
+	/// Run the `{ name, next: next.@ }` destructure body over the record links.
+	async fn tree(
+		start: &str,
+		min: u32,
+		max: Option<u32>,
+		ctx: &ExecutionContext,
+	) -> FlowResult<Value> {
+		let start = val(start).await;
+		run(&start, "link:a.{ name, next: next.@ }", min, max, SYSTEM_LIMIT, false, ctx).await
+	}
+
+	#[tokio::test]
+	async fn a_final_start_returns_its_own_final_value_without_evaluating_the_body() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		// The body here always raises, so reaching it at all would fail the test.
+		let path = raise_path(Raise::Error);
+		let base = EvalContext::from_exec_ctx(&ctx);
+		for (start, expected) in [
+			(Value::None, Value::None),
+			(Value::Null, Value::Null),
+			(val("[]").await, val("[]").await),
+		] {
+			let out = evaluate_recurse_iterative(
+				&start,
+				&path,
+				bounds(1, Some(3), SYSTEM_LIMIT),
+				&None,
+				&ctx,
+				base.with_value(&start),
+			)
+			.await
+			.unwrap();
+			assert_eq!(out, expected);
+		}
+	}
+
+	#[tokio::test]
+	async fn discovery_then_assembly_builds_the_nested_tree_one_level_per_depth() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+
+		// Each depth adds one level of nesting; the level at the bound is stored
+		// raw, which is why the innermost value is a record id.
+		assert_eq!(
+			tree("link:a", 1, Some(1), &ctx).await.unwrap(),
+			val("{ name: 'A', next: link:b }").await
+		);
+		assert_eq!(
+			tree("link:a", 2, Some(2), &ctx).await.unwrap(),
+			val("{ name: 'A', next: { name: 'B', next: link:c } }").await
+		);
+		assert_eq!(
+			tree("link:a", 3, Some(3), &ctx).await.unwrap(),
+			val("{ name: 'A', next: { name: 'B', next: { name: 'C', next: link:d } } }").await
+		);
+	}
+
+	#[tokio::test]
+	async fn a_branching_body_assembles_every_child_of_every_level() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		assert_eq!(
+			tree("link:x", 2, Some(2), &ctx).await.unwrap(),
+			val(
+				"{ name: 'X', next: [{ name: 'Y', next: [link:w] }, { name: 'Z', next: [link:w] }] }"
+			)
+			.await
+		);
+	}
+
+	#[tokio::test]
+	async fn a_node_reachable_at_two_depths_is_assembled_at_each_of_them() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		// link:o sits at depth 1 (directly under link:m) and at depth 2 (under
+		// link:n). Levels are deduplicated within a level only, so both
+		// occurrences are assembled — at depth 1 as a sub-tree, at the bound as
+		// a raw record id.
+		assert_eq!(
+			tree("link:m", 2, Some(2), &ctx).await.unwrap(),
+			val("{ name: 'M', next: [{ name: 'N', next: [link:o] }, { name: 'O', next: NONE }] }")
+				.await
+		);
+	}
+
+	#[tokio::test]
+	async fn a_sub_tree_that_cannot_reach_min_depth_is_eliminated() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		// The diamond is two levels deep, so a minimum of four eliminates every
+		// sub-tree bottom-up and the whole result collapses to NONE rather than a
+		// truncated tree.
+		assert_eq!(tree("link:x", 4, Some(4), &ctx).await.unwrap(), Value::None);
+		// A start that cannot take a single step is eliminated the same way.
+		assert_eq!(tree("link:d", 2, Some(2), &ctx).await.unwrap(), Value::None);
+	}
+
+	#[tokio::test]
+	async fn the_body_operator_and_the_sink_fallback_discover_the_same_levels() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		let start = val("node:a").await;
+		let src = "node:a->step->node.@";
+
+		let via_body = run(&start, src, 2, Some(2), SYSTEM_LIMIT, true, &ctx).await.unwrap();
+		let via_sink = run(&start, src, 2, Some(2), SYSTEM_LIMIT, false, &ctx).await.unwrap();
+		assert_eq!(via_body, val("[node:c]").await);
+		assert_eq!(via_body, via_sink, "both discovery mechanisms must agree");
+	}
+
+	#[tokio::test]
+	async fn a_deep_chain_is_assembled_without_stack_recursion() {
+		let db = TestDb::new(FIXTURES).await;
+		// A chain far deeper than a recursive implementation would tolerate per
+		// frame: neither phase may descend the native stack.
+		const DEPTH: u32 = 100;
+		db.run(
+			"FOR $i IN 1..=99 {
+				UPSERT type::record('deep', $i) SET name = 'n', next = type::record('deep', $i + 1)
+			};
+			UPSERT deep:100 SET name = 'end';",
+		)
+		.await;
+		let ctx = db.exec_ctx().await;
+
+		let start = val("deep:1").await;
+		let out =
+			run(&start, "link:a.{ name, next: next.@ }", 1, Some(DEPTH), SYSTEM_LIMIT, false, &ctx)
+				.await
+				.unwrap();
+
+		// One object per level, nested through `next`, ending on the record with
+		// no outgoing link.
+		let mut levels = 0;
+		let mut node = out;
+		while let Value::Object(obj) = node {
+			levels += 1;
+			node = obj.get("next").cloned().unwrap_or(Value::None);
+		}
+		assert_eq!(levels, DEPTH, "one assembled object per depth");
+		assert_eq!(node, Value::None, "the deepest record has no link to follow");
+	}
+
+	#[tokio::test]
+	async fn an_unbounded_recursion_still_discovering_at_the_cap_raises_the_limit() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		let start = val("link:a").await;
+		// One level is pushed per iteration, so a level count above the cap means
+		// the walk had not finished.
+		let err = run(&start, "link:a.{ name, next: next.@ }", 1, None, 2, false, &ctx)
+			.await
+			.unwrap_err();
+		assert!(matches!(
+			exec_error(err),
+			crate::exec::Error::IdiomRecursionLimitExceeded {
+				limit: 2
+			}
+		));
+	}
+
+	#[tokio::test]
+	async fn an_explicit_bound_truncates_silently_instead_of_raising() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		let start = val("link:a").await;
+		assert_eq!(
+			run(&start, "link:a.{ name, next: next.@ }", 1, Some(2), 2, false, &ctx).await.unwrap(),
+			val("{ name: 'A', next: { name: 'B', next: link:c } }").await
+		);
+	}
+
+	#[tokio::test]
+	async fn a_non_record_value_reaching_the_marker_is_rejected_during_discovery() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		let start = val("link:a").await;
+		// `name.@` feeds a string into the marker, which discovery rejects rather
+		// than treating as a node.
+		let err =
+			run(&start, "link:a.{ name, next: name.@ }", 1, Some(2), SYSTEM_LIMIT, false, &ctx)
+				.await
+				.unwrap_err();
+		match exec_error(err) {
+			crate::exec::Error::InvalidRecursionTarget {
+				value,
+			} => assert_eq!(value, "'A'"),
+			other => panic!("expected InvalidRecursionTarget, got {other:?}"),
+		}
+	}
+
+	#[tokio::test]
+	async fn control_flow_out_of_the_body_aborts_the_discovery_phase() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		let start = val("link:a").await;
+		let base = EvalContext::from_exec_ctx(&ctx);
+
+		// Only the path-elimination signal is swallowed by the discovery loop;
+		// every other signal is returned as-is.
+		for raise in [Raise::Break, Raise::Continue, Raise::Return, Raise::Error] {
+			let path = raise_path(raise);
+			let err = evaluate_recurse_iterative(
+				&start,
+				&path,
+				bounds(1, Some(3), SYSTEM_LIMIT),
+				&None,
+				&ctx,
+				base.with_value(&start),
+			)
+			.await
+			.unwrap_err();
+			assert!(!is_elimination(&err), "{raise:?} must not be mistaken for path elimination");
+			match (raise, &err) {
+				(Raise::Break, ControlFlow::Break)
+				| (Raise::Continue, ControlFlow::Continue)
+				| (Raise::Return, ControlFlow::Return(_))
+				| (Raise::Error, ControlFlow::Err(_)) => {}
+				(raise, err) => panic!("{raise:?} propagated as {err}"),
+			}
+		}
+	}
+}

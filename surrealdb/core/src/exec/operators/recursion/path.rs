@@ -186,3 +186,209 @@ pub(crate) async fn evaluate_recurse_path(
 
 	Ok(Value::Array(completed_paths.into()))
 }
+
+#[cfg(test)]
+mod tests {
+	use super::super::tests::{
+		FIXTURES, Raise, SYSTEM_LIMIT, body_path, bounds, exec_error, raise_path,
+	};
+	use super::*;
+	use crate::exec::ExecutionContext;
+	use crate::exec::operators::test_util::{TestDb, val};
+	use crate::expr::ControlFlow;
+
+	/// Run the path strategy over the body `src` from the value `start`.
+	async fn run_from(
+		start: &Value,
+		src: &str,
+		min: u32,
+		max: Option<u32>,
+		inclusive: bool,
+		system_limit: u32,
+		ctx: &ExecutionContext,
+	) -> FlowResult<Value> {
+		let path = body_path(src, ctx).await;
+		let base = crate::exec::physical_expr::EvalContext::from_exec_ctx(ctx);
+		evaluate_recurse_path(
+			start,
+			&path,
+			bounds(min, max, system_limit),
+			inclusive,
+			base.with_value(start),
+		)
+		.await
+	}
+
+	/// Run over the `next` record-link body with the default system limit.
+	async fn links(
+		start: &str,
+		min: u32,
+		max: Option<u32>,
+		inclusive: bool,
+		ctx: &ExecutionContext,
+	) -> FlowResult<Value> {
+		let start = val(start).await;
+		run_from(&start, "link:a.next", min, max, inclusive, SYSTEM_LIMIT, ctx).await
+	}
+
+	#[tokio::test]
+	async fn each_walk_is_returned_as_its_own_array() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		// Non-inclusive walks start from an empty prefix, so the first step is
+		// still evaluated against the start node but the start is not in the
+		// output.
+		assert_eq!(
+			links("link:x", 1, Some(1), false, &ctx).await.unwrap(),
+			val("[[link:y], [link:z]]").await
+		);
+		assert_eq!(
+			links("link:x", 1, Some(2), false, &ctx).await.unwrap(),
+			val("[[link:y, link:w], [link:z, link:w]]").await
+		);
+		assert_eq!(
+			links("link:x", 1, Some(2), true, &ctx).await.unwrap(),
+			val("[[link:x, link:y, link:w], [link:x, link:z, link:w]]").await
+		);
+	}
+
+	#[tokio::test]
+	async fn a_walk_that_dead_ends_at_or_past_min_depth_is_completed() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		// The diamond bottoms out at link:w after two steps, well short of the
+		// upper bound, and both walks are returned as they stood.
+		assert_eq!(
+			links("link:x", 1, Some(9), false, &ctx).await.unwrap(),
+			val("[[link:y, link:w], [link:z, link:w]]").await
+		);
+	}
+
+	#[tokio::test]
+	async fn a_walk_that_dies_before_min_depth_is_dropped_not_truncated() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		// Every diamond walk is two steps long, so a minimum of three leaves
+		// nothing — the two-step walks are discarded rather than returned short.
+		assert_eq!(links("link:x", 3, Some(4), false, &ctx).await.unwrap(), val("[]").await);
+	}
+
+	#[tokio::test]
+	async fn walks_still_active_at_the_upper_bound_are_returned() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		assert_eq!(
+			links("link:a", 1, Some(2), false, &ctx).await.unwrap(),
+			val("[[link:b, link:c]]").await
+		);
+	}
+
+	#[tokio::test]
+	async fn a_dead_end_start_yields_no_walks_at_all() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		// Zero steps is below the minimum, so even the inclusive prefix — which
+		// is a non-empty path — is discarded.
+		assert_eq!(links("link:d", 1, Some(3), false, &ctx).await.unwrap(), val("[]").await);
+		assert_eq!(links("link:d", 1, Some(3), true, &ctx).await.unwrap(), val("[]").await);
+	}
+
+	#[tokio::test]
+	async fn dead_end_elements_inside_a_step_result_drop_only_their_own_branch() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		// `.next` over [link:d, link:c] yields [NONE, link:d]: the NONE is
+		// skipped and only the live successor extends the walk.
+		let start = val("[link:d, link:c]").await;
+		assert_eq!(
+			run_from(&start, "link:a.next", 1, Some(3), false, SYSTEM_LIMIT, &ctx).await.unwrap(),
+			val("[[link:d]]").await
+		);
+	}
+
+	#[tokio::test]
+	async fn a_cycle_is_walked_to_the_bound_because_walks_carry_no_visited_set() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		// The 2-cycle produces one walk that revisits both nodes; only the depth
+		// bound stops it.
+		assert_eq!(
+			links("link:p", 1, Some(4), false, &ctx).await.unwrap(),
+			val("[[link:q, link:p, link:q, link:p]]").await
+		);
+	}
+
+	#[tokio::test]
+	async fn a_self_loop_repeats_inside_the_walk_rather_than_closing_it() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		// link:s links to itself. There is no equality check here (unlike the
+		// default strategy), so the node is appended once per step until the
+		// bound is reached.
+		assert_eq!(
+			links("link:s", 1, Some(3), false, &ctx).await.unwrap(),
+			val("[[link:s, link:s, link:s]]").await
+		);
+	}
+
+	#[tokio::test]
+	async fn an_unbounded_walk_still_active_at_the_cap_raises_the_limit() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		let start = val("link:a").await;
+		let err = run_from(&start, "link:a.next", 1, None, false, 2, &ctx).await.unwrap_err();
+		assert!(matches!(
+			exec_error(err),
+			crate::exec::Error::IdiomRecursionLimitExceeded {
+				limit: 2
+			}
+		));
+	}
+
+	#[tokio::test]
+	async fn an_explicit_bound_truncates_silently_instead_of_raising() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		let start = val("link:a").await;
+		assert_eq!(
+			run_from(&start, "link:a.next", 1, Some(2), false, 2, &ctx).await.unwrap(),
+			val("[[link:b, link:c]]").await
+		);
+	}
+
+	#[tokio::test]
+	async fn a_non_record_value_is_rejected_because_recursion_is_record_only() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		let start = val("link:a").await;
+		let err = run_from(&start, "link:a.name", 1, Some(2), false, SYSTEM_LIMIT, &ctx)
+			.await
+			.unwrap_err();
+		match exec_error(err) {
+			crate::exec::Error::InvalidRecursionTarget {
+				value,
+			} => assert_eq!(value, "'A'"),
+			other => panic!("expected InvalidRecursionTarget, got {other:?}"),
+		}
+	}
+
+	#[tokio::test]
+	async fn control_flow_out_of_the_body_aborts_the_traversal() {
+		let db = TestDb::new(FIXTURES).await;
+		let ctx = db.exec_ctx().await;
+		let start = val("link:a").await;
+		let base = crate::exec::physical_expr::EvalContext::from_exec_ctx(&ctx);
+
+		let path = raise_path(Raise::Continue);
+		let err = evaluate_recurse_path(
+			&start,
+			&path,
+			bounds(1, Some(3), SYSTEM_LIMIT),
+			false,
+			base.with_value(&start),
+		)
+		.await
+		.unwrap_err();
+		assert!(matches!(err, ControlFlow::Continue));
+	}
+}

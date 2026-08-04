@@ -116,13 +116,25 @@ enum MatchTarget {
 	Unresolved,
 }
 
+/// The field path and query string a MATCHES needs to probe a full-text index.
+///
+/// Present only when the source expression can denote an index probe at all:
+/// an idiom on the left, and a right operand that resolves to a value at plan
+/// time (legacy `Tree::eval_matches_operator` requires a computed node and
+/// takes its `to_raw_string()`).
+#[derive(Debug, Clone)]
+pub(crate) struct MatchProbe {
+	/// Field idiom from the left side (used to find the matching FT index).
+	pub(crate) idiom: Idiom,
+	/// Search query string from the right side (extracted at plan time).
+	pub(crate) query: String,
+}
+
 /// Evaluates a MATCHES (`@@` / `@N@`) predicate.
 ///
-/// Created by the planner when a `BinaryOperator::Matches` is encountered
-/// with an idiom on the left and a string literal (or resolvable bind
-/// parameter) on the right. Index resolution is performed lazily per row
-/// table and cached for subsequent rows. See the module docs for the full
-/// decision tree and its legacy-executor mapping.
+/// Every parsed `BinaryOperator::Matches` becomes one of these, so the decision
+/// tree in the module docs is the single answer for the operator. Index
+/// resolution is performed lazily per row table and cached for subsequent rows.
 pub struct MatchesOp {
 	/// Left side expression (the idiom side — also evaluated per row on the
 	/// record-link path).
@@ -132,10 +144,14 @@ pub struct MatchesOp {
 	/// The MATCHES operator (`@@`, `@1@`, `@AND@`, …; carries the boolean
 	/// operator used on the record-link value path).
 	pub(crate) operator: MatchesOperator,
-	/// Field idiom from the left side (used to find the matching FT index).
-	pub(crate) idiom: Idiom,
-	/// Search query string from the right side (extracted at plan time).
-	pub(crate) query: String,
+	/// The index probe this expression denotes, when it denotes one.
+	///
+	/// `None` for a left operand that is not an idiom, or a right operand that
+	/// does not resolve to a value at plan time. Neither shape can name an
+	/// index, so both resolve to [`MatchTarget::Unresolved`] — which is also
+	/// what the legacy executor reports for them, since its tree registers
+	/// neither and `QueryExecutor::matches` then finds no entry.
+	pub(crate) probe: Option<MatchProbe>,
 	/// Whether this expression was registered from the enclosing SELECT's
 	/// WHERE condition (see [`MatchesScope`]).
 	registered: bool,
@@ -154,8 +170,7 @@ impl MatchesOp {
 		left: Arc<dyn PhysicalExpr>,
 		right: Arc<dyn PhysicalExpr>,
 		operator: MatchesOperator,
-		idiom: Idiom,
-		query: String,
+		probe: Option<MatchProbe>,
 		registered: bool,
 		executor_tables: Arc<[TableName]>,
 	) -> Self {
@@ -163,8 +178,7 @@ impl MatchesOp {
 			left,
 			right,
 			operator,
-			idiom,
-			query,
+			probe,
 			registered,
 			executor_tables,
 			resolution: tokio::sync::Mutex::new(HashMap::new()),
@@ -199,12 +213,19 @@ impl MatchesOp {
 	/// Resolve the full-text index for `table`, mirroring the legacy tree's
 	/// `resolve_idiom`: first a local index on the table itself, then a
 	/// record-link traversal via the table's field definitions.
+	///
+	/// An expression carrying no [`MatchProbe`] names no field and no query, so
+	/// there is nothing to resolve against and no catalog read is issued.
 	async fn resolve_uncached(
 		&self,
 		ctx: &EvalContext<'_>,
 		table: &TableName,
 	) -> Result<MatchTarget, anyhow::Error> {
 		use crate::catalog::providers::TableProvider;
+
+		let Some(probe) = self.probe.as_ref() else {
+			return Ok(MatchTarget::Unresolved);
+		};
 
 		let frozen = ctx.exec_ctx.ctx();
 		let root = ctx.exec_ctx.root();
@@ -240,12 +261,13 @@ impl MatchesOp {
 		};
 		let local = indexes.iter().find(|idx| {
 			matches!(&idx.index, Index::FullText(_))
-				&& idx.cols.contains(&self.idiom)
+				&& idx.cols.contains(&probe.idiom)
 				&& !(check_perms && index_columns_touch_restricted(&idx.cols, &fields))
 		});
 		if let Some(index_def) = local {
-			let (fti, qt) =
-				self.open_index(ctx, table.clone(), index_def, frozen, opt, &tx).await?;
+			let (fti, qt) = self
+				.open_index(ctx, table.clone(), index_def, &probe.query, frozen, opt, &tx)
+				.await?;
 			return Ok(MatchTarget::Local(fti, qt));
 		}
 
@@ -253,15 +275,15 @@ impl MatchesOp {
 		// kind whose name prefixes the idiom decides (legacy
 		// `resolve_record_field`); auto-defined `field[*]` children make
 		// `ts[*].name` resolvable while `ts.name` is not.
-		if self.idiom.0.len() > 1 {
+		if probe.idiom.0.len() > 1 {
 			for field in fields.iter() {
 				let Some(Kind::Record(targets)) = &field.field_kind else {
 					continue;
 				};
-				if !self.idiom.starts_with(&field.name.0) {
+				if !probe.idiom.starts_with(&field.name.0) {
 					continue;
 				}
-				let remote_field = &self.idiom.0[field.name.0.len()..];
+				let remote_field = &probe.idiom.0[field.name.0.len()..];
 				if remote_field.is_empty() {
 					break;
 				}
@@ -276,6 +298,7 @@ impl MatchesOp {
 							ctx,
 							target,
 							remote_field,
+							&probe.query,
 							check_perms,
 							frozen,
 							opt,
@@ -307,6 +330,7 @@ impl MatchesOp {
 		ctx: &EvalContext<'_>,
 		target: &TableName,
 		remote_field: &[crate::expr::part::Part],
+		query: &str,
 		check_perms: bool,
 		frozen: &crate::ctx::FrozenContext,
 		opt: &crate::dbs::Options,
@@ -332,7 +356,8 @@ impl MatchesOp {
 		});
 		match index_def {
 			Some(def) => {
-				let (fti, qt) = self.open_index(ctx, target.clone(), def, frozen, opt, tx).await?;
+				let (fti, qt) =
+					self.open_index(ctx, target.clone(), def, query, frozen, opt, tx).await?;
 				Ok(Some((fti, qt)))
 			}
 			None => Ok(None),
@@ -340,11 +365,13 @@ impl MatchesOp {
 	}
 
 	/// Open a full-text index and extract the query terms for it.
+	#[expect(clippy::too_many_arguments)]
 	async fn open_index(
 		&self,
 		ctx: &EvalContext<'_>,
 		table: TableName,
 		index_def: &crate::catalog::IndexDefinition,
+		query: &str,
 		frozen: &crate::ctx::FrozenContext,
 		opt: &crate::dbs::Options,
 		tx: &Arc<crate::kvs::Transaction>,
@@ -385,7 +412,7 @@ impl MatchesOp {
 			let az_fn = LegacyAnalyzerFunction::new(frozen, opt);
 			let mut stack = reblessive::TreeStack::new();
 			stack
-				.enter(|stk| fti.extract_querying_terms(stk, frozen, &az_fn, self.query.clone()))
+				.enter(|stk| fti.extract_querying_terms(stk, frozen, &az_fn, query.to_owned()))
 				.finish()
 				.await?
 		};
@@ -500,8 +527,7 @@ impl Clone for MatchesOp {
 			left: Arc::clone(&self.left),
 			right: Arc::clone(&self.right),
 			operator: self.operator.clone(),
-			idiom: self.idiom.clone(),
-			query: self.query.clone(),
+			probe: self.probe.clone(),
 			registered: self.registered,
 			executor_tables: Arc::clone(&self.executor_tables),
 			// The cache is not Clone — the clone lazily re-resolves.
@@ -513,8 +539,7 @@ impl Clone for MatchesOp {
 impl std::fmt::Debug for MatchesOp {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		f.debug_struct("MatchesOp")
-			.field("idiom", &self.idiom)
-			.field("query", &self.query)
+			.field("probe", &self.probe)
 			.field("operator", &self.operator)
 			.field("registered", &self.registered)
 			.finish()

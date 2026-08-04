@@ -263,10 +263,13 @@ impl ToSql for SequencePlan {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
-	use crate::exec::operators::test_util::{drain_err, root_ctx};
-	use crate::expr::Literal;
 
+	use super::*;
+	use crate::exec::operators::test_util::{
+		TestDb, collect, drain_err, parse_expr, root_ctx, try_collect,
+	};
+	use crate::expr::Literal;
+	use crate::kvs::TransactionType;
 	#[tokio::test]
 	async fn a_context_without_a_transaction_yields_an_error_not_a_panic() {
 		// Each statement is planned at execute time, which needs a transaction to
@@ -277,6 +280,239 @@ mod tests {
 		assert!(
 			format!("{err}").contains("requires a transaction"),
 			"expected a missing-transaction error, got: {err}"
+		);
+	}
+	/// Build a `SequencePlan` over the given statements the way the planner does:
+	/// the block is stored unplanned and each statement is planned just before it
+	/// runs, so a `LET` can inform the planning of what follows.
+	fn plan(statements: &[&str]) -> Arc<dyn ExecOperator> {
+		let block = Block(statements.iter().copied().map(parse_expr).collect());
+		Arc::new(SequencePlan::new(block, 0))
+	}
+
+	/// A database-level context over a read transaction.
+	///
+	/// `SequencePlan` re-plans each statement at execute time, and the planner
+	/// reads the transaction out of the context unconditionally, so a
+	/// transaction-less root context cannot drive this operator.
+	async fn db_ctx() -> ExecutionContext {
+		TestDb::new("").await.exec_ctx().await
+	}
+
+	/// The message carried by a `THROW`n error.
+	fn thrown(flow: ControlFlow) -> String {
+		match flow {
+			ControlFlow::Err(e) => match e.downcast_ref::<ExecError>() {
+				Some(ExecError::Thrown(msg)) => msg.clone(),
+				_ => panic!("expected a THROWn error, got {e:?}"),
+			},
+			other => panic!("expected an error, got {other}"),
+		}
+	}
+
+	#[tokio::test]
+	async fn a_sequence_emits_exactly_one_row_carrying_the_last_statements_value() {
+		let ctx = db_ctx().await;
+		// Sequence declares `is_scalar()` and `CardinalityHint::AtMostOne`: the
+		// earlier statements' values are discarded, not emitted.
+		assert_eq!(collect(&plan(&["1", "2", "3"]), &ctx).await, vec![Value::from(3i64)]);
+	}
+
+	#[tokio::test]
+	async fn an_empty_block_emits_a_single_none_row() {
+		let ctx = db_ctx().await;
+		let op: Arc<dyn ExecOperator> = Arc::new(SequencePlan::new(Block(Vec::new()), 0));
+		assert_eq!(collect(&op, &ctx).await, vec![Value::None]);
+	}
+
+	#[tokio::test]
+	async fn statements_run_in_order_and_a_later_one_sees_an_earlier_binding() {
+		let ctx = db_ctx().await;
+		assert_eq!(collect(&plan(&["LET $x = 5", "$x + 1"]), &ctx).await, vec![Value::from(6i64)]);
+	}
+
+	#[tokio::test]
+	async fn a_binding_is_available_to_the_planning_of_later_statements() {
+		// The reason planning is deferred per statement: the table name in the
+		// SELECT below is only knowable once the LET has run.
+		let db = TestDb::new("CREATE users:tobie SET name = 'Tobie'").await;
+		let ctx = db.exec_ctx().await;
+		let rows =
+			collect(&plan(&[r#"LET $t = "users""#, "SELECT name FROM type::table($t)"]), &ctx)
+				.await;
+		assert_eq!(rows.len(), 1, "a sequence emits one row");
+		let Value::Array(selected) = &rows[0] else {
+			panic!("a non-scalar last statement is wrapped in an array, got {:?}", rows[0]);
+		};
+		assert_eq!(selected.len(), 1, "the SELECT should have found the seeded record");
+	}
+
+	#[tokio::test]
+	async fn a_binding_as_the_last_statement_leaves_the_sequence_emitting_none() {
+		let ctx = db_ctx().await;
+		// A context-mutating statement produces no value of its own, so it resets
+		// the running result rather than carrying the previous one forward.
+		assert_eq!(collect(&plan(&["1", "LET $x = 5"]), &ctx).await, vec![Value::None]);
+	}
+
+	#[tokio::test]
+	async fn a_return_in_a_middle_statement_short_circuits_the_rest() {
+		let ctx = db_ctx().await;
+		let flow = try_collect(&plan(&["1", "RETURN 2", r#"THROW "ran past the RETURN""#]), &ctx)
+			.await
+			.expect_err("RETURN must propagate");
+		match flow {
+			ControlFlow::Return(v) => assert_eq!(v, Value::from(2i64)),
+			other => panic!("expected RETURN, got {other}"),
+		}
+	}
+
+	#[tokio::test]
+	async fn loop_signals_propagate_out_so_an_enclosing_for_loop_sees_them() {
+		let ctx = db_ctx().await;
+		// A block nested inside a FOR loop must be able to BREAK or CONTINUE the
+		// loop, so these signals travel out of the sequence rather than being
+		// swallowed — and they stop the remaining statements.
+		let flow = try_collect(&plan(&["BREAK", r#"THROW "ran past the BREAK""#]), &ctx)
+			.await
+			.expect_err("BREAK must propagate");
+		assert!(matches!(flow, ControlFlow::Break), "got {flow}");
+
+		let flow = try_collect(&plan(&["CONTINUE", r#"THROW "ran past the CONTINUE""#]), &ctx)
+			.await
+			.expect_err("CONTINUE must propagate");
+		assert!(matches!(flow, ControlFlow::Continue), "got {flow}");
+	}
+
+	#[tokio::test]
+	async fn an_error_in_a_middle_statement_stops_the_sequence() {
+		let ctx = db_ctx().await;
+		let flow =
+			try_collect(&plan(&["1", r#"THROW "boom""#, r#"THROW "ran past the failure""#]), &ctx)
+				.await
+				.expect_err("the error must propagate");
+		assert_eq!(thrown(flow), "boom");
+	}
+
+	#[tokio::test]
+	async fn access_mode_is_readwrite_when_any_statement_writes() {
+		// The executor picks the transaction type from the plan's access mode, so
+		// a write anywhere in the block has to be reported by the whole sequence.
+		assert_eq!(plan(&["1", "2"]).access_mode(), AccessMode::ReadOnly);
+		assert_eq!(plan(&["1", "CREATE foo"]).access_mode(), AccessMode::ReadWrite);
+		assert_eq!(plan(&["CREATE foo", "1"]).access_mode(), AccessMode::ReadWrite);
+	}
+
+	#[tokio::test]
+	async fn required_context_is_the_maximum_across_statements() {
+		// The executor validates the declared context level before execution, so
+		// under-reporting would let a statement run without a namespace/database.
+		assert_eq!(plan(&["1", "2"]).required_context(), ContextLevel::Root);
+		assert_eq!(plan(&["1", "INFO FOR NS"]).required_context(), ContextLevel::Namespace);
+		assert_eq!(plan(&["1", "SELECT * FROM foo"]).required_context(), ContextLevel::Database);
+		assert_eq!(plan(&["SELECT * FROM foo", "1"]).required_context(), ContextLevel::Database);
+	}
+
+	#[tokio::test]
+	async fn mutates_context_is_true_only_when_the_block_binds_a_parameter() {
+		// This is what makes the executor ask for `output_context()` so following
+		// statements in the enclosing script see the block's bindings.
+		assert!(!plan(&["1", "2"]).mutates_context());
+		assert!(plan(&["1", "LET $x = 5"]).mutates_context());
+	}
+
+	#[tokio::test]
+	async fn output_context_publishes_the_blocks_bindings() {
+		let ctx = db_ctx().await;
+		let op = plan(&["LET $x = 5", "LET $y = $x + 1"]);
+		let out = op.output_context(&ctx).await.expect("the block should succeed");
+		assert_eq!(out.value("x"), Some(&Value::from(5i64)));
+		assert_eq!(out.value("y"), Some(&Value::from(6i64)));
+		// The input context is untouched; bindings only travel forward.
+		assert!(ctx.value("x").is_none());
+	}
+
+	#[tokio::test]
+	async fn output_context_rejects_a_control_flow_signal_from_the_block() {
+		let ctx = db_ctx().await;
+		// `output_context` is the binding path, where there is no loop to break and
+		// no caller to return to, so any of the three signals is invalid.
+		for statement in ["BREAK", "CONTINUE", "RETURN 1"] {
+			let err = plan(&[statement])
+				.output_context(&ctx)
+				.await
+				.err()
+				.unwrap_or_else(|| panic!("{statement} is not valid at a binding site"));
+			let ControlFlow::Err(err) = err else {
+				panic!("{statement} must be reported as an error, not passed on as a signal");
+			};
+			assert!(
+				matches!(err.downcast_ref::<ExecError>(), Some(ExecError::InvalidControlFlow)),
+				"expected InvalidControlFlow for {statement}, got {err:?}"
+			);
+		}
+	}
+
+	#[tokio::test]
+	async fn output_context_propagates_an_error_downcastable() {
+		let ctx = db_ctx().await;
+		// The error must not be flattened: the transactor needs to recognise a
+		// write conflict, and cancellation/timeout must stay classified.
+		let ctrl = plan(&[r#"THROW "boom""#])
+			.output_context(&ctx)
+			.await
+			.expect_err("the error must propagate");
+		let ControlFlow::Err(err) = ctrl else {
+			panic!("a THROW is an error, not a control-flow signal");
+		};
+		assert!(
+			matches!(err.downcast_ref::<ExecError>(), Some(ExecError::Thrown(msg)) if msg == "boom"),
+			"expected the original Thrown error, got {err:?}"
+		);
+	}
+
+	#[tokio::test]
+	async fn the_legacy_compute_fallback_sees_bindings_made_on_the_planned_path() {
+		// CREATE has no streaming plan, so the sequence falls back to legacy
+		// compute for it. The fallback context is cloned from the execution
+		// context so the preceding LET, applied on the planned path, is visible.
+		let db = TestDb::new("").await;
+		let ctx = db.exec_ctx_as(&TestDb::owner(), TransactionType::Write).await;
+		let rows = collect(&plan(&["LET $n = 42", "CREATE ONLY foo:1 SET n = $n"]), &ctx).await;
+		assert_eq!(rows.len(), 1);
+		let Value::Object(created) = &rows[0] else {
+			panic!("CREATE ONLY yields a single object, got {:?}", rows[0]);
+		};
+		assert_eq!(created.get("n"), Some(&Value::from(42i64)));
+	}
+
+	#[tokio::test]
+	async fn the_legacy_compute_fallback_cannot_write_from_inside_a_permission_predicate() {
+		// SECURITY: a stored PERMISSIONS expression runs with enforcement disabled
+		// (`skip_fetch_perms`), so the fallback must strip write capability —
+		// otherwise a permission check could mutate data unauthorized.
+		let db = TestDb::new("").await;
+		let ctx = db.exec_ctx_as(&TestDb::owner(), TransactionType::Write).await;
+
+		// Sanity: the same statement succeeds when this is not a predicate.
+		let rows = collect(&plan(&["CREATE ONLY foo:1 SET n = 1"]), &ctx).await;
+		assert_eq!(rows.len(), 1);
+
+		let ExecutionContext::Database(mut inner) = ctx else {
+			panic!("exec_ctx_as builds a Database context");
+		};
+		inner.ns_ctx.root.skip_fetch_perms = true;
+		let predicate_ctx = ExecutionContext::Database(inner);
+
+		let flow = try_collect(&plan(&["CREATE ONLY foo:2 SET n = 1"]), &predicate_ctx)
+			.await
+			.expect_err("a write inside a permission predicate must be refused");
+		let ControlFlow::Err(e) = flow else {
+			panic!("expected an error, got {flow}");
+		};
+		assert!(
+			matches!(e.downcast_ref::<ExecError>(), Some(ExecError::PermissionPredicateSideEffect)),
+			"expected PermissionPredicateSideEffect, got {e:?}"
 		);
 	}
 }

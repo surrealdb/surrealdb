@@ -912,3 +912,666 @@ fn compute_compound_key_range(
 		Ok(entry_range(ns, db, ix, without_bound()?.prefix_expect()))
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	//! B-tree iterator behaviour against real, committed index data.
+	//!
+	//! Each fixture defines its index and writes its rows as separate
+	//! statements, then opens a read context: an index defined in the same
+	//! transaction as the `CREATE`s is never backfilled, so a scan over it
+	//! would be silently empty. Every test therefore asserts a non-empty
+	//! result before asserting anything finer.
+	//!
+	//! Record ids are compared as SurrealQL text (`t:a`) so a failure names
+	//! the rows rather than a byte range.
+
+	use std::sync::Arc;
+
+	use surrealdb_types::ToSql;
+
+	use super::*;
+	use crate::exec::ExecutionContext;
+	use crate::exec::operators::test_util::TestDb;
+	use crate::val::Number;
+
+	/// One bound-combination case: a label for failure messages, the lower and
+	/// upper bounds to scan, and the record ids expected in iteration order.
+	type BoundCase<'a> = (&'a str, Bound<&'a Value>, Bound<&'a Value>, Vec<&'a str>);
+
+	/// A committed table plus everything its iterators need: the namespace and
+	/// database ids, the online index definitions, and a read transaction.
+	///
+	/// The [`ExecutionContext`] is kept because the transaction lives exactly as
+	/// long as the context that opened it.
+	struct Fixture {
+		ctx: ExecutionContext,
+		ns: NamespaceId,
+		db: DatabaseId,
+		indexes: Arc<[IndexDefinition]>,
+	}
+
+	impl Fixture {
+		/// Open a read context over `table` and resolve its online indexes.
+		async fn new(db: &TestDb, table: &str) -> Self {
+			let ctx = db.exec_ctx().await;
+			let dbc = ctx.database().expect("database-level context").clone();
+			let tb: surrealdb_strand::TableName = table.into();
+			let indexes = dbc.get_table_indexes(&tb, None).await.expect("index definitions");
+			assert!(!indexes.is_empty(), "table {table} has no online index to scan");
+			Self {
+				ns: dbc.ns().namespace_id,
+				db: dbc.db.database_id,
+				indexes,
+				ctx,
+			}
+		}
+
+		fn ix(&self, name: &str) -> &IndexDefinition {
+			self.indexes
+				.iter()
+				.find(|i| i.name.as_str() == name)
+				.unwrap_or_else(|| panic!("index {name} is not online"))
+		}
+
+		fn tx(&self) -> Arc<Transaction> {
+			self.ctx.database().expect("database-level context").txn()
+		}
+	}
+
+	/// Drain an iterator whose `next_batch` takes only the transaction.
+	///
+	/// Returns the record ids in emission order plus the per-batch sizes, so a
+	/// test can assert both the result and how it was chunked. An empty batch
+	/// is the documented end-of-iteration signal.
+	macro_rules! drain {
+		($it:expr, $tx:expr) => {{
+			let mut ids: Vec<String> = Vec::new();
+			let mut sizes: Vec<usize> = Vec::new();
+			loop {
+				let batch = $it.next_batch(&$tx).await.expect("batch should scan");
+				if batch.is_empty() {
+					break;
+				}
+				sizes.push(batch.len());
+				ids.extend(batch.iter().map(|r| r.to_sql()));
+			}
+			(ids, sizes)
+		}};
+	}
+
+	/// As [`drain`], for the compound iterators, whose `next_batch` takes a
+	/// caller-supplied per-batch entry cap.
+	macro_rules! drain_capped {
+		($it:expr, $tx:expr, $limit:expr) => {{
+			let mut ids: Vec<String> = Vec::new();
+			let mut sizes: Vec<usize> = Vec::new();
+			loop {
+				let batch = $it.next_batch(&$tx, $limit).await.expect("batch should scan");
+				if batch.is_empty() {
+					break;
+				}
+				sizes.push(batch.len());
+				ids.extend(batch.iter().map(|r| r.to_sql()));
+			}
+			(ids, sizes)
+		}};
+	}
+
+	fn reversed(ids: &[&str]) -> Vec<String> {
+		ids.iter().rev().map(|s| (*s).to_owned()).collect()
+	}
+
+	fn owned(ids: &[&str]) -> Vec<String> {
+		ids.iter().map(|s| (*s).to_owned()).collect()
+	}
+
+	// ------------------------------------------------------------------
+	// Non-unique (`Idx`) index
+	// ------------------------------------------------------------------
+
+	/// `t` with a non-unique index on `v`: two rows share `v = 1`, and one row
+	/// each holds NONE and NULL.
+	async fn idx_db() -> TestDb {
+		let db = TestDb::new("DEFINE TABLE t SCHEMALESS; DEFINE INDEX iv ON t FIELDS v;").await;
+		db.run(
+			"CREATE t:a SET v = 1;
+			 CREATE t:b SET v = 1;
+			 CREATE t:c SET v = 2;
+			 CREATE t:d SET v = 3;
+			 CREATE t:e SET v = NONE;
+			 CREATE t:f SET v = NULL;",
+		)
+		.await;
+		db
+	}
+
+	#[tokio::test]
+	async fn equality_returns_every_duplicate_in_record_order() {
+		let db = idx_db().await;
+		let fx = Fixture::new(&db, "t").await;
+		let tx = fx.tx();
+		let mut it = IndexEqualIterator::new(fx.ns, fx.db, fx.ix("iv"), &Value::from(1i64))
+			.expect("equality iterator");
+		let (ids, _) = drain!(it, tx);
+		// A non-unique index stores one entry per (value, record-id) pair, so
+		// both rows on `v = 1` come back, ordered by the record-id suffix.
+		assert_eq!(ids, owned(&["t:a", "t:b"]));
+	}
+
+	#[tokio::test]
+	async fn equality_backward_reverses_the_record_order() {
+		let db = idx_db().await;
+		let fx = Fixture::new(&db, "t").await;
+		let tx = fx.tx();
+		let mut it =
+			IndexEqualIterator::with_direction(fx.ns, fx.db, fx.ix("iv"), &Value::from(1i64), true)
+				.expect("reverse equality iterator");
+		let (ids, _) = drain!(it, tx);
+		assert_eq!(ids, reversed(&["t:a", "t:b"]));
+	}
+
+	#[tokio::test]
+	async fn equality_on_an_absent_value_yields_nothing() {
+		let db = idx_db().await;
+		let fx = Fixture::new(&db, "t").await;
+		let tx = fx.tx();
+		let mut it = IndexEqualIterator::new(fx.ns, fx.db, fx.ix("iv"), &Value::from(99i64))
+			.expect("equality iterator");
+		let (ids, sizes) = drain!(it, tx);
+		assert!(ids.is_empty(), "no row holds v = 99, got {ids:?}");
+		assert!(sizes.is_empty(), "an exhausted scan yields no batch at all");
+	}
+
+	#[tokio::test]
+	async fn none_and_null_are_separately_indexed_keys() {
+		let db = idx_db().await;
+		let fx = Fixture::new(&db, "t").await;
+		let tx = fx.tx();
+
+		let mut it = IndexEqualIterator::new(fx.ns, fx.db, fx.ix("iv"), &Value::None)
+			.expect("equality iterator");
+		let (none_ids, _) = drain!(it, tx);
+		assert_eq!(none_ids, owned(&["t:e"]));
+
+		let mut it = IndexEqualIterator::new(fx.ns, fx.db, fx.ix("iv"), &Value::Null)
+			.expect("equality iterator");
+		let (null_ids, _) = drain!(it, tx);
+		assert_eq!(null_ids, owned(&["t:f"]), "NULL is a distinct key from NONE");
+	}
+
+	#[tokio::test]
+	async fn unbounded_range_covers_every_row_in_index_order() {
+		let db = idx_db().await;
+		let fx = Fixture::new(&db, "t").await;
+		let tx = fx.tx();
+
+		// Key order puts the nullish values below the numbers.
+		let expected = ["t:e", "t:f", "t:a", "t:b", "t:c", "t:d"];
+
+		let mut it = IndexRangeIterator::new(
+			fx.ns,
+			fx.db,
+			fx.ix("iv"),
+			Bound::Unbounded,
+			Bound::Unbounded,
+			Direction::Forward,
+		)
+		.expect("range iterator");
+		let (forward, _) = drain!(it, tx);
+		assert_eq!(forward, owned(&expected));
+
+		let mut it = IndexRangeIterator::new(
+			fx.ns,
+			fx.db,
+			fx.ix("iv"),
+			Bound::Unbounded,
+			Bound::Unbounded,
+			Direction::Backward,
+		)
+		.expect("range iterator");
+		let (backward, _) = drain!(it, tx);
+		assert_eq!(backward, reversed(&expected), "a backward scan is the exact reverse");
+	}
+
+	#[tokio::test]
+	async fn range_bound_combinations_include_the_documented_edges() {
+		let db = idx_db().await;
+		let fx = Fixture::new(&db, "t").await;
+		let tx = fx.tx();
+		let (v1, v2, v3, v4, v9) = (
+			Value::from(1i64),
+			Value::from(2i64),
+			Value::from(3i64),
+			Value::from(4i64),
+			Value::from(9i64),
+		);
+
+		// An inclusive bound admits every entry for that value; an exclusive
+		// bound admits none of them.
+		let cases: Vec<BoundCase<'_>> = vec![
+			("[1,2]", Bound::Included(&v1), Bound::Included(&v2), vec!["t:a", "t:b", "t:c"]),
+			("(1,3]", Bound::Excluded(&v1), Bound::Included(&v3), vec!["t:c", "t:d"]),
+			("[1,3)", Bound::Included(&v1), Bound::Excluded(&v3), vec!["t:a", "t:b", "t:c"]),
+			("(1,3)", Bound::Excluded(&v1), Bound::Excluded(&v3), vec!["t:c"]),
+			("..1)", Bound::Unbounded, Bound::Excluded(&v1), vec!["t:e", "t:f"]),
+			("[2..", Bound::Included(&v2), Bound::Unbounded, vec!["t:c", "t:d"]),
+			("(3..", Bound::Excluded(&v3), Bound::Unbounded, vec![]),
+			("[4,9]", Bound::Included(&v4), Bound::Included(&v9), vec![]),
+		];
+
+		for (label, from, to, expected) in cases {
+			let mut it =
+				IndexRangeIterator::new(fx.ns, fx.db, fx.ix("iv"), from, to, Direction::Forward)
+					.expect("range iterator");
+			let (forward, _) = drain!(it, tx);
+			assert_eq!(forward, owned(&expected), "forward {label}");
+
+			let mut it =
+				IndexRangeIterator::new(fx.ns, fx.db, fx.ix("iv"), from, to, Direction::Backward)
+					.expect("range iterator");
+			let (backward, _) = drain!(it, tx);
+			assert_eq!(backward, reversed(&expected), "backward {label}");
+		}
+	}
+
+	#[tokio::test]
+	async fn contradictory_bounds_scan_nothing_rather_than_failing() {
+		// The analyser folds a contradiction into `AccessPath::EmptyScan`, so
+		// the iterator never sees one in a planned query; it must still be safe
+		// to construct and drain.
+		let db = idx_db().await;
+		let fx = Fixture::new(&db, "t").await;
+		let tx = fx.tx();
+		let v3 = Value::from(3i64);
+		let mut it = IndexRangeIterator::new(
+			fx.ns,
+			fx.db,
+			fx.ix("iv"),
+			Bound::Excluded(&v3),
+			Bound::Excluded(&v3),
+			Direction::Forward,
+		)
+		.expect("range iterator");
+		let (ids, _) = drain!(it, tx);
+		assert!(ids.is_empty(), "an empty range yields no rows, got {ids:?}");
+	}
+
+	#[tokio::test]
+	async fn equality_resumes_across_batch_boundaries() {
+		// One value shared by more rows than a single batch holds, so the
+		// cursor has to advance (forward) and retreat (backward) past the
+		// last-returned key without dropping or repeating an entry.
+		let db = TestDb::new("DEFINE TABLE t SCHEMALESS; DEFINE INDEX iv ON t FIELDS v;").await;
+		let total = INDEX_BATCH_SIZE as usize + 100;
+		let rows =
+			(0..total).map(|i| format!("{{ id: {i}, v: 1 }}")).collect::<Vec<_>>().join(", ");
+		db.run(&format!("INSERT INTO t [{rows}];")).await;
+
+		let fx = Fixture::new(&db, "t").await;
+		let tx = fx.tx();
+		let value = Value::from(1i64);
+
+		let mut it =
+			IndexEqualIterator::new(fx.ns, fx.db, fx.ix("iv"), &value).expect("equality iterator");
+		let (forward, sizes) = drain!(it, tx);
+		assert_eq!(sizes, vec![INDEX_BATCH_SIZE as usize, 100], "a batch caps at INDEX_BATCH_SIZE");
+		assert_eq!(forward.len(), total);
+		let unique: std::collections::HashSet<&String> = forward.iter().collect();
+		assert_eq!(unique.len(), total, "no entry is returned twice across batches");
+		assert_eq!(forward.first().map(String::as_str), Some("t:0"));
+		assert_eq!(forward.last(), Some(&format!("t:{}", total - 1)));
+
+		let mut it = IndexEqualIterator::with_direction(fx.ns, fx.db, fx.ix("iv"), &value, true)
+			.expect("reverse equality iterator");
+		let (backward, sizes) = drain!(it, tx);
+		assert_eq!(sizes, vec![INDEX_BATCH_SIZE as usize, 100]);
+		let mut expected = forward.clone();
+		expected.reverse();
+		assert_eq!(backward, expected, "the backward scan reverses the forward one exactly");
+	}
+
+	// ------------------------------------------------------------------
+	// Unique (`Uniq`) index
+	// ------------------------------------------------------------------
+
+	/// `u` with a unique index on `k`, plus two rows whose `k` is NONE — a
+	/// unique index stores nullish tuples in the non-unique key format, so they
+	/// do not collide.
+	async fn uniq_db() -> TestDb {
+		let db =
+			TestDb::new("DEFINE TABLE u SCHEMALESS; DEFINE INDEX ik ON u FIELDS k UNIQUE;").await;
+		db.run(
+			"CREATE u:1 SET k = 10;
+			 CREATE u:2 SET k = 20;
+			 CREATE u:3 SET k = 30;
+			 CREATE u:4 SET k = NONE;
+			 CREATE u:5 SET k = NONE;",
+		)
+		.await;
+		db
+	}
+
+	#[tokio::test]
+	async fn unique_equality_is_a_point_lookup() {
+		let db = uniq_db().await;
+		let fx = Fixture::new(&db, "u").await;
+		let tx = fx.tx();
+
+		let mut it = UniqueEqualIterator::new(fx.ns, fx.db, fx.ix("ik"), &Value::from(20i64))
+			.expect("unique equality iterator");
+		let (ids, sizes) = drain!(it, tx);
+		assert_eq!(ids, owned(&["u:2"]));
+		assert_eq!(sizes, vec![1], "a unique key resolves in one batch");
+
+		let mut it = UniqueEqualIterator::new(fx.ns, fx.db, fx.ix("ik"), &Value::from(21i64))
+			.expect("unique equality iterator");
+		let (ids, _) = drain!(it, tx);
+		assert!(ids.is_empty(), "no row holds k = 21, got {ids:?}");
+	}
+
+	#[tokio::test]
+	async fn unique_nullish_equality_matches_every_nullish_row() {
+		// NONE/NULL tuples carry a record-id suffix, so one unique index can
+		// hold many of them and the lookup must be a prefix scan, not a get.
+		let db = uniq_db().await;
+		let fx = Fixture::new(&db, "u").await;
+		let tx = fx.tx();
+		let mut it = UniqueEqualIterator::new(fx.ns, fx.db, fx.ix("ik"), &Value::None)
+			.expect("unique equality iterator");
+		let (ids, _) = drain!(it, tx);
+		assert_eq!(ids, owned(&["u:4", "u:5"]));
+	}
+
+	#[tokio::test]
+	async fn unique_range_bound_combinations_include_the_documented_edges() {
+		let db = uniq_db().await;
+		let fx = Fixture::new(&db, "u").await;
+		let tx = fx.tx();
+		let (k10, k20, k30, k40) =
+			(Value::from(10i64), Value::from(20i64), Value::from(30i64), Value::from(40i64));
+
+		let cases: Vec<BoundCase<'_>> = vec![
+			// An inclusive upper bound must include the boundary key even
+			// though the underlying KV range is half-open.
+			("[10,30]", Bound::Included(&k10), Bound::Included(&k30), vec!["u:1", "u:2", "u:3"]),
+			("(10,30)", Bound::Excluded(&k10), Bound::Excluded(&k30), vec!["u:2"]),
+			("[20..", Bound::Included(&k20), Bound::Unbounded, vec!["u:2", "u:3"]),
+			// Nullish entries sort below the numbers.
+			("..20)", Bound::Unbounded, Bound::Excluded(&k20), vec!["u:4", "u:5", "u:1"]),
+			("..", Bound::Unbounded, Bound::Unbounded, vec!["u:4", "u:5", "u:1", "u:2", "u:3"]),
+			("[40..", Bound::Included(&k40), Bound::Unbounded, vec![]),
+		];
+
+		for (label, from, to, expected) in cases {
+			let mut it =
+				UniqueRangeIterator::new(fx.ns, fx.db, fx.ix("ik"), from, to, Direction::Forward)
+					.expect("unique range iterator");
+			let (forward, _) = drain!(it, tx);
+			assert_eq!(forward, owned(&expected), "forward {label}");
+
+			let mut it =
+				UniqueRangeIterator::new(fx.ns, fx.db, fx.ix("ik"), from, to, Direction::Backward)
+					.expect("unique range iterator");
+			let (backward, _) = drain!(it, tx);
+			assert_eq!(backward, reversed(&expected), "backward {label}");
+		}
+	}
+
+	// ------------------------------------------------------------------
+	// Compound (multi-column) index
+	// ------------------------------------------------------------------
+
+	/// `c` with a compound index on `(a, b)`; `c:4` sits under a different
+	/// leading value so a prefix scan must not reach it.
+	async fn compound_db() -> TestDb {
+		let db = TestDb::new("DEFINE TABLE c SCHEMALESS; DEFINE INDEX iab ON c FIELDS a, b;").await;
+		db.run(
+			"CREATE c:1 SET a = 1, b = 1;
+			 CREATE c:2 SET a = 1, b = 2;
+			 CREATE c:3 SET a = 1, b = 3;
+			 CREATE c:4 SET a = 2, b = 1;",
+		)
+		.await;
+		db
+	}
+
+	#[tokio::test]
+	async fn compound_prefix_scan_stays_within_the_prefix() {
+		let db = compound_db().await;
+		let fx = Fixture::new(&db, "c").await;
+		let tx = fx.tx();
+		let prefix = vec![Value::from(1i64)];
+
+		let mut it = CompoundEqualIterator::new(
+			fx.ns,
+			fx.db,
+			fx.ix("iab"),
+			&prefix,
+			None,
+			Direction::Forward,
+		)
+		.expect("compound equality iterator");
+		let (forward, _) = drain_capped!(it, tx, INDEX_BATCH_SIZE);
+		// Ordered by the trailing column, and `c:4` (a = 2) is out of range.
+		assert_eq!(forward, owned(&["c:1", "c:2", "c:3"]));
+
+		let mut it = CompoundEqualIterator::new(
+			fx.ns,
+			fx.db,
+			fx.ix("iab"),
+			&prefix,
+			None,
+			Direction::Backward,
+		)
+		.expect("compound equality iterator");
+		let (backward, _) = drain_capped!(it, tx, INDEX_BATCH_SIZE);
+		assert_eq!(backward, reversed(&["c:1", "c:2", "c:3"]));
+	}
+
+	#[tokio::test]
+	async fn compound_equality_range_pins_the_full_composite_key() {
+		let db = compound_db().await;
+		let fx = Fixture::new(&db, "c").await;
+		let tx = fx.tx();
+		let prefix = vec![Value::from(1i64)];
+		let range = (BinaryOperator::Equal, Value::from(2i64));
+		let mut it = CompoundEqualIterator::new(
+			fx.ns,
+			fx.db,
+			fx.ix("iab"),
+			&prefix,
+			Some(&range),
+			Direction::Forward,
+		)
+		.expect("compound equality iterator");
+		let (ids, _) = drain_capped!(it, tx, INDEX_BATCH_SIZE);
+		assert_eq!(ids, owned(&["c:2"]), "the range value extends the prefix into an exact key");
+	}
+
+	#[tokio::test]
+	async fn compound_range_operators_match_the_documented_key_bounds() {
+		let db = compound_db().await;
+		let fx = Fixture::new(&db, "c").await;
+		let tx = fx.tx();
+		let prefix = vec![Value::from(1i64)];
+
+		let cases: Vec<(BinaryOperator, Vec<&str>)> = vec![
+			(BinaryOperator::MoreThan, vec!["c:3"]),
+			(BinaryOperator::MoreThanEqual, vec!["c:2", "c:3"]),
+			(BinaryOperator::LessThan, vec!["c:1"]),
+			(BinaryOperator::LessThanEqual, vec!["c:1", "c:2"]),
+			(BinaryOperator::Equal, vec!["c:2"]),
+		];
+
+		for (op, expected) in cases {
+			let range = (op.clone(), Value::from(2i64));
+			let mut it = CompoundRangeIterator::new(
+				fx.ns,
+				fx.db,
+				fx.ix("iab"),
+				&prefix,
+				&range,
+				Direction::Forward,
+			)
+			.expect("compound range iterator");
+			let (forward, _) = drain_capped!(it, tx, INDEX_BATCH_SIZE);
+			// Every bound is anchored on the prefix, so `c:4` (a = 2) can
+			// never leak in whichever way the trailing column is bounded.
+			assert_eq!(forward, owned(&expected), "forward b {op:?} 2");
+
+			let mut it = CompoundRangeIterator::new(
+				fx.ns,
+				fx.db,
+				fx.ix("iab"),
+				&prefix,
+				&range,
+				Direction::Backward,
+			)
+			.expect("compound range iterator");
+			let (backward, _) = drain_capped!(it, tx, INDEX_BATCH_SIZE);
+			assert_eq!(backward, reversed(&expected), "backward b {op:?} 2");
+		}
+	}
+
+	#[tokio::test]
+	async fn unsupported_range_operator_widens_to_the_whole_prefix() {
+		// Any operator outside the documented table degrades to the prefix
+		// range: an over-approximation the residual filter has to narrow.
+		let db = compound_db().await;
+		let fx = Fixture::new(&db, "c").await;
+		let tx = fx.tx();
+		let prefix = vec![Value::from(1i64)];
+		let range = (BinaryOperator::NotEqual, Value::from(2i64));
+		let mut it = CompoundRangeIterator::new(
+			fx.ns,
+			fx.db,
+			fx.ix("iab"),
+			&prefix,
+			&range,
+			Direction::Forward,
+		)
+		.expect("compound range iterator");
+		let (ids, _) = drain_capped!(it, tx, INDEX_BATCH_SIZE);
+		assert_eq!(ids, owned(&["c:1", "c:2", "c:3"]), "c:2 is not excluded by the key range");
+	}
+
+	#[tokio::test]
+	async fn compound_scan_resumes_across_capped_batches() {
+		let db = compound_db().await;
+		let fx = Fixture::new(&db, "c").await;
+		let tx = fx.tx();
+		let prefix = vec![Value::from(1i64)];
+
+		let mut it = CompoundEqualIterator::new(
+			fx.ns,
+			fx.db,
+			fx.ix("iab"),
+			&prefix,
+			None,
+			Direction::Forward,
+		)
+		.expect("compound equality iterator");
+		let (forward, sizes) = drain_capped!(it, tx, 1);
+		assert_eq!(sizes, vec![1, 1, 1], "the caller's cap bounds every batch");
+		assert_eq!(forward, owned(&["c:1", "c:2", "c:3"]));
+
+		let mut it = CompoundEqualIterator::new(
+			fx.ns,
+			fx.db,
+			fx.ix("iab"),
+			&prefix,
+			None,
+			Direction::Backward,
+		)
+		.expect("compound equality iterator");
+		let (backward, sizes) = drain_capped!(it, tx, 1);
+		assert_eq!(sizes, vec![1, 1, 1]);
+		assert_eq!(backward, reversed(&["c:1", "c:2", "c:3"]));
+	}
+
+	#[tokio::test]
+	async fn zero_cap_reads_one_entry_on_equal_and_none_on_range() {
+		// `CompoundEqualIterator` clamps the cap up to 1 while
+		// `CompoundRangeForwardIterator` passes 0 through, where a 0-entry read
+		// is indistinguishable from exhaustion. Neither is the query's LIMIT:
+		// the scan pipeline tracks that itself and truncates the batch.
+		let db = compound_db().await;
+		let fx = Fixture::new(&db, "c").await;
+		let tx = fx.tx();
+		let prefix = vec![Value::from(1i64)];
+
+		let mut it = CompoundEqualIterator::new(
+			fx.ns,
+			fx.db,
+			fx.ix("iab"),
+			&prefix,
+			None,
+			Direction::Forward,
+		)
+		.expect("compound equality iterator");
+		let batch = it.next_batch(&tx, 0).await.expect("batch should scan");
+		assert_eq!(batch.len(), 1);
+
+		let range = (BinaryOperator::MoreThanEqual, Value::from(1i64));
+		let mut it = CompoundRangeForwardIterator::new(fx.ns, fx.db, fx.ix("iab"), &prefix, &range)
+			.expect("compound range iterator");
+		let batch = it.next_batch(&tx, 0).await.expect("batch should scan");
+		assert!(batch.is_empty());
+	}
+
+	// ------------------------------------------------------------------
+	// Bitmap candidate ranges
+	// ------------------------------------------------------------------
+
+	#[tokio::test]
+	async fn bitmap_range_drains_the_same_entries_as_the_streaming_scan() {
+		use crate::exec::index::access_path::BTreeAccess;
+
+		let db = idx_db().await;
+		let fx = Fixture::new(&db, "t").await;
+		let tx = fx.tx();
+		let ix = fx.ix("iv");
+
+		let mut it = IndexEqualIterator::new(fx.ns, fx.db, ix, &Value::from(1i64))
+			.expect("equality iterator");
+		let (streamed, _) = drain!(it, tx);
+		assert_eq!(streamed.len(), 2, "the fixture has two rows on v = 1");
+
+		let access = BTreeAccess::Equality(Value::from(1i64));
+		let mut range = bitmap_scan_range(fx.ns, fx.db, ix, &access).expect("b-tree range");
+		let entries = scan(&mut range, &tx, INDEX_BATCH_SIZE).await.expect("drain");
+		let mut docs = roaring::RoaringTreemap::new();
+		let mut missing = Vec::new();
+		let decoded = decode_entry_doc_ids(entries, &mut docs, &mut missing).expect("decode");
+		assert_eq!(decoded, streamed.len(), "the drain sees exactly the streamed entries");
+		assert!(missing.is_empty(), "a current-format index carries a doc-ID on every entry");
+		assert_eq!(docs.len() as usize, streamed.len());
+	}
+
+	#[tokio::test]
+	async fn bitmap_range_rejects_non_btree_access_shapes() {
+		use crate::exec::index::access_path::BTreeAccess;
+		use crate::expr::operator::{BooleanOperator, MatchesOperator};
+
+		let db = idx_db().await;
+		let fx = Fixture::new(&db, "t").await;
+		let ix = fx.ix("iv");
+
+		let full_text = BTreeAccess::FullText {
+			query: "hello".to_owned(),
+			operator: MatchesOperator {
+				rf: None,
+				operator: BooleanOperator::And,
+			},
+		};
+		assert!(bitmap_scan_range(fx.ns, fx.db, ix, &full_text).is_err());
+
+		let knn = BTreeAccess::Knn {
+			vector: vec![Number::Int(1)],
+			k: 3,
+			ef: 10,
+		};
+		assert!(bitmap_scan_range(fx.ns, fx.db, ix, &knn).is_err());
+	}
+}

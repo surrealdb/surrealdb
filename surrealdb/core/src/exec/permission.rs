@@ -253,3 +253,387 @@ impl TableSelectGate for PhysicalTableSelect {
 		})
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::dbs::Session;
+	use crate::exec::operators::test_util::{TestDb, parse_expr, physical_expr, root_ctx, val};
+	use crate::iam::{Level, Role};
+	use crate::kvs::TransactionType;
+
+	// =========================================================================
+	// convert_permission_to_physical
+	// =========================================================================
+
+	#[tokio::test]
+	async fn catalog_permission_maps_onto_the_three_physical_arms() {
+		let ctx = root_ctx();
+		let planner = Planner::new(ctx.ctx(), ctx.function_registry());
+
+		let none = convert_permission_to_physical(&Permission::None, &planner).await.unwrap();
+		assert!(matches!(none, PhysicalPermission::Deny));
+
+		let full = convert_permission_to_physical(&Permission::Full, &planner).await.unwrap();
+		assert!(matches!(full, PhysicalPermission::Allow));
+
+		let specific = Permission::Specific(parse_expr("owner = $auth.id"));
+		let conditional = convert_permission_to_physical(&specific, &planner).await.unwrap();
+		assert!(matches!(conditional, PhysicalPermission::Conditional(_)));
+	}
+
+	#[tokio::test]
+	async fn runtime_conversion_matches_the_planner_conversion() {
+		let ctx = root_ctx();
+		let permission = Permission::Specific(parse_expr("age > 18"));
+
+		let resolved = convert_permission_to_physical_runtime(&permission, &ctx).await.unwrap();
+		let PhysicalPermission::Conditional(expr) = resolved else {
+			panic!("a Specific permission resolves to Conditional");
+		};
+
+		// The txn-less runtime path must still produce an evaluable predicate,
+		// not a deferred/unsupported placeholder.
+		let allowed = check_permission_for_value(
+			&PhysicalPermission::Conditional(expr),
+			&val("{ age: 21 }").await,
+			None,
+			&ctx,
+		)
+		.await
+		.unwrap();
+		assert!(allowed);
+	}
+
+	// =========================================================================
+	// should_check_perms
+	// =========================================================================
+
+	/// Build a database context for `session` and ask whether `action` needs
+	/// permission enforcement.
+	async fn checks_perms(db: &TestDb, session: &Session, action: Action) -> bool {
+		let ctx = db.exec_ctx_as(session, TransactionType::Read).await;
+		should_check_perms(ctx.database().unwrap(), action).unwrap()
+	}
+
+	#[tokio::test]
+	async fn root_owner_is_exempt_from_both_actions() {
+		let db = TestDb::new("").await;
+		let owner = TestDb::owner();
+		assert!(!checks_perms(&db, &owner, Action::View).await);
+		assert!(!checks_perms(&db, &owner, Action::Edit).await);
+	}
+
+	#[tokio::test]
+	async fn viewer_is_exempt_from_view_but_not_from_edit() {
+		let db = TestDb::new("").await;
+		let viewer =
+			Session::for_level(Level::Database("test".to_owned(), "test".to_owned()), Role::Viewer);
+		assert!(!checks_perms(&db, &viewer, Action::View).await);
+		// A Viewer has no editor role, so writes stay permission-checked.
+		assert!(checks_perms(&db, &viewer, Action::Edit).await);
+	}
+
+	#[tokio::test]
+	async fn a_role_outside_the_target_database_is_not_exempt() {
+		let db = TestDb::new("").await;
+		// Owner of a *different* database: has the role, but the database under
+		// query is not inside its actor level, so checks stay on.
+		let elsewhere =
+			Session::for_level(Level::Database("test".to_owned(), "other".to_owned()), Role::Owner);
+		assert!(checks_perms(&db, &elsewhere, Action::View).await);
+		assert!(checks_perms(&db, &elsewhere, Action::Edit).await);
+	}
+
+	#[tokio::test]
+	async fn record_users_are_always_permission_checked() {
+		let db = TestDb::new("").await;
+		let record = Session::for_record(
+			"test",
+			"test",
+			"user",
+			crate::types::PublicValue::String("user:tobie".to_owned()),
+		);
+		assert!(checks_perms(&db, &record, Action::View).await);
+		assert!(checks_perms(&db, &record, Action::Edit).await);
+	}
+
+	#[tokio::test]
+	async fn anonymous_is_exempt_only_while_server_auth_is_disabled() {
+		let anon = Session::default().with_ns("test").with_db("test");
+
+		let open = TestDb::new("").await;
+		assert!(!checks_perms(&open, &anon, Action::View).await);
+
+		let secured = TestDb::new_with_auth("").await;
+		assert!(checks_perms(&secured, &anon, Action::View).await);
+	}
+
+	#[tokio::test]
+	async fn skip_fetch_perms_disables_every_check() {
+		let db = TestDb::new_with_auth("").await;
+		let record = Session::for_record(
+			"test",
+			"test",
+			"user",
+			crate::types::PublicValue::String("user:tobie".to_owned()),
+		);
+		let ctx = db.exec_ctx_as(&record, TransactionType::Read).await;
+
+		// Sanity: this identity is checked before the bypass is set.
+		assert!(should_check_perms(ctx.database().unwrap(), Action::View).unwrap());
+
+		let ExecutionContext::Database(mut inner) = ctx else {
+			panic!("exec_ctx_as builds a Database context");
+		};
+		inner.ns_ctx.root.skip_fetch_perms = true;
+		assert!(!should_check_perms(&inner, Action::View).unwrap());
+		assert!(!should_check_perms(&inner, Action::Edit).unwrap());
+	}
+
+	// =========================================================================
+	// validate_record_user_access
+	// =========================================================================
+
+	#[tokio::test]
+	async fn non_record_identities_bypass_the_ns_db_confinement_check() {
+		let db = TestDb::new("").await;
+		let ctx = db.exec_ctx_as(&TestDb::owner(), TransactionType::Read).await;
+		assert!(validate_record_user_access(ctx.database().unwrap()).is_ok());
+	}
+
+	#[tokio::test]
+	async fn a_record_user_is_confined_to_its_own_namespace_and_database() {
+		let db = TestDb::new("").await;
+		let rid = crate::types::PublicValue::String("user:tobie".to_owned());
+
+		let matching = Session::for_record("test", "test", "user", rid.clone());
+		let ctx = db.exec_ctx_as(&matching, TransactionType::Read).await;
+		assert!(validate_record_user_access(ctx.database().unwrap()).is_ok());
+
+		// The session names test/test (so the context resolves), but the token's
+		// own level names a different namespace / database.
+		let wrong_ns = Session {
+			au: Arc::new(crate::iam::Auth::for_record(
+				"user:tobie".to_owned(),
+				"other",
+				"test",
+				"user",
+			)),
+			..Session::for_record("test", "test", "user", rid.clone())
+		};
+		let ctx = db.exec_ctx_as(&wrong_ns, TransactionType::Read).await;
+		let err = validate_record_user_access(ctx.database().unwrap()).unwrap_err();
+		assert!(
+			matches!(err, Error::Exec(ExecError::NsNotAllowed { .. })),
+			"expected NsNotAllowed, got {err:?}"
+		);
+
+		let wrong_db = Session {
+			au: Arc::new(crate::iam::Auth::for_record(
+				"user:tobie".to_owned(),
+				"test",
+				"other",
+				"user",
+			)),
+			..Session::for_record("test", "test", "user", rid)
+		};
+		let ctx = db.exec_ctx_as(&wrong_db, TransactionType::Read).await;
+		let err = validate_record_user_access(ctx.database().unwrap()).unwrap_err();
+		assert!(
+			matches!(err, Error::Exec(ExecError::DbNotAllowed { .. })),
+			"expected DbNotAllowed, got {err:?}"
+		);
+	}
+
+	// =========================================================================
+	// check_permission_for_value
+	// =========================================================================
+
+	#[tokio::test]
+	async fn unconditional_arms_short_circuit_without_evaluating() {
+		let ctx = root_ctx();
+		let row = val("{ id: person:tobie }").await;
+
+		assert!(
+			check_permission_for_value(&PhysicalPermission::Allow, &row, None, &ctx).await.unwrap()
+		);
+		assert!(
+			!check_permission_for_value(&PhysicalPermission::Deny, &row, None, &ctx).await.unwrap()
+		);
+	}
+
+	#[tokio::test]
+	async fn a_conditional_permission_is_evaluated_against_the_record() {
+		let ctx = root_ctx();
+		let perm = PhysicalPermission::Conditional(physical_expr("public = true", &ctx).await);
+
+		let allowed = check_permission_for_value(&perm, &val("{ public: true }").await, None, &ctx)
+			.await
+			.unwrap();
+		assert!(allowed);
+
+		let denied = check_permission_for_value(&perm, &val("{ public: false }").await, None, &ctx)
+			.await
+			.unwrap();
+		assert!(!denied);
+
+		// A missing field is NONE, which is not truthy — deny, not error.
+		let absent = check_permission_for_value(&perm, &val("{ other: 1 }").await, None, &ctx)
+			.await
+			.unwrap();
+		assert!(!absent);
+	}
+
+	#[tokio::test]
+	async fn value_param_binds_the_picked_field_for_field_level_checks() {
+		let ctx = root_ctx();
+		let perm = PhysicalPermission::Conditional(physical_expr("$value > 10", &ctx).await);
+		let row = val("{ score: 42 }").await;
+
+		let allowed =
+			check_permission_for_value(&perm, &row, Some(&Value::from(42)), &ctx).await.unwrap();
+		assert!(allowed);
+
+		let denied =
+			check_permission_for_value(&perm, &row, Some(&Value::from(3)), &ctx).await.unwrap();
+		assert!(!denied);
+	}
+
+	#[tokio::test]
+	async fn the_record_is_bound_as_the_document_root_so_parent_resolves() {
+		// `$parent` is the one reader that does not fall back to the current
+		// value, so binding only the value would leave this predicate falsy and
+		// deny every row.
+		let ctx = root_ctx();
+		let perm = PhysicalPermission::Conditional(
+			physical_expr("acl[WHERE $parent.owner = 'tobie'] != []", &ctx).await,
+		);
+
+		let row = val("{ owner: 'tobie', acl: [{ read: true }] }").await;
+		assert!(check_permission_for_value(&perm, &row, None, &ctx).await.unwrap());
+
+		let other = val("{ owner: 'jaime', acl: [{ read: true }] }").await;
+		assert!(!check_permission_for_value(&perm, &other, None, &ctx).await.unwrap());
+	}
+
+	#[tokio::test]
+	async fn skip_fetch_perms_allows_a_conditional_permission_unconditionally() {
+		let ctx = root_ctx();
+		// A predicate that would otherwise deny.
+		let perm = PhysicalPermission::Conditional(physical_expr("false", &ctx).await);
+		let row = val("{ id: person:tobie }").await;
+		assert!(!check_permission_for_value(&perm, &row, None, &ctx).await.unwrap());
+
+		let ExecutionContext::Root(mut root) = ctx else {
+			panic!("root_ctx builds a Root context");
+		};
+		root.skip_fetch_perms = true;
+		let inner = ExecutionContext::Root(root);
+		assert!(check_permission_for_value(&perm, &row, None, &inner).await.unwrap());
+	}
+
+	#[tokio::test]
+	async fn control_flow_out_of_a_predicate_becomes_an_error_not_a_panic() {
+		let ctx = root_ctx();
+		// BREAK has no surrounding loop inside a permission predicate, so it has
+		// nowhere to go and must surface as an error.
+		let perm = PhysicalPermission::Conditional(physical_expr("BREAK", &ctx).await);
+		let row = val("{ id: person:tobie }").await;
+
+		let err = check_permission_for_value(&perm, &row, None, &ctx).await.unwrap_err();
+		assert!(
+			err.to_string().contains("unexpected control flow"),
+			"expected the control-flow message, got {err}"
+		);
+	}
+
+	#[tokio::test]
+	async fn an_error_inside_a_predicate_is_carried_through_unwrapped() {
+		let ctx = root_ctx();
+		// A thrown error must stay downcastable rather than collapse to
+		// `Internal`, so a write conflict raised per row can still be retried.
+		let perm = PhysicalPermission::Conditional(physical_expr("THROW 'boom'", &ctx).await);
+		let row = val("{ id: person:tobie }").await;
+
+		let err = check_permission_for_value(&perm, &row, None, &ctx).await.unwrap_err();
+		assert!(err.to_string().contains("boom"), "expected the thrown message, got {err}");
+		assert!(
+			!err.to_string().contains("unexpected control flow"),
+			"a THROW is an error, not a stray control-flow signal: {err}"
+		);
+	}
+
+	#[tokio::test]
+	async fn a_conditional_permission_reads_through_a_record_link() {
+		// A table permission that dereferences a link needs a transaction, so
+		// this is the path that `root_ctx` cannot serve.
+		let db = TestDb::new(
+			"DEFINE TABLE org SCHEMALESS;
+			 DEFINE TABLE doc SCHEMALESS;
+			 CREATE org:acme SET public = true;
+			 CREATE org:secret SET public = false;
+			 CREATE doc:1 SET org = org:acme;
+			 CREATE doc:2 SET org = org:secret;",
+		)
+		.await;
+		let ctx = db.exec_ctx().await;
+		let perm = PhysicalPermission::Conditional(physical_expr("org.public = true", &ctx).await);
+
+		let doc1 = val("{ id: doc:1, org: org:acme }").await;
+		let doc2 = val("{ id: doc:2, org: org:secret }").await;
+		assert!(check_permission_for_value(&perm, &doc1, None, &ctx).await.unwrap());
+		assert!(!check_permission_for_value(&perm, &doc2, None, &ctx).await.unwrap());
+	}
+
+	// =========================================================================
+	// PhysicalTableSelect
+	// =========================================================================
+
+	#[tokio::test]
+	async fn the_ann_gate_reports_whole_index_decisions_up_front() {
+		let ctx = root_ctx();
+
+		let allow = PhysicalTableSelect::new(PhysicalPermission::Allow, ctx.clone());
+		assert_eq!(allow.allows_every_doc(), Some(true));
+
+		let deny = PhysicalTableSelect::new(PhysicalPermission::Deny, ctx.clone());
+		assert_eq!(deny.allows_every_doc(), Some(false));
+
+		// Conditional cannot be decided for the whole index, so the search must
+		// gate each candidate individually.
+		let conditional = PhysicalTableSelect::new(
+			PhysicalPermission::Conditional(physical_expr("public = true", &ctx).await),
+			ctx.clone(),
+		);
+		assert_eq!(conditional.allows_every_doc(), None);
+	}
+
+	#[tokio::test]
+	async fn the_ann_gate_decides_a_candidate_with_the_same_predicate() {
+		let ctx = root_ctx();
+		let gate = PhysicalTableSelect::new(
+			PhysicalPermission::Conditional(physical_expr("public = true", &ctx).await),
+			ctx.clone(),
+		);
+
+		let rid = Arc::new(RecordId {
+			table: "doc".into(),
+			key: crate::val::RecordIdKey::Number(1),
+		});
+		let allowed = Arc::new(Record::new(val("{ public: true }").await));
+		let denied = Arc::new(Record::new(val("{ public: false }").await));
+
+		let mut stack = reblessive::tree::TreeStack::new();
+		let (yes, no) = stack
+			.enter(|stk| async {
+				let yes = gate.allows_doc(stk, &rid, &allowed).await.unwrap();
+				let no = gate.allows_doc(stk, &rid, &denied).await.unwrap();
+				(yes, no)
+			})
+			.finish()
+			.await;
+		assert!(yes);
+		assert!(!no);
+	}
+}
