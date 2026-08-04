@@ -159,6 +159,7 @@ impl ExecOperator for ExternalSort {
 
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
 			let mut count = 0usize;
+			let mut seq = 0usize;
 
 			while let Some(batch_result) = input_stream.next().await {
 				// Check for cancellation between batches
@@ -193,8 +194,10 @@ impl ExecOperator for ExternalSort {
 					// Write keyed value to temp file
 					let keyed = KeyedValue {
 						keys,
+						seq,
 						value,
 					};
+					seq += 1;
 
 					// Use spawn_blocking for file I/O
 					let mut w = writer;
@@ -244,8 +247,9 @@ impl ExecOperator for ExternalSort {
 					))
 					.build()?;
 
-				let sorted = sorter
-					.sort_by(reader, |a, b| compare_keys(&a.keys, &b.keys, &order_by_clone))?;
+				let sorted = sorter.sort_by(reader, |a, b| {
+					compare_keys(&a.keys, &b.keys, &order_by_clone).then_with(|| a.seq.cmp(&b.seq))
+				})?;
 
 				// Collect sorted values
 				let values: Vec<Value> =

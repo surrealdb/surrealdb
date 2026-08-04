@@ -1,9 +1,14 @@
 /**
-[env]
-planner-strategy = ["all-ro"]
-
 [test]
-reason = "Streaming TopK (SortTopKByKey) must break ties stably: rows with equal sort keys are returned in scan (insertion) order, including when LIMIT cuts inside a tie group. Tie order is not pinned across planner strategies (the legacy compute path differs), so this locks the streaming path only."
+reason = """
+Rows whose ORDER BY keys compare equal are returned in the order the input
+produced them --- scan order here --- including when LIMIT cuts inside a tie
+group and when START pages into one. Every sort path upholds this: the
+in-memory sorts, the top-k heaps and the disk-backed external sorts all
+compare the row's arrival position as the final sort key, so the guarantee does
+not depend on an underlying sort being stable.
+"""
+issue = 472
 
 [[test.results]]
 value = "'OK'"

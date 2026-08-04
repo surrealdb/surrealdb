@@ -12,7 +12,9 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 #[cfg(not(target_family = "wasm"))]
-use rayon::prelude::{IntoParallelIterator, ParallelIterator, ParallelSliceMut};
+use rayon::prelude::{
+	IndexedParallelIterator, IntoParallelIterator, ParallelIterator, ParallelSliceMut,
+};
 #[cfg(not(target_family = "wasm"))]
 use tokio::task::spawn_blocking;
 
@@ -26,6 +28,14 @@ use crate::exec::{
 #[cfg(not(target_family = "wasm"))]
 use crate::expr::ControlFlowExt;
 use crate::val::Value;
+
+/// A row decorated with its sort keys and its arrival position.
+///
+/// The position is part of the sort key: rows whose ORDER BY keys compare
+/// equal are emitted in the order the input produced them. Comparing it
+/// explicitly, rather than relying on a stable sort, keeps tie order identical
+/// across the sequential and rayon paths and across native and WASM.
+type KeyedRow = (Vec<Value>, usize, Value);
 
 /// Sorts the input stream by the specified ORDER BY fields.
 ///
@@ -179,13 +189,13 @@ impl ExecOperator for Sort {
 			// consuming the column vectors to avoid cloning values.
 			let mut key_iters: Vec<std::vec::IntoIter<Value>> =
 				key_columns.into_iter().map(|col| col.into_iter()).collect();
-			let mut keyed: Vec<(Vec<Value>, Value)> = Vec::with_capacity(num_values);
-			for value in all_values {
+			let mut keyed: Vec<KeyedRow> = Vec::with_capacity(num_values);
+			for (seq, value) in all_values.into_iter().enumerate() {
 				let keys: Vec<Value> = key_iters
 					.iter_mut()
 					.map(|iter| iter.next().expect("key column length matches batch size"))
 					.collect();
-				keyed.push((keys, value));
+				keyed.push((keys, seq, value));
 			}
 
 			// Sort the keyed values
@@ -211,14 +221,14 @@ impl ExecOperator for Sort {
 /// Sort keyed values using parallel sort on non-WASM, single-threaded on WASM.
 #[cfg(not(target_family = "wasm"))]
 async fn sort_keyed_values(
-	mut keyed: Vec<(Vec<Value>, Value)>,
+	mut keyed: Vec<KeyedRow>,
 	order_by: Vec<OrderByField>,
 ) -> Result<Vec<Value>, crate::expr::ControlFlow> {
 	spawn_blocking(move || {
-		keyed.par_sort_unstable_by(|(keys_a, _), (keys_b, _)| {
-			compare_keys(keys_a, keys_b, &order_by)
+		keyed.par_sort_unstable_by(|(keys_a, seq_a, _), (keys_b, seq_b, _)| {
+			compare_keys(keys_a, keys_b, &order_by).then_with(|| seq_a.cmp(seq_b))
 		});
-		keyed.into_iter().map(|(_, v)| v).collect()
+		keyed.into_iter().map(|(_, _, v)| v).collect()
 	})
 	.await
 	.context("Sort error")
@@ -227,11 +237,13 @@ async fn sort_keyed_values(
 /// Sort keyed values using single-threaded sort on WASM.
 #[cfg(target_family = "wasm")]
 async fn sort_keyed_values(
-	mut keyed: Vec<(Vec<Value>, Value)>,
+	mut keyed: Vec<KeyedRow>,
 	order_by: Vec<OrderByField>,
 ) -> Result<Vec<Value>, crate::expr::ControlFlow> {
-	keyed.sort_by(|(keys_a, _), (keys_b, _)| compare_keys(keys_a, keys_b, &order_by));
-	Ok(keyed.into_iter().map(|(_, v)| v).collect())
+	keyed.sort_by(|(keys_a, seq_a, _), (keys_b, seq_b, _)| {
+		compare_keys(keys_a, keys_b, &order_by).then_with(|| seq_a.cmp(seq_b))
+	});
+	Ok(keyed.into_iter().map(|(_, _, v)| v).collect())
 }
 
 // ============================================================================
@@ -394,18 +406,20 @@ async fn sort_by_keys(
 	const PARALLEL_EXTRACT_THRESHOLD: usize = 2000;
 
 	spawn_blocking(move || {
-		let extract = |v: Value| {
+		let extract = |(seq, v): (usize, Value)| {
 			let keys: Vec<Value> =
 				sort_keys.iter().map(|k| k.path.extract(&v).into_owned()).collect();
-			(keys, v)
+			(keys, seq, v)
 		};
-		let mut keyed: Vec<(Vec<Value>, Value)> = if values.len() < PARALLEL_EXTRACT_THRESHOLD {
-			values.into_iter().map(extract).collect()
+		let mut keyed: Vec<KeyedRow> = if values.len() < PARALLEL_EXTRACT_THRESHOLD {
+			values.into_iter().enumerate().map(extract).collect()
 		} else {
-			values.into_par_iter().map(extract).collect()
+			values.into_par_iter().enumerate().map(extract).collect()
 		};
-		keyed.par_sort_unstable_by(|a, b| compare_keys_by_sort_key(&a.0, &b.0, &sort_keys));
-		keyed.into_iter().map(|(_, v)| v).collect()
+		keyed.par_sort_unstable_by(|a, b| {
+			compare_keys_by_sort_key(&a.0, &b.0, &sort_keys).then_with(|| a.1.cmp(&b.1))
+		});
+		keyed.into_iter().map(|(_, _, v)| v).collect()
 	})
 	.await
 	.context("Sort error")
@@ -417,14 +431,17 @@ async fn sort_by_keys(
 	values: Vec<Value>,
 	sort_keys: Vec<SortKey>,
 ) -> Result<Vec<Value>, crate::expr::ControlFlow> {
-	let mut keyed: Vec<(Vec<Value>, Value)> = values
+	let mut keyed: Vec<KeyedRow> = values
 		.into_iter()
-		.map(|v| {
+		.enumerate()
+		.map(|(seq, v)| {
 			let keys: Vec<Value> =
 				sort_keys.iter().map(|k| k.path.extract(&v).into_owned()).collect();
-			(keys, v)
+			(keys, seq, v)
 		})
 		.collect();
-	keyed.sort_by(|a, b| compare_keys_by_sort_key(&a.0, &b.0, &sort_keys));
-	Ok(keyed.into_iter().map(|(_, v)| v).collect())
+	keyed.sort_by(|a, b| {
+		compare_keys_by_sort_key(&a.0, &b.0, &sort_keys).then_with(|| a.1.cmp(&b.1))
+	});
+	Ok(keyed.into_iter().map(|(_, _, v)| v).collect())
 }

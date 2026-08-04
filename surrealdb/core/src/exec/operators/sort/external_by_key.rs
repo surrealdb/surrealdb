@@ -132,6 +132,7 @@ impl ExecOperator for ExternalSortByKey {
 			let mut writer =
 				TempFileWriter::new(&dir).context("Failed to create temp file writer")?;
 			let mut count = 0usize;
+			let mut seq = 0usize;
 
 			while let Some(batch_result) = input_stream.next().await {
 				if ctx.cancellation().is_cancelled() {
@@ -150,8 +151,10 @@ impl ExecOperator for ExternalSortByKey {
 
 					let keyed = KeyedValue {
 						keys,
+						seq,
 						value,
 					};
+					seq += 1;
 
 					let mut w = writer;
 					w = spawn_blocking(move || {
@@ -198,6 +201,7 @@ impl ExecOperator for ExternalSortByKey {
 
 				let sorted = sorter.sort_by(reader, |a, b| {
 					compare_keys_by_sort_key(&a.keys, &b.keys, &sort_keys_clone)
+						.then_with(|| a.seq.cmp(&b.seq))
 				})?;
 
 				let values: Vec<Value> =

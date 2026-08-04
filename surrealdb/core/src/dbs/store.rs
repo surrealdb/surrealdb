@@ -162,6 +162,10 @@ impl MemoryRandom {
 
 /// The struct MemoryOrdered represents an in-memory store that aggregates
 /// ordered data.
+///
+/// Rows whose ORDER BY keys compare equal are emitted in collection order. The
+/// sorts below are unstable, so the collection index is compared explicitly as
+/// the final key.
 pub(in crate::dbs) struct MemoryOrdered {
 	/// Collected values
 	values: Vec<Value>,
@@ -222,7 +226,9 @@ impl MemoryOrdered {
 			return;
 		}
 		let mut ordered = mem::take(&mut self.ordered);
-		ordered.sort_unstable_by(|a, b| self.orders.compare(&self.values[*a], &self.values[*b]));
+		ordered.sort_unstable_by(|a, b| {
+			self.orders.compare(&self.values[*a], &self.values[*b]).then_with(|| a.cmp(b))
+		});
 		apply_permutation_in_place(&mut self.values, &mut ordered);
 		// ordered is already empty from mem::take, so it stays cleared
 	}
@@ -241,7 +247,9 @@ impl MemoryOrdered {
 		let mut values = mem::take(&mut self.values);
 		let orders = self.orders.clone();
 		self.values = spawn_blocking(move || {
-			ordered.par_sort_unstable_by(|a, b| orders.compare(&values[*a], &values[*b]));
+			ordered.par_sort_unstable_by(|a, b| {
+				orders.compare(&values[*a], &values[*b]).then_with(|| a.cmp(b))
+			});
 			apply_permutation_in_place(&mut values, &mut ordered);
 			values
 		})
@@ -275,8 +283,14 @@ impl MemoryOrdered {
 	}
 }
 
+/// A value in the [`MemoryOrderedLimit`] heap.
+///
+/// The ordering is reversed (the heap keeps the worst candidate at the top so
+/// it can be evicted first), and `seq` -- the value's push order -- is the
+/// final key, so equal-keyed rows are kept and emitted in push order.
 pub(super) struct OrderedValue {
 	value: Value,
+	seq: usize,
 	orders: Arc<OrderList>,
 }
 impl PartialOrd<Self> for OrderedValue {
@@ -289,19 +303,21 @@ impl Eq for OrderedValue {}
 
 impl Ord for OrderedValue {
 	fn cmp(&self, other: &Self) -> Ordering {
-		self.orders.compare(&other.value, &self.value)
+		self.orders.compare(&other.value, &self.value).then_with(|| other.seq.cmp(&self.seq))
 	}
 }
 
 impl PartialEq<Self> for OrderedValue {
 	fn eq(&self, other: &Self) -> bool {
-		self.value.eq(&other.value)
+		self.cmp(other) == Ordering::Equal
 	}
 }
 
 pub(super) struct MemoryOrderedLimit {
 	/// The priority list
 	heap: BinaryHeap<Reverse<OrderedValue>>,
+	/// Number of values pushed so far, used as the tie-breaking sort key
+	pushed: usize,
 	/// The maximum size of the priority list
 	limit: usize,
 	/// The order specification
@@ -314,6 +330,7 @@ impl MemoryOrderedLimit {
 	pub(super) fn new(limit: usize, orders: OrderList) -> Self {
 		Self {
 			heap: BinaryHeap::with_capacity(limit + 1),
+			pushed: 0,
 			limit,
 			orders: Arc::new(orders),
 			result: None,
@@ -321,15 +338,19 @@ impl MemoryOrderedLimit {
 	}
 
 	pub(in crate::dbs) fn push(&mut self, value: Value) {
+		let seq = self.pushed;
+		self.pushed += 1;
 		if self.heap.len() >= self.limit {
 			// When the heap is full, first check if the new value
 			// if smaller that the top of this min-heap in order to
-			// prevent unnecessary push/pop and Arc::clone.
+			// prevent unnecessary push/pop and Arc::clone. A value that
+			// only ties with the top loses, keeping the earlier row.
 			if let Some(top) = self.heap.peek() {
 				let cmp = self.orders.compare(&value, &top.0.value);
 				if cmp == Ordering::Less {
 					self.heap.push(Reverse(OrderedValue {
 						value,
+						seq,
 						orders: Arc::clone(&self.orders),
 					}));
 					self.heap.pop();
@@ -339,6 +360,7 @@ impl MemoryOrderedLimit {
 			// Push the value onto the heap because it's not full.
 			self.heap.push(Reverse(OrderedValue {
 				value,
+				seq,
 				orders: Arc::clone(&self.orders),
 			}));
 		}

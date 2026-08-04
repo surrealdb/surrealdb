@@ -70,16 +70,24 @@ impl PhysicalExpr for WherePart {
 					}
 					Ok(Value::Array(result.into()))
 				}
-				// For non-arrays, check if the single value matches
-				other => {
-					let item_ctx = ctx.with_value(&other);
-					let matches = self.predicate.evaluate(item_ctx).await?.is_truthy();
-					if matches {
-						Ok(Value::Array(vec![other].into()))
-					} else {
-						Ok(Value::Array(crate::val::Array::default()))
+				// A filtered set stays a set, so `<set>[..][WHERE ..]` keeps its
+				// deduplicating type instead of decaying to an array.
+				Value::Set(set) => {
+					let mut result = crate::val::Set::new();
+					for item in set.iter() {
+						let item_ctx = ctx.with_value(item);
+						let matches = self.predicate.evaluate(item_ctx).await?.is_truthy();
+						if matches {
+							result.insert(item.clone());
+						}
 					}
+					Ok(Value::Set(result))
 				}
+				// `[WHERE ..]` selects from a collection. Applied to anything
+				// else -- a scalar, an object, a record id, NONE -- there is
+				// nothing to select from, so the path yields NONE rather than
+				// promoting the value to a one-element collection.
+				_ => Ok(Value::None),
 			}
 		})
 	}
@@ -238,56 +246,58 @@ mod tests {
 	}
 
 	// =========================================================================
-	// Non-array inputs
+	// Inputs that are not arrays
 	// =========================================================================
 
 	#[tokio::test]
-	async fn a_filter_on_a_non_array_wraps_the_single_value_in_an_array() {
-		// Current behaviour: a non-array input is tested as one value and, when
-		// it matches, comes back wrapped in a one-element array; when it does
-		// not, the result is an empty array. The legacy `compute` path instead
-		// yields NONE for a non-array, non-set input.
+	async fn a_filter_on_a_non_collection_yields_none() {
+		// There is nothing to select from, so a matching predicate does not
+		// promote the value to a one-element collection.
 		let ctx = root_ctx();
 		assert_eq!(
 			eval_on("a[WHERE $this > 2]", &val("{ a: 5 }").await, &ctx).await.unwrap(),
-			val("[5]").await
+			Value::None
 		);
 		assert_eq!(
 			eval_on("a[WHERE $this > 2]", &val("{ a: 1 }").await, &ctx).await.unwrap(),
-			val("[]").await
+			Value::None
 		);
-		// An object input is likewise treated as a single item.
+		// An object is not a collection of its entries either.
 		assert_eq!(
 			eval_on("a[WHERE age > 30]", &val("{ a: { age: 35 } }").await, &ctx).await.unwrap(),
-			val("[{ age: 35 }]").await
+			Value::None
 		);
 	}
 
 	#[tokio::test]
-	async fn a_filter_on_a_missing_field_tests_none_as_a_single_value() {
-		// A missing field is NONE, and NONE reaches the single-value arm: a
-		// predicate that holds for NONE produces `[NONE]`.
+	async fn a_filter_on_a_missing_field_yields_none() {
+		// A missing field is NONE, which is not a collection, so the predicate
+		// does not decide the result.
 		let ctx = root_ctx();
 		assert_eq!(
 			eval_on("a[WHERE $this = NONE]", &val("{ }").await, &ctx).await.unwrap(),
-			val("[NONE]").await
+			Value::None
 		);
 		assert_eq!(
 			eval_on("a[WHERE $this != NONE]", &val("{ }").await, &ctx).await.unwrap(),
-			val("[]").await
+			Value::None
 		);
 	}
 
 	#[tokio::test]
-	async fn a_filter_on_a_set_tests_the_whole_set_rather_than_its_members() {
-		// Current behaviour: only `Value::Array` is filtered element-wise. A set
-		// falls into the single-value arm, so the result is a one-element array
-		// holding the untouched set. The legacy `compute` path filters set
-		// members and returns a set.
+	async fn a_filter_on_a_set_keeps_the_matching_members_as_a_set() {
+		// Sets are filtered member-wise like arrays, and the deduplicating type
+		// survives the filter.
 		let ctx = root_ctx();
 		let set = Value::Set(Set::from_iter(vec![Value::from(1), Value::from(2), Value::from(3)]));
-		let out = filter("$this != NONE", false, &set, &ctx).await;
-		assert_eq!(out, Value::Array(vec![set].into()));
+		assert_eq!(
+			filter("$this > 1", false, &set, &ctx).await,
+			Value::Set(Set::from_iter(vec![Value::from(2), Value::from(3)]))
+		);
+		assert_eq!(
+			filter("$this > 10", false, &set, &ctx).await,
+			Value::Set(Set::from_iter(vec![]))
+		);
 	}
 
 	// =========================================================================
