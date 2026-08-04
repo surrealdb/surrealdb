@@ -124,6 +124,7 @@ dashmap.workspace = true
 deunicode.workspace = true
 fastnum.workspace = true
 fst.workspace = true
+frostem.workspace = true
 futures.workspace = true
 fuzzy-matcher.workspace = true
 geo = { workspace = true, features = ["use-serde"] }
@@ -151,7 +152,6 @@ rayon.workspace = true
 regex.workspace = true
 roaring = { workspace = true, features = ["serde"] }
 rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
-rust-stemmers.workspace = true
 scrypt.workspace = true
 semver = { workspace = true, features = ["serde"] }
 serde = { workspace = true, features = ["derive", "rc"] }

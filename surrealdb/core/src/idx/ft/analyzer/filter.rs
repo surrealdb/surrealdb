@@ -1,6 +1,6 @@
 use anyhow::Result;
 use deunicode::deunicode;
-use rust_stemmers::{Algorithm, Stemmer};
+use frostem::{Algorithm, Stemmer};
 
 use crate::expr::filter::Filter as SqlFilter;
 use crate::expr::language::Language;
@@ -33,24 +33,24 @@ impl Filter {
 			SqlFilter::Ngram(min, max) => Filter::Ngram(*min, *max),
 			SqlFilter::Snowball(l) => {
 				let a = match l {
-					Language::Arabic => Stemmer::create(Algorithm::Arabic),
-					Language::Danish => Stemmer::create(Algorithm::Danish),
-					Language::Dutch => Stemmer::create(Algorithm::Dutch),
-					Language::English => Stemmer::create(Algorithm::English),
-					Language::Finnish => Stemmer::create(Algorithm::Finnish),
-					Language::French => Stemmer::create(Algorithm::French),
-					Language::German => Stemmer::create(Algorithm::German),
-					Language::Greek => Stemmer::create(Algorithm::Greek),
-					Language::Hungarian => Stemmer::create(Algorithm::Hungarian),
-					Language::Italian => Stemmer::create(Algorithm::Italian),
-					Language::Norwegian => Stemmer::create(Algorithm::Norwegian),
-					Language::Portuguese => Stemmer::create(Algorithm::Portuguese),
-					Language::Romanian => Stemmer::create(Algorithm::Romanian),
-					Language::Russian => Stemmer::create(Algorithm::Russian),
-					Language::Spanish => Stemmer::create(Algorithm::Spanish),
-					Language::Swedish => Stemmer::create(Algorithm::Swedish),
-					Language::Tamil => Stemmer::create(Algorithm::Tamil),
-					Language::Turkish => Stemmer::create(Algorithm::Turkish),
+					Language::Arabic => Stemmer::new(Algorithm::Arabic),
+					Language::Danish => Stemmer::new(Algorithm::Danish),
+					Language::Dutch => Stemmer::new(Algorithm::Dutch),
+					Language::English => Stemmer::new(Algorithm::English),
+					Language::Finnish => Stemmer::new(Algorithm::Finnish),
+					Language::French => Stemmer::new(Algorithm::French),
+					Language::German => Stemmer::new(Algorithm::German),
+					Language::Greek => Stemmer::new(Algorithm::Greek),
+					Language::Hungarian => Stemmer::new(Algorithm::Hungarian),
+					Language::Italian => Stemmer::new(Algorithm::Italian),
+					Language::Norwegian => Stemmer::new(Algorithm::Norwegian),
+					Language::Portuguese => Stemmer::new(Algorithm::Portuguese),
+					Language::Romanian => Stemmer::new(Algorithm::Romanian),
+					Language::Russian => Stemmer::new(Algorithm::Russian),
+					Language::Spanish => Stemmer::new(Algorithm::Spanish),
+					Language::Swedish => Stemmer::new(Algorithm::Swedish),
+					Language::Tamil => Stemmer::new(Algorithm::Tamil),
+					Language::Turkish => Stemmer::new(Algorithm::Turkish),
 				};
 				Filter::Stemmer(a)
 			}

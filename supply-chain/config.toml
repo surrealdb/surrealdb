@@ -565,6 +565,10 @@ criteria = "safe-to-deploy"
 version = "1.0.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.frostem]]
+version = "1.20260804.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.fs-err]]
 version = "3.3.0"
 criteria = "safe-to-deploy"
@@ -1347,10 +1351,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.rstar]]
 version = "0.12.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.rust-stemmers]]
-version = "1.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rust_decimal]]

@@ -129,6 +129,7 @@ ext-sort = "^0.1.5"
 fastnum = "0.7.4"
 flatbuffers = { version = "25.12.19", features = ["serde"] }
 fst = "0.4.7"
+frostem = { version = "1.20260804.0", default-features = false, features = ["arabic", "danish", "dutch", "english", "finnish", "french", "german", "greek", "hungarian", "italian", "norwegian", "portuguese", "romanian", "russian", "spanish", "swedish", "tamil", "turkish"] }
 futures = "0.3.32"
 futures-util = "0.3.32"
 fuzzy-matcher = "0.3.7"
@@ -178,7 +179,6 @@ rmcp = { version = "1.4.0", default-features = false }
 roaring = "0.11.3"
 rustls = { version = "0.23.38", default-features = false, features = ["logging", "std", "tls12"] }
 rust_decimal = "1.41.0"
-rust-stemmers = "1.2.0" # TODO: Look at the use of this dependency. Last update 5 years ago, unmaintained.
 schemars = "1.2.1"
 scrypt = "0.11.0"
 semver = "1.0.28"
