@@ -1,9 +1,11 @@
+use std::collections::HashMap;
 use std::pin::{Pin, pin};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::{Result, anyhow, bail};
+use async_channel::Sender;
 use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
 use surrealdb_types::{Error as TypesError, QueryError, ToSql};
@@ -20,13 +22,14 @@ use crate::catalog::providers::{
 use crate::ctx::reason::Reason;
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{
-	Force, MessageBroker, Options, QueryResult, QueryType, RoutedNotification, StatementCounters,
+	Force, MessageBroker, Options, QueryResult, QueryStreamItem, QueryType, RoutedNotification,
+	StatementCounters, items_for_result,
 };
 use crate::doc::DefaultBroker;
 use crate::err::{EngineError, Error};
-use crate::exec::Error as ExecError;
 use crate::exec::function::FunctionRegistry;
 use crate::exec::planner::try_plan_expr;
+use crate::exec::{Error as ExecError, OutputShape};
 use crate::expr::paths::{DB, NS};
 use crate::expr::plan::LogicalPlan;
 use crate::expr::statements::{OptionStatement, UseStatement};
@@ -165,6 +168,68 @@ fn query_type_for_toplevel_expr(expr: &TopLevelExpr) -> QueryType {
 	}
 }
 
+/// Turns the values a plan produced into the statement's result value.
+///
+/// The plan declares the shape and the number of values that arrived does not
+/// get a vote: a consumer that forwards values as they are produced knows the
+/// shape long before it knows the count, so the count cannot be what decides.
+/// An operator that declares [`OutputShape::Scalar`] and then emits anything
+/// but one value has a bug; reporting it is what keeps that bug from reaching
+/// the caller as a silently rearranged result.
+fn shape_statement_value(shape: OutputShape, mut values: Vec<Value>) -> Result<Value> {
+	match shape {
+		OutputShape::Scalar if values.len() == 1 => {
+			Ok(values.pop().expect("values verified non-empty"))
+		}
+		OutputShape::Scalar => Err(anyhow!(EngineError::unreachable(format!(
+			"A scalar plan produced {} values instead of one",
+			values.len()
+		)))),
+		OutputShape::Rows => Ok(Value::Array(Array::from(values))),
+	}
+}
+
+/// Where a streaming execution sends its output.
+///
+/// Only rows stream: a statement's `QueryResult` is one small entry either way,
+/// so [`Executor::results`] still accumulates them, and this sends
+/// [`QueryStreamItem`]s alongside. That is what keeps the transaction-block
+/// bookkeeping — which rewrites already-produced results when a block fails —
+/// working unchanged.
+///
+/// The ordering it maintains is the one the wire requires: a statement's rows
+/// go out while it runs, and its `Finished` only once its outcome is final.
+struct StreamSink {
+	items: Sender<QueryStreamItem>,
+	/// Statements whose rows have already been sent, and how many went out.
+	///
+	/// Keyed by statement index rather than held in a single slot because
+	/// finalisation can lag several statements behind: inside a
+	/// `BEGIN … COMMIT` block every statement's rows go out as it runs, but
+	/// none of them is final until the block resolves.
+	streamed: HashMap<usize, u64>,
+	/// How many of [`Executor::results`] have been finalised. Results at or
+	/// past this index are still provisional — inside an unresolved
+	/// `BEGIN … COMMIT` block, they may yet be rewritten into errors.
+	finalised: usize,
+}
+
+impl StreamSink {
+	/// Send one item, ignoring a consumer that has stopped reading.
+	///
+	/// A closed channel is not an error here: the caller has already been told
+	/// to stop by [`Self::is_closed`], and an item produced in the meantime has
+	/// nowhere to go.
+	async fn send(&self, item: QueryStreamItem) {
+		let _ = self.items.send(item).await;
+	}
+
+	/// Whether the consumer has gone away.
+	fn is_closed(&self) -> bool {
+		self.items.is_closed()
+	}
+}
+
 struct PreparedBroker {
 	receiver: async_channel::Receiver<RoutedNotification>,
 	delivery: Arc<dyn MessageBroker>,
@@ -187,6 +252,8 @@ pub struct Executor {
 	/// broker was already present (higher layer) or this statement skipped installation.
 	/// Drives conditional [`clear_broker`] so we never remove an externally supplied broker.
 	broker_owned_by_executor: bool,
+	/// Present when this execution streams its results.
+	stream: Option<StreamSink>,
 }
 
 impl Executor {
@@ -272,6 +339,110 @@ impl Executor {
 			function_registry: Arc::clone(kvs.function_registry()),
 			cached_session: None,
 			broker_owned_by_executor: false,
+			stream: None,
+		}
+	}
+
+	/// Build an executor that streams its results into `items` as it produces
+	/// them, instead of only accumulating them.
+	pub(crate) fn new_streaming(
+		kvs: &Datastore,
+		ctx: FrozenContext,
+		opt: Options,
+		items: Sender<QueryStreamItem>,
+	) -> Self {
+		let mut this = Self::new(kvs, ctx, opt);
+		this.stream = Some(StreamSink {
+			items,
+			streamed: HashMap::new(),
+			finalised: 0,
+		});
+		this
+	}
+
+	/// Whether a streaming execution has lost its consumer.
+	///
+	/// The remaining statements are abandoned when it has. Stopping only the
+	/// statement that was producing rows would leave the ones after it to run
+	/// and commit — a dropped `SELECT * FROM big; DELETE FROM important` would
+	/// still perform the delete — so the check belongs at the statement
+	/// boundary, beside the executor's other stop conditions.
+	fn consumer_gone(&self) -> bool {
+		self.stream.as_ref().is_some_and(StreamSink::is_closed)
+	}
+
+	/// Whether the statement about to run should stream its rows.
+	///
+	/// False once the consumer has gone away, so a dropped stream stops the
+	/// work rather than producing rows nothing will read.
+	fn streams_rows(&self) -> bool {
+		self.stream.as_ref().is_some_and(|sink| !sink.is_closed())
+	}
+
+	/// The index of the statement currently running.
+	///
+	/// Its result has not been pushed yet, so it is the next slot in
+	/// [`Self::results`]. Statements run one at a time, which is what makes
+	/// that identification sound.
+	fn current_index(&self) -> usize {
+		self.results.len()
+	}
+
+	/// How many rows the statement at `index` streamed, if it streamed.
+	///
+	/// `Some` means its rows are already on their way to the consumer, so its
+	/// value must not be sent again — and it is the row count for that
+	/// statement, which cannot be recovered from its result: a streamed
+	/// statement's value is empty precisely because the rows went elsewhere.
+	fn streamed_rows(&self, index: usize) -> Option<u64> {
+		self.stream.as_ref().and_then(|sink| sink.streamed.get(&index).copied())
+	}
+
+	/// Send the results that have become final, in order.
+	///
+	/// Called once a statement's outcome can no longer change: immediately for
+	/// a statement outside a transaction block, and at the block's resolution
+	/// for every statement inside one, since until then a failure can still
+	/// rewrite them into errors.
+	async fn finalise_results(&mut self) {
+		let Some(sink) = self.stream.as_mut() else {
+			return;
+		};
+		while sink.finalised < self.results.len() {
+			let index = sink.finalised;
+			sink.finalised += 1;
+			let result = &mut self.results[index];
+			// A statement whose rows already went out is owed only its terminal
+			// item; one that failed is owed only that too, since its rows (if
+			// any) are retracted. Anything else contributes its value as well.
+			let items = if result.result.is_ok() && sink.streamed.contains_key(&index) {
+				vec![QueryStreamItem::Finished {
+					index,
+					time: result.time,
+					query_type: result.query_type,
+					error: None,
+				}]
+			} else {
+				// Take the value rather than copy it: it can be a whole
+				// statement's results from the legacy evaluator, and the only
+				// caller that reads them back wants a `LIVE`/`KILL` id, which
+				// is left in place.
+				let owned = match result.query_type {
+					QueryType::Live | QueryType::Kill => result.clone(),
+					QueryType::Other => QueryResult {
+						time: result.time,
+						result: std::mem::replace(
+							&mut result.result,
+							Ok(surrealdb_types::Value::None),
+						),
+						query_type: result.query_type,
+					},
+				};
+				items_for_result(index, owned)
+			};
+			for item in items {
+				sink.send(item).await;
+			}
 		}
 	}
 
@@ -599,10 +770,16 @@ impl Executor {
 	///
 	/// This builds an ExecutionContext from the current session state and executes
 	/// the streaming operator plan, collecting all results into an array.
+	/// `stream_rows` is set by the callers that run a **top-level** statement,
+	/// whose values are the statement's own result. It is false where the
+	/// values are consumed rather than returned — a `LET` binding them to a
+	/// param — because those are not the statement's rows and must not reach
+	/// the consumer as such.
 	async fn execute_operator_plan(
 		&mut self,
 		plan: Arc<dyn crate::exec::ExecOperator>,
 		txn: Arc<Transaction>,
+		stream_rows: bool,
 	) -> FlowResult<Value> {
 		use tokio_util::sync::CancellationToken;
 
@@ -730,12 +907,41 @@ impl Executor {
 			}
 		};
 
+		// A row-shaped statement whose rows nothing is waiting to collect can
+		// send each batch onward as it arrives, rather than building the whole
+		// array first. A scalar one cannot: its value IS the single row, so
+		// there is nothing to stream and one item carries it.
+		let streaming = stream_rows && matches!(plan.output_shape(), OutputShape::Rows);
+		let index = self.current_index();
+
 		// Collect all results
 		let mut results = Vec::new();
+		let mut streamed: u64 = 0;
 		while let Some(batch_result) = stream.next().await {
 			match batch_result {
 				Ok(batch) => {
-					results.extend(batch.values);
+					if streaming {
+						let values = batch
+							.values
+							.into_iter()
+							.map(convert_value_to_public_value)
+							.collect::<Result<Vec<_>>>()
+							.map_err(ControlFlow::Err)?;
+						streamed += values.len() as u64;
+						let sink = self.stream.as_ref().expect("streaming implies a sink");
+						sink.send(QueryStreamItem::Rows {
+							index,
+							values,
+						})
+						.await;
+						// A consumer that stopped reading wants no more rows, and
+						// the statement is about to be abandoned anyway.
+						if sink.is_closed() {
+							break;
+						}
+					} else {
+						results.extend(batch.values);
+					}
 				}
 				Err(crate::expr::ControlFlow::Err(e)) => {
 					return Err(ControlFlow::Err(e));
@@ -753,12 +959,18 @@ impl Executor {
 			}
 		}
 
-		// Return results as an array if it's a query, or the scalar value if it's a scalar plan
-		if plan.is_scalar() && results.len() == 1 {
-			Ok(results.pop().expect("results verified non-empty"))
-		} else {
-			Ok(Value::Array(Array::from(results)))
+		if streaming {
+			// The rows are already on their way, so the statement's own value is
+			// empty. `streamed` is what tells the caller not to send it again.
+			self.stream
+				.as_mut()
+				.expect("streaming implies a sink")
+				.streamed
+				.insert(index, streamed);
+			return Ok(Value::None);
 		}
+
+		shape_statement_value(plan.output_shape(), results).map_err(ControlFlow::Err)
 	}
 
 	/// Executes a statement which needs a transaction with the supplied
@@ -975,7 +1187,9 @@ impl Executor {
 					Arc::clone(&txn),
 					Some(Arc::clone(&self.opt.auth))
 				) {
-					Ok(plan) => self.execute_operator_plan(plan, Arc::clone(&txn)).await,
+					// The RHS binds to a param rather than being returned, so its
+					// values are not the statement's rows and must not stream.
+					Ok(plan) => self.execute_operator_plan(plan, Arc::clone(&txn), false).await,
 					Err(Error::Exec(
 						err @ (ExecError::PlannerUnsupported(_)
 						| ExecError::PlannerUnimplemented(_)),
@@ -1086,8 +1300,13 @@ impl Executor {
 						// Set the transaction on the context
 						ctx_mut!().set_transaction(Arc::clone(&txn));
 
+						// Every caller of this method runs a top-level statement,
+						// so these values are the statement's own result and may
+						// stream.
+						let stream_rows = self.streams_rows();
 						// Build execution context and execute the plan
-						let exec_result = self.execute_operator_plan(plan, Arc::clone(&txn)).await;
+						let exec_result =
+							self.execute_operator_plan(plan, Arc::clone(&txn), stream_rows).await;
 
 						self.check_slow_log(start, &e);
 
@@ -1383,6 +1602,14 @@ impl Executor {
 
 		// loop over the statements until we hit a cancel or a commit statement.
 		while let Some(stmt) = stream.next().await {
+			// A block whose consumer has gone away is abandoned mid-way, which
+			// falls through to the missing-COMMIT tail below and cancels the
+			// transaction. Rolling back is the safe reading of "nobody is
+			// waiting for this": the alternative is committing writes for a
+			// query the caller stopped listening to.
+			if self.consumer_gone() {
+				break;
+			}
 			yield_now!();
 			let stmt = match stmt {
 				Ok(x) => x,
@@ -1741,6 +1968,7 @@ impl Executor {
 					// surface affected-row counts independently of the
 					// post-RETURN value shape.
 					let counters = self.install_statement_counters();
+					let statement_index = self.current_index();
 					let r: Result<Value> = match self
 						.execute_plan_in_transaction(Arc::clone(&txn), &before, plan)
 						.await
@@ -1839,11 +2067,17 @@ impl Executor {
 					// DML statements consult the iterator-side counter
 					// so RETURN NONE / fresh CREATE etc. report
 					// accurately.
-					let rows = Self::count_result_rows(
-						statement_type,
-						Some(counters.as_ref()),
-						r.as_ref().ok(),
-					);
+					// A streamed statement's rows never reach its value, so the
+					// count comes from what the sink sent rather than from the
+					// value shape, which would read as zero.
+					let rows = match self.streamed_rows(statement_index) {
+						Some(streamed) => streamed,
+						None => Self::count_result_rows(
+							statement_type,
+							Some(counters.as_ref()),
+							r.as_ref().ok(),
+						),
+					};
 					stmt_result_rows = rows;
 
 					match r {
@@ -1905,14 +2139,52 @@ impl Executor {
 		opt: Options,
 		plan: LogicalPlan,
 	) -> Result<Vec<QueryResult>> {
+		let mut executor = Self::new(kvs, ctx, opt);
+		executor.run_plan_with_transaction(kvs, plan).await?;
+		Ok(executor.results)
+	}
+
+	/// Execute a logical plan with an existing transaction, streaming results
+	/// into `items` as they are produced.
+	///
+	/// The transaction spans requests and only its owner can commit it, so a
+	/// statement's result is final as soon as the statement ends — there is no
+	/// block resolution to wait for, and whether the caller later commits is
+	/// its own affair, exactly as on the buffered path.
+	pub(crate) async fn execute_plan_streaming_with_transaction(
+		kvs: &Datastore,
+		ctx: FrozenContext,
+		opt: Options,
+		plan: LogicalPlan,
+		items: Sender<QueryStreamItem>,
+	) -> Result<Vec<QueryResult>> {
+		let mut executor = Self::new_streaming(kvs, ctx, opt, items);
+		let outcome = executor.run_plan_with_transaction(kvs, plan).await;
+		executor.finalise_results().await;
+		outcome.map(|()| executor.results)
+	}
+
+	/// Shared body: run every statement against the transaction already on the
+	/// context, accumulating results on `self` and streaming them when this
+	/// executor streams.
+	async fn run_plan_with_transaction(
+		&mut self,
+		kvs: &Datastore,
+		plan: LogicalPlan,
+	) -> Result<()> {
 		// The transaction is already set in the context
 		// Execute each expression with the transaction
-		let tx = ctx.tx();
+		let tx = self.ctx.tx();
 		let batch_start = Instant::now();
-		let mut executor = Self::new(kvs, ctx, opt);
-		let mut results = Vec::new();
+		let results_start = self.results.len();
 
 		for expr in plan.expressions {
+			// See `consumer_gone`: the rest of the plan is abandoned rather
+			// than run. The transaction spans requests and its owner still
+			// decides whether to commit.
+			if self.consumer_gone() {
+				break;
+			}
 			let start = Instant::now();
 			// Capture classification before the expression is moved
 			// into `execute_plan_in_transaction` so we can emit a
@@ -1928,8 +2200,8 @@ impl Executor {
 						Expr::Select(_) | Expr::Info(_) | Expr::Explain { .. }
 					)
 				);
-			let counters = executor.install_statement_counters();
-			let result = executor.execute_plan_in_transaction(Arc::clone(&tx), &start, expr).await;
+			let counters = self.install_statement_counters();
+			let result = self.execute_plan_in_transaction(Arc::clone(&tx), &start, expr).await;
 
 			let time = start.elapsed();
 			let query_result = match result {
@@ -1964,7 +2236,7 @@ impl Executor {
 			// previous behaviour for this entry point).
 			let stmt_result_rows =
 				Self::count_result_rows(statement_type, Some(counters.as_ref()), None);
-			executor.emit_statement_event_cached(
+			self.emit_statement_event_cached(
 				kvs,
 				statement_type,
 				statement_read_only,
@@ -1974,11 +2246,14 @@ impl Executor {
 				stmt_result_rows,
 				error_class,
 			);
-			results.push(query_result);
+			self.results.push(query_result);
+			// The statement is over and this transaction spans requests, so
+			// nothing later in this plan can rewrite it.
+			self.finalise_results().await;
 		}
 
-		executor.emit_query_event_for_results(kvs, batch_start, &results);
-		Ok(results)
+		self.emit_query_event_for_results(kvs, batch_start, &self.results[results_start..]);
+		Ok(())
 	}
 
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
@@ -2034,14 +2309,56 @@ impl Executor {
 	where
 		S: Stream<Item = Result<TopLevelExpr>>,
 	{
+		let mut this = Executor::new(kvs, ctx, opt);
+		this.run_expr_stream(kvs, skip_success_results, stream).await?;
+		Ok(this.results)
+	}
+
+	/// Execute a logical plan, sending results into `items` as they are
+	/// produced rather than collecting them.
+	///
+	/// Returns the results as well, so an embedded caller that wants both the
+	/// streamed items and the assembled answer pays for the query once.
+	pub(crate) async fn execute_plan_streaming(
+		kvs: &Datastore,
+		ctx: FrozenContext,
+		opt: Options,
+		plan: LogicalPlan,
+		items: Sender<QueryStreamItem>,
+	) -> Result<Vec<QueryResult>> {
+		let stream = futures::stream::iter(plan.expressions.into_iter().map(Ok));
+		let mut this = Executor::new_streaming(kvs, ctx, opt, items);
+		let outcome = this.run_expr_stream(kvs, false, stream).await;
+		// However the execution ended, every result it produced is now final.
+		// A consumer is owed a terminal item for each one, including on the
+		// paths that returned an error before the loop finalised them.
+		this.finalise_results().await;
+		outcome.map(|()| this.results)
+	}
+
+	/// Execute every statement in `stream`, accumulating results and, when this
+	/// executor streams, sending them onward as they become final.
+	///
+	/// The results stay on `self` rather than being returned so that a caller
+	/// can finalise whatever was produced even on the paths that fail — a
+	/// streaming consumer is owed a terminal item for every statement that
+	/// produced a result, however the execution ended.
+	async fn run_expr_stream<S>(
+		&mut self,
+		kvs: &Datastore,
+		skip_success_results: bool,
+		stream: S,
+	) -> Result<()>
+	where
+		S: Stream<Item = Result<TopLevelExpr>>,
+	{
 		// Capture batch boundaries up-front so the `QueryEvent` emitted
 		// at every return path measures the full span of the batch even
 		// when an early parse error short-circuits the loop. The slice
 		// of `QueryResult`s the executor produced is the source of
 		// truth for the per-batch counters.
 		let batch_start = Instant::now();
-		let mut this = Executor::new(kvs, ctx, opt);
-		let batch_results_start = this.results.len();
+		let batch_results_start = self.results.len();
 		let mut stream = pin!(stream);
 
 		if skip_success_results {
@@ -2052,7 +2369,7 @@ impl Executor {
 				Some(Ok(TopLevelExpr::Option(ref stmt)))
 					if stmt.name.eq_ignore_ascii_case("IMPORT") && stmt.what =>
 				{
-					this.execute_option_statement(stmt)?;
+					self.execute_option_statement(stmt)?;
 				}
 				Some(Err(e)) => {
 					bail!(ExecError::InvalidStatement(e.to_string()));
@@ -2070,21 +2387,26 @@ impl Executor {
 		}
 
 		while let Some(stmt) = stream.next().await {
+			// Nothing is reading the results any more, so the statements after
+			// this one are abandoned rather than run.
+			if self.consumer_gone() {
+				break;
+			}
 			let stmt = match stmt {
 				Ok(x) => x,
 				Err(e) => {
-					this.results.push(QueryResult {
+					self.results.push(QueryResult {
 						time: Duration::ZERO,
 						result: Err(TypesError::internal(e.to_string())),
 						query_type: QueryType::Other,
 					});
 
-					this.emit_query_event_for_results(
+					self.emit_query_event_for_results(
 						kvs,
 						batch_start,
-						&this.results[batch_results_start..],
+						&self.results[batch_results_start..],
 					);
-					return Ok(this.results);
+					return Ok(());
 				}
 			};
 
@@ -2108,7 +2430,7 @@ impl Executor {
 								.to_string()
 						));
 					}
-					let result = this.execute_option_statement(&stmt);
+					let result = self.execute_option_statement(&stmt);
 					let outcome = Outcome::from(&result);
 					// `execute_option_statement` returns `anyhow::Result`; the
 					// only failure today is a permission denial via the
@@ -2117,7 +2439,7 @@ impl Executor {
 					// is `permission`, not the generic `client` bucket.
 					let error_class =
 						result.as_ref().err().map(|_| crate::observe::error_class::PERMISSION);
-					this.emit_statement_event_cached(
+					self.emit_statement_event_cached(
 						kvs,
 						statement_type,
 						statement_read_only,
@@ -2129,7 +2451,7 @@ impl Executor {
 					);
 					result?;
 					if !skip_success_results {
-						this.results.push(QueryResult {
+						self.results.push(QueryResult {
 							time: Duration::ZERO,
 							result: Ok(convert_value_to_public_value(Value::None)?),
 							query_type: QueryType::Other,
@@ -2138,14 +2460,14 @@ impl Executor {
 				}
 				TopLevelExpr::Begin => {
 					if !skip_success_results {
-						this.results.push(QueryResult {
+						self.results.push(QueryResult {
 							time: Duration::ZERO,
 							result: Ok(convert_value_to_public_value(Value::None)?),
 							query_type: QueryType::Other,
 						});
 					}
 
-					let begin_result = this.execute_begin_statement(kvs, stream.as_mut()).await;
+					let begin_result = self.execute_begin_statement(kvs, stream.as_mut()).await;
 					let outcome = Outcome::from(&begin_result);
 					// `execute_begin_statement` returns `anyhow::Result`; on
 					// failure the result is wrapped via
@@ -2159,7 +2481,7 @@ impl Executor {
 						.as_ref()
 						.err()
 						.map(|_| crate::observe::error_class::TXN_CREATE_FAILED);
-					this.emit_statement_event_cached(
+					self.emit_statement_event_cached(
 						kvs,
 						statement_type,
 						statement_read_only,
@@ -2171,18 +2493,18 @@ impl Executor {
 					);
 
 					if let Err(e) = begin_result {
-						this.results.push(QueryResult {
+						self.results.push(QueryResult {
 							time: Duration::ZERO,
 							result: Err(types_error_from_anyhow(e)),
 							query_type: QueryType::Other,
 						});
 
-						this.emit_query_event_for_results(
+						self.emit_query_event_for_results(
 							kvs,
 							batch_start,
-							&this.results[batch_results_start..],
+							&self.results[batch_results_start..],
 						);
-						return Ok(this.results);
+						return Ok(());
 					}
 				}
 				stmt => {
@@ -2191,16 +2513,23 @@ impl Executor {
 					// Install fresh per-statement counters so DML
 					// iterators can record affected rows independently of
 					// the post-RETURN value shape.
-					let counters = this.install_statement_counters();
-					let result = this.execute_bare_statement(kvs, &start, stmt).await;
+					let counters = self.install_statement_counters();
+					let statement_index = self.current_index();
+					let result = self.execute_bare_statement(kvs, &start, stmt).await;
 					let outcome = Outcome::from(&result);
-					let result_rows = Self::count_result_rows(
-						statement_type,
-						Some(counters.as_ref()),
-						result.as_ref().ok(),
-					);
+					// A streamed statement's rows never reach its value, so the
+					// count comes from what the sink sent rather than from the
+					// value shape, which would read as zero.
+					let result_rows = match self.streamed_rows(statement_index) {
+						Some(streamed) => streamed,
+						None => Self::count_result_rows(
+							statement_type,
+							Some(counters.as_ref()),
+							result.as_ref().ok(),
+						),
+					};
 					let error_class = result.as_ref().err().map(classify_anyhow_error);
-					this.emit_statement_event_cached(
+					self.emit_statement_event_cached(
 						kvs,
 						statement_type,
 						statement_read_only,
@@ -2213,7 +2542,7 @@ impl Executor {
 
 					if skip_success_results {
 						if let Err(err) = result {
-							this.results.push(QueryResult {
+							self.results.push(QueryResult {
 								time: start.elapsed(),
 								result: Err(types_error_from_anyhow(err)),
 								query_type,
@@ -2224,7 +2553,7 @@ impl Executor {
 							Ok(value) => Ok(convert_value_to_public_value(value)?),
 							Err(err) => Err(types_error_from_anyhow(err)),
 						};
-						this.results.push(QueryResult {
+						self.results.push(QueryResult {
 							time: start.elapsed(),
 							result,
 							query_type,
@@ -2232,18 +2561,66 @@ impl Executor {
 					}
 				}
 			}
+			// This statement's outcome can no longer change, so it — and, when
+			// the statement was a `BEGIN` that has now resolved, every statement
+			// its block held — can be sent onward.
+			self.finalise_results().await;
 			yield_now!();
 		}
-		this.emit_query_event_for_results(kvs, batch_start, &this.results[batch_results_start..]);
-		Ok(this.results)
+		self.emit_query_event_for_results(kvs, batch_start, &self.results[batch_results_start..]);
+		Ok(())
 	}
 }
 
 #[cfg(test)]
 mod tests {
+	use super::shape_statement_value;
 	use crate::dbs::Session;
+	use crate::exec::OutputShape;
 	use crate::iam::{Level, Role};
 	use crate::kvs::Datastore;
+	use crate::val::{Array, Value};
+
+	fn values(n: usize) -> Vec<Value> {
+		(0..n).map(|i| Value::from(i as i64)).collect()
+	}
+
+	/// A `Rows` plan's result is an array of everything it emitted, however many
+	/// that turns out to be -- including none.
+	#[test]
+	fn rows_are_always_an_array() {
+		for n in [0, 1, 2, 7] {
+			let shaped = shape_statement_value(OutputShape::Rows, values(n))
+				.expect("rows are shapeable at any count");
+			assert_eq!(shaped, Value::Array(Array::from(values(n))), "{n} values");
+		}
+	}
+
+	/// A `Scalar` plan's result is the value it emitted, unwrapped -- not a
+	/// one-element array.
+	#[test]
+	fn a_scalar_is_unwrapped() {
+		let shaped = shape_statement_value(OutputShape::Scalar, vec![Value::from(42i64)])
+			.expect("one value is what Scalar promises");
+		assert_eq!(shaped, Value::from(42i64));
+	}
+
+	/// The declared shape is authoritative: a `Scalar` plan that emits the wrong
+	/// number of values is reported rather than quietly reshaped into an array.
+	/// Falling back would hide the operator's bug behind a result that merely
+	/// looks plausible, and a streaming consumer cannot fall back at all --
+	/// by the time the count is known the values have already been sent.
+	#[test]
+	fn a_scalar_plan_that_emits_the_wrong_count_is_reported() {
+		for n in [0, 2, 5] {
+			let error = shape_statement_value(OutputShape::Scalar, values(n))
+				.expect_err("a scalar plan emits exactly one value");
+			assert!(
+				error.to_string().contains(&format!("produced {n} values")),
+				"the error should name the count that arrived, got: {error}"
+			);
+		}
+	}
 
 	#[tokio::test]
 	async fn check_execute_option_permissions() {

@@ -11,8 +11,8 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{
-	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
-	ValueBatchStream,
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, OutputShape,
+	ValueBatch, ValueBatchStream,
 };
 
 /// Expr operator - evaluates a scalar expression.
@@ -77,8 +77,8 @@ impl ExecOperator for ExprPlan {
 		})))
 	}
 
-	fn is_scalar(&self) -> bool {
-		true
+	fn output_shape(&self) -> OutputShape {
+		OutputShape::Scalar
 	}
 }
 

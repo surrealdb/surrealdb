@@ -425,6 +425,50 @@ pub(crate) async fn router(
 
 			Ok(response)
 		}
+		Command::QueryStream {
+			txn,
+			query,
+			variables,
+			items,
+		} => {
+			// Merge session vars with query vars
+			let mut vars = state.vars.read().await.clone();
+			vars.extend(variables);
+
+			// Preparing the job is what can fail synchronously -- a parse error,
+			// an expired session -- so it happens while the session guard is
+			// held. The job itself owns everything it needs from here.
+			let job = {
+				let session = state.session.read().await;
+				if let Some(txn_id) = txn {
+					let Some(tx) = state.transactions.get(&txn_id) else {
+						return Ok(vec![QueryResultBuilder::started_now().finish_with_result(
+							Err(Error::not_found(
+								"Transaction not found".to_string(),
+								Some(surrealdb_types::NotFoundError::Transaction),
+							)),
+						)]);
+					};
+					kvs.execute_stream_with_transaction(
+						query.as_ref(),
+						&session,
+						Some(vars),
+						tx,
+						None,
+						items,
+					)?
+				} else {
+					kvs.execute_stream(query.as_ref(), &session, Some(vars), None, items)?
+				}
+			};
+
+			// The caller drains the item channel, so driving the execution here
+			// is what lets the two make progress against each other. The
+			// results come back only so the execution's own failures do; the
+			// rows have already gone to the caller.
+			job.run.await?;
+			Ok(Vec::new())
+		}
 
 		#[cfg(target_family = "wasm")]
 		Command::ExportFile {

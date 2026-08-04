@@ -62,7 +62,7 @@ pub use invalidate::Invalidate;
 pub use live::Stream;
 pub use merge::Merge;
 pub use patch::Patch;
-pub use query::{IntoVariables, Query, QueryStream};
+pub use query::{IntoVariables, ItemStream, Query, QueryStream, StreamItem};
 pub use run::{IntoFn, Run};
 pub use select::Select;
 pub use set::Set;

@@ -21,9 +21,12 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 
+#[cfg(test)]
+use async_channel::Receiver;
 use async_channel::Sender;
+pub use surrealdb_rpc::QUERY_STREAM_BUFFER;
 pub use surrealdb_rpc::export::Config as DbExportConfig;
-use surrealdb_rpc::{QueryResult, Token};
+use surrealdb_rpc::{QueryResult, QueryStreamItem, Token, items_for_result};
 use surrealdb_types::{
 	Array, ConnectionError, Error, NotFoundError, Notification, Object, SurrealValue, Value,
 	Variables,
@@ -165,6 +168,21 @@ pub enum Command {
 		/// The variables bound for this query only.
 		variables: Variables,
 	},
+	/// Execute a query, sending results into a channel as they are produced.
+	///
+	/// Only engines that report themselves as streaming ever receive one; see
+	/// [`RouteChannelEngine::new_streaming`]. The route's own response channel
+	/// carries the outcome, not the results, which travel on `items`.
+	QueryStream {
+		/// The transaction to run in, or `None` for an implicit one.
+		txn: Option<Uuid>,
+		/// The query text.
+		query: Cow<'static, str>,
+		/// The variables bound for this query only.
+		variables: Variables,
+		/// Where results are sent as they are produced.
+		items: Sender<QueryStreamItem>,
+	},
 	/// Export the database to a file.
 	ExportFile {
 		/// The file to write.
@@ -289,6 +307,35 @@ impl EngineContext {
 /// A boxed engine result.
 pub type EngineFuture<'a, T> = BoxFuture<'a, Result<T, Error>>;
 
+/// Answers a streaming caller from an engine's buffered `query`.
+///
+/// The caller sees the same items either way, just all at once. This is the
+/// right answer for any engine whose transport cannot carry results before the
+/// query ends -- which is most of them.
+fn buffered_query_stream<'a, E>(
+	engine: &'a E,
+	ctx: EngineContext,
+	query: Cow<'static, str>,
+	variables: Variables,
+	items: Sender<QueryStreamItem>,
+) -> EngineFuture<'a, ()>
+where
+	E: SurrealEngine + ?Sized,
+{
+	Box::pin(async move {
+		for (index, result) in engine.query(ctx, query, variables).await?.into_iter().enumerate() {
+			for item in items_for_result(index, result) {
+				// A receiver that has gone away wants no more items, and there
+				// is nothing else to do with them.
+				if items.send(item).await.is_err() {
+					return Ok(());
+				}
+			}
+		}
+		Ok(())
+	})
+}
+
 /// The interface every SurrealDB engine implements, and the only thing the
 /// Rust SDK calls to reach a database.
 ///
@@ -321,6 +368,32 @@ pub trait SurrealEngine: Debug + Send + Sync + 'static {
 		query: Cow<'static, str>,
 		variables: Variables,
 	) -> EngineFuture<'_, Vec<QueryResult>>;
+
+	/// Executes SurrealQL, sending results into `items` as they are produced.
+	///
+	/// The returned future is the execution: drive it while draining `items`,
+	/// and treat the channel closing as "no more results" rather than as
+	/// success, since a failure that belongs to no single statement is reported
+	/// by the future.
+	///
+	/// The default answers from [`Self::query`] and replays the finished
+	/// results, which is what an engine whose transport cannot carry
+	/// incremental results should do — the caller sees the same items either
+	/// way, just all at once. Overriding it is worthwhile only where results
+	/// can actually reach the caller before the query ends.
+	///
+	/// Rows are provisional until their statement's
+	/// [`Finished`](QueryStreamItem::Finished) item arrives; see
+	/// [`QueryStreamItem`].
+	fn query_stream(
+		&self,
+		ctx: EngineContext,
+		query: Cow<'static, str>,
+		variables: Variables,
+		items: Sender<QueryStreamItem>,
+	) -> EngineFuture<'_, ()> {
+		buffered_query_stream(self, ctx, query, variables, items)
+	}
 
 	/// Calls a function, or a machine learning model when `version` is set.
 	fn run(
@@ -493,12 +566,35 @@ fn unsupported(what: &str) -> Error {
 /// not part of the interface: an engine with no route channel (the gRPC one)
 /// never constructs a `Command` at all.
 #[derive(Debug, Clone)]
-pub struct RouteChannelEngine(Sender<Route>);
+pub struct RouteChannelEngine {
+	sender: Sender<Route>,
+	/// Whether the engine behind the channel serves [`Command::QueryStream`].
+	///
+	/// A route channel is the same shape whichever engine is on the far end, so
+	/// this is what distinguishes one that can produce results incrementally
+	/// from one whose transport answers a query all at once. The latter is left
+	/// to the buffered default rather than being sent a command it would only
+	/// refuse.
+	streams: bool,
+}
 
 impl RouteChannelEngine {
-	/// Wraps a route sender as a [`SurrealEngine`].
+	/// Wraps a route sender as a [`SurrealEngine`] that answers queries all at
+	/// once.
 	pub fn new(sender: Sender<Route>) -> Self {
-		Self(sender)
+		Self {
+			sender,
+			streams: false,
+		}
+	}
+
+	/// Wraps a route sender whose engine serves [`Command::QueryStream`], and
+	/// so can hand results to the caller as it produces them.
+	pub fn new_streaming(sender: Sender<Route>) -> Self {
+		Self {
+			sender,
+			streams: true,
+		}
 	}
 
 	/// Sends one command and awaits its single response, flattening the
@@ -532,7 +628,7 @@ impl RouteChannelEngine {
 		// Both failure modes mean the engine task is gone, which callers
 		// distinguish from a database error with `Error::is_connection()` to
 		// decide whether reconnecting is worth trying.
-		self.0.send(route).await.map_err(|e| {
+		self.sender.send(route).await.map_err(|e| {
 			Error::connection(
 				format!("Failed to send command: {e}"),
 				ConnectionError::ConnectionFailed,
@@ -589,6 +685,34 @@ impl SurrealEngine for RouteChannelEngine {
 			},
 			ctx.session,
 		))
+	}
+
+	fn query_stream(
+		&self,
+		ctx: EngineContext,
+		query: Cow<'static, str>,
+		variables: Variables,
+		items: Sender<QueryStreamItem>,
+	) -> EngineFuture<'_, ()> {
+		if !self.streams {
+			// The engine behind this channel answers a query all at once, so
+			// there is nothing to gain by asking it to stream and it would only
+			// refuse. The default replays its finished results instead.
+			return buffered_query_stream(self, ctx, query, variables, items);
+		}
+		Box::pin(async move {
+			self.results(
+				Command::QueryStream {
+					txn: ctx.transaction,
+					query,
+					variables,
+					items,
+				},
+				ctx.session,
+			)
+			.await
+			.map(|_| ())
+		})
 	}
 
 	fn run(
@@ -868,5 +992,96 @@ impl SurrealEngine for RouteChannelEngine {
 			},
 			ctx.session,
 		))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use surrealdb_types::Value;
+
+	use super::*;
+
+	/// Serve one route and report the command it carried.
+	async fn command_for(engine: &RouteChannelEngine, routes: Receiver<Route>) -> Command {
+		let (items, _keep) = async_channel::bounded(4);
+		let stream = engine.query_stream(
+			EngineContext::new(Uuid::nil()),
+			Cow::Borrowed("SELECT * FROM thing"),
+			Variables::default(),
+			items,
+		);
+		let serve = async {
+			let route = routes.recv().await.expect("a route");
+			// Answer so the engine's call can complete.
+			let _ = route.response.send(Ok(Vec::new())).await;
+			route.request.command
+		};
+		let (_, command) = futures::future::join(stream, serve).await;
+		command
+	}
+
+	/// An engine that can produce results incrementally is asked to; one that
+	/// cannot is served from its buffered `query` instead, so it is never sent
+	/// a command it would only refuse.
+	#[tokio::test]
+	async fn only_a_streaming_engine_is_asked_to_stream() {
+		let (sender, routes) = async_channel::bounded(1);
+		let streaming = RouteChannelEngine::new_streaming(sender);
+		assert!(
+			matches!(command_for(&streaming, routes).await, Command::QueryStream { .. }),
+			"a streaming engine receives the streaming command"
+		);
+
+		let (sender, routes) = async_channel::bounded(1);
+		let buffered = RouteChannelEngine::new(sender);
+		assert!(
+			matches!(command_for(&buffered, routes).await, Command::Query { .. }),
+			"a buffered engine is asked for a whole result, and the default replays it"
+		);
+	}
+
+	/// The buffered adaptation produces the same items a streaming engine
+	/// would, so a caller cannot tell which one answered.
+	#[tokio::test]
+	async fn the_buffered_adaptation_produces_the_same_items() {
+		let (sender, routes) = async_channel::bounded(1);
+		let engine = RouteChannelEngine::new(sender);
+		let (items, received) = async_channel::bounded(8);
+		let stream = engine.query_stream(
+			EngineContext::new(Uuid::nil()),
+			Cow::Borrowed("SELECT * FROM thing"),
+			Variables::default(),
+			items,
+		);
+		let serve = async {
+			let route = routes.recv().await.expect("a route");
+			let _ = route
+				.response
+				.send(Ok(vec![QueryResult {
+					time: std::time::Duration::ZERO,
+					result: Ok(Value::Array(vec![Value::Bool(true)].into())),
+					query_type: surrealdb_rpc::QueryType::Other,
+				}]))
+				.await;
+		};
+		let (outcome, ()) = futures::future::join(stream, serve).await;
+		outcome.expect("the engine answered");
+
+		let mut items = Vec::new();
+		while let Ok(item) = received.try_recv() {
+			items.push(item);
+		}
+		assert!(matches!(items[0], QueryStreamItem::Rows { .. }), "a list becomes rows");
+		assert!(
+			matches!(
+				items[1],
+				QueryStreamItem::Finished {
+					error: None,
+					..
+				}
+			),
+			"and the statement is terminated"
+		);
+		assert_eq!(items.len(), 2);
 	}
 }

@@ -17,6 +17,12 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 
 			let query_result = match cmd {
 				Command::Invalidate | Command::Health => query_result,
+				// The mock engine is wrapped as non-streaming, so a caller's
+				// `query_stream` is served by the buffered default and this
+				// never arrives.
+				Command::QueryStream {
+					..
+				} => unreachable!("the mock engine does not serve streaming queries"),
 				Command::Begin => {
 					query_result.with_result(Ok(Value::Uuid(uuid::Uuid::now_v7().into())))
 				}

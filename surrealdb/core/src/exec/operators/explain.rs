@@ -13,8 +13,8 @@ use surrealdb_types::ToSql;
 
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::{
-	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
-	ValueBatchStream, buffer_stream,
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, OutputShape,
+	ValueBatch, ValueBatchStream, buffer_stream,
 };
 use crate::expr::{ControlFlow, ExplainFormat};
 use crate::val::{Array, Object, Value};
@@ -77,9 +77,9 @@ impl ExecOperator for ExplainPlan {
 		})))))
 	}
 
-	fn is_scalar(&self) -> bool {
+	fn output_shape(&self) -> OutputShape {
 		// EXPLAIN returns a single scalar value (text or JSON)
-		true
+		OutputShape::Scalar
 	}
 }
 
@@ -202,8 +202,8 @@ impl ExecOperator for AnalyzePlan {
 		Ok(Box::pin(stream))
 	}
 
-	fn is_scalar(&self) -> bool {
-		true
+	fn output_shape(&self) -> OutputShape {
+		OutputShape::Scalar
 	}
 }
 

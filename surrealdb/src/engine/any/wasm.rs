@@ -39,7 +39,12 @@ impl conn::Sealed for Any {
 			let session_clone = session_clone.unwrap_or_else(SessionClone::new);
 			let mut features = HashSet::new();
 
-			match EndpointKind::from(address.url.scheme()) {
+			let endpoint_kind = EndpointKind::from(address.url.scheme());
+			// An embedded engine owns its datastore and can hand results over as
+			// it produces them; a remote one is bounded by what its transport
+			// can carry, which for `ws` and `http` is one response per query.
+			let streams = endpoint_kind.is_local();
+			match endpoint_kind {
 				EndpointKind::IndxDb => {
 					#[cfg(feature = "kv-indxdb")]
 					{
@@ -180,7 +185,11 @@ impl conn::Sealed for Any {
 			}
 
 			let waiter = watch::channel(Some(WaitFor::Connection));
-			let router = Router::from_route_sender(route_tx, features, config);
+			let router = if streams {
+				Router::from_streaming_route_sender(route_tx, features, config)
+			} else {
+				Router::from_route_sender(route_tx, features, config)
+			};
 
 			Ok((router, waiter, session_clone).into())
 		})

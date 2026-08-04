@@ -9,10 +9,10 @@ use async_channel::Receiver;
 use futures::StreamExt;
 use surrealdb_types::{ConfigurationError, QueryError, SerializationError, ValidationError};
 #[cfg(not(target_family = "wasm"))]
-use tokio::spawn;
+pub(crate) use tokio::spawn;
 use uuid::Uuid;
 #[cfg(target_family = "wasm")]
-use wasm_bindgen_futures::spawn_local as spawn;
+pub(crate) use wasm_bindgen_futures::spawn_local as spawn;
 
 use crate::conn::{Router, ctx, ctx_txn};
 use crate::engine::any::Any;

@@ -12,7 +12,8 @@ use futures::StreamExt;
 
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, Error as ExecError, ExecOperator, ExecutionContext,
-	FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
+	FlowResult, OperatorMetrics, OutputShape, ValueBatch, ValueBatchStream, buffer_stream,
+	monitor_stream,
 };
 use crate::expr::ControlFlow;
 use crate::val::Value;
@@ -70,9 +71,9 @@ impl ExecOperator for UnwrapExactlyOne {
 		Some(&self.metrics)
 	}
 
-	fn is_scalar(&self) -> bool {
+	fn output_shape(&self) -> OutputShape {
 		// The result is unwrapped (not wrapped in an array)
-		true
+		OutputShape::Scalar
 	}
 
 	fn output_ordering(&self) -> crate::exec::OutputOrdering {

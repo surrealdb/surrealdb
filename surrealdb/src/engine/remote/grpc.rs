@@ -22,13 +22,14 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration as StdDuration;
 
+use async_channel::Sender;
 use surrealdb_engine_api::{
 	DbExportConfig, EngineContext, EngineFuture, MlExportConfig, SurrealEngine,
 };
 use surrealdb_protocol::proto::rpc::v1 as rpc;
 use surrealdb_protocol::proto::rpc::v1::surreal_db_service_client::SurrealDbServiceClient;
 use surrealdb_protocol::proto::v1 as proto;
-use surrealdb_rpc::{QueryResult, QueryType, Token};
+use surrealdb_rpc::{QueryResult, QueryStreamItem, QueryType, Token};
 use tokio::sync::Notify;
 use tonic::transport::Channel;
 use uuid::Uuid;
@@ -667,13 +668,20 @@ impl GrpcEngine {
 		Ok(())
 	}
 
-	async fn query_inner(
+	/// Open a query's response stream.
+	///
+	/// `max_batch_records` is the client's say in the latency/throughput
+	/// trade-off: zero lets the server choose, which is right when the caller
+	/// waits for the whole result anyway, while a small number gets the first
+	/// rows onto the wire sooner for a caller that consumes them as they come.
+	async fn open_query(
 		&self,
 		context: rpc::RequestContext,
 		query: String,
 		variables: Variables,
-	) -> EngineResult<Vec<QueryResult>> {
-		let mut stream = self
+		max_batch_records: u32,
+	) -> EngineResult<tonic::Streaming<rpc::QueryResponse>> {
+		Ok(self
 			.client()
 			.query(rpc::QueryRequest {
 				context: Some(context),
@@ -682,18 +690,38 @@ impl GrpcEngine {
 				// Empty means row-oriented values only, which is all this
 				// engine can decode.
 				accepted_encodings: Vec::new(),
+				max_batch_records,
 			})
 			.await
 			.map_err(status_to_error)?
-			.into_inner();
+			.into_inner())
+	}
 
-		let mut statements: Vec<Statement> = Vec::new();
-		let mut ended = false;
+	/// Run a query and assemble one result per statement.
+	///
+	/// Every batch is accumulated before returning, so the batch size only
+	/// affects how the rows are carried, never what the caller sees.
+	async fn query_inner(
+		&self,
+		context: rpc::RequestContext,
+		query: String,
+		variables: Variables,
+	) -> EngineResult<Vec<QueryResult>> {
+		let mut stream = self.open_query(context, query, variables, 0).await?;
+
+		// `None` marks an index that has produced no frame. `Begin` only sizes
+		// this: its `statement_count` counts statements the query PARSED into,
+		// and a statement skipped by control flow -- a `RETURN` inside a
+		// `BEGIN` block short-circuits the rest -- produces no frames at all.
+		// Treating such an index as an empty result would invent a result for a
+		// statement that never ran.
+		let mut statements: Vec<Option<Statement>> = Vec::new();
+		let mut ended = None;
 		while let Some(response) = stream.message().await.map_err(status_to_error)? {
 			match response.frame {
 				Some(rpc::query_response::Frame::Begin(begin)) => {
 					statements = Vec::new();
-					grow_statements(&mut statements, begin.result_count as usize)?;
+					grow_statements(&mut statements, begin.statement_count as usize)?;
 				}
 				Some(rpc::query_response::Frame::Batch(batch)) => {
 					let index = batch.query_index as usize;
@@ -702,10 +730,10 @@ impl GrpcEngine {
 					if index >= statements.len() {
 						grow_statements(&mut statements, index + 1)?;
 					}
-					statements[index].push(batch);
+					statements[index].get_or_insert_with(Statement::default).push(batch);
 				}
-				Some(rpc::query_response::Frame::End(_)) => {
-					ended = true;
+				Some(rpc::query_response::Frame::End(end)) => {
+					ended = Some(end);
 					break;
 				}
 				// A stream-level error is not attributable to one statement,
@@ -724,13 +752,27 @@ impl GrpcEngine {
 		// before it must be reported, not answered: the statements collected
 		// so far would otherwise read as the whole result, and a `SELECT`
 		// truncated part-way would look like a table with fewer rows in it.
-		if !ended {
+		let Some(end) = ended else {
 			return Err(Error::connection(
 				"The query ended before it was complete".to_string(),
 				crate::types::ConnectionError::ConnectionFailed,
 			));
+		};
+		let results = finish_statements(statements);
+		// `End` carries the authoritative count, so a stream that lost frames
+		// without losing its terminator is caught here rather than read as a
+		// query with fewer statements than it had.
+		if results.len() != end.result_count as usize {
+			return Err(Error::connection(
+				format!(
+					"The query reported {} statement results but {} arrived",
+					end.result_count,
+					results.len()
+				),
+				crate::types::ConnectionError::ConnectionFailed,
+			));
 		}
-		Ok(statements.into_iter().map(Statement::finish).collect())
+		Ok(results)
 	}
 }
 
@@ -749,14 +791,166 @@ const MAX_STATEMENTS: usize = 1 << 20;
 
 /// Grows the per-statement accumulators to `len`, refusing a length no query
 /// could legitimately produce.
-fn grow_statements(statements: &mut Vec<Statement>, len: usize) -> EngineResult<()> {
+///
+/// New slots are empty rather than default-constructed: an index only becomes a
+/// result once a frame arrives for it.
+fn grow_statements(statements: &mut Vec<Option<Statement>>, len: usize) -> EngineResult<()> {
 	if len > MAX_STATEMENTS {
 		return Err(Error::internal(format!(
 			"The server reported {len} statement results, more than the {MAX_STATEMENTS} a query may have"
 		)));
 	}
-	statements.resize_with(len, Statement::default);
+	statements.resize_with(len, || None);
 	Ok(())
+}
+
+/// Run a query, forwarding each frame's contents as it arrives.
+///
+/// This is what a caller consuming rows as they are produced gets: nothing is
+/// held back, so a `SELECT` reaches the caller while the server is still
+/// scanning. A statement's rows are only valid once its `Finished` item
+/// arrives, which is where a failure — including one that retracts rows already
+/// forwarded — is reported.
+async fn stream_query(
+	engine: &GrpcEngine,
+	context: rpc::RequestContext,
+	query: String,
+	variables: Variables,
+	max_batch_records: u32,
+	items: Sender<QueryStreamItem>,
+) -> EngineResult<()> {
+	let mut stream = engine.open_query(context, query, variables, max_batch_records).await?;
+	let mut ended = false;
+	while let Some(response) = stream.message().await.map_err(status_to_error)? {
+		let batch = match response.frame {
+			Some(rpc::query_response::Frame::Batch(batch)) => batch,
+			Some(rpc::query_response::Frame::End(_)) => {
+				ended = true;
+				break;
+			}
+			// A stream-level error is not attributable to one statement, so it
+			// fails the whole query.
+			Some(rpc::query_response::Frame::Error(error)) => return Err(proto_error(error)),
+			// `Begin` only sizes a buffered caller's allocation; a streaming one
+			// has nothing to pre-size.
+			Some(rpc::query_response::Frame::Begin(_)) => continue,
+			None => {
+				return Err(Error::internal(
+					"Query stream carried an unrecognised frame".to_string(),
+				));
+			}
+		};
+		for item in batch_items(batch)? {
+			// A receiver that has gone away wants no more items. Returning
+			// drops the response stream, which is how the server learns to stop.
+			if items.send(item).await.is_err() {
+				return Ok(());
+			}
+		}
+	}
+	// `End` is what marks a query stream complete. A stream that stops before it
+	// must be reported, not answered: the rows forwarded so far would otherwise
+	// read as the whole result, and a `SELECT` truncated part-way would look
+	// like a table with fewer rows in it.
+	if !ended {
+		return Err(Error::connection(
+			"The query ended before it was complete".to_string(),
+			crate::types::ConnectionError::ConnectionFailed,
+		));
+	}
+	Ok(())
+}
+
+/// The items one batch frame carries.
+///
+/// A terminal frame contributes its statement's `Finished` item as well as
+/// whatever rows it carries, in that order — rows first, so a consumer never
+/// sees a statement finish before the rows that belong to it.
+fn batch_items(batch: rpc::QueryBatchFrame) -> EngineResult<Vec<QueryStreamItem>> {
+	let index = batch.query_index as usize;
+	let single = batch.kind == rpc::QueryResponseKind::Single as i32;
+	let terminal = single || batch.kind == rpc::QueryResponseKind::BatchedFinal as i32;
+
+	let mut items = Vec::new();
+	if let Some(error) = batch.error {
+		// A statement's own failure is terminal for it, and its payload is
+		// empty: any rows already forwarded are retracted by this.
+		items.push(QueryStreamItem::Finished {
+			index,
+			time: batch_duration(batch.stats.as_ref()),
+			query_type: statement_query_type(batch.statement_kind),
+			error: Some(proto_error(error)),
+		});
+		return Ok(items);
+	}
+
+	let values = match batch.payload {
+		Some(rpc::query_batch_frame::Payload::Values(values)) => values
+			.values
+			.into_iter()
+			.map(|value| Value::try_from(value).map_err(deserialization_error))
+			.collect::<EngineResult<Vec<Value>>>()?,
+		Some(rpc::query_batch_frame::Payload::Arrow(_)) => {
+			return Err(Error::internal(
+				"Server sent a columnar batch, which was not requested".to_string(),
+			));
+		}
+		None => Vec::new(),
+	};
+
+	if single {
+		// One value that is not a list: the statement's result is that value,
+		// not an array containing it.
+		if let Some(value) = values.into_iter().next() {
+			items.push(QueryStreamItem::Value {
+				index,
+				value,
+			});
+		}
+	} else if !values.is_empty() {
+		items.push(QueryStreamItem::Rows {
+			index,
+			values,
+		});
+	}
+
+	if terminal {
+		items.push(QueryStreamItem::Finished {
+			index,
+			time: batch_duration(batch.stats.as_ref()),
+			query_type: statement_query_type(batch.statement_kind),
+			error: None,
+		});
+	}
+	Ok(items)
+}
+
+/// How long a statement took, as its terminal batch reported it.
+fn batch_duration(stats: Option<&rpc::QueryStats>) -> StdDuration {
+	stats
+		.and_then(|stats| stats.execution_duration)
+		.and_then(|duration| StdDuration::try_from(duration).ok())
+		.unwrap_or_default()
+}
+
+/// What kind of statement a batch frame says produced it.
+fn statement_query_type(kind: i32) -> QueryType {
+	match rpc::QueryStatementKind::try_from(kind) {
+		Ok(rpc::QueryStatementKind::Live) => QueryType::Live,
+		Ok(rpc::QueryStatementKind::Kill) => QueryType::Kill,
+		_ => QueryType::Other,
+	}
+}
+
+/// Turns the per-index accumulators into one result per statement that ran.
+///
+/// Indexes that received no frame are dropped, not finalised. An empty
+/// accumulator finishes as an empty array, which would be a result for a
+/// statement that never ran -- and dropping them is also what makes the results
+/// line up with the ones the other transports return for the same query, since
+/// a skipped statement contributes nothing there either.
+fn finish_statements(statements: Vec<Option<Statement>>) -> Vec<QueryResult> {
+	statements.into_iter().flatten().map(Statement::finish).collect()
 }
 
 /// Consumes session lifecycle events in order: attach a new session, attach
@@ -808,6 +1002,27 @@ impl SurrealEngine for GrpcEngine {
 		Box::pin(async move {
 			let context = self.ready(ctx).await?;
 			self.query_inner(context, query.into_owned(), variables).await
+		})
+	}
+
+	/// Unlike the default, this forwards results as the server produces them
+	/// rather than replaying them once the query has finished.
+	fn query_stream(
+		&self,
+		ctx: EngineContext,
+		query: std::borrow::Cow<'static, str>,
+		variables: Variables,
+		items: Sender<QueryStreamItem>,
+	) -> EngineFuture<'_, ()> {
+		Box::pin(async move {
+			let context = self.ready(ctx).await?;
+			// Zero, not a small number: `max_batch_records` is a cap on every
+			// batch, not the size of the first one. Asking for a small cap
+			// would pin the whole stream to it, where the server already
+			// starts each statement small and ramps up to its own maximum --
+			// which is exactly the first-row-then-throughput shape a streaming
+			// caller wants.
+			stream_query(self, context, query.into_owned(), variables, 0, items).await
 		})
 	}
 
@@ -2110,6 +2325,37 @@ mod tests {
 			statement.finish().result.unwrap(),
 			Value::Array(Array::from(vec![Value::Number(1.into()), Value::Number(2.into())]))
 		);
+	}
+
+	/// `Begin.statement_count` counts the statements a query parsed into, which
+	/// is an upper bound on the ones that produce results: a statement skipped
+	/// by control flow emits no frames. Those indexes must be dropped, not
+	/// finished, or a skipped statement reports an empty array as its result.
+	#[test]
+	fn indexes_that_never_emitted_are_not_results() {
+		let mut ran = Statement::default();
+		ran.push(batch(vec![Value::Number(1.into())], rpc::QueryResponseKind::BatchedFinal));
+
+		// Sized from `statement_count`, but only the middle statement ran.
+		let mut statements: Vec<Option<Statement>> = Vec::new();
+		grow_statements(&mut statements, 3).expect("three statements is a legal count");
+		statements[1] = Some(ran);
+
+		let results = finish_statements(statements);
+		assert_eq!(results.len(), 1, "only the statement that emitted is a result");
+		assert_eq!(
+			results[0].result.as_ref().unwrap(),
+			&Value::Array(Array::from(vec![Value::Number(1.into())]))
+		);
+	}
+
+	/// A count no query could produce is refused before it sizes an allocation,
+	/// since both `statement_count` and the per-batch index arrive from the peer.
+	#[test]
+	fn an_absurd_statement_count_is_refused() {
+		let mut statements: Vec<Option<Statement>> = Vec::new();
+		assert!(grow_statements(&mut statements, MAX_STATEMENTS + 1).is_err());
+		assert!(statements.is_empty(), "nothing is allocated for a refused count");
 	}
 
 	/// A statement's own failure travels in its result, so the other

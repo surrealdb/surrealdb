@@ -1821,6 +1821,6 @@ mod planner_tests {
 		let plan = Planner::new(&ctx, &registry).plan(&expr).await.expect("Planning failed");
 
 		assert_eq!(plan.name(), "Expr");
-		assert!(plan.is_scalar());
+		assert!(plan.output_shape().is_scalar());
 	}
 }

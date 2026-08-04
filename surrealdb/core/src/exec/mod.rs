@@ -87,6 +87,33 @@ pub(crate) use ordering::OutputOrdering;
 // Re-export physical expression types
 pub(crate) use physical_expr::{EvalContext, PhysicalExpr};
 
+/// The shape an operator's output takes when it is a statement's result.
+///
+/// The plan declares this rather than the executor inferring it from how many
+/// values arrived, because a consumer that forwards values as they are produced
+/// has to know the shape before it knows the count.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OutputShape {
+	/// The statement's value is an array of every value emitted.
+	Rows,
+	/// The statement's value is the one value emitted, unwrapped. `SELECT ONLY`
+	/// and every non-query expression (`RETURN 1 + 2`, `IF …`, a block) have
+	/// this shape.
+	///
+	/// An operator declaring it emits exactly one value; emitting none or
+	/// several is a bug in that operator, not a shape the caller chooses
+	/// between.
+	Scalar,
+}
+
+impl OutputShape {
+	/// Whether the statement's value is the single emitted value rather than an
+	/// array of them.
+	pub(crate) fn is_scalar(self) -> bool {
+		matches!(self, OutputShape::Scalar)
+	}
+}
+
 /// A batch of values returned by an execution plan.
 ///
 /// Idea: In the future, this could become an `enum` to support columnar execution as well:
@@ -205,13 +232,12 @@ pub(crate) trait ExecOperator: Debug + Send + Sync {
 		CardinalityHint::Unbounded
 	}
 
-	/// Returns true if this plan represents a scalar expression.
+	/// The shape this operator's output takes when it is a statement's result.
 	///
-	/// Scalar expressions return a single value directly, while queries
-	/// return results wrapped in an array. This is used by the executor
-	/// to format results correctly.
-	fn is_scalar(&self) -> bool {
-		false
+	/// See [`OutputShape`]. The default is [`OutputShape::Rows`]: an operator
+	/// that emits rows.
+	fn output_shape(&self) -> OutputShape {
+		OutputShape::Rows
 	}
 
 	/// Returns the operator-level metrics for this node, if available.

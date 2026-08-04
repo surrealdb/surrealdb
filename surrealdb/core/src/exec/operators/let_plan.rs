@@ -84,7 +84,7 @@ impl LetPlan {
 		);
 		let results = collect_stream(stream).await?;
 
-		Ok(if self.value.is_scalar() {
+		Ok(if self.value.output_shape().is_scalar() {
 			results.into_iter().next().unwrap_or(Value::None)
 		} else {
 			Value::Array(Array(results))
@@ -166,7 +166,7 @@ impl ToSql for LetPlan {
 		f.push_str("LET $");
 		f.push_str(self.name.as_str());
 		f.push_str(" = ");
-		if self.value.is_scalar() {
+		if self.value.output_shape().is_scalar() {
 			f.push_str("<expr>");
 		} else {
 			f.push_str("(<query>)");
@@ -178,7 +178,7 @@ impl ToSql for LetPlan {
 mod tests {
 	use super::*;
 	use crate::exec::operators::test_util::root_ctx;
-	use crate::exec::{OutputOrdering, ValueBatch};
+	use crate::exec::{OutputOrdering, OutputShape, ValueBatch};
 
 	/// Which signal a [`StubValue`] raises once its rows are exhausted.
 	///
@@ -214,8 +214,8 @@ mod tests {
 	/// `rows` are emitted as one batch, then `signal` is raised. With `eager`
 	/// set, `execute()` returns the signal instead of a stream and `rows` never
 	/// appear; otherwise the signal arrives as a later stream item. `scalar`
-	/// drives `is_scalar()`, which decides whether `LetPlan` binds one value or
-	/// an array.
+	/// drives `output_shape()`, which decides whether `LetPlan` binds one value
+	/// or an array.
 	#[derive(Debug)]
 	struct StubValue {
 		rows: Vec<Value>,
@@ -301,8 +301,12 @@ mod tests {
 			OutputOrdering::Unordered
 		}
 
-		fn is_scalar(&self) -> bool {
-			self.scalar
+		fn output_shape(&self) -> OutputShape {
+			if self.scalar {
+				OutputShape::Scalar
+			} else {
+				OutputShape::Rows
+			}
 		}
 
 		fn execute(&self, _ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {

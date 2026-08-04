@@ -9,13 +9,14 @@ use futures::StreamExt;
 use futures::future::Either;
 use futures::stream::SelectAll;
 use indexmap::IndexMap;
-use surrealdb_rpc::{DbResultStats, QueryType};
+use surrealdb_engine_api::QUERY_STREAM_BUFFER;
+use surrealdb_rpc::{DbResultStats, QueryStreamItem, QueryType};
 use surrealdb_types::Error as TypesError;
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
 use crate::conn::ctx_txn;
-use crate::method::live::Stream;
+use crate::method::live::{Stream, spawn};
 use crate::method::{BoxFuture, OnceLockExt, Stats, WithStats};
 use crate::notification::Notification;
 use crate::types::{SurrealValue, Value, Variables};
@@ -113,6 +114,198 @@ where
 		self.queries.push(query.into());
 		self
 	}
+
+	/// Run the query and receive its results as they are produced, rather than
+	/// waiting for all of them.
+	///
+	/// Awaiting a [`Query`] gives [`IndexedResults`], which means holding the
+	/// whole result set in memory and seeing none of it until the last row is
+	/// read. This yields [`StreamItem`]s instead, so a large `SELECT` can be
+	/// processed — or forwarded — while the server is still producing it.
+	///
+	/// # Rows are provisional until their statement finishes
+	///
+	/// A statement's rows arrive before its outcome is known: it can still fail
+	/// on a later row, and a `BEGIN … COMMIT` block can still roll back. The
+	/// [`StatementEnd`](StreamItem::StatementEnd) item is what confirms them,
+	/// and one carrying an error retracts every row that preceded it. Anything
+	/// that acts on rows as they arrive has to be able to undo that.
+	///
+	/// Only some connections stream for real. The others answer from the
+	/// buffered path and replay the results, so this is always correct but only
+	/// sometimes earlier.
+	///
+	/// # `LIVE SELECT` is not for this
+	///
+	/// Awaiting a [`Query`] registers each `LIVE SELECT` it ran and hands back a
+	/// notification stream for it. This does not: a live query's id arrives as
+	/// an ordinary row, and nothing subscribes to it. Use the awaited form for
+	/// live queries, and this for reading rows.
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// # use futures::StreamExt;
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// use surrealdb::method::StreamItem;
+	///
+	/// let mut rows = db.query("SELECT * FROM person").stream_items()?;
+	/// while let Some(item) = rows.next().await {
+	///     match item? {
+	///         StreamItem::Row { value, .. } => println!("{value:?}"),
+	///         StreamItem::StatementEnd { result, .. } => result?,
+	///     }
+	/// }
+	/// # Ok(())
+	/// # }
+	/// ```
+	pub fn stream_items(self) -> Result<ItemStream> {
+		let Self {
+			txn,
+			client,
+			queries,
+			variables,
+		} = self;
+		let engine = Arc::clone(&client.inner.router.extract()?.engine);
+		let query = join_queries(&queries);
+		let variables = variables?;
+		let ctx = ctx_txn(client.session_id, txn);
+
+		let (out_tx, out_rx) = crate::channel::bounded(STREAM_ITEM_BUFFER);
+		// The execution and the drain have to make progress together -- the
+		// channel between them is bounded, so each blocks on the other -- and
+		// the caller only drains the far end. Both therefore run on a task of
+		// their own.
+		spawn(async move {
+			let (raw_tx, raw_rx) = crate::channel::bounded(QUERY_STREAM_BUFFER);
+			let run = engine.query_stream(ctx, Cow::Owned(query), variables, raw_tx);
+			let forward = async {
+				while let Ok(item) = raw_rx.recv().await {
+					for item in stream_items_for(item) {
+						// The caller stopped reading; dropping `raw_rx` with
+						// this future is what stops the query.
+						if out_tx.send(Ok(item)).await.is_err() {
+							return;
+						}
+					}
+				}
+			};
+			let (outcome, ()) = futures::future::join(run, forward).await;
+			// A failure belonging to no single statement ends the stream, as
+			// distinct from a statement reporting its own.
+			if let Err(error) = outcome {
+				let _ = out_tx.send(Err(error)).await;
+			}
+		});
+
+		Ok(ItemStream {
+			items: Box::pin(out_rx),
+		})
+	}
+}
+
+/// How far a streaming query may run ahead of the caller reading it.
+///
+/// Each item is one row, so this is deliberately larger than the batch-sized
+/// buffer the engine uses underneath. It still bounds the query by the caller's
+/// read speed, which is what stops an abandoned stream from running a scan to
+/// completion into memory nobody drains.
+const STREAM_ITEM_BUFFER: usize = 256;
+
+/// Rewrites one execution item as the items a caller sees.
+///
+/// Rows are flattened: whether a statement's value arrived as a batch of rows
+/// or as a single value is how the buffered API decides between an array and a
+/// bare value, but a caller reading rows one at a time has already made that
+/// choice.
+fn stream_items_for(item: QueryStreamItem) -> Vec<StreamItem> {
+	match item {
+		QueryStreamItem::Rows {
+			index,
+			values,
+		} => values
+			.into_iter()
+			.map(|value| StreamItem::Row {
+				statement: index,
+				value,
+			})
+			.collect(),
+		QueryStreamItem::Value {
+			index,
+			value,
+		} => vec![StreamItem::Row {
+			statement: index,
+			value,
+		}],
+		QueryStreamItem::Finished {
+			index,
+			time,
+			query_type,
+			error,
+		} => vec![StreamItem::StatementEnd {
+			statement: index,
+			stats: DbResultStats::default().with_execution_time(time).with_query_type(query_type),
+			result: match error {
+				Some(error) => Err(error),
+				None => Ok(()),
+			},
+		}],
+	}
+}
+
+/// One item of a query's results, as they are produced.
+///
+/// See [`Query::stream_items`], and note that a [`Row`](Self::Row) is
+/// provisional until its statement's [`StatementEnd`](Self::StatementEnd)
+/// confirms it.
+///
+/// Deliberately exhaustive, unlike most types here: a caller matches on every
+/// item a query produces, so a wildcard arm would silently discard any kind
+/// added later. Failing to compile is the right way to learn about one.
+#[derive(Debug)]
+pub enum StreamItem {
+	/// One row of a statement's results.
+	Row {
+		/// Which statement produced it, counting from zero.
+		statement: usize,
+		/// The row.
+		value: Value,
+	},
+	/// A statement is finished. No further item carries it.
+	StatementEnd {
+		/// Which statement, counting from zero.
+		statement: usize,
+		/// What the statement cost.
+		stats: DbResultStats,
+		/// Whether it succeeded. An error retracts every row it emitted.
+		result: Result<()>,
+	},
+}
+
+/// A stream of a query's results, from [`Query::stream_items`].
+#[derive(Debug)]
+#[must_use = "streams do nothing unless you poll them"]
+pub struct ItemStream {
+	items: Pin<Box<crate::channel::Receiver<Result<StreamItem>>>>,
+}
+
+impl futures::Stream for ItemStream {
+	type Item = Result<StreamItem>;
+
+	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+		self.items.as_mut().poll_next(cx)
+	}
+}
+
+/// Joins a builder's queries into one script.
+fn join_queries(queries: &[Cow<'_, str>]) -> String {
+	queries
+		.iter()
+		.map(|q| q.trim_end_matches(|c: char| c == ';' || c.is_whitespace()))
+		.collect::<Vec<_>>()
+		.join("; ")
 }
 
 impl<'r, Client> IntoFuture for Query<'r, Client>
@@ -133,11 +326,7 @@ where
 		Box::pin(async move {
 			// Extract the router from the client
 			let router = client.inner.router.extract()?;
-			let query = queries
-				.iter()
-				.map(|q| q.trim_end_matches(|c: char| c == ';' || c.is_whitespace()))
-				.collect::<Vec<_>>()
-				.join("; ");
+			let query = join_queries(&queries);
 
 			let results = router
 				.query_results(ctx_txn(client.session_id, txn), Cow::Owned(query), variables?)

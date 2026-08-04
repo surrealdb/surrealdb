@@ -17,7 +17,7 @@ use crate::exec::plan_or_compute::{
 };
 use crate::exec::{
 	AccessMode, CardinalityHint, Error as ExecError, ExecOperator, FlowResult, OperatorMetrics,
-	ValueBatch, ValueBatchStream,
+	OutputShape, ValueBatch, ValueBatchStream,
 };
 use crate::expr::{Block, ControlFlow, ControlFlowExt, Error as ExprError, Expr, Param};
 use crate::val::Value;
@@ -134,9 +134,9 @@ impl ExecOperator for ForeachPlan {
 		Some(&self.metrics)
 	}
 
-	fn is_scalar(&self) -> bool {
+	fn output_shape(&self) -> OutputShape {
 		// FOR loops return a single value (NONE)
-		true
+		OutputShape::Scalar
 	}
 }
 

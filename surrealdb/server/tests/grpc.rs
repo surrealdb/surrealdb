@@ -463,3 +463,212 @@ async fn sessions_are_independent_across_connections() {
 		.check()
 		.expect_err("a separate connection must not inherit the other's authentication");
 }
+
+/// Results reach the client while the query is still running.
+///
+/// This is the property the streaming path exists for, and the one no other
+/// test here can see: the SDK's engine buffers every frame before returning, so
+/// a buffered server and a streaming one are indistinguishable through it. The
+/// raw client observes the frames themselves.
+///
+/// The assertion is a generous ratio rather than a latency bound, so it pins
+/// the behaviour without depending on how fast the machine is. A server that
+/// executed to completion before answering would sit at essentially 100%.
+#[tokio::test]
+async fn rows_arrive_before_the_query_finishes() {
+	use std::time::Instant;
+
+	use surrealdb_protocol::proto::rpc::v1::surreal_db_service_client::SurrealDbServiceClient;
+	use surrealdb_protocol::proto::rpc::v1::{
+		self as rpc, AccessMethod, AttachSessionRequest, NullableString, RequestContext,
+		SigninRequest, UseRequest, UserCredentials, access_method, nullable_string,
+	};
+
+	let server = TestServer::start().await;
+
+	// Enough rows that producing them all takes meaningfully longer than
+	// producing the first batch.
+	const RECORDS: i64 = 10_000;
+	let db = server.connect_as_root().await;
+	db.query("FOR $i IN array::range(0, $count) { CREATE type::record('wide', $i) SET n = $i }")
+		.bind(("count", RECORDS))
+		.await
+		.expect("send")
+		.check()
+		.expect("seed");
+
+	let mut client = SurrealDbServiceClient::connect(format!("http://{}", server.address))
+		.await
+		.expect("a raw gRPC client");
+
+	let session = client
+		.attach_session(AttachSessionRequest::default())
+		.await
+		.expect("attach")
+		.into_inner()
+		.session
+		.expect("the server mints a session id");
+	let context = Some(RequestContext {
+		session: Some(session),
+		..Default::default()
+	});
+	client
+		.signin(SigninRequest {
+			context: context.clone(),
+			access_method: Some(AccessMethod {
+				method: Some(access_method::Method::User(UserCredentials {
+					username: USER.to_string(),
+					password: PASS.to_string(),
+					..Default::default()
+				})),
+			}),
+		})
+		.await
+		.expect("signin");
+	client
+		.r#use(UseRequest {
+			context: context.clone(),
+			namespace: Some(NullableString {
+				value: Some(nullable_string::Value::Some("test".to_string())),
+			}),
+			database: Some(NullableString {
+				value: Some(nullable_string::Value::Some("test".to_string())),
+			}),
+		})
+		.await
+		.expect("use");
+
+	let mut stream = client
+		.query(rpc::QueryRequest {
+			context,
+			query: "SELECT * FROM wide".to_string(),
+			variables: None,
+			accepted_encodings: Vec::new(),
+			max_batch_records: 0,
+		})
+		.await
+		.expect("query")
+		.into_inner();
+
+	// Time from the `Begin` frame, not from the request. `Begin` is sent on
+	// accepting the query and before executing it, so it separates what this
+	// test is about -- how soon results follow their own production -- from
+	// connecting a channel and resolving a session, which happen once and would
+	// otherwise dominate a fixture small enough to run in a test suite.
+	let mut executing = None;
+	let mut first_rows: Option<Duration> = None;
+	let mut records = 0usize;
+	while let Some(response) = stream.message().await.expect("a frame") {
+		match response.frame {
+			Some(rpc::query_response::Frame::Begin(_)) => executing = Some(Instant::now()),
+			Some(rpc::query_response::Frame::Batch(batch)) => {
+				if let Some(rpc::query_batch_frame::Payload::Values(values)) = batch.payload
+					&& !values.values.is_empty()
+				{
+					let executing = executing.expect("`Begin` precedes every batch");
+					first_rows.get_or_insert_with(|| executing.elapsed());
+					records += values.values.len();
+				}
+			}
+			_ => {}
+		}
+	}
+	let executing = executing.expect("the query began");
+	let total = executing.elapsed();
+	let first = first_rows.expect("some rows arrived");
+
+	assert_eq!(records, RECORDS as usize, "every record still arrives exactly once");
+	assert!(
+		first.as_secs_f64() < total.as_secs_f64() * 0.25,
+		"the first rows should arrive early in the query, not at the end: \
+		 first after {first:?} of {total:?}"
+	);
+}
+
+/// The SDK's streaming API hands rows to the caller as they arrive, and reports
+/// each statement's outcome separately from its rows.
+#[tokio::test]
+async fn the_sdk_streams_rows_as_they_arrive() {
+	use futures::StreamExt;
+	use surrealdb::method::StreamItem;
+
+	let server = TestServer::start().await;
+	let db = server.connect_as_root().await;
+
+	const RECORDS: i64 = 500;
+	db.query("FOR $i IN array::range(0, $count) { CREATE type::record('row', $i) SET n = $i }")
+		.bind(("count", RECORDS))
+		.await
+		.expect("send")
+		.check()
+		.expect("seed");
+
+	let mut items =
+		db.query("SELECT * FROM row").query("RETURN 'done'").stream_items().expect("a stream");
+
+	let mut rows = 0usize;
+	let mut ends = Vec::new();
+	while let Some(item) = items.next().await {
+		match item.expect("no stream-level failure") {
+			StreamItem::Row {
+				statement,
+				..
+			} => {
+				// Rows arrive before their statement is confirmed, which is the
+				// whole point: nothing has told us yet that they are final.
+				assert!(
+					!ends.contains(&statement),
+					"statement {statement} produced a row after it finished"
+				);
+				rows += 1;
+			}
+			StreamItem::StatementEnd {
+				statement,
+				result,
+				..
+			} => {
+				result.expect("both statements succeed");
+				ends.push(statement);
+			}
+		}
+	}
+
+	assert_eq!(rows, RECORDS as usize + 1, "every row, plus the second statement's one value");
+	assert_eq!(ends, vec![0, 1], "each statement ends exactly once, in order");
+}
+
+/// A statement that fails reports it on its own `StatementEnd`, leaving the
+/// other statements' results usable -- the streaming equivalent of a per-result
+/// error in the buffered API.
+#[tokio::test]
+async fn a_failed_statement_ends_with_its_error() {
+	use futures::StreamExt;
+	use surrealdb::method::StreamItem;
+
+	let server = TestServer::start().await;
+	let db = server.connect_as_root().await;
+
+	let mut items = db
+		.query("RETURN 1")
+		.query("THROW 'nope'")
+		.query("RETURN 3")
+		.stream_items()
+		.expect("a stream");
+
+	let mut outcomes = Vec::new();
+	while let Some(item) = items.next().await {
+		if let StreamItem::StatementEnd {
+			statement,
+			result,
+			..
+		} = item.expect("no stream-level failure")
+		{
+			outcomes.push((statement, result.is_ok()));
+		}
+	}
+	assert_eq!(
+		outcomes,
+		vec![(0, true), (1, false), (2, true)],
+		"only the throwing statement fails, and the ones around it still finish"
+	);
+}

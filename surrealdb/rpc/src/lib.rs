@@ -19,10 +19,12 @@ pub mod method;
 pub mod query;
 pub mod request;
 pub mod response;
+pub mod stream;
 pub mod token;
 
 pub use method::Method;
 pub use query::{QueryResult, QueryResultBuilder, QueryType, Status};
 pub use request::{Request, check_protected_param};
 pub use response::{DbResponse, DbResult, DbResultStats, db_response_from_bytes};
+pub use stream::{QUERY_STREAM_BUFFER, QueryStreamItem, items_for_result};
 pub use token::Token;

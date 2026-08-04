@@ -11,7 +11,7 @@ use crate::exec::permission::{
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
+	OperatorMetrics, OutputShape, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
 use crate::expr::ControlFlowExt;
 use crate::expr::part::Part;
@@ -97,8 +97,8 @@ impl ExecOperator for Fetch {
 		Some(&self.metrics)
 	}
 
-	fn is_scalar(&self) -> bool {
-		self.input.is_scalar()
+	fn output_shape(&self) -> OutputShape {
+		self.input.output_shape()
 	}
 
 	fn output_ordering(&self) -> crate::exec::OutputOrdering {

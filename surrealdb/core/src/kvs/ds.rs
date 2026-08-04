@@ -60,7 +60,7 @@ use crate::dbs::capabilities::{
 use crate::dbs::node::{Node, Timestamp};
 use crate::dbs::{
 	Capabilities, DurableSession, Executor, MessageBroker, Options, QueryResult,
-	QueryResultBuilder, Session, durable_session, restore_session,
+	QueryResultBuilder, QueryStreamItem, QueryStreamJob, Session, durable_session, restore_session,
 };
 use crate::doc::process_next_events_batch;
 use crate::err::{EngineError, Error};
@@ -4199,6 +4199,146 @@ impl Datastore {
 			// and reaches the client as `internal` where it used to be a
 			// validation failure. The helper walks the whole registry.
 			crate::err::anyhow_to_types_error(e)
+		})
+	}
+
+	/// Parse SurrealQL and prepare it to stream its results.
+	///
+	/// Where [`Self::execute`] answers with every statement's result at once,
+	/// this sends [`QueryStreamItem`]s into `items` as the executor produces
+	/// them, so a caller can forward rows before the query finishes. See the
+	/// [`stream`](crate::dbs::QueryStreamItem) module for what a consumer may
+	/// assume about them — chiefly that rows are provisional until their
+	/// statement's terminal item arrives.
+	///
+	/// Parsing and the session checks happen here, so their failures are
+	/// reported instead of a job. Everything after that is reported by driving
+	/// [`QueryStreamJob::run`].
+	/// `cancel` stops the execution at its next yield point. A streaming caller
+	/// wants one: a consumer that stops reading is only noticed at the next
+	/// send otherwise, so a query in a phase that emits nothing for a while — a
+	/// sort, an aggregate — would run to completion after the client had gone.
+	pub fn execute_stream(
+		self: &Arc<Self>,
+		txt: &str,
+		sess: &Session,
+		vars: Option<PublicVariables>,
+		cancel: Option<CancelHandle>,
+		items: Sender<QueryStreamItem>,
+	) -> Result<QueryStreamJob, TypesError> {
+		// Parse the SQL query text
+		let ast = syn::parse_with_capabilities(txt, &self.capabilities.load(), &self.parser_config)
+			.map_err(|e| TypesError::validation(e.to_string(), None))?;
+		self.process_plan_streaming(ast.into(), sess, vars, None, cancel, items)
+	}
+
+	/// Parse SurrealQL and prepare it to stream its results, running inside an
+	/// existing transaction. See [`Self::execute_stream`].
+	pub fn execute_stream_with_transaction(
+		self: &Arc<Self>,
+		txt: &str,
+		sess: &Session,
+		vars: Option<PublicVariables>,
+		tx: Arc<Transaction>,
+		cancel: Option<CancelHandle>,
+		items: Sender<QueryStreamItem>,
+	) -> Result<QueryStreamJob, TypesError> {
+		// Parse the SQL query text
+		let ast = syn::parse_with_capabilities(txt, &self.capabilities.load(), &self.parser_config)
+			.map_err(|e| TypesError::validation(e.to_string(), None))?;
+		self.process_plan_streaming(ast.into(), sess, vars, Some(tx), cancel, items)
+	}
+
+	/// Prepare an already-parsed plan to stream its results.
+	///
+	/// Shares [`Self::process_plan_inner`]'s preflight — an expired session,
+	/// anonymous access, a context that cannot be built — because a caller that
+	/// fails those has no query to stream and should learn so from the call
+	/// rather than from an empty stream.
+	pub(crate) fn process_plan_streaming(
+		self: &Arc<Self>,
+		plan: LogicalPlan,
+		sess: &Session,
+		vars: Option<PublicVariables>,
+		tx: Option<Arc<Transaction>>,
+		cancel: Option<CancelHandle>,
+		items: Sender<QueryStreamItem>,
+	) -> Result<QueryStreamJob, TypesError> {
+		// Check if the session has expired
+		if sess.expired() {
+			return Err(TypesError::not_allowed(
+				"The session has expired".to_string(),
+				AuthError::SessionExpired,
+			));
+		}
+
+		// Check if anonymous actors can execute queries when auth is enabled
+		if let Err(e) = self.check_anon(sess) {
+			return Err(TypesError::not_allowed(
+				format!("Anonymous access not allowed: {e}"),
+				AuthError::NotAllowed {
+					actor: "anonymous".to_owned(),
+					action: "process".to_owned(),
+					resource: "query".to_owned(),
+				},
+			));
+		}
+
+		// Create a new query options
+		let opt = self.setup_options(sess);
+
+		// Create a default context
+		let mut ctx = self.setup_ctx().map_err(crate::err::anyhow_to_types_error)?;
+
+		// Install the external cancellation flag if one was supplied. The
+		// executor short-circuits at its next yield with `Reason::Canceled` and
+		// finalises the transaction on its normal error path -- which is why
+		// this is a flag rather than the caller dropping the execution future,
+		// since dropping it would drop the open transaction with it.
+		if let Some(cancel) = cancel {
+			ctx.set_cancellation(&cancel);
+		}
+
+		// Start an execution context
+		ctx.attach_session(sess).map_err(crate::err::into_types_error)?;
+
+		// Store the query variables
+		if let Some(vars) = vars {
+			ctx.attach_variables(vars.into()).map_err(crate::err::into_types_error)?;
+		}
+
+		// An externally-supplied transaction is prepared exactly as on the
+		// buffered path: it carries the session's tenant identity into the
+		// transaction events, and the write-cardinality guard applies to
+		// statements running inside a client-owned transaction too, so wrapping
+		// a statement in one cannot bypass it.
+		if let Some(tx) = &tx {
+			if let Some(identity) = ctx.tenant_identity() {
+				tx.set_tenant_identity(Arc::clone(identity));
+			}
+			tx.arm_write_keys_limit(self.transaction_max_write_keys());
+			ctx.set_transaction(Arc::clone(tx));
+		}
+
+		// The count is known now because parsing is done, which is what lets a
+		// transport announce it before the first result exists.
+		let statement_count = plan.expressions.len();
+		let kvs = Arc::clone(self);
+		let ctx = ctx.freeze();
+		Ok(QueryStreamJob {
+			statement_count,
+			run: Box::pin(async move {
+				let executed = match tx {
+					Some(_) => {
+						Executor::execute_plan_streaming_with_transaction(
+							&kvs, ctx, opt, plan, items,
+						)
+						.await
+					}
+					None => Executor::execute_plan_streaming(&kvs, ctx, opt, plan, items).await,
+				};
+				executed.map_err(crate::err::anyhow_to_types_error)
+			}),
 		})
 	}
 

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use async_channel::Sender;
 use surrealdb_types::{HashMap, object};
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -8,7 +9,7 @@ use uuid::Uuid;
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider, RootProvider};
 use crate::ctx::CancelHandle;
 use crate::dbs::capabilities::{ExperimentalTarget, MethodTarget};
-use crate::dbs::{QueryResult, QueryType, Session};
+use crate::dbs::{QueryResult, QueryStreamItem, QueryStreamJob, QueryType, Session};
 use crate::iam::token::Token;
 use crate::kvs::{Datastore, TransactionType};
 use crate::observe::{
@@ -1767,34 +1768,137 @@ pub trait RpcProtocol {
 			return Err(method_not_allowed(Method::Query.to_string()));
 		}
 		// Process the method arguments
-		let (query, vars) =
-			extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
-				.ok_or(invalid_params("Expected (query:string, vars:object)".to_string()))?;
-
-		let PublicValue::String(query) = query else {
-			return Err(invalid_params("Expected query to be string".to_string()));
-		};
-
-		// Specify the query variables
-		let vars = match vars {
-			Some(PublicValue::Object(v)) => {
-				let mut merged = session.variables.clone();
-				merged.extend(v.into());
-				Some(merged)
-			}
-			None | Some(PublicValue::None | PublicValue::Null) => Some(session.variables.clone()),
-			unexpected => {
-				return Err(invalid_params(format!(
-					"Expected vars to be object, got {unexpected:?}"
-				)));
-			}
-		};
+		let (query, vars) = extract_query_params(params, &session)?;
 
 		Ok(DbResult::Query(
 			run_query(self, txn, session_id, QueryForm::Text(&query), vars)
 				.await
 				.map_err(types_error_from_anyhow)?,
 		))
+	}
+
+	/// Prepare SurrealQL to stream its results, rather than answering with all
+	/// of them at once.
+	///
+	/// Returns the parsed statement count together with the execution, because
+	/// a transport has to announce that count before the first result exists.
+	/// Drive [`QueryStreamJob::run`] while draining `items`.
+	///
+	/// This applies the same gates as [`Self::execute`] does for
+	/// [`Method::Query`] — the capability check and the wall-clock guard —
+	/// since a streaming call reaches the datastore without passing through it.
+	/// The wall-clock guard bounds the whole execution rather than only its
+	/// setup, so a client that reads slowly cannot hold a read snapshot open
+	/// past the configured timeout.
+	/// `cancel` is the caller's own handle on the execution, tripped when the
+	/// consumer goes away. It is cooperative on purpose: the execution stops at
+	/// its next yield point and finalises its transaction, where dropping the
+	/// future instead would drop that transaction unfinished. A transport with
+	/// a connection-level handle of its own is used as a fallback.
+	async fn query_stream(
+		&self,
+		txn: Option<Uuid>,
+		session_id: Uuid,
+		params: PublicArray,
+		cancel: Option<CancelHandle>,
+		items: Sender<QueryStreamItem>,
+	) -> Result<QueryStreamJob, surrealdb_types::Error> {
+		// The capability gate lives in `execute`, which this does not go
+		// through: a denied `query` must be denied here too.
+		if !self.kvs().allows_rpc_method(&MethodTarget {
+			method: Method::Query,
+		}) {
+			warn!("Capabilities denied RPC method call attempt, target: 'query'");
+			return Err(method_not_allowed(Method::Query.to_string()));
+		}
+
+		// One acquisition, and everything the execution needs taken from it:
+		// reading twice would let a concurrent `set` or `use` land in between,
+		// so the variables and the session could come from states that never
+		// existed together.
+		//
+		// The guard is then dropped rather than held across the execution, as
+		// the buffered path holds it: a stream lives for as long as its
+		// consumer reads, and holding the guard that long would block every
+		// `use` / `set` / `signin` on the session behind a slow client. The
+		// execution runs against the session as it was when the query started,
+		// which is what the buffered path effectively gives it too — there, a
+		// concurrent mutation simply waits instead.
+		let (query, vars, session) = {
+			let session_lock = self.get_session(&session_id).await?;
+			let session = session_lock.read().await;
+			// Check if the user is allowed to query
+			if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
+				return Err(method_not_allowed(Method::Query.to_string()));
+			}
+			if !Self::LQ_SUPPORT && session.rt {
+				return Err(bad_lq_config());
+			}
+			let (query, vars) = extract_query_params(params, &session)?;
+			(query, vars, session.clone())
+		};
+
+		let cancel = cancel.or_else(|| self.cancel_handle());
+		let kvs = self.kvs_arc();
+		let job = match txn {
+			Some(txn_id) => {
+				let tx = self.get_tx(txn_id).await?;
+				kvs.execute_stream_with_transaction(&query, &session, vars, tx, cancel, items)?
+			}
+			None => kvs.execute_stream(&query, &session, vars, cancel, items)?,
+		};
+
+		// Bound the execution the way `execute` bounds a buffered one. The
+		// guard wraps the run future, so it covers producing every row rather
+		// than only reaching the first.
+		let timeout = self.kvs().query_timeout();
+		// The observer event `execute` emits on completion. A streaming query
+		// does not pass through `execute`, so it reports itself: the identity
+		// comes from the session already cloned above rather than a second
+		// lookup, and the duration covers producing every row, which is the
+		// span a caller comparing it against a buffered query means.
+		//
+		// There is no auth event to match it: `method_to_auth_action` maps
+		// `Query` to `None`, so `execute` emits none either.
+		let observer = Arc::clone(self.kvs().observer());
+		let identity = TenantIdentity::from(&session);
+		let started = web_time::Instant::now();
+		let QueryStreamJob {
+			statement_count,
+			run,
+		} = job;
+		Ok(QueryStreamJob {
+			statement_count,
+			run: Box::pin(async move {
+				let result = match timeout {
+					Some(timeout) => match tokio::time::timeout(timeout, run).await {
+						Ok(inner) => inner,
+						Err(_elapsed) => {
+							warn!(
+								target: "surrealdb::core::rpc",
+								timeout = ?timeout,
+								"Streaming query exceeded the configured query timeout"
+							);
+							Err(query_timeout_error(timeout))
+						}
+					},
+					None => run.await,
+				};
+				observer.on_rpc_complete(&RpcEvent {
+					safe: RpcEventSafe {
+						method: Method::Query,
+						outcome: Outcome::from(&result),
+						duration: started.elapsed(),
+						error_class: result
+							.as_ref()
+							.err()
+							.map(crate::observe::error_class::classify_types_error),
+					},
+					ctx: identity.to_rpc_ctx(),
+				});
+				result
+			}),
+		})
 	}
 
 	async fn gql(
@@ -2136,6 +2240,39 @@ enum QueryForm<'a> {
 	/// is itself gated behind the `gql` feature.
 	#[cfg(feature = "gql")]
 	Plan(crate::gql::PreparedGqlQuery),
+}
+
+/// Read a `query` call's arguments: the SurrealQL text, and the variables to
+/// run it with.
+///
+/// The call's own variables are layered over the session's rather than
+/// replacing them, so a query sees both, and a missing or null `vars` leaves
+/// the session's in place.
+fn extract_query_params(
+	params: PublicArray,
+	session: &Session,
+) -> Result<(String, Option<PublicVariables>), surrealdb_types::Error> {
+	let (query, vars) = extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
+		.ok_or(invalid_params("Expected (query:string, vars:object)".to_string()))?;
+
+	let PublicValue::String(query) = query else {
+		return Err(invalid_params("Expected query to be string".to_string()));
+	};
+
+	// Specify the query variables
+	let vars = match vars {
+		Some(PublicValue::Object(v)) => {
+			let mut merged = session.variables.clone();
+			merged.extend(v.into());
+			Some(merged)
+		}
+		None | Some(PublicValue::None | PublicValue::Null) => Some(session.variables.clone()),
+		unexpected => {
+			return Err(invalid_params(format!("Expected vars to be object, got {unexpected:?}")));
+		}
+	};
+
+	Ok((query, vars))
 }
 
 async fn run_query<T>(

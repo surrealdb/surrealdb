@@ -10,8 +10,8 @@ use surrealdb_types::ToSql;
 
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::{
-	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
-	ValueBatchStream,
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, OutputShape,
+	ValueBatch, ValueBatchStream,
 };
 use crate::expr::Base;
 use crate::iam::{Action, ResourceKind};
@@ -100,8 +100,8 @@ impl ExecOperator for SleepPlan {
 		})))
 	}
 
-	fn is_scalar(&self) -> bool {
-		true
+	fn output_shape(&self) -> OutputShape {
+		OutputShape::Scalar
 	}
 }
 
@@ -137,7 +137,7 @@ mod tests {
 	#[test]
 	fn test_sleep_plan_is_scalar() {
 		let plan = test_sleep_plan(Duration(std::time::Duration::from_millis(100)));
-		assert!(plan.is_scalar());
+		assert!(plan.output_shape().is_scalar());
 	}
 
 	#[test]

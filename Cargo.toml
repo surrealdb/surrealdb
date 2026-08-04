@@ -247,7 +247,7 @@ snap = "1.1.1"
 stringprep = "0.1"
 strsim = "0.11.1"
 subtle = "2.6"
-surrealdb-protocol = { version = "0.12.0", default-features = false }
+surrealdb-protocol = { version = "0.13.0", default-features = false }
 sysinfo = { version = "0.37.2", default-features = false, features = ["system"] }
 tempfile = "3.27.0"
 thiserror = "2.0.18"

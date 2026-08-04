@@ -23,7 +23,7 @@ use crate::exec::plan_or_compute::{
 use crate::exec::planner::try_plan_expr;
 use crate::exec::{
 	AccessMode, BoxFut, CardinalityHint, Error as ExecError, ExecOperator, FlowResult,
-	OperatorMetrics, ValueBatch, ValueBatchStream,
+	OperatorMetrics, OutputShape, ValueBatch, ValueBatchStream,
 };
 use crate::expr::{Block, ControlFlow, ControlFlowExt, Expr};
 use crate::val::{Array, Value};
@@ -140,8 +140,8 @@ impl ExecOperator for SequencePlan {
 		Some(&self.metrics)
 	}
 
-	fn is_scalar(&self) -> bool {
-		true
+	fn output_shape(&self) -> OutputShape {
+		OutputShape::Scalar
 	}
 }
 
@@ -191,7 +191,7 @@ async fn execute_block_with_context(
 					let stream = plan.execute(&current_ctx)?;
 					let values = collect_stream(stream).await?;
 
-					result = if plan.is_scalar() {
+					result = if plan.output_shape().is_scalar() {
 						values.into_iter().next().unwrap_or(Value::None)
 					} else {
 						Value::Array(Array(values))

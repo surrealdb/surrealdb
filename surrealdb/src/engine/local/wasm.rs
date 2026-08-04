@@ -40,7 +40,7 @@ impl conn::Sealed for Db {
 			features.insert(ExtraFeatures::LiveQueries);
 
 			let waiter = watch::channel(Some(WaitFor::Connection));
-			let router = Router::from_route_sender(route_tx, features, config);
+			let router = Router::from_streaming_route_sender(route_tx, features, config);
 
 			Ok((router, waiter, session_clone).into())
 		})

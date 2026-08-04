@@ -20,13 +20,17 @@ mod sort_error;
 mod statement;
 mod statement_counters;
 mod store;
+mod stream;
 
 pub mod capabilities;
 // A session outlives the process that attached it, so its stored form belongs to
 // the keyspace; the live session above converts in and out of it.
 pub(crate) use surrealdb_datastore::values::session::DurableSession;
 pub use surrealdb_rpc::capabilities::NewPlannerStrategy;
-pub use surrealdb_rpc::{QueryResult, QueryResultBuilder, QueryType, Status};
+pub use surrealdb_rpc::{
+	QUERY_STREAM_BUFFER, QueryResult, QueryResultBuilder, QueryStreamItem, QueryType, Status,
+	items_for_result,
+};
 
 pub(crate) use self::broker::SendKill;
 pub use self::broker::{
@@ -43,6 +47,7 @@ pub(crate) use self::session::{durable_session, restore_session};
 pub(crate) use self::sort_error::SortError;
 pub(crate) use self::statement::Statement;
 pub(crate) use self::statement_counters::StatementCounters;
+pub use self::stream::{QueryItemStream, QueryStreamJob};
 pub use crate::catalog::node;
 pub(crate) use crate::expr::variables::Variables;
 
@@ -51,5 +56,7 @@ mod file;
 
 #[cfg(all(test, feature = "kv-mem"))]
 mod definer_rights_test;
+#[cfg(all(test, feature = "kv-mem"))]
+mod stream_test;
 #[cfg(test)]
 pub(crate) mod test;

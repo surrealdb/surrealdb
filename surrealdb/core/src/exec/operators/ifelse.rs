@@ -13,8 +13,8 @@ use crate::err::EngineError;
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::plan_or_compute::{evaluate_expr_at_depth, expr_required_context};
 use crate::exec::{
-	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
-	ValueBatchStream,
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, OutputShape,
+	ValueBatch, ValueBatchStream,
 };
 use crate::expr::{ControlFlow, Expr};
 use crate::val::Value;
@@ -129,9 +129,9 @@ impl ExecOperator for IfElsePlan {
 		Some(&self.metrics)
 	}
 
-	fn is_scalar(&self) -> bool {
+	fn output_shape(&self) -> OutputShape {
 		// IF/ELSE expressions return a single value
-		true
+		OutputShape::Scalar
 	}
 }
 

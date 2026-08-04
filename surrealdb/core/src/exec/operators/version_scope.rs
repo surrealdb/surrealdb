@@ -9,7 +9,7 @@ use futures::StreamExt;
 
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, PhysicalExpr, ValueBatchStream, monitor_stream,
+	OperatorMetrics, OutputShape, PhysicalExpr, ValueBatchStream, monitor_stream,
 };
 
 /// Evaluates the VERSION expression once and propagates the resulting
@@ -66,8 +66,8 @@ impl ExecOperator for VersionScope {
 		Some(&self.metrics)
 	}
 
-	fn is_scalar(&self) -> bool {
-		self.inner.is_scalar()
+	fn output_shape(&self) -> OutputShape {
+		self.inner.output_shape()
 	}
 
 	fn output_ordering(&self) -> crate::exec::OutputOrdering {

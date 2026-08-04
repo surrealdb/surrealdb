@@ -13,8 +13,8 @@ use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, UserProvide
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{
-	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
-	ValueBatchStream,
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, OutputShape,
+	ValueBatch, ValueBatchStream,
 };
 use crate::expr::Base;
 use crate::expr::statements::info::InfoStructure;
@@ -108,8 +108,8 @@ impl ExecOperator for UserInfoPlan {
 		})))
 	}
 
-	fn is_scalar(&self) -> bool {
-		true
+	fn output_shape(&self) -> OutputShape {
+		OutputShape::Scalar
 	}
 }
 

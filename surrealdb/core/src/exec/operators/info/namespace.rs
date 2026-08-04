@@ -14,8 +14,8 @@ use crate::catalog::providers::{AuthorisationProvider, DatabaseProvider, UserPro
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{
-	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
-	ValueBatchStream,
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, OutputShape,
+	ValueBatch, ValueBatchStream,
 };
 use crate::expr::statements::info::InfoStructure;
 use crate::iam::{Action, ResourceKind};
@@ -94,8 +94,8 @@ impl ExecOperator for NamespaceInfoPlan {
 		})))
 	}
 
-	fn is_scalar(&self) -> bool {
-		true
+	fn output_shape(&self) -> OutputShape {
+		OutputShape::Scalar
 	}
 }
 

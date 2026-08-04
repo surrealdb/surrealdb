@@ -18,5 +18,9 @@ surrealdb-rpc.workspace = true
 surrealdb-types.workspace = true
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 
+[dev-dependencies]
+futures = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
+
 [lints]
 workspace = true

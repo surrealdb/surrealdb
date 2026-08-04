@@ -69,7 +69,7 @@ impl PhysicalExpr for ScalarSubquery {
 			}
 
 			// Check if the plan is scalar (e.g., SELECT ... FROM ONLY)
-			if self.plan.is_scalar() {
+			if self.plan.output_shape().is_scalar() {
 				// Scalar plans should return a single value directly (or NONE if empty)
 				Ok(values.pop().unwrap_or(Value::None))
 			} else {

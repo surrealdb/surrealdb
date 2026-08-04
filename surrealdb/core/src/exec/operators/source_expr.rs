@@ -17,8 +17,8 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{
-	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
-	monitor_stream,
+	AccessMode, ExecOperator, FlowResult, OperatorMetrics, OutputShape, ValueBatch,
+	ValueBatchStream, monitor_stream,
 };
 use crate::val::Value;
 
@@ -136,9 +136,9 @@ impl ExecOperator for SourceExpr {
 		Ok(monitor_stream(Box::pin(stream), "SourceExpr", &self.metrics))
 	}
 
-	fn is_scalar(&self) -> bool {
+	fn output_shape(&self) -> OutputShape {
 		// SourceExpr is not scalar - it can yield multiple values
-		false
+		OutputShape::Rows
 	}
 }
 

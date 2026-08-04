@@ -66,7 +66,7 @@ impl ExecOperator for ReturnPlan {
 		// Check if inner plan is scalar (like `RETURN 1 + 2`) vs query (like `RETURN SELECT
 		// ...`) Query results should stay wrapped in array; scalar results can be
 		// unwrapped
-		let inner_is_scalar = inner.is_scalar();
+		let inner_is_scalar = inner.output_shape().is_scalar();
 
 		// Return a stream that executes the inner plan and produces the control flow signal
 		Ok(Box::pin(futures::stream::once(async move {
@@ -128,7 +128,7 @@ mod tests {
 	use super::*;
 	use crate::exec::operators::ExprPlan;
 	use crate::exec::operators::test_util::{ValuesOperator, physical_expr, root_ctx, try_collect};
-	use crate::exec::{Error as ExecError, ValueBatch};
+	use crate::exec::{Error as ExecError, OutputShape, ValueBatch};
 	use crate::val::Array;
 
 	/// A control-flow signal a [`Stub`] raises. `ControlFlow` is not `Clone`, so
@@ -234,8 +234,12 @@ mod tests {
 			self.cardinality
 		}
 
-		fn is_scalar(&self) -> bool {
-			self.scalar
+		fn output_shape(&self) -> OutputShape {
+			if self.scalar {
+				OutputShape::Scalar
+			} else {
+				OutputShape::Rows
+			}
 		}
 
 		fn execute(&self, _ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {

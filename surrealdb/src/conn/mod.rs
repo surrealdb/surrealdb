@@ -90,6 +90,21 @@ impl Router {
 		}
 	}
 
+	/// Builds a router around a [`Route`] channel whose engine can produce
+	/// results incrementally, so a streaming caller is served for real rather
+	/// than from the buffered path.
+	pub(crate) fn from_streaming_route_sender(
+		sender: Sender<Route>,
+		features: HashSet<ExtraFeatures>,
+		config: Config,
+	) -> Self {
+		Self {
+			engine: Arc::new(RouteChannelEngine::new_streaming(sender)),
+			config,
+			features,
+		}
+	}
+
 	/// Builds a router around an engine that serves [`SurrealEngine`]
 	/// directly, with no route channel behind it.
 	#[cfg_attr(not(feature = "protocol-grpc"), allow(dead_code))]

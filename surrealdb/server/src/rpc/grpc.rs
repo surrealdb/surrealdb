@@ -44,14 +44,19 @@
 //! which authenticates per request cannot reach a session belonging to a
 //! different principal.
 
+use std::collections::{HashMap as StdHashMap, HashSet as StdHashSet, VecDeque};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
 use dashmap::DashMap;
 use futures::{Stream, StreamExt};
+use surrealdb_core::channel::{Receiver, bounded};
+use surrealdb_core::ctx::CancelHandle;
 use surrealdb_core::dbs::capabilities::{MethodTarget, RouteTarget};
-use surrealdb_core::dbs::{QueryResult, QueryType, Session};
+use surrealdb_core::dbs::{
+	QUERY_STREAM_BUFFER, QueryResult, QueryStreamItem, QueryStreamJob, QueryType, Session,
+};
 use surrealdb_core::iam::check::check_ns_db;
 use surrealdb_core::iam::{Auth, Token};
 use surrealdb_core::kvs::{Datastore, Transaction, TransactionType, export};
@@ -67,6 +72,7 @@ use surrealdb_types::{Array, Error as TypesError, HashMap, Notification, Surreal
 use tokio::sync::{RwLock, mpsc};
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
+use web_time::Instant;
 
 use crate::cnf::{
 	GRPC_MAX_ATTACHED_SESSIONS, GRPC_NOTIFICATION_BUFFER, HTTP_MAX_IMPORT_BODY_SIZE,
@@ -80,7 +86,7 @@ use crate::rpc::RpcState;
 /// their bytes the same way.
 const EXPORT_CHUNK_SIZE: usize = surrealdb_protocol::DEFAULT_FILE_CHUNK_SIZE;
 
-/// How many records one query batch frame carries.
+/// The most records one query batch frame carries, whatever a client asks for.
 ///
 /// A statement's results are split across frames so that no single message
 /// grows with the result set: a gRPC client decodes 4 MiB per message by
@@ -641,6 +647,7 @@ impl RpcProtocol for Grpc {
 }
 
 /// The session a request runs on.
+#[derive(Clone, Copy)]
 struct ResolvedSession {
 	/// The session the method executes against.
 	id: Uuid,
@@ -1089,10 +1096,9 @@ impl SurrealDbService for GrpcService {
 				"This server does not serve columnar (Arrow) query results",
 			));
 		}
-		let results =
-			self.run_query(request.context.as_ref(), request.query, request.variables).await?;
-		let frames = query_frames(results);
-		Ok(Response::new(Box::pin(futures::stream::iter(frames.into_iter().map(Ok)))))
+		let batch_records = batch_records(request.max_batch_records);
+		self.stream_query(request.context.as_ref(), request.query, request.variables, batch_records)
+			.await
 	}
 
 	/// Calls a function, or a machine learning model when a version is given.
@@ -1344,6 +1350,7 @@ impl GrpcService {
 					.kvs()
 					.query_timeout()
 					.and_then(|timeout| proto::Duration::try_from(timeout).ok()),
+				max_batch_records: QUERY_BATCH_RECORDS as u32,
 			}),
 			live_queries: Some(rpc::LiveQueryCapabilities {
 				// Notifications are delivered straight to an attached
@@ -1373,6 +1380,118 @@ impl GrpcService {
 			DbResult::Query(results) => Ok(results),
 			_ => Err(Status::internal("Query did not return statement results")),
 		}
+	}
+
+	/// Runs a query, framing each statement's results as they are produced.
+	///
+	/// The stream is built before the query has run: `Begin` goes out first, as
+	/// the protocol requires, carrying the statement count parsing already
+	/// established. Everything after it is produced lazily, so the first rows
+	/// reach the client while the rest of the scan is still happening.
+	async fn stream_query(
+		&self,
+		context: Option<&rpc::RequestContext>,
+		query: String,
+		variables: Option<proto::Variables>,
+		batch_records: usize,
+	) -> Result<Response<ResponseStream<rpc::QueryResponse>>, Status> {
+		// Parse the transaction id before resolving a session, for the reason
+		// `execute` gives: an early return between the two would strand an
+		// ephemeral session in the map with nothing left to remove it.
+		let txn = match context.and_then(|context| context.transaction.as_ref()) {
+			Some(txn) => Some(to_uuid(txn)?),
+			None => None,
+		};
+		let session = self.resolve(context, true).await?;
+		if let Some(txn) = txn
+			&& !self.rpc().transaction_belongs_to(&txn, session.id)
+		{
+			self.release(&session).await;
+			return Err(to_status(&invalid_params("Transaction not found")));
+		}
+
+		let variables = match variables {
+			Some(variables) => match from_proto_variables(variables) {
+				Ok(variables) => variables,
+				Err(status) => {
+					self.release(&session).await;
+					return Err(status);
+				}
+			},
+			None => Value::None,
+		};
+		let params = Array::from(vec![Value::String(query), variables]);
+
+		let (items_tx, items_rx) = bounded(QUERY_STREAM_BUFFER);
+		// The handle this request cancels with. The frames own it, so it trips
+		// when the client stops reading -- see `ReleaseOnDrop`.
+		let cancel = CancelHandle::new();
+		// A client's own deadline, which `GrpcService::execute` applies for
+		// buffered queries and this path would otherwise drop on the floor.
+		let requested_timeout = context
+			.and_then(|context| context.timeout)
+			.and_then(|timeout| Duration::try_from(timeout).ok());
+		let job = match RpcProtocol::query_stream(
+			self.rpc(),
+			txn,
+			session.id,
+			params,
+			Some(cancel.clone()),
+			items_tx,
+		)
+		.await
+		{
+			Ok(job) => job,
+			Err(error) => {
+				self.release(&session).await;
+				return Err(to_status(&error));
+			}
+		};
+
+		// A failure before execution began -- a parse error, a denied
+		// capability, an unknown transaction -- has already been returned
+		// above, which is what the protocol asks for: those end the RPC with a
+		// transport error and no frames at all.
+		let begin = rpc::QueryResponse {
+			frame: Some(rpc::query_response::Frame::Begin(rpc::QueryBegin {
+				query_id: Some(proto::Uuid::from_uuid(Uuid::new_v4())),
+				statement_count: job.statement_count as u32,
+			})),
+		};
+
+		// The execution is polled only when the client reads, so a deadline
+		// awaited alongside it would never fire for a client that stops
+		// reading -- and that client would pin an open read snapshot for as
+		// long as it held the stream. This watchdog is driven by the runtime
+		// instead, so it fires regardless.
+		//
+		// Tripping the handle alone is not enough: the execution parks on a
+		// full `items` channel rather than at a yield point, so the receiver is
+		// closed too, which fails that send and lets the executor finalise its
+		// transaction on the way out.
+		if let Some(deadline) = shortest(requested_timeout, self.rpc().kvs().query_timeout()) {
+			let cancel = cancel.clone();
+			let items = items_rx.clone();
+			tokio::spawn(async move {
+				tokio::time::sleep(deadline).await;
+				cancel.trip();
+				items.close();
+			});
+		}
+
+		let state = QueryFraming::new(
+			Arc::clone(&self.state),
+			session,
+			job,
+			items_rx,
+			batch_records,
+			cancel,
+		);
+		let frames = futures::stream::unfold(Some(state), |state| async move {
+			let mut state = state?;
+			state.next().await.map(|frame| (Ok(frame), Some(state)))
+		});
+		Ok(Response::new(Box::pin(futures::stream::once(async move { Ok(begin) }).chain(frames))))
 	}
 
 	/// Registers a live query for a subscription that will own it.
@@ -1804,6 +1923,481 @@ enum ByteFrame {
 	Error(proto::SurrealError),
 }
 
+/// The sooner of two optional deadlines.
+fn shortest(a: Option<Duration>, b: Option<Duration>) -> Option<Duration> {
+	match (a, b) {
+		(Some(a), Some(b)) => Some(a.min(b)),
+		(deadline, None) | (None, deadline) => deadline,
+	}
+}
+
+/// A streaming execution in flight, as [`QueryStreamJob::run`] hands it over.
+type QueryStreamRun = Pin<Box<dyn Future<Output = Result<Vec<QueryResult>, TypesError>> + Send>>;
+
+/// The first batch a statement sends, in records.
+///
+/// The ramp exists for time-to-first-row: a client waiting on a large `SELECT`
+/// sees something after this many records rather than after a full batch. Each
+/// subsequent batch doubles up to the negotiated maximum, so the small frames
+/// are confined to the start and a long result still costs one frame per
+/// [`batch_records`] rows.
+const QUERY_FIRST_BATCH_RECORDS: usize = 16;
+
+/// Releases a streaming query's resources when the stream carrying its results
+/// is dropped.
+///
+/// A dropped stream means the client stopped reading, and that is the only
+/// signal for it: the framing state is simply never polled again, so nothing
+/// after the last `next()` runs. Everything the request owns therefore has to
+/// be released from here rather than at the end of the stream.
+///
+/// Tripping the cancel handle is what stops the query. Waiting for the next
+/// send to fail would not be enough: a query inside a phase that emits nothing
+/// for a while -- a sort, an aggregate -- would run to completion first.
+/// Cancelling this way rather than dropping the execution future is deliberate:
+/// the future owns an open transaction, and dropping it would leave that
+/// transaction neither committed nor cancelled.
+struct ReleaseOnDrop {
+	cancel: CancelHandle,
+	/// The ephemeral session to remove, for a request that named none. A
+	/// client-named session outlives the request and is left alone.
+	ephemeral: Option<(Arc<RpcState>, Uuid)>,
+}
+
+impl ReleaseOnDrop {
+	fn new(cancel: CancelHandle, state: Arc<RpcState>, session: &ResolvedSession) -> Self {
+		Self {
+			cancel,
+			ephemeral: session.client.is_none().then_some((state, session.id)),
+		}
+	}
+
+	/// Give up ownership of the ephemeral session, for the path that has
+	/// already released it.
+	fn released(&mut self) {
+		self.ephemeral = None;
+	}
+}
+
+impl Drop for ReleaseOnDrop {
+	fn drop(&mut self) {
+		self.cancel.trip();
+		// Removing a session awaits, which a `Drop` cannot, so it goes to a
+		// task. Nothing else holds a handle on this session -- the request that
+		// made it is over -- so there is no ordering to preserve.
+		if let Some((state, id)) = self.ephemeral.take() {
+			tokio::spawn(async move {
+				state.grpc.remove_ephemeral_session(&id).await;
+			});
+		}
+	}
+}
+
+/// Turns a streaming execution's items into query response frames.
+///
+/// Holds one statement's rows back only until they fill a batch, so the wire
+/// sees them long before the statement -- or the query -- has finished.
+struct QueryFraming {
+	state: Arc<RpcState>,
+	session: ResolvedSession,
+	/// The execution, until it has been driven to completion.
+	run: Option<QueryStreamRun>,
+	items: Receiver<QueryStreamItem>,
+	/// The framing decisions, which do not depend on how the items arrive.
+	frames: QueryFrames,
+	started: Instant,
+	/// Set once the terminating frame has been queued, which stops the stream.
+	done: bool,
+	/// Cancels the query and releases the request's session when this struct is
+	/// dropped, i.e. when the client stops reading.
+	release: ReleaseOnDrop,
+}
+
+/// Turns a streaming execution's items into query response frames.
+///
+/// Separate from [`QueryFraming`] because none of these decisions depend on how
+/// the items arrive: a statement's rows are framed the same whether they were
+/// produced one batch at a time or all at once.
+struct QueryFrames {
+	/// Rows waiting to be framed, and how many batches each statement has sent.
+	pending: StdHashMap<u32, PendingStatement>,
+	/// Frames produced but not yet yielded, in order.
+	queued: VecDeque<rpc::QueryResponse>,
+	/// The largest batch this client accepted.
+	batch_records: usize,
+	/// Statements already terminated, so a second attempt is ignored.
+	///
+	/// Two things can end a statement: its own `Finished` item, and a value
+	/// this server could not encode. Both have to terminate it -- an encode
+	/// failure cannot be deferred to the executor, which does not know about
+	/// it -- so whichever happens first wins and the other is dropped. Sending
+	/// both would put a frame after a terminal one, which the protocol forbids,
+	/// and count the statement twice in `End.result_count`.
+	terminated: StdHashSet<u32>,
+}
+
+/// One statement's rows on their way to the wire.
+#[derive(Default)]
+struct PendingStatement {
+	values: Vec<proto::Value>,
+	/// How many batches have gone out, which is the frame's `batch_index`.
+	batches: u64,
+	/// Records to accumulate before flushing, doubling per batch up to the
+	/// client's maximum.
+	target: usize,
+	/// Records sent so far, which the terminal batch reports as the statement's
+	/// `records_returned`.
+	sent: i64,
+	/// Set when the statement's value is a single value rather than a list.
+	///
+	/// This decides the terminal batch's `kind`, and it cannot be inferred from
+	/// the count: a `SELECT` returning one row is still a one-element array,
+	/// where `SELECT ONLY` returning one row is that row.
+	single: bool,
+}
+
+impl PendingStatement {
+	/// A statement with nothing sent yet, whose first batch is the small one
+	/// the ramp starts from.
+	fn new(batch_records: usize) -> Self {
+		Self {
+			target: QUERY_FIRST_BATCH_RECORDS.min(batch_records).max(1),
+			..Default::default()
+		}
+	}
+}
+
+impl QueryFraming {
+	fn new(
+		state: Arc<RpcState>,
+		session: ResolvedSession,
+		job: QueryStreamJob,
+		items: Receiver<QueryStreamItem>,
+		batch_records: usize,
+		cancel: CancelHandle,
+	) -> Self {
+		let release = ReleaseOnDrop::new(cancel, Arc::clone(&state), &session);
+		Self {
+			state,
+			session,
+			run: Some(job.run),
+			items,
+			frames: QueryFrames::new(batch_records),
+			started: Instant::now(),
+			done: false,
+			release,
+		}
+	}
+
+	/// The next frame, or `None` once the stream is complete.
+	async fn next(&mut self) -> Option<rpc::QueryResponse> {
+		loop {
+			if let Some(frame) = self.frames.pop() {
+				return Some(frame);
+			}
+			if self.done {
+				// The session outlives the request that made it only when the
+				// client named one; an ephemeral session is this stream's, and
+				// nothing else will remove it. Doing it here rather than
+				// leaving it to the drop guard keeps it awaited, so a caller
+				// that reads the stream to its end sees the session gone.
+				if self.session.client.is_none() {
+					let state = Arc::clone(&self.state);
+					let id = self.session.id;
+					self.release.released();
+					state.grpc.remove_ephemeral_session(&id).await;
+				}
+				return None;
+			}
+			// Drive the execution and the drain together: the channel is
+			// bounded, so awaiting either alone would deadlock against the
+			// other.
+			let run = self.run.as_mut().expect("the execution is driven until it completes");
+			tokio::select! {
+				item = self.items.recv() => match item {
+					Ok(item) => self.frames.absorb(item),
+					// The execution dropped its sender, so the only thing left
+					// is its own outcome.
+					Err(_) => {
+						let outcome = self.run.take().expect("still running").await;
+						self.finish(outcome).await;
+					}
+				},
+				outcome = run => {
+					// The execution finished before its channel drained. Take
+					// what is still buffered before terminating.
+					self.run = None;
+					while let Ok(item) = self.items.try_recv() {
+						self.frames.absorb(item);
+					}
+					self.finish(outcome).await;
+				}
+			}
+		}
+	}
+
+	/// Queue the frame that ends the stream.
+	async fn finish(&mut self, outcome: Result<Vec<QueryResult>, TypesError>) {
+		self.done = true;
+		match outcome {
+			Ok(results) => {
+				let state = Arc::clone(&self.state);
+				let session_id = self.session.id;
+				register_live_queries(&state, session_id, &results).await;
+				self.frames.end(self.started.elapsed());
+			}
+			// A failure that belongs to no single statement ends the stream
+			// instead of completing it.
+			Err(error) => self.frames.error(&error),
+		}
+	}
+}
+
+impl QueryFrames {
+	fn new(batch_records: usize) -> Self {
+		Self {
+			pending: StdHashMap::new(),
+			queued: VecDeque::new(),
+			batch_records,
+			terminated: StdHashSet::new(),
+		}
+	}
+
+	/// The next frame produced so far, in order.
+	fn pop(&mut self) -> Option<rpc::QueryResponse> {
+		self.queued.pop_front()
+	}
+
+	/// Queue the frame that completes the stream successfully.
+	fn end(&mut self, elapsed: Duration) {
+		self.queued.push_back(rpc::QueryResponse {
+			frame: Some(rpc::query_response::Frame::End(rpc::QueryEnd {
+				result_count: self.terminated.len() as u32,
+				execution_duration: proto::Duration::try_from(elapsed).ok(),
+			})),
+		});
+	}
+
+	/// Queue the frame that ends the stream without completing it.
+	fn error(&mut self, error: &TypesError) {
+		self.queued.push_back(rpc::QueryResponse {
+			frame: Some(rpc::query_response::Frame::Error(to_proto_error(error))),
+		});
+	}
+
+	/// Fold one item into the frames it produces.
+	fn absorb(&mut self, item: QueryStreamItem) {
+		// A statement this server already terminated -- because a value of its
+		// own could not be encoded -- takes nothing further. Its rows would
+		// otherwise be framed after its terminal batch, which the protocol
+		// forbids and a client reading rows as they arrive would act on.
+		if self.terminated.contains(&(item.index() as u32)) {
+			return;
+		}
+		match item {
+			QueryStreamItem::Rows {
+				index,
+				values,
+			} => {
+				let index = index as u32;
+				let batch_records = self.batch_records;
+				let entry = self
+					.pending
+					.entry(index)
+					.or_insert_with(|| PendingStatement::new(batch_records));
+				match try_values(values.into_iter()) {
+					Ok(mut encoded) => entry.values.append(&mut encoded),
+					// A value the wire cannot carry fails only the statement
+					// that produced it, exactly as its own error would.
+					Err(error) => {
+						self.pending.remove(&index);
+						self.queue_terminal(
+							index,
+							rpc::QueryStatementKind::Other,
+							Some(to_proto_error(&error)),
+							0,
+						);
+						return;
+					}
+				}
+				while self.pending.get(&index).is_some_and(|p| p.values.len() >= p.target) {
+					self.flush(index);
+				}
+			}
+			QueryStreamItem::Value {
+				index,
+				value,
+			} => {
+				let index = index as u32;
+				let batch_records = self.batch_records;
+				match proto::Value::try_from(value).map_err(types_error_from_anyhow) {
+					Ok(value) => {
+						// A single value is not a list, so it is not batched:
+						// the terminal frame carries it whole, marked `SINGLE`
+						// so the client does not rebuild an array around it.
+						let entry = self
+							.pending
+							.entry(index)
+							.or_insert_with(|| PendingStatement::new(batch_records));
+						entry.values.push(value);
+						entry.single = true;
+					}
+					Err(error) => {
+						self.pending.remove(&index);
+						self.queue_terminal(
+							index,
+							rpc::QueryStatementKind::Other,
+							Some(to_proto_error(&error)),
+							0,
+						);
+					}
+				}
+			}
+			QueryStreamItem::Finished {
+				index,
+				time,
+				query_type,
+				error,
+			} => {
+				let index = index as u32;
+				let kind = match query_type {
+					QueryType::Live => rpc::QueryStatementKind::Live,
+					QueryType::Kill => rpc::QueryStatementKind::Kill,
+					_ => rpc::QueryStatementKind::Other,
+				};
+				self.queue_terminal(
+					index,
+					kind,
+					error.map(|e| to_proto_error(&e)),
+					time.as_nanos(),
+				);
+			}
+		}
+	}
+
+	/// Emit a full batch for `index`, leaving the statement open.
+	fn flush(&mut self, index: u32) {
+		let Some(entry) = self.pending.get_mut(&index) else {
+			return;
+		};
+		let take = entry.target.min(entry.values.len());
+		let values: Vec<proto::Value> = entry.values.drain(..take).collect();
+		let batch_index = entry.batches;
+		entry.batches += 1;
+		entry.sent += values.len() as i64;
+		// Ramp toward the client's maximum, so the small frames that make the
+		// first row arrive early do not become a per-frame cost on a long result.
+		entry.target = (entry.target * 2).min(self.batch_records).max(1);
+		self.queued.push_back(rpc::QueryResponse {
+			frame: Some(rpc::query_response::Frame::Batch(rpc::QueryBatchFrame {
+				query_index: index,
+				batch_index,
+				// A statement's kind is only known once it finishes, and only
+				// the terminal frame needs it: `LIVE` and `KILL` produce a
+				// single value rather than rows, so nothing that reaches a
+				// non-terminal batch is anything but an ordinary statement.
+				statement_kind: rpc::QueryStatementKind::Other as i32,
+				kind: rpc::QueryResponseKind::Batched as i32,
+				stats: None,
+				error: None,
+				payload: Some(rpc::query_batch_frame::Payload::Values(rpc::ValueBatch {
+					values,
+				})),
+			})),
+		});
+	}
+
+	/// Emit the frame that completes a statement, carrying whatever is left.
+	fn queue_terminal(
+		&mut self,
+		index: u32,
+		kind: rpc::QueryStatementKind,
+		error: Option<proto::SurrealError>,
+		elapsed_nanos: u128,
+	) {
+		if !self.terminated.insert(index) {
+			// Already terminated; see `terminated`.
+			return;
+		}
+		let entry = self.pending.remove(&index).unwrap_or_default();
+		// A statement whose rows were split reports the count it actually sent;
+		// one that failed reports nothing, since its rows are retracted.
+		let (payload, records) = if error.is_some() {
+			(None, 0)
+		} else {
+			let records = entry.sent + entry.values.len() as i64;
+			(
+				Some(rpc::query_batch_frame::Payload::Values(rpc::ValueBatch {
+					values: entry.values,
+				})),
+				records,
+			)
+		};
+		let single = error.is_none() && entry.single;
+		let stats = rpc::QueryStats {
+			records_returned: records,
+			bytes_returned: -1,
+			records_scanned: -1,
+			bytes_scanned: -1,
+			execution_duration: u64::try_from(elapsed_nanos)
+				.ok()
+				.and_then(|nanos| proto::Duration::try_from(Duration::from_nanos(nanos)).ok()),
+		};
+		self.queued.push_back(rpc::QueryResponse {
+			frame: Some(rpc::query_response::Frame::Batch(rpc::QueryBatchFrame {
+				query_index: index,
+				batch_index: entry.batches,
+				kind: if single {
+					rpc::QueryResponseKind::Single as i32
+				} else {
+					rpc::QueryResponseKind::BatchedFinal as i32
+				},
+				statement_kind: kind as i32,
+				stats: Some(stats),
+				error,
+				payload,
+			})),
+		});
+	}
+}
+
+/// Track the live queries an execution registered, and forget the ones it
+/// killed.
+///
+/// A `LIVE SELECT` produces its id as an ordinary result, but the id is only
+/// useful once the transport knows which session to deliver that query's
+/// notifications to. The buffered path does this over the finished results; a
+/// streaming one waits for the same point, since a registration inside a
+/// transaction block is not real until the block commits.
+async fn register_live_queries(state: &RpcState, session_id: Uuid, results: &[QueryResult]) {
+	if !results.iter().any(|r| matches!(r.query_type, QueryType::Live | QueryType::Kill)) {
+		return;
+	}
+	// Read the session's namespace and database once, and drop the guard before
+	// calling the hooks: `handle_live` takes the same lock, and a concurrent
+	// session-mutating request queued between two reads on a write-preferring
+	// lock would deadlock both.
+	let (namespace, database) = match state.grpc.get_session(&session_id).await {
+		Ok(lock) => {
+			let session = lock.read().await;
+			(session.ns.clone(), session.db.clone())
+		}
+		Err(_) => (None, None),
+	};
+	for result in results {
+		let Ok(Value::Uuid(id)) = &result.result else {
+			continue;
+		};
+		match result.query_type {
+			QueryType::Live => {
+				state.grpc.handle_live(id, session_id, namespace.clone(), database.clone()).await;
+			}
+			QueryType::Kill => state.grpc.handle_kill(id).await,
+			QueryType::Other => {}
+		}
+	}
+}
+
 /// Frames an export as a byte stream: chunks, then a trailer stating the
 /// totals so the receiver can tell a complete transfer from a truncated one --
 /// or, if the export failed part-way, an error frame in the trailer's place so
@@ -1914,127 +2508,24 @@ fn verify_trailer(
 	Ok(())
 }
 
-/// Renders a query's results as the frames of a query stream.
-///
-/// This server executes a query to completion before answering, so `Begin`
-/// carries the true statement count and every statement contributes exactly
-/// one, final, batch. A client that demultiplexes by `query_index`, as the
-/// protocol requires, cannot tell the difference.
-/// What a statement produced, once encoded for the wire.
-///
-/// The distinction survives encoding because it decides the batch `kind`: a
-/// list is rebuilt as an array by the client, a single value is not.
-enum Records {
-	One(Vec<proto::Value>),
-	List(Vec<proto::Value>),
-}
-
 /// Encodes values for the wire, reporting the first one it cannot carry.
 fn try_values(values: impl Iterator<Item = Value>) -> Result<Vec<proto::Value>, TypesError> {
 	values.map(|value| proto::Value::try_from(value).map_err(types_error_from_anyhow)).collect()
 }
 
-fn query_frames(results: Vec<QueryResult>) -> Vec<rpc::QueryResponse> {
-	let mut frames = Vec::with_capacity(results.len() + 2);
-	frames.push(rpc::QueryResponse {
-		frame: Some(rpc::query_response::Frame::Begin(rpc::QueryBegin {
-			query_id: Some(proto::Uuid::from_uuid(Uuid::new_v4())),
-			result_count: results.len() as u32,
-		})),
-	});
-	for (index, result) in results.into_iter().enumerate() {
-		let statement_kind = match result.query_type {
-			QueryType::Live => rpc::QueryStatementKind::Live,
-			QueryType::Kill => rpc::QueryStatementKind::Kill,
-			_ => rpc::QueryStatementKind::Other,
-		};
-		let mut stats = rpc::QueryStats {
-			records_returned: -1,
-			bytes_returned: -1,
-			records_scanned: -1,
-			bytes_scanned: -1,
-			// Advisory, like the counters beside it: a duration the wire cannot
-			// carry is reported as absent rather than failing the statement it
-			// merely describes.
-			execution_duration: proto::Duration::try_from(result.time).ok(),
-		};
-		// One frame per statement, except for a list of records, which is split
-		// so no single message grows with the result set.
-		let mut batch =
-			|batch_index: u64, kind, values: Option<Vec<proto::Value>>, error, stats| {
-				frames.push(rpc::QueryResponse {
-					frame: Some(rpc::query_response::Frame::Batch(rpc::QueryBatchFrame {
-						query_index: index as u32,
-						batch_index,
-						kind: kind as i32,
-						statement_kind: statement_kind as i32,
-						stats,
-						error,
-						payload: values.map(|values| {
-							rpc::query_batch_frame::Payload::Values(rpc::ValueBatch {
-								values,
-							})
-						}),
-					})),
-				});
-			};
-		// Encode up front. A value the wire cannot carry fails only the
-		// statement that produced it, the same way that statement's own error
-		// does, so the results around it still reach the client.
-		let encoded = match result.result {
-			Ok(Value::Array(array)) => {
-				stats.records_returned = array.len() as i64;
-				try_values(array.into_iter()).map(Records::List)
-			}
-			// Anything that is not a list is the statement's single value.
-			Ok(value) => {
-				stats.records_returned = 1;
-				try_values(std::iter::once(value)).map(Records::One)
-			}
-			Err(err) => Err(err),
-		};
-		match encoded {
-			// A statement's own failure travels in its batch so the other
-			// statements' results still reach the client.
-			Err(err) => batch(
-				0,
-				rpc::QueryResponseKind::BatchedFinal,
-				None,
-				Some(to_proto_error(&err)),
-				Some(stats),
-			),
-			Ok(Records::One(values)) => {
-				batch(0, rpc::QueryResponseKind::Single, Some(values), None, Some(stats));
-			}
-			Ok(Records::List(mut values)) => {
-				// An empty result still owes the client one final batch, so it
-				// learns the statement's kind and stats.
-				let batches = values.len().div_ceil(QUERY_BATCH_RECORDS).max(1);
-				for batch_index in 0..batches {
-					let take = QUERY_BATCH_RECORDS.min(values.len());
-					let records = values.drain(..take).collect();
-					let final_batch = batch_index + 1 == batches;
-					batch(
-						batch_index as u64,
-						if final_batch {
-							rpc::QueryResponseKind::BatchedFinal
-						} else {
-							rpc::QueryResponseKind::Batched
-						},
-						Some(records),
-						None,
-						// The stats describe the statement, not the batch, so
-						// they ride on the one that completes it.
-						final_batch.then_some(stats),
-					);
-				}
-			}
-		}
+/// How many records to put in one batch, given what the client asked for.
+///
+/// A request above the server's own bound is clamped rather than refused, which
+/// is what `QueryRequest.max_batch_records` requires: a client that asks for
+/// more than it may have still gets its results. Zero means the client
+/// expressed no preference, so the server chooses. The bound this clamps to is
+/// the one reported as `Limits.max_batch_records`, so a client can discover it
+/// rather than infer it from the batches it receives.
+fn batch_records(requested: u32) -> usize {
+	match requested as usize {
+		0 => QUERY_BATCH_RECORDS,
+		n => n.min(QUERY_BATCH_RECORDS),
 	}
-	frames.push(rpc::QueryResponse {
-		frame: Some(rpc::query_response::Frame::End(rpc::QueryEnd {})),
-	});
-	frames
 }
 
 /// Renders a data-change notification in the shape a subscription streams.
@@ -2550,7 +3041,34 @@ mod tests {
 	}
 
 	fn frames(results: Vec<QueryResult>) -> Vec<rpc::QueryResponse> {
-		query_frames(results)
+		frames_with(results, QUERY_BATCH_RECORDS)
+	}
+
+	/// Frame finished results the way the streaming path frames them, so these
+	/// tests exercise the framing the server actually serves.
+	///
+	/// Feeding whole results in is the same thing a statement that produced its
+	/// rows all at once does, and `Begin` is prepended here because the handler
+	/// sends it before the execution starts rather than as part of the framing.
+	fn frames_with(results: Vec<QueryResult>, batch_records: usize) -> Vec<rpc::QueryResponse> {
+		let mut framing = QueryFrames::new(batch_records);
+		let statement_count = results.len() as u32;
+		let mut frames = vec![rpc::QueryResponse {
+			frame: Some(rpc::query_response::Frame::Begin(rpc::QueryBegin {
+				query_id: Some(proto::Uuid::from_uuid(Uuid::new_v4())),
+				statement_count,
+			})),
+		}];
+		for (index, result) in results.into_iter().enumerate() {
+			for item in surrealdb_core::dbs::items_for_result(index, result) {
+				framing.absorb(item);
+			}
+		}
+		framing.end(Duration::from_millis(3));
+		while let Some(frame) = framing.pop() {
+			frames.push(frame);
+		}
+		frames
 	}
 
 	fn batch(response: &rpc::QueryResponse) -> &rpc::QueryBatchFrame {
@@ -2568,22 +3086,166 @@ mod tests {
 		}
 	}
 
-	/// A query stream always opens with `Begin` and closes with `End`, and
-	/// `Begin` reports the true statement count.
+	/// Nothing follows a statement's terminal batch, including rows the
+	/// executor had already produced for it.
+	///
+	/// A value this server cannot encode terminates its statement, but the
+	/// executor knows nothing of that and keeps sending the batches it is
+	/// partway through. Framing those would put rows after the terminal batch,
+	/// which the protocol forbids and a client acting on rows as they arrive
+	/// would treat as real results.
+	#[test]
+	fn a_terminated_statement_takes_no_further_rows() {
+		let mut frames = QueryFrames::new(QUERY_BATCH_RECORDS);
+		frames.queue_terminal(
+			0,
+			rpc::QueryStatementKind::Other,
+			Some(to_proto_error(&TypesError::internal("unencodable".to_string()))),
+			0,
+		);
+		// The batches the executor was already partway through sending.
+		for _ in 0..4 {
+			frames.absorb(QueryStreamItem::Rows {
+				index: 0,
+				values: vec![Value::Bool(true); QUERY_BATCH_RECORDS],
+			});
+		}
+		frames.absorb(QueryStreamItem::Finished {
+			index: 0,
+			time: Duration::ZERO,
+			query_type: QueryType::Other,
+			error: None,
+		});
+		frames.end(Duration::ZERO);
+
+		let mut produced = Vec::new();
+		while let Some(frame) = frames.pop() {
+			produced.push(frame);
+		}
+		assert_eq!(produced.len(), 2, "one terminal batch and one end frame, nothing after");
+		assert!(
+			matches!(produced[0].frame, Some(rpc::query_response::Frame::Batch(_))),
+			"the terminal batch"
+		);
+		assert!(matches!(produced[1].frame, Some(rpc::query_response::Frame::End(_))));
+	}
+
+	/// The deadline a streaming query runs under is the sooner of the client's
+	/// own and the server's, and either alone still applies.
+	///
+	/// This is what bounds a client that stops reading: its execution is polled
+	/// only when it reads, so the deadline has to come from a timer the runtime
+	/// drives, and that timer needs a duration whichever side supplied one.
+	#[test]
+	fn a_streaming_query_takes_the_sooner_deadline() {
+		let short = Duration::from_secs(1);
+		let long = Duration::from_secs(60);
+		assert_eq!(shortest(Some(short), Some(long)), Some(short));
+		assert_eq!(shortest(Some(long), Some(short)), Some(short));
+		assert_eq!(shortest(Some(short), None), Some(short), "the client's alone still applies");
+		assert_eq!(shortest(None, Some(long)), Some(long), "the server's alone still applies");
+		assert_eq!(shortest(None, None), None, "neither configured means no deadline");
+	}
+
+	/// A statement is terminated once, whichever ends it first.
+	///
+	/// A value this server cannot encode terminates its statement immediately,
+	/// and the executor -- which knows nothing of the encoding -- goes on to
+	/// send that statement's own `Finished`. Acting on both would put a frame
+	/// after a terminal one and count the statement twice in `result_count`,
+	/// which a client cross-checking that count reads as a lost frame.
+	#[test]
+	fn a_statement_is_terminated_only_once() {
+		let mut frames = QueryFrames::new(QUERY_BATCH_RECORDS);
+		frames.queue_terminal(0, rpc::QueryStatementKind::Other, None, 0);
+		frames.absorb(QueryStreamItem::Finished {
+			index: 0,
+			time: Duration::ZERO,
+			query_type: QueryType::Other,
+			error: None,
+		});
+		frames.end(Duration::ZERO);
+
+		let mut produced = Vec::new();
+		while let Some(frame) = frames.pop() {
+			produced.push(frame);
+		}
+		assert_eq!(produced.len(), 2, "one terminal batch and one end frame");
+		assert!(matches!(produced[0].frame, Some(rpc::query_response::Frame::Batch(_))));
+		match produced[1].frame.as_ref() {
+			Some(rpc::query_response::Frame::End(end)) => {
+				assert_eq!(end.result_count, 1, "the statement is counted once");
+			}
+			other => panic!("expected an end frame, got {other:?}"),
+		}
+	}
+
+	/// A query stream always opens with `Begin` and closes with `End`. This
+	/// server executes to completion first, so every statement it parsed also
+	/// produced a result: `Begin.statement_count` and `End.result_count` agree,
+	/// and `End` reports how long the whole query took.
 	#[test]
 	fn query_frames_are_bracketed_by_begin_and_end() {
 		let frames = frames(vec![result(Value::None), result(Value::None)]);
 		assert_eq!(frames.len(), 4);
 		match frames[0].frame.as_ref() {
-			Some(rpc::query_response::Frame::Begin(begin)) => assert_eq!(begin.result_count, 2),
+			Some(rpc::query_response::Frame::Begin(begin)) => {
+				assert_eq!(begin.statement_count, 2);
+			}
 			_ => panic!("expected a begin frame"),
 		}
-		assert!(matches!(frames[3].frame, Some(rpc::query_response::Frame::End(_))));
+		match frames[3].frame.as_ref() {
+			Some(rpc::query_response::Frame::End(end)) => {
+				assert_eq!(end.result_count, 2, "every parsed statement produced a result");
+				assert!(
+					end.execution_duration.is_some(),
+					"the whole-query duration is what a client cannot sum from the per-statement ones"
+				);
+			}
+			_ => panic!("expected an end frame"),
+		}
+	}
+
+	/// A client's batch size is honoured, and a request above the server's own
+	/// bound is clamped rather than refused -- asking for more than you may have
+	/// still returns results.
+	#[test]
+	fn a_client_batch_size_is_honoured_and_clamped() {
+		assert_eq!(batch_records(0), QUERY_BATCH_RECORDS, "zero means the server chooses");
+		assert_eq!(batch_records(1), 1, "a client may ask for one record per batch");
+		assert_eq!(batch_records(u32::MAX), QUERY_BATCH_RECORDS, "clamped, not refused");
+
+		let rows = Array::from(
+			(0..3).map(|i| Value::Number(surrealdb_types::Number::Int(i))).collect::<Vec<_>>(),
+		);
+		let frames = frames_with(vec![result(Value::Array(rows))], batch_records(1));
+		let sizes = batch_sizes(&frames);
+		assert!(
+			sizes.iter().all(|n| *n <= 1),
+			"a client asking for one record per batch gets no more than one, {sizes:?}"
+		);
+		assert_eq!(sizes.iter().sum::<usize>(), 3, "every record is still sent once");
+	}
+
+	/// How many records each of a statement's batches carried.
+	fn batch_sizes(frames: &[rpc::QueryResponse]) -> Vec<usize> {
+		frames[1..frames.len() - 1]
+			.iter()
+			.map(|response| match batch(response).payload.as_ref() {
+				Some(rpc::query_batch_frame::Payload::Values(values)) => values.values.len(),
+				None => 0,
+				_ => panic!("expected a value batch"),
+			})
+			.collect()
 	}
 
 	/// A result larger than one batch is split, so no single message grows with
 	/// the result set -- a client decoding with gRPC's 4 MiB default would
 	/// otherwise refuse a large `SELECT` outright.
+	///
+	/// The batches ramp rather than being uniform: the first is small so the
+	/// client sees rows early, and each one doubles up to the cap so a long
+	/// result does not pay a per-frame cost for that.
 	#[test]
 	fn a_large_result_is_split_across_batches() {
 		let records = QUERY_BATCH_RECORDS * 2 + 1;
@@ -2593,42 +3255,43 @@ mod tests {
 				.collect::<Vec<_>>(),
 		);
 		let frames = frames(vec![result(Value::Array(rows))]);
+		let batches: Vec<&rpc::QueryBatchFrame> =
+			frames[1..frames.len() - 1].iter().map(batch).collect();
 
-		// Begin, three batches, End.
-		assert_eq!(frames.len(), 5, "expected the records to span three batches");
-		let batches: Vec<&rpc::QueryBatchFrame> = frames[1..4].iter().map(batch).collect();
+		assert!(batches.len() > 1, "a result this size must span several batches");
 		assert_eq!(
 			batches.iter().map(|b| b.batch_index).collect::<Vec<_>>(),
-			[0, 1, 2],
+			(0..batches.len() as u64).collect::<Vec<_>>(),
 			"batches must be indexed in order so the client can demultiplex them"
 		);
 		let kinds: Vec<i32> = batches.iter().map(|b| b.kind).collect();
-		assert_eq!(
-			kinds,
-			[
-				rpc::QueryResponseKind::Batched as i32,
-				rpc::QueryResponseKind::Batched as i32,
-				rpc::QueryResponseKind::BatchedFinal as i32,
-			],
+		let (last, rest) = kinds.split_last().expect("at least one batch");
+		assert_eq!(*last, rpc::QueryResponseKind::BatchedFinal as i32);
+		assert!(
+			rest.iter().all(|k| *k == rpc::QueryResponseKind::Batched as i32),
 			"only the last batch completes the statement"
 		);
 
-		let counts: Vec<usize> = batches
-			.iter()
-			.map(|b| match b.payload.as_ref() {
-				Some(rpc::query_batch_frame::Payload::Values(values)) => values.values.len(),
-				_ => panic!("expected a value batch"),
-			})
-			.collect();
-		assert_eq!(counts, [QUERY_BATCH_RECORDS, QUERY_BATCH_RECORDS, 1]);
-		assert_eq!(counts.iter().sum::<usize>(), records, "every record must be sent once");
+		let sizes = batch_sizes(&frames);
+		assert_eq!(sizes.iter().sum::<usize>(), records, "every record must be sent once");
+		assert_eq!(sizes[0], QUERY_FIRST_BATCH_RECORDS, "the first batch is small, for latency");
+		assert!(
+			sizes.windows(2).all(|w| w[1] >= w[0] || w[1] == sizes[sizes.len() - 1]),
+			"batches grow toward the cap, {sizes:?}"
+		);
+		assert!(sizes.iter().all(|n| *n <= QUERY_BATCH_RECORDS), "no batch exceeds the cap");
 
 		// The stats describe the statement, so they ride on the batch that
 		// completes it rather than being repeated or split.
-		assert!(batches[0].stats.is_none());
-		assert!(batches[1].stats.is_none());
+		assert!(rest.iter().enumerate().all(|(i, _)| batches[i].stats.is_none()));
 		assert_eq!(
-			batches[2].stats.as_ref().expect("the final batch carries the stats").records_returned,
+			batches
+				.last()
+				.expect("at least one batch")
+				.stats
+				.as_ref()
+				.expect("the final batch carries the stats")
+				.records_returned,
 			records as i64
 		);
 	}
