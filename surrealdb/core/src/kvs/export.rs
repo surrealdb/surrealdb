@@ -20,9 +20,12 @@ use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::define::{DefineAccessStatement, DefineKind, DefineUserStatement};
 use crate::expr::user::UserDuration;
 use crate::expr::{Algorithm, Base, DefineAnalyzerStatement, Expr, Idiom, Literal};
+use crate::idx::IndexKeyBase;
+use crate::idx::ft::fulltext::mean_tokens_per_document;
 use crate::key::schema::{RecordKey, RecordPrefix};
 use crate::key::{KVKeyDecode, KVSubspace, KVValue};
 use crate::sql::statements::OptionStatement;
+use crate::val::TableName;
 use crate::{catalog, val};
 
 struct InlineCommentWriter<'a, F>(&'a mut F);
@@ -269,6 +272,151 @@ async fn export_table_structure(
 	Ok(())
 }
 
+/// Target number of KV keys the records of one emitted `INSERT` should write on
+/// re-import.
+///
+/// An import executes one statement per transaction, so how many records an
+/// `INSERT` line carries decides how large a transaction is on the way back in.
+/// What a transaction costs is not its record count but the number of keys those
+/// records write, and a table's index set moves that by two orders of magnitude:
+/// a bare record writes 2 keys, eight b-tree indexes take it to 12, and a single
+/// full-text index to ~170. Sizing by keys keeps a transaction's cost roughly
+/// constant across index sets instead of leaving it to vary with the schema.
+///
+/// The value is chosen so a table whose records write few keys keeps using the
+/// whole `export_batch_size` — the cap below — and only a table carrying an
+/// index whose per-record key count is large groups its records more tightly.
+const INSERT_KEY_BUDGET: usize = 20_000;
+
+/// Keys a record writes for itself, independent of any index.
+const KEYS_PER_RECORD: usize = 2;
+
+/// Keys a record writes per index whose per-record key count is fixed and small:
+/// plain, unique, and count indexes each write a bounded number of entries.
+const KEYS_PER_VALUE_INDEX: usize = 2;
+
+/// Keys a full-text index writes per indexed term: the posting and the
+/// delta-log entry that compaction folds into the term's document bitmap.
+const KEYS_PER_FULLTEXT_TERM: usize = 2;
+
+/// Fallback allowance for one index whose per-record key count scales with the
+/// indexed content rather than being fixed, used when the index carries no
+/// statistic to derive it from — an index with no documents yet, or a vector
+/// index, whose per-record cost follows graph connectivity rather than a length
+/// the index records.
+///
+/// Deliberately generous. Overestimating only groups records more tightly, and
+/// throughput is flat across a wide range of small groupings, whereas
+/// underestimating leaves the oversized transaction in place — so the error that
+/// costs nothing is the one to make.
+const KEYS_PER_CONTENT_INDEX_FALLBACK: usize = 256;
+
+/// Records sampled from a batch to price a value index's fan-out.
+///
+/// A table's records are usually alike in shape, so a handful is enough to tell
+/// a scalar field from an array one and to size the array within an order of
+/// magnitude. The sample is taken per batch, so a table whose shape varies down
+/// its key range is re-priced as the export walks it.
+const FAN_OUT_SAMPLE: usize = 8;
+
+/// The number of index entries one record produces for an index over `cols`.
+///
+/// A value index over an array-valued field does not write one entry: the
+/// indexer expands a non-flattened array into one entry per element, so a
+/// record with a 500-element `tags` array writes 500 entries to a single index.
+/// Ignoring that would let exactly the schema this change exists to bound —
+/// records that write far more keys than their count suggests — keep producing
+/// oversized transactions.
+///
+/// Takes the largest fan-out across the index's columns rather than their
+/// product: the combinator advances one column per step, so the entry count
+/// tracks the longest array rather than every combination of them.
+fn index_fan_out(data: &val::Value, cols: &[Idiom]) -> usize {
+	cols.iter()
+		.map(|col| match data.pick(col) {
+			val::Value::Array(a) => a.len().max(1),
+			_ => 1,
+		})
+		.max()
+		.unwrap_or(1)
+}
+
+/// Estimates the keys one record of `table` writes, given its index set and a
+/// sample of the records about to be emitted.
+///
+/// Two index kinds cost more per record than the schema alone reveals, and both
+/// are resolved from data rather than guessed:
+///
+/// - A full-text index writes per distinct term, so a table of 8 KB documents costs an order of
+///   magnitude more per record than one of 700 B documents. Derived from the mean document length
+///   the index already maintains for BM25 scoring, using the token mean as a stand-in for the
+///   distinct-term count — which overestimates, since documents repeat words, in the direction that
+///   costs nothing.
+/// - A value index over an array field writes one entry per element. Derived from the sampled
+///   records, since no statistic records it.
+///
+/// Falls back to a fixed allowance where neither is available: a full-text index
+/// with no documents to average, and the vector indexes, whose per-record cost
+/// follows graph connectivity rather than anything visible here.
+async fn keys_per_record(
+	tx: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	table: &TableName,
+	indexes: &[catalog::IndexDefinition],
+	sample: &[val::Value],
+) -> Result<usize> {
+	let mut keys = KEYS_PER_RECORD;
+	for ix in indexes {
+		keys += match ix.index {
+			catalog::Index::FullText(_) => {
+				let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+				match mean_tokens_per_document(tx, &ikb).await? {
+					Some(mean) => (mean as usize).saturating_mul(KEYS_PER_FULLTEXT_TERM),
+					None => KEYS_PER_CONTENT_INDEX_FALLBACK,
+				}
+			}
+			catalog::Index::Hnsw(_) | catalog::Index::DiskAnn(_) => KEYS_PER_CONTENT_INDEX_FALLBACK,
+			catalog::Index::Idx | catalog::Index::Uniq | catalog::Index::Count(_) => {
+				let fan_out =
+					sample.iter().map(|data| index_fan_out(data, &ix.cols)).max().unwrap_or(1);
+				KEYS_PER_VALUE_INDEX.saturating_mul(fan_out)
+			}
+		};
+	}
+	Ok(keys)
+}
+
+/// Decodes up to `limit` records from the head of a scan batch, for sizing.
+///
+/// Sizing has to look at record content, and the alternative to decoding a few
+/// twice is threading decoded records through the emit path — which would hold a
+/// whole batch's `Value`s alive for the sake of a handful used to measure.
+fn decode_sample(batch: &[(Vec<u8>, Vec<u8>)], limit: usize) -> Result<Vec<val::Value>> {
+	batch
+		.iter()
+		.take(limit)
+		.map(|(k, v)| {
+			let k = RecordKey::decode_key(k)?;
+			let rid = crate::val::RecordId {
+				table: k.tb.into_owned(),
+				key: k.id.into_owned(),
+			};
+			Ok(Record::kv_decode_value(v, rid)?.data)
+		})
+		.collect()
+}
+
+/// Chooses how many records to put in one emitted `INSERT`, from the keys the
+/// table's index set makes each record write.
+///
+/// Never exceeds `batch_size`, so `export_batch_size` remains the bound a
+/// deployment can already configure and this only ever groups more tightly than
+/// it asks for.
+fn records_per_insert(keys_per_record: usize, batch_size: u32) -> usize {
+	(INSERT_KEY_BUDGET / keys_per_record.max(1)).clamp(1, batch_size.max(1) as usize)
+}
+
 async fn export_table_data(
 	tx: &Transaction,
 	ns: NamespaceId,
@@ -283,6 +431,11 @@ async fn export_table_data(
 	chn.send(bytes!("")).await?;
 
 	let tb_name = table.name.clone();
+	// How many records one `INSERT` carries is a separate question from how many
+	// keys one scan reads: the scan size trades KV round trips against memory,
+	// while the `INSERT` size sets the size of a transaction on re-import. The
+	// index set only bears on the second.
+	let indexes = tx.all_tb_indexes(ns, db, &tb_name, None).await?;
 	// A record's value decodes only with its own key's record id, so the table's
 	// records are read as bytes and decoded per key by `export_regular_data`.
 	let records = RecordPrefix {
@@ -301,7 +454,17 @@ async fn export_table_data(
 		if batch.result.is_empty() {
 			break;
 		}
-		export_regular_data(batch.result, chn).await?;
+		// Price this batch from its own records. Sizing needs to see the data
+		// because a value index over an array field writes one entry per
+		// element, which the schema does not state.
+		let sample = decode_sample(&batch.result, FAN_OUT_SAMPLE)?;
+		let per_insert = records_per_insert(
+			keys_per_record(tx, ns, db, &tb_name, &indexes, &sample).await?,
+			batch_size,
+		);
+		for group in batch.result.chunks(per_insert) {
+			export_regular_data(group, chn).await?;
+		}
 	}
 
 	chn.send(bytes!("")).await?;
@@ -362,7 +525,7 @@ fn process_record(record: &Record, records_relate: &mut String, records_normal: 
 /// * `Result<()>` - Returns `Ok(())` if the operation is successful, or an `Error` if an error
 ///   occurs.
 async fn export_regular_data(
-	regular_values: Vec<(Vec<u8>, Vec<u8>)>,
+	regular_values: &[(Vec<u8>, Vec<u8>)],
 	chn: &Sender<Vec<u8>>,
 ) -> Result<()> {
 	// Initialize strings to hold normal records and graph edge records.
@@ -372,12 +535,12 @@ async fn export_regular_data(
 
 	// Process each regular value.
 	for (k, v) in regular_values {
-		let k = RecordKey::decode_key(&k)?;
+		let k = RecordKey::decode_key(k)?;
 		let rid = crate::val::RecordId {
 			table: k.tb.into_owned(),
 			key: k.id.into_owned(),
 		};
-		let v = Record::kv_decode_value(&v, rid)?;
+		let v = Record::kv_decode_value(v, rid)?;
 		// Process the value and categorize it into records_relate or records_normal.
 		process_record(&v, &mut records_relate, &mut records_normal);
 	}

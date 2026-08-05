@@ -1,0 +1,208 @@
+//! How an export groups records into `INSERT` statements.
+//!
+//! An import runs one statement per transaction, so the grouping the exporter
+//! chooses is what sets transaction size on the way back in. These tests pin the
+//! grouping against the two things that decide it — the configured scan batch and
+//! the table's index set — and check that changing it leaves the data identical.
+
+use anyhow::Result;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::dbs::capabilities::Capabilities;
+use surrealdb_core::kvs::Datastore;
+use surrealdb_types::Value;
+
+use crate::helpers::new_ns_db;
+
+/// Builds a memory datastore, optionally overriding `export_batch_size`.
+async fn ds_with_batch_size(batch: Option<usize>) -> Result<Datastore> {
+	let mut builder = Datastore::builder().with_capabilities(Capabilities::all());
+	if let Some(batch) = batch {
+		builder = builder.with_config(
+			surrealdb_core::cnf::ConfigMap::empty()
+				.with_key_value("export_batch_size", batch.to_string()),
+		);
+	}
+	let ds = builder.build_with_path("memory").await?;
+	new_ns_db(&ds, "test", "test").await?;
+	Ok(ds)
+}
+
+/// Exports the whole database as text.
+async fn export_text(ds: &Datastore, ses: &Session) -> Result<String> {
+	let (tx, rx) = surrealdb_core::channel::bounded::<Vec<u8>>(16);
+	let task = ds.export(ses, tx).await?;
+	let collector = tokio::spawn(async move {
+		let mut out = Vec::new();
+		while let Ok(chunk) = rx.recv().await {
+			out.extend_from_slice(&chunk);
+		}
+		out
+	});
+	task.await?;
+	Ok(String::from_utf8(collector.await?)?)
+}
+
+/// The number of records each `INSERT [ … ];` line in an export carries.
+fn insert_group_sizes(sql: &str) -> Vec<usize> {
+	sql.lines()
+		.filter(|l| l.starts_with("INSERT [ "))
+		// Records are rendered as `{ … }` objects joined by `, `, and the padded
+		// field values in these fixtures hold no braces, so counting openers
+		// counts records.
+		.map(|l| l.matches('{').count())
+		.collect()
+}
+
+/// Seeds with a document long enough that a full-text index over it costs
+/// meaningfully more than the record itself, which is the case where grouping has
+/// to tighten. A short field would correctly leave the grouping at the cap.
+async fn seed(ds: &Datastore, ses: &Session, schema: &str, records: usize) -> Result<()> {
+	seed_with_terms(ds, ses, schema, records, 100).await
+}
+
+/// Seeds `records` rows whose `bio` holds `terms` distinct words, so a test can
+/// vary how many keys a full-text index writes per record.
+async fn seed_with_terms(
+	ds: &Datastore,
+	ses: &Session,
+	schema: &str,
+	records: usize,
+	terms: usize,
+) -> Result<()> {
+	ds.execute(schema, ses, None).await?;
+	for i in 0..records {
+		let bio: Vec<String> = (0..terms).map(|t| format!("w{t}")).collect();
+		let sql = format!("CREATE person:{i} SET bio = '{}'", bio.join(" "));
+		let mut res = ds.execute(&sql, ses, None).await?;
+		res.remove(0).result?;
+	}
+	Ok(())
+}
+
+const FULLTEXT_SCHEMA: &str = "DEFINE TABLE person SCHEMALESS;
+	 DEFINE ANALYZER ab TOKENIZERS blank FILTERS lowercase;
+	 DEFINE INDEX ix_bio ON person FIELDS bio FULLTEXT ANALYZER ab BM25";
+
+/// With no index, records write few keys, so the grouping stays at the
+/// configured scan batch and the export is what it always was.
+#[tokio::test]
+async fn plain_table_groups_at_the_configured_batch() -> Result<()> {
+	let ds = ds_with_batch_size(Some(10)).await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	seed(&ds, &ses, "DEFINE TABLE person SCHEMALESS", 25).await?;
+
+	let sql = export_text(&ds, &ses).await?;
+	// 25 records at a batch of 10: the scan bound is what splits them.
+	assert_eq!(insert_group_sizes(&sql), vec![10, 10, 5], "{sql}");
+	Ok(())
+}
+
+/// A full-text index makes each record write keys in proportion to its distinct
+/// term count, so the same records are grouped far more tightly than the scan
+/// batch would group them.
+#[tokio::test]
+async fn full_text_table_groups_more_tightly_than_the_batch() -> Result<()> {
+	let ds = ds_with_batch_size(Some(1000)).await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	seed(&ds, &ses, FULLTEXT_SCHEMA, 200).await?;
+
+	let sql = export_text(&ds, &ses).await?;
+	let groups = insert_group_sizes(&sql);
+	let largest = *groups.iter().max().expect("the export must carry records");
+	assert!(
+		largest < 200,
+		"a full-text table must group below the scan batch, got groups {groups:?}"
+	);
+	assert_eq!(groups.iter().sum::<usize>(), 200, "every record must still be exported");
+	Ok(())
+}
+
+/// A full-text index writes per distinct term, so how many keys a record costs
+/// scales with its document length. The grouping has to follow that: the same
+/// row count over longer documents must be split into more statements.
+///
+/// This is what a fixed per-index allowance cannot do — it would hand both
+/// tables the same grouping and leave the long-document one with the oversized
+/// transaction that grouping exists to avoid.
+#[tokio::test]
+async fn grouping_follows_document_length() -> Result<()> {
+	let mut sizes = Vec::new();
+	for terms in [10usize, 200] {
+		let ds = ds_with_batch_size(Some(1000)).await?;
+		let ses = Session::owner().with_ns("test").with_db("test");
+		seed_with_terms(&ds, &ses, FULLTEXT_SCHEMA, 60, terms).await?;
+		let sql = export_text(&ds, &ses).await?;
+		let groups = insert_group_sizes(&sql);
+		assert_eq!(groups.iter().sum::<usize>(), 60, "every record must still be exported");
+		sizes.push(*groups.iter().max().expect("the export must carry records"));
+	}
+	let (short_docs, long_docs) = (sizes[0], sizes[1]);
+	assert!(
+		long_docs < short_docs,
+		"longer documents must group more tightly: \
+		 {short_docs} for 10 terms vs {long_docs} for 200"
+	);
+	Ok(())
+}
+
+/// A plain index over an array field writes one entry per element, so a record
+/// holding a long array costs far more keys than its field count suggests. The
+/// grouping has to follow the array length, not the index count.
+#[tokio::test]
+async fn grouping_follows_array_index_fan_out() -> Result<()> {
+	const SCHEMA: &str = "DEFINE TABLE person SCHEMALESS;
+		 DEFINE INDEX ix_tags ON person FIELDS tags";
+	let mut sizes = Vec::new();
+	for tags in [1usize, 400] {
+		let ds = ds_with_batch_size(Some(1000)).await?;
+		let ses = Session::owner().with_ns("test").with_db("test");
+		ds.execute(SCHEMA, &ses, None).await?;
+		for i in 0..40 {
+			let list: Vec<String> = (0..tags).map(|t| format!("'t{t}'")).collect();
+			let sql = format!("CREATE person:{i} SET tags = [{}]", list.join(", "));
+			ds.execute(&sql, &ses, None).await?.remove(0).result?;
+		}
+		let sql = export_text(&ds, &ses).await?;
+		let groups = insert_group_sizes(&sql);
+		assert_eq!(groups.iter().sum::<usize>(), 40, "every record must still be exported");
+		sizes.push(*groups.iter().max().expect("the export must carry records"));
+	}
+	let (scalar_ish, fanned_out) = (sizes[0], sizes[1]);
+	assert_eq!(scalar_ish, 40, "a one-element array must not tighten the grouping");
+	assert!(
+		fanned_out < scalar_ish,
+		"a 400-element array must group more tightly: {scalar_ish} vs {fanned_out}"
+	);
+	Ok(())
+}
+
+/// Grouping is a transport concern: re-importing an export must reproduce the
+/// same records however its `INSERT` lines were split.
+#[tokio::test]
+async fn regrouped_export_round_trips() -> Result<()> {
+	let source = ds_with_batch_size(Some(1000)).await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	seed(&source, &ses, FULLTEXT_SCHEMA, 120).await?;
+	let sql = export_text(&source, &ses).await?;
+	assert!(insert_group_sizes(&sql).len() > 1, "the fixture must exercise several groups");
+
+	// Replay into a fresh datastore and compare what came back.
+	let target = ds_with_batch_size(None).await?;
+	let mut res = target.execute(&sql, &ses, None).await?;
+	for r in res.drain(..) {
+		r.result?;
+	}
+
+	const COUNT: &str = "SELECT VALUE count() FROM person GROUP ALL";
+	let source_count = source.execute(COUNT, &ses, None).await?.remove(0).result?;
+	let target_count = target.execute(COUNT, &ses, None).await?.remove(0).result?;
+	assert_eq!(source_count, target_count);
+
+	// The full-text index has to answer on the replayed side too, which is what
+	// proves the regrouped statements rebuilt index state rather than just rows.
+	const MATCHES: &str = "SELECT VALUE count() FROM person WHERE bio @@ 'w0' GROUP ALL";
+	let hits = target.execute(MATCHES, &ses, None).await?.remove(0).result?;
+	assert_eq!(hits, source.execute(MATCHES, &ses, None).await?.remove(0).result?);
+	assert_ne!(hits, Value::None, "the replayed full-text index must match");
+	Ok(())
+}

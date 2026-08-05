@@ -770,33 +770,7 @@ impl FullTextIndex {
 		&self,
 		tx: &Transaction,
 	) -> Result<(DocLengthAndCount, Vec<Vec<u8>>)> {
-		let mut dlc = DocLengthAndCount::default();
-		// Compute the total number of documents (DocCount) and the total number of
-		// terms (DocLength) This key list is supposed to be small, subject to
-		// compaction. The prefix key itself is the compacted values,
-		// and the child keys of the prefix are deltas from transaction not yet compacted.
-		let prefix = DocStatsKey {
-			ns: self.ikb.ns(),
-			db: self.ikb.db(),
-			tb: Cow::Borrowed(self.ikb.table()),
-			ix: self.ikb.index(),
-		};
-		let prefix_len = prefix.encode_key()?.len();
-
-		let mut delta_keys = Vec::new();
-		for (idx, (k, st)) in tx.getr(prefix.range_subtree()?, None).await?.into_iter().enumerate()
-		{
-			dlc.doc_count += st.doc_count;
-			dlc.total_docs_length += st.total_docs_length;
-
-			// The prefix key can only be the first key.
-			// All other keys are extensions of the prefix key so they must not have the same
-			// length.
-			if idx != 0 && k.len() != prefix_len {
-				delta_keys.push(k);
-			}
-		}
-		Ok((dlc, delta_keys))
+		collect_doc_length_and_count_for(tx, &self.ikb).await
 	}
 
 	/// Collects compacted root stats plus a bounded batch of visible `!dc`
@@ -1188,6 +1162,59 @@ impl Scorer {
 
 		numerator / denominator
 	}
+}
+
+/// Reads an index's `!dc` region: the compacted root plus every visible delta.
+///
+/// The root holds the totals compaction has folded so far and each child key a
+/// contribution not yet folded in, so the complete statistic is their sum. The
+/// returned key list names the deltas seen, which is what a caller compacting
+/// them deletes; a caller that only wants the statistic ignores it.
+///
+/// Cost tracks the uncompacted delta count, not the index size, so it is bounded
+/// by how far compaction has fallen behind.
+async fn collect_doc_length_and_count_for(
+	tx: &Transaction,
+	ikb: &IndexKeyBase,
+) -> Result<(DocLengthAndCount, Vec<Vec<u8>>)> {
+	let mut dlc = DocLengthAndCount::default();
+	let prefix = DocStatsKey {
+		ns: ikb.ns(),
+		db: ikb.db(),
+		tb: Cow::Borrowed(ikb.table()),
+		ix: ikb.index(),
+	};
+	let prefix_len = prefix.encode_key()?.len();
+
+	let mut delta_keys = Vec::new();
+	for (idx, (k, st)) in tx.getr(prefix.range_subtree()?, None).await?.into_iter().enumerate() {
+		dlc.doc_count += st.doc_count;
+		dlc.total_docs_length += st.total_docs_length;
+
+		// The prefix key can only be the first key. Every other key extends the
+		// prefix, so it must differ in length.
+		if idx != 0 && k.len() != prefix_len {
+			delta_keys.push(k);
+		}
+	}
+	Ok((dlc, delta_keys))
+}
+
+/// The mean number of indexed tokens per document in a full-text index, or
+/// `None` when the index holds no documents.
+///
+/// Derived from the same `total_docs_length` / `doc_count` pair BM25 scoring
+/// uses, so it needs no analyzer and costs one read of the index's `!dc` region.
+/// Callers sizing work by how much a document costs to index want this rather
+/// than a fixed guess, because a full-text index writes per distinct term and so
+/// its per-record key count scales with document length.
+pub async fn mean_tokens_per_document(tx: &Transaction, ikb: &IndexKeyBase) -> Result<Option<u64>> {
+	let (dlc, _) = collect_doc_length_and_count_for(tx, ikb).await?;
+	if dlc.doc_count <= 0 || dlc.total_docs_length <= 0 {
+		return Ok(None);
+	}
+	let mean = dlc.total_docs_length / dlc.doc_count as i128;
+	Ok(Some(mean.clamp(1, u64::MAX as i128) as u64))
 }
 
 #[cfg(test)]

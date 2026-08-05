@@ -22,6 +22,7 @@ mod changefeeds;
 mod create;
 mod define;
 mod delete;
+mod export;
 mod field;
 mod function;
 mod future;

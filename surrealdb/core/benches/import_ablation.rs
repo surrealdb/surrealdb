@@ -81,6 +81,13 @@ static SHAPE: std::sync::LazyLock<String> =
 static EXTRA_FIELDS: std::sync::LazyLock<usize> =
 	std::sync::LazyLock::new(|| env_usize("ABL_EXTRA_FIELDS", 0));
 
+/// Elements in each record's `tags` array. A plain or unique index over an
+/// array-valued field expands the array into one index entry per element, so
+/// this is the knob that prices index fan-out. Zero leaves the field off
+/// entirely, which is what keeps every other measurement comparable.
+static ARRAY_TAGS: std::sync::LazyLock<usize> =
+	std::sync::LazyLock::new(|| env_usize("ABL_ARRAY_TAGS", 0));
+
 /// One record, shaped like a document a real export would carry: a few scalar
 /// fields, a nested object, and a text blob that dominates the byte size.
 fn record(id: usize) -> String {
@@ -108,6 +115,16 @@ fn record(id: usize) -> String {
 	};
 	for f in 0..*EXTRA_FIELDS {
 		let _ = write!(base, "f{f}: {}, ", id + f);
+	}
+	if *ARRAY_TAGS > 0 {
+		base.push_str("tags: [");
+		for t in 0..*ARRAY_TAGS {
+			if t > 0 {
+				base.push_str(", ");
+			}
+			let _ = write!(base, "'tag{:04}'", (id + t) % 1000);
+		}
+		base.push_str("], ");
 	}
 	// The bio is always the last field, and always the one that absorbs the
 	// remaining byte budget, so record size stays fixed as field count varies.
@@ -157,6 +174,12 @@ fn index_defs(table: &str) -> Vec<String> {
 		format!("DEFINE INDEX ix_state_age ON {table} FIELDS address.state, age"),
 		format!("DEFINE INDEX ix_email_active ON {table} FIELDS email, active"),
 	]
+}
+
+/// An index over the array-valued `tags` field, which fans out to one entry per
+/// element rather than one per record.
+fn array_index_defs(table: &str) -> Vec<String> {
+	vec![format!("DEFINE INDEX ix_tags ON {table} FIELDS tags")]
 }
 
 /// A full-text index needs an analyzer, so it comes as a pair.
@@ -391,6 +414,16 @@ fn build_cases() -> Vec<Case> {
 		});
 	}
 
+	// An index over an array-valued field: the same index kind as the b-tree
+	// cases above, but its per-record entry count follows the array's length
+	// rather than being one.
+	cases.push(Case {
+		name: "arr1_before",
+		schema: vec!["DEFINE TABLE person SCHEMALESS".to_string()],
+		before: array_index_defs("person"),
+		after: vec![],
+	});
+
 	// Full-text is a different cost class, so it gets its own pair. The
 	// analyzer is schema, not an index, so it stays ahead of the data in both.
 	cases.push(Case {
@@ -420,6 +453,81 @@ fn build_cases() -> Vec<Case> {
 // ---------------------------------------------------------------------------
 // Export
 // ---------------------------------------------------------------------------
+
+/// Measures the backup/restore round trip: seed a datastore under `schema`,
+/// export it, then import the export's own bytes into a fresh datastore.
+///
+/// Restore time is what a user experiences, and it is governed by how the
+/// exporter grouped records into `INSERT` statements, because an import runs one
+/// statement per transaction. Importing the generated corpus instead would
+/// measure a grouping the exporter never chose.
+async fn run_roundtrip(backend: &str, inserts: &[String], records: usize, schema: &[String]) {
+	let (ds, _dir) = open(backend).await;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	ds.execute("USE NAMESPACE test DATABASE test", &ses, None).await.unwrap();
+	let mut setup = vec!["DEFINE TABLE person SCHEMALESS".to_string()];
+	setup.extend(schema.iter().cloned());
+	run_import(&ds, &ses, setup).await;
+	run_import(&ds, &ses, inserts.to_vec()).await;
+
+	let (tx, rx) = surrealdb_core::channel::bounded::<Vec<u8>>(64);
+	let task = ds.export(&ses, tx).await.unwrap();
+	let collector = tokio::spawn(async move {
+		let mut out = Vec::new();
+		while let Ok(chunk) = rx.recv().await {
+			out.extend_from_slice(&chunk);
+		}
+		out
+	});
+	task.await.unwrap();
+	let exported = collector.await.unwrap();
+	let text = String::from_utf8(exported).unwrap();
+
+	// Every fixture record carries its own `id`, and the wide shape nests an
+	// `address` object, so brace counting would over-count; the id field is what
+	// occurs exactly once per record.
+	let groups: Vec<usize> = text
+		.lines()
+		.filter(|l| l.starts_with("INSERT [ "))
+		.map(|l| l.matches("id: person:").count())
+		.collect();
+	let largest = groups.iter().copied().max().unwrap_or(0);
+
+	// Restore into a fresh store, importing exactly what the export produced.
+	let (fresh, _dir2) = open(backend).await;
+	let ses2 = Session::owner().with_ns("test").with_db("test");
+	fresh.execute("USE NAMESPACE test DATABASE test", &ses2, None).await.unwrap();
+	let start = Instant::now();
+	let stream = futures::stream::iter(vec![Ok::<Bytes, anyhow::Error>(Bytes::from(text))]);
+	let results = fresh.import_stream(&ses2, stream).await.unwrap();
+	let errors: Vec<_> = results.iter().filter(|r| r.result.is_err()).collect();
+	assert!(errors.is_empty(), "restore errors: {:?}", errors.first().map(|e| &e.result));
+	let elapsed = start.elapsed();
+
+	let res = fresh
+		.execute("SELECT count() FROM person GROUP ALL", &ses2, None)
+		.await
+		.unwrap()
+		.remove(0)
+		.result
+		.unwrap();
+	let json = res.into_json_value();
+	let got = json.get(0).and_then(|v| v.get("count")).and_then(|v| v.as_u64()).unwrap_or(0);
+	assert_eq!(got as usize, records, "restore lost records");
+
+	eprintln!(
+		"{:<10} {:>10} {:>12} {:>10.2}s {:>12.0}",
+		if schema.is_empty() {
+			"none"
+		} else {
+			"schema"
+		},
+		groups.len(),
+		largest,
+		elapsed.as_secs_f64(),
+		records as f64 / elapsed.as_secs_f64()
+	);
+}
 
 /// Populate a datastore with the corpus, then run a real export through
 /// `Datastore::export_with_config` and return its bytes.
@@ -624,7 +732,18 @@ fn main() {
 	// One statement is one transaction, so varying records-per-statement varies
 	// commits-per-record with everything else held constant.
 	if sweep {
-		eprintln!("\n=== records/statement sweep (idx0, {backend}) ===");
+		// The index set the sweep runs against. Records-per-statement only sets
+		// transaction size in *records*; what a transaction actually costs is the
+		// keys those records write, which the index set decides. Sweeping under
+		// each index set is what separates the two.
+		let sweep_schema = env_str("ABL_SWEEP_SCHEMA", "none");
+		let sweep_before = match sweep_schema.as_str() {
+			"none" => vec![],
+			"idx8" => index_defs("person"),
+			"ft1" => fulltext_defs("person"),
+			other => panic!("unknown ABL_SWEEP_SCHEMA: {other} (none|idx8|ft1)"),
+		};
+		eprintln!("\n=== records/statement sweep ({sweep_schema}, {backend}) ===");
 		eprintln!(
 			"{:<10} {:>10} {:>12} {:>10} {:>10} {:>12}",
 			"batch", "records", "statements", "parse", "total", "records/s"
@@ -646,7 +765,7 @@ fn main() {
 			let case = Case {
 				name: "sweep",
 				schema: vec!["DEFINE TABLE person SCHEMALESS".to_string()],
-				before: vec![],
+				before: sweep_before.clone(),
 				after: vec![],
 			};
 			// Parse the same corpus separately: a very large single statement
@@ -666,6 +785,21 @@ fn main() {
 				recs as f64 / t.total().as_secs_f64()
 			);
 		}
+	}
+
+	// --- export/restore round trip ---------------------------------------
+	// The exporter chooses the `INSERT` grouping, and an import runs one
+	// statement per transaction, so restore time is set by that choice rather
+	// than by the corpus the ladder above imports.
+	if phase("roundtrip") {
+		eprintln!("\n=== export/restore round trip ({backend}) ===");
+		eprintln!(
+			"{:<10} {:>10} {:>12} {:>11} {:>12}",
+			"schema", "INSERTs", "largest", "restore", "records/s"
+		);
+		rt.block_on(run_roundtrip(&backend, &inserts, records, &[]));
+		rt.block_on(run_roundtrip(&backend, &inserts, records, &index_defs("person")));
+		rt.block_on(run_roundtrip(&backend, &inserts, records, &fulltext_defs("person")));
 	}
 
 	// --- export + compression --------------------------------------------
