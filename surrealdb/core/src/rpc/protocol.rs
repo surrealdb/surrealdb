@@ -687,10 +687,21 @@ pub trait RpcProtocol {
 						.transaction(TransactionType::Write)
 						.await
 						.map_err(types_error_from_anyhow)?;
-					let create = kvs
-						.should_materialize_ns_on_use(&tx, session.au.as_ref(), &ns)
-						.await
-						.map_err(types_error_from_anyhow)?;
+					// Cancel before returning: this check runs with `tx` already
+					// open, so propagating its error directly would drop a
+					// writeable transaction without committing or cancelling it,
+					// tripping `Transactor::drop`'s "a transaction was dropped
+					// without being committed or cancelled" error and leaving the
+					// transaction to be reaped instead of rolled back promptly.
+					let create =
+						match kvs.should_materialize_ns_on_use(&tx, session.au.as_ref(), &ns).await
+						{
+							Ok(create) => create,
+							Err(e) => {
+								let _ = tx.cancel().await;
+								return Err(types_error_from_anyhow(e));
+							}
+						};
 					if create {
 						run!(tx, tx.get_or_add_ns(None, &ns).await)
 							.map_err(types_error_from_anyhow)?;
@@ -725,10 +736,20 @@ pub trait RpcProtocol {
 						.transaction(TransactionType::Write)
 						.await
 						.map_err(types_error_from_anyhow)?;
-					let create = kvs
+					// Cancel before returning, as in the namespace branch above: a
+					// bare `?` here would drop `tx` while it is still open. A
+					// single `use(ns, db)` call passes through both branches, so
+					// the unguarded form could leak two transactions per call.
+					let create = match kvs
 						.should_materialize_db_on_use(&tx, session.au.as_ref(), &ns, &db)
 						.await
-						.map_err(types_error_from_anyhow)?;
+					{
+						Ok(create) => create,
+						Err(e) => {
+							let _ = tx.cancel().await;
+							return Err(types_error_from_anyhow(e));
+						}
+					};
 					if create {
 						run!(tx, tx.ensure_ns_db(None, &ns, &db).await)
 							.map_err(types_error_from_anyhow)?;

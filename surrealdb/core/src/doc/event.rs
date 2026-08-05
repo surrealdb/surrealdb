@@ -370,7 +370,20 @@ async fn process_events_batch(
 /// A queue entry is only removed once it has run, so an undecodable entry has
 /// to be stepped over rather than propagated: returning an error here would
 /// leave the entry in place and fail every later batch the same way.
+///
+/// Both halves are checked here. The key is validated even though the value is
+/// what this returns, because an entry whose *key* cannot be decoded is equally
+/// unprocessable: it could never be run and could never be deleted (the delete
+/// is keyed off the decoded key), so it stayed in the queue and failed every
+/// subsequent batch — and, before the decode moved above the transaction open in
+/// `run_event`, leaked a writeable transaction on each of those attempts.
+/// Neither half is deleted, matching how the other queue drains treat entries
+/// written by a newer node during a rolling upgrade.
 fn decode_queued(k: &[u8], v: &[u8]) -> Option<AsyncEventRecord> {
+	if let Err(e) = EventQueueKey::decode_key(k) {
+		error!("Skipping async event queue entry with an undecodable key: {e} - Key: {k:?}");
+		return None;
+	}
 	match KVValue::kv_decode_value(v, ()) {
 		Ok(ev) => Some(ev),
 		Err(e) => {
@@ -427,11 +440,19 @@ impl AsyncEventContext {
 		mut ctx: Context,
 		mut ev: AsyncEventRecord,
 	) -> Result<()> {
+		// Decode the key *before* opening the transaction. Decoding it after
+		// would let a decode failure return while the writeable transaction is
+		// still open, tripping `Transactor::drop`'s "a transaction was dropped
+		// without being committed or cancelled" error. Because the queue entry is
+		// only removed once it has run, that leak repeated on every batch for as
+		// long as the undecodable entry stayed in the queue. `decode_queued` now
+		// steps over such an entry before it reaches here, so this is the second
+		// line of defence rather than the only one.
+		let eq = EventQueueKey::decode_key(&self.k)?;
 		let tx = self.new_write_tx().await?;
 		ctx.set_transaction(Arc::new(tx));
 		let ctx = ctx.freeze();
 		let tx = ctx.tx();
-		let eq = EventQueueKey::decode_key(&self.k)?;
 		match Self::process_event(stk, &ctx, &self.opt, self.lh.as_ref(), &eq, &ev).await {
 			Ok(_) => {
 				// Event processed successfully, delete the event from the queue.
@@ -523,5 +544,72 @@ impl AsyncEventContext {
 		// compile it once per dequeued event before execution.
 		let compiled = EventDefinition::from_stored(&ev.event_definition)?;
 		Document::process_event_sync(stk, ctx, opt, lh, &compiled, &doc).await
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::borrow::Cow;
+
+	use uuid::Uuid;
+
+	use super::decode_queued;
+	use crate::catalog::{DatabaseId, NamespaceId};
+	use crate::key::schema::EventQueueKey;
+	use crate::key::{KVKey, KVKeyDecode};
+
+	fn valid_key() -> Vec<u8> {
+		EventQueueKey {
+			ns: NamespaceId(1),
+			db: DatabaseId(2),
+			tb: Cow::Owned("tb".into()),
+			ev: Cow::Owned("ev".into()),
+			ts: 42,
+			node_id: Uuid::from_u128(7),
+		}
+		.encode_key()
+		.expect("a well-formed queue key must encode")
+		.to_vec()
+	}
+
+	/// Guards the key check added to [`decode_queued`] against rejecting
+	/// well-formed keys. If this regressed, every async event would be silently
+	/// skipped rather than processed, which is far worse than the leak the check
+	/// prevents.
+	#[test]
+	fn a_well_formed_queue_key_still_decodes() {
+		let encoded = valid_key();
+		let decoded = EventQueueKey::decode_key(&encoded).expect("valid key must decode");
+		assert_eq!(decoded.ns, NamespaceId(1));
+		assert_eq!(decoded.db, DatabaseId(2));
+		assert_eq!(decoded.ts, 42);
+		assert_eq!(decoded.node_id, Uuid::from_u128(7));
+	}
+
+	/// An entry whose key cannot be decoded must be stepped over here, before a
+	/// transaction is opened for it.
+	///
+	/// Previously it reached `run_event`, which opened a writeable transaction
+	/// and only then decoded the key, so the failure returned with the
+	/// transaction still open — tripping `Transactor::drop`'s "a transaction was
+	/// dropped without being committed or cancelled". Because a queue entry is
+	/// only removed once it has run, the entry stayed put and leaked another
+	/// transaction on every subsequent batch, indefinitely.
+	#[test]
+	fn an_undecodable_key_is_skipped() {
+		assert!(
+			decode_queued(b"/!eq\xff-not-a-valid-entry", &[]).is_none(),
+			"an undecodable key must be skipped, not passed on to run_event"
+		);
+	}
+
+	/// The pre-existing value check must still reject a bad payload behind a
+	/// good key, so the new key check has not short-circuited it.
+	#[test]
+	fn an_undecodable_value_behind_a_valid_key_is_skipped() {
+		assert!(
+			decode_queued(&valid_key(), b"not-an-async-event-record").is_none(),
+			"an undecodable value must still be skipped"
+		);
 	}
 }

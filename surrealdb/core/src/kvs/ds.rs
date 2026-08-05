@@ -4747,7 +4747,13 @@ impl Datastore {
 		// statements and explicit client-owned transactions.
 		tx.arm_write_keys_limit(self.transaction_max_write_keys());
 
-		let db = tx.ensure_ns_db(None, ns, db).await?;
+		// `tx` is open and writeable from here until the commit/cancel below, so
+		// every fallible step in between cancels before returning. A bare `?`
+		// would drop the transaction without committing or cancelling it,
+		// tripping `Transactor::drop`'s "a transaction was dropped without being
+		// committed or cancelled" error and leaving it to be reaped rather than
+		// rolled back promptly. `catch!` is the cancel-then-propagate form.
+		let db = catch!(tx, tx.ensure_ns_db(None, ns, db).await);
 
 		let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
 
@@ -4755,36 +4761,44 @@ impl Datastore {
 		// handles this request: this transaction is opened per request, so the
 		// compiled catalog cache is always cold, and compiling the whole list
 		// would parse every handler body in the database to dispatch one.
-		let res =
-			match tx.find_db_api(db.namespace_id, db.database_id, &segments, req.method).await? {
-				Some((api, params)) => {
-					let api = &api;
-					debug!(
-						request_id = %req.request_id,
-						path = %path,
-						"API definition found, dispatching to process_api_request"
-					);
-					req.params = params.try_into()?;
+		let routed = catch!(
+			tx,
+			tx.find_db_api(db.namespace_id, db.database_id, &segments, req.method).await
+		);
+		let res = match routed {
+			Some((api, params)) => {
+				let api = &api;
+				debug!(
+					request_id = %req.request_id,
+					path = %path,
+					"API definition found, dispatching to process_api_request"
+				);
+				req.params = catch!(tx, params.try_into());
 
-					let opt = self.setup_options(session);
+				let opt = self.setup_options(session);
 
-					let mut ctx = self.setup_ctx()?;
-					ctx.set_transaction(Arc::clone(&tx));
-					ctx.attach_session(session)?;
-					let ctx = &ctx.freeze();
-
-					process_api_request(ctx, &opt, api, req).await
+				let mut ctx = catch!(tx, self.setup_ctx());
+				ctx.set_transaction(Arc::clone(&tx));
+				// Not `catch!`: like `try_into` above, this error needs
+				// converting into the function's error type.
+				if let Err(e) = ctx.attach_session(session) {
+					let _ = tx.cancel().await;
+					return Err(e.into());
 				}
-				None => {
-					trace!(
-						request_id = %req.request_id,
-						path = %path,
-						"No API definition found for path"
-					);
-					tx.cancel().await?;
-					return Ok(ApiResponse::from_error(ApiError::NotFound, req.request_id.clone()));
-				}
-			};
+				let ctx = &ctx.freeze();
+
+				process_api_request(ctx, &opt, api, req).await
+			}
+			None => {
+				trace!(
+					request_id = %req.request_id,
+					path = %path,
+					"No API definition found for path"
+				);
+				tx.cancel().await?;
+				return Ok(ApiResponse::from_error(ApiError::NotFound, req.request_id.clone()));
+			}
+		};
 
 		// Handle committing or cancelling the transaction
 		if res.is_ok() {
