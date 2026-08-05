@@ -409,3 +409,41 @@ async fn matching_credentials_on_existing_session_are_accepted() {
 		"matching credentials must pass verification; body: {body}"
 	);
 }
+
+#[tokio::test]
+async fn custom_cloud_host_header_is_allowed() {
+	// Issue #7458: Cloud instances receive requests with hostnames like
+	// `my-instance.aws-euw1.surreal.cloud` rather than `localhost`.
+	// Verify that custom Host headers are accepted rather than returning HTTP 403.
+	let ds = test_datastore().await;
+	let service = setup_service(ds);
+
+	let body = json!({
+		"jsonrpc": "2.0",
+		"id": 1,
+		"method": "initialize",
+		"params": {
+			"protocolVersion": "2024-11-05",
+			"capabilities": {},
+			"clientInfo": { "name": "probe", "version": "1" }
+		}
+	});
+
+	let req = Request::builder()
+		.method(Method::POST)
+		.uri("/mcp")
+		.header("host", "my-cloud-instance.aws-euw1.surreal.cloud")
+		.header("content-type", "application/json")
+		.header("accept", "application/json, text/event-stream")
+		.body(Full::new(Bytes::from(body.to_string())))
+		.unwrap();
+
+	let resp = service.handle(req).await;
+	assert_ne!(
+		resp.status(),
+		StatusCode::FORBIDDEN,
+		"Custom cloud host header must not be rejected with 403 Forbidden"
+	);
+	assert_eq!(resp.status(), StatusCode::OK);
+}
+

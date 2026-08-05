@@ -969,6 +969,7 @@ mod http_service {
 	) -> McpHttpService {
 		let mut config = StreamableHttpServerConfig::default();
 		config.stateful_mode = true;
+		config = config.disable_allowed_hosts();
 		StreamableHttpService::new(
 			move || {
 				let svc = McpService::new(Arc::clone(&ds), None, None, Session::default());
