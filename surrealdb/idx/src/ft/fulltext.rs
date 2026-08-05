@@ -247,6 +247,7 @@ impl FullTextIndex {
 		let mut set = HashSet::new();
 		let tx = env.tx();
 		let nid = env.node_id();
+		let uid = Self::delta_uid();
 		// Get the doc id (if it exists)
 		let doc_id = self.get_doc_id(&tx, rid).await?;
 		if let Some(doc_id) = doc_id {
@@ -260,7 +261,7 @@ impl FullTextIndex {
 						// Delete the term
 						let key = self.ikb.new_td(s, doc_id);
 						tx.del_key(&key).await?;
-						self.set_tt(&tx, s, doc_id, &nid, false).await?;
+						self.set_tt(&tx, s, doc_id, &nid, uid, false).await?;
 					}
 				}
 			}
@@ -275,7 +276,7 @@ impl FullTextIndex {
 						total_docs_length: -(dl as i128),
 						doc_count: -1,
 					};
-					let key = self.ikb.new_dc_with_id(doc_id, env.node_id(), Uuid::now_v7());
+					let key = self.ikb.new_dc_with_id(doc_id, nid, uid);
 					tx.put_key(&key, &dcl).await?;
 					*require_compaction = true;
 				}
@@ -302,15 +303,16 @@ impl FullTextIndex {
 	) -> Result<()> {
 		let tx = env.tx();
 		let nid = env.node_id();
+		let uid = Self::delta_uid();
 		// Resolve (or assign) the record's doc id in the table's shared space
 		let doc_id = self.doc_ids.resolve_or_assign(env, &rid.key).await?;
 		// Collect the tokens.
 		let tokens =
 			self.analyzer.analyze_content(stk, az_fn, content, FilteringStage::Indexing).await?;
 		let dl = if self.highlighting {
-			self.index_with_offsets(&nid, &tx, doc_id, tokens).await?
+			self.index_with_offsets(&nid, uid, &tx, doc_id, tokens).await?
 		} else {
-			self.index_without_offsets(&nid, &tx, doc_id, tokens).await?
+			self.index_without_offsets(&nid, uid, &tx, doc_id, tokens).await?
 		};
 		{
 			// Set the doc length
@@ -319,7 +321,7 @@ impl FullTextIndex {
 		}
 		{
 			// Increase the doc count and total doc length
-			let key = self.ikb.new_dc_with_id(doc_id, env.node_id(), Uuid::now_v7());
+			let key = self.ikb.new_dc_with_id(doc_id, nid, uid);
 			let dcl = DocLengthAndCount {
 				total_docs_length: dl as i128,
 				doc_count: 1,
@@ -339,6 +341,7 @@ impl FullTextIndex {
 	async fn index_with_offsets(
 		&self,
 		nid: &Uuid,
+		uid: Uuid,
 		tx: &Transaction,
 		id: DocId,
 		tokens: Vec<Tokens>,
@@ -350,7 +353,7 @@ impl FullTextIndex {
 			td.f = o.len() as TermFrequency;
 			td.o = o;
 			tx.set_key(&key, &td).await?;
-			self.set_tt(tx, t, id, nid, true).await?;
+			self.set_tt(tx, t, id, nid, uid, true).await?;
 		}
 		Ok(dl)
 	}
@@ -358,6 +361,7 @@ impl FullTextIndex {
 	async fn index_without_offsets(
 		&self,
 		nid: &Uuid,
+		uid: Uuid,
 		tx: &Transaction,
 		id: DocId,
 		tokens: Vec<Tokens>,
@@ -368,9 +372,29 @@ impl FullTextIndex {
 			let key = self.ikb.new_td(t, id);
 			td.f = f;
 			tx.set_key(&key, &td).await?;
-			self.set_tt(tx, t, id, nid, true).await?;
+			self.set_tt(tx, t, id, nid, uid, true).await?;
 		}
 		Ok(dl)
+	}
+
+	/// Mints the delta-key discriminator shared by one maintenance call's
+	/// `!tt` and `!dc` writes.
+	///
+	/// Both delta families fold by summing signed contributions, so a
+	/// discriminator that collides silently drops one contribution and leaves
+	/// the compacted state wrong. One value per call is sufficient because the
+	/// keys it appears in are already distinct within a call: `!tt` is keyed by
+	/// term and each term is written at most once (the term maps are keyed by
+	/// term, and the removal path dedups explicitly), and `!dc` is written at
+	/// most once. Separate calls mint separate values, which is what keeps a
+	/// remove/re-index pair on the same record from collapsing into one key.
+	///
+	/// Minting per call rather than per term matters for throughput: each value
+	/// costs an entropy syscall, and a text field yields as many terms as it has
+	/// distinct words, so per-term minting makes indexing cost scale with the
+	/// system's randomness path rather than with the writes it performs.
+	fn delta_uid() -> Uuid {
+		Uuid::now_v7()
 	}
 
 	async fn set_tt(
@@ -379,9 +403,10 @@ impl FullTextIndex {
 		term: &str,
 		doc_id: DocId,
 		nid: &Uuid,
+		uid: Uuid,
 		add: bool,
 	) -> Result<()> {
-		let key = self.ikb.new_tt(term, doc_id, *nid, Uuid::now_v7(), add);
+		let key = self.ikb.new_tt(term, doc_id, *nid, uid, add);
 		tx.set_key(&key, &String::new()).await
 	}
 
@@ -1217,6 +1242,12 @@ mod tests {
 
 	impl TestContext {
 		async fn new() -> Self {
+			Self::with_highlighting(true).await
+		}
+
+		/// `highlighting` selects which of the two indexing paths the context
+		/// exercises: offsets are recorded only when highlighting is on.
+		async fn with_highlighting(highlight: bool) -> Self {
 			let ds = TestIndexStore::new().await;
 			// `DEFINE ANALYZER test TOKENIZERS blank`, as the definition the
 			// index consumes: lowering the statement to it is the evaluator's
@@ -1258,7 +1289,7 @@ mod tests {
 			let ft_params = Arc::new(FullTextParams {
 				analyzer: az.name.clone(),
 				scoring: Default::default(),
-				highlight: true,
+				highlight,
 			});
 			let nid = Uuid::new_v4();
 			let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "t".into(), IndexId(3));
@@ -1587,6 +1618,38 @@ mod tests {
 		let after_second = test.fti.compute_doc_length_and_count(&tx, None).await.unwrap();
 		assert_eq!(before, after_second);
 		tx.cancel().await.unwrap();
+	}
+
+	/// Every delta a maintenance call writes shares one discriminator, so the
+	/// keys have to stay distinct by their remaining fields or a contribution is
+	/// silently lost.
+	///
+	/// Indexing a document leaves one `!tt` delta per distinct term and one
+	/// `!dc` delta. A remove followed by a re-index in the same transaction adds
+	/// a removal and an addition delta for every term, and a second `!dc` pair,
+	/// none of which may overwrite the deltas the first call left behind.
+	#[test(tokio::test)]
+	async fn every_term_and_call_keeps_its_own_delta() {
+		for highlight in [false, true] {
+			let test = TestContext::with_highlighting(highlight).await;
+			let doc = Arc::new(RecordId::new("t".into(), "doc1".to_owned()));
+			let mut stack = reblessive::TreeStack::new();
+
+			// A record with no doc-ID yet: the removal half writes nothing, so
+			// this counts exactly what one indexing call emits.
+			stack.enter(|stk| test.remove_insert_task(stk, &doc)).finish().await;
+			let tx = test.new_tx(TransactionType::Read).await;
+			let terms = test.tt_delta_count(&tx).await;
+			assert!(terms > 2, "the fixture content must yield several distinct terms");
+			assert_eq!(test.dc_delta_count(&tx).await, 1, "highlight={highlight}");
+			tx.cancel().await.unwrap();
+
+			stack.enter(|stk| test.remove_insert_task(stk, &doc)).finish().await;
+			let tx = test.new_tx(TransactionType::Read).await;
+			assert_eq!(test.tt_delta_count(&tx).await, terms * 3, "highlight={highlight}");
+			assert_eq!(test.dc_delta_count(&tx).await, 3, "highlight={highlight}");
+			tx.cancel().await.unwrap();
+		}
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
