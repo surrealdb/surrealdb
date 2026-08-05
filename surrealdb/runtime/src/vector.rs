@@ -3,7 +3,7 @@ use surrealdb_expr::val::{Number, Value};
 
 use crate::util::math::vector::{
 	Add, Angle, CrossProduct, Divide, DotProduct, Magnitude, Multiply, Normalize, Project, Scale,
-	Subtract,
+	Subtract, add_assign,
 };
 
 pub fn add((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
@@ -44,6 +44,22 @@ pub fn project((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
 
 pub fn subtract((a, b): (Vec<Number>, Vec<Number>)) -> Result<Value> {
 	Ok(a.subtract(&b)?.into_iter().map(Value::from).collect::<Vec<_>>().into())
+}
+
+/// Sum a collection of equal-dimension vectors elementwise.
+///
+/// Every vector must share the same dimension; a mismatch is an error rather
+/// than a truncated or zero-padded result. An empty collection has no dimension
+/// to return a zero vector for, so it yields `NONE`.
+pub fn sum((vectors,): (Vec<Vec<Number>>,)) -> Result<Value> {
+	let mut vectors = vectors.into_iter();
+	let Some(mut total) = vectors.next() else {
+		return Ok(Value::None);
+	};
+	for vector in vectors {
+		add_assign("vector::sum", &mut total, &vector)?;
+	}
+	Ok(total.into_iter().map(Value::from).collect::<Vec<_>>().into())
 }
 
 pub fn scale((a, b): (Vec<Number>, Number)) -> Result<Value> {

@@ -3475,6 +3475,30 @@ async fn function_vector_subtract() -> Result<()> {
 }
 
 #[tokio::test]
+async fn function_vector_sum() -> Result<()> {
+	test_queries(
+		r#"
+		RETURN vector::sum([[1, 2, 3], [4, 5, 6]]);
+		RETURN vector::sum([[1, 2], [3, 4], [5, 6]]);
+		RETURN vector::sum([[1, 2, 3]]);
+		RETURN vector::sum([]);
+	"#,
+		&["[5, 7, 9]", "[9, 12]", "[1, 2, 3]", "NONE"],
+	)
+	.await?;
+	check_test_is_error(
+		r#"
+		RETURN vector::sum([[1, 2], [1, 2, 3]]);
+	"#,
+		&[
+			"Incorrect arguments for function vector::sum(). The two vectors must be of the same dimension.",
+		],
+	)
+	.await?;
+	Ok(())
+}
+
+#[tokio::test]
 async fn function_vector_similarity_cosine() -> Result<()> {
 	test_queries(
 		r#"

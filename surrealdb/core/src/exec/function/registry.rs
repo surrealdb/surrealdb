@@ -250,6 +250,11 @@ mod tests {
 		assert!(registry.is_aggregate("time::max"));
 		assert!(registry.is_aggregate("array::group"));
 		assert!(registry.is_aggregate("array::distinct"));
+		assert!(registry.is_aggregate("vector::sum"));
+
+		// vector::sum is both an aggregate and a scalar, so a direct call folds
+		// the array it is given while a GROUP BY query folds across rows.
+		assert!(registry.contains("vector::sum"));
 
 		// Scalar functions should not be aggregates
 		assert!(!registry.is_aggregate("math::abs"));

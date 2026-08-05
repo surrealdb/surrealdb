@@ -6,7 +6,7 @@
 //! context and stays here.
 
 pub use surrealdb_runtime::vector::{
-	add, angle, cross, divide, dot, magnitude, multiply, normalize, project, scale, subtract,
+	add, angle, cross, divide, dot, magnitude, multiply, normalize, project, scale, subtract, sum,
 };
 
 pub mod similarity {

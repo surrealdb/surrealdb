@@ -31,6 +31,20 @@ pub fn check_same_dimension<T>(fnc: &str, a: &[T], b: &[T]) -> Result<()> {
 	Ok(())
 }
 
+/// Add `other` into `acc` elementwise, in place.
+///
+/// `acc` must already hold the running total and must have the same dimension
+/// as `other`; a mismatch is reported against `fnc`. Accumulating in place keeps
+/// a running vector total allocation-free per input, so callers folding over
+/// many vectors hold O(dimension) state rather than O(inputs × dimension).
+pub fn add_assign(fnc: &str, acc: &mut [Number], other: &[Number]) -> Result<()> {
+	check_same_dimension(fnc, acc, other)?;
+	for (a, b) in acc.iter_mut().zip(other.iter()) {
+		*a = *a + *b;
+	}
+	Ok(())
+}
+
 pub trait Add {
 	/// Addition of two vectors
 	fn add(&self, other: &Self) -> Result<Vec<Number>>;

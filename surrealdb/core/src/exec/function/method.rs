@@ -482,6 +482,7 @@ pub fn build_method_registry(funcs: &FunctionRegistry) -> MethodRegistry {
 	m.register_typed("vector_project", ValueKind::Array, get(funcs, "vector::project"));
 	m.register_typed("vector_scale", ValueKind::Array, get(funcs, "vector::scale"));
 	m.register_typed("vector_subtract", ValueKind::Array, get(funcs, "vector::subtract"));
+	m.register_typed("vector_sum", ValueKind::Array, get(funcs, "vector::sum"));
 	m.register_typed(
 		"vector_distance_chebyshev",
 		ValueKind::Array,

@@ -14,6 +14,12 @@ use crate::{define_pure_function, register_functions};
 define_pure_function!(VectorMagnitude, "vector::magnitude", (vector: Any) -> Float, crate::fnc::vector::magnitude);
 define_pure_function!(VectorNormalize, "vector::normalize", (vector: Any) -> Any, crate::fnc::vector::normalize);
 
+// Collection-of-vectors functions.
+//
+// `vector::sum` is also registered as an aggregate, so a GROUP BY query folds it
+// across rows while a direct call folds the array it is given.
+define_pure_function!(VectorSum, "vector::sum", (vectors: Any) -> Any, crate::fnc::vector::sum);
+
 // Two vector argument functions
 define_pure_function!(VectorAdd, "vector::add", (a: Any, b: Any) -> Any, crate::fnc::vector::add);
 define_pure_function!(VectorAngle, "vector::angle", (a: Any, b: Any) -> Float, crate::fnc::vector::angle);
@@ -152,6 +158,7 @@ pub fn register(registry: &mut FunctionRegistry) {
 		VectorSimilarityPearson,
 		VectorSimilaritySpearman,
 		VectorSubtract,
+		VectorSum,
 	);
 
 	// Index function (reads distance from KNN context)
