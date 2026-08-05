@@ -744,6 +744,14 @@ impl<'ctx> Planner<'ctx> {
 	) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
 		use crate::expr::literal::Literal;
 
+		// A literal that already denotes a value becomes that value, once, at
+		// plan time. Without this a whole object or array literal is rebuilt
+		// per row from its per-entry physical expressions, which is the bulk of
+		// the cost of importing records.
+		if let Some(value) = lit.as_static_value() {
+			return Ok(Arc::new(crate::exec::physical_expr::Literal(value)));
+		}
+
 		match lit {
 			Literal::Array(elements) => {
 				let elements = self.physical_args(elements).await?;

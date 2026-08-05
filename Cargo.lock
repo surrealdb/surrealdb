@@ -6929,6 +6929,7 @@ dependencies = [
  "wasmtimer",
  "web-time",
  "wiremock",
+ "zstd",
 ]
 
 [[package]]

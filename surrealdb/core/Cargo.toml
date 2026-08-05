@@ -238,6 +238,7 @@ tokio = { workspace = true, features = ["macros", "sync", "rt-multi-thread"] }
 tokio-util.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 wiremock.workspace = true
+zstd = { workspace = true, features = ["default"] }
 
 [package.metadata.cargo-machete]
 # md-5 crate is imported as md5::
@@ -296,4 +297,8 @@ harness = false
 
 [[bench]]
 name = "import_load"
+harness = false
+
+[[bench]]
+name = "import_ablation"
 harness = false

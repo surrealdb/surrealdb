@@ -332,6 +332,23 @@ impl From<surrealdb_types::Range> for Expr {
 }
 
 impl Expr {
+	/// The value this expression denotes, when it denotes one without being
+	/// evaluated.
+	///
+	/// Only a literal can answer this; every other form either reads the
+	/// environment or needs the evaluator, so it answers `None`. See
+	/// [`Literal::as_static_value`] for the contract the result upholds.
+	///
+	/// Narrower than [`Self::is_static`], which is also true of expressions
+	/// that are computable without the environment but still need evaluating
+	/// (arithmetic on literals, say).
+	pub fn as_static_value(&self) -> Option<crate::val::Value> {
+		match self {
+			Expr::Literal(literal) => literal.as_static_value(),
+			_ => None,
+		}
+	}
+
 	/// Checks if a expression is 'pure' i.e. does not rely on the environment.
 	pub fn is_static(&self) -> bool {
 		match self {

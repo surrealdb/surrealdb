@@ -70,6 +70,84 @@ impl Literal {
 			Literal::Object(items) => items.iter().all(|x| x.value.is_static()),
 		}
 	}
+
+	/// The value this literal denotes, when it denotes one on its own.
+	///
+	/// `Some` when no part of the literal needs the evaluator: the scalars, and
+	/// the collections whose every element is itself directly convertible. The
+	/// result is required to equal what evaluating the literal produces, so a
+	/// caller may use either interchangeably. In particular an object's entries
+	/// are ordered and a repeated key resolves to its last occurrence, matching
+	/// evaluation.
+	///
+	/// `None` for anything whose value is not a property of the literal alone:
+	/// a record id with a generated key (the key is allocated when the literal
+	/// is evaluated), and any collection containing such an element. `None` is
+	/// always a safe answer, so a caller must treat it as "ask the evaluator"
+	/// rather than as "not a value".
+	///
+	/// This is the shape a `.surql` import consists of almost entirely, and
+	/// answering it without the evaluator is what keeps import off the async
+	/// stack: see the callers in the legacy literal evaluator and in the
+	/// planner.
+	pub fn as_static_value(&self) -> Option<crate::val::Value> {
+		use crate::val::Value;
+
+		let value = match self {
+			Literal::None => Value::None,
+			Literal::Null => Value::Null,
+			Literal::UnboundedRange => Value::Range(Box::new(crate::val::Range::unbounded())),
+			Literal::Bool(x) => Value::Bool(*x),
+			Literal::Float(x) => Value::Number(crate::val::Number::Float(*x)),
+			Literal::Integer(x) => Value::Number(crate::val::Number::Int(*x)),
+			Literal::Decimal(x) => Value::Number(crate::val::Number::Decimal(*x)),
+			Literal::String(x) => Value::String(x.clone()),
+			Literal::Bytes(x) => Value::Bytes(x.clone()),
+			Literal::Regex(x) => Value::Regex(x.clone()),
+			Literal::Duration(x) => Value::Duration(*x),
+			Literal::Datetime(x) => Value::Datetime(*x),
+			Literal::Uuid(x) => Value::Uuid(*x),
+			Literal::Geometry(x) => Value::Geometry(x.clone()),
+			Literal::File(x) => Value::File(x.clone()),
+			// Only the key forms that are values in their own right. A
+			// generated key is allocated during evaluation, and the compound
+			// keys hold expressions.
+			Literal::RecordId(rid) => {
+				use crate::expr::RecordIdKeyLit;
+				let key = match &rid.key {
+					RecordIdKeyLit::Number(x) => crate::val::RecordIdKey::Number(*x),
+					RecordIdKeyLit::String(x) => crate::val::RecordIdKey::String(x.clone()),
+					RecordIdKeyLit::Uuid(x) => crate::val::RecordIdKey::Uuid(*x),
+					_ => return None,
+				};
+				Value::RecordId(crate::val::RecordId::new(rid.table.clone(), key))
+			}
+			Literal::Array(exprs) => {
+				let mut values = Vec::with_capacity(exprs.len());
+				for e in exprs {
+					values.push(e.as_static_value()?);
+				}
+				Value::Array(crate::val::Array(values))
+			}
+			Literal::Set(exprs) => {
+				let mut set = crate::val::Set::new();
+				for e in exprs {
+					set.insert(e.as_static_value()?);
+				}
+				Value::Set(set)
+			}
+			// Built through a sorted map, exactly as evaluation builds it, so
+			// key ordering and duplicate-key resolution cannot drift apart.
+			Literal::Object(items) => {
+				let mut map = std::collections::BTreeMap::new();
+				for i in items {
+					map.insert(i.key.clone(), i.value.as_static_value()?);
+				}
+				Value::Object(crate::val::Object::from(map))
+			}
+		};
+		Some(value)
+	}
 }
 
 impl PartialEq for Literal {
@@ -230,5 +308,93 @@ mod equality_tests {
 	#[test]
 	fn signed_zero_is_not_equal_to_zero() {
 		assert_ne!(Literal::Float(-0.0), Literal::Float(0.0));
+	}
+}
+
+#[cfg(test)]
+mod static_value_tests {
+	use surrealdb_strand::Strand;
+
+	use super::{Literal, ObjectEntry};
+	use crate::expr::record_id::RecordIdKeyGen;
+	use crate::expr::{Expr, RecordIdKeyLit, RecordIdLit};
+	use crate::val::Value;
+
+	fn entry(key: &str, value: Literal) -> ObjectEntry {
+		ObjectEntry {
+			key: Strand::new(key),
+			value: Expr::Literal(value),
+		}
+	}
+
+	/// An object's entries come out ordered by key regardless of source order,
+	/// because the value has to be indistinguishable from the evaluated one.
+	#[test]
+	fn object_entries_are_ordered_by_key() {
+		let lit =
+			Literal::Object(vec![entry("z", Literal::Integer(1)), entry("a", Literal::Integer(2))]);
+		let Some(Value::Object(obj)) = lit.as_static_value() else {
+			panic!("a literal object of literals is a value");
+		};
+		let keys: Vec<&str> = obj.iter().map(|(k, _)| k.as_str()).collect();
+		assert_eq!(keys, ["a", "z"]);
+	}
+
+	/// A repeated key resolves to its last occurrence, matching what inserting
+	/// each entry in source order produces.
+	#[test]
+	fn repeated_object_key_keeps_the_last() {
+		let lit =
+			Literal::Object(vec![entry("a", Literal::Integer(1)), entry("a", Literal::Integer(3))]);
+		let Some(Value::Object(obj)) = lit.as_static_value() else {
+			panic!("a literal object of literals is a value");
+		};
+		assert_eq!(obj.len(), 1);
+		assert_eq!(obj.get("a"), Some(&Value::Number(crate::val::Number::Int(3))));
+	}
+
+	/// A generated record-id key is allocated during evaluation, so a literal
+	/// carrying one is not a value on its own — and neither is any collection
+	/// holding it, or the fast path would hand out ids the evaluator never
+	/// allocated.
+	#[test]
+	fn generated_record_id_key_is_not_static() {
+		let lit = Literal::RecordId(RecordIdLit {
+			table: "t".into(),
+			key: RecordIdKeyLit::Generate(RecordIdKeyGen::Ulid),
+		});
+		assert!(lit.as_static_value().is_none());
+		let nested = Literal::Object(vec![entry("id", lit.clone())]);
+		assert!(nested.as_static_value().is_none());
+		let in_array = Literal::Array(vec![Expr::Literal(lit)]);
+		assert!(in_array.as_static_value().is_none());
+	}
+
+	/// A collection is a value only if every element is, so one non-literal
+	/// element withholds the whole collection from the fast path.
+	#[test]
+	fn non_literal_element_withholds_the_collection() {
+		let lit = Literal::Array(vec![
+			Expr::Literal(Literal::Integer(1)),
+			Expr::Idiom(crate::expr::Idiom::field("f".to_owned())),
+		]);
+		assert!(lit.as_static_value().is_none());
+	}
+
+	/// Simple record-id keys are values, which is what makes an exported
+	/// record's `id` field take the fast path.
+	#[test]
+	fn simple_record_id_keys_are_static() {
+		for key in [
+			RecordIdKeyLit::Number(1),
+			RecordIdKeyLit::String(Strand::new("a")),
+			RecordIdKeyLit::Uuid(crate::val::Uuid::nil()),
+		] {
+			let lit = Literal::RecordId(RecordIdLit {
+				table: "t".into(),
+				key,
+			});
+			assert!(matches!(lit.as_static_value(), Some(Value::RecordId(_))));
+		}
 	}
 }

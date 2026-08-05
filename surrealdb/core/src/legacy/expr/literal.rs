@@ -9,6 +9,30 @@ use crate::expr::FlowResult;
 use crate::expr::literal::Literal;
 use crate::val::{Array, Number, Object, Range, Value};
 
+/// Computes one element of a collection literal.
+///
+/// An expression that is itself a literal needing no evaluation is converted
+/// directly. Everything else is evaluated on the async stack as usual.
+///
+/// The direct conversion is not a micro-optimisation: `stk.run` pushes a task
+/// onto the reblessive stack, and that push (writing the future's state into
+/// the stack allocation and moving the result back out) costs far more than
+/// building the value for entries that are plain scalars. Collection literals
+/// are the shape a `.surql` import consists of almost entirely, so the number
+/// of pushes per record is what governs import throughput.
+async fn compute_element(
+	e: &crate::expr::Expr,
+	stk: &mut Stk,
+	ctx: &FrozenContext,
+	opt: &Options,
+	doc: Option<&CursorDoc>,
+) -> FlowResult<Value> {
+	if let Some(v) = e.as_static_value() {
+		return Ok(v);
+	}
+	stk.run(|stk| crate::legacy::expr_compute(e, stk, ctx, opt, doc)).await
+}
+
 /// Process this type returning a computed simple Value
 #[instrument(level = "trace", name = "Literal::compute", skip_all)]
 pub(crate) async fn literal_compute(
@@ -35,8 +59,7 @@ pub(crate) async fn literal_compute(
 		Literal::Array(exprs) => {
 			let mut array = Vec::with_capacity(exprs.len());
 			for e in exprs.iter() {
-				array
-					.push(stk.run(|stk| crate::legacy::expr_compute(e, stk, ctx, opt, doc)).await?);
+				array.push(compute_element(e, stk, ctx, opt, doc).await?);
 			}
 			Value::Array(Array(array))
 		}
@@ -51,9 +74,7 @@ pub(crate) async fn literal_compute(
 		Literal::Object(items) => {
 			let mut map = BTreeMap::new();
 			for i in items.iter() {
-				let v = stk
-					.run(|stk| crate::legacy::expr_compute(&i.value, stk, ctx, opt, doc))
-					.await?;
+				let v = compute_element(&i.value, stk, ctx, opt, doc).await?;
 				map.insert(i.key.clone(), v);
 			}
 			Value::Object(Object::from(map))

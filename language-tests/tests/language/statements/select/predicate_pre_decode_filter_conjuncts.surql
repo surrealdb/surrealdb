@@ -61,7 +61,7 @@ value = """
 [[test.results]]
 value = """
 'SelectProject [ctx: Db] [projections: id]
-    TableScan [ctx: Db] [table: t, direction: Forward, predicate: outer CONTAINS {x: 10}, pre_decode_filter: yes]
+    TableScan [ctx: Db] [table: t, direction: Forward, predicate: outer CONTAINS { x: 10 }, pre_decode_filter: yes]
 '"""
 
 [[test.results]]
