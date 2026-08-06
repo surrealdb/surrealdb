@@ -23,6 +23,7 @@ use axum::{Extension, Router};
 use surrealdb_core::dbs::Session;
 use surrealdb_core::dbs::capabilities::RouteTarget;
 use surrealdb_protocol::proto::rpc::v1::surreal_db_service_server::SurrealDbServiceServer;
+use tonic::codec::CompressionEncoding;
 use tower_service::Service;
 
 use super::AppState;
@@ -37,6 +38,29 @@ use crate::rpc::grpc::GrpcService;
 /// answers them with gRPC's own `UNIMPLEMENTED` status rather than an HTTP 404
 /// a gRPC client would have to guess at.
 const SERVICE_ROUTE: &str = "/surrealdb.protocol.rpc.v1.SurrealDBService/{*method}";
+
+/// The compressed message codecs the service accepts and will answer with, most
+/// preferred first, paired with the `grpc-accept-encoding` token that names each
+/// one on the wire.
+///
+/// One list drives both the service's configuration and what `GetCapabilities`
+/// reports, because a client that is told about a codec the route does not
+/// enable spends a rejected call discovering otherwise.
+const COMPRESSED_ENCODINGS: &[(&str, CompressionEncoding)] =
+	&[("zstd", CompressionEncoding::Zstd), ("gzip", CompressionEncoding::Gzip)];
+
+/// The codec list as the capability handshake reports it.
+///
+/// `identity` comes last and is always accepted whether or not it is named;
+/// naming it is what makes the answer read as "these and uncompressed" rather
+/// than as the silence of a server too old to carry the field.
+pub fn accepted_message_encodings() -> Vec<String> {
+	COMPRESSED_ENCODINGS
+		.iter()
+		.map(|(token, _)| (*token).to_string())
+		.chain(std::iter::once("identity".to_string()))
+		.collect()
+}
 
 pub fn router() -> Router<Arc<RpcState>> {
 	Router::new().route(SERVICE_ROUTE, any(handler))
@@ -63,6 +87,13 @@ async fn handler(
 		// result or an export chunk is bounded by the data, not by what a
 		// client may push at us.
 		.max_decoding_message_size(*HTTP_MAX_RPC_BODY_SIZE);
+	// Accept a compressed request in any of these, and answer in one of them.
+	// tonic picks the response encoding per request from the client's
+	// `grpc-accept-encoding`, so a client advertising none — including one built
+	// before this was enabled — still receives identity-encoded frames.
+	for (_, encoding) in COMPRESSED_ENCODINGS {
+		service = service.accept_compressed(*encoding).send_compressed(*encoding);
+	}
 	let response = match service.call(request).await {
 		Ok(response) => response,
 		// The generated service reports failures as gRPC statuses, so its
@@ -76,7 +107,20 @@ async fn handler(
 mod tests {
 	use surrealdb_protocol::proto::rpc::v1::surreal_db_service_server::SERVICE_NAME;
 
-	use super::SERVICE_ROUTE;
+	use super::{COMPRESSED_ENCODINGS, SERVICE_ROUTE, accepted_message_encodings};
+
+	/// What the handshake advertises has to be what the route enables, plus
+	/// `identity`. A codec named here but not enabled costs a client a rejected
+	/// call; one enabled but not named costs it the compression it could have
+	/// had.
+	#[test]
+	fn the_advertised_codecs_are_the_enabled_ones() {
+		let advertised = accepted_message_encodings();
+		let (named, identity) = advertised.split_at(advertised.len() - 1);
+		assert_eq!(identity, ["identity"], "identity is always accepted and is named last");
+		let enabled: Vec<&str> = COMPRESSED_ENCODINGS.iter().map(|(token, _)| *token).collect();
+		assert_eq!(named, enabled.as_slice());
+	}
 
 	/// The route is written out so it reads as a path, but it has to stay in
 	/// step with the service the protocol generates: a rename there would

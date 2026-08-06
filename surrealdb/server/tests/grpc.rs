@@ -43,8 +43,14 @@ impl Drop for TestServer {
 	}
 }
 
+type EncodingLog = Arc<std::sync::Mutex<Vec<(String, String)>>>;
+
 impl TestServer {
 	async fn start() -> Self {
+		Self::start_with(None).await
+	}
+
+	async fn start_with(record: Option<EncodingLog>) -> Self {
 		let (send, recv) = surrealdb_core::channel::bounded(128);
 		let datastore = Datastore::builder()
 			.with_capabilities(Capabilities::all())
@@ -69,7 +75,25 @@ impl TestServer {
 		router.spawn_notifications();
 
 		let handle = axum_server::Handle::new();
-		let app = router.into_router();
+		let mut app = router.into_router();
+		if let Some(seen) = record {
+			app = app.layer(axum::middleware::from_fn(
+				move |request: axum::extract::Request, next: axum::middleware::Next| {
+					let seen = Arc::clone(&seen);
+					async move {
+						let path = request.uri().path().to_string();
+						let encoding = request
+							.headers()
+							.get("grpc-encoding")
+							.and_then(|v| v.to_str().ok())
+							.unwrap_or("identity")
+							.to_string();
+						seen.lock().expect("encoding log poisoned").push((path, encoding));
+						next.run(request).await
+					}
+				},
+			));
+		}
 		tokio::spawn({
 			let handle = handle.clone();
 			async move {
@@ -86,6 +110,15 @@ impl TestServer {
 			canceller,
 			handle,
 		}
+	}
+
+	/// Starts a server that records the `grpc-encoding` of every request it
+	/// receives, so a test can assert what was actually on the wire rather than
+	/// what either peer was configured to prefer.
+	async fn start_recording() -> (Self, Arc<std::sync::Mutex<Vec<(String, String)>>>) {
+		let seen: Arc<std::sync::Mutex<Vec<(String, String)>>> = Arc::default();
+		let server = Self::start_with(Some(Arc::clone(&seen))).await;
+		(server, seen)
 	}
 
 	/// Connects the SDK's gRPC engine to this server.
@@ -670,5 +703,188 @@ async fn a_failed_statement_ends_with_its_error() {
 		outcomes,
 		vec![(0, true), (1, false), (2, true)],
 		"only the throwing statement fails, and the ones around it still finish"
+	);
+}
+
+/// Compression is negotiated per request, not assumed.
+///
+/// An export is the payload that makes this matter -- it is the one response
+/// large enough for the encoding to change what crosses the network -- and the
+/// HTTP transport has always gzipped it, so shipping it uncompressed over gRPC
+/// was a regression against the transport it stands beside.
+///
+/// What has to hold is that enabling it did not make an encoding mandatory: a
+/// client advertising nothing must still be served. Both halves are asserted
+/// from the response's own `grpc-encoding`, which is what the server actually
+/// put on the wire rather than what either side was configured to prefer.
+#[tokio::test]
+async fn export_compression_is_negotiated_per_client() {
+	use surrealdb_protocol::proto::rpc::v1::surreal_db_service_client::SurrealDbServiceClient;
+	use surrealdb_protocol::proto::rpc::v1::{
+		self as rpc, AccessMethod, AttachSessionRequest, NullableString, RequestContext,
+		SigninRequest, UseRequest, UserCredentials, access_method, nullable_string,
+	};
+	use tonic::codec::CompressionEncoding;
+
+	let server = TestServer::start().await;
+	let db = server.connect_as_root().await;
+	db.query("CREATE person:1 SET name = 'a'").await.expect("send").check().expect("seed");
+
+	/// Signs a raw client in and returns the context every later call carries.
+	async fn authenticate(
+		client: &mut SurrealDbServiceClient<tonic::transport::Channel>,
+	) -> Option<RequestContext> {
+		let session = client
+			.attach_session(AttachSessionRequest::default())
+			.await
+			.expect("attach")
+			.into_inner()
+			.session
+			.expect("the server mints a session id");
+		let context = Some(RequestContext {
+			session: Some(session),
+			..Default::default()
+		});
+		client
+			.signin(SigninRequest {
+				context: context.clone(),
+				access_method: Some(AccessMethod {
+					method: Some(access_method::Method::User(UserCredentials {
+						username: USER.to_string(),
+						password: PASS.to_string(),
+						..Default::default()
+					})),
+				}),
+			})
+			.await
+			.expect("signin");
+		client
+			.r#use(UseRequest {
+				context: context.clone(),
+				namespace: Some(NullableString {
+					value: Some(nullable_string::Value::Some("test".to_string())),
+				}),
+				database: Some(NullableString {
+					value: Some(nullable_string::Value::Some("test".to_string())),
+				}),
+			})
+			.await
+			.expect("use");
+		context
+	}
+
+	let endpoint = format!("http://{}", server.address);
+
+	// A client that advertises zstd is served zstd.
+	let mut compressing = SurrealDbServiceClient::connect(endpoint.clone())
+		.await
+		.expect("a raw gRPC client")
+		.accept_compressed(CompressionEncoding::Zstd);
+	let context = authenticate(&mut compressing).await;
+	let response = compressing
+		.export_surql(rpc::ExportSurqlRequest {
+			context,
+			config: None,
+		})
+		.await
+		.expect("export");
+	assert_eq!(
+		response.metadata().get("grpc-encoding").map(|v| v.to_str().expect("ascii")),
+		Some("zstd"),
+		"a client advertising zstd must be served zstd"
+	);
+
+	// A client that advertises nothing is served identity, and the stream still
+	// carries the export.
+	let mut plain = SurrealDbServiceClient::connect(endpoint).await.expect("a raw gRPC client");
+	let context = authenticate(&mut plain).await;
+	let response = plain
+		.export_surql(rpc::ExportSurqlRequest {
+			context,
+			config: None,
+		})
+		.await
+		.expect("export");
+	assert!(
+		response.metadata().get("grpc-encoding").is_none(),
+		"a client advertising no encoding must be served identity"
+	);
+
+	let mut body = Vec::new();
+	let mut stream = response.into_inner();
+	while let Some(frame) = stream.message().await.expect("a frame") {
+		if let Some(rpc::export_surql_response::Frame::Chunk(chunk)) = frame.frame {
+			body.extend_from_slice(&chunk.data);
+		}
+	}
+	let text = String::from_utf8(body).expect("the export is utf-8");
+	assert!(text.contains("person:1"), "the uncompressed export must still carry the record");
+}
+
+/// An import streams a whole database up, so it is the request worth
+/// compressing -- and the only one. Small calls are left alone, because framing
+/// and compressing a few hundred bytes costs more than it saves.
+///
+/// Asserted from what the server received rather than from what the client was
+/// configured to do, since the point is what crossed the network.
+#[tokio::test]
+async fn imports_upload_compressed_and_small_calls_do_not() {
+	let (server, seen) = TestServer::start_recording().await;
+	let db = server.connect_as_root().await;
+	db.query("CREATE person:exported SET name = 'Tobie'")
+		.await
+		.expect("send")
+		.check()
+		.expect("create");
+
+	let file = tempfile::NamedTempFile::new().expect("temp file");
+	db.export(file.path()).await.expect("export");
+
+	let restored = server.connect_to_database("restored").await;
+	restored.import(file.path()).await.expect("import");
+	let people: Vec<Value> = restored.select("person").await.expect("select");
+	assert_eq!(people.len(), 1, "the import must still land");
+
+	let seen = seen.lock().expect("encoding log poisoned");
+	let encoding_of = |suffix: &str| -> Option<&str> {
+		seen.iter().find(|(path, _)| path.ends_with(suffix)).map(|(_, encoding)| encoding.as_str())
+	};
+
+	// Exactly one attempt, and it compressed: reading the capability is what
+	// makes the compressed attempt safe, so a retry here would mean the answer
+	// was not trusted or was wrong.
+	let imports: Vec<&str> = seen
+		.iter()
+		.filter(|(path, _)| path.ends_with("/ImportSurql"))
+		.map(|(_, encoding)| encoding.as_str())
+		.collect();
+	assert_eq!(imports, ["zstd"], "one compressed import attempt, saw {seen:?}");
+	// The handshake is what negotiated it, and every ordinary call after it
+	// stays uncompressed.
+	assert_eq!(
+		encoding_of("/Query"),
+		Some("identity"),
+		"a query must not pay to compress a few hundred bytes, saw {seen:?}"
+	);
+	assert_eq!(
+		encoding_of("/Signin"),
+		Some("identity"),
+		"a signin must not be compressed, saw {seen:?}"
+	);
+	// The handshake reads the answer out of the capabilities rather than
+	// probing for it, so it is asked once and asked uncompressed.
+	let handshakes: Vec<&str> = seen
+		.iter()
+		.filter(|(path, _)| path.ends_with("/GetCapabilities"))
+		.map(|(_, encoding)| encoding.as_str())
+		.collect();
+	assert!(
+		handshakes.iter().all(|encoding| *encoding == "identity"),
+		"the handshake must not be compressed, saw {handshakes:?}"
+	);
+	assert_eq!(
+		handshakes.len(),
+		2,
+		"one handshake per connection, and this test opens two, saw {handshakes:?}"
 	);
 }

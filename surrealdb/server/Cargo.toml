@@ -133,7 +133,7 @@ tower-http = { version = "0.6.8", features = [
     "add-extension",
     "compression-full",
 ] }
-tonic = { version = "0.14.5", features = ["tls-native-roots"] }
+tonic = { version = "0.14.5", features = ["tls-native-roots", "gzip", "zstd"] }
 tower-service = "0.3.3"
 tracing-appender = "0.2.5"
 tracing-opentelemetry = "0.32.1"

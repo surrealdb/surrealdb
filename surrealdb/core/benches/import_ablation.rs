@@ -616,6 +616,25 @@ fn compression_report(label: &str, corpus: &[u8]) {
 			(corpus.len() as f64 / (1024.0 * 1024.0)) / delapsed.as_secs_f64(),
 		);
 	}
+
+	// A gRPC transport compresses each message on its own, so the ratio it
+	// achieves is not the whole-stream ratio above: every frame's compressor
+	// starts without the history of the ones before it. Pricing the export at
+	// the frame size the transport actually uses is what says whether framing
+	// erodes the win.
+	for chunk in [64usize * 1024, 256 * 1024, 1024 * 1024] {
+		let start = Instant::now();
+		let total: usize =
+			corpus.chunks(chunk).map(|c| zstd::encode_all(c, 3).unwrap().len()).sum();
+		let elapsed = start.elapsed();
+		eprintln!(
+			"  zstd -3 per {:>4} KiB frame: {:.2} MiB  ratio {:.2}x  {:.0} MiB/s compress",
+			chunk / 1024,
+			total as f64 / (1024.0 * 1024.0),
+			corpus.len() as f64 / total as f64,
+			(corpus.len() as f64 / (1024.0 * 1024.0)) / elapsed.as_secs_f64(),
+		);
+	}
 }
 
 // ---------------------------------------------------------------------------

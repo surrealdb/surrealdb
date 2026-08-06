@@ -24,7 +24,14 @@ parse = ["dep:surrealdb-syn"]
 protocol-http = ["dep:reqwest", "surrealdb-types/reqwest"]
 protocol-ws = ["dep:tokio-tungstenite", "tokio/time"]
 # Native only: tonic does not build for wasm32.
-protocol-grpc = ["dep:tonic", "dep:surrealdb-protocol", "surrealdb-types/proto", "tokio/time"]
+protocol-grpc = [
+    "dep:tonic",
+    "tonic?/gzip",
+    "tonic?/zstd",
+    "dep:surrealdb-protocol",
+    "surrealdb-types/proto",
+    "tokio/time",
+]
 # The `kv-*` features select a storage backend for the embedded engine. The
 # engine crate is the only route from the SDK to the database core.
 kv-mem = ["dep:surrealdb-engine-local", "surrealdb-engine-local/kv-mem", "dep:surrealdb-kvs", "tokio/time"]

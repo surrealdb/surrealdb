@@ -1361,6 +1361,13 @@ impl GrpcService {
 				multiple_subscribers: false,
 				retention: None,
 			}),
+			// The codecs the gRPC route enables `accept_compressed` for, most
+			// preferred first, so a client can compress an upload without first
+			// spending a rejected call to discover whether it may. `identity`
+			// is listed last because it is always accepted; naming it is what
+			// separates this answer from the silence of a server too old to
+			// have the field.
+			accepted_message_encodings: crate::ntw::grpc::accepted_message_encodings(),
 		}
 	}
 

@@ -31,6 +31,7 @@ use surrealdb_protocol::proto::rpc::v1::surreal_db_service_client::SurrealDbServ
 use surrealdb_protocol::proto::v1 as proto;
 use surrealdb_rpc::{QueryResult, QueryStreamItem, QueryType, Token};
 use tokio::sync::Notify;
+use tonic::codec::CompressionEncoding;
 use tonic::transport::Channel;
 use uuid::Uuid;
 
@@ -137,8 +138,17 @@ pub(crate) async fn connect_engine(
 	let channel = builder.connect().await.map_err(|e| {
 		Error::connection(e.to_string(), crate::types::ConnectionError::ConnectionFailed)
 	})?;
-	let mut client = SurrealDbServiceClient::new(channel);
+	// Advertise what this client can decode, which is what lets the server
+	// compress its responses -- the direction an export travels.
+	let mut client = SurrealDbServiceClient::new(channel)
+		.accept_compressed(CompressionEncoding::Zstd)
+		.accept_compressed(CompressionEncoding::Gzip);
 	let capabilities = fetch_capabilities(&mut client).await?;
+	// The other direction has no negotiation of its own: a client compresses
+	// unconditionally, and a server that cannot decode the encoding rejects the
+	// call. The handshake says which codecs it can decode, so an upload can be
+	// compressed without first spending a rejected call to find out.
+	let compress_requests = server_accepts_request_encoding(&capabilities);
 	// Take the message size from the server rather than leaving tonic's 4 MiB
 	// default in place: the server splits a query's records across frames, but
 	// a single record larger than the default would still be undecodable, and
@@ -153,6 +163,7 @@ pub(crate) async fn connect_engine(
 	let features = extra_features(&capabilities);
 	let engine = Arc::new(GrpcEngine {
 		client,
+		compress_requests,
 		server_version: capabilities.server_version,
 		sessions: SessionRegistry::default(),
 		query_timeout: address
@@ -189,9 +200,54 @@ fn extra_features(
 	features
 }
 
+/// The encoding requests are compressed with once the server is known to accept
+/// it. Chosen over gzip for the same reason the server prefers it: a better
+/// ratio at several times the throughput, so it does not become the bottleneck
+/// on the payload that motivates compressing requests at all -- an import.
+const REQUEST_ENCODING: CompressionEncoding = CompressionEncoding::Zstd;
+
+/// The `grpc-accept-encoding` token naming [`REQUEST_ENCODING`].
+const REQUEST_ENCODING_TOKEN: &str = "zstd";
+
+/// Whether the server said it can decode the encoding uploads would use.
+///
+/// An empty list is a server predating the field, which the protocol defines as
+/// unknown rather than unsupported -- and specifies is to be read as "send
+/// uncompressed and do not probe". So silence answers no, and the only yes is an
+/// explicit mention.
+fn server_accepts_request_encoding(capabilities: &rpc::ServerCapabilities) -> bool {
+	capabilities
+		.accepted_message_encodings
+		.iter()
+		.any(|encoding| encoding.eq_ignore_ascii_case(REQUEST_ENCODING_TOKEN))
+}
+
+/// Whether a failed handshake failed *because* the request was compressed.
+///
+/// A server that does not accept the encoding answers `UNIMPLEMENTED` and, per
+/// the gRPC specification, names what it does accept in `grpc-accept-encoding`.
+/// That header is the discriminator rather than the status message, whose
+/// wording belongs to the peer's implementation.
+fn rejected_request_encoding(status: &tonic::Status) -> bool {
+	status.code() == tonic::Code::Unimplemented
+		&& status.metadata().contains_key("grpc-accept-encoding")
+}
+
 async fn fetch_capabilities(
 	client: &mut SurrealDbServiceClient<Channel>,
 ) -> crate::Result<rpc::ServerCapabilities> {
+	get_capabilities(client).await.map_err(|status| {
+		Error::connection(
+			status.message().to_string(),
+			crate::types::ConnectionError::ConnectionFailed,
+		)
+	})
+}
+
+/// The handshake, keeping the `Status` so a caller can tell *why* it failed.
+async fn get_capabilities(
+	client: &mut SurrealDbServiceClient<Channel>,
+) -> Result<rpc::ServerCapabilities, tonic::Status> {
 	let request = rpc::GetCapabilitiesRequest {
 		context: None,
 		client: Some(rpc::ClientInfo {
@@ -201,23 +257,12 @@ async fn fetch_capabilities(
 			metadata: Vec::new(),
 		}),
 	};
-	let capabilities = client
+	client
 		.get_capabilities(request)
-		.await
-		.map_err(|status| {
-			Error::connection(
-				status.message().to_string(),
-				crate::types::ConnectionError::ConnectionFailed,
-			)
-		})?
+		.await?
 		.into_inner()
-		.capabilities;
-	capabilities.ok_or_else(|| {
-		Error::connection(
-			"Server did not report its capabilities".to_string(),
-			crate::types::ConnectionError::ConnectionFailed,
-		)
-	})
+		.capabilities
+		.ok_or_else(|| tonic::Status::internal("Server did not report its capabilities"))
 }
 
 /// An operation that must be re-applied to a cloned session.
@@ -399,6 +444,9 @@ impl SessionRegistry {
 
 struct GrpcEngine {
 	client: SurrealDbServiceClient<Channel>,
+	/// Whether the server accepted a compressed request during the handshake.
+	/// Only the uploads large enough to pay for it consult this.
+	compress_requests: bool,
 	/// Reported once at connect; `version` answers from it rather than
 	/// spending a round trip, as the protocol intends.
 	server_version: String,
@@ -419,6 +467,17 @@ impl std::fmt::Debug for GrpcEngine {
 impl GrpcEngine {
 	fn client(&self) -> SurrealDbServiceClient<Channel> {
 		self.client.clone()
+	}
+
+	/// A client that compresses what it sends, or `None` when the server did not
+	/// say it could decode the encoding.
+	///
+	/// Kept separate from [`client`](Self::client) rather than compressing
+	/// everything: a query or an RPC call is a few hundred bytes, where framing
+	/// and compressing costs more than it saves, while an import streams a whole
+	/// database past.
+	fn compressed_upload_client(&self) -> Option<SurrealDbServiceClient<Channel>> {
+		self.compress_requests.then(|| self.client.clone().send_compressed(REQUEST_ENCODING))
 	}
 
 	fn context(&self, session: Uuid, transaction: Option<Uuid>) -> rpc::RequestContext {
@@ -1357,11 +1416,27 @@ impl SurrealEngine for GrpcEngine {
 	fn import_file(&self, ctx: EngineContext, path: PathBuf) -> EngineFuture<'_, ()> {
 		Box::pin(async move {
 			let context = self.ready(ctx).await?;
-			let file = tokio::fs::File::open(&path)
-				.await
-				.map_err(|e| Error::internal(format!("Failed to open {}: {e}", path.display())))?;
+			let open = || async {
+				tokio::fs::File::open(&path)
+					.await
+					.map_err(|e| Error::internal(format!("Failed to open {}: {e}", path.display())))
+			};
+			// A codec the handshake named can still be refused in front of the
+			// server -- a proxy may have answered the handshake itself, or
+			// terminated TLS and re-framed without the codec the backend has.
+			// gRPC reports that as `UNIMPLEMENTED` naming what is really
+			// accepted, so reading the capability saves the probe without
+			// removing the need to fall back.
+			if let Some(mut client) = self.compressed_upload_client() {
+				let stream = import_stream(context.clone(), open().await?);
+				match client.import_surql(stream).await {
+					Ok(_) => return Ok(()),
+					Err(status) if rejected_request_encoding(&status) => {}
+					Err(status) => return Err(status_to_error(status)),
+				}
+			}
 			self.client()
-				.import_surql(import_stream(context, file))
+				.import_surql(import_stream(context, open().await?))
 				.await
 				.map_err(status_to_error)?;
 			Ok(())
@@ -2479,5 +2554,45 @@ mod tests {
 		)
 		.expect_err("an unspecified action should be rejected");
 		assert!(error.is_internal(), "expected an internal error, got {error:?}");
+	}
+}
+
+#[cfg(test)]
+mod request_compression_tests {
+	use super::rejected_request_encoding;
+
+	/// Exactly the status tonic's server builds when it is handed a request in
+	/// an encoding it does not accept: `UNIMPLEMENTED` naming what it does
+	/// accept. Recognising it is what lets the handshake retry uncompressed
+	/// instead of failing the connection.
+	#[test]
+	fn an_unsupported_encoding_is_recognised() {
+		let mut status =
+			tonic::Status::unimplemented("Content is compressed with `zstd` which isn't supported");
+		status.metadata_mut().insert("grpc-accept-encoding", "identity".parse().unwrap());
+		assert!(rejected_request_encoding(&status));
+	}
+
+	/// A server that does accept the encoding but has the method switched off
+	/// also answers `UNIMPLEMENTED` -- `ExportDirectory` is one, and an
+	/// operator's denied-method list produces more. Retrying those uncompressed
+	/// would not help, so only the encoding header may trigger the fallback.
+	#[test]
+	fn a_genuinely_unimplemented_method_is_not() {
+		let status = tonic::Status::unimplemented("Directory export is not served");
+		assert!(!rejected_request_encoding(&status));
+	}
+
+	/// Nor may any other failure be read as an encoding problem: retrying
+	/// uncompressed would mask it and report the wrong cause.
+	#[test]
+	fn other_failures_are_not() {
+		for status in [
+			tonic::Status::unavailable("connection refused"),
+			tonic::Status::unauthenticated("bad credentials"),
+			tonic::Status::internal("boom"),
+		] {
+			assert!(!rejected_request_encoding(&status), "{status:?}");
+		}
 	}
 }
