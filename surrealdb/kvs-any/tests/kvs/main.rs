@@ -43,11 +43,10 @@ fn main() -> ExitCode {
 	#[allow(unused_mut)]
 	let mut backends = Vec::new();
 
+	// The memory backend no longer supports versioning (removed in the
+	// surrealmx 0.23 upgrade), so there is no `mem_versioned` backend.
 	#[cfg(feature = "kv-mem")]
-	{
-		backends.push(TestBackend::new("mem", || ds_from_path("memory")));
-		backends.push(TestBackend::new("mem_versioned", || ds_from_path("memory?versioned=true")));
-	}
+	backends.push(TestBackend::new("mem", || ds_from_path("memory")));
 
 	#[cfg(feature = "kv-rocksdb")]
 	backends.push(TestBackend::new("rocksdb", || ds_on_disk("rocksdb")));

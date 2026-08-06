@@ -42,12 +42,16 @@ macro_rules! include_tests {
 }
 
 mod backup;
+// The versioned suites run only on backends that still support native
+// versioning; the memory backend dropped it in the surrealmx 0.23 upgrade.
+#[cfg(any(feature = "kv-rocksdb", feature = "kv-surrealkv",))]
 mod backup_version;
 mod basic;
 mod live;
 mod run;
 mod serialisation;
 mod session_isolation;
+#[cfg(any(feature = "kv-rocksdb", feature = "kv-surrealkv",))]
 mod version;
 
 const ROOT_USER: &str = "root";
@@ -692,38 +696,9 @@ mod tikv {
 // Versioned storage engine tests
 // --------------------------------------------------
 
-#[cfg(feature = "kv-mem")]
-mod mem_versioned {
-	use surrealdb::Surreal;
-	use surrealdb::engine::local::{Db, Mem};
-	use surrealdb::opt::Config;
-	use surrealdb::opt::auth::Root;
-	use tokio::sync::{Semaphore, SemaphorePermit};
-
-	use super::{ROOT_PASS, ROOT_USER};
-
-	static PERMITS: Semaphore = Semaphore::const_new(1);
-
-	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Db>) {
-		let permit = PERMITS.acquire().await.unwrap();
-		let root = Root {
-			username: ROOT_USER.to_string(),
-			password: ROOT_PASS.to_string(),
-		};
-		let config = config.user(root.clone());
-		let db = Surreal::new::<Mem>(config).versioned().await.unwrap();
-		db.signin(root).await.unwrap();
-		(permit, db)
-	}
-
-	#[test_log::test(tokio::test)]
-	async fn any_engine_can_connect() {
-		surrealdb::engine::any::connect("memory?versioned=true").await.unwrap();
-	}
-
-	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run, version, backup_version);
-}
-
+// The memory backend no longer supports versioning after the surrealmx 0.23
+// upgrade; versioned coverage runs on the surrealkv backend below (rocksdb also
+// retains native versioning).
 #[cfg(feature = "kv-surrealkv")]
 mod surrealkv_versioned {
 	use surrealdb::Surreal;

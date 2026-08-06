@@ -96,11 +96,9 @@ impl CreateInfo {
 
 		let ds = match self.backend {
 			Backend::Memory => {
-				if versioned {
-					builder.build_with_path("mem://?versioned=true&retention=1h").await?
-				} else {
-					builder.build_with_path("mem://").await?
-				}
+				// The memory backend no longer supports versioning; the runner
+				// filters versioned tests out on this backend (see cmd/run).
+				builder.build_with_path("mem://").await?
 			}
 			Backend::RocksDb => {
 				let p = self.produce_path();

@@ -1,13 +1,9 @@
-use surrealdb_cnf::{Config, parse_duration};
+use surrealdb_cnf::Config;
 use surrealdb_kvs::config::{AolMode, SnapshotMode, SyncMode};
 
 /// Configuration for the in-memory storage engine, parsed from query parameters.
 #[derive(Debug, Clone)]
 pub struct MemoryConfig {
-	/// Whether MVCC versioning is enabled.
-	pub versioned: bool,
-	/// Version retention period in nanoseconds (0 = unlimited).
-	pub retention_ns: u64,
 	/// Path for persistence files (from URL path, e.g. `mem:///tmp/data`). If set, enables disk
 	/// persistence.
 	pub persist_path: Option<String>,
@@ -22,8 +18,6 @@ pub struct MemoryConfig {
 impl Default for MemoryConfig {
 	fn default() -> Self {
 		Self {
-			versioned: false,
-			retention_ns: 0,
 			persist_path: None,
 			sync_mode: SyncMode::Never,
 			aol_mode: AolMode::Never,
@@ -41,10 +35,6 @@ impl Config for MemoryConfig {
 			} else {
 				Some(Some(x.to_owned()))
 			}
-		})
-		.parse_key_bool("datastore_versioned", &mut self.versioned)
-		.parse_key_with("datastore_retention", &mut self.retention_ns, |x| {
-			parse_duration(x).map(|x| x.as_nanos() as u64).ok()
 		})
 		.parse_key("datastore_aol", &mut self.aol_mode)
 		.parse_key("datastore_snapshot", &mut self.snapshot_mode);
@@ -70,8 +60,6 @@ mod test {
 	fn test_memory_config_defaults() {
 		let map = ConfigMap::empty();
 		let config = map.load::<MemoryConfig>();
-		assert!(!config.versioned);
-		assert_eq!(config.retention_ns, 0);
 		assert!(config.persist_path.is_none());
 		assert_eq!(config.aol_mode, AolMode::Never);
 		assert_eq!(config.snapshot_mode, SnapshotMode::Never);
@@ -81,11 +69,10 @@ mod test {
 	#[test]
 	fn test_memory_config_with_persistence() {
 		// Persist path comes from URL path (e.g. mem:///tmp/data), not query params
-		let map = ConfigMap::from_config_string("versioned=true&aol=sync&snapshot=60s&sync=5s")
+		let map = ConfigMap::from_config_string("aol=sync&snapshot=60s&sync=5s")
 			.with_key_value("persist", "/tmp/data")
 			.map_keys(|x| format!("datastore_{x}"));
 		let config = map.load::<MemoryConfig>();
-		assert!(config.versioned);
 		assert_eq!(config.persist_path.as_deref(), Some("/tmp/data"));
 		assert_eq!(config.aol_mode, AolMode::Sync);
 		assert_eq!(config.snapshot_mode, SnapshotMode::Interval(Duration::from_secs(60)));

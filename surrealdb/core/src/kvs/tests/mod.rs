@@ -20,6 +20,7 @@ mod rpc_session_test;
 mod sequences_tikv_test;
 #[cfg(feature = "kv-mem")]
 mod tx_cache_test;
+mod tx_cache_versioned_test;
 #[cfg(feature = "kv-mem")]
 mod tx_engine_test;
 mod tx_metrics;

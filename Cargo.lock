@@ -7257,7 +7257,6 @@ dependencies = [
  "libtest-mimic",
  "surrealdb-kvs",
  "tokio",
- "web-time",
 ]
 
 [[package]]
@@ -7780,9 +7779,9 @@ dependencies = [
 
 [[package]]
 name = "surrealmx"
-version = "0.22.0"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e8a87f050a4860832ccf4a53e43ea264e98d27618983602b5c575e6df296054"
+checksum = "26ccaa3935534159e7d3d9e909791be1b92a9fd1b58830e2a003e8a12c262176"
 dependencies = [
  "arc-swap",
  "bincode",

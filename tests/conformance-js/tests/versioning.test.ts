@@ -1,19 +1,25 @@
 import { expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { rootClient, startServer, type TestServer } from "../src/harness";
 
 // Temporal / time-travel conformance — the VERSION clause reading historical
-// record state on a versioned datastore. Every test runs against its own fresh
-// server started with the versioned in-memory datastore, so version history is
-// isolated per test. The exhaustive spec lives in
+// record state on a versioned datastore. The memory backend no longer supports
+// versioning (dropped in the surrealmx 0.23 upgrade), so each test owns a fresh
+// surrealkv datastore in its own temp directory; version history must not leak
+// between them. The exhaustive spec lives in
 // language-tests/tests/reproductions/*_version_*.surql.
-
-// Each test owns a versioned server; version history must not leak between them.
 async function withVersionedServer<T>(fn: (server: TestServer) => Promise<T>): Promise<T> {
-	const server = await startServer({ datastore: "memory?versioned=true" });
+	const dir = mkdtempSync(join(tmpdir(), "sdb-conf-versioned-"));
+	const server = await startServer({
+		datastore: `surrealkv://${dir}/db?versioned=true&retention=1h`,
+	});
 	try {
 		return await fn(server);
 	} finally {
 		await server.stop();
+		rmSync(dir, { recursive: true, force: true });
 	}
 }
 

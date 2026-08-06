@@ -78,6 +78,10 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 			let config_backend = &x.test.config.parsed.env.backend;
 			config_backend.is_empty() || config_backend.contains(&backend)
 		})
+		// The memory backend no longer supports versioned (MVCC time-travel)
+		// queries after the surrealmx 0.23 upgrade; versioned coverage runs on
+		// the rocksdb and surrealkv backends, which retain native versioning.
+		.with_filter(|x| !x.test.config.parsed.env.versioned || !matches!(backend, Backend::Memory))
 		// Run for all config the test has configured.
 		.with_expander(|x| {
 			x.test
