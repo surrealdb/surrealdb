@@ -568,13 +568,14 @@ async fn run_export(backend: &str, inserts: &[String], records: usize) -> Vec<u8
 		out.len() as f64 / (1024.0 * 1024.0),
 		(out.len() as f64 / (1024.0 * 1024.0)) / elapsed.as_secs_f64(),
 	);
+	// One channel message per line the exporter writes, so its size follows the
+	// records a line carries. A transport frames these itself rather than
+	// forwarding them one for one, so this is the shape the framing is handed,
+	// not the shape that reaches a client.
 	eprintln!(
-		"  channel messages: {messages} (one gRPC frame each), largest {:.2} MiB",
+		"  channel messages: {messages}, largest {:.2} MiB",
 		largest as f64 / (1024.0 * 1024.0)
 	);
-	if largest > 4 * 1024 * 1024 {
-		eprintln!("  WARNING: largest message exceeds the 4 MiB default gRPC decode limit");
-	}
 	out
 }
 

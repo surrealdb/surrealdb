@@ -21,6 +21,11 @@ use surrealdb::opt::auth::Root;
 use surrealdb_core::CommunityComposer;
 use surrealdb_core::dbs::capabilities::Capabilities;
 use surrealdb_core::kvs::Datastore;
+use surrealdb_protocol::proto::rpc::v1::surreal_db_service_client::SurrealDbServiceClient;
+use surrealdb_protocol::proto::rpc::v1::{
+	AccessMethod, AttachSessionRequest, NullableString, RequestContext, SigninRequest, UseRequest,
+	UserCredentials, access_method, nullable_string,
+};
 use surrealdb_server::ntw::{RouterOptions, SurrealRouter};
 use surrealdb_types::Value;
 use tokio_util::sync::CancellationToken;
@@ -706,6 +711,49 @@ async fn a_failed_statement_ends_with_its_error() {
 	);
 }
 
+/// Signs a raw client in and returns the context every later call carries.
+async fn authenticate(
+	client: &mut SurrealDbServiceClient<tonic::transport::Channel>,
+) -> Option<RequestContext> {
+	let session = client
+		.attach_session(AttachSessionRequest::default())
+		.await
+		.expect("attach")
+		.into_inner()
+		.session
+		.expect("the server mints a session id");
+	let context = Some(RequestContext {
+		session: Some(session),
+		..Default::default()
+	});
+	client
+		.signin(SigninRequest {
+			context: context.clone(),
+			access_method: Some(AccessMethod {
+				method: Some(access_method::Method::User(UserCredentials {
+					username: USER.to_string(),
+					password: PASS.to_string(),
+					..Default::default()
+				})),
+			}),
+		})
+		.await
+		.expect("signin");
+	client
+		.r#use(UseRequest {
+			context: context.clone(),
+			namespace: Some(NullableString {
+				value: Some(nullable_string::Value::Some("test".to_string())),
+			}),
+			database: Some(NullableString {
+				value: Some(nullable_string::Value::Some("test".to_string())),
+			}),
+		})
+		.await
+		.expect("use");
+	context
+}
+
 /// Compression is negotiated per request, not assumed.
 ///
 /// An export is the payload that makes this matter -- it is the one response
@@ -719,59 +767,12 @@ async fn a_failed_statement_ends_with_its_error() {
 /// put on the wire rather than what either side was configured to prefer.
 #[tokio::test]
 async fn export_compression_is_negotiated_per_client() {
-	use surrealdb_protocol::proto::rpc::v1::surreal_db_service_client::SurrealDbServiceClient;
-	use surrealdb_protocol::proto::rpc::v1::{
-		self as rpc, AccessMethod, AttachSessionRequest, NullableString, RequestContext,
-		SigninRequest, UseRequest, UserCredentials, access_method, nullable_string,
-	};
+	use surrealdb_protocol::proto::rpc::v1 as rpc;
 	use tonic::codec::CompressionEncoding;
 
 	let server = TestServer::start().await;
 	let db = server.connect_as_root().await;
 	db.query("CREATE person:1 SET name = 'a'").await.expect("send").check().expect("seed");
-
-	/// Signs a raw client in and returns the context every later call carries.
-	async fn authenticate(
-		client: &mut SurrealDbServiceClient<tonic::transport::Channel>,
-	) -> Option<RequestContext> {
-		let session = client
-			.attach_session(AttachSessionRequest::default())
-			.await
-			.expect("attach")
-			.into_inner()
-			.session
-			.expect("the server mints a session id");
-		let context = Some(RequestContext {
-			session: Some(session),
-			..Default::default()
-		});
-		client
-			.signin(SigninRequest {
-				context: context.clone(),
-				access_method: Some(AccessMethod {
-					method: Some(access_method::Method::User(UserCredentials {
-						username: USER.to_string(),
-						password: PASS.to_string(),
-						..Default::default()
-					})),
-				}),
-			})
-			.await
-			.expect("signin");
-		client
-			.r#use(UseRequest {
-				context: context.clone(),
-				namespace: Some(NullableString {
-					value: Some(nullable_string::Value::Some("test".to_string())),
-				}),
-				database: Some(NullableString {
-					value: Some(nullable_string::Value::Some("test".to_string())),
-				}),
-			})
-			.await
-			.expect("use");
-		context
-	}
 
 	let endpoint = format!("http://{}", server.address);
 
@@ -887,4 +888,91 @@ async fn imports_upload_compressed_and_small_calls_do_not() {
 		2,
 		"one handshake per connection, and this test opens two, saw {handshakes:?}"
 	);
+}
+
+/// A frame's size must come from the chunk size the server advertises, not from
+/// how wide the exported records happen to be.
+///
+/// The exporter writes one line per `INSERT` statement, so a line is as wide as
+/// the records it carries. Forwarding lines as frames tied the two together, and
+/// records of a few KB were enough to push a frame past the very message limit
+/// the same handshake reports -- leaving a client that honoured that limit
+/// unable to decode its own export.
+///
+/// The client here is left at its default limits, so it stands in for exactly
+/// that client.
+#[tokio::test]
+async fn export_frames_are_bounded_regardless_of_record_width() {
+	use surrealdb_protocol::proto::rpc::v1 as rpc;
+
+	const CHUNK: usize = surrealdb_protocol::DEFAULT_FILE_CHUNK_SIZE;
+	// Wide enough that one `INSERT` line runs past the 4 MiB default decode
+	// limit: the exporter groups up to 1000 records per line, and these are
+	// ~300 KiB each.
+	const RECORDS: usize = 20;
+	const FIELD_BYTES: usize = 300 * 1024;
+
+	let server = TestServer::start().await;
+	let db = server.connect_as_root().await;
+	let blob = "x".repeat(FIELD_BYTES);
+	for i in 0..RECORDS {
+		db.query(format!("CREATE person:{i} SET blob = '{blob}'"))
+			.await
+			.expect("send")
+			.check()
+			.expect("seed");
+	}
+
+	let mut client = SurrealDbServiceClient::connect(format!("http://{}", server.address))
+		.await
+		.expect("a raw gRPC client");
+	let context = authenticate(&mut client).await;
+	let mut stream = client
+		.export_surql(rpc::ExportSurqlRequest {
+			context,
+			config: None,
+		})
+		.await
+		.expect("export")
+		.into_inner();
+
+	let mut sizes = Vec::new();
+	let mut body = Vec::new();
+	let mut trailer = None;
+	while let Some(response) = stream.message().await.expect("a frame") {
+		match response.frame {
+			Some(rpc::export_surql_response::Frame::Chunk(chunk)) => {
+				sizes.push(chunk.data.len());
+				body.extend_from_slice(&chunk.data);
+			}
+			Some(rpc::export_surql_response::Frame::Trailer(t)) => trailer = Some(t),
+			Some(rpc::export_surql_response::Frame::Error(e)) => panic!("export failed: {e:?}"),
+			None => panic!("a frame with no payload"),
+		}
+	}
+
+	let largest = sizes.iter().copied().max().expect("the export must carry chunks");
+	assert!(
+		largest <= CHUNK,
+		"no frame may exceed the advertised chunk size of {CHUNK}, largest was {largest}"
+	);
+	// The payload is several times the chunk size, so this really did have to
+	// split rather than happening to fit.
+	assert!(
+		body.len() > 4 * CHUNK,
+		"the fixture must produce an export worth splitting, got {} bytes",
+		body.len()
+	);
+	// Framing is not allowed to change the bytes or what the trailer says about
+	// them.
+	let trailer = trailer.expect("a complete export ends with a trailer");
+	assert_eq!(trailer.bytes as usize, body.len(), "the trailer must count what was sent");
+	assert_eq!(
+		trailer.blake3,
+		blake3::hash(&body).to_hex().to_string(),
+		"the digest must cover the reassembled bytes"
+	);
+	let text = String::from_utf8(body).expect("the export is utf-8");
+	assert!(text.contains("person:0"), "the export must carry its records");
+	assert!(text.contains(&format!("person:{}", RECORDS - 1)));
 }

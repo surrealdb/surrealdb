@@ -2544,6 +2544,17 @@ async fn discard_unregistered_live_queries(state: &RpcState, session_id: Uuid, i
 /// totals so the receiver can tell a complete transfer from a truncated one --
 /// or, if the export failed part-way, an error frame in the trailer's place so
 /// a partial transfer is never mistaken for a whole one.
+///
+/// Frames are sized at [`EXPORT_CHUNK_SIZE`], which is what the server reports
+/// as `max_chunk_bytes`. The exporter writes one line per `INSERT` statement,
+/// so a line is as wide as its records are: forwarding lines as they arrive
+/// would tie frame size to record width and, for wide-enough records, push a
+/// frame past the message limit the same handshake advertises. Buffering across
+/// short lines and splitting long ones keeps the two agreeing whatever the data
+/// looks like.
+///
+/// The digest and byte count are taken as bytes arrive, not as they are framed,
+/// so both describe the export itself and re-framing cannot change them.
 fn frame_byte_stream<T, F>(export: Export, wrap: F) -> impl Stream<Item = Result<T, Status>> + Send
 where
 	F: Fn(ByteFrame) -> T + Send + 'static,
@@ -2556,6 +2567,10 @@ where
 		/// `None` once the terminating frame has been emitted, which is what
 		/// stops the stream.
 		export: Option<Export>,
+		/// Received but not yet framed. Bounded by one chunk plus the largest
+		/// single line the exporter writes, since a full chunk is emitted as
+		/// soon as one is available.
+		buffer: bytes::BytesMut,
 		hasher: blake3::Hasher,
 		streamed: u64,
 	}
@@ -2564,50 +2579,71 @@ where
 		(
 			Framing {
 				export: Some(export),
+				buffer: bytes::BytesMut::new(),
 				hasher: blake3::Hasher::new(),
 				streamed: 0,
 			},
 			wrap,
 		),
 		|(mut framing, wrap)| async move {
-			let export = framing.export.take()?;
-			match export.chunks.recv().await {
-				Ok(chunk) => {
-					framing.hasher.update(&chunk);
-					framing.streamed += chunk.len() as u64;
+			loop {
+				// A whole chunk is ready: emit exactly that much and keep the
+				// rest for the next frame.
+				if framing.buffer.len() >= EXPORT_CHUNK_SIZE {
+					let data = framing.buffer.split_to(EXPORT_CHUNK_SIZE).freeze();
 					let frame = wrap(ByteFrame::Chunk(rpc::DataChunk {
-						data: bytes::Bytes::from(chunk),
+						data,
 					}));
-					framing.export = Some(export);
-					Some((Ok(frame), (framing, wrap)))
+					return Some((Ok(frame), (framing, wrap)));
 				}
-				// The channel closed, which happens both when the export
-				// finished and when it gave up part-way. The task's own result
-				// is what distinguishes them.
-				Err(_) => {
-					let frame = match export.outcome.await {
-						Ok(Ok(())) => ByteFrame::Trailer(rpc::DataTrailer {
-							bytes: framing.streamed,
-							blake3: framing.hasher.finalize().to_hex().to_string(),
-						}),
-						Ok(Err(err)) => {
-							error!("gRPC export failed: {err}");
-							ByteFrame::Error(proto::SurrealError::new(
-								proto::ErrorKind::Internal,
-								"The export failed part-way through",
-							))
-						}
-						Err(err) => {
-							error!("gRPC export task panicked: {err}");
-							ByteFrame::Error(proto::SurrealError::new(
-								proto::ErrorKind::Internal,
-								"The export failed part-way through",
-							))
-						}
-					};
-					// `framing.export` stays `None`, ending the stream after
-					// this terminating frame.
-					Some((Ok(wrap(frame)), (framing, wrap)))
+				let export = framing.export.take()?;
+				match export.chunks.recv().await {
+					Ok(chunk) => {
+						framing.hasher.update(&chunk);
+						framing.streamed += chunk.len() as u64;
+						framing.buffer.extend_from_slice(&chunk);
+						framing.export = Some(export);
+					}
+					// The channel closed, which happens both when the export
+					// finished and when it gave up part-way. Whatever is left is
+					// short of a full chunk, so it goes out as the last one --
+					// and only then does the task's own result say which of the
+					// two happened.
+					Err(_) if !framing.buffer.is_empty() => {
+						let data = std::mem::take(&mut framing.buffer).freeze();
+						let frame = wrap(ByteFrame::Chunk(rpc::DataChunk {
+							data,
+						}));
+						// Held so the next poll sees a drained buffer and a
+						// closed channel, and terminates.
+						framing.export = Some(export);
+						return Some((Ok(frame), (framing, wrap)));
+					}
+					Err(_) => {
+						let frame = match export.outcome.await {
+							Ok(Ok(())) => ByteFrame::Trailer(rpc::DataTrailer {
+								bytes: framing.streamed,
+								blake3: framing.hasher.finalize().to_hex().to_string(),
+							}),
+							Ok(Err(err)) => {
+								error!("gRPC export failed: {err}");
+								ByteFrame::Error(proto::SurrealError::new(
+									proto::ErrorKind::Internal,
+									"The export failed part-way through",
+								))
+							}
+							Err(err) => {
+								error!("gRPC export task panicked: {err}");
+								ByteFrame::Error(proto::SurrealError::new(
+									proto::ErrorKind::Internal,
+									"The export failed part-way through",
+								))
+							}
+						};
+						// `framing.export` stays `None`, ending the stream after
+						// this terminating frame.
+						return Some((Ok(wrap(frame)), (framing, wrap)));
+					}
 				}
 			}
 		},
