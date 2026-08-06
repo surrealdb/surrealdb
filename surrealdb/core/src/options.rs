@@ -115,6 +115,16 @@ pub struct EngineOptions {
 	///
 	/// Default: 60 seconds
 	pub rpc_session_gc_interval: Duration,
+	/// Interval for refreshing the cached process/system utilisation metrics.
+	///
+	/// Both `INFO FOR ROOT` and the `surrealdb.process.*` gauges read a cached
+	/// snapshot rather than sampling on demand, so a periodic refresh is what
+	/// keeps them current. Exactly one refresher must run: `sysinfo` derives CPU
+	/// percentage as a delta since the previous refresh, so a second concurrent
+	/// refresher would shorten that window unpredictably and skew the reading.
+	///
+	/// Default: 30 seconds
+	pub system_metrics_refresh_interval: Duration,
 }
 
 impl Default for EngineOptions {
@@ -134,6 +144,7 @@ impl Default for EngineOptions {
 			tikv_gc_lifetime: Duration::from_secs(600),
 			tikv_lock_cleanup_interval: Duration::from_secs(60),
 			rpc_session_gc_interval: Duration::from_secs(60),
+			system_metrics_refresh_interval: Duration::from_secs(30),
 		}
 	}
 }
@@ -203,6 +214,11 @@ impl EngineOptions {
 
 	pub fn with_rpc_session_gc_interval(mut self, interval: Duration) -> Self {
 		self.rpc_session_gc_interval = interval;
+		self
+	}
+
+	pub fn with_system_metrics_refresh_interval(mut self, interval: Duration) -> Self {
+		self.system_metrics_refresh_interval = interval;
 		self
 	}
 }

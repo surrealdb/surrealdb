@@ -1437,8 +1437,6 @@ impl Datastore {
 	pub async fn update_node(&self) -> Result<()> {
 		// Log when this method is run
 		trace!(target: TARGET, id = %self.id, "Updating node in the cluster");
-		// Refresh system usage metrics
-		crate::sys::refresh().await;
 		// Open transaction and set node data
 		let txn = self.transaction(Write).await?;
 		let key = NodeKey {
@@ -1460,12 +1458,6 @@ impl Datastore {
 		trace!(target: TARGET, id = %self.id, timeout = ?timeout_duration, "Updating node in the cluster with timeout");
 
 		let deadline = Instant::now() + timeout_duration;
-
-		await_node_step(deadline, timeout_duration, Some(canceller), async {
-			crate::sys::refresh().await;
-			Ok(())
-		})
-		.await?;
 
 		let txn =
 			await_node_step(deadline, timeout_duration, Some(canceller), self.transaction(Write))
@@ -3637,6 +3629,17 @@ impl Datastore {
 	/// The post-commit wake-ups the background tasks wait on.
 	pub fn commit_triggers(&self) -> &Arc<CommitTriggers> {
 		&self.triggers
+	}
+
+	/// The live-query engine this datastore delivers notifications through.
+	///
+	/// Selected from the datastore configuration at construction and fixed for
+	/// the datastore's lifetime. The engine's background tasks read it to decide
+	/// whether to run the per-node live-query router at all: under
+	/// [`LiveQueryEngine::Inline`] the router has nothing to deliver, so no task
+	/// is spawned for it.
+	pub fn live_query_engine(&self) -> LiveQueryEngine {
+		self.config.datastore.live_query_engine
 	}
 
 	pub async fn health_check(&self) -> Result<()> {

@@ -281,18 +281,21 @@ pub static METRICS_ENABLED: LazyLock<bool> = lazy_env_parse!("SURREAL_METRICS_EN
 pub static SLOW_QUERY_METRIC_THRESHOLD_MS: LazyLock<u64> =
 	lazy_env_parse!("SURREAL_SLOW_QUERY_METRIC_THRESHOLD_MS", u64, 1000);
 
-/// Cadence (in seconds) at which the cached process snapshot used by the
-/// `surrealdb.process.{memory,cpu_percent}` observable gauges is refreshed.
+/// Cadence (in seconds) at which the cached process snapshot read by the
+/// `surrealdb.process.{memory,cpu_percent}` observable gauges and by
+/// `INFO FOR ROOT` is refreshed.
 ///
-/// A background task runs while metrics are enabled (Prometheus and / or
-/// OTLP) and calls
-/// [`surrealdb_core::observe::refresh_process_snapshot`] on this cadence
-/// so OTLP-only deployments do not see flat-lined process metrics
-/// between exports. The default of `5` seconds gives stable CPU%
-/// readings (sysinfo computes CPU% as a delta since the last refresh,
-/// so very short intervals amplify scheduler jitter) while keeping the
-/// per-refresh overhead well under 0.05% of one core. Operators
-/// running tighter or looser metric pipelines can override.
+/// Supplies `EngineOptions::system_metrics_refresh_interval`, so the engine's
+/// maintenance scheduler calls
+/// [`surrealdb_core::observe::refresh_process_snapshot`] on this cadence. The
+/// refresh runs whether or not metrics are exported, because `INFO FOR ROOT`
+/// reads the same cache; OTLP-only deployments therefore do not see
+/// flat-lined process metrics between exports. Values below one second are
+/// floored to one. The default of `5` seconds gives stable CPU% readings
+/// (sysinfo computes CPU% as a delta since the last refresh, so very short
+/// intervals amplify scheduler jitter) while keeping the per-refresh overhead
+/// well under 0.05% of one core. Operators running tighter or looser metric
+/// pipelines can override.
 pub static PROCESS_METRICS_REFRESH_INTERVAL: LazyLock<u64> =
 	lazy_env_parse!("SURREAL_PROCESS_METRICS_REFRESH_INTERVAL", u64, 5);
 

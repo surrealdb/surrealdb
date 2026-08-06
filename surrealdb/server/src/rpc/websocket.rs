@@ -193,7 +193,6 @@ impl Websocket {
 				// Split the socket into sending and receiving streams
 				let (ws_sender, ws_receiver) = buffer.split();
 				// Spawn async tasks for the WebSocket
-				tasks.spawn(Self::ping(Arc::clone(&rpc), sender.clone()));
 				tasks.spawn(Self::read(Arc::clone(&rpc), ws_receiver, sender.clone(), rec_limit));
 				tasks.spawn(Self::write(Arc::clone(&rpc), ws_sender, receiver));
 			}
@@ -201,7 +200,6 @@ impl Websocket {
 				// Split the socket into sending and receiving streams
 				let (ws_sender, ws_receiver) = ws.split();
 				// Spawn async tasks for the WebSocket
-				tasks.spawn(Self::ping(Arc::clone(&rpc), sender.clone()));
 				tasks.spawn(Self::read(Arc::clone(&rpc), ws_receiver, sender.clone(), rec_limit));
 				tasks.spawn(Self::write(Arc::clone(&rpc), ws_sender, receiver));
 			}
@@ -247,42 +245,11 @@ impl Websocket {
 		});
 	}
 
-	/// Send Ping messages to the client
-	async fn ping(rpc: Arc<Websocket>, internal_sender: Sender<Message>) {
-		// Create the interval ticker
-		let mut interval = tokio::time::interval(WEBSOCKET_PING_FREQUENCY);
-		// Clone the WebSocket cancellation token (awaitable view of the
-		// shared cancel handle).
-		let canceller = rpc.cancel.token();
-		// Loop, and listen for messages to write
-		loop {
-			tokio::select! {
-				// Process brances in order
-				biased;
-				// Check if we should teardown
-				_ = canceller.cancelled() => break,
-				// Send a regular ping message
-				_ = interval.tick() => {
-					// Create a new ping message
-					let msg = Message::Ping(Bytes::from_static(b""));
-					// Close the connection if the message fails
-					if let Err(err) = internal_sender.send(msg).await {
-						// Output any errors if not a close error
-						if err.to_string() != CONN_CLOSED_ERR {
-							trace!("WebSocket error: {err}");
-						}
-						// Cancel the WebSocket tasks AND the executor cancel
-						// flag so in-flight queries return early.
-						rpc.cancel_all();
-						// Exit out of the loop
-						break;
-					}
-				},
-			}
-		}
-	}
-
-	/// Write messages to the client
+	/// Write messages to the client, and keep the connection alive
+	///
+	/// Owns the sending half of the socket, so it also emits the periodic ping:
+	/// a separate ping task would have to hand its message to this one through
+	/// the response channel anyway.
 	async fn write<S: SinkExt<Message> + Unpin>(
 		rpc: Arc<Websocket>,
 		mut socket: S,
@@ -297,6 +264,13 @@ impl Websocket {
 		let buffer = *WEBSOCKET_RESPONSE_BUFFER_SIZE > 0;
 		// How often should responses be flushed
 		let period = Duration::from_millis(*WEBSOCKET_RESPONSE_FLUSH_PERIOD);
+		// Keepalive ticker. The leading tick fires immediately, so a connection
+		// is pinged as soon as it opens.
+		let mut ping = tokio::time::interval(WEBSOCKET_PING_FREQUENCY);
+		// Pings convey liveness, not history: after a stall, one ping says as
+		// much as the whole backlog, so missed ticks are dropped rather than
+		// burst onto the socket.
+		ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 		// Loop, and listen for messages to write
 		loop {
 			tokio::select! {
@@ -304,6 +278,31 @@ impl Websocket {
 				biased;
 				// Check if we should teardown
 				_ = canceller.cancelled() => break,
+				// Send a regular ping message. Polled ahead of the response
+				// channel so a saturated connection cannot starve the
+				// keepalive; a tick is only ready once per period, so it
+				// delays a queued response by at most one message.
+				_ = ping.tick() => {
+					// Write through the same buffer-aware path as responses so
+					// the ping cannot overtake an already-queued message.
+					let msg = Message::Ping(Bytes::from_static(b""));
+					let result = match buffer {
+						true => socket.feed(msg).await,
+						false => socket.send(msg).await,
+					};
+					// Close the connection if the message fails
+					if let Err(err) = result {
+						// Output any errors if not a close error
+						if err.to_string() != CONN_CLOSED_ERR {
+							trace!("WebSocket error: {err}");
+						}
+						// Cancel the WebSocket tasks AND the executor cancel
+						// flag so in-flight queries return early.
+						rpc.cancel_all();
+						// Exit out of the loop
+						break;
+					}
+				},
 				// Retrieve a response from the channel
 				Some(res) = internal_receiver.recv() => {
 					// Capture the byte length before the message is moved

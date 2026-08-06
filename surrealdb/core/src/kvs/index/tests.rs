@@ -2671,8 +2671,8 @@ async fn resume_scan_adopts_stalled_concurrent_build() -> Result<()> {
 }
 
 /// End-to-end check of the *periodic* path: an interval-driven loop calling
-/// `resume_stalled_index_builds` (exactly what `spawn_task_resume_index_builds`
-/// runs) must, on its own, adopt a stalled `CONCURRENTLY` build and drive it to
+/// `resume_stalled_index_builds` (exactly what the engine's maintenance
+/// scheduler runs) must, on its own, adopt a stalled `CONCURRENTLY` build and drive it to
 /// `Online` — no manual `REBUILD`/`REMOVE`. This pins the behaviour in CI
 /// independently of a live server harness.
 #[tokio::test(flavor = "multi_thread")]
@@ -2719,8 +2719,8 @@ async fn periodic_task_resumes_stalled_build() -> Result<()> {
 	.await?;
 	tx.commit().await?;
 
-	// Spawn the periodic resume loop, mirroring `spawn_task_resume_index_builds`:
-	// an interval timer that calls `resume_stalled_index_builds` until cancelled.
+	// Spawn the periodic resume loop, mirroring the engine's maintenance
+	// scheduler: a timer that calls `resume_stalled_index_builds` until cancelled.
 	let canceller = tokio_util::sync::CancellationToken::new();
 	let task = {
 		let ds = Arc::clone(&ds);

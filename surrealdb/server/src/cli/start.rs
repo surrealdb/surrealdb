@@ -309,7 +309,12 @@ pub async fn init<
 		.with_tikv_gc_interval(tikv_gc_interval)
 		.with_tikv_gc_lifetime(tikv_gc_lifetime)
 		.with_tikv_lock_cleanup_interval(tikv_lock_cleanup_interval)
-		.with_rpc_session_gc_interval(durable_session_gc_interval);
+		.with_rpc_session_gc_interval(durable_session_gc_interval)
+		// Floor the configured value at 1s so a misconfigured zero neither
+		// produces a tight refresh loop nor unregisters the job.
+		.with_system_metrics_refresh_interval(Duration::from_secs(
+			(*PROCESS_METRICS_REFRESH_INTERVAL).max(1),
+		));
 	// Configure the config
 	let Some(bind) = listen_addresses.first().copied() else {
 		return Err(anyhow::anyhow!("No listen address provided"));
@@ -342,15 +347,6 @@ pub async fn init<
 	// Create a token to cancel tasks
 	let canceller = CancellationToken::new();
 
-	// Keep the cached process snapshot fresh for both readers. The
-	// `/metrics` handler used to refresh on each scrape; OTLP push has
-	// no equivalent path, so a background task is the only way to
-	// avoid flat-lined `surrealdb.process.*` values on OTLP-only
-	// deployments. Only spawn when at least one reader is configured;
-	// otherwise nobody reads the cache.
-	if *METRICS_ENABLED || otlp_metrics_active() {
-		spawn_process_snapshot_refresh(canceller.clone());
-	}
 	// Start the datastore. The startup import and credential initialisation are
 	// returned rather than run here, so the web server can bind before they run.
 	let (datastore, recv, router_state, pending_startup) =
@@ -478,10 +474,10 @@ pub async fn init<
 ///   configured).
 /// - The process / pipeline observable gauges (`surrealdb.build.info`, `surrealdb.process.*`, audit
 ///   / slow-query self-metrics) are registered whenever any reader is attached -- either Prometheus
-///   pull or OTLP push. This matches the gate used by [`spawn_process_snapshot_refresh`] so the
-///   cache and its readers stay symmetrical, and keeps OTLP-only deployments
-///   (`SURREAL_METRICS_ENABLED=false` + `SURREAL_TELEMETRY_PROVIDER=otlp`) wired up to the same
-///   gauge surface as Prometheus scrapers.
+///   pull or OTLP push. This keeps OTLP-only deployments (`SURREAL_METRICS_ENABLED=false` +
+///   `SURREAL_TELEMETRY_PROVIDER=otlp`) wired up to the same gauge surface as Prometheus scrapers.
+///   The snapshot these gauges read is refreshed by the engine's maintenance scheduler regardless
+///   of whether any reader is attached, because `INFO FOR ROOT` reads the same cache.
 /// - When [`METRICS_ENABLED`] is `true`, a [`MetricsObserver`] is constructed and returned as part
 ///   of the [`MetricsState`] so the `/metrics` handler can reach the Prometheus text exporter; it
 ///   also lands in the fan-out so the labelled `surrealdb.*` family is recorded on every emit.
@@ -504,10 +500,9 @@ fn build_observability<C: ObservabilityProvider>(
 	// against the unified meter provider whenever any reader -- Prometheus
 	// pull or OTLP push -- is configured. Without this hoist OTLP-only
 	// deployments would build the `SdkMeterProvider` (see
-	// `telemetry::metrics::init`) and refresh the process snapshot via
-	// `spawn_process_snapshot_refresh` but never expose any gauges that
-	// read from the cache, leaving OTLP collectors with zero
-	// `surrealdb.build.info` / `surrealdb.process.*` /
+	// `telemetry::metrics::init`) and keep the process snapshot fresh but
+	// never expose any gauges that read from the cache, leaving OTLP
+	// collectors with zero `surrealdb.build.info` / `surrealdb.process.*` /
 	// `surrealdb_audit_*` / `surrealdb_slow_query_*` samples.
 	if *METRICS_ENABLED || otlp_metrics_active() {
 		crate::observe::metrics::register_process_metrics(runtime);
@@ -552,39 +547,4 @@ fn build_observability<C: ObservabilityProvider>(
 		observer: metrics_observer,
 	});
 	Ok((metrics_state, combined))
-}
-
-/// Spawn a background task that refreshes the cached process snapshot
-/// used by the `surrealdb.process.{memory,cpu_percent}` observable
-/// gauges every [`PROCESS_METRICS_REFRESH_INTERVAL`] seconds.
-///
-/// The task runs an eager refresh once before entering its tick loop
-/// so the first OTLP export and the first `/metrics` scrape both
-/// observe non-zero values; without that the cold-start window can
-/// take up to one full interval before the cache populates. The task
-/// cancels cleanly via the supplied [`CancellationToken`] on graceful
-/// shutdown.
-fn spawn_process_snapshot_refresh(canceller: CancellationToken) {
-	// Floor the configured value at 1s so a misconfigured zero does
-	// not produce a tight refresh loop.
-	let secs = (*PROCESS_METRICS_REFRESH_INTERVAL).max(1);
-	let period = Duration::from_secs(secs);
-	tokio::spawn(async move {
-		// Eager initial refresh so cold-start exports observe a real
-		// snapshot rather than the all-zero default.
-		let _ = surrealdb_core::observe::refresh_process_snapshot().await;
-		let mut ticker = tokio::time::interval(period);
-		// `tokio::time::interval` fires immediately on first tick; we
-		// already refreshed above, so skip the leading tick.
-		ticker.tick().await;
-		loop {
-			tokio::select! {
-				biased;
-				_ = canceller.cancelled() => break,
-				_ = ticker.tick() => {
-					let _ = surrealdb_core::observe::refresh_process_snapshot().await;
-				}
-			}
-		}
-	});
 }

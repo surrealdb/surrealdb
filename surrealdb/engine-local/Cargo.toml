@@ -67,7 +67,12 @@ surrealdb-cnf = { workspace = true }
 criterion.workspace = true
 rand.workspace = true
 test-log = { workspace = true, features = ["trace"] }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+tokio = { workspace = true, features = [
+    "macros",
+    "rt-multi-thread",
+    "test-util",
+    "time",
+] }
 web-time.workspace = true
 
 [lints]
