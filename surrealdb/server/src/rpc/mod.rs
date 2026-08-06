@@ -13,7 +13,7 @@ use surrealdb_core::channel::Receiver;
 #[cfg(feature = "graphql")]
 use surrealdb_core::graphql::NotificationRouter;
 use surrealdb_core::rpc::{DbResponse, DbResult, RpcProtocol};
-use surrealdb_types::Notification;
+use surrealdb_types::{Action, Notification};
 use tokio::sync::RwLock;
 use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
@@ -104,6 +104,10 @@ impl RpcState {
 /// The helper is intentionally independent of the datastore notification channel so embedded
 /// products can inject an already-authenticated notification received over an internal relay.
 /// Unknown live-query ids and disconnected WebSocket sessions are no-ops.
+///
+/// An [`Action::Killed`] notification also ends the registration it names: this is the only
+/// signal that carries the id of a subscription the datastore has ended, so nothing else can
+/// drop the entry.
 pub async fn dispatch_live_notification(notification: Notification, state: Arc<RpcState>) {
 	#[cfg(feature = "graphql")]
 	if state.notification_router.has_subscribers() {
@@ -119,7 +123,26 @@ pub async fn dispatch_live_notification(notification: Notification, state: Arc<R
 	// Copy the lookup result out and drop the `live_queries` read guard BEFORE acquiring
 	// `web_sockets`. Keeping those locks independent prevents cleanup paths from being blocked
 	// by a client send on the hot notification path.
-	let live_query = state.live_queries.read().await.get(&notification.id).cloned();
+	//
+	// A killed subscription is deleted from storage before this notification is sent, so this
+	// is the last one its id will ever carry and the registration ends with it. Leaving it
+	// would hold the entry -- and keep the active-LQ gauge counting it -- until the connection
+	// closes. `KILL` is not the only source: removing a table, database, or namespace, and
+	// revoking a principal, all end subscriptions this way. The entry is taken out of the map
+	// before the frame is sent, so a second notification for the same id cannot decrement the
+	// gauge twice, and the labels come from the entry itself so the gauge stays balanced
+	// against the registration that incremented it.
+	let live_query = if notification.action == Action::Killed {
+		let entry = state.live_queries.write().await.remove(&notification.id);
+		if let Some(entry) = entry.as_ref()
+			&& let Some(obs) = state.metrics_observer.as_ref()
+		{
+			obs.adjust_live_query_active(-1, entry.namespace.as_deref(), entry.database.as_deref());
+		}
+		entry
+	} else {
+		state.live_queries.read().await.get(&notification.id).cloned()
+	};
 	if let Some(entry) = live_query
 		&& let Some(rpc) = state.web_sockets.read().await.get(&entry.websocket_id).cloned()
 	{

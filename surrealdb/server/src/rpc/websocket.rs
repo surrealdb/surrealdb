@@ -1966,6 +1966,239 @@ mod tests {
 		});
 	}
 
+	/// A WebSocket connection whose live-query notifications are delivered by
+	/// the same dispatcher the server runs, so a `Killed` notification reaches
+	/// the transport exactly as it does in production.
+	struct LiveHarness {
+		state: Arc<RpcState>,
+		rpc: Arc<Websocket>,
+		/// Frames the dispatcher sends to the connection.
+		frames: Receiver<Message>,
+		canceller: CancellationToken,
+		dispatcher: tokio::task::JoinHandle<()>,
+	}
+
+	impl LiveHarness {
+		async fn new() -> Self {
+			use surrealdb_core::dbs::capabilities::Capabilities;
+
+			let (notify_tx, notify_rx) = surrealdb_core::channel::bounded(100);
+			let ds = Arc::new(
+				Datastore::builder()
+					.with_capabilities(Capabilities::all())
+					.with_notify(notify_tx)
+					.build_with_path("memory")
+					.await
+					.unwrap(),
+			);
+			let owner = Session::owner();
+			ds.execute("DEFINE NS `test`", &owner, None).await.unwrap();
+			let owner_ns = owner.clone().with_ns("test");
+			ds.execute("DEFINE DB `test`", &owner_ns, None).await.unwrap();
+			let setup = Session::owner().with_ns("test").with_db("test");
+			ds.execute("CREATE foo SET x = 1", &setup, None).await.unwrap();
+
+			let state = Arc::new(crate::rpc::RpcState::new(Arc::clone(&ds)));
+			let canceller = CancellationToken::new();
+			let dispatcher = tokio::spawn(crate::rpc::notifications(
+				notify_rx,
+				Arc::clone(&state),
+				canceller.clone(),
+			));
+
+			let (channel, frames) = channel::<Message>(8);
+			let rpc = Arc::new(Websocket {
+				id: Uuid::new_v4(),
+				format: Format::Json,
+				state: Arc::clone(&state),
+				datastore: ds,
+				sessions: HashMap::new(),
+				transactions: DashMap::new(),
+				counters: DashMap::new(),
+				shutdown: CancellationToken::new(),
+				cancel: surrealdb_core::ctx::CancelHandle::new(),
+				channel,
+			});
+			// The dispatcher delivers to connected WebSockets only.
+			state.web_sockets.write().await.insert(rpc.id, Arc::clone(&rpc));
+			// LIVE queries require a realtime-enabled session.
+			let session = Session::owner().with_ns("test").with_db("test").with_rt(true);
+			rpc.set_session(rpc.id, Arc::new(RwLock::new(session)));
+
+			Self {
+				state,
+				rpc,
+				frames,
+				canceller,
+				dispatcher,
+			}
+		}
+
+		/// Runs `sql` through the `query` RPC and returns the decoded response.
+		async fn query(&self, id: &str, sql: &str) -> serde_json::Value {
+			let body = serde_json::json!({
+				"id": id,
+				"method": "query",
+				"params": [sql],
+			});
+			let (responses, mut response) = channel::<Message>(8);
+			Websocket::handle_message(
+				&self.rpc,
+				Message::Text(body.to_string().into()),
+				responses,
+				1024,
+			)
+			.await;
+			let message = response.recv().await.expect("response sent over channel");
+			let text = match message {
+				Message::Text(t) => t.to_string(),
+				other => panic!("expected Text response from Json format, got {other:?}"),
+			};
+			serde_json::from_str(&text).unwrap_or_else(|e| panic!("JSON response ({e}): {text}"))
+		}
+
+		/// Registers a LIVE query and returns the id the transport recorded.
+		async fn register_live(&self) -> Uuid {
+			let response = self.query("live", "LIVE SELECT * FROM foo;").await;
+			assert_eq!(
+				response["result"][0]["status"], "OK",
+				"LIVE SELECT did not succeed: {response}",
+			);
+			let registered = self.registrations().await;
+			assert_eq!(
+				registered.len(),
+				1,
+				"LIVE SELECT did not register exactly one live query: {registered:?}",
+			);
+			registered[0]
+		}
+
+		/// The live queries registered against this connection.
+		async fn registrations(&self) -> Vec<Uuid> {
+			self.state
+				.live_queries
+				.read()
+				.await
+				.iter()
+				.filter_map(|(lqid, entry)| (entry.websocket_id == self.rpc.id).then_some(*lqid))
+				.collect()
+		}
+
+		/// Awaits the next frame the dispatcher sends to the connection.
+		async fn next_frame(&mut self) -> String {
+			let message = tokio::time::timeout(Duration::from_secs(10), self.frames.recv())
+				.await
+				.expect("notification dispatched within 10s")
+				.expect("notification channel open");
+			match message {
+				Message::Text(t) => t.to_string(),
+				other => panic!("expected Text notification from Json format, got {other:?}"),
+			}
+		}
+
+		/// Waits for `lqid` to leave the registry, then reports what is left
+		/// against this connection.
+		async fn registrations_after_unregistering(&self, lqid: &Uuid) -> Vec<Uuid> {
+			// The dispatcher drops the entry after handing the frame to the
+			// connection's channel, so give it a moment to get there.
+			for _ in 0..100 {
+				if !self.state.live_queries.read().await.contains_key(lqid) {
+					break;
+				}
+				tokio::time::sleep(Duration::from_millis(20)).await;
+			}
+			self.registrations().await
+		}
+
+		async fn shutdown(self) {
+			self.canceller.cancel();
+			let _ = self.dispatcher.await;
+		}
+	}
+
+	/// A `KILL` statement must drop the live query's WebSocket registration.
+	///
+	/// The `run_query` post-processing hook recovers the killed id from the
+	/// statement's result value, and a `KILL` statement evaluates to `NONE`,
+	/// so `handle_kill` never fires for one. The `Killed` notification the
+	/// statement queues on commit is the only thing that carries the id to
+	/// this transport, so the notification dispatcher is what has to drop the
+	/// entry -- otherwise `state.live_queries` holds it, and the active-LQ
+	/// gauge counts it, until the connection closes.
+	#[test]
+	fn kill_statement_unregisters_live_query_over_websocket() {
+		with_big_stack(|| async {
+			let mut harness = LiveHarness::new().await;
+			let lqid = harness.register_live().await;
+
+			// KILL it as a statement, rather than through the `kill` RPC method.
+			let response = harness.query("kill", &format!("KILL u'{lqid}';")).await;
+			// PROOF THE KILL RAN: a KILL that errored would leave the
+			// registration in place for a reason that has nothing to do with
+			// the dispatcher, and the leak assertion below would be reporting
+			// the wrong bug.
+			assert_eq!(
+				response["result"][0]["status"], "OK",
+				"KILL statement did not succeed: {response}",
+			);
+
+			// The subscriber is still owed the KILLED frame.
+			let frame = harness.next_frame().await;
+			assert!(
+				frame.contains("KILLED"),
+				"expected a KILLED notification on the connection channel, got: {frame}",
+			);
+
+			// The registration goes with it.
+			let leaked = harness.registrations_after_unregistering(&lqid).await;
+			assert!(
+				leaked.is_empty(),
+				"KILL statement left live-query registrations behind: {leaked:?} -- \
+				 the entry (and the active-LQ gauge) leak for the lifetime of the \
+				 connection even though the subscription is gone",
+			);
+
+			harness.shutdown().await;
+		});
+	}
+
+	/// Removing the table a live query watches must drop its WebSocket
+	/// registration too.
+	///
+	/// `REMOVE TABLE` ends every subscription on the table and tells each
+	/// subscriber with a `Killed` notification. No query result carries those
+	/// ids -- the statement's own result says nothing about them -- so the
+	/// dispatcher is the only place they can be unregistered.
+	#[test]
+	fn removing_a_table_unregisters_its_live_queries_over_websocket() {
+		with_big_stack(|| async {
+			let mut harness = LiveHarness::new().await;
+			let lqid = harness.register_live().await;
+
+			let response = harness.query("remove", "REMOVE TABLE foo;").await;
+			assert_eq!(
+				response["result"][0]["status"], "OK",
+				"REMOVE TABLE did not succeed: {response}",
+			);
+
+			let frame = harness.next_frame().await;
+			assert!(
+				frame.contains("KILLED"),
+				"expected a KILLED notification on the connection channel, got: {frame}",
+			);
+
+			let leaked = harness.registrations_after_unregistering(&lqid).await;
+			assert!(
+				leaked.is_empty(),
+				"REMOVE TABLE left live-query registrations behind: {leaked:?} -- \
+				 the subscription is gone from storage but the entry (and the \
+				 active-LQ gauge) survive for the lifetime of the connection",
+			);
+
+			harness.shutdown().await;
+		});
+	}
+
 	/// Regression test for the explicit-`begin`-on-cancel leak (Codex P2,
 	/// PR #286).
 	///
