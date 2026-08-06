@@ -549,7 +549,6 @@ mod tests {
 	use surrealdb_kvs::TransactionBuilder;
 	#[cfg(feature = "kv-rocksdb")]
 	use temp_dir::TempDir;
-	use tokio::sync::Notify;
 	use tokio::time::sleep;
 	use uuid::Uuid;
 
@@ -635,10 +634,9 @@ mod tests {
 	/// * `flavor` - The type of datastore to use for the test (memory or RocksDB)
 	async fn task_lease_concurrency(builder: Box<dyn TransactionBuilder>) {
 		// Async event trigger
-		let async_event_trigger = Arc::new(Notify::new());
+		let triggers = Arc::new(crate::triggers::CommitTriggers::new());
 		// Create a transaction factory with the specified datastore flavor
-		let tf =
-			TransactionFactory::new(async_event_trigger, builder, Arc::new(Default::default()));
+		let tf = TransactionFactory::new(triggers, builder, Arc::new(Default::default()));
 		// Create a sequence generator for the transaction factory
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 		// Set test to run for 3 seconds
@@ -758,10 +756,9 @@ mod tests {
 			.await
 			.unwrap();
 		// Create an async event trigger
-		let async_event_trigger = Arc::new(Notify::new());
+		let triggers = Arc::new(crate::triggers::CommitTriggers::new());
 		// Create the transaction factory
-		let tf =
-			TransactionFactory::new(async_event_trigger, builder, Arc::new(Default::default()));
+		let tf = TransactionFactory::new(triggers, builder, Arc::new(Default::default()));
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		// Set lease duration to 10 seconds
@@ -834,9 +831,8 @@ mod tests {
 			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
 			.await
 			.unwrap();
-		let async_event_trigger = Arc::new(Notify::new());
-		let tf =
-			TransactionFactory::new(async_event_trigger, builder, Arc::new(Default::default()));
+		let triggers = Arc::new(crate::triggers::CommitTriggers::new());
+		let tf = TransactionFactory::new(triggers, builder, Arc::new(Default::default()));
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		let lease_duration = Duration::from_secs(60);
@@ -888,9 +884,8 @@ mod tests {
 			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
 			.await
 			.unwrap();
-		let async_event_trigger = Arc::new(Notify::new());
-		let tf =
-			TransactionFactory::new(async_event_trigger, builder, Arc::new(Default::default()));
+		let triggers = Arc::new(crate::triggers::CommitTriggers::new());
+		let tf = TransactionFactory::new(triggers, builder, Arc::new(Default::default()));
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		// Create a handler with a 1-second lease duration (below the 8-second floor)
@@ -932,9 +927,8 @@ mod tests {
 			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
 			.await
 			.unwrap();
-		let async_event_trigger = Arc::new(Notify::new());
-		let tf =
-			TransactionFactory::new(async_event_trigger, builder, Arc::new(Default::default()));
+		let triggers = Arc::new(crate::triggers::CommitTriggers::new());
+		let tf = TransactionFactory::new(triggers, builder, Arc::new(Default::default()));
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		let lease_duration = Duration::from_secs(60);
@@ -986,9 +980,8 @@ mod tests {
 			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
 			.await
 			.unwrap();
-		let async_event_trigger = Arc::new(Notify::new());
-		let tf =
-			TransactionFactory::new(async_event_trigger, builder, Arc::new(Default::default()));
+		let triggers = Arc::new(crate::triggers::CommitTriggers::new());
+		let tf = TransactionFactory::new(triggers, builder, Arc::new(Default::default()));
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		// Use a 60-second lease so maintain_period = 60/8 = 7 seconds
@@ -1050,9 +1043,8 @@ mod tests {
 			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
 			.await
 			.unwrap();
-		let async_event_trigger = Arc::new(Notify::new());
-		let tf =
-			TransactionFactory::new(async_event_trigger, builder, Arc::new(Default::default()));
+		let triggers = Arc::new(crate::triggers::CommitTriggers::new());
+		let tf = TransactionFactory::new(triggers, builder, Arc::new(Default::default()));
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		// Use the minimum lease duration (8 seconds due to the floor)
@@ -1120,9 +1112,8 @@ mod tests {
 			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
 			.await
 			.unwrap();
-		let async_event_trigger = Arc::new(Notify::new());
-		let tf =
-			TransactionFactory::new(async_event_trigger, builder, Arc::new(Default::default()));
+		let triggers = Arc::new(crate::triggers::CommitTriggers::new());
+		let tf = TransactionFactory::new(triggers, builder, Arc::new(Default::default()));
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		// Use minimum lease duration (clamped to 8 seconds)
@@ -1182,9 +1173,8 @@ mod tests {
 			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
 			.await
 			.unwrap();
-		let async_event_trigger = Arc::new(Notify::new());
-		let tf =
-			TransactionFactory::new(async_event_trigger, builder, Arc::new(Default::default()));
+		let triggers = Arc::new(crate::triggers::CommitTriggers::new());
+		let tf = TransactionFactory::new(triggers, builder, Arc::new(Default::default()));
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		let node_id = Uuid::new_v4();

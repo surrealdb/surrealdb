@@ -9,7 +9,6 @@ use arc_swap::ArcSwap;
 use async_channel::Sender;
 use surrealdb_cnf::ConfigMap;
 use surrealdb_cnf::dynamic::DynamicConfiguration;
-use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -292,11 +291,11 @@ impl Builder {
 		builder: Box<dyn TransactionBuilder>,
 		buckets: BucketsManager,
 	) -> Result<Datastore> {
-		let async_event_trigger = Arc::new(Notify::new());
+		let triggers = Arc::new(surrealdb_datastore::triggers::CommitTriggers::new());
 		let observer = self.observer;
 		let config = Arc::new(RuntimeConfig::load(&self.config));
 		let tf = TransactionFactory::new(
-			Arc::clone(&async_event_trigger),
+			Arc::clone(&triggers),
 			builder,
 			Arc::new(self.config.load::<TransactionConfig>()),
 		)
@@ -340,7 +339,7 @@ impl Builder {
 			function_registry: Arc::new(FunctionRegistry::with_builtins()),
 			buckets,
 			sequences: Sequences::new(tf, id),
-			async_event_trigger,
+			triggers,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new(
 				config.surrealism.surrealism_cache_size,

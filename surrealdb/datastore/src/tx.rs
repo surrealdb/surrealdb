@@ -46,7 +46,7 @@ use surrealdb_observe::{
 	ExecutionObserver, Outcome, TenantIdentity, TransactionEvent, TransactionEventSafe,
 	TransactionMetrics,
 };
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::Mutex;
 use tokio::time::sleep;
 use tracing::Instrument;
 use uuid::Uuid;
@@ -62,13 +62,14 @@ use crate::key::schema::{
 	BuildAppendTicketPrefix, BuildReservationKey, BuildStateKey, ChangeFeedKey, DatabaseKey,
 	DatabasePrefix, DbAccessMethodKey, DbAccessMethodPrefix, DbAccessRoot, DbConfigKey,
 	DbConfigPrefix, DbGrantKey, DbGrantPrefix, DbUserKey, DbUserPrefix, EventKey, EventPrefix,
-	FieldKey, FieldPrefix, ForeignTablePrefix, FunctionKey, FunctionPrefix, IdxRoot, IndexDefKey,
-	IndexDefPrefix, IndexNameKey, LiveEventsKey, MlModelKey, MlModelPrefix, ModuleKey,
-	ModulePrefix, NamespaceKey, NamespacePrefix, NodeKey, NodePrefix, NsAccessMethodKey,
-	NsAccessMethodPrefix, NsAccessRoot, NsGrantKey, NsGrantPrefix, NsUserKey, NsUserPrefix,
-	ParamKey, ParamPrefix, ReclaimKey, RecordKey, RootAccessMethodKey, RootAccessMethodPrefix,
-	RootAccessRoot, RootConfigKey, RootGrantKey, RootGrantPrefix, RootUserKey, RootUserPrefix,
-	SequenceKey, SequencePrefix, SubscriptionPrefix, TableKey, TablePrefix,
+	FieldKey, FieldPrefix, ForeignTablePrefix, FunctionKey, FunctionPrefix, IdxRoot,
+	IndexCompactionKey, IndexCountKey, IndexDefKey, IndexDefPrefix, IndexNameKey, LiveEventsKey,
+	MlModelKey, MlModelPrefix, ModuleKey, ModulePrefix, NamespaceKey, NamespacePrefix, NodeKey,
+	NodePrefix, NsAccessMethodKey, NsAccessMethodPrefix, NsAccessRoot, NsGrantKey, NsGrantPrefix,
+	NsUserKey, NsUserPrefix, ParamKey, ParamPrefix, ReclaimKey, RecordKey, RootAccessMethodKey,
+	RootAccessMethodPrefix, RootAccessRoot, RootConfigKey, RootGrantKey, RootGrantPrefix,
+	RootUserKey, RootUserPrefix, SequenceKey, SequencePrefix, SubscriptionPrefix, TableKey,
+	TablePrefix,
 };
 use crate::sequences::Sequences;
 #[cfg(any(test, feature = "test-hooks"))]
@@ -76,10 +77,12 @@ use crate::testing::{
 	NonRetryableErrorSite, RetryableConflictSite, maybe_inject_non_retryable_error,
 	maybe_inject_retryable_conflict,
 };
+use crate::triggers::CommitTriggers;
 use crate::values::changefeed::Changefeed;
 use crate::values::index_build::{
 	BuildGeneration, BuildTicket, BuildTicketMutationSeq, IndexBuildPhase, IndexBuildReportStatus,
 };
+use crate::values::index_delta::{BufferedIndex, IndexDeltaBuffer};
 use crate::values::live_query::LiveEventBuffer;
 use crate::{
 	DatastoreError, Direction, Error as KvsError, IntoBytes, NORMAL_BATCH_SIZE, TransactionConfig,
@@ -121,10 +124,16 @@ pub struct Transaction {
 	changefeed: OnceLock<Changefeed>,
 	/// The live-query event buffer (dedicated keyspace, Router engine).
 	live_events: OnceLock<LiveEventBuffer>,
-	/// Async event trigger
-	async_event_trigger: Arc<Notify>,
+	/// Per-transaction aggregation of count-index deltas and compaction
+	/// triggers, flushed as one entry per index inside this transaction's
+	/// commit rather than one per mutated document.
+	index_deltas: OnceLock<IndexDeltaBuffer>,
+	/// Post-commit wake-ups, fired once the commit makes the work visible.
+	triggers: Arc<CommitTriggers>,
 	/// Do we have to trigger async events after the commit?
 	trigger_async_event: AtomicBool,
+	/// Did this transaction queue any index-compaction work?
+	trigger_index_compaction: AtomicBool,
 	/// Write-cardinality guard: maximum number of individual key writes this
 	/// transaction may buffer before further writes fail. Unset by default,
 	/// leaving the transaction unbounded. Armed once — by the executor for
@@ -769,7 +778,7 @@ impl Transaction {
 	pub fn new(
 		local: bool,
 		sequences: Sequences,
-		async_event_trigger: Arc<Notify>,
+		triggers: Arc<CommitTriggers>,
 		observer: Arc<dyn ExecutionObserver>,
 		tr: Transactor,
 		config: &TransactionConfig,
@@ -785,8 +794,10 @@ impl Transaction {
 			sequences,
 			changefeed: OnceLock::new(),
 			live_events: OnceLock::new(),
-			async_event_trigger,
+			index_deltas: OnceLock::new(),
+			triggers,
 			trigger_async_event: AtomicBool::new(false),
+			trigger_index_compaction: AtomicBool::new(false),
 			write_keys_limit: OnceLock::new(),
 			write_guard_poisoned: AtomicBool::new(false),
 			guarded_writes: AtomicU64::new(0),
@@ -1108,6 +1119,10 @@ impl Transaction {
 		if let Some(live_events) = self.live_events.get() {
 			live_events.clear();
 		}
+		// Discard any buffered index deltas
+		if let Some(index_deltas) = self.index_deltas.get() {
+			index_deltas.clear();
+		}
 		// Cancel the underlying transactor. Emit a transaction event on
 		// either outcome so counters and durations are always reported
 		// even when cancel itself reports a driver-level error.
@@ -1162,6 +1177,18 @@ impl Transaction {
 				limit,
 			}
 			.into());
+		}
+		// Flush the per-index aggregates before the changefeed, so they are
+		// part of this transaction's write set. Failure falls into the same
+		// cancel-and-report path as the changefeed flush below.
+		if let Err(e) = self.store_index_deltas().await {
+			if let Err(err) = self.cancel().await {
+				tracing::warn!(
+					target: "surrealdb::core::kvs::tx",
+					"transaction cleanup failed after index-delta storage failed; preserving original error {e}: {err}"
+				);
+			}
+			return Err(e);
 		}
 		// Store any buffered changefeed entries. Failure here falls into
 		// `cancel`, which itself emits the transaction event, so avoid
@@ -1270,7 +1297,14 @@ impl Transaction {
 		self.run_commit_actions().await;
 		if self.trigger_async_event.load(Ordering::Relaxed) {
 			// Notify after commit so queued events are visible to workers.
-			self.async_event_trigger.notify_one();
+			self.triggers.async_event.notify_one();
+		}
+		if self.trigger_index_compaction.load(Ordering::Relaxed) {
+			// Notify after commit so the queued request is visible to the
+			// compactor. Without this the queue waits out the compaction
+			// interval, and nothing relates that timer to the write rate — the
+			// gap between the two is what lets the delta log grow unbounded.
+			self.triggers.index_compaction.notify_one();
 		}
 		self.emit_transaction_event(Outcome::Success);
 		Ok(())
@@ -2242,6 +2276,124 @@ impl Transaction {
 		)
 	}
 
+	/// Accumulate a signed count-index delta for this transaction.
+	///
+	/// Buffered rather than written per document: all of a transaction's
+	/// mutations to one index collapse into a single `!iu` entry at commit. The
+	/// entry is still a blind write of a key no other transaction shares, so
+	/// this keeps the contention-free property the delta log exists for while
+	/// removing the per-document fan-out that made the log — and therefore every
+	/// `count()` read — grow with write volume.
+	pub fn buffer_count_delta(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+		delta: i64,
+		nid: Uuid,
+	) {
+		self.index_deltas.get_or_init(IndexDeltaBuffer::new).buffer_count_delta(
+			BufferedIndex {
+				ns,
+				db,
+				tb: tb.clone(),
+				ix,
+			},
+			delta,
+			nid,
+		)
+	}
+
+	/// The net count delta this transaction has buffered but not yet written.
+	///
+	/// The count read path adds this to the committed entries it scans, so a
+	/// read still observes its own transaction's uncommitted mutations.
+	pub fn pending_count_delta(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+	) -> i64 {
+		match self.index_deltas.get() {
+			Some(buffer) => buffer.pending_count(&BufferedIndex {
+				ns,
+				db,
+				tb: tb.clone(),
+				ix,
+			}),
+			None => 0,
+		}
+	}
+
+	/// Register that an index wants compaction once this transaction commits.
+	///
+	/// Deduplicated per index for the same reason as the count deltas: the
+	/// queue only needs to name the index once per transaction, not once per
+	/// mutated document.
+	pub fn buffer_compaction_trigger(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+		nid: Uuid,
+	) {
+		self.index_deltas.get_or_init(IndexDeltaBuffer::new).buffer_compaction_trigger(
+			BufferedIndex {
+				ns,
+				db,
+				tb: tb.clone(),
+				ix,
+			},
+			nid,
+		)
+	}
+
+	/// Write the buffered index deltas as one entry per index.
+	///
+	/// Called from [`Self::commit`] before the underlying commit, so the entries
+	/// land in the same transaction as the document changes that produced them
+	/// and the count stays atomic with the data. Like the changefeed flush,
+	/// these writes are metered against the write-cardinality guard.
+	pub async fn store_index_deltas(&self) -> Result<()> {
+		let Some(buffer) = self.index_deltas.get() else {
+			return Ok(());
+		};
+		if buffer.is_empty() {
+			return Ok(());
+		}
+		for (index, delta, nid) in buffer.take_counts() {
+			let key = IndexCountKey {
+				ns: index.ns,
+				db: index.db,
+				tb: Cow::Borrowed(&index.tb),
+				ix: index.ix,
+				uid: Some((nid, Uuid::now_v7())),
+				pos: delta > 0,
+				count: delta.unsigned_abs(),
+			};
+			self.put_key(&key, &()).await?;
+		}
+		let compactions = buffer.take_compactions();
+		if !compactions.is_empty() {
+			self.trigger_index_compaction();
+		}
+		for (index, nid) in compactions {
+			let key = IndexCompactionKey {
+				ns: index.ns,
+				db: index.db,
+				tb: Cow::Borrowed(&index.tb),
+				ix: index.ix,
+				nid,
+				uid: Uuid::now_v7(),
+			};
+			self.put_key(&key, &()).await?;
+		}
+		Ok(())
+	}
+
 	/// Records a record change into the dedicated live-query event buffer.
 	///
 	/// Independent of the changefeed: it always retains full before/after values
@@ -2525,6 +2677,12 @@ impl Transaction {
 	}
 
 	/// Mark this transaction to wake the async event processor after commit.
+	/// Mark that this transaction queued index-compaction work, so the
+	/// compactor is woken once the commit makes it visible.
+	pub fn trigger_index_compaction(&self) {
+		self.trigger_index_compaction.store(true, Ordering::Relaxed);
+	}
+
 	pub fn trigger_async_event(&self) {
 		self.trigger_async_event.store(true, Ordering::Relaxed);
 	}

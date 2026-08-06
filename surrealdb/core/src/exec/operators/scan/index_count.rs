@@ -391,6 +391,11 @@ pub(crate) async fn sum_index_count_deltas(
 			}
 		}
 	}
+	// Add the deltas this transaction has buffered but not yet flushed. Count
+	// deltas are aggregated per transaction and written at commit, so they are
+	// not in the scanned range yet; without this a read would not observe writes
+	// made earlier in its own transaction.
+	count += txn.pending_count_delta(ns, db, tb, ix);
 	Ok(count.max(0) as usize)
 }
 

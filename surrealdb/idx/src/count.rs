@@ -10,7 +10,15 @@ use crate::key::{KVKeyDecode, Resumable, TypedRange};
 use crate::val::TableName;
 use crate::{IndexKeyBase, bump_compaction_generation, read_compaction_generation};
 
-pub struct IndexCountThingIterator(Option<TypedRange<()>>);
+pub struct IndexCountThingIterator {
+	range: Option<TypedRange<()>>,
+	/// Identity of the index being counted, kept so the read can add the
+	/// deltas this transaction has buffered but not yet flushed.
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: TableName,
+	ix: IndexId,
+}
 
 /// Snapshot gathered by the read phase of count-index compaction.
 ///
@@ -40,15 +48,21 @@ impl IndexCountCompactionPlan {
 
 impl IndexCountThingIterator {
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &TableName, ix: IndexId) -> Result<Self> {
-		Ok(Self(Some(
-			IndexCountPrefix {
-				ns,
-				db,
-				tb: std::borrow::Cow::Borrowed(tb),
-				ix,
-			}
-			.range()?,
-		)))
+		Ok(Self {
+			range: Some(
+				IndexCountPrefix {
+					ns,
+					db,
+					tb: std::borrow::Cow::Borrowed(tb),
+					ix,
+				}
+				.range()?,
+			),
+			ns,
+			db,
+			tb: tb.clone(),
+			ix,
+		})
 	}
 
 	pub async fn next_count(
@@ -57,7 +71,7 @@ impl IndexCountThingIterator {
 		txn: &Transaction,
 		_limit: u32,
 	) -> Result<usize> {
-		if let Some(range) = self.0.take() {
+		if let Some(range) = self.range.take() {
 			let mut count: i64 = 0;
 			let mut loops = 0;
 			let mut current_range = Some(range);
@@ -83,6 +97,11 @@ impl IndexCountThingIterator {
 				};
 				env.is_done(None).await?;
 			}
+			// Add this transaction's own buffered mutations. Count deltas are
+			// aggregated per transaction and flushed at commit, so they are not
+			// in the scanned range yet; without this a read would not observe
+			// writes made earlier in its own transaction.
+			count += txn.pending_count_delta(self.ns, self.db, &self.tb, self.ix);
 			Ok(count as usize)
 		} else {
 			Ok(0)
@@ -106,7 +125,7 @@ impl IndexCountThingIterator {
 		limit: u32,
 	) -> Result<IndexCountCompactionPlan> {
 		let generation = read_compaction_generation(txn, &ikb.new_iv_key()).await?;
-		let Some(range) = self.0.take() else {
+		let Some(range) = self.range.take() else {
 			return Ok(IndexCountCompactionPlan {
 				generation,
 				count: 0,

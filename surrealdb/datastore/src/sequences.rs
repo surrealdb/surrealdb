@@ -775,7 +775,6 @@ mod tests {
 	};
 	use surrealdb_cnf::ConfigMap;
 	use surrealdb_strand::TableName;
-	use tokio::sync::Notify;
 	use uuid::Uuid;
 
 	use crate::TransactionType;
@@ -794,8 +793,11 @@ mod tests {
 			.new_transaction_builder("mem://", Default::default(), ConfigMap::default())
 			.await
 			.unwrap();
-		let tf =
-			TransactionFactory::new(Arc::new(Notify::new()), builder, Arc::new(Default::default()));
+		let tf = TransactionFactory::new(
+			Arc::new(crate::triggers::CommitTriggers::new()),
+			builder,
+			Arc::new(Default::default()),
+		);
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 		(tf, sequences)
 	}

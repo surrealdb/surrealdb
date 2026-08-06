@@ -27,12 +27,12 @@ use rand::distr::{Alphanumeric, SampleString};
 use reblessive::TreeStack;
 use surrealdb_cnf::ConfigMap;
 use surrealdb_cnf::dynamic::DynamicConfiguration;
+use surrealdb_datastore::triggers::CommitTriggers;
 use surrealdb_kvs::TransactionType;
 use surrealdb_kvs::TransactionType::*;
 use surrealdb_types::{AuthError, Error as TypesError, SurrealValue, object};
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
-use tokio::sync::Notify;
 use tokio::time::{Instant, sleep, timeout, timeout_at};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, instrument, trace, warn};
@@ -293,8 +293,10 @@ pub struct Datastore {
 	/// instead of being eagerly compiled at startup.
 	#[cfg(feature = "surrealism")]
 	lazy_surrealism: bool,
-	// Async event processing trigger
-	async_event_trigger: Arc<Notify>,
+	/// Post-commit wake-ups shared with every transaction: async event
+	/// processing, and index compaction so the compactor runs on the write
+	/// instead of waiting out its interval.
+	triggers: Arc<CommitTriggers>,
 	/// The per-layer configuration every query executed on this datastore
 	/// reaches through its context, plus the datastore's own knobs.
 	config: Arc<RuntimeConfig>,
@@ -549,7 +551,7 @@ impl Datastore {
 			sequences: Sequences::new(self.transaction_factory.clone(), self.id),
 			transaction_factory: self.transaction_factory,
 			created_here: std::sync::atomic::AtomicBool::new(false),
-			async_event_trigger: self.async_event_trigger,
+			triggers: self.triggers,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new(
 				self.config.surrealism.surrealism_cache_size,
@@ -603,7 +605,7 @@ impl Datastore {
 			sequences: Sequences::new(transaction_factory.clone(), id),
 			transaction_factory,
 			created_here: std::sync::atomic::AtomicBool::new(false),
-			async_event_trigger: Arc::clone(&self.async_event_trigger),
+			triggers: Arc::clone(&self.triggers),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new(
 				self.config.surrealism.surrealism_cache_size,
@@ -3632,8 +3634,9 @@ impl Datastore {
 	pub(crate) fn index_builder(&self) -> &IndexBuilder {
 		&self.index_builder
 	}
-	pub fn async_event_trigger(&self) -> &Arc<Notify> {
-		&self.async_event_trigger
+	/// The post-commit wake-ups the background tasks wait on.
+	pub fn commit_triggers(&self) -> &Arc<CommitTriggers> {
+		&self.triggers
 	}
 
 	pub async fn health_check(&self) -> Result<()> {
@@ -4971,6 +4974,7 @@ mod test {
 		CatalogProvider, DatabaseProvider, NamespaceProvider, TableProvider,
 	};
 	use crate::iam::verify::verify_root_creds;
+	use crate::key::schema::{IndexCountKey, IndexCountPrefix};
 	use crate::kvs::testing::{
 		RetryableConflictSite, inject_retryable_conflict, retryable_conflict_count,
 	};
@@ -5914,6 +5918,209 @@ mod test {
 			cleanups,
 			vec![batch as u64, 10, (batch / 2) as u64],
 			"expected the late-sorting index to be drained between the early index's batches"
+		);
+		Ok(())
+	}
+
+	/// One statement writing many documents must leave exactly one `!iu`
+	/// count-delta entry and one `/!ic` compaction request, not one of each per
+	/// document.
+	///
+	/// Reads of a COUNT index sum every un-compacted `!iu` entry, so the
+	/// per-document fan-out made `count()` cost scale with write volume and made
+	/// the compaction queue grow at the same rate. Aggregating per transaction
+	/// keeps the contention-free property the delta log exists for (the entry is
+	/// still a blind write under a key no other transaction shares) while
+	/// removing that scaling.
+	#[tokio::test]
+	async fn count_index_writes_one_delta_per_transaction() -> Result<()> {
+		const ROWS: usize = 500;
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE item SCHEMALESS;
+			 DEFINE INDEX idx_total ON item COUNT;",
+		)
+		.await?;
+		let ikb = index_key_base(&ds, "item", "idx_total").await?;
+
+		execute_all(&ds, &session, &format!("CREATE |item:1..={ROWS}| RETURN NONE")).await?;
+
+		let (deltas, queued) = {
+			let txn = ds.transaction(Read).await?;
+			let iu = IndexCountPrefix {
+				ns: ikb.ns(),
+				db: ikb.db(),
+				tb: Cow::Borrowed(ikb.table()),
+				ix: ikb.index(),
+			}
+			.range()?;
+			let deltas = catch!(txn, txn.keys(iu, u32::MAX, 0, None).await);
+			let queued =
+				catch!(txn, txn.keys(IndexCompactionPrefix {}.range()?, u32::MAX, 0, None).await);
+			let _ = txn.cancel().await;
+			(deltas, queued)
+		};
+
+		assert_eq!(
+			deltas.len(),
+			1,
+			"{ROWS} rows in one statement must leave one count-delta entry, found {}",
+			deltas.len()
+		);
+		assert_eq!(
+			queued.len(),
+			1,
+			"{ROWS} rows in one statement must enqueue one compaction request, found {}",
+			queued.len()
+		);
+
+		// The single entry carries the net delta, so the count is still right.
+		let sum = {
+			let mut sum: i64 = 0;
+			for key in &deltas {
+				let iu = IndexCountKey::decode_key(key)?;
+				let delta = i64::try_from(iu.count).expect("count delta out of range");
+				sum += if iu.pos {
+					delta
+				} else {
+					-delta
+				};
+			}
+			sum
+		};
+		assert_eq!(sum, ROWS as i64, "the aggregated entry must carry the net delta");
+		Ok(())
+	}
+
+	/// A commit that queues compaction work must wake the compactor, rather
+	/// than leaving the queue to sit until the next tick.
+	///
+	/// The compaction interval and the write rate are otherwise unrelated, and
+	/// that gap is what lets a count index's delta log — which every read of the
+	/// index sums — grow without bound. The notification is what ties the two
+	/// together.
+	#[tokio::test]
+	async fn commit_queuing_compaction_work_wakes_the_compactor() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE item SCHEMALESS;
+			 DEFINE INDEX idx_total ON item COUNT;",
+		)
+		.await?;
+
+		// Wait on the trigger the background compactor waits on. Registering
+		// before the write is what makes this deterministic rather than a race:
+		// `Notify` also stores one permit, so a notification that lands before
+		// the await still satisfies it.
+		let triggers = Arc::clone(ds.commit_triggers());
+		let waiter = tokio::spawn(async move {
+			triggers.index_compaction.notified().await;
+		});
+
+		execute_all(&ds, &session, "CREATE item:1 RETURN NONE").await?;
+
+		tokio::time::timeout(Duration::from_secs(5), waiter)
+			.await
+			.expect("a commit that queues compaction work must notify the compactor")
+			.expect("the waiter task must not panic");
+		Ok(())
+	}
+
+	/// A commit that queues no compaction work must not wake the compactor, so
+	/// unrelated write traffic does not keep the lease check spinning.
+	#[tokio::test]
+	async fn commit_without_compaction_work_does_not_wake_the_compactor() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		// No COUNT (or other compaction-eligible) index, so nothing to queue.
+		execute_all(&ds, &session, "DEFINE TABLE item SCHEMALESS;").await?;
+
+		let triggers = Arc::clone(ds.commit_triggers());
+		let waiter = tokio::spawn(async move {
+			triggers.index_compaction.notified().await;
+		});
+
+		execute_all(&ds, &session, "CREATE item:1 RETURN NONE").await?;
+
+		let woke = tokio::time::timeout(Duration::from_millis(300), waiter).await;
+		assert!(woke.is_err(), "a write with no compaction work must not wake the compactor");
+		Ok(())
+	}
+
+	/// Mutations that cancel out within one transaction write no entry at all,
+	/// and a read inside that transaction still sees its own uncommitted work.
+	#[tokio::test]
+	async fn count_index_nets_out_within_a_transaction() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE item SCHEMALESS;
+			 DEFINE INDEX idx_total ON item COUNT;",
+		)
+		.await?;
+		let ikb = index_key_base(&ds, "item", "idx_total").await?;
+
+		// A create and a delete of the same rows inside one transaction net to
+		// zero, so there is no delta worth recording.
+		execute_all(
+			&ds,
+			&session,
+			"BEGIN;
+			 CREATE |item:1..=50| RETURN NONE;
+			 DELETE item:1..=50 RETURN NONE;
+			 COMMIT;",
+		)
+		.await?;
+
+		let deltas = {
+			let txn = ds.transaction(Read).await?;
+			let iu = IndexCountPrefix {
+				ns: ikb.ns(),
+				db: ikb.db(),
+				tb: Cow::Borrowed(ikb.table()),
+				ix: ikb.index(),
+			}
+			.range()?;
+			let res = catch!(txn, txn.keys(iu, u32::MAX, 0, None).await);
+			let _ = txn.cancel().await;
+			res
+		};
+		assert!(
+			deltas.is_empty(),
+			"a net-zero transaction must write no delta, found {}",
+			deltas.len()
+		);
+
+		// A read later in the same transaction as its writes must observe them,
+		// even though the aggregate is not flushed until commit.
+		let res = ds
+			.execute(
+				"BEGIN;
+				 CREATE |item:100..=109| RETURN NONE;
+				 SELECT count() FROM item GROUP ALL;
+				 COMMIT;",
+				&session,
+				None,
+			)
+			.await?;
+		// Locate the SELECT's result by content rather than by position, so the
+		// assertion does not depend on how many results the surrounding
+		// BEGIN/COMMIT contribute.
+		let mut counted = None;
+		for r in res {
+			let rendered = format!("{:?}", r.result?);
+			if rendered.contains("count") {
+				counted = Some(rendered);
+			}
+		}
+		let counted = counted.expect("the SELECT must produce a result");
+		assert!(
+			counted.contains("Int(10)"),
+			"a read must see its own transaction's buffered deltas, got {counted}"
 		);
 		Ok(())
 	}

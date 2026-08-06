@@ -33,6 +33,7 @@ pub mod key;
 pub mod sequences;
 pub mod tasklease;
 pub mod tr;
+pub mod triggers;
 pub mod tx;
 pub mod util;
 pub mod version;

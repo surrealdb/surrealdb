@@ -17,9 +17,9 @@ use std::sync::Arc;
 use anyhow::Result;
 use surrealdb_cnf::ConfigMap;
 use surrealdb_datastore::sequences::Sequences;
+use surrealdb_datastore::triggers::CommitTriggers;
 use surrealdb_datastore::{Transaction, TransactionFactory};
 use surrealdb_kvs::TransactionType;
-use tokio::sync::Notify;
 use uuid::Uuid;
 
 use crate::catalog::providers::{BoxProviderFut, CancellationProbe};
@@ -51,8 +51,11 @@ impl TestIndexStore {
 			.new_transaction_builder(path, Default::default(), ConfigMap::default())
 			.await
 			.unwrap();
-		let tf =
-			TransactionFactory::new(Arc::new(Notify::new()), builder, Arc::new(Default::default()));
+		let tf = TransactionFactory::new(
+			Arc::new(CommitTriggers::new()),
+			builder,
+			Arc::new(Default::default()),
+		);
 		let node_id = Uuid::new_v4();
 		let config = IdxConfig::default();
 		let stores = IndexStores::new(config.hnsw_cache_size, config.diskann_cache_size);

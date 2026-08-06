@@ -26,6 +26,16 @@ type Task = Pin<Box<()>>;
 
 const NODE_MEMBERSHIP_UPDATE_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// How long a trigger-driven index-compaction pass waits before running.
+///
+/// The compaction interval is the floor on how *stale* the queue may get; this
+/// is the floor on how *often* a write may start a pass. It bounds the cost of
+/// the wake-up path — most importantly the lease check on nodes that do not
+/// hold the compaction lease, which returns almost immediately and would
+/// otherwise spin for as long as writes keep arriving — and batches the commits
+/// that land during the wait into a single pass.
+const INDEX_COMPACTION_TRIGGER_DEBOUNCE: Duration = Duration::from_millis(250);
+
 enum NodeMembershipUpdateResult {
 	Updated,
 	Cancelled,
@@ -260,6 +270,7 @@ fn spawn_task_index_compaction(
 ) -> Task {
 	// Get the delay interval from the config
 	let interval = opts.index_compaction_interval;
+	let triggers = Arc::clone(dbs.commit_triggers());
 	// Spawn a future
 	Box::pin(spawn(async move {
 		// Log the interval frequency
@@ -272,6 +283,31 @@ fn spawn_task_index_compaction(
 				biased;
 				// Check if this has shutdown
 				_ = canceller.cancelled() => break,
+				// Wake early when a commit queues compaction work, so the queue
+				// drains at the write rate rather than at this task's cadence.
+				// Nothing otherwise relates the two, and the gap between them is
+				// what lets a count index's delta log — which every read of that
+				// index sums — grow without bound.
+				_ = triggers.index_compaction.notified() => {
+					// Debounce before running. A node that does not hold the
+					// compaction lease returns from a pass almost immediately,
+					// so honouring every notification would spin on the lease
+					// check for as long as writes keep arriving. The wait also
+					// batches the commits landing in the meantime into one pass.
+					tokio::select! {
+						biased;
+						_ = canceller.cancelled() => break,
+						_ = time::sleep(INDEX_COMPACTION_TRIGGER_DEBOUNCE) => {}
+					}
+					if let Err(e) =
+						Datastore::index_compaction(Arc::clone(&dbs), interval, canceller.clone()).await
+					{
+						if canceller.is_cancelled() {
+							break;
+						}
+						error!("Error running index compaction: {e}");
+					}
+				}
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => {
 					if let Err(e) =
@@ -382,7 +418,7 @@ fn spawn_task_event_processing(
 	canceller: CancellationToken,
 	opts: &EngineOptions,
 ) -> Task {
-	let trigger = Arc::clone(dbs.async_event_trigger());
+	let triggers = Arc::clone(dbs.commit_triggers());
 	// Get the delay interval from the config
 	let interval = opts.event_processing_interval;
 	// Spawn a future
@@ -404,7 +440,7 @@ fn spawn_task_event_processing(
 				// Check if this has shutdown
 				_ = canceller.cancelled() => break,
 				// Wake early when new async events are committed.
-				_ = trigger.notified() => process_events().await,
+				_ = triggers.async_event.notified() => process_events().await,
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => process_events().await
 			}

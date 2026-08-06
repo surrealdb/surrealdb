@@ -34,7 +34,7 @@ use crate::env::IndexEnv;
 use crate::expr::Part;
 use crate::ft::analyzer::AnalyzerFunction;
 use crate::ft::fulltext::{FullTextCompactionPlan, FullTextIndex};
-use crate::key::schema::{EntryKey, IndexCountKey, UniqueKey};
+use crate::key::schema::{EntryKey, UniqueKey};
 #[cfg(diskann)]
 use crate::trees::diskann::index::{DiskAnnCompactionPlan, DiskAnnIndex};
 use crate::trees::hnsw::index::{HnswCompactionPlan, HnswIndex};
@@ -302,16 +302,20 @@ impl<'a> IndexOperation<'a> {
 		if relative_count == 0 {
 			return Ok(());
 		}
-		let key = IndexCountKey {
-			ns: self.ns,
-			db: self.db,
-			tb: std::borrow::Cow::Borrowed(&self.table_name),
-			ix: self.ix.index_id,
-			uid: Some((self.env.node_id(), uuid::Uuid::now_v7())),
-			pos: relative_count > 0,
-			count: relative_count.unsigned_abs() as u64,
-		};
-		self.env.tx().put_key(&key, &()).await?;
+		// Accumulate into the transaction's per-index total instead of writing
+		// one `!iu` entry per document. The entry is still written blind under a
+		// key no other transaction shares, so nothing contends; it is just
+		// written once per transaction, at commit, carrying the net delta.
+		// Since every `count()` read sums the un-compacted entries, the
+		// per-document form made read cost scale with write volume.
+		self.env.tx().buffer_count_delta(
+			self.ns,
+			self.db,
+			&self.table_name,
+			self.ix.index_id,
+			relative_count as i64,
+			self.env.node_id(),
+		);
 		*require_compaction = true;
 		Ok(())
 	}
@@ -506,8 +510,11 @@ impl<'a> IndexOperation<'a> {
 	/// length data; for HNSW indexes it processes pending vector operations;
 	/// for count indexes it reconciles count tracking entries.
 	pub async fn compaction_trigger(ikb: &IndexKeyBase, tx: &Transaction, nid: Uuid) -> Result<()> {
-		let ic = ikb.new_ic_key(nid);
-		tx.put_key(&ic, &()).await?;
+		// Deduplicated per index for this transaction and written at commit, so
+		// a statement touching many documents enqueues one request rather than
+		// one per document. The queue entry only names the index to compact, so
+		// repeating it per document added drain work without adding information.
+		tx.buffer_compaction_trigger(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), nid);
 		Ok(())
 	}
 

@@ -11,19 +11,19 @@ use std::sync::Arc;
 use anyhow::Result;
 use surrealdb_kvs::{Metrics, TransactionBuilder, TransactionType};
 use surrealdb_observe::{ExecutionObserver, NoopObserver};
-use tokio::sync::Notify;
 
 use crate::config::TransactionConfig;
 use crate::sequences::Sequences;
 use crate::tr::Transactor;
+use crate::triggers::CommitTriggers;
 use crate::tx::Transaction;
 
 #[derive(Clone)]
 pub struct TransactionFactory {
 	// The inner datastore type
 	builder: Arc<Box<dyn TransactionBuilder>>,
-	// Async event processing trigger
-	async_event_trigger: Arc<Notify>,
+	/// Post-commit wake-ups handed to every transaction this factory opens.
+	triggers: Arc<CommitTriggers>,
 	/// Observer invoked on transaction lifecycle events. Defaults to
 	/// [`NoopObserver`]; replaced by the datastore's observer when one is
 	/// configured.
@@ -34,13 +34,13 @@ pub struct TransactionFactory {
 
 impl TransactionFactory {
 	pub fn new(
-		async_event_trigger: Arc<Notify>,
+		triggers: Arc<CommitTriggers>,
 		builder: Box<dyn TransactionBuilder>,
 		config: Arc<TransactionConfig>,
 	) -> Self {
 		Self {
 			builder: Arc::new(builder),
-			async_event_trigger,
+			triggers,
 			observer: Arc::new(NoopObserver),
 			config,
 		}
@@ -76,7 +76,7 @@ impl TransactionFactory {
 		Ok(Transaction::new(
 			local,
 			sequences,
-			Arc::clone(&self.async_event_trigger),
+			Arc::clone(&self.triggers),
 			Arc::clone(&self.observer),
 			Transactor {
 				inner,
