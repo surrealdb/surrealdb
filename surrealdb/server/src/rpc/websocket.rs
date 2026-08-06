@@ -946,29 +946,6 @@ impl RpcProtocol for Websocket {
 		trace!("Registered live query {lqid} on websocket {}", self.id);
 	}
 
-	/// Handles the execution of a KILL statement.
-	///
-	/// Decrements the active LIVE query gauge only when a registration was
-	/// actually removed so duplicate kills do not drift the counter negative.
-	/// The decrement uses the namespace/database stashed at registration time
-	/// so the gauge series is balanced even when the killing session has
-	/// since switched namespaces.
-	async fn handle_kill(&self, lqid: &Uuid) {
-		if let Some(entry) = self.state.live_queries.write().await.remove(lqid) {
-			if let Some(obs) = self.state.metrics_observer.as_ref() {
-				obs.adjust_live_query_active(
-					-1,
-					entry.namespace.as_deref(),
-					entry.database.as_deref(),
-				);
-			}
-			trace!(
-				"Unregistered live query {lqid} on websocket {} for session {}",
-				entry.websocket_id, entry.session_id,
-			);
-		}
-	}
-
 	/// Handles the cleanup of live queries for a given session.
 	///
 	/// Drops the gauge per-entry using the namespace/database recorded at
@@ -2118,13 +2095,12 @@ mod tests {
 
 	/// A `KILL` statement must drop the live query's WebSocket registration.
 	///
-	/// The `run_query` post-processing hook recovers the killed id from the
-	/// statement's result value, and a `KILL` statement evaluates to `NONE`,
-	/// so `handle_kill` never fires for one. The `Killed` notification the
-	/// statement queues on commit is the only thing that carries the id to
-	/// this transport, so the notification dispatcher is what has to drop the
-	/// entry -- otherwise `state.live_queries` holds it, and the active-LQ
-	/// gauge counts it, until the connection closes.
+	/// A `KILL` statement evaluates to `NONE`, so no result value carries the
+	/// id it killed. The `Killed` notification the statement queues on commit
+	/// is the only thing that carries that id to this transport, so the
+	/// notification dispatcher is what has to drop the entry -- otherwise
+	/// `state.live_queries` holds it, and the active-LQ gauge counts it, until
+	/// the connection closes.
 	#[test]
 	fn kill_statement_unregisters_live_query_over_websocket() {
 		with_big_stack(|| async {

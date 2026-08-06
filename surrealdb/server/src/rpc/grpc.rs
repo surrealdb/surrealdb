@@ -285,8 +285,8 @@ impl Grpc {
 		let id = notification.id.into_inner();
 		// Copy the sender and labels out, and drop the map guard, before
 		// awaiting: holding a `DashMap` guard across an await blocks every
-		// other user of that shard, including the `handle_kill` that would
-		// unblock us.
+		// other user of that shard, including the cleanup that would unblock
+		// us.
 		let Some((subscriber, namespace, database)) = self.live_queries.get(&id).map(|lq| {
 			(
 				lq.subscriber.as_ref().map(|s| s.frames.clone()),
@@ -537,15 +537,6 @@ impl RpcProtocol for Grpc {
 		// The session id is a capability and stays out of the log; the live
 		// query id identifies the registration well enough to trace it.
 		trace!("Registered live query {lqid} on the gRPC transport");
-	}
-
-	async fn handle_kill(&self, lqid: &Uuid) {
-		// End the stream before dropping the registration so the subscriber
-		// learns *why* its stream ended rather than just seeing it close.
-		self.end_subscription(lqid, rpc::SubscribeEndReason::Killed);
-		if self.forget_live_query(lqid).is_some() {
-			trace!("Unregistered live query {lqid} on the gRPC transport");
-		}
 	}
 
 	async fn cleanup_lqs(&self, session_id: &Uuid) {
@@ -2449,16 +2440,19 @@ impl QueryFrames {
 	}
 }
 
-/// Track the live queries an execution registered, and forget the ones it
-/// killed.
+/// Track the live queries an execution registered.
 ///
 /// A `LIVE SELECT` produces its id as an ordinary result, but the id is only
 /// useful once the transport knows which session to deliver that query's
 /// notifications to. The buffered path does this over the finished results; a
 /// streaming one waits for the same point, since a registration inside a
 /// transaction block is not real until the block commits.
+///
+/// Registrations are only ever added here. A statement that ends a subscription
+/// does not report the id it ended, so `dispatch_notification` drops the entry
+/// when it sees that id's `Action::Killed` notification instead.
 async fn register_live_queries(state: &RpcState, session_id: Uuid, results: &[QueryResult]) {
-	if !results.iter().any(|r| matches!(r.query_type, QueryType::Live | QueryType::Kill)) {
+	if !results.iter().any(|r| r.query_type == QueryType::Live) {
 		return;
 	}
 	// Read the session's namespace and database once, and drop the guard before
@@ -2494,12 +2488,8 @@ async fn register_live_queries(state: &RpcState, session_id: Uuid, results: &[Qu
 		let Ok(Value::Uuid(id)) = &result.result else {
 			continue;
 		};
-		match result.query_type {
-			QueryType::Live => {
-				state.grpc.handle_live(id, session_id, namespace.clone(), database.clone()).await;
-			}
-			QueryType::Kill => state.grpc.handle_kill(id).await,
-			QueryType::Other => {}
+		if result.query_type == QueryType::Live {
+			state.grpc.handle_live(id, session_id, namespace.clone(), database.clone()).await;
 		}
 	}
 }

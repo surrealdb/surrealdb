@@ -148,7 +148,9 @@ pub(crate) async fn kill_statement_compute(
 		))
 		.await;
 	}
-	// Return the query id
+	// `KILL` resolves to `NONE`, not to the id it killed: clients pin that. The
+	// notification queued above is what carries the id onwards, and is the only
+	// way a transport learns which registration to drop.
 	Ok(Value::None)
 }
 

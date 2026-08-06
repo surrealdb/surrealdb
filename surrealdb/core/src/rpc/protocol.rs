@@ -336,6 +336,13 @@ pub trait RpcProtocol {
 	/// any concurrent session-mutating RPC on the same WebSocket
 	/// (signin / signup / authenticate / set / unset / yuse / refresh /
 	/// invalidate / revoke / reset).
+	///
+	/// There is no counterpart hook for ending a registration. A statement that
+	/// ends a subscription does not report the id it ended -- `KILL` resolves to
+	/// `NONE`, and removing a table, database or namespace, or revoking a
+	/// principal, ends subscriptions without naming them at all. The only signal
+	/// carrying the id is the `Action::Killed` notification, so an implementation
+	/// must drop the registration when it dispatches one.
 	fn handle_live(
 		&self,
 		_lqid: &Uuid,
@@ -344,10 +351,6 @@ pub trait RpcProtocol {
 		_database: Option<String>,
 	) -> impl std::future::Future<Output = ()> + Send {
 		async { unimplemented!("handle_live function must be implemented if LQ_SUPPORT = true") }
-	}
-	/// Handles the execution of a KILL statement
-	fn handle_kill(&self, _lqid: &Uuid) -> impl std::future::Future<Output = ()> + Send {
-		async { unimplemented!("handle_kill function must be implemented if LQ_SUPPORT = true") }
 	}
 
 	/// Handles the cleanup of live queries
@@ -2375,27 +2378,17 @@ where
 	// recursive read on a write-preferring lock, and any concurrent
 	// session-mutating RPC on the same WebSocket would queue a writer
 	// between the two reads and deadlock both futures.
+	//
+	// Registration is the only hook here. A statement that ends a subscription
+	// does not report the id it ended, so the transport drops the registration
+	// on that id's `Action::Killed` notification instead.
 	let live_namespace = session.ns.clone();
 	let live_database = session.db.clone();
 	for response in &res {
-		match &response.query_type {
-			QueryType::Live => {
-				if let Ok(PublicValue::Uuid(lqid)) = &response.result {
-					this.handle_live(
-						lqid,
-						session_id,
-						live_namespace.clone(),
-						live_database.clone(),
-					)
-					.await;
-				}
-			}
-			QueryType::Kill => {
-				if let Ok(PublicValue::Uuid(lqid)) = &response.result {
-					this.handle_kill(lqid).await;
-				}
-			}
-			_ => {}
+		if response.query_type == QueryType::Live
+			&& let Ok(PublicValue::Uuid(lqid)) = &response.result
+		{
+			this.handle_live(lqid, session_id, live_namespace.clone(), live_database.clone()).await;
 		}
 	}
 	// Return the result to the client
