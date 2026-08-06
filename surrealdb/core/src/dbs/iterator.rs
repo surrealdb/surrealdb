@@ -45,6 +45,23 @@ pub(crate) enum Iterable {
 	/// Always carries a [`DocumentContext::NsDbTbMutCtx`] — CREATE is
 	/// always a write.
 	Defer(DocumentContext, RecordId),
+	/// A [`Mock`] target (`|table:N|` / `|table:a..b|`) for a deferable
+	/// statement (CREATE, UPSERT without condition), carried whole instead
+	/// of pre-expanded into one [`Iterable::Defer`] per id. `Mock`'s own
+	/// iterator is already lazy (see `expr::mock::IntoIter`); expanding it
+	/// eagerly during `prepare` only to store every id in this iterator's
+	/// entry `Vec` up front would hold `O(n)` entries in memory before a
+	/// single record is processed. The collector drains it id-by-id
+	/// instead, the same way [`Iterable::Table`]/[`Iterable::Range`]
+	/// stream rather than pre-list their keys.
+	///
+	/// Always carries a [`DocumentContext::NsDbTbMutCtx`] — CREATE is
+	/// always a write.
+	MockDefer(DocumentContext, Mock),
+	/// A [`Mock`] target for a non-deferable statement (SELECT / UPDATE /
+	/// DELETE / RELATE-through over `|table:N|`) — the read/mutate
+	/// counterpart of [`Iterable::MockDefer`]; same lazy-drain rationale.
+	MockRecordId(DocumentContext, Mock),
 	/// An iterable whose Record ID needs to be generated
 	/// before processing. This is used in CREATE statements
 	/// when generating a new id, or generating an id based
@@ -467,19 +484,14 @@ impl Iterator {
 		)
 		.await?;
 
-		// Add the records to the iterator
-		for (count, rid) in mock.clone().into_iter().enumerate() {
-			if stm_ctx.stm.is_deferable() {
-				self.ingest(Iterable::Defer(doc_ctx.clone(), rid))
-			} else {
-				self.ingest(Iterable::RecordId(doc_ctx.clone(), rid))
-			}
-			// Check if the context is finished
-			if stm_ctx.ctx.is_done(Some(count)).await? {
-				break;
-			}
+		// Carry the mock whole — the collector drains it id-by-id during
+		// iterate() instead of this loop expanding it into one entry per id
+		// up front (see `Iterable::MockDefer`).
+		if stm_ctx.stm.is_deferable() {
+			self.ingest(Iterable::MockDefer(doc_ctx, mock.clone()))
+		} else {
+			self.ingest(Iterable::MockRecordId(doc_ctx, mock.clone()))
 		}
-		// All ingested ok
 		Ok(())
 	}
 

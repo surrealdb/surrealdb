@@ -13,6 +13,7 @@ use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::{Iterable, Iterator, Operable, Options, Processable, Statement};
 use crate::doc::{DocumentContext, NsDbCtx};
 use crate::exec::Error as ExecError;
+use crate::expr::Mock;
 use crate::expr::dir::Dir;
 use crate::expr::lookup::{ComputedLookupSubject, LookupKind};
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, RecordIterator};
@@ -685,6 +686,12 @@ pub(super) trait Collector {
 				self.collect(Collectable::RecordId(doc_ctx, v)).await?
 			}
 			Iterable::Defer(doc_ctx, v) => self.collect(Collectable::Defer(doc_ctx, v)).await?,
+			Iterable::MockDefer(doc_ctx, mock) => {
+				self.collect_mock(ctx, doc_ctx, mock, true).await?
+			}
+			Iterable::MockRecordId(doc_ctx, mock) => {
+				self.collect_mock(ctx, doc_ctx, mock, false).await?
+			}
 			Iterable::Lookup {
 				doc_ctx,
 				kind,
@@ -859,6 +866,32 @@ pub(super) trait Collector {
 			}
 		}
 		// Everything ok
+		Ok(())
+	}
+
+	/// Drains a [`Mock`] target one id at a time, the same lazy-streaming
+	/// shape as [`Self::collect_table`] over a live key range: `Mock`'s own
+	/// iterator is already `O(1)`-state (see `expr::mock::IntoIter`), so
+	/// there is nothing to pre-materialize — only the per-id `Collectable`
+	/// this produces is real work.
+	#[instrument(level = "trace", skip_all)]
+	async fn collect_mock(
+		&mut self,
+		ctx: &FrozenContext,
+		doc_ctx: DocumentContext,
+		mock: Mock,
+		deferable: bool,
+	) -> Result<()> {
+		for (count, rid) in mock.into_iter().enumerate() {
+			if ctx.is_done(Some(count)).await? {
+				break;
+			}
+			if deferable {
+				self.collect(Collectable::Defer(doc_ctx.clone(), rid)).await?;
+			} else {
+				self.collect(Collectable::RecordId(doc_ctx.clone(), rid)).await?;
+			}
+		}
 		Ok(())
 	}
 
