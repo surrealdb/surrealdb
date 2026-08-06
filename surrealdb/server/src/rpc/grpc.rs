@@ -1966,37 +1966,70 @@ const QUERY_FIRST_BATCH_RECORDS: usize = 16;
 /// transaction neither committed nor cancelled.
 struct ReleaseOnDrop {
 	cancel: CancelHandle,
-	/// The ephemeral session to remove, for a request that named none. A
+	state: Arc<RpcState>,
+	/// The session the request ran on, and so the session the live queries
+	/// below were committed under.
+	session_id: Uuid,
+	/// Whether that session is this request's own and goes with it. A
 	/// client-named session outlives the request and is left alone.
-	ephemeral: Option<(Arc<RpcState>, Uuid)>,
+	ephemeral: bool,
+	/// The live queries the execution has committed that nothing has claimed.
+	/// Deleted on the way out -- see [`discard_unregistered_live_queries`].
+	unregistered: Vec<Uuid>,
 }
 
 impl ReleaseOnDrop {
 	fn new(cancel: CancelHandle, state: Arc<RpcState>, session: &ResolvedSession) -> Self {
 		Self {
 			cancel,
-			ephemeral: session.client.is_none().then_some((state, session.id)),
+			state,
+			session_id: session.id,
+			ephemeral: session.client.is_none(),
+			unregistered: Vec::new(),
 		}
+	}
+
+	/// Take responsibility for a live query the execution has committed, until
+	/// something registers it.
+	fn track_live_query(&mut self, id: Uuid) {
+		self.unregistered.push(id);
+	}
+
+	/// Give up the live queries collected so far, for the path that settles
+	/// them itself.
+	fn take_live_queries(&mut self) -> Vec<Uuid> {
+		std::mem::take(&mut self.unregistered)
 	}
 
 	/// Give up ownership of the ephemeral session, for the path that has
 	/// already released it.
 	fn released(&mut self) {
-		self.ephemeral = None;
+		self.ephemeral = false;
 	}
 }
 
 impl Drop for ReleaseOnDrop {
 	fn drop(&mut self) {
 		self.cancel.trip();
-		// Removing a session awaits, which a `Drop` cannot, so it goes to a
-		// task. Nothing else holds a handle on this session -- the request that
-		// made it is over -- so there is no ordering to preserve.
-		if let Some((state, id)) = self.ephemeral.take() {
-			tokio::spawn(async move {
-				state.grpc.remove_ephemeral_session(&id).await;
-			});
+		let unregistered = std::mem::take(&mut self.unregistered);
+		let ephemeral = self.ephemeral.then_some(self.session_id);
+		if unregistered.is_empty() && ephemeral.is_none() {
+			return;
 		}
+		// Both steps await, which a `Drop` cannot, so they go to a task.
+		// Nothing else holds a handle on this session -- the request that made
+		// it is over -- so there is no ordering to preserve against anything
+		// outside that task. Inside it the live queries go first: the session
+		// carries the namespace and database the orphan metric is attributed
+		// to, and removing it would take those labels away.
+		let state = Arc::clone(&self.state);
+		let session_id = self.session_id;
+		tokio::spawn(async move {
+			discard_unregistered_live_queries(&state, session_id, unregistered).await;
+			if let Some(id) = ephemeral {
+				state.grpc.remove_ephemeral_session(&id).await;
+			}
+		});
 	}
 }
 
@@ -2061,6 +2094,10 @@ struct PendingStatement {
 	/// the count: a `SELECT` returning one row is still a one-element array,
 	/// where `SELECT ONLY` returning one row is that row.
 	single: bool,
+	/// The uuid a single-value statement produced, kept until the statement
+	/// finishes so a `LIVE SELECT`'s id can be read back there -- the point at
+	/// which the statement's kind is known.
+	live_query: Option<Uuid>,
 }
 
 impl PendingStatement {
@@ -2122,7 +2159,7 @@ impl QueryFraming {
 			let run = self.run.as_mut().expect("the execution is driven until it completes");
 			tokio::select! {
 				item = self.items.recv() => match item {
-					Ok(item) => self.frames.absorb(item),
+					Ok(item) => self.absorb(item),
 					// The execution dropped its sender, so the only thing left
 					// is its own outcome.
 					Err(_) => {
@@ -2135,7 +2172,7 @@ impl QueryFraming {
 					// what is still buffered before terminating.
 					self.run = None;
 					while let Ok(item) = self.items.try_recv() {
-						self.frames.absorb(item);
+						self.absorb(item);
 					}
 					self.finish(outcome).await;
 				}
@@ -2143,9 +2180,25 @@ impl QueryFraming {
 		}
 	}
 
+	/// Fold one item into the frames it produces, taking responsibility for any
+	/// live query it reports.
+	///
+	/// Until the execution finishes and its live queries are registered, this
+	/// request is the only thing that knows those datastore rows exist, so a
+	/// stream that never gets that far has to delete them itself.
+	fn absorb(&mut self, item: QueryStreamItem) {
+		if let Some(id) = self.frames.absorb(item) {
+			self.release.track_live_query(id);
+		}
+	}
+
 	/// Queue the frame that ends the stream.
 	async fn finish(&mut self, outcome: Result<Vec<QueryResult>, TypesError>) {
 		self.done = true;
+		// Whichever way the execution ended, its live queries are settled here,
+		// so nothing is left for the drop guard to delete: a registration made
+		// below must not then be undone behind the client's back.
+		let unregistered = self.release.take_live_queries();
 		match outcome {
 			Ok(results) => {
 				let state = Arc::clone(&self.state);
@@ -2154,8 +2207,13 @@ impl QueryFraming {
 				self.frames.end(self.started.elapsed());
 			}
 			// A failure that belongs to no single statement ends the stream
-			// instead of completing it.
-			Err(error) => self.frames.error(&error),
+			// instead of completing it. It carries no results, so there is
+			// nothing to register from and every live query the execution
+			// committed is left unowned.
+			Err(error) => {
+				discard_unregistered_live_queries(&self.state, self.session.id, unregistered).await;
+				self.frames.error(&error);
+			}
 		}
 	}
 }
@@ -2192,14 +2250,15 @@ impl QueryFrames {
 		});
 	}
 
-	/// Fold one item into the frames it produces.
-	fn absorb(&mut self, item: QueryStreamItem) {
+	/// Fold one item into the frames it produces, reporting the live query the
+	/// item's statement committed once that statement has finished.
+	fn absorb(&mut self, item: QueryStreamItem) -> Option<Uuid> {
 		// A statement this server already terminated -- because a value of its
 		// own could not be encoded -- takes nothing further. Its rows would
 		// otherwise be framed after its terminal batch, which the protocol
 		// forbids and a client reading rows as they arrive would act on.
 		if self.terminated.contains(&(item.index() as u32)) {
-			return;
+			return None;
 		}
 		match item {
 			QueryStreamItem::Rows {
@@ -2224,12 +2283,13 @@ impl QueryFrames {
 							Some(to_proto_error(&error)),
 							0,
 						);
-						return;
+						return None;
 					}
 				}
 				while self.pending.get(&index).is_some_and(|p| p.values.len() >= p.target) {
 					self.flush(index);
 				}
+				None
 			}
 			QueryStreamItem::Value {
 				index,
@@ -2237,6 +2297,14 @@ impl QueryFrames {
 			} => {
 				let index = index as u32;
 				let batch_records = self.batch_records;
+				// Only a `LIVE SELECT`'s id is ever read back from here, so only
+				// a uuid is worth keeping: retaining every single statement's
+				// value would double the peak memory of the path built to bound
+				// it.
+				let live_query = match &value {
+					Value::Uuid(id) => Some(id.into_inner()),
+					_ => None,
+				};
 				match proto::Value::try_from(value).map_err(types_error_from_anyhow) {
 					Ok(value) => {
 						// A single value is not a list, so it is not batched:
@@ -2248,6 +2316,7 @@ impl QueryFrames {
 							.or_insert_with(|| PendingStatement::new(batch_records));
 						entry.values.push(value);
 						entry.single = true;
+						entry.live_query = live_query;
 					}
 					Err(error) => {
 						self.pending.remove(&index);
@@ -2259,6 +2328,7 @@ impl QueryFrames {
 						);
 					}
 				}
+				None
 			}
 			QueryStreamItem::Finished {
 				index,
@@ -2272,12 +2342,23 @@ impl QueryFrames {
 					QueryType::Kill => rpc::QueryStatementKind::Kill,
 					_ => rpc::QueryStatementKind::Other,
 				};
+				// A `LIVE SELECT`'s id rides the stream as its statement's
+				// single value, and this is where that statement is known to
+				// have produced one -- and to have committed it, since a
+				// statement is not finished until its transaction has resolved.
+				let live_query = match (query_type, &error) {
+					(QueryType::Live, None) => {
+						self.pending.get(&index).and_then(|entry| entry.live_query)
+					}
+					_ => None,
+				};
 				self.queue_terminal(
 					index,
 					kind,
 					error.map(|e| to_proto_error(&e)),
 					time.as_nanos(),
 				);
+				live_query
 			}
 		}
 	}
@@ -2389,7 +2470,25 @@ async fn register_live_queries(state: &RpcState, session_id: Uuid, results: &[Qu
 			let session = lock.read().await;
 			(session.ns.clone(), session.db.clone())
 		}
-		Err(_) => (None, None),
+		// The session is gone: a `DetachSession` removed it while this query
+		// ran. Registering now would attach a live query to a session that no
+		// longer exists -- delivering change data for an authorization that has
+		// been torn down, and leaving an entry the per-session cleanup has
+		// already run past. Delete the rows the execution committed instead.
+		// The `KILL`s need nothing: the statement itself removed their rows,
+		// and that cleanup already dropped their registrations.
+		Err(_) => {
+			let orphans = results
+				.iter()
+				.filter(|result| matches!(result.query_type, QueryType::Live))
+				.filter_map(|result| match &result.result {
+					Ok(Value::Uuid(id)) => Some(id.into_inner()),
+					_ => None,
+				})
+				.collect();
+			discard_unregistered_live_queries(state, session_id, orphans).await;
+			return;
+		}
 	};
 	for result in results {
 		let Ok(Value::Uuid(id)) = &result.result else {
@@ -2401,6 +2500,42 @@ async fn register_live_queries(state: &RpcState, session_id: Uuid, results: &[Qu
 			}
 			QueryType::Kill => state.grpc.handle_kill(id).await,
 			QueryType::Other => {}
+		}
+	}
+}
+
+/// Delete the live queries an execution committed that nothing will register.
+///
+/// A committed `LIVE SELECT` writes a datastore row keyed by its id, and it is
+/// the registration in [`register_live_queries`] that makes that row reachable:
+/// only a registered live query can be subscribed to, killed, or swept when its
+/// session ends. A stream whose registration cannot happen -- abandoned by its
+/// client, failed as a whole, or left with no session to register against --
+/// would otherwise leave the row behind for the lifetime of the datastore, with
+/// the broker producing notifications for it that this transport does not own
+/// and no cleanup path can find.
+async fn discard_unregistered_live_queries(state: &RpcState, session_id: Uuid, ids: Vec<Uuid>) {
+	if ids.is_empty() {
+		return;
+	}
+	let orphaned = ids.len();
+	let Err(err) = state.grpc.kvs().delete_queries(ids).await else {
+		return;
+	};
+	error!("Error cleaning up the live queries of an unfinished gRPC streaming query: {err}");
+	// The rows survived, so notifications for them will be produced and
+	// silently discarded from here on. Count them against the tenant that will
+	// be paying for it, so the leak is alertable rather than only greppable.
+	if let Some(observer) = state.grpc.metrics_observer.as_ref() {
+		let (namespace, database) = match state.grpc.get_session(&session_id).await {
+			Ok(lock) => {
+				let session = lock.read().await;
+				(session.ns.clone(), session.db.clone())
+			}
+			Err(_) => (None, None),
+		};
+		for _ in 0..orphaned {
+			observer.record_live_query_orphaned(namespace.as_deref(), database.as_deref());
 		}
 	}
 }
@@ -3045,6 +3180,298 @@ mod tests {
 			.err()
 			.expect("an unknown live query must be refused");
 		assert_eq!(refused.code(), tonic::Code::NotFound);
+	}
+
+	/// An attached session a `LIVE SELECT` can run on: realtime, and pointed at
+	/// a namespace and database. An ephemeral session is not marked realtime,
+	/// so a streaming `LIVE SELECT` has to be given one of these.
+	async fn realtime_session(service: &GrpcService) -> Uuid {
+		let id = Uuid::new_v4();
+		service.rpc().attach(id).await.expect("attach");
+		let lock = service.rpc().get_session(&id).await.expect("the attached session");
+		let mut session = lock.write().await;
+		*session = Session::owner().with_ns("test").with_db("test").with_rt(true);
+		session.id = Some(id);
+		drop(session);
+		id
+	}
+
+	fn context(session_id: Uuid) -> rpc::RequestContext {
+		rpc::RequestContext {
+			session: Some(proto::Uuid::from_uuid(session_id)),
+			transaction: None,
+			timeout: None,
+		}
+	}
+
+	/// Writes to the table a test's live queries watch, from outside the
+	/// transport so it works whether or not the request's session still exists.
+	async fn write(service: &GrpcService, statement: &str) {
+		let session = Session::owner().with_ns("test").with_db("test");
+		let results =
+			service.kvs().execute(statement, &session, None).await.expect("the write runs");
+		for result in results {
+			result.result.expect("the write succeeds");
+		}
+	}
+
+	/// Creates the table these tests' live queries watch, and the namespace and
+	/// database their sessions run in.
+	async fn define_watched_table(service: &GrpcService) {
+		write(service, "DEFINE NAMESPACE test; DEFINE DATABASE test; DEFINE TABLE thing").await;
+	}
+
+	/// Registers a live query in the datastore and nowhere else, which is the
+	/// state a streaming query leaves one in until it finishes.
+	async fn commit_live_query(service: &GrpcService) -> Uuid {
+		let session = Session::owner().with_ns("test").with_db("test").with_rt(true);
+		let mut results = service
+			.kvs()
+			.execute("LIVE SELECT * FROM thing", &session, None)
+			.await
+			.expect("the live query runs");
+		match results.remove(0).result.expect("the live query succeeds") {
+			Value::Uuid(id) => id.into_inner(),
+			value => panic!("a live query answers with its id, got {value:?}"),
+		}
+	}
+
+	/// How many live queries the datastore still holds against the watched
+	/// table.
+	///
+	/// Read from the catalog rather than inferred from whether a change is
+	/// notified: a writer's subscription list is cached against the table's
+	/// committed live-query timestamp, and a deletion does not bump it, so
+	/// notifications can outlive the row a caller is asking about.
+	async fn live_query_rows(service: &GrpcService) -> usize {
+		let session = Session::owner().with_ns("test").with_db("test");
+		let mut results = service
+			.kvs()
+			.execute("INFO FOR TABLE thing", &session, None)
+			.await
+			.expect("the table info runs");
+		let info = match results.remove(0).result.expect("the table info succeeds") {
+			Value::Object(info) => info,
+			value => panic!("table info answers with an object, got {value:?}"),
+		};
+		match info.get("lives") {
+			Some(Value::Object(lives)) => lives.len(),
+			other => panic!("table info reports its live queries, got {other:?}"),
+		}
+	}
+
+	/// Reads frames until the one that completes a `LIVE SELECT`, which is
+	/// where its row is committed and its id is on the wire -- and where a
+	/// client that stops reading leaves the registration undone.
+	async fn read_to_live_statement(frames: &mut ResponseStream<rpc::QueryResponse>) {
+		loop {
+			let frame = frames.next().await.expect("a frame").expect("a frame");
+			if let Some(rpc::query_response::Frame::Batch(batch)) = &frame.frame
+				&& batch.statement_kind == rpc::QueryStatementKind::Live as i32
+			{
+				return;
+			}
+		}
+	}
+
+	/// A client that stops reading abandons the query where it stands. A
+	/// `LIVE SELECT` that had already committed has written a datastore row,
+	/// and the registration that would make it reachable never runs: nothing
+	/// can subscribe to it, no cleanup path can find it, and the broker keeps
+	/// producing notifications for it that are discarded. The stream's own
+	/// teardown is the last thing that knows the id, so it deletes the row.
+	#[tokio::test]
+	async fn an_abandoned_stream_deletes_the_live_query_it_committed() {
+		let service = service().await;
+		let session_id = realtime_session(&service).await;
+		let context = context(session_id);
+		define_watched_table(&service).await;
+
+		// The `SLEEP` keeps the execution in flight after the `LIVE SELECT` has
+		// committed, which is the window this is about: the statement's row is
+		// written, and the registration that only happens once the whole query
+		// finishes has not run.
+		let response = service
+			.stream_query(
+				Some(&context),
+				"LIVE SELECT * FROM thing; SLEEP 30s".to_string(),
+				None,
+				QUERY_BATCH_RECORDS,
+			)
+			.await
+			.expect("the stream starts");
+		let mut frames = response.into_inner();
+		read_to_live_statement(&mut frames).await;
+		assert_eq!(
+			live_query_rows(&service).await,
+			1,
+			"the live query is committed before the stream is abandoned",
+		);
+
+		drop(frames);
+
+		// The teardown hands the deletion to a task, so give it room to land.
+		let mut deleted = false;
+		for _ in 0..100 {
+			if live_query_rows(&service).await == 0 {
+				deleted = true;
+				break;
+			}
+			tokio::time::sleep(Duration::from_millis(20)).await;
+		}
+		assert!(deleted, "an abandoned stream's live query must not outlive it");
+		assert!(
+			service.rpc().live_queries.is_empty(),
+			"an abandoned stream registers nothing either",
+		);
+	}
+
+	/// A run that fails as a whole carries no results, so there is nothing to
+	/// register the live queries it had already committed from. They are
+	/// deleted instead: a row nothing owns is the same leak an abandoned stream
+	/// would have left.
+	///
+	/// The failure is injected rather than provoked: a statement's own error --
+	/// a timeout, a rollback -- travels in that statement's frame and still
+	/// completes the run, so what is exercised here is the narrower case the
+	/// executor reports as no results at all.
+	#[tokio::test]
+	async fn a_failed_run_deletes_the_live_queries_it_committed() {
+		let service = service().await;
+		let session_id = realtime_session(&service).await;
+		define_watched_table(&service).await;
+		// A committed live query that no transport has registered, which is
+		// what a stream holds once the statement that made it has finished.
+		let id = commit_live_query(&service).await;
+		assert_eq!(
+			live_query_rows(&service).await,
+			1,
+			"the live query is committed before the run fails",
+		);
+
+		let (items, buffered) = bounded(QUERY_STREAM_BUFFER);
+		for item in surrealdb_core::dbs::items_for_result(
+			0,
+			QueryResult {
+				time: Duration::ZERO,
+				result: Ok(Value::Uuid(surrealdb_types::Uuid::from(id))),
+				query_type: QueryType::Live,
+			},
+		) {
+			items.send(item).await.expect("the items fit the stream's buffer");
+		}
+		drop(items);
+		let job = QueryStreamJob {
+			statement_count: 1,
+			run: Box::pin(async {
+				Err(TypesError::internal("the run failed as a whole".to_string()))
+			}),
+		};
+		let mut framing = QueryFraming::new(
+			Arc::clone(&service.state),
+			ResolvedSession {
+				id: session_id,
+				client: Some(session_id),
+			},
+			job,
+			buffered,
+			QUERY_BATCH_RECORDS,
+			CancelHandle::new(),
+		);
+
+		// The failure ends the stream, and the deletion is awaited before that
+		// frame is queued -- so by the time a client sees it, the row is gone.
+		let mut failed = false;
+		while let Some(frame) = framing.next().await {
+			failed |= matches!(frame.frame, Some(rpc::query_response::Frame::Error(_)));
+		}
+		assert!(failed, "the run's failure ends the stream");
+		assert_eq!(
+			live_query_rows(&service).await,
+			0,
+			"a failed run's live query must not outlive it",
+		);
+		assert!(service.rpc().live_queries.is_empty(), "a failed run registers nothing either");
+	}
+
+	/// A session detached while its query ran cannot take a registration: the
+	/// live query would deliver change data for an authorization that has been
+	/// torn down, and the per-session cleanup that would have removed it has
+	/// already run. The committed row is deleted instead.
+	#[tokio::test]
+	async fn a_detached_sessions_live_query_is_deleted_not_registered() {
+		let service = service().await;
+		let session_id = realtime_session(&service).await;
+		let context = context(session_id);
+		define_watched_table(&service).await;
+
+		let response = service
+			.stream_query(
+				Some(&context),
+				"LIVE SELECT * FROM thing; SLEEP 200ms".to_string(),
+				None,
+				QUERY_BATCH_RECORDS,
+			)
+			.await
+			.expect("the stream starts");
+		let mut frames = response.into_inner();
+		read_to_live_statement(&mut frames).await;
+		// Detach while the `SLEEP` holds the query open, so the session is gone
+		// by the time the registration is attempted.
+		service.rpc().detach(session_id).await.expect("detach the session");
+		while let Some(frame) = frames.next().await {
+			frame.expect("a frame");
+		}
+
+		assert!(
+			service.rpc().live_queries.is_empty(),
+			"a detached session's live query must not be registered",
+		);
+		assert_eq!(
+			live_query_rows(&service).await,
+			0,
+			"a detached session's live query must not be left in the datastore",
+		);
+	}
+
+	/// The framing layer is what sees a live query id go past: it rides the
+	/// stream as an ordinary single value, and only the statement's terminal
+	/// item says the statement that produced it was a `LIVE SELECT`.
+	#[test]
+	fn framing_reports_the_live_queries_it_frames() {
+		let id = surrealdb_types::Uuid::new_v4();
+		let mut framing = QueryFrames::new(QUERY_BATCH_RECORDS);
+		let live = QueryResult {
+			time: Duration::ZERO,
+			result: Ok(Value::Uuid(id)),
+			query_type: QueryType::Live,
+		};
+		let reported: Vec<Uuid> = surrealdb_core::dbs::items_for_result(0, live)
+			.into_iter()
+			.filter_map(|item| framing.absorb(item))
+			.collect();
+		assert_eq!(reported, vec![id.into_inner()], "the live query is reported once, on finish");
+
+		// A statement that failed committed nothing, and an ordinary statement
+		// that happens to return a uuid is not a live query.
+		let mut framing = QueryFrames::new(QUERY_BATCH_RECORDS);
+		let failed = QueryResult {
+			time: Duration::ZERO,
+			result: Err(TypesError::internal("no".to_string())),
+			query_type: QueryType::Live,
+		};
+		let other = QueryResult {
+			time: Duration::ZERO,
+			result: Ok(Value::Uuid(surrealdb_types::Uuid::new_v4())),
+			query_type: QueryType::Other,
+		};
+		let reported: Vec<Uuid> = [failed, other]
+			.into_iter()
+			.enumerate()
+			.flat_map(|(index, result)| surrealdb_core::dbs::items_for_result(index, result))
+			.filter_map(|item| framing.absorb(item))
+			.collect();
+		assert!(reported.is_empty(), "nothing else is taken for a live query: {reported:?}");
 	}
 
 	fn frames(results: Vec<QueryResult>) -> Vec<rpc::QueryResponse> {

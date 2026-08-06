@@ -381,6 +381,14 @@ transaction management, notification routing
   lost to a racing `signin`).
 - Live query notification delivery must verify the target WebSocket still exists and
   the live query is still registered to that connection/session.
+- A `LIVE SELECT` that commits must end up either registered for notification
+  delivery or deleted from the datastore. Where registration cannot happen — the
+  session was detached mid-query, the execution failed as a whole and returned no
+  results, or the client abandoned a result stream before it reached the
+  registration — the committed rows must be deleted, never left registered to a
+  torn-down authorization and never left behind for a cleanup path that cannot find
+  them. A transport whose result stream can be dropped mid-execution has to track
+  the ids as it frames them, since after the drop nothing else knows them.
 - Messages in the wrong frame type for the negotiated format must be rejected before
   parsing.
 - All open transactions must be explicitly cancelled on WebSocket disconnect.
