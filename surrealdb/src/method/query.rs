@@ -174,24 +174,35 @@ where
 		let ctx = ctx_txn(client.session_id, txn);
 
 		let (out_tx, out_rx) = crate::channel::bounded(STREAM_ITEM_BUFFER);
+		let (raw_tx, raw_rx) = crate::channel::bounded(QUERY_STREAM_BUFFER);
+		// Closing this channel is what stops the execution, and a `Receiver`
+		// clone closes it for every holder — so the returned stream can stop the
+		// execution without also being the thing that drains it.
+		let stop = StopHandle {
+			items: Box::new(raw_rx.clone()),
+		};
 		// The execution and the drain have to make progress together -- the
 		// channel between them is bounded, so each blocks on the other -- and
 		// the caller only drains the far end. Both therefore run on a task of
 		// their own.
 		spawn(async move {
-			let (raw_tx, raw_rx) = crate::channel::bounded(QUERY_STREAM_BUFFER);
 			let run = engine.query_stream(ctx, Cow::Owned(query), variables, raw_tx);
 			let forward = async {
 				while let Ok(item) = raw_rx.recv().await {
 					for item in stream_items_for(item) {
-						// The caller stopped reading; dropping `raw_rx` with
-						// this future is what stops the query.
 						if out_tx.send(Ok(item)).await.is_err() {
+							// The caller stopped reading. Closing the execution's
+							// channel is what unparks it: it is bounded, and this
+							// loop was the only thing draining it.
+							raw_rx.close();
 							return;
 						}
 					}
 				}
 			};
+			// Joined, not selected: the execution owns an open transaction and
+			// finalises it as it completes, so it is driven to the end even once
+			// nothing is left to receive its results.
 			let (outcome, ()) = futures::future::join(run, forward).await;
 			// A failure belonging to no single statement ends the stream, as
 			// distinct from a statement reporting its own.
@@ -202,6 +213,7 @@ where
 
 		Ok(ItemStream {
 			items: Box::pin(out_rx),
+			stop,
 		})
 	}
 }
@@ -284,11 +296,39 @@ pub enum StreamItem {
 	},
 }
 
+/// Stops the execution behind an [`ItemStream`] by closing the channel it sends
+/// its results into.
+///
+/// The execution's sends then fail and it reads the channel as closed, which is
+/// both what unparks one blocked on a full channel and what tells it to stop. It
+/// is observed only where the execution sends, so a statement in a phase that
+/// emits nothing runs on until it next produces something — reaching its own end,
+/// and finalising its transaction there, rather than stopping early.
+///
+/// The receiver is boxed only to keep it `Unpin`, which [`ItemStream`]'s own
+/// `Stream` impl needs; nothing here polls it.
+#[derive(Debug)]
+struct StopHandle {
+	items: Box<crate::channel::Receiver<QueryStreamItem>>,
+}
+
+impl StopHandle {
+	fn stop(&self) {
+		self.items.close();
+	}
+}
+
 /// A stream of a query's results, from [`Query::stream_items`].
+///
+/// Dropping this stops the query. The execution behind it holds an open
+/// transaction that it finalises as it completes, so it is stopped rather than
+/// abandoned: an execution left parked on a channel nobody drains would hold
+/// that transaction open for the lifetime of the process.
 #[derive(Debug)]
 #[must_use = "streams do nothing unless you poll them"]
 pub struct ItemStream {
 	items: Pin<Box<crate::channel::Receiver<Result<StreamItem>>>>,
+	stop: StopHandle,
 }
 
 impl futures::Stream for ItemStream {
@@ -296,6 +336,18 @@ impl futures::Stream for ItemStream {
 
 	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
 		self.items.as_mut().poll_next(cx)
+	}
+}
+
+impl Drop for ItemStream {
+	/// Stops the execution as the stream goes away.
+	///
+	/// Dropping the receiving end of the caller-facing channel is not enough on
+	/// its own: the execution sends into a channel further back, and that one
+	/// closing is what it observes. Left open, an execution that had already
+	/// filled it would stay parked on a send with nothing to drain it.
+	fn drop(&mut self) {
+		self.stop.stop();
 	}
 }
 

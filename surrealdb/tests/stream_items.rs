@@ -7,6 +7,8 @@
 
 #![cfg(feature = "kv-mem")]
 
+use std::time::Duration;
+
 use futures::StreamExt;
 use surrealdb::Surreal;
 use surrealdb::engine::local::Mem;
@@ -16,6 +18,52 @@ async fn db() -> Surreal<surrealdb::engine::local::Db> {
 	let db = Surreal::new::<Mem>(()).await.expect("an embedded connection");
 	db.use_ns("test").use_db("test").await.expect("use");
 	db
+}
+
+/// How many tasks are alive on the runtime running this test.
+///
+/// A streaming query occupies several: `stream_items` spawns one to drive the
+/// execution against the caller's reads, and the embedded engine spawns another
+/// to run the query itself. All of them must retire once the stream is dropped,
+/// and the count is how that is observed — an execution that is merely parked is
+/// still alive, where one that reached its end is not.
+///
+/// The count is exact here because a `#[tokio::test]` runs on a current-thread
+/// runtime; the metric carries no such guarantee on a multi-threaded one.
+fn alive_tasks() -> usize {
+	tokio::runtime::Handle::current().metrics().num_alive_tasks()
+}
+
+/// Waits for the alive-task count to fall to `target`, returning what it
+/// reached. Bounded, so a task that never retires fails an assertion rather
+/// than hanging the test.
+async fn wait_for_tasks(target: usize) -> usize {
+	let mut alive = alive_tasks();
+	for _ in 0..200 {
+		if alive <= target {
+			break;
+		}
+		tokio::time::sleep(Duration::from_millis(25)).await;
+		alive = alive_tasks();
+	}
+	alive
+}
+
+/// The alive-task count once it has stopped changing.
+///
+/// Every request the SDK makes occupies a task while it runs, so a count taken
+/// while an earlier one is still retiring would read as a task that leaked.
+async fn settled_tasks() -> usize {
+	let mut last = alive_tasks();
+	for _ in 0..200 {
+		tokio::time::sleep(Duration::from_millis(25)).await;
+		let now = alive_tasks();
+		if now == last {
+			return now;
+		}
+		last = now;
+	}
+	last
 }
 
 /// Rows arrive one at a time, and each statement is terminated exactly once,
@@ -137,4 +185,52 @@ async fn a_dropped_stream_releases_the_connection() {
 			.expect("send");
 	let answer: Option<String> = response.take(0).expect("a result");
 	assert_eq!(answer.as_deref(), Some("still here"));
+}
+
+/// Abandoning a stream stops the execution behind it.
+///
+/// The execution holds an open transaction and finalises it on its own
+/// completion path — committing or cancelling as its outcome requires — so an
+/// execution that never completes never finalises it. Dropping the stream is
+/// therefore not enough on its own: the execution has to be told to stop, and
+/// then run to completion so that finalisation happens.
+///
+/// The observable form of "never completes" is a task that stays alive with
+/// nothing left to wake it. Both of the query's tasks retiring is what says the
+/// execution reached its end rather than parking on a buffer no one will drain
+/// again.
+///
+/// The row count is what makes this a test rather than a tautology: the query
+/// must be nowhere near finished when the stream is dropped. The buffers between
+/// the executor and the caller hold a few thousand rows between them, so a
+/// smaller result would already be produced in full and its tasks would retire
+/// whether or not anything stopped them.
+#[tokio::test]
+async fn a_dropped_stream_stops_the_execution_behind_it() {
+	let db = db().await;
+	db.query("FOR $i IN array::range(0, 10000) { CREATE type::record('row', $i) SET n = $i }")
+		.await
+		.expect("send")
+		.check()
+		.expect("seed");
+
+	// The seed's own route task has to retire before the count means anything,
+	// or it would be indistinguishable from a leaked one.
+	let baseline = settled_tasks().await;
+
+	let mut items = db.query("SELECT * FROM row").stream_items().expect("a stream");
+	items.next().await.expect("at least one item").expect("no stream-level failure");
+	assert!(
+		alive_tasks() > baseline,
+		"the execution is running while the stream is being read, or the count below proves nothing",
+	);
+
+	drop(items);
+
+	let alive = wait_for_tasks(baseline).await;
+	assert_eq!(
+		alive, baseline,
+		"the execution is still alive after its stream was dropped, holding a transaction that \
+		 will never be committed or cancelled",
+	);
 }
