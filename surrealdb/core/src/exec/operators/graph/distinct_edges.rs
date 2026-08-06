@@ -30,12 +30,6 @@
 //! `exec/planner/match_plan.rs`. The transform is order-preserving and 1:≤1 (each
 //! input row yields at most one output row), so it propagates the input ordering.
 
-// The GQL v2 MATCH operators are constructed only by the gql-gated
-// planner (`Expr::Match` is `#[cfg(feature = "gql")]`), so they are dead
-// code when the feature is off — suppress the lint there only, keeping
-// dead-code detection active in the default (gql-on) build.
-#![cfg_attr(not(feature = "gql"), allow(dead_code))]
-
 use std::sync::Arc;
 
 use common::future::stream::{self, Yielder};

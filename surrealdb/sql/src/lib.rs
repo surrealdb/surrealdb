@@ -135,7 +135,6 @@ pub use self::literal::Literal;
 pub use self::lookup::Lookup;
 pub use self::mock::Mock;
 pub use self::model::Model;
-#[cfg_attr(not(feature = "surrealism"), allow(unused_imports))]
 pub use self::module::{ModuleExecutable, ModuleName, SiloExecutable, SurrealismExecutable};
 pub use self::operator::{AssignOperator, BinaryOperator, PostfixOperator, PrefixOperator};
 pub use self::order::Order;

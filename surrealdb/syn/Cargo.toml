@@ -13,9 +13,6 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
-[features]
-surrealism = ["surrealdb-sql/surrealism"]
-
 [dependencies]
 common = { workspace = true }
 surrealdb-cnf = { workspace = true }

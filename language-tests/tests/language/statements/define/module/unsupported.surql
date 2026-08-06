@@ -3,7 +3,7 @@
 allow-experimental = []
 
 [test]
-reason = "DEFINE MODULE is rejected at parse time when Surrealism modules are not enabled, with the caret on the MODULE keyword. In a build compiled without the `surrealism` cargo feature the rejection is unconditional; with that feature compiled in, the same diagnostic is reported whenever the `surrealism` experimental capability is absent."
+reason = "DEFINE MODULE is rejected at parse time when the `surrealism` experimental capability is absent, with the caret on the MODULE keyword. The gate is purely a runtime check on that capability and does not depend on the `surrealism` cargo feature; capability_granted.surql covers the granted case."
 
 [test.results]
 parsing-error = """

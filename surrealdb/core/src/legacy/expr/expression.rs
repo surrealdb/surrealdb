@@ -188,7 +188,6 @@ pub(crate) async fn expr_compute(
 		} => Err(ControlFlow::Err(anyhow::Error::new(ExecError::InvalidStatement(
 			"EXPLAIN is only supported with the new execution model".to_string(),
 		)))),
-		#[cfg(feature = "gql")]
 		Expr::Match(_) => Err(ControlFlow::Err(anyhow::Error::new(ExecError::InvalidStatement(
 			"GQL MATCH requires the streaming execution engine; it cannot run under the \
 				 compute-only planner strategy"

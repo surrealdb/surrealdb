@@ -1,6 +1,5 @@
 use std::fmt::{self, Display};
 
-#[cfg(feature = "surrealism")]
 use anyhow::Result;
 use common::fail;
 use surrealdb_types::{SqlFormat, ToSql};

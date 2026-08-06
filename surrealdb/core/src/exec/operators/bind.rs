@@ -10,12 +10,6 @@
 //! `Bind` is structurally transparent: it neither reorders nor drops rows, so
 //! it delegates `cardinality_hint` and `output_ordering` to its input.
 
-// The GQL v2 MATCH operators are constructed only by the gql-gated
-// planner (`Expr::Match` is `#[cfg(feature = "gql")]`), so they are dead
-// code when the feature is off — suppress the lint there only, keeping
-// dead-code detection active in the default (gql-on) build.
-#![cfg_attr(not(feature = "gql"), allow(dead_code))]
-
 use std::sync::Arc;
 
 use futures::TryStreamExt;

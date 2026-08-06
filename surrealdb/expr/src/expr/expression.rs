@@ -86,8 +86,6 @@ pub enum Expr {
 	/// under the streaming execution planner; see the `compute` and
 	/// `From<expr::Expr> for sql::Expr` arms for the invariants it relies on.
 	// Constructed by the GQL lowering, which lands as a sibling piece of PR-A.
-	#[cfg(feature = "gql")]
-	#[allow(dead_code)]
 	Match(Box<crate::expr::match_plan::MatchPlan>),
 }
 
@@ -134,7 +132,6 @@ impl Expr {
 			Expr::Closure(_) => true,
 			// A GQL query is read-only unless it carries mutation stages; a
 			// mutation-bearing plan must run under a write transaction.
-			#[cfg(feature = "gql")]
 			Expr::Match(plan) => !plan.has_mutations(),
 			Expr::Create(_)
 			| Expr::Update(_)
@@ -404,7 +401,6 @@ impl Expr {
 				..
 			} => false,
 			// GQL MATCH reads from the datastore, so it is never static.
-			#[cfg(feature = "gql")]
 			Expr::Match(_) => false,
 		}
 	}
@@ -465,7 +461,6 @@ impl Expr {
 
 			// GQL MATCH renders as a multi-clause statement; parenthesize it
 			// when nested.
-			#[cfg(feature = "gql")]
 			Expr::Match(_) => true,
 
 			Expr::Literal(_)
@@ -494,7 +489,6 @@ impl ToSql for Expr {
 		// `Expr::Match` cannot round-trip through `sql::Expr` (it has no SurrealQL
 		// surface). Render it directly via the dedicated `MatchPlan` renderer
 		// before the conversion would replace it with a placeholder.
-		#[cfg(feature = "gql")]
 		if let Expr::Match(plan) = self {
 			plan.fmt_sql(f, fmt);
 			return;
@@ -547,7 +541,6 @@ impl SerializeRevisioned for Expr {
 		// construction. Mirror the `From<expr::Expr> for sql::Expr` arm and fail
 		// loud (in debug) rather than silently emit unparseable bytes, so a
 		// future regression that nests `Expr::Match` is caught here.
-		#[cfg(feature = "gql")]
 		if matches!(self, Expr::Match(_)) {
 			tracing::error!(
 				"Expr::Match reached Revisioned serialization; it must never enter a \

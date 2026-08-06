@@ -62,9 +62,7 @@
 mod aggregate;
 mod cycle_guard;
 mod idiom;
-// GQL `MATCH` planning (`plan_match`). Gated like the IR it consumes
-// (`expr::Expr::Match` is `#[cfg(feature = "gql")]`).
-#[cfg(feature = "gql")]
+// GQL `MATCH` planning (`plan_match`).
 mod match_plan;
 mod row_scope;
 mod select;
@@ -729,7 +727,6 @@ impl<'ctx> Planner<'ctx> {
 
 			// GQL MATCH is only ever planned as a top-level operator tree
 			// (`plan_match`), never as a scalar sub-expression.
-			#[cfg(feature = "gql")]
 			Expr::Match(_) => Err(ExecError::PlannerUnsupported(
 				"GQL MATCH cannot be used as a sub-expression".to_string(),
 			)
@@ -1371,7 +1368,6 @@ impl<'ctx> Planner<'ctx> {
 				// (`exec/planner/match_plan.rs`). It never returns
 				// PlannerUnsupported/Unimplemented — a MatchPlan only reaches here
 				// because it lowered cleanly, so any failure is a real error.
-				#[cfg(feature = "gql")]
 				Expr::Match(m) => self.plan_match(*m).await,
 			}
 		})

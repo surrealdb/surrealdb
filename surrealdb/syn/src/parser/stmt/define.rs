@@ -20,13 +20,11 @@ use surrealdb_sql::statements::define::{
 };
 use surrealdb_sql::tokenizer::Tokenizer;
 use surrealdb_sql::{
-	AccessType, ApiMethod, DefineModuleStatement, EventKind, Expr, Index, Literal, Param,
-	Permission, Permissions, Scoring, TableType, access_type, table_type,
+	AccessType, ApiMethod, DefineModuleStatement, EventKind, Expr, Index, Literal,
+	ModuleExecutable, Param, Permission, Permissions, Scoring, SiloExecutable,
+	SurrealismExecutable, TableType, access_type, table_type,
 };
-#[cfg(feature = "surrealism")]
-use surrealdb_sql::{ModuleExecutable, SiloExecutable, SurrealismExecutable};
 use surrealdb_strand::Strand;
-#[cfg(feature = "surrealism")]
 use surrealdb_types::File as PublicFile;
 
 use crate::error::bail;
@@ -222,18 +220,6 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	#[cfg(not(feature = "surrealism"))]
-	pub async fn parse_define_module(
-		&mut self,
-		_stk: &mut Stk,
-	) -> ParseResult<DefineModuleStatement> {
-		bail!(
-			"Surrealism modules are not enabled",
-			@self.last_span() => "Use of `DEFINE MODULE` requires Surrealism modules"
-		)
-	}
-
-	#[cfg(feature = "surrealism")]
 	pub async fn parse_define_module(
 		&mut self,
 		stk: &mut Stk,

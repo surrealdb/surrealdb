@@ -304,7 +304,6 @@ implement_visitor! {
 		Expr::Explain { statement, .. } => {
 			this.visit_expr(statement)?;
 		},
-		#[cfg(feature = "gql")]
 		Expr::Match(plan) => {
 			use crate::expr::match_plan::{MatchStage, MutationStage, UpdateData};
 			// Walk every reachable Expr across the steps (clause predicates and
@@ -1878,7 +1877,6 @@ implement_visitor_mut! {
 		Expr::Explain { statement, .. } => {
 			this.visit_mut_expr(statement)?;
 		},
-		#[cfg(feature = "gql")]
 		Expr::Match(plan) => {
 			use crate::expr::match_plan::{MatchStage, MutationStage, UpdateData};
 			// Walk every reachable Expr across the steps (clause predicates and

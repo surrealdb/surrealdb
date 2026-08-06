@@ -14,7 +14,6 @@ keywords.workspace = true
 categories.workspace = true
 
 [features]
-surrealism = []
 arbitrary = [
     "dep:arbitrary",
     "dep:regex-syntax",

@@ -411,7 +411,6 @@ pub(crate) fn expr_required_context(expr: &Expr) -> ContextLevel {
 		} => expr_required_context(statement),
 
 		// GQL MATCH queries the datastore and needs a database.
-		#[cfg(feature = "gql")]
 		Expr::Match(_) => ContextLevel::Database,
 	}
 }

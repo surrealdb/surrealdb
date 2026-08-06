@@ -154,7 +154,6 @@ fn statement_type_from_expr(expr: &Expr) -> StatementType {
 		| Expr::FunctionCall(_)
 		| Expr::Closure(_) => StatementType::Other,
 		// GQL MATCH is not a SurrealQL statement-shaped expression.
-		#[cfg(feature = "gql")]
 		Expr::Match(_) => StatementType::Other,
 	}
 }

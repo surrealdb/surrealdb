@@ -1,7 +1,6 @@
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
-#[cfg(feature = "ml")]
 pub const ARGUMENTS: &str = "The model expects 1 argument. The argument can be either a number, an object, or an array of numbers.";
 
 pub fn get_model_path(ns: &str, db: &str, name: &str, version: &str, hash: &str) -> String {

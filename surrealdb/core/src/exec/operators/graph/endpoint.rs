@@ -50,12 +50,6 @@
 //! a `SELECT` on that table would return for the caller. A permission denial is
 //! indistinguishable from a missing record — both drop the row.
 
-// The GQL v2 MATCH operators are constructed only by the gql-gated
-// planner (`Expr::Match` is `#[cfg(feature = "gql")]`), so they are dead
-// code when the feature is off — suppress the lint there only, keeping
-// dead-code detection active in the default (gql-on) build.
-#![cfg_attr(not(feature = "gql"), allow(dead_code))]
-
 use std::sync::Arc;
 
 use common::future::stream::{self, Yielder};

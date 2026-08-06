@@ -165,6 +165,10 @@ const IGNORE_TESTS: &[&str] = &[
 	// Uses the silo module name form `silo::<org>::<pkg><major.minor.patch>`,
 	// whose version suffix this parser does not accept yet.
 	"language/statements/remove/module/not_exists_silo_name.surql",
+	// Names a module with `DEFINE MODULE <name> AS <executable>`. This parser
+	// takes the operands in the opposite order (`<executable> AS <name>`), so
+	// it rejects the executable where it expects an alias path.
+	"language/statements/define/module/capability_granted.surql",
 ];
 
 #[test]

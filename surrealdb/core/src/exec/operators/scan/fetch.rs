@@ -26,13 +26,6 @@
 //! the entire FieldState machinery (computed fields + field-level permissions),
 //! which would leak restricted fields into binding rows.
 
-// This FieldState-aware fetch helper is used only by the GQL v2 MATCH
-// operators, which are constructed only by the gql-gated planner
-// (`Expr::Match` is `#[cfg(feature = "gql")]`), so it is dead code when the
-// feature is off — suppress the lint there only, keeping dead-code detection
-// active in the default (gql-on) build.
-#![cfg_attr(not(feature = "gql"), allow(dead_code))]
-
 use std::collections::HashMap;
 use std::sync::Arc;
 

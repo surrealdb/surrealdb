@@ -3,7 +3,6 @@
 //! Lives in core rather than beside the AST: `surrealdb-sql` sits below
 //! core, so it cannot name `expr` types.
 
-#[cfg(feature = "gql")]
 use crate::sql::Literal;
 use crate::sql::expression::*;
 
@@ -146,7 +145,6 @@ impl From<crate::expr::Expr> for Expr {
 			// (which serializes `Expr` as SurrealQL text). It has no SurrealQL
 			// surface, so this conversion is unreachable by construction; emit a
 			// loud-but-non-panicking placeholder rather than a `sql::Match`.
-			#[cfg(feature = "gql")]
 			crate::expr::Expr::Match(_) => {
 				tracing::error!(
 					"Expr::Match reached the sql::Expr conversion; it must never enter a \

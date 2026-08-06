@@ -44,7 +44,6 @@ impl Visitor for MutationScanner {
 			| Expr::Alter(_) => Err(FoundMutation),
 
 			// A GQL plan carries its mutations in its stages.
-			#[cfg(feature = "gql")]
 			Expr::Match(plan) => {
 				if plan.has_mutations() {
 					Err(FoundMutation)

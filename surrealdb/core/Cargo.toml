@@ -43,9 +43,9 @@ kv-surrealkv = [
 ]
 scripting = ["dep:js", "surrealdb-expr/scripting"]
 http = ["dep:reqwest"]
-ml = ["dep:surrealml-core", "surrealdb-expr/ml"]
+ml = ["dep:surrealml-core"]
 jwks = ["dep:reqwest", "surrealdb-datastore/jwks"]
-surrealism = ["dep:surrealism-runtime", "dep:async-trait", "surrealdb-sql/surrealism", "surrealdb-syn/surrealism", "surrealdb-expr/surrealism"]
+surrealism = ["dep:surrealism-runtime", "dep:async-trait"]
 allocator = ["dep:jemallocator", "dep:mimalloc"]
 arbitrary = [
     "surrealdb-expr/arbitrary",
@@ -67,7 +67,7 @@ allocation-tracking = []
 graphql = ["dep:async-graphql", "surrealdb-catalog/graphql"]
 
 # GQL support
-gql = ["surrealdb-expr/gql", "dep:surrealdb-gql"]
+gql = ["dep:surrealdb-gql"]
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]

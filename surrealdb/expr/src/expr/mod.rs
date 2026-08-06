@@ -33,7 +33,6 @@ pub mod language;
 pub mod limit;
 pub mod literal;
 pub mod lookup;
-#[cfg(feature = "gql")]
 pub mod match_plan;
 pub mod mock;
 pub mod model;
@@ -92,7 +91,6 @@ pub use self::literal::{Literal, ObjectEntry};
 pub use self::lookup::Lookup;
 // Re-exported for the GQL lowering and the streaming planner (PR-A landing
 // piecemeal); not yet referenced through this alias in this crate.
-#[cfg(feature = "gql")]
 #[allow(unused_imports)]
 pub use self::match_plan::MatchPlan;
 pub use self::mock::Mock;

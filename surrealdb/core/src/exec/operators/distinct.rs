@@ -18,12 +18,6 @@
 //! exceeding it fails the query with an error that names the knob. Spill to disk
 //! is a future change, matching the `Aggregate` stance.
 
-// The GQL v2 MATCH operators are constructed only by the gql-gated
-// planner (`Expr::Match` is `#[cfg(feature = "gql")]`), so they are dead
-// code when the feature is off — suppress the lint there only, keeping
-// dead-code detection active in the default (gql-on) build.
-#![cfg_attr(not(feature = "gql"), allow(dead_code))]
-
 use std::collections::BTreeSet;
 use std::sync::Arc;
 

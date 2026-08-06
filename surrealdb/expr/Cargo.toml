@@ -14,10 +14,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [features]
-ml = []
-gql = []
 scripting = ["dep:js"]
-surrealism = []
 arbitrary = [
     "dep:arbitrary",
     "surrealdb-sql/arbitrary",
