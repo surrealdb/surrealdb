@@ -741,10 +741,11 @@ jobs:
   # Embedded Node.js engine
   # ----------------------------------------
 
-  # Builds the `@surrealdb/node` NAPI addon for the host platform and drives the
-  # built package through the JavaScript SDK. The addon is published from this
-  # repo alongside the engine, so a change that breaks it has to fail here
-  # rather than at release time.
+  # Builds the `@surrealdb/node-native` NAPI addon for the host platform and
+  # drives the built package directly — the SDK engine that wraps it lives in the
+  # surrealdb.js repository. The addon is published from this repo alongside the
+  # engine it embeds, so a change that breaks it has to fail here rather than at
+  # release time.
   node-engine:
     name: Node engine
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}

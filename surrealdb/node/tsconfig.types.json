@@ -1,7 +1,0 @@
-// The program the declaration bundle is generated from. It covers the shipped
-// sources only, so the build and test scripts — which run under Bun, not in the
-// published package — cannot influence the emitted types.
-{
-	"extends": "./tsconfig.json",
-	"include": ["src-ts/**/*", "napi/index.d.ts"]
-}

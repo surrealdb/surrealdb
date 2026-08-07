@@ -1139,7 +1139,7 @@ jobs:
   # ----------------------------------------
   # Publish the embedded Node.js engine (versioned releases)
   # ----------------------------------------
-  # `@surrealdb/node` embeds this exact engine, so it ships with it and carries
+  # `@surrealdb/node-native` embeds this exact engine, so it ships with it and carries
   # the same version. Unlike the `surreal` binary the addon is not part of the
   # rolling build, so its per-platform binaries are compiled here, from the
   # released SHA. Nightly publishes no packages, as with crates.
@@ -1260,7 +1260,7 @@ jobs:
             !surrealdb/node/dist/*.node
 
   publish-node-addon:
-    name: Publish @surrealdb/node
+    name: Publish @surrealdb/node-native
     needs: [prepare-vars, approve, build-node-addon]
     if: ${{ needs.prepare-vars.outputs.release-engine == 'true' && needs.prepare-vars.outputs.nightly-release != 'true' }}
     runs-on: ubuntu-latest

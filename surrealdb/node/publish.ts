@@ -1,5 +1,5 @@
 /**
- * Publish `@surrealdb/node` to npm.
+ * Publish `@surrealdb/node-native` to npm.
  *
  * The package version is not committed: it is the engine version, taken from
  * `SURREAL_VERSION` when the release workflow supplies one and otherwise read

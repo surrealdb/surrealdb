@@ -1,8 +1,7 @@
-import { copyFile } from "node:fs/promises";
+import { copyFile, mkdir } from "node:fs/promises";
 import { basename } from "node:path";
 import { Glob } from "bun";
 import dedent from "dedent";
-import { rolldown } from "rolldown";
 
 const isWindows = process.platform === "win32";
 const [, , ...flags] = Bun.argv;
@@ -17,7 +16,6 @@ const DTS_HEADER = dedent`
 	};
 
 	type ConnectionOptions = {
-		strict?: boolean;
 		/** Query timeout in whole seconds. */
 		query_timeout?: number;
 		/** Transaction timeout in whole seconds. */
@@ -81,48 +79,18 @@ await Bun.spawn(buildCmd, {
     },
 }).exited;
 
-// Bundle the engine implementation
-console.log("🔨 Generating the package bundle");
+// Assemble the package
+//
+// This package is the NAPI addon and nothing else: the engine that implements
+// the SDK's interface lives in the surrealdb.js repository and depends on this.
+// So there is no TypeScript of ours to bundle — NAPI already emits the loader
+// and its typings, and they are what gets published.
+console.log("📦 Assembling the package");
 
-const bundle = await rolldown({
-    input: "./src-ts/index.ts",
-    // The NAPI loader the CLI generates imports `module` unprefixed.
-    external: ["surrealdb", "node:module", "module"],
-});
+await mkdir("dist", { recursive: true });
+await copyFile("napi/index.js", "dist/index.js");
+await copyFile("napi/index.d.ts", "dist/index.d.ts");
 
-// ESModule only (we require top level await)
-await bundle.write({
-    format: "esm",
-    file: "./dist/surrealdb-node.mjs",
-});
-
-// TS Declaration
-const task = Bun.spawn(
-    [
-        "bunx",
-        "dts-bundle-generator",
-        "--project",
-        "tsconfig.types.json",
-        "--no-check",
-        "--disable-symlinks-following",
-        "--export-referenced-types",
-        "false",
-        "-o",
-        "./dist/surrealdb-node.d.ts",
-        "./src-ts/index.ts",
-    ],
-    {
-        stdout: "inherit",
-        stderr: "inherit",
-        async onExit(_, exitCode) {
-            if (exitCode !== 0) process.exit(exitCode);
-        },
-    },
-);
-
-await task.exited;
-
-// Copy the NAPI binary
 for await (const file of new Glob("napi/*.node").scan(".")) {
     await copyFile(file, `dist/${basename(file)}`);
 }

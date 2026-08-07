@@ -1,11 +1,11 @@
 {
-	"name": "@surrealdb/node",
+	"name": "@surrealdb/node-native",
 	"version": "0.0.0",
 	"type": "module",
 	"license": "Apache-2.0",
-	"description": "Embeddable Node.js, Bun, and Deno engine for SurrealDB",
+	"description": "Native NAPI bindings to an embedded SurrealDB engine, for Node.js, Bun, and Deno",
 	"homepage": "https://github.com/surrealdb/surrealdb",
-	"keywords": ["surrealdb", "nodejs", "bun", "deno", "embedded"],
+	"keywords": ["surrealdb", "nodejs", "bun", "deno", "embedded", "napi"],
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/surrealdb/surrealdb.git",
@@ -15,21 +15,15 @@
 		"build": "bun run build.ts",
 		"release": "bun run publish.ts"
 	},
-	"peerDependencies": {
-		"surrealdb": "^2.0.1"
-	},
 	"devDependencies": {
 		"@napi-rs/cli": "^3.1.5",
-		"dedent": "^1.7.0",
-		"dts-bundle-generator": "^9.5.1",
-		"rolldown": "1.0.0-beta.31",
-		"surrealdb": "^2.0.8",
-		"typescript": "~5.8.3"
+		"@surrealdb/cbor": "2.0.0-alpha.4",
+		"dedent": "^1.7.0"
 	},
 	"exports": {
 		".": {
-			"import": "./dist/surrealdb-node.mjs",
-			"types": "./dist/surrealdb-node.d.ts"
+			"import": "./dist/index.js",
+			"types": "./dist/index.d.ts"
 		}
 	},
 	"files": ["dist"],

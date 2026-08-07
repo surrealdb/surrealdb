@@ -1,134 +1,187 @@
 /**
- * Smoke tests for the built `@surrealdb/node` package.
+ * Smoke tests for the built `@surrealdb/node-native` package.
  *
- * These drive the published artefact — `dist/surrealdb-node.mjs` and the
- * native addon beside it — through the real SDK, so they cover the three NAPI
- * entry points the engine exposes: the RPC channel, the notification channel,
- * and the export/import pair. Run `bun run build` first.
+ * These drive the published artefact — `dist/index.js` and the native addon
+ * beside it — directly, without the JavaScript SDK. The SDK's engine lives in
+ * the surrealdb.js repository and depends on this package, so testing through it
+ * here would test that repository's code against a build of this one; the
+ * `external-sdk-tests` workflow is where that pairing belongs.
+ *
+ * What is covered is the addon's own surface: every NAPI entry point, the
+ * CBOR-in / CBOR-out request channel, the notification channel, the
+ * export/import pair, and the closed-engine contract after `free`.
+ *
+ * Requests are encoded with `@surrealdb/cbor` — SurrealDB's own codec, the same
+ * one the SDK uses — so these exercise the wire shape a real caller sends rather
+ * than a hand-rolled approximation. Run `bun run build` first.
  */
 
 import { expect, test } from "bun:test";
-import { Surreal, Table } from "surrealdb";
-import { createNodeEngines } from "./dist/surrealdb-node.mjs";
+import { decode, encode } from "@surrealdb/cbor";
+import { SurrealNodeEngine } from "./dist/index.js";
 
-/** Open an in-memory database, ready for queries. */
-async function connect(): Promise<Surreal> {
-	const db = new Surreal({ engines: createNodeEngines() });
+/** One statement's outcome inside a `query` reply. */
+type StatementResult<T> = { status: string; result: T };
 
-	await db.connect("mem://");
-	await db.use({ namespace: "test", database: "test" });
+let nextId = 0;
 
-	return db;
+/**
+ * Send one RPC request and return the decoded reply.
+ *
+ * A success reply is the method's value itself; only a failure is wrapped, in an
+ * `{ error }` envelope.
+ */
+async function rpc(
+	engine: SurrealNodeEngine,
+	method: string,
+	params: unknown[] = [],
+): Promise<unknown> {
+	const payload = encode({ id: ++nextId, method, params });
+	const response = await engine.execute(new Uint8Array(payload));
+	return decode(response);
+}
+
+/** Send one RPC request, failing the test if it reported an error. */
+async function ok(
+	engine: SurrealNodeEngine,
+	method: string,
+	params: unknown[] = [],
+): Promise<unknown> {
+	const reply = await rpc(engine, method, params);
+	const error = (reply as { error?: unknown })?.error;
+	expect(error, `${method} should not error`).toBeUndefined();
+	return reply;
+}
+
+/** Send a `query` and return the statements' results. */
+async function query<T>(
+	engine: SurrealNodeEngine,
+	sql: string,
+): Promise<StatementResult<T>[]> {
+	return (await ok(engine, "query", [sql])) as StatementResult<T>[];
+}
+
+/** Open an in-memory engine with a namespace and database selected. */
+async function connect(
+	opts?: Parameters<typeof SurrealNodeEngine.connect>[1],
+): Promise<SurrealNodeEngine> {
+	const engine = await SurrealNodeEngine.connect("mem://", opts);
+	await ok(engine, "use", ["test", "test"]);
+	return engine;
 }
 
 test("reports the engine version", async () => {
-	const db = await connect();
+	expect(SurrealNodeEngine.version()).toStartWith("3.");
 
-	const { version } = await db.version();
-	expect(version).toStartWith("surrealdb-");
-
-	await db.close();
+	const engine = await connect();
+	expect(await ok(engine, "version")).toMatch(/^surrealdb-/);
+	await engine.free();
 });
 
 test("creates and selects a record", async () => {
-	const db = await connect();
+	const engine = await connect();
 
-	await db.query("CREATE person:tobie SET name = 'Tobie'");
-	const [people] = await db.query<[{ name: string }[]]>("SELECT * FROM person");
+	await query(engine, "CREATE person:tobie SET name = 'Tobie'");
+	const [people] = await query<{ name: string }[]>(engine, "SELECT * FROM person");
 
-	expect(people).toHaveLength(1);
-	expect(people[0]?.name).toBe("Tobie");
+	expect(people?.status).toBe("OK");
+	expect(people?.result).toHaveLength(1);
+	expect(people?.result[0]?.name).toBe("Tobie");
 
-	await db.close();
+	await engine.free();
 });
 
 test("delivers live query notifications", async () => {
-	const db = await connect();
+	const engine = await connect();
+	const receiver = await engine.notifications();
 
-	// LIVE SELECT resolves its target up front, so the table has to exist
-	// before the subscription is registered.
-	await db.query("DEFINE TABLE person SCHEMALESS");
+	// `live` names a table, so it has to exist before it can be watched.
+	await query(engine, "DEFINE TABLE person");
+	expect(await ok(engine, "live", ["person"])).toBeDefined();
 
-	const subscription = await db.live(new Table("person"));
-	const received = (async () => {
-		for await (const message of subscription) {
-			return message;
-		}
-	})();
+	await query(engine, "CREATE person:tobie SET name = 'Tobie'");
 
-	await db.query("CREATE person:tobie SET name = 'Tobie'");
+	const encoded = await receiver.recv();
+	expect(encoded).not.toBeNull();
 
-	const message = await received;
-	expect(message?.action).toBe("CREATE");
+	const notification = decode(encoded as Uint8Array) as { action: string };
+	expect(notification.action).toBe("CREATE");
 
-	await subscription.kill();
-	await db.close();
+	await engine.free();
+});
+
+test("the notification channel ends once the engine is freed", async () => {
+	const engine = await connect();
+	const receiver = await engine.notifications();
+
+	await engine.free();
+
+	// The datastore is gone, so the stream ends rather than leaving the caller
+	// awaiting a notification that can never arrive.
+	expect(await receiver.recv()).toBeNull();
 });
 
 test("accepts a query timeout longer than 255 seconds", async () => {
-	// The timeout deserializes into a `u64`. A narrower type rejected any
-	// value above 255 outright, including the one this package documents.
-	const db = new Surreal({
-		engines: createNodeEngines({ query_timeout: 30_000, transaction_timeout: 30_000 }),
-	});
-
-	await db.connect("mem://");
-	await db.use({ namespace: "test", database: "test" });
-
-	const [value] = await db.query<[number]>("RETURN 1");
-	expect(value).toBe(1);
-
-	await db.close();
+	// Regression: these were `u8`, so the documented 30_000 was rejected.
+	const engine = await connect({ query_timeout: 30_000, transaction_timeout: 30_000 });
+	const [returned] = await query<number>(engine, "RETURN 1");
+	expect(returned?.result).toBe(1);
+	await engine.free();
 });
 
 test("creates the configured default namespace and database", async () => {
-	const db = new Surreal({
-		engines: createNodeEngines({
-			defaults: { namespace: "custom", database: "custom" },
-		}),
+	const engine = await SurrealNodeEngine.connect("mem://", {
+		defaults: { namespace: "custom_ns", database: "custom_db" },
 	});
 
-	await db.connect("mem://");
+	// Selecting them succeeds only because connecting created them.
+	await ok(engine, "use", ["custom_ns", "custom_db"]);
+	const [info] = await query<unknown>(engine, "INFO FOR DB");
+	expect(info?.status).toBe("OK");
 
-	const [root] = await db.query<[{ namespaces: Record<string, string> }]>("INFO FOR ROOT");
-	expect(Object.keys(root.namespaces)).toEqual(["custom"]);
-
-	await db.use({ namespace: "custom" });
-
-	const [namespace] = await db.query<[{ databases: Record<string, string> }]>("INFO FOR NS");
-	expect(Object.keys(namespace.databases)).toEqual(["custom"]);
-
-	await db.close();
+	await engine.free();
 });
 
 test("accepts every planner strategy the options type declares", async () => {
 	for (const strategy of ["best-effort", "compute-only", "all-read-only"] as const) {
-		const db = new Surreal({
-			engines: createNodeEngines({ capabilities: { planner_strategy: strategy } }),
-		});
-
-		await db.connect("mem://");
-		await db.use({ namespace: "test", database: "test" });
-
-		const [value] = await db.query<[number]>("RETURN 1");
-		expect(value).toBe(1);
-
-		await db.close();
+		const engine = await connect({ capabilities: { planner_strategy: strategy } });
+		const [returned] = await query<number>(engine, "RETURN 1");
+		expect(returned?.result, strategy).toBe(1);
+		await engine.free();
 	}
 });
 
+test("rejects a malformed capability target instead of aborting", async () => {
+	// The addon is built with `panic = "abort"`, so this used to take the host
+	// process down over a typo in a config object.
+	expect(
+		SurrealNodeEngine.connect("mem://", {
+			capabilities: { functions: ["not-a-function-name"] },
+		}),
+	).rejects.toThrow(/invalid capability target/);
+});
+
 test("exports and re-imports the database", async () => {
-	const db = await connect();
+	const engine = await connect();
+	await query(engine, "CREATE person:tobie SET name = 'Tobie'");
 
-	await db.query("CREATE person:tobie SET name = 'Tobie'");
-	const exported = await db.export();
-	expect(exported).toContain("person:tobie");
+	const sql = await engine.export();
+	expect(sql).toContain("person:tobie");
 
-	await db.query("DELETE person");
-	await db.import(exported);
+	const restored = await connect();
+	await restored.import(sql);
+	const [people] = await query<{ name: string }[]>(restored, "SELECT * FROM person");
+	expect(people?.result[0]?.name).toBe("Tobie");
 
-	const [people] = await db.query<[unknown[]]>("SELECT * FROM person");
-	expect(people).toHaveLength(1);
+	await engine.free();
+	await restored.free();
+});
 
-	await db.close();
+test("a freed engine reports itself closed rather than panicking", async () => {
+	const engine = await connect();
+	await engine.free();
+
+	expect(rpc(engine, "query", ["RETURN 1"])).rejects.toThrow(/closed/);
+	expect(engine.import("")).rejects.toThrow(/closed/);
+	expect(engine.export()).rejects.toThrow(/closed/);
 });
