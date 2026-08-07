@@ -179,7 +179,7 @@ impl SurrealNodeEngine {
 
 		let connection = SurrealNodeConnection {
 			id,
-			kvs: Arc::new(kvs),
+			kvs,
 			live_queries: Arc::new(HashMap::new()),
 			transactions: DashMap::new(),
 			sessions,
