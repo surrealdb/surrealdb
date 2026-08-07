@@ -16,8 +16,9 @@
 //! | `idxN_before` | incremental maintenance of N indexes, defined ahead of the data (what `surreal export` emits today) |
 //! | `idxN_after`  | one batched build per index, defined after the data |
 //!
-//! Also sweeps records-per-statement to price the per-commit overhead, and
-//! reports gzip/zstd ratio and throughput for the generated corpus.
+//! Also sweeps records-per-statement to price the per-commit overhead, prices
+//! `INSERT` against `CREATE` to separate the statement form from the work it
+//! shares, and reports gzip/zstd ratio and throughput for the generated corpus.
 //!
 //! ```bash
 //! cargo bench -p surrealdb-core --bench import_ablation --features kv-rocksdb
@@ -159,6 +160,15 @@ fn insert_statement(first_id: usize, batch: usize) -> String {
 	}
 	sql.push_str("];\n");
 	sql
+}
+
+/// One `CREATE … CONTENT { … }` statement carrying a single record.
+///
+/// The record's `id` rides in the content, as `CREATE person CONTENT { id:
+/// person:1, … }`, so the statement carries exactly the same bytes as the
+/// one-record `INSERT` form and differs only in the statement kind.
+fn create_statement(id: usize) -> String {
+	format!("CREATE person CONTENT {};\n", record(id))
 }
 
 /// The index set, ordered so that taking the first N gives a sensible
@@ -649,7 +659,7 @@ fn main() {
 	let only = env_str("ABL_CASES", "");
 	// Which sections to run. Narrowing this is what makes the binary usable
 	// under a sampling profiler: one section, one kind of work in the profile.
-	let phases = env_str("ABL_PHASES", "parse,ladder,sweep,export,compress");
+	let phases = env_str("ABL_PHASES", "parse,ladder,stmtform,sweep,export,compress");
 	let phase = |name: &str| phases.split(',').any(|p| p.trim() == name);
 	let sweep = phase("sweep") && env_str("ABL_SWEEP", "1") == "1";
 
@@ -746,6 +756,40 @@ fn main() {
 			records as f64 / total.as_secs_f64(),
 			vs,
 		);
+	}
+
+	// --- statement form ---------------------------------------------------
+	// `INSERT` takes a savepoint per record and carries the `ON DUPLICATE KEY
+	// UPDATE` conflict path; `CREATE` does neither. Both forms are priced at one
+	// record per statement, which holds the transaction count equal, so the
+	// difference between the two rows is the statement form and nothing else.
+	//
+	// The delta is an upper bound on what dropping the savepoint could recover,
+	// since the two statements differ in more than that one step.
+	if phase("stmtform") {
+		let n = records.min(20_000);
+		eprintln!("\n=== statement form (idx0, {backend}, 1 record/statement) ===");
+		eprintln!("{:<10} {:>10} {:>10} {:>12}", "form", "records", "total", "records/s");
+		let forms: [(&str, Vec<String>); 2] = [
+			("insert", (0..n).map(|i| insert_statement(i, 1)).collect()),
+			("create", (0..n).map(create_statement).collect()),
+		];
+		for (name, data) in forms {
+			let case = Case {
+				name: "stmtform",
+				schema: vec!["DEFINE TABLE person SCHEMALESS".to_string()],
+				before: vec![],
+				after: vec![],
+			};
+			let t = rt.block_on(run_case(&backend, &case, &data, n));
+			eprintln!(
+				"{:<10} {:>10} {:>9.2}s {:>12.0}",
+				name,
+				n,
+				t.total().as_secs_f64(),
+				n as f64 / t.total().as_secs_f64()
+			);
+		}
 	}
 
 	// --- commit-granularity sweep ----------------------------------------
