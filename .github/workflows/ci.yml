@@ -738,6 +738,46 @@ jobs:
         run: bun test --timeout 30000
 
   # ----------------------------------------
+  # Embedded Node.js engine
+  # ----------------------------------------
+
+  # Builds the `@surrealdb/node` NAPI addon for the host platform and drives the
+  # built package through the JavaScript SDK. The addon is published from this
+  # repo alongside the engine, so a change that breaks it has to fail here
+  # rather than at release time.
+  node-engine:
+    name: Node engine
+    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+          # The addon is a release build into its own target triple directory,
+          # so it shares nothing with the debug-profile jobs.
+          cache-key: node
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: surrealdb/node
+        run: bun install --frozen-lockfile
+
+      - name: Build the addon
+        working-directory: surrealdb/node
+        run: bun run build
+
+      - name: Test the addon
+        working-directory: surrealdb/node
+        run: bun test
+
+  # ----------------------------------------
   # Required checks
   # ----------------------------------------
 
@@ -782,6 +822,8 @@ jobs:
       - upgrade-tests
       # JS SDK conformance
       - conformance-tests
+      # Embedded Node.js engine
+      - node-engine
     steps:
       - name: Check for failures
         run: |
@@ -811,6 +853,7 @@ jobs:
             "${{ needs.lang-tests.result }}"
             "${{ needs.upgrade-tests.result }}"
             "${{ needs.conformance-tests.result }}"
+            "${{ needs.node-engine.result }}"
           )
 
           # Check if any job failed (skipped is ok for conditional jobs)

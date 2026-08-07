@@ -1137,6 +1137,192 @@ jobs:
           cargo-registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
   # ----------------------------------------
+  # Publish the embedded Node.js engine (versioned releases)
+  # ----------------------------------------
+  # `@surrealdb/node` embeds this exact engine, so it ships with it and carries
+  # the same version. Unlike the `surreal` binary the addon is not part of the
+  # rolling build, so its per-platform binaries are compiled here, from the
+  # released SHA. Nightly publishes no packages, as with crates.
+
+  build-node-addon:
+    name: Build Node addon (${{ matrix.name }})
+    needs: [prepare-vars, approve]
+    if: ${{ needs.prepare-vars.outputs.release-engine == 'true' && needs.prepare-vars.outputs.nightly-release != 'true' }}
+    runs-on: ${{ matrix.host }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS x86_64
+            host: macos-latest
+            target: x86_64-apple-darwin
+          - name: macOS aarch64
+            host: macos-latest
+            target: aarch64-apple-darwin
+          # The repository-root cargo config links the `surreal` binary against
+          # the static CRT. An addon is loaded into an already-running node.exe
+          # and has to share that process's dynamic CRT, so the flags are
+          # replaced here — `RUSTFLAGS` overrides the config's `rustflags`
+          # outright rather than appending to them.
+          - name: Windows x86_64
+            host: windows-latest
+            target: x86_64-pc-windows-msvc
+            rustflags: -C target-feature=-crt-static
+          - name: Windows aarch64
+            host: windows-latest
+            target: aarch64-pc-windows-msvc
+          - name: Linux x86_64 (gnu)
+            host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            cross: true
+          - name: Linux x86_64 (musl)
+            host: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            cross: true
+            rustflags: -C target-feature=-crt-static
+          - name: Linux aarch64 (gnu)
+            host: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            cross: true
+          - name: Linux aarch64 (musl)
+            host: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            cross: true
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.prepare-vars.outputs.git-sha }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      # Only the gnu aarch64 target links with the GNU toolchain; the musl
+      # targets are linked by zig via cargo-zigbuild.
+      - name: Install cross-compilation toolchain
+        if: ${{ matrix.target == 'aarch64-unknown-linux-gnu' }}
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - name: Install ziglang
+        if: ${{ matrix.cross }}
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.14.1
+
+      - name: Install cargo-zigbuild
+        if: ${{ matrix.cross }}
+        uses: taiki-e/install-action@328a871ad8f62ecac78390391f463ccabc974b72 # v2.69.9
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          tool: cargo-zigbuild
+
+      - name: Install dependencies
+        working-directory: surrealdb/node
+        run: bun install --frozen-lockfile
+
+      - name: Build the addon
+        working-directory: surrealdb/node
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+        run: bun run build.ts --target ${{ matrix.target }} ${{ matrix.cross && '-x' || '' }}
+
+      - name: Upload the native binary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: node-addon-${{ matrix.target }}
+          if-no-files-found: error
+          path: surrealdb/node/dist/*.node
+
+      # The JavaScript entry point and type declarations are identical for
+      # every target, so one build's copy is enough.
+      - name: Upload the package bundle
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: node-addon-bundle
+          if-no-files-found: error
+          path: |
+            surrealdb/node/dist/
+            !surrealdb/node/dist/*.node
+
+  publish-node-addon:
+    name: Publish @surrealdb/node
+    needs: [prepare-vars, approve, build-node-addon]
+    if: ${{ needs.prepare-vars.outputs.release-engine == 'true' && needs.prepare-vars.outputs.nightly-release != 'true' }}
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ needs.prepare-vars.outputs.publish != 'true' }}
+    permissions:
+      contents: read
+      # Required both for npm's OIDC trusted publishing and for provenance.
+      id-token: write
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.prepare-vars.outputs.git-sha }}
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Install Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Download the package bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: node-addon-bundle
+          path: surrealdb/node/dist/
+
+      - name: Download the native binaries
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: node-addon-*
+          path: surrealdb/node/dist/
+          merge-multiple: true
+
+      - name: Distribution summary
+        working-directory: surrealdb/node
+        run: ls -l dist
+
+      # npm can only attest provenance for a package built in a public
+      # repository, so the flag is passed only when this workflow is running in
+      # one. Engine releases run from the private repository today, where npm
+      # would reject the attestation and fail the publish.
+      - name: Publish to npm
+        working-directory: surrealdb/node
+        env:
+          SURREAL_VERSION: ${{ needs.prepare-vars.outputs.version }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          bun run publish.ts \
+            ${{ github.event.repository.private == false && '--provenance' || '' }} \
+            ${{ needs.prepare-vars.outputs.publish != 'true' && '--dry-run' || '' }}
+
+  # ----------------------------------------
   # Promote binaries
   # ----------------------------------------
 

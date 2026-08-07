@@ -66,4 +66,11 @@ history.txt
 surrealism/test/demo.surli
 surrealism/test/surrealism
 
+# `@surrealdb/node` build outputs: `napi/` is what the NAPI CLI generates,
+# `dist/` is the published package.
+/surrealdb/node/node_modules/
+/surrealdb/node/napi/
+/surrealdb/node/dist/
+/surrealdb/node/*.tgz
+
 *.actual.txt

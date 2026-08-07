@@ -28,6 +28,7 @@ members = [
     "surrealdb/kvs-test",
     "surrealdb/kvs-tikv",
     "surrealdb/mcp",
+    "surrealdb/node",
     "surrealdb/observe",
     "surrealdb/parse-common",
     "surrealdb/parser",
@@ -207,6 +208,9 @@ logos = "0.16.1" # TODO: pin version
 md-5 = "0.10.6"
 memchr = "2.8.0"
 mimalloc = "0.1.49"
+napi = { version = "3.12.0", default-features = false }
+napi-build = "2.4.0"
+napi-derive = "3.6.2"
 native-tls = "0.2.18"
 ndarray = "0.17.2"
 ndarray-stats = "0.7.0"

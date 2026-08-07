@@ -1,0 +1,28 @@
+{
+	"compilerOptions": {
+		// `DOM` is what supplies the web platform types the engine uses —
+		// AbortController, Blob, ReadableStream, Response, TextDecoder — all of
+		// which Node, Bun and Deno provide as globals.
+		"lib": ["ESNext", "DOM"],
+		"target": "ESNext",
+		"module": "ESNext",
+		"moduleDetection": "force",
+
+		"moduleResolution": "bundler",
+		"allowImportingTsExtensions": true,
+		"verbatimModuleSyntax": true,
+		"emitDeclarationOnly": true,
+		"isolatedDeclarations": false,
+		"declaration": true,
+
+		"strict": true,
+		"skipLibCheck": true,
+		"noFallthroughCasesInSwitch": true,
+
+		"noUnusedLocals": false,
+		"noUnusedParameters": false,
+		"noPropertyAccessFromIndexSignature": false,
+		"noImplicitOverride": true
+	},
+	"exclude": ["node_modules", "dist"]
+}
