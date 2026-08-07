@@ -172,7 +172,7 @@ mod tests {
 	use crate::kvs::TransactionType::Write;
 	use crate::types::{PublicNotification, PublicRecordId, PublicRecordIdKey, PublicValue};
 
-	async fn new_ds_with_auth() -> Result<(Receiver<PublicNotification>, Datastore)> {
+	async fn new_ds_with_auth() -> Result<(Receiver<PublicNotification>, Arc<Datastore>)> {
 		let (send, recv) = crate::channel::bounded(1000);
 		let ds = Datastore::builder()
 			.with_capabilities(Capabilities::all())
@@ -183,7 +183,7 @@ mod tests {
 		Ok((recv, ds))
 	}
 
-	async fn new_ds_no_auth() -> Result<(Receiver<PublicNotification>, Datastore)> {
+	async fn new_ds_no_auth() -> Result<(Receiver<PublicNotification>, Arc<Datastore>)> {
 		let (send, recv) = crate::channel::bounded(1000);
 		let ds = Datastore::builder()
 			.with_capabilities(Capabilities::all())

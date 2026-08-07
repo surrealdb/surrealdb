@@ -544,8 +544,6 @@ async fn stdio_completion_suggests_tables() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn stdio_uses_base_session_when_auth_enabled_and_guest_disabled() {
-	use std::sync::Arc;
-
 	use surrealdb_core::dbs::Capabilities;
 	use surrealdb_core::kvs::Datastore;
 
@@ -553,14 +551,12 @@ async fn stdio_uses_base_session_when_auth_enabled_and_guest_disabled() {
 	// case for the old behaviour where `Session::default()` was used as the
 	// fallback. With the fix in place, the STDIO path should supply
 	// `Session::owner()` as the base session and every tool call should work.
-	let ds = Arc::new(
-		Datastore::builder()
-			.with_auth(true)
-			.with_capabilities(Capabilities::default())
-			.build_with_path("memory")
-			.await
-			.expect("datastore"),
-	);
+	let ds = Datastore::builder()
+		.with_auth(true)
+		.with_capabilities(Capabilities::default())
+		.build_with_path("memory")
+		.await
+		.expect("datastore");
 	// Bootstrap NS/DB so `default_ns`/`default_db` resolve to something real.
 	ds.execute("DEFINE NAMESPACE test;", &Session::owner(), None).await.expect("ns");
 	ds.execute("DEFINE DATABASE test;", &Session::owner().with_ns("test"), None).await.expect("db");

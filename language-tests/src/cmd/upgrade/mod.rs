@@ -234,7 +234,9 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 
 	let mut reports = Vec::new();
 
-	let ds = Datastore::new("memory")
+	let ds = Datastore::builder()
+		.without_maintenance_tasks()
+		.build_with_path("memory")
 		.await
 		.expect("failed to create datastore for running matching expressions");
 

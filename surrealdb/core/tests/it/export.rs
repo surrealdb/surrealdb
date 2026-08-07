@@ -5,6 +5,8 @@
 //! grouping against the two things that decide it — the configured scan batch and
 //! the table's index set — and check that changing it leaves the data identical.
 
+use std::sync::Arc;
+
 use anyhow::Result;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::dbs::capabilities::Capabilities;
@@ -14,7 +16,7 @@ use surrealdb_types::Value;
 use crate::helpers::new_ns_db;
 
 /// Builds a memory datastore, optionally overriding `export_batch_size`.
-async fn ds_with_batch_size(batch: Option<usize>) -> Result<Datastore> {
+async fn ds_with_batch_size(batch: Option<usize>) -> Result<Arc<Datastore>> {
 	let mut builder = Datastore::builder().with_capabilities(Capabilities::all());
 	if let Some(batch) = batch {
 		builder = builder.with_config(

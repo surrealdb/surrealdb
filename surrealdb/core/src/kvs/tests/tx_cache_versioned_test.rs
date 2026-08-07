@@ -6,6 +6,8 @@
 //! versioning.
 #![cfg(feature = "kv-surrealkv")]
 
+use std::sync::Arc;
+
 use surrealdb_kvs::TransactionType::Write;
 use temp_dir::TempDir;
 
@@ -16,7 +18,7 @@ use crate::val::TableName;
 
 /// Build a versioned surrealkv datastore in a fresh temporary directory. The
 /// returned `TempDir` guard must be kept alive for the datastore's lifetime.
-async fn versioned_datastore() -> (TempDir, Datastore) {
+async fn versioned_datastore() -> (TempDir, Arc<Datastore>) {
 	let dir = TempDir::new().unwrap();
 	let path = format!("surrealkv://{}?versioned=true&retention=1h", dir.path().to_string_lossy());
 	let ds = Datastore::builder()

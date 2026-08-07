@@ -52,7 +52,7 @@ async fn datastore() -> Arc<Datastore> {
 	for result in ds.execute(SEED, &session(), None).await.expect("the seed runs") {
 		result.result.expect("every seed statement succeeds");
 	}
-	Arc::new(ds)
+	ds
 }
 
 fn session() -> Session {

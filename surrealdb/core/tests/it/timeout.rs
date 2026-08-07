@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -36,7 +37,10 @@ async fn statement_timeouts() -> Result<()> {
 	Ok(())
 }
 
-async fn new_ds_with_timeout(query: Option<Duration>, transaction: Option<Duration>) -> Datastore {
+async fn new_ds_with_timeout(
+	query: Option<Duration>,
+	transaction: Option<Duration>,
+) -> Arc<Datastore> {
 	let ds = Datastore::builder()
 		.with_capabilities(Capabilities::all())
 		.with_query_timeout(query)

@@ -7,13 +7,11 @@ use async_channel::{Receiver, Sender};
 use futures::StreamExt;
 use futures::stream::poll_fn;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::options::EngineOptions;
 use surrealdb_engine_api::{Route, SessionError, SessionId, session_error_to_error};
 use surrealdb_types::{Error, Notification};
-use tokio_util::sync::CancellationToken;
 
 use crate::router::RouterState;
-use crate::{LocalConfig, router, tasks};
+use crate::{LocalConfig, router};
 
 /// Open the datastore described by `config` and serve routes from it until the
 /// route channel closes.
@@ -29,6 +27,9 @@ pub async fn run_router(
 	let opt = config.engine_options();
 
 	let builder = Datastore::builder()
+		// The datastore starts its own maintenance tasks, so the cadences go to
+		// the builder rather than to a `tasks::init` call here.
+		.with_engine_options(opt)
 		.with_query_timeout(config.query_timeout)
 		.with_transaction_timeout(config.transaction_timeout)
 		.with_auth(config.root.is_some());
@@ -71,26 +72,27 @@ pub async fn run_router(
 		}
 	};
 
-	let router_state = RouterState::new(Arc::new(kvs));
+	let router_state = RouterState::new(kvs);
 
-	let canceller = CancellationToken::new();
+	router_loop(&router_state, route_rx, session_rx, notify).await;
 
-	let tasks = tasks::init(Arc::clone(&router_state.kvs), canceller.clone(), &opt);
-
-	router_loop(&router_state, canceller, tasks, route_rx, session_rx, notify).await;
-
+	// Stops the datastore's maintenance tasks as well as the storage engine.
 	router_state.kvs.shutdown().await.ok();
 }
 
 /// Serve routes from an already-open datastore, shutting it down when the route
 /// channel closes.
 ///
+/// The datastore arrives with its own maintenance tasks and its own
+/// cancellation, both established when it was built, so neither is passed in
+/// here. A caller that wants to control either sets them on the
+/// [`Builder`](surrealdb_core::kvs::ds::builder::Builder) it constructs the
+/// datastore with.
+///
 /// The first message on `conn_tx` is sent as soon as the loop is running.
 pub async fn run_datastore_router(
-	canceller: CancellationToken,
 	datastore: Arc<Datastore>,
 	notifications: Option<Receiver<Notification>>,
-	engine: EngineOptions,
 	conn_tx: Sender<Result<(), Error>>,
 	route_rx: Receiver<Route>,
 	session_rx: Receiver<SessionId>,
@@ -99,17 +101,14 @@ pub async fn run_datastore_router(
 
 	let router_state = RouterState::new(datastore);
 
-	let tasks = tasks::init(Arc::clone(&router_state.kvs), canceller.clone(), &engine);
+	router_loop(&router_state, route_rx, session_rx, notifications).await;
 
-	router_loop(&router_state, canceller, tasks, route_rx, session_rx, notifications).await;
-
+	// Stops the datastore's maintenance tasks as well as the storage engine.
 	router_state.kvs.shutdown().await.ok();
 }
 
 async fn router_loop(
 	router_state: &RouterState,
-	canceller: CancellationToken,
-	tasks: tasks::Tasks,
 	route_rx: Receiver<Route>,
 	session_rx: Receiver<SessionId>,
 	notification: Option<Receiver<Notification>>,
@@ -207,8 +206,4 @@ async fn router_loop(
 			}
 		}
 	}
-	// Shutdown and stop closed tasks
-	canceller.cancel();
-	// Wait for background tasks to finish
-	tasks.resolve().await.ok();
 }

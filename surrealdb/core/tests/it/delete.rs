@@ -38,7 +38,7 @@ impl ExecutionObserver for CapturingTransactionObserver {
 	}
 }
 
-async fn new_observed_ds() -> Result<(Datastore, Arc<CapturingTransactionObserver>)> {
+async fn new_observed_ds() -> Result<(Arc<Datastore>, Arc<CapturingTransactionObserver>)> {
 	let observer = Arc::new(CapturingTransactionObserver::default());
 	let ds = Datastore::builder()
 		.with_capabilities(Capabilities::all())

@@ -139,6 +139,7 @@ impl Document {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+	use std::sync::Arc;
 	use std::time::Duration;
 
 	use surrealdb_cnf::ConfigMap;
@@ -153,13 +154,13 @@ mod tests {
 	use crate::types::PublicValue;
 
 	/// Build an in-memory datastore with the given live-query engine selected.
-	async fn new_ds(engine: &str) -> Datastore {
+	async fn new_ds(engine: &str) -> Arc<Datastore> {
 		build_ds(engine, None).await
 	}
 
 	/// Build an in-memory datastore with a specific engine and (optional)
 	/// live-query retention (e.g. `"1us"`).
-	async fn build_ds(engine: &str, retention: Option<&str>) -> Datastore {
+	async fn build_ds(engine: &str, retention: Option<&str>) -> Arc<Datastore> {
 		let (send, _recv) = crate::channel::bounded(1000);
 		let mut config = ConfigMap::empty().with_key_value("live_query_engine", engine);
 		if let Some(r) = retention {

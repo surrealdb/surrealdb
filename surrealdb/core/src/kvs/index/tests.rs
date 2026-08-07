@@ -39,8 +39,11 @@ use crate::val::{RecordId, RecordIdKey, TableName, Value};
 
 const REPEATED_RETRY_CONFLICTS: usize = 1000;
 
-async fn new_index_test_ds() -> Result<(Datastore, Session)> {
-	let ds = Datastore::new("memory").await?;
+async fn new_index_test_ds() -> Result<(Arc<Datastore>, Session)> {
+	// These tests adopt, resume and observe index builds directly, and assert on
+	// when the datastore's own state is released. A background scheduler running
+	// `resume_stalled_index_builds` would claim the same builds.
+	let ds = Datastore::builder().without_maintenance_tasks().build_with_path("memory").await?;
 	let session = Session::owner().with_ns("test").with_db("test");
 	let tx = ds.transaction(TransactionType::Write).await?;
 	tx.ensure_ns_db(None, "test", "test").await?;
@@ -49,7 +52,7 @@ async fn new_index_test_ds() -> Result<(Datastore, Session)> {
 }
 
 #[cfg(feature = "kv-mem")]
-async fn new_distributed_index_test_ds() -> Result<(Datastore, Datastore, Session)> {
+async fn new_distributed_index_test_ds() -> Result<(Arc<Datastore>, Datastore, Session)> {
 	let (ds_a, session) = new_index_test_ds().await?;
 	let ds_b = ds_a.fork_for_test_with_node_id(uuid::Uuid::new_v4());
 	// Both simulated compute nodes must be visible in durable node
@@ -331,7 +334,7 @@ async fn start_index_build_paused(
 
 #[cfg(feature = "kv-mem")]
 struct PausedRemoveBuild {
-	ds: Datastore,
+	ds: Arc<Datastore>,
 	session: Session,
 	guard: RetryableConflictGuard,
 	ns: NamespaceId,
@@ -2678,7 +2681,6 @@ async fn resume_scan_adopts_stalled_concurrent_build() -> Result<()> {
 #[tokio::test(flavor = "multi_thread")]
 async fn periodic_task_resumes_stalled_build() -> Result<()> {
 	let (ds, session) = new_index_test_ds().await?;
-	let ds = Arc::new(ds);
 	execute_all(
 		&ds,
 		&session,
@@ -4769,7 +4771,6 @@ async fn concurrent_removal_of_last_doc_id_indexes_purges_mappings() -> Result<(
 
 	// Drop both consumers concurrently, retrying the loser of the
 	// table-definition write conflict.
-	let ds = Arc::new(ds);
 	let task_a = {
 		let (ds, session) = (Arc::clone(&ds), session.clone());
 		tokio::spawn(async move {
@@ -4820,7 +4821,6 @@ async fn concurrent_definition_of_doc_id_indexes_shares_one_space() -> Result<()
 		"no mappings before any doc-ID index"
 	);
 
-	let ds = Arc::new(ds);
 	let task_a = {
 		let (ds, session) = (Arc::clone(&ds), session.clone());
 		tokio::spawn(async move {
@@ -6009,7 +6009,6 @@ async fn concurrent_build_under_table_writes(
 	const WRITES_BEFORE_BUILD: u64 = 50;
 
 	let (ds, session) = new_index_test_ds().await?;
-	let ds = Arc::new(ds);
 	execute_all(
 		&ds,
 		&session,

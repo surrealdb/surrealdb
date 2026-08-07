@@ -47,7 +47,11 @@ async fn init(target: &str) {
 	match target {
 		#[cfg(feature = "kv-mem")]
 		"lib-mem" => {
-			let ds = Datastore::new("memory").await.unwrap();
+			let ds = Datastore::builder()
+				.without_maintenance_tasks()
+				.build_with_path("memory")
+				.await
+				.unwrap();
 			// Define namespace and database for benchmarks
 			ds.execute("DEFINE NAMESPACE test", &Session::owner(), None)
 				.await
@@ -55,7 +59,7 @@ async fn init(target: &str) {
 			ds.execute("DEFINE DATABASE test", &Session::owner().with_ns("test"), None)
 				.await
 				.expect("Unable to define database");
-			let _ = DB.set(Arc::new(ds));
+			let _ = DB.set(ds);
 		}
 		#[cfg(feature = "kv-rocksdb")]
 		"lib-rocksdb" => {
@@ -67,7 +71,11 @@ async fn init(target: &str) {
 					.as_millis()
 			);
 			println!("\n### Using path: {} ###\n", path);
-			let ds = Datastore::new(&path).await.unwrap();
+			let ds = Datastore::builder()
+				.without_maintenance_tasks()
+				.build_with_path(&path)
+				.await
+				.unwrap();
 			// Define namespace and database for benchmarks
 			ds.execute("DEFINE NAMESPACE test", &Session::owner(), None)
 				.await
@@ -75,7 +83,7 @@ async fn init(target: &str) {
 			ds.execute("DEFINE DATABASE test", &Session::owner().with_ns("test"), None)
 				.await
 				.expect("Unable to define database");
-			let _ = DB.set(Arc::new(ds));
+			let _ = DB.set(ds);
 		}
 		#[cfg(feature = "kv-surrealkv")]
 		"lib-surrealkv" => {
@@ -87,7 +95,11 @@ async fn init(target: &str) {
 					.as_millis()
 			);
 			println!("\n### Using path: {} ###\n", path);
-			let ds = Datastore::new(&path).await.unwrap();
+			let ds = Datastore::builder()
+				.without_maintenance_tasks()
+				.build_with_path(&path)
+				.await
+				.unwrap();
 			// Define namespace and database for benchmarks
 			ds.execute("DEFINE NAMESPACE test", &Session::owner(), None)
 				.await
@@ -95,7 +107,7 @@ async fn init(target: &str) {
 			ds.execute("DEFINE DATABASE test", &Session::owner().with_ns("test"), None)
 				.await
 				.expect("Unable to define database");
-			let _ = DB.set(Arc::new(ds));
+			let _ = DB.set(ds);
 		}
 		t if t.starts_with("sdk") => panic!(
 			"Target '{t}' drives the SDK, not the datastore. Run it from the `surrealdb` crate: `cargo bench --package surrealdb --bench sdb`."

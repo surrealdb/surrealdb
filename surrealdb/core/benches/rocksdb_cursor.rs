@@ -13,6 +13,8 @@
 
 #![allow(clippy::unwrap_used)]
 
+use std::sync::Arc;
+
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use surrealdb_core::CommunityComposer;
 use surrealdb_core::kvs::Direction::Forward;
@@ -27,7 +29,7 @@ fn runtime() -> Runtime {
 /// Seed a rocksdb-backed datastore with `prefix_count` prefixes, each
 /// containing `per_prefix` keys (raw KV, not SurrealQL). Returns the
 /// datastore and the temp dir (keep alive for the bench's lifetime).
-fn setup(prefix_count: usize, per_prefix: usize) -> (Datastore, TempDir) {
+fn setup(prefix_count: usize, per_prefix: usize) -> (Arc<Datastore>, TempDir) {
 	let tmp = TempDir::new().unwrap();
 	let path = format!("rocksdb:{}", tmp.path().to_string_lossy());
 	let ds = runtime().block_on(async {

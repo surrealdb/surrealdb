@@ -36,6 +36,8 @@ struct Foreign;
 // ---------------------------------------------------------------------------
 
 mod expired_token {
+	use std::sync::Arc;
+
 	use chrono::{Duration, Utc};
 	use jsonwebtoken::{EncodingKey, encode};
 
@@ -48,7 +50,7 @@ mod expired_token {
 	const SECRET: &str = "jwt_secret";
 
 	/// A datastore with a JWT access method named `token` on `test`/`test`.
-	async fn datastore_with_jwt_access() -> Datastore {
+	async fn datastore_with_jwt_access() -> Arc<Datastore> {
 		let ds = Datastore::new("memory").await.unwrap();
 		let sess = Session::owner().with_ns("test").with_db("test");
 		ds.execute(
@@ -389,11 +391,13 @@ fn an_unrelated_failure_is_neither_retryable_nor_a_shutdown() {
 // ---------------------------------------------------------------------------
 
 mod remove_if_exists {
+	use std::sync::Arc;
+
 	use crate::dbs::Session;
 	use crate::dbs::capabilities::{Capabilities, ExperimentalTarget, Targets};
 	use crate::kvs::Datastore;
 
-	async fn setup() -> (Datastore, Session) {
+	async fn setup() -> (Arc<Datastore>, Session) {
 		let ds = Datastore::new("memory").await.unwrap();
 		let sess = Session::owner().with_ns("test").with_db("test");
 		ds.execute("DEFINE NAMESPACE test; DEFINE DATABASE test", &sess, None).await.unwrap();

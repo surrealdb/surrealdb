@@ -138,15 +138,13 @@ mod tests {
 	/// we touch the datastore.
 	#[tokio::test]
 	async fn run_rejects_arg_array_over_cap() {
-		use std::sync::Arc;
-
 		use surrealdb_core::dbs::Session;
 		use surrealdb_core::kvs::Datastore;
 
 		use crate::cnf::McpConfig;
 		let cap = McpConfig::default().run_max_args;
 		let args: Vec<JsonValue> = (0..=cap).map(|i| JsonValue::from(i as i64)).collect();
-		let ds = Arc::new(Datastore::new("memory").await.expect("in-memory datastore"));
+		let ds = Datastore::new("memory").await.expect("in-memory datastore");
 		let session = crate::session::McpSession::new(ds, Session::default());
 		let err = run(
 			&session,

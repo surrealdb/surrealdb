@@ -20,13 +20,11 @@ use crate::key::{AnyRange, KVKeyDecode};
 use crate::kvs::Datastore;
 
 async fn mem_ds() -> Arc<Datastore> {
-	Arc::new(
-		Datastore::builder()
-			.with_capabilities(Capabilities::all())
-			.build_with_path("memory")
-			.await
-			.unwrap(),
-	)
+	Datastore::builder()
+		.with_capabilities(Capabilities::all())
+		.build_with_path("memory")
+		.await
+		.unwrap()
 }
 
 /// Count the keys currently stored in a range.

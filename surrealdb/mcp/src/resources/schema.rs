@@ -330,14 +330,12 @@ mod tests {
 	/// follow-up `INFO FOR TABLE` calls.
 	#[tokio::test]
 	async fn database_schema_includes_per_table_fields() {
-		use std::sync::Arc;
-
 		use surrealdb_core::dbs::Session;
 		use surrealdb_core::kvs::Datastore;
 
 		use crate::session::McpSession;
 
-		let ds = Arc::new(Datastore::new("memory").await.expect("datastore"));
+		let ds = Datastore::new("memory").await.expect("datastore");
 		ds.execute("DEFINE NAMESPACE acme; DEFINE DATABASE prod;", &Session::owner(), None)
 			.await
 			.expect("seed ns/db");
@@ -396,14 +394,12 @@ mod tests {
 	/// resource silently loses the table's fields/indexes/events.
 	#[tokio::test]
 	async fn database_schema_enriches_backtick_quoted_tables() {
-		use std::sync::Arc;
-
 		use surrealdb_core::dbs::Session;
 		use surrealdb_core::kvs::Datastore;
 
 		use crate::session::McpSession;
 
-		let ds = Arc::new(Datastore::new("memory").await.expect("datastore"));
+		let ds = Datastore::new("memory").await.expect("datastore");
 		ds.execute("DEFINE NAMESPACE acme; DEFINE DATABASE prod;", &Session::owner(), None)
 			.await
 			.expect("seed ns/db");
@@ -456,14 +452,12 @@ mod tests {
 	/// parser cannot read.
 	#[tokio::test]
 	async fn fetch_table_schema_rejects_quote_breaking_names() {
-		use std::sync::Arc;
-
 		use surrealdb_core::dbs::Session;
 		use surrealdb_core::kvs::Datastore;
 
 		use crate::session::McpSession;
 
-		let ds = Arc::new(Datastore::new("memory").await.expect("datastore"));
+		let ds = Datastore::new("memory").await.expect("datastore");
 		ds.execute("DEFINE NAMESPACE acme; DEFINE DATABASE prod;", &Session::owner(), None)
 			.await
 			.expect("seed ns/db");

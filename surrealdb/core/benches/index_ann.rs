@@ -283,7 +283,7 @@ async fn init_datastore(session: &Session, index: Option<AnnIndex>, store: Bench
 		BenchStore::RocksDb => Some(TempDir::new().unwrap()),
 	};
 	let endpoint = store.endpoint(temp_dir.as_ref());
-	let ds = Arc::new(Datastore::new(&endpoint).await.unwrap());
+	let ds = Datastore::new(&endpoint).await.unwrap();
 	execute_ok(ds.as_ref(), &Session::owner(), &format!("DEFINE NAMESPACE {NS};")).await;
 	execute_ok(ds.as_ref(), &Session::owner().with_ns(NS), &format!("DEFINE DATABASE {DB};")).await;
 	if let Some(index) = index {

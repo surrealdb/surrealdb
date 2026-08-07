@@ -1,12 +1,10 @@
 use core::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use futures::StreamExt;
-use surrealdb_core::err::{is_query_cancelled, is_query_timedout};
-use surrealdb_core::kvs::{Datastore, LiveQueryEngine};
-use surrealdb_core::options::EngineOptions;
+use surrealdb_datastore::triggers::CommitTriggers;
 use surrealdb_types::Error;
 #[cfg(not(target_family = "wasm"))]
 use tokio::{
@@ -21,7 +19,13 @@ use wasmtimer::std::Instant;
 #[cfg(target_family = "wasm")]
 use wasmtimer::tokio::{self as time, MissedTickBehavior};
 
-use crate::interval::IntervalStream;
+use crate::err::{is_query_cancelled, is_query_timedout};
+use crate::kvs::{Datastore, LiveQueryEngine};
+use crate::options::EngineOptions;
+
+mod interval;
+
+use self::interval::IntervalStream;
 
 #[cfg(not(target_family = "wasm"))]
 type Task = Pin<Box<dyn Future<Output = Result<(), tokio::task::JoinError>> + Send + 'static>>;
@@ -90,13 +94,35 @@ impl Tasks {
 /// - The **live-query router** is spawned only under [`LiveQueryEngine::Router`]; under the default
 ///   inline engine it has nothing to deliver.
 ///
-/// Must be called after `dbs::init` and before `net::init`, which blocks until
-/// the web server stops.
-pub fn init(dbs: Arc<Datastore>, canceller: CancellationToken, opts: &EngineOptions) -> Tasks {
+/// Every task holds a [`Weak`] reference to the datastore, never a strong one.
+/// The datastore owns these handles, so a strong reference would close a cycle
+/// through them and the datastore could never be dropped. Each pass upgrades
+/// for the duration of that pass and exits the task once the upgrade fails,
+/// which is what lets an embedder that simply drops its datastore — rather than
+/// calling [`Datastore::shutdown`] — still wind the tasks down.
+///
+/// The datastore starts these itself, so the only reason to call this directly
+/// is to start them against a datastore built with
+/// [`Builder::without_maintenance_tasks`](crate::kvs::ds::builder::Builder::without_maintenance_tasks).
+pub fn init(dbs: &Arc<Datastore>, canceller: CancellationToken, opts: &EngineOptions) -> Tasks {
+	let weak = Arc::downgrade(dbs);
+	// The triggers are shared state in their own right, so a task holding them
+	// does not keep the datastore alive.
+	let triggers = dbs.commit_triggers();
 	let mut tasks = Vec::with_capacity(6);
-	tasks.push(spawn_task_node_membership_refresh(Arc::clone(&dbs), canceller.clone(), opts));
-	tasks.push(spawn_task_event_processing(Arc::clone(&dbs), canceller.clone(), opts));
-	tasks.push(spawn_task_index_compaction(Arc::clone(&dbs), canceller.clone(), opts));
+	tasks.push(spawn_task_node_membership_refresh(Weak::clone(&weak), canceller.clone(), opts));
+	tasks.push(spawn_task_event_processing(
+		Weak::clone(&weak),
+		Arc::clone(triggers),
+		canceller.clone(),
+		opts,
+	));
+	tasks.push(spawn_task_index_compaction(
+		Weak::clone(&weak),
+		Arc::clone(triggers),
+		canceller.clone(),
+		opts,
+	));
 	for (group, slots) in [("maintenance", maintenance_slots(opts)), ("sweep", sweep_slots(opts))] {
 		// Every job in a group can be disabled by interval, so a group can end up
 		// empty; spawning a task that immediately exits would serve no purpose.
@@ -104,14 +130,14 @@ pub fn init(dbs: Arc<Datastore>, canceller: CancellationToken, opts: &EngineOpti
 			tasks.push(spawn_task_scheduler(
 				group,
 				slots,
-				Arc::clone(&dbs),
+				Weak::clone(&weak),
 				canceller.clone(),
 				opts,
 			));
 		}
 	}
 	if dbs.live_query_engine() == LiveQueryEngine::Router {
-		tasks.push(spawn_task_live_query_router(dbs, canceller, opts));
+		tasks.push(spawn_task_live_query_router(weak, canceller, opts));
 	}
 	Tasks(tasks)
 }
@@ -123,7 +149,7 @@ pub fn init(dbs: Arc<Datastore>, canceller: CancellationToken, opts: &EngineOpti
 /// frequently and keeps its own task rather than queueing behind maintenance
 /// work. Only spawned under [`LiveQueryEngine::Router`].
 fn spawn_task_live_query_router(
-	dbs: Arc<Datastore>,
+	dbs: Weak<Datastore>,
 	canceller: CancellationToken,
 	opts: &EngineOptions,
 ) -> Task {
@@ -136,6 +162,7 @@ fn spawn_task_live_query_router(
 				biased;
 				_ = canceller.cancelled() => break,
 				Some(_) = ticker.next() => {
+					let Some(dbs) = dbs.upgrade() else { break };
 					if let Err(e) = dbs.live_query_router_process().await {
 						error!("Error running the live-query router: {e}");
 					}
@@ -147,7 +174,7 @@ fn spawn_task_live_query_router(
 }
 
 fn spawn_task_node_membership_refresh(
-	dbs: Arc<Datastore>,
+	dbs: Weak<Datastore>,
 	canceller: CancellationToken,
 	opts: &EngineOptions,
 ) -> Task {
@@ -167,6 +194,7 @@ fn spawn_task_node_membership_refresh(
 				_ = canceller.cancelled() => break,
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => {
+					let Some(dbs) = dbs.upgrade() else { break };
 					if !run_node_membership_update(
 						NODE_MEMBERSHIP_UPDATE_TIMEOUT,
 						update_node_membership(
@@ -199,6 +227,7 @@ fn spawn_task_node_membership_refresh(
 /// # Arguments
 ///
 /// * `dbs` - The datastore instance
+/// * `triggers` - The commit wake-ups, so a write can start a pass early
 /// * `canceller` - Token used to cancel the task when the engine is shutting down
 /// * `opts` - Engine options containing the compaction interval
 ///
@@ -206,13 +235,13 @@ fn spawn_task_node_membership_refresh(
 ///
 /// * A pinned task that can be awaited
 fn spawn_task_index_compaction(
-	dbs: Arc<Datastore>,
+	dbs: Weak<Datastore>,
+	triggers: Arc<CommitTriggers>,
 	canceller: CancellationToken,
 	opts: &EngineOptions,
 ) -> Task {
 	// Get the delay interval from the config
 	let interval = opts.index_compaction_interval;
-	let triggers = Arc::clone(dbs.commit_triggers());
 	// Spawn a future
 	Box::pin(spawn(async move {
 		// Log the interval frequency
@@ -241,8 +270,9 @@ fn spawn_task_index_compaction(
 						_ = canceller.cancelled() => break,
 						_ = time::sleep(INDEX_COMPACTION_TRIGGER_DEBOUNCE) => {}
 					}
+					let Some(dbs) = dbs.upgrade() else { break };
 					if let Err(e) =
-						Datastore::index_compaction(Arc::clone(&dbs), interval, canceller.clone()).await
+						Datastore::index_compaction(dbs, interval, canceller.clone()).await
 					{
 						if canceller.is_cancelled() {
 							break;
@@ -252,8 +282,9 @@ fn spawn_task_index_compaction(
 				}
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => {
+					let Some(dbs) = dbs.upgrade() else { break };
 					if let Err(e) =
-						Datastore::index_compaction(Arc::clone(&dbs), interval, canceller.clone()).await
+						Datastore::index_compaction(dbs, interval, canceller.clone()).await
 					{
 						if canceller.is_cancelled() {
 							break;
@@ -273,11 +304,11 @@ fn spawn_task_index_compaction(
 /// reasons: the queue is fed by the write path and each pass drains it to empty,
 /// and the events themselves run user-defined SurrealQL of unbounded duration.
 fn spawn_task_event_processing(
-	dbs: Arc<Datastore>,
+	dbs: Weak<Datastore>,
+	triggers: Arc<CommitTriggers>,
 	canceller: CancellationToken,
 	opts: &EngineOptions,
 ) -> Task {
-	let triggers = Arc::clone(dbs.commit_triggers());
 	// Get the delay interval from the config
 	let interval = opts.event_processing_interval;
 	// Spawn a future
@@ -286,11 +317,19 @@ fn spawn_task_event_processing(
 		trace!("Running event processing every {interval:?}");
 		// Create a new time-based interval ticket
 		let mut ticker = interval_ticker(interval).await;
-		//
+		// Reports whether the datastore is still alive; a `false` ends the task.
 		let process_events = async || {
-			if let Err(e) = dbs.event_processing(interval).await {
+			let Some(dbs) = dbs.upgrade() else {
+				return false;
+			};
+			// The pass stops at the next batch boundary once cancelled, so a
+			// shutdown does not wait out a queue the write path keeps refilling.
+			if let Err(e) = dbs.event_processing(interval, &canceller).await
+				&& !canceller.is_cancelled()
+			{
 				error!("Error running event processing: {e}");
 			}
+			true
 		};
 		// Loop continuously until the task is cancelled
 		loop {
@@ -299,9 +338,9 @@ fn spawn_task_event_processing(
 				// Check if this has shutdown
 				_ = canceller.cancelled() => break,
 				// Wake early when new async events are committed.
-				_ = triggers.async_event.notified() => process_events().await,
+				_ = triggers.async_event.notified() => if !process_events().await { break },
 				// Receive a notification on the channel
-				Some(_) = ticker.next() => process_events().await
+				Some(_) = ticker.next() => if !process_events().await { break }
 			}
 		}
 		trace!("Background task exited: Running event processing");
@@ -484,7 +523,7 @@ async fn run_maintenance_job(
 		MaintenanceJob::TikvGc => dbs.run_mvcc_gc(opts.tikv_gc_lifetime).await,
 		MaintenanceJob::TikvLockCleanup => dbs.run_lock_cleanup(opts.tikv_gc_lifetime).await,
 		MaintenanceJob::SystemMetricsRefresh => {
-			surrealdb_core::observe::refresh_process_snapshot().await;
+			crate::observe::refresh_process_snapshot().await;
 			Ok(())
 		}
 	};
@@ -527,7 +566,7 @@ where
 fn spawn_task_scheduler(
 	group: &'static str,
 	slots: Vec<Slot>,
-	dbs: Arc<Datastore>,
+	dbs: Weak<Datastore>,
 	canceller: CancellationToken,
 	opts: &EngineOptions,
 ) -> Task {
@@ -546,9 +585,18 @@ fn spawn_task_scheduler(
 		);
 		let jobs_canceller = canceller.clone();
 		maintenance_loop(slots, canceller, move |job| {
-			let dbs = Arc::clone(&dbs);
+			let dbs = Weak::clone(&dbs);
 			let canceller = jobs_canceller.clone();
-			async move { run_maintenance_job(job, &dbs, &canceller, &opts, reclaim_grace).await }
+			async move {
+				// The datastore is gone, so there is nothing left to maintain.
+				// Cancelling ends the schedule on its next iteration, and does the
+				// same for every other task sharing this token.
+				let Some(dbs) = dbs.upgrade() else {
+					canceller.cancel();
+					return;
+				};
+				run_maintenance_job(job, &dbs, &canceller, &opts, reclaim_grace).await
+			}
 		})
 		.await;
 		trace!("Background task exited: Running {group} jobs");
@@ -600,10 +648,6 @@ mod test {
 	use std::sync::{Arc, Mutex};
 	use std::time::Duration;
 
-	#[cfg(feature = "kv-mem")]
-	use surrealdb_core::kvs::Datastore;
-	#[cfg(feature = "kv-mem")]
-	use surrealdb_core::options::EngineOptions;
 	use tokio::time::Instant;
 	use tokio_util::sync::CancellationToken;
 
@@ -611,7 +655,10 @@ mod test {
 		MaintenanceJob, Slot, maintenance_loop, maintenance_slots, next_slot, sweep_slots,
 	};
 	#[cfg(feature = "kv-mem")]
-	use crate::tasks;
+	use crate::kvs::Datastore;
+	#[cfg(feature = "kv-mem")]
+	use crate::kvs::tasks;
+	use crate::options::EngineOptions;
 
 	/// A slot due one interval from now, as the scheduler registers them.
 	fn slot(job: MaintenanceJob, interval: Duration) -> Slot {
@@ -897,8 +944,8 @@ mod test {
 	pub async fn tasks_complete() {
 		let can = CancellationToken::new();
 		let opt = EngineOptions::default();
-		let dbs = Arc::new(Datastore::new("memory").await.unwrap());
-		let tasks = tasks::init(Arc::clone(&dbs), can.clone(), &opt);
+		let dbs = Datastore::new("memory").await.unwrap();
+		let tasks = tasks::init(&dbs, can.clone(), &opt);
 		can.cancel();
 		tasks.resolve().await.unwrap();
 	}
@@ -914,8 +961,8 @@ mod test {
 			.with_node_membership_check_interval(Duration::from_millis(10))
 			.with_index_compaction_interval(Duration::from_millis(10))
 			.with_event_processing_interval(Duration::from_millis(10));
-		let dbs = Arc::new(Datastore::new("memory").await.unwrap());
-		let tasks = tasks::init(Arc::clone(&dbs), can.clone(), &opt);
+		let dbs = Datastore::new("memory").await.unwrap();
+		let tasks = tasks::init(&dbs, can.clone(), &opt);
 		tokio::time::sleep(Duration::from_millis(200)).await;
 		can.cancel();
 		tokio::time::timeout(Duration::from_secs(10), tasks.resolve())
@@ -935,9 +982,9 @@ mod test {
 		let can = CancellationToken::new();
 		let opt = EngineOptions::default()
 			.with_node_membership_refresh_interval(Duration::from_millis(50));
-		let dbs = Arc::new(Datastore::new("memory").await.unwrap());
+		let dbs = Datastore::new("memory").await.unwrap();
 		dbs.insert_node().await.unwrap();
-		let tasks = tasks::init(Arc::clone(&dbs), can.clone(), &opt);
+		let tasks = tasks::init(&dbs, can.clone(), &opt);
 		tokio::time::sleep(Duration::from_millis(500)).await;
 		let age = dbs.node_heartbeat_age().await.unwrap();
 		can.cancel();
@@ -952,8 +999,8 @@ mod test {
 	pub async fn live_query_router_is_not_spawned_under_the_inline_engine() {
 		let can = CancellationToken::new();
 		let opt = EngineOptions::default();
-		let dbs = Arc::new(Datastore::new("memory").await.unwrap());
-		let tasks = tasks::init(Arc::clone(&dbs), can.clone(), &opt);
+		let dbs = Datastore::new("memory").await.unwrap();
+		let tasks = tasks::init(&dbs, can.clone(), &opt);
 		// heartbeat, event processing, index compaction, maintenance, sweeps.
 		assert_eq!(tasks.0.len(), 5);
 		can.cancel();
@@ -969,8 +1016,8 @@ mod test {
 		let opt = EngineOptions::default()
 			.with_reclaim_interval(Duration::ZERO)
 			.with_rpc_session_gc_interval(Duration::ZERO);
-		let dbs = Arc::new(Datastore::new("memory").await.unwrap());
-		let tasks = tasks::init(Arc::clone(&dbs), can.clone(), &opt);
+		let dbs = Datastore::new("memory").await.unwrap();
+		let tasks = tasks::init(&dbs, can.clone(), &opt);
 		assert_eq!(tasks.0.len(), 4, "the empty sweep group should not be spawned");
 		can.cancel();
 		tasks.resolve().await.unwrap();

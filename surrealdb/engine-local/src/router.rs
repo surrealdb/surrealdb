@@ -863,8 +863,6 @@ pub(crate) async fn router(
 #[cfg(test)]
 mod tests {
 	#[cfg(feature = "kv-mem")]
-	use std::sync::Arc;
-
 	#[cfg(feature = "kv-mem")]
 	use surrealdb_core::kvs::Datastore;
 	#[cfg(feature = "kv-mem")]
@@ -878,7 +876,7 @@ mod tests {
 	#[cfg(feature = "kv-mem")]
 	async fn new_state() -> RouterState {
 		let kvs = Datastore::new("memory").await.unwrap();
-		RouterState::new(Arc::new(kvs))
+		RouterState::new(kvs)
 	}
 
 	/// Focused check that the `handle_session` dispatcher maps a `Clone` event to

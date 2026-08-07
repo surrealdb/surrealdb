@@ -19,7 +19,11 @@ fuzz_target!(|commands: &str| {
 	}
 
 	tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
-		let dbs = Datastore::new("memory").await.unwrap();
+		let dbs = Datastore::builder()
+			.without_maintenance_tasks()
+			.build_with_path("memory")
+			.await
+			.unwrap();
 		let ses = Session::owner().with_ns("test").with_db("test");
 		for command in commands.iter() {
 			for blacklisted_string in blacklisted_command_strings.iter() {

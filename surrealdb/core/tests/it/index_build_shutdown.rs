@@ -14,6 +14,7 @@
 //! the table succeed.
 #![cfg(feature = "kv-surrealkv")]
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Result, bail};
@@ -24,7 +25,7 @@ use surrealdb_types::Value;
 
 use crate::helpers::new_ns_db;
 
-async fn open_ds(path: &str) -> Result<Datastore> {
+async fn open_ds(path: &str) -> Result<Arc<Datastore>> {
 	Datastore::builder()
 		.with_capabilities(Capabilities::all())
 		.build_with_path(&format!("surrealkv://{path}"))

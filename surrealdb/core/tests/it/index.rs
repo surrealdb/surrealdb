@@ -212,7 +212,6 @@ async fn multi_index_concurrent_test(
 ";
 
 	let (_, dbs) = new_ds("test", "test", false).await?;
-	let dbs = Arc::new(dbs);
 
 	// Start the index compaction
 	let abort_compaction = CancellationToken::new();
@@ -368,7 +367,6 @@ async fn collect_value_ids(dbs: &Datastore, session: &Session, sql: &str) -> Res
 #[test_log::test]
 async fn diskann_pending_and_compacted_knn() -> Result<()> {
 	let (_, dbs) = new_ds("test", "test", false).await?;
-	let dbs = Arc::new(dbs);
 	let session = Session::owner().with_ns("test").with_db("test");
 	let sql = "
 		DEFINE INDEX diskann_pts ON pts FIELDS point DISKANN DIMENSION 2 DIST EUCLIDEAN TYPE F32 DEGREE 8 L_BUILD 20;
@@ -402,7 +400,6 @@ async fn diskann_pending_and_compacted_knn() -> Result<()> {
 #[test_log::test]
 async fn hnsw_concurrent_writes() -> Result<()> {
 	let (_, dbs) = new_ds("test", "test", false).await?;
-	let dbs = Arc::new(dbs);
 	let session = Session::owner().with_ns("test").with_db("test");
 
 	// Define the table and the index.
@@ -490,7 +487,6 @@ async fn multi_index_concurrent_test_index_compaction() -> Result<()> {
 	// Step 1: Create a shared datastore and set up 3 namespaces × 3 databases = 9 isolated
 	// environments. Each combination gets its own owner session, simulating a multi-tenant setup.
 	let (_, dbs) = new_ds("test", "test", false).await?;
-	let dbs = Arc::new(dbs);
 	let mut sessions = Vec::new();
 	for ns in ["ns1", "ns2", "ns3"] {
 		for db in ["db1", "db2", "db3"] {

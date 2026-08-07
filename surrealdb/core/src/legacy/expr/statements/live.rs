@@ -160,6 +160,8 @@ pub(crate) async fn live_statement_compute(
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+	use std::sync::Arc;
+
 	use anyhow::Result;
 
 	use crate::catalog::providers::{CatalogProvider, TableProvider};
@@ -172,7 +174,7 @@ mod tests {
 		PublicAction, PublicNotification, PublicRecordId, PublicRecordIdKey, PublicValue,
 	};
 
-	pub async fn new_ds() -> Result<(Receiver<PublicNotification>, Datastore)> {
+	pub async fn new_ds() -> Result<(Receiver<PublicNotification>, Arc<Datastore>)> {
 		let (send, recv) = crate::channel::bounded(1000);
 		let ds = Datastore::builder()
 			.with_capabilities(Capabilities::all())

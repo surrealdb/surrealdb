@@ -31,6 +31,7 @@ use crate::kvs::{
 };
 use crate::lq::LiveQueryRouter;
 use crate::observe::{ExecutionObserver, NoopObserver};
+use crate::options::EngineOptions;
 #[cfg(feature = "surrealism")]
 use crate::surrealism::cache::SurrealismCache;
 use crate::types::PublicNotification;
@@ -50,6 +51,11 @@ pub struct Builder {
 	http_endpoint: Option<String>,
 	id: Option<Uuid>,
 	slow_log: Option<SlowLog>,
+	/// The cadences the maintenance tasks run at.
+	engine_options: EngineOptions,
+	/// Whether to start the maintenance tasks. On by default; see
+	/// [`Builder::without_maintenance_tasks`].
+	maintenance: bool,
 	transaction_timeout: Option<Duration>,
 	query_timeout: Option<Duration>,
 	temporary_directory: Option<Arc<PathBuf>>,
@@ -81,6 +87,8 @@ impl Builder {
 			http_endpoint: None,
 			id: None,
 			slow_log: None,
+			engine_options: EngineOptions::default(),
+			maintenance: true,
 			transaction_timeout: None,
 			query_timeout: None,
 			temporary_directory: None,
@@ -118,6 +126,31 @@ impl Builder {
 	/// Sets the capabilities for the datastore.
 	pub fn with_capabilities(mut self, cap: Capabilities) -> Self {
 		self.capabilities = cap;
+		self
+	}
+
+	/// Sets the cadences the datastore's maintenance tasks run at.
+	pub fn with_engine_options(mut self, options: EngineOptions) -> Self {
+		self.engine_options = options;
+		self
+	}
+
+	/// Builds a datastore with **no** maintenance tasks.
+	///
+	/// Intended for tests and benchmarks that need a quiescent datastore —
+	/// compaction running mid-benchmark measures something else, and a test
+	/// asserting on a delta log needs it to stay where the test put it. Such a
+	/// caller drives the individual passes itself (for example
+	/// [`Datastore::index_compaction`]), or starts the whole set later with
+	/// [`tasks::init`](crate::kvs::tasks::init).
+	///
+	/// Anything serving real queries wants the default. Without these tasks an
+	/// index's delta log grows unbounded and every read of that index sums it,
+	/// `REMOVE NAMESPACE` never destroys the data it detached, changefeed data
+	/// is never collected, an interrupted index build is never resumed, and this
+	/// node's cluster heartbeat never refreshes.
+	pub fn without_maintenance_tasks(mut self) -> Self {
+		self.maintenance = false;
 		self
 	}
 
@@ -208,11 +241,11 @@ impl Builder {
 		self
 	}
 
-	pub async fn build_with_path(self, path: &str) -> Result<Datastore> {
+	pub async fn build_with_path(self, path: &str) -> Result<Arc<Datastore>> {
 		self.build_with_factory_path(path, CommunityComposer()).await
 	}
 
-	pub async fn build_with_factory_path<F>(self, path: &str, composer: F) -> Result<Datastore>
+	pub async fn build_with_factory_path<F>(self, path: &str, composer: F) -> Result<Arc<Datastore>>
 	where
 		F: TransactionBuilderFactory + 'static,
 	{
@@ -229,7 +262,7 @@ impl Builder {
 		self,
 		path: &str,
 		composer: F,
-	) -> Result<(Datastore, F::RouterState)>
+	) -> Result<(Arc<Datastore>, F::RouterState)>
 	where
 		F: TransactionBuilderFactory + 'static,
 	{
@@ -290,8 +323,12 @@ impl Builder {
 		self,
 		builder: Box<dyn TransactionBuilder>,
 		buckets: BucketsManager,
-	) -> Result<Datastore> {
+	) -> Result<Arc<Datastore>> {
 		let triggers = Arc::new(surrealdb_datastore::triggers::CommitTriggers::new());
+		// Read before `self` is partially moved below.
+		let maintenance = self.maintenance;
+		let options = self.engine_options;
+		let shutdown = self.shutdown.clone();
 		let observer = self.observer;
 		let config = Arc::new(RuntimeConfig::load(&self.config));
 		let tf = TransactionFactory::new(
@@ -315,6 +352,9 @@ impl Builder {
 		);
 
 		let datastore = Datastore {
+			shutdown,
+			maintenance: parking_lot::Mutex::new(None),
+			shutdown_lock: tokio::sync::Mutex::new(()),
 			created_here: std::sync::atomic::AtomicBool::new(false),
 			id,
 			transaction_factory: tf.clone(),
@@ -363,6 +403,18 @@ impl Builder {
 			let baseline = txn.safe_timestamp().await?.as_versionstamp();
 			txn.cancel().await?;
 			datastore.live_query_router.set_baseline(baseline);
+		}
+		// Shared from here on: the maintenance tasks hold a `Weak` to it, and
+		// nothing hands out a bare `Datastore` any more.
+		let datastore = Arc::new(datastore);
+		// A datastore without its maintenance tasks is not a working database,
+		// so starting them is the constructor's job rather than every embedder's
+		// to remember. Opt out with `without_maintenance_tasks`.
+		if maintenance {
+			let tasks = crate::kvs::tasks::init(&datastore, datastore.shutdown.clone(), &options);
+			// This is the only writer, and it runs before the datastore is
+			// handed to anyone.
+			*datastore.maintenance.lock() = Some(tasks);
 		}
 		Ok(datastore)
 	}

@@ -404,6 +404,8 @@ mod tests {
 
 	#[cfg(feature = "kv-mem")]
 	mod against_a_datastore {
+		use std::sync::Arc;
+
 		use super::*;
 		use crate::catalog::{DatabaseDefinition, NamespaceDefinition};
 		use crate::key::schema::SequencePrefix;
@@ -435,7 +437,7 @@ mod tests {
 		}
 
 		/// A datastore with one namespace and database, returning their ids.
-		async fn fixture() -> (Datastore, NamespaceId, DatabaseId) {
+		async fn fixture() -> (Arc<Datastore>, NamespaceId, DatabaseId) {
 			let ds = Datastore::new("memory").await.unwrap();
 			let (ns, db) = (NamespaceId(1), DatabaseId(1));
 			create_db(&ds, ns, db, "test").await;

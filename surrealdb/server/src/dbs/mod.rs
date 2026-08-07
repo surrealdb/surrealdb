@@ -827,7 +827,7 @@ pub async fn init<C: TransactionBuilderFactory>(
 		#[cfg_attr(not(feature = "surrealism"), allow(unused_variables))]
 		lazy_surrealism,
 	}: StartCommandDbsOptions,
-) -> Result<(Datastore, Receiver<Notification>, C::RouterState, PendingStartup)> {
+) -> Result<(Arc<Datastore>, Receiver<Notification>, C::RouterState, PendingStartup)> {
 	// Warn about the strict mode flag being unused.
 	if let Some(true) = strict_mode {
 		warn!(
@@ -874,6 +874,8 @@ pub async fn init<C: TransactionBuilderFactory>(
 	let config = ConfigMap::from_env();
 	// Parse and setup the desired kv datastore
 	let builder = Datastore::builder()
+		// The datastore starts its own maintenance tasks from these.
+		.with_engine_options(opt.engine)
 		.with_config(config)
 		// Mirror the tokio runtime worker count the server built itself
 		// with (see `cnf::RUNTIME_WORKER_THREADS`) into the datastore

@@ -6,9 +6,10 @@
 //! (`IndexCountThingIterator::next_count`) sums *every* outstanding delta on
 //! each read. Compaction folds them into a baseline.
 //!
-//! An embedded `Datastore` does not spawn the background compaction task, so
-//! this reproduces the steady state whenever compaction falls behind the write
-//! rate.
+//! The datastore here is built with `without_maintenance_tasks`, so compaction
+//! only runs where this file calls it. That holds the backlog at the size each
+//! case sets, reproducing the steady state of any deployment whose write rate
+//! outruns compaction.
 //!
 //! The record count is held constant and only the delta backlog is varied, by
 //! churning records (each CREATE writes a `+1` delta and each DELETE a `-1`
@@ -80,7 +81,8 @@ async fn compact(ds: &Arc<Datastore>) -> u128 {
 }
 
 async fn new_ds() -> (Arc<Datastore>, Session) {
-	let ds = Arc::new(Datastore::new("memory").await.unwrap());
+	let ds =
+		Datastore::builder().without_maintenance_tasks().build_with_path("memory").await.unwrap();
 	let session = Session::owner().with_ns("test").with_db("test");
 	run(
 		&ds,

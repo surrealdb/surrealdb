@@ -35,6 +35,7 @@ fn no_migration_is_declared_ahead_of_this_build() {
 
 #[cfg(feature = "kv-mem")]
 mod datastore {
+	use std::sync::Arc;
 	use std::sync::atomic::{AtomicU32, Ordering};
 
 	use super::*;
@@ -43,7 +44,7 @@ mod datastore {
 	use crate::kvs::version::MajorVersion;
 	use crate::kvs::{Datastore, TransactionType};
 
-	async fn mem() -> Datastore {
+	async fn mem() -> Arc<Datastore> {
 		Datastore::new("memory").await.unwrap()
 	}
 

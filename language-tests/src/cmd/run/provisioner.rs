@@ -82,6 +82,7 @@ impl CreateInfo {
 		// would then fail with `File access denied`. This also sets a single
 		// global allowlist shared by every language test.
 		let builder = Datastore::builder()
+		.without_maintenance_tasks()
 			.with_capabilities(cap)
 			.with_auth(true)
 			.with_temporary_directory(Some(sort_temp_dir))
@@ -139,7 +140,7 @@ impl CreateInfo {
 		ds.bootstrap().await?;
 
 		Ok(Ds {
-			store: Arc::new(ds),
+			store: ds,
 			path,
 		})
 	}
@@ -197,8 +198,8 @@ pub struct Ds {
 pub struct Provisioner {
 	send: Sender<Ds>,
 	recv: Receiver<Ds>,
-	grade_send: Sender<Box<Datastore>>,
-	grade_recv: Receiver<Box<Datastore>>,
+	grade_send: Sender<Arc<Datastore>>,
+	grade_recv: Receiver<Arc<Datastore>>,
 	create_info: Arc<CreateInfo>,
 }
 
@@ -221,13 +222,13 @@ pub enum CanReuse {
 #[must_use]
 pub struct Permit {
 	info: Arc<CreateInfo>,
-	grade_send: Sender<Box<Datastore>>,
-	grade_ds: Box<Datastore>,
+	grade_send: Sender<Arc<Datastore>>,
+	grade_ds: Arc<Datastore>,
 	inner: PermitInner,
 }
 
 impl Permit {
-	pub async fn with<F: AsyncFnOnce(&Arc<Datastore>, &Box<Datastore>) -> (CanReuse, R), R>(
+	pub async fn with<F: AsyncFnOnce(&Arc<Datastore>, &Arc<Datastore>) -> (CanReuse, R), R>(
 		self,
 		f: F,
 	) -> Result<R> {
@@ -309,8 +310,9 @@ impl Permit {
 	}
 }
 
-async fn create_grade_ds() -> Box<Datastore> {
+async fn create_grade_ds() -> Arc<Datastore> {
 	let ds = Datastore::builder()
+		.without_maintenance_tasks()
 		.with_capabilities(
 			Capabilities::none()
 				.with_functions(Targets::All)
@@ -329,7 +331,7 @@ async fn create_grade_ds() -> Box<Datastore> {
 		.await
 		.unwrap();
 
-	Box::new(ds)
+	ds
 }
 
 impl Provisioner {

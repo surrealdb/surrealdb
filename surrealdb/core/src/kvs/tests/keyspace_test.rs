@@ -8,6 +8,7 @@
 //! key, and a key the engine writes that nobody declared shows up the same way.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use surrealdb_kvs::TransactionType::Read;
 
@@ -16,7 +17,7 @@ use crate::key::RawRange;
 use crate::key::schema::{AnyKey, KeyKind, describe};
 use crate::kvs::Datastore;
 
-async fn mem_ds() -> Datastore {
+async fn mem_ds() -> Arc<Datastore> {
 	Datastore::builder()
 		.with_capabilities(Capabilities::all())
 		.build_with_path("memory")

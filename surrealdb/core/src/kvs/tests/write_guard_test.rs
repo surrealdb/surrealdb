@@ -26,7 +26,7 @@ async fn guarded_ds(limit: u64) -> (Arc<Datastore>, Session) {
 		tx.ensure_ns_db(None, "test", "test").await.unwrap();
 		tx.commit().await.unwrap();
 	}
-	(Arc::new(ds), Session::owner().with_ns("test").with_db("test"))
+	(ds, Session::owner().with_ns("test").with_db("test"))
 }
 
 /// Executes SurrealQL and asserts every statement succeeded.

@@ -29,6 +29,9 @@ pub async fn run_router(
 	let opt = config.engine_options();
 
 	let builder = Datastore::builder()
+		// The datastore starts its own maintenance tasks, so the cadences go to
+		// the builder rather than to a `tasks::init` call here.
+		.with_engine_options(opt)
 		.with_query_timeout(config.query_timeout)
 		.with_transaction_timeout(config.transaction_timeout)
 		.with_auth(config.root.is_some());
@@ -66,11 +69,7 @@ pub async fn run_router(
 		}
 	};
 
-	let router_state = RouterState::new(Arc::new(kvs));
-
-	let canceller = CancellationToken::new();
-
-	let tasks = tasks::init(router_state.kvs.clone(), canceller.clone(), &opt);
+	let router_state = RouterState::new(kvs);
 
 	let mut notify = notify.map(Box::pin);
 	let mut notification_stream = poll_fn(move |cx| match &mut notify {
@@ -169,10 +168,7 @@ pub async fn run_router(
 			}
 		}
 	}
-	// Shutdown and stop closed tasks
-	canceller.cancel();
-	// Wait for background tasks to finish
-	tasks.resolve().await.ok();
-	// Delete this node from the cluster
+	// Stops the datastore's maintenance tasks, then deletes this node from
+	// the cluster and shuts the storage engine down.
 	router_state.kvs.shutdown().await.ok();
 }

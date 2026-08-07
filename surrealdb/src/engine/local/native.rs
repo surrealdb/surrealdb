@@ -2,10 +2,9 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_channel::Receiver;
-use surrealdb_engine_local::{Datastore, EngineOptions};
+use surrealdb_engine_local::Datastore;
 use surrealdb_types::Notification;
 use tokio::sync::watch;
-use tokio_util::sync::CancellationToken;
 
 use crate::conn::{self, Router};
 use crate::engine::local::{Db, local_config};
@@ -58,11 +57,12 @@ impl Surreal<Db> {
 	// It exposes internal types in the public API so it is marked as doc(hidden).
 	// This function is not stable nor subject to semver stability guarentees.
 	#[doc(hidden)]
+	/// The datastore carries its own maintenance tasks and cancellation, both
+	/// established when it was built, so neither is passed here any more. Set
+	/// them on the `Builder` used to construct the datastore instead.
 	pub async fn unstable_from_datastore(
-		canceller: CancellationToken,
 		datastore: Arc<Datastore>,
 		notifications: Option<Receiver<Notification>>,
-		engine: EngineOptions,
 	) -> Result<Self> {
 		let (route_tx, route_rx) = async_channel::unbounded();
 		let (conn_tx, conn_rx) = async_channel::bounded::<Result<()>>(1);
@@ -70,10 +70,8 @@ impl Surreal<Db> {
 		let recv = session_clone.receiver.clone();
 
 		tokio::spawn(surrealdb_engine_local::native::run_datastore_router(
-			canceller,
 			datastore,
 			notifications,
-			engine,
 			conn_tx,
 			route_rx,
 			recv,

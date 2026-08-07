@@ -1330,7 +1330,7 @@ mod tests {
 		if let Some(obs) = observer {
 			builder = builder.with_observer(obs);
 		}
-		let ds = Arc::new(builder.build_with_path("memory").await.unwrap());
+		let ds = builder.build_with_path("memory").await.unwrap();
 		let state = Arc::new(crate::rpc::RpcState::new(Arc::clone(&ds)));
 		let id = Uuid::new_v4();
 		let (tx, _rx) = channel::<Message>(8);
@@ -1639,14 +1639,12 @@ mod tests {
 
 		with_big_stack(|| async {
 			let observer = Arc::new(WriteTxCompletionCounter::default());
-			let ds = Arc::new(
-				Datastore::builder()
-					.with_capabilities(Capabilities::all())
-					.with_observer(Arc::clone(&observer) as Arc<dyn ExecutionObserver>)
-					.build_with_path("memory")
-					.await
-					.unwrap(),
-			);
+			let ds = Datastore::builder()
+				.with_capabilities(Capabilities::all())
+				.with_observer(Arc::clone(&observer) as Arc<dyn ExecutionObserver>)
+				.build_with_path("memory")
+				.await
+				.unwrap();
 			// Pre-define NS/DB and warm up the datastore so the in-flight
 			// query resolves against an existing scope and metadata write
 			// txs (table definitions, sequence allocations, etc.) do not
@@ -1770,13 +1768,11 @@ mod tests {
 		use surrealdb_core::dbs::capabilities::Capabilities;
 
 		with_big_stack(|| async {
-			let ds = Arc::new(
-				Datastore::builder()
-					.with_capabilities(Capabilities::all())
-					.build_with_path("memory")
-					.await
-					.unwrap(),
-			);
+			let ds = Datastore::builder()
+				.with_capabilities(Capabilities::all())
+				.build_with_path("memory")
+				.await
+				.unwrap();
 			// Pre-define NS/DB and create the target table.
 			let owner = Session::owner();
 			ds.execute("DEFINE NS `test`", &owner, None).await.unwrap();
@@ -1883,13 +1879,11 @@ mod tests {
 		use surrealdb_core::dbs::capabilities::Capabilities;
 
 		with_big_stack(|| async {
-			let ds = Arc::new(
-				Datastore::builder()
-					.with_capabilities(Capabilities::all())
-					.build_with_path("memory")
-					.await
-					.unwrap(),
-			);
+			let ds = Datastore::builder()
+				.with_capabilities(Capabilities::all())
+				.build_with_path("memory")
+				.await
+				.unwrap();
 			let owner = Session::owner();
 			ds.execute("DEFINE NS `test`", &owner, None).await.unwrap();
 			let owner_ns = owner.clone().with_ns("test");
@@ -1959,14 +1953,12 @@ mod tests {
 			use surrealdb_core::dbs::capabilities::Capabilities;
 
 			let (notify_tx, notify_rx) = surrealdb_core::channel::bounded(100);
-			let ds = Arc::new(
-				Datastore::builder()
-					.with_capabilities(Capabilities::all())
-					.with_notify(notify_tx)
-					.build_with_path("memory")
-					.await
-					.unwrap(),
-			);
+			let ds = Datastore::builder()
+				.with_capabilities(Capabilities::all())
+				.with_notify(notify_tx)
+				.build_with_path("memory")
+				.await
+				.unwrap();
 			let owner = Session::owner();
 			ds.execute("DEFINE NS `test`", &owner, None).await.unwrap();
 			let owner_ns = owner.clone().with_ns("test");
@@ -2188,13 +2180,11 @@ mod tests {
 		use surrealdb_core::dbs::capabilities::Capabilities;
 
 		with_big_stack(|| async {
-			let ds = Arc::new(
-				Datastore::builder()
-					.with_capabilities(Capabilities::all())
-					.build_with_path("memory")
-					.await
-					.unwrap(),
-			);
+			let ds = Datastore::builder()
+				.with_capabilities(Capabilities::all())
+				.build_with_path("memory")
+				.await
+				.unwrap();
 			let owner = Session::owner();
 			ds.execute("DEFINE NS `test`", &owner, None).await.unwrap();
 			let owner_ns = owner.clone().with_ns("test");

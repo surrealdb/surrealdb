@@ -234,7 +234,9 @@ serial_test.workspace = true
 temp-dir.workspace = true
 test-log = { workspace = true, features = ["trace"] }
 time = { workspace = true, features = ["serde"] }
-tokio = { workspace = true, features = ["macros", "sync", "rt-multi-thread"] }
+# `test-util` gives the maintenance-scheduler tests a paused clock, so they
+# assert dispatch order rather than sleeping through real intervals.
+tokio = { workspace = true, features = ["macros", "sync", "rt-multi-thread", "test-util"] }
 tokio-util.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 wiremock.workspace = true

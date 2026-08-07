@@ -7,6 +7,7 @@
 
 #[cfg(test)]
 mod tests {
+	use std::sync::Arc;
 	use std::time::Duration;
 
 	use surrealdb_strand::Strand;
@@ -220,7 +221,7 @@ mod tests {
 		record_id
 	}
 
-	async fn init(store_diff: bool) -> Datastore {
+	async fn init(store_diff: bool) -> Arc<Datastore> {
 		let namespace_id = NamespaceId(1);
 		let database_id = DatabaseId(2);
 		let table_id = TableId(3);

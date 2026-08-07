@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use surrealdb_kvs::TransactionType::*;
 use uuid::Uuid;
 
@@ -83,7 +85,7 @@ async fn tikv_cursor_for_each_metrics_match_next_batch() {
 /// `for_each` must record the same scan metrics (keys + byte counters) as
 /// draining `next_batch` — including rows the visitor ignores, since the cursor
 /// reads them from storage either way. Guards EXPLAIN ANALYZE / observability.
-pub async fn cursor_for_each_metrics_match_next_batch(ds: Datastore) {
+pub async fn cursor_for_each_metrics_match_next_batch(ds: Arc<Datastore>) {
 	let pairs: Vec<(Vec<u8>, Vec<u8>)> = vec![
 		(b"a".to_vec(), b"vvv0".to_vec()),
 		(b"a\x00".to_vec(), b"vv1".to_vec()),

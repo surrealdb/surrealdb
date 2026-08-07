@@ -727,13 +727,11 @@ mod tests {
 	const TTL: Duration = Duration::from_secs(3600);
 
 	async fn mem_ds() -> Arc<Datastore> {
-		Arc::new(
-			Datastore::builder()
-				.with_capabilities(Capabilities::all())
-				.build_with_path("memory")
-				.await
-				.unwrap(),
-		)
+		Datastore::builder()
+			.with_capabilities(Capabilities::all())
+			.build_with_path("memory")
+			.await
+			.unwrap()
 	}
 
 	/// A durability-enabled HTTP handler over the shared datastore —

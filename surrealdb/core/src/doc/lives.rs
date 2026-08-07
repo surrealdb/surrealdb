@@ -642,6 +642,8 @@ impl MessageBroker for DefaultBroker {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+	use std::sync::Arc;
+
 	use anyhow::Result;
 	use chrono::Utc;
 	use surrealdb_kvs::TransactionType::Write;
@@ -654,7 +656,7 @@ mod tests {
 		PublicAction, PublicNotification, PublicRecordId, PublicRecordIdKey, PublicValue,
 	};
 
-	async fn new_ds_with_broker() -> Result<(Receiver<PublicNotification>, Datastore)> {
+	async fn new_ds_with_broker() -> Result<(Receiver<PublicNotification>, Arc<Datastore>)> {
 		let (send, recv) = crate::channel::bounded(1000);
 		let ds = Datastore::builder()
 			.with_capabilities(Capabilities::all())

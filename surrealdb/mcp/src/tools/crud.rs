@@ -296,7 +296,6 @@ fn resolve_update_mode<'a>(
 
 #[cfg(test)]
 mod tests {
-	use std::sync::Arc;
 
 	use serde_json::json;
 	use surrealdb_core::dbs::Session;
@@ -305,7 +304,7 @@ mod tests {
 	use super::*;
 
 	async fn session() -> McpSession {
-		let ds = Arc::new(Datastore::new("memory").await.expect("datastore"));
+		let ds = Datastore::new("memory").await.expect("datastore");
 		ds.execute("DEFINE NAMESPACE test;", &Session::owner(), None).await.expect("ns");
 		ds.execute("DEFINE DATABASE test;", &Session::owner().with_ns("test"), None)
 			.await

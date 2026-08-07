@@ -24,7 +24,10 @@ use crate::val::RecordIdKey;
 /// graph.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_diskann_filtered_knn_batches_record_fetches() -> Result<()> {
-	let ds = Arc::new(Datastore::new("memory").await?);
+	// Compaction happens only where this test calls it: the assertions compare
+	// the pending set against the compacted graph, which a background
+	// compactor would fold away before the first phase reads it.
+	let ds = Datastore::builder().without_maintenance_tasks().build_with_path("memory").await?;
 	{
 		let tx = ds.transaction(TransactionType::Write).await?;
 		tx.ensure_ns_db(None, "test", "test").await?;
@@ -153,7 +156,10 @@ async fn test_diskann_filtered_knn_batches_record_fetches() -> Result<()> {
 /// the graph entry too) and assert the filtered KNN excludes it and backfills.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_diskann_filtered_knn_skips_missing_record() -> Result<()> {
-	let ds = Arc::new(Datastore::new("memory").await?);
+	// Compaction happens only where this test calls it: the assertions compare
+	// the pending set against the compacted graph, which a background
+	// compactor would fold away before the first phase reads it.
+	let ds = Datastore::builder().without_maintenance_tasks().build_with_path("memory").await?;
 	let db_def = {
 		let tx = ds.transaction(TransactionType::Write).await?;
 		let db = tx.ensure_ns_db(None, "test", "test").await?;

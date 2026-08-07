@@ -5,6 +5,8 @@
 //! causing "not found" errors.
 
 // Common test setup helpers
+use std::sync::Arc;
+
 use surrealdb_kvs::TransactionType::Write;
 use surrealdb_strand::TableName;
 
@@ -14,7 +16,8 @@ use crate::dbs::{Capabilities, Session};
 use crate::kvs::Datastore;
 
 /// Helper to create a Datastore and write transaction with namespace and database set up
-async fn setup_tx_with_ns_db() -> (Datastore, crate::kvs::Transaction, NamespaceId, DatabaseId) {
+async fn setup_tx_with_ns_db() -> (Arc<Datastore>, crate::kvs::Transaction, NamespaceId, DatabaseId)
+{
 	let ds = Datastore::builder()
 		.with_capabilities(Capabilities::all())
 		.build_with_path("memory")

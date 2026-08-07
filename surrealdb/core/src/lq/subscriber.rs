@@ -86,6 +86,7 @@ pub(crate) async fn replay_table_live_events(
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+	use std::sync::Arc;
 	use std::time::Duration;
 
 	use surrealdb_cnf::ConfigMap;
@@ -97,7 +98,7 @@ mod tests {
 
 	/// Build a datastore with the given live-query engine and a notification
 	/// channel.
-	async fn new_ds(engine: &str) -> (Receiver<PublicNotification>, Datastore) {
+	async fn new_ds(engine: &str) -> (Receiver<PublicNotification>, Arc<Datastore>) {
 		let (send, recv) = crate::channel::bounded(1000);
 		let config = ConfigMap::empty().with_key_value("live_query_engine", engine);
 		let ds = Datastore::builder()

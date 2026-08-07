@@ -15,6 +15,7 @@ pub struct LocalStore {
 impl LocalStore {
 	pub async fn new(path: &str) -> Result<Self> {
 		let ds = Datastore::builder()
+		.without_maintenance_tasks()
 			.with_capabilities(Capabilities::all())
 			.with_auth(false)
 			.build_with_path(&format!("surrealkv://{path}"))

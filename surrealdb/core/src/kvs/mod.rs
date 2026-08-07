@@ -19,6 +19,7 @@ pub(crate) use surrealdb_kvs::{api, consts, err};
 pub use surrealdb_kvs_any::{BackendProvider, Backends, ConnectContext};
 
 pub mod export;
+pub mod tasks;
 
 mod clock;
 pub(crate) mod ds;

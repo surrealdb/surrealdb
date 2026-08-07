@@ -29,6 +29,7 @@
 
 use std::fmt::Write as _;
 use std::io::Write as _;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::{Bytes, BytesMut};
@@ -242,7 +243,7 @@ fn builder() -> surrealdb_core::kvs::Builder {
 	b
 }
 
-async fn open(backend: &str) -> (Datastore, Option<temp_dir::TempDir>) {
+async fn open(backend: &str) -> (Arc<Datastore>, Option<temp_dir::TempDir>) {
 	match backend {
 		"memory" => (builder().build_with_path("memory").await.unwrap(), None),
 		"rocksdb" => {

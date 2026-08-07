@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use clap::Args;
-use surrealdb::engine::{any, tasks};
+use surrealdb::engine::any;
 use surrealdb_core::kvs::TransactionBuilderFactory;
 use surrealdb_core::observe::{ExecutionObserver, FanOutObserver};
 use surrealdb_core::options::EngineOptions;
@@ -351,7 +351,7 @@ pub async fn init<
 	// returned rather than run here, so the web server can bind before they run.
 	let (datastore, recv, router_state, pending_startup) =
 		dbs::init::<C>(composer, &config, canceller.clone(), combined_observer, dbs).await?;
-	let datastore = Arc::new(datastore);
+	let datastore = datastore;
 	// Tracks whether the instance has finished starting up (import + credentials)
 	// and is ready to serve user-facing queries. The HTTP listener binds
 	// immediately; until this flips to `true`, query/auth endpoints return 503
@@ -404,8 +404,6 @@ pub async fn init<
 	if let Err(err) = crate::observe::register_storage_metrics(&datastore, &runtime) {
 		warn!("failed to register storage metrics: {err}");
 	}
-	// Start the node agent
-	let nodetasks = tasks::init(Arc::clone(&datastore), canceller.clone(), &config.engine);
 	// The `/ready` probe treats the node as unhealthy if its cluster heartbeat
 	// hasn't refreshed within a few cycles of the node-membership refresh task
 	// (which also confirms the storage read and write paths are working).
@@ -456,7 +454,6 @@ pub async fn init<
 	// Shutdown and stop closed tasks
 	canceller.cancel();
 	// Wait for background tasks to finish
-	nodetasks.resolve().await?;
 	// Shutdown the datastore
 	datastore.shutdown().await?;
 	// All ok

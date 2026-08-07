@@ -1084,7 +1084,7 @@ mod tests {
 	use super::*;
 
 	async fn fresh_datastore() -> Arc<Datastore> {
-		Arc::new(Datastore::new("memory").await.expect("memory datastore"))
+		Datastore::new("memory").await.expect("memory datastore")
 	}
 
 	/// Locks in the construction-time invariant that

@@ -250,14 +250,12 @@ impl TestDb {
 	}
 
 	async fn build(setup: &str, auth_enabled: bool) -> Self {
-		let ds = Arc::new(
-			Datastore::builder()
-				.with_capabilities(crate::dbs::Capabilities::all())
-				.with_auth(auth_enabled)
-				.build_with_path("memory")
-				.await
-				.expect("in-memory datastore"),
-		);
+		let ds = Datastore::builder()
+			.with_capabilities(crate::dbs::Capabilities::all())
+			.with_auth(auth_enabled)
+			.build_with_path("memory")
+			.await
+			.expect("in-memory datastore");
 		{
 			let txn = ds.transaction(TransactionType::Write).await.expect("write transaction");
 			txn.ensure_ns_db(None, "test", "test").await.expect("ensure test/test");

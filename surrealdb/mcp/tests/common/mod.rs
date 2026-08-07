@@ -16,7 +16,7 @@ use tracing_subscriber::registry::LookupSpan;
 /// Build a fresh in-memory datastore with the `test` namespace and database
 /// pre-created. Mirrors the bootstrap in `surrealdb/core/tests/helpers/mod.rs`.
 pub async fn test_datastore() -> Arc<Datastore> {
-	let ds = Arc::new(Datastore::new("memory").await.expect("Failed to create datastore"));
+	let ds = Datastore::new("memory").await.expect("Failed to create datastore");
 	ds.execute("DEFINE NAMESPACE test;", &Session::owner(), None).await.expect("bootstrap NS");
 	ds.execute("DEFINE DATABASE test;", &Session::owner().with_ns("test"), None)
 		.await

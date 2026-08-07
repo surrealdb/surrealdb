@@ -2,6 +2,7 @@
 #![recursion_limit = "256"]
 
 use std::hint::black_box;
+use std::sync::Arc;
 use std::time::Duration;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
@@ -39,7 +40,7 @@ fn bench_processor(c: &mut Criterion) {
 }
 
 struct Input {
-	dbs: Datastore,
+	dbs: Arc<Datastore>,
 	ses: Session,
 	count: usize,
 }

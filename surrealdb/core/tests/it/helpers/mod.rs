@@ -19,10 +19,15 @@ pub async fn new_ds(
 	ns: &str,
 	db: &str,
 	auth: bool,
-) -> Result<(NotifyReceiver<Notification>, Datastore)> {
+) -> Result<(NotifyReceiver<Notification>, Arc<Datastore>)> {
 	let (send, recv) = channel::bounded(NOTIFICATIONS_CHANNEL_SIZE);
 
+	// These tests drive maintenance themselves — draining the async-event queue,
+	// compacting indexes, resuming index builds — at points they choose, and
+	// several of them bypass the task leases that keep two processors off the
+	// same queue. A concurrent scheduler would double-process that work.
 	let ds = Datastore::builder()
+		.without_maintenance_tasks()
 		.with_capabilities(Capabilities::all())
 		.with_notify(send)
 		.with_auth(auth)
@@ -330,7 +335,7 @@ pub fn skip_ok(res: &mut Vec<QueryResult>, skip: usize) -> Result<()> {
 #[allow(dead_code)]
 pub struct Test {
 	pub notifications: NotifyReceiver<Notification>,
-	pub ds: Datastore,
+	pub ds: Arc<Datastore>,
 	pub session: Session,
 	pub responses: Vec<QueryResult>,
 	pos: usize,
@@ -345,7 +350,7 @@ impl Debug for Test {
 impl Test {
 	#[allow(dead_code)]
 	pub async fn new_ds_session(
-		ds: Datastore,
+		ds: Arc<Datastore>,
 		notify: NotifyReceiver<Notification>,
 		session: Session,
 		sql: &str,
@@ -362,7 +367,7 @@ impl Test {
 
 	#[allow(dead_code)]
 	pub async fn new_ds(
-		ds: Datastore,
+		ds: Arc<Datastore>,
 		notify: NotifyReceiver<Notification>,
 		sql: &str,
 	) -> Result<Self> {
@@ -389,7 +394,8 @@ impl Test {
 	/// - Flushing caches (jwks, IndexStore, ...)
 	#[allow(dead_code)]
 	pub async fn restart(self, sql: &str) -> Result<Self> {
-		Self::new_ds(self.ds.restart(), self.notifications, sql).await
+		let ds = Arc::new(Arc::into_inner(self.ds).expect("sole owner of the datastore").restart());
+		Self::new_ds(ds, self.notifications, sql).await
 	}
 
 	/// Checks if the number of responses matches the expected size.

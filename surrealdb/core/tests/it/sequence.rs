@@ -26,7 +26,6 @@ async fn concurrent_task_asc(ds: Arc<Datastore>, seq: &str, count: usize) -> Has
 #[tokio::test(flavor = "multi_thread")]
 async fn concurrent_sequence_next_val() -> Result<()> {
 	let (_, ds) = new_ds("test", "test", false).await?;
-	let ds = Arc::new(ds);
 	let ses = Session::owner().with_ns("test").with_db("test");
 
 	// Create the sequence
@@ -90,7 +89,7 @@ async fn sequence_next_val_after_restart() -> Result<()> {
 	let set1 = concurrent_task(&ds, "sq", 1000).await;
 
 	// Restart the datastore
-	let ds = ds.restart();
+	let ds = Arc::new(Arc::into_inner(ds).expect("sole owner of the datastore").restart());
 
 	// Run again 1000 sequence::nextval()
 	let set2 = concurrent_task(&ds, "sq", 1000).await;

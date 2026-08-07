@@ -13,7 +13,7 @@ use crate::dbs::{Capabilities, Session};
 use crate::kvs::{Datastore, TransactionType};
 use crate::val::TableName;
 
-async fn new_ds() -> Datastore {
+async fn new_ds() -> Arc<Datastore> {
 	Datastore::builder()
 		.with_capabilities(Capabilities::all())
 		.with_auth(false)

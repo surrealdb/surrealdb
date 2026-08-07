@@ -4,6 +4,8 @@
 
 mod common;
 
+use std::sync::Arc;
+
 use common::{content_text, init_service, root_session, test_datastore};
 use surrealdb_core::dbs::Session;
 use surrealdb_mcp::McpService;
@@ -395,23 +397,20 @@ async fn test_use_rejects_nonexistent_database() {
 async fn test_use_rejects_guest_when_guest_queries_denied() {
 	// A datastore that denies arbitrary queries from guest subjects must
 	// not let an anonymous MCP session pin a namespace/database either.
-	use std::sync::Arc;
 
 	use surrealdb_core::dbs::Capabilities;
 	use surrealdb_core::dbs::capabilities::{ArbitraryQueryTarget, Targets};
 	use surrealdb_core::kvs::Datastore;
 
-	let ds = Arc::new(
-		Datastore::builder()
-			.with_capabilities(Capabilities::default().without_arbitrary_query(Targets::<
-				ArbitraryQueryTarget,
-			>::Some(
-				[ArbitraryQueryTarget::Guest].into_iter().collect(),
-			)))
-			.build_with_path("memory")
-			.await
-			.expect("datastore"),
-	);
+	let ds = Datastore::builder()
+		.with_capabilities(Capabilities::default().without_arbitrary_query(Targets::<
+			ArbitraryQueryTarget,
+		>::Some(
+			[ArbitraryQueryTarget::Guest].into_iter().collect(),
+		)))
+		.build_with_path("memory")
+		.await
+		.expect("datastore");
 	ds.execute("DEFINE NAMESPACE other_ns;", &Session::owner(), None).await.expect("seed ns");
 	let service = McpService::new(ds, None, None, Session::owner());
 	service.init_session(Session::default()).expect("init session");
@@ -579,8 +578,6 @@ async fn test_list_structured_content_envelope_shape() {
 /// context window with the full DDL blob.
 #[tokio::test]
 async fn test_list_truncates_oversized_subtree() {
-	use std::sync::Arc;
-
 	use surrealdb_mcp::cnf::McpConfig;
 
 	// Build a service with a tiny `max_result_bytes` cap (256 bytes)
@@ -1783,22 +1780,18 @@ async fn test_list_configs_does_not_error() {
 
 #[tokio::test]
 async fn test_run_respects_function_permissions() {
-	use std::sync::Arc;
-
 	use surrealdb_core::dbs::Capabilities;
 	use surrealdb_core::kvs::Datastore;
 
 	// Build a datastore with auth *enabled* so `PERMISSIONS NONE` bites.
 	// `Capabilities::all()` grants guest access so anonymous sessions are
 	// allowed into the DB, but function-level PERMISSIONS NONE still applies.
-	let ds = Arc::new(
-		Datastore::builder()
-			.with_auth(true)
-			.with_capabilities(Capabilities::all())
-			.build_with_path("memory")
-			.await
-			.expect("datastore"),
-	);
+	let ds = Datastore::builder()
+		.with_auth(true)
+		.with_capabilities(Capabilities::all())
+		.build_with_path("memory")
+		.await
+		.expect("datastore");
 
 	// Owner session bootstraps NS/DB and defines the locked-down function.
 	ds.execute("DEFINE NAMESPACE test;", &Session::owner(), None).await.expect("bootstrap NS");

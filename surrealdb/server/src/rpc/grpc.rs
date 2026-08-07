@@ -2970,13 +2970,11 @@ mod tests {
 	/// A service whose requests arrive as `caller` -- the principal the auth
 	/// middleware resolved from the request's own headers.
 	async fn service_for(caller: Session) -> GrpcService {
-		let datastore = Arc::new(
-			Datastore::builder()
-				.with_capabilities(Capabilities::all())
-				.build_with_path("memory")
-				.await
-				.expect("datastore"),
-		);
+		let datastore = Datastore::builder()
+			.with_capabilities(Capabilities::all())
+			.build_with_path("memory")
+			.await
+			.expect("datastore");
 		GrpcService::new(Arc::new(RpcState::new(datastore)), caller)
 	}
 

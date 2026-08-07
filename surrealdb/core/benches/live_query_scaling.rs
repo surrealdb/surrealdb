@@ -31,7 +31,7 @@
 //! `BENCH_LQ_MEASUREMENT_SECS` (default 10).
 
 use std::hint::black_box;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
@@ -59,7 +59,7 @@ fn env<T: std::str::FromStr>(key: &str, default: T) -> T {
 
 /// A prepared datastore with `subscribers` live queries registered on `TB`.
 struct Prepared {
-	ds: Datastore,
+	ds: Arc<Datastore>,
 	session: Session,
 }
 

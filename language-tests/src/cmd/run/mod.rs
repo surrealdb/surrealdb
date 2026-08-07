@@ -653,13 +653,14 @@ mod tests {
 	/// provisioner hands out (all capabilities + experimental targets, auth on).
 	async fn base_datastore() -> Arc<Datastore> {
 		let ds = Datastore::builder()
+		.without_maintenance_tasks()
 			.with_capabilities(Capabilities::all().with_experimental(Targets::All))
 			.with_auth(true)
 			.build_with_path("memory")
 			.await
 			.unwrap();
 		ds.bootstrap().await.unwrap();
-		Arc::new(ds)
+		ds
 	}
 
 	fn case_from_source(id: usize, path: &str, source: &str) -> Arc<TestCase> {

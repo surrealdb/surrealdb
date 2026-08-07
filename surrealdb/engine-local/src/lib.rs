@@ -29,13 +29,18 @@ pub use surrealdb_core::kvs::Datastore;
 pub use surrealdb_core::options::EngineOptions;
 use surrealdb_rpc::capabilities::Capabilities;
 
-mod interval;
 #[cfg(not(target_family = "wasm"))]
 pub mod native;
 mod router;
-pub mod tasks;
 #[cfg(target_family = "wasm")]
 pub mod wasm;
+
+/// The datastore's background maintenance tasks.
+///
+/// Re-exported because the datastore starts them itself; this path is what
+/// `surrealdb::engine::tasks` resolves to.
+#[doc(inline)]
+pub use surrealdb_core::kvs::tasks;
 
 /// The root credentials to initialise the datastore with on first start.
 #[derive(Debug, Clone)]

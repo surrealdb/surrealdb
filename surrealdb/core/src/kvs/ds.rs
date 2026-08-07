@@ -122,6 +122,18 @@ pub use config::LiveQueryEngine;
 const TARGET: &str = "surrealdb::core::kvs::ds";
 const NODE_DELETE_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// How long [`Datastore::shutdown`] waits for the maintenance tasks to finish
+/// their in-flight pass before giving up on a clean stop.
+///
+/// A pass is left to finish because the storage engine shutdown that follows
+/// refuses every commit, so an interrupted pass fails rather than completes.
+/// That cannot be an unbounded wait: an async event runs user-defined
+/// SurrealQL, whose duration nothing here bounds, so a single non-terminating
+/// event would otherwise hold shutdown open forever. On expiry the remaining
+/// handles are dropped and shutdown proceeds; the abandoned pass then has its
+/// commits refused, which is the same outcome as a crash at that instant.
+const MAINTENANCE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// The role assigned to the initial user created when starting the server with
 /// credentials for the first time
 const INITIAL_USER_ROLE: &str = "owner";
@@ -224,6 +236,26 @@ fn archive_node_for_shutdown(
 /// The underlying datastore instance which stores the dataset.
 pub struct Datastore {
 	transaction_factory: TransactionFactory,
+	/// Cancellation for this datastore's own background work, tripped by
+	/// [`Self::shutdown`].
+	shutdown: CancellationToken,
+	/// Handles for the maintenance tasks the builder started for this
+	/// datastore, so [`Self::shutdown`] can wait for them to stop.
+	///
+	/// A datastore is not a working database without them — index compaction,
+	/// tombstone reclaim, changefeed GC, index-build recovery and the cluster
+	/// heartbeat all live there — so they are started at construction rather
+	/// than left to the embedder. `None` only for a datastore built with
+	/// [`Builder::without_maintenance_tasks`](self::builder::Builder::without_maintenance_tasks).
+	maintenance: parking_lot::Mutex<Option<crate::kvs::tasks::Tasks>>,
+	/// Serialises [`Self::shutdown`] across the holders of this datastore.
+	///
+	/// The sequence has to run start to finish for exactly one caller at a time:
+	/// it stops the maintenance tasks *before* closing the storage engine, and a
+	/// second caller that skipped straight to the storage shutdown would close
+	/// the engine out from under a pass the first caller is still waiting on.
+	/// Later callers therefore block here and observe the completed sequence.
+	shutdown_lock: tokio::sync::Mutex<()>,
 	/// The unique id of this datastore, used in notifications.
 	id: Uuid,
 	/// Whether this process created the datastore's storage.
@@ -494,7 +526,10 @@ impl Datastore {
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub async fn new(path: &str) -> Result<Self> {
+	/// The datastore is returned shared, because it starts background
+	/// maintenance tasks that hold a [`Weak`](std::sync::Weak) reference to it.
+	/// Use [`Builder::without_maintenance_tasks`] for a quiescent datastore.
+	pub async fn new(path: &str) -> Result<Arc<Self>> {
 		Builder::new().build_with_path(path).await
 	}
 
@@ -523,9 +558,17 @@ impl Datastore {
 
 	/// Create a new datastore with the same persistent data (inner), with
 	/// flushed cache. Simulating a server restart
+	///
+	/// The restarted datastore carries **no** maintenance tasks: it is returned
+	/// unshared, so there is nothing for a task to hold a `Weak` to. Callers
+	/// that need them start them with
+	/// [`tasks::init`](crate::kvs::tasks::init) once they have shared it.
 	pub fn restart(self) -> Self {
 		self.buckets.clear();
 		Self {
+			shutdown: CancellationToken::new(),
+			maintenance: parking_lot::Mutex::new(None),
+			shutdown_lock: tokio::sync::Mutex::new(()),
 			id: self.id,
 			auth_enabled: self.auth_enabled,
 			dynamic_configuration: DynamicConfiguration::default(),
@@ -580,6 +623,10 @@ impl Datastore {
 	pub(crate) fn fork_for_test_with_node_id(&self, id: Uuid) -> Self {
 		let transaction_factory = self.transaction_factory.clone();
 		Self {
+			// A fork is unshared, so it carries no maintenance tasks.
+			shutdown: CancellationToken::new(),
+			maintenance: parking_lot::Mutex::new(None),
+			shutdown_lock: tokio::sync::Mutex::new(()),
 			id,
 			auth_enabled: self.auth_enabled,
 			dynamic_configuration: self.dynamic_configuration.clone(),
@@ -1048,6 +1095,34 @@ impl Datastore {
 	pub async fn shutdown(&self) -> Result<()> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running datastore shutdown operations");
+		// One caller runs the whole sequence at a time. The steps below are
+		// ordered — tasks stopped before the storage engine closes — and a
+		// concurrent caller that found the handles already taken would otherwise
+		// skip the wait and close the engine while the first caller's pass was
+		// still using it. Later callers block here and return once the sequence
+		// they were waiting on has finished.
+		let _shutting_down = self.shutdown_lock.lock().await;
+		// Stop this datastore's maintenance tasks first. They open transactions
+		// of their own, and the storage engine shutdown below refuses every
+		// commit once it has run, so a pass still in flight would fail rather
+		// than finish. Cancelling is idempotent, so a caller that already
+		// cancelled its own token — as the server and the embedded engine do —
+		// loses nothing by reaching here.
+		self.shutdown.cancel();
+		// Taken rather than borrowed: the guard must not be held across the
+		// await, and the handles are consumed by resolving them.
+		let tasks = self.maintenance.lock().take();
+		if let Some(tasks) = tasks {
+			// Bounded: a pass runs user-defined SurrealQL in the async event
+			// case, so waiting for one to finish cannot be waiting forever.
+			if timeout(MAINTENANCE_SHUTDOWN_TIMEOUT, tasks.resolve()).await.is_err() {
+				warn!(
+					target: TARGET,
+					"Maintenance tasks did not stop within {MAINTENANCE_SHUTDOWN_TIMEOUT:?}; \
+					 continuing shutdown without them"
+				);
+			}
+		}
 		// Local index builder tasks are deliberately left running: the storage
 		// engine shutdown below stops the commit coordinator first, after which
 		// every commit is refused before it applies (see the engine
@@ -1094,7 +1169,7 @@ impl Datastore {
 	/// no-op on backends other than TiKV. Background tasks call this on
 	/// `EngineOptions::tikv_gc_interval` and shutdown runs one final
 	/// advisory pass.
-	pub async fn run_mvcc_gc(&self, lifetime: Duration) -> Result<()> {
+	pub(crate) async fn run_mvcc_gc(&self, lifetime: Duration) -> Result<()> {
 		#[cfg(feature = "kv-tikv")]
 		if let Some(ops) = self.tikv_ops() {
 			return ops.run_mvcc_gc(lifetime).await.map_err(Into::into);
@@ -1108,7 +1183,7 @@ impl Datastore {
 	/// Routes through the backend's [`TransactionBuilder::extension`] hook;
 	/// no-op on backends other than TiKV. Background tasks call this on
 	/// `EngineOptions::tikv_lock_cleanup_interval`.
-	pub async fn run_lock_cleanup(&self, lifetime: Duration) -> Result<()> {
+	pub(crate) async fn run_lock_cleanup(&self, lifetime: Duration) -> Result<()> {
 		#[cfg(feature = "kv-tikv")]
 		if let Some(ops) = self.tikv_ops() {
 			return ops.run_lock_cleanup(lifetime).await.map_err(Into::into);
@@ -1450,7 +1525,7 @@ impl Datastore {
 	/// Updates this node, bounding each step and explicitly cancelling any
 	/// open write transaction before returning on timeout or cancellation.
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self, canceller))]
-	pub async fn update_node_with_timeout(
+	pub(crate) async fn update_node_with_timeout(
 		&self,
 		timeout_duration: Duration,
 		canceller: &CancellationToken,
@@ -1932,7 +2007,7 @@ impl Datastore {
 	/// # Arguments
 	/// * `interval` - The interval between purge runs, to calculate the lease duration
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn purge_expired_rpc_sessions(&self, interval: &Duration) -> Result<()> {
+	pub(crate) async fn purge_expired_rpc_sessions(&self, interval: &Duration) -> Result<()> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Attempting expired RPC session purge");
 		// Create a new lease handler
@@ -2247,7 +2322,7 @@ impl Datastore {
 	/// Unlike changefeed GC this runs on every node without a lease: each node
 	/// delivers only to the subscriptions it owns.
 	#[instrument(level = "trace", target = "surrealdb::core::lq", skip(self))]
-	pub async fn live_query_router_process(&self) -> Result<()> {
+	pub(crate) async fn live_query_router_process(&self) -> Result<()> {
 		// Only the Router engine delivers via the router.
 		if self.config.datastore.live_query_engine != LiveQueryEngine::Router {
 			return Ok(());
@@ -2324,7 +2399,7 @@ impl Datastore {
 	///
 	/// Returns the number of stalled builds adopted this pass.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self, canceller))]
-	pub async fn resume_stalled_index_builds(
+	pub(crate) async fn resume_stalled_index_builds(
 		&self,
 		interval: Duration,
 		canceller: CancellationToken,
@@ -3562,8 +3637,18 @@ impl Datastore {
 	/// Process queued async events using a distributed lease to coordinate batches.
 	/// Once a batch starts it runs to completion even if the lease expires, so
 	/// brief overlap is possible.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn event_processing(&self, interval: Duration) -> Result<()> {
+	///
+	/// Returns as soon as `canceller` is tripped, at the next batch boundary. The
+	/// events themselves are user-defined SurrealQL that nothing here bounds, so
+	/// this bounds the wait to one batch rather than to the whole queue — which
+	/// is what stops a busy queue from holding [`Self::shutdown`] open for as
+	/// long as writes keep arriving.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self, canceller))]
+	pub(crate) async fn event_processing(
+		&self,
+		interval: Duration,
+		canceller: &CancellationToken,
+	) -> Result<()> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Attempting event processing process");
 		// Create a new lease handler
@@ -3574,8 +3659,14 @@ impl Datastore {
 			TaskLeaseType::EventProcessing,
 			interval * 2,
 		)?;
-		// We continue without interruptions while there are keys and the lease
+		// We continue while there are keys, the lease, and no cancellation
 		loop {
+			// Stop between batches once shutdown starts. Cancellation is not a
+			// failure: the queue is durable, so whatever is left is processed by
+			// the next pass on this node or another.
+			if canceller.is_cancelled() {
+				return Ok(());
+			}
 			// Attempt to acquire a lease for the EventProcessing task
 			// If we don't get the lease, another node is handling this task
 			if !lh.has_lease().await? {
@@ -4983,8 +5074,11 @@ mod test {
 	};
 	use crate::types::{PublicValue, PublicVariables};
 
-	async fn new_index_compaction_test_ds() -> Result<(Datastore, Session)> {
-		let ds = Datastore::new("memory").await?;
+	async fn new_index_compaction_test_ds() -> Result<(Arc<Datastore>, Session)> {
+		// These tests decide when compaction runs and observe the wake-up that
+		// drives it. `CommitTriggers::index_compaction` is a `notify_one`, so a
+		// background compactor would take the permit a test is waiting on.
+		let ds = Datastore::builder().without_maintenance_tasks().build_with_path("memory").await?;
 		let session = Session::owner().with_ns("test").with_db("test");
 		let txn = ds.transaction(Write).await?;
 		txn.ensure_ns_db(None, "test", "test").await?;
@@ -5077,7 +5171,7 @@ mod test {
 	/// A datastore with the `gql` capability and an initialised `test/test`
 	/// namespace/database, for the GQL mutation tests.
 	#[cfg(feature = "gql")]
-	async fn gql_test_ds() -> Result<(Datastore, Session)> {
+	async fn gql_test_ds() -> Result<(Arc<Datastore>, Session)> {
 		use crate::dbs::capabilities::Targets;
 		let ds = Datastore::builder()
 			.with_capabilities(Capabilities::all().with_experimental(Targets::All))
@@ -5739,12 +5833,9 @@ mod test {
 		let node_id = ds.id();
 		let _guard = inject_retryable_conflict(site, node_id);
 
-		let (_, errors) = Datastore::index_compaction(
-			Arc::new(ds),
-			Duration::from_secs(1),
-			CancellationToken::new(),
-		)
-		.await?;
+		let (_, errors) =
+			Datastore::index_compaction(ds, Duration::from_secs(1), CancellationToken::new())
+				.await?;
 
 		assert_eq!(errors, 0);
 		assert_eq!(retryable_conflict_count(site, node_id), 0);
@@ -5789,7 +5880,7 @@ mod test {
 			.with_observer(Arc::clone(&observer) as Arc<dyn ExecutionObserver>)
 			.build_with_path("memory")
 			.await?;
-		let ds = Arc::new(ds);
+		let ds = ds;
 		let session = Session::owner().with_ns("test").with_db("test");
 		{
 			let txn = ds.transaction(Write).await?;
@@ -5869,7 +5960,7 @@ mod test {
 			.with_observer(Arc::clone(&observer) as Arc<dyn ExecutionObserver>)
 			.build_with_path("memory")
 			.await?;
-		let ds = Arc::new(ds);
+		let ds = ds;
 		let session = Session::owner().with_ns("test").with_db("test");
 		{
 			let txn = ds.transaction(Write).await?;
@@ -6053,6 +6144,86 @@ mod test {
 		Ok(())
 	}
 
+	/// Queues `count` async events and returns how many the event ran.
+	async fn queue_async_events(ds: &Datastore, session: &Session, count: usize) -> Result<()> {
+		execute_all(
+			ds,
+			session,
+			"DEFINE TABLE person SCHEMALESS;
+			 DEFINE TABLE logged SCHEMALESS;
+			 DEFINE EVENT log ON person ASYNC THEN (CREATE logged SET who = $after.id);",
+		)
+		.await?;
+		execute_all(ds, session, &format!("CREATE |person:{count}| RETURN NONE;")).await
+	}
+
+	async fn logged_count(ds: &Datastore, session: &Session) -> Result<usize> {
+		let mut res = ds.execute("SELECT * FROM logged", session, None).await?;
+		match res.remove(0).result? {
+			PublicValue::Array(a) => Ok(a.len()),
+			other => panic!("expected an array, got {other:?}"),
+		}
+	}
+
+	/// A cancelled pass must return at the next batch boundary rather than drain
+	/// the queue. Async events run user-defined SurrealQL of unbounded duration,
+	/// so a pass that ignored cancellation would hold [`Datastore::shutdown`]
+	/// open for as long as the queue kept refilling.
+	#[test_log::test(tokio::test)]
+	async fn event_processing_returns_immediately_once_cancelled() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		queue_async_events(&ds, &session, 50).await?;
+
+		let canceller = CancellationToken::new();
+		canceller.cancel();
+		// Cancellation is not an error: the queue is durable, so what is left is
+		// picked up by the next pass here or on another node.
+		ds.event_processing(Duration::from_secs(1), &canceller).await?;
+		assert_eq!(
+			logged_count(&ds, &session).await?,
+			0,
+			"a cancelled pass must not process the queue"
+		);
+		Ok(())
+	}
+
+	/// The control for the test above: with a live token the same queue drains,
+	/// so the early return is cancellation and not a broken pass.
+	#[test_log::test(tokio::test)]
+	async fn event_processing_drains_the_queue_when_not_cancelled() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		queue_async_events(&ds, &session, 50).await?;
+
+		ds.event_processing(Duration::from_secs(1), &CancellationToken::new()).await?;
+		assert_eq!(
+			logged_count(&ds, &session).await?,
+			50,
+			"an uncancelled pass must drain the queue"
+		);
+		Ok(())
+	}
+
+	/// Two owners of one datastore may both call `shutdown`, which the sequence
+	/// serialises so a second caller cannot close the storage engine while the
+	/// first is still waiting on a maintenance pass.
+	///
+	/// This covers the liveness half of that: both callers complete and neither
+	/// blocks on the other's guard. The exclusion itself is a property of holding
+	/// the guard across the whole sequence, not something observable from
+	/// outside without a test hook in the shutdown path.
+	#[test_log::test(tokio::test)]
+	async fn concurrent_shutdown_calls_both_complete() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let (first, second) = tokio::time::timeout(Duration::from_secs(30), async {
+			tokio::join!(ds.shutdown(), ds.shutdown())
+		})
+		.await
+		.map_err(|_| anyhow::anyhow!("concurrent shutdown deadlocked"))?;
+		first?;
+		second?;
+		Ok(())
+	}
+
 	/// Mutations that cancel out within one transaction write no entry at all,
 	/// and a read inside that transaction still sees its own uncommitted work.
 	#[tokio::test]
@@ -6134,7 +6305,7 @@ mod test {
 	#[tokio::test]
 	async fn index_compaction_quarantines_undecodable_queue_keys() -> Result<()> {
 		let (ds, session) = new_index_compaction_test_ds().await?;
-		let ds = Arc::new(ds);
+		let ds = ds;
 		execute_all(
 			&ds,
 			&session,

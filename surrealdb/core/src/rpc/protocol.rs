@@ -2478,7 +2478,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn mutations_persist_and_an_evicted_session_is_rehydrated() {
-		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let ds = Datastore::new("memory").await.unwrap();
 		let rpc = DurableRpc::new(ds);
 		let sid = Uuid::from_u128(7);
 
@@ -2508,7 +2508,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn attach_persists_so_a_bare_session_survives_eviction() {
-		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let ds = Datastore::new("memory").await.unwrap();
 		let rpc = DurableRpc::new(ds);
 		let sid = Uuid::from_u128(13);
 
@@ -2527,7 +2527,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn read_only_methods_do_not_persist() {
-		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let ds = Datastore::new("memory").await.unwrap();
 		let rpc = DurableRpc::new(ds);
 		let sid = Uuid::from_u128(9);
 		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
@@ -2539,7 +2539,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn detach_deletes_the_durable_copy() {
-		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let ds = Datastore::new("memory").await.unwrap();
 		let rpc = DurableRpc::new(ds);
 		let sid = Uuid::from_u128(11);
 		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
@@ -2561,7 +2561,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn detach_fails_and_keeps_the_session_when_the_durable_delete_fails() {
-		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let ds = Datastore::new("memory").await.unwrap();
 		let rpc = DurableRpc::new(ds);
 		let sid = Uuid::from_u128(15);
 		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));

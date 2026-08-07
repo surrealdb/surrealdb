@@ -152,7 +152,7 @@ mod tikv_concurrency {
 		tx.delr(RootRoot {}.range_subtree().unwrap()).await.unwrap();
 		tx.del_key(&VersionKey {}).await.unwrap();
 		tx.commit().await.unwrap();
-		Arc::new(ds)
+		ds
 	}
 
 	/// Run a `REMOVE INDEX IF EXISTS` to completion, retrying on the transient
