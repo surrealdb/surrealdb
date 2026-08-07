@@ -525,6 +525,14 @@ pub trait RpcProtocol {
 			}
 			_ => dispatch.await,
 		};
+		let observer = self.kvs().observer();
+		// Nothing is observing, so none of the event context below is ever read.
+		// Building it costs a session lookup, a read-lock acquisition and several
+		// `String` clones on every single RPC, which is the default configuration
+		// for an embedded datastore and for a server with metrics disabled.
+		if observer.is_noop() {
+			return result;
+		}
 		let outcome = Outcome::from(&result);
 		// Resolve session context for the observer event. An unknown
 		// session ID yields an empty `TenantIdentity` rather than an
@@ -553,7 +561,6 @@ pub trait RpcProtocol {
 		// `-` sentinel.
 		let error_class =
 			result.as_ref().err().map(crate::observe::error_class::classify_types_error);
-		let observer = self.kvs().observer();
 		observer.on_rpc_complete(&RpcEvent {
 			safe: RpcEventSafe {
 				method,
@@ -1153,7 +1160,7 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let vars = Some(session.variables.clone());
 		// Execute the query on the database
-		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), vars)
+		let mut res = run_query(self, txn, session_id, &session, QueryForm::Parsed(ast), vars)
 			.await
 			.map_err(types_error_from_anyhow)?;
 		// Extract the first query result
@@ -1201,7 +1208,7 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let vars = Some(session.variables.clone());
 
-		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), vars)
+		let mut res = run_query(self, txn, session_id, &session, QueryForm::Parsed(ast), vars)
 			.await
 			.map_err(types_error_from_anyhow)?;
 
@@ -1267,7 +1274,7 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let vars = Some(session.variables.clone());
 		// Execute the query on the database
-		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), vars)
+		let mut res = run_query(self, txn, session_id, &session, QueryForm::Parsed(ast), vars)
 			.await
 			.map_err(types_error_from_anyhow)?;
 		// Extract the first query result
@@ -1318,7 +1325,7 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(session.variables.clone());
 		// Execute the query on the database
-		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var)
+		let mut res = run_query(self, txn, session_id, &session, QueryForm::Parsed(ast), var)
 			.await
 			.map_err(types_error_from_anyhow)?;
 		// Extract the first query result
@@ -1367,7 +1374,7 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(session.variables.clone());
 		// Execute the query on the database
-		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var)
+		let mut res = run_query(self, txn, session_id, &session, QueryForm::Parsed(ast), var)
 			.await
 			.map_err(types_error_from_anyhow)?;
 		// Extract the first query result
@@ -1421,7 +1428,7 @@ pub trait RpcProtocol {
 		};
 		let ast = Ast::single_expr(Expr::Create(Box::new(sql)));
 		// Execute the query on the database
-		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), None)
+		let mut res = run_query(self, txn, session_id, &session, QueryForm::Parsed(ast), None)
 			.await
 			.map_err(types_error_from_anyhow)?;
 		// Extract the first query result
@@ -1479,7 +1486,7 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(session.variables.clone());
 		// Execute the query on the database
-		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var)
+		let mut res = run_query(self, txn, session_id, &session, QueryForm::Parsed(ast), var)
 			.await
 			.map_err(types_error_from_anyhow)?;
 		// Extract the first query result
@@ -1588,7 +1595,7 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(session.variables.clone());
 		// Execute the query on the database
-		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var)
+		let mut res = run_query(self, txn, session_id, &session, QueryForm::Parsed(ast), var)
 			.await
 			.map_err(types_error_from_anyhow)?;
 		// Extract the first query result
@@ -1752,7 +1759,7 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(session.variables.clone());
 		// Execute the query on the database
-		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var)
+		let mut res = run_query(self, txn, session_id, &session, QueryForm::Parsed(ast), var)
 			.await
 			.map_err(types_error_from_anyhow)?;
 		// Extract the first query result
@@ -1795,7 +1802,7 @@ pub trait RpcProtocol {
 		let (query, vars) = extract_query_params(params, &session)?;
 
 		Ok(DbResult::Query(
-			run_query(self, txn, session_id, QueryForm::Text(&query), vars)
+			run_query(self, txn, session_id, &session, QueryForm::Text(&query), vars)
 				.await
 				.map_err(types_error_from_anyhow)?,
 		))
@@ -1884,8 +1891,11 @@ pub trait RpcProtocol {
 		//
 		// There is no auth event to match it: `method_to_auth_action` maps
 		// `Query` to `None`, so `execute` emits none either.
+		//
+		// `None` when nothing is observing, which also skips building the
+		// identity — the same short-circuit `execute` applies.
 		let observer = Arc::clone(self.kvs().observer());
-		let identity = TenantIdentity::from(&session);
+		let identity = (!observer.is_noop()).then(|| TenantIdentity::from(&session));
 		let started = web_time::Instant::now();
 		let QueryStreamJob {
 			statement_count,
@@ -1908,18 +1918,20 @@ pub trait RpcProtocol {
 					},
 					None => run.await,
 				};
-				observer.on_rpc_complete(&RpcEvent {
-					safe: RpcEventSafe {
-						method: Method::Query,
-						outcome: Outcome::from(&result),
-						duration: started.elapsed(),
-						error_class: result
-							.as_ref()
-							.err()
-							.map(crate::observe::error_class::classify_types_error),
-					},
-					ctx: identity.to_rpc_ctx(),
-				});
+				if let Some(identity) = &identity {
+					observer.on_rpc_complete(&RpcEvent {
+						safe: RpcEventSafe {
+							method: Method::Query,
+							outcome: Outcome::from(&result),
+							duration: started.elapsed(),
+							error_class: result
+								.as_ref()
+								.err()
+								.map(crate::observe::error_class::classify_types_error),
+						},
+						ctx: identity.to_rpc_ctx(),
+					});
+				}
 				result
 			}),
 		})
@@ -1974,7 +1986,7 @@ pub trait RpcProtocol {
 			let plan = self.kvs().parse_gql(&query)?;
 
 			Ok(DbResult::Query(
-				run_query(self, txn, session_id, QueryForm::Plan(plan), vars)
+				run_query(self, txn, session_id, &session, QueryForm::Plan(plan), vars)
 					.await
 					.map_err(types_error_from_anyhow)?,
 			))
@@ -2215,7 +2227,7 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(session.variables.clone());
 		// Execute the function on the database
-		let mut res = run_query(self, None, session_id, QueryForm::Parsed(ast), var)
+		let mut res = run_query(self, None, session_id, &session, QueryForm::Parsed(ast), var)
 			.await
 			.map_err(types_error_from_anyhow)?;
 		// Extract the first query result
@@ -2299,18 +2311,27 @@ fn extract_query_params(
 	Ok((query, vars))
 }
 
+/// Runs a query against a session the caller already holds a read guard on.
+///
+/// The session is passed in rather than looked up again on purpose. Every caller
+/// reaches here holding a read guard on `RwLock<Session>`, and that lock is
+/// task-fair: a writer queued between two acquisitions blocks the second read,
+/// while the caller's outer guard blocks the writer. Re-locking here would
+/// therefore deadlock against any concurrent `set` / `use` / `signin` /
+/// `authenticate` on the same session, all of which a transport may apply
+/// concurrently with this call. The same reasoning already keeps `handle_live`
+/// off the lock — see the snapshot below.
 async fn run_query<T>(
 	this: &T,
 	txn: Option<Uuid>,
 	session_id: Uuid,
+	session: &Session,
 	query: QueryForm<'_>,
 	vars: Option<PublicVariables>,
 ) -> Result<Vec<QueryResult>>
 where
 	T: RpcProtocol + ?Sized,
 {
-	let session_lock = this.get_session(&session_id).await.map_err(anyhow::Error::from)?;
-	let session = session_lock.read().await;
 	if !T::LQ_SUPPORT && session.rt {
 		return Err(bad_lq_config().into());
 	}
@@ -2324,48 +2345,48 @@ where
 		match (query, cancel) {
 			(QueryForm::Text(query), Some(cancel)) => {
 				this.kvs()
-					.execute_with_transaction_and_cancel(query, &session, vars, tx, cancel)
+					.execute_with_transaction_and_cancel(query, session, vars, tx, cancel)
 					.await?
 			}
 			(QueryForm::Text(query), None) => {
-				this.kvs().execute_with_transaction(query, &session, vars, tx).await?
+				this.kvs().execute_with_transaction(query, session, vars, tx).await?
 			}
 			(QueryForm::Parsed(ast), Some(cancel)) => {
 				this.kvs()
-					.process_with_transaction_and_cancel(ast, &session, vars, tx, cancel)
+					.process_with_transaction_and_cancel(ast, session, vars, tx, cancel)
 					.await?
 			}
 			(QueryForm::Parsed(ast), None) => {
-				this.kvs().process_with_transaction(ast, &session, vars, tx).await?
+				this.kvs().process_with_transaction(ast, session, vars, tx).await?
 			}
 			#[cfg(feature = "gql")]
 			(QueryForm::Plan(plan), Some(cancel)) => {
 				this.kvs()
-					.process_gql_with_transaction_and_cancel(plan, &session, vars, tx, cancel)
+					.process_gql_with_transaction_and_cancel(plan, session, vars, tx, cancel)
 					.await?
 			}
 			#[cfg(feature = "gql")]
 			(QueryForm::Plan(plan), None) => {
-				this.kvs().process_gql_with_transaction(plan, &session, vars, tx).await?
+				this.kvs().process_gql_with_transaction(plan, session, vars, tx).await?
 			}
 		}
 	} else {
 		// No transaction - execute normally
 		match (query, cancel) {
 			(QueryForm::Text(query), Some(cancel)) => {
-				this.kvs().execute_with_cancel(query, &session, vars, cancel).await?
+				this.kvs().execute_with_cancel(query, session, vars, cancel).await?
 			}
-			(QueryForm::Text(query), None) => this.kvs().execute(query, &session, vars).await?,
+			(QueryForm::Text(query), None) => this.kvs().execute(query, session, vars).await?,
 			(QueryForm::Parsed(ast), Some(cancel)) => {
-				this.kvs().process_with_cancel(ast, &session, vars, cancel).await?
+				this.kvs().process_with_cancel(ast, session, vars, cancel).await?
 			}
-			(QueryForm::Parsed(ast), None) => this.kvs().process(ast, &session, vars).await?,
+			(QueryForm::Parsed(ast), None) => this.kvs().process(ast, session, vars).await?,
 			#[cfg(feature = "gql")]
 			(QueryForm::Plan(plan), Some(cancel)) => {
-				this.kvs().process_gql_with_cancel(plan, &session, vars, cancel).await?
+				this.kvs().process_gql_with_cancel(plan, session, vars, cancel).await?
 			}
 			#[cfg(feature = "gql")]
-			(QueryForm::Plan(plan), None) => this.kvs().process_gql(plan, &session, vars).await?,
+			(QueryForm::Plan(plan), None) => this.kvs().process_gql(plan, session, vars).await?,
 		}
 	};
 
@@ -2373,7 +2394,7 @@ where
 	//
 	// `handle_live` needs the registering session's namespace / database
 	// for the `surrealdb.live_query.active` gauge labelling. We snapshot
-	// those off the read guard we already hold here rather than letting
+	// those off the session the caller lent us rather than letting
 	// `handle_live` re-lock the same `RwLock<Session>`: that would be a
 	// recursive read on a write-preferring lock, and any concurrent
 	// session-mutating RPC on the same WebSocket would queue a writer
@@ -2474,6 +2495,109 @@ mod tests {
 
 	fn use_params(ns: &str, db: &str) -> PublicArray {
 		vec![PublicValue::String(ns.to_owned()), PublicValue::String(db.to_owned())].into()
+	}
+
+	/// Counts `on_rpc_complete` calls, reporting itself as a no-op shell or not.
+	///
+	/// A real observer never lies about [`ExecutionObserver::is_noop`] — only
+	/// `NoopObserver` overrides it. This one does so it can observe the
+	/// short-circuit from the outside: with the flag set, a counted event means
+	/// the gate did not fire.
+	struct RpcCounter {
+		noop: bool,
+		count: std::sync::atomic::AtomicUsize,
+	}
+
+	impl crate::observe::ExecutionObserver for RpcCounter {
+		fn on_rpc_complete(&self, _event: &crate::observe::RpcEvent) {
+			self.count.fetch_add(1, Ordering::SeqCst);
+		}
+		fn is_noop(&self) -> bool {
+			self.noop
+		}
+	}
+
+	async fn count_rpc_events(noop: bool) -> usize {
+		let observer = Arc::new(RpcCounter {
+			noop,
+			count: std::sync::atomic::AtomicUsize::new(0),
+		});
+		let ds = Datastore::builder()
+			.with_observer(Arc::clone(&observer) as Arc<dyn crate::observe::ExecutionObserver>)
+			.build_with_path("memory")
+			.await
+			.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let sid = Uuid::from_u128(31);
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+		rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await.unwrap();
+		observer.count.load(Ordering::SeqCst)
+	}
+
+	/// The gate must not silence a live observer.
+	#[tokio::test]
+	async fn an_observed_rpc_still_reports_its_event() {
+		assert_eq!(count_rpc_events(false).await, 1, "a live observer received no RPC event");
+	}
+
+	/// And with nothing observing, the whole event path — a session lookup, a
+	/// read-lock acquisition and the identity clones — is skipped.
+	#[tokio::test]
+	async fn an_unobserved_rpc_builds_no_event() {
+		assert_eq!(count_rpc_events(true).await, 0, "the no-op short-circuit did not fire");
+	}
+
+	/// A query and a session mutation on the same session must both complete.
+	///
+	/// `Session` sits behind a task-fair `RwLock`, so a queued writer blocks
+	/// later readers. Any method that acquires a read guard and then reaches a
+	/// second acquisition of the same lock therefore deadlocks against a
+	/// concurrent `set` / `use` / `signin`: the writer waits on the outer guard
+	/// while the inner read waits behind the writer.
+	///
+	/// A transport applies one connection's RPCs concurrently, so this is
+	/// reachable from a single client. The two tasks race, so a run that happens
+	/// not to interleave passes vacuously — but once the re-lock is gone no
+	/// interleaving can hang, so this cannot fail spuriously.
+	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+	async fn a_query_and_a_concurrent_session_mutation_both_complete() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let rpc = Arc::new(DurableRpc::new(ds));
+		let sid = Uuid::from_u128(21);
+		rpc.set_session(sid, Arc::new(RwLock::new(Session::owner())));
+		rpc.execute(None, sid, Some(sid), Method::Use, use_params("app", "app")).await.unwrap();
+
+		const ROUNDS: usize = 200;
+		let queries = {
+			let rpc = Arc::clone(&rpc);
+			tokio::spawn(async move {
+				for i in 0..ROUNDS {
+					let params: PublicArray =
+						vec![PublicValue::String(format!("RETURN {i};"))].into();
+					rpc.execute(None, sid, Some(sid), Method::Query, params).await.unwrap();
+				}
+			})
+		};
+		let mutations = {
+			let rpc = Arc::clone(&rpc);
+			tokio::spawn(async move {
+				for i in 0..ROUNDS {
+					let params: PublicArray = vec![
+						PublicValue::String("k".to_owned()),
+						PublicValue::Number(surrealdb_types::Number::Int(i as i64)),
+					]
+					.into();
+					rpc.execute(None, sid, Some(sid), Method::Set, params).await.unwrap();
+				}
+			})
+		};
+
+		tokio::time::timeout(std::time::Duration::from_secs(30), async {
+			queries.await.unwrap();
+			mutations.await.unwrap();
+		})
+		.await
+		.expect("a query deadlocked against a concurrent session mutation");
 	}
 
 	#[tokio::test]
