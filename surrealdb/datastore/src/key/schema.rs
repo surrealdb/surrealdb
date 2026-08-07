@@ -361,17 +361,48 @@ keyspace! {
 						/// Uncompacted full-text term changes: all terms, one term, and
 						/// one change. Each level is also a stored key, because
 						/// compaction writes its result at the bound itself.
+						///
+						/// Legacy shape, no longer written. Readers fold this family
+						/// and `!tx` together and compaction drains both, so an
+						/// index carrying entries in either shape resolves to the
+						/// same document set.
 						term_changes = ["!tt"] => String (also_range);
 						term_change_set = term_changes + [term: Str] => String
 							(also_range);
 						term_change = term_change_set
 							+ [doc_id: DocId, nid: Uuid, uid: Uuid, add: bool] => String;
 
+						/// Uncompacted full-text term changes, batched per transaction.
+						///
+						/// `!tt` spends one key per (term, document) pair. Nothing
+						/// requires that: the entry is already tagged with a
+						/// per-transaction id, so two transactions never share a key,
+						/// and one transaction's whole contribution to a term collapses
+						/// into a single bitmap without reintroducing contention. A
+						/// statement indexing many records then writes one key per
+						/// distinct term rather than one per (term, record).
+						///
+						/// `add` stays in the key, as in `!tt`, so the two directions
+						/// never share a bitmap and a reader needs no signed payload.
+						term_change_batch = ["!tx", @, term: Str, @, nid: Uuid, uid: Uuid, add: bool]
+							=> roaring::RoaringTreemap;
+
 						/// Document length and count, compacted at the bound and
 						/// accumulated in deltas beneath it.
+						///
+						/// Legacy shape, no longer written; read and drained
+						/// alongside `!dx`.
 						doc_stats = ["!dc"] => crate::values::fulltext::DocLengthAndCount
 							(also_range);
 						doc_stats_delta = doc_stats + [doc_id: DocId, nid: Uuid, uid: Uuid]
+							=> crate::values::fulltext::DocLengthAndCount;
+
+						/// Document length and count, batched per transaction.
+						///
+						/// The same per-transaction tagging that makes `!tx` safe makes
+						/// a per-document key unnecessary here: the fields sum, so one
+						/// entry can carry every document the transaction indexed.
+						doc_stats_batch = ["!dx", @, nid: Uuid, uid: Uuid]
 							=> crate::values::fulltext::DocLengthAndCount;
 
 						doc_length = ["!dl", @, id: DocId] => crate::values::fulltext::DocLength;

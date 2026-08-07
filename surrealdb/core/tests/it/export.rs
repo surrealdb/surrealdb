@@ -129,7 +129,7 @@ async fn full_text_table_groups_more_tightly_than_the_batch() -> Result<()> {
 #[tokio::test]
 async fn grouping_follows_document_length() -> Result<()> {
 	let mut sizes = Vec::new();
-	for terms in [10usize, 200] {
+	for terms in [10usize, 600] {
 		let ds = ds_with_batch_size(Some(1000)).await?;
 		let ses = Session::owner().with_ns("test").with_db("test");
 		seed_with_terms(&ds, &ses, FULLTEXT_SCHEMA, 60, terms).await?;
@@ -142,7 +142,7 @@ async fn grouping_follows_document_length() -> Result<()> {
 	assert!(
 		long_docs < short_docs,
 		"longer documents must group more tightly: \
-		 {short_docs} for 10 terms vs {long_docs} for 200"
+		 {short_docs} for 10 terms vs {long_docs} for 600"
 	);
 	Ok(())
 }
@@ -184,7 +184,7 @@ async fn grouping_follows_array_index_fan_out() -> Result<()> {
 async fn regrouped_export_round_trips() -> Result<()> {
 	let source = ds_with_batch_size(Some(1000)).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	seed(&source, &ses, FULLTEXT_SCHEMA, 120).await?;
+	seed_with_terms(&source, &ses, FULLTEXT_SCHEMA, 120, 400).await?;
 	let sql = export_text(&source, &ses).await?;
 	assert!(insert_group_sizes(&sql).len() > 1, "the fixture must exercise several groups");
 

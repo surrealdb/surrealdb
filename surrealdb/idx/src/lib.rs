@@ -61,6 +61,8 @@ use std::fmt::{Debug, Display};
 use std::sync::Arc;
 
 use anyhow::Result;
+use roaring::RoaringTreemap;
+use surrealdb_datastore::values::fulltext::DocLengthAndCount;
 use surrealdb_datastore::values::index_build::{
 	Appending, AppendingId, BatchId, BuildGeneration, BuildTicket, BuildTicketMutationSeq,
 	IndexBuildReservation, PrimaryAppendingTicket,
@@ -76,12 +78,13 @@ use crate::key::schema::{
 	BuildAppendGenerationPrefix, BuildAppendIxPrefix, BuildAppendKey, BuildAppendTicketPrefix,
 	BuildPrimaryGenerationPrefix, BuildPrimaryIxPrefix, BuildPrimaryKey,
 	BuildReservationGenerationPrefix, BuildReservationIxPrefix, BuildReservationKey, BuildStateKey,
-	BuildTicketIxPrefix, BuildTicketKey, DocCountKey, DocLengthKey, DocStatsDeltaKey, DocStatsKey,
-	HnswElementHashedKey, HnswElementKey, HnswGenerationKey, HnswLayerKey, HnswLayerLayerPrefix,
-	HnswNodeKey, HnswNodeLayerPrefix, HnswPendingRoot, HnswRecordPendingKey,
+	BuildTicketIxPrefix, BuildTicketKey, DocCountKey, DocLengthKey, DocStatsBatchPrefix,
+	DocStatsKey, HnswElementHashedKey, HnswElementKey, HnswGenerationKey, HnswLayerKey,
+	HnswLayerLayerPrefix, HnswNodeKey, HnswNodeLayerPrefix, HnswPendingRoot, HnswRecordPendingKey,
 	HnswRecordPendingPrefix, HnswStateKey, HnswVectorKey, IndexAppendKey, IndexAppendPrefix,
-	IndexCompactionKey, IndexPrimaryKey, IndexVersionKey, TermChangeKey, TermChangeSetKey,
-	TermChangesKey, TermDocsKey, TermGenerationKey, TermPostingKey,
+	IndexCompactionKey, IndexPrimaryKey, IndexVersionKey, TermChangeBatchPrefix,
+	TermChangeBatchTermPrefix, TermChangeSetKey, TermChangesKey, TermDocsKey, TermGenerationKey,
+	TermPostingKey,
 };
 #[cfg(diskann)]
 use crate::key::schema::{
@@ -796,27 +799,6 @@ impl IndexKeyBase {
 		}
 	}
 
-	fn new_tt<'a>(
-		&'a self,
-		term: &'a str,
-		doc_id: DocId,
-		nid: Uuid,
-		uid: Uuid,
-		add: bool,
-	) -> TermChangeKey<'a> {
-		TermChangeKey {
-			ns: self.0.ns,
-			db: self.0.db,
-			tb: Cow::Borrowed(&self.0.tb),
-			ix: self.0.ix,
-			term: Cow::Borrowed(term),
-			doc_id,
-			nid,
-			uid,
-			add,
-		}
-	}
-
 	fn new_tt_term_range<'a>(&'a self, term: &'a str) -> Result<TypedRange<String>> {
 		TermChangeSetKey {
 			ns: self.0.ns,
@@ -838,6 +820,48 @@ impl IndexKeyBase {
 		.range()
 	}
 
+	fn new_tx_term_range<'a>(&'a self, term: &'a str) -> Result<TypedRange<RoaringTreemap>> {
+		TermChangeBatchTermPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+			term: Cow::Borrowed(term),
+		}
+		.range()
+	}
+
+	fn new_tx_terms_range(&self) -> Result<TypedRange<RoaringTreemap>> {
+		TermChangeBatchPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+		}
+		.range()
+	}
+
+	/// Buffers this index's contribution to one term until the transaction
+	/// commits, where it becomes one `!tx` entry per term and direction.
+	fn buffer_tt(&self, tx: &Transaction, term: &str, doc_id: DocId, nid: Uuid, add: bool) {
+		tx.buffer_term_change(self.0.ns, self.0.db, &self.0.tb, self.0.ix, term, doc_id, add, nid)
+	}
+
+	/// What this transaction has buffered for one term, as `(added, removed)`.
+	fn pending_tt(&self, tx: &Transaction, term: &str) -> (RoaringTreemap, RoaringTreemap) {
+		tx.pending_term_change(self.0.ns, self.0.db, &self.0.tb, self.0.ix, term)
+	}
+
+	/// Buffers one document's contribution to this index's statistics.
+	fn buffer_dx(&self, tx: &Transaction, stats: DocLengthAndCount, nid: Uuid) {
+		tx.buffer_doc_stats(self.0.ns, self.0.db, &self.0.tb, self.0.ix, stats, nid)
+	}
+
+	/// What this transaction has buffered for this index's statistics.
+	fn pending_dx(&self, tx: &Transaction) -> DocLengthAndCount {
+		tx.pending_doc_stats(self.0.ns, self.0.db, &self.0.tb, self.0.ix)
+	}
+
 	/// Generation guard for full-text term-document (`!tt`) compaction.
 	fn new_tv_key(&self) -> TermGenerationKey<'_> {
 		TermGenerationKey {
@@ -845,18 +869,6 @@ impl IndexKeyBase {
 			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
-		}
-	}
-
-	fn new_dc_with_id(&self, doc_id: DocId, nid: Uuid, uid: Uuid) -> DocStatsDeltaKey<'_> {
-		DocStatsDeltaKey {
-			ns: self.0.ns,
-			db: self.0.db,
-			tb: Cow::Borrowed(&self.0.tb),
-			ix: self.0.ix,
-			doc_id,
-			nid,
-			uid,
 		}
 	}
 
@@ -868,6 +880,16 @@ impl IndexKeyBase {
 			ix: self.0.ix,
 		}
 		.encode_key()
+	}
+
+	fn new_dx_range(&self) -> Result<TypedRange<DocLengthAndCount>> {
+		DocStatsBatchPrefix {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+		}
+		.range()
 	}
 
 	/// Generation guard for full-text document-stat (`!dc`) compaction.

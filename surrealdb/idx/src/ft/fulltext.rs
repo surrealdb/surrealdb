@@ -36,7 +36,7 @@ use crate::ft::analyzer::tokenizer::Tokens;
 use crate::ft::analyzer::{Analyzer, AnalyzerFunction};
 use crate::ft::highlighter::{HighlightParams, Highlighter, Offseter};
 use crate::ft::{DocLength, MatchesHitsIterator, Score, TermFrequency};
-use crate::key::schema::{DocStatsKey, TermChangeKey};
+use crate::key::schema::{DocStatsKey, TermChangeBatchKey, TermChangeKey};
 use crate::key::{KVKey, KVKeyDecode};
 use crate::trees::store::IndexStores;
 use crate::val::{RecordId, Value};
@@ -247,7 +247,6 @@ impl FullTextIndex {
 		let mut set = HashSet::new();
 		let tx = env.tx();
 		let nid = env.node_id();
-		let uid = Self::delta_uid();
 		// Get the doc id (if it exists)
 		let doc_id = self.get_doc_id(&tx, rid).await?;
 		if let Some(doc_id) = doc_id {
@@ -261,7 +260,7 @@ impl FullTextIndex {
 						// Delete the term
 						let key = self.ikb.new_td(s, doc_id);
 						tx.del_key(&key).await?;
-						self.set_tt(&tx, s, doc_id, &nid, uid, false).await?;
+						self.ikb.buffer_tt(&tx, s, doc_id, nid, false);
 					}
 				}
 			}
@@ -276,8 +275,7 @@ impl FullTextIndex {
 						total_docs_length: -(dl as i128),
 						doc_count: -1,
 					};
-					let key = self.ikb.new_dc_with_id(doc_id, nid, uid);
-					tx.put_key(&key, &dcl).await?;
+					self.ikb.buffer_dx(&tx, dcl, nid);
 					*require_compaction = true;
 				}
 			}
@@ -303,16 +301,15 @@ impl FullTextIndex {
 	) -> Result<()> {
 		let tx = env.tx();
 		let nid = env.node_id();
-		let uid = Self::delta_uid();
 		// Resolve (or assign) the record's doc id in the table's shared space
 		let doc_id = self.doc_ids.resolve_or_assign(env, &rid.key).await?;
 		// Collect the tokens.
 		let tokens =
 			self.analyzer.analyze_content(stk, az_fn, content, FilteringStage::Indexing).await?;
 		let dl = if self.highlighting {
-			self.index_with_offsets(&nid, uid, &tx, doc_id, tokens).await?
+			self.index_with_offsets(&nid, &tx, doc_id, tokens).await?
 		} else {
-			self.index_without_offsets(&nid, uid, &tx, doc_id, tokens).await?
+			self.index_without_offsets(&nid, &tx, doc_id, tokens).await?
 		};
 		{
 			// Set the doc length
@@ -321,12 +318,11 @@ impl FullTextIndex {
 		}
 		{
 			// Increase the doc count and total doc length
-			let key = self.ikb.new_dc_with_id(doc_id, nid, uid);
 			let dcl = DocLengthAndCount {
 				total_docs_length: dl as i128,
 				doc_count: 1,
 			};
-			tx.put_key(&key, &dcl).await?;
+			self.ikb.buffer_dx(&tx, dcl, nid);
 			*require_compaction = true;
 		}
 		// We're done
@@ -341,7 +337,6 @@ impl FullTextIndex {
 	async fn index_with_offsets(
 		&self,
 		nid: &Uuid,
-		uid: Uuid,
 		tx: &Transaction,
 		id: DocId,
 		tokens: Vec<Tokens>,
@@ -353,7 +348,7 @@ impl FullTextIndex {
 			td.f = o.len() as TermFrequency;
 			td.o = o;
 			tx.set_key(&key, &td).await?;
-			self.set_tt(tx, t, id, nid, uid, true).await?;
+			self.ikb.buffer_tt(tx, t, id, *nid, true);
 		}
 		Ok(dl)
 	}
@@ -361,7 +356,6 @@ impl FullTextIndex {
 	async fn index_without_offsets(
 		&self,
 		nid: &Uuid,
-		uid: Uuid,
 		tx: &Transaction,
 		id: DocId,
 		tokens: Vec<Tokens>,
@@ -372,42 +366,46 @@ impl FullTextIndex {
 			let key = self.ikb.new_td(t, id);
 			td.f = f;
 			tx.set_key(&key, &td).await?;
-			self.set_tt(tx, t, id, nid, uid, true).await?;
+			self.ikb.buffer_tt(tx, t, id, *nid, true);
 		}
 		Ok(dl)
 	}
 
-	/// Mints the delta-key discriminator shared by one maintenance call's
-	/// `!tt` and `!dc` writes.
+	/// Every uncompacted change to one term's document set.
 	///
-	/// Both delta families fold by summing signed contributions, so a
-	/// discriminator that collides silently drops one contribution and leaves
-	/// the compacted state wrong. One value per call is sufficient because the
-	/// keys it appears in are already distinct within a call: `!tt` is keyed by
-	/// term and each term is written at most once (the term maps are keyed by
-	/// term, and the removal path dedups explicitly), and `!dc` is written at
-	/// most once. Separate calls mint separate values, which is what keeps a
-	/// remove/re-index pair on the same record from collapsing into one key.
-	///
-	/// Minting per call rather than per term matters for throughput: each value
-	/// costs an entropy syscall, and a text field yields as many terms as it has
-	/// distinct words, so per-term minting makes indexing cost scale with the
-	/// system's randomness path rather than with the writes it performs.
-	fn delta_uid() -> Uuid {
-		Uuid::now_v7()
-	}
-
-	async fn set_tt(
-		&self,
-		tx: &Transaction,
-		term: &str,
-		doc_id: DocId,
-		nid: &Uuid,
-		uid: Uuid,
-		add: bool,
-	) -> Result<()> {
-		let key = self.ikb.new_tt(term, doc_id, *nid, uid, add);
-		tx.set_key(&key, &String::new()).await
+	/// Three sources, all folded into signed counts so only the sign matters:
+	/// the per-document `!tt` entries an older server wrote, the batched `!tx`
+	/// bitmaps, and this transaction's own buffered contribution, which is not
+	/// written until commit and so cannot be read back from the transaction.
+	async fn term_deltas(&self, tx: &Transaction, term: &str) -> Result<HashMap<DocId, i64>> {
+		let mut deltas: HashMap<DocId, i64> = HashMap::new();
+		for k in tx.keys(self.ikb.new_tt_term_range(term)?, u32::MAX, 0, None).await? {
+			let tt = TermChangeKey::decode_key(&k)?;
+			*deltas.entry(tt.doc_id).or_default() += if tt.add {
+				1
+			} else {
+				-1
+			};
+		}
+		for (k, docs) in tx.getr(self.ikb.new_tx_term_range(term)?, None).await? {
+			let batch = TermChangeBatchKey::decode_key(&k)?;
+			let step = if batch.add {
+				1
+			} else {
+				-1
+			};
+			for doc_id in &docs {
+				*deltas.entry(doc_id).or_default() += step;
+			}
+		}
+		let (added, removed) = self.ikb.pending_tt(tx, term);
+		for doc_id in &added {
+			*deltas.entry(doc_id).or_default() += 1;
+		}
+		for doc_id in &removed {
+			*deltas.entry(doc_id).or_default() -= 1;
+		}
+		Ok(deltas)
 	}
 
 	/// Extracts query terms from a search string
@@ -440,18 +438,7 @@ impl FullTextIndex {
 		// Phase 1: Collect deltas for each term (sequential range scans)
 		let mut all_deltas: Vec<HashMap<DocId, i64>> = Vec::with_capacity(unique_terms.len());
 		for term in &unique_terms {
-			let range = self.ikb.new_tt_term_range(term)?;
-			let mut deltas: HashMap<DocId, i64> = HashMap::new();
-			for k in tx.keys(range, u32::MAX, 0, None).await? {
-				let tt = TermChangeKey::decode_key(&k)?;
-				let entry = deltas.entry(tt.doc_id).or_default();
-				if tt.add {
-					*entry += 1;
-				} else {
-					*entry -= 1;
-				}
-			}
-			all_deltas.push(deltas);
+			all_deltas.push(self.term_deltas(&tx, term).await?);
 		}
 
 		// Phase 2: Batch-fetch compacted bitmaps for all terms at once
@@ -568,10 +555,14 @@ impl FullTextIndex {
 		limit: u32,
 	) -> Result<TermDocsCompactionPlan> {
 		let generation = read_compaction_generation(tx, &self.ikb.new_tv_key()).await?;
-		let range = self.ikb.new_tt_terms_range()?;
+		let limit = limit.max(1);
 		let mut delta_keys = Vec::new();
 		let mut deltas_by_term: HashMap<String, HashMap<DocId, i64>> = HashMap::new();
-		let batch = tx.batch_keys(range, limit.max(1), None).await?;
+		// Both delta shapes are drained in one pass, so an index carrying entries
+		// written either side of the `!tx` change compacts to the same document
+		// set. Each family is bounded by the same limit, and either having more
+		// leaves work for the next round.
+		let batch = tx.batch_keys(self.ikb.new_tt_terms_range()?, limit, None).await?;
 		for k in batch.result {
 			let tt = TermChangeKey::decode_key(&k)?;
 			let entry = deltas_by_term
@@ -586,11 +577,30 @@ impl FullTextIndex {
 			}
 			delta_keys.push(k);
 		}
+		// One row beyond the limit, so "is there more" is answered without
+		// materialising the whole backlog the way an unbounded read would.
+		let mut batched =
+			tx.scan(self.ikb.new_tx_terms_range()?, limit.saturating_add(1), 0, None).await?;
+		let batched_has_more = batched.len() > limit as usize;
+		batched.truncate(limit as usize);
+		for (k, docs) in batched {
+			let tx_key = TermChangeBatchKey::decode_key(&k)?;
+			let step = if tx_key.add {
+				1
+			} else {
+				-1
+			};
+			let by_doc = deltas_by_term.entry(tx_key.term.to_string()).or_default();
+			for doc_id in &docs {
+				*by_doc.entry(doc_id).or_default() += step;
+			}
+			delta_keys.push(k);
+		}
 		Ok(TermDocsCompactionPlan {
 			generation,
 			deltas_by_term,
 			delta_keys,
-			has_more: batch.next.is_some(),
+			has_more: batch.next.is_some() || batched_has_more,
 		})
 	}
 
@@ -788,8 +798,9 @@ impl FullTextIndex {
 		};
 		let mut dlc = tx.get_key(&dc_prefix, None).await?.unwrap_or_default();
 
+		let limit = limit.max(1);
 		let range = dc_prefix.range()?;
-		let batch = tx.batch_keys_vals_raw(range, limit.max(1), None).await?;
+		let batch = tx.batch_keys_vals_raw(range, limit, None).await?;
 		let mut delta_keys = Vec::with_capacity(batch.result.len());
 		for (k, v) in batch.result {
 			let st: DocLengthAndCount = revision::from_slice(&v)?;
@@ -797,7 +808,18 @@ impl FullTextIndex {
 			dlc.total_docs_length += st.total_docs_length;
 			delta_keys.push(k);
 		}
-		Ok((dlc, delta_keys, batch.next.is_some()))
+		// Drain the batched deltas in the same pass, so an index carrying entries
+		// written either side of the `!dx` change compacts to the same statistic.
+		let mut batched =
+			tx.scan(self.ikb.new_dx_range()?, limit.saturating_add(1), 0, None).await?;
+		let batched_has_more = batched.len() > limit as usize;
+		batched.truncate(limit as usize);
+		for (k, st) in batched {
+			dlc.doc_count += st.doc_count;
+			dlc.total_docs_length += st.total_docs_length;
+			delta_keys.push(k);
+		}
+		Ok((dlc, delta_keys, batch.next.is_some() || batched_has_more))
 	}
 
 	async fn compute_doc_length_and_count(
@@ -1197,6 +1219,16 @@ async fn collect_doc_length_and_count_for(
 			delta_keys.push(k);
 		}
 	}
+	// The batched deltas an up-to-date server writes, then this transaction's own
+	// buffered contribution, which is not written until commit.
+	for (k, st) in tx.getr(ikb.new_dx_range()?, None).await? {
+		dlc.doc_count += st.doc_count;
+		dlc.total_docs_length += st.total_docs_length;
+		delta_keys.push(k);
+	}
+	let pending = ikb.pending_dx(tx);
+	dlc.doc_count += pending.doc_count;
+	dlc.total_docs_length += pending.total_docs_length;
 	Ok((dlc, delta_keys))
 }
 
@@ -1383,6 +1415,8 @@ mod tests {
 			tx.commit().await.unwrap();
 		}
 
+		/// Uncompacted document-statistic deltas, in both the per-document `!dc`
+		/// shape and the batched `!dx` one, since either may be present.
 		async fn dc_delta_count(&self, tx: &Transaction) -> usize {
 			let dc_range = DocStatsKey {
 				ns: self.ikb.ns(),
@@ -1392,12 +1426,17 @@ mod tests {
 			}
 			.range()
 			.unwrap();
-			tx.keys(dc_range, u32::MAX, 0, None).await.unwrap().len()
+			let legacy = tx.keys(dc_range, u32::MAX, 0, None).await.unwrap().len();
+			let batched = tx.count(self.ikb.new_dx_range().unwrap(), None).await.unwrap();
+			legacy + batched
 		}
 
+		/// Uncompacted term deltas, in both the per-document `!tt` shape and the
+		/// batched `!tx` one.
 		async fn tt_delta_count(&self, tx: &Transaction) -> usize {
-			let range = self.ikb.new_tt_terms_range().unwrap();
-			tx.count(range, None).await.unwrap()
+			let legacy = tx.count(self.ikb.new_tt_terms_range().unwrap(), None).await.unwrap();
+			let batched = tx.count(self.ikb.new_tx_terms_range().unwrap(), None).await.unwrap();
+			legacy + batched
 		}
 	}
 
@@ -1492,8 +1531,7 @@ mod tests {
 
 		// Check that logs have been compacted:
 		let tx = test.new_tx(TransactionType::Read).await;
-		let range = test.ikb.new_tt_terms_range().unwrap();
-		assert_eq!(tx.count(range, None).await.unwrap(), 0);
+		assert_eq!(test.tt_delta_count(&tx).await, 0);
 		assert_eq!(test.dc_delta_count(&tx).await, 0);
 		let subtree = DocStatsKey {
 			ns: test.ikb.ns(),
@@ -1647,16 +1685,18 @@ mod tests {
 		tx.cancel().await.unwrap();
 	}
 
-	/// Every delta a maintenance call writes shares one discriminator, so the
-	/// keys have to stay distinct by their remaining fields or a contribution is
-	/// silently lost.
+	/// A transaction's deltas share one discriminator, so the keys have to stay
+	/// distinct by their remaining fields or a contribution is silently lost;
+	/// and separate transactions must never collapse into each other.
 	///
-	/// Indexing a document leaves one `!tt` delta per distinct term and one
-	/// `!dc` delta. A remove followed by a re-index in the same transaction adds
-	/// a removal and an addition delta for every term, and a second `!dc` pair,
-	/// none of which may overwrite the deltas the first call left behind.
+	/// Indexing a document leaves one term delta per distinct term and one
+	/// statistics delta. A remove followed by a re-index of the same record
+	/// within one transaction nets to what the index already said: the term is
+	/// still present, so the transaction contributes one addition per term, and
+	/// the statistics do not move at all, so it contributes no statistics entry.
+	/// The earlier transaction's deltas are untouched either way.
 	#[test(tokio::test)]
-	async fn every_term_and_call_keeps_its_own_delta() {
+	async fn every_term_and_transaction_keeps_its_own_delta() {
 		for highlight in [false, true] {
 			let test = TestContext::with_highlighting(highlight).await;
 			let doc = Arc::new(RecordId::new("t".into(), "doc1".to_owned()));
@@ -1671,10 +1711,14 @@ mod tests {
 			assert_eq!(test.dc_delta_count(&tx).await, 1, "highlight={highlight}");
 			tx.cancel().await.unwrap();
 
+			// A second transaction removing and re-indexing the same content:
+			// one addition per term on top of the first transaction's, and no
+			// statistics entry, because removing and re-adding one document of
+			// unchanged length nets to zero.
 			stack.enter(|stk| test.remove_insert_task(stk, &doc)).finish().await;
 			let tx = test.new_tx(TransactionType::Read).await;
-			assert_eq!(test.tt_delta_count(&tx).await, terms * 3, "highlight={highlight}");
-			assert_eq!(test.dc_delta_count(&tx).await, 3, "highlight={highlight}");
+			assert_eq!(test.tt_delta_count(&tx).await, terms * 2, "highlight={highlight}");
+			assert_eq!(test.dc_delta_count(&tx).await, 1, "highlight={highlight}");
 			tx.cancel().await.unwrap();
 		}
 	}
@@ -1752,6 +1796,63 @@ mod tests {
 		tx.cancel().await.unwrap();
 	}
 
+	/// A query must observe the documents its own transaction has just indexed,
+	/// before that transaction commits.
+	///
+	/// The term deltas and the document statistics are buffered until commit, so
+	/// neither is in the keyspace yet when this query runs; the read paths have
+	/// to fold the transaction's own pending contribution over what they scan.
+	#[test(tokio::test)]
+	async fn a_query_sees_its_own_uncommitted_indexing() {
+		let test = TestContext::new().await;
+		let doc = Arc::new(RecordId::new("t".into(), "doc1".to_owned()));
+
+		// One write environment for both the indexing and the query, so nothing
+		// this test indexes has been committed when it asks for it back.
+		let ctx = test.ds.env(TransactionType::Write).await;
+		let tx = ctx.tx();
+		let az_fn = NoAnalyzerFunction;
+		let mut require_compaction = false;
+		let mut stack = reblessive::TreeStack::new();
+		stack
+			.enter(|stk| {
+				test.fti.index_content(
+					stk,
+					&ctx,
+					&az_fn,
+					&doc,
+					vec![test.content.as_ref().clone()],
+					&mut require_compaction,
+				)
+			})
+			.finish()
+			.await
+			.unwrap();
+
+		// Nothing has reached the keyspace: the deltas are still in the buffer.
+		assert_eq!(test.tt_delta_count(&tx).await, 0, "deltas must still be buffered");
+		assert_eq!(test.dc_delta_count(&tx).await, 0, "statistics must still be buffered");
+
+		let qt = stack
+			.enter(|stk| test.fti.extract_querying_terms(stk, &ctx, &az_fn, "Welcome".into()))
+			.finish()
+			.await
+			.unwrap();
+		let doc_id = test.fti.get_doc_id(&tx, &doc).await.unwrap().unwrap();
+		assert!(
+			qt.docs.iter().flatten().any(|docs| docs.contains(doc_id)),
+			"a query must see the document its own transaction indexed"
+		);
+
+		// The scorer weighs against corpus statistics, which are buffered too, so
+		// it must not report an empty corpus.
+		let dlc = test.fti.compute_doc_length_and_count(&tx, None).await.unwrap();
+		assert_eq!(dlc.doc_count, 1, "the buffered document must count towards the corpus");
+		assert!(dlc.total_docs_length > 0, "the buffered document must carry its length");
+
+		tx.cancel().await.unwrap();
+	}
+
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn compaction_preserves_post_snapshot_deltas() {
 		let test = TestContext::new().await;
@@ -1779,9 +1880,8 @@ mod tests {
 			1,
 			"post-snapshot doc-length delta must remain uncompacted"
 		);
-		let range = test.ikb.new_tt_terms_range().unwrap();
 		assert!(
-			tx.count(range, None).await.unwrap() > 0,
+			test.tt_delta_count(&tx).await > 0,
 			"post-snapshot term deltas must remain uncompacted"
 		);
 		let dlc = test.fti.compute_doc_length_and_count(&tx, None).await.unwrap();

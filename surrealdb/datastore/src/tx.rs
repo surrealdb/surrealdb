@@ -22,6 +22,7 @@ use std::time::Duration;
 use anyhow::Result;
 use chrono::Utc;
 use common::EngineError;
+use roaring::RoaringTreemap;
 use surrealdb_catalog::node::Node;
 use surrealdb_catalog::providers::{
 	ApiProvider, AuthorisationProvider, BoxProviderFut, BucketProvider, CachePolicy,
@@ -61,15 +62,15 @@ use crate::key::schema::{
 	AnalyzerKey, AnalyzerPrefix, ApiKey, ApiPrefix, BucketKey, BucketPrefix,
 	BuildAppendTicketPrefix, BuildReservationKey, BuildStateKey, ChangeFeedKey, DatabaseKey,
 	DatabasePrefix, DbAccessMethodKey, DbAccessMethodPrefix, DbAccessRoot, DbConfigKey,
-	DbConfigPrefix, DbGrantKey, DbGrantPrefix, DbUserKey, DbUserPrefix, EventKey, EventPrefix,
-	FieldKey, FieldPrefix, ForeignTablePrefix, FunctionKey, FunctionPrefix, IdxRoot,
+	DbConfigPrefix, DbGrantKey, DbGrantPrefix, DbUserKey, DbUserPrefix, DocStatsBatchKey, EventKey,
+	EventPrefix, FieldKey, FieldPrefix, ForeignTablePrefix, FunctionKey, FunctionPrefix, IdxRoot,
 	IndexCompactionKey, IndexCountKey, IndexDefKey, IndexDefPrefix, IndexNameKey, LiveEventsKey,
 	MlModelKey, MlModelPrefix, ModuleKey, ModulePrefix, NamespaceKey, NamespacePrefix, NodeKey,
 	NodePrefix, NsAccessMethodKey, NsAccessMethodPrefix, NsAccessRoot, NsGrantKey, NsGrantPrefix,
 	NsUserKey, NsUserPrefix, ParamKey, ParamPrefix, ReclaimKey, RecordKey, RootAccessMethodKey,
 	RootAccessMethodPrefix, RootAccessRoot, RootConfigKey, RootGrantKey, RootGrantPrefix,
 	RootUserKey, RootUserPrefix, SequenceKey, SequencePrefix, SubscriptionPrefix, TableKey,
-	TablePrefix,
+	TablePrefix, TermChangeBatchKey,
 };
 use crate::sequences::Sequences;
 #[cfg(any(test, feature = "test-hooks"))]
@@ -79,10 +80,11 @@ use crate::testing::{
 };
 use crate::triggers::CommitTriggers;
 use crate::values::changefeed::Changefeed;
+use crate::values::fulltext::DocLengthAndCount;
 use crate::values::index_build::{
 	BuildGeneration, BuildTicket, BuildTicketMutationSeq, IndexBuildPhase, IndexBuildReportStatus,
 };
-use crate::values::index_delta::{BufferedIndex, IndexDeltaBuffer};
+use crate::values::index_delta::{BufferedIndex, BufferedTerm, IndexDeltaBuffer};
 use crate::values::live_query::LiveEventBuffer;
 use crate::{
 	DatastoreError, Direction, Error as KvsError, IntoBytes, NORMAL_BATCH_SIZE, TransactionConfig,
@@ -127,7 +129,11 @@ pub struct Transaction {
 	/// Per-transaction aggregation of count-index deltas and compaction
 	/// triggers, flushed as one entry per index inside this transaction's
 	/// commit rather than one per mutated document.
-	index_deltas: OnceLock<IndexDeltaBuffer>,
+	/// Boxed so the buffer's size does not count against every `Transaction`.
+	/// It is allocated only for a transaction that actually mutates an index, and
+	/// `Transaction` is held on the stack through deep recursive paths where the
+	/// inline size matters.
+	index_deltas: OnceLock<Box<IndexDeltaBuffer>>,
 	/// Post-commit wake-ups, fired once the commit makes the work visible.
 	triggers: Arc<CommitTriggers>,
 	/// Do we have to trigger async events after the commit?
@@ -2171,18 +2177,38 @@ impl Transaction {
 	// --------------------------------------------------
 
 	/// Set a new save point on the transaction.
+	/// The buffered index deltas are scoped alongside the storage save point.
+	/// They describe writes this transaction has made, so a rollback that undoes
+	/// those writes has to undo the buffered description of them too.
 	pub async fn new_save_point(&self) -> Result<()> {
-		Ok(self.inner.new_save_point().await?)
+		// The storage save point opens first: the buffer's frames mirror its
+		// stack, so a failed open must not leave a frame behind for some outer
+		// save point's release to pop instead of its own.
+		self.inner.new_save_point().await?;
+		// Initialised rather than merely inspected: the save point is opened
+		// before the mutations it scopes, so waiting for the buffer to exist
+		// would leave the first mutation in the transaction's own frame, where a
+		// rollback cannot reach it.
+		self.index_deltas.get_or_init(|| Box::new(IndexDeltaBuffer::new())).push_save_point();
+		Ok(())
 	}
 
 	/// Release the last save point.
 	pub async fn release_last_save_point(&self) -> Result<()> {
-		Ok(self.inner.release_last_save_point().await?)
+		self.inner.release_last_save_point().await?;
+		if let Some(buffer) = self.index_deltas.get() {
+			buffer.release_save_point();
+		}
+		Ok(())
 	}
 
 	/// Rollback to the last save point.
 	pub async fn rollback_to_save_point(&self) -> Result<()> {
-		Ok(self.inner.rollback_to_save_point().await?)
+		self.inner.rollback_to_save_point().await?;
+		if let Some(buffer) = self.index_deltas.get() {
+			buffer.rollback_save_point();
+		}
+		Ok(())
 	}
 
 	// --------------------------------------------------
@@ -2293,7 +2319,7 @@ impl Transaction {
 		delta: i64,
 		nid: Uuid,
 	) {
-		self.index_deltas.get_or_init(IndexDeltaBuffer::new).buffer_count_delta(
+		self.index_deltas.get_or_init(|| Box::new(IndexDeltaBuffer::new())).buffer_count_delta(
 			BufferedIndex {
 				ns,
 				db,
@@ -2340,15 +2366,120 @@ impl Transaction {
 		ix: IndexId,
 		nid: Uuid,
 	) {
-		self.index_deltas.get_or_init(IndexDeltaBuffer::new).buffer_compaction_trigger(
+		self.index_deltas
+			.get_or_init(|| Box::new(IndexDeltaBuffer::new()))
+			.buffer_compaction_trigger(
+				BufferedIndex {
+					ns,
+					db,
+					tb: tb.clone(),
+					ix,
+				},
+				nid,
+			)
+	}
+
+	/// Record that a document gained (`add`) or lost a full-text term.
+	///
+	/// Buffered rather than written per (term, document): a `!tt` key per pair
+	/// makes the delta log grow with indexed *work*, where one key per distinct
+	/// term per transaction bounds it by the vocabulary. The flushed `!tx` entry
+	/// is still a blind write of a key no other transaction shares.
+	#[expect(clippy::too_many_arguments, reason = "the index identity is four fields")]
+	pub fn buffer_term_change(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+		term: &str,
+		doc_id: u64,
+		add: bool,
+		nid: Uuid,
+	) {
+		self.index_deltas.get_or_init(|| Box::new(IndexDeltaBuffer::new())).buffer_term_change(
+			BufferedTerm {
+				index: BufferedIndex {
+					ns,
+					db,
+					tb: tb.clone(),
+					ix,
+				},
+				term: term.to_string(),
+			},
+			doc_id,
+			add,
+			nid,
+		)
+	}
+
+	/// The document ids this transaction has buffered for one term but not yet
+	/// written, as `(added, removed)`.
+	///
+	/// The full-text read path applies these over the committed entries it scans,
+	/// so a query observes the documents its own transaction has just indexed.
+	pub fn pending_term_change(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+		term: &str,
+	) -> (RoaringTreemap, RoaringTreemap) {
+		match self.index_deltas.get() {
+			Some(buffer) => buffer.pending_term_change(&BufferedTerm {
+				index: BufferedIndex {
+					ns,
+					db,
+					tb: tb.clone(),
+					ix,
+				},
+				term: term.to_string(),
+			}),
+			None => Default::default(),
+		}
+	}
+
+	/// Add one document's length to a full-text index's running statistics.
+	pub fn buffer_doc_stats(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+		stats: DocLengthAndCount,
+		nid: Uuid,
+	) {
+		self.index_deltas.get_or_init(|| Box::new(IndexDeltaBuffer::new())).buffer_doc_stats(
 			BufferedIndex {
 				ns,
 				db,
 				tb: tb.clone(),
 				ix,
 			},
+			stats,
 			nid,
 		)
+	}
+
+	/// The document statistics this transaction has buffered but not yet written,
+	/// so a scorer weighs the documents its own transaction has just indexed.
+	pub fn pending_doc_stats(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+	) -> DocLengthAndCount {
+		match self.index_deltas.get() {
+			Some(buffer) => buffer.pending_doc_stats(&BufferedIndex {
+				ns,
+				db,
+				tb: tb.clone(),
+				ix,
+			}),
+			None => DocLengthAndCount::default(),
+		}
 	}
 
 	/// Write the buffered index deltas as one entry per index.
@@ -2390,6 +2521,50 @@ impl Transaction {
 				uid: Uuid::now_v7(),
 			};
 			self.put_key(&key, &()).await?;
+		}
+		// One discriminator for the whole flush. Every key it appears in is
+		// already distinct within the flush — `!tx` by term and direction, `!dx`
+		// by index — and separate transactions mint separate values, which is
+		// what stops one transaction's contributions from overwriting another's.
+		//
+		// Minted on first use: the value costs an entropy syscall, and most
+		// commits reaching here carry only count deltas.
+		let term_changes = buffer.take_term_changes();
+		let doc_stats = buffer.take_doc_stats();
+		let uid = if term_changes.is_empty() && doc_stats.is_empty() {
+			Uuid::nil()
+		} else {
+			Uuid::now_v7()
+		};
+		for (term, delta) in term_changes {
+			let index = &term.index;
+			for (add, docs) in [(true, delta.added), (false, delta.removed)] {
+				if docs.is_empty() {
+					continue;
+				}
+				let key = TermChangeBatchKey {
+					ns: index.ns,
+					db: index.db,
+					tb: Cow::Borrowed(&index.tb),
+					ix: index.ix,
+					term: Cow::Borrowed(&term.term),
+					nid: delta.nid,
+					uid,
+					add,
+				};
+				self.set_key(&key, &docs).await?;
+			}
+		}
+		for (index, stats, nid) in doc_stats {
+			let key = DocStatsBatchKey {
+				ns: index.ns,
+				db: index.db,
+				tb: Cow::Borrowed(&index.tb),
+				ix: index.ix,
+				nid,
+				uid,
+			};
+			self.set_key(&key, &stats).await?;
 		}
 		Ok(())
 	}

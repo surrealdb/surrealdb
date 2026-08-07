@@ -295,9 +295,13 @@ const KEYS_PER_RECORD: usize = 2;
 /// plain, unique, and count indexes each write a bounded number of entries.
 const KEYS_PER_VALUE_INDEX: usize = 2;
 
-/// Keys a full-text index writes per indexed term: the posting and the
-/// delta-log entry that compaction folds into the term's document bitmap.
-const KEYS_PER_FULLTEXT_TERM: usize = 2;
+/// Keys a full-text index writes per indexed term: the posting.
+///
+/// The delta log a term also contributes to is batched per transaction rather
+/// than per (term, document), so its cost is bounded by the statement's distinct
+/// vocabulary and amortises to well under one key per term as the group grows.
+/// Counting it here would shrink the group for keys the group does not write.
+const KEYS_PER_FULLTEXT_TERM: usize = 1;
 
 /// Fallback allowance for one index whose per-record key count scales with the
 /// indexed content rather than being fixed, used when the index carries no

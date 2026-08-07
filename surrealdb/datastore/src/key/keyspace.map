@@ -165,8 +165,13 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}*{db}*{tb}+{ix}!tt                                                                               TermChangesKey ->  String
 /*{ns}*{db}*{tb}+{ix}!tt{term}                                                                       TermChangeSetKey ->  String
 /*{ns}*{db}*{tb}+{ix}!tt{term}{doc_id}{nid}{uid}{add}                                                   TermChangeKey ->  String
+/*{ns}*{db}*{tb}+{ix}!tx{term}{nid}{uid}{add}                                                      TermChangeBatchKey ->  roaring::RoaringTreemap
+/*{ns}*{db}*{tb}+{ix}!tx                                                                        TermChangeBatchPrefix ->  (range)
+/*{ns}*{db}*{tb}+{ix}!tx{term}                                                              TermChangeBatchTermPrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!dc                                                                                  DocStatsKey ->  crate::values::fulltext::DocLengthAndCount
 /*{ns}*{db}*{tb}+{ix}!dc{doc_id}{nid}{uid}                                                           DocStatsDeltaKey ->  crate::values::fulltext::DocLengthAndCount
+/*{ns}*{db}*{tb}+{ix}!dx{nid}{uid}                                                                   DocStatsBatchKey ->  crate::values::fulltext::DocLengthAndCount
+/*{ns}*{db}*{tb}+{ix}!dx                                                                          DocStatsBatchPrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!dl{id}                                                                             DocLengthKey ->  crate::values::fulltext::DocLength
 /*{ns}*{db}*{tb}+{ix}!dl                                                                              DocLengthPrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!dv                                                                                  DocCountKey ->  u64
