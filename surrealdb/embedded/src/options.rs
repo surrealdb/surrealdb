@@ -1,6 +1,11 @@
+//! Connection options as the JavaScript side supplies them.
+//!
+//! Deserialized from the FFI shim's own representation (a `serde_json::Value`
+//! on node, a `JsValue` on wasm) and consumed once, when the connection opens.
+
 use std::collections::HashSet;
 
-use napi::Error;
+use anyhow::{Context, Result};
 use serde::Deserialize;
 use surrealdb_core::dbs::{NewPlannerStrategy, capabilities};
 
@@ -82,11 +87,20 @@ pub enum TargetsConfig {
 	Array(HashSet<String>),
 }
 
+/// Parses a set of capability target patterns.
+///
+/// Returns an error rather than panicking on a malformed pattern: this runs on
+/// a connection options object supplied by JavaScript, and the addons are built
+/// with `panic = "abort"`, so a panic here would take the host process down
+/// over a typo in a config literal.
 macro_rules! process_targets {
 	($set:ident) => {{
 		let mut functions = HashSet::with_capacity($set.len());
 		for function in $set {
-			functions.insert(function.parse().expect("invalid function name"));
+			let parsed = function
+				.parse()
+				.with_context(|| format!("invalid capability target: {function}"))?;
+			functions.insert(parsed);
 		}
 		capabilities::Targets::Some(functions)
 	}};
@@ -112,9 +126,9 @@ impl From<PlannerStrategy> for NewPlannerStrategy {
 }
 
 impl TryFrom<CapabilitiesConfig> for capabilities::Capabilities {
-	type Error = Error;
+	type Error = anyhow::Error;
 
-	fn try_from(config: CapabilitiesConfig) -> Result<Self, Self::Error> {
+	fn try_from(config: CapabilitiesConfig) -> Result<Self> {
 		let caps = match config {
 			CapabilitiesConfig::Bool(true) => Self::all(),
 			CapabilitiesConfig::Bool(false) => {
@@ -337,5 +351,77 @@ impl TryFrom<CapabilitiesConfig> for capabilities::Capabilities {
 		Ok(caps
 			.with_arbitrary_query(capabilities::Targets::All)
 			.without_arbitrary_query(capabilities::Targets::None))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn options(json: &str) -> Options {
+		serde_json::from_str(json).expect("the options literal should deserialize")
+	}
+
+	fn capabilities_from(json: &str) -> Result<capabilities::Capabilities> {
+		options(json).capabilities.expect("the literal sets capabilities").try_into()
+	}
+
+	/// A malformed target is reported, not panicked on. The shims are built with
+	/// `panic = "abort"`, so panicking here would take the host process down
+	/// over a typo in a JavaScript config literal.
+	#[test]
+	fn a_malformed_capability_target_is_an_error() {
+		for json in [
+			r#"{"capabilities":{"functions":["http::get","not-a-function-name"]}}"#,
+			r#"{"capabilities":{"experimental":["no-such-feature"]}}"#,
+			r#"{"capabilities":{"functions":{"deny":["also-not-a-function"]}}}"#,
+		] {
+			let err = capabilities_from(json).expect_err("a malformed target should be rejected");
+			assert!(
+				format!("{err:#}").contains("invalid capability target"),
+				"error did not name the cause: {err:#}"
+			);
+		}
+	}
+
+	/// The well-formed shapes still convert, so the error path above is not just
+	/// rejecting everything.
+	#[test]
+	fn well_formed_capability_targets_convert() {
+		for json in [
+			r#"{"capabilities":true}"#,
+			r#"{"capabilities":false}"#,
+			r#"{"capabilities":{"functions":["http::get"]}}"#,
+			r#"{"capabilities":{"network_targets":{"allow":true,"deny":["example.com"]}}}"#,
+			r#"{"capabilities":{"experimental":["files","gql"]}}"#,
+			r#"{"capabilities":{"planner_strategy":"compute-only"}}"#,
+		] {
+			capabilities_from(json).unwrap_or_else(|e| panic!("{json} should convert: {e:#}"));
+		}
+	}
+
+	/// `defaults` accepts both the boolean and the explicit pair, and the
+	/// boolean's `true` is what an omitted `defaults` means.
+	#[test]
+	fn defaults_config_resolves_both_shapes() {
+		assert_eq!(
+			DefaultsConfig::default().get_defaults(),
+			Some(("main".to_owned(), "main".to_owned()))
+		);
+		assert_eq!(DefaultsConfig::Bool(false).get_defaults(), None);
+		let explicit = options(r#"{"defaults":{"namespace":"ns","database":"db"}}"#);
+		assert_eq!(
+			explicit.defaults.unwrap().get_defaults(),
+			Some(("ns".to_owned(), "db".to_owned()))
+		);
+	}
+
+	/// The documented timeouts are whole seconds and must accept values past a
+	/// byte — the README's own example uses 30_000.
+	#[test]
+	fn timeouts_accept_values_past_a_byte() {
+		let opts = options(r#"{"query_timeout":30000,"transaction_timeout":65536}"#);
+		assert_eq!(opts.query_timeout, Some(30_000));
+		assert_eq!(opts.transaction_timeout, Some(65_536));
 	}
 }

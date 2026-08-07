@@ -7065,6 +7065,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "surrealdb-embedded"
+version = "3.3.0-nightly"
+dependencies = [
+ "anyhow",
+ "async-channel",
+ "dashmap",
+ "futures",
+ "serde",
+ "serde_json",
+ "surrealdb-core",
+ "surrealdb-types",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "surrealdb-engine-api"
 version = "3.3.0-nightly"
 dependencies = [
@@ -7404,16 +7420,12 @@ dependencies = [
 name = "surrealdb-node"
 version = "3.3.0-nightly"
 dependencies = [
- "async-channel",
- "dashmap",
+ "futures",
  "napi",
  "napi-build",
  "napi-derive",
- "serde",
  "serde_json",
- "surrealdb-core",
- "surrealdb-types",
- "uuid",
+ "surrealdb-embedded",
 ]
 
 [[package]]

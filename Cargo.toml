@@ -11,6 +11,7 @@ members = [
     "surrealdb/common",
     "surrealdb/core",
     "surrealdb/datastore",
+    "surrealdb/embedded",
     "surrealdb/catalog",
     "surrealdb/engine-api",
     "surrealdb/engine-local",
@@ -81,6 +82,7 @@ surrealdb-sql = { version = "3.3.0-nightly", path = "surrealdb/sql" }
 surrealdb-strand = { version = "3.3.0-nightly", path = "surrealdb/strand", default-features = false }
 surrealdb-syn = { version = "3.3.0-nightly", path = "surrealdb/syn" }
 surrealdb-core = { version = "3.3.0-nightly", path = "surrealdb/core", default-features = false }
+surrealdb-embedded = { version = "3.3.0-nightly", path = "surrealdb/embedded", default-features = false }
 surrealdb-datastore = { version = "3.3.0-nightly", path = "surrealdb/datastore" }
 surrealdb-engine-api = { version = "3.3.0-nightly", path = "surrealdb/engine-api" }
 surrealdb-engine-local = { version = "3.3.0-nightly", path = "surrealdb/engine-local", default-features = false }

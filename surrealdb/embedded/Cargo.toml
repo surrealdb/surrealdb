@@ -1,0 +1,39 @@
+[package]
+name = "surrealdb-embedded"
+# The shared body of the embedded JavaScript engines. Each FFI shim
+# (`@surrealdb/node`, `@surrealdb/wasm`) is published as an npm package rather
+# than a crate, and this has no standalone use, so it is not published either.
+publish = false
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+version.workspace = true
+description = "Shared embedded SurrealDB engine for the JavaScript FFI shims"
+
+[features]
+default = []
+kv-mem = ["surrealdb-core/kv-mem"]
+kv-rocksdb = ["surrealdb-core/kv-rocksdb"]
+kv-surrealkv = ["surrealdb-core/kv-surrealkv"]
+kv-indxdb = ["surrealdb-core/kv-indxdb"]
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+async-channel = { workspace = true }
+dashmap = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+surrealdb-core = { workspace = true, features = ["http"] }
+surrealdb-types = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+uuid = { workspace = true, features = ["v7"] }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true

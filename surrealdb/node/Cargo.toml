@@ -11,24 +11,20 @@ description = "Embedded SurrealDB engine for Node.js, Bun, and Deno"
 
 [features]
 default = ["kv-mem"]
-kv-mem = ["surrealdb-core/kv-mem"]
-kv-rocksdb = ["surrealdb-core/kv-rocksdb"]
-kv-surrealkv = ["surrealdb-core/kv-surrealkv"]
+kv-mem = ["surrealdb-embedded/kv-mem"]
+kv-rocksdb = ["surrealdb-embedded/kv-rocksdb"]
+kv-surrealkv = ["surrealdb-embedded/kv-surrealkv"]
 
 [lib]
 path = "src-rust/lib.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
-surrealdb-core = { workspace = true, features = ["http"] }
-surrealdb-types = { workspace = true }
-async-channel = { workspace = true }
-dashmap = { workspace = true }
+surrealdb-embedded = { workspace = true }
+futures = { workspace = true }
 napi = { workspace = true, features = ["async", "serde-json"] }
 napi-derive = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-uuid = { workspace = true, features = ["v7"] }
 
 [build-dependencies]
 napi-build = { workspace = true }
