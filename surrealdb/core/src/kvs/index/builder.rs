@@ -1416,12 +1416,6 @@ impl Building {
 					return Ok(());
 				}
 				let ctx = self.new_write_tx_ctx().await?;
-				let key = IdxRoot {
-					ns: self.ix_key.ns,
-					db: self.ix_key.db,
-					tb: Cow::Borrowed(&self.ix_key.tb),
-					ix: self.ix_key.ix,
-				};
 				let tx = ctx.tx();
 				if let Err(err) = self
 					.maintain_build_ownership(&tx, generation, &[IndexBuildPhase::Building])
@@ -1439,7 +1433,8 @@ impl Building {
 					}
 					return Err(err);
 				}
-				if let Err(err) = tx.del_prefix_key(&key).await {
+				if let Err(err) = crate::idx::wipe_index_data(&tx, &self.ikb, &self.ix.index).await
+				{
 					if self
 						.cancel_and_retryable_conflict(
 							&tx,

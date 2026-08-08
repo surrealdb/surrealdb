@@ -81,8 +81,8 @@ use crate::key::schema::{
 	BuildTicketIxPrefix, BuildTicketKey, DocCountKey, DocLengthKey, DocStatsBatchPrefix,
 	DocStatsKey, HnswElementHashedKey, HnswElementKey, HnswGenerationKey, HnswLayerKey,
 	HnswLayerLayerPrefix, HnswNodeKey, HnswNodeLayerPrefix, HnswPendingRoot, HnswRecordPendingKey,
-	HnswRecordPendingPrefix, HnswStateKey, HnswVectorKey, IndexAppendKey, IndexAppendPrefix,
-	IndexCompactionKey, IndexPrimaryKey, IndexVersionKey, TermChangeBatchPrefix,
+	HnswRecordPendingPrefix, HnswStateKey, HnswVectorKey, IdxRoot, IndexAppendKey,
+	IndexAppendPrefix, IndexCompactionKey, IndexPrimaryKey, IndexVersionKey, TermChangeBatchPrefix,
 	TermChangeBatchTermPrefix, TermChangeSetKey, TermChangesKey, TermDocsKey, TermGenerationKey,
 	TermPostingKey,
 };
@@ -133,6 +133,85 @@ pub(crate) fn is_transaction_condition_not_met(e: &anyhow::Error) -> bool {
 	matches!(storage_error(e), Some(KvsError::TransactionConditionNotMet))
 }
 
+/// Clears everything an index has stored, and advances its compaction
+/// generation so that starting from empty does not unfence a compactor.
+///
+/// The generation key lives inside the subspace this clears. Deleting it would
+/// return the index to the state a never-compacted index is in, and a
+/// compaction plan prepared before the wipe expects exactly that state — so
+/// [`bump_compaction_generation`]'s conditional write would match again, and the
+/// guard whose whole purpose is to reject a stale plan would pass it. The
+/// per-key guards behind it are no help: whoever wipes an index goes on to
+/// re-index the same records, and a pending is derived wholly from the record
+/// and the graph state, carrying no writer identity, so the recreated entries
+/// can be byte-identical to the captured ones. Such a plan consumes the fresh
+/// pendings and folds them into a graph loaded from the pre-wipe snapshot,
+/// publishing an index that is `Online` and empty.
+///
+/// Writing the generation back one above what it was leaves every pre-wipe
+/// generation unmatchable, which is what keeps that guard able to do its job.
+/// Only the generations the index type actually keeps are touched.
+///
+/// The writes land after the delete within one transaction. That is well
+/// defined on every backend: `delr` enumerates the range and deletes key by
+/// key, so this is a later point write to the same key rather than a write
+/// racing a range tombstone.
+pub async fn wipe_index_data(
+	tx: &Transaction,
+	ikb: &IndexKeyBase,
+	index: &catalog::Index,
+) -> Result<()> {
+	/// Reads a generation and returns the value that must replace it.
+	async fn next<K>(tx: &Transaction, key: &K) -> Result<u64>
+	where
+		K: KVKey<Value = u64> + Debug,
+	{
+		Ok(read_compaction_generation(tx, key).await?.unwrap_or(0).saturating_add(1))
+	}
+
+	// Read the generations before the wipe removes them.
+	let mut hnsw = None;
+	let mut term = None;
+	let mut docs = None;
+	let mut count = None;
+	#[cfg(diskann)]
+	let mut diskann = None;
+	match index {
+		catalog::Index::Hnsw(_) => hnsw = Some(next(tx, &ikb.new_hg_key()).await?),
+		catalog::Index::FullText(_) => {
+			term = Some(next(tx, &ikb.new_tv_key()).await?);
+			docs = Some(next(tx, &ikb.new_dv_key()).await?);
+		}
+		catalog::Index::Count(_) => count = Some(next(tx, &ikb.new_iv_key()).await?),
+		#[cfg(diskann)]
+		catalog::Index::DiskAnn(_) => diskann = Some(next(tx, &ikb.new_dg_key()).await?),
+		#[cfg(not(diskann))]
+		catalog::Index::DiskAnn(_) => {}
+		// A b-tree index compacts nothing, so it keeps no generation.
+		catalog::Index::Idx | catalog::Index::Uniq => {}
+	}
+
+	tx.del_prefix_key(&ikb.new_idx_root()).await?;
+
+	if let Some(generation) = hnsw {
+		tx.set_key(&ikb.new_hg_key(), &generation).await?;
+	}
+	if let Some(generation) = term {
+		tx.set_key(&ikb.new_tv_key(), &generation).await?;
+	}
+	if let Some(generation) = docs {
+		tx.set_key(&ikb.new_dv_key(), &generation).await?;
+	}
+	if let Some(generation) = count {
+		tx.set_key(&ikb.new_iv_key(), &generation).await?;
+	}
+	#[cfg(diskann)]
+	if let Some(generation) = diskann {
+		tx.set_key(&ikb.new_dg_key(), &generation).await?;
+	}
+	Ok(())
+}
+
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct IndexKeyBase(Arc<Inner>);
@@ -180,6 +259,16 @@ impl IndexKeyBase {
 			ix: self.0.ix,
 		}
 		.range()
+	}
+
+	/// Subspace covering everything this index has stored.
+	fn new_idx_root(&self) -> IdxRoot<'_> {
+		IdxRoot {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+		}
 	}
 
 	/// Key storing the HNSW pending compaction generation.

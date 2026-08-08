@@ -20,6 +20,7 @@ use crate::catalog::{DatabaseId, Index, IndexDefinition, IndexId, NamespaceId, R
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
+use crate::idx::index::IndexOperation;
 use crate::key::schema::{
 	DocKeyPrefix, DocLookupPrefix, DocPendingKey, DocPendingPrefix, EntryPrefix, IdxRoot,
 	IndexCountKey, IndexCountPrefix, RecordPrefix,
@@ -6672,5 +6673,82 @@ async fn generation_flip_fences_in_flight_ticket_allocation() -> Result<()> {
 			anyhow::anyhow!("takeover did not finish after the reservation was released")
 		})???
 		.expect("takeover should acquire the new generation");
+	Ok(())
+}
+
+/// A compaction plan prepared before an index's data was wiped must never
+/// apply, however faithfully the wiped state is recreated afterwards.
+///
+/// This is what the generation guard in `bump_compaction_generation` exists to
+/// enforce, and a rebuild's clean phase is the one caller that can defeat it.
+/// The generation key lives inside the subspace the wipe clears, so clearing it
+/// returns the index to the state a never-compacted index is in — which is
+/// exactly the state a plan prepared before the wipe expects, so its
+/// conditional write matches again. The per-key guards behind it match too,
+/// because a rebuild re-indexes the same records and an HNSW pending is derived
+/// wholly from the record and the graph state, carrying no writer identity. The
+/// stale plan would then consume the rebuild's pendings and fold them into a
+/// graph loaded from the pre-wipe snapshot, leaving the index `Online` and
+/// empty.
+///
+/// The pendings are restored from their own bytes rather than by running a
+/// rebuild, because the contract under test is that a pre-wipe plan cannot
+/// apply — not that a rebuild happens to reproduce those bytes exactly.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn a_compaction_plan_prepared_before_a_wipe_cannot_apply() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX hx ON t FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32;
+		 CREATE t:1 SET vec = [1.0, 0.0];
+		 CREATE t:2 SET vec = [0.0, 1.0];",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "t", "hx").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+	let Index::Hnsw(params) = &ix.index else {
+		panic!("the fixture must define an HNSW index");
+	};
+
+	// Read phase, over the pendings the writes above left behind. Nothing has
+	// compacted this index, so the plan's expected generation is absent — the
+	// value a wipe restores.
+	let tx = Arc::new(ds.transaction(TransactionType::Read).await?);
+	let pendings = catch!(tx, tx.scan_raw(ikb.new_hr_range()?, u32::MAX, 0, None).await);
+	let mut ctx = ds.setup_ctx()?;
+	ctx.set_transaction(Arc::clone(&tx));
+	let ctx = ctx.freeze();
+	let plan = IndexOperation::prepare_hnsw_compaction(&ctx, &ikb).await?;
+	tx.cancel().await?;
+	assert!(plan.has_work(), "the fixture must leave pendings for the plan to capture");
+	assert_eq!(pendings.len(), 2, "one pending per indexed record");
+
+	// A rebuild's clean phase, followed by the pendings it would rewrite.
+	let tx = ds.transaction(TransactionType::Write).await?;
+	catch!(tx, crate::idx::wipe_index_data(&tx, &ikb, &ix.index).await);
+	for (key, value) in &pendings {
+		catch!(tx, tx.set(Key::from(key.clone()), value.clone()).await);
+	}
+	tx.commit().await?;
+
+	// Write phase of the stale plan.
+	let tx = Arc::new(ds.transaction(TransactionType::Write).await?);
+	let mut ctx = ds.setup_ctx()?;
+	ctx.set_transaction(Arc::clone(&tx));
+	let ctx = ctx.freeze();
+	let applied =
+		IndexOperation::apply_hnsw_compaction(&ctx, ctx.get_index_stores(), &ikb, params, plan)
+			.await?;
+	tx.cancel().await?;
+	assert!(!applied, "a plan prepared before the wipe must be rejected, not applied");
+
+	// The pendings must survive for whoever compacts next.
+	let tx = ds.transaction(TransactionType::Read).await?;
+	let surviving = catch!(tx, tx.count(ikb.new_hr_range()?, None).await);
+	tx.cancel().await?;
+	assert_eq!(surviving, pendings.len(), "the rejected plan must leave every pending in place");
 	Ok(())
 }
