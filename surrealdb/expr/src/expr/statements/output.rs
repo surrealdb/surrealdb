@@ -10,6 +10,6 @@ pub struct OutputStatement {
 impl OutputStatement {
 	/// Check if we require a writeable transaction
 	pub fn read_only(&self) -> bool {
-		self.what.read_only()
+		self.what.read_only() && self.fetch.as_ref().map(|x| x.read_only()).unwrap_or(true)
 	}
 }

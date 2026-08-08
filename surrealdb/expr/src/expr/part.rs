@@ -57,13 +57,31 @@ impl Part {
 	}
 
 	/// Check if we require a writeable transaction
+	/// Whether evaluating this part can be done on a read-only transaction.
+	///
+	/// Matched exhaustively on purpose: a new variant that carries an
+	/// expression must be classified here rather than defaulting to read-only,
+	/// which would let a mutation reach a read-only transaction.
 	pub fn read_only(&self) -> bool {
 		match self {
 			Part::Start(v) => v.read_only(),
 			Part::Where(v) => v.read_only(),
 			Part::Value(v) => v.read_only(),
 			Part::Method(_, v) => v.iter().all(Expr::read_only),
-			_ => true,
+			Part::Lookup(v) => v.read_only(),
+			Part::Destructure(v) => v.iter().all(DestructurePart::read_only),
+			Part::Recurse(_, alias, instruction) => {
+				alias.as_ref().map(|x| x.read_only()).unwrap_or(true)
+					&& instruction.as_ref().map(|x| x.read_only()).unwrap_or(true)
+			}
+			Part::All
+			| Part::Flatten
+			| Part::Last
+			| Part::First
+			| Part::Field(_)
+			| Part::Optional
+			| Part::Doc
+			| Part::RepeatRecurse => true,
 		}
 	}
 	/// Returns a yield if an alias is specified
@@ -332,6 +350,16 @@ pub enum DestructurePart {
 }
 
 impl DestructurePart {
+	/// Whether evaluating this destructure entry can be done on a read-only
+	/// transaction.
+	pub fn read_only(&self) -> bool {
+		match self {
+			DestructurePart::All(_) | DestructurePart::Field(_) => true,
+			DestructurePart::Aliased(_, v) => v.read_only(),
+			DestructurePart::Destructure(_, v) => v.iter().all(DestructurePart::read_only),
+		}
+	}
+
 	pub fn field(&self) -> &str {
 		match self {
 			DestructurePart::All(v) => v.as_str(),
@@ -397,6 +425,25 @@ pub enum RecurseInstruction {
 		// Do we include the starting point in the collection?
 		inclusive: bool,
 	},
+}
+
+impl RecurseInstruction {
+	/// Whether evaluating this recursion instruction can be done on a
+	/// read-only transaction.
+	pub fn read_only(&self) -> bool {
+		match self {
+			RecurseInstruction::Path {
+				..
+			}
+			| RecurseInstruction::Collect {
+				..
+			} => true,
+			RecurseInstruction::Shortest {
+				expects,
+				..
+			} => expects.read_only(),
+		}
+	}
 }
 
 impl ToSql for RecurseInstruction {

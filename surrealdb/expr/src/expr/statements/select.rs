@@ -40,9 +40,25 @@ pub struct SelectStatement {
 
 impl SelectStatement {
 	/// Check if computing this type can be done on a read only transaction.
+	/// Whether computing this statement can be done on a read-only
+	/// transaction.
+	///
+	/// Every clause that can carry a user expression is inspected. The
+	/// executor picks the transaction type from this before the statement is
+	/// planned, so a clause omitted here would let a mutation reach a
+	/// read-only transaction and fail partway through the statement.
 	pub fn read_only(&self) -> bool {
 		self.fields.read_only()
+			&& self.omit.iter().all(|v| v.read_only())
 			&& self.what.iter().all(|v| v.read_only())
 			&& self.cond.as_ref().map(|x| x.0.read_only()).unwrap_or(true)
+			&& self.split.as_ref().map(|x| x.read_only()).unwrap_or(true)
+			&& self.group.as_ref().map(|x| x.read_only()).unwrap_or(true)
+			&& self.order.as_ref().map(|x| x.read_only()).unwrap_or(true)
+			&& self.limit.as_ref().map(|x| x.read_only()).unwrap_or(true)
+			&& self.start.as_ref().map(|x| x.read_only()).unwrap_or(true)
+			&& self.fetch.as_ref().map(|x| x.read_only()).unwrap_or(true)
+			&& self.version.read_only()
+			&& self.timeout.read_only()
 	}
 }

@@ -22,6 +22,23 @@ pub struct Lookup {
 	pub alias: Option<Idiom>,
 }
 
+impl Lookup {
+	/// Whether evaluating this graph lookup can be done on a read-only
+	/// transaction. Every clause the lookup carries can hold a user
+	/// expression, so each is inspected; the subject (`what`) names tables and
+	/// ranges only.
+	pub fn read_only(&self) -> bool {
+		self.expr.as_ref().map(|x| x.read_only()).unwrap_or(true)
+			&& self.cond.as_ref().map(|x| x.0.read_only()).unwrap_or(true)
+			&& self.split.as_ref().map(|x| x.read_only()).unwrap_or(true)
+			&& self.group.as_ref().map(|x| x.read_only()).unwrap_or(true)
+			&& self.order.as_ref().map(|x| x.read_only()).unwrap_or(true)
+			&& self.limit.as_ref().map(|x| x.read_only()).unwrap_or(true)
+			&& self.start.as_ref().map(|x| x.read_only()).unwrap_or(true)
+			&& self.alias.as_ref().map(|x| x.read_only()).unwrap_or(true)
+	}
+}
+
 impl ToSql for Lookup {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		let stmt: crate::sql::lookup::Lookup = self.clone().into();

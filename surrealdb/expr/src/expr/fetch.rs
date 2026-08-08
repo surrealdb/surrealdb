@@ -25,6 +25,12 @@ impl Fetchs {
 		Self(fetches)
 	}
 
+	/// Whether evaluating every fetch target can be done on a read-only
+	/// transaction.
+	pub fn read_only(&self) -> bool {
+		self.0.iter().all(|x| x.read_only())
+	}
+
 	pub fn len(&self) -> usize {
 		self.0.len()
 	}
@@ -66,6 +72,14 @@ impl InfoStructure for Fetchs {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Fetch(pub Expr);
+
+impl Fetch {
+	/// Whether evaluating this fetch target can be done on a read-only
+	/// transaction.
+	pub fn read_only(&self) -> bool {
+		self.0.read_only()
+	}
+}
 
 impl surrealdb_types::ToSql for Fetch {
 	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {

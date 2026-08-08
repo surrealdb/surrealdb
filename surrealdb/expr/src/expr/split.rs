@@ -7,6 +7,14 @@ use crate::expr::idiom::Idiom;
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Splits(pub Vec<Split>);
 
+impl Splits {
+	/// Whether evaluating every split target can be done on a read-only
+	/// transaction.
+	pub fn read_only(&self) -> bool {
+		self.0.iter().all(|x| x.read_only())
+	}
+}
+
 impl Deref for Splits {
 	type Target = Vec<Split>;
 	fn deref(&self) -> &Self::Target {
@@ -31,6 +39,14 @@ impl ToSql for Splits {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Split(pub Idiom);
+
+impl Split {
+	/// Whether evaluating this split target can be done on a read-only
+	/// transaction.
+	pub fn read_only(&self) -> bool {
+		self.0.read_only()
+	}
+}
 
 impl Deref for Split {
 	type Target = Idiom;

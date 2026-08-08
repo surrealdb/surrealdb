@@ -56,6 +56,8 @@ mod file;
 
 #[cfg(all(test, feature = "kv-mem"))]
 mod definer_rights_test;
+#[cfg(test)]
+mod read_only_test;
 #[cfg(all(test, feature = "kv-mem"))]
 mod stream_test;
 #[cfg(test)]

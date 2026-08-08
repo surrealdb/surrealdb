@@ -10,6 +10,14 @@ use crate::expr::idiom::Idiom;
 pub struct Groups(pub Vec<Group>);
 
 impl Groups {
+	/// Whether evaluating every group key can be done on a read-only
+	/// transaction.
+	pub fn read_only(&self) -> bool {
+		self.0.iter().all(|x| x.read_only())
+	}
+}
+
+impl Groups {
 	pub fn is_group_all_only(&self) -> bool {
 		self.0.is_empty()
 	}
@@ -26,6 +34,14 @@ impl Groups {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Group(pub Idiom);
+
+impl Group {
+	/// Whether evaluating this group key can be done on a read-only
+	/// transaction.
+	pub fn read_only(&self) -> bool {
+		self.0.read_only()
+	}
+}
 
 impl Deref for Group {
 	type Target = Idiom;

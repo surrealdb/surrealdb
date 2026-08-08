@@ -5,6 +5,14 @@ use crate::expr::Expr;
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Limit(pub Expr);
 
+impl Limit {
+	/// Whether evaluating the limit expression can be done on a read-only
+	/// transaction.
+	pub fn read_only(&self) -> bool {
+		self.0.read_only()
+	}
+}
+
 impl ToSql for Limit {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		let stmt: crate::sql::limit::Limit = self.clone().into();

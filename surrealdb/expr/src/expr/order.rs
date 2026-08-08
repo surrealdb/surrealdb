@@ -12,6 +12,16 @@ pub enum Ordering {
 	Order(OrderList),
 }
 
+impl Ordering {
+	/// Whether evaluating the ordering can be done on a read-only transaction.
+	pub fn read_only(&self) -> bool {
+		match self {
+			Ordering::Random => true,
+			Ordering::Order(list) => list.read_only(),
+		}
+	}
+}
+
 impl ToSql for Ordering {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		let sql_ordering: crate::sql::order::Ordering = self.clone().into();
@@ -21,6 +31,14 @@ impl ToSql for Ordering {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct OrderList(pub Vec<Order>);
+
+impl OrderList {
+	/// Whether evaluating every ordering key can be done on a read-only
+	/// transaction.
+	pub fn read_only(&self) -> bool {
+		self.0.iter().all(|x| x.value.read_only())
+	}
+}
 
 impl Deref for OrderList {
 	type Target = Vec<Order>;
