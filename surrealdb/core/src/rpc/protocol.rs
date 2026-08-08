@@ -510,7 +510,7 @@ pub trait RpcProtocol {
 		// `Method::is_transaction_control`).
 		let result: Result<DbResult, surrealdb_types::Error> = match self.kvs().query_timeout() {
 			Some(timeout) if !method.is_transaction_control() => {
-				match tokio::time::timeout(timeout, dispatch).await {
+				match common::time::timeout(timeout, dispatch).await {
 					Ok(inner) => inner,
 					Err(_elapsed) => {
 						warn!(
@@ -1905,7 +1905,7 @@ pub trait RpcProtocol {
 			statement_count,
 			run: Box::pin(async move {
 				let result = match timeout {
-					Some(timeout) => match tokio::time::timeout(timeout, run).await {
+					Some(timeout) => match common::time::timeout(timeout, run).await {
 						Ok(inner) => inner,
 						Err(_elapsed) => {
 							warn!(

@@ -354,10 +354,19 @@ script = '''
     #!/bin/bash
     set -euo pipefail
 
+    # Each scan below records its own verdict and the script exits once at the
+    # end, so one scan's findings never hide the other's.
+    FAILED=0
+
     # Scan for direct use of std::time::Instant or std::time::SystemTime in Rust source files.
     # These should be imported from web_time instead for WASM compatibility.
     # std::time::Duration is fine and not flagged.
     # language-tests/ and fuzz/ are excluded (separate workspaces).
+    #
+    # Note: this does not match the brace form (`std::time::{Duration, Instant}`),
+    # which reaches the same clock. Widening it surfaces hits in crates that never
+    # build for wasm, so making it accurate means scoping it the way the
+    # tokio::time scan below is scoped.
 
     MATCHES=$(grep -rn --include='*.rs' \
         -E 'std::time::(Instant|SystemTime)' \
@@ -374,10 +383,59 @@ script = '''
         done
         COUNT=$(echo "$MATCHES" | wc -l | tr -d ' ')
         echo "Found $COUNT disallowed std::time import(s). Use web_time instead."
-        exit 1
+        FAILED=1
+    else
+        echo "No disallowed std::time imports found."
     fi
 
-    echo "No disallowed std::time imports found."
+    # The crates below all compile for wasm32-unknown-unknown, where tokio's
+    # timers compile but trap: they read the clock through std::time, and while
+    # nothing requests tokio's `time` feature for wasm, feature unification
+    # supplies it anyway. `common::time` is the same API over the right clock
+    # for each target, so any `tokio::time` here is a latent wasm panic.
+    #
+    # Tests are exempt — they only ever run natively.
+    #
+    # `tokio::spawn` has the same shape of problem (no runtime on wasm) but is
+    # not checked here: a `#[cfg(not(target_family = "wasm"))]` block around it
+    # is perfectly correct, and grep cannot see cfg, so every hit would be a
+    # false positive.
+
+    TIMERS=$(grep -rn --include='*.rs' \
+        -E 'tokio::time::(Instant|Interval|MissedTickBehavior|interval|sleep|timeout|timeout_at)\b' \
+        --exclude-dir=target \
+        --exclude-dir=tests \
+        --exclude='*test*.rs' \
+        surrealdb/core/src surrealdb/common/src surrealdb/datastore/src surrealdb/kvs/src \
+        surrealdb/expr/src surrealdb/idx/src surrealdb/embedded/src \
+        | grep -v '^surrealdb/common/src/time.rs:' || true)
+
+    # Everything that survives the path filters still has to clear the
+    # per-file test module, which no path convention marks.
+    TIMERS=$(echo "$TIMERS" | while IFS= read -r match; do
+        [ -z "$match" ] && continue
+        file=${match%%:*}
+        rest=${match#*:}
+        line=${rest%%:*}
+        # The nearest preceding `mod test`/`mod tests` opener, if any.
+        start=$(grep -n -E '^(\t| )*mod tests?( |\{)' "$file" | cut -d: -f1 | awk -v L="$line" '$1 < L' | tail -1)
+        [ -n "$start" ] || echo "$match"
+    done)
+
+    if [ -n "$TIMERS" ]; then
+        echo "$TIMERS" | while IFS= read -r match; do
+            echo "error: $match"
+            echo "  --> Use common::time instead of tokio::time so the timer works on WASM."
+            echo ""
+        done
+        COUNT=$(echo "$TIMERS" | wc -l | tr -d ' ')
+        echo "Found $COUNT disallowed tokio::time use(s). Use common::time instead."
+        FAILED=1
+    else
+        echo "No disallowed tokio::time uses found."
+    fi
+
+    exit $FAILED
 '''
 
 [tasks.ci-check-wasm]
@@ -388,18 +446,25 @@ script = '''
 # 2. Add the LLVM bin directory to your PATH: `echo 'export PATH="/opt/homebrew/opt/llvm/bin:$PATH"' >> ~/.zshrc`
 category = "CI - CHECK"
 description = "Run code quality checks (WASM)"
-command = "cargo"
 env = { RUSTFLAGS = '--cfg getrandom_backend="wasm_js"' }
-args = [
-    "check",
-    "--locked",
-    "--package",
-    "surrealdb",
-    "--features",
-    "protocol-ws,protocol-http,kv-mem,kv-indxdb,http,jwks",
-    "--target",
-    "wasm32-unknown-unknown",
-]
+script = '''
+    #!/bin/bash
+    set -euo pipefail
+
+    # The Rust SDK, compiled for the browser.
+    cargo check --locked --package surrealdb \
+        --features protocol-ws,protocol-http,kv-mem,kv-indxdb,http,jwks \
+        --target wasm32-unknown-unknown
+
+    # The browser engine, which pulls in `surrealdb-embedded` behind it. Neither
+    # is reachable from `surrealdb`, so the check above covers neither. Both
+    # feature sets are built and published, so both are checked.
+    for features in kv-mem,kv-indxdb kv-mem,kv-indxdb,debug; do
+        cargo check --locked --package surrealdb-wasm \
+            --features "$features" \
+            --target wasm32-unknown-unknown
+    done
+'''
 
 # --------------------------------------------------
 # Integration Tests

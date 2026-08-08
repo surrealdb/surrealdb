@@ -26,6 +26,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use common::EngineError;
+use common::time::sleep;
 use rand::Rng;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -37,7 +38,6 @@ use surrealdb_kvs::key::{KVKey, TypedRange};
 use surrealdb_kvs::{Key, impl_kv_value_revisioned};
 use surrealdb_strand::TableName;
 use tokio::sync::{Mutex, RwLock};
-use tokio::time::sleep;
 use uuid::Uuid;
 use web_time::Instant;
 

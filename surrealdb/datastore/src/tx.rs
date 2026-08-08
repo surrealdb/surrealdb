@@ -22,6 +22,7 @@ use std::time::Duration;
 use anyhow::Result;
 use chrono::Utc;
 use common::EngineError;
+use common::time::sleep;
 use roaring::RoaringTreemap;
 use surrealdb_catalog::node::Node;
 use surrealdb_catalog::providers::{
@@ -48,7 +49,6 @@ use surrealdb_observe::{
 	TransactionMetrics,
 };
 use tokio::sync::Mutex;
-use tokio::time::sleep;
 use tracing::Instrument;
 use uuid::Uuid;
 use web_time::Instant;

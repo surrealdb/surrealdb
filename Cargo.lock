@@ -6297,6 +6297,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde-wasm-bindgen"
+version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8302e169f0eddcc139c70f139d19d6467353af16f9fce27e8c30158036a1e16b"
+dependencies = [
+ "js-sys",
+ "serde",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "serde_core"
 version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6914,6 +6925,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "unicase",
+ "wasmtimer",
 ]
 
 [[package]]
@@ -7793,6 +7805,21 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "surrealdb-wasm"
+version = "3.3.0-nightly"
+dependencies = [
+ "anyhow",
+ "futures",
+ "js-sys",
+ "serde-wasm-bindgen",
+ "surrealdb-embedded",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "wasm-streams 0.5.0",
+ "web-sys",
 ]
 
 [[package]]

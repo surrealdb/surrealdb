@@ -265,7 +265,7 @@ mod tests {
 	/// completion order differ from input order.
 	fn delayed(delay: u64, value: i64) -> BoxFut<'static, FlowResult<Value>> {
 		Box::pin(async move {
-			tokio::time::sleep(Duration::from_millis(delay)).await;
+			common::time::sleep(Duration::from_millis(delay)).await;
 			Ok(Value::from(value))
 		})
 	}

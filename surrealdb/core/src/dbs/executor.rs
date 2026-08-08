@@ -787,12 +787,54 @@ impl Executor {
 			DatabaseContext, ExecutionContext, NamespaceContext, RootContext,
 		};
 
-		/// Guard that aborts a spawned task when dropped, ensuring the
-		/// timeout task is cleaned up when execution finishes or errors.
-		struct AbortOnDrop(tokio::task::JoinHandle<()>);
-		impl Drop for AbortOnDrop {
+		/// Guard that stops the timeout task when dropped, so it does not
+		/// outlive the execution it was bounding.
+		///
+		/// The task has to be spawned rather than raced inside the query
+		/// future: the point is for it to fire while the executor is inside an
+		/// operator that is not otherwise yielding to check the deadline.
+		#[cfg(not(target_family = "wasm"))]
+		struct TimeoutGuard(tokio::task::JoinHandle<()>);
+		#[cfg(not(target_family = "wasm"))]
+		impl Drop for TimeoutGuard {
 			fn drop(&mut self) {
 				self.0.abort();
+			}
+		}
+
+		/// Wasm has no runtime to spawn onto and `spawn_local` returns no
+		/// handle to abort, so the task is stopped by a token it waits on
+		/// alongside the timer.
+		#[cfg(target_family = "wasm")]
+		struct TimeoutGuard(CancellationToken);
+		#[cfg(target_family = "wasm")]
+		impl Drop for TimeoutGuard {
+			fn drop(&mut self) {
+				self.0.cancel();
+			}
+		}
+
+		/// Cancels `token` once `timeout` elapses, unless the returned guard is
+		/// dropped first.
+		fn spawn_timeout(timeout: Duration, token: CancellationToken) -> TimeoutGuard {
+			#[cfg(not(target_family = "wasm"))]
+			{
+				TimeoutGuard(tokio::spawn(async move {
+					common::time::sleep(timeout).await;
+					token.cancel();
+				}))
+			}
+			#[cfg(target_family = "wasm")]
+			{
+				let finished = CancellationToken::new();
+				let stop = finished.clone();
+				wasm_bindgen_futures::spawn_local(async move {
+					tokio::select! {
+						_ = common::time::sleep(timeout) => token.cancel(),
+						_ = stop.cancelled() => {}
+					}
+				});
+				TimeoutGuard(finished)
 			}
 		}
 
@@ -810,18 +852,12 @@ impl Executor {
 			None => CancellationToken::new(),
 		};
 
-		// If a query timeout is configured, spawn a task that cancels the
-		// token when the timeout expires. This lets operators that check
-		// the cancellation token (e.g. SleepPlan, long-running scans)
-		// stop promptly instead of running to completion.
-		// AbortOnDrop ensures the task is cleaned up when execution finishes.
-		let _timeout_guard = self.ctx.timeout().map(|timeout| {
-			let token = cancellation.clone();
-			AbortOnDrop(tokio::spawn(async move {
-				tokio::time::sleep(timeout).await;
-				token.cancel();
-			}))
-		});
+		// If a query timeout is configured, cancel the token when it expires.
+		// This lets operators that check the cancellation token (e.g.
+		// SleepPlan, long-running scans) stop promptly instead of running to
+		// completion. The guard stops the task when execution finishes.
+		let _timeout_guard =
+			self.ctx.timeout().map(|timeout| spawn_timeout(timeout, cancellation.clone()));
 
 		// Build the root context using cached session info. The context
 		// snapshot must be fresh per-query because it contains the
@@ -1407,7 +1443,7 @@ impl Executor {
 
 		let exec_result = match kvs.transaction_timeout() {
 			Some(timeout) => {
-				match tokio::time::timeout(
+				match common::time::timeout(
 					timeout,
 					self.execute_plan_in_transaction(Arc::clone(&txn), start, plan),
 				)
@@ -1541,7 +1577,7 @@ impl Executor {
 		match kvs.transaction_timeout() {
 			Some(timeout) => {
 				let start_results = self.results.len();
-				match tokio::time::timeout(
+				match common::time::timeout(
 					timeout,
 					self.execute_begin_statement_inner(kvs, Arc::clone(&txn), stream),
 				)

@@ -73,4 +73,10 @@ surrealism/test/surrealism
 /surrealdb/node/dist/
 /surrealdb/node/*.tgz
 
+# `@surrealdb/wasm-native` build outputs: `dist/` is what wasm-bindgen generates
+# and also what gets published, module and loader together.
+/surrealdb/wasm/node_modules/
+/surrealdb/wasm/dist/
+/surrealdb/wasm/*.tgz
+
 *.actual.txt

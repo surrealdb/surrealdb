@@ -1,5 +1,5 @@
 use anyhow::Result;
-use tokio::time::timeout;
+use common::time::timeout;
 
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
@@ -38,10 +38,7 @@ pub(crate) async fn sleep_statement_compute(
 /// to the executor's normal yield, which sees the cancel flag and
 /// bails with `EngineError::QueryCancelled`.
 pub(crate) async fn sleep_statement_sleep(this: &SleepStatement, ctx: &FrozenContext) {
-	#[cfg(target_family = "wasm")]
-	let sleep_fut = wasmtimer::tokio::sleep(this.duration.0);
-	#[cfg(not(target_family = "wasm"))]
-	let sleep_fut = tokio::time::sleep(this.duration.0);
+	let sleep_fut = common::time::sleep(this.duration.0);
 	match ctx.cancel_token() {
 		Some(token) => {
 			tokio::select! {

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use chrono::Utc;
+use common::time::{sleep, timeout};
 use surrealdb_strand::TableName;
-use tokio::time::{sleep, timeout};
 use web_time::Instant;
 
 use super::builder::{IndexKey, IndexMutation};

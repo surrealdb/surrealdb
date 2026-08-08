@@ -21,6 +21,7 @@ use anyhow::{Context as _, Result, ensure};
 use arc_swap::ArcSwap;
 use async_channel::Sender;
 use bytes::{Bytes, BytesMut};
+use common::time::{Instant, sleep, timeout, timeout_at};
 use futures::{Future, Stream};
 use rand::Rng;
 use rand::distr::{Alphanumeric, SampleString};
@@ -33,7 +34,6 @@ use surrealdb_kvs::TransactionType::*;
 use surrealdb_types::{AuthError, Error as TypesError, SurrealValue, object};
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
-use tokio::time::{Instant, sleep, timeout, timeout_at};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, instrument, trace, warn};
 use uuid::Uuid;

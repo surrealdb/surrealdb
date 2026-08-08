@@ -778,6 +778,51 @@ jobs:
         working-directory: surrealdb/node
         run: bun test
 
+  wasm-engine:
+    name: Wasm engine
+    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          targets: wasm32-unknown-unknown
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+          # The module is a release build into its own target triple directory,
+          # so it shares nothing with the debug-profile jobs.
+          cache-key: wasm
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      # The CLI and the wasm-bindgen crate share a bindgen schema that changes
+      # between patch releases, so the version comes from the lockfile — the
+      # same source `build.ts` checks against before it runs.
+      - name: Install wasm-bindgen-cli
+        run: |
+          version=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | grep '^version' | cut -d'"' -f2)
+          echo "Installing wasm-bindgen-cli $version"
+          cargo install -f wasm-bindgen-cli --version "$version"
+
+      - name: Install wasm-opt
+        run: cargo install wasm-opt --version 0.116.1
+
+      - name: Install dependencies
+        working-directory: surrealdb/wasm
+        run: bun install --frozen-lockfile
+
+      - name: Build the module
+        working-directory: surrealdb/wasm
+        run: bun run build
+
+      - name: Test the module
+        working-directory: surrealdb/wasm
+        run: bun test
+
   # ----------------------------------------
   # Required checks
   # ----------------------------------------
@@ -825,6 +870,8 @@ jobs:
       - conformance-tests
       # Embedded Node.js engine
       - node-engine
+      # Embedded browser engine
+      - wasm-engine
     steps:
       - name: Check for failures
         run: |
@@ -840,6 +887,7 @@ jobs:
             "${{ needs.check-release.result }}"
             "${{ needs.check-msrv.result }}"
             "${{ needs.check-wasm.result }}"
+            "${{ needs.test-wasm.result }}"
             "${{ needs.check-revision.result }}"
             "${{ needs.check-docs.result }}"
             "${{ needs.feature-check.result }}"
@@ -855,6 +903,7 @@ jobs:
             "${{ needs.upgrade-tests.result }}"
             "${{ needs.conformance-tests.result }}"
             "${{ needs.node-engine.result }}"
+            "${{ needs.wasm-engine.result }}"
           )
 
           # Check if any job failed (skipped is ok for conditional jobs)

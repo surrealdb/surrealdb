@@ -3,21 +3,15 @@ use std::pin::Pin;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
+use common::time::{Instant, MissedTickBehavior, sleep};
 use futures::StreamExt;
 use surrealdb_datastore::triggers::CommitTriggers;
 use surrealdb_types::Error;
 #[cfg(not(target_family = "wasm"))]
-use tokio::{
-	spawn, time,
-	time::{Instant, MissedTickBehavior},
-};
+use tokio::spawn;
 use tokio_util::sync::CancellationToken;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
-#[cfg(target_family = "wasm")]
-use wasmtimer::std::Instant;
-#[cfg(target_family = "wasm")]
-use wasmtimer::tokio::{self as time, MissedTickBehavior};
 
 use crate::err::{is_query_cancelled, is_query_timedout};
 use crate::kvs::{Datastore, LiveQueryEngine};
@@ -268,7 +262,7 @@ fn spawn_task_index_compaction(
 					tokio::select! {
 						biased;
 						_ = canceller.cancelled() => break,
-						_ = time::sleep(INDEX_COMPACTION_TRIGGER_DEBOUNCE) => {}
+						_ = sleep(INDEX_COMPACTION_TRIGGER_DEBOUNCE) => {}
 					}
 					let Some(dbs) = dbs.upgrade() else { break };
 					if let Err(e) =
@@ -548,7 +542,7 @@ where
 		tokio::select! {
 			biased;
 			_ = canceller.cancelled() => break,
-			_ = time::sleep(delay) => {}
+			_ = sleep(delay) => {}
 		}
 		run(slots[i].job).await;
 		// Measure the next deadline from completion, not from the deadline just
@@ -636,7 +630,7 @@ where
 
 async fn interval_ticker(interval: Duration) -> IntervalStream {
 	// Create a new interval timer
-	let mut interval = time::interval(interval);
+	let mut interval = common::time::interval(interval);
 	// Don't bombard the database if we miss some ticks
 	interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 	interval.tick().await;

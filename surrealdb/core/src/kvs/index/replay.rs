@@ -5,8 +5,8 @@ use std::sync::atomic::Ordering;
 
 use anyhow::Result;
 use chrono::Utc;
+use common::time::sleep;
 use reblessive::TreeStack;
-use tokio::time::sleep;
 use uuid::Uuid;
 use web_time::Instant;
 

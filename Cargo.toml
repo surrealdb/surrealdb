@@ -42,6 +42,7 @@ members = [
     "surrealdb/token",
     "surrealdb/types",
     "surrealdb/types/derive",
+    "surrealdb/wasm",
     # SurrealML crates
     "surrealml/core",
     # Surrealism crates
@@ -247,6 +248,7 @@ scrypt = "0.11.0"
 semver = "1.0.28"
 serde = "1.0.228"
 serde_json = "1.0.149"
+serde-wasm-bindgen = "0.6.5"
 sha1 = "0.10.6"
 sha2 = "0.10.9"
 snap = "1.1.1"
@@ -271,7 +273,9 @@ uuid = "1.23.1"
 wasm-bindgen = "0.2.108"
 wasm-bindgen-futures = "0.4.58"
 wasm-bindgen-test = "0.3.58"
+wasm-streams = "0.5.0"
 wasmtimer = { version = "0.4.3", default-features = false }
+web-sys = { version = "0.3.85", default-features = false }
 
 # Dev dependencies
 criterion = "0.8"
@@ -589,6 +593,27 @@ strip = true
 inherits = "release"
 lto = false
 codegen-units = 16
+
+# The browser engine (`surrealdb/wasm`). A wasm module is downloaded before it
+# can run, so its size is a latency cost every page load pays and `opt-level`
+# trades against — which is the one setting that differs from `release`.
+# `wasm-opt -Oz` runs afterwards and shrinks the module further, but it works on
+# the emitted code and cannot recover a monomorphisation `-O3` chose to inline.
+#
+# Profiles have to live here: cargo reads them only from the workspace root and
+# silently ignores a `[profile]` in a member manifest.
+[profile.wasm-release]
+inherits = "release"
+opt-level = 'z'
+
+# Keeps the symbol names a browser stack trace needs, and the panic messages
+# `panic = "abort"` would otherwise let the runtime discard. Paired with the
+# crate's `debug` feature, which installs the console panic hook that reports
+# them.
+[profile.wasm-release-debug]
+inherits = "wasm-release"
+strip = false
+panic = 'unwind'
 
 [profile.bench]
 strip = false

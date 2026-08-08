@@ -293,7 +293,7 @@ async fn apply(ds: &Datastore, registry: &[Migration], pending: &[u32]) -> Resul
 			count = outstanding.len(),
 			"Another node is applying data migrations; waiting for it to finish"
 		);
-		tokio::time::sleep(WAIT_POLL_INTERVAL).await;
+		common::time::sleep(WAIT_POLL_INTERVAL).await;
 	}
 }
 

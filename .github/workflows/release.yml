@@ -1323,6 +1323,123 @@ jobs:
             ${{ needs.prepare-vars.outputs.publish != 'true' && '--dry-run' || '' }}
 
   # ----------------------------------------
+  # Publish the embedded browser engine (versioned releases)
+  # ----------------------------------------
+  # `@surrealdb/wasm-native` embeds this exact engine, so it ships with it and
+  # carries the same version. One artefact rather than a matrix: WebAssembly is
+  # the only target. Nightly publishes no packages, as with crates.
+
+  build-wasm-engine:
+    name: Build Wasm engine
+    needs: [prepare-vars, approve]
+    if: ${{ needs.prepare-vars.outputs.release-engine == 'true' && needs.prepare-vars.outputs.nightly-release != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.prepare-vars.outputs.git-sha }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      # The CLI and the wasm-bindgen crate share a bindgen schema that changes
+      # between patch releases, so the version comes from the lockfile — the
+      # same source `build.ts` checks against before it runs.
+      - name: Install wasm-bindgen-cli
+        run: |
+          version=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | grep '^version' | cut -d'"' -f2)
+          echo "Installing wasm-bindgen-cli $version"
+          cargo install -f wasm-bindgen-cli --version "$version"
+
+      - name: Install wasm-opt
+        run: cargo install wasm-opt --version 0.116.1
+
+      - name: Install dependencies
+        working-directory: surrealdb/wasm
+        run: bun install --frozen-lockfile
+
+      - name: Build the module
+        working-directory: surrealdb/wasm
+        run: bun run build
+
+      - name: Upload the package bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: wasm-engine-bundle
+          if-no-files-found: error
+          path: surrealdb/wasm/dist/
+
+  publish-wasm-engine:
+    name: Publish @surrealdb/wasm-native
+    needs: [prepare-vars, approve, build-wasm-engine]
+    if: ${{ needs.prepare-vars.outputs.release-engine == 'true' && needs.prepare-vars.outputs.nightly-release != 'true' }}
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ needs.prepare-vars.outputs.publish != 'true' }}
+    permissions:
+      contents: read
+      # Required both for npm's OIDC trusted publishing and for provenance.
+      id-token: write
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.prepare-vars.outputs.git-sha }}
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Install Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Download the package bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: wasm-engine-bundle
+          path: surrealdb/wasm/dist/
+
+      - name: Distribution summary
+        working-directory: surrealdb/wasm
+        run: ls -lR dist
+
+      # npm can only attest provenance for a package built in a public
+      # repository, so the flag is passed only when this workflow is running in
+      # one. Engine releases run from the private repository today, where npm
+      # would reject the attestation and fail the publish.
+      - name: Publish to npm
+        working-directory: surrealdb/wasm
+        env:
+          SURREAL_VERSION: ${{ needs.prepare-vars.outputs.version }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          bun run publish.ts \
+            ${{ github.event.repository.private == false && '--provenance' || '' }} \
+            ${{ needs.prepare-vars.outputs.publish != 'true' && '--dry-run' || '' }}
+
+  # ----------------------------------------
   # Promote binaries
   # ----------------------------------------
 

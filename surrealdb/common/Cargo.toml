@@ -28,6 +28,16 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 parking_lot.workspace = true
 sysinfo = { workspace = true, optional = true }
 
+# The two halves of `crate::time`, split by target so this crate never adds
+# tokio's `time` feature to a wasm build. That does not keep the feature out —
+# `surrealdb-datastore` requests it unconditionally and cargo unifies — which is
+# exactly why `crate::time` picks the timer rather than trusting the feature set.
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+tokio = { workspace = true, default-features = false, features = ["time"] }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+wasmtimer = { workspace = true, default-features = false, features = ["tokio"] }
+
 [dev-dependencies]
 hashbrown.workspace = true
 tokio = { workspace = true, features = ["rt","time"] }

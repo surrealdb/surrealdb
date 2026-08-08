@@ -8,12 +8,12 @@ use std::time::Duration;
 
 use anyhow::{Result, ensure};
 use chrono::Utc;
+use common::time::sleep;
 use futures::channel::oneshot::{Receiver, Sender, channel};
 use surrealdb_datastore::close::{CommitAction, RollbackAction};
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 use tokio::sync::{Notify, RwLock};
-use tokio::time::sleep;
 use uuid::Uuid;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;

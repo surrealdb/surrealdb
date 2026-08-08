@@ -35,3 +35,4 @@ pub mod non_max;
 pub mod range;
 pub mod span;
 pub mod str;
+pub mod time;
