@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::syn::error::RenderedError;
+use surrealdb_syn::error::RenderedError;
 use surrealdb_types::{Object, Value as SurValue, Variables};
 
 use super::cmp::{RoughlyEq, RoughlyEqConfig};

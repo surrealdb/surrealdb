@@ -20,7 +20,7 @@ mod full_sort;
 mod shuffle;
 mod topk;
 
-pub use common::{OrderByField, SortDirection, SortKey, compare_values};
+pub(crate) use common::{OrderByField, SortDirection, SortKey, compare_values};
 #[cfg(all(storage, not(target_family = "wasm")))]
 pub use external::ExternalSort;
 #[cfg(all(storage, not(target_family = "wasm")))]

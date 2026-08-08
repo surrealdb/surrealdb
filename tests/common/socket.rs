@@ -8,7 +8,7 @@ use futures_util::{SinkExt, TryStreamExt};
 use http::header::{HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use surrealdb_core::syn::ParserConfig;
+use surrealdb_syn::ParserConfig;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;

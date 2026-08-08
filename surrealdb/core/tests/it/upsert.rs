@@ -1,5 +1,5 @@
 use surrealdb_core::dbs::Session;
-use surrealdb_core::iam::{Level, Role};
+use surrealdb_iam::{Level, Role};
 use surrealdb_types::{Array, ToSql, Value};
 
 use crate::helpers::new_ds;

@@ -9,10 +9,11 @@ use clap::ArgMatches;
 use semver::Version;
 use sha2::{Digest, Sha256};
 use surrealdb_core::channel;
-use surrealdb_core::dbs::capabilities::Targets;
-use surrealdb_core::dbs::{Capabilities, Session};
+use surrealdb_core::dbs::Session;
 use surrealdb_core::env::VERSION;
 use surrealdb_core::kvs::{Builder, Datastore};
+use surrealdb_rpc::capabilities::Capabilities;
+use surrealdb_rpc::capabilities::Targets;
 
 use crate::cli::{Backend, ColorMode};
 use crate::cmd::bench::stats::{ComparisonData, MeasurementData};
@@ -790,7 +791,7 @@ enum BenchStatement {
 	/// the GraphQL arm, which generates its schema up front). The plan is cloned
 	/// per iteration because `process_gql` consumes it by value.
 	Gql {
-		plan: surrealdb_core::gql::PreparedGqlQuery,
+		plan: surrealdb_gql::PreparedGqlQuery,
 	},
 	GraphQl {
 		schema: async_graphql::dynamic::Schema,
@@ -818,18 +819,16 @@ impl BenchStatement {
 				// Parse + lower the `.gql` source once, exactly as the run path
 				// does (see `cmd::run::run_test_with_dbs`), so the timed loop
 				// measures only `process_gql`.
-				let settings = surrealdb_core::gql::GqlParserSettings::default();
+				let settings = surrealdb_gql::GqlParserSettings::default();
 				let source = run.case.test.source.as_bytes();
-				let plan = surrealdb_core::gql::parse_to_plan_with_settings(
-					&run.case.test.source,
-					settings,
-				)
-				.map_err(|e| {
-					anyhow!(
-						"Failed to parse/lower GQL bench statement: {}",
-						e.render_on_bytes(source)
-					)
-				})?;
+				let plan =
+					surrealdb_gql::parse_to_plan_with_settings(&run.case.test.source, settings)
+						.map_err(|e| {
+							anyhow!(
+								"Failed to parse/lower GQL bench statement: {}",
+								e.render_on_bytes(source)
+							)
+						})?;
 				Ok(Self::Gql {
 					plan,
 				})
@@ -903,7 +902,7 @@ impl BenchStatement {
 }
 
 /// Seed used to make benchmark datasets deterministic. Each dataset build
-/// reseeds the engine RNG (see `surrealdb_core::rnd`) so `rand::*` values and
+/// reseeds the engine RNG (see `surrealdb_expr::val::rnd`) so `rand::*` values and
 /// `|record:N|` ids are identical across runs and independent of benchmark
 /// order. Override with `SURREAL_RAND_SEED` to sanity-check results against a
 /// different, but still fixed, dataset draw; the variable is parsed once by
@@ -963,7 +962,7 @@ async fn build_and_populate(
 	let session =
 		util::session_from_test_config(&run.case.test.config.parsed, config.new_planner.into());
 
-	surrealdb_core::rnd::reseed(dataset_seed());
+	surrealdb_expr::val::rnd::reseed(dataset_seed());
 
 	// Use the per-variant dataset import chain (from `[bench].datasets`) when one
 	// was selected, otherwise fall back to the bench's own resolved imports.
@@ -1119,7 +1118,7 @@ async fn run_bench(
 	// vector-KNN query vector) is deterministic and independent of how many benches
 	// shared this datastore before it. (The rebuild path reseeds again inside each
 	// per-iteration `prepare`; harmless.)
-	surrealdb_core::rnd::reseed(dataset_seed());
+	surrealdb_expr::val::rnd::reseed(dataset_seed());
 
 	let before_warmup = Instant::now();
 	let mut count = 0usize;

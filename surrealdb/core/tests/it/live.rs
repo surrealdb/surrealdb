@@ -522,17 +522,17 @@ async fn test_remove_user_kills_their_live_queries() -> Result<()> {
 
 	// alice subscribes.
 	let alice = Session::for_level(
-		surrealdb_core::iam::Level::Database("test".into(), "test".into()),
-		surrealdb_core::iam::Role::Owner,
+		surrealdb_iam::Level::Database("test".into(), "test".into()),
+		surrealdb_iam::Role::Owner,
 	)
 	.with_ns("test")
 	.with_db("test")
 	.with_rt(true);
 	let alice = Session {
-		au: std::sync::Arc::new(surrealdb_core::iam::Auth::new(surrealdb_core::iam::Actor::new(
+		au: std::sync::Arc::new(surrealdb_iam::Auth::new(surrealdb_iam::Actor::new(
 			"alice".to_string(),
-			vec![surrealdb_core::iam::Role::Owner],
-			surrealdb_core::iam::Level::Database("test".into(), "test".into()),
+			vec![surrealdb_iam::Role::Owner],
+			surrealdb_iam::Level::Database("test".into(), "test".into()),
 		))),
 		..alice
 	};

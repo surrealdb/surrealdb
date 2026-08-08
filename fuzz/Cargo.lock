@@ -3670,7 +3670,9 @@ dependencies = [
  "rust_decimal",
  "surrealdb-types",
  "thiserror",
+ "tokio",
  "unicase",
+ "wasmtimer",
 ]
 
 [[package]]
@@ -3838,6 +3840,9 @@ version = "0.0.0"
 dependencies = [
  "libfuzzer-sys",
  "surrealdb-core",
+ "surrealdb-gql",
+ "surrealdb-sql",
+ "surrealdb-syn",
  "surrealdb-types",
  "tokio",
 ]

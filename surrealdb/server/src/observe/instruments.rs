@@ -206,10 +206,10 @@ pub mod names {
 /// observers, tests, and the `safe` security audit all reference the same
 /// strings.
 pub mod attrs {
-	/// `success` / `error` / `cancelled` (from [`surrealdb_core::observe::Outcome::as_label`]).
+	/// `success` / `error` / `cancelled` (from [`surrealdb_observe::Outcome::as_label`]).
 	pub static OUTCOME: &str = "outcome";
 	/// Bounded statement classification (from
-	/// [`surrealdb_core::observe::StatementType::as_label`]).
+	/// [`surrealdb_observe::StatementType::as_label`]).
 	pub static STATEMENT_TYPE: &str = "statement_type";
 	/// Resolved namespace identifier (sentinel `"-"` when unset).
 	pub static NAMESPACE: &str = "namespace";
@@ -217,7 +217,7 @@ pub mod attrs {
 	pub static DATABASE: &str = "database";
 	/// Resolved user / actor identifier (sentinel `"-"` when unset, `<record>` for
 	/// record-access principals — see the `From<&Session>` impl for
-	/// [`surrealdb_core::observe::TenantIdentity`]).
+	/// [`surrealdb_observe::TenantIdentity`]).
 	pub static USER: &str = "user";
 	/// Bounded session protocol identifier (`websocket` / `http`).
 	pub static PROTOCOL: &str = "protocol";
@@ -229,7 +229,7 @@ pub mod attrs {
 	pub static WRITE: &str = "write";
 	/// KV operation classification (`get` / `scan` / `put` / `set` / `del`).
 	pub static KV_OP: &str = "op";
-	/// Bounded RPC method identifier (from [`surrealdb_core::rpc::Method::to_str`]).
+	/// Bounded RPC method identifier (from [`surrealdb_rpc::Method::to_str`]).
 	pub static RPC_METHOD: &str = "rpc.method";
 	/// Auth attempt type (`signin` / `signup` / `authenticate` / …).
 	pub static AUTH_ACTION: &str = "auth_action";
@@ -265,7 +265,7 @@ pub mod attrs {
 /// from the RPC dispatch shim. Server crates additionally use them via the
 /// shared classifier helpers ([`error_class::classify_types_error`],
 /// [`error_class::classify_http_status`]) at the HTTP / GraphQL / MCP layers.
-pub use surrealdb_core::observe::error_class;
+pub use surrealdb_observe::error_class;
 
 #[cfg(test)]
 mod tests {

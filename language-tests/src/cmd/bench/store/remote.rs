@@ -205,17 +205,13 @@ impl RemoteStore {
 						);
 					}
 					Message::Binary(bytes) => {
-						let res =
-							match surrealdb_core::rpc::format::flatbuffers::decode::<Value>(&bytes)
-							{
-								Ok(x) => x,
-								Err(e) => {
-									println!(
-										"Warning, remote datastore returned invalid format: {e}"
-									);
-									continue;
-								}
-							};
+						let res = match surrealdb_types::decode::<Value>(&bytes) {
+							Ok(x) => x,
+							Err(e) => {
+								println!("Warning, remote datastore returned invalid format: {e}");
+								continue;
+							}
+						};
 
 						let resp = match Response::from_value(res) {
 							Err(e) => {
@@ -265,9 +261,7 @@ impl RemoteStore {
 						};
 						req_id += 1;
 
-						let bytes =
-							surrealdb_core::rpc::format::flatbuffers::encode(&req.into_value())
-								.unwrap();
+						let bytes = surrealdb_types::encode(&req.into_value()).unwrap();
 						if let Err(e) = s.send(Message::Binary(bytes.into())).await {
 							ws_error(e);
 						}

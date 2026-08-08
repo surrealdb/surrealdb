@@ -16,7 +16,7 @@
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer};
 use surrealdb_core::dbs::Session;
-use surrealdb_core::iam::Level;
+use surrealdb_iam::Level;
 
 /// Extract the authenticated `Session` from HTTP request parts in the
 /// extensions.
@@ -141,7 +141,7 @@ pub(crate) fn check_subject(
 #[cfg(test)]
 mod tests {
 	use http::Request;
-	use surrealdb_core::iam::{Auth, Role};
+	use surrealdb_iam::{Auth, Role};
 
 	use super::*;
 

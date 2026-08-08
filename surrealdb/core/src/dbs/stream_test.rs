@@ -6,11 +6,11 @@
 
 use std::sync::Arc;
 
-use surrealdb_rpc::QueryResult;
+use surrealdb_rpc::{QUERY_STREAM_BUFFER, QueryResult};
 use surrealdb_types::Value as PublicValue;
 
 use crate::catalog::providers::CatalogProvider;
-use crate::dbs::{QUERY_STREAM_BUFFER, QueryStreamItem, Session};
+use crate::dbs::{QueryStreamItem, Session};
 use crate::kvs::{Datastore, TransactionType};
 
 /// What a consumer reassembles from one statement's items.

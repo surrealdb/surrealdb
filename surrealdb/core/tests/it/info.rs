@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use regex::Regex;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::iam::{Level, Role};
+use surrealdb_iam::{Level, Role};
 use surrealdb_types::{Number, ToSql, Value};
 
 use crate::helpers::*;

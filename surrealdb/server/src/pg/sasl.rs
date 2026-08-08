@@ -1,6 +1,6 @@
 //! Postgres SASL server-side exchange for SCRAM-SHA-256 (RFC 5802 / 7677).
 //!
-//! The cryptographic core lives in `surrealdb_core::iam::scram`, reached here
+//! The cryptographic core lives in `surrealdb_iam::scram`, reached here
 //! through [`ScramAuth`]; this module owns the SCRAM message parsing/formatting,
 //! server-nonce generation, and the AuthMessage assembly Postgres SASL requires.
 //! Channel binding is not offered (plain `SCRAM-SHA-256`, not `-PLUS`).
@@ -8,8 +8,8 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use rand::TryRngCore;
-use surrealdb_core::iam::scram;
 use surrealdb_core::iam::verify::ScramAuth;
+use surrealdb_iam::scram;
 
 use super::error::PgError;
 

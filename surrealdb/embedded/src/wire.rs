@@ -13,7 +13,7 @@
 
 use anyhow::{Result, bail};
 use surrealdb_core::rpc::Format;
-use surrealdb_core::rpc::format::{cbor, flatbuffers, json};
+use surrealdb_core::rpc::format::{cbor, json};
 use surrealdb_types::Value;
 
 /// Decodes a value the shim's caller sent.
@@ -26,7 +26,7 @@ pub fn decode(format: Format, bytes: &[u8], recursion_limit: usize) -> Result<Va
 		Format::Cbor => cbor::decode(bytes, recursion_limit),
 		// Flatbuffers is length-prefixed and self-describing, so nesting is
 		// bounded by the buffer rather than by a configured depth.
-		Format::Flatbuffers => flatbuffers::decode(bytes),
+		Format::Flatbuffers => surrealdb_types::decode(bytes),
 		Format::Json => json::decode(bytes, recursion_limit),
 		Format::Unsupported => bail!("unsupported wire format"),
 	}
@@ -36,7 +36,7 @@ pub fn decode(format: Format, bytes: &[u8], recursion_limit: usize) -> Result<Va
 pub fn encode(format: Format, value: Value) -> Result<Vec<u8>> {
 	match format {
 		Format::Cbor => cbor::encode(value),
-		Format::Flatbuffers => flatbuffers::encode(&value),
+		Format::Flatbuffers => surrealdb_types::encode(&value),
 		Format::Json => json::encode(value),
 		Format::Unsupported => bail!("unsupported wire format"),
 	}

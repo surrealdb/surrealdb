@@ -2,11 +2,6 @@ mod fake;
 mod notrack;
 mod track;
 
-pub use common::mem_registry::{
-	MemoryReporter, cleanup_memory_reporters, memory_reporters_allocated_by_name,
-	memory_reporters_allocated_total, register_memory_reporter,
-};
-
 // --------------------------------------------------
 // No global allocator, or allocation tracking
 // --------------------------------------------------

@@ -19,13 +19,13 @@ use surrealdb::Surreal;
 use surrealdb::engine::remote::grpc::{Client, Grpc};
 use surrealdb::opt::auth::Root;
 use surrealdb_core::CommunityComposer;
-use surrealdb_core::dbs::capabilities::Capabilities;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_protocol::proto::rpc::v1::surreal_db_service_client::SurrealDbServiceClient;
 use surrealdb_protocol::proto::rpc::v1::{
 	AccessMethod, AttachSessionRequest, NullableString, RequestContext, SigninRequest, UseRequest,
 	UserCredentials, access_method, nullable_string,
 };
+use surrealdb_rpc::capabilities::Capabilities;
 use surrealdb_server::ntw::{RouterOptions, SurrealRouter};
 use surrealdb_types::Value;
 use tokio_util::sync::CancellationToken;

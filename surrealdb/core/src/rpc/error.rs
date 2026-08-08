@@ -1,12 +1,9 @@
 //! RPC layer error constructors that depend on core-internal types.
 //!
 //! The pure constructors (using only [`surrealdb_types`]) live in
-//! [`surrealdb_rpc::error`] and are re-exported here so `crate::rpc::error::*`
-//! continues to resolve every constructor from a single path. The two
-//! constructors below stay in core because they reach into core-only types
-//! (`crate::val::Duration`, `crate::err`, `crate::api`, `crate::kvs`).
+//! [`surrealdb_rpc::error`]. The two constructors below stay in core because
+//! they reach into core-only types (`crate::val::Duration`, `crate::err`).
 
-pub use surrealdb_rpc::error::*;
 use surrealdb_types::Error as TypesError;
 
 /// Build the error returned when a call trips the wall-clock query-timeout

@@ -4463,7 +4463,9 @@ dependencies = [
  "surrealdb-types",
  "sysinfo",
  "thiserror",
+ "tokio",
  "unicase",
+ "wasmtimer",
 ]
 
 [[package]]
@@ -5110,6 +5112,11 @@ dependencies = [
  "similar",
  "surrealdb-cnf",
  "surrealdb-core",
+ "surrealdb-expr",
+ "surrealdb-gql",
+ "surrealdb-kvs",
+ "surrealdb-rpc",
+ "surrealdb-syn",
  "surrealdb-types",
  "tokio",
  "tokio-tungstenite",

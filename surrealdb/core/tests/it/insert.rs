@@ -1,7 +1,7 @@
 use anyhow::Result;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::iam::{Level, Role};
 use surrealdb_core::syn;
+use surrealdb_iam::{Level, Role};
 use surrealdb_types::{Array, Value};
 
 use crate::helpers::{Test, new_ds};

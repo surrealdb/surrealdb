@@ -45,8 +45,8 @@ fn sample_cast_error() -> CastError {
 	}
 }
 
-fn sample_rendered_error() -> crate::syn::error::RenderedError {
-	crate::syn::error::RenderedError {
+fn sample_rendered_error() -> surrealdb_syn::error::RenderedError {
+	surrealdb_syn::error::RenderedError {
 		errors: vec!["sample".to_string()],
 		snippets: Vec::new(),
 	}

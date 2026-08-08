@@ -5,9 +5,9 @@ use axum::{Extension, Router};
 use axum_extra::TypedHeader;
 use futures::TryStreamExt;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::dbs::capabilities::RouteTarget;
-use surrealdb_core::iam::Action::Edit;
-use surrealdb_core::iam::ResourceKind::Any;
+use surrealdb_iam::Action::Edit;
+use surrealdb_iam::ResourceKind::Any;
+use surrealdb_rpc::capabilities::RouteTarget;
 use surrealdb_types::SurrealValue;
 use tower_http::limit::RequestBodyLimitLayer;
 

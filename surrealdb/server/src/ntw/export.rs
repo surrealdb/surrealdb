@@ -9,12 +9,12 @@ use axum_extra::TypedHeader;
 use bytes::Bytes;
 use http::StatusCode;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::dbs::capabilities::RouteTarget;
-use surrealdb_core::iam::Action::View;
-use surrealdb_core::iam::ResourceKind::Any;
 use surrealdb_core::iam::check::check_ns_db;
-use surrealdb_core::kvs::export;
 use surrealdb_core::rpc::format::Format;
+use surrealdb_iam::Action::View;
+use surrealdb_iam::ResourceKind::Any;
+use surrealdb_rpc::capabilities::RouteTarget;
+use surrealdb_rpc::export;
 use surrealdb_types::SurrealValue;
 
 use super::AppState;
@@ -54,9 +54,9 @@ async fn post_handler(
 			.map_err(anyhow::Error::msg)
 			.map_err(ResponseError)?,
 		// FIXME: Add flatbuffer recursion limit.
-		Format::Flatbuffers => surrealdb_core::rpc::format::flatbuffers::decode(&body)
-			.map_err(anyhow::Error::msg)
-			.map_err(ResponseError)?,
+		Format::Flatbuffers => {
+			surrealdb_types::decode(&body).map_err(anyhow::Error::msg).map_err(ResponseError)?
+		}
 		Format::Unsupported => {
 			return Err(ResponseError(anyhow::Error::msg("unsupported body format")));
 		}

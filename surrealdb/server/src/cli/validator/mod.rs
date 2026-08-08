@@ -2,11 +2,11 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-use surrealdb_core::dbs::capabilities::{
+use surrealdb_rpc::capabilities::{
 	ArbitraryQueryTarget, EvalQueryTarget, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
 	RouteTarget, Targets,
 };
-use surrealdb_core::kvs::export::{ExcludedTables, TableConfig};
+use surrealdb_rpc::export::{ExcludedTables, TableConfig};
 
 pub(crate) mod parser;
 

@@ -30,8 +30,9 @@ use async_channel::Receiver;
 use dashmap::DashMap;
 use futures::Stream;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::kvs::{Datastore, Transaction};
+use surrealdb_core::kvs::Datastore;
 use surrealdb_core::rpc::RpcProtocol;
+use surrealdb_datastore::Transaction;
 use surrealdb_types::{Action, HashMap, Notification, Value};
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -40,8 +41,9 @@ mod options;
 mod protocol;
 pub mod wire;
 
-pub use surrealdb_core::kvs::export::Config as ExportConfig;
-pub use surrealdb_core::rpc::{DbResult, Format, Request};
+pub use surrealdb_core::rpc::Format;
+pub use surrealdb_rpc::export::Config as ExportConfig;
+pub use surrealdb_rpc::{DbResult, Request};
 
 pub use self::options::{
 	CapabilitiesConfig, DefaultsConfig, Options, PlannerStrategy, Targets, TargetsConfig,
@@ -94,7 +96,7 @@ impl EmbeddedEngine {
 		// subscribes as part of connecting, before it can know whether the
 		// capability is on, and an unused channel costs nothing.
 		let (notify_tx, notify_rx) =
-			async_channel::bounded(surrealdb_core::cnf::NOTIFICATIONS_CHANNEL_SIZE);
+			async_channel::bounded(surrealdb_cnf::NOTIFICATIONS_CHANNEL_SIZE);
 
 		let capabilities =
 			capabilities.map_or_else(|| Ok(Default::default()), TryInto::try_into)?;

@@ -3909,8 +3909,8 @@ pub async fn function_http_get_from_script() -> Result<()> {
 pub async fn function_http_redirect_to_denied_port_blocked() -> Result<()> {
 	use std::str::FromStr;
 
-	use surrealdb_core::dbs::capabilities::{NetTarget, Targets};
 	use surrealdb_core::kvs::Datastore;
+	use surrealdb_rpc::capabilities::{NetTarget, Targets};
 	use wiremock::matchers::{method, path};
 	use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -3939,7 +3939,7 @@ pub async fn function_http_redirect_to_denied_port_blocked() -> Result<()> {
 
 	// Allow all outbound connections, but deny the specific port on server B.
 	let deny_target = format!("127.0.0.1:{denied_port}");
-	let caps = surrealdb_core::dbs::capabilities::Capabilities::all().without_network_targets(
+	let caps = surrealdb_rpc::capabilities::Capabilities::all().without_network_targets(
 		Targets::Some([NetTarget::from_str(&deny_target).unwrap()].into()),
 	);
 

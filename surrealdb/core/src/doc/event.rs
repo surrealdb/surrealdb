@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::{Result, bail};
 use reblessive::TreeStack;
 use reblessive::tree::Stk;
-pub use surrealdb_datastore::values::event_queue::AsyncEventRecord;
+pub(crate) use surrealdb_datastore::values::event_queue::AsyncEventRecord;
 use surrealdb_kvs::TransactionType::Write;
 use surrealdb_kvs::timestamp::HlcTimeStamp;
 #[cfg(not(target_family = "wasm"))]

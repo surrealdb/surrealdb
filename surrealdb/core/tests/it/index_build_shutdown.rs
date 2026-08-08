@@ -19,8 +19,8 @@ use std::time::Duration;
 
 use anyhow::{Result, bail};
 use surrealdb_core::dbs::Session;
-use surrealdb_core::dbs::capabilities::Capabilities;
 use surrealdb_core::kvs::Datastore;
+use surrealdb_rpc::capabilities::Capabilities;
 use surrealdb_types::Value;
 
 use crate::helpers::new_ns_db;

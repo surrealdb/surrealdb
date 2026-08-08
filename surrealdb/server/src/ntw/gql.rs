@@ -13,7 +13,7 @@ use axum::{Extension, Router};
 use axum_extra::TypedHeader;
 use bytes::Bytes;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::dbs::capabilities::RouteTarget;
+use surrealdb_rpc::capabilities::RouteTarget;
 use surrealdb_types::{Array, SurrealValue, Value, Variables};
 use tower_http::limit::RequestBodyLimitLayer;
 

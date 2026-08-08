@@ -2,7 +2,7 @@ use std::fmt;
 
 use anyhow::Result;
 use async_channel::Sender;
-pub use surrealdb_rpc::export::{Config, ExcludedTables, TableConfig};
+use surrealdb_rpc::export::Config;
 use surrealdb_types::ToSql;
 
 use super::Transaction;

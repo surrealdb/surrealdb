@@ -6,10 +6,10 @@ use axum_extra::TypedHeader;
 use bytes::Bytes;
 use surrealdb::types::Value;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::dbs::capabilities::RouteTarget;
-use surrealdb_core::iam::Token;
 use surrealdb_core::iam::signin::signin;
 use surrealdb_core::syn;
+use surrealdb_rpc::Token;
+use surrealdb_rpc::capabilities::RouteTarget;
 use surrealdb_types::SurrealValue;
 use tower_http::limit::RequestBodyLimitLayer;
 

@@ -129,7 +129,7 @@ pub(crate) enum BitmapNodeKind {
 /// Result of evaluating one branch.
 ///
 /// `Overflow` means the branch abandoned its drain because it exceeded the
-/// per-branch entry budget ([`crate::cnf::BITMAP_BRANCH_BUDGET`]). An AND
+/// per-branch entry budget ([`surrealdb_cnf::BITMAP_BRANCH_BUDGET`]). An AND
 /// simply drops such a branch — the full WHERE clause is kept as a residual
 /// filter above [`BitmapResolve`], so dropping a conjunct only widens the
 /// candidate set. A branch that cannot be dropped (a union member, an AND-NOT
@@ -698,7 +698,7 @@ impl ExecOperator for BitmapResolve {
 				db: db.database_id,
 				table: &table_name,
 				doc_ids: &doc_ids,
-				budget: *crate::cnf::BITMAP_BRANCH_BUDGET,
+				budget: *surrealdb_cnf::BITMAP_BRANCH_BUDGET,
 			};
 			let bitmap = match root.build_bitmap(&bctx, true).await? {
 				BranchBitmap::Ready(bitmap) => bitmap,

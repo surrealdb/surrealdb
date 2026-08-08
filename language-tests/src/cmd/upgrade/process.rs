@@ -6,7 +6,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use futures::{SinkExt, StreamExt};
-use surrealdb_core::rpc::{DbResponse, DbResult};
+use surrealdb_rpc::DbResponse;
+use surrealdb_rpc::DbResult;
 use surrealdb_types::{Error as TypesError, Value};
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
@@ -237,7 +238,7 @@ impl SurrealConnection {
 		// Convert ProxyObject to Value
 		let value = object.into_value();
 
-		let message = surrealdb_core::rpc::format::flatbuffers::encode(&value)
+		let message = surrealdb_types::encode(&value)
 			.map_err(|e| TypesError::serialization(e.to_string(), None))?;
 		self.socket
 			.send(Message::Binary(message.into()))
@@ -276,10 +277,9 @@ impl SurrealConnection {
 				}
 			};
 
-			let response: DbResponse = surrealdb_core::rpc::format::flatbuffers::decode(&data)
-				.map_err(|e| {
-					TypesError::serialization(format!("Failed to deserialize response: {e}"), None)
-				})?;
+			let response: DbResponse = surrealdb_types::decode(&data).map_err(|e| {
+				TypesError::serialization(format!("Failed to deserialize response: {e}"), None)
+			})?;
 
 			if response.result.is_err() {
 				let Err(e) = response.result else {

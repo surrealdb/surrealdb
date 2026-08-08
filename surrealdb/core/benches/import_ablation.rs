@@ -33,9 +33,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::{Bytes, BytesMut};
-use surrealdb_core::dbs::{Capabilities, Session};
+use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::syn::parser::{ParserSettings, StatementStream};
+use surrealdb_rpc::capabilities::Capabilities;
+use surrealdb_syn::parser::{ParserSettings, StatementStream};
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -236,7 +237,7 @@ fn builder() -> surrealdb_core::kvs::Builder {
 	let limit = env_usize("ABL_MAX_WRITE_KEYS", 0);
 	if limit > 0 {
 		b = b.with_config(
-			surrealdb_core::cnf::ConfigMap::empty()
+			surrealdb_cnf::ConfigMap::empty()
 				.with_key_value("transaction_max_write_keys", limit.to_string()),
 		);
 	}
@@ -289,12 +290,12 @@ fn run_parse_only(statements: &[String]) -> usize {
 		while let Some(stmt) = stream.parse_partial(&mut buffer).unwrap() {
 			// The import path converts every parsed statement into the
 			// execution AST before dispatch, so price that here too.
-			std::hint::black_box(surrealdb_core::expr::TopLevelExpr::from(stmt));
+			std::hint::black_box(surrealdb_expr::expr::TopLevelExpr::from(stmt));
 			parsed += 1;
 		}
 	}
 	while let Some(stmt) = stream.parse_complete(&mut buffer).unwrap() {
-		std::hint::black_box(surrealdb_core::expr::TopLevelExpr::from(stmt));
+		std::hint::black_box(surrealdb_expr::expr::TopLevelExpr::from(stmt));
 		parsed += 1;
 	}
 	parsed
@@ -680,17 +681,17 @@ fn main() {
 	eprintln!("=== Import ablation ===");
 	eprintln!(
 		"  size_of: Value={} Object={} Array={} Number={} RecordId={}",
-		std::mem::size_of::<surrealdb_core::val::Value>(),
-		std::mem::size_of::<surrealdb_core::val::Object>(),
-		std::mem::size_of::<surrealdb_core::val::Array>(),
-		std::mem::size_of::<surrealdb_core::val::Number>(),
-		std::mem::size_of::<surrealdb_core::val::RecordId>(),
+		std::mem::size_of::<surrealdb_expr::val::Value>(),
+		std::mem::size_of::<surrealdb_expr::val::Object>(),
+		std::mem::size_of::<surrealdb_expr::val::Array>(),
+		std::mem::size_of::<surrealdb_expr::val::Number>(),
+		std::mem::size_of::<surrealdb_expr::val::RecordId>(),
 	);
 	eprintln!(
 		"  size_of: expr::Expr={} expr::Literal={} sql::Expr={}",
-		std::mem::size_of::<surrealdb_core::expr::Expr>(),
-		std::mem::size_of::<surrealdb_core::expr::Literal>(),
-		std::mem::size_of::<surrealdb_core::sql::Expr>(),
+		std::mem::size_of::<surrealdb_expr::expr::Expr>(),
+		std::mem::size_of::<surrealdb_expr::expr::Literal>(),
+		std::mem::size_of::<surrealdb_sql::Expr>(),
 	);
 	eprintln!("  shape:              {}", *SHAPE);
 	eprintln!("  backend:            {backend}");

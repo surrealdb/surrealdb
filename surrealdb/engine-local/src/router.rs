@@ -13,20 +13,24 @@ use async_channel::{Receiver, Sender};
 use futures::StreamExt;
 #[cfg(not(target_family = "wasm"))]
 use futures::stream::poll_fn;
-use surrealdb_core::dbs::{AuthPrincipalSnapshot, QueryResult, QueryResultBuilder, Session};
+use surrealdb_core::dbs::{AuthPrincipalSnapshot, Session};
 use surrealdb_core::iam;
-#[cfg(not(target_family = "wasm"))]
-use surrealdb_core::kvs::export::Config as DbExportConfig;
-use surrealdb_core::kvs::{Datastore, Transaction, TransactionType};
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
-use surrealdb_core::{
-	iam::{Action, ResourceKind, check::check_ns_db},
-	ml::storage::surml_file::SurMlFile,
-};
+use surrealdb_core::iam::check::check_ns_db;
+use surrealdb_core::kvs::Datastore;
+use surrealdb_datastore::Transaction;
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealdb_engine_api::MlExportConfig;
 use surrealdb_engine_api::{Command, SessionError, SessionId};
+#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
+use surrealdb_iam::{Action, ResourceKind};
+use surrealdb_kvs::TransactionType;
+#[cfg(not(target_family = "wasm"))]
+use surrealdb_rpc::export::Config as DbExportConfig;
+use surrealdb_rpc::{QueryResult, QueryResultBuilder, Token};
 use surrealdb_types::{Error, HashMap, Notification, SurrealValue, ToSql, Value, Variables};
+#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
+use surrealml_core::storage::surml_file::SurMlFile;
 use tokio::sync::RwLock;
 #[cfg(not(target_family = "wasm"))]
 use tokio::{
@@ -269,7 +273,7 @@ async fn cleanup_lqs_on_principal_change(
 /// session state without going through it.
 async fn ensure_session_active(state: &SessionState) -> Result<(), Error> {
 	if state.session.read().await.expired() {
-		return Err(surrealdb_core::rpc::session_expired());
+		return Err(surrealdb_rpc::error::session_expired());
 	}
 	Ok(())
 }
@@ -325,8 +329,8 @@ pub(crate) async fn router(
 			let before = AuthPrincipalSnapshot::capture(&*state.session.read().await);
 			// Extract the access token and check if this token supports refresh
 			let (access, with_refresh) = match &token {
-				iam::Token::Access(access) => (access, false),
-				iam::Token::WithRefresh {
+				Token::Access(access) => (access, false),
+				Token::WithRefresh {
 					access,
 					..
 				} => (access, true),
@@ -846,7 +850,7 @@ pub(crate) async fn router(
 			// method is processed; `Datastore::execute` covers the query path,
 			// so without this the session methods are the way past it.
 			ensure_session_active(state).await?;
-			surrealdb_core::rpc::check_protected_param(&key)
+			surrealdb_rpc::check_protected_param(&key)
 				.map_err(|e| Error::internal(e.to_string()))?;
 			// Need to compute because certain keys might not be allowed to be set and those
 			// should be rejected by an error.

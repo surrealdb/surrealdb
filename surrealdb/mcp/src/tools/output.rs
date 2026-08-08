@@ -15,7 +15,7 @@
 
 use rmcp::model::{CallToolResult, Content};
 use serde_json::{Value as JsonValue, json};
-use surrealdb_core::dbs::QueryResult;
+use surrealdb_rpc::QueryResult;
 use surrealdb_types::Error as TypesError;
 
 /// If the serialised form of `value` exceeds the supplied cap, replace it
@@ -332,7 +332,7 @@ mod tests {
 	/// without digging into the nested value.
 	#[test]
 	fn single_statement_result_surfaces_truncation() {
-		use surrealdb_core::dbs::QueryResultBuilder;
+		use surrealdb_rpc::QueryResultBuilder;
 		let limit = McpConfig::default().max_result_bytes.expect("default cap must be active");
 		let oversized = "x".repeat(limit + 1024);
 		let result = QueryResultBuilder::started_now()

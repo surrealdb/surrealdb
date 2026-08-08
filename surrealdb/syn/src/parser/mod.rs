@@ -173,8 +173,8 @@ impl Default for ParserSettings {
 impl ParserSettings {
 	/// Settings for re-parsing canonical SurrealQL text that this engine
 	/// previously rendered and persisted: the text-on-the-wire encodings of
-	/// `surrealdb_core::expr::Expr` and `expr::Block`, and every text field a
-	/// catalog definition stores (see `surrealdb_core::catalog::SurqlText`).
+	/// `surrealdb_expr::expr::Expr` and `expr::Block`, and every text field a
+	/// catalog definition stores (see `surrealdb_catalog::SurqlText`).
 	///
 	/// This profile is part of the storage wire contract and is deliberately
 	/// independent of the datastore's live capabilities and configuration:

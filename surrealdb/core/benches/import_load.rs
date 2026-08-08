@@ -28,8 +28,9 @@ use bytes::Bytes;
 use common::create_runtime;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use futures::StreamExt;
-use surrealdb_core::dbs::{Capabilities, Session};
+use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
+use surrealdb_rpc::capabilities::Capabilities;
 
 // ---------------------------------------------------------------------------
 // Configuration

@@ -40,7 +40,7 @@ use uuid::Uuid;
 
 use super::tx::Transaction;
 use super::version::{MajorVersion, MigrationRecord, StorageVersion, VersionHistoryEntry};
-use super::{INDEX_COMPACTION_QUEUE_BATCH_SIZE, export, migration};
+use super::{INDEX_COMPACTION_QUEUE_BATCH_SIZE, migration};
 use crate::api::err::ApiError;
 use crate::api::invocation::process_api_request;
 use crate::api::request::ApiRequest;
@@ -344,7 +344,7 @@ pub struct Datastore {
 	observer: Arc<dyn ExecutionObserver>,
 }
 
-pub use surrealdb_kvs::{Metric, Metrics, TransactionBuilder};
+pub(crate) use surrealdb_kvs::{Metrics, TransactionBuilder};
 
 /// Transaction-builder construction result with router startup state.
 ///
@@ -4542,7 +4542,7 @@ impl Datastore {
 		chn: Sender<Vec<u8>>,
 	) -> Result<impl Future<Output = Result<()>>> {
 		// Create a default export config
-		let cfg = super::export::Config::default();
+		let cfg = surrealdb_rpc::export::Config::default();
 		self.export_with_config(sess, chn, cfg).await
 	}
 
@@ -4552,7 +4552,7 @@ impl Datastore {
 		&self,
 		sess: &Session,
 		chn: Sender<Vec<u8>>,
-		cfg: export::Config,
+		cfg: surrealdb_rpc::export::Config,
 	) -> Result<impl Future<Output = Result<()>> + 'static> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), DatastoreError::ExpiredSession);

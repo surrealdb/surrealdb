@@ -2,9 +2,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use surrealdb_core::dbs::{Capabilities, Session};
+use surrealdb_core::dbs::Session;
 #[allow(unused_imports)]
 use surrealdb_core::kvs::Datastore;
+use surrealdb_rpc::capabilities::Capabilities;
 
 use crate::helpers::Test;
 

@@ -1,7 +1,7 @@
 //! Auto-completion support for MCP tool arguments.
 
 use rmcp::model::{CompleteRequestParams, CompleteResult, CompletionInfo};
-use surrealdb_core::dbs::QueryResult;
+use surrealdb_rpc::QueryResult;
 
 use crate::session::McpSession;
 

@@ -22,14 +22,12 @@ mod statement_counters;
 mod store;
 mod stream;
 
-pub mod capabilities;
 // A session outlives the process that attached it, so its stored form belongs to
 // the keyspace; the live session above converts in and out of it.
 pub(crate) use surrealdb_datastore::values::session::DurableSession;
-pub use surrealdb_rpc::capabilities::NewPlannerStrategy;
-pub use surrealdb_rpc::{
-	QUERY_STREAM_BUFFER, QueryResult, QueryResultBuilder, QueryStreamItem, QueryType, Status,
-	items_for_result,
+pub(crate) use surrealdb_rpc::capabilities::NewPlannerStrategy;
+pub(crate) use surrealdb_rpc::{
+	QueryResult, QueryResultBuilder, QueryStreamItem, QueryType, capabilities, items_for_result,
 };
 
 pub(crate) use self::broker::SendKill;
@@ -37,7 +35,7 @@ pub use self::broker::{
 	BrokerRoutingContext, LocalMessageBroker, MessageBroker, NodeEndpointResolver,
 	RoutedNotification,
 };
-pub use self::capabilities::Capabilities;
+pub(crate) use self::capabilities::Capabilities;
 pub(crate) use self::capture::ParameterCapturePass;
 pub(crate) use self::executor::Executor;
 pub(crate) use self::iterator::{Iterable, Iterator, Operable, Processable};

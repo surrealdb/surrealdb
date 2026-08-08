@@ -53,7 +53,7 @@ pub const NOTIFICATIONS_CHANNEL_SIZE: usize = 15_000;
 /// to its canonical form; entries that fail to canonicalize are dropped with a
 /// warning. `subject` names the allowlist for log messages (e.g. `"file"`).
 /// Enforcement of a resolved path against the allowlist lives in
-/// `surrealdb_core::idx::file::check_is_path_allowed`.
+/// `surrealdb_idx::file::check_is_path_allowed`.
 pub fn extract_allowed_paths(input: &str, canonicalize: bool, subject: &str) -> Vec<PathBuf> {
 	let delimiter = if cfg!(target_os = "windows") {
 		";"
@@ -181,7 +181,7 @@ pub fn set_default_hnsw_build_seed(seed: u64) {
 }
 
 /// Optional fixed seed for the deterministic data-generation RNG (see
-/// `surrealdb_core::rnd`).
+/// `surrealdb_expr::val::rnd`).
 ///
 /// Unset (the default) leaves `rand::*` and generated record ids drawing from
 /// the per-thread RNG, exactly as in production. Set `SURREAL_RAND_SEED=<u64>`

@@ -7,7 +7,8 @@ use std::collections::HashSet;
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
-use surrealdb_core::dbs::{NewPlannerStrategy, capabilities};
+use surrealdb_rpc::capabilities;
+use surrealdb_rpc::capabilities::NewPlannerStrategy;
 
 #[derive(Deserialize, Default)]
 pub struct Options {

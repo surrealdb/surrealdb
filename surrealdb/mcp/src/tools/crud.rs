@@ -8,7 +8,7 @@ use rmcp::ErrorData;
 use rmcp::model::CallToolResult;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use surrealdb_core::dbs::QueryResult;
+use surrealdb_rpc::QueryResult;
 use surrealdb_types::Variables;
 
 use super::{

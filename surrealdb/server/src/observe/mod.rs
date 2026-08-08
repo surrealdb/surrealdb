@@ -40,10 +40,10 @@
 //!
 //! Attribute values that may carry tenant identifiers
 //! (`namespace`, `database`, `user`) collapse to a sentinel `"-"` when
-//! unset, matching the [`surrealdb_core::observe::TenantIdentity`]
+//! unset, matching the [`surrealdb_observe::TenantIdentity`]
 //! resolution rules. Record-access principals collapse to a fixed
 //! `<record>` sentinel rather than emitting raw record ids; see the
-//! `From<&Session>` impl for [`surrealdb_core::observe::TenantIdentity`].
+//! `From<&Session>` impl for [`surrealdb_observe::TenantIdentity`].
 
 pub mod handler;
 pub mod http_tower;

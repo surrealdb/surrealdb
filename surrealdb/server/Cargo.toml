@@ -42,7 +42,7 @@ jwks = ["surrealdb-core/jwks"]
 # Build against AWS-LC FIPS 3.0.x (NIST CMVP cert #4816).
 # Restricts TLS to FIPS-approved cipher suites at runtime.
 fips = ["rustls/fips"]
-ml = ["surrealdb/ml"]
+ml = ["surrealdb/ml", "dep:surrealml-core"]
 scripting = ["surrealdb-core/scripting"]
 surrealism = [
     "surrealdb-core/surrealism",
@@ -83,6 +83,17 @@ surrealdb = { workspace = true, features = [
 ] }
 surrealdb-core.workspace = true
 surrealdb-cnf.workspace = true
+common.workspace = true
+surrealdb-catalog.workspace = true
+surrealdb-collections.workspace = true
+surrealdb-datastore.workspace = true
+surrealdb-iam.workspace = true
+surrealdb-kvs.workspace = true
+surrealdb-observe.workspace = true
+surrealdb-rpc.workspace = true
+surrealdb-sql.workspace = true
+surrealml-core = { workspace = true, optional = true }
+surrealdb-syn.workspace = true
 surrealdb-protocol = { workspace = true, features = ["rpc"] }
 surrealdb-types = { workspace = true, features = ["proto"] }
 parse-common.workspace = true

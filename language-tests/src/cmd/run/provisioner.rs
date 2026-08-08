@@ -4,11 +4,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::Result;
-use surrealdb_core::channel;
 use surrealdb_cnf::ConfigMap;
-use surrealdb_core::dbs::Capabilities;
-use surrealdb_core::dbs::capabilities::Targets;
+use surrealdb_core::channel;
 use surrealdb_core::kvs::Datastore;
+use surrealdb_rpc::capabilities::Capabilities;
+use surrealdb_rpc::capabilities::Targets;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
 use crate::cli::Backend;
@@ -82,7 +82,7 @@ impl CreateInfo {
 		// would then fail with `File access denied`. This also sets a single
 		// global allowlist shared by every language test.
 		let builder = Datastore::builder()
-		.without_maintenance_tasks()
+			.without_maintenance_tasks()
 			.with_capabilities(cap)
 			.with_auth(true)
 			.with_temporary_directory(Some(sort_temp_dir))

@@ -8,6 +8,7 @@ use md5::Digest;
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
 use surrealdb_cnf::SERVER_NAME;
+use surrealdb_rpc::Token;
 use surrealdb_types::ToSql;
 use uuid::Uuid;
 
@@ -28,7 +29,7 @@ use crate::exec::Error as ExecError;
 use crate::expr::access_type;
 use crate::expr::statements::access;
 use crate::iam::issue::{config, expiration};
-use crate::iam::token::{Claims, HEADER, Token};
+use crate::iam::token::{Claims, HEADER};
 use crate::iam::{self, Auth, Error as AuthError, algorithm_to_jwt_algorithm};
 use crate::kvs::TransactionType::*;
 use crate::kvs::{Datastore, is_retryable_transaction_conflict};

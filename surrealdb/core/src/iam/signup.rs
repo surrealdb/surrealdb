@@ -4,6 +4,7 @@ use anyhow::{Result, bail};
 use chrono::Utc;
 use jsonwebtoken::{Header, encode};
 use surrealdb_cnf::SERVER_NAME;
+use surrealdb_rpc::Token;
 use surrealdb_types::ToSql;
 use uuid::Uuid;
 
@@ -15,7 +16,7 @@ use crate::dbs::Session;
 use crate::err::exec_error;
 use crate::exec::Error as ExecError;
 use crate::iam::issue::{config, expiration};
-use crate::iam::token::{Claims, Token};
+use crate::iam::token::Claims;
 use crate::iam::{Actor, Auth, Error as AuthError, Level, Role, algorithm_to_jwt_algorithm};
 use crate::kvs::TransactionType::*;
 use crate::kvs::{Datastore, is_retryable_transaction_conflict};
@@ -452,7 +453,9 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_signup_record_with_refresh() {
-		use crate::iam::{Token, signin};
+		use surrealdb_rpc::Token;
+
+		use crate::iam::signin;
 
 		// Test without refresh
 		{

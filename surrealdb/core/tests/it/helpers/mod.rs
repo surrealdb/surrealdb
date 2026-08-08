@@ -6,13 +6,14 @@ use std::thread::Builder;
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use regex::Regex;
+use surrealdb_cnf::NOTIFICATIONS_CHANNEL_SIZE;
 use surrealdb_core::channel::{self, Receiver as NotifyReceiver};
-use surrealdb_core::cnf::NOTIFICATIONS_CHANNEL_SIZE;
-use surrealdb_core::dbs::capabilities::Capabilities;
-use surrealdb_core::dbs::{QueryResult, Session};
-use surrealdb_core::iam::{Auth, Level, Role};
+use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::syn;
+use surrealdb_iam::{Auth, Level, Role};
+use surrealdb_rpc::QueryResult;
+use surrealdb_rpc::capabilities::Capabilities;
 use surrealdb_types::{Error as TypesError, Notification, Number, ToSql, Value};
 
 pub async fn new_ds(

@@ -354,7 +354,9 @@ surrealdb = { workspace = true, features = [
     "rustls",
 ] }
 surrealdb-core.workspace = true
+surrealdb-rpc.workspace = true
 surrealdb-server.workspace = true
+surrealdb-syn.workspace = true
 
 [target.'cfg(unix)'.dev-dependencies]
 nix = { workspace = true, features = ["signal", "user"] }

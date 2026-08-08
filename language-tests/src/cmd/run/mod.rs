@@ -11,10 +11,11 @@ use futures::FutureExt as _;
 use provisioner::Provisioner;
 use semver::Version;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::dbs::capabilities::ExperimentalTarget;
 use surrealdb_core::env::VERSION;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::{gql, syn};
+use surrealdb_gql as gql;
+use surrealdb_rpc::capabilities::ExperimentalTarget;
+use surrealdb_syn::parser;
 use surrealdb_types::Value as SurValue;
 use tokio::sync::mpsc::{self, UnboundedSender};
 
@@ -353,10 +354,10 @@ async fn check_retained_keys(dbs: &Datastore) -> Result<Vec<Vec<u8>>> {
 	// infrastructure that legitimately persists, not leaked test data.
 	const ALLOWED_KEY_PREFIXES: &[&[u8]] = &[b"/!ni", b"/!nh", b"/!nd", b"/!ic", b"/!tl"];
 
-	let txn = dbs.transaction(surrealdb_core::kvs::TransactionType::Read).await?;
+	let txn = dbs.transaction(surrealdb_kvs::TransactionType::Read).await?;
 	// The point of this check is to find keys the declared keyspace does *not*
 	// describe, which is the one scan no key bound can express.
-	let range = surrealdb_core::key::RawRange::every_key();
+	let range = surrealdb_kvs::key::RawRange::every_key();
 	let res = txn.keys_raw(range, 1000, 0, None).await?;
 	txn.cancel().await?;
 	Ok(res
@@ -464,7 +465,7 @@ async fn run_test_body(
 
 	let (did_timeout, result) = match run.case.test.dialect {
 		Dialect::SurrealQl => {
-			let settings = syn::parser::ParserSettings {
+			let settings = parser::ParserSettings {
 				files_enabled: dbs
 					.get_capabilities()
 					.allows_experimental(&ExperimentalTarget::Files),
@@ -475,7 +476,7 @@ async fn run_test_body(
 			};
 
 			let source = &run.case.test.source.as_bytes();
-			let mut parser = syn::parser::Parser::new_with_settings(source, settings);
+			let mut parser = parser::Parser::new_with_settings(source, settings);
 			let mut stack = reblessive::Stack::new();
 
 			let query = match stack.enter(|stk| parser.parse_query(stk)).finish() {
@@ -504,7 +505,7 @@ async fn run_test_body(
 		}
 		Dialect::Gql => {
 			// GQL has no capability-gated syntax; the default recursion
-			// limit matches `syn::parser::ParserSettings::default()` above.
+			// limit matches `parser::ParserSettings::default()` above.
 			// Lowering produces a `PreparedGqlQuery` (a `MatchPlan` embedded
 			// in a logical plan); it executes through the streaming engine via
 			// `process_gql`, so `.gql` cases default away from the
@@ -512,8 +513,7 @@ async fn run_test_body(
 			// schema's planner-strategy seam).
 			let settings = gql::GqlParserSettings::default();
 			let source = &run.case.test.source.as_bytes();
-			let query = match gql::parse_to_plan_with_settings(&run.case.test.source, settings)
-			{
+			let query = match gql::parse_to_plan_with_settings(&run.case.test.source, settings) {
 				Ok(x) => x,
 				Err(e) => {
 					return Ok(BodyOutcome::Early(TestTaskResult::ParserError(
@@ -640,9 +640,9 @@ mod tests {
 	use std::sync::Arc;
 	use std::time::SystemTime;
 
-	use surrealdb_core::dbs::Capabilities;
-	use surrealdb_core::dbs::capabilities::Targets;
 	use surrealdb_core::kvs::Datastore;
+	use surrealdb_rpc::capabilities::Capabilities;
+	use surrealdb_rpc::capabilities::Targets;
 
 	use super::*;
 	use crate::tests::case::{CaseId, Dialect, Origin, TestCase};
@@ -653,7 +653,7 @@ mod tests {
 	/// provisioner hands out (all capabilities + experimental targets, auth on).
 	async fn base_datastore() -> Arc<Datastore> {
 		let ds = Datastore::builder()
-		.without_maintenance_tasks()
+			.without_maintenance_tasks()
 			.with_capabilities(Capabilities::all().with_experimental(Targets::All))
 			.with_auth(true)
 			.build_with_path("memory")

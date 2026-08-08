@@ -26,15 +26,20 @@ allocation-tracking = ["surrealdb-core/allocation-tracking"]
 arbitrary = ["surrealdb-core/arbitrary"]
 http = ["surrealdb-core/http"]
 jwks = ["surrealdb-core/jwks"]
-ml = ["surrealdb-core/ml"]
+ml = ["surrealdb-core/ml", "dep:surrealml-core"]
 scripting = ["surrealdb-core/scripting"]
 
 [dependencies]
 # workspace internal dependencies
 surrealdb-core = { workspace = true, default-features = false }
 surrealdb-engine-api = { workspace = true }
+surrealdb-cnf = { workspace = true }
+surrealdb-datastore = { workspace = true }
+surrealdb-iam = { workspace = true }
+surrealdb-kvs = { workspace = true }
 surrealdb-rpc = { workspace = true }
 surrealdb-types = { workspace = true }
+surrealml-core = { workspace = true, optional = true }
 
 # Other crates (anyhow used for import stream compat with core's execute_import)
 anyhow.workspace = true

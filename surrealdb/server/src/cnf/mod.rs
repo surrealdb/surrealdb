@@ -2,7 +2,7 @@ use std::env;
 use std::sync::LazyLock;
 use std::time::Duration;
 
-use surrealdb_core::lazy_env_parse;
+use common::lazy_env_parse;
 
 /// The logo of the SurrealDB server
 pub const LOGO: &str = "

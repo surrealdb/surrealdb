@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::dbs::capabilities::Capabilities;
 use surrealdb_core::kvs::Datastore;
+use surrealdb_rpc::capabilities::Capabilities;
 use surrealdb_types::Value;
 
 use crate::helpers::new_ns_db;
@@ -20,7 +20,7 @@ async fn ds_with_batch_size(batch: Option<usize>) -> Result<Arc<Datastore>> {
 	let mut builder = Datastore::builder().with_capabilities(Capabilities::all());
 	if let Some(batch) = batch {
 		builder = builder.with_config(
-			surrealdb_core::cnf::ConfigMap::empty()
+			surrealdb_cnf::ConfigMap::empty()
 				.with_key_value("export_batch_size", batch.to_string()),
 		);
 	}

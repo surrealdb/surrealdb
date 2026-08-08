@@ -23,31 +23,29 @@ pub enum ContentType {
 
 /// Pre-allocated static header value for `text/plain` content type
 pub(super) static HEADER_VALUE_TEXT_PLAIN: HeaderValue =
-	HeaderValue::from_static(surrealdb_core::api::format::PLAIN);
+	HeaderValue::from_static(surrealdb_rpc::format::PLAIN);
 /// Pre-allocated static header value for `application/json` content type
 pub(super) static HEADER_VALUE_APPLICATION_JSON: HeaderValue =
-	HeaderValue::from_static(surrealdb_core::api::format::JSON);
+	HeaderValue::from_static(surrealdb_rpc::format::JSON);
 /// Pre-allocated static header value for `application/cbor` content type
 pub(super) static HEADER_VALUE_APPLICATION_CBOR: HeaderValue =
-	HeaderValue::from_static(surrealdb_core::api::format::CBOR);
+	HeaderValue::from_static(surrealdb_rpc::format::CBOR);
 /// Pre-allocated static header value for `application/octet-stream` content type
 pub(super) static HEADER_VALUE_APPLICATION_OCTET_STREAM: HeaderValue =
-	HeaderValue::from_static(surrealdb_core::api::format::OCTET_STREAM);
+	HeaderValue::from_static(surrealdb_rpc::format::OCTET_STREAM);
 /// Pre-allocated static header value for `application/surrealdb+flatbuffers` content type
 pub(super) static HEADER_VALUE_APPLICATION_SURREAL_DB_FLATBUFFERS: HeaderValue =
-	HeaderValue::from_static(surrealdb_core::api::format::FLATBUFFERS);
+	HeaderValue::from_static(surrealdb_rpc::format::FLATBUFFERS);
 
 impl std::fmt::Display for ContentType {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
-			ContentType::TextPlain => f.write_str(surrealdb_core::api::format::PLAIN),
-			ContentType::ApplicationJson => f.write_str(surrealdb_core::api::format::JSON),
-			ContentType::ApplicationCbor => f.write_str(surrealdb_core::api::format::CBOR),
-			ContentType::ApplicationOctetStream => {
-				f.write_str(surrealdb_core::api::format::OCTET_STREAM)
-			}
+			ContentType::TextPlain => f.write_str(surrealdb_rpc::format::PLAIN),
+			ContentType::ApplicationJson => f.write_str(surrealdb_rpc::format::JSON),
+			ContentType::ApplicationCbor => f.write_str(surrealdb_rpc::format::CBOR),
+			ContentType::ApplicationOctetStream => f.write_str(surrealdb_rpc::format::OCTET_STREAM),
 			ContentType::ApplicationSurrealDBFlatbuffers => {
-				f.write_str(surrealdb_core::api::format::FLATBUFFERS)
+				f.write_str(surrealdb_rpc::format::FLATBUFFERS)
 			}
 		}
 	}
@@ -67,13 +65,11 @@ impl Header for ContentType {
 			value.to_str().map_err(|_| headers::Error::invalid())?.split(';').collect();
 
 		match parts[0] {
-			surrealdb_core::api::format::PLAIN => Ok(ContentType::TextPlain),
-			surrealdb_core::api::format::JSON => Ok(ContentType::ApplicationJson),
-			surrealdb_core::api::format::CBOR => Ok(ContentType::ApplicationCbor),
-			surrealdb_core::api::format::OCTET_STREAM => Ok(ContentType::ApplicationOctetStream),
-			surrealdb_core::api::format::FLATBUFFERS => {
-				Ok(ContentType::ApplicationSurrealDBFlatbuffers)
-			}
+			surrealdb_rpc::format::PLAIN => Ok(ContentType::TextPlain),
+			surrealdb_rpc::format::JSON => Ok(ContentType::ApplicationJson),
+			surrealdb_rpc::format::CBOR => Ok(ContentType::ApplicationCbor),
+			surrealdb_rpc::format::OCTET_STREAM => Ok(ContentType::ApplicationOctetStream),
+			surrealdb_rpc::format::FLATBUFFERS => Ok(ContentType::ApplicationSurrealDBFlatbuffers),
 			_ => Err(headers::Error::invalid()),
 		}
 	}

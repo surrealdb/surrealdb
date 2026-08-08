@@ -20,6 +20,11 @@ bench-remote-store = ["bench","tokio-tungstenite", "tokio-tungstenite/native-tls
 # Crates for running surrealdb.
 surrealdb-core = { path = "../surrealdb/core", default-features = false, features = ["scripting", "kv-mem", "graphql", "gql"] }
 surrealdb-cnf = { path = "../surrealdb/cnf" }
+surrealdb-rpc = { path = "../surrealdb/rpc" }
+surrealdb-expr = { path = "../surrealdb/expr" }
+surrealdb-gql = { path = "../surrealdb/gql" }
+surrealdb-kvs = { path = "../surrealdb/kvs" }
+surrealdb-syn = { path = "../surrealdb/syn" }
 surrealdb-types = { path = "../surrealdb/types" }
 # Used to execute GraphQL (.graphql) test cases against the dynamic schema.
 # Same version as the root workspace pins for surrealdb-core.

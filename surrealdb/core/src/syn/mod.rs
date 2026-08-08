@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-pub use surrealdb_syn::{ParseError, ParserConfig, error, lexer, parser, token};
+pub(crate) use surrealdb_syn::{ParseError, ParserConfig, lexer, parser};
 
 use crate::dbs::Capabilities;
 use crate::dbs::capabilities::ExperimentalTarget;
@@ -21,7 +21,7 @@ mod test;
 
 use anyhow::{Result, bail, ensure};
 use lexer::Lexer;
-pub use parser::ParserSettings;
+pub(crate) use parser::ParserSettings;
 use parser::{ParseResult, Parser};
 use reblessive::Stk;
 

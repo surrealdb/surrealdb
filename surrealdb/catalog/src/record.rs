@@ -21,8 +21,8 @@ use crate::val::{RecordId, Value};
 /// # Examples
 ///
 /// ```no_compile
-/// use surrealdb_core::catalog::Record;
-/// use surrealdb_core::val::{Object, Value};
+/// use surrealdb_catalog::Record;
+/// use surrealdb_expr::val::{Object, Value};
 ///
 /// // Create a new record with data
 /// let record = Record::new(Value::Object(Object::default()));

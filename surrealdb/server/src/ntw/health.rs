@@ -1,6 +1,6 @@
 use axum::routing::get;
 use axum::{Extension, Router};
-use surrealdb_core::dbs::capabilities::RouteTarget;
+use surrealdb_rpc::capabilities::RouteTarget;
 
 use super::AppState;
 use crate::ntw::error::Error as NetError;

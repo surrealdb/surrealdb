@@ -272,15 +272,14 @@ mod gql_integration {
 			let res = client
 				.post(url)
 				.basic_auth(USER, Some(PASS))
-				.header(header::ACCEPT, surrealdb_core::api::format::FLATBUFFERS)
+				.header(header::ACCEPT, surrealdb_rpc::format::FLATBUFFERS)
 				.body(MATCH_QUERY)
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let bytes = res.bytes().await?;
-			let value: surrealdb_types::Value =
-				surrealdb_core::rpc::format::flatbuffers::decode(&bytes)
-					.expect("flatbuffers GQL response should decode to Value");
+			let value: surrealdb_types::Value = surrealdb_types::decode(&bytes)
+				.expect("flatbuffers GQL response should decode to Value");
 			let array = value.into_array().unwrap();
 			assert_eq!(array.len(), 1);
 			let result = array.into_iter().next().unwrap().into_object().unwrap();

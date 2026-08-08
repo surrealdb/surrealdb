@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use serde::Deserialize;
-use surrealdb_core::syn::ParserSettings;
+use surrealdb_syn::parser::ParserSettings;
 use surrealdb_types::Value;
 
 #[derive(Default, Deserialize, Debug, Clone)]

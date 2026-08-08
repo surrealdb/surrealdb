@@ -78,10 +78,8 @@ pub use sequence::SequencePlan;
 pub use sleep::SleepPlan;
 #[cfg(all(storage, not(target_family = "wasm")))]
 pub use sort::{ExternalSort, ExternalSortByKey};
-pub use sort::{
-	OrderByField, RandomShuffle, Sort, SortByKey, SortDirection, SortKey, SortTopK, SortTopKByKey,
-	compare_values,
-};
+pub(crate) use sort::{OrderByField, SortDirection, SortKey, compare_values};
+pub use sort::{RandomShuffle, Sort, SortByKey, SortTopK, SortTopKByKey};
 pub use source_expr::SourceExpr;
 pub use split::Split;
 pub use timeout::Timeout;

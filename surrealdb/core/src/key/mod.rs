@@ -29,15 +29,11 @@
 //! The layout itself, and the map generated from it, live with the keyspace
 //! in [`surrealdb_datastore::key`].
 
-// The keyspace moved to the crate that owns the transaction; these keep every
-// `crate::key::schema::…` path in core resolving.
+// The keyspace lives with the crate that owns the transaction; these bind it to
+// core's own `crate::key::…` paths.
 pub(crate) use surrealdb_datastore::key::{reclaim, schema};
-// `RawRange::every_key` is reached by the language-test harness from outside the
-// crate, so the type itself has to be nameable there.
-pub use surrealdb_kvs::key::RawRange;
 pub(crate) use surrealdb_kvs::key::{
-	AnyRange, Error, KVKey, KVKeyDecode, KVRange, KVSubspace, Resumable, TypedRange,
+	AnyRange, Error, KVKey, KVKeyDecode, KVRange, KVSubspace, RawRange, Resumable, TypedRange,
 };
 pub(crate) use surrealdb_kvs::value::KVValue;
-// Needs to be public for the enterprise crate.
-pub use surrealdb_kvs::{Key, KeyRange};
+pub(crate) use surrealdb_kvs::{Key, KeyRange};

@@ -14,11 +14,9 @@
 //!   database
 //! - `mem`: in-memory database
 
-pub use surrealdb_kvs::{Direction, TransactionType, Val, Version};
-pub(crate) use surrealdb_kvs::{api, consts, err};
-pub use surrealdb_kvs_any::{BackendProvider, Backends, ConnectContext};
+pub(crate) use surrealdb_kvs::{Direction, TransactionBuilder, TransactionType, Val, consts, err};
 
-pub mod export;
+pub(crate) mod export;
 pub mod tasks;
 
 mod clock;
@@ -33,27 +31,23 @@ pub(crate) mod slowlog;
 #[cfg(test)]
 mod tests;
 
-pub use api::{
-	GetMultiResult, KeysResult, ScanCursorKeys, ScanCursorVals, ScanResult, Transactable,
-};
-pub use consts::{
-	COUNT_BATCH_SIZE, ESTIMATED_BYTES_PER_KEY, ESTIMATED_BYTES_PER_KV,
+pub(crate) use consts::{
 	INDEX_COMPACTION_QUEUE_BATCH_SIZE, INDEXING_BATCH_MAX_BYTES, INDEXING_BATCH_SIZE,
 	INDEXING_PROBE_BATCH_SIZE, NORMAL_BATCH_SIZE,
 };
 pub use ds::{
-	Builder, Datastore, LiveQueryEngine, Metric, Metrics, TransactionBuilder,
-	TransactionBuilderFactory, TransactionBuilderParts,
+	Builder, Datastore, LiveQueryEngine, TransactionBuilderFactory, TransactionBuilderParts,
 };
-pub use err::{Error, Result};
+pub(crate) use err::Error;
+pub(crate) use surrealdb_datastore::IntoBytes;
 // Named for the layer rather than re-exported as `Error`: `kvs::Error` above is
 // the storage backend's, and a datastore failure is a different thing.
 pub(crate) use surrealdb_datastore::error::DatastoreError;
-pub use surrealdb_datastore::{IntoBytes, into};
-// The transaction layer and the keyspace live one crate down now; core reaches
-// them through these so no call site had to change.
+// The transaction layer and the keyspace live one crate down, in
+// `surrealdb-datastore`; these bind them to core's own `crate::kvs::…` paths.
+// Depend on that crate directly to reach them from outside core.
 pub(crate) use surrealdb_datastore::{
-	TransactionConfig, TransactionFactory, cache, sequences, tasklease, tr, tx, util, version,
+	TransactionConfig, TransactionFactory, cache, sequences, tasklease, tx, util, version,
 };
 // Recognising a storage failure descends with the transaction layer: the code
 // that classifies one sits on both sides of the crate boundary. Both shapes stay
@@ -63,19 +57,7 @@ pub(crate) use surrealdb_datastore::{
 pub(crate) use surrealdb_datastore::{
 	is_indeterminate_commit, is_retryable_transaction_conflict, is_shutdown_error, storage_error,
 };
-#[cfg(any(
-	feature = "kv-mem",
-	feature = "kv-rocksdb",
-	feature = "kv-indxdb",
-	feature = "kv-tikv",
-	feature = "kv-surrealkv",
-))]
-pub use surrealdb_kvs::timestamp::{
-	BoxTimeStamp, BoxTimeStampImpl, HlcTimeStamp, HlcTimeStampImpl, IncTimeStampImpl,
-	MAX_TIMESTAMP_BYTES, TimeStamp, TimeStampImpl,
-};
-pub use tr::Transactor;
-pub use tx::Transaction;
+pub(crate) use tx::Transaction;
 
 pub(crate) use crate::catalog::providers::CachePolicy;
 

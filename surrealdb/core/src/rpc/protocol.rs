@@ -2,6 +2,12 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use async_channel::Sender;
+use surrealdb_rpc::args::extract_args;
+use surrealdb_rpc::error::{
+	bad_lq_config, invalid_params, method_not_allowed, method_not_found, session_exists,
+	session_expired, session_not_found,
+};
+use surrealdb_rpc::{DbResult, Method, Token, check_protected_param};
 use surrealdb_types::{HashMap, object};
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -12,18 +18,12 @@ use crate::dbs::capabilities::{ExperimentalTarget, MethodTarget};
 use crate::dbs::{
 	AuthPrincipalSnapshot, QueryResult, QueryStreamItem, QueryStreamJob, QueryType, Session,
 };
-use crate::iam::token::Token;
 use crate::kvs::{Datastore, TransactionType};
 use crate::observe::{
 	AuthAction, AuthEvent, AuthEventSafe, AuthScope, Outcome, RpcEvent, RpcEventSafe,
 	TenantIdentity,
 };
-use crate::rpc::args::extract_args;
-use crate::rpc::{
-	DbResult, Method, bad_lq_config, invalid_params, method_not_allowed, method_not_found,
-	query_timeout_error, session_exists, session_expired, session_not_found,
-	types_error_from_anyhow,
-};
+use crate::rpc::error::{query_timeout_error, types_error_from_anyhow};
 use crate::sql::statements::live::LiveFields;
 use crate::sql::{
 	Ast, CreateStatement, Data as SqlData, DeleteStatement, Expr, Fields, Function, FunctionCall,
@@ -1070,7 +1070,7 @@ pub trait RpcProtocol {
 		match val {
 			None | Some(PublicValue::None) => session.variables.remove(key.as_str()),
 			Some(val) => {
-				crate::rpc::check_protected_param(&key)?;
+				check_protected_param(&key)?;
 				session.variables.insert(key, val)
 			}
 		}

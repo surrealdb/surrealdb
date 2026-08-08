@@ -1,11 +1,11 @@
-//! Facade over the leaf [`surrealdb_observe`] crate, plus the core-side residue
-//! that cannot live in the leaf.
+//! The core-side residue of observability that cannot live in the leaf
+//! [`surrealdb_observe`] crate.
 //!
 //! The observability event types, the [`ExecutionObserver`] trait, the fan-out
 //! dispatcher, the error-class constants, and the provider trait all live in
-//! `surrealdb-observe` and are re-exported here so existing `crate::observe::*`
-//! (core) and `surrealdb_core::observe::*` (server) paths keep resolving
-//! unchanged.
+//! `surrealdb-observe`; depend on that crate directly to reach them. They are
+//! pulled in here crate-internally so core's own `crate::observe::…` paths
+//! resolve, but they are not part of core's public surface.
 //!
 //! What stays in core:
 //!
@@ -23,7 +23,7 @@ pub mod process;
 mod provider_impls;
 
 pub use process::{ProcessSnapshot, process_snapshot, refresh_process_snapshot};
-pub use surrealdb_observe::*;
+pub(crate) use surrealdb_observe::*;
 
 /// Re-exported at its original path. The function had to move into `dbs` to
 /// keep the leaf crate free of `crate::kvs`, but it was the one item of this

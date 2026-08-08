@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use surrealdb_core::dbs::Capabilities;
 use surrealdb_core::kvs::Datastore;
+use surrealdb_rpc::capabilities::Capabilities;
 use surrealdb_types::{SurrealValue, Variables};
 
 use super::BenchMarkRun;
@@ -15,7 +15,7 @@ pub struct LocalStore {
 impl LocalStore {
 	pub async fn new(path: &str) -> Result<Self> {
 		let ds = Datastore::builder()
-		.without_maintenance_tasks()
+			.without_maintenance_tasks()
 			.with_capabilities(Capabilities::all())
 			.with_auth(false)
 			.build_with_path(&format!("surrealkv://{path}"))

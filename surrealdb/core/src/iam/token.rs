@@ -24,7 +24,7 @@ fn decode_access_token_claims(token: &str) -> Result<jsonwebtoken::TokenData<Cla
 	Ok(jsonwebtoken::dangerous::insecure_decode::<Claims>(token)?)
 }
 
-pub use surrealdb_rpc::Token;
+use surrealdb_rpc::Token;
 
 /// Refreshes an access token using a refresh token.
 ///

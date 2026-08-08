@@ -439,7 +439,8 @@ mod tests {
 
 	use anyhow::{Result, bail};
 	use surrealdb_cnf::ConfigMap;
-	use surrealdb_kvs::TransactionType;
+	use surrealdb_kvs::api::{BoxFut, Transactable};
+	use surrealdb_kvs::{Metrics, TransactionType};
 	use tokio_util::sync::CancellationToken;
 
 	use super::Builder;
@@ -447,11 +448,7 @@ mod tests {
 	use crate::buc::{
 		BucketStoreProvider, BucketStoreProviderRequirements, Config as BucketConfig,
 	};
-	use crate::kvs::api::BoxFut;
-	use crate::kvs::{
-		Metrics, Transactable, TransactionBuilder, TransactionBuilderFactory,
-		TransactionBuilderParts,
-	};
+	use crate::kvs::{TransactionBuilder, TransactionBuilderFactory, TransactionBuilderParts};
 
 	#[derive(Clone)]
 	struct TestRouterState(Arc<usize>);

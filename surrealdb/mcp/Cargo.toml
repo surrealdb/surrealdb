@@ -21,6 +21,9 @@ transport-io = ["rmcp/transport-io"]
 rmcp = { workspace = true, features = ["server", "macros"] }
 surrealdb-core = { workspace = true, features = ["graphql", "gql"] }
 surrealdb-cnf = { workspace = true }
+surrealdb-iam = { workspace = true }
+surrealdb-rpc = { workspace = true }
+surrealdb-syn = { workspace = true }
 surrealdb-types = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }

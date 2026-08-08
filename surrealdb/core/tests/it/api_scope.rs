@@ -10,11 +10,11 @@
 //! tenant must be rejected before another tenant's handler runs.
 
 use anyhow::Result;
+use surrealdb_catalog::ApiMethod;
 use surrealdb_core::api::request::ApiRequest;
-use surrealdb_core::catalog::ApiMethod;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::iam::{Level, Role};
 use surrealdb_core::kvs::Datastore;
+use surrealdb_iam::{Level, Role};
 use surrealdb_types::ToSql;
 
 use crate::helpers::new_ds;

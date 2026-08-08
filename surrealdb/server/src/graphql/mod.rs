@@ -29,8 +29,8 @@ use bytes::Bytes;
 use futures_util::future::BoxFuture;
 use http::header::{CONTENT_TYPE, HeaderValue};
 use surrealdb_core::dbs::Session;
-use surrealdb_core::dbs::capabilities::RouteTarget;
-use surrealdb_core::observe::Outcome;
+use surrealdb_observe::Outcome;
+use surrealdb_rpc::capabilities::RouteTarget;
 use tower_service::Service;
 use web_time::Instant;
 
@@ -221,9 +221,9 @@ where
 							Outcome::Success
 						};
 						let error_class = if timed_out {
-							Some(surrealdb_core::observe::error_class::TIMEOUT)
+							Some(surrealdb_observe::error_class::TIMEOUT)
 						} else if response.is_err() {
-							Some(surrealdb_core::observe::error_class::CLIENT)
+							Some(surrealdb_observe::error_class::CLIENT)
 						} else {
 							None
 						};
@@ -287,9 +287,9 @@ where
 						Outcome::Success
 					};
 					let error_class = if timed_out {
-						Some(surrealdb_core::observe::error_class::TIMEOUT)
+						Some(surrealdb_observe::error_class::TIMEOUT)
 					} else if any_err {
-						Some(surrealdb_core::observe::error_class::CLIENT)
+						Some(surrealdb_observe::error_class::CLIENT)
 					} else {
 						None
 					};

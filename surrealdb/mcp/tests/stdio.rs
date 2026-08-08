@@ -544,8 +544,8 @@ async fn stdio_completion_suggests_tables() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn stdio_uses_base_session_when_auth_enabled_and_guest_disabled() {
-	use surrealdb_core::dbs::Capabilities;
 	use surrealdb_core::kvs::Datastore;
+	use surrealdb_rpc::capabilities::Capabilities;
 
 	// Datastore with auth *enabled* and guest access *disabled* -- the worst
 	// case for the old behaviour where `Session::default()` was used as the

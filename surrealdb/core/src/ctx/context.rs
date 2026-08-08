@@ -1639,8 +1639,9 @@ mod tests {
 	#[cfg(all(feature = "allocation-tracking", feature = "allocator"))]
 	#[serial_test::serial]
 	async fn test_context_memory_threshold_integration() {
+		use common::str::ParseBytes;
+
 		use crate::kvs::DatastoreError;
-		use crate::str::ParseBytes;
 
 		// Set a low memory threshold (1MB) before MEMORY_THRESHOLD is accessed
 		// This must happen before any code accesses cnf::MEMORY_THRESHOLD

@@ -8,8 +8,8 @@ use anyhow::Result;
 use clap::Args;
 use surrealdb::engine::any;
 use surrealdb_core::kvs::TransactionBuilderFactory;
-use surrealdb_core::observe::{ExecutionObserver, FanOutObserver};
 use surrealdb_core::options::EngineOptions;
+use surrealdb_observe::{ExecutionObserver, FanOutObserver};
 use tokio_util::sync::CancellationToken;
 
 use super::config::Config;

@@ -8,11 +8,13 @@ use anyhow::Result;
 use bytes::BytesMut;
 use surrealdb_core::ctx::CancelHandle;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::dbs::capabilities::RouteTarget;
 use surrealdb_core::iam::verify::{self, ScramAuth, basic};
-use surrealdb_core::kvs::{Datastore, Transaction, TransactionType};
-use surrealdb_core::sql::Ast;
+use surrealdb_core::kvs::Datastore;
 use surrealdb_core::syn;
+use surrealdb_datastore::Transaction;
+use surrealdb_kvs::TransactionType;
+use surrealdb_rpc::capabilities::RouteTarget;
+use surrealdb_sql::Ast;
 use surrealdb_types::{Value, Variables};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -1279,7 +1281,7 @@ impl Connection {
 		&self,
 		query: &str,
 		params: Variables,
-	) -> Result<Vec<surrealdb_core::dbs::QueryResult>, PgError> {
+	) -> Result<Vec<surrealdb_rpc::QueryResult>, PgError> {
 		self.ds.execute_gql(query, &self.session, Some(params)).await.map_err(|e| PgError::from(&e))
 	}
 
@@ -1288,7 +1290,7 @@ impl Connection {
 		&self,
 		_query: &str,
 		_params: Variables,
-	) -> Result<Vec<surrealdb_core::dbs::QueryResult>, PgError> {
+	) -> Result<Vec<surrealdb_rpc::QueryResult>, PgError> {
 		Err(PgError::feature_not_supported("this server was not built with GQL support"))
 	}
 
@@ -1715,7 +1717,7 @@ impl Connection {
 	fn apply_session_updates(
 		&mut self,
 		let_vars: Vec<String>,
-		mut trailing: Vec<surrealdb_core::dbs::QueryResult>,
+		mut trailing: Vec<surrealdb_rpc::QueryResult>,
 	) {
 		let Some(session_result) = trailing.pop() else {
 			return;
@@ -1724,7 +1726,7 @@ impl Connection {
 			// Never write a protected name ($session/$auth/$token/$access)
 			// into the session variables: the executor rejects those on every
 			// subsequent query, which would poison the connection.
-			if surrealdb_core::rpc::check_protected_param(&name).is_err() {
+			if surrealdb_rpc::check_protected_param(&name).is_err() {
 				continue;
 			}
 			if let Ok(value) = result.result {

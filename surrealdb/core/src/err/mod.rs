@@ -14,9 +14,9 @@ mod behaviour_pins;
 mod to_types;
 #[cfg(test)]
 mod wire_snapshot_test;
-/// Re-exported so the engine names its universal failures under `err` like
-/// every other error type, wherever the type itself has to live.
-pub use common::EngineError;
+/// Bound to `crate::err` so the engine names its universal failures under one
+/// module, wherever the type itself has to live.
+pub(crate) use common::EngineError;
 pub(crate) use to_types::into_types_error;
 
 /// The SurrealDB error types that can appear inside an [`anyhow::Error`],
@@ -340,7 +340,7 @@ error_registry! {
 	// failure exactly as the parser reported it.
 	crate::syn::ParseError {
 		map: LeafError::to_types_error,
-		probe: crate::syn::ParseError::InvalidQuery(crate::syn::error::RenderedError {
+		probe: crate::syn::ParseError::InvalidQuery(surrealdb_syn::error::RenderedError {
 			errors: vec!["sample".to_string()],
 			snippets: Vec::new(),
 		}),

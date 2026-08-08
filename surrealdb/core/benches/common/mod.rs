@@ -4,8 +4,9 @@
 
 use std::sync::Arc;
 
-use surrealdb_core::dbs::{Capabilities, Session};
+use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
+use surrealdb_rpc::capabilities::Capabilities;
 use tokio::runtime::Runtime;
 
 /// Create a new multithreaded Tokio runtime for benchmarks

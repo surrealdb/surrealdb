@@ -28,10 +28,7 @@
 //! errors.
 
 use anyhow::{Result, ensure};
-pub use surrealdb_gql::{
-	GqlParserSettings, PreparedGqlQuery, ast, lexer, lower, parse_str, parse_to_plan_with_settings,
-	parse_with_settings, parser, token,
-};
+pub(crate) use surrealdb_gql::{GqlParserSettings, PreparedGqlQuery, parse_to_plan_with_settings};
 
 use crate::dbs::Capabilities;
 use crate::syn::{ParseError, ParserConfig};

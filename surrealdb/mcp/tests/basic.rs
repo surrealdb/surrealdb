@@ -148,8 +148,8 @@ fn test_validate_table_name_rejects_record_ids_and_injection() {
 
 #[test]
 fn test_json_to_variables_object() {
-	use surrealdb_core::syn::ParserConfig;
 	use surrealdb_mcp::cnf::McpConfig;
+	use surrealdb_syn::ParserConfig;
 	let mcp = McpConfig::default();
 	let core = ParserConfig::default();
 	let json = serde_json::json!({"name": "John", "age": 30, "active": true});
@@ -159,8 +159,8 @@ fn test_json_to_variables_object() {
 
 #[test]
 fn test_json_to_variables_rejects_non_object() {
-	use surrealdb_core::syn::ParserConfig;
 	use surrealdb_mcp::cnf::McpConfig;
+	use surrealdb_syn::ParserConfig;
 	let mcp = McpConfig::default();
 	let core = ParserConfig::default();
 	let json = serde_json::json!("not an object");
@@ -398,9 +398,8 @@ async fn test_use_rejects_guest_when_guest_queries_denied() {
 	// A datastore that denies arbitrary queries from guest subjects must
 	// not let an anonymous MCP session pin a namespace/database either.
 
-	use surrealdb_core::dbs::Capabilities;
-	use surrealdb_core::dbs::capabilities::{ArbitraryQueryTarget, Targets};
 	use surrealdb_core::kvs::Datastore;
+	use surrealdb_rpc::capabilities::{ArbitraryQueryTarget, Capabilities, Targets};
 
 	let ds = Datastore::builder()
 		.with_capabilities(Capabilities::default().without_arbitrary_query(Targets::<
@@ -1780,8 +1779,8 @@ async fn test_list_configs_does_not_error() {
 
 #[tokio::test]
 async fn test_run_respects_function_permissions() {
-	use surrealdb_core::dbs::Capabilities;
 	use surrealdb_core::kvs::Datastore;
+	use surrealdb_rpc::capabilities::Capabilities;
 
 	// Build a datastore with auth *enabled* so `PERMISSIONS NONE` bites.
 	// `Capabilities::all()` grants guest access so anonymous sessions are

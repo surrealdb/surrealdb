@@ -17,7 +17,7 @@ pub mod schema;
 use std::str::FromStr;
 
 use rmcp::ErrorData;
-use surrealdb_core::syn::ParserConfig;
+use surrealdb_syn::ParserConfig;
 use surrealdb_types::{Decimal, Number, SurrealValue, Value, Variables};
 
 pub(crate) use self::output::{

@@ -2,8 +2,9 @@
 
 use std::sync::Arc;
 
-use surrealdb_core::dbs::{QueryResult, QueryResultBuilder, Session};
+use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
+use surrealdb_rpc::{QueryResult, QueryResultBuilder};
 use surrealdb_types::Variables;
 use tokio::sync::RwLock;
 

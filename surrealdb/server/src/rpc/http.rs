@@ -3,12 +3,13 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use surrealdb_core::dbs::Session;
-use surrealdb_core::iam::{Auth, Level};
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::rpc::{
-	DbResult, Method, RpcProtocol, method_not_allowed, method_not_found, session_exists,
-	session_not_found, types_error_from_anyhow,
+use surrealdb_core::rpc::{RpcProtocol, types_error_from_anyhow};
+use surrealdb_iam::{Auth, Level};
+use surrealdb_rpc::error::{
+	method_not_allowed, method_not_found, session_exists, session_not_found,
 };
+use surrealdb_rpc::{DbResult, Method};
 use surrealdb_types::{Array, Error as TypesError, HashMap, Value};
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, RwLock};
 use uuid::Uuid;
@@ -719,8 +720,8 @@ impl RpcProtocol for Http {
 
 #[cfg(test)]
 mod tests {
-	use surrealdb_core::dbs::Capabilities;
-	use surrealdb_core::iam::Role;
+	use surrealdb_iam::Role;
+	use surrealdb_rpc::capabilities::Capabilities;
 
 	use super::*;
 

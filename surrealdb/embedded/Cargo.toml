@@ -27,6 +27,10 @@ dashmap = { workspace = true }
 futures = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 surrealdb-core = { workspace = true, features = ["http"] }
+surrealdb-cnf = { workspace = true }
+surrealdb-datastore = { workspace = true }
+surrealdb-kvs = { workspace = true }
+surrealdb-rpc = { workspace = true }
 surrealdb-types = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
 uuid = { workspace = true, features = ["v7"] }

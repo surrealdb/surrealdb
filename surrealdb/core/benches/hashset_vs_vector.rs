@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use criterion::measurement::WallTime;
 use criterion::{BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main};
-use surrealdb_core::idx::trees::dynamicset::{AHashSet, ArraySet, DynamicSet};
+use surrealdb_idx::trees::dynamicset::{AHashSet, ArraySet, DynamicSet};
 use web_time::SystemTime;
 
 fn bench_hashset(samples_vec: &Vec<Vec<u64>>) {

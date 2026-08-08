@@ -68,7 +68,7 @@ pub async fn run(session: &McpSession, p: RunParams) -> Result<CallToolResult, E
 	// `RETURN <fn>(...)` is always a single statement.
 	let result = results.pop().unwrap_or_else(|| {
 		tracing::warn!(target: "surrealdb::mcp", "run() returned no statements");
-		surrealdb_core::dbs::QueryResultBuilder::instant_none()
+		surrealdb_rpc::QueryResultBuilder::instant_none()
 	});
 	Ok(single_statement_result(result, mcp.max_result_bytes))
 }

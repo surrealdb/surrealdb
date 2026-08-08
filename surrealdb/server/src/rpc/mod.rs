@@ -12,7 +12,8 @@ use futures::stream::FuturesUnordered;
 use surrealdb_core::channel::Receiver;
 #[cfg(feature = "graphql")]
 use surrealdb_core::graphql::NotificationRouter;
-use surrealdb_core::rpc::{DbResponse, DbResult, RpcProtocol};
+use surrealdb_core::rpc::RpcProtocol;
+use surrealdb_rpc::{DbResponse, DbResult};
 use surrealdb_types::{Action, Notification};
 use tokio::sync::RwLock;
 use tokio_stream::StreamExt;

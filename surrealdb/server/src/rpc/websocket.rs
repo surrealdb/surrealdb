@@ -12,14 +12,17 @@ use futures::{Sink, SinkExt, StreamExt};
 use http::{HeaderMap, HeaderName, HeaderValue};
 use opentelemetry_http::HeaderExtractor;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::kvs::{Datastore, Transaction, TransactionType};
+use surrealdb_core::kvs::Datastore;
 use surrealdb_core::mem::ALLOC;
-use surrealdb_core::observe::{
+use surrealdb_core::rpc::RpcProtocol;
+use surrealdb_core::rpc::format::Format;
+use surrealdb_datastore::Transaction;
+use surrealdb_kvs::TransactionType;
+use surrealdb_observe::{
 	NetworkBytesEvent, NetworkBytesEventCtx, NetworkBytesEventSafe, NetworkDirection,
 	SessionAction, SessionEvent, SessionEventCtx, SessionEventSafe, SessionProtocol,
 };
-use surrealdb_core::rpc::format::Format;
-use surrealdb_core::rpc::{DbResponse, DbResult, Method, RpcProtocol};
+use surrealdb_rpc::{DbResponse, DbResult, Method};
 use surrealdb_types::{Array, Error as TypesError, HashMap, ToSql, Value};
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
@@ -779,10 +782,10 @@ impl RpcProtocol for Websocket {
 	/// a client attempting to exhaust memory within a single connection.
 	async fn attach(&self, session_id: Uuid) -> Result<DbResult, TypesError> {
 		if self.session_map().contains_key(&session_id) {
-			return Err(surrealdb_core::rpc::session_exists(session_id));
+			return Err(surrealdb_rpc::error::session_exists(session_id));
 		}
 		if self.session_map().len() >= *WEBSOCKET_MAX_ATTACHED_SESSIONS {
-			return Err(surrealdb_core::rpc::method_not_allowed(Method::Attach.to_string()));
+			return Err(surrealdb_rpc::error::method_not_allowed(Method::Attach.to_string()));
 		}
 		let mut session = Session::default().with_rt(Self::LQ_SUPPORT);
 		session.id = Some(session_id);
@@ -797,7 +800,7 @@ impl RpcProtocol for Websocket {
 	/// it down would leave the connection in an inconsistent state.
 	async fn detach(&self, session_id: Uuid) -> Result<DbResult, TypesError> {
 		if session_id == self.id {
-			return Err(surrealdb_core::rpc::invalid_params(
+			return Err(surrealdb_rpc::error::invalid_params(
 				"Cannot detach the implicit connection session",
 			));
 		}
@@ -813,7 +816,7 @@ impl RpcProtocol for Websocket {
 	async fn get_tx(
 		&self,
 		id: Uuid,
-	) -> Result<Arc<surrealdb_core::kvs::Transaction>, surrealdb_types::Error> {
+	) -> Result<Arc<surrealdb_datastore::Transaction>, surrealdb_types::Error> {
 		debug!("WebSocket get_tx called for transaction {id}");
 		self.transactions
 			.get(&id)
@@ -826,7 +829,7 @@ impl RpcProtocol for Websocket {
 					"Transaction {id} not found in WebSocket transactions map (have {} transactions)",
 					self.transactions.len()
 				);
-				surrealdb_core::rpc::invalid_params("Transaction not found")
+				surrealdb_rpc::error::invalid_params("Transaction not found")
 			})
 	}
 
@@ -834,7 +837,7 @@ impl RpcProtocol for Websocket {
 	async fn set_tx(
 		&self,
 		id: Uuid,
-		tx: Arc<surrealdb_core::kvs::Transaction>,
+		tx: Arc<surrealdb_datastore::Transaction>,
 	) -> Result<(), surrealdb_types::Error> {
 		// Tag the transaction with the connection's implicit default session and
 		// reserve a slot so the open-transaction counter stays consistent with a
@@ -1013,7 +1016,7 @@ impl RpcProtocol for Websocket {
 			// Roll back the reservation and reject: the session already holds the
 			// maximum number of concurrently open transactions.
 			self.release_txn_slot(&session_id);
-			return Err(surrealdb_core::rpc::too_many_transactions());
+			return Err(surrealdb_rpc::error::too_many_transactions());
 		}
 		// `begin` bypasses the executor (which is where the
 		// `Context::done` cancel short-circuit lives), so the cancel
@@ -1056,7 +1059,7 @@ impl RpcProtocol for Websocket {
 		// `reset` leaves the txn correctly tracked rather than undone.
 		if session_id != self.id && !self.session_map().contains_key(&session_id) {
 			self.cleanup_txns_filtered(Some(&session_id)).await;
-			return Err(surrealdb_core::rpc::session_not_found(session_id));
+			return Err(surrealdb_rpc::error::session_not_found(session_id));
 		}
 		// Return the transaction ID to the client
 		Ok(DbResult::Other(Value::Uuid(surrealdb::types::Uuid::from(id))))
@@ -1072,14 +1075,14 @@ impl RpcProtocol for Websocket {
 		// Extract the transaction ID from params
 		let mut params_vec = params.into_vec();
 		let Some(Value::Uuid(txn_id)) = params_vec.pop() else {
-			return Err(surrealdb_core::rpc::invalid_params("Expected transaction UUID"));
+			return Err(surrealdb_rpc::error::invalid_params("Expected transaction UUID"));
 		};
 
 		let txn_id = txn_id.into_inner();
 
 		// Retrieve and remove the transaction from the map
 		let Some((_, (session_id, tx))) = self.transactions.remove(&txn_id) else {
-			return Err(surrealdb_core::rpc::invalid_params("Transaction not found"));
+			return Err(surrealdb_rpc::error::invalid_params("Transaction not found"));
 		};
 		// The transaction is no longer open, so free its reserved slot.
 		self.release_txn_slot(&session_id);
@@ -1101,14 +1104,14 @@ impl RpcProtocol for Websocket {
 		// Extract the transaction ID from params
 		let mut params_vec = params.into_vec();
 		let Some(Value::Uuid(txn_id)) = params_vec.pop() else {
-			return Err(surrealdb_core::rpc::invalid_params("Expected transaction UUID"));
+			return Err(surrealdb_rpc::error::invalid_params("Expected transaction UUID"));
 		};
 
 		let txn_id = txn_id.into_inner();
 
 		// Retrieve and remove the transaction from the map
 		let Some((_, (session_id, tx))) = self.transactions.remove(&txn_id) else {
-			return Err(surrealdb_core::rpc::invalid_params("Transaction not found"));
+			return Err(surrealdb_rpc::error::invalid_params("Transaction not found"));
 		};
 		// The transaction is no longer open, so free its reserved slot.
 		self.release_txn_slot(&session_id);
@@ -1296,9 +1299,9 @@ impl Websocket {
 mod tests {
 	use std::sync::{Arc, Mutex};
 
-	use surrealdb_core::iam::{Auth, Role};
 	use surrealdb_core::kvs::Datastore;
-	use surrealdb_core::observe::{
+	use surrealdb_iam::{Auth, Role};
+	use surrealdb_observe::{
 		AuthEvent, ExecutionObserver, NetworkBytesEvent, QueryEvent, RpcEvent, SessionEvent,
 		StatementEvent, TransactionEvent,
 	};
@@ -1617,7 +1620,7 @@ mod tests {
 		use std::time::Duration as StdDuration;
 
 		use surrealdb_core::dbs::Session;
-		use surrealdb_core::dbs::capabilities::Capabilities;
+		use surrealdb_rpc::capabilities::Capabilities;
 
 		#[derive(Default)]
 		struct WriteTxCompletionCounter {
@@ -1765,7 +1768,7 @@ mod tests {
 		use std::time::Duration as StdDuration;
 
 		use surrealdb_core::dbs::Session;
-		use surrealdb_core::dbs::capabilities::Capabilities;
+		use surrealdb_rpc::capabilities::Capabilities;
 
 		with_big_stack(|| async {
 			let ds = Datastore::builder()
@@ -1876,7 +1879,7 @@ mod tests {
 	#[test]
 	fn handle_live_gate_refuses_registration_when_canceller_is_set() {
 		use surrealdb_core::dbs::Session;
-		use surrealdb_core::dbs::capabilities::Capabilities;
+		use surrealdb_rpc::capabilities::Capabilities;
 
 		with_big_stack(|| async {
 			let ds = Datastore::builder()
@@ -1950,7 +1953,7 @@ mod tests {
 
 	impl LiveHarness {
 		async fn new() -> Self {
-			use surrealdb_core::dbs::capabilities::Capabilities;
+			use surrealdb_rpc::capabilities::Capabilities;
 
 			let (notify_tx, notify_rx) = surrealdb_core::channel::bounded(100);
 			let ds = Datastore::builder()
@@ -2177,7 +2180,7 @@ mod tests {
 	#[test]
 	fn begin_rpc_after_cancel_does_not_leak_transaction() {
 		use surrealdb_core::dbs::Session;
-		use surrealdb_core::dbs::capabilities::Capabilities;
+		use surrealdb_rpc::capabilities::Capabilities;
 
 		with_big_stack(|| async {
 			let ds = Datastore::builder()

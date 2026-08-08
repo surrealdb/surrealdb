@@ -2,13 +2,11 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::dbs::capabilities::Capabilities;
-use surrealdb_core::iam::{Level, Role};
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::observe::{
-	ExecutionObserver, Outcome, TransactionEvent, TransactionMetricsSnapshot,
-};
 use surrealdb_core::syn;
+use surrealdb_iam::{Level, Role};
+use surrealdb_observe::{ExecutionObserver, Outcome, TransactionEvent, TransactionMetricsSnapshot};
+use surrealdb_rpc::capabilities::Capabilities;
 use surrealdb_types::{Action, Array, Notification, RecordId, Value};
 
 use crate::helpers::{new_ds, new_ns_db};

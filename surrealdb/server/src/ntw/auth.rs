@@ -12,7 +12,7 @@ use http::request::Parts;
 use hyper::{Request, Response};
 use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::verify::{basic, token};
-use surrealdb_core::observe::HttpRequestEventCtx;
+use surrealdb_observe::HttpRequestEventCtx;
 use tower::{Layer, Service};
 use uuid::Uuid;
 

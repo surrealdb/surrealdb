@@ -10,17 +10,17 @@ use surrealdb::opt::capabilities::Capabilities as SdkCapabilities;
 use surrealdb_cnf::ConfigMap;
 use surrealdb_core::channel::Receiver;
 use surrealdb_core::kvs::{Datastore, TransactionBuilderFactory};
-use surrealdb_core::observe::ExecutionObserver;
+use surrealdb_observe::ExecutionObserver;
+use surrealdb_rpc::capabilities::{
+	ArbitraryQueryTarget, Capabilities, EvalQueryTarget, ExperimentalTarget, FuncTarget,
+	MethodTarget, NetTarget, NewPlannerStrategy, RouteTarget, Targets,
+};
 use surrealdb_types::Notification;
 use tokio::time::{Instant, sleep, timeout};
 use tokio_util::sync::CancellationToken;
 
 use crate::cli::Config;
-use crate::core::dbs::capabilities::{
-	ArbitraryQueryTarget, Capabilities, EvalQueryTarget, ExperimentalTarget, FuncTarget,
-	MethodTarget, NetTarget, RouteTarget, Targets,
-};
-use crate::core::dbs::{NewPlannerStrategy, Session};
+use crate::core::dbs::Session;
 
 const TARGET: &str = "surreal::dbs";
 

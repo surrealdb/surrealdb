@@ -21,8 +21,8 @@ use axum::response::Response;
 use axum::routing::any;
 use axum::{Extension, Router};
 use surrealdb_core::dbs::Session;
-use surrealdb_core::dbs::capabilities::RouteTarget;
 use surrealdb_protocol::proto::rpc::v1::surreal_db_service_server::SurrealDbServiceServer;
+use surrealdb_rpc::capabilities::RouteTarget;
 use tonic::codec::CompressionEncoding;
 use tower_service::Service;
 

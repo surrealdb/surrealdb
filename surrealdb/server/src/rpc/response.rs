@@ -1,6 +1,6 @@
 use axum::extract::ws::Message;
-use surrealdb_core::rpc::DbResponse;
 use surrealdb_core::rpc::format::Format;
+use surrealdb_rpc::DbResponse;
 use tokio::sync::mpsc::Sender;
 use tracing::Span;
 

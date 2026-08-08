@@ -1,7 +1,6 @@
 use std::sync::Once;
 
-pub use surrealdb_iam::*;
-pub use token::Token;
+pub(crate) use surrealdb_iam::*;
 
 pub mod access;
 mod action_impls;

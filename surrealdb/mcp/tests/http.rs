@@ -378,7 +378,7 @@ fn owner_session() -> Session {
 /// initialize as user A and then replay a tool call as user B on the
 /// same session id.
 fn db_user_session() -> Session {
-	use surrealdb_core::iam::{Auth, Role};
+	use surrealdb_iam::{Auth, Role};
 	Session {
 		au: std::sync::Arc::new(Auth::for_db(Role::Editor, "test", "test")),
 		ns: Some("test".into()),

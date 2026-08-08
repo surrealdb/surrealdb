@@ -1,12 +1,12 @@
 use anyhow::Result;
 use http::header::{ACCEPT, CONTENT_TYPE};
 use reblessive::tree::Stk;
+use surrealdb_rpc::format as api_format;
 use tracing::trace;
 use uuid::Uuid;
 
 use super::args::Optional;
 use crate::api::err::ApiError;
-use crate::api::format as api_format;
 use crate::api::invocation::process_api_request_with_stack;
 use crate::api::request::ApiRequest;
 use crate::api::response::ApiResponse;

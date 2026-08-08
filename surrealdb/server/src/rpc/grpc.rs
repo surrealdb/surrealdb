@@ -53,21 +53,22 @@ use dashmap::DashMap;
 use futures::{Stream, StreamExt};
 use surrealdb_core::channel::{Receiver, bounded};
 use surrealdb_core::ctx::CancelHandle;
-use surrealdb_core::dbs::capabilities::{MethodTarget, RouteTarget};
-use surrealdb_core::dbs::{
-	QUERY_STREAM_BUFFER, QueryResult, QueryStreamItem, QueryStreamJob, QueryType, Session,
-};
+use surrealdb_core::dbs::{QueryStreamJob, Session};
 use surrealdb_core::iam::check::check_ns_db;
-use surrealdb_core::iam::{Auth, Token};
-use surrealdb_core::kvs::{Datastore, Transaction, TransactionType, export};
-use surrealdb_core::rpc::{
-	DbResult, Method, RpcProtocol, invalid_params, method_not_allowed, session_exists,
-	session_not_found, types_error_from_anyhow,
-};
+use surrealdb_core::kvs::Datastore;
+use surrealdb_core::rpc::{RpcProtocol, types_error_from_anyhow};
+use surrealdb_datastore::Transaction;
+use surrealdb_iam::Auth;
+use surrealdb_kvs::TransactionType;
 use surrealdb_protocol::method_names;
 use surrealdb_protocol::proto::rpc::v1 as rpc;
 use surrealdb_protocol::proto::rpc::v1::surreal_db_service_server::SurrealDbService;
 use surrealdb_protocol::proto::v1 as proto;
+use surrealdb_rpc::capabilities::{MethodTarget, RouteTarget};
+use surrealdb_rpc::error::{invalid_params, method_not_allowed, session_exists, session_not_found};
+use surrealdb_rpc::{
+	DbResult, Method, QUERY_STREAM_BUFFER, QueryResult, QueryStreamItem, QueryType, Token, export,
+};
 use surrealdb_types::{Array, Error as TypesError, HashMap, Notification, SurrealValue, Value};
 use tokio::sync::{RwLock, mpsc};
 use tonic::{Request, Response, Status};
@@ -223,8 +224,8 @@ impl Grpc {
 		// An anonymous caller is the ordinary case, and the id is what
 		// authorises it. A session bound to nobody yet has no principal to
 		// compare against, so the id is all there is either way.
-		if matches!(caller.level(), surrealdb_core::iam::Level::No)
-			|| matches!(session.au.level(), surrealdb_core::iam::Level::No)
+		if matches!(caller.level(), surrealdb_iam::Level::No)
+			|| matches!(session.au.level(), surrealdb_iam::Level::No)
 		{
 			return Ok(());
 		}
@@ -583,7 +584,7 @@ impl RpcProtocol for Grpc {
 			return Err(invalid_params("Opening a transaction requires an attached session"));
 		}
 		if !self.reserve_transaction_slot(session_id) {
-			return Err(surrealdb_core::rpc::too_many_transactions());
+			return Err(surrealdb_rpc::error::too_many_transactions());
 		}
 		let tx = match self.kvs.transaction(TransactionType::Write).await {
 			Ok(tx) => tx,
@@ -1598,8 +1599,8 @@ impl GrpcService {
 		self.kvs()
 			.check(
 				&session,
-				surrealdb_core::iam::Action::Edit,
-				surrealdb_core::iam::ResourceKind::Any.on_level(session.au.level().to_owned()),
+				surrealdb_iam::Action::Edit,
+				surrealdb_iam::ResourceKind::Any.on_level(session.au.level().to_owned()),
 			)
 			.map_err(|err| Status::permission_denied(err.to_string()))?;
 
@@ -1696,8 +1697,8 @@ impl GrpcService {
 		self.kvs()
 			.check(
 				&session,
-				surrealdb_core::iam::Action::Edit,
-				surrealdb_core::iam::ResourceKind::Model.on_db(&namespace, &database),
+				surrealdb_iam::Action::Edit,
+				surrealdb_iam::ResourceKind::Model.on_db(&namespace, &database),
 			)
 			.map_err(|err| Status::permission_denied(err.to_string()))?;
 
@@ -1734,7 +1735,7 @@ impl GrpcService {
 		})?;
 		verify_trailer(&trailer, model.len() as u64, hasher.finalize())?;
 
-		let file = surrealdb_core::ml::storage::surml_file::SurMlFile::from_bytes(model)
+		let file = surrealml_core::storage::surml_file::SurMlFile::from_bytes(model)
 			.map_err(|err| Status::invalid_argument(format!("Invalid SurrealML file: {err}")))?;
 		let (name, version) = (file.header.name.to_string(), file.header.version.to_string());
 		// The name and version the model is stored under come from its header,
@@ -1786,8 +1787,8 @@ impl GrpcService {
 		self.kvs()
 			.check(
 				&session,
-				surrealdb_core::iam::Action::View,
-				surrealdb_core::iam::ResourceKind::Any.on_db(&namespace, &database),
+				surrealdb_iam::Action::View,
+				surrealdb_iam::ResourceKind::Any.on_db(&namespace, &database),
 			)
 			.map_err(|err| Status::permission_denied(err.to_string()))?;
 		let (sender, chunks) = surrealdb::channel::bounded(1);
@@ -1816,8 +1817,8 @@ impl GrpcService {
 		self.kvs()
 			.check(
 				&session,
-				surrealdb_core::iam::Action::View,
-				surrealdb_core::iam::ResourceKind::Model.on_db(&namespace, &database),
+				surrealdb_iam::Action::View,
+				surrealdb_iam::ResourceKind::Model.on_db(&namespace, &database),
 			)
 			.map_err(|err| Status::permission_denied(err.to_string()))?;
 		let info = self
@@ -2958,7 +2959,7 @@ fn to_status(error: &TypesError) -> Status {
 
 #[cfg(test)]
 mod tests {
-	use surrealdb_core::dbs::Capabilities;
+	use surrealdb_rpc::capabilities::Capabilities;
 	use surrealdb_types::{Object, SerializationError};
 
 	use super::*;
@@ -3022,7 +3023,7 @@ mod tests {
 		{
 			let session = service.rpc().get_session(&session_id).await.expect("session");
 			let mut session = session.write().await;
-			session.au = Arc::new(Auth::for_ns(surrealdb_core::iam::Role::Owner, "test-ns"));
+			session.au = Arc::new(Auth::for_ns(surrealdb_iam::Role::Owner, "test-ns"));
 		}
 
 		let refused = service
@@ -3374,7 +3375,7 @@ mod tests {
 		);
 
 		let (items, buffered) = bounded(QUERY_STREAM_BUFFER);
-		for item in surrealdb_core::dbs::items_for_result(
+		for item in surrealdb_rpc::items_for_result(
 			0,
 			QueryResult {
 				time: Duration::ZERO,
@@ -3470,7 +3471,7 @@ mod tests {
 			result: Ok(Value::Uuid(id)),
 			query_type: QueryType::Live,
 		};
-		let reported: Vec<Uuid> = surrealdb_core::dbs::items_for_result(0, live)
+		let reported: Vec<Uuid> = surrealdb_rpc::items_for_result(0, live)
 			.into_iter()
 			.filter_map(|item| framing.absorb(item))
 			.collect();
@@ -3492,7 +3493,7 @@ mod tests {
 		let reported: Vec<Uuid> = [failed, other]
 			.into_iter()
 			.enumerate()
-			.flat_map(|(index, result)| surrealdb_core::dbs::items_for_result(index, result))
+			.flat_map(|(index, result)| surrealdb_rpc::items_for_result(index, result))
 			.filter_map(|item| framing.absorb(item))
 			.collect();
 		assert!(reported.is_empty(), "nothing else is taken for a live query: {reported:?}");
@@ -3518,7 +3519,7 @@ mod tests {
 			})),
 		}];
 		for (index, result) in results.into_iter().enumerate() {
-			for item in surrealdb_core::dbs::items_for_result(index, result) {
+			for item in surrealdb_rpc::items_for_result(index, result) {
 				framing.absorb(item);
 			}
 		}

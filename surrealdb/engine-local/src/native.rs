@@ -38,7 +38,7 @@ pub async fn run_router(
 	let builder = builder.with_temporary_directory(config.temporary_directory);
 
 	let (notify, builder) = if config.capabilities.allows_live_query_notifications() {
-		let (send, recv) = async_channel::bounded(surrealdb_core::cnf::NOTIFICATIONS_CHANNEL_SIZE);
+		let (send, recv) = async_channel::bounded(surrealdb_cnf::NOTIFICATIONS_CHANNEL_SIZE);
 		(Some(recv), builder.with_notify(send))
 	} else {
 		(None, builder)

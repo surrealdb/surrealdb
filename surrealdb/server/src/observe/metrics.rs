@@ -47,10 +47,11 @@ use std::sync::Arc;
 
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram, UpDownCounter};
-use surrealdb_core::observe::{
+use surrealdb_core::observe::process_snapshot;
+use surrealdb_observe::{
 	AuthEvent, BucketOperationEvent, ExecutionObserver, HttpRequestEvent, HttpRequestStartEvent,
 	NetworkBytesEvent, NetworkDirection, QueryEvent, RpcEvent, SessionAction, SessionEvent,
-	StatementEvent, TransactionEvent, process_snapshot,
+	StatementEvent, TransactionEvent,
 };
 
 use super::instruments::{NONE_LABEL, attrs, names, scope};
@@ -438,12 +439,12 @@ impl MetricsObserver {
 	/// `operation_type` should be a stable lower-case identifier from the
 	/// closed set `{"query", "mutation", "subscription", "unknown"}`.
 	/// `error_class` is `Some` only when `outcome` is
-	/// [`surrealdb_core::observe::Outcome::Error`].
+	/// [`surrealdb_observe::Outcome::Error`].
 	#[allow(clippy::too_many_arguments)]
 	pub fn record_graphql_operation(
 		&self,
 		operation_type: &'static str,
-		outcome: surrealdb_core::observe::Outcome,
+		outcome: surrealdb_observe::Outcome,
 		error_class: Option<&'static str>,
 		duration: std::time::Duration,
 		namespace: Option<&str>,
@@ -470,7 +471,7 @@ impl MetricsObserver {
 		&self,
 		tool: &'static str,
 		transport: &'static str,
-		outcome: surrealdb_core::observe::Outcome,
+		outcome: surrealdb_observe::Outcome,
 		error_class: Option<&'static str>,
 		duration: std::time::Duration,
 	) {
@@ -863,7 +864,7 @@ mod tests {
 	use opentelemetry_sdk::metrics::data::ResourceMetrics;
 	use opentelemetry_sdk::metrics::reader::MetricReader;
 	use opentelemetry_sdk::metrics::{InstrumentKind, ManualReader, SdkMeterProvider, Temporality};
-	use surrealdb_core::observe::{
+	use surrealdb_observe::{
 		AuthAction, AuthEvent, AuthEventCtx, AuthEventSafe, AuthScope, ExecutionObserver,
 		HttpMethod, HttpRequestEvent, HttpRequestEventCtx, HttpRequestEventSafe,
 		HttpRequestStartEvent, HttpRequestStartEventSafe, HttpVersion, NetworkBytesEvent,
@@ -1207,7 +1208,7 @@ mod tests {
 		});
 		obs.on_rpc_complete(&RpcEvent {
 			safe: RpcEventSafe {
-				method: surrealdb_core::rpc::Method::Select,
+				method: surrealdb_rpc::Method::Select,
 				outcome: Outcome::Success,
 				duration: Duration::from_millis(1),
 				error_class: None,

@@ -132,7 +132,7 @@ impl Expr {
 	}
 
 	// NOTE: Changes to this function also likely require changes to
-	// `surrealdb_core::expr::Expr::needs_parentheses`.
+	// `surrealdb_expr::expr::Expr::needs_parentheses`.
 	/// Returns if this expression needs to be parenthesized when inside another expression.
 	pub fn needs_parentheses(&self) -> bool {
 		match self {

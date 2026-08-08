@@ -1,9 +1,10 @@
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use surrealdb_core::cnf::ConfigMap;
-use surrealdb_core::dbs::{Capabilities, Session};
+use surrealdb_cnf::ConfigMap;
+use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
+use surrealdb_rpc::capabilities::Capabilities;
 
 use crate::helpers::new_ds;
 

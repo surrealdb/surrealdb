@@ -5,13 +5,16 @@ use std::time::Duration;
 
 use semver::VersionReq;
 use serde::{Deserialize, Serialize, de};
-use surrealdb_core::dbs::NewPlannerStrategy;
-use surrealdb_core::dbs::capabilities::{
-	ArbitraryQueryTarget, EvalQueryTarget, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
-	RouteTarget,
-};
-use surrealdb_core::syn::parser::ParserSettings;
 use surrealdb_core::syn::{self};
+use surrealdb_rpc::capabilities::ArbitraryQueryTarget;
+use surrealdb_rpc::capabilities::EvalQueryTarget;
+use surrealdb_rpc::capabilities::ExperimentalTarget;
+use surrealdb_rpc::capabilities::FuncTarget;
+use surrealdb_rpc::capabilities::MethodTarget;
+use surrealdb_rpc::capabilities::NetTarget;
+use surrealdb_rpc::capabilities::NewPlannerStrategy;
+use surrealdb_rpc::capabilities::RouteTarget;
+use surrealdb_syn::parser::ParserSettings;
 use surrealdb_types::{Object, RecordId, ToSql, Value};
 
 use crate::cli::Backend;
@@ -201,7 +204,7 @@ impl TestEnv {
 
 /// Strategy for the new streaming planner/executor in language tests.
 ///
-/// Maps to `surrealdb_core::dbs::NewPlannerStrategy` but uses shorter
+/// Maps to `surrealdb_rpc::capabilities::NewPlannerStrategy` but uses shorter
 /// kebab-case names for TOML configuration.
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]

@@ -17,8 +17,10 @@ use std::sync::Arc;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use surrealdb_core::CommunityComposer;
-use surrealdb_core::kvs::Direction::Forward;
-use surrealdb_core::kvs::{Datastore, TransactionType, Transactor};
+use surrealdb_core::kvs::Datastore;
+use surrealdb_datastore::Transactor;
+use surrealdb_kvs::Direction::Forward;
+use surrealdb_kvs::TransactionType;
 use temp_dir::TempDir;
 use tokio::runtime::Runtime;
 

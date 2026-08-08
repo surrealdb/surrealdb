@@ -35,9 +35,10 @@ use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use surrealdb_core::cnf::ConfigMap;
-use surrealdb_core::dbs::{Capabilities, Session};
+use surrealdb_cnf::ConfigMap;
+use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
+use surrealdb_rpc::capabilities::Capabilities;
 use surrealdb_types::Notification;
 use tokio::runtime::{Builder, Runtime};
 

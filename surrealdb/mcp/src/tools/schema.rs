@@ -5,7 +5,7 @@ use rmcp::model::CallToolResult;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::json;
-use surrealdb_core::dbs::QueryResult;
+use surrealdb_rpc::QueryResult;
 
 use super::output::cap_value;
 use super::{
@@ -43,7 +43,7 @@ pub async fn info(session: &McpSession, params: InfoParams) -> Result<CallToolRe
 	let mut results = session.execute(&query, None).await?;
 	let result = results.pop().unwrap_or_else(|| {
 		tracing::warn!(target: "surrealdb::mcp", "info() returned no statements");
-		surrealdb_core::dbs::QueryResultBuilder::instant_none()
+		surrealdb_rpc::QueryResultBuilder::instant_none()
 	});
 	Ok(single_statement_result(result, session.config().max_result_bytes))
 }
