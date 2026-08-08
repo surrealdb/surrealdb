@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use regex::Regex;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::{Level, Role};
-use surrealdb_types::ToSql;
+use surrealdb_types::{Number, ToSql, Value};
 
 use crate::helpers::*;
 
@@ -26,6 +26,40 @@ async fn info_for_root() {
 		r"\{ accesses: \[\{.*\}\], config: \{ .* \}, defaults: \{ .* \}, namespaces: \[\{ .* \}\], nodes: \[.*\], system: \{ .* \}, users: \[\{ .* \}\] \}",
 	)
 	.unwrap();
+}
+
+/// `INFO FOR ROOT` must report real host metrics on the first query a datastore
+/// ever serves.
+///
+/// The metrics live in a process-wide cache that starts zeroed and is kept
+/// current by the `SystemMetricsRefresh` maintenance job. That job runs on a
+/// spawned task, so before the constructor populated the cache itself a query
+/// arriving first saw `physical_cores: 0` and `available_parallelism: 0` — not
+/// stale values but impossible ones.
+///
+/// Only the two fields that cannot legitimately be zero on a running host are
+/// asserted. CPU usage and load average can each be genuinely 0 on an idle
+/// machine, and resident memory is not worth a threshold.
+#[tokio::test]
+async fn info_for_root_reports_system_metrics_immediately() {
+	let (_, dbs) = new_ds("test", "test", false).await.unwrap();
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let mut res = dbs.execute("INFO FOR ROOT", &ses, None).await.unwrap();
+	let val = res.remove(0).result.unwrap();
+	let Value::Object(root) = &val else {
+		panic!("INFO FOR ROOT must return an object, got {val:?}");
+	};
+	let Some(Value::Object(system)) = root.get("system") else {
+		panic!("INFO FOR ROOT must carry a `system` object, got {val:?}");
+	};
+
+	for field in ["physical_cores", "available_parallelism"] {
+		let got = system.get(field);
+		assert!(
+			matches!(got, Some(Value::Number(Number::Int(n))) if *n > 0),
+			"`{field}` must be populated before the first query, got {got:?}"
+		);
+	}
 }
 
 #[tokio::test]

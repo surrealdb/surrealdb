@@ -105,8 +105,9 @@ pub async fn iam_run_case(
 		);
 
 		let tmp = resp.pop().expect("IAM case: check missing result row").output();
-		let tmp = tmp
+		let mut tmp = tmp
 			.map_err(|e| anyhow!("Check statement errored for test {test_index} ({test}): {e}",))?;
+		zero_volatile_system_block(&mut tmp);
 		let expected = syn::value(check_expected_result)?;
 		ensure!(
 			tmp == expected,
@@ -139,6 +140,41 @@ pub async fn iam_run_case(
 }
 
 type CaseIter<'a> = std::slice::Iter<'a, ((Level, Role), (&'a str, &'a str), bool, String)>;
+
+/// Zeroes the numbers inside an `INFO FOR ROOT` result's `system` block, leaving
+/// its keys and their shapes in place.
+///
+/// The block reports live host metrics — core count, CPU usage, load average,
+/// resident memory — so its values cannot be asserted; they belong to the
+/// machine, not to the statement under test. Its *shape* can be, and is worth
+/// asserting: the keys stay in the expectations, so a block that loses a field,
+/// renames one, or disappears entirely still fails the comparison. Only the
+/// numbers are neutralised.
+///
+/// `INFO FOR ROOT` is the only result carrying the key, so this is a no-op for
+/// every other statement.
+pub fn zero_volatile_system_block(value: &mut Value) {
+	fn zero(value: &mut Value) {
+		match value {
+			Value::Number(n) => {
+				*n = match n {
+					Number::Int(_) => Number::Int(0),
+					Number::Float(_) => Number::Float(0.0),
+					Number::Decimal(_) => Number::Decimal(0.into()),
+				}
+			}
+			// `load_average` is an array of three floats.
+			Value::Array(values) => values.iter_mut().for_each(zero),
+			_ => {}
+		}
+	}
+
+	if let Value::Object(object) = value
+		&& let Some(Value::Object(system)) = object.get_mut("system")
+	{
+		system.values_mut().for_each(zero);
+	}
+}
 
 #[allow(dead_code)]
 pub async fn iam_check_cases(

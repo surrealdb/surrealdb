@@ -404,6 +404,16 @@ impl Builder {
 			txn.cancel().await?;
 			datastore.live_query_router.set_baseline(baseline);
 		}
+		// Populate the system metrics cache before anyone can read it. The
+		// cache is process-wide and starts zeroed, and `INFO FOR ROOT` reports
+		// it verbatim — so without this a query arriving before the first
+		// `SystemMetricsRefresh` pass sees `physical_cores: 0`,
+		// `available_parallelism: 0` and no memory figures, which is wrong
+		// rather than merely stale. The scheduler already gives that job a
+		// `next_due` of `now`, but it runs on a spawned task, so its first pass
+		// lands some time after this constructor returns. Doing it here closes
+		// that window; the task keeps the values current from then on.
+		crate::sys::refresh().await;
 		// Shared from here on: the maintenance tasks hold a `Weak` to it, and
 		// nothing hands out a bare `Datastore` any more.
 		let datastore = Arc::new(datastore);

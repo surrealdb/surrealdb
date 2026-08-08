@@ -32,7 +32,10 @@ async fn define_statement_namespace() -> Result<()> {
 	let tmp = res.remove(0).result;
 	assert!(tmp.is_ok(), "{:?}", tmp);
 	//
-	let tmp = res.remove(0).result?;
+	let mut tmp = res.remove(0).result?;
+	// The `system` block holds live host metrics, so only its shape is compared
+	// — see `zero_volatile_system_block`.
+	zero_volatile_system_block(&mut tmp);
 	let val = syn::value(
 		"{
 			accesses: {},

@@ -63,16 +63,17 @@ mod tests {
 
 	#[tokio::test]
 	async fn refresh_populates_sync_snapshot_cache() {
-		// Cold cache: nothing has run yet, so the sync getter returns
-		// the all-zero default.
-		let cold = process_snapshot();
-		// CPU% may legitimately read zero on a quiet test thread, so
-		// we only assert the memory-bytes field which is always > 0
-		// for a running process.
-
-		// One refresh cycle should populate the sync atomics. After
-		// the await the synchronous getter must observe the same
-		// memory value the async refresh just returned.
+		// One refresh cycle must publish into the sync atomics: after the await
+		// the synchronous getter has to observe the same memory value the async
+		// refresh just returned. This is what the OTel observable-gauge
+		// callbacks read on the OTLP push path, and they have no async context
+		// of their own — if the hand-off regresses they report nothing.
+		//
+		// The two samples are compared for equality rather than for growth. The
+		// cache is process-wide, so a reading taken before the refresh is not
+		// guaranteed to be the zeroed default — anything else in this binary
+		// that built a datastore has already populated it — and two real RSS
+		// samples are not ordered.
 		let refreshed = refresh_process_snapshot().await;
 		assert!(refreshed.memory_bytes > 0, "sysinfo failed to read RSS");
 		let after = process_snapshot();
@@ -80,10 +81,5 @@ mod tests {
 			after.memory_bytes, refreshed.memory_bytes,
 			"sync cache did not pick up the async refresh result",
 		);
-		// Cold-state guard: the cache must transition strictly upward
-		// from (0, 0.0) to a populated reading. If this regresses, the
-		// background refresh task will not actually publish values to
-		// OTel observable-gauge callbacks on the OTLP push path.
-		assert!(after.memory_bytes >= cold.memory_bytes);
 	}
 }
