@@ -486,12 +486,12 @@ impl ExecOperator for Aggregate {
 				let mut group_key_columns: Vec<Vec<Value>> =
 					Vec::with_capacity(group_by_exprs.len());
 				for expr in &group_by_exprs {
-					let keys = match expr.evaluate_batch(eval_ctx.clone(), &batch.values).await {
+					let keys = match expr.evaluate_batch(eval_ctx.clone(), batch.values()).await {
 						Ok(v) => v,
 						Err(_) => {
 							// Fallback: evaluate per-row, replacing ignorable errors with None
-							let mut keys = Vec::with_capacity(batch.values.len());
-							for value in &batch.values {
+							let mut keys = Vec::with_capacity(batch.len());
+							for value in batch.values() {
 								let v =
 									expr.evaluate(eval_ctx.with_value(value)).await.or_none()?;
 								keys.push(v);
@@ -511,15 +511,15 @@ impl ExecOperator for Aggregate {
 						for extracted in &info.aggregates {
 							let col = match extracted
 								.argument_expr
-								.evaluate_batch(eval_ctx.clone(), &batch.values)
+								.evaluate_batch(eval_ctx.clone(), batch.values())
 								.await
 							{
 								Ok(v) => v,
 								Err(_) => {
 									// Fallback: evaluate per-row, replacing ignorable errors with
 									// None
-									let mut col = Vec::with_capacity(batch.values.len());
-									for value in &batch.values {
+									let mut col = Vec::with_capacity(batch.len());
+									for value in batch.values() {
 										let v = extracted
 											.argument_expr
 											.evaluate(eval_ctx.with_value(value))
@@ -563,7 +563,7 @@ impl ExecOperator for Aggregate {
 						} else if let Some(expr) = &agg.fallback_expr {
 							// Non-aggregate field - store first value
 							if state.first_values[field_idx].is_none()
-								&& let Some(first_value) = batch.values.first()
+								&& let Some(first_value) = batch.values().first()
 							{
 								match expr.evaluate(eval_ctx.with_value(first_value)).await {
 									Ok(field_value) => {
@@ -582,9 +582,9 @@ impl ExecOperator for Aggregate {
 					// key is a contiguous run in `key_rows`, so the probe borrows it
 					// and only clones when the row opens a new group.
 					let key_width = group_key_columns.len();
-					let key_rows = group_key_rows(&mut group_key_columns, batch.values.len());
+					let key_rows = group_key_rows(&mut group_key_columns, batch.len());
 
-					for (row_idx, value) in batch.values.iter().enumerate() {
+					for (row_idx, value) in batch.values().iter().enumerate() {
 						let key = &key_rows[row_idx * key_width..(row_idx + 1) * key_width];
 						let state = groups.entry_for_row(key, || {
 							create_group_state(&aggregates, &evaluated_extra_args)
@@ -649,11 +649,7 @@ impl ExecOperator for Aggregate {
 				results.push(result);
 			}
 
-			yielder
-				.emit(ValueBatch {
-					values: results,
-				})
-				.await;
+			yielder.emit(ValueBatch::new(results)).await;
 			Ok(())
 		});
 
@@ -1041,9 +1037,7 @@ mod tests {
 	}
 
 	fn batch(values: Vec<Value>) -> FlowResult<ValueBatch> {
-		Ok(ValueBatch {
-			values,
-		})
+		Ok(ValueBatch::new(values))
 	}
 
 	// =========================================================================
@@ -1503,7 +1497,7 @@ mod tests {
 	async fn group_all_first_value_fields_only_read_the_first_row_of_each_batch() {
 		let ctx = root_ctx();
 		// One batch whose first row lacks the field: the GROUP ALL path evaluates
-		// the first-value expression against `batch.values.first()` only, so the
+		// the first-value expression against `batch.values().first()` only, so the
 		// later row that does carry the field is never consulted for that batch.
 		let one_batch = ValuesOperator::new(rows(&["{ }", "{ label: 'second' }"]).await);
 		let op =

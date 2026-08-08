@@ -303,11 +303,7 @@ impl ExecOperator for FullTextScan {
 							.await?;
 							pipeline.process_batch(&mut values, &ctx).await?;
 							if !values.is_empty() {
-								yielder
-									.emit(ValueBatch {
-										values,
-									})
-									.await;
+								yielder.emit(ValueBatch::new(values)).await;
 							}
 							rid_batch.clear();
 						}
@@ -335,11 +331,7 @@ impl ExecOperator for FullTextScan {
 				.await?;
 				pipeline.process_batch(&mut values, &ctx).await?;
 				if !values.is_empty() {
-					yielder
-						.emit(ValueBatch {
-							values,
-						})
-						.await;
+					yielder.emit(ValueBatch::new(values)).await;
 				}
 			}
 			Ok(())

@@ -247,10 +247,10 @@ impl ExecOperator for Project {
 				let projected_values = if include_all {
 					// --- include_all path: per-row processing ---
 					// RecordId dereferencing and row-skipping requires per-row handling.
-					let mut values = Vec::with_capacity(batch.values.len());
+					let mut values = Vec::with_capacity(batch.len());
 					if fields.is_empty() && omit.is_empty() {
 						// Pure SELECT * — move values directly, no clone needed
-						for value in batch.values {
+						for value in batch.into_values() {
 							match value {
 								Value::RecordId(rid) => {
 									let fetched =
@@ -267,7 +267,7 @@ impl ExecOperator for Project {
 						// iteration while keeping the backing buffer.
 						let mut field_writes: Vec<(FieldPath, Value)> =
 							Vec::with_capacity(fields.len());
-						for value in batch.values {
+						for value in batch.into_values() {
 							// For RecordId inputs, resolve the target record FIRST.
 							// When the record is missing or resolves to a non-Object,
 							// field expressions must not run — field expressions can
@@ -327,7 +327,7 @@ impl ExecOperator for Project {
 					// --- Batch per-field evaluation for non-include_all ---
 					// Evaluate each field expression across all rows in one batch call,
 					// then assemble per-row objects from the results.
-					let batch_len = batch.values.len();
+					let batch_len = batch.len();
 					let mut objects: Vec<Object> =
 						(0..batch_len).map(|_| Object::default()).collect();
 
@@ -335,7 +335,7 @@ impl ExecOperator for Project {
 						if field.expr.is_projection_function() {
 							// Projection functions return multiple field bindings;
 							// handle per-row since they need special object assembly.
-							for (i, value) in batch.values.iter().enumerate() {
+							for (i, value) in batch.values().iter().enumerate() {
 								evaluate_and_set_field(
 									&mut objects[i],
 									field,
@@ -349,7 +349,7 @@ impl ExecOperator for Project {
 							// parallelize. For simple field accesses, the default
 							// sequential implementation is used.
 							let field_values =
-								field.expr.evaluate_batch(eval_ctx.clone(), &batch.values).await?;
+								field.expr.evaluate_batch(eval_ctx.clone(), batch.values()).await?;
 							for (i, field_value) in field_values.into_iter().enumerate() {
 								set_field_on_object(
 									&mut objects[i],
@@ -371,9 +371,7 @@ impl ExecOperator for Project {
 					values
 				};
 
-				Ok(ValueBatch {
-					values: projected_values,
-				})
+				Ok(ValueBatch::new(projected_values))
 			}
 		});
 
@@ -712,9 +710,9 @@ impl ExecOperator for SelectProject {
 
 			async move {
 				let batch = batch_result?;
-				let mut projected_values = Vec::with_capacity(batch.values.len());
+				let mut projected_values = Vec::with_capacity(batch.len());
 
-				for value in batch.values {
+				for value in batch.into_values() {
 					let is_record_id = matches!(&value, Value::RecordId(_));
 					let projected = apply_projections(value, &projections, &ctx).await?;
 					if is_record_id && matches!(&projected, Value::None) {
@@ -723,9 +721,7 @@ impl ExecOperator for SelectProject {
 					projected_values.push(projected);
 				}
 
-				Ok(ValueBatch {
-					values: projected_values,
-				})
+				Ok(ValueBatch::new(projected_values))
 			}
 		});
 

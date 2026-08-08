@@ -63,7 +63,7 @@ impl PhysicalExpr for ScalarSubquery {
 			let mut values = Vec::new();
 			while let Some(batch_result) = stream.next().await {
 				match batch_result {
-					Ok(batch) => values.extend(batch.values),
+					Ok(batch) => values.extend(batch.into_values()),
 					Err(ctrl) => return Err(ctrl),
 				}
 			}

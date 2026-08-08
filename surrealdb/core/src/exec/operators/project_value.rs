@@ -107,7 +107,7 @@ impl ExecOperator for ProjectValue {
 
 			async move {
 				let batch = batch_result?;
-				let mut values = batch.values;
+				let mut values = batch.into_values();
 
 				if !omit.is_empty() {
 					for value in &mut values {
@@ -124,9 +124,7 @@ impl ExecOperator for ProjectValue {
 				// are encountered (rare -- only from explicit RETURN
 				// statements in function bodies).
 				match expr.evaluate_batch(eval_ctx.clone(), &values).await {
-					Ok(projected_values) => Ok(ValueBatch {
-						values: projected_values,
-					}),
+					Ok(projected_values) => Ok(ValueBatch::new(projected_values)),
 					Err(ControlFlow::Return(_)) => {
 						let mut projected_values = Vec::with_capacity(values.len());
 						for value in &values {
@@ -136,9 +134,7 @@ impl ExecOperator for ProjectValue {
 								Err(e) => return Err(e),
 							}
 						}
-						Ok(ValueBatch {
-							values: projected_values,
-						})
+						Ok(ValueBatch::new(projected_values))
 					}
 					Err(e) => Err(e),
 				}

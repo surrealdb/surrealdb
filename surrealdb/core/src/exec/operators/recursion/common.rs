@@ -165,7 +165,7 @@ pub(crate) fn discover_body_targets<'a>(
 		let mut body_stream = body_op.execute(&body_ctx)?;
 		while let Some(batch_result) = body_stream.next().await {
 			let batch = batch_result?;
-			for v in batch.values {
+			for v in batch.into_values() {
 				collect_discovery_targets(v, &mut discovered)?;
 			}
 		}

@@ -202,7 +202,7 @@ impl ExecOperator for SortTopK {
 				let num_fields = order_by.len();
 				let mut key_columns: Vec<Vec<Value>> = Vec::with_capacity(num_fields);
 				for field in order_by.iter() {
-					let keys = field.expr.evaluate_batch(eval_ctx.clone(), &batch.values).await?;
+					let keys = field.expr.evaluate_batch(eval_ctx.clone(), batch.values()).await?;
 					key_columns.push(keys);
 				}
 
@@ -210,7 +210,7 @@ impl ExecOperator for SortTopK {
 				let mut key_iters: Vec<std::vec::IntoIter<Value>> =
 					key_columns.into_iter().map(|col| col.into_iter()).collect();
 
-				for value in batch.values {
+				for value in batch.into_values() {
 					let keys: Vec<Value> = key_iters
 						.iter_mut()
 						.map(|iter| iter.next().expect("key column length matches batch size"))
@@ -251,15 +251,13 @@ impl ExecOperator for SortTopK {
 			}
 			sorted.reverse();
 
-			Ok(ValueBatch {
-				values: sorted,
-			})
+			Ok(ValueBatch::new(sorted))
 		});
 
 		// Filter out empty batches
 		let filtered = sorted_stream.filter_map(|result| async move {
 			match result {
-				Ok(batch) if batch.values.is_empty() => None,
+				Ok(batch) if batch.is_empty() => None,
 				other => Some(other),
 			}
 		});
@@ -557,19 +555,17 @@ impl ExecOperator for SortTopKByKey {
 					Err(e) => return Err(e),
 				};
 
-				for value in batch.values {
+				for value in batch.into_values() {
 					acc.insert(value);
 				}
 			}
 
-			Ok(ValueBatch {
-				values: acc.into_sorted(),
-			})
+			Ok(ValueBatch::new(acc.into_sorted()))
 		});
 
 		let filtered = sorted_stream.filter_map(|result| async move {
 			match result {
-				Ok(batch) if batch.values.is_empty() => None,
+				Ok(batch) if batch.is_empty() => None,
 				other => Some(other),
 			}
 		});

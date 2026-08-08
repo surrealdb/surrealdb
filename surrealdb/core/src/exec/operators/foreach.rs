@@ -197,9 +197,7 @@ async fn execute_foreach(
 				}
 				Err(ControlFlow::Break) => {
 					// Exit the loop entirely
-					return Ok(ValueBatch {
-						values: vec![Value::None],
-					});
+					return Ok(ValueBatch::new(vec![Value::None]));
 				}
 				Err(ctrl) => {
 					// Propagate RETURN and errors upward
@@ -210,9 +208,7 @@ async fn execute_foreach(
 	}
 
 	// Loop completed normally - return NONE
-	Ok(ValueBatch {
-		values: vec![Value::None],
-	})
+	Ok(ValueBatch::new(vec![Value::None]))
 }
 
 impl ToSql for ForeachPlan {

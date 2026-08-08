@@ -87,7 +87,7 @@ impl PhysicalExpr for RecursePart {
 			while let Some(batch_result) = stream.next().await {
 				let batch = batch_result?;
 				// RecursionOp yields a single batch with the recursion result
-				if let Some(v) = batch.values.into_iter().next() {
+				if let Some(v) = batch.into_iter().next() {
 					result = v;
 				}
 			}

@@ -204,10 +204,10 @@ impl ExecOperator for EndpointBind {
 				// back to. Rows whose edge binding is missing / not a record /
 				// label-mismatched never enter `targets_to_fetch` and so are
 				// dropped here.
-				let mut targets_to_fetch: Vec<RecordId> = Vec::with_capacity(batch.values.len());
-				let mut row_positions: Vec<usize> = Vec::with_capacity(batch.values.len());
+				let mut targets_to_fetch: Vec<RecordId> = Vec::with_capacity(batch.len());
+				let mut row_positions: Vec<usize> = Vec::with_capacity(batch.len());
 
-				for (i, row) in batch.values.iter().enumerate() {
+				for (i, row) in batch.values().iter().enumerate() {
 					match extract_endpoint_id(row, &edge, field) {
 						Some(rid) => {
 							// Apply the target_label filter before fetching.
@@ -243,16 +243,12 @@ impl ExecOperator for EndpointBind {
 					let Some(target_value) = target_value else {
 						continue;
 					};
-					let input_row = &batch.values[row_positions[slot]];
+					let input_row = &batch.values()[row_positions[slot]];
 					out.push(bound_row(input_row, &target_binding, target_value));
 				}
 
 				if !out.is_empty() {
-					yielder
-						.emit(ValueBatch {
-							values: out,
-						})
-						.await;
+					yielder.emit(ValueBatch::new(out)).await;
 				}
 			}
 			Ok(())

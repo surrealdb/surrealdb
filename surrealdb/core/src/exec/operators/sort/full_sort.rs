@@ -162,15 +162,13 @@ impl ExecOperator for Sort {
 					)));
 				}
 				match batch_result {
-					Ok(batch) => all_values.extend(batch.values),
+					Ok(batch) => all_values.extend(batch.into_values()),
 					Err(e) => return Err(e),
 				}
 			}
 
 			if all_values.is_empty() {
-				return Ok(ValueBatch {
-					values: vec![],
-				});
+				return Ok(ValueBatch::empty());
 			}
 
 			// Pre-compute sort keys using per-field batch evaluation
@@ -201,15 +199,13 @@ impl ExecOperator for Sort {
 			// Sort the keyed values
 			let sorted = sort_keyed_values(keyed, order_by).await?;
 
-			Ok(ValueBatch {
-				values: sorted,
-			})
+			Ok(ValueBatch::new(sorted))
 		});
 
 		// Filter out empty batches
 		let filtered = sorted_stream.filter_map(|result| async move {
 			match result {
-				Ok(batch) if batch.values.is_empty() => None,
+				Ok(batch) if batch.is_empty() => None,
 				other => Some(other),
 			}
 		});
@@ -358,29 +354,25 @@ impl ExecOperator for SortByKey {
 					)));
 				}
 				match batch_result {
-					Ok(batch) => all_values.extend(batch.values),
+					Ok(batch) => all_values.extend(batch.into_values()),
 					Err(e) => return Err(e),
 				}
 			}
 
 			if all_values.is_empty() {
-				return Ok(ValueBatch {
-					values: vec![],
-				});
+				return Ok(ValueBatch::empty());
 			}
 
 			// Sort by extracting field values (no expression evaluation)
 			let sorted = sort_by_keys(all_values, sort_keys).await?;
 
-			Ok(ValueBatch {
-				values: sorted,
-			})
+			Ok(ValueBatch::new(sorted))
 		});
 
 		// Filter out empty batches
 		let filtered = sorted_stream.filter_map(|result| async move {
 			match result {
-				Ok(batch) if batch.values.is_empty() => None,
+				Ok(batch) if batch.is_empty() => None,
 				other => Some(other),
 			}
 		});

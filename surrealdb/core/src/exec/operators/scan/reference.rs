@@ -196,7 +196,6 @@ impl ExecOperator for ReferenceScan {
 			while let Some(batch_result) = input_stream.next().await {
 				let batch = batch_result?;
 				let target_rids: Vec<RecordId> = batch
-					.values
 					.into_iter()
 					.flat_map(|v| {
 						let mut rids = Vec::new();
@@ -268,11 +267,7 @@ impl ExecOperator for ReferenceScan {
 								&mut perm_cache,
 							)
 							.await?;
-							yielder
-								.emit(ValueBatch {
-									values,
-								})
-								.await;
+							yielder.emit(ValueBatch::new(values)).await;
 							rid_batch.clear();
 						}
 					}
@@ -294,11 +289,7 @@ impl ExecOperator for ReferenceScan {
 					&mut perm_cache,
 				)
 				.await?;
-				yielder
-					.emit(ValueBatch {
-						values,
-					})
-					.await;
+				yielder.emit(ValueBatch::new(values)).await;
 			}
 			Ok(())
 		});

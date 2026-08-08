@@ -75,9 +75,9 @@ impl ExecOperator for Split {
 			let idioms = idioms.clone();
 			match batch_result {
 				Ok(batch) => {
-					let mut expanded_values = Vec::with_capacity(batch.values.len() * idioms.len());
+					let mut expanded_values = Vec::with_capacity(batch.len() * idioms.len());
 
-					for value in batch.values {
+					for value in batch.into_values() {
 						// Split this value on all idioms sequentially
 						let mut current_values = vec![value];
 
@@ -92,9 +92,7 @@ impl ExecOperator for Split {
 						expanded_values.extend(current_values);
 					}
 
-					Ok(ValueBatch {
-						values: expanded_values,
-					})
+					Ok(ValueBatch::new(expanded_values))
 				}
 				Err(e) => Err(e),
 			}

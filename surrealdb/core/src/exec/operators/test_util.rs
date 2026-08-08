@@ -85,9 +85,7 @@ impl ExecOperator for ValuesOperator {
 
 	fn execute(&self, _ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let values = self.values.clone();
-		Ok(Box::pin(futures::stream::once(std::future::ready(Ok(ValueBatch {
-			values,
-		})))))
+		Ok(Box::pin(futures::stream::once(std::future::ready(Ok(ValueBatch::new(values))))))
 	}
 }
 
@@ -133,7 +131,7 @@ pub(crate) async fn collect(op: &Arc<dyn ExecOperator>, ctx: &ExecutionContext) 
 	let mut stream = op.execute(ctx).expect("execute should succeed");
 	let mut out = Vec::new();
 	while let Some(batch) = stream.next().await {
-		out.extend(batch.expect("batch should be Ok").values);
+		out.extend(batch.expect("batch should be Ok").into_values());
 	}
 	out
 }
@@ -148,7 +146,7 @@ pub(crate) async fn try_collect(
 	let mut stream = op.execute(ctx)?;
 	let mut out = Vec::new();
 	while let Some(batch) = stream.next().await {
-		out.extend(batch?.values);
+		out.extend(batch?.into_values());
 	}
 	Ok(out)
 }
@@ -376,7 +374,7 @@ pub(crate) async fn drain_err(op: &impl ExecOperator, ctx: &ExecutionContext) ->
 		Err(ctrl) => return unwrap(ctrl),
 	};
 	match stream.next().await {
-		Some(Ok(batch)) => panic!("expected an error, got rows: {:?}", batch.values),
+		Some(Ok(batch)) => panic!("expected an error, got rows: {:?}", batch.values()),
 		Some(Err(ctrl)) => unwrap(ctrl),
 		None => panic!("expected an error, got an empty stream"),
 	}

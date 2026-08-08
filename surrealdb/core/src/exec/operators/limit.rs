@@ -173,25 +173,25 @@ impl ExecOperator for Limit {
 
 				// Apply offset - skip values until we've skipped enough
 				if skipped < offset {
-					let to_skip = (offset - skipped).min(batch.values.len());
+					let to_skip = (offset - skipped).min(batch.len());
 					skipped += to_skip;
-					if to_skip >= batch.values.len() {
+					if to_skip >= batch.len() {
 						// Entire batch is within the offset window, skip it
 						continue;
 					}
 					// Remove the prefix in-place (single memmove, no allocation)
-					batch.values.drain(..to_skip);
+					batch.values_mut().drain(..to_skip);
 				}
 
 				// Apply limit - truncate is a no-op when len <= remaining
 				if let Some(limit) = limit_value {
-					batch.values.truncate(limit.saturating_sub(emitted));
+					batch.values_mut().truncate(limit.saturating_sub(emitted));
 				}
 
-				emitted += batch.values.len();
+				emitted += batch.len();
 
 				// Only emit non-empty batches
-				if !batch.values.is_empty() {
+				if !batch.is_empty() {
 					yielder.emit(batch).await;
 				}
 

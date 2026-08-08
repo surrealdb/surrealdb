@@ -132,7 +132,7 @@ impl ExecOperator for Compute {
 				let batch = batch_result?;
 				let eval_ctx = EvalContext::from_exec_ctx(&ctx);
 
-				compute_batch(batch.values, &fields, eval_ctx).await
+				compute_batch(batch.into_values(), &fields, eval_ctx).await
 			}
 		});
 
@@ -235,9 +235,7 @@ async fn compute_batch(
 		}
 	}
 
-	Ok(ValueBatch {
-		values: objects.into_iter().map(Value::Object).collect(),
-	})
+	Ok(ValueBatch::new(objects.into_iter().map(Value::Object).collect()))
 }
 
 #[cfg(test)]

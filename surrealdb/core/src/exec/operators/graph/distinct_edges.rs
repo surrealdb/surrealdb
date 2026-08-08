@@ -109,17 +109,13 @@ impl ExecOperator for DistinctEdges {
 				crate::exec::operators::check_cancelled(&ctx)?;
 				let batch = batch_result?;
 				let mut values = Vec::new();
-				for value in batch.values {
+				for value in batch.into_values() {
 					if row_has_distinct_edges(&value, &edge_bindings) {
 						values.push(value);
 					}
 				}
 				if !values.is_empty() {
-					yielder
-						.emit(ValueBatch {
-							values,
-						})
-						.await;
+					yielder.emit(ValueBatch::new(values)).await;
 				}
 			}
 			Ok(())

@@ -236,7 +236,7 @@ impl ExecOperator for KnnTopK {
 					Err(e) => return Err(e),
 				};
 
-				for value in batch.values {
+				for value in batch.into_values() {
 					// Extract the vector field from the record
 					let record_vec = match extract_vector(&value, &field) {
 						Some(v) => v,
@@ -297,15 +297,13 @@ impl ExecOperator for KnnTopK {
 
 			let sorted: Vec<Value> = entries.into_iter().map(|e| e.value).collect();
 
-			Ok(ValueBatch {
-				values: sorted,
-			})
+			Ok(ValueBatch::new(sorted))
 		});
 
 		// Filter out empty batches
 		let filtered = result_stream.filter_map(|result| async move {
 			match result {
-				Ok(batch) if batch.values.is_empty() => None,
+				Ok(batch) if batch.is_empty() => None,
 				other => Some(other),
 			}
 		});

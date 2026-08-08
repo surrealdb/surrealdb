@@ -93,9 +93,7 @@ impl ExecOperator for IndexInfoPlan {
 
 		Ok(Box::pin(stream::once(async move {
 			let value = execute_index_info(&ctx, &*index, &*table).await?;
-			Ok(ValueBatch {
-				values: vec![value],
-			})
+			Ok(ValueBatch::new(vec![value]))
 		})))
 	}
 

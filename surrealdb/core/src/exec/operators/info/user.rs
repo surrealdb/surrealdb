@@ -102,9 +102,7 @@ impl ExecOperator for UserInfoPlan {
 
 		Ok(Box::pin(stream::once(async move {
 			let value = execute_user_info(&ctx, &*user, base, structured).await?;
-			Ok(ValueBatch {
-				values: vec![value],
-			})
+			Ok(ValueBatch::new(vec![value]))
 		})))
 	}
 

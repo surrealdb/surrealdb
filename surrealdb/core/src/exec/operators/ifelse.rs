@@ -150,23 +150,17 @@ async fn execute_ifelse(
 
 		if cond_value.is_truthy() {
 			let result = evaluate_expr_at_depth(body, ctx, depth).await?;
-			return Ok(ValueBatch {
-				values: vec![result],
-			});
+			return Ok(ValueBatch::new(vec![result]));
 		}
 	}
 
 	// No branch matched - check for else body
 	if let Some(else_expr) = else_body {
 		let result = evaluate_expr_at_depth(else_expr, ctx, depth).await?;
-		Ok(ValueBatch {
-			values: vec![result],
-		})
+		Ok(ValueBatch::new(vec![result]))
 	} else {
 		// No else - return NONE
-		Ok(ValueBatch {
-			values: vec![Value::None],
-		})
+		Ok(ValueBatch::new(vec![Value::None]))
 	}
 }
 

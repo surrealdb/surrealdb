@@ -272,9 +272,7 @@ fn make_count_batch(count: usize, field_names: &[String]) -> ValueBatch {
 	for name in field_names {
 		obj.insert(name.clone(), count_val.clone());
 	}
-	ValueBatch {
-		values: vec![Value::Object(obj)],
-	}
+	ValueBatch::new(vec![Value::Object(obj)])
 }
 
 /// Count records in a record-id range using `txn.count()`.

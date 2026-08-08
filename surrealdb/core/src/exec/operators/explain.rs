@@ -72,9 +72,7 @@ impl ExecOperator for ExplainPlan {
 			}
 		};
 
-		Ok(Box::pin(futures::stream::once(std::future::ready(Ok(ValueBatch {
-			values: vec![output],
-		})))))
+		Ok(Box::pin(futures::stream::once(std::future::ready(Ok(ValueBatch::new(vec![output]))))))
 	}
 
 	fn output_shape(&self) -> OutputShape {
@@ -157,7 +155,7 @@ impl ExecOperator for AnalyzePlan {
 			while let Some(batch_result) = inner_stream.next().await {
 				match batch_result {
 					Ok(batch) => {
-						total_rows += batch.values.len() as u64;
+						total_rows += batch.len() as u64;
 					}
 					// Flow control signals mean the inner plan stopped early.
 					// Stop draining and format the metrics we've collected so far.
@@ -191,11 +189,7 @@ impl ExecOperator for AnalyzePlan {
 				}
 			};
 
-			yielder
-				.emit(ValueBatch {
-					values: vec![output],
-				})
-				.await;
+			yielder.emit(ValueBatch::new(vec![output])).await;
 			Ok(())
 		});
 
@@ -220,6 +214,14 @@ fn format_execution_plan(plan: &dyn ExecOperator, output: &mut String, prefix: &
 	// Show context level
 	let context = plan.required_context();
 	let _ = write!(output, "{} [ctx: {}]", name, context.short_name());
+
+	// Show the output partitioning only when the operator produces more than one
+	// stream, so a plan built entirely from single-partition operators renders
+	// exactly as it did before partitioning existed.
+	let partitioning = plan.output_partitioning();
+	if !partitioning.is_single() {
+		let _ = write!(output, " [partitions: {}]", partitioning.count());
+	}
 
 	// Show properties if any
 	if !properties.is_empty() {
@@ -269,6 +271,13 @@ fn format_execution_plan_json(plan: &dyn ExecOperator) -> Object {
 	obj.insert("operator", Value::String(plan.name().into()));
 
 	obj.insert("context", Value::String(plan.required_context().short_name().into()));
+
+	// Emitted only when the operator produces more than one stream, so a plan of
+	// single-partition operators renders the same keys it always did.
+	let partitioning = plan.output_partitioning();
+	if !partitioning.is_single() {
+		obj.insert("partitions", Value::from(partitioning.count() as i64));
+	}
 
 	let attrs = plan.attrs();
 	if !attrs.is_empty() {
@@ -382,6 +391,14 @@ fn format_analyze_plan(
 	let context = plan.required_context();
 	let _ = write!(output, "{} [ctx: {}]", name, context.short_name());
 
+	// Show the output partitioning only when the operator produces more than one
+	// stream, so a plan built entirely from single-partition operators renders
+	// exactly as it did before partitioning existed.
+	let partitioning = plan.output_partitioning();
+	if !partitioning.is_single() {
+		let _ = write!(output, " [partitions: {}]", partitioning.count());
+	}
+
 	// Show properties if any
 	if !properties.is_empty() {
 		let _ = write!(output, " [");
@@ -445,6 +462,13 @@ fn format_analyze_plan_json(
 	obj.insert("operator", Value::String(plan.name().into()));
 
 	obj.insert("context", Value::String(plan.required_context().short_name().into()));
+
+	// Emitted only when the operator produces more than one stream, so a plan of
+	// single-partition operators renders the same keys it always did.
+	let partitioning = plan.output_partitioning();
+	if !partitioning.is_single() {
+		obj.insert("partitions", Value::from(partitioning.count() as i64));
+	}
 
 	let attrs = plan.attrs();
 	if !attrs.is_empty() {

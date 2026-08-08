@@ -42,13 +42,13 @@ use futures::Stream;
 use crate::exe::FlowResultExt;
 // Re-export FlowResult, FlowResultExt, and ControlFlowExt for operator implementations
 pub(crate) use crate::expr::{ControlFlowExt, FlowResult};
-use crate::val::Value;
 
 /// A boxed `Send` future, used at trait boundaries to keep async state
 /// machines from inflating the parent future.
 pub(crate) type BoxFut<'a, T> = Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
 
 pub(crate) mod access_mode;
+pub(crate) mod batch;
 pub(crate) mod buffer;
 pub(crate) mod cardinality;
 pub(crate) mod config;
@@ -63,6 +63,7 @@ pub(crate) mod metrics;
 pub(crate) mod object_extract;
 pub(crate) mod operators;
 pub(crate) mod ordering;
+pub(crate) mod partitioning;
 pub(crate) mod parts;
 pub(crate) mod permission;
 pub(crate) mod physical_expr;
@@ -73,6 +74,8 @@ pub(crate) mod topk_pushdown;
 
 // Re-export access mode types
 pub(crate) use access_mode::{AccessMode, CombineAccessModes};
+// Re-export the operator data unit
+pub(crate) use batch::ValueBatch;
 // Re-export buffer helper
 pub(crate) use buffer::buffer_stream;
 // Re-export cardinality hint
@@ -84,6 +87,8 @@ pub(crate) use error::Error;
 pub(crate) use metrics::{OperatorMetrics, monitor_stream};
 // Re-export ordering types
 pub(crate) use ordering::OutputOrdering;
+// Re-export the output-partitioning property
+pub(crate) use partitioning::Partitioning;
 // Re-export physical expression types
 pub(crate) use physical_expr::{EvalContext, PhysicalExpr};
 
@@ -112,21 +117,6 @@ impl OutputShape {
 	pub(crate) fn is_scalar(self) -> bool {
 		matches!(self, OutputShape::Scalar)
 	}
-}
-
-/// A batch of values returned by an execution plan.
-///
-/// Idea: In the future, this could become an `enum` to support columnar execution as well:
-/// ```rust
-/// enum ValueBatch {
-///     Values(Vec<Value>),
-///     Columnar(arrow::RecordBatch),
-/// }
-/// ```
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-pub struct ValueBatch {
-	pub(crate) values: Vec<Value>,
 }
 
 pub(crate) type ValueBatchStream = Pin<Box<dyn Stream<Item = FlowResult<ValueBatch>> + Send>>;
@@ -230,6 +220,21 @@ pub(crate) trait ExecOperator: Debug + Send + Sync {
 	/// Override in leaf operators with known small cardinality.
 	fn cardinality_hint(&self) -> CardinalityHint {
 		CardinalityHint::Unbounded
+	}
+
+	/// How this operator's output is divided across parallel streams.
+	///
+	/// The default is [`Partitioning::Single`]: one stream carrying every row,
+	/// which is what every operator produces. An operator that passes rows
+	/// through unchanged should delegate to its input, the way it delegates
+	/// [`output_ordering`](Self::output_ordering); an operator that must see
+	/// every row together must declare `Single` and merge its input rather than
+	/// let a partial view reach anything downstream.
+	///
+	/// Only a `ReadOnly` subtree may ever be partitioned; see
+	/// [`Partitioning`] for why a write cannot be.
+	fn output_partitioning(&self) -> Partitioning {
+		Partitioning::Single
 	}
 
 	/// The shape this operator's output takes when it is a statement's result.

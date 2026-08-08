@@ -344,9 +344,9 @@ impl ExecOperator for Expand {
 			while let Some(batch_result) = input_stream.next().await {
 				crate::exec::operators::check_cancelled(&ctx)?;
 				let batch = batch_result?;
-				let mut out: Vec<Value> = Vec::with_capacity(batch.values.len());
+				let mut out: Vec<Value> = Vec::with_capacity(batch.len());
 
-				for row in batch.values {
+				for row in batch.into_values() {
 					match extract_source_id(&row, &source) {
 						SourceId::Found(rid) => {
 							expand_row(
@@ -399,11 +399,7 @@ impl ExecOperator for Expand {
 				}
 
 				if !out.is_empty() {
-					yielder
-						.emit(ValueBatch {
-							values: out,
-						})
-						.await;
+					yielder.emit(ValueBatch::new(out)).await;
 				}
 			}
 			Ok(())

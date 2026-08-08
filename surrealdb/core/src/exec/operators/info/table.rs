@@ -107,9 +107,7 @@ impl ExecOperator for TableInfoPlan {
 
 		Ok(Box::pin(stream::once(async move {
 			let value = execute_table_info(&ctx, &*table, structured, version.as_deref()).await?;
-			Ok(ValueBatch {
-				values: vec![value],
-			})
+			Ok(ValueBatch::new(vec![value]))
 		})))
 	}
 

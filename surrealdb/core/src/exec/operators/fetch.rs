@@ -121,16 +121,14 @@ impl ExecOperator for Fetch {
 
 			async move {
 				let batch = batch_result?;
-				let mut fetched_values = Vec::with_capacity(batch.values.len());
+				let mut fetched_values = Vec::with_capacity(batch.len());
 
-				for value in batch.values {
+				for value in batch.into_values() {
 					let fetched = fetch_fields(&ctx, value, &fields).await?;
 					fetched_values.push(fetched);
 				}
 
-				Ok(ValueBatch {
-					values: fetched_values,
-				})
+				Ok(ValueBatch::new(fetched_values))
 			}
 		});
 

@@ -110,7 +110,7 @@ impl ExecOperator for Filter {
 				}
 
 				// Only emit non-empty batches
-				if batch.values.is_empty() {
+				if batch.is_empty() {
 					None
 				} else {
 					Some(Ok(batch))
@@ -129,17 +129,17 @@ async fn filter_batch_in_place(
 	exec_ctx: &ExecutionContext,
 ) -> FlowResult<()> {
 	let eval_ctx = EvalContext::from_exec_ctx(exec_ctx);
-	let results = predicate.evaluate_batch(eval_ctx, &batch.values).await?;
+	let results = predicate.evaluate_batch(eval_ctx, batch.values()).await?;
 
 	let mut write_idx = 0;
 	for (read_idx, result) in results.into_iter().enumerate() {
 		if result.is_truthy() {
 			if write_idx != read_idx {
-				batch.values.swap(write_idx, read_idx);
+				batch.values_mut().swap(write_idx, read_idx);
 			}
 			write_idx += 1;
 		}
 	}
-	batch.values.truncate(write_idx);
+	batch.values_mut().truncate(write_idx);
 	Ok(())
 }

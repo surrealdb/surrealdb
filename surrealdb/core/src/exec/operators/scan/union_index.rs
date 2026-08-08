@@ -467,7 +467,7 @@ impl ExecOperator for UnionIndexScan {
 				for stream in &mut sub_streams {
 					if let Some(batch_result) = stream.next().await {
 						let batch: ValueBatch = batch_result?;
-						buffers.push(batch.values);
+						buffers.push(batch.into_values());
 						positions.push(0);
 					} else {
 						buffers.push(Vec::new());
@@ -541,7 +541,7 @@ impl ExecOperator for UnionIndexScan {
 						positions[idx] = 0;
 						if let Some(batch_result) = sub_streams[idx].next().await {
 							let batch: ValueBatch = batch_result?;
-							buffers[idx] = batch.values;
+							buffers[idx] = batch.into_values();
 						}
 					}
 
@@ -572,11 +572,7 @@ impl ExecOperator for UnionIndexScan {
 					let mut batch = vec![value];
 					let cont = pipeline.process_batch(&mut batch, &ctx).await?;
 					if !batch.is_empty() {
-						yielder
-							.emit(ValueBatch {
-								values: batch,
-							})
-							.await;
+						yielder.emit(ValueBatch::new(batch)).await;
 					}
 					if !cont {
 						return Ok(());
@@ -594,7 +590,6 @@ impl ExecOperator for UnionIndexScan {
 
 						let batch: ValueBatch = batch_result?;
 						let mut deduped: Vec<Value> = batch
-							.values
 							.into_iter()
 							.filter(|v| match extract_rid(v) {
 								Some(rid) => seen.insert(rid),
@@ -606,11 +601,7 @@ impl ExecOperator for UnionIndexScan {
 							// Apply permission pipeline (computed fields, field permissions)
 							let cont = pipeline.process_batch(&mut deduped, &ctx).await?;
 							if !deduped.is_empty() {
-								yielder
-									.emit(ValueBatch {
-										values: deduped,
-									})
-									.await;
+								yielder.emit(ValueBatch::new(deduped)).await;
 							}
 							if !cont {
 								return Ok(());

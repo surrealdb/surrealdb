@@ -104,9 +104,7 @@ impl ExecOperator for DatabaseInfoPlan {
 
 		Ok(Box::pin(stream::once(async move {
 			let value = execute_database_info(&ctx, structured, version.as_deref()).await?;
-			Ok(ValueBatch {
-				values: vec![value],
-			})
+			Ok(ValueBatch::new(vec![value]))
 		})))
 	}
 

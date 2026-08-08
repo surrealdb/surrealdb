@@ -23,7 +23,7 @@ use crate::exec::pre_decode_filter::{PreDecodeFilterStatus, pre_decode_filter_fo
 use crate::exec::topk_pushdown::{TopKPushdownStatus, topk_probe_for_execute};
 use crate::exec::{
 	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
-	OutputOrdering, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	OutputOrdering, PhysicalExpr, ValueBatchStream, monitor_stream,
 };
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::iam::Action;
@@ -319,13 +319,9 @@ impl ExecOperator for TableScan {
 						Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)))?;
 					}
 					let mut batch = batch_result?;
-					let cont = pipeline.process_batch(&mut batch.values, &ctx).await?;
-					if !batch.values.is_empty() {
-						yielder
-							.emit(ValueBatch {
-								values: batch.values,
-							})
-							.await;
+					let cont = pipeline.process_batch(batch.values_mut(), &ctx).await?;
+					if !batch.is_empty() {
+						yielder.emit(batch).await;
 					}
 					if !cont {
 						break;

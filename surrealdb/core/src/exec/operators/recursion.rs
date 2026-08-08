@@ -296,9 +296,7 @@ impl ExecOperator for RecursionOp {
 				}
 			};
 
-			Ok(ValueBatch {
-				values: vec![result],
-			})
+			Ok(ValueBatch::new(vec![result]))
 		};
 
 		Ok(monitor_stream(Box::pin(stream::once(fut)), "Recurse", &metrics))

@@ -114,11 +114,7 @@ impl ExecOperator for LetPlan {
 
 	fn execute(&self, _ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		// LET returns NONE as its result (the binding happens in output_context)
-		Ok(Box::pin(stream::once(async {
-			Ok(crate::exec::ValueBatch {
-				values: vec![Value::None],
-			})
-		})))
+		Ok(Box::pin(stream::once(async { Ok(crate::exec::ValueBatch::new(vec![Value::None])) })))
 	}
 
 	fn mutates_context(&self) -> bool {
@@ -316,9 +312,7 @@ mod tests {
 
 			let mut items: Vec<FlowResult<ValueBatch>> = Vec::new();
 			if !self.rows.is_empty() {
-				items.push(Ok(ValueBatch {
-					values: self.rows.clone(),
-				}));
+				items.push(Ok(ValueBatch::new(self.rows.clone())));
 			}
 			if let Some(signal) = self.signal {
 				items.push(Err(signal.build()));

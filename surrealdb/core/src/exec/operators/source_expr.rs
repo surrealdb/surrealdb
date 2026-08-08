@@ -103,11 +103,7 @@ impl ExecOperator for SourceExpr {
 						super::fetch::batch_fetch_in_place(&ctx, &mut values).await?;
 						values.retain(|v| !matches!(v, Value::None | Value::Null));
 						if !values.is_empty() {
-							yielder
-								.emit(ValueBatch {
-									values,
-								})
-								.await;
+							yielder.emit(ValueBatch::new(values)).await;
 						}
 					}
 				}
@@ -115,19 +111,11 @@ impl ExecOperator for SourceExpr {
 				Value::RecordId(ref rid) => {
 					let fetched = super::fetch::fetch_record(&ctx, rid).await?;
 					if !matches!(fetched, Value::None) {
-						yielder
-							.emit(ValueBatch {
-								values: vec![fetched],
-							})
-							.await;
+						yielder.emit(ValueBatch::new(vec![fetched])).await;
 					}
 				}
 				other => {
-					yielder
-						.emit(ValueBatch {
-							values: vec![other],
-						})
-						.await;
+					yielder.emit(ValueBatch::new(vec![other])).await;
 				}
 			}
 			Ok(())

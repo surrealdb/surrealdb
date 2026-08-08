@@ -478,7 +478,7 @@ impl ExecOperator for PathExpand {
 			while let Some(batch_result) = input_stream.next().await {
 				crate::exec::operators::check_cancelled(&ctx)?;
 				let batch = batch_result?;
-				for row in batch.values {
+				for row in batch.into_values() {
 					// Drop rows whose source is absent / not a record id.
 					let Some(source_rid) = source_record_id(&row, &source) else {
 						debug!(
@@ -518,11 +518,7 @@ impl ExecOperator for PathExpand {
 						);
 						out.push(assembled);
 						if out.len() >= scan_batch_size {
-							yielder
-								.emit(ValueBatch {
-									values: std::mem::take(&mut out),
-								})
-								.await;
+							yielder.emit(ValueBatch::new(std::mem::take(&mut out))).await;
 							out = Vec::with_capacity(scan_batch_size);
 						}
 					}
@@ -679,11 +675,7 @@ impl ExecOperator for PathExpand {
 								);
 								out.push(assembled);
 								if out.len() >= scan_batch_size {
-									yielder
-										.emit(ValueBatch {
-											values: std::mem::take(&mut out),
-										})
-										.await;
+									yielder.emit(ValueBatch::new(std::mem::take(&mut out))).await;
 									out = Vec::with_capacity(scan_batch_size);
 								}
 							}
@@ -714,11 +706,7 @@ impl ExecOperator for PathExpand {
 			}
 
 			if !out.is_empty() {
-				yielder
-					.emit(ValueBatch {
-						values: out,
-					})
-					.await;
+				yielder.emit(ValueBatch::new(out)).await;
 			}
 			Ok(())
 		});

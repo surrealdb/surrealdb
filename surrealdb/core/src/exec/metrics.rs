@@ -196,7 +196,7 @@ impl Stream for MetricsStream {
 
 		match &result {
 			Poll::Ready(Some(Ok(batch))) => {
-				let rows = batch.values.len() as u64;
+				let rows = batch.len() as u64;
 				span.record("size", rows);
 				this.metrics.record_batch(rows, delta);
 				this.batch_idx += 1;

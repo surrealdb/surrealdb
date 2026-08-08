@@ -426,11 +426,7 @@ impl ExecOperator for IndexScan {
 						let cont = pipeline.process_batch(&mut values, &ctx).await?;
 
 						if !values.is_empty() {
-							yielder
-								.emit(ValueBatch {
-									values,
-								})
-								.await;
+							yielder.emit(ValueBatch::new(values)).await;
 						}
 						if !cont {
 							break;
@@ -471,11 +467,7 @@ impl ExecOperator for IndexScan {
 						let cont = pipeline.process_batch(&mut values, &ctx).await?;
 
 						if !values.is_empty() {
-							yielder
-								.emit(ValueBatch {
-									values,
-								})
-								.await;
+							yielder.emit(ValueBatch::new(values)).await;
 						}
 						if !cont {
 							break;
@@ -532,11 +524,7 @@ impl ExecOperator for IndexScan {
 						let cont = pipeline.process_batch(&mut values, &ctx).await?;
 
 						if !values.is_empty() {
-							yielder
-								.emit(ValueBatch {
-									values,
-								})
-								.await;
+							yielder.emit(ValueBatch::new(values)).await;
 						}
 						if !cont {
 							break;
@@ -586,11 +574,7 @@ impl ExecOperator for IndexScan {
 						let cont = pipeline.process_batch(&mut values, &ctx).await?;
 
 						if !values.is_empty() {
-							yielder
-								.emit(ValueBatch {
-									values,
-								})
-								.await;
+							yielder.emit(ValueBatch::new(values)).await;
 						}
 						if !cont {
 							break;
@@ -677,11 +661,7 @@ impl ExecOperator for IndexScan {
 						let cont = pipeline.process_batch(&mut values, &ctx).await?;
 
 						if !values.is_empty() {
-							yielder
-								.emit(ValueBatch {
-									values,
-								})
-								.await;
+							yielder.emit(ValueBatch::new(values)).await;
 						}
 						if !cont || remaining == 0 {
 							break;
@@ -768,11 +748,7 @@ impl ExecOperator for IndexScan {
 						let cont = pipeline.process_batch(&mut values, &ctx).await?;
 
 						if !values.is_empty() {
-							yielder
-								.emit(ValueBatch {
-									values,
-								})
-								.await;
+							yielder.emit(ValueBatch::new(values)).await;
 						}
 						if !cont || remaining == 0 {
 							break;

@@ -66,11 +66,7 @@ impl ExecOperator for CurrentValueSource {
 		let value = ctx.current_value().cloned().unwrap_or(Value::None);
 
 		Ok(monitor_stream(
-			Box::pin(stream::once(async move {
-				Ok(ValueBatch {
-					values: vec![value],
-				})
-			})),
+			Box::pin(stream::once(async move { Ok(ValueBatch::new(vec![value])) })),
 			"CurrentValueSource",
 			&self.metrics,
 		))

@@ -222,7 +222,7 @@ async fn evaluate_lookup_for_value(
 				anyhow::anyhow!("Unexpected continue in lookup")
 			}
 		})?;
-		results.extend(batch.values);
+		results.extend(batch.into_values());
 	}
 
 	// When extract_id is set, the scan used FullEdge mode for WHERE/SPLIT filtering

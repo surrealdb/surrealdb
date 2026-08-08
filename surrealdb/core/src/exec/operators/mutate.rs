@@ -112,7 +112,7 @@ impl ExecOperator for UpdateBinding {
 			let mut rows = Vec::new();
 			while let Some(batch) = input_stream.next().await {
 				check_cancelled(&ctx)?;
-				rows.extend(batch?.values);
+				rows.extend(batch?.into_values());
 			}
 			let mut out = Vec::with_capacity(rows.len());
 			// Apply per row, in textual row order: a row-scoped value (`SET a.x =
@@ -128,11 +128,7 @@ impl ExecOperator for UpdateBinding {
 				}
 				out.push(row);
 			}
-			yielder
-				.emit(ValueBatch {
-					values: out,
-				})
-				.await;
+			yielder.emit(ValueBatch::new(out)).await;
 			Ok(())
 		});
 
@@ -222,7 +218,7 @@ impl ExecOperator for DeleteBinding {
 			let mut rows = Vec::new();
 			while let Some(batch) = input_stream.next().await {
 				check_cancelled(&ctx)?;
-				rows.extend(batch?.values);
+				rows.extend(batch?.into_values());
 			}
 			let mut out = Vec::with_capacity(rows.len());
 			// Apply per row, in textual row order. A fan-out can bind the SAME
@@ -245,11 +241,7 @@ impl ExecOperator for DeleteBinding {
 				}
 				out.push(row);
 			}
-			yielder
-				.emit(ValueBatch {
-					values: out,
-				})
-				.await;
+			yielder.emit(ValueBatch::new(out)).await;
 			Ok(())
 		});
 
@@ -539,7 +531,7 @@ impl ExecOperator for InsertGraph {
 			let mut rows = Vec::new();
 			while let Some(batch) = input_stream.next().await {
 				check_cancelled(&ctx)?;
-				rows.extend(batch?.values);
+				rows.extend(batch?.into_values());
 			}
 			let mut out = Vec::with_capacity(rows.len());
 			for mut row in rows {
@@ -547,11 +539,7 @@ impl ExecOperator for InsertGraph {
 				insert_row(&nodes, &edges, &mut row, &frozen, &opt).await?;
 				out.push(row);
 			}
-			yielder
-				.emit(ValueBatch {
-					values: out,
-				})
-				.await;
+			yielder.emit(ValueBatch::new(out)).await;
 			Ok(())
 		});
 
@@ -651,9 +639,7 @@ impl ExecOperator for SingleRowScan {
 	}
 
 	fn execute(&self, _ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let batch = ValueBatch {
-			values: vec![Value::Object(Object::default())],
-		};
+		let batch = ValueBatch::new(vec![Value::Object(Object::default())]);
 		let stream = futures::stream::once(async move { Ok(batch) });
 		Ok(monitor_stream(Box::pin(stream), "SingleRowScan", &self.metrics))
 	}

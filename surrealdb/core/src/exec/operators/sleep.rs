@@ -88,9 +88,7 @@ impl ExecOperator for SleepPlan {
 			}
 
 			// Return Value::None as the result
-			Ok(ValueBatch {
-				values: vec![Value::None],
-			})
+			Ok(ValueBatch::new(vec![Value::None]))
 		})))
 	}
 

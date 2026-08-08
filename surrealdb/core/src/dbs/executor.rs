@@ -957,7 +957,6 @@ impl Executor {
 				Ok(batch) => {
 					if streaming {
 						let values = batch
-							.values
 							.into_iter()
 							.map(convert_value_to_public_value)
 							.collect::<Result<Vec<_>>>()
@@ -975,7 +974,7 @@ impl Executor {
 							break;
 						}
 					} else {
-						results.extend(batch.values);
+						results.extend(batch.into_values());
 					}
 				}
 				Err(crate::expr::ControlFlow::Err(e)) => {

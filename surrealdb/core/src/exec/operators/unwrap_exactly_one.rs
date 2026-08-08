@@ -95,7 +95,7 @@ impl ExecOperator for UnwrapExactlyOne {
 
 			while let Some(batch_result) = input_stream.next().await {
 				let batch = batch_result?;
-				collected.extend(batch.values);
+				collected.extend(batch.into_values());
 
 				// Early exit if we already have more than one value
 				if collected.len() > 1 {
@@ -108,11 +108,7 @@ impl ExecOperator for UnwrapExactlyOne {
 			if collected.is_empty() {
 				if none_on_empty {
 					// Table scan with no results → return NONE
-					yielder
-						.emit(ValueBatch {
-							values: vec![Value::None],
-						})
-						.await;
+					yielder.emit(ValueBatch::new(vec![Value::None])).await;
 				} else {
 					// Array source with no elements → error
 					Err(ControlFlow::Err(anyhow::anyhow!(ExecError::SingleOnlyOutput)))?;
@@ -121,11 +117,7 @@ impl ExecOperator for UnwrapExactlyOne {
 				let result = collected.pop().expect("collected has exactly one element");
 
 				// Emit the single result
-				yielder
-					.emit(ValueBatch {
-						values: vec![result],
-					})
-					.await;
+				yielder.emit(ValueBatch::new(vec![result])).await;
 			}
 			Ok(())
 		});

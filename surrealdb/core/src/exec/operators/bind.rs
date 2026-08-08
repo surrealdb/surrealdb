@@ -88,7 +88,6 @@ impl ExecOperator for Bind {
 
 		let bound = input_stream.map_ok(move |x| {
 			let values = x
-				.values
 				.into_iter()
 				.map(|x| {
 					let mut row = Object::default();
@@ -96,9 +95,7 @@ impl ExecOperator for Bind {
 					Value::Object(row)
 				})
 				.collect();
-			ValueBatch {
-				values,
-			}
+			ValueBatch::new(values)
 		});
 
 		Ok(monitor_stream(Box::pin(bound), "Bind", &self.metrics))

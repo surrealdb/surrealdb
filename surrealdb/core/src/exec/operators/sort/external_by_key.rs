@@ -145,7 +145,7 @@ impl ExecOperator for ExternalSortByKey {
 					Err(e) => return Err(e),
 				};
 
-				for value in batch.values {
+				for value in batch.into_values() {
 					let keys: Vec<Value> =
 						sort_keys.iter().map(|k| k.path.extract(&value).into_owned()).collect();
 
@@ -171,9 +171,7 @@ impl ExecOperator for ExternalSortByKey {
 			}
 
 			if count == 0 {
-				return Ok(ValueBatch {
-					values: vec![],
-				});
+				return Ok(ValueBatch::empty());
 			}
 
 			writer.flush().context("Flush error")?;
@@ -213,14 +211,12 @@ impl ExecOperator for ExternalSortByKey {
 			.context("Sort task join error")?
 			.context("Sort error")?;
 
-			Ok(ValueBatch {
-				values: sorted,
-			})
+			Ok(ValueBatch::new(sorted))
 		});
 
 		let filtered = sorted_stream.filter_map(|result| async move {
 			match result {
-				Ok(batch) if batch.values.is_empty() => None,
+				Ok(batch) if batch.is_empty() => None,
 				other => Some(other),
 			}
 		});

@@ -300,11 +300,7 @@ impl ExecOperator for DynamicScan {
 					.await?;
 
 					if !results.is_empty() {
-						yielder
-							.emit(ValueBatch {
-								values: results,
-							})
-							.await;
+						yielder.emit(ValueBatch::new(results)).await;
 					}
 					return Ok(());
 				}
@@ -360,11 +356,7 @@ impl ExecOperator for DynamicScan {
 					}
 
 					if !values.is_empty() {
-						yielder
-							.emit(ValueBatch {
-								values,
-							})
-							.await;
+						yielder.emit(ValueBatch::new(values)).await;
 					}
 					return Ok(());
 				}
@@ -397,11 +389,7 @@ impl ExecOperator for DynamicScan {
 						}
 					}
 
-					yielder
-						.emit(ValueBatch {
-							values: vec![other],
-						})
-						.await;
+					yielder.emit(ValueBatch::new(vec![other])).await;
 					return Ok(());
 				}
 			};
@@ -561,13 +549,9 @@ impl ExecOperator for DynamicScan {
 					Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)))?;
 				}
 				let mut batch = batch_result?;
-				let cont = pipeline.process_batch(&mut batch.values, &ctx).await?;
-				if !batch.values.is_empty() {
-					yielder
-						.emit(ValueBatch {
-							values: batch.values,
-						})
-						.await;
+				let cont = pipeline.process_batch(batch.values_mut(), &ctx).await?;
+				if !batch.is_empty() {
+					yielder.emit(batch).await;
 				}
 				if !cont {
 					break;

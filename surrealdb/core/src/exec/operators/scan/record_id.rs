@@ -192,11 +192,7 @@ impl ExecOperator for RecordIdScan {
 				other => {
 					// If the expression didn't produce a RecordId, yield as-is
 					// (defensive fallback — the planner should only route RecordIds here)
-					yielder
-						.emit(ValueBatch {
-							values: vec![other],
-						})
-						.await;
+					yielder.emit(ValueBatch::new(vec![other])).await;
 					return Ok(());
 				}
 			};
@@ -222,11 +218,7 @@ impl ExecOperator for RecordIdScan {
 			.await?;
 
 			if !results.is_empty() {
-				yielder
-					.emit(ValueBatch {
-						values: results,
-					})
-					.await;
+				yielder.emit(ValueBatch::new(results)).await;
 			}
 			Ok(())
 		});
@@ -376,8 +368,8 @@ pub(crate) async fn execute_record_lookup(
 					return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
 				}
 				let mut batch = batch_result?;
-				let cont = pipeline.process_batch(&mut batch.values, ctx).await?;
-				results.extend(batch.values);
+				let cont = pipeline.process_batch(batch.values_mut(), ctx).await?;
+				results.extend(batch.into_values());
 				if !cont {
 					break;
 				}

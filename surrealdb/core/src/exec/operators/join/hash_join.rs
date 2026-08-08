@@ -329,7 +329,7 @@ impl ExecOperator for HashJoin {
 				while let Some(batch_result) = probe_stream.next().await {
 					crate::exec::operators::check_cancelled(&ctx)?;
 					let batch = batch_result?;
-					total += batch.values.len();
+					total += batch.len();
 					if total > max_rows {
 						Err(ControlFlow::Err(anyhow::anyhow!(
 							crate::exec::Error::InvalidStatement(format!(
@@ -358,7 +358,7 @@ impl ExecOperator for HashJoin {
 				// poll cancellation so a client disconnect / timeout interrupts.
 				crate::exec::operators::check_cancelled(&ctx)?;
 				let batch = batch_result?;
-				for row in batch.values {
+				for row in batch.into_values() {
 					if let Some(key) = join_key(&row, &keys) {
 						table.insert(key, row, max_rows)?
 					}
@@ -385,7 +385,7 @@ impl ExecOperator for HashJoin {
 				crate::exec::operators::check_cancelled(&ctx)?;
 				let batch = batch_result?;
 				let mut out: Vec<Value> = Vec::new();
-				for row in batch.values {
+				for row in batch.into_values() {
 					match join_type {
 						JoinType::Cross => {
 							// Cartesian product: pair every probe row with every
@@ -447,11 +447,7 @@ impl ExecOperator for HashJoin {
 					}
 				}
 				if !out.is_empty() {
-					yielder
-						.emit(ValueBatch {
-							values: out,
-						})
-						.await;
+					yielder.emit(ValueBatch::new(out)).await;
 				}
 			}
 			Ok(())

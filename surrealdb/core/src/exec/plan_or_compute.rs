@@ -274,7 +274,7 @@ pub(crate) async fn collect_single_value(
 
 	while let Some(batch_result) = stream.next().await {
 		match batch_result {
-			Ok(batch) => values.extend(batch.values),
+			Ok(batch) => values.extend(batch.into_values()),
 			Err(ctrl) => return Err(ctrl),
 		}
 	}
@@ -296,7 +296,7 @@ pub(crate) async fn collect_stream(mut stream: ValueBatchStream) -> FlowResult<V
 
 	while let Some(batch_result) = stream.next().await {
 		match batch_result {
-			Ok(batch) => results.extend(batch.values),
+			Ok(batch) => results.extend(batch.into_values()),
 			Err(ctrl) => return Err(ctrl),
 		}
 	}

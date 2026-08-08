@@ -753,11 +753,7 @@ impl ExecOperator for BitmapResolve {
 				.await?;
 				pipeline.process_batch(&mut values, &ctx).await?;
 				if !values.is_empty() {
-					yielder
-						.emit(ValueBatch {
-							values,
-						})
-						.await;
+					yielder.emit(ValueBatch::new(values)).await;
 				}
 			}
 			Ok(())

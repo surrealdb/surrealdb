@@ -84,7 +84,7 @@ impl ExecOperator for ReturnPlan {
 			let mut values = Vec::new();
 			while let Some(batch_result) = stream.next().await {
 				match batch_result {
-					Ok(batch) => values.extend(batch.values),
+					Ok(batch) => values.extend(batch.into_values()),
 					Err(ControlFlow::Return(v)) => {
 						values.push(v);
 						break;
@@ -253,9 +253,7 @@ mod tests {
 				{
 					items.push(Err(signal.build()));
 				}
-				items.push(Ok(ValueBatch {
-					values: vec![row.clone()],
-				}));
+				items.push(Ok(ValueBatch::new(vec![row.clone()])));
 			}
 			if let Some((at, signal)) = &self.stream_signal
 				&& *at >= self.rows.len()

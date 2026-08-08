@@ -103,15 +103,13 @@ impl ExecOperator for RandomShuffle {
 					)));
 				}
 				match batch_result {
-					Ok(batch) => all_values.extend(batch.values),
+					Ok(batch) => all_values.extend(batch.into_values()),
 					Err(e) => return Err(e),
 				}
 			}
 
 			if all_values.is_empty() {
-				return Ok(ValueBatch {
-					values: vec![],
-				});
+				return Ok(ValueBatch::empty());
 			}
 
 			// Apply shuffle or reservoir sampling
@@ -121,15 +119,13 @@ impl ExecOperator for RandomShuffle {
 				full_shuffle(all_values).await
 			};
 
-			Ok(ValueBatch {
-				values: shuffled,
-			})
+			Ok(ValueBatch::new(shuffled))
 		});
 
 		// Filter out empty batches
 		let filtered = shuffled_stream.filter_map(|result| async move {
 			match result {
-				Ok(batch) if batch.values.is_empty() => None,
+				Ok(batch) if batch.is_empty() => None,
 				other => Some(other),
 			}
 		});

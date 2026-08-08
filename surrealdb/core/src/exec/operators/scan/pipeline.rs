@@ -330,11 +330,7 @@ pub(crate) fn kv_scan_stream(
 				break;
 			}
 			if !decoded.is_empty() {
-				yielder
-					.emit(ValueBatch {
-						values: decoded,
-					})
-					.await;
+				yielder.emit(ValueBatch::new(decoded)).await;
 			}
 		}
 		Ok(())

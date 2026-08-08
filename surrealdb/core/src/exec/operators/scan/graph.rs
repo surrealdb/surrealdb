@@ -300,7 +300,6 @@ impl ExecOperator for GraphEdgeScan {
 			while let Some(batch_result) = input_stream.next().await {
 				let batch = batch_result?;
 				let source_rids: Vec<RecordId> = batch
-					.values
 					.into_iter()
 					.flat_map(|v| {
 						let mut rids = Vec::new();
@@ -477,18 +476,10 @@ impl ExecOperator for GraphEdgeScan {
 												}
 												edges_yielded += values.len();
 												if !values.is_empty() {
-													yielder
-														.emit(ValueBatch {
-															values,
-														})
-														.await;
+													yielder.emit(ValueBatch::new(values)).await;
 												}
 											} else {
-												yielder
-													.emit(ValueBatch {
-														values,
-													})
-													.await;
+												yielder.emit(ValueBatch::new(values)).await;
 											}
 										}
 										if limit_hit || chunk_bound_hit {
@@ -583,11 +574,7 @@ impl ExecOperator for GraphEdgeScan {
 														&mut perm_cache,
 													)
 													.await?;
-													yielder
-														.emit(ValueBatch {
-															values,
-														})
-														.await;
+													yielder.emit(ValueBatch::new(values)).await;
 													rid_batch.clear();
 												}
 												if limit_hit {
@@ -643,11 +630,7 @@ impl ExecOperator for GraphEdgeScan {
 				)
 				.await?;
 				if !values.is_empty() {
-					yielder
-						.emit(ValueBatch {
-							values,
-						})
-						.await;
+					yielder.emit(ValueBatch::new(values)).await;
 				}
 			}
 			Ok(())

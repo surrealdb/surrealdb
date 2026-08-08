@@ -97,9 +97,7 @@ impl ExecOperator for SequencePlan {
 
 		let stream = stream::once(async move {
 			let (result, _) = execute_block_with_context(&block, &initial_ctx, depth).await?;
-			Ok(ValueBatch {
-				values: vec![result],
-			})
+			Ok(ValueBatch::new(vec![result]))
 		});
 
 		Ok(Box::pin(stream))

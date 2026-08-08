@@ -177,7 +177,7 @@ impl ExecOperator for ExternalSort {
 				let num_fields = order_by.len();
 				let mut key_columns: Vec<Vec<Value>> = Vec::with_capacity(num_fields);
 				for field in order_by.iter() {
-					let keys = field.expr.evaluate_batch(eval_ctx.clone(), &batch.values).await?;
+					let keys = field.expr.evaluate_batch(eval_ctx.clone(), batch.values()).await?;
 					key_columns.push(keys);
 				}
 
@@ -185,7 +185,7 @@ impl ExecOperator for ExternalSort {
 				let mut key_iters: Vec<std::vec::IntoIter<Value>> =
 					key_columns.into_iter().map(|col| col.into_iter()).collect();
 
-				for value in batch.values {
+				for value in batch.into_values() {
 					let keys: Vec<Value> = key_iters
 						.iter_mut()
 						.map(|iter| iter.next().expect("key column length matches batch size"))
@@ -215,9 +215,7 @@ impl ExecOperator for ExternalSort {
 			}
 
 			if count == 0 {
-				return Ok(ValueBatch {
-					values: vec![],
-				});
+				return Ok(ValueBatch::empty());
 			}
 
 			// Flush and prepare for reading
@@ -261,15 +259,13 @@ impl ExecOperator for ExternalSort {
 			.context("Sort task join error")?
 			.context("Sort error")?;
 
-			Ok(ValueBatch {
-				values: sorted,
-			})
+			Ok(ValueBatch::new(sorted))
 		});
 
 		// Filter out empty batches
 		let filtered = sorted_stream.filter_map(|result| async move {
 			match result {
-				Ok(batch) if batch.values.is_empty() => None,
+				Ok(batch) if batch.is_empty() => None,
 				other => Some(other),
 			}
 		});
