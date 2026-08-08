@@ -230,6 +230,18 @@ pub(crate) async fn kill_live_query(
 	Ok(results)
 }
 
+/// Rejects a command that arrives on a session whose authentication has expired.
+///
+/// `Datastore::execute` refuses an expired session itself, so the query path is
+/// covered wherever it is reached from. This is for the commands that change
+/// session state without going through it.
+async fn ensure_session_active(state: &SessionState) -> Result<(), Error> {
+	if state.session.read().await.expired() {
+		return Err(surrealdb_core::rpc::session_expired());
+	}
+	Ok(())
+}
+
 pub(crate) async fn router(
 	kvs: &Arc<Datastore>,
 	state: &SessionState,
@@ -783,6 +795,12 @@ pub(crate) async fn router(
 			value,
 		} => {
 			let query_result = QueryResultBuilder::started_now();
+			// SECURITY: an expired session must not be able to change session
+			// state, the same as over the RPC transports. `SECURITY_GUIDE.md`
+			// section 3 requires expiry to be checked before any statement or
+			// method is processed; `Datastore::execute` covers the query path,
+			// so without this the session methods are the way past it.
+			ensure_session_active(state).await?;
 			surrealdb_core::rpc::check_protected_param(&key)
 				.map_err(|e| Error::internal(e.to_string()))?;
 			// Need to compute because certain keys might not be allowed to be set and those
@@ -798,6 +816,7 @@ pub(crate) async fn router(
 			key,
 		} => {
 			let query_result = QueryResultBuilder::started_now();
+			ensure_session_active(state).await?;
 			state.vars.write().await.remove(&key);
 			Ok(vec![query_result.finish()])
 		}

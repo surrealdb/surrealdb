@@ -1936,9 +1936,62 @@ pub async fn use_defaults_applies_the_configured_default(new_db: impl CreateDb) 
 	drop(permit);
 }
 
+/// An expired session cannot set a variable.
+///
+/// A parity test between the transports. `SECURITY_GUIDE.md` section 3 requires
+/// expiry to be checked "before executing any statement, processing any RPC
+/// method"; the RPC path does that in `set`, while the embedded engine's `Set`
+/// command has no expiry check at all. `query` is checked on both — the
+/// datastore itself refuses an expired session — so this pins the session
+/// method, which is where the two diverge.
+pub async fn set_on_an_expired_session_is_rejected(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db(Config::new()).await;
+	let namespace = Ulid::new().to_string();
+	let database = Ulid::new().to_string();
+	db.use_ns(&namespace).use_db(&database).await.unwrap();
+
+	let access = Ulid::new();
+	let email = format!("{access}@example.com");
+	let pass = "password123";
+	// The shortest session this can be given, so the test waits it out rather
+	// than mocking a clock the engine does not expose.
+	db.query(format!(
+		"
+        DEFINE ACCESS `{access}` ON DB TYPE RECORD
+        SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+        SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+        DURATION FOR SESSION 1s FOR TOKEN 15s
+    "
+	))
+	.await
+	.unwrap()
+	.check()
+	.unwrap();
+
+	db.signup(RecordAccess {
+		namespace: namespace.clone(),
+		database: database.clone(),
+		access: access.to_string(),
+		params: AuthParams {
+			pass: pass.to_string(),
+			email: email.clone(),
+		},
+	})
+	.await
+	.unwrap();
+
+	tokio::time::sleep(Duration::from_secs(2)).await;
+
+	db.set("some_key", 1).await.expect_err("an expired session must not be able to set a variable");
+
+	drop(permit);
+}
+
 define_include_tests!(basic => {
 	#[test_log::test(tokio::test)]
 	connect,
+	#[test_log::test(tokio::test)]
+	set_on_an_expired_session_is_rejected,
 	#[test_log::test(tokio::test)]
 	use_defaults_applies_the_configured_default,
 	#[test_log::test(tokio::test)]

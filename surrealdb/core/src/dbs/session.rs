@@ -99,7 +99,12 @@ impl Session {
 	}
 
 	/// Checks if the session has expired
-	pub(crate) fn expired(&self) -> bool {
+	///
+	/// Public because the expiry rule has to be applied identically wherever a
+	/// session is accepted, including the embedded engine outside this crate.
+	/// Reimplementing it against the public `exp` field is what lets the two
+	/// drift.
+	pub fn expired(&self) -> bool {
 		match self.exp {
 			Some(exp) => Utc::now().timestamp() > exp,
 			// It is currently possible to have sessions without expiration.
