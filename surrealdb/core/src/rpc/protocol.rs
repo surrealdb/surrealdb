@@ -9,7 +9,9 @@ use uuid::Uuid;
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider, RootProvider};
 use crate::ctx::CancelHandle;
 use crate::dbs::capabilities::{ExperimentalTarget, MethodTarget};
-use crate::dbs::{QueryResult, QueryStreamItem, QueryStreamJob, QueryType, Session};
+use crate::dbs::{
+	AuthPrincipalSnapshot, QueryResult, QueryStreamItem, QueryStreamJob, QueryType, Session,
+};
 use crate::iam::token::Token;
 use crate::kvs::{Datastore, TransactionType};
 use crate::observe::{
@@ -49,32 +51,6 @@ fn singular(value: &PublicValue) -> bool {
 		PublicValue::Object(_) => true,
 		PublicValue::RecordId(t) => !matches!(t.key, PublicRecordIdKey::Range(_)),
 		_ => false,
-	}
-}
-
-// SECURITY: LIVE queries capture the session's auth principal at registration
-// time (see `surrealdb/core/src/dbs/session.rs`). When an auth-lifecycle RPC
-// changes the principal on the same WebSocket, those captured snapshots would
-// continue to dispatch notifications under the prior context, bypassing the
-// access controls that should now apply (GHSA-2xrp-m9c6-75rj). Callers
-// snapshot the principal before the operation and tear LIVE subscriptions
-// down when it changes. Token refresh against the same identity leaves the
-// principal unchanged and preserves the subscriptions.
-struct AuthPrincipalSnapshot {
-	id: String,
-	level: crate::iam::Level,
-}
-
-impl AuthPrincipalSnapshot {
-	fn capture(session: &Session) -> Self {
-		Self {
-			id: session.au.id().to_string(),
-			level: session.au.level().clone(),
-		}
-	}
-
-	fn differs_from(&self, session: &Session) -> bool {
-		session.au.id() != self.id || session.au.level() != &self.level
 	}
 }
 

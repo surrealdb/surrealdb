@@ -13,7 +13,7 @@ use async_channel::{Receiver, Sender};
 use futures::StreamExt;
 #[cfg(not(target_family = "wasm"))]
 use futures::stream::poll_fn;
-use surrealdb_core::dbs::{QueryResult, QueryResultBuilder, Session};
+use surrealdb_core::dbs::{AuthPrincipalSnapshot, QueryResult, QueryResultBuilder, Session};
 use surrealdb_core::iam;
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_core::kvs::export::Config as DbExportConfig;
@@ -230,6 +230,38 @@ pub(crate) async fn kill_live_query(
 	Ok(results)
 }
 
+/// Ends this session's live queries when an auth operation changed the
+/// principal.
+///
+/// SECURITY: a subscription captures the principal that registered it, so one
+/// left running across a principal change keeps dispatching under the previous
+/// access controls (GHSA-2xrp-m9c6-75rj). See [`AuthPrincipalSnapshot`].
+///
+/// Deletion goes straight to the datastore rather than through a `KILL`
+/// statement, as the WebSocket transport does it: the session now belongs to
+/// the *new* principal, which may have no permission to kill what the previous
+/// one registered — and a teardown that can be refused is not a teardown.
+async fn cleanup_lqs_on_principal_change(
+	kvs: &Datastore,
+	state: &SessionState,
+	before: &AuthPrincipalSnapshot,
+) {
+	if !before.differs_from(&*state.session.read().await) {
+		return;
+	}
+	let mut gc = Vec::new();
+	state.live_queries.retain(|id, _| {
+		gc.push(*id);
+		false
+	});
+	if gc.is_empty() {
+		return;
+	}
+	if let Err(error) = kvs.delete_queries(gc).await {
+		warn!("Failed to end live queries after the session's principal changed; {error}");
+	}
+}
+
 /// Rejects a command that arrives on a session whose authentication has expired.
 ///
 /// `Datastore::execute` refuses an expired session itself, so the query path is
@@ -262,11 +294,13 @@ pub(crate) async fn router(
 			credentials,
 		} => {
 			let query_result = QueryResultBuilder::started_now();
+			let before = AuthPrincipalSnapshot::capture(&*state.session.read().await);
 			let token = {
 				iam::signup::signup(kvs, &mut *state.session.write().await, credentials.into())
 					.await
 					.map_err(surrealdb_core::err::anyhow_to_types_error)?
 			};
+			cleanup_lqs_on_principal_change(kvs, state, &before).await;
 			let result = query_result.finish_with_result(Ok(token.into_value()));
 			Ok(vec![result])
 		}
@@ -274,11 +308,13 @@ pub(crate) async fn router(
 			credentials,
 		} => {
 			let query_result = QueryResultBuilder::started_now();
+			let before = AuthPrincipalSnapshot::capture(&*state.session.read().await);
 			let token = {
 				iam::signin::signin(kvs, &mut *state.session.write().await, credentials.into())
 					.await
 					.map_err(surrealdb_core::err::anyhow_to_types_error)?
 			};
+			cleanup_lqs_on_principal_change(kvs, state, &before).await;
 			let result = query_result.finish_with_result(Ok(token.into_value()));
 			Ok(vec![result])
 		}
@@ -286,6 +322,7 @@ pub(crate) async fn router(
 			token,
 		} => {
 			let query_result = QueryResultBuilder::started_now();
+			let before = AuthPrincipalSnapshot::capture(&*state.session.read().await);
 			// Extract the access token and check if this token supports refresh
 			let (access, with_refresh) = match &token {
 				iam::Token::Access(access) => (access, false),
@@ -317,6 +354,9 @@ pub(crate) async fn router(
 								Err(error) => query_result
 									.finish_with_result(Err(Error::internal(error.to_string()))),
 							};
+							// This branch returns early, so it needs the same
+							// teardown as the one below.
+							cleanup_lqs_on_principal_change(kvs, state, &before).await;
 							return Ok(vec![result]);
 						}
 						// If authentication failed and automatic refresh isn't applicable,
@@ -325,6 +365,7 @@ pub(crate) async fn router(
 					}
 				}
 			};
+			cleanup_lqs_on_principal_change(kvs, state, &before).await;
 			Ok(vec![result])
 		}
 		Command::Refresh {
@@ -332,6 +373,7 @@ pub(crate) async fn router(
 		} => {
 			// Refresh command: Exchange a refresh token for new access and refresh tokens
 			let query_result = QueryResultBuilder::started_now();
+			let before = AuthPrincipalSnapshot::capture(&*state.session.read().await);
 			let result = {
 				match iam::token::refresh(token, kvs, &mut *state.session.write().await).await {
 					Ok(token) => query_result.finish_with_result(Ok(token.into_value())),
@@ -340,10 +382,12 @@ pub(crate) async fn router(
 					}
 				}
 			};
+			cleanup_lqs_on_principal_change(kvs, state, &before).await;
 			Ok(vec![result])
 		}
 		Command::Invalidate => {
 			let query_result = QueryResultBuilder::started_now();
+			let before = AuthPrincipalSnapshot::capture(&*state.session.read().await);
 			let result = {
 				match iam::clear::clear(&mut *state.session.write().await) {
 					Ok(_) => query_result.finish_with_result(Ok(Value::None)),
@@ -352,6 +396,7 @@ pub(crate) async fn router(
 					}
 				}
 			};
+			cleanup_lqs_on_principal_change(kvs, state, &before).await;
 			Ok(vec![result])
 		}
 		Command::Begin => {

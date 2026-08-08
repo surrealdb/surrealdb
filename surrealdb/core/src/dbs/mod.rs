@@ -42,7 +42,7 @@ pub(crate) use self::capture::ParameterCapturePass;
 pub(crate) use self::executor::Executor;
 pub(crate) use self::iterator::{Iterable, Iterator, Operable, Processable};
 pub(crate) use self::options::{Force, Options};
-pub use self::session::Session;
+pub use self::session::{AuthPrincipalSnapshot, Session};
 pub(crate) use self::session::{durable_session, restore_session};
 pub(crate) use self::sort_error::SortError;
 pub(crate) use self::statement::Statement;

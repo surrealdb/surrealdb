@@ -603,7 +603,80 @@ pub async fn live_select_returns_uuid(new_db: impl CreateDb) {
 	drop(permit);
 }
 
+/// Re-authenticating a session ends the live queries the previous principal
+/// registered.
+///
+/// A parity test between the transports, and the embedded half of
+/// GHSA-2xrp-m9c6-75rj: a subscription authorised for one principal must not
+/// keep delivering once the session belongs to another. The RPC path tears live
+/// queries down on all six methods that change the principal (`signup`,
+/// `signin`, `authenticate`, `refresh`, `invalidate`, `reset`); the embedded
+/// engine tears them down on none.
+pub async fn signin_ends_the_previous_principals_live_queries(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db(Config::new()).await;
+
+	let namespace = Ulid::new().to_string();
+	let database = Ulid::new().to_string();
+	db.use_ns(&namespace).use_db(&database).await.unwrap();
+
+	let table = format!("table_{}", Ulid::new());
+	let access = Ulid::new();
+	let email = format!("{access}@example.com");
+	let pass = "password123";
+	db.query(format!(
+		"
+        DEFINE TABLE {table};
+        DEFINE ACCESS `{access}` ON DB TYPE RECORD
+        SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+        SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+        DURATION FOR SESSION 1d FOR TOKEN 15s
+    "
+	))
+	.await
+	.unwrap()
+	.check()
+	.unwrap();
+
+	// A second session on the same connection, so the write below comes from a
+	// principal that is still allowed to make it. Cloning copies the current
+	// (root) session state.
+	let writer = db.clone();
+
+	// Subscribe while this session is still root.
+	let mut stream = db.select(Resource::from(&table)).live().await.unwrap();
+
+	// Change the principal: root -> record user. The subscription above belongs
+	// to the principal that has just been replaced, so it must not survive.
+	db.signup(surrealdb::opt::auth::Record {
+		namespace: namespace.clone(),
+		database: database.clone(),
+		access: access.to_string(),
+		params: super::AuthParams {
+			pass: pass.to_string(),
+			email: email.clone(),
+		},
+	})
+	.await
+	.unwrap();
+
+	// Anything the old subscription would have matched, written by a principal
+	// that is still permitted to write it.
+	let _: Value = writer.create(Resource::from(&table)).await.unwrap();
+
+	// The stream must not deliver: either it has ended, or nothing arrives.
+	if let Ok(Some(notification)) = tokio::time::timeout(LQ_TIMEOUT, stream.next()).await {
+		panic!(
+			"a live query registered before the principal changed still delivered: {:?}",
+			notification.map(|n| n.action)
+		);
+	}
+
+	drop(permit);
+}
+
 define_include_tests!(live => {
+	#[test_log::test(tokio::test)]
+	signin_ends_the_previous_principals_live_queries,
 	#[test_log::test(tokio::test)]
 	live_select_table,
 	#[test_log::test(tokio::test)]

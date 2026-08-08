@@ -192,6 +192,41 @@ impl Session {
 	}
 }
 
+/// The identity a session is acting as, captured so a change can be detected.
+///
+/// SECURITY: LIVE queries capture the session's auth principal at registration
+/// time. When an auth-lifecycle operation changes the principal on the same
+/// connection, those captured snapshots would continue to dispatch
+/// notifications under the prior context, bypassing the access controls that
+/// should now apply (GHSA-2xrp-m9c6-75rj). Callers snapshot the principal
+/// before the operation and tear LIVE subscriptions down when it changes.
+/// Token refresh against the same identity leaves the principal unchanged and
+/// preserves the subscriptions.
+///
+/// Lives here rather than beside any one caller because every transport that
+/// accepts an auth-lifecycle operation has to apply the same rule; a second
+/// copy of "what counts as a change" is what lets two transports drift apart.
+#[derive(Clone, Debug)]
+pub struct AuthPrincipalSnapshot {
+	id: String,
+	level: Level,
+}
+
+impl AuthPrincipalSnapshot {
+	/// Capture the principal `session` is currently acting as.
+	pub fn capture(session: &Session) -> Self {
+		Self {
+			id: session.au.id().to_string(),
+			level: session.au.level().clone(),
+		}
+	}
+
+	/// Whether `session` is now acting as a different principal.
+	pub fn differs_from(&self, session: &Session) -> bool {
+		session.au.id() != self.id || session.au.level() != &self.level
+	}
+}
+
 /// Capture the durable form of `session`, expiring at `expires_at`
 /// (milliseconds since the UNIX epoch).
 ///
