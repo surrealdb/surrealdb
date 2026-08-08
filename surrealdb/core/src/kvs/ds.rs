@@ -47,7 +47,8 @@ use crate::api::request::ApiRequest;
 use crate::api::response::ApiResponse;
 use crate::buc::manager::BucketsManager;
 use crate::catalog::providers::{
-	CatalogProvider, DatabaseProvider, NamespaceProvider, NodeProvider, TableProvider, UserProvider,
+	CatalogProvider, DatabaseProvider, NamespaceProvider, NodeProvider, RootProvider,
+	TableProvider, UserProvider,
 };
 use crate::catalog::{Index, NodeLiveQuery, StoredSubscriptionDefinition};
 use crate::config::RuntimeConfig;
@@ -4775,10 +4776,55 @@ impl Datastore {
 				}
 				session.db = Some(db);
 			}
-			(None, None) => {
-				session.ns = None;
-				session.db = None;
+			// An empty `USE` asks for the configured default, not for the
+			// session to be cleared. A session that has already selected a
+			// namespace — from a token, say — keeps it, so this only ever fills
+			// in what is missing.
+			(None, None) if session.ns.is_none() => {
+				let tx = new_tx().await?;
+				let default = match tx.get_default_config().await {
+					Ok(config) => config.map(|c| (c.namespace.clone(), c.database.clone())),
+					Err(e) => {
+						let _ = tx.cancel().await;
+						return Err(map_internal(e));
+					}
+				};
+
+				// The default names a namespace and database a fresh datastore
+				// may not have materialised yet. Creating them is gated on the
+				// same authorization an explicit `DEFINE NAMESPACE` /
+				// `DEFINE DATABASE` needs, as the arms above are: a caller
+				// without it still gets the selection, and a later operation
+				// reports a clean `NsNotFound` rather than silently having
+				// created what it could not have defined. See
+				// `SECURITY_GUIDE.md` section 3.
+				if let Some((Some(ns), db)) = default {
+					let create_ns = self
+						.should_materialize_ns_on_use(&tx, &session.au, &ns)
+						.await
+						.map_err(map_internal)?;
+					if create_ns && let Err(e) = tx.get_or_add_ns(ctx, &ns).await {
+						let _ = tx.cancel().await;
+						return Err(map_internal(e));
+					}
+					if let Some(db) = db {
+						let create_db = create_ns
+							&& self
+								.should_materialize_db_on_use(&tx, &session.au, &ns, &db)
+								.await
+								.map_err(map_internal)?;
+						if create_db && let Err(e) = tx.ensure_ns_db(ctx, &ns, &db).await {
+							let _ = tx.cancel().await;
+							return Err(map_internal(e));
+						}
+						session.db = Some(db);
+					}
+					session.ns = Some(ns);
+				}
+
+				commit_tx(tx).await?;
 			}
+			(None, None) => {}
 		}
 
 		let value = PublicValue::from_t(object! {

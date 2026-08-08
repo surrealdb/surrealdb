@@ -1906,9 +1906,41 @@ pub async fn refresh_tokens(new_db: impl CreateDb) {
 	db.authenticate(token).refresh().await.unwrap_err();
 }
 
+/// `use_defaults` applies the datastore's configured default namespace and
+/// database.
+///
+/// This is a parity test between the transports, not a feature test: the
+/// WebSocket and HTTP engines resolve `DEFINE CONFIG DEFAULT` themselves before
+/// touching the session, while the embedded engine passes the empty `USE`
+/// straight to the shared session helper, which reads "no namespace and no
+/// database" as a request to *clear* both. The documented behaviour is to apply
+/// the default, so that is what every backend is held to here.
+pub async fn use_defaults_applies_the_configured_default(new_db: impl CreateDb) {
+	let (permit, db) = new_db.create_db(Config::new()).await;
+
+	let ns = Ulid::new().to_string();
+	let database = Ulid::new().to_string();
+	db.query(format!("DEFINE CONFIG OVERWRITE DEFAULT NAMESPACE `{ns}` DATABASE `{database}`"))
+		.await
+		.unwrap()
+		.check()
+		.unwrap();
+
+	// The session has selected nothing yet, which is the only state in which
+	// the default applies — a session that already has a namespace keeps it.
+	let (got_ns, got_db) = db.use_defaults().await.unwrap();
+
+	assert_eq!(got_ns.as_deref(), Some(ns.as_str()), "namespace default was not applied");
+	assert_eq!(got_db.as_deref(), Some(database.as_str()), "database default was not applied");
+
+	drop(permit);
+}
+
 define_include_tests!(basic => {
 	#[test_log::test(tokio::test)]
 	connect,
+	#[test_log::test(tokio::test)]
+	use_defaults_applies_the_configured_default,
 	#[test_log::test(tokio::test)]
 	yuse,
 	#[test_log::test(tokio::test)]
