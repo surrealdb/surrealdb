@@ -23,8 +23,10 @@ impl Document {
 	/// - Right pointer edge: from the `out` record pointing to this relation
 	///
 	/// For enforced relations, it validates that both the `in` and `out` records exist
-	/// before creating the edges. It also marks the record metadata as an edge type and
-	/// stores the `in` and `out` fields on the document.
+	/// before creating the edges — except under `OPTION IMPORT`, where the check is
+	/// deferred because a restore can reach an edge table before its endpoints. It also
+	/// marks the record metadata as an edge type and stores the `in` and `out` fields on
+	/// the document.
 	pub(super) async fn store_edges_data(
 		&mut self,
 		ctx: &FrozenContext,
@@ -46,14 +48,26 @@ impl Document {
 			let rid = self.id()?;
 			// Get the transaction
 			let txn = ctx.tx();
-			// For enforced relations, ensure that the edges exist
-			if matches!(
-				tb.table_type,
-				TableType::Relation(Relation {
-					enforced: true,
-					..
-				})
-			) {
+			// For enforced relations, ensure that both endpoints exist.
+			//
+			// Skipped while replaying an export. An export orders tables by
+			// name, so an edge table is restored before the vertex tables it
+			// points at whenever its name sorts earlier, and enforcing here
+			// would reject every one of its edges. Enforcement is an
+			// admission check on the write path, not an invariant any reader
+			// depends on, so deferring it during a restore costs nothing that
+			// a query can observe. The sibling checks in `process_table_fields`,
+			// `process_table_events`, `process_table_views` and
+			// `process_changefeeds` are deferred the same way, for the same
+			// reason: an export is replayed as a whole or not at all.
+			if !opt.import
+				&& matches!(
+					tb.table_type,
+					TableType::Relation(Relation {
+						enforced: true,
+						..
+					})
+				) {
 				// Check that the `in` record exists
 				ensure!(
 					txn.record_exists(ns, db, &l.table, &l.key, opt.version).await?,

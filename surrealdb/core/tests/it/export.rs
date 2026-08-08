@@ -208,3 +208,67 @@ async fn regrouped_export_round_trips() -> Result<()> {
 	assert_ne!(hits, Value::None, "the replayed full-text index must match");
 	Ok(())
 }
+
+/// An export orders tables by name, so an `ENFORCED` relation whose table name
+/// sorts before its endpoints' is replayed while those endpoints are still
+/// missing. The restore must keep the graph anyway: enforcement is an admission
+/// check on the write path, and an export is replayed as a whole.
+///
+/// `knows` sorting before `person` is the canonical naming, so this is the
+/// ordinary case rather than a contrived one.
+#[tokio::test]
+async fn enforced_relation_survives_a_self_restore() -> Result<()> {
+	let source = ds_with_batch_size(None).await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let mut res = source
+		.execute(
+			"DEFINE TABLE person SCHEMALESS;
+			 DEFINE TABLE knows TYPE RELATION FROM person TO person ENFORCED;
+			 CREATE person:a, person:b;
+			 RELATE person:a->knows->person:b;",
+			&ses,
+			None,
+		)
+		.await?;
+	for r in res.drain(..) {
+		r.result?;
+	}
+
+	let sql = export_text(&source, &ses).await?;
+	let tables: Vec<&str> = sql.lines().filter(|l| l.starts_with("-- TABLE: ")).collect();
+	assert_eq!(
+		tables,
+		["-- TABLE: knows", "-- TABLE: person"],
+		"the fixture must export the edge table before its endpoints"
+	);
+
+	// Every statement has to succeed: a restore that reports one rejected
+	// `INSERT RELATION` among thousands of accepted lines is how this went
+	// unnoticed, so the assertion is on the statements, not just the outcome.
+	let target = ds_with_batch_size(None).await?;
+	let mut res = target.execute(&sql, &ses, None).await?;
+	for r in res.drain(..) {
+		r.result?;
+	}
+
+	for query in [
+		"SELECT VALUE count() FROM knows GROUP ALL",
+		"SELECT VALUE ->knows->person FROM person:a",
+		"SELECT VALUE <-knows<-person FROM person:b",
+	] {
+		let restored = target.execute(query, &ses, None).await?.remove(0).result?;
+		assert_ne!(restored, Value::None, "`{query}` found nothing after the restore");
+		assert_eq!(restored, source.execute(query, &ses, None).await?.remove(0).result?);
+	}
+
+	// Deferring the check must not disable it: the restored table still
+	// refuses a new edge to a record that does not exist.
+	let err = target
+		.execute("RELATE person:a->knows->person:missing", &ses, None)
+		.await?
+		.remove(0)
+		.result
+		.expect_err("the restored table must still enforce its endpoints");
+	assert!(err.to_string().contains("person:missing"), "unexpected error: {err}");
+	Ok(())
+}

@@ -285,8 +285,9 @@ relate), Key API, field evaluation, events, views, cascades
 - Batch write size, transaction duration, and mutation volume must be bounded.
 - Event nesting depth must be enforced. View cascade depth and fan-out must be
   limited.
-- Import mode (which bypasses field/event/view processing) must only be settable by
-  administrative callers.
+- Import mode (which bypasses field/event/view processing and the `ENFORCED` relation
+  endpoint-existence check) must only be settable by administrative callers. It must not
+  bypass any permission check: table-level `PERMISSIONS` still gate every imported write.
 
 ### Review Triggers
 
