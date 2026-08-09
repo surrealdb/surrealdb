@@ -13,6 +13,19 @@ pub static ENVIRONMENT: LazyLock<Mutex<Environment>> =
 pub static INFORMATION: LazyLock<Mutex<Information>> =
 	LazyLock::new(|| Mutex::new(Information::default()));
 
+/// Refreshes the cache only if nothing has populated it yet.
+///
+/// [`Information`] starts at its all-zero default and `physical_cores` is at
+/// least one on every host, so a zero there means no refresh has completed.
+/// Two callers racing the check both refresh, which costs one extra pass and
+/// leaves the same state.
+pub async fn refresh_if_cold() {
+	let cold = INFORMATION.lock().await.physical_cores == 0;
+	if cold {
+		refresh().await;
+	}
+}
+
 pub async fn refresh() {
 	// Get the environment
 	let mut environment = ENVIRONMENT.lock().await;

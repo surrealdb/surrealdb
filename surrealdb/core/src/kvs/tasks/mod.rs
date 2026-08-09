@@ -15,6 +15,7 @@ use wasm_bindgen_futures::spawn_local as spawn;
 
 use crate::err::{is_query_cancelled, is_query_timedout};
 use crate::kvs::{Datastore, LiveQueryEngine};
+use crate::observe::process::RefreshClaim;
 use crate::options::EngineOptions;
 
 mod interval;
@@ -494,6 +495,7 @@ async fn run_maintenance_job(
 	canceller: &CancellationToken,
 	opts: &EngineOptions,
 	reclaim_grace: Duration,
+	metrics_claim: &RefreshClaim,
 ) {
 	let res = match job {
 		MaintenanceJob::NodeExpire => dbs.expire_nodes().await,
@@ -517,7 +519,14 @@ async fn run_maintenance_job(
 		MaintenanceJob::TikvGc => dbs.run_mvcc_gc(opts.tikv_gc_lifetime).await,
 		MaintenanceJob::TikvLockCleanup => dbs.run_lock_cleanup(opts.tikv_gc_lifetime).await,
 		MaintenanceJob::SystemMetricsRefresh => {
-			crate::observe::refresh_process_snapshot().await;
+			// The snapshot is one cache per process, and its CPU percentage is a
+			// delta since the previous refresh of it, so only the datastore
+			// holding the process-wide claim refreshes; the others let their
+			// pass go by. Retried every pass, so the refresh moves to a
+			// surviving datastore when the holder's task ends.
+			if metrics_claim.take() {
+				crate::observe::refresh_process_snapshot().await;
+			}
 			Ok(())
 		}
 	};
@@ -578,9 +587,15 @@ fn spawn_task_scheduler(
 			slots.iter().map(|s| s.job.label()).collect::<Vec<_>>().join(", ")
 		);
 		let jobs_canceller = canceller.clone();
+		// This task's holder of the process-wide metrics claim: taken by its
+		// first refresh pass, and released when the task ends or is dropped so
+		// another datastore can take over. Only the group carrying that job
+		// ever takes it.
+		let metrics_claim = RefreshClaim::process();
 		maintenance_loop(slots, canceller, move |job| {
 			let dbs = Weak::clone(&dbs);
 			let canceller = jobs_canceller.clone();
+			let metrics_claim = metrics_claim.clone();
 			async move {
 				// The datastore is gone, so there is nothing left to maintain.
 				// Cancelling ends the schedule on its next iteration, and does the
@@ -589,7 +604,8 @@ fn spawn_task_scheduler(
 					canceller.cancel();
 					return;
 				};
-				run_maintenance_job(job, &dbs, &canceller, &opts, reclaim_grace).await
+				run_maintenance_job(job, &dbs, &canceller, &opts, reclaim_grace, &metrics_claim)
+					.await
 			}
 		})
 		.await;
@@ -645,6 +661,10 @@ mod test {
 	use tokio::time::Instant;
 	use tokio_util::sync::CancellationToken;
 
+	// Used only by the tests that build a datastore, so it is gated with them:
+	// the lib tests build under `-D warnings` once per kv backend.
+	#[cfg(feature = "kv-mem")]
+	use super::RefreshClaim;
 	use super::{
 		MaintenanceJob, Slot, maintenance_loop, maintenance_slots, next_slot, sweep_slots,
 	};
@@ -984,6 +1004,38 @@ mod test {
 		can.cancel();
 		tasks.resolve().await.unwrap();
 		assert!(age < Duration::from_millis(500), "heartbeat was {age:?} stale");
+	}
+
+	/// However many datastores a process builds, one of them refreshes the
+	/// process metrics: the snapshot is a single per-process cache whose CPU
+	/// percentage is a delta since its own previous refresh, so a second
+	/// refresher would cut that window short by an amount that depends on
+	/// nothing but scheduling.
+	///
+	/// The claim is process-wide, so every datastore this test binary builds
+	/// contends for it: the holder that ends the wait below may be one of those
+	/// rather than one of these two. What is asserted is the property itself —
+	/// that a scheduler holds the claim and a further holder is refused.
+	#[cfg(feature = "kv-mem")]
+	#[test_log::test(tokio::test)]
+	pub async fn only_one_datastore_refreshes_the_process_metrics() {
+		let opts = EngineOptions::default()
+			.with_system_metrics_refresh_interval(Duration::from_millis(10));
+		let _first =
+			Datastore::builder().with_engine_options(opts).build_with_path("memory").await.unwrap();
+		let _second =
+			Datastore::builder().with_engine_options(opts).build_with_path("memory").await.unwrap();
+		// A scheduler takes the claim on a pass of its own task, so wait for one
+		// rather than assuming it has already run. A probe that wins the race
+		// against a pass holds the claim only for the length of the check, and
+		// the next pass takes it back.
+		tokio::time::timeout(Duration::from_secs(30), async {
+			while RefreshClaim::process().take() {
+				tokio::time::sleep(Duration::from_millis(10)).await;
+			}
+		})
+		.await
+		.expect("no scheduler holds the metrics claim, so every datastore refreshes");
 	}
 
 	/// The live-query router is the only conditionally-spawned task: under the

@@ -119,9 +119,15 @@ pub struct EngineOptions {
 	///
 	/// Both `INFO FOR ROOT` and the `surrealdb.process.*` gauges read a cached
 	/// snapshot rather than sampling on demand, so a periodic refresh is what
-	/// keeps them current. Exactly one refresher must run: `sysinfo` derives CPU
-	/// percentage as a delta since the previous refresh, so a second concurrent
+	/// keeps them current. Exactly one refresher runs per process, whatever the
+	/// number of datastores: `sysinfo` derives CPU percentage as a delta since
+	/// the previous refresh of one process-wide handle, so a second concurrent
 	/// refresher would shorten that window unpredictably and skew the reading.
+	/// Every datastore schedules the job on this interval; the claim in
+	/// [`observe::process`](crate::observe::process) settles which one performs
+	/// it, and hands it on when that datastore goes away. Construction warms the
+	/// cache once per process on top of that, so the first query never reads the
+	/// zeroed default.
 	///
 	/// Default: 30 seconds
 	pub system_metrics_refresh_interval: Duration,

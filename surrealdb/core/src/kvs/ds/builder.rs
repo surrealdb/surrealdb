@@ -413,7 +413,13 @@ impl Builder {
 		// `next_due` of `now`, but it runs on a spawned task, so its first pass
 		// lands some time after this constructor returns. Doing it here closes
 		// that window; the task keeps the values current from then on.
-		crate::sys::refresh().await;
+		//
+		// Only when the cache is cold, because it is shared with every other
+		// datastore in the process: once one of them has warmed it the values
+		// are real and no older than one refresh interval, and refreshing again
+		// here would only cut short the CPU-percentage window of the scheduled
+		// refresher that owns the cadence.
+		crate::sys::refresh_if_cold().await;
 		// Shared from here on: the maintenance tasks hold a `Weak` to it, and
 		// nothing hands out a bare `Datastore` any more.
 		let datastore = Arc::new(datastore);
