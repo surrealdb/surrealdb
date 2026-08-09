@@ -20,6 +20,30 @@ pub fn too_many_transactions() -> TypesError {
 	TypesError::validation("Too many open transactions".to_string(), ValidationError::InvalidParams)
 }
 
+/// Too many concurrently executing streaming queries for the connection.
+pub fn too_many_streams() -> TypesError {
+	TypesError::validation(
+		"Too many concurrent streaming queries".to_string(),
+		ValidationError::InvalidParams,
+	)
+}
+
+/// A streaming query is already in flight under the same request id.
+pub fn stream_exists() -> TypesError {
+	TypesError::validation(
+		"A streaming query with this request id is already in progress".to_string(),
+		ValidationError::InvalidParams,
+	)
+}
+
+/// No in-flight streaming query matches the given request id.
+pub fn stream_not_found() -> TypesError {
+	TypesError::validation(
+		"No streaming query with this request id is in progress".to_string(),
+		ValidationError::InvalidParams,
+	)
+}
+
 /// Invalid request structure.
 pub fn invalid_request() -> TypesError {
 	TypesError::validation("Invalid request".to_string(), ValidationError::InvalidRequest)

@@ -224,6 +224,10 @@ surrealdb-types.workspace = true
 # serves. A dev-dependency: the server has no reason to carry a gRPC *client*
 # in a release build.
 surrealdb = { workspace = true, features = ["protocol-grpc"] }
+# A raw WebSocket client, so the WebSocket wire protocol -- envelope shapes,
+# streaming frames -- can be tested as any SDK would observe it, without an
+# SDK's own buffering in between.
+tokio-tungstenite.workspace = true
 futures.workspace = true
 reqwest = { workspace = true, default-features = false, features = ["http2"] }
 tempfile.workspace = true

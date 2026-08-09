@@ -2,6 +2,7 @@ pub mod format;
 pub mod grpc;
 pub mod http;
 pub mod response;
+pub mod streaming;
 pub mod websocket;
 
 use std::collections::HashMap;

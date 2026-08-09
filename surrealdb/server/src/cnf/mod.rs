@@ -101,6 +101,36 @@ pub static GRPC_MAX_ATTACHED_SESSIONS: LazyLock<usize> =
 pub static GRPC_NOTIFICATION_BUFFER: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_GRPC_NOTIFICATION_BUFFER", usize, 1024);
 
+/// How long a streaming query may wait to hand one frame to a WebSocket
+/// connection's outbound channel before the stream is stopped (default: 30s).
+///
+/// A frame send is what a stalled client blocks, and blocking it stops the
+/// execution being polled while it holds a read snapshot or a transaction. The
+/// wall-clock query timeout would bound that, but it is off by default, so this
+/// is the bound that always applies. It is not a limit on how long a stream may
+/// run: it is reset for every frame, so a client that keeps reading is never
+/// affected.
+///
+/// Clamped to `1..=86_400`. Zero would defeat the grace the terminal frame is
+/// given, and a huge value would overflow the deadline arithmetic it feeds.
+/// There is deliberately no value meaning "no bound", because the bound is what
+/// stops a stalled client pinning an execution.
+pub static WEBSOCKET_STREAM_SEND_TIMEOUT_SECS: LazyLock<u64> = LazyLock::new(|| {
+	static CONFIGURED: LazyLock<u64> =
+		lazy_env_parse!("SURREAL_WEBSOCKET_STREAM_SEND_TIMEOUT", u64, 30);
+	(*CONFIGURED).clamp(1, 86_400)
+});
+
+/// The maximum number of concurrently executing streaming queries on a single
+/// WebSocket connection (default: 32).
+///
+/// Every in-flight stream holds an executing query — with whatever read
+/// snapshot or transaction that entails — for as long as its client keeps
+/// reading, so this bounds what one connection can pin at once. A request over
+/// the cap is refused with an error; nothing is queued.
+pub static WEBSOCKET_MAX_CONCURRENT_STREAMS: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_WEBSOCKET_MAX_CONCURRENT_STREAMS", usize, 32);
+
 /// The maximum number of concurrently open client-managed transactions on a
 /// WebSocket connection's implicit default session (default: 64). Bounds
 /// resource use by a client that opens transactions without committing or

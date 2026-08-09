@@ -37,6 +37,8 @@ pub enum Method {
 	Begin,
 	Commit,
 	Cancel,
+	QueryStream,
+	QueryCancel,
 }
 
 impl Method {
@@ -97,6 +99,9 @@ impl Method {
 			"begin" => Self::Begin,
 			"commit" => Self::Commit,
 			"cancel" => Self::Cancel,
+			// WebSocket-scoped; see the note on `to_str`.
+			"query_stream" => Self::QueryStream,
+			"query_cancel" => Self::QueryCancel,
 			_ => Self::Unknown,
 		}
 	}
@@ -144,6 +149,12 @@ impl Method {
 			Self::Begin => "begin",
 			Self::Commit => "commit",
 			Self::Cancel => "cancel",
+			// These name the WebSocket streaming methods specifically. Denying
+			// `query_stream` does not restrict streaming on other transports:
+			// gRPC streams through its own `Query` RPC, which is gated as
+			// `query` there, so `--deny-rpc query` is what covers it.
+			Self::QueryStream => "query_stream",
+			Self::QueryCancel => "query_cancel",
 		}
 	}
 }
@@ -220,6 +231,22 @@ mod tests {
 		assert!(!Method::Signin.is_transaction_control());
 		assert!(!Method::Signup.is_transaction_control());
 		assert!(!Method::Authenticate.is_transaction_control());
+	}
+
+	#[test]
+	fn streaming_methods_round_trip() {
+		assert_eq!(Method::parse_case_sensitive("query_stream"), Method::QueryStream);
+		assert_eq!(Method::parse_case_insensitive("Query_Stream"), Method::QueryStream);
+		assert_eq!(Method::QueryStream.to_str(), "query_stream");
+		assert!(Method::QueryStream.is_valid());
+		assert_eq!(Method::parse_case_sensitive("query_cancel"), Method::QueryCancel);
+		assert_eq!(Method::parse_case_insensitive("Query_Cancel"), Method::QueryCancel);
+		assert_eq!(Method::QueryCancel.to_str(), "query_cancel");
+		assert!(Method::QueryCancel.is_valid());
+		// Cancelling a streaming query is not transaction control: the
+		// wall-clock timeout must be able to bound it like any other method.
+		assert!(!Method::QueryStream.is_transaction_control());
+		assert!(!Method::QueryCancel.is_transaction_control());
 	}
 
 	#[test]

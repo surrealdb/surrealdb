@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
 use async_channel::Sender;
@@ -68,6 +69,49 @@ const fn method_to_auth_action(method: Method) -> Option<AuthAction> {
 		_ => None,
 	}
 }
+
+/// Deletes the live queries an execution registered after its caller had
+/// already been answered.
+///
+/// An execution that outlives its wall-clock guard carries on detached, so that
+/// it can finalise its transaction rather than be dropped holding it. Its
+/// caller has been given a timeout by then, and no transport will ever see the
+/// results, so a `LIVE SELECT` it commits afterwards has nobody to register it:
+/// notifications for it would be produced and silently discarded for the
+/// lifetime of the datastore, and no cleanup path could find it. Deleting the
+/// rows is what keeps it from becoming that orphan.
+async fn settle_detached_live_queries(
+	kvs: &Datastore,
+	results: Result<Vec<QueryResult>, surrealdb_types::Error>,
+) {
+	let Ok(results) = results else {
+		return;
+	};
+	let orphans: Vec<Uuid> = results
+		.iter()
+		.filter(|result| matches!(result.query_type, QueryType::Live))
+		.filter_map(|result| match &result.result {
+			Ok(PublicValue::Uuid(id)) => Some(id.into_inner()),
+			_ => None,
+		})
+		.collect();
+	if !orphans.is_empty()
+		&& let Err(err) = kvs.delete_queries(orphans).await
+	{
+		error!(
+			target: "surrealdb::core::rpc",
+			"Error cleaning up the live queries of a detached streaming query: {err}"
+		);
+	}
+}
+
+/// How long a streaming execution is given to stop itself after its wall-clock
+/// timeout has tripped its cancel handle, before it is abandoned.
+///
+/// A cooperative stop needs the execution to reach a yield point. One parked
+/// sending into a full `items` channel reaches none until its consumer drains,
+/// so this bounds the wait rather than trusting the consumer to.
+const QUERY_STREAM_STOP_GRACE: Duration = Duration::from_secs(5);
 
 #[expect(async_fn_in_trait)]
 pub trait RpcProtocol {
@@ -451,6 +495,13 @@ pub trait RpcProtocol {
 				Method::Relate => self.relate(txn, session, params).await,
 				Method::Run => self.run(txn, session, params).await,
 				Method::InsertRelation => self.insert_relation(txn, session, params).await,
+				// A streaming query is answered with a sequence of frames, so
+				// it cannot come through this single-response dispatch: a
+				// transport that supports it serves the method before ever
+				// reaching `execute`, and every other transport reports it
+				// absent.
+				Method::QueryStream => Err(method_not_found(method.to_string())),
+				Method::QueryCancel => self.query_cancel(params).await,
 				_ => Err(method_not_found(method.to_string())),
 			};
 			// On success, persist the session if dispatch changed it (or
@@ -1845,6 +1896,12 @@ pub trait RpcProtocol {
 			(query, vars, session.clone())
 		};
 
+		// Kept so the wall-clock guard below can stop the execution
+		// cooperatively rather than by dropping it. Deliberately the caller's
+		// own handle and never the connection-level fallback below: tripping
+		// that would cancel every other query on the same connection because
+		// this one timed out.
+		let guard_cancel = cancel.clone();
 		let cancel = cancel.or_else(|| self.cancel_handle());
 		let kvs = self.kvs_arc();
 		let job = match txn {
@@ -1858,6 +1915,22 @@ pub trait RpcProtocol {
 		// Bound the execution the way `execute` bounds a buffered one. The
 		// guard wraps the run future, so it covers producing every row rather
 		// than only reaching the first.
+		//
+		// It stops the execution by tripping its cancel handle and then
+		// awaiting it, never by dropping it: the execution owns an open
+		// transaction, and dropping the future would leave that transaction
+		// neither committed nor cancelled. The executor short-circuits at its
+		// next yield and finalises the transaction on its normal error path,
+		// which is the same route a client-driven cancellation takes.
+		//
+		// The wait for it to stop is itself bounded. A cooperative stop needs
+		// the execution to reach a yield point, and one parked sending into a
+		// full `items` channel reaches none until its consumer drains -- so a
+		// consumer that has stopped draining would otherwise turn a bounded
+		// timeout into an indefinite wait. Past that grace the caller is
+		// answered with its timeout and the execution carries on detached,
+		// finalising its own transaction; its results settle themselves, since
+		// nothing is left to hand them to.
 		let timeout = self.kvs().query_timeout();
 		// The observer event `execute` emits on completion. A streaming query
 		// does not pass through `execute`, so it reports itself: the identity
@@ -1875,23 +1948,93 @@ pub trait RpcProtocol {
 		let started = web_time::Instant::now();
 		let QueryStreamJob {
 			statement_count,
-			run,
+			mut run,
 		} = job;
 		Ok(QueryStreamJob {
 			statement_count,
 			run: Box::pin(async move {
 				let result = match timeout {
-					Some(timeout) => match common::time::timeout(timeout, run).await {
-						Ok(inner) => inner,
-						Err(_elapsed) => {
-							warn!(
-								target: "surrealdb::core::rpc",
-								timeout = ?timeout,
-								"Streaming query exceeded the configured query timeout"
-							);
-							Err(query_timeout_error(timeout))
+					Some(timeout) => {
+						let deadline = common::time::sleep(timeout);
+						tokio::pin!(deadline);
+						let mut elapsed = false;
+						loop {
+							tokio::select! {
+								// The execution is polled first so that it wins
+								// a tie: a run that completes in the same poll
+								// as the deadline has produced a real answer,
+								// and an unbiased choice would discard it and
+								// report a timeout roughly half the time.
+								biased;
+								result = &mut run => {
+									// The deadline may have fired first, in
+									// which case the execution has just
+									// finished stopping and the timeout is the
+									// caller's answer.
+									break if elapsed {
+										warn!(
+											target: "surrealdb::core::rpc",
+											timeout = ?timeout,
+											"Streaming query exceeded the configured query timeout"
+										);
+										Err(query_timeout_error(timeout))
+									} else {
+										result
+									};
+								}
+							_ = &mut deadline => {
+									if elapsed {
+										// The grace elapsed: the execution did
+										// not stop cooperatively. It is handed
+										// on rather than dropped -- dropping it
+										// would leave its transaction neither
+										// committed nor cancelled -- so the
+										// caller gets its timeout now while the
+										// execution finalises itself.
+										error!(
+											target: "surrealdb::core::rpc",
+											timeout = ?timeout,
+											"Streaming query did not stop within the grace period \
+											 after its timeout; detaching it to finalise on its own"
+										);
+										#[cfg(not(target_family = "wasm"))]
+										{
+											let kvs = Arc::clone(&kvs);
+											tokio::spawn(async move {
+												settle_detached_live_queries(&kvs, run.await).await;
+											});
+											break Err(query_timeout_error(timeout));
+										}
+										// No task to hand it to here, and
+										// dropping it is the one thing that
+										// must not happen, so keep polling it:
+										// the tripped handle and the
+										// execution's own context deadline are
+										// what end it.
+										#[cfg(target_family = "wasm")]
+										{
+											settle_detached_live_queries(&kvs, run.await).await;
+											break Err(query_timeout_error(timeout));
+										}
+									}
+									elapsed = true;
+									// Cooperative: the execution keeps being
+									// polled until it returns, so it finalises
+									// its transaction itself. Its consumer is
+									// what drains `items`, and it is driving
+									// this future, so closing the channel here
+									// is neither needed nor ours to do.
+									if let Some(cancel) = &guard_cancel {
+										cancel.trip();
+									}
+									// Re-arm as the abandonment deadline.
+									deadline.as_mut().reset(
+										common::time::Instant::now() + QUERY_STREAM_STOP_GRACE,
+									);
+								}
+							}
 						}
-					},
+					}
 					None => run.await,
 				};
 				if let Some(identity) = &identity {
@@ -1911,6 +2054,20 @@ pub trait RpcProtocol {
 				result
 			}),
 		})
+	}
+
+	/// Cancels an in-flight streaming query by its originating request id.
+	///
+	/// The registry of in-flight streams is transport state — a stream is
+	/// reachable only from the connection that started it — so the base
+	/// implementation reports the method as absent, exactly as a server
+	/// without streaming would. A transport that serves `query_stream`
+	/// overrides this with a lookup into its own registry. `execute` applies
+	/// the capability gate for [`Method::QueryCancel`] before dispatching
+	/// here, as it does for every method.
+	async fn query_cancel(&self, params: PublicArray) -> Result<DbResult, surrealdb_types::Error> {
+		let _ = params;
+		Err(method_not_found(Method::QueryCancel.to_string()))
 	}
 
 	async fn gql(

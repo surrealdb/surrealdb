@@ -35,8 +35,9 @@ impl DbResultStats {
 }
 
 /// The data returned by the database
-// The variants here should be in exactly the same order as the SDK's remote WebSocket `Data`
-// In future, they will possibly be merged to avoid having to keep them in sync.
+// This enum is the single wire type shared by the server and the Rust SDK's
+// remote engines; both sides match on it directly, so a new variant reaches
+// them together.
 #[derive(Debug, Serialize, Deserialize)]
 pub enum DbResult {
 	/// Generally methods return a `expr::Value`

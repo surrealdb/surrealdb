@@ -393,6 +393,54 @@ transaction management, notification routing
 - Messages in the wrong frame type for the negotiated format must be rejected before
   parsing.
 - All open transactions must be explicitly cancelled on WebSocket disconnect.
+- Streaming queries (`query_stream`) must be capped per WebSocket connection
+  (`WEBSOCKET_MAX_CONCURRENT_STREAMS`): each in-flight stream holds an executing
+  query — and whatever snapshot or transaction that entails — for as long as its
+  client reads.
+- A streaming execution future must never be dropped mid-flight (it owns an open
+  transaction); stopping a stream is always the cooperative pair of tripping its
+  cancel handle *and* closing its items channel, and the driver then polls the
+  execution to completion. Every frame send must be raced against the connection
+  canceller and the query's wall-clock deadline, because a client that stops
+  reading otherwise parks the driver on a full outbound channel with the
+  execution unpolled and its timeout guard never firing.
+- The stream registry (`query_cancel`'s lookup) is per-connection, like the
+  session map: a client must never be able to reach another connection's
+  streams.
+- Streamed rows are provisional until their statement's `Finished` frame; a
+  statement or stream failure must retract them (error on the terminal frame),
+  never abandon them silently mid-protocol. A stream that was stopped rather
+  than answered — cancelled, torn down, or abandoned because frames could no
+  longer be delivered — must carry an error on its terminal `End`: the
+  executor reports abandonment as success, so without it a truncated answer
+  reads as a whole one. An outcome already delivered to the client can never be
+  retracted; when a later failure would contradict it, the whole stream fails.
+- No transport may hold a `DashMap` guard (session map, transaction map, stream
+  registry) across an `await`. The guards are blocking locks over a whole
+  shard, and the awaits on these paths are sends on client-paced channels: a
+  guard held across one lets a single connection park worker threads
+  server-wide, including every other transport's.
+- A streaming execution runs against a **snapshot** of its session, taken when
+  the query starts: the buffered path holds the session read guard for the whole
+  execution, but a stream lives as long as its client reads, and holding the
+  guard that long would block every `use` / `set` / `signin` behind a slow
+  client. The consequence is that authorization teardown — `invalidate`, a token
+  revocation, `detach` — does not stop a stream already in flight; it succeeds
+  immediately while the stream finishes under the authorization it started with.
+  What bounds that exposure is the stream's own lifetime, so a transport that
+  streams must keep one: a per-frame send timeout that always applies, not only
+  a wall-clock query timeout an operator may not have configured. Revocation
+  that must take effect immediately has to close the connection.
+- A `LIVE SELECT` executed through a stream must be registered for notification
+  delivery from the execution's completed results (as the buffered path does),
+  or its datastore rows become orphans that disconnect cleanup cannot find.
+  Where registration cannot happen — the session was detached mid-query, the
+  execution failed as a whole and returned no results, or the client abandoned
+  the stream before it reached the registration — the committed rows must be
+  deleted instead, never left registered to a torn-down authorization and never
+  left behind. A transport whose stream can be dropped mid-execution has to
+  track the ids as they are framed, since after the drop nothing else knows
+  them.
 
 ### Review Triggers
 
@@ -404,6 +452,8 @@ Flag when changes touch:
 - The `gql` RPC method (GQL: must keep `allows_query_by_subject` and the
   `ExperimentalTarget::Gql` gate in `Datastore::parse_gql`)
 - Transaction methods (begin/commit/cancel) or transaction map
+- The streaming driver (`rpc/streaming.rs`), the stream registry, or the
+  `query_stream`/`query_cancel` methods
 - Notification routing or LiveQueries map structure
 - HTTP RPC handler session management
 - Durable session persistence (`Http::load_session`/`persist_session`/

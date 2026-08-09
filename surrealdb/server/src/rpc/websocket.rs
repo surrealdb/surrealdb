@@ -22,6 +22,7 @@ use surrealdb_observe::{
 	NetworkBytesEvent, NetworkBytesEventCtx, NetworkBytesEventSafe, NetworkDirection,
 	SessionAction, SessionEvent, SessionEventCtx, SessionEventSafe, SessionProtocol,
 };
+use surrealdb_rpc::error::{invalid_params, stream_not_found};
 use surrealdb_rpc::{DbResponse, DbResult, Method};
 use surrealdb_types::{Array, Error as TypesError, HashMap, ToSql, Value};
 use tokio::sync::RwLock;
@@ -110,6 +111,13 @@ pub struct Websocket {
 	/// Enforces [`MAX_TRANSACTIONS_PER_CONNECTION`] /
 	/// [`MAX_TRANSACTIONS_PER_SESSION`].
 	pub(crate) counters: DashMap<Uuid, AtomicUsize>,
+	/// The streaming queries currently executing on this connection, keyed by
+	/// the canonical rendering of each one's request id. Entered before a
+	/// stream's execution starts and removed when its driver returns, so
+	/// `query_cancel` can reach any stream that is still producing frames.
+	/// Per-connection, like [`Self::sessions`]: a client can only ever cancel
+	/// its own streams. Bounded by [`WEBSOCKET_MAX_CONCURRENT_STREAMS`].
+	pub(crate) streams: DashMap<String, crate::rpc::streaming::StreamHandle>,
 	/// A cancellation token called when shutting down the server
 	pub(crate) shutdown: CancellationToken,
 	/// Connection-level cancellation handle. Bundles a hot-path
@@ -160,6 +168,7 @@ impl Websocket {
 			sessions: HashMap::new(),
 			transactions: DashMap::new(),
 			counters: DashMap::new(),
+			streams: DashMap::new(),
 			channel: sender.clone(),
 			datastore,
 		});
@@ -595,7 +604,7 @@ impl Websocket {
 						)
 						.await;
 					}
-					// Otherwise process the request message inline. The
+					// Otherwise process the request inline. Either way, the
 					// handler MUST NOT be raced against the connection-level
 					// canceller via `tokio::select!`: that would drop the
 					// handler future together with whatever transaction the
@@ -612,12 +621,34 @@ impl Websocket {
 					// its next yield with `Reason::Canceled`, the
 					// transaction is finalised on the executor's normal
 					// error path, and this handler returns an
-					// `Err(QueryCancelled)` like any other failure.
+					// `Err(QueryCancelled)` like any other failure. The
+					// streaming driver observes the same canceller
+					// cooperatively for the same reason.
 					//
 					// The read loop drains its `FuturesUnordered` of
 					// in-flight `handle_message` futures on cancel rather
 					// than dropping it (see `read`), so this future is
 					// never dropped mid-flight in production.
+					//
+					// A streaming query is answered with a sequence of frames
+					// rather than one response, so it cannot go through the
+					// single-response dispatch below; its driver owns the
+					// whole exchange, including every failure answer.
+					else if req.method == Method::QueryStream {
+						let client_session: Option<Uuid> = req.session_id.map(Into::into);
+						let session_id = client_session.unwrap_or(rpc.id);
+						crate::rpc::streaming::process_query_stream(
+							rpc,
+							req.id,
+							session_id,
+							client_session,
+							req.txn.map(Into::into),
+							req.params,
+							chn,
+						)
+						.await;
+					}
+					// Otherwise process the request message inline
 					else {
 						let client_session: Option<Uuid> = req.session_id.map(Into::into);
 						let session_id = client_session.unwrap_or(rpc.id);
@@ -1094,6 +1125,27 @@ impl RpcProtocol for Websocket {
 		Ok(DbResult::Other(Value::None))
 	}
 
+	/// Cancel an in-flight streaming query by its originating request id.
+	///
+	/// Stops the stream's execution cooperatively: the driver observes the
+	/// stop, drives the execution to its cancelled completion so its
+	/// transaction is finalised, and still ends the stream with an `End`
+	/// frame reflecting how far it got. The registry is per-connection, so a
+	/// client can only ever cancel its own streams; a request id with no
+	/// stream in flight — including one that just finished — is an error the
+	/// caller can disregard.
+	async fn query_cancel(&self, params: Array) -> Result<DbResult, surrealdb_types::Error> {
+		let mut params = params.into_vec();
+		let (Some(id), None) = (params.pop(), params.pop()) else {
+			return Err(invalid_params("Expected the request id of the streaming query to cancel"));
+		};
+		let Some(handle) = self.streams.get(&id.to_sql()) else {
+			return Err(stream_not_found());
+		};
+		handle.stop();
+		Ok(DbResult::Other(Value::None))
+	}
+
 	/// Cancel a transaction
 	async fn cancel(
 		&self,
@@ -1345,6 +1397,7 @@ mod tests {
 			sessions: HashMap::new(),
 			transactions: DashMap::new(),
 			counters: DashMap::new(),
+			streams: DashMap::new(),
 			shutdown: CancellationToken::new(),
 			cancel: surrealdb_core::ctx::CancelHandle::new(),
 			channel: tx,
@@ -1675,6 +1728,7 @@ mod tests {
 				sessions: HashMap::new(),
 				transactions: DashMap::new(),
 				counters: DashMap::new(),
+				streams: DashMap::new(),
 				shutdown: CancellationToken::new(),
 				cancel: surrealdb_core::ctx::CancelHandle::new(),
 				channel: chn_internal,
@@ -1795,6 +1849,7 @@ mod tests {
 				sessions: HashMap::new(),
 				transactions: DashMap::new(),
 				counters: DashMap::new(),
+				streams: DashMap::new(),
 				shutdown: CancellationToken::new(),
 				cancel: surrealdb_core::ctx::CancelHandle::new(),
 				channel: chn_internal,
@@ -1903,6 +1958,7 @@ mod tests {
 				sessions: HashMap::new(),
 				transactions: DashMap::new(),
 				counters: DashMap::new(),
+				streams: DashMap::new(),
 				shutdown: CancellationToken::new(),
 				cancel: surrealdb_core::ctx::CancelHandle::new(),
 				channel: chn_internal,
@@ -1986,6 +2042,7 @@ mod tests {
 				sessions: HashMap::new(),
 				transactions: DashMap::new(),
 				counters: DashMap::new(),
+				streams: DashMap::new(),
 				shutdown: CancellationToken::new(),
 				cancel: surrealdb_core::ctx::CancelHandle::new(),
 				channel,
@@ -2204,6 +2261,7 @@ mod tests {
 				sessions: HashMap::new(),
 				transactions: DashMap::new(),
 				counters: DashMap::new(),
+				streams: DashMap::new(),
 				shutdown: CancellationToken::new(),
 				cancel: surrealdb_core::ctx::CancelHandle::new(),
 				channel: chn_internal,
@@ -2432,6 +2490,967 @@ mod tests {
 				);
 			}
 			rpc.cleanup_all_txns().await;
+		});
+	}
+
+	// ------------------------------------------------------------------
+	// Streaming (`query_stream` / `query_cancel`)
+	// ------------------------------------------------------------------
+
+	/// A Websocket over a fresh datastore with the given capabilities, its
+	/// owner session pinned under the connection id against a prepared
+	/// `test`/`test` namespace and database.
+	async fn streaming_rpc(
+		capabilities: surrealdb_rpc::capabilities::Capabilities,
+	) -> Arc<Websocket> {
+		let ds = Datastore::builder()
+			.with_capabilities(capabilities)
+			.build_with_path("memory")
+			.await
+			.unwrap();
+		let owner = Session::owner();
+		ds.execute("DEFINE NS `test`", &owner, None).await.unwrap();
+		ds.execute("DEFINE DB `test`", &owner.clone().with_ns("test"), None).await.unwrap();
+		let state = Arc::new(crate::rpc::RpcState::new(Arc::clone(&ds)));
+		let (tx, _rx) = channel::<Message>(8);
+		let rpc = Arc::new(Websocket {
+			id: Uuid::new_v4(),
+			format: Format::Json,
+			state,
+			datastore: ds,
+			sessions: HashMap::new(),
+			transactions: DashMap::new(),
+			counters: DashMap::new(),
+			streams: DashMap::new(),
+			shutdown: CancellationToken::new(),
+			cancel: surrealdb_core::ctx::CancelHandle::new(),
+			channel: tx,
+		});
+		let sess = Session::owner().with_ns("test").with_db("test").with_rt(true);
+		rpc.set_session(rpc.id, Arc::new(RwLock::new(sess)));
+		rpc
+	}
+
+	/// Run one SurrealQL statement directly against the datastore, for
+	/// seeding.
+	async fn seed(rpc: &Websocket, sql: &str) {
+		let sess = Session::owner().with_ns("test").with_db("test");
+		for result in rpc.kvs().execute(sql, &sess, None).await.unwrap() {
+			result.result.expect("seeding should succeed");
+		}
+	}
+
+	/// Send one request and collect every message it answers with, decoded
+	/// from the Json format. The messages are consumed while the handler
+	/// runs, so channel backpressure never parks it.
+	async fn collect_messages(
+		rpc: &Arc<Websocket>,
+		body: serde_json::Value,
+	) -> Vec<serde_json::Value> {
+		let msg = Message::Text(body.to_string().into());
+		let (chn_tx, mut chn_rx) = channel::<Message>(8);
+		let handler = tokio::spawn({
+			let rpc = Arc::clone(rpc);
+			async move {
+				Websocket::handle_message(&rpc, msg, chn_tx, 1024).await;
+			}
+		});
+		let mut messages = Vec::new();
+		while let Some(msg) = chn_rx.recv().await {
+			messages.push(decode_json(msg));
+		}
+		handler.await.expect("handler completes");
+		messages
+	}
+
+	/// Send one `query_stream` request for `sql` and collect its messages.
+	async fn stream_request(rpc: &Arc<Websocket>, id: &str, sql: &str) -> Vec<serde_json::Value> {
+		collect_messages(
+			rpc,
+			serde_json::json!({ "id": id, "method": "query_stream", "params": [sql] }),
+		)
+		.await
+	}
+
+	fn decode_json(msg: Message) -> serde_json::Value {
+		match msg {
+			Message::Text(text) => serde_json::from_str(&text).expect("valid response json"),
+			other => panic!("expected Text response from Json format, got {other:?}"),
+		}
+	}
+
+	/// The frame tag of a message, when it is a stream frame.
+	fn frame_tag(msg: &serde_json::Value) -> Option<&str> {
+		msg.get("result")?.get("stream")?.as_str()
+	}
+
+	/// The `query_stream` answer is the framed form of the buffered answer:
+	/// ordered frames bracketed by `begin` and `end`, rows re-batched along
+	/// the ramp, a scalar statement marked `single`, and every frame carrying
+	/// the request id.
+	#[test]
+	fn a_streaming_query_answers_with_ordered_frames() {
+		with_big_stack(|| async {
+			use surrealdb_rpc::capabilities::Capabilities;
+			let rpc = streaming_rpc(Capabilities::all()).await;
+			// Enough rows that the ramp needs more than one frame.
+			seed(&rpc, "CREATE |foo:40| SET x = 1 RETURN NONE").await;
+			let messages = stream_request(&rpc, "s1", "SELECT * FROM foo; RETURN 1 + 1;").await;
+
+			for msg in &messages {
+				assert_eq!(msg["id"], "s1", "every frame carries the request id: {msg}");
+			}
+			let tags: Vec<&str> =
+				messages.iter().map(|m| frame_tag(m).expect("a stream frame")).collect();
+			assert_eq!(tags.first(), Some(&"begin"), "the stream opens before any result");
+			assert_eq!(tags.last(), Some(&"end"), "the stream ends exactly once");
+			assert_eq!(messages[0]["result"]["statements"], 2);
+
+			// Statement 0: forty rows, split along the ramp, then a
+			// non-single finish.
+			let rows: Vec<&serde_json::Value> =
+				messages.iter().filter(|m| frame_tag(m) == Some("rows")).collect();
+			assert!(rows.len() >= 2, "40 rows do not fit the first ramp frame: {tags:?}");
+			let delivered: usize =
+				rows.iter().map(|m| m["result"]["values"].as_array().unwrap().len()).sum();
+			assert_eq!(delivered, 40, "every row arrives exactly once");
+			assert_eq!(rows[0]["result"]["values"].as_array().unwrap().len(), 16);
+
+			// Statement 1: a single value, marked as such by its finish.
+			let value = messages
+				.iter()
+				.find(|m| frame_tag(m) == Some("value"))
+				.expect("the RETURN produces a value frame");
+			assert_eq!(value["result"]["index"], 1);
+			assert_eq!(value["result"]["value"], 2);
+
+			let finishes: Vec<&serde_json::Value> =
+				messages.iter().filter(|m| frame_tag(m) == Some("finished")).collect();
+			assert_eq!(finishes.len(), 2, "one finish per statement");
+			assert_eq!(finishes[0]["result"]["index"], 0);
+			assert_eq!(finishes[0]["result"]["single"], false);
+			assert!(finishes[0]["result"].get("error").is_none());
+			assert_eq!(finishes[1]["result"]["index"], 1);
+			assert_eq!(finishes[1]["result"]["single"], true);
+
+			let end = &messages[messages.len() - 1]["result"];
+			assert_eq!(end["results"], 2);
+			assert!(end.get("error").is_none());
+			assert!(rpc.streams.is_empty(), "the stream registry is drained");
+		});
+	}
+
+	/// Rows must reach the wire while the query is still executing: a
+	/// trailing SLEEP holds the stream open long after the first statement's
+	/// rows are produced, so observing them before the end frame — by more
+	/// than the sleep — proves streaming rather than buffering.
+	#[test]
+	fn rows_reach_the_wire_before_the_query_finishes() {
+		use std::time::Duration as StdDuration;
+		with_big_stack(|| async {
+			use surrealdb_rpc::capabilities::Capabilities;
+			let rpc = streaming_rpc(Capabilities::all()).await;
+			seed(&rpc, "CREATE |foo:20| SET x = 1 RETURN NONE").await;
+
+			let body = serde_json::json!({
+				"id": "t1",
+				"method": "query_stream",
+				"params": ["SELECT * FROM foo; SLEEP 300ms;"],
+			});
+			let msg = Message::Text(body.to_string().into());
+			let (chn_tx, mut chn_rx) = channel::<Message>(8);
+			let handler = tokio::spawn({
+				let rpc = Arc::clone(&rpc);
+				async move {
+					Websocket::handle_message(&rpc, msg, chn_tx, 1024).await;
+				}
+			});
+			let mut first_rows = None;
+			let mut end = None;
+			while let Some(msg) = chn_rx.recv().await {
+				let msg = decode_json(msg);
+				match frame_tag(&msg) {
+					Some("rows") if first_rows.is_none() => {
+						first_rows = Some(tokio::time::Instant::now());
+					}
+					Some("end") => end = Some(tokio::time::Instant::now()),
+					_ => {}
+				}
+			}
+			handler.await.expect("handler completes");
+			let first_rows = first_rows.expect("rows were streamed");
+			let end = end.expect("the stream ended");
+			assert!(
+				end.duration_since(first_rows) >= StdDuration::from_millis(250),
+				"the first rows must precede the query's completion by the sleep",
+			);
+		});
+	}
+
+	/// Inside a transaction block that rolls back, rows already on the wire
+	/// are retracted by their statement's error finish — never by silence.
+	#[test]
+	fn a_rolled_back_block_retracts_its_rows_on_the_wire() {
+		with_big_stack(|| async {
+			use surrealdb_rpc::capabilities::Capabilities;
+			let rpc = streaming_rpc(Capabilities::all()).await;
+			seed(&rpc, "CREATE |foo:20| SET x = 1 RETURN NONE").await;
+			let messages = stream_request(
+				&rpc,
+				"r1",
+				"BEGIN; SELECT * FROM foo; THROW 'rolled back'; COMMIT;",
+			)
+			.await;
+
+			let rows_indices: Vec<i64> = messages
+				.iter()
+				.filter(|m| frame_tag(m) == Some("rows"))
+				.map(|m| m["result"]["index"].as_i64().unwrap())
+				.collect();
+			assert!(!rows_indices.is_empty(), "rows go out before the block fails");
+			for index in &rows_indices {
+				let finish = messages
+					.iter()
+					.find(|m| {
+						frame_tag(m) == Some("finished")
+							&& m["result"]["index"].as_i64() == Some(*index)
+					})
+					.expect("every streamed statement still finishes");
+				assert!(
+					finish["result"].get("error").is_some(),
+					"a rolled-back statement's finish must retract its rows: {finish}",
+				);
+			}
+			assert_eq!(
+				frame_tag(&messages[messages.len() - 1]),
+				Some("end"),
+				"the stream still ends in order",
+			);
+		});
+	}
+
+	/// `query_cancel` names an in-flight stream by its request id and stops
+	/// it: the stream still ends cleanly — promptly, not after the query
+	/// would have finished — and the registry entry is gone.
+	#[test]
+	fn query_cancel_stops_a_streaming_query() {
+		use std::time::Duration as StdDuration;
+		with_big_stack(|| async {
+			use surrealdb_rpc::capabilities::Capabilities;
+			let rpc = streaming_rpc(Capabilities::all()).await;
+			let started = tokio::time::Instant::now();
+			let body = serde_json::json!({
+				"id": "c1",
+				"method": "query_stream",
+				"params": ["SLEEP 30s; RETURN 1;"],
+			});
+			let msg = Message::Text(body.to_string().into());
+			let (chn_tx, mut chn_rx) = channel::<Message>(8);
+			let handler = tokio::spawn({
+				let rpc = Arc::clone(&rpc);
+				async move {
+					Websocket::handle_message(&rpc, msg, chn_tx, 1024).await;
+				}
+			});
+			// The begin frame proves the stream is registered before the
+			// cancel goes looking for it.
+			let first = decode_json(chn_rx.recv().await.expect("a first frame"));
+			assert_eq!(frame_tag(&first), Some("begin"));
+
+			// Cancel through the full envelope path, as a client would.
+			let cancel = collect_messages(
+				&rpc,
+				serde_json::json!({
+					"id": "c2",
+					"method": "query_cancel",
+					"params": ["c1"],
+				}),
+			)
+			.await;
+			assert_eq!(cancel.len(), 1);
+			assert_eq!(cancel[0]["id"], "c2");
+			assert!(cancel[0].get("error").is_none(), "the cancel succeeds: {:?}", cancel[0]);
+
+			// The stream ends long before the 30s sleep would have, and its
+			// end frame says the answer is incomplete: a client must not read
+			// a cancelled stream as a whole one.
+			let mut end = None;
+			while let Some(msg) = chn_rx.recv().await {
+				let msg = decode_json(msg);
+				if frame_tag(&msg) == Some("end") {
+					end = Some(msg);
+				}
+			}
+			handler.await.expect("handler completes");
+			let end = end.expect("a cancelled stream still ends with its end frame");
+			assert!(
+				end["result"].get("error").is_some(),
+				"a cancelled stream's end frame must retract what it never delivered: {end}",
+			);
+			assert!(
+				started.elapsed() < StdDuration::from_secs(20),
+				"the cancel must interrupt the sleep",
+			);
+			assert!(rpc.streams.is_empty(), "the registry entry is removed");
+
+			// A second cancel finds nothing to stop.
+			let again = RpcProtocol::query_cancel(
+				rpc.as_ref(),
+				Array::from(vec![Value::String("c1".to_string())]),
+			)
+			.await;
+			assert!(again.is_err(), "cancelling a finished stream is an error");
+		});
+	}
+
+	/// Frames are correlated by the request id, so a request without one is
+	/// refused before anything runs.
+	#[test]
+	fn a_streaming_query_requires_a_request_id() {
+		with_big_stack(|| async {
+			use surrealdb_rpc::capabilities::Capabilities;
+			let rpc = streaming_rpc(Capabilities::all()).await;
+			let messages = collect_messages(
+				&rpc,
+				serde_json::json!({ "method": "query_stream", "params": ["RETURN 1;"] }),
+			)
+			.await;
+			assert_eq!(messages.len(), 1, "one failure, no frames: {messages:?}");
+			let error = messages[0]["error"]["message"].as_str().unwrap_or_default();
+			assert!(error.contains("request id"), "names the missing id: {error}");
+		});
+	}
+
+	/// A request id names one stream: while it is in flight, a second
+	/// request under the same id is refused and the original is undisturbed.
+	/// Undisturbed includes its registration — a cancel after the refusal
+	/// must stop the original stream, not a leftover of the duplicate.
+	#[test]
+	fn a_duplicate_stream_id_is_refused() {
+		use std::time::Duration as StdDuration;
+		with_big_stack(|| async {
+			use surrealdb_rpc::capabilities::Capabilities;
+			let rpc = streaming_rpc(Capabilities::all()).await;
+			let started = tokio::time::Instant::now();
+			let body = serde_json::json!({
+				"id": "dup",
+				"method": "query_stream",
+				"params": ["SLEEP 30s;"],
+			});
+			let msg = Message::Text(body.to_string().into());
+			let (chn_tx, mut chn_rx) = channel::<Message>(8);
+			let handler = tokio::spawn({
+				let rpc = Arc::clone(&rpc);
+				async move {
+					Websocket::handle_message(&rpc, msg, chn_tx, 1024).await;
+				}
+			});
+			let first = decode_json(chn_rx.recv().await.expect("a first frame"));
+			assert_eq!(frame_tag(&first), Some("begin"));
+
+			let duplicate = collect_messages(
+				&rpc,
+				serde_json::json!({
+					"id": "dup",
+					"method": "query_stream",
+					"params": ["RETURN 1;"],
+				}),
+			)
+			.await;
+			assert_eq!(duplicate.len(), 1, "the duplicate is refused outright");
+			assert!(
+				duplicate[0]["error"]["message"]
+					.as_str()
+					.unwrap_or_default()
+					.contains("already in progress"),
+				"names the collision: {:?}",
+				duplicate[0],
+			);
+
+			// The original stream is still cancellable — it was not clobbered.
+			RpcProtocol::query_cancel(
+				rpc.as_ref(),
+				Array::from(vec![Value::String("dup".to_string())]),
+			)
+			.await
+			.expect("the original stream is still registered");
+			while chn_rx.recv().await.is_some() {}
+			handler.await.expect("handler completes");
+			// The cancel reached the ORIGINAL stream's execution: had the
+			// duplicate clobbered its registration, the cancel would have
+			// tripped a dangling handle and the sleep would run its full
+			// course.
+			assert!(
+				started.elapsed() < StdDuration::from_secs(20),
+				"the cancel must interrupt the original stream's sleep",
+			);
+		});
+	}
+
+	/// A connection holds at most [`WEBSOCKET_MAX_CONCURRENT_STREAMS`]
+	/// executing streams: the excess request is refused outright — nothing is
+	/// queued — and cancelling the others frees the slots.
+	#[test]
+	fn the_concurrent_stream_cap_refuses_the_excess_stream() {
+		with_big_stack(|| async {
+			use surrealdb_rpc::capabilities::Capabilities;
+
+			use crate::cnf::WEBSOCKET_MAX_CONCURRENT_STREAMS;
+			let rpc = streaming_rpc(Capabilities::all()).await;
+			let mut streams = Vec::new();
+			for i in 0..*WEBSOCKET_MAX_CONCURRENT_STREAMS {
+				let body = serde_json::json!({
+					"id": format!("s{i}"),
+					"method": "query_stream",
+					"params": ["SLEEP 30s;"],
+				});
+				let msg = Message::Text(body.to_string().into());
+				let (chn_tx, mut chn_rx) = channel::<Message>(8);
+				let handler = tokio::spawn({
+					let rpc = Arc::clone(&rpc);
+					async move {
+						Websocket::handle_message(&rpc, msg, chn_tx, 1024).await;
+					}
+				});
+				let first = decode_json(chn_rx.recv().await.expect("a first frame"));
+				assert_eq!(frame_tag(&first), Some("begin"), "stream {i} starts");
+				streams.push((handler, chn_rx));
+			}
+
+			let refused = collect_messages(
+				&rpc,
+				serde_json::json!({
+					"id": "over",
+					"method": "query_stream",
+					"params": ["RETURN 1;"],
+				}),
+			)
+			.await;
+			assert_eq!(refused.len(), 1, "the excess stream is refused outright");
+			assert!(
+				refused[0]["error"]["message"]
+					.as_str()
+					.unwrap_or_default()
+					.contains("Too many concurrent streaming queries"),
+				"names the cap: {:?}",
+				refused[0],
+			);
+
+			for i in 0..streams.len() {
+				RpcProtocol::query_cancel(
+					rpc.as_ref(),
+					Array::from(vec![Value::String(format!("s{i}"))]),
+				)
+				.await
+				.expect("cancel stream");
+			}
+			for (handler, mut chn_rx) in streams {
+				while chn_rx.recv().await.is_some() {}
+				handler.await.expect("handler completes");
+			}
+			assert!(rpc.streams.is_empty(), "every slot is freed");
+		});
+	}
+
+	/// A rejected request holds no reservation while it reports the rejection.
+	///
+	/// Reporting is an awaited send, so on a connection that has stopped
+	/// reading it parks. The read loop keeps accepting messages, so if a
+	/// rejection kept its reservation while parked, a client could grow the
+	/// registry without bound precisely by refusing to read — defeating the
+	/// cap it was being refused by.
+	#[test]
+	fn an_over_cap_rejection_holds_no_reservation_while_it_parks() {
+		with_big_stack(|| async {
+			use surrealdb_rpc::capabilities::Capabilities;
+
+			use crate::cnf::WEBSOCKET_MAX_CONCURRENT_STREAMS;
+			let cap = *WEBSOCKET_MAX_CONCURRENT_STREAMS;
+			let rpc = streaming_rpc(Capabilities::all()).await;
+			// Fill the cap with streams that stay open.
+			let mut streams = Vec::new();
+			for i in 0..cap {
+				let body = serde_json::json!({
+					"id": format!("s{i}"),
+					"method": "query_stream",
+					"params": ["SLEEP 30s;"],
+				});
+				let msg = Message::Text(body.to_string().into());
+				let (chn_tx, mut chn_rx) = channel::<Message>(8);
+				let handler = tokio::spawn({
+					let rpc = Arc::clone(&rpc);
+					async move {
+						Websocket::handle_message(&rpc, msg, chn_tx, 1024).await;
+					}
+				});
+				let first = decode_json(chn_rx.recv().await.expect("a first frame"));
+				assert_eq!(frame_tag(&first), Some("begin"), "stream {i} starts");
+				streams.push((handler, chn_rx));
+			}
+			assert_eq!(rpc.streams.len(), cap, "the cap is full");
+
+			// A channel nobody drains, saturated so the next send parks: this
+			// is a client that has stopped reading.
+			let (stalled_tx, mut stalled_rx) = channel::<Message>(1);
+			stalled_tx.send(Message::Text("filler".into())).await.expect("saturate the channel");
+
+			// Over-cap requests, each with a fresh id, all parking on their
+			// rejection.
+			let mut rejected = Vec::new();
+			for i in 0..8 {
+				let body = serde_json::json!({
+					"id": format!("over{i}"),
+					"method": "query_stream",
+					"params": ["RETURN 1;"],
+				});
+				let msg = Message::Text(body.to_string().into());
+				rejected.push(tokio::spawn({
+					let rpc = Arc::clone(&rpc);
+					let chn = stalled_tx.clone();
+					async move {
+						Websocket::handle_message(&rpc, msg, chn, 1024).await;
+					}
+				}));
+			}
+			// Observe each rejection actually reaching its parked send, rather
+			// than sleeping and hoping: the filler occupies the only slot, so
+			// draining one message frees exactly one rejection to complete its
+			// send. Every rejection observed this way is one that was parked
+			// while the registry was inspected.
+			let filler = stalled_rx.recv().await.expect("the filler message");
+			assert!(matches!(filler, Message::Text(_)), "the filler is what saturated the channel");
+			for observed in 0..rejected.len() {
+				let msg = decode_json(
+					tokio::time::timeout(std::time::Duration::from_secs(10), stalled_rx.recv())
+						.await
+						.expect("a rejection reaches its send")
+						.expect("the channel stays open"),
+				);
+				assert!(
+					msg["error"]["message"]
+						.as_str()
+						.unwrap_or_default()
+						.contains("Too many concurrent streaming queries"),
+					"each parked message is an over-cap rejection: {msg}",
+				);
+				// The invariant, checked while the remaining rejections are
+				// still parked: none of them is holding a reservation.
+				assert_eq!(
+					rpc.streams.len(),
+					cap,
+					"with {} rejection(s) still parked, the registry grew to {} beyond the \
+					 cap of {cap}",
+					rejected.len() - observed - 1,
+					rpc.streams.len(),
+				);
+			}
+
+			for handler in rejected {
+				handler.await.expect("each rejection completes");
+			}
+			for i in 0..cap {
+				RpcProtocol::query_cancel(
+					rpc.as_ref(),
+					Array::from(vec![Value::String(format!("s{i}"))]),
+				)
+				.await
+				.expect("cancel stream");
+			}
+			for (handler, mut chn_rx) in streams {
+				while chn_rx.recv().await.is_some() {}
+				handler.await.expect("handler completes");
+			}
+		});
+	}
+
+	/// The bracket frames survive a cancel: a client told a stream ended must
+	/// also have been told it began, or it cannot reconcile the two.
+	#[test]
+	fn a_cancel_cannot_drop_the_frames_that_bracket_a_stream() {
+		with_big_stack(|| async {
+			use surrealdb_rpc::capabilities::Capabilities;
+			let rpc = streaming_rpc(Capabilities::all()).await;
+			// Trip the stream's canceller before its first frame can go out, by
+			// cancelling as soon as the registry entry exists. A channel with
+			// room means the send would otherwise succeed, so only the cancel
+			// race can drop `Begin`.
+			let body = serde_json::json!({
+				"id": "b1",
+				"method": "query_stream",
+				"params": ["SLEEP 5s; RETURN 1;"],
+			});
+			let msg = Message::Text(body.to_string().into());
+			let (chn_tx, mut chn_rx) = channel::<Message>(8);
+			let canceller = tokio::spawn({
+				let rpc = Arc::clone(&rpc);
+				async move {
+					// Cancel the moment the stream registers, which is before
+					// its first frame is sent.
+					loop {
+						if RpcProtocol::query_cancel(
+							rpc.as_ref(),
+							Array::from(vec![Value::String("b1".to_string())]),
+						)
+						.await
+						.is_ok()
+						{
+							return;
+						}
+						tokio::task::yield_now().await;
+					}
+				}
+			});
+			Websocket::handle_message(&rpc, msg, chn_tx, 1024).await;
+			canceller.await.expect("the cancel lands");
+
+			let mut frames = Vec::new();
+			while let Some(msg) = chn_rx.recv().await {
+				frames.push(decode_json(msg));
+			}
+			let tags: Vec<Option<&str>> = frames.iter().map(frame_tag).collect();
+			assert_eq!(tags.first(), Some(&Some("begin")), "the stream still opens: {tags:?}");
+			assert_eq!(tags.last(), Some(&Some("end")), "and still ends: {tags:?}");
+		});
+	}
+
+	/// The terminal frame counts what the client actually received, not what was
+	/// framed — so the count it is given and the `finished` frames it saw agree
+	/// even when the two diverge.
+	///
+	/// They diverge when a statement's terminal frame is framed but never sent,
+	/// which a cancel mid-stream produces: the executor keeps yielding the items
+	/// it had already buffered, so framing continues past the stop while
+	/// delivery does not.
+	#[test]
+	fn the_end_frame_counts_only_delivered_statements() {
+		with_big_stack(|| async {
+			use surrealdb_rpc::capabilities::Capabilities;
+			let rpc = streaming_rpc(Capabilities::all()).await;
+			seed(&rpc, "CREATE |foo:600| SET x = 1 RETURN NONE").await;
+			let body = serde_json::json!({
+				"id": "d1",
+				"method": "query_stream",
+				"params": ["SELECT * FROM foo; RETURN 1; RETURN 2;"],
+			});
+			let msg = Message::Text(body.to_string().into());
+			let (chn_tx, mut chn_rx) = channel::<Message>(8);
+			let handler = tokio::spawn({
+				let rpc = Arc::clone(&rpc);
+				async move {
+					Websocket::handle_message(&rpc, msg, chn_tx, 1024).await;
+				}
+			});
+			// Cancel once rows are flowing, so later statements are framed but
+			// not delivered.
+			let mut frames = Vec::new();
+			loop {
+				let msg = decode_json(chn_rx.recv().await.expect("a frame"));
+				let rows = frame_tag(&msg) == Some("rows");
+				frames.push(msg);
+				if rows {
+					break;
+				}
+			}
+			RpcProtocol::query_cancel(
+				rpc.as_ref(),
+				Array::from(vec![Value::String("d1".to_string())]),
+			)
+			.await
+			.expect("cancel the stream");
+			while let Some(msg) = chn_rx.recv().await {
+				frames.push(decode_json(msg));
+			}
+			handler.await.expect("handler completes");
+
+			let delivered = frames.iter().filter(|m| frame_tag(m) == Some("finished")).count();
+			// The divergence has to be real, or this would hold just as well
+			// against a count taken from what was framed rather than delivered,
+			// and could not have caught that.
+			assert!(
+				delivered < 3,
+				"the cancel must leave at least one of the three statements unfinished on \
+				 the wire, got {delivered}: {frames:#?}",
+			);
+			let end = frames.iter().find(|m| frame_tag(m) == Some("end")).expect("the stream ends");
+			assert_eq!(
+				end["result"]["results"].as_u64(),
+				Some(delivered as u64),
+				"the count must match the finished frames the client saw: {frames:#?}",
+			);
+			// And the stream says it did not complete, so the statements with no
+			// terminal frame are retracted.
+			assert!(
+				end["result"].get("error").is_some(),
+				"a cancelled stream's end frame carries an error: {end}",
+			);
+		});
+	}
+
+	/// A `LIVE SELECT` over a stream registers its subscription exactly as
+	/// the buffered path does, so notifications flow and disconnect cleanup
+	/// can find it.
+	#[test]
+	fn a_live_select_over_a_stream_registers_its_subscription() {
+		with_big_stack(|| async {
+			use surrealdb_rpc::capabilities::Capabilities;
+			let rpc = streaming_rpc(Capabilities::all()).await;
+			seed(&rpc, "DEFINE TABLE foo").await;
+			let messages = stream_request(&rpc, "l1", "LIVE SELECT * FROM foo;").await;
+
+			let value =
+				messages.iter().find(|m| frame_tag(m) == Some("value")).unwrap_or_else(|| {
+					panic!("the live query id arrives as a value frame: {messages:#?}")
+				});
+			let lqid: Uuid =
+				value["result"]["value"].as_str().unwrap().parse().expect("a live query id");
+			let finish = messages
+				.iter()
+				.find(|m| frame_tag(m) == Some("finished"))
+				.expect("the statement finishes");
+			assert_eq!(finish["result"]["type"], "live");
+
+			let live = rpc.state.live_queries.read().await;
+			let entry = live.get(&lqid).expect("the live query is registered for dispatch");
+			assert_eq!(entry.websocket_id, rpc.id);
+			assert_eq!(entry.session_id, rpc.id, "registered under the resolved session");
+		});
+	}
+
+	/// A cancel that lands mid-result must not present the rows it did
+	/// deliver as a complete answer: the statement it truncated gets no
+	/// success finish, and the end frame carries the retraction.
+	#[test]
+	fn a_cancel_mid_result_never_reports_a_truncated_statement_as_complete() {
+		with_big_stack(|| async {
+			use surrealdb_rpc::capabilities::Capabilities;
+			let rpc = streaming_rpc(Capabilities::all()).await;
+			seed(&rpc, "CREATE |foo:400| SET x = 1 RETURN NONE").await;
+			let body = serde_json::json!({
+				"id": "m1",
+				"method": "query_stream",
+				"params": ["SELECT * FROM foo; SLEEP 20s;"],
+			});
+			let msg = Message::Text(body.to_string().into());
+			let (chn_tx, mut chn_rx) = channel::<Message>(8);
+			let handler = tokio::spawn({
+				let rpc = Arc::clone(&rpc);
+				async move {
+					Websocket::handle_message(&rpc, msg, chn_tx, 1024).await;
+				}
+			});
+			// Cancel once rows are flowing, so the stream is mid-answer.
+			let mut seen_rows = false;
+			while !seen_rows {
+				let msg = decode_json(chn_rx.recv().await.expect("a frame"));
+				seen_rows = frame_tag(&msg) == Some("rows");
+			}
+			RpcProtocol::query_cancel(
+				rpc.as_ref(),
+				Array::from(vec![Value::String("m1".to_string())]),
+			)
+			.await
+			.expect("cancel the stream");
+
+			let mut frames = Vec::new();
+			while let Some(msg) = chn_rx.recv().await {
+				frames.push(decode_json(msg));
+			}
+			handler.await.expect("handler completes");
+			let end = frames.iter().find(|m| frame_tag(m) == Some("end")).expect("the stream ends");
+			assert!(
+				end["result"].get("error").is_some(),
+				"the end frame must retract the statements it never finished: {end}",
+			);
+			// The SLEEP never ran to completion, so it must not be reported as
+			// a finished statement.
+			let finished: Vec<i64> = frames
+				.iter()
+				.filter(|m| frame_tag(m) == Some("finished"))
+				.map(|m| m["result"]["index"].as_i64().unwrap())
+				.collect();
+			assert!(
+				!finished.contains(&1),
+				"an unfinished statement is not reported: {finished:?}"
+			);
+		});
+	}
+
+	/// A value the negotiated format cannot carry fails its statement rather
+	/// than the stream, and the failure reaches the wire in order: the
+	/// retraction precedes the terminal frame, and that terminal frame counts
+	/// what was actually delivered.
+	///
+	/// CBOR cannot encode a regex, which makes this reachable with one
+	/// ordinary query rather than a fault injection.
+	#[test]
+	fn an_unencodable_value_retracts_its_statement_in_order() {
+		with_big_stack(|| async {
+			use surrealdb_rpc::capabilities::Capabilities;
+			let rpc = streaming_rpc(Capabilities::all()).await;
+			// The frames of this connection are encoded as CBOR.
+			let rpc = Arc::new(Websocket {
+				id: rpc.id,
+				format: Format::Cbor,
+				state: Arc::clone(&rpc.state),
+				datastore: Arc::clone(&rpc.datastore),
+				sessions: HashMap::new(),
+				transactions: DashMap::new(),
+				counters: DashMap::new(),
+				streams: DashMap::new(),
+				shutdown: CancellationToken::new(),
+				cancel: surrealdb_core::ctx::CancelHandle::new(),
+				channel: rpc.channel.clone(),
+			});
+			let sess = Session::owner().with_ns("test").with_db("test").with_rt(true);
+			rpc.set_session(rpc.id, Arc::new(RwLock::new(sess)));
+
+			// The request rides the same format as the frames it will be
+			// answered with.
+			let body = Value::Object(surrealdb_types::object! {
+				id: "e1",
+				method: "query_stream",
+				params: Value::Array(Array::from(vec![Value::String(
+					"RETURN /abc/; RETURN 1;".to_string(),
+				)])),
+			});
+			let encoded = surrealdb_core::rpc::format::cbor::encode(body).expect("encode request");
+			let msg = Message::Binary(encoded.into());
+			let (chn_tx, mut chn_rx) = channel::<Message>(8);
+			let handler = tokio::spawn({
+				let rpc = Arc::clone(&rpc);
+				async move {
+					Websocket::handle_message(&rpc, msg, chn_tx, 1024).await;
+				}
+			});
+			let mut frames = Vec::new();
+			while let Some(msg) = chn_rx.recv().await {
+				let Message::Binary(bytes) = msg else {
+					panic!("cbor frames are binary");
+				};
+				let value = surrealdb_core::rpc::format::cbor::decode(&bytes, 64)
+					.expect("a decodable frame");
+				frames.push(value.to_sql());
+			}
+			handler.await.expect("handler completes");
+
+			// The unencodable statement is retracted, and the retraction is not
+			// the last thing on the wire -- the terminal frame is.
+			let retraction = frames
+				.iter()
+				.position(|f| f.contains("'finished'") && f.contains("error"))
+				.unwrap_or_else(|| panic!("the statement is retracted: {frames:#?}"));
+			let end = frames
+				.iter()
+				.position(|f| f.contains("stream: 'end'"))
+				.unwrap_or_else(|| panic!("the stream ends: {frames:#?}"));
+			assert!(
+				retraction < end,
+				"a retraction raised while the queue drained must precede the end frame: {frames:#?}",
+			);
+			assert_eq!(end, frames.len() - 1, "nothing follows the end frame: {frames:#?}");
+			// The statement that could be answered still was.
+			assert!(
+				frames.iter().any(|f| f.contains("stream: 'value'")),
+				"the encodable statement is unaffected: {frames:#?}",
+			);
+		});
+	}
+
+	/// A `LIVE SELECT` whose session is detached before the stream finishes
+	/// must not be registered: the registration would deliver change data
+	/// under an authorization that has been torn down, and the per-session
+	/// cleanup has already run past it.
+	#[test]
+	fn a_detached_sessions_live_query_is_discarded_not_registered() {
+		with_big_stack(|| async {
+			use surrealdb_rpc::capabilities::Capabilities;
+			let rpc = streaming_rpc(Capabilities::all()).await;
+			seed(&rpc, "DEFINE TABLE thing").await;
+			// Attach a second session to run the stream under, so it can be
+			// detached while the query is in flight.
+			let session_id = Uuid::new_v4();
+			rpc.attach(session_id).await.expect("attach a session");
+			{
+				let lock = rpc.get_session(&session_id).await.expect("the attached session");
+				let mut session = lock.write().await;
+				*session = Session::owner().with_ns("test").with_db("test").with_rt(true);
+				session.id = Some(session_id);
+			}
+
+			let body = serde_json::json!({
+				"id": "d1",
+				"session": session_id.to_string(),
+				"method": "query_stream",
+				"params": ["SLEEP 100ms; LIVE SELECT * FROM thing;"],
+			});
+			let msg = Message::Text(body.to_string().into());
+			let (chn_tx, mut chn_rx) = channel::<Message>(8);
+			let handler = tokio::spawn({
+				let rpc = Arc::clone(&rpc);
+				async move {
+					Websocket::handle_message(&rpc, msg, chn_tx, 1024).await;
+				}
+			});
+			let first = decode_json(chn_rx.recv().await.expect("a first frame"));
+			assert_eq!(frame_tag(&first), Some("begin"));
+			// Detach while the SLEEP holds the query open, so the session is
+			// gone by the time the LIVE statement's registration is attempted.
+			rpc.detach(session_id).await.expect("detach the session");
+
+			let mut frames = Vec::new();
+			while let Some(msg) = chn_rx.recv().await {
+				frames.push(decode_json(msg));
+			}
+			handler.await.expect("handler completes");
+			assert!(
+				rpc.state.live_queries.read().await.is_empty(),
+				"a detached session's live query must not be registered",
+			);
+			// The client was told the live query succeeded -- it holds the id --
+			// so being told the stream ended is not enough: an errored `End`
+			// retracts only statements without a `Finished` frame, and this one
+			// has one. The id has to be named so the client can drop it.
+			let lqid = frames
+				.iter()
+				.find(|m| frame_tag(m) == Some("value"))
+				.map(|m| m["result"]["value"].as_str().unwrap_or_default().to_string());
+			if let Some(lqid) = lqid.filter(|id| !id.is_empty()) {
+				let end =
+					frames.iter().find(|m| frame_tag(m) == Some("end")).expect("the stream ends");
+				let error = end["result"]["error"]["message"].as_str().unwrap_or_default();
+				assert!(
+					error.contains(&lqid),
+					"the discarded live query {lqid} must be named on the end frame, got: {error}",
+				);
+			}
+		});
+	}
+
+	/// Denying either the `query_stream` capability or the underlying
+	/// `query` capability refuses a streaming request before anything runs.
+	#[test]
+	fn streaming_is_refused_by_either_capability() {
+		with_big_stack(|| async {
+			use surrealdb_rpc::capabilities::{Capabilities, MethodTarget, Targets};
+			for denied in [Method::QueryStream, Method::Query] {
+				let caps = Capabilities::all().without_rpc_methods(Targets::Some(
+					[MethodTarget {
+						method: denied,
+					}]
+					.into(),
+				));
+				let rpc = streaming_rpc(caps).await;
+				let messages = stream_request(&rpc, "d1", "RETURN 1;").await;
+				assert_eq!(messages.len(), 1, "one failure, no frames: {messages:?}");
+				assert!(
+					messages[0]["error"]["message"]
+						.as_str()
+						.unwrap_or_default()
+						.contains("not allowed"),
+					"denying {denied} refuses streaming: {:?}",
+					messages[0],
+				);
+			}
 		});
 	}
 }
