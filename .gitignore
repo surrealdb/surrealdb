@@ -80,3 +80,7 @@ surrealism/test/surrealism
 /surrealdb/wasm/*.tgz
 
 *.actual.txt
+
+# Default --store-path of the language benchmark suite, and its dataset cache.
+/bench_results/
+/ds_cache/

@@ -5,6 +5,8 @@ use std::pin::Pin;
 use anyhow::Result;
 use clap::ArgMatches;
 
+use surrealdb_types::{Datetime, SurrealValue, Value};
+
 use crate::cli::Backend;
 use crate::cmd::bench::stats::MeasurementData;
 
@@ -49,6 +51,59 @@ pub struct BenchMarkRun {
 	pub path: String,
 	pub backend: Backend,
 	pub measurement: MeasurementData,
+	/// The commit this measurement was taken at. The `measurement` table has
+	/// always declared this field, but nothing ever wrote it — so a stored
+	/// baseline could not say which code it came from.
+	pub commit: Option<String>,
+	/// Rows the benched statement returned. Compared against the baseline's to
+	/// catch a bench whose *workload* changed rather than its speed.
+	pub rows: Option<i64>,
+}
+
+/// A stored measurement together with the provenance needed to judge whether
+/// comparing against it means anything.
+///
+/// The comparison used to be handed a bare [`MeasurementData`], which carries
+/// statistics and nothing else — so a baseline row from a different commit, a
+/// different week, or a differently-shaped dataset was indistinguishable from a
+/// current one, and a stale row read as a regression in whatever it was
+/// compared against.
+pub struct Baseline {
+	pub measurement: MeasurementData,
+	pub commit: Option<String>,
+	pub datetime: Option<Datetime>,
+	pub rows: Option<i64>,
+}
+
+/// The object a measurement is stored as: the sample statistics with the
+/// provenance fields alongside them.
+///
+/// Assembled here rather than in the query so both stores write the same shape,
+/// and because an object-merge builtin is not available to lean on.
+fn measurement_content(
+	measurement: MeasurementData,
+	commit: Option<String>,
+	rows: Option<i64>,
+) -> Value {
+	let mut object = measurement.into_value().into_object().expect("a measurement is an object");
+	object.insert("commit", commit);
+	object.insert("rows", rows);
+	Value::Object(object)
+}
+
+/// Reads the provenance fields off a `fn::last_measurement` row.
+///
+/// Done by hand rather than through a derive because the row also carries the
+/// statistics and the computed `path`/`backend`/`datetime` fields, and the
+/// statistics are deserialized separately into [`MeasurementData`].
+fn baseline_meta(value: &Value) -> (Option<String>, Option<Datetime>, Option<i64>) {
+	let Some(obj) = value.as_object() else {
+		return (None, None, None);
+	};
+	let commit = obj.get("commit").and_then(|v| v.as_string()).cloned();
+	let datetime = obj.get("datetime").and_then(|v| v.as_datetime()).cloned();
+	let rows = obj.get("rows").and_then(|v| v.as_int()).copied();
+	(commit, datetime, rows)
 }
 
 trait BenchDataStore: Send + Sync {
@@ -58,7 +113,7 @@ trait BenchDataStore: Send + Sync {
 		&'a mut self,
 		path: &'a str,
 		backend: Backend,
-	) -> impl Future<Output = Result<Option<MeasurementData>>> + 'a + Send;
+	) -> impl Future<Output = Result<Option<Baseline>>> + 'a + Send;
 
 	fn close<'a>(&'a mut self) -> impl Future<Output = Result<()>> + 'a + Send {
 		async { Ok(()) }
@@ -74,7 +129,7 @@ pub trait DynBenchDataStore {
 		&'a mut self,
 		path: &'a str,
 		backend: Backend,
-	) -> BoxFuture<'a, Result<Option<MeasurementData>>>;
+	) -> BoxFuture<'a, Result<Option<Baseline>>>;
 
 	fn close<'a>(&'a mut self) -> BoxFuture<'a, Result<()>>;
 }
@@ -88,7 +143,7 @@ impl<T: BenchDataStore> DynBenchDataStore for T {
 		&'a mut self,
 		path: &'a str,
 		backend: Backend,
-	) -> BoxFuture<'a, Result<Option<MeasurementData>>> {
+	) -> BoxFuture<'a, Result<Option<Baseline>>> {
 		Box::pin(<T as BenchDataStore>::fetch_latest(self, path, backend))
 	}
 

@@ -14,10 +14,11 @@ use surrealdb_core::env::VERSION;
 use surrealdb_core::kvs::{Builder, Datastore};
 use surrealdb_rpc::capabilities::Capabilities;
 use surrealdb_rpc::capabilities::Targets;
+use surrealdb_types::Datetime;
 
 use crate::cli::{Backend, ColorMode};
 use crate::cmd::bench::stats::{ComparisonData, MeasurementData};
-use crate::cmd::bench::store::{BenchMarkRun, StoreConfig, get_store};
+use crate::cmd::bench::store::{Baseline, BenchMarkRun, StoreConfig, get_store};
 use crate::cmd::bench::{DEFAULT_NOISE_THRESHOLD, DEFAULT_SIGNIFICANCE_THRESHOLD};
 use crate::cmd::util::ImportFailure;
 use crate::cmd::{graphql, util};
@@ -192,7 +193,17 @@ impl<'a> CmdConfig<'a> {
 /// verdict. Kept in sync with the human-readable summary printed in `run()`:
 /// a difference that isn't statistically significant, or is significant but
 /// inside the noise threshold, is reported as `within-noise`.
-fn comparison_verdict(compare: &ComparisonData) -> &'static str {
+fn comparison_verdict(compare: &Comparison) -> &'static str {
+	// A bench that returns a different number of rows than its baseline did is
+	// not a faster or slower version of the same work — it is different work,
+	// and reporting a percentage against it invites the reader to blame the
+	// code. This is not hypothetical: #635 changed mock expansion, which changed
+	// the seeded `rand::*` draw order, which changed how many rows the scan
+	// benches match; the timings moved up to 2.4x with the engine untouched.
+	if compare.workload_changed() {
+		return "workload-changed";
+	}
+	let compare = &compare.data;
 	if compare.p_value >= DEFAULT_SIGNIFICANCE_THRESHOLD {
 		return "within-noise";
 	}
@@ -206,6 +217,65 @@ fn comparison_verdict(compare: &ComparisonData) -> &'static str {
 	}
 }
 
+/// A baseline comparison, with enough of the baseline's provenance to say
+/// whether the comparison is meaningful.
+struct Comparison {
+	data: ComparisonData,
+	/// Commit the baseline was measured at, when it was recorded.
+	baseline_commit: Option<String>,
+	/// When the baseline was measured. A baseline that predates the benches it
+	/// is compared against reports a difference that no code caused.
+	baseline_datetime: Option<Datetime>,
+	baseline_rows: Option<i64>,
+	rows: Option<i64>,
+}
+
+impl Comparison {
+	/// Whether this bench returned a different number of rows than the baseline
+	/// did. Unknown on either side (a GQL bench, or a baseline written before
+	/// `rows` was recorded) counts as unchanged, so an unknown never
+	/// manufactures a warning.
+	fn workload_changed(&self) -> bool {
+		match (self.baseline_rows, self.rows) {
+			(Some(base), Some(now)) => base != now,
+			_ => false,
+		}
+	}
+
+	/// Whole days between the baseline measurement and now.
+	fn baseline_age_days(&self) -> Option<i64> {
+		let taken = self.baseline_datetime.as_ref()?;
+		let now = Datetime::now();
+		Some((*now - **taken).num_days())
+	}
+}
+
+/// A baseline older than this is reported alongside every comparison drawn
+/// against it. The nightly is meant to refresh these every 24 hours, so
+/// anything past a couple of days means the nightly has been failing and the
+/// board is measuring against whatever it last managed to store.
+const BASELINE_STALE_DAYS: i64 = 2;
+
+/// The commit being measured, recorded with each stored measurement so a
+/// baseline can later say which code produced it.
+///
+/// `GITHUB_SHA` in CI, otherwise `git rev-parse HEAD` so a local `--save` is
+/// attributable too. `None` when neither is available, which reads the same as
+/// every measurement stored before this was recorded at all.
+fn current_commit() -> Option<String> {
+	if let Ok(sha) = std::env::var("GITHUB_SHA")
+		&& !sha.is_empty()
+	{
+		return Some(sha);
+	}
+	let out = std::process::Command::new("git").args(["rev-parse", "HEAD"]).output().ok()?;
+	if !out.status.success() {
+		return None;
+	}
+	let sha = String::from_utf8(out.stdout).ok()?.trim().to_string();
+	(!sha.is_empty()).then_some(sha)
+}
+
 /// Per-bench comparison against the fetched baseline. Percentages are relative to
 /// the baseline (positive = slower than baseline = regression).
 #[derive(serde::Serialize)]
@@ -217,6 +287,17 @@ struct JsonComparison {
 	change_hi_pct: f64,
 	p_value: f64,
 	verdict: &'static str,
+	/// Commit the baseline was measured at, so a comparison can be traced to the
+	/// code that produced the number it is drawn against. `None` for rows stored
+	/// before the commit was recorded.
+	base_commit: Option<String>,
+	/// Age of the baseline in whole days. The nightly refreshes these every 24
+	/// hours, so anything larger means it has been failing and this comparison
+	/// spans every merge since.
+	base_age_days: Option<i64>,
+	/// Rows the baseline's statement returned, against `JsonBench::rows`. A
+	/// difference means the two runs measured different work.
+	base_rows: Option<i64>,
 }
 
 /// One bench's result in the `--json` report. Times are in seconds.
@@ -227,6 +308,10 @@ struct JsonBench {
 	median_lo_secs: f64,
 	median_hi_secs: f64,
 	mean_secs: f64,
+	/// Rows this bench's statement returned, or `None` for a dialect whose
+	/// result is not a row list. Recorded so a change in the *workload* is
+	/// distinguishable from a change in its speed.
+	rows: Option<i64>,
 	comparison: Option<JsonComparison>,
 }
 
@@ -418,7 +503,8 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 	}
 	readonly.sort_by_key(|run| first_seen[&run.config.group_key]);
 
-	let mut measurements: Vec<(String, MeasurementData, Option<ComparisonData>)> = Vec::new();
+	let mut measurements: Vec<(String, MeasurementData, Option<i64>, Option<Comparison>)> =
+		Vec::new();
 
 	// Read-only benches: build + populate + compact one datastore per group, then
 	// run every member against it. The whole group runs on a single runtime so the
@@ -499,13 +585,15 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 								run.name()
 							);
 						}
-						BenchRunResult::Ok(measurement, compare) => {
+						BenchRunResult::Ok(measurement, rows, compare) => {
 							if cfg.save
 								&& let Err(e) = store
 									.add(BenchMarkRun {
 										measurement: measurement.clone(),
 										path: run.name(),
 										backend: cfg.backend,
+										commit: current_commit(),
+										rows,
 									})
 									.await
 							{
@@ -514,7 +602,7 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 									run.name()
 								);
 							}
-							measurements.push((run.name(), measurement, compare));
+							measurements.push((run.name(), measurement, rows, compare));
 						}
 					}
 				}
@@ -581,19 +669,21 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 					run.name()
 				);
 			}
-			BenchRunResult::Ok(measurement, compare) => {
+			BenchRunResult::Ok(measurement, rows, compare) => {
 				if cfg.save
 					&& let Err(e) = store
 						.add(BenchMarkRun {
 							measurement: measurement.clone(),
 							path: run.name(),
 							backend: cfg.backend,
+							commit: current_commit(),
+							rows,
 						})
 						.await
 				{
 					eprintln!("Warning: could not store measurement for {}: {e:#}", run.name());
 				}
-				measurements.push((run.name(), measurement, compare));
+				measurements.push((run.name(), measurement, rows, compare));
 			}
 		}
 
@@ -603,10 +693,34 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 		}
 	}
 
-	for (name, m, compare) in &measurements {
+	for (name, m, _rows, compare) in &measurements {
 		println!(" - {}", name);
 
 		if let Some(compare) = compare {
+			// Said before the percentage, because the percentage is not worth
+			// reading once either of these holds.
+			if compare.workload_changed() {
+				println!(
+					"       WORKLOAD CHANGED: returns {} rows, baseline returned {} — \
+					 this is different work, not a speed difference",
+					compare.rows.unwrap_or_default(),
+					compare.baseline_rows.unwrap_or_default(),
+				);
+			}
+			if let Some(age) = compare.baseline_age_days()
+				&& age > BASELINE_STALE_DAYS
+			{
+				println!(
+					"       STALE BASELINE: measured {age} days ago{} — the comparison \
+					 below spans every merge since",
+					match &compare.baseline_commit {
+						Some(c) => format!(" at {}", c.chars().take(9).collect::<String>()),
+						None => String::new(),
+					}
+				);
+			}
+
+			let compare = &compare.data;
 			let signficant = compare.p_value < DEFAULT_SIGNIFICANCE_THRESHOLD;
 			if !signficant {
 				println!("       No change in performance detected")
@@ -717,19 +831,23 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 	if let Some(json_path) = cfg.json {
 		let benches = measurements
 			.iter()
-			.map(|(name, m, compare)| JsonBench {
+			.map(|(name, m, rows, compare)| JsonBench {
 				name: name.clone(),
 				median_secs: m.median.point,
 				median_lo_secs: m.median.lower_bound,
 				median_hi_secs: m.median.upper_bound,
 				mean_secs: m.mean.point,
+				rows: *rows,
 				comparison: compare.as_ref().map(|c| JsonComparison {
-					base_median_secs: c.base_median,
-					change_pct: c.dist_mean.point * 100.0,
-					change_lo_pct: c.dist_mean.lower_bound * 100.0,
-					change_hi_pct: c.dist_mean.upper_bound * 100.0,
-					p_value: c.p_value,
+					base_median_secs: c.data.base_median,
+					change_pct: c.data.dist_mean.point * 100.0,
+					change_lo_pct: c.data.dist_mean.lower_bound * 100.0,
+					change_hi_pct: c.data.dist_mean.upper_bound * 100.0,
+					p_value: c.data.p_value,
 					verdict: comparison_verdict(c),
+					base_commit: c.baseline_commit.clone(),
+					base_age_days: c.baseline_age_days(),
+					base_rows: c.baseline_rows,
 				}),
 			})
 			.collect();
@@ -761,7 +879,15 @@ pub async fn run(color: ColorMode, parent: &ArgMatches, current: &ArgMatches) ->
 pub fn builder_from_config(config: &TestConfig) -> Builder {
 	let capabilities = resolve_capabilities(config);
 
-	let builder = Datastore::builder();
+	// Quiescent, because a benchmark has to measure the statement rather than
+	// whatever the background tasks happen to be doing beside it: compaction,
+	// changefeed GC, tombstone reclaim and the cluster heartbeat all run on the
+	// same cores as the timed section. The indexes the benches read are still
+	// compacted — `build_and_populate` drains the compaction queue itself once
+	// the dataset is loaded, so that cost lands before the measurement instead
+	// of during it, and the explicit drain no longer contends with the
+	// background task for the `IndexCompaction` lease.
+	let builder = Datastore::builder().without_maintenance_tasks();
 	let builder = if capabilities.allows_live_query_notifications() {
 		let (send, _) = channel::bounded(15_000);
 		builder.with_notify(send)
@@ -774,7 +900,7 @@ pub fn builder_from_config(config: &TestConfig) -> Builder {
 #[allow(clippy::large_enum_variant)]
 enum BenchRunResult {
 	Import(ImportFailure),
-	Ok(MeasurementData, Option<ComparisonData>),
+	Ok(MeasurementData, Option<i64>, Option<Comparison>),
 	/// Too few samples were collected to compute statistics — a bench whose single
 	/// iteration exceeds `max_time` collects only one sample, and the stats need at
 	/// least two. Reported and skipped instead of panicking.
@@ -855,20 +981,31 @@ impl BenchStatement {
 	/// errors every iteration measures the error path, and the cost of
 	/// failing is unrelated to — and usually far cheaper than — the work the
 	/// bench claims to time.
+	/// Returns the number of rows the statement produced, which the caller
+	/// records alongside the timing. Two runs of a bench that return different
+	/// row counts are not measuring the same work, however comparable their
+	/// timings look — see [`JsonBench::rows`].
 	async fn execute(
 		&self,
 		run: &TestRun<BenchRunConfig>,
 		dbs: &Arc<Datastore>,
 		session: &Session,
-	) -> Result<()> {
+	) -> Result<Option<i64>> {
 		match self {
 			Self::SurrealQl => {
 				let results = dbs.execute(&run.case.test.source, session, None).await?;
+				let mut rows = 0i64;
 				for (idx, result) in results.iter().enumerate() {
-					if let Err(error) = &result.result {
-						bail!("bench statement {idx} returned an error: {error}");
+					match &result.result {
+						Err(error) => bail!("bench statement {idx} returned an error: {error}"),
+						// One row for a non-array result, so a bench selecting a
+						// single record still counts as work rather than as zero.
+						Ok(value) => {
+							rows += value.as_array().map_or(1, |a| a.len() as i64);
+						}
 					}
 				}
+				return Ok(Some(rows));
 			}
 			Self::Gql {
 				plan,
@@ -897,7 +1034,9 @@ impl BenchStatement {
 				}
 			}
 		}
-		Ok(())
+		// GQL and GraphQL results are not shaped as a row list, so they carry no
+		// row count and are compared on timing alone.
+		Ok(None)
 	}
 }
 
@@ -1015,7 +1154,7 @@ async fn run_group(
 	group: &[TestRun<BenchRunConfig>],
 	config: &BenchConfig,
 	quick: bool,
-	baselines: Vec<Option<MeasurementData>>,
+	baselines: Vec<Option<Baseline>>,
 ) -> Result<GroupOutcome> {
 	let token = tokio_util::sync::CancellationToken::new();
 
@@ -1048,7 +1187,7 @@ fn bench_marker(name: &str) {
 async fn run_bench(
 	run: &TestRun<BenchRunConfig>,
 	config: &BenchConfig,
-	baseline: Option<MeasurementData>,
+	baseline: Option<Baseline>,
 	quick: bool,
 	shared_dbs: Option<Arc<Datastore>>,
 ) -> Result<BenchRunResult> {
@@ -1168,13 +1307,18 @@ async fn run_bench(
 	let measure_start = Instant::now();
 	let mut iterations = Vec::new();
 	let mut samples = Vec::new();
+	// Row count of the last measured iteration. Every iteration runs the same
+	// statement against the same data, so any one of them describes the
+	// workload; taking the last avoids an extra untimed execution.
+	let mut rows: Option<i64> = None;
 	for _ in 0..sample_size {
 		let mut sample_duration = 0.0;
 		for _ in 0..iterations_per_samples {
 			if let Some((dbs, session, statement)) = shared.as_ref() {
 				let start = Instant::now();
-				statement.execute(run, dbs, session).await?;
+				let produced = statement.execute(run, dbs, session).await?;
 				sample_duration += start.elapsed().as_secs_f64();
+				rows = produced;
 			} else {
 				let (dbs, session) = match prepare(run, config, &token).await? {
 					Ok(prepared) => prepared,
@@ -1183,8 +1327,9 @@ async fn run_bench(
 				let statement = BenchStatement::prepare(run, &dbs, &session).await?;
 
 				let start = Instant::now();
-				statement.execute(run, &dbs, &session).await?;
+				let produced = statement.execute(run, &dbs, &session).await?;
 				sample_duration += start.elapsed().as_secs_f64();
+				rows = produced;
 			}
 		}
 		iterations.push(iterations_per_samples as f64);
@@ -1213,7 +1358,13 @@ async fn run_bench(
 	let Some(measurement) = MeasurementData::from_iteration_times(iterations, samples) else {
 		return Ok(BenchRunResult::InsufficientSamples(collected));
 	};
-	let comp = baseline.map(|baseline| ComparisonData::compare(&baseline, &measurement));
+	let comp = baseline.map(|baseline| Comparison {
+		data: ComparisonData::compare(&baseline.measurement, &measurement),
+		baseline_commit: baseline.commit,
+		baseline_datetime: baseline.datetime,
+		baseline_rows: baseline.rows,
+		rows,
+	});
 
-	Ok(BenchRunResult::Ok(measurement, comp))
+	Ok(BenchRunResult::Ok(measurement, rows, comp))
 }
