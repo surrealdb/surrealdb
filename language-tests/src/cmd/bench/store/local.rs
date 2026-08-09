@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use anyhow::{Context, Result};
 use surrealdb_core::kvs::Datastore;
 use surrealdb_rpc::capabilities::Capabilities;
@@ -9,7 +11,7 @@ use crate::cmd::bench::stats::MeasurementData;
 use crate::cmd::bench::store::BenchDataStore;
 
 pub struct LocalStore {
-	ds: Datastore,
+	ds: Arc<Datastore>,
 }
 
 impl LocalStore {

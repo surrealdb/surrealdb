@@ -692,6 +692,32 @@ jobs:
         run: cargo check --package surrealdb-server --features tokio-console
 
   # ----------------------------------------
+  # Language-test bench harness
+  # ----------------------------------------
+
+  # The `bench`/`bench-remote-store` features build a separate binary (the
+  # `Benchmark PR` workflow) that nothing else in CI compiles, so a break there
+  # would otherwise go unnoticed until that label-gated job runs. `cargo check`
+  # in debug catches a broken build far cheaper than the full release build
+  # the benchmark job needs to actually run benches.
+  check-bench:
+    name: Check language-test bench harness
+    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+          workspaces: language-tests
+          cache-key: lang-bench
+
+      - name: Check bench harness compiles
+        run: cargo check --features bench,bench-remote-store --manifest-path language-tests/Cargo.toml
+
+  # ----------------------------------------
   # JS SDK conformance suite
   # ----------------------------------------
 
@@ -852,6 +878,7 @@ jobs:
       - check-docs
       - feature-check
       - check-tokio-console
+      - check-bench
       - unused-deps
       - check-versions
       # Integration tests
@@ -892,6 +919,7 @@ jobs:
             "${{ needs.check-docs.result }}"
             "${{ needs.feature-check.result }}"
             "${{ needs.check-tokio-console.result }}"
+            "${{ needs.check-bench.result }}"
             "${{ needs.unused-deps.result }}"
             "${{ needs.check-versions.result }}"
             "${{ needs.integration-tests.result }}"

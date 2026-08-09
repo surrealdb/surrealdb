@@ -13,6 +13,6 @@ DEFINE FIELD active ON record TYPE bool DEFAULT true;
 DEFINE FIELD created_at ON record TYPE datetime;
 DEFINE FIELD status ON record TYPE string ASSERT $value IN ['draft', 'published', 'archived'];
 DEFINE FIELD tags ON record TYPE array<string>;
-DEFINE FIELD geography ON record FLEXIBLE TYPE object;
+DEFINE FIELD geography ON record TYPE object FLEXIBLE;
 DEFINE EVENT audit ON record WHEN $event = 'CREATE' THEN { RETURN NONE };
 DEFINE INDEX record_name_age ON record FIELDS name, age;

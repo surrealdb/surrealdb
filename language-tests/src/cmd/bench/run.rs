@@ -950,11 +950,9 @@ async fn build_and_populate(
 	config: &BenchConfig,
 	token: &tokio_util::sync::CancellationToken,
 ) -> Result<std::result::Result<Arc<Datastore>, ImportFailure>> {
-	let dbs = Arc::new(
-		builder_from_config(&run.case.test.config.parsed)
-			.build_with_path(&datastore_conn(config))
-			.await?,
-	);
+	let dbs = builder_from_config(&run.case.test.config.parsed)
+		.build_with_path(&datastore_conn(config))
+		.await?;
 
 	// The import session only targets the namespace/database — data lands as owner
 	// (see `run_imports_list`), so it is independent of the bench's own auth. The
