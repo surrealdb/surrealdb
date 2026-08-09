@@ -10,6 +10,7 @@ use async_channel::Sender;
 #[allow(unused_imports)]
 pub(crate) use surrealdb_engine_api::{
 	Command, EngineContext, MlExportConfig, RequestData, Route, RouteChannelEngine, SurrealEngine,
+	single_result,
 };
 use surrealdb_rpc::QueryResult;
 use uuid::Uuid;
@@ -126,16 +127,7 @@ impl Router {
 		query: Cow<'static, str>,
 		variables: Variables,
 	) -> BoxFuture<'_, Result<Value>> {
-		Box::pin(async move {
-			let mut results = self.engine.query(ctx, query, variables).await?;
-			match results.len() {
-				0 => Ok(Value::None),
-				1 => Ok(results.remove(0).result?),
-				_ => Err(Error::internal(
-					"expected the database to return one or no results".to_string(),
-				)),
-			}
-		})
+		Box::pin(async move { single_result(self.engine.query(ctx, query, variables).await?) })
 	}
 
 	/// Runs a query and deserialises its result as an optional record.

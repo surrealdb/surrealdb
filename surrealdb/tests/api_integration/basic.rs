@@ -1928,6 +1928,57 @@ pub async fn client_side_transactions(new_db: impl CreateDb) {
 	drop(permit);
 }
 
+/// A query abandoned part-way through cannot leave work a later commit would
+/// persist.
+///
+/// The execution runs on the caller's own task, so a caller that stops awaiting
+/// aborts it mid-batch. Whatever it wrote is still in the transaction, and the
+/// caller still holds the handle, so the transaction has to be taken away from
+/// it rather than left committable.
+///
+/// Embedded only: a remote transport does not tie the server's execution to the
+/// caller's future, so abandoning the future there leaves the statement to
+/// finish and the transaction is still the caller's to commit.
+#[cfg(not(any(feature = "protocol-http", feature = "protocol-ws")))]
+pub async fn an_abandoned_query_cannot_be_committed(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+	let ns = Ulid::new().to_string();
+	let dbn = Ulid::new().to_string();
+	db.use_ns(&ns).use_db(&dbn).await.unwrap();
+	drop(permit);
+
+	// Seeded outside the transaction, so the check below distinguishes "the
+	// abandoned write is gone" from "the table never existed".
+	db.query("CREATE person:kept SET name = 'kept'").await.unwrap().check().unwrap();
+
+	// A clone, so the original handle is still available to check with once the
+	// transaction has been taken away from this one.
+	let txn = db.clone().begin().await.unwrap();
+
+	// Abandon a query that writes and then sleeps, so it is certain to be part
+	// way through when the timeout takes the future away.
+	let abandoned = tokio::time::timeout(
+		Duration::from_millis(250),
+		txn.query("CREATE person:ghost SET name = 'ghost'").query("SLEEP 10s"),
+	)
+	.await;
+	assert!(abandoned.is_err(), "the query must still be running when it is dropped");
+
+	// The transaction is no longer the caller's to commit.
+	txn.commit().await.expect_err("an abandoned transaction cannot be committed");
+
+	// And nothing it wrote survived.
+	let mut response = db.query("SELECT VALUE name FROM person").await.unwrap();
+	let names: Vec<String> = response.take(0).unwrap();
+	assert_eq!(names, vec!["kept".to_string()], "the abandoned write must not be visible");
+}
+
+#[cfg(any(feature = "protocol-http", feature = "protocol-ws"))]
+pub async fn an_abandoned_query_cannot_be_committed(_new_db: impl CreateDb) {
+	// A remote engine's execution outlives the caller's future; see above.
+}
+
 #[cfg(feature = "protocol-http")]
 pub async fn client_side_transactions(_new_db: impl CreateDb) {
 	// Client-side transactions are not supported on HTTP
@@ -2194,6 +2245,8 @@ define_include_tests!(basic => {
 	field_and_index_methods,
 	#[test_log::test(tokio::test)]
 	client_side_transactions,
+	#[test_log::test(tokio::test)]
+	an_abandoned_query_cannot_be_committed,
 	#[test_log::test(tokio::test)]
 	refresh_tokens,
 });

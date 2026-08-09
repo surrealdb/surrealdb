@@ -32,6 +32,10 @@ use surrealdb_types::{
 };
 use uuid::Uuid;
 
+pub mod session;
+
+pub use session::{Established, SessionEntry, SessionRegistry};
+
 /// A future boxed for storage behind a trait object, as
 /// [`SurrealEngine`]'s methods require.
 ///
@@ -85,6 +89,12 @@ pub enum SessionError {
 	NotFound(Uuid),
 	/// The remote end reported a session failure.
 	Remote(String),
+}
+
+impl From<SessionError> for Error {
+	fn from(error: SessionError) -> Self {
+		session_error_to_error(error)
+	}
 }
 
 /// Convert a session error into the error type the SDK surfaces to callers.
@@ -537,6 +547,20 @@ fn unsupported(what: &str) -> Error {
 	Error::configuration(format!("{what} is not supported by this engine"), None)
 }
 
+/// Flattens the results of an operation that runs a single statement into the
+/// one value it produced.
+///
+/// An empty reply reads as [`Value::None`]: an operation with no result may
+/// answer with either, and both mean the same thing. Anything longer than one
+/// result is a bug in the engine rather than something to report to the user.
+pub fn single_result(mut results: Vec<QueryResult>) -> Result<Value, Error> {
+	match results.len() {
+		0 => Ok(Value::None),
+		1 => results.remove(0).result,
+		_ => Err(Error::internal("expected the database to return one or no results".to_string())),
+	}
+}
+
 /// A [`SurrealEngine`] that drives an engine which consumes [`Route`]s.
 ///
 /// The WebSocket and HTTP engines each run a task that reads `Route`s off a
@@ -571,14 +595,7 @@ impl RouteChannelEngine {
 	/// engine answer a no-result operation with either an empty vector or a
 	/// single `Value::None`, and both mean the same thing.
 	async fn value(&self, command: Command, session: Uuid) -> Result<Value, Error> {
-		let mut results = self.results(command, session).await?;
-		match results.len() {
-			0 => Ok(Value::None),
-			1 => results.remove(0).result,
-			_ => Err(Error::internal(
-				"expected the database to return one or no results".to_string(),
-			)),
-		}
+		single_result(self.results(command, session).await?)
 	}
 
 	/// Sends one command and awaits its single response.

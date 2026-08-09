@@ -17,7 +17,6 @@
 //! the same happens-before the WebSocket engine gets by draining its session
 //! channel before each route.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration as StdDuration;
@@ -30,7 +29,6 @@ use surrealdb_protocol::proto::rpc::v1 as rpc;
 use surrealdb_protocol::proto::rpc::v1::surreal_db_service_client::SurrealDbServiceClient;
 use surrealdb_protocol::proto::v1 as proto;
 use surrealdb_rpc::{QueryResult, QueryStreamItem, QueryType, Token};
-use tokio::sync::Notify;
 use tonic::codec::CompressionEncoding;
 use tonic::transport::Channel;
 use uuid::Uuid;
@@ -346,57 +344,24 @@ impl Replayable {
 	}
 }
 
-/// A session's replay log and its readiness signal.
-#[derive(Default)]
-struct SessionEntry {
-	ready: Notify,
-	/// The session the server allocated for this one, or the failure that
-	/// stopped it being established. `None` until `AttachSession` answers.
-	///
-	/// Session ids are the server's to mint -- it refuses to create one a
-	/// client named -- so this is what every request for this session must
-	/// carry, and the SDK's own session id is only a local handle onto it.
-	server: Mutex<Option<EngineResult<Uuid>>>,
+/// What the gRPC engine establishes for a session: the identity the server
+/// minted for it, and the log a clone of it is rebuilt from.
+///
+/// Session ids are the server's to mint -- it refuses to create one a client
+/// named -- so `server` is what every request for this session must carry, and
+/// the SDK's own session id is only a local handle onto it.
+#[derive(Debug)]
+struct GrpcSession {
+	server: Uuid,
 	replay: Mutex<Vec<Replayable>>,
 }
 
-impl SessionEntry {
-	/// Waits until this session exists server-side, answering with the id the
-	/// server gave it.
-	///
-	/// Follows `Notify`'s race-free pattern: the notified future is created
-	/// *before* the readiness check, so a `notify_waiters()` landing between
-	/// the check and the await is not missed. The loop covers a spurious
-	/// wake-up, which would otherwise return before the session existed.
-	async fn wait_ready(&self) -> EngineResult<Uuid> {
-		loop {
-			let notified = self.ready.notified();
-			if let Some(result) = self.outcome() {
-				return result;
-			}
-			notified.await;
-		}
-	}
-
-	fn established(&self) -> std::sync::MutexGuard<'_, Option<EngineResult<Uuid>>> {
-		self.server.lock().expect("session registry poisoned")
-	}
-
-	/// How establishing this session turned out, or `None` if it has not been
-	/// attempted yet. Unlike [`wait_ready`](Self::wait_ready), this does not
-	/// wait for the answer.
-	fn outcome(&self) -> Option<EngineResult<Uuid>> {
-		self.established().clone()
-	}
-
-	/// Publishes the outcome of establishing this session.
-	///
-	/// A failure is published rather than swallowed so that waiters fail with
-	/// the reason the session was never established, instead of hanging or
-	/// silently running against no session at all.
-	fn mark_ready(&self, outcome: EngineResult<Uuid>) {
-		*self.established() = Some(outcome);
-		self.ready.notify_waiters();
+impl GrpcSession {
+	fn new(server: Uuid) -> Arc<Self> {
+		Arc::new(Self {
+			server,
+			replay: Mutex::new(Vec::new()),
+		})
 	}
 
 	/// Appends an operation to the replay log, coalescing it into the entry it
@@ -429,18 +394,12 @@ impl SessionEntry {
 	}
 }
 
-#[derive(Default)]
-struct SessionRegistry(Mutex<HashMap<Uuid, Arc<SessionEntry>>>);
-
-impl SessionRegistry {
-	fn entry(&self, id: Uuid) -> Arc<SessionEntry> {
-		Arc::clone(self.0.lock().expect("session registry poisoned").entry(id).or_default())
-	}
-
-	fn remove(&self, id: Uuid) {
-		self.0.lock().expect("session registry poisoned").remove(&id);
-	}
-}
+/// The sessions this engine is serving, and what the server made of each.
+///
+/// Failures keep this engine's own error type, so what stopped a session being
+/// established still reads as what it was -- a connection failure stays one,
+/// and a caller can still tell that reconnecting is what to do.
+type SessionRegistry = surrealdb_engine_api::SessionRegistry<Arc<GrpcSession>, Error>;
 
 struct GrpcEngine {
 	client: SurrealDbServiceClient<Channel>,
@@ -503,10 +462,10 @@ impl GrpcEngine {
 	async fn ready_session(
 		&self,
 		ctx: EngineContext,
-	) -> EngineResult<(rpc::RequestContext, Arc<SessionEntry>)> {
-		let entry = self.sessions.entry(ctx.session);
-		let session = entry.wait_ready().await?;
-		Ok((self.context(session, ctx.transaction), entry))
+	) -> EngineResult<(rpc::RequestContext, Arc<GrpcSession>)> {
+		let session = self.sessions.resolve(ctx.session).await?;
+		let context = self.context(session.server, ctx.transaction);
+		Ok((context, session))
 	}
 
 	/// Attaches a session and replays `log` onto it, so the clone is a copy of
@@ -516,15 +475,11 @@ impl GrpcEngine {
 	/// runs unauthenticated, or in the wrong namespace, and reports errors
 	/// naming neither. Only the operations that did apply are recorded, so the
 	/// clone's own log describes the state it actually reached.
-	async fn establish_clone(
-		&self,
-		entry: &SessionEntry,
-		log: Vec<Replayable>,
-	) -> EngineResult<Uuid> {
-		let session = self.attach().await?;
+	async fn establish_clone(&self, log: Vec<Replayable>) -> EngineResult<Arc<GrpcSession>> {
+		let session = GrpcSession::new(self.attach().await?);
 		for op in log {
-			self.apply(self.context(session, None), op.clone()).await?;
-			entry.record(op);
+			self.apply(self.context(session.server, None), op.clone()).await?;
+			session.record(op);
 		}
 		Ok(session)
 	}
@@ -533,11 +488,11 @@ impl GrpcEngine {
 	///
 	/// Published either way: waiters must not hang, and a failure has to reach
 	/// the request that goes on to need the session.
-	fn publish(&self, entry: &SessionEntry, id: Uuid, established: EngineResult<Uuid>) {
+	fn publish(&self, id: Uuid, established: EngineResult<Arc<GrpcSession>>) {
 		if let Err(error) = established.as_ref() {
 			trace!("failed to establish session {id}: {error}");
 		}
-		entry.mark_ready(established);
+		self.sessions.entry(id).publish(established);
 	}
 
 	async fn apply(&self, context: rpc::RequestContext, op: Replayable) -> EngineResult<()> {
@@ -1018,34 +973,35 @@ async fn session_task(engine: Arc<GrpcEngine>, session_rx: async_channel::Receiv
 	while let Ok(event) = session_rx.recv().await {
 		match event {
 			SessionId::Initial(id) => {
-				let entry = engine.sessions.entry(id);
-				engine.publish(&entry, id, engine.attach().await);
+				let established = engine.attach().await.map(GrpcSession::new);
+				engine.publish(id, established);
 			}
 			SessionId::Clone {
 				old,
 				new,
 			} => {
-				let log = engine.sessions.entry(old).log();
-				let entry = engine.sessions.entry(new);
-				let established = engine.establish_clone(&entry, log).await;
-				engine.publish(&entry, new, established);
+				// A clone of a session that was never established has nothing to
+				// replay; `establish_clone` then simply attaches a fresh one.
+				let log = match engine.sessions.established(old) {
+					Some(Ok(session)) => session.log(),
+					_ => Vec::new(),
+				};
+				engine.publish(new, engine.establish_clone(log).await);
 			}
 			SessionId::Drop(id) => {
 				// Only a session that was established has anything to release.
-				// Read the outcome rather than waiting for it: the event that
-				// establishes a session is consumed from this same channel
-				// first, so it is already there -- and waiting here would stall
-				// every later session event if it somehow were not.
-				match engine.sessions.entry(id).outcome() {
+				// Ending it also fails anything still waiting on it, which is
+				// what keeps a request that outlived its handle from waiting on
+				// a session that has just gone away.
+				match engine.sessions.end(id) {
 					Some(Ok(session)) => {
-						if let Err(error) = engine.detach(session).await {
+						if let Err(error) = engine.detach(session.server).await {
 							trace!("failed to detach session {id}: {error}");
 						}
 					}
 					Some(Err(error)) => trace!("session {id} was never attached: {error}"),
 					None => trace!("session {id} was dropped before it was established"),
 				}
-				engine.sessions.remove(id);
 			}
 		}
 	}
@@ -2277,7 +2233,7 @@ mod tests {
 	/// it took to get there.
 	#[test]
 	fn the_replay_log_coalesces_repeated_operations() {
-		let entry = SessionEntry::default();
+		let entry = GrpcSession::new(Uuid::nil());
 		for _ in 0..10 {
 			entry.record(Replayable::Use {
 				namespace: Some("ns".to_string()),
@@ -2298,7 +2254,7 @@ mod tests {
 	/// clone reaches the same state in the same order the original did.
 	#[test]
 	fn the_replay_log_does_not_coalesce_across_a_sign_in() {
-		let entry = SessionEntry::default();
+		let entry = GrpcSession::new(Uuid::nil());
 		let use_ns_db = || Replayable::Use {
 			namespace: Some("ns".to_string()),
 			database: Some("db".to_string()),

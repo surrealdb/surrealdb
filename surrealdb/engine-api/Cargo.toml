@@ -16,6 +16,7 @@ categories.workspace = true
 async-channel.workspace = true
 surrealdb-rpc.workspace = true
 surrealdb-types.workspace = true
+tokio = { workspace = true, default-features = false, features = ["sync"] }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 
 [dev-dependencies]

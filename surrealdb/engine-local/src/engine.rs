@@ -21,13 +21,13 @@ use surrealdb_core::iam::check::check_ns_db;
 use surrealdb_core::kvs::Datastore;
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealdb_engine_api::MlExportConfig;
-use surrealdb_engine_api::{EngineContext, EngineFuture, SurrealEngine};
+use surrealdb_engine_api::{EngineContext, EngineFuture, SurrealEngine, single_result};
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealdb_iam::{Action, ResourceKind};
 use surrealdb_kvs::TransactionType;
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_rpc::export::Config as DbExportConfig;
-use surrealdb_rpc::{QueryResult, QueryResultBuilder, QueryStreamItem, Token};
+use surrealdb_rpc::{QueryResult, QueryResultBuilder, QueryStreamItem, QueryType, Token};
 use surrealdb_types::{Array, Error, Notification, Object, ToSql, Value, Variables};
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealml_core::storage::surml_file::SurMlFile;
@@ -40,7 +40,7 @@ use tokio::{
 use tokio_util::bytes::BytesMut;
 use uuid::Uuid;
 
-use crate::session::{SessionRegistry, SessionState};
+use crate::session::{self, SessionRegistry, SessionState};
 use crate::std_error_to_types_error;
 
 /// A datastore this process owns, served through the SDK's engine interface.
@@ -62,19 +62,7 @@ impl std::fmt::Debug for LocalEngine {
 impl LocalEngine {
 	/// The state the request's session owns, once that session is registered.
 	async fn state(&self, ctx: EngineContext) -> Result<Arc<SessionState>, Error> {
-		self.sessions.resolve(ctx.session).await
-	}
-}
-
-/// Flattens the results of a statement run for its single value.
-///
-/// An empty reply reads as [`Value::None`]: an operation with no result may
-/// answer with either, and both mean the same thing.
-fn single_value(mut results: Vec<QueryResult>) -> Result<Value, Error> {
-	match results.len() {
-		0 => Ok(Value::None),
-		1 => results.remove(0).result,
-		_ => Err(Error::internal("expected the database to return one or no results".to_string())),
+		session::resolve(&self.sessions, ctx.session).await
 	}
 }
 
@@ -83,6 +71,14 @@ fn transaction_not_found() -> Error {
 	Error::not_found(
 		"Transaction not found".to_string(),
 		Some(surrealdb_types::NotFoundError::Transaction),
+	)
+}
+
+/// The failure of committing a transaction whose query was abandoned part-way.
+fn transaction_abandoned() -> Error {
+	Error::internal(
+		"The transaction was rolled back: a query running in it was abandoned before it finished"
+			.to_string(),
 	)
 }
 
@@ -96,6 +92,26 @@ pub(crate) async fn kill_live_query(
 
 	let results = kvs.execute(&sql, session, Some(vars)).await?;
 	Ok(results)
+}
+
+/// Records the live queries a statement registered against the session it ran
+/// on.
+///
+/// A `LIVE SELECT` exists in the datastore the moment its statement succeeds,
+/// but its subscriber only arrives on the `subscribe_live` that follows. The
+/// session has to know about it from the earlier of the two, or a teardown
+/// between them -- an auth change, say -- would leave it running.
+fn record_live_queries(state: &SessionState, results: &[QueryResult]) {
+	for result in results.iter().filter(|result| result.query_type == QueryType::Live) {
+		if let Ok(Value::Uuid(id)) = &result.result {
+			// Subscribed already, in principle: keep whatever is there rather
+			// than dropping a subscriber that beat this.
+			let id = id.into_inner();
+			if state.live_queries.get(&id).is_none() {
+				state.live_queries.insert(id, None);
+			}
+		}
+	}
 }
 
 /// Ends this session's live queries when an auth operation changed the
@@ -302,6 +318,52 @@ where
 	Ok(())
 }
 
+/// Abandons the transaction a query is running in if the query is dropped
+/// before it finishes.
+///
+/// The execution runs on the caller's own task, so a caller that stops awaiting
+/// -- a `timeout`, a `select!` branch that lost -- aborts it part-way through
+/// the batch. What it wrote is still in the transaction and the caller still
+/// holds that transaction's id, so without this a later `commit` would commit a
+/// batch that only half ran.
+///
+/// Setting it aside is what makes that impossible: the `commit` that follows
+/// reports it instead of persisting it. It is set aside rather than dropped
+/// because some backends panic when a live transaction is dropped, so it has to
+/// be cancelled by something that can await -- which `Drop` cannot.
+struct AbandonOnCancel<'a> {
+	state: &'a SessionState,
+	txn: Uuid,
+	finished: bool,
+}
+
+impl<'a> AbandonOnCancel<'a> {
+	fn new(state: &'a SessionState, txn: Uuid) -> Self {
+		Self {
+			state,
+			txn,
+			finished: false,
+		}
+	}
+
+	/// The execution ran to its own conclusion, so the transaction is the
+	/// caller's again -- to commit or to roll back, whichever its result calls
+	/// for.
+	fn finished(mut self) {
+		self.finished = true;
+	}
+}
+
+impl Drop for AbandonOnCancel<'_> {
+	fn drop(&mut self) {
+		if !self.finished
+			&& let Some(tx) = self.state.transactions.take(&self.txn)
+		{
+			self.state.abandoned.insert(self.txn, tx);
+		}
+	}
+}
+
 impl SurrealEngine for LocalEngine {
 	fn query(
 		&self,
@@ -316,12 +378,16 @@ impl SurrealEngine for LocalEngine {
 			vars.extend(variables);
 
 			let session = state.session.read().await;
-			match ctx.transaction {
+			let results = match ctx.transaction {
 				Some(txn) => match state.transactions.get(&txn) {
 					Some(tx) => {
-						self.kvs
+						let abandon = AbandonOnCancel::new(&state, txn);
+						let results = self
+							.kvs
 							.execute_with_transaction(query.as_ref(), &session, Some(vars), tx)
-							.await
+							.await;
+						abandon.finished();
+						results
 					}
 					// Reported as the statement's own failure rather than the
 					// call's, so a caller reading a multi-statement response
@@ -332,7 +398,11 @@ impl SurrealEngine for LocalEngine {
 					]),
 				},
 				None => self.kvs.execute(query.as_ref(), &session, Some(vars)).await,
+			};
+			if let Ok(results) = &results {
+				record_live_queries(&state, results);
 			}
+			results
 		})
 	}
 
@@ -411,7 +481,7 @@ impl SurrealEngine for LocalEngine {
 				.kvs
 				.execute(&sql, &*state.session.read().await, Some(state.vars.read().await.clone()))
 				.await?;
-			single_value(results)
+			single_result(results)
 		})
 	}
 
@@ -587,11 +657,17 @@ impl SurrealEngine for LocalEngine {
 	fn commit(&self, ctx: EngineContext, txn: Uuid) -> EngineFuture<'_, ()> {
 		Box::pin(async move {
 			let state = self.state(ctx).await?;
+			// A transaction whose query was abandoned is rolled back here, where
+			// there is something to await on, and the caller is told rather than
+			// having half a batch committed under it.
+			if let Some(tx) = state.abandoned.take(&txn) {
+				tx.cancel().await.map_err(std_error_to_types_error)?;
+				return Err(transaction_abandoned());
+			}
 			// Removing is what claims the transaction, so two concurrent calls
 			// naming the same one cannot both go on to finalise it.
-			if let Some(tx) = state.transactions.take(&txn) {
-				tx.commit().await.map_err(std_error_to_types_error)?;
-			}
+			let tx = state.transactions.take(&txn).ok_or_else(transaction_not_found)?;
+			tx.commit().await.map_err(std_error_to_types_error)?;
 			Ok(())
 		})
 	}
@@ -599,9 +675,14 @@ impl SurrealEngine for LocalEngine {
 	fn rollback(&self, ctx: EngineContext, txn: Uuid) -> EngineFuture<'_, ()> {
 		Box::pin(async move {
 			let state = self.state(ctx).await?;
-			if let Some(tx) = state.transactions.take(&txn) {
-				tx.cancel().await.map_err(std_error_to_types_error)?;
-			}
+			// Rolling back what was abandoned is exactly what the caller asked
+			// for, so this is not an error on that path.
+			let tx = state
+				.abandoned
+				.take(&txn)
+				.or_else(|| state.transactions.take(&txn))
+				.ok_or_else(transaction_not_found)?;
+			tx.cancel().await.map_err(std_error_to_types_error)?;
 			Ok(())
 		})
 	}
@@ -631,7 +712,7 @@ impl SurrealEngine for LocalEngine {
 	) -> EngineFuture<'_, ()> {
 		Box::pin(async move {
 			let state = self.state(ctx).await?;
-			state.live_queries.insert(uuid, notifications);
+			state.live_queries.insert(uuid, Some(notifications));
 			Ok(())
 		})
 	}
@@ -647,7 +728,7 @@ impl SurrealEngine for LocalEngine {
 				state.vars.read().await.clone(),
 			)
 			.await?;
-			single_value(results)?;
+			single_result(results)?;
 			Ok(())
 		})
 	}
@@ -833,5 +914,61 @@ impl SurrealEngine for LocalEngine {
 
 			Ok(())
 		})
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use surrealdb_rpc::QueryResultBuilder;
+	use surrealdb_types::Uuid as PublicUuid;
+
+	use super::*;
+
+	/// A live query belongs to the session from the moment its statement
+	/// succeeds, not from the `subscribe_live` that follows: an auth change
+	/// landing between the two tears down what it can see, and the datastore
+	/// already has this one.
+	#[test]
+	fn a_live_query_is_recorded_before_its_subscriber_arrives() {
+		let state = SessionState::new(Uuid::now_v7());
+		let live = Uuid::now_v7();
+
+		record_live_queries(
+			&state,
+			&[
+				QueryResultBuilder::started_now()
+					.with_query_type(QueryType::Live)
+					.finish_with_result(Ok(Value::Uuid(PublicUuid::from(live)))),
+				QueryResultBuilder::instant_none(),
+			],
+		);
+
+		assert!(
+			matches!(state.live_queries.get(&live), Some(None)),
+			"the live query is the session's, with no subscriber yet"
+		);
+		assert_eq!(state.live_queries.len(), 1, "only the live statement registers one");
+	}
+
+	/// Recording runs on every statement, so it must not displace a subscriber
+	/// that has already arrived for the same live query.
+	#[test]
+	fn recording_does_not_displace_an_existing_subscriber() {
+		let state = SessionState::new(Uuid::now_v7());
+		let live = Uuid::now_v7();
+		let (sender, _receiver) = async_channel::bounded(1);
+		state.live_queries.insert(live, Some(sender));
+
+		record_live_queries(
+			&state,
+			&[QueryResultBuilder::started_now()
+				.with_query_type(QueryType::Live)
+				.finish_with_result(Ok(Value::Uuid(PublicUuid::from(live))))],
+		);
+
+		assert!(
+			matches!(state.live_queries.get(&live), Some(Some(_))),
+			"the subscriber must survive a later recording pass"
+		);
 	}
 }
