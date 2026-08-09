@@ -23,10 +23,27 @@ LLVM_PROFILE_FILE = { value = "target/llvm-cov-target/%p-%m.profraw", condition 
 # The trailing `..` token resolves to a path-based version, which the runner
 # cargo-builds against the current checkout — this is the "main" target.
 #
+# The chain lists every *stable* release on the 3.x line in order. Betas are
+# omitted: once a minor goes stable nobody upgrades from its betas, and a beta
+# left in the chain only displaces the stable that shipped after it. A beta
+# belongs here only while its minor is unreleased. Each new release must be
+# appended before `..`, or the last hop silently widens into a multi-release
+# jump and the versions users actually upgrade from stop being covered.
+#
+# `;` separates independent chains; hops are only made within a chain. The break
+# between 3.2.0 and 3.2.1 is deliberate. `REBUILD INDEX` on an HNSW, FULLTEXT or
+# DISKANN index never returns when the index was written before 3.2.1 and is read
+# by 3.2.1 or later — verified for sources 3.1.5 and 3.2.0 against targets 3.2.1,
+# 3.2.2 and 3.2.4. The store is otherwise sound: it opens, queries and reports
+# INFO normally, and only the rebuild wedges. Rebuilding is the documented upgrade
+# step for those index types, so the three tests covering them cannot cross that
+# boundary. Splitting the chain keeps every other pair covered, including 3.2.0 as
+# a target; `importing-version` cannot express "every version except this one".
+#
 # Every numeric entry must have a published binary at
 #   https://download.surrealdb.com/v{ver}/surreal-v{ver}.{platform}.{tgz|exe}
 # Override `LANG_UPGRADE_VERSIONS` to test alternative chains locally.
-LANG_UPGRADE_VERSIONS = { value = "3.0.0,3.0.1,3.0.2,3.0.3,3.0.4,3.0.5,3.1.0-beta.1,3.1.0-beta.2,..", condition = { env_not_set = [
+LANG_UPGRADE_VERSIONS = { value = "3.0.0,3.0.1,3.0.2,3.0.3,3.0.4,3.0.5,3.1.0,3.1.1,3.1.2,3.1.3,3.1.4,3.1.5,3.2.0;3.2.1,3.2.2,3.2.3,3.2.4,..", condition = { env_not_set = [
     "LANG_UPGRADE_VERSIONS",
 ] } }
 
@@ -916,14 +933,19 @@ script = """
 # Override _TEST_LANG_UPGRADE_JOBS to tune per-runner concurrency (default 12).
 cd language-tests
 cargo build --features "${_TEST_LANG_FEATURES}"
-IFS=',' read -ra V <<< "${LANG_UPGRADE_VERSIONS}"
-for ((i=0; i<${#V[@]}-1; i++)); do
-    echo "=== Upgrade hop: ${V[$i]} -> ${V[$((i+1))]} (backend=${_TEST_API_ENGINE}) ==="
-    ./target/debug/surrealql-test --color always upgrade \\
-        --from "${V[$i]}" --to "${V[$((i+1))]}" \\
-        --backend "${_TEST_API_ENGINE}" \\
-        --allow-download --no-wip \\
-        --jobs "${_TEST_LANG_UPGRADE_JOBS:-12}"
+# `;` separates independent chains, `,` separates versions within one. Adjacent
+# pairs are hopped within a chain; no hop is made across a chain boundary.
+IFS=';' read -ra CHAINS <<< "${LANG_UPGRADE_VERSIONS}"
+for chain in "${CHAINS[@]}"; do
+    IFS=',' read -ra V <<< "${chain}"
+    for ((i=0; i<${#V[@]}-1; i++)); do
+        echo "=== Upgrade hop: ${V[$i]} -> ${V[$((i+1))]} (backend=${_TEST_API_ENGINE}) ==="
+        ./target/debug/surrealql-test --color always upgrade \\
+            --from "${V[$i]}" --to "${V[$((i+1))]}" \\
+            --backend "${_TEST_API_ENGINE}" \\
+            --allow-download --no-wip \\
+            --jobs "${_TEST_LANG_UPGRADE_JOBS:-12}"
+    done
 done
 """
 

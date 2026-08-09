@@ -644,12 +644,12 @@ jobs:
       - name: Resolve upgrade version chain
         id: vers
         run: |
-          # Extract the comma-separated chain, then translate commas to '_' so
-          # the value is usable inside an `actions/cache` key (which forbids
-          # commas).
+          # Extract the version chains, then translate their ',' and ';'
+          # separators to '_' so the value is usable inside an `actions/cache`
+          # key (which forbids commas).
           chain=$(grep -E '^LANG_UPGRADE_VERSIONS = ' Makefile.ci.toml \
             | sed -E 's/.*value = "([^"]+)".*/\1/' \
-            | tr ',' '_')
+            | tr ',;' '__')
           echo "chain=$chain" >> "$GITHUB_OUTPUT"
 
       - name: Cache upgrade binaries

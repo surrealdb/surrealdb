@@ -103,6 +103,39 @@ source-file test can't express.
 
 Located in `surrealdb/tests/` and `tests/`. Follow standard Rust testing conventions.
 
+### Upgrade Tests (`language-tests/tests/upgrade/*.surql`)
+
+Each test is a pair: `X_import.surql` runs on an old released binary and writes
+data, `X.surql` runs on a newer one and asserts what comes back. The versions
+hopped through live in `LANG_UPGRADE_VERSIONS` in `Makefile.ci.toml`.
+
+**Every new release must be appended to `LANG_UPGRADE_VERSIONS` before the `..`
+token.** The chain runs *adjacent pairs*, so a release that is missing does not
+merely go untested — it widens the final hop into a multi-release jump, and the
+version users are actually upgrading from stops being covered anywhere. Nothing
+fails when this is forgotten; the chain just quietly tests less than it appears
+to. Binaries must be published at `https://download.surrealdb.com/v{ver}/` for
+every entry.
+
+`;` separates independent chains and `,` separates versions within one. Hops are
+made only within a chain, so a pair that cannot work — one spanning a defect in a
+released binary that no gate can express — is excluded by breaking the chain
+there, leaving every other pair covered.
+
+List stable releases only. A beta belongs in the chain while its minor is
+unreleased, and must be replaced by the stable that supersedes it.
+
+A released binary with a defect cannot be fixed retroactively, so a hop
+targeting one stays red. Gate the affected test with `version` (bounds the
+upgrade target) or `importing-version` (bounds the source) rather than removing
+the release from the chain, so the remaining tests still cover that hop.
+
+The import phase defines the namespace and database explicitly before replaying
+a test's imports. Do not make it depend on a write implicitly creating them:
+that is not dependable across the released binaries the chain spans, and when it
+does not happen every import statement fails against a store that was never
+written to.
+
 ## Code Quality Rules
 
 - Use `anyhow::Result` for fallible APIs, `thiserror` for domain errors

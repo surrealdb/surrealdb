@@ -7,6 +7,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::path::Path;
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use clap::ArgMatches;
@@ -404,6 +405,43 @@ async fn run_imports(
 				bail!("Failed to authenticate on importing database: {}", e.message())
 			}
 
+			// The session selects a namespace and database that need not exist on a
+			// fresh store, so create them before the imports run. Relying on the
+			// first write to bring them into being is not dependable across the
+			// released binaries the chain hops through: when it does not happen,
+			// every import statement fails with "The namespace 'test' does not
+			// exist" and leaves an empty store for the test phase to read.
+			//
+			// Runs after `signin` because defining a namespace requires root.
+			let mut provision = String::new();
+			if let Some(ns) = namespace {
+				provision.push_str(&format!("DEFINE NAMESPACE IF NOT EXISTS `{ns}`;"));
+			}
+			if let Some(db) = database {
+				provision.push_str(&format!("DEFINE DATABASE IF NOT EXISTS `{db}`;"));
+			}
+			if !provision.is_empty() {
+				match connection.query(&provision).await {
+					Ok(TestTaskResult::Results {
+						res,
+						..
+					}) => {
+						if let Some(e) = res.iter().find_map(|x| x.as_ref().err()) {
+							bail!(
+								"Failed to provision namespace/database on importing database: {e}"
+							)
+						}
+					}
+					Ok(TestTaskResult::RunningError(e)) => {
+						bail!("Failed to provision namespace/database on importing database: {e:?}")
+					}
+					Err(e) => {
+						bail!("Failed to provision namespace/database on importing database: {e:?}")
+					}
+					_ => {}
+				}
+			}
+
 			for import in imports {
 				match connection.query(&import.source).await {
 					Ok(TestTaskResult::RunningError(e)) => {
@@ -411,6 +449,23 @@ async fn run_imports(
 							import.origin.path.clone(),
 							format!("Failed to run import: {e:?}"),
 						)));
+					}
+					Ok(TestTaskResult::Results {
+						res,
+						..
+					}) => {
+						// A completed round-trip still carries one result per
+						// statement, any of which may be an error. An import whose
+						// statements all failed leaves an empty datastore, and
+						// without this check it counts as a clean import and only
+						// surfaces later as an unrelated "namespace does not exist"
+						// from the test phase, with the real cause never reported.
+						if let Some(e) = res.iter().find_map(|x| x.as_ref().err()) {
+							return Ok(Some(TestTaskResult::Import(
+								import.origin.path.clone(),
+								format!("Import statement returned an error: {e}"),
+							)));
+						}
 					}
 					Err(e) => {
 						return Ok(Some(TestTaskResult::Import(
@@ -490,13 +545,32 @@ async fn run_upgrade_test(
 		.await?
 }
 
+/// Ceiling on a single run: spawn the source binary, replay its imports, restart
+/// on the target binary and run the test.
+///
+/// Nothing in the run is otherwise bounded — `assert_running_while` waits as long
+/// as the spawned process is alive, so a statement that never returns stalls that
+/// run forever and, with enough of them, the whole job. A run that reaches this
+/// limit is reported as a failure. The value is far above what any test legitimately
+/// needs; hops complete 45 runs in seconds.
+const RUN_TIMEOUT: Duration = Duration::from_secs(300);
+
 async fn run_task(
 	run: TestRun<UpgradeTestConfig>,
 	config: Arc<Config>,
 ) -> (TestRun<UpgradeTestConfig>, TestTaskResult) {
-	match run_task_inner(&run, config).await {
-		Ok(x) => (run, x),
-		Err(e) => (run, TestTaskResult::RunningError(e)),
+	// Dropping the timed-out future drops the `SurrealProcess` handles, which are
+	// `kill_on_drop`, so the spawned binaries do not outlive the run.
+	match tokio::time::timeout(RUN_TIMEOUT, run_task_inner(&run, config)).await {
+		Ok(Ok(x)) => (run, x),
+		Ok(Err(e)) => (run, TestTaskResult::RunningError(e)),
+		Err(_) => (
+			run,
+			TestTaskResult::RunningError(anyhow::anyhow!(
+				"Run did not finish within {}s; the database did not return from a statement",
+				RUN_TIMEOUT.as_secs()
+			)),
+		),
 	}
 }
 

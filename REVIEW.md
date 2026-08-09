@@ -9,6 +9,7 @@
 - **Revisioned structs**: changes to types that derive `Revision` must be backwards compatible.
 - **Test coverage**: bug fixes should include a language test (`language-tests/tests/`) or SDK test (`surrealdb/tests/`, `tests/`). New SurrealQL functionality needs corresponding `.surql` test files. Functionality that can be tested with language tests should be preferred over writing custom rust language tests.
 - **Dependency changes**: new external crates require justification. Prefer workspace-managed dependencies in the root `Cargo.toml`.
+- **New releases**: a change that tags or ships a version must add it to `LANG_UPGRADE_VERSIONS` in [Makefile.ci.toml](Makefile.ci.toml), before the trailing `..`. Omitting it silently widens the last upgrade-test hop into a multi-release jump instead of failing. See [CLAUDE.md](CLAUDE.md) > Testing Conventions > Upgrade Tests.
 
 ## Skip
 
