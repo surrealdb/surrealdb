@@ -117,6 +117,11 @@ where
 	/// it might be helpful to set this to a number that works best
 	/// for you.
 	///
+	/// This applies to the remote engines. An embedded connection queues
+	/// nothing between the caller and the datastore — each request is awaited
+	/// where it is made — so there is no channel for it to bound, and it is
+	/// ignored.
+	///
 	/// # Examples
 	///
 	/// ```no_run

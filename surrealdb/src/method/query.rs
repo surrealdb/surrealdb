@@ -172,6 +172,14 @@ where
 		let query = join_queries(&queries);
 		let variables = variables?;
 		let ctx = ctx_txn(client.session_id, txn);
+		// The execution runs on a task of its own, and a session lasts only as
+		// long as a handle to it: an owned handle therefore travels with the
+		// execution, or the session it runs under would be released the moment
+		// this function returns. A borrowed one is the caller's to keep alive.
+		let keepalive = match client {
+			Cow::Owned(client) => Some(client),
+			Cow::Borrowed(_) => None,
+		};
 
 		let (out_tx, out_rx) = crate::channel::bounded(STREAM_ITEM_BUFFER);
 		let (raw_tx, raw_rx) = crate::channel::bounded(QUERY_STREAM_BUFFER);
@@ -186,6 +194,7 @@ where
 		// the caller only drains the far end. Both therefore run on a task of
 		// their own.
 		spawn(async move {
+			let _keepalive = keepalive;
 			let run = engine.query_stream(ctx, Cow::Owned(query), variables, raw_tx);
 			let forward = async {
 				while let Ok(item) = raw_rx.recv().await {

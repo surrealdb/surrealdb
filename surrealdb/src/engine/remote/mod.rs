@@ -313,12 +313,6 @@ impl RemoteCommand for Command {
 			}
 			| Command::ImportMl {
 				..
-			}
-			// These transports answer a query in one response, so they are
-			// wrapped as non-streaming engines and never sent this. It has no
-			// RPC method to compile into.
-			| Command::QueryStream {
-				..
 			} => return None,
 			Command::Health => RouterRequest {
 				id,

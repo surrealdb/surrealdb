@@ -17,34 +17,25 @@ impl conn::Sealed for Db {
 	#[allow(private_interfaces)]
 	fn connect(
 		address: Endpoint,
-		capacity: usize,
+		_capacity: usize,
 		session_clone: Option<crate::SessionClone>,
 	) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
-			let (route_tx, route_rx) = match capacity {
-				0 => async_channel::unbounded(),
-				capacity => async_channel::bounded(capacity),
-			};
-
-			let (conn_tx, conn_rx) = async_channel::bounded(1);
 			let config = address.config.clone();
 			let session_clone = session_clone.unwrap_or_else(SessionClone::new);
 
-			tokio::spawn(surrealdb_engine_local::native::run_router(
+			let engine = surrealdb_engine_local::connect(
 				local_config(address),
-				conn_tx,
-				route_rx,
 				session_clone.receiver.clone(),
-			));
-
-			conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
+			)
+			.await?;
 
 			let mut features = HashSet::new();
 			features.insert(ExtraFeatures::Backup);
 			features.insert(ExtraFeatures::LiveQueries);
 
 			let waiter = watch::channel(Some(WaitFor::Connection));
-			let router = Router::from_streaming_route_sender(route_tx, features, config);
+			let router = Router::from_engine(engine, features, config);
 
 			Ok((router, waiter, session_clone).into())
 		})
@@ -64,29 +55,47 @@ impl Surreal<Db> {
 		datastore: Arc<Datastore>,
 		notifications: Option<Receiver<Notification>>,
 	) -> Result<Self> {
-		let (route_tx, route_rx) = async_channel::unbounded();
-		let (conn_tx, conn_rx) = async_channel::bounded::<Result<()>>(1);
 		let session_clone = SessionClone::new();
-		let recv = session_clone.receiver.clone();
-
-		tokio::spawn(surrealdb_engine_local::native::run_datastore_router(
+		let engine = surrealdb_engine_local::from_datastore(
 			datastore,
 			notifications,
-			conn_tx,
-			route_rx,
-			recv,
-		));
-
-		conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
+			session_clone.receiver.clone(),
+		);
 
 		let mut features = HashSet::new();
 		features.insert(ExtraFeatures::Backup);
 		features.insert(ExtraFeatures::LiveQueries);
 
 		let waiter = watch::channel(Some(WaitFor::Connection));
-		let router =
-			Router::from_streaming_route_sender(route_tx, features, crate::opt::Config::default());
+		let router = Router::from_engine(engine, features, crate::opt::Config::default());
 
 		Ok((router, waiter, session_clone).into())
+	}
+}
+
+#[cfg(all(test, feature = "kv-mem"))]
+mod tests {
+	use std::sync::Arc;
+
+	use surrealdb_engine_local::Datastore;
+
+	use crate::Surreal;
+	use crate::engine::local::Db;
+
+	/// Bringing your own datastore reaches the same engine `connect` builds,
+	/// but not by the same route, so it is the one construction path the
+	/// integration suite has no way to drive.
+	#[test_log::test(tokio::test)]
+	async fn a_supplied_datastore_serves_queries() {
+		let datastore = Datastore::new("memory").await.unwrap();
+		let db =
+			Surreal::<Db>::unstable_from_datastore(Arc::clone(&datastore), None).await.unwrap();
+
+		db.use_ns("test").use_db("test").await.unwrap();
+		db.query("CREATE person:one SET name = 'a'").await.unwrap().check().unwrap();
+
+		let names: Vec<String> =
+			db.query("SELECT VALUE name FROM person").await.unwrap().take(0).unwrap();
+		assert_eq!(names, vec!["a".to_string()]);
 	}
 }

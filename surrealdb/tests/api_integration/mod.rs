@@ -499,6 +499,71 @@ mod mem {
 		db.use_ns("test").use_db("test").await.unwrap();
 	}
 
+	/// `authenticate` redeems the refresh token by itself when the access token
+	/// it was given has expired.
+	///
+	/// Embedded only, deliberately: over the RPC transports `authenticate`
+	/// carries a bare token string and there is nowhere to put a refresh token,
+	/// so a caller there asks for the refresh explicitly. This is the implicit
+	/// path, and it is the one that takes the session lock twice — once to try
+	/// the access token and again to redeem the refresh token — so an
+	/// implementation that holds the first lock into the second deadlocks here
+	/// rather than failing.
+	#[test_log::test(tokio::test)]
+	async fn authenticate_refreshes_an_expired_access_token() {
+		use surrealdb::opt::auth::Record as RecordAccess;
+		use ulid::Ulid;
+
+		use super::AuthParams;
+
+		let db = Surreal::new::<Mem>(()).await.unwrap();
+		let namespace = Ulid::new().to_string();
+		let database = Ulid::new().to_string();
+		db.use_ns(&namespace).use_db(&database).await.unwrap();
+		let access = Ulid::new();
+		let email = format!("{access}@example.com");
+		let pass = "password123";
+		// A token lifetime short enough to expire within the test.
+		db.query(format!(
+			"
+			DEFINE ACCESS `{access}` ON DATABASE TYPE RECORD
+			SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+			SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+			WITH REFRESH
+			DURATION FOR SESSION 1d FOR TOKEN 1s
+		"
+		))
+		.await
+		.unwrap()
+		.check()
+		.unwrap();
+
+		let token = db
+			.signup(RecordAccess {
+				namespace,
+				database,
+				access: access.to_string(),
+				params: AuthParams {
+					pass: pass.to_string(),
+					email,
+				},
+			})
+			.await
+			.unwrap();
+		assert!(token.refresh.is_some(), "the access grant is defined WITH REFRESH");
+		let expired = token.access.as_insecure_token().to_owned();
+
+		// Let the access token expire, leaving the refresh token as the only way in.
+		tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+		let token = db.authenticate(token).await.unwrap();
+		assert_ne!(
+			expired,
+			token.access.as_insecure_token(),
+			"the session must be authenticated with a freshly issued access token"
+		);
+	}
+
 	#[test_log::test(tokio::test)]
 	async fn experimental_features() {
 		let surql = "
@@ -560,6 +625,45 @@ mod rocksdb {
 			// Create a database directory using a relative path
 			surrealdb::engine::any::connect(format!("rocksdb://relative/{db_dir}")).await.unwrap();
 		}
+	}
+
+	/// Dropping the last connection handle shuts the datastore down.
+	///
+	/// Nothing calls `shutdown()` explicitly -- the engine takes the handles
+	/// going away as the signal -- so without this an embedded connection would
+	/// hold its storage for the lifetime of the process. RocksDB is where that
+	/// is observable: it takes an exclusive lock on its directory, so the same
+	/// path can only be reopened once the lock has been released.
+	#[test_log::test(tokio::test)]
+	async fn dropping_the_last_handle_releases_the_datastore() {
+		let _permit = PERMITS.acquire().await.unwrap();
+		let endpoint = format!("rocksdb://{}", TEMP_DIR.join(Ulid::new().to_string()).display());
+
+		let db = surrealdb::engine::any::connect(&endpoint).await.unwrap();
+		// Establishes the premise the rest of the test rests on: while the
+		// datastore is open, its directory cannot be opened again.
+		surrealdb::engine::any::connect(&endpoint)
+			.await
+			.expect_err("an open RocksDB datastore holds its directory");
+		drop(db);
+
+		// Shutdown runs on the engine's own task, so it has not necessarily
+		// finished by the time the handle is dropped.
+		let mut last = None;
+		for _ in 0..100 {
+			match surrealdb::engine::any::connect(&endpoint).await {
+				// Dropped here rather than left to the end of the test: the
+				// runtime stops with the test, and an engine still holding the
+				// directory when that happens never gets to release it.
+				Ok(reopened) => {
+					drop(reopened);
+					return;
+				}
+				Err(error) => last = Some(error),
+			}
+			tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+		}
+		panic!("the datastore was never released: {last:?}");
 	}
 
 	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run);

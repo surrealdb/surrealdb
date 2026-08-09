@@ -22,10 +22,10 @@ async fn db() -> Surreal<surrealdb::engine::local::Db> {
 
 /// How many tasks are alive on the runtime running this test.
 ///
-/// A streaming query occupies several: `stream_items` spawns one to drive the
-/// execution against the caller's reads, and the embedded engine spawns another
-/// to run the query itself. All of them must retire once the stream is dropped,
-/// and the count is how that is observed — an execution that is merely parked is
+/// A streaming query occupies one: `stream_items` spawns it to drive the
+/// execution against the caller's reads, and the embedded engine runs the
+/// execution on that same task. It must retire once the stream is dropped, and
+/// the count is how that is observed — an execution that is merely parked is
 /// still alive, where one that reached its end is not.
 ///
 /// The count is exact here because a `#[tokio::test]` runs on a current-thread
@@ -196,9 +196,8 @@ async fn a_dropped_stream_releases_the_connection() {
 /// then run to completion so that finalisation happens.
 ///
 /// The observable form of "never completes" is a task that stays alive with
-/// nothing left to wake it. Both of the query's tasks retiring is what says the
-/// execution reached its end rather than parking on a buffer no one will drain
-/// again.
+/// nothing left to wake it. The query's task retiring is what says the execution
+/// reached its end rather than parking on a buffer no one will drain again.
 ///
 /// The row count is what makes this a test rather than a tautology: the query
 /// must be nowhere near finished when the stream is dropped. The buffers between
@@ -214,7 +213,7 @@ async fn a_dropped_stream_stops_the_execution_behind_it() {
 		.check()
 		.expect("seed");
 
-	// The seed's own route task has to retire before the count means anything,
+	// The seed's own task has to retire before the count means anything,
 	// or it would be indistinguishable from a leaked one.
 	let baseline = settled_tasks().await;
 

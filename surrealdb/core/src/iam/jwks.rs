@@ -358,39 +358,45 @@ fn build_jwks_client(kvs: &Datastore) -> Result<Client> {
 // Attempts to fetch a JWKS object from a remote location and stores it in the
 // cache if successful
 async fn fetch_jwks_from_url(kvs: &Datastore, url: &str) -> Result<JwkSet> {
-	let cache = kvs.cache();
-	#[cfg(not(target_family = "wasm"))]
-	let client = build_jwks_client(kvs)?;
-	#[cfg(target_family = "wasm")]
-	let client = Client::new();
-	let req = client.get(url);
-	// Add a User-Agent header so that WAF rules don't reject the request
-	#[cfg(not(target_family = "wasm"))]
-	let req = req.header(reqwest::header::USER_AGENT, &kvs.config().http.surrealdb_user_agent);
-	#[cfg(not(target_family = "wasm"))]
-	let res = req.timeout((*REMOTE_TIMEOUT).to_std().expect("valid duration")).send().await?;
-	#[cfg(target_family = "wasm")]
-	let res = req.send().await?;
-	if !res.status().is_success() {
-		warn!(
-			"Unsuccessful HTTP status code received when fetching JWKS object from remote location: '{:?}'",
-			res.status()
-		);
-		bail!(AuthError::InvalidAuth); // Return opaque error
-	}
-	let jwks = res.bytes().await?;
+	// On browser WASM the reqwest futures and response held across the awaits
+	// below are not `Send`, while the callers that authenticate a session are
+	// `Send`-bounded; the wrapper asserts `Send` for the whole block.
+	common::future::assert_send(async move {
+		let cache = kvs.cache();
+		#[cfg(not(target_family = "wasm"))]
+		let client = build_jwks_client(kvs)?;
+		#[cfg(target_family = "wasm")]
+		let client = Client::new();
+		let req = client.get(url);
+		// Add a User-Agent header so that WAF rules don't reject the request
+		#[cfg(not(target_family = "wasm"))]
+		let req = req.header(reqwest::header::USER_AGENT, &kvs.config().http.surrealdb_user_agent);
+		#[cfg(not(target_family = "wasm"))]
+		let res = req.timeout((*REMOTE_TIMEOUT).to_std().expect("valid duration")).send().await?;
+		#[cfg(target_family = "wasm")]
+		let res = req.send().await?;
+		if !res.status().is_success() {
+			warn!(
+				"Unsuccessful HTTP status code received when fetching JWKS object from remote location: '{:?}'",
+				res.status()
+			);
+			bail!(AuthError::InvalidAuth); // Return opaque error
+		}
+		let jwks = res.bytes().await?;
 
-	match serde_json::from_slice::<JwkSet>(&jwks) {
-		Ok(jwks) => {
-			// If successful, cache the JWKS object by its URL
-			store_jwks_in_cache(cache.as_ref(), jwks.clone(), url);
-			Ok(jwks)
+		match serde_json::from_slice::<JwkSet>(&jwks) {
+			Ok(jwks) => {
+				// If successful, cache the JWKS object by its URL
+				store_jwks_in_cache(cache.as_ref(), jwks.clone(), url);
+				Ok(jwks)
+			}
+			Err(err) => {
+				warn!("Failed to parse malformed JWKS object: '{}'", err);
+				Err(anyhow::Error::new(AuthError::InvalidAuth)) // Return opaque error
+			}
 		}
-		Err(err) => {
-			warn!("Failed to parse malformed JWKS object: '{}'", err);
-			Err(anyhow::Error::new(AuthError::InvalidAuth)) // Return opaque error
-		}
-	}
+	})
+	.await
 }
 
 // Attempts to fetch a JWKS object from the local cache

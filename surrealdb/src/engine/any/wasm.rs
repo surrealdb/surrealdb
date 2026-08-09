@@ -40,22 +40,19 @@ impl conn::Sealed for Any {
 			let mut features = HashSet::new();
 
 			let endpoint_kind = EndpointKind::from(address.url.scheme());
-			// An embedded engine owns its datastore and can hand results over as
-			// it produces them; a remote one is bounded by what its transport
-			// can carry, which for `ws` and `http` is one response per query.
-			let streams = endpoint_kind.is_local();
 			match endpoint_kind {
 				EndpointKind::IndxDb => {
 					#[cfg(feature = "kv-indxdb")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						spawn_local(surrealdb_engine_local::wasm::run_router(
+						let engine = surrealdb_engine_local::connect(
 							engine::local::local_config(address),
-							conn_tx,
-							route_rx,
 							session_clone.receiver.clone(),
-						));
-						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
+						)
+						.await?;
+						let router = Router::from_engine(engine, features, config);
+						let waiter = watch::channel(Some(WaitFor::Connection));
+						return Ok((router, waiter, session_clone).into());
 					}
 
 					#[cfg(not(feature = "kv-indxdb"))]
@@ -68,13 +65,14 @@ impl conn::Sealed for Any {
 					#[cfg(feature = "kv-mem")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						spawn_local(surrealdb_engine_local::wasm::run_router(
+						let engine = surrealdb_engine_local::connect(
 							engine::local::local_config(address),
-							conn_tx,
-							route_rx,
 							session_clone.receiver.clone(),
-						));
-						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
+						)
+						.await?;
+						let router = Router::from_engine(engine, features, config);
+						let waiter = watch::channel(Some(WaitFor::Connection));
+						return Ok((router, waiter, session_clone).into());
 					}
 
 					#[cfg(not(feature = "kv-mem"))]
@@ -87,13 +85,14 @@ impl conn::Sealed for Any {
 					#[cfg(feature = "kv-rocksdb")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						spawn_local(surrealdb_engine_local::wasm::run_router(
+						let engine = surrealdb_engine_local::connect(
 							engine::local::local_config(address),
-							conn_tx,
-							route_rx,
 							session_clone.receiver.clone(),
-						));
-						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
+						)
+						.await?;
+						let router = Router::from_engine(engine, features, config);
+						let waiter = watch::channel(Some(WaitFor::Connection));
+						return Ok((router, waiter, session_clone).into());
 					}
 
 					#[cfg(not(feature = "kv-rocksdb"))]
@@ -104,13 +103,14 @@ impl conn::Sealed for Any {
 					#[cfg(feature = "kv-surrealkv")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						spawn_local(surrealdb_engine_local::wasm::run_router(
+						let engine = surrealdb_engine_local::connect(
 							engine::local::local_config(address),
-							conn_tx,
-							route_rx,
 							session_clone.receiver.clone(),
-						));
-						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
+						)
+						.await?;
+						let router = Router::from_engine(engine, features, config);
+						let waiter = watch::channel(Some(WaitFor::Connection));
+						return Ok((router, waiter, session_clone).into());
 					}
 
 					#[cfg(not(feature = "kv-surrealkv"))]
@@ -123,13 +123,14 @@ impl conn::Sealed for Any {
 					#[cfg(feature = "kv-tikv")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						spawn_local(surrealdb_engine_local::wasm::run_router(
+						let engine = surrealdb_engine_local::connect(
 							engine::local::local_config(address),
-							conn_tx,
-							route_rx,
 							session_clone.receiver.clone(),
-						));
-						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
+						)
+						.await?;
+						let router = Router::from_engine(engine, features, config);
+						let waiter = watch::channel(Some(WaitFor::Connection));
+						return Ok((router, waiter, session_clone).into());
 					}
 
 					#[cfg(not(feature = "kv-tikv"))]
@@ -185,11 +186,7 @@ impl conn::Sealed for Any {
 			}
 
 			let waiter = watch::channel(Some(WaitFor::Connection));
-			let router = if streams {
-				Router::from_streaming_route_sender(route_tx, features, config)
-			} else {
-				Router::from_route_sender(route_tx, features, config)
-			};
+			let router = Router::from_route_sender(route_tx, features, config);
 
 			Ok((router, waiter, session_clone).into())
 		})

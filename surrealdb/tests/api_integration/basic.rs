@@ -443,6 +443,100 @@ pub async fn query_binds(new_db: impl CreateDb) {
 	assert_eq!(record.name, "John Doe");
 }
 
+/// `stream_items` is the only caller of the engine's streaming query, and the
+/// embedded engine is the only one that serves it for real -- the rest answer
+/// from the buffered default, which replays a finished result as the same
+/// items. Both must produce every row, tagged with its statement and ahead of
+/// the item that confirms it.
+pub async fn query_stream_items(new_db: impl CreateDb) {
+	use futures::StreamExt as _;
+	use surrealdb::method::StreamItem;
+
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+
+	for name in ["a", "b", "c"] {
+		db.query(format!("CREATE person SET name = '{name}'")).await.unwrap().check().unwrap();
+	}
+
+	// Two statements, so the items have to carry which one they belong to and
+	// the ends have to arrive in statement order -- neither of which a
+	// single-statement query can tell apart from an unindexed replay.
+	let mut items = db
+		.query("SELECT name FROM person")
+		.query("SELECT name FROM person WHERE name = 'a'")
+		.stream_items()
+		.unwrap();
+
+	let mut rows = [0, 0];
+	let mut ends = Vec::new();
+	while let Some(item) = items.next().await {
+		match item.unwrap() {
+			StreamItem::Row {
+				statement,
+				..
+			} => {
+				assert!(!ends.contains(&statement), "a row arrived after its statement ended");
+				rows[statement] += 1;
+			}
+			StreamItem::StatementEnd {
+				statement,
+				result,
+				..
+			} => {
+				result.unwrap();
+				ends.push(statement);
+			}
+		}
+	}
+	assert_eq!(rows, [3, 1], "every row reaches the caller, tagged with its statement");
+	assert_eq!(ends, vec![0, 1], "each statement ends exactly once, in order");
+}
+
+/// An owned query streams to the end even though nothing else holds the
+/// connection.
+///
+/// `into_owned` exists so a query can be moved onto another task, which means
+/// the handle it was built from is gone by the time the stream is read. The
+/// execution runs under a session, and a session lives only as long as a handle
+/// to it, so the owned handle has to travel with the execution.
+pub async fn owned_query_stream_outlives_its_builder(new_db: impl CreateDb) {
+	use futures::StreamExt as _;
+	use surrealdb::method::StreamItem;
+
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+	drop(permit);
+
+	db.query("CREATE person SET name = 'a'").await.unwrap().check().unwrap();
+
+	// `into_owned` clones the handle, and `stream_items` consumes the query --
+	// so nothing the caller holds keeps that clone's session alive.
+	let mut items = db.query("SELECT name FROM person").into_owned().stream_items().unwrap();
+
+	let mut rows = 0;
+	let mut ended = false;
+	while let Some(item) = items.next().await {
+		match item.unwrap() {
+			StreamItem::Row {
+				..
+			} => rows += 1,
+			StreamItem::StatementEnd {
+				result,
+				..
+			} => {
+				result.unwrap();
+				ended = true;
+			}
+		}
+	}
+	assert_eq!(rows, 1, "the row must reach the caller");
+	assert!(ended, "the stream must end, rather than stalling on a released session");
+}
+
 pub async fn query_with_stats(new_db: impl CreateDb) {
 	let config = Config::new();
 	let (permit, db) = new_db.create_db(config).await;
@@ -2020,6 +2114,10 @@ define_include_tests!(basic => {
 	query_decimals,
 	#[test_log::test(tokio::test)]
 	query_binds,
+	#[test_log::test(tokio::test)]
+	query_stream_items,
+	#[test_log::test(tokio::test)]
+	owned_query_stream_outlives_its_builder,
 	#[test_log::test(tokio::test)]
 	query_with_stats,
 	#[test_log::test(tokio::test)]

@@ -3,9 +3,9 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_channel::Sender;
-// The engine interface, and the route-channel adapter that lets the embedded,
-// WebSocket and HTTP engines serve it unchanged. `Command` is that adapter's
-// vocabulary, not this crate's: nothing outside it constructs one.
+// The engine interface, and the route-channel adapter that lets the WebSocket
+// and HTTP engines serve it unchanged. `Command` is that adapter's vocabulary,
+// not this crate's: nothing outside it constructs one.
 // Which of these a build uses depends on which engines it enables.
 #[allow(unused_imports)]
 pub(crate) use surrealdb_engine_api::{
@@ -76,8 +76,8 @@ impl Router {
 		self.query_value(ctx_txn(session, request.txn), request.query, request.variables)
 	}
 
-	/// Builds a router around a [`Route`] channel, the shape the embedded,
-	/// WebSocket and HTTP engines each already produce.
+	/// Builds a router around a [`Route`] channel, the shape the WebSocket and
+	/// HTTP engines each already produce.
 	pub(crate) fn from_route_sender(
 		sender: Sender<Route>,
 		features: HashSet<ExtraFeatures>,
@@ -90,24 +90,19 @@ impl Router {
 		}
 	}
 
-	/// Builds a router around a [`Route`] channel whose engine can produce
-	/// results incrementally, so a streaming caller is served for real rather
-	/// than from the buffered path.
-	pub(crate) fn from_streaming_route_sender(
-		sender: Sender<Route>,
-		features: HashSet<ExtraFeatures>,
-		config: Config,
-	) -> Self {
-		Self {
-			engine: Arc::new(RouteChannelEngine::new_streaming(sender)),
-			config,
-			features,
-		}
-	}
-
 	/// Builds a router around an engine that serves [`SurrealEngine`]
 	/// directly, with no route channel behind it.
-	#[cfg_attr(not(feature = "protocol-grpc"), allow(dead_code))]
+	#[cfg_attr(
+		not(any(
+			feature = "protocol-grpc",
+			feature = "kv-mem",
+			feature = "kv-tikv",
+			feature = "kv-rocksdb",
+			feature = "kv-indxdb",
+			feature = "kv-surrealkv",
+		)),
+		allow(dead_code)
+	)]
 	pub(crate) fn from_engine(
 		engine: Arc<dyn SurrealEngine>,
 		features: HashSet<ExtraFeatures>,
