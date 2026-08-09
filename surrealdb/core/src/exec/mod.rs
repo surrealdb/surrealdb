@@ -55,6 +55,7 @@ pub(crate) mod config;
 pub(crate) mod context;
 pub(crate) mod error;
 pub(crate) mod expression_registry;
+pub(crate) mod fan_out;
 pub(crate) use crate::val::field_path;
 pub(crate) mod field_path_convert;
 pub(crate) mod function;

@@ -4,6 +4,7 @@ use futures::StreamExt;
 
 use crate::catalog::providers::TableProvider;
 use crate::catalog::table_select_permission;
+use crate::exec::fan_out::{RECORD_DEREFERENCE, evaluate_each};
 use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, convert_permission_to_physical_runtime,
 	should_check_perms,
@@ -407,11 +408,11 @@ pub(crate) async fn fetch_record(
 	Ok(val)
 }
 
-/// Batch fetch multiple records by their IDs concurrently.
+/// Fetch several records by id, overlapping the fetches.
 ///
-/// This function fetches multiple records in parallel using `try_join_all`,
-/// which is more efficient than sequential fetching for larger batches.
-/// The transaction cache will deduplicate repeated IDs automatically.
+/// The transaction cache deduplicates repeated ids automatically. The only
+/// expressions that run are each target's own, which is what
+/// [`RECORD_DEREFERENCE`] names.
 ///
 /// # Arguments
 ///
@@ -426,27 +427,7 @@ pub(crate) async fn batch_fetch_records(
 	ctx: &ExecutionContext,
 	rids: &[RecordId],
 ) -> crate::expr::FlowResult<Vec<Value>> {
-	if rids.is_empty() {
-		return Ok(Vec::new());
-	}
-
-	// For small batches, sequential fetch may be more efficient
-	// due to lower overhead. Threshold chosen empirically.
-	const PARALLEL_THRESHOLD: usize = 4;
-
-	if rids.len() < PARALLEL_THRESHOLD {
-		// Sequential fetch for small batches
-		let mut results = Vec::with_capacity(rids.len());
-		for rid in rids {
-			results.push(fetch_record(ctx, rid).await?);
-		}
-		return Ok(results);
-	}
-
-	// Parallel fetch for larger batches
-	let futures: Vec<_> = rids.iter().map(|rid| fetch_record(ctx, rid)).collect();
-
-	futures::future::try_join_all(futures).await
+	evaluate_each(ctx, RECORD_DEREFERENCE, rids, |rid| fetch_record(ctx, rid)).await
 }
 
 /// Batch fetch records and replace RecordIds in an array in place.

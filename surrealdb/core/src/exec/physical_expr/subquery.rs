@@ -3,6 +3,7 @@ use std::sync::Arc;
 use futures::StreamExt;
 use surrealdb_types::{SqlFormat, ToSql};
 
+use crate::exec::fan_out::evaluate_each;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, BoxFut, ExecOperator};
 use crate::expr::FlowResult;
@@ -79,33 +80,20 @@ impl PhysicalExpr for ScalarSubquery {
 		})
 	}
 
-	/// Parallel batch evaluation for subqueries.
+	/// Batch evaluation for subqueries.
 	///
-	/// Read-only subqueries can run in parallel across rows since each row's
-	/// subquery execution is independent. Falls back to sequential for
-	/// mutation subqueries (ReadWrite) to preserve side-effect ordering.
+	/// Each row runs the subquery plan, so the mode is the plan's own: a
+	/// mutating subquery is evaluated one row at a time.
 	fn evaluate_batch<'a>(
 		&'a self,
 		ctx: EvalContext<'a>,
 		values: &'a [Value],
 	) -> BoxFut<'a, FlowResult<Vec<Value>>> {
-		Box::pin(async move {
-			if values.len() < 2 || self.plan.access_mode() == AccessMode::ReadWrite {
-				// Sequential for small batches or mutation subqueries.
-				// Use `with_value_and_doc` so single-row batches still set
-				// `document_root` for `$parent` / nested correlation (#7154).
-				let mut results = Vec::with_capacity(values.len());
-				for value in values {
-					results.push(self.evaluate(ctx.with_value_and_doc(value)).await?);
-				}
-				return Ok(results);
-			}
+		Box::pin(evaluate_each(ctx.exec_ctx, self.plan.access_mode(), values, move |value| {
 			// Bind both current value and document root so `$parent` / nested
-			// subqueries match `with_value_and_doc` single-row evaluation (#7154).
-			let futures: Vec<_> =
-				values.iter().map(|value| self.evaluate(ctx.with_value_and_doc(value))).collect();
-			futures::future::try_join_all(futures).await
-		})
+			// subqueries match single-row evaluation (#7154).
+			self.evaluate(ctx.with_value_and_doc(value))
+		}))
 	}
 
 	fn access_mode(&self) -> AccessMode {

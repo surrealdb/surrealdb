@@ -100,6 +100,11 @@ pub(crate) fn buffer_stream(
 /// The inner stream is moved into a separate tokio task that eagerly produces
 /// batches into a bounded channel. The returned stream reads from the channel.
 ///
+/// Only a [`ReadOnly`](AccessMode::ReadOnly) stream may be moved onto another
+/// task: a writing one running ahead of its consumer would order its writes by
+/// the scheduler. This is the operator-level counterpart of the row-level rule
+/// in [`crate::exec::fan_out`], and [`buffer_stream`] is what enforces it.
+///
 /// Safe to use when the operator pipeline's `RootContext.ctx` is a snapshot
 /// (independent `Arc<Context>`) rather than a clone of the executor's Arc.
 #[cfg(not(target_family = "wasm"))]

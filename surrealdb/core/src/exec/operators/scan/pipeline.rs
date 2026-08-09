@@ -140,7 +140,7 @@ impl ScanPipeline {
 		batch: &mut Vec<Value>,
 		ctx: &ExecutionContext,
 	) -> Result<bool, ControlFlow> {
-		// Phase 1: filter + process (parallel per-record via try_join_all_buffered)
+		// Phase 1: filter + process, per record
 		if self.needs_processing {
 			filter_and_process_batch(
 				batch,

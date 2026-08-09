@@ -5,6 +5,7 @@ use std::sync::Arc;
 use futures::StreamExt;
 use surrealdb_types::{SqlFormat, ToSql};
 
+use crate::exec::fan_out::evaluate_each;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, BoxFut, ContextLevel, Error as ExecError, ExecOperator};
 use crate::expr::FlowResult;
@@ -89,29 +90,18 @@ impl PhysicalExpr for LookupPart {
 		})
 	}
 
-	/// Parallel batch evaluation for graph/reference lookups.
+	/// Batch evaluation for graph/reference lookups.
 	///
-	/// Each lookup executes a plan per RecordId, which involves I/O.
-	/// Parallelizing across rows lets multiple lookups proceed concurrently.
-	/// Falls back to sequential for ReadWrite plans to preserve mutation ordering.
+	/// Each row runs the lookup plan, so the mode is the plan's own: a lookup
+	/// whose plan mutates is evaluated one row at a time.
 	fn evaluate_batch<'a>(
 		&'a self,
 		ctx: EvalContext<'a>,
 		values: &'a [Value],
 	) -> BoxFut<'a, FlowResult<Vec<Value>>> {
-		Box::pin(async move {
-			if values.len() < 2 || self.access_mode() == AccessMode::ReadWrite {
-				// Sequential for small batches or mutation plans
-				let mut results = Vec::with_capacity(values.len());
-				for value in values {
-					results.push(self.evaluate(ctx.with_value(value)).await?);
-				}
-				return Ok(results);
-			}
-			let futures: Vec<_> =
-				values.iter().map(|value| self.evaluate(ctx.with_value(value))).collect();
-			futures::future::try_join_all(futures).await
-		})
+		Box::pin(evaluate_each(ctx.exec_ctx, self.access_mode(), values, move |value| {
+			self.evaluate(ctx.with_value(value))
+		}))
 	}
 
 	fn access_mode(&self) -> AccessMode {

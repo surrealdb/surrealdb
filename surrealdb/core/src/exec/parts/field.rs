@@ -2,13 +2,11 @@
 
 use surrealdb_types::{SqlFormat, ToSql};
 
+use crate::exec::fan_out::{RECORD_DEREFERENCE, evaluate_each};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, BoxFut, ContextLevel};
 use crate::expr::FlowResult;
 use crate::val::Value;
-
-/// Threshold below which we evaluate sequentially (no parallelism overhead).
-const PARALLEL_BATCH_THRESHOLD: usize = 2;
 
 /// Simple field access on an object - `foo`.
 ///
@@ -40,28 +38,19 @@ impl PhysicalExpr for FieldPart {
 		})
 	}
 
-	/// Parallel batch evaluation for field access.
+	/// Batch evaluation for field access.
 	///
-	/// Field access on RecordIds triggers record fetches, which are I/O-bound.
-	/// Parallelizing across rows lets multiple fetches proceed concurrently.
+	/// Field access on a record id dereferences it, which is I/O, so the rows
+	/// are worth overlapping. The only expressions that run are the target's,
+	/// which is what [`RECORD_DEREFERENCE`] names.
 	fn evaluate_batch<'a>(
 		&'a self,
 		ctx: EvalContext<'a>,
 		values: &'a [Value],
 	) -> BoxFut<'a, FlowResult<Vec<Value>>> {
-		Box::pin(async move {
-			if values.len() < PARALLEL_BATCH_THRESHOLD {
-				// Small batches: avoid parallelism overhead
-				let mut results = Vec::with_capacity(values.len());
-				for value in values {
-					results.push(self.evaluate(ctx.with_value(value)).await?);
-				}
-				return Ok(results);
-			}
-			let futures: Vec<_> =
-				values.iter().map(|value| self.evaluate(ctx.with_value(value))).collect();
-			futures::future::try_join_all(futures).await
-		})
+		Box::pin(evaluate_each(ctx.exec_ctx, RECORD_DEREFERENCE, values, move |value| {
+			self.evaluate(ctx.with_value(value))
+		}))
 	}
 
 	fn access_mode(&self) -> AccessMode {

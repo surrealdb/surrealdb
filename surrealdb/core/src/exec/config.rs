@@ -19,6 +19,13 @@ use surrealdb_cnf as cnf;
 /// downstream. Overridable per deployment via the `scan_batch_size` key.
 const DEFAULT_SCAN_BATCH_SIZE: usize = 1000;
 
+/// Default row count below which a batch is evaluated one row at a time.
+///
+/// This is the highest of the thresholds the fan-out sites used before they
+/// shared one, not a measured optimum. Overridable per deployment via the
+/// `fan_out_row_threshold` key.
+const DEFAULT_FAN_OUT_ROW_THRESHOLD: usize = 4;
+
 /// Limits and batch sizes governing query execution.
 #[derive(Clone, Debug)]
 pub(crate) struct ExecConfig {
@@ -77,6 +84,21 @@ pub(crate) struct ExecConfig {
 	/// Used to limit allocation for builtin functions. Default: 2^20 (1 MiB),
 	/// can be as large as 28 (2^28, 256 MiB)
 	pub generation_allocation_limit: usize,
+	/// Rows below which the expression layer evaluates a batch one row at a
+	/// time instead of overlapping them (default: 4). Set it above any batch
+	/// size to disable overlapping entirely.
+	///
+	/// Only a read-only evaluation is ever overlapped, whatever this is set to;
+	/// see [`crate::exec::fan_out`].
+	///
+	/// What overlapping is worth depends on what the rows do. Rows that only
+	/// dereference a record link gain nothing, because they share a transaction
+	/// and every backend guards it, so they queue on the guard instead of
+	/// overlapping their reads. Rows that each run an operator plan gain a great
+	/// deal, because those plans buffer through their own tasks and so reach
+	/// more than one core. `benches/fan_out.rs` measures both settings against
+	/// each other per shape and per backend; #860 tracks acting on it.
+	pub fan_out_row_threshold: usize,
 }
 
 impl Default for ExecConfig {
@@ -93,6 +115,7 @@ impl Default for ExecConfig {
 			gql_max_output_rows: 1_000_000,
 			external_sorting_buffer_limit: 50_000,
 			generation_allocation_limit: 2 << 20,
+			fan_out_row_threshold: DEFAULT_FAN_OUT_ROW_THRESHOLD,
 		}
 	}
 }
@@ -111,6 +134,7 @@ impl cnf::Config for ExecConfig {
 			.parse_key("gql_max_path_rows", &mut self.gql_max_path_rows)
 			.parse_key("gql_max_output_rows", &mut self.gql_max_output_rows)
 			.parse_key("external_sorting_buffer_limit", &mut self.external_sorting_buffer_limit)
+			.parse_key("fan_out_row_threshold", &mut self.fan_out_row_threshold)
 			.parse_key_with(
 				"generation_allocation_limit",
 				&mut self.generation_allocation_limit,
@@ -137,6 +161,18 @@ mod tests {
 		let map = ConfigMap::empty().with_key_value("topk_threshold_pushdown_enabled", "false");
 		config.parse(&map);
 		assert!(!config.topk_threshold_pushdown_enabled, "config map disables the feature");
+	}
+
+	/// The fan-out threshold defaults to 4 and parses from the config map, which
+	/// is what lets `benches/fan_out.rs` run the same query with overlapping on
+	/// and off.
+	#[test]
+	fn fan_out_row_threshold_parses() {
+		let mut config = ExecConfig::default();
+		assert_eq!(config.fan_out_row_threshold, 4);
+		let map = ConfigMap::empty().with_key_value("fan_out_row_threshold", "1000000");
+		config.parse(&map);
+		assert_eq!(config.fan_out_row_threshold, 1_000_000);
 	}
 
 	/// The GQL v2 MATCH resource limits default to 1M and parse from the config

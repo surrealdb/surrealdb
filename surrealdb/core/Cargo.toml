@@ -304,3 +304,7 @@ harness = false
 [[bench]]
 name = "import_ablation"
 harness = false
+
+[[bench]]
+name = "fan_out"
+harness = false

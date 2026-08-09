@@ -238,19 +238,30 @@ impl TestDb {
 	/// [`crate::exec::permission::should_check_perms`] short-circuits for an
 	/// anonymous identity — use [`Self::new_with_auth`] to exercise that gate.
 	pub(crate) async fn new(setup: &str) -> Self {
-		Self::build(setup, false).await
+		Self::build(setup, false, surrealdb_cnf::ConfigMap::empty()).await
 	}
 
 	/// As [`Self::new`], but with server auth enabled, so an anonymous identity
 	/// is subject to permission checks.
 	pub(crate) async fn new_with_auth(setup: &str) -> Self {
-		Self::build(setup, true).await
+		Self::build(setup, true, surrealdb_cnf::ConfigMap::empty()).await
 	}
 
-	async fn build(setup: &str, auth_enabled: bool) -> Self {
+	/// As [`Self::new`], but with `config` applied, for exercising a knob whose
+	/// effect is only visible through a built datastore.
+	///
+	/// Gated to match its caller (`exec::fan_out`'s config test), so a build
+	/// without the in-memory backend does not carry it as dead code.
+	#[cfg(feature = "kv-mem")]
+	pub(crate) async fn new_with_config(setup: &str, config: surrealdb_cnf::ConfigMap) -> Self {
+		Self::build(setup, false, config).await
+	}
+
+	async fn build(setup: &str, auth_enabled: bool, config: surrealdb_cnf::ConfigMap) -> Self {
 		let ds = Datastore::builder()
 			.with_capabilities(crate::dbs::Capabilities::all())
 			.with_auth(auth_enabled)
+			.with_config(config)
 			.build_with_path("memory")
 			.await
 			.expect("in-memory datastore");

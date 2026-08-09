@@ -1,0 +1,124 @@
+name: Fan-out overlap benchmark
+
+# Measures whether overlapping the rows of a batch in the expression layer buys
+# anything, per storage backend. See `surrealdb/core/benches/fan_out.rs` and
+# #860.
+#
+# Deliberately narrow, because each run occupies three jobs on the shared bench
+# pool. It fires once when a pull request that touches the fan-out policy is
+# opened, and otherwise only on demand.
+#
+# `synchronize` is deliberately absent. A `paths` filter matches against every
+# file the pull request changes, not just the latest push, so leaving it in
+# would re-run all three backends on every push to such a branch — including
+# pushes nowhere near the policy. Use the manual trigger to re-measure after a
+# change that warrants it.
+#
+# It reports and never fails a merge.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, reopened]
+    paths:
+      - "surrealdb/core/benches/fan_out.rs"
+      - "surrealdb/core/src/exec/fan_out.rs"
+      - "surrealdb/core/src/exec/config.rs"
+      - ".github/workflows/fan-out-bench.yml"
+      - ".github/scripts/summarise_fan_out_bench.py"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+env:
+  # sccache → S3 compile cache (read by setup-environment); fail-open if the
+  # backend is unreachable. Same block as ci.yml.
+  SCCACHE_BUCKET: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+  SCCACHE_REGION: us-east-1
+  SCCACHE_S3_KEY_PREFIX: ${{ github.repository }}
+  SCCACHE_IDLE_TIMEOUT: "0"
+  AWS_ACCESS_KEY_ID: ${{ secrets.AMAZON_ACCESS_KEY }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AMAZON_SECRET_KEY }}
+
+jobs:
+  bench:
+    name: Fan-out overlap (${{ matrix.backend }})
+    # The dedicated bench pool, so the measurement is not competing with other
+    # jobs on a shared runner.
+    runs-on: runner-arm-bench
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # TiKV is absent: it is the one backend whose reads are round trips and
+        # so the one that might justify overlapping, but it needs a cluster to
+        # measure against. #860 tracks that half.
+        backend: [kv-mem, kv-rocksdb, kv-surrealkv]
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2 (Actions must be pinned by commit hash)
+
+      - name: Setup environment (toolchain + sccache + cache)
+        uses: ./.github/actions/setup-environment
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get -qq -y update
+          sudo apt-get -qq -y install clang curl jq
+
+      - name: Build benchmark
+        # Built separately so the measured step runs a binary by absolute path.
+        # quiet_system.py drops back to the invoking user with a minimal
+        # environment, which is not a reliable place to resolve `cargo`.
+        run: |
+          cargo bench -p surrealdb-core --bench fan_out \
+            --no-default-features --features ${{ matrix.backend }} --no-run
+
+      - name: Locate benchmark binary
+        # A second, already-satisfied build purely to read the artifact path out
+        # of cargo's JSON. Kept apart from the build above because
+        # `--message-format=json` puts compiler diagnostics on stdout, where a
+        # `jq` filter would swallow the very errors this step exists to surface.
+        run: |
+          cargo bench -p surrealdb-core --bench fan_out \
+            --no-default-features --features ${{ matrix.backend }} \
+            --no-run --message-format=json \
+            | jq -r 'select(.executable != null and .target.name == "fan_out") | .executable' \
+            | tail -1 > "$RUNNER_TEMP/bench-bin"
+          test -x "$(cat "$RUNNER_TEMP/bench-bin")"
+
+      - name: Run benchmark
+        # quiet_system.py pins the CPU governor and disables ASLR the same way
+        # the nightly bench run does, so the two arms are measured under the
+        # same conditions as every other benchmark in this repo.
+        run: |
+          sudo ./.github/scripts/quiet_system.py \
+            "$(cat "$RUNNER_TEMP/bench-bin")" --bench \
+            | tee "$RUNNER_TEMP/fan-out-${{ matrix.backend }}.txt"
+
+      - name: Summarise
+        run: |
+          python3 .github/scripts/summarise_fan_out_bench.py \
+            --backend "${{ matrix.backend }}" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Save raw output as artifact
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0 (Actions must be pinned by commit hash)
+        with:
+          name: fan-out-${{ matrix.backend }}
+          path: |
+            ${{ runner.temp }}/fan-out-${{ matrix.backend }}.txt
+            target/criterion/fan_out/**/new/estimates.json
