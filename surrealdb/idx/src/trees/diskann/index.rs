@@ -67,10 +67,10 @@ use crate::{
 /// `has_more = true` is set on the [`DiskAnnCompactionPlan`] and the caller is expected to run
 /// another compaction iteration.
 ///
-/// (#7318 review followup, C7) Pending records are sharded under `!dw{shard}` and guarded per
-/// shard by `!dy`, so compaction drains and advances one shard's guard at a time and lookup scans
-/// only the non-empty shards — bounding KNN's pending work to the active backlog rather than the
-/// whole pending set on every query, which is what the unsharded `!dr` layout used to force.
+/// Pending records are sharded under `!dw{shard}` and guarded per shard by `!dy`, so compaction
+/// drains and advances one shard's guard at a time and lookup scans only the non-empty shards.
+/// That is what bounds KNN's pending work to the active backlog rather than to the whole pending
+/// set on every query.
 const DISKANN_COMPACTION_MAX_PENDING_KEYS: usize = 1024;
 const DISKANN_COMPACTION_MAX_PENDING_BYTES: usize = 16 * 1024 * 1024;
 

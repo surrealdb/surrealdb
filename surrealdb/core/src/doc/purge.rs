@@ -376,18 +376,21 @@ impl Document {
 			if batch.is_empty() {
 				break;
 			}
-			// Copy each borrowed key into an owned `Vec<u8>` up front so
-			// that the downstream `await`s (which call back into the same
-			// transaction via `get_tb_field` etc.) don't conflict with
-			// the cursor's `&mut self` borrow.
-			let keys: Vec<Vec<u8>> = batch.iter().map(|k| k.to_vec()).collect();
+			// Decode the batch into owned references up front, so that the
+			// downstream `await`s (which call back into the same transaction
+			// via `get_tb_field` etc.) don't conflict with the cursor's
+			// `&mut self` borrow. Owning here rather than copying the bytes
+			// also means the `into_owned` calls below move out of the decoded
+			// key instead of cloning out of the batch.
+			let keys = batch
+				.iter()
+				.map(|k| Ok(ReferenceKey::decode_key(k)?.into_owned()))
+				.collect::<Result<Vec<_>>>()?;
 			// Process each key in the batch
 			for key in keys {
 				yield_now!();
 				// We saw a reference key
 				saw_reference_key = true;
-				// Decode the key into a reference
-				let key = ReferenceKey::decode_key(&key)?;
 				// Extract the foreign table name
 				let ft = key.foreign_table.as_ref();
 				// Extract the foreign field name
