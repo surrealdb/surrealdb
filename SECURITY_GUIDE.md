@@ -19,14 +19,37 @@ the change. If a code path deviates from an invariant, it must carry an explicit
 *Severity Triage*.
 
 For the general (non-security) review checklist — performance, error handling,
-concurrency, test coverage, dependencies — see [REVIEW.md](REVIEW.md).
+concurrency, test coverage, dependencies — see [REVIEW.md](REVIEW.md). For reporting
+a vulnerability rather than reviewing one, see [SECURITY.md](SECURITY.md).
+
+**Maintenance.** This document describes code, so it goes stale when code moves.
+Any change that renames or relocates a symbol or module named here must update the
+reference in the same PR. `.github/workflows/security-guide-refs.yml` enforces the
+mechanical half of that: every Rust file path and every backticked code identifier
+below must resolve somewhere in the tree, or CI fails. A reference the checker
+cannot resolve but that is nonetheless correct belongs in
+`.github/security-guide-refs-allow.txt` with a reason.
 
 ## Module Locations
 
-File references use short module names. Core engine modules (`iam/`, `dbs/`, `fnc/`,
-`buc/`, `rpc/`, `sql/`, `kvs/`, `doc/`) live under `surrealdb/core/src/`. Server
-modules (`ntw/`, `rpc/`) live under `surrealdb/server/src/`. When both crates
-contain the same module name (e.g. `rpc/`), both locations are security-relevant.
+File references use short module paths and omit the crate's `src/` segment: a
+reference to `gql/lower/mutation.rs` means `surrealdb/gql/src/lower/mutation.rs`,
+and `dbs/options.rs` means `surrealdb/core/src/dbs/options.rs`.
+
+Security-relevant code is spread across the workspace, not concentrated in one
+crate. Resolve a module name as follows:
+
+| Module | Primary location | Notes |
+|---|---|---|
+| `dbs/`, `doc/`, `ctx/`, `fnc/`, `buc/`, `exec/` | `surrealdb/core/src/` | |
+| `ntw/` | `surrealdb/server/src/` | |
+| `rpc/` | both `surrealdb/core/src/` and `surrealdb/server/src/` | both are security-relevant; `rpc/streaming.rs` is the server one, `rpc/protocol.rs` the core one |
+| `iam/`, `kvs/`, `idx/` | `surrealdb/core/src/` | a `surrealdb/<name>/` crate of the same name also exists; the core module holds the bulk of the enforcement logic |
+| `syn/`, `gql/` | `surrealdb/<name>/` crate | the same-named module under `core/src/` is a thin remnant, **not** the code to review |
+| `sql/`, `expr/` | `surrealdb/<name>/` crate | no longer under `core/src/`; some legacy AST also lives in `core/src/legacy/expr/` |
+
+When a name resolves in two places, treat both as in scope unless the table says
+otherwise.
 
 ## Review Scope
 
@@ -50,6 +73,27 @@ When multiple sections are triggered, prioritize findings as follows:
   information leakage through error messages, session isolation failures.
 - **Medium**: defense-in-depth gaps, missing audit logging, incomplete cleanup,
   overly broad capability defaults.
+- **Low**: hardening opportunities with no reachable exploit path, and drift
+  between this document and the code (a stale symbol name, a moved module, an
+  invariant whose named mechanism no longer exists). Drift is worth reporting
+  rather than silently working around: an invariant nobody can locate stops being
+  reviewed.
+
+## Verification Status
+
+An invariant is only as good as what keeps it true. Each is one of:
+
+- **Enforced** — a type, lint, or assertion makes the violation impossible or
+  loud. Nothing further is needed at review time.
+- **Verified by `<test name>`** — a named regression test fails if the invariant
+  breaks. Deleting or weakening that test is itself a finding.
+- **Review-only** — nothing mechanical protects it; a human or AI reviewer
+  applying this document is the only control.
+
+Invariants below carry a `Verified by:` note where such a test exists. Everything
+without one is review-only by default. That is the current state, not the target:
+the backlog is to give the Critical and High invariants named tests, and a PR that
+adds one should also add the note here.
 
 ## Intentional Exceptions
 
@@ -135,6 +179,9 @@ SurrealDB's security model rests on four pillars:
   resurrect or clobber across nodes, but under such a race a losing mutation may be
   dropped rather than merged, so security-critical revocation should be driven from
   the session's owning node.
+  Verified by: `detach_deletes_the_durable_copy`,
+  `detach_fails_and_keeps_the_session_when_the_durable_delete_fails`
+  (`rpc/protocol.rs`).
 
 ### Review Triggers
 
@@ -156,8 +203,11 @@ Flag for detailed review when changes touch:
 
 **Files**: `iam/`, `dbs/options.rs` (`Options` struct, `perms` flag, `with_import`),
 `ctx/context.rs` (`check_perms`, `is_allowed`), document processing pipeline in
-`doc/` (`check_permissions_table`, `process_table_fields`, `pluck_generic`,
-`pluck_select`)
+`doc/` (`process_table_fields`, `apply_select_field_permissions` in `doc/output.rs`,
+`reduce_current` / `filter_computed_field_permissions` in `doc/reduce.rs`),
+and the streaming read path in `exec/permission.rs`
+(`should_check_perms`, `check_permission_for_value`, `validate_record_user_access`)
+and `exec/operators/scan/fetch.rs` (`resolve_with_field_state`)
 
 ### Invariants
 
@@ -172,10 +222,23 @@ Flag for detailed review when changes touch:
   Auth level grants access to the target scope.
 - The `Permission` enum defaults to `Full`. All code constructing permission objects
   must do so intentionally. Omitting a PERMISSIONS clause results in full access.
-- Field-level permissions must be enforced on both write path
-  (`process_table_fields`) and read path (`pluck_generic`, `pluck_select`),
-  including for computed fields, reduced documents, and all output modes (AFTER,
-  BEFORE, DIFF, FIELDS).
+- Field-level permissions must be enforced on both the write path
+  (`process_table_fields`) and every read path, including for computed fields,
+  reduced documents, and all output modes (AFTER, BEFORE, DIFF, FIELDS). There
+  are two read paths and a new one must join one of them, never neither:
+  the document pipeline (`apply_select_field_permissions` in `doc/output.rs`,
+  `reduce_current` and `filter_computed_field_permissions` in `doc/reduce.rs`)
+  and the streaming engine (`resolve_with_field_state` in
+  `exec/operators/scan/fetch.rs`, backed by `check_permission_for_value` in
+  `exec/permission.rs`).
+  Two scan paths deliberately sit outside the document pipeline and carry
+  `// SECURITY:` comments saying so — `exec/operators/scan/graph.rs` (graph edge
+  results) and `exec/operators/scan/reference.rs` (reference scans). A change to
+  either must show that the compensating check is still applied; a change that
+  adds a third such path without one is a field-permission leak.
+  Verified by: `skip_fetch_perms_disables_every_check`,
+  `a_record_user_is_confined_to_its_own_namespace_and_database`,
+  `record_users_are_always_permission_checked` (`exec/permission.rs`).
 - Reference cascade operations (ON DELETE CASCADE, UNSET, CUSTOM) must only modify
   records reachable through explicitly defined REFERENCE relationships.
 - Permission expressions (WHERE clause in PERMISSIONS) must not produce observable
@@ -188,6 +251,8 @@ Flag for detailed review when changes touch:
   `skip_fetch_perms` (streaming path), both of which set `Options::permission_predicate`
   so `Expr::compute` blocks CREATE/UPDATE/DELETE/RELATE/INSERT/UPSERT and DDL —
   including writes reached through custom-function bodies.
+  Verified by: `the_legacy_compute_fallback_cannot_write_from_inside_a_permission_predicate`
+  (`exec/operators/sequence.rs`).
 - The Auth context within Options must not be mutated by user-controlled operations.
   Only system-internal mechanisms (AuthLimit) may produce derived Options with
   modified auth, and these must never broaden permissions.
@@ -205,7 +270,10 @@ Flag for detailed review when changes touch:
 - `DEFINE EVENT`, `DEFINE TABLE ... AS`, or `DEFINE FIELD ... REFERENCE` processing
 - `Auth`, `AuthLimit`, `Actor`, or role-checking methods
 - `USE` statement handling in the executor
-- `process_table_fields`, `pluck_generic`, or `pluck_select`
+- `process_table_fields`, `apply_select_field_permissions`, `reduce_current`, or
+  `filter_computed_field_permissions` (document read/write paths)
+- `resolve_with_field_state`, `check_permission_for_value`, or `should_check_perms`
+  (streaming read path), or any new scan operator that fetches record contents
 - `purge_references` or cascade processing logic
 - How `auth_enabled` is evaluated or propagated
 - The `reduced` document mechanism or computed field handling
@@ -383,12 +451,14 @@ transaction management, notification routing
 - Live query notification delivery must verify the target WebSocket still exists and
   the live query is still registered to that connection/session.
 - A `LIVE SELECT` that commits must end up either registered for notification
-  delivery or deleted from the datastore. Where registration cannot happen — the
-  session was detached mid-query, the execution failed as a whole and returned no
-  results, or the client abandoned a result stream before it reached the
-  registration — the committed rows must be deleted, never left registered to a
-  torn-down authorization and never left behind for a cleanup path that cannot find
-  them. A transport whose result stream can be dropped mid-execution has to track
+  delivery or deleted from the datastore, on every transport including the
+  streaming one. Where registration cannot happen — the session was detached
+  mid-query, the execution failed as a whole and returned no results, or the
+  client abandoned the result stream before it reached the registration — the
+  committed rows must be deleted, never left registered to a torn-down
+  authorization and never left behind for a cleanup path that cannot find them.
+  A stream registers from the execution's completed results, as the buffered path
+  does. A transport whose result stream can be dropped mid-execution has to track
   the ids as it frames them, since after the drop nothing else knows them.
 - Messages in the wrong frame type for the negotiated format must be rejected before
   parsing.
@@ -397,50 +467,55 @@ transaction management, notification routing
   (`WEBSOCKET_MAX_CONCURRENT_STREAMS`): each in-flight stream holds an executing
   query — and whatever snapshot or transaction that entails — for as long as its
   client reads.
-- A streaming execution future must never be dropped mid-flight (it owns an open
-  transaction); stopping a stream is always the cooperative pair of tripping its
-  cancel handle *and* closing its items channel, and the driver then polls the
-  execution to completion. Every frame send must be raced against the connection
-  canceller and the query's wall-clock deadline, because a client that stops
-  reading otherwise parks the driver on a full outbound channel with the
-  execution unpolled and its timeout guard never firing.
-- The stream registry (`query_cancel`'s lookup) is per-connection, like the
-  session map: a client must never be able to reach another connection's
-  streams.
-- Streamed rows are provisional until their statement's `Finished` frame; a
-  statement or stream failure must retract them (error on the terminal frame),
-  never abandon them silently mid-protocol. A stream that was stopped rather
-  than answered — cancelled, torn down, or abandoned because frames could no
-  longer be delivered — must carry an error on its terminal `End`: the
-  executor reports abandonment as success, so without it a truncated answer
-  reads as a whole one. An outcome already delivered to the client can never be
-  retracted; when a later failure would contradict it, the whole stream fails.
+- A streaming execution future must never be dropped mid-flight. Stopping a stream
+  is always the cooperative pair of tripping its cancel handle *and* closing its
+  items channel; the driver then polls the execution to completion.
+- Every frame send must be raced against both the connection canceller and the
+  query's wall-clock deadline.
+- A transport that streams must enforce a per-frame send timeout that always
+  applies, independent of any operator-configured query timeout.
+- The stream registry (`query_cancel`'s lookup) must be per-connection, like the
+  session map. A client must never be able to reach another connection's streams.
+- Streamed rows are provisional until their statement's `Finished` frame. A
+  statement or stream failure must retract them by erroring on the terminal frame,
+  never abandon them silently mid-protocol. A stream that was stopped rather than
+  answered (cancelled, torn down, or abandoned because frames could no longer be
+  delivered) must carry an error on its terminal `End`.
+- An outcome already delivered to the client can never be retracted. When a later
+  failure would contradict one, the whole stream fails.
 - No transport may hold a `DashMap` guard (session map, transaction map, stream
-  registry) across an `await`. The guards are blocking locks over a whole
-  shard, and the awaits on these paths are sends on client-paced channels: a
-  guard held across one lets a single connection park worker threads
-  server-wide, including every other transport's.
-- A streaming execution runs against a **snapshot** of its session, taken when
-  the query starts: the buffered path holds the session read guard for the whole
-  execution, but a stream lives as long as its client reads, and holding the
-  guard that long would block every `use` / `set` / `signin` behind a slow
-  client. The consequence is that authorization teardown — `invalidate`, a token
-  revocation, `detach` — does not stop a stream already in flight; it succeeds
-  immediately while the stream finishes under the authorization it started with.
-  What bounds that exposure is the stream's own lifetime, so a transport that
-  streams must keep one: a per-frame send timeout that always applies, not only
-  a wall-clock query timeout an operator may not have configured. Revocation
-  that must take effect immediately has to close the connection.
-- A `LIVE SELECT` executed through a stream must be registered for notification
-  delivery from the execution's completed results (as the buffered path does),
-  or its datastore rows become orphans that disconnect cleanup cannot find.
-  Where registration cannot happen — the session was detached mid-query, the
-  execution failed as a whole and returned no results, or the client abandoned
-  the stream before it reached the registration — the committed rows must be
-  deleted instead, never left registered to a torn-down authorization and never
-  left behind. A transport whose stream can be dropped mid-execution has to
-  track the ids as they are framed, since after the drop nothing else knows
-  them.
+  registry) across an `await`.
+- A streaming execution runs against a **snapshot** of its session, taken when the
+  query starts. Authorization teardown (`invalidate`, a token revocation, `detach`)
+  therefore does not stop a stream already in flight: it succeeds immediately while
+  the stream finishes under the authorization it started with. Revocation that must
+  take effect immediately has to close the connection.
+
+### Why the streaming rules are shaped this way
+
+Rationale for the invariants above, for reviewers deciding whether a proposed
+change preserves them. This is background, not additional requirements.
+
+A streaming execution owns an open transaction, so dropping its future strands
+that transaction rather than releasing it. A client that stops reading parks the
+driver on a full outbound channel with the execution unpolled, which means its
+timeout guard never fires either; racing every send against the canceller and
+deadline is what keeps a slow or hostile reader from pinning resources
+indefinitely.
+
+The executor reports abandonment as success. Without the error on the terminal
+`End`, a truncated answer is indistinguishable from a complete one to the client.
+
+`DashMap` guards are blocking locks over a whole shard, and the awaits on these
+paths are sends on client-paced channels. A guard held across one lets a single
+connection park worker threads server-wide, including every other transport's.
+
+The session snapshot exists because the buffered path holds the session read guard
+for the whole execution, which is fine when execution is bounded by the server but
+not when a stream lives as long as its client reads: holding it that long would
+block every `use`, `set`, and `signin` behind a slow client. The exposure that
+buys is bounded by the stream's own lifetime, which is why the always-on per-frame
+send timeout above is load-bearing rather than a performance nicety.
 
 ### Review Triggers
 
@@ -624,19 +699,25 @@ Surrealism/WASM
   `fetch` runtime follows redirects transparently with no policy hook, so the
   DNS-resolved-IP validation and per-hop redirect validation above cannot be
   performed — only the initial request URL's host is validated against
-  allow/deny. This is acceptable only because the sole wasm deployment target is
-  a Cloudflare Worker, whose egress cannot reach loopback/link-local/RFC1918
-  addresses (the runtime enforces the IP-level restriction). Restoring per-hop
-  redirect validation on wasm (a web-sys `redirect: "manual"` client) is a
-  tracked follow-up.
+  allow/deny. This is an accepted risk, valid only while the sole wasm deployment
+  target is a Cloudflare Worker, whose egress cannot reach loopback/link-local/RFC1918
+  addresses (the runtime enforces the IP-level restriction). Any change that widens
+  the wasm target set invalidates the acceptance and must restore per-hop validation
+  first. TODO(no-issue-yet): a web-sys `redirect: "manual"` client would let wasm
+  validate each hop; file and link a tracking issue when this is scheduled.
 - JavaScript runtime must enforce memory, stack, and time limits per invocation.
   Each invocation must create a new runtime (no state persistence).
 - Crypto compare operations must enforce cost allowance bounds.
 - String-producing functions must enforce generation allocation limits.
 - Method-style function invocations (e.g., `$array.map(...)`) must be correctly
   canonicalized for capability checking.
-- WASM/Surrealism capabilities must be validated before instantiation. WASI context
-  configuration (especially `inherit_env`) must be reviewed for secret exposure.
+- WASM/Surrealism capabilities must be validated before instantiation. The guest's
+  WASI context is built in one place, `wasi_context.rs` (`build`), and that
+  construction must stay deny-by-default: no host environment is inherited, the
+  filesystem is preopened read-only or not at all, sockets are refused outright when
+  the net allowlist is empty, and `allow_ip_name_lookup` stays off even when it is
+  not (hostnames resolve at module load, so runtime DNS would only serve tunneling).
+  Any builder call that inherits host state is a secret-exposure finding.
 - The `eval::surql` / `eval::gql` functions (`fnc/eval.rs`) evaluate a runtime
   query string in the caller's transaction. They must remain gated by **all** of:
   the function-family capability (enforced by the engine before dispatch), the
@@ -654,8 +735,11 @@ Surrealism/WASM
   user invoking an owner-defined function that calls `eval` is therefore still
   seen as `record` and remains denied.
 - eval must reject transaction-control and session-level top-level statements
-  (BEGIN/CANCEL/COMMIT/USE/LIVE/KILL/OPTION/SHOW/access), bound the nesting depth
-  (`MAX_EVAL_DEPTH`), and honour `PROTECTED_PARAM_NAMES` for caller bindings.
+  (BEGIN/CANCEL/COMMIT/USE/LIVE/KILL/OPTION/SHOW/access), bound recursion, and
+  honour `PROTECTED_PARAM_NAMES` for caller bindings. The recursion bound is
+  expression-nesting depth charged against `max_computation_depth`, carried in as a
+  budget so a query reached through nested `eval` calls cannot reset it; there is no
+  separate eval-only depth constant.
 
 ### Review Triggers
 
@@ -771,7 +855,11 @@ Flag when changes touch:
 
 ## 15. Query Parser
 
-**Files**: `syn/`, `sql/`, `gql/`, parser entry points, expression construction
+**Files**: the `surrealdb/syn` crate (SurrealQL lexer/parser, the bulk of the
+grammar), `surrealdb/parser`, `surrealdb/sql` and `surrealdb/expr` (AST and
+expression construction), and the `surrealdb/gql` crate (GQL front-end). The
+same-named modules under `core/src/` are thin remnants of the pre-crate-split
+layout and are not where the grammar lives.
 
 ### Invariants
 
@@ -801,7 +889,96 @@ Flag when changes touch:
 
 ---
 
-## 15a. GQL (experimental ISO GQL surface)
+## Cross-Cutting Concerns
+
+### Confused Deputy Prevention
+
+Any code path where system-internal execution (`perms=false`) processes
+user-influenced expressions is a potential confused deputy. This includes:
+
+- Event THEN clauses
+- Materialized view maintenance (DEFINE TABLE ... AS)
+- Reference cascade operations (ON DELETE CASCADE/UNSET/CUSTOM)
+- Permission expression evaluation (WHERE clause in PERMISSIONS)
+- VALUE/DEFAULT/ASSERT/COMPUTED field expressions
+
+All such paths must have an explicit, documented authority context. The `perms=false`
+scope must be minimized and must not extend to evaluating arbitrary user inputs.
+
+Flag when changes touch `new_with_perms(false)`, authority context propagation in
+event/view/cascade processing, or any path that evaluates user-defined expressions
+during system-internal operations.
+
+### Error Sanitization
+
+All error responses visible to clients must be sanitized. Review any change to error
+formatting, error types, or error propagation paths. Watch for:
+
+- Internal paths or filenames in error messages
+- Record contents or field values in error details
+- Schema structure details in authorization errors
+- Stack traces or panic messages
+- Storage engine implementation details
+- Backend URLs or credentials
+
+Flag when changes touch error type definitions, `Display`/`ResponseError` impls,
+error conversion (`From`/`Into`) chains, or any code path that formats errors for
+client responses.
+
+### Resource Bounding
+
+Every operation that processes user-controlled input must have bounded resource
+consumption. Watch for:
+
+- Unbounded allocations (parser buffers, batch sizes, list results)
+- Missing timeouts (remote calls, long-running queries)
+- Amplification patterns (single input triggering multiplicative work)
+- Recursion without depth limits
+- Connection/transaction accumulation without caps
+
+Flag when changes add new allocation paths for user-controlled data, remove or
+increase existing limits, add recursive processing, or introduce new external
+call sites without timeouts.
+
+### Import Mode Safety
+
+The `import` flag bypasses field validation, event processing, live query
+notifications, and view computation. Any change involving:
+
+- Setting or propagating the `import` flag
+- The `OPTION IMPORT` authorization gate
+- Document processing pipeline skip conditions
+
+...must be reviewed for authorization correctness and flag lifetime scoping.
+
+Flag when changes touch `with_import`, `OPTION IMPORT` handling, or any document
+processing pipeline condition that checks the import flag.
+
+### Namespace/Database Isolation
+
+Every operation must be verified against the principal's authorized namespace and
+database. Watch for:
+
+- Context switches without re-authorization
+- HTTP headers overriding token-based scope
+- Import payloads containing USE statements
+- Cross-boundary key structures (keys not scoped by NS/DB)
+- Cache entries shared across security boundaries
+
+Flag when changes touch key encoding/decoding, cache key construction, USE statement
+handling, HTTP header-based context resolution, or any data structure that is
+indexed or partitioned by namespace/database.
+
+---
+
+# Appendices
+
+Surfaces that are experimental, feature-gated, or otherwise not part of the
+default deployment. They carry the same invariant weight as the numbered
+sections while enabled, but are kept apart so the numbering of the core
+sections stays stable as experimental surfaces come and go.
+
+## Appendix A. GQL (experimental ISO GQL surface)
 
 **Files**: `gql/` (lexer, parser, `lower/`), `expr/match_plan.rs`,
 the binding-table operators — `exec/operators/graph/` (`expand.rs`, `endpoint.rs`,
@@ -893,19 +1070,23 @@ invariants.
   them. Label mutations are rejected (one table per record).
 - **Read-after-write ordering.** A `MATCH`/`OPTIONAL` clause that follows a mutation must observe
   that mutation's writes (read-your-writes within the one transaction), and must never race them.
-  The streaming engine's read-only buffering (`buffer.rs` `spawn_buffered`) opens scan cursors
-  *eagerly* at stream-construction time for pipeline parallelism; that eager read is buried
-  throughout a subtree (every read-only operator buffers its child), so it cannot be defeated by
-  buffering choices at the join level alone. `HashJoin` (the operator that joins a read clause onto
-  the accumulated bindings) handles this by ensuring **the writing side drains before the reading
-  side is constructed**, and which side mutates depends on the fold: `fold_mandatory` puts the
-  mutating accumulator on the **build** side (then DEFER the probe's construction until the build
-  drains), while `fold_optional`'s left-join puts it on the **probe** side (then PRE-DRAIN the probe
-  — a pipeline breaker, so draining executes its writes — before constructing the build, and replay
-  the buffered probe rows). Both directions are load-bearing: reverting either to eager construction
-  silently reintroduces stale reads (a `MATCH`/`OPTIONAL` after `SET`/`DELETE`/`INSERT` seeing
-  pre-write data). Pure-read joins keep eager construction on both sides (one shared snapshot;
-  overlap is safe and faster).
+  In `HashJoin`, the writing side must drain before the reading side is *constructed*. Which side
+  writes depends on the fold, and both directions are load-bearing:
+  `fold_mandatory` puts the mutating accumulator on the **build** side, so the probe's construction
+  is deferred until the build drains; `fold_optional`'s left-join puts it on the **probe** side, so
+  the probe is pre-drained (executing its writes) before the build is constructed, and its buffered
+  rows replayed. Pure-read joins keep eager construction on both sides.
+
+#### Why construction order is the control point
+
+The streaming engine's read-only buffering (`spawn_buffered` in `buffer.rs`) opens scan cursors
+eagerly at stream-construction time for pipeline parallelism, and every read-only operator buffers
+its child, so that eager read is spread throughout a subtree rather than concentrated at the join.
+It therefore cannot be defeated by buffering choices at the join level alone, which is why the
+requirement is phrased around when the reading side is *constructed* rather than when it is polled.
+Reverting either direction to eager construction silently reintroduces stale reads: a
+`MATCH`/`OPTIONAL` after `SET`/`DELETE`/`INSERT` seeing pre-write data. Pure-read joins are exempt
+because both sides share one snapshot, so overlap is both safe and faster.
 
 ### Review Triggers
 
@@ -941,85 +1122,3 @@ Flag when changes touch:
   in `expr/expression.rs` (a mutation plan that reports read-only would run in a
   read transaction)
 - The `Expr::Match` compute-arm error or the `sql::Expr` conversion guard
-
----
-
-## Cross-Cutting Concerns
-
-### Confused Deputy Prevention
-
-Any code path where system-internal execution (`perms=false`) processes
-user-influenced expressions is a potential confused deputy. This includes:
-
-- Event THEN clauses
-- Materialized view maintenance (DEFINE TABLE ... AS)
-- Reference cascade operations (ON DELETE CASCADE/UNSET/CUSTOM)
-- Permission expression evaluation (WHERE clause in PERMISSIONS)
-- VALUE/DEFAULT/ASSERT/COMPUTED field expressions
-
-All such paths must have an explicit, documented authority context. The `perms=false`
-scope must be minimized and must not extend to evaluating arbitrary user inputs.
-
-Flag when changes touch `new_with_perms(false)`, authority context propagation in
-event/view/cascade processing, or any path that evaluates user-defined expressions
-during system-internal operations.
-
-### Error Sanitization
-
-All error responses visible to clients must be sanitized. Review any change to error
-formatting, error types, or error propagation paths. Watch for:
-
-- Internal paths or filenames in error messages
-- Record contents or field values in error details
-- Schema structure details in authorization errors
-- Stack traces or panic messages
-- Storage engine implementation details
-- Backend URLs or credentials
-
-Flag when changes touch error type definitions, `Display`/`ResponseError` impls,
-error conversion (`From`/`Into`) chains, or any code path that formats errors for
-client responses.
-
-### Resource Bounding
-
-Every operation that processes user-controlled input must have bounded resource
-consumption. Watch for:
-
-- Unbounded allocations (parser buffers, batch sizes, list results)
-- Missing timeouts (remote calls, long-running queries)
-- Amplification patterns (single input triggering multiplicative work)
-- Recursion without depth limits
-- Connection/transaction accumulation without caps
-
-Flag when changes add new allocation paths for user-controlled data, remove or
-increase existing limits, add recursive processing, or introduce new external
-call sites without timeouts.
-
-### Import Mode Safety
-
-The `import` flag bypasses field validation, event processing, live query
-notifications, and view computation. Any change involving:
-
-- Setting or propagating the `import` flag
-- The `OPTION IMPORT` authorization gate
-- Document processing pipeline skip conditions
-
-...must be reviewed for authorization correctness and flag lifetime scoping.
-
-Flag when changes touch `with_import`, `OPTION IMPORT` handling, or any document
-processing pipeline condition that checks the import flag.
-
-### Namespace/Database Isolation
-
-Every operation must be verified against the principal's authorized namespace and
-database. Watch for:
-
-- Context switches without re-authorization
-- HTTP headers overriding token-based scope
-- Import payloads containing USE statements
-- Cross-boundary key structures (keys not scoped by NS/DB)
-- Cache entries shared across security boundaries
-
-Flag when changes touch key encoding/decoding, cache key construction, USE statement
-handling, HTTP header-based context resolution, or any data structure that is
-indexed or partitioned by namespace/database.

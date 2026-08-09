@@ -1,0 +1,15 @@
+# Allowlist for .github/scripts/check-security-guide-refs.py
+#
+# One token per line, `#` starts a comment. A token here is skipped when
+# verifying that every code reference in SECURITY_GUIDE.md resolves in the tree.
+#
+# Add a token only when the reference is correct but genuinely unresolvable:
+# an external crate's API, a name that only exists in generated code, or prose
+# that happens to match an identifier pattern. Always give the reason on the
+# line, so the next person can tell a deliberate exception from an accident.
+#
+# Do NOT use this to silence a reference that broke because code moved. That is
+# the drift the check exists to catch: update the guide instead.
+#
+# This file is intentionally empty. Every reference in the guide currently
+# resolves without an exception.

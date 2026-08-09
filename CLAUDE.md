@@ -1,25 +1,5 @@
 # CLAUDE.md
 
-This file provides essential context for AI assistants working with the SurrealDB codebase.
-
-## Project Overview
-
-SurrealDB is a multi-model database built in Rust supporting document, graph, relational, time-series, geospatial, and key-value data models. It can run embedded, in browser (WASM), at the edge, or as a distributed cluster.
-
-## Project Structure
-
-```
-surrealdb/           # Main SDK crate
-surrealdb/core/      # Core database engine (query execution, storage)
-surrealdb/mcp/       # Model Context Protocol server (stdio + HTTP)
-surrealdb/node/      # `@surrealdb/node` NAPI addon (embedded engine for Node/Bun/Deno)
-surrealdb/server/    # HTTP, WebSocket, gRPC server
-surrealdb/types/     # Public types and derive macros
-surrealism/          # Surrealism (WASM plugin system) crates
-language-tests/      # SurrealQL test suite (.surql files)
-tests/               # Integration tests (CLI, HTTP, WebSocket, GraphQL)
-```
-
 ## Common Commands
 
 ```bash
@@ -31,110 +11,16 @@ cargo make fmt
 
 # Run clippy lints
 cargo make ci-clippy
-
-# Run all tests
-cargo test
-
-# Run language tests
-cd language-tests && cargo run run
-
-# Run specific language test
-# Note: all paths are relative to the language-tests/tests directory
-cd language-tests && cargo run run path/to/test.surql
-
-# Auto-generate test results
-# Note: The test results must be empty for the auto-generation to work.
-cd language-tests && cargo run run --results accept path/to/test.surql
-
-# Benchmark a language-test bench (measures by default; --profile records a flamegraph)
-# Pass the bench filter and flags after `--`. See language-tests/README.md > Benchmarking.
-cargo make bench -- scans/where_integer_in_many_full --save
-cargo make bench -- scans/where_integer_in_many_full --profile --dataset indexed
 ```
 
 ## Testing Conventions
 
-### Language Tests (`language-tests/tests/*.surql`, `*.gql`)
-
-Test SurrealQL queries with expected results (`.gql` files test the GQL dialect). Bug reproductions go in `language-tests/tests/reproductions/ISSUE_NUMBER_description.surql`.
-
-**Test file format:**
-```surql
-/**
-[env]
-namespace = true
-database = true
-auth = { level = "owner" }
-
-[test]
-reason = "Description of what this tests"
-issue = 1234  # Optional GitHub issue
-
-[[test.results]]
-value = "expected_result"
-*/
-
--- SurrealQL queries here
-```
-
-### Parser Tests (`surrealdb/parser/src/test/files/*.surql`)
-
-The parser crate has its own file-based test suite. When adding a parser test, add a `.surql`
-file under `surrealdb/parser/src/test/files/` (or `files_quirk/` for quirk-mode parsing) instead
-of writing a test function in `src/test/mod.rs`. These tests verify that the source parses and
-that the generated AST matches the expected block embedded in the file after
-`/* ===== result =====`. Sources that fail to parse are also supported: the expected block then
-contains the rendered parsing error, so error messages are pinned too.
-
-Generate or update expected output with the `RESULT` environment variable:
-
-```bash
-# Fill in expectations for files that don't have one yet
-RESULT=ACCEPT cargo test -p surrealdb-parser text_test
-
-# Rewrite expectations that have changed (review the diff before committing)
-RESULT=OVERWRITE cargo test -p surrealdb-parser text_test
-```
-
-Only add a function test in `src/test/mod.rs` for uncommon parser functionality that a plain
-source-file test can't express.
+Language tests, upgrade tests, and benchmarks: `language-tests/CLAUDE.md`.
+Parser tests: `surrealdb/parser/CLAUDE.md`.
 
 ### SDK/Integration Tests
 
 Located in `surrealdb/tests/` and `tests/`. Follow standard Rust testing conventions.
-
-### Upgrade Tests (`language-tests/tests/upgrade/*.surql`)
-
-Each test is a pair: `X_import.surql` runs on an old released binary and writes
-data, `X.surql` runs on a newer one and asserts what comes back. The versions
-hopped through live in `LANG_UPGRADE_VERSIONS` in `Makefile.ci.toml`.
-
-**Every new release must be appended to `LANG_UPGRADE_VERSIONS` before the `..`
-token.** The chain runs *adjacent pairs*, so a release that is missing does not
-merely go untested — it widens the final hop into a multi-release jump, and the
-version users are actually upgrading from stops being covered anywhere. Nothing
-fails when this is forgotten; the chain just quietly tests less than it appears
-to. Binaries must be published at `https://download.surrealdb.com/v{ver}/` for
-every entry.
-
-`;` separates independent chains and `,` separates versions within one. Hops are
-made only within a chain, so a pair that cannot work — one spanning a defect in a
-released binary that no gate can express — is excluded by breaking the chain
-there, leaving every other pair covered.
-
-List stable releases only. A beta belongs in the chain while its minor is
-unreleased, and must be replaced by the stable that supersedes it.
-
-A released binary with a defect cannot be fixed retroactively, so a hop
-targeting one stays red. Gate the affected test with `version` (bounds the
-upgrade target) or `importing-version` (bounds the source) rather than removing
-the release from the chain, so the remaining tests still cover that hop.
-
-The import phase defines the namespace and database explicitly before replaying
-a test's imports. Do not make it depend on a write implicitly creating them:
-that is not dependable across the released binaries the chain spans, and when it
-does not happen every import statement fails against a store that was never
-written to.
 
 ## Code Quality Rules
 
