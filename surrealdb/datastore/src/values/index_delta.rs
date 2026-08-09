@@ -194,17 +194,36 @@ impl IndexDeltaBuffer {
 	/// Re-recording the same document in the opposite direction supersedes the
 	/// first: a document removed and then re-indexed within one transaction ends
 	/// up only in `added`, which is the net truth the compactor needs.
-	pub fn buffer_term_change(&self, term: BufferedTerm, doc_id: u64, add: bool, nid: Uuid) {
+	/// Returns whether this change is the first in its direction for the term,
+	/// which is exactly when it adds a key to what the flush will write: the
+	/// flush emits one key per (term, direction) whose set is non-empty. The
+	/// caller charges the write-cardinality guard on that, so the guard counts
+	/// the keys this buffer will write, and counts each of them once.
+	#[must_use]
+	pub fn buffer_term_change(
+		&self,
+		term: BufferedTerm,
+		doc_id: u64,
+		add: bool,
+		nid: Uuid,
+	) -> bool {
 		let mut frames = self.term_changes.lock();
 		let frame = frames.last_mut().expect("the transaction frame is always present");
 		let delta = frame.entry(term).or_default();
 		delta.nid = nid;
+		// A direction emptied again by a later cancellation keeps the charge it
+		// already took, over-counting by one in that case — the safe direction
+		// for a limit.
 		if add {
+			let first = delta.added.is_empty();
 			delta.removed.remove(doc_id);
 			delta.added.insert(doc_id);
+			first
 		} else {
+			let first = delta.removed.is_empty();
 			delta.added.remove(doc_id);
 			delta.removed.insert(doc_id);
+			first
 		}
 	}
 
@@ -388,7 +407,7 @@ mod tests {
 		let nid = Uuid::nil();
 
 		buffer.push_save_point();
-		buffer.buffer_term_change(term(), 7, true, nid);
+		let _ = buffer.buffer_term_change(term(), 7, true, nid);
 		buffer.buffer_doc_stats(term().index, stats(100, 1), nid);
 		buffer.rollback_save_point();
 
@@ -406,7 +425,7 @@ mod tests {
 		let nid = Uuid::nil();
 
 		buffer.push_save_point();
-		buffer.buffer_term_change(term(), 7, true, nid);
+		let _ = buffer.buffer_term_change(term(), 7, true, nid);
 		buffer.buffer_doc_stats(term().index, stats(100, 1), nid);
 		buffer.release_save_point();
 
@@ -431,12 +450,12 @@ mod tests {
 
 		// The abandoned create attempt indexed a term the final record lacks.
 		buffer.push_save_point();
-		buffer.buffer_term_change(term(), 7, true, nid);
+		let _ = buffer.buffer_term_change(term(), 7, true, nid);
 		buffer.buffer_doc_stats(term().index, stats(100, 1), nid);
 		buffer.rollback_save_point();
 
 		// The retry indexes the record it actually stored.
-		buffer.buffer_term_change(term(), 9, true, nid);
+		let _ = buffer.buffer_term_change(term(), 9, true, nid);
 		buffer.buffer_doc_stats(term().index, stats(40, 1), nid);
 
 		let flushed = buffer.take_term_changes();
@@ -453,9 +472,9 @@ mod tests {
 		let buffer = IndexDeltaBuffer::new();
 		let nid = Uuid::nil();
 
-		buffer.buffer_term_change(term(), 7, false, nid);
+		let _ = buffer.buffer_term_change(term(), 7, false, nid);
 		buffer.buffer_doc_stats(term().index, stats(-100, -1), nid);
-		buffer.buffer_term_change(term(), 7, true, nid);
+		let _ = buffer.buffer_term_change(term(), 7, true, nid);
 		buffer.buffer_doc_stats(term().index, stats(100, 1), nid);
 
 		let flushed = buffer.take_term_changes();

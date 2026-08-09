@@ -11,7 +11,7 @@ use roaring::treemap::IntoIter;
 use surrealdb_datastore::Transaction;
 // A posting and the index's document statistics are stored values, so both are
 // declared below this layer; the indexing and scoring code here maintains them.
-pub use surrealdb_datastore::values::fulltext::{DocLengthAndCount, TermDocument};
+pub use surrealdb_datastore::values::fulltext::{DocLengthAndCount, DocumentTerms, TermDocument};
 use surrealdb_kvs::consts::COUNT_BATCH_SIZE;
 use uuid::Uuid;
 
@@ -250,6 +250,15 @@ impl FullTextIndex {
 		// Get the doc id (if it exists)
 		let doc_id = self.get_doc_id(&tx, rid).await?;
 		if let Some(doc_id) = doc_id {
+			// Where this document's postings live decides what has to be
+			// deleted: one entry for a document written since `!dt` existed, or
+			// the legacy per-term keys for one written before. Both cases still
+			// record a removal per term in the delta log, because the term's
+			// document set is maintained separately from its postings.
+			let has_entry = tx.exists_key(&self.ikb.new_dt(doc_id), None).await?;
+			if has_entry {
+				tx.del_key(&self.ikb.new_dt(doc_id)).await?;
+			}
 			// Delete the terms
 			for tks in &tokens {
 				for t in tks.list() {
@@ -257,10 +266,12 @@ impl FullTextIndex {
 					let s = tks.get_token_string(t)?;
 					// Check if the term has already been deleted
 					if set.insert(s) {
-						// Delete the term
-						let key = self.ikb.new_td(s, doc_id);
-						tx.del_key(&key).await?;
-						self.ikb.buffer_tt(&tx, s, doc_id, nid, false);
+						if !has_entry {
+							// Delete the legacy per-term posting
+							let key = self.ikb.new_td(s, doc_id);
+							tx.del_key(&key).await?;
+						}
+						self.ikb.buffer_tt(&tx, s, doc_id, nid, false)?;
 					}
 				}
 			}
@@ -342,14 +353,24 @@ impl FullTextIndex {
 		tokens: Vec<Tokens>,
 	) -> Result<DocLength> {
 		let (dl, offsets) = Analyzer::extract_offsets(&tokens)?;
-		let mut td = TermDocument::default();
+		// Collected in one pass rather than inserted term by term: a `VecMap`
+		// keeps its entries sorted, so N inserts would memmove N times where a
+		// single sort does not.
+		let mut postings = Vec::with_capacity(offsets.len());
 		for (t, o) in offsets {
-			let key = self.ikb.new_td(t, id);
-			td.f = o.len() as TermFrequency;
-			td.o = o;
-			tx.set_key(&key, &td).await?;
-			self.ikb.buffer_tt(tx, t, id, *nid, true);
+			postings.push((
+				t.into(),
+				TermDocument {
+					f: o.len() as TermFrequency,
+					o,
+				},
+			));
+			self.ikb.buffer_tt(tx, t, id, *nid, true)?;
 		}
+		let doc = DocumentTerms {
+			terms: postings.into_iter().collect(),
+		};
+		tx.set_key(&self.ikb.new_dt(id), &doc).await?;
 		Ok(dl)
 	}
 
@@ -361,13 +382,21 @@ impl FullTextIndex {
 		tokens: Vec<Tokens>,
 	) -> Result<DocLength> {
 		let (dl, tf) = Analyzer::extract_frequencies(&tokens)?;
-		let mut td = TermDocument::default();
+		let mut postings = Vec::with_capacity(tf.len());
 		for (t, f) in tf {
-			let key = self.ikb.new_td(t, id);
-			td.f = f;
-			tx.set_key(&key, &td).await?;
-			self.ikb.buffer_tt(tx, t, id, *nid, true);
+			postings.push((
+				t.into(),
+				TermDocument {
+					f,
+					o: Vec::new(),
+				},
+			));
+			self.ikb.buffer_tt(tx, t, id, *nid, true)?;
 		}
+		let doc = DocumentTerms {
+			terms: postings.into_iter().collect(),
+		};
+		tx.set_key(&self.ikb.new_dt(id), &doc).await?;
 		Ok(dl)
 	}
 
@@ -985,10 +1014,10 @@ impl FullTextIndex {
 		let doc_id = self.get_doc_id(tx, thg).await?;
 		if let Some(doc_id) = doc_id {
 			let mut hl = Highlighter::new(&hlp, idiom, doc);
+			let mut loaded = self.get_document_terms(tx, doc_id).await?;
 			for tk in qt.tokens.list() {
-				if let Some(td) =
-					self.get_term_document(tx, doc_id, qt.tokens.get_token_string(tk)?).await?
-				{
+				let term = qt.tokens.get_token_string(tk)?;
+				if let Some(td) = self.take_term_document(tx, doc_id, &mut loaded, term).await? {
 					hl.highlight(tk.get_char_len(), td.o);
 				}
 			}
@@ -997,14 +1026,59 @@ impl FullTextIndex {
 		Ok(Value::None)
 	}
 
+	/// One document's posting for one term.
+	///
+	/// The document's own entry answers this when it exists. A document indexed
+	/// before that entry existed has no `!dt` key, and its postings are still
+	/// under the legacy per-term keys — so absence of the entry, not absence of
+	/// the term, is what selects the fallback. A document that has been
+	/// rewritten since carries a `!dt` entry whose map is authoritative: a term
+	/// missing from it does not occur in the document.
+	/// Test-only, and deliberately so: it decodes a document's whole entry to
+	/// take one term from it, which is the cost the read paths avoid by loading
+	/// the entry once per document. A caller wanting several terms wants
+	/// [`Self::get_document_terms`] and [`Self::take_term_document`].
+	#[cfg(test)]
 	async fn get_term_document(
 		&self,
 		tx: &Transaction,
 		id: DocId,
 		term: &str,
 	) -> Result<Option<TermDocument>> {
-		let key = self.ikb.new_td(term, id);
-		tx.get_key(&key, None).await
+		let mut loaded = self.get_document_terms(tx, id).await?;
+		self.take_term_document(tx, id, &mut loaded, term).await
+	}
+
+	/// Every posting one document carries, or `None` for a document whose
+	/// postings predate the per-document entry.
+	///
+	/// Read once by a caller that wants several of a document's terms: the entry
+	/// holds every term the document carries, so fetching it per term would
+	/// decode all of them once per term.
+	async fn get_document_terms(
+		&self,
+		tx: &Transaction,
+		id: DocId,
+	) -> Result<Option<DocumentTerms>> {
+		tx.get_key(&self.ikb.new_dt(id), None).await
+	}
+
+	/// Takes one term's posting out of a document's already-loaded entry,
+	/// falling back to the legacy per-term key when the document has none.
+	///
+	/// Takes rather than borrows so a caller walking several terms consumes each
+	/// posting's offsets without cloning them; no term is asked for twice.
+	async fn take_term_document(
+		&self,
+		tx: &Transaction,
+		id: DocId,
+		loaded: &mut Option<DocumentTerms>,
+		term: &str,
+	) -> Result<Option<TermDocument>> {
+		match loaded {
+			Some(doc) => Ok(doc.terms.remove(term)),
+			None => tx.get_key(&self.ikb.new_td(term, id), None).await,
+		}
 	}
 
 	pub async fn read_offsets(
@@ -1017,10 +1091,10 @@ impl FullTextIndex {
 		let doc_id = self.get_doc_id(tx, thg).await?;
 		if let Some(doc_id) = doc_id {
 			let mut or = Offseter::new(partial);
+			let mut loaded = self.get_document_terms(tx, doc_id).await?;
 			for tk in qt.tokens.list() {
 				let term = qt.tokens.get_token_string(tk)?;
-				let o = self.get_term_document(tx, doc_id, term).await?;
-				if let Some(o) = o {
+				if let Some(o) = self.take_term_document(tx, doc_id, &mut loaded, term).await? {
 					or.highlight(tk.get_char_len(), o.o);
 				}
 			}
@@ -1126,13 +1200,16 @@ impl Scorer {
 		let mut sc = 0.0;
 		let tl = qt.tokens.list();
 		let doc_length = fti.get_doc_length(tx, doc_id).await?.unwrap_or(0) as f64;
+		// The document's postings, read once for the whole query rather than
+		// once per term: the entry carries every term the document holds.
+		let mut loaded = fti.get_document_terms(tx, doc_id).await?;
 		for (i, d) in qt.docs.iter().enumerate() {
 			if let Some(docs) = d
 				&& docs.contains(doc_id)
 				&& let Some(token) = tl.get(i)
 			{
 				let term = qt.tokens.get_token_string(token)?;
-				let td = fti.get_term_document(tx, doc_id, term).await?;
+				let td = fti.take_term_document(tx, doc_id, &mut loaded, term).await?;
 				if let Some(td) = td {
 					sc += self.compute_bm25_score(td.f as f64, docs.len() as f64, doc_length)
 				}
@@ -1238,8 +1315,10 @@ async fn collect_doc_length_and_count_for(
 /// Derived from the same `total_docs_length` / `doc_count` pair BM25 scoring
 /// uses, so it needs no analyzer and costs one read of the index's `!dc` region.
 /// Callers sizing work by how much a document costs to index want this rather
-/// than a fixed guess, because a full-text index writes per distinct term and so
-/// its per-record key count scales with document length.
+/// than a fixed guess: a document's postings travel in one key, but the delta log
+/// it contributes to spends one key per distinct term in the transaction, so in
+/// the worst case — documents sharing no vocabulary — the per-record key count
+/// still scales with document length.
 pub async fn mean_tokens_per_document(tx: &Transaction, ikb: &IndexKeyBase) -> Result<Option<u64>> {
 	let (dlc, _) = collect_doc_length_and_count_for(tx, ikb).await?;
 	if dlc.doc_count <= 0 || dlc.total_docs_length <= 0 {
@@ -1263,7 +1342,7 @@ mod tests {
 	use tokio::time::sleep;
 	use uuid::Uuid;
 
-	use super::{FullTextIndex, TermDocument};
+	use super::{DocumentTerms, FullTextIndex, TermDocument};
 	use crate::IndexKeyBase;
 	use crate::catalog::{AnalyzerDefinition, DatabaseId, FullTextParams, IndexId, NamespaceId};
 	use crate::expr::Tokenizer;
@@ -1799,6 +1878,75 @@ mod tests {
 	/// A query must observe the documents its own transaction has just indexed,
 	/// before that transaction commits.
 	///
+	/// A document indexed by an older server has its postings under the legacy
+	/// per-term keys and no per-document entry, and must still score and
+	/// highlight. What selects the fallback is the absence of that entry, not the
+	/// absence of the term — so once a document has one, its map is the whole
+	/// truth and a leftover legacy key for a term it no longer carries must not
+	/// resurrect that term.
+	#[test(tokio::test)]
+	async fn a_document_indexed_before_the_per_document_entry_still_reads_back() {
+		let test = TestContext::new().await;
+		let legacy = TermDocument {
+			f: 7,
+			o: vec![Offset {
+				index: 0,
+				start: 1,
+				gen_start: 1,
+				end: 4,
+			}],
+		};
+
+		// An older server's output: a posting under the per-term key, with no
+		// per-document entry alongside it.
+		let tx = test.new_tx(TransactionType::Write).await;
+		tx.set_key(&test.ikb.new_td("ancient", 1), &legacy).await.unwrap();
+		tx.commit().await.unwrap();
+
+		let tx = test.new_tx(TransactionType::Read).await;
+		assert_eq!(
+			test.fti.get_term_document(&tx, 1, "ancient").await.unwrap().as_ref(),
+			Some(&legacy),
+			"a posting written before the per-document entry existed must still be found"
+		);
+		assert_eq!(
+			test.fti.get_term_document(&tx, 1, "absent").await.unwrap(),
+			None,
+			"a term the document never carried must not be invented"
+		);
+		tx.cancel().await.unwrap();
+
+		// Re-indexing the document publishes an entry. From then on the entry
+		// answers for every term, and the stale legacy key is unreachable.
+		let tx = test.new_tx(TransactionType::Write).await;
+		let current = DocumentTerms {
+			terms: [(
+				"current".into(),
+				TermDocument {
+					f: 1,
+					o: Vec::new(),
+				},
+			)]
+			.into_iter()
+			.collect(),
+		};
+		tx.set_key(&test.ikb.new_dt(1), &current).await.unwrap();
+		tx.commit().await.unwrap();
+
+		let tx = test.new_tx(TransactionType::Read).await;
+		assert_eq!(
+			test.fti.get_term_document(&tx, 1, "current").await.unwrap().map(|td| td.f),
+			Some(1),
+			"the per-document entry must answer for the terms it holds"
+		);
+		assert_eq!(
+			test.fti.get_term_document(&tx, 1, "ancient").await.unwrap(),
+			None,
+			"a legacy key must not outlive the entry that replaced it"
+		);
+		tx.cancel().await.unwrap();
+	}
+
 	/// The term deltas and the document statistics are buffered until commit, so
 	/// neither is in the keyspace yet when this query runs; the read paths have
 	/// to fold the transaction's own pending contribution over what they scan.

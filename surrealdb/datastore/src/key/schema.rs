@@ -347,16 +347,40 @@ keyspace! {
 						unique = ["*", fd: [Value..], raw 0x02]
 							=> crate::values::entry::IndexEntryValue (derive(-Eq));
 
-						/// Full-text term postings.
-						///
-						/// The root holds the whole document set for a term; a posting
-						/// extends it with one document id. Both live under the same
-						/// tag, so one scan returns the root and its postings together
-						/// and the decoder tells them apart by whether the document id
-						/// is present.
+						/// Full-text term document sets: every document id carrying a
+						/// term, compacted into one bitmap.
 						term_docs = ["!td", @, term: Str] => roaring::RoaringTreemap;
+
+						/// Legacy per-(term, document) posting, no longer written.
+						/// Extends the term's root key with one document id, so a
+						/// scan of the root's range returns both and the decoder
+						/// tells them apart by whether the document id is present.
+						/// Read as a fallback for documents indexed before `!dt`
+						/// existed, which is decided by whether that document has a
+						/// `!dt` entry.
 						term_posting = term_docs + [id: DocId]
 							=> crate::values::fulltext::TermDocument;
+
+						/// One document's postings, keyed by the document rather than
+						/// by term.
+						///
+						/// A posting is only ever addressed as (term, document): the
+						/// set of documents carrying a term comes from `!td`, and a
+						/// posting is read afterwards to score or highlight a document
+						/// already known to match. Nothing enumerates a term's
+						/// postings. Keying by document therefore serves every access
+						/// this family has, and collapses the ~1 key per (term,
+						/// document) that `!td` spent into one key per document —
+						/// bounded, since a document's distinct terms are bounded by
+						/// the document itself.
+						///
+						/// Scoring reads the whole entry to take one term's frequency
+						/// from it. That is one point read per document scored, where
+						/// the per-term shape needed one per (term, document); on an
+						/// index declared with `HIGHLIGHTS` the entry also carries
+						/// offsets, so those reads move fewer keys but more bytes.
+						doc_terms = ["!dt", @, id: DocId]
+							=> crate::values::fulltext::DocumentTerms;
 
 						/// Uncompacted full-text term changes: all terms, one term, and
 						/// one change. Each level is also a stored key, because

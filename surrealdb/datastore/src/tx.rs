@@ -1810,6 +1810,26 @@ impl Transaction {
 		Ok(())
 	}
 
+	/// Insert or update a key whose write slot was already reserved.
+	///
+	/// Only for a write the write-cardinality guard was charged for earlier, so
+	/// that it is not charged twice. The buffered index deltas are the case:
+	/// `buffer_term_change` charges each key the flush will write at the moment
+	/// the buffer gains it, which is what lets an over-limit statement report
+	/// before its caller commits.
+	async fn set_key_prereserved<K>(&self, key: &K, val: &K::Value) -> Result<()>
+	where
+		K: KVKey + Debug,
+	{
+		let key = key.encode_key()?;
+		let val = val.kv_encode_value()?;
+		let key_bytes = key.len() as u64;
+		let value_bytes = val.len() as u64;
+		self.tr.set(key, val).await?;
+		self.metrics.record_set(key_bytes, value_bytes);
+		Ok(())
+	}
+
 	/// Insert or update a key in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn set<V>(&self, key: Key<'_>, val: V) -> Result<()>
@@ -2385,6 +2405,13 @@ impl Transaction {
 	/// makes the delta log grow with indexed *work*, where one key per distinct
 	/// term per transaction bounds it by the vocabulary. The flushed `!tx` entry
 	/// is still a blind write of a key no other transaction shares.
+	///
+	/// The write-cardinality guard is charged here rather than at the flush, once
+	/// for each key the flush will write. Charging at the flush would leave an
+	/// over-limit statement on a caller-owned transaction reporting nothing until
+	/// that caller committed, because nothing else in the statement writes a key
+	/// per term any more. The count is the same either way; only when the caller
+	/// learns of it differs.
 	#[expect(clippy::too_many_arguments, reason = "the index identity is four fields")]
 	pub fn buffer_term_change(
 		&self,
@@ -2396,21 +2423,26 @@ impl Transaction {
 		doc_id: u64,
 		add: bool,
 		nid: Uuid,
-	) {
-		self.index_deltas.get_or_init(|| Box::new(IndexDeltaBuffer::new())).buffer_term_change(
-			BufferedTerm {
-				index: BufferedIndex {
-					ns,
-					db,
-					tb: tb.clone(),
-					ix,
+	) -> Result<()> {
+		let fresh =
+			self.index_deltas.get_or_init(|| Box::new(IndexDeltaBuffer::new())).buffer_term_change(
+				BufferedTerm {
+					index: BufferedIndex {
+						ns,
+						db,
+						tb: tb.clone(),
+						ix,
+					},
+					term: term.to_string(),
 				},
-				term: term.to_string(),
-			},
-			doc_id,
-			add,
-			nid,
-		)
+				doc_id,
+				add,
+				nid,
+			);
+		if fresh {
+			self.reserve_write_slot()?;
+		}
+		Ok(())
 	}
 
 	/// The document ids this transaction has buffered for one term but not yet
@@ -2552,7 +2584,7 @@ impl Transaction {
 					uid,
 					add,
 				};
-				self.set_key(&key, &docs).await?;
+				self.set_key_prereserved(&key, &docs).await?;
 			}
 		}
 		for (index, stats, nid) in doc_stats {

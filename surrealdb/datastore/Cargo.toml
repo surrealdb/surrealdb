@@ -39,6 +39,7 @@ roaring = { workspace = true, features = ["serde"] }
 parking_lot.workspace = true
 serde.workspace = true
 surrealdb-catalog.workspace = true
+surrealdb-collections.workspace = true
 surrealdb-expr.workspace = true
 surrealdb-iam.workspace = true
 surrealdb-rpc.workspace = true
@@ -72,7 +73,6 @@ rstest.workspace = true
 serde_json.workspace = true
 # The on-disk lease-contention runs need somewhere to put a store.
 temp-dir.workspace = true
-surrealdb-collections.workspace = true
 # The allocator and lease tests need a real transaction, so they open one
 # against an in-memory backend. Nothing in the library selects a backend.
 surrealdb-kvs-any = { workspace = true, features = ["kv-mem"] }

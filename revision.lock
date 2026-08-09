@@ -42,6 +42,7 @@ DiskAnnRecordPendingUpdate:1(surrealdb/datastore/src/values/diskann.rs)(12618516
 DiskAnnState:1(surrealdb/datastore/src/values/diskann.rs)(525049006)
 Distance:2(surrealdb/catalog/src/schema/index.rs)(2552342693)
 DocLengthAndCount:1(surrealdb/datastore/src/values/fulltext.rs)(4133838282)
+DocumentTerms:1(surrealdb/datastore/src/values/fulltext.rs)(3163047889)
 DurableSession:1(surrealdb/datastore/src/values/session.rs)(3633641708)
 Duration:1(surrealdb/expr/src/val/duration.rs)(1429838087)
 ElementDocs:1(surrealdb/datastore/src/values/hnsw.rs)(3519792008)

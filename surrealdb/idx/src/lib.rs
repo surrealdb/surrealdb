@@ -79,12 +79,12 @@ use crate::key::schema::{
 	BuildPrimaryGenerationPrefix, BuildPrimaryIxPrefix, BuildPrimaryKey,
 	BuildReservationGenerationPrefix, BuildReservationIxPrefix, BuildReservationKey, BuildStateKey,
 	BuildTicketIxPrefix, BuildTicketKey, DocCountKey, DocLengthKey, DocStatsBatchPrefix,
-	DocStatsKey, HnswElementHashedKey, HnswElementKey, HnswGenerationKey, HnswLayerKey,
-	HnswLayerLayerPrefix, HnswNodeKey, HnswNodeLayerPrefix, HnswPendingRoot, HnswRecordPendingKey,
-	HnswRecordPendingPrefix, HnswStateKey, HnswVectorKey, IdxRoot, IndexAppendKey,
-	IndexAppendPrefix, IndexCompactionKey, IndexPrimaryKey, IndexVersionKey, TermChangeBatchPrefix,
-	TermChangeBatchTermPrefix, TermChangeSetKey, TermChangesKey, TermDocsKey, TermGenerationKey,
-	TermPostingKey,
+	DocStatsKey, DocTermsKey, HnswElementHashedKey, HnswElementKey, HnswGenerationKey,
+	HnswLayerKey, HnswLayerLayerPrefix, HnswNodeKey, HnswNodeLayerPrefix, HnswPendingRoot,
+	HnswRecordPendingKey, HnswRecordPendingPrefix, HnswStateKey, HnswVectorKey, IdxRoot,
+	IndexAppendKey, IndexAppendPrefix, IndexCompactionKey, IndexPrimaryKey, IndexVersionKey,
+	TermChangeBatchPrefix, TermChangeBatchTermPrefix, TermChangeSetKey, TermChangesKey,
+	TermDocsKey, TermGenerationKey, TermPostingKey,
 };
 #[cfg(diskann)]
 use crate::key::schema::{
@@ -877,6 +877,19 @@ impl IndexKeyBase {
 		}
 	}
 
+	/// Key holding every posting for one document.
+	fn new_dt(&self, doc_id: DocId) -> DocTermsKey<'_> {
+		DocTermsKey {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+			id: doc_id,
+		}
+	}
+
+	/// Legacy per-(term, document) posting key. Written by servers before `!dt`
+	/// existed, and still read for documents that carry no `!dt` entry.
 	fn new_td<'a>(&'a self, term: &'a str, doc_id: DocId) -> TermPostingKey<'a> {
 		TermPostingKey {
 			ns: self.0.ns,
@@ -932,7 +945,14 @@ impl IndexKeyBase {
 
 	/// Buffers this index's contribution to one term until the transaction
 	/// commits, where it becomes one `!tx` entry per term and direction.
-	fn buffer_tt(&self, tx: &Transaction, term: &str, doc_id: DocId, nid: Uuid, add: bool) {
+	fn buffer_tt(
+		&self,
+		tx: &Transaction,
+		term: &str,
+		doc_id: DocId,
+		nid: Uuid,
+		add: bool,
+	) -> Result<()> {
 		tx.buffer_term_change(self.0.ns, self.0.db, &self.0.tb, self.0.ix, term, doc_id, add, nid)
 	}
 
