@@ -21,7 +21,6 @@ kv-indxdb = ["surrealdb-embedded/kv-indxdb"]
 debug = ["dep:web-sys"]
 
 [lib]
-path = "src-rust/lib.rs"
 crate-type = ["cdylib"]
 
 [dependencies]

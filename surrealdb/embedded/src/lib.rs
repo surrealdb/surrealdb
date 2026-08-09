@@ -1,8 +1,8 @@
 //! The shared body of SurrealDB's embedded JavaScript engines.
 //!
-//! `@surrealdb/node` and `@surrealdb/wasm` are the same database behind two
-//! different FFIs. Everything that is not the FFI lives here: connection
-//! options, and the session / transaction / live-query bookkeeping an
+//! `@surrealdb/node-native` and `@surrealdb/wasm-native` are the same database
+//! behind two different FFIs. Everything that is not the FFI lives here:
+//! connection options, and the session / transaction / live-query bookkeeping an
 //! [`RpcProtocol`] implementation needs. Each shim is left with the parts that
 //! genuinely differ — how JavaScript hands over an options object, how values
 //! cross the boundary, and the lifetime of the FFI handle.

@@ -47,37 +47,44 @@ const DTS_HEADER = dedent`
 
 const dtsHeader = isWindows ? `"${DTS_HEADER}"` : DTS_HEADER; // This makes me weep
 const buildCmd = [
-    "bunx",
-    "napi",
-    "build",
-    "-s",
-    "--esm",
-    "--strip",
-    "--dts-header",
-    dtsHeader,
-    "--platform",
-    "--release",
-    "--features",
-    "kv-rocksdb,kv-mem,kv-surrealkv",
-    "-o",
-    "napi",
+	"bunx",
+	"napi",
+	"build",
+	"-s",
+	"--esm",
+	"--strip",
+	"--dts-header",
+	dtsHeader,
+	"--platform",
+	"--release",
+	"--features",
+	"kv-rocksdb,kv-mem,kv-surrealkv",
+	"-o",
+	"napi",
 ];
 
 if (flags.length > 0) {
-    buildCmd.push(...flags);
-    console.log(`🎯 NAPI flags: ${flags.join(" ")}`);
+	buildCmd.push(...flags);
+	console.log(`🎯 NAPI flags: ${flags.join(" ")}`);
 }
 
-await Bun.spawn(buildCmd, {
-    stdout: "inherit",
-    stderr: "inherit",
-    env: {
-        ...process.env,
-        CFLAGS_aarch64_unknown_linux_gnu: "-D__ARM_ARCH=8",
-        CXX_aarch64_unknown_linux_gnu: "aarch64-linux-gnu-g++",
-        CC_aarch64_unknown_linux_gnu: "aarch64-linux-gnu-gcc",
-    },
+const code = await Bun.spawn(buildCmd, {
+	stdout: "inherit",
+	stderr: "inherit",
+	env: {
+		...process.env,
+		CFLAGS_aarch64_unknown_linux_gnu: "-D__ARM_ARCH=8",
+		CXX_aarch64_unknown_linux_gnu: "aarch64-linux-gnu-g++",
+		CC_aarch64_unknown_linux_gnu: "aarch64-linux-gnu-gcc",
+	},
 }).exited;
+
+// Without this a broken build leaves the previous `dist/` in place and the
+// package looks like it built.
+if (code !== 0) {
+	console.error(`❌ Building the NAPI binary failed (exit ${code})`);
+	process.exit(code);
+}
 
 // Assemble the package
 //
@@ -92,5 +99,5 @@ await copyFile("napi/index.js", "dist/index.js");
 await copyFile("napi/index.d.ts", "dist/index.d.ts");
 
 for await (const file of new Glob("napi/*.node").scan(".")) {
-    await copyFile(file, `dist/${basename(file)}`);
+	await copyFile(file, `dist/${basename(file)}`);
 }

@@ -3,10 +3,10 @@
 //! Everything here is FFI: turning a JavaScript options object into
 //! [`Options`], moving bytes across the boundary, and the lifetime of the
 //! addon's handle. The database behaviour lives in `surrealdb-embedded`, shared
-//! with `@surrealdb/wasm`.
+//! with `@surrealdb/wasm-native`.
 
 use futures::StreamExt;
-use napi::bindgen_prelude::*;
+use napi::bindgen_prelude::{Error, Uint8Array};
 use napi::tokio::sync::{Mutex, RwLock};
 use napi_derive::napi;
 use serde_json::{Value as JsValue, from_value};
@@ -41,7 +41,7 @@ pub struct NotificationReceiver {
 impl NotificationReceiver {
 	/// The next notification, or `null` once the connection stops producing them.
 	#[napi]
-	pub async fn recv(&self) -> std::result::Result<Option<Uint8Array>, Error> {
+	pub async fn recv(&self) -> Result<Option<Uint8Array>, Error> {
 		let next = self.stream.lock().await.next().await;
 		Ok(next.map(|encoded| encoded.as_slice().into()))
 	}
@@ -50,7 +50,7 @@ impl NotificationReceiver {
 #[napi]
 impl SurrealNodeEngine {
 	#[napi]
-	pub async fn execute(&self, data: Uint8Array) -> std::result::Result<Uint8Array, Error> {
+	pub async fn execute(&self, data: Uint8Array) -> Result<Uint8Array, Error> {
 		let lock = self.0.read().await;
 		let engine = lock.as_ref().ok_or_else(closed)?;
 		// `Uint8Array` derefs to the bytes napi already holds, so the request
@@ -62,7 +62,7 @@ impl SurrealNodeEngine {
 	/// The live query notifications for this connection, encoded, drained with
 	/// [`NotificationReceiver::recv`].
 	#[napi]
-	pub async fn notifications(&self) -> std::result::Result<NotificationReceiver, Error> {
+	pub async fn notifications(&self) -> Result<NotificationReceiver, Error> {
 		let lock = self.0.read().await;
 		let engine = lock.as_ref().ok_or_else(closed)?;
 		Ok(NotificationReceiver {
@@ -74,7 +74,7 @@ impl SurrealNodeEngine {
 	pub async fn connect(
 		endpoint: String,
 		#[napi(ts_arg_type = "ConnectionOptions")] opts: Option<JsValue>,
-	) -> std::result::Result<SurrealNodeEngine, Error> {
+	) -> Result<SurrealNodeEngine, Error> {
 		let opts: Option<Options> = from_value::<Option<Options>>(JsValue::from(opts))?;
 		let engine =
 			EmbeddedEngine::connect(&endpoint, opts.unwrap_or_default()).await.map_err(err_map)?;
@@ -82,21 +82,21 @@ impl SurrealNodeEngine {
 	}
 
 	#[napi]
-	pub async fn export(&self, config: Option<Uint8Array>) -> std::result::Result<String, Error> {
+	pub async fn export(&self, config: Option<Uint8Array>) -> Result<String, Error> {
 		let lock = self.0.read().await;
 		let engine = lock.as_ref().ok_or_else(closed)?;
 		engine.export_encoded(WIRE_FORMAT, config.as_deref()).await.map_err(err_map)
 	}
 
 	#[napi]
-	pub async fn import(&self, input: String) -> std::result::Result<(), Error> {
+	pub async fn import(&self, input: String) -> Result<(), Error> {
 		let lock = self.0.read().await;
 		let engine = lock.as_ref().ok_or_else(closed)?;
 		engine.import(&input).await.map_err(err_map)
 	}
 
 	#[napi]
-	pub fn version() -> std::result::Result<String, Error> {
+	pub fn version() -> Result<String, Error> {
 		Ok(EmbeddedEngine::version().to_owned())
 	}
 

@@ -7,8 +7,12 @@ use chrono::{DateTime, Utc};
 pub use cnf::MemoryConfig;
 use surrealmx::{Database, DatabaseOptions, KeyIterator, ScanIterator, Transaction as Tx};
 use tokio::sync::RwLock;
-use tracing::{info, instrument};
+#[cfg(not(target_family = "wasm"))]
+use tracing::info;
+use tracing::instrument;
 
+// Only the persistence configuration is logged, and wasm has no persistence.
+#[cfg(not(target_family = "wasm"))]
 const TARGET: &str = "surrealdb::core::kvs::mem";
 
 use surrealdb_kvs::api::{
@@ -64,6 +68,10 @@ pub struct Transaction {
 
 impl Datastore {
 	/// Open a new database
+	#[cfg_attr(
+		target_family = "wasm",
+		expect(unused_variables, reason = "only persistence is configurable, and wasm has none")
+	)]
 	pub async fn new(config: MemoryConfig) -> Result<Datastore> {
 		// Create the shared blocking threadpool (idempotent)
 		surrealdb_kvs::threadpool::initialise();

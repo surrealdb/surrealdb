@@ -1,6 +1,6 @@
 [package]
 name = "surrealdb-node"
-# Distributed as the `@surrealdb/node` npm package, not as a crate: the build
+# Distributed as the `@surrealdb/node-native` npm package, not as a crate: the build
 # artefact is a NAPI addon (`cdylib`) that is useless to a Cargo consumer.
 publish = false
 authors.workspace = true
@@ -16,15 +16,14 @@ kv-rocksdb = ["surrealdb-embedded/kv-rocksdb"]
 kv-surrealkv = ["surrealdb-embedded/kv-surrealkv"]
 
 [lib]
-path = "src-rust/lib.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
-surrealdb-embedded = { workspace = true }
 futures = { workspace = true }
 napi = { workspace = true, features = ["async", "serde-json"] }
 napi-derive = { workspace = true }
 serde_json = { workspace = true }
+surrealdb-embedded = { workspace = true }
 
 [build-dependencies]
 napi-build = { workspace = true }

@@ -1,4 +1,4 @@
-//! The `@surrealdb/node` NAPI addon: an embedded SurrealDB engine for the
+//! The `@surrealdb/node-native` NAPI addon: an embedded SurrealDB engine for the
 //! JavaScript SDK running on Node.js, Bun, or Deno.
 //!
 //! The addon exposes a single RPC entry point. A caller encodes an RPC request
