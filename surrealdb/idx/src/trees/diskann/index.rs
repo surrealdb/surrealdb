@@ -988,14 +988,12 @@ impl DiskAnnIndex {
 			if batch.is_empty() {
 				return Ok(true);
 			}
-			let owned: Vec<(Vec<u8>, Vec<u8>)> =
-				batch.iter().map(|(k, v)| (k.to_vec(), v.to_vec())).collect();
-			for (legacy_key, legacy_value) in owned {
+			for (legacy_key, legacy_value) in batch.iter() {
 				if env.is_done(Some(*count)).await? {
 					bail!(EngineError::QueryCancelled)
 				}
-				let id = DiskannRecordPendingKey::decode_key(&legacy_key)?.id.into_owned();
-				let legacy_update = DiskAnnRecordPendingUpdate::kv_decode_value(&legacy_value, ())?;
+				let id = DiskannRecordPendingKey::decode_key(legacy_key)?.id.into_owned();
+				let legacy_update = DiskAnnRecordPendingUpdate::kv_decode_value(legacy_value, ())?;
 				let legacy_op = Self::record_pending_to_operation(id.clone(), legacy_update);
 				// Probe the record's sharded `!dw` counterpart so a dual-layout record is folded in
 				// here rather than split across passes. Deletes happen only at apply, so the `!dw`
@@ -1019,8 +1017,12 @@ impl DiskAnnIndex {
 					return Ok(false);
 				}
 				// The pair is authorized; capture both halves unconditionally so the byte guard can
-				// never admit one and reject the other (which would orphan the sharded half).
-				builder.add_authorized(legacy_key, legacy_value, legacy_op);
+				// never admit one and reject the other (which would orphan the sharded half). The
+				// plan needs each entry's exact bytes for its conditional delete, so the copy is
+				// made here rather than for the whole batch up front: the caps above stop a
+				// part-read batch as a matter of course, and what the loop never reaches is never
+				// copied.
+				builder.add_authorized(legacy_key.to_vec(), legacy_value.to_vec(), legacy_op);
 				if let Some((shard_key_bytes, shard_value, shard_op)) = shard_entry {
 					folded_shard_keys.insert(shard_key_bytes.as_slice().to_vec());
 					builder.add_authorized(
@@ -1055,21 +1057,21 @@ impl DiskAnnIndex {
 			if batch.is_empty() {
 				return Ok(true);
 			}
-			let owned: Vec<(Vec<u8>, Vec<u8>)> =
-				batch.iter().map(|(k, v)| (k.to_vec(), v.to_vec())).collect();
-			for (key, value) in owned {
+			for (key, value) in batch.iter() {
 				if env.is_done(Some(*count)).await? {
 					bail!(EngineError::QueryCancelled)
 				}
-				if folded_shard_keys.contains(&key) {
+				if folded_shard_keys.contains(key) {
 					// Already folded next to its legacy counterpart in phase 1; the plan deletes
 					// it.
 					continue;
 				}
-				let id = DiskannRecordPendingShardKey::decode_key(&key)?.id.into_owned();
-				let pending = DiskAnnRecordPendingUpdate::kv_decode_value(&value, ())?;
+				let id = DiskannRecordPendingShardKey::decode_key(key)?.id.into_owned();
+				let pending = DiskAnnRecordPendingUpdate::kv_decode_value(value, ())?;
 				let pending = Self::record_pending_to_operation(id, pending);
-				if !builder.add(key, value, pending) {
+				// Copied per entry rather than per batch, for the reason given in
+				// `collect_legacy_record_pending`.
+				if !builder.add(key.to_vec(), value.to_vec(), pending) {
 					return Ok(false);
 				}
 				*count += 1;

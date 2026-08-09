@@ -391,15 +391,17 @@ impl HnswIndex {
 			if batch.is_empty() {
 				break;
 			}
-			let owned: Vec<(Vec<u8>, Vec<u8>)> =
-				batch.iter().map(|(k, v)| (k.to_vec(), v.to_vec())).collect();
-			for (key, value) in owned {
+			for (key, value) in batch.iter() {
 				if env.is_done(Some(*count)).await? {
 					bail!(EngineError::QueryCancelled)
 				}
-				let pending = VectorPendingUpdate::kv_decode_value(&value, ())?;
+				let pending = VectorPendingUpdate::kv_decode_value(value, ())?;
 				let pending = Self::append_pending_to_operation(pending);
-				if !builder.add(key, value, pending) {
+				// The plan captures each entry's exact bytes for its conditional
+				// delete, so the copy is made here rather than for the whole batch
+				// up front: the caps below stop a part-read batch as a matter of
+				// course, and what the loop never reaches is never copied.
+				if !builder.add(key.to_vec(), value.to_vec(), pending) {
 					return Ok(());
 				}
 				*count += 1;
@@ -429,16 +431,16 @@ impl HnswIndex {
 			if batch.is_empty() {
 				break;
 			}
-			let owned: Vec<(Vec<u8>, Vec<u8>)> =
-				batch.iter().map(|(k, v)| (k.to_vec(), v.to_vec())).collect();
-			for (key, value) in owned {
+			for (key, value) in batch.iter() {
 				if env.is_done(Some(*count)).await? {
 					bail!(EngineError::QueryCancelled)
 				}
-				let hr = HnswRecordPendingKey::decode_key(&key)?;
-				let pending = HnswRecordPendingUpdate::kv_decode_value(&value, ())?;
+				let hr = HnswRecordPendingKey::decode_key(key)?;
+				let pending = HnswRecordPendingUpdate::kv_decode_value(value, ())?;
 				let pending = Self::record_pending_to_operation(hr.id.into_owned(), pending);
-				if !builder.add(key, value, pending) {
+				// Copied per entry rather than per batch, for the reason given in
+				// `collect_append_pending_for_plan`.
+				if !builder.add(key.to_vec(), value.to_vec(), pending) {
 					return Ok(());
 				}
 				*count += 1;

@@ -851,17 +851,11 @@ pub(super) trait Collector {
 			if batch.is_empty() {
 				break;
 			}
-			// Materialise owned `(Key, Val)` pairs up front because the
-			// per-item `self.collect(...)` await may need to call back into
-			// the cursor's transaction, which can't co-exist with the
-			// outstanding `&mut self` borrow on the cursor.
-			let owned: Vec<(Vec<u8>, Val)> =
-				batch.iter().map(|(k, v)| (k.to_vec(), v.to_vec())).collect();
-			for (k, v) in owned {
+			for (k, v) in batch.iter() {
 				if ctx.is_done(Some(count)).await? {
 					break 'outer;
 				}
-				self.collect(Collectable::KeyVal(doc_ctx.clone(), k, v)).await?;
+				self.collect(Collectable::KeyVal(doc_ctx.clone(), k.to_vec(), v.to_vec())).await?;
 				count += 1;
 			}
 		}
@@ -932,12 +926,11 @@ pub(super) trait Collector {
 			if batch.is_empty() {
 				break;
 			}
-			let owned: Vec<Vec<u8>> = batch.iter().map(|k| k.to_vec()).collect();
-			for k in owned {
+			for k in batch.iter() {
 				if ctx.is_done(Some(count)).await? {
 					break 'outer;
 				}
-				self.collect(Collectable::TableKey(doc_ctx.clone(), k)).await?;
+				self.collect(Collectable::TableKey(doc_ctx.clone(), k.to_vec())).await?;
 				count += 1;
 			}
 		}
@@ -1020,13 +1013,11 @@ pub(super) trait Collector {
 			if batch.is_empty() {
 				break;
 			}
-			let owned: Vec<(Vec<u8>, Val)> =
-				batch.iter().map(|(k, v)| (k.to_vec(), v.to_vec())).collect();
-			for (k, v) in owned {
+			for (k, v) in batch.iter() {
 				if ctx.is_done(Some(count)).await? {
 					break 'outer;
 				}
-				self.collect(Collectable::KeyVal(doc_ctx.clone(), k, v)).await?;
+				self.collect(Collectable::KeyVal(doc_ctx.clone(), k.to_vec(), v.to_vec())).await?;
 				count += 1;
 			}
 		}
@@ -1068,12 +1059,11 @@ pub(super) trait Collector {
 			if batch.is_empty() {
 				break;
 			}
-			let owned: Vec<Vec<u8>> = batch.iter().map(|k| k.to_vec()).collect();
-			for k in owned {
+			for k in batch.iter() {
 				if ctx.is_done(Some(count)).await? {
 					break 'outer;
 				}
-				self.collect(Collectable::RangeKey(doc_ctx.clone(), k)).await?;
+				self.collect(Collectable::RangeKey(doc_ctx.clone(), k.to_vec())).await?;
 				count += 1;
 			}
 		}
@@ -1196,12 +1186,12 @@ pub(super) trait Collector {
 				if batch.is_empty() {
 					break;
 				}
-				let owned: Vec<Vec<u8>> = batch.iter().map(|k| k.to_vec()).collect();
-				for key in owned {
+				for key in batch.iter() {
 					if ctx.is_done(Some(count)).await? {
 						break 'keys;
 					}
-					self.collect(Collectable::Lookup(doc_ctx.clone(), kind.clone(), key)).await?;
+					self.collect(Collectable::Lookup(doc_ctx.clone(), kind.clone(), key.to_vec()))
+						.await?;
 					count += 1;
 				}
 			}
