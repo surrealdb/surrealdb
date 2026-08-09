@@ -15,9 +15,12 @@
 //! empty. Break it and a lookup returns whichever duplicate happens to sort first
 //! - a wrong element, a wrong neighbour set, and no error anywhere.
 
+use std::sync::Arc;
+
 use anyhow::Result;
 use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
 use serde::{Deserialize, Serialize};
+use surrealdb_expr::val::RecordIdKey;
 use surrealdb_kvs::impl_kv_value_revisioned;
 use surrealdb_kvs::value::KVValue;
 
@@ -83,6 +86,37 @@ pub struct HnswRecordPendingUpdate {
 }
 
 impl_kv_value_revisioned!(HnswRecordPendingUpdate);
+
+/// A pending vector update queued under the append-keyed `!hp` layout.
+///
+/// One entry per queued change, where [`HnswRecordPendingUpdate`] above holds one
+/// coalesced entry per record. Nothing writes it: it is decoded so that an index
+/// holding entries under this layout still drains, and every entry compaction
+/// consumes is one fewer that will ever be read.
+#[revisioned(revision = 1)]
+pub struct VectorPendingUpdate {
+	/// Identifies the document being updated (by doc ID if known, or record key if new).
+	pub id: VectorId,
+	/// The previous vectors to remove from the index (empty for new documents).
+	pub old_vectors: Vec<SerializedVector>,
+	/// The new vectors to insert into the index (empty for deletions).
+	pub new_vectors: Vec<SerializedVector>,
+}
+
+impl_kv_value_revisioned!(VectorPendingUpdate);
+
+/// Identifies a vector's owning document, either by its internal doc ID or its record key.
+///
+/// When a document is first indexed, its doc ID may not yet be assigned, so the
+/// record key is used. Once the pending update is applied, the doc ID is resolved.
+#[revisioned(revision = 1)]
+#[derive(Debug, PartialOrd, Ord, Hash, PartialEq, Eq, Clone)]
+pub enum VectorId {
+	/// A previously resolved internal document ID.
+	DocId(DocId),
+	/// A record key for a document whose doc ID has not yet been resolved.
+	RecordKey(Arc<RecordIdKey>),
+}
 
 /// Contains the mapping between an element ID and the document IDs that share the same vector.
 #[revisioned(revision = 1)]

@@ -548,7 +548,7 @@ impl ExecOperator for ShortestPathExpand {
 						let mut decoded_targets: Vec<Option<RecordId>> = Vec::new();
 						for r in ranges {
 							let mut cursor = txn
-								.open_keys_cursor_raw(r, Direction::Forward, 0, version)
+								.open_keys_cursor(r, Direction::Forward, 0, version)
 								.await
 								.context("Failed to open ShortestPathExpand graph cursor")?;
 							loop {

@@ -7,26 +7,23 @@ mod heuristic;
 pub mod index;
 mod layer;
 
-use std::sync::Arc;
-
 use anyhow::Result;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 use reblessive::tree::Stk;
-use revision::revisioned;
 use roaring::RoaringTreemap;
 use surrealdb_datastore::Transaction;
-// The graph's state record, the queued per-record update and the element id they
-// address are keyspace values, so they are declared below this layer; the graph
-// built from them stays here.
-pub use surrealdb_datastore::values::hnsw::{HnswRecordPendingUpdate, HnswState};
+// The graph's state record, the queued updates in both their layouts, the vector
+// identity they carry and the element id they address are keyspace values, so
+// they are declared below this layer; the graph built from them stays here.
+pub use surrealdb_datastore::values::hnsw::{
+	HnswRecordPendingUpdate, HnswState, VectorId, VectorPendingUpdate,
+};
 pub(crate) use surrealdb_datastore::values::vector::ElementId;
 
 use crate::IndexKeyBase;
 use crate::catalog::{HnswParams, TableId};
-use crate::docids::DocId;
 use crate::env::IndexEnv;
-use crate::key::impl_kv_value_revisioned;
 use crate::trees::dynamicset::DynamicSet;
 use crate::trees::hnsw::cache::VectorCache;
 use crate::trees::hnsw::elements::HnswElements;
@@ -36,7 +33,6 @@ use crate::trees::hnsw::index::HnswContext;
 use crate::trees::hnsw::layer::{HnswLayer, LayerState};
 use crate::trees::knn::DoublePriorityQueue;
 use crate::trees::vector::{SerializedVector, SharedVector, Vector};
-use crate::val::RecordIdKey;
 
 /// Parameters for a k-nearest neighbor search on the HNSW graph.
 struct HnswSearch {
@@ -57,36 +53,6 @@ impl HnswSearch {
 		}
 	}
 }
-
-/// A pending vector update queued for later application to the HNSW graph.
-///
-/// During concurrent writes, vector updates are not applied directly to the graph.
-/// Instead, they are serialized to the key-value store as pending updates and later
-/// applied in batch by a background task via [`HnswIndex::index_pendings`].
-#[revisioned(revision = 1)]
-pub(crate) struct VectorPendingUpdate {
-	/// Identifies the document being updated (by doc ID if known, or record key if new).
-	id: VectorId,
-	/// The previous vectors to remove from the index (empty for new documents).
-	old_vectors: Vec<SerializedVector>,
-	/// The new vectors to insert into the index (empty for deletions).
-	new_vectors: Vec<SerializedVector>,
-}
-
-/// Identifies a vector's owning document, either by its internal doc ID or its record key.
-///
-/// When a document is first indexed, its doc ID may not yet be assigned, so the
-/// record key is used. Once the pending update is applied, the doc ID is resolved.
-#[revisioned(revision = 1)]
-#[derive(Debug, PartialOrd, Ord, Hash, PartialEq, Eq, Clone)]
-pub(crate) enum VectorId {
-	/// A previously resolved internal document ID.
-	DocId(DocId),
-	/// A record key for a document whose doc ID has not yet been resolved.
-	RecordKey(Arc<RecordIdKey>),
-}
-
-impl_kv_value_revisioned!(VectorPendingUpdate);
 
 /// Core HNSW (Hierarchical Navigable Small World) graph implementation.
 ///

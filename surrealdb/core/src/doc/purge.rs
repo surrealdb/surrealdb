@@ -267,7 +267,7 @@ impl Document {
 		}
 		.range()?;
 		// Open a cursor over the graph edge range so we can peek the first key.
-		let mut cursor = txn.open_keys_cursor_raw(range, Direction::Forward, 0, None).await?;
+		let mut cursor = txn.open_keys_cursor(range, Direction::Forward, 0, None).await?;
 		// Check if there are any edges to purge by fetching at most one key.
 		let batch = cursor.next_batch(1).await?;
 		// Only proceed if there are edges for this record.
@@ -367,8 +367,7 @@ impl Document {
 		// were, the trailing range delete is a no-op we can skip.
 		let mut saw_reference_key = false;
 		// Obtain a cursor over the reference range.
-		let mut cursor =
-			txn.open_keys_cursor_raw(range.clone(), Direction::Forward, 0, None).await?;
+		let mut cursor = txn.open_keys_cursor(range.clone(), Direction::Forward, 0, None).await?;
 		// Loop until no more entries
 		loop {
 			// Pull the next batch of reference keys from the cursor.

@@ -1188,8 +1188,7 @@ pub(super) trait Collector {
 		// Loop over the chosen edge types
 		'keys: for rng in ranges {
 			// Create a new iterable range
-			let mut cursor =
-				txn.open_keys_cursor_raw(rng, Direction::Forward, 0, opt.version).await?;
+			let mut cursor = txn.open_keys_cursor(rng, Direction::Forward, 0, opt.version).await?;
 			// Loop until no more entries
 			let mut count = 0;
 			loop {

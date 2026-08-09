@@ -31,7 +31,7 @@ pub struct IndexCountCompactionPlan {
 	count: i64,
 	has_delta: bool,
 	has_more: bool,
-	keys: Vec<Vec<u8>>,
+	keys: Vec<IndexCountKey<'static>>,
 }
 
 impl IndexCountCompactionPlan {
@@ -164,7 +164,10 @@ impl IndexCountThingIterator {
 					has_delta = true;
 					delta_count += 1;
 				}
-				keys.push(key.clone());
+				// The write phase deletes exactly what this snapshot saw, so the
+				// decoded key is kept rather than the bytes it came from: the delete
+				// is then the same key type the scan proved it to be.
+				keys.push(iu.into_owned());
 			}
 			if has_more {
 				break;
@@ -202,7 +205,7 @@ impl IndexCountThingIterator {
 			return Ok(false);
 		}
 		for key in plan.keys.iter() {
-			txn.del(key.into()).await?;
+			txn.del_key(key).await?;
 		}
 		let count = plan.count;
 		let pos = count.is_positive();

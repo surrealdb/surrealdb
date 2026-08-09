@@ -74,6 +74,12 @@ use crate::{
 const DISKANN_COMPACTION_MAX_PENDING_KEYS: usize = 1024;
 const DISKANN_COMPACTION_MAX_PENDING_BYTES: usize = 16 * 1024 * 1024;
 
+/// Exact pending key/value observed by a DiskANN compaction read phase.
+///
+/// Held as bytes rather than as the key and value they decode to, for the reason
+/// spelled out on the HNSW type of the same name: the delete is conditional on a
+/// byte comparison with what is stored, and a re-encode is not guaranteed to
+/// reproduce those bytes.
 struct CapturedPendingKey {
 	/// Exact pending key captured during the read phase.
 	key: Vec<u8>,
@@ -716,7 +722,7 @@ impl DiskAnnIndex {
 		tx: &Transaction,
 		rng: TypedRange<DiskAnnRecordPendingUpdate>,
 	) -> Result<bool> {
-		let mut cursor = tx.open_vals_cursor_raw(rng, Direction::Forward, 0, None).await?;
+		let mut cursor = tx.open_vals_cursor(rng, Direction::Forward, 0, None).await?;
 		// The first non-empty batch is conclusive; we just need to know
 		// whether *any* entry exists in the range.
 		let batch = cursor.next_batch(1).await?;
@@ -976,7 +982,7 @@ impl DiskAnnIndex {
 		folded_shard_keys: &mut HashSet<Vec<u8>>,
 	) -> Result<bool> {
 		let mut cursor =
-			tx.open_vals_cursor_raw(ikb.new_dr_range()?, Direction::Forward, 0, None).await?;
+			tx.open_vals_cursor(ikb.new_dr_range()?, Direction::Forward, 0, None).await?;
 		loop {
 			let batch = cursor.next_batch(surrealdb_kvs::consts::NORMAL_BATCH_SIZE).await?;
 			if batch.is_empty() {
@@ -1043,7 +1049,7 @@ impl DiskAnnIndex {
 		builder: &mut PendingPlanBuilder,
 		folded_shard_keys: &HashSet<Vec<u8>>,
 	) -> Result<bool> {
-		let mut cursor = tx.open_vals_cursor_raw(rng, Direction::Forward, 0, None).await?;
+		let mut cursor = tx.open_vals_cursor(rng, Direction::Forward, 0, None).await?;
 		loop {
 			let batch = cursor.next_batch(surrealdb_kvs::consts::NORMAL_BATCH_SIZE).await?;
 			if batch.is_empty() {
@@ -1557,7 +1563,7 @@ impl DiskAnnIndex {
 	where
 		F: FnMut(PendingOperation),
 	{
-		let mut cursor = tx.open_vals_cursor_raw(rng, Direction::Forward, 0, None).await?;
+		let mut cursor = tx.open_vals_cursor(rng, Direction::Forward, 0, None).await?;
 		loop {
 			let batch = cursor.next_batch(surrealdb_kvs::consts::NORMAL_BATCH_SIZE).await?;
 			if batch.is_empty() {

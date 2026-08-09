@@ -399,10 +399,8 @@ async fn has_connected_edges(
 		id: Cow::Borrowed(&rid.key),
 	}
 	.range()?;
-	let mut cursor = txn
-		.open_keys_cursor_raw(range, Direction::Forward, 0, None)
-		.await
-		.map_err(ControlFlow::Err)?;
+	let mut cursor =
+		txn.open_keys_cursor(range, Direction::Forward, 0, None).await.map_err(ControlFlow::Err)?;
 	let batch = cursor.next_batch(1).await.map_err(ControlFlow::Err)?;
 	Ok(!batch.is_empty())
 }

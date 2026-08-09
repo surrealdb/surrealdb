@@ -34,8 +34,8 @@ use surrealdb_catalog::providers::{
 	CancellationProbe, DatabaseProvider, NamespaceProvider, TableProvider,
 };
 use surrealdb_catalog::{DatabaseId, IndexId, NamespaceId, TableId};
-use surrealdb_kvs::key::{KVKey, TypedRange};
-use surrealdb_kvs::{Key, impl_kv_value_revisioned};
+use surrealdb_kvs::impl_kv_value_revisioned;
+use surrealdb_kvs::key::{KVKey, KVKeyDecode, TypedRange};
 use surrealdb_strand::TableName;
 use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
@@ -140,79 +140,160 @@ impl SequenceDomain {
 		}
 	}
 
-	fn new_batch_key(&self, start: i64) -> Result<Key<'static>> {
+	fn new_batch_key(&self, start: i64) -> SequenceBatchKey<'_> {
 		match &self {
-			Self::UserName(ns, db, sq) => SeqBatchKey {
+			Self::UserName(ns, db, sq) => SequenceBatchKey::User(SeqBatchKey {
 				ns: *ns,
 				db: *db,
 				sq: Cow::Borrowed(sq.as_str()),
 				start,
-			}
-			.encode_key(),
-			Self::TableDocIds(ns, db, tb) => {
-				DocIdBatchKey::new(*ns, *db, Cow::Borrowed(tb), start).encode_key()
-			}
-			Self::NameSpacesIds => NsIdBatchKey {
+			}),
+			Self::TableDocIds(ns, db, tb) => SequenceBatchKey::TableDocIds(DocIdBatchKey::new(
+				*ns,
+				*db,
+				Cow::Borrowed(tb),
 				start,
-			}
-			.encode_key(),
-			Self::DatabasesIds(ns) => DbIdBatchKey {
+			)),
+			Self::NameSpacesIds => SequenceBatchKey::Namespaces(NsIdBatchKey {
+				start,
+			}),
+			Self::DatabasesIds(ns) => SequenceBatchKey::Databases(DbIdBatchKey {
 				ns: *ns,
 				start,
-			}
-			.encode_key(),
-			Self::TablesIds(ns, db) => TbIdBatchKey {
+			}),
+			Self::TablesIds(ns, db) => SequenceBatchKey::Tables(TbIdBatchKey {
 				ns: *ns,
 				db: *db,
 				start,
-			}
-			.encode_key(),
-			Self::IndexIds(ns, db, tb) => IndexIdBatchKey {
+			}),
+			Self::IndexIds(ns, db, tb) => SequenceBatchKey::Indexes(IndexIdBatchKey {
 				ns: *ns,
 				db: *db,
 				tb: Cow::Borrowed(tb),
 				start,
-			}
-			.encode_key(),
+			}),
 		}
 	}
 
-	fn new_state_key(&self, nid: Uuid) -> Result<Key<'static>> {
+	/// Reads back a batch key this domain's own range produced.
+	///
+	/// The domain says which of the six families the bytes belong to, so the
+	/// dispatch is the same one [`Self::new_batch_key`] makes, run the other way.
+	/// A batch's `start` lives in its key rather than in [`BatchValue`], so this is
+	/// also the only way to learn which range a scanned entry reserved.
+	fn decode_batch_key<'a>(&self, bytes: &'a [u8]) -> Result<SequenceBatchKey<'a>> {
+		Ok(match &self {
+			Self::UserName(..) => SequenceBatchKey::User(SeqBatchKey::decode_key(bytes)?),
+			Self::TableDocIds(..) => {
+				SequenceBatchKey::TableDocIds(DocIdBatchKey::decode_key(bytes)?)
+			}
+			Self::NameSpacesIds => SequenceBatchKey::Namespaces(NsIdBatchKey::decode_key(bytes)?),
+			Self::DatabasesIds(..) => SequenceBatchKey::Databases(DbIdBatchKey::decode_key(bytes)?),
+			Self::TablesIds(..) => SequenceBatchKey::Tables(TbIdBatchKey::decode_key(bytes)?),
+			Self::IndexIds(..) => SequenceBatchKey::Indexes(IndexIdBatchKey::decode_key(bytes)?),
+		})
+	}
+
+	/// The state key for `nid`, owning its fields so it can be held for the life of
+	/// the [`Sequence`] that writes through it.
+	fn new_state_key(&self, nid: Uuid) -> SequenceStateKey<'static> {
 		match &self {
-			Self::UserName(ns, db, sq) => SeqStateKey {
+			Self::UserName(ns, db, sq) => SequenceStateKey::User(SeqStateKey {
 				ns: *ns,
 				db: *db,
-				sq: Cow::Borrowed(sq.as_str()),
+				sq: Cow::Owned(sq.clone()),
 				nid,
-			}
-			.encode_key(),
-			Self::TableDocIds(ns, db, tb) => {
-				DocIdStateKey::new(*ns, *db, Cow::Borrowed(tb), nid).encode_key()
-			}
-			Self::NameSpacesIds => NsIdStateKey {
+			}),
+			Self::TableDocIds(ns, db, tb) => SequenceStateKey::TableDocIds(DocIdStateKey::new(
+				*ns,
+				*db,
+				Cow::Owned(tb.clone()),
 				nid,
-			}
-			.encode_key(),
-			Self::DatabasesIds(ns) => DbIdStateKey {
+			)),
+			Self::NameSpacesIds => SequenceStateKey::Namespaces(NsIdStateKey {
+				nid,
+			}),
+			Self::DatabasesIds(ns) => SequenceStateKey::Databases(DbIdStateKey {
 				ns: *ns,
 				nid,
-			}
-			.encode_key(),
-			Self::TablesIds(ns, db) => TbIdStateKey {
-				ns: *ns,
-				db: *db,
-				nid,
-			}
-			.encode_key(),
-			Self::IndexIds(ns, db, tb) => IndexIdStateKey {
+			}),
+			Self::TablesIds(ns, db) => SequenceStateKey::Tables(TbIdStateKey {
 				ns: *ns,
 				db: *db,
-				tb: Cow::Borrowed(tb),
 				nid,
-			}
-			.encode_key(),
+			}),
+			Self::IndexIds(ns, db, tb) => SequenceStateKey::Indexes(IndexIdStateKey {
+				ns: *ns,
+				db: *db,
+				tb: Cow::Owned(tb.clone()),
+				nid,
+			}),
 		}
 	}
+}
+
+/// The batch key of whichever family a [`SequenceDomain`] names.
+///
+/// A domain chooses between six key families, and one function cannot return six
+/// different `impl KVKey`. This enum is that return type. It declares no layout
+/// of its own and spells no bytes: every method forwards to the generated key it
+/// wraps. What it buys is that the family stays a type all the way to the
+/// transaction, so the value written under it is `BatchValue` by the compiler's
+/// reckoning rather than by the call site's.
+#[derive(Debug)]
+enum SequenceBatchKey<'a> {
+	User(SeqBatchKey<'a>),
+	TableDocIds(DocIdBatchKey<'a>),
+	Namespaces(NsIdBatchKey),
+	Databases(DbIdBatchKey),
+	Tables(TbIdBatchKey),
+	Indexes(IndexIdBatchKey<'a>),
+}
+
+impl KVKey for SequenceBatchKey<'_> {
+	type Value = BatchValue;
+
+	fn encode_buffer(&self, buffer: &mut Vec<u8>) -> Result<()> {
+		match self {
+			Self::User(k) => k.encode_buffer(buffer),
+			Self::TableDocIds(k) => k.encode_buffer(buffer),
+			Self::Namespaces(k) => k.encode_buffer(buffer),
+			Self::Databases(k) => k.encode_buffer(buffer),
+			Self::Tables(k) => k.encode_buffer(buffer),
+			Self::Indexes(k) => k.encode_buffer(buffer),
+		}
+	}
+
+	fn value_context(&self) {}
+}
+
+/// The per-node state key of whichever family a [`SequenceDomain`] names. See
+/// [`SequenceBatchKey`].
+#[derive(Debug)]
+enum SequenceStateKey<'a> {
+	User(SeqStateKey<'a>),
+	TableDocIds(DocIdStateKey<'a>),
+	Namespaces(NsIdStateKey),
+	Databases(DbIdStateKey),
+	Tables(TbIdStateKey),
+	Indexes(IndexIdStateKey<'a>),
+}
+
+impl KVKey for SequenceStateKey<'_> {
+	type Value = SequenceState;
+
+	fn encode_buffer(&self, buffer: &mut Vec<u8>) -> Result<()> {
+		match self {
+			Self::User(k) => k.encode_buffer(buffer),
+			Self::TableDocIds(k) => k.encode_buffer(buffer),
+			Self::Namespaces(k) => k.encode_buffer(buffer),
+			Self::Databases(k) => k.encode_buffer(buffer),
+			Self::Tables(k) => k.encode_buffer(buffer),
+			Self::Indexes(k) => k.encode_buffer(buffer),
+		}
+	}
+
+	fn value_context(&self) {}
 }
 
 /// Represents a batch allocation of IDs in the key-value store.
@@ -490,7 +571,7 @@ struct Sequence {
 	/// The exclusive upper bound of the current batch allocation
 	to: i64,
 	/// The key used to persist this sequence's state
-	state_key: Key<'static>,
+	state_key: SequenceStateKey<'static>,
 }
 
 impl Sequence {
@@ -515,12 +596,12 @@ impl Sequence {
 		batch: u32,
 		timeout: Option<Duration>,
 	) -> Result<Self> {
-		let state_key = seq.new_state_key(sqs.nid)?;
+		let state_key = seq.new_state_key(sqs.nid);
 		// Create a separate transaction for reading sequence state to avoid conflicts
 		// with the parent transaction in strict serialization mode (e.g., FDB)
 		let tx = sqs.tf.transaction(TransactionType::Read, sqs.clone()).await?;
-		let mut st: SequenceState = if let Some(v) = tx.get(state_key.as_borrowed(), None).await? {
-			revision::from_slice(&v)?
+		let mut st: SequenceState = if let Some(st) = tx.get_key(&state_key, None).await? {
+			st
 		} else {
 			// First boot for this sequence: bump the configured start past any IDs
 			// already issued via the catalog so we never reuse live namespace,
@@ -611,8 +692,7 @@ impl Sequence {
 		let tx = self.tf.transaction(TransactionType::Write, sqs.clone()).await?;
 
 		// Execute operations and ensure transaction is cancelled on error
-		let data = revision::to_vec(&self.st)?;
-		match tx.set(self.state_key.as_borrowed(), &data).await {
+		match tx.set_key(&self.state_key, &self.st).await {
 			Ok(_) => {
 				tx.commit().await?;
 				Ok(v)
@@ -721,18 +801,33 @@ impl Sequence {
 					if next < ba.to {
 						return Ok((next, ba.to));
 					}
-					// Otherwise we can remove this old batch and create a new one
-					tx.del(key.as_slice().into()).await?;
+					// Otherwise we can remove this old batch and create a new one.
+					//
+					// Deleted through the decoded key, which re-encodes to the bytes
+					// it came from — the round trip every declared key upholds. A key
+					// that does not decode has no such guarantee and cannot be
+					// addressed any other way, so it is retired by its bytes: the
+					// alternative is to fail, and every failure here is swallowed and
+					// retried by `find_batch_allocation`, so one unreadable entry
+					// would stall this domain's allocation for as long as the caller
+					// waits.
+					match seq.decode_batch_key(key) {
+						Ok(batch_key) => tx.del_key(&batch_key).await?,
+						Err(e) => {
+							warn!("Retiring an undecodable sequence batch key: {e}");
+							tx.del(key.as_slice().into()).await?
+						}
+					}
 				}
 			}
 			// We compute the new batch
 			let next_to = next_start + batch as i64;
 			// And store it in the KV store
-			let bv = revision::to_vec(&BatchValue {
+			let bv = BatchValue {
 				to: next_to,
 				owner: sqs.nid,
-			})?;
-			let batch_key = seq.new_batch_key(next_start)?;
+			};
+			let batch_key = seq.new_batch_key(next_start);
 			// Claim the batch with a conditional create (put-if-absent) rather
 			// than a blind `set`. Two nodes exhausting the same domain
 			// concurrently observe the same committed state and therefore compute
@@ -746,7 +841,7 @@ impl Sequence {
 			// then retries, re-scans, and claims the next free range.
 			// Conflict-serializing backends (mem/rocksdb/surrealkv) already reject
 			// the second writer either way.
-			tx.put(batch_key, &bv).await?;
+			tx.put_key(&batch_key, &bv).await?;
 			Ok::<(i64, i64), anyhow::Error>((next_start, next_to))
 		}
 		.await;
@@ -780,6 +875,74 @@ mod tests {
 	use crate::TransactionType;
 	use crate::factory::TransactionFactory;
 	use crate::sequences::{Sequence, SequenceDomain, Sequences};
+
+	/// Every domain addresses the route its own key family spells.
+	///
+	/// The dispatch enums exist to keep a domain's choice of family a type rather
+	/// than bytes, which is only worth anything if each variant wraps the key the
+	/// schema declares for that domain. Nothing else checks it: the allocator only
+	/// ever round-trips through itself, so a variant wrapping a neighbour's key
+	/// type would read and write consistently while silently sharing another
+	/// domain's ID space.
+	#[test]
+	fn each_domain_addresses_its_own_route() {
+		use surrealdb_kvs::key::KVKey;
+
+		let ns = NamespaceId(1);
+		let db = DatabaseId(2);
+		let tb = TableName::from("testtb");
+		let nid = Uuid::from_u128(3);
+
+		// `start` and `nid` are the only fields that vary within a family, so the
+		// route is what the leading bytes have to prove.
+		for (domain, batch, state) in [
+			(
+				SequenceDomain::UserName(ns, db, "sq".to_string()),
+				&b"/*\0\0\0\x01*\0\0\0\x02!sqsq\0!ba"[..],
+				&b"/*\0\0\0\x01*\0\0\0\x02!sqsq\0!st"[..],
+			),
+			(
+				SequenceDomain::TableDocIds(ns, db, tb.clone()),
+				&b"/*\0\0\0\x01*\0\0\0\x02*testtb\0!dh"[..],
+				&b"/*\0\0\0\x01*\0\0\0\x02*testtb\0!ds"[..],
+			),
+			(SequenceDomain::NameSpacesIds, &b"/!nh"[..], &b"/!ni"[..]),
+			(SequenceDomain::DatabasesIds(ns), &b"/*\0\0\0\x01!dh"[..], &b"/*\0\0\0\x01!di"[..]),
+			(
+				SequenceDomain::TablesIds(ns, db),
+				&b"/*\0\0\0\x01*\0\0\0\x02!th"[..],
+				&b"/*\0\0\0\x01*\0\0\0\x02!ti"[..],
+			),
+			(
+				SequenceDomain::IndexIds(ns, db, tb),
+				&b"/*\0\0\0\x01*\0\0\0\x02*testtb\0!ih"[..],
+				&b"/*\0\0\0\x01*\0\0\0\x02*testtb\0!is"[..],
+			),
+		] {
+			let encoded = domain.new_batch_key(7).encode_key().unwrap();
+			assert!(
+				encoded.starts_with(batch),
+				"batch key {} does not sit under {}",
+				String::from_utf8_lossy(&encoded),
+				String::from_utf8_lossy(batch)
+			);
+			// The key a scan hands back decodes and re-encodes to the same bytes,
+			// which is what lets the write phase delete through the decoded key.
+			assert_eq!(
+				&*domain.decode_batch_key(&encoded).unwrap().encode_key().unwrap(),
+				&*encoded,
+				"a batch key did not survive the round trip its delete relies on"
+			);
+
+			let encoded = domain.new_state_key(nid).encode_key().unwrap();
+			assert!(
+				encoded.starts_with(state),
+				"state key {} does not sit under {}",
+				String::from_utf8_lossy(&encoded),
+				String::from_utf8_lossy(state)
+			);
+		}
+	}
 
 	/// A transaction source without a `Datastore`.
 	///

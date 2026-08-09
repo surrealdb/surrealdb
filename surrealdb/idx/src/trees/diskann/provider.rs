@@ -363,7 +363,7 @@ impl DiskAnnProvider {
 			context.ikb.new_de_range().map_err(|e| ANNError::log_index_error(e.to_string()))?;
 		let mut cursor = context
 			.tx
-			.open_vals_cursor_raw(rng, surrealdb_kvs::Direction::Forward, 0, None)
+			.open_vals_cursor(rng, surrealdb_kvs::Direction::Forward, 0, None)
 			.await
 			.map_err(|e| ANNError::log_index_error(e.to_string()))?;
 		let cache_misses = !context.tx.writeable();

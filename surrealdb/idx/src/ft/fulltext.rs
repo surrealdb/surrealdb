@@ -36,8 +36,10 @@ use crate::ft::analyzer::tokenizer::Tokens;
 use crate::ft::analyzer::{Analyzer, AnalyzerFunction};
 use crate::ft::highlighter::{HighlightParams, Highlighter, Offseter};
 use crate::ft::{DocLength, MatchesHitsIterator, Score, TermFrequency};
-use crate::key::schema::{DocStatsKey, TermChangeBatchKey, TermChangeKey};
-use crate::key::{KVKey, KVKeyDecode};
+use crate::key::schema::{
+	DocStatsBatchKey, DocStatsDeltaKey, DocStatsKey, TermChangeBatchKey, TermChangeKey,
+};
+use crate::key::{KVKey, KVKeyDecode, KVValue};
 use crate::trees::store::IndexStores;
 use crate::val::{RecordId, Value};
 use crate::{IndexKeyBase, bump_compaction_generation, catalog, read_compaction_generation};
@@ -143,16 +145,50 @@ impl FullTextCompactionPlan {
 }
 
 /// Bounded read-phase snapshot for document count/length (`!dc`) compaction.
+///
+/// The two delta shapes are kept apart because they are two key families with
+/// two value types, and a single list of them could only be a list of bytes.
 struct DocLengthAndCountCompactionPlan {
 	generation: Option<u64>,
 	dlc: DocLengthAndCount,
-	delta_keys: Vec<Vec<u8>>,
+	deltas: DocStatsDeltaKeys,
 	has_more: bool,
+}
+
+/// The document-statistics deltas one read phase saw, kept by family.
+///
+/// `!dc` is the legacy per-document shape and `!dx` the per-transaction one.
+/// Both are drained in the same pass, so an index carrying entries written
+/// either side of the `!dx` change compacts to the same statistic.
+#[derive(Default)]
+struct DocStatsDeltaKeys {
+	legacy: Vec<DocStatsDeltaKey<'static>>,
+	batched: Vec<DocStatsBatchKey<'static>>,
+}
+
+impl DocStatsDeltaKeys {
+	fn is_empty(&self) -> bool {
+		self.legacy.is_empty() && self.batched.is_empty()
+	}
+
+	/// Removes every delta the read phase folded into its total.
+	///
+	/// Only these keys: an entry written after the read is not accounted for in
+	/// the compacted value and must survive to be folded in by a later round.
+	async fn delete(&self, tx: &Transaction) -> Result<()> {
+		for key in &self.legacy {
+			tx.del_key(key).await?;
+		}
+		for key in &self.batched {
+			tx.del_key(key).await?;
+		}
+		Ok(())
+	}
 }
 
 impl DocLengthAndCountCompactionPlan {
 	fn has_logs(&self) -> bool {
-		!self.delta_keys.is_empty()
+		!self.deltas.is_empty()
 	}
 
 	/// Returns true when the `!dc` delta scan stopped before the range ended.
@@ -162,16 +198,22 @@ impl DocLengthAndCountCompactionPlan {
 }
 
 /// Bounded read-phase snapshot for term-document (`!tt`) compaction.
+///
+/// The two delta shapes are kept apart for the same reason as in
+/// [`DocLengthAndCountCompactionPlan`].
 struct TermDocsCompactionPlan {
 	generation: Option<u64>,
 	deltas_by_term: HashMap<String, HashMap<DocId, i64>>,
-	delta_keys: Vec<Vec<u8>>,
+	/// The per-document `!tt` deltas this snapshot saw.
+	tt_keys: Vec<TermChangeKey<'static>>,
+	/// The per-transaction `!tx` deltas this snapshot saw.
+	tx_keys: Vec<TermChangeBatchKey<'static>>,
 	has_more: bool,
 }
 
 impl TermDocsCompactionPlan {
 	fn has_logs(&self) -> bool {
-		!self.delta_keys.is_empty()
+		!self.tt_keys.is_empty() || !self.tx_keys.is_empty()
 	}
 
 	/// Returns true when the `!tt` delta scan stopped before the range ended.
@@ -585,7 +627,8 @@ impl FullTextIndex {
 	) -> Result<TermDocsCompactionPlan> {
 		let generation = read_compaction_generation(tx, &self.ikb.new_tv_key()).await?;
 		let limit = limit.max(1);
-		let mut delta_keys = Vec::new();
+		let mut tt_keys = Vec::new();
+		let mut tx_keys = Vec::new();
 		let mut deltas_by_term: HashMap<String, HashMap<DocId, i64>> = HashMap::new();
 		// Both delta shapes are drained in one pass, so an index carrying entries
 		// written either side of the `!tx` change compacts to the same document
@@ -604,7 +647,7 @@ impl FullTextIndex {
 			} else {
 				*entry -= 1;
 			}
-			delta_keys.push(k);
+			tt_keys.push(tt.into_owned());
 		}
 		// One row beyond the limit, so "is there more" is answered without
 		// materialising the whole backlog the way an unbounded read would.
@@ -623,12 +666,13 @@ impl FullTextIndex {
 			for doc_id in &docs {
 				*by_doc.entry(doc_id).or_default() += step;
 			}
-			delta_keys.push(k);
+			tx_keys.push(tx_key.into_owned());
 		}
 		Ok(TermDocsCompactionPlan {
 			generation,
 			deltas_by_term,
-			delta_keys,
+			tt_keys,
+			tx_keys,
 			has_more: batch.next.is_some() || batched_has_more,
 		})
 	}
@@ -674,8 +718,11 @@ impl FullTextIndex {
 				self.set_term_docs_delta(tx, &term, &deltas).await?;
 			}
 		}
-		for key in plan.delta_keys {
-			tx.del(key.into()).await?;
+		for key in &plan.tt_keys {
+			tx.del_key(key).await?;
+		}
+		for key in &plan.tx_keys {
+			tx.del_key(key).await?;
 		}
 		Ok(())
 	}
@@ -808,7 +855,7 @@ impl FullTextIndex {
 	async fn collect_doc_length_and_count(
 		&self,
 		tx: &Transaction,
-	) -> Result<(DocLengthAndCount, Vec<Vec<u8>>)> {
+	) -> Result<(DocLengthAndCount, DocStatsDeltaKeys)> {
 		collect_doc_length_and_count_for(tx, &self.ikb).await
 	}
 
@@ -818,7 +865,7 @@ impl FullTextIndex {
 		&self,
 		tx: &Transaction,
 		limit: u32,
-	) -> Result<(DocLengthAndCount, Vec<Vec<u8>>, bool)> {
+	) -> Result<(DocLengthAndCount, DocStatsDeltaKeys, bool)> {
 		let dc_prefix = DocStatsKey {
 			ns: self.ikb.ns(),
 			db: self.ikb.db(),
@@ -829,13 +876,16 @@ impl FullTextIndex {
 
 		let limit = limit.max(1);
 		let range = dc_prefix.range()?;
-		let batch = tx.batch_keys_vals_raw(range, limit, None).await?;
-		let mut delta_keys = Vec::with_capacity(batch.result.len());
+		let batch = tx.batch_keys_vals(range, limit, None).await?;
+		let mut deltas = DocStatsDeltaKeys {
+			legacy: Vec::with_capacity(batch.result.len()),
+			batched: Vec::with_capacity(limit as usize),
+		};
 		for (k, v) in batch.result {
-			let st: DocLengthAndCount = revision::from_slice(&v)?;
+			let st = DocLengthAndCount::kv_decode_value(&v, ())?;
 			dlc.doc_count += st.doc_count;
 			dlc.total_docs_length += st.total_docs_length;
-			delta_keys.push(k);
+			deltas.legacy.push(DocStatsDeltaKey::decode_key(&k)?.into_owned());
 		}
 		// Drain the batched deltas in the same pass, so an index carrying entries
 		// written either side of the `!dx` change compacts to the same statistic.
@@ -846,9 +896,9 @@ impl FullTextIndex {
 		for (k, st) in batched {
 			dlc.doc_count += st.doc_count;
 			dlc.total_docs_length += st.total_docs_length;
-			delta_keys.push(k);
+			deltas.batched.push(DocStatsBatchKey::decode_key(&k)?.into_owned());
 		}
-		Ok((dlc, delta_keys, batch.next.is_some() || batched_has_more))
+		Ok((dlc, deltas, batch.next.is_some() || batched_has_more))
 	}
 
 	async fn compute_doc_length_and_count(
@@ -856,13 +906,11 @@ impl FullTextIndex {
 		tx: &Transaction,
 		compact_log: Option<&mut bool>,
 	) -> Result<DocLengthAndCount> {
-		let (dlc, delta_keys) = self.collect_doc_length_and_count(tx).await?;
+		let (dlc, deltas) = self.collect_doc_length_and_count(tx).await?;
 		if let Some(compact_log) = compact_log
-			&& !delta_keys.is_empty()
+			&& !deltas.is_empty()
 		{
-			for key in delta_keys {
-				tx.del(key.into()).await?;
-			}
+			deltas.delete(tx).await?;
 			*compact_log = true;
 		}
 		Ok(dlc)
@@ -883,12 +931,12 @@ impl FullTextIndex {
 		limit: u32,
 	) -> Result<DocLengthAndCountCompactionPlan> {
 		let generation = read_compaction_generation(tx, &self.ikb.new_dv_key()).await?;
-		let (dlc, delta_keys, has_more) =
+		let (dlc, deltas, has_more) =
 			self.collect_doc_length_and_count_compaction(tx, limit).await?;
 		Ok(DocLengthAndCountCompactionPlan {
 			generation,
 			dlc,
-			delta_keys,
+			deltas,
 			has_more,
 		})
 	}
@@ -929,11 +977,8 @@ impl FullTextIndex {
 		tx: &Transaction,
 		plan: DocLengthAndCountCompactionPlan,
 	) -> Result<()> {
-		let key = self.ikb.new_dc_compacted()?;
-		tx.set(key, &revision::to_vec(&plan.dlc)?).await?;
-		for key in plan.delta_keys {
-			tx.del(key.into()).await?;
-		}
+		tx.set_key(&self.ikb.new_dc_compacted(), &plan.dlc).await?;
+		plan.deltas.delete(tx).await?;
 		Ok(())
 	}
 
@@ -1275,7 +1320,7 @@ impl Scorer {
 async fn collect_doc_length_and_count_for(
 	tx: &Transaction,
 	ikb: &IndexKeyBase,
-) -> Result<(DocLengthAndCount, Vec<Vec<u8>>)> {
+) -> Result<(DocLengthAndCount, DocStatsDeltaKeys)> {
 	let mut dlc = DocLengthAndCount::default();
 	let prefix = DocStatsKey {
 		ns: ikb.ns(),
@@ -1285,15 +1330,16 @@ async fn collect_doc_length_and_count_for(
 	};
 	let prefix_len = prefix.encode_key()?.len();
 
-	let mut delta_keys = Vec::new();
+	let mut deltas = DocStatsDeltaKeys::default();
 	for (idx, (k, st)) in tx.getr(prefix.range_subtree()?, None).await?.into_iter().enumerate() {
 		dlc.doc_count += st.doc_count;
 		dlc.total_docs_length += st.total_docs_length;
 
 		// The prefix key can only be the first key. Every other key extends the
-		// prefix, so it must differ in length.
+		// prefix, so it must differ in length, and extends it by exactly the
+		// fields a delta adds — which is what the decode then confirms.
 		if idx != 0 && k.len() != prefix_len {
-			delta_keys.push(k);
+			deltas.legacy.push(DocStatsDeltaKey::decode_key(&k)?.into_owned());
 		}
 	}
 	// The batched deltas an up-to-date server writes, then this transaction's own
@@ -1301,12 +1347,12 @@ async fn collect_doc_length_and_count_for(
 	for (k, st) in tx.getr(ikb.new_dx_range()?, None).await? {
 		dlc.doc_count += st.doc_count;
 		dlc.total_docs_length += st.total_docs_length;
-		delta_keys.push(k);
+		deltas.batched.push(DocStatsBatchKey::decode_key(&k)?.into_owned());
 	}
 	let pending = ikb.pending_dx(tx);
 	dlc.doc_count += pending.doc_count;
 	dlc.total_docs_length += pending.total_docs_length;
-	Ok((dlc, delta_keys))
+	Ok((dlc, deltas))
 }
 
 /// The mean number of indexed tokens per document in a full-text index, or
@@ -1738,7 +1784,7 @@ mod tests {
 		};
 		assert!(plan.has_logs());
 		assert!(plan.has_more());
-		assert_eq!(plan.delta_keys.len(), 2);
+		assert_eq!(plan.deltas.legacy.len() + plan.deltas.batched.len(), 2);
 
 		let tx = test.new_tx(TransactionType::Write).await;
 		assert!(test.fti.apply_doc_length_and_count_compaction(&tx, plan).await.unwrap());
@@ -1823,7 +1869,7 @@ mod tests {
 		};
 		assert!(plan.has_logs());
 		assert!(plan.has_more());
-		assert_eq!(plan.delta_keys.len(), 2);
+		assert_eq!(plan.tt_keys.len() + plan.tx_keys.len(), 2);
 
 		let tx = test.new_tx(TransactionType::Write).await;
 		assert!(test.fti.apply_term_docs_compaction(&tx, plan).await.unwrap());

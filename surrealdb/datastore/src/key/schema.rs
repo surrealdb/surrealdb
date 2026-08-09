@@ -470,10 +470,12 @@ keyspace! {
 						hnsw_record_pending = ["!hr", @, id: Id]
 							=> crate::values::hnsw::HnswRecordPendingUpdate;
 
-						/// Append-keyed HNSW pending updates, read only by range, so
-						/// the subspace is declared without an addressable key. The
-						/// region still takes part in the disjointness check.
-						hnsw_pending = ["!hp"] {}
+						/// Append-keyed HNSW pending updates: one entry per queued
+						/// change, where `!hr` above holds one coalesced entry per
+						/// record. Read and drained, never written, so an index
+						/// holding entries under this layout still empties.
+						hnsw_pending_legacy = ["!hp", @, appending_id: u64]
+							=> crate::values::hnsw::VectorPendingUpdate;
 
 						/// DiskANN graph storage, compiled only where the backend is
 						/// available. Conflicts are reported against every key
@@ -738,10 +740,72 @@ mod tests {
 			of(b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!di\x03id\0")
 		);
 
+		// The append-keyed HNSW pending layout is no longer written, so this is the
+		// one thing that keeps it readable: the bytes come from the encoder that
+		// wrote them, and an index upgraded from before the `!hr` change still has
+		// entries under them waiting to be drained.
+		let pending = HnswPendingLegacyKey::new(
+			NamespaceId(1),
+			DatabaseId(2),
+			Cow::Borrowed(&tb),
+			IndexId(3),
+			7,
+		);
+		assert_eq!(
+			of(&pending.encode_key().unwrap()),
+			of(b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hp\0\0\0\0\0\0\0\x07")
+		);
+
 		let range =
 			EventPrefix::new(NamespaceId(1), DatabaseId(2), Cow::Borrowed(&tb)).range().unwrap();
 		assert_eq!(of(range.start()), of(b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!ev\0"));
 		assert_eq!(of(range.end()), of(b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!ew"));
+	}
+
+	/// Owning a key's borrowed fields does not change the bytes it spells.
+	///
+	/// `into_owned` exists so a key decoded from a scan can outlive the batch that
+	/// lent it the bytes, and callers then delete through it. That is only sound
+	/// if the owned key addresses the same entry, so the equality is the whole
+	/// contract rather than an incidental property.
+	#[test]
+	fn owning_a_key_does_not_move_it() {
+		let tb = TableName::from("testtb");
+		let id = RecordIdKey::String(Strand::new_static("id"));
+
+		// One key per shape a borrowed field can take: a borrowed string, a
+		// borrowed table name, a borrowed record id under the index format, and a
+		// key that borrows nothing beyond its inherited level.
+		let namespace = NamespaceKey::new(Cow::Borrowed("test"));
+		assert_eq!(
+			namespace.encode_key().unwrap(),
+			namespace.clone().into_owned().encode_key().unwrap()
+		);
+
+		let table = TableKey::new(NamespaceId(1), DatabaseId(2), Cow::Borrowed(&tb));
+		assert_eq!(table.encode_key().unwrap(), table.clone().into_owned().encode_key().unwrap());
+
+		let record =
+			RecordKey::new(NamespaceId(1), DatabaseId(2), Cow::Borrowed(&tb), Cow::Borrowed(&id));
+		assert_eq!(record.encode_key().unwrap(), record.clone().into_owned().encode_key().unwrap());
+
+		let count = IndexCountKey::new(
+			NamespaceId(1),
+			DatabaseId(2),
+			Cow::Borrowed(&tb),
+			IndexId(3),
+			Some((Uuid::from_u128(4), Uuid::from_u128(5))),
+			true,
+			9,
+		);
+		assert_eq!(count.encode_key().unwrap(), count.clone().into_owned().encode_key().unwrap());
+
+		// And the owned key really does outlive the bytes it decoded from.
+		let owned = {
+			let bytes = table.encode_key().unwrap();
+			TableKey::decode_key(&bytes).unwrap().into_owned()
+		};
+		assert_eq!(owned.encode_key().unwrap(), table.encode_key().unwrap());
 	}
 
 	/// Byte strings that exist in stored data.
@@ -844,6 +908,7 @@ mod tests {
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!dq\x01\x01\x05\x03\x01\x01\x01\0\x02\x01\0\x03\x01\0\0",
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!dq\x01\x01\x06\x03\x01\x01\x02\x03\0",
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!dq\x01\x01\x07\x03\x01\x01\x02\x03\0",
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hp\0\0\0\0\0\0\0\x07",
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hr\x03testid\0",
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hv\x01\x01\x01\0\x03\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\xF0\x3F\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\x40\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\x08\x40\0",
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hv\x01\x01\x01\x01\x03\x01\0\x01\0\x80\x3F\x01\0\x01\0\x01\0\x40\x01\0\x01\0\x40\x40\0",
@@ -898,7 +963,7 @@ mod tests {
 		// sit between keys, not on one.
 		assert_eq!(
 			(decoded, bounds.len()),
-			(76, 36),
+			(77, 36),
 			"the corpus split moved; entries read as bounds:\n{}",
 			bounds.join("\n")
 		);

@@ -36,10 +36,10 @@ pub use surrealdb_expr::{expr, val};
 pub(crate) mod key {
 	pub(crate) use surrealdb_datastore::key::schema;
 	pub(crate) use surrealdb_kvs::key::{
-		KVKey, KVKeyDecode, KVRange, KVSubspace, RawRange, Resumable, TypedRange,
+		KVKey, KVKeyDecode, KVRange, KVSubspace, Resumable, TypedRange,
 	};
 	pub(crate) use surrealdb_kvs::value::KVValue;
-	pub(crate) use surrealdb_kvs::{Key, KeyRange, impl_kv_value_revisioned};
+	pub(crate) use surrealdb_kvs::{Key, KeyRange};
 }
 
 pub mod config;
@@ -80,7 +80,7 @@ use crate::key::schema::{
 	BuildReservationGenerationPrefix, BuildReservationIxPrefix, BuildReservationKey, BuildStateKey,
 	BuildTicketIxPrefix, BuildTicketKey, DocCountKey, DocLengthKey, DocStatsBatchPrefix,
 	DocStatsKey, DocTermsKey, HnswElementHashedKey, HnswElementKey, HnswGenerationKey,
-	HnswLayerKey, HnswLayerLayerPrefix, HnswNodeKey, HnswNodeLayerPrefix, HnswPendingRoot,
+	HnswLayerKey, HnswLayerLayerPrefix, HnswNodeKey, HnswNodeLayerPrefix, HnswPendingLegacyPrefix,
 	HnswRecordPendingKey, HnswRecordPendingPrefix, HnswStateKey, HnswVectorKey, IdxRoot,
 	IndexAppendKey, IndexAppendPrefix, IndexCompactionKey, IndexPrimaryKey, IndexVersionKey,
 	TermChangeBatchPrefix, TermChangeBatchTermPrefix, TermChangeSetKey, TermChangesKey,
@@ -93,8 +93,8 @@ use crate::key::schema::{
 	DiskannRecordPendingPrefix, DiskannRecordPendingShardKey, DiskannRecordPendingShardShardPrefix,
 	DiskannStateKey,
 };
-use crate::key::{KVKey, Key, RawRange, TypedRange};
-use crate::trees::hnsw::ElementId;
+use crate::key::{KVKey, TypedRange};
+use crate::trees::hnsw::{ElementId, VectorPendingUpdate};
 use crate::trees::vector::SerializedVector;
 use crate::val::{RecordIdKey, TableName};
 
@@ -251,8 +251,8 @@ impl IndexKeyBase {
 	}
 
 	/// Range covering append-keyed HNSW pending updates.
-	pub fn new_hp_range(&self) -> Result<RawRange> {
-		HnswPendingRoot {
+	pub fn new_hp_range(&self) -> Result<TypedRange<VectorPendingUpdate>> {
+		HnswPendingLegacyPrefix {
 			ns: self.0.ns,
 			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
@@ -981,14 +981,13 @@ impl IndexKeyBase {
 		}
 	}
 
-	fn new_dc_compacted(&self) -> Result<Key<'static>> {
+	fn new_dc_compacted(&self) -> DocStatsKey<'_> {
 		DocStatsKey {
 			ns: self.0.ns,
 			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),
 			ix: self.0.ix,
 		}
-		.encode_key()
 	}
 
 	fn new_dx_range(&self) -> Result<TypedRange<DocLengthAndCount>> {

@@ -37,6 +37,19 @@ const HNSW_COMPACTION_MAX_PENDING_KEYS: usize = 1024;
 /// Maximum encoded pending key/value bytes captured by one compaction plan.
 const HNSW_COMPACTION_MAX_PENDING_BYTES: usize = 16 * 1024 * 1024;
 /// Exact pending key/value observed by an HNSW compaction read phase.
+///
+/// Both halves stay as the bytes the scan returned rather than as the key and
+/// value they decode to. The write phase deletes conditionally on the value, and
+/// the condition is a byte comparison against what is stored: a re-encode has to
+/// reproduce those bytes exactly for the delete to fire, and nothing guarantees
+/// it does. A decoded value re-encodes under the current revision, which is not
+/// the revision an older node wrote it under, and the pending layouts are
+/// precisely where entries written by an older node are found.
+///
+/// The cost of getting that wrong is not a failed delete. `del_compare` reports
+/// a mismatch as a lost race, which compaction takes to mean another node got
+/// there first — so a re-encode that differed by a byte would abandon the plan
+/// silently and forever, and the backlog would never drain.
 struct CapturedPendingKey {
 	/// Encoded key to delete if the value still matches.
 	key: Vec<u8>,
@@ -372,7 +385,7 @@ impl HnswIndex {
 		count: &mut usize,
 	) -> Result<()> {
 		let rng = ikb.new_hp_range()?;
-		let mut cursor = tx.open_vals_cursor_raw(rng, Direction::Forward, 0, None).await?;
+		let mut cursor = tx.open_vals_cursor(rng, Direction::Forward, 0, None).await?;
 		loop {
 			let batch = cursor.next_batch(surrealdb_kvs::consts::NORMAL_BATCH_SIZE).await?;
 			if batch.is_empty() {
@@ -410,7 +423,7 @@ impl HnswIndex {
 		count: &mut usize,
 	) -> Result<()> {
 		let rng = ikb.new_hr_range()?;
-		let mut cursor = tx.open_vals_cursor_raw(rng, Direction::Forward, 0, None).await?;
+		let mut cursor = tx.open_vals_cursor(rng, Direction::Forward, 0, None).await?;
 		loop {
 			let batch = cursor.next_batch(surrealdb_kvs::consts::NORMAL_BATCH_SIZE).await?;
 			if batch.is_empty() {
@@ -797,7 +810,7 @@ impl HnswIndex {
 		F: FnMut(PendingOperation),
 	{
 		let rng = self.ikb.new_hp_range()?;
-		let mut cursor = tx.open_vals_cursor_raw(rng, Direction::Forward, 0, None).await?;
+		let mut cursor = tx.open_vals_cursor(rng, Direction::Forward, 0, None).await?;
 		let mut count = 0;
 		loop {
 			let batch = cursor.next_batch(surrealdb_kvs::consts::NORMAL_BATCH_SIZE).await?;
@@ -816,7 +829,7 @@ impl HnswIndex {
 		drop(cursor);
 
 		let rng = self.ikb.new_hr_range()?;
-		let mut cursor = tx.open_vals_cursor_raw(rng, Direction::Forward, 0, None).await?;
+		let mut cursor = tx.open_vals_cursor(rng, Direction::Forward, 0, None).await?;
 		loop {
 			let batch = cursor.next_batch(surrealdb_kvs::consts::NORMAL_BATCH_SIZE).await?;
 			if batch.is_empty() {

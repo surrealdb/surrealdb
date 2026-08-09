@@ -1933,7 +1933,13 @@ impl Transaction {
 	// Raw bytes functions
 	// --------------------------------------------------
 
-	/// Fetch a key from the datastore, without decoding.
+	/// Fetch a key from the datastore, without decoding its value.
+	///
+	/// The key is still typed; only the value comes back as bytes. That is what a
+	/// caller wants when the bytes themselves are the point — a value whose decode
+	/// would splice in data from the key that this caller must not have, or one
+	/// that has to be compared byte for byte against what is stored. Everything
+	/// else should use [`Self::get_key`] and let the key name the value's type.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn get_key_raw<K>(&self, key: &K, version: Option<u64>) -> Result<Option<Val>>
 	where
@@ -2116,6 +2122,23 @@ impl Transaction {
 	/// prefix of a graph traversal). Each [`ScanCursorKeys::next_batch`]
 	/// call advances the same iterator instead of re-seeking from scratch.
 	/// `skip` is applied once on the first batch.
+	///
+	/// The keys come back as bytes because a key *is* bytes until it is decoded;
+	/// what the typed range guarantees is which key type they all are, so the
+	/// caller's `decode_key` cannot be the wrong one.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn open_keys_cursor<'a, V>(
+		&'a self,
+		rng: TypedRange<V>,
+		dir: Direction,
+		skip: u32,
+		version: Option<u64>,
+	) -> Result<MeteredKeysCursor<'a>> {
+		self.open_keys_cursor_raw(rng, dir, skip, version).await
+	}
+
+	/// Open a keys-only scan cursor over a region whose contents are of more than
+	/// one type. See [`Self::open_keys_cursor`].
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn open_keys_cursor_raw<'a>(
 		&'a self,
@@ -2131,8 +2154,25 @@ impl Transaction {
 		})
 	}
 
-	/// Open a stateful key+value scan cursor over a raw-byte range. See
+	/// Open a stateful key+value scan cursor over a typed range. See
 	/// [`Self::open_keys_cursor`].
+	///
+	/// Both halves are lent as bytes. The typed range fixes which key type and
+	/// which value type the region holds, so a caller that defers the decode past
+	/// a filter still knows what to decode each surviving row as.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn open_vals_cursor<'a, V>(
+		&'a self,
+		rng: TypedRange<V>,
+		dir: Direction,
+		skip: u32,
+		version: Option<u64>,
+	) -> Result<MeteredValsCursor<'a>> {
+		self.open_vals_cursor_raw(rng, dir, skip, version).await
+	}
+
+	/// Open a key+value scan cursor over a region whose contents are of more than
+	/// one type. See [`Self::open_keys_cursor`].
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn open_vals_cursor_raw<'a>(
 		&'a self,
@@ -2178,10 +2218,24 @@ impl Transaction {
 		Ok(self.tr.batch_keys(rng.into_key_range(), batch, version).await?)
 	}
 
-	/// Retrieve a batched scan over a specific range of keys in the datastore.
+	/// Retrieve a batched scan of keys and values over a specific range of keys in
+	/// the datastore.
 	///
 	/// This function fetches the key-value pairs in batches, with multiple
-	/// requests to the underlying datastore.
+	/// requests to the underlying datastore. Both halves are returned as bytes;
+	/// the typed range is what says which key type and which value type they are.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn batch_keys_vals<V>(
+		&self,
+		rng: TypedRange<V>,
+		batch: u32,
+		version: Option<u64>,
+	) -> Result<Batch<(Vec<u8>, Val)>> {
+		self.batch_keys_vals_raw(rng, batch, version).await
+	}
+
+	/// Retrieve a batched scan of keys and values over a region whose contents are
+	/// of more than one type. See [`Self::batch_keys_vals`].
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn batch_keys_vals_raw(
 		&self,

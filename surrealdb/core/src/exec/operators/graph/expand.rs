@@ -510,7 +510,7 @@ async fn expand_row(
 
 	for range in ranges {
 		let mut cursor = txn
-			.open_keys_cursor_raw(range, Direction::Forward, 0, version)
+			.open_keys_cursor(range, Direction::Forward, 0, version)
 			.await
 			.context("Failed to open graph cursor")?;
 		loop {

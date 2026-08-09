@@ -7240,7 +7240,6 @@ dependencies = [
  "quick_cache",
  "rand 0.9.4",
  "reblessive",
- "revision",
  "roaring",
  "rstest",
  "rust-stemmers",

@@ -612,7 +612,7 @@ where
 		// for each node and take precedence over the Hl data loaded above.
 		let range = self.ikb.new_hn_layer_range(self.level)?;
 		let mut count = 0;
-		let mut cursor = tx.open_vals_cursor_raw(range, Direction::Forward, 0, None).await?;
+		let mut cursor = tx.open_vals_cursor(range, Direction::Forward, 0, None).await?;
 		loop {
 			let batch = cursor.next_batch(surrealdb_kvs::consts::NORMAL_BATCH_SIZE).await?;
 			if batch.is_empty() {

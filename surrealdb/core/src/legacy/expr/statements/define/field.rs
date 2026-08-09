@@ -738,7 +738,7 @@ pub(crate) async fn purge_dropped_reference_keys(
 		}
 		.range()?;
 		let mut orphaned: Vec<Vec<u8>> = Vec::new();
-		let mut cursor = txn.open_keys_cursor_raw(range, Direction::Forward, 0, None).await?;
+		let mut cursor = txn.open_keys_cursor(range, Direction::Forward, 0, None).await?;
 		loop {
 			let batch = cursor.next_batch(NORMAL_BATCH_SIZE).await?;
 			if batch.is_empty() {

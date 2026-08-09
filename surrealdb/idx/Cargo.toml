@@ -36,7 +36,6 @@ parking_lot.workspace = true
 quick_cache.workspace = true
 rand.workspace = true
 reblessive = { workspace = true, features = ["tree"] }
-revision = { workspace = true }
 roaring = { workspace = true, features = ["serde"] }
 rust-stemmers.workspace = true
 storekey.workspace = true

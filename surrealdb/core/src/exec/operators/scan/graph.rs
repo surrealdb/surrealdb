@@ -335,7 +335,7 @@ impl ExecOperator for GraphEdgeScan {
 								let mut last_processed_key: Option<Vec<u8>> = None;
 								{
 									let mut cursor = txn
-										.open_keys_cursor_raw(
+										.open_keys_cursor(
 											chunk.clone(),
 											Direction::Forward,
 											0,
@@ -522,12 +522,7 @@ impl ExecOperator for GraphEdgeScan {
 										.await?;
 										for r in inner_ranges {
 											let mut inner_cursor = txn
-												.open_keys_cursor_raw(
-													r,
-													Direction::Forward,
-													0,
-													version,
-												)
+												.open_keys_cursor(r, Direction::Forward, 0, version)
 												.await
 												.context(
 													"Failed to open legacy-fallback graph cursor",

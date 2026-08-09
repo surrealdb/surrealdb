@@ -198,7 +198,8 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}*{db}*{tb}+{ix}!hn{layer}                                                                   HnswNodeLayerPrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!hr{id}                                                                     HnswRecordPendingKey ->  crate::values::hnsw::HnswRecordPendingUpdate
 /*{ns}*{db}*{tb}+{ix}!hr                                                                      HnswRecordPendingPrefix ->  (range)
-/*{ns}*{db}*{tb}+{ix}!hp                                                                              HnswPendingRoot ->  (subtree)
+/*{ns}*{db}*{tb}+{ix}!hp{appending_id}                                                           HnswPendingLegacyKey ->  crate::values::hnsw::VectorPendingUpdate
+/*{ns}*{db}*{tb}+{ix}!hp                                                                      HnswPendingLegacyPrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!ds                                                                              DiskannStateKey ->  crate::values::diskann::DiskAnnState
 /*{ns}*{db}*{tb}+{ix}!dg                                                                         DiskannGenerationKey ->  u64
 /*{ns}*{db}*{tb}+{ix}!de{element_id}                                                                DiskannElementKey ->  crate::values::diskann::DiskAnnElement

@@ -365,7 +365,7 @@ pub(crate) async fn sum_index_count_deltas(
 	.range()?;
 
 	let mut cursor = txn
-		.open_keys_cursor_raw(range, crate::kvs::Direction::Forward, 0, None)
+		.open_keys_cursor(range, crate::kvs::Direction::Forward, 0, None)
 		.await
 		.context("Failed to open index-count cursor")?;
 	let mut count: i64 = 0;

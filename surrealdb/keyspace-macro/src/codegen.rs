@@ -133,6 +133,7 @@ fn type_def(model: &Model, def: &TypeDef) -> TokenStream {
 	let encode = encode_impl(def);
 	let decode = decode_impl(def);
 	let ctor = constructor(def);
+	let into_owned = into_owned(def);
 	let key_impls = key_impls(def);
 	let range_impls = range_impls(model, def);
 	let extension_bounds = extension_bounds(model, def);
@@ -142,6 +143,7 @@ fn type_def(model: &Model, def: &TypeDef) -> TokenStream {
 		#(#cfgs)* #encode
 		#(#cfgs)* #decode
 		#(#cfgs)* #ctor
+		#(#cfgs)* #into_owned
 		#key_impls
 		#range_impls
 		#extension_bounds
@@ -419,6 +421,44 @@ fn constructor(def: &TypeDef) -> TokenStream {
 			#[allow(clippy::too_many_arguments)]
 			pub fn new(#(#params),*) -> Self {
 				Self { #(#names,)* }
+			}
+		}
+	}
+}
+
+/// Lifts a key decoded from borrowed bytes into one that owns them.
+///
+/// A key read from a scan borrows the bytes it was decoded from, so it cannot
+/// outlive the batch that lent them. Code that reads a region and then acts on
+/// what it found — a compactor collecting the deltas it will delete, say — needs
+/// the key to survive that far, and without this the only thing that does is the
+/// undecoded bytes, which is the typing the schema exists to supply.
+///
+/// Emitted only for types that borrow; for the rest the key already owns
+/// everything and `'static` is the only lifetime it has.
+fn into_owned(def: &TypeDef) -> TokenStream {
+	if !def.lifetime {
+		return TokenStream::new();
+	}
+	let name = &def.name;
+	let fields = def.fields.iter().map(|f| {
+		let fname = &f.name;
+		// Every borrowed field type resolves through a `Cow`, so the owned form is
+		// the same `Cow` holding its own copy.
+		if f.borrowed {
+			quote!(#fname: ::std::borrow::Cow::Owned(self.#fname.into_owned()))
+		} else {
+			quote!(#fname: self.#fname)
+		}
+	});
+	let doc =
+		format!(" The same `{}`, owning every field it borrowed from the key bytes.", def.name);
+
+	quote! {
+		impl #name<'_> {
+			#[doc = #doc]
+			pub fn into_owned(self) -> #name<'static> {
+				#name { #(#fields,)* }
 			}
 		}
 	}

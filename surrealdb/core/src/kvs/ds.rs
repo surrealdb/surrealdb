@@ -1686,7 +1686,7 @@ impl Datastore {
 					// Fetch the next batch of keys and values
 					let res = catch!(
 						txn,
-						txn.batch_keys_vals_raw(rng.clone(), NORMAL_BATCH_SIZE, None).await
+						txn.batch_keys_vals(rng.clone(), NORMAL_BATCH_SIZE, None).await
 					);
 					// A full page carries a continuation: resume the range after
 					// the last key this page returned.
@@ -2038,10 +2038,8 @@ impl Datastore {
 			// Fetch the next batch of keys and values under a read transaction.
 			let batch = {
 				let txn = self.transaction(Read).await?;
-				let res = catch!(
-					txn,
-					txn.batch_keys_vals_raw(rng.clone(), NORMAL_BATCH_SIZE, None).await
-				);
+				let res =
+					catch!(txn, txn.batch_keys_vals(rng.clone(), NORMAL_BATCH_SIZE, None).await);
 				catch!(txn, txn.cancel().await);
 				res
 			};
@@ -2165,8 +2163,7 @@ impl Datastore {
 					while let Some(rng) = next {
 						// Fetch the next batch of keys and values
 						let max = NORMAL_BATCH_SIZE;
-						let res =
-							catch!(txn, txn.batch_keys_vals_raw(rng.clone(), max, None).await);
+						let res = catch!(txn, txn.batch_keys_vals(rng.clone(), max, None).await);
 						// A full page carries a continuation: resume the range
 						// after the last key this page returned.
 						next = match (&res.next, res.result.last()) {
@@ -2656,6 +2653,11 @@ impl Datastore {
 					let _ = txn.cancel().await;
 					return Err(e);
 				}
+				// Deleted as bytes rather than through the decoded key, because
+				// the batch deliberately includes entries that do not decode. An
+				// undecodable entry names no index, so it can never be compacted
+				// and a typed delete could never address it; leaving it would
+				// park it at the head of the queue forever.
 				for k in &keys {
 					if let Err(e) = txn.del(Key::from(k)).await {
 						warn!(target: TARGET, "Failed to delete compaction queue entry: {e}");
@@ -2861,6 +2863,11 @@ impl Datastore {
 						}
 					}
 				}
+				// As with the compaction queue above: `done` can hold an entry
+				// that did not decode, which names nothing to reclaim and so is
+				// finished by definition. Only a delete by bytes retires it —
+				// which is also why the stamp above is conditional on the decode
+				// and this is not.
 				for k in &done {
 					if let Err(e) = txn.del(Key::from(k)).await {
 						warn!(target: TARGET, "Failed to delete reclaim queue entry: {e}");
