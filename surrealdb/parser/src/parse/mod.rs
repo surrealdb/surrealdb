@@ -303,7 +303,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		stack: &mut Stack,
 		ast: &mut Ast,
 		config: Config,
-	) -> Result<Option<NodeId<P>>, TypedError<Diagnostic<'static>>> {
+	) -> Result<Option<(P, u32)>, TypedError<Diagnostic<'static>>> {
 		let lex = BaseTokenKind::lexer(source);
 		let lex = PeekableLexer::new(lex);
 
@@ -333,7 +333,12 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		loop {
 			if let Some(x) = runner.step() {
 				match x {
-					Ok(x) => return Ok(Some(x)),
+					Ok(x) => {
+						std::mem::drop(runner);
+
+						let eaten = parser.last_span.end;
+						return Ok(Some((x, eaten)));
+					}
 					Err(e) => {
 						if e.is_missing_data() {
 							return Ok(None);
@@ -401,6 +406,16 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			Ok(x) => Ok(Some(x)),
 			Err(e) => {
 				if e.is_speculative() && !self.state.contains(ParserState::SPECULATING) {
+					// If we hit a speculating error but we also peeked until the lexer was empty
+					// we might have made a decision based on the absence of more data.
+					// So we must see if more data is available before rejecting the speculating
+					// branch.
+					if self.settings.contains(ParserSettings::PARTIAL)
+						&& self.lex.lexer().remainder().is_empty()
+					{
+						return Err(ParseError::missing_data());
+					}
+
 					self.lex = backup;
 					Ok(None)
 				} else {
@@ -424,6 +439,15 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			Ok(x) => Ok(Some(x)),
 			Err(e) => {
 				if e.is_speculative() && !self.state.contains(ParserState::SPECULATING) {
+					// If we hit a speculating error but we also peeked until the lexer was empty
+					// we might have made a decision based on the absence of more data.
+					// So we must see if more data is available before rejecting the speculating
+					// branch.
+					if self.settings.contains(ParserSettings::PARTIAL)
+						&& self.lex.lexer().remainder().is_empty()
+					{
+						return Err(ParseError::missing_data());
+					}
 					self.lex = backup;
 					Ok(None)
 				} else {
@@ -677,15 +701,9 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	/// and the token if it is.
 	pub fn expect(&mut self, kind: BaseTokenKind) -> ParseResult<Token> {
 		let Some(token) = self.peek()? else {
-			if self.state.contains(ParserState::SPECULATING) {
-				return Err(ParseError::speculate());
-			}
 			return Err(self.unexpected(kind.description()));
 		};
 		if token.token != kind {
-			if self.state.contains(ParserState::SPECULATING) {
-				return Err(ParseError::speculate());
-			}
 			return Err(self.unexpected(kind.description()));
 		}
 		self.lex.pop_peek();
@@ -701,11 +719,14 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			Err(e) => e,
 			Ok(Some(token)) => self.unexpected_token(expected, token),
 			Ok(None) => {
-				if self.state.contains(ParserState::SPECULATING) {
-					return ParseError::speculate();
-				}
 				let span = self.peek_span();
-				self.error(format!("Unexpected end of query, expected {}", expected), span)
+				self.with_error(|this| {
+					basic_diagnostic(
+						this,
+						span,
+						format!("Unexpected end of query, expected {}", expected),
+					)
+				})
 			}
 		}
 	}
@@ -714,13 +735,12 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	/// Expects a string specifying what was expected at this point.
 	#[cold]
 	pub fn unexpected_token(&mut self, expected: &str, token: Token) -> ParseError {
-		if self.state.contains(ParserState::SPECULATING) {
-			return ParseError::speculate();
-		}
-		self.error(
-			format!("Unexpected token `{}`, expected {}", self.slice(token.span), expected),
-			token.span,
-		)
+		self.with_error(|p| {
+			Level::Error
+				.title(format!("Unexpected token `{}`, expected {}", p.slice(token.span), expected))
+				.snippet(p.snippet().annotate(AnnotationKind::Primary.span(token.span)))
+				.to_diagnostic()
+		})
 	}
 
 	/// Create an unexpected error but with a given label appied to the annotation.
@@ -734,19 +754,15 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			Err(e) => return e,
 		};
 
-		if self.state.contains(ParserState::SPECULATING) {
-			return ParseError::speculate();
-		}
-
-		let message = match peek {
-			Some(token) => {
-				format!("Unexpected token `{}`, expected {}", self.slice(token.span), expected)
-			}
-			None => format!("Unexpected token end of query, expected {}", expected),
-		};
-
 		let span = self.peek_span();
 		self.with_error(|this| {
+			let message = match peek {
+				Some(token) => {
+					format!("Unexpected token `{}`, expected {}", this.slice(token.span), expected)
+				}
+				None => format!("Unexpected token end of query, expected {}", expected),
+			};
+
 			Level::Error
 				.title(message)
 				.snippet(
@@ -825,6 +841,10 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	{
 		if self.state.contains(ParserState::SPECULATING) {
 			ParseError::speculate()
+		} else if self.settings.contains(ParserSettings::PARTIAL)
+			&& self.lex.lexer().remainder().is_empty()
+		{
+			ParseError::missing_data()
 		} else {
 			ParseError::diagnostic(cb(self).to_owned())
 		}
@@ -836,12 +856,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	where
 		Cow<'source, str>: From<T>,
 	{
-		self.with_error(|this| {
-			Level::Error
-				.title(msg)
-				.snippet(this.snippet().annotate(AnnotationKind::Primary.span(span)))
-				.to_diagnostic()
-		})
+		self.with_error(|this| basic_diagnostic(this, span, msg))
 	}
 
 	/// Creates a parsing error for a lexing error.
@@ -853,18 +868,12 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 					return ParseError::missing_data();
 				}
 				self.with_error(|this| {
-					Level::Error
-						.title("Unexpected end of query while lexing a token")
-						.snippet(this.snippet().annotate(AnnotationKind::Primary.span(span)))
-						.to_diagnostic()
+					basic_diagnostic(this, span, "Unexpected end of query while lexing a token")
 				})
 			}
-			LexError::InvalidToken(span) => self.with_error(|this| {
-				Level::Error
-					.title("Invalid token")
-					.snippet(this.snippet().annotate(AnnotationKind::Primary.span(span)))
-					.to_diagnostic()
-			}),
+			LexError::InvalidToken(span) => {
+				self.with_error(|this| basic_diagnostic(this, span, "Invalid token"))
+			}
 		}
 	}
 
@@ -960,4 +969,14 @@ impl<'source, 'ast> DerefMut for Parser<'source, 'ast> {
 	fn deref_mut(&mut self) -> &mut Ast {
 		self.ast
 	}
+}
+
+fn basic_diagnostic<'s, M>(parser: &Parser<'s, '_>, span: Span, msg: M) -> Diagnostic<'s>
+where
+	Cow<'s, str>: From<M>,
+{
+	Level::Error
+		.title(msg)
+		.snippet(parser.snippet().annotate(AnnotationKind::Primary.span(span)))
+		.to_diagnostic()
 }

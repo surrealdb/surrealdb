@@ -7,7 +7,7 @@ Query
                 BinaryExpr
                     .left: Expr::Integer
                         +1
-                    .op: Inside
+                    .op: BinaryOperator::Inside
                     .right: Expr::Object
                         Object
                             .entries: Some

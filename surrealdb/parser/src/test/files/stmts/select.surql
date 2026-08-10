@@ -174,7 +174,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -211,7 +211,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: Some
@@ -258,7 +258,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -306,7 +306,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -364,7 +364,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -424,7 +424,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -484,7 +484,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -546,7 +546,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -608,7 +608,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -672,7 +672,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -738,7 +738,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -804,7 +804,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -871,7 +871,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -938,7 +938,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -1020,7 +1020,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -1098,7 +1098,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None
@@ -1174,7 +1174,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +2
                     .split: None

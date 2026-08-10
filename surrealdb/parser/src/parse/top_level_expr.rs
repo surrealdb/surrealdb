@@ -68,18 +68,36 @@ impl Parse for ast::Query {
 
 		let mut exprs = None;
 		let mut cur: Option<NodeListId<ast::TopLevelExpr>> = None;
-		while let Some(next) = parser.peek()? {
-			if let Some(cur) = cur
-				&& parser.eat(T![;])?.is_none()
+
+		loop {
+			// Handle eof before trying to eat so we do not trigger
+			// the peek missing_data error when doing a partial parse.
+
+			// eat all the empty statements.
+			while !parser.eof() && parser.eat(T![;])?.is_some() {}
+
+			if parser.eof() {
+				break;
+			}
+
+			let expr = parser.parse().await?;
+			parser.push_list(expr, &mut exprs, &mut cur);
+
+			if parser.eat(T![;])?.is_none()
+				&& let Some(next) = parser.peek()?
 			{
+				// Missing `;` error.
 				return Err(parser.with_error(|parser| {
-					let last_stmt = parser[cur].cur;
-					let last_stmt_span = last_stmt.ast_span(parser);
+					let Some(cur) = cur else {
+						unreachable!()
+					};
+					let cur = parser[cur].cur;
+					let last_stmt_span = cur.ast_span(parser);
 					let last_stmt_end = Span {
 						start: last_stmt_span.end,
 						end: last_stmt_span.end,
 					};
-					let last_stmt_name = name_previous_statement(last_stmt, parser);
+					let last_stmt_name = name_previous_statement(cur, parser);
 
 					Level::Error
 						.title(format!(
@@ -108,16 +126,6 @@ impl Parse for ast::Query {
 						.to_diagnostic()
 				}));
 			}
-
-			// eat all the empty statements.
-			while parser.eat(T![;])?.is_some() {}
-
-			if parser.eof() {
-				break;
-			}
-
-			let expr = parser.parse().await?;
-			parser.push_list(expr, &mut exprs, &mut cur);
 		}
 
 		let span = parser.span_since(span);

@@ -1948,106 +1948,110 @@ impl_vis_type! {
 	}
 }
 
-#[derive(Debug)]
-pub enum MatchesOperator {
-	And,
-	Or,
+impl_vis_type! {
+	#[derive(Debug)]
+	pub enum MatchesOperator {
+		And,
+		Or,
+	}
 }
 
-#[derive(Debug)]
-pub enum BinaryOperator {
-	/// `-`
-	Subtract,
-	/// `+`
-	Add,
-	/// `*`, `×`
-	Multiply,
-	/// `/`
-	Divide,
-	/// `%`
-	Remainder,
-	/// `**`
-	Power,
-	/// `=`
-	Equal,
-	/// `==`
-	ExactEqual,
-	/// `!=`
-	NotEqual,
-	/// `*=`
-	AllEqual,
-	/// `?=`
-	AnyEqual,
+impl_vis_type! {
+	#[derive(Debug)]
+	pub enum BinaryOperator {
+		/// `-`
+		Subtract,
+		/// `+`
+		Add,
+		/// `*`, `×`
+		Multiply,
+		/// `/`
+		Divide,
+		/// `%`
+		Remainder,
+		/// `**`
+		Power,
+		/// `=`
+		Equal,
+		/// `==`
+		ExactEqual,
+		/// `!=`
+		NotEqual,
+		/// `*=`
+		AllEqual,
+		/// `?=`
+		AnyEqual,
 
-	/// `||`, `OR`
-	Or,
-	/// `&&`, `AND`
-	And,
-	/// `??`
-	NullCoalescing,
-	/// `?:`
-	TenaryCondition,
+		/// `||`, `OR`
+		Or,
+		/// `&&`, `AND`
+		And,
+		/// `??`
+		NullCoalescing,
+		/// `?:`
+		TenaryCondition,
 
-	/// `<`
-	LessThan,
-	/// `<=`
-	LessThanEqual,
-	/// `>`
-	GreaterThan,
-	/// `>=`
-	GreaterThanEqual,
+		/// `<`
+		LessThan,
+		/// `<=`
+		LessThanEqual,
+		/// `>`
+		GreaterThan,
+		/// `>=`
+		GreaterThanEqual,
 
-	/// `∋`
-	Contain,
-	/// `∌`
-	NotContain,
-	/// `⊇`
-	ContainAll,
-	/// `⊃`
-	ContainAny,
-	/// `⊅`
-	ContainNone,
-	/// `∈`
-	Inside,
-	/// `∉`
-	NotInside,
-	/// `⊆`
-	AllInside,
-	/// `⊂`
-	AnyInside,
-	/// `⊄`
-	NoneInside,
+		/// `∋`
+		Contain,
+		/// `∌`
+		NotContain,
+		/// `⊇`
+		ContainAll,
+		/// `⊃`
+		ContainAny,
+		/// `⊅`
+		ContainNone,
+		/// `∈`
+		Inside,
+		/// `∉`
+		NotInside,
+		/// `⊆`
+		AllInside,
+		/// `⊂`
+		AnyInside,
+		/// `⊄`
+		NoneInside,
 
-	/// `OUTSIDE`
-	Outside,
-	/// `INTERSECTS`
-	Intersects,
+		/// `OUTSIDE`
+		Outside,
+		/// `INTERSECTS`
+		Intersects,
 
-	/// `..`
-	Range,
-	/// `..=`
-	RangeInclusive,
-	/// `>..`
-	RangeSkip,
-	/// `>..=`
-	RangeSkipInclusive,
+		/// `..`
+		Range,
+		/// `..=`
+		RangeInclusive,
+		/// `>..`
+		RangeSkip,
+		/// `>..=`
+		RangeSkipInclusive,
 
-	// `@@`
-	Matches {
-		reference: Option<NodeId<Integer>>,
-		operator: Option<MatchesOperator>,
-	},
-	KNearestNeighbour {
-		k: NodeId<Integer>,
-		distance: Distance,
-	},
-	KTree {
-		k: NodeId<Integer>,
-	},
-	KApproximate {
-		k: NodeId<Integer>,
-		ef: NodeId<Integer>,
-	},
+		// `@@`
+		Matches {
+			reference: Option<NodeId<Integer>>,
+			operator: Option<MatchesOperator>,
+		},
+		KNearestNeighbour {
+			k: NodeId<Integer>,
+			distance: Distance,
+		},
+		KTree {
+			k: NodeId<Integer>,
+		},
+		KApproximate {
+			k: NodeId<Integer>,
+			ef: NodeId<Integer>,
+		},
+	}
 }
 
 ast_type! {

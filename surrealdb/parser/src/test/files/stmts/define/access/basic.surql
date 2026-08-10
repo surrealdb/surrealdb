@@ -96,7 +96,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: Add
+                            .op: BinaryOperator::Add
                             .right: Expr::Integer
                                 +1
                     .ty: None
@@ -146,7 +146,7 @@ Query
                                     BinaryExpr
                                         .left: Expr::Integer
                                             +1
-                                        .op: Add
+                                        .op: BinaryOperator::Add
                                         .right: Expr::Integer
                                             +1
                             .issue: Some
@@ -158,7 +158,7 @@ Query
                                     BinaryExpr
                                         .left: Expr::Integer
                                             +1
-                                        .op: Add
+                                        .op: BinaryOperator::Add
                                         .right: Expr::Integer
                                             +2
         -TopLevelExpr::Expr
@@ -184,7 +184,7 @@ Query
                                     BinaryExpr
                                         .left: Expr::Integer
                                             +1
-                                        .op: Add
+                                        .op: BinaryOperator::Add
                                         .right: Expr::Integer
                                             +1
                             .issue: None
@@ -211,7 +211,7 @@ Query
                                 BinaryExpr
                                     .left: Expr::Integer
                                         +1
-                                    .op: Add
+                                    .op: BinaryOperator::Add
                                     .right: Expr::Integer
                                         +2
                             .signin: Some
@@ -219,7 +219,7 @@ Query
                                 BinaryExpr
                                     .left: Expr::Integer
                                         +1
-                                    .op: Add
+                                    .op: BinaryOperator::Add
                                     .right: Expr::Integer
                                         +1
                             .jwt: Some
@@ -229,7 +229,7 @@ Query
                                         BinaryExpr
                                             .left: Expr::Integer
                                                 +1
-                                            .op: Add
+                                            .op: BinaryOperator::Add
                                             .right: Expr::Integer
                                                 +3
                                 .issue: None

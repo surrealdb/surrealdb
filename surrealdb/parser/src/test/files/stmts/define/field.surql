@@ -181,7 +181,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +1
                     .computed: None
@@ -212,7 +212,7 @@ Query
                         BinaryExpr
                             .left: Expr::Integer
                                 +1
-                            .op: ExactEqual
+                            .op: BinaryOperator::ExactEqual
                             .right: Expr::Integer
                                 +1
                     .computed: Some
@@ -451,7 +451,7 @@ Query
                             BinaryExpr
                                 .left: Expr::Integer
                                     +1
-                                .op: Subtract
+                                .op: BinaryOperator::Subtract
                                 .right: Expr::Integer
                                     +2
 */

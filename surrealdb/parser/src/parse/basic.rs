@@ -5,9 +5,10 @@ use ast::{NodeId, PathSegment};
 use common::source_error::{AnnotationKind, Level};
 use common::span::Span;
 use rust_decimal::Decimal;
-use token::{BaseTokenKind, T};
+use token::{BaseTokenKind, T, Token};
 
 use super::{ParseResult, ParseSync, Parser};
+use crate::parse::{ParseError, ParserSettings};
 
 impl ParseSync for ast::Ident {
 	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
@@ -61,7 +62,32 @@ impl ParseSync for f64 {
 			ast::Sign::Plus
 		};
 
-		let token = parser.expect(BaseTokenKind::Float)?;
+		// Some more complicated handling of expecting a float here because we
+		// need to handle the case here we require a float but we are doing a partial parse
+		// and the cut-off is right after the dot, i.e. `1.`.
+		let expect = BaseTokenKind::Float.description();
+		let token = match parser.peek_expect(expect)? {
+			token @ Token {
+				token: BaseTokenKind::Float,
+				..
+			} => {
+				let _ = parser.next();
+				token
+			}
+			Token {
+				token: BaseTokenKind::Int,
+				..
+			} if parser.settings.contains(ParserSettings::PARTIAL) => {
+				if let Some(BaseTokenKind::Int) = parser.peek()?.map(|x| x.token)
+					&& let Some(T![.]) = parser.peek_joined1()?.map(|x| x.token)
+				{
+					return Err(ParseError::missing_data());
+				}
+				return Err(parser.unexpected(expect));
+			}
+			_ => return Err(parser.unexpected(expect)),
+		};
+
 		let slice = parser.slice(token.span);
 		let slice = ununderscore_slice(slice, &mut parser.unescape_buffer);
 		let float: f64 =

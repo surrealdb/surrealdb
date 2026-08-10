@@ -24,7 +24,7 @@ Query
                                     .start: Ident
                                         .text: "a"
                                     .parts: None
-                            .op: Add
+                            .op: BinaryOperator::Add
                             .right: Expr::Integer
                                 +2
 */

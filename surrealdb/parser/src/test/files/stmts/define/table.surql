@@ -380,7 +380,7 @@ Query
                                 BinaryExpr
                                     .left: Expr::Integer
                                         +1
-                                    .op: ExactEqual
+                                    .op: BinaryOperator::ExactEqual
                                     .right: Expr::Integer
                                         +1
                         .select: Some

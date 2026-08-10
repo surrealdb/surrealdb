@@ -11,9 +11,7 @@ use super::AstFormatter;
 use crate::mac::impl_vis_debug;
 use crate::types::{Ast, NodeLibrary};
 use crate::vis::AstVis;
-use crate::{
-	AlterKind, Base, BinaryOperator, DateTime, Integer, NodeId, NodeListId, Sign, Spanned,
-};
+use crate::{AlterKind, Base, DateTime, Integer, NodeId, NodeListId, Sign, Spanned};
 
 impl<N, L> AstVis<L> for AlterKind<N>
 where
@@ -156,7 +154,6 @@ where
 	}
 }
 
-impl_vis_debug!(BinaryOperator);
 impl_vis_debug!(Base);
 
 impl_vis_debug!(Decimal);

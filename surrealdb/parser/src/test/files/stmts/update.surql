@@ -185,7 +185,7 @@ Query
                                     .start: Ident
                                         .text: "foo"
                                     .parts: None
-                            .op: Equal
+                            .op: BinaryOperator::Equal
                             .right: Expr::Path
                                 Path
                                     .start: Ident
@@ -234,7 +234,7 @@ Query
                                     .start: Ident
                                         .text: "foo"
                                     .parts: None
-                            .op: Equal
+                            .op: BinaryOperator::Equal
                             .right: Expr::Path
                                 Path
                                     .start: Ident
@@ -284,7 +284,7 @@ Query
                                     .start: Ident
                                         .text: "foo"
                                     .parts: None
-                            .op: Equal
+                            .op: BinaryOperator::Equal
                             .right: Expr::Path
                                 Path
                                     .start: Ident
@@ -334,7 +334,7 @@ Query
                                     .start: Ident
                                         .text: "foo"
                                     .parts: None
-                            .op: Equal
+                            .op: BinaryOperator::Equal
                             .right: Expr::Path
                                 Path
                                     .start: Ident
@@ -384,7 +384,7 @@ Query
                                     .start: Ident
                                         .text: "foo"
                                     .parts: None
-                            .op: Equal
+                            .op: BinaryOperator::Equal
                             .right: Expr::Path
                                 Path
                                     .start: Ident
@@ -434,7 +434,7 @@ Query
                                     .start: Ident
                                         .text: "foo"
                                     .parts: None
-                            .op: Equal
+                            .op: BinaryOperator::Equal
                             .right: Expr::Path
                                 Path
                                     .start: Ident
@@ -484,7 +484,7 @@ Query
                                     .start: Ident
                                         .text: "foo"
                                     .parts: None
-                            .op: Equal
+                            .op: BinaryOperator::Equal
                             .right: Expr::Path
                                 Path
                                     .start: Ident
@@ -550,7 +550,7 @@ Query
                                     .start: Ident
                                         .text: "foo"
                                     .parts: None
-                            .op: Equal
+                            .op: BinaryOperator::Equal
                             .right: Expr::Path
                                 Path
                                     .start: Ident
@@ -618,7 +618,7 @@ Query
                                     .start: Ident
                                         .text: "foo"
                                     .parts: None
-                            .op: Equal
+                            .op: BinaryOperator::Equal
                             .right: Expr::Path
                                 Path
                                     .start: Ident

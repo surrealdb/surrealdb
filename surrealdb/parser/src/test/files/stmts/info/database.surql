@@ -41,7 +41,7 @@ Query
                             BinaryExpr
                                 .left: Expr::Integer
                                     +1
-                                .op: Add
+                                .op: BinaryOperator::Add
                                 .right: Expr::Integer
                                     +1
                     .structure: true

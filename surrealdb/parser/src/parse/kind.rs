@@ -336,7 +336,12 @@ async fn parse_prime_type(parser: &mut Parser<'_, '_>) -> ParseResult<ast::Prime
 
 			Ok(ast::PrimeType::Geometry(ty))
 		}
-
+		T![-] | T![+] => {
+			// This ensures `-Infinity`, `-1`, and similar tokens won't throw an error
+			// during partial parses.
+			let _ = parser.peek_joined1()?;
+			Err(parser.unexpected("a kind"))
+		}
 		_ => Err(parser.unexpected("a kind")),
 	}
 }

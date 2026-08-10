@@ -94,7 +94,7 @@ Query
                             .left: Expr::String
                                 StringLit
                                     .text: "d"
-                            .op: Add
+                            .op: BinaryOperator::Add
                             .right: Expr::String
                                 StringLit
                                     .text: "b"

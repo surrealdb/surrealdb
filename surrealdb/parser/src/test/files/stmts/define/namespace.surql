@@ -33,7 +33,7 @@ Query
                             .left: Expr::String
                                 StringLit
                                     .text: "n"
-                            .op: Add
+                            .op: BinaryOperator::Add
                             .right: Expr::String
                                 StringLit
                                     .text: "s"
