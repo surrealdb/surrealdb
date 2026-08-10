@@ -46,6 +46,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use axum::extract::ws::Message;
@@ -142,10 +143,50 @@ impl StreamHandle {
 	}
 }
 
-/// Removes a stream's registry entry when the driver returns, on every path.
+/// A claim on one of the connection's concurrent-stream slots, held for as
+/// long as the stream it admits.
+///
+/// The claim is what [`WEBSOCKET_MAX_CONCURRENT_STREAMS`] is enforced by, and
+/// it is taken *before* the registry grows rather than measured after: a check
+/// that consults the registry's length can only notice an overshoot that has
+/// already happened, so two requests racing under the last free slot would both
+/// enter the registry, both then see it over the cap, and both back out —
+/// correct in the end, but with the registry observably above the cap in
+/// between. A claim that loses the race never grows anything.
+struct StreamSlot<'a> {
+	rpc: &'a Websocket,
+}
+
+impl<'a> StreamSlot<'a> {
+	/// Claim a slot, or `None` when the connection already holds
+	/// [`WEBSOCKET_MAX_CONCURRENT_STREAMS`] of them.
+	fn claim(rpc: &'a Websocket) -> Option<Self> {
+		rpc.stream_slots
+			.fetch_update(Ordering::AcqRel, Ordering::Acquire, |held| {
+				(held < *WEBSOCKET_MAX_CONCURRENT_STREAMS).then_some(held + 1)
+			})
+			.ok()
+			.map(|_| Self {
+				rpc,
+			})
+	}
+}
+
+impl Drop for StreamSlot<'_> {
+	fn drop(&mut self) {
+		self.rpc.stream_slots.fetch_sub(1, Ordering::AcqRel);
+	}
+}
+
+/// Removes a stream's registry entry when the driver returns, on every path,
+/// and gives back the slot that admitted it.
 struct StreamRegistration<'a> {
 	rpc: &'a Websocket,
 	key: String,
+	/// Released after the entry above has been removed — fields drop after the
+	/// `Drop` body — so the freed slot is never handed to a request that could
+	/// fill it while this one is still registered.
+	_slot: StreamSlot<'a>,
 }
 
 impl Drop for StreamRegistration<'_> {
@@ -184,10 +225,8 @@ pub(crate) async fn process_query_stream(
 		return;
 	}
 	// Reserve the registry slot before anything can run, so a concurrent
-	// `query_cancel` for this id has a handle to find and a duplicate id is
-	// refused before it does any work. The reservation is insert-then-check,
-	// like `begin`'s transaction slots: two concurrent inserts cannot both
-	// slip under the cap.
+	// `query_cancel` for this id has a handle to find, and both a duplicate id
+	// and an over-cap request are refused before either does any work.
 	let key = id.to_sql();
 	let cancel = CancelHandle::new();
 	let (items_tx, items_rx) = bounded(QUERY_STREAM_BUFFER);
@@ -196,47 +235,53 @@ pub(crate) async fn process_query_stream(
 		items: items_rx.clone(),
 	};
 	// An id names one stream: a duplicate is refused, and the stream already
-	// running under this id keeps its registration untouched.
+	// running under this id keeps its registration untouched. Claiming the slot
+	// inside the vacant arm is what keeps admission and entry indivisible: the
+	// registry only ever grows on a request the cap has already let through.
+	// The claim is a wait-free atomic, so the shard guard it runs under is held
+	// no longer than the insert it guards.
 	//
-	// The reservation's outcome is taken as a `bool` so the map guard is
+	// The reservation's outcome is taken as a plain value so the map guard is
 	// released before anything is awaited. A `DashMap` guard held across an
 	// await would be catastrophic here: the guard is a blocking lock over a
 	// whole shard, the await below is a send on a channel the client paces,
 	// and every other task touching the registry — `query_cancel`, another
-	// stream's deregistration, the `len` below — would block its worker
-	// thread rather than yield.
+	// stream's deregistration — would block its worker thread rather than
+	// yield.
 	let reserved = match rpc.streams.entry(key.clone()) {
-		dashmap::mapref::entry::Entry::Occupied(_) => false,
-		dashmap::mapref::entry::Entry::Vacant(slot) => {
-			slot.insert(handle);
-			true
+		dashmap::mapref::entry::Entry::Occupied(_) => Err(stream_exists()),
+		dashmap::mapref::entry::Entry::Vacant(entry) => match StreamSlot::claim(rpc) {
+			Some(slot) => {
+				entry.insert(handle);
+				Ok(slot)
+			}
+			None => Err(too_many_streams()),
+		},
+	};
+	// A rejected request holds no reservation while it reports the rejection.
+	// Reporting it is an awaited send on a channel the client paces, so on a
+	// connection that has stopped reading it parks indefinitely -- and the read
+	// loop keeps accepting messages, so every further request would park the
+	// same way. A rejection that kept a slot or a registry entry while parked
+	// would let a client grow both without bound precisely by refusing to read,
+	// defeating the cap it was being refused by.
+	let slot = match reserved {
+		Ok(slot) => slot,
+		Err(error) => {
+			crate::rpc::response::send(
+				DbResponse::failure(Some(id), client_session, error),
+				fmt,
+				chn,
+			)
+			.await;
+			return;
 		}
 	};
-	if !reserved {
-		let error = stream_exists();
-		crate::rpc::response::send(DbResponse::failure(Some(id), client_session, error), fmt, chn)
-			.await;
-		return;
-	}
 	let registration = StreamRegistration {
 		rpc,
 		key,
+		_slot: slot,
 	};
-	// A rejected request must hold no reservation while it reports the
-	// rejection. Reporting it is an awaited send on a channel the client paces,
-	// so on a connection that has stopped reading it parks indefinitely -- and
-	// the read loop keeps accepting messages, so every further request would
-	// park the same way and hold a reservation of its own. Releasing first
-	// bounds the registry by what is actually executing, which is what the cap
-	// is for; keeping the reservation until the send completed would let a
-	// client grow the registry without bound precisely by refusing to read.
-	if rpc.streams.len() > *WEBSOCKET_MAX_CONCURRENT_STREAMS {
-		drop(registration);
-		let error = too_many_streams();
-		crate::rpc::response::send(DbResponse::failure(Some(id), client_session, error), fmt, chn)
-			.await;
-		return;
-	}
 	// The deadline for the whole exchange, when the operator configured one.
 	// `query_stream` applies the same timeout to the execution, but that guard
 	// only fires while the execution is being polled, and a stalled client is
@@ -254,8 +299,9 @@ pub(crate) async fn process_query_stream(
 	{
 		Ok(job) => job,
 		Err(error) => {
-			// Released before the report, for the reason given at the cap
-			// check above: a rejected request holds nothing while it parks.
+			// Released before the report, for the reason given at the
+			// reservation above: a rejected request holds nothing while it
+			// parks.
 			drop(registration);
 			crate::rpc::response::send(
 				DbResponse::failure(Some(id), client_session, error),

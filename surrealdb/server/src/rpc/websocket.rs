@@ -116,8 +116,17 @@ pub struct Websocket {
 	/// stream's execution starts and removed when its driver returns, so
 	/// `query_cancel` can reach any stream that is still producing frames.
 	/// Per-connection, like [`Self::sessions`]: a client can only ever cancel
-	/// its own streams. Bounded by [`WEBSOCKET_MAX_CONCURRENT_STREAMS`].
+	/// its own streams. Bounded by [`Self::stream_slots`].
 	pub(crate) streams: DashMap<String, crate::rpc::streaming::StreamHandle>,
+	/// How many of this connection's concurrent-stream slots are claimed.
+	///
+	/// This count, not [`Self::streams`]'s length, is what
+	/// [`WEBSOCKET_MAX_CONCURRENT_STREAMS`] is enforced against: a request
+	/// claims its slot here, atomically and only while one is free, before it
+	/// may enter the registry, and gives the slot back only after leaving it.
+	/// So the registry is never larger than the cap at any instant a
+	/// concurrent observer could catch it.
+	pub(crate) stream_slots: AtomicUsize,
 	/// A cancellation token called when shutting down the server
 	pub(crate) shutdown: CancellationToken,
 	/// Connection-level cancellation handle. Bundles a hot-path
@@ -169,6 +178,7 @@ impl Websocket {
 			transactions: DashMap::new(),
 			counters: DashMap::new(),
 			streams: DashMap::new(),
+			stream_slots: AtomicUsize::new(0),
 			channel: sender.clone(),
 			datastore,
 		});
@@ -1398,6 +1408,7 @@ mod tests {
 			transactions: DashMap::new(),
 			counters: DashMap::new(),
 			streams: DashMap::new(),
+			stream_slots: AtomicUsize::new(0),
 			shutdown: CancellationToken::new(),
 			cancel: surrealdb_core::ctx::CancelHandle::new(),
 			channel: tx,
@@ -1729,6 +1740,7 @@ mod tests {
 				transactions: DashMap::new(),
 				counters: DashMap::new(),
 				streams: DashMap::new(),
+				stream_slots: AtomicUsize::new(0),
 				shutdown: CancellationToken::new(),
 				cancel: surrealdb_core::ctx::CancelHandle::new(),
 				channel: chn_internal,
@@ -1850,6 +1862,7 @@ mod tests {
 				transactions: DashMap::new(),
 				counters: DashMap::new(),
 				streams: DashMap::new(),
+				stream_slots: AtomicUsize::new(0),
 				shutdown: CancellationToken::new(),
 				cancel: surrealdb_core::ctx::CancelHandle::new(),
 				channel: chn_internal,
@@ -1959,6 +1972,7 @@ mod tests {
 				transactions: DashMap::new(),
 				counters: DashMap::new(),
 				streams: DashMap::new(),
+				stream_slots: AtomicUsize::new(0),
 				shutdown: CancellationToken::new(),
 				cancel: surrealdb_core::ctx::CancelHandle::new(),
 				channel: chn_internal,
@@ -2043,6 +2057,7 @@ mod tests {
 				transactions: DashMap::new(),
 				counters: DashMap::new(),
 				streams: DashMap::new(),
+				stream_slots: AtomicUsize::new(0),
 				shutdown: CancellationToken::new(),
 				cancel: surrealdb_core::ctx::CancelHandle::new(),
 				channel,
@@ -2262,6 +2277,7 @@ mod tests {
 				transactions: DashMap::new(),
 				counters: DashMap::new(),
 				streams: DashMap::new(),
+				stream_slots: AtomicUsize::new(0),
 				shutdown: CancellationToken::new(),
 				cancel: surrealdb_core::ctx::CancelHandle::new(),
 				channel: chn_internal,
@@ -2522,6 +2538,7 @@ mod tests {
 			transactions: DashMap::new(),
 			counters: DashMap::new(),
 			streams: DashMap::new(),
+			stream_slots: AtomicUsize::new(0),
 			shutdown: CancellationToken::new(),
 			cancel: surrealdb_core::ctx::CancelHandle::new(),
 			channel: tx,
@@ -2949,6 +2966,15 @@ mod tests {
 				handler.await.expect("handler completes");
 			}
 			assert!(rpc.streams.is_empty(), "every slot is freed");
+			// The registry emptying is not enough on its own: capacity is held
+			// by the slot count, so a refused request that gave back its entry
+			// but not its slot would leave the connection permanently short of
+			// the cap while looking idle.
+			assert_eq!(
+				rpc.stream_slots.load(Ordering::Acquire),
+				0,
+				"the refused request gave its slot back too",
+			);
 		});
 	}
 
@@ -3034,14 +3060,15 @@ mod tests {
 					"each parked message is an over-cap rejection: {msg}",
 				);
 				// The invariant, checked while the remaining rejections are
-				// still parked: none of them is holding a reservation.
+				// still parked: none of them is holding a reservation. Sampled
+				// once, so the number reported is the number that failed.
+				let registered = rpc.streams.len();
 				assert_eq!(
-					rpc.streams.len(),
+					registered,
 					cap,
-					"with {} rejection(s) still parked, the registry grew to {} beyond the \
-					 cap of {cap}",
+					"with {} rejection(s) still parked, the registry grew to {registered} \
+					 beyond the cap of {cap}",
 					rejected.len() - observed - 1,
-					rpc.streams.len(),
 				);
 			}
 
@@ -3297,6 +3324,7 @@ mod tests {
 				transactions: DashMap::new(),
 				counters: DashMap::new(),
 				streams: DashMap::new(),
+				stream_slots: AtomicUsize::new(0),
 				shutdown: CancellationToken::new(),
 				cancel: surrealdb_core::ctx::CancelHandle::new(),
 				channel: rpc.channel.clone(),
