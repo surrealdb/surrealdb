@@ -309,9 +309,9 @@ pub fn uuid((Optional(timestamp),): (Optional<Datetime>,)) -> Result<Value> {
 			ensure!(
 				timestamp.0 >= chrono::DateTime::UNIX_EPOCH,
 				Error::InvalidFunctionArguments {
-					name: String::from("rand::ulid"),
+					name: String::from("rand::uuid"),
 					message: format!(
-						"To generate a ULID from a datetime, it must be a time beyond UNIX epoch."
+						"To generate a UUID from a datetime, it must be a time beyond UNIX epoch."
 					),
 				}
 			);
@@ -369,9 +369,9 @@ pub mod uuid {
 				anyhow::ensure!(
 					timestamp.0 >= chrono::DateTime::UNIX_EPOCH,
 					surrealdb_expr::expr::Error::InvalidFunctionArguments {
-						name: String::from("rand::ulid"),
+						name: String::from("rand::uuid::v7"),
 						message: format!(
-							"To generate a ULID from a datetime, it must be a time beyond UNIX epoch."
+							"To generate a UUID from a datetime, it must be a time beyond UNIX epoch."
 						),
 					}
 				);
