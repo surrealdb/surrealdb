@@ -209,10 +209,17 @@ impl into_endpoint::Sealed for &str {
 				let query = &url["mem://?".len()..];
 				(Url::parse("mem://").expect("valid memory url"), format!("mem://?{query}"))
 			}
-			url if url.starts_with("ws") | url.starts_with("http") | url.starts_with("tikv") => (
-				Url::parse(url).map_err(|_| Error::internal(format!("Invalid URL: {}", self)))?,
-				String::new(),
-			),
+			url if url.starts_with("ws")
+				| url.starts_with("http")
+				| url.starts_with("grpc")
+				| url.starts_with("tikv") =>
+			{
+				(
+					Url::parse(url)
+						.map_err(|_| Error::internal(format!("Invalid URL: {}", self)))?,
+					String::new(),
+				)
+			}
 
 			_ => {
 				let (scheme, path) = split_url(self);
@@ -338,6 +345,34 @@ pub fn connect(address: impl IntoEndpoint) -> Connect<Any, Surreal<Any>> {
 		address: address.into_endpoint(),
 		capacity: 0,
 		response_type: PhantomData,
+	}
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod endpoint_tests {
+
+	use super::*;
+
+	/// A remote scheme keeps its authority in the URL and leaves the path
+	/// empty; a local scheme keeps only its scheme in the URL and carries the
+	/// rest in the path, which is where a file-backed engine reads it from.
+	#[test]
+	fn remote_schemes_keep_their_authority() {
+		for url in ["ws://127.0.0.1:8000", "http://127.0.0.1:8000", "grpc://127.0.0.1:8000"] {
+			let endpoint = __into_endpoint(url).unwrap();
+			assert_eq!(endpoint.url.host_str(), Some("127.0.0.1"), "{url} lost its host");
+			assert_eq!(endpoint.url.port(), Some(8000), "{url} lost its port");
+			assert!(endpoint.path.is_empty(), "{url} was treated as a local engine");
+		}
+	}
+
+	#[test]
+	fn local_schemes_carry_a_path() {
+		let endpoint = __into_endpoint("rocksdb://some/folder").unwrap();
+		assert_eq!(endpoint.url.scheme(), "rocksdb");
+		assert_eq!(endpoint.url.host_str(), None);
+		assert_eq!(endpoint.path, "rocksdb://some/folder");
 	}
 }
 

@@ -349,6 +349,7 @@ cli = ["surrealdb-server/cli"]
 [dependencies]
 # workspace internal dependencies
 surrealdb = { workspace = true, features = [
+    "protocol-grpc",
     "protocol-http",
     "protocol-ws",
     "rustls",
