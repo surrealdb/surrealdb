@@ -132,7 +132,10 @@ impl HttpClient {
 	/// runtime (unlike a browser) permits setting it — so hosts that reject
 	/// requests lacking a `User-Agent`, such as the GitHub API, are reachable.
 	#[cfg(target_family = "wasm")]
-	pub fn new(
+	// `allow`/`deny` are unused here by design, as documented above: they are
+	// taken by value so this constructor's signature matches the native one.
+	#[allow(clippy::needless_pass_by_value)]
+	pub(crate) fn new(
 		allow: Targets<NetTarget>,
 		deny: Targets<NetTarget>,
 		config: &HttpConfig,

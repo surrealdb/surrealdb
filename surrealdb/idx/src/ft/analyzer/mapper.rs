@@ -82,11 +82,9 @@ impl Mapper {
 	async fn iterate_file(terms: &mut Tree<VariableSizeKey, String>, path: &Path) -> Result<()> {
 		let file = File::open(path)?;
 		let reader = BufReader::new(file);
-		let mut line_number = 0;
-		for line_result in reader.lines() {
+		for (line_number, line_result) in reader.lines().enumerate() {
 			let line = line_result?;
 			Self::add_line_tree(terms, &line, line_number)?;
-			line_number += 1;
 		}
 		Ok(())
 	}

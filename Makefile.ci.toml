@@ -462,24 +462,30 @@ script = '''
 # 1. Install LLVM from Homebrew: `brew install llvm`
 # 2. Add the LLVM bin directory to your PATH: `echo 'export PATH="/opt/homebrew/opt/llvm/bin:$PATH"' >> ~/.zshrc`
 category = "CI - CHECK"
-description = "Run code quality checks (WASM)"
+description = "Run clippy linting (WASM)"
 env = { RUSTFLAGS = '--cfg getrandom_backend="wasm_js"' }
 script = '''
     #!/bin/bash
     set -euo pipefail
 
+    # Clippy rather than `cargo check`: the host-target `ci-clippy` never
+    # compiles `cfg(target_family = "wasm")` items, so this is the only pass
+    # that lints them.
+
     # The Rust SDK, compiled for the browser.
-    cargo check --locked --package surrealdb \
+    cargo clippy --locked --package surrealdb \
         --features protocol-ws,protocol-http,kv-mem,kv-indxdb,http,jwks \
-        --target wasm32-unknown-unknown
+        --target wasm32-unknown-unknown \
+        -- -D warnings
 
     # The browser engine, which pulls in `surrealdb-embedded` behind it. Neither
     # is reachable from `surrealdb`, so the check above covers neither. Both
     # feature sets are built and published, so both are checked.
     for features in kv-mem,kv-indxdb kv-mem,kv-indxdb,debug; do
-        cargo check --locked --package surrealdb-wasm \
+        cargo clippy --locked --package surrealdb-wasm \
             --features "$features" \
-            --target wasm32-unknown-unknown
+            --target wasm32-unknown-unknown \
+            -- -D warnings
     done
 '''
 

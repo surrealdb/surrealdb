@@ -28,6 +28,29 @@ type Task = Pin<Box<dyn Future<Output = Result<(), tokio::task::JoinError>> + Se
 #[cfg(target_family = "wasm")]
 type Task = Pin<Box<()>>;
 
+/// Spawns `fut` on the ambient runtime and returns a handle the caller can await
+/// to observe the task finishing.
+///
+/// Awaiting the returned [`Task`] is only meaningful off wasm. `spawn_local`
+/// yields no join handle, so on wasm the task is detached and the returned
+/// `Task` completes immediately without waiting for `fut`.
+#[cfg(not(target_family = "wasm"))]
+fn into_task<F>(fut: F) -> Task
+where
+	F: Future<Output = ()> + Send + 'static,
+{
+	Box::pin(spawn(fut))
+}
+
+#[cfg(target_family = "wasm")]
+fn into_task<F>(fut: F) -> Task
+where
+	F: Future<Output = ()> + 'static,
+{
+	spawn(fut);
+	Box::pin(())
+}
+
 const NODE_MEMBERSHIP_UPDATE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// How long a trigger-driven index-compaction pass waits before running.
@@ -149,7 +172,7 @@ fn spawn_task_live_query_router(
 	opts: &EngineOptions,
 ) -> Task {
 	let interval = opts.live_query_router_interval;
-	Box::pin(spawn(async move {
+	into_task(async move {
 		trace!("Running the live-query router every {interval:?}");
 		let mut ticker = interval_ticker(interval).await;
 		loop {
@@ -165,7 +188,7 @@ fn spawn_task_live_query_router(
 			}
 		}
 		trace!("Background task exited: Running the live-query router");
-	}))
+	})
 }
 
 fn spawn_task_node_membership_refresh(
@@ -176,7 +199,7 @@ fn spawn_task_node_membership_refresh(
 	// Get the delay interval from the config
 	let interval = opts.node_membership_refresh_interval;
 	// Spawn a future
-	Box::pin(spawn(async move {
+	into_task(async move {
 		// Log the interval frequency
 		trace!("Updating node registration information every {interval:?}");
 		// Create a new time-based interval ticket
@@ -204,7 +227,7 @@ fn spawn_task_node_membership_refresh(
 			}
 		}
 		trace!("Background task exited: Updating node registration information");
-	}))
+	})
 }
 
 /// Spawns a background task for index compaction
@@ -238,7 +261,7 @@ fn spawn_task_index_compaction(
 	// Get the delay interval from the config
 	let interval = opts.index_compaction_interval;
 	// Spawn a future
-	Box::pin(spawn(async move {
+	into_task(async move {
 		// Log the interval frequency
 		trace!("Running index compaction every {interval:?}");
 		// Create a new time-based interval ticket
@@ -290,7 +313,7 @@ fn spawn_task_index_compaction(
 			}
 		}
 		trace!("Background task exited: Running index compaction");
-	}))
+	})
 }
 
 /// Spawns the async event processing task.
@@ -307,7 +330,7 @@ fn spawn_task_event_processing(
 	// Get the delay interval from the config
 	let interval = opts.event_processing_interval;
 	// Spawn a future
-	Box::pin(spawn(async move {
+	into_task(async move {
 		// Log the interval frequency
 		trace!("Running event processing every {interval:?}");
 		// Create a new time-based interval ticket
@@ -339,7 +362,7 @@ fn spawn_task_event_processing(
 			}
 		}
 		trace!("Background task exited: Running event processing");
-	}))
+	})
 }
 
 // --------------------------------------------------
@@ -580,7 +603,7 @@ fn spawn_task_scheduler(
 	// read it. Deriving the effective grace here means a longer `--tikv-gc-lifetime`
 	// can never be undercut by leaving `--reclaim-grace` at its default.
 	let reclaim_grace = opts.reclaim_grace.max(opts.tikv_gc_lifetime);
-	Box::pin(spawn(async move {
+	into_task(async move {
 		trace!(
 			"Running {} {group} jobs on a shared schedule: {}",
 			slots.len(),
@@ -610,7 +633,7 @@ fn spawn_task_scheduler(
 		})
 		.await;
 		trace!("Background task exited: Running {group} jobs");
-	}))
+	})
 }
 
 async fn update_node_membership(

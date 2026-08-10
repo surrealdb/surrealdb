@@ -119,7 +119,7 @@ pub(crate) async fn run_router(
 
 				// Spawn the request handling in a background task
 				// SessionState uses RwLock internally, so we can share the Arc directly
-				let router_state = state.clone();
+				let router_state = Arc::clone(&state);
 				spawn_local(async move {
 					let result = super::router(
 						route.request,

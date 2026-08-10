@@ -676,7 +676,7 @@ impl IndxdbTx {
 
 		let mut keys = Vec::with_capacity(out.len());
 		let mut key_bytes = 0u64;
-		for (key, _) in out.into_iter() {
+		for (key, _) in out {
 			key_bytes += key.len() as u64;
 			keys.push(key);
 		}
@@ -702,7 +702,7 @@ impl IndxdbTx {
 		let mut values = Vec::with_capacity(out.len());
 		let mut key_bytes = 0u64;
 		let mut value_bytes = 0u64;
-		for (key, val) in out.into_iter() {
+		for (key, val) in out {
 			let val = val.ok_or_else(|| KvsError::internal("scan entry without a value"))?;
 			key_bytes += key.len() as u64;
 			value_bytes += val.len() as u64;

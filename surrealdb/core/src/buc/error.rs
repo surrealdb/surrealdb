@@ -36,6 +36,10 @@ pub(crate) enum Error {
 
 	/// A path outside the configured allowlist was requested
 	#[error("File access denied: {0}")]
+	// Only the file backend constructs this, and that backend is not compiled
+	// for wasm. The variant stays in the enum on every target so the error's
+	// wire representation does not vary by target.
+	#[cfg_attr(target_family = "wasm", allow(dead_code))]
 	FileAccessDenied(String),
 
 	/// A bucket without its own backend was used, but no global bucket exists

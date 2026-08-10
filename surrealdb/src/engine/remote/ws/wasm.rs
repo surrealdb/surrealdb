@@ -181,6 +181,10 @@ pub(crate) async fn run_router(
 	}
 
 	let (socket_sink, socket_stream) = socket.split();
+	// The wasm socket halves are neither `Send` nor `Sync`, so this `Arc` buys no
+	// cross-thread sharing over an `Rc`. It mirrors the native router's shape,
+	// which shares the same state across genuinely concurrent tasks.
+	#[allow(clippy::arc_with_non_send_sync)]
 	let state = Arc::new(RouterState::new(socket_sink, socket_stream));
 
 	'router: loop {
