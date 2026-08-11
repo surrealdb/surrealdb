@@ -776,6 +776,11 @@ struct StreamFrames {
 struct PendingStatement {
 	/// Rows awaiting framing, taken from the front so that framing an item
 	/// costs time linear in its size rather than quadratic.
+	///
+	/// The deque is what makes that true, and is pinned below: taking a frame
+	/// off the front of a `VecDeque` leaves the rows behind it where they are,
+	/// where draining the front of a `Vec` shifts every one of them down and
+	/// makes framing a whole result quadratic in its size.
 	values: VecDeque<Value>,
 	/// A single value awaiting its own frame. Emitted before anything else the
 	/// statement produces.
@@ -811,6 +816,16 @@ impl Default for PendingStatement {
 		}
 	}
 }
+
+const _: () = {
+	// Pins the container behind `PendingStatement::values`. A `Vec` there would
+	// compile everywhere else and produce byte-identical frames, so nothing
+	// observable about the output can catch the swap, while each frame would
+	// shift the rest of the statement's rows down to make room.
+	fn _rows_wait_in_a_deque(pending: &PendingStatement) {
+		let _: &VecDeque<Value> = &pending.values;
+	}
+};
 
 impl StreamFrames {
 	fn new() -> Self {
@@ -1005,6 +1020,11 @@ mod tests {
 		std::iter::from_fn(|| frames.pop()).collect()
 	}
 
+	/// How many rows are still waiting to be framed, across every statement.
+	fn queued(frames: &StreamFrames) -> usize {
+		frames.pending.values().map(|p| p.values.len()).sum()
+	}
+
 	/// The first frames are small so the first row arrives early, and they
 	/// double toward the cap so a long result is not a per-frame tax.
 	#[test]
@@ -1189,71 +1209,67 @@ mod tests {
 		assert_eq!(frames.terminated.len(), 2, "both statements count toward the result count");
 	}
 
-	/// Framing an item costs time linear in its size, and holds one frame at a
-	/// time rather than pre-framing the whole result.
+	/// Framing an item costs time proportional to its size, and holds one frame
+	/// at a time rather than pre-framing the whole result.
 	///
 	/// A single item routinely carries an entire statement's result — every
 	/// sort and aggregate operator emits exactly one batch — so an item of
 	/// hundreds of thousands of rows is an ordinary `ORDER BY`, not an
-	/// adversarial input. Taking rows out of the front of a vector made that
-	/// quadratic and wedged the worker thread doing it, since framing has no
-	/// await point.
+	/// adversarial input. Framing has no await point, so a cost that grew
+	/// faster than the item would wedge the worker thread doing it.
 	///
-	/// The measurement covers `absorb` *and* the `pop` loop, because that is
-	/// the whole framing cost and either half may be where it lives: the
-	/// implementation this replaced did the chunking eagerly inside `absorb`,
-	/// so timing only `pop` would have looked linear no matter how bad `absorb`
-	/// was. The assertion is on how the cost scales rather than on a wall-clock
-	/// budget — doubling the rows should roughly double the work, where
-	/// quadratic framing quadruples it — which holds regardless of how fast the
-	/// machine is.
+	/// Both halves of that cost are asserted here as exact counts. `absorb`
+	/// queues an item's rows without framing any of them, and each `pop` then
+	/// takes one frame's worth off the front and leaves the rest alone: every
+	/// row is moved out of the queue exactly once, and never more than one
+	/// frame's worth at a time. The remaining ingredient — that taking from the
+	/// front does not move the rows behind it — belongs to the container rather
+	/// than to the frames, which are identical either way, and is pinned at
+	/// [`PendingStatement::values`].
 	#[test]
-	fn framing_a_whole_result_is_linear_and_holds_one_frame() {
-		/// Frames one item of `count` rows, timing everything, and returning
-		/// how many rows and frames came out.
-		fn frame(count: usize) -> (std::time::Duration, usize, usize) {
-			let start = std::time::Instant::now();
-			let mut frames = StreamFrames::new();
-			frames.absorb(rows(0, count));
-			frames.absorb(finished(0));
-			let mut delivered = 0;
-			let mut produced = 0;
-			while let Some(frame) = frames.pop() {
-				if let QueryStreamFrame::Rows {
-					values,
-					..
-				} = &frame
-				{
-					assert!(values.len() <= QUERY_BATCH_RECORDS, "no frame exceeds the cap");
-					delivered += values.len();
-				}
-				produced += 1;
+	fn framing_a_whole_result_holds_one_frame_at_a_time() {
+		const ROWS: usize = 600_000;
+
+		let mut frames = StreamFrames::new();
+		frames.absorb(rows(0, ROWS));
+		assert_eq!(queued(&frames), ROWS, "absorbing an item queues its rows without framing them");
+		frames.absorb(finished(0));
+
+		let mut delivered = 0;
+		let mut produced = 0;
+		let mut widest = 0;
+		while let Some(frame) = frames.pop() {
+			produced += 1;
+			if let QueryStreamFrame::Rows {
+				values,
+				..
+			} = &frame
+			{
+				delivered += values.len();
+				widest = widest.max(values.len());
+				// A frame carries rows off the queue and nothing else touches
+				// them, so the two account for the whole result between them at
+				// every point in the walk.
+				assert_eq!(
+					queued(&frames) + delivered,
+					ROWS,
+					"a frame takes only the rows it carries"
+				);
 			}
-			(start.elapsed(), delivered, produced)
 		}
 
-		/// The best of several runs, so a page fault or a neighbouring test on
-		/// a loaded machine cannot inflate the comparison.
-		fn best(count: usize) -> (std::time::Duration, usize, usize) {
-			(0..3).map(|_| frame(count)).min_by_key(|(elapsed, ..)| *elapsed).expect("a run")
-		}
-
-		// A four-fold spread rather than a doubling, because both shapes share a
-		// large per-row cost (cloning each `Value`) that dilutes the difference:
-		// linear framing lands near 4x, the quadratic form this replaced lands
-		// near 16x, and the threshold between them leaves a wide margin on both
-		// sides. A doubling put the two barely either side of the threshold and
-		// could report a false result in either direction.
-		let (small, delivered, produced) = best(150_000);
-		let (large, delivered_large, _) = best(600_000);
-		assert_eq!(delivered, 150_000, "every row goes out exactly once");
-		assert_eq!(delivered_large, 600_000);
-		assert!(produced > 150_000 / QUERY_BATCH_RECORDS, "the result is split across frames");
-		let ratio = large.as_secs_f64() / small.as_secs_f64().max(f64::EPSILON);
-		assert!(
-			ratio < 8.0,
-			"quadrupling the rows multiplied framing cost by {ratio:.1}x \
-			 ({small:?} -> {large:?}), which is not linear",
+		assert_eq!(delivered, ROWS, "every row goes out exactly once");
+		assert_eq!(widest, QUERY_BATCH_RECORDS, "a long result fills its frames to the cap");
+		// The ramp doubles from the first frame's size to the cap, so it spends
+		// `log2(cap / first)` frames carrying `cap - first` rows between them
+		// before every later frame is a full one, and one `Finished` closes the
+		// statement.
+		let ramp_frames = (QUERY_BATCH_RECORDS / QUERY_FIRST_BATCH_RECORDS).ilog2() as usize;
+		let ramp_rows = QUERY_BATCH_RECORDS - QUERY_FIRST_BATCH_RECORDS;
+		let expected = ramp_frames + (ROWS - ramp_rows).div_ceil(QUERY_BATCH_RECORDS) + 1;
+		assert_eq!(
+			produced, expected,
+			"one frame per {QUERY_BATCH_RECORDS} rows once the ramp reaches the cap"
 		);
 	}
 
