@@ -41,6 +41,28 @@ impl SurrealWasmEngine {
 		Ok(self.0.execute_encoded(WIRE_FORMAT, &data).await?)
 	}
 
+	/// Runs a query, answering with frames as the executor produces them rather
+	/// than with every statement's result at once.
+	///
+	/// The request is the same envelope [`Self::execute`] takes. A failure
+	/// before execution begins — a denied capability, a parse error, an unknown
+	/// transaction — rejects here and produces no frames at all; everything
+	/// after that is carried on the frames themselves.
+	///
+	/// A `ReadableStream` so the reader sets the pace: the query is driven by a
+	/// task of the engine's own, and the frames it produces are buffered one at a
+	/// time, so a reader that stops reading stops the scan. Cancelling the stream
+	/// is how a consumer walks away.
+	pub async fn query_stream(&self, data: Vec<u8>) -> Result<sys::ReadableStream, Error> {
+		let frames = self.0.query_stream_encoded(WIRE_FORMAT, &data).await?;
+		let stream = frames.map(|encoded| {
+			let bytes: Uint8Array = encoded.as_slice().into();
+			Ok(JsValue::from(bytes))
+		});
+
+		Ok(ReadableStream::from_stream(stream).into_raw())
+	}
+
 	/// The live-query notifications for this connection, encoded.
 	///
 	/// A `ReadableStream` rather than a channel of this module's own, so the

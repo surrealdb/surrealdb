@@ -15,6 +15,7 @@ pub mod capabilities;
 pub mod error;
 pub mod export;
 pub mod format;
+pub mod framing;
 pub mod method;
 pub mod query;
 pub mod request;
@@ -22,6 +23,7 @@ pub mod response;
 pub mod stream;
 pub mod token;
 
+pub use framing::{QUERY_BATCH_RECORDS, StreamFrames};
 pub use method::Method;
 pub use query::{QueryResult, QueryResultBuilder, QueryType, Status};
 pub use request::{Request, check_protected_param};

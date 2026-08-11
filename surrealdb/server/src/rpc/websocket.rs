@@ -2601,6 +2601,27 @@ mod tests {
 		msg.get("result")?.get("stream")?.as_str()
 	}
 
+	/// The id a `LIVE SELECT` in a framed answer produced.
+	///
+	/// Found by the statement that finished as a live query rather than by
+	/// taking the first `value` frame, since any preceding statement produces
+	/// one of those as well.
+	fn live_query_id(frames: &[serde_json::Value]) -> String {
+		let index = frames
+			.iter()
+			.find(|m| {
+				frame_tag(m) == Some("finished") && m["result"]["type"].as_str() == Some("live")
+			})
+			.map(|m| &m["result"]["index"])
+			.unwrap_or_else(|| panic!("a statement finished as a live query: {frames:#?}"));
+		frames
+			.iter()
+			.find(|m| frame_tag(m) == Some("value") && &m["result"]["index"] == index)
+			.and_then(|m| m["result"]["value"].as_str())
+			.unwrap_or_else(|| panic!("that statement carried its id: {frames:#?}"))
+			.to_owned()
+	}
+
 	/// The `query_stream` answer is the framed form of the buffered answer:
 	/// ordered frames bracketed by `begin` and `end`, rows re-batched along
 	/// the ramp, a scalar statement marked `single`, and every frame carrying
@@ -3438,19 +3459,82 @@ mod tests {
 			// so being told the stream ended is not enough: an errored `End`
 			// retracts only statements without a `Finished` frame, and this one
 			// has one. The id has to be named so the client can drop it.
-			let lqid = frames
-				.iter()
-				.find(|m| frame_tag(m) == Some("value"))
-				.map(|m| m["result"]["value"].as_str().unwrap_or_default().to_string());
-			if let Some(lqid) = lqid.filter(|id| !id.is_empty()) {
-				let end =
-					frames.iter().find(|m| frame_tag(m) == Some("end")).expect("the stream ends");
-				let error = end["result"]["error"]["message"].as_str().unwrap_or_default();
-				assert!(
-					error.contains(&lqid),
-					"the discarded live query {lqid} must be named on the end frame, got: {error}",
-				);
+			let lqid = live_query_id(&frames);
+			let end = frames.iter().find(|m| frame_tag(m) == Some("end")).expect("the stream ends");
+			let error = end["result"]["error"]["message"].as_str().unwrap_or_default();
+			assert!(
+				error.contains(&lqid),
+				"the discarded live query {lqid} must be named on the end frame, got: {error}",
+			);
+		});
+	}
+
+	/// A `LIVE SELECT` whose session stopped acting as the principal that
+	/// created it must not be registered either.
+	///
+	/// `invalidate` is the case that makes "does the session still exist" the
+	/// wrong question: it keeps the session and clears its authentication, so its
+	/// `cleanup_lqs` sweeps a map this id is not in yet and the registration
+	/// would otherwise land behind the teardown — delivering change data after a
+	/// logout. This is the shape GHSA-2xrp-m9c6-75rj describes.
+	#[test]
+	fn an_invalidated_sessions_live_query_is_discarded_not_registered() {
+		with_big_stack(|| async {
+			use surrealdb_rpc::capabilities::Capabilities;
+			let rpc = streaming_rpc(Capabilities::all()).await;
+			seed(&rpc, "DEFINE TABLE thing").await;
+			let session_id = Uuid::new_v4();
+			rpc.attach(session_id).await.expect("attach a session");
+			{
+				let lock = rpc.get_session(&session_id).await.expect("the attached session");
+				let mut session = lock.write().await;
+				*session = Session::owner().with_ns("test").with_db("test").with_rt(true);
+				session.id = Some(session_id);
 			}
+
+			let body = serde_json::json!({
+				"id": "i1",
+				"session": session_id.to_string(),
+				"method": "query_stream",
+				"params": ["SLEEP 100ms; LIVE SELECT * FROM thing;"],
+			});
+			let msg = Message::Text(body.to_string().into());
+			let (chn_tx, mut chn_rx) = channel::<Message>(8);
+			let handler = tokio::spawn({
+				let rpc = Arc::clone(&rpc);
+				async move {
+					Websocket::handle_message(&rpc, msg, chn_tx, 1024).await;
+				}
+			});
+			let first = decode_json(chn_rx.recv().await.expect("a first frame"));
+			assert_eq!(frame_tag(&first), Some("begin"));
+			// Invalidate while the SLEEP holds the query open. The session stays;
+			// only the principal it acts as goes away.
+			RpcProtocol::invalidate(rpc.as_ref(), session_id).await.expect("invalidate");
+
+			let mut frames = Vec::new();
+			while let Some(msg) = chn_rx.recv().await {
+				frames.push(decode_json(msg));
+			}
+			handler.await.expect("handler completes");
+			assert!(
+				rpc.state.live_queries.read().await.is_empty(),
+				"a live query created under a principal the session no longer has must not be \
+				 registered: {frames:#?}",
+			);
+			// The id is taken from the statement that finished as a live query,
+			// not from the first `value` frame: the `SLEEP` ahead of it produces
+			// one too, carrying null. Unconditional, because the client was told
+			// this id and holds a subscription that will never fire -- were the
+			// lookup allowed to find nothing, a stream that never ran the
+			// statement would satisfy the assertion above on its own.
+			let lqid = live_query_id(&frames);
+			let end = frames.iter().find(|m| frame_tag(m) == Some("end")).expect("the stream ends");
+			let error = end["result"]["error"]["message"].as_str().unwrap_or_default();
+			assert!(
+				error.contains(&lqid),
+				"the discarded live query {lqid} must be named on the end frame, got: {error}",
+			);
 		});
 	}
 

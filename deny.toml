@@ -86,12 +86,21 @@ yanked = "warn"
 #   the operator-configured cloud endpoint — not arbitrary attacker input. `object_store`
 #   0.13.2 pins `quick-xml = "0.39"` (<0.40), so reaching the patched >=0.41 requires an
 #   `object_store` 0.14 major bump (tracked separately, as it also touches the `obs` module).
+#
+# - for RUSTSEC-2026-0249, smartstring is unmaintained (archived 2026-05-03) and every version
+#   is affected, so there is no upgrade that clears it. It reaches us only through
+#   `opentelemetry-prometheus-text-exporter`, which uses it for metric and label names the
+#   server itself supplies — no attacker-controlled input, and nothing `unsafe` of ours. The
+#   exporter's own 0.3.0 still requires `smartstring = "^1.0.1"`, so clearing this means the
+#   exporter migrating to `compact_str` or `smol_str`; bumping to 0.3.0 would only add an
+#   `opentelemetry` 0.31 -> 0.32 major bump across the `obs` module for no advisory gain.
 ignore = [
     "RUSTSEC-2025-0141",
     "RUSTSEC-2023-0071",
     "RUSTSEC-2024-0436",
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
+    "RUSTSEC-2026-0249",
 ]
 
 # --------------------------------------------------

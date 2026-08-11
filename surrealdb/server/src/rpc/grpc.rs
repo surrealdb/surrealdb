@@ -53,10 +53,10 @@ use dashmap::DashMap;
 use futures::{Stream, StreamExt};
 use surrealdb_core::channel::{Receiver, bounded};
 use surrealdb_core::ctx::CancelHandle;
-use surrealdb_core::dbs::{QueryStreamJob, Session};
+use surrealdb_core::dbs::{AuthPrincipalSnapshot, QueryStreamJob, Session};
 use surrealdb_core::iam::check::check_ns_db;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::rpc::{RpcProtocol, types_error_from_anyhow};
+use surrealdb_core::rpc::{RpcProtocol, live_query_owner, types_error_from_anyhow};
 use surrealdb_datastore::Transaction;
 use surrealdb_iam::Auth;
 use surrealdb_kvs::TransactionType;
@@ -1430,7 +1430,7 @@ impl GrpcService {
 		let requested_timeout = context
 			.and_then(|context| context.timeout)
 			.and_then(|timeout| Duration::try_from(timeout).ok());
-		let job = match RpcProtocol::query_stream(
+		let (job, principal) = match RpcProtocol::query_stream(
 			self.rpc(),
 			txn,
 			session.id,
@@ -1481,6 +1481,7 @@ impl GrpcService {
 		let state = QueryFraming::new(
 			Arc::clone(&self.state),
 			session,
+			principal,
 			job,
 			items_rx,
 			batch_records,
@@ -2032,6 +2033,10 @@ impl Drop for ReleaseOnDrop {
 struct QueryFraming {
 	state: Arc<RpcState>,
 	session: ResolvedSession,
+	/// The principal the execution runs as, and the one its `LIVE SELECT`s
+	/// belong to. The session may be acting as someone else by the time they are
+	/// registered.
+	principal: AuthPrincipalSnapshot,
 	/// The execution, until it has been driven to completion.
 	run: Option<QueryStreamRun>,
 	items: Receiver<QueryStreamItem>,
@@ -2107,6 +2112,7 @@ impl QueryFraming {
 	fn new(
 		state: Arc<RpcState>,
 		session: ResolvedSession,
+		principal: AuthPrincipalSnapshot,
 		job: QueryStreamJob,
 		items: Receiver<QueryStreamItem>,
 		batch_records: usize,
@@ -2116,6 +2122,7 @@ impl QueryFraming {
 		Self {
 			state,
 			session,
+			principal,
 			run: Some(job.run),
 			items,
 			frames: QueryFrames::new(batch_records),
@@ -2195,7 +2202,7 @@ impl QueryFraming {
 			Ok(results) => {
 				let state = Arc::clone(&self.state);
 				let session_id = self.session.id;
-				register_live_queries(&state, session_id, &results).await;
+				register_live_queries(&state, session_id, &self.principal, &results).await;
 				self.frames.end(self.started.elapsed());
 			}
 			// A failure that belongs to no single statement ends the stream
@@ -2452,27 +2459,31 @@ impl QueryFrames {
 /// Registrations are only ever added here. A statement that ends a subscription
 /// does not report the id it ended, so `dispatch_notification` drops the entry
 /// when it sees that id's `Action::Killed` notification instead.
-async fn register_live_queries(state: &RpcState, session_id: Uuid, results: &[QueryResult]) {
+async fn register_live_queries(
+	state: &RpcState,
+	session_id: Uuid,
+	principal: &AuthPrincipalSnapshot,
+	results: &[QueryResult],
+) {
 	if !results.iter().any(|r| r.query_type == QueryType::Live) {
 		return;
 	}
-	// Read the session's namespace and database once, and drop the guard before
-	// calling the hooks: `handle_live` takes the same lock, and a concurrent
-	// session-mutating request queued between two reads on a write-preferring
-	// lock would deadlock both.
-	let (namespace, database) = match state.grpc.get_session(&session_id).await {
-		Ok(lock) => {
-			let session = lock.read().await;
-			(session.ns.clone(), session.db.clone())
-		}
-		// The session is gone: a `DetachSession` removed it while this query
-		// ran. Registering now would attach a live query to a session that no
-		// longer exists -- delivering change data for an authorization that has
-		// been torn down, and leaving an entry the per-session cleanup has
-		// already run past. Delete the rows the execution committed instead.
+	// The guard is held across every registration below, taken under the
+	// principal the execution ran as. `handle_live` does not touch the session
+	// lock, which is what makes holding it safe, and holding it is what stops a
+	// registration racing the teardown that would have removed it.
+	let session = live_query_owner(state.grpc.session_map(), session_id, principal).await;
+	let (namespace, database) = match &session {
+		Some(owner) => (owner.ns.clone(), owner.db.clone()),
+		// No owner: the session was detached while this query ran, or it is no
+		// longer acting as the principal that created these subscriptions --
+		// `invalidate` keeps the session and clears the authentication, and its
+		// `cleanup_lqs` swept a map these ids were not in yet. Either way
+		// registering now would deliver change data under an authorization that
+		// has been torn down. Delete the rows the execution committed instead.
 		// The `KILL`s need nothing: the statement itself removed their rows,
 		// and that cleanup already dropped their registrations.
-		Err(_) => {
+		None => {
 			let orphans = results
 				.iter()
 				.filter(|result| matches!(result.query_type, QueryType::Live))
@@ -3398,6 +3409,7 @@ mod tests {
 				id: session_id,
 				client: Some(session_id),
 			},
+			AuthPrincipalSnapshot::capture(&Session::default()),
 			job,
 			buffered,
 			QUERY_BATCH_RECORDS,

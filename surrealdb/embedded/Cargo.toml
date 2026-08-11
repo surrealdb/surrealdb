@@ -33,7 +33,17 @@ surrealdb-kvs = { workspace = true }
 surrealdb-rpc = { workspace = true }
 surrealdb-types = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
+tracing = { workspace = true }
 uuid = { workspace = true, features = ["v7"] }
+web-time = { workspace = true }
+
+# A query stream's execution is driven by a task of its own, so that it is
+# finished and its transaction finalised whether or not anyone is still reading.
+[target.'cfg(target_family = "wasm")'.dependencies]
+wasm-bindgen-futures = { workspace = true }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+tokio = { workspace = true, features = ["rt"] }
 
 [dev-dependencies]
 serde_json = { workspace = true }

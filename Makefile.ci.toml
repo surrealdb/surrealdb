@@ -989,7 +989,11 @@ args = [
     "--locked",
     "--no-default-features",
     "--features",
-    "allocator,allocation-tracking,storage-mem,storage-rocksdb,scripting,http,jwks,surrealism,gql",
+    # `surrealdb-embedded/kv-mem` has to be named explicitly: it is that crate's
+    # own feature, and `storage-mem` on the SDK enables `surrealdb-core/kv-mem`
+    # without touching it. Everything in the embedded engine that needs a
+    # datastore is gated on it, tests included.
+    "allocator,allocation-tracking,storage-mem,storage-rocksdb,scripting,http,jwks,surrealism,gql,surrealdb-embedded/kv-mem",
     "--workspace",
     "--exclude", "demo",
     "--exclude", "surrealdb-profiling",

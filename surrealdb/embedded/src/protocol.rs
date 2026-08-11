@@ -41,6 +41,34 @@ impl RpcProtocol for EmbeddedEngine {
 		&self.sessions
 	}
 
+	/// Lists the sessions attached to this connection, less its own.
+	///
+	/// A session id is the whole of what is needed to run under that session, so
+	/// what a transport may list depends on whose sessions its map holds. An
+	/// embedded engine's map is per-connection, like the WebSocket transport's:
+	/// the ids are ones the holder of this engine attached itself, which is why
+	/// listing them is a feature rather than a leak. The transports whose maps
+	/// are reachable by id from any caller — HTTP and gRPC — refuse the method
+	/// outright instead.
+	///
+	/// The implicit default session is filtered out. It is the one session the
+	/// caller did not attach and cannot have a use for by id, and it is the most
+	/// privileged one on the connection, so listing it would hand out the id of
+	/// the session every unnamed request runs under. Withholding the id is the
+	/// whole of the protection: `detach` deletes whatever id it is given, so a
+	/// caller that learns this one can still tear that session down.
+	async fn sessions(&self) -> TxResult<DbResult> {
+		let connection = self.id;
+		let sessions = self
+			.session_map()
+			.to_vec()
+			.into_iter()
+			.filter(|(id, _)| *id != connection)
+			.map(|(id, _)| Value::Uuid(surrealdb_types::Uuid::from(id)))
+			.collect();
+		Ok(DbResult::Other(Value::Array(sessions)))
+	}
+
 	/// Records a LIVE registration against the session that made it.
 	///
 	/// The namespace and database are snapshotted by the caller off the session

@@ -20,6 +20,10 @@
 //! consumes; the JavaScript SDK is the client here, and it speaks the RPC
 //! envelope directly.
 
+// The engine's futures nest deeply enough that computing their layout exceeds
+// the default limit, as they do for the shims that hold one.
+#![recursion_limit = "256"]
+
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context as TaskContext, Poll};
@@ -39,6 +43,7 @@ use uuid::Uuid;
 
 mod options;
 mod protocol;
+mod stream;
 pub mod wire;
 
 pub use surrealdb_core::rpc::Format;
@@ -48,6 +53,7 @@ pub use surrealdb_rpc::{DbResult, Request};
 pub use self::options::{
 	CapabilitiesConfig, DefaultsConfig, Options, PlannerStrategy, Targets, TargetsConfig,
 };
+pub use self::stream::{EncodedQueryFrames, QueryFrames};
 
 /// An embedded SurrealDB instance addressed over the RPC protocol.
 ///
@@ -67,7 +73,9 @@ pub struct EmbeddedEngine {
 	/// Open client-managed transactions, each tagged with the session that owns
 	/// it so it can be cancelled when that session goes away.
 	transactions: DashMap<Uuid, (Uuid, Arc<Transaction>)>,
-	sessions: HashMap<Uuid, Arc<RwLock<Session>>>,
+	/// Shared with an in-flight query stream, which registers a `LIVE SELECT`
+	/// only against a session that is still attached.
+	sessions: Arc<HashMap<Uuid, Arc<RwLock<Session>>>>,
 	notifications: Receiver<Notification>,
 }
 
@@ -122,7 +130,7 @@ impl EmbeddedEngine {
 		let id = Uuid::now_v7();
 		let mut session = Session::default().with_rt(true);
 		session.id = Some(id);
-		let sessions = HashMap::new();
+		let sessions = Arc::new(HashMap::new());
 		sessions.insert(id, Arc::new(RwLock::new(session)));
 
 		Ok(Self {
@@ -425,6 +433,49 @@ mod tests {
 				.await
 				.expect("the stream should end once the engine is gone")
 				.is_none()
+		);
+	}
+
+	/// Listing sessions returns the ones the caller attached, and never the
+	/// implicit default.
+	///
+	/// A session id is the whole of what is needed to run under that session, so
+	/// handing back the id of the connection's own session would let a caller
+	/// address — or `detach` — the session every unnamed request runs under.
+	#[tokio::test]
+	async fn listing_sessions_hides_the_connections_own() {
+		let engine = engine().await;
+		let attached = Uuid::now_v7();
+
+		let mut obj = Object::default();
+		obj.insert("method".to_owned(), Value::String("attach".to_owned()));
+		obj.insert("session".to_owned(), Value::Uuid(surrealdb_types::Uuid::from(attached)));
+		engine
+			.execute(Request::from_object(obj).expect("an attach request should parse"))
+			.await
+			.expect("attach");
+
+		let mut obj = Object::default();
+		obj.insert("method".to_owned(), Value::String("sessions".to_owned()));
+		let listed = engine
+			.execute(Request::from_object(obj).expect("a sessions request should parse"))
+			.await
+			.expect("sessions");
+		let DbResult::Other(Value::Array(listed)) = listed else {
+			panic!("expected an array of session ids, got {listed:?}");
+		};
+
+		let listed: Vec<Uuid> = listed
+			.into_iter()
+			.map(|value| match value {
+				Value::Uuid(id) => id.into_inner(),
+				other => panic!("expected a uuid, got {other:?}"),
+			})
+			.collect();
+		assert_eq!(listed, vec![attached], "only the attached session is listed");
+		assert!(
+			!listed.contains(&engine.id),
+			"the connection's own session must not be enumerable",
 		);
 	}
 

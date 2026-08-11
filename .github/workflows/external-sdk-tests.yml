@@ -6,6 +6,11 @@ name: SDKs
 
 on:
   workflow_dispatch:
+    inputs:
+      surrealdb-js-ref:
+        description: "The surrealdb.js ref to test the embedded engine against"
+        required: false
+        default: main
   pull_request:
     types:
       - opened
@@ -424,3 +429,139 @@ jobs:
             exit 1
           fi
           echo "✅ All SDK tests passed"
+
+  # --------------------------------------
+  # Embedded engines, through the SDK
+  # --------------------------------------
+
+  # Each module's own suite (`Node engine` and `Wasm engine` in ci.yml) covers its
+  # FFI surface. This covers the pairing: the SDK's `NodeEngine` and
+  # `WebAssemblyEngine` driving builds of this repo's modules, which is the only
+  # place a defect in how the two meet can show up.
+  #
+  # The suite reaches shapes neither module's own tests do, because it drives them
+  # the way the SDK's own API does — `query().retry()` abandons a stream
+  # mid-flight, for one — so it is where a defect in a module's lifetime handling
+  # surfaces rather than in a release.
+  #
+  # Both modules are built even though the suites run separately: surrealdb.js is
+  # one Bun workspace, so a single `bun install` has to satisfy both packages'
+  # native dependencies or it resolves neither.
+  sdk-javascript-embedded:
+    name: SDK - JavaScript (embedded engines)
+    runs-on: runner-amd-16-cores-spot
+    # Manual only until the two modules are published and surrealdb.js's packages
+    # wrap them. Before then the guard below is the honest outcome on every run,
+    # and a permanently red required check teaches people to ignore it. Run it by
+    # hand against a branch that has the wrappers:
+    #   gh workflow run external-sdk-tests.yml -f surrealdb-js-ref=<branch>
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v6.0.2
+        with:
+          path: engine
+
+      - name: Setup environment
+        uses: ./engine/.github/actions/setup-environment
+        with:
+          targets: wasm32-unknown-unknown
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+          cache-key: node
+
+      - name: Setup JavaScript
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      # The CLI and the wasm-bindgen crate share a bindgen schema that changes
+      # between patch releases, so the version comes from the lockfile — the
+      # same source `build.ts` checks against before it runs.
+      - name: Install wasm-bindgen-cli
+        working-directory: engine
+        run: |
+          version=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | grep '^version' | cut -d'"' -f2)
+          echo "Installing wasm-bindgen-cli $version"
+          cargo install -f wasm-bindgen-cli --version "$version"
+
+      - name: Install wasm-opt
+        run: cargo install wasm-opt --version 0.116.1
+
+      - name: Build and pack the addon
+        id: node
+        working-directory: engine/surrealdb/node
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+          # A distinct name per run: `bun install` reuses a cached extraction for
+          # a tarball whose name and version have not changed, which would install
+          # a stale module and test the wrong binary.
+          bun pm pack --destination "${{ runner.temp }}"
+          mv "${{ runner.temp }}"/surrealdb-node-native-*.tgz \
+            "${{ runner.temp }}/addon-${{ github.sha }}.tgz"
+          echo "tarball=${{ runner.temp }}/addon-${{ github.sha }}.tgz" >> "$GITHUB_OUTPUT"
+
+      - name: Build and pack the WebAssembly module
+        id: wasm
+        working-directory: engine/surrealdb/wasm
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+          bun pm pack --destination "${{ runner.temp }}"
+          mv "${{ runner.temp }}"/surrealdb-wasm-native-*.tgz \
+            "${{ runner.temp }}/module-${{ github.sha }}.tgz"
+          echo "tarball=${{ runner.temp }}/module-${{ github.sha }}.tgz" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout surrealdb.js
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v6.0.2
+        with:
+          repository: "surrealdb/surrealdb.js"
+          ref: ${{ inputs.surrealdb-js-ref || 'main' }}
+          path: sdk
+
+      - name: Point the SDK at the modules just built
+        working-directory: sdk
+        run: |
+          # Repointing every package that wraps one of our modules, and failing
+          # when a package does not: without that the job installs, builds and
+          # passes while testing surrealdb.js's own engines, reporting green for a
+          # pairing it never exercised. A silent pass here is worse than no job at
+          # all.
+          python3 - <<'PY'
+          import json, pathlib, sys
+
+          wrappers = {
+              "packages/node/package.json": ("@surrealdb/node-native", "${{ steps.node.outputs.tarball }}"),
+              "packages/wasm/package.json": ("@surrealdb/wasm-native", "${{ steps.wasm.outputs.tarball }}"),
+          }
+
+          missing = []
+          for path, (dependency, tarball) in wrappers.items():
+              manifest = pathlib.Path(path)
+              package = json.loads(manifest.read_text())
+              if dependency not in package.get("dependencies", {}):
+                  missing.append(f"{path} does not depend on {dependency}")
+                  continue
+              package["dependencies"][dependency] = f"file:{tarball}"
+              manifest.write_text(json.dumps(package, indent=4) + "\n")
+
+          if missing:
+              for line in missing:
+                  print(f"::error::{line}, so it builds its own engine and this job")
+                  print("::error::would test nothing about this repo. It becomes meaningful")
+                  print("::error::once the wrapper lands.")
+              sys.exit(1)
+          PY
+
+      - name: Install dependencies
+        working-directory: sdk
+        # Not frozen: the manifests were just repointed at local tarballs.
+        run: bun install
+
+      - name: Run the SDK suite against the embedded Node engine
+        working-directory: sdk
+        run: bun run test:node
+
+      - name: Run the SDK suite against the embedded WebAssembly engine
+        working-directory: sdk
+        run: bun run test:wasm

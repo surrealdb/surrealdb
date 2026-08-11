@@ -7095,7 +7095,10 @@ dependencies = [
  "surrealdb-rpc",
  "surrealdb-types",
  "tokio",
+ "tracing",
  "uuid",
+ "wasm-bindgen-futures",
+ "web-time",
 ]
 
 [[package]]

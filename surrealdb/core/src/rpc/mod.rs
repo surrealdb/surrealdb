@@ -5,4 +5,4 @@ pub mod format;
 
 pub use error::{query_timeout_error, types_error_from_anyhow};
 pub use format::Format;
-pub use protocol::RpcProtocol;
+pub use protocol::{RpcProtocol, live_query_owner};

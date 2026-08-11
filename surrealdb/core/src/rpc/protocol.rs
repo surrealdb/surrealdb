@@ -113,6 +113,46 @@ async fn settle_detached_live_queries(
 /// so this bounds the wait rather than trusting the consumer to.
 const QUERY_STREAM_STOP_GRACE: Duration = Duration::from_secs(5);
 
+/// The session a streaming execution's `LIVE SELECT`s may be registered
+/// against, held so that registering them cannot race the teardown that would
+/// have removed them.
+///
+/// A buffered query registers its live queries while still holding the session
+/// read guard it ran under, so an auth-lifecycle operation — `invalidate`,
+/// `reset`, a `signin` that changes principal — either runs first and is
+/// followed by a registration under the *new* principal, or runs second and its
+/// `cleanup_lqs` finds the registration and removes it. A streaming query
+/// cannot hold that guard: a stream lives as long as its consumer reads, and
+/// holding it would block every `use` / `set` / `signin` on the session behind a
+/// slow client. So it drops the guard and takes this at the end instead.
+///
+/// Two things have to be true, and only both together close the window:
+///
+/// - The session must still be acting as the principal the execution ran as. Checking that the
+///   session merely still *exists* is not enough — `invalidate` clears the authentication and keeps
+///   the session, so its `cleanup_lqs` would sweep an empty map and the registration would land
+///   afterwards, delivering change data under an authorization that had been torn down. That is the
+///   shape GHSA-2xrp-m9c6-75rj describes.
+/// - The guard must be *held* across the registration. Releasing it between the check and the
+///   insert reopens the same window from the other side: a teardown could pass through the gap,
+///   sweep nothing, and leave the registration behind it.
+///
+/// `None` means the live queries have no owner and must be deleted rather than
+/// registered: the session has gone, or it is no longer the principal that
+/// created them. A caller that already told its consumer about an id it must now
+/// discard has to say so — the id will never deliver.
+///
+/// The returned guard is why [`RpcProtocol::handle_live`] must not acquire the
+/// session lock.
+pub async fn live_query_owner(
+	sessions: &HashMap<Uuid, Arc<RwLock<Session>>>,
+	session_id: Uuid,
+	principal: &AuthPrincipalSnapshot,
+) -> Option<tokio::sync::OwnedRwLockReadGuard<Session>> {
+	let session = sessions.get(&session_id)?.read_owned().await;
+	(!principal.differs_from(&session)).then_some(session)
+}
+
 #[expect(async_fn_in_trait)]
 pub trait RpcProtocol {
 	/// The datastore for this RPC interface
@@ -356,6 +396,11 @@ pub trait RpcProtocol {
 	/// any concurrent session-mutating RPC on the same WebSocket
 	/// (signin / signup / authenticate / set / unset / yuse / refresh /
 	/// invalidate / revoke / reset).
+	///
+	/// That rule is load-bearing beyond the deadlock: a streaming caller
+	/// registers with the read guard still held, which is what stops a
+	/// registration racing the teardown that would have removed it. See
+	/// [`live_query_owner`].
 	///
 	/// There is no counterpart hook for ending a registration. A statement that
 	/// ends a subscription does not report the id it ended -- `KILL` resolves to
@@ -1853,6 +1898,11 @@ pub trait RpcProtocol {
 	/// its next yield point and finalises its transaction, where dropping the
 	/// future instead would drop that transaction unfinished. A transport with
 	/// a connection-level handle of its own is used as a fallback.
+	///
+	/// The principal returned alongside the job is the one the execution runs
+	/// as. A caller registering the `LIVE SELECT`s the execution creates must
+	/// pass it to [`live_query_owner`], because by then the session may be
+	/// acting as someone else.
 	async fn query_stream(
 		&self,
 		txn: Option<Uuid>,
@@ -1860,7 +1910,7 @@ pub trait RpcProtocol {
 		params: PublicArray,
 		cancel: Option<CancelHandle>,
 		items: Sender<QueryStreamItem>,
-	) -> Result<QueryStreamJob, surrealdb_types::Error> {
+	) -> Result<(QueryStreamJob, AuthPrincipalSnapshot), surrealdb_types::Error> {
 		// The capability gate lives in `execute`, which this does not go
 		// through: a denied `query` must be denied here too.
 		if !self.kvs().allows_rpc_method(&MethodTarget {
@@ -1882,7 +1932,7 @@ pub trait RpcProtocol {
 		// execution runs against the session as it was when the query started,
 		// which is what the buffered path effectively gives it too — there, a
 		// concurrent mutation simply waits instead.
-		let (query, vars, session) = {
+		let (query, vars, session, principal) = {
 			let session_lock = self.get_session(&session_id).await?;
 			let session = session_lock.read().await;
 			// Check if the user is allowed to query
@@ -1893,7 +1943,11 @@ pub trait RpcProtocol {
 				return Err(bad_lq_config());
 			}
 			let (query, vars) = extract_query_params(params, &session)?;
-			(query, vars, session.clone())
+			// Captured under the same guard as everything else the execution
+			// needs, so it names the principal the query actually runs as rather
+			// than whoever the session belongs to by the time it finishes.
+			let principal = AuthPrincipalSnapshot::capture(&session);
+			(query, vars, session.clone(), principal)
 		};
 
 		// Kept so the wall-clock guard below can stop the execution
@@ -1950,7 +2004,7 @@ pub trait RpcProtocol {
 			statement_count,
 			mut run,
 		} = job;
-		Ok(QueryStreamJob {
+		let job = QueryStreamJob {
 			statement_count,
 			run: Box::pin(async move {
 				let result = match timeout {
@@ -2053,7 +2107,8 @@ pub trait RpcProtocol {
 				}
 				result
 			}),
-		})
+		};
+		Ok((job, principal))
 	}
 
 	/// Cancels an in-flight streaming query by its originating request id.
@@ -2551,6 +2606,98 @@ where
 
 #[cfg(test)]
 mod tests {
+	/// A streaming execution's live queries belong to the principal that created
+	/// them, so the owner is only granted while the session is still acting as
+	/// that principal — not merely while a session of that id exists.
+	///
+	/// `invalidate` keeps the session and clears its authentication, which is the
+	/// case that made "does the session exist" the wrong question: it answers yes
+	/// for a session whose `cleanup_lqs` has already swept the map.
+	mod live_query_ownership {
+		use std::sync::Arc;
+
+		use surrealdb_iam::{Auth, Level};
+		use surrealdb_types::HashMap;
+		use tokio::sync::RwLock;
+		use uuid::Uuid;
+
+		use crate::dbs::{AuthPrincipalSnapshot, Session};
+		use crate::rpc::live_query_owner;
+
+		fn registered(session: Session) -> (HashMap<Uuid, Arc<RwLock<Session>>>, Uuid) {
+			let id = Uuid::now_v7();
+			let sessions = HashMap::new();
+			sessions.insert(id, Arc::new(RwLock::new(session)));
+			(sessions, id)
+		}
+
+		#[tokio::test]
+		async fn an_unchanged_principal_owns_them() {
+			let session = Session {
+				au: Arc::new(Auth::for_root(surrealdb_iam::Role::Owner)),
+				..Default::default()
+			};
+			let principal = AuthPrincipalSnapshot::capture(&session);
+			let (sessions, id) = registered(session);
+
+			assert!(
+				live_query_owner(&sessions, id, &principal).await.is_some(),
+				"the session is still who it was",
+			);
+		}
+
+		#[tokio::test]
+		async fn a_cleared_principal_does_not() {
+			let session = Session {
+				au: Arc::new(Auth::for_root(surrealdb_iam::Role::Owner)),
+				..Default::default()
+			};
+			let principal = AuthPrincipalSnapshot::capture(&session);
+			let (sessions, id) = registered(session);
+
+			// What `invalidate` does: the session stays, its authentication goes.
+			let entry = sessions.get(&id).expect("the session is registered");
+			crate::iam::clear::clear(&mut *entry.write().await).expect("clear");
+
+			assert!(
+				live_query_owner(&sessions, id, &principal).await.is_none(),
+				"an invalidated session does not own what it created before",
+			);
+		}
+
+		#[tokio::test]
+		async fn a_different_level_does_not() {
+			let session = Session {
+				au: Arc::new(Auth::for_root(surrealdb_iam::Role::Owner)),
+				..Default::default()
+			};
+			let principal = AuthPrincipalSnapshot::capture(&session);
+			let (sessions, id) = registered(session);
+
+			let entry = sessions.get(&id).expect("the session is registered");
+			entry.write().await.au = Arc::new(Auth::for_ns(surrealdb_iam::Role::Owner, "ns"));
+
+			assert!(
+				live_query_owner(&sessions, id, &principal).await.is_none(),
+				"the same actor at a different level is a different principal",
+			);
+			// Guard against the assertion passing for the wrong reason.
+			assert!(matches!(entry.read().await.au.level(), Level::Namespace(_)));
+		}
+
+		#[tokio::test]
+		async fn a_session_that_has_gone_does_not() {
+			let session = Session::default();
+			let principal = AuthPrincipalSnapshot::capture(&session);
+			let (sessions, _) = registered(session);
+
+			assert!(
+				live_query_owner(&sessions, Uuid::now_v7(), &principal).await.is_none(),
+				"a session that was never registered owns nothing",
+			);
+		}
+	}
+
 	use std::collections::HashMap as StdHashMap;
 	use std::sync::atomic::{AtomicBool, Ordering};
 	use std::sync::{Arc, Mutex};

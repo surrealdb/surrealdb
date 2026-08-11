@@ -78,6 +78,47 @@ async function connect(
 	return engine;
 }
 
+/** One frame of a streaming query answer. */
+type StreamFrame = {
+	stream: "begin" | "rows" | "value" | "finished" | "end";
+	statements?: number;
+	index?: number;
+	values?: unknown[];
+	value?: unknown;
+	single?: boolean;
+	results?: number;
+	error?: unknown;
+};
+
+/**
+ * Drain a streaming query, returning every frame with the moment it arrived.
+ *
+ * The timings are what distinguish streaming from a buffered answer delivered in
+ * pieces: a frame that arrives before the query has finished could not have been
+ * buffered.
+ */
+async function streamFrames(
+	engine: SurrealWasmEngine,
+	sql: string,
+): Promise<{ frame: StreamFrame; at: number }[]> {
+	const payload = encode({ id: ++nextId, method: "query_stream", params: [sql] });
+	const stream = await engine.query_stream(new Uint8Array(payload));
+	const reader = stream.getReader();
+	const started = performance.now();
+	const frames: { frame: StreamFrame; at: number }[] = [];
+
+	for (;;) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		frames.push({
+			frame: decode(value as Uint8Array) as StreamFrame,
+			at: performance.now() - started,
+		});
+	}
+
+	return frames;
+}
+
 test("reports the engine version", async () => {
 	expect(SurrealWasmEngine.version()).toStartWith("3.");
 
@@ -176,4 +217,119 @@ test("exports and re-imports the database", async () => {
 
 	engine.free();
 	restored.free();
+});
+
+test("streams a query as frames that rebuild the buffered result", async () => {
+	const engine = await connect();
+	await query(engine, "CREATE |person:50| SET n = 1");
+
+	const frames = await streamFrames(engine, "SELECT n FROM person; RETURN 'done';");
+	const kinds = frames.map(({ frame }) => frame.stream);
+
+	expect(kinds[0], "the stream opens by announcing itself").toBe("begin");
+	expect(frames[0]?.frame.statements).toBe(2);
+	expect(kinds.at(-1), "and ends exactly once").toBe("end");
+	expect(kinds.filter((kind) => kind === "end")).toHaveLength(1);
+	expect(frames.at(-1)?.frame.error).toBeUndefined();
+	expect(frames.at(-1)?.frame.results).toBe(2);
+
+	// The 50 rows arrive across several frames, in order, and rebuild the array
+	// the buffered `query` would have returned in one piece.
+	const rowFrames = frames.filter(({ frame }) => frame.stream === "rows" && frame.index === 0);
+	expect(rowFrames.length, "50 rows do not fit in one frame").toBeGreaterThan(1);
+	expect(rowFrames.flatMap(({ frame }) => frame.values ?? [])).toHaveLength(50);
+
+	// The second statement is a bare value, so it arrives whole and says so.
+	const finished = frames.find(({ frame }) => frame.stream === "finished" && frame.index === 1);
+	expect(finished?.frame.single).toBe(true);
+
+	engine.free();
+});
+
+test("rows reach JavaScript before the query has finished", async () => {
+	const engine = await connect();
+	await query(engine, "CREATE |person:50| SET n = 1");
+
+	// The sleep runs after the SELECT, so a buffered answer could not produce a
+	// single row until it was over. Streaming delivers them first.
+	const frames = await streamFrames(engine, "SELECT n FROM person; SLEEP 2s;");
+	const firstRows = frames.find(({ frame }) => frame.stream === "rows");
+	const total = frames.at(-1)?.at ?? 0;
+
+	expect(total, "the query really did take the sleep").toBeGreaterThan(2000);
+	expect(
+		firstRows?.at,
+		`the first rows waited for the sleep (${firstRows?.at}ms of ${total}ms)`,
+	).toBeLessThan(1000);
+
+	engine.free();
+});
+
+test("a query that cannot parse arrives as a terminal frame", async () => {
+	const engine = await connect();
+
+	// The failure belongs to no statement, and rejecting across the boundary
+	// would flatten it to a string — so it comes back structured, on the one
+	// frame an unopened stream produces.
+	const frames = await streamFrames(engine, "SELECT * FROM;");
+
+	expect(frames).toHaveLength(1);
+	expect(frames[0]?.frame.stream).toBe("end");
+	expect(frames[0]?.frame.results).toBe(0);
+
+	const error = frames[0]?.frame.error as { code: number; message: string; kind?: string };
+	expect(error?.message).toContain("Parse error");
+	expect(error?.kind).toBe("Validation");
+	expect(error?.code).toBe(-32000);
+
+	engine.free();
+});
+
+test("abandoning a stream mid-flight leaves the engine usable", async () => {
+	const engine = await connect();
+	await query(engine, "CREATE |person:200| SET n = 1");
+
+	// Cancel the reader while the execution is still running. The driver owns it
+	// and has to finish it anyway: it holds an open transaction.
+	const payload = encode({
+		id: ++nextId,
+		method: "query_stream",
+		params: ["SELECT n FROM person; SLEEP 5s;"],
+	});
+	const stream = await engine.query_stream(new Uint8Array(payload));
+	const reader = stream.getReader();
+	expect((await reader.read()).done).toBe(false);
+	await reader.cancel();
+
+	const [one] = await query<number>(engine, "RETURN 1");
+	expect(one?.result).toBe(1);
+
+	engine.free();
+});
+
+test("cancelling a stream stops an execution the consumer has left behind", async () => {
+	const engine = await connect();
+	await query(engine, "CREATE |person:200| SET n = 1");
+
+	// The sleep parks the execution with the `CREATE` still ahead of it, which is
+	// what makes the stop observable. Without a pause the executor runs ahead of
+	// the consumer — it is buffered, not lock-step — so a write that close to the
+	// front of the query has already happened by the time a first frame arrives.
+	const payload = encode({
+		id: ++nextId,
+		method: "query_stream",
+		params: ["SELECT n FROM person; SLEEP 1s; CREATE person:late SET n = 1;"],
+	});
+	const stream = await engine.query_stream(new Uint8Array(payload));
+	const reader = stream.getReader();
+	expect((await reader.read()).done).toBe(false);
+	await reader.cancel();
+
+	// Past the sleep the abandoned execution would have waited out.
+	await new Promise((resolve) => setTimeout(resolve, 2000));
+
+	const [late] = await query<unknown[]>(engine, "SELECT * FROM person:late");
+	expect(late?.result, "the statement past the sleep never ran").toEqual([]);
+
+	engine.free();
 });
