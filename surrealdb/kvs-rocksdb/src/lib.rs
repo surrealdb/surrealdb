@@ -721,7 +721,7 @@ impl Datastore {
 		//       want to stall the async runtime for the duration.
 		let compact_on_shutdown = self.compact_on_shutdown;
 		let wait_for_compact_seconds = self.shutdown_wait_for_compact_seconds;
-		let cleanup: Result<()> = affinitypool::spawn_local(move || {
+		let lsm_cleanup = move || -> Result<()> {
 			// (3) Optional full-keyspace compaction. Mirrors the
 			//     `Transactable::compact` impl: change_level=true,
 			//     target_level=6, bottommost_level_compaction=Force so
@@ -765,8 +765,12 @@ impl Datastore {
 			info!(target: TARGET, "Cancelling background work");
 			self.db.cancel_all_background_work(true);
 			Ok(())
-		})
-		.await;
+		};
+		// SAFETY: `lsm_cleanup` borrows `self`, so the returned future must not
+		// be leaked while that borrow is live. It is awaited inline here and
+		// never stored, so its destructor — which blocks until the worker has
+		// stopped touching the borrow — always runs before `shutdown` returns.
+		let cleanup = unsafe { affinitypool::spawn_local(lsm_cleanup) }.await;
 		if let Err(e) = cleanup {
 			error!("An error occurred during shutdown cleanup: {e}");
 		}
@@ -2366,10 +2370,17 @@ impl Transactable for Transaction {
 				// Acquire the lock before dispatching: tokio Mutex requires an
 				// async context, which `spawn_local`'s closure does not have.
 				let guard = self.inner.lock().await;
-				return affinitypool::spawn_local(move || {
-					// Run the serial count
-					self.count_blocking(rng, version, guard)
-				})
+				// SAFETY: the closure borrows `self` and holds the inner
+				// `MutexGuard`, so the returned future must not be leaked while
+				// those borrows are live. It is awaited inline here and never
+				// stored, so its destructor — which blocks until the worker has
+				// stopped touching the borrows — always runs before they expire.
+				return unsafe {
+					affinitypool::spawn_local(move || {
+						// Run the serial count
+						self.count_blocking(rng, version, guard)
+					})
+				}
 				.await;
 			}
 			// Decide how many shards to dispatch, bounded by the machine
@@ -2392,10 +2403,17 @@ impl Transactable for Transaction {
 				// Acquire the lock before dispatching: tokio Mutex requires an
 				// async context, which `spawn_local`'s closure does not have.
 				let guard = self.inner.lock().await;
-				return affinitypool::spawn_local(move || {
-					// Run the serial count
-					self.count_blocking(rng, version, guard)
-				})
+				// SAFETY: the closure borrows `self` and holds the inner
+				// `MutexGuard`, so the returned future must not be leaked while
+				// those borrows are live. It is awaited inline here and never
+				// stored, so its destructor — which blocks until the worker has
+				// stopped touching the borrows — always runs before they expire.
+				return unsafe {
+					affinitypool::spawn_local(move || {
+						// Run the serial count
+						self.count_blocking(rng, version, guard)
+					})
+				}
 				.await;
 			}
 			// Build all shard `ReadOptions` under the inner lock so each shard
@@ -2426,7 +2444,7 @@ impl Transactable for Transaction {
 			for (sub_rng, ro) in scans {
 				// Clone the Arc'd handle so each shard owns its own reference
 				let db = self.db.clone();
-				tasks.push(affinitypool::spawn_local(move || -> Result<usize> {
+				let count_shard = move || -> Result<usize> {
 					// Create the iterator on the database
 					let mut iter = db.raw_iterator_opt(ro);
 					// Seek to the start key
@@ -2442,7 +2460,15 @@ impl Transactable for Transaction {
 					iter.status().map_err(kvs_error)?;
 					// Return the per-shard count
 					Ok(res)
-				}));
+				};
+				// SAFETY: each shard's `ReadOptions` holds the transaction's
+				// snapshot pointer, which stays valid only while `inner.tx`
+				// lives. The blocking drop of the returned future is what keeps
+				// a shard from iterating past that point, so no future may be
+				// leaked: they are collected into `tasks`, joined below, and
+				// dropped there — `try_join_all` drops the outstanding ones on
+				// the error path, blocking on each in turn.
+				tasks.push(unsafe { affinitypool::spawn_local(count_shard) });
 			}
 			// Run all shard scans concurrently and sum the per-shard counts
 			let counts = futures::future::try_join_all(tasks).await?;
@@ -2490,9 +2516,16 @@ impl Transactable for Transaction {
 			// the permit-aware path for short bounded ops only.
 			if self.write {
 				let guard = self.inner.lock().await;
-				return affinitypool::spawn_local(move || {
-					self.keys_blocking(rng, limit, skip, version, Direction::Forward, guard)
-				})
+				// SAFETY: the closure borrows `self` and holds the inner
+				// `MutexGuard`, so the returned future must not be leaked while
+				// those borrows are live. It is awaited inline here and never
+				// stored, so its destructor — which blocks until the worker has
+				// stopped touching the borrows — always runs before they expire.
+				return unsafe {
+					affinitypool::spawn_local(move || {
+						self.keys_blocking(rng, limit, skip, version, Direction::Forward, guard)
+					})
+				}
 				.await;
 			}
 			self.run_blocking(move |guard| {
@@ -2533,9 +2566,16 @@ impl Transactable for Transaction {
 			// the permit-aware path for short bounded ops only.
 			if self.write {
 				let guard = self.inner.lock().await;
-				return affinitypool::spawn_local(move || {
-					self.keys_blocking(rng, limit, skip, version, Direction::Backward, guard)
-				})
+				// SAFETY: the closure borrows `self` and holds the inner
+				// `MutexGuard`, so the returned future must not be leaked while
+				// those borrows are live. It is awaited inline here and never
+				// stored, so its destructor — which blocks until the worker has
+				// stopped touching the borrows — always runs before they expire.
+				return unsafe {
+					affinitypool::spawn_local(move || {
+						self.keys_blocking(rng, limit, skip, version, Direction::Backward, guard)
+					})
+				}
 				.await;
 			}
 			self.run_blocking(move |guard| {
@@ -2576,9 +2616,16 @@ impl Transactable for Transaction {
 			// the permit-aware path for short bounded ops only.
 			if self.write {
 				let guard = self.inner.lock().await;
-				return affinitypool::spawn_local(move || {
-					self.scan_blocking(rng, limit, skip, version, Direction::Forward, guard)
-				})
+				// SAFETY: the closure borrows `self` and holds the inner
+				// `MutexGuard`, so the returned future must not be leaked while
+				// those borrows are live. It is awaited inline here and never
+				// stored, so its destructor — which blocks until the worker has
+				// stopped touching the borrows — always runs before they expire.
+				return unsafe {
+					affinitypool::spawn_local(move || {
+						self.scan_blocking(rng, limit, skip, version, Direction::Forward, guard)
+					})
+				}
 				.await;
 			}
 			self.run_blocking(move |guard| {
@@ -2619,9 +2666,16 @@ impl Transactable for Transaction {
 			// the permit-aware path for short bounded ops only.
 			if self.write {
 				let guard = self.inner.lock().await;
-				return affinitypool::spawn_local(move || {
-					self.scan_blocking(rng, limit, skip, version, Direction::Backward, guard)
-				})
+				// SAFETY: the closure borrows `self` and holds the inner
+				// `MutexGuard`, so the returned future must not be leaked while
+				// those borrows are live. It is awaited inline here and never
+				// stored, so its destructor — which blocks until the worker has
+				// stopped touching the borrows — always runs before they expire.
+				return unsafe {
+					affinitypool::spawn_local(move || {
+						self.scan_blocking(rng, limit, skip, version, Direction::Backward, guard)
+					})
+				}
 				.await;
 			}
 			self.run_blocking(move |guard| {
@@ -2817,21 +2871,29 @@ impl Transactable for Transaction {
 			// Force the bottommost SSTs to be rewritten
 			copts.set_bottommost_level_compaction(BottommostLevelCompaction::Force);
 			// Spawn a new task to compact the range
-			affinitypool::spawn_local(move || {
-				// Flush the WAL to storage
-				self.db.flush_wal(true).map_err(kvs_error)?;
-				// Flush the memtables to SST
-				self.db.flush_opt(&fopts).map_err(kvs_error)?;
-				// Get the compaction range
-				let (start, end) = match range {
-					Some((start, end)) => (Some(start), Some(end)),
-					None => (None, None),
-				};
-				// Compact the specified range with the bottommost target.
-				self.db.compact_range_opt(start, end, &copts);
-				// All ok
-				Ok(())
-			})
+			//
+			// SAFETY: the closure borrows `self`, so the returned future must
+			// not be leaked while that borrow is live. It is awaited inline here
+			// and never stored, so its destructor — which blocks until the
+			// worker has stopped touching the borrow — always runs before the
+			// enclosing future completes.
+			unsafe {
+				affinitypool::spawn_local(move || {
+					// Flush the WAL to storage
+					self.db.flush_wal(true).map_err(kvs_error)?;
+					// Flush the memtables to SST
+					self.db.flush_opt(&fopts).map_err(kvs_error)?;
+					// Get the compaction range
+					let (start, end) = match range {
+						Some((start, end)) => (Some(start), Some(end)),
+						None => (None, None),
+					};
+					// Compact the specified range with the bottommost target.
+					self.db.compact_range_opt(start, end, &copts);
+					// All ok
+					Ok(())
+				})
+			}
 			.await
 		})
 	}

@@ -552,8 +552,8 @@ impl Transactable for Transaction {
 			let end = rng.end;
 			// Load the inner transaction
 			let inner = self.inner.read().await;
-			// Execute on the blocking threadpool
-			let res = affinitypool::spawn_local(move || -> Result<_> {
+			// Build the counting closure, which borrows the key range
+			let count_range = move || -> Result<_> {
 				// Store the count
 				let mut count = 0;
 				//
@@ -611,8 +611,15 @@ impl Transactable for Transaction {
 				}
 				// Return result
 				Ok(count)
-			})
-			.await?;
+			};
+			// Execute on the blocking threadpool
+			//
+			// SAFETY: `count_range` borrows `rng` through `beg`/`end` and holds
+			// the inner read guard, so the returned future must not be leaked
+			// while those borrows are live. It is awaited inline here and never
+			// stored, so its destructor — which blocks until the worker has
+			// stopped touching the borrows — always runs before they expire.
+			let res = unsafe { affinitypool::spawn_local(count_range) }.await?;
 			// Return result
 			Ok(res)
 		})

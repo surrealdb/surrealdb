@@ -93,6 +93,15 @@ impl InlineGuard {
 	/// borrow of caller state (e.g. cursor batch advance). For ops that
 	/// need to acquire the transaction inner Mutex, see
 	/// `Transaction::run_blocking` which folds in the lock acquire.
+	///
+	/// **Callers must not leak the returned future.** On the diverted
+	/// branch the op runs on a pool worker, and only the future's
+	/// destructor — which blocks until that worker has stopped — keeps
+	/// the closure's borrows from dangling. Dropping the future normally
+	/// (including on cancellation) upholds this; `mem::forget`,
+	/// `Box::leak`, `ManuallyDrop`, or embedding it in another future
+	/// that is itself leaked does not. Every call site in this crate
+	/// awaits the future immediately.
 	#[cfg(not(target_family = "wasm"))]
 	pub(super) async fn try_inline_or_offload<'a, F, R>(&self, op: F) -> R
 	where
@@ -106,7 +115,12 @@ impl InlineGuard {
 			}
 			Err(_) => {
 				self.diverted.fetch_add(1, Ordering::Relaxed);
-				affinitypool::spawn_local(op).await
+				// SAFETY: `op` may borrow non-`'static` data, so the pool future
+				// must not be leaked. It is awaited inline here, which makes it
+				// part of the future this `async fn` returns — the no-leak
+				// obligation therefore lands on our callers, and is documented
+				// on this function.
+				unsafe { affinitypool::spawn_local(op) }.await
 			}
 		}
 	}

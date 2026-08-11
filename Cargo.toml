@@ -127,7 +127,7 @@ surrealism-types = { version = "0.5", path = "surrealism/types", default-feature
 
 
 # External surreal crates
-affinitypool = "0.7.0"
+affinitypool = "0.8.0"
 dmp = "0.2.3"
 lexicmp = "0.2.0"
 revision = { version = "0.30.0", features = [

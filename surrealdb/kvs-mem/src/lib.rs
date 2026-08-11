@@ -520,14 +520,22 @@ impl Transactable for Transaction {
 			// Load the inner transaction
 			let inner = self.inner.read().await;
 			// Execute on the blocking threadpool
-			let res = affinitypool::spawn_local(move || -> Result<_> {
-				// Count the items in the range
-				let res = inner
-					.total(beg.into_inner()..end.into_inner(), None, None)
-					.map_err(kvs_error)?;
-				// Return result
-				Ok(res)
-			})
+			//
+			// SAFETY: the closure borrows `rng` through `beg`/`end` and holds
+			// the inner read guard, so the returned future must not be leaked
+			// while those borrows are live. It is awaited inline here and never
+			// stored, so its destructor — which blocks until the worker has
+			// stopped touching the borrows — always runs before they expire.
+			let res = unsafe {
+				affinitypool::spawn_local(move || -> Result<_> {
+					// Count the items in the range
+					let res = inner
+						.total(beg.into_inner()..end.into_inner(), None, None)
+						.map_err(kvs_error)?;
+					// Return result
+					Ok(res)
+				})
+			}
 			.await?;
 			// Return result
 			Ok(res)

@@ -6,17 +6,15 @@
 /// `kv-surrealkv` storage backends to run synchronous storage work off the
 /// tokio runtime.
 ///
-/// Default: `num_cpus::get()` on hosts with at least 16 logical cores
-/// (matching the legacy `thread_per_core` behaviour with one pinned
+/// Default: `num_cpus::get()` on hosts with at least 16 logical cores (one
 /// worker per core), `16` on smaller hosts. Override with
 /// `SURREAL_KVS_THREADPOOL_SIZE=<N>` (minimum `4`) to oversubscribe (more
 /// concurrent blocking-IO slots, useful when many workers stall on disk
 /// reads or fsyncs) or undersubscribe (cap blocking concurrency below
 /// core count).
 ///
-/// Explicit overrides drop the per-core CPU pinning that the default
-/// applies on >=16-core hosts — pinning only makes sense when the
-/// worker count exactly matches the core count.
+/// Workers are never pinned to cores; placement is left to the OS
+/// scheduler.
 ///
 /// **Minimum: 4.** Some kvs operations always run on this pool — read-only
 /// `count` with sharded fan-out, `compact`, writable scans — and below ~4
@@ -60,17 +58,11 @@ pub static KVS_THREADPOOL_SIZE: std::sync::LazyLock<usize> = std::sync::LazyLock
 
 /// Create the shared KVS blocking threadpool.
 ///
-/// Size and pinning behaviour are driven by [`KVS_THREADPOOL_SIZE`]:
-///
-/// * When the resolved size matches the host's logical core count *and* that count is at least 16,
-///   the pool uses `affinitypool::thread_per_core` so each worker is pinned to a dedicated core.
-///   This is the default on ≥16-core hosts.
-/// * When the size is below 16 on a small-core host (the computed default floor), the pool is sized
-///   to 16 unpinned workers — enough slack to absorb short bursts of blocking I/O without occupying
-///   every core.
-/// * When `SURREAL_KVS_THREADPOOL_SIZE` is set to an explicit value that does not equal the core
-///   count (oversubscription or undersubscription), the pool drops pinning and uses that exact
-///   worker count.
+/// The worker count is [`KVS_THREADPOOL_SIZE`]: one worker per logical core
+/// on ≥16-core hosts, a floor of 16 unpinned workers on smaller ones (enough
+/// slack to absorb short bursts of blocking I/O without occupying every
+/// core), or the exact `SURREAL_KVS_THREADPOOL_SIZE` value when set. Worker
+/// placement is left to the OS scheduler in every case.
 pub fn initialise() {
 	// Create the threadpool and ignore errors
 	#[cfg(not(target_family = "wasm"))]
@@ -78,22 +70,11 @@ pub fn initialise() {
 		// Resolve the configured pool size (env-overridable; default
 		// computed from `num_cpus::get()` with a 16-thread floor).
 		let threads = *KVS_THREADPOOL_SIZE;
-		// Cache the host's logical core count once so the pinning
-		// decision is consistent with the size resolution above.
-		let cores = num_cpus::get();
-		// Create the threadpool builder
-		let builder = affinitypool::Builder::new().thread_name("surrealdb-threadpool");
-		// Pin one worker per core only when the configured size exactly
-		// matches the core count on a ≥16-core host. Any explicit
-		// over/under-subscription drops pinning, since pinning a count
-		// other than `num_cpus` is either impossible (too many) or
-		// leaves cores unused (too few).
-		let builder = if threads == cores && cores >= 16 {
-			builder.thread_per_core(true)
-		} else {
-			builder.worker_threads(threads)
-		};
 		// Create the threadpool and ignore errors
-		let _ = builder.build().build_global();
+		let _ = affinitypool::Builder::new()
+			.thread_name("surrealdb-threadpool")
+			.worker_threads(threads)
+			.build()
+			.build_global();
 	}
 }
