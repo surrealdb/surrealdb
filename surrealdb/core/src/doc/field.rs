@@ -711,8 +711,14 @@ impl FieldEditContext<'_> {
 					let now = Arc::new(val.clone());
 					// Get the current document
 					let doc = Some(&self.doc.current);
-					// Disable permission recursion and block side effects
-					let opt = &self.opt.new_for_permission_predicate();
+					// Disable permission recursion, and block side effects
+					// unless the `mutable_permissions` capability opens up these
+					// write-triggered (create/update) field clauses.
+					let opt = &crate::doc::check::permission_predicate_frame(
+						self.ctx,
+						self.opt,
+						crate::doc::check::PermissionClauseKind::Write,
+					);
 					// Configure the context
 					// Configure the context
 					let ctx = match self.context.take() {

@@ -112,3 +112,44 @@ fn mutations_require_a_write_transaction() {
 		assert!(!read_only(sql), "`{sql}` claimed to be read-only");
 	}
 }
+
+/// Composite literals evaluate their element expressions in place, so a
+/// mutation inside one needs a write transaction.
+#[test]
+fn a_mutation_in_a_composite_literal_requires_a_write_transaction() {
+	let cases = [
+		("array literal", "RETURN [(CREATE log)]"),
+		("set literal", "RETURN <set> [(CREATE log)]"),
+		("object literal", "RETURN { w: (CREATE log) }"),
+		("record id key", "RETURN r_thing:[(CREATE log).n]"),
+		("record id range", "SELECT * FROM r_thing:[(CREATE log).n].."),
+	];
+	assert_none_claim_read_only(&cases);
+}
+
+/// Closures execute bodies the statement text may not reveal. A call on
+/// anything but a closure literal, a call argument, and a writing literal
+/// body must all over-approximate to writable.
+#[test]
+fn closures_that_may_write_require_a_write_transaction() {
+	let cases = [
+		("call on a param", "RETURN $fn(1)"),
+		("call argument", "RETURN (|$n| $n)((CREATE log).n)"),
+		("writing literal body, called", "RETURN (|| { CREATE log })()"),
+		("writing literal body, as a value", "RETURN [|| { CREATE log }]"),
+		(
+			"writing literal body, as a builtin argument",
+			"RETURN array::map([1], || { CREATE log })",
+		),
+	];
+	assert_none_claim_read_only(&cases);
+}
+
+/// The precision that keeps the previous test honest: a call on a closure
+/// literal whose body is read-only keeps its read transaction.
+#[test]
+fn a_pure_literal_closure_call_keeps_its_read_transaction() {
+	for sql in ["RETURN (|$n: number| $n + 1)(1)", "SELECT * FROM (|| 1)()"] {
+		assert!(read_only(sql), "`{sql}` should not need a write transaction");
+	}
+}

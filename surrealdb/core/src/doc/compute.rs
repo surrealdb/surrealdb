@@ -173,7 +173,14 @@ impl Document {
 			// executes with their own privilege. Mirrors the write-side
 			// `process_table_fields` and the streaming
 			// `compute_fields_for_value`.
-			let opt = &opt.limited_by(&AuthLimit::try_from(&fd.auth_limit)?);
+			//
+			// SECURITY: and refuse writes from the body, whichever auth it runs
+			// under. `Expr::contains_mutation` rejects a mutation written into
+			// the body at definition time but cannot see through a call to a
+			// user-defined function, so without this a read of the field would
+			// mutate the database as the definer.
+			let opt =
+				&opt.limited_by(&AuthLimit::try_from(&fd.auth_limit)?).new_for_computed_field();
 
 			let mut val = crate::legacy::expr_compute(computed, stk, ctx, opt, Some(doc))
 				.await

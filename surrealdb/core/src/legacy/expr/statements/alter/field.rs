@@ -138,6 +138,20 @@ pub(crate) async fn alter_field_statement_compute(
 		);
 	}
 
+	// ALTER stores the same shape DEFINE does, so the assembled definition must
+	// satisfy the same read-only rules: the SELECT guard never modifies data
+	// (GHSA-66r2-5gwj-gxm2), and the create/update guards only when the
+	// `mutable_permissions` capability is enabled.
+	crate::fnc::mutability::ensure_permission_clauses_read_only(
+		ctx,
+		opt,
+		"field",
+		name.clone(),
+		[&df.select_permission],
+		[&df.create_permission, &df.update_permission],
+	)
+	.await?;
+
 	let key = FieldKey {
 		ns,
 		db,

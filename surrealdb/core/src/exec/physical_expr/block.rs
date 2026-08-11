@@ -79,15 +79,11 @@ fn get_legacy_context(
 		.options()
 		.ok_or_else(|| anyhow::anyhow!("Options not available for legacy compute fallback"))?;
 
-	// When this block is evaluated inside a PERMISSIONS predicate (signalled by
-	// `skip_fetch_perms`), block write side effects on the legacy compute
-	// fallback so a predicate cannot mutate data via a custom function body or
-	// nested statement (GHSA-66r2-5gwj-gxm2).
-	let options = if permission_predicate {
-		options.new_for_permission_predicate()
-	} else {
-		options.clone()
-	};
+	let options = crate::exec::plan_or_compute::legacy_fallback_options(
+		options,
+		permission_predicate,
+		exec_ctx.root().computing_field,
+	);
 
 	// Use or create a cached context for legacy compute
 	let frozen = if let Some(ctx) = cached_ctx.take() {

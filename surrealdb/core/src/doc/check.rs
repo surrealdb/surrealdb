@@ -360,8 +360,15 @@ impl Document {
 		doc: &CursorDoc,
 	) -> Result<(), IgnoreError> {
 		if self.id.is_some() && ctx.check_perms(opt, Action::View)? {
-			self.process_permissions(stk, ctx, opt, doc, &self.doc_ctx.tb()?.permissions.select)
-				.await?;
+			self.process_permissions(
+				stk,
+				ctx,
+				opt,
+				doc,
+				&self.doc_ctx.tb()?.permissions.select,
+				PermissionClauseKind::Read,
+			)
+			.await?;
 		}
 		Ok(())
 	}
@@ -377,8 +384,15 @@ impl Document {
 		doc: &CursorDoc,
 	) -> Result<(), IgnoreError> {
 		if self.id.is_some() && ctx.check_perms(opt, Action::Edit)? {
-			self.process_permissions(stk, ctx, opt, doc, &self.doc_ctx.tb()?.permissions.create)
-				.await?;
+			self.process_permissions(
+				stk,
+				ctx,
+				opt,
+				doc,
+				&self.doc_ctx.tb()?.permissions.create,
+				PermissionClauseKind::Write,
+			)
+			.await?;
 		}
 		Ok(())
 	}
@@ -394,8 +408,15 @@ impl Document {
 		doc: &CursorDoc,
 	) -> Result<(), IgnoreError> {
 		if self.id.is_some() && ctx.check_perms(opt, Action::Edit)? {
-			self.process_permissions(stk, ctx, opt, doc, &self.doc_ctx.tb()?.permissions.update)
-				.await?;
+			self.process_permissions(
+				stk,
+				ctx,
+				opt,
+				doc,
+				&self.doc_ctx.tb()?.permissions.update,
+				PermissionClauseKind::Write,
+			)
+			.await?;
 		}
 		Ok(())
 	}
@@ -411,8 +432,15 @@ impl Document {
 		doc: &CursorDoc,
 	) -> Result<(), IgnoreError> {
 		if self.id.is_some() && ctx.check_perms(opt, Action::Edit)? {
-			self.process_permissions(stk, ctx, opt, doc, &self.doc_ctx.tb()?.permissions.delete)
-				.await?;
+			self.process_permissions(
+				stk,
+				ctx,
+				opt,
+				doc,
+				&self.doc_ctx.tb()?.permissions.delete,
+				PermissionClauseKind::Write,
+			)
+			.await?;
 		}
 		Ok(())
 	}
@@ -445,6 +473,12 @@ impl Document {
 	/// is computed against `doc` with permission checks disabled on the
 	/// nested `Options`, so the predicate itself cannot recursively trip
 	/// table-level permission gates.
+	///
+	/// A `Read` clause (`SELECT`) is always evaluated write-blocked. A `Write`
+	/// clause (create/update/delete) is write-blocked too, unless the
+	/// `mutable_permissions` capability is enabled — the transitional escape
+	/// hatch that lets those predicates carry side effects (see
+	/// [`permission_predicate_frame`]).
 	async fn process_permissions(
 		&self,
 		stk: &mut Stk,
@@ -452,13 +486,15 @@ impl Document {
 		opt: &Options,
 		doc: &CursorDoc,
 		perms: &Permission,
+		clause: PermissionClauseKind,
 	) -> Result<(), IgnoreError> {
 		match perms {
 			Permission::None => Err(IgnoreError::Ignore),
 			Permission::Full => Ok(()),
 			Permission::Specific(e) => {
-				// Disable permission recursion and block side effects
-				let opt = &opt.new_for_permission_predicate();
+				// Disable permission recursion, and block side effects unless
+				// the capability opens this clause up.
+				let opt = &permission_predicate_frame(ctx, opt, clause);
 				// Process the PERMISSION clause
 				if !stk
 					.run(|stk| crate::legacy::expr_compute(e, stk, ctx, opt, Some(doc)))
@@ -471,5 +507,38 @@ impl Document {
 				Ok(())
 			}
 		}
+	}
+}
+
+/// Which kind of permission clause is being evaluated, for the runtime
+/// write-frame decision.
+#[derive(Clone, Copy)]
+pub(crate) enum PermissionClauseKind {
+	/// `PERMISSIONS FOR select` — evaluated on reads; always write-blocked.
+	Read,
+	/// `PERMISSIONS FOR create/update/delete` — evaluated during a write;
+	/// write-blocked unless the `mutable_permissions` capability is enabled.
+	Write,
+}
+
+/// Derive the `Options` frame for evaluating a permission predicate.
+///
+/// Always disables permission recursion. Blocks data-modifying statements
+/// (GHSA-66r2-5gwj-gxm2) for every `Read` clause, and for `Write` clauses too
+/// unless the `mutable_permissions` capability is enabled — the transitional
+/// escape hatch that permits side effects in create/update/delete predicates.
+pub(crate) fn permission_predicate_frame(
+	ctx: &FrozenContext,
+	opt: &Options,
+	clause: PermissionClauseKind,
+) -> Options {
+	let writes_allowed = matches!(clause, PermissionClauseKind::Write)
+		&& ctx
+			.get_capabilities()
+			.allows_experimental(&crate::dbs::capabilities::ExperimentalTarget::MutablePermissions);
+	if writes_allowed {
+		opt.new_for_permission_predicate_allow_writes()
+	} else {
+		opt.new_for_permission_predicate()
 	}
 }

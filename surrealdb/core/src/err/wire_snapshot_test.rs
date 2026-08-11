@@ -1022,9 +1022,39 @@ fn every_exec_variant() -> Vec<(&'static str, ExecError)> {
 			},
 		),
 		("PermissionPredicateSideEffect", ExecError::PermissionPredicateSideEffect),
+		("ComputedFieldSideEffect", ExecError::ComputedFieldSideEffect),
 		(
 			"PermissionClauseNotReadonly",
 			ExecError::PermissionClauseNotReadonly {
+				kind: "sample",
+				name: "sample".to_string(),
+			},
+		),
+		(
+			"PermissionWriteViaFunction",
+			ExecError::PermissionWriteViaFunction {
+				kind: "sample",
+				name: "sample".to_string(),
+				function: "sample".to_string(),
+			},
+		),
+		(
+			"ComputedWriteViaFunction",
+			ExecError::ComputedWriteViaFunction {
+				field: "sample".to_string(),
+				function: "sample".to_string(),
+			},
+		),
+		(
+			"FunctionRequiredReadOnly",
+			ExecError::FunctionRequiredReadOnly {
+				name: "sample".to_string(),
+				consumers: "sample".to_string(),
+			},
+		),
+		(
+			"MutablePermissionsDisabled",
+			ExecError::MutablePermissionsDisabled {
 				kind: "sample",
 				name: "sample".to_string(),
 			},

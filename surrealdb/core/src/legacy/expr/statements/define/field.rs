@@ -95,14 +95,19 @@ pub(crate) async fn define_field_statement_compute(
 	// Allowed to run?
 	ctx.is_allowed(opt, Action::Edit, ResourceKind::Field, Base::Db)?;
 
-	// A PERMISSIONS clause must not perform writes (GHSA-66r2-5gwj-gxm2).
-	if this.permissions.has_direct_write() {
-		return Err(ExecError::PermissionClauseNotReadonly {
-			kind: "field",
-			name: definition.name.to_sql(),
-		}
-		.into());
-	}
+	// A SELECT PERMISSIONS clause must not perform writes (GHSA-66r2-5gwj-gxm2),
+	// directly or through a function call. The create/update clauses are held to
+	// the same rule unless the `mutable_permissions` capability is on. (Fields
+	// carry no delete permission.)
+	crate::fnc::mutability::ensure_permission_clauses_read_only(
+		ctx,
+		opt,
+		"field",
+		definition.name.to_sql(),
+		[&this.permissions.select],
+		[&this.permissions.create, &this.permissions.update],
+	)
+	.await?;
 
 	// Validate any GRAPHQL_ALIAS at definition time so typos surface here
 	// rather than silently falling back at schema-generation time.
@@ -115,6 +120,7 @@ pub(crate) async fn define_field_statement_compute(
 	// Validate computed options
 	crate::legacy::define_field_statement_validate_computed_options(
 		this,
+		opt,
 		ns,
 		db,
 		ctx.tx(),
@@ -406,6 +412,7 @@ pub(crate) async fn define_field_statement_process_recursive_definitions(
 
 pub(crate) async fn define_field_statement_validate_computed_options(
 	this: &DefineFieldStatement,
+	opt: &Options,
 	ns: NamespaceId,
 	db: DatabaseId,
 	txn: Arc<Transaction>,
@@ -414,21 +421,41 @@ pub(crate) async fn define_field_statement_validate_computed_options(
 	// Find all existing field definitions
 	let fields = txn.all_tb_fields(ns, db, &definition.table, None).await?;
 	if let Some(computed) = this.computed.as_ref() {
-		// A COMPUTED body is evaluated on every read of the field, inside the
-		// reading statement's own transaction — which is read-only for a plain
-		// SELECT. A write in the body can therefore never succeed; it only turns
-		// every later read of the field into an error, and the two execution
-		// engines report that error differently. Reject it here so the failure
-		// lands on the definition instead.
+		// A COMPUTED body is evaluated on every read of the field, under a
+		// frame that refuses writes at runtime. A write in the body can
+		// therefore never succeed; it only turns every later read of the
+		// field into an error. Reject it here so the failure lands on the
+		// definition instead.
 		//
 		// `contains_mutation` walks the whole body — subqueries, idiom parts,
-		// blocks, closure bodies and call arguments — because unlike a
-		// PERMISSIONS clause a COMPUTED body has no runtime guard behind it. A
-		// function *call* stays opaque: the callee is stored separately and can
-		// be redefined after this field is, so definition time cannot be sound
-		// about it, and read-only helpers like `COMPUTED fn::score(n)` must keep
-		// working. A write reached through a call still fails at read time.
+		// blocks, closure bodies and call arguments.
 		ensure!(!computed.contains_mutation(), ExecError::ComputedWrite(definition.name.to_sql()));
+
+		// A function *call* is resolved against the callee bodies stored in
+		// this snapshot, so a provable write behind a call is refused too,
+		// naming the function. The other half of the rule guards the other
+		// order: redefining a callee to write is refused while this field
+		// depends on it (`ensure_function_stays_read_only_for_consumers`).
+		// Opaque callables (scripts, `eval`, closures arriving as data) and
+		// callees not yet defined stay accepted — those can be pure, and the
+		// runtime frame backstops them. Skipped under import so existing
+		// exports keep restoring.
+		if !opt.import
+			&& let Some(function) = crate::fnc::mutability::provable_writer_via_calls(
+				&txn,
+				ns,
+				db,
+				&computed.function_facts(),
+				&std::collections::HashMap::new(),
+			)
+			.await?
+		{
+			return Err(ExecError::ComputedWriteViaFunction {
+				field: definition.name.to_sql(),
+				function,
+			}
+			.into());
+		}
 
 		// Ensure the field is not the `id` field
 		ensure!(!definition.name.is_id(), ExecError::IdFieldKeywordConflict("COMPUTED".into()));

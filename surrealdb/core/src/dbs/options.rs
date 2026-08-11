@@ -33,14 +33,12 @@ pub struct Options {
 	pub(crate) force: Force,
 	/// Should we run permissions checks?
 	pub(crate) perms: bool,
-	/// Are we evaluating a `PERMISSIONS` predicate (WHERE clause)?
+	/// Why a data-modifying statement is rejected in this frame, if it is.
 	///
-	/// Permission predicates are computed with `perms` disabled so they don't
-	/// recurse into their own table's gates. While that is in effect, mutating
-	/// statements (CREATE/UPDATE/DELETE/RELATE/INSERT/UPSERT and DDL) must be
-	/// rejected so a predicate cannot produce observable side effects
-	/// (see `SECURITY_GUIDE.md`).
-	pub(crate) permission_predicate: bool,
+	/// Both reasons are stored expressions that a *read* evaluates, so a write
+	/// reached from one is a side effect the reading statement never asked for.
+	/// See [`NoWriteFrame`] and `SECURITY_GUIDE.md`.
+	pub(crate) no_write: Option<NoWriteFrame>,
 	/// Should we process field queries?
 	pub(crate) import: bool,
 	/// The data version as a timestamp
@@ -55,6 +53,26 @@ pub enum Force {
 	None,
 }
 
+/// The kind of stored expression being evaluated, for frames where a
+/// data-modifying statement must be rejected.
+///
+/// Each variant is a body the database evaluates on behalf of a reader who did
+/// not write it and cannot see it. Both have a definition-time check that
+/// rejects a mutation in the body itself; neither check can see through a call
+/// to a user-defined function, whose body is stored separately and may be
+/// redefined afterwards. This frame is the runtime half of each pair.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NoWriteFrame {
+	/// A stored `PERMISSIONS` predicate. Evaluated with `perms` disabled so it
+	/// does not recurse into its own table's gates, which is exactly why it
+	/// must not be able to write (GHSA-66r2-5gwj-gxm2).
+	PermissionPredicate,
+	/// A `COMPUTED` field body. Evaluated on every read of the field, under the
+	/// definer's auth rather than the reader's, so a write here would let a
+	/// read mutate the database as somebody else.
+	ComputedField,
+}
+
 impl Options {
 	pub(crate) fn new(config: &ExecConfig) -> Self {
 		Self {
@@ -62,7 +80,7 @@ impl Options {
 			db: None,
 			dive: config.max_computation_depth,
 			perms: true,
-			permission_predicate: false,
+			no_write: None,
 			force: Force::None,
 			import: false,
 			auth: Arc::new(Auth::default()),
@@ -205,7 +223,40 @@ impl Options {
 	pub fn new_for_permission_predicate(&self) -> Self {
 		Self {
 			perms: false,
-			permission_predicate: true,
+			no_write: Some(NoWriteFrame::PermissionPredicate),
+			..self.clone()
+		}
+	}
+
+	/// Create a new Options object for evaluating a `PERMISSIONS FOR
+	/// create/update/delete` predicate when the `mutable_permissions` capability
+	/// is enabled.
+	///
+	/// Like [`Self::new_for_permission_predicate`] it disables permission
+	/// recursion, but it leaves `no_write` unset so a data-modifying statement in
+	/// the predicate runs instead of being rejected. This reverses part of the
+	/// GHSA-66r2-5gwj-gxm2 block for those write-triggered clauses; `SELECT`
+	/// predicates never use it. The write runs with `perms` disabled (like the
+	/// blocking frame), so an enabled server accepts the pre-fix escalation
+	/// surface for these clauses — the documented cost of the transitional
+	/// capability. Callers gate this on the capability; when it is off they use
+	/// [`Self::new_for_permission_predicate`] instead.
+	pub fn new_for_permission_predicate_allow_writes(&self) -> Self {
+		Self {
+			perms: false,
+			no_write: None,
+			..self.clone()
+		}
+	}
+
+	/// Create a new Options object for evaluating a `COMPUTED` field body.
+	///
+	/// Unlike [`Self::new_for_permission_predicate`] this leaves `perms`
+	/// untouched: a computed body reads the database as the field's definer and
+	/// those reads stay permission-checked. Only the write rejection is shared.
+	pub fn new_for_computed_field(&self) -> Self {
+		Self {
+			no_write: Some(NoWriteFrame::ComputedField),
 			..self.clone()
 		}
 	}

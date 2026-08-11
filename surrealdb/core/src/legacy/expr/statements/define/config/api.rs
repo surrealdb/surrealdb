@@ -40,6 +40,14 @@ pub(crate) async fn api_config_compute(
 		}
 		.into());
 	}
+	crate::fnc::mutability::ensure_guards_call_read_only(
+		ctx,
+		opt,
+		"config",
+		"api".to_string(),
+		[&this.permissions],
+	)
+	.await?;
 
 	Ok(crate::catalog::ApiConfig {
 		middleware,

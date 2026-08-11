@@ -119,6 +119,12 @@ pub enum ExperimentalTarget {
 	Files,
 	Surrealism,
 	Gql,
+	/// Transitional escape hatch: permit data-modifying statements inside
+	/// `PERMISSIONS FOR create/update/delete` predicates, reversing part of the
+	/// GHSA-66r2-5gwj-gxm2 block for those clauses. `SELECT` permission clauses
+	/// stay read-only regardless. Default off; intended to be removed once
+	/// affected schemas migrate their side effects to `DEFINE EVENT`.
+	MutablePermissions,
 }
 
 impl fmt::Display for ExperimentalTarget {
@@ -127,6 +133,7 @@ impl fmt::Display for ExperimentalTarget {
 			Self::Files => write!(f, "files"),
 			Self::Surrealism => write!(f, "surrealism"),
 			Self::Gql => write!(f, "gql"),
+			Self::MutablePermissions => write!(f, "mutable_permissions"),
 		}
 	}
 }
@@ -143,6 +150,7 @@ impl Target<str> for ExperimentalTarget {
 			Self::Files => elem.eq_ignore_ascii_case("files"),
 			Self::Surrealism => elem.eq_ignore_ascii_case("surrealism"),
 			Self::Gql => elem.eq_ignore_ascii_case("gql"),
+			Self::MutablePermissions => elem.eq_ignore_ascii_case("mutable_permissions"),
 		}
 	}
 }
@@ -171,6 +179,7 @@ impl std::str::FromStr for ExperimentalTarget {
 			"files" => Ok(ExperimentalTarget::Files),
 			"surrealism" => Ok(ExperimentalTarget::Surrealism),
 			"gql" => Ok(ExperimentalTarget::Gql),
+			"mutable_permissions" => Ok(ExperimentalTarget::MutablePermissions),
 			_ => Err(ParseExperimentalTargetError::InvalidName),
 		}
 	}
@@ -1034,6 +1043,14 @@ mod tests {
 		assert!(ExperimentalTarget::Gql.matches("GQL"));
 		assert!(!ExperimentalTarget::Gql.matches("files"));
 		assert!(!ExperimentalTarget::Files.matches("gql"));
+
+		assert_eq!(
+			ExperimentalTarget::from_str("mutable_permissions").unwrap(),
+			ExperimentalTarget::MutablePermissions
+		);
+		assert_eq!(ExperimentalTarget::MutablePermissions.to_string(), "mutable_permissions");
+		assert!(ExperimentalTarget::MutablePermissions.matches("MUTABLE_PERMISSIONS"));
+		assert!(!ExperimentalTarget::MutablePermissions.matches("gql"));
 	}
 
 	#[test]

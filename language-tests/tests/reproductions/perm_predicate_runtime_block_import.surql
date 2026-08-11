@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "Setup for perm_predicate_runtime_block: a function whose body performs a write, referenced from a table's SELECT/UPDATE permission predicate. The DEFINE is accepted because the function call is opaque to the definition-time check, so the runtime guard must block the write when a record user triggers the predicate (GHSA-66r2-5gwj-gxm2)."
+reason = "Setup for perm_predicate_runtime_block: a function whose body performs a write through `eval`, referenced from a table's SELECT/UPDATE permission predicate. The DEFINE is accepted because an `eval` body is opaque to the definition-time checks (a resolvable function-call write would be refused at definition), so the runtime guard must block the write when a record user triggers the predicate (GHSA-66r2-5gwj-gxm2)."
 run = false
 */
 
@@ -9,10 +9,11 @@ run = false
 DEFINE TABLE audit SCHEMALESS PERMISSIONS FOR select FULL;
 
 -- A read-only-looking predicate: it calls a function whose body performs a
--- write. The DEFINE is accepted (the call is opaque to `has_direct_write`); the
--- write must be blocked at runtime by the permission-predicate guard.
+-- write through `eval`, which definition time cannot see (the query string is
+-- only a value). The write must be blocked at runtime by the
+-- permission-predicate guard.
 DEFINE FUNCTION fn::side_effect() {
-	CREATE audit SET marker = true;
+	eval::surql("CREATE audit SET marker = true");
 	RETURN true;
 } PERMISSIONS FULL;
 

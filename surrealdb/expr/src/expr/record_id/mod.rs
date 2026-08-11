@@ -19,6 +19,12 @@ impl RecordIdLit {
 	pub fn is_static(&self) -> bool {
 		self.key.is_static()
 	}
+
+	/// Whether evaluating this record id can modify data; see
+	/// [`Literal::read_only`](crate::expr::Literal::read_only).
+	pub fn read_only(&self) -> bool {
+		self.key.read_only()
+	}
 }
 
 impl ToSql for RecordIdLit {

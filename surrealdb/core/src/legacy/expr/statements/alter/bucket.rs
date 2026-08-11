@@ -67,6 +67,24 @@ pub(crate) async fn alter_bucket_statement_compute(
 		AlterKind::None => {}
 	}
 
+	// ALTER stores the same shape DEFINE does, so the assembled definition must
+	// satisfy the same read-only rules: no permission guard that modifies data
+	// (GHSA-66r2-5gwj-gxm2), directly or through a function call.
+	if bu.permissions.has_direct_write() {
+		anyhow::bail!(crate::exec::Error::PermissionClauseNotReadonly {
+			kind: "bucket",
+			name: name.clone(),
+		});
+	}
+	crate::fnc::mutability::ensure_guards_call_read_only(
+		ctx,
+		opt,
+		"bucket",
+		name.clone(),
+		[&bu.permissions],
+	)
+	.await?;
+
 	let key = BucketKey {
 		ns,
 		db,

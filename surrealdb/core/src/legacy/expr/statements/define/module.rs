@@ -41,6 +41,14 @@ pub(crate) async fn define_module_statement_compute(
 			name: storage_name.clone(),
 		});
 	}
+	crate::fnc::mutability::ensure_guards_call_read_only(
+		ctx,
+		opt,
+		"module",
+		storage_name.clone(),
+		[&this.permissions],
+	)
+	.await?;
 	if txn.get_db_module(ns, db, &storage_name, None).await.is_ok() {
 		match this.kind {
 			DefineKind::Default => {

@@ -83,6 +83,19 @@ impl RecordIdKeyLit {
 			RecordIdKeyLit::Object(items) => items.iter().all(|x| x.value.is_static()),
 		}
 	}
+
+	/// Whether evaluating this key can modify data; see [`Literal::read_only`].
+	pub fn read_only(&self) -> bool {
+		match self {
+			RecordIdKeyLit::Number(_)
+			| RecordIdKeyLit::String(_)
+			| RecordIdKeyLit::Uuid(_)
+			| RecordIdKeyLit::Generate(_) => true,
+			RecordIdKeyLit::Range(record_id_key_range_lit) => record_id_key_range_lit.read_only(),
+			RecordIdKeyLit::Array(exprs) => exprs.iter().all(|x| x.read_only()),
+			RecordIdKeyLit::Object(items) => items.iter().all(|x| x.value.read_only()),
+		}
+	}
 }
 
 impl From<crate::types::PublicRecordIdKey> for RecordIdKeyLit {

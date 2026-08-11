@@ -93,8 +93,7 @@ impl Expr {
 	/// Check if this expression does only reads.
 	pub fn read_only(&self) -> bool {
 		match self {
-			Expr::Literal(_)
-			| Expr::Param(_)
+			Expr::Param(_)
 			| Expr::Table(_)
 			| Expr::Mock(_)
 			| Expr::Constant(_)
@@ -103,16 +102,34 @@ impl Expr {
 			| Expr::Info(_)
 			| Expr::Sleep(_) => true,
 
+			// Composite literals evaluate their element expressions in place.
+			Expr::Literal(l) => l.read_only(),
+
 			Expr::Idiom(x) => x.read_only(),
 			Expr::Block(block) => block.read_only(),
 			Expr::Prefix {
 				expr,
 				..
-			}
-			| Expr::Postfix {
-				expr,
-				..
 			} => expr.read_only(),
+			Expr::Postfix {
+				expr,
+				op,
+			} => match op {
+				// Calling a closure executes a body this expression can only
+				// see when the target is a closure literal; anything else
+				// (a param, a field) must over-approximate to writable.
+				PostfixOperator::Call(args) => {
+					matches!(&**expr, Expr::Closure(_))
+						&& expr.read_only()
+						&& args.iter().all(Expr::read_only)
+				}
+				// Method dispatch resolves to builtins; only its arguments
+				// carry user expressions, mirroring `Part::Method`.
+				PostfixOperator::MethodCall(_, args) => {
+					expr.read_only() && args.iter().all(Expr::read_only)
+				}
+				PostfixOperator::Range | PostfixOperator::RangeSkip => expr.read_only(),
+			},
 			Expr::Binary {
 				left,
 				right,
@@ -129,7 +146,10 @@ impl Expr {
 				statement,
 				..
 			} => statement.read_only(),
-			Expr::Closure(_) => true,
+			// A closure literal is inert as a value, but wherever it can flow
+			// it can also be invoked (call operator, closure-taking builtins),
+			// so a writing body makes the expression writable.
+			Expr::Closure(c) => c.body.read_only(),
 			// A GQL query is read-only unless it carries mutation stages; a
 			// mutation-bearing plan must run under a write transaction.
 			Expr::Match(plan) => !plan.has_mutations(),

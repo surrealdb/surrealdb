@@ -155,6 +155,13 @@ pub struct RootContext {
 	/// so that permission predicate evaluation does not re-enter table permissions
 	/// and recurse infinitely on cyclic record links.
 	pub(crate) skip_fetch_perms: bool,
+	/// When true, a write reached from here is rejected.
+	///
+	/// Set while evaluating a `COMPUTED` field body, which runs on every read of
+	/// the field and under the definer's auth. The streaming engine plans no
+	/// writes of its own, so enforcement is the legacy fallback's
+	/// (`plan_or_compute::legacy_fallback_options`); this flag is what tells it.
+	pub(crate) computing_field: bool,
 	/// Evaluated VERSION timestamp for time-travel queries.
 	///
 	/// Set by the `VersionScope` operator when a SELECT has a VERSION clause.
@@ -173,6 +180,7 @@ impl std::fmt::Debug for RootContext {
 			.field("session", &self.session)
 			.field("current_value", &self.current_value.as_ref().map(|_| "<Value>"))
 			.field("skip_fetch_perms", &self.skip_fetch_perms)
+			.field("computing_field", &self.computing_field)
 			.field("version_stamp", &self.version_stamp)
 			.field("ctx", &"<FrozenContext>")
 			.finish()
@@ -564,6 +572,7 @@ impl ExecutionContext {
 				session: r.session.clone(),
 				current_value: r.current_value.clone(),
 				skip_fetch_perms: r.skip_fetch_perms,
+				computing_field: r.computing_field,
 				version_stamp: r.version_stamp,
 			}),
 			Self::Namespace(n) => Self::Namespace(NamespaceContext {
@@ -577,6 +586,7 @@ impl ExecutionContext {
 					session: n.root.session.clone(),
 					current_value: n.root.current_value.clone(),
 					skip_fetch_perms: n.root.skip_fetch_perms,
+					computing_field: n.root.computing_field,
 					version_stamp: n.root.version_stamp,
 				},
 				ns: Arc::clone(&n.ns),
@@ -593,6 +603,7 @@ impl ExecutionContext {
 						session: d.ns_ctx.root.session.clone(),
 						current_value: d.ns_ctx.root.current_value.clone(),
 						skip_fetch_perms: d.ns_ctx.root.skip_fetch_perms,
+						computing_field: d.ns_ctx.root.computing_field,
 						version_stamp: d.ns_ctx.root.version_stamp,
 					},
 					ns: Arc::clone(&d.ns_ctx.ns),
@@ -645,6 +656,24 @@ impl ExecutionContext {
 			Self::Database(d) => &mut d.ns_ctx.root,
 		};
 		root.skip_fetch_perms = skip;
+		new
+	}
+
+	/// Derive a context in which a write is rejected.
+	///
+	/// Used while evaluating a `COMPUTED` field body. See
+	/// [`RootContext::computing_field`].
+	pub fn computing_field(self) -> Self {
+		if self.root().computing_field {
+			return self;
+		}
+		let mut new = self;
+		let root = match &mut new {
+			Self::Root(r) => r,
+			Self::Namespace(n) => &mut n.root,
+			Self::Database(d) => &mut d.ns_ctx.root,
+		};
+		root.computing_field = true;
 		new
 	}
 

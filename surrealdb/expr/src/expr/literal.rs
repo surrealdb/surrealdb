@@ -71,6 +71,33 @@ impl Literal {
 		}
 	}
 
+	/// Whether evaluating this literal can modify data. Composite literals
+	/// (arrays, sets, objects, record ids) evaluate their element expressions
+	/// in place, so those must be inspected; scalars cannot write.
+	pub fn read_only(&self) -> bool {
+		match self {
+			Literal::None
+			| Literal::Null
+			| Literal::UnboundedRange
+			| Literal::Bool(_)
+			| Literal::Float(_)
+			| Literal::Integer(_)
+			| Literal::Decimal(_)
+			| Literal::String(_)
+			| Literal::Bytes(_)
+			| Literal::Regex(_)
+			| Literal::Duration(_)
+			| Literal::Datetime(_)
+			| Literal::Uuid(_)
+			| Literal::File(_)
+			| Literal::Geometry(_) => true,
+			Literal::RecordId(record_id_lit) => record_id_lit.read_only(),
+			Literal::Array(exprs) => exprs.iter().all(|x| x.read_only()),
+			Literal::Set(exprs) => exprs.iter().all(|x| x.read_only()),
+			Literal::Object(items) => items.iter().all(|x| x.value.read_only()),
+		}
+	}
+
 	/// The value this literal denotes, when it denotes one on its own.
 	///
 	/// `Some` when no part of the literal needs the evaluator: the scalars, and

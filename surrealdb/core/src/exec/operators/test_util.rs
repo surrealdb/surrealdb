@@ -106,6 +106,7 @@ pub(crate) fn root_ctx() -> ExecutionContext {
 		session: None,
 		current_value: None,
 		skip_fetch_perms: false,
+		computing_field: false,
 		version_stamp: None,
 	})
 }
@@ -333,6 +334,7 @@ impl TestDb {
 			session: Some(Arc::new(session_info(session))),
 			current_value: None,
 			skip_fetch_perms: false,
+			computing_field: false,
 			version_stamp: None,
 		};
 

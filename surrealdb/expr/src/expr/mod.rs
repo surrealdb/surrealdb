@@ -24,6 +24,7 @@ pub mod fetch;
 pub mod field;
 pub mod filter;
 pub mod function;
+pub mod function_facts;
 pub mod graphql_config;
 pub mod group;
 pub mod idiom;

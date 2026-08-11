@@ -4,8 +4,13 @@ namespace = true
 database = true
 auth = { level = "owner" }
 
+# The production default: `mutable_permissions` off, so create/update/delete
+# write clauses are refused at definition time like SELECT clauses.
+[env.capabilities]
+allow-experimental = []
+
 [test]
-reason = "A side-effecting PERMISSIONS predicate must be rejected at definition time (GHSA-66r2-5gwj-gxm2). Read-only predicates, helper-function calls and read-only subqueries remain valid."
+reason = "A side-effecting PERMISSIONS predicate must be rejected at definition time (GHSA-66r2-5gwj-gxm2). Read-only predicates, helper-function calls and read-only subqueries remain valid. A SELECT clause is refused unconditionally; a create/update/delete write clause is refused with the capability-specific message when `mutable_permissions` is off."
 
 [[test.results]]
 value = "NONE"
@@ -14,7 +19,7 @@ value = "NONE"
 error = "Found a non-read-only expression in the PERMISSIONS clause for table `bad`, but a PERMISSIONS clause must not modify data"
 
 [[test.results]]
-error = "Found a non-read-only expression in the PERMISSIONS clause for field `f`, but a PERMISSIONS clause must not modify data"
+error = "Cannot define field `f`: a create/update/delete PERMISSIONS clause modifies data, which requires the `mutable_permissions` capability to be enabled; otherwise move the side effect to a DEFINE EVENT"
 
 [[test.results]]
 error = "Found a non-read-only expression in the PERMISSIONS clause for function `fn::bad`, but a PERMISSIONS clause must not modify data"

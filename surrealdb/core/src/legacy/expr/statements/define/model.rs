@@ -35,6 +35,14 @@ pub(crate) async fn define_model_statement_compute(
 			name: this.name.to_string(),
 		});
 	}
+	crate::fnc::mutability::ensure_guards_call_read_only(
+		ctx,
+		opt,
+		"model",
+		this.name.to_string(),
+		[&this.permissions],
+	)
+	.await?;
 	// Fetch the transaction
 	let txn = ctx.tx();
 	// Check if the definition exists

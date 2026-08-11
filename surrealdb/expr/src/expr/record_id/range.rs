@@ -28,6 +28,15 @@ impl RecordIdKeyRangeLit {
 			Bound::Unbounded => true,
 		}
 	}
+
+	/// Whether evaluating this range can modify data; see [`Literal::read_only`].
+	pub fn read_only(&self) -> bool {
+		let bound_read_only = |bound: &Bound<RecordIdKeyLit>| match bound {
+			Bound::Included(x) | Bound::Excluded(x) => x.read_only(),
+			Bound::Unbounded => true,
+		};
+		bound_read_only(&self.start) && bound_read_only(&self.end)
+	}
 }
 
 impl ToSql for RecordIdKeyRangeLit {

@@ -3,7 +3,7 @@ use std::ops::Bound;
 use reblessive::tree::Stk;
 
 use crate::ctx::FrozenContext;
-use crate::dbs::Options;
+use crate::dbs::{NoWriteFrame, Options};
 use crate::doc::CursorDoc;
 use crate::exec::Error as ExecError;
 use crate::expr::expression::Expr;
@@ -23,13 +23,14 @@ pub(crate) async fn expr_compute(
 ) -> FlowResult<Value> {
 	let opt = opt.dive(1).map_err(anyhow::Error::new)?;
 
-	// While evaluating a PERMISSIONS predicate (which runs with permission
-	// enforcement disabled) no statement may modify data — otherwise a
-	// stored permission expression could perform unauthorized writes during
-	// a permission check (GHSA-66r2-5gwj-gxm2). This catches writes reached
-	// directly, through nested subqueries, or through function/closure
-	// bodies, on both the legacy and streaming execution paths.
-	if opt.permission_predicate
+	// A stored expression that a *read* evaluates may not modify data: a
+	// PERMISSIONS predicate runs with permission enforcement disabled
+	// (GHSA-66r2-5gwj-gxm2), and a COMPUTED body runs under the definer's auth
+	// on every read of the field. This catches writes reached directly, through
+	// nested subqueries, or through function/closure bodies, on both the legacy
+	// and streaming execution paths — the streaming engine plans no writes of
+	// its own, so every one of them arrives here.
+	if let Some(frame) = opt.no_write
 		&& matches!(
 			this,
 			Expr::Create(_)
@@ -43,7 +44,23 @@ pub(crate) async fn expr_compute(
 				| Expr::Rebuild(_)
 				| Expr::Alter(_)
 		) {
-		return Err(ControlFlow::Err(anyhow::Error::new(ExecError::PermissionPredicateSideEffect)));
+		let err = match frame {
+			NoWriteFrame::PermissionPredicate => {
+				// A create/update/delete predicate reaching this block means the
+				// `mutable_permissions` capability is off (a select predicate
+				// always reaches it). Point the operator at the sanctioned
+				// mechanism for write side effects on writes.
+				warn!(
+					"A PERMISSIONS clause attempted to modify data and was blocked \
+					 (GHSA-66r2-5gwj-gxm2). Move audit-style side effects to a DEFINE EVENT; \
+					 to keep them in create/update/delete permission clauses, enable the \
+					 `mutable_permissions` experimental capability."
+				);
+				ExecError::PermissionPredicateSideEffect
+			}
+			NoWriteFrame::ComputedField => ExecError::ComputedFieldSideEffect,
+		};
+		return Err(ControlFlow::Err(anyhow::Error::new(err)));
 	}
 
 	match this {

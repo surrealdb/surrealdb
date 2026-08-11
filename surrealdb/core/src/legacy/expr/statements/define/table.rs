@@ -18,7 +18,6 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::{self, CursorDoc, Document, DocumentContext, NsDbCtx};
 use crate::exe::FlowResultExt;
-use crate::exec::Error as ExecError;
 use crate::expr::field::Selector;
 use crate::expr::paths::{ID, IN, OUT};
 use crate::expr::statements::define::DefineKind;
@@ -51,13 +50,18 @@ pub(crate) async fn define_table_statement_compute(
 	// Process the name
 	let name = TableName::new(expr_to_ident(stk, ctx, opt, doc, &this.name, "table name").await?);
 
-	// A PERMISSIONS clause must not perform writes (GHSA-66r2-5gwj-gxm2).
-	if this.permissions.has_direct_write() {
-		bail!(ExecError::PermissionClauseNotReadonly {
-			kind: "table",
-			name: name.as_str().to_string(),
-		});
-	}
+	// A SELECT PERMISSIONS clause must not perform writes (GHSA-66r2-5gwj-gxm2),
+	// directly or through a function call. The create/update/delete clauses are
+	// held to the same rule unless the `mutable_permissions` capability is on.
+	crate::fnc::mutability::ensure_permission_clauses_read_only(
+		ctx,
+		opt,
+		"table",
+		name.as_str().to_string(),
+		[&this.permissions.select],
+		[&this.permissions.create, &this.permissions.update, &this.permissions.delete],
+	)
+	.await?;
 
 	// Get the NS and DB
 	let (ns_name, db_name) = opt.ns_db()?;

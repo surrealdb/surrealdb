@@ -65,6 +65,33 @@ pub(crate) async fn alter_function_statement_compute(
 	// Recompute auth_limit from the current principal to prevent privilege escalation
 	fc.auth_limit = AuthLimit::new_from_auth(&opt.auth).into();
 
+	// The assembled definition must satisfy the same read-only rules DEFINE
+	// enforces, since ALTER stores the same shape: no writing guard
+	// (GHSA-66r2-5gwj-gxm2), directly or through a function call, and no
+	// writing body while read-only consumers depend on this name.
+	if fc.permissions.has_direct_write() {
+		anyhow::bail!(crate::exec::Error::PermissionClauseNotReadonly {
+			kind: "function",
+			name: format!("fn::{}", this.name),
+		});
+	}
+	crate::fnc::mutability::ensure_guards_call_read_only(
+		ctx,
+		opt,
+		"function",
+		format!("fn::{}", this.name),
+		[&fc.permissions],
+	)
+	.await?;
+	crate::fnc::mutability::ensure_function_stays_read_only_for_consumers(
+		ctx,
+		opt,
+		&this.name,
+		&fc.block,
+		&fc.permissions,
+	)
+	.await?;
+
 	let key = FunctionKey {
 		ns,
 		db,

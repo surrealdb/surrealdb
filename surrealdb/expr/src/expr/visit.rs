@@ -252,8 +252,21 @@ implement_visitor! {
 			Expr::Prefix { expr, .. } => {
 				this.visit_expr(expr)?;
 			},
-			Expr::Postfix { expr, .. } => {
+			Expr::Postfix { expr, op } => {
 				this.visit_expr(expr)?;
+				// A call operator carries argument expressions of its own,
+				// which are evaluated at the call site just like function-call
+				// arguments; range operators carry none.
+				match op {
+					crate::expr::operator::PostfixOperator::Range
+					| crate::expr::operator::PostfixOperator::RangeSkip => {},
+					crate::expr::operator::PostfixOperator::MethodCall(_, args)
+					| crate::expr::operator::PostfixOperator::Call(args) => {
+						for a in args.iter(){
+							this.visit_expr(a)?;
+						}
+					}
+				}
 			},
 			Expr::Binary { left, right, .. } => {
 				this.visit_expr(left)?;
@@ -1825,8 +1838,19 @@ implement_visitor_mut! {
 			Expr::Prefix { expr, .. } => {
 				this.visit_mut_expr(expr)?;
 			},
-			Expr::Postfix { expr, .. } => {
+			Expr::Postfix { expr, op } => {
 				this.visit_mut_expr(expr)?;
+				// Same call-argument traversal as the immutable visitor.
+				match op {
+					crate::expr::operator::PostfixOperator::Range
+					| crate::expr::operator::PostfixOperator::RangeSkip => {},
+					crate::expr::operator::PostfixOperator::MethodCall(_, args)
+					| crate::expr::operator::PostfixOperator::Call(args) => {
+						for a in args.iter_mut(){
+							this.visit_mut_expr(a)?;
+						}
+					}
+				}
 			},
 			Expr::Binary { left, right, .. } => {
 				this.visit_mut_expr(left)?;

@@ -887,6 +887,13 @@ pub(crate) async fn compute_fields_for_value(
 		_ => None,
 	};
 
+	// SECURITY: the body runs in a frame that refuses writes, whichever auth it
+	// holds. `Expr::contains_mutation` rejects a mutation written into the body
+	// at definition time but cannot see through a call to a user-defined
+	// function, so without this a read of the field would mutate the database as
+	// the definer. Loop-invariant, so derived once per row rather than per field.
+	let field_ctx = ctx.clone().computing_field();
+
 	for cf in &state.computed_fields {
 		// SECURITY: apply the field's AUTH LIMIT so the body runs under the
 		// definer's auth, not the reader's. Without it a low-privileged definer
@@ -896,16 +903,17 @@ pub(crate) async fn compute_fields_for_value(
 		// The narrowed context is derived per field rather than hoisted because
 		// each field carries its own stamp; `narrowing_auth_limit` returns `None`
 		// for the inert root-Owner stamp so the common case pays nothing.
-		let limited_ctx = cf.auth_limit.as_ref().map(|limit| ctx.with_limited_auth(limit));
-		let narrowed_eval_ctx = limited_ctx.as_ref().map(|limited| {
-			let mut narrowed = EvalContext::from_exec_ctx(limited);
+		let limited_ctx = cf.auth_limit.as_ref().map(|limit| field_ctx.with_limited_auth(limit));
+		let narrowed_eval_ctx = limited_ctx.as_ref().unwrap_or(&field_ctx);
+		let narrowed_eval_ctx = {
+			let mut narrowed = EvalContext::from_exec_ctx(narrowed_eval_ctx);
 			narrowed.skip_fetch_perms = skip_fetch_perms;
 			narrowed.computing_record.clone_from(&eval_ctx.computing_record);
 			narrowed
-		});
+		};
 		// Evaluate with the row as both current value and document root so
 		// nested subqueries see the same `$parent` as top-level projections (#7154).
-		let row_ctx = narrowed_eval_ctx.as_ref().unwrap_or(&eval_ctx).with_value_and_doc(value);
+		let row_ctx = narrowed_eval_ctx.with_value_and_doc(value);
 		let computed_value = match cf.expr.evaluate(row_ctx).await {
 			Ok(v) => v,
 			Err(ControlFlow::Return(v)) => v,

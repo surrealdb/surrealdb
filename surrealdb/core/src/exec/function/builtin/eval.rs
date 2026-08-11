@@ -73,6 +73,15 @@ async fn evaluate_streaming(
 	let isolated = isolated.freeze();
 	let mut eval_ctx = exec_ctx.with_new_ctx(isolated);
 
+	// Carry the permission-predicate no-write signal onto the root of the
+	// re-entered context. Inside a `PERMISSIONS` predicate the flag lives on
+	// the caller's `EvalContext` (set in `exec::permission`), not on the root
+	// this builtin rebuilds from; without this, a write reached through
+	// `eval` from a predicate body would bypass the frame that
+	// `plan_or_compute` derives from the root (GHSA-66r2-5gwj-gxm2). The
+	// COMPUTED-field signal is already a root flag, so it needs no mirror.
+	eval_ctx = eval_ctx.with_skip_fetch_perms(ctx.skip_fetch_perms);
+
 	// Promote to Database level when a database is selected, so nested table /
 	// GQL MATCH queries have the context they require. `eval`'s `required_context`
 	// stays Root so db-less queries (e.g. `eval::surql("RETURN 1")`) still work;

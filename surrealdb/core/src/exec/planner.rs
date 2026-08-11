@@ -464,6 +464,51 @@ impl<'ctx> Planner<'ctx> {
 		self.function_registry
 	}
 
+	/// Resolve the access mode of a user-defined function's body at plan time,
+	/// by walking the call graph in the plan-time snapshot
+	/// ([`crate::fnc::mutability`], conservative polarity).
+	///
+	/// Returns `AccessMode::ReadWrite` — the safe over-approximation — when the
+	/// planner lacks the transaction or namespace/database context to resolve,
+	/// or when the resolution errors, mirroring how
+	/// [`Self::resolve_module_writeable`] degrades. A `ReadOnly` answer is
+	/// returned only when the whole reachable call graph is provably write-free
+	/// in this snapshot, so a `ReadWrite` fallback can never mis-license a
+	/// write onto a read-only fast path.
+	async fn resolve_custom_access_mode(&self, name: &str) -> crate::exec::AccessMode {
+		use crate::catalog::providers::DatabaseProvider;
+		use crate::exec::AccessMode;
+
+		let (Some(txn), Some(ns), Some(db)) = (&self.txn, &self.ns, &self.db) else {
+			return AccessMode::ReadWrite;
+		};
+		// A UDF call reaches its callee's body through the call graph; the call
+		// itself contributes exactly that one edge.
+		let mut facts = crate::expr::function_facts::FunctionFacts::default();
+		facts.calls.insert(name.to_owned());
+
+		let resolved = async {
+			let db_def = txn.get_db_by_name(ns, db, None).await?.ok_or_else(|| {
+				anyhow::anyhow!("database `{ns}/{db}` not found while resolving `fn::{name}`")
+			})?;
+			crate::fnc::mutability::resolve_mutability(
+				txn,
+				db_def.namespace_id,
+				db_def.database_id,
+				&facts,
+				&std::collections::HashMap::new(),
+			)
+			.await
+		}
+		.await;
+		match resolved {
+			Ok(r) if !r.possibly_writes() => AccessMode::ReadOnly,
+			// A write is possible, or the snapshot could not be read: keep the
+			// safe over-approximation.
+			Ok(_) | Err(_) => AccessMode::ReadWrite,
+		}
+	}
+
 	/// Resolve the `writeable` flag for a Surrealism module function from
 	/// the cached runtime's exports manifest.
 	///
@@ -1029,12 +1074,14 @@ impl<'ctx> Planner<'ctx> {
 			}
 			Function::Custom(name) => {
 				let arguments = self.physical_args(arguments).await?;
+				let body_access_mode = self.resolve_custom_access_mode(&name).await;
 				Ok(Arc::new(UserDefinedFunctionExec {
 					name,
 					arguments,
 					// Recorded so the function body, planned lazily on call,
 					// continues the depth count from here rather than resetting.
 					plan_depth: self.current_depth(),
+					body_access_mode,
 				}))
 			}
 			Function::Script(script) => {

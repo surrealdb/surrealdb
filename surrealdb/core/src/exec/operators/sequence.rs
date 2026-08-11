@@ -242,14 +242,11 @@ fn legacy_context_for_fallback(
 	let options = exec_ctx.options().ok_or_else(|| {
 		EngineError::Internal("Options not available for legacy compute fallback".into())
 	})?;
-	// Block write side effects when this sequence is evaluated inside a
-	// PERMISSIONS predicate (signalled by `skip_fetch_perms`), so a predicate
-	// cannot mutate data via the legacy compute fallback (GHSA-66r2-5gwj-gxm2).
-	let options = if exec_ctx.root().skip_fetch_perms {
-		options.new_for_permission_predicate()
-	} else {
-		options.clone()
-	};
+	let options = crate::exec::plan_or_compute::legacy_fallback_options(
+		options,
+		exec_ctx.root().skip_fetch_perms,
+		exec_ctx.root().computing_field,
+	);
 	Ok((options, Arc::clone(exec_ctx.ctx())))
 }
 

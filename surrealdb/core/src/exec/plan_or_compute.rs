@@ -36,22 +36,40 @@ pub(crate) fn get_legacy_context(
 	let options = exec_ctx.options().ok_or_else(|| {
 		ExecError::Thrown("Options not available for legacy compute fallback".into())
 	})?;
-	let options = legacy_fallback_options(exec_ctx, options);
+	let options = legacy_fallback_options(
+		options,
+		exec_ctx.root().skip_fetch_perms,
+		exec_ctx.root().computing_field,
+	);
 	Ok((options, Arc::clone(exec_ctx.ctx())))
 }
 
 /// Derive the `Options` to use for a legacy compute fallback.
 ///
-/// When the streaming context is evaluating a `PERMISSIONS` predicate
-/// (signalled by `skip_fetch_perms`), the fallback must block write side
-/// effects so a predicate cannot mutate data through the legacy compute path
-/// (GHSA-66r2-5gwj-gxm2).
-fn legacy_fallback_options(
-	exec_ctx: &ExecutionContext,
+/// The streaming engine plans no writes of its own, so every write in an
+/// expression reaches the legacy path through here. Two frames must not be
+/// allowed to take it:
+///
+/// - a `PERMISSIONS` predicate (signalled by `skip_fetch_perms`), which is evaluated with
+///   permission enforcement disabled (GHSA-66r2-5gwj-gxm2);
+/// - a `COMPUTED` field body (signalled by `computing_field`), which is evaluated on every read of
+///   the field and under the definer's auth.
+///
+/// The permission frame also disables `perms`; the computed frame does not,
+/// because a computed body's own reads stay permission-checked.
+/// The two signals are taken as arguments rather than read from `exec_ctx`
+/// because the permission frame is tracked per `EvalContext` at some call sites
+/// and per root at others. Naming them at each site keeps this the only place
+/// that decides what they mean.
+pub(crate) fn legacy_fallback_options(
 	options: &crate::dbs::Options,
+	permission_predicate: bool,
+	computing_field: bool,
 ) -> crate::dbs::Options {
-	if exec_ctx.root().skip_fetch_perms {
+	if permission_predicate {
 		options.new_for_permission_predicate()
+	} else if computing_field {
+		options.new_for_computed_field()
 	} else {
 		options.clone()
 	}
@@ -69,7 +87,11 @@ pub(crate) fn get_legacy_context_with_param(
 	let options = exec_ctx.options().ok_or_else(|| {
 		ExecError::Thrown("Options not available for legacy compute fallback".into())
 	})?;
-	let options = legacy_fallback_options(exec_ctx, options);
+	let options = legacy_fallback_options(
+		options,
+		exec_ctx.root().skip_fetch_perms,
+		exec_ctx.root().computing_field,
+	);
 
 	let mut ctx = crate::ctx::Context::new_child(exec_ctx.ctx());
 	ctx.add_value(param_name.to_string(), std::sync::Arc::new(param_value.clone()));

@@ -38,6 +38,14 @@ pub(crate) async fn define_bucket_statement_compute(
 			name: name.clone(),
 		});
 	}
+	crate::fnc::mutability::ensure_guards_call_read_only(
+		ctx,
+		opt,
+		"bucket",
+		name.clone(),
+		[&this.permissions],
+	)
+	.await?;
 	// Fetch the transaction
 	let txn = ctx.tx();
 	let (ns, db) = ctx.get_ns_db_ids(opt).await?;

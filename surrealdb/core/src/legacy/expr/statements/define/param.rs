@@ -33,6 +33,14 @@ pub(crate) async fn define_param_statement_compute(
 			name: this.name.to_string(),
 		});
 	}
+	crate::fnc::mutability::ensure_guards_call_read_only(
+		ctx,
+		opt,
+		"param",
+		this.name.to_string(),
+		[&this.permissions],
+	)
+	.await?;
 
 	let value = stk
 		.run(|stk| crate::legacy::expr_compute(&this.value, stk, ctx, opt, doc))
