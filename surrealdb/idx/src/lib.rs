@@ -84,7 +84,7 @@ use crate::key::schema::{
 	HnswRecordPendingKey, HnswRecordPendingPrefix, HnswStateKey, HnswVectorKey, IdxRoot,
 	IndexAppendKey, IndexAppendPrefix, IndexCompactionKey, IndexPrimaryKey, IndexVersionKey,
 	TermChangeBatchPrefix, TermChangeBatchTermPrefix, TermChangeSetKey, TermChangesKey,
-	TermDocsKey, TermGenerationKey, TermPostingKey,
+	TermDocsKey, TermDocsResidualKey, TermGenerationKey, TermPostingKey,
 };
 #[cfg(diskann)]
 use crate::key::schema::{
@@ -869,6 +869,17 @@ impl IndexKeyBase {
 
 	fn new_td_root<'a>(&'a self, term: &'a str) -> TermDocsKey<'a> {
 		TermDocsKey {
+			ns: self.0.ns,
+			db: self.0.db,
+			tb: Cow::Borrowed(&self.0.tb),
+			ix: self.0.ix,
+			term: Cow::Borrowed(term),
+		}
+	}
+
+	/// Per-document totals for one term that its compacted bitmap cannot hold.
+	fn new_tr_root<'a>(&'a self, term: &'a str) -> TermDocsResidualKey<'a> {
+		TermDocsResidualKey {
 			ns: self.0.ns,
 			db: self.0.db,
 			tb: Cow::Borrowed(&self.0.tb),

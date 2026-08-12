@@ -162,6 +162,8 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}*{db}*{tb}+{ix}!td{term}                                                                            TermDocsKey ->  roaring::RoaringTreemap
 /*{ns}*{db}*{tb}+{ix}!td                                                                               TermDocsPrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!td{term}{id}                                                                     TermPostingKey ->  crate::values::fulltext::TermDocument
+/*{ns}*{db}*{tb}+{ix}!tr{term}                                                                    TermDocsResidualKey ->  crate::values::fulltext::TermDocsResidual
+/*{ns}*{db}*{tb}+{ix}!tr                                                                       TermDocsResidualPrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!dt{id}                                                                              DocTermsKey ->  crate::values::fulltext::DocumentTerms
 /*{ns}*{db}*{tb}+{ix}!dt                                                                               DocTermsPrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!tt                                                                               TermChangesKey ->  String

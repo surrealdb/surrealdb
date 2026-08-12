@@ -360,6 +360,17 @@ keyspace! {
 						term_posting = term_docs + [id: DocId]
 							=> crate::values::fulltext::TermDocument;
 
+						/// Per-document totals `!td` could not hold, because a bitmap
+						/// carries a document once and a total can be anything.
+						///
+						/// Written only where a compaction round reached part of a
+						/// term's changes, so the total it folded is not yet the
+						/// document's final one. Absent for every term whose changes
+						/// were folded whole, which is every term once the delta
+						/// families are drained.
+						term_docs_residual = ["!tr", @, term: Str]
+							=> crate::values::fulltext::TermDocsResidual;
+
 						/// One document's postings, keyed by the document rather than
 						/// by term.
 						///

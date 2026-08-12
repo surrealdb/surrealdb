@@ -14,6 +14,8 @@ use surrealdb_collections::VecMap;
 use surrealdb_kvs::impl_kv_value_revisioned;
 use surrealdb_strand::Strand;
 
+use crate::values::ids::DocId;
+
 /// A character position within an analysed document.
 pub type Position = u32;
 
@@ -93,6 +95,43 @@ pub struct DocumentTerms {
 }
 
 impl_kv_value_revisioned!(DocumentTerms);
+
+/// What a term's compacted document set could not hold.
+///
+/// Uncompacted changes to a term are signed counts — one per addition, minus one
+/// per removal — and a document belongs to the term when its compacted
+/// membership plus those counts comes to one or more. The compacted side is a
+/// membership bitmap, so it can only carry a total of zero or one. A total
+/// outside that range is kept here instead of being clamped into the bitmap and
+/// lost.
+///
+/// That is what makes a term's compacted set independent of how its changes were
+/// grouped: each round preserves `membership + residual + remaining counts` per
+/// document, and that sum is what every reader resolves.
+///
+/// A positive count belongs to a document the bitmap holds and a negative one to
+/// a document it does not, so a residual written beside its own bitmap decides
+/// nothing on its own. A reader still has to fold it: a compactor that does not
+/// know this family can move the bitmap without clearing the residual, and the
+/// total is then the only thing that says where the document belongs.
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TermDocsResidual {
+	/// Per-document totals, excluding the one the bitmap already carries.
+	/// Never zero: a document whose total the bitmap holds exactly is absent.
+	pub counts: VecMap<DocId, i64>,
+}
+
+impl TermDocsResidual {
+	/// Builds a residual from per-document totals in any order.
+	pub fn new(counts: impl IntoIterator<Item = (DocId, i64)>) -> Self {
+		Self {
+			counts: counts.into_iter().collect(),
+		}
+	}
+}
+
+impl_kv_value_revisioned!(TermDocsResidual);
 
 /// Tracks document length and count statistics for the index
 #[revisioned(revision = 1)]

@@ -11,7 +11,9 @@ use roaring::treemap::IntoIter;
 use surrealdb_datastore::Transaction;
 // A posting and the index's document statistics are stored values, so both are
 // declared below this layer; the indexing and scoring code here maintains them.
-pub use surrealdb_datastore::values::fulltext::{DocLengthAndCount, DocumentTerms, TermDocument};
+pub use surrealdb_datastore::values::fulltext::{
+	DocLengthAndCount, DocumentTerms, TermDocsResidual, TermDocument,
+};
 use surrealdb_kvs::Direction;
 use surrealdb_kvs::consts::COUNT_BATCH_SIZE;
 use uuid::Uuid;
@@ -222,6 +224,15 @@ struct TermDocsCompactionPlan {
 	tt_keys: Vec<TermChangeKey<'static>>,
 	/// The per-transaction `!tx` deltas this snapshot saw.
 	tx_keys: Vec<TermChangeBatchKey<'static>>,
+	/// The first term either scan stopped inside, before which every term's
+	/// deltas were captured whole. `None` where both scans reached the end of
+	/// their range, so every term this snapshot names was captured whole.
+	///
+	/// Both families order their entries by term, and each is bounded
+	/// separately, so a term is captured whole only when both scans passed it —
+	/// which is why one cutoff covers a split within either family and a split
+	/// between them.
+	captured_below: Option<String>,
 	has_more: bool,
 }
 
@@ -235,6 +246,15 @@ impl TermDocsCompactionPlan {
 	/// on the entry that spent its budget with more of the range behind it.
 	fn has_more(&self) -> bool {
 		self.has_more
+	}
+
+	/// Whether every delta this term had was captured, so the totals folded for
+	/// it are the documents' final ones.
+	///
+	/// A term encodes to bytes that sort as the term does, so comparing the
+	/// terms compares their position in both delta ranges.
+	fn captured_whole(&self, term: &str) -> bool {
+		self.captured_below.as_deref().is_none_or(|cutoff| term < cutoff)
 	}
 }
 
@@ -528,6 +548,29 @@ impl FullTextIndex {
 			all_deltas.push(self.term_deltas(&tx, term).await?);
 		}
 
+		// Phase 1b: add what a term's compacted bitmap could not hold, which is
+		// part of the same total the deltas contribute to.
+		//
+		// Read for every term, not only for terms that have deltas. A residual
+		// this compactor wrote always sits beside a bitmap that agrees with its
+		// sign, so it would decide nothing on its own — but a compactor that
+		// does not know the family can move the bitmap out from under one, and
+		// the total is then the only thing that still says where the document
+		// belongs. Deciding from the bitmap alone would make that state
+		// permanent instead of leaving it to be folded away.
+		let residual_keys: Vec<_> =
+			unique_terms.iter().map(|term| self.ikb.new_tr_root(term)).collect();
+		for (deltas, residual) in
+			all_deltas.iter_mut().zip(tx.get_many_key(residual_keys, None).await?)
+		{
+			let Some(residual) = residual else {
+				continue;
+			};
+			for (doc_id, count) in residual.counts.iter() {
+				*deltas.entry(*doc_id).or_default() += *count;
+			}
+		}
+
 		// Phase 2: Batch-fetch compacted bitmaps for all terms at once
 		let bitmap_keys: Vec<_> =
 			unique_terms.iter().map(|term| self.ikb.new_td_root(term)).collect();
@@ -582,59 +625,72 @@ impl FullTextIndex {
 		}
 	}
 
-	async fn append_term_docs_delta(
+	/// Folds one term's captured deltas into its compacted state.
+	///
+	/// A document's total is its compacted membership, plus what the term's
+	/// residual carries for it, plus the deltas this round captured. The bitmap
+	/// takes one of that total and the residual keeps the rest, so nothing the
+	/// bitmap cannot represent is discarded. That is what makes the compacted set
+	/// independent of how a term's deltas were grouped into rounds: every round
+	/// leaves `membership + residual + remaining deltas` where it found it, and
+	/// only that sum decides whether a document carries the term.
+	///
+	/// `captured_whole` says no delta for this term was left behind, so the total
+	/// is the document's final one. It lands in the bitmap alone and the residual
+	/// is dropped — a term with nothing left to fold is answered by its bitmap.
+	async fn fold_term_docs(
 		&self,
 		tx: &Transaction,
 		term: &str,
-		deltas: &HashMap<DocId, i64>,
-	) -> Result<RoaringTreemap> {
-		// Retrieve the current compacted document set for this term
-		// This is the consolidated bitmap of all documents containing this term
+		mut totals: HashMap<DocId, i64>,
+		residual: Option<TermDocsResidual>,
+		captured_whole: bool,
+	) -> Result<()> {
 		let td = self.ikb.new_td_root(term);
-		let mut docs = tx.get_key(&td, None).await?.unwrap_or_default();
+		let mut docs: RoaringTreemap = tx.get_key(&td, None).await?.unwrap_or_default();
 
-		// Applied by sign, which is what makes the result depend on how the deltas were
-		// grouped into rounds. A document one transaction added and another removed nets
-		// to zero and leaves the set alone; the same pair folded in two rounds removes
-		// and then re-adds it. Whichever a reader gets, the log cannot say which is
-		// right: entries sort by node before time, so it records no order to fold in.
-		//
-		// So a term whose cancelling deltas straddle a round boundary — of either delta
-		// family, or between them, since each is bounded separately — can compact to a
-		// set that depends on where the boundary fell. Making a round stop only on term
-		// boundaries is not a fix: it cannot cover a term present in both families
-		// without coordinating their two scans, and it gives up the bound on a round
-		// entirely for a term whose own backlog is large. What it needs is a delta log
-		// that records an order to fold in.
-		for (doc_id, delta) in deltas {
-			match 0.cmp(delta) {
-				// If delta is negative, the term was removed from this document
-				Ordering::Greater => {
-					docs.remove(*doc_id);
-				}
-				// If delta is positive, the term was added to this document
+		let carried = residual.unwrap_or_default().counts;
+		for (doc_id, count) in carried.iter() {
+			*totals.entry(*doc_id).or_default() += *count;
+		}
+
+		let mut left_over = Vec::new();
+		for (doc_id, total) in &totals {
+			let total = i64::from(docs.contains(*doc_id)) + *total;
+			match 0.cmp(&total) {
 				Ordering::Less => {
 					docs.insert(*doc_id);
+					if !captured_whole && total > 1 {
+						left_over.push((*doc_id, total - 1));
+					}
 				}
-				// If delta is zero, no change needed (term was added and removed equal times)
-				Ordering::Equal => {}
+				Ordering::Greater => {
+					docs.remove(*doc_id);
+					if !captured_whole {
+						left_over.push((*doc_id, total));
+					}
+				}
+				Ordering::Equal => {
+					docs.remove(*doc_id);
+				}
 			}
 		}
 
-		Ok(docs)
-	}
-	async fn set_term_docs_delta(
-		&self,
-		tx: &Transaction,
-		term: &str,
-		deltas: &HashMap<DocId, i64>,
-	) -> Result<()> {
-		let docs = self.append_term_docs_delta(tx, term, deltas).await?;
-		let td = self.ikb.new_td_root(term);
 		if docs.is_empty() {
 			tx.del_key(&td).await?;
 		} else {
 			tx.set_key(&td, &docs).await?;
+		}
+		let tr = self.ikb.new_tr_root(term);
+		if left_over.is_empty() {
+			// Only where one is there to remove: the residual is absent for all
+			// but the terms a round stopped inside, and a delete of a key that was
+			// never written is a write nonetheless.
+			if !carried.is_empty() {
+				tx.del_key(&tr).await?;
+			}
+		} else {
+			tx.set_key(&tr, &TermDocsResidual::new(left_over)).await?;
 		}
 		Ok(())
 	}
@@ -670,6 +726,7 @@ impl FullTextIndex {
 		// how wide the transaction that wrote it was. The `!tx` pass therefore
 		// spends `limit` as a document budget.
 		let batch = tx.batch_keys(self.ikb.new_tt_terms_range()?, limit, None).await?;
+		let tt_cut_short = batch.next.is_some();
 		for k in batch.result {
 			let tt = TermChangeKey::decode_key(&k)?;
 			let entry = deltas_by_term
@@ -785,12 +842,31 @@ impl FullTextIndex {
 				_ => break 'paging,
 			}
 		}
+		// A scan that stopped short leaves the term it stopped on possibly
+		// half-captured, and every term sorting after it untouched — while the
+		// other family, bounded separately, may have gone further. So the terms
+		// captured whole are those before the earlier of the two stops, and the
+		// lowest term stands in for a scan that stopped with nothing to show.
+		let mut captured_below = None;
+		let mut stopped_at = |term: Option<&str>| {
+			let cutoff = term.unwrap_or_default();
+			if captured_below.as_deref().is_none_or(|current| cutoff < current) {
+				captured_below = Some(cutoff.to_string());
+			}
+		};
+		if tt_cut_short {
+			stopped_at(tt_keys.last().map(|k| k.term.as_ref()));
+		}
+		if batched_has_more {
+			stopped_at(tx_keys.last().map(|k| k.term.as_ref()));
+		}
 		Ok(TermDocsCompactionPlan {
 			generation,
 			deltas_by_term,
 			tt_keys,
 			tx_keys,
-			has_more: batch.next.is_some() || batched_has_more,
+			captured_below,
+			has_more: tt_cut_short || batched_has_more,
 		})
 	}
 
@@ -828,12 +904,24 @@ impl FullTextIndex {
 	async fn write_term_docs_compaction(
 		&self,
 		tx: &Transaction,
-		plan: TermDocsCompactionPlan,
+		mut plan: TermDocsCompactionPlan,
 	) -> Result<()> {
-		for (term, deltas) in plan.deltas_by_term {
-			if !deltas.is_empty() {
-				self.set_term_docs_delta(tx, &term, &deltas).await?;
-			}
+		let folded: Vec<(String, HashMap<DocId, i64>, bool)> =
+			std::mem::take(&mut plan.deltas_by_term)
+				.into_iter()
+				.filter(|(_, deltas)| !deltas.is_empty())
+				.map(|(term, deltas)| {
+					let captured_whole = plan.captured_whole(&term);
+					(term, deltas, captured_whole)
+				})
+				.collect();
+		// One round trip for every term's residual rather than one per term. A
+		// round folds as many terms as its budget allows, and all but the term it
+		// stopped inside have no residual to read.
+		let keys: Vec<_> = folded.iter().map(|(term, ..)| self.ikb.new_tr_root(term)).collect();
+		let residuals = tx.get_many_key(keys, None).await?;
+		for ((term, deltas, captured_whole), residual) in folded.into_iter().zip(residuals) {
+			self.fold_term_docs(tx, &term, deltas, residual, captured_whole).await?;
 		}
 		for key in &plan.tt_keys {
 			tx.del_key(key).await?;
@@ -1502,6 +1590,7 @@ mod tests {
 	use std::time::{Duration, Instant};
 
 	use reblessive::tree::Stk;
+	use roaring::RoaringTreemap;
 	use surrealdb_datastore::Transaction;
 	use surrealdb_kvs::TransactionType;
 	use surrealdb_strand::Strand;
@@ -1509,7 +1598,10 @@ mod tests {
 	use tokio::time::sleep;
 	use uuid::Uuid;
 
-	use super::{DocumentTerms, FullTextIndex, TermChangeKey, TermDocument};
+	use super::{
+		DocId, DocumentTerms, FullTextIndex, TermChangeBatchKey, TermChangeKey, TermDocsResidual,
+		TermDocument,
+	};
 	use crate::IndexKeyBase;
 	use crate::catalog::{AnalyzerDefinition, DatabaseId, FullTextParams, IndexId, NamespaceId};
 	use crate::expr::Tokenizer;
@@ -1712,6 +1804,110 @@ mod tests {
 			let legacy = tx.count(self.ikb.new_tt_terms_range().unwrap(), None).await.unwrap();
 			let batched = tx.count(self.ikb.new_tx_terms_range().unwrap(), None).await.unwrap();
 			legacy + batched
+		}
+
+		/// Writes one batched `!tx` delta directly, so a test controls the order
+		/// the entries sort in rather than leaving it to the node ids indexing
+		/// would use.
+		async fn write_tx_delta(
+			&self,
+			tx: &Transaction,
+			term: &str,
+			nid: u128,
+			add: bool,
+			docs: &RoaringTreemap,
+		) {
+			let key = TermChangeBatchKey {
+				ns: self.ikb.ns(),
+				db: self.ikb.db(),
+				tb: Cow::Borrowed(self.ikb.table()),
+				ix: self.ikb.index(),
+				term: Cow::Borrowed(term),
+				nid: Uuid::from_u128(nid),
+				uid: Uuid::from_u128(9),
+				add,
+			};
+			tx.set_key(&key, docs).await.unwrap();
+		}
+
+		/// The same, in the per-document `!tt` shape an upgraded database carries.
+		async fn write_tt_delta(
+			&self,
+			tx: &Transaction,
+			term: &str,
+			doc_id: DocId,
+			nid: u128,
+			add: bool,
+		) {
+			let key = TermChangeKey {
+				ns: self.ikb.ns(),
+				db: self.ikb.db(),
+				tb: Cow::Borrowed(self.ikb.table()),
+				ix: self.ikb.index(),
+				term: Cow::Borrowed(term),
+				doc_id,
+				nid: Uuid::from_u128(nid),
+				uid: Uuid::from_u128(9),
+				add,
+			};
+			tx.set_key(&key, &String::new()).await.unwrap();
+		}
+
+		/// One term's compacted document set.
+		async fn term_docs(&self, term: &str) -> Option<RoaringTreemap> {
+			let tx = self.new_tx(TransactionType::Read).await;
+			let docs = tx.get_key(&self.ikb.new_td_root(term), None).await.unwrap();
+			tx.cancel().await.unwrap();
+			docs
+		}
+
+		/// What that set could not hold, as `(document, count)` pairs.
+		async fn term_residual(&self, term: &str) -> Option<Vec<(DocId, i64)>> {
+			let tx = self.new_tx(TransactionType::Read).await;
+			let residual: Option<TermDocsResidual> =
+				tx.get_key(&self.ikb.new_tr_root(term), None).await.unwrap();
+			tx.cancel().await.unwrap();
+			residual.map(|r| r.counts.iter().map(|(doc_id, count)| (*doc_id, *count)).collect())
+		}
+
+		/// Runs bounded term-document compaction rounds until both delta families
+		/// are drained, and answers how many of them did work.
+		async fn drain_term_docs(&self, limit: u32) -> usize {
+			let mut rounds = 0;
+			loop {
+				let tx = self.new_tx(TransactionType::Write).await;
+				let plan =
+					self.fti.prepare_term_docs_compaction_with_limit(&tx, limit).await.unwrap();
+				let has_more = plan.has_more();
+				let applied = self.fti.apply_term_docs_compaction(&tx, plan).await.unwrap();
+				tx.commit().await.unwrap();
+				if !applied {
+					return rounds;
+				}
+				rounds += 1;
+				assert!(rounds < 64, "compaction is not draining the delta ranges");
+				if !has_more {
+					return rounds;
+				}
+			}
+		}
+
+		/// The documents a query resolves for one term, through the same path a
+		/// `MATCHES` clause takes.
+		async fn query_docs(&self, term: &str) -> RoaringTreemap {
+			let (ctx, tx) = self.new_read_env().await;
+			let mut stack = reblessive::TreeStack::new();
+			let az_fn = NoAnalyzerFunction;
+			let qt = stack
+				.enter(|stk| self.fti.extract_querying_terms(stk, &ctx, &az_fn, term.to_owned()))
+				.finish()
+				.await
+				.unwrap();
+			tx.cancel().await.unwrap();
+			qt.docs.into_iter().flatten().fold(RoaringTreemap::new(), |mut all, docs| {
+				all |= docs;
+				all
+			})
 		}
 	}
 
@@ -2241,6 +2437,286 @@ mod tests {
 		);
 		// It ended on the range's last entry, so there is nothing to come back for.
 		assert!(!plan.has_more(), "a round that took the last entry reports no more");
+	}
+
+	/// A term's compacted document set must not depend on where a round stopped.
+	///
+	/// Deltas are signed counts and a compacted set is a bitmap, so a document a
+	/// round saw added while the removal cancelling it sits past the round's
+	/// budget comes to a count of two — one more than a bitmap can hold. Discard
+	/// what does not fit and the removal, folded by the next round, takes the
+	/// document out of a set it belongs in: a term lost from a document that
+	/// carries it, with nothing later to put it back.
+	///
+	/// The entries are written rather than indexed, because the shape needs the
+	/// addition to sort ahead of the removal and the pair to straddle the budget.
+	#[test(tokio::test)]
+	async fn a_round_that_stops_inside_a_term_folds_it_to_the_same_set() {
+		let test = TestContext::new().await;
+		let doc: DocId = 7;
+		let present = RoaringTreemap::from_iter([doc]);
+
+		// A compacted set that already carries the document, so the only history
+		// reaching these two entries is a removal and the addition undoing it: the
+		// document ends where it started. Entries sort by node ahead of direction,
+		// so the addition is what a budget of one takes.
+		let tx = test.new_tx(TransactionType::Write).await;
+		tx.set_key(&test.ikb.new_td_root("hello"), &present).await.unwrap();
+		test.write_tx_delta(&tx, "hello", 1, true, &present).await;
+		test.write_tx_delta(&tx, "hello", 2, false, &present).await;
+		tx.commit().await.unwrap();
+
+		let tx = test.new_tx(TransactionType::Write).await;
+		let plan = test.fti.prepare_term_docs_compaction_with_limit(&tx, 1).await.unwrap();
+		assert_eq!(plan.tx_keys.len(), 1, "a round is bounded by its budget, not by the term");
+		assert!(test.fti.apply_term_docs_compaction(&tx, plan).await.unwrap());
+		tx.commit().await.unwrap();
+
+		assert_eq!(
+			test.term_residual("hello").await,
+			Some(vec![(doc, 1)]),
+			"the count the bitmap could not hold must be kept, not clamped away"
+		);
+		assert_eq!(
+			test.term_docs("hello").await,
+			Some(present.clone()),
+			"a count above what the bitmap holds leaves the document in it"
+		);
+		assert_eq!(
+			test.query_docs("hello").await,
+			present,
+			"a query between rounds resolves the same total compaction does"
+		);
+
+		assert_eq!(test.drain_term_docs(1).await, 1, "one entry is left, so one round drains it");
+		assert_eq!(
+			test.term_docs("hello").await,
+			Some(present),
+			"a pair that cancels leaves the set as it was, however the rounds split it"
+		);
+		assert_eq!(
+			test.term_residual("hello").await,
+			None,
+			"a term with nothing left to fold keeps no residual"
+		);
+	}
+
+	/// The same rule where the count runs below what a bitmap can hold rather
+	/// than above it, which is the other way the compacted set comes out wrong.
+	///
+	/// A document absent from the compacted set whose removal a round folds first
+	/// — entries sort by node ahead of time, so a removal can sort ahead of the
+	/// addition it undid — reaches minus one. Drop that and the addition the next
+	/// round folds puts the document into a set it does not belong in: a hit
+	/// against a term the document does not carry.
+	#[test(tokio::test)]
+	async fn a_round_that_stops_inside_a_term_leaves_an_absent_document_absent() {
+		let test = TestContext::new().await;
+		let doc: DocId = 7;
+		let touched = RoaringTreemap::from_iter([doc]);
+
+		// No compacted set for the term, so the history reaching these entries is
+		// the addition and then the removal undoing it — the reverse of the order
+		// the two sort in.
+		let tx = test.new_tx(TransactionType::Write).await;
+		test.write_tx_delta(&tx, "hello", 1, false, &touched).await;
+		test.write_tx_delta(&tx, "hello", 2, true, &touched).await;
+		tx.commit().await.unwrap();
+
+		let tx = test.new_tx(TransactionType::Write).await;
+		let plan = test.fti.prepare_term_docs_compaction_with_limit(&tx, 1).await.unwrap();
+		assert_eq!(plan.tx_keys.len(), 1, "a round is bounded by its budget, not by the term");
+		assert!(test.fti.apply_term_docs_compaction(&tx, plan).await.unwrap());
+		tx.commit().await.unwrap();
+
+		assert_eq!(
+			test.term_residual("hello").await,
+			Some(vec![(doc, -1)]),
+			"a count below what the bitmap can hold must be kept too"
+		);
+		assert_eq!(
+			test.term_docs("hello").await,
+			None,
+			"a count below what the bitmap holds keeps the document out of it"
+		);
+		assert!(
+			test.query_docs("hello").await.is_empty(),
+			"a query between rounds resolves the same total compaction does"
+		);
+
+		test.drain_term_docs(1).await;
+		assert_eq!(
+			test.term_docs("hello").await,
+			None,
+			"a pair that cancels leaves the set as it was, however the rounds split it"
+		);
+		assert_eq!(test.term_residual("hello").await, None);
+	}
+
+	/// The same rule on the per-document family an upgraded database carries,
+	/// whose pass is bounded by keys and so can also stop inside a term.
+	#[test(tokio::test)]
+	async fn a_round_that_stops_inside_a_legacy_term_folds_it_to_the_same_set() {
+		let test = TestContext::new().await;
+		let doc: DocId = 7;
+		let present = RoaringTreemap::from_iter([doc]);
+
+		// Keyed by document and then node, so the pair is adjacent and the
+		// addition is again the one a budget of one takes.
+		let tx = test.new_tx(TransactionType::Write).await;
+		tx.set_key(&test.ikb.new_td_root("hello"), &present).await.unwrap();
+		test.write_tt_delta(&tx, "hello", doc, 1, true).await;
+		test.write_tt_delta(&tx, "hello", doc, 2, false).await;
+		tx.commit().await.unwrap();
+
+		let tx = test.new_tx(TransactionType::Write).await;
+		let plan = test.fti.prepare_term_docs_compaction_with_limit(&tx, 1).await.unwrap();
+		assert_eq!(plan.tt_keys.len(), 1, "a round is bounded by its budget, not by the term");
+		assert!(test.fti.apply_term_docs_compaction(&tx, plan).await.unwrap());
+		tx.commit().await.unwrap();
+
+		assert_eq!(
+			test.term_residual("hello").await,
+			Some(vec![(doc, 1)]),
+			"the count the bitmap could not hold must be kept, not clamped away"
+		);
+
+		test.drain_term_docs(1).await;
+		assert_eq!(
+			test.term_docs("hello").await,
+			Some(present),
+			"a pair that cancels leaves the set as it was, however the rounds split it"
+		);
+		assert_eq!(test.term_residual("hello").await, None);
+	}
+
+	/// A term split *between* the two delta families, which is the split neither
+	/// family's own bound can close.
+	///
+	/// Each family is scanned under its own budget, so a term's per-document
+	/// entries can be folded by one round and its batched entries by another even
+	/// where neither scan stopped inside that term. Here the legacy pass takes the
+	/// term's addition and the batched pass is spent on a term sorting ahead of
+	/// it, leaving the removal for a later round.
+	#[test(tokio::test)]
+	async fn a_term_split_between_the_delta_families_folds_to_the_same_set() {
+		let test = TestContext::new().await;
+		let doc: DocId = 7;
+		let present = RoaringTreemap::from_iter([doc]);
+
+		let tx = test.new_tx(TransactionType::Write).await;
+		tx.set_key(&test.ikb.new_td_root("hello"), &present).await.unwrap();
+		test.write_tt_delta(&tx, "hello", doc, 1, true).await;
+		test.write_tx_delta(&tx, "hello", 2, false, &present).await;
+		// Two batched entries under a term sorting first, so a budget of one is
+		// spent before the batched pass reaches the term above.
+		test.write_tx_delta(&tx, "aaa", 1, true, &RoaringTreemap::from_iter([9])).await;
+		test.write_tx_delta(&tx, "aaa", 2, true, &RoaringTreemap::from_iter([10])).await;
+		tx.commit().await.unwrap();
+
+		let tx = test.new_tx(TransactionType::Write).await;
+		let plan = test.fti.prepare_term_docs_compaction_with_limit(&tx, 1).await.unwrap();
+		assert_eq!(
+			plan.tx_keys.iter().map(|k| k.term.as_ref()).collect::<Vec<_>>(),
+			vec!["aaa"],
+			"the batched pass must be spent before it reaches the split term"
+		);
+		assert_eq!(plan.tt_keys.len(), 1, "the legacy pass takes the term's addition");
+		assert!(test.fti.apply_term_docs_compaction(&tx, plan).await.unwrap());
+		tx.commit().await.unwrap();
+
+		assert_eq!(
+			test.term_residual("hello").await,
+			Some(vec![(doc, 1)]),
+			"a term the other family has more of is not folded whole"
+		);
+
+		test.drain_term_docs(1).await;
+		assert_eq!(
+			test.term_docs("hello").await,
+			Some(present),
+			"an addition and a removal in different families still cancel"
+		);
+		assert_eq!(test.term_residual("hello").await, None);
+		assert_eq!(test.term_docs("aaa").await, Some(RoaringTreemap::from_iter([9, 10])));
+	}
+
+	/// A term whose every delta a round captured is answered by its bitmap alone.
+	///
+	/// The residual carries a total across a round boundary. A round that leaves
+	/// nothing behind has no boundary to carry one over, so a total that still
+	/// does not fit says the additions and removals recorded for that document
+	/// did not alternate. Keeping it would pin the document against every later
+	/// delta — the removal below would leave it in the set.
+	#[test(tokio::test)]
+	async fn a_term_folded_whole_is_answered_by_its_bitmap() {
+		let test = TestContext::new().await;
+		let doc: DocId = 7;
+		let present = RoaringTreemap::from_iter([doc]);
+
+		// An addition of a document the set already holds, and nothing to cancel
+		// it: a total of two with the whole term captured.
+		let tx = test.new_tx(TransactionType::Write).await;
+		tx.set_key(&test.ikb.new_td_root("hello"), &present).await.unwrap();
+		test.write_tx_delta(&tx, "hello", 1, true, &present).await;
+		tx.commit().await.unwrap();
+
+		test.drain_term_docs(64).await;
+		assert_eq!(test.term_docs("hello").await, Some(present));
+		assert_eq!(test.term_residual("hello").await, None);
+
+		// So the next removal is the one that decides membership.
+		let tx = test.new_tx(TransactionType::Write).await;
+		test.write_tx_delta(&tx, "hello", 3, false, &RoaringTreemap::from_iter([doc])).await;
+		tx.commit().await.unwrap();
+
+		test.drain_term_docs(64).await;
+		assert_eq!(
+			test.term_docs("hello").await,
+			None,
+			"the document must leave the set the removal took it out of"
+		);
+		assert!(test.query_docs("hello").await.is_empty());
+	}
+
+	/// A residual with no deltas beside it still decides where its documents
+	/// belong, rather than being overridden by the bitmap alone.
+	///
+	/// A compactor of this build always leaves a residual beside a bitmap that
+	/// agrees with its sign, and leaves deltas for the round that will fold it
+	/// away. One that does not know the family leaves neither: it folds the
+	/// remaining deltas into the bitmap and strands the residual, which is the
+	/// state written directly here. Reading the total rather than the bitmap is
+	/// what keeps that recoverable — the term resolves correctly now, and the
+	/// next delta folded on top of it lands where it should.
+	#[test(tokio::test)]
+	async fn a_residual_left_without_deltas_still_decides_membership() {
+		let test = TestContext::new().await;
+		let doc: DocId = 7;
+
+		// No compacted set and no deltas, so the residual is the whole total.
+		let tx = test.new_tx(TransactionType::Write).await;
+		tx.set_key(&test.ikb.new_tr_root("hello"), &TermDocsResidual::new([(doc, 1)]))
+			.await
+			.unwrap();
+		tx.commit().await.unwrap();
+
+		assert_eq!(
+			test.query_docs("hello").await,
+			RoaringTreemap::from_iter([doc]),
+			"a total of one carries the document whichever side of the compaction it sits on"
+		);
+
+		// And the removal that follows takes it back out, rather than landing on
+		// a bitmap that never learned the document was there.
+		let tx = test.new_tx(TransactionType::Write).await;
+		test.write_tx_delta(&tx, "hello", 1, false, &RoaringTreemap::from_iter([doc])).await;
+		tx.commit().await.unwrap();
+
+		assert!(test.query_docs("hello").await.is_empty());
+		test.drain_term_docs(64).await;
+		assert_eq!(test.term_docs("hello").await, None);
+		assert_eq!(test.term_residual("hello").await, None);
 	}
 
 	/// A query must observe the documents its own transaction has just indexed,
