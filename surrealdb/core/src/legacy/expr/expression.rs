@@ -30,7 +30,12 @@ pub(crate) async fn expr_compute(
 	// nested subqueries, or through function/closure bodies, on both the legacy
 	// and streaming execution paths — the streaming engine plans no writes of
 	// its own, so every one of them arrives here.
-	if let Some(frame) = opt.no_write
+	//
+	// The `mutable_permissions` capability reopens this for create/update/delete
+	// predicates: those frames leave `no_write` unset and instead set
+	// `mutable_permission_predicate`, so a write is permitted and recorded as
+	// usage of the transitional capability rather than blocked.
+	if (opt.no_write.is_some() || opt.mutable_permission_predicate)
 		&& matches!(
 			this,
 			Expr::Create(_)
@@ -44,23 +49,31 @@ pub(crate) async fn expr_compute(
 				| Expr::Rebuild(_)
 				| Expr::Alter(_)
 		) {
-		let err = match frame {
-			NoWriteFrame::PermissionPredicate => {
-				// A create/update/delete predicate reaching this block means the
-				// `mutable_permissions` capability is off (a select predicate
-				// always reaches it). Point the operator at the sanctioned
-				// mechanism for write side effects on writes.
-				warn!(
-					"A PERMISSIONS clause attempted to modify data and was blocked \
-					 (GHSA-66r2-5gwj-gxm2). Move audit-style side effects to a DEFINE EVENT; \
-					 to keep them in create/update/delete permission clauses, enable the \
-					 `mutable_permissions` experimental capability."
-				);
-				ExecError::PermissionPredicateSideEffect
-			}
-			NoWriteFrame::ComputedField => ExecError::ComputedFieldSideEffect,
-		};
-		return Err(ControlFlow::Err(anyhow::Error::new(err)));
+		if let Some(frame) = opt.no_write {
+			let err = match frame {
+				NoWriteFrame::PermissionPredicate => {
+					// A create/update/delete predicate reaching this block means the
+					// `mutable_permissions` capability is off (a select predicate
+					// always reaches it). Point the operator at the sanctioned
+					// mechanism for write side effects on writes.
+					warn!(
+						"A PERMISSIONS clause attempted to modify data and was blocked \
+						 (GHSA-66r2-5gwj-gxm2). Move audit-style side effects to a DEFINE EVENT; \
+						 to keep them in create/update/delete permission clauses, enable the \
+						 `mutable_permissions` experimental capability."
+					);
+					ExecError::PermissionPredicateSideEffect
+				}
+				NoWriteFrame::ComputedField => ExecError::ComputedFieldSideEffect,
+			};
+			return Err(ControlFlow::Err(anyhow::Error::new(err)));
+		}
+		// `mutable_permission_predicate` with `no_write` unset: the capability
+		// permitted this write. Record it so operators can track reliance on the
+		// transitional capability, then fall through and run the statement.
+		if let Some(counters) = ctx.statement_counters() {
+			counters.record_mutable_permission_write();
+		}
 	}
 
 	match this {

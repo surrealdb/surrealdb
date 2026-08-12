@@ -223,6 +223,7 @@ applicable. Sentinel `"-"` values appear when ctx is unresolved.
 | `surrealdb_statement_total` | `surrealdb.statement` | counter | `statement_type, outcome, namespace, database, user` |
 | `surrealdb_statement_duration_seconds` | `surrealdb.statement` | histogram | same as above |
 | `surrealdb_statement_rows_total` | `surrealdb.statement` | counter | same as above (DML only) |
+| `surrealdb_statement_mutable_permission_writes_total` | `surrealdb.statement` | counter | `statement_type, outcome` (deliberately **no** tenant labels — see below) |
 | `surrealdb_query_total` | `surrealdb.query` | counter | `outcome, namespace, database, user` |
 | `surrealdb_query_duration_seconds` | `surrealdb.query` | histogram | same as above |
 | `surrealdb_transaction_total` | `surrealdb.transaction` | counter | `write, outcome, namespace, database, user` |
@@ -247,6 +248,17 @@ applicable. Sentinel `"-"` values appear when ctx is unresolved.
 | `surrealdb_http_active_requests` | `surrealdb.http` | gauge | `http_request_method, http_route` (attribute-stripped to keep the gauge balanced) |
 | `surrealdb_live_query_active` | `surrealdb.live_query` | gauge | none |
 | `surrealdb_live_query_notifications_total` | `surrealdb.live_query` | counter | none |
+
+`surrealdb_statement_mutable_permission_writes_total` counts data-modifying
+statements that ran inside a `create` / `update` / `delete` `PERMISSIONS`
+predicate and were permitted only because the transitional `mutable_permissions`
+experimental capability is enabled (without it those writes are blocked —
+GHSA-66r2-5gwj-gxm2). A non-zero value means the deployment relies on the
+capability and has schemas to migrate to `DEFINE EVENT` before it is removed.
+Unlike the rest of the statement family it carries **no** `namespace` /
+`database` / `user` labels: it is an instance-level usage signal, so it reports
+that a node uses the capability and how much without attributing that use to any
+tenant.
 
 ### Authenticated-only — pipeline self-metrics
 

@@ -39,6 +39,18 @@ pub struct Options {
 	/// reached from one is a side effect the reading statement never asked for.
 	/// See [`NoWriteFrame`] and `SECURITY_GUIDE.md`.
 	pub(crate) no_write: Option<NoWriteFrame>,
+	/// Set while evaluating a `create`/`update`/`delete` `PERMISSIONS` predicate
+	/// with the `mutable_permissions` capability enabled — the transitional
+	/// frame that permits writes GHSA-66r2-5gwj-gxm2 would otherwise block.
+	///
+	/// Purely observational: it does not gate execution (that is `no_write`'s
+	/// job — this frame leaves it unset). A data-modifying statement reached
+	/// under it is recorded on the per-statement counters as usage of the
+	/// capability. Propagates into the predicate's sub-evaluations (nested
+	/// subqueries and called function bodies) so their writes count too;
+	/// naturally scoped, because it is only ever set on the predicate frame and
+	/// callers resume their own `Options` once the predicate returns.
+	pub(crate) mutable_permission_predicate: bool,
 	/// Should we process field queries?
 	pub(crate) import: bool,
 	/// The data version as a timestamp
@@ -81,6 +93,7 @@ impl Options {
 			dive: config.max_computation_depth,
 			perms: true,
 			no_write: None,
+			mutable_permission_predicate: false,
 			force: Force::None,
 			import: false,
 			auth: Arc::new(Auth::default()),
@@ -245,6 +258,7 @@ impl Options {
 		Self {
 			perms: false,
 			no_write: None,
+			mutable_permission_predicate: true,
 			..self.clone()
 		}
 	}

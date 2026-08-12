@@ -203,6 +203,7 @@ surrealdb_process_uptime_seconds 99
 				duration: std::time::Duration::from_millis(2),
 				read_only: true,
 				result_rows: 0,
+				mutable_permission_writes: 0,
 				error_class: None,
 			},
 			ctx: StatementEventCtx {
