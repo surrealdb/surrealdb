@@ -135,9 +135,24 @@ jobs:
           # The pushed commit, or the exact engine sha/ref for a manual (re)build.
           ref: ${{ inputs.engine-git-sha || github.sha }}
 
+      # CI tooling (first-party actions) comes from the WORKFLOW ref - the
+      # pushed commit on this branch, or whichever branch/tag a manual dispatch
+      # was run from - NOT from the (possibly older/overridden) commit checked
+      # out above for the build. Dispatch from main and the workflow, its
+      # actions and its scripts all come from main; dispatch from a branch or
+      # tag to debug and everything comes from that ref instead.
+      - name: Checkout CI tooling from the workflow ref
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
+
       - name: Derive rolling build vars
         id: vars
-        uses: ./.github/actions/derive-rolling-vars
+        uses: ./.ci/.github/actions/derive-rolling-vars
 
       # A manual dispatch may build the downstream image against an arbitrary
       # engine commit for inspection, but it is only promotable when that engine
@@ -146,12 +161,11 @@ jobs:
       # share a branch (a main dispatch may pair a releases/3.2 engine commit and
       # vice versa) and an older ancestor being rebuilt still counts.
       #
-      # This is duplicated (verbatim) in rolling-build.yml's prepare on purpose: it
-      # must stay inline rather than become a shared local action. A `uses: ./…`
-      # action is read from the checked-out tree, and prepare checks out the target
-      # engine commit, so the action would be missing whenever an override
-      # reproduces a commit that predates it (every current release). An inline
-      # run: comes from the workflow definition, so it is always present.
+      # This is duplicated (verbatim) in rolling-build.yml's prepare on purpose.
+      # It predates the .ci tooling checkout above (a workspace-local `uses: ./…`
+      # action would be missing when an override reproduces a commit that
+      # predates it); it could now become a ./.ci/... action, but is kept inline
+      # since it is small and changes rarely.
       - name: Assert engine commit is on a release line
         id: promotable
         if: ${{ inputs.engine-git-sha != '' }}

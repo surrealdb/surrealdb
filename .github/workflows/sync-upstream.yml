@@ -45,14 +45,33 @@ on:
         type: string
         default: ""
         required: false
+      releases_up_to:
+        description: "Only push release tags at or below this version, semver (releases only; blank = all releases)"
+        type: string
+        default: ""
+        required: false
       dry_run:
         description: "Dry run (validate but make no changes)"
         type: boolean
         default: false
 
 concurrency:
-  group: ${{ github.workflow }}-sync-main
-  cancel-in-progress: false
+  # Three lanes: pull (scheduled/manual), push-releases, and push-main.
+  #  - pull is separate so a routine pull can never cancel a push parked at the
+  #    `upstream` approval gate.
+  #  - the two push kinds are separate so a release-triggered `push (releases)`
+  #    cannot cancel an operator's in-flight `push (releases + main)` - which
+  #    would silently discard their approval and leave main unsynced.
+  group: ${{ github.workflow }}-${{ (github.event_name == 'workflow_dispatch' && startsWith(inputs.direction, 'push')) && (contains(inputs.direction, 'main') && 'push-main' || 'push-releases') || 'pull' }}
+  # Supersede only within the push-main lane (the newest main push wins). The
+  # push-releases lane keeps cancel-in-progress FALSE: a release auto-triggers a
+  # releases sync, so an operator's releases sync parked at the `upstream`
+  # approval gate must queue, not be cancelled (cancelling would silently discard
+  # their approval). Release pushes only ever fast-forward tags, so a queued run
+  # behind a newer one is harmless. The pull lane also keeps false: it runs on a
+  # */30 cron, so cancelling would let a pull that overruns 30 min be killed by
+  # every subsequent tick and never complete - queueing is correct there too.
+  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' && contains(inputs.direction, 'main') }}
 
 defaults:
   run:
@@ -275,6 +294,7 @@ jobs:
           DST_REPO: surrealdb/surrealdb
           DIRECTION: ${{ inputs.direction }}
           MAIN_COMMIT: ${{ inputs.main_commit }}
+          RELEASES_UP_TO: ${{ inputs.releases_up_to }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -euo pipefail
@@ -351,6 +371,19 @@ jobs:
           if [ -z "$source_tags" ]; then
             echo "_No source releases to sync._" >> "$S"
             exit 0
+          fi
+
+          # Bound the releases sync to a version when requested: drop every tag
+          # newer than releases_up_to so publishing vX.Y.Z never leaks a later tag
+          # (vX.Y.(Z+1), v(X).(Y+1).0, a newer line's pre-release, ...) that already
+          # exists here. Semver-correct (sort -V mis-orders pre-releases).
+          if [ -n "${RELEASES_UP_TO:-}" ]; then
+            source_tags="$(printf '%s\n' "$source_tags" | python3 .github/scripts/release-tags-le.py "$RELEASES_UP_TO")"
+            { echo ""; echo "- **Bounded to:** \`${RELEASES_UP_TO}\` — newer release tags are excluded."; } >> "$S"
+            if [ -z "$source_tags" ]; then
+              { echo ""; echo "_No source releases at or below \`${RELEASES_UP_TO}\` to sync._"; } >> "$S"
+              exit 0
+            fi
           fi
           dst_tags="$(gh api --paginate "repos/$DST_REPO/releases?per_page=100" \
             --jq '.[] | select(.draft | not) | .tag_name' 2>/dev/null | sort -u || true)"
@@ -538,6 +571,7 @@ jobs:
           DST_TOKEN: ${{ steps.app-token.outputs.token }}
           SRC_REPO: ${{ github.repository }}
           DST_REPO: surrealdb/surrealdb
+          RELEASES_UP_TO: ${{ inputs.releases_up_to }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           set -euo pipefail
@@ -552,17 +586,55 @@ jobs:
             exit 0
           fi
 
-          # The source's "latest" defines the desired latest pointer. When the
-          # source has no "latest" we leave the destination pointer to GitHub's
-          # own heuristic instead of forcing every release non-latest (which would
-          # otherwise unset a valid latest pointer and show as perpetual drift).
-          latest_tag="$(GH_TOKEN="$SRC_TOKEN" gh release view --repo "$SRC_REPO" --json tagName --jq .tagName 2>/dev/null || true)"
-          if [ -n "$latest_tag" ]; then manage_latest=true; else manage_latest=false; fi
+          # Bound the releases sync to a version when requested (same rule and
+          # script as the plan job): publishing vX.Y.Z must not push a newer tag
+          # that already exists here. Semver-correct (sort -V mis-orders pre-releases).
+          if [ -n "${RELEASES_UP_TO:-}" ]; then
+            source_releases="$(printf '%s\n' "$source_releases" | python3 .github/scripts/release-tags-le.py "$RELEASES_UP_TO")"
+            if [ -z "$source_releases" ]; then
+              echo "No source releases at or below ${RELEASES_UP_TO} to sync"
+              exit 0
+            fi
+          fi
 
           # The destination's current latest tag. `gh release view` has no
           # isLatest field, so the latest pointer is derived from the destination's
           # latest release (empty when it has none yet).
           dst_latest_tag="$(GH_TOKEN="$DST_TOKEN" gh release view --repo "$DST_REPO" --json tagName --jq .tagName 2>/dev/null || true)"
+
+          # Desired "latest" pointer.
+          if [ -n "${RELEASES_UP_TO:-}" ]; then
+            # Bounded sync: the newest release we may publish is the bound itself
+            # (when it is a real release). Promote it to latest ONLY if it is at or
+            # above the destination's current latest, so a backport sync (bound
+            # older than an already-public newer release) never demotes it. We still
+            # explicitly manage every bounded release (--latest true/false), because
+            # a newly-created release would otherwise DEFAULT to latest on GitHub and
+            # wrongly demote a newer public one.
+            manage_latest=true
+            latest_tag=""
+            # Resolve the bound to the actual source tag it names, v-prefix-agnostic
+            # (the filter script already ignores a leading v, so match it the same
+            # way here - a bound like "3.1.6" still promotes "v3.1.6"). latest_tag
+            # must be the real tag so the per-release `tag == latest_tag` test below
+            # matches. Fails safe: no match leaves latest_tag empty (nothing promoted).
+            want="${RELEASES_UP_TO#v}"; match=""
+            while IFS= read -r t; do
+              [ -n "$t" ] && [ "${t#v}" = "$want" ] && { match="$t"; break; }
+            done <<< "$source_releases"
+            if [ -n "$match" ] \
+               && { [ -z "$dst_latest_tag" ] \
+                    || [ -n "$(printf '%s\n' "$dst_latest_tag" | python3 .github/scripts/release-tags-le.py "$RELEASES_UP_TO")" ]; }; then
+              latest_tag="$match"
+            fi
+          else
+            # Unbounded sync: the source's own "latest" defines the pointer. When the
+            # source has no latest, leave the destination's to GitHub's heuristic
+            # instead of forcing every release non-latest (which would unset a valid
+            # pointer and show as perpetual drift).
+            latest_tag="$(GH_TOKEN="$SRC_TOKEN" gh release view --repo "$SRC_REPO" --json tagName --jq .tagName 2>/dev/null || true)"
+            if [ -n "$latest_tag" ]; then manage_latest=true; else manage_latest=false; fi
+          fi
 
           # Tags are only ever created as part of a release, so the release set is
           # the complete set of tags we may publish. A release's tag is pushed
@@ -590,7 +662,19 @@ jobs:
             [ -z "$title" ] && title="$tag"
             is_prerelease="$(printf '%s' "$src_meta" | jq -r '.isPrerelease')"
             printf '%s' "$src_meta" | jq -r '.body // ""' > "$workdir/body.md"
+            # Strip the internal-only build-provenance trailer before syncing:
+            # the promote action emits a `<!-- internal-only -->` marker just
+            # before it (engine + downstream commit SHAs), and everything from
+            # that marker to end of file is internal-only. Cutting it keeps the
+            # public release clean. Doing it before the drift check means the
+            # reconciler compares the same body we publish, so existing public
+            # releases self-heal and there is no perpetual re-edit loop.
+            sed -i -E '/<!-- internal-only -->/,$d' "$workdir/body.md"
             body="$(cat "$workdir/body.md")"
+            # Rewrite the file from the trimmed value so --notes-file matches the
+            # drift comparison exactly (command substitution already dropped any
+            # trailing newlines).
+            printf '%s' "$body" > "$workdir/body.md"
             # name<TAB>size identifies an asset; size also catches a file that was
             # replaced under the same name. Sorted for an order-independent diff.
             src_assets="$(printf '%s' "$src_meta" | jq -r '.assets[] | "\(.name)\t\(.size)"' | sort)"

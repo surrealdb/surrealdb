@@ -50,17 +50,27 @@ on:
   # build before promotion. main is deliberately NOT built per push.
   schedule:
     - cron: "0 20 * * *"
-  # Manual build/rebuild: dispatch against the branch line and pass the exact
-  # commit — or a branch/ref, which resolves to its tip — to (re)build. On main /
-  # releases/* it reproduces (and overwrites) that commit's promotable artifacts.
-  # On any other branch it is a throwaway test build — no manifest is written and
+  # Manual build/rebuild: pass the exact commit — or a branch/ref, which
+  # resolves to its tip — to (re)build. A commit on main or a releases/* line
+  # reproduces (and overwrites) that commit's promotable artifacts, keyed under
+  # the LINE CONTAINING THE COMMIT (so a main dispatch can rebuild any line,
+  # including one whose branch does not carry this workflow file). A commit on
+  # no promotion line is a throwaway test build — no manifest is written and
   # the artifacts are deleted afterwards. Omit git-sha to build the branch tip.
   workflow_dispatch:
     inputs:
       git-sha:
-        # A branch/ref resolves to its tip. The artifact line/slug follows the
-        # DISPATCHED ref, so pass a commit or ref that belongs to the branch you
-        # dispatched against. Empty = the dispatched branch tip.
+        # A branch/ref resolves to its tip. Artifacts are keyed by the release
+        # line containing the commit (dispatched ref preferred when it contains
+        # it), so the dispatching branch does not constrain what can be rebuilt.
+        # Empty = the dispatched branch tip.
+        #
+        # Heads-up: because keying follows the commit's line, dispatching from a
+        # feature branch with a git-sha that lives on main keys the build under
+        # `main` and OVERWRITES main's promotable set - it is not namespaced as
+        # throwaway. To debug workflow changes without touching a promotable
+        # line, dispatch a commit that is on no release line (its build is the
+        # throwaway variant).
         description: 'Commit or branch to (re)build (empty = branch tip)'
         required: false
         type: string
@@ -113,9 +123,24 @@ jobs:
           # branch resolves to its tip).
           ref: ${{ inputs.git-sha || github.sha }}
 
+      # CI tooling (first-party actions) comes from the WORKFLOW ref - the
+      # pushed commit on this branch, or whichever branch/tag a manual dispatch
+      # was run from - NOT from the (possibly older/overridden) commit checked
+      # out above for the build. Dispatch from main and the workflow, its
+      # actions and its scripts all come from main; dispatch from a branch or
+      # tag to debug and everything comes from that ref instead.
+      - name: Checkout CI tooling from the workflow ref
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
+
       - name: Derive rolling build vars
         id: vars
-        uses: ./.github/actions/derive-rolling-vars
+        uses: ./.ci/.github/actions/derive-rolling-vars
 
       # A manual dispatch may build an arbitrary commit for inspection, but it is
       # only promotable when that commit lives on a promotion line. Reachability
@@ -125,11 +150,10 @@ jobs:
       # rebuilt still counts.
       #
       # This is duplicated (verbatim) in rolling-downstream-build.yml's prepare on
-      # purpose: it must stay inline rather than become a shared local action. A
-      # `uses: ./…` action is read from the checked-out tree, and prepare checks
-      # out the target commit, so the action would be missing whenever an override
-      # reproduces a commit that predates it (every current release). An inline
-      # run: comes from the workflow definition, so it is always present.
+      # purpose. It predates the .ci tooling checkout above (a workspace-local
+      # `uses: ./…` action would be missing when an override reproduces a commit
+      # that predates it); it could now become a ./.ci/... action, but is kept
+      # inline since it is small and changes rarely.
       - name: Assert built commit is on a release line
         id: promotable
         if: ${{ inputs.git-sha != '' }}

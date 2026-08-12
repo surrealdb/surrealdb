@@ -17,105 +17,183 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Setup environment
-      uses: ./.github/actions/setup-environment
-      with:
-        # Precautionary headroom on the GitHub-hosted ubuntu-latest runner
-        # (Linux-only, no-op elsewhere). Publishing now runs with --no-verify
-        # (the rolling `package` gate already verify-built the workspace on this
-        # SHA), so this no longer needs to fit a full rocksdb + wasm-opt rebuild;
-        # it's kept as cheap insurance against packaging many large crates.
-        free-disk-space: 'true'
-
-    - name: Install release-plz
-      uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # (Actions must be pinned by commit hash) v2.81.11
-      with:
-        tool: release-plz@0.3.159
-
-    - name: Configure release-plz
-      shell: bash
-      run: |
-        # publish_no_verify passes `--no-verify` to `cargo publish`, so release
-        # does NOT rebuild each crate to verify its tarball before upload. That
-        # verification already happened at rolling-build time (the `package`
-        # channel gate runs `cargo package --locked --workspace` on this exact
-        # SHA and gates the manifest), so re-doing the full workspace rebuild
-        # here — rocksdb + wasm-opt C/C++ builds and all — is pure duplication.
-        # This is the build-once / promote-many contract for crates: verify once
-        # on push, upload the already-verified crates at promote time.
-        cat << EOF > /tmp/release-plz.toml
-        [workspace]
-        changelog_update = false
-        git_release_enable = false
-        semver_check = false
-        git_tag_enable = false
-        publish_no_verify = true
-        EOF
+    # setup-environment (with free-disk-space) is provided by the CALLING JOB
+    # (hoisted): a nested `uses: ./...` here would resolve against the released
+    # commit in the workspace, not the workflow ref this action came from.
 
     # No CARGO_REGISTRY_TOKEN here: `cargo publish --dry-run` never contacts the
     # registry to upload, so the crates.io token is deliberately kept OUT of
     # scope for dry-runs (and for the nightly path, which only ever dry-runs).
-    # The token is only injected into the real publish step below.
     - name: Publish the crate (dry-run)
       if: ${{ inputs.publish == 'false' || inputs.nightly-release == 'true' }}
       shell: bash
       run: |
         set -x
-        
-        # Create a temporary branch in case the git ref is not a branch
-        git checkout -b crate
-        
+
+        # Create a temporary branch in case the git ref is not a branch.
+        git checkout -b crate 2>/dev/null || true
+
         echo "Running cargo publish --workspace --dry-run --no-verify"
         echo "Note: Failures here are informational and do not block nightly builds"
         echo "Common cause: workspace crates with new APIs not yet published"
 
         # --no-verify: the rolling `package` gate already ran
-        # `cargo package --locked --workspace` on this SHA (build-once /
-        # promote-many), so skip the redundant per-crate rebuild. This stays a
+        # `cargo publish --workspace --dry-run` WITH verify on this SHA
+        # (build-once / promote-many), compiling each crate from its packaged
+        # tarball, so skip the redundant per-crate rebuild here. This stays a
         # cheap name/version/registry sanity check on top of that gate.
-        # Let this fail naturally - workflow will handle continuation
         cargo publish --workspace --dry-run --no-verify
 
+    # Real publish — cargo only, no release-plz and no forge/GitHub token.
+    #
+    # Publishes to crates.io in dependency order with bounded retries and an
+    # idempotent skip, reproducing the only two behaviours release-plz gave us
+    # (transient-failure retries + skip-already-published) on top of cargo's own
+    # per-crate index-wait. `cargo publish -p <crate>` blocks until the crate is
+    # visible in the registry index before returning, so each dependent resolves
+    # its just-published dependency on the next iteration — that wait is what a
+    # bare `cargo publish --workspace` used to race. Only CARGO_REGISTRY_TOKEN is
+    # required; no --git-token, no pull-requests scope, no PR-association calls.
     - name: Publish the crate
       if: ${{ inputs.publish == 'true' && inputs.nightly-release != 'true' }}
       shell: bash
       env:
         CARGO_REGISTRY_TOKEN: ${{ inputs.cargo-registry-token }}
       run: |
-        set -x
+        set -uo pipefail
+        # Turn errexit OFF deliberately (the runner supplies -e): this script
+        # manages errors explicitly via return codes, the publish_one retry
+        # ladder, and `publish_one "$c" || exit 1`. Without this, changing that
+        # call site to a bare call would let -e abort inside publish_one before
+        # its retry logic ran.
+        set +e
 
-        # Create a temporary branch in case the git ref is not a branch
-        git checkout -b crate
+        # Detached HEAD at the released SHA — give cargo a branch to sit on.
+        git checkout -b crate 2>/dev/null || true
 
-        # Real publish - use release-plz for retry logic
-        # If all crates are already published, release-plz will fail
-        # We should treat this as success (idempotency)
-        if ! release-plz release --config /tmp/release-plz.toml; then
-          # Check if the failure was because everything is already published
-          echo "release-plz failed, checking if all crates are already published..."
-
-          # Get all workspace crates (exclude crates with publish = false)
-          all_published=true
-          for crate in $(cargo metadata --format-version 1 --no-deps | jq -r '.packages[] | select(.publish != []) | .name'); do
-            version=$(cargo metadata --format-version 1 --no-deps | jq -r ".packages[] | select(.name == \"$crate\") | .version")
-            echo "Checking if $crate@$version is published..."
-
-            if ! cargo search "$crate" --limit 1 | grep -q "^$crate = \"$version\""; then
-              echo "  $crate@$version is NOT published"
-              all_published=false
-              break
-            else
-              echo "  $crate@$version is already published"
-            fi
-          done
-
-          if [[ "$all_published" == "true" ]]; then
-            echo "All crates are already published. Treating as success (idempotent)."
-            exit 0
-          else
-            echo "Some crates failed to publish. Failing."
-            exit 1
-          fi
+        # `cargo metadata` runs under the `set +e` above, so guard it explicitly:
+        # a failure would otherwise leave meta empty, PUBLISHABLE empty, and the
+        # step take a green "nothing to publish" exit — while promote, tagging and
+        # propagation still ship the release. The publish set names what reaches
+        # crates.io, so fail loudly (same reasoning as prepare-release-vars).
+        if ! meta="$(cargo metadata --format-version 1 --no-deps)" || [ -z "$meta" ]; then
+          echo "::error::cargo metadata failed; cannot determine the crates to publish."
+          exit 1
         fi
 
+        # Publishable members: `.publish` is null (unset -> publishable) or a
+        # non-empty registry list; `[]` means `publish = false` (skip).
+        # Guard jq's exit (pipefail is on): a jq failure must not silently yield a
+        # partial or empty PUBLISHABLE. Capture first, then mapfile, so an empty
+        # result becomes an empty array (caught by the check below) rather than a
+        # single empty element.
+        if ! pub_names="$(printf '%s' "$meta" \
+          | jq -r '.packages[] | select(.publish != []) | .name' | sort -u)"; then
+          echo "::error::failed to enumerate publishable crates from cargo metadata."
+          exit 1
+        fi
+        PUBLISHABLE=()
+        [ -n "$pub_names" ] && mapfile -t PUBLISHABLE <<< "$pub_names"
+        # This workspace always has publishable crates, so an empty set is never a
+        # legitimate steady state on the release path - it means metadata/jq
+        # produced nothing. Fail loudly rather than exit 0 with "nothing to do",
+        # which would green-light a release that publishes no crates. (Idempotent
+        # re-runs are handled per-crate in the loop below, where already-published
+        # crates are skipped - not by this branch.)
+        if [ "${#PUBLISHABLE[@]}" -eq 0 ]; then
+          echo "::error::no publishable crates resolved from cargo metadata; refusing to proceed with an empty publish set."
+          exit 1
+        fi
 
+        # Dependency-order the members: emit "<dep> <pkg>" for every non-dev
+        # dependency that is itself a workspace member, then tsort (deps first).
+        # tsort only lists nodes present in an edge, so publishable members with
+        # no internal edges are appended afterwards (their order is free).
+        # Guard the jq exit status (it runs under `set +e`): a jq failure would
+        # otherwise yield empty edges, an empty tsort, and ORDER silently degrading
+        # to PUBLISHABLE's alphabetical order - the exact mid-publish resolution
+        # failure the tsort guard below exists to prevent. An empty result from a
+        # SUCCESSFUL jq (a workspace with no internal deps) is still fine.
+        if ! edges="$(printf '%s' "$meta" | jq -r '
+          [.packages[].name] as $names
+          | .packages[] as $pkg
+          | $pkg.dependencies[]?
+          | select(.kind != "dev")
+          | .name
+          | select(. as $d | $names | index($d))
+          | "\(.) \($pkg.name)"')"; then
+          echo "::error::failed to compute the crate dependency graph from cargo metadata."
+          exit 1
+        fi
+        # Do NOT hide tsort's stderr or ignore its exit code: a dependency
+        # cycle makes tsort exit non-zero and print the offending cycle, and
+        # swallowing that would silently degrade ORDER to alphabetical - which
+        # surfaces much later as a confusing mid-publish resolution failure on
+        # the irreversible path. Fail loudly here instead.
+        if ! ordered="$(printf '%s\n' "$edges" | tsort)"; then
+          echo "::error::Could not dependency-order workspace crates for publishing (tsort failed; likely a dependency cycle, see above)."
+          exit 1
+        fi
+        mapfile -t ORDERED < <(printf '%s' "$ordered")
+
+        is_publishable() { local x; for x in "${PUBLISHABLE[@]}"; do [ "$x" = "$1" ] && return 0; done; return 1; }
+        in_list() { local x t="$1"; shift; for x in "$@"; do [ "$x" = "$t" ] && return 0; done; return 1; }
+
+        ORDER=()
+        for c in "${ORDERED[@]}"; do is_publishable "$c" && ORDER+=("$c"); done
+        for c in "${PUBLISHABLE[@]}"; do in_list "$c" "${ORDER[@]}" || ORDER+=("$c"); done
+
+        crate_version() {
+          printf '%s' "$meta" | jq -r --arg n "$1" '.packages[] | select(.name==$n) | .version'
+        }
+
+        # Is <name>@<version> already on crates.io? Query the sparse index
+        # (authoritative and fast; `cargo search` is cache-stale). Path layout:
+        # 1|2-char names -> 1/ or 2/ dirs, 3-char -> 3/<c1>, else <c1c2>/<c3c4>.
+        # The index lowercases names.
+        is_published() {
+          local name ver p
+          name="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"; ver="$2"
+          case "${#name}" in
+            1) p="1/${name}" ;;
+            2) p="2/${name}" ;;
+            3) p="3/${name:0:1}/${name}" ;;
+            *) p="${name:0:2}/${name:2:2}/${name}" ;;
+          esac
+          curl -fsSL "https://index.crates.io/${p}" 2>/dev/null \
+            | jq -e --arg v "$ver" 'select(.vers == $v)' >/dev/null 2>&1
+        }
+
+        MAX_ATTEMPTS=5
+        BACKOFF=30
+
+        # Publish one crate: skip if already on crates.io, else cargo publish
+        # with bounded retries + backoff for transient failures (network, 429,
+        # 5xx, index-propagation timeout). "Already uploaded" (from a partial
+        # earlier run or a mid-retry race) counts as success — publishes are
+        # irreversible, so this idempotency is what makes re-runs safe.
+        publish_one() {
+          local c="$1" v a=1 out rc
+          v="$(crate_version "$c")"
+          if [ -z "$v" ] || [ "$v" = "null" ]; then echo "::error::could not resolve version for ${c}"; return 1; fi
+          if is_published "$c" "$v"; then echo "skip ${c}@${v} (already on crates.io)"; return 0; fi
+          while :; do
+            echo "Publishing ${c}@${v} (attempt ${a}/${MAX_ATTEMPTS})"
+            out="$(cargo publish -p "$c" --no-verify 2>&1)"; rc=$?
+            printf '%s\n' "$out"
+            [ "$rc" -eq 0 ] && { echo "published ${c}@${v}"; return 0; }
+            if printf '%s' "$out" | grep -qiE 'already (uploaded|exists)|is already uploaded|already published'; then
+              echo "${c}@${v} already on crates.io — treating as success"; return 0
+            fi
+            if is_published "$c" "$v"; then echo "${c}@${v} present after attempt ${a} — treating as success"; return 0; fi
+            if [ "$a" -ge "$MAX_ATTEMPTS" ]; then echo "::error::failed to publish ${c}@${v} after ${MAX_ATTEMPTS} attempts"; return 1; fi
+            echo "::warning::publish ${c}@${v} attempt ${a} failed; retrying in ${BACKOFF}s"
+            a=$((a + 1)); sleep "$BACKOFF"
+          done
+        }
+
+        echo "Publish order: ${ORDER[*]}"
+        for c in "${ORDER[@]}"; do
+          publish_one "$c" || exit 1
+        done
+        echo "All publishable crates are on crates.io."

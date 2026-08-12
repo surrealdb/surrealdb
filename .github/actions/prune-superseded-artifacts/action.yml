@@ -1,0 +1,53 @@
+name: 'Prune superseded S3 artifacts'
+description: >-
+  Prune superseded S3 artifacts.
+  Extracted verbatim from release.yml. The interface is the ENV VARS set
+  on the calling step (they propagate into this composite step's process
+  environment); see the call site in release.yml for the exact set.
+
+outputs:
+  older:
+    description: 'older (see step body)'
+    value: ${{ steps.prune-s3.outputs.older }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Prune superseded S3 artifacts
+      id: prune-s3
+      shell: bash
+      run: |
+        set -euo pipefail
+        older=()
+        mapfile -t existing < <(aws s3 ls "s3://${ROLLING_BUCKET}/rolling-builds/${SLUG}/" | awk '/PRE/{print $2}' | sed 's#/##')
+        for d in "${existing[@]}"; do
+          [[ -z "$d" || "$d" == "$RELEASED" ]] && continue
+          # Only supersede commits that are strict ancestors of the released one.
+          git merge-base --is-ancestor "$d" "$RELEASED" 2>/dev/null || continue
+          # Record the ancestor for prune-images regardless of side (its downstream
+          # image deletion is gated on the downstream side over there).
+          older+=("$d")
+          # The heavy S3 binaries (.tgz/.txt/.exe) are ENGINE artifacts, so only
+          # delete them when the engine side is part of THIS release. A
+          # downstream-only release leaves ancestors' engine binaries in place so a
+          # later engine promotion of an ancestor can still find them (symmetric
+          # with the downstream ECR prune). The JSON manifests (engine.json +
+          # downstream.json) are ALWAYS kept, so a still-pending promotion of the
+          # other side can still resolve its manifest. Manifests are tiny; the
+          # binaries are not.
+          if [[ "$RELEASE_ENGINE" == "true" ]]; then
+            echo "Pruning superseded S3 binaries under rolling-builds/${SLUG}/${d}/ (keeping engine.json + downstream.json)"
+            # Best-effort: prune runs AFTER the release has already shipped, so a
+            # delete failure (e.g. the runner role lacking s3:DeleteObject) must not
+            # redden a successful release. It only means superseded binaries linger.
+            # DRY_RUN: --dryrun makes aws print what it WOULD delete, deleting
+            # nothing, so a publish:false release validates the selection above.
+            dryrun_flag=""
+            [ "${DRY_RUN:-false}" = "true" ] && dryrun_flag="--dryrun"
+            if ! aws s3 rm ${dryrun_flag} --recursive "s3://${ROLLING_BUCKET}/rolling-builds/${SLUG}/${d}/" \
+              --exclude '*' --include '*.tgz' --include '*.txt' --include '*.exe'; then
+              echo "::warning::Could not prune superseded S3 binaries under rolling-builds/${SLUG}/${d}/ (often a missing s3:DeleteObject grant on the runner role). Leaving them in place; the release itself is unaffected."
+            fi
+          fi
+        done
+        echo "older=${older[*]}" >> "$GITHUB_OUTPUT"

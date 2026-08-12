@@ -107,9 +107,37 @@ jobs:
         with:
           ref: ${{ inputs.git-ref }}
 
+      # CI tooling (first-party actions) comes from the WORKFLOW ref - the
+      # pushed commit on this branch, or whichever branch/tag a manual dispatch
+      # was run from - NOT from the (possibly older/overridden) commit checked
+      # out above for the build. Dispatch from main and the workflow, its
+      # actions and its scripts all come from main; dispatch from a branch or
+      # tag to debug and everything comes from that ref instead.
+      - name: Checkout CI tooling from the workflow ref
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
+
+      # Hoisted here (loaded from .ci = the workflow ref) rather than nested
+      # inside the build-{linux,macos,windows} actions: a nested `uses: ./...`
+      # resolves against $GITHUB_WORKSPACE (the built commit checked out above),
+      # which would reopen the backport hole for the binary-build tooling. Per-OS
+      # inputs: Windows persists the sccache disk cache as one Swatinem entry
+      # (instead of hundreds of per-crate GHA-cache entries) and saves it.
+      - name: Setup environment
+        uses: ./.ci/.github/actions/setup-environment
+        with:
+          targets: ${{ matrix.arch }}
+          cache-directories: ${{ matrix.os == 'windows' && 'C:\sccache' || '' }}
+          save-cache: ${{ matrix.os == 'windows' }}
+
       - name: Build Linux binary
         if: matrix.os == 'linux'
-        uses: ./.github/actions/build-linux
+        uses: ./.ci/.github/actions/build-linux
         with:
           arch: ${{ matrix.arch }}
           platform: ${{ matrix.platform }}
@@ -121,7 +149,7 @@ jobs:
 
       - name: Build macOS binary
         if: matrix.os == 'macos'
-        uses: ./.github/actions/build-macos
+        uses: ./.ci/.github/actions/build-macos
         with:
           arch: ${{ matrix.arch }}
           platform: ${{ matrix.platform }}
@@ -133,7 +161,7 @@ jobs:
 
       - name: Build Windows binary
         if: matrix.os == 'windows'
-        uses: ./.github/actions/build-windows
+        uses: ./.ci/.github/actions/build-windows
         with:
           arch: ${{ matrix.arch }}
           platform: ${{ matrix.platform }}
@@ -158,8 +186,23 @@ jobs:
         with:
           ref: ${{ inputs.git-ref }}
 
+      # CI tooling (first-party actions) comes from the WORKFLOW ref - the
+      # pushed commit on this branch, or whichever branch/tag a manual dispatch
+      # was run from - NOT from the (possibly older/overridden) commit checked
+      # out above for the build. Dispatch from main and the workflow, its
+      # actions and its scripts all come from main; dispatch from a branch or
+      # tag to debug and everything comes from that ref instead.
+      - name: Checkout CI tooling from the workflow ref
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
+
       - name: Package macOS universal binary
-        uses: ./.github/actions/package-macos-universal
+        uses: ./.ci/.github/actions/package-macos-universal
         with:
           name: ${{ inputs.name }}
 
@@ -234,6 +277,21 @@ jobs:
         with:
           ref: ${{ inputs.git-ref }}
 
+      # CI tooling (first-party actions) comes from the WORKFLOW ref - the
+      # pushed commit on this branch, or whichever branch/tag a manual dispatch
+      # was run from - NOT from the (possibly older/overridden) commit checked
+      # out above for the build. Dispatch from main and the workflow, its
+      # actions and its scripts all come from main; dispatch from a branch or
+      # tag to debug and everything comes from that ref instead.
+      - name: Checkout CI tooling from the workflow ref
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
+
       - name: Download artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -287,7 +345,7 @@ jobs:
       # action so the engine and downstream images run the identical gate (Trivy +
       # version + startup + HTTP health).
       - name: Test the Docker image (scan + smoke test)
-        uses: ./.github/actions/test-docker-image
+        uses: ./.ci/.github/actions/test-docker-image
         with:
           image-ref: surrealdb-rolling-local:amd64
 
@@ -318,7 +376,7 @@ jobs:
       # continue-on-error) so a missing attestation never blocks a release.
       - name: Verify engine image attestations
         continue-on-error: true
-        uses: ./.github/actions/verify-attestations
+        uses: ./.ci/.github/actions/verify-attestations
         with:
           image-ref: ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:rolling-${{ inputs.branch-slug }}-${{ inputs.git-ref }}${{ matrix.tag-suffix }}
 
@@ -343,21 +401,39 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ inputs.git-ref }}
-          # release-plz compares against history to detect changed crates.
-          fetch-depth: 0
+
+      # CI tooling (first-party actions) comes from the WORKFLOW ref - the
+      # pushed commit on this branch, or whichever branch/tag a manual dispatch
+      # was run from - NOT from the (possibly older/overridden) commit checked
+      # out above for the build. Dispatch from main and the workflow, its
+      # actions and its scripts all come from main; dispatch from a branch or
+      # tag to debug and everything comes from that ref instead.
+      - name: Checkout CI tooling from the workflow ref
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
+
+      # Hoisted from check-crate-versions so it too loads from the workflow ref
+      # (.ci), not the built commit.
+      - name: Setup environment
+        uses: ./.ci/.github/actions/setup-environment
 
       - name: Check crate versions
-        uses: ./.github/actions/check-crate-versions
+        uses: ./.ci/.github/actions/check-crate-versions
 
   package:
     name: Package crates (rolling)
-    # `cargo package` verifies each crate by compiling the whole workspace + deps.
-    # That overflows a hosted runner's default disk, so quality-package frees space
-    # first (see its setup-environment step). A bigger self-hosted runner was tried
-    # but didn't cut wall-clock: the verify compile is the bottleneck regardless of
-    # core count (it runs about as long as the per-target binary builds), so it
-    # never gated overall release time. The small hosted runner + disk cleanup is
-    # the cheaper choice.
+    # Runs `cargo publish --workspace --dry-run` (see quality-package): the same
+    # command the real ordered publish uses, with verify ON so each crate is
+    # compiled from its packaged tarball - the form a crates.io consumer builds.
+    # That verify compile is the bottleneck (it runs about as long as a per-
+    # target binary build), and it overflows a hosted runner's default disk, so
+    # the job frees disk in setup-environment and runs on a modest runner rather
+    # than paying for a bigger one that wouldn't shorten the compile.
     runs-on: ubuntu-latest-4-cores
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -370,8 +446,31 @@ jobs:
         with:
           ref: ${{ inputs.git-ref }}
 
+      # CI tooling (first-party actions) comes from the WORKFLOW ref - the
+      # pushed commit on this branch, or whichever branch/tag a manual dispatch
+      # was run from - NOT from the (possibly older/overridden) commit checked
+      # out above for the build. Dispatch from main and the workflow, its
+      # actions and its scripts all come from main; dispatch from a branch or
+      # tag to debug and everything comes from that ref instead.
+      - name: Checkout CI tooling from the workflow ref
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
+
+      # Hoisted from quality-package so it too loads from the workflow ref
+      # (.ci), not the built commit. free-disk-space: the verify compile in
+      # quality-package overflows a hosted runner's default disk.
+      - name: Setup environment
+        uses: ./.ci/.github/actions/setup-environment
+        with:
+          free-disk-space: 'true'
+
       - name: Package crates
-        uses: ./.github/actions/quality-package
+        uses: ./.ci/.github/actions/quality-package
 
   # Single source of truth for "the engine side of this commit is releasable" on
   # this channel. Runs after every engine artifact-producing job AND both channel

@@ -1,0 +1,76 @@
+name: 'Open Homebrew bump PR'
+description: >-
+  Open Homebrew bump PR.
+  Extracted verbatim from release.yml. The interface is the ENV VARS set
+  on the calling step (they propagate into this composite step's process
+  environment); see the call site in release.yml for the exact set.
+
+outputs:
+  pr-url:
+    description: 'pr-url (see step body)'
+    value: ${{ steps.open-pr.outputs.pr-url }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Open Homebrew bump PR
+      id: open-pr
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        # The caller checks the tap out beside the workspace root and names the
+        # directory via TAP_DIR (a `uses:` step cannot set working-directory).
+        cd "${TAP_DIR}"
+
+        # The tap owns the formula generation; regenerate without committing,
+        # pinning the exact released version rather than the "latest" pointer.
+        SKIP_GIT=1 bash release.sh "${VERSION}"
+
+        if [[ -z "$(git status --porcelain)" ]]; then
+          echo "Homebrew formula already up to date for ${VERSION}."
+          exit 0
+        fi
+
+        branch="auto/upgrade-${VERSION}"
+        git config user.name "surrealdb-release-bot"
+        git config user.email "release-bot@surrealdb.com"
+        git checkout -B "${branch}"
+        git add --all
+        git commit -m "Upgrade to ${VERSION}"
+
+        # Dry-run: the formula is regenerated and committed to a LOCAL branch in
+        # this throwaway checkout (safe), but the branch is never pushed and no PR
+        # is opened or merged. Show the formula change so the bump is reviewable
+        # at release time rather than surprising us on a real release.
+        if [ "${DRY_RUN:-false}" = "true" ]; then
+          echo "::group::[dry-run] Homebrew formula change for ${VERSION}"
+          git --no-pager show --stat --patch HEAD
+          echo "::endgroup::"
+          echo "[dry-run] would push branch '${branch}' to the tap, open/update the \"Upgrade to ${VERSION}\" PR, and squash-merge it."
+          exit 0
+        fi
+
+        git push --force-with-lease -u origin "${branch}"
+
+        if gh pr view "${branch}" >/dev/null 2>&1; then
+          pr_url="$(gh pr view "${branch}" --json url --jq '.url')"
+          echo "PR already exists; updated its branch: ${pr_url}"
+        else
+          pr_url="$(gh pr create \
+            --base main \
+            --head "${branch}" \
+            --title "Upgrade to ${VERSION}" \
+            --body "Auto-generated on promotion of SurrealDB ${VERSION}. Bumps the \`surreal\` formula to ${VERSION}. Auto-merges once any required checks pass.")"
+        fi
+
+        # Homebrew formula bumps are mechanical, so merge them as directly as
+        # possible: try an immediate squash merge first (works when the App can
+        # bypass the tap's protection, or the tap has none), then fall back to
+        # enabling GitHub auto-merge, and only then to a warning. Non-fatal - if
+        # none can proceed the PR is left open rather than failing the release.
+        gh pr merge --squash "${pr_url}" \
+          || gh pr merge --auto --squash "${pr_url}" \
+          || echo "::warning title=Update Homebrew tap::could not merge ${pr_url}; merge it manually"
+
+        echo "pr-url=${pr_url}" >> "$GITHUB_OUTPUT"

@@ -63,35 +63,57 @@ echo "Pinning downstream engine dependencies to ${ENGINE_SHA} for tag ${TAG}"
 # ---------------------------------------------------------------------------
 # 1) Rewrite every engine dependency to rev = <engine-sha>.
 # ---------------------------------------------------------------------------
-# Engine deps are declared as single-line inline tables, e.g.
-#   <crate> = { git = "ssh://.../<engine-repo>.git", branch = "main" }
-# Drop whatever version selector (branch/tag/rev) the line carries, then add
-# `rev = <engine-sha>` right after the git URL. Any other keys on the line are
-# preserved. Comment lines and non-engine git deps never match (they carry no
-# engine `git = "..."` URL), so they are left untouched.
+# Delegated to the downstream repo's own dependency tooling when present
+# (docker/patch-ce-local.py --pin-rev): the same parser and discovery the
+# rolling image build and the downstream-compat check use, so the tag pins
+# EXACTLY the set of engine dependencies the build redirected - however many
+# exist, however they are formatted or aliased, whatever URL spelling they
+# use. tomlkit (best-effort install) keeps the committed pin diff surgical;
+# without it the script re-serializes, which is semantically identical.
 #
-# The engine `owner/repo` contains a `/`, so engine lines are addressed with a
-# custom sed delimiter (@) rather than the default `/`.
-mapfile -t toml_files < <(grep -rl --include='Cargo.toml' -e "$ENGINE_MATCH" . || true)
-if [[ "${#toml_files[@]}" -eq 0 ]]; then
-	echo "::error::No Cargo.toml references the engine repo (${ENGINE_MATCH}); nothing to pin (unexpected)."
-	exit 1
-fi
-
-for f in "${toml_files[@]}"; do
-	# Only touch lines that actually declare an engine git dependency.
-	if ! grep -Eq "git[[:space:]]*=[[:space:]]*\"[^\"]*${ENGINE_MATCH}[^\"]*\"" "$f"; then
-		continue
+# Falls back to the legacy sed rewrite for downstream commits that predate
+# the script (e.g. old release lines), whose manifests use the single-line
+# form it understands. The lock verification in step 3 guards BOTH paths:
+# any engine crate not pinned to the released sha refuses to tag.
+#
+# Existence of the script is a sufficient capability check: it was introduced
+# complete with --pin-rev in a single downstream commit and backported intact
+# to the release lines, so no downstream commit carries the script WITHOUT
+# --pin-rev. A commit predating the script takes the sed fallback below.
+if [[ -f docker/patch-ce-local.py ]]; then
+	python3 -m pip install --quiet tomlkit 2>/dev/null || true
+	WORKSPACE_DIR=. python3 docker/patch-ce-local.py --pin-rev "${ENGINE_SHA}"
+else
+	# Engine deps are declared as single-line inline tables, e.g.
+	#   <crate> = { git = "ssh://.../<engine-repo>.git", branch = "main" }
+	# Drop whatever version selector (branch/tag/rev) the line carries, then add
+	# `rev = <engine-sha>` right after the git URL. Any other keys on the line are
+	# preserved. Comment lines and non-engine git deps never match (they carry no
+	# engine `git = "..."` URL), so they are left untouched.
+	#
+	# The engine `owner/repo` contains a `/`, so engine lines are addressed with a
+	# custom sed delimiter (@) rather than the default `/`.
+	mapfile -t toml_files < <(grep -rl --include='Cargo.toml' -e "$ENGINE_MATCH" . || true)
+	if [[ "${#toml_files[@]}" -eq 0 ]]; then
+		echo "::error::No Cargo.toml references the engine repo (${ENGINE_MATCH}); nothing to pin (unexpected)."
+		exit 1
 	fi
-	# Drop an existing branch/tag/rev selector, whether it trails or leads the
-	# git key (handles `git=..., branch=...` and `branch=..., git=...`).
-	sed -i -E "\\@${ENGINE_MATCH}@ s/,[[:space:]]*(branch|tag|rev)[[:space:]]*=[[:space:]]*\"[^\"]*\"//g" "$f"
-	sed -i -E "\\@${ENGINE_MATCH}@ s/(branch|tag|rev)[[:space:]]*=[[:space:]]*\"[^\"]*\"[[:space:]]*,[[:space:]]*//g" "$f"
-	# Add the exact rev right after the git URL.
-	sed -i -E "\\@${ENGINE_MATCH}@ s#(git[[:space:]]*=[[:space:]]*\"[^\"]*${ENGINE_MATCH}[^\"]*\")#\1, rev = \"${ENGINE_SHA}\"#" "$f"
-	echo "Rewrote engine deps in ${f}:"
-	grep -nE "git[[:space:]]*=.*${ENGINE_MATCH}" "$f" || true
-done
+
+	for f in "${toml_files[@]}"; do
+		# Only touch lines that actually declare an engine git dependency.
+		if ! grep -Eq "git[[:space:]]*=[[:space:]]*\"[^\"]*${ENGINE_MATCH}[^\"]*\"" "$f"; then
+			continue
+		fi
+		# Drop an existing branch/tag/rev selector, whether it trails or leads the
+		# git key (handles `git=..., branch=...` and `branch=..., git=...`).
+		sed -i -E "\\@${ENGINE_MATCH}@ s/,[[:space:]]*(branch|tag|rev)[[:space:]]*=[[:space:]]*\"[^\"]*\"//g" "$f"
+		sed -i -E "\\@${ENGINE_MATCH}@ s/(branch|tag|rev)[[:space:]]*=[[:space:]]*\"[^\"]*\"[[:space:]]*,[[:space:]]*//g" "$f"
+		# Add the exact rev right after the git URL.
+		sed -i -E "\\@${ENGINE_MATCH}@ s#(git[[:space:]]*=[[:space:]]*\"[^\"]*${ENGINE_MATCH}[^\"]*\")#\1, rev = \"${ENGINE_SHA}\"#" "$f"
+		echo "Rewrote engine deps in ${f}:"
+		grep -nE "git[[:space:]]*=.*${ENGINE_MATCH}" "$f" || true
+	done
+fi
 
 # ---------------------------------------------------------------------------
 # 2) Re-lock ONLY the engine crates.

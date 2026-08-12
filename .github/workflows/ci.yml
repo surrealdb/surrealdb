@@ -399,9 +399,9 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          # release-plz inspects git history to detect which crates changed.
-          fetch-depth: 0
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
 
       # Catches PRs that change a published crate (e.g. surrealism, surrealml)
       # without bumping its version, so it's surfaced at review time instead of

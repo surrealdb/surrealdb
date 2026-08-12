@@ -1,0 +1,46 @@
+name: 'Resolve components to release'
+description: >-
+  Resolve components to release.
+  Extracted verbatim from release.yml. The interface is the ENV VARS set
+  on the calling step (they propagate into this composite step's process
+  environment); see the call site in release.yml for the exact set.
+
+outputs:
+  release-downstream:
+    description: 'release-downstream (see step body)'
+    value: ${{ steps.resolve.outputs.release-downstream }}
+  release-engine:
+    description: 'release-engine (see step body)'
+    value: ${{ steps.resolve.outputs.release-engine }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Resolve components to release
+      id: resolve
+      shell: bash
+      run: |
+        set -euo pipefail
+        release_engine="${REQ_ENGINE}"
+        release_downstream="${REQ_DOWNSTREAM}"
+
+        if [[ "${release_downstream}" == "true" && "${DS_BUILT}" != "true" ]]; then
+          if [[ "${EVENT}" == "schedule" ]]; then
+            echo "::warning::Nightly: no downstream image was built for ${SHA}; releasing the engine only."
+            release_downstream=false
+          else
+            echo "::error::A downstream release was requested (components=${COMPONENTS}) but no downstream image was built for ${SHA} (no downstream.json for this commit). Re-run the rolling build for this commit, or release components=engine only."
+            exit 1
+          fi
+        fi
+
+        if [[ "${release_engine}" != "true" && "${release_downstream}" != "true" ]]; then
+          echo "::error::Nothing to release: neither the engine nor a downstream image is being promoted."
+          exit 1
+        fi
+
+        echo "Effective release: engine=${release_engine}, downstream=${release_downstream}"
+        {
+          echo "release-engine=${release_engine}"
+          echo "release-downstream=${release_downstream}"
+        } >> "$GITHUB_OUTPUT"

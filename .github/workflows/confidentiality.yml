@@ -46,6 +46,5 @@ jobs:
       - name: Scan tracked files
         env:
           AWS_ECR_REGISTRY: ${{ secrets.AWS_ECR_REGISTRY }}
-          DOWNSTREAM_APP_CLIENT_ID: ${{ secrets.DOWNSTREAM_APP_CLIENT_ID }}
           CONFIDENTIAL_TERMS: ${{ vars.CONFIDENTIAL_TERMS }}
         run: .github/scripts/check-confidentiality.sh

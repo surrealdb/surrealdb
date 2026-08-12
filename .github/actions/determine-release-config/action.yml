@@ -1,0 +1,84 @@
+name: 'Determine release configuration'
+description: >-
+  Decide what this run releases: channel, publish flag, components and
+  requested ref, from the trigger (schedule vs dispatch).
+  Extracted verbatim from release.yml. The interface is the ENV VARS set
+  on the calling step (they propagate into this composite step's process
+  environment); see the call site in release.yml for the exact set.
+
+outputs:
+  components:
+    description: 'components (see step body)'
+    value: ${{ steps.config.outputs.components }}
+  nightly-release:
+    description: 'nightly-release (see step body)'
+    value: ${{ steps.config.outputs.nightly-release }}
+  publish:
+    description: 'publish (see step body)'
+    value: ${{ steps.config.outputs.publish }}
+  release-channel:
+    description: 'release-channel (see step body)'
+    value: ${{ steps.config.outputs.release-channel }}
+  release-downstream:
+    description: 'release-downstream (see step body)'
+    value: ${{ steps.config.outputs.release-downstream }}
+  release-engine:
+    description: 'release-engine (see step body)'
+    value: ${{ steps.config.outputs.release-engine }}
+  requested-ref:
+    description: 'requested-ref (see step body)'
+    value: ${{ steps.config.outputs.requested-ref }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Determine release configuration
+      id: config
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ "${EVENT}" == "schedule" ]]; then
+          # Scheduled nightly: resolve the SHA from main history in the locate
+          # step (the newest commit that actually has a rolling build), so we
+          # never race a still-running rolling build for the current HEAD.
+          requested_ref="${GITHUB_REF_NAME}"
+          channel=nightly
+          publish=true
+          # Two decoupled nightly schedules, distinguished by their cron string:
+          # the 00:30 run promotes the downstream nightly image; every other
+          # scheduled run promotes the engine nightly. Keeping them on separate
+          # runs (and separate concurrency keys) means a failure on one side never
+          # blocks the other.
+          if [[ "${EVENT_SCHEDULE}" == "30 0 * * *" ]]; then
+            components=downstream
+          else
+            components=engine
+          fi
+        else
+          requested_ref="${INPUT_GIT_SHA}"
+          publish="${INPUT_PUBLISH}"
+          channel="${INPUT_RELEASE_TYPE}"
+          components="${INPUT_COMPONENTS}"
+        fi
+        # nightly is the only channel that does not publish crates.
+        if [[ "$channel" == "nightly" ]]; then nightly=true; else nightly=false; fi
+
+        # Which sides to release. Defaults to both; the engine side covers
+        # binaries, crates, the public DockerHub image and all the follow-up
+        # PRs, while the downstream side is only the private image mirror.
+        [[ -z "$components" ]] && components=both
+        case "$components" in
+          both)       release_engine=true;  release_downstream=true ;;
+          engine)     release_engine=true;  release_downstream=false ;;
+          downstream) release_engine=false; release_downstream=true ;;
+          *) echo "::error::Unknown components value '${components}' (expected both|engine|downstream)"; exit 1 ;;
+        esac
+        {
+          echo "requested-ref=${requested_ref}"
+          echo "release-channel=${channel}"
+          echo "nightly-release=${nightly}"
+          echo "publish=${publish}"
+          echo "components=${components}"
+          echo "release-engine=${release_engine}"
+          echo "release-downstream=${release_downstream}"
+        } >> "$GITHUB_OUTPUT"

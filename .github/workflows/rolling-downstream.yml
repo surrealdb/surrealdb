@@ -101,9 +101,13 @@ jobs:
       - name: Check whether the downstream build is configured
         id: preflight
         env:
-          CLIENT_ID: ${{ secrets.DOWNSTREAM_APP_CLIENT_ID }}
+          # Gate on the PRIVATE KEY (a secret), not the client-id (a variable):
+          # variables are present where secrets are withheld, so gating on the
+          # id would run the token mint keyless and hard-fail. Matches
+          # downstream-compat.yml.
+          HAS_APP: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY != '' }}
         run: |
-          if [ -n "${CLIENT_ID}" ]; then
+          if [ "${HAS_APP}" == "true" ]; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
           else
             echo "configured=false" >> "$GITHUB_OUTPUT"
@@ -115,8 +119,8 @@ jobs:
         if: steps.preflight.outputs.configured == 'true'
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          client-id: ${{ secrets.DOWNSTREAM_APP_CLIENT_ID }}
-          private-key: ${{ secrets.DOWNSTREAM_APP_PRIVATE_KEY }}
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
           repositories: ${{ secrets.DOWNSTREAM_REPO }}
 
       # Resolve which downstream commit to build. An explicit override (a branch
@@ -292,8 +296,8 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          client-id: ${{ secrets.DOWNSTREAM_APP_CLIENT_ID }}
-          private-key: ${{ secrets.DOWNSTREAM_APP_PRIVATE_KEY }}
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
           repositories: ${{ secrets.DOWNSTREAM_REPO }}
 
       - name: Checkout downstream
@@ -312,6 +316,28 @@ jobs:
           path: downstream/engine
           persist-credentials: false
 
+      # Downstream build TOOLING (the build-docker-* actions) comes from the tip
+      # of the RESOLVED downstream branch - the downstream analogue of loading
+      # this repo's tooling from the workflow ref - not from the (possibly
+      # older) downstream commit being (re)built. An action fix on a downstream
+      # line therefore applies to every (re)build of that line immediately,
+      # without commit-level backports. The SOURCE (Dockerfile, its patch
+      # script, manifests) still comes from the pinned commit checked out above,
+      # which is what docker build reads - build config stays coupled to the
+      # code it builds. Falls back to the built commit when no branch was
+      # resolved (explicit downstream-sha override).
+      - name: Checkout downstream CI tooling from the resolved branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ github.repository_owner }}/${{ secrets.DOWNSTREAM_REPO }}
+          ref: ${{ inputs.downstream-branch || needs.preflight.outputs.sha }}
+          token: ${{ steps.app-token.outputs.token }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: downstream-ci
+          persist-credentials: false
+
       # Ambient auth: the private runner's IAM instance role provides downstream
       # ECR credentials, so no configure-aws-credentials / static keys are
       # needed. The registry comes from a secret; the region is derived from the
@@ -326,7 +352,7 @@ jobs:
             | docker login --username AWS --password-stdin "$REGISTRY"
 
       - name: Build builder image
-        uses: ./downstream/.github/actions/build-docker-builder
+        uses: ./downstream-ci/.github/actions/build-docker-builder
         with:
           context-dir: downstream
           dockerfile: downstream/docker/Dockerfile
@@ -375,8 +401,8 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
-          client-id: ${{ secrets.DOWNSTREAM_APP_CLIENT_ID }}
-          private-key: ${{ secrets.DOWNSTREAM_APP_PRIVATE_KEY }}
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
           repositories: ${{ secrets.DOWNSTREAM_REPO }}
 
       - name: Checkout downstream
@@ -393,6 +419,28 @@ jobs:
         with:
           ref: ${{ inputs.engine-ref }}
           path: downstream/engine
+          persist-credentials: false
+
+      # Downstream build TOOLING (the build-docker-* actions) comes from the tip
+      # of the RESOLVED downstream branch - the downstream analogue of loading
+      # this repo's tooling from the workflow ref - not from the (possibly
+      # older) downstream commit being (re)built. An action fix on a downstream
+      # line therefore applies to every (re)build of that line immediately,
+      # without commit-level backports. The SOURCE (Dockerfile, its patch
+      # script, manifests) still comes from the pinned commit checked out above,
+      # which is what docker build reads - build config stays coupled to the
+      # code it builds. Falls back to the built commit when no branch was
+      # resolved (explicit downstream-sha override).
+      - name: Checkout downstream CI tooling from the resolved branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ github.repository_owner }}/${{ secrets.DOWNSTREAM_REPO }}
+          ref: ${{ inputs.downstream-branch || needs.preflight.outputs.sha }}
+          token: ${{ steps.app-token.outputs.token }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: downstream-ci
           persist-credentials: false
 
       # Ambient auth: the private runner's IAM instance role provides downstream
@@ -412,7 +460,7 @@ jobs:
       # / SSH deploy key is needed. Pushes both the base rolling tag and the
       # per-arch tag the manifest step stitches together.
       - name: Build + push downstream image
-        uses: ./downstream/.github/actions/build-docker-image
+        uses: ./downstream-ci/.github/actions/build-docker-image
         with:
           context-dir: downstream
           dockerfile: downstream/docker/Dockerfile

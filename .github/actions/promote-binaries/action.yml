@@ -122,6 +122,11 @@ runs:
         {
           echo "Release v${VERSION}"
           echo ""
+          # Everything from this marker to end of file is internal-only build
+          # provenance (engine + downstream commit SHAs). The public release
+          # sync (sync-upstream.yml) strips from this marker down, so none of it
+          # reaches surrealdb/surrealdb.
+          echo "<!-- internal-only -->"
           echo "### Build provenance"
           echo "- Engine (surrealdb) commit: \`${engine_sha}\`"
           if [[ "${ds_built}" == "true" && -n "${ds_sha}" ]]; then
@@ -220,6 +225,18 @@ runs:
         set -euo pipefail
         version="${{ inputs.version }}"
         major="${version%%.*}"
+        # The pointer names the newest stable on this major line for download
+        # clients, so it must only ever advance: a patch release on an OLDER
+        # minor (e.g. v3.1.x shipped after v3.2.x) keeps the published pointer
+        # where it is. Only stable X.Y.Z triples reach this step, so a plain
+        # version sort decides; an equal version rewrites (a re-release stays
+        # idempotent) and a missing pointer is created.
+        current="$(aws s3 cp "s3://download.surrealdb.com/v${major}.txt" - 2>/dev/null | tr -d 'v[:space:]' || true)"
+        if [ -n "${current}" ] \
+          && [ "$(printf '%s\n' "${current}" "${version}" | sort -V | tail -n1)" != "${version}" ]; then
+          echo "Keeping v${major}.txt at v${current}: released v${version} is older."
+          exit 0
+        fi
         echo "v${version}" > "v${major}.txt"
         aws s3 cp --cache-control 'no-store' "v${major}.txt" "s3://download.surrealdb.com/v${major}.txt"
 

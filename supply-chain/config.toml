@@ -450,6 +450,10 @@ criteria = "safe-to-deploy"
 version = "0.1.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.cxxbridge-flags]]
+version = "1.0.199"
+criteria = "safe-to-deploy"
+
 [[exemptions.darling]]
 version = "0.23.0"
 criteria = "safe-to-deploy"
@@ -538,10 +542,6 @@ criteria = "safe-to-deploy"
 version = "1.0.19"
 criteria = "safe-to-deploy"
 
-[[exemptions.earcutr]]
-version = "0.4.3"
-criteria = "safe-to-deploy"
-
 [[exemptions.ecdsa]]
 version = "0.16.9"
 criteria = "safe-to-deploy"
@@ -571,7 +571,7 @@ version = "0.5.3"
 criteria = "safe-to-run"
 
 [[exemptions.event-listener]]
-version = "5.4.1"
+version = "5.4.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.event-listener-strategy]]
@@ -868,10 +868,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.itertools]]
 version = "0.10.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.itertools]]
-version = "0.11.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.itertools]]
@@ -1550,10 +1546,6 @@ criteria = "safe-to-deploy"
 version = "0.6.3"
 criteria = "safe-to-deploy"
 
-[[exemptions.spade]]
-version = "2.15.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.spin]]
 version = "0.9.9"
 criteria = "safe-to-deploy"
@@ -1592,6 +1584,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.syn]]
 version = "2.0.117"
+criteria = "safe-to-deploy"
+
+[[exemptions.syn]]
+version = "3.0.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.sync_wrapper]]
@@ -1668,10 +1664,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.toml_parser]]
 version = "1.1.2+spec-1.1.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.toml_writer]]
-version = "1.1.1+spec-1.1.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.tonic]]
@@ -1928,10 +1920,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.zerovec-derive]]
 version = "0.11.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.zmij]]
-version = "1.0.21"
 criteria = "safe-to-deploy"
 
 [[exemptions.zstd]]

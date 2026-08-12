@@ -1,0 +1,44 @@
+name: 'Guard against overwriting an existing downstream release'
+description: >-
+  Guard against overwriting an existing downstream release.
+  Extracted verbatim from release.yml. The interface is the ENV VARS set
+  on the calling step (they propagate into this composite step's process
+  environment); see the call site in release.yml for the exact set.
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Guard against overwriting an existing downstream release
+      id: guard
+      shell: bash
+      run: |
+        set -euo pipefail
+        # The downstream release tag is the sanitized release name (same
+        # transform mirror-downstream applies), prod variant (no -dev suffix).
+        prefix=$(echo "${NAME}" | sed 's/[^a-zA-Z0-9_.-]/-/g' | tr '[:upper:]' '[:lower:]')
+        region="$(printf '%s' "$REGISTRY" | cut -d. -f4)"
+
+        # This guard refuses to clobber a shipped downstream image, so an ECR
+        # API error must fail closed - only a definitive ImageNotFoundException
+        # counts as "absent". A bare success/failure test would read a transient
+        # error as "not released" and proceed to overwrite.
+        if out=$(aws ecr describe-images --region "$region" \
+                   --repository-name "$DS_REPO" \
+                   --image-ids "imageTag=${prefix}" 2>&1); then
+          exists=true
+        elif grep -q 'ImageNotFoundException' <<<"$out"; then
+          exists=false
+        else
+          echo "::error::Could not determine whether downstream ${prefix} exists in ECR (${out}). Failing closed to avoid clobbering a shipped image; re-run once ECR is reachable."
+          exit 1
+        fi
+
+        if [[ "$exists" == "true" ]]; then
+          if [[ "$OVERWRITE" != "true" ]]; then
+            echo "::error::Refusing to release downstream ${prefix}: the tag already exists in the downstream ECR repository. This version's downstream image was already released. Bump the version, or re-run with overwrite: true to intentionally clobber it."
+            exit 1
+          fi
+          echo "::warning::downstream ${prefix} already exists; overwriting because overwrite=true."
+        else
+          echo "downstream ${prefix} has not been released yet; proceeding."
+        fi

@@ -27,9 +27,9 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Setup environment
-      uses: ./.github/actions/setup-environment
-
+    # setup-environment is provided by the CALLING JOB (hoisted): a nested
+    # `uses: ./...` here would resolve against the released commit in the
+    # workspace, not the workflow ref this action was checked out from.
     - name: Set outputs
       id: outputs
       shell: bash
@@ -37,10 +37,19 @@ runs:
         set -x
 
         cargo_version=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
+        # Fail loudly rather than proceed with a bogus version: jq prints the
+        # string "null" if the crate is absent, and this value names the whole
+        # release (tag, GitHub release, download pointers).
+        if [ -z "${cargo_version}" ] || [ "${cargo_version}" = "null" ]; then
+          echo "::error::could not resolve the 'surrealdb' crate version from cargo metadata"
+          exit 1
+        fi
 
         if [[ "${{ inputs.nightly-release }}" == "true" ]]; then
           # Nightly release - compute version based on main's version
-          nightly_version=$(./.github/scripts/compute-nightly-version.sh "$cargo_version")
+          # Action-relative path: the script travels with this action's checkout
+          # (.ci) instead of resolving against the released commit in the workspace.
+          nightly_version=$("${GITHUB_ACTION_PATH}/../../scripts/compute-nightly-version.sh" "$cargo_version")
           echo "version=${nightly_version}" >> $GITHUB_OUTPUT
 
           date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)

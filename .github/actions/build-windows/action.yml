@@ -44,15 +44,6 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Setup environment
-      uses: ./.github/actions/setup-environment
-      with:
-        targets: ${{ inputs.arch }}
-        # Persist the sccache disk cache as a single Swatinem entry instead of letting
-        # sccache fill the 10 GiB repo GHA cache with hundreds of individual crate entries.
-        cache-directories: 'C:\sccache'
-        save-cache: 'true'
-
     - name: Configure sccache for Windows
       shell: bash
       run: |

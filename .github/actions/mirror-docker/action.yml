@@ -31,6 +31,10 @@ inputs:
   docker-pass:
     description: 'DockerHub password'
     required: true
+  dry-run:
+    description: 'Verify the source manifests in ECR and compute the public tags, but do not create/push anything on DockerHub'
+    required: false
+    default: 'false'
 
 runs:
   using: 'composite'
@@ -74,6 +78,7 @@ runs:
         TAG_SUFFIX: ${{ inputs.tag-suffix }}
         ENVIRONMENT: ${{ inputs.environment }}
         LATEST: ${{ inputs.latest }}
+        DRY_RUN: ${{ inputs.dry-run }}
       run: |
         set -euo pipefail
 
@@ -106,6 +111,15 @@ runs:
         for t in "${tags[@]}"; do
           tag_args+=(--tag "$t")
         done
+
+        # Dry run: the source manifests were already inspected above (proving
+        # the release image exists in ECR and both platform digests resolve);
+        # report the tags that WOULD be created and stop before any push.
+        if [[ "${DRY_RUN:-false}" == "true" ]]; then
+          echo "[dry-run] Source manifests verified in ECR (amd64 ${amd64}, arm64 ${arm64})."
+          echo "[dry-run] Would create: ${tags[*]}"
+          exit 0
+        fi
 
         echo "Mirroring ${SOURCE_TAG}${TAG_SUFFIX} -> ${tags[*]}"
         docker buildx imagetools create "${tag_args[@]}" \

@@ -44,11 +44,6 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Setup environment
-      uses: ./.github/actions/setup-environment
-      with:
-        targets: ${{ inputs.arch }}
-
     - name: Output package versions
       shell: bash
       run: |

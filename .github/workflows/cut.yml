@@ -66,6 +66,21 @@ jobs:
           fetch-depth: 0
           ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
 
+      # CI tooling (scripts) comes from the WORKFLOW ref - the branch/tag this
+      # run was dispatched from - not from the (possibly older) commit being
+      # cut, so cut logic never needs to exist on that commit. Placed after the
+      # root checkout so the default clean cannot remove it. setup-environment
+      # below deliberately stays workspace-resolved: the toolchain must match
+      # the source being cut.
+      - name: Checkout CI tooling from the workflow ref
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
+
       # A cut must come from main: the new version (and, for minor cuts, the new
       # release branch) is derived from main's development version.
       - name: Verify the commit is on main
@@ -83,4 +98,4 @@ jobs:
       - name: Cut release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: .github/scripts/cut-release.sh "${{ inputs.cut-type }}" "${{ inputs.publish }}"
+        run: .ci/.github/scripts/cut-release.sh "${{ inputs.cut-type }}" "${{ inputs.publish }}"

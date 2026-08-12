@@ -87,6 +87,11 @@ yanked = "warn"
 #   0.13.2 pins `quick-xml = "0.39"` (<0.40), so reaching the patched >=0.41 requires an
 #   `object_store` 0.14 major bump (tracked separately, as it also touches the `obs` module).
 #
+# - for RUSTSEC-2026-0205, scc's Array::insert double-free-on-panic triggers only if a
+#   user-supplied comparator panics; scc is pulled solely by serial_test, a dev-dependency
+#   used in tests, so it is not in any shipped binary. serial_test still pins scc 2.x, so
+#   reaching the >=3.8.4 fix needs a serial_test bump (deferred).
+#
 # - for RUSTSEC-2026-0249, smartstring is unmaintained (archived 2026-05-03) and every version
 #   is affected, so there is no upgrade that clears it. It reaches us only through
 #   `opentelemetry-prometheus-text-exporter`, which uses it for metric and label names the
@@ -100,6 +105,7 @@ ignore = [
     "RUSTSEC-2024-0436",
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
+    "RUSTSEC-2026-0205",
     "RUSTSEC-2026-0249",
 ]
 

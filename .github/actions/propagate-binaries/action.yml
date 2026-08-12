@@ -8,6 +8,10 @@ inputs:
   aws-secret-access-key:
     description: 'AWS secret access key'
     required: true
+  dry-run:
+    description: 'Dry run: pass --dryrun to aws s3 sync so the LIST/compare (and the parallel fan-out, AWS auth, bucket access and quorum logic) all run, but nothing is copied or deleted'
+    required: false
+    default: 'false'
 
 runs:
   using: 'composite'
@@ -21,17 +25,58 @@ runs:
 
     - name: Distribute binaries
       shell: bash
+      env:
+        DRY_RUN: ${{ inputs.dry-run }}
       run: |
         regions=("af-south-1" "ap-east-1" "ap-south-1" "ap-southeast-1" "ap-southeast-2" "ca-central-1" "eu-central-1" "eu-west-2" "me-south-1" "sa-east-1" "us-west-2")
+
+        # Dry run still LISTs/compares each region (exercising auth, bucket
+        # access, the parallel fan-out and the quorum logic) but copies and
+        # deletes nothing. Empty when off, so it word-splits away below.
+        dryrun_flag=""
+        if [ "${DRY_RUN:-false}" = "true" ]; then
+            dryrun_flag="--dryrun"
+            echo "::notice title=Propagate binaries::Dry run - aws s3 sync --dryrun (no objects copied or deleted)"
+        fi
+
+        # Fan out one server-side (bucket-to-bucket) sync per region, all at
+        # once. Each destination is its own per-region bucket with an
+        # independent S3 request-rate budget, and the only shared resource -
+        # the source bucket - is read far within S3's per-prefix request
+        # limits, so running every region concurrently is safe. Each job
+        # writes to its own log file so the parallel output does not interleave.
+        logdir="$(mktemp -d)"
+        trap 'rm -rf "${logdir}"' EXIT
+        declare -A pids
+        for region in "${regions[@]}"; do
+            aws s3 sync ${dryrun_flag} --cli-connect-timeout 30 --cli-read-timeout 120 --delete --storage-class INTELLIGENT_TIERING --source-region eu-west-2 --region "${region}" s3://download.surrealdb.com "s3://download.${region}.surrealdb.com" >"${logdir}/${region}.log" 2>&1 &
+            pids["${region}"]=$!
+        done
+
+        # Wait on each region's specific PID so we recover its individual exit
+        # status - a bare `wait` would collapse them and break the quorum gate.
+        # Dump the log of any region that failed for diagnosis.
         failed_regions=()
         succeeded_regions=()
-        for region in ${regions[@]}; do
-            if aws s3 sync --cli-connect-timeout 30 --cli-read-timeout 120 --delete --storage-class INTELLIGENT_TIERING --source-region eu-west-2 --region ${region} s3://download.surrealdb.com s3://download.${region}.surrealdb.com; then
+        for region in "${regions[@]}"; do
+            if wait "${pids[${region}]}"; then
                 succeeded_regions+=("${region}")
+                # On a dry-run the point is to review the plan - especially what
+                # --delete would remove - so surface each region's would-do log
+                # in a collapsed group even on success. A real run stays quiet.
+                if [ "${DRY_RUN:-false}" = "true" ]; then
+                    echo "::group::Sync plan for ${region} (dry-run)"
+                    cat "${logdir}/${region}.log"
+                    echo "::endgroup::"
+                fi
             else
                 failed_regions+=("${region}")
+                echo "::group::Sync log for ${region} (failed)"
+                cat "${logdir}/${region}.log"
+                echo "::endgroup::"
             fi
         done
+
         total=${#regions[@]}
         quorum=$(( total / 2 + 1 ))
         if [ ${#failed_regions[@]} -gt 0 ]; then
@@ -41,5 +86,4 @@ runs:
             echo "::error::Only ${#succeeded_regions[@]}/${total} regions synced, quorum of ${quorum} not met"
             exit 1
         fi
-
-
+        echo "Synced ${#succeeded_regions[@]}/${total} regions: ${succeeded_regions[*]}"

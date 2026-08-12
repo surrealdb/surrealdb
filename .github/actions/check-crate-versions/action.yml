@@ -1,96 +1,143 @@
 name: 'Check crate versions'
-description: 'Fail when a publishable crate has unreleased changes but was not version-bumped'
+description: 'Fail when a publishable crate is unpublishable as-is: its current version is already on crates.io with different packaged content'
 
-# This action always exits non-zero when it finds version drift, so the step
-# (and its job) shows a red X — there is no "soft" green-with-a-warning mode that
-# is easy to miss. Whether that failure *blocks* is decided by the caller:
+# This action always exits non-zero when it finds drift, so the step (and its
+# job) shows a red X - there is no "soft" green-with-a-warning mode that is
+# easy to miss. Whether that failure *blocks* is decided by the caller:
 #   - blocking gate (CI, rolling): use this job in `needs` / required checks.
 #   - visible-but-non-blocking (nightly): set `continue-on-error: true` on the
 #     job, so the job still shows a red X but does not fail the workflow run.
+#
+# The invariant: the commit must be publishable as-is. For every publishable
+# workspace crate, its current version is either
+#   (a) absent from crates.io - it is the pending release and will publish
+#       fresh; or
+#   (b) already on crates.io with IDENTICAL packaged content - the publish
+#       step skips existing versions, so a content difference would mean the
+#       release silently ships code that differs from what the registry
+#       serves at that version.
+# Both halves compare against the crate's OWN version, never the registry's
+# newest release, so the gate holds on every release line - an older line's
+# workspace legitimately trails the newest published version.
 
 runs:
   using: 'composite'
   steps:
-    - name: Setup environment
-      uses: ./.github/actions/setup-environment
-
-    - name: Install release-plz
-      uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # (Actions must be pinned by commit hash) v2.81.11
-      with:
-        tool: release-plz@0.3.159
-
-    - name: Detect unreleased crate version drift
+    # setup-environment is provided by the CALLING JOB (hoisted): a nested
+    # `uses: ./...` here would resolve against GITHUB_WORKSPACE - the built
+    # commit in a rolling build, not the workflow ref this action came from -
+    # reintroducing the backport hole. The caller checks it out from the
+    # correct ref (./.ci/... in rolling, ./... in ci.yml).
+    - name: Detect unpublishable crate versions
       shell: bash
       run: |
         set -euo pipefail
+        # The CI tooling checkout (.ci) sits untracked inside the source
+        # workspace; `cargo package` treats untracked, un-ignored paths as a
+        # dirty tree and refuses to package. Exclude it at the repository
+        # level - the built commit's .gitignore cannot be amended
+        # retroactively.
+        excl="$(git rev-parse --git-path info/exclude)"
+        mkdir -p "$(dirname "$excl")"
+        git check-ignore -q .ci 2>/dev/null || echo '/.ci/' >> "$excl"
 
-        # release-plz refuses to run on a detached HEAD, which is how CI checks
-        # out a commit. Put it on a throwaway branch first.
-        git checkout -b crate-version-check >/dev/null 2>&1 || true
+        # Sparse-index path scheme (https://doc.rust-lang.org/cargo/reference/registry-index.html).
+        index_path() {
+          local n="$1"
+          case "${#n}" in
+            1) echo "1/${n}" ;;
+            2) echo "2/${n}" ;;
+            3) echo "3/${n:0:1}/${n}" ;;
+            *) echo "${n:0:2}/${n:2:2}/${n}" ;;
+          esac
+        }
 
-        # Version-only run: no changelog, tag, or release side effects. We rely
-        # on release-plz comparing each publishable crate's source against what
-        # is published on crates.io (NOT git tags) and bumping any crate that
-        # has unreleased changes. Crates whose current version isn't published
-        # yet (e.g. the -nightly workspace version) have no registry baseline at
-        # that version, so release-plz treats them as the pending release and
-        # leaves them untouched.
-        cfg="${RUNNER_TEMP:-/tmp}/release-plz-version-check.toml"
-        {
-          echo "[workspace]"
-          echo "changelog_update = false"
-          echo "git_release_enable = false"
-          echo "git_tag_enable = false"
-          echo "semver_check = false"
-        } > "$cfg"
+        fail=""
+        while IFS=$'\t' read -r name ver; do
+          # (a) Existence at THIS version. Distinguish a CONFIRMED-absent
+          # version (safe to treat as the pending release) from an index
+          # ACCESS FAILURE (indeterminate) - the latter must fail the gate
+          # closed, never skip, or a transient crates.io outage could approve
+          # a commit whose published crate differs from its source and let the
+          # publish step silently ship a mismatch at an immutable version.
+          #   HTTP 200 -> index served; the version is present or genuinely not.
+          #   HTTP 404 -> crate name absent from the index -> never published.
+          #   anything else (5xx, 000 timeout, ...) -> indeterminate -> fail.
+          idxfile="$(mktemp)"
+          http="$(curl -sS --retry 3 --retry-delay 2 -o "${idxfile}" -w '%{http_code}' \
+            "https://index.crates.io/$(index_path "${name}")" 2>/dev/null || echo 000)"
+          case "${http}" in
+            200)
+              if ! grep -qF "\"vers\":\"${ver}\"" "${idxfile}"; then
+                rm -f "${idxfile}"
+                echo "${name} ${ver}: not on crates.io (version absent) - pending release."
+                continue
+              fi
+              rm -f "${idxfile}"
+              # Present (incl. yanked - crates.io keeps the version slot); fall
+              # through to the content comparison below.
+              ;;
+            404)
+              rm -f "${idxfile}"
+              echo "${name} ${ver}: not on crates.io (crate unpublished) - pending release."
+              continue
+              ;;
+            *)
+              rm -f "${idxfile}"
+              echo "::error::Could not determine whether ${name} ${ver} is published (crates.io index returned HTTP ${http}). Failing closed: a transient index failure must not approve a possibly-mismatched crate. Re-run once the index is reachable."
+              exit 1
+              ;;
+          esac
 
-        release-plz update --config "$cfg"
-
-        # A changed `version = ` line means release-plz wants to bump a crate
-        # that has unreleased changes — i.e. a forgotten version bump. We match
-        # on the version line specifically (via `git diff -G`) because release-plz
-        # also rewrites manifests cosmetically (e.g. normalising a missing
-        # trailing newline) on crates it leaves "up to date"; those must NOT be
-        # reported as drift. release-plz only touches publishable crates, so
-        # publish = false crates never show here.
-        drift=$(git diff -G'^version[[:space:]]*=' --name-only | grep -E '(^|/)Cargo\.toml$' || true)
-
-        if [[ -z "$drift" ]]; then
-          echo "No version drift: every publishable crate with changes is already bumped."
-          exit 0
-        fi
-
-        # Turn the drifting manifests into a human-readable list of crate names
-        # with their proposed old -> new versions, so the failure names the exact
-        # crates that need bumping instead of a generic example.
-        summary=""
-        names=""
-        while IFS= read -r manifest; do
-          [[ -z "$manifest" ]] && continue
-          # Crate name from the [package] table (not the directory, which can differ).
-          name=$(awk '
-            /^\[/ { in_pkg = ($0 ~ /^\[package\]/) }
-            in_pkg && /^[[:space:]]*name[[:space:]]*=/ {
-              sub(/^[^=]*=[[:space:]]*/, "")
-              gsub(/^"|"[[:space:]]*$/, "")
-              print; exit
-            }' "$manifest")
-          [[ -z "$name" ]] && name="$manifest"
-          old=$(git diff -- "$manifest" | sed -nE 's/^-version[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' | head -n1)
-          new=$(git diff -- "$manifest" | sed -nE 's/^\+version[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' | head -n1)
-          if [[ -n "$old" && -n "$new" ]]; then
-            summary+="  - ${name} (${manifest}): ${old} -> ${new}"$'\n'
-          else
-            summary+="  - ${name} (${manifest})"$'\n'
+          # (b) Same-version content comparison. Excluded from the diff:
+          #   .cargo_vcs_info.json - embeds the commit sha, always differs;
+          #   Cargo.toml           - the cargo-normalized rewrite varies by
+          #                          cargo version (Cargo.toml.orig, which IS
+          #                          compared, carries the authored manifest);
+          #   Cargo.lock           - regenerated from registry state at package
+          #                          time, not derived from this commit.
+          echo "${name} ${ver}: already on crates.io - comparing packaged content..."
+          # The whole workspace is packaged ONCE below (first time through);
+          # packaging crates individually would resolve their sibling
+          # dependencies against the registry alone, which fails whenever a
+          # sibling's version is the still-unpublished pending release. A
+          # --workspace run resolves those from the workspace's own packaged
+          # set instead.
+          #
+          # EXCLUDE publish=false crates: unlike `cargo publish`, `cargo package`
+          # packages them too and then fails resolving their own publish=false
+          # path deps (e.g. surrealdb-node -> surrealdb-embedded), which the real
+          # publish never touches. Nothing publishable depends on a publish=false
+          # crate, so excluding them cannot strand a crate we actually diff. The
+          # list is derived (publish == [] means publish=false) so new such
+          # crates are handled without editing this gate.
+          if [ ! -d target/package ]; then
+            mapfile -t skip < <(cargo metadata --no-deps --format-version 1 \
+              | jq -r '.packages[] | select(.publish == []) | "--exclude=\(.name)"')
+            cargo package --workspace --no-verify ${skip[@]+"${skip[@]}"}
           fi
-          names+="${name}, "
-        done <<< "$drift"
-        names=${names%, }
+          workdir="$(mktemp -d)"
+          curl -fsSL --retry 3 --retry-delay 2 \
+            "https://static.crates.io/crates/${name}/${name}-${ver}.crate" \
+            -o "${workdir}/published.crate"
+          mkdir "${workdir}/published" "${workdir}/local"
+          tar -xzf "${workdir}/published.crate" -C "${workdir}/published" --strip-components=1
+          tar -xzf "target/package/${name}-${ver}.crate" -C "${workdir}/local" --strip-components=1
+          rm -f "${workdir}"/{published,local}/{.cargo_vcs_info.json,Cargo.toml,Cargo.lock}
+          if diff -r "${workdir}/published" "${workdir}/local" > "${workdir}/diff.txt" 2>&1; then
+            echo "${name} ${ver}: identical to the published crate - publish will skip it."
+          else
+            echo "::group::${name} ${ver}: packaged content differs from the published crate"
+            head -n 100 "${workdir}/diff.txt"
+            echo "::endgroup::"
+            fail+="${name}@${ver} "
+          fi
+          rm -rf "${workdir}"
+        done < <(cargo metadata --no-deps --format-version 1 \
+          | jq -r '.packages[] | select(.publish != []) | [.name, .version] | @tsv')
 
-        echo "Publishable crates have unreleased changes but no version bump:"
-        printf '%s' "$summary"
-        echo "----- proposed version changes -----"
-        git --no-pager diff -- '*Cargo.toml'
-
-        echo "::error::Publishable crates changed without a version bump: ${names}. Bump them before this commit can produce a publishable release."
-        exit 1
+        if [ -n "${fail}" ]; then
+          echo "::error::Unpublishable crates: ${fail%% }. Their versions are already on crates.io with different content, so the publish step would skip them and the release would silently ship code that differs from the registry. Bump their versions before this commit can produce a publishable release."
+          exit 1
+        fi
+        echo "Every publishable crate is either at an unpublished (pending) version or identical to its published crate."

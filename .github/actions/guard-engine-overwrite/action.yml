@@ -1,0 +1,66 @@
+name: 'Guard against overwriting an existing engine release'
+description: >-
+  Guard against overwriting an existing engine release.
+  Extracted verbatim from release.yml. The interface is the ENV VARS set
+  on the calling step (they propagate into this composite step's process
+  environment); see the call site in release.yml for the exact set.
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Guard against overwriting an existing engine release
+      id: guard
+      shell: bash
+      run: |
+        set -euo pipefail
+        tag="v${VERSION}"
+        exists=false
+        reason=""
+
+        # This guard refuses to clobber a shipped release, so it must NEVER
+        # read a transient API/network failure as "not released". Both probes
+        # below treat only confirmed answers as decisive and fail closed on
+        # anything indeterminate.
+
+        # 1) A GitHub release already exists for this version. Only 200
+        # (exists) and 404 (confirmed absent) are decisive; any other status
+        # (5xx, auth, or 000 from a curl/network failure) is indeterminate.
+        code=$(curl -sS -o /dev/null -w '%{http_code}' \
+          -H "Authorization: Bearer ${GH_TOKEN}" \
+          -H "Accept: application/vnd.github+json" \
+          "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" || echo 000)
+        case "$code" in
+          200) exists=true; reason="a GitHub release ${tag} already exists" ;;
+          404) : ;;  # confirmed absent - fall through to the S3 check
+          *)
+            echo "::error::Could not determine whether GitHub release ${tag} exists (API returned HTTP ${code}). Failing closed to avoid clobbering a shipped release; re-run once the API is reachable."
+            exit 1 ;;
+        esac
+
+        # 2) The public download bucket already has a v<version>/ prefix.
+        # list-objects-v2 exits 0 for both empty and non-empty (distinguished
+        # by whether it returns a key); a non-zero exit is a real S3 error and
+        # must fail closed, not be swallowed into "empty".
+        if [[ "$exists" != "true" ]]; then
+          bucket="download.surrealdb.com"
+          if key=$(aws s3api list-objects-v2 --bucket "$bucket" --prefix "${tag}/" \
+                     --max-items 1 --query 'Contents[0].Key' --output text 2>&1); then
+            if [[ -n "$key" && "$key" != "None" ]]; then
+              exists=true
+              reason="s3://${bucket}/${tag}/ is not empty"
+            fi
+          else
+            echo "::error::Could not list s3://${bucket}/${tag}/ to check for an existing release (${key}). Failing closed."
+            exit 1
+          fi
+        fi
+
+        if [[ "$exists" == "true" && "$OVERWRITE" != "true" ]]; then
+          echo "::error::Refusing to release ${tag}: ${reason}. This version was already released. Bump the version, or re-run with overwrite: true to intentionally clobber it."
+          exit 1
+        fi
+        if [[ "$exists" == "true" ]]; then
+          echo "::warning::${tag} already exists (${reason}); overwriting because overwrite=true."
+        else
+          echo "${tag} has not been released yet; proceeding."
+        fi

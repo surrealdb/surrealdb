@@ -3,6 +3,13 @@ set -euo pipefail
 
 RELEASE_BRANCH="${1:-}"
 PUBLISH="${2:-false}"
+# The released version, anchored from the release job (prepare-vars.outputs.version)
+# rather than read from the branch tip. This keeps the bump idempotent: on an
+# overwrite=true re-run of the same release, NEXT_VERSION is still computed from
+# the version that was RELEASED, so the branch (already bumped to NEXT) shows no
+# diff below and the run no-ops - instead of reading the already-bumped tip and
+# advancing a second time. Falls back to the checked-out code when not supplied.
+RELEASED_VERSION="${3:-}"
 
 if [[ -z "$RELEASE_BRANCH" ]]; then
 	echo "Error: release branch argument required"
@@ -15,17 +22,21 @@ if [[ "$RELEASE_BRANCH" == "main" ]]; then
 	exit 1
 fi
 
-# The released version is taken from the code on the currently checked-out
-# git ref (the release branch), not passed in as an argument.
-VERSION=$(cargo metadata --format-version 1 --no-deps | \
-	jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
-
-if [[ -z "$VERSION" || "$VERSION" == "null" ]]; then
-	echo "Error: Could not determine the released version from the code"
-	exit 1
+# Prefer the released version passed by the caller (the idempotent anchor above);
+# fall back to the version in the checked-out code when it isn't supplied.
+if [[ -n "$RELEASED_VERSION" ]]; then
+	VERSION="$RELEASED_VERSION"
+	echo "Released version (from caller): ${VERSION}"
+else
+	VERSION=$(cargo metadata --format-version 1 --no-deps | \
+		jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
+	echo "Released version (from code): ${VERSION}"
 fi
 
-echo "Released version (from code): ${VERSION}"
+if [[ -z "$VERSION" || "$VERSION" == "null" ]]; then
+	echo "Error: Could not determine the released version"
+	exit 1
+fi
 
 # Compute the next version:
 #   * stable X.Y.Z            -> X.Y.(Z+1)         (e.g. 3.1.3        -> 3.1.4)
@@ -141,6 +152,44 @@ Review and merge this PR to prepare \`${RELEASE_BRANCH}\` for the next patch rel
 	fi
 
 	echo "PR: ${PR_URL}"
+
+	# Track this bump against the milestone for the version it introduces. If the
+	# auto-merge below is ever dropped (a PR can fall out of the merge queue), the
+	# PR stays visible as open work on the v${NEXT_VERSION} milestone rather than
+	# being silently forgotten before the next release. The milestone is created
+	# when it does not exist yet. Non-fatal end to end: a milestone hiccup never
+	# fails the release.
+	MILESTONE_TITLE="v${NEXT_VERSION}"
+	REPO="${GITHUB_REPOSITORY:-$(gh repo view --json nameWithOwner -q '.nameWithOwner')}"
+	PR_NUMBER="${PR_URL##*/}"
+	milestone_number="$(gh api --paginate "repos/${REPO}/milestones?state=all&per_page=100" \
+		--jq ".[] | select(.title == \"${MILESTONE_TITLE}\") | .number" 2>/dev/null | head -n1)"
+	if [[ -z "$milestone_number" ]]; then
+		milestone_number="$(gh api -X POST "repos/${REPO}/milestones" \
+			-f title="${MILESTONE_TITLE}" --jq '.number' 2>/dev/null || true)"
+		[[ -n "$milestone_number" ]] && echo "Created milestone ${MILESTONE_TITLE} (#${milestone_number})"
+	fi
+	if [[ -n "$milestone_number" ]]; then
+		if gh api -X PATCH "repos/${REPO}/issues/${PR_NUMBER}" \
+			-F milestone="${milestone_number}" >/dev/null 2>&1; then
+			echo "Assigned ${PR_URL} to milestone ${MILESTONE_TITLE}"
+		else
+			echo "::warning title=Milestone::could not assign ${PR_URL} to milestone ${MILESTONE_TITLE}; assign it manually"
+		fi
+	else
+		echo "::warning title=Milestone::could not find or create milestone ${MILESTONE_TITLE}; PR left unassigned"
+	fi
+
+	# These version-bump PRs are mechanical and must land before the next
+	# release, so merge them as directly as possible. Try an immediate squash
+	# merge first - the App is a ruleset bypass actor on this repo, so this
+	# lands even while required checks are still queued - then fall back to
+	# enabling GitHub auto-merge (which waits for required checks), and only
+	# then to a warning. Non-fatal: a merge that cannot proceed leaves the PR
+	# open rather than failing the release.
+	gh pr merge --squash "${PR_URL}" \
+		|| gh pr merge --auto --squash "${PR_URL}" \
+		|| echo "::warning title=Auto-merge::could not merge ${PR_URL}; merge it manually"
 
 	# Surface the PR URL as a step output when running in GitHub Actions so the
 	# release summary can list it.

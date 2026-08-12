@@ -83,11 +83,6 @@ runs:
         outputs: type=docker,dest=${{ steps.image.outputs.folder }}/surrealdb-builder-${{ steps.image.outputs.tag }}-${{ inputs.platform }}
         tags: surrealdb-builder:${{ steps.image.outputs.tag }}-${{ inputs.platform }}
 
-    - name: Setup environment
-      uses: ./.github/actions/setup-environment
-      with:
-        targets: ${{ inputs.arch }}
-
     - name: Output package versions
       shell: bash
       run: |

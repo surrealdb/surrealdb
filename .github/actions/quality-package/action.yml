@@ -1,28 +1,39 @@
 name: 'Package crates'
-description: 'Verify the workspace crates package cleanly for crates.io'
-
-inputs:
-  save-cache:
-    description: 'Whether to save the cargo cache'
-    required: false
-    default: 'false'
+description: 'Verify the workspace publishes cleanly to crates.io (dependency-ordered dry-run)'
 
 runs:
   using: 'composite'
   steps:
-    - name: Setup environment
-      uses: ./.github/actions/setup-environment
-      with:
-        save-cache: ${{ inputs.save-cache }}
-        # `cargo package` compiles the whole workspace + deps to verify each crate
-        # tarball, which overflows a hosted runner's default disk. Reclaim space
-        # (preinstalled Android SDK, .NET, GHC, etc.) before building. No-op on
-        # non-Linux / self-hosted runners.
-        free-disk-space: 'true'
-
-    - name: Install tools
-      uses: ./.github/actions/install-tools
-
-    - name: Package crates
+    # setup-environment is provided by the CALLING JOB (hoisted): a nested
+    # `uses: ./...` here would resolve against GITHUB_WORKSPACE - the built
+    # commit in a rolling build, not the workflow ref - reintroducing the
+    # backport hole. The caller checks it out from ./.ci/... .
+    - name: Verify the workspace publishes cleanly
       shell: bash
-      run: cargo make ci-package
+      run: |
+        set -euo pipefail
+        # The CI tooling checkout (.ci) sits untracked inside the source
+        # workspace; cargo's publish VCS check treats untracked, un-ignored
+        # paths as a dirty tree and refuses. Exclude it at the repository
+        # level - the built commit's .gitignore cannot be amended retroactively.
+        excl="$(git rev-parse --git-path info/exclude)"
+        mkdir -p "$(dirname "$excl")"
+        git check-ignore -q .ci 2>/dev/null || echo '/.ci/' >> "$excl"
+
+        # cargo publish's own dry-run: same command shape as the real
+        # promotion-time publish (dependency-ordered, skips publish=false
+        # crates), so it catches the real publish-blockers - a missing version
+        # requirement on an intra-workspace dependency, a publish=false crate
+        # depended on with a version, dependency-ordering problems - while
+        # resolving each member's still-unpublished siblings from the workspace's
+        # own packaged set.
+        #
+        # VERIFY IS ON (no --no-verify): this compiles each crate from its
+        # PACKAGED tarball - the exact form a crates.io consumer builds - which
+        # catches packaging-specific breakage an in-tree build misses (a file
+        # left out of the package, a build.rs referencing an excluded path, a
+        # path-vs-registry dependency difference). This is what lets the real
+        # publish run --no-verify safely: this gate has already verified the
+        # packaged form compiles for this SHA. Do not add --no-verify here
+        # without also removing it from the real publish in publish-crate.
+        cargo publish --workspace --dry-run

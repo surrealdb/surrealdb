@@ -44,8 +44,50 @@ runs:
         date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
         rev=$(git rev-parse --short HEAD)
         build_metadata="${date}.${rev}"
+
+        # The branch that namespaces the artifacts must be the line the BUILT
+        # commit belongs to, not the ref the workflow file ran from: the release
+        # workflow resolves a commit's line by ancestry and looks the artifacts
+        # up under that line's slug, so keying them by the dispatched ref would
+        # strand a cross-ref rebuild (e.g. a main dispatch rebuilding a
+        # releases/* commit) where the release can never find them.
+        #
+        # On the hot paths (push / schedule / tip dispatch) HEAD IS the
+        # dispatched ref's tip, so the dispatched ref is used as-is with no
+        # extra fetches. Only an override that builds some other commit pays
+        # for the ancestry resolution: prefer the dispatched ref if it still
+        # contains the commit, otherwise the first promotion line that does
+        # (main, then releases/* in ref order). A commit on no line keeps the
+        # dispatched ref's name - such builds are throwaway by the callers'
+        # promotability gates, and the name only labels their temporary
+        # artifacts.
+        branch="${GITHUB_REF_NAME}"
+        if [ "${full_sha}" != "${GITHUB_SHA}" ]; then
+          # Ancestry needs history connecting HEAD to the promotion lines; the
+          # rolling checkout is shallow, so deepen (no-op when complete), then
+          # bring in main + every releases/* tip.
+          if [ -f "$(git rev-parse --git-dir)/shallow" ]; then
+            git fetch --no-tags --quiet --unshallow origin 2>/dev/null \
+              || git fetch --no-tags --quiet --deepen=2147483647 origin 2>/dev/null \
+              || true
+          fi
+          git fetch --no-tags --quiet origin \
+            '+refs/heads/main:refs/remotes/origin/main' \
+            '+refs/heads/releases/*:refs/remotes/origin/releases/*'
+          if ! git merge-base --is-ancestor "${full_sha}" \
+              "refs/remotes/origin/${GITHUB_REF_NAME}" 2>/dev/null; then
+            for ref in $(git for-each-ref --format='%(refname)' \
+              refs/remotes/origin/main 'refs/remotes/origin/releases/*'); do
+              if git merge-base --is-ancestor "${full_sha}" "${ref}" 2>/dev/null; then
+                branch="${ref#refs/remotes/origin/}"
+                break
+              fi
+            done
+          fi
+        fi
+
         # Slug the branch for namespacing: non-alphanumerics -> '-', lowercased.
-        ref_slug=$(echo "${GITHUB_REF_NAME}" | sed -e 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
+        ref_slug=$(echo "${branch}" | sed -e 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
         name="rolling-${full_sha}"
         cargo_version=$(awk '/^\[workspace.package\]/{f=1} f&&/^version[[:space:]]*=/{gsub(/version[[:space:]]*=[[:space:]]*"|"/,""); print; exit}' Cargo.toml)
         {
@@ -54,6 +96,6 @@ runs:
           echo "slug=${ref_slug}"
           echo "s3-prefix=rolling-builds/${ref_slug}/${full_sha}"
           echo "version=${cargo_version}"
-          echo "branch=${GITHUB_REF_NAME}"
+          echo "branch=${branch}"
           echo "sha=${full_sha}"
         } >> "$GITHUB_OUTPUT"

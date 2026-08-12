@@ -20,7 +20,8 @@ set -euo pipefail
 # names are deliberately omitted: they are common words that appear throughout
 # the tree, and the sensitive coordinates are covered anyway (the registry host
 # carries the account ID and is matched; a specific full slug can be added to
-# CONFIDENTIAL_TERMS), so nothing is lost by excluding them.
+# CONFIDENTIAL_TERMS), so nothing is lost by excluding them. GitHub App client
+# ids are public identifiers (not secrets), so they are not guarded either.
 
 patterns="$(mktemp)"
 matches="$(mktemp)"
@@ -33,7 +34,6 @@ append() {
 }
 
 append "${AWS_ECR_REGISTRY:-}"
-append "${DOWNSTREAM_APP_CLIENT_ID:-}"
 if [ -n "${CONFIDENTIAL_TERMS:-}" ]; then
 	printf '%s\n' "${CONFIDENTIAL_TERMS}" >>"$patterns"
 fi
@@ -44,7 +44,7 @@ tr -d '\r' <"$patterns" | sed '/^[[:space:]]*$/d' >"${patterns}.clean"
 mv "${patterns}.clean" "$patterns"
 
 if [ ! -s "$patterns" ]; then
-	echo "::error title=Confidentiality::No confidential terms available (DOWNSTREAM_* / CONFIDENTIAL_TERMS unset). Failing closed."
+	echo "::error title=Confidentiality::No confidential terms available (AWS_ECR_REGISTRY / CONFIDENTIAL_TERMS unset). Failing closed."
 	exit 1
 fi
 
