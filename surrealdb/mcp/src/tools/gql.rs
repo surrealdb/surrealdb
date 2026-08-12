@@ -19,6 +19,11 @@ pub struct GqlParams {
 	/// SurrealDB values such as decimals, datetimes, durations, record ids, or
 	/// uuids.
 	pub parameters: Option<serde_json::Value>,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	#[serde(flatten)]
+	pub scope: super::ToolScope,
 }
 
 pub async fn execute(session: &McpSession, params: GqlParams) -> Result<CallToolResult, ErrorData> {

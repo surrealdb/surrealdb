@@ -823,7 +823,7 @@ jobs:
         working-directory: tests/mcp-js
         env:
           SURREAL_BIN: ${{ github.workspace }}/artifacts/surreal
-        run: bun test --timeout 60000
+        run: bun test --timeout 90000
 
   # ----------------------------------------
   # Embedded Node.js engine

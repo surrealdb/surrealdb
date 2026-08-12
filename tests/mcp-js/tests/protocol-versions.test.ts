@@ -9,27 +9,28 @@ import {
 } from "../src/harness";
 
 /**
- * Protocol revisions this server commits to serving, oldest first. Each one is
+ * Handshake-era revisions this server commits to serving, oldest first. Each is
  * exercised end to end: negotiation, then a real tool call on the negotiated
- * session. Dropping a revision from this list is a breaking change for the
- * clients pinned to it, so the list is the contract rather than a sample.
+ * session. Dropping one is a breaking change for the clients pinned to it, so
+ * the list is the contract rather than a sample.
+ *
+ * `2026-07-28` is deliberately absent here: it has no handshake and no session,
+ * so it cannot be driven by this flow. It is covered by `stateless.test.ts`.
  */
 const SUPPORTED_VERSIONS = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"] as const;
 
 /**
- * The revision the server advertises when a client asks for something it does
- * not serve. rmcp falls back to the server's own advertised version rather than
- * erroring, so an unknown request must degrade to this instead of failing.
+ * The revision the server names when a client asks for one it does not serve.
+ * rmcp answers with the server's own advertised version rather than erroring,
+ * so an unknown request must degrade to this instead of failing.
  */
-const ADVERTISED_VERSION = "2025-11-25";
+const ADVERTISED_VERSION = "2026-07-28";
 
 /**
- * Released spec revision that this server does not yet serve. It is kept in the
- * matrix deliberately: the negotiation contract for an unsupported-but-real
- * version is graceful downgrade, and that has to stay covered until the server
- * implements the revision.
+ * A version string no revision will ever use. Negotiation must degrade to the
+ * advertised version rather than erroring, which is what lets a client probe.
  */
-const UNSUPPORTED_VERSION = "2026-07-28";
+const UNKNOWN_VERSION = "1999-01-01";
 
 let server: TestServer;
 
@@ -115,15 +116,17 @@ describe("protocol version negotiation", () => {
 		});
 	}
 
-	test(`downgrades an unsupported ${UNSUPPORTED_VERSION} request to ${ADVERTISED_VERSION}`, async () => {
-		const { status, body } = await rawInitialize(server, UNSUPPORTED_VERSION);
+	test("downgrades an entirely unknown version rather than erroring", async () => {
+		const { status, body } = await rawInitialize(server, UNKNOWN_VERSION);
 		expect(status).toBe(200);
-		expect(body?.error, "an unsupported version must downgrade, not error").toBeUndefined();
+		expect(body?.error, "an unknown version must degrade, not error").toBeUndefined();
 		expect(body?.result?.protocolVersion).toBe(ADVERTISED_VERSION);
 	});
 
-	test("downgrades an entirely unknown version rather than erroring", async () => {
-		const { status, body } = await rawInitialize(server, "1999-01-01");
+	test(`negotiates ${ADVERTISED_VERSION} when a client asks for it by handshake`, async () => {
+		// A client may still send `initialize` while asking for the stateless
+		// revision; rmcp answers it and then serves the connection statelessly.
+		const { status, body } = await rawInitialize(server, ADVERTISED_VERSION);
 		expect(status).toBe(200);
 		expect(body?.result?.protocolVersion).toBe(ADVERTISED_VERSION);
 	});
@@ -141,8 +144,15 @@ describe("protocol version negotiation", () => {
 });
 
 describe("session lifecycle", () => {
+	/**
+	 * Newest revision that still has sessions. Session lifecycle is only
+	 * meaningful below 2026-07-28, which removes protocol sessions entirely —
+	 * so these cases pin the legacy contract rather than the advertised one.
+	 */
+	const SESSION_VERSION = "2025-11-25";
+
 	test("a second request reuses the negotiated session", async () => {
-		const version = ADVERTISED_VERSION;
+		const version = SESSION_VERSION;
 		const { sessionId } = await rawInitialize(server, version);
 		await sendInitialized(sessionId, version);
 

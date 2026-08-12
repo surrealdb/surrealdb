@@ -26,6 +26,11 @@ pub struct RunParams {
 	/// values via `{"$ql": "<expr>"}` -- e.g. pass a record id as
 	/// `{"$ql": "person:alice"}` or a decimal as `{"$ql": "9.99dec"}`.
 	pub args: Option<Vec<serde_json::Value>>,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	#[serde(flatten)]
+	pub scope: super::ToolScope,
 }
 
 /// Invoke a SurrealQL function with typed argument bindings. Works for built-in
@@ -151,6 +156,7 @@ mod tests {
 			RunParams {
 				function: "math::sum".to_string(),
 				args: Some(args),
+				scope: Default::default(),
 			},
 		)
 		.await

@@ -75,6 +75,11 @@ pub struct SelectParams {
 	/// references in one round-trip rather than issuing follow-up
 	/// queries.
 	pub fetch_clause: Option<String>,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	#[serde(flatten)]
+	pub scope: super::ToolScope,
 }
 
 pub async fn select(session: &McpSession, p: SelectParams) -> Result<CallToolResult, ErrorData> {
@@ -116,6 +121,11 @@ pub struct CreateParams {
 	/// uuid, ...) -- e.g. `{"price": {"$ql": "9.99dec"}, "customer":
 	/// {"$ql": "customer:alice"}}`.
 	pub data: Option<serde_json::Value>,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	#[serde(flatten)]
+	pub scope: super::ToolScope,
 }
 
 pub async fn create(session: &McpSession, p: CreateParams) -> Result<CallToolResult, ErrorData> {
@@ -143,6 +153,11 @@ pub struct InsertParams {
 	/// Whether this is a relation insert.
 	#[serde(default)]
 	pub relation: bool,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	#[serde(flatten)]
+	pub scope: super::ToolScope,
 }
 
 pub async fn insert(session: &McpSession, p: InsertParams) -> Result<CallToolResult, ErrorData> {
@@ -185,6 +200,11 @@ pub struct UpsertParams {
 	/// Optional `WHERE` clause (SurrealQL expression fragment). For dynamic
 	/// values use `$param` bindings via the raw `query` tool.
 	pub where_clause: Option<String>,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	#[serde(flatten)]
+	pub scope: super::ToolScope,
 }
 
 pub async fn upsert(session: &McpSession, p: UpsertParams) -> Result<CallToolResult, ErrorData> {
@@ -214,6 +234,11 @@ pub struct UpdateParams {
 	/// Optional `WHERE` clause (SurrealQL expression fragment). For dynamic
 	/// values use `$param` bindings via the raw `query` tool.
 	pub where_clause: Option<String>,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	#[serde(flatten)]
+	pub scope: super::ToolScope,
 }
 
 pub async fn update(session: &McpSession, p: UpdateParams) -> Result<CallToolResult, ErrorData> {
@@ -235,6 +260,11 @@ pub struct DeleteParams {
 	/// Optional `WHERE` clause (SurrealQL expression fragment). For dynamic
 	/// values use `$param` bindings via the raw `query` tool.
 	pub where_clause: Option<String>,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	#[serde(flatten)]
+	pub scope: super::ToolScope,
 }
 
 pub async fn delete(session: &McpSession, p: DeleteParams) -> Result<CallToolResult, ErrorData> {
@@ -259,6 +289,11 @@ pub struct RelateParams {
 	/// Embed typed SurrealDB values via `{"$ql": "<expr>"}` (e.g.
 	/// `{"order": {"$ql": "order:o1"}, "quantity": 2}`).
 	pub content_data: Option<serde_json::Value>,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	#[serde(flatten)]
+	pub scope: super::ToolScope,
 }
 
 pub async fn relate(session: &McpSession, p: RelateParams) -> Result<CallToolResult, ErrorData> {
@@ -343,6 +378,7 @@ mod tests {
 				group_clause: None,
 				split_clause: None,
 				fetch_clause: None,
+				scope: Default::default(),
 			},
 		)
 		.await
@@ -365,6 +401,7 @@ mod tests {
 				group_clause: None,
 				split_clause: None,
 				fetch_clause: Some("owner".into()),
+				scope: Default::default(),
 			},
 		)
 		.await
@@ -416,6 +453,7 @@ mod tests {
 			CreateParams {
 				target: "product:bad".into(),
 				data: Some(json!({ "price": "9.99" })),
+				scope: Default::default(),
 			},
 		)
 		.await
@@ -433,6 +471,7 @@ mod tests {
 			CreateParams {
 				target: "product:good".into(),
 				data: Some(json!({ "price": { "$ql": "9.99dec" } })),
+				scope: Default::default(),
 			},
 		)
 		.await
@@ -463,6 +502,7 @@ mod tests {
 				]),
 				ignore: true,
 				relation: true,
+				scope: Default::default(),
 			},
 		)
 		.await

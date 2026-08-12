@@ -18,6 +18,11 @@ use crate::session::McpSession;
 pub struct InfoParams {
 	/// Scope: "root", "ns", "db", or a table name. Defaults to most specific context.
 	pub target: Option<String>,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	#[serde(flatten)]
+	pub scope: super::ToolScope,
 }
 
 /// Dump full introspection for a scope or table via `INFO FOR <scope>` / `INFO FOR TABLE`.
@@ -94,6 +99,16 @@ pub struct ListParams {
 	pub table: Option<String>,
 	/// Required when `kind` is one of: users, accesses. One of: root, ns, db.
 	pub scope: Option<ListScope>,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	///
+	/// Named apart from `scope` above, which selects the *level* a `users` or
+	/// `accesses` listing is read at rather than the namespace/database the
+	/// call runs in. The two are independent: listing database users requires
+	/// `scope = "db"` and a namespace/database to read them from.
+	#[serde(flatten)]
+	pub tool_scope: super::ToolScope,
 }
 
 /// Enumerate entities of a given kind, returning only the requested subtree of

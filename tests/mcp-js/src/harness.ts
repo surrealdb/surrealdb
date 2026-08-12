@@ -71,7 +71,10 @@ export async function startServer(options: ServerOptions = {}): Promise<TestServ
 }
 
 async function waitHealthy(httpUrl: string, proc: Subprocess): Promise<boolean> {
-	const deadline = Date.now() + 15000;
+	// Each test file spawns its own server, so several debug builds start at
+	// once. Startup is the slowest thing this suite does and it degrades under
+	// that load, so the deadline covers a loaded machine rather than an idle one.
+	const deadline = Date.now() + 30000;
 	while (Date.now() < deadline) {
 		if (proc.exitCode !== null) return false; // port collision or startup failure
 		try {

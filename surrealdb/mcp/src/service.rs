@@ -20,7 +20,7 @@ use crate::auth::{self, BoundSubject};
 use crate::cnf::McpConfig;
 use crate::metrics::{McpMetricsRecorder, McpToolOutcome};
 use crate::session::McpSession;
-use crate::tools::{connection, crud, gql, graphql, query, run as run_tool, schema};
+use crate::tools::{ToolScope, connection, crud, gql, graphql, query, run as run_tool, schema};
 use crate::{audit, completions, prompts, resources};
 
 const LOG: &str = "surrealdb::mcp";
@@ -77,6 +77,30 @@ pub struct McpService {
 	/// MUST be tied to the `Arc` reference count rather than to a single
 	/// `Drop` impl on `McpService`.
 	session_gauge: Arc<SessionGaugeGuard>,
+}
+
+/// The session a single tool call runs against.
+///
+/// Either the long-lived session a legacy handshake bound — reused so `use`
+/// keeps working across calls — or one built for this request alone, which is
+/// how a stateless request and a scope-bearing legacy call are both served
+/// without touching connection state.
+///
+/// The owned variant is boxed to keep the enum pointer-sized: a handshake
+/// session is borrowed, and allocating for the per-request case costs nothing
+/// measurable beside the query it is about to run.
+enum ResolvedSession<'a> {
+	Handshake(&'a McpSession),
+	PerRequest(Box<McpSession>),
+}
+
+impl ResolvedSession<'_> {
+	fn get(&self) -> &McpSession {
+		match self {
+			Self::Handshake(session) => session,
+			Self::PerRequest(session) => session,
+		}
+	}
 }
 
 /// Drop-guard that decrements the `surrealdb.mcp.session.active` gauge
@@ -432,6 +456,15 @@ impl McpService {
 	/// - HTTP, same authenticated subject as binding: allowed.
 	/// - HTTP, different authenticated subject than binding: rejected with `invalid_params`.
 	fn verify_request_subject(&self, ctx: &RequestContext<RoleServer>) -> Result<(), McpError> {
+		// Under the stateless protocol there is no session id, so there is
+		// nothing to hijack: every request carries its own credentials and is
+		// authenticated independently before it reaches this handler. The
+		// bound-subject check exists specifically to stop a session id being
+		// replayed with different credentials, a vector the revision removes
+		// along with sessions themselves.
+		if Self::is_stateless(ctx) {
+			return Ok(());
+		}
 		let Some(bound) = self.bound_subject.get() else {
 			// If `init_session` was never called, `bound_subject` is
 			// empty; return a protocol-level error so the caller knows
@@ -453,11 +486,105 @@ impl McpService {
 		auth::check_subject(bound, incoming)
 	}
 
-	/// Stable audit label for the bound subject. Returns `"unbound"`
-	/// before `initialize` (only reachable from internal logging on
-	/// pathological code paths).
-	fn bound_subject_label(&self) -> String {
-		self.bound_subject.get().map(BoundSubject::audit_label).unwrap_or_else(|| "unbound".into())
+	/// Audit label for whoever is making this request.
+	///
+	/// A handshake-bound subject wins, so legacy sessions keep logging the
+	/// identity captured at `initialize`. Without one — the stateless case —
+	/// the label is derived from the credentials on the request itself, which
+	/// is the only identity that exists there.
+	fn request_subject_label(&self, ctx: &RequestContext<RoleServer>) -> String {
+		if let Some(bound) = self.bound_subject.get() {
+			return bound.audit_label();
+		}
+		auth::incoming_subject(ctx)
+			.map(|subject| subject.audit_label())
+			.unwrap_or_else(|| "anonymous".into())
+	}
+
+	/// Whether this request is served under the stateless protocol.
+	///
+	/// rmcp reports the version carried in the request's own `_meta`, falling
+	/// back to the version agreed at handshake for legacy peers, so this one
+	/// call discriminates the two eras correctly for both.
+	fn is_stateless(ctx: &RequestContext<RoleServer>) -> bool {
+		ctx.protocol_version().is_some_and(|version| version >= ProtocolVersion::V_2026_07_28)
+	}
+
+	/// Namespace and database carried by the request's `surreal-ns` /
+	/// `surreal-db` headers, if any. Empty values are treated as absent so a
+	/// blank header cannot blank out a configured default.
+	fn header_scope(ctx: &RequestContext<RoleServer>) -> (Option<String>, Option<String>) {
+		let Some(parts) = ctx.extensions.get::<http::request::Parts>() else {
+			return (None, None);
+		};
+		let read = |name: &str| {
+			parts
+				.headers
+				.get(name)
+				.and_then(|value| value.to_str().ok())
+				.map(str::to_string)
+				.filter(|value| !value.is_empty())
+		};
+		(read("surreal-ns"), read("surreal-db"))
+	}
+
+	/// Resolve the session a tool call runs against.
+	///
+	/// Scope precedence, highest first: the call's own `namespace` /
+	/// `database` arguments, the `surreal-ns` / `surreal-db` request headers,
+	/// the handshake session's current `use` state, then the server's
+	/// configured defaults. Each layer fills only the halves the layer above
+	/// left unset, so a call may override the database while inheriting the
+	/// namespace.
+	///
+	/// A handshake session is reused as-is when the call names no scope of its
+	/// own, which is what keeps `use` meaningful for legacy clients. As soon as
+	/// a call does name a scope, it runs against a derived session so the
+	/// override cannot leak into the connection's `use` state and affect later
+	/// calls.
+	///
+	/// Without a handshake the request must be a stateless one; anything else
+	/// is a legacy client that skipped `initialize`, and still gets told so.
+	async fn resolve_session(
+		&self,
+		ctx: &RequestContext<RoleServer>,
+		scope: &ToolScope,
+	) -> Result<ResolvedSession<'_>, McpError> {
+		scope.validate()?;
+		let (header_ns, header_db) = Self::header_scope(ctx);
+		let ns = scope.namespace.clone().or(header_ns);
+		let db = scope.database.clone().or(header_db);
+
+		match self.session.get() {
+			Some(session) if ns.is_none() && db.is_none() => {
+				Ok(ResolvedSession::Handshake(session))
+			}
+			Some(session) => {
+				Ok(ResolvedSession::PerRequest(Box::new(session.derive_scoped(ns, db).await)))
+			}
+			None if Self::is_stateless(ctx) => {
+				// No handshake ever happened, so both the caller's identity and
+				// their scope come from this request. Networked transports get
+				// the session the auth middleware attached; in-process ones
+				// fall back to the configured base session.
+				let base = ctx
+					.extensions
+					.get::<http::request::Parts>()
+					.and_then(auth::extract_session_from_parts)
+					.unwrap_or_else(|| self.base_session.clone());
+				Ok(ResolvedSession::PerRequest(Box::new(McpSession::from_request(
+					Arc::clone(&self.datastore),
+					base,
+					ns.or_else(|| self.default_ns.clone()),
+					db.or_else(|| self.default_db.clone()),
+					Arc::clone(&self.config),
+				))))
+			}
+			None => Err(McpError::internal_error(
+				"MCP session not initialized: send `initialize` first",
+				None,
+			)),
+		}
 	}
 
 	/// Verify the request, run `handler`, and emit the canonical audit
@@ -480,26 +607,32 @@ impl McpService {
 		&self,
 		tool: &'static str,
 		ctx: &RequestContext<RoleServer>,
+		scope: &ToolScope,
 		handler: F,
 	) -> Result<CallToolResult, McpError>
 	where
 		F: AsyncFnOnce(&McpSession) -> Result<CallToolResult, McpError>,
 	{
-		let subject = self.bound_subject_label();
-		// Snapshot ns/db best-effort. If the session isn't initialized
-		// yet we still want the audit record to fire, so fall back to
-		// `(None, None)` rather than short-circuiting before the log.
-		let (ns, db) = match self.session.get() {
-			Some(s) => s.current_ns_db().await,
-			None => (None, None),
-		};
+		let subject = self.request_subject_label(ctx);
 		let started = Instant::now();
-		let outcome: Result<CallToolResult, McpError> = async {
+		// Verification and scope resolution run inside the timed span so a
+		// rejected request still produces exactly one audit record.
+		let resolved = async {
 			self.verify_request_subject(ctx)?;
-			let session = self.session()?;
-			handler(session).await
+			self.resolve_session(ctx, scope).await
 		}
 		.await;
+		// Log the scope the call actually ran against, which for a
+		// scope-bearing call is not the connection's `use` state. A request
+		// rejected before resolution has no scope to report.
+		let (ns, db) = match &resolved {
+			Ok(session) => session.get().current_ns_db().await,
+			Err(_) => (None, None),
+		};
+		let outcome: Result<CallToolResult, McpError> = match resolved {
+			Ok(session) => handler(session.get()).await,
+			Err(err) => Err(err),
+		};
 		let elapsed = started.elapsed();
 		let (kind, kind_str) = audit::classify(&outcome);
 		audit::record(tool, &subject, ns.as_deref(), db.as_deref(), kind, &kind_str, elapsed);
@@ -526,7 +659,7 @@ impl McpService {
 /// same claim as the newest revision this server implements. Binding to it
 /// would let a dependency bump silently change the protocol SurrealDB
 /// advertises.
-pub const ADVERTISED_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::V_2025_11_25;
+pub const ADVERTISED_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::V_2026_07_28;
 
 /// Every protocol revision this server implements, newest first.
 ///
@@ -535,13 +668,15 @@ pub const ADVERTISED_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::V_2025
 /// versions are accepted. A revision absent here is answered by downgrading to
 /// [`ADVERTISED_PROTOCOL_VERSION`] rather than by an error.
 ///
-/// `2026-07-28` is deliberately excluded. That revision removes the
-/// `initialize` handshake and protocol sessions entirely, so every request must
-/// carry its own identity and scope; this server still resolves the caller's
-/// session once at `initialize` and holds the active namespace/database on it.
-/// Advertising the revision without that redesign would answer `tools/list`
-/// normally and then fail every `tools/call`.
+/// Both protocol eras are served on one endpoint. Under `2026-07-28` there is
+/// no handshake and no session: the caller's credentials arrive with every
+/// request and the namespace/database come from the call's own arguments,
+/// headers, or the server's defaults. Under the older revisions the
+/// `initialize` handshake still binds a session whose `use` state persists
+/// across calls. [`McpService::resolve_session`] is the single point where
+/// that difference is decided.
 pub const SUPPORTED_PROTOCOL_VERSIONS: &[ProtocolVersion] = &[
+	ProtocolVersion::V_2026_07_28,
 	ProtocolVersion::V_2025_11_25,
 	ProtocolVersion::V_2025_06_18,
 	ProtocolVersion::V_2025_03_26,
@@ -576,7 +711,8 @@ impl McpService {
 		Parameters(p): Parameters<query::QueryParams>,
 		ctx: RequestContext<RoleServer>,
 	) -> Result<CallToolResult, McpError> {
-		self.dispatch_tool("query", &ctx, async |s| query::execute(s, p).await).await
+		let scope = p.scope.clone();
+		self.dispatch_tool("query", &ctx, &scope, async |s| query::execute(s, p).await).await
 	}
 
 	#[tool(
@@ -594,7 +730,8 @@ impl McpService {
 		Parameters(p): Parameters<crud::SelectParams>,
 		ctx: RequestContext<RoleServer>,
 	) -> Result<CallToolResult, McpError> {
-		self.dispatch_tool("select", &ctx, async |s| crud::select(s, p).await).await
+		let scope = p.scope.clone();
+		self.dispatch_tool("select", &ctx, &scope, async |s| crud::select(s, p).await).await
 	}
 
 	#[tool(
@@ -612,7 +749,8 @@ impl McpService {
 		Parameters(p): Parameters<crud::CreateParams>,
 		ctx: RequestContext<RoleServer>,
 	) -> Result<CallToolResult, McpError> {
-		self.dispatch_tool("create", &ctx, async |s| crud::create(s, p).await).await
+		let scope = p.scope.clone();
+		self.dispatch_tool("create", &ctx, &scope, async |s| crud::create(s, p).await).await
 	}
 
 	#[tool(
@@ -630,7 +768,8 @@ impl McpService {
 		Parameters(p): Parameters<crud::InsertParams>,
 		ctx: RequestContext<RoleServer>,
 	) -> Result<CallToolResult, McpError> {
-		self.dispatch_tool("insert", &ctx, async |s| crud::insert(s, p).await).await
+		let scope = p.scope.clone();
+		self.dispatch_tool("insert", &ctx, &scope, async |s| crud::insert(s, p).await).await
 	}
 
 	#[tool(
@@ -648,7 +787,8 @@ impl McpService {
 		Parameters(p): Parameters<crud::UpsertParams>,
 		ctx: RequestContext<RoleServer>,
 	) -> Result<CallToolResult, McpError> {
-		self.dispatch_tool("upsert", &ctx, async |s| crud::upsert(s, p).await).await
+		let scope = p.scope.clone();
+		self.dispatch_tool("upsert", &ctx, &scope, async |s| crud::upsert(s, p).await).await
 	}
 
 	#[tool(
@@ -666,7 +806,8 @@ impl McpService {
 		Parameters(p): Parameters<crud::UpdateParams>,
 		ctx: RequestContext<RoleServer>,
 	) -> Result<CallToolResult, McpError> {
-		self.dispatch_tool("update", &ctx, async |s| crud::update(s, p).await).await
+		let scope = p.scope.clone();
+		self.dispatch_tool("update", &ctx, &scope, async |s| crud::update(s, p).await).await
 	}
 
 	#[tool(
@@ -684,7 +825,8 @@ impl McpService {
 		Parameters(p): Parameters<crud::DeleteParams>,
 		ctx: RequestContext<RoleServer>,
 	) -> Result<CallToolResult, McpError> {
-		self.dispatch_tool("delete", &ctx, async |s| crud::delete(s, p).await).await
+		let scope = p.scope.clone();
+		self.dispatch_tool("delete", &ctx, &scope, async |s| crud::delete(s, p).await).await
 	}
 
 	#[tool(
@@ -702,7 +844,8 @@ impl McpService {
 		Parameters(p): Parameters<crud::RelateParams>,
 		ctx: RequestContext<RoleServer>,
 	) -> Result<CallToolResult, McpError> {
-		self.dispatch_tool("relate", &ctx, async |s| crud::relate(s, p).await).await
+		let scope = p.scope.clone();
+		self.dispatch_tool("relate", &ctx, &scope, async |s| crud::relate(s, p).await).await
 	}
 
 	#[tool(
@@ -720,7 +863,8 @@ impl McpService {
 		Parameters(p): Parameters<schema::InfoParams>,
 		ctx: RequestContext<RoleServer>,
 	) -> Result<CallToolResult, McpError> {
-		self.dispatch_tool("info", &ctx, async |s| schema::info(s, p).await).await
+		let scope = p.scope.clone();
+		self.dispatch_tool("info", &ctx, &scope, async |s| schema::info(s, p).await).await
 	}
 
 	#[tool(
@@ -738,7 +882,8 @@ impl McpService {
 		Parameters(p): Parameters<schema::ListParams>,
 		ctx: RequestContext<RoleServer>,
 	) -> Result<CallToolResult, McpError> {
-		self.dispatch_tool("list", &ctx, async |s| schema::list(s, p).await).await
+		let scope = p.tool_scope.clone();
+		self.dispatch_tool("list", &ctx, &scope, async |s| schema::list(s, p).await).await
 	}
 
 	#[tool(
@@ -757,7 +902,17 @@ impl McpService {
 		Parameters(p): Parameters<connection::UseParams>,
 		ctx: RequestContext<RoleServer>,
 	) -> Result<CallToolResult, McpError> {
-		self.dispatch_tool("use", &ctx, async |s| connection::r#use(s, p).await).await
+		let scope = ToolScope::default();
+		// Dispatch even when the call cannot succeed, so the rejection is
+		// audited and counted like any other invocation rather than vanishing.
+		let stateless = Self::is_stateless(&ctx);
+		self.dispatch_tool("use", &ctx, &scope, async |s| {
+			if stateless {
+				return Ok(connection::use_unsupported_when_stateless());
+			}
+			connection::r#use(s, p).await
+		})
+		.await
 	}
 
 	#[tool(
@@ -775,7 +930,8 @@ impl McpService {
 		Parameters(p): Parameters<run_tool::RunParams>,
 		ctx: RequestContext<RoleServer>,
 	) -> Result<CallToolResult, McpError> {
-		self.dispatch_tool("run", &ctx, async |s| run_tool::run(s, p).await).await
+		let scope = p.scope.clone();
+		self.dispatch_tool("run", &ctx, &scope, async |s| run_tool::run(s, p).await).await
 	}
 
 	#[tool(
@@ -793,7 +949,8 @@ impl McpService {
 		Parameters(p): Parameters<gql::GqlParams>,
 		ctx: RequestContext<RoleServer>,
 	) -> Result<CallToolResult, McpError> {
-		self.dispatch_tool("gql", &ctx, async |s| gql::execute(s, p).await).await
+		let scope = p.scope.clone();
+		self.dispatch_tool("gql", &ctx, &scope, async |s| gql::execute(s, p).await).await
 	}
 
 	#[tool(
@@ -811,7 +968,8 @@ impl McpService {
 		Parameters(p): Parameters<graphql::GraphqlParams>,
 		ctx: RequestContext<RoleServer>,
 	) -> Result<CallToolResult, McpError> {
-		self.dispatch_tool("graphql", &ctx, async |s| graphql::execute(s, p).await).await
+		let scope = p.scope.clone();
+		self.dispatch_tool("graphql", &ctx, &scope, async |s| graphql::execute(s, p).await).await
 	}
 }
 

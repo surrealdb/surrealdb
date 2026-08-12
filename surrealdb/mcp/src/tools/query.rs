@@ -18,6 +18,11 @@ pub struct QueryParams {
 	/// such as decimals, datetimes, durations, record ids, or uuids
 	/// (e.g. `{"price": {"$ql": "9.99dec"}, "user": {"$ql": "person:alice"}}`).
 	pub parameters: Option<serde_json::Value>,
+	/// Namespace and database this call runs against. Flattened, so the
+	/// emitted schema carries `namespace` and `database` directly, each
+	/// documenting its own fallback order.
+	#[serde(flatten)]
+	pub scope: super::ToolScope,
 }
 
 pub async fn execute(

@@ -226,6 +226,50 @@ impl McpSession {
 		}
 	}
 
+	/// Derive a session pinned to an explicit `(namespace, database)`,
+	/// sharing this session's datastore, authentication and configuration
+	/// but owning its own `use` state.
+	///
+	/// A `None` component leaves that half of the scope as it is on the
+	/// source session, so a caller may override the database while
+	/// inheriting the namespace. Mutating the returned session's scope does
+	/// not affect the session it was derived from, which is what makes it
+	/// safe to hand to a single stateless request.
+	pub(crate) async fn derive_scoped(&self, ns: Option<String>, db: Option<String>) -> Self {
+		let mut scoped = self.session.read().await.clone();
+		if ns.is_some() {
+			scoped.ns = ns;
+		}
+		if db.is_some() {
+			scoped.db = db;
+		}
+		Self {
+			ds: Arc::clone(&self.ds),
+			session: RwLock::new(scoped),
+			config: Arc::clone(&self.config),
+		}
+	}
+
+	/// Build a session directly from an authenticated `Session`, pinned to
+	/// an explicit scope. Used to serve a request that arrives without any
+	/// prior handshake, where the caller's credentials and scope both come
+	/// from the request itself.
+	pub(crate) fn from_request(
+		ds: Arc<Datastore>,
+		mut session: Session,
+		ns: Option<String>,
+		db: Option<String>,
+		config: Arc<McpConfig>,
+	) -> Self {
+		if ns.is_some() {
+			session.ns = ns;
+		}
+		if db.is_some() {
+			session.db = db;
+		}
+		Self::with_config(ds, session, config)
+	}
+
 	/// Read-only access to the underlying datastore for permission checks
 	/// and existence probes that shouldn't go through the SQL layer.
 	pub(crate) fn datastore(&self) -> &Datastore {

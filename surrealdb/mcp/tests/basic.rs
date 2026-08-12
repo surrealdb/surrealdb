@@ -185,6 +185,7 @@ async fn test_query_tool() {
 		query::QueryParams {
 			query: "RETURN 1 + 1".to_string(),
 			parameters: None,
+			scope: Default::default(),
 		},
 	)
 	.await;
@@ -202,6 +203,7 @@ async fn test_query_tool_with_params() {
 		query::QueryParams {
 			query: "RETURN $x + $y".to_string(),
 			parameters: Some(serde_json::json!({"x": 10, "y": 20})),
+			scope: Default::default(),
 		},
 	)
 	.await;
@@ -219,6 +221,7 @@ async fn test_create_with_data() {
 		crud::CreateParams {
 			target: "person".to_string(),
 			data: Some(serde_json::json!({"name": "Alice", "age": 30})),
+			scope: Default::default(),
 		},
 	)
 	.await;
@@ -236,6 +239,7 @@ async fn test_select_after_create() {
 		crud::CreateParams {
 			target: "person".to_string(),
 			data: Some(serde_json::json!({"name": "Bob"})),
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -253,6 +257,7 @@ async fn test_select_after_create() {
 			group_clause: None,
 			split_clause: None,
 			fetch_clause: None,
+			scope: Default::default(),
 		},
 	)
 	.await;
@@ -270,6 +275,7 @@ async fn test_identifier_validation_in_crud() {
 		crud::CreateParams {
 			target: "person; DELETE FROM person".to_string(),
 			data: None,
+			scope: Default::default(),
 		},
 	)
 	.await;
@@ -482,6 +488,7 @@ async fn test_list_tables_empty() {
 			kind: schema::ListKind::Tables,
 			table: None,
 			scope: None,
+			tool_scope: Default::default(),
 		},
 	)
 	.await;
@@ -499,6 +506,7 @@ async fn test_list_tables_after_define() {
 		query::QueryParams {
 			query: "DEFINE TABLE cat;".to_string(),
 			parameters: None,
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -510,6 +518,7 @@ async fn test_list_tables_after_define() {
 			kind: schema::ListKind::Tables,
 			table: None,
 			scope: None,
+			tool_scope: Default::default(),
 		},
 	)
 	.await
@@ -534,6 +543,7 @@ async fn test_list_structured_content_envelope_shape() {
 		query::QueryParams {
 			query: "DEFINE TABLE widget;".to_string(),
 			parameters: None,
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -545,6 +555,7 @@ async fn test_list_structured_content_envelope_shape() {
 			kind: schema::ListKind::Tables,
 			table: None,
 			scope: None,
+			tool_scope: Default::default(),
 		},
 	)
 	.await
@@ -606,6 +617,7 @@ async fn test_list_truncates_oversized_subtree() {
 			query::QueryParams {
 				query: format!("DEFINE TABLE table_{i};"),
 				parameters: None,
+				scope: Default::default(),
 			},
 		)
 		.await
@@ -618,6 +630,7 @@ async fn test_list_truncates_oversized_subtree() {
 			kind: schema::ListKind::Tables,
 			table: None,
 			scope: None,
+			tool_scope: Default::default(),
 		},
 	)
 	.await
@@ -652,6 +665,7 @@ async fn test_list_namespaces_and_databases() {
 			kind: schema::ListKind::Namespaces,
 			table: None,
 			scope: None,
+			tool_scope: Default::default(),
 		},
 	)
 	.await;
@@ -663,6 +677,7 @@ async fn test_list_namespaces_and_databases() {
 			kind: schema::ListKind::Databases,
 			table: None,
 			scope: None,
+			tool_scope: Default::default(),
 		},
 	)
 	.await;
@@ -681,6 +696,7 @@ async fn test_list_fields_requires_table() {
 			kind: schema::ListKind::Fields,
 			table: None,
 			scope: None,
+			tool_scope: Default::default(),
 		},
 	)
 	.await;
@@ -699,6 +715,7 @@ async fn test_list_users_requires_scope() {
 			kind: schema::ListKind::Users,
 			table: None,
 			scope: None,
+			tool_scope: Default::default(),
 		},
 	)
 	.await;
@@ -710,6 +727,7 @@ async fn test_list_users_requires_scope() {
 			kind: schema::ListKind::Users,
 			table: None,
 			scope: Some(schema::ListScope::Db),
+			tool_scope: Default::default(),
 		},
 	)
 	.await;
@@ -729,6 +747,7 @@ async fn test_list_rejects_inapplicable_params() {
 			kind: schema::ListKind::Tables,
 			table: Some("person".to_string()),
 			scope: None,
+			tool_scope: Default::default(),
 		},
 	)
 	.await;
@@ -741,6 +760,7 @@ async fn test_list_rejects_inapplicable_params() {
 			kind: schema::ListKind::Tables,
 			table: None,
 			scope: Some(schema::ListScope::Db),
+			tool_scope: Default::default(),
 		},
 	)
 	.await;
@@ -759,6 +779,7 @@ async fn test_list_fields_after_define() {
 			query: "DEFINE TABLE widget SCHEMAFULL; DEFINE FIELD name ON widget TYPE string;"
 				.to_string(),
 			parameters: None,
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -770,6 +791,7 @@ async fn test_list_fields_after_define() {
 			kind: schema::ListKind::Fields,
 			table: Some("widget".to_string()),
 			scope: None,
+			tool_scope: Default::default(),
 		},
 	)
 	.await
@@ -790,6 +812,7 @@ async fn test_list_rejects_malicious_table() {
 			kind: schema::ListKind::Fields,
 			table: Some("person; DROP TABLE person".to_string()),
 			scope: None,
+			tool_scope: Default::default(),
 		},
 	)
 	.await;
@@ -811,6 +834,7 @@ async fn test_run_builtin_no_args() {
 		run_tool::RunParams {
 			function: "time::now".to_string(),
 			args: None,
+			scope: Default::default(),
 		},
 	)
 	.await;
@@ -828,6 +852,7 @@ async fn test_run_builtin_with_args() {
 		run_tool::RunParams {
 			function: "math::sum".to_string(),
 			args: Some(vec![serde_json::json!([1, 2, 3, 4])]),
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -847,6 +872,7 @@ async fn test_run_user_defined_function() {
 		query::QueryParams {
 			query: "DEFINE FUNCTION fn::double($x: number) { RETURN $x * 2; };".to_string(),
 			parameters: None,
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -857,6 +883,7 @@ async fn test_run_user_defined_function() {
 		run_tool::RunParams {
 			function: "fn::double".to_string(),
 			args: Some(vec![serde_json::json!(21)]),
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -877,6 +904,7 @@ async fn test_run_rejects_invalid_function_name() {
 		run_tool::RunParams {
 			function: "math::sum; DELETE person".to_string(),
 			args: None,
+			scope: Default::default(),
 		},
 	)
 	.await;
@@ -888,6 +916,7 @@ async fn test_run_rejects_invalid_function_name() {
 		run_tool::RunParams {
 			function: "math::sum()".to_string(),
 			args: None,
+			scope: Default::default(),
 		},
 	)
 	.await;
@@ -899,6 +928,7 @@ async fn test_run_rejects_invalid_function_name() {
 		run_tool::RunParams {
 			function: String::new(),
 			args: None,
+			scope: Default::default(),
 		},
 	)
 	.await;
@@ -918,6 +948,7 @@ async fn test_run_arg_types_preserved() {
 		run_tool::RunParams {
 			function: "type::is_number".to_string(),
 			args: Some(vec![serde_json::json!(42)]),
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -940,6 +971,7 @@ async fn test_info_defaults_to_db() {
 		session,
 		schema::InfoParams {
 			target: None,
+			scope: Default::default(),
 		},
 	)
 	.await;
@@ -969,6 +1001,7 @@ async fn test_get_table_schema_resource_backtick_quoted() {
 			        DEFINE FIELD name ON `my table` TYPE string;"
 				.to_string(),
 			parameters: None,
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -1037,6 +1070,7 @@ async fn test_error_sanitization_in_results() {
 		query::QueryParams {
 			query: "INVALID SYNTAX HERE ???".to_string(),
 			parameters: None,
+			scope: Default::default(),
 		},
 	)
 	.await;
@@ -1076,6 +1110,7 @@ async fn test_insert_round_trip() {
 			]),
 			ignore: false,
 			relation: false,
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -1095,6 +1130,7 @@ async fn test_insert_round_trip() {
 			group_clause: None,
 			split_clause: None,
 			fetch_clause: None,
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -1114,6 +1150,7 @@ async fn test_upsert_merge_then_read() {
 		crud::CreateParams {
 			target: "person:alice".to_string(),
 			data: Some(serde_json::json!({"name": "Alice", "age": 30})),
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -1127,6 +1164,7 @@ async fn test_upsert_merge_then_read() {
 			merge_data: Some(serde_json::json!({"nickname": "Ally"})),
 			patch_data: None,
 			where_clause: None,
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -1144,6 +1182,7 @@ async fn test_upsert_merge_then_read() {
 			group_clause: None,
 			split_clause: None,
 			fetch_clause: None,
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -1167,6 +1206,7 @@ async fn test_upsert_requires_exactly_one_mode() {
 			merge_data: None,
 			patch_data: None,
 			where_clause: None,
+			scope: Default::default(),
 		},
 	)
 	.await;
@@ -1180,6 +1220,7 @@ async fn test_upsert_requires_exactly_one_mode() {
 			merge_data: Some(serde_json::json!({"b": 2})),
 			patch_data: None,
 			where_clause: None,
+			scope: Default::default(),
 		},
 	)
 	.await;
@@ -1197,6 +1238,7 @@ async fn test_update_content_replaces_record() {
 		crud::CreateParams {
 			target: "note:one".to_string(),
 			data: Some(serde_json::json!({"title": "draft", "tags": ["a", "b"]})),
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -1210,6 +1252,7 @@ async fn test_update_content_replaces_record() {
 			merge_data: None,
 			patch_data: None,
 			where_clause: None,
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -1227,6 +1270,7 @@ async fn test_update_content_replaces_record() {
 			group_clause: None,
 			split_clause: None,
 			fetch_clause: None,
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -1247,6 +1291,7 @@ async fn test_delete_round_trip() {
 		crud::CreateParams {
 			target: "tmp:1".to_string(),
 			data: Some(serde_json::json!({"n": 1})),
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -1257,6 +1302,7 @@ async fn test_delete_round_trip() {
 		crud::DeleteParams {
 			target: "tmp:1".to_string(),
 			where_clause: None,
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -1274,6 +1320,7 @@ async fn test_delete_round_trip() {
 			group_clause: None,
 			split_clause: None,
 			fetch_clause: None,
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -1296,6 +1343,7 @@ async fn test_relate_creates_edge() {
 		crud::CreateParams {
 			target: "person:a".to_string(),
 			data: None,
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -1305,6 +1353,7 @@ async fn test_relate_creates_edge() {
 		crud::CreateParams {
 			target: "person:b".to_string(),
 			data: None,
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -1317,6 +1366,7 @@ async fn test_relate_creates_edge() {
 			table: "knows".to_string(),
 			with: "person:b".to_string(),
 			content_data: Some(serde_json::json!({"since": 2024})),
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -1336,6 +1386,7 @@ async fn test_relate_creates_edge() {
 			group_clause: None,
 			split_clause: None,
 			fetch_clause: None,
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -1364,6 +1415,7 @@ async fn test_all_crud_tools_reject_injection() {
 				group_clause: None,
 				split_clause: None,
 				fetch_clause: None,
+				scope: Default::default(),
 			},
 		)
 		.await
@@ -1375,6 +1427,7 @@ async fn test_all_crud_tools_reject_injection() {
 			crud::CreateParams {
 				target: bad.to_string(),
 				data: None,
+				scope: Default::default(),
 			},
 		)
 		.await
@@ -1388,6 +1441,7 @@ async fn test_all_crud_tools_reject_injection() {
 				data: serde_json::json!([{}]),
 				ignore: false,
 				relation: false,
+				scope: Default::default(),
 			},
 		)
 		.await
@@ -1402,6 +1456,7 @@ async fn test_all_crud_tools_reject_injection() {
 				merge_data: None,
 				patch_data: None,
 				where_clause: None,
+				scope: Default::default(),
 			},
 		)
 		.await
@@ -1416,6 +1471,7 @@ async fn test_all_crud_tools_reject_injection() {
 				merge_data: None,
 				patch_data: None,
 				where_clause: None,
+				scope: Default::default(),
 			},
 		)
 		.await
@@ -1427,6 +1483,7 @@ async fn test_all_crud_tools_reject_injection() {
 			crud::DeleteParams {
 				target: bad.to_string(),
 				where_clause: None,
+				scope: Default::default(),
 			},
 		)
 		.await
@@ -1440,6 +1497,7 @@ async fn test_all_crud_tools_reject_injection() {
 				table: "knows".to_string(),
 				with: "person:b".to_string(),
 				content_data: None,
+				scope: Default::default(),
 			},
 		)
 		.await
@@ -1453,6 +1511,7 @@ async fn test_all_crud_tools_reject_injection() {
 				table: bad.to_string(),
 				with: "person:b".to_string(),
 				content_data: None,
+				scope: Default::default(),
 			},
 		)
 		.await
@@ -1466,6 +1525,7 @@ async fn test_all_crud_tools_reject_injection() {
 				table: "knows".to_string(),
 				with: bad.to_string(),
 				content_data: None,
+				scope: Default::default(),
 			},
 		)
 		.await
@@ -1487,6 +1547,7 @@ async fn test_info_target_root() {
 		session,
 		schema::InfoParams {
 			target: Some("root".to_string()),
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -1505,6 +1566,7 @@ async fn test_info_target_ns() {
 		session,
 		schema::InfoParams {
 			target: Some("ns".to_string()),
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -1523,6 +1585,7 @@ async fn test_info_target_db() {
 		session,
 		schema::InfoParams {
 			target: Some("db".to_string()),
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -1543,6 +1606,7 @@ async fn test_info_target_table() {
 			query: "DEFINE TABLE widget SCHEMAFULL; DEFINE FIELD name ON widget TYPE string;"
 				.to_string(),
 			parameters: None,
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -1552,6 +1616,7 @@ async fn test_info_target_table() {
 		session,
 		schema::InfoParams {
 			target: Some("widget".to_string()),
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -1573,6 +1638,7 @@ async fn test_info_target_backtick_quoted_table() {
 			        DEFINE FIELD name ON `my table` TYPE string;"
 				.to_string(),
 			parameters: None,
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -1582,6 +1648,7 @@ async fn test_info_target_backtick_quoted_table() {
 		session,
 		schema::InfoParams {
 			target: Some("`my table`".to_string()),
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -1603,6 +1670,7 @@ async fn test_list_fields_backtick_quoted_table() {
 			        DEFINE FIELD name ON `my table` TYPE string;"
 				.to_string(),
 			parameters: None,
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -1614,6 +1682,7 @@ async fn test_list_fields_backtick_quoted_table() {
 			kind: schema::ListKind::Fields,
 			table: Some("`my table`".to_string()),
 			scope: None,
+			tool_scope: Default::default(),
 		},
 	)
 	.await
@@ -1634,6 +1703,7 @@ async fn test_info_target_rejects_record_id() {
 		session,
 		schema::InfoParams {
 			target: Some("person:john".to_string()),
+			scope: Default::default(),
 		},
 	)
 	.await;
@@ -1650,6 +1720,7 @@ async fn test_info_target_rejects_injection() {
 		session,
 		schema::InfoParams {
 			target: Some("t; DROP TABLE t".to_string()),
+			scope: Default::default(),
 		},
 	)
 	.await;
@@ -1671,6 +1742,7 @@ async fn test_list_functions() {
 		query::QueryParams {
 			query: "DEFINE FUNCTION fn::hello() { RETURN 'hi'; };".to_string(),
 			parameters: None,
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -1682,6 +1754,7 @@ async fn test_list_functions() {
 			kind: schema::ListKind::Functions,
 			table: None,
 			scope: None,
+			tool_scope: Default::default(),
 		},
 	)
 	.await
@@ -1701,6 +1774,7 @@ async fn test_list_analyzers() {
 		query::QueryParams {
 			query: "DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase;".to_string(),
 			parameters: None,
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -1712,6 +1786,7 @@ async fn test_list_analyzers() {
 			kind: schema::ListKind::Analyzers,
 			table: None,
 			scope: None,
+			tool_scope: Default::default(),
 		},
 	)
 	.await
@@ -1731,6 +1806,7 @@ async fn test_list_params() {
 		query::QueryParams {
 			query: "DEFINE PARAM $maximum VALUE 100;".to_string(),
 			parameters: None,
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -1742,6 +1818,7 @@ async fn test_list_params() {
 			kind: schema::ListKind::Params,
 			table: None,
 			scope: None,
+			tool_scope: Default::default(),
 		},
 	)
 	.await
@@ -1764,6 +1841,7 @@ async fn test_list_configs_does_not_error() {
 			kind: schema::ListKind::Configs,
 			table: None,
 			scope: None,
+			tool_scope: Default::default(),
 		},
 	)
 	.await
@@ -1816,6 +1894,7 @@ async fn test_run_respects_function_permissions() {
 		run_tool::RunParams {
 			function: "fn::secret".to_string(),
 			args: None,
+			scope: Default::default(),
 		},
 	)
 	.await;
@@ -1859,6 +1938,7 @@ async fn test_failing_statement_surfaces_as_tool_error() {
 			// Permissions error: record IDs aren't numbers.
 			query: "CREATE person:1 SET age = 'not a number' + 5".to_string(),
 			parameters: None,
+			scope: Default::default(),
 		},
 	)
 	.await
@@ -1894,6 +1974,7 @@ async fn test_mixed_statement_results_expose_per_statement_status() {
 		query::QueryParams {
 			query: "RETURN 1; THROW 'boom'; RETURN 2;".to_string(),
 			parameters: None,
+			scope: Default::default(),
 		},
 	)
 	.await

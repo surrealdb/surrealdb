@@ -17,6 +17,8 @@ pub mod schema;
 use std::str::FromStr;
 
 use rmcp::ErrorData;
+use schemars::JsonSchema;
+use serde::Deserialize;
 use surrealdb_syn::ParserConfig;
 use surrealdb_types::{Decimal, Number, SurrealValue, Value, Variables};
 
@@ -25,6 +27,49 @@ pub(crate) use self::output::{
 	tool_error_from_surreal,
 };
 use crate::cnf::McpConfig;
+
+/// Namespace and database a single tool call runs against.
+///
+/// Flattened into every tool's parameters so scope travels with the request
+/// instead of being read from connection state. This is what lets one
+/// endpoint serve both protocol eras: under `2026-07-28` there is no session
+/// to hold a current namespace, and the spec requires state spanning requests
+/// to be named explicitly by the client on each one.
+///
+/// Both fields are optional. When absent, [`crate::service::McpService`]
+/// falls back through the request's `surreal-ns` / `surreal-db` headers, the
+/// handshake session's `use` state (legacy protocol versions only), and
+/// finally the server's configured defaults. See
+/// [`crate::service::McpService::resolve_scope`] for the full precedence.
+///
+/// The `use` tool deliberately does not carry this: its own `namespace` and
+/// `database` arguments mean "switch to", not "run this call against".
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+pub struct ToolScope {
+	/// Namespace to run this call against. Defaults to the `surreal-ns`
+	/// request header, the session's current namespace, or the server's
+	/// configured default, in that order.
+	pub namespace: Option<String>,
+	/// Database to run this call against. Defaults to the `surreal-db`
+	/// request header, the session's current database, or the server's
+	/// configured default, in that order.
+	pub database: Option<String>,
+}
+
+impl ToolScope {
+	/// Validate both identifiers, rejecting anything that is not a bare or
+	/// backtick-quoted name. Record ids are rejected: a namespace or
+	/// database is always a plain identifier.
+	pub(crate) fn validate(&self) -> Result<(), ErrorData> {
+		if let Some(ns) = &self.namespace {
+			validate_table_name(ns)?;
+		}
+		if let Some(db) = &self.database {
+			validate_table_name(db)?;
+		}
+		Ok(())
+	}
+}
 
 /// Validate that a string is safe to use as a SurrealQL identifier or simple
 /// record ID when interpolated directly into a query string.
