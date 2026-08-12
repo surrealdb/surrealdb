@@ -188,7 +188,7 @@ impl Header {
 		let description = StringValue::from_string(buffer.get(6).unwrap_or(&"").to_string());
 		let engine = Engine::from_string(buffer.get(7).unwrap_or(&"").to_string());
 		let origin = Origin::from_string(buffer.get(8).unwrap_or(&"").to_string())?;
-		let input_dims = InputDims::from_string(buffer.get(9).unwrap_or(&"").to_string());
+		let input_dims = InputDims::from_string(buffer.get(9).unwrap_or(&"").to_string())?;
 		Ok(Header {
 			keys,
 			normalisers,
@@ -259,7 +259,7 @@ mod tests {
 			Header::delimiter(),
 			Origin::from_string("author=>local".to_string()).unwrap(),
 			Header::delimiter(),
-			InputDims::from_string("1,2".to_string()),
+			InputDims::from_string("1,2".to_string()).unwrap(),
 			Header::delimiter(),
 		)
 	}
@@ -297,6 +297,16 @@ mod tests {
 		let header = Header::from_bytes(data.to_vec()).unwrap();
 
 		assert_eq!(header, Header::fresh());
+	}
+
+	// Regression test for GHSA-jwr6-6444-28xv: the malformed header from the advisory
+	// proof-of-concept (a non-numeric `bad` input-dimensions field) must produce a
+	// structured error instead of panicking the parser.
+	#[test]
+	fn test_from_bytes_malformed_header_does_not_panic() {
+		let header = "//=>//=>//=>//=>m//=>1.2.3//=>desc//=>pytorch//=>author=>local//=>bad//=>";
+		let result = Header::from_bytes(header.as_bytes().to_vec());
+		assert!(result.is_err());
 	}
 
 	#[test]

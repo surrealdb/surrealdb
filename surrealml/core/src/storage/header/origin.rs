@@ -3,6 +3,7 @@ use std::fmt;
 
 use super::string_value::StringValue;
 use crate::errors::error::{SurrealError, SurrealErrorStatus};
+use crate::safe_eject_option;
 
 const LOCAL: &str = "local";
 const SURREAL_DB: &str = "surreal_db";
@@ -111,8 +112,10 @@ impl Origin {
 			return Ok(Origin::fresh());
 		}
 		let mut split = origin.split("=>");
-		let author = split.next().unwrap().to_string();
-		let origin = split.next().unwrap().to_string();
+		// Avoid unchecked `unwrap()` on attacker-controlled header data: a malformed
+		// origin field (e.g. one missing the `=>` delimiter) must error, not panic.
+		let author = safe_eject_option!(split.next()).to_string();
+		let origin = safe_eject_option!(split.next()).to_string();
 		Ok(Origin {
 			origin: OriginValue::from_string(origin)?,
 			author: StringValue::from_string(author),
@@ -177,5 +180,12 @@ mod tests {
 
 		assert_eq!(None, origin.author.value);
 		assert_eq!("local".to_string(), origin.origin.to_string());
+	}
+
+	// Regression test for GHSA-jwr6-6444-28xv: a non-empty origin field without the
+	// `=>` delimiter must error rather than panic on `split.next().unwrap()`.
+	#[test]
+	fn test_from_string_missing_delimiter_errors() {
+		assert!(Origin::from_string("no-delimiter".to_string()).is_err());
 	}
 }

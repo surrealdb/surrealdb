@@ -69,7 +69,9 @@ impl Output {
 		let normaliser = safe_eject_option!(buffer.next());
 		let normaliser = match normaliser {
 			"none" => None,
-			_ => Some(NormaliserType::from_string(data).unwrap().0),
+			// Propagate malformed-normaliser errors instead of `unwrap()`-panicking on
+			// attacker-controlled header data.
+			_ => Some(NormaliserType::from_string(data)?.0),
 		};
 		Ok(Output {
 			name,
@@ -150,5 +152,12 @@ pub mod tests {
 	fn test_to_string_with_no_data() {
 		let output = Output::fresh();
 		assert_eq!(output.to_string(), "");
+	}
+
+	// Regression test for GHSA-jwr6-6444-28xv: a malformed normaliser in the output
+	// field must error rather than panic on `NormaliserType::from_string(..).unwrap()`.
+	#[test]
+	fn test_from_string_malformed_normaliser_errors() {
+		assert!(Output::from_string("col=>garbage".to_string()).is_err());
 	}
 }

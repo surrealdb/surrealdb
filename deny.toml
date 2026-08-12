@@ -71,12 +71,34 @@ yanked = "warn"
 # - RUSTSEC-2024-0384 (instant): the fork moved its `serial_test 0.5` dev-dep to 3.x, which
 #   no longer depends on `parking_lot 0.11` / `instant`.
 #
-# Cleared by the wasmtime 44 bump on main (RUSTSEC-2026-0149, wasmtime-wasi 43.0.2
-# `path_open(TRUNCATE)` host-perm bypass).
+# Not ignored because the wasmtime 46 line fixes them, and this workspace pins
+# wasmtime >=46: RUSTSEC-2026-0149 (wasmtime-wasi 43.0.2 `path_open(TRUNCATE)`
+# host-perm bypass), RUSTSEC-2026-0188 (wasmtime-wasi hard-link/rename
+# destination-permission bypass), and RUSTSEC-2026-0222 (wasmtime store
+# type-index confusion) are all resolved in wasmtime >=46.
+#
+# - for RUSTSEC-2026-0194 / -0195, quick-xml <0.41 has XML-parsing DoS bugs (quadratic
+#   duplicate-attribute check + unbounded namespace-declaration allocation). On this
+#   branch quick-xml 0.26 is reached only through inferno -> pprof, a dev-dependency
+#   used for profiling; it never parses untrusted input in shipped binaries. Reaching
+#   the patched >=0.41 requires an inferno major bump.
+#
+# - for RUSTSEC-2026-0249, smartstring is unmaintained (repository archived, no safe
+#   upgrade available); it is pulled only by opentelemetry-prometheus-text-exporter for
+#   metrics text encoding and is not on any untrusted-input path.
+#
+# - for RUSTSEC-2026-0205, scc's Array::insert double-free-on-panic triggers only if a
+#   user-supplied comparator panics; scc is pulled solely by serial_test, a
+#   dev-dependency used in tests, so it is not in any shipped binary. serial_test 3.4.0
+#   pins scc 2.x, so reaching the >=3.8.4 fix needs a serial_test bump (deferred).
 ignore = [
     "RUSTSEC-2025-0141",
     "RUSTSEC-2023-0071",
     "RUSTSEC-2024-0436",
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+    "RUSTSEC-2026-0249",
+    "RUSTSEC-2026-0205",
 ]
 
 # --------------------------------------------------

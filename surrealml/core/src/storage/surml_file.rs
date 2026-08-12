@@ -214,4 +214,22 @@ mod tests {
 			}
 		}
 	}
+
+	// Regression test for GHSA-jwr6-6444-28xv: a tiny malformed `.surml` upload (the
+	// advisory proof-of-concept) reaches `SurMlFile::from_bytes` from the `/ml/import`
+	// endpoint. It must return a structured error rather than panicking, which on a
+	// release build (`panic = 'abort'`) would terminate the whole server process.
+	#[test]
+	fn test_malformed_surml_does_not_panic() {
+		let header = b"//=>//=>//=>//=>m//=>1.2.3//=>desc//=>pytorch//=>author=>local//=>bad//=>";
+		let mut payload = Vec::new();
+		payload.extend_from_slice(&(header.len() as u32).to_be_bytes());
+		payload.extend_from_slice(header);
+		payload.extend_from_slice(b"model");
+
+		match SurMlFile::from_bytes(payload) {
+			Ok(_) => panic!("malformed surml file should not parse successfully"),
+			Err(error) => assert_eq!(error.status, SurrealErrorStatus::BadRequest),
+		}
+	}
 }

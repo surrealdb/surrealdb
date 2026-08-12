@@ -48,18 +48,27 @@ categories = ["database-implementations", "data-structures", "embedded"]
 
 [workspace.dependencies]
 # SurrealDB crates
-surrealdb = { version = "3.1.6", path = "surrealdb", default-features = false }
-surrealdb-strand = { version = "3.1.6", path = "surrealdb/strand", default-features = false }
-surrealdb-core = { version = "3.1.6", path = "surrealdb/core", default-features = false }
-surrealdb-server = { version = "3.1.6", path = "surrealdb/server", default-features = false }
-surrealdb-mcp = { version = "3.1.6", path = "surrealdb/mcp", default-features = false }
-surrealdb-types = { version = "3.1.6", path = "surrealdb/types" }
-surrealdb-types-derive = { version = "3.1.6", path = "surrealdb/types/derive" }
-ast = { package = "surrealdb-ast", path = "surrealdb/ast" }
-token = { package = "surrealdb-token", path = "surrealdb/token" }
-parser = { package = "surrealdb-parser", path = "surrealdb/parser" }
-common = { package = "surrealdb-common", path = "surrealdb/common" }
-surrealdb-collections = { version = "3.1.6", path = "surrealdb/collections" }
+# The versioned sibling crates use TILDE requirements on this release line:
+# the family's crates are API-compatible only within a minor line (public
+# types gain fields between lines), so a caret requirement - which lets a
+# fresh resolution of this line's published crates pull siblings from a newer
+# line - produces graphs that do not compile. Tilde keeps every consumer of an
+# X.Y.Z crate on this line's siblings while letting the line's patch releases
+# interoperate, and it matches nothing on the registry before this version
+# first publishes, so cargo package resolves the siblings from the workspace's
+# own packaged set.
+surrealdb = { version = "~3.1.6", path = "surrealdb", default-features = false }
+surrealdb-strand = { version = "~3.1.6", path = "surrealdb/strand", default-features = false }
+surrealdb-core = { version = "~3.1.6", path = "surrealdb/core", default-features = false }
+surrealdb-server = { version = "~3.1.6", path = "surrealdb/server", default-features = false }
+surrealdb-mcp = { version = "~3.1.6", path = "surrealdb/mcp", default-features = false }
+surrealdb-types = { version = "~3.1.6", path = "surrealdb/types" }
+surrealdb-types-derive = { version = "~3.1.6", path = "surrealdb/types/derive" }
+ast = { version = "~3.1.6", package = "surrealdb-ast", path = "surrealdb/ast" }
+token = { version = "~3.1.6", package = "surrealdb-token", path = "surrealdb/token" }
+parser = { version = "~3.1.6", package = "surrealdb-parser", path = "surrealdb/parser" }
+common = { version = "~3.1.6", package = "surrealdb-common", path = "surrealdb/common" }
+surrealdb-collections = { version = "~3.1.6", path = "surrealdb/collections" }
 
 # SurrealML crates
 surrealml-core = { version = "0.1", path = "surrealml/core" }
@@ -73,7 +82,10 @@ affinitypool = "0.7.0"
 dmp = "0.2.3"
 indxdb = "0.12.0"
 lexicmp = "0.2.0"
-revision = { version = "0.28.0", features = [
+# All supported release lines keep `revision` on the same release, so that
+# crates from different lines sharing a dependency graph implement the same
+# revision traits.
+revision = { version = "0.30.0", features = [
     "bytes",
     "chrono",
     "geo",
@@ -228,8 +240,8 @@ toml = "0.9.12"
 wasm-encoder = "0.245"
 wasm-opt = "0.116.1"
 wasmparser = "0.245"
-wasmtime = { version = "44.0.2", default-features = false, features = ["async", "cranelift", "winch", "runtime", "std", "wat", "component-model", "parallel-compilation"] }
-wasmtime-wasi = { version = "44.0.2", features = ["p1", "p2"] }
+wasmtime = { version = "46.0.2", default-features = false, features = ["async", "cranelift", "winch", "runtime", "std", "wat", "component-model", "parallel-compilation"] }
+wasmtime-wasi = { version = "46.0.2", features = ["p1", "p2"] }
 wit-bindgen = { version = "0.51", default-features = false, features = ["macros", "realloc"] }
 zstd = "0.13.3"
 

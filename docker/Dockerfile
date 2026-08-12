@@ -3,7 +3,7 @@
 # This stage is used to build the SurrealDB linux binary
 ###
 
-FROM docker.io/rockylinux/rockylinux:9@sha256:53f4c6dcb34e1403bd93207351f0af9a593610faeb7165cb8a037346765199b0 AS builder
+FROM docker.io/rockylinux/rockylinux:9@sha256:8101994123cf3d0a8fee517bee7f39e555c7d92bd2d9eb3303cc988a0eeed00f AS builder
 
 RUN dnf install -y gcc-toolset-13 git cmake llvm-toolset patch zlib-devel python3.11 openssl-devel \
 	&& dnf clean all
@@ -36,7 +36,7 @@ ENTRYPOINT ["/builder-entrypoint.sh"]
 # This stage is used to install the timezone files
 ###
 
-FROM cgr.dev/chainguard/wolfi-base:latest@sha256:0cff4df29a6597173dc8b813787318150141eb96ac783dc3ff4f5ff52c49a1e2 AS tzdata
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:e161445c05b19e668cb5cc44df2f0403329fd4f0ac892794255e328e760612a1 AS tzdata
 
 RUN apk add --no-cache tzdata
 
@@ -47,7 +47,7 @@ RUN apk add --no-cache tzdata
 #
 # Development image (built on the CI environment)
 #
-FROM cgr.dev/chainguard/glibc-dynamic:latest-dev@sha256:c0afadbbe6c0ae7aacafa32d7b473b6caf5caf94ef940c043992f5402a6b9db7 AS dev-ci
+FROM cgr.dev/chainguard/glibc-dynamic:latest-dev@sha256:6d00a134118686aca478cbf82315be37c38fba5e8608f1f1b215f5dad8cfdfd2 AS dev-ci
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -82,7 +82,7 @@ ENTRYPOINT ["/surreal"]
 #
 # Production image (built on the CI environment)
 #
-FROM cgr.dev/chainguard/glibc-dynamic:latest@sha256:d7aa809c1ae88f97cd727d6f5f91e4edab579a14f86f52fd0dd8c658c854286d AS prod-ci
+FROM cgr.dev/chainguard/glibc-dynamic:latest@sha256:0dc86136587f0ac15d61d307dcd8193e4a9880d26d2f2659b9e2b142640eecc0 AS prod-ci
 
 COPY --from=dev-ci /surreal /surreal
 
@@ -105,7 +105,7 @@ ENTRYPOINT ["/surreal"]
 #
 # Development image (built locally)
 #
-FROM cgr.dev/chainguard/glibc-dynamic:latest-dev@sha256:c0afadbbe6c0ae7aacafa32d7b473b6caf5caf94ef940c043992f5402a6b9db7 AS dev
+FROM cgr.dev/chainguard/glibc-dynamic:latest-dev@sha256:6d00a134118686aca478cbf82315be37c38fba5e8608f1f1b215f5dad8cfdfd2 AS dev
 
 ARG SURREALDB_BINARY=target/release/surreal
 
@@ -137,7 +137,7 @@ ENTRYPOINT ["/surreal"]
 #
 # Production image (built locally)
 #
-FROM cgr.dev/chainguard/glibc-dynamic:latest@sha256:d7aa809c1ae88f97cd727d6f5f91e4edab579a14f86f52fd0dd8c658c854286d AS prod
+FROM cgr.dev/chainguard/glibc-dynamic:latest@sha256:0dc86136587f0ac15d61d307dcd8193e4a9880d26d2f2659b9e2b142640eecc0 AS prod
 
 COPY --from=dev /surreal /surreal
 
