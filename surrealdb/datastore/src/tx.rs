@@ -157,6 +157,21 @@ pub struct Transaction {
 	/// rollback contract on client-owned (RPC/SDK) transactions, whose
 	/// lifecycle the executor does not manage.
 	write_guard_poisoned: AtomicBool,
+	/// Set when the storage layer could not close a save point.
+	///
+	/// Which of the scope's writes survive is then unknown, so the buffered index
+	/// deltas can be neither kept nor dropped: keeping them risks flushing a term
+	/// change for a posting that no longer exists, and dropping them risks a
+	/// posting no bitmap names. Their frames can no longer be held at the storage
+	/// stack's depth either, so an outer release would fold the wrong one.
+	///
+	/// Refusing the commit is what makes the choice unnecessary, and it has to be
+	/// refused here rather than left to the caller's error handling: a client-owned
+	/// (RPC/SDK) transaction survives a statement error and can still issue COMMIT.
+	/// Cancelling on the spot would be the more direct answer but is not available
+	/// — a caller may hold a cursor, and cancel waits for every cursor to drop,
+	/// which that caller cannot do until the call it is blocked in returns.
+	save_point_poisoned: AtomicBool,
 	/// Number of write slots reserved against the write-cardinality guard.
 	/// Each write operation atomically reserves its slot *before* the
 	/// storage call, so concurrent writes on the same transaction (e.g.
@@ -806,6 +821,7 @@ impl Transaction {
 			trigger_index_compaction: AtomicBool::new(false),
 			write_keys_limit: OnceLock::new(),
 			write_guard_poisoned: AtomicBool::new(false),
+			save_point_poisoned: AtomicBool::new(false),
 			guarded_writes: AtomicU64::new(0),
 			pending_index_build_reservations: Mutex::new(Vec::new()),
 			cached_index_build_reservations: Mutex::new(HashMap::new()),
@@ -1149,8 +1165,61 @@ impl Transaction {
 	/// transaction registers nothing, and draining would re-enter the path that
 	/// opened it. It emits no transaction event either, so an action's own writes
 	/// are not counted as a transaction of the caller's.
+	///
+	/// It flushes no buffered index deltas either, and refuses rather than drop any
+	/// it finds. A transaction that maintained an index has a description of those
+	/// writes waiting for [`Self::commit`] to store; committing the writes without
+	/// it would leave a record absent from the term bitmaps and statistics that
+	/// nothing later reconciles. The transactions this exists for touch keys
+	/// directly and buffer nothing, so the check names a caller's mistake rather
+	/// than a state to handle.
+	///
+	/// The poisons are checked for the same reason: a transaction that must not
+	/// persist its writes must not persist them by this route either.
 	pub async fn commit_bare(&self) -> Result<()> {
+		self.poisoned()?;
+		if self.index_deltas.get().is_some_and(|buffer| !buffer.is_empty()) {
+			return Err(crate::error::DatastoreError::QueryNotExecuted {
+				message: "A transaction carrying buffered index deltas cannot be committed bare, \
+				          because the deltas describe writes it is about to make durable"
+					.to_string(),
+			}
+			.into());
+		}
 		Ok(self.tr.commit().await?)
+	}
+
+	/// The reason this transaction may not commit, if there is one.
+	///
+	/// Two conditions poison a transaction, and both mean its writes are a state no
+	/// caller asked for:
+	///
+	/// - A tripped write-cardinality guard leaves the writes buffered before the failing
+	///   reservation as a partial statement, so committing them would break the guard's
+	///   atomic-rollback contract.
+	/// - A save point the storage layer could not close leaves it unknown which of that scope's
+	///   writes survive. See [`Self::save_point_poisoned`].
+	///
+	/// Either is reachable at an explicit COMMIT: a client-owned (RPC/SDK)
+	/// transaction survives the statement error that set the flag. An explicit
+	/// CANCEL behaves as normal.
+	fn poisoned(&self) -> Result<()> {
+		if self.write_guard_poisoned.load(Ordering::Relaxed) {
+			let limit = self.write_keys_limit.get().map(|l| l.get()).unwrap_or_default();
+			return Err(crate::error::DatastoreError::TransactionWriteKeysExceeded {
+				limit,
+			}
+			.into());
+		}
+		if self.save_point_poisoned.load(Ordering::Relaxed) {
+			return Err(crate::error::DatastoreError::QueryNotExecuted {
+				message: "A save point could not be closed, leaving the transaction's writes and \
+				          the index deltas describing them unreconcilable"
+					.to_string(),
+			}
+			.into());
+		}
+		Ok(())
 	}
 
 	/// Cancel without draining the registered close-time actions. See
@@ -1164,25 +1233,16 @@ impl Transaction {
 	/// This attempts to commit all changes made within the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn commit(&self) -> Result<()> {
-		// A tripped write-cardinality guard poisons the transaction: the
-		// writes buffered before the failing reservation are a partial
-		// statement, so committing them — reachable when a client-owned
-		// (RPC/SDK) transaction issues an explicit COMMIT after an
-		// over-limit statement error — would break the guard's atomic
-		// rollback contract. Refuse the commit and roll back instead;
-		// an explicit CANCEL behaves as normal.
-		if self.write_guard_poisoned.load(Ordering::Relaxed) {
-			let limit = self.write_keys_limit.get().map(|l| l.get()).unwrap_or_default();
+		// Refuse a commit the transaction is no longer allowed to make, and roll
+		// back instead. See [`Self::poisoned`].
+		if let Err(e) = self.poisoned() {
 			if let Err(err) = self.cancel().await {
 				tracing::warn!(
 					target: "surrealdb::core::kvs::tx",
-					"transaction cleanup failed after a poisoned-guard commit was refused: {err}"
+					"transaction cleanup failed after a poisoned commit was refused: {err}"
 				);
 			}
-			return Err(crate::error::DatastoreError::TransactionWriteKeysExceeded {
-				limit,
-			}
-			.into());
+			return Err(e);
 		}
 		// Flush the per-index aggregates before the changefeed, so they are
 		// part of this transaction's write set. Failure falls into the same
@@ -1817,6 +1877,16 @@ impl Transaction {
 	/// `buffer_term_change` charges each key the flush will write at the moment
 	/// the buffer gains it, which is what lets an over-limit statement report
 	/// before its caller commits.
+	///
+	/// Upsert rather than insert, unlike the count deltas, and the difference is
+	/// how many keys each writes. Every engine implements insert as an existence
+	/// check followed by a write — a remote round trip per key on TiKV. A count
+	/// delta is one key per index, so it can afford to have a colliding
+	/// discriminator reported rather than silently absorbed. Term changes are one
+	/// key per distinct term, so a read for each would restore the per-key cost the
+	/// buffer exists to collapse. What keeps the upsert safe is the discriminator:
+	/// a freshly minted v7 UUID per flush, so no key written here is a key another
+	/// transaction writes.
 	async fn set_key_prereserved<K>(&self, key: &K, val: &K::Value) -> Result<()>
 	where
 		K: KVKey + Debug,
@@ -2269,7 +2339,10 @@ impl Transaction {
 
 	/// Release the last save point.
 	pub async fn release_last_save_point(&self) -> Result<()> {
-		self.inner.release_last_save_point().await?;
+		if let Err(e) = self.inner.release_last_save_point().await {
+			Self::poison_unless_inert(&e, &self.save_point_poisoned);
+			return Err(e.into());
+		}
 		if let Some(buffer) = self.index_deltas.get() {
 			buffer.release_save_point();
 		}
@@ -2278,11 +2351,38 @@ impl Transaction {
 
 	/// Rollback to the last save point.
 	pub async fn rollback_to_save_point(&self) -> Result<()> {
-		self.inner.rollback_to_save_point().await?;
+		if let Err(e) = self.inner.rollback_to_save_point().await {
+			Self::poison_unless_inert(&e, &self.save_point_poisoned);
+			return Err(e.into());
+		}
 		if let Some(buffer) = self.index_deltas.get() {
 			buffer.rollback_save_point();
 		}
 		Ok(())
+	}
+
+	/// Poison the transaction for a save-point failure that leaves its state in
+	/// doubt, which is every one the engine raises after it has begun reverting.
+	///
+	/// The three below it raises first, from the guards a save-point call opens with:
+	/// a scope that is not open, a transaction that cannot be written, and one that is
+	/// already closed. Nothing has been reverted in any of them, so the writes stand
+	/// exactly as they did and the buffer's frames still mirror the storage stack —
+	/// neither side moved. Each reports a caller's mistake it can handle, and killing
+	/// its transaction would answer that with one it cannot, replacing a precise error
+	/// with a vaguer one.
+	///
+	/// What must poison is a failure partway through: an engine unwinding a scope that
+	/// absorbed released save points reverts once per save point, and one of those
+	/// failing leaves it unknown which of the scope's writes survive.
+	fn poison_unless_inert(e: &KvsError, poisoned: &AtomicBool) {
+		let inert = matches!(
+			e,
+			KvsError::NoSavepoint | KvsError::TransactionReadonly | KvsError::TransactionFinished
+		);
+		if !inert {
+			poisoned.store(true, Ordering::Relaxed);
+		}
 	}
 
 	// --------------------------------------------------
@@ -2568,13 +2668,15 @@ impl Transaction {
 		}
 	}
 
-	/// Write the buffered index deltas as one entry per index.
+	/// Write the buffered index deltas: one entry per index for the counts,
+	/// compaction triggers and statistics, and one per term and direction for the
+	/// term changes.
 	///
 	/// Called from [`Self::commit`] before the underlying commit, so the entries
 	/// land in the same transaction as the document changes that produced them
 	/// and the count stays atomic with the data. Like the changefeed flush,
 	/// these writes are metered against the write-cardinality guard.
-	pub async fn store_index_deltas(&self) -> Result<()> {
+	async fn store_index_deltas(&self) -> Result<()> {
 		let Some(buffer) = self.index_deltas.get() else {
 			return Ok(());
 		};
@@ -2613,6 +2715,12 @@ impl Transaction {
 		// by index — and separate transactions mint separate values, which is
 		// what stops one transaction's contributions from overwriting another's.
 		//
+		// `!dx` is inserted rather than upserted, so a discriminator that did
+		// collide is reported instead of silently absorbing one of the two
+		// contributions. It can afford the existence check that costs, because it
+		// is one key per index; `!tx` is one key per distinct term and cannot, so
+		// it upserts and rests on the discriminator alone.
+		//
 		// Minted on first use: the value costs an entropy syscall, and most
 		// commits reaching here carry only count deltas.
 		let term_changes = buffer.take_term_changes();
@@ -2650,7 +2758,7 @@ impl Transaction {
 				nid,
 				uid,
 			};
-			self.set_key(&key, &stats).await?;
+			self.put_key(&key, &stats).await?;
 		}
 		Ok(())
 	}

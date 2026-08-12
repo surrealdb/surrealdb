@@ -363,3 +363,80 @@ async fn write_guard_ignores_internal_transactions() {
 		.expect("over-limit statement should fail");
 	assert!(err.contains("maximum number of key writes (5)"), "unexpected error: {err}");
 }
+
+/// `commit_bare` skips the close-time actions and the index-delta flush, which is
+/// what the maintenance transactions that use it need. It must not become a way
+/// around the poison: a client-owned transaction whose statement tripped the guard
+/// holds a partial statement either way.
+#[tokio::test(flavor = "multi_thread")]
+async fn write_guard_poison_refuses_a_bare_commit() {
+	let (ds, ses) = guarded_ds(200).await;
+	setup_cascade(&ds, &ses, 10, 50).await;
+	let tx = Arc::new(ds.transaction(TransactionType::Write).await.unwrap());
+	let results = ds
+		.execute_with_transaction("DELETE document:doc1;", &ses, None, Arc::clone(&tx))
+		.await
+		.unwrap();
+	assert!(
+		results.into_iter().any(|r| r.result.is_err()),
+		"the over-limit statement should have failed"
+	);
+	let err = tx.commit_bare().await.expect_err("a bare commit must be refused too");
+	assert!(
+		err.to_string().contains("maximum number of key writes (200)"),
+		"unexpected bare-commit error: {err}"
+	);
+	tx.cancel().await.unwrap();
+	assert_intact(&ds, &ses, 10).await;
+}
+
+/// Buffered index deltas describe writes the transaction is about to make durable,
+/// and `commit_bare` does not store them. Committing the writes without them would
+/// leave an index disagreeing with the records for good, so the transactions that
+/// commit bare are the ones that buffer nothing, and this refuses the rest rather
+/// than dropping what they buffered.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_bare_commit_refuses_buffered_index_deltas() {
+	use surrealdb_datastore::values::fulltext::DocLengthAndCount;
+
+	use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+
+	let ds = Datastore::new("memory").await.unwrap();
+	let key = |s: &str| Key::from(s.as_bytes().to_vec());
+
+	// Nothing buffered: the maintenance shape, which must still commit.
+	let tx = ds.transaction(TransactionType::Write).await.unwrap();
+	tx.set(key("zz-bare"), vec![1u8]).await.unwrap();
+	tx.commit_bare().await.expect("a transaction buffering nothing commits bare");
+
+	// Every family the buffer holds, one at a time: each on its own is a flush the
+	// bare commit would skip, so each on its own has to refuse it.
+	let ns = NamespaceId(1);
+	let db = DatabaseId(2);
+	let tb = "t".into();
+	let ix = IndexId(3);
+	let nid = uuid::Uuid::nil();
+	let stats = DocLengthAndCount {
+		total_docs_length: 10,
+		doc_count: 1,
+	};
+
+	for family in ["counts", "compactions", "term_changes", "doc_stats"] {
+		let tx = ds.transaction(TransactionType::Write).await.unwrap();
+		tx.set(key(&format!("zz-bare-{family}")), vec![1u8]).await.unwrap();
+		match family {
+			"counts" => tx.buffer_count_delta(ns, db, &tb, ix, 1, nid),
+			"compactions" => tx.buffer_compaction_trigger(ns, db, &tb, ix, nid),
+			"term_changes" => {
+				tx.buffer_term_change(ns, db, &tb, ix, "hello", 7, true, nid).unwrap()
+			}
+			_ => tx.buffer_doc_stats(ns, db, &tb, ix, stats, nid),
+		}
+		let err = tx.commit_bare().await.expect_err("a buffered family must refuse a bare commit");
+		assert!(
+			err.to_string().contains("buffered index deltas"),
+			"unexpected bare-commit error for {family}: {err}"
+		);
+		tx.cancel().await.unwrap();
+	}
+}

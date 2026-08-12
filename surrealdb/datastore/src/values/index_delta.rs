@@ -32,6 +32,22 @@
 //! it scans, and the full-text paths add
 //! [`IndexDeltaBuffer::pending_term_change`] and
 //! [`IndexDeltaBuffer::pending_doc_stats`].
+//!
+//! ## Save-point scoping
+//!
+//! Every family is a stack of frames rather than one map, because what the buffer
+//! holds is a description of writes this transaction has made — so a rollback that
+//! undoes those writes has to reach the description too. `INSERT` is the case that
+//! forces it: it takes a save point per record and rolls it back on a unique
+//! conflict or under `INSERT IGNORE`, having already maintained the indexes. A
+//! contribution that outlived that rollback would claim a count the table does not
+//! hold, or a document carrying a term with no posting behind it.
+//!
+//! The frames mirror the storage save-point stack: [`IndexDeltaBuffer::push_save_point`]
+//! opens one, [`IndexDeltaBuffer::release_save_point`] folds it into its parent,
+//! and [`IndexDeltaBuffer::rollback_save_point`] discards it. The bottom frame is
+//! the transaction's own and is never popped — the storage layer has no save point
+//! matching it.
 
 use std::collections::HashMap;
 
@@ -61,9 +77,13 @@ pub struct BufferedTerm {
 
 /// The document ids one transaction added to, and removed from, one term.
 ///
-/// A document that was both added and removed nets to nothing and is dropped at
-/// [`FullTextDelta::normalise`], which keeps the two sets disjoint so a reader
-/// can apply them in either order.
+/// The two sets are disjoint: a document appears in whichever direction was
+/// recorded for it last, so a reader can apply them in either order. That is
+/// upheld by the only two things that write a delta — [`Self::buffer_term_change`]
+/// clears the opposite set for the document it records, and [`Self::apply`]
+/// preserves disjointness when both sides already hold it.
+///
+/// [`Self::buffer_term_change`]: IndexDeltaBuffer::buffer_term_change
 #[derive(Default)]
 pub struct FullTextDelta {
 	pub added: RoaringTreemap,
@@ -85,9 +105,11 @@ impl FullTextDelta {
 	}
 
 	/// Drops the documents present in both sets, which cancelled out.
+	///
+	/// A guard on the disjointness the two writers uphold, rather than the thing
+	/// that establishes it: on every path they cover there is nothing to drop, and
+	/// the early exit is what keeps that path from paying for an intersection.
 	fn normalise(&mut self) {
-		// `buffer_term_change` keeps a frame's two sets disjoint, so the common
-		// path has nothing to drop and must not pay for an intersection.
 		if self.added.is_disjoint(&self.removed) {
 			return;
 		}
@@ -101,8 +123,8 @@ impl FullTextDelta {
 	}
 }
 
-/// Drops every save-point frame and empties the transaction's own, keeping the
-/// existing allocations for the next transaction to reuse.
+/// Drops every save-point frame and empties the transaction's own, leaving the
+/// stack at the floor depth every other operation assumes.
 fn reset_frames<K, V>(frames: &mut Vec<HashMap<K, V>>) {
 	frames.truncate(1);
 	match frames.first_mut() {
@@ -140,15 +162,11 @@ fn pop_save_point<K, V>(frames: &mut Vec<HashMap<K, V>>) -> Option<HashMap<K, V>
 pub struct IndexDeltaBuffer {
 	/// Net signed count delta per count index, with the node id to tag the
 	/// flushed entry with.
-	counts: Mutex<HashMap<BufferedIndex, (i64, Uuid)>>,
+	counts: Mutex<Vec<HashMap<BufferedIndex, (i64, Uuid)>>>,
 	/// Indexes that asked for compaction, and the node id to tag the entry with.
-	compactions: Mutex<HashMap<BufferedIndex, Uuid>>,
+	compactions: Mutex<Vec<HashMap<BufferedIndex, Uuid>>>,
 	/// Document ids this transaction moved into or out of each full-text term,
 	/// and the summed document-length and count contribution per index.
-	///
-	/// Both are stacks whose top frame receives new mutations, so a save point
-	/// can be rolled back without the buffer keeping contributions whose KV
-	/// writes were undone. There is always at least the transaction's own frame.
 	term_changes: Mutex<Vec<HashMap<BufferedTerm, FullTextDelta>>>,
 	doc_stats: Mutex<Vec<HashMap<BufferedIndex, (DocLengthAndCount, Uuid)>>>,
 }
@@ -156,8 +174,8 @@ pub struct IndexDeltaBuffer {
 impl Default for IndexDeltaBuffer {
 	fn default() -> Self {
 		Self {
-			counts: Mutex::default(),
-			compactions: Mutex::default(),
+			counts: Mutex::new(vec![HashMap::new()]),
+			compactions: Mutex::new(vec![HashMap::new()]),
 			term_changes: Mutex::new(vec![HashMap::new()]),
 			doc_stats: Mutex::new(vec![HashMap::new()]),
 		}
@@ -174,19 +192,29 @@ impl IndexDeltaBuffer {
 		if delta == 0 {
 			return;
 		}
-		let mut counts = self.counts.lock();
-		counts.entry(index).or_insert((0, nid)).0 += delta;
+		let mut frames = self.counts.lock();
+		let frame = frames.last_mut().expect("the transaction frame is always present");
+		frame.entry(index).or_insert((0, nid)).0 += delta;
 	}
 
 	/// The net delta buffered for one index so far, so a read in this
 	/// transaction can see this transaction's own uncommitted mutations.
+	///
+	/// Summed across the open save points, because their writes are visible to
+	/// this transaction until one is rolled back.
 	pub fn pending_count(&self, index: &BufferedIndex) -> i64 {
-		self.counts.lock().get(index).map(|(delta, _)| *delta).unwrap_or(0)
+		self.counts
+			.lock()
+			.iter()
+			.filter_map(|frame| frame.get(index).map(|(delta, _)| *delta))
+			.sum()
 	}
 
 	/// Record that an index wants compaction once this transaction commits.
 	pub fn buffer_compaction_trigger(&self, index: BufferedIndex, nid: Uuid) {
-		self.compactions.lock().insert(index, nid);
+		let mut frames = self.compactions.lock();
+		let frame = frames.last_mut().expect("the transaction frame is always present");
+		frame.insert(index, nid);
 	}
 
 	/// Record that `doc_id` gained (`add`) or lost a full-text term.
@@ -194,11 +222,16 @@ impl IndexDeltaBuffer {
 	/// Re-recording the same document in the opposite direction supersedes the
 	/// first: a document removed and then re-indexed within one transaction ends
 	/// up only in `added`, which is the net truth the compactor needs.
-	/// Returns whether this change is the first in its direction for the term,
-	/// which is exactly when it adds a key to what the flush will write: the
-	/// flush emits one key per (term, direction) whose set is non-empty. The
-	/// caller charges the write-cardinality guard on that, so the guard counts
-	/// the keys this buffer will write, and counts each of them once.
+	/// Returns whether this change is the first in its direction for the term
+	/// *within the frame it lands in*, which is what the caller charges the
+	/// write-cardinality guard on: the flush emits one key per (term, direction)
+	/// whose set is non-empty, so a first change is a key the flush will write.
+	///
+	/// Per frame rather than per term, so a term first touched inside a save point
+	/// that already has it in an enclosing scope is charged twice, and a charge for
+	/// a frame that is later rolled back is never returned. Both over-count, which
+	/// is the direction a limit has to err in, and both follow the guard's standing
+	/// rule that a reservation is not refunded.
 	#[must_use]
 	pub fn buffer_term_change(
 		&self,
@@ -308,9 +341,18 @@ impl IndexDeltaBuffer {
 	/// the same transaction) net to zero and are dropped: there is no delta to
 	/// record, so writing an entry would only add work for the next compaction.
 	pub fn take_counts(&self) -> Vec<(BufferedIndex, i64, Uuid)> {
-		self.counts
-			.lock()
-			.drain()
+		let mut frames = self.counts.lock();
+		let mut merged: HashMap<BufferedIndex, (i64, Uuid)> = HashMap::new();
+		for frame in frames.drain(..) {
+			for (index, (delta, nid)) in frame {
+				let entry = merged.entry(index).or_insert((0, nid));
+				entry.0 += delta;
+				entry.1 = nid;
+			}
+		}
+		frames.push(HashMap::new());
+		merged
+			.into_iter()
 			.filter(|(_, (delta, _))| *delta != 0)
 			.map(|(index, (delta, nid))| (index, delta, nid))
 			.collect()
@@ -318,30 +360,38 @@ impl IndexDeltaBuffer {
 
 	/// Drain the accumulated compaction triggers.
 	pub fn take_compactions(&self) -> Vec<(BufferedIndex, Uuid)> {
-		self.compactions.lock().drain().collect()
+		let mut frames = self.compactions.lock();
+		let mut merged: HashMap<BufferedIndex, Uuid> = HashMap::new();
+		for frame in frames.drain(..) {
+			merged.extend(frame);
+		}
+		frames.push(HashMap::new());
+		merged.into_iter().collect()
 	}
 
 	/// True when nothing is buffered, so commit can skip the flush entirely.
 	pub fn is_empty(&self) -> bool {
-		self.counts.lock().is_empty()
-			&& self.compactions.lock().is_empty()
+		self.counts.lock().iter().all(HashMap::is_empty)
+			&& self.compactions.lock().iter().all(HashMap::is_empty)
 			&& self.term_changes.lock().iter().all(HashMap::is_empty)
 			&& self.doc_stats.lock().iter().all(HashMap::is_empty)
 	}
 
 	/// Discard everything buffered. Used when the transaction is cancelled.
 	pub fn clear(&self) {
-		self.counts.lock().clear();
-		self.compactions.lock().clear();
+		reset_frames(&mut self.counts.lock());
+		reset_frames(&mut self.compactions.lock());
 		reset_frames(&mut self.term_changes.lock());
 		reset_frames(&mut self.doc_stats.lock());
 	}
 
 	/// Open a frame for a save point, so its mutations can be discarded whole.
 	///
-	/// Both stacks are pushed and popped together by every save-point operation,
-	/// so they always stand at the same depth.
+	/// Every stack is pushed and popped together by every save-point operation, so
+	/// they always stand at the same depth.
 	pub fn push_save_point(&self) {
+		self.counts.lock().push(HashMap::new());
+		self.compactions.lock().push(HashMap::new());
 		self.term_changes.lock().push(HashMap::new());
 		self.doc_stats.lock().push(HashMap::new());
 	}
@@ -349,6 +399,24 @@ impl IndexDeltaBuffer {
 	/// Fold the save point's frame into the one beneath it: its writes survived,
 	/// so its buffered contributions belong to the enclosing scope.
 	pub fn release_save_point(&self) {
+		{
+			let mut frames = self.counts.lock();
+			if let Some(top) = pop_save_point(&mut frames) {
+				let parent = frames.last_mut().expect("popping left at least one frame");
+				for (index, (delta, nid)) in top {
+					let entry = parent.entry(index).or_insert((0, nid));
+					entry.0 += delta;
+					entry.1 = nid;
+				}
+			}
+		}
+		{
+			let mut frames = self.compactions.lock();
+			if let Some(top) = pop_save_point(&mut frames) {
+				let parent = frames.last_mut().expect("popping left at least one frame");
+				parent.extend(top);
+			}
+		}
 		{
 			let mut frames = self.term_changes.lock();
 			if let Some(top) = pop_save_point(&mut frames) {
@@ -370,6 +438,8 @@ impl IndexDeltaBuffer {
 	/// Discard the save point's frame: its KV writes were rolled back, so its
 	/// buffered contributions describe writes that no longer exist.
 	pub fn rollback_save_point(&self) {
+		pop_save_point(&mut self.counts.lock());
+		pop_save_point(&mut self.compactions.lock());
 		pop_save_point(&mut self.term_changes.lock());
 		pop_save_point(&mut self.doc_stats.lock());
 	}
@@ -415,6 +485,65 @@ mod tests {
 		assert_eq!(buffer.pending_doc_stats(&term().index), stats(0, 0));
 		assert!(buffer.take_term_changes().is_empty());
 		assert!(buffer.take_doc_stats().is_empty());
+	}
+
+	/// The count families are scoped by the same frames. `INSERT ... ON DUPLICATE
+	/// KEY UPDATE` on a counted table is the shape that needs it: the abandoned
+	/// create attempt counts a row the table does not hold, and a contribution
+	/// surviving its rollback overstates the count for good, since a count index is
+	/// a delta log with nothing to correct it later.
+	#[test]
+	fn a_rolled_back_save_point_keeps_none_of_its_counts() {
+		let buffer = IndexDeltaBuffer::new();
+		let nid = Uuid::nil();
+		let index = term().index;
+
+		buffer.push_save_point();
+		buffer.buffer_count_delta(index.clone(), 1, nid);
+		buffer.buffer_compaction_trigger(index.clone(), nid);
+		buffer.rollback_save_point();
+
+		assert_eq!(buffer.pending_count(&index), 0, "the abandoned attempt must not be counted");
+		assert!(buffer.take_counts().is_empty());
+		assert!(buffer.take_compactions().is_empty(), "nothing was written to compact");
+	}
+
+	/// A released save point's counts belong to the enclosing scope, and a read in
+	/// the transaction sees them from the moment they are buffered — the writes
+	/// they describe are visible until something rolls them back.
+	///
+	/// Nested, because a single scope cannot tell framing apart from one flat map:
+	/// releasing into a parent sums either way. What distinguishes them is an inner
+	/// rollback under an outer scope that survives — the inner contribution has to
+	/// go and the outer one has to stay, which one map cannot do.
+	#[test]
+	fn nested_save_points_keep_only_the_counts_that_survived() {
+		let buffer = IndexDeltaBuffer::new();
+		let nid = Uuid::nil();
+		let index = term().index;
+
+		buffer.buffer_count_delta(index.clone(), 2, nid);
+		buffer.push_save_point();
+		buffer.buffer_count_delta(index.clone(), 3, nid);
+		// Asked for inside the scope that survives, so the release has to carry it up.
+		buffer.buffer_compaction_trigger(index.clone(), nid);
+		assert_eq!(buffer.pending_count(&index), 5, "an open scope's writes are visible");
+
+		buffer.push_save_point();
+		buffer.buffer_count_delta(index.clone(), 10, nid);
+		assert_eq!(buffer.pending_count(&index), 15);
+		buffer.rollback_save_point();
+		assert_eq!(buffer.pending_count(&index), 5, "the inner scope's writes went with it");
+
+		buffer.release_save_point();
+		assert_eq!(buffer.pending_count(&index), 5, "the outer scope's survived");
+		assert_eq!(buffer.take_counts(), vec![(index.clone(), 5, nid)]);
+		assert_eq!(
+			buffer.take_compactions(),
+			vec![(index, nid)],
+			"a released scope's compaction wake-up has to reach the flush, or the deltas it \
+			 folded sit uncompacted until something else asks"
+		);
 	}
 
 	/// A released save point's writes survived, so its deltas belong to the

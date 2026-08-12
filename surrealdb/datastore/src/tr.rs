@@ -11,8 +11,14 @@ use crate::{IntoBytes, Result, Val};
 
 /// A set of undoable updates and requests against a dataset.
 pub struct Transactor {
-	// The underlying transaction
-	pub inner: Box<dyn Transactable>,
+	/// The underlying transaction.
+	///
+	/// Crate-private, because reaching it is reaching past what
+	/// [`crate::Transaction`] wraps around it: the write-cardinality guard, the
+	/// poison checks, the buffered index deltas and the save-point frames that
+	/// mirror this transaction's own save-point stack. `Transaction` derefs to
+	/// `Transactor`, so a public field here is a public bypass of all of them.
+	pub(crate) inner: Box<dyn Transactable>,
 }
 
 impl fmt::Display for Transactor {
@@ -75,8 +81,13 @@ impl Transactor {
 	/// Commit a transaction.
 	///
 	/// This attempts to commit all changes made within the transaction.
+	///
+	/// Crate-private: [`crate::Transaction::commit`] is the commit a caller wants.
+	/// It refuses a poisoned transaction and flushes the buffered index deltas into
+	/// the same transaction as the writes they describe, and reaching this one past
+	/// it — which `Transaction`'s `Deref` would otherwise allow — skips both.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn commit(&self) -> Result<()> {
+	pub(crate) async fn commit(&self) -> Result<()> {
 		self.inner.commit().await
 	}
 
@@ -356,21 +367,17 @@ impl Transactor {
 	// --------------------------------------------------
 	// Savepoint functions
 	// --------------------------------------------------
-
-	/// Set a new save point on the transaction.
-	pub async fn new_save_point(&self) -> Result<()> {
-		self.inner.new_save_point().await
-	}
-
-	/// Release the last save point.
-	pub async fn release_last_save_point(&self) -> Result<()> {
-		self.inner.release_last_save_point().await
-	}
-
-	/// Rollback to the last save point.
-	pub async fn rollback_to_save_point(&self) -> Result<()> {
-		self.inner.rollback_to_save_point().await
-	}
+	//
+	// A save point scopes more than the storage layer's write set: the buffered
+	// index deltas describe writes this transaction has made, so they are framed
+	// alongside it. Only [`crate::Transaction`] holds those buffers, so it owns
+	// the save-point API and reaches the engine through `inner` directly.
+	//
+	// Deliberately no wrapper here. `Transaction` derefs to `Transactor`, so one
+	// would resolve on a `Transaction` for any caller who reached for it, and move
+	// the storage stack without the frames that mirror it. Reaching `inner` still
+	// does that — the field is what `Transaction` itself needs — so this is one
+	// fewer way in rather than none.
 
 	// --------------------------------------------------
 	// Timestamp functions

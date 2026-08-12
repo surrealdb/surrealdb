@@ -29,6 +29,21 @@ async fn ds_with_batch_size(batch: Option<usize>) -> Result<Arc<Datastore>> {
 	Ok(ds)
 }
 
+/// Builds a memory datastore that enforces `transaction_max_write_keys`, for the
+/// import side of a round trip.
+async fn ds_with_write_keys_limit(limit: usize) -> Result<Arc<Datastore>> {
+	let ds = Datastore::builder()
+		.with_capabilities(Capabilities::all())
+		.with_config(
+			surrealdb_cnf::ConfigMap::empty()
+				.with_key_value("transaction_max_write_keys", limit.to_string()),
+		)
+		.build_with_path("memory")
+		.await?;
+	new_ns_db(&ds, "test", "test").await?;
+	Ok(ds)
+}
+
 /// Exports the whole database as text.
 async fn export_text(ds: &Datastore, ses: &Session) -> Result<String> {
 	let (tx, rx) = surrealdb_core::channel::bounded::<Vec<u8>>(16);
@@ -81,12 +96,35 @@ async fn seed_with_terms(
 	Ok(())
 }
 
+/// Seeds `records` rows whose `bio` words are unique to the row, so the group's
+/// distinct vocabulary grows with every record it carries.
+///
+/// This is the shape with no slack in it. When rows share their words, one
+/// delta-log key covers the whole group and the per-term estimate is far above
+/// what the group writes; when they share none, the estimate is exactly met and
+/// anything it leaves out is a group that overruns.
+async fn seed_with_unique_terms(
+	ds: &Datastore,
+	ses: &Session,
+	schema: &str,
+	records: usize,
+	terms: usize,
+) -> Result<()> {
+	ds.execute(schema, ses, None).await?;
+	for i in 0..records {
+		let bio: Vec<String> = (0..terms).map(|t| format!("r{i}w{t}")).collect();
+		let sql = format!("CREATE person:{i} SET bio = '{}'", bio.join(" "));
+		ds.execute(&sql, ses, None).await?.remove(0).result?;
+	}
+	Ok(())
+}
+
 const FULLTEXT_SCHEMA: &str = "DEFINE TABLE person SCHEMALESS;
 	 DEFINE ANALYZER ab TOKENIZERS blank FILTERS lowercase;
 	 DEFINE INDEX ix_bio ON person FIELDS bio FULLTEXT ANALYZER ab BM25";
 
 /// With no index, records write few keys, so the grouping stays at the
-/// configured scan batch and the export is what it always was.
+/// configured scan batch and nothing tightens it.
 #[tokio::test]
 async fn plain_table_groups_at_the_configured_batch() -> Result<()> {
 	let ds = ds_with_batch_size(Some(10)).await?;
@@ -106,14 +144,17 @@ async fn plain_table_groups_at_the_configured_batch() -> Result<()> {
 async fn full_text_table_groups_more_tightly_than_the_batch() -> Result<()> {
 	let ds = ds_with_batch_size(Some(1000)).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	seed(&ds, &ses, FULLTEXT_SCHEMA, 200).await?;
+	// Enough terms that the key budget is comfortably what splits these records,
+	// with headroom either way. A fixture sized to only just clear the bound flips
+	// on any retune of the per-term estimate instead of on the behaviour it pins.
+	seed_with_terms(&ds, &ses, FULLTEXT_SCHEMA, 200, 300).await?;
 
 	let sql = export_text(&ds, &ses).await?;
 	let groups = insert_group_sizes(&sql);
 	let largest = *groups.iter().max().expect("the export must carry records");
 	assert!(
-		largest < 200,
-		"a full-text table must group below the scan batch, got groups {groups:?}"
+		largest < 100,
+		"a full-text table must group far below the 1000-record scan batch, got {groups:?}"
 	);
 	assert_eq!(groups.iter().sum::<usize>(), 200, "every record must still be exported");
 	Ok(())
@@ -188,8 +229,12 @@ async fn regrouped_export_round_trips() -> Result<()> {
 	let sql = export_text(&source, &ses).await?;
 	assert!(insert_group_sizes(&sql).len() > 1, "the fixture must exercise several groups");
 
-	// Replay into a fresh datastore and compare what came back.
-	let target = ds_with_batch_size(None).await?;
+	// Replay into a fresh datastore and compare what came back. The target arms the
+	// write-cardinality guard at the budget the grouping is sized against, so a
+	// statement that writes more keys than the exporter estimated fails here rather
+	// than passing on the estimate being unenforced. That is the whole point of
+	// sizing by keys: a group has to fit the transaction it becomes.
+	let target = ds_with_write_keys_limit(20_000).await?;
 	let mut res = target.execute(&sql, &ses, None).await?;
 	for r in res.drain(..) {
 		r.result?;
@@ -206,6 +251,45 @@ async fn regrouped_export_round_trips() -> Result<()> {
 	let hits = target.execute(MATCHES, &ses, None).await?.remove(0).result?;
 	assert_eq!(hits, source.execute(MATCHES, &ses, None).await?.remove(0).result?);
 	assert_ne!(hits, Value::None, "the replayed full-text index must match");
+	Ok(())
+}
+
+/// A group has to fit the transaction it becomes, at the vocabulary where the
+/// estimate has no slack: records sharing no words, so every term costs a
+/// delta-log key of its own.
+///
+/// Anything the estimate leaves out of a *record's* cost shows up here: charging
+/// only per term — as though the term allowance also covered the record, doc-id,
+/// term-map and document-length keys — puts one extra record in each group, which
+/// is enough to overrun the budget the group was sized for.
+///
+/// Records of uniform length, so this says nothing about a group whose vocabulary
+/// is concentrated in a few long documents. The estimate derives its per-record
+/// cost from the table's mean, which is not a ceiling for such a group.
+#[tokio::test]
+async fn a_disjoint_vocabulary_group_fits_its_own_import() -> Result<()> {
+	let source = ds_with_batch_size(Some(1000)).await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	seed_with_unique_terms(&source, &ses, FULLTEXT_SCHEMA, 70, 300).await?;
+	let sql = export_text(&source, &ses).await?;
+	let groups = insert_group_sizes(&sql);
+	assert!(groups.len() > 1, "the fixture must split into groups the budget decides");
+
+	let target = ds_with_write_keys_limit(20_000).await?;
+	let mut res = target.execute(&sql, &ses, None).await?;
+	for r in res.drain(..) {
+		r.result.map_err(|e| {
+			anyhow::anyhow!(
+				"a group the exporter sized must import within the budget: {e} ({groups:?})"
+			)
+		})?;
+	}
+
+	const COUNT: &str = "SELECT VALUE count() FROM person GROUP ALL";
+	assert_eq!(
+		target.execute(COUNT, &ses, None).await?.remove(0).result?,
+		source.execute(COUNT, &ses, None).await?.remove(0).result?,
+	);
 	Ok(())
 }
 

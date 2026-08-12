@@ -280,13 +280,27 @@ async fn export_table_structure(
 /// What a transaction costs is not its record count but the number of keys those
 /// records write, and a table's index set moves that by two orders of magnitude:
 /// a bare record writes 2 keys, eight b-tree indexes take it to 12, and a single
-/// full-text index to ~170. Sizing by keys keeps a transaction's cost roughly
-/// constant across index sets instead of leaving it to vary with the schema.
+/// full-text index roughly one per distinct term in the document. Sizing by keys
+/// keeps a transaction's cost roughly constant across index sets instead of
+/// leaving it to vary with the schema.
 ///
 /// The value is chosen so a table whose records write few keys keeps using the
 /// whole `export_batch_size` — the cap below — and only a table carrying an
 /// index whose per-record key count is large groups its records more tightly.
 const INSERT_KEY_BUDGET: usize = 20_000;
+
+/// Keys a statement writes once rather than per record: an index whose maintenance
+/// is batched per transaction — the full-text and count families — contributes a
+/// delta entry and a compaction-queue entry at commit whatever the group's size.
+/// Plain and unique indexes contribute neither, so this is an allowance for the
+/// tables that have them and a small overcharge for the tables that do not.
+///
+/// Flat rather than per-index, because it is taken off the budget before the index
+/// set is known. What it costs is a group's last few records: one for a table whose
+/// records are expensive enough to group tightly, more for a cheap table already
+/// grouping near the whole batch, where a handful of records either way is not what
+/// decides transaction size.
+const KEYS_PER_STATEMENT: usize = 32;
 
 /// Keys a record writes for itself, independent of any index.
 const KEYS_PER_RECORD: usize = 2;
@@ -295,13 +309,35 @@ const KEYS_PER_RECORD: usize = 2;
 /// plain, unique, and count indexes each write a bounded number of entries.
 const KEYS_PER_VALUE_INDEX: usize = 2;
 
-/// Keys a full-text index writes per indexed term: the posting.
+/// Keys a full-text index writes per indexed term: its share of the delta log.
 ///
-/// The delta log a term also contributes to is batched per transaction rather
-/// than per (term, document), so its cost is bounded by the statement's distinct
-/// vocabulary and amortises to well under one key per term as the group grows.
-/// Counting it here would shrink the group for keys the group does not write.
+/// A record's postings are one key, not one per term — a document's whole term
+/// map is a single value. So the only cost that scales with term count is the
+/// delta log, and because that is batched per transaction, a group's delta cost
+/// is its *distinct vocabulary*: at most one key per posting, when no record in
+/// the group shares a word with another, and less the more they overlap.
+///
+/// One key per term is therefore the ceiling rather than the going rate, which is
+/// the direction to err in: over-sizing groups more tightly than needed and costs
+/// throughput that is flat across small groupings, where under-sizing leaves the
+/// oversized transaction that grouping exists to avoid.
+///
+/// It covers the delta log and nothing else. The keys that do not scale with term
+/// count get [`KEYS_PER_FULLTEXT_RECORD`], because at the ceiling — a group whose
+/// records share no vocabulary — there is no slack in this allowance to absorb
+/// them, and a group sized as though there were is one that fails its own
+/// re-import against the write-cardinality guard.
 const KEYS_PER_FULLTEXT_TERM: usize = 1;
+
+/// Keys a record writes for a full-text index however long its document is: the
+/// term map, the document length, and the table's forward and reverse doc-id
+/// mapping.
+///
+/// The doc-id pair is table-scoped rather than per index, so a table carrying
+/// several full-text indexes is charged for it more than once. That is the safe
+/// direction, and the alternative — accounting for it once per table — would put
+/// per-record cost somewhere other than the per-index loop that derives it.
+const KEYS_PER_FULLTEXT_RECORD: usize = 4;
 
 /// Fallback allowance for one index whose per-record key count scales with the
 /// indexed content rather than being fixed, used when the index carries no
@@ -328,9 +364,9 @@ const FAN_OUT_SAMPLE: usize = 8;
 /// A value index over an array-valued field does not write one entry: the
 /// indexer expands a non-flattened array into one entry per element, so a
 /// record with a 500-element `tags` array writes 500 entries to a single index.
-/// Ignoring that would let exactly the schema this change exists to bound —
-/// records that write far more keys than their count suggests — keep producing
-/// oversized transactions.
+/// Ignoring that would leave exactly the schema this budget exists for — records
+/// that write far more keys than their count suggests — producing oversized
+/// transactions.
 ///
 /// Takes the largest fan-out across the index's columns rather than their
 /// product: the combinator advances one column per step, so the entry count
@@ -354,8 +390,9 @@ fn index_fan_out(data: &val::Value, cols: &[Idiom]) -> usize {
 /// - A full-text index writes per distinct term, so a table of 8 KB documents costs an order of
 ///   magnitude more per record than one of 700 B documents. Derived from the mean document length
 ///   the index already maintains for BM25 scoring, using the token mean as a stand-in for the
-///   distinct-term count — which overestimates, since documents repeat words, in the direction that
-///   costs nothing.
+///   distinct-term count. Usually above it, since documents repeat words, which is the direction
+///   that costs nothing — but not a bound: the mean is truncated, and a mean is not a ceiling for a
+///   group whose vocabulary sits in a few long documents.
 /// - A value index over an array field writes one entry per element. Derived from the sampled
 ///   records, since no statistic records it.
 ///
@@ -372,11 +409,14 @@ async fn keys_per_record(
 ) -> Result<usize> {
 	let mut keys = KEYS_PER_RECORD;
 	for ix in indexes {
-		keys += match ix.index {
+		// Saturating, so a table whose statistics are implausible sizes its group at
+		// one record rather than wrapping to a large one.
+		keys = keys.saturating_add(match ix.index {
 			catalog::Index::FullText(_) => {
 				let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
 				match mean_tokens_per_document(tx, &ikb).await? {
-					Some(mean) => (mean as usize).saturating_mul(KEYS_PER_FULLTEXT_TERM),
+					Some(mean) => KEYS_PER_FULLTEXT_RECORD
+						.saturating_add((mean as usize).saturating_mul(KEYS_PER_FULLTEXT_TERM)),
 					None => KEYS_PER_CONTENT_INDEX_FALLBACK,
 				}
 			}
@@ -386,7 +426,7 @@ async fn keys_per_record(
 					sample.iter().map(|data| index_fan_out(data, &ix.cols)).max().unwrap_or(1);
 				KEYS_PER_VALUE_INDEX.saturating_mul(fan_out)
 			}
-		};
+		});
 	}
 	Ok(keys)
 }
@@ -417,8 +457,14 @@ fn decode_sample(batch: &[(Vec<u8>, Vec<u8>)], limit: usize) -> Result<Vec<val::
 /// Never exceeds `batch_size`, so `export_batch_size` remains the bound a
 /// deployment can already configure and this only ever groups more tightly than
 /// it asks for.
+///
+/// The budget is spent net of what a statement writes once however many records it
+/// carries, so the per-record division has the whole of what is left. Without that
+/// the estimate lands exactly on the budget for a group whose records fill it, and
+/// the statement's own entries carry it over.
 fn records_per_insert(keys_per_record: usize, batch_size: u32) -> usize {
-	(INSERT_KEY_BUDGET / keys_per_record.max(1)).clamp(1, batch_size.max(1) as usize)
+	let budget = INSERT_KEY_BUDGET.saturating_sub(KEYS_PER_STATEMENT);
+	(budget / keys_per_record.max(1)).clamp(1, batch_size.max(1) as usize)
 }
 
 async fn export_table_data(
@@ -704,5 +750,48 @@ pub(crate) fn define_user_statement_from_definition(
 			.map(|x| Expr::Idiom(Idiom::field(x.clone())))
 			.unwrap_or(Expr::Literal(Literal::None)),
 		scram: def.scram.clone(),
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::{INSERT_KEY_BUDGET, records_per_insert};
+
+	/// The fewest keys a statement writes once, whatever its group size: one index
+	/// whose maintenance is batched per transaction contributes a delta entry and a
+	/// compaction-queue entry at commit. Stated here rather than read from the
+	/// allowance, so this measures the grouping against what a statement costs
+	/// instead of against the number the grouping already used.
+	const STATEMENT_FLOOR: usize = 2;
+
+	/// A group's records must leave room for what the statement writes once, or a
+	/// group whose per-record cost divides the budget evenly lands exactly on it and
+	/// is carried over by the statement's own entries.
+	#[test]
+	fn a_group_leaves_room_for_what_the_statement_itself_writes() {
+		// A per-record cost that divides the whole budget evenly, which is the only
+		// shape where the last record and the statement's entries compete.
+		let per_record = 100;
+		assert_eq!(INSERT_KEY_BUDGET % per_record, 0, "the case only bites on an exact division");
+		let group = records_per_insert(per_record, u32::MAX);
+		assert!(
+			group * per_record + STATEMENT_FLOOR <= INSERT_KEY_BUDGET,
+			"a group of {group} at {per_record} keys each writes {} plus the statement's own, \
+			 over a budget of {INSERT_KEY_BUDGET}",
+			group * per_record
+		);
+	}
+
+	/// The scan batch stays the bound a deployment configures, and a record too
+	/// expensive to share a statement still gets one of its own.
+	#[test]
+	fn grouping_respects_the_batch_and_never_reaches_zero() {
+		assert_eq!(records_per_insert(1, 10), 10, "a cheap record groups at the batch");
+		assert_eq!(
+			records_per_insert(INSERT_KEY_BUDGET * 2, 10),
+			1,
+			"a record costing more than the whole budget still gets a statement"
+		);
+		assert_eq!(records_per_insert(0, 10), 10, "a zero estimate must not divide by zero");
 	}
 }

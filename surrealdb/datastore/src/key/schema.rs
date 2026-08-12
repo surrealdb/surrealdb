@@ -351,13 +351,12 @@ keyspace! {
 						/// term, compacted into one bitmap.
 						term_docs = ["!td", @, term: Str] => roaring::RoaringTreemap;
 
-						/// Legacy per-(term, document) posting, no longer written.
+						/// Per-(term, document) posting, read but never written.
 						/// Extends the term's root key with one document id, so a
 						/// scan of the root's range returns both and the decoder
 						/// tells them apart by whether the document id is present.
-						/// Read as a fallback for documents indexed before `!dt`
-						/// existed, which is decided by whether that document has a
-						/// `!dt` entry.
+						/// Read as the fallback for a document that carries no `!dt`
+						/// entry, the absence of which is what selects it.
 						term_posting = term_docs + [id: DocId]
 							=> crate::values::fulltext::TermDocument;
 
@@ -386,10 +385,9 @@ keyspace! {
 						/// one change. Each level is also a stored key, because
 						/// compaction writes its result at the bound itself.
 						///
-						/// Legacy shape, no longer written. Readers fold this family
-						/// and `!tx` together and compaction drains both, so an
-						/// index carrying entries in either shape resolves to the
-						/// same document set.
+						/// Read but never written. Readers fold this family and `!tx`
+						/// together and compaction drains both, so an index carrying
+						/// entries in either shape resolves to the same document set.
 						term_changes = ["!tt"] => String (also_range);
 						term_change_set = term_changes + [term: Str] => String
 							(also_range);
@@ -408,14 +406,19 @@ keyspace! {
 						///
 						/// `add` stays in the key, as in `!tt`, so the two directions
 						/// never share a bitmap and a reader needs no signed payload.
+						///
+						/// The trade is that the value's size follows the writing
+						/// transaction rather than being fixed: one entry names every
+						/// document that transaction moved for the term. A reader that
+						/// bounds work by key count therefore bounds nothing — see how
+						/// full-text compaction spends its limit as a document budget.
 						term_change_batch = ["!tx", @, term: Str, @, nid: Uuid, uid: Uuid, add: bool]
 							=> roaring::RoaringTreemap;
 
 						/// Document length and count, compacted at the bound and
 						/// accumulated in deltas beneath it.
 						///
-						/// Legacy shape, no longer written; read and drained
-						/// alongside `!dx`.
+						/// Read but never written; drained alongside `!dx`.
 						doc_stats = ["!dc"] => crate::values::fulltext::DocLengthAndCount
 							(also_range);
 						doc_stats_delta = doc_stats + [doc_id: DocId, nid: Uuid, uid: Uuid]

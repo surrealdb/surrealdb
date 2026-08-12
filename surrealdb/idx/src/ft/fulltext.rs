@@ -12,6 +12,7 @@ use surrealdb_datastore::Transaction;
 // A posting and the index's document statistics are stored values, so both are
 // declared below this layer; the indexing and scoring code here maintains them.
 pub use surrealdb_datastore::values::fulltext::{DocLengthAndCount, DocumentTerms, TermDocument};
+use surrealdb_kvs::Direction;
 use surrealdb_kvs::consts::COUNT_BATCH_SIZE;
 use uuid::Uuid;
 
@@ -39,7 +40,7 @@ use crate::ft::{DocLength, MatchesHitsIterator, Score, TermFrequency};
 use crate::key::schema::{
 	DocStatsBatchKey, DocStatsDeltaKey, DocStatsKey, TermChangeBatchKey, TermChangeKey,
 };
-use crate::key::{KVKey, KVKeyDecode, KVValue};
+use crate::key::{KVKey, KVKeyDecode, KVValue, Resumable};
 use crate::trees::store::IndexStores;
 use crate::val::{RecordId, Value};
 use crate::{IndexKeyBase, bump_compaction_generation, catalog, read_compaction_generation};
@@ -121,10 +122,21 @@ pub struct FullTextIndex {
 	bm25: Option<Bm25Params>,
 }
 
+/// Ceiling on the entries one page of a compaction round's `!tx` scan asks for.
+///
+/// A page is normally sized from the budget the round has left and the bitmap
+/// width it has already seen; this only caps how large that calculation may get.
+/// It matters for the narrowest backlog — single-document entries, the shape a
+/// trickle of small writes leaves — where the budget alone would ask for every
+/// remaining entry in one read. Raising it trades a larger page for fewer round
+/// trips per round.
+const TERM_DELTA_SCAN_PAGE: u32 = 4_096;
+
 /// Snapshot gathered by the read phase of full-text compaction.
 ///
-/// The plan contains only the exact `!dc`/`!tt` delta keys observed at the
-/// snapshot plus the generations that must still match before applying it. A
+/// The plan contains only the exact delta keys observed at the snapshot — in
+/// either the per-document (`!dc`, `!tt`) or the per-transaction (`!dx`, `!tx`)
+/// shape — plus the generations that must still match before applying it. A
 /// continuation flag tells the datastore whether to prepare another bounded
 /// batch after this one commits.
 pub struct FullTextCompactionPlan {
@@ -157,9 +169,9 @@ struct DocLengthAndCountCompactionPlan {
 
 /// The document-statistics deltas one read phase saw, kept by family.
 ///
-/// `!dc` is the legacy per-document shape and `!dx` the per-transaction one.
-/// Both are drained in the same pass, so an index carrying entries written
-/// either side of the `!dx` change compacts to the same statistic.
+/// `!dc` is the per-document shape and `!dx` the per-transaction one. Both are
+/// drained in the same pass, so an index carrying entries in either shape compacts
+/// to the same statistic.
 #[derive(Default)]
 struct DocStatsDeltaKeys {
 	legacy: Vec<DocStatsDeltaKey<'static>>,
@@ -191,7 +203,9 @@ impl DocLengthAndCountCompactionPlan {
 		!self.deltas.is_empty()
 	}
 
-	/// Returns true when the `!dc` delta scan stopped before the range ended.
+	/// Returns true when either delta family left entries for the next round: the
+	/// per-document scan stopped before its range ended, or the batched one had more
+	/// than the round's limit.
 	fn has_more(&self) -> bool {
 		self.has_more
 	}
@@ -216,7 +230,9 @@ impl TermDocsCompactionPlan {
 		!self.tt_keys.is_empty() || !self.tx_keys.is_empty()
 	}
 
-	/// Returns true when the `!tt` delta scan stopped before the range ended.
+	/// Returns true when either delta family left entries for the next round: the
+	/// per-document scan stopped before its range ended, or the batched pass stopped
+	/// on the entry that spent its budget with more of the range behind it.
 	fn has_more(&self) -> bool {
 		self.has_more
 	}
@@ -577,7 +593,19 @@ impl FullTextIndex {
 		let td = self.ikb.new_td_root(term);
 		let mut docs = tx.get_key(&td, None).await?.unwrap_or_default();
 
-		// Apply the delta changes to the document set
+		// Applied by sign, which is what makes the result depend on how the deltas were
+		// grouped into rounds. A document one transaction added and another removed nets
+		// to zero and leaves the set alone; the same pair folded in two rounds removes
+		// and then re-adds it. Whichever a reader gets, the log cannot say which is
+		// right: entries sort by node before time, so it records no order to fold in.
+		//
+		// So a term whose cancelling deltas straddle a round boundary — of either delta
+		// family, or between them, since each is bounded separately — can compact to a
+		// set that depends on where the boundary fell. Making a round stop only on term
+		// boundaries is not a fix: it cannot cover a term present in both families
+		// without coordinating their two scans, and it gives up the bound on a round
+		// entirely for a term whose own backlog is large. What it needs is a delta log
+		// that records an order to fold in.
 		for (doc_id, delta) in deltas {
 			match 0.cmp(delta) {
 				// If delta is negative, the term was removed from this document
@@ -630,10 +658,17 @@ impl FullTextIndex {
 		let mut tt_keys = Vec::new();
 		let mut tx_keys = Vec::new();
 		let mut deltas_by_term: HashMap<String, HashMap<DocId, i64>> = HashMap::new();
-		// Both delta shapes are drained in one pass, so an index carrying entries
-		// written either side of the `!tx` change compacts to the same document
-		// set. Each family is bounded by the same limit, and either having more
+		// Both delta shapes are drained in one pass, so an index carrying entries in
+		// either shape compacts to the same document set. Either family having more
 		// leaves work for the next round.
+		//
+		// What `limit` bounds differs by shape, because it is the round's hold on
+		// memory and a compaction transaction is exempt from the write-cardinality
+		// guard that bounds statement execution — nothing else caps it. A `!tt` key
+		// names one document, so bounding keys bounds documents. A `!tx` key carries
+		// a whole bitmap, so the same key bound would leave the round scaling with
+		// how wide the transaction that wrote it was. The `!tx` pass therefore
+		// spends `limit` as a document budget.
 		let batch = tx.batch_keys(self.ikb.new_tt_terms_range()?, limit, None).await?;
 		for k in batch.result {
 			let tt = TermChangeKey::decode_key(&k)?;
@@ -649,24 +684,106 @@ impl FullTextIndex {
 			}
 			tt_keys.push(tt.into_owned());
 		}
-		// One row beyond the limit, so "is there more" is answered without
-		// materialising the whole backlog the way an unbounded read would.
-		let mut batched =
-			tx.scan(self.ikb.new_tx_terms_range()?, limit.saturating_add(1), 0, None).await?;
-		let batched_has_more = batched.len() > limit as usize;
-		batched.truncate(limit as usize);
-		for (k, docs) in batched {
-			let tx_key = TermChangeBatchKey::decode_key(&k)?;
-			let step = if tx_key.add {
-				1
-			} else {
-				-1
+		// What is left of the budget once the per-document family has spent its
+		// share, so `limit` bounds the round rather than each family separately.
+		let tx_budget = (limit as u64).saturating_sub(tt_keys.len() as u64);
+		// Read in pages and fold each before asking for the next, so what a round
+		// holds follows the budget rather than the backlog. The budget bounds it
+		// except for the one entry a round is always allowed — which may be wider
+		// than the whole of it, or the round could never compact that term.
+		//
+		// A row count cannot express what a page costs — that is the documents
+		// inside its bitmaps — so a page is sized two ways at once, and takes the
+		// smaller. From the widest entry seen so far, about as many rows as the
+		// remaining budget covers at that width, rounded up so a budget smaller than
+		// one entry still asks for one; the widest rather than the mean, because the
+		// mean under-sizes the estimate exactly when widths vary. And from the rows
+		// already folded, at most twice as many, so the read can only grow as fast
+		// as evidence for it does.
+		//
+		// The ramp is what covers the case the width estimate cannot: a page whose
+		// entries are all far wider than anything measured before them. Doubling
+		// means such a page is never more than twice the size of one already folded
+		// inside the budget, where sizing on width alone would jump straight to the
+		// cap on the strength of one narrow entry. Neither bounds the read in terms
+		// of documents — no row-limited scan can — so the cap is the last ceiling.
+		let mut range = self.ikb.new_tx_terms_range()?;
+		let mut batched_has_more = false;
+		let mut folded_docs = 0u64;
+		let mut widest = 0u64;
+		'paging: loop {
+			// A page of at least one entry keeps a round able to make progress, and
+			// is what probes for more once the budget is exactly spent.
+			let remaining = tx_budget.saturating_sub(folded_docs);
+			let rows = match widest {
+				// Nothing measured yet: read one entry rather than guess. A page
+				// sized before any width is known is the unbounded read again.
+				0 => 1,
+				widest => remaining
+					.div_ceil(widest)
+					.min((tx_keys.len() as u64).saturating_mul(2))
+					.clamp(1, TERM_DELTA_SCAN_PAGE as u64) as u32,
 			};
-			let by_doc = deltas_by_term.entry(tx_key.term.to_string()).or_default();
-			for doc_id in &docs {
-				*by_doc.entry(doc_id).or_default() += step;
+			let page = tx.scan(range.clone(), rows, 0, None).await?;
+			let page_full = page.len() as u32 == rows;
+			let resume_after = page.last().map(|(k, _)| k.clone());
+			let page_len = page.len();
+			for (index, (k, docs)) in page.into_iter().enumerate() {
+				// One rule for every entry: the one that takes the round past a limit is
+				// folded, and is the round's last. So a round holds at most `limit`
+				// entries and one more, and `tx_budget` documents and that entry's width,
+				// and always folds at least one entry however wide — which it must, or an
+				// entry wider than the whole budget would never compact at all. The budget
+				// is spent in whole entries because the write phase may only delete an
+				// entry whose every document it folded.
+				//
+				// Folding it rather than deferring it is what stops a wide entry behind
+				// narrow ones from waiting on them: a round restarts at the head of the
+				// range, so a deferred entry is only reached once everything sorting before
+				// it is gone.
+				//
+				// It does not make the order fair. Writes arriving at the head of the range
+				// as fast as a round drains it hold every round's attention, and a term
+				// sorting behind them stays uncompacted for as long as that lasts — its own
+				// backlog static, but its queries folding deltas that never get folded for
+				// them. Ordering that fairly needs a round to resume where the last one
+				// stopped rather than at the head, which needs the position to be durable.
+				let folded_entries = tx_keys.len() as u64;
+				let last =
+					folded_entries + 1 >= limit as u64 || folded_docs + docs.len() >= tx_budget;
+				folded_docs += docs.len();
+				// Measured over every entry the round accepts, including the first,
+				// whose width is the only thing the next page has to go on. Floored at
+				// one so an entry carrying no documents still counts as measured —
+				// leaving it at zero would hold every later page at a single row.
+				widest = widest.max(docs.len().max(1));
+				let tx_key = TermChangeBatchKey::decode_key(&k)?;
+				let step = if tx_key.add {
+					1
+				} else {
+					-1
+				};
+				let by_doc = deltas_by_term.entry(tx_key.term.to_string()).or_default();
+				for doc_id in &docs {
+					*by_doc.entry(doc_id).or_default() += step;
+				}
+				tx_keys.push(tx_key.into_owned());
+				if last {
+					// Rows after this one in the page are entries this round did not reach.
+					// Past the page's end it depends on whether the scan filled it: a full
+					// page may be followed by another, a short one is the range's end. A
+					// round that took the last entry there was reports no more, rather than
+					// leaving an empty round behind it.
+					batched_has_more = index + 1 < page_len || page_full;
+					break 'paging;
+				}
 			}
-			tx_keys.push(tx_key.into_owned());
+			match resume_after {
+				// A page the scan filled may have been cut short by the row count, so
+				// the range continues after its last entry. A short page is the end.
+				Some(k) if page_full => range = range.resume_after(&k, Direction::Forward),
+				_ => break 'paging,
+			}
 		}
 		Ok(TermDocsCompactionPlan {
 			generation,
@@ -874,12 +991,14 @@ impl FullTextIndex {
 		};
 		let mut dlc = tx.get_key(&dc_prefix, None).await?.unwrap_or_default();
 
-		let limit = limit.max(1);
+		// Held one below `u32::MAX` so the probe row below is always a real extra
+		// row rather than one the saturating add silently folded away.
+		let limit = limit.clamp(1, u32::MAX - 1);
 		let range = dc_prefix.range()?;
 		let batch = tx.batch_keys_vals(range, limit, None).await?;
 		let mut deltas = DocStatsDeltaKeys {
 			legacy: Vec::with_capacity(batch.result.len()),
-			batched: Vec::with_capacity(limit as usize),
+			batched: Vec::new(),
 		};
 		for (k, v) in batch.result {
 			let st = DocLengthAndCount::kv_decode_value(&v, ())?;
@@ -887,8 +1006,10 @@ impl FullTextIndex {
 			dlc.total_docs_length += st.total_docs_length;
 			deltas.legacy.push(DocStatsDeltaKey::decode_key(&k)?.into_owned());
 		}
-		// Drain the batched deltas in the same pass, so an index carrying entries
-		// written either side of the `!dx` change compacts to the same statistic.
+		// Drain the batched deltas in the same pass, so an index carrying entries in
+		// either shape compacts to the same statistic.
+		// One `!dx` entry is one fixed-size statistic, so unlike `!tx` a key bound
+		// is already a bound on the work this fold holds.
 		let mut batched =
 			tx.scan(self.ikb.new_dx_range()?, limit.saturating_add(1), 0, None).await?;
 		let batched_has_more = batched.len() > limit as usize;
@@ -1388,7 +1509,7 @@ mod tests {
 	use tokio::time::sleep;
 	use uuid::Uuid;
 
-	use super::{DocumentTerms, FullTextIndex, TermDocument};
+	use super::{DocumentTerms, FullTextIndex, TermChangeKey, TermDocument};
 	use crate::IndexKeyBase;
 	use crate::catalog::{AnalyzerDefinition, DatabaseId, FullTextParams, IndexId, NamespaceId};
 	use crate::expr::Tokenizer;
@@ -1537,6 +1658,35 @@ mod tests {
 				IndexOperation::compaction_trigger(&self.ikb, &tx, self.nid).await.unwrap();
 			}
 
+			tx.commit().await.unwrap();
+		}
+
+		/// Indexes several documents in one transaction, so each flushed `!tx`
+		/// entry carries a bitmap as wide as the batch rather than one document.
+		///
+		/// `content` selects which terms the batch writes, so a test can place
+		/// entries of chosen widths at chosen points in the scan's term order.
+		async fn index_batch_in_one_tx(&self, stk: &mut Stk, rids: &[RecordId], content: &Value) {
+			let ctx = self.ds.env(TransactionType::Write).await;
+			let tx = ctx.tx();
+			let az_fn = NoAnalyzerFunction;
+			let mut require_compaction = false;
+			for rid in rids {
+				self.fti
+					.index_content(
+						stk,
+						&ctx,
+						&az_fn,
+						rid,
+						vec![content.clone()],
+						&mut require_compaction,
+					)
+					.await
+					.unwrap();
+			}
+			if require_compaction {
+				IndexOperation::compaction_trigger(&self.ikb, &tx, self.nid).await.unwrap();
+			}
 			tx.commit().await.unwrap();
 		}
 
@@ -1919,6 +2069,178 @@ mod tests {
 			"query should still see documents after all term deltas are compacted"
 		);
 		tx.cancel().await.unwrap();
+	}
+
+	/// A `!tx` entry carries a whole bitmap, so a round bounding itself by key
+	/// count would hold as many documents as the transaction that wrote the entry
+	/// was wide — and a compaction transaction has no write-cardinality guard
+	/// behind it. The limit is spent as a document budget instead.
+	///
+	/// It is spent in whole keys, because the write phase may only delete an entry
+	/// whose every document it folded. So an entry wider than the entire budget is
+	/// still folded on its own, or it could never be compacted at all.
+	#[test(tokio::test)]
+	async fn term_docs_compaction_bounds_documents_not_keys() {
+		let test = TestContext::new().await;
+		let docs: Vec<RecordId> =
+			(0..6).map(|i| RecordId::new("t".into(), format!("doc{i}"))).collect();
+
+		let mut stack = reblessive::TreeStack::new();
+		let content = test.content.as_ref().clone();
+		stack.enter(|stk| test.index_batch_in_one_tx(stk, &docs, &content)).finish().await;
+
+		let tx = test.new_tx(TransactionType::Read).await;
+		assert!(
+			test.tt_delta_count(&tx).await > 2,
+			"the fixture must leave more entries than one round's budget"
+		);
+		tx.cancel().await.unwrap();
+
+		let tx = test.new_tx(TransactionType::Read).await;
+		let plan = test.fti.prepare_term_docs_compaction_with_limit(&tx, 2).await.unwrap();
+		tx.cancel().await.unwrap();
+		assert_eq!(
+			plan.tx_keys.len(),
+			1,
+			"one entry six documents wide spends a budget of two on its own"
+		);
+		assert!(plan.has_more(), "the entries the budget stopped short of are the next round's");
+
+		// Spending in whole keys must not stall: draining a budget at a time still
+		// reaches zero, however wide the entries are.
+		loop {
+			let tx = test.new_tx(TransactionType::Write).await;
+			let plan = test.fti.prepare_term_docs_compaction_with_limit(&tx, 2).await.unwrap();
+			let has_more = plan.has_more();
+			let applied = test.fti.apply_term_docs_compaction(&tx, plan).await.unwrap();
+			tx.commit().await.unwrap();
+			if !applied || !has_more {
+				break;
+			}
+		}
+		let tx = test.new_tx(TransactionType::Read).await;
+		assert_eq!(test.tt_delta_count(&tx).await, 0, "every entry must eventually compact");
+		tx.cancel().await.unwrap();
+	}
+
+	/// `limit` bounds the round, not each delta family, so the batched pass takes
+	/// only what the per-document pass left. Two families each spending the whole
+	/// limit would let a round hold twice the documents it was sized for.
+	///
+	/// A round the per-document pass filled completely still takes one batched entry,
+	/// because every round folds at least one. Taking none would leave the batched
+	/// family undrained for as long as a legacy backlog arrived as fast as it went.
+	#[test(tokio::test)]
+	async fn a_round_shares_one_budget_across_both_delta_shapes() {
+		let test = TestContext::new().await;
+
+		// Entries in the per-document shape, which a reader folds alongside `!tx`.
+		let tx = test.new_tx(TransactionType::Write).await;
+		for doc_id in 0..3u64 {
+			let key = TermChangeKey {
+				ns: test.ikb.ns(),
+				db: test.ikb.db(),
+				tb: Cow::Borrowed(test.ikb.table()),
+				ix: test.ikb.index(),
+				term: Cow::Borrowed("aaa"),
+				doc_id,
+				nid: Uuid::nil(),
+				uid: Uuid::nil(),
+				add: true,
+			};
+			tx.set_key(&key, &String::new()).await.unwrap();
+		}
+		tx.commit().await.unwrap();
+
+		// Then batched entries under three distinct terms, all sorting after the legacy
+		// ones. More than one, so a pass given its own budget of three would take them
+		// all where a pass given what the legacy pass left takes one.
+		let docs = vec![RecordId::new("t".into(), "w0".to_owned())];
+		let content = Value::from(Array::from(vec!["zza", "zzb", "zzc"]));
+		let mut stack = reblessive::TreeStack::new();
+		stack.enter(|stk| test.index_batch_in_one_tx(stk, &docs, &content)).finish().await;
+
+		let tx = test.new_tx(TransactionType::Read).await;
+		let plan = test.fti.prepare_term_docs_compaction_with_limit(&tx, 3).await.unwrap();
+		tx.cancel().await.unwrap();
+
+		assert_eq!(plan.tt_keys.len(), 3, "the legacy entries spend the whole budget");
+		// A round with no budget left still takes one batched entry, because every round
+		// folds at least one. The alternative starves the batched family whenever a
+		// legacy backlog arrives as fast as it drains.
+		assert_eq!(
+			plan.tx_keys.len(),
+			1,
+			"a spent budget still folds one entry, and stops: {:?}",
+			plan.tx_keys.iter().map(|k| k.term.to_string()).collect::<Vec<_>>()
+		);
+		assert!(plan.has_more(), "the round stopped short of the range's end");
+	}
+
+	/// The entry that ends a round is folded, not deferred to a later one.
+	///
+	/// A round restarts at the head of the range, so a deferred entry waits for
+	/// everything in front of it to be deleted. Here two narrow entries sort ahead of
+	/// a wider one and spend the budget between them, which is exactly the shape that
+	/// used to defer the entry behind them.
+	///
+	/// This buys ordering within a round, not fairness across rounds: writes arriving
+	/// at the head as fast as a round drains it still hold every round's attention.
+	#[test(tokio::test)]
+	async fn a_round_folds_the_entry_that_ends_it_rather_than_deferring_it() {
+		let test = TestContext::new().await;
+		let ahead = vec![RecordId::new("t".into(), "n0".to_owned())];
+		let behind: Vec<RecordId> =
+			(0..4).map(|i| RecordId::new("t".into(), format!("w{i}"))).collect();
+		let two_terms = Value::from(Array::from(vec!["aaa", "aab"]));
+		let one_term = Value::from(Array::from(vec!["zzz"]));
+
+		let mut stack = reblessive::TreeStack::new();
+		stack.enter(|stk| test.index_batch_in_one_tx(stk, &ahead, &two_terms)).finish().await;
+		stack.enter(|stk| test.index_batch_in_one_tx(stk, &behind, &one_term)).finish().await;
+
+		let tx = test.new_tx(TransactionType::Read).await;
+		let plan = test.fti.prepare_term_docs_compaction_with_limit(&tx, 3).await.unwrap();
+		tx.cancel().await.unwrap();
+
+		let folded: Vec<String> = plan.tx_keys.iter().map(|k| k.term.to_string()).collect();
+		assert!(
+			folded.contains(&"zzz".to_owned()),
+			"the entry that ends the round must be folded, got {folded:?}"
+		);
+	}
+
+	/// An entry wider than the whole remaining budget is folded when it is the one
+	/// that ends the round, and the round stops there.
+	///
+	/// Turning it away for a later round is what starves it, so the bound comes from
+	/// the round stopping instead: one entry past the budget, not every entry behind
+	/// it. See `a_round_folds_the_entry_that_ends_it_rather_than_deferring_it`.
+	#[test(tokio::test)]
+	async fn a_wide_entry_ends_the_round_it_overruns() {
+		let test = TestContext::new().await;
+		let narrow = vec![RecordId::new("t".into(), "n0".to_owned())];
+		let wide: Vec<RecordId> =
+			(0..6).map(|i| RecordId::new("t".into(), format!("w{i}"))).collect();
+		let first = Value::from(Array::from(vec!["aaa"]));
+		let second = Value::from(Array::from(vec!["zzz"]));
+
+		let mut stack = reblessive::TreeStack::new();
+		stack.enter(|stk| test.index_batch_in_one_tx(stk, &narrow, &first)).finish().await;
+		stack.enter(|stk| test.index_batch_in_one_tx(stk, &wide, &second)).finish().await;
+
+		let tx = test.new_tx(TransactionType::Read).await;
+		let plan = test.fti.prepare_term_docs_compaction_with_limit(&tx, 3).await.unwrap();
+		tx.cancel().await.unwrap();
+
+		let folded: Vec<String> = plan.tx_keys.iter().map(|k| k.term.to_string()).collect();
+		assert_eq!(
+			folded,
+			vec!["aaa", "zzz"],
+			"the overrunning entry is folded, and then the round ends"
+		);
+		// It ended on the range's last entry, so there is nothing to come back for.
+		assert!(!plan.has_more(), "a round that took the last entry reports no more");
 	}
 
 	/// A query must observe the documents its own transaction has just indexed,
