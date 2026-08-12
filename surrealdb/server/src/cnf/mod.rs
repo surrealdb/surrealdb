@@ -50,7 +50,7 @@ pub static HTTP_MAX_SQL_BODY_SIZE: LazyLock<usize> =
 pub static HTTP_MAX_GQL_BODY_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_HTTP_MAX_GQL_BODY_SIZE", usize, 1 << 20);
 
-/// The maximum HTTP body size of the HTTP /api endpoint (default: 1 MiB)
+/// The maximum HTTP body size of the HTTP /api endpoint (default: 4 MiB)
 pub static HTTP_MAX_API_BODY_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_HTTP_MAX_API_BODY_SIZE", usize, 4 << 20);
 
