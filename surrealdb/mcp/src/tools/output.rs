@@ -3,7 +3,7 @@
 //! MCP tool responses emit both structured and unstructured content:
 //!
 //! - `CallToolResult.structured_content` carries the typed JSON the LLM can deserialize verbatim.
-//!   This is the 2025-06-18 spec "structured content" affordance.
+//!   This is the spec's "structured content" affordance.
 //! - `CallToolResult.content` carries a human-readable rendering of the same data. Tools that
 //!   predate structured content still work off this.
 //!
@@ -13,7 +13,7 @@
 //! in a multi-statement query keeps `is_error = false` so the caller can see
 //! which statements succeeded.
 
-use rmcp::model::{CallToolResult, Content};
+use rmcp::model::{CallToolResult, ContentBlock};
 use serde_json::{Value as JsonValue, json};
 use surrealdb_rpc::QueryResult;
 use surrealdb_types::Error as TypesError;
@@ -110,7 +110,7 @@ pub(crate) fn single_statement_result(
 				"truncated": truncated,
 				"time_ms": time_ms,
 			});
-			let mut r = CallToolResult::success(vec![Content::text(text)]);
+			let mut r = CallToolResult::success(vec![ContentBlock::text(text)]);
 			r.structured_content = Some(structured);
 			r
 		}
@@ -127,7 +127,7 @@ pub(crate) fn single_statement_result(
 				"kind": err.kind_str(),
 				"time_ms": time_ms,
 			});
-			let mut r = CallToolResult::error(vec![Content::text(format!(
+			let mut r = CallToolResult::error(vec![ContentBlock::text(format!(
 				"Error ({}): {}",
 				err.kind_str(),
 				err.message()
@@ -221,9 +221,9 @@ pub(crate) fn multi_statement_result(
 	});
 	let text = text_blocks.join("\n\n");
 	let mut r = if is_error {
-		CallToolResult::error(vec![Content::text(text)])
+		CallToolResult::error(vec![ContentBlock::text(text)])
 	} else {
-		CallToolResult::success(vec![Content::text(text)])
+		CallToolResult::success(vec![ContentBlock::text(text)])
 	};
 	r.structured_content = Some(structured);
 	r
@@ -236,7 +236,7 @@ pub(crate) fn multi_statement_result(
 /// rendering of the payload.
 pub(crate) fn structured_success(structured: JsonValue) -> CallToolResult {
 	let text = pretty_json(&structured);
-	let mut r = CallToolResult::success(vec![Content::text(text)]);
+	let mut r = CallToolResult::success(vec![ContentBlock::text(text)]);
 	r.structured_content = Some(structured);
 	r
 }
@@ -246,7 +246,7 @@ pub(crate) fn structured_success(structured: JsonValue) -> CallToolResult {
 /// in-band error rather than a protocol-level JSON-RPC error.
 pub(crate) fn tool_error_from_surreal(err: &TypesError) -> CallToolResult {
 	let payload = error_payload(err);
-	let mut r = CallToolResult::error(vec![Content::text(format!(
+	let mut r = CallToolResult::error(vec![ContentBlock::text(format!(
 		"Error ({}): {}",
 		err.kind_str(),
 		err.message()
@@ -265,7 +265,8 @@ pub(crate) fn tool_error(kind: &'static str, message: impl Into<String>) -> Call
 		"error": message,
 		"kind": kind,
 	});
-	let mut r = CallToolResult::error(vec![Content::text(format!("Error ({kind}): {message}"))]);
+	let mut r =
+		CallToolResult::error(vec![ContentBlock::text(format!("Error ({kind}): {message}"))]);
 	r.structured_content = Some(structured);
 	r
 }

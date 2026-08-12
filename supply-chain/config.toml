@@ -238,6 +238,10 @@ criteria = "safe-to-deploy"
 version = "0.2.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.base64]]
+version = "0.23.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.bcrypt]]
 version = "0.18.0"
 criteria = "safe-to-deploy"
@@ -458,12 +462,24 @@ criteria = "safe-to-deploy"
 version = "0.23.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.darling]]
+version = "0.24.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.darling_core]]
 version = "0.23.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.darling_core]]
+version = "0.24.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.darling_macro]]
 version = "0.23.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.darling_macro]]
+version = "0.24.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.dashmap]]
@@ -1347,11 +1363,11 @@ version = "0.7.46"
 criteria = "safe-to-deploy"
 
 [[exemptions.rmcp]]
-version = "1.7.0"
+version = "3.1.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.rmcp-macros]]
-version = "1.7.0"
+version = "3.1.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.roaring]]
@@ -1555,7 +1571,7 @@ version = "0.7.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.sse-stream]]
-version = "0.2.3"
+version = "0.2.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.stable_deref_trait]]

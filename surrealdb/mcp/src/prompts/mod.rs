@@ -3,7 +3,7 @@
 pub mod query_builder;
 pub mod schema_explorer;
 
-use rmcp::model::{GetPromptResult, Prompt, PromptArgument, PromptMessage, PromptMessageRole};
+use rmcp::model::{GetPromptResult, Prompt, PromptArgument, PromptMessage, Role};
 
 /// List all available prompts.
 pub fn list_prompts() -> Vec<Prompt> {
@@ -84,7 +84,7 @@ pub fn get_prompt(name: &str, arguments: &serde_json::Value) -> Option<GetPrompt
 
 fn get_data_modeler_prompt(requirements: &str) -> GetPromptResult {
 	GetPromptResult::new(vec![PromptMessage::new_text(
-		PromptMessageRole::User,
+		Role::User,
 		format!(
 			r#"Help me design a SurrealDB data model for: {requirements}
 
@@ -110,7 +110,7 @@ SurrealDB capabilities to consider:
 
 fn get_transaction_prompt(goal: &str) -> GetPromptResult {
 	GetPromptResult::new(vec![PromptMessage::new_text(
-		PromptMessageRole::User,
+		Role::User,
 		format!(
 			r#"Help me write a SurrealDB transaction to: {goal}
 
@@ -137,7 +137,7 @@ Key rules:
 
 fn get_graph_prompt(scenario: &str) -> GetPromptResult {
 	GetPromptResult::new(vec![PromptMessage::new_text(
-		PromptMessageRole::User,
+		Role::User,
 		format!(
 			r#"Help me with graph operations in SurrealDB for: {scenario}
 
@@ -162,7 +162,7 @@ Graph patterns:
 
 fn get_search_prompt(use_case: &str) -> GetPromptResult {
 	GetPromptResult::new(vec![PromptMessage::new_text(
-		PromptMessageRole::User,
+		Role::User,
 		format!(
 			r#"Help me set up full-text search in SurrealDB for: {use_case}
 
@@ -192,7 +192,7 @@ Advanced features:
 
 #[cfg(test)]
 mod tests {
-	use rmcp::model::PromptMessageContent;
+	use rmcp::model::ContentBlock;
 
 	use super::*;
 
@@ -210,9 +210,7 @@ mod tests {
 			.messages
 			.iter()
 			.filter_map(|m| match &m.content {
-				PromptMessageContent::Text {
-					text,
-				} => Some(text.as_str()),
+				ContentBlock::Text(text) => Some(text.text.as_str()),
 				_ => None,
 			})
 			.collect::<Vec<_>>()

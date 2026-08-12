@@ -765,6 +765,67 @@ jobs:
         run: bun test --timeout 30000
 
   # ----------------------------------------
+  # MCP server
+  # ----------------------------------------
+
+  # The MCP server needs a job of its own. The workspace test tasks run with
+  # `--no-default-features`, which leaves `surrealdb-mcp/server-http` off and so
+  # compiles the HTTP-transport and audit test files — both gated on that
+  # feature — down to empty binaries. The Rust half here runs those suites with
+  # the transports actually enabled. The JS half drives the built server through
+  # the official MCP TypeScript SDK, covering the advertised tool surface and
+  # the protocol-version negotiation matrix against a real client rather than
+  # against our own in-process assumptions.
+  mcp-tests:
+    name: MCP tests
+    runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
+    needs: build
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+        with:
+          preset: test
+
+      - name: Run MCP crate tests
+        run: cargo make ci-mcp-test
+
+      - name: Download server binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: surreal-arm64
+          path: ${{ github.workspace }}/artifacts
+
+      - name: Set file permissions
+        run: chmod +x ${{ github.workspace }}/artifacts/surreal
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: tests/mcp-js
+        run: bun install --frozen-lockfile
+
+      # Each test file spawns its own debug-build server and waits for /health
+      # in a `beforeAll`, so the per-test timeout has to cover process startup
+      # on a loaded runner, not just a request. 60s is headroom for that hook,
+      # not a real budget — the suite settles in well under a minute.
+      - name: Run MCP conformance suite
+        working-directory: tests/mcp-js
+        env:
+          SURREAL_BIN: ${{ github.workspace }}/artifacts/surreal
+        run: bun test --timeout 60000
+
+  # ----------------------------------------
   # Embedded Node.js engine
   # ----------------------------------------
 
@@ -896,6 +957,8 @@ jobs:
       - upgrade-tests
       # JS SDK conformance
       - conformance-tests
+      # MCP server
+      - mcp-tests
       # Embedded Node.js engine
       - node-engine
       # Embedded browser engine
@@ -931,6 +994,7 @@ jobs:
             "${{ needs.lang-tests.result }}"
             "${{ needs.upgrade-tests.result }}"
             "${{ needs.conformance-tests.result }}"
+            "${{ needs.mcp-tests.result }}"
             "${{ needs.node-engine.result }}"
             "${{ needs.wasm-engine.result }}"
           )

@@ -518,11 +518,41 @@ impl McpService {
 	}
 }
 
+/// Protocol revision advertised to a client that does not request a specific
+/// supported one, and reported by the `surrealdb://info` resource.
+///
+/// Pinned explicitly rather than inherited from `ProtocolVersion::LATEST`: the
+/// SDK constant tracks the newest revision the SDK models, which is not the
+/// same claim as the newest revision this server implements. Binding to it
+/// would let a dependency bump silently change the protocol SurrealDB
+/// advertises.
+pub const ADVERTISED_PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::V_2025_11_25;
+
+/// Every protocol revision this server implements, newest first.
+///
+/// This list bounds three things at once: what `server/discover` advertises,
+/// what `initialize` negotiation may agree to, and which per-request protocol
+/// versions are accepted. A revision absent here is answered by downgrading to
+/// [`ADVERTISED_PROTOCOL_VERSION`] rather than by an error.
+///
+/// `2026-07-28` is deliberately excluded. That revision removes the
+/// `initialize` handshake and protocol sessions entirely, so every request must
+/// carry its own identity and scope; this server still resolves the caller's
+/// session once at `initialize` and holds the active namespace/database on it.
+/// Advertising the revision without that redesign would answer `tools/list`
+/// normally and then fail every `tools/call`.
+pub const SUPPORTED_PROTOCOL_VERSIONS: &[ProtocolVersion] = &[
+	ProtocolVersion::V_2025_11_25,
+	ProtocolVersion::V_2025_06_18,
+	ProtocolVersion::V_2025_03_26,
+	ProtocolVersion::V_2024_11_05,
+];
+
 // ---------------------------------------------------------------------------
 // Tool implementations -- use types from tools/ modules directly
 // ---------------------------------------------------------------------------
 
-// Tool annotations follow the MCP 2025-06-18 hint spec:
+// Tool annotations follow the MCP hint spec as of 2025-11-25:
 // - `read_only_hint = true` for tools that never write.
 // - `destructive_hint = true` for tools that may mutate or remove data.
 // - `idempotent_hint = true` for tools where repeated calls with the same arguments produce the
@@ -749,12 +779,12 @@ impl McpService {
 	}
 
 	#[tool(
-		description = "Execute a GQL (ISO/IEC 39075) query with optional parameter bindings, e.g. `MATCH (p:person) RETURN p.name AS name`.",
+		description = "Execute a GQL (ISO/IEC 39075) query or mutation with optional parameter bindings, e.g. `MATCH (p:person) RETURN p.name AS name`. Mutation statements (INSERT, SET, REMOVE, DELETE) are supported and may modify or delete data.",
 		annotations(
 			title = "Run GQL",
-			read_only_hint = true,
-			destructive_hint = false,
-			idempotent_hint = true,
+			read_only_hint = false,
+			destructive_hint = true,
+			idempotent_hint = false,
 			open_world_hint = false
 		)
 	)]
@@ -800,8 +830,18 @@ impl ServerHandler for McpService {
 				.enable_completions()
 				.build(),
 		)
-		.with_server_info(Implementation::from_build_env())
+		.with_protocol_version(ADVERTISED_PROTOCOL_VERSION)
+		// Named explicitly rather than via `Implementation::from_build_env()`,
+		// which resolves `CARGO_CRATE_NAME` inside rmcp and so reports the SDK
+		// as the server. MCP clients surface this name to users.
+		.with_server_info(
+			Implementation::new("surrealdb", env!("CARGO_PKG_VERSION")).with_title("SurrealDB"),
+		)
 		.with_instructions(resources::instructions::get_instructions().to_string())
+	}
+
+	fn supported_protocol_versions(&self) -> std::borrow::Cow<'static, [ProtocolVersion]> {
+		std::borrow::Cow::Borrowed(SUPPORTED_PROTOCOL_VERSIONS)
 	}
 
 	#[tracing::instrument(skip_all, target = "surrealdb::mcp")]
@@ -844,11 +884,7 @@ impl ServerHandler for McpService {
 		ctx: RequestContext<RoleServer>,
 	) -> Result<ListResourcesResult, McpError> {
 		self.verify_request_subject(&ctx)?;
-		Ok(ListResourcesResult {
-			resources: resources::list_resources(),
-			next_cursor: None,
-			meta: None,
-		})
+		Ok(ListResourcesResult::with_all_items(resources::list_resources()))
 	}
 
 	async fn list_resource_templates(
@@ -857,20 +893,16 @@ impl ServerHandler for McpService {
 		ctx: RequestContext<RoleServer>,
 	) -> Result<ListResourceTemplatesResult, McpError> {
 		self.verify_request_subject(&ctx)?;
-		Ok(ListResourceTemplatesResult {
-			resource_templates: resources::list_resource_templates(),
-			next_cursor: None,
-			meta: None,
-		})
+		Ok(ListResourceTemplatesResult::with_all_items(resources::list_resource_templates()))
 	}
 
 	async fn read_resource(
 		&self,
 		request: ReadResourceRequestParams,
 		ctx: RequestContext<RoleServer>,
-	) -> Result<ReadResourceResult, McpError> {
+	) -> Result<ReadResourceResponse, McpError> {
 		self.verify_request_subject(&ctx)?;
-		resources::read_resource(self.session()?, &request.uri).await
+		Ok(resources::read_resource(self.session()?, &request.uri).await?.into())
 	}
 
 	async fn list_prompts(
@@ -879,18 +911,14 @@ impl ServerHandler for McpService {
 		ctx: RequestContext<RoleServer>,
 	) -> Result<ListPromptsResult, McpError> {
 		self.verify_request_subject(&ctx)?;
-		Ok(ListPromptsResult {
-			prompts: prompts::list_prompts(),
-			next_cursor: None,
-			meta: None,
-		})
+		Ok(ListPromptsResult::with_all_items(prompts::list_prompts()))
 	}
 
 	async fn get_prompt(
 		&self,
 		request: GetPromptRequestParams,
 		ctx: RequestContext<RoleServer>,
-	) -> Result<GetPromptResult, McpError> {
+	) -> Result<GetPromptResponse, McpError> {
 		self.verify_request_subject(&ctx)?;
 		// `request.arguments` is already a `serde_json::Map<String, Value>`,
 		// so we can wrap it directly into a `Value::Object` without a
@@ -901,7 +929,7 @@ impl ServerHandler for McpService {
 			.as_ref()
 			.map(|m| serde_json::Value::Object(m.clone()))
 			.unwrap_or(serde_json::Value::Null);
-		prompts::get_prompt(&request.name, &args).ok_or_else(|| {
+		prompts::get_prompt(&request.name, &args).map(Into::into).ok_or_else(|| {
 			McpError::invalid_params(format!("Unknown prompt: {}", request.name), None)
 		})
 	}
@@ -997,7 +1025,7 @@ mod http_service {
 		mcp_config: Arc<McpConfig>,
 	) -> McpHttpService {
 		let mut config = StreamableHttpServerConfig::default();
-		config.stateful_mode = true;
+		config.legacy_session_mode = true;
 		apply_host_policy(&mut config, &mcp_config);
 		StreamableHttpService::new(
 			move || {

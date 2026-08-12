@@ -23,10 +23,7 @@ pub mod instructions;
 pub mod schema;
 
 use rmcp::ErrorData;
-use rmcp::model::{
-	AnnotateAble, RawResource, RawResourceTemplate, ReadResourceResult, Resource, ResourceContents,
-	ResourceTemplate,
-};
+use rmcp::model::{ReadResourceResult, Resource, ResourceContents, ResourceTemplate};
 
 use crate::session::McpSession;
 
@@ -51,18 +48,15 @@ pub fn list_resources() -> Vec<Resource> {
 	// advertised via [`list_resource_templates`] instead, so their URIs
 	// remain globally unique and safe for clients to cache.
 	vec![
-		RawResource::new(INSTRUCTIONS_URI, "SurrealDB Instructions")
+		Resource::new(INSTRUCTIONS_URI, "SurrealDB Instructions")
 			.with_description("Usage instructions for the SurrealDB MCP server")
-			.with_mime_type("text/markdown")
-			.no_annotation(),
-		RawResource::new(INFO_URI, "Server Info")
+			.with_mime_type("text/markdown"),
+		Resource::new(INFO_URI, "Server Info")
 			.with_description("SurrealDB server version and capabilities")
-			.with_mime_type("application/json")
-			.no_annotation(),
-		RawResource::new(VERSION_URI, "SurrealDB Version")
+			.with_mime_type("application/json"),
+		Resource::new(VERSION_URI, "SurrealDB Version")
 			.with_description("SurrealDB version string")
-			.with_mime_type("text/plain")
-			.no_annotation(),
+			.with_mime_type("text/plain"),
 	]
 }
 
@@ -70,23 +64,21 @@ pub fn list_resources() -> Vec<Resource> {
 /// parameterised schema surface via `resources/templates/list`.
 pub fn list_resource_templates() -> Vec<ResourceTemplate> {
 	vec![
-		RawResourceTemplate::new(DATABASE_SCHEMA_TEMPLATE, "Database Schema")
+		ResourceTemplate::new(DATABASE_SCHEMA_TEMPLATE, "Database Schema")
 			.with_description(
 				"Full schema for a specific namespace/database. Replace \
 				 `{namespace}` and `{database}` with the target identifiers. \
 				 The URI is globally unique so it is safe to cache and subscribe to.",
 			)
-			.with_mime_type("application/json")
-			.no_annotation(),
-		RawResourceTemplate::new(TABLE_SCHEMA_TEMPLATE, "Table Schema")
+			.with_mime_type("application/json"),
+		ResourceTemplate::new(TABLE_SCHEMA_TEMPLATE, "Table Schema")
 			.with_description(
 				"Schema for a specific table inside a specific namespace/database. \
 				 Replace `{namespace}`, `{database}`, and `{table}` with the target \
 				 identifiers. The URI is globally unique so it is safe to cache and \
 				 subscribe to.",
 			)
-			.with_mime_type("application/json")
-			.no_annotation(),
+			.with_mime_type("application/json"),
 	]
 }
 

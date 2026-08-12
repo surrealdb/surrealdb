@@ -19,8 +19,8 @@ use std::time::Duration;
 use common::test_datastore;
 use rmcp::ServiceExt;
 use rmcp::model::{
-	CallToolRequestParams, ClientInfo, CompleteRequestParams, GetPromptRequestParams,
-	PromptMessageContent, ReadResourceRequestParams, Reference, ResourceContents,
+	CallToolRequestParams, ClientInfo, CompleteRequestParams, ContentBlock, GetPromptRequestParams,
+	ReadResourceRequestParams, Reference, ResourceContents,
 };
 use rmcp::service::RunningService;
 use serde_json::json;
@@ -83,7 +83,7 @@ fn tool_text(result: &rmcp::model::CallToolResult) -> String {
 	result
 		.content
 		.iter()
-		.filter_map(|c| c.raw.as_text())
+		.filter_map(|c| c.as_text())
 		.map(|t| t.text.as_str())
 		.collect::<Vec<_>>()
 		.join("\n")
@@ -112,10 +112,10 @@ fn resource_text(result: &rmcp::model::ReadResourceResult) -> String {
 #[tokio::test(flavor = "multi_thread")]
 async fn stdio_handshake_reports_server_info() {
 	let (client, server) = spawn_server().await;
-	let info = client.peer_info().expect("server info should be set after handshake").clone();
+	let info = client.peer_info().expect("server info should be set after handshake");
 
 	// Instructions are our curated LLM-facing docs -- must be non-empty.
-	let instructions = info.instructions.expect("server should send instructions");
+	let instructions = info.instructions.clone().expect("server should send instructions");
 	assert!(!instructions.is_empty(), "instructions should be non-empty");
 	assert!(
 		instructions.contains("SurrealDB"),
@@ -531,9 +531,7 @@ async fn stdio_prompts_list_and_get() {
 		.messages
 		.iter()
 		.filter_map(|m| match &m.content {
-			PromptMessageContent::Text {
-				text,
-			} => Some(text.as_str()),
+			ContentBlock::Text(text) => Some(text.text.as_str()),
 			_ => None,
 		})
 		.collect::<Vec<_>>()
@@ -580,10 +578,7 @@ async fn stdio_completion_suggests_tables() {
 
 	let req = CompleteRequestParams::new(
 		Reference::for_prompt("query_builder"),
-		rmcp::model::ArgumentInfo {
-			name: "table".to_string(),
-			value: String::new(),
-		},
+		rmcp::model::ArgumentInfo::new("table".to_string(), String::new()),
 	);
 	let result = within("complete", client.complete(req)).await.expect("complete");
 	let values = result.completion.values;

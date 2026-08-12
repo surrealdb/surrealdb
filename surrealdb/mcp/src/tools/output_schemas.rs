@@ -7,7 +7,7 @@
 //! after it is constructed, since the `#[tool]` attribute macro does not
 //! expose an attribute for output schemas.
 //!
-//! All schemas are strict objects, as required by the MCP 2025-06-18 spec.
+//! All schemas are strict objects, as required by the MCP spec.
 
 use std::sync::Arc;
 

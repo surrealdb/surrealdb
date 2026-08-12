@@ -126,10 +126,7 @@ mod tests {
 	fn make_request(name: &str) -> CompleteRequestParams {
 		CompleteRequestParams::new(
 			Reference::for_prompt("any"),
-			ArgumentInfo {
-				name: name.to_string(),
-				value: String::new(),
-			},
+			ArgumentInfo::new(name.to_string(), String::new()),
 		)
 	}
 

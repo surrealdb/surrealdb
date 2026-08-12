@@ -238,7 +238,7 @@ regex = "1.12.3"
 regex-syntax = "0.8.10"
 reqwest = { version = "0.13.2", default-features = false }
 ring = "0.17.14"
-rmcp = { version = "1.4.0", default-features = false }
+rmcp = { version = "3.1.2", default-features = false }
 roaring = "0.11.3"
 rustls = { version = "0.23.38", default-features = false, features = ["logging", "std", "tls12"] }
 rust_decimal = "1.41.0"

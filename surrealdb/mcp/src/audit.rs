@@ -89,7 +89,6 @@ fn error_code_label(code: ErrorCode) -> String {
 		ErrorCode::METHOD_NOT_FOUND => "METHOD_NOT_FOUND".into(),
 		ErrorCode::INVALID_PARAMS => "INVALID_PARAMS".into(),
 		ErrorCode::INTERNAL_ERROR => "INTERNAL_ERROR".into(),
-		ErrorCode::URL_ELICITATION_REQUIRED => "URL_ELICITATION_REQUIRED".into(),
 		other => format!("CODE_{}", other.0),
 	}
 }
@@ -138,14 +137,14 @@ pub(crate) fn record(
 
 #[cfg(test)]
 mod tests {
-	use rmcp::model::Content;
+	use rmcp::model::ContentBlock;
 	use serde_json::json;
 
 	use super::*;
 
 	#[test]
 	fn classifies_success() {
-		let mut call = CallToolResult::success(vec![Content::text("ok")]);
+		let mut call = CallToolResult::success(vec![ContentBlock::text("ok")]);
 		call.structured_content = Some(json!({"status": "ok"}));
 		let result: Result<CallToolResult, McpError> = Ok(call);
 		let (outcome, kind) = classify(&result);
@@ -155,7 +154,7 @@ mod tests {
 
 	#[test]
 	fn classifies_tool_error_and_extracts_kind() {
-		let mut call = CallToolResult::error(vec![Content::text("Error (Validation): bad")]);
+		let mut call = CallToolResult::error(vec![ContentBlock::text("Error (Validation): bad")]);
 		call.structured_content = Some(json!({"error": "bad", "kind": "Validation"}));
 		let result: Result<CallToolResult, McpError> = Ok(call);
 		let (outcome, kind) = classify(&result);
@@ -165,7 +164,7 @@ mod tests {
 
 	#[test]
 	fn classifies_multi_statement_first_error_kind() {
-		let mut call = CallToolResult::success(vec![Content::text("...")]);
+		let mut call = CallToolResult::success(vec![ContentBlock::text("...")]);
 		call.structured_content = Some(json!({
 			"results": [
 				{"index": 0, "status": "ok"},

@@ -7,7 +7,6 @@
 //! [`crate::resources`] module docs for the reasoning.
 
 use rmcp::ErrorData;
-use rmcp::model::ProtocolVersion;
 use serde_json::json;
 
 use crate::session::McpSession;
@@ -16,16 +15,17 @@ use crate::tools::validate_table_name;
 
 /// Emit the `surrealdb://info` resource.
 ///
-/// The protocol version is taken from [`ProtocolVersion::LATEST`] so this
-/// value cannot drift from what we actually negotiate during the MCP
-/// handshake. Capabilities mirror what [`crate::service::McpService::get_info`]
-/// advertises so clients can introspect server features from a single
-/// resource fetch without re-reading the initialize response.
+/// The protocol version is read from
+/// [`crate::service::ADVERTISED_PROTOCOL_VERSION`], the same constant
+/// `get_info` advertises during the handshake, so the two can never disagree.
+/// Capabilities mirror what [`crate::service::McpService::get_info`] declares
+/// so clients can introspect server features from a single resource fetch
+/// without re-reading the initialize response.
 pub fn get_server_info() -> String {
 	json!({
 		"name": "SurrealDB",
 		"version": env!("CARGO_PKG_VERSION"),
-		"protocol_version": ProtocolVersion::LATEST.to_string(),
+		"protocol_version": crate::service::ADVERTISED_PROTOCOL_VERSION.to_string(),
 		"capabilities": {
 			"tools": true,
 			"resources": true,

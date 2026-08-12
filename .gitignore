@@ -79,6 +79,10 @@ surrealism/test/surrealism
 /surrealdb/wasm/dist/
 /surrealdb/wasm/*.tgz
 
+# Dependencies of the Bun-driven test suites, installed by `bun install`.
+/tests/conformance-js/node_modules/
+/tests/mcp-js/node_modules/
+
 *.actual.txt
 
 # Default --store-path of the language benchmark suite, and its dataset cache.

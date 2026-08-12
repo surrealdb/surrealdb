@@ -1,0 +1,12 @@
+{
+	"name": "surrealdb-mcp-conformance",
+	"private": true,
+	"type": "module",
+	"description": "MCP server conformance tests driven through the official MCP TypeScript SDK: every advertised tool, and the full protocol-version negotiation matrix, over Streamable HTTP.",
+	"scripts": {
+		"test": "bun test"
+	},
+	"dependencies": {
+		"@modelcontextprotocol/sdk": "^1.30.0"
+	}
+}

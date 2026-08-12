@@ -966,6 +966,31 @@ dependencies = [
 ]
 
 # --------------------------------------------------
+# MCP tests
+# --------------------------------------------------
+
+# The MCP suite needs its own task because the workspace test tasks run with
+# `--no-default-features`, which suppresses `surrealdb-mcp/server-http` and so
+# compiles the `#![cfg(feature = "server-http")]` HTTP and audit test files
+# down to empty binaries. Naming the package and its transports explicitly is
+# what makes the transport-level and audit-pipeline coverage actually execute.
+[tasks.ci-mcp-test]
+category = "CI - MCP TESTS"
+description = "Run the MCP server test suite across every transport"
+command = "cargo"
+args = [
+    "nextest",
+    "run",
+    "--locked",
+    "--package",
+    "surrealdb-mcp",
+    "--no-default-features",
+    "--features",
+    "server-http,transport-io",
+    "--all-targets",
+]
+
+# --------------------------------------------------
 # Workspace tests
 # --------------------------------------------------
 
