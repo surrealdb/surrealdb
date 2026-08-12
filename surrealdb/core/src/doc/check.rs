@@ -6,7 +6,6 @@ use super::IgnoreError;
 use crate::catalog::Permission;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
-use crate::doc::compute::DocKind;
 use crate::doc::{CursorDoc, Document, Error as DocError, Extras};
 use crate::exe::FlowResultExt;
 use crate::expr::paths::{ID, IN, OUT};
@@ -310,40 +309,18 @@ impl Document {
 		let Some(cond) = cond else {
 			return Ok(());
 		};
-		// Check if we need to reduce the document
-		if self.reduction_required(ctx, opt)? {
-			// Materialise the reduced view via the cached helper. On
-			// UPDATE / UPSERT this is a cache hit because
-			// `compute_input_data` has already built it against the same
-			// pre-mutation `self.current` — saves one `reduce_document`
-			// call per row. On DELETE / SELECT this is the first reduce.
-			let _ = self.reduce_current(stk, ctx, opt).await?;
-			// Populate computed fields on the reduced view so predicates
-			// like `WHERE flag` see the materialised value.
-			self.compute_fields(stk, ctx, opt, DocKind::CurrentReduced, None).await?;
-			// Re-borrow the reduced view we just materialised
-			let doc: &CursorDoc = self.current_reduced.as_ref().unwrap_or(&self.current);
-			// Check the WHERE clause against the reduced view
-			if !stk
-				.run(|stk| crate::legacy::expr_compute(&cond.0, stk, ctx, opt, Some(doc)))
-				.await
-				.catch_return()?
-				.is_truthy()
-			{
-				return Err(IgnoreError::Ignore);
-			}
-		} else {
-			// Compute the fields on the current document
-			self.compute_fields(stk, ctx, opt, DocKind::Current, None).await?;
-			// Check the WHERE clause against the computed document
-			if !stk
-				.run(|stk| crate::legacy::expr_compute(&cond.0, stk, ctx, opt, Some(&self.current)))
-				.await
-				.catch_return()?
-				.is_truthy()
-			{
-				return Err(IgnoreError::Ignore);
-			}
+		// Materialise the pre-mutation snapshot. On a mutating statement the
+		// data clause reads this same image, so the predicate and the data
+		// clause cannot disagree about a computed field's value.
+		let doc: &CursorDoc = self.materialise_current_snapshot(stk, ctx, opt).await?;
+		// Check the WHERE clause against the snapshot
+		if !stk
+			.run(|stk| crate::legacy::expr_compute(&cond.0, stk, ctx, opt, Some(doc)))
+			.await
+			.catch_return()?
+			.is_truthy()
+		{
+			return Err(IgnoreError::Ignore);
 		}
 		// Carry on
 		Ok(())

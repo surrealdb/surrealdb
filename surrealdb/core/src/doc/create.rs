@@ -39,6 +39,10 @@ impl Document {
 		// Store the document and index data
 		self.store_record_data(ctx, stm).await?;
 		self.store_index_data(stk, ctx, opt).await?;
+		// Materialise the computed fields the record's observers read: they are
+		// stripped before storage, so events, live queries, changefeeds and the
+		// output projection would otherwise see the record without them.
+		self.materialise_observed_fields(stk, ctx, opt).await?;
 		// Process additional table operations
 		self.process_table_references(stk, ctx, opt).await?;
 		self.process_table_views(stk, ctx, opt, super::Action::Create).await?;

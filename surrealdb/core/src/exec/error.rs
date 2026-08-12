@@ -407,8 +407,9 @@ pub(crate) enum Error {
 	#[error("Cannot define field `{0}` as `COMPUTED` bodies must be read-only.")]
 	ComputedWrite(String),
 
-	/// Cyclic dependency detected among computed fields
-	#[error("Cyclic dependency detected among computed fields: {0}")]
+	/// A field's DEFAULT / VALUE / ASSERT / COMPUTED clauses read each other in
+	/// a cycle, so there is no order in which they can all be evaluated
+	#[error("Cyclic dependency detected among field clauses: {0}")]
 	ComputedFieldCycle(String),
 
 	/// Cannot use the `{0}` keyword on the `id` field

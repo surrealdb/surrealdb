@@ -23,12 +23,15 @@ impl Document {
 		self.check_update_permissions(stk, ctx, opt, &self.current).await?;
 		// Reject writes to read-only view tables (after the permission gate)
 		self.check_table_not_view(opt)?;
+		// Check if the WHERE condition is truthy BEFORE evaluating the data
+		// clause, so a data clause with side effects runs only for records the
+		// condition accepts. This also matches the index-backed plan, where
+		// records rejected by the condition never enter this pipeline at all.
+		self.check_where_condition(stk, ctx, opt, stm.cond()).await?;
 		// Ensure any input data is computed
 		self.compute_input_data(stk, ctx, opt, stm).await?;
 		// Ensure all special fields are valid
 		self.check_data_fields()?;
-		// Check if the WHERE condition is truthy
-		self.check_where_condition(stk, ctx, opt, stm.cond()).await?;
 		// Set the specified record content
 		self.process_record_data(stk, ctx, opt).await?;
 		// Set the default record field values
@@ -42,6 +45,10 @@ impl Document {
 		// Store the document and index data
 		self.store_record_data(ctx, stm).await?;
 		self.store_index_data(stk, ctx, opt).await?;
+		// Materialise the computed fields the record's observers read: they are
+		// stripped before storage, so events, live queries, changefeeds and the
+		// output projection would otherwise see the record without them.
+		self.materialise_observed_fields(stk, ctx, opt).await?;
 		// Process additional table operations
 		self.process_table_references(stk, ctx, opt).await?;
 		self.process_table_views(stk, ctx, opt, super::Action::Update).await?;

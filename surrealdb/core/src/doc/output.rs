@@ -210,7 +210,7 @@ impl Document {
 		} else {
 			DocKind::Current
 		};
-		self.compute_fields(stk, ctx, opt, kind, None).await?;
+		self.compute_fields_if_present(stk, ctx, opt, kind, None).await?;
 		// Re-borrow the view we just materialised
 		let current: &CursorDoc = self.current_reduced.as_ref().unwrap_or(&self.current);
 		// Output the document
@@ -232,7 +232,7 @@ impl Document {
 		} else {
 			DocKind::Initial
 		};
-		self.compute_fields(stk, ctx, opt, kind, None).await?;
+		self.compute_fields_if_present(stk, ctx, opt, kind, None).await?;
 		// Re-borrow the view we just materialised
 		let initial: &CursorDoc = self.initial_reduced.as_ref().unwrap_or(&self.initial);
 		// Output the document
@@ -249,15 +249,17 @@ impl Document {
 		// Materialise the reduced views via the cached helpers.
 		let _ = self.reduce_initial(stk, ctx, opt).await?;
 		let _ = self.reduce_current(stk, ctx, opt).await?;
-		// Compute every computed field on both sides
+		// Compute every computed field on both sides. A creating statement has
+		// no pre-mutation record and a deleting one has no post-mutation record,
+		// and that view is left as it is rather than derived from nothing.
 		let reduced = self.initial_reduced.is_some();
 		let (ki, kc) = if reduced {
 			(DocKind::InitialReduced, DocKind::CurrentReduced)
 		} else {
 			(DocKind::Initial, DocKind::Current)
 		};
-		self.compute_fields(stk, ctx, opt, ki, None).await?;
-		self.compute_fields(stk, ctx, opt, kc, None).await?;
+		self.compute_fields_if_present(stk, ctx, opt, ki, None).await?;
+		self.compute_fields_if_present(stk, ctx, opt, kc, None).await?;
 		// Re-borrow the views we just materialised
 		let initial: &CursorDoc = self.initial_reduced.as_ref().unwrap_or(&self.initial);
 		let current: &CursorDoc = self.current_reduced.as_ref().unwrap_or(&self.current);
@@ -278,15 +280,17 @@ impl Document {
 		// Materialise the reduced views via the cached helpers.
 		let _ = self.reduce_initial(stk, ctx, opt).await?;
 		let _ = self.reduce_current(stk, ctx, opt).await?;
-		// Compute every computed field on both sides
+		// Compute every computed field on both sides. A creating statement has
+		// no pre-mutation record and a deleting one has no post-mutation record,
+		// and that view is left as it is rather than derived from nothing.
 		let reduced = self.initial_reduced.is_some();
 		let (ki, kc) = if reduced {
 			(DocKind::InitialReduced, DocKind::CurrentReduced)
 		} else {
 			(DocKind::Initial, DocKind::Current)
 		};
-		self.compute_fields(stk, ctx, opt, ki, None).await?;
-		self.compute_fields(stk, ctx, opt, kc, None).await?;
+		self.compute_fields_if_present(stk, ctx, opt, ki, None).await?;
+		self.compute_fields_if_present(stk, ctx, opt, kc, None).await?;
 		// Re-borrow the views we just materialised
 		let initial: &CursorDoc = self.initial_reduced.as_ref().unwrap_or(&self.initial);
 		let current: &CursorDoc = self.current_reduced.as_ref().unwrap_or(&self.current);

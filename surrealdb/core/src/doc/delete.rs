@@ -46,6 +46,10 @@ impl Document {
 			self.remove_doc_id(ctx).await?;
 		}
 		self.purge_record_data(stk, ctx, opt).await?;
+		// Materialise the computed fields the record's observers read: they are
+		// stripped before storage, so events, live queries, changefeeds and the
+		// output projection would otherwise see the record without them.
+		self.materialise_observed_fields(stk, ctx, opt).await?;
 		self.process_table_views(stk, ctx, opt, super::Action::Delete).await?;
 		self.process_table_events(stk, ctx, opt, super::Action::Delete).await?;
 		self.process_table_lives(stk, ctx, opt, super::Action::Delete).await?;

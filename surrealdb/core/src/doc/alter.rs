@@ -352,13 +352,17 @@ impl Document {
 					apply_assignments(stk, ctx, opt, self.current.doc.to_mut(), &x).await?;
 				}
 			};
-			// Every arm mutates `self.current.doc`, so the reduced view
-			// cached earlier in the pipeline (e.g. by `compute_input_data`
-			// or `check_where_condition`) is now stale. Invalidate
-			// it so any downstream caller that re-reduces sees the new
+			// Every arm mutates `self.current.doc`, so the pre-mutation
+			// snapshot is now stale in both halves. Invalidate the reduced
+			// view so any downstream caller that re-reduces sees the new
 			// field values rather than relying on `output_*` to do this
-			// implicitly.
+			// implicitly, and clear `fields_computed` so the computed fields
+			// are re-derived from those new values instead of the snapshot
+			// ones — otherwise a computed field that depends on an assigned
+			// field keeps its pre-mutation value, or disappears from the
+			// returned record once `process_table_fields` strips it.
 			self.current_reduced = None;
+			self.current.fields_computed = false;
 		};
 		// Carry on
 		Ok(())
@@ -368,14 +372,21 @@ impl Document {
 	///
 	/// The expressions inside `SET`/`CONTENT`/`MERGE`/`PATCH`/`REPLACE`/`UNSET`
 	/// can reference `$input` (for `INSERT … ON DUPLICATE KEY UPDATE` and
-	/// `RELATE`) and the current document fields, so the data clause must be
-	/// computed against a reduced view of `current` that has had field-level
-	/// permissions applied. The first call materialises that reduced view via
-	/// [`Self::reduce_current`], computes each expression against it, and
-	/// stores the resulting [`ComputedData`] on `self`. Subsequent calls in
-	/// the same pipeline (e.g. the UPSERT retry path, or `process_record_data`
-	/// reusing the value computed by an earlier permission check) are no-ops
-	/// and return the cached value without re-evaluating any user expression.
+	/// `RELATE`) and the current document fields, so the data clause is
+	/// evaluated against the pre-mutation snapshot built by
+	/// [`Self::materialise_current_snapshot`]: field-level permissions
+	/// applied, `COMPUTED` fields populated, and none of this statement's own
+	/// assignments visible. Every expression is evaluated against that one
+	/// image before any of them is applied, which is what makes
+	/// `SET a = a + 1, b = a + 1` assign `b` from the old `a`, and what makes
+	/// a computed field read the same in the data clause as in the `WHERE`
+	/// condition.
+	///
+	/// The first call computes each expression and stores the resulting
+	/// [`ComputedData`] on `self`. Subsequent calls in the same pipeline
+	/// (e.g. the UPSERT retry path, or `process_record_data` reusing the
+	/// value computed by an earlier permission check) are no-ops and return
+	/// the cached value without re-evaluating any user expression.
 	///
 	/// Returns `Ok(None)` when the statement has no data clause.
 	pub(super) async fn compute_input_data(
@@ -397,8 +408,9 @@ impl Document {
 				Extras::Relate(_, _, Some(value)) => Some(Arc::clone(value)),
 				_ => None,
 			};
-			// Reduce the document with permissions
-			let doc = self.reduce_current(stk, ctx, opt).await?;
+			// Evaluate against the pre-mutation snapshot, so the data clause
+			// reads exactly what the `WHERE` condition read
+			let doc = self.materialise_current_snapshot(stk, ctx, opt).await?;
 			// Compote the input data from the statement
 			self.input_data = Some(match data {
 				// This is a UNSET expression

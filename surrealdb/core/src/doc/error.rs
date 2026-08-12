@@ -103,6 +103,16 @@ pub(crate) enum Error {
 		field: Idiom,
 	},
 
+	/// The table's field clauses read each other in a cycle, so there is no
+	/// order in which they can all be evaluated
+	#[error(
+		"Cannot write to table '{table}': the DEFAULT, VALUE, ASSERT or COMPUTED clauses of the fields {fields} depend on each other in a cycle"
+	)]
+	FieldDependencyCycle {
+		table: String,
+		fields: String,
+	},
+
 	/// The specified value did not conform to the LET type check
 	#[error("Couldn't coerce value for field `{field_name}` of `{record}`: {error}")]
 	FieldCoerce {
@@ -163,6 +173,11 @@ impl LeafError for Error {
 					id: record.to_sql(),
 				},
 			),
+			// The table's own definitions are mutually inconsistent, so no
+			// record can be written until the schema is changed
+			Error::FieldDependencyCycle {
+				..
+			} => TypesError::configuration(message, None),
 			Error::IdNotFound {
 				rid,
 			} => TypesError::not_found(

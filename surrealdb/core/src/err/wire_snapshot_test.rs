@@ -459,6 +459,13 @@ fn every_doc_variant() -> Vec<(&'static str, DocError)> {
 			},
 		),
 		(
+			"FieldDependencyCycle",
+			DocError::FieldDependencyCycle {
+				table: "sample".to_string(),
+				fields: "sample".to_string(),
+			},
+		),
+		(
 			"FieldCoerce",
 			DocError::FieldCoerce {
 				record: "sample".to_string(),

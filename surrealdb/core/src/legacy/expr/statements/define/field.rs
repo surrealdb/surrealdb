@@ -503,10 +503,14 @@ pub(crate) async fn define_field_statement_validate_computed_options(
 	Ok(())
 }
 
-/// Validate that defining this computed field does not create a dependency cycle.
+/// Validate that defining this field does not create a dependency cycle.
 ///
-/// Builds a dependency graph from all existing computed fields on the table plus
-/// the field being defined, then runs iterative DFS to detect cycles.
+/// Builds a dependency graph from the value-producing clauses of all fields on
+/// the table plus the field being defined, then runs iterative DFS to detect
+/// cycles. `DEFAULT`, `VALUE` and `COMPUTED` take part, because each produces a
+/// value the write path may have to produce another field's value from.
+/// `ASSERT` does not: it validates a value rather than producing one, so two
+/// fields asserting against each other is ordinary.
 /// Only checks same-table dependencies (cross-table cycles are future work).
 pub(crate) async fn define_field_statement_validate_computed_cycles(
 	_this: &DefineFieldStatement,
@@ -515,22 +519,22 @@ pub(crate) async fn define_field_statement_validate_computed_cycles(
 	txn: Arc<Transaction>,
 	definition: &catalog::FieldDefinition,
 ) -> Result<()> {
-	// Only relevant for computed fields
-	if definition.computed.is_none() {
+	// Only relevant for fields that produce a value from other fields
+	if !definition.has_production_clause() {
 		return Ok(());
 	}
 
 	let fields = txn.all_tb_fields(ns, db, &definition.table, None).await?;
 	let field_name = definition.name.to_raw_string();
 
-	// Build adjacency list: field_name -> list of computed field dependencies.
-	// Deps are always extracted on the fly (computed_deps is not stored).
+	// Build adjacency list: field_name -> the fields its clauses read.
+	// Deps are always extracted on the fly (they are not stored).
 	// BTreeMap ensures deterministic iteration order for consistent cycle error messages.
 	let mut graph: std::collections::BTreeMap<String, Vec<String>> =
 		std::collections::BTreeMap::new();
 
 	for fd in fields.iter() {
-		if fd.computed.is_none() {
+		if !fd.has_production_clause() {
 			continue;
 		}
 		let name = fd.name.to_raw_string();
@@ -538,21 +542,11 @@ pub(crate) async fn define_field_statement_validate_computed_cycles(
 		if name == field_name {
 			continue;
 		}
-		let deps = if let Some(ref expr) = fd.computed {
-			crate::expr::computed_deps::extract_computed_deps(expr).fields
-		} else {
-			Vec::new()
-		};
-		graph.insert(name, deps);
+		graph.insert(name, fd.production_dependencies());
 	}
 
 	// Insert/replace the field being defined with its freshly-extracted deps
-	let new_deps = definition
-		.computed
-		.as_ref()
-		.map(|expr| crate::expr::computed_deps::extract_computed_deps(expr).fields)
-		.unwrap_or_default();
-	graph.insert(field_name, new_deps);
+	graph.insert(field_name, definition.production_dependencies());
 
 	// Iterative DFS cycle detection.
 	// States: 0 = unvisited, 1 = in current path, 2 = fully visited
@@ -579,7 +573,7 @@ pub(crate) async fn define_field_statement_validate_computed_cycles(
 				let neighbor = neighbors[*idx].as_str();
 				*idx += 1;
 
-				// Only check neighbors that are computed fields (in the graph)
+				// Only check neighbors that have a clause of their own (in the graph)
 				if !graph.contains_key(neighbor) {
 					continue;
 				}

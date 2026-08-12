@@ -114,6 +114,7 @@ TableIsView	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot writ
 FieldValue	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Found sample for field `f`, with record `sample`, but field must conform to: sample' }
 FieldReadonly	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Found changed value for field `f`, with record `sample`, but field is readonly' }
 FieldUndefined	{ cause: NONE, code: -32000, kind: 'Internal', message: "Found field 'f', but no such field exists for table 'sample'" }
+FieldDependencyCycle	{ cause: NONE, code: -32000, kind: 'Configuration', message: "Cannot write to table 'sample': the DEFAULT, VALUE, ASSERT or COMPUTED clauses of the fields sample depend on each other in a cycle" }
 FieldCoerce	{ cause: NONE, code: -32000, kind: 'Internal', message: "Couldn't coerce value for field `sample` of `sample`: Expected `sample` but found `NONE`" }
 DeleteRejectedByReference	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot delete `sample` as it is referenced by `sample` with an ON DELETE REJECT clause' }
 RefsUpdateFailure	{ cause: NONE, code: -32000, kind: 'Internal', message: 'An error occurred while updating references for `sample`: sample' }
@@ -255,7 +256,7 @@ ComputedNestedFieldConflict	{ cause: NONE, code: -32000, kind: 'Internal', messa
 ComputedParentFieldConflict	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot define nested field `sample` as parent field `sample` is a `COMPUTED` field.' }
 ComputedNestedField	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot define field `sample` as `COMPUTED` fields must be top-level.' }
 ComputedWrite	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'Cannot define field `sample` as `COMPUTED` bodies must be read-only.' }
-ComputedFieldCycle	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cyclic dependency detected among computed fields: sample' }
+ComputedFieldCycle	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cyclic dependency detected among field clauses: sample' }
 IdFieldKeywordConflict	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot use the `sample` keyword on the `id` field.' }
 IdFieldUnsupportedKind	{ cause: NONE, code: -32000, kind: 'Internal', message: "Cannot use the `sample` type on the `id` field, as that's not a valid record id key." }
 ComputedFieldCannotBeIndexed	{ cause: NONE, code: -32000, kind: 'Internal', message: "Computed fields cannot be indexed. Index: 'sample' - Field: 'sample'" }

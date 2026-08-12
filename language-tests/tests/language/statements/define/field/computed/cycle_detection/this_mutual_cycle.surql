@@ -14,7 +14,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-error = "Cyclic dependency detected among computed fields: a -> b -> a"
+error = "Cyclic dependency detected among field clauses: a -> b -> a"
 
 */
 

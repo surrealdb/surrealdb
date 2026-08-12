@@ -178,20 +178,40 @@ impl Document {
 
 	/// Processes all DEFINE FIELD statements for each matching field in the document.
 	///
-	/// Applies field-level logic in the following order:
+	/// Runs after the data clause, against the record's new values, so a clause
+	/// reading a field sees what this statement wrote to it rather than the
+	/// pre-mutation snapshot the data clause read.
+	///
+	/// Runs in two passes, because producing a value and validating one have
+	/// different ordering requirements.
+	///
+	/// The **production** pass visits fields in the dependency order carried by
+	/// [`FieldEvalOrder`](crate::doc::document::FieldEvalOrder), not the name
+	/// order the field list arrives in, so a clause reading another field runs
+	/// after that field has been produced. A cycle between producing clauses has
+	/// no such order and is rejected. Within a field:
 	/// - READONLY keyword - prevents modification of readonly fields
 	/// - DEFAULT clause - applies default values for missing fields on new records
 	/// - TYPE clause - validates the field value against the field type
 	/// - VALUE clause - sets or processes the field value
-	/// - ASSERT clause - validates field constraints
 	/// - REFERENCE clause - manages foreign key references
 	/// - PERMISSIONS clause - enforces field-level permissions
+	///
+	/// The **validation** pass then runs every `ASSERT` clause. Order is not a
+	/// question there — each one reads the record as it will be stored, so a
+	/// clause reading a sibling sees that sibling's final value however
+	/// production was ordered, and two fields asserting against each other see
+	/// one consistent record. `$value` is read back from the document rather
+	/// than carried over from production, because the `PERMISSIONS` clause may
+	/// have reverted it.
 	///
 	/// Certain fields have special behaviors:
 	/// - `id` field: readonly after creation, and enforced for existing records
 	/// - Optional fields: child fields are skipped when parent is NONE and type allows it
 	/// - READONLY fields: reverted to old value when omitted within CONTENT clause
-	/// - COMPUTED fields: any value is removed, as computed fields are processed later
+	/// - COMPUTED fields: derived rather than processed, and stripped before storage. One is
+	///   evaluated here only when another field's clause reads it; the rest are left to the read
+	///   side, which evaluates only what a projection asks for.
 	pub(super) async fn process_table_fields(
 		&mut self,
 		stk: &mut Stk,
@@ -207,12 +227,50 @@ impl Document {
 		let rid = self.id()?;
 		// Get the user applied input
 		let inp = self.compute_input_value(stk, ctx, opt, stm).await?.unwrap_or_default();
+		// Get the field definitions and the order to process them in
+		let fields = self.doc_ctx.fd()?;
+		let field_order = Arc::clone(self.doc_ctx.field_order()?);
+		// A cycle between field clauses has no evaluation order at all, so
+		// there is no correct record to write
+		if let Some(cycle) = &field_order.cycle {
+			bail!(Error::FieldDependencyCycle {
+				table: self.doc_ctx.tb()?.name.as_str().to_string(),
+				fields: cycle.join(", "),
+			});
+		}
 		// When set, any matching embedded object fields
 		// which are prefixed with the specified idiom
 		// will be skipped, as the parent object is optional
 		let mut skip: Option<&Idiom> = None;
-		// Loop through all field statements
-		for fd in self.doc_ctx.fd()?.iter() {
+		// Paths whose ASSERT clause runs in the validation pass below, as
+		// (index into `fields`, path within the document)
+		let mut deferred_asserts: Vec<(usize, Idiom)> = Vec::new();
+		// Loop through all field statements, in dependency order so a clause
+		// reading another field sees that field's processed value
+		for &field_idx in field_order.order.iter() {
+			let fd = &fields[field_idx];
+			// A COMPUTED field's value is derived, never taken from the record,
+			// so it is not processed like the others. Materialise it here only
+			// when some other field's clause reads it — that clause is ordered
+			// after this point, so the value is in place by the time it runs.
+			// Everything else is left to the read side, which evaluates only
+			// the computed fields a projection asks for. Either way the value
+			// is stripped again below, before the record is stored.
+			if let Some(computed) = &fd.computed {
+				if field_order.required_computed.contains(&field_idx) {
+					Document::compute_one_field(
+						stk,
+						ctx,
+						opt,
+						&rid,
+						fd,
+						computed,
+						&mut self.current,
+					)
+					.await?;
+				}
+				continue;
+			}
 			// Limit auth
 			let opt = opt.limited_by(&AuthLimit::try_from(&fd.auth_limit)?);
 			// Check if we should skip this field
@@ -305,36 +363,34 @@ impl Document {
 				};
 				// Skip this field?
 				if !skipped {
-					// Check if this is a COMPUTED field
-					if field.def.computed.is_some() {
-						// The value will be computed later, so we set it to NONE
-						val = Value::None;
-					} else {
-						// Process any DEFAULT clause
-						val = field.process_default_clause(val).await?;
-						// Check for the existance of a VALUE clause
-						if field.def.value.is_some() {
-							// If the value is NONE (field doesn't exist), process VALUE first
-							// Otherwise, do TYPE check first to validate explicit input
-							if val.is_none() {
-								// Process any VALUE clause first when field is missing
-								val = field.process_value_clause(val).await?;
-								// Process any TYPE clause
-								val = field.process_type_clause(val).await?;
-							} else {
-								// Process any TYPE clause first for explicit values
-								val = field.process_type_clause(val).await?;
-								// Process any VALUE clause
-								val = field.process_value_clause(val).await?;
-								// Re-validate that VALUE output conforms to TYPE
-								val = field.process_type_clause(val).await?;
-							}
-						} else {
+					// Process any DEFAULT clause
+					val = field.process_default_clause(val).await?;
+					// Check for the existance of a VALUE clause
+					if field.def.value.is_some() {
+						// If the value is NONE (field doesn't exist), process VALUE first
+						// Otherwise, do TYPE check first to validate explicit input
+						if val.is_none() {
+							// Process any VALUE clause first when field is missing
+							val = field.process_value_clause(val).await?;
 							// Process any TYPE clause
 							val = field.process_type_clause(val).await?;
+						} else {
+							// Process any TYPE clause first for explicit values
+							val = field.process_type_clause(val).await?;
+							// Process any VALUE clause
+							val = field.process_value_clause(val).await?;
+							// Re-validate that VALUE output conforms to TYPE
+							val = field.process_type_clause(val).await?;
 						}
-						// Process any ASSERT clause
-						val = field.process_assert_clause(val).await?;
+					} else {
+						// Process any TYPE clause
+						val = field.process_type_clause(val).await?;
+					}
+					// Defer this path's ASSERT clause to the validation pass, so
+					// it reads the record as it will be stored rather than as it
+					// stands part-way through production
+					if fd.assert.is_some() {
+						deferred_asserts.push((field_idx, k.clone()));
 					}
 				}
 				// Process any PERMISSIONS clause
@@ -353,14 +409,48 @@ impl Document {
 				}
 			}
 		}
-		// Note: COMPUTED fields are NOT evaluated here. Storing
-		// computed values at write time produces incorrect behaviour
-		// for selective projections — a computed field that the read
-		// did not request must not be evaluated (issue #7094). The
-		// `output_document!` macro on the read side invokes
-		// `Document::compute_fields(needed_roots = ...)` after
-		// reduction and only evaluates the closure of computed fields
-		// the projection actually consumes.
+		// Validation pass. Every `ASSERT` runs after every field has been
+		// produced, so each one reads the record as it will be stored: sibling
+		// fields hold their final values whatever order production happened in,
+		// and two fields asserting against each other (`ASSERT in != out`) see
+		// the same record rather than each other's half-built state. `$value`
+		// is read back from the document for the same reason — a `PERMISSIONS`
+		// clause may have reverted it after the value was produced.
+		for (field_idx, path) in deferred_asserts {
+			let fd = &fields[field_idx];
+			// Limit auth
+			let opt = opt.limited_by(&AuthLimit::try_from(&fd.auth_limit)?);
+			// Rebuild the clause context around the final value
+			let val = self.current.doc.as_ref().pick(&path);
+			let old = Arc::new(self.initial.doc.as_ref().pick(&path));
+			let user_input = Arc::new(inp.pick(&path));
+			let mut field = FieldEditContext {
+				context: None,
+				doc: self,
+				rid: Arc::clone(&rid),
+				def: fd,
+				stk,
+				ctx,
+				opt: &opt,
+				old,
+				user_input,
+			};
+			// The clause only validates, so the value it returns is the value
+			// it was given
+			field.process_assert_clause(val).await?;
+		}
+		// A computed value is never stored: the read side derives it from the
+		// stored fields, so that a projection which does not ask for a computed
+		// field never pays to evaluate it (issue #7094). Drop whatever the loop
+		// above materialised for the field clauses that read it, along with any
+		// value the user tried to assign to a computed field, and clear the
+		// flag so the read side re-derives from the values just written.
+		for fd in fields.iter() {
+			if fd.computed.is_some() {
+				self.current.doc.to_mut().cut(&fd.name);
+			}
+		}
+		self.current.fields_computed = false;
 		// Carry on
 		Ok(())
 	}

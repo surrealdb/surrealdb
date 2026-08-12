@@ -309,6 +309,95 @@ impl FromStored for FieldDefinition {
 }
 
 impl FieldDefinition {
+	/// The same-table fields this field needs a value from before its own value
+	/// can be produced.
+	///
+	/// Only the clauses that *produce* a value contribute: `DEFAULT`, `VALUE`
+	/// and `COMPUTED`. `ASSERT` is excluded because it validates a value that
+	/// has already been produced rather than producing one, so it imposes no
+	/// order — and two fields asserting against each other is ordinary, not a
+	/// cycle:
+	///
+	/// ```surql
+	/// DEFINE FIELD in  ON follows TYPE record<user> ASSERT in != out;
+	/// DEFINE FIELD out ON follows TYPE record<user> ASSERT out != in;
+	/// ```
+	///
+	/// Callers use this to order field evaluation so a clause runs after the
+	/// fields it reads, and to reject a schema whose producing clauses read each
+	/// other in a cycle.
+	///
+	/// A `DEFAULT` / `VALUE` clause naming its own field is reading that field's
+	/// current value, not asking for one to be produced first, so it is not a
+	/// dependency: `DEFINE FIELD n ON t VALUE n ?? 0` is ordinary. A `COMPUTED`
+	/// clause naming its own field has nothing else to derive from and is
+	/// reported as a cycle.
+	///
+	/// A clause containing an opaque construct (a subquery, a parameter, a
+	/// graph traversal) contributes only the dependencies static analysis could
+	/// determine, so an ordering derived from this is best-effort for those.
+	pub fn production_dependencies(&self) -> Vec<String> {
+		let mut deps = Vec::new();
+		if let Some(expr) = &self.value {
+			deps.extend(self.reads_of(expr));
+		}
+		match &self.default {
+			DefineDefault::Set(expr) | DefineDefault::Always(expr) => {
+				deps.extend(self.reads_of(expr))
+			}
+			DefineDefault::None => {}
+		}
+		// A COMPUTED clause keeps its self-reference: it has nothing else to
+		// derive from, so naming itself is a cycle rather than a read
+		if let Some(expr) = &self.computed {
+			deps.extend(crate::expr::computed_deps::extract_computed_deps(expr).fields);
+		}
+		deps.sort();
+		deps.dedup();
+		deps
+	}
+
+	/// The same-table fields one clause of this field reads, excluding the field
+	/// itself — naming your own field is reading the value under consideration,
+	/// not asking for one to be produced first.
+	fn reads_of(&self, expr: &Expr) -> Vec<String> {
+		let own_name = self.name.to_raw_string();
+		crate::expr::computed_deps::extract_computed_deps(expr)
+			.fields
+			.into_iter()
+			.filter(|dep| *dep != own_name)
+			.collect()
+	}
+
+	/// The same-table fields this field's `ASSERT` clause reads.
+	///
+	/// Kept apart from [`Self::production_dependencies`] because these impose no
+	/// evaluation order: an `ASSERT` runs after every field has been produced,
+	/// so it reads final values whatever order production happened in. Callers
+	/// need them only to know which `COMPUTED` fields have to be materialised
+	/// for the validation pass to read.
+	///
+	/// A clause naming its own field is excluded for the same reason as in
+	/// `production_dependencies`: it is reading the value being validated.
+	pub fn assert_dependencies(&self) -> Vec<String> {
+		let Some(expr) = &self.assert else {
+			return Vec::new();
+		};
+		let mut deps = self.reads_of(expr);
+		deps.sort();
+		deps.dedup();
+		deps
+	}
+
+	/// Whether this field has a clause that produces a value per record, and so
+	/// can take part in a dependency cycle with another field.
+	/// See [`Self::production_dependencies`].
+	pub fn has_production_clause(&self) -> bool {
+		self.value.is_some()
+			|| self.computed.is_some()
+			|| !matches!(self.default, DefineDefault::None)
+	}
+
 	pub fn to_stored(&self) -> StoredFieldDefinition {
 		StoredFieldDefinition {
 			name: IdiomText::new(&self.name),
