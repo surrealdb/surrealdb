@@ -92,6 +92,11 @@ impl Document {
 			// Re-evaluate computed fields against the reduced view.
 			self.compute_fields(stk, ctx, opt, DocKind::CurrentReduced, needed_roots.as_ref())
 				.await?;
+			// SECURITY: those fields did not exist when the reduce applied
+			// field permissions, and the projection below can rename one,
+			// which puts it beyond the reach of the name-keyed pass in
+			// `apply_select_field_permissions`.
+			self.filter_reduced_computed_fields(stk, ctx, opt).await?;
 		}
 		// Re-borrow the view we just materialised
 		let current: &CursorDoc = self.current_reduced.as_ref().unwrap_or(&self.current);
@@ -188,8 +193,19 @@ impl Document {
 				_ => return Err(IgnoreError::Ignore),
 			},
 		};
-		// Apply field-level select permissions to the output
-		self.apply_select_field_permissions(stk, ctx, opt, &mut out).await?;
+		// Apply field-level select permissions to the output. `Output::Diff` is
+		// excluded because a patch-op list is not a record image: its objects
+		// are keyed `op` / `path` / `value`, and a field's name only ever
+		// matches one of those by coincidence — a table defining a field named
+		// `value` would have the op's payload cut out from under it, leaving a
+		// malformed op. Nor could the pass protect anything here, since it keys
+		// on field names and an op names its field inside a `path` string. The
+		// ops need no pass: `output_diff` diffs the two permission-reduced
+		// views, so a field the caller cannot select is absent from both sides
+		// and cannot reach a path in the first place.
+		if !matches!(output, Some(Output::Diff)) {
+			self.apply_select_field_permissions(stk, ctx, opt, &mut out).await?;
+		}
 		// Output the document
 		Ok(out)
 	}
@@ -260,6 +276,10 @@ impl Document {
 		};
 		self.compute_fields_if_present(stk, ctx, opt, ki, None).await?;
 		self.compute_fields_if_present(stk, ctx, opt, kc, None).await?;
+		// SECURITY: those fields did not exist when the reduce applied field
+		// permissions, and a patch op naming one is beyond the reach of the
+		// name-keyed pass in `apply_select_field_permissions`.
+		self.filter_reduced_computed_fields(stk, ctx, opt).await?;
 		// Re-borrow the views we just materialised
 		let initial: &CursorDoc = self.initial_reduced.as_ref().unwrap_or(&self.initial);
 		let current: &CursorDoc = self.current_reduced.as_ref().unwrap_or(&self.current);
@@ -291,6 +311,11 @@ impl Document {
 		};
 		self.compute_fields_if_present(stk, ctx, opt, ki, None).await?;
 		self.compute_fields_if_present(stk, ctx, opt, kc, None).await?;
+		// SECURITY: those fields did not exist when the reduce applied field
+		// permissions, and this projection can rename one — or read it through
+		// `$before` / `$after` — which puts it beyond the reach of the
+		// name-keyed pass in `apply_select_field_permissions`.
+		self.filter_reduced_computed_fields(stk, ctx, opt).await?;
 		// Re-borrow the views we just materialised
 		let initial: &CursorDoc = self.initial_reduced.as_ref().unwrap_or(&self.initial);
 		let current: &CursorDoc = self.current_reduced.as_ref().unwrap_or(&self.current);
@@ -306,6 +331,11 @@ impl Document {
 	/// Apply each field's `PERMISSIONS FOR select` clause to the
 	/// already-projected output value, cutting any fields the viewer
 	/// is not allowed to see.
+	///
+	/// `out` must be an image of the record — a projection of it, or the whole
+	/// thing. The pass matches field names against `out`'s own keys, so a value
+	/// shaped like anything else is matched against the wrong structure: this
+	/// is why `Output::Diff` does not come through here.
 	///
 	/// Uses `Value::cut` (sync) rather than `Value::del` (async,
 	/// idiom-aware): the extra `Part` variants `del` handles

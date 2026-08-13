@@ -74,9 +74,18 @@ impl Value {
 							accum.pop();
 						}
 					} else {
+						// A part that does not address an element addresses
+						// something *within* each element, so it is carried into
+						// the recursion instead of being consumed here — the same
+						// distribution `Value::pick` and `Value::cut` apply, and
+						// what makes `a.b` on an array of objects widen to
+						// `a[0].b`, `a[1].b`. Consuming it would instead yield
+						// each element's own path, so a caller cutting those
+						// paths would remove whole elements in place of the one
+						// field this part names.
 						for (idx, v) in v.iter().enumerate() {
 							accum.push(Part::index_int(idx as i64));
-							v._each(rest, accum, build);
+							v._each(path, accum, build);
 							accum.pop();
 						}
 					}
@@ -113,9 +122,11 @@ impl Value {
 							accum.pop();
 						}
 					} else {
+						// Carried into the recursion, not consumed — see the
+						// array arm above.
 						for (idx, v) in v.iter().enumerate() {
 							accum.push(Part::index_int(idx as i64));
-							v._each(rest, accum, build);
+							v._each(path, accum, build);
 							accum.pop();
 						}
 					}
@@ -164,6 +175,43 @@ mod tests {
 		let res: Vec<Idiom> = vec![syn::idiom("test.something").unwrap().into()];
 		assert_eq!(res, val.each(&idi));
 		assert_eq!(val.pick(&res[0]), parse_val!("[{ age: 34 }, { age: 36 }]"));
+	}
+
+	#[test]
+	fn each_array_implicit_field() {
+		// Without `[*]`, a part at an array position still addresses something
+		// inside each element, so it widens the same way `pick` and `cut`
+		// distribute it — never to the elements' own paths, which a caller
+		// cutting the result would remove whole.
+		let idi: Idiom = syn::idiom("test.something.age").unwrap().into();
+		let val = parse_val!("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
+		let res: Vec<Idiom> = vec![
+			syn::idiom("test.something[0].age").unwrap().into(),
+			syn::idiom("test.something[1].age").unwrap().into(),
+		];
+		assert_eq!(res, val.each(&idi));
+		assert_eq!(val.pick(&res[0]), Value::from(34));
+		assert_eq!(val.pick(&res[1]), Value::from(36));
+	}
+
+	#[test]
+	fn each_array_implicit_field_absent() {
+		// A part no element carries matches nothing at all. Yielding the
+		// elements' paths here is what let a field-permission pass erase an
+		// entire array for a field none of its objects even define.
+		let idi: Idiom = syn::idiom("test.something.missing").unwrap().into();
+		let val = parse_val!("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
+		assert_eq!(Vec::<Idiom>::new(), val.each(&idi));
+	}
+
+	#[test]
+	fn each_array_implicit_field_partial() {
+		// Only the elements that carry the part are addressed.
+		let idi: Idiom = syn::idiom("test.something.age").unwrap().into();
+		let val = parse_val!("{ test: { something: [{ age: 34 }, { name: 'tobie' }] } }");
+		let res: Vec<Idiom> = vec![syn::idiom("test.something[0].age").unwrap().into()];
+		assert_eq!(res, val.each(&idi));
+		assert_eq!(val.pick(&res[0]), Value::from(34));
 	}
 
 	#[test]

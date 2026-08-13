@@ -33,9 +33,12 @@ impl Document {
 	/// must be evaluated against.
 	///
 	/// The snapshot is the field-level-permission-reduced view of
-	/// `self.current` with every `COMPUTED` field populated. Both readers
-	/// share one image, so a `WHERE` predicate and a data-clause expression
-	/// in the same statement always agree about what a computed field holds:
+	/// `self.current` with every `COMPUTED` field populated, and then the
+	/// computed fields filtered by their own `PERMISSIONS FOR select` — a
+	/// field the caller may not read is absent from the snapshot whether it is
+	/// stored or computed. Both readers share one image, so a `WHERE`
+	/// predicate and a data-clause expression in the same statement always
+	/// agree about what a computed field holds:
 	///
 	/// ```surql
 	/// DEFINE FIELD can_drive ON person COMPUTED age >= 18;
@@ -74,6 +77,12 @@ impl Document {
 				false => DocKind::Current,
 			};
 			self.compute_fields(stk, ctx, opt, kind, None).await?;
+			// SECURITY: the reduce ran before those fields existed, so it could
+			// not apply their own `PERMISSIONS FOR select`. Apply them now: this
+			// image is what the `WHERE` condition and the data clause read, and
+			// a data clause can copy a value it reads into a field the caller is
+			// allowed to select.
+			self.filter_reduced_computed_fields(stk, ctx, opt).await?;
 		}
 		// Hand back the view the caller must evaluate against
 		Ok(self.current_reduced.as_ref().unwrap_or(&self.current))

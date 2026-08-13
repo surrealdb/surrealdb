@@ -527,8 +527,15 @@ impl Document {
 			// are populated, so it can't filter them; apply the
 			// computed-field `FOR select` permissions now so a
 			// subscriber without permission to read a computed field
-			// never receives its value in the LIVE notification.
-			if let Err(e) = self.filter_computed_field_permissions(stk, ctx, opt, &mut doc).await {
+			// never receives its value in the LIVE notification. The
+			// predicates read `source`, the record this payload was
+			// reduced from, so a clause naming a field the subscriber
+			// cannot select is answered by the record rather than by the
+			// reduced view that already dropped it.
+			if let Err(e) =
+				Document::filter_computed_field_permissions(stk, ctx, opt, fields, source, &mut doc)
+					.await
+			{
 				tracing::debug!(
 					target: "surrealdb::core::doc::lives",
 					error = %e,

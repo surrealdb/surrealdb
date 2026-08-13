@@ -224,7 +224,16 @@ and `exec/operators/scan/fetch.rs` (`resolve_with_field_state`)
   must do so intentionally. Omitting a PERMISSIONS clause results in full access.
 - Field-level permissions must be enforced on both the write path
   (`process_table_fields`) and every read path, including for computed fields,
-  reduced documents, and all output modes (AFTER, BEFORE, DIFF, FIELDS). There
+  reduced documents, and all output modes (AFTER, BEFORE, DIFF, FIELDS). A
+  mutating statement's `WHERE` condition and data clause are read paths too:
+  they evaluate against the pre-mutation snapshot
+  (`materialise_current_snapshot` in `doc/compute.rs`), so a field the caller
+  cannot select must be absent from it — otherwise a data clause reads the
+  value and copies it into a field the caller can select. A COMPUTED field is
+  the case to check, because the reduce kernel runs before any computed field
+  exists and cannot filter one; `filter_reduced_computed_fields` is what
+  enforces their `PERMISSIONS FOR select` on a reduced view, and every site
+  that materialises them on one has to call it. There
   are two read paths and a new one must join one of them, never neither:
   the document pipeline (`apply_select_field_permissions` in `doc/output.rs`,
   `reduce_current` and `filter_computed_field_permissions` in `doc/reduce.rs`)
