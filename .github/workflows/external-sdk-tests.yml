@@ -261,7 +261,9 @@ jobs:
         run: uv sync --group dev
 
       - name: Run Python tests (${{ matrix.protocol }})
-        timeout-minutes: 5
+        # The ws leg legitimately takes ~5 minutes on loaded runners; a 5-minute
+        # timeout was killing fully green runs at the finish line.
+        timeout-minutes: 10
         run: uv run pytest --ignore=tests/unit_tests/connections/embedded
         env:
           PYTHONPATH: ./src
@@ -277,7 +279,7 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - 8.2
+          - 8.4
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v6.0.2
@@ -297,11 +299,10 @@ jobs:
         uses: shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f # (Actions must be pinned by commit hash) v2.37.0
         with:
           php-version: ${{ matrix.version }}
+          extensions: openswoole-26.2.0
 
-      - name: Setup Composer
-        uses: php-actions/composer@8a65f0d3c6a1d17ca4800491a40b5756a4c164f3 # (Actions must be pinned by commit hash) v6.1.2
-        with:
-          php_version: ${{ matrix.version }}
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
 
       - name: Start SurrealDB
         run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
@@ -328,7 +329,7 @@ jobs:
       - name: Run PHP tests
         timeout-minutes: 5
         continue-on-error: true
-        run: composer test-coverage-v2
+        run: composer test
 
   sdk-dotnet:
     name: SDK - .NET (${{ matrix.version }})
