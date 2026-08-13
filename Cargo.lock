@@ -7754,6 +7754,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "surrealdb-sqon"
+version = "3.3.0-nightly"
+dependencies = [
+ "arbitrary",
+ "chrono",
+ "logos",
+ "rust_decimal",
+ "surrealdb-common",
+ "surrealdb-parse-common",
+ "surrealdb-types",
+ "uuid",
+]
+
+[[package]]
 name = "surrealdb-strand"
 version = "3.3.0-nightly"
 dependencies = [
@@ -7847,7 +7861,6 @@ dependencies = [
  "regex",
  "regex-syntax",
  "reqwest 0.13.3",
- "rquickjs",
  "rstest",
  "rust_decimal",
  "semver",

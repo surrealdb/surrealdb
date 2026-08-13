@@ -37,6 +37,7 @@ members = [
     "surrealdb/runtime",
     "surrealdb/server",
     "surrealdb/sql",
+    "surrealdb/sqon",
     "surrealdb/strand",
     "surrealdb/syn",
     "surrealdb/token",
@@ -95,6 +96,7 @@ ast = { version = "3.3.0-nightly", package = "surrealdb-ast", path = "surrealdb/
 token = { version = "3.3.0-nightly", package = "surrealdb-token", path = "surrealdb/token" }
 parser = { version = "3.3.0-nightly", package = "surrealdb-parser", path = "surrealdb/parser" }
 parse-common = { version = "3.3.0-nightly", package = "surrealdb-parse-common", path = "surrealdb/parse-common" }
+sqon = { version = "3.3.0-nightly", package = "surrealdb-sqon", path = "surrealdb/sqon" }
 common = { version = "3.3.0-nightly", package = "surrealdb-common", path = "surrealdb/common" }
 surrealdb-cnf = { version = "3.3.0-nightly", path = "surrealdb/cnf" }
 surrealdb-runtime = { version = "3.3.0-nightly", path = "surrealdb/runtime" }

@@ -103,15 +103,8 @@ fn handle_escape(buffer: &mut String, slice: &str, token: EscapeTokenKind) -> bo
 			buffer.push('⟩');
 			true
 		}
-		EscapeTokenKind::EscUnicodeFixed => {
-			let char = decode_unicode_hex(&slice.as_bytes()["\\u".len()..]);
-			if let Some(x) = char::from_u32(char) {
-				buffer.push(x);
-				true
-			} else {
-				false
-			}
-		}
+		// Handled by the caller, since a surrogate pair spans two tokens.
+		EscapeTokenKind::EscUnicodeFixed => unreachable!(),
 		EscapeTokenKind::EscUnicodeBracket => {
 			let char = decode_unicode_hex(&slice.as_bytes()["\\u{".len()..slice.len() - 1]);
 			if let Some(x) = char::from_u32(char) {
@@ -148,7 +141,7 @@ pub fn unescape<'a>(source: &'a str, buffer: &'a mut String) -> Result<&'a str, 
 			break;
 		};
 
-		let span = lexer.span();
+		let mut span = lexer.span();
 
 		let next = match next {
 			Ok(x) => x,
@@ -163,6 +156,52 @@ pub fn unescape<'a>(source: &'a str, buffer: &'a mut String) -> Result<&'a str, 
 		match next {
 			EscapeTokenKind::Chars => {
 				pending_span.end = span.end;
+			}
+			EscapeTokenKind::EscUnicodeFixed => {
+				buffer.push_str(&source[pending_span]);
+
+				let code = decode_unicode_hex(&source.as_bytes()[span.start + 2..span.end]);
+				let c = match code {
+					// A high surrogate encodes a character above U+FFFF together with the
+					// following low surrogate escape sequence, mirroring UTF-16.
+					0xD800..=0xDBFF => {
+						let next = lexer.next();
+						let low_span = lexer.span();
+						if !matches!(next, Some(Ok(EscapeTokenKind::EscUnicodeFixed))) {
+							return Err(Error {
+								span: span.start..low_span.end,
+								message: "Invalid escape sequence, a high surrogate must be followed by a low surrogate escape sequence (\\uDC00-\\uDFFF)".to_string(),
+							});
+						}
+
+						let low = decode_unicode_hex(
+							&source.as_bytes()[low_span.start + 2..low_span.end],
+						);
+						if !(0xDC00..=0xDFFF).contains(&low) {
+							return Err(Error {
+								span: span.start..low_span.end,
+								message: "Invalid escape sequence, a high surrogate must be followed by a low surrogate escape sequence (\\uDC00-\\uDFFF)".to_string(),
+							});
+						}
+
+						let code = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00);
+						span = span.start..low_span.end;
+						char::from_u32(code)
+							.expect("a surrogate pair always encodes a valid code point")
+					}
+					0xDC00..=0xDFFF => {
+						return Err(Error {
+							span,
+							message: "Invalid escape sequence, unexpected lone low surrogate"
+								.to_string(),
+						});
+					}
+					code => char::from_u32(code)
+						.expect("a non-surrogate \\uXXXX value is always a valid code point"),
+				};
+
+				buffer.push(c);
+				pending_span = span.end..span.end;
 			}
 			x => {
 				buffer.push_str(&source[pending_span]);
@@ -237,8 +276,18 @@ pub fn unescaped_to_escaped_offset(source: &str, offset: usize) -> usize {
 			}
 			EscapeTokenKind::EscUnicodeFixed => {
 				let char = decode_unicode_hex(&lexer.slice().as_bytes()["\\u".len()..]);
-				offset_idx +=
-					char::from_u32(char).expect("escape string should be valid").len_utf8();
+				if (0xD800..=0xDBFF).contains(&char) {
+					// Valid input, so a low surrogate escape follows; the pair encodes a
+					// single character above U+FFFF, which is 4 bytes in UTF-8.
+					lexer
+						.next()
+						.expect("escape string should be valid")
+						.expect("escape string should be valid");
+					offset_idx += 4;
+				} else {
+					offset_idx +=
+						char::from_u32(char).expect("escape string should be valid").len_utf8();
+				}
 			}
 			EscapeTokenKind::EscUnicodeBracket => {
 				let slice = lexer.slice().as_bytes();
@@ -298,6 +347,24 @@ mod test {
 		assert_eq!(unescape(r"\u{21}", &mut buffer).unwrap(), "!");
 		assert_eq!(unescape(r"\u{1F600}", &mut buffer).unwrap(), "😀");
 		assert_eq!(unescape(r"a\u{78}b", &mut buffer).unwrap(), "axb");
+	}
+
+	#[test]
+	fn surrogate_pairs() {
+		let mut buffer = String::new();
+		assert_eq!(unescape(r"\uD83D\uDE00", &mut buffer).unwrap(), "😀");
+		assert_eq!(unescape(r"a\uD83D\uDE00b", &mut buffer).unwrap(), "a😀b");
+
+		// A high surrogate not followed by a low surrogate escape.
+		unescape(r"\uD83D", &mut buffer).unwrap_err();
+		unescape(r"\uD83Dx", &mut buffer).unwrap_err();
+		unescape(r"\uD83DA", &mut buffer).unwrap_err();
+		// A lone low surrogate.
+		unescape(r"\uDE00", &mut buffer).unwrap_err();
+
+		// The offset after the pair maps past both escape sequences.
+		assert_eq!(unescaped_to_escaped_offset(r"\uD83D\uDE00a", 4), 12);
+		assert_eq!(unescaped_to_escaped_offset(r"\uD83D\uDE00a", 5), 13);
 	}
 
 	#[test]

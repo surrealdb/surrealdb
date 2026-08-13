@@ -192,8 +192,8 @@ impl ToSql for RecordIdKeyRange {
 				v.fmt_sql(f, fmt);
 			}
 			Bound::Excluded(v) => {
+				v.fmt_sql(f, fmt);
 				f.push('>');
-				v.fmt_sql(f, fmt)
 			}
 		};
 
