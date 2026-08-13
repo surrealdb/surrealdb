@@ -15,6 +15,7 @@ use crate::expr::Expr;
 use crate::expr::data::Data;
 use crate::expr::idiom::{Idiom, IdiomTrie, IdiomTrieContains};
 use crate::expr::kind::Kind;
+use crate::expr::part::Part;
 use crate::expr::statements::define::kind_contains_object;
 use crate::iam::{Action, AuthLimit};
 use crate::key::schema::ReferenceKey;
@@ -406,6 +407,15 @@ impl Document {
 					// shrink the array, dropping nullable items the
 					// caller meant to keep.
 					self.current.doc.to_mut().put(&k, val);
+				}
+			}
+			// VALUE for individual elements can normalise distinct stored
+			// values to the same value (for example trimming whitespace).
+			// Rebuild set parents so uniqueness is restored.
+			if matches!(fd.name.0.last(), Some(Part::All)) && fd.name.0.len() > 1 {
+				let parent = Idiom(fd.name.0[..fd.name.0.len() - 1].to_vec());
+				if let Value::Set(set) = self.current.doc.as_ref().pick(&parent) {
+					self.current.doc.to_mut().put(&parent, Value::Set(set.normalize()));
 				}
 			}
 		}

@@ -63,6 +63,42 @@ impl Value {
 						}
 					}
 				},
+				// Current value at path is a set
+				Value::Set(v) => match p {
+					Part::All => {
+						let path = path.next();
+						let len = v.len();
+						for i in 0..len {
+							if let Some(elem) = v.nth_mut(i) {
+								elem.put(path, val.clone());
+							}
+						}
+					}
+					Part::First => {
+						if let Some(v) = v.first_mut() {
+							v.put(path.next(), val)
+						}
+					}
+					Part::Last => {
+						if let Some(v) = v.last_mut() {
+							v.put(path.next(), val)
+						}
+					}
+					x => {
+						if let Some(idx) = x.as_old_index() {
+							if let Some(v) = v.nth_mut(idx) {
+								v.put(path.next(), val)
+							}
+						} else {
+							let len = v.len();
+							for i in 0..len {
+								if let Some(elem) = v.nth_mut(i) {
+									elem.put(path, val.clone());
+								}
+							}
+						}
+					}
+				},
 				// Current value at path is empty
 				Value::Null => {
 					*self = Value::empty_object();
@@ -166,6 +202,38 @@ mod tests {
 		let mut val: Value = parse_val!("{ test: { other: null, something: 123 } }");
 		let res: Value = parse_val!("{ test: { other: { something: 999 }, something: 123 } }");
 		val.put(&idi, Value::from(999));
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn put_set_index() {
+		let idi: Idiom = syn::idiom("test[0]").unwrap().into();
+		let mut val: Value = parse_val!("{ test: { 'a', 'b', } }");
+		val.put(&idi, Value::from("hello"));
+		let Value::Object(obj) = &val else {
+			panic!("expected object");
+		};
+		let Value::Set(set) = obj.get("test").unwrap() else {
+			panic!("expected set");
+		};
+		assert_eq!(set.len(), 2);
+		assert_eq!(set.nth(0), Some(&Value::from("hello")));
+		assert_eq!(set.nth(1), Some(&Value::from("b")));
+	}
+
+	#[tokio::test]
+	async fn put_set_index_normalize() {
+		let idi: Idiom = syn::idiom("test[0]").unwrap().into();
+		let mut val: Value = parse_val!("{ test: { 'a', 'b', } }");
+		let res: Value = parse_val!("{ test: { 'b', 'hello', } }");
+		val.put(&idi, Value::from("hello"));
+		// Callers that need set invariants (for example the field pipeline after
+		// `test.*` VALUE) run `Set::normalize` once all element writes are done.
+		if let Value::Object(obj) = &mut val
+			&& let Some(Value::Set(set)) = obj.get_mut("test")
+		{
+			*set = std::mem::take(set).normalize();
+		}
 		assert_eq!(res, val);
 	}
 

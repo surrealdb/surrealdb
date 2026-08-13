@@ -487,12 +487,28 @@ impl_direct! {
 	Bytes => Bytes,
 	Object => Object,
 	Array => Array,
-	Set => Set,
 	RecordId => RecordId,
 	String => Strand = String,
 	Geometry => Geometry,
 	Regex => Regex,
 	Table => TableName,
+}
+
+impl Coerce for Set {
+	fn can_coerce(v: &Value) -> bool {
+		matches!(v, Value::Set(_) | Value::Array(_))
+	}
+
+	fn coerce(v: Value) -> Result<Self, CoerceError> {
+		match v {
+			Value::Set(x) => Ok(x),
+			Value::Array(x) => Ok(Set::from(x.0)),
+			v => Err(CoerceError::InvalidKind {
+				from: v,
+				into: Kind::of::<Set>().to_sql(),
+			}),
+		}
+	}
 }
 
 /// `String` coercion delegates to `Strand` and converts on success
@@ -598,6 +614,9 @@ impl Value {
 	fn can_coerce_to_set_len(&self, kind: &Kind, len: u64) -> bool {
 		match self {
 			Value::Set(s) => s.len() as u64 == len && s.iter().all(|x| x.can_coerce_to_kind(kind)),
+			Value::Array(a) => {
+				a.len() as u64 == len && a.iter().all(|x| x.can_coerce_to_kind(kind))
+			}
 			_ => false,
 		}
 	}
@@ -605,6 +624,7 @@ impl Value {
 	fn can_coerce_to_set(&self, kind: &Kind) -> bool {
 		match self {
 			Value::Set(s) => s.iter().all(|x| x.can_coerce_to_kind(kind)),
+			Value::Array(a) => a.iter().all(|x| x.can_coerce_to_kind(kind)),
 			_ => false,
 		}
 	}

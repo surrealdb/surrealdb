@@ -230,6 +230,15 @@ mod tests {
 	}
 
 	#[test]
+	fn walk_set_field_all() {
+		let idi: Idiom = syn::idiom("test.*").unwrap().into();
+		let val = parse_val!("{ test: { ' hello ', } }");
+		let res: Vec<(Idiom, Value)> =
+			vec![(syn::idiom("test[0]").unwrap().into(), Value::from(" hello "))];
+		assert_eq!(res, val.walk(&idi));
+	}
+
+	#[test]
 	fn walk_array_field_embedded_index_all() {
 		let idi: Idiom = syn::idiom("test.something[*].tags[*]").unwrap().into();
 		let val = parse_val!(
