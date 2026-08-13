@@ -450,25 +450,32 @@ impl McpService {
 	///
 	/// Outcomes (see [`crate::auth::check_subject`]):
 	///
+	/// - Stateless request, which by definition has no bound subject: allowed; it carries its own
+	///   credentials and is authenticated before reaching this handler.
 	/// - Stdio transport: allowed without re-checking incoming credentials.
 	/// - HTTP, no or anonymous credentials on a non-anonymous bound session: rejected with
 	///   `invalid_params`.
 	/// - HTTP, same authenticated subject as binding: allowed.
 	/// - HTTP, different authenticated subject than binding: rejected with `invalid_params`.
 	fn verify_request_subject(&self, ctx: &RequestContext<RoleServer>) -> Result<(), McpError> {
-		// Under the stateless protocol there is no session id, so there is
-		// nothing to hijack: every request carries its own credentials and is
-		// authenticated independently before it reaches this handler. The
-		// bound-subject check exists specifically to stop a session id being
-		// replayed with different credentials, a vector the revision removes
-		// along with sessions themselves.
-		if Self::is_stateless(ctx) {
-			return Ok(());
-		}
 		let Some(bound) = self.bound_subject.get() else {
-			// If `init_session` was never called, `bound_subject` is
-			// empty; return a protocol-level error so the caller knows
-			// to send `initialize` first.
+			// Nothing was bound at handshake, so there is no subject to
+			// impersonate. A stateless request legitimately has none: it
+			// carries its own credentials and is authenticated before it
+			// reaches this handler.
+			//
+			// The bypass is gated on the *absence* of a binding, never on the
+			// request's claimed protocol version alone. Legacy sessions share
+			// this endpoint and the claimed version is attacker-controlled, so
+			// a version-only test would let a replayed `mcp-session-id` skip
+			// the check below and run under the bound subject's credentials.
+			// See [`Self::is_stateless`].
+			if self.is_stateless(ctx) {
+				return Ok(());
+			}
+			// `init_session` was never called and this is not a stateless
+			// request: return a protocol-level error so the caller knows to
+			// send `initialize` first.
 			return Err(McpError::internal_error(
 				"MCP session not initialized: send `initialize` first",
 				None,
@@ -501,13 +508,25 @@ impl McpService {
 			.unwrap_or_else(|| "anonymous".into())
 	}
 
-	/// Whether this request is served under the stateless protocol.
+	/// Whether this request is genuinely sessionless, i.e. served under the
+	/// stateless protocol, where there are no session ids and every request
+	/// carries its own credentials.
 	///
-	/// rmcp reports the version carried in the request's own `_meta`, falling
-	/// back to the version agreed at handshake for legacy peers, so this one
-	/// call discriminates the two eras correctly for both.
-	fn is_stateless(ctx: &RequestContext<RoleServer>) -> bool {
-		ctx.protocol_version().is_some_and(|version| version >= ProtocolVersion::V_2026_07_28)
+	/// Both halves of the test are load-bearing, and the claimed protocol
+	/// version is the weaker one. rmcp reads that version from the request's
+	/// own `_meta`, falling back to the version agreed at handshake only when
+	/// the request omits it — so on an endpoint that also serves legacy
+	/// sessions (`create_http_service` enables rmcp's `legacy_session_mode`)
+	/// any caller can name the stateless revision on a request that does carry
+	/// an `mcp-session-id`. Requiring the absence of a
+	/// handshake session is what makes this answer whether the request is
+	/// *actually* sessionless rather than merely what it claims to be, which
+	/// is the only form of the question safe to authorize against.
+	fn is_stateless(&self, ctx: &RequestContext<RoleServer>) -> bool {
+		self.session.get().is_none()
+			&& ctx
+				.protocol_version()
+				.is_some_and(|version| version >= ProtocolVersion::V_2026_07_28)
 	}
 
 	/// Namespace and database carried by the request's `surreal-ns` /
@@ -562,7 +581,7 @@ impl McpService {
 			Some(session) => {
 				Ok(ResolvedSession::PerRequest(Box::new(session.derive_scoped(ns, db).await)))
 			}
-			None if Self::is_stateless(ctx) => {
+			None if self.is_stateless(ctx) => {
 				// No handshake ever happened, so both the caller's identity and
 				// their scope come from this request. Networked transports get
 				// the session the auth middleware attached; in-process ones
@@ -905,7 +924,7 @@ impl McpService {
 		let scope = ToolScope::default();
 		// Dispatch even when the call cannot succeed, so the rejection is
 		// audited and counted like any other invocation rather than vanishing.
-		let stateless = Self::is_stateless(&ctx);
+		let stateless = self.is_stateless(&ctx);
 		self.dispatch_tool("use", &ctx, &scope, async |s| {
 			if stateless {
 				return Ok(connection::use_unsupported_when_stateless());
@@ -1315,5 +1334,23 @@ mod tests {
 		let svc =
 			McpService::new(ds, None, None, Session::default()).with_transport_label("custom-bus");
 		assert!(!svc.is_stdio_transport());
+	}
+
+	/// Locks in the invariant [`McpService::is_stateless`] relies on to keep the
+	/// stateless bypass in [`McpService::verify_request_subject`] out of reach
+	/// of a bound session: `init_session` fills the session and the subject
+	/// together, so "no session" and "no bound subject" are the same condition.
+	/// If these two cells could ever diverge, a service could report itself
+	/// stateless while still holding a subject to impersonate.
+	#[tokio::test]
+	async fn init_session_binds_session_and_subject_together() {
+		let ds = fresh_datastore().await;
+		let svc = McpService::new(ds, None, None, Session::default()).with_transport_label("http");
+		assert!(svc.session.get().is_none(), "a fresh service holds no session");
+		assert!(svc.bound_subject.get().is_none(), "a fresh service holds no bound subject");
+
+		svc.init_session(Session::owner()).expect("init_session");
+		assert!(svc.session.get().is_some(), "init_session must bind the session");
+		assert!(svc.bound_subject.get().is_some(), "init_session must bind the subject");
 	}
 }

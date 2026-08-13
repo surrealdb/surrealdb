@@ -460,6 +460,95 @@ async fn missing_credentials_on_existing_session_is_rejected() {
 	);
 }
 
+/// The stateless and legacy protocols share the `/mcp` endpoint, so a caller
+/// can present a legacy `mcp-session-id` *and* claim the stateless revision on
+/// the same request. Such a request must never be served by the session that
+/// id names: the stateless protocol authenticates each request on its own, so
+/// honouring the id there would run the call under the handshake's identity
+/// without matching its credentials.
+///
+/// The scope of the resolved session is the discriminator. The handshake bound
+/// `test`/`test`; a request served sessionlessly resolves neither, since the
+/// HTTP factory configures no default namespace or database. Query success
+/// cannot discriminate — `test_datastore` runs with auth disabled, so an
+/// anonymous session executes the same statements as an owner one.
+#[tokio::test]
+async fn stateless_claim_with_replayed_session_id_is_not_served_by_that_session() {
+	let ds = test_datastore().await;
+	let service = setup_service(ds);
+	let (session_id, _) = initialize(&service, Some(owner_session())).await;
+	complete_handshake(&service, &session_id).await;
+
+	let scope_probe = json!({
+		"jsonrpc": "2.0",
+		"id": 10,
+		"method": "tools/call",
+		"params": {
+			"_meta": {
+				// Fully-qualified keys: rmcp ignores a bare `protocolVersion`,
+				// which would leave the request legacy and defuse this test.
+				"io.modelcontextprotocol/protocolVersion": "2026-07-28",
+				"io.modelcontextprotocol/clientCapabilities": {},
+			},
+			"name": "query",
+			"arguments": { "query": "RETURN [session::ns(), session::db()]" },
+		},
+	});
+	// A stateless-revision request must carry the agreeing protocol header and
+	// the SEP-2243 method/name headers, or rmcp rejects it before dispatch and
+	// the assertion below would pass without exercising anything.
+	let http_req = Request::builder()
+		.method(Method::POST)
+		.uri("/mcp")
+		.header("host", "localhost")
+		.header("content-type", "application/json")
+		.header("accept", "application/json, text/event-stream")
+		.header("mcp-protocol-version", "2026-07-28")
+		.header("mcp-method", "tools/call")
+		.header("mcp-name", "query")
+		.header("mcp-session-id", &session_id)
+		.body(Full::new(Bytes::from(scope_probe.to_string())))
+		.unwrap();
+	let resp = service.handle(http_req).await;
+	assert_eq!(resp.status(), StatusCode::OK);
+	let body = body_to_string(resp).await;
+	let parsed = parse_sse_json(&body);
+	let scope = parsed
+		.pointer("/result/structuredContent/value")
+		.unwrap_or_else(|| panic!("stateless call should return a scope; body: {body}"));
+	assert_eq!(
+		scope,
+		&json!([null, null]),
+		"a stateless-revision request must not inherit the replayed session's scope; body: {body}"
+	);
+
+	// Control: the same probe as a legacy request with the session's own
+	// credentials does resolve the handshake scope, so the assertion above
+	// reflects the stateless claim rather than a probe that can never see one.
+	let legacy_probe = json!({
+		"jsonrpc": "2.0",
+		"id": 11,
+		"method": "tools/call",
+		"params": {
+			"name": "query",
+			"arguments": { "query": "RETURN [session::ns(), session::db()]" },
+		},
+	});
+	let resp =
+		service.handle(post_request(&legacy_probe, Some(&session_id), Some(owner_session()))).await;
+	assert_eq!(resp.status(), StatusCode::OK);
+	let body = body_to_string(resp).await;
+	let parsed = parse_sse_json(&body);
+	let scope = parsed
+		.pointer("/result/structuredContent/value")
+		.unwrap_or_else(|| panic!("legacy call should return a scope; body: {body}"));
+	assert_eq!(
+		scope,
+		&json!(["test", "test"]),
+		"legacy request with matching credentials must resolve the handshake scope; body: {body}"
+	);
+}
+
 #[tokio::test]
 async fn matching_credentials_on_existing_session_are_accepted() {
 	// Symmetric positive case: replaying with the *same* authenticated
