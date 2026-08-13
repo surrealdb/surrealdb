@@ -537,8 +537,8 @@ impl TikvOpsHandle {
 /// physical/logical decomposition as the rest of the engine. Returns
 /// `None` if the computed instant would precede the epoch.
 fn safepoint_from(now: &tikv::Timestamp, lifetime: Duration) -> Option<tikv::Timestamp> {
-	let micros: i64 = lifetime.as_micros().try_into().ok()?;
-	let physical = now.physical.checked_sub(micros)?;
+	let millis: i64 = lifetime.as_millis().try_into().ok()?;
+	let physical = now.physical.checked_sub(millis)?;
 	if physical < 0 {
 		return None;
 	}
@@ -1335,7 +1335,11 @@ impl TimeStampImpl for TiKVStampImpl {
 	}
 
 	fn create_from_datetime(&self, dt: DateTime<Utc>) -> Option<BoxTimeStamp> {
-		let physical = dt.timestamp_micros();
+		// `physical` is the TiKV TSO physical component, which is measured in
+		// milliseconds (it is what `version()` shifts left by 18 bits, and what
+		// `current_timestamp()` returns). Using microseconds here overflows the
+		// `version()` packing for any realistic datetime.
+		let physical = dt.timestamp_millis();
 		Some(BoxTimeStamp::new(TiKVStamp(tikv::Timestamp {
 			physical,
 			logical: 0,
@@ -1396,13 +1400,13 @@ impl TimeStamp for TiKVStamp {
 	}
 
 	fn as_datetime(&self) -> Option<DateTime<Utc>> {
-		// Will truncate, but is only a problem far in the future
-		DateTime::from_timestamp_micros(self.0.physical)
+		// `physical` is in milliseconds (TiKV TSO physical component).
+		DateTime::from_timestamp_millis(self.0.physical)
 	}
 
 	fn sub_checked(&self, duration: Duration) -> Option<BoxTimeStamp> {
-		let micros = duration.as_micros().try_into().ok()?;
-		let physical = self.0.physical.checked_sub(micros)?;
+		let millis = duration.as_millis().try_into().ok()?;
+		let physical = self.0.physical.checked_sub(millis)?;
 		Some(BoxTimeStamp::new(TiKVStamp(tikv::Timestamp {
 			physical,
 			logical: self.0.logical,
@@ -1583,7 +1587,8 @@ mod tests {
 			logical: 42,
 			suffix_bits: 7,
 		};
-		let safepoint = safepoint_from(&now, Duration::from_micros(250)).unwrap();
+		// `physical` is in milliseconds, so a 250 ms lifetime subtracts 250.
+		let safepoint = safepoint_from(&now, Duration::from_millis(250)).unwrap();
 		assert_eq!(safepoint.physical, 999_750);
 		// Logical and suffix bits ride along unchanged so the safepoint
 		// stays comparable to other timestamps in the same epoch.
@@ -1598,9 +1603,9 @@ mod tests {
 			logical: 0,
 			suffix_bits: 0,
 		};
-		// A 1 ms lifetime is 1000 micros; subtracting from `physical = 100`
-		// underflows past the epoch and should bail.
-		assert!(safepoint_from(&now, Duration::from_millis(1)).is_none());
+		// A 101 ms lifetime subtracted from `physical = 100` ms underflows
+		// past the epoch and should bail.
+		assert!(safepoint_from(&now, Duration::from_millis(101)).is_none());
 	}
 
 	#[test]
@@ -1610,7 +1615,7 @@ mod tests {
 			logical: 0,
 			suffix_bits: 0,
 		};
-		// `Duration::MAX.as_micros()` doesn't fit in `i64`; the
+		// `Duration::MAX.as_millis()` doesn't fit in `i64`; the
 		// `try_into` should bail rather than panic.
 		assert!(safepoint_from(&now, Duration::MAX).is_none());
 	}
