@@ -5070,9 +5070,9 @@ dependencies = [
 
 [[package]]
 name = "surrealmx"
-version = "0.23.0"
+version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26ccaa3935534159e7d3d9e909791be1b92a9fd1b58830e2a003e8a12c262176"
+checksum = "9e6ea4bb6532095046e99d2820185dee700c5bd7e6d919d3331c2537bcd8f91b"
 dependencies = [
  "arc-swap",
  "bincode",

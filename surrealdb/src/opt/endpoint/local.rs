@@ -38,7 +38,7 @@ fn format_duration(d: Duration) -> String {
 impl<R> Connect<Db, R> {
 	/// Enable MVCC versioning on the datastore.
 	///
-	/// Supported by `SurrealKv` and `Mem` engines.
+	/// Supported by the `SurrealKv` and `RocksDb` engines.
 	///
 	/// # Examples
 	///
@@ -65,7 +65,7 @@ impl<R> Connect<Db, R> {
 	/// Determines how long old versions are kept before being garbage collected.
 	/// A duration of zero means unlimited retention.
 	///
-	/// Supported by `SurrealKv` and `Mem` engines. Requires `versioned()`.
+	/// Supported by the `SurrealKv` and `RocksDb` engines. Requires `versioned()`.
 	///
 	/// # Examples
 	///

@@ -930,9 +930,10 @@ pub trait Transactable: Send + Sync {
 	/// while a synchronous `DEFINE EVENT` computes its `THEN` expression as a
 	/// full statement, which takes and releases a savepoint of its own.
 	///
-	/// Engines that expose a native savepoint but no release operation can get
-	/// the release-merge behaviour from [`crate::SavepointStack`]. Engines with
-	/// no native savepoint need an undo log keyed per open scope.
+	/// Engines that expose a native savepoint and a native release call both
+	/// directly. Engines with a savepoint but no release can get the
+	/// release-merge behaviour from [`crate::SavepointStack`]. Engines with no
+	/// native savepoint need an undo log keyed per open scope.
 	fn new_save_point(&self) -> BoxFut<'_, Result<()>>;
 
 	/// Release the last save point, keeping its writes undoable by any enclosing

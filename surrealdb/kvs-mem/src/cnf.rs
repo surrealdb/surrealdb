@@ -1,4 +1,6 @@
-use surrealdb_cnf::Config;
+use std::time::Duration;
+
+use surrealdb_cnf::{Config, parse_duration};
 use surrealdb_kvs::config::{AolMode, SnapshotMode, SyncMode};
 
 /// Configuration for the in-memory storage engine, parsed from query parameters.
@@ -13,6 +15,17 @@ pub struct MemoryConfig {
 	pub aol_mode: AolMode,
 	/// Snapshot interval. Requires `persist_path`.
 	pub snapshot_mode: SnapshotMode,
+	/// Whether MVCC versioning was requested.
+	///
+	/// The memory backend has no versioned-read path, so this is parsed only to
+	/// refuse it at startup rather than accept it and fail every versioned query
+	/// later. See [`crate::Datastore::new`].
+	pub versioned: bool,
+	/// Version retention period requested (zero = unset).
+	///
+	/// Retention only has meaning alongside versioning, which this backend does
+	/// not offer, so it is parsed for the same reason as `versioned`.
+	pub retention: Duration,
 }
 
 impl Default for MemoryConfig {
@@ -22,6 +35,8 @@ impl Default for MemoryConfig {
 			sync_mode: SyncMode::Never,
 			aol_mode: AolMode::Never,
 			snapshot_mode: SnapshotMode::Never,
+			versioned: false,
+			retention: Duration::ZERO,
 		}
 	}
 }
@@ -37,7 +52,9 @@ impl Config for MemoryConfig {
 			}
 		})
 		.parse_key("datastore_aol", &mut self.aol_mode)
-		.parse_key("datastore_snapshot", &mut self.snapshot_mode);
+		.parse_key("datastore_snapshot", &mut self.snapshot_mode)
+		.parse_key("datastore_versioned", &mut self.versioned)
+		.parse_key_with("datastore_retention", &mut self.retention, |x| parse_duration(x).ok());
 
 		if map.has_key("datastore_sync") {
 			map.parse_key("datastore_sync", &mut self.sync_mode);
@@ -64,6 +81,17 @@ mod test {
 		assert_eq!(config.aol_mode, AolMode::Never);
 		assert_eq!(config.snapshot_mode, SnapshotMode::Never);
 		assert_eq!(config.sync_mode, SyncMode::Never);
+		assert!(!config.versioned);
+		assert_eq!(config.retention, Duration::ZERO);
+	}
+
+	#[test]
+	fn test_memory_config_versioning_parsed() {
+		let map = ConfigMap::from_config_string("versioned=true&retention=30d")
+			.map_keys(|x| format!("datastore_{x}"));
+		let config = map.load::<MemoryConfig>();
+		assert!(config.versioned);
+		assert_eq!(config.retention, Duration::from_secs(30 * 24 * 60 * 60));
 	}
 
 	#[test]

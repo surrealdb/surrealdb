@@ -26,9 +26,7 @@ use surrealdb_kvs::err::{Error, Result};
 use surrealdb_kvs::timestamp::{
 	BoxTimeStamp, BoxTimeStampImpl, MAX_TIMESTAMP_BYTES, TimeStamp, TimeStampImpl,
 };
-use surrealdb_kvs::{
-	Direction, Key, KeyRange, Metrics, SavepointStack, TransactionBuilder, TransactionType, Val,
-};
+use surrealdb_kvs::{Direction, Key, KeyRange, Metrics, TransactionBuilder, TransactionType, Val};
 
 /// Convert a SurrealMX engine error into the generic KVS error type.
 #[expect(
@@ -43,6 +41,7 @@ fn kvs_error(e: surrealmx::Error) -> Error {
 		surrealmx::Error::KeyAlreadyExists => Error::TransactionKeyAlreadyExists,
 		surrealmx::Error::KeyReadConflict => Error::TransactionConflict(e.to_string()),
 		surrealmx::Error::KeyWriteConflict => Error::TransactionConflict(e.to_string()),
+		surrealmx::Error::NoSavepoint => Error::NoSavepoint,
 		_ => Error::Transaction(e.to_string()),
 	}
 }
@@ -58,21 +57,17 @@ pub struct Transaction {
 	write: bool,
 	/// The underlying datastore transaction
 	inner: RwLock<Tx>,
-	/// Engine savepoints backing each open savepoint.
-	///
-	/// Always acquired before `inner` and held across it, so the scope counts
-	/// and the engine's savepoint stack cannot drift apart between the two.
-	/// Nothing acquires the pair in the opposite order, so they cannot deadlock.
-	savepoints: RwLock<SavepointStack>,
 }
 
 impl Datastore {
 	/// Open a new database
-	#[cfg_attr(
-		target_family = "wasm",
-		expect(unused_variables, reason = "only persistence is configurable, and wasm has none")
-	)]
 	pub async fn new(config: MemoryConfig) -> Result<Datastore> {
+		// Refuse versioning up front. The memory backend has no versioned-read
+		// path, so accepting these would hand back a datastore that silently
+		// ignores them and then rejects every versioned query it is given.
+		if config.versioned || !config.retention.is_zero() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Create the shared blocking threadpool (idempotent)
 		surrealdb_kvs::threadpool::initialise();
 		#[cfg(not(target_family = "wasm"))]
@@ -146,7 +141,6 @@ impl Datastore {
 			done: AtomicBool::new(false),
 			write,
 			inner: RwLock::new(txn),
-			savepoints: RwLock::new(SavepointStack::default()),
 		}))
 	}
 }
@@ -699,11 +693,7 @@ impl Transactable for Transaction {
 	/// Set a new save point on the transaction.
 	fn new_save_point(&self) -> BoxFut<'_, Result<()>> {
 		Box::pin(async move {
-			let mut savepoints = self.savepoints.write().await;
 			self.inner.write().await.set_savepoint().map_err(kvs_error)?;
-			// Counted only once the engine has accepted the savepoint, so a
-			// refusal cannot leave a scope counted that the engine never took.
-			savepoints.open();
 			Ok(())
 		})
 	}
@@ -711,16 +701,7 @@ impl Transactable for Transaction {
 	/// Rollback to the last save point.
 	fn rollback_to_save_point(&self) -> BoxFut<'_, Result<()>> {
 		Box::pin(async move {
-			// A scope that absorbed released savepoints needs one engine
-			// rollback per savepoint, as each reverts to the most recent. The
-			// stack guard is held across the unwind so the count and the engine
-			// cannot diverge partway through.
-			let mut savepoints = self.savepoints.write().await;
-			let unwind = savepoints.take()?;
-			let mut inner = self.inner.write().await;
-			for _ in 0..unwind {
-				inner.rollback_to_savepoint().map_err(kvs_error)?;
-			}
+			self.inner.write().await.rollback_to_savepoint().map_err(kvs_error)?;
 			Ok(())
 		})
 	}
@@ -728,8 +709,12 @@ impl Transactable for Transaction {
 	/// Release the last save point.
 	fn release_last_save_point(&self) -> BoxFut<'_, Result<()>> {
 		Box::pin(async move {
-			self.savepoints.write().await.release();
-			Ok(())
+			// Releasing with no scope open is inert, so the engine refusing to
+			// pop an empty stack satisfies the contract rather than breaking it.
+			match self.inner.write().await.release_savepoint() {
+				Ok(()) | Err(surrealmx::Error::NoSavepoint) => Ok(()),
+				Err(e) => Err(kvs_error(e)),
+			}
 		})
 	}
 
@@ -994,11 +979,11 @@ mod tests {
 
 	/// A write / supersede / delete round-trip through the public transaction
 	/// API. The live state always reflects the latest committed writes, and a
-	/// versioned read is rejected: the memory backend no longer supports MVCC
-	/// time-travel now that surrealmx (0.23) has dropped its versioned-read
-	/// API. Reclamation of superseded versions is surrealmx's own concern
-	/// (inline at commit plus a tracked background sweep) and is covered by its
-	/// own test suite.
+	/// versioned read is rejected: the memory backend offers no MVCC
+	/// time-travel, because surrealmx exposes no versioned-read API.
+	/// Reclamation of superseded versions is surrealmx's own concern (inline at
+	/// commit plus a tracked background sweep) and is covered by its own test
+	/// suite.
 	#[tokio::test]
 	async fn roundtrip_and_versioned_reads_rejected() {
 		let ds = Datastore::new(MemoryConfig::default()).await.unwrap();
@@ -1025,5 +1010,29 @@ mod tests {
 			Err(Error::UnsupportedVersionedQueries)
 		));
 		tx.cancel().await.unwrap();
+	}
+
+	/// Versioning is refused when the datastore is built, not left to fail on
+	/// the first versioned query. Retention is refused on its own too: it only
+	/// means anything alongside versioning, so honouring it here would be
+	/// accepting a setting that can never take effect.
+	#[tokio::test]
+	async fn versioning_config_rejected_at_startup() {
+		let config = MemoryConfig {
+			versioned: true,
+			..Default::default()
+		};
+		assert!(matches!(
+			Datastore::new(config).await.err(),
+			Some(Error::UnsupportedVersionedQueries)
+		));
+		let config = MemoryConfig {
+			retention: Duration::from_secs(30),
+			..Default::default()
+		};
+		assert!(matches!(
+			Datastore::new(config).await.err(),
+			Some(Error::UnsupportedVersionedQueries)
+		));
 	}
 }

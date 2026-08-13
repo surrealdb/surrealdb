@@ -4,10 +4,11 @@ use crate::err::{Error, Result};
 
 /// Tracks the engine savepoints backing each open logical savepoint.
 ///
-/// The engines behind the local backends expose only "set a savepoint" and
-/// "roll back to the most recent savepoint", where rolling back consumes the
-/// savepoint it reverts to. Neither offers a release operation — a way to
-/// discard a savepoint marker while keeping the writes made after it.
+/// Some engines expose only "set a savepoint" and "roll back to the most recent
+/// savepoint", where rolling back consumes the savepoint it reverts to, with no
+/// release operation — a way to discard a savepoint marker while keeping the
+/// writes made after it. This type supplies release for those engines; a
+/// backend whose engine has a native release calls it directly instead.
 ///
 /// Release still has to leave those writes undoable by the enclosing
 /// savepoint, so a released savepoint stays on the engine's stack and its
@@ -29,11 +30,10 @@ use crate::err::{Error, Result};
 /// engine past the end of its stack.
 ///
 /// Two costs follow from emulating release rather than performing it, and both
-/// would go away if the engines gained a native pop-without-restore:
+/// go away for any engine that gains a native pop-without-restore:
 ///
 /// - A released savepoint is left on the engine's stack for the rest of the transaction. What that
-///   retains is engine-specific: a counter on surrealkv, a lock-tracker allocation on RocksDB, a
-///   full writeset snapshot on surrealmx.
+///   retains is engine-specific: a counter on surrealkv, a lock-tracker allocation on RocksDB.
 /// - Unwinding a scope that absorbed `n` releases costs `n + 1` engine rollbacks, and each one
 ///   restores whole-transaction state rather than one scope's worth.
 #[derive(Debug, Default)]
