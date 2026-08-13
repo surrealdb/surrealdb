@@ -2,10 +2,11 @@
 #
 # Builds and stores ONE channel's release-ready engine artifact set for a single
 # commit: the binary matrix (+ macOS universal), the multi-arch Docker images
-# (scanned before push to the registry), and the
-# rolling-builds/<slug>/<sha>/engine.json manifest that marks the engine side of
-# the commit as releasable for that channel. The downstream side records its own
-# separate downstream.json (see rolling-downstream.yml), built by the separate
+# (scanned before push to the registry), the npm packages that embed the engine
+# (@surrealdb/node-native + @surrealdb/wasm-native, on releases/* lines only), and
+# the rolling-builds/<slug>/<sha>/engine.json manifest that marks the engine side
+# of the commit as releasable for that channel. The downstream side records its
+# own separate downstream.json (see rolling-downstream.yml), built by the separate
 # rolling-downstream-build.yml workflow.
 #
 # rolling-build.yml calls this once per push for the branch's channel (the
@@ -472,6 +473,311 @@ jobs:
       - name: Package crates
         uses: ./.ci/.github/actions/quality-package
 
+  # ============================================================================
+  # npm packages (@surrealdb/node-native + @surrealdb/wasm-native)
+  # ============================================================================
+  # These embed this exact engine and carry its version, built here so the promote
+  # workflow only has to publish them (build-once / promote-many, like the binaries
+  # and the Docker image). The artifacts are version-agnostic (the version is
+  # injected at publish time), so one rolling build serves whatever version the
+  # commit is ultimately promoted as. The build jobs run on every releases/* push
+  # and on any manual workflow_dispatch (so a rebuild or a test-branch dispatch
+  # exercises them; throwaway lines have their bundles cleaned up by cleanup-test,
+  # like the binaries and images). The unattended scheduled nightly on main skips
+  # them: nightly publishes no npm packages (as with crates), so a daily 8-target
+  # native matrix would be pure waste. See build-node-addon / build-wasm-engine
+  # below.
+  #
+  # npm-preflight gates all of the above on the packages actually being present at
+  # the built commit. Release lines cut before @surrealdb/node-native +
+  # @surrealdb/wasm-native existed (e.g. releases/3.1, releases/3.2) have no
+  # surrealdb/node or surrealdb/wasm, so npm is skipped for them — at build AND
+  # promote time. Building a missing package directory would fail and, because
+  # finalize waits on the npm jobs, block the engine promote for a line that never
+  # shipped npm. (Gated to the same channels the npm build runs on, so the
+  # scheduled nightly skips this preflight too.)
+  npm-preflight:
+    name: Detect npm packages
+    if: ${{ startsWith(inputs.branch, 'releases/') || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    outputs:
+      build-npm: ${{ steps.detect.outputs.build-npm }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      # Sparse, blobless checkout of just the two package manifests — this job only
+      # needs to know whether they exist, not the whole (large) repo. Non-cone
+      # patterns match the exact paths; if the commit lacks them, the working tree
+      # is simply empty and the detect step reports no packages.
+      - name: Checkout package manifests
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.git-ref }}
+          filter: blob:none
+          sparse-checkout: |
+            surrealdb/node/package.json
+            surrealdb/wasm/package.json
+          sparse-checkout-cone-mode: false
+
+      # Both packages were introduced together and travel together, so treat
+      # "either absent" as "this line has no npm packages" and skip the build.
+      - name: Detect npm package sources
+        id: detect
+        env:
+          GIT_REF: ${{ inputs.git-ref }}
+        run: |
+          set -euo pipefail
+          if [ -f surrealdb/node/package.json ] && [ -f surrealdb/wasm/package.json ]; then
+            echo "build-npm=true" >> "$GITHUB_OUTPUT"
+            echo "npm package sources present at ${GIT_REF}; the npm build will run."
+          else
+            echo "build-npm=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::surrealdb/node and/or surrealdb/wasm absent at ${GIT_REF}; skipping the npm build (this line ships no npm packages)."
+          fi
+
+  # `@surrealdb/node-native`: the NAPI addon, one native binary per platform.
+  build-node-addon:
+    name: Build Node addon (${{ matrix.name }})
+    needs: [npm-preflight]
+    if: ${{ needs.npm-preflight.outputs.build-npm == 'true' }}
+    runs-on: ${{ matrix.host }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS x86_64
+            host: macos-latest
+            target: x86_64-apple-darwin
+          - name: macOS aarch64
+            host: macos-latest
+            target: aarch64-apple-darwin
+          # The repository-root cargo config links the `surreal` binary against
+          # the static CRT. An addon is loaded into an already-running node.exe
+          # and has to share that process's dynamic CRT, so the flags are
+          # replaced here — `RUSTFLAGS` overrides the config's `rustflags`
+          # outright rather than appending to them.
+          - name: Windows x86_64
+            host: windows-latest
+            target: x86_64-pc-windows-msvc
+            rustflags: -C target-feature=-crt-static
+          - name: Windows aarch64
+            host: windows-latest
+            target: aarch64-pc-windows-msvc
+          - name: Linux x86_64 (gnu)
+            host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            cross: true
+          - name: Linux x86_64 (musl)
+            host: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            cross: true
+            rustflags: -C target-feature=-crt-static
+          - name: Linux aarch64 (gnu)
+            host: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            cross: true
+          - name: Linux aarch64 (musl)
+            host: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            cross: true
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.git-ref }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      # napi/cargo compile with the repo-pinned toolchain (rust-toolchain.toml),
+      # NOT the `stable` one installed above — so the target's std has to be added
+      # to the pinned toolchain. dtolnay's `targets:` input adds it to `stable`,
+      # which the build never uses, so on a cross target the pinned toolchain lacks
+      # the std and the build dies with "can't find crate for `core`". Running
+      # rustup at the repo root resolves the pinned toolchain via rust-toolchain.toml
+      # (auto-installing it), the same way build-macos adds its cross slice. A no-op
+      # for the native (host) target.
+      - name: Add the target to the pinned toolchain
+        shell: bash
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      # Only the gnu aarch64 target links with the GNU toolchain; the musl
+      # targets are linked by zig via cargo-zigbuild.
+      - name: Install cross-compilation toolchain
+        if: ${{ matrix.target == 'aarch64-unknown-linux-gnu' }}
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - name: Install ziglang
+        if: ${{ matrix.cross }}
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.14.1
+
+      - name: Install cargo-zigbuild
+        if: ${{ matrix.cross }}
+        uses: taiki-e/install-action@328a871ad8f62ecac78390391f463ccabc974b72 # v2.69.9
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          tool: cargo-zigbuild
+
+      - name: Install dependencies
+        working-directory: surrealdb/node
+        run: bun install --frozen-lockfile
+
+      - name: Build the addon
+        working-directory: surrealdb/node
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+        run: bun run build.ts --target ${{ matrix.target }} ${{ matrix.cross && '-x' || '' }}
+
+      - name: Upload the native binary
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: node-addon-${{ matrix.target }}
+          if-no-files-found: error
+          path: surrealdb/node/dist/*.node
+
+      # The JavaScript entry point and type declarations are identical for
+      # every target, so one build's copy is enough.
+      - name: Upload the package bundle
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: node-addon-bundle
+          if-no-files-found: error
+          path: |
+            surrealdb/node/dist/
+            !surrealdb/node/dist/*.node
+
+  # `@surrealdb/wasm-native`: the embedded browser engine. One artefact rather
+  # than a matrix — WebAssembly is the only target.
+  build-wasm-engine:
+    name: Build Wasm engine
+    needs: [npm-preflight]
+    if: ${{ needs.npm-preflight.outputs.build-npm == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.git-ref }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      # The CLI and the wasm-bindgen crate share a bindgen schema that changes
+      # between patch releases, so the version comes from the lockfile — the
+      # same source `build.ts` checks against before it runs.
+      - name: Install wasm-bindgen-cli
+        run: |
+          version=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | grep '^version' | cut -d'"' -f2)
+          echo "Installing wasm-bindgen-cli $version"
+          cargo install -f wasm-bindgen-cli --version "$version"
+
+      - name: Install wasm-opt
+        run: cargo install wasm-opt --version 0.116.1
+
+      - name: Install dependencies
+        working-directory: surrealdb/wasm
+        run: bun install --frozen-lockfile
+
+      - name: Build the module
+        working-directory: surrealdb/wasm
+        run: bun run build
+
+      - name: Upload the package bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: wasm-engine-bundle
+          if-no-files-found: error
+          path: surrealdb/wasm/dist/
+
+  # Store the built npm bundles under the channel's rolling prefix so the promote
+  # workflow can publish them without rebuilding. Waits on the crate gates for the
+  # same reason publish-s3/docker do: never persist artifacts for a commit a failed
+  # gate would make unpromotable. Assembles each package's dist/ (for the addon:
+  # every platform's native binary plus the shared JS/typings) exactly as the
+  # publish step expects to find it, then uploads it verbatim.
+  publish-npm-s3:
+    name: Publish npm bundles to S3
+    if: ${{ needs.npm-preflight.outputs.build-npm == 'true' }}
+    needs: [npm-preflight, build-node-addon, build-wasm-engine, check-versions, package]
+    # Private runner: rolling artifacts live in the private CI bucket, reached via
+    # the runner's ambient IAM role (no static keys). Label from a repo/org var.
+    runs-on: ${{ vars.RUNNER_AMD }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      # One pattern download assembles the whole node dist/: `node-addon-*` matches
+      # both the shared JS/typings bundle (node-addon-bundle) and every platform's
+      # native binary (node-addon-<target>), merged into one directory.
+      - name: Download the Node bundle + native binaries
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: node-addon-*
+          path: node/dist/
+          merge-multiple: true
+
+      - name: Download the Wasm package bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: wasm-engine-bundle
+          path: wasm/dist/
+
+      - name: Distribution summary
+        run: |
+          echo "node/dist:" && ls -l node/dist
+          echo "wasm/dist:" && ls -lR wasm/dist
+
+      # The assembled dist/ trees are uploaded verbatim under npm/<pkg>/ so the
+      # promote workflow can drop them straight into the package's dist/ and
+      # publish. Ambient IAM creds from the private runner; region is the bucket's
+      # home region.
+      - name: Upload to the rolling prefix
+        env:
+          ROLLING_BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
+          S3_PREFIX: ${{ inputs.s3-prefix }}
+          AWS_REGION: us-east-1
+        run: |
+          set -euo pipefail
+          aws s3 cp --recursive --cache-control 'no-store' \
+            node/dist/ "s3://${ROLLING_BUCKET}/${S3_PREFIX}/npm/node/"
+          aws s3 cp --recursive --cache-control 'no-store' \
+            wasm/dist/ "s3://${ROLLING_BUCKET}/${S3_PREFIX}/npm/wasm/"
+
   # Single source of truth for "the engine side of this commit is releasable" on
   # this channel. Runs after every engine artifact-producing job AND both channel
   # gates have succeeded, then writes engine.json — the manifest the promote
@@ -497,10 +803,25 @@ jobs:
   # from which manifests exist for the commit.
   finalize:
     name: Finalize channel
-    needs: [build, macos-universal, publish-s3, docker, check-versions, package]
+    needs: [build, macos-universal, publish-s3, docker, check-versions, package, npm-preflight, build-node-addon, build-wasm-engine, publish-npm-s3]
     # Run once the engine side is green. !cancelled() keeps the manifest from
     # being written when the run was cancelled. The ref check keeps throwaway test
     # builds (dispatched against non-release branches) unpromotable.
+    #
+    # The npm packages are REQUIRED for promotability only on a releases/* line
+    # that actually builds them — the only channel that ever PUBLISHES npm (a
+    # versioned release). There, all three npm jobs must have succeeded. Every
+    # other channel does not require them:
+    #   * nightly (main, scheduled) builds no npm at all;
+    #   * a manual main dispatch may build npm to exercise it, but main is promoted
+    #     as nightly and never publishes npm, so an npm failure there must NOT block
+    #     the engine (binary + Docker) promote;
+    #   * a release line that predates the packages (build-npm == false, e.g.
+    #     releases/3.1) has none to build.
+    # Requiring npm only on `build-npm == true AND releases/*` (rather than
+    # tolerating a bare 'skipped' result) still keeps a FAILED npm build — which
+    # surfaces as 'skipped' on its dependants — from slipping through as promotable
+    # on a releases/* line, while never coupling a main rebuild to npm health.
     if: >-
       ${{ !cancelled()
       && needs.build.result == 'success'
@@ -509,6 +830,11 @@ jobs:
       && needs.docker.result == 'success'
       && needs.check-versions.result == 'success'
       && needs.package.result == 'success'
+      && (needs.npm-preflight.outputs.build-npm != 'true'
+          || !startsWith(inputs.branch, 'releases/')
+          || (needs.build-node-addon.result == 'success'
+              && needs.build-wasm-engine.result == 'success'
+              && needs.publish-npm-s3.result == 'success'))
       && inputs.engine-promotable == 'true'
       && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/releases/')) }}
     # Private runner: the manifest lives next to the rolling binaries in the
@@ -562,7 +888,10 @@ jobs:
   # this run's slug + sha, so it can only ever remove what this run created.
   cleanup-test:
     name: Clean up test artifacts
-    needs: [build, macos-universal, publish-s3, docker]
+    # Waits on the npm jobs too so a throwaway dispatch's npm bundles (uploaded by
+    # publish-npm-s3) are removed by the recursive prefix delete below rather than
+    # racing it. always() tolerates them being skipped on a non-dispatch throwaway.
+    needs: [build, macos-universal, publish-s3, docker, build-node-addon, build-wasm-engine, publish-npm-s3]
     if: ${{ always() && github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/heads/releases/') }}
     # Private runner: reaches the private CI bucket and the ECR via the runner's
     # ambient IAM role (no static keys). Label from a repo/org variable.

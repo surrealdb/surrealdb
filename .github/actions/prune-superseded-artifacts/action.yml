@@ -36,16 +36,22 @@ runs:
           # other side can still resolve its manifest. Manifests are tiny; the
           # binaries are not.
           if [[ "$RELEASE_ENGINE" == "true" ]]; then
-            echo "Pruning superseded S3 binaries under rolling-builds/${SLUG}/${d}/ (keeping engine.json + downstream.json)"
+            echo "Pruning superseded S3 binaries + npm bundles under rolling-builds/${SLUG}/${d}/ (keeping engine.json + downstream.json)"
             # Best-effort: prune runs AFTER the release has already shipped, so a
             # delete failure (e.g. the runner role lacking s3:DeleteObject) must not
             # redden a successful release. It only means superseded binaries linger.
             # DRY_RUN: --dryrun makes aws print what it WOULD delete, deleting
             # nothing, so a publish:false release validates the selection above.
+            #
+            # The npm bundles (npm/node/, npm/wasm/) are ENGINE artifacts too (they
+            # embed this engine), so they are pruned on the same engine-side gate and
+            # kept for the released commit itself. 'npm/*' matches every object under
+            # that prefix regardless of extension; the .tgz/.txt/.exe includes still
+            # cover the top-level binaries.
             dryrun_flag=""
             [ "${DRY_RUN:-false}" = "true" ] && dryrun_flag="--dryrun"
             if ! aws s3 rm ${dryrun_flag} --recursive "s3://${ROLLING_BUCKET}/rolling-builds/${SLUG}/${d}/" \
-              --exclude '*' --include '*.tgz' --include '*.txt' --include '*.exe'; then
+              --exclude '*' --include '*.tgz' --include '*.txt' --include '*.exe' --include 'npm/*'; then
               echo "::warning::Could not prune superseded S3 binaries under rolling-builds/${SLUG}/${d}/ (often a missing s3:DeleteObject grant on the runner role). Leaving them in place; the release itself is unaffected."
             fi
           fi

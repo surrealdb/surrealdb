@@ -51,7 +51,7 @@ jobs:
       - name: Export USER for cachix
         run: echo "USER=$(id -un)" >> "$GITHUB_ENV"
 
-      - uses: cachix/cachix-action@1eb2ef646ac0255473d23a5907ad7b04ce94065c # (Actions must be pinned by commit hash) v17
+      - uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # (Actions must be pinned by commit hash) v17
         env:
           CACHIX_AUTH_TOKEN: ${{ env.IS_TRUSTED_REF == 'true' && secrets.CACHIX_AUTH_TOKEN || '' }}
         with:

@@ -43,6 +43,30 @@ async function workspaceVersion(): Promise<string> {
 	return version;
 }
 
+/**
+ * Is this exact version already on the npm registry? Queries the public registry
+ * (no auth needed). A 404 on the package means it does not exist yet (a first
+ * publish); any other non-OK status is treated as "unknown" so the publish still
+ * proceeds and npm's own write-once guard has the final say.
+ */
+async function isPublished(pkgName: string, pkgVersion: string): Promise<boolean> {
+	const url = `https://registry.npmjs.org/${pkgName.replace("/", "%2F")}`;
+	let res: Response;
+	try {
+		res = await fetch(url, { headers: { accept: "application/vnd.npm.install-v1+json" } });
+	} catch (err) {
+		console.warn(`⚠️ Could not reach the npm registry to check ${pkgName}@${pkgVersion} (${err}); proceeding with publish.`);
+		return false;
+	}
+	if (res.status === 404) return false;
+	if (!res.ok) {
+		console.warn(`⚠️ Registry check for ${pkgName} returned HTTP ${res.status}; proceeding with publish.`);
+		return false;
+	}
+	const doc = (await res.json()) as { versions?: Record<string, unknown> };
+	return Boolean(doc.versions?.[pkgVersion]);
+}
+
 const version = process.env.SURREAL_VERSION || (await workspaceVersion());
 const pkg = await packageFile.json();
 const { name } = pkg;
@@ -52,6 +76,15 @@ const { name } = pkg;
 const channel = values.channel ?? version.match(/-([0-9A-Za-z]+)/)?.[1] ?? "latest";
 
 console.log(`✨ Publishing ${name} as version ${version} (tag ${channel})`);
+
+// Idempotent skip: if this exact version is already on the registry, do nothing.
+// Mirrors crate publishing so "re-run failed jobs" and overwrite re-releases
+// converge instead of failing on npm's write-once versions. A dry run still runs
+// below — it validates packing without publishing.
+if (!values["dry-run"] && (await isPublished(name, version))) {
+	console.log(`✅ ${name}@${version} is already published — skipping.`);
+	process.exit(0);
+}
 
 pkg.version = version;
 await Bun.write(packageFile, `${JSON.stringify(pkg, null, "\t")}\n`);
@@ -97,5 +130,14 @@ const publishCode = await Bun.spawn(publishCmd, {
 	stdout: "inherit",
 	stderr: "inherit",
 }).exited;
+
+// A concurrent or prior publish may have landed this version between the check
+// above and now; if the exact version is on the registry, treat it as success —
+// the same way crate publishing tolerates an already-uploaded crate. Not for a
+// dry run, which never publishes.
+if (publishCode !== 0 && !values["dry-run"] && (await isPublished(name, version))) {
+	console.log(`✅ ${name}@${version} is already on the registry — treating publish as success.`);
+	process.exit(0);
+}
 
 process.exit(publishCode);

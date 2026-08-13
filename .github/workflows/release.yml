@@ -183,6 +183,11 @@ jobs:
       downstream-built: ${{ steps.locate.outputs.downstream-built }}
       downstream-sha: ${{ steps.locate.outputs.downstream-sha }}
       downstream-branch: ${{ steps.locate.outputs.downstream-branch }}
+      # Whether the resolved commit carries the npm package sources
+      # (surrealdb/node + surrealdb/wasm). Release lines that predate the packages
+      # (e.g. releases/3.1) have neither, so their promote skips the npm publish
+      # jobs rather than fail fetching a bundle that was never built.
+      has-npm: ${{ steps.npm.outputs.has-npm }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
@@ -294,6 +299,23 @@ jobs:
           # Keep the .ci tooling checkout: `clean: true` (default) would git-clean
           # it away as untracked. Tracked files still reset to the resolved commit.
           clean: false
+
+      # Detect whether this commit carries the npm package sources. Release lines
+      # that predate @surrealdb/node-native + @surrealdb/wasm-native (e.g.
+      # releases/3.1) have neither, so their promote must SKIP the npm publish jobs
+      # rather than fail trying to fetch a bundle the rolling build never produced.
+      - name: Detect npm packages
+        id: npm
+        env:
+          GIT_SHA: ${{ steps.locate.outputs.git-sha }}
+        run: |
+          set -euo pipefail
+          if [ -f surrealdb/node/package.json ] && [ -f surrealdb/wasm/package.json ]; then
+            echo "has-npm=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-npm=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::surrealdb/node and/or surrealdb/wasm absent at ${GIT_SHA}; the npm publish jobs will be skipped for this release."
+          fi
 
       # Toolchain for `cargo metadata` in prepare-release-vars, hoisted out of
       # that action so no nested `uses:` resolves against the released commit.
@@ -664,144 +686,109 @@ jobs:
           cargo-registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
   # ----------------------------------------
-  # Publish the embedded Node.js engine (versioned releases)
+  # Publish the embedded-engine npm packages (versioned releases)
   # ----------------------------------------
-  # `@surrealdb/node-native` embeds this exact engine, so it ships with it and carries
-  # the same version. Unlike the `surreal` binary the addon is not part of the
-  # rolling build, so its per-platform binaries are compiled here, from the
-  # released SHA. Nightly publishes no packages, as with crates.
-
-  build-node-addon:
-    name: Build Node addon (${{ matrix.name }})
+  # `@surrealdb/node-native` (the NAPI addon) and `@surrealdb/wasm-native` (the
+  # WebAssembly module) each embed this exact engine and carry its version. Like
+  # the `surreal` binary and the Docker image they are part of the rolling build
+  # (rolling-channel.yml): compiled once at push time and stored under the commit's
+  # rolling prefix. Promotion only PUBLISHES them, compiling nothing.
+  #
+  # It takes TWO jobs because two constraints pull opposite ways:
+  #   * only the private runner can READ the rolling bucket (ambient IAM; the static
+  #     download-bucket keys have no access — verified), but
+  #   * npm TRUSTED PUBLISHING (OIDC, no token) rejects self-hosted runners, so the
+  #     publish must run on a GitHub-hosted runner.
+  # So stage-npm (self-hosted) downloads the bundles and hands them off as workflow
+  # artifacts, and publish-npm (hosted) downloads those and publishes via OIDC.
+  # Nightly publishes no packages (as with crates), and a line that predates the
+  # packages (has-npm == false) is skipped entirely.
+  stage-npm:
+    name: Stage npm bundles from S3
     needs: [prepare-vars, approve]
-    if: ${{ needs.prepare-vars.outputs.release-engine == 'true' && needs.prepare-vars.outputs.nightly-release != 'true' }}
-    runs-on: ${{ matrix.host }}
+    # has-npm gates out release lines that predate the packages (e.g. releases/3.1),
+    # whose rolling build produced no bundle to promote.
+    if: ${{ needs.prepare-vars.outputs.release-engine == 'true' && needs.prepare-vars.outputs.nightly-release != 'true' && needs.prepare-vars.outputs.has-npm == 'true' }}
+    # Private runner: the prebuilt bundles live in the private CI bucket, read via
+    # the runner's ambient IAM role (no static keys). Label from a repo/org var.
+    runs-on: ${{ vars.RUNNER_AMD }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      # Download both packages' prebuilt dist/ trees from the commit's rolling
+      # prefix. The guard distinguishes a genuinely-absent bundle (rebuild the
+      # rolling build) from a transient ls error (just retry), so the failure
+      # message points at the right fix. This must NOT be continue-on-error even on
+      # a dry-run: a missing bundle is a real problem worth surfacing.
+      - name: Download bundles from the rolling prefix
+        env:
+          ROLLING_BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
+          S3_PREFIX: ${{ needs.prepare-vars.outputs.s3-prefix }}
+          AWS_REGION: us-east-1
+        run: |
+          set -euo pipefail
+          for slot in node wasm; do
+            prefix="s3://${ROLLING_BUCKET}/${S3_PREFIX}/npm/${slot}/"
+            if ! listing="$(aws s3 ls "$prefix")"; then
+              echo "::error::Could not list ${prefix} (transient S3 or credentials error). Re-run this job."
+              exit 1
+            fi
+            if [ -z "$listing" ]; then
+              echo "::error::No prebuilt @surrealdb/${slot}-native bundle under ${S3_PREFIX}/npm/${slot}/. The commit's rolling build did not store one (built before npm moved into the rolling build, or the bundle was pruned). Re-run rolling-build.yml for this commit."
+              exit 1
+            fi
+            aws s3 cp --recursive "$prefix" "staged/${slot}/"
+          done
+          echo "Staged:" && ls -lR staged
+
+      - name: Upload the Node bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: npm-bundle-node
+          if-no-files-found: error
+          path: staged/node/
+
+      - name: Upload the Wasm bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: npm-bundle-wasm
+          if-no-files-found: error
+          path: staged/wasm/
+
+  publish-npm:
+    name: Publish ${{ matrix.package }}
+    needs: [prepare-vars, approve, stage-npm]
+    if: ${{ needs.prepare-vars.outputs.release-engine == 'true' && needs.prepare-vars.outputs.nightly-release != 'true' && needs.prepare-vars.outputs.has-npm == 'true' }}
+    # GitHub-hosted: npm trusted publishing (OIDC) rejects self-hosted runners, and
+    # this job needs no bucket access — it consumes the staged artifact.
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ needs.prepare-vars.outputs.publish != 'true' }}
+    permissions:
+      contents: read
+      # Required for npm's OIDC trusted publishing (there is no NPM_TOKEN).
+      # Provenance is auto-skipped for a private source repo, so none is attempted.
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: macOS x86_64
-            host: macos-latest
-            target: x86_64-apple-darwin
-          - name: macOS aarch64
-            host: macos-latest
-            target: aarch64-apple-darwin
-          # The repository-root cargo config links the `surreal` binary against
-          # the static CRT. An addon is loaded into an already-running node.exe
-          # and has to share that process's dynamic CRT, so the flags are
-          # replaced here — `RUSTFLAGS` overrides the config's `rustflags`
-          # outright rather than appending to them.
-          - name: Windows x86_64
-            host: windows-latest
-            target: x86_64-pc-windows-msvc
-            rustflags: -C target-feature=-crt-static
-          - name: Windows aarch64
-            host: windows-latest
-            target: aarch64-pc-windows-msvc
-          - name: Linux x86_64 (gnu)
-            host: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            cross: true
-          - name: Linux x86_64 (musl)
-            host: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-            cross: true
-            rustflags: -C target-feature=-crt-static
-          - name: Linux aarch64 (gnu)
-            host: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-            cross: true
-          - name: Linux aarch64 (musl)
-            host: ubuntu-latest
-            target: aarch64-unknown-linux-musl
-            cross: true
+          - package: '@surrealdb/node-native'
+            dir: surrealdb/node
+            slot: node
+          - package: '@surrealdb/wasm-native'
+            dir: surrealdb/wasm
+            slot: wasm
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
         with:
           egress-policy: audit
 
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ needs.prepare-vars.outputs.git-sha }}
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-        with:
-          toolchain: stable
-          targets: ${{ matrix.target }}
-
-      - name: Install Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: latest
-
-      # Only the gnu aarch64 target links with the GNU toolchain; the musl
-      # targets are linked by zig via cargo-zigbuild.
-      - name: Install cross-compilation toolchain
-        if: ${{ matrix.target == 'aarch64-unknown-linux-gnu' }}
-        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-
-      - name: Install ziglang
-        if: ${{ matrix.cross }}
-        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
-        with:
-          version: 0.14.1
-
-      - name: Install cargo-zigbuild
-        if: ${{ matrix.cross }}
-        uses: taiki-e/install-action@328a871ad8f62ecac78390391f463ccabc974b72 # v2.69.9
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        with:
-          tool: cargo-zigbuild
-
-      - name: Install dependencies
-        working-directory: surrealdb/node
-        run: bun install --frozen-lockfile
-
-      - name: Build the addon
-        working-directory: surrealdb/node
-        env:
-          RUSTFLAGS: ${{ matrix.rustflags }}
-        run: bun run build.ts --target ${{ matrix.target }} ${{ matrix.cross && '-x' || '' }}
-
-      - name: Upload the native binary
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: node-addon-${{ matrix.target }}
-          if-no-files-found: error
-          path: surrealdb/node/dist/*.node
-
-      # The JavaScript entry point and type declarations are identical for
-      # every target, so one build's copy is enough.
-      - name: Upload the package bundle
-        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: node-addon-bundle
-          if-no-files-found: error
-          path: |
-            surrealdb/node/dist/
-            !surrealdb/node/dist/*.node
-
-  publish-node-addon:
-    name: Publish @surrealdb/node-native
-    needs: [prepare-vars, approve, build-node-addon]
-    if: ${{ needs.prepare-vars.outputs.release-engine == 'true' && needs.prepare-vars.outputs.nightly-release != 'true' }}
-    runs-on: ubuntu-latest
-    continue-on-error: ${{ needs.prepare-vars.outputs.publish != 'true' }}
-    permissions:
-      contents: read
-      # Required both for npm's OIDC trusted publishing and for provenance.
-      id-token: write
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
+      # The released source supplies package.json + publish.ts; the built dist/
+      # comes from the staged artifact below. Nothing is compiled here.
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -818,152 +805,36 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
 
-      - name: Download the package bundle
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: node-addon-bundle
-          path: surrealdb/node/dist/
+      # Trusted publishing requires npm >= 11.5.1; node 24's bundled npm can be just
+      # under that, so upgrade explicitly. Pin to the 11.x line (proven with trusted
+      # publishing) rather than @latest, so a new npm major can't change publish/OIDC
+      # behaviour mid-release without a deliberate bump. publish.ts shells out to it.
+      - name: Ensure npm supports trusted publishing
+        run: |
+          npm install -g npm@11
+          npm --version
 
-      - name: Download the native binaries
+      - name: Download the staged bundle
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          pattern: node-addon-*
-          path: surrealdb/node/dist/
-          merge-multiple: true
+          name: npm-bundle-${{ matrix.slot }}
+          path: ${{ matrix.dir }}/dist/
 
       - name: Distribution summary
-        working-directory: surrealdb/node
-        run: ls -l dist
-
-      # npm can only attest provenance for a package built in a public
-      # repository, so the flag is passed only when this workflow is running in
-      # one. Engine releases run from the private repository today, where npm
-      # would reject the attestation and fail the publish.
-      - name: Publish to npm
-        working-directory: surrealdb/node
-        env:
-          SURREAL_VERSION: ${{ needs.prepare-vars.outputs.version }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          bun run publish.ts \
-            ${{ github.event.repository.private == false && '--provenance' || '' }} \
-            ${{ needs.prepare-vars.outputs.publish != 'true' && '--dry-run' || '' }}
-
-  # ----------------------------------------
-  # Publish the embedded browser engine (versioned releases)
-  # ----------------------------------------
-  # `@surrealdb/wasm-native` embeds this exact engine, so it ships with it and
-  # carries the same version. One artefact rather than a matrix: WebAssembly is
-  # the only target. Nightly publishes no packages, as with crates.
-
-  build-wasm-engine:
-    name: Build Wasm engine
-    needs: [prepare-vars, approve]
-    if: ${{ needs.prepare-vars.outputs.release-engine == 'true' && needs.prepare-vars.outputs.nightly-release != 'true' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ needs.prepare-vars.outputs.git-sha }}
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-        with:
-          toolchain: stable
-          targets: wasm32-unknown-unknown
-
-      - name: Install Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: latest
-
-      # The CLI and the wasm-bindgen crate share a bindgen schema that changes
-      # between patch releases, so the version comes from the lockfile — the
-      # same source `build.ts` checks against before it runs.
-      - name: Install wasm-bindgen-cli
-        run: |
-          version=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | grep '^version' | cut -d'"' -f2)
-          echo "Installing wasm-bindgen-cli $version"
-          cargo install -f wasm-bindgen-cli --version "$version"
-
-      - name: Install wasm-opt
-        run: cargo install wasm-opt --version 0.116.1
-
-      - name: Install dependencies
-        working-directory: surrealdb/wasm
-        run: bun install --frozen-lockfile
-
-      - name: Build the module
-        working-directory: surrealdb/wasm
-        run: bun run build
-
-      - name: Upload the package bundle
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: wasm-engine-bundle
-          if-no-files-found: error
-          path: surrealdb/wasm/dist/
-
-  publish-wasm-engine:
-    name: Publish @surrealdb/wasm-native
-    needs: [prepare-vars, approve, build-wasm-engine]
-    if: ${{ needs.prepare-vars.outputs.release-engine == 'true' && needs.prepare-vars.outputs.nightly-release != 'true' }}
-    runs-on: ubuntu-latest
-    continue-on-error: ${{ needs.prepare-vars.outputs.publish != 'true' }}
-    permissions:
-      contents: read
-      # Required both for npm's OIDC trusted publishing and for provenance.
-      id-token: write
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ needs.prepare-vars.outputs.git-sha }}
-
-      - name: Install Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: latest
-
-      - name: Install Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: 24
-          registry-url: https://registry.npmjs.org
-
-      - name: Download the package bundle
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: wasm-engine-bundle
-          path: surrealdb/wasm/dist/
-
-      - name: Distribution summary
-        working-directory: surrealdb/wasm
+        working-directory: ${{ matrix.dir }}
         run: ls -lR dist
 
-      # npm can only attest provenance for a package built in a public
-      # repository, so the flag is passed only when this workflow is running in
-      # one. Engine releases run from the private repository today, where npm
-      # would reject the attestation and fail the publish.
+      # Auth is npm OIDC trusted publishing — no NODE_AUTH_TOKEN. Each package must
+      # have a trusted publisher configured on npm for this repo + this workflow
+      # (environment blank). npm >= 11.5.1 performs the OIDC exchange automatically.
+      # Provenance is intentionally not forced: npm skips it for a private source
+      # repo.
       - name: Publish to npm
-        working-directory: surrealdb/wasm
+        working-directory: ${{ matrix.dir }}
         env:
           SURREAL_VERSION: ${{ needs.prepare-vars.outputs.version }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           bun run publish.ts \
-            ${{ github.event.repository.private == false && '--provenance' || '' }} \
             ${{ needs.prepare-vars.outputs.publish != 'true' && '--dry-run' || '' }}
 
   # ----------------------------------------

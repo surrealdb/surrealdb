@@ -52,6 +52,19 @@ build before promotion. Correctness on every `main` commit is still gated by
 
 - builds the full binary matrix (5 platforms) **and** the macOS universal binary,
   and stores them in S3 under `rolling/<branch-slug>/<sha>/`,
+- builds the npm packages that embed the engine — `@surrealdb/node-native` (the
+  NAPI addon, one native binary per platform) and `@surrealdb/wasm-native` (the
+  WebAssembly module) — and stores their assembled `dist/` trees under
+  `rolling/<branch-slug>/<sha>/npm/{node,wasm}/`. They are built version-agnostic
+  (the version is injected at publish time), so one rolling build serves whatever
+  version the commit is promoted as. They build on every `releases/*` push and on
+  any manual `workflow_dispatch` (so a rebuild or a test-branch dispatch exercises
+  them); the unattended scheduled **nightly** on `main` skips them, since nightly
+  publishes no npm packages (as with crates). They are also skipped — at build
+  **and** promote time — for any commit that does not actually contain the packages,
+  so release lines that predate them (e.g. `releases/3.1`, `releases/3.2`) build,
+  promote, and write `engine.json` exactly as before, simply shipping no npm
+  packages,
 - verifies the workspace crates package cleanly and that no publishable crate
   changed without a version bump (`check-crate-versions`),
 - builds the multi-arch Docker images, **scans them with Trivy before pushing**
@@ -165,6 +178,12 @@ SHA it:
 - publishes the crates **from the exact SHA** for versioned releases (nightly
   never publishes crates); the crate version is whatever `Cargo.toml` carries at
   that commit,
+- publishes the npm packages (`@surrealdb/node-native`, `@surrealdb/wasm-native`)
+  for versioned engine releases by **downloading** their prebuilt `dist/` from the
+  commit's rolling prefix and running each package's `publish.ts` — no rebuild.
+  The release version is injected via `SURREAL_VERSION`, so the addon and module
+  carry the same version as the `surrealdb` release whose engine they embed.
+  Nightly publishes no npm packages,
 - **mirrors** the prebuilt Docker image from private ECR to the public DockerHub
   using `docker buildx imagetools create` (no rebuild), reproducing the full tag
   matrix (`:vX.Y.Z`, `:X.Y`, `:X`, `:latest`, `:nightly`, `-dev`, etc.), and
@@ -545,7 +564,7 @@ Pruning is **per side**, symmetric with promotion, so a partial release only
 prunes what it actually superseded:
 
 - An **engine** release prunes ancestors' engine artifacts (the heavy S3
-  binaries and the engine ECR images).
+  binaries, the stored npm bundles, and the engine ECR images).
 - A **downstream** release prunes ancestors' downstream ECR images.
 - A **both** release prunes both.
 
