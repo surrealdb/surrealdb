@@ -1545,6 +1545,9 @@ pub fn module_surrealism() -> StoredModuleDefinition {
 			bucket: "my_bucket".to_string(),
 			key: "module_key".to_string(),
 		}),
+		// Definitions serialized before revision 2 predate signing, so they
+		// decode as unsigned.
+		unsigned: true,
 	}
 }
 
@@ -1561,6 +1564,7 @@ pub fn module_silo() -> StoredModuleDefinition {
 			minor: 2,
 			patch: 3,
 		}),
+		unsigned: true,
 	}
 }
 
@@ -1574,6 +1578,7 @@ pub fn module_no_name() -> StoredModuleDefinition {
 			bucket: "default_bucket".to_string(),
 			key: "anonymous_module".to_string(),
 		}),
+		unsigned: true,
 	}
 }
 

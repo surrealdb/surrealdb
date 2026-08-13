@@ -224,8 +224,6 @@ impl Parser<'_> {
 		&mut self,
 		stk: &mut Stk,
 	) -> ParseResult<DefineModuleStatement> {
-		use crate::parser::mac::expected_whitespace;
-
 		if !self.settings.surrealism_enabled {
 			bail!(
 				"Surrealism modules are not enabled",
@@ -261,13 +259,11 @@ impl Parser<'_> {
 				expected!(self, t!("::"));
 				let package = self.parse_ident()?.into_string();
 				expected!(self, t!("::"));
-				expected_whitespace!(self, t!("<"));
-				let major = self.next_token_value::<u32>()?;
-				expected_whitespace!(self, t!("."));
-				let minor = self.next_token_value::<u32>()?;
-				expected_whitespace!(self, t!("."));
-				let patch = self.next_token_value::<u32>()?;
-				expected!(self, t!(">"));
+				// Shared with the `silo::` function-call form so both spell a
+				// version the same way. The digits have to be read straight off
+				// the token: the integer lexer rejects a `.` that is followed by
+				// a digit, since `1.0` is the start of a float.
+				let (major, minor, patch) = self.parse_model_version()?;
 
 				ModuleExecutable::Silo(SiloExecutable {
 					organisation,
@@ -290,12 +286,17 @@ impl Parser<'_> {
 			kind,
 			name,
 			executable,
+			unsigned: false,
 			comment: Expr::Literal(Literal::None),
 			permissions: Permission::default(),
 		};
 
 		loop {
 			match self.peek_kind() {
+				t!("UNSIGNED") => {
+					self.pop_peek();
+					definition.unsigned = true;
+				}
 				t!("COMMENT") => {
 					self.pop_peek();
 					definition.comment = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
@@ -307,6 +308,17 @@ impl Parser<'_> {
 				}
 				_ => break,
 			}
+		}
+
+		// No executable form carries a verifiable signature yet, so every
+		// module has to opt out of verification explicitly. Requiring the
+		// keyword now keeps definitions written today valid once signing
+		// lands and the keyword becomes the opt-out it names.
+		if !definition.unsigned {
+			bail!(
+				"Expected the `UNSIGNED` keyword on this module definition",
+				@self.last_span() => "Surrealism modules are not signature-verified yet, so a module must be defined as `UNSIGNED`"
+			)
 		}
 
 		Ok(definition)

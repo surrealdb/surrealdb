@@ -69,7 +69,7 @@ async function moduleClient(): Promise<Surreal> {
 	const responses = await db
 		.query(
 			`DEFINE BUCKET test BACKEND "file:${bucketDir}";
-			 DEFINE MODULE mod::demo AS f"test:/demo.surli";`,
+			 DEFINE MODULE mod::demo AS f"test:/demo.surli" UNSIGNED;`,
 		)
 		.responses();
 	for (const r of responses) expect(r.success).toBe(true);
@@ -206,6 +206,9 @@ moduleTest(
 			.json();
 		expect(Object.keys(info.modules)).toContain("mod::demo");
 		expect(info.modules["mod::demo"]).toContain("DEFINE MODULE");
+		// The definition renders back with the UNSIGNED keyword it was defined
+		// with, so an exported catalog re-imports.
+		expect(info.modules["mod::demo"]).toContain("UNSIGNED");
 
 		// The STRUCTURE form carries the extracted export manifest, including the
 		// writeable flag the host uses to decide whether a call may mutate data.

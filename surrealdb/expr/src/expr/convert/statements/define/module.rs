@@ -11,6 +11,7 @@ impl From<DefineModuleStatement> for crate::expr::statements::DefineModuleStatem
 			kind: v.kind.into(),
 			name: v.name.map(Into::into),
 			executable: v.executable.into(),
+			unsigned: v.unsigned,
 			comment: v.comment.into(),
 			permissions: v.permissions.into(),
 		}
@@ -23,6 +24,7 @@ impl From<crate::expr::statements::DefineModuleStatement> for DefineModuleStatem
 			kind: v.kind.into(),
 			name: v.name.map(Into::into),
 			executable: v.executable.into(),
+			unsigned: v.unsigned,
 			comment: v.comment.into(),
 			permissions: v.permissions.into(),
 		}

@@ -754,6 +754,9 @@ macro_rules! T {
 	(UNSET) => {
 		$crate::BaseTokenKind::KwUnset
 	};
+	(UNSIGNED) => {
+		$crate::BaseTokenKind::KwUnsigned
+	};
 	(UPDATE) => {
 		$crate::BaseTokenKind::KwUpdate
 	};

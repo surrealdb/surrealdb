@@ -765,6 +765,7 @@ ast_type! {
 		pub kind: DefineKind,
 		pub subject: ModuleName,
 		pub alias: Option<NodeId<Path>>,
+		pub unsigned: bool,
 		pub comment: Option<NodeId<Expr>>,
 		pub permission: Option<Permission>,
 	}

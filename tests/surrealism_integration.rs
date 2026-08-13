@@ -117,11 +117,21 @@ mod surrealism_integration {
 	async fn start_surrealism_server(
 		bucket_dir: &Path,
 	) -> Result<(String, common::Child), Box<dyn std::error::Error>> {
+		start_surrealism_server_with(bucket_dir, HashMap::new()).await
+	}
+
+	/// As [`start_surrealism_server`], with extra environment variables merged
+	/// in — used to redirect silo resolution at a local registry.
+	async fn start_surrealism_server_with(
+		bucket_dir: &Path,
+		extra: HashMap<String, String>,
+	) -> Result<(String, common::Child), Box<dyn std::error::Error>> {
 		let mut vars = HashMap::new();
 		vars.insert(
 			"SURREAL_BUCKET_FOLDER_ALLOWLIST".to_string(),
 			bucket_dir.to_string_lossy().to_string(),
 		);
+		vars.extend(extra);
 
 		common::start_server(common::StartServerArguments {
 			args: "--allow-experimental files,surrealism --allow-net 127.0.0.1".to_string(),
@@ -241,6 +251,116 @@ mod surrealism_integration {
 		let _ = stream.shutdown(Shutdown::Write);
 	}
 
+	/// A stand-in for the Silo package host, serving one `.surli` at the path a
+	/// `silo::` executable resolves to.
+	struct LocalSiloRegistry {
+		addr: SocketAddr,
+		shutdown: Option<mpsc::Sender<()>>,
+		handle: Option<thread::JoinHandle<()>>,
+	}
+
+	impl LocalSiloRegistry {
+		/// Serve `package` at `/{org}/{pkg}/{version}.surli`; every other path
+		/// 404s, so a wrong version or name is a miss rather than a silent hit.
+		fn start(path: &str, package: Vec<u8>) -> Result<Self, Box<dyn std::error::Error>> {
+			let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
+			listener.set_nonblocking(true)?;
+			let addr = listener.local_addr()?;
+			let (shutdown_tx, shutdown_rx) = mpsc::channel();
+			let path = path.to_string();
+			let handle = thread::spawn(move || {
+				run_local_silo_registry(listener, shutdown_rx, path, package)
+			});
+
+			Ok(Self {
+				addr,
+				shutdown: Some(shutdown_tx),
+				handle: Some(handle),
+			})
+		}
+
+		fn endpoint(&self) -> String {
+			format!("http://{}", self.addr)
+		}
+	}
+
+	impl Drop for LocalSiloRegistry {
+		fn drop(&mut self) {
+			if let Some(shutdown) = self.shutdown.take() {
+				let _ = shutdown.send(());
+			}
+			if let Some(handle) = self.handle.take() {
+				let _ = handle.join();
+			}
+		}
+	}
+
+	fn run_local_silo_registry(
+		listener: TcpListener,
+		shutdown_rx: mpsc::Receiver<()>,
+		path: String,
+		package: Vec<u8>,
+	) {
+		loop {
+			if shutdown_rx.try_recv().is_ok() {
+				return;
+			}
+
+			match listener.accept() {
+				Ok((stream, _)) => {
+					let path = path.clone();
+					let package = package.clone();
+					thread::spawn(move || handle_silo_connection(stream, &path, &package));
+				}
+				Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+					thread::sleep(Duration::from_millis(10));
+				}
+				Err(_) => return,
+			}
+		}
+	}
+
+	/// Serve a single request. Drains the full request head before replying, for
+	/// the same reason [`handle_pokemon_connection`] does.
+	fn handle_silo_connection(mut stream: TcpStream, package_path: &str, package: &[u8]) {
+		let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+
+		let mut buf = Vec::with_capacity(1024);
+		let mut chunk = [0u8; 1024];
+		loop {
+			match stream.read(&mut chunk) {
+				Ok(0) => break,
+				Ok(n) => {
+					buf.extend_from_slice(&chunk[..n]);
+					if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+						break;
+					}
+				}
+				Err(_) => return,
+			}
+		}
+
+		let request = String::from_utf8_lossy(&buf);
+		let path =
+			request.lines().next().and_then(|line| line.split_whitespace().nth(1)).unwrap_or("/");
+
+		let response = if path == package_path {
+			let mut head = format!(
+				"HTTP/1.1 200 OK\r\ncontent-type: application/octet-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+				package.len()
+			)
+			.into_bytes();
+			head.extend_from_slice(package);
+			head
+		} else {
+			b"HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n".to_vec()
+		};
+
+		let _ = stream.write_all(&response);
+		let _ = stream.flush();
+		let _ = stream.shutdown(Shutdown::Write);
+	}
+
 	/// Execute one or more SurrealQL statements via the HTTP `/sql` endpoint and
 	/// return the parsed results.
 	async fn sql_query(addr: &str, ns: &str, db: &str, query: &str) -> Vec<QueryResult> {
@@ -274,7 +394,7 @@ mod surrealism_integration {
 		let dir = bucket_dir.to_string_lossy();
 		let setup = format!(
 			"DEFINE BUCKET test BACKEND \"file:{dir}\";\
-			 DEFINE MODULE mod::demo AS f\"test:/demo.surli\";"
+			 DEFINE MODULE mod::demo AS f\"test:/demo.surli\" UNSIGNED;"
 		);
 		let results = sql_query(addr, ns, db, &setup).await;
 		for (i, r) in results.iter().enumerate() {
@@ -1046,6 +1166,93 @@ mod surrealism_integration {
 	#[test(tokio::test)]
 	async fn module_fetch_pokemon() -> Result<(), Box<dyn std::error::Error>> {
 		check_fetch_pokemon(&DEMO_DIR.canonical).await
+	}
+
+	// -------------------------------------------------------------------
+	// Silo executable tests (local registry standing in for the package host)
+	// -------------------------------------------------------------------
+
+	/// A `silo::` executable resolves against the configured endpoint, needing
+	/// neither a bucket nor a locally built archive, and the module it yields
+	/// runs like any other.
+	async fn check_silo_module(bucket_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+		// The demo package's own coordinates: organisation `surrealdb`, name
+		// `demo`, version 1.0.0 -- see surrealism/demo/surrealism.toml.
+		let package = std::fs::read(bucket_dir.join("demo.surli"))?;
+		let registry = LocalSiloRegistry::start("/surrealdb/demo/1.0.0.surli", package)?;
+
+		let mut vars = HashMap::new();
+		vars.insert("SURREAL_SURREALISM_SILO_ENDPOINT".to_string(), registry.endpoint());
+		let (addr, _server) = start_surrealism_server_with(bucket_dir, vars).await?;
+
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
+		let results =
+			sql_query(&addr, &ns, &db, "DEFINE MODULE silo::surrealdb::demo::<1.0.0> UNSIGNED;")
+				.await;
+		assert_eq!(results[0].status, "OK", "silo DEFINE MODULE failed: {:?}", results[0].result);
+
+		// The module is keyed by its package coordinates, so that is also how
+		// its exports are called.
+		let results =
+			sql_query(&addr, &ns, &db, "RETURN silo::surrealdb::demo::<1.0.0>::math(5);").await;
+		assert_eq!(results[0].status, "OK", "silo math(5) failed: {:?}", results[0].result);
+		assert_eq!(results[0].result, serde_json::json!(10));
+
+		// INFO renders the definition back with the keyword it was defined with.
+		let results = sql_query(&addr, &ns, &db, "INFO FOR DB;").await;
+		assert_eq!(results[0].status, "OK", "INFO FOR DB failed: {:?}", results[0].result);
+		let rendered = results[0].result["modules"]["silo::surrealdb::demo::<1.0.0>"]
+			.as_str()
+			.expect("silo module missing from INFO FOR DB");
+		assert!(
+			rendered.starts_with("DEFINE MODULE silo::surrealdb::demo::<1.0.0> UNSIGNED"),
+			"unexpected rendering: {rendered}"
+		);
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn module_silo_executable() -> Result<(), Box<dyn std::error::Error>> {
+		check_silo_module(&DEMO_DIR.canonical).await
+	}
+
+	/// A version the registry does not carry fails at definition time rather
+	/// than being recorded and failing on first call.
+	async fn check_silo_missing_version(
+		bucket_dir: &Path,
+	) -> Result<(), Box<dyn std::error::Error>> {
+		let package = std::fs::read(bucket_dir.join("demo.surli"))?;
+		let registry = LocalSiloRegistry::start("/surrealdb/demo/1.0.0.surli", package)?;
+
+		let mut vars = HashMap::new();
+		vars.insert("SURREAL_SURREALISM_SILO_ENDPOINT".to_string(), registry.endpoint());
+		let (addr, _server) = start_surrealism_server_with(bucket_dir, vars).await?;
+
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
+		// The definition itself is recorded -- an unreachable package is a
+		// warning at define time -- but calling it surfaces the miss.
+		let results =
+			sql_query(&addr, &ns, &db, "DEFINE MODULE silo::surrealdb::demo::<9.9.9> UNSIGNED;")
+				.await;
+		assert_eq!(results[0].status, "OK", "silo DEFINE MODULE failed: {:?}", results[0].result);
+
+		let results =
+			sql_query(&addr, &ns, &db, "RETURN silo::surrealdb::demo::<9.9.9>::math(5);").await;
+		assert_eq!(results[0].status, "ERR", "expected a miss: {:?}", results[0].result);
+		let error = results[0].result.to_string();
+		assert!(error.contains("was not found"), "unexpected error: {error}");
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn module_silo_missing_version() -> Result<(), Box<dyn std::error::Error>> {
+		check_silo_missing_version(&DEMO_DIR.canonical).await
 	}
 
 	// -------------------------------------------------------------------

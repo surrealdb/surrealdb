@@ -16,6 +16,116 @@ use crate::expr::Error;
 use crate::expr::FlowResult;
 use crate::val::Value;
 
+/// Look up a module by its storage name, then call one of its exports.
+///
+/// Both executable forms reach a module the same way — the storage name is the
+/// only thing that differs — so `mod::` and `silo::` calls share this body and
+/// cannot drift apart in permission checking, argument coercion or return
+/// validation. `mod_name` is the storage name
+/// ([`ModuleName::get_storage_name`](crate::expr::module::ModuleName)), and
+/// `sub` names the export, or the default one when `None`.
+#[cfg(feature = "surrealism")]
+async fn call_module_export<'a>(
+	mod_name: String,
+	sub: Option<&'a str>,
+	arguments: &'a [Arc<dyn PhysicalExpr>],
+	ctx: EvalContext<'a>,
+) -> FlowResult<Value> {
+	use reblessive::TreeStack;
+
+	use crate::doc::CursorDoc;
+	use crate::expr::module::ModuleExecutable;
+
+	let fnc_name = match sub {
+		Some(sub) => format!("{mod_name}::{sub}"),
+		None => mod_name.clone(),
+	};
+
+	// Check if this function is allowed
+	ctx.check_allowed_function(&fnc_name)?;
+
+	// Get the database context for module lookup
+	let db_ctx = ctx
+		.exec_ctx
+		.database()
+		.map_err(|_| anyhow::anyhow!("Module function '{}' requires database context", fnc_name))?;
+
+	// Get namespace and database IDs
+	let ns_id = db_ctx.ns_ctx.ns.namespace_id;
+	let db_id = db_ctx.db.database_id;
+
+	// Get the module definition
+	let val =
+		ctx.txn().get_db_module(ns_id, db_id, &mod_name, ctx.exec_ctx.version_stamp()).await?;
+
+	// Check permissions
+	if ctx.exec_ctx.should_check_perms(crate::iam::Action::View)? {
+		check_permission(&val.permissions, &mod_name, &ctx).await?;
+	}
+
+	// Get the executable and signature
+	let executable: ModuleExecutable = val.executable.clone().into();
+	let frozen_ctx = ctx.exec_ctx.ctx();
+	let signature =
+		crate::legacy::module_executable_signature(&executable, frozen_ctx, &ns_id, &db_id, sub)
+			.await?;
+
+	// Evaluate all arguments
+	let args = evaluate_args(arguments, ctx.clone()).await?;
+
+	// Validate argument count against signature
+	if args.len() != signature.args.len() {
+		return Err(Error::InvalidFunctionArguments {
+			name: fnc_name,
+			message: format!(
+				"The function expects {} arguments, but {} were provided.",
+				signature.args.len(),
+				args.len()
+			),
+		}
+		.into());
+	}
+
+	// Validate and coerce arguments to their expected types
+	let mut coerced_args = Vec::with_capacity(args.len());
+	for (arg, kind) in args.into_iter().zip(signature.args.iter()) {
+		let coerced = arg.coerce_to_kind(kind).map_err(|e| Error::InvalidFunctionArguments {
+			name: fnc_name.clone(),
+			message: format!("Failed to coerce argument: {e}"),
+		})?;
+		coerced_args.push(coerced);
+	}
+
+	// Get the Options for the module execution
+	let opt = ctx
+		.exec_ctx
+		.options()
+		.ok_or_else(|| anyhow::anyhow!("Module functions require Options context"))?;
+
+	// Build CursorDoc from current value
+	let doc = ctx.current_value.map(|v| CursorDoc::new(None, None, v.clone()));
+
+	// Run the module using the legacy stack-based execution
+	let mut stack = TreeStack::new();
+	let result = stack
+		.enter(|stk| {
+			crate::legacy::module_executable_run(
+				&executable,
+				stk,
+				frozen_ctx,
+				opt,
+				doc.as_ref(),
+				coerced_args,
+				sub,
+			)
+		})
+		.finish()
+		.await?;
+
+	// Validate return value if signature specifies a return type
+	validate_return(&fnc_name, signature.returns.as_ref(), result).map_err(Into::into)
+}
+
 // =============================================================================
 // SurrealismModuleExec - for Function::Module
 // =============================================================================
@@ -47,110 +157,12 @@ impl PhysicalExpr for SurrealismModuleExec {
 
 	#[cfg(feature = "surrealism")]
 	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
-		Box::pin(async move {
-			use reblessive::TreeStack;
-
-			use crate::doc::CursorDoc;
-			use crate::expr::module::ModuleExecutable;
-
-			// Build module and function names
-			let mod_name = format!("mod::{}", self.module);
-			let fnc_name = match &self.sub {
-				Some(sub) => format!("{}::{}", mod_name, sub),
-				None => mod_name.clone(),
-			};
-
-			// Check if this function is allowed
-			ctx.check_allowed_function(&fnc_name)?;
-
-			// Get the database context for module lookup
-			let db_ctx = ctx.exec_ctx.database().map_err(|_| {
-				anyhow::anyhow!("Module function '{}' requires database context", fnc_name)
-			})?;
-
-			// Get namespace and database IDs
-			let ns_id = db_ctx.ns_ctx.ns.namespace_id;
-			let db_id = db_ctx.db.database_id;
-
-			// Get the module definition
-			let val = ctx
-				.txn()
-				.get_db_module(ns_id, db_id, &mod_name, ctx.exec_ctx.version_stamp())
-				.await?;
-
-			// Check permissions
-			if ctx.exec_ctx.should_check_perms(crate::iam::Action::View)? {
-				check_permission(&val.permissions, &mod_name, &ctx).await?;
-			}
-
-			// Get the executable and signature
-			let executable: ModuleExecutable = val.executable.clone().into();
-			let frozen_ctx = ctx.exec_ctx.ctx();
-			let signature = crate::legacy::module_executable_signature(
-				&executable,
-				frozen_ctx,
-				&ns_id,
-				&db_id,
-				self.sub.as_deref(),
-			)
-			.await?;
-
-			// Evaluate all arguments
-			let args = evaluate_args(&self.arguments, ctx.clone()).await?;
-
-			// Validate argument count against signature
-			if args.len() != signature.args.len() {
-				return Err(Error::InvalidFunctionArguments {
-					name: fnc_name,
-					message: format!(
-						"The function expects {} arguments, but {} were provided.",
-						signature.args.len(),
-						args.len()
-					),
-				}
-				.into());
-			}
-
-			// Validate and coerce arguments to their expected types
-			let mut coerced_args = Vec::with_capacity(args.len());
-			for (arg, kind) in args.into_iter().zip(signature.args.iter()) {
-				let coerced =
-					arg.coerce_to_kind(kind).map_err(|e| Error::InvalidFunctionArguments {
-						name: fnc_name.clone(),
-						message: format!("Failed to coerce argument: {e}"),
-					})?;
-				coerced_args.push(coerced);
-			}
-
-			// Get the Options for the module execution
-			let opt = ctx
-				.exec_ctx
-				.options()
-				.ok_or_else(|| anyhow::anyhow!("Module functions require Options context"))?;
-
-			// Build CursorDoc from current value
-			let doc = ctx.current_value.map(|v| CursorDoc::new(None, None, v.clone()));
-
-			// Run the module using the legacy stack-based execution
-			let mut stack = TreeStack::new();
-			let result = stack
-				.enter(|stk| {
-					crate::legacy::module_executable_run(
-						&executable,
-						stk,
-						frozen_ctx,
-						opt,
-						doc.as_ref(),
-						coerced_args,
-						self.sub.as_deref(),
-					)
-				})
-				.finish()
-				.await?;
-
-			// Validate return value if signature specifies a return type
-			validate_return(&fnc_name, signature.returns.as_ref(), result).map_err(Into::into)
-		})
+		Box::pin(call_module_export(
+			format!("mod::{}", self.module),
+			self.sub.as_deref(),
+			&self.arguments,
+			ctx,
+		))
 	}
 
 	#[cfg(not(feature = "surrealism"))]
@@ -222,6 +234,20 @@ impl PhysicalExpr for SiloModuleExec {
 		args_required_context(&self.arguments).max(crate::exec::ContextLevel::Database)
 	}
 
+	#[cfg(feature = "surrealism")]
+	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+		Box::pin(call_module_export(
+			format!(
+				"silo::{}::{}::<{}.{}.{}>",
+				self.org, self.pkg, self.major, self.minor, self.patch
+			),
+			self.sub.as_deref(),
+			&self.arguments,
+			ctx,
+		))
+	}
+
+	#[cfg(not(feature = "surrealism"))]
 	fn evaluate<'a>(&'a self, _ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
 		Box::pin(async move {
 			let name = format!(
@@ -229,7 +255,7 @@ impl PhysicalExpr for SiloModuleExec {
 				self.org, self.pkg, self.major, self.minor, self.patch
 			);
 			Err(anyhow::anyhow!(
-				"Silo function '{}' is not yet supported in the streaming executor",
+				"Silo function '{}' requires the 'surrealism' feature to be enabled",
 				name
 			)
 			.into())

@@ -235,10 +235,15 @@ impl Parse for ast::DefineModule {
 			None
 		};
 
+		let mut unsigned = None;
 		let mut comment = None;
 		let mut permissions = None;
 		while let Some(x) = parser.peek()? {
 			match x.token {
+				T![UNSIGNED] => {
+					let _ = parser.next();
+					parse_unordered_clause_sync(parser, &mut unsigned, x.span, |_| Ok(()))?;
+				}
 				T![COMMENT] => {
 					let _ = parser.next();
 					parse_unordered_clause(parser, &mut comment, x.span, Parser::parse_enter)
@@ -253,10 +258,20 @@ impl Parse for ast::DefineModule {
 		}
 
 		let span = parser.span_since(define.span);
+
+		// Signature verification does not exist for any executable form yet,
+		// so the opt-out keyword is mandatory rather than optional.
+		if unsigned.is_none() {
+			return Err(
+				parser.error("expected the `UNSIGNED` keyword on this module definition", span)
+			);
+		}
+
 		Ok(ast::DefineModule {
 			kind,
 			subject,
 			alias,
+			unsigned: true,
 			comment: comment.map(|x| x.0),
 			permission: permissions.map(|x| x.0),
 			span,

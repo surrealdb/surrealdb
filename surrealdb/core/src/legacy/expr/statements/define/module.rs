@@ -103,6 +103,7 @@ pub(crate) async fn define_module_statement_compute(
 		&ModuleDefinition {
 			name: this.name.clone(),
 			executable: this.executable.clone().into(),
+			unsigned: this.unsigned,
 			comment,
 			permissions: this.permissions.clone(),
 		},
@@ -110,13 +111,28 @@ pub(crate) async fn define_module_statement_compute(
 	.await?;
 	// Clear the cache
 	txn.clear_cache();
-	// Warm the surrealism runtime cache for the newly defined module
+	// Warm the surrealism runtime cache for the newly defined module. Both
+	// executable forms are warmed, so a bucket object or a silo package that
+	// cannot be loaded is logged while the definition is still in hand. Warming
+	// is best-effort: the definition stands either way and a failure surfaces
+	// again on first call.
 	#[cfg(feature = "surrealism")]
-	if let ModuleExecutable::Surrealism(surrealism) = &this.executable {
-		let lookup = SurrealismCacheLookup::File(&ns, &db, &surrealism.0.bucket, &surrealism.0.key);
+	{
+		let lookup = match &this.executable {
+			ModuleExecutable::Surrealism(surrealism) => {
+				SurrealismCacheLookup::File(&ns, &db, &surrealism.0.bucket, &surrealism.0.key)
+			}
+			ModuleExecutable::Silo(silo) => SurrealismCacheLookup::Silo(
+				&silo.organisation,
+				&silo.package,
+				silo.major,
+				silo.minor,
+				silo.patch,
+			),
+		};
 		if let Err(e) = ctx.get_surrealism_runtime(lookup).await {
 			tracing::warn!(
-				module = ?this.name,
+				module = ?storage_name,
 				error = %e,
 				"Failed to eagerly load surrealism module into cache"
 			);

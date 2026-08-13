@@ -697,6 +697,8 @@ pub enum BaseTokenKind {
 	KwUnique,
 	#[regex(r"(?i)UNSET")]
 	KwUnset,
+	#[regex(r"(?i)UNSIGNED")]
+	KwUnsigned,
 	#[regex(r"(?i)UPDATE")]
 	KwUpdate,
 	#[regex(r"(?i)UPSERT")]
@@ -1174,6 +1176,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwType => "keyword `TYPE`",
 			BaseTokenKind::KwUnique => "keyword `UNIQUE`",
 			BaseTokenKind::KwUnset => "keyword `UNSET`",
+			BaseTokenKind::KwUnsigned => "keyword `UNSIGNED`",
 			BaseTokenKind::KwUpdate => "keyword `UPDATE`",
 			BaseTokenKind::KwUpsert => "keyword `UPSERT`",
 			BaseTokenKind::KwUppercase => "keyword `UPPERCASE`",
@@ -1492,6 +1495,7 @@ impl BaseTokenKind {
 				| Self::KwType
 				| Self::KwUnique
 				| Self::KwUnset
+				| Self::KwUnsigned
 				| Self::KwUpdate
 				| Self::KwUpsert
 				| Self::KwUppercase

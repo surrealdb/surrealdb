@@ -1232,23 +1232,73 @@ impl Context {
 
 		cache
 			.get_or_insert_with(&lookup, async || {
-				let SurrealismCacheLookup::File(ns, db, bucket, key) = lookup else {
-					bail!("silo lookups are not supported yet");
+				// Both executable forms resolve to the bytes of one `.surli`
+				// archive; only where those bytes come from differs.
+				let (surli, temp_prefix) = match lookup {
+					SurrealismCacheLookup::File(ns, db, bucket, key) => {
+						let bucket = self.get_bucket_store(*ns, *db, bucket).await?;
+						let key = ObjectKey::new(key);
+						let surli = bucket
+							.get(&key)
+							.await
+							.map_err(|e| anyhow::anyhow!("failed to get file: {}", e))?;
+
+						let Some(surli) = surli else {
+							bail!("file not found");
+						};
+
+						let safe_key = key.to_string().replace(['/', '\\'], "_");
+						(surli, format!("SURREAL_MODFS_{ns}_{db}_{safe_key}_"))
+					}
+					SurrealismCacheLookup::Silo(org, pkg, major, minor, patch) => {
+						#[cfg(not(feature = "http"))]
+						{
+							let _ = (org, pkg, major, minor, patch);
+							bail!(
+								"Failed to get surrealism runtime: silo module packages are fetched over HTTP, which this build does not support"
+							);
+						}
+						#[cfg(feature = "http")]
+						{
+							let endpoint = &self.config.surrealism.surrealism_silo_endpoint;
+							let url = crate::surrealism::silo::package_url(
+								endpoint, org, pkg, major, minor, patch,
+							)?;
+							// A silo fetch is first-party package resolution
+							// rather than user-directed traffic, so it needs no
+							// `allow_net` grant. An operator's explicit deny is
+							// still honoured.
+							let allow = match url.host() {
+								Some(host) => Targets::Some(
+									[NetTarget::Host(
+										host.to_owned(),
+										url.port_or_known_default(),
+									)]
+									.into_iter()
+									.collect(),
+								),
+								None => bail!("The silo module endpoint `{endpoint}` has no host"),
+							};
+							let client = HttpClient::new(
+								allow,
+								self.capabilities.denied_network_targets_ref().clone(),
+								&config,
+							)
+							.context("Failed to create http client for silo module packages")?;
+
+							let surli = crate::surrealism::silo::fetch_package(
+								&client, &url, org, pkg, major, minor, patch,
+							)
+							.await?;
+
+							(
+								surli,
+								format!("SURREAL_MODFS_silo_{org}_{pkg}_{major}_{minor}_{patch}_"),
+							)
+						}
+					}
 				};
 
-				let bucket = self.get_bucket_store(*ns, *db, bucket).await?;
-				let key = ObjectKey::new(key);
-				let surli = bucket
-					.get(&key)
-					.await
-					.map_err(|e| anyhow::anyhow!("failed to get file: {}", e))?;
-
-				let Some(surli) = surli else {
-					bail!("file not found");
-				};
-
-				let safe_key = key.to_string().replace(['/', '\\'], "_");
-				let temp_prefix = format!("SURREAL_MODFS_{ns}_{db}_{safe_key}_");
 				let unpack_opts = UnpackOptions {
 					#[cfg(storage)]
 					temp_base: self.temporary_directory().map(|p| p.as_path()),

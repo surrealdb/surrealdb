@@ -9,6 +9,17 @@ pub struct DefineModuleStatement {
 	pub kind: DefineKind,
 	pub name: Option<Ident>,
 	pub executable: ModuleExecutable,
+	/// Whether the module is loaded without verifying a signature.
+	///
+	/// Spelled as a trailing `UNSIGNED` clause, unordered with `COMMENT` and
+	/// `PERMISSIONS`. Signature verification is not yet implemented for any
+	/// executable form, so every module currently has to opt out of it
+	/// explicitly and this is always `true` for a freshly parsed statement.
+	/// `false` is therefore not expressible in the grammar and would not
+	/// survive a render/reparse round trip, which is why the fuzzer is pinned
+	/// to `true` rather than left to generate either.
+	#[cfg_attr(feature = "arbitrary", arbitrary(value = true))]
+	pub unsigned: bool,
 	pub comment: Expr,
 	pub permissions: Permission,
 }
@@ -25,6 +36,9 @@ impl ToSql for DefineModuleStatement {
 			write_sql!(f, sql_fmt, " mod::{} AS", name);
 		}
 		write_sql!(f, sql_fmt, " {}", self.executable);
+		if self.unsigned {
+			f.push_str(" UNSIGNED");
+		}
 		if !matches!(self.comment, Expr::Literal(Literal::None)) {
 			write_sql!(f, sql_fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}

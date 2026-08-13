@@ -1,6 +1,6 @@
-DEFINE MODULE f"abc" as mod::bla;
-DEFINE MODULE f"abc" as mod::bla COMMENT "comment";
-DEFINE MODULE f"abc" as mod::bla PERMISSIONS FULL;
+DEFINE MODULE f"abc" as mod::bla UNSIGNED;
+DEFINE MODULE f"abc" as mod::bla UNSIGNED COMMENT "comment";
+DEFINE MODULE f"abc" as mod::bla UNSIGNED PERMISSIONS FULL;
 /* ===== result =====
 Query
     .exprs: Some
@@ -19,6 +19,7 @@ Query
                             -PathSegment::Ident
                                 Ident
                                     .text: "bla"
+                    .unsigned: true
                     .comment: None
                     .permission: None
         -TopLevelExpr::Expr
@@ -36,6 +37,7 @@ Query
                             -PathSegment::Ident
                                 Ident
                                     .text: "bla"
+                    .unsigned: true
                     .comment: Some
                     Expr::String
                         StringLit
@@ -56,6 +58,7 @@ Query
                             -PathSegment::Ident
                                 Ident
                                     .text: "bla"
+                    .unsigned: true
                     .comment: None
                     .permission: Some
                     Permission::Full

@@ -1,6 +1,8 @@
 pub(crate) mod cache;
 pub(crate) mod config;
 pub(crate) mod host;
+#[cfg(feature = "http")]
+pub(crate) mod silo;
 
 /// Checks whether capabilities required by a Surrealism package are allowed
 /// by the server configuration. The `allow_arbitrary_queries` capability is

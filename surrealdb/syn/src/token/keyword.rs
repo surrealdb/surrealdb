@@ -214,6 +214,7 @@ keyword! {
 	Type => "TYPE",
 	Unique => "UNIQUE",
 	Unset => "UNSET",
+	Unsigned => "UNSIGNED",
 	Update => "UPDATE",
 	Upsert => "UPSERT",
 	Uppercase => "UPPERCASE",

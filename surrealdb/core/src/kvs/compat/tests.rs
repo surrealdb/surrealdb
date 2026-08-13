@@ -71,8 +71,18 @@ fn version_writes_current_format(version_name: &str, type_name: &str, fixture: &
 	/// `StoredTableDefinition`; the other `TableMutations` fixtures (`Set`,
 	/// `Del`, ...) embed no definition and keep their pin.
 	const V3_3_0_EMBEDS_A_BUMPED_TYPE: &[&str] = &["table_mutations_def"];
+	/// Bumped after the newest snapshot was captured, so *every* frozen file
+	/// holds the pre-bump encoding and none of them can pin the current one:
+	/// `StoredModuleDefinition` gained `unsigned` (1 -> 2). Their fixtures
+	/// still decode — the field defaults in — but re-encode a revision higher.
+	/// Each name drops off this list once a snapshot taken after its bump
+	/// exists to pin it, exactly as `V3_3_0_BUMPED` did at `v3_3_0`.
+	const AFTER_NEWEST_SNAPSHOT_BUMPED: &[&str] = &["StoredModuleDefinition"];
 
 	let text_migration_moved_it = TEXT_MIGRATION_BUMPED.contains(&type_name);
+	if AFTER_NEWEST_SNAPSHOT_BUMPED.contains(&type_name) {
+		return false;
+	}
 	match version_name {
 		// Captured from the current encoder: everything must match.
 		"v3_4_0" => true,

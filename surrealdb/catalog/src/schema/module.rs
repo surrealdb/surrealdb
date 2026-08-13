@@ -9,13 +9,25 @@ use crate::sql::statements::define::DefineKind;
 use crate::sql::{self, DefineModuleStatement};
 use crate::val::Value;
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct StoredModuleDefinition {
 	pub name: Option<String>,
 	pub comment: Option<String>,
 	pub permissions: StoredPermission,
 	pub executable: ModuleExecutable,
+	/// Whether this module is loaded without verifying a signature.
+	///
+	/// Definitions written before this field existed predate signing
+	/// entirely, so they decode as unsigned and keep loading unchanged.
+	#[revision(start = 2, default_fn = "default_unsigned")]
+	pub unsigned: bool,
+}
+
+impl StoredModuleDefinition {
+	fn default_unsigned(_revision: u16) -> Result<bool, revision::Error> {
+		Ok(true)
+	}
 }
 
 impl_kv_value_revisioned!(StoredModuleDefinition);
@@ -42,6 +54,7 @@ impl ModuleDefinition {
 			kind: DefineKind::Default,
 			name: self.name.clone().map(Into::into),
 			executable: self.executable.clone().into(),
+			unsigned: self.unsigned,
 			permissions: self.permissions.to_sql_permission(),
 			comment: self
 				.comment
@@ -72,6 +85,7 @@ impl InfoStructure for ModuleDefinition {
 		Value::from(map! {
 			"name", if let Some(name) = self.name => name.into(),
 			"executable" => self.executable.structure(),
+			"unsigned" => self.unsigned.into(),
 			"permissions" => self.permissions.structure(),
 			"comment", if let Some(v) = self.comment => v.to_sql().into(),
 		})
@@ -89,6 +103,8 @@ impl ToSql for ModuleDefinition {
 pub struct ModuleDefinition {
 	pub name: Option<String>,
 	pub executable: ModuleExecutable,
+	/// See [`StoredModuleDefinition::unsigned`].
+	pub unsigned: bool,
 	pub permissions: Permission,
 	pub comment: Option<String>,
 }
@@ -101,6 +117,7 @@ impl FromStored for ModuleDefinition {
 			Ok(ModuleDefinition {
 				name: stored.name.clone(),
 				executable: stored.executable.clone(),
+				unsigned: stored.unsigned,
 				permissions: Permission::from_stored(&stored.permissions)?,
 				comment: stored.comment.clone(),
 			})
@@ -121,6 +138,7 @@ impl ModuleDefinition {
 			comment: self.comment.clone(),
 			permissions: crate::catalog::StoredPermission::from_runtime(&self.permissions),
 			executable: self.executable.clone(),
+			unsigned: self.unsigned,
 		}
 	}
 }

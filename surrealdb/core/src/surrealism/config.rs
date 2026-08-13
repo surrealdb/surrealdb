@@ -3,10 +3,11 @@
 //! Most of these knobs are the server's half of a module's resource budget:
 //! where a module also declares a limit in its `.surli` config, the effective
 //! limit is the smaller of the two, so a value here can only tighten what a
-//! module asked for, never widen it. The remaining two size the datastore-wide
-//! cache of compiled modules and select the tracing level module output is
-//! recorded at. This layer owns them because it is where a module is unpacked,
-//! compiled, pooled and invoked.
+//! module asked for, never widen it. The rest size the datastore-wide cache of
+//! compiled modules, select the tracing level module output is recorded at,
+//! and name the host a `silo::` executable resolves against. This layer owns
+//! them because it is where a module is fetched, unpacked, compiled, pooled
+//! and invoked.
 //!
 //! The memory, execution-time, KV and pool ceilings are read while a module is
 //! compiled into a cached runtime, so a module already in the cache keeps the
@@ -52,6 +53,12 @@ pub(crate) struct SurrealismConfig {
 	/// "debug"). A module's standard error is always recorded at `warn`,
 	/// independently of this.
 	pub surrealism_log_level: String,
+	/// Base URL that a `silo::` module executable is resolved against. A
+	/// package is fetched from
+	/// `{endpoint}/{organisation}/{package}/{major}.{minor}.{patch}.surli`, so a trailing slash
+	/// here is redundant and is stripped before the path is appended. Point this at a mirror to
+	/// serve packages from elsewhere.
+	pub surrealism_silo_endpoint: String,
 }
 
 impl Default for SurrealismConfig {
@@ -65,6 +72,7 @@ impl Default for SurrealismConfig {
 			surrealism_max_fs_bytes: 100 * 1024 * 1024,
 			surrealism_max_pool_size: 8,
 			surrealism_log_level: "debug".to_string(),
+			surrealism_silo_endpoint: "https://silo.surrealdb.com".to_string(),
 		}
 	}
 }
@@ -85,6 +93,9 @@ impl cnf::Config for SurrealismConfig {
 			.parse_key("surrealism_max_fs_bytes", &mut self.surrealism_max_fs_bytes)
 			.parse_key_with("surrealism_log_level", &mut self.surrealism_log_level, |s| {
 				Some(s.to_string())
+			})
+			.parse_key_with("surrealism_silo_endpoint", &mut self.surrealism_silo_endpoint, |s| {
+				Some(s.trim_end_matches('/').to_string())
 			});
 	}
 }
