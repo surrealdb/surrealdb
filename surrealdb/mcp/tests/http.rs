@@ -33,6 +33,19 @@ fn post_request(
 	session_id: Option<&str>,
 	session: Option<Session>,
 ) -> Request<Full<Bytes>> {
+	post_request_with_headers(body, session_id, session, &[])
+}
+
+/// [`post_request`] plus arbitrary extra headers, for the protocol-revision and
+/// SEP-2243 headers only a few tests need. The base header set is shared so an
+/// rmcp change to what `StreamableHttpService` requires of a POST is a one-line
+/// fix rather than one per hand-rolled builder.
+fn post_request_with_headers(
+	body: &Value,
+	session_id: Option<&str>,
+	session: Option<Session>,
+	extra_headers: &[(&str, &str)],
+) -> Request<Full<Bytes>> {
 	let mut builder = Request::builder()
 		.method(Method::POST)
 		.uri("/mcp")
@@ -41,6 +54,9 @@ fn post_request(
 		.header("accept", "application/json, text/event-stream");
 	if let Some(id) = session_id {
 		builder = builder.header("mcp-session-id", id);
+	}
+	for (name, value) in extra_headers {
+		builder = builder.header(*name, *value);
 	}
 	let mut req = builder.body(Full::new(Bytes::from(body.to_string()))).unwrap();
 	if let Some(s) = session {
@@ -100,12 +116,23 @@ fn parse_sse_json(body: &str) -> Value {
 
 /// Send an `initialize` POST and return (session-id, parsed body).
 async fn initialize(service: &McpHttpService, attach_session: Option<Session>) -> (String, Value) {
+	initialize_with_version(service, "2025-06-18", attach_session).await
+}
+
+/// [`initialize`] naming a specific protocol revision. A revision outside
+/// `SUPPORTED_PROTOCOL_VERSIONS` exercises rmcp's negotiation fallback, which
+/// answers with the server's advertised revision.
+async fn initialize_with_version(
+	service: &McpHttpService,
+	version: &str,
+	attach_session: Option<Session>,
+) -> (String, Value) {
 	let body = json!({
 		"jsonrpc": "2.0",
 		"id": 1,
 		"method": "initialize",
 		"params": {
-			"protocolVersion": "2025-06-18",
+			"protocolVersion": version,
 			"capabilities": {},
 			"clientInfo": { "name": "http-test", "version": "0.0.0" },
 		},
@@ -228,13 +255,14 @@ async fn second_post_with_same_session_id_reuses_session_state() {
 	let resp = service.handle(post_request(&notif, Some(&session_id), None)).await;
 	assert_eq!(resp.status(), StatusCode::ACCEPTED, "notifications/initialized must be accepted");
 
-	// Now call `tools/list` with the same session id.
+	// Now call `tools/list` with the same session id. Follow-up requests on an
+	// authenticated session must present its credentials, `tools/list` included.
 	let req = json!({
 		"jsonrpc": "2.0",
 		"id": 2,
 		"method": "tools/list",
 	});
-	let resp = service.handle(post_request(&req, Some(&session_id), None)).await;
+	let resp = service.handle(post_request(&req, Some(&session_id), Some(owner_session()))).await;
 	assert_eq!(resp.status(), StatusCode::OK);
 	let body = body_to_string(resp).await;
 	let parsed = parse_sse_json(&body);
@@ -242,8 +270,38 @@ async fn second_post_with_same_session_id_reuses_session_state() {
 		.get("result")
 		.and_then(|r| r.get("tools"))
 		.and_then(|t| t.as_array())
-		.expect("tools/list must return a tools array");
+		.unwrap_or_else(|| panic!("tools/list must return a tools array; body: {body}"));
 	assert!(tools.iter().any(|t| t.get("name").and_then(|n| n.as_str()) == Some("query")));
+}
+
+/// `tools/list` is subject to the same binding as every other method. The
+/// listing is static, so the leak is the inference rather than the payload:
+/// answering it confirms the replayed `mcp-session-id` is live, which is exactly
+/// what possession of the id alone must not establish.
+#[tokio::test]
+async fn tools_list_without_credentials_on_existing_session_is_rejected() {
+	let ds = test_datastore().await;
+	let service = setup_service(ds);
+	let (session_id, _) = initialize(&service, Some(owner_session())).await;
+	complete_handshake(&service, &session_id).await;
+
+	let req = json!({
+		"jsonrpc": "2.0",
+		"id": 3,
+		"method": "tools/list",
+	});
+	let resp = service.handle(post_request(&req, Some(&session_id), None)).await;
+	assert_eq!(resp.status(), StatusCode::OK);
+	let body = body_to_string(resp).await;
+	let parsed = parse_sse_json(&body);
+	let err = parsed
+		.get("error")
+		.unwrap_or_else(|| panic!("tools/list must not answer without credentials; body: {body}"));
+	let message = err.get("message").and_then(|v| v.as_str()).unwrap_or("");
+	assert!(
+		message.contains("Credentials required"),
+		"error message must mention missing credentials, got: {message}"
+	);
 }
 
 #[tokio::test]
@@ -460,12 +518,82 @@ async fn missing_credentials_on_existing_session_is_rejected() {
 	);
 }
 
-/// The stateless and legacy protocols share the `/mcp` endpoint, so a caller
-/// can present a legacy `mcp-session-id` *and* claim the stateless revision on
-/// the same request. Such a request must never be served by the session that
-/// id names: the stateless protocol authenticates each request on its own, so
-/// honouring the id there would run the call under the handshake's identity
-/// without matching its credentials.
+/// A handshake naming a revision this server does not implement is answered
+/// with the advertised one, and the advertised revision is the sessionless
+/// `2026-07-28` — yet rmcp classifies that handshake by the *requested*
+/// revision, so it still runs the legacy lifecycle and issues an
+/// `mcp-session-id`. The result is a session that reports the sessionless
+/// revision from `ctx.protocol_version()` on every later request while holding
+/// both a session and a bound subject.
+///
+/// Deciding statelessness from that reported revision therefore skips the
+/// subject check on a session that has one, and possession of the session id
+/// alone is enough to run tool calls as the handshake's identity with no
+/// credentials at all. The binding, not the revision, has to be the
+/// discriminator.
+#[tokio::test]
+async fn credentialless_replay_is_rejected_when_negotiation_reports_the_sessionless_revision() {
+	let ds = test_datastore().await;
+	let service = setup_service(ds);
+	// Any revision outside `SUPPORTED_PROTOCOL_VERSIONS` triggers the fallback.
+	// It must sort below the sessionless revision, or rmcp routes the handshake
+	// itself sessionlessly and never allocates the session id this needs.
+	let (session_id, init) =
+		initialize_with_version(&service, "2024-10-07", Some(owner_session())).await;
+	assert_eq!(
+		init.pointer("/result/protocolVersion").and_then(Value::as_str),
+		Some("2026-07-28"),
+		"fixture requires negotiation to answer with the advertised sessionless revision; body: {init}"
+	);
+	complete_handshake(&service, &session_id).await;
+
+	let req = json!({
+		"jsonrpc": "2.0",
+		"id": 10,
+		"method": "tools/call",
+		"params": {
+			"name": "query",
+			"arguments": { "query": "RETURN [session::ns(), session::db()]" },
+		},
+	});
+	let resp = service.handle(post_request(&req, Some(&session_id), None)).await;
+	assert_eq!(resp.status(), StatusCode::OK);
+	let body = body_to_string(resp).await;
+	let parsed = parse_sse_json(&body);
+	let err = parsed.get("error").unwrap_or_else(|| {
+		panic!(
+			"credential-less replay on a negotiation-fallback session must be rejected, \
+			 not served as the bound owner; body: {body}"
+		)
+	});
+	let message = err.get("message").and_then(|v| v.as_str()).unwrap_or("");
+	assert!(
+		message.contains("Credentials required"),
+		"error message must mention missing credentials, got: {message}"
+	);
+
+	// Control: the same session still serves its own credentials, so the
+	// rejection above is about the credentials and not about the odd handshake.
+	let resp = service.handle(post_request(&req, Some(&session_id), Some(owner_session()))).await;
+	assert_eq!(resp.status(), StatusCode::OK);
+	let body = body_to_string(resp).await;
+	let parsed = parse_sse_json(&body);
+	let scope = parsed
+		.pointer("/result/structuredContent/value")
+		.unwrap_or_else(|| panic!("matching credentials should return a scope; body: {body}"));
+	assert_eq!(
+		scope,
+		&json!(["test", "test"]),
+		"matching credentials must resolve the handshake scope; body: {body}"
+	);
+}
+
+/// rmcp treats a request that names the sessionless revision in its own `_meta`
+/// as sessionless *regardless of any `mcp-session-id` it carries*: it builds a
+/// fresh service from the factory and never looks the id up. The handler's
+/// contract leans on that, so pin it — an rmcp change that started routing such
+/// a request to the named session would put a request claiming to be
+/// sessionless in front of a service that holds a session.
 ///
 /// The scope of the resolved session is the discriminator. The handshake bound
 /// `test`/`test`; a request served sessionlessly resolves neither, since the
@@ -473,7 +601,7 @@ async fn missing_credentials_on_existing_session_is_rejected() {
 /// cannot discriminate — `test_datastore` runs with auth disabled, so an
 /// anonymous session executes the same statements as an owner one.
 #[tokio::test]
-async fn stateless_claim_with_replayed_session_id_is_not_served_by_that_session() {
+async fn request_naming_the_sessionless_revision_is_not_served_by_a_replayed_session() {
 	let ds = test_datastore().await;
 	let service = setup_service(ds);
 	let (session_id, _) = initialize(&service, Some(owner_session())).await;
@@ -494,58 +622,31 @@ async fn stateless_claim_with_replayed_session_id_is_not_served_by_that_session(
 			"arguments": { "query": "RETURN [session::ns(), session::db()]" },
 		},
 	});
-	// A stateless-revision request must carry the agreeing protocol header and
+	// A sessionless-revision request must carry the agreeing protocol header and
 	// the SEP-2243 method/name headers, or rmcp rejects it before dispatch and
 	// the assertion below would pass without exercising anything.
-	let http_req = Request::builder()
-		.method(Method::POST)
-		.uri("/mcp")
-		.header("host", "localhost")
-		.header("content-type", "application/json")
-		.header("accept", "application/json, text/event-stream")
-		.header("mcp-protocol-version", "2026-07-28")
-		.header("mcp-method", "tools/call")
-		.header("mcp-name", "query")
-		.header("mcp-session-id", &session_id)
-		.body(Full::new(Bytes::from(scope_probe.to_string())))
-		.unwrap();
-	let resp = service.handle(http_req).await;
+	let resp = service
+		.handle(post_request_with_headers(
+			&scope_probe,
+			Some(&session_id),
+			None,
+			&[
+				("mcp-protocol-version", "2026-07-28"),
+				("mcp-method", "tools/call"),
+				("mcp-name", "query"),
+			],
+		))
+		.await;
 	assert_eq!(resp.status(), StatusCode::OK);
 	let body = body_to_string(resp).await;
 	let parsed = parse_sse_json(&body);
 	let scope = parsed
 		.pointer("/result/structuredContent/value")
-		.unwrap_or_else(|| panic!("stateless call should return a scope; body: {body}"));
+		.unwrap_or_else(|| panic!("sessionless call should return a scope; body: {body}"));
 	assert_eq!(
 		scope,
 		&json!([null, null]),
-		"a stateless-revision request must not inherit the replayed session's scope; body: {body}"
-	);
-
-	// Control: the same probe as a legacy request with the session's own
-	// credentials does resolve the handshake scope, so the assertion above
-	// reflects the stateless claim rather than a probe that can never see one.
-	let legacy_probe = json!({
-		"jsonrpc": "2.0",
-		"id": 11,
-		"method": "tools/call",
-		"params": {
-			"name": "query",
-			"arguments": { "query": "RETURN [session::ns(), session::db()]" },
-		},
-	});
-	let resp =
-		service.handle(post_request(&legacy_probe, Some(&session_id), Some(owner_session()))).await;
-	assert_eq!(resp.status(), StatusCode::OK);
-	let body = body_to_string(resp).await;
-	let parsed = parse_sse_json(&body);
-	let scope = parsed
-		.pointer("/result/structuredContent/value")
-		.unwrap_or_else(|| panic!("legacy call should return a scope; body: {body}"));
-	assert_eq!(
-		scope,
-		&json!(["test", "test"]),
-		"legacy request with matching credentials must resolve the handshake scope; body: {body}"
+		"a sessionless-revision request must not inherit the replayed session's scope; body: {body}"
 	);
 }
 

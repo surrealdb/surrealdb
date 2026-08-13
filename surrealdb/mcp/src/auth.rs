@@ -39,6 +39,12 @@ pub(crate) fn extract_session_from_parts(parts: &http::request::Parts) -> Option
 /// handshake bound an authenticated caller, follow-up requests on
 /// networked transports must present the same authenticated subject —
 /// missing, anonymous, or different credentials are rejected.
+///
+/// The identity comes from `Auth::id()`, which for access-method tokens names
+/// the *access method* rather than the individual token holder, so two callers
+/// authenticated by the same `DEFINE ACCESS` share a fingerprint. Roles are not
+/// part of it either. The check therefore binds a session to an access path, not
+/// to a principal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BoundSubject {
 	level: Level,
@@ -96,8 +102,11 @@ pub(crate) fn incoming_subject(ctx: &RequestContext<RoleServer>) -> Option<Bound
 ///
 /// Outcomes:
 ///
-/// - Bound subject is anonymous: any incoming subject is accepted (anonymous handshake stays
-///   anonymous).
+/// - Bound subject is anonymous, incoming is missing or anonymous: accepted (an anonymous handshake
+///   stays anonymous).
+/// - Bound subject is anonymous, incoming is authenticated: rejected. The session would still serve
+///   the call as anonymous, so the caller must re-initialize to bind the identity it now wants to
+///   act under rather than have it silently ignored.
 /// - Bound subject is authenticated, incoming is missing or anonymous: reject with
 ///   [`McpError::invalid_params`]. Possession of the session id alone must not let a caller drop
 ///   credentials and keep running under the bound subject.

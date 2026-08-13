@@ -37,16 +37,31 @@ const LOG: &str = "surrealdb::mcp";
 /// in [`http`] explicitly overrides this with `"http"`.
 const STDIO_TRANSPORT_LABEL: &str = "stdio";
 
+/// What a legacy `initialize` handshake binds to a service: the long-lived
+/// session whose `use` state persists across calls, plus the fingerprint of the
+/// subject that opened it.
+///
+/// The two live in one cell rather than two because
+/// [`McpService::verify_request_subject`] authorizes on the *absence* of a
+/// handshake: "there is no session to serve this from" and "there is no subject
+/// to impersonate" must be a single observation. Two cells could be read in a
+/// state where they disagree, and a service that reported itself sessionless
+/// while still holding a subject would skip the strict credential check.
+struct BoundHandshake {
+	session: McpSession,
+	/// Used by [`McpService::verify_request_subject`] to reject inbound
+	/// requests that present a *different* authenticated identity on the same
+	/// MCP session id (the spec's "MUST verify all inbound requests" rule).
+	subject: BoundSubject,
+}
+
 /// The MCP server handler for SurrealDB.
 #[derive(Clone)]
 pub struct McpService {
-	session: Arc<OnceCell<McpSession>>,
-	/// Subject fingerprint captured at `initialize`. Used by
-	/// [`McpService::verify_request_subject`] to reject inbound requests
-	/// that present a *different* authenticated identity on the same MCP
-	/// session id (the spec's "MUST verify all inbound requests" rule).
-	/// Stored alongside the [`McpSession`] so both share a lifetime.
-	bound_subject: Arc<OnceCell<BoundSubject>>,
+	/// Empty until `initialize` binds a handshake. Emptiness *is* the
+	/// definition of a sessionless request in this service; see
+	/// [`McpService::is_stateless`].
+	handshake: Arc<OnceCell<BoundHandshake>>,
 	datastore: Arc<Datastore>,
 	default_ns: Option<String>,
 	default_db: Option<String>,
@@ -304,8 +319,7 @@ impl McpService {
 		let mut tool_router = Self::tool_router();
 		crate::tools::output_schemas::attach(&mut tool_router);
 		Self {
-			session: Arc::new(OnceCell::new()),
-			bound_subject: Arc::new(OnceCell::new()),
+			handshake: Arc::new(OnceCell::new()),
 			datastore,
 			default_ns,
 			default_db,
@@ -371,8 +385,9 @@ impl McpService {
 	}
 
 	fn session(&self) -> Result<&McpSession, McpError> {
-		self.session
+		self.handshake
 			.get()
+			.map(|bound| &bound.session)
 			.ok_or_else(|| McpError::internal_error("MCP session not initialized", None))
 	}
 
@@ -391,14 +406,14 @@ impl McpService {
 		let subject = BoundSubject::from_session(&session);
 		let mcp_session =
 			McpSession::with_config(Arc::clone(&self.datastore), session, Arc::clone(&self.config));
-		self.session
-			.set(mcp_session)
+		// One `set` publishes the session and the subject together, so no
+		// reader can observe a service that holds one without the other.
+		self.handshake
+			.set(BoundHandshake {
+				session: mcp_session,
+				subject,
+			})
 			.map_err(|_| McpError::internal_error("Session already initialized", None))?;
-		// Use `OnceCell::set` here too — failing means the subject was
-		// previously bound (which should never happen because session-set
-		// already errored above), but the redundancy keeps the two cells
-		// in lock-step.
-		let _ = self.bound_subject.set(subject);
 		// Bump the active-session gauge now that the session is bound.
 		// The matching `-1` lives in `SessionGaugeGuard::drop`, fired
 		// when the last clone of this `McpService` is released so the
@@ -450,7 +465,7 @@ impl McpService {
 	///
 	/// Outcomes (see [`crate::auth::check_subject`]):
 	///
-	/// - Stateless request, which by definition has no bound subject: allowed; it carries its own
+	/// - Sessionless request, which by definition has no bound subject: allowed; it carries its own
 	///   credentials and is authenticated before reaching this handler.
 	/// - Stdio transport: allowed without re-checking incoming credentials.
 	/// - HTTP, no or anonymous credentials on a non-anonymous bound session: rejected with
@@ -458,24 +473,23 @@ impl McpService {
 	/// - HTTP, same authenticated subject as binding: allowed.
 	/// - HTTP, different authenticated subject than binding: rejected with `invalid_params`.
 	fn verify_request_subject(&self, ctx: &RequestContext<RoleServer>) -> Result<(), McpError> {
-		let Some(bound) = self.bound_subject.get() else {
-			// Nothing was bound at handshake, so there is no subject to
-			// impersonate. A stateless request legitimately has none: it
-			// carries its own credentials and is authenticated before it
-			// reaches this handler.
+		let Some(bound) = self.handshake.get() else {
+			// No handshake, so there is no subject to impersonate and nothing
+			// for a replayed session id to reach. A sessionless request
+			// legitimately has none: it carries its own credentials and is
+			// authenticated before it gets here.
 			//
-			// The bypass is gated on the *absence* of a binding, never on the
-			// request's claimed protocol version alone. Legacy sessions share
-			// this endpoint and the claimed version is attacker-controlled, so
-			// a version-only test would let a replayed `mcp-session-id` skip
-			// the check below and run under the bound subject's credentials.
-			// See [`Self::is_stateless`].
+			// The bypass keys on the handshake cell, never on the request's
+			// protocol version alone: a bound session can report the
+			// sessionless revision, so a version-only test would return `Ok`
+			// here and run the call under the bound subject's credentials
+			// without matching them. See [`Self::is_stateless`].
 			if self.is_stateless(ctx) {
 				return Ok(());
 			}
-			// `init_session` was never called and this is not a stateless
-			// request: return a protocol-level error so the caller knows to
-			// send `initialize` first.
+			// No handshake and not a sessionless request: return a
+			// protocol-level error so the caller knows to send `initialize`
+			// first.
 			return Err(McpError::internal_error(
 				"MCP session not initialized: send `initialize` first",
 				None,
@@ -490,7 +504,7 @@ impl McpService {
 			return Ok(());
 		}
 		let incoming = auth::incoming_subject(ctx);
-		auth::check_subject(bound, incoming)
+		auth::check_subject(&bound.subject, incoming)
 	}
 
 	/// Audit label for whoever is making this request.
@@ -500,33 +514,45 @@ impl McpService {
 	/// the label is derived from the credentials on the request itself, which
 	/// is the only identity that exists there.
 	fn request_subject_label(&self, ctx: &RequestContext<RoleServer>) -> String {
-		if let Some(bound) = self.bound_subject.get() {
-			return bound.audit_label();
+		if let Some(bound) = self.handshake.get() {
+			return bound.subject.audit_label();
 		}
 		auth::incoming_subject(ctx)
 			.map(|subject| subject.audit_label())
 			.unwrap_or_else(|| "anonymous".into())
 	}
 
-	/// Whether this request is genuinely sessionless, i.e. served under the
-	/// stateless protocol, where there are no session ids and every request
-	/// carries its own credentials.
+	/// Whether this request is genuinely sessionless: no handshake bound it, so
+	/// its credentials and its scope come from the request itself.
 	///
-	/// Both halves of the test are load-bearing, and the claimed protocol
-	/// version is the weaker one. rmcp reads that version from the request's
-	/// own `_meta`, falling back to the version agreed at handshake only when
-	/// the request omits it — so on an endpoint that also serves legacy
-	/// sessions (`create_http_service` enables rmcp's `legacy_session_mode`)
-	/// any caller can name the stateless revision on a request that does carry
-	/// an `mcp-session-id`. Requiring the absence of a
-	/// handshake session is what makes this answer whether the request is
-	/// *actually* sessionless rather than merely what it claims to be, which
-	/// is the only form of the question safe to authorize against.
+	/// The handshake half is what makes the answer authoritative, and it must
+	/// come first. `ctx.protocol_version()` reports the version in the
+	/// request's own `_meta`, falling back to the one *negotiated* at handshake
+	/// when the request omits it — and that negotiated value is not the
+	/// client's choice: rmcp answers a version outside
+	/// [`SUPPORTED_PROTOCOL_VERSIONS`] with [`ADVERTISED_PROTOCOL_VERSION`] and
+	/// records it as the peer's version. Since the advertised revision is the
+	/// sessionless one, a legacy session opened with any unrecognised version
+	/// string reports the sessionless revision on every later request, while
+	/// still holding a session and a bound subject. So the version alone
+	/// answers "which protocol era are we speaking", never "is there a
+	/// handshake here" — only the cell answers that, and only that question is
+	/// safe to authorize against.
+	///
+	/// The version half remains load-bearing for the reverse case: a caller on
+	/// an older revision that never sent `initialize` has no handshake either,
+	/// and must be told to send one rather than served anonymously.
 	fn is_stateless(&self, ctx: &RequestContext<RoleServer>) -> bool {
-		self.session.get().is_none()
-			&& ctx
-				.protocol_version()
-				.is_some_and(|version| version >= ProtocolVersion::V_2026_07_28)
+		self.handshake.get().is_none() && Self::claims_sessionless_revision(ctx)
+	}
+
+	/// Whether the request speaks a protocol revision that has no sessions.
+	///
+	/// This is the request's *claim* about its era, which on its own says
+	/// nothing about whether a handshake exists; see [`Self::is_stateless`] for
+	/// why the two questions must not be conflated.
+	fn claims_sessionless_revision(ctx: &RequestContext<RoleServer>) -> bool {
+		ctx.protocol_version().is_some_and(|version| version >= ProtocolVersion::V_2026_07_28)
 	}
 
 	/// Namespace and database carried by the request's `surreal-ns` /
@@ -574,14 +600,17 @@ impl McpService {
 		let ns = scope.namespace.clone().or(header_ns);
 		let db = scope.database.clone().or(header_db);
 
-		match self.session.get() {
+		// The arms below have already established whether a handshake exists, so
+		// they test the request's era with `claims_sessionless_revision` rather
+		// than re-reading the cell through `is_stateless`.
+		match self.handshake.get().map(|bound| &bound.session) {
 			Some(session) if ns.is_none() && db.is_none() => {
 				Ok(ResolvedSession::Handshake(session))
 			}
 			Some(session) => {
 				Ok(ResolvedSession::PerRequest(Box::new(session.derive_scoped(ns, db).await)))
 			}
-			None if self.is_stateless(ctx) => {
+			None if Self::claims_sessionless_revision(ctx) => {
 				// No handshake ever happened, so both the caller's identity and
 				// their scope come from this request. Networked transports get
 				// the session the auth middleware attached; in-process ones
@@ -924,9 +953,12 @@ impl McpService {
 		let scope = ToolScope::default();
 		// Dispatch even when the call cannot succeed, so the rejection is
 		// audited and counted like any other invocation rather than vanishing.
-		let stateless = self.is_stateless(&ctx);
+		// The test runs inside the closure so it observes the same handshake
+		// state `dispatch_tool` resolved `s` from; reading it beforehand would
+		// let a handshake bound in between refuse a `use` that has somewhere to
+		// apply.
 		self.dispatch_tool("use", &ctx, &scope, async |s| {
-			if stateless {
+			if self.is_stateless(&ctx) {
 				return Ok(connection::use_unsupported_when_stateless());
 			}
 			connection::r#use(s, p).await
@@ -1053,6 +1085,38 @@ impl ServerHandler for McpService {
 		self.init_session(session)?;
 		tracing::info!(target: LOG, "MCP session initialized");
 		Ok(self.get_info())
+	}
+
+	/// Written out rather than left to `#[tool_handler]` so `tools/list` runs
+	/// the same subject check as every sibling method. The generated version
+	/// answers from the router without consulting the binding, which makes
+	/// possession of an `mcp-session-id` alone enough to confirm the id is live —
+	/// the exact inference the binding exists to deny.
+	///
+	/// Everything below the check reproduces the generated body exactly,
+	/// including the cache hints the sessionless revision added and the
+	/// `Self::tool_router()` call. That call builds a *fresh* router, which is
+	/// not the same value as [`Self::tool_router`]: the field additionally
+	/// carries the output schemas [`crate::tools::output_schemas::attach`]
+	/// applies, and those schemas do not currently describe what the tools
+	/// return. Reading the field here would start advertising them and make
+	/// every SDK client reject the responses, so this must keep calling the
+	/// associated function until the schemas are corrected.
+	async fn list_tools(
+		&self,
+		_: Option<PaginatedRequestParams>,
+		ctx: RequestContext<RoleServer>,
+	) -> Result<ListToolsResult, McpError> {
+		self.verify_request_subject(&ctx)?;
+		let supports_cache_hints = Self::claims_sessionless_revision(&ctx);
+		Ok(ListToolsResult {
+			result_type: Some(ResultType::COMPLETE),
+			tools: Self::tool_router().list_all(),
+			meta: None,
+			next_cursor: None,
+			ttl_ms: supports_cache_hints.then_some(0),
+			cache_scope: supports_cache_hints.then_some(CacheScope::Public),
+		})
 	}
 
 	async fn list_resources(
@@ -1336,21 +1400,32 @@ mod tests {
 		assert!(!svc.is_stdio_transport());
 	}
 
-	/// Locks in the invariant [`McpService::is_stateless`] relies on to keep the
-	/// stateless bypass in [`McpService::verify_request_subject`] out of reach
-	/// of a bound session: `init_session` fills the session and the subject
-	/// together, so "no session" and "no bound subject" are the same condition.
-	/// If these two cells could ever diverge, a service could report itself
-	/// stateless while still holding a subject to impersonate.
+	/// `initialize` publishes the session and the subject in one write, so no
+	/// reader can observe a service holding a session without the subject that
+	/// opened it — the state in which
+	/// [`McpService::verify_request_subject`] would take its sessionless bypass
+	/// while a subject was still there to impersonate. The single
+	/// [`BoundHandshake`] cell is what makes that unrepresentable; this pins the
+	/// observable half, including that an authenticated handshake binds a
+	/// *non-anonymous* subject — an anonymous binding makes
+	/// [`crate::auth::check_subject`] accept every replay.
 	#[tokio::test]
-	async fn init_session_binds_session_and_subject_together() {
+	async fn init_session_publishes_handshake_atomically() {
 		let ds = fresh_datastore().await;
 		let svc = McpService::new(ds, None, None, Session::default()).with_transport_label("http");
-		assert!(svc.session.get().is_none(), "a fresh service holds no session");
-		assert!(svc.bound_subject.get().is_none(), "a fresh service holds no bound subject");
+		assert!(svc.handshake.get().is_none(), "a fresh service holds no handshake");
+		assert!(svc.session().is_err(), "a fresh service has no session to serve from");
 
 		svc.init_session(Session::owner()).expect("init_session");
-		assert!(svc.session.get().is_some(), "init_session must bind the session");
-		assert!(svc.bound_subject.get().is_some(), "init_session must bind the subject");
+		let bound = svc.handshake.get().expect("init_session must bind the handshake");
+		assert!(svc.session().is_ok(), "the bound session must be servable");
+		assert!(
+			!bound.subject.is_anonymous(),
+			"an owner handshake must bind a non-anonymous subject"
+		);
+		assert!(
+			svc.init_session(Session::owner()).is_err(),
+			"a second handshake on one service is a protocol error"
+		);
 	}
 }
