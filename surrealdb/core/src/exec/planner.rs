@@ -470,8 +470,9 @@ impl<'ctx> Planner<'ctx> {
 	///
 	/// Returns `AccessMode::ReadWrite` — the safe over-approximation — when the
 	/// planner lacks the transaction or namespace/database context to resolve,
-	/// or when the resolution errors, mirroring how
-	/// [`Self::resolve_module_writeable`] degrades. A `ReadOnly` answer is
+	/// or when the resolution errors. [`Self::resolve_module_writeable`] takes
+	/// the same write-side default for missing context, though it propagates a
+	/// resolution error rather than absorbing it. A `ReadOnly` answer is
 	/// returned only when the whole reachable call graph is provably write-free
 	/// in this snapshot, so a `ReadWrite` fallback can never mis-license a
 	/// write onto a read-only fast path.
@@ -512,11 +513,14 @@ impl<'ctx> Planner<'ctx> {
 	/// Resolve the `writeable` flag for a Surrealism module function from
 	/// the cached runtime's exports manifest.
 	///
-	/// Returns `Ok(false)` when the planner lacks the transaction or
-	/// namespace/database context needed for the lookup. In all other cases
-	/// the module is loaded (blocking on first use if necessary) and the
-	/// signature is read so the flag is always consistent with the module's
-	/// declaration.
+	/// Returns `Ok(true)` — the safe over-approximation — when the planner
+	/// lacks the transaction or namespace/database context the lookup needs.
+	/// `ReadWrite` costs a write transaction and serialised evaluation, whereas
+	/// a wrong `ReadOnly` would license a writing module onto the partitioned
+	/// and parallel fan-out paths, which are sound only for readers. In all
+	/// other cases the module is loaded (blocking on first use if necessary)
+	/// and the signature is read so the flag is always consistent with the
+	/// module's declaration.
 	#[cfg(feature = "surrealism")]
 	async fn resolve_module_writeable(
 		&self,
@@ -529,17 +533,17 @@ impl<'ctx> Planner<'ctx> {
 		use crate::expr::module::ModuleExecutable;
 
 		let Some(txn) = &self.txn else {
-			return Ok(false);
+			return Ok(true);
 		};
 		let (Some(ns), Some(db)) = (&self.ns, &self.db) else {
-			return Ok(false);
+			return Ok(true);
 		};
 		let Some(db_def) = txn
 			.get_db_by_name(ns, db, None)
 			.await
 			.map_err(|e| EngineError::Internal(e.to_string()))?
 		else {
-			return Ok(false);
+			return Ok(true);
 		};
 		let mod_name = format!("mod::{module}");
 		let val =
@@ -551,6 +555,9 @@ impl<'ctx> Planner<'ctx> {
 						..
 					}) = e.downcast_ref::<CatalogError>()
 					{
+						// Not an unresolved flag but a resolved absence: the
+						// invocation repeats this lookup and fails on it, so the
+						// call cannot reach a module body and cannot write.
 						return Ok(false);
 					}
 					return Err(EngineError::Internal(e.to_string()).into());
