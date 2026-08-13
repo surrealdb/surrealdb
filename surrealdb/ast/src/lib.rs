@@ -268,13 +268,16 @@ ast_type! {
 
 impl_vis_type! {
 	#[derive(Debug)]
+	/// The namespace and database are expressions, not identifiers: a name may
+	/// be computed, as it may anywhere else a resource is named (`USE DB $db`,
+	/// `USE DB type::string(..)`). Evaluation coerces the result to a string.
 	pub enum UseKind {
-		Namespace(NodeId<Ident>),
+		Namespace(NodeId<Expr>),
 		NamespaceDatabase{
-			namespace: NodeId<Ident>,
-			database: NodeId<Ident>
+			namespace: NodeId<Expr>,
+			database: NodeId<Expr>
 		},
-		Database(NodeId<Ident>),
+		Database(NodeId<Expr>),
 	}
 }
 

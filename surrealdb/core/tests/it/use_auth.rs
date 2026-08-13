@@ -119,3 +119,69 @@ async fn process_use_materializes_for_root_editor() -> Result<()> {
 	);
 	Ok(())
 }
+
+/// The namespace and database arguments of `USE` are expressions, so
+/// evaluating one can read or write the datastore. Computing them requires
+/// the statement's transaction on the context: `Context::tx()` resolves a
+/// context without one through `unreachable!()`, and release profiles are
+/// `panic = 'abort'`, so an argument that reached the datastore aborted the
+/// whole server process rather than failing the query.
+///
+/// The language-test reproduction covers the same statements across the
+/// storage modes; these assert what it cannot, namely that the failed
+/// statement's writes are rolled back.
+#[tokio::test]
+async fn use_ns_db_expression_arguments_fail_as_queries() -> Result<()> {
+	let (_, ds) = new_ds("test", "test", false).await?;
+	let sess = Session::owner().with_ns("test").with_db("test");
+
+	ds.execute("DEFINE TABLE anything", &sess, None).await?.remove(0).output()?;
+
+	// Each argument reaches the datastore: a subquery reads, `INFO` reads
+	// through the catalog, and a nested `DEFINE` writes.
+	for (sql, expected) in [
+		("USE DB (SELECT VALUE id FROM anything)", "Expected `database` but found `[]`"),
+		("USE DB (INFO FOR DB).analyzers", "Expected `database` but found `{  }`"),
+		("USE NS (INFO FOR DB).analyzers", "Expected `namespace` but found `{  }`"),
+		("USE NS DEFINE NAMESPACE zz", "Expected `namespace` but found `NONE`"),
+	] {
+		let err = ds
+			.execute(sql, &sess, None)
+			.await?
+			.remove(0)
+			.output()
+			.expect_err(&format!("`{sql}` must fail as a query"))
+			.to_string();
+		assert_eq!(err, expected, "unexpected error for `{sql}`");
+	}
+
+	// The rejected statements left the session where it was, and the
+	// namespace the nested `DEFINE` would have created was rolled back.
+	let info = root_info(&ds).await?;
+	assert!(!info.contains("zz"), "a failed USE must not commit its argument's writes: {info}");
+
+	let out = ds.execute("SELECT * FROM anything", &sess, None).await?.remove(0).output()?;
+	assert_eq!(out.to_sql(), "[]");
+
+	Ok(())
+}
+
+/// A computed argument that does coerce to a name selects it, which is what
+/// keeps the expression form worth having.
+#[tokio::test]
+async fn use_db_accepts_a_computed_name() -> Result<()> {
+	let (_, ds) = new_ds("test", "test", false).await?;
+	let sess = Session::owner().with_ns("test").with_db("test");
+
+	for sql in ["USE DB type::string('x')", "LET $db = 'from_param'; USE DB $db"] {
+		let mut resp = ds.execute(sql, &sess, None).await?;
+		let out = resp.pop().expect("a response per statement").output()?;
+		assert!(
+			out.to_sql().contains("database"),
+			"`{sql}` should report the selected context, got {}",
+			out.to_sql()
+		);
+	}
+
+	Ok(())
+}

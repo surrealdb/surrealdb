@@ -183,7 +183,7 @@ impl Parse for ast::TopLevelExpr {
 					))
 					.to_diagnostic()
 			})),
-			T![USE] => Ok(TopLevelExpr::Use(parser.parse_sync()?)),
+			T![USE] => Ok(TopLevelExpr::Use(parser.parse().await?)),
 			T![OPTION] => Ok(TopLevelExpr::Option(parser.parse_sync()?)),
 			T![KILL] => Ok(TopLevelExpr::Kill(parser.parse_sync()?)),
 			T![SHOW] => Ok(TopLevelExpr::Show(parser.parse().await?)),
@@ -297,35 +297,32 @@ impl ParseSync for ast::Kill {
 	}
 }
 
-impl ParseSync for ast::Use {
-	fn parse_sync(parser: &mut Parser) -> super::ParseResult<Self> {
+impl Parse for ast::Use {
+	async fn parse(parser: &mut Parser<'_, '_>) -> super::ParseResult<Self> {
 		let start = parser.expect(T![USE])?.span;
 
-		let (kind, span) = if parser.eat(T![NAMESPACE])?.is_some() {
-			let ns = parser.parse_sync()?;
+		// An argument is an expression, which carries no span of its own, so
+		// the statement's span runs from `USE` to whatever the last argument
+		// consumed.
+		let kind = if parser.eat(T![NAMESPACE])?.is_some() {
+			let ns = parser.parse_enter().await?;
 			if parser.eat(T![DATABASE])?.is_some() {
-				let db = parser.parse_sync()?;
-				(
-					UseKind::NamespaceDatabase {
-						namespace: ns,
-						database: db,
-					},
-					start.extend(parser[db].span),
-				)
+				UseKind::NamespaceDatabase {
+					namespace: ns,
+					database: parser.parse_enter().await?,
+				}
 			} else {
-				(UseKind::Namespace(ns), start.extend(parser[ns].span))
+				UseKind::Namespace(ns)
 			}
 		} else if parser.eat(T![DATABASE])?.is_some() {
-			let db = parser.parse_sync()?;
-
-			(UseKind::Database(db), start.extend(parser[db].span))
+			UseKind::Database(parser.parse_enter().await?)
 		} else {
 			return Err(parser.unexpected("either `NAMESPACE` or `DATABASE`"));
 		};
 
 		Ok(ast::Use {
 			kind,
-			span,
+			span: parser.span_since(start),
 		})
 	}
 }

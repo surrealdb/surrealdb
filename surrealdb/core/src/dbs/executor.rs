@@ -1034,6 +1034,13 @@ impl Executor {
 		}
 		let res = match plan {
 			TopLevelExpr::Use(stmt) => {
+				// The namespace and database arguments are expressions, and an
+				// expression may read or write the datastore. They are computed
+				// against `self.ctx` below, so the statement's transaction has
+				// to be installed on it first: `Context::tx()` has no fallback
+				// for a context without one.
+				ctx_mut!().set_transaction(Arc::clone(&txn));
+
 				let opt_ref = self.opt.clone();
 
 				let (use_ns, use_db) = match stmt {
