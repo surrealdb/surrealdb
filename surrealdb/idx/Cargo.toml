@@ -81,6 +81,7 @@ diskann-vector.workspace = true
 flate2.workspace = true
 rstest.workspace = true
 rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
+serial_test.workspace = true
 # The engines' own tests open a transaction against an in-memory backend.
 # Nothing in the library selects a backend.
 surrealdb-kvs-any = { workspace = true, features = ["kv-mem"] }

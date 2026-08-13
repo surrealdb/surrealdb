@@ -178,9 +178,9 @@ clap = "4.6.1"
 dashmap = "6.1.0"
 dialoguer = "0.11"
 deunicode = "1.6.2"
-diskann = { version = "=0.54.0", default-features = false }
-diskann-utils = "=0.54.0"
-diskann-vector = "=0.54.0"
+diskann = { version = "=0.55.0", default-features = false }
+diskann-utils = "=0.55.0"
+diskann-vector = "=0.55.0"
 ext-sort = "^0.1.5"
 fastnum = "0.7.4"
 flatbuffers = { version = "25.12.19", features = ["serde"] }
