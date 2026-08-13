@@ -189,6 +189,15 @@ mod surrealism_integration {
 				// client never stalls the accept loop (which also polls the
 				// shutdown channel between connections).
 				Ok((stream, _)) => {
+					// The accepted socket inherits the listener's non-blocking flag
+					// on BSD-derived platforms, and a non-blocking `write_all` that
+					// meets a full send buffer stops short at `WouldBlock` and serves
+					// a truncated body. These responses are small enough to usually
+					// fit, which makes the truncation load-dependent rather than
+					// absent.
+					if stream.set_nonblocking(false).is_err() {
+						continue;
+					}
 					thread::spawn(move || handle_pokemon_connection(stream));
 				}
 				Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
