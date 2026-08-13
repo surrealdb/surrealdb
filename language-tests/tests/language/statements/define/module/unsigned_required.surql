@@ -13,11 +13,11 @@ reason = "No module source is signature-verified yet, so DEFINE MODULE requires 
 [test.results]
 parsing-error = """
 Expected the `UNSIGNED` keyword on this module definition
-  --> [23:28]
+  --> [23:30]
    |
-23 | DEFINE MODULE mod::test AS f"bucket:/module.wasm";
-   |                            ^^^^^^^^^^^^^^^^^^^^^^ Surrealism modules are not signature-verified yet, so a module must be defined as `UNSIGNED`
+23 | DEFINE MODULE mod::test FROM f"bucket:/module.wasm";
+   |                              ^^^^^^^^^^^^^^^^^^^^^^ Surrealism modules are not signature-verified yet, so a module must be defined as `UNSIGNED`
 """
 */
 
-DEFINE MODULE mod::test AS f"bucket:/module.wasm";
+DEFINE MODULE mod::test FROM f"bucket:/module.wasm";

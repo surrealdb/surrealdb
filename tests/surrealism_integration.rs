@@ -394,7 +394,7 @@ mod surrealism_integration {
 		let dir = bucket_dir.to_string_lossy();
 		let setup = format!(
 			"DEFINE BUCKET test BACKEND \"file:{dir}\";\
-			 DEFINE MODULE mod::demo AS f\"test:/demo.surli\" UNSIGNED;"
+			 DEFINE MODULE mod::demo FROM f\"test:/demo.surli\" UNSIGNED;"
 		);
 		let results = sql_query(addr, ns, db, &setup).await;
 		for (i, r) in results.iter().enumerate() {

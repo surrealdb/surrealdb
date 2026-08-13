@@ -69,7 +69,7 @@ async function moduleClient(): Promise<Surreal> {
 	const responses = await db
 		.query(
 			`DEFINE BUCKET test BACKEND "file:${bucketDir}";
-			 DEFINE MODULE mod::demo AS f"test:/demo.surli" UNSIGNED;`,
+			 DEFINE MODULE mod::demo FROM f"test:/demo.surli" UNSIGNED;`,
 		)
 		.responses();
 	for (const r of responses) expect(r.success).toBe(true);

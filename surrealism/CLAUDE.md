@@ -28,11 +28,13 @@ Archives are self-contained; load them via `SurrealismPackage::from_file(path)`.
 A module executable is either a `.surli` in a bucket or a Silo package named by exact version:
 
 ```surql
-DEFINE MODULE mod::color AS f"modules:/color.surli" UNSIGNED;
+DEFINE MODULE mod::color FROM f"modules:/color.surli" UNSIGNED;
 DEFINE MODULE silo::surrealdb::color::<1.0.0> UNSIGNED;
 ```
 
-A silo package is downloaded from `{surrealism_silo_endpoint}/{org}/{pkg}/{major}.{minor}.{patch}.surli`, so it needs no local build and no bucket. The named form takes a `mod::` alias; the silo form is keyed by its package coordinates and takes none.
+A silo package is downloaded from `{surrealism_silo_endpoint}/{org}/{pkg}/{major}.{minor}.{patch}.surli`, so it needs no local build and no bucket. The named form takes a `mod::` name; the silo form is keyed by its package coordinates and takes none.
+
+The keyword before the executable is `FROM`, not `AS`: what follows is the module's source, and `AS` would invert the sense it carries everywhere else in SurrealQL, where the alias sits on the right.
 
 `UNSIGNED` is a trailing clause, unordered with `COMMENT` and `PERMISSIONS`, and mandatory on both forms. No module source is signature-verified yet, so every module opts out of verification explicitly; once Silo signs on upload, the keyword becomes the opt-out it names and definitions written today keep their meaning.
 

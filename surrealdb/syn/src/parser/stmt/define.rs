@@ -244,7 +244,10 @@ impl Parser<'_> {
 		let name = if self.eat(t!("mod")) {
 			expected!(self, t!("::"));
 			let name = self.parse_ident()?.into_string();
-			expected!(self, t!("AS"));
+			// What follows is the module's source, not an alias for it, so the
+			// keyword is `FROM`. `AS` would invert the sense it carries in
+			// every other statement, where the alias sits on the right.
+			expected!(self, t!("FROM"));
 			Some(name.into())
 		} else {
 			None

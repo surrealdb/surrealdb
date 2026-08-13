@@ -33,7 +33,7 @@ impl ToSql for DefineModuleStatement {
 			DefineKind::IfNotExists => f.push_str(" IF NOT EXISTS"),
 		}
 		if let Some(name) = &self.name {
-			write_sql!(f, sql_fmt, " mod::{} AS", name);
+			write_sql!(f, sql_fmt, " mod::{} FROM", name);
 		}
 		write_sql!(f, sql_fmt, " {}", self.executable);
 		if self.unsigned {

@@ -144,12 +144,12 @@ fn a_definition_name_survives_render_and_reparse(#[case] query: &str) {
 /// parser rejects the statement outright.
 #[cfg(feature = "surrealism")]
 #[rstest]
-#[case::plain("DEFINE MODULE mod::helpers AS f\"test:/demo.surli\" UNSIGNED")]
-#[case::reserved("DEFINE MODULE mod::`select` AS f\"test:/demo.surli\" UNSIGNED")]
-#[case::spaced("DEFINE MODULE mod::`my module` AS f\"test:/demo.surli\" UNSIGNED")]
-#[case::digit_leading("DEFINE MODULE mod::`1st` AS f\"test:/demo.surli\" UNSIGNED")]
-#[case::backtick("DEFINE MODULE mod::`odd\\`name` AS f\"test:/demo.surli\" UNSIGNED")]
-#[case::silo("DEFINE MODULE mod::helpers AS silo::acme::pkg::<1.0.0> UNSIGNED")]
+#[case::plain("DEFINE MODULE mod::helpers FROM f\"test:/demo.surli\" UNSIGNED")]
+#[case::reserved("DEFINE MODULE mod::`select` FROM f\"test:/demo.surli\" UNSIGNED")]
+#[case::spaced("DEFINE MODULE mod::`my module` FROM f\"test:/demo.surli\" UNSIGNED")]
+#[case::digit_leading("DEFINE MODULE mod::`1st` FROM f\"test:/demo.surli\" UNSIGNED")]
+#[case::backtick("DEFINE MODULE mod::`odd\\`name` FROM f\"test:/demo.surli\" UNSIGNED")]
+#[case::silo("DEFINE MODULE mod::helpers FROM silo::acme::pkg::<1.0.0> UNSIGNED")]
 fn a_module_name_survives_render_and_reparse(#[case] query: &str) {
 	assert_name_round_trips(query);
 }
