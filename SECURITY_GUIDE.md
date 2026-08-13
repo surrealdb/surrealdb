@@ -271,13 +271,18 @@ and `exec/operators/scan/fetch.rs` (`resolve_with_field_state`)
     `mutable_permissions` experimental capability is enabled. When on, those
     predicates run write-capable (with permissions still bypassed, as with any
     predicate), which re-opens the escalation surface for those clauses — the
-    documented cost of the capability. It is **off by default** and not enabled by
-    `--allow-all`; the block, when it fires, logs a warning steering operators to
-    `DEFINE EVENT` (the sanctioned definer-authority side-effect mechanism). The
-    capability is intended to be removed once affected schemas migrate. The frame
-    decision lives in `doc::check::permission_predicate_frame`
-    (`PermissionClauseKind::Read` vs `Write`); `eval`-nested writes inside a
-    predicate remain blocked regardless of the capability.
+    documented cost of the capability. **The `surreal` server allows the capability
+    unless `--deny-experimental` / `SURREAL_CAPS_DENY_EXPERIMENTAL` names the target**,
+    so treat write-capable create/update/delete predicates as the norm for a served
+    deployment; an embedder supplying its own `Capabilities` gets it off by default.
+    The block, when it fires, logs a warning steering operators to `DEFINE EVENT`
+    (the sanctioned definer-authority side-effect mechanism), and
+    `surrealdb_statement_mutable_permission_writes_total` reports how much a
+    deployment relies on the capability. The capability is intended to be removed
+    once affected schemas migrate. The frame decision lives in
+    `doc::check::permission_predicate_frame` (`PermissionClauseKind::Read` vs
+    `Write`); `eval`-nested writes inside a predicate remain blocked regardless of
+    the capability.
 - The Auth context within Options must not be mutated by user-controlled operations.
   Only system-internal mechanisms (AuthLimit) may produce derived Options with
   modified auth, and these must never broaden permissions.

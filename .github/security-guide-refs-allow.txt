@@ -10,6 +10,12 @@
 #
 # Do NOT use this to silence a reference that broke because code moved. That is
 # the drift the check exists to catch: update the guide instead.
-#
-# This file is intentionally empty. Every reference in the guide currently
-# resolves without an exception.
+
+# Exported metric name. The instrument is declared as
+# `surrealdb.statement.mutable_permission_writes`
+# (observe/instruments.rs::names::STATEMENT_MUTABLE_PERMISSION_WRITES); the
+# Prometheus exporter replaces the dots and appends the counter suffix, so the
+# name an operator queries exists only after export. The guide names the queried
+# form because that is what a reviewer checking the capability's usage signal
+# needs, and it matches doc/OBSERVABILITY.md.
+surrealdb_statement_mutable_permission_writes_total

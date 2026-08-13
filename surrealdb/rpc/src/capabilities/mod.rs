@@ -122,8 +122,14 @@ pub enum ExperimentalTarget {
 	/// Transitional escape hatch: permit data-modifying statements inside
 	/// `PERMISSIONS FOR create/update/delete` predicates, reversing part of the
 	/// GHSA-66r2-5gwj-gxm2 block for those clauses. `SELECT` permission clauses
-	/// stay read-only regardless. Default off; intended to be removed once
-	/// affected schemas migrate their side effects to `DEFINE EVENT`.
+	/// stay read-only regardless. Intended to be removed once affected schemas
+	/// migrate their side effects to `DEFINE EVENT`.
+	///
+	/// Off in [`Capabilities::default`] like every other target here, but the
+	/// `surreal` server adds it to whatever an operator allowed, so a server
+	/// permits these clauses unless the target is specifically denied. An
+	/// embedder building its own [`Capabilities`] gets the default and has to
+	/// ask for it.
 	MutablePermissions,
 }
 
