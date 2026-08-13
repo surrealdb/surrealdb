@@ -26,7 +26,13 @@ Implements `surrealism_runtime::host::InvocationContext` for use inside SurrealD
 Caches compiled `Runtime` instances using `quick_cache`. Key variants:
 
 - `File(ns, db, bucket, key)` — for user-uploaded modules
-- `Silo(org, pkg, major, minor, patch)` — for silo-hosted packages
+- `Silo(ns, db, org, pkg, major, minor, patch)` — for silo-hosted packages
+
+Both variants are scoped by namespace and database. A `Runtime` owns the
+module's KV store and pools controllers whose WASM linear memory survives
+between invocations, so an entry shared by two databases would leak module
+state across the tenant boundary. Two databases resolving the same silo package
+therefore compile and hold it separately.
 
 Weight is based on WASM binary size (in MB); larger modules are evicted first under memory pressure. Default budget is `SURREALISM_CACHE_SIZE * 100 MB`.
 

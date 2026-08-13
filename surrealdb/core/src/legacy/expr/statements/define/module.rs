@@ -70,6 +70,8 @@ pub(crate) async fn define_module_statement_compute(
 							&surrealism.0.key,
 						),
 						ModuleExecutable::Silo(silo) => SurrealismCacheLookup::Silo(
+							&ns,
+							&db,
 							&silo.organisation,
 							&silo.package,
 							silo.major,
@@ -123,6 +125,8 @@ pub(crate) async fn define_module_statement_compute(
 				SurrealismCacheLookup::File(&ns, &db, &surrealism.0.bucket, &surrealism.0.key)
 			}
 			ModuleExecutable::Silo(silo) => SurrealismCacheLookup::Silo(
+				&ns,
+				&db,
 				&silo.organisation,
 				&silo.package,
 				silo.major,

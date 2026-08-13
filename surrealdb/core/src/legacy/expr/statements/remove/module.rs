@@ -55,6 +55,8 @@ pub(crate) async fn remove_module_statement_compute(
 				SurrealismCacheLookup::File(&ns, &db, &surrealism.bucket, &surrealism.key)
 			}
 			ModuleExecutable::Silo(silo) => SurrealismCacheLookup::Silo(
+				&ns,
+				&db,
 				&silo.organisation,
 				&silo.package,
 				silo.major,

@@ -31,7 +31,7 @@ pub(crate) async fn module_executable_signature(
 			crate::legacy::surrealism_executable_signature(surrealism, ctx, ns, db, sub).await
 		}
 		ModuleExecutable::Silo(silo) => {
-			crate::legacy::silo_executable_signature(silo, ctx, sub).await
+			crate::legacy::silo_executable_signature(silo, ctx, ns, db, sub).await
 		}
 	}
 }
@@ -115,10 +115,14 @@ pub(crate) async fn surrealism_executable_run(
 pub(crate) async fn silo_executable_signature(
 	this: &SiloExecutable,
 	ctx: &FrozenContext,
+	ns: &NamespaceId,
+	db: &DatabaseId,
 	sub: Option<&str>,
 ) -> Result<Signature> {
 	check_surrealism_enabled(ctx)?;
 	let lookup = SurrealismCacheLookup::Silo(
+		ns,
+		db,
 		&this.organisation,
 		&this.package,
 		this.major,
@@ -140,7 +144,10 @@ pub(crate) async fn silo_executable_run(
 	sub: Option<&str>,
 ) -> Result<Value> {
 	check_surrealism_enabled(ctx)?;
+	let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 	let lookup = SurrealismCacheLookup::Silo(
+		&ns,
+		&db,
 		&this.organisation,
 		&this.package,
 		this.major,
@@ -155,6 +162,8 @@ pub(crate) async fn silo_executable_run(
 pub(crate) async fn silo_executable_signature(
 	_this: &SiloExecutable,
 	_ctx: &FrozenContext,
+	_ns: &NamespaceId,
+	_db: &DatabaseId,
 	_sub: Option<&str>,
 ) -> Result<Signature> {
 	bail!("Surrealism functions are not supported in WASM environments")

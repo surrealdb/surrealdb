@@ -743,6 +743,13 @@ Surrealism/WASM
   the net allowlist is empty, and `allow_ip_name_lookup` stays off even when it is
   not (hostnames resolve at module load, so runtime DNS would only serve tunneling).
   Any builder call that inherits host state is a secret-exposure finding.
+- A cached Surrealism `Runtime` is stateful: it owns the module's KV store and pools
+  controllers whose WASM linear memory (heap, statics) survives between invocations,
+  so unlike the JavaScript runtime it is not rebuilt per invocation. Every
+  `SurrealismCacheKey` variant (`surrealism/cache.rs`) must therefore be scoped by
+  namespace and database. A key that identifies a module only by where its bytes come
+  from — for silo packages, organisation/package/version — lets two databases share one
+  runtime, and module-local state written under one tenant becomes readable by another.
 - The `eval::surql` / `eval::gql` functions (`fnc/eval.rs`) evaluate a runtime
   query string in the caller's transaction. They must remain gated by **all** of:
   the function-family capability (enforced by the engine before dispatch), the

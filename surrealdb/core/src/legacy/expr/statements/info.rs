@@ -453,8 +453,15 @@ pub(crate) async fn get_module_exports(
 			Some(surrealism_exports_manifest_to_value(runtime.exports()))
 		}
 		ModuleExecutable::Silo(s) => {
-			let lookup =
-				SurrealismCacheLookup::Silo(&s.organisation, &s.package, s.major, s.minor, s.patch);
+			let lookup = SurrealismCacheLookup::Silo(
+				ns,
+				db,
+				&s.organisation,
+				&s.package,
+				s.major,
+				s.minor,
+				s.patch,
+			);
 			let runtime = match ctx.get_surrealism_runtime(lookup).await {
 				Ok(r) => r,
 				Err(e) => {

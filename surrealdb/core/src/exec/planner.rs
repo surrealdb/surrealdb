@@ -587,6 +587,14 @@ impl<'ctx> Planner<'ctx> {
 
 	/// Resolve the `writeable` flag for a Silo package function from
 	/// the cached runtime's exports manifest.
+	///
+	/// A silo runtime is cached per namespace/database, so without the
+	/// planner's transaction and those ids there is no key to resolve the
+	/// signature under. Those cases return `Ok(true)`, the safe
+	/// over-approximation: `ReadWrite` costs a write transaction and serialised
+	/// evaluation, whereas a wrong `ReadOnly` would license a writing module
+	/// onto the partitioned and parallel fan-out paths, which are sound only
+	/// for readers.
 	#[cfg(feature = "surrealism")]
 	async fn resolve_silo_writeable(
 		&self,
@@ -597,9 +605,23 @@ impl<'ctx> Planner<'ctx> {
 		patch: u32,
 		sub: Option<&str>,
 	) -> Result<bool, Error> {
+		use crate::catalog::providers::DatabaseProvider;
 		use crate::ctx::Context;
 		use crate::expr::module::SiloExecutable;
 
+		let Some(txn) = &self.txn else {
+			return Ok(true);
+		};
+		let (Some(ns), Some(db)) = (&self.ns, &self.db) else {
+			return Ok(true);
+		};
+		let Some(db_def) = txn
+			.get_db_by_name(ns, db, None)
+			.await
+			.map_err(|e| EngineError::Internal(e.to_string()))?
+		else {
+			return Ok(true);
+		};
 		let executable = SiloExecutable {
 			organisation: org.to_string(),
 			package: pkg.to_string(),
@@ -609,16 +631,18 @@ impl<'ctx> Planner<'ctx> {
 		};
 		// Same as resolve_module_writeable: derive a context with the
 		// planner's transaction so signature resolution can access stores.
-		let ctx = if let Some(txn) = &self.txn {
-			let mut plan_ctx = Context::new_child(self.ctx);
-			plan_ctx.set_transaction(Arc::clone(txn));
-			plan_ctx.freeze()
-		} else {
-			Arc::clone(self.ctx)
-		};
-		let sig = crate::legacy::silo_executable_signature(&executable, &ctx, sub)
-			.await
-			.map_err(|e| EngineError::Internal(e.to_string()))?;
+		let mut plan_ctx = Context::new_child(self.ctx);
+		plan_ctx.set_transaction(Arc::clone(txn));
+		let frozen = plan_ctx.freeze();
+		let sig = crate::legacy::silo_executable_signature(
+			&executable,
+			&frozen,
+			&db_def.namespace_id,
+			&db_def.database_id,
+			sub,
+		)
+		.await
+		.map_err(|e| EngineError::Internal(e.to_string()))?;
 		Ok(sig.writeable)
 	}
 

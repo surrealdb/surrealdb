@@ -1250,10 +1250,10 @@ impl Context {
 						let safe_key = key.to_string().replace(['/', '\\'], "_");
 						(surli, format!("SURREAL_MODFS_{ns}_{db}_{safe_key}_"))
 					}
-					SurrealismCacheLookup::Silo(org, pkg, major, minor, patch) => {
+					SurrealismCacheLookup::Silo(ns, db, org, pkg, major, minor, patch) => {
 						#[cfg(not(feature = "http"))]
 						{
-							let _ = (org, pkg, major, minor, patch);
+							let _ = (ns, db, org, pkg, major, minor, patch);
 							bail!(
 								"Failed to get surrealism runtime: silo module packages are fetched over HTTP, which this build does not support"
 							);
@@ -1293,7 +1293,9 @@ impl Context {
 
 							(
 								surli,
-								format!("SURREAL_MODFS_silo_{org}_{pkg}_{major}_{minor}_{patch}_"),
+								format!(
+									"SURREAL_MODFS_silo_{ns}_{db}_{org}_{pkg}_{major}_{minor}_{patch}_"
+								),
 							)
 						}
 					}

@@ -308,6 +308,13 @@ mod surrealism_integration {
 
 			match listener.accept() {
 				Ok((stream, _)) => {
+					// The accepted socket inherits the listener's non-blocking flag on
+					// BSD-derived platforms. A package is far larger than the send
+					// buffer, so a non-blocking `write_all` would stop short at
+					// `WouldBlock` and serve a truncated body.
+					if stream.set_nonblocking(false).is_err() {
+						continue;
+					}
 					let path = path.clone();
 					let package = package.clone();
 					thread::spawn(move || handle_silo_connection(stream, &path, &package));
@@ -1253,6 +1260,81 @@ mod surrealism_integration {
 	#[test(tokio::test)]
 	async fn module_silo_missing_version() -> Result<(), Box<dyn std::error::Error>> {
 		check_silo_missing_version(&DEMO_DIR.canonical).await
+	}
+
+	/// A silo runtime keeps its KV store and WASM memory between invocations, so
+	/// two databases defining the same package must each get their own. What one
+	/// tenant writes into module state must not be visible to another.
+	async fn check_silo_state_is_per_database(
+		bucket_dir: &Path,
+	) -> Result<(), Box<dyn std::error::Error>> {
+		let package = std::fs::read(bucket_dir.join("demo.surli"))?;
+		let registry = LocalSiloRegistry::start("/surrealdb/demo/1.0.0.surli", package)?;
+
+		let mut vars = HashMap::new();
+		vars.insert("SURREAL_SURREALISM_SILO_ENDPOINT".to_string(), registry.endpoint());
+		let (addr, _server) = start_surrealism_server_with(bucket_dir, vars).await?;
+
+		// Two tenants on one server, both resolving the same package coordinates.
+		let tenants = [
+			(Ulid::new().to_string(), Ulid::new().to_string()),
+			(Ulid::new().to_string(), Ulid::new().to_string()),
+		];
+		for (ns, db) in &tenants {
+			let results =
+				sql_query(&addr, ns, db, "DEFINE MODULE silo::surrealdb::demo::<1.0.0> UNSIGNED;")
+					.await;
+			assert_eq!(
+				results[0].status, "OK",
+				"silo DEFINE MODULE failed: {:?}",
+				results[0].result
+			);
+		}
+
+		let (ns_a, db_a) = &tenants[0];
+		let (ns_b, db_b) = &tenants[1];
+
+		let results = sql_query(
+			&addr,
+			ns_a,
+			db_a,
+			"RETURN silo::surrealdb::demo::<1.0.0>::kv_set_value('tenant_secret', 42);",
+		)
+		.await;
+		assert_eq!(results[0].status, "OK", "kv_set_value: {:?}", results[0].result);
+
+		// The writing tenant still sees its own value.
+		let results = sql_query(
+			&addr,
+			ns_a,
+			db_a,
+			"RETURN silo::surrealdb::demo::<1.0.0>::kv_get_value('tenant_secret');",
+		)
+		.await;
+		assert_eq!(results[0].status, "OK", "kv_get_value: {:?}", results[0].result);
+		assert_eq!(results[0].result, serde_json::json!(42));
+
+		// The other tenant must not.
+		let results = sql_query(
+			&addr,
+			ns_b,
+			db_b,
+			"RETURN silo::surrealdb::demo::<1.0.0>::kv_get_value('tenant_secret');",
+		)
+		.await;
+		assert_eq!(results[0].status, "OK", "kv_get_value: {:?}", results[0].result);
+		assert_eq!(
+			results[0].result,
+			serde_json::Value::Null,
+			"silo module state leaked across the namespace/database boundary"
+		);
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn module_silo_state_is_per_database() -> Result<(), Box<dyn std::error::Error>> {
+		check_silo_state_is_per_database(&DEMO_DIR.canonical).await
 	}
 
 	// -------------------------------------------------------------------
