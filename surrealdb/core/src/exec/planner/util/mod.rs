@@ -24,7 +24,8 @@ pub(crate) use conditions::{
 	BruteForceKnnVector, all_value_sources, extract_bruteforce_knn, extract_matches_context,
 	extract_record_id_point_lookup, extract_table_from_matches, has_knn_k_operator,
 	has_knn_ktree_operator, has_knn_operator, has_top_level_or, strip_fts_condition,
-	strip_index_conditions, strip_knn_from_condition, strip_union_index_conditions,
+	strip_index_conditions, strip_knn_and_matches_from_condition, strip_knn_from_condition,
+	strip_union_index_conditions,
 };
 pub(crate) use fields::{
 	check_forbidden_group_by_params, derive_field_name, idiom_to_field_name, idiom_to_field_path,

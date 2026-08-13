@@ -865,6 +865,37 @@ impl DistanceExt for Distance {
 	}
 }
 
+/// #548 exact tier: the query vector converted through the index's vector
+/// type, mirroring the conversion (including the dimension check) that
+/// `knn_search` applies before a graph search.
+pub fn typed_query_vector(
+	vector_type: VectorType,
+	dimension: usize,
+	pt: &[Number],
+) -> Result<Vector> {
+	let vector = Vector::try_from_vector(vector_type, pt)?;
+	vector.check_dimension(dimension)?;
+	Ok(vector)
+}
+
+/// #548 exact tier: convert a record's raw vector through the index's vector
+/// type and score it against the (already converted) query vector — exactly
+/// how the graph search scores stored vectors, so reduced-precision index
+/// types (F32/F16/I8/...) rank identically across tiers. `None` when the raw
+/// values cannot be represented in the vector type or the dimension does not
+/// match; such a record could not have been indexed as-is either.
+pub fn score_raw_vector(
+	distance: &Distance,
+	vector_type: VectorType,
+	dimension: usize,
+	query: &Vector,
+	raw: &[Number],
+) -> Option<f64> {
+	let record = Vector::try_from_vector(vector_type, raw).ok()?;
+	record.check_dimension(dimension).ok()?;
+	Some(distance.calculate(&record, query))
+}
+
 pub fn distance_compute(d: &Distance, v1: &Vec<Number>, v2: &Vec<Number>) -> Result<Number> {
 	use surrealdb_runtime::util::math::ToFloat;
 	use surrealdb_runtime::util::math::vector::{

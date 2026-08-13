@@ -3,6 +3,7 @@ use std::sync::Arc;
 use ahash::{HashMap, HashSet};
 use anyhow::Result;
 use reblessive::tree::Stk;
+use roaring::RoaringTreemap;
 use surrealdb_catalog::providers::CachePolicy;
 
 use crate::IndexKeyBase;
@@ -10,7 +11,7 @@ use crate::catalog::providers::TableProvider;
 use crate::catalog::{Record, TableId};
 use crate::docids::DocId;
 use crate::trees::gate::{
-	CachedTableSelect, CandidateCondition, check_cached_table_select_for_doc,
+	CachedTableSelect, CandidateCondition, CandidateFetchCounter, check_cached_table_select_for_doc,
 };
 use crate::trees::hnsw::VectorId;
 use crate::trees::hnsw::cache::VectorCache;
@@ -36,8 +37,10 @@ pub(super) struct HnswTruthyDocumentFilter<'a> {
 	table_id: TableId,
 	/// Shared HNSW cache used for compact document ID resolution.
 	vector_cache: VectorCache,
-	/// The filter condition to evaluate.
-	cond: Arc<dyn CandidateCondition + 'a>,
+	/// The filter condition to evaluate. `None` runs the filter in
+	/// permission-only mode: a candidate the permission gate admits is truthy
+	/// by definition.
+	cond: Option<Arc<dyn CandidateCondition + 'a>>,
 	/// Pending generation captured at lookup start, used to reject stale doc-id cache entries.
 	pending_generation: Option<u64>,
 	/// Cache of previously evaluated filter results.
@@ -47,6 +50,9 @@ pub(super) struct HnswTruthyDocumentFilter<'a> {
 	/// share the indexed table, so one resolution serves the lifetime of the
 	/// filter.
 	permission: CachedTableSelect<'a>,
+	/// Counter for the candidates this filter fetches and evaluates
+	/// in-traversal. `None` when the driving executor reports no metrics.
+	metrics: Option<Arc<dyn CandidateFetchCounter>>,
 }
 
 impl<'a> HnswTruthyDocumentFilter<'a> {
@@ -54,9 +60,10 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 		ikb: IndexKeyBase,
 		table_id: TableId,
 		vector_cache: VectorCache,
-		cond: Arc<dyn CandidateCondition + 'a>,
+		cond: Option<Arc<dyn CandidateCondition + 'a>>,
 		pending_generation: Option<u64>,
 		select_gate: CachedTableSelect<'a>,
+		metrics: Option<Arc<dyn CandidateFetchCounter>>,
 	) -> Self {
 		Self {
 			ikb,
@@ -66,17 +73,36 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 			pending_generation,
 			cache: Default::default(),
 			permission: select_gate,
+			metrics,
 		}
 	}
 
 	/// Returns `true` if any of the given document IDs satisfies the filter condition.
+	///
+	/// When an `allow_list` is provided (#548), document IDs outside it are
+	/// skipped without fetching their record: an element must be admitted by
+	/// a document that itself passes the bitmap, never by a sibling document
+	/// that happens to share the same vector. Docs in `pending_docs` are
+	/// skipped for the same reason — the pending scan is their source of
+	/// truth and result materialization suppresses them, so they must not
+	/// admit their (stale) graph element either.
 	pub(super) async fn check_any_doc_truthy(
 		&mut self,
 		ctx: &HnswContext<'_>,
 		stk: &mut Stk,
 		doc_ids: Ids64,
+		pending_docs: Option<&RoaringTreemap>,
+		allow_list: Option<&RoaringTreemap>,
 	) -> Result<bool> {
 		for doc_id in doc_ids.iter() {
+			if pending_docs.is_some_and(|pending| pending.contains(doc_id)) {
+				continue;
+			}
+			if let Some(allow) = allow_list
+				&& !allow.contains(doc_id)
+			{
+				continue;
+			}
 			if self.check_vector_id_truthy(ctx, stk, VectorId::DocId(doc_id)).await? {
 				return Ok(true);
 			}
@@ -213,10 +239,18 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 				Arc::new(RecordId::new(self.ikb.table().clone(), key.as_ref().clone()))
 			}
 		};
+		// One in-traversal candidate record evaluation (filter-cache misses
+		// only — a cached verdict returned above involved no new fetch). This
+		// counts evaluations, not KV reads: the record read below may be a
+		// transaction-cache hit (prefetch batches warm it), and the candidate
+		// is counted even if that read subsequently errors.
+		if let Some(metrics) = &self.metrics {
+			metrics.record_fetch();
+		}
 		let record = Self::is_record_truthy(
 			ctx,
 			stk,
-			self.cond.as_ref(),
+			self.cond.as_deref(),
 			Arc::clone(&rid),
 			&self.permission,
 		)
@@ -228,10 +262,13 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 
 	/// Fetches a record and evaluates the filter condition against it.
 	/// Returns the record data if truthy, or `None` otherwise.
+	///
+	/// A `None` condition means permission-only mode: a record that passes the
+	/// SELECT-permission gate is truthy by definition.
 	async fn is_record_truthy(
 		ctx: &HnswContext<'_>,
 		stk: &mut Stk,
-		cond: &dyn CandidateCondition,
+		cond: Option<&dyn CandidateCondition>,
 		rid: Arc<RecordId>,
 		permission: &CachedTableSelect<'_>,
 	) -> Result<Option<Arc<Record>>> {
@@ -247,7 +284,11 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 		if !check_cached_table_select_for_doc(stk, permission, &rid, &val).await? {
 			return Ok(None);
 		}
-		if cond.matches(stk, &rid, &val).await? {
+		let truthy = match cond {
+			Some(cond) => cond.matches(stk, &rid, &val).await?,
+			None => true,
+		};
+		if truthy {
 			return Ok(Some(val));
 		}
 		Ok(None)
@@ -256,13 +297,6 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 	/// Remove a vector id that has been evicted from the knn result
 	pub(super) fn expire(&mut self, id: &VectorId) {
 		self.cache.remove(id);
-	}
-
-	/// Remove a list of vector ids that have been evicted from the knn result
-	pub(super) fn expires(&mut self, ids: &[VectorId]) {
-		for id in ids {
-			self.cache.remove(id);
-		}
 	}
 
 	/// Consumes the filter and returns the accumulated result cache.

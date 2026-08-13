@@ -20,7 +20,7 @@ use crate::trees::diskann::cache::DiskAnnCache;
 use crate::trees::diskann::docs::DiskAnnDocs;
 use crate::trees::diskann::index::DiskAnnContext;
 use crate::trees::gate::{
-	CachedTableSelect, CandidateCondition, check_cached_table_select_for_doc,
+	CachedTableSelect, CandidateCondition, CandidateFetchCounter, check_cached_table_select_for_doc,
 };
 use crate::trees::hnsw::VectorId;
 use crate::val::RecordId;
@@ -38,8 +38,10 @@ pub(super) struct DiskAnnTruthyDocumentFilter<'a> {
 	diskann_cache: DiskAnnCache,
 	/// Pending generation captured at lookup start, used to reject stale doc-id cache entries.
 	pending_generation: Option<u64>,
-	/// Condition applied to candidate records.
-	cond: Arc<dyn CandidateCondition + 'a>,
+	/// Condition applied to candidate records. `None` runs the filter in
+	/// permission-only mode: a candidate the permission gate admits is truthy
+	/// by definition.
+	cond: Option<Arc<dyn CandidateCondition + 'a>>,
 	/// Query-local truthy/missing cache keyed by vector owner.
 	cache: FilterCache,
 	/// Table SELECT permission gate, supplied by the executor driving the
@@ -47,6 +49,9 @@ pub(super) struct DiskAnnTruthyDocumentFilter<'a> {
 	/// share the indexed table, so one resolution serves the lifetime of the
 	/// filter.
 	permission: CachedTableSelect<'a>,
+	/// Counter for the candidates this filter fetches and evaluates
+	/// in-traversal. `None` when the driving executor reports no metrics.
+	metrics: Option<Arc<dyn CandidateFetchCounter>>,
 }
 
 impl<'a> DiskAnnTruthyDocumentFilter<'a> {
@@ -56,8 +61,9 @@ impl<'a> DiskAnnTruthyDocumentFilter<'a> {
 		table_id: TableId,
 		diskann_cache: DiskAnnCache,
 		pending_generation: Option<u64>,
-		cond: Arc<dyn CandidateCondition + 'a>,
+		cond: Option<Arc<dyn CandidateCondition + 'a>>,
 		select_gate: CachedTableSelect<'a>,
+		metrics: Option<Arc<dyn CandidateFetchCounter>>,
 	) -> Self {
 		Self {
 			ikb,
@@ -67,6 +73,7 @@ impl<'a> DiskAnnTruthyDocumentFilter<'a> {
 			cond,
 			cache: Default::default(),
 			permission: select_gate,
+			metrics,
 		}
 	}
 
@@ -101,10 +108,18 @@ impl<'a> DiskAnnTruthyDocumentFilter<'a> {
 				Arc::new(RecordId::new(self.ikb.table().clone(), key.as_ref().clone()))
 			}
 		};
+		// One in-traversal candidate record evaluation (filter-cache misses
+		// only — a cached verdict returned above involved no new fetch). This
+		// counts evaluations, not KV reads: the record read below may be a
+		// transaction-cache hit (prefetch batches warm it), and the candidate
+		// is counted even if that read subsequently errors.
+		if let Some(metrics) = &self.metrics {
+			metrics.record_fetch();
+		}
 		let record = Self::is_record_truthy(
 			ctx,
 			stk,
-			self.cond.as_ref(),
+			self.cond.as_deref(),
 			Arc::clone(&rid),
 			&self.permission,
 		)
@@ -210,10 +225,13 @@ impl<'a> DiskAnnTruthyDocumentFilter<'a> {
 	}
 
 	/// Evaluates the SQL condition against a fetched record and returns the record on success.
+	///
+	/// A `None` condition means permission-only mode: a record that passes the
+	/// SELECT-permission gate is truthy by definition.
 	async fn is_record_truthy(
 		ctx: &DiskAnnContext<'_>,
 		stk: &mut Stk,
-		cond: &dyn CandidateCondition,
+		cond: Option<&dyn CandidateCondition>,
 		rid: Arc<RecordId>,
 		permission: &CachedTableSelect<'_>,
 	) -> Result<Option<Arc<Record>>> {
@@ -230,7 +248,11 @@ impl<'a> DiskAnnTruthyDocumentFilter<'a> {
 		if !check_cached_table_select_for_doc(stk, permission, &rid, &val).await? {
 			return Ok(None);
 		}
-		if cond.matches(stk, &rid, &val).await? {
+		let truthy = match cond {
+			Some(cond) => cond.matches(stk, &rid, &val).await?,
+			None => true,
+		};
+		if truthy {
 			return Ok(Some(val));
 		}
 		Ok(None)

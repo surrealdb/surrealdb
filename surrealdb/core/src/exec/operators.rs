@@ -57,7 +57,7 @@ pub use info::{
 };
 pub use join::{HashJoin, JoinType};
 pub use knn_topk::KnnTopK;
-pub(crate) use knn_topk::KnnVectorSource;
+pub(crate) use knn_topk::{KnnTopKHeap, KnnVectorSource, extract_vector};
 pub use let_plan::LetPlan;
 pub use limit::Limit;
 pub use mutate::{DeleteBinding, DrainSink, InsertGraph, SingleRowScan, UpdateBinding};
@@ -66,9 +66,9 @@ pub use project::{FieldSelection, Project, Projection, SelectProject};
 pub use project_value::ProjectValue;
 pub use recursion::RecursionOp;
 pub use r#return::ReturnPlan;
-pub(crate) use scan::BitmapNode;
 // Scan operators (storage I/O)
 pub use scan::CountScan;
+pub(crate) use scan::{BitmapNode, KnnPrefilter};
 pub use scan::{
 	BitmapResolve, DynamicScan, EdgeTableSpec, EmptyScan, FullTextScan, GraphEdgeScan,
 	GraphScanOutput, IndexScan, KnnScan, RecordIdScan, ReferenceScan, ReferenceScanOutput,

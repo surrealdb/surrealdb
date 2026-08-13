@@ -240,7 +240,9 @@ impl BitmapNode {
 					// The first child anchors the intersection: it is drained
 					// without a budget so the AND always has a base. Later
 					// children that overflow are dropped — the residual WHERE
-					// filter enforces their predicate per surviving row.
+					// filter enforces their predicate per surviving row. In
+					// strict mode nothing may be dropped: any overflow
+					// invalidates the whole evaluation.
 					let mut acc: Option<RoaringTreemap> = None;
 					for (i, child) in children.iter().enumerate() {
 						match child.build_bitmap(bctx, anchored && i == 0).await? {
@@ -263,6 +265,9 @@ impl BitmapNode {
 								if acc.as_ref().is_some_and(|a| a.is_empty()) {
 									break;
 								}
+							}
+							BranchBitmap::Overflow if bctx.strict => {
+								return Ok(BranchBitmap::Overflow);
 							}
 							BranchBitmap::Overflow => continue,
 						}
@@ -305,11 +310,18 @@ impl BitmapNode {
 							// A dropped subtraction only widens the candidate
 							// set (the residual `NOT ...` filter still
 							// applies), so the subtract side is never anchored.
-							if !acc.is_empty()
-								&& let BranchBitmap::Ready(sub) =
-									subtract.build_bitmap(bctx, false).await?
-							{
-								acc -= sub;
+							// In strict mode a subtraction overflow invalidates
+							// the evaluation like any other branch (unreachable
+							// for v1 KNN prefilter trees, which carry no NOTs —
+							// kept airtight regardless).
+							if !acc.is_empty() {
+								match subtract.build_bitmap(bctx, false).await? {
+									BranchBitmap::Ready(sub) => acc -= sub,
+									BranchBitmap::Overflow if bctx.strict => {
+										return Ok(BranchBitmap::Overflow);
+									}
+									BranchBitmap::Overflow => {}
+								}
 							}
 							BranchBitmap::Ready(acc)
 						}
@@ -355,6 +367,7 @@ impl BitmapNode {
 			doc_ids: &doc_ids,
 			// `0` disables the drained-entry budget: exact mode.
 			budget: 0,
+			strict: false,
 		};
 		match self.build_bitmap(&bctx, true).await? {
 			BranchBitmap::Ready(bitmap) => Ok(bitmap.len()),
@@ -362,6 +375,49 @@ impl BitmapNode {
 			BranchBitmap::Overflow => Err(ControlFlow::Err(anyhow::anyhow!(
 				"An exact bitmap plan overflowed its branch budget"
 			))),
+		}
+	}
+
+	/// Evaluate the tree into a KNN allow-list bitmap (#548, pre-filtered
+	/// vector search).
+	///
+	/// Strict and budget-bounded: each branch is one covered WHERE conjunct
+	/// already dropped from the scan's in-traversal residual, so no branch may
+	/// be dropped (a widened bitmap would admit candidates that fail the
+	/// covered conjuncts, letting them consume top-K slots). No branch is
+	/// anchored either — the allow-list is an optimization, never required for
+	/// the plan to produce rows, so nothing may drain unbounded. Any branch
+	/// exceeding `budget` therefore disables the whole prefilter — `Ok(None)`
+	/// — and the caller falls back to full in-traversal filtering (past the
+	/// budget the filter is non-selective enough for that path to be
+	/// acceptable).
+	pub(crate) async fn build_allowlist(
+		&self,
+		ctx: &ExecutionContext,
+		table: &TableName,
+		budget: usize,
+	) -> std::result::Result<Option<RoaringTreemap>, ControlFlow> {
+		// The planner never attaches a prefilter to a versioned KNN query;
+		// this is the defense-in-depth backstop.
+		reject_versioned_execution(ctx)?;
+		let db_ctx = ctx.database().context("KNN prefilter requires database context")?;
+		let ns = db_ctx.ns_ctx.ns.namespace_id;
+		let db = db_ctx.db.database_id;
+		let txn = ctx.txn();
+		let doc_ids = TableDocIds::new(ns, db, table.clone());
+		let bctx = BitmapBuildContext {
+			ctx,
+			txn: txn.as_ref(),
+			ns,
+			db,
+			table,
+			doc_ids: &doc_ids,
+			budget,
+			strict: true,
+		};
+		match self.build_bitmap(&bctx, false).await? {
+			BranchBitmap::Ready(bitmap) => Ok(Some(bitmap)),
+			BranchBitmap::Overflow => Ok(None),
 		}
 	}
 
@@ -550,6 +606,13 @@ struct BitmapBuildContext<'a> {
 	doc_ids: &'a TableDocIds,
 	/// Per-branch drained-entry budget; `0` disables it.
 	budget: usize,
+	/// All-or-nothing mode (#548 KNN allow-lists): a branch overflow
+	/// invalidates the whole evaluation instead of being dropped. Dropping an
+	/// AND child (or an AND-NOT subtraction) widens the bitmap — safe when
+	/// the full WHERE is re-applied as a residual filter (#547 plans), but
+	/// wrong for an allow-list whose covered conjuncts were dropped from the
+	/// in-traversal residual.
+	strict: bool,
 }
 
 /// Physical operator that evaluates a bitmap candidate expression tree and
@@ -699,6 +762,7 @@ impl ExecOperator for BitmapResolve {
 				table: &table_name,
 				doc_ids: &doc_ids,
 				budget: *surrealdb_cnf::BITMAP_BRANCH_BUDGET,
+				strict: false,
 			};
 			let bitmap = match root.build_bitmap(&bctx, true).await? {
 				BranchBitmap::Ready(bitmap) => bitmap,

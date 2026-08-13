@@ -6,7 +6,9 @@
 use std::ops::Bound;
 use std::sync::Arc;
 
-use super::access_path::{AccessPath, BTreeAccess, BitmapPlan, IndexRef, select_access_path};
+use super::access_path::{
+	AccessPath, BTreeAccess, BitmapPlan, IndexRef, KnnPrefilterPlan, select_access_path,
+};
 use crate::catalog::{Index, IndexDefinition};
 use crate::exec::planner::util::try_literal_to_value;
 use crate::expr::operator::{MatchesOperator, NearestNeighbor, PrefixOperator};
@@ -62,9 +64,17 @@ impl<'a> IndexAnalyzer<'a> {
 			self.analyze_order(ordering, &mut candidates);
 		}
 
-		// Filter out indexes not allowed by WITH hints
+		// Filter out indexes not allowed by WITH hints. A KNN candidate is
+		// exempt: the KNN operator can only be computed by its KnnScan, so it
+		// must survive to `select_access_path`, whose must-drive rule
+		// overrides the hint (with a warning) — otherwise the operator lands
+		// in a per-row residual where it is never truthy and the query
+		// silently returns zero rows.
 		if let Some(With::Index(names)) = self.with_hints {
-			candidates.retain(|c| names.iter().any(|n| n.as_str() == c.index_ref.name.as_str()));
+			candidates.retain(|c| {
+				matches!(c.access, BTreeAccess::Knn { .. })
+					|| names.iter().any(|n| n.as_str() == c.index_ref.name.as_str())
+			});
 		}
 
 		// Merge half-bounded ranges on the same index into bounded ranges
@@ -276,7 +286,7 @@ impl<'a> IndexAnalyzer<'a> {
 	/// Returns `None` (caller falls back to the streaming plans) unless the
 	/// plan has at least two positive members, or one positive member plus a
 	/// subtraction. Order/limit/version gating is the caller's
-	/// responsibility; `not_exact_col` reports whether a column's declared
+	/// responsibility; `exact_col` reports whether a column's declared
 	/// field kind guarantees scalar values (array values fan out to one
 	/// index entry per element, making b-tree bitmaps over-approximate and
 	/// therefore unusable for subtraction).
@@ -284,7 +294,7 @@ impl<'a> IndexAnalyzer<'a> {
 		&self,
 		cond: Option<&Cond>,
 		candidates: &[IndexCandidate],
-		not_exact_col: &dyn Fn(&Idiom) -> bool,
+		exact_col: &dyn Fn(&Idiom) -> bool,
 	) -> Option<BitmapPlan> {
 		let cond = cond?;
 		// Explicit hints pin the plan (NOINDEX is handled before analysis).
@@ -292,8 +302,10 @@ impl<'a> IndexAnalyzer<'a> {
 			return None;
 		}
 		// A KNN operator must be consumed by its KnnScan (see
-		// `try_and_nested_or_union`); pre-filtered vector search is a
-		// separate follow-up (#548).
+		// `try_and_nested_or_union`); a KNN query's sibling conjuncts are
+		// fused by [`Self::try_knn_prefilter`] into the scan's allow-list
+		// bitmap instead (#548) — the query never becomes a plain
+		// `BitmapFusion` source.
 		if Self::expr_contains_knn(&cond.0) {
 			return None;
 		}
@@ -367,7 +379,7 @@ impl<'a> IndexAnalyzer<'a> {
 		let mut nots: Vec<BitmapPlan> = Vec::new();
 		for conjunct in &conjuncts {
 			if let Some(inner) = Self::as_negated_expr(conjunct)
-				&& let Some(node) = self.bitmap_exact_plan(inner, not_exact_col)
+				&& let Some(node) = self.bitmap_exact_plan(inner, exact_col)
 			{
 				nots.push(node);
 			}
@@ -425,8 +437,9 @@ impl<'a> IndexAnalyzer<'a> {
 
 	/// Whether a candidate can produce a bitmap branch: b-tree accesses need
 	/// entry doc-IDs, full-text needs the current format, KNN never
-	/// participates (#548), and a full-range scan (no WHERE selectivity)
-	/// contributes nothing to an intersection.
+	/// participates (its operator is consumed by the KnnScan the bitmap
+	/// feeds, see [`Self::try_knn_prefilter`]), and a full-range scan (no
+	/// WHERE selectivity) contributes nothing to an intersection.
 	fn bitmap_capable_candidate(c: &IndexCandidate) -> bool {
 		if c.empty {
 			return false;
@@ -636,7 +649,7 @@ impl<'a> IndexAnalyzer<'a> {
 	fn bitmap_exact_plan(
 		&self,
 		inner: &Expr,
-		not_exact_col: &dyn Fn(&Idiom) -> bool,
+		exact_col: &dyn Fn(&Idiom) -> bool,
 	) -> Option<BitmapPlan> {
 		// `NOT (B OR C)` — subtract the union when every branch is exact.
 		if let Expr::Binary {
@@ -648,7 +661,7 @@ impl<'a> IndexAnalyzer<'a> {
 			Self::flatten_or(inner, &mut branches);
 			let mut children = Vec::with_capacity(branches.len());
 			for branch in branches {
-				children.push(self.bitmap_exact_plan(branch, not_exact_col)?);
+				children.push(self.bitmap_exact_plan(branch, exact_col)?);
 			}
 			return Some(BitmapPlan::Or(children));
 		}
@@ -682,12 +695,106 @@ impl<'a> IndexAnalyzer<'a> {
 					BTreeAccess::FullText {
 						..
 					} => true,
-					_ => Self::candidate_pinned_columns(c).iter().all(not_exact_col),
+					_ => Self::candidate_pinned_columns(c).iter().all(exact_col),
 				}
 			})
 			.max_by_key(|c| c.score())
 			.as_ref()
 			.and_then(Self::bitmap_leaf_from_candidate)
+	}
+
+	/// Split a KNN query's stripped WHERE into an exact allow-list bitmap
+	/// plan and a true residual (#548, pre-filtered vector search).
+	///
+	/// Per conjunct of the AND chain:
+	/// - a conjunct containing a MATCHES operator joins the prefilter when it is exactly
+	///   bitmap-representable (its full-text index is online in the current format); otherwise it
+	///   is dropped entirely — MATCHES is not evaluable inside the ANN traversal (no query executor
+	///   there, it computes to `false` and would reject every candidate), so an uncovered MATCHES
+	///   is enforced only by the outer `Filter` re-applying the KNN-stripped WHERE;
+	/// - a negated conjunct always stays residual (no table-universe bitmap is maintained, and
+	///   index-NOT is inexact for records missing the field);
+	/// - any other conjunct joins the prefilter iff its truth set is *exactly* a candidate bitmap
+	///   ([`Self::bitmap_exact_plan`]). Exactness is mandatory: covered conjuncts are dropped from
+	///   the in-traversal filter, and a superset bitmap would let non-matching candidates consume
+	///   top-K slots (the outer `Filter` would drop them, silently returning fewer than k rows).
+	///
+	/// One covered conjunct suffices — unlike [`Self::try_bitmap_fusion`]'s
+	/// ≥ 2 rule — because it already eliminates in-traversal record fetches.
+	pub(crate) fn try_knn_prefilter(
+		&self,
+		stripped: &Cond,
+		exact_col: &dyn Fn(&Idiom) -> bool,
+	) -> Option<KnnPrefilterPlan> {
+		// Explicit hints pin the plan.
+		if self.with_hints.is_some() {
+			return None;
+		}
+		let mut conjuncts = Vec::new();
+		Self::flatten_and(&stripped.0, &mut conjuncts);
+		let mut covered: Vec<BitmapPlan> = Vec::new();
+		let mut residual: Vec<&Expr> = Vec::new();
+		for conjunct in conjuncts {
+			if Self::expr_contains_matches(conjunct) {
+				if let Some(leaf) = self.bitmap_exact_plan(conjunct, exact_col) {
+					covered.push(leaf);
+				}
+				// Not exactly coverable: excluded from the residual too (see
+				// the method doc) — the outer Filter enforces it.
+			} else if Self::as_negated_expr(conjunct).is_some() {
+				residual.push(conjunct);
+			} else if let Some(leaf) = self.bitmap_exact_plan(conjunct, exact_col) {
+				covered.push(leaf);
+			} else {
+				residual.push(conjunct);
+			}
+		}
+		if covered.is_empty() {
+			return None;
+		}
+		let root = if covered.len() == 1 {
+			covered.pop().expect("checked non-empty")
+		} else {
+			BitmapPlan::And(covered)
+		};
+		let residual = residual
+			.into_iter()
+			.cloned()
+			.reduce(|left, right| Expr::Binary {
+				left: Box::new(left),
+				op: BinaryOperator::And,
+				right: Box::new(right),
+			})
+			.map(Cond);
+		Some(KnnPrefilterPlan {
+			root,
+			residual,
+		})
+	}
+
+	/// Returns `true` if the expression tree contains a full-text MATCHES
+	/// operator. MATCHES needs a query executor and is not evaluable inside
+	/// an ANN traversal's record-fetch filter (it computes to `false` there),
+	/// so such conjuncts must never be pushed down as an in-traversal
+	/// residual (#548) — the outer `Filter` enforces them instead.
+	pub(crate) fn expr_contains_matches(expr: &Expr) -> bool {
+		match expr {
+			Expr::Binary {
+				left,
+				op,
+				right,
+			} => {
+				matches!(op, BinaryOperator::Matches(_))
+					|| Self::expr_contains_matches(left)
+					|| Self::expr_contains_matches(right)
+			}
+			Expr::Prefix {
+				expr: inner,
+				..
+			} => Self::expr_contains_matches(inner),
+			Expr::FunctionCall(call) => call.arguments.iter().any(Self::expr_contains_matches),
+			_ => false,
+		}
 	}
 
 	/// Maximum number of array elements to expand for `field IN [...]`.
@@ -1908,6 +2015,9 @@ impl IndexCandidate {
 				vector: vector.clone(),
 				k: *k,
 				ef: *ef,
+				// The prefilter is a plan-level concern; the SELECT planner
+				// attaches it after path selection (#548).
+				prefilter: None,
 			},
 			_ => AccessPath::BTreeScan {
 				index_ref: self.index_ref.clone(),
@@ -2141,7 +2251,7 @@ mod tests {
 		use crate::catalog::BTREE_ENTRY_DOC_IDS_FORMAT_VERSION;
 
 		/// A b-tree index at the doc-ID entry format (bitmap-capable).
-		fn idx_v2(id: u32, name: &str, cols: &[&str]) -> IndexDefinition {
+		pub(super) fn idx_v2(id: u32, name: &str, cols: &[&str]) -> IndexDefinition {
 			let mut def = idx_basic(id, name, cols);
 			def.format_version = BTREE_ENTRY_DOC_IDS_FORMAT_VERSION;
 			def
@@ -2939,6 +3049,120 @@ mod tests {
 			assert!(
 				a.try_and_nested_or_union(Some(&cond), crate::kvs::Direction::Forward).is_none(),
 				"a KNN operator in the condition must disable the nested-OR union"
+			);
+		}
+	}
+
+	// ------------------------------------------------------------------
+	// KNN prefilter split (#548)
+	// ------------------------------------------------------------------
+	mod knn_prefilter {
+		use super::bitmap_fusion::idx_v2;
+		use super::*;
+		use crate::catalog::{Distance, HnswParams, VectorType};
+		use crate::kvs::Direction;
+
+		fn idx_hnsw(id: u32, name: &str, cols: &[&str]) -> IndexDefinition {
+			idx_def(
+				id,
+				name,
+				cols,
+				Index::Hnsw(HnswParams {
+					dimension: 2,
+					distance: Distance::Euclidean,
+					vector_type: VectorType::F32,
+					m: 12,
+					m0: 24,
+					ml: 0.4.into(),
+					ef_construction: 150,
+					extend_candidates: false,
+					keep_pruned_connections: false,
+					use_hashed_vector: false,
+				}),
+			)
+		}
+
+		/// Split the KNN-stripped WHERE the way `try_knn_prefilter_plan` does.
+		fn split(az: &IndexAnalyzer<'_>, cond: &Cond, exact: bool) -> Option<KnnPrefilterPlan> {
+			let stripped = crate::exec::planner::util::strip_knn_from_condition(cond)
+				.expect("a non-KNN residual remains");
+			az.try_knn_prefilter(&stripped, &move |_| exact)
+		}
+
+		#[test]
+		fn covered_and_residual_conjuncts_split() {
+			let az =
+				analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_hnsw(2, "hn_vec", &["vec"])], None);
+			let cond = parse_cond("a = 1 AND unindexed = 2 AND vec <|2,100|> [0.0, 0.0]");
+			let plan = split(&az, &cond, true).expect("the equality on `a` is coverable");
+			assert!(
+				matches!(plan.root, BitmapPlan::BTree { .. }),
+				"single covered conjunct forms the bitmap root: {:?}",
+				plan.root
+			);
+			let residual = plan.residual.expect("the unindexed conjunct stays residual");
+			assert_eq!(surrealdb_types::ToSql::to_sql(&residual.0), "unindexed = 2");
+		}
+
+		#[test]
+		fn inexact_column_stays_residual() {
+			// Without a declared array-free field kind the equality is not
+			// provably exact, so nothing is covered and no prefilter forms.
+			let az =
+				analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_hnsw(2, "hn_vec", &["vec"])], None);
+			let cond = parse_cond("a = 1 AND vec <|2,100|> [0.0, 0.0]");
+			assert!(split(&az, &cond, false).is_none());
+		}
+
+		#[test]
+		fn negation_stays_residual() {
+			let az =
+				analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_hnsw(2, "hn_vec", &["vec"])], None);
+			let cond = parse_cond("a = 1 AND !(a = 2) AND vec <|2,100|> [0.0, 0.0]");
+			let plan = split(&az, &cond, true).expect("the positive equality is coverable");
+			let residual = plan.residual.expect("the negation stays residual");
+			assert!(
+				surrealdb_types::ToSql::to_sql(&residual.0).contains('!'),
+				"negation kept: {}",
+				surrealdb_types::ToSql::to_sql(&residual.0)
+			);
+		}
+
+		#[test]
+		fn uncoverable_matches_conjunct_excluded_from_residual() {
+			// MATCHES is not evaluable inside the ANN traversal; with no
+			// full-text index it cannot be covered either, so it must vanish
+			// from the split entirely (the outer Filter enforces it).
+			let az =
+				analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_hnsw(2, "hn_vec", &["vec"])], None);
+			let cond = parse_cond("a = 1 AND body @@ 'x' AND vec <|2,100|> [0.0, 0.0]");
+			let plan = split(&az, &cond, true).expect("the equality is coverable");
+			assert!(
+				plan.residual.is_none(),
+				"an uncoverable MATCHES must not become an in-traversal residual: {:?}",
+				plan.residual
+			);
+		}
+
+		#[test]
+		fn knn_candidate_drives_over_unique_equality() {
+			// #548 regression: the unique equality outscores KNN (1000 > 800)
+			// but a KNN operator can only be computed by its KnnScan, so the
+			// KNN candidate must drive unconditionally.
+			let az = analyzer(
+				vec![idx_uniq(1, "ix_email", &["email"]), idx_hnsw(2, "hn_vec", &["vec"])],
+				None,
+			);
+			let cond = parse_cond("email = 'a@x.com' AND vec <|2,100|> [0.0, 0.0]");
+			let candidates = az.analyze(Some(&cond), None);
+			let path = crate::exec::index::access_path::select_access_path(
+				candidates,
+				None,
+				Direction::Forward,
+			);
+			assert!(
+				matches!(path, AccessPath::KnnSearch { .. }),
+				"the KNN candidate must drive the plan: {path:?}"
 			);
 		}
 	}

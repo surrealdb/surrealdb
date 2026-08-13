@@ -6752,3 +6752,80 @@ async fn a_compaction_plan_prepared_before_a_wipe_cannot_apply() -> Result<()> {
 	assert_eq!(surviving, pendings.len(), "the rejected plan must leave every pending in place");
 	Ok(())
 }
+
+/// A pre-filtered KNN search (#548) whose WHERE is fully index-coverable
+/// performs zero record fetches inside the ANN search, on both the exact and
+/// the graph tier: EXPLAIN ANALYZE (unredacted under `Session::owner()`)
+/// reports the chosen `prefilter_tier` and no in-traversal `fetched:`
+/// counter. The contrast query filters on an indexed column with no declared
+/// field kind — not provably exact, so it stays an in-traversal residual and
+/// reports its per-candidate record fetches.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn knn_prefilter_performs_zero_in_traversal_fetches() -> Result<()> {
+	use surrealdb_types::Value as PublicValue;
+
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE FIELD category ON t TYPE string;
+		 DEFINE INDEX idx_category ON t FIELDS category;
+		 DEFINE INDEX idx_rawcat ON t FIELDS rawcat;
+		 DEFINE INDEX hn_pt ON t FIELDS point HNSW DIMENSION 1;",
+	)
+	.await?;
+	// 2200 category-'a' rows push that allow-list over the exact-tier
+	// threshold (default 2000) onto the graph tier; the 200 'b' rows stay on
+	// the exact tier.
+	execute_all(
+		&ds,
+		&session,
+		"FOR $i IN 0..2400 {
+			CREATE type::record('t', $i) SET
+				point = [ <float> $i ],
+				category = IF $i % 12 < 11 { 'a' } ELSE { 'b' },
+				rawcat = IF $i % 12 < 11 { 'a' } ELSE { 'b' };
+		};",
+	)
+	.await?;
+
+	let explain = |sql: &'static str| {
+		let ds = &ds;
+		let session = &session;
+		async move {
+			let mut results = ds.execute(sql, session, None).await?;
+			let value = results.remove(0).result?;
+			match value {
+				PublicValue::String(plan) => Ok::<String, anyhow::Error>(plan),
+				other => anyhow::bail!("unexpected EXPLAIN result: {other:?}"),
+			}
+		}
+	};
+
+	// Exact tier (200 members): zero in-traversal fetches.
+	let plan =
+		explain("EXPLAIN ANALYZE SELECT id FROM t WHERE category = 'b' AND point <|3,40|> [0f]")
+			.await?;
+	assert!(plan.contains("prefilter_tier: exact"), "expected exact tier:\n{plan}");
+	assert!(!plan.contains("fetched:"), "no in-traversal fetches expected:\n{plan}");
+
+	// Graph tier (2200 members): admission is pure bitmap membership — still
+	// zero in-traversal fetches.
+	let plan =
+		explain("EXPLAIN ANALYZE SELECT id FROM t WHERE category = 'a' AND point <|3,40|> [0f]")
+			.await?;
+	assert!(plan.contains("prefilter_tier: graph"), "expected graph tier:\n{plan}");
+	assert!(!plan.contains("fetched:"), "no in-traversal fetches expected:\n{plan}");
+
+	// Contrast: `rawcat` has no declared field kind, so its equality is not
+	// provably exact and remains an in-traversal residual — the filter
+	// fetches candidate records and says so.
+	let plan =
+		explain("EXPLAIN ANALYZE SELECT id FROM t WHERE rawcat = 'b' AND point <|3,40|> [0f]")
+			.await?;
+	assert!(!plan.contains("prefilter_tier"), "no prefilter expected:\n{plan}");
+	assert!(plan.contains("fetched:"), "in-traversal fetches expected:\n{plan}");
+	Ok(())
+}

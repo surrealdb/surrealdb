@@ -13,7 +13,7 @@
 
 use common::{LeafError, internal_todo};
 use fst::Error as FstError;
-use surrealdb_types::{Error as TypesError, ToSql};
+use surrealdb_types::{Error as TypesError, QueryError, ToSql};
 
 use crate::ft::MatchRef;
 use crate::val::RecordId;
@@ -69,6 +69,25 @@ pub enum Error {
 	/// A mapper path outside the configured allowlist was requested
 	#[error("File access denied: {0}")]
 	FileAccessDenied(String),
+
+	/// An ANN graph's in-memory state names an entry-point element whose
+	/// vector the reading transaction cannot see.
+	///
+	/// The graph state (entry point, layer versions) is held per process and
+	/// reconciled with the store by a state check before a search runs; the
+	/// element vectors are read from the transaction. A search that starts
+	/// from state which is ahead of its own snapshot — the writes that
+	/// introduced the entry point were rolled back, or the state check was
+	/// skipped — cannot reach the graph at all. Reloading the state, which a
+	/// retry does, resolves it.
+	#[error(
+		"Vector index {index_id} on table `{table}` cannot be searched: entry point element {element} has no vector in this transaction"
+	)]
+	AnnEntryPointUnreadable {
+		table: String,
+		index_id: u32,
+		element: u64,
+	},
 }
 
 impl LeafError for Error {
@@ -83,6 +102,13 @@ impl LeafError for Error {
 			| Error::AnalyzerError(_)
 			| Error::HighlightError(_)
 			| Error::FstError(_) => TypesError::internal(message),
+			// The graph state this search started from disagrees with its own
+			// snapshot, which is what a retry resolves: the next search
+			// reconciles the state before reading. Reported as a conflict so a
+			// client retries rather than surfacing it as a failed query.
+			Error::AnnEntryPointUnreadable {
+				..
+			} => TypesError::query(message, QueryError::TransactionConflict),
 			Error::InvalidVectorDimension {
 				..
 			}

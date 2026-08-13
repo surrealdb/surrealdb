@@ -1031,7 +1031,8 @@ impl HnswEntry {
 		ef: u32,
 		cond_filter: Option<KnnCondFilter<'_>>,
 	) -> Result<Self> {
-		let res = h.knn_search(ctx, stk, v, n as usize, ef as usize, cond_filter).await?;
+		// The legacy planner never builds an allow-list.
+		let res = h.knn_search(ctx, stk, v, n as usize, ef as usize, cond_filter, None).await?;
 		Ok(Self {
 			res,
 		})
@@ -1058,7 +1059,8 @@ impl DiskAnnEntry {
 		l: u32,
 		cond_filter: Option<KnnCondFilter<'_>>,
 	) -> Result<Self> {
-		let res = d.knn_search(ctx, stk, v, n as usize, l as usize, cond_filter).await?;
+		// The legacy planner never builds an allow-list.
+		let res = d.knn_search(ctx, stk, v, n as usize, l as usize, cond_filter, None).await?;
 		Ok(Self {
 			res,
 		})

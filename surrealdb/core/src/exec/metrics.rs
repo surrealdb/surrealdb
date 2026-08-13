@@ -68,6 +68,17 @@ pub(crate) struct OperatorMetrics {
 	/// Like `skipped_rows`, the scan accumulates per cursor batch and flushes
 	/// via [`OperatorMetrics::add_edges_scanned`].
 	edges_scanned: AtomicU64,
+	/// Candidate records fetched for per-candidate evaluation *inside* an ANN
+	/// search (the truthy-document filters' record fetch + permission gate +
+	/// cond evaluation), one per unique candidate evaluated. This counts
+	/// evaluations, not KV reads: the underlying record read may be served
+	/// from the transaction cache (the pendings scan and the neighbourhood
+	/// prefetch batch-warm it), and a candidate is counted even if its fetch
+	/// subsequently errors. The KNN prefilter (#548) exists to drive this to
+	/// zero for index-covered predicates — EXPLAIN ANALYZE renders it so that
+	/// claim is observable. Deliberately excludes the exact tier's bounded
+	/// resolve-stage fetches, which happen outside any traversal.
+	records_fetched: AtomicU64,
 }
 
 impl OperatorMetrics {
@@ -84,6 +95,7 @@ impl OperatorMetrics {
 			elapsed_ns: AtomicU64::new(0),
 			skipped_rows: AtomicU64::new(0),
 			edges_scanned: AtomicU64::new(0),
+			records_fetched: AtomicU64::new(0),
 		}
 	}
 
@@ -143,6 +155,17 @@ impl OperatorMetrics {
 		self.edges_scanned.fetch_add(n, Ordering::Relaxed);
 	}
 
+	/// Candidate records fetched for in-traversal evaluation so far.
+	pub(crate) fn records_fetched(&self) -> u64 {
+		self.records_fetched.load(Ordering::Relaxed)
+	}
+
+	/// Record `n` candidate records fetched for in-traversal evaluation by an
+	/// ANN search's truthy-document filter.
+	pub(crate) fn add_records_fetched(&self, n: u64) {
+		self.records_fetched.fetch_add(n, Ordering::Relaxed);
+	}
+
 	/// Record one batch of `rows` values, adding `delta_ns` to elapsed time.
 	fn record_batch(&self, rows: u64, delta_ns: u64) {
 		self.output_rows.fetch_add(rows, Ordering::Relaxed);
@@ -154,6 +177,15 @@ impl OperatorMetrics {
 	/// `Pending` or `None`).
 	fn record_elapsed(&self, delta_ns: u64) {
 		self.elapsed_ns.fetch_add(delta_ns, Ordering::Relaxed);
+	}
+}
+
+/// Lets an ANN truthy-document filter count its in-traversal candidate
+/// evaluations against the surrounding scan operator's metrics, without the
+/// index layer naming this one.
+impl crate::idx::trees::gate::CandidateFetchCounter for OperatorMetrics {
+	fn record_fetch(&self) {
+		self.add_records_fetched(1);
 	}
 }
 

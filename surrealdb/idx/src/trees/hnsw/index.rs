@@ -588,6 +588,12 @@ impl HnswIndex {
 	/// HNSW pending updates remain on the hot write path, so lookup scans them
 	/// conservatively instead of relying on a shared pending-state key that can
 	/// create write contention under concurrent indexing.
+	///
+	/// `allow_list` restricts candidate admission to the given doc-IDs (over
+	/// the table's shared doc-ID space) without fetching records; graph
+	/// traversal still expands through non-members so the search does not
+	/// disconnect. `None` leaves admission unrestricted.
+	#[expect(clippy::too_many_arguments)]
 	pub async fn knn_search(
 		&self,
 		env: &dyn IndexEnv,
@@ -596,6 +602,7 @@ impl HnswIndex {
 		k: usize,
 		ef: usize,
 		cond_filter: Option<KnnCondFilter<'_>>,
+		allow_list: Option<&RoaringTreemap>,
 	) -> Result<VecDeque<KnnIteratorResult>> {
 		let compaction_generation =
 			read_compaction_generation(&env.tx(), &self.ikb.new_hg_key()).await?;
@@ -608,6 +615,7 @@ impl HnswIndex {
 				f.cond,
 				compaction_generation,
 				f.select_gate,
+				f.metrics,
 			)
 		});
 		// Extract the vector
@@ -621,9 +629,10 @@ impl HnswIndex {
 
 		// Search in the pendings if any
 		let pending_docs =
-			self.search_pendings(&ctx, stk, &search, &mut filter, &mut builder).await?;
+			self.search_pendings(&ctx, stk, &search, &mut filter, allow_list, &mut builder).await?;
 		// Search in the graph
-		self.search_graph(&ctx, stk, &search, pending_docs, &mut filter, &mut builder).await?;
+		self.search_graph(&ctx, stk, &search, pending_docs, &mut filter, allow_list, &mut builder)
+			.await?;
 
 		// We build the final result: replacing DocId with RecordIds
 		let result = builder.collect();
@@ -682,7 +691,9 @@ impl HnswIndex {
 	/// Searches for nearest neighbors in the committed HNSW graph.
 	///
 	/// Acquires a read lock on the graph and performs KNN search, optionally
-	/// excluding documents that are present in `pending_docs`.
+	/// excluding documents that are present in `pending_docs` and restricting
+	/// admission to `allow_list` members (#548).
+	#[expect(clippy::too_many_arguments)]
 	pub(super) async fn search_graph(
 		&self,
 		ctx: &HnswContext<'_>,
@@ -690,32 +701,40 @@ impl HnswIndex {
 		search: &HnswSearch,
 		pending_docs: Option<RoaringTreemap>,
 		filter: &mut Option<HnswTruthyDocumentFilter<'_>>,
+		allow_list: Option<&RoaringTreemap>,
 		builder: &mut KnnResultBuilder,
 	) -> Result<()> {
 		let hnsw = self.hnsw.read().await;
-		// Do the search
-		if let Some(filter) = filter {
+		// Do the search. The allow-list routes through the filtered chain even
+		// without a truthy filter: the unfiltered chain suppresses elements
+		// from the traversal frontier itself, which is fine for a handful of
+		// pending docs but would disconnect the walk under a selective bitmap.
+		if filter.is_some() || allow_list.is_some() {
 			let neighbours = hnsw
-				.knn_search_with_filter(ctx, search, stk, filter, pending_docs.as_ref())
+				.knn_search_with_filter(ctx, search, stk, filter, pending_docs.as_ref(), allow_list)
 				.await?;
 			self.add_graph_results(
-				&ctx.tx,
+				ctx,
+				stk,
 				&hnsw,
 				neighbours,
 				pending_docs.as_ref(),
+				allow_list,
+				filter,
 				builder,
-				|evicted_docs| filter.expires(&evicted_docs),
 			)
 			.await
 		} else {
 			let neighbours = hnsw.knn_search(ctx, search, pending_docs.as_ref()).await?;
 			self.add_graph_results(
-				&ctx.tx,
+				ctx,
+				stk,
 				&hnsw,
 				neighbours,
 				pending_docs.as_ref(),
+				None,
+				filter,
 				builder,
-				|_| {},
 			)
 			.await
 		}
@@ -733,6 +752,7 @@ impl HnswIndex {
 		stk: &mut Stk,
 		search: &HnswSearch,
 		filter: &mut Option<HnswTruthyDocumentFilter<'_>>,
+		allow_list: Option<&RoaringTreemap>,
 		builder: &mut KnnResultBuilder,
 	) -> Result<Option<RoaringTreemap>> {
 		let mut all_existing_docs = RoaringTreemap::new();
@@ -765,6 +785,32 @@ impl HnswIndex {
 		.await?;
 		if all_existing_docs.is_empty() && non_deleted_docs.is_empty() {
 			return Ok(None);
+		}
+		// #548: drop pending candidates outside the allow-list before the
+		// prefetch below, so non-members are never fetched. Note the
+		// `all_existing_docs` suppression bitmap is deliberately NOT filtered:
+		// a pending doc must mask its stale graph entries whether or not it is
+		// allowed.
+		if let Some(allow) = allow_list {
+			let mut allowed = HashMap::default();
+			for (id, vectors) in non_deleted_docs {
+				let member = match &id {
+					VectorId::DocId(doc_id) => allow.contains(*doc_id),
+					VectorId::RecordKey(key) => {
+						match HnswDocs::get_doc_id(&self.ikb, &ctx.tx, key).await? {
+							Some(doc_id) => allow.contains(doc_id),
+							// A record with no doc-ID in the shared space has no
+							// entries in any doc-ID-carrying index, so the
+							// index-covered conjuncts cannot hold for it.
+							None => false,
+						}
+					}
+				};
+				if member {
+					allowed.insert(id, vectors);
+				}
+			}
+			non_deleted_docs = allowed;
 		}
 		// Warm the transaction record cache for the pending candidates in one
 		// batch, so the per-doc truthy checks below hit the cache instead of
@@ -855,47 +901,66 @@ impl HnswIndex {
 	///
 	/// `pending_docs` suppresses compacted graph hits for documents with newer record-keyed pending
 	/// updates, so the exact pending scan remains the source of truth for those records.
-	async fn add_graph_results<F>(
+	///
+	/// `allow_list` (#548) and the truthy `filter` gate each doc individually:
+	/// element admission only requires *one* qualifying doc, so a multi-doc
+	/// element (identical vectors) may carry sibling docs that are outside the
+	/// bitmap, hidden by the SELECT permission, or failing the residual
+	/// condition — none of which may surface or consume top-K slots here.
+	/// Sibling verification is cache-first: the doc that admitted the element
+	/// is already verdict-cached, so single-doc elements (the common case)
+	/// re-check for free.
+	#[expect(clippy::too_many_arguments)]
+	async fn add_graph_results(
 		&self,
-		tx: &Transaction,
+		ctx: &HnswContext<'_>,
+		stk: &mut Stk,
 		hnsw: &HnswFlavor,
 		neighbors: Vec<(f64, ElementId)>,
 		pending_docs: Option<&RoaringTreemap>,
+		allow_list: Option<&RoaringTreemap>,
+		filter: &mut Option<HnswTruthyDocumentFilter<'_>>,
 		builder: &mut KnnResultBuilder,
-		mut evicted_docs_func: F,
-	) -> Result<()>
-	where
-		F: FnMut(Vec<VectorId>),
-	{
+	) -> Result<()> {
 		for (e_dist, e_id) in neighbors {
 			if !builder.check_add(e_dist) {
 				continue;
 			}
 			let docs = if let Some(docs) = self.vec_docs.get_cached_doc_set(e_id).await {
 				Some(docs)
-			} else if let Some(v) = hnsw.get_vector(tx, &e_id).await? {
-				self.vec_docs.get_docs_by_element(tx, e_id, &v).await?
+			} else if let Some(v) = hnsw.get_vector(&ctx.tx, &e_id).await? {
+				self.vec_docs.get_docs_by_element(&ctx.tx, e_id, &v).await?
 			} else {
 				None
 			};
 			if let Some(docs) = docs {
-				let evicted_docs = if let Some(pending_docs) = pending_docs {
-					let mut evicted_docs = Vec::with_capacity(1);
+				if pending_docs.is_some() || allow_list.is_some() || filter.is_some() {
 					for doc_id in docs.iter() {
-						if pending_docs.contains(doc_id) {
+						if let Some(pending_docs) = pending_docs
+							&& pending_docs.contains(doc_id)
+						{
 							continue;
 						}
-						if let Some(evicted_id) =
-							builder.add_vector_id_result(e_dist, VectorId::DocId(doc_id))
+						if let Some(allow) = allow_list
+							&& !allow.contains(doc_id)
 						{
-							evicted_docs.push(evicted_id);
+							continue;
+						}
+						let id = VectorId::DocId(doc_id);
+						if let Some(filter) = filter.as_mut()
+							&& !filter.check_vector_id_truthy(ctx, stk, id.clone()).await?
+						{
+							continue;
+						}
+						if let Some(evicted_id) = builder.add_vector_id_result(e_dist, id)
+							&& let Some(filter) = filter.as_mut()
+						{
+							filter.expire(&evicted_id);
 						}
 					}
-					evicted_docs
 				} else {
-					builder.add_graph_result(e_dist, &docs)
-				};
-				evicted_docs_func(evicted_docs);
+					builder.add_graph_result(e_dist, &docs);
+				}
 			}
 		}
 		Ok(())

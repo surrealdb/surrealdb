@@ -20,7 +20,8 @@ use crate::exec::permission::{
 };
 use crate::exec::planner::util::{
 	SELECT_ITERATION_PARAMS, fold_condition_expressions, index_covers_ordering,
-	resolve_condition_params, resolve_projection_field_idioms, strip_knn_from_condition,
+	resolve_condition_params, resolve_projection_field_idioms,
+	strip_knn_and_matches_from_condition,
 };
 use crate::exec::pre_decode_filter::{PreDecodeFilterStatus, pre_decode_filter_for_execute};
 use crate::exec::{
@@ -768,10 +769,15 @@ async fn resolve_table_scan_stream(
 			vector,
 			k,
 			ef,
+			// Runtime-resolved access paths never carry a prefilter — the
+			// bitmap split is a plan-time-only analysis (#548).
+			prefilter: _,
 		}) => {
-			// Strip KNN operators from the resolved condition to get the
-			// residual (non-KNN predicates) for HNSW pushdown.
-			let residual_cond = resolved_cond.as_ref().and_then(strip_knn_from_condition);
+			// Strip KNN operators — and MATCHES conjuncts, which are not
+			// evaluable inside the ANN search — from the resolved condition
+			// to get the residual for HNSW pushdown.
+			let residual_cond =
+				resolved_cond.as_ref().and_then(strip_knn_and_matches_from_condition);
 			let knn_op = KnnScan::new(
 				index_ref,
 				vector,
@@ -781,6 +787,7 @@ async fn resolve_table_scan_stream(
 				cfg.version,
 				cfg.knn_context.clone(),
 				residual_cond,
+				None,
 				None,
 			);
 			let stream = knn_op.execute(ctx)?;
@@ -886,8 +893,9 @@ fn create_index_operator(
 			vector,
 			k,
 			ef,
+			prefilter: _,
 		} => {
-			let residual_cond = resolved_cond.and_then(strip_knn_from_condition);
+			let residual_cond = resolved_cond.and_then(strip_knn_and_matches_from_condition);
 			Arc::new(KnnScan::new(
 				index_ref.clone(),
 				vector.clone(),
@@ -897,6 +905,7 @@ fn create_index_operator(
 				cfg.version.clone(),
 				cfg.knn_context.clone(),
 				residual_cond,
+				None,
 				None,
 			))
 		}

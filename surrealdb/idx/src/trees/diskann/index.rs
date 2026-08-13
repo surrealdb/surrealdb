@@ -74,6 +74,13 @@ use crate::{
 const DISKANN_COMPACTION_MAX_PENDING_KEYS: usize = 1024;
 const DISKANN_COMPACTION_MAX_PENDING_BYTES: usize = 16 * 1024 * 1024;
 
+/// Ceiling for the allow-list over-query retries in [`DiskAnnIndex::search_graph`],
+/// as a multiple of the initial (already ef-boosted) search list. The list
+/// doubles per retry, so the worst case is three extra graph searches —
+/// bounded work that converts "the top-`l` overall contained too few allow-list
+/// members" from a truncated result into a converging one.
+const ALLOWLIST_OVERQUERY_CEILING_FACTOR: usize = 8;
+
 /// Exact pending key/value observed by a DiskANN compaction read phase.
 ///
 /// Held as bytes rather than as the key and value they decode to, for the reason
@@ -565,6 +572,9 @@ struct DiskAnnGraphSearch<'a, 'b> {
 	search: &'a DiskAnnSearch,
 	/// Document IDs with pending updates that should suppress compacted graph results.
 	pending_docs: Option<RoaringTreemap>,
+	/// Doc-IDs admitted by the index-covered WHERE conjuncts (#548). When set,
+	/// candidates outside the bitmap are rejected without any record fetch.
+	allow_list: Option<&'a RoaringTreemap>,
 	/// Optional condition filter applied before admitting candidates to the result builder.
 	filter: &'a mut Option<DiskAnnTruthyDocumentFilter<'b>>,
 	/// Shared result builder combining pending and graph candidates.
@@ -1253,6 +1263,10 @@ impl DiskAnnIndex {
 	/// Lookup scans pending updates unless the distributed pending-state guard is explicitly empty.
 	/// Compacted graph candidates are resolved through process-local caches before any remaining KV
 	/// reads, and final document IDs are materialized in one batch.
+	/// `allow_list` restricts candidate admission to the given doc-IDs (over
+	/// the table's shared doc-ID space) without fetching records. `None`
+	/// leaves admission unrestricted.
+	#[expect(clippy::too_many_arguments)]
 	pub async fn knn_search(
 		&self,
 		env: &dyn IndexEnv,
@@ -1261,6 +1275,7 @@ impl DiskAnnIndex {
 		k: usize,
 		ef: usize,
 		cond_filter: Option<KnnCondFilter<'_>>,
+		allow_list: Option<&RoaringTreemap>,
 	) -> Result<VecDeque<KnnIteratorResult>> {
 		let pending_state = Self::read_pending_state(&env.tx(), &self.ikb).await?;
 		let compaction_generation =
@@ -1273,6 +1288,7 @@ impl DiskAnnIndex {
 				compaction_generation,
 				f.cond,
 				f.select_gate,
+				f.metrics,
 			)
 		});
 		let vector = Vector::try_from_vector(self.vector_type, pt)?;
@@ -1287,7 +1303,15 @@ impl DiskAnnIndex {
 		// ranges for non-empty `!dy` shards and the legacy `!dr` range unconditionally; when
 		// nothing is pending the cost is a single empty legacy range probe.
 		let pending_docs = self
-			.search_pendings(&ctx, stk, &search, &mut filter, &mut builder, &pending_state)
+			.search_pendings(
+				&ctx,
+				stk,
+				&search,
+				&mut filter,
+				allow_list,
+				&mut builder,
+				&pending_state,
+			)
 			.await?;
 		self.search_graph(
 			&ctx,
@@ -1296,6 +1320,7 @@ impl DiskAnnIndex {
 				graph: &graph,
 				search: &search,
 				pending_docs,
+				allow_list,
 				filter: &mut filter,
 				builder: &mut builder,
 			},
@@ -1353,112 +1378,174 @@ impl DiskAnnIndex {
 		stk: &mut Stk,
 		state: DiskAnnGraphSearch<'_, '_>,
 	) -> Result<()> {
-		let results =
-			state.graph.search(ctx, &state.search.query, state.search.k, state.search.l).await?;
-		// Keep the distances returned by graph search instead of re-reading each vector only to
-		// recompute the same score. The remaining vector reads are only needed to resolve
-		// vector-to-document keys.
-		let candidates: Vec<_> = results
-			.into_iter()
-			.map(|(element_id, distance)| (element_id, self.graph_distance(distance)))
-			.filter(|(_, distance)| state.builder.check_add(*distance))
-			.collect();
-		if candidates.is_empty() {
-			return Ok(());
-		}
-		// Resolve candidate graph elements to document id sets before applying pending-update
-		// suppression and optional truthy filtering. Warm doc-set cache hits avoid re-reading the
-		// graph vector; misses fetch only the missing vectors before falling back to Dq/Dh
-		// mappings.
-		let mut docs = self.vec_docs.get_docs_by_element_batch(&ctx.tx, &candidates).await?;
-		// Candidates come back distance-ascending from the graph search; sort
-		// defensively (NaN-safe via `total_cmp`, a no-op when already ordered) so
-		// the `break` on a closed `check_add` gate below stays sound even if the
-		// upstream ordering contract ever changes. Keep the sort and the `break`s
-		// together — the early-exit is only valid because the list is sorted.
-		docs.sort_by(|a, b| a.1.total_cmp(&b.1));
-		// Prefetch candidate records in distance-ascending windows that grow
-		// geometrically. Each window warms the transaction record cache with one
-		// multi-get, so the per-candidate `get_record` calls in the eval pass
-		// become cache hits instead of individual round-trips. Windowing bounds
-		// the over-fetch: the eval pass tightens `check_add` as the result builder
-		// fills, and once the gate closes the remaining (farther) candidates are
-		// never fetched. A non-selective filter fills the builder inside the first
-		// window and stops there; a selective filter (the builder rarely fills)
-		// walks the whole list in O(log n) windows — a handful of multi-gets, far
-		// fewer round-trips than one fetch per candidate. The per-candidate eval
-		// body is unchanged (only iterated by reference), so results are identical.
-		let mut idx = 0usize;
-		let mut window =
-			(*surrealdb_cnf::DISKANN_FILTER_PREFETCH_MIN_CHUNK).max(state.search.k).max(1);
-		'windows: while idx < docs.len() {
-			let end = idx.saturating_add(window).min(docs.len());
-			let slice = &docs[idx..end];
-			// Warm this window's filter-eligible records in a single multi-get.
-			if let Some(filter) = state.filter.as_mut() {
-				let mut prefetch_ids: Vec<VectorId> = Vec::new();
-				for (_, distance, docs) in slice {
-					// Sorted ascending: a closed gate stays closed, so stop.
-					if !state.builder.check_add(*distance) {
-						break;
-					}
-					let Some(docs) = docs else {
-						continue;
-					};
-					for doc_id in docs.iter() {
-						if state
-							.pending_docs
-							.as_ref()
-							.is_some_and(|pending| pending.contains(doc_id))
-						{
-							continue;
+		// #548: with an allow-list, this is a *gated post-filter*, not filtered
+		// traversal — `graph.search` walks unaware of the bitmap and returns the
+		// top-`l` candidates overall, so a selective allow-list can leave fewer
+		// than k admissible docs in that list even when the graph holds plenty
+		// (HNSW, by contrast, gates admission during traversal and keeps walking
+		// until `ef` members are found). Compensate by over-querying: retry with
+		// a doubled search list until k allow-list members have been admitted,
+		// the graph is exhausted, the builder's distance gate closes (every
+		// remaining candidate is farther than the k already held), or the retry
+		// ceiling is reached. `admitted` guards retries against re-adding docs
+		// the builder already holds. The pure-residual path (no allow-list)
+		// keeps its pre-existing single-pass semantics.
+		let mut l = state.search.l;
+		let retry_ceiling = l.saturating_mul(ALLOWLIST_OVERQUERY_CEILING_FACTOR);
+		let mut admitted: HashSet<u64> = HashSet::default();
+		loop {
+			let results = state.graph.search(ctx, &state.search.query, state.search.k, l).await?;
+			// Fewer results than requested means the traversal ran dry: a wider
+			// list cannot surface anything new.
+			let graph_exhausted = results.len() < l;
+			let mut gate_closed = false;
+			// Keep the distances returned by graph search instead of re-reading each vector only to
+			// recompute the same score. The remaining vector reads are only needed to resolve
+			// vector-to-document keys.
+			let candidates: Vec<_> = results
+				.into_iter()
+				.map(|(element_id, distance)| (element_id, self.graph_distance(distance)))
+				.filter(|(_, distance)| state.builder.check_add(*distance))
+				.collect();
+			if !candidates.is_empty() {
+				// Resolve candidate graph elements to document id sets before applying
+				// pending-update suppression and optional truthy filtering. Warm doc-set cache
+				// hits avoid re-reading the graph vector; misses fetch only the missing vectors
+				// before falling back to Dq/Dh mappings.
+				let mut docs =
+					self.vec_docs.get_docs_by_element_batch(&ctx.tx, &candidates).await?;
+				// Candidates come back distance-ascending from the graph search; sort
+				// defensively (NaN-safe via `total_cmp`, a no-op when already ordered) so
+				// the `break` on a closed `check_add` gate below stays sound even if the
+				// upstream ordering contract ever changes. Keep the sort and the `break`s
+				// together — the early-exit is only valid because the list is sorted.
+				docs.sort_by(|a, b| a.1.total_cmp(&b.1));
+				// Prefetch candidate records in distance-ascending windows that grow
+				// geometrically. Each window warms the transaction record cache with one
+				// multi-get, so the per-candidate `get_record` calls in the eval pass
+				// become cache hits instead of individual round-trips. Windowing bounds
+				// the over-fetch: the eval pass tightens `check_add` as the result builder
+				// fills, and once the gate closes the remaining (farther) candidates are
+				// never fetched. A non-selective filter fills the builder inside the first
+				// window and stops there; a selective filter (the builder rarely fills)
+				// walks the whole list in O(log n) windows — a handful of multi-gets, far
+				// fewer round-trips than one fetch per candidate. The per-candidate eval
+				// body is unchanged (only iterated by reference), so results are identical.
+				let mut idx = 0usize;
+				let mut window =
+					(*surrealdb_cnf::DISKANN_FILTER_PREFETCH_MIN_CHUNK).max(state.search.k).max(1);
+				'windows: while idx < docs.len() {
+					let end = idx.saturating_add(window).min(docs.len());
+					let slice = &docs[idx..end];
+					// Warm this window's filter-eligible records in a single multi-get.
+					if let Some(filter) = state.filter.as_mut() {
+						let mut prefetch_ids: Vec<VectorId> = Vec::new();
+						for (_, distance, docs) in slice {
+							// Sorted ascending: a closed gate stays closed, so stop.
+							if !state.builder.check_add(*distance) {
+								break;
+							}
+							let Some(docs) = docs else {
+								continue;
+							};
+							for doc_id in docs.iter() {
+								if state
+									.pending_docs
+									.as_ref()
+									.is_some_and(|pending| pending.contains(doc_id))
+								{
+									continue;
+								}
+								// Bitmap-rejected candidates are never evaluated by the
+								// filter, so their records must not be prefetched either;
+								// neither are docs already admitted by an earlier
+								// over-query pass.
+								if state.allow_list.is_some_and(|allow| !allow.contains(doc_id))
+									|| admitted.contains(&doc_id)
+								{
+									continue;
+								}
+								prefetch_ids.push(VectorId::DocId(doc_id));
+							}
 						}
-						prefetch_ids.push(VectorId::DocId(doc_id));
+						filter.prefetch_records(ctx, &prefetch_ids).await?;
 					}
+					// Evaluate this window against the now-warm cache.
+					for (_, distance, docs) in slice {
+						// Sorted ascending: once the gate closes, every later candidate
+						// (here and in all later windows) fails — stop entirely.
+						if !state.builder.check_add(*distance) {
+							gate_closed = true;
+							break 'windows;
+						}
+						let Some(docs) = docs else {
+							continue;
+						};
+						for doc_id in docs.iter() {
+							if state
+								.pending_docs
+								.as_ref()
+								.is_some_and(|pending| pending.contains(doc_id))
+							{
+								continue;
+							}
+							// #548: allow-list admission — a doc outside the bitmap is
+							// rejected before any record fetch. DiskANN admission is
+							// per-doc (unlike HNSW's per-element queue), so this gate
+							// alone keeps disallowed sibling docs of a shared vector out
+							// of the result builder. A doc admitted by an earlier
+							// over-query pass is already in the builder.
+							if state.allow_list.is_some_and(|allow| !allow.contains(doc_id))
+								|| admitted.contains(&doc_id)
+							{
+								continue;
+							}
+							let id = VectorId::DocId(doc_id);
+							if let Some(filter) = state.filter.as_mut()
+								&& !filter.check_vector_id_truthy(ctx, stk, id.clone()).await?
+							{
+								continue;
+							}
+							if state.allow_list.is_some() {
+								admitted.insert(doc_id);
+							}
+							if let Some(evicted_id) =
+								state.builder.add_vector_id_result(*distance, id)
+								&& let Some(filter) = state.filter.as_mut()
+							{
+								filter.expire(&evicted_id);
+							}
+						}
+					}
+					idx = end;
+					window = window
+						.saturating_mul(2)
+						.min(*surrealdb_cnf::DISKANN_FILTER_PREFETCH_MAX_CHUNK);
 				}
-				filter.prefetch_records(ctx, &prefetch_ids).await?;
 			}
-			// Evaluate this window against the now-warm cache.
-			for (_, distance, docs) in slice {
-				// Sorted ascending: once the gate closes, every later candidate
-				// (here and in all later windows) fails — stop entirely.
-				if !state.builder.check_add(*distance) {
-					break 'windows;
-				}
-				let Some(docs) = docs else {
-					continue;
-				};
-				for doc_id in docs.iter() {
-					if state.pending_docs.as_ref().is_some_and(|pending| pending.contains(doc_id)) {
-						continue;
-					}
-					let id = VectorId::DocId(doc_id);
-					if let Some(filter) = state.filter.as_mut()
-						&& !filter.check_vector_id_truthy(ctx, stk, id.clone()).await?
-					{
-						continue;
-					}
-					if let Some(evicted_id) = state.builder.add_vector_id_result(*distance, id)
-						&& let Some(filter) = state.filter.as_mut()
-					{
-						filter.expire(&evicted_id);
-					}
-				}
+			// Over-query only applies to allow-list-gated searches, and stops as
+			// soon as retrying cannot improve the result set.
+			if state.allow_list.is_none()
+				|| admitted.len() >= state.search.k
+				|| gate_closed
+				|| graph_exhausted
+				|| l >= retry_ceiling
+			{
+				return Ok(());
 			}
-			idx = end;
-			window =
-				window.saturating_mul(2).min(*surrealdb_cnf::DISKANN_FILTER_PREFETCH_MAX_CHUNK);
+			l = l.saturating_mul(2).min(retry_ceiling);
 		}
-		Ok(())
 	}
 
 	/// Scores pending vectors exactly and returns document IDs that should suppress graph results.
+	#[expect(clippy::too_many_arguments)]
 	async fn search_pendings(
 		&self,
 		ctx: &DiskAnnContext<'_>,
 		stk: &mut Stk,
 		search: &DiskAnnSearch,
 		filter: &mut Option<DiskAnnTruthyDocumentFilter<'_>>,
+		allow_list: Option<&RoaringTreemap>,
 		builder: &mut KnnResultBuilder,
 		pending_state: &[Option<DiskAnnPendingState>],
 	) -> Result<Option<RoaringTreemap>> {
@@ -1491,6 +1578,32 @@ impl DiskAnnIndex {
 		.await?;
 		if all_existing_docs.is_empty() && non_deleted_docs.is_empty() {
 			return Ok(None);
+		}
+		// #548: drop pending candidates outside the allow-list before the
+		// prefetch below, so non-members are never fetched. Note the
+		// `all_existing_docs` suppression bitmap is deliberately NOT filtered:
+		// a pending doc must mask its stale graph entries whether or not it is
+		// allowed.
+		if let Some(allow) = allow_list {
+			let mut allowed = HashMap::default();
+			for (id, vectors) in non_deleted_docs {
+				let member = match &id {
+					VectorId::DocId(doc_id) => allow.contains(*doc_id),
+					VectorId::RecordKey(key) => {
+						match DiskAnnDocs::get_doc_id(&self.ikb, &ctx.tx, key).await? {
+							Some(doc_id) => allow.contains(doc_id),
+							// A record with no doc-ID in the shared space has no
+							// entries in any doc-ID-carrying index, so the
+							// index-covered conjuncts cannot hold for it.
+							None => false,
+						}
+					}
+				};
+				if member {
+					allowed.insert(id, vectors);
+				}
+			}
+			non_deleted_docs = allowed;
 		}
 		// Warm the transaction record cache for the pending candidates in one
 		// batch, so the per-doc truthy checks below hit the cache instead of
@@ -1597,6 +1710,7 @@ mod tests {
 
 	use super::*;
 	use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+	use crate::docids::TableDocIds;
 	use crate::test_env::{TestIndexEnv, TestIndexStore};
 	use crate::trees::diskann::cache::DiskAnnCache;
 
@@ -1718,7 +1832,7 @@ mod tests {
 		let query = f32_query(values);
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack
-			.enter(|stk| async { index.knn_search(&ctx, stk, &query, k, 8, None).await })
+			.enter(|stk| async { index.knn_search(&ctx, stk, &query, k, 8, None, None).await })
 			.finish()
 			.await?;
 		ctx.tx().cancel().await?;
@@ -1739,11 +1853,136 @@ mod tests {
 		let query = f32_query(values);
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack
-			.enter(|stk| async { index.knn_search(&ctx, stk, &query, 1, 8, None).await })
+			.enter(|stk| async { index.knn_search(&ctx, stk, &query, 1, 8, None, None).await })
 			.finish()
 			.await?;
 		ctx.tx().cancel().await?;
 		Ok(res.front().map(|(_, dist, _)| *dist))
+	}
+
+	/// #548 test helper: runs a KNN search with an optional allow-list and
+	/// returns the sorted numeric record keys of the results.
+	async fn knn_keys_with_allow(
+		index: &DiskAnnIndex,
+		ds: &TestIndexStore,
+		values: &[f32],
+		k: usize,
+		allow_list: Option<&RoaringTreemap>,
+	) -> Result<Vec<i64>> {
+		let ctx = new_ctx(ds, TransactionType::Read).await;
+		let query = f32_query(values);
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res = stack
+			.enter(|stk| async {
+				index.knn_search(&ctx, stk, &query, k, 8, None, allow_list).await
+			})
+			.finish()
+			.await?;
+		ctx.tx().cancel().await?;
+		let mut keys: Vec<i64> = res
+			.iter()
+			.map(|(rid, _, _)| match &rid.key {
+				RecordIdKey::Number(n) => *n,
+				other => panic!("unexpected record key: {other:?}"),
+			})
+			.collect();
+		keys.sort();
+		Ok(keys)
+	}
+
+	/// #548: the DiskANN graph tier post-filters `graph.search`'s top-`l`
+	/// list, so when every near candidate is outside the allow-list the
+	/// search must over-query (bounded list doubling) instead of returning
+	/// fewer than k rows while admissible vectors exist farther out.
+	#[tokio::test]
+	async fn diskann_allow_list_overqueries_past_disallowed_neighbours() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = ikb();
+		let index = DiskAnnIndex::new(
+			ikb.clone(),
+			TableId(4),
+			&params(VectorType::F32, Distance::Euclidean),
+			cache(),
+		)
+		.await?;
+		let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
+		// Records 1..=30 cluster around the query point but are all outside
+		// the allow-list; records 31..=40 are allowed but strictly farther,
+		// beyond the initial l=8 candidate list.
+		let mut allow = RoaringTreemap::new();
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			for i in 1..=40i64 {
+				let id = RecordIdKey::Number(i);
+				let doc = docids.resolve_or_assign(&ctx, &id).await?;
+				let v = if i <= 30 {
+					i as f32
+				} else {
+					1_000.0 + i as f32
+				};
+				if i > 30 {
+					allow.insert(doc);
+				}
+				index.index(&ctx, &id, None, Some(f32_content(&[v, v, v, v]))).await?;
+			}
+			ctx.tx().commit().await?;
+		}
+		while compact_once(&index, &ds, &ikb).await? {}
+		// k=5 with l=8: the top-8 overall are all disallowed, so a single
+		// gated pass would return nothing — the over-query retries must reach
+		// the allowed cluster and return the 5 nearest allowed records.
+		let res = knn_keys_with_allow(&index, &ds, &[0.0f32; 4], 5, Some(&allow)).await?;
+		assert_eq!(res, vec![31, 32, 33, 34, 35]);
+		Ok(())
+	}
+
+	/// #548: allow-list admission for DiskANN — gates pending updates, the
+	/// compacted graph (per doc, including the disallowed sibling of a shared
+	/// vector), and admits nothing on an empty allow-list.
+	#[tokio::test]
+	async fn diskann_allow_list_restricts_admission() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = ikb();
+		let index = DiskAnnIndex::new(
+			ikb.clone(),
+			TableId(4),
+			&params(VectorType::F32, Distance::Euclidean),
+			cache(),
+		)
+		.await?;
+		let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
+		// Records 1 and 2 share one vector; records 3 and 4 are distinct.
+		// Each record's shared doc-ID is resolved at write time, as the
+		// document pipeline does through any doc-ID-carrying sibling index.
+		let vectors: [[f32; 4]; 4] = [
+			[7.0, 7.0, 7.0, 7.0],
+			[7.0, 7.0, 7.0, 7.0],
+			[1.0, 1.0, 1.0, 1.0],
+			[2.0, 2.0, 2.0, 2.0],
+		];
+		let mut docs = Vec::new();
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			for (i, v) in vectors.iter().enumerate() {
+				let id = RecordIdKey::Number(i as i64 + 1);
+				docs.push(docids.resolve_or_assign(&ctx, &id).await?);
+				index.index(&ctx, &id, None, Some(f32_content(v))).await?;
+			}
+			ctx.tx().commit().await?;
+		}
+		let query = [0.0f32; 4];
+		let allow = RoaringTreemap::from_iter([docs[0], docs[2]]);
+		// Pending phase: only allow-members are admitted.
+		assert_eq!(knn_keys_with_allow(&index, &ds, &query, 4, Some(&allow)).await?, vec![1, 3]);
+		// Compacted phase: per-doc gating also holds for the graph — record 2
+		// shares its vector with admitted record 1 but must not surface.
+		while compact_once(&index, &ds, &ikb).await? {}
+		assert_eq!(knn_keys_with_allow(&index, &ds, &query, 4, Some(&allow)).await?, vec![1, 3]);
+		// No allow-list: unrestricted. Empty allow-list: nothing.
+		assert_eq!(knn_keys_with_allow(&index, &ds, &query, 4, None).await?, vec![1, 2, 3, 4]);
+		let empty = RoaringTreemap::new();
+		assert!(knn_keys_with_allow(&index, &ds, &query, 4, Some(&empty)).await?.is_empty());
+		Ok(())
 	}
 
 	async fn compact_once(

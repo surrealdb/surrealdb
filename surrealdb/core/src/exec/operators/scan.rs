@@ -31,6 +31,7 @@ pub use empty::EmptyScan;
 pub use fulltext::FullTextScan;
 pub use graph::{EdgeTableSpec, GraphEdgeScan, GraphScanOutput};
 pub use index::IndexScan;
+pub(crate) use knn::KnnPrefilter;
 pub use knn::KnnScan;
 pub(crate) use pipeline::determine_scan_direction;
 pub use record_id::RecordIdScan;

@@ -8,9 +8,9 @@ use std::sync::Arc;
 
 use super::IndexCandidate;
 use crate::catalog::IndexDefinition;
-use crate::expr::BinaryOperator;
 use crate::expr::operator::MatchesOperator;
 use crate::expr::with::With;
+use crate::expr::{BinaryOperator, Cond};
 use crate::kvs::Direction;
 use crate::val::{Number, Range, Value};
 
@@ -110,6 +110,10 @@ pub enum AccessPath {
 		k: u32,
 		/// ANN search expansion factor
 		ef: u32,
+		/// Pre-filtered vector search (#548): an exact bitmap plan over the
+		/// index-covered WHERE conjuncts, plus the true residual. `None` when
+		/// no conjunct is exactly index-coverable.
+		prefilter: Option<KnnPrefilterPlan>,
 	},
 
 	/// Roaring-bitmap candidate fusion over the table's shared doc-ID space
@@ -167,6 +171,28 @@ impl AccessPath {
 			}
 		)
 	}
+}
+
+/// Plan-level pre-filter for a KNN search (issue #548).
+///
+/// Built by [`crate::exec::index::analysis::IndexAnalyzer::try_knn_prefilter`]
+/// from the KNN-stripped WHERE clause: each conjunct whose truth set is
+/// *exactly* a candidate bitmap joins `root`; the others are re-ANDed into
+/// `residual`. At execute time the bitmap becomes the ANN search's allow-list
+/// and only the residual keeps the per-candidate record-fetch filter.
+#[derive(Debug, Clone)]
+pub struct KnnPrefilterPlan {
+	/// Bitmap plan whose truth set exactly equals the AND of the covered
+	/// conjuncts (see `IndexAnalyzer::bitmap_exact_plan` — exactness is
+	/// mandatory because the covered conjuncts are dropped from the
+	/// in-traversal filter, and an over-approximate bitmap would let
+	/// non-matching candidates consume top-K slots).
+	pub root: BitmapPlan,
+	/// KNN-stripped conjuncts NOT covered by `root`, re-ANDed. `None` when
+	/// the whole stripped WHERE is covered. MATCHES conjuncts never appear
+	/// here: they are not evaluable in-traversal (no query executor), so an
+	/// uncovered MATCHES is enforced only by the outer `Filter`.
+	pub residual: Option<Cond>,
 }
 
 /// Plan-level bitmap candidate expression tree (issue #547).
@@ -303,13 +329,34 @@ impl BTreeAccess {
 ///    - Prefer index that covers ORDER BY
 ///    - Otherwise, pick first matching index
 pub fn select_access_path(
-	candidates: Vec<IndexCandidate>,
+	mut candidates: Vec<IndexCandidate>,
 	with_hints: Option<&With>,
 	direction: Direction,
 ) -> AccessPath {
 	// WITH NOINDEX forces table scan
 	if matches!(with_hints, Some(With::NoIndex)) {
 		return AccessPath::TableScan;
+	}
+
+	// A KNN operator can only be computed by its KnnScan: every other driver
+	// leaves `<|k,ef|>` behind in a per-row residual where it is never
+	// truthy, silently returning zero rows. So when a KNN candidate exists it
+	// drives unconditionally — overriding score selection (a unique equality
+	// outscores KNN, 1000 > 800) and WITH INDEX hints, both of which would
+	// otherwise pick a silently-wrong plan. The sibling predicates feed the
+	// KNN prefilter (#548) or the pushed-down residual instead.
+	if let Some(pos) = candidates.iter().position(|c| matches!(c.access, BTreeAccess::Knn { .. })) {
+		// Overriding an explicit hint deserves a signal — mirroring the
+		// unmatched-hint warning below — so "why isn't my index being used"
+		// investigations have something to find.
+		if let Some(With::Index(names)) = with_hints {
+			tracing::warn!(
+				target: "surreal::index",
+				hinted = ?names,
+				"WITH INDEX hint overridden: a KNN operator can only be computed by its KnnScan",
+			);
+		}
+		return candidates.swap_remove(pos).to_access_path(direction);
 	}
 
 	// WITH INDEX names - find the hinted index
@@ -594,6 +641,7 @@ mod tests {
 					vector: vec![Number::Int(1)],
 					k: 3,
 					ef: 10,
+					prefilter: None,
 				},
 				AccessPath::Union {
 					paths: vec![btree(range(Bound::Unbounded, Bound::Unbounded))],

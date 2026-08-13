@@ -34,13 +34,14 @@ use super::util::{
 	idiom_to_field_name, index_covers_ordering, is_bounded_topk_downstream, is_count_all_eligible,
 	is_indexed_count_eligible, order_is_scan_compatible, resolve_condition_params,
 	resolve_param_value, resolve_projection_field_idioms, strip_fts_condition,
-	strip_index_conditions, strip_knn_from_condition, strip_union_index_conditions,
+	strip_index_conditions, strip_knn_and_matches_from_condition, strip_knn_from_condition,
+	strip_union_index_conditions,
 };
 use crate::catalog::Index;
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::err::{EngineError, Error};
 use crate::exec::index::access_path::{
-	AccessPath, BTreeAccess, BitmapPlan, IndexRef, select_access_path,
+	AccessPath, BTreeAccess, BitmapPlan, IndexRef, KnnPrefilterPlan, select_access_path,
 };
 use crate::exec::index::analysis::IndexAnalyzer;
 use crate::exec::operators::scan::determine_scan_direction;
@@ -1560,6 +1561,7 @@ impl<'ctx> Planner<'ctx> {
 						vector,
 						k,
 						ef,
+						prefilter,
 					} => {
 						return self
 							.plan_knn_search_source(
@@ -1568,6 +1570,7 @@ impl<'ctx> Planner<'ctx> {
 								vector,
 								k,
 								ef,
+								prefilter,
 								cond,
 								needed_fields,
 								version,
@@ -1854,15 +1857,41 @@ impl<'ctx> Planner<'ctx> {
 		vector: Vec<crate::val::Number>,
 		k: u32,
 		ef: u32,
+		prefilter: Option<KnnPrefilterPlan>,
 		cond: Option<&Cond>,
 		needed_fields: Option<std::collections::HashSet<String>>,
 		version: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 		table_ctx: Option<ResolvedTableContext>,
 		knn_ctx: Option<Arc<crate::exec::function::KnnContext>>,
 	) -> Result<PlannedSource, Error> {
-		use crate::exec::operators::KnnScan;
+		use crate::exec::operators::{KnnPrefilter, KnnScan};
 
-		let residual_cond = cond.and_then(strip_knn_from_condition);
+		// The in-traversal residual excludes MATCHES conjuncts: they are not
+		// evaluable inside the ANN search (no query executor — they compute
+		// to `false` and would reject every candidate). The outer Filter
+		// (`FilterAction::UseOriginal`) enforces them through their physical
+		// operator instead.
+		let residual_cond = cond.and_then(strip_knn_and_matches_from_condition);
+		// #548: compile the plan-level prefilter into its operator-side form —
+		// the bitmap node tree evaluated at execute time, plus the true
+		// residual both as a `Cond` (for the in-traversal filter) and as a
+		// physical expression (for the graph-free exact tier).
+		let prefilter = match prefilter {
+			Some(p) => {
+				let residual_phys = match &p.residual {
+					Some(c) => Some(self.physical_expr(c.0.clone()).await?),
+					None => None,
+				};
+				let node = bitmap_plan_to_node(p.root);
+				Some(KnnPrefilter {
+					node_dyn: Arc::clone(&node) as Arc<dyn ExecOperator>,
+					node,
+					residual: p.residual,
+					residual_phys,
+				})
+			}
+			None => None,
+		};
 		let mut scan = KnnScan::new(
 			index_ref,
 			vector,
@@ -1872,6 +1901,7 @@ impl<'ctx> Planner<'ctx> {
 			version,
 			knn_ctx,
 			residual_cond,
+			prefilter,
 			Some(needed_fields),
 		);
 		if let Some(tc) = table_ctx {
@@ -2282,8 +2312,11 @@ impl<'ctx> Planner<'ctx> {
 				vector,
 				k,
 				ef,
+				// Union branches carry no prefilter in v1: a branch is a
+				// single predicate, so there is nothing to cover.
+				prefilter: _,
 			} => {
-				let residual_cond = cond.and_then(strip_knn_from_condition);
+				let residual_cond = cond.and_then(strip_knn_and_matches_from_condition);
 				let mut scan = KnnScan::new(
 					index_ref,
 					vector,
@@ -2293,6 +2326,7 @@ impl<'ctx> Planner<'ctx> {
 					version.cloned(),
 					knn_ctx.cloned(),
 					residual_cond,
+					None,
 					None,
 				);
 				if let Some(tc) = table_ctx {
@@ -2840,7 +2874,32 @@ impl<'ctx> Planner<'ctx> {
 		// `determine_scan_direction` (which only handles ORDER BY id).
 		// This enables LIMIT pushdown and sort elimination for queries like
 		// `ORDER BY metadata.payload_metadata.modified DESC LIMIT 25`.
-		let (path, direction) = adjust_direction_for_order(path, order, direction);
+		let (mut path, direction) = adjust_direction_for_order(path, order, direction);
+
+		// Pre-filtered vector search (#548): evaluate the KNN query's exactly
+		// index-coverable conjuncts into an allow-list bitmap before the ANN
+		// search, instead of fetching every visited candidate's record.
+		// Gated like bitmap fusion: no WITH hints (the user pinned the plan)
+		// and no VERSION (doc-ID mappings are not time-travel-aware).
+		if let AccessPath::KnnSearch {
+			prefilter,
+			..
+		} = &mut path
+			&& with.is_none()
+			&& !has_version
+			&& *surrealdb_cnf::KNN_PREFILTER_ENABLED
+		{
+			*prefilter = self
+				.try_knn_prefilter_plan(
+					txn,
+					ns_def.namespace_id,
+					db_def.database_id,
+					table_name,
+					&analyzer,
+					analysis_cond,
+				)
+				.await;
+		}
 
 		// When the best single-index path is a full-range scan (ORDER BY
 		// only, no WHERE selectivity), also try a multi-index union for
@@ -2960,13 +3019,44 @@ impl<'ctx> Planner<'ctx> {
 		} else {
 			None
 		};
-		let not_exact_col = |col: &Idiom| -> bool {
+		let exact_col = |col: &Idiom| -> bool {
 			let Some(fields) = &fields else {
 				return false;
 			};
 			fields.iter().find(|fd| &fd.name == col).is_some_and(field_def_excludes_arrays)
 		};
-		analyzer.try_bitmap_fusion(Some(cond), candidates, &not_exact_col)
+		analyzer.try_bitmap_fusion(Some(cond), candidates, &exact_col)
+	}
+
+	/// Attempt to build the pre-filter plan for a KNN access path (#548).
+	///
+	/// The KNN-stripped WHERE is split per conjunct: conjuncts whose truth
+	/// set is exactly a candidate bitmap join the allow-list plan, the rest
+	/// stay as the true residual (see [`IndexAnalyzer::try_knn_prefilter`]).
+	/// The table's declared field kinds are resolved for the array-free
+	/// exactness gate — unlike [`Self::try_bitmap_fusion_plan`]'s lazy fetch,
+	/// every b-tree leaf needs the gate here, not only NOT subtractions. Any
+	/// catalog error simply disables the optimization — this is never a
+	/// correctness gate.
+	async fn try_knn_prefilter_plan(
+		&self,
+		txn: &Transaction,
+		ns_id: crate::catalog::NamespaceId,
+		db_id: crate::catalog::DatabaseId,
+		table_name: &TableName,
+		analyzer: &IndexAnalyzer<'_>,
+		cond: Option<&Cond>,
+	) -> Option<KnnPrefilterPlan> {
+		let stripped = cond.and_then(strip_knn_from_condition)?;
+		let fields = txn.all_tb_fields(ns_id, db_id, table_name, None).await.ok()?;
+		let exact_col = |col: &Idiom| -> bool {
+			fields
+				.iter()
+				.find(|fd| &fd.name == col)
+				.and_then(|fd| fd.field_kind.as_ref())
+				.is_some_and(field_kind_excludes_arrays)
+		};
+		analyzer.try_knn_prefilter(&stripped, &exact_col)
 	}
 }
 

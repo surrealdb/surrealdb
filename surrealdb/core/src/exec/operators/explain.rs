@@ -364,7 +364,9 @@ fn format_metrics_text(metrics: &OperatorMetrics, redact_volatile_explain_attrs:
 	// Scan-side counters that depend on how far the scan progressed (volatile
 	// like batches/elapsed), rendered only when non-zero. `scanned` is the
 	// denominator for graph-traversal filter selectivity (matched = rows);
-	// `skipped` is the TopK threshold-pushdown reject count.
+	// `skipped` is the TopK threshold-pushdown reject count; `fetched` is the
+	// count of candidate records evaluated inside an ANN search (#548 drives
+	// it to zero for index-covered predicates).
 	let mut extra = String::new();
 	let scanned = metrics.edges_scanned();
 	if scanned > 0 {
@@ -373,6 +375,10 @@ fn format_metrics_text(metrics: &OperatorMetrics, redact_volatile_explain_attrs:
 	let skipped = metrics.skipped_rows();
 	if skipped > 0 {
 		extra.push_str(&format!(", skipped: {}", skipped));
+	}
+	let fetched = metrics.records_fetched();
+	if fetched > 0 {
+		extra.push_str(&format!(", fetched: {}", fetched));
 	}
 	format!("rows: {}, batches: {}, elapsed: {}{}", rows, batches, elapsed_str, extra)
 }
@@ -496,6 +502,11 @@ fn format_analyze_plan_json(
 			if skipped > 0 {
 				metrics_obj.insert("skipped_rows", Value::from(skipped as i64));
 			}
+			// Deliberately rendered even at zero — unlike the counters above,
+			// `records_fetched: 0` is itself the claim worth asserting: an ANN
+			// search whose predicate was fully served by the allow-list bitmap
+			// performed no in-traversal record fetches (#548).
+			metrics_obj.insert("records_fetched", Value::from(metrics.records_fetched() as i64));
 		}
 		obj.insert("metrics", Value::Object(metrics_obj));
 	}

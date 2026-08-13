@@ -287,6 +287,14 @@ fn every_idx_variant() -> Vec<(&'static str, IdxError)> {
 			},
 		),
 		("FileAccessDenied", IdxError::FileAccessDenied("sample".to_string())),
+		(
+			"AnnEntryPointUnreadable",
+			IdxError::AnnEntryPointUnreadable {
+				table: "sample".to_string(),
+				index_id: 1,
+				element: 1,
+			},
+		),
 	]
 }
 

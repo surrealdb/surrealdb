@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::catalog::Record;
-use crate::trees::gate::{CachedTableSelect, CandidateCondition};
+use crate::trees::gate::{CachedTableSelect, CandidateCondition, CandidateFetchCounter};
 use crate::val::RecordId;
 
 #[cfg(diskann)]
@@ -30,5 +30,14 @@ pub struct KnnCondFilter<'a> {
 	/// condition sees it.
 	pub select_gate: CachedTableSelect<'a>,
 	/// The condition to evaluate against each admitted candidate record.
-	pub cond: Arc<dyn CandidateCondition + 'a>,
+	///
+	/// `None` runs the filter in permission-only mode: an admitted candidate is
+	/// truthy by definition. Used when the search's whole WHERE is already
+	/// satisfied by an allow-list bitmap, but a per-record SELECT permission
+	/// still has to be enforced per candidate so hidden rows never consume
+	/// top-K slots.
+	pub cond: Option<Arc<dyn CandidateCondition + 'a>>,
+	/// Counter for the candidates the filter fetches and evaluates
+	/// in-traversal. `None` when the driving executor reports no metrics.
+	pub metrics: Option<Arc<dyn CandidateFetchCounter>>,
 }

@@ -24,6 +24,7 @@ pub(crate) use surrealdb_datastore::values::vector::ElementId;
 use crate::IndexKeyBase;
 use crate::catalog::{HnswParams, TableId};
 use crate::env::IndexEnv;
+use crate::error::Error;
 use crate::trees::dynamicset::DynamicSet;
 use crate::trees::hnsw::cache::VectorCache;
 use crate::trees::hnsw::elements::HnswElements;
@@ -348,11 +349,19 @@ where
 			if q_level > top_up_layers {
 				self.state.enter_point = Some(q_id);
 			}
+			Ok(())
 		} else {
-			#[cfg(debug_assertions)]
-			unreachable!()
+			// The element's vector is already stored and its id already spent,
+			// but without a readable entry point there is nothing to connect it
+			// to: returning here would commit an element that is in no layer and
+			// so unreachable by every later search. The caller rolls the write
+			// back and reloads the state instead.
+			Err(anyhow::anyhow!(Error::AnnEntryPointUnreadable {
+				table: self.ikb.table().to_string(),
+				index_id: self.ikb.index().0,
+				element: ep_id,
+			}))
 		}
-		Ok(())
 	}
 
 	/// Persists the current graph state to the key-value store.
@@ -458,21 +467,38 @@ where
 		}
 	}
 
-	/// Performs a k-nearest neighbor search with a conditional document filter.
+	/// Performs a k-nearest neighbor search with a conditional document filter
+	/// and/or an allow-list bitmap gating candidate admission (#548).
 	///
 	/// Similar to [`knn_search`](Self::knn_search), but additionally applies a
-	/// user-defined filter to exclude non-matching documents from the results.
+	/// user-defined filter and/or the allow-list to exclude non-matching
+	/// documents from the results.
 	async fn knn_search_with_filter(
 		&self,
 		ctx: &HnswContext<'_>,
 		search: &HnswSearch,
 		stk: &mut Stk,
-		filter: &mut HnswTruthyDocumentFilter<'_>,
+		filter: &mut Option<HnswTruthyDocumentFilter<'_>>,
 		pending_docs: Option<&RoaringTreemap>,
+		allow_list: Option<&RoaringTreemap>,
 	) -> Result<Vec<(f64, ElementId)>> {
-		if let Some((ep_dist, ep_id)) = self.search_ep(ctx, &search.pt, pending_docs).await?
-			&& self.elements.get_vector(&ctx.tx, &ep_id).await?.is_some()
-		{
+		// The upper-layer descent keeps `pending_docs` only: it is pure
+		// navigation towards the layer-0 entry point, not result admission.
+		// Restricting it with the allow-list would strand the entry point
+		// under sparse filters and disconnect the traversal.
+		if let Some((ep_dist, ep_id)) = self.search_ep(ctx, &search.pt, pending_docs).await? {
+			// The descent only carries forward elements whose vectors it read,
+			// so re-reading this one in the same transaction resolves. Treated
+			// like an unreadable entry point rather than as no neighbours: the
+			// graph is unsearchable either way, and an empty result would be
+			// indistinguishable from a graph that genuinely holds none.
+			let Some(ep_pt) = self.elements.get_vector(&ctx.tx, &ep_id).await? else {
+				return Err(anyhow::anyhow!(Error::AnnEntryPointUnreadable {
+					table: self.ikb.table().to_string(),
+					index_id: self.ikb.index().0,
+					element: ep_id,
+				}));
+			};
 			let w = self
 				.layer0
 				.search_single_with_filter(
@@ -482,8 +508,10 @@ where
 					search,
 					ep_dist,
 					ep_id,
+					&ep_pt,
 					filter,
 					pending_docs,
+					allow_list,
 				)
 				.await?;
 			return Ok(w.to_vec_limit(search.k));
@@ -495,33 +523,44 @@ where
 	///
 	/// Starting from the graph's entry point, greedily descends through the upper
 	/// layers to find the closest element to the query vector `pt`.
+	///
+	/// `Ok(None)` means the graph is empty. A graph whose entry point exists but
+	/// whose vector this transaction cannot read is reported as
+	/// [`Error::AnnEntryPointUnreadable`] rather than as an empty result: the
+	/// search cannot reach the graph, and returning no neighbours would present
+	/// a pending-only result set as if it were complete.
 	async fn search_ep(
 		&self,
 		ctx: &HnswContext<'_>,
 		pt: &SharedVector,
 		pending_doc: Option<&RoaringTreemap>,
 	) -> Result<Option<(f64, ElementId)>> {
-		if let Some(mut ep_id) = self.state.enter_point {
-			if let Some(mut ep_dist) = self.elements.get_distance(&ctx.tx, pt, &ep_id).await? {
-				for layer in self.layers.iter().rev() {
-					if let Some(ep_dist_id) = layer
-						.search_single(ctx, &self.elements, pt, ep_dist, ep_id, 1, pending_doc)
-						.await?
-						.peek_first()
-					{
-						(ep_dist, ep_id) = ep_dist_id;
-					} else {
-						#[cfg(debug_assertions)]
-						unreachable!()
-					}
-				}
-				return Ok(Some((ep_dist, ep_id)));
-			} else {
-				#[cfg(debug_assertions)]
-				unreachable!()
+		let Some(mut ep_id) = self.state.enter_point else {
+			return Ok(None);
+		};
+		let Some(mut ep_dist) = self.elements.get_distance(&ctx.tx, pt, &ep_id).await? else {
+			return Err(anyhow::anyhow!(Error::AnnEntryPointUnreadable {
+				table: self.ikb.table().to_string(),
+				index_id: self.ikb.index().0,
+				element: ep_id,
+			}));
+		};
+		for layer in self.layers.iter().rev() {
+			// A layer that admits no candidate leaves the entry point as it
+			// stands and descent continues one layer down: every element the
+			// descent has accepted so far had its vector read, so the entry
+			// point carried forward is always usable. Upper layers hold a
+			// subset of the elements and `pending_doc` suppresses more, so an
+			// empty layer result is ordinary.
+			if let Some(ep_dist_id) = layer
+				.search_single(ctx, &self.elements, pt, ep_dist, ep_id, 1, pending_doc)
+				.await?
+				.peek_first()
+			{
+				(ep_dist, ep_id) = ep_dist_id;
 			}
 		}
-		Ok(None)
+		Ok(Some((ep_dist, ep_id)))
 	}
 
 	/// Retrieves the vector associated with the given element ID.
@@ -557,6 +596,7 @@ mod tests {
 	use ndarray::Array1;
 	use rand::rngs::SmallRng;
 	use reblessive::tree::Stk;
+	use roaring::RoaringTreemap;
 	use surrealdb_kvs::TransactionType;
 	use test_log::test;
 	use tracing::info;
@@ -568,11 +608,14 @@ mod tests {
 		VectorType,
 	};
 	use crate::docids::{DocId, TableDocIds};
+	use crate::error::Error;
 	use crate::test_env::{TestIndexEnv, TestIndexStore};
 	use crate::trees::hnsw::docs::VecDocs;
 	use crate::trees::hnsw::flavor::HnswFlavor;
 	use crate::trees::hnsw::index::{HnswContext, HnswIndex};
-	use crate::trees::hnsw::{ElementId, HnswRecordPendingUpdate, HnswSearch, VectorId};
+	use crate::trees::hnsw::{
+		ElementId, HnswRecordPendingUpdate, HnswSearch, VectorCache, VectorId,
+	};
 	use crate::trees::knn::tests::{
 		RandomItemGenerator, TestCollection, get_seed_rnd, new_random_vec, new_vectors_from_file,
 	};
@@ -819,7 +862,9 @@ mod tests {
 			for knn in 1..max_knn {
 				let search = HnswSearch::new(obj.clone(), knn, 500);
 				let mut builder = KnnResultBuilder::new(search.k);
-				h.search_graph(&ctx, stk, &search, None, &mut None, &mut builder).await.unwrap();
+				h.search_graph(&ctx, stk, &search, None, &mut None, None, &mut builder)
+					.await
+					.unwrap();
 				let res = builder.collect();
 				let first_dist: f64 = res.first().unwrap().0.into();
 				if knn == 1 && res.len() == 1 && first_dist > 0.0 {
@@ -1183,7 +1228,7 @@ mod tests {
 			let mut stack = reblessive::tree::TreeStack::new();
 			let pt = vec![Number::Int(2), Number::Int(2)];
 			let res = stack
-				.enter(|stk| async { h.knn_search(&ctx, stk, &pt, 1, 500, None).await })
+				.enter(|stk| async { h.knn_search(&ctx, stk, &pt, 1, 500, None, None).await })
 				.finish()
 				.await?;
 			ctx.tx().cancel().await?;
@@ -1192,6 +1237,493 @@ mod tests {
 				"re-created record must be resolvable in KNN results: {res:?}"
 			);
 		}
+		Ok(())
+	}
+
+	/// #548 test scaffold: an HNSW index over `n` distinct 2-D vectors
+	/// (record key `i` → vector `(i, i)` for `i` in `1..=n`), optionally
+	/// compacted into the graph. Each record's shared doc-ID is resolved at
+	/// write time — as the document pipeline does through any doc-ID-carrying
+	/// sibling index — so allow-list membership is testable both for pending
+	/// and compacted vectors. Returns the index and the doc-IDs in key order.
+	async fn new_allow_list_fixture(
+		ds: &TestIndexStore,
+		ikb: &IndexKeyBase,
+		n: i64,
+		compact: bool,
+	) -> Result<(HnswIndex, Vec<DocId>)> {
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 12, 500, true, true, true);
+		let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
+		let mut docs = Vec::with_capacity(n as usize);
+		let h = {
+			let ctx = new_ctx(ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+			let h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&tx,
+				ikb.clone(),
+				TableId(3),
+				&p,
+			)
+			.await?;
+			for i in 1..=n {
+				let id = RecordIdKey::Number(i);
+				docs.push(docids.resolve_or_assign(&ctx, &id).await?);
+				h.index(
+					&ctx,
+					&id,
+					None,
+					Some(vector_content(&new_i16_vec(i as isize, i as isize))),
+				)
+				.await?;
+			}
+			tx.commit().await?;
+			h
+		};
+		if compact {
+			loop {
+				let ctx = new_ctx(ds, TransactionType::Write).await;
+				let compacted = h.index_pendings(&ctx).await?;
+				ctx.tx().commit().await?;
+				if compacted == 0 {
+					break;
+				}
+			}
+		}
+		Ok((h, docs))
+	}
+
+	/// #548 test helper: runs a KNN search with an optional allow-list and
+	/// returns the sorted numeric record keys of the results.
+	async fn knn_with_allow(
+		ds: &TestIndexStore,
+		h: &HnswIndex,
+		pt: &[Number],
+		k: usize,
+		allow_list: Option<&RoaringTreemap>,
+	) -> Result<Vec<i64>> {
+		let ctx = new_ctx(ds, TransactionType::Read).await;
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res = stack
+			.enter(|stk| async { h.knn_search(&ctx, stk, pt, k, 500, None, allow_list).await })
+			.finish()
+			.await?;
+		ctx.tx().cancel().await?;
+		let mut keys: Vec<i64> = res
+			.iter()
+			.map(|(rid, _, _)| match &rid.key {
+				RecordIdKey::Number(n) => *n,
+				other => panic!("unexpected record key: {other:?}"),
+			})
+			.collect();
+		keys.sort();
+		Ok(keys)
+	}
+
+	/// #548: allow-list admission restricts graph results to bitmap members —
+	/// no allow-list is unrestricted, and an empty allow-list admits nothing.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_allow_list_restricts_graph_admission() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let (h, docs) = new_allow_list_fixture(&ds, &ikb, 8, true).await?;
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		// No allow-list: unrestricted admission returns every record.
+		assert_eq!(knn_with_allow(&ds, &h, &pt, 8, None).await?, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+		// The allow-list restricts admission to exactly its members, even
+		// with k larger than the member count.
+		let allow = RoaringTreemap::from_iter([docs[0], docs[2], docs[4]]);
+		assert_eq!(knn_with_allow(&ds, &h, &pt, 8, Some(&allow)).await?, vec![1, 3, 5]);
+		// An empty allow-list admits nothing.
+		let empty = RoaringTreemap::new();
+		assert!(knn_with_allow(&ds, &h, &pt, 8, Some(&empty)).await?.is_empty());
+		Ok(())
+	}
+
+	/// Regression (#548 review): a doc with a pending update must not admit
+	/// its (stale) graph element through the allow-list — result
+	/// materialization suppresses pending docs, so such an element burns an
+	/// `ef` slot that can never yield a row, and the pending scan already
+	/// scores the doc's CURRENT vector exactly. With a tight `ef`, the stale
+	/// near entry would otherwise crowd out a legitimate committed
+	/// neighbour and return the wrong top-k.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_allow_list_ignores_pending_docs_for_admission() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 12, 500, true, true, true);
+		let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
+		let mut docs = Vec::new();
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+			let h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&tx,
+				ikb.clone(),
+				TableId(3),
+				&p,
+			)
+			.await?;
+			// Records 1 and 2 share one vector near the query (one graph
+			// element, two doc-IDs); record 3 is a little farther.
+			let vectors = [new_i16_vec(1, 1), new_i16_vec(1, 1), new_i16_vec(2, 2)];
+			for (i, v) in vectors.iter().enumerate() {
+				let id = RecordIdKey::Number(i as i64 + 1);
+				docs.push(docids.resolve_or_assign(&ctx, &id).await?);
+				h.index(&ctx, &id, None, Some(vector_content(v))).await?;
+			}
+			tx.commit().await?;
+			h
+		};
+		loop {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let compacted = h.index_pendings(&ctx).await?;
+			ctx.tx().commit().await?;
+			if compacted == 0 {
+				break;
+			}
+		}
+		// Move record 1 far away, leaving the update pending: its stale graph
+		// entry still sits near the query, but the pending scan is now the
+		// source of truth for its (far) position.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			h.index(
+				&ctx,
+				&RecordIdKey::Number(1),
+				Some(vector_content(&new_i16_vec(1, 1))),
+				Some(vector_content(&new_i16_vec(100, 100))),
+			)
+			.await?;
+			ctx.tx().commit().await?;
+		}
+		// Allow records 1 and 3 (record 2, sharing the stale near element, is
+		// NOT allowed). With ef=1, admitting the stale element through
+		// pending record 1 would fill the result queue and lock out record 3
+		// — returning record 1 at its far position instead of the true
+		// nearest allowed record.
+		let allow = RoaringTreemap::from_iter([docs[0], docs[2]]);
+		let ctx = new_ctx(&ds, TransactionType::Read).await;
+		let mut stack = reblessive::tree::TreeStack::new();
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		let res = stack
+			.enter(|stk| async { h.knn_search(&ctx, stk, &pt, 1, 1, None, Some(&allow)).await })
+			.finish()
+			.await?;
+		ctx.tx().cancel().await?;
+		let keys: Vec<i64> = res
+			.iter()
+			.map(|(rid, _, _)| match &rid.key {
+				RecordIdKey::Number(n) => *n,
+				other => panic!("unexpected record key: {other:?}"),
+			})
+			.collect();
+		assert_eq!(keys, vec![3], "the committed allowed neighbour must win: {res:?}");
+		Ok(())
+	}
+
+	/// Regression (#548 review): the initial entry-point admission passed the
+	/// QUERY vector where the element's own vector belongs. On a cold
+	/// vector-doc cache the doc-set lookup keys off that vector, so the
+	/// entry point resolved another vector's (usually no) doc set, was
+	/// rejected, and the wrong verdict was cached under its element id. A
+	/// fresh index instance (fresh caches) over the same persisted graph
+	/// must still admit the entry point through the allow-list.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_allow_list_admits_entry_point_on_cold_cache() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		// A single record: it is necessarily the graph's entry point.
+		let (h, docs) = new_allow_list_fixture(&ds, &ikb, 1, true).await?;
+		// Query vector deliberately different from the stored vector (1, 1).
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		let allow = RoaringTreemap::from_iter([docs[0]]);
+		// Warm-cache sanity check on the original instance.
+		assert_eq!(knn_with_allow(&ds, &h, &pt, 1, Some(&allow)).await?, vec![1]);
+		// A fresh index instance over the same persisted graph, with its own
+		// (empty) vector cache: the entry-point admission must resolve the
+		// element's doc set from the KV store, keyed by the element's actual
+		// vector — not the query vector.
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 12, 500, true, true, true);
+		let h2 = {
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let h2 = HnswIndex::new(
+				VectorCache::new(64 * 1024 * 1024),
+				&ctx.tx(),
+				ikb.clone(),
+				TableId(3),
+				&p,
+			)
+			.await?;
+			h2.check_state(&ctx).await?;
+			ctx.tx().cancel().await?;
+			h2
+		};
+		assert_eq!(knn_with_allow(&ds, &h2, &pt, 1, Some(&allow)).await?, vec![1]);
+		Ok(())
+	}
+
+	/// Inserting into a graph whose in-memory state names an entry point the
+	/// writing transaction cannot resolve is an error, not a silent no-op.
+	///
+	/// The new element's vector is stored and its id spent before the graph is
+	/// touched, so a write that skipped the connection step would commit an
+	/// element that sits in no layer and that no later search can reach.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_insert_over_unreadable_entry_point_is_reported() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		// Element ids start at 0, so the single seeded record is element 0 and
+		// the graph's entry point.
+		let (_seed, _docs) = new_allow_list_fixture(&ds, &ikb, 1, true).await?;
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 12, 500, true, true, true);
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let h = HnswIndex::new(
+				VectorCache::new(64 * 1024 * 1024),
+				&ctx.tx(),
+				ikb.clone(),
+				TableId(3),
+				&p,
+			)
+			.await?;
+			h.check_state(&ctx).await?;
+			ctx.tx().cancel().await?;
+			h
+		};
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+			tx.del_key(&ikb.new_he_key(0)).await?;
+			tx.commit().await?;
+		}
+		// Indexing stages a pending update; compaction is what reaches the
+		// graph, and so what has to refuse.
+		let ctx = new_ctx(&ds, TransactionType::Write).await;
+		let id = RecordIdKey::Number(2);
+		h.index(&ctx, &id, None, Some(vector_content(&new_i16_vec(5, 5)))).await?;
+		let err = h
+			.index_pendings(&ctx)
+			.await
+			.expect_err("an unreadable entry point must not leave the element unconnected");
+		ctx.tx().cancel().await?;
+		assert!(
+			matches!(
+				err.downcast_ref::<Error>(),
+				Some(Error::AnnEntryPointUnreadable {
+					element: 0,
+					..
+				})
+			),
+			"unexpected error: {err}"
+		);
+		Ok(())
+	}
+
+	/// A graph whose in-memory state names an entry point the reading
+	/// transaction cannot resolve is an error, not an empty result set.
+	///
+	/// Returning no neighbours here would be indistinguishable from a graph
+	/// that holds none, so a search over a state that has outrun its snapshot
+	/// would silently present a pending-only result as complete. The same
+	/// verdict is required of debug and release builds.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_unreadable_entry_point_is_reported() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		// A single record: it is necessarily the graph's entry point, and
+		// element ids start at 0, so the entry point is element 0.
+		let (_h, _docs) = new_allow_list_fixture(&ds, &ikb, 1, true).await?;
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 12, 500, true, true, true);
+		// A fresh instance with an empty vector cache, so element vectors
+		// resolve from the store, holding state loaded before the removal
+		// below.
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let h = HnswIndex::new(
+				VectorCache::new(64 * 1024 * 1024),
+				&ctx.tx(),
+				ikb.clone(),
+				TableId(3),
+				&p,
+			)
+			.await?;
+			h.check_state(&ctx).await?;
+			ctx.tx().cancel().await?;
+			h
+		};
+		// Drop the entry point's stored vector behind that state's back,
+		// reproducing what a rolled-back write leaves visible: state naming an
+		// element the store no longer has.
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+			let key = ikb.new_he_key(0);
+			assert!(
+				tx.get_key(&key, None).await?.is_some(),
+				"element 0 should hold the entry point's vector"
+			);
+			tx.del_key(&key).await?;
+			tx.commit().await?;
+		}
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		let ctx = new_ctx(&ds, TransactionType::Read).await;
+		let mut stack = reblessive::tree::TreeStack::new();
+		let err = stack
+			.enter(|stk| async { h.knn_search(&ctx, stk, &pt, 1, 500, None, None).await })
+			.finish()
+			.await
+			.expect_err("an unreadable entry point must not be reported as an empty result");
+		ctx.tx().cancel().await?;
+		assert!(
+			matches!(
+				err.downcast_ref::<Error>(),
+				Some(Error::AnnEntryPointUnreadable {
+					element: 0,
+					..
+				})
+			),
+			"unexpected error: {err}"
+		);
+		Ok(())
+	}
+
+	/// #548: `allow_list` and `pending_docs` share a type but have opposite
+	/// polarity — the same doc-ID set admits exactly its members as an
+	/// allow-list and suppresses exactly its members as pending docs. This
+	/// test fails if the two parameters are ever transposed along the
+	/// filtered-search call chain.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_allow_list_and_pending_docs_polarity() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let (h, docs) = new_allow_list_fixture(&ds, &ikb, 6, true).await?;
+		let subset = RoaringTreemap::from_iter([docs[1], docs[3]]);
+		let search = HnswSearch::new(new_i16_vec(0, 0), 6, 500);
+		let ctx = new_ctx(&ds, TransactionType::Read).await;
+		let hctx = h.new_hnsw_context(&ctx);
+		let mut stack = reblessive::tree::TreeStack::new();
+		let (admitted, kept) = stack
+			.enter(|stk| async {
+				// As the allow-list: exactly the subset is admitted.
+				let mut b1 = KnnResultBuilder::new(6);
+				h.search_graph(&hctx, stk, &search, None, &mut None, Some(&subset), &mut b1)
+					.await?;
+				// As pending docs: exactly the subset is suppressed.
+				let mut b2 = KnnResultBuilder::new(6);
+				h.search_graph(&hctx, stk, &search, Some(subset.clone()), &mut None, None, &mut b2)
+					.await?;
+				anyhow::Ok((b1.collect(), b2.collect()))
+			})
+			.finish()
+			.await?;
+		ctx.tx().cancel().await?;
+		let to_doc_ids = |res: KnnResult| -> Vec<DocId> {
+			let mut ids: Vec<DocId> = res
+				.iter()
+				.map(|(_, id)| match id {
+					VectorId::DocId(d) => *d,
+					other => panic!("unexpected vector id: {other:?}"),
+				})
+				.collect();
+			ids.sort();
+			ids
+		};
+		assert_eq!(to_doc_ids(admitted), vec![docs[1], docs[3]]);
+		let mut complement: Vec<DocId> = vec![docs[0], docs[2], docs[4], docs[5]];
+		complement.sort();
+		assert_eq!(to_doc_ids(kept), complement);
+		Ok(())
+	}
+
+	/// #548: one graph element can carry several doc-IDs (identical vectors).
+	/// Element admission only needs one allowed doc, but result
+	/// materialization must gate per doc: a sibling doc outside the
+	/// allow-list must neither surface nor consume a top-K slot.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_allow_list_gates_shared_vector_docs() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 12, 500, true, true, true);
+		let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
+		let mut docs = Vec::new();
+		let h = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let tx = ctx.tx();
+			let h = HnswIndex::new(
+				ds.index_stores().vector_cache().clone(),
+				&tx,
+				ikb.clone(),
+				TableId(3),
+				&p,
+			)
+			.await?;
+			// Records 1 and 2 share one vector (one graph element, two
+			// doc-IDs); records 3 and 4 are distinct.
+			let vectors =
+				[new_i16_vec(7, 7), new_i16_vec(7, 7), new_i16_vec(1, 1), new_i16_vec(2, 2)];
+			for (i, v) in vectors.iter().enumerate() {
+				let id = RecordIdKey::Number(i as i64 + 1);
+				docs.push(docids.resolve_or_assign(&ctx, &id).await?);
+				h.index(&ctx, &id, None, Some(vector_content(v))).await?;
+			}
+			tx.commit().await?;
+			h
+		};
+		loop {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let compacted = h.index_pendings(&ctx).await?;
+			ctx.tx().commit().await?;
+			if compacted == 0 {
+				break;
+			}
+		}
+		let pt = vec![Number::Int(7), Number::Int(7)];
+		// Record 2 shares its element with allowed record 1 but is not in
+		// the allow-list itself: it must not appear.
+		let allow = RoaringTreemap::from_iter([docs[0], docs[2], docs[3]]);
+		assert_eq!(knn_with_allow(&ds, &h, &pt, 4, Some(&allow)).await?, vec![1, 3, 4]);
+		Ok(())
+	}
+
+	/// #548: the allow-list also gates the pending (uncompacted) scan, for
+	/// both doc-ID-mapped pendings and record-keyed pendings whose membership
+	/// is resolved through the current `Di` mapping (delete → re-create).
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_allow_list_gates_pending_updates() -> Result<()> {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let (h, docs) = new_allow_list_fixture(&ds, &ikb, 4, false).await?;
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		// All vectors are still pending: only allow-members are admitted.
+		let allow = RoaringTreemap::from_iter([docs[0], docs[1]]);
+		assert_eq!(knn_with_allow(&ds, &h, &pt, 4, Some(&allow)).await?, vec![1, 2]);
+		// Delete → re-create record 2 before compaction: its pending becomes
+		// record-keyed and its doc-ID is re-assigned, so membership must be
+		// resolved through the current mapping.
+		let id2 = RecordIdKey::Number(2);
+		let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
+		{
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			h.index(&ctx, &id2, Some(vector_content(&new_i16_vec(2, 2))), None).await?;
+			docids.remove(&ctx.tx(), &id2).await?;
+			ctx.tx().commit().await?;
+		}
+		let new_doc2 = {
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let d = docids.resolve_or_assign(&ctx, &id2).await?;
+			h.index(&ctx, &id2, None, Some(vector_content(&new_i16_vec(2, 2)))).await?;
+			ctx.tx().commit().await?;
+			d
+		};
+		assert_ne!(new_doc2, docs[1], "re-create must not reuse the deleted doc-ID");
+		// Allowed under its re-resolved doc-ID → admitted.
+		let allow = RoaringTreemap::from_iter([docs[0], new_doc2]);
+		assert_eq!(knn_with_allow(&ds, &h, &pt, 4, Some(&allow)).await?, vec![1, 2]);
+		// The stale (deleted) doc-ID no longer admits the record.
+		let allow = RoaringTreemap::from_iter([docs[0], docs[1]]);
+		assert_eq!(knn_with_allow(&ds, &h, &pt, 4, Some(&allow)).await?, vec![1]);
 		Ok(())
 	}
 
@@ -1524,7 +2056,7 @@ mod tests {
 							let ctx = new_ctx(&ds, TransactionType::Read).await;
 							let ctx = h.new_hnsw_context(&ctx);
 							let mut builder = KnnResultBuilder::new(knn);
-							h.search_graph(&ctx, stk, &search, None, &mut None, &mut builder)
+							h.search_graph(&ctx, stk, &search, None, &mut None, None, &mut builder)
 								.await
 								.unwrap();
 							ctx.tx.cancel().await.unwrap();
@@ -1593,6 +2125,159 @@ mod tests {
 			100,
 			p,
 			&[(10, 0.98), (40, 1.0)],
+		)
+		.await
+	}
+
+	/// #548: recall of allow-list-gated HNSW traversal against the filtered
+	/// brute-force ground truth, across allow-list selectivities.
+	///
+	/// The allow-list admits doc-IDs by modulus (optionally inverted for the
+	/// near-universe case); the oracle is a linear scan restricted to the
+	/// same subset; the gated traversal runs with the 4× boosted ef the
+	/// graph tier applies by default. Each case asserts an average
+	/// Recall@10 floor over the query set — the sparsest cases document why
+	/// the triage routes tiny allow-lists to the graph-free exact tier
+	/// instead (guaranteed recall 1.0 there).
+	async fn test_recall_filtered(
+		embeddings_file: &str,
+		ingest_limit: usize,
+		queries_file: &str,
+		query_limit: usize,
+		p: HnswParams,
+		ef: usize,
+		cases: &[(u64, bool, f64)],
+	) -> Result<()> {
+		let ds = Arc::new(TestIndexStore::new().await);
+		let tx = ds.transaction(TransactionType::Write).await?;
+		let db = tx.ensure_ns_db(None, "myns", "mydb").await?;
+		tx.commit().await?;
+
+		let collection: Arc<TestCollection> =
+			Arc::new(TestCollection::NonUnique(new_vectors_from_file(
+				p.vector_type,
+				&format!("../../tests/data/{embeddings_file}"),
+				Some(ingest_limit),
+			)?));
+
+		let ctx = new_ctx(&ds, TransactionType::Write).await;
+		let tx = ctx.tx();
+		let h = HnswIndex::new(
+			ds.index_stores().vector_cache().clone(),
+			&tx,
+			IndexKeyBase::new(db.namespace_id, db.database_id, "tb".into(), IndexId(4)),
+			TableId(3),
+			&p,
+		)
+		.await?;
+		for (doc_id, obj) in collection.to_vec_ref() {
+			let content = vec![Value::from(obj.deref())];
+			h.index(&ctx, &RecordIdKey::Number(*doc_id as i64), None, Some(content)).await?;
+		}
+		assert_eq!(h.index_pendings(&ctx).await?, collection.len());
+		assert_eq!(h.index_pendings(&ctx).await?, 0);
+		tx.commit().await?;
+
+		let queries = TestCollection::NonUnique(new_vectors_from_file(
+			p.vector_type,
+			&format!("../../tests/data/{queries_file}"),
+			Some(query_limit),
+		)?);
+
+		let mut stack = reblessive::tree::TreeStack::new();
+		stack
+			.enter(|stk| async {
+				for &(modulus, invert, min_recall) in cases {
+					// Membership by doc-ID modulus, inverted for the
+					// near-universe selectivity.
+					let allow: RoaringTreemap = collection
+						.to_vec_ref()
+						.iter()
+						.map(|(doc_id, _)| *doc_id)
+						.filter(|doc_id| (doc_id % modulus == 0) != invert)
+						.collect();
+					let members = allow.len() as usize;
+					assert!(members > 0, "empty allow-list for modulus {modulus}");
+					let knn = 10;
+					// The graph tier's default 4× ef boost.
+					let ef_gated = ef * 4;
+					let mut total_recall = 0.0;
+					for (_, pt) in queries.to_vec_ref() {
+						let search = HnswSearch::new(pt.clone(), knn, ef_gated);
+						let ctx = new_ctx(&ds, TransactionType::Read).await;
+						let hctx = h.new_hnsw_context(&ctx);
+						let mut builder = KnnResultBuilder::new(knn);
+						h.search_graph(
+							&hctx,
+							stk,
+							&search,
+							None,
+							&mut None,
+							Some(&allow),
+							&mut builder,
+						)
+						.await
+						.unwrap();
+						hctx.tx.cancel().await.unwrap();
+						let res = builder.collect();
+						// Every returned doc must be an allow-list member.
+						for (_, id) in res.iter() {
+							match id {
+								VectorId::DocId(d) => {
+									assert!(allow.contains(*d), "non-member {d} in results")
+								}
+								other => panic!("unexpected vector id: {other:?}"),
+							}
+						}
+						let truth =
+							collection.knn_filtered(pt, &Distance::Euclidean, knn, &allow);
+						let rec = compute_recall(&truth, &res);
+						if rec == 1.0 {
+							assert_eq!(truth, res);
+						}
+						total_recall += rec;
+					}
+					let recall = total_recall / queries.to_vec_ref().len() as f64;
+					info!(
+						"modulus: {modulus} invert: {invert} members: {members} - Recall: {recall}"
+					);
+					assert!(
+						recall >= min_recall,
+						"modulus: {modulus} invert: {invert} members: {members} - Recall: {recall} - Expected: {min_recall}"
+					);
+				}
+			})
+			.finish()
+			.await;
+		Ok(())
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn test_recall_filtered_euclidean() -> Result<()> {
+		let p = new_params(20, VectorType::F32, Distance::Euclidean, 8, 100, false, false, false);
+		test_recall_filtered(
+			"hnsw-random-9000-20-euclidean.gz",
+			1000,
+			"hnsw-random-5000-20-euclidean.gz",
+			100,
+			p,
+			40,
+			&[
+				// Floors are set with margin below observed recall (the graph
+				// build is unseeded, so exact figures vary run to run). The
+				// sparse cases sit well below 1.0 even with the ef boost —
+				// which is precisely why the triage routes allow-lists up to
+				// T_exact through the graph-free exact tier (recall 1.0 by
+				// construction) instead of this traversal.
+				// 0.1% (a single member; observed ~1.0).
+				(1000, false, 0.5),
+				// 1% (10 members = k; observed ~0.85).
+				(100, false, 0.6),
+				// 10% (100 members).
+				(10, false, 0.85),
+				// 90% (near-universe).
+				(10, true, 0.9),
+			],
 		)
 		.await
 	}
@@ -1683,7 +2368,7 @@ mod tests {
 						let qctx = new_ctx(&ds, TransactionType::Read).await;
 						let qctx = h.new_hnsw_context(&qctx);
 						let mut builder = KnnResultBuilder::new(knn);
-						h.search_graph(&qctx, stk, &search, None, &mut None, &mut builder)
+						h.search_graph(&qctx, stk, &search, None, &mut None, None, &mut builder)
 							.await
 							.unwrap();
 						qctx.tx.cancel().await.unwrap();
@@ -1777,6 +2462,27 @@ mod tests {
 		fn knn(&self, pt: &SharedVector, dist: &Distance, n: usize) -> KnnResult {
 			let mut b = KnnResultBuilder::new(n);
 			for (doc_id, doc_pt) in self.to_vec_ref() {
+				let d = dist.calculate(doc_pt, pt);
+				if b.check_add(d) {
+					b.add_graph_result(d, &Ids64::One(*doc_id));
+				}
+			}
+			b.collect()
+		}
+
+		/// #548: brute-force ground truth restricted to an allow-list subset.
+		fn knn_filtered(
+			&self,
+			pt: &SharedVector,
+			dist: &Distance,
+			n: usize,
+			allow: &RoaringTreemap,
+		) -> KnnResult {
+			let mut b = KnnResultBuilder::new(n);
+			for (doc_id, doc_pt) in self.to_vec_ref() {
+				if !allow.contains(*doc_id) {
+					continue;
+				}
 				let d = dist.calculate(doc_pt, pt);
 				if b.check_add(d) {
 					b.add_graph_result(d, &Ids64::One(*doc_id));

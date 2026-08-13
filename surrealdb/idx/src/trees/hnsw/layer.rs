@@ -118,22 +118,30 @@ where
 		search: &HnswSearch,
 		ep_dist: f64,
 		ep_id: ElementId,
-		filter: &mut HnswTruthyDocumentFilter<'_>,
+		ep_pt: &SharedVector,
+		filter: &mut Option<HnswTruthyDocumentFilter<'_>>,
 		pending_docs: Option<&RoaringTreemap>,
+		allow_list: Option<&RoaringTreemap>,
 	) -> Result<DoublePriorityQueue> {
 		let visited = HashSet::from_iter([ep_id]);
 		let candidates = DoublePriorityQueue::from(ep_dist, ep_id);
 		let mut w = DoublePriorityQueue::default();
+		// The entry point's admission must use ITS vector, not the query's:
+		// on a cold cache the doc-set lookup keys off the vector, so passing
+		// the query vector resolves another vector's (usually no) doc set,
+		// wrongly rejecting the entry point and caching the wrong verdict
+		// under its element id.
 		Self::add_if_truthy(
 			ctx,
 			stk,
 			search.ef,
 			&mut w,
-			&search.pt,
+			ep_pt,
 			ep_dist,
 			ep_id,
 			filter,
 			pending_docs,
+			allow_list,
 		)
 		.await?;
 		self.search_with_filter(
@@ -146,6 +154,7 @@ where
 			w,
 			filter,
 			pending_docs,
+			allow_list,
 		)
 		.await
 	}
@@ -236,8 +245,9 @@ where
 		mut candidates: DoublePriorityQueue,
 		mut visited: HashSet<ElementId>,
 		mut w: DoublePriorityQueue,
-		filter: &mut HnswTruthyDocumentFilter<'_>,
+		filter: &mut Option<HnswTruthyDocumentFilter<'_>>,
 		pending_docs: Option<&RoaringTreemap>,
+		allow_list: Option<&RoaringTreemap>,
 	) -> Result<DoublePriorityQueue> {
 		let mut f_dist = w.peek_last_dist().unwrap_or(f64::MAX);
 
@@ -261,6 +271,7 @@ where
 					f_dist,
 					filter,
 					pending_docs,
+					allow_list,
 				)
 				.await?;
 				for &e_id in neighbourhood.iter() {
@@ -282,6 +293,7 @@ where
 								e_id,
 								filter,
 								pending_docs,
+								allow_list,
 							)
 							.await?
 							{
@@ -323,9 +335,16 @@ where
 		visited: &HashSet<ElementId>,
 		w_len: usize,
 		f_dist: f64,
-		filter: &mut HnswTruthyDocumentFilter<'_>,
+		filter: &mut Option<HnswTruthyDocumentFilter<'_>>,
 		pending_docs: Option<&RoaringTreemap>,
+		allow_list: Option<&RoaringTreemap>,
 	) -> Result<()> {
+		// Without a truthy filter there is no record evaluation to warm up:
+		// admission is decided purely on the allow-list bitmap, with zero
+		// record fetches.
+		let Some(filter) = filter.as_mut() else {
+			return Ok(());
+		};
 		let mut ids: Vec<VectorId> = Vec::new();
 		for &e_id in neighbourhood.iter() {
 			if visited.contains(&e_id) {
@@ -350,12 +369,35 @@ where
 				continue;
 			}
 			for doc_id in docs.iter() {
+				// Bitmap-rejected and individually-pending candidates are never
+				// evaluated by the filter, so their records must not be
+				// prefetched either.
+				if pending_docs.is_some_and(|pending| pending.contains(doc_id)) {
+					continue;
+				}
+				if let Some(allow) = allow_list
+					&& !allow.contains(doc_id)
+				{
+					continue;
+				}
 				ids.push(VectorId::DocId(doc_id));
 			}
 		}
 		filter.prefetch_records(ctx, &ids).await
 	}
 
+	/// Decides whether an element is admitted into the result queue `w`.
+	///
+	/// The caller has already pushed the element into the traversal
+	/// candidates, so a rejection here never stops the graph walk (standard
+	/// filtered-HNSW: expansion traverses disallowed nodes, admission is
+	/// gated). Gates run cheapest-first:
+	/// 1. pending suppression (`pending_docs` — the exact pending scan is the source of truth for
+	///    those docs, so the graph hit is ignored);
+	/// 2. allow-list admission (#548 — `allow_list` holds the doc-IDs whose records satisfy the
+	///    index-covered WHERE conjuncts; an element with no doc in the bitmap is rejected without
+	///    any record fetch);
+	/// 3. the truthy filter (record fetch + permission gate + residual cond), when one is present.
 	#[expect(clippy::too_many_arguments)]
 	pub(super) async fn add_if_truthy(
 		ctx: &HnswContext<'_>,
@@ -365,8 +407,9 @@ where
 		e_pt: &SharedVector,
 		e_dist: f64,
 		e_id: ElementId,
-		filter: &mut HnswTruthyDocumentFilter<'_>,
+		filter: &mut Option<HnswTruthyDocumentFilter<'_>>,
 		pending_docs: Option<&RoaringTreemap>,
+		allow_list: Option<&RoaringTreemap>,
 	) -> Result<bool> {
 		if let Some(docs) = ctx.vec_docs.get_docs_by_element(&ctx.tx, e_id, e_pt).await? {
 			if let Some(pending_docs) = pending_docs
@@ -376,7 +419,23 @@ where
 				// In this case we ignore the one in the HNSW index
 				return Ok(false);
 			}
-			if filter.check_any_doc_truthy(ctx, stk, docs).await? {
+			// Per-doc gates ignore pending docs entirely: the pending scan is
+			// their source of truth (it scores their CURRENT vectors) and
+			// result materialization suppresses them, so admitting an element
+			// on the strength of a pending doc alone would burn an `ef` slot
+			// that can never yield a row — crowding out committed neighbours.
+			if let Some(allow) = allow_list
+				&& !Self::check_any_doc_in_allow(&docs, pending_docs, allow)
+			{
+				return Ok(false);
+			}
+			let truthy = match filter {
+				Some(filter) => {
+					filter.check_any_doc_truthy(ctx, stk, docs, pending_docs, allow_list).await?
+				}
+				None => true,
+			};
+			if truthy {
 				w.push(e_dist, e_id);
 				if w.len() > efc {
 					w.pop_last();
@@ -397,6 +456,31 @@ where
 			}
 		}
 		true
+	}
+
+	/// Returns `true` iff any of the element's non-pending doc-IDs is in the
+	/// allow-list.
+	///
+	/// Inverse polarity of [`Self::check_all_docs_in_pending`]: `pending_docs`
+	/// suppresses an element when *all* its docs are pending, while the
+	/// allow-list admits an element when *any* of its docs is allowed (an
+	/// empty allow-list therefore admits nothing). Pending docs never count
+	/// towards admission — the pending scan is their source of truth and
+	/// result materialization skips them.
+	fn check_any_doc_in_allow(
+		docs: &Ids64,
+		pending_docs: Option<&RoaringTreemap>,
+		allow_list: &RoaringTreemap,
+	) -> bool {
+		for doc_id in docs.iter() {
+			if pending_docs.is_some_and(|pending| pending.contains(doc_id)) {
+				continue;
+			}
+			if allow_list.contains(doc_id) {
+				return true;
+			}
+		}
+		false
 	}
 
 	async fn are_all_docs_in_pending(

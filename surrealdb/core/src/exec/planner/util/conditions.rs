@@ -211,6 +211,40 @@ pub(crate) fn strip_knn_from_condition(cond: &Cond) -> Option<Cond> {
 	.map(Cond)
 }
 
+/// Strip handled KNN operators AND every conjunct containing a MATCHES
+/// operator from a WHERE clause, returning the in-traversal residual for a
+/// `KnnScan` (#548).
+///
+/// The residual is evaluated per candidate inside the ANN search through the
+/// legacy compute path, where MATCHES has no query executor and computes to
+/// `false` — leaving a MATCHES conjunct in would reject every candidate and
+/// return zero rows. Dropping a conjunct from the in-traversal residual only
+/// admits more candidates (the outer `Filter` re-applies the KNN-stripped
+/// WHERE — with `MATCHES` evaluated through its physical operator — so final
+/// rows stay correct); it can never produce wrong rows.
+///
+/// The user-visible trade-off when a MATCHES conjunct is NOT exactly
+/// bitmap-coverable (no FULLTEXT index, stale index format, negated MATCHES,
+/// ...): non-matching candidates occupy top-K slots inside the search, so
+/// the statement may return **fewer than k rows even when k matching rows
+/// exist** — the k nearest overall are found first and then filtered, rather
+/// than the k nearest *matching* rows. Strictly better than the zero rows
+/// this replaced, and covered conjuncts (an online, current-format FULLTEXT
+/// index) avoid it entirely by joining the allow-list.
+pub(crate) fn strip_knn_and_matches_from_condition(cond: &Cond) -> Option<Cond> {
+	use crate::exec::index::analysis::IndexAnalyzer;
+	strip_and_simplify(cond.0.clone(), |e| {
+		matches!(
+			e,
+			Expr::Binary {
+				op: BinaryOperator::NearestNeighbor(nn),
+				..
+			} if matches!(nn.as_ref(), NearestNeighbor::K(..) | NearestNeighbor::Approximate(..))
+		) || IndexAnalyzer::expr_contains_matches(e)
+	})
+	.map(Cond)
+}
+
 /// Walk the top-level AND chain of `expr` and replace each leaf for which
 /// `should_strip` returns `true` with `Literal::Bool(true)`. After the
 /// walk, collapse boolean sentinels via [`BoolSimplifier`]. Returns the

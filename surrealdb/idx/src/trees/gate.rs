@@ -86,6 +86,19 @@ pub trait CandidateCondition: Send + Sync {
 	) -> BoxGateFut<'a>;
 }
 
+/// Counts the candidates an ANN truthy-document filter fetches and evaluates
+/// inside the search, so the driving executor can report that cost.
+///
+/// Implemented by the layer that owns those metrics. Declared here, with the
+/// other per-candidate seams, so the filters can count without naming it.
+pub trait CandidateFetchCounter: Send + Sync {
+	/// Record one candidate fetched and evaluated in-traversal.
+	///
+	/// Called once per filter-cache miss: a verdict served from the filter's
+	/// query-local cache involves no new fetch and is not counted.
+	fn record_fetch(&self);
+}
+
 /// How an ANN truthy-document filter gates each candidate on the table's
 /// SELECT permission. Resolved once when the filter is built and reused for
 /// every candidate; check each candidate via

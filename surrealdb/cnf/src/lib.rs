@@ -269,6 +269,43 @@ pub static REGEX_CACHE_SIZE: LazyLock<usize> =
 pub static BITMAP_BRANCH_BUDGET: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_BITMAP_BRANCH_BUDGET", usize, 250_000);
 
+/// Master switch for pre-filtered vector search (#548, default: true).
+/// When `false`, KNN queries keep evaluating their WHERE residual inside the
+/// ANN traversal via per-candidate record fetches, exactly as before the
+/// allow-list bitmap prefilter existed.
+pub static KNN_PREFILTER_ENABLED: LazyLock<bool> =
+	lazy_env_parse!("SURREAL_KNN_PREFILTER_ENABLED", bool, true);
+
+/// Allow-list size at or below which a pre-filtered KNN search skips the
+/// graph entirely and scores the members exactly (default: 2000). Below this
+/// cardinality a bounded fetch-and-score over the bitmap is cheaper than a
+/// graph traversal and — unlike filtered ANN search under a highly selective
+/// filter — guaranteed to find the true top-K.
+pub static KNN_PREFILTER_EXACT_THRESHOLD: LazyLock<u64> =
+	lazy_env_parse!("SURREAL_KNN_PREFILTER_EXACT_THRESHOLD", u64, 2_000);
+
+/// Allow-list size above which the gated ANN traversal stops boosting `ef`
+/// (default: 100000). Large allow-lists barely reject candidates on typical
+/// tables, so widening the search buys no recall; admission stays gated on
+/// bitmap membership at every size — an absolute cardinality says nothing
+/// about how near-universe the predicate really is, and an unrestricted
+/// search with a post-check would truncate results whenever the nearest
+/// overall neighbours are excluded.
+pub static KNN_PREFILTER_EF_BOOST_THRESHOLD: LazyLock<u64> =
+	lazy_env_parse!("SURREAL_KNN_PREFILTER_EF_BOOST_THRESHOLD", u64, 100_000);
+
+/// `ef` multiplier for allow-list-gated ANN traversal (default: 4). A
+/// selective allow-list rejects most candidates, effectively thinning the
+/// graph; boosting the search width counteracts the recall loss. Applied as
+/// `max(ef, ef * boost)` capped by [`KNN_PREFILTER_EF_MAX`].
+pub static KNN_PREFILTER_EF_BOOST: LazyLock<u32> =
+	lazy_env_parse!("SURREAL_KNN_PREFILTER_EF_BOOST", u32, 4);
+
+/// Ceiling for the boosted `ef` of an allow-list-gated ANN traversal
+/// (default: 1024). Never clamps below the user-requested `ef`.
+pub static KNN_PREFILTER_EF_MAX: LazyLock<u32> =
+	lazy_env_parse!("SURREAL_KNN_PREFILTER_EF_MAX", u32, 1_024);
+
 // A limit belongs on the owning layer's config struct rather than in a static
 // here whenever its readers already hold a configuration in hand: that keeps it
 // per-datastore and settable programmatically, not only through an env var. The
