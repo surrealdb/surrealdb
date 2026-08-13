@@ -6505,7 +6505,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "surreal"
-version = "3.2.4"
+version = "3.2.5"
 dependencies = [
  "assert_fs",
  "chrono",
@@ -6540,7 +6540,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb"
-version = "3.2.4"
+version = "3.2.5"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -6594,7 +6594,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-ast"
-version = "3.2.4"
+version = "3.2.5"
 dependencies = [
  "chrono",
  "rust_decimal",
@@ -6604,7 +6604,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-collections"
-version = "3.2.4"
+version = "3.2.5"
 dependencies = [
  "criterion",
  "revision",
@@ -6613,14 +6613,14 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-common"
-version = "3.2.4"
+version = "3.2.5"
 dependencies = [
  "hashbrown 0.16.1",
 ]
 
 [[package]]
 name = "surrealdb-core"
-version = "3.2.4"
+version = "3.2.5"
 dependencies = [
  "addr",
  "affinitypool",
@@ -6755,7 +6755,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-mcp"
-version = "3.2.4"
+version = "3.2.5"
 dependencies = [
  "anyhow",
  "bytes",
@@ -6776,7 +6776,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-parser"
-version = "3.2.4"
+version = "3.2.5"
 dependencies = [
  "bitflags",
  "chrono",
@@ -6792,7 +6792,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-profiling"
-version = "3.2.4"
+version = "3.2.5"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6840,7 +6840,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-server"
-version = "3.2.4"
+version = "3.2.5"
 dependencies = [
  "anyhow",
  "assert_fs",
@@ -6915,7 +6915,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-strand"
-version = "3.2.4"
+version = "3.2.5"
 dependencies = [
  "arbitrary",
  "criterion",
@@ -6954,7 +6954,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-token"
-version = "3.2.4"
+version = "3.2.5"
 dependencies = [
  "logos",
  "surrealdb-common",
@@ -6962,7 +6962,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-types"
-version = "3.2.4"
+version = "3.2.5"
 dependencies = [
  "anyhow",
  "arbitrary",
@@ -6996,7 +6996,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-types-derive"
-version = "3.2.4"
+version = "3.2.5"
 dependencies = [
  "heck 0.4.1",
  "proc-macro2",
