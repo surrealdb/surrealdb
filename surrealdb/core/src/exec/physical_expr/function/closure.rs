@@ -55,9 +55,18 @@ impl PhysicalExpr for ClosureExec {
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		// Closures themselves are read-only (they're values)
-		// What they do when called is a different matter
-		AccessMode::ReadOnly
+		// A closure literal is inert as a value, but wherever it can flow it can
+		// also be invoked — the call operator, or a closure-taking builtin such
+		// as `array::map` that runs the body per element under this statement's
+		// options. A writing body therefore makes the expression writable, so
+		// anything combining this access mode (e.g. `args_access_mode` on the
+		// builtin holding it) is conservative. Mirrors the expr layer's
+		// `Expr::Closure(c) => c.body.read_only()`.
+		if self.closure.body.read_only() {
+			AccessMode::ReadOnly
+		} else {
+			AccessMode::ReadWrite
+		}
 	}
 }
 
@@ -225,5 +234,70 @@ impl ToSql for ClosureCallExec {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		self.target.fmt_sql(f, fmt);
 		f.push_str("(...)");
+	}
+}
+
+#[cfg(all(test, feature = "kv-mem"))]
+#[allow(clippy::unwrap_used)]
+mod tests {
+	use crate::exec::AccessMode;
+	use crate::exec::operators::test_util::TestDb;
+	use crate::exec::planner::Planner;
+
+	/// Plan `expression` against a txn-backed planner over `db` and return the
+	/// resolved access mode of the resulting physical expression tree.
+	async fn access_mode_of(db: &TestDb, expression: &str) -> AccessMode {
+		let ctx = db.exec_ctx().await;
+		let crate::exec::ExecutionContext::Database(db_ctx) = &ctx else {
+			panic!("exec_ctx builds a Database context");
+		};
+		let txn = ctx.txn();
+		let planner = Planner::with_txn(
+			ctx.ctx(),
+			&db_ctx.ns_ctx.root.function_registry,
+			txn,
+			Some("test".to_owned()),
+			Some("test".to_owned()),
+		);
+		let expr: crate::expr::Expr = crate::syn::expr(expression).unwrap().into();
+		planner.physical_expr(expr).await.unwrap().access_mode()
+	}
+
+	#[tokio::test]
+	async fn a_pure_closure_literal_is_read_only() {
+		let db = TestDb::new("").await;
+		assert_eq!(access_mode_of(&db, "|$x: any| { RETURN $x; }").await, AccessMode::ReadOnly);
+	}
+
+	#[tokio::test]
+	async fn a_writing_closure_literal_is_read_write() {
+		// A closure does not write when it is created, but it can be invoked
+		// wherever the value flows, so a writing body makes the expression
+		// writable — matching the expr layer's `Expr::Closure(c) => c.body.read_only()`.
+		let db = TestDb::new("DEFINE TABLE log SCHEMALESS;").await;
+		assert_eq!(
+			access_mode_of(&db, "|$x: any| { CREATE log SET v = $x; }").await,
+			AccessMode::ReadWrite
+		);
+	}
+
+	#[tokio::test]
+	async fn a_writing_closure_passed_to_a_builtin_is_read_write() {
+		// `array::map` runs the closure per element under this statement's
+		// options, so a writing closure argument makes the whole call writable.
+		// Feeding the closure body into the builtin's access mode is what closes
+		// the gap: otherwise the call would resolve read-only and could be
+		// overlapped or spawned as if it never wrote.
+		let db = TestDb::new("DEFINE TABLE log SCHEMALESS;").await;
+		assert_eq!(
+			access_mode_of(&db, "array::map([1, 2], |$x: any| { CREATE log SET v = $x; })").await,
+			AccessMode::ReadWrite
+		);
+		// A pure closure argument keeps the call read-only — no regression for
+		// the common case.
+		assert_eq!(
+			access_mode_of(&db, "array::map([1, 2], |$x: any| { RETURN $x; })").await,
+			AccessMode::ReadOnly
+		);
 	}
 }
