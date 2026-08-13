@@ -198,8 +198,11 @@ impl<'a> IndexAnalyzer<'a> {
 	/// itself an OR of independently-indexable predicates, builds the union.
 	/// The union covers only that OR; the remaining conjuncts are enforced by
 	/// the residual `Filter` the SELECT planner installs above the
-	/// `UnionIndexScan` (mixed-index unions are never stripped by
-	/// `strip_union_index_conditions`, so the full WHERE stays as residual).
+	/// `UnionIndexScan`.  Those conjuncts must survive
+	/// `strip_union_index_conditions`, which is why it only drops a
+	/// containment leaf whose literals contain *every* branch value — a
+	/// sibling conjunct narrower than the OR's branch values is not implied
+	/// by the union and stays in the filter.
 	///
 	/// Returns the best such union (the one whose weakest branch is most
 	/// selective) with its effective score, so the caller can compare it

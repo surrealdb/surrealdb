@@ -2157,12 +2157,16 @@ impl<'ctx> Planner<'ctx> {
 		};
 
 		// Strip CONTAINSANY / ANYINSIDE leaves whose literal value set
-		// is fully covered by the branches' prefix values.  If
-		// everything is covered, the residual Filter goes away and
-		// LIMIT can be pushed into the sub-scans (when merge is
-		// active).  CONTAINSALL / ALLINSIDE leaves are NOT stripped
-		// (intersection semantics; see `strip_union_index_conditions`
-		// rustdoc and issue #236).
+		// contains every one of the branches' prefix values — only then
+		// does each branch imply the leaf.  `cond` is the whole WHERE
+		// clause, which may hold conjuncts the union does not cover
+		// (see `try_and_nested_or_union`), so the check is per leaf and
+		// never assumes a leaf produced this union.  If everything is
+		// covered, the residual Filter goes away and LIMIT can be
+		// pushed into the sub-scans (when merge is active).
+		// CONTAINSALL / ALLINSIDE leaves are NOT stripped (intersection
+		// semantics; see `strip_union_index_conditions` rustdoc and
+		// issue #236).
 		//
 		// SECURITY: stripping is also disabled when the WHERE clause
 		// references a field whose SELECT permission is not `Full`.

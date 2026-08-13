@@ -312,11 +312,20 @@ pub(crate) fn strip_index_conditions(
 /// Strip conditions covered by a union of BTree access paths from a WHERE
 /// clause.
 ///
-/// Recognises `field CONTAINSANY [v0, v1, ...]` (idiom on left) and the
-/// symmetric `[v0, v1, ...] ANYINSIDE field` (idiom on right) when every
-/// literal value appears as the leading equality/prefix value of some
-/// branch.  The branches must all share the same index and all use that
-/// index's leading array-element column (via `idiom_matches_containment`).
+/// Recognises `field CONTAINSANY [l0, l1, ...]` (idiom on left) and the
+/// symmetric `[l0, l1, ...] ANYINSIDE field` (idiom on right).  The branches
+/// must all share the same index and all use that index's leading
+/// array-element column (via `idiom_matches_containment`).
+///
+/// A union over branch values `V` emits every row whose indexed array holds
+/// *at least one* member of `V`, so a leaf `field CONTAINSANY L` is only
+/// implied — and hence only strippable — when `V ⊆ L`.  The converse
+/// (`L ⊆ V`) does **not** imply the leaf: the union may have been built from
+/// a different AND conjunct (a nested OR, or another containment leaf) whose
+/// values reach outside `L`, and a row admitted through one of those
+/// branches need not satisfy `L` at all.  Callers pass the whole WHERE
+/// clause, so every top-level AND leaf is tested independently of which
+/// conjunct produced the union.
 ///
 /// `CONTAINSALL` / `ALLINSIDE` leaves are deliberately **not** considered
 /// covered: their semantics require every value to match the *same* row,
@@ -332,11 +341,10 @@ pub(crate) fn strip_union_index_conditions(
 	use crate::val::Value;
 
 	// Collect (index_first_column, set_of_branch_values) from the paths.
-	// All branches must agree on the index and its first column.  A
-	// `HashSet<&Value>` keeps `union_covers_leaf`'s per-literal lookup
-	// at O(1) average — important when a query mixes a small union
-	// (≤ MAX_IN_EXPANSION_SIZE branches) with a large array literal on
-	// some other AND-leaf that the matcher still has to check.
+	// All branches must agree on the index and its first column.  The
+	// `HashSet<&Value>` collapses branches that repeat a value (a union
+	// built from `[a, a]`), so `union_covers_leaf` tests each distinct
+	// branch value once per candidate leaf.
 	let mut first_col: Option<&Idiom> = None;
 	let mut branch_values: HashSet<&Value> = HashSet::with_capacity(paths.len());
 	for path in paths {
@@ -383,7 +391,8 @@ pub(crate) fn strip_union_index_conditions(
 }
 
 /// Returns `true` when a `CONTAINSANY` (idiom-left) or `ANYINSIDE`
-/// (idiom-right) leaf is fully covered by the set of branch values.
+/// (idiom-right) leaf is implied by the union, i.e. every branch value is one
+/// of the leaf's literals so no branch can admit a row the leaf rejects.
 fn union_covers_leaf(
 	col: &Idiom,
 	branch_values: &HashSet<&crate::val::Value>,
@@ -413,16 +422,26 @@ fn union_covers_leaf(
 	let Some(Value::Array(arr)) = try_literal_to_value(lit) else {
 		return false;
 	};
-	// `field CONTAINSANY []` / `[] ANYINSIDE field` evaluates to FALSE
-	// (no values to match), so the leaf must stay in the residual
-	// filter to reject all rows.  `arr.0.iter().all(...)` would be
-	// vacuously true on the empty array, silently dropping the
-	// always-false constraint.
-	if arr.0.is_empty() {
+	// Every branch value must be one of the leaf's literals.  The union emits
+	// a row on the strength of a single branch, so a branch value outside the
+	// literals would admit rows the leaf rejects.  An empty union guarantees
+	// nothing about a row and must never cover a leaf; the `all` below would
+	// be vacuously true over it.
+	//
+	// This also keeps the always-false `field CONTAINSANY []` / `[]
+	// ANYINSIDE field` in the residual filter: no non-empty branch set is a
+	// subset of the empty literal array.
+	//
+	// A `HashSet<&Value>` of the literals keeps the per-branch lookup at
+	// O(1) average, so a small union checked against a large array literal
+	// stays linear.  A hash/`Eq` disagreement across numeric kinds can only
+	// miss a match, which leaves the leaf in the residual filter — the safe
+	// direction.
+	if branch_values.is_empty() {
 		return false;
 	}
-	// Every literal value must appear in some branch's prefix.
-	arr.0.iter().all(|v| branch_values.contains(v))
+	let leaf_values: HashSet<&Value> = arr.0.iter().collect();
+	branch_values.iter().all(|v| leaf_values.contains(*v))
 }
 
 /// Decides whether a single binary comparison leaf is covered by a chosen
@@ -924,4 +943,144 @@ pub(crate) fn extract_table_from_matches(
 		return table.clone();
 	}
 	surrealdb_strand::TableName::from("unknown".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+	use std::str::FromStr;
+	use std::sync::Arc;
+
+	use surrealdb_strand::Strand;
+	use surrealdb_types::ToSql;
+
+	use super::*;
+	use crate::catalog::{Index, IndexDefinition, IndexId};
+	use crate::exec::index::access_path::{AccessPath, BTreeAccess, IndexRef};
+	use crate::kvs::Direction;
+	use crate::val::Value;
+
+	fn parse_cond(snippet: &str) -> Cond {
+		let src = format!("SELECT * FROM t WHERE {snippet}");
+		let mut exprs = crate::syn::parse(&src).expect("parse").expressions;
+		assert_eq!(exprs.len(), 1, "expected one statement from {src:?}");
+		match exprs.remove(0).into() {
+			crate::expr::TopLevelExpr::Expr(Expr::Select(s)) => s.cond.expect("WHERE"),
+			other => panic!("expected SELECT, got {other:?}"),
+		}
+	}
+
+	/// A union of equality scans over an index on `col`, one branch per value.
+	fn union_paths(col: &str, values: &[&str]) -> Vec<AccessPath> {
+		let def = IndexDefinition {
+			index_id: IndexId(1),
+			name: Strand::from("ix"),
+			table_name: "t".into(),
+			cols: vec![Idiom::from_str(col).expect("valid idiom")],
+			index: Index::Idx,
+			count_cond: None,
+			comment: None,
+			prepare_remove: false,
+			format_version: 1,
+		};
+		let indexes: Arc<[IndexDefinition]> = Arc::from(vec![def].into_boxed_slice());
+		values
+			.iter()
+			.map(|v| AccessPath::BTreeScan {
+				index_ref: IndexRef::new(Arc::clone(&indexes), 0),
+				access: BTreeAccess::Equality(Value::from(*v)),
+				direction: Direction::Forward,
+			})
+			.collect()
+	}
+
+	/// Residual left after stripping, rendered for comparison. `None` means
+	/// the whole condition was consumed and no `Filter` survives.
+	fn residual(cond: &str, col: &str, branches: &[&str]) -> Option<String> {
+		strip_union_index_conditions(&parse_cond(cond), &union_paths(col, branches))
+			.map(|c| c.0.to_sql())
+	}
+
+	#[test]
+	fn strips_leaf_matching_the_branch_values() {
+		// The union was built from this leaf: branch values == literals.
+		assert_eq!(residual("tags CONTAINSANY ['a', 'b']", "tags.*", &["a", "b"]), None);
+		assert_eq!(residual("['a', 'b'] ANYINSIDE tags", "tags.*", &["a", "b"]), None);
+	}
+
+	#[test]
+	fn strips_leaf_wider_than_the_branch_values() {
+		// Every branch value is a literal, so each branch implies the leaf.
+		assert_eq!(residual("tags CONTAINSANY ['a', 'b', 'c']", "tags.*", &["a", "b"]), None);
+	}
+
+	#[test]
+	fn keeps_leaf_narrower_than_the_branch_values() {
+		// The `'b'` branch admits rows without `'a'`, so the leaf must be
+		// re-applied. This is the nested-OR shape: the union comes from the
+		// OR conjunct, and the sibling CONTAINSANY is strictly narrower.
+		assert_eq!(
+			residual(
+				"tags CONTAINSANY ['a'] AND (tags CONTAINS 'a' OR tags CONTAINS 'b')",
+				"tags.*",
+				&["a", "b"],
+			)
+			.as_deref(),
+			Some("tags CONTAINSANY ['a'] AND (tags CONTAINS 'a' OR tags CONTAINS 'b')"),
+		);
+		// Two containment siblings: the wider leaf is implied by the union,
+		// the narrower one is not.
+		assert_eq!(
+			residual(
+				"tags CONTAINSANY ['a', 'b'] AND tags CONTAINSANY ['a']",
+				"tags.*",
+				&["a", "b"]
+			)
+			.as_deref(),
+			Some("tags CONTAINSANY ['a']"),
+		);
+	}
+
+	#[test]
+	fn keeps_leaf_disjoint_from_the_branch_values() {
+		assert_eq!(
+			residual("tags CONTAINSANY ['z']", "tags.*", &["a", "b"]).as_deref(),
+			Some("tags CONTAINSANY ['z']"),
+		);
+	}
+
+	#[test]
+	fn keeps_empty_containsany_leaf() {
+		// `tags CONTAINSANY []` is always FALSE and must reject every row.
+		assert_eq!(
+			residual("tags CONTAINSANY [] AND tags CONTAINSANY ['a']", "tags.*", &["a"]).as_deref(),
+			Some("tags CONTAINSANY []"),
+		);
+	}
+
+	#[test]
+	fn keeps_containsall_leaf() {
+		// CONTAINSALL needs intersection; a union of branches cannot prove it.
+		assert_eq!(
+			residual("tags CONTAINSALL ['a', 'b']", "tags.*", &["a", "b"]).as_deref(),
+			Some("tags CONTAINSALL ['a', 'b']"),
+		);
+	}
+
+	#[test]
+	fn keeps_leaf_on_a_different_field() {
+		assert_eq!(
+			residual("other CONTAINSANY ['a', 'b']", "tags.*", &["a", "b"]).as_deref(),
+			Some("other CONTAINSANY ['a', 'b']"),
+		);
+	}
+
+	#[test]
+	fn keeps_leaf_when_index_column_is_not_an_array_flatten() {
+		// A scalar column's equality branch says `tags = 'a'`, not
+		// `'a' ∈ tags`, so it cannot imply a containment leaf.
+		assert_eq!(
+			residual("tags CONTAINSANY ['a', 'b']", "tags", &["a", "b"]).as_deref(),
+			Some("tags CONTAINSANY ['a', 'b']"),
+		);
+	}
 }
