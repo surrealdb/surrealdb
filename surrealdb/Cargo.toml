@@ -157,7 +157,6 @@ rstest.workspace = true
 serial_test.workspace = true
 temp-dir.workspace = true
 test-log = { workspace = true, features = ["trace"] }
-time = { workspace = true, features = ["serde"] }
 tokio = { workspace = true, features = ["macros", "sync", "rt-multi-thread"] }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 ulid = { workspace = true, features = ["serde"] }

@@ -348,6 +348,9 @@ jobs:
       - name: Check docs
         run: cargo make ci-docs
 
+      - name: Run doctests
+        run: cargo make ci-doctests
+
   feature-check:
     name: Check feature combinations
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}

@@ -3,27 +3,22 @@
 //! # Example
 //!
 //! ```no_run
-//! use std::borrow::Cow;
-//! use serde::{Serialize, Deserialize};
-//! use serde_json::json;
 //! use surrealdb::{Error, Surreal};
 //! use surrealdb::opt::auth::Root;
 //! use surrealdb::engine::remote::ws::Ws;
+//! use surrealdb::types::{SurrealValue, object};
 //!
-//! #[derive(Serialize, Deserialize)]
+//! #[derive(SurrealValue)]
 //! struct Person {
 //!     title: String,
 //!     name: Name,
 //!     marketing: bool,
 //! }
 //!
-//! // Pro tip: Replace String with Cow<'static, str> to
-//! // avoid unnecessary heap allocations when inserting
-//!
-//! #[derive(Serialize, Deserialize)]
+//! #[derive(SurrealValue)]
 //! struct Name {
-//!     first: Cow<'static, str>,
-//!     last: Cow<'static, str>,
+//!     first: String,
+//!     last: String,
 //! }
 //!
 //! // Install at https://surrealdb.com/install
@@ -40,8 +35,8 @@
 //!
 //!     // Signin as a namespace, database, or root user
 //!     db.signin(Root {
-//!         username: "root",
-//!         password: "root",
+//!         username: "root".into(),
+//!         password: "root".into(),
 //!     }).await?;
 //!
 //!     // Select a specific namespace / database
@@ -73,7 +68,7 @@
 //!
 //!     // Update a person record with a specific ID
 //!     let updated: Option<Person> = db.update(("person", "jaime"))
-//!         .merge(json!({"marketing": true}))
+//!         .merge(object! { marketing: true })
 //!         .await?;
 //!
 //!     // Select all people records

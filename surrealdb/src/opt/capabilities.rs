@@ -95,7 +95,7 @@ impl From<&ExperimentalFeature> for ExperimentalTarget {
 /// example:
 /// ```
 /// # use surrealdb::opt::capabilities::Capabilities;
-/// # fn cap() -> surrealdb::Result<Capabilities>{
+/// # fn cap() -> Result<Capabilities, Box<dyn std::error::Error>> {
 /// # let cap =
 /// Capabilities::none()
 ///     .with_function_allowed("http::*")?
@@ -141,7 +141,7 @@ impl From<&ExperimentalFeature> for ExperimentalTarget {
 /// # use surrealdb::opt::Config;
 /// # use surrealdb::Surreal;
 /// # #[tokio::main]
-/// # async fn main() -> surrealdb::Result<()> {
+/// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let capabilities = Capabilities::default()
 ///     .with_function_denied("http::*")?;
 /// let config = Config::default().capabilities(capabilities);

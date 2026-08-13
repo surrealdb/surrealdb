@@ -96,17 +96,17 @@ where
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
-	/// use surrealdb::RecordId;
+	/// use surrealdb::types::{RecordId, Value};
 	///
-	/// let id = RecordId::from_table_key("user", "john");
+	/// let id = RecordId::new("user", "john");
 	/// let mut response = db
 	///     .query("SELECT * FROM $id<-knows.*")
 	///     .query("SELECT * FROM $id->knows.*")
 	///     .bind(("id", id))
 	///     .await?;
 	///
-	/// let followers = response.take::<Vec<_>>(0)?;
-	/// let following = response.take::<Vec<_>>(1)?;
+	/// let followers = response.take::<Vec<Value>>(0)?;
+	/// let following = response.take::<Vec<Value>>(1)?;
 	/// # Ok(())
 	/// # }
 	/// ```
@@ -479,11 +479,11 @@ where
 	/// Binding an object
 	///
 	/// ```no_run
-	/// use serde::Serialize;
+	/// use surrealdb::types::SurrealValue;
 	///
-	/// #[derive(Serialize)]
-	/// struct User<'a> {
-	///     name: &'a str,
+	/// #[derive(SurrealValue)]
+	/// struct User {
+	///     name: String,
 	/// }
 	///
 	/// # #[tokio::main]
@@ -491,7 +491,7 @@ where
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// let response = db.query("CREATE user SET name = $name")
 	///     .bind(User {
-	///         name: "John Doe",
+	///         name: "John Doe".into(),
 	///     })
 	///     .await?;
 	/// # Ok(())
@@ -582,10 +582,9 @@ impl IndexedResults {
 	/// # Examples
 	///
 	/// ```no_run
-	/// use serde::Deserialize;
-	/// use surrealdb::RecordId;
+	/// use surrealdb::types::{RecordId, SurrealValue};
 	///
-	/// #[derive(Debug, Deserialize)]
+	/// #[derive(Debug, SurrealValue)]
 	/// struct User {
 	///     id: RecordId,
 	///     balance: String
@@ -646,12 +645,10 @@ impl IndexedResults {
 	/// # Examples
 	///
 	/// ```no_run
-	/// use serde::Deserialize;
 	/// use surrealdb::Notification;
-	/// use surrealdb::RecordId;
-	/// use surrealdb::Value;
+	/// use surrealdb::types::{RecordId, SurrealValue, Value};
 	///
-	/// #[derive(Debug, Deserialize)]
+	/// #[derive(Debug, SurrealValue)]
 	/// struct User {
 	///     id: RecordId,
 	///     balance: String
@@ -781,10 +778,9 @@ impl WithStats<IndexedResults> {
 	/// # Examples
 	///
 	/// ```no_run
-	/// use serde::Deserialize;
-	/// use surrealdb::RecordId;
+	/// use surrealdb::types::{RecordId, SurrealValue};
 	///
-	/// #[derive(Debug, Deserialize)]
+	/// #[derive(Debug, SurrealValue)]
 	/// struct User {
 	///     id: RecordId,
 	///     balance: String

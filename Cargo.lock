@@ -6873,7 +6873,6 @@ dependencies = [
  "surrealdb-types-derive",
  "temp-dir",
  "test-log",
- "time",
  "tokio",
  "tokio-tungstenite 0.28.0",
  "tokio-tungstenite-wasm",

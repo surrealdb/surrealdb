@@ -144,7 +144,8 @@ where
 	/// # use surrealdb::opt::Resource;
 	/// # use surrealdb::Result;
 	/// # use surrealdb::Notification;
-	/// # #[derive(Debug, serde::Deserialize)]
+	/// # use surrealdb::types::SurrealValue;
+	/// # #[derive(Debug, SurrealValue)]
 	/// # struct Person;
 	/// #
 	/// # #[tokio::main]

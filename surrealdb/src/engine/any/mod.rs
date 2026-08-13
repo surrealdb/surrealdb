@@ -78,7 +78,7 @@
 //!
 //! # Examples
 //!
-//! ```rust
+//! ```no_run
 //! use std::env;
 //! use surrealdb::engine::any;
 //! use surrealdb::engine::any::Any;

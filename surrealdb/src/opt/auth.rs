@@ -176,16 +176,13 @@ impl<T, P> Credentials<T> for Record<P> where P: SurrealValue {}
 /// use surrealdb::opt::auth::{Token, AccessToken, RefreshToken};
 ///
 /// // Create a token with only access token (legacy mode)
-/// let legacy_token = Token {
-///     access: AccessToken::from("access_token_string"),
-///     refresh: None,
-/// };
+/// let legacy_token = Token::from(AccessToken::from("access_token_string"));
 ///
 /// // Create a token with both access and refresh tokens
-/// let modern_token = Token {
-///     access: AccessToken::from("access_token_string"),
-///     refresh: Some(RefreshToken::from("refresh_token_string")),
-/// };
+/// let modern_token = Token::from((
+///     AccessToken::from("access_token_string"),
+///     RefreshToken::from("refresh_token_string"),
+/// ));
 ///
 /// // Access token values securely
 /// let access_value = modern_token.access.as_insecure_token();

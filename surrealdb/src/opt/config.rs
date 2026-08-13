@@ -8,8 +8,8 @@ use surrealdb_rpc::capabilities::Capabilities as CoreCapabilities;
 use crate::opt::capabilities::Capabilities;
 use crate::opt::websocket::WebsocketConfig;
 
-/// Configuration for server connection, including: strictness, notifications,
-/// query_timeout, transaction_timeout
+/// Configuration for a connection: credentials, capabilities, TLS, timeouts,
+/// and the background-task intervals the local engines run on.
 #[derive(Debug, Clone, Default)]
 pub struct Config {
 	pub(crate) ast_payload: bool,

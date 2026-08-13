@@ -138,16 +138,16 @@ where
 	///
 	/// ```no_run
 	/// use std::sync::LazyLock;
-	/// use serde::{Serialize, Deserialize};
 	/// use surrealdb::Surreal;
 	/// use surrealdb::opt::auth::Root;
+	/// use surrealdb::types::SurrealValue;
 	/// use surrealdb::engine::remote::ws::Ws;
 	/// use surrealdb::engine::remote::ws::Client;
 	///
 	/// // Creates a new static instance of the client
 	/// static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
 	///
-	/// #[derive(Serialize, Deserialize)]
+	/// #[derive(SurrealValue)]
 	/// struct Person {
 	///     name: String,
 	/// }
@@ -159,8 +159,8 @@ where
 	///
 	///     // Log into the database
 	///     DB.signin(Root {
-	///         username: "root",
-	///         password: "root",
+	///         username: "root".into(),
+	///         password: "root".into(),
 	///     }).await?;
 	///
 	///     // Select a namespace/database
@@ -180,15 +180,15 @@ where
 	///
 	/// ```no_run
 	/// use std::sync::LazyLock;
-	/// use serde::{Serialize, Deserialize};
 	/// use surrealdb::Surreal;
 	/// use surrealdb::engine::any::Any;
 	/// use surrealdb::opt::auth::Root;
+	/// use surrealdb::types::SurrealValue;
 	///
 	/// // Creates a new static instance of the client
 	/// static DB: LazyLock<Surreal<Any>> = LazyLock::new(Surreal::init);
 	///
-	/// #[derive(Serialize, Deserialize)]
+	/// #[derive(SurrealValue)]
 	/// struct Person {
 	///     name: String,
 	/// }
@@ -200,8 +200,8 @@ where
 	///
 	///     // Log into the database
 	///     DB.signin(Root {
-	///         username: "root",
-	///         password: "root",
+	///         username: "root".into(),
+	///         password: "root".into(),
 	///     }).await?;
 	///
 	///     // Select a namespace/database
@@ -350,9 +350,9 @@ where
 	/// # Examples
 	///
 	/// ```no_run
-	/// use serde::Serialize;
+	/// use surrealdb::types::SurrealValue;
 	///
-	/// #[derive(Serialize)]
+	/// #[derive(SurrealValue)]
 	/// struct Name {
 	///     first: String,
 	///     last: String,
@@ -390,9 +390,9 @@ where
 	/// # Examples
 	///
 	/// ```no_run
-	/// use serde::Serialize;
+	/// use surrealdb::types::SurrealValue;
 	///
-	/// #[derive(Serialize)]
+	/// #[derive(SurrealValue)]
 	/// struct Name {
 	///     first: String,
 	///     last: String,
@@ -429,11 +429,11 @@ where
 	/// # Examples
 	///
 	/// ```no_run
-	/// use serde::Serialize;
 	/// use surrealdb::opt::auth::Root;
 	/// use surrealdb::opt::auth::Record;
+	/// use surrealdb::types::SurrealValue;
 	///
-	/// #[derive(Debug, Serialize)]
+	/// #[derive(Debug, SurrealValue)]
 	/// struct AuthParams {
 	///     email: String,
 	///     password: String,
@@ -445,8 +445,8 @@ where
 	/// #
 	/// // Sign in as root
 	/// db.signin(Root {
-	///     username: "root",
-	///     password: "root",
+	///     username: "root".into(),
+	///     password: "root".into(),
 	/// })
 	/// .await?;
 	///
@@ -463,9 +463,9 @@ where
 	///
 	/// // Sign a user up
 	/// db.signup(Record {
-	///     namespace: "main",
-	///     database: "main",
-	///     access: "user_access",
+	///     namespace: "main".into(),
+	///     database: "main".into(),
+	///     access: "user_access".into(),
 	///     params: AuthParams {
 	///         email: "john.doe@example.com".into(),
 	///         password: "password123".into(),
@@ -498,8 +498,8 @@ where
 	/// #
 	/// // Sign in as root
 	/// db.signin(Root {
-	///     username: "root",
-	///     password: "root",
+	///     username: "root".into(),
+	///     password: "root".into(),
 	/// })
 	/// .await?;
 	///
@@ -512,9 +512,9 @@ where
 	///
 	/// // Sign a user in
 	/// db.signin(Namespace {
-	///     namespace: "main",
-	///     username: "johndoe",
-	///     password: "password123",
+	///     namespace: "main".into(),
+	///     username: "johndoe".into(),
+	///     password: "password123".into(),
 	/// }).await?;
 	/// #
 	/// # Ok(())
@@ -533,8 +533,8 @@ where
 	/// #
 	/// // Sign in as root
 	/// db.signin(Root {
-	///     username: "root",
-	///     password: "root",
+	///     username: "root".into(),
+	///     password: "root".into(),
 	/// })
 	/// .await?;
 	///
@@ -547,10 +547,10 @@ where
 	///
 	/// // Sign a user in
 	/// db.signin(Database {
-	///     namespace: "main",
-	///     database: "main",
-	///     username: "johndoe",
-	///     password: "password123",
+	///     namespace: "main".into(),
+	///     database: "main".into(),
+	///     username: "johndoe".into(),
+	///     password: "password123".into(),
 	/// }).await?;
 	/// #
 	/// # Ok(())
@@ -560,11 +560,11 @@ where
 	/// Record signin
 	///
 	/// ```no_run
-	/// use serde::Serialize;
 	/// use surrealdb::opt::auth::Root;
 	/// use surrealdb::opt::auth::Record;
+	/// use surrealdb::types::SurrealValue;
 	///
-	/// #[derive(Debug, Serialize)]
+	/// #[derive(Debug, SurrealValue)]
 	/// struct AuthParams {
 	///     email: String,
 	///     password: String,
@@ -579,9 +579,9 @@ where
 	///
 	/// // Sign a user in
 	/// db.signin(Record {
-	///     namespace: "main",
-	///     database: "main",
-	///     access: "user_access",
+	///     namespace: "main".into(),
+	///     database: "main".into(),
+	///     access: "user_access".into(),
 	///     params: AuthParams {
 	///         email: "john.doe@example.com".into(),
 	///         password: "password123".into(),
@@ -644,7 +644,9 @@ where
 	/// # Examples
 	///
 	/// ```no_run
-	/// # #[derive(serde::Deserialize)]
+	/// use surrealdb::types::{SurrealValue, Table};
+	///
+	/// # #[derive(SurrealValue)]
 	/// # struct Person;
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
@@ -665,7 +667,7 @@ where
 	/// // Get all of the results from the second query
 	/// let people: Vec<Person> = result.take(1)?;
 	///
-	/// #[derive(serde::Deserialize)]
+	/// #[derive(SurrealValue)]
 	/// struct Country {
 	///     name: String
 	/// }
@@ -678,10 +680,10 @@ where
 	///     .query("CREATE country")
 	///     .await?;
 	///
-	/// // It won't deserialize into a Country struct
+	/// // It won't convert into a Country struct, because the
+	/// // record has no `name` field
 	/// if let Err(e) = result.take::<Option<Country>>(0) {
 	///     println!("Failed to make a country: {e:#?}");
-	///     assert!(e.to_string().contains("missing field `name`"));
 	/// }
 	/// #
 	/// # Ok(())
@@ -704,7 +706,8 @@ where
 	/// ```no_run
 	/// # use futures::StreamExt;
 	/// # use surrealdb::opt::Resource;
-	/// # #[derive(serde::Deserialize)]
+	/// # use surrealdb::types::SurrealValue;
+	/// # #[derive(SurrealValue)]
 	/// # struct Person;
 	/// #
 	/// # #[tokio::main]
@@ -751,20 +754,20 @@ where
 	/// # Examples
 	///
 	/// ```no_run
-	/// use serde::Serialize;
+	/// use surrealdb::types::SurrealValue;
 	///
-	/// # #[derive(serde::Deserialize)]
+	/// # #[derive(SurrealValue)]
 	/// # struct Person;
 	/// #
-	/// #[derive(Serialize)]
+	/// #[derive(SurrealValue)]
 	/// struct Settings {
 	///     active: bool,
 	///     marketing: bool,
 	/// }
 	///
-	/// #[derive(Serialize)]
+	/// #[derive(SurrealValue)]
 	/// struct User {
-	///     name: &'static str,
+	///     name: String,
 	///     settings: Settings,
 	/// }
 	///
@@ -781,7 +784,7 @@ where
 	/// // Create a record with a specific ID
 	/// let record: Option<Person> = db.create(("person", "tobie"))
 	///     .content(User {
-	///         name: "Tobie",
+	///         name: "Tobie".into(),
 	///         settings: Settings {
 	///             active: true,
 	///             marketing: true,
@@ -806,21 +809,20 @@ where
 	/// # Examples
 	///
 	/// ```no_run
-	/// use serde::{Serialize, Deserialize};
-	/// use surrealdb::RecordId;
+	/// use surrealdb::types::{RecordId, SurrealValue};
 	///
-	/// # #[derive(Deserialize)]
+	/// # #[derive(SurrealValue)]
 	/// # struct Person;
 	/// #
-	/// #[derive(Serialize)]
+	/// #[derive(SurrealValue)]
 	/// struct Settings {
 	///     active: bool,
 	///     marketing: bool,
 	/// }
 	///
-	/// #[derive(Serialize)]
-	/// struct User<'a> {
-	///     name: &'a str,
+	/// #[derive(SurrealValue)]
+	/// struct User {
+	///     name: String,
 	///     settings: Settings,
 	/// }
 	///
@@ -834,7 +836,7 @@ where
 	/// // Insert a record with a specific ID
 	/// let person: Option<Person> = db.insert(("person", "tobie"))
 	///     .content(User {
-	///         name: "Tobie",
+	///         name: "Tobie".into(),
 	///         settings: Settings {
 	///             active: true,
 	///             marketing: true,
@@ -846,14 +848,14 @@ where
 	/// let people: Vec<Person> = db.insert("person")
 	///     .content(vec![
 	///         User {
-	///             name: "Tobie",
+	///             name: "Tobie".into(),
 	///             settings: Settings {
 	///                 active: true,
 	///                 marketing: false,
 	///             },
 	///         },
 	///         User {
-	///             name: "Jaime",
+	///             name: "Jaime".into(),
 	///             settings: Settings {
 	///                 active: true,
 	///                 marketing: true,
@@ -863,26 +865,26 @@ where
 	///     .await?;
 	///
 	/// // Insert multiple records with pre-defined IDs
-	/// #[derive(Serialize)]
-	/// struct UserWithId<'a> {
+	/// #[derive(SurrealValue)]
+	/// struct UserWithId {
 	///     id: RecordId,
-	///     name: &'a str,
+	///     name: String,
 	///     settings: Settings,
 	/// }
 	///
 	/// let people: Vec<Person> = db.insert("person")
 	///     .content(vec![
 	///         UserWithId {
-	///             id: ("person", "tobie").into(),
-	///             name: "Tobie",
+	///             id: RecordId::new("person", "tobie"),
+	///             name: "Tobie".into(),
 	///             settings: Settings {
 	///                 active: true,
 	///                 marketing: false,
 	///             },
 	///         },
 	///         UserWithId {
-	///             id: ("person", "jaime").into(),
-	///             name: "Jaime",
+	///             id: RecordId::new("person", "jaime"),
+	///             name: "Jaime".into(),
 	///             settings: Settings {
 	///                 active: true,
 	///                 marketing: true,
@@ -891,45 +893,24 @@ where
 	///     ])
 	///     .await?;
 	///
-	/// // Insert multiple records into different tables
-	/// #[derive(Serialize)]
-	/// struct WithId<'a> {
-	///     id: RecordId,
-	///     name: &'a str,
-	/// }
-	///
-	/// let people: Vec<Person> = db.insert(())
-	///     .content(vec![
-	///         WithId {
-	///             id: ("person", "tobie").into(),
-	///             name: "Tobie",
-	///         },
-	///         WithId {
-	///             id: ("company", "surrealdb").into(),
-	///             name: "SurrealDB",
-	///         },
-	///     ])
-	///     .await?;
-	///
-	///
 	/// // Insert relations
-	/// #[derive(Serialize, Deserialize)]
+	/// #[derive(SurrealValue)]
 	/// struct Founded {
-	///     #[serde(rename = "in")]
+	///     #[surreal(rename = "in")]
 	///     founder: RecordId,
-	///     #[serde(rename = "out")]
+	///     #[surreal(rename = "out")]
 	///     company: RecordId,
 	/// }
 	///
 	/// let founded: Vec<Founded> = db.insert("founded")
 	///     .relation(vec![
 	///         Founded {
-	///             founder: ("person", "tobie").into(),
-	///             company: ("company", "surrealdb").into(),
+	///             founder: RecordId::new("person", "tobie"),
+	///             company: RecordId::new("company", "surrealdb"),
 	///         },
 	///         Founded {
-	///             founder: ("person", "jaime").into(),
-	///             company: ("company", "surrealdb").into(),
+	///             founder: RecordId::new("person", "jaime"),
+	///             company: RecordId::new("company", "surrealdb"),
 	///         },
 	///     ])
 	///     .await?;
@@ -954,20 +935,20 @@ where
 	/// Replace the current document / record data with the specified data.
 	///
 	/// ```no_run
-	/// use serde::Serialize;
+	/// use surrealdb::types::SurrealValue;
 	///
-	/// # #[derive(serde::Deserialize)]
+	/// # #[derive(SurrealValue)]
 	/// # struct Person;
 	/// #
-	/// #[derive(Serialize)]
+	/// #[derive(SurrealValue)]
 	/// struct Settings {
 	///     active: bool,
 	///     marketing: bool,
 	/// }
 	///
-	/// #[derive(Serialize)]
+	/// #[derive(SurrealValue)]
 	/// struct User {
-	///     name: &'static str,
+	///     name: String,
 	///     settings: Settings,
 	/// }
 	///
@@ -984,7 +965,7 @@ where
 	/// // Update a record with a specific ID
 	/// let person: Option<Person> = db.upsert(("person", "tobie"))
 	///     .content(User {
-	///         name: "Tobie",
+	///         name: "Tobie".into(),
 	///         settings: Settings {
 	///             active: true,
 	///             marketing: true,
@@ -999,25 +980,24 @@ where
 	/// Merge the current document / record data with the specified data.
 	///
 	/// ```no_run
-	/// use serde::Serialize;
-	/// use time::OffsetDateTime;
+	/// use surrealdb::types::{Datetime, SurrealValue};
 	///
-	/// # #[derive(serde::Deserialize)]
+	/// # #[derive(SurrealValue)]
 	/// # struct Person;
 	/// #
-	/// #[derive(Serialize)]
+	/// #[derive(SurrealValue)]
 	/// struct UpdatedAt {
-	///     updated_at: OffsetDateTime,
+	///     updated_at: Datetime,
 	/// }
 	///
-	/// #[derive(Serialize)]
+	/// #[derive(SurrealValue)]
 	/// struct Settings {
 	///     active: bool,
 	/// }
 	///
-	/// #[derive(Serialize)]
+	/// #[derive(SurrealValue)]
 	/// struct User {
-	///     updated_at: OffsetDateTime,
+	///     updated_at: Datetime,
 	///     settings: Settings,
 	/// }
 	///
@@ -1031,14 +1011,14 @@ where
 	/// // Update all records in a table
 	/// let people: Vec<Person> = db.upsert("person")
 	///     .merge(UpdatedAt {
-	///         updated_at: OffsetDateTime::now_utc(),
+	///         updated_at: Datetime::now(),
 	///     })
 	///     .await?;
 	///
 	/// // Update a record with a specific ID
 	/// let person: Option<Person> = db.upsert(("person", "tobie"))
 	///     .merge(User {
-	///         updated_at: OffsetDateTime::now_utc(),
+	///         updated_at: Datetime::now(),
 	///         settings: Settings {
 	///             active: true,
 	///         },
@@ -1052,26 +1032,25 @@ where
 	/// Apply [JSON Patch](https://jsonpatch.com) changes to all records, or a specific record, in the database.
 	///
 	/// ```no_run
-	/// use serde::Serialize;
 	/// use surrealdb::opt::PatchOp;
-	/// use time::OffsetDateTime;
+	/// use surrealdb::types::{Datetime, SurrealValue};
 	///
-	/// # #[derive(serde::Deserialize)]
+	/// # #[derive(SurrealValue)]
 	/// # struct Person;
 	/// #
-	/// #[derive(Serialize)]
+	/// #[derive(SurrealValue)]
 	/// struct UpdatedAt {
-	///     updated_at: OffsetDateTime,
+	///     updated_at: Datetime,
 	/// }
 	///
-	/// #[derive(Serialize)]
+	/// #[derive(SurrealValue)]
 	/// struct Settings {
 	///     active: bool,
 	/// }
 	///
-	/// #[derive(Serialize)]
+	/// #[derive(SurrealValue)]
 	/// struct User {
-	///     updated_at: OffsetDateTime,
+	///     updated_at: Datetime,
 	///     settings: Settings,
 	/// }
 	///
@@ -1084,7 +1063,7 @@ where
 	///
 	/// // Update all records in a table
 	/// let people: Vec<Person> = db.upsert("person")
-	///     .patch(PatchOp::replace("/created_at", OffsetDateTime::now_utc()))
+	///     .patch(PatchOp::replace("/created_at", Datetime::now()))
 	///     .await?;
 	///
 	/// // Update a record with a specific ID
@@ -1113,20 +1092,20 @@ where
 	/// Replace the current document / record data with the specified data.
 	///
 	/// ```no_run
-	/// use serde::Serialize;
+	/// use surrealdb::types::SurrealValue;
 	///
-	/// # #[derive(serde::Deserialize)]
+	/// # #[derive(SurrealValue)]
 	/// # struct Person;
 	/// #
-	/// #[derive(Serialize)]
+	/// #[derive(SurrealValue)]
 	/// struct Settings {
 	///     active: bool,
 	///     marketing: bool,
 	/// }
 	///
-	/// #[derive(Serialize)]
+	/// #[derive(SurrealValue)]
 	/// struct User {
-	///     name: &'static str,
+	///     name: String,
 	///     settings: Settings,
 	/// }
 	///
@@ -1143,7 +1122,7 @@ where
 	/// // Update a record with a specific ID
 	/// let person: Option<Person> = db.update(("person", "tobie"))
 	///     .content(User {
-	///         name: "Tobie",
+	///         name: "Tobie".into(),
 	///         settings: Settings {
 	///             active: true,
 	///             marketing: true,
@@ -1158,25 +1137,24 @@ where
 	/// Merge the current document / record data with the specified data.
 	///
 	/// ```no_run
-	/// use serde::Serialize;
-	/// use time::OffsetDateTime;
+	/// use surrealdb::types::{Datetime, SurrealValue};
 	///
-	/// # #[derive(serde::Deserialize)]
+	/// # #[derive(SurrealValue)]
 	/// # struct Person;
 	/// #
-	/// #[derive(Serialize)]
+	/// #[derive(SurrealValue)]
 	/// struct UpdatedAt {
-	///     updated_at: OffsetDateTime,
+	///     updated_at: Datetime,
 	/// }
 	///
-	/// #[derive(Serialize)]
+	/// #[derive(SurrealValue)]
 	/// struct Settings {
 	///     active: bool,
 	/// }
 	///
-	/// #[derive(Serialize)]
+	/// #[derive(SurrealValue)]
 	/// struct User {
-	///     updated_at: OffsetDateTime,
+	///     updated_at: Datetime,
 	///     settings: Settings,
 	/// }
 	///
@@ -1190,14 +1168,14 @@ where
 	/// // Update all records in a table
 	/// let people: Vec<Person> = db.update("person")
 	///     .merge(UpdatedAt {
-	///         updated_at: OffsetDateTime::now_utc(),
+	///         updated_at: Datetime::now(),
 	///     })
 	///     .await?;
 	///
 	/// // Update a record with a specific ID
 	/// let person: Option<Person> = db.update(("person", "tobie"))
 	///     .merge(User {
-	///         updated_at: OffsetDateTime::now_utc(),
+	///         updated_at: Datetime::now(),
 	///         settings: Settings {
 	///             active: true,
 	///         },
@@ -1211,26 +1189,25 @@ where
 	/// Apply [JSON Patch](https://jsonpatch.com) changes to all records, or a specific record, in the database.
 	///
 	/// ```no_run
-	/// use serde::Serialize;
 	/// use surrealdb::opt::PatchOp;
-	/// use time::OffsetDateTime;
+	/// use surrealdb::types::{Datetime, SurrealValue};
 	///
-	/// # #[derive(serde::Deserialize)]
+	/// # #[derive(SurrealValue)]
 	/// # struct Person;
 	/// #
-	/// #[derive(Serialize)]
+	/// #[derive(SurrealValue)]
 	/// struct UpdatedAt {
-	///     updated_at: OffsetDateTime,
+	///     updated_at: Datetime,
 	/// }
 	///
-	/// #[derive(Serialize)]
+	/// #[derive(SurrealValue)]
 	/// struct Settings {
 	///     active: bool,
 	/// }
 	///
-	/// #[derive(Serialize)]
+	/// #[derive(SurrealValue)]
 	/// struct User {
-	///     updated_at: OffsetDateTime,
+	///     updated_at: Datetime,
 	///     settings: Settings,
 	/// }
 	///
@@ -1243,7 +1220,7 @@ where
 	///
 	/// // Update all records in a table
 	/// let people: Vec<Person> = db.update("person")
-	///     .patch(PatchOp::replace("/created_at", OffsetDateTime::now_utc()))
+	///     .patch(PatchOp::replace("/created_at", Datetime::now()))
 	///     .await?;
 	///
 	/// // Update a record with a specific ID
@@ -1270,7 +1247,8 @@ where
 	/// # Examples
 	///
 	/// ```no_run
-	/// # #[derive(serde::Deserialize)]
+	/// # use surrealdb::types::SurrealValue;
+	/// # #[derive(SurrealValue)]
 	/// # struct Person;
 	/// #
 	/// # #[tokio::main]

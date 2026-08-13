@@ -64,6 +64,27 @@ args = [
     "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-rocksdb,kv-tikv,http,scripting,jwks",
 ]
 
+# Doctests need their own task: every other test task here runs under
+# `cargo nextest`, which does not execute doctests at all.
+#
+# The feature list is `ci-docs` plus `kv-surrealkv`. A doc example behind a
+# `#[cfg(feature = ...)]` item is invisible to rustdoc unless that feature is
+# on, so every engine carrying examples has to be enabled here or its examples
+# go unchecked.
+[tasks.ci-doctests]
+category = "CI - CHECK"
+description = "Compile and run the SDK's documentation examples"
+command = "cargo"
+args = [
+    "test",
+    "--locked",
+    "--package",
+    "surrealdb",
+    "--doc",
+    "--features",
+    "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-rocksdb,kv-surrealkv,kv-tikv,http,scripting,jwks",
+]
+
 [tasks.ci-fmt]
 category = "CI - CHECK"
 description = "Run code formatting checks"
@@ -1363,6 +1384,7 @@ dependencies = [
     "ci-feature-check",
     "ci-unused-deps",
     "ci-docs",
+    "ci-doctests",
     # Workspace tests
     "ci-workspace-test",
     # Integration tests

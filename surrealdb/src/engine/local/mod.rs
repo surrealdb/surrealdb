@@ -195,21 +195,6 @@ use crate::{Connect, Surreal};
 /// # Ok(())
 /// # }
 /// ```
-///
-/// Instantiating an in-memory strict instance
-///
-/// ```
-/// use surrealdb::opt::Config;
-/// use surrealdb::Surreal;
-/// use surrealdb::engine::local::Mem;
-///
-/// # #[tokio::main]
-/// # async fn main() -> surrealdb::Result<()> {
-/// let config = Config::default().strict();
-/// let db = Surreal::new::<Mem>(config).await?;
-/// # Ok(())
-/// # }
-/// ```
 #[cfg(feature = "kv-mem")]
 #[cfg_attr(docsrs, doc(cfg(feature = "kv-mem")))]
 #[derive(Debug)]
@@ -228,21 +213,6 @@ pub struct Mem;
 /// use surrealdb::engine::local::RocksDb;
 ///
 /// let db = Surreal::new::<RocksDb>("path/to/database-folder").await?;
-/// # Ok(())
-/// # }
-/// ```
-///
-/// Instantiating a RocksDB-backed strict instance
-///
-/// ```no_run
-/// # #[tokio::main]
-/// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::opt::Config;
-/// use surrealdb::Surreal;
-/// use surrealdb::engine::local::RocksDb;
-///
-/// let config = Config::default().strict();
-/// let db = Surreal::new::<RocksDb>(("path/to/database-folder", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -267,21 +237,6 @@ pub struct RocksDb;
 /// # Ok(())
 /// # }
 /// ```
-///
-/// Instantiating an IndxDB-backed strict instance
-///
-/// ```no_run
-/// # #[tokio::main]
-/// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::opt::Config;
-/// use surrealdb::Surreal;
-/// use surrealdb::engine::local::IndxDb;
-///
-/// let config = Config::default().strict();
-/// let db = Surreal::new::<IndxDb>(("DatabaseName", config)).await?;
-/// # Ok(())
-/// # }
-/// ```
 #[cfg(feature = "kv-indxdb")]
 #[cfg_attr(docsrs, doc(cfg(feature = "kv-indxdb")))]
 #[derive(Debug)]
@@ -303,21 +258,6 @@ pub struct IndxDb;
 /// # Ok(())
 /// # }
 /// ```
-///
-/// Instantiating a TiKV strict instance
-///
-/// ```no_run
-/// # #[tokio::main]
-/// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::opt::Config;
-/// use surrealdb::Surreal;
-/// use surrealdb::engine::local::TiKv;
-///
-/// let config = Config::default().strict();
-/// let db = Surreal::new::<TiKv>(("localhost:2379", config)).await?;
-/// # Ok(())
-/// # }
-/// ```
 #[cfg(feature = "kv-tikv")]
 #[cfg_attr(docsrs, doc(cfg(feature = "kv-tikv")))]
 #[derive(Debug)]
@@ -336,21 +276,6 @@ pub struct TiKv;
 /// use surrealdb::engine::local::SurrealKv;
 ///
 /// let db = Surreal::new::<SurrealKv>("path/to/database-folder").await?;
-/// # Ok(())
-/// # }
-/// ```
-///
-/// Instantiating a SurrealKV-backed strict instance
-///
-/// ```no_run
-/// # #[tokio::main]
-/// # async fn main() -> surrealdb::Result<()> {
-/// use surrealdb::opt::Config;
-/// use surrealdb::Surreal;
-/// use surrealdb::engine::local::SurrealKv;
-///
-/// let config = Config::default().strict();
-/// let db = Surreal::new::<SurrealKv>(("path/to/database-folder", config)).await?;
 /// # Ok(())
 /// # }
 /// ```
