@@ -84,10 +84,13 @@ fn datastore_path(dir: &TempDir, arm: &str) -> String {
 	format!("surrealkv:{}", dir.path().join(arm).display())
 }
 
-/// The shapes that reach a fan-out, one per site in `exec::fan_out`.
+/// The shapes that reach a fan-out.
 ///
 /// Each is a whole statement rather than a microbenchmark of the helper, so
-/// what is measured is the cost the engine actually pays.
+/// what is measured is the cost the engine actually pays. The first group
+/// covers one overlap site each in `exec::fan_out`; `udf_dereference` covers
+/// the plan-time access-mode resolution of a user-defined call, which is what
+/// decides whether such a call may overlap at all.
 const SHAPES: &[(&str, &str)] = &[
 	// FieldPart::evaluate_batch — dereference a link, read one field.
 	("field_dereference", "SELECT link.title FROM holder"),
@@ -99,6 +102,14 @@ const SHAPES: &[(&str, &str)] = &[
 	("graph_lookup", "SELECT ->wrote->doc FROM holder"),
 	// ScalarSubquery::evaluate_batch — one subquery plan per row.
 	("scalar_subquery", "SELECT (SELECT title FROM doc WHERE id = $parent.link) AS t FROM holder"),
+	// UserDefinedFunctionExec::access_mode — the per-row subquery overlaps only
+	// because the read-only function it projects resolves read-only against the
+	// plan-time snapshot; a function that could write would pin the subquery to
+	// ReadWrite and serialise the rows.
+	(
+		"udf_dereference",
+		"SELECT (SELECT VALUE fn::title(id) FROM doc WHERE id = $parent.link) AS t FROM holder",
+	),
 ];
 
 /// A datastore seeded with `ROWS` linked records under the given threshold.
@@ -116,6 +127,14 @@ async fn seeded(dir: &TempDir, arm: &str, threshold: &str) -> Arc<Datastore> {
 
 	let ses = Session::owner().with_ns("bench").with_db("bench");
 	ds.execute("DEFINE TABLE doc SCHEMALESS; DEFINE TABLE holder SCHEMALESS;", &ses, None)
+		.await
+		.unwrap();
+
+	// A read-only function for the `udf_dereference` shape. Its body only reads,
+	// so the planner resolves the call as read-only and the subquery projecting
+	// it stays overlap-eligible; a function that could write would force the
+	// subquery to ReadWrite and suppress the fan-out.
+	ds.execute("DEFINE FUNCTION fn::title($d: record) { RETURN $d.title; };", &ses, None)
 		.await
 		.unwrap();
 
