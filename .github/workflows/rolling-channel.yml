@@ -808,9 +808,11 @@ jobs:
     # being written when the run was cancelled. The ref check keeps throwaway test
     # builds (dispatched against non-release branches) unpromotable.
     #
-    # The npm packages are REQUIRED for promotability only on a releases/* line
-    # that actually builds them — the only channel that ever PUBLISHES npm (a
-    # versioned release). There, all three npm jobs must have succeeded. Every
+    # The npm packages are REQUIRED for promotability only on a releases/* line —
+    # the only channel that ever PUBLISHES npm (a versioned release). There,
+    # npm-preflight must itself have SUCCEEDED (a failed preflight leaves
+    # build-npm empty, which must not be read as "this line has no packages"), and
+    # if it reports packages then all three npm jobs must have succeeded. Every
     # other channel does not require them:
     #   * nightly (main, scheduled) builds no npm at all;
     #   * a manual main dispatch may build npm to exercise it, but main is promoted
@@ -818,10 +820,11 @@ jobs:
     #     the engine (binary + Docker) promote;
     #   * a release line that predates the packages (build-npm == false, e.g.
     #     releases/3.1) has none to build.
-    # Requiring npm only on `build-npm == true AND releases/*` (rather than
-    # tolerating a bare 'skipped' result) still keeps a FAILED npm build — which
-    # surfaces as 'skipped' on its dependants — from slipping through as promotable
-    # on a releases/* line, while never coupling a main rebuild to npm health.
+    # Requiring explicit successes (rather than tolerating a bare 'skipped' result)
+    # keeps a FAILED npm build — which surfaces as 'skipped' on its dependants —
+    # from slipping through as promotable on a releases/* line, while never
+    # coupling a main rebuild to npm health. npm-preflight always runs on a
+    # releases/* line, so demanding its success there can never deadlock.
     if: >-
       ${{ !cancelled()
       && needs.build.result == 'success'
@@ -830,11 +833,12 @@ jobs:
       && needs.docker.result == 'success'
       && needs.check-versions.result == 'success'
       && needs.package.result == 'success'
-      && (needs.npm-preflight.outputs.build-npm != 'true'
-          || !startsWith(inputs.branch, 'releases/')
-          || (needs.build-node-addon.result == 'success'
-              && needs.build-wasm-engine.result == 'success'
-              && needs.publish-npm-s3.result == 'success'))
+      && (!startsWith(inputs.branch, 'releases/')
+          || (needs.npm-preflight.result == 'success'
+              && (needs.npm-preflight.outputs.build-npm != 'true'
+                  || (needs.build-node-addon.result == 'success'
+                      && needs.build-wasm-engine.result == 'success'
+                      && needs.publish-npm-s3.result == 'success'))))
       && inputs.engine-promotable == 'true'
       && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/releases/')) }}
     # Private runner: the manifest lives next to the rolling binaries in the

@@ -732,12 +732,20 @@ jobs:
           set -euo pipefail
           for slot in node wasm; do
             prefix="s3://${ROLLING_BUCKET}/${S3_PREFIX}/npm/${slot}/"
-            if ! listing="$(aws s3 ls "$prefix")"; then
-              echo "::error::Could not list ${prefix} (transient S3 or credentials error). Re-run this job."
+            # `aws s3 ls` exits 1 with an EMPTY listing when the prefix simply holds
+            # no objects, and >1 (2, 25x) for a real failure — bad credentials, an
+            # S3 error, a missing bucket. So the two cases are told apart by the
+            # exit status; an empty listing alone never means "the call failed".
+            set +e
+            listing="$(aws s3 ls "$prefix")"
+            rc=$?
+            set -e
+            if [ "$rc" -gt 1 ]; then
+              echo "::error::Could not list ${prefix} — aws exited ${rc} (transient S3 or credentials error). Re-run this job."
               exit 1
             fi
             if [ -z "$listing" ]; then
-              echo "::error::No prebuilt @surrealdb/${slot}-native bundle under ${S3_PREFIX}/npm/${slot}/. The commit's rolling build did not store one (built before npm moved into the rolling build, or the bundle was pruned). Re-run rolling-build.yml for this commit."
+              echo "::error::No prebuilt @surrealdb/${slot}-native bundle under ${S3_PREFIX}/npm/${slot}/. The commit's rolling build did not store one (built before npm moved into the rolling build, or the bundle was pruned). Rebuild it by dispatching rolling-build.yml FROM A REF THAT CARRIES THE NPM BUILD JOBS (e.g. main) with git-sha set to this commit: dispatching from the release line itself re-runs that line's own rolling-channel.yml, which may not build npm at all."
               exit 1
             fi
             aws s3 cp --recursive "$prefix" "staged/${slot}/"

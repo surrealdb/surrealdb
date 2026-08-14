@@ -46,8 +46,11 @@ async function workspaceVersion(): Promise<string> {
 /**
  * Is this exact version already on the npm registry? Queries the public registry
  * (no auth needed). A 404 on the package means it does not exist yet (a first
- * publish); any other non-OK status is treated as "unknown" so the publish still
- * proceeds and npm's own write-once guard has the final say.
+ * publish); any other non-OK status — and any unreadable response body — is
+ * treated as "unknown" so the publish still proceeds and npm's own write-once
+ * guard has the final say. Never throws: the caller uses it to decide whether to
+ * skip or to forgive a publish, and must not lose that publish's exit code to a
+ * registry hiccup.
  */
 async function isPublished(pkgName: string, pkgVersion: string): Promise<boolean> {
 	const url = `https://registry.npmjs.org/${pkgName.replace("/", "%2F")}`;
@@ -63,8 +66,13 @@ async function isPublished(pkgName: string, pkgVersion: string): Promise<boolean
 		console.warn(`⚠️ Registry check for ${pkgName} returned HTTP ${res.status}; proceeding with publish.`);
 		return false;
 	}
-	const doc = (await res.json()) as { versions?: Record<string, unknown> };
-	return Boolean(doc.versions?.[pkgVersion]);
+	try {
+		const doc = (await res.json()) as { versions?: Record<string, unknown> };
+		return Boolean(doc.versions?.[pkgVersion]);
+	} catch (err) {
+		console.warn(`⚠️ Could not read the registry response for ${pkgName} (${err}); proceeding with publish.`);
+		return false;
+	}
 }
 
 const version = process.env.SURREAL_VERSION || (await workspaceVersion());
