@@ -50,7 +50,7 @@ use crate::catalog::providers::{
 	CatalogProvider, DatabaseProvider, NamespaceProvider, NodeProvider, RootProvider,
 	TableProvider, UserProvider,
 };
-use crate::catalog::{Index, NodeLiveQuery, StoredSubscriptionDefinition};
+use crate::catalog::{Index, NodeLiveQuery};
 use crate::config::RuntimeConfig;
 use crate::ctx::{CancelHandle, Context};
 #[cfg(feature = "jwks")]
@@ -88,7 +88,7 @@ use crate::key::schema::{
 	DbRoot, IdxRoot, IndexCompactionIxPrefix, IndexCompactionKey, IndexCompactionPrefix,
 	MigrationKey, MigrationPrefix, NodeKey, NodeLiveQueryKey, NodeLiveQueryPrefix, NsRoot,
 	ReclaimKey, ReclaimPrefix, SessionKey, SessionPrefix, StorageVersionKey, SubscriptionKey,
-	SubscriptionPrefix, VersionHistoryPrefix, VersionKey,
+	VersionHistoryPrefix, VersionKey,
 };
 use crate::key::{KVKey, KVKeyDecode, KVSubspace, KVValue, Key, KeyRange, RawRange, Resumable};
 use crate::kvs::cache::ds::DatastoreCache;
@@ -1629,21 +1629,48 @@ impl Datastore {
 		if !inactive.is_empty() {
 			// Open a writeable transaction
 			let txn = self.transaction(Write).await?;
+			// Whether any candidate still qualified once re-read below.
+			let mut expired = false;
 			// Archive the inactive nodes
 			for nd in inactive.iter() {
-				// Log the live query scanning
-				trace!(target: TARGET, id = %nd.id, "Archiving node in the cluster");
-				// Mark the node as archived
-				let node = nd.archive();
 				// Get the key for the node entry
 				let key = NodeKey {
 					nd: nd.id,
 				};
+				// The candidate set was sampled in an earlier transaction. A node
+				// id that survives a restart can be re-registered inside that
+				// window — `insert_node` upserts an active row under the same id,
+				// with a fresh heartbeat — and archiving it here would retire a
+				// live member. The write is therefore conditional on the heartbeat
+				// the scan saw: a row whose heartbeat has moved has re-registered
+				// or refreshed itself, and is no longer the row that expired.
+				//
+				// That closes the window in both directions. A commit that landed
+				// before this transaction's snapshot is visible to this re-read,
+				// and one racing this transaction writes the same key, which the
+				// engine's write-conflict detection rejects.
+				let current = catch!(txn, txn.get_key(&key, None).await);
+				let Some(current) =
+					current.filter(|n| n.is_active() && n.heartbeat == nd.heartbeat)
+				else {
+					trace!(target: TARGET, id = %nd.id, "Skipping node that is no longer expired");
+					continue;
+				};
+				// Log the node archival
+				trace!(target: TARGET, id = %nd.id, "Archiving node in the cluster");
+				// Mark the node as archived, carrying the re-read row forward so
+				// no field of the stale snapshot is written back
+				let node = current.archive();
 				// Update the node entry
 				catch!(txn, txn.replace_key(&key, &node).await);
+				expired = true;
 			}
-			// Commit the changes
-			catch!(txn, txn.commit().await);
+			// Commit the changes, or release the transaction when every candidate
+			// turned out to be live after all
+			match expired {
+				true => catch!(txn, txn.commit().await),
+				false => catch!(txn, txn.cancel().await),
+			}
 		}
 		// Everything was successful
 		Ok(())
@@ -1678,6 +1705,23 @@ impl Datastore {
 				.range()?,
 			);
 			let txn = self.transaction(Write).await?;
+			{
+				// The archived set was sampled in an earlier transaction. A node
+				// id that survives a restart can be re-registered inside that
+				// window — `insert_node` upserts an active row under the same id
+				// — and reaping it here would delete a live member along with the
+				// live queries it has already registered. Re-read the row in this
+				// transaction and only proceed while it is still archived.
+				let key = NodeKey {
+					nd: *id,
+				};
+				let node = catch!(txn, txn.get_key(&key, None).await);
+				if !node.is_some_and(|nd| nd.is_archived()) {
+					trace!(target: TARGET, id = %id, "Skipping node that is no longer archived");
+					catch!(txn, txn.cancel().await);
+					continue;
+				}
+			}
 			{
 				// Log the live query scanning
 				trace!(target: TARGET, id = %id, "Deleting live queries for node");
@@ -2091,117 +2135,6 @@ impl Datastore {
 			yield_now!();
 		}
 		// Everything was successful
-		Ok(())
-	}
-
-	/// Clean up all other miscellaneous data.
-	///
-	/// This function should be run periodically at an interval.
-	///
-	/// This function clears up all data which might have been missed from
-	/// previous cleanup runs, or when previous runs failed. This function
-	/// currently deletes all live queries, for nodes which no longer exist
-	/// in the cluster, from all namespaces, databases, and tables. It uses
-	/// a number of transactions in order to prevent failure of large or
-	/// long-running transactions on distributed storage engines.
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn garbage_collect(&self) -> Result<()> {
-		// Log the node deletion
-		trace!(target: TARGET, "Garbage collecting all miscellaneous data");
-		// Fetch archived nodes
-		let archived = {
-			let txn = self.transaction(Read).await?;
-			let nds = catch!(txn, txn.all_nodes().await);
-			txn.cancel().await?;
-			// Filter the archived nodes
-			nds.iter().filter_map(Node::archived).collect::<Vec<_>>()
-		};
-		// Fetch all namespaces
-		let nss = {
-			let txn = self.transaction(Read).await?;
-			let res = catch!(txn, txn.all_ns(None).await);
-			txn.cancel().await?;
-			res
-		};
-		// Loop over all namespaces
-		for ns in nss.iter() {
-			// Log the namespace
-			trace!(target: TARGET, "Garbage collecting data in namespace {}", ns.name);
-			// Fetch all databases
-			let dbs = {
-				let txn = self.transaction(Read).await?;
-				let res = catch!(txn, txn.all_db(ns.namespace_id, None).await);
-				txn.cancel().await?;
-				res
-			};
-			// Loop over all databases
-			for db in dbs.iter() {
-				// Log the namespace
-				trace!(target: TARGET, "Garbage collecting data in database {}/{}", ns.name, db.name);
-				// Fetch all tables
-				let tbs = {
-					let txn = self.transaction(Read).await?;
-					let res = catch!(txn, txn.all_tb(ns.namespace_id, db.database_id, None).await);
-					txn.cancel().await?;
-					res
-				};
-				// Loop over all tables
-				for tb in tbs.iter() {
-					// Log the namespace
-					trace!(target: TARGET, "Garbage collecting data in table {}/{}/{}", ns.name, db.name, tb.name);
-					// Iterate over the table live queries
-					let tb_name = tb.name.clone();
-					let mut next = Some(
-						SubscriptionPrefix {
-							ns: db.namespace_id,
-							db: db.database_id,
-							tb: Cow::Borrowed(&tb_name),
-						}
-						.range()?,
-					);
-					let txn = self.transaction(Write).await?;
-					while let Some(rng) = next {
-						// Fetch the next batch of keys and values
-						let max = NORMAL_BATCH_SIZE;
-						let res = catch!(txn, txn.batch_keys_vals(rng.clone(), max, None).await);
-						// A full page carries a continuation: resume the range
-						// after the last key this page returned.
-						next = match (&res.next, res.result.last()) {
-							(Some(_), Some((k, _))) => {
-								Some(rng.resume_after(k, Direction::Forward))
-							}
-							_ => None,
-						};
-						for (k, v) in res.result.iter() {
-							// Decode the LIVE query statement
-							let stm: StoredSubscriptionDefinition =
-								KVValue::kv_decode_value(v, ())?;
-							// Get the node id and the live query id
-							let (nid, lid) = (stm.node, stm.id);
-							// Check that the node for this query is archived
-							if archived.contains(&stm.node) {
-								// Get the key for this node live query
-								let tlq = catch!(txn, SubscriptionKey::decode_key(k));
-								// Get the key for this table live query
-								let nlq = NodeLiveQueryKey {
-									nd: nid,
-									lq: lid,
-								};
-								// Delete the node live query
-								catch!(txn, txn.clr_key(&nlq).await);
-								// Delete the table live query
-								catch!(txn, txn.clr_key(&tlq).await);
-							}
-						}
-						// Pause and yield execution
-						yield_now!();
-					}
-					// Commit the changes
-					catch!(txn, txn.commit().await);
-				}
-			}
-		}
-		// All ok
 		Ok(())
 	}
 
