@@ -61,7 +61,7 @@ authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 edition = "2024"
 license-file = "LICENSE"
 publish = false
-version = "3.3.0-beta.2"
+version = "3.3.0-beta.3"
 description = "A scalable, distributed, collaborative, document-graph database, for the realtime web"
 repository = "https://github.com/surrealdb/surrealdb"
 homepage = "https://github.com/surrealdb/surrealdb"
@@ -76,48 +76,48 @@ categories = ["database-implementations", "data-structures", "embedded"]
 
 [workspace.dependencies]
 # SurrealDB crates
-surrealdb = { version = "3.3.0-beta.2", path = "surrealdb", default-features = false }
-surrealdb-catalog = { version = "3.3.0-beta.2", path = "surrealdb/catalog" }
-surrealdb-expr = { version = "3.3.0-beta.2", path = "surrealdb/expr" }
-surrealdb-gql = { version = "3.3.0-beta.2", path = "surrealdb/gql" }
-surrealdb-sql = { version = "3.3.0-beta.2", path = "surrealdb/sql" }
-surrealdb-strand = { version = "3.3.0-beta.2", path = "surrealdb/strand", default-features = false }
-surrealdb-syn = { version = "3.3.0-beta.2", path = "surrealdb/syn" }
-surrealdb-core = { version = "3.3.0-beta.2", path = "surrealdb/core", default-features = false }
-surrealdb-embedded = { version = "3.3.0-beta.2", path = "surrealdb/embedded", default-features = false }
-surrealdb-datastore = { version = "3.3.0-beta.2", path = "surrealdb/datastore" }
-surrealdb-engine-api = { version = "3.3.0-beta.2", path = "surrealdb/engine-api" }
-surrealdb-engine-local = { version = "3.3.0-beta.2", path = "surrealdb/engine-local", default-features = false }
-surrealdb-server = { version = "3.3.0-beta.2", path = "surrealdb/server", default-features = false }
-surrealdb-mcp = { version = "3.3.0-beta.2", path = "surrealdb/mcp", default-features = false }
-surrealdb-types = { version = "3.3.0-beta.2", path = "surrealdb/types" }
-surrealdb-types-derive = { version = "3.3.0-beta.2", path = "surrealdb/types/derive" }
-ast = { version = "3.3.0-beta.2", package = "surrealdb-ast", path = "surrealdb/ast" }
-token = { version = "3.3.0-beta.2", package = "surrealdb-token", path = "surrealdb/token" }
-parser = { version = "3.3.0-beta.2", package = "surrealdb-parser", path = "surrealdb/parser" }
-parse-common = { version = "3.3.0-beta.2", package = "surrealdb-parse-common", path = "surrealdb/parse-common" }
-sqon = { version = "3.3.0-beta.2", package = "surrealdb-sqon", path = "surrealdb/sqon" }
-common = { version = "3.3.0-beta.2", package = "surrealdb-common", path = "surrealdb/common" }
-surrealdb-cnf = { version = "3.3.0-beta.2", path = "surrealdb/cnf" }
-surrealdb-runtime = { version = "3.3.0-beta.2", path = "surrealdb/runtime" }
-surrealdb-rpc = { version = "3.3.0-beta.2", path = "surrealdb/rpc" }
-surrealdb-iam = { version = "3.3.0-beta.2", path = "surrealdb/iam" }
-surrealdb-idx = { version = "3.3.0-beta.2", path = "surrealdb/idx" }
-surrealdb-observe = { version = "3.3.0-beta.2", path = "surrealdb/observe" }
-surrealdb-keyspace-macro = { version = "3.3.0-beta.2", path = "surrealdb/keyspace-macro" }
-surrealdb-kvs = { version = "3.3.0-beta.2", path = "surrealdb/kvs" }
-surrealdb-kvs-any = { version = "3.3.0-beta.2", path = "surrealdb/kvs-any", default-features = false }
-surrealdb-kvs-indxdb = { version = "3.3.0-beta.2", path = "surrealdb/kvs-indxdb" }
-surrealdb-kvs-mem = { version = "3.3.0-beta.2", path = "surrealdb/kvs-mem" }
-surrealdb-kvs-rocksdb = { version = "3.3.0-beta.2", path = "surrealdb/kvs-rocksdb" }
-surrealdb-kvs-surrealkv = { version = "3.3.0-beta.2", path = "surrealdb/kvs-surrealkv" }
+surrealdb = { version = "3.3.0-beta.3", path = "surrealdb", default-features = false }
+surrealdb-catalog = { version = "3.3.0-beta.3", path = "surrealdb/catalog" }
+surrealdb-expr = { version = "3.3.0-beta.3", path = "surrealdb/expr" }
+surrealdb-gql = { version = "3.3.0-beta.3", path = "surrealdb/gql" }
+surrealdb-sql = { version = "3.3.0-beta.3", path = "surrealdb/sql" }
+surrealdb-strand = { version = "3.3.0-beta.3", path = "surrealdb/strand", default-features = false }
+surrealdb-syn = { version = "3.3.0-beta.3", path = "surrealdb/syn" }
+surrealdb-core = { version = "3.3.0-beta.3", path = "surrealdb/core", default-features = false }
+surrealdb-embedded = { version = "3.3.0-beta.3", path = "surrealdb/embedded", default-features = false }
+surrealdb-datastore = { version = "3.3.0-beta.3", path = "surrealdb/datastore" }
+surrealdb-engine-api = { version = "3.3.0-beta.3", path = "surrealdb/engine-api" }
+surrealdb-engine-local = { version = "3.3.0-beta.3", path = "surrealdb/engine-local", default-features = false }
+surrealdb-server = { version = "3.3.0-beta.3", path = "surrealdb/server", default-features = false }
+surrealdb-mcp = { version = "3.3.0-beta.3", path = "surrealdb/mcp", default-features = false }
+surrealdb-types = { version = "3.3.0-beta.3", path = "surrealdb/types" }
+surrealdb-types-derive = { version = "3.3.0-beta.3", path = "surrealdb/types/derive" }
+ast = { version = "3.3.0-beta.3", package = "surrealdb-ast", path = "surrealdb/ast" }
+token = { version = "3.3.0-beta.3", package = "surrealdb-token", path = "surrealdb/token" }
+parser = { version = "3.3.0-beta.3", package = "surrealdb-parser", path = "surrealdb/parser" }
+parse-common = { version = "3.3.0-beta.3", package = "surrealdb-parse-common", path = "surrealdb/parse-common" }
+sqon = { version = "3.3.0-beta.3", package = "surrealdb-sqon", path = "surrealdb/sqon" }
+common = { version = "3.3.0-beta.3", package = "surrealdb-common", path = "surrealdb/common" }
+surrealdb-cnf = { version = "3.3.0-beta.3", path = "surrealdb/cnf" }
+surrealdb-runtime = { version = "3.3.0-beta.3", path = "surrealdb/runtime" }
+surrealdb-rpc = { version = "3.3.0-beta.3", path = "surrealdb/rpc" }
+surrealdb-iam = { version = "3.3.0-beta.3", path = "surrealdb/iam" }
+surrealdb-idx = { version = "3.3.0-beta.3", path = "surrealdb/idx" }
+surrealdb-observe = { version = "3.3.0-beta.3", path = "surrealdb/observe" }
+surrealdb-keyspace-macro = { version = "3.3.0-beta.3", path = "surrealdb/keyspace-macro" }
+surrealdb-kvs = { version = "3.3.0-beta.3", path = "surrealdb/kvs" }
+surrealdb-kvs-any = { version = "3.3.0-beta.3", path = "surrealdb/kvs-any", default-features = false }
+surrealdb-kvs-indxdb = { version = "3.3.0-beta.3", path = "surrealdb/kvs-indxdb" }
+surrealdb-kvs-mem = { version = "3.3.0-beta.3", path = "surrealdb/kvs-mem" }
+surrealdb-kvs-rocksdb = { version = "3.3.0-beta.3", path = "surrealdb/kvs-rocksdb" }
+surrealdb-kvs-surrealkv = { version = "3.3.0-beta.3", path = "surrealdb/kvs-surrealkv" }
 # Dev-only, `publish = false`: declared WITHOUT a version so cargo strips it
 # from published manifests. A version here would make cargo package/publish
 # demand it from crates.io, where a publish=false crate can never appear -
 # breaking every crate that dev-depends on it (surrealdb-kvs-any, -kvs-indxdb).
 surrealdb-kvs-test = { path = "surrealdb/kvs-test" }
-surrealdb-kvs-tikv = { version = "3.3.0-beta.2", path = "surrealdb/kvs-tikv" }
-surrealdb-collections = { version = "3.3.0-beta.2", path = "surrealdb/collections" }
+surrealdb-kvs-tikv = { version = "3.3.0-beta.3", path = "surrealdb/kvs-tikv" }
+surrealdb-collections = { version = "3.3.0-beta.3", path = "surrealdb/collections" }
 
 # SurrealML crates
 surrealml-core = { version = "0.1", path = "surrealml/core" }
