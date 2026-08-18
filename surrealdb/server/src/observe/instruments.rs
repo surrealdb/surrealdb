@@ -117,12 +117,6 @@ pub mod names {
 	pub static STATEMENT_TOTAL: &str = "surrealdb.statement";
 	pub static STATEMENT_DURATION: &str = "surrealdb.statement.duration";
 	pub static STATEMENT_ROWS: &str = "surrealdb.statement.rows";
-	/// Data-modifying statements run inside a create/update/delete `PERMISSIONS`
-	/// predicate permitted only by the transitional `mutable_permissions`
-	/// capability. Emitted without tenant labels — an instance-level usage
-	/// signal for tracking reliance on the capability before its removal.
-	pub static STATEMENT_MUTABLE_PERMISSION_WRITES: &str =
-		"surrealdb.statement.mutable_permission_writes";
 
 	// --- Query (scope: QUERY) ------------------------------------------
 
@@ -319,7 +313,6 @@ mod tests {
 			names::SESSION_TOTAL,
 			names::SLOW_QUERY_TOTAL,
 			names::STATEMENT_DURATION,
-			names::STATEMENT_MUTABLE_PERMISSION_WRITES,
 			names::STATEMENT_ROWS,
 			names::STATEMENT_TOTAL,
 			names::TRANSACTION_CONFLICTS,

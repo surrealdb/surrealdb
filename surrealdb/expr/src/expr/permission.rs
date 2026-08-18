@@ -21,19 +21,6 @@ pub enum Permission {
 }
 
 impl Permission {
-	/// Whether this permission clause directly contains a data-modifying
-	/// statement, which is not allowed (GHSA-66r2-5gwj-gxm2).
-	///
-	/// Reads the guard expression directly. The stored twin has to compile its
-	/// text first and treat a parse failure as unsafe; a statement carries the
-	/// expression it parsed, so there is nothing that can fail here.
-	pub fn has_direct_write(&self) -> bool {
-		match self {
-			Permission::None | Permission::Full => false,
-			Permission::Specific(expr) => expr.has_direct_write(),
-		}
-	}
-
 	/// Lowers to the sql-side permission for embedding in a
 	/// `sql::Define*Statement` at the INFO/export rendering boundary.
 	pub fn to_sql_permission(&self) -> sql::Permission {
@@ -121,16 +108,5 @@ impl Permission {
 	/// form.
 	pub fn is_specific(&self) -> bool {
 		matches!(self, Self::Specific(_))
-	}
-}
-
-impl Permissions {
-	/// Whether any of the select/create/update/delete clauses directly contains
-	/// a data-modifying statement (GHSA-66r2-5gwj-gxm2).
-	pub fn has_direct_write(&self) -> bool {
-		self.select.has_direct_write()
-			|| self.create.has_direct_write()
-			|| self.update.has_direct_write()
-			|| self.delete.has_direct_write()
 	}
 }

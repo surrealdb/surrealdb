@@ -10,7 +10,6 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::exe::FlowResultExt;
-use crate::exec::Error as ExecError;
 use crate::expr::Base;
 use crate::expr::statements::define::DefineKind;
 use crate::expr::statements::define::bucket::DefineBucketStatement;
@@ -31,21 +30,6 @@ pub(crate) async fn define_bucket_statement_compute(
 	ctx.is_allowed(opt, Action::Edit, ResourceKind::Bucket, Base::Db)?;
 	// Process the name
 	let name = expr_to_ident(stk, ctx, opt, doc, &this.name, "bucket name").await?;
-	// A PERMISSIONS clause must not perform writes (GHSA-66r2-5gwj-gxm2).
-	if this.permissions.has_direct_write() {
-		bail!(ExecError::PermissionClauseNotReadonly {
-			kind: "bucket",
-			name: name.clone(),
-		});
-	}
-	crate::fnc::mutability::ensure_guards_call_read_only(
-		ctx,
-		opt,
-		"bucket",
-		name.clone(),
-		[&this.permissions],
-	)
-	.await?;
 	// Fetch the transaction
 	let txn = ctx.tx();
 	let (ns, db) = ctx.get_ns_db_ids(opt).await?;

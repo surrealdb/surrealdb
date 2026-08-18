@@ -45,9 +45,6 @@ pub enum ExperimentalFeature {
 	Surrealism,
 	/// Enable the GQL query language.
 	Gql,
-	/// Permit data-modifying statements in `PERMISSIONS FOR create/update/delete`
-	/// clauses. Transitional; `SELECT` permission clauses stay read-only.
-	MutablePermissions,
 }
 
 /// Not public API
@@ -58,7 +55,6 @@ impl From<&ExperimentalFeature> for ExperimentalTarget {
 			ExperimentalFeature::Files => ExperimentalTarget::Files,
 			ExperimentalFeature::Surrealism => ExperimentalTarget::Surrealism,
 			ExperimentalFeature::Gql => ExperimentalTarget::Gql,
-			ExperimentalFeature::MutablePermissions => ExperimentalTarget::MutablePermissions,
 		}
 	}
 }

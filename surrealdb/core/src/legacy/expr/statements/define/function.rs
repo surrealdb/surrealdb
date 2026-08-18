@@ -7,7 +7,6 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::exe::FlowResultExt;
-use crate::exec::Error as ExecError;
 use crate::expr::Base;
 use crate::expr::statements::define::DefineKind;
 use crate::expr::statements::define::function::DefineFunctionStatement;
@@ -31,21 +30,6 @@ pub(crate) async fn define_function_statement_compute(
 		&this.graphql_alias,
 		"function",
 	)?;
-	// A PERMISSIONS clause must not perform writes (GHSA-66r2-5gwj-gxm2).
-	if this.permissions.has_direct_write() {
-		bail!(ExecError::PermissionClauseNotReadonly {
-			kind: "function",
-			name: format!("fn::{}", this.name),
-		});
-	}
-	crate::fnc::mutability::ensure_guards_call_read_only(
-		ctx,
-		opt,
-		"function",
-		format!("fn::{}", this.name),
-		[&this.permissions],
-	)
-	.await?;
 	// Fetch the transaction
 	let txn = ctx.tx();
 	// Check if the definition exists
@@ -65,19 +49,6 @@ pub(crate) async fn define_function_statement_compute(
 			}
 		}
 	}
-
-	// A body that writes is fine on its own — but not while COMPUTED fields
-	// or permission guards depend on this name staying read-only, since those
-	// evaluate it on reads under a frame that refuses writes. Checked after
-	// the existence handling so an `IF NOT EXISTS` no-op stays a no-op.
-	crate::fnc::mutability::ensure_function_stays_read_only_for_consumers(
-		ctx,
-		opt,
-		&this.name,
-		&this.block,
-		&this.permissions,
-	)
-	.await?;
 
 	// Process the statement
 	let (ns_name, db_name) = opt.ns_db()?;

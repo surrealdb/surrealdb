@@ -39,18 +39,6 @@ pub struct Options {
 	/// reached from one is a side effect the reading statement never asked for.
 	/// See [`NoWriteFrame`] and `SECURITY_GUIDE.md`.
 	pub(crate) no_write: Option<NoWriteFrame>,
-	/// Set while evaluating a `create`/`update`/`delete` `PERMISSIONS` predicate
-	/// with the `mutable_permissions` capability enabled — the transitional
-	/// frame that permits writes GHSA-66r2-5gwj-gxm2 would otherwise block.
-	///
-	/// Purely observational: it does not gate execution (that is `no_write`'s
-	/// job — this frame leaves it unset). A data-modifying statement reached
-	/// under it is recorded on the per-statement counters as usage of the
-	/// capability. Propagates into the predicate's sub-evaluations (nested
-	/// subqueries and called function bodies) so their writes count too;
-	/// naturally scoped, because it is only ever set on the predicate frame and
-	/// callers resume their own `Options` once the predicate returns.
-	pub(crate) mutable_permission_predicate: bool,
 	/// Should we process field queries?
 	pub(crate) import: bool,
 	/// The data version as a timestamp
@@ -69,19 +57,22 @@ pub enum Force {
 /// data-modifying statement must be rejected.
 ///
 /// Each variant is a body the database evaluates on behalf of a reader who did
-/// not write it and cannot see it. Both have a definition-time check that
-/// rejects a mutation in the body itself; neither check can see through a call
-/// to a user-defined function, whose body is stored separately and may be
-/// redefined afterwards. This frame is the runtime half of each pair.
+/// not write it and cannot see it. This frame is where the rejection happens:
+/// it fires at the point a write is actually reached, so it holds regardless of
+/// how many function calls deep the write sits or which branch selected it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum NoWriteFrame {
-	/// A stored `PERMISSIONS` predicate. Evaluated with `perms` disabled so it
-	/// does not recurse into its own table's gates, which is exactly why it
-	/// must not be able to write (GHSA-66r2-5gwj-gxm2).
+	/// A stored `SELECT` `PERMISSIONS` predicate. Evaluated with `perms`
+	/// disabled so it does not recurse into its own table's gates, which is
+	/// exactly why it must not be able to write (GHSA-66r2-5gwj-gxm2). The
+	/// create/update/delete clauses are reached from a write and use
+	/// [`Options::new_for_mutable_permission_predicate`] instead.
 	PermissionPredicate,
 	/// A `COMPUTED` field body. Evaluated on every read of the field, under the
 	/// definer's auth rather than the reader's, so a write here would let a
-	/// read mutate the database as somebody else.
+	/// read mutate the database as somebody else. `DEFINE FIELD` rejects a
+	/// mutation written directly into the body; this frame covers the writes
+	/// that only a call can reach.
 	ComputedField,
 }
 
@@ -93,7 +84,6 @@ impl Options {
 			dive: config.max_computation_depth,
 			perms: true,
 			no_write: None,
-			mutable_permission_predicate: false,
 			force: Force::None,
 			import: false,
 			auth: Arc::new(Auth::default()),
@@ -242,23 +232,17 @@ impl Options {
 	}
 
 	/// Create a new Options object for evaluating a `PERMISSIONS FOR
-	/// create/update/delete` predicate when the `mutable_permissions` capability
-	/// is enabled.
+	/// create/update/delete` predicate.
 	///
 	/// Like [`Self::new_for_permission_predicate`] it disables permission
-	/// recursion, but it leaves `no_write` unset so a data-modifying statement in
-	/// the predicate runs instead of being rejected. This reverses part of the
-	/// GHSA-66r2-5gwj-gxm2 block for those write-triggered clauses; `SELECT`
-	/// predicates never use it. The write runs with `perms` disabled (like the
-	/// blocking frame), so an enabled server accepts the pre-fix escalation
-	/// surface for these clauses — the documented cost of the transitional
-	/// capability. Callers gate this on the capability; when it is off they use
-	/// [`Self::new_for_permission_predicate`] instead.
-	pub fn new_for_permission_predicate_allow_writes(&self) -> Self {
+	/// recursion, but it leaves `no_write` unset so a data-modifying statement
+	/// in the predicate runs instead of being rejected. Only the clauses a
+	/// *write* triggers use this frame; a `SELECT` predicate never does. The
+	/// write runs with `perms` disabled, like the blocking frame.
+	pub fn new_for_mutable_permission_predicate(&self) -> Self {
 		Self {
 			perms: false,
 			no_write: None,
-			mutable_permission_predicate: true,
 			..self.clone()
 		}
 	}

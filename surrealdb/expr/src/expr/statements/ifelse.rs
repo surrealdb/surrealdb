@@ -17,12 +17,6 @@ impl IfelseStatement {
 		self.exprs.iter().all(|x| x.0.read_only() && x.1.read_only())
 			&& self.close.as_ref().map(|x| x.read_only()).unwrap_or(true)
 	}
-
-	/// Check if any branch directly contains a data-modifying statement.
-	pub fn has_direct_write(&self) -> bool {
-		self.exprs.iter().any(|x| x.0.has_direct_write() || x.1.has_direct_write())
-			|| self.close.as_ref().map(|x| x.has_direct_write()).unwrap_or(false)
-	}
 }
 
 impl ToSql for IfelseStatement {

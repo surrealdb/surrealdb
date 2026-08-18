@@ -1,17 +1,14 @@
 //! Whether a stored expression can modify data anywhere in its own tree.
 //!
-//! Contrast with [`Expr::has_direct_write`], which inspects only the expression
-//! itself and its immediate combinators: it treats subqueries, idioms and
-//! closures as opaque because the `PERMISSIONS` clauses it guards have a runtime
-//! backstop (`Options::new_for_permission_predicate`). A `COMPUTED` field body
-//! has no such backstop — it is evaluated on every read of the field — so its
-//! check walks the whole tree.
+//! Used at definition time to reject a `COMPUTED` field body that writes: the
+//! walk descends into subqueries, idioms, blocks and closure bodies, so a
+//! mutation anywhere inside the body itself is found.
 //!
-//! A function *call* stays opaque in both: the callee's body lives in the
-//! catalog, which this crate cannot see. Callers that need to see through
-//! calls extract [`crate::expr::function_facts::FunctionFacts`] and resolve
-//! them against a catalog snapshot instead. Call *arguments* are evaluated in
-//! place and are therefore walked.
+//! A function *call* stays opaque: the callee's body lives in the catalog,
+//! which this crate cannot see, and whether it writes may depend on which
+//! branch the arguments select. Those are left to the runtime write refusal
+//! (`Options::no_write`), which fires at the point a write is actually
+//! reached. Call *arguments* are evaluated in place and are therefore walked.
 
 use crate::expr::Expr;
 use crate::expr::visit::{Visit, Visitor};
@@ -96,11 +93,9 @@ impl Expr {
 	/// looking through subqueries, idiom parts, blocks and closure bodies.
 	///
 	/// A call to a user-defined function, script, module or silo is opaque:
-	/// its body lives outside this expression. A caller that needs to see
-	/// through user-defined calls extracts
-	/// [`crate::expr::function_facts::FunctionFacts`] and resolves them
-	/// against a catalog snapshot instead. Arguments to such a call *are*
-	/// walked, since they are evaluated at the call site.
+	/// its body lives outside this expression, and is left to the runtime
+	/// write refusal. Arguments to such a call *are* walked, since they are
+	/// evaluated at the call site.
 	pub fn contains_mutation(&self) -> bool {
 		MutationScanner.visit_expr(self).is_err()
 	}

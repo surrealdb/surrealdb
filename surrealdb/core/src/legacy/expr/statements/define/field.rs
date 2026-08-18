@@ -95,20 +95,6 @@ pub(crate) async fn define_field_statement_compute(
 	// Allowed to run?
 	ctx.is_allowed(opt, Action::Edit, ResourceKind::Field, Base::Db)?;
 
-	// A SELECT PERMISSIONS clause must not perform writes (GHSA-66r2-5gwj-gxm2),
-	// directly or through a function call. The create/update clauses are held to
-	// the same rule unless the `mutable_permissions` capability is on. (Fields
-	// carry no delete permission.)
-	crate::fnc::mutability::ensure_permission_clauses_read_only(
-		ctx,
-		opt,
-		"field",
-		definition.name.to_sql(),
-		[&this.permissions.select],
-		[&this.permissions.create, &this.permissions.update],
-	)
-	.await?;
-
 	// Validate any GRAPHQL_ALIAS at definition time so typos surface here
 	// rather than silently falling back at schema-generation time.
 	crate::legacy::expr::statements::define::validate_graphql_alias(&this.graphql_alias, "field")?;
@@ -120,7 +106,6 @@ pub(crate) async fn define_field_statement_compute(
 	// Validate computed options
 	crate::legacy::define_field_statement_validate_computed_options(
 		this,
-		opt,
 		ns,
 		db,
 		ctx.tx(),
@@ -412,7 +397,6 @@ pub(crate) async fn define_field_statement_process_recursive_definitions(
 
 pub(crate) async fn define_field_statement_validate_computed_options(
 	this: &DefineFieldStatement,
-	opt: &Options,
 	ns: NamespaceId,
 	db: DatabaseId,
 	txn: Arc<Transaction>,
@@ -422,40 +406,18 @@ pub(crate) async fn define_field_statement_validate_computed_options(
 	let fields = txn.all_tb_fields(ns, db, &definition.table, None).await?;
 	if let Some(computed) = this.computed.as_ref() {
 		// A COMPUTED body is evaluated on every read of the field, under a
-		// frame that refuses writes at runtime. A write in the body can
-		// therefore never succeed; it only turns every later read of the
-		// field into an error. Reject it here so the failure lands on the
-		// definition instead.
+		// frame that refuses writes at runtime. A write written directly into
+		// the body can therefore never succeed; it only turns every later read
+		// of the field into an error. Reject it here so the failure lands on
+		// the definition instead.
 		//
-		// `contains_mutation` walks the whole body — subqueries, idiom parts,
-		// blocks, closure bodies and call arguments.
+		// `contains_mutation` walks this body alone — subqueries, idiom parts,
+		// blocks, closure bodies and call arguments. A call to a user-defined
+		// function is opaque to it: the callee's body lives in the catalog and
+		// may take the writing branch only on inputs this field never supplies.
+		// Those are left to the runtime frame, which refuses the write at the
+		// point it is actually reached.
 		ensure!(!computed.contains_mutation(), ExecError::ComputedWrite(definition.name.to_sql()));
-
-		// A function *call* is resolved against the callee bodies stored in
-		// this snapshot, so a provable write behind a call is refused too,
-		// naming the function. The other half of the rule guards the other
-		// order: redefining a callee to write is refused while this field
-		// depends on it (`ensure_function_stays_read_only_for_consumers`).
-		// Opaque callables (scripts, `eval`, closures arriving as data) and
-		// callees not yet defined stay accepted — those can be pure, and the
-		// runtime frame backstops them. Skipped under import so existing
-		// exports keep restoring.
-		if !opt.import
-			&& let Some(function) = crate::fnc::mutability::provable_writer_via_calls(
-				&txn,
-				ns,
-				db,
-				&computed.function_facts(),
-				&std::collections::HashMap::new(),
-			)
-			.await?
-		{
-			return Err(ExecError::ComputedWriteViaFunction {
-				field: definition.name.to_sql(),
-				function,
-			}
-			.into());
-		}
 
 		// Ensure the field is not the `id` field
 		ensure!(!definition.name.is_id(), ExecError::IdFieldKeywordConflict("COMPUTED".into()));

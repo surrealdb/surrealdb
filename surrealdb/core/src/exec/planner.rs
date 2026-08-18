@@ -497,7 +497,6 @@ impl<'ctx> Planner<'ctx> {
 				db_def.namespace_id,
 				db_def.database_id,
 				&facts,
-				&std::collections::HashMap::new(),
 			)
 			.await
 		}

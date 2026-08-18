@@ -229,11 +229,6 @@ ParamPermissions	{ cause: NONE, code: -32000, kind: 'Internal', message: "You do
 FunctionPermissions	{ cause: NONE, code: -32000, kind: 'Internal', message: "You don't have permission to run the sample function" }
 PermissionPredicateSideEffect	{ cause: NONE, code: -32000, kind: 'Internal', message: 'A PERMISSIONS clause cannot contain a statement that modifies data' }
 ComputedFieldSideEffect	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'A COMPUTED clause cannot contain a statement that modifies data' }
-PermissionClauseNotReadonly	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Found a non-read-only expression in the PERMISSIONS clause for sample `sample`, but a PERMISSIONS clause must not modify data' }
-PermissionWriteViaFunction	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'The PERMISSIONS clause for sample `sample` calls `fn::sample`, which modifies data, but a PERMISSIONS clause must not modify data' }
-ComputedWriteViaFunction	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'Cannot define field `sample` as `COMPUTED`: the body calls `fn::sample`, which modifies data, and `COMPUTED` bodies must be read-only' }
-FunctionRequiredReadOnly	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'Cannot define function `fn::sample`: it modifies data, but it must remain read-only because it is used by sample' }
-MutablePermissionsDisabled	{ cause: NONE, code: -32600, details: { kind: 'InvalidRequest' }, kind: 'Validation', message: 'Cannot define sample `sample`: a create/update/delete PERMISSIONS clause modifies data, which requires the `mutable_permissions` capability to be enabled; otherwise move the side effect to a DEFINE EVENT' }
 SetCoerce	{ cause: NONE, code: -32000, kind: 'Internal', message: "Tried to set `$sample`, but couldn't coerce value: Expected `sample` but found `NONE`" }
 ReturnCoerce	{ cause: NONE, code: -32000, kind: 'Internal', message: "Couldn't coerce return value from function `sample`: Expected `sample` but found `NONE`" }
 Unimplemented	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Unimplemented functionality: sample' }

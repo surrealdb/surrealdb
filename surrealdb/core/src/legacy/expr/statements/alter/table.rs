@@ -108,20 +108,6 @@ pub(crate) async fn alter_table_statement_compute(
 		txn.compact(&key).await?;
 	}
 
-	// ALTER stores the same shape DEFINE does, so the assembled definition must
-	// satisfy the same read-only rules: the SELECT guard never modifies data
-	// (GHSA-66r2-5gwj-gxm2), and the create/update/delete guards only when the
-	// `mutable_permissions` capability is enabled.
-	crate::fnc::mutability::ensure_permission_clauses_read_only(
-		ctx,
-		opt,
-		"table",
-		name.as_str().to_string(),
-		[&dt.permissions.select],
-		[&dt.permissions.create, &dt.permissions.update, &dt.permissions.delete],
-	)
-	.await?;
-
 	// Set the table definition
 	txn.put_tb(ns_name, db_name, &dt).await?;
 

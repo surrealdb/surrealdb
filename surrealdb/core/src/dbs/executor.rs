@@ -589,7 +589,6 @@ impl Executor {
 		start: &Instant,
 		outcome: Outcome,
 		result_rows: u64,
-		mutable_permission_writes: u64,
 		error_class: Option<&'static str>,
 	) {
 		kvs.observer().on_statement_complete(&StatementEvent {
@@ -599,7 +598,6 @@ impl Executor {
 				duration: start.elapsed(),
 				read_only,
 				result_rows,
-				mutable_permission_writes,
 				error_class,
 			},
 			ctx: self.ctx.tenant_identity().map(|t| t.to_statement_ctx(sql.clone())).unwrap_or(
@@ -634,7 +632,6 @@ impl Executor {
 				duration: Duration::ZERO,
 				read_only: false,
 				result_rows: 0,
-				mutable_permission_writes: 0,
 				error_class: Some(error_class),
 			},
 			ctx: self.ctx.tenant_identity().map(|t| t.to_statement_ctx(None)).unwrap_or_default(),
@@ -1774,9 +1771,6 @@ impl Executor {
 			// match either returns early or contributes a non-DML
 			// statement, so 0 is the right default.
 			let mut stmt_result_rows: u64 = 0;
-			// Captured inside the DML arm below where the per-statement counters
-			// are still in scope; every other arm leaves it at the 0 default.
-			let mut stmt_mutable_permission_writes: u64 = 0;
 			let result = match stmt {
 				TopLevelExpr::Begin => {
 					let _ = txn.cancel().await;
@@ -1809,7 +1803,6 @@ impl Executor {
 						sql_text,
 						&before,
 						Outcome::Error,
-						0,
 						0,
 						Some(crate::observe::error_class::INTERNAL),
 					);
@@ -1879,7 +1872,6 @@ impl Executor {
 						&before,
 						Outcome::Success,
 						0,
-						0,
 						None,
 					);
 
@@ -1913,7 +1905,6 @@ impl Executor {
 							sql_text,
 							&before,
 							Outcome::Success,
-							0,
 							0,
 							None,
 						);
@@ -1983,7 +1974,6 @@ impl Executor {
 						&before,
 						Outcome::Error,
 						0,
-						0,
 						Some(crate::observe::error_class::CLIENT),
 					);
 
@@ -2004,7 +1994,6 @@ impl Executor {
 							sql_text,
 							&before,
 							Outcome::Success,
-							0,
 							0,
 							None,
 						);
@@ -2067,12 +2056,6 @@ impl Executor {
 								&before,
 								Outcome::Error,
 								0,
-								// A create/update/delete permission predicate may have
-								// run a write under the `mutable_permissions` capability
-								// before this statement errored; the metric has an
-								// `outcome="error"` cohort, so report the tally rather
-								// than a hard zero (matches the non-transaction path).
-								counters.mutable_permission_writes(),
 								error_class,
 							);
 
@@ -2138,7 +2121,6 @@ impl Executor {
 						),
 					};
 					stmt_result_rows = rows;
-					stmt_mutable_permission_writes = counters.mutable_permission_writes();
 
 					match r {
 						Ok(value) => Ok(convert_value_to_public_value(value)?),
@@ -2158,7 +2140,6 @@ impl Executor {
 				&before,
 				outcome,
 				stmt_result_rows,
-				stmt_mutable_permission_writes,
 				error_class,
 			);
 
@@ -2305,7 +2286,6 @@ impl Executor {
 				&start,
 				outcome,
 				stmt_result_rows,
-				counters.mutable_permission_writes(),
 				error_class,
 			);
 			self.results.push(query_result);
@@ -2509,7 +2489,6 @@ impl Executor {
 						&start,
 						outcome,
 						0,
-						0,
 						error_class,
 					);
 					result?;
@@ -2551,7 +2530,6 @@ impl Executor {
 						sql_text,
 						&start,
 						outcome,
-						0,
 						0,
 						error_class,
 					);
@@ -2601,7 +2579,6 @@ impl Executor {
 						&start,
 						outcome,
 						result_rows,
-						counters.mutable_permission_writes(),
 						error_class,
 					);
 
@@ -3020,7 +2997,6 @@ mod tests {
 		struct CapturingObserver {
 			events: Mutex<Vec<(StatementType, u64)>>,
 			queries: Mutex<Vec<(Outcome, u32, u32, u32)>>,
-			perm_writes: Mutex<Vec<(StatementType, u64)>>,
 		}
 
 		impl CapturingObserver {
@@ -3031,19 +3007,11 @@ mod tests {
 			fn queries(&self) -> Vec<(Outcome, u32, u32, u32)> {
 				self.queries.lock().unwrap().clone()
 			}
-
-			fn perm_writes(&self) -> Vec<(StatementType, u64)> {
-				self.perm_writes.lock().unwrap().clone()
-			}
 		}
 
 		impl ExecutionObserver for CapturingObserver {
 			fn on_statement_complete(&self, event: &StatementEvent) {
 				self.events.lock().unwrap().push((event.safe.kind, event.safe.result_rows));
-				self.perm_writes
-					.lock()
-					.unwrap()
-					.push((event.safe.kind, event.safe.mutable_permission_writes));
 			}
 
 			fn on_query_complete(&self, event: &QueryEvent) {
@@ -3072,7 +3040,6 @@ mod tests {
 				.unwrap();
 			observer.events.lock().unwrap().clear();
 			observer.queries.lock().unwrap().clear();
-			observer.perm_writes.lock().unwrap().clear();
 			ds.execute(sql, &sess, None).await.unwrap();
 			(observer.snapshot(), observer)
 		}
@@ -3097,76 +3064,6 @@ mod tests {
 			let events = run("CREATE foo:bar RETURN BEFORE;").await;
 			let creates = rows_for(&events, StatementType::Create);
 			assert_eq!(creates, vec![1], "CREATE RETURN BEFORE should report 1 affected row");
-		}
-
-		#[tokio::test]
-		async fn mutable_permission_write_counted_on_statement_event() {
-			use crate::dbs::Capabilities;
-			use crate::dbs::capabilities::Targets;
-
-			let observer = Arc::new(CapturingObserver::default());
-			let obs: Arc<dyn ExecutionObserver> =
-				Arc::clone(&observer) as Arc<dyn ExecutionObserver>;
-			let ds = Datastore::builder()
-				.with_capabilities(Capabilities::all().with_experimental(Targets::All))
-				.with_observer(obs)
-				.build_with_path("memory")
-				.await
-				.unwrap();
-
-			// As owner: a `thing` table whose create-permission predicate writes
-			// to an audit table through a function, plus a record user to trigger
-			// it. Owner sessions bypass permission predicates, so the predicate
-			// write only fires for the record session below.
-			let owner = Session::default().with_ns("NS").with_db("DB");
-			ds.execute(
-				"DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB; \
-				 DEFINE TABLE audit SCHEMALESS PERMISSIONS FOR select FULL; \
-				 DEFINE FUNCTION fn::mark() { UPSERT audit:created SET hit = true; RETURN true; }; \
-				 DEFINE TABLE thing SCHEMALESS \
-				 PERMISSIONS FOR select FULL FOR create WHERE fn::mark() OR true; \
-				 DEFINE ACCESS user ON DATABASE TYPE RECORD SIGNIN ( $rid ); \
-				 CREATE user:test;",
-				&owner,
-				None,
-			)
-			.await
-			.unwrap();
-
-			observer.events.lock().unwrap().clear();
-			observer.perm_writes.lock().unwrap().clear();
-
-			// As the record user: the create-permission predicate runs and its
-			// write executes under the `mutable_permissions` capability, so the
-			// executor records the write as capability usage on the CREATE's
-			// statement event. The predicate may be evaluated more than once per
-			// operation, so assert a non-zero count rather than an exact one.
-			let rec = Session::for_record(
-				"NS",
-				"DB",
-				"user",
-				surrealdb_types::Value::RecordId(surrealdb_types::RecordId::new("user", "test")),
-			);
-			ds.execute("CREATE thing:1 SET n = 0;", &rec, None).await.unwrap();
-
-			let counted: Vec<u64> = observer
-				.perm_writes()
-				.into_iter()
-				.filter(|(k, _)| *k == StatementType::Create)
-				.map(|(_, n)| n)
-				.collect();
-			assert_eq!(
-				counted.len(),
-				1,
-				"expected exactly one CREATE statement event: {:?}",
-				observer.perm_writes(),
-			);
-			assert!(
-				counted[0] >= 1,
-				"the create-permission predicate's write should be counted as \
-				 mutable-permission usage: {:?}",
-				observer.perm_writes(),
-			);
 		}
 
 		#[tokio::test]
