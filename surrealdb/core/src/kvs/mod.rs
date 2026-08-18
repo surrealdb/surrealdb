@@ -36,7 +36,8 @@ pub(crate) use consts::{
 	INDEXING_PROBE_BATCH_SIZE, NORMAL_BATCH_SIZE,
 };
 pub use ds::{
-	Builder, Datastore, LiveQueryEngine, TransactionBuilderFactory, TransactionBuilderParts,
+	Builder, Datastore, LiveQueryEngine, NODE_ARCHIVE_THRESHOLD, TransactionBuilderFactory,
+	TransactionBuilderParts,
 };
 pub(crate) use err::Error;
 pub(crate) use surrealdb_datastore::IntoBytes;

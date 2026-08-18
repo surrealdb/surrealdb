@@ -10,6 +10,7 @@ use surrealdb::opt::capabilities::Capabilities as SdkCapabilities;
 use surrealdb_cnf::ConfigMap;
 use surrealdb_core::channel::Receiver;
 use surrealdb_core::kvs::{Datastore, TransactionBuilderFactory};
+use surrealdb_core::options::EngineOptions;
 use surrealdb_observe::ExecutionObserver;
 use surrealdb_rpc::capabilities::{
 	ArbitraryQueryTarget, Capabilities, EvalQueryTarget, ExperimentalTarget, FuncTarget,
@@ -912,7 +913,7 @@ pub async fn init<C: TransactionBuilderFactory>(
 		.with_auth(!unauthenticated)
 		.with_capabilities(capabilities)
 		.with_notify(send)
-		.with_shutdown_cancel(canceller)
+		.with_shutdown_cancel(canceller.clone())
 		.with_observer(observer);
 
 	#[cfg(storage)]
@@ -981,21 +982,82 @@ pub async fn init<C: TransactionBuilderFactory>(
 		credentials: deferred_credentials,
 		timeout: startup_operation_timeout,
 	};
-	// Bootstrap the datastore
+	// Register this node's cluster membership row before the caller binds the
+	// listener. `/ready` reads that row on its very first probe
+	// (`node_heartbeat_age` -> `get_node`), and a missing row is an `NdNotFound`
+	// read failure, which the probe reports as a 500 rather than the 503 that
+	// means "still starting".
 	retry_with_timeout("Insert node", startup_operation_timeout, || async {
 		dbs.insert_node().await
 	})
 	.await?;
-	retry_with_timeout("Expire nodes", startup_operation_timeout, || async {
-		dbs.expire_nodes().await
-	})
-	.await?;
-	retry_with_timeout("Remove nodes", startup_operation_timeout, || async {
-		dbs.remove_nodes().await
-	})
-	.await?;
+	spawn_first_node_maintenance_pass(&dbs, &opt.engine, canceller);
 	// All ok
 	Ok((dbs, recv, router_state, pending_startup))
+}
+
+/// Starts the first peer-expiry and archived-node cleanup pass in the
+/// background.
+///
+/// Ordering is the whole point of running this from here rather than from the
+/// maintenance scheduler, which the datastore starts at construction time:
+///
+/// - It runs after `check_version`, so a pass can never commit catalog mutations to a datastore
+///   whose version validation goes on to refuse startup.
+/// - It runs after this node's own `insert_node`, so the id this process is about to serve under is
+///   already active when the pass takes its snapshot. A node id that is stable across restarts
+///   would otherwise be visible to an earlier pass as its previous incarnation's stale or archived
+///   row, and both jobs decide from a snapshot taken before their write transaction.
+///
+/// It runs in the background rather than inline because it must not gate the
+/// HTTP bind: `remove_nodes` opens one write transaction per archived node, so
+/// its cost scales with however much dead-member residue a restarting cluster
+/// left behind, with no bound. It is registered with the datastore rather than
+/// detached, so `Datastore::shutdown` waits for it on the same budget as the
+/// maintenance tasks instead of closing the storage engine under a pass that is
+/// still opening transactions.
+///
+/// Expiry runs before cleanup, so a peer that has just timed out is archived in
+/// time for the same pass to reap it. Either step is skipped when its interval
+/// is zero, which is how both are disabled — the same contract the scheduler's
+/// own registration applies. Failures are logged and do not stop the other
+/// step: the periodic `NodeExpire` / `NodeCleanup` jobs run on their normal
+/// cadence from here on and pick up whatever this pass left.
+fn spawn_first_node_maintenance_pass(
+	dbs: &Arc<Datastore>,
+	engine: &EngineOptions,
+	canceller: CancellationToken,
+) {
+	let expire = !engine.node_membership_check_interval.is_zero();
+	let cleanup = !engine.node_membership_cleanup_interval.is_zero();
+	if !expire && !cleanup {
+		return;
+	}
+	/// Reports a failed step, unless the server is shutting down: the storage
+	/// engine refuses commits from that point on, so a failure there describes
+	/// the shutdown rather than a fault.
+	fn report(canceller: &CancellationToken, step: &str, res: Result<()>) {
+		if let Err(err) = res
+			&& !canceller.is_cancelled()
+		{
+			warn!(target: TARGET, "Error {step}: {err}");
+		}
+	}
+
+	let ds = Arc::clone(dbs);
+	let registered = dbs.spawn_joined_on_shutdown(async move {
+		if expire && !canceller.is_cancelled() {
+			report(&canceller, "expiring inactive nodes", ds.expire_nodes().await);
+		}
+		if cleanup && !canceller.is_cancelled() {
+			report(&canceller, "removing archived nodes", ds.remove_nodes().await);
+		}
+	});
+	if !registered {
+		// Nothing was started, because nothing would wait for it: the datastore
+		// runs no background tasks, or is already shutting down.
+		debug!(target: TARGET, "Skipped the first node-maintenance pass: no background tasks to join it with");
+	}
 }
 
 /// Startup work deferred out of [`init`] so the caller can bind the HTTP
@@ -1056,6 +1118,10 @@ mod tests {
 
 	use clap::Parser;
 	use serial_test::serial;
+	// Named here rather than inside each test because the shared helpers below
+	// carry them in their signatures.
+	#[cfg(feature = "storage-rocksdb")]
+	use surrealdb_datastore::key::schema::{NodeKey, NodeLiveQueryKey};
 	use surrealdb_types::ToSql;
 	use test_log::test;
 	use wiremock::matchers::{method, path};
@@ -1875,5 +1941,177 @@ mod tests {
 			Targets::None,
 			"When deny_funcs=All and allow_funcs=None, should deny (return None)"
 		);
+	}
+
+	/// Seeds a fresh datastore at `path` with an archived peer node and one of
+	/// the live-query records it owns, then closes it so the caller can open the
+	/// same path through [`init`]. Returns the keys of the two seeded rows.
+	///
+	/// The heartbeat sits at the epoch, so no reading of the clock makes the row
+	/// look live, and the seeding datastore runs no maintenance tasks, so nothing
+	/// reaps the rows before the caller reopens the path.
+	#[cfg(feature = "storage-rocksdb")]
+	async fn seed_archived_peer(path: &str) -> Result<(NodeKey, NodeLiveQueryKey)> {
+		use surrealdb_core::dbs::node::{Node, Timestamp};
+		use surrealdb_datastore::TransactionType;
+		use surrealdb_datastore::catalog::{DatabaseId, NamespaceId, NodeLiveQuery};
+		use uuid::Uuid;
+
+		let peer = Uuid::new_v4();
+		let node_key = NodeKey {
+			nd: peer,
+		};
+		let nlq_key = NodeLiveQueryKey {
+			nd: peer,
+			lq: Uuid::new_v4(),
+		};
+		let seed = Datastore::builder().without_maintenance_tasks().build_with_path(path).await?;
+		// Stamp the storage version first: data written to an unstamped datastore
+		// reads back as a pre-versioning upgrade, which `init` refuses to start
+		// against.
+		seed.check_version().await?;
+		let txn = seed.transaction(TransactionType::Write).await?;
+		txn.set_key(&node_key, &Node::new(peer, Timestamp::default(), true)).await?;
+		txn.set_key(
+			&nlq_key,
+			&NodeLiveQuery {
+				ns: NamespaceId(1),
+				db: DatabaseId(1),
+				tb: "test".to_string().into(),
+			},
+		)
+		.await?;
+		txn.commit().await?;
+		// Release the storage engine's lock before the caller reopens the path.
+		seed.shutdown().await?;
+		Ok((node_key, nlq_key))
+	}
+
+	/// A server config for `path` with both node-maintenance intervals set to
+	/// `interval`, which is what decides whether the node jobs run at all.
+	#[cfg(feature = "storage-rocksdb")]
+	fn node_maintenance_config(path: String, interval: Duration) -> Result<Config> {
+		use surrealdb_core::options::EngineOptions;
+
+		use crate::ntw::client_ip::ClientIp;
+
+		Ok(Config {
+			bind: "127.0.0.1:0".parse()?,
+			postgres_bind: None,
+			path,
+			client_ip: ClientIp::None,
+			user: None,
+			pass: None,
+			crt: None,
+			key: None,
+			engine: EngineOptions::default()
+				.with_node_membership_check_interval(interval)
+				.with_node_membership_cleanup_interval(interval),
+			no_identification_headers: false,
+			allow_origin: Vec::new(),
+			durable_session_ttl: None,
+		})
+	}
+
+	/// Whether the seeded node row and its live-query row are still present,
+	/// read in one transaction so the pair is observed at a single snapshot.
+	#[cfg(feature = "storage-rocksdb")]
+	async fn seeded_rows_present(
+		dbs: &Datastore,
+		node_key: &NodeKey,
+		nlq_key: &NodeLiveQueryKey,
+	) -> Result<(bool, bool)> {
+		use surrealdb_datastore::TransactionType;
+
+		let txn = dbs.transaction(TransactionType::Read).await?;
+		let node = txn.get_key(node_key, None).await?;
+		let nlq = txn.get_key(nlq_key, None).await?;
+		txn.cancel().await?;
+		Ok((node.is_some(), nlq.is_some()))
+	}
+
+	/// `init` must never reap archived cluster members on its own thread:
+	/// `remove_nodes` opens one write transaction per archived node, so inlining
+	/// it would hold the HTTP bind for as long as a restarting cluster's residue
+	/// takes to clear.
+	///
+	/// Both intervals are zero, the documented setting that disables the node
+	/// jobs. That leaves the schedule without them *and* skips the first pass
+	/// `init` spawns, so nothing but `init` itself could have touched the seeded
+	/// rows by the time it returns.
+	#[cfg(feature = "storage-rocksdb")]
+	#[test(tokio::test(flavor = "multi_thread"))]
+	#[serial]
+	async fn init_leaves_archived_nodes_for_the_maintenance_scheduler() -> Result<()> {
+		use surrealdb_core::CommunityComposer;
+		use surrealdb_observe::NoopObserver;
+
+		let dir = tempfile::tempdir()?;
+		let path = format!("rocksdb:{}", dir.path().join("store").display());
+		let (node_key, nlq_key) = seed_archived_peer(&path).await?;
+
+		let dbs_opts = TestCli::try_parse_from(["surrealdb"])?.dbs;
+		let config = node_maintenance_config(path, Duration::ZERO)?;
+		let canceller = CancellationToken::new();
+		let (dbs, _recv, _router_state, _pending) =
+			init(CommunityComposer(), &config, canceller.clone(), Arc::new(NoopObserver), dbs_opts)
+				.await?;
+
+		let (node, nlq) = seeded_rows_present(&dbs, &node_key, &nlq_key).await?;
+		assert!(node, "init removed the archived node");
+		assert!(nlq, "init removed the archived node's live query");
+
+		// The cleanup path itself is intact — it is only deferred, not dropped.
+		dbs.remove_nodes().await?;
+		let (node, nlq) = seeded_rows_present(&dbs, &node_key, &nlq_key).await?;
+		assert!(!node, "remove_nodes left the archived node behind");
+		assert!(!nlq, "remove_nodes left the archived node's live query behind");
+
+		canceller.cancel();
+		dbs.shutdown().await?;
+		Ok(())
+	}
+
+	/// The first expiry and cleanup pass runs off `init`, after this node has
+	/// registered, so a restarting cluster clears dead-member residue without
+	/// waiting out an interval and without the reap gating the HTTP bind.
+	///
+	/// Both intervals are an hour, so the periodic jobs cannot reach their first
+	/// deadline inside the test: the only thing that can reap the seeded rows is
+	/// the pass `init` spawns.
+	#[cfg(feature = "storage-rocksdb")]
+	#[test(tokio::test(flavor = "multi_thread"))]
+	#[serial]
+	async fn init_spawns_the_first_cleanup_pass_after_registration() -> Result<()> {
+		use surrealdb_core::CommunityComposer;
+		use surrealdb_observe::NoopObserver;
+
+		let dir = tempfile::tempdir()?;
+		let path = format!("rocksdb:{}", dir.path().join("store").display());
+		let (node_key, nlq_key) = seed_archived_peer(&path).await?;
+
+		let dbs_opts = TestCli::try_parse_from(["surrealdb"])?.dbs;
+		let config = node_maintenance_config(path, Duration::from_secs(3600))?;
+		let canceller = CancellationToken::new();
+		let (dbs, _recv, _router_state, _pending) =
+			init(CommunityComposer(), &config, canceller.clone(), Arc::new(NoopObserver), dbs_opts)
+				.await?;
+
+		// The pass is spawned, so poll for its effect rather than assuming it has
+		// already landed when `init` returns.
+		let deadline = Instant::now() + Duration::from_secs(15);
+		let (node, nlq) = loop {
+			let present = seeded_rows_present(&dbs, &node_key, &nlq_key).await?;
+			if present == (false, false) || Instant::now() >= deadline {
+				break present;
+			}
+			sleep(Duration::from_millis(100)).await;
+		};
+		assert!(!node, "the first cleanup pass left the archived node behind");
+		assert!(!nlq, "the first cleanup pass left the archived node's live query behind");
+
+		canceller.cancel();
+		dbs.shutdown().await?;
+		Ok(())
 	}
 }

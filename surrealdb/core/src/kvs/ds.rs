@@ -50,7 +50,7 @@ use crate::catalog::providers::{
 	CatalogProvider, DatabaseProvider, NamespaceProvider, NodeProvider, RootProvider,
 	TableProvider, UserProvider,
 };
-use crate::catalog::{Index, NodeLiveQuery, StoredSubscriptionDefinition};
+use crate::catalog::{Index, NodeLiveQuery};
 use crate::config::RuntimeConfig;
 use crate::ctx::{CancelHandle, Context};
 #[cfg(feature = "jwks")]
@@ -88,7 +88,7 @@ use crate::key::schema::{
 	DbRoot, IdxRoot, IndexCompactionIxPrefix, IndexCompactionKey, IndexCompactionPrefix,
 	MigrationKey, MigrationPrefix, NodeKey, NodeLiveQueryKey, NodeLiveQueryPrefix, NsRoot,
 	ReclaimKey, ReclaimPrefix, SessionKey, SessionPrefix, StorageVersionKey, SubscriptionKey,
-	SubscriptionPrefix, VersionHistoryPrefix, VersionKey,
+	VersionHistoryPrefix, VersionKey,
 };
 use crate::key::{KVKey, KVKeyDecode, KVSubspace, KVValue, Key, KeyRange, RawRange, Resumable};
 use crate::kvs::cache::ds::DatastoreCache;
@@ -134,6 +134,20 @@ const NODE_DELETE_TIMEOUT: Duration = Duration::from_secs(60);
 /// handles are dropped and shutdown proceeds; the abandoned pass then has its
 /// commits refused, which is the same outcome as a crash at that instant.
 const MAINTENANCE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How stale a node's cluster heartbeat must be before a peer archives it.
+///
+/// A fixed threshold, deliberately independent of
+/// `node_membership_check_interval` (which only decides how often the scan
+/// looks) and of `node_membership_cleanup_interval` (which decides how often an
+/// archived row is reaped): every member has to agree on when a node counts as
+/// gone, and they do not share a scan cadence.
+///
+/// This is the ceiling on how long any other mechanism may keep treating a node
+/// as healthy. A readiness window at or above it lets a node keep taking
+/// traffic after its peers have archived it and started collecting its live
+/// queries — see `EngineOptions::readiness_heartbeat_max_age`.
+pub const NODE_ARCHIVE_THRESHOLD: Duration = Duration::from_secs(30);
 
 /// The role assigned to the initial user created when starting the server with
 /// credentials for the first time
@@ -240,14 +254,17 @@ pub struct Datastore {
 	/// Cancellation for this datastore's own background work, tripped by
 	/// [`Self::shutdown`].
 	shutdown: CancellationToken,
-	/// Handles for the maintenance tasks the builder started for this
-	/// datastore, so [`Self::shutdown`] can wait for them to stop.
+	/// Handles for this datastore's background tasks, so [`Self::shutdown`] can
+	/// wait for them to stop: the maintenance tasks the builder started, plus
+	/// anything an embedder added through [`Self::spawn_joined_on_shutdown`].
 	///
-	/// A datastore is not a working database without them — index compaction,
-	/// tombstone reclaim, changefeed GC, index-build recovery and the cluster
-	/// heartbeat all live there — so they are started at construction rather
-	/// than left to the embedder. `None` only for a datastore built with
-	/// [`Builder::without_maintenance_tasks`](self::builder::Builder::without_maintenance_tasks).
+	/// A datastore is not a working database without the maintenance tasks —
+	/// index compaction, tombstone reclaim, changefeed GC, index-build recovery
+	/// and the cluster heartbeat all live there — so they are started at
+	/// construction rather than left to the embedder. `None` for a datastore
+	/// built with
+	/// [`Builder::without_maintenance_tasks`](self::builder::Builder::without_maintenance_tasks),
+	/// and from the point [`Self::shutdown`] takes the set.
 	maintenance: parking_lot::Mutex<Option<crate::kvs::tasks::Tasks>>,
 	/// Serialises [`Self::shutdown`] across the holders of this datastore.
 	///
@@ -1091,6 +1108,42 @@ impl Datastore {
 		self.execute(sql, sess, None).await.map_err(|e| anyhow::anyhow!(e))
 	}
 
+	/// Spawns `fut` as a background task of this datastore, so that
+	/// [`Self::shutdown`] waits for it before closing the storage engine.
+	///
+	/// This is how work that opens transactions of its own gets to run outside
+	/// the caller's control flow without racing shutdown. A task spawned any
+	/// other way is not known here, so shutdown closes the engine under it and
+	/// its in-flight transaction fails; one spawned through this is joined on
+	/// the same budget as the maintenance tasks, and is cancelled through the
+	/// same token (see [`Self::shutdown`]).
+	///
+	/// The task is expected to observe that token: the join is bounded, and a
+	/// task still running when the budget expires is abandoned exactly as a
+	/// maintenance pass would be.
+	///
+	/// Returns `false`, having spawned nothing, when this datastore has no task
+	/// set to join — either it was built with
+	/// [`Builder::without_maintenance_tasks`](self::builder::Builder::without_maintenance_tasks),
+	/// or shutdown has already taken the set. Starting storage work in either
+	/// case would be work nothing waits for.
+	#[cfg(not(target_family = "wasm"))]
+	pub fn spawn_joined_on_shutdown<F>(&self, fut: F) -> bool
+	where
+		F: Future<Output = ()> + Send + 'static,
+	{
+		// The guard spans the spawn so a concurrent shutdown either takes the set
+		// before the task exists, or finds it already registered.
+		let mut tasks = self.maintenance.lock();
+		match tasks.as_mut() {
+			Some(tasks) => {
+				tasks.push(crate::kvs::tasks::into_task(fut));
+				true
+			}
+			None => false,
+		}
+	}
+
 	/// Run the datastore shutdown tasks, performing any necessary cleanup
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn shutdown(&self) -> Result<()> {
@@ -1618,7 +1671,7 @@ impl Datastore {
 			nds.iter()
 				.filter_map(|n| {
 					// Check that the node is active and has expired
-					match n.is_active() && n.heartbeat < now - Duration::from_secs(30) {
+					match n.is_active() && n.heartbeat < now - NODE_ARCHIVE_THRESHOLD {
 						true => Some(n.to_owned()),
 						false => None,
 					}
@@ -1629,21 +1682,48 @@ impl Datastore {
 		if !inactive.is_empty() {
 			// Open a writeable transaction
 			let txn = self.transaction(Write).await?;
+			// Whether any candidate still qualified once re-read below.
+			let mut expired = false;
 			// Archive the inactive nodes
 			for nd in inactive.iter() {
-				// Log the live query scanning
-				trace!(target: TARGET, id = %nd.id, "Archiving node in the cluster");
-				// Mark the node as archived
-				let node = nd.archive();
 				// Get the key for the node entry
 				let key = NodeKey {
 					nd: nd.id,
 				};
+				// The candidate set was sampled in an earlier transaction. A node
+				// id that survives a restart can be re-registered inside that
+				// window — `insert_node` upserts an active row under the same id,
+				// with a fresh heartbeat — and archiving it here would retire a
+				// live member. The write is therefore conditional on the heartbeat
+				// the scan saw: a row whose heartbeat has moved has re-registered
+				// or refreshed itself, and is no longer the row that expired.
+				//
+				// That closes the window in both directions. A commit that landed
+				// before this transaction's snapshot is visible to this re-read,
+				// and one racing this transaction writes the same key, which the
+				// engine's write-conflict detection rejects.
+				let current = catch!(txn, txn.get_key(&key, None).await);
+				let Some(current) =
+					current.filter(|n| n.is_active() && n.heartbeat == nd.heartbeat)
+				else {
+					trace!(target: TARGET, id = %nd.id, "Skipping node that is no longer expired");
+					continue;
+				};
+				// Log the node archival
+				trace!(target: TARGET, id = %nd.id, "Archiving node in the cluster");
+				// Mark the node as archived, carrying the re-read row forward so
+				// no field of the stale snapshot is written back
+				let node = current.archive();
 				// Update the node entry
 				catch!(txn, txn.replace_key(&key, &node).await);
+				expired = true;
 			}
-			// Commit the changes
-			catch!(txn, txn.commit().await);
+			// Commit the changes, or release the transaction when every candidate
+			// turned out to be live after all
+			match expired {
+				true => catch!(txn, txn.commit().await),
+				false => catch!(txn, txn.cancel().await),
+			}
 		}
 		// Everything was successful
 		Ok(())
@@ -1678,6 +1758,23 @@ impl Datastore {
 				.range()?,
 			);
 			let txn = self.transaction(Write).await?;
+			{
+				// The archived set was sampled in an earlier transaction. A node
+				// id that survives a restart can be re-registered inside that
+				// window — `insert_node` upserts an active row under the same id
+				// — and reaping it here would delete a live member along with the
+				// live queries it has already registered. Re-read the row in this
+				// transaction and only proceed while it is still archived.
+				let key = NodeKey {
+					nd: *id,
+				};
+				let node = catch!(txn, txn.get_key(&key, None).await);
+				if !node.is_some_and(|nd| nd.is_archived()) {
+					trace!(target: TARGET, id = %id, "Skipping node that is no longer archived");
+					catch!(txn, txn.cancel().await);
+					continue;
+				}
+			}
 			{
 				// Log the live query scanning
 				trace!(target: TARGET, id = %id, "Deleting live queries for node");
@@ -2091,117 +2188,6 @@ impl Datastore {
 			yield_now!();
 		}
 		// Everything was successful
-		Ok(())
-	}
-
-	/// Clean up all other miscellaneous data.
-	///
-	/// This function should be run periodically at an interval.
-	///
-	/// This function clears up all data which might have been missed from
-	/// previous cleanup runs, or when previous runs failed. This function
-	/// currently deletes all live queries, for nodes which no longer exist
-	/// in the cluster, from all namespaces, databases, and tables. It uses
-	/// a number of transactions in order to prevent failure of large or
-	/// long-running transactions on distributed storage engines.
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn garbage_collect(&self) -> Result<()> {
-		// Log the node deletion
-		trace!(target: TARGET, "Garbage collecting all miscellaneous data");
-		// Fetch archived nodes
-		let archived = {
-			let txn = self.transaction(Read).await?;
-			let nds = catch!(txn, txn.all_nodes().await);
-			txn.cancel().await?;
-			// Filter the archived nodes
-			nds.iter().filter_map(Node::archived).collect::<Vec<_>>()
-		};
-		// Fetch all namespaces
-		let nss = {
-			let txn = self.transaction(Read).await?;
-			let res = catch!(txn, txn.all_ns(None).await);
-			txn.cancel().await?;
-			res
-		};
-		// Loop over all namespaces
-		for ns in nss.iter() {
-			// Log the namespace
-			trace!(target: TARGET, "Garbage collecting data in namespace {}", ns.name);
-			// Fetch all databases
-			let dbs = {
-				let txn = self.transaction(Read).await?;
-				let res = catch!(txn, txn.all_db(ns.namespace_id, None).await);
-				txn.cancel().await?;
-				res
-			};
-			// Loop over all databases
-			for db in dbs.iter() {
-				// Log the namespace
-				trace!(target: TARGET, "Garbage collecting data in database {}/{}", ns.name, db.name);
-				// Fetch all tables
-				let tbs = {
-					let txn = self.transaction(Read).await?;
-					let res = catch!(txn, txn.all_tb(ns.namespace_id, db.database_id, None).await);
-					txn.cancel().await?;
-					res
-				};
-				// Loop over all tables
-				for tb in tbs.iter() {
-					// Log the namespace
-					trace!(target: TARGET, "Garbage collecting data in table {}/{}/{}", ns.name, db.name, tb.name);
-					// Iterate over the table live queries
-					let tb_name = tb.name.clone();
-					let mut next = Some(
-						SubscriptionPrefix {
-							ns: db.namespace_id,
-							db: db.database_id,
-							tb: Cow::Borrowed(&tb_name),
-						}
-						.range()?,
-					);
-					let txn = self.transaction(Write).await?;
-					while let Some(rng) = next {
-						// Fetch the next batch of keys and values
-						let max = NORMAL_BATCH_SIZE;
-						let res = catch!(txn, txn.batch_keys_vals(rng.clone(), max, None).await);
-						// A full page carries a continuation: resume the range
-						// after the last key this page returned.
-						next = match (&res.next, res.result.last()) {
-							(Some(_), Some((k, _))) => {
-								Some(rng.resume_after(k, Direction::Forward))
-							}
-							_ => None,
-						};
-						for (k, v) in res.result.iter() {
-							// Decode the LIVE query statement
-							let stm: StoredSubscriptionDefinition =
-								KVValue::kv_decode_value(v, ())?;
-							// Get the node id and the live query id
-							let (nid, lid) = (stm.node, stm.id);
-							// Check that the node for this query is archived
-							if archived.contains(&stm.node) {
-								// Get the key for this node live query
-								let tlq = catch!(txn, SubscriptionKey::decode_key(k));
-								// Get the key for this table live query
-								let nlq = NodeLiveQueryKey {
-									nd: nid,
-									lq: lid,
-								};
-								// Delete the node live query
-								catch!(txn, txn.clr_key(&nlq).await);
-								// Delete the table live query
-								catch!(txn, txn.clr_key(&tlq).await);
-							}
-						}
-						// Pause and yield execution
-						yield_now!();
-					}
-					// Commit the changes
-					catch!(txn, txn.commit().await);
-				}
-			}
-		}
-		// All ok
 		Ok(())
 	}
 
@@ -5113,6 +5099,7 @@ pub(crate) fn define_user_statement_new_with_password(
 mod test {
 	use std::collections::BTreeMap;
 	use std::future::pending;
+	use std::sync::atomic::{AtomicBool, Ordering};
 
 	use surrealdb_strand::TableName;
 
@@ -6426,6 +6413,50 @@ mod test {
 		);
 
 		assert_eq!(outcome, ShutdownNodeDeleteOutcome::TimedOut);
+	}
+
+	/// A task registered through `spawn_joined_on_shutdown` must have finished by
+	/// the time `shutdown` returns. Shutdown closes the storage engine last, so
+	/// a task it did not wait for would still be opening transactions against an
+	/// engine that has already refused them.
+	#[tokio::test]
+	async fn shutdown_waits_for_a_registered_task() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let finished = Arc::new(AtomicBool::new(false));
+		let flag = Arc::clone(&finished);
+		// Long enough that a shutdown which did not wait returns first: nothing
+		// else in the sequence takes anywhere near this on an in-memory engine.
+		assert!(ds.spawn_joined_on_shutdown(async move {
+			tokio::time::sleep(Duration::from_millis(500)).await;
+			flag.store(true, Ordering::SeqCst);
+		}));
+
+		ds.shutdown().await.unwrap();
+
+		assert!(
+			finished.load(Ordering::SeqCst),
+			"shutdown returned while the registered task was still running"
+		);
+	}
+
+	/// A datastore with no task set has nothing to join a task with, so
+	/// registration reports that it started nothing rather than detaching it.
+	#[tokio::test]
+	async fn a_task_is_not_registered_without_a_task_set() {
+		let ds = Datastore::builder()
+			.without_maintenance_tasks()
+			.build_with_path("memory")
+			.await
+			.unwrap();
+		let started = Arc::new(AtomicBool::new(false));
+		let flag = Arc::clone(&started);
+
+		assert!(!ds.spawn_joined_on_shutdown(async move {
+			flag.store(true, Ordering::SeqCst);
+		}));
+
+		tokio::task::yield_now().await;
+		assert!(!started.load(Ordering::SeqCst), "the task ran despite not being registered");
 	}
 
 	#[tokio::test]

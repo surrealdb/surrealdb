@@ -131,7 +131,35 @@ pub struct EngineOptions {
 	///
 	/// Default: 30 seconds
 	pub system_metrics_refresh_interval: Duration,
+	/// How stale this node's cluster heartbeat may get before it is treated as
+	/// unhealthy, overriding the value derived from
+	/// [`Self::node_membership_refresh_interval`].
+	///
+	/// `None` derives it as the refresh interval times
+	/// [`READINESS_HEARTBEAT_STALENESS_FACTOR`], which suits a storage engine
+	/// whose node-row write is local and sub-millisecond: staleness beyond a few
+	/// refresh cycles is then a genuine fault.
+	///
+	/// Set it when the write is not local. Under a consensus engine the same
+	/// write is a distributed transaction whose latency moves with cluster
+	/// health, and every member's heartbeat slows together — so a window derived
+	/// from the refresh interval turns partial degradation into every node
+	/// reporting unhealthy at once. Widening the window without slowing the
+	/// refresh is only expressible through this field.
+	///
+	/// Must stay below the interval at which a peer archives a node it considers
+	/// expired (see `Datastore::expire_nodes`): a node still reported healthy
+	/// after its peers have written it off keeps taking traffic while its
+	/// cluster registration and live queries are garbage-collected underneath
+	/// it.
+	///
+	/// Default: `None`
+	pub readiness_heartbeat_max_age: Option<Duration>,
 }
+
+/// How many node-membership refresh cycles a heartbeat may miss before the node
+/// is treated as unhealthy, when no explicit window is configured.
+pub const READINESS_HEARTBEAT_STALENESS_FACTOR: u32 = 3;
 
 impl Default for EngineOptions {
 	fn default() -> Self {
@@ -151,11 +179,31 @@ impl Default for EngineOptions {
 			tikv_lock_cleanup_interval: Duration::from_secs(60),
 			rpc_session_gc_interval: Duration::from_secs(60),
 			system_metrics_refresh_interval: Duration::from_secs(30),
+			readiness_heartbeat_max_age: None,
 		}
 	}
 }
 
 impl EngineOptions {
+	/// How stale this node's cluster heartbeat may get before it is unhealthy.
+	///
+	/// The configured value when there is one, otherwise the refresh interval
+	/// times [`READINESS_HEARTBEAT_STALENESS_FACTOR`]. An interval large enough
+	/// to overflow that product degrades to [`Duration::MAX`], which is
+	/// "never considered stale" rather than a panic.
+	pub fn resolved_readiness_heartbeat_max_age(&self) -> Duration {
+		self.readiness_heartbeat_max_age.unwrap_or_else(|| {
+			self.node_membership_refresh_interval
+				.checked_mul(READINESS_HEARTBEAT_STALENESS_FACTOR)
+				.unwrap_or(Duration::MAX)
+		})
+	}
+
+	pub fn with_readiness_heartbeat_max_age(mut self, max_age: Option<Duration>) -> Self {
+		self.readiness_heartbeat_max_age = max_age;
+		self
+	}
+
 	pub fn with_node_membership_refresh_interval(mut self, interval: Duration) -> Self {
 		self.node_membership_refresh_interval = interval;
 		self

@@ -7,7 +7,7 @@ use std::time::Duration;
 use anyhow::Result;
 use clap::Args;
 use surrealdb::engine::any;
-use surrealdb_core::kvs::TransactionBuilderFactory;
+use surrealdb_core::kvs::{NODE_ARCHIVE_THRESHOLD, TransactionBuilderFactory};
 use surrealdb_core::options::EngineOptions;
 use surrealdb_observe::{ExecutionObserver, FanOutObserver};
 use tokio_util::sync::CancellationToken;
@@ -61,6 +61,12 @@ pub struct StartCommandArguments {
 	#[arg(env = "SURREAL_NODE_MEMBERSHIP_CLEANUP_INTERVAL", long = "node-membership-cleanup-interval", value_parser = super::validator::duration)]
 	#[arg(default_value = "300s")]
 	node_membership_cleanup_interval: Duration,
+	#[arg(
+		help = "How stale this node's cluster heartbeat may get before /ready reports it unhealthy (defaults to three refresh intervals)",
+		help_heading = "Database"
+	)]
+	#[arg(env = "SURREAL_READINESS_HEARTBEAT_MAX_AGE", long = "readiness-heartbeat-max-age", value_parser = super::validator::duration)]
+	readiness_heartbeat_max_age: Option<Duration>,
 	#[arg(
 		help = "The interval at which to perform changefeed garbage collection",
 		help_heading = "Database"
@@ -252,6 +258,7 @@ pub async fn init<
 		node_membership_refresh_interval,
 		node_membership_check_interval,
 		node_membership_cleanup_interval,
+		readiness_heartbeat_max_age,
 		changefeed_gc_interval,
 		index_compaction_interval,
 		index_build_resume_interval,
@@ -300,6 +307,7 @@ pub async fn init<
 		.with_node_membership_refresh_interval(node_membership_refresh_interval)
 		.with_node_membership_check_interval(node_membership_check_interval)
 		.with_node_membership_cleanup_interval(node_membership_cleanup_interval)
+		.with_readiness_heartbeat_max_age(readiness_heartbeat_max_age)
 		.with_changefeed_gc_interval(changefeed_gc_interval)
 		.with_index_compaction_interval(index_compaction_interval)
 		.with_index_build_resume_interval(index_build_resume_interval)
@@ -363,7 +371,12 @@ pub async fn init<
 		let ds = Arc::clone(&datastore);
 		let ready = Arc::clone(&ready);
 		let startup_canceller = canceller.clone();
-		tokio::spawn(async move {
+		// Registered with the datastore, so the shutdown that closes the storage
+		// engine waits for this task to stop first: an import runs statements of
+		// its own, and the engine must not close under one. The wait is short
+		// because the task selects on the token, which shutdown trips before it
+		// joins.
+		if !datastore.spawn_joined_on_shutdown(async move {
 			tokio::select! {
 				biased;
 				// Stop promptly if the server is shutting down; leave `ready`
@@ -381,7 +394,11 @@ pub async fn init<
 					}
 				}
 			}
-		});
+		}) {
+			// The datastore is already shutting down, so the deferred work is not
+			// started and the instance never reports ready.
+			debug!("Startup skipped: the datastore is shutting down");
+		}
 	} else {
 		// Nothing deferred (no import, credentials already initialised): ready to
 		// serve as soon as the listener binds.
@@ -391,8 +408,20 @@ pub async fn init<
 	#[cfg(feature = "surrealism")]
 	if !datastore.is_lazy_surrealism() {
 		let ds = Arc::clone(&datastore);
-		tokio::spawn(async move {
-			ds.eager_load_surrealism_modules().await;
+		let load_canceller = canceller.clone();
+		// The load reads the catalog, so it is registered with the datastore and
+		// joined before the storage engine closes. It selects on the token rather
+		// than being awaited to completion: the modules it has not reached yet
+		// are loaded on first use, so abandoning the rest costs nothing but
+		// waiting out the whole load during shutdown would.
+		datastore.spawn_joined_on_shutdown(async move {
+			tokio::select! {
+				biased;
+				_ = load_canceller.cancelled() => {
+					debug!("Surrealism eager load aborted due to shutdown");
+				}
+				_ = ds.eager_load_surrealism_modules() => {}
+			}
 		});
 	}
 	// Register datastore metrics against the unified meter provider. The
@@ -405,16 +434,24 @@ pub async fn init<
 		warn!("failed to register storage metrics: {err}");
 	}
 	// The `/ready` probe treats the node as unhealthy if its cluster heartbeat
-	// hasn't refreshed within a few cycles of the node-membership refresh task
-	// (which also confirms the storage read and write paths are working).
-	const READINESS_HEARTBEAT_STALENESS_FACTOR: u32 = 3;
-	// `checked_mul` guards against overflow from an extreme configured interval;
-	// `Duration::MAX` degrades to "heartbeat never considered stale".
-	let max_heartbeat_age = config
-		.engine
-		.node_membership_refresh_interval
-		.checked_mul(READINESS_HEARTBEAT_STALENESS_FACTOR)
-		.unwrap_or(Duration::MAX);
+	// hasn't refreshed within this window (the refresh also confirms the storage
+	// read and write paths are working). Configured, or else derived from the
+	// refresh interval.
+	let max_heartbeat_age = config.engine.resolved_readiness_heartbeat_max_age();
+	// A peer archives a node whose heartbeat passes `NODE_ARCHIVE_THRESHOLD`,
+	// and then collects its live queries. A readiness window that reaches that
+	// far leaves this node taking traffic after the cluster has written it off,
+	// which is worse than either outcome alone. The window is not clamped —
+	// an operator who has raised the threshold in their own build, or who
+	// accepts the consequence, keeps what they configured — but it is never
+	// silently accepted either.
+	if max_heartbeat_age >= NODE_ARCHIVE_THRESHOLD {
+		warn!(
+			"Readiness heartbeat window ({max_heartbeat_age:?}) is at or beyond the interval after \
+			 which peers archive an unresponsive node ({NODE_ARCHIVE_THRESHOLD:?}); this node can \
+			 be reported ready after the cluster has already archived it"
+		);
+	}
 	let readiness = ntw::Readiness {
 		ready: Arc::clone(&ready),
 		// The heartbeat freshness check applies on the server path, where the
@@ -451,10 +488,10 @@ pub async fn init<
 		readiness,
 	)
 	.await?;
-	// Shutdown and stop closed tasks
+	// Tell every task holding this token to stop. The datastore shutdown below
+	// then waits for the ones registered with it — including the startup work
+	// spawned above — before closing the storage engine.
 	canceller.cancel();
-	// Wait for background tasks to finish
-	// Shutdown the datastore
 	datastore.shutdown().await?;
 	// All ok
 	Ok(())

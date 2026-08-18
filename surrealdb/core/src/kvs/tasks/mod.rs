@@ -35,7 +35,7 @@ type Task = Pin<Box<()>>;
 /// yields no join handle, so on wasm the task is detached and the returned
 /// `Task` completes immediately without waiting for `fut`.
 #[cfg(not(target_family = "wasm"))]
-fn into_task<F>(fut: F) -> Task
+pub(crate) fn into_task<F>(fut: F) -> Task
 where
 	F: Future<Output = ()> + Send + 'static,
 {
@@ -43,7 +43,7 @@ where
 }
 
 #[cfg(target_family = "wasm")]
-fn into_task<F>(fut: F) -> Task
+pub(crate) fn into_task<F>(fut: F) -> Task
 where
 	F: Future<Output = ()> + 'static,
 {
@@ -51,7 +51,54 @@ where
 	Box::pin(())
 }
 
-const NODE_MEMBERSHIP_UPDATE_TIMEOUT: Duration = Duration::from_secs(60);
+/// The most attempts one heartbeat tick will make.
+///
+/// The tick's budget is the real bound — an attempt that times out consumes all
+/// of it and ends the tick. This bounds the other case: a write that fails in
+/// milliseconds returns nearly the whole budget, and without a cap a write
+/// failing instantly and forever would spin.
+const MAX_NODE_MEMBERSHIP_UPDATE_ATTEMPTS: u32 = 3;
+
+/// The smallest budget a heartbeat tick will run on.
+///
+/// The budget is otherwise derived from the staleness window, and a short
+/// configured window derives one no storage write could finish in — which would
+/// fail every attempt by construction rather than bounding one.
+const MIN_NODE_MEMBERSHIP_TICK_BUDGET: Duration = Duration::from_millis(100);
+
+/// The longest one heartbeat tick may spend, however wide the staleness window.
+///
+/// A window of [`Duration::MAX`] is the documented degradation of an interval
+/// too large to derive from, and means "never considered stale" — but a tick
+/// still has to produce a deadline the clock can represent. Past this bound
+/// waiting longer inside one tick buys nothing: a node-registration write that
+/// has not completed by now is not going to, and the next tick retries anyway.
+const MAX_NODE_MEMBERSHIP_TICK_BUDGET: Duration = Duration::from_secs(300);
+
+/// How long one heartbeat tick may spend on its attempts.
+///
+/// The heartbeat value is stamped before the write that carries it, so a write
+/// taking `L` leaves the row already `L` old the moment it lands, and the next
+/// replacement cannot arrive sooner than that next write's own `L`. The age
+/// therefore peaks at about `2L`, and a node stays ready only while
+/// `2L <= window` — so a write slower than half the window cannot keep this node
+/// ready however patient the tick is. Admitting one would spend the tick on a
+/// write whose success no longer helps, so the budget stops at `window / 2`.
+///
+/// One refresh interval is also held back, so a tick that spends its whole
+/// budget without landing still leaves the next tick room inside the window.
+/// Whichever of the two binds first wins.
+///
+/// Floored at [`MIN_NODE_MEMBERSHIP_TICK_BUDGET`] so a window narrower than the
+/// interval still gets one real attempt rather than none, and capped at
+/// [`MAX_NODE_MEMBERSHIP_TICK_BUDGET`] so the deadline stays representable.
+fn node_membership_tick_budget(interval: Duration, max_heartbeat_age: Duration) -> Duration {
+	max_heartbeat_age
+		.saturating_sub(interval)
+		.min(max_heartbeat_age / 2)
+		.max(MIN_NODE_MEMBERSHIP_TICK_BUDGET)
+		.min(MAX_NODE_MEMBERSHIP_TICK_BUDGET)
+}
 
 /// How long a trigger-driven index-compaction pass waits before running.
 ///
@@ -73,6 +120,15 @@ enum NodeMembershipUpdateResult {
 pub struct Tasks(#[cfg_attr(target_family = "wasm", expect(dead_code))] Vec<Task>);
 
 impl Tasks {
+	/// Adds a task to this set, so it is joined with the rest at shutdown.
+	///
+	/// Only compiled off wasm, where a [`Task`] carries no join handle and the
+	/// set is never awaited.
+	#[cfg(not(target_family = "wasm"))]
+	pub(crate) fn push(&mut self, task: Task) {
+		self.0.push(task);
+	}
+
 	#[cfg(target_family = "wasm")]
 	pub async fn resolve(self) -> Result<(), Error> {
 		Ok(())
@@ -198,6 +254,9 @@ fn spawn_task_node_membership_refresh(
 ) -> Task {
 	// Get the delay interval from the config
 	let interval = opts.node_membership_refresh_interval;
+	// How stale the heartbeat may get before this node is unhealthy, which is
+	// what bounds how long one tick may spend trying to refresh it.
+	let max_heartbeat_age = opts.resolved_readiness_heartbeat_max_age();
 	// Spawn a future
 	into_task(async move {
 		// Log the interval frequency
@@ -213,14 +272,9 @@ fn spawn_task_node_membership_refresh(
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => {
 					let Some(dbs) = dbs.upgrade() else { break };
-					if !run_node_membership_update(
-						NODE_MEMBERSHIP_UPDATE_TIMEOUT,
-						update_node_membership(
-							&dbs,
-							&canceller,
-							NODE_MEMBERSHIP_UPDATE_TIMEOUT,
-						),
-					).await {
+					if !run_node_membership_update(interval, max_heartbeat_age, |budget| {
+						update_node_membership(&dbs, &canceller, budget)
+					}).await {
 						break;
 					}
 				}
@@ -649,22 +703,80 @@ async fn update_node_membership(
 	}
 }
 
-async fn run_node_membership_update<Fut>(timeout_duration: Duration, update_node: Fut) -> bool
+/// Runs one heartbeat tick: attempts the node-registration write, retrying
+/// until it lands or the tick has spent its budget.
+///
+/// Every attempt is handed all the budget the tick has left, so the write a
+/// tick can service is as slow as its whole budget. Nothing is spent on a
+/// shorter probe first: the heartbeat value is stamped before the write that
+/// carries it, so a probe that fails does not just waste time, it adds its own
+/// duration to how old the row is when the next one finally lands.
+///
+/// Retrying still costs nothing in the case that matters. An attempt that times
+/// out has consumed the budget, so the tick ends; one that fails in
+/// milliseconds — a write conflict, say — returns almost all of it, and the
+/// next attempt starts immediately with nearly the full budget.
+///
+/// `attempt` is handed the budget for that attempt and must not outlive it.
+/// Attempts are sequential — the next one starts only once the previous has
+/// returned, so a tick never has two registration writes in flight.
+///
+/// Returns whether the heartbeat task should keep running: `false` only for
+/// [`NodeMembershipUpdateResult::Cancelled`], which means shutdown and is
+/// therefore never retried. Every other outcome is transient, so an exhausted
+/// tick still returns `true` and the next tick tries again.
+async fn run_node_membership_update<F, Fut>(
+	interval: Duration,
+	max_heartbeat_age: Duration,
+	mut attempt: F,
+) -> bool
 where
+	F: FnMut(Duration) -> Fut,
 	Fut: Future<Output = NodeMembershipUpdateResult>,
 {
-	match update_node.await {
-		NodeMembershipUpdateResult::Updated => true,
-		NodeMembershipUpdateResult::Cancelled => false,
-		NodeMembershipUpdateResult::TimedOut => {
-			warn!("Timed out updating node registration information after {timeout_duration:?}");
-			true
+	let budget = node_membership_tick_budget(interval, max_heartbeat_age);
+	// `checked_add` because a caller may hand us any window; the budget is capped
+	// so this resolves in practice, and a clock that cannot represent the deadline
+	// falls back to spending the budget on a single attempt rather than panicking.
+	let deadline = Instant::now().checked_add(budget);
+	let mut last_failure = None;
+	let mut attempts = 0;
+	while attempts < MAX_NODE_MEMBERSHIP_UPDATE_ATTEMPTS {
+		let remaining = match deadline {
+			Some(deadline) => deadline.saturating_duration_since(Instant::now()),
+			None => budget,
+		};
+		if remaining.is_zero() {
+			break;
 		}
-		NodeMembershipUpdateResult::Failed(e) => {
-			error!("Error updating node registration information: {e}");
-			true
+		attempts += 1;
+		match attempt(remaining).await {
+			NodeMembershipUpdateResult::Updated => return true,
+			NodeMembershipUpdateResult::Cancelled => return false,
+			NodeMembershipUpdateResult::TimedOut => {
+				last_failure = Some(NodeMembershipUpdateResult::TimedOut);
+			}
+			NodeMembershipUpdateResult::Failed(e) => {
+				last_failure = Some(NodeMembershipUpdateResult::Failed(e));
+			}
+		}
+		if deadline.is_none() {
+			break;
 		}
 	}
+	// One line per exhausted tick, reporting the outcome that ended it: a
+	// per-attempt line would multiply the log by the attempt count while a stall
+	// lasts.
+	match last_failure {
+		Some(NodeMembershipUpdateResult::TimedOut) => {
+			warn!("Timed out updating node registration information after {attempts} attempts");
+		}
+		Some(NodeMembershipUpdateResult::Failed(e)) => {
+			error!("Error updating node registration information after {attempts} attempts: {e}");
+		}
+		_ => {}
+	}
+	true
 }
 
 async fn interval_ticker(interval: Duration) -> IntervalStream {
@@ -689,7 +801,10 @@ mod test {
 	#[cfg(feature = "kv-mem")]
 	use super::RefreshClaim;
 	use super::{
-		MaintenanceJob, Slot, maintenance_loop, maintenance_slots, next_slot, sweep_slots,
+		MAX_NODE_MEMBERSHIP_TICK_BUDGET, MAX_NODE_MEMBERSHIP_UPDATE_ATTEMPTS,
+		MIN_NODE_MEMBERSHIP_TICK_BUDGET, MaintenanceJob, NodeMembershipUpdateResult, Slot,
+		maintenance_loop, maintenance_slots, next_slot, node_membership_tick_budget,
+		run_node_membership_update, sweep_slots,
 	};
 	#[cfg(feature = "kv-mem")]
 	use crate::kvs::Datastore;
@@ -747,6 +862,282 @@ mod test {
 		})
 		.await;
 		Arc::into_inner(log).unwrap().into_inner().unwrap()
+	}
+
+	/// The staleness window the derivation produces for `interval` when nothing
+	/// is configured, so a test that does not care about the window uses the same
+	/// one production does.
+	fn derived_window(interval: Duration) -> Duration {
+		EngineOptions::default()
+			.with_node_membership_refresh_interval(interval)
+			.resolved_readiness_heartbeat_max_age()
+	}
+
+	/// Drives one heartbeat tick over a scripted outcome sequence, recording the
+	/// budget each attempt was given and the instant it started.
+	///
+	/// A scripted `TimedOut` consumes the whole budget it was handed, as a real
+	/// one does; every other outcome returns at once. The sequence is consumed
+	/// one entry per attempt, so a tick that attempts more times than the script
+	/// allows is a test failure rather than a silent repeat of the last outcome.
+	async fn record_heartbeat_tick(
+		interval: Duration,
+		window: Duration,
+		outcomes: Vec<NodeMembershipUpdateResult>,
+	) -> (bool, Vec<(Duration, Instant)>) {
+		let script = Arc::new(Mutex::new(outcomes.into_iter()));
+		let log = Arc::new(Mutex::new(Vec::new()));
+		let sink = Arc::clone(&log);
+		let keep_running = run_node_membership_update(interval, window, move |budget| {
+			let script = Arc::clone(&script);
+			let sink = Arc::clone(&sink);
+			async move {
+				sink.lock().unwrap().push((budget, Instant::now()));
+				let outcome = {
+					let mut script = script.lock().unwrap();
+					script.next().expect("attempted more times than the script allows")
+				};
+				if matches!(outcome, NodeMembershipUpdateResult::TimedOut) {
+					tokio::time::sleep(budget).await;
+				}
+				outcome
+			}
+		})
+		.await;
+		(keep_running, Arc::into_inner(log).unwrap().into_inner().unwrap())
+	}
+
+	/// Drives one heartbeat tick against a write that always takes `cost`,
+	/// timing out whenever the attempt it was given is shorter than that.
+	async fn record_heartbeat_tick_against_a_write_taking(
+		interval: Duration,
+		window: Duration,
+		cost: Duration,
+	) -> (bool, Vec<Duration>) {
+		let log = Arc::new(Mutex::new(Vec::new()));
+		let sink = Arc::clone(&log);
+		let keep_running = run_node_membership_update(interval, window, move |budget| {
+			let sink = Arc::clone(&sink);
+			async move {
+				sink.lock().unwrap().push(budget);
+				if budget < cost {
+					tokio::time::sleep(budget).await;
+					NodeMembershipUpdateResult::TimedOut
+				} else {
+					tokio::time::sleep(cost).await;
+					NodeMembershipUpdateResult::Updated
+				}
+			}
+		})
+		.await;
+		(keep_running, Arc::into_inner(log).unwrap().into_inner().unwrap())
+	}
+
+	/// Runs `ticks` heartbeat ticks against a write of constant `latency`, and
+	/// returns the greatest age any node row reached at the moment it was
+	/// replaced.
+	///
+	/// Models what the datastore does: the heartbeat value is stamped when the
+	/// attempt starts and the row is replaced when that attempt completes, so the
+	/// age of the row being replaced is measured from the *previous* landed
+	/// attempt's stamp to this one's completion. Ticks are paced like the real
+	/// ticker, which delays rather than queues a tick its predecessor overran.
+	async fn worst_modelled_heartbeat_age(
+		interval: Duration,
+		window: Duration,
+		latency: Duration,
+		ticks: usize,
+	) -> Duration {
+		// Seeded as though a write had just landed, stamped now.
+		let stamped = Arc::new(Mutex::new(Instant::now()));
+		let worst = Arc::new(Mutex::new(Duration::ZERO));
+		for _ in 0..ticks {
+			let tick_started = Instant::now();
+			let stamped = Arc::clone(&stamped);
+			let worst = Arc::clone(&worst);
+			run_node_membership_update(interval, window, move |budget| {
+				let stamped = Arc::clone(&stamped);
+				let worst = Arc::clone(&worst);
+				async move {
+					let stamp = Instant::now();
+					if budget < latency {
+						tokio::time::sleep(budget).await;
+						return NodeMembershipUpdateResult::TimedOut;
+					}
+					tokio::time::sleep(latency).await;
+					let replaced = Instant::now();
+					let mut stamped = stamped.lock().unwrap();
+					let age = replaced.duration_since(*stamped);
+					*stamped = stamp;
+					let mut worst = worst.lock().unwrap();
+					*worst = (*worst).max(age);
+					NodeMembershipUpdateResult::Updated
+				}
+			})
+			.await;
+			// `MissedTickBehavior::Delay`: the next tick is one interval after this
+			// one fired, or immediate if this one already overran that.
+			let spent = Instant::now().duration_since(tick_started);
+			if spent < interval {
+				tokio::time::sleep(interval - spent).await;
+			}
+		}
+		*worst.lock().unwrap()
+	}
+
+	/// `n` scripted timeouts, which the enum cannot express as `vec![_; n]`
+	/// because one of its variants carries a non-`Clone` error.
+	fn timed_out(n: usize) -> Vec<NodeMembershipUpdateResult> {
+		(0..n).map(|_| NodeMembershipUpdateResult::TimedOut).collect()
+	}
+
+	/// A write that fails fast is retried inside the same tick, because it
+	/// returned nearly the whole budget: the next attempt still has the patience
+	/// to land.
+	#[test_log::test(tokio::test(start_paused = true))]
+	async fn a_fast_failure_is_retried_within_the_tick() {
+		let interval = Duration::from_secs(3);
+		let window = derived_window(interval);
+		let budget = node_membership_tick_budget(interval, window);
+		let (keep_running, attempts) = record_heartbeat_tick(
+			interval,
+			window,
+			vec![
+				NodeMembershipUpdateResult::Failed(anyhow::anyhow!("conflict")),
+				NodeMembershipUpdateResult::Updated,
+			],
+		)
+		.await;
+
+		assert!(keep_running);
+		assert_eq!(attempts.len(), 2, "a fast failure should have been retried");
+		assert!(
+			attempts.iter().all(|(b, _)| *b == budget),
+			"every attempt gets the whole remaining budget: {attempts:?}"
+		);
+	}
+
+	/// A write that times out has consumed the tick's budget, so the tick ends
+	/// rather than starting an attempt with nothing left to give it.
+	#[test_log::test(tokio::test(start_paused = true))]
+	async fn a_timed_out_write_ends_the_tick() {
+		let interval = Duration::from_secs(3);
+		let window = derived_window(interval);
+		let budget = node_membership_tick_budget(interval, window);
+		let started = Instant::now();
+		let (keep_running, attempts) = record_heartbeat_tick(interval, window, timed_out(3)).await;
+
+		assert!(keep_running, "an exhausted tick is transient, not a reason to stop");
+		assert_eq!(attempts.len(), 1, "a timeout spends the whole budget");
+		assert_eq!(attempts[0].0, budget);
+		assert_eq!(Instant::now().duration_since(started), budget);
+	}
+
+	/// An instantly-failing write must not spin: the budget cannot end the tick
+	/// when nothing consumes it, so the attempt cap does.
+	#[test_log::test(tokio::test(start_paused = true))]
+	async fn an_instantly_failing_write_stops_at_the_attempt_cap() {
+		let interval = Duration::from_secs(3);
+		let (keep_running, attempts) = record_heartbeat_tick(
+			interval,
+			derived_window(interval),
+			(0..MAX_NODE_MEMBERSHIP_UPDATE_ATTEMPTS + 1)
+				.map(|_| NodeMembershipUpdateResult::Failed(anyhow::anyhow!("nope")))
+				.collect(),
+		)
+		.await;
+
+		assert!(keep_running);
+		assert_eq!(attempts.len(), MAX_NODE_MEMBERSHIP_UPDATE_ATTEMPTS as usize);
+	}
+
+	/// The tick's whole budget is available to a single write, so the slowest
+	/// write it can service is the budget itself rather than a fraction of it.
+	#[test_log::test(tokio::test(start_paused = true))]
+	async fn a_write_needing_the_whole_budget_still_lands() {
+		let interval = Duration::from_secs(3);
+		for window in [Duration::from_secs(9), Duration::from_secs(30)] {
+			let budget = node_membership_tick_budget(interval, window);
+			let (keep_running, budgets) =
+				record_heartbeat_tick_against_a_write_taking(interval, window, budget).await;
+
+			assert!(keep_running);
+			assert_eq!(
+				budgets,
+				vec![budget],
+				"a write as slow as the whole {budget:?} budget should land on the first attempt"
+			);
+		}
+	}
+
+	/// The budget is the lesser of the window less one refresh interval and half
+	/// the window, floored and capped.
+	#[test]
+	fn the_heartbeat_tick_budget_is_bounded_by_half_the_window() {
+		let interval = Duration::from_secs(3);
+		// Default: min(9 - 3, 9 / 2) = 4.5s — half the window binds.
+		assert_eq!(
+			node_membership_tick_budget(interval, Duration::from_secs(9)),
+			Duration::from_millis(4500)
+		);
+		// Widened: min(30 - 3, 30 / 2) = 15s.
+		assert_eq!(
+			node_membership_tick_budget(interval, Duration::from_secs(30)),
+			Duration::from_secs(15)
+		);
+		// A window barely above the interval: the reserve binds instead.
+		assert_eq!(
+			node_membership_tick_budget(interval, Duration::from_secs(4)),
+			Duration::from_secs(1)
+		);
+		// Never less than one real attempt, however narrow the window.
+		assert_eq!(
+			node_membership_tick_budget(interval, Duration::from_secs(1)),
+			MIN_NODE_MEMBERSHIP_TICK_BUDGET
+		);
+	}
+
+	/// The invariant the budget exists to keep. The heartbeat value is stamped
+	/// before the write that carries it, so a write of `L` lands a row that is
+	/// already `L` old and the next replacement is another `L` away: the age peaks
+	/// near `2L`, and anything a tick wastes before the write that lands is added
+	/// on top. A write at the edge of what the default config admits must still
+	/// keep the age inside the window, tick after tick.
+	#[test_log::test(tokio::test(start_paused = true))]
+	async fn a_slow_but_admitted_write_keeps_the_age_inside_the_window() {
+		let interval = Duration::from_secs(3);
+		let window = derived_window(interval);
+		let latency = Duration::from_millis(4200);
+		assert!(latency <= node_membership_tick_budget(interval, window));
+
+		let worst = worst_modelled_heartbeat_age(interval, window, latency, 5).await;
+
+		assert!(worst < window, "heartbeat reached {worst:?}, past the {window:?} window");
+	}
+
+	/// `Duration::MAX` is what the derivation degrades to for an interval too
+	/// large to multiply out, and means "never considered stale". The tick has to
+	/// turn that into a deadline the clock can represent: capped, not overflowed,
+	/// and not a tick that returns instantly and spins.
+	#[test_log::test(tokio::test(start_paused = true))]
+	async fn a_saturated_window_is_capped_rather_than_overflowing() {
+		let interval = Duration::from_secs(3);
+		assert_eq!(
+			node_membership_tick_budget(interval, Duration::MAX),
+			MAX_NODE_MEMBERSHIP_TICK_BUDGET
+		);
+
+		let started = Instant::now();
+		let (keep_running, attempts) =
+			record_heartbeat_tick(interval, Duration::MAX, timed_out(2)).await;
+
+		assert!(keep_running);
+		assert_eq!(
+			attempts.iter().map(|(b, _)| *b).collect::<Vec<_>>(),
+			vec![MAX_NODE_MEMBERSHIP_TICK_BUDGET]
+		);
+		// Bounded by the cap, and it did real waiting rather than spinning.
+		assert_eq!(Instant::now().duration_since(started), MAX_NODE_MEMBERSHIP_TICK_BUDGET);
 	}
 
 	#[test]
@@ -936,44 +1327,17 @@ mod test {
 		assert_eq!(passes.len(), 3, "dispatched after cancellation: {passes:?}");
 	}
 
-	#[test_log::test(tokio::test)]
-	async fn node_membership_update_exits_when_cancelled() {
-		let should_continue = super::run_node_membership_update(Duration::from_secs(60), async {
-			super::NodeMembershipUpdateResult::Cancelled
-		})
-		.await;
-
-		assert!(!should_continue);
-	}
-
-	#[test_log::test(tokio::test)]
-	async fn node_membership_update_continues_after_timeout() {
-		let should_continue = super::run_node_membership_update(Duration::from_secs(60), async {
-			super::NodeMembershipUpdateResult::TimedOut
-		})
-		.await;
-
-		assert!(should_continue);
-	}
-
-	#[test_log::test(tokio::test)]
+	#[test_log::test(tokio::test(start_paused = true))]
 	async fn node_membership_update_continues_after_success() {
-		let should_continue = super::run_node_membership_update(Duration::from_secs(60), async {
-			super::NodeMembershipUpdateResult::Updated
-		})
+		let (should_continue, attempts) = record_heartbeat_tick(
+			Duration::from_secs(3),
+			derived_window(Duration::from_secs(3)),
+			vec![NodeMembershipUpdateResult::Updated],
+		)
 		.await;
 
 		assert!(should_continue);
-	}
-
-	#[test_log::test(tokio::test)]
-	async fn node_membership_update_continues_after_error() {
-		let should_continue = super::run_node_membership_update(Duration::from_secs(60), async {
-			super::NodeMembershipUpdateResult::Failed(anyhow::anyhow!("update failed"))
-		})
-		.await;
-
-		assert!(should_continue);
+		assert_eq!(attempts.len(), 1, "a write that landed must not be repeated");
 	}
 
 	#[cfg(feature = "kv-mem")]
