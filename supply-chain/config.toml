@@ -37,6 +37,12 @@ audit-as-crates-io = false
 [policy.surrealdb-ast]
 audit-as-crates-io = false
 
+[policy.surrealdb-catalog]
+audit-as-crates-io = false
+
+[policy.surrealdb-cnf]
+audit-as-crates-io = false
+
 [policy.surrealdb-collections]
 audit-as-crates-io = false
 
@@ -53,6 +59,15 @@ audit-as-crates-io = false
 audit-as-crates-io = false
 
 [policy.surrealdb-engine-local]
+audit-as-crates-io = false
+
+[policy.surrealdb-expr]
+audit-as-crates-io = false
+
+[policy.surrealdb-gql]
+audit-as-crates-io = false
+
+[policy.surrealdb-iam]
 audit-as-crates-io = false
 
 [policy.surrealdb-idx]
@@ -89,6 +104,9 @@ audit-as-crates-io = false
 [policy.surrealdb-mcp]
 audit-as-crates-io = false
 
+[policy.surrealdb-observe]
+audit-as-crates-io = false
+
 [policy.surrealdb-parse-common]
 audit-as-crates-io = false
 
@@ -96,6 +114,9 @@ audit-as-crates-io = false
 audit-as-crates-io = false
 
 [policy.surrealdb-profiling]
+audit-as-crates-io = false
+
+[policy.surrealdb-rpc]
 audit-as-crates-io = false
 
 [policy.surrealdb-runtime]
@@ -107,7 +128,13 @@ audit-as-crates-io = false
 [policy.surrealdb-sql]
 audit-as-crates-io = false
 
+[policy.surrealdb-sqon]
+audit-as-crates-io = false
+
 [policy.surrealdb-strand]
+audit-as-crates-io = false
+
+[policy.surrealdb-syn]
 audit-as-crates-io = false
 
 [policy.surrealdb-token]

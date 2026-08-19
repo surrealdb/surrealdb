@@ -19,6 +19,15 @@ set -euo pipefail
 #       through the alpha/beta/rc cycle and only advances to `(X+1).1.0-nightly`
 #       once `(X+1).0.0` ships stable (see advance-main-after-release.sh).
 #
+# The independently-versioned families (surrealism, surrealml) travel with the
+# engine on their own 0.x lines. Each cut moves them in the same shape as
+# surrealdb: the release line takes their current nightly minor as its
+# pre-release (0.m.0-nightly -> 0.m.0-beta.1), and main advances one minor
+# (0.m.0-nightly -> 0.(m+1).0-nightly). A cut thus reserves one of each
+# family's minors per release line, keeping their numbers independent of
+# surrealdb's while managed by the same rule. (advance-main-after-release.sh
+# leaves them alone - they already advanced here, at cut time.)
+#
 # Usage: cut-release.sh <minor|major> [publish]
 #   publish=false performs a dry-run (no pushes, no PRs).
 
@@ -73,37 +82,107 @@ git config user.email "github-actions[bot]@users.noreply.github.com"
 # The commit we cut from (main HEAD).
 BASE_SHA=$(git rev-parse HEAD)
 
-set_workspace_version() {
-	local new_version="$1"
+crate_current_version() {
+	cargo metadata --format-version 1 --no-deps \
+		| jq -r --arg n "$1" '.packages | map(select(.name == $n))[0].version'
+}
 
-	# The current on-disk workspace version. Both call sites run against a fresh
-	# checkout of BASE_SHA, so this is always main's X.Y.0-nightly.
-	local current_version
-	current_version=$(cargo metadata --format-version 1 --no-deps | \
-		jq -r '.packages | map(select(.name == "surrealdb"))[0].version')
-	if [[ -z "$current_version" || "$current_version" == "null" ]]; then
+# Every workspace member manifest, including the root (which carries
+# [workspace.package] and [workspace.dependencies]). The rewrite spans all of
+# them: surrealdb crates inherit their version from [workspace.package] so only
+# the root manifest names it, but the independent families declare an explicit
+# version in each crate's own manifest, so those must be rewritten too.
+mapfile -t MANIFESTS < <(cargo metadata --format-version 1 --no-deps | jq -r '.packages[].manifest_path')
+
+# Direction-agnostic rewrite of one version string to another across every
+# manifest, verifying the old string is gone. Direct string replacement rather
+# than a bump tool because a minor cut moves nightly -> beta, which is a semver
+# "downgrade" (nightly sorts above beta) that bump tools refuse to perform. The
+# strings are specific pre-release versions unique to a single family, so a
+# broad replace never touches an unrelated dependency.
+rewrite_version_string() {
+	local from="$1" to="$2"
+	[[ "$from" == "$to" ]] && return 0
+	perl -pi -e "s/\"\Q${from}\E\"/\"${to}\"/g" "${MANIFESTS[@]}"
+	if grep -qF -- "\"${from}\"" "${MANIFESTS[@]}"; then
+		echo "::error::'${from}' still present in a workspace manifest after rewrite"
+		exit 1
+	fi
+}
+
+# Rewrite every family's version for one leg of the cut. mode is "branch" (the
+# release line's first pre-release) or "main" (the next development version).
+# Both call sites run against a fresh checkout of BASE_SHA, so every family is
+# on its X.Y.0-nightly development version on entry.
+set_workspace_version() {
+	local mode="$1" surrealdb_target="$2"
+
+	# surrealdb: [workspace.package].version + every surrealdb* dependency entry
+	# carry the version verbatim; the caller already computed the exact target.
+	local cur_sdb
+	cur_sdb=$(crate_current_version surrealdb)
+	if [[ -z "$cur_sdb" || "$cur_sdb" == "null" ]]; then
 		echo "Error: could not determine the current workspace version"
 		exit 1
 	fi
 
-	# Rewrite the workspace version wherever it appears in the root manifest:
-	# [workspace.package].version and every surrealdb* entry in
-	# [workspace.dependencies] carry it verbatim, while the independently
-	# versioned crates (surrealism*, surrealml-*) use their own distinct version
-	# strings and are left untouched. A direct rewrite is used because it is
-	# direction-agnostic: a minor cut moves nightly -> beta, which is a semver
-	# "downgrade" (nightly sorts above beta) that version-bumping tools refuse to
-	# perform.
-	if [[ "$current_version" != "$new_version" ]]; then
-		perl -pi -e "s/\"\Q${current_version}\E\"/\"${new_version}\"/g" Cargo.toml
-		if grep -q "\"${current_version}\"" Cargo.toml; then
-			echo "Error: '${current_version}' still present in Cargo.toml after rewrite"
+	# The independently-versioned families are every published workspace member
+	# that does not carry surrealdb's version: the surrealdb crates inherit it
+	# from [workspace.package], so anything published on a different string is on
+	# its own 0.x line. One representative crate per family is enough — a family's
+	# crates share a single version string, so rewrite_version_string moves them
+	# all together (via [workspace.dependencies] and each crate's own [package]),
+	# and naming one member for `cargo update -p` reconciles the rest. Derived
+	# from metadata rather than a hand-maintained list so a newly added family is
+	# picked up automatically, and captured before the surrealdb rewrite below so
+	# the "version != cur_sdb" filter still sees surrealdb on its pre-cut string.
+	# publish=false members (demo, test-only crates) are excluded: the discipline
+	# only governs published lines.
+	local -a independent_anchors
+	mapfile -t independent_anchors < <(
+		cargo metadata --format-version 1 --no-deps \
+			| jq -r --arg sdb "$cur_sdb" \
+				'[ .packages[] | select(.publish != []) | select(.version != $sdb) ]
+				 | group_by(.version) | map(.[0].name) | .[]'
+	)
+
+	rewrite_version_string "$cur_sdb" "$surrealdb_target"
+
+	# Each family travels with the engine on its own 0.x line: the release line
+	# takes the SAME nightly->pre-release transform on its current 0.m minor
+	# (0.m.0-nightly -> 0.m.0-<beta.1|alpha.1>), and main advances one minor
+	# (0.m.0-nightly -> 0.(m+1).0-nightly). Each release line therefore reserves
+	# one of each family's minors, mirroring surrealdb's per-line cadence without
+	# tying the family's number to surrealdb's. The pre-release suffix matches
+	# surrealdb's (from BRANCH_VERSION).
+	local suffix="${BRANCH_VERSION#*-}"
+	local anchor cur target
+	for anchor in "${independent_anchors[@]}"; do
+		cur=$(crate_current_version "$anchor")
+		if [[ ! "$cur" =~ ^([0-9]+)\.([0-9]+)\.0-nightly$ ]]; then
+			echo "::error::${anchor} is on '${cur}', expected M.m.0-nightly; refusing to cut from an inconsistent independent-crate version."
 			exit 1
 		fi
-	fi
+		if [[ "$mode" == "branch" ]]; then
+			target="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.0-${suffix}"
+		else
+			target="${BASH_REMATCH[1]}.$((BASH_REMATCH[2] + 1)).0-nightly"
+		fi
+		rewrite_version_string "$cur" "$target"
+	done
 
-	# Sync the lockfile to the rewritten versions.
-	cargo update -p surrealdb -p surrealdb-core -p surrealdb-server
+	# Regenerate the lockfile from the rewritten manifests WITHOUT upgrading any
+	# external dependency: name only workspace members, so cargo reconciles their
+	# entries and leaves everything else pinned. `cargo update` with no package
+	# specs (or --workspace with unpinned deps) would pull in unrelated updates,
+	# which risks a broken tree and belongs in its own deliberate PR, not a cut.
+	# The surrealdb representatives cover the surrealdb crates; each family anchor
+	# covers its family.
+	local -a update_specs=(-p surrealdb -p surrealdb-core -p surrealdb-server)
+	for anchor in "${independent_anchors[@]}"; do
+		update_specs+=(-p "$anchor")
+	done
+	cargo update "${update_specs[@]}"
 }
 
 # ----------------------------------------------------------------------------
@@ -135,7 +214,7 @@ if [[ -n "$RELEASE_BRANCH" ]]; then
 
 	if [[ "$reuse_existing" != "true" ]]; then
 		git checkout -b "${RELEASE_BRANCH}" "${BASE_SHA}"
-		set_workspace_version "${BRANCH_VERSION}"
+		set_workspace_version branch "${BRANCH_VERSION}"
 		git commit -am "Set version to ${BRANCH_VERSION}"
 
 		if [[ "$PUBLISH" == "true" ]]; then
@@ -151,7 +230,7 @@ fi
 # Open the PR to move main to its next development version
 # ----------------------------------------------------------------------------
 git checkout -B "main-bump" "${BASE_SHA}"
-set_workspace_version "${MAIN_VERSION}"
+set_workspace_version main "${MAIN_VERSION}"
 
 if git diff --quiet; then
 	echo "main is already on ${MAIN_VERSION}; nothing to bump"

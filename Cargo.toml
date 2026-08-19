@@ -120,12 +120,12 @@ surrealdb-kvs-tikv = { version = "3.3.0-beta.3", path = "surrealdb/kvs-tikv" }
 surrealdb-collections = { version = "3.3.0-beta.3", path = "surrealdb/collections" }
 
 # SurrealML crates
-surrealml-core = { version = "0.1", path = "surrealml/core" }
+surrealml-core = { version = "0.2.0-beta.3", path = "surrealml/core" }
 # Surrealism crates
-surrealism = { version = "0.5", path = "surrealism" }
-surrealism-macros = { version = "0.5", path = "surrealism/macros", default-features = false }
-surrealism-runtime = { version = "0.5", path = "surrealism/runtime" }
-surrealism-types = { version = "0.5", path = "surrealism/types", default-features = false }
+surrealism = { version = "0.6.0-beta.3", path = "surrealism" }
+surrealism-macros = { version = "0.6.0-beta.3", path = "surrealism/macros", default-features = false }
+surrealism-runtime = { version = "0.6.0-beta.3", path = "surrealism/runtime" }
+surrealism-types = { version = "0.6.0-beta.3", path = "surrealism/types", default-features = false }
 
 
 # External surreal crates
