@@ -1039,42 +1039,6 @@ fn every_exec_variant() -> Vec<(&'static str, ExecError)> {
 		("PermissionPredicateSideEffect", ExecError::PermissionPredicateSideEffect),
 		("ComputedFieldSideEffect", ExecError::ComputedFieldSideEffect),
 		(
-			"PermissionClauseNotReadonly",
-			ExecError::PermissionClauseNotReadonly {
-				kind: "sample",
-				name: "sample".to_string(),
-			},
-		),
-		(
-			"PermissionWriteViaFunction",
-			ExecError::PermissionWriteViaFunction {
-				kind: "sample",
-				name: "sample".to_string(),
-				function: "sample".to_string(),
-			},
-		),
-		(
-			"ComputedWriteViaFunction",
-			ExecError::ComputedWriteViaFunction {
-				field: "sample".to_string(),
-				function: "sample".to_string(),
-			},
-		),
-		(
-			"FunctionRequiredReadOnly",
-			ExecError::FunctionRequiredReadOnly {
-				name: "sample".to_string(),
-				consumers: "sample".to_string(),
-			},
-		),
-		(
-			"MutablePermissionsDisabled",
-			ExecError::MutablePermissionsDisabled {
-				kind: "sample",
-				name: "sample".to_string(),
-			},
-		),
-		(
 			"SetCoerce",
 			ExecError::SetCoerce {
 				name: "sample".to_string(),
@@ -1390,7 +1354,7 @@ fn snapshot_covers_every_variant() {
 // 173: idx::Error carries a `FileAccessDenied` twin of the buc variant with a
 // byte-identical message, so the mapper allowlist is enforced inside idx; the
 // wire output of the affected sites is unchanged.
-const UNTYPED_INTERNAL_BUDGET: usize = 173;
+const UNTYPED_INTERNAL_BUDGET: usize = 172;
 
 /// Counts variants whose OWN kind is `Internal`.
 ///

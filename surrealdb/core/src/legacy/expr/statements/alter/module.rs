@@ -43,24 +43,6 @@ pub(crate) async fn alter_module_statement_compute(
 		md.permissions = p.clone();
 	}
 
-	// ALTER stores the same shape DEFINE does, so the assembled definition must
-	// satisfy the same read-only rules: no permission guard that modifies data
-	// (GHSA-66r2-5gwj-gxm2), directly or through a function call.
-	if md.permissions.has_direct_write() {
-		anyhow::bail!(crate::exec::Error::PermissionClauseNotReadonly {
-			kind: "module",
-			name: storage_name.clone(),
-		});
-	}
-	crate::fnc::mutability::ensure_guards_call_read_only(
-		ctx,
-		opt,
-		"module",
-		storage_name.clone(),
-		[&md.permissions],
-	)
-	.await?;
-
 	txn.put_db_module(ns, db, &md).await?;
 	txn.clear_cache();
 	Ok(Value::None)

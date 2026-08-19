@@ -23,7 +23,7 @@ pub(crate) async fn expr_compute(
 ) -> FlowResult<Value> {
 	let opt = opt.dive(1).map_err(anyhow::Error::new)?;
 
-	// A stored expression that a *read* evaluates may not modify data: a
+	// A stored expression that a *read* evaluates may not modify data: a SELECT
 	// PERMISSIONS predicate runs with permission enforcement disabled
 	// (GHSA-66r2-5gwj-gxm2), and a COMPUTED body runs under the definer's auth
 	// on every read of the field. This catches writes reached directly, through
@@ -31,11 +31,12 @@ pub(crate) async fn expr_compute(
 	// and streaming execution paths — the streaming engine plans no writes of
 	// its own, so every one of them arrives here.
 	//
-	// The `mutable_permissions` capability reopens this for create/update/delete
-	// predicates: those frames leave `no_write` unset and instead set
-	// `mutable_permission_predicate`, so a write is permitted and recorded as
-	// usage of the transitional capability rather than blocked.
-	if (opt.no_write.is_some() || opt.mutable_permission_predicate)
+	// This is the enforcement point for both rules. A definition-time check
+	// cannot stand in for it: whether a called function writes may depend on
+	// which branch its arguments select, so only reaching the statement settles
+	// it. create/update/delete PERMISSIONS clauses are reached from a write and
+	// carry no such frame, so they never land here.
+	if let Some(frame) = opt.no_write
 		&& matches!(
 			this,
 			Expr::Create(_)
@@ -49,31 +50,19 @@ pub(crate) async fn expr_compute(
 				| Expr::Rebuild(_)
 				| Expr::Alter(_)
 		) {
-		if let Some(frame) = opt.no_write {
-			let err = match frame {
-				NoWriteFrame::PermissionPredicate => {
-					// A create/update/delete predicate reaching this block means the
-					// `mutable_permissions` capability is off (a select predicate
-					// always reaches it). Point the operator at the sanctioned
-					// mechanism for write side effects on writes.
-					warn!(
-						"A PERMISSIONS clause attempted to modify data and was blocked \
-						 (GHSA-66r2-5gwj-gxm2). Move audit-style side effects to a DEFINE EVENT; \
-						 to keep them in create/update/delete permission clauses, enable the \
-						 `mutable_permissions` experimental capability."
-					);
-					ExecError::PermissionPredicateSideEffect
-				}
-				NoWriteFrame::ComputedField => ExecError::ComputedFieldSideEffect,
-			};
-			return Err(ControlFlow::Err(anyhow::Error::new(err)));
-		}
-		// `mutable_permission_predicate` with `no_write` unset: the capability
-		// permitted this write. Record it so operators can track reliance on the
-		// transitional capability, then fall through and run the statement.
-		if let Some(counters) = ctx.statement_counters() {
-			counters.record_mutable_permission_write();
-		}
+		let err = match frame {
+			NoWriteFrame::PermissionPredicate => {
+				// Point the operator at the sanctioned mechanism for write side
+				// effects driven by a read.
+				warn!(
+					"A SELECT PERMISSIONS clause attempted to modify data and was blocked \
+					 (GHSA-66r2-5gwj-gxm2). Move audit-style side effects to a DEFINE EVENT."
+				);
+				ExecError::PermissionPredicateSideEffect
+			}
+			NoWriteFrame::ComputedField => ExecError::ComputedFieldSideEffect,
+		};
+		return Err(ControlFlow::Err(anyhow::Error::new(err)));
 	}
 
 	match this {

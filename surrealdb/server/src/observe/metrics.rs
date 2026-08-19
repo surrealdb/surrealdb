@@ -99,7 +99,6 @@ pub struct MetricsObserver {
 	statement_total: Counter<u64>,
 	statement_duration: Histogram<f64>,
 	statement_rows: Counter<u64>,
-	statement_mutable_permission_writes: Counter<u64>,
 	// Query (scope: surrealdb.query)
 	query_total: Counter<u64>,
 	query_duration: Histogram<f64>,
@@ -196,16 +195,6 @@ impl MetricsObserver {
 					"Cumulative count of rows returned (SELECT) or affected \
 					 (CREATE / UPDATE / UPSERT / DELETE / RELATE / INSERT) by \
 					 completed statements",
-				)
-				.build(),
-			statement_mutable_permission_writes: stmt
-				.u64_counter(names::STATEMENT_MUTABLE_PERMISSION_WRITES)
-				.with_description(
-					"Cumulative count of data-modifying statements run inside a \
-					 create/update/delete PERMISSIONS predicate permitted only by \
-					 the transitional `mutable_permissions` capability. Non-zero \
-					 means the deployment relies on the capability and has schemas \
-					 to migrate to DEFINE EVENT before it is removed",
 				)
 				.build(),
 			query_total: qry
@@ -633,20 +622,6 @@ impl ExecutionObserver for MetricsObserver {
 		if event.safe.result_rows > 0 {
 			self.statement_rows.add(event.safe.result_rows, &attrs);
 		}
-		if event.safe.mutable_permission_writes > 0 {
-			// Instance-level usage signal: deliberately omit the tenant
-			// (namespace / database / user) labels the rest of this family
-			// carries, so the counter shows that the node relies on the
-			// transitional `mutable_permissions` capability and how much,
-			// without attributing that reliance to any tenant.
-			self.statement_mutable_permission_writes.add(
-				event.safe.mutable_permission_writes,
-				&[
-					KeyValue::new(attrs::STATEMENT_TYPE, event.safe.kind.as_label()),
-					KeyValue::new(attrs::OUTCOME, event.safe.outcome.as_label()),
-				],
-			);
-		}
 		if self.slow_query_threshold_ms > 0 {
 			let duration_ms = event.safe.duration.as_millis() as u64;
 			if duration_ms >= self.slow_query_threshold_ms {
@@ -1034,7 +1009,6 @@ mod tests {
 				duration: Duration::from_millis(3),
 				read_only: true,
 				result_rows,
-				mutable_permission_writes: 0,
 				error_class: None,
 			},
 			ctx: StatementEventCtx {
@@ -1060,10 +1034,6 @@ mod tests {
 		));
 		let names = collect_names(&reader);
 		// Statement instruments live on the `surrealdb.statement` scope.
-		// `STATEMENT_MUTABLE_PERMISSION_WRITES` is emitted only for non-zero
-		// events, so it does not materialise here; its registration and scope
-		// are asserted in
-		// `mutable_permission_writes_counter_is_instance_level_and_non_zero_only`.
 		for (instrument, expected_scope) in [
 			(names::STATEMENT_TOTAL, scope::STATEMENT),
 			(names::STATEMENT_DURATION, scope::STATEMENT),
@@ -1123,74 +1093,6 @@ mod tests {
 			}
 		}
 		assert!(found_rows_family, "rows family did not materialise");
-		provider.shutdown().expect("shutdown");
-	}
-
-	#[tokio::test]
-	async fn mutable_permission_writes_counter_is_instance_level_and_non_zero_only() {
-		use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
-		let (provider, reader, runtime) = fresh_runtime();
-		let obs = MetricsObserver::new(&runtime).expect("observer");
-
-		// A create/update/delete PERMISSIONS clause ran 3 writes under the
-		// `mutable_permissions` capability. Tenant ctx is present on the event
-		// (as it would be in a real multi-tenant deployment).
-		let mut ev = statement_event(
-			StatementType::Create,
-			Some("acme"),
-			Some("alice"),
-			1,
-			Outcome::Success,
-		);
-		ev.safe.mutable_permission_writes = 3;
-		obs.on_statement_complete(&ev);
-
-		// A statement that used no such writes must not materialise a data
-		// point on this family.
-		obs.on_statement_complete(&statement_event(
-			StatementType::Select,
-			Some("acme"),
-			Some("alice"),
-			9,
-			Outcome::Success,
-		));
-
-		let mut rm = ResourceMetrics::default();
-		reader.collect(&mut rm).expect("collect");
-
-		let mut found = false;
-		let mut points = 0usize;
-		let mut summed = 0u64;
-		for sm in rm.scope_metrics() {
-			for metric in sm.metrics() {
-				if metric.name() != names::STATEMENT_MUTABLE_PERMISSION_WRITES {
-					continue;
-				}
-				found = true;
-				if let AggregatedMetrics::U64(MetricData::Sum(sum)) = metric.data() {
-					for dp in sum.data_points() {
-						points += 1;
-						summed += dp.value();
-						// Instance-level only: the counter must carry no tenant
-						// identity, unlike the rest of the statement family.
-						for key in [attrs::NAMESPACE, attrs::DATABASE, attrs::USER] {
-							assert!(
-								dp.attributes().all(|kv| kv.key.as_str() != key),
-								"mutable-permission counter leaked tenant label `{key}`: {dp:?}",
-							);
-						}
-						// The non-tenant statement_type label is retained.
-						assert!(
-							dp.attributes().any(|kv| kv.key.as_str() == attrs::STATEMENT_TYPE),
-							"missing statement_type label: {dp:?}",
-						);
-					}
-				}
-			}
-		}
-		assert!(found, "mutable-permission-writes family did not materialise");
-		assert_eq!(points, 1, "the zero-valued statement must not add a data point");
-		assert_eq!(summed, 3, "counter must sum only the capability-enabled writes");
 		provider.shutdown().expect("shutdown");
 	}
 
@@ -1491,7 +1393,6 @@ mod tests {
 				duration: Duration::from_millis(2),
 				read_only: true,
 				result_rows: 1,
-				mutable_permission_writes: 0,
 				error_class: None,
 			},
 			ctx: StatementEventCtx {

@@ -9,7 +9,6 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::exe::FlowResultExt;
-use crate::exec::Error as ExecError;
 use crate::expr::Base;
 use crate::expr::statements::define::DefineKind;
 use crate::expr::statements::define::model::DefineModelStatement;
@@ -28,21 +27,6 @@ pub(crate) async fn define_model_statement_compute(
 ) -> Result<Value> {
 	// Allowed to run?
 	ctx.is_allowed(opt, Action::Edit, ResourceKind::Model, Base::Db)?;
-	// A PERMISSIONS clause must not perform writes (GHSA-66r2-5gwj-gxm2).
-	if this.permissions.has_direct_write() {
-		bail!(ExecError::PermissionClauseNotReadonly {
-			kind: "model",
-			name: this.name.to_string(),
-		});
-	}
-	crate::fnc::mutability::ensure_guards_call_read_only(
-		ctx,
-		opt,
-		"model",
-		this.name.to_string(),
-		[&this.permissions],
-	)
-	.await?;
 	// Fetch the transaction
 	let txn = ctx.tx();
 	// Check if the definition exists

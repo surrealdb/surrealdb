@@ -250,39 +250,35 @@ and `exec/operators/scan/fetch.rs` (`resolve_with_field_state`)
   `record_users_are_always_permission_checked` (`exec/permission.rs`).
 - Reference cascade operations (ON DELETE CASCADE, UNSET, CUSTOM) must only modify
   records reachable through explicitly defined REFERENCE relationships.
-- Permission expressions (WHERE clause in PERMISSIONS) must not produce observable
-  side effects (writes, deletes, event triggers). This is enforced in two layers
-  (GHSA-66r2-5gwj-gxm2): definition-time rejection of clauses that reach a
-  data-modifying statement (directly via `Permissions::has_direct_write`, or
-  through a function call via `fnc::mutability::ensure_permission_clauses_read_only`,
-  checked in every `DEFINE`/`ALTER` that stores permissions), and a runtime guard
-  that rejects any mutating statement reached while a predicate is evaluated.
-  Predicate evaluation uses `Options::new_for_permission_predicate` (legacy path)
-  or carries `skip_fetch_perms` (streaming path), both of which set a
+- A `SELECT` permission expression (the WHERE clause in `PERMISSIONS FOR select`)
+  must not produce observable side effects (writes, deletes, event triggers).
+  A read must never trigger a write — the core escalation GHSA-66r2-5gwj-gxm2
+  closes — and the predicate is evaluated with permission enforcement already
+  disabled, so a write reached from one bypasses every gate.
+
+  This is enforced **at runtime only**. Predicate evaluation uses
+  `Options::new_for_permission_predicate` (legacy path) or carries
+  `skip_fetch_perms` (streaming path), both of which set a
   `NoWriteFrame::PermissionPredicate` so `Expr::compute` blocks
   CREATE/UPDATE/DELETE/RELATE/INSERT/UPSERT and DDL — including writes reached
-  through custom-function bodies.
+  through custom-function bodies, `eval`, scripts and closures arriving as data.
+  The block logs a warning steering operators to `DEFINE EVENT`, the sanctioned
+  definer-authority side-effect mechanism.
   Verified by: `the_legacy_compute_fallback_cannot_write_from_inside_a_permission_predicate`
   (`exec/operators/sequence.rs`).
-  - **SELECT permission predicates are always write-blocked**, at both layers.
-    A read must never trigger a write (the core escalation the advisory closes).
+
+  There is deliberately **no definition-time counterpart**. A `DEFINE`/`ALTER`
+  that stores a writing `SELECT` guard is accepted; it fails when a read reaches
+  the write. Rejecting at definition time cannot be made sound — whether a called
+  function reaches a write depends on which branch its arguments select — and a
+  check that guesses either refuses working schemas or gives false assurance.
+  Treat the runtime frame as the whole of the control.
   - **create/update/delete permission predicates** (table clauses, and the
-    create/update field clauses) are write-blocked too **unless** the transitional
-    `mutable_permissions` experimental capability is enabled. When on, those
-    predicates run write-capable (with permissions still bypassed, as with any
-    predicate), which re-opens the escalation surface for those clauses — the
-    documented cost of the capability. **The `surreal` server allows the capability
-    unless `--deny-experimental` / `SURREAL_CAPS_DENY_EXPERIMENTAL` names the target**,
-    so treat write-capable create/update/delete predicates as the norm for a served
-    deployment; an embedder supplying its own `Capabilities` gets it off by default.
-    The block, when it fires, logs a warning steering operators to `DEFINE EVENT`
-    (the sanctioned definer-authority side-effect mechanism), and
-    `surrealdb_statement_mutable_permission_writes_total` reports how much a
-    deployment relies on the capability. The capability is intended to be removed
-    once affected schemas migrate. The frame decision lives in
+    create/update field clauses) carry no such frame: they are only ever reached
+    from a statement that is already writing, so their side effects run, with
+    permissions bypassed as with any predicate. The frame decision lives in
     `doc::check::permission_predicate_frame` (`PermissionClauseKind::Read` vs
-    `Write`); `eval`-nested writes inside a predicate remain blocked regardless of
-    the capability.
+    `Write`).
 - The Auth context within Options must not be mutated by user-controlled operations.
   Only system-internal mechanisms (AuthLimit) may produce derived Options with
   modified auth, and these must never broaden permissions.

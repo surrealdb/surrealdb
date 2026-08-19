@@ -3,32 +3,40 @@
 imports = ["reproductions/perm_predicate_runtime_block_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "user:test" }
 
-[env.capabilities]
-allow-eval-query = ["record", "system"]
-
 [test]
-reason = "A permission predicate that writes via a custom-function body must be blocked at runtime on both the streaming SELECT path and the legacy UPDATE path, and must not create the row (GHSA-66r2-5gwj-gxm2). The write hides behind `eval` because a resolvable function-call write is refused at definition time."
+reason = """
+	A `select` PERMISSIONS guard that reaches a write through a user-defined
+	function body is blocked at runtime, and must not write
+	(GHSA-66r2-5gwj-gxm2). The `create`/`update`/`delete` guards carry no such
+	frame: they are reached from a statement that is already writing, so their
+	side effects run.
 
-# 0: SELECT — streaming path. It errors; the exact wording is wrapped
-# differently per planner config ("Failed to check permission: ..."), so only
-# assert that an error occurred.
+	The block lives only at runtime. Nothing about these guards is refused when
+	they are defined, because a call's body may take its writing branch only on
+	arguments this guard never supplies.
+"""
+
+# 0: SELECT evaluates the select guard on the streaming path. It errors; the
+# exact wording is wrapped differently per planner config ("Failed to check
+# permission: ..."), so only assert that an error occurred.
 [[test.results]]
 error = true
 
-# 1: UPDATE — legacy compute path, stable error wording across configs.
+# 1: UPDATE evaluates the update guard, whose write is permitted, so the
+# statement succeeds.
 [[test.results]]
-error = "A PERMISSIONS clause cannot contain a statement that modifies data"
+value = "[{ id: writable:1, n: 1 }]"
 
-# 2: the predicate's write was blocked, so audit is empty.
+# 2: only the update guard wrote. The select guard's write was refused.
 [[test.results]]
-value = "[]"
+value = "[{ hit: true, id: audit:writer }]"
 */
 
--- 0: SELECT triggers the SELECT-permission predicate (streaming path) -> blocked.
-SELECT * FROM victim;
+-- 0: reading triggers the select guard -> its write is refused.
+SELECT * FROM readable;
 
--- 1: UPDATE triggers the UPDATE-permission predicate (legacy path) -> blocked.
-UPDATE victim:1 SET visible = false;
+-- 1: writing triggers the update guard -> its write runs.
+UPDATE writable:1 SET n = 1;
 
--- 2: the predicate must not have written to `audit`.
-SELECT * FROM audit;
+-- 2: `audit:reader` must be absent; `audit:writer` must be present.
+SELECT * FROM audit ORDER BY id;

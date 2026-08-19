@@ -451,11 +451,8 @@ impl Document {
 	/// nested `Options`, so the predicate itself cannot recursively trip
 	/// table-level permission gates.
 	///
-	/// A `Read` clause (`SELECT`) is always evaluated write-blocked. A `Write`
-	/// clause (create/update/delete) is write-blocked too, unless the
-	/// `mutable_permissions` capability is enabled — the transitional escape
-	/// hatch that lets those predicates carry side effects (see
-	/// [`permission_predicate_frame`]).
+	/// A `Read` clause (`SELECT`) is evaluated write-blocked; a `Write` clause
+	/// (create/update/delete) is not (see [`permission_predicate_frame`]).
 	async fn process_permissions(
 		&self,
 		stk: &mut Stk,
@@ -469,9 +466,9 @@ impl Document {
 			Permission::None => Err(IgnoreError::Ignore),
 			Permission::Full => Ok(()),
 			Permission::Specific(e) => {
-				// Disable permission recursion, and block side effects unless
-				// the capability opens this clause up.
-				let opt = &permission_predicate_frame(ctx, opt, clause);
+				// Disable permission recursion, and block side effects on the
+				// clauses a read evaluates.
+				let opt = &permission_predicate_frame(opt, clause);
 				// Process the PERMISSION clause
 				if !stk
 					.run(|stk| crate::legacy::expr_compute(e, stk, ctx, opt, Some(doc)))
@@ -493,29 +490,21 @@ impl Document {
 pub(crate) enum PermissionClauseKind {
 	/// `PERMISSIONS FOR select` — evaluated on reads; always write-blocked.
 	Read,
-	/// `PERMISSIONS FOR create/update/delete` — evaluated during a write;
-	/// write-blocked unless the `mutable_permissions` capability is enabled.
+	/// `PERMISSIONS FOR create/update/delete` — evaluated during a write, and
+	/// free to carry side effects of its own.
 	Write,
 }
 
 /// Derive the `Options` frame for evaluating a permission predicate.
 ///
-/// Always disables permission recursion. Blocks data-modifying statements
-/// (GHSA-66r2-5gwj-gxm2) for every `Read` clause, and for `Write` clauses too
-/// unless the `mutable_permissions` capability is enabled — the transitional
-/// escape hatch that permits side effects in create/update/delete predicates.
-pub(crate) fn permission_predicate_frame(
-	ctx: &FrozenContext,
-	opt: &Options,
-	clause: PermissionClauseKind,
-) -> Options {
-	let writes_allowed = matches!(clause, PermissionClauseKind::Write)
-		&& ctx
-			.get_capabilities()
-			.allows_experimental(&crate::dbs::capabilities::ExperimentalTarget::MutablePermissions);
-	if writes_allowed {
-		opt.new_for_permission_predicate_allow_writes()
-	} else {
-		opt.new_for_permission_predicate()
+/// Always disables permission recursion. A `Read` clause is evaluated under
+/// the frame that rejects data-modifying statements (GHSA-66r2-5gwj-gxm2): it
+/// runs on behalf of a reader who did not write it, with permission
+/// enforcement already disabled. A `Write` clause is reached only from a
+/// statement that is writing anyway, so its predicate may write too.
+pub(crate) fn permission_predicate_frame(opt: &Options, clause: PermissionClauseKind) -> Options {
+	match clause {
+		PermissionClauseKind::Read => opt.new_for_permission_predicate(),
+		PermissionClauseKind::Write => opt.new_for_mutable_permission_predicate(),
 	}
 }

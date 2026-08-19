@@ -30,9 +30,4 @@ impl ForeachStatement {
 	pub fn read_only(&self) -> bool {
 		self.range.read_only() && self.block.read_only()
 	}
-
-	/// Check if the range or body directly contains a data-modifying statement.
-	pub fn has_direct_write(&self) -> bool {
-		self.range.has_direct_write() || self.block.has_direct_write()
-	}
 }

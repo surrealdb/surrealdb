@@ -209,78 +209,22 @@ pub(crate) enum Error {
 		name: String,
 	},
 
-	/// A permission predicate attempted to perform a write or other side effect
-	/// while being evaluated (GHSA-66r2-5gwj-gxm2). Permission expressions are
-	/// evaluated with permission enforcement disabled, so they must be free of
-	/// observable side effects.
+	/// A `SELECT` permission predicate attempted to perform a write or other
+	/// side effect while being evaluated (GHSA-66r2-5gwj-gxm2). Permission
+	/// expressions are evaluated with permission enforcement disabled, so they
+	/// must be free of observable side effects. The create/update/delete
+	/// clauses are reached from a write and may carry side effects.
 	#[error("A PERMISSIONS clause cannot contain a statement that modifies data")]
 	PermissionPredicateSideEffect,
 
 	/// A `COMPUTED` body reached a data-modifying statement while being
 	/// evaluated. The definition-time check ([`Error::ComputedWrite`]) rejects a
-	/// mutation written into the body, but treats a call to a user-defined
-	/// function as opaque, since the callee is stored separately and can be
-	/// redefined afterwards. This is the runtime half of that pair.
+	/// mutation written into the body itself, but treats a call to a
+	/// user-defined function as opaque, since the callee is stored separately,
+	/// can be redefined afterwards, and may take its writing branch only on
+	/// inputs this body never supplies. This is where those are caught.
 	#[error("A COMPUTED clause cannot contain a statement that modifies data")]
 	ComputedFieldSideEffect,
-
-	/// A DEFINE/ALTER (or import) supplied a permission clause that directly
-	/// contains a data-modifying statement, which is not allowed.
-	#[error(
-		"Found a non-read-only expression in the PERMISSIONS clause for {kind} `{name}`, but a PERMISSIONS clause must not modify data"
-	)]
-	PermissionClauseNotReadonly {
-		kind: &'static str,
-		name: String,
-	},
-
-	/// A DEFINE supplied a permission clause that calls a user-defined
-	/// function whose stored body reaches a data-modifying statement. The
-	/// direct form is [`Error::PermissionClauseNotReadonly`]; this is the
-	/// same rule resolved through the function call graph.
-	#[error(
-		"The PERMISSIONS clause for {kind} `{name}` calls `fn::{function}`, which modifies data, but a PERMISSIONS clause must not modify data"
-	)]
-	PermissionWriteViaFunction {
-		kind: &'static str,
-		name: String,
-		function: String,
-	},
-
-	/// A DEFINE FIELD supplied a COMPUTED body that calls a user-defined
-	/// function whose stored body reaches a data-modifying statement. The
-	/// direct form is [`Error::ComputedWrite`]; this is the same rule
-	/// resolved through the function call graph.
-	#[error(
-		"Cannot define field `{field}` as `COMPUTED`: the body calls `fn::{function}`, which modifies data, and `COMPUTED` bodies must be read-only"
-	)]
-	ComputedWriteViaFunction {
-		field: String,
-		function: String,
-	},
-
-	/// A DEFINE/ALTER FUNCTION supplied a body that reaches a data-modifying
-	/// statement while COMPUTED fields or permission clauses depend on the
-	/// function staying read-only.
-	#[error(
-		"Cannot define function `fn::{name}`: it modifies data, but it must remain read-only because it is used by {consumers}"
-	)]
-	FunctionRequiredReadOnly {
-		name: String,
-		consumers: String,
-	},
-
-	/// A DEFINE/ALTER supplied a `PERMISSIONS FOR create/update/delete` clause
-	/// that modifies data while the `mutable_permissions` capability is off.
-	/// SELECT clauses are never permitted to modify data; these write-triggered
-	/// clauses are, but only behind the transitional capability.
-	#[error(
-		"Cannot define {kind} `{name}`: a create/update/delete PERMISSIONS clause modifies data, which requires the `mutable_permissions` capability to be enabled; otherwise move the side effect to a DEFINE EVENT"
-	)]
-	MutablePermissionsDisabled {
-		kind: &'static str,
-		name: String,
-	},
 
 	/// The specified value did not conform to the LET type check
 	#[error("Tried to set `${name}`, but couldn't coerce value: {error}")]
@@ -444,23 +388,10 @@ impl LeafError for Error {
 			Error::AccessUnsupportedAlgorithm => TypesError::validation(message, None),
 			// The definition itself is malformed, so the client can act on it.
 			// `ComputedFieldSideEffect` is the same fault caught at read time
-			// instead of definition time, so it reaches clients the same way;
-			// the `ViaFunction`/`RequiredReadOnly` forms are the same rule
-			// resolved through the function call graph.
-			Error::ComputedWrite(_)
-			| Error::ComputedFieldSideEffect
-			| Error::ComputedWriteViaFunction {
-				..
+			// instead of definition time, so it reaches clients the same way.
+			Error::ComputedWrite(_) | Error::ComputedFieldSideEffect => {
+				TypesError::validation(message, ValidationError::InvalidRequest)
 			}
-			| Error::PermissionWriteViaFunction {
-				..
-			}
-			| Error::FunctionRequiredReadOnly {
-				..
-			}
-			| Error::MutablePermissionsDisabled {
-				..
-			} => TypesError::validation(message, ValidationError::InvalidRequest),
 
 			// A `THROW`, reaching the client verbatim. The only kind in this
 			// type the query author chooses.
@@ -554,9 +485,6 @@ impl LeafError for Error {
 				..
 			}
 			| Error::PermissionPredicateSideEffect
-			| Error::PermissionClauseNotReadonly {
-				..
-			}
 			| Error::SetCoerce {
 				..
 			}

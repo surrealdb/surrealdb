@@ -20,11 +20,6 @@ impl Block {
 	pub fn read_only(&self) -> bool {
 		self.0.iter().all(|x| x.read_only())
 	}
-
-	/// Check if this block directly contains a data-modifying statement.
-	pub fn has_direct_write(&self) -> bool {
-		self.0.iter().any(|x| x.has_direct_write())
-	}
 }
 
 impl ToSql for Block {

@@ -50,19 +50,6 @@ pub(crate) async fn define_table_statement_compute(
 	// Process the name
 	let name = TableName::new(expr_to_ident(stk, ctx, opt, doc, &this.name, "table name").await?);
 
-	// A SELECT PERMISSIONS clause must not perform writes (GHSA-66r2-5gwj-gxm2),
-	// directly or through a function call. The create/update/delete clauses are
-	// held to the same rule unless the `mutable_permissions` capability is on.
-	crate::fnc::mutability::ensure_permission_clauses_read_only(
-		ctx,
-		opt,
-		"table",
-		name.as_str().to_string(),
-		[&this.permissions.select],
-		[&this.permissions.create, &this.permissions.update, &this.permissions.delete],
-	)
-	.await?;
-
 	// Get the NS and DB
 	let (ns_name, db_name) = opt.ns_db()?;
 

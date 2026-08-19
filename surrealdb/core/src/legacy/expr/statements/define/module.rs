@@ -7,7 +7,6 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::exe::FlowResultExt as _;
-use crate::exec::Error as ExecError;
 use crate::expr::Base;
 #[cfg(feature = "surrealism")]
 use crate::expr::module::ModuleExecutable;
@@ -34,21 +33,6 @@ pub(crate) async fn define_module_statement_compute(
 	// Check if the definition exists
 	let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 	let storage_name = ModuleName::try_from(this)?.get_storage_name();
-	// A PERMISSIONS clause must not perform writes (GHSA-66r2-5gwj-gxm2).
-	if this.permissions.has_direct_write() {
-		bail!(ExecError::PermissionClauseNotReadonly {
-			kind: "module",
-			name: storage_name.clone(),
-		});
-	}
-	crate::fnc::mutability::ensure_guards_call_read_only(
-		ctx,
-		opt,
-		"module",
-		storage_name.clone(),
-		[&this.permissions],
-	)
-	.await?;
 	if txn.get_db_module(ns, db, &storage_name, None).await.is_ok() {
 		match this.kind {
 			DefineKind::Default => {

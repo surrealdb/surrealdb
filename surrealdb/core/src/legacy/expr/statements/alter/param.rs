@@ -56,24 +56,6 @@ pub(crate) async fn alter_param_statement_compute(
 		pa.permissions = p.clone();
 	}
 
-	// ALTER stores the same shape DEFINE does, so the assembled definition must
-	// satisfy the same read-only rules: no permission guard that modifies data
-	// (GHSA-66r2-5gwj-gxm2), directly or through a function call.
-	if pa.permissions.has_direct_write() {
-		anyhow::bail!(crate::exec::Error::PermissionClauseNotReadonly {
-			kind: "param",
-			name: this.name.to_string(),
-		});
-	}
-	crate::fnc::mutability::ensure_guards_call_read_only(
-		ctx,
-		opt,
-		"param",
-		this.name.to_string(),
-		[&pa.permissions],
-	)
-	.await?;
-
 	let key = ParamKey {
 		ns,
 		db,

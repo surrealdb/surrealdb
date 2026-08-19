@@ -495,31 +495,6 @@ impl DbsCapabilities {
 	}
 
 	fn get_allow_experimental(&self) -> Targets<ExperimentalTarget> {
-		// `mutable_permissions` is allowed on every server without being asked
-		// for, so a schema whose create/update/delete PERMISSIONS clauses modify
-		// data keeps working with no configuration. It is added after the
-		// allow/deny resolution rather than defaulted into it because both of the
-		// resolution's shapes would otherwise drop it: a general experimental deny
-		// (`--deny-experimental=*`) suppresses everything unnamed, and naming any
-		// unrelated target replaces the allow set instead of extending it.
-		//
-		// `SELECT` clauses stay read-only regardless (GHSA-66r2-5gwj-gxm2); this
-		// only concerns the write-triggered clauses. Naming the target in
-		// `--deny-experimental` is the off switch, since a specific deny is
-		// applied on top of whatever is allowed.
-		match self.get_configured_allow_experimental() {
-			Targets::All => Targets::All,
-			Targets::None => ExperimentalTarget::MutablePermissions.into(),
-			Targets::Some(mut targets) => {
-				targets.insert(ExperimentalTarget::MutablePermissions);
-				Targets::Some(targets)
-			}
-		}
-	}
-
-	/// The experimental targets the operator asked for, before the
-	/// `mutable_permissions` default in [`Self::get_allow_experimental`].
-	fn get_configured_allow_experimental(&self) -> Targets<ExperimentalTarget> {
 		// If there was a global deny, we allow if there is a general allow or some
 		// specific allows for experimental features
 		if self.deny_all {
@@ -1110,7 +1085,6 @@ pub(crate) async fn finish_startup(ds: &Datastore, pending: &PendingStartup) -> 
 
 #[cfg(test)]
 mod tests {
-	use std::collections::HashSet;
 	use std::ffi::OsString;
 	use std::str::FromStr;
 	use std::sync::Arc;
@@ -1738,70 +1712,6 @@ mod tests {
 		};
 		assert_eq!(caps.get_allow_experimental(), Targets::All);
 		assert_eq!(caps.get_allow_arbitrary_query(), Targets::All);
-	}
-
-	/// Builds a [`DbsCapabilities`] whose only interesting fields are the
-	/// experimental allow / deny pair.
-	fn experimental_caps(
-		allow: Option<Targets<ExperimentalTarget>>,
-		deny: Option<Targets<ExperimentalTarget>>,
-	) -> DbsCapabilities {
-		DbsCapabilities {
-			allow_all: false,
-			#[cfg(feature = "scripting")]
-			allow_scripting: false,
-			allow_guests: false,
-			allow_funcs: None,
-			allow_experimental: allow,
-			allow_arbitrary_query: None,
-			allow_eval_query: None,
-			allow_net: None,
-			allow_rpc: None,
-			allow_http: None,
-			deny_all: false,
-			#[cfg(feature = "scripting")]
-			deny_scripting: false,
-			deny_guests: false,
-			deny_funcs: None,
-			deny_experimental: deny,
-			deny_arbitrary_query: None,
-			deny_eval_query: None,
-			deny_net: None,
-			deny_rpc: None,
-			deny_http: None,
-			planner_strategy: NewPlannerStrategy::default(),
-		}
-	}
-
-	#[test]
-	fn test_dbs_capabilities_mutable_permissions_allowed_without_being_asked_for() {
-		let mutable = ExperimentalTarget::MutablePermissions;
-
-		// Nothing configured: allowed, where every other experimental target is
-		// still denied.
-		let caps = experimental_caps(None, None);
-		assert_eq!(caps.get_allow_experimental(), Targets::from(mutable.clone()));
-		assert!(Capabilities::from(caps).allows_experimental(&mutable));
-
-		// A general experimental deny does not suppress it. This is the shape a
-		// managed deployment applies, so it is what decides whether a hosted
-		// instance can run these clauses at all.
-		let caps = experimental_caps(None, Some(Targets::All));
-		assert_eq!(caps.get_allow_experimental(), Targets::from(mutable.clone()));
-		assert!(Capabilities::from(caps).allows_experimental(&mutable));
-
-		// Naming an unrelated target replaces the allow set, so the addition has
-		// to survive that too: both end up allowed.
-		let caps = experimental_caps(Some(Targets::from(ExperimentalTarget::Gql)), None);
-		assert_eq!(
-			caps.get_allow_experimental(),
-			Targets::Some(HashSet::from([ExperimentalTarget::Gql, mutable.clone()]))
-		);
-
-		// Naming the target in the deny list is the off switch: a specific deny is
-		// applied on top of whatever is allowed.
-		let caps = experimental_caps(None, Some(Targets::from(mutable.clone())));
-		assert!(!Capabilities::from(caps).allows_experimental(&mutable));
 	}
 
 	#[test]

@@ -361,16 +361,6 @@ pub struct StatementEventSafe {
 	/// Bounded scalar, non-identifying -- safe to surface as a counter
 	/// increment on the dimensional metrics observer.
 	pub result_rows: u64,
-	/// Number of data-modifying statements this statement ran inside a
-	/// `create`/`update`/`delete` `PERMISSIONS` predicate that only executed
-	/// because the transitional `mutable_permissions` capability is enabled.
-	/// `0` for the overwhelming majority of statements (the capability off, or
-	/// the permission predicate performing no writes).
-	///
-	/// A non-zero value means the deployment is relying on the transitional
-	/// capability, which is scheduled for removal — operators track it to find
-	/// schemas to migrate to `DEFINE EVENT`. Bounded scalar, non-identifying.
-	pub mutable_permission_writes: u64,
 	/// Bounded error classification when `outcome` is [`Outcome::Error`].
 	/// `None` for success / cancelled. Drawn from a fixed enum at the
 	/// recording site so it stays safe for label-cardinality purposes.

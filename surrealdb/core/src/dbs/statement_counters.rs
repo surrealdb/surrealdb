@@ -44,15 +44,6 @@ pub(crate) struct StatementCounters {
 	/// SELECT row counts are derived from the post-RETURN [`crate::val::Value`]
 	/// shape inside [`crate::dbs::executor`], not from this counter.
 	affected: AtomicU64,
-	/// Data-modifying statements this statement ran inside a
-	/// `create`/`update`/`delete` `PERMISSIONS` predicate that only executed
-	/// because the `mutable_permissions` capability is enabled. Incremented at
-	/// the single `no_write`-frame decision site in
-	/// [`crate::legacy::expr_compute`] when the write is permitted by the
-	/// transitional capability rather than blocked. The executor reads the
-	/// snapshot at statement completion for the usage metric; the value is
-	/// never used to gate execution.
-	mutable_permission_writes: AtomicU64,
 }
 
 impl StatementCounters {
@@ -71,18 +62,5 @@ impl StatementCounters {
 	/// executor immediately after the statement has returned.
 	pub(crate) fn affected(&self) -> u64 {
 		self.affected.load(Ordering::Relaxed)
-	}
-
-	/// Record that a data-modifying statement ran inside a
-	/// `create`/`update`/`delete` `PERMISSIONS` predicate under the
-	/// `mutable_permissions` capability.
-	pub(crate) fn record_mutable_permission_write(&self) {
-		self.mutable_permission_writes.fetch_add(1, Ordering::Relaxed);
-	}
-
-	/// Read the current mutable-permission-write count. Cheap; safe to call
-	/// from the executor immediately after the statement has returned.
-	pub(crate) fn mutable_permission_writes(&self) -> u64 {
-		self.mutable_permission_writes.load(Ordering::Relaxed)
 	}
 }
