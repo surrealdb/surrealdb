@@ -31,7 +31,9 @@ if (!(await packageFile.exists())) {
 
 /** Read the shared crate version out of the Cargo workspace manifest. */
 async function workspaceVersion(): Promise<string> {
-	const manifest = await Bun.file("../../Cargo.toml").text();
+	// Resolved against this script rather than the process CWD, so the lookup
+	// does not depend on where it was invoked from.
+	const manifest = await Bun.file(`${import.meta.dir}/../../Cargo.toml`).text();
 	const section = manifest.split(/^\[workspace\.package\]$/m)[1];
 	const version = section?.match(/^version\s*=\s*"([^"]+)"/m)?.[1];
 
@@ -75,6 +77,37 @@ async function isPublished(pkgName: string, pkgVersion: string): Promise<boolean
 	}
 }
 
+/**
+ * Warn when `latest` does not point where this channel's releases should leave
+ * it.
+ *
+ * npm points `latest` at the FIRST version a package ever publishes whatever
+ * `--tag` asked for, so a package whose first release was a prerelease leaves
+ * `npm install <pkg>` fetching that prerelease forever — including after newer
+ * ones ship under `beta`. Nothing here can move the tag (trusted publishing
+ * mints a token for the publish alone), so this reports it for a human to
+ * correct with `npm dist-tag`.
+ */
+async function warnOnMisplacedLatest(name: string): Promise<void> {
+	try {
+		const res = await fetch(`https://registry.npmjs.org/${name.replace("/", "%2F")}`, {
+			headers: { accept: "application/vnd.npm.install-v1+json" },
+		});
+		if (!res.ok) return;
+		const doc = (await res.json()) as { "dist-tags"?: Record<string, string> };
+		const latest = doc["dist-tags"]?.latest;
+		if (latest && /-/.test(latest)) {
+			console.warn(
+				`⚠️ ${name}'s \`latest\` tag points at the prerelease ${latest}, so ` +
+					`\`npm install ${name}\` resolves to it. Point \`latest\` at a stable ` +
+					`release: npm dist-tag add ${name}@<stable> latest`,
+			);
+		}
+	} catch {
+		// A registry hiccup must not fail a publish that has already succeeded.
+	}
+}
+
 const version = process.env.SURREAL_VERSION || (await workspaceVersion());
 const pkg = await packageFile.json();
 const { name } = pkg;
@@ -97,8 +130,11 @@ if (!values["dry-run"] && (await isPublished(name, version))) {
 pkg.version = version;
 await Bun.write(packageFile, `${JSON.stringify(pkg, null, "\t")}\n`);
 
-// Packing
-const safeName = name.replaceAll("@", "-");
+// Packing. The tarball name is the one `bun pm pack` writes: scope marker
+// dropped, separator flattened. It has to be passed to npm exactly, because a
+// name npm cannot open is read as a flag and it silently packs the directory
+// instead.
+const safeName = name.replace(/^@/, "").replaceAll("/", "-");
 
 console.log(`📦 Packing ${name}@${version}...`);
 
@@ -146,6 +182,10 @@ const publishCode = await Bun.spawn(publishCmd, {
 if (publishCode !== 0 && !values["dry-run"] && (await isPublished(name, version))) {
 	console.log(`✅ ${name}@${version} is already on the registry — treating publish as success.`);
 	process.exit(0);
+}
+
+if (publishCode === 0 && !values["dry-run"]) {
+	await warnOnMisplacedLatest(name);
 }
 
 process.exit(publishCode);

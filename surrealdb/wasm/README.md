@@ -63,9 +63,38 @@ engine.free();
 | `init` | Instantiates the module; must resolve before anything else is called |
 | `SurrealWasmEngine` | One embedded instance: `connect`, `execute`, `notifications`, `export`, `import`, `version`, `free` |
 | `ConnectionOptions` | Capabilities, timeouts, and the namespace/database created on new storage |
+| `./module` | The `.wasm` file itself, for a caller that resolves the module source itself |
 
 Storage backends are selected by the endpoint: `mem://` and `indxdb://name`, the latter backed by
 the browser's IndexedDB.
+
+### Where `init` reads the module from
+
+`init()` with no argument resolves `index_bg.wasm` against the loader's own URL, which is right
+only while the loader and the module sit beside each other. A bundler that copies the loader
+elsewhere — Vite's dependency pre-bundling moves it into `node_modules/.vite/deps/` — leaves the
+fetch pointing at a path the dev server answers with its HTML fallback, and instantiation fails on
+the bytes not being a module (`expected magic word 00 61 73 6d, found 3c 21 64 6f`, which is
+`<!do`).
+
+`init` therefore accepts an explicit module source, and this package exports the `.wasm` under
+`./module` so a caller can own the resolution rather than inherit the loader's location:
+
+```ts
+import init from "@surrealdb/wasm-native";
+import wasmUrl from "@surrealdb/wasm-native/module?url";
+
+await init({ module_or_path: wasmUrl });
+```
+
+Both are part of this package's surface and will keep working: the argument form is wasm-bindgen's
+own `--target web` entry point, and `./module` is a subpath export declared here. Leaving the loader
+where it was put works too, with Vite:
+
+```ts
+// vite.config.ts
+optimizeDeps: { exclude: ["@surrealdb/wasm", "@surrealdb/wasm-native"] }
+```
 
 A reply is the method's value; only a failure is wrapped, in an `{ error }` envelope.
 `notifications()` returns a `ReadableStream` of encoded live-query notifications, which ends when

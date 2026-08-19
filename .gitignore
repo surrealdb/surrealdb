@@ -67,10 +67,12 @@ surrealism/test/demo.surli
 surrealism/test/surrealism
 
 # `@surrealdb/node` build outputs: `napi/` is what the NAPI CLI generates,
-# `dist/` is the published package.
+# `dist/` is the published package, and `npm/` holds the per-platform packages
+# the publish step stages out of it.
 /surrealdb/node/node_modules/
 /surrealdb/node/napi/
 /surrealdb/node/dist/
+/surrealdb/node/npm/
 /surrealdb/node/*.tgz
 
 # `@surrealdb/wasm-native` build outputs: `dist/` is what wasm-bindgen generates

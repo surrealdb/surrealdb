@@ -62,17 +62,42 @@ await engine.free();
 | `NotificationReceiver` | Live-query notifications, drained one at a time with `recv` |
 | `ConnectionOptions` | Capabilities, timeouts, and the namespace/database created on new storage |
 
-Storage backends are selected by the endpoint: `mem://`, `rocksdb://path`, `surrealkv://path`, and
-`surrealkv+versioned://path`.
+Storage backends are selected by the endpoint: `mem://`, `rocksdb://path` and `surrealkv://path`.
+SurrealKV's MVCC versioning is a query parameter on that endpoint —
+`surrealkv://path?versioned=true` — not a scheme of its own; the `surrealkv+versioned://` spelling
+was removed engine-wide and now reports what to use instead.
+
+`free()` closes the datastore, not just this handle: it resolves once the storage is closed, so a
+file-backed path is unlocked and can be reopened as soon as the promise settles.
 
 A reply is the method's value; only a failure is wrapped, in an `{ error }` envelope. Every instance
 must be released with `free()`, after which each method reports a closed engine rather than
 panicking — the addon is built with `panic = "abort"`, so a panic would end the host process.
 
+### Streaming query frames
+
+`query_stream` answers with a sequence of frames rather than one reply, each an object tagged by a
+`stream` key: one `begin`, then `rows` / `value` and `finished` frames per statement, then exactly
+one terminal `end`. They are the frames the server sends over WebSocket, so a client rebuilds a
+result the same way on either transport.
+
+The `begin` frame carries a `version`, which is the whole of the protocol's negotiation. While it
+does not change: a `stream` tag is never repurposed, new tags and fields may be added — ignore the
+ones you do not know rather than failing on them — and every `finished` frame carries `single`,
+which is what tells a statement whose value is one bare value from one whose value is a list.
+
 ## Requirements
 
 - ES modules (`import`) — CommonJS (`require`) is not supported
-- Node.js, Bun, or Deno on a supported platform (native binaries are published per OS/architecture)
+- Node.js, Bun, or Deno on a supported platform
+
+## What gets installed
+
+The native binary is around 45 MB and there is one per platform, so they are not shipped inside this
+package. Each is published as `@surrealdb/node-native-<platform>` carrying `os`/`cpu`/`libc`, and
+this package lists all of them under `optionalDependencies`: an install downloads only the one its
+host can use, and the loader requires exactly that package. Nothing has to be configured — npm,
+Bun, pnpm and Yarn all skip the platform packages they cannot install.
 
 ## Contributing
 

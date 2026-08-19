@@ -101,6 +101,17 @@ impl<'a> Backends<'a> {
 			));
 		}
 
+		// Versioning is a SurrealKV configuration parameter rather than a scheme
+		// of its own, so the `+versioned` spelling names no backend. Caught here
+		// because the generic fallback below would report only that the datastore
+		// could not be loaded, which reads as a build without the backend.
+		if scheme == "surrealkv+versioned" {
+			return Err(Error::Datastore(
+				"The `surrealkv+versioned://` scheme is no longer supported; use `surrealkv://<path>?versioned=true` instead"
+					.into(),
+			));
+		}
+
 		let path = if path.starts_with("/") {
 			// if absolute, remove all slashes except one
 			let normalised = format!("/{}", path.trim_start_matches("/"));
@@ -167,13 +178,14 @@ impl<'a> Backends<'a> {
 		}
 		// First-party schemes stay valid even when their feature is compiled
 		// out, so construction can report the targeted "not enabled" error.
-		// The legacy `file:` scheme is accepted here for the same reason.
+		// The removed `file:` and `surrealkv+versioned:` schemes are accepted
+		// here for the same reason: construction names their replacement.
 		let (scheme, bare) =
 			match scheme_part.split_once("://").or_else(|| scheme_part.split_once(':')) {
 				Some((scheme, _)) => (scheme, false),
 				None => (scheme_part, true),
 			};
-		let known = scheme == "file"
+		let known = matches!(scheme, "file" | "surrealkv+versioned")
 			|| self.providers.iter().flat_map(|x| x.schemes()).any(|x| *x == scheme);
 		let bare_ok = !bare || matches!(scheme, "memory" | "mem");
 		if known && bare_ok {
@@ -254,5 +266,31 @@ mod tests {
 			panic!("expected an error for the legacy `file:` scheme")
 		};
 		assert!(err.to_string().contains("no longer supported"));
+	}
+
+	/// The removed `surrealkv+versioned:` scheme names its replacement rather
+	/// than reporting a datastore that could not be loaded, which reads as a
+	/// build without the SurrealKV backend.
+	#[cfg(feature = "kv-mem")]
+	#[tokio::test]
+	async fn versioned_surrealkv_scheme_names_its_replacement() {
+		use surrealdb_cnf::ConfigMap;
+		use tokio_util::sync::CancellationToken;
+
+		let backends = Backends::community();
+		// Validation accepts it so construction is reached, and construction is
+		// where the replacement is named.
+		assert!(backends.path_valid("surrealkv+versioned://data").is_ok());
+		let Err(err) = backends
+			.new_transaction_builder(
+				"surrealkv+versioned://data",
+				CancellationToken::new(),
+				ConfigMap::empty(),
+			)
+			.await
+		else {
+			panic!("expected an error for the removed `surrealkv+versioned:` scheme")
+		};
+		assert!(err.to_string().contains("versioned=true"), "got: {err}");
 	}
 }
