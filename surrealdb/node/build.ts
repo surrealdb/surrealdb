@@ -2,12 +2,25 @@ import { copyFile, mkdir } from "node:fs/promises";
 import { basename } from "node:path";
 import { Glob } from "bun";
 import dedent from "dedent";
+import { packageVersion } from "./version.ts";
 
 const isWindows = process.platform === "win32";
 const [, , ...flags] = Bun.argv;
 
+// The loader NAPI generates names the per-platform binary package it falls back
+// to *and* the version it expects that package to carry, both read out of
+// `package.json`. The committed version is a placeholder, so it is stamped for
+// the length of the build and put back afterwards: leaving the placeholder in
+// would bake a version no published binary package can ever match, which fails
+// the load for anyone running with `NAPI_RS_ENFORCE_VERSION_CHECK` set.
+const packageFile = Bun.file("package.json");
+const committedManifest = await packageFile.text();
+const manifest = JSON.parse(committedManifest);
+manifest.version = await packageVersion();
+await Bun.write(packageFile, `${JSON.stringify(manifest, null, "\t")}\n`);
+
 // Build the NAPI binary
-console.log("🔨 Building the NAPI binary");
+console.log(`🔨 Building the NAPI binary (version ${manifest.version})`);
 
 const DTS_HEADER = dedent`
 	type CapabilitiesAllowDenyList = {
@@ -78,6 +91,10 @@ const code = await Bun.spawn(buildCmd, {
 		CC_aarch64_unknown_linux_gnu: "aarch64-linux-gnu-gcc",
 	},
 }).exited;
+
+// The stamped version has served its purpose the moment NAPI has read it, and
+// a build must not leave the working tree carrying a version nobody committed.
+await Bun.write(packageFile, committedManifest);
 
 // Without this a broken build leaves the previous `dist/` in place and the
 // package looks like it built.

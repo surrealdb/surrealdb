@@ -39,6 +39,7 @@ use surrealdb_core::rpc::RpcProtocol;
 use surrealdb_datastore::Transaction;
 use surrealdb_types::{Action, HashMap, Notification, Value};
 use tokio::sync::RwLock;
+use tracing::{instrument, warn};
 use uuid::Uuid;
 
 mod options;
@@ -252,6 +253,30 @@ impl EmbeddedEngine {
 		let session = session.read().await;
 		self.kvs.import(sql, &session).await?;
 		Ok(())
+	}
+
+	/// Closes the datastore this connection opened, releasing the storage.
+	///
+	/// Dropping the engine is not enough for a file-backed backend: the lock on
+	/// the data directory is held until the storage engine is closed, and
+	/// closing it is asynchronous, so a shim that only drops its handle leaves
+	/// the path locked and the same process cannot reopen it. A shim's own
+	/// release call — `free()` on both of them — awaits this first.
+	///
+	/// Bounded rather than infallible-fast: stopping the maintenance tasks and
+	/// archiving this node in the cluster keyspace each carry their own timeout
+	/// inside the datastore. A failure is reported there with the detail that
+	/// explains it and is not returned here, because a caller closing a
+	/// connection has nothing to do with it.
+	///
+	/// Afterwards the datastore refuses every commit, so a query stream still in
+	/// flight — it holds the datastore, not this handle — ends rather than
+	/// writing. Callers that want an in-flight stream to finish stop it first.
+	#[instrument(level = "trace", target = "surrealdb::embedded", skip(self))]
+	pub async fn shutdown(&self) {
+		if let Err(err) = self.kvs.shutdown().await {
+			warn!("Failed to close the embedded datastore cleanly: {err:#}");
+		}
 	}
 
 	/// The engine version, as the `version` RPC method reports it.

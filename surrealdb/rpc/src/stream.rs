@@ -132,6 +132,34 @@ pub fn items_for_result(index: usize, result: QueryResult) -> Vec<QueryStreamIte
 /// arbitrary response payload, which user data could imitate.
 pub const STREAM_FRAME_KEY: &str = "stream";
 
+/// The revision of the value-encoded frame protocol this build speaks, carried
+/// on the [`Begin`](QueryStreamFrame::Begin) frame as `version`.
+///
+/// Scoped to the transports that carry frames as values — WebSocket and the
+/// embedded engines. gRPC frames are protobuf messages with their own schema
+/// evolution and carry no equivalent field.
+///
+/// It exists so a client can tell one *shape* of the protocol from another
+/// without inspecting frames, and it changes only when a change is not
+/// backwards compatible. What is guaranteed within a revision:
+///
+/// - A `stream` tag is never repurposed. `begin`, `rows`, `value`, `finished` and `end` keep the
+///   meanings documented on [`QueryStreamFrame`] for as long as this number does not change.
+/// - New tags and new fields may be added. A client must ignore a tag it does not know and a field
+///   it does not read, rather than treating either as an error — that is what makes adding one
+///   backwards compatible.
+/// - Every `finished` frame carries `single`. It is what distinguishes a statement whose value is
+///   one bare value from one whose value is a list, and a statement that emitted no payload frame
+///   has nothing else to tell them apart, so it is always written — never omitted as a default.
+///
+/// A client reading frames as objects — as the JavaScript SDK does — compares
+/// this when it requires an exact revision; one that only needs the guarantees
+/// above can ignore it, since a `begin` frame without a `version` predates the
+/// field and speaks revision 1. [`QueryStreamFrame::from_value`] does not carry
+/// it into [`Begin`](QueryStreamFrame::Begin), so a client decoding through that
+/// type reads it off the object before parsing, or not at all.
+pub const QUERY_STREAM_VERSION: i64 = 1;
+
 /// One frame of a streaming query answer on the WebSocket protocol.
 ///
 /// A `query_stream` request is answered by a sequence of these instead of a
@@ -154,6 +182,10 @@ pub enum QueryStreamFrame {
 	/// upper bound on the statements that will finish: control flow such as a
 	/// `RETURN` inside a `BEGIN` block can skip the tail, so count results by
 	/// `Finished` frames, never by this.
+	///
+	/// On the wire this frame also carries [`QUERY_STREAM_VERSION`] as
+	/// `version`, which is the whole of the protocol's negotiation: it is not
+	/// parsed back here, because a server only ever produces its own revision.
 	Begin {
 		statements: usize,
 	},
@@ -217,6 +249,7 @@ impl QueryStreamFrame {
 				statements,
 			} => Value::Object(object! {
 				stream: "begin",
+				version: QUERY_STREAM_VERSION,
 				statements: statements as i64,
 			}),
 			Self::Rows {
@@ -514,6 +547,35 @@ mod tests {
 				"a frame carrying both id and action would misparse as a notification"
 			);
 			assert!(map.contains_key(STREAM_FRAME_KEY), "every frame is tagged");
+		}
+	}
+
+	/// The two things a client decodes structurally rather than negotiating:
+	/// the revision on the opening frame, and `single` on every `finished` one.
+	/// A `single` omitted as a default would make a single-valued statement
+	/// that emitted no payload frame read as an empty list.
+	#[test]
+	fn the_wire_carries_the_version_and_always_carries_single() {
+		let Value::Object(begin) = (QueryStreamFrame::Begin {
+			statements: 1,
+		})
+		.into_value() else {
+			panic!("frames are objects");
+		};
+		assert_eq!(begin.get("version"), Some(&int(QUERY_STREAM_VERSION)));
+
+		for single in [false, true] {
+			let Value::Object(finished) = (QueryStreamFrame::Finished {
+				index: 0,
+				time: Duration::ZERO,
+				query_type: QueryType::Other,
+				single,
+				error: None,
+			})
+			.into_value() else {
+				panic!("frames are objects");
+			};
+			assert_eq!(finished.get("single"), Some(&Value::Bool(single)));
 		}
 	}
 }

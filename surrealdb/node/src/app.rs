@@ -175,9 +175,18 @@ impl SurrealNodeEngine {
 		Ok(EmbeddedEngine::version().to_owned())
 	}
 
+	/// Releases the connection and closes the datastore behind it.
+	///
+	/// Resolves only once the storage is closed, so a file-backed path is
+	/// unlocked and can be reopened — by this process or another — the moment
+	/// the returned promise settles. Taking the handle first means a concurrent
+	/// call reports a closed engine rather than closing the storage twice.
 	#[napi]
 	pub async fn free(&self) {
-		let _inner_opt = self.0.write().await.take();
+		let engine = self.0.write().await.take();
+		if let Some(engine) = engine {
+			engine.shutdown().await;
+		}
 	}
 }
 

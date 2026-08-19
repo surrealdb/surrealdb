@@ -16,6 +16,8 @@
  * than a hand-rolled approximation. Run `bun run build` first.
  */
 
+import { rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { expect, test } from "bun:test";
 import { decode, encode } from "@surrealdb/cbor";
 import { SurrealNodeEngine } from "./dist/index.js";
@@ -348,6 +350,32 @@ test("abandoning a stream mid-flight does not take the process down", async () =
 	expect(one?.result).toBe(1);
 
 	await engine.free();
+});
+
+test("a freed engine releases the storage it opened", async () => {
+	const path = `${tmpdir()}/surrealdb-node-free-${Date.now()}`;
+
+	// Removed on the failing path too: a datastore directory that outlives the
+	// test keeps a LOCK file, and a failure is exactly when one is left behind.
+	try {
+		const first = await SurrealNodeEngine.connect(`surrealkv://${path}`);
+		await ok(first, "use", ["test", "test"]);
+		await query(first, "CREATE person:tobie SET name = 'Tobie'");
+
+		// The lock on the data directory is held until the storage is closed, and
+		// closing it is asynchronous — so a `free()` that only dropped the handle
+		// would leave this path unopenable for the life of the process.
+		await first.free();
+
+		const second = await SurrealNodeEngine.connect(`surrealkv://${path}`);
+		await ok(second, "use", ["test", "test"]);
+		const [people] = await query<{ name: string }[]>(second, "SELECT * FROM person");
+		expect(people?.result[0]?.name).toBe("Tobie");
+
+		await second.free();
+	} finally {
+		await rm(path, { recursive: true, force: true });
+	}
 });
 
 test("a freed engine reports itself closed rather than panicking", async () => {

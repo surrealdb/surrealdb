@@ -807,6 +807,14 @@ jobs:
         with:
           bun-version: latest
 
+      # @surrealdb/node-native's publish stages one npm package per platform
+      # with the NAPI CLI, so the package's dev dependencies are needed here and
+      # not only at build time. The wasm package stages nothing but installs
+      # from its own lockfile the same way.
+      - name: Install dependencies
+        working-directory: ${{ matrix.dir }}
+        run: bun install --frozen-lockfile
+
       - name: Install Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -837,6 +845,13 @@ jobs:
       # (environment blank). npm >= 11.5.1 performs the OIDC exchange automatically.
       # Provenance is intentionally not forced: npm skips it for a private source
       # repo.
+      #
+      # "Each package" includes the eight @surrealdb/node-native-<platform>
+      # packages the node publish creates, which carry the native binaries so an
+      # installer downloads one platform's worth instead of all of them. A
+      # platform package without a trusted publisher fails to publish, and the
+      # root package is deliberately published last so it never lands naming one
+      # that did not.
       - name: Publish to npm
         working-directory: ${{ matrix.dir }}
         env:
