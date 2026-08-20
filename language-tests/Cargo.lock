@@ -1124,9 +1124,9 @@ dependencies = [
 
 [[package]]
 name = "diskann"
-version = "0.54.0"
+version = "0.55.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "421c6cf955c6cb1451d36c8a3740ab2a22880265d0fa93d8ea22cbc425c90479"
+checksum = "31a7680a192e1abc16cb70415cb6c1aa4c4cf3269294ce2583c5d81763ee9762"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -1144,9 +1144,9 @@ dependencies = [
 
 [[package]]
 name = "diskann-utils"
-version = "0.54.0"
+version = "0.55.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7cdf7d491910fbff13338e07460c9197a3c172268cfd4d8f8e69e5cec5a256d9"
+checksum = "0e2d755436dbe7141db9d2311ba99e885126003251d9392d5e41768548df777a"
 dependencies = [
  "bytemuck",
  "cfg-if",
@@ -1161,9 +1161,9 @@ dependencies = [
 
 [[package]]
 name = "diskann-vector"
-version = "0.54.0"
+version = "0.55.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "de1643bbece645f03527ef120bc7dd5e4e40557980dbe52ee51129adfb58a851"
+checksum = "bf19284b35e697b4c49e71306425490b526ebe70b5602eb06d19c3013fb5138c"
 dependencies = [
  "cfg-if",
  "diskann-wide",
@@ -1172,9 +1172,9 @@ dependencies = [
 
 [[package]]
 name = "diskann-wide"
-version = "0.54.0"
+version = "0.55.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "421f02c42e57a2153dc65b66b4b95fe2be56e14bf9f95253b663abcac8521166"
+checksum = "7d3f814c2b66a98968630b7ad31afbb3c5e62b94b26f80542878eb7440aa8e5d"
 dependencies = [
  "cfg-if",
  "half",
@@ -4405,7 +4405,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "surrealdb-catalog"
-version = "3.3.0-nightly"
+version = "3.4.0-nightly"
 dependencies = [
  "ahash 0.8.12",
  "anyhow",
@@ -4431,7 +4431,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-cnf"
-version = "3.3.0-nightly"
+version = "3.4.0-nightly"
 dependencies = [
  "num-traits",
  "path-clean",
@@ -4442,7 +4442,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-collections"
-version = "3.3.0-nightly"
+version = "3.4.0-nightly"
 dependencies = [
  "revision 0.30.0",
  "storekey",
@@ -4450,7 +4450,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-common"
-version = "3.3.0-nightly"
+version = "3.4.0-nightly"
 dependencies = [
  "chrono",
  "futures",
@@ -4468,7 +4468,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-core"
-version = "3.3.0-nightly"
+version = "3.4.0-nightly"
 dependencies = [
  "ahash 0.8.12",
  "anyhow",
@@ -4553,7 +4553,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-datastore"
-version = "3.3.0-nightly"
+version = "3.4.0-nightly"
 dependencies = [
  "anyhow",
  "blake3",
@@ -4589,7 +4589,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-expr"
-version = "3.3.0-nightly"
+version = "3.4.0-nightly"
 dependencies = [
  "anyhow",
  "bytes",
@@ -4630,7 +4630,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-gql"
-version = "3.3.0-nightly"
+version = "3.4.0-nightly"
 dependencies = [
  "phf",
  "reblessive",
@@ -4644,7 +4644,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-iam"
-version = "3.3.0-nightly"
+version = "3.4.0-nightly"
 dependencies = [
  "anyhow",
  "argon2",
@@ -4663,7 +4663,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-idx"
-version = "3.3.0-nightly"
+version = "3.4.0-nightly"
 dependencies = [
  "ahash 0.8.12",
  "anyhow",
@@ -4703,7 +4703,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-keyspace-macro"
-version = "3.3.0-nightly"
+version = "3.4.0-nightly"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4712,7 +4712,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-kvs"
-version = "3.3.0-nightly"
+version = "3.4.0-nightly"
 dependencies = [
  "affinitypool",
  "anyhow",
@@ -4730,7 +4730,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-kvs-any"
-version = "3.3.0-nightly"
+version = "3.4.0-nightly"
 dependencies = [
  "surrealdb-cnf",
  "surrealdb-kvs",
@@ -4744,7 +4744,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-kvs-mem"
-version = "3.3.0-nightly"
+version = "3.4.0-nightly"
 dependencies = [
  "affinitypool",
  "chrono",
@@ -4757,7 +4757,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-kvs-rocksdb"
-version = "3.3.0-nightly"
+version = "3.4.0-nightly"
 dependencies = [
  "affinitypool",
  "futures",
@@ -4774,7 +4774,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-kvs-surrealkv"
-version = "3.3.0-nightly"
+version = "3.4.0-nightly"
 dependencies = [
  "affinitypool",
  "chrono",
@@ -4789,7 +4789,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-kvs-tikv"
-version = "3.3.0-nightly"
+version = "3.4.0-nightly"
 dependencies = [
  "chrono",
  "surrealdb-cnf",
@@ -4816,7 +4816,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-observe"
-version = "3.3.0-nightly"
+version = "3.4.0-nightly"
 dependencies = [
  "surrealdb-iam",
  "surrealdb-rpc",
@@ -4826,7 +4826,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-parse-common"
-version = "3.3.0-nightly"
+version = "3.4.0-nightly"
 dependencies = [
  "chrono",
  "logos",
@@ -4864,7 +4864,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-rpc"
-version = "3.3.0-nightly"
+version = "3.4.0-nightly"
 dependencies = [
  "anyhow",
  "humantime",
@@ -4884,7 +4884,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-runtime"
-version = "3.3.0-nightly"
+version = "3.4.0-nightly"
 dependencies = [
  "addr",
  "ammonia",
@@ -4921,7 +4921,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-sql"
-version = "3.3.0-nightly"
+version = "3.4.0-nightly"
 dependencies = [
  "bytes",
  "chrono",
@@ -4943,7 +4943,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-strand"
-version = "3.3.0-nightly"
+version = "3.4.0-nightly"
 dependencies = [
  "revision 0.30.0",
  "serde",
@@ -4952,7 +4952,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-syn"
-version = "3.3.0-nightly"
+version = "3.4.0-nightly"
 dependencies = [
  "bytes",
  "chrono",
@@ -5003,7 +5003,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-types"
-version = "3.3.0-nightly"
+version = "3.4.0-nightly"
 dependencies = [
  "anyhow",
  "bytes",
@@ -5031,7 +5031,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-types-derive"
-version = "3.3.0-nightly"
+version = "3.4.0-nightly"
 dependencies = [
  "heck 0.4.1",
  "proc-macro2",

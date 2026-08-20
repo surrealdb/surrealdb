@@ -183,6 +183,11 @@ set_workspace_version() {
 		update_specs+=(-p "$anchor")
 	done
 	cargo update "${update_specs[@]}"
+
+	# The same reconciliation for the workspaces outside the root one: they
+	# depend on the crates just rewritten by path, so their lockfiles now name a
+	# version that no longer exists.
+	"$(dirname "${BASH_SOURCE[0]}")/reconcile-satellite-lockfiles.sh"
 }
 
 # ----------------------------------------------------------------------------

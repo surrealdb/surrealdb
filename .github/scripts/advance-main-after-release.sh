@@ -75,6 +75,13 @@ PACKAGES=$(cargo metadata --format-version 1 --no-deps | \
 cargo set-version $PACKAGES "${NEXT_VERSION}"
 cargo update -p surrealdb -p surrealdb-core -p surrealdb-server
 
+# The workspaces outside the root one depend on the crates just rewritten by
+# path, so their lockfiles now name a version that no longer exists. Resolved
+# from this script's own directory so the tooling comes from wherever this
+# script was run from, matching how the workflow checks it out separately from
+# the tree being bumped.
+"$(dirname "${BASH_SOURCE[0]}")/reconcile-satellite-lockfiles.sh"
+
 if git diff --quiet; then
 	echo "main is already on ${NEXT_VERSION}; nothing to bump"
 	exit 0
