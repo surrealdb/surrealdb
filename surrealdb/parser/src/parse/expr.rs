@@ -629,9 +629,7 @@ async fn parse_recurse(
 
 	let mut expr = Expr::Document(push_span);
 	while let Some(new_expr) = parser
-		.enter(async |parser| {
-			try_parse_infix_postfix_op(parser, IDIOM_BP, Expr::Document(push_span), span).await
-		})
+		.enter(async |parser| try_parse_infix_postfix_op(parser, IDIOM_BP, expr, span).await)
 		.await?
 	{
 		expr = new_expr

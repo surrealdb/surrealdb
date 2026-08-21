@@ -7,7 +7,7 @@ use token::{BaseTokenKind, T};
 
 use crate::parse::range::{TryRange, parse_prefix_range_sync, try_parse_infix_range_sync};
 use crate::parse::utils::parse_delimited_list;
-use crate::parse::{ParseError, ParseResult, Parser, ParserSettings};
+use crate::parse::{ParseError, ParseResult, Parser, ParserSettings, ParserState};
 use crate::{Parse, ParseSync};
 
 impl ParseSync for ast::Mock {
@@ -681,10 +681,26 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 			Ok(Expr::Throw(expr))
 		}
 		T![CONTINUE] => {
+			if !parser.settings.contains(ParserSettings::QUIRK_NO_CONTROLFLOW_CHECK)
+				&& !parser.state.contains(ParserState::LOOP)
+			{
+				return Err(parser.error(
+					"Invalid use of control flow statement outside of loop body",
+					peek.span,
+				));
+			}
 			let _ = parser.next();
 			Ok(Expr::Continue(parser.push(peek.span)))
 		}
 		T![BREAK] => {
+			if !parser.settings.contains(ParserSettings::QUIRK_NO_CONTROLFLOW_CHECK)
+				&& !parser.state.contains(ParserState::LOOP)
+			{
+				return Err(parser.error(
+					"Invalid use of control flow statement outside of loop body",
+					peek.span,
+				));
+			}
 			let _ = parser.next();
 			Ok(Expr::Break(parser.push(peek.span)))
 		}

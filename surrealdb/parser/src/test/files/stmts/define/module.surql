@@ -1,6 +1,6 @@
-DEFINE MODULE f"abc" as mod::bla UNSIGNED;
-DEFINE MODULE f"abc" as mod::bla UNSIGNED COMMENT "comment";
-DEFINE MODULE f"abc" as mod::bla UNSIGNED PERMISSIONS FULL;
+DEFINE MODULE mod::bla FROM f"abc" UNSIGNED;
+DEFINE MODULE mod::bla FROM f"abc" UNSIGNED COMMENT "comment";
+DEFINE MODULE mod::bla FROM f"abc" UNSIGNED PERMISSIONS FULL;
 /* ===== result =====
 Query
     .exprs: Some
@@ -8,17 +8,17 @@ Query
             Expr::DefineModule
                 DefineModule
                     .kind: Create
-                    .subject: ModuleName::File
-                        FileLit
-                            .path: "abc"
-                    .alias: Some
-                    Path
+                    .name: Path
                         .start: Ident
                             .text: "mod"
                         .parts: Some
                             -PathSegment::Ident
                                 Ident
                                     .text: "bla"
+                    .source: Some
+                    ModuleSource::File
+                        FileLit
+                            .path: "abc"
                     .unsigned: true
                     .comment: None
                     .permission: None
@@ -26,17 +26,17 @@ Query
             Expr::DefineModule
                 DefineModule
                     .kind: Create
-                    .subject: ModuleName::File
-                        FileLit
-                            .path: "abc"
-                    .alias: Some
-                    Path
+                    .name: Path
                         .start: Ident
                             .text: "mod"
                         .parts: Some
                             -PathSegment::Ident
                                 Ident
                                     .text: "bla"
+                    .source: Some
+                    ModuleSource::File
+                        FileLit
+                            .path: "abc"
                     .unsigned: true
                     .comment: Some
                     Expr::String
@@ -47,17 +47,17 @@ Query
             Expr::DefineModule
                 DefineModule
                     .kind: Create
-                    .subject: ModuleName::File
-                        FileLit
-                            .path: "abc"
-                    .alias: Some
-                    Path
+                    .name: Path
                         .start: Ident
                             .text: "mod"
                         .parts: Some
                             -PathSegment::Ident
                                 Ident
                                     .text: "bla"
+                    .source: Some
+                    ModuleSource::File
+                        FileLit
+                            .path: "abc"
                     .unsigned: true
                     .comment: None
                     .permission: Some

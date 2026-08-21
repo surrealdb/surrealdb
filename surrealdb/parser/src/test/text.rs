@@ -95,6 +95,7 @@ fn text_test() {
 			quirk_block_first_no_semi: false,
 			quirk_delete_permission_field: false,
 			quirk_legacy_place_productions: false,
+			quirk_no_controlflow_check: false,
 		},
 	)
 }
@@ -112,20 +113,10 @@ fn text_test_quirk() {
 			quirk_block_first_no_semi: true,
 			quirk_delete_permission_field: true,
 			quirk_legacy_place_productions: true,
+			quirk_no_controlflow_check: true,
 		},
 	)
 }
-
-// These tests are ignored because the new parser has some different behavior that might
-// be more disirable then the behavior of the old parser, punting the decision about if
-// this should be changed to to future.
-//
-// Do not just add tests here when they fail.
-const IGNORE_TESTS: &[&str] = &[
-	"language/control_flow/transaction/cancel_behaviour.surql",
-	"language/control_flow/transaction/commit_behaviour.surql",
-	"language/statements/define/module/capability_granted.surql",
-];
 
 #[test]
 fn all_language_tests() {
@@ -139,10 +130,6 @@ fn all_language_tests() {
 
 	walk_dir(&tests_path, &mut |path| {
 		if path.extension().and_then(|x| x.to_str()) != Some("surql") {
-			return;
-		}
-
-		if IGNORE_TESTS.iter().any(|x| path.ends_with(x)) {
 			return;
 		}
 
@@ -162,6 +149,7 @@ fn all_language_tests() {
 				quirk_block_first_no_semi: true,
 				quirk_delete_permission_field: true,
 				quirk_legacy_place_productions: true,
+				quirk_no_controlflow_check: true,
 			},
 		);
 

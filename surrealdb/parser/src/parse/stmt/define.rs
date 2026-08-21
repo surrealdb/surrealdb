@@ -10,7 +10,7 @@ use crate::parse::utils::{
 	parse_delimited_list, parse_seperated_list, parse_seperated_list_sync, parse_unordered_clause,
 	parse_unordered_clause_sync, redefined_error,
 };
-use crate::parse::{ParseError, ParseResult, ParserSettings};
+use crate::parse::{ParseError, ParseResult, ParserSettings, ParserState};
 use crate::{Parse, ParseSync, Parser};
 
 impl ParseSync for ast::DefineKind {
@@ -47,7 +47,10 @@ impl Parse for ast::Permission {
 			}
 			T![WHERE] => {
 				let _ = parser.next();
-				let expr = parser.parse_enter().await?;
+
+				let expr = parser
+					.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
+					.await?;
 				ast::Permission::Where(expr)
 			}
 			_ => return Err(parser.unexpected("`NONE`, `FULL` or `WHERE`")),
@@ -184,7 +187,8 @@ impl Parse for ast::DefineFunction {
 			None
 		};
 
-		let body = parser.parse().await?;
+		let body =
+			parser.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter).await?;
 
 		let mut comment = None;
 		let mut permissions = None;
@@ -223,14 +227,15 @@ impl Parse for ast::DefineModule {
 		let _ = parser.expect(T![MODULE])?;
 		let kind = parser.parse_sync()?;
 
-		let peek = parser.peek_expect("a file literal or a path")?;
-		let subject = match peek.token {
-			BaseTokenKind::FileString => ast::ModuleName::File(parser.parse_sync()?),
-			x if x.is_identifier() => ast::ModuleName::Path(parser.parse_sync()?),
-			_ => return Err(parser.unexpected("a file literal or a path")),
-		};
-		let alias = if parser.eat(T![AS])?.is_some() {
-			Some(parser.parse_sync()?)
+		let name = parser.parse_sync()?;
+
+		let source = if parser.eat(T![FROM])?.is_some() {
+			let peek = parser.peek_expect("a file literal or a path")?;
+			match peek.token {
+				BaseTokenKind::FileString => Some(ast::ModuleSource::File(parser.parse_sync()?)),
+				x if x.is_identifier() => Some(ast::ModuleSource::Path(parser.parse_sync()?)),
+				_ => return Err(parser.unexpected("a file literal or a path")),
+			}
 		} else {
 			None
 		};
@@ -269,8 +274,8 @@ impl Parse for ast::DefineModule {
 
 		Ok(ast::DefineModule {
 			kind,
-			subject,
-			alias,
+			name,
+			source,
 			unsigned: true,
 			comment: comment.map(|x| x.0),
 			permission: permissions.map(|x| x.0),
@@ -642,7 +647,8 @@ impl Parse for ast::ApiAction {
 
 		let _ = parser.expect(T![THEN])?;
 
-		let action = parser.parse_enter().await?;
+		let action =
+			parser.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter).await?;
 
 		Ok(ast::ApiAction {
 			middleware: middleware.map(|x| x.0),
@@ -757,8 +763,15 @@ impl Parse for ast::DefineApi {
 
 					if let Some(x) = parser.eat(T![THEN])? {
 						did_parse = true;
-						parse_unordered_clause(parser, &mut fallback, x.span, Parser::parse_enter)
-							.await?;
+						parse_unordered_clause(parser, &mut fallback, x.span, async |parser| {
+							parser
+								.with_state(
+									|s| s.difference(ParserState::LOOP),
+									Parser::parse_enter,
+								)
+								.await
+						})
+						.await?;
 					}
 
 					if !did_parse {
@@ -888,13 +901,26 @@ impl Parse for ast::DefineEvent {
 				T![WHEN] => {
 					let _ = parser.next();
 
-					parse_unordered_clause(parser, &mut condition, peek.span, Parser::parse_enter)
-						.await?
+					parse_unordered_clause(parser, &mut condition, peek.span, async |parser| {
+						parser
+							.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
+							.await
+					})
+					.await?
 				}
 				T![THEN] => {
 					let _ = parser.next();
 					parse_unordered_clause(parser, &mut then, peek.span, async |parser| {
-						parse_seperated_list(parser, T![,], Parser::parse_enter).await.map(|x| x.1)
+						parse_seperated_list(parser, T![,], async |parser| {
+							parser
+								.with_state(
+									|s| s.difference(ParserState::LOOP),
+									Parser::parse_enter,
+								)
+								.await
+						})
+						.await
+						.map(|x| x.1)
 					})
 					.await?
 				}
@@ -1152,13 +1178,21 @@ impl Parse for ast::DefineField {
 				}
 				T![COMPUTED] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut computed, peek.span, Parser::parse_enter)
-						.await?
+					parse_unordered_clause(parser, &mut computed, peek.span, async |parser| {
+						parser
+							.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
+							.await
+					})
+					.await?
 				}
 				T![ASSERT] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut assert, peek.span, Parser::parse_enter)
-						.await?
+					parse_unordered_clause(parser, &mut assert, peek.span, async |parser| {
+						parser
+							.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
+							.await
+					})
+					.await?
 				}
 				T![PERMISSIONS] => {
 					parse_unordered_clause(parser, &mut permissions, peek.span, Parser::parse)
@@ -1167,11 +1201,18 @@ impl Parse for ast::DefineField {
 				T![DEFAULT] => {
 					let _ = parser.next();
 					parse_unordered_clause(parser, &mut default, peek.span, async |parser| {
-						if parser.eat(T![ALWAYS])?.is_some() {
-							Ok(ast::FieldDefault::Always(parser.parse_enter().await?))
-						} else {
-							Ok(ast::FieldDefault::Some(parser.parse_enter().await?))
-						}
+						parser
+							.with_state(
+								|s| s.difference(ParserState::LOOP),
+								async |parser| {
+									if parser.eat(T![ALWAYS])?.is_some() {
+										Ok(ast::FieldDefault::Always(parser.parse_enter().await?))
+									} else {
+										Ok(ast::FieldDefault::Some(parser.parse_enter().await?))
+									}
+								},
+							)
+							.await
 					})
 					.await?
 				}
@@ -2316,13 +2357,21 @@ impl Parse for ast::RecordAccess {
 			match peek.token {
 				T![SIGNIN] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut signin, peek.span, Parser::parse_enter)
-						.await?;
+					parse_unordered_clause(parser, &mut signin, peek.span, async |parser| {
+						parser
+							.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
+							.await
+					})
+					.await?;
 				}
 				T![SIGNUP] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut signup, peek.span, Parser::parse_enter)
-						.await?;
+					parse_unordered_clause(parser, &mut signup, peek.span, async |parser| {
+						parser
+							.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
+							.await
+					})
+					.await?;
 				}
 				T![WITH] => {
 					let _ = parser.next();
@@ -2396,12 +2445,11 @@ impl Parse for ast::DefineAccess {
 				}
 				T![AUTHENTICATE] => {
 					let _ = parser.next();
-					parse_unordered_clause(
-						parser,
-						&mut authenticate,
-						peek.span,
-						Parser::parse_enter,
-					)
+					parse_unordered_clause(parser, &mut authenticate, peek.span, async |parser| {
+						parser
+							.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
+							.await
+					})
 					.await?;
 				}
 				T![DURATION] => {

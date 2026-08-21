@@ -6,7 +6,7 @@ use crate::parse::utils::{
 	parse_delimited_list, parse_seperated_list, parse_seperated_list_sync, parse_unordered_clause,
 	parse_unordered_clause_sync, redefined_error,
 };
-use crate::parse::{ParseResult, ParserSettings};
+use crate::parse::{ParseResult, ParserSettings, ParserState};
 use crate::{Parse, Parser};
 
 fn parse_if_exists(parser: &mut Parser<'_, '_>) -> ParseResult<bool> {
@@ -270,8 +270,11 @@ impl Parse for ast::AlterEvent {
 				}
 				T![WHEN] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut condition, peek.span, async |x| {
-						Ok(AlterKind::Set(x.parse_enter().await?))
+					parse_unordered_clause(parser, &mut condition, peek.span, async |parser| {
+						parser
+							.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
+							.await
+							.map(AlterKind::Set)
 					})
 					.await?;
 				}
@@ -279,7 +282,16 @@ impl Parse for ast::AlterEvent {
 					let _ = parser.next();
 					parse_unordered_clause(parser, &mut then, peek.span, async |x| {
 						Ok(AlterKind::Set(
-							parse_seperated_list(x, T![,], Parser::parse_enter).await?.1,
+							parse_seperated_list(x, T![,], async |parser| {
+								parser
+									.with_state(
+										|s| s.difference(ParserState::LOOP),
+										Parser::parse_enter,
+									)
+									.await
+							})
+							.await?
+							.1,
 						))
 					})
 					.await?;
@@ -694,26 +706,36 @@ impl Parse for ast::AlterField {
 				T![ASSERT] => {
 					let _ = parser.next();
 					parse_unordered_clause(parser, &mut assert, peek.span, async |parser| {
-						parser.parse_enter().await.map(AlterKind::Set)
+						parser
+							.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
+							.await
+							.map(AlterKind::Set)
 					})
 					.await?;
 				}
 				T![DEFAULT] => {
 					let _ = parser.next();
 					parse_unordered_clause(parser, &mut default, peek.span, async |parser| {
-						if parser.eat(T![ALWAYS])?.is_some() {
-							parser
-								.parse_enter()
-								.await
-								.map(ast::FieldDefault::Always)
-								.map(AlterKind::Set)
-						} else {
-							parser
-								.parse_enter()
-								.await
-								.map(ast::FieldDefault::Some)
-								.map(AlterKind::Set)
-						}
+						parser
+							.with_state(
+								|s| s.difference(ParserState::LOOP),
+								async |parser| {
+									if parser.eat(T![ALWAYS])?.is_some() {
+										parser
+											.parse_enter()
+											.await
+											.map(ast::FieldDefault::Always)
+											.map(AlterKind::Set)
+									} else {
+										parser
+											.parse_enter()
+											.await
+											.map(ast::FieldDefault::Some)
+											.map(AlterKind::Set)
+									}
+								},
+							)
+							.await
 					})
 					.await?;
 				}
@@ -1227,7 +1249,10 @@ impl Parse for ast::AlterAccess {
 				T![AUTHENTICATE] => {
 					let _ = parser.next();
 					parse_unordered_clause(parser, &mut authenticate, peek.span, async |parser| {
-						parser.parse_enter().await.map(AlterKind::Set)
+						parser
+							.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
+							.await
+							.map(AlterKind::Set)
 					})
 					.await?;
 				}
@@ -1356,7 +1381,15 @@ impl Parse for ast::AlterApi {
 									parser,
 									&mut fallback,
 									next.span,
-									async |parser| parser.parse_enter().await.map(AlterKind::Set),
+									async |parser| {
+										parser
+											.with_state(
+												|s| s.difference(ParserState::LOOP),
+												Parser::parse_enter,
+											)
+											.await
+											.map(AlterKind::Set)
+									},
 								)
 								.await?;
 							}

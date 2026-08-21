@@ -32,6 +32,7 @@ fn main() {
 		quirk_block_first_no_semi: true,
 		quirk_delete_permission_field: true,
 		quirk_legacy_place_productions: true,
+		quirk_no_controlflow_check: true,
 	};
 
 	for idx in input.char_indices().map(|x| x.0).skip(1).chain(iter::once(input.len())) {

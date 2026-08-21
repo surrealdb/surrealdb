@@ -115,6 +115,8 @@ pub struct Config {
 	pub quirk_delete_permission_field: bool,
 	/// Does the parser allow place idioms which have previously allowed nonsensical syntax.
 	pub quirk_legacy_place_productions: bool,
+	/// Does the parser allow `BREAK` and `CONTINUE` outside of loop bodies..
+	pub quirk_no_controlflow_check: bool,
 }
 
 impl Config {
@@ -138,13 +140,14 @@ impl Default for Config {
 			quirk_block_first_no_semi: false,
 			quirk_delete_permission_field: false,
 			quirk_legacy_place_productions: false,
+			quirk_no_controlflow_check: false,
 		}
 	}
 }
 
 bitflags! {
 	#[derive(Clone,Copy)]
-	struct ParserSettings: u8 {
+	struct ParserSettings: u16 {
 		/// Is the emission of warnings enabled.
 		const WARNINGS           = 1 << 0;
 		/// Is the parser parsing a partially available query.
@@ -161,6 +164,8 @@ bitflags! {
 		const QUIRK_DELETE_PERMISSION_FIELD = 1 << 6;
 		/// Does the parser allow specifying delete permissions of fields.
 		const QUIRK_LEGACY_PLACE_PRODUCTIONS = 1 << 7;
+		/// Whether to allow `BREAK` and `CONTINUE` outside of loop bodies.
+		const QUIRK_NO_CONTROLFLOW_CHECK = 1 << 8;
 	}
 }
 
@@ -188,6 +193,9 @@ impl ParserSettings {
 		}
 		if cfg.quirk_legacy_place_productions {
 			settings |= ParserSettings::QUIRK_LEGACY_PLACE_PRODUCTIONS;
+		}
+		if cfg.quirk_no_controlflow_check {
+			settings |= ParserSettings::QUIRK_NO_CONTROLFLOW_CHECK;
 		}
 
 		settings
@@ -518,7 +526,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	pub(crate) async fn with_state<F1, F2, R>(&mut self, state_cb: F1, cb: F2) -> ParseResult<R>
 	where
 		F1: FnOnce(ParserState) -> ParserState,
-		F2: AsyncFnOnce(&mut Parser) -> ParseResult<R>,
+		F2: for<'a> AsyncFnOnce(&'a mut Parser<'source, 'ast>) -> ParseResult<R>,
 	{
 		let old = self.state;
 		self.state = state_cb(old);

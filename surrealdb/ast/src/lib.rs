@@ -41,8 +41,6 @@ library! {
 		top_level_expr: Vec<TopLevelExpr>,
 		top_level_exprs: Vec<NodeList<TopLevelExpr>>,
 
-		transactions: Vec<Transaction>,
-
 		kill: Vec<Kill>,
 		use_stmt: Vec<Use>,
 		option_stmt: Vec<OptionStmt>,
@@ -237,19 +235,14 @@ ast_type! {
 
 ast_type! {
 	pub enum TopLevelExpr {
-		Transaction(NodeId<Transaction>),
+		Begin(NodeId<Span>),
+		Commit(NodeId<Span>),
+		Cancel(NodeId<Span>),
 		Use(NodeId<Use>),
 		Option(NodeId<OptionStmt>),
 		Kill(NodeId<Kill>),
 		Show(NodeId<Show>),
 		Expr(NodeId<Expr>),
-	}
-}
-
-ast_type! {
-	pub struct Transaction {
-		pub statements: Option<NodeListId<TopLevelExpr>>,
-		pub commits: bool,
 	}
 }
 
@@ -757,7 +750,7 @@ ast_type! {
 	}
 }
 ast_type! {
-	pub enum ModuleName{
+	pub enum ModuleSource{
 		File(NodeId<FileLit>),
 		Path(NodeId<Path>),
 	}
@@ -766,8 +759,8 @@ ast_type! {
 ast_type! {
 	pub struct DefineModule{
 		pub kind: DefineKind,
-		pub subject: ModuleName,
-		pub alias: Option<NodeId<Path>>,
+		pub name: NodeId<Path>,
+		pub source: Option<ModuleSource>,
 		pub unsigned: bool,
 		pub comment: Option<NodeId<Expr>>,
 		pub permission: Option<Permission>,

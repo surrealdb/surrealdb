@@ -165,6 +165,7 @@ fn files_test() {
 			quirk_block_first_no_semi: false,
 			quirk_delete_permission_field: false,
 			quirk_legacy_place_productions: false,
+			quirk_no_controlflow_check: false,
 		},
 		|_| true,
 		cleanup,
@@ -188,15 +189,15 @@ fn files_quirk_test() {
 			quirk_block_first_no_semi: true,
 			quirk_delete_permission_field: true,
 			quirk_legacy_place_productions: true,
+			quirk_no_controlflow_check: true,
 		},
 		|_| true,
 		cleanup,
 	);
 }
 
+/// Ignore big import files. They take too long to parse byte by byte.
 const IGNORE_TESTS: &[&str] = &[
-	"language/control_flow/transaction/cancel_behaviour.surql",
-	"language/control_flow/transaction/commit_behaviour.surql",
 	"datasets/surreal-deal-store-mini.surql",
 	"datasets/graph.surql",
 	"bench/executor/rt_import.surql",
@@ -240,6 +241,7 @@ fn all_language_tests() {
 			quirk_block_first_no_semi: true,
 			quirk_delete_permission_field: true,
 			quirk_legacy_place_productions: true,
+			quirk_no_controlflow_check: true,
 		},
 		|p| !IGNORE_TESTS.iter().any(|x| p.ends_with(x)),
 		cleanup,

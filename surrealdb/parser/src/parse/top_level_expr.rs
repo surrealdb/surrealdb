@@ -1,14 +1,12 @@
-use ast::{AstSpan, KillKind, NodeId, NodeListId, Query, TopLevelExpr, Transaction, UseKind};
+use ast::{AstSpan, KillKind, NodeId, NodeListId, Query, TopLevelExpr, UseKind};
 use common::source_error::{AnnotationKind, Level};
 use common::span::Span;
 use token::{BaseTokenKind, T};
 
 use super::{Parse, ParseResult, ParseSync, Parser};
-use crate::parse::ParserState;
 
 fn name_previous_statement(prev: NodeId<TopLevelExpr>, parser: &Parser<'_, '_>) -> &'static str {
 	match parser[prev] {
-		TopLevelExpr::Transaction(_) => "a transaction",
 		TopLevelExpr::Expr(n) => match parser[n] {
 			ast::Expr::Path(n) => {
 				if parser[n].parts.is_none() {
@@ -142,141 +140,32 @@ impl Parse for ast::TopLevelExpr {
 		let next = parser.peek_expect("an expression")?;
 		match next.token {
 			T![BEGIN] => {
-				if parser.state.contains(ParserState::TRANSACTION) {
-					return Err(parser.with_error(|parser| {
-						Level::Error
-							.title(format!("Unexpected token `{}`", parser.slice(next.span)))
-							.snippet(parser.snippet().annotate(
-								AnnotationKind::Primary.span(next.span).label(
-									"You cannot start a second transaction within an existing transaction",
-								),
-							))
-							.to_diagnostic()
-					}));
-				}
-
-				let tx = parser
-					.with_state(
-						|state| state | ParserState::TRANSACTION,
-						async |parser| parser.parse().await,
-					)
-					.await?;
-				Ok(TopLevelExpr::Transaction(tx))
+				let _ = parser.next();
+				parser.eat(T![TRANSACTION])?;
+				let span = parser.span_since(next.span);
+				let span = parser.push(span);
+				Ok(ast::TopLevelExpr::Begin(span))
 			}
-			T![CANCEL] => Err(parser.with_error(|parser| {
-				Level::Error
-					.title("Unexpected token `CANCEL` expected an expression")
-					.snippet(parser.snippet().annotate(
-						AnnotationKind::Primary.span(next.span).label(
-							"`CANCEL` statements can only be used within a transaction block",
-						),
-					))
-					.to_diagnostic()
-			})),
-			T![COMMIT] => Err(parser.with_error(|parser| {
-				Level::Error
-					.title("Unexpected token `COMMIT` expected an expression")
-					.snippet(parser.snippet().annotate(
-						AnnotationKind::Primary.span(next.span).label(
-							"`COMMIT` statements can only be used within a transaction block",
-						),
-					))
-					.to_diagnostic()
-			})),
+			T![CANCEL] => {
+				let _ = parser.next();
+				parser.eat(T![TRANSACTION])?;
+				let span = parser.span_since(next.span);
+				let span = parser.push(span);
+				Ok(ast::TopLevelExpr::Cancel(span))
+			}
+			T![COMMIT] => {
+				let _ = parser.next();
+				parser.eat(T![TRANSACTION])?;
+				let span = parser.span_since(next.span);
+				let span = parser.push(span);
+				Ok(ast::TopLevelExpr::Commit(span))
+			}
 			T![USE] => Ok(TopLevelExpr::Use(parser.parse().await?)),
 			T![OPTION] => Ok(TopLevelExpr::Option(parser.parse_sync()?)),
 			T![KILL] => Ok(TopLevelExpr::Kill(parser.parse_sync()?)),
 			T![SHOW] => Ok(TopLevelExpr::Show(parser.parse().await?)),
 			_ => Ok(TopLevelExpr::Expr(parser.parse().await?)),
 		}
-	}
-}
-
-impl Parse for ast::Transaction {
-	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
-		debug_assert!(parser.state.contains(ParserState::TRANSACTION));
-
-		let start = parser.expect(T![BEGIN])?.span;
-		let _ = parser.eat(T![TRANSACTION])?;
-
-		let mut head = None;
-		let mut tail = None;
-		let (end, commits) = loop {
-			if parser.eat(T![;])?.is_none() {
-				let span = parser.peek_span();
-				return Err(parser.with_error(|parser| {
-					Level::Error
-						.title(format!(
-							"Unexpected token `{}`, expected `;` as the transaction block has not yet ended",
-							parser.slice(span)
-						))
-						.snippet(
-							parser.snippet().annotate(AnnotationKind::Primary.span(span)).annotate(
-								AnnotationKind::Context
-									.span(start)
-									.label("This transaction is still open"),
-							),
-						)
-						.to_diagnostic()
-				}));
-			}
-
-			let Some(next) = parser.peek()? else {
-				let span = parser.peek_span();
-				return Err(parser.with_error(|parser| {
-					Level::Error
-						.title("Unexpected end of query, expected transaction block to end")
-						.snippet(
-							parser.snippet().annotate(AnnotationKind::Primary.span(span)).annotate(
-								AnnotationKind::Context
-									.span(start)
-									.label("Expected this transaction to end"),
-							),
-						)
-						.to_diagnostic()
-				}));
-			};
-
-			match next.token {
-				T![CANCEL] => {
-					parser.next()?;
-					break (next.span, false);
-				}
-				T![COMMIT] => {
-					parser.next()?;
-					break (next.span, true);
-				}
-				T![BEGIN] => {
-					return Err(parser.with_error(|parser| {
-						Level::Error
-							.title(
-								"Unexpected token `BEGIN`, cannot start a transaction within another transaction",
-							)
-							.snippet(
-								parser
-									.snippet()
-									.annotate(AnnotationKind::Primary.span(next.span))
-									.annotate(
-										AnnotationKind::Context
-											.span(start)
-											.label("Expected this transaction to end"),
-									),
-							)
-							.to_diagnostic()
-					}));
-				}
-				_ => {
-					let node = parser.parse_enter::<TopLevelExpr>().await?;
-					parser.push_list(node, &mut head, &mut tail);
-				}
-			}
-		};
-
-		Ok(Transaction {
-			span: start.extend(end),
-			statements: head,
-			commits,
-		})
 	}
 }
 

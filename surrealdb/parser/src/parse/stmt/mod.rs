@@ -11,7 +11,7 @@ use token::{BaseTokenKind, T};
 use super::Parser;
 use crate::Parse;
 use crate::parse::utils::{parse_delimited_list, parse_seperated_list, parse_seperated_list_sync};
-use crate::parse::{ParseError, ParseResult};
+use crate::parse::{ParseError, ParseResult, ParserState};
 
 impl Parse for ast::If {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
@@ -81,7 +81,7 @@ impl Parse for ast::For {
 		let _ = parser.expect(T![IN])?;
 		let expr = parser.parse_enter().await?;
 
-		let body = parser.parse().await?;
+		let body = parser.with_state(|s| s | ParserState::LOOP, Parser::parse).await?;
 
 		let span = parser.span_since(start.span);
 		Ok(ast::For {
@@ -252,6 +252,18 @@ async fn try_parse_clause_expr(
 	}
 }
 
+async fn try_parse_clause_expr_no_loop(
+	parser: &mut Parser<'_, '_>,
+	token: BaseTokenKind,
+) -> ParseResult<Option<NodeId<ast::Expr>>> {
+	parser
+		.with_state(
+			|s| s.difference(ParserState::LOOP),
+			async |parser| try_parse_clause_expr(parser, token).await,
+		)
+		.await
+}
+
 async fn try_parse_with(parser: &mut Parser<'_, '_>) -> ParseResult<Option<WithIndex>> {
 	if parser.eat(T![WITH])?.is_some() {
 		let peek = parser.peek_expect("`INDEX` `NO`, or `NOINDEX`")?;
@@ -309,19 +321,27 @@ async fn try_parse_record_data(parser: &mut Parser<'_, '_>) -> ParseResult<Optio
 		}
 		Some(T![CONTENT]) => {
 			let _ = parser.next();
-			Some(ast::RecordData::Content(parser.parse_enter().await?))
+			Some(ast::RecordData::Content(
+				parser.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter).await?,
+			))
 		}
 		Some(T![PATCH]) => {
 			let _ = parser.next();
-			Some(ast::RecordData::Patch(parser.parse_enter().await?))
+			Some(ast::RecordData::Patch(
+				parser.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter).await?,
+			))
 		}
 		Some(T![MERGE]) => {
 			let _ = parser.next();
-			Some(ast::RecordData::Merge(parser.parse_enter().await?))
+			Some(ast::RecordData::Merge(
+				parser.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter).await?,
+			))
 		}
 		Some(T![REPLACE]) => {
 			let _ = parser.next();
-			Some(ast::RecordData::Replace(parser.parse_enter().await?))
+			Some(ast::RecordData::Replace(
+				parser.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter).await?,
+			))
 		}
 		_ => None,
 	};
@@ -331,7 +351,9 @@ async fn try_parse_record_data(parser: &mut Parser<'_, '_>) -> ParseResult<Optio
 impl Parse for ast::Selector {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let span = parser.peek_span();
-		let expr = parser.parse_enter().await?;
+
+		let expr =
+			parser.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter).await?;
 		let alias = if parser.eat(T![AS])?.is_some() {
 			Some(parser.parse().await?)
 		} else {
@@ -414,7 +436,7 @@ impl Parse for ast::Delete {
 
 		let with_index = try_parse_with(parser).await?;
 
-		let condition = try_parse_clause_expr(parser, T![WHERE]).await?;
+		let condition = try_parse_clause_expr_no_loop(parser, T![WHERE]).await?;
 		let output = if let Some(x) = parser.peek()?
 			&& let T![RETURN] = x.token
 		{
@@ -456,7 +478,8 @@ impl Parse for ast::Assignment {
 		};
 		let _ = parser.next();
 
-		let value = parser.parse_enter().await?;
+		let value =
+			parser.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter).await?;
 		let span = parser.span_since(start);
 
 		Ok(ast::Assignment {
@@ -511,7 +534,7 @@ impl Parse for ast::Update {
 
 		let data = try_parse_record_data(parser).await?;
 
-		let condition = try_parse_clause_expr(parser, T![WHERE]).await?;
+		let condition = try_parse_clause_expr_no_loop(parser, T![WHERE]).await?;
 
 		let output = if let Some(x) = parser.peek()?
 			&& let T![RETURN] = x.token
@@ -551,7 +574,7 @@ impl Parse for ast::Upsert {
 
 		let data = try_parse_record_data(parser).await?;
 
-		let condition = try_parse_clause_expr(parser, T![WHERE]).await?;
+		let condition = try_parse_clause_expr_no_loop(parser, T![WHERE]).await?;
 
 		let output = if let Some(x) = parser.peek()?
 			&& let T![RETURN] = x.token
@@ -805,7 +828,7 @@ impl Parse for ast::Select {
 			parse_seperated_list(parser, T![,], async |parser| parser.parse_enter().await).await?;
 
 		let with_index = try_parse_with(parser).await?;
-		let condition = try_parse_clause_expr(parser, T![WHERE]).await?;
+		let condition = try_parse_clause_expr_no_loop(parser, T![WHERE]).await?;
 
 		let split_span = parser.peek_span();
 		let split = if parser.eat(T![SPLIT])?.is_some() {
@@ -888,7 +911,9 @@ impl Parse for ast::Select {
 					if let Some(t) = parser.peek()?
 						&& (t.token.is_identifier() || t.token == BaseTokenKind::Param)
 					{
-						parser.parse_enter().await
+						parser
+							.with_state(|s| s.difference(ParserState::LOOP), Parser::parse_enter)
+							.await
 					} else {
 						Err(parser.unexpected("a fetch expression"))
 					}
@@ -1178,7 +1203,14 @@ impl Parse for ast::Access {
 					}
 					T![WHERE] => {
 						let _ = parser.next();
-						ast::AccessShowKind::Condition(parser.parse_enter().await?)
+						ast::AccessShowKind::Condition(
+							parser
+								.with_state(
+									|s| s.difference(ParserState::LOOP),
+									Parser::parse_enter,
+								)
+								.await?,
+						)
 					}
 					_ => return Err(parser.unexpected(expect)),
 				};
