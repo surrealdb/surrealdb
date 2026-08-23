@@ -25,6 +25,7 @@ pub struct RunParams {
 	/// numbers stay numbers, objects stay objects. Embed typed SurrealDB
 	/// values via `{"$ql": "<expr>"}` -- e.g. pass a record id as
 	/// `{"$ql": "person:alice"}` or a decimal as `{"$ql": "9.99dec"}`.
+	#[schemars(extend("items" = {}))]
 	pub args: Option<Vec<serde_json::Value>>,
 }
 
@@ -109,6 +110,13 @@ mod tests {
 	use serde_json::Value as JsonValue;
 
 	use super::*;
+
+	#[test]
+	fn args_schema_uses_object_items() {
+		let schema = serde_json::to_value(schemars::schema_for!(RunParams))
+			.expect("RunParams schema should serialize");
+		assert_eq!(schema["properties"]["args"]["items"], serde_json::json!({}));
+	}
 
 	#[test]
 	fn accepts_builtin_names() {
