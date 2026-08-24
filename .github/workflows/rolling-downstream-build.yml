@@ -124,13 +124,8 @@ jobs:
       # separately (finalize / preflight.promotable).
       engine-promotable: ${{ inputs.engine-git-sha == '' && 'true' || steps.promotable.outputs.promotable }}
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The pushed commit, or the exact engine sha/ref for a manual (re)build.
           ref: ${{ inputs.engine-git-sha || github.sha }}
@@ -142,7 +137,7 @@ jobs:
       # actions and its scripts all come from main; dispatch from a branch or
       # tag to debug and everything comes from that ref instead.
       - name: Checkout CI tooling from the workflow ref
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           sparse-checkout: |
@@ -219,11 +214,6 @@ jobs:
       downstream-ref: ${{ steps.read.outputs.ds-ref }}
       downstream-branch: ${{ steps.read.outputs.ds-branch }}
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
       - name: Read recorded downstream commit
         id: read
         env:

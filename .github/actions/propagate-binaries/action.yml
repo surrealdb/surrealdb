@@ -17,7 +17,7 @@ runs:
   using: 'composite'
   steps:
     - name: Configure AWS
-      uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
+      uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
       with:
         aws-region: us-east-2
         aws-access-key-id: ${{ inputs.aws-access-key-id }}
@@ -28,7 +28,7 @@ runs:
       env:
         DRY_RUN: ${{ inputs.dry-run }}
       run: |
-        regions=("af-south-1" "ap-east-1" "ap-south-1" "ap-southeast-1" "ap-southeast-2" "ca-central-1" "eu-central-1" "eu-west-2" "me-south-1" "sa-east-1" "us-west-2")
+        regions=("af-south-1" "ap-east-1" "ap-south-1" "ap-southeast-1" "ap-southeast-2" "ca-central-1" "eu-central-1" "eu-west-2" "sa-east-1" "us-west-2")
 
         # Dry run still LISTs/compares each region (exercising auth, bucket
         # access, the parallel fan-out and the quorum logic) but copies and

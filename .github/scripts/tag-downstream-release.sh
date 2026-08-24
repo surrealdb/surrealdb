@@ -164,6 +164,12 @@ echo "Verified: all engine crates in Cargo.lock are pinned to ${ENGINE_SHA}."
 git config user.name "surrealdb-release-bot"
 git config user.email "release-bot@surrealdb.com"
 
+# The downstream commit the release was built from (HEAD before the pin
+# commit): the equivalence check in step 5 compares an existing tag against
+# it, so an overwrite re-release built from a DIFFERENT downstream commit is
+# recognized as needing a new tag even when the engine sha is unchanged.
+DOWNSTREAM_BASE="$(git rev-parse HEAD)"
+
 git add -A
 if git diff --cached --quiet; then
 	# Already pinned (e.g. a retry after the commit but before the push). Tag the
@@ -182,9 +188,33 @@ else
 	tag_exists=false
 fi
 
+# Does the existing remote tag match THIS release: annotation pins this engine
+# sha, and the tagged commit sits on this downstream base (the base itself when
+# nothing needed pinning, or a pin commit whose parent is the base). Both
+# checks are needed - the annotation alone misses the same engine re-paired
+# with a different downstream commit; ancestry alone misses a different engine
+# pinned on the same base. Fetches the tag into refs/tags/existing-remote-tag.
+existing_tag_matches() {
+	git fetch --no-tags --force origin "refs/tags/${TAG}:refs/tags/existing-remote-tag"
+	local commit parent
+	commit="$(git rev-parse 'existing-remote-tag^{commit}' 2>/dev/null || echo '')"
+	parent="$(git rev-parse 'existing-remote-tag^{commit}^' 2>/dev/null || echo '')"
+	git tag -l --format='%(contents)' existing-remote-tag | grep -q "engine ${ENGINE_SHA}" \
+		&& { [[ "$commit" == "$DOWNSTREAM_BASE" ]] || [[ "$parent" == "$DOWNSTREAM_BASE" ]]; }
+}
+
 if [[ "$tag_exists" == "true" && "$OVERWRITE" != "true" ]]; then
-	echo "::notice::Downstream tag ${TAG} already exists; leaving it untouched (re-run with overwrite: true to replace it)."
-	exit 0
+	# A resume legitimately re-runs this job with the tag already pushed, so an
+	# existing MATCHING tag passes. A mismatched tag (a different engine, or
+	# the same engine re-paired with a different downstream commit between
+	# attempts) misrepresents the shipped image and must not pass silently on
+	# the no-overwrite path - replacing it is an explicit operator decision.
+	if existing_tag_matches; then
+		echo "::notice::Downstream tag ${TAG} already pins engine ${ENGINE_SHA} on downstream ${DOWNSTREAM_BASE}; leaving it in place."
+		exit 0
+	fi
+	echo "::error::Downstream tag ${TAG} exists and does not match this release (engine ${ENGINE_SHA} on downstream ${DOWNSTREAM_BASE}). Re-run with overwrite: true to replace it."
+	exit 1
 fi
 
 git tag -f -a "${TAG}" -m "SurrealDB downstream release ${TAG}
@@ -198,12 +228,25 @@ if [[ "$PUBLISH" != "true" ]]; then
 fi
 
 if [[ "$tag_exists" == "true" ]]; then
-	echo "Overwriting existing downstream tag ${TAG}."
-	git push --force origin "refs/tags/${TAG}"
+	# The downstream repo protects release tags against updates, so a
+	# force-push may be rejected outright - and a re-run of the same release
+	# does not need one: a matching tag is correct as-is (the pin commit
+	# differs only in hash/timestamp). Only a mismatched tag actually needs
+	# replacing.
+	if existing_tag_matches; then
+		echo "::notice::Downstream tag ${TAG} already pins engine ${ENGINE_SHA} on downstream ${DOWNSTREAM_BASE}; leaving the existing tag in place."
+	else
+		echo "Overwriting existing downstream tag ${TAG} (it pins a different engine commit or downstream base)."
+		if ! git push --force origin "refs/tags/${TAG}"; then
+			echo "::error::Downstream tag ${TAG} does not match this release (engine ${ENGINE_SHA} on downstream ${DOWNSTREAM_BASE}) and could not be replaced (the downstream repository protects tags against updates). Delete the tag on the downstream repo (or lift the protection for it) and re-run."
+			exit 1
+		fi
+		echo "Pushed downstream tag ${TAG} (engine ${ENGINE_SHA})."
+	fi
 else
 	git push origin "refs/tags/${TAG}"
+	echo "Pushed downstream tag ${TAG} (engine ${ENGINE_SHA})."
 fi
-echo "Pushed downstream tag ${TAG} (engine ${ENGINE_SHA})."
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
 	echo "tag=${TAG}" >> "$GITHUB_OUTPUT"

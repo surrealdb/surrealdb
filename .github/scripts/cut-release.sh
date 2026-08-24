@@ -75,6 +75,13 @@ fi
 echo "Main will be bumped to: ${MAIN_VERSION}"
 [[ -n "$RELEASE_BRANCH" ]] && echo "Release branch ${RELEASE_BRANCH} will start at: ${BRANCH_VERSION}"
 
+# Expose the computed line to the workflow: the downstream cut job mirrors the
+# branch on the downstream repo. Emitted before any mutation so the outputs are
+# present for every exit path (fresh cut, reused branch, dry-run).
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+	echo "release-branch=${RELEASE_BRANCH}" >> "$GITHUB_OUTPUT"
+fi
+
 # Configure git identity for the commits (fresh runners have none)
 git config user.name "github-actions[bot]"
 git config user.email "github-actions[bot]@users.noreply.github.com"

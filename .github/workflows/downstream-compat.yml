@@ -97,7 +97,7 @@ jobs:
       # composite actions below (./.github/actions/...) resolve.
       - name: Checkout engine (this PR)
         if: steps.preflight.outputs.configured == 'true'
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Don't leave this repo's GITHUB_TOKEN in the workspace git config: it
           # is scoped to this repo, and a later git call to the downstream repo
@@ -193,7 +193,7 @@ jobs:
 
       - name: Checkout downstream
         if: steps.preflight.outputs.configured == 'true'
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.repository_owner }}/${{ secrets.DOWNSTREAM_REPO }}
           ref: ${{ steps.branch.outputs.ref }}
@@ -228,7 +228,7 @@ jobs:
       - name: Restore cached AWS C++ SDK
         id: aws-sdk-cache
         if: steps.preflight.outputs.configured == 'true'
-        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # (Actions must be pinned by commit hash) v4.2.3
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # (Actions must be pinned by commit hash) v6.1.0
         with:
           path: ${{ runner.temp }}/aws-sdk-install
           key: aws-sdk-cpp-${{ runner.os }}-${{ runner.arch }}-1.11.845-v1
@@ -296,7 +296,7 @@ jobs:
       # freshly-built SDK. Skipped on a cache hit.
       - name: Save AWS C++ SDK to cache
         if: steps.preflight.outputs.configured == 'true' && steps.aws-sdk-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # (Actions must be pinned by commit hash) v4.2.3
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # (Actions must be pinned by commit hash) v6.1.0
         with:
           path: ${{ runner.temp }}/aws-sdk-install
           key: aws-sdk-cpp-${{ runner.os }}-${{ runner.arch }}-1.11.845-v1

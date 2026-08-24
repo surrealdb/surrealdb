@@ -35,13 +35,13 @@ jobs:
       IS_TRUSTED_REF: ${{ github.ref == 'refs/heads/main' || github.ref_type == 'tag' }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
         with:
           egress-policy: audit
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # (Actions must be pinned by commit hash) v7.0.1
 
-      - uses: cachix/install-nix-action@616559265b40713947b9c190a8ff4b507b5df49b # (Actions must be pinned by commit hash) v31.10.4
+      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # (Actions must be pinned by commit hash) v31.11.1
 
       # The self-hosted runner starts with $USER unset, which cachix rejects
       # ("$USER must be set."). GitHub-hosted runners export it automatically.

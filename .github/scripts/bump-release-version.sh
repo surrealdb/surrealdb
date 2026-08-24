@@ -188,20 +188,51 @@ Review and merge this PR to prepare \`${RELEASE_BRANCH}\` for the next patch rel
 	fi
 
 	# These version-bump PRs are mechanical and must land before the next
-	# release, so merge them as directly as possible. Try an immediate squash
-	# merge first - the App is a ruleset bypass actor on this repo, so this
-	# lands even while required checks are still queued - then fall back to
-	# enabling GitHub auto-merge (which waits for required checks), and only
-	# then to a warning. Non-fatal: a merge that cannot proceed leaves the PR
-	# open rather than failing the release.
-	gh pr merge --squash "${PR_URL}" \
-		|| gh pr merge --auto --squash "${PR_URL}" \
-		|| echo "::warning title=Auto-merge::could not merge ${PR_URL}; merge it manually"
+	# release, so merge them without waiting for checks or a review. The
+	# release-automation App that opens the PR is a ruleset bypass actor on the
+	# release-branch rules, so it may squash-merge even while required checks are
+	# still queued and no review exists.
+	#
+	# The merge MUST go through the REST endpoint directly rather than
+	# `gh pr merge --squash`: gh inspects the PR's merge-state client-side first
+	# and, the instant after creation, sees it as BLOCKED (checks not started, no
+	# review) and refuses locally - it never calls the merge endpoint, so the
+	# App's bypass never gets a chance to apply. `--auto` would enable GitHub
+	# auto-merge, but that still honours the required approving review, so it sits
+	# waiting for a human. Calling PUT .../merge as the App lets the bypass take
+	# effect immediately. Squash is the branch's only allowed merge method.
+	#
+	# Mergeability is computed asynchronously right after a PR is created, so a
+	# transient failure on the first call can just mean "not computed yet"; retry
+	# a few times with a short backoff before falling back to auto-merge (so the
+	# PR still lands eventually, after a review) and, failing that, a warning.
+	# Non-fatal end to end: a merge that cannot proceed leaves the PR open rather
+	# than failing the release.
+	merged=false
+	merge_err=""
+	for attempt in 1 2 3 4; do
+		if merge_err="$(gh api -X PUT "repos/${REPO}/pulls/${PR_NUMBER}/merge" \
+			-f merge_method=squash 2>&1)"; then
+			merged=true
+			break
+		fi
+		[[ "$attempt" -lt 4 ]] && sleep 3
+	done
+	if [[ "$merged" == "true" ]]; then
+		echo "Merged ${PR_URL} (squash) via the release-automation App's ruleset bypass"
+	else
+		echo "Direct merge did not succeed (last error: ${merge_err}); enabling auto-merge instead."
+		gh pr merge --auto --squash "${PR_URL}" \
+			|| echo "::warning title=Auto-merge::could not merge ${PR_URL}; merge it manually"
+	fi
 
-	# Surface the PR URL as a step output when running in GitHub Actions so the
-	# release summary can list it.
+	# Surface the PR URL and whether it already merged as step outputs, so the
+	# release summary can list it under "auto-merged" vs "review & merge".
+	# `merged` is true only when the direct squash landed here; the auto-merge
+	# fallback leaves it awaiting its requirements, so it stays false.
 	if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
 		echo "pr-url=${PR_URL}" >> "$GITHUB_OUTPUT"
+		echo "merged=${merged}" >> "$GITHUB_OUTPUT"
 	fi
 else
 	echo "[Dry-run] Would create PR to bump ${RELEASE_BRANCH} to ${NEXT_VERSION}"

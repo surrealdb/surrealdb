@@ -16,7 +16,7 @@
 
 name: Cut release
 
-run-name: "Cut ${{ inputs.cut-type }} release (publish: ${{ inputs.publish }})"
+run-name: "${{ !inputs.execute && '[dry-run] ' || '' }}Cut ${{ inputs.cut-type }} release"
 
 on:
   workflow_dispatch:
@@ -32,7 +32,7 @@ on:
         required: false
         type: string
         description: "Commit on main to cut from (defaults to main HEAD)"
-      publish:
+      execute:
         required: false
         type: boolean
         default: false
@@ -53,14 +53,11 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+    outputs:
+      release-branch: ${{ steps.cut.outputs.release-branch }}
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.git-sha || 'main' }}
           fetch-depth: 0
@@ -73,7 +70,7 @@ jobs:
       # below deliberately stays workspace-resolved: the toolchain must match
       # the source being cut.
       - name: Checkout CI tooling from the workflow ref
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           sparse-checkout: |
@@ -96,6 +93,106 @@ jobs:
         uses: ./.github/actions/setup-environment
 
       - name: Cut release
+        id: cut
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: .ci/.github/scripts/cut-release.sh "${{ inputs.cut-type }}" "${{ inputs.publish }}"
+        run: .ci/.github/scripts/cut-release.sh "${{ inputs.cut-type }}" "${{ inputs.execute }}"
+
+  # ----------------------------------------
+  # Mirror the new line on the downstream repo
+  # ----------------------------------------
+  # A new engine releases/X.Y line needs a same-named branch on the downstream
+  # repo, with its engine git dependencies retargeted from main to the new
+  # branch: the rolling downstream build resolves the MATCHING release-line
+  # branch (falling back to main with a warning), and the release-time
+  # reproducibility tag pins on top of that branch's manifests. No-ops with a
+  # notice when the downstream app/repo are not configured.
+  cut-downstream:
+    name: Cut downstream release branch
+    needs: cut
+    if: ${{ github.repository == vars.PRIVATE_ENGINE_REPO }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Downstream App configured?
+        id: cfg
+        env:
+          # Gate on the PRIVATE KEY (a secret), not the client-id (a variable):
+          # variables are present in contexts where secrets are withheld, so
+          # gating on the id would run the token mint without a key and
+          # hard-fail instead of no-opping. Matches release.yml.
+          HAS_APP: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY != '' }}
+          DOWNSTREAM_REPO: ${{ secrets.DOWNSTREAM_REPO }}
+        run: |
+          set -euo pipefail
+          if [[ "${HAS_APP}" == "true" && -n "${DOWNSTREAM_REPO}" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Downstream app/repo not configured; skipping the downstream branch cut."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate a token for the downstream repo
+        id: app-token
+        if: ${{ steps.cfg.outputs.configured == 'true' }}
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY }}
+          repositories: ${{ secrets.DOWNSTREAM_REPO }}
+
+      # CI tooling (scripts) comes from the WORKFLOW ref, as in the cut job.
+      - name: Checkout CI tooling from the workflow ref
+        if: ${{ steps.cfg.outputs.configured == 'true' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
+
+      # The downstream branch is cut from the downstream repo's main HEAD. The
+      # minted token persists in the checkout so the script's push below is
+      # authenticated.
+      - name: Checkout downstream
+        if: ${{ steps.cfg.outputs.configured == 'true' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository_owner }}/${{ secrets.DOWNSTREAM_REPO }}
+          ref: main
+          token: ${{ steps.app-token.outputs.token }}
+          path: downstream
+
+      - name: Setup environment
+        if: ${{ steps.cfg.outputs.configured == 'true' }}
+        uses: ./.ci/.github/actions/setup-environment
+        with:
+          # The downstream repo is checked out under ./downstream, so its Cargo
+          # workspace is not at the job root. Point the rust-cache probe there;
+          # left at its default it runs `cargo metadata` against the (manifest
+          # -less) root and logs a red "could not find Cargo.toml" error before
+          # falling back to no cache.
+          workspaces: downstream
+
+      # Retarget the downstream's engine deps at the new branch and push it.
+      # cargo must fetch the engine repo to re-lock, and the engine dep is
+      # declared with an ssh URL, so rewrite that URL to an https one
+      # authenticated with this repo's GITHUB_TOKEN (which can read this
+      # private engine repo) and use git-fetch-with-cli, so cargo honours the
+      # rewrite for transport while still recording the ssh URL in the lock.
+      - name: Cut the downstream branch
+        if: ${{ steps.cfg.outputs.configured == 'true' }}
+        working-directory: downstream
+        env:
+          ENGINE_TOKEN: ${{ github.token }}
+          ENGINE_REPO: ${{ github.repository }}
+          RELEASE_BRANCH: ${{ needs.cut.outputs.release-branch }}
+          PUBLISH: ${{ inputs.execute }}
+          CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+        run: |
+          set -euo pipefail
+          git config --global \
+            "url.https://x-access-token:${ENGINE_TOKEN}@github.com/${ENGINE_REPO}.insteadOf" \
+            "ssh://git@github.com/${ENGINE_REPO}"
+          "${GITHUB_WORKSPACE}/.ci/.github/scripts/cut-downstream-release.sh" \
+            "${RELEASE_BRANCH}" "${PUBLISH}"

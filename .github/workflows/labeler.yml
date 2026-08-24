@@ -17,11 +17,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
         with:
           egress-policy: audit
 
-      - uses: github/issue-labeler@6bea9ed491bb74fce38775b3d863e64a59dbd9eb # (Actions must be pinned by commit hash) v3.3
+      - uses: github/issue-labeler@c1b0f9f52a63158c4adc09425e858e87b32e9685 # (Actions must be pinned by commit hash) v3.4
         with:
           configuration-path: .github/labeler.yml
           enable-versioned-regex: 0

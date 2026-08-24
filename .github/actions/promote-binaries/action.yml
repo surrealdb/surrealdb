@@ -162,7 +162,7 @@ runs:
     # ambient rolling download + private manifest write so it doesn't shadow
     # those creds.
     - name: Configure AWS
-      uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
+      uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
       with:
         aws-region: us-east-2
         aws-access-key-id: ${{ inputs.aws-access-key-id }}
@@ -195,7 +195,7 @@ runs:
         ls -l publish
 
     - name: Create GitHub release
-      uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
+      uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
       if: ${{ inputs.publish == 'true' && inputs.create-release == 'true' }}
       with:
         tag_name: v${{ inputs.version }}

@@ -98,13 +98,8 @@ jobs:
             os: windows
             runner: windows-latest-32-cores
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.git-ref }}
 
@@ -115,7 +110,7 @@ jobs:
       # actions and its scripts all come from main; dispatch from a branch or
       # tag to debug and everything comes from that ref instead.
       - name: Checkout CI tooling from the workflow ref
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           sparse-checkout: |
@@ -126,15 +121,16 @@ jobs:
       # Hoisted here (loaded from .ci = the workflow ref) rather than nested
       # inside the build-{linux,macos,windows} actions: a nested `uses: ./...`
       # resolves against $GITHUB_WORKSPACE (the built commit checked out above),
-      # which would reopen the backport hole for the binary-build tooling. Per-OS
-      # inputs: Windows persists the sccache disk cache as one Swatinem entry
-      # (instead of hundreds of per-crate GHA-cache entries) and saves it.
+      # which would reopen the backport hole for the binary-build tooling.
+      # Compiler caching comes from the shared S3 sccache backend (inputs
+      # below) on every OS, so no per-OS disk-cache persistence is needed.
       - name: Setup environment
         uses: ./.ci/.github/actions/setup-environment
         with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           targets: ${{ matrix.arch }}
-          cache-directories: ${{ matrix.os == 'windows' && 'C:\sccache' || '' }}
-          save-cache: ${{ matrix.os == 'windows' }}
 
       - name: Build Linux binary
         if: matrix.os == 'linux'
@@ -147,6 +143,18 @@ jobs:
           build-metadata: ${{ inputs.build-metadata }}
           upload: true
           release: true
+          # Builder-image layer cache: one moving tag per line and platform.
+          # BUILDER_CACHE_ECR_IMAGE is the full <registry>/<repository> prefix
+          # of an ECR repo that THIS JOB'S runner pool can push to via its
+          # ambient IAM role - the build matrix runs on a different pool than
+          # the docker/publish jobs, with push rights to a different, dedicated
+          # builder repo. Unset, the cache-image input stays empty and the
+          # build falls back to a cold local cache (never a failure). Image
+          # lifecycle in the cache repo - untagged predecessors orphaned by the
+          # moving tag, and tags left by throwaway branch slugs - is owned by
+          # an ECR lifecycle policy on that repository; the cleanup/prune jobs
+          # here never touch it.
+          cache-image: ${{ secrets.BUILDER_CACHE_ECR_IMAGE != '' && format('{0}:builder-cache-{1}-{2}', secrets.BUILDER_CACHE_ECR_IMAGE, inputs.branch-slug, matrix.platform) || '' }}
 
       - name: Build macOS binary
         if: matrix.os == 'macos'
@@ -177,13 +185,8 @@ jobs:
     needs: [build]
     runs-on: macos-latest
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.git-ref }}
 
@@ -194,7 +197,7 @@ jobs:
       # actions and its scripts all come from main; dispatch from a branch or
       # tag to debug and everything comes from that ref instead.
       - name: Checkout CI tooling from the workflow ref
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           sparse-checkout: |
@@ -218,11 +221,6 @@ jobs:
     # keys). The label comes from a repo/org variable.
     runs-on: ${{ vars.RUNNER_AMD }}
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
       # Only this channel's artifacts, keeping the per-artifact directory layout.
       - name: Download artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -268,13 +266,8 @@ jobs:
             build-target: dev-ci
             tag-suffix: -dev
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.git-ref }}
 
@@ -285,7 +278,7 @@ jobs:
       # actions and its scripts all come from main; dispatch from a branch or
       # tag to debug and everything comes from that ref instead.
       - name: Checkout CI tooling from the workflow ref
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           sparse-checkout: |
@@ -304,10 +297,10 @@ jobs:
       # arm64 on this amd64 runner. GitHub-hosted runners ship binfmt, but a
       # self-hosted private runner may not, so register it explicitly.
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       # Ambient auth: the private runner's IAM instance role provides ECR
       # credentials, so no configure-aws-credentials / static keys are needed.
@@ -326,7 +319,7 @@ jobs:
       # BEFORE anything is pushed to ECR. A vulnerable image never reaches the
       # registry, and therefore can never be promoted to a release.
       - name: Build image locally for scanning (amd64)
-        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: artifacts
           load: true
@@ -357,7 +350,7 @@ jobs:
         # verbatim: their in-toto subject/materials encode the ECR registry host
         # (and therefore the AWS account ID). The mirror strips them by
         # recreating the index from the per-platform manifests only.
-        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: artifacts
           push: true
@@ -393,13 +386,8 @@ jobs:
     name: Check crate versions (rolling)
     runs-on: ubuntu-latest-4-cores
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.git-ref }}
 
@@ -410,7 +398,7 @@ jobs:
       # actions and its scripts all come from main; dispatch from a branch or
       # tag to debug and everything comes from that ref instead.
       - name: Checkout CI tooling from the workflow ref
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           sparse-checkout: |
@@ -422,6 +410,10 @@ jobs:
       # (.ci), not the built commit.
       - name: Setup environment
         uses: ./.ci/.github/actions/setup-environment
+        with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
 
       - name: Check crate versions
         uses: ./.ci/.github/actions/check-crate-versions
@@ -437,13 +429,8 @@ jobs:
     # than paying for a bigger one that wouldn't shorten the compile.
     runs-on: ubuntu-latest-4-cores
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.git-ref }}
 
@@ -454,7 +441,7 @@ jobs:
       # actions and its scripts all come from main; dispatch from a branch or
       # tag to debug and everything comes from that ref instead.
       - name: Checkout CI tooling from the workflow ref
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           sparse-checkout: |
@@ -468,6 +455,9 @@ jobs:
       - name: Setup environment
         uses: ./.ci/.github/actions/setup-environment
         with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           free-disk-space: 'true'
 
       - name: Package crates
@@ -503,17 +493,12 @@ jobs:
     outputs:
       build-npm: ${{ steps.detect.outputs.build-npm }}
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
       # Sparse, blobless checkout of just the two package manifests — this job only
       # needs to know whether they exist, not the whole (large) repo. Non-cone
       # patterns match the exact paths; if the commit lacks them, the working tree
       # is simply empty and the detect step reports no packages.
       - name: Checkout package manifests
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.git-ref }}
           filter: blob:none
@@ -584,30 +569,44 @@ jobs:
             target: aarch64-unknown-linux-musl
             cross: true
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.git-ref }}
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+      # CI tooling (first-party actions) comes from the WORKFLOW ref, not the
+      # built commit checked out above - same reasoning as the engine build job.
+      - name: Checkout CI tooling from the workflow ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          toolchain: stable
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
+
+      # Toolchain, the shared S3 compiler cache (inputs below), and
+      # cargo registry/git + installed-binary (~/.cargo/bin) caching keyed per
+      # target. finalize blocks on this job, so its wall-clock is part of
+      # time-to-promotable for every release-line push.
+      - name: Setup environment
+        uses: ./.ci/.github/actions/setup-environment
+        with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           targets: ${{ matrix.target }}
+          cache-key: npm-addon-${{ matrix.target }}
+          save-cache: 'true'
 
       # napi/cargo compile with the repo-pinned toolchain (rust-toolchain.toml),
-      # NOT the `stable` one installed above — so the target's std has to be added
-      # to the pinned toolchain. dtolnay's `targets:` input adds it to `stable`,
-      # which the build never uses, so on a cross target the pinned toolchain lacks
-      # the std and the build dies with "can't find crate for `core`". Running
-      # rustup at the repo root resolves the pinned toolchain via rust-toolchain.toml
-      # (auto-installing it), the same way build-macos adds its cross slice. A no-op
-      # for the native (host) target.
+      # NOT the `stable` one setup-environment installs - so the target's std has
+      # to be added to the pinned toolchain. The `targets:` input adds it to
+      # `stable`, which the build never uses, so on a cross target the pinned
+      # toolchain lacks the std and the build dies with "can't find crate for
+      # `core`". Running rustup at the repo root resolves the pinned toolchain via
+      # rust-toolchain.toml (auto-installing it), the same way build-macos adds
+      # its cross slice. A no-op for the native (host) target.
       - name: Add the target to the pinned toolchain
         shell: bash
         run: rustup target add ${{ matrix.target }}
@@ -623,15 +622,30 @@ jobs:
         if: ${{ matrix.target == 'aarch64-unknown-linux-gnu' }}
         run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
+      # Zig provides the cross linker for the musl/gnu cross targets (via
+      # cargo-zigbuild below). Installed by direct download from ziglang.org
+      # with a pinned version and checksum rather than through a marketplace
+      # action: the compiler ships as a self-contained static tarball, every
+      # cross entry runs on an x86_64 Linux host, and the pinned checksum
+      # (from https://ziglang.org/download/index.json) makes the supply chain
+      # ours to verify instead of a third-party action's.
       - name: Install ziglang
         if: ${{ matrix.cross }}
-        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
-        with:
-          version: 0.14.1
+        env:
+          ZIG_VERSION: 0.14.1
+          ZIG_SHA256: 24aeeec8af16c381934a6cd7d95c807a8cb2cf7df9fa40d359aa884195c4716c
+        run: |
+          set -euo pipefail
+          dist="zig-x86_64-linux-${ZIG_VERSION}"
+          curl -fsSL --retry 5 -o zig.tar.xz "https://ziglang.org/download/${ZIG_VERSION}/${dist}.tar.xz"
+          echo "${ZIG_SHA256}  zig.tar.xz" | sha256sum -c -
+          sudo tar -C /opt -xJf zig.tar.xz
+          rm zig.tar.xz
+          echo "/opt/${dist}" >> "$GITHUB_PATH"
 
       - name: Install cargo-zigbuild
         if: ${{ matrix.cross }}
-        uses: taiki-e/install-action@328a871ad8f62ecac78390391f463ccabc974b72 # v2.69.9
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
@@ -647,10 +661,13 @@ jobs:
           RUSTFLAGS: ${{ matrix.rustflags }}
         run: bun run build.ts --target ${{ matrix.target }} ${{ matrix.cross && '-x' || '' }}
 
+      # Namespaced by inputs.name like every other artifact in this workflow, so
+      # concurrent channel entries can never collide on artifact names or
+      # cross-match each other's download patterns.
       - name: Upload the native binary
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: node-addon-${{ matrix.target }}
+          name: node-addon-${{ inputs.name }}-${{ matrix.target }}
           if-no-files-found: error
           path: surrealdb/node/dist/*.node
 
@@ -658,9 +675,9 @@ jobs:
       # every target, so one build's copy is enough.
       - name: Upload the package bundle
         if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: node-addon-bundle
+          name: node-addon-${{ inputs.name }}-bundle
           if-no-files-found: error
           path: |
             surrealdb/node/dist/
@@ -674,21 +691,33 @@ jobs:
     if: ${{ needs.npm-preflight.outputs.build-npm == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.git-ref }}
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+      # CI tooling (first-party actions) comes from the WORKFLOW ref, not the
+      # built commit checked out above - same reasoning as the engine build job.
+      - name: Checkout CI tooling from the workflow ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          toolchain: stable
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
+
+      # Toolchain, the shared S3 compiler cache (inputs below), and
+      # cargo registry/git + installed-binary (~/.cargo/bin) caching.
+      - name: Setup environment
+        uses: ./.ci/.github/actions/setup-environment
+        with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           targets: wasm32-unknown-unknown
+          cache-key: npm-wasm
+          save-cache: 'true'
 
       - name: Install Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -697,15 +726,27 @@ jobs:
 
       # The CLI and the wasm-bindgen crate share a bindgen schema that changes
       # between patch releases, so the version comes from the lockfile — the
-      # same source `build.ts` checks against before it runs.
-      - name: Install wasm-bindgen-cli
+      # same source `build.ts` checks against before it runs. wasm-opt wraps
+      # binaryen's C++ (a multi-minute build), so both installs are skipped
+      # when the exact version is already present in the cached ~/.cargo/bin;
+      # `cargo install --list` is the authority on what is installed at which
+      # version.
+      - name: Install wasm-bindgen-cli + wasm-opt
         run: |
+          set -euo pipefail
+          installed() { cargo install --list | grep -q "^$1 v$2:"; }
           version=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | grep '^version' | cut -d'"' -f2)
-          echo "Installing wasm-bindgen-cli $version"
-          cargo install -f wasm-bindgen-cli --version "$version"
-
-      - name: Install wasm-opt
-        run: cargo install wasm-opt --version 0.116.1
+          if installed wasm-bindgen-cli "$version"; then
+            echo "wasm-bindgen-cli $version already installed (cache)"
+          else
+            echo "Installing wasm-bindgen-cli $version"
+            cargo install -f wasm-bindgen-cli --version "$version"
+          fi
+          if installed wasm-opt 0.116.1; then
+            echo "wasm-opt 0.116.1 already installed (cache)"
+          else
+            cargo install -f wasm-opt --version 0.116.1
+          fi
 
       - name: Install dependencies
         working-directory: surrealdb/wasm
@@ -716,9 +757,9 @@ jobs:
         run: bun run build
 
       - name: Upload the package bundle
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: wasm-engine-bundle
+          name: wasm-engine-${{ inputs.name }}-bundle
           if-no-files-found: error
           path: surrealdb/wasm/dist/
 
@@ -736,25 +777,21 @@ jobs:
     # the runner's ambient IAM role (no static keys). Label from a repo/org var.
     runs-on: ${{ vars.RUNNER_AMD }}
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
-      # One pattern download assembles the whole node dist/: `node-addon-*` matches
-      # both the shared JS/typings bundle (node-addon-bundle) and every platform's
-      # native binary (node-addon-<target>), merged into one directory.
+      # One pattern download assembles the whole node dist/: the pattern matches
+      # both this channel entry's shared JS/typings bundle (…-bundle) and every
+      # platform's native binary (…-<target>), merged into one directory. The
+      # inputs.name segment scopes the match to THIS channel entry's artifacts.
       - name: Download the Node bundle + native binaries
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: node-addon-*
+          pattern: node-addon-${{ inputs.name }}-*
           path: node/dist/
           merge-multiple: true
 
       - name: Download the Wasm package bundle
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: wasm-engine-bundle
+          name: wasm-engine-${{ inputs.name }}-bundle
           path: wasm/dist/
 
       - name: Distribution summary
@@ -846,11 +883,6 @@ jobs:
     # keys). Label from a repo/org variable so it is not hardcoded here.
     runs-on: ${{ vars.RUNNER_AMD }}
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
       # engine.json lives in the private CI bucket alongside the rolling binaries.
       # It carries the engine side only — zero downstream metadata — and only
       # public-safe fields (no registry/account/repo): the registry coordinates
@@ -896,7 +928,20 @@ jobs:
     # publish-npm-s3) are removed by the recursive prefix delete below rather than
     # racing it. always() tolerates them being skipped on a non-dispatch throwaway.
     needs: [build, macos-universal, publish-s3, docker, build-node-addon, build-wasm-engine, publish-npm-s3]
-    if: ${{ always() && github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/heads/releases/') }}
+    # Runs ONLY for a genuinely throwaway build and NEVER against a promotable
+    # prefix. Gate on the artifact SLUG - the line containing the built commit,
+    # which is what names the shared rolling-builds/<slug>/<sha> prefix - not the
+    # workflow ref and not engine-promotable:
+    #   * a dispatch from a feature branch that rebuilds a real release-line commit
+    #     is keyed under that line's slug (e.g. releases-3-3), so a ref-based guard
+    #     would delete the real release's artifacts;
+    #   * an empty-git-sha dispatch off a feature branch builds the feature tip,
+    #     keyed under the feature slug (a genuine throwaway), yet engine-promotable
+    #     reports it promotable (it short-circuits to true whenever git-sha is
+    #     empty), so that guard would leak its binaries.
+    # `main` and `releases-*` are the promotable slugs; every other slug is a
+    # throwaway prefix no promotable build ever writes to, so deleting it is safe.
+    if: ${{ always() && inputs.branch-slug != 'main' && !startsWith(inputs.branch-slug, 'releases-') }}
     # Private runner: reaches the private CI bucket and the ECR via the runner's
     # ambient IAM role (no static keys). Label from a repo/org variable.
     runs-on: ${{ vars.RUNNER_AMD }}
@@ -904,11 +949,6 @@ jobs:
       ECR_REGISTRY: ${{ secrets.AWS_ECR_REGISTRY }}
       ECR_REPOSITORY: ${{ secrets.AWS_ECR_REPOSITORY }}
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
       - name: Delete rolling binaries from S3
         env:
           ROLLING_BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}

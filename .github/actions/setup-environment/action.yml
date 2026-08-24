@@ -38,6 +38,26 @@ inputs:
     description: 'Whether to compile via sccache (RUSTC_WRAPPER)'
     required: false
     default: 'true'
+  sccache-bucket:
+    description: >-
+      S3 bucket for the shared sccache backend. Empty falls back to a
+      SCCACHE_BUCKET already present in the calling job's environment, and
+      with neither the compile runs against a local disk cache only (ephemeral
+      on hosted runners) - the fork-PR / unconfigured-secret path.
+    required: false
+    default: ''
+  sccache-access-key-id:
+    description: >-
+      Static access key for the sccache bucket, scoped to the daemon-start
+      step only - it never enters the calling job's environment. Empty falls
+      back to AWS credentials already in the job environment, then to the
+      ambient credential chain (e.g. a private runner's instance role).
+    required: false
+    default: ''
+  sccache-secret-access-key:
+    description: 'Secret half of sccache-access-key-id.'
+    required: false
+    default: ''
 
 runs:
   using: 'composite'
@@ -90,46 +110,76 @@ runs:
         df -h /
 
     - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
+      uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # stable
       with:
         toolchain: ${{ inputs.toolchain }}
         components: ${{ inputs.components }}
         targets: ${{ inputs.targets }}
 
-    - name: Configure AWS creds for sccache
-      if: inputs.enable-sccache == 'true'
-      shell: bash
-      run: |
-        # Materialize the AWS credentials the CLI resolves (static env keys, a
-        # profile, or an instance role's STS session token) into env vars that
-        # the sccache S3 backend can read. Must run before sccache-action starts
-        # the daemon below, since the daemon reads its creds at start time.
-        # env-no-export emits bare NAME=VALUE lines (the plain `env` format emits
-        # `export NAME=VALUE`, which $GITHUB_ENV cannot parse).
-        # Skipped on fork PRs (no SCCACHE_BUCKET) → sccache falls back to local.
-        # Non-fatal: if no creds resolve (e.g. the dedicated SCCACHE_AWS_* secrets
-        # aren't set yet), don't fail the job — the sccache probe below then finds
-        # the backend unreachable and compiles uncached.
-        if [[ -n "$SCCACHE_BUCKET" ]]; then
-          aws configure export-credentials --format env-no-export >> "$GITHUB_ENV" \
-            || echo "::warning title=sccache::no AWS credentials resolved; compiling without the cache"
-        fi
-
     - name: Setup sccache
       if: inputs.enable-sccache == 'true'
-      uses: mozilla-actions/sccache-action@1583d6b38d7be47f593cb472781bbb21cab4321e # v0.0.10
+      uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
 
-    - name: Configure sccache environment
+    - name: Start sccache
       if: inputs.enable-sccache == 'true'
       shell: bash
+      env:
+        # Inputs arrive under INPUT_* names so the calling job's own
+        # SCCACHE_*/AWS_* environment (the configuration style some workflows
+        # use) stays visible as a fallback - a step-scoped SCCACHE_BUCKET
+        # would override it even when empty.
+        INPUT_SCCACHE_BUCKET: ${{ inputs.sccache-bucket }}
+        INPUT_SCCACHE_ACCESS_KEY_ID: ${{ inputs.sccache-access-key-id }}
+        INPUT_SCCACHE_SECRET_ACCESS_KEY: ${{ inputs.sccache-secret-access-key }}
       run: |
-        # The sccache S3 backend (SCCACHE_BUCKET + AWS_* creds) is configured at
-        # the workflow level and read when the server starts. Probe it by starting
-        # the server explicitly: only enable RUSTC_WRAPPER if the backend is
-        # actually reachable. If it isn't — missing S3 perms, a bucket outage, or
-        # a fork PR with no creds — compile *uncached* rather than failing every
-        # rustc invocation (sccache treats a backend it can't read as fatal).
         echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
+
+        # Backend configuration and credentials live in THIS step's shell and
+        # die with it: the daemon reads them at start and holds them for the
+        # job's lifetime, so no later step in the calling job sees the
+        # credentials. A client-restarted daemon (the daemon should never
+        # exit: idle timeout 0) would lack this environment and fall back to
+        # an uncached local build rather than a broken S3 backend.
+        # sccache treats a present-but-EMPTY SCCACHE_BUCKET as an S3
+        # configuration and refuses to start on it, so the variable must be
+        # unset - not empty - for the local disk cache fallback to engage
+        # (the fork-PR / unconfigured-secret path).
+        if [[ -n "${INPUT_SCCACHE_BUCKET:-${SCCACHE_BUCKET:-}}" ]]; then
+          export SCCACHE_BUCKET="${INPUT_SCCACHE_BUCKET:-${SCCACHE_BUCKET:-}}"
+        else
+          unset SCCACHE_BUCKET
+        fi
+        export SCCACHE_REGION="${SCCACHE_REGION:-us-east-1}" # the bucket's home region
+        export SCCACHE_S3_KEY_PREFIX="${SCCACHE_S3_KEY_PREFIX:-$GITHUB_REPOSITORY}" # scope cache to this repo
+        export SCCACHE_IDLE_TIMEOUT="${SCCACHE_IDLE_TIMEOUT:-0}" # don't let the daemon exit mid-compile
+        # Raised IPC frame limit: only the non-default client-side compile
+        # mode streams cached artifact bytes over the IPC channel; the default
+        # server-side mode does not. A guard, not load-bearing.
+        export SCCACHE_MAX_FRAME_LENGTH="${SCCACHE_MAX_FRAME_LENGTH:-2147483648}"
+        if [[ -n "$INPUT_SCCACHE_ACCESS_KEY_ID" ]]; then
+          export AWS_ACCESS_KEY_ID="$INPUT_SCCACHE_ACCESS_KEY_ID"
+          export AWS_SECRET_ACCESS_KEY="$INPUT_SCCACHE_SECRET_ACCESS_KEY"
+          unset AWS_SESSION_TOKEN
+        elif [[ -n "${SCCACHE_BUCKET:-}" && -z "${AWS_ACCESS_KEY_ID:-}" ]]; then
+          # Materialize whatever the ambient chain resolves (e.g. a private
+          # runner's instance role - sccache cannot consume pod-identity
+          # credentials directly). The CLI's exit status must be checked on
+          # the substitution itself: eval of its (empty) output would succeed
+          # even when the CLI failed. Non-fatal: with no credentials the probe
+          # below falls back to an uncached compile rather than failing.
+          if creds="$(aws configure export-credentials --format env 2>/dev/null)"; then
+            eval "$creds"
+          else
+            echo "::warning title=sccache::no AWS credentials resolved; compiling without the cache"
+          fi
+        fi
+
+        # The S3 backend is read when the server starts. Probe it by starting
+        # the server explicitly: only enable RUSTC_WRAPPER if the backend is
+        # actually reachable. If it isn't - missing S3 perms, a bucket outage,
+        # or a fork PR with no secrets - compile *uncached* rather than failing
+        # every rustc invocation (sccache treats a backend it can't read as
+        # fatal).
         sccache --stop-server >/dev/null 2>&1 || true
         if sccache --start-server; then
           echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
@@ -139,7 +189,7 @@ runs:
         fi
 
     - name: Setup cache
-      uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       with:
         save-if: ${{ inputs.save-cache }}
         shared-key: ${{ inputs.cache-key }}

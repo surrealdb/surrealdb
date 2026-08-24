@@ -93,11 +93,6 @@ jobs:
       # with the downstream's unreleased main.
       promotable: ${{ steps.branch.outputs.promotable }}
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
       - name: Check whether the downstream build is configured
         id: preflight
         env:
@@ -284,11 +279,6 @@ jobs:
           - platform: linux/arm64
             arch: arm64
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
       # Mint a short-lived, repo-scoped token for the downstream, check it out,
       # and colocate this engine inside it so the downstream Dockerfile can build
       # the engine from a path (engine-path) instead of fetching it.
@@ -301,7 +291,7 @@ jobs:
           repositories: ${{ secrets.DOWNSTREAM_REPO }}
 
       - name: Checkout downstream
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.repository_owner }}/${{ secrets.DOWNSTREAM_REPO }}
           ref: ${{ needs.preflight.outputs.sha }}
@@ -310,7 +300,7 @@ jobs:
           persist-credentials: false
 
       - name: Colocate engine source
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.engine-ref }}
           path: downstream/engine
@@ -327,7 +317,7 @@ jobs:
       # code it builds. Falls back to the built commit when no branch was
       # resolved (explicit downstream-sha override).
       - name: Checkout downstream CI tooling from the resolved branch
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.repository_owner }}/${{ secrets.DOWNSTREAM_REPO }}
           ref: ${{ inputs.downstream-branch || needs.preflight.outputs.sha }}
@@ -389,11 +379,6 @@ jobs:
           - platform: linux/arm64
             arch: arm64
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
       # Mint a short-lived, repo-scoped token for the downstream, check it out,
       # and colocate this engine inside it so the downstream Dockerfile can build
       # the engine from a path (engine-path) instead of fetching it.
@@ -406,7 +391,7 @@ jobs:
           repositories: ${{ secrets.DOWNSTREAM_REPO }}
 
       - name: Checkout downstream
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.repository_owner }}/${{ secrets.DOWNSTREAM_REPO }}
           ref: ${{ needs.preflight.outputs.sha }}
@@ -415,7 +400,7 @@ jobs:
           persist-credentials: false
 
       - name: Colocate engine source
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.engine-ref }}
           path: downstream/engine
@@ -432,7 +417,7 @@ jobs:
       # code it builds. Falls back to the built commit when no branch was
       # resolved (explicit downstream-sha override).
       - name: Checkout downstream CI tooling from the resolved branch
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ github.repository_owner }}/${{ secrets.DOWNSTREAM_REPO }}
           ref: ${{ inputs.downstream-branch || needs.preflight.outputs.sha }}
@@ -499,15 +484,10 @@ jobs:
           - name: dev
             suffix: -dev
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
       # Check out the engine repo so the shared ./.github/actions/test-docker-image
       # composite action is available on this runner.
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Ambient auth: the private runner's IAM instance role provides downstream
       # ECR credentials, so no configure-aws-credentials / static keys are
@@ -523,7 +503,7 @@ jobs:
             | docker login --username AWS --password-stdin "$REGISTRY"
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       # Scan + smoke-test the amd64 image BEFORE stitching the multi-arch rolling
       # manifest, so a vulnerable or non-booting image never becomes promotable.
@@ -600,11 +580,6 @@ jobs:
     # runner's ambient IAM role (no static keys). Label from a repo/org variable.
     runs-on: ${{ vars.RUNNER_AMD }}
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
       - name: Write downstream manifest
         env:
           ROLLING_BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}

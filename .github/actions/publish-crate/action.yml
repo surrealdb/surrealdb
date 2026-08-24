@@ -46,13 +46,12 @@ runs:
 
     # Real publish — cargo only, no release-plz and no forge/GitHub token.
     #
-    # Publishes to crates.io in dependency order with bounded retries and an
-    # idempotent skip, reproducing the only two behaviours release-plz gave us
-    # (transient-failure retries + skip-already-published) on top of cargo's own
-    # per-crate index-wait. `cargo publish -p <crate>` blocks until the crate is
-    # visible in the registry index before returning, so each dependent resolves
-    # its just-published dependency on the next iteration — that wait is what a
-    # bare `cargo publish --workspace` used to race. Only CARGO_REGISTRY_TOKEN is
+    # Publishes to crates.io in dependency order with bounded retries, an
+    # idempotent skip, and rate-limit-aware scheduling (see the scheduler
+    # comment in the script) on top of cargo's own per-crate index-wait.
+    # `cargo publish -p <crate>` blocks until the crate is visible in the
+    # registry index before returning, so each dependent resolves its
+    # just-published dependency when its turn comes. Only CARGO_REGISTRY_TOKEN is
     # required; no --git-token, no pull-requests scope, no PR-association calls.
     - name: Publish the crate
       if: ${{ inputs.publish == 'true' && inputs.nightly-release != 'true' }}
@@ -147,53 +146,235 @@ runs:
           printf '%s' "$meta" | jq -r --arg n "$1" '.packages[] | select(.name==$n) | .version'
         }
 
-        # Is <name>@<version> already on crates.io? Query the sparse index
-        # (authoritative and fast; `cargo search` is cache-stale). Path layout:
-        # 1|2-char names -> 1/ or 2/ dirs, 3-char -> 3/<c1>, else <c1c2>/<c3c4>.
-        # The index lowercases names.
-        is_published() {
-          local name ver p
-          name="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"; ver="$2"
+        # Sparse-index path for a crate name (the index is authoritative and
+        # fast; `cargo search` is cache-stale). Layout: 1|2-char names -> 1/ or
+        # 2/ dirs, 3-char -> 3/<c1>, else <c1c2>/<c3c4>. The index lowercases
+        # names.
+        index_path() {
+          local name; name="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
           case "${#name}" in
-            1) p="1/${name}" ;;
-            2) p="2/${name}" ;;
-            3) p="3/${name:0:1}/${name}" ;;
-            *) p="${name:0:2}/${name:2:2}/${name}" ;;
+            1) printf '1/%s' "$name" ;;
+            2) printf '2/%s' "$name" ;;
+            3) printf '3/%s/%s' "${name:0:1}" "$name" ;;
+            *) printf '%s/%s/%s' "${name:0:2}" "${name:2:2}" "$name" ;;
           esac
-          curl -fsSL "https://index.crates.io/${p}" 2>/dev/null \
-            | jq -e --arg v "$ver" 'select(.vers == $v)' >/dev/null 2>&1
         }
 
+        # Is <name>@<version> already on crates.io?
+        is_published() {
+          curl -fsSL "https://index.crates.io/$(index_path "$1")" 2>/dev/null \
+            | jq -e --arg v "$2" 'select(.vers == $v)' >/dev/null 2>&1
+        }
+
+        # Does the crate NAME exist on crates.io at all (any version)? This is
+        # what decides which rate-limit bucket a publish draws from. A
+        # transient index error misclassifies an existing name as new, which
+        # only affects scheduling priority, never correctness.
+        name_exists() {
+          curl -fsSL "https://index.crates.io/$(index_path "$1")" >/dev/null 2>&1
+        }
+
+        # ---- crates.io rate-limit-aware scheduling ------------------------
+        # crates.io meters publishes per account with two leaky buckets
+        # (https://crates.io/docs/rate-limits): NEW crate names (small burst,
+        # then roughly one every 10 minutes) and new versions of existing
+        # names (larger burst, then one per minute). A 429 response names the
+        # exact time the next token becomes available. The new-name refill is
+        # a server-side floor - a release introducing N new names cannot
+        # finish faster than that bucket refills, whatever the client does.
+        # What the scheduler guarantees is that nothing else queues behind
+        # that floor:
+        #   * every unpublished crate is classified new-name vs new-version
+        #     up front via the sparse index;
+        #   * crates publish in dependency order, but a drained bucket never
+        #     blocks crates that only need the other bucket;
+        #   * among ready crates, new names go first - they are the scarce
+        #     resource and unblock their dependents earliest;
+        #   * the job sleeps only when nothing is publishable, waking at the
+        #     earliest recorded lift/backoff time.
         MAX_ATTEMPTS=5
         BACKOFF=30
 
-        # Publish one crate: skip if already on crates.io, else cargo publish
-        # with bounded retries + backoff for transient failures (network, 429,
-        # 5xx, index-propagation timeout). "Already uploaded" (from a partial
-        # earlier run or a mid-retry race) counts as success — publishes are
-        # irreversible, so this idempotency is what makes re-runs safe.
-        publish_one() {
-          local c="$1" v a=1 out rc
+        declare -A VERSION CLASS STATE ATTEMPTS NOT_BEFORE DEPS
+        for c in "${ORDER[@]}"; do
+          STATE[$c]=pending; ATTEMPTS[$c]=0; NOT_BEFORE[$c]=0
+        done
+        # Dependency gating uses only edges between publishable members: a
+        # publish=false dep can never be published, and a crate depending on
+        # one could not be published at all - cargo itself rejects that.
+        while read -r d p; do
+          [ -n "$d" ] && [ -n "${STATE[$p]+x}" ] && [ -n "${STATE[$d]+x}" ] && DEPS[$p]+=" $d"
+        done <<< "$edges"
+
+        new_count=0
+        for c in "${ORDER[@]}"; do
           v="$(crate_version "$c")"
-          if [ -z "$v" ] || [ "$v" = "null" ]; then echo "::error::could not resolve version for ${c}"; return 1; fi
-          if is_published "$c" "$v"; then echo "skip ${c}@${v} (already on crates.io)"; return 0; fi
-          while :; do
-            echo "Publishing ${c}@${v} (attempt ${a}/${MAX_ATTEMPTS})"
-            out="$(cargo publish -p "$c" --no-verify 2>&1)"; rc=$?
-            printf '%s\n' "$out"
-            [ "$rc" -eq 0 ] && { echo "published ${c}@${v}"; return 0; }
-            if printf '%s' "$out" | grep -qiE 'already (uploaded|exists)|is already uploaded|already published'; then
-              echo "${c}@${v} already on crates.io — treating as success"; return 0
+          if [ -z "$v" ] || [ "$v" = "null" ]; then echo "::error::could not resolve version for ${c}"; exit 1; fi
+          VERSION[$c]="$v"
+          if is_published "$c" "$v"; then
+            echo "skip ${c}@${v} (already on crates.io)"
+            STATE[$c]=done
+          elif name_exists "$c"; then
+            CLASS[$c]=ver
+          else
+            CLASS[$c]=new; new_count=$((new_count + 1))
+          fi
+        done
+        if [ "$new_count" -gt 0 ]; then
+          echo "::notice::${new_count} crate(s) are new names on crates.io; the registry limits new-name publishes to roughly one every 10 minutes after a small burst (https://crates.io/docs/rate-limits), so this job may spend up to ~$(( new_count * 10 )) minutes waiting."
+        fi
+
+        # Wall-clock budget for waiting: the new-name bucket can demand ~10
+        # minutes per new name (plus slack for the version bucket and
+        # transient backoffs). Beyond that something is wrong - fail rather
+        # than spin against the registry for hours.
+        WAIT_BUDGET=$(( 1800 + new_count * 700 ))
+        waited=0
+
+        # Epochs before which each bucket is known to 429 (learned from
+        # responses; 0 = assumed open).
+        new_lift=0
+        ver_lift=0
+
+        # "Please try again after <RFC-1123 date> GMT and see ..."
+        parse_lift() {
+          local at
+          at="$(printf '%s' "$1" | grep -oE 'try again after [A-Za-z]+, [0-9]+ [A-Za-z]+ [0-9]+ [0-9:]+ GMT' | head -1 | sed 's/^try again after //')"
+          [ -n "$at" ] && date -u -d "$at" +%s 2>/dev/null
+        }
+
+        # One publish attempt for a ready crate. Return codes: 0 done (or
+        # already present - publishes are irreversible, so idempotency is what
+        # makes re-runs safe); 2 rate-limited (bucket lift recorded, does NOT
+        # consume an attempt); 3 transient failure (backoff recorded);
+        # 1 permanent failure (attempts exhausted).
+        try_publish() {
+          local c="$1" v="${VERSION[$1]}" out rc lift now
+          echo "Publishing ${c}@${v} (attempt $(( ATTEMPTS[$c] + 1 ))/${MAX_ATTEMPTS}, ${CLASS[$c]}-name bucket)"
+          out="$(cargo publish -p "$c" --no-verify 2>&1)"; rc=$?
+          printf '%s\n' "$out"
+          [ "$rc" -eq 0 ] && return 0
+          if printf '%s' "$out" | grep -qiE 'already (uploaded|exists)|is already uploaded|already published'; then
+            echo "${c}@${v} already on crates.io - treating as success"; return 0
+          fi
+          if is_published "$c" "$v"; then echo "${c}@${v} present - treating as success"; return 0; fi
+          if printf '%s' "$out" | grep -q '429 Too Many Requests'; then
+            now="$(date -u +%s)"
+            lift="$(parse_lift "$out")" || lift=$(( now + 60 ))
+            # Clamp: a stale or skewed lift must not stall the job - an early
+            # retry just 429s again and re-reads the next lift time.
+            [ "$lift" -le "$now" ] && lift=$(( now + 10 ))
+            [ "$lift" -gt $(( now + 900 )) ] && lift=$(( now + 900 ))
+            # When the response's wording names a bucket, trust it over our
+            # classification (they can disagree after an index read error) and
+            # CORRECT the crate's class to match - bucket_open and the wake
+            # computation gate on the class, so a stale class would keep this
+            # crate's effective lift at zero and turn the wait into a tight
+            # publish/429 retry loop against the drained bucket. Unrecognized
+            # 429 wording attributes the lift to the crate's CURRENT class
+            # without reclassifying: a wrong flip would stall the other
+            # bucket's crates behind a lift they do not need.
+            if printf '%s' "$out" | grep -q 'too many new crates'; then
+              new_lift="$lift"; CLASS[$c]=new
+            elif printf '%s' "$out" | grep -q 'too many versions'; then
+              ver_lift="$lift"; CLASS[$c]=ver
+            elif [[ "${CLASS[$c]}" == "new" ]]; then
+              new_lift="$lift"
+            else
+              ver_lift="$lift"
             fi
-            if is_published "$c" "$v"; then echo "${c}@${v} present after attempt ${a} — treating as success"; return 0; fi
-            if [ "$a" -ge "$MAX_ATTEMPTS" ]; then echo "::error::failed to publish ${c}@${v} after ${MAX_ATTEMPTS} attempts"; return 1; fi
-            echo "::warning::publish ${c}@${v} attempt ${a} failed; retrying in ${BACKOFF}s"
-            a=$((a + 1)); sleep "$BACKOFF"
-          done
+            # Plain log line, not a ::warning:: annotation: a rate-limit wait is
+            # the scheduler's expected, designed behaviour and recurs many times
+            # per run, so it belongs in the job log, not stamped on the run
+            # summary. A genuine failure (attempts/budget exhausted) still
+            # surfaces as an ::error:: below.
+            echo "crates.io rate limit while publishing ${c}@${v}; that bucket's next token arrives in $(( lift - now ))s"
+            return 2
+          fi
+          ATTEMPTS[$c]=$(( ATTEMPTS[$c] + 1 ))
+          if [ "${ATTEMPTS[$c]}" -ge "$MAX_ATTEMPTS" ]; then
+            echo "::error::failed to publish ${c}@${v} after ${MAX_ATTEMPTS} attempts"
+            return 1
+          fi
+          NOT_BEFORE[$c]=$(( $(date -u +%s) + BACKOFF ))
+          echo "::warning::publish ${c}@${v} attempt ${ATTEMPTS[$c]} failed; will retry after ${BACKOFF}s"
+          return 3
+        }
+
+        deps_done() {
+          local d
+          for d in ${DEPS[$1]:-}; do [ "${STATE[$d]}" = "done" ] || return 1; done
+          return 0
+        }
+
+        bucket_open() {
+          if [ "$1" = "new" ]; then [ "$2" -ge "$new_lift" ]; else [ "$2" -ge "$ver_lift" ]; fi
+        }
+
+        pending_left() {
+          local c
+          for c in "${ORDER[@]}"; do [ "${STATE[$c]}" = "pending" ] && return 0; done
+          return 1
         }
 
         echo "Publish order: ${ORDER[*]}"
-        for c in "${ORDER[@]}"; do
-          publish_one "$c" || exit 1
+        while pending_left; do
+          progressed=0
+          # New names first: they are the scarce resource. A drained bucket
+          # breaks out of its pass; the other pass still runs.
+          for pass in new ver; do
+            for c in "${ORDER[@]}"; do
+              [ "${STATE[$c]}" = "pending" ] || continue
+              [ "${CLASS[$c]}" = "$pass" ] || continue
+              now="$(date -u +%s)"
+              [ "$now" -ge "${NOT_BEFORE[$c]}" ] || continue
+              bucket_open "$pass" "$now" || break
+              deps_done "$c" || continue
+              try_publish "$c"; rc=$?
+              case "$rc" in
+                0) STATE[$c]=done; progressed=1 ;;
+                1) exit 1 ;;
+                2) break ;;
+                3) : ;;
+              esac
+            done
+          done
+          pending_left || break
+          [ "$progressed" -eq 1 ] && continue
+
+          # Nothing publishable right now: wake at the earliest time any
+          # ready crate could become eligible (its bucket lift or its own
+          # transient backoff, whichever is later).
+          now="$(date -u +%s)"; wake=""
+          for c in "${ORDER[@]}"; do
+            [ "${STATE[$c]}" = "pending" ] || continue
+            deps_done "$c" || continue
+            t="${NOT_BEFORE[$c]}"
+            if [ "${CLASS[$c]}" = "new" ]; then
+              [ "$new_lift" -gt "$t" ] && t="$new_lift"
+            else
+              [ "$ver_lift" -gt "$t" ] && t="$ver_lift"
+            fi
+            if [ -z "$wake" ] || [ "$t" -lt "$wake" ]; then wake="$t"; fi
+          done
+          # Topological order guarantees some pending crate is always ready
+          # (deps are publishable members and permanent failures exit above),
+          # so an empty wake means the graph bookkeeping is broken.
+          if [ -z "$wake" ]; then
+            echo "::error::internal scheduling error: pending crates but none can become eligible."
+            exit 1
+          fi
+          sleep_s=$(( wake - now + 5 ))
+          [ "$sleep_s" -lt 5 ] && sleep_s=5
+          [ "$sleep_s" -gt 900 ] && sleep_s=900
+          waited=$(( waited + sleep_s ))
+          if [ "$waited" -gt "$WAIT_BUDGET" ]; then
+            echo "::error::exceeded the publish wait budget (${WAIT_BUDGET}s) with crates still unpublished; giving up. See https://crates.io/docs/rate-limits."
+            exit 1
+          fi
+          left=0
+          for c in "${ORDER[@]}"; do [ "${STATE[$c]}" = "pending" ] && left=$((left + 1)); done
+          echo "waiting ${sleep_s}s for the next publish window (${left} crate(s) left)"
+          sleep "$sleep_s"
         done
         echo "All publishable crates are on crates.io."

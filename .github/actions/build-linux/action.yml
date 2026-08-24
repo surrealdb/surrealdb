@@ -35,6 +35,16 @@ inputs:
     description: 'Compile with release flag'
     required: false
     default: 'true'
+  cache-image:
+    description: >-
+      Full image reference (registry/repo:tag) for the buildx registry cache of
+      the builder image, read and written via ambient AWS credentials. Pull
+      access gives a warm cache; push access lets the cache persist across
+      runs; neither a failed import nor a rejected export blocks the build.
+      Empty keeps the cache local to the runner, which on ephemeral runners
+      means a cold builder build every run.
+    required: false
+    default: ''
 
 outputs:
   artifact-name:
@@ -56,31 +66,61 @@ runs:
         echo "folder=/tmp/surrealdb-builder/${tag}" >> $GITHUB_OUTPUT
 
     - name: Set up Buildx
-      uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+      uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
     - name: Setup artifact directory
       shell: bash
       run: mkdir -p ${{ steps.image.outputs.folder }}
 
-    - name: Restore cache artifact (if exists)
-      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-      continue-on-error: true
-      with:
-        name: surrealdb-builder-${{ steps.image.outputs.tag }}-${{ inputs.platform }}
-        path: ${{ steps.image.outputs.folder }}
+    # The cache is an optimization, never a gate: if the registry is
+    # unreachable (or the login fails), the build proceeds with a cold local
+    # cache instead of failing, so a registry outage cannot block a release
+    # build. Region and registry host are derived from the reference.
+    - name: Report a disabled builder cache
+      if: ${{ inputs.cache-image == '' }}
+      shell: bash
+      run: echo "::notice title=builder cache::cache-image is not configured; the builder image rebuilds from scratch on every run."
 
+    - name: Log in to the builder cache registry
+      id: cache
+      if: ${{ inputs.cache-image != '' }}
+      shell: bash
+      env:
+        CACHE_IMAGE: ${{ inputs.cache-image }}
+      run: |
+        set -euo pipefail
+        registry="${CACHE_IMAGE%%/*}"
+        region="$(printf '%s' "$registry" | cut -d. -f4)"
+        if aws ecr get-login-password --region "$region" 2>/dev/null \
+             | docker login --username AWS --password-stdin "$registry" >/dev/null 2>&1; then
+          echo "ref=${CACHE_IMAGE}" >> "$GITHUB_OUTPUT"
+        else
+          echo "::warning::Could not log in to ${registry} for the builder-image cache; building with a cold cache."
+          echo "ref=" >> "$GITHUB_OUTPUT"
+        fi
+
+    # image-manifest/oci-mediatypes: ECR rejects buildkit's default cache
+    # manifest format; the OCI form is required for a registry cache there.
+    # ignore-error on the export: a registry login can succeed while the role
+    # lacks push rights on the repo (GetAuthorizationToken is granted broadly),
+    # and buildkit otherwise fails the WHOLE build when the cache export is
+    # rejected at the end - the cache must degrade, never gate.
+    # mode=min exports the full layer set of this build: the `builder` target
+    # is a single self-contained stage, so mode=max has no extra intermediate
+    # stages to add. `load` streams the image straight into the local daemon
+    # for the `docker run` compile below.
     - name: Build & Push builder image
-      uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
+      uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
       id: build
       with:
         context: .
         platforms: linux/${{ inputs.platform }}
         file: ./docker/Dockerfile
         target: builder
-        cache-from: type=local,src=${{ steps.image.outputs.folder }}
-        cache-to: type=local,dest=${{ steps.image.outputs.folder }}
+        cache-from: ${{ steps.cache.outputs.ref != '' && format('type=registry,ref={0}', steps.cache.outputs.ref) || format('type=local,src={0}', steps.image.outputs.folder) }}
+        cache-to: ${{ steps.cache.outputs.ref != '' && format('type=registry,ref={0},mode=min,image-manifest=true,oci-mediatypes=true,ignore-error=true', steps.cache.outputs.ref) || format('type=local,dest={0}', steps.image.outputs.folder) }}
         push: false
-        outputs: type=docker,dest=${{ steps.image.outputs.folder }}/surrealdb-builder-${{ steps.image.outputs.tag }}-${{ inputs.platform }}
+        load: true
         tags: surrealdb-builder:${{ steps.image.outputs.tag }}-${{ inputs.platform }}
 
     - name: Output package versions
@@ -109,7 +149,6 @@ runs:
         set -x
 
         tag=$(echo ${{ github.ref_name }} | sed -e 's/[^a-zA-Z0-9]/-/g')
-        folder="/tmp/surrealdb-builder/${tag}"
 
         # Build
         extra_args=""
@@ -129,8 +168,6 @@ runs:
 
         # Builder entrypoint downloads ONNX Runtime in-container when ORT_DOWNLOAD_URL is set.
         ORT_DOWNLOAD_URL="https://github.com/supertone-inc/onnxruntime-build/releases/download/v${{ inputs.onnx-version }}/onnxruntime-linux-${{ steps.onnx.outputs.arch }}-static_lib-${{ inputs.onnx-version }}.tgz"
-
-        docker load -i ${folder}/surrealdb-builder-${tag}-${{ inputs.platform }}
 
         # Do not pass `-e RUSTFLAGS=` when unset: an empty RUSTFLAGS in the container
         # disables `[build] rustflags` from `.cargo/config.toml`.
@@ -162,7 +199,7 @@ runs:
 
     - name: Upload artifacts
       if: ${{ inputs.upload == 'true' }}
-      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: surreal-${{ inputs.name }}.linux-${{ inputs.platform }}
         path: |

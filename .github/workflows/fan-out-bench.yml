@@ -40,7 +40,7 @@ permissions:
 
 env:
   # sccache → S3 compile cache (read by setup-environment); fail-open if the
-  # backend is unreachable. Same block as ci.yml.
+  # backend is unreachable. Consumed by setup-environment's daemon-start step.
   SCCACHE_BUCKET: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
   SCCACHE_REGION: us-east-1
   SCCACHE_S3_KEY_PREFIX: ${{ github.repository }}
@@ -63,13 +63,8 @@ jobs:
         # measure against. #860 tracks that half.
         backend: [kv-mem, kv-rocksdb, kv-surrealkv]
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2 (Actions must be pinned by commit hash)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Actions must be pinned by commit hash)
 
       - name: Setup environment (toolchain + sccache + cache)
         uses: ./.github/actions/setup-environment
@@ -116,7 +111,7 @@ jobs:
 
       - name: Save raw output as artifact
         if: always()
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0 (Actions must be pinned by commit hash)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 (Actions must be pinned by commit hash)
         with:
           name: fan-out-${{ matrix.backend }}
           path: |

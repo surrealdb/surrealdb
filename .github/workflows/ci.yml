@@ -29,20 +29,6 @@ defaults:
 permissions:
   contents: read
 
-# sccache → S3 backend (a drop-in replacement for the former Depot Cache).
-# Set at workflow level so the values are in the environment when the
-# sccache-action daemon starts (it reads its backend config at start time).
-# Fork PRs have no secrets, so SCCACHE_BUCKET is empty there and sccache
-# transparently falls back to a local cache — builds still succeed, just
-# without the shared cache (the same behaviour forks had under Depot).
-env:
-  SCCACHE_BUCKET: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
-  SCCACHE_REGION: us-east-1
-  SCCACHE_S3_KEY_PREFIX: ${{ github.repository }} # scope cache to this repo
-  SCCACHE_IDLE_TIMEOUT: "0" # don't let the daemon exit mid-compile
-  AWS_ACCESS_KEY_ID: ${{ secrets.AMAZON_ACCESS_KEY }}
-  AWS_SECRET_ACCESS_KEY: ${{ secrets.AMAZON_SECRET_KEY }}
-
 jobs:
   # ----------------------------------------
   # Server build
@@ -66,11 +52,14 @@ jobs:
       SCCACHE_ERROR_LOG: ${{ (github.event_name == 'push' || github.event_name == 'merge_group') && '/tmp/sccache.log' || '' }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           # The WASI target is needed to pack the Surrealism demo module below.
           targets: wasm32-wasip2
           save-cache: ${{ github.ref == 'refs/heads/main' }}
@@ -98,7 +87,7 @@ jobs:
           -o ${{ github.workspace }}/demo.surli surrealism/demo
 
       - name: Upload Surrealism demo module
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # (Actions must be pinned by commit hash) v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # (Actions must be pinned by commit hash) v7.0.1
         with:
           name: demo-surli-${{ matrix.name }}
           path: demo.surli
@@ -109,14 +98,14 @@ jobs:
 
       - name: Upload sccache debug log
         if: ${{ always() && (github.event_name == 'push' || github.event_name == 'merge_group') }}
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # (Actions must be pinned by commit hash) v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # (Actions must be pinned by commit hash) v7.0.1
         with:
           name: sccache-debug-build-${{ matrix.name }}
           path: /tmp/sccache.log
           if-no-files-found: warn
 
       - name: Upload artifact
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # (Actions must be pinned by commit hash) v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # (Actions must be pinned by commit hash) v7.0.1
         with:
           name: surreal-${{ matrix.name }}
           path: target/${{ matrix.target }}/debug/surreal
@@ -130,7 +119,7 @@ jobs:
     runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Lookup the nightly toolchain
         id: info
@@ -141,6 +130,9 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           toolchain: ${{ steps.info.outputs.toolchain }}
           components: rustfmt
           save-cache: ${{ github.ref == 'refs/heads/main' }}
@@ -157,11 +149,14 @@ jobs:
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           components: clippy
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
@@ -180,11 +175,14 @@ jobs:
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           components: clippy
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
@@ -199,11 +197,14 @@ jobs:
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           toolchain: nightly
           components: miri
           save-cache: ${{ github.ref == 'refs/heads/main' }}
@@ -216,11 +217,14 @@ jobs:
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -235,11 +239,14 @@ jobs:
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -255,11 +262,14 @@ jobs:
       msrv: "1.95" # This should be updated if the MSRV is updated.
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           toolchain: ${{ env.msrv }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
@@ -274,11 +284,14 @@ jobs:
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           components: clippy
           targets: wasm32-unknown-unknown
           save-cache: ${{ github.ref == 'refs/heads/main' }}
@@ -296,11 +309,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           targets: wasm32-unknown-unknown
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
@@ -316,11 +332,14 @@ jobs:
     runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           enable-sccache: "false"
 
@@ -335,11 +354,14 @@ jobs:
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -357,11 +379,14 @@ jobs:
     if: github.ref == 'refs/heads/main'
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           enable-sccache: "false"
 
@@ -379,11 +404,14 @@ jobs:
     runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           enable-sccache: "false"
 
@@ -401,10 +429,18 @@ jobs:
     runs-on: ubuntu-latest-4-cores
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
+        with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+          # This job only runs `cargo package --no-verify`, which compiles
+          # nothing, so sccache would never be exercised (like the other
+          # no-compile jobs above).
+          enable-sccache: "false"
 
       # Catches PRs that change a published crate (e.g. surrealism, surrealml)
       # without bumping its version, so it's surfaced at review time instead of
@@ -427,11 +463,14 @@ jobs:
         arch: ${{ (github.event_name == 'merge_group' || github.event_name == 'push') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -462,7 +501,7 @@ jobs:
         arch: ${{ (github.event_name == 'merge_group' || github.event_name == 'push') && fromJSON('["arm","amd"]') || fromJSON('["arm"]') }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Test workspace
         uses: ./.github/actions/test-workspace
@@ -483,11 +522,14 @@ jobs:
         engine: [mem, rocksdb, surrealkv, tikv]
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           cache-key: kvs
 
@@ -513,11 +555,14 @@ jobs:
     runs-on: runner-arm-4-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build local
@@ -537,11 +582,14 @@ jobs:
         engine: [any, ws, http, mem, rocksdb, surrealkv, tikv]
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           # Engine-independent deps (see kvs-engines) — one shared cache key.
           cache-key: sdk
@@ -575,11 +623,14 @@ jobs:
         engine: ${{ github.event_name == 'push' && fromJSON('["mem", "surrealkv", "rocksdb", "tikv"]') || fromJSON('["mem", "surrealkv", "rocksdb"]') }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           workspaces: language-tests
           # Engine-independent deps (see kvs-engines) — one shared cache key.
@@ -607,7 +658,7 @@ jobs:
 
       - name: Upload language test coverage to Codecov
         if: matrix.engine == 'mem' && matrix.arch == 'arm'
-        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # (Actions must be pinned by commit hash) v6.0.0
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # (Actions must be pinned by commit hash) v7.0.0
         with:
           files: language-tests-lcov.info
           fail_ci_if_error: false
@@ -630,11 +681,14 @@ jobs:
         engine: [surrealkv, rocksdb]
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           # Both workspaces are cached: `language-tests` for the test harness,
           # and the root workspace because the final `..` hop builds the
@@ -657,7 +711,7 @@ jobs:
           echo "chain=$chain" >> "$GITHUB_OUTPUT"
 
       - name: Cache upgrade binaries
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # (Actions must be pinned by commit hash) v4.2.3
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # (Actions must be pinned by commit hash) v6.1.0
         with:
           # Pre-built surreal-vX.Y.Z tarballs from download.surrealdb.com.
           # Release tarballs are immutable, so stale-key restores are safe.
@@ -685,11 +739,14 @@ jobs:
       RUSTFLAGS: -D warnings --cfg tokio_unstable
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Check tokio-console feature
@@ -709,11 +766,14 @@ jobs:
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           workspaces: language-tests
           cache-key: lang-bench
@@ -731,7 +791,7 @@ jobs:
     needs: build
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download server binary
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -785,11 +845,14 @@ jobs:
     needs: build
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -842,11 +905,14 @@ jobs:
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           # The addon is a release build into its own target triple directory,
           # so it shares nothing with the debug-profile jobs.
@@ -874,11 +940,14 @@ jobs:
     runs-on: runner-arm-16-cores${{ github.event_name == 'pull_request' && '-spot' || '' }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
+          sccache-bucket: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+          sccache-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          sccache-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
           targets: wasm32-unknown-unknown
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           # The module is a release build into its own target triple directory,

@@ -36,7 +36,7 @@ env:
   MARKER: "<!-- lang-bench-quick -->"
   RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
   # sccache → S3 compile cache (read by setup-environment); fail-open if the
-  # backend is unreachable. Same block as ci.yml.
+  # backend is unreachable. Consumed by setup-environment's daemon-start step.
   SCCACHE_BUCKET: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
   SCCACHE_REGION: us-east-1
   SCCACHE_S3_KEY_PREFIX: ${{ github.repository }}
@@ -54,7 +54,7 @@ jobs:
       !contains(github.event.pull_request.labels.*.name, 'benchmark')
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Post instructions comment
         run: |
@@ -76,7 +76,7 @@ jobs:
        contains(github.event.pull_request.labels.*.name, 'benchmark'))
     steps:
       - name: Checkout PR head
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Benchmark the PR's own commit (not the merge ref), so the comparison
           # is this branch's code vs nightly `main`.

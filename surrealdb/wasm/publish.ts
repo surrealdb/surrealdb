@@ -19,6 +19,11 @@ const { values } = parseArgs({
 		// repository, so the caller decides whether to ask for it.
 		provenance: { type: "boolean", default: false },
 		channel: { type: "string" },
+		// The release pipeline's single "this release owns the public `latest`
+		// pointer" decision (prepare-vars.outputs.latest), propagated so npm's
+		// `latest` tracks the same version as latest.txt and the GitHub release
+		// rather than being re-derived here.
+		latest: { type: "boolean", default: false },
 	},
 });
 
@@ -77,44 +82,20 @@ async function isPublished(pkgName: string, pkgVersion: string): Promise<boolean
 	}
 }
 
-/**
- * Warn when `latest` does not point where this channel's releases should leave
- * it.
- *
- * npm points `latest` at the FIRST version a package ever publishes whatever
- * `--tag` asked for, so a package whose first release was a prerelease leaves
- * `npm install <pkg>` fetching that prerelease forever — including after newer
- * ones ship under `beta`. Nothing here can move the tag (trusted publishing
- * mints a token for the publish alone), so this reports it for a human to
- * correct with `npm dist-tag`.
- */
-async function warnOnMisplacedLatest(name: string): Promise<void> {
-	try {
-		const res = await fetch(`https://registry.npmjs.org/${name.replace("/", "%2F")}`, {
-			headers: { accept: "application/vnd.npm.install-v1+json" },
-		});
-		if (!res.ok) return;
-		const doc = (await res.json()) as { "dist-tags"?: Record<string, string> };
-		const latest = doc["dist-tags"]?.latest;
-		if (latest && /-/.test(latest)) {
-			console.warn(
-				`⚠️ ${name}'s \`latest\` tag points at the prerelease ${latest}, so ` +
-					`\`npm install ${name}\` resolves to it. Point \`latest\` at a stable ` +
-					`release: npm dist-tag add ${name}@<stable> latest`,
-			);
-		}
-	} catch {
-		// A registry hiccup must not fail a publish that has already succeeded.
-	}
-}
-
 const version = process.env.SURREAL_VERSION || (await workspaceVersion());
 const pkg = await packageFile.json();
 const { name } = pkg;
 
-// A prerelease publishes under a tag named after its label (`3.1.0-beta.4` ->
-// `beta`), so only a stable version can ever move `latest`.
-const channel = values.channel ?? version.match(/-([0-9A-Za-z]+)/)?.[1] ?? "latest";
+// The dist-tag `npm install <pkg>` resolves this to. `--latest` is the release
+// pipeline's single is-this-the-latest decision (the same one behind latest.txt
+// and the GitHub release), so npm never disagrees with them: when set, this
+// version owns `latest`; otherwise a pre-release ships under its channel label
+// and a non-latest stable under a `v<major>.<minor>` maintenance tag, so neither
+// can displace `latest`. An explicit --channel overrides.
+const label = version.match(/-([0-9A-Za-z]+)/)?.[1];
+const channel =
+	values.channel ??
+	(values.latest ? "latest" : (label ?? `v${version.split(".").slice(0, 2).join(".")}`));
 
 console.log(`✨ Publishing ${name} as version ${version} (tag ${channel})`);
 
@@ -182,10 +163,6 @@ const publishCode = await Bun.spawn(publishCmd, {
 if (publishCode !== 0 && !values["dry-run"] && (await isPublished(name, version))) {
 	console.log(`✅ ${name}@${version} is already on the registry — treating publish as success.`);
 	process.exit(0);
-}
-
-if (publishCode === 0 && !values["dry-run"]) {
-	await warnOnMisplacedLatest(name);
 }
 
 process.exit(publishCode);
