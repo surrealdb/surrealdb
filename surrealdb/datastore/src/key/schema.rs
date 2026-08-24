@@ -64,6 +64,22 @@ keyspace! {
 		var       Bytes = Cow<'k, [u8]>;
 	}
 
+	/// A version bootstrap that has begun but has not yet stamped `!v`, holding
+	/// the major version it set out to stamp.
+	///
+	/// Written between the two transactions that create a datastore, so finding
+	/// it *while `!v` is absent* means the store's contents were written by a
+	/// versioned build whose bootstrap was interrupted, not by a build that
+	/// predates `!v`. Those two states are otherwise identical on disk, and only
+	/// the second may be refused as out of date. Alongside a stamped `!v` it is
+	/// inert residue — two nodes bootstrapping the same empty datastore can each
+	/// write it, and whichever stamps second finds nothing left to retire.
+	///
+	/// Sorts before `!v`, and so before the range the emptiness probe in
+	/// `get_version` scans, which is what keeps the sentinel itself from
+	/// counting as the data it exists to explain.
+	bootstrap = ["!bv"] => crate::version::MajorVersion;
+
 	/// Storage format version. Sits outside the `/`-rooted keyspace and so sorts
 	/// before all data, which is what lets a version probe read it without
 	/// knowing whether anything else exists yet.

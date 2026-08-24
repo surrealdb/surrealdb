@@ -4,6 +4,7 @@ SurrealDB keyspace
 Every route, the generated type that addresses it, and the value it stores.
 Generated from the `keyspace!` schema; do not edit by hand.
 
+!bv                                                                                                      BootstrapKey ->  crate::version::MajorVersion
 !v                                                                                                         VersionKey ->  crate::version::MajorVersion
 /                                                                                                            RootRoot ->  (subtree)
 /!vs                                                                                                StorageVersionKey ->  crate::version::StorageVersion

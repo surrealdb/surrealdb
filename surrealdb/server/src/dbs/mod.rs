@@ -25,6 +25,14 @@ use crate::core::dbs::Session;
 
 const TARGET: &str = "surreal::dbs";
 
+/// How often a startup operation that is still retrying reports that it is
+/// still going.
+///
+/// The cadence is on the log, not on the retries: attempts keep to their own
+/// back-off, and one failure in every interval is reported at `info` so the
+/// wait is visible without `debug` logging turned on.
+const STARTUP_RETRY_LOG_INTERVAL: Duration = Duration::from_secs(5);
+
 #[derive(Args, Debug)]
 pub struct StartCommandDbsOptions {
 	#[arg(help = "Whether strict mode is enabled on this database instance")]
@@ -710,6 +718,7 @@ where
 {
 	let start = Instant::now();
 	let mut attempt = 0;
+	let mut last_reported = start;
 
 	loop {
 		attempt += 1;
@@ -746,13 +755,29 @@ where
 					));
 				}
 
-				debug!(
-					target: TARGET,
-					operation = operation_name,
-					attempt = attempt,
-					error = %e,
-					"Operation failed, retrying..."
-				);
+				// The first failure always reports, and one more per interval
+				// after that, so an operator watching a start that is waiting on
+				// storage sees it without the log scaling with the retry rate.
+				if attempt == 1 || last_reported.elapsed() >= STARTUP_RETRY_LOG_INTERVAL {
+					last_reported = Instant::now();
+					info!(
+						target: TARGET,
+						operation = operation_name,
+						attempt = attempt,
+						elapsed = ?elapsed,
+						budget = ?timeout_duration,
+						error = %e,
+						"Operation failed, still retrying within the startup budget"
+					);
+				} else {
+					debug!(
+						target: TARGET,
+						operation = operation_name,
+						attempt = attempt,
+						error = %e,
+						"Operation failed, retrying..."
+					);
+				}
 
 				// Exponential backoff with jitter: 100ms, 200ms, 400ms, 800ms, 1600ms, capped at 5s
 				// Jitter adds randomness (0.5 to 1.5x) to prevent thundering herd
@@ -786,8 +811,14 @@ where
 /// can resolve on its own.
 fn is_permanent_storage_error(e: &anyhow::Error) -> bool {
 	let message = e.to_string();
-	// `OutdatedStorageVersion` and `MigratedBeyondStorageVersion`.
-	message.contains("out-of-date") || message.contains("cannot be read by this one")
+	// `OutdatedStorageVersion`, `MigratedBeyondStorageVersion` and
+	// `InvalidStorageVersion` respectively. The last reaches startup because the
+	// version bootstrap declines to retry a marker it cannot decode; retrying it
+	// here would spend the budget and then report a timeout, which names none of
+	// what an operator has to act on.
+	message.contains("out-of-date")
+		|| message.contains("cannot be read by this one")
+		|| message.contains("invalid storage version")
 }
 
 #[instrument(level = "trace", target = "surreal::dbs", skip_all)]
@@ -875,8 +906,15 @@ pub async fn init<C: TransactionBuilderFactory>(
 	let config = ConfigMap::from_env();
 	// Parse and setup the desired kv datastore
 	let builder = Datastore::builder()
-		// The datastore starts its own maintenance tasks from these.
+		// The cadences the maintenance tasks run at, once this function starts
+		// them below.
 		.with_engine_options(opt.engine)
+		// Started by hand after `check_version`, not at construction. Every one
+		// of these tasks writes, and a write that lands before the version key
+		// does makes a datastore this process just created look like one written
+		// before that key existed — which `check_version` is obliged to refuse,
+		// permanently, on this and every later start.
+		.without_maintenance_tasks()
 		.with_config(config)
 		// Mirror the tokio runtime worker count the server built itself
 		// with (see `cnf::RUNTIME_WORKER_THREADS`) into the datastore
@@ -966,6 +1004,9 @@ pub async fn init<C: TransactionBuilderFactory>(
 		dbs.insert_node().await
 	})
 	.await?;
+	// The version is stamped and this node is registered, so the maintenance
+	// tasks may start writing.
+	dbs.start_maintenance_tasks();
 	spawn_first_node_maintenance_pass(&dbs, &opt.engine, canceller);
 	// All ok
 	Ok((dbs, recv, router_state, pending_startup))
@@ -974,11 +1015,13 @@ pub async fn init<C: TransactionBuilderFactory>(
 /// Starts the first peer-expiry and archived-node cleanup pass in the
 /// background.
 ///
-/// Ordering is the whole point of running this from here rather than from the
-/// maintenance scheduler, which the datastore starts at construction time:
+/// Ordering is the whole point of running this from here rather than leaving it
+/// to the maintenance scheduler's own cadence:
 ///
 /// - It runs after `check_version`, so a pass can never commit catalog mutations to a datastore
-///   whose version validation goes on to refuse startup.
+///   whose version validation goes on to refuse startup. The scheduler is held back for the same
+///   reason (see the `without_maintenance_tasks` builder call in `init`), but this pass has to be
+///   ordered explicitly because it does not wait for the first tick.
 /// - It runs after this node's own `insert_node`, so the id this process is about to serve under is
 ///   already active when the pass takes its snapshot. A node id that is stable across restarts
 ///   would otherwise be visible to an earlier pass as its previous incarnation's stale or archived
@@ -1211,6 +1254,51 @@ mod tests {
 
 		assert_eq!(err.to_string(), "permanent");
 		assert_eq!(attempts.load(Ordering::SeqCst), 1);
+	}
+
+	/// Every storage-state error the version bootstrap can raise is recognised
+	/// as permanent by the server's own classifier.
+	///
+	/// The classifier matches rendered text, because these cross the core
+	/// boundary as `anyhow::Error` and the type is not nameable here. That makes
+	/// it drift silently when a variant is reworded or a new one starts reaching
+	/// startup, so the fixtures are the real errors rather than copies of their
+	/// wording: a reword that breaks the match breaks this too.
+	#[test]
+	fn every_storage_state_error_is_classified_permanent() {
+		use surrealdb_datastore::DatastoreError;
+
+		for error in [
+			DatastoreError::InvalidStorageVersion,
+			DatastoreError::OutdatedStorageVersion {
+				expected: 3,
+				actual: 1,
+			},
+			DatastoreError::MigratedBeyondStorageVersion {
+				stored: "3.4.0".to_string(),
+				running: "3.3.0".to_string(),
+				migrations: "2".to_string(),
+			},
+		] {
+			let rendered = error.to_string();
+			assert!(
+				is_permanent_storage_error(&anyhow::Error::new(error)),
+				"a permanent storage-state error would be retried: {rendered}"
+			);
+		}
+	}
+
+	/// A migration another node is still applying is the one startup condition a
+	/// retry resolves on its own, so it must stay retryable.
+	#[test]
+	fn a_pending_migration_is_not_classified_permanent() {
+		use surrealdb_datastore::DatastoreError;
+
+		assert!(!is_permanent_storage_error(&anyhow::Error::new(
+			DatastoreError::MigrationTimedOut {
+				migrations: "2".to_string(),
+			}
+		)));
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
@@ -1889,9 +1977,44 @@ mod tests {
 		Ok((node_key, nlq_key))
 	}
 
+	/// Leaves a datastore at `path` in the state a version bootstrap that was
+	/// interrupted before it stamped `!v` leaves behind: the bootstrap sentinel,
+	/// and a node row standing in for the maintenance write that used to reach
+	/// storage first.
+	///
+	/// Written by hand rather than by interrupting a real bootstrap because the
+	/// injection registry the core tests use is a test-only build of the
+	/// datastore crate; what matters here is that `init` recovers the state, and
+	/// the core tests are what pin that the state is the one the bootstrap
+	/// actually produces.
+	#[cfg(feature = "storage-rocksdb")]
+	async fn seed_interrupted_bootstrap(path: &str) -> Result<()> {
+		use surrealdb_core::dbs::node::{Node, Timestamp};
+		use surrealdb_datastore::TransactionType;
+		use surrealdb_datastore::key::schema::BootstrapKey;
+		use surrealdb_datastore::version::MajorVersion;
+		use uuid::Uuid;
+
+		let seed = Datastore::builder().without_maintenance_tasks().build_with_path(path).await?;
+		let txn = seed.transaction(TransactionType::Write).await?;
+		txn.set_key(&BootstrapKey {}, &MajorVersion::latest()).await?;
+		let peer = Uuid::new_v4();
+		txn.set_key(
+			&NodeKey {
+				nd: peer,
+			},
+			&Node::new(peer, Timestamp::default(), false),
+		)
+		.await?;
+		txn.commit().await?;
+		// Release the storage engine's lock before the caller reopens the path.
+		seed.shutdown().await?;
+		Ok(())
+	}
+
 	/// A server config for `path` with both node-maintenance intervals set to
 	/// `interval`, which is what decides whether the node jobs run at all.
-	#[cfg(feature = "storage-rocksdb")]
+	#[cfg(any(feature = "storage-rocksdb", feature = "storage-mem"))]
 	fn node_maintenance_config(path: String, interval: Duration) -> Result<Config> {
 		use surrealdb_core::options::EngineOptions;
 
@@ -2011,6 +2134,84 @@ mod tests {
 		};
 		assert!(!node, "the first cleanup pass left the archived node behind");
 		assert!(!nlq, "the first cleanup pass left the archived node's live query behind");
+
+		canceller.cancel();
+		dbs.shutdown().await?;
+		Ok(())
+	}
+
+	/// `init` starts the maintenance schedule itself, because it builds the
+	/// datastore without one.
+	///
+	/// Every maintenance task writes — the node-membership refresh blindly
+	/// upserts this node's row, every leased job writes its lease — and a write
+	/// that reaches storage before `check_version` stamps the version key makes
+	/// a datastore this process just created indistinguishable from one written
+	/// before that key existed, which `check_version` then refuses as out of
+	/// date on this and every later start. Deferring the schedule is what keeps
+	/// that ordering structural; starting it here is the other half, and
+	/// dropping it would leave a server with no compaction, no reclaim and no
+	/// heartbeat while everything else about startup looked healthy.
+	#[cfg(feature = "storage-mem")]
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn init_starts_the_maintenance_schedule_after_the_version_gate() -> Result<()> {
+		use surrealdb_core::CommunityComposer;
+		use surrealdb_datastore::version::MajorVersion;
+		use surrealdb_observe::NoopObserver;
+
+		let dbs_opts = TestCli::try_parse_from(["surrealdb"])?.dbs;
+		let config = node_maintenance_config("memory".to_string(), Duration::from_secs(3600))?;
+		let canceller = CancellationToken::new();
+		let (dbs, _recv, _router_state, _pending) =
+			init(CommunityComposer(), &config, canceller.clone(), Arc::new(NoopObserver), dbs_opts)
+				.await?;
+
+		assert!(
+			dbs.maintenance_tasks_running(),
+			"init returned a datastore with no maintenance tasks"
+		);
+		// And the gate they were held for did its job: a datastore this start
+		// created is stamped at this build, not read as pre-versioning storage.
+		assert_eq!(dbs.get_version().await?, (MajorVersion::latest(), false));
+
+		canceller.cancel();
+		dbs.shutdown().await?;
+		Ok(())
+	}
+	/// A volume whose first boot was interrupted between claiming the datastore
+	/// and stamping it starts, rather than being refused for the life of the
+	/// volume.
+	///
+	/// Run against a persistent backend and through a genuine reopen, because
+	/// that is the shape of the failure: the first process wrote and died, and
+	/// every later process has only the bytes to go on. Without the sentinel
+	/// those bytes read as storage from before `!v` existed, and `init` commits
+	/// `!v = 1` and refuses — permanently, since the refusal is a permanent
+	/// error and the stamp it read is now on disk.
+	#[cfg(feature = "storage-rocksdb")]
+	#[test(tokio::test(flavor = "multi_thread"))]
+	#[serial]
+	async fn init_completes_a_bootstrap_a_previous_boot_left_unfinished() -> Result<()> {
+		use surrealdb_core::CommunityComposer;
+		use surrealdb_datastore::version::MajorVersion;
+		use surrealdb_observe::NoopObserver;
+
+		let dir = tempfile::tempdir()?;
+		let path = format!("rocksdb:{}", dir.path().join("store").display());
+		seed_interrupted_bootstrap(&path).await?;
+
+		let dbs_opts = TestCli::try_parse_from(["surrealdb"])?.dbs;
+		let config = node_maintenance_config(path, Duration::from_secs(3600))?;
+		let canceller = CancellationToken::new();
+		let (dbs, _recv, _router_state, _pending) =
+			init(CommunityComposer(), &config, canceller.clone(), Arc::new(NoopObserver), dbs_opts)
+				.await?;
+
+		assert_eq!(
+			dbs.get_version().await?,
+			(MajorVersion::latest(), false),
+			"the interrupted bootstrap was not completed at this build's version"
+		);
 
 		canceller.cancel();
 		dbs.shutdown().await?;

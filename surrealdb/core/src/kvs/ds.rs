@@ -85,10 +85,10 @@ use crate::idx::trees::store::IndexStores;
 use crate::key::AnyRange;
 use crate::key::reclaim::{Expunge, ReclaimKind, ReclaimState};
 use crate::key::schema::{
-	DbRoot, IdxRoot, IndexCompactionIxPrefix, IndexCompactionKey, IndexCompactionPrefix,
-	MigrationKey, MigrationPrefix, NodeKey, NodeLiveQueryKey, NodeLiveQueryPrefix, NsRoot,
-	ReclaimKey, ReclaimPrefix, SessionKey, SessionPrefix, StorageVersionKey, SubscriptionKey,
-	VersionHistoryPrefix, VersionKey,
+	BootstrapKey, DbRoot, IdxRoot, IndexCompactionIxPrefix, IndexCompactionKey,
+	IndexCompactionPrefix, MigrationKey, MigrationPrefix, NodeKey, NodeLiveQueryKey,
+	NodeLiveQueryPrefix, NsRoot, ReclaimKey, ReclaimPrefix, SessionKey, SessionPrefix,
+	StorageVersionKey, SubscriptionKey, VersionHistoryPrefix, VersionKey,
 };
 use crate::key::{KVKey, KVKeyDecode, KVSubspace, KVValue, Key, KeyRange, RawRange, Resumable};
 use crate::kvs::cache::ds::DatastoreCache;
@@ -98,13 +98,17 @@ use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
 use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 #[cfg(test)]
-use crate::kvs::testing::{RetryableConflictSite, maybe_inject_retryable_conflict};
+use crate::kvs::testing::{
+	NonRetryableErrorSite, RetryableConflictSite, maybe_inject_non_retryable_error,
+	maybe_inject_retryable_conflict,
+};
 use crate::kvs::{
 	DatastoreError, Direction, NORMAL_BATCH_SIZE, TransactionFactory,
 	is_retryable_transaction_conflict,
 };
 use crate::lq::LiveQueryRouter;
 use crate::observe::ExecutionObserver;
+use crate::options::EngineOptions;
 use crate::sql::Ast;
 #[cfg(feature = "surrealism")]
 use crate::surrealism::cache::SurrealismCache;
@@ -134,6 +138,46 @@ const NODE_DELETE_TIMEOUT: Duration = Duration::from_secs(60);
 /// handles are dropped and shutdown proceeds; the abandoned pass then has its
 /// commits refused, which is the same outcome as a crash at that instant.
 const MAINTENANCE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long [`Datastore::retry_bootstrap`] waits for storage to become able to
+/// serve the version bootstrap before giving up.
+///
+/// Sized to outlast the cluster formation of a distributed backend, which is
+/// the condition it exists to wait out. The server's own
+/// `SURREAL_STARTUP_OPERATION_TIMEOUT` is a shorter ceiling by default and is
+/// the knob an operator reaches for; this bound only stops an embedder that has
+/// no such ceiling from waiting forever.
+const BOOTSTRAP_RETRY_BUDGET: Duration = Duration::from_secs(120);
+
+/// How long one bootstrap attempt may run before it is abandoned and retried.
+const BOOTSTRAP_RETRY_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The gap before the first bootstrap retry, doubled on each further attempt up
+/// to [`BOOTSTRAP_RETRY_MAX_BACKOFF`].
+const BOOTSTRAP_RETRY_MIN_BACKOFF: Duration = Duration::from_millis(100);
+
+/// The longest gap between two bootstrap attempts.
+const BOOTSTRAP_RETRY_MAX_BACKOFF: Duration = Duration::from_secs(5);
+
+/// How many times the back-off may double, which is as many as it takes to
+/// reach [`BOOTSTRAP_RETRY_MAX_BACKOFF`] from
+/// [`BOOTSTRAP_RETRY_MIN_BACKOFF`].
+const BOOTSTRAP_RETRY_MAX_DOUBLINGS: u32 = 6;
+
+// Capping the exponent is only sound while the cap still reaches the ceiling:
+// stop short of it and the back-off would silently settle below its documented
+// maximum if either bound were retuned.
+const _: () = assert!(
+	BOOTSTRAP_RETRY_MIN_BACKOFF.as_millis() << BOOTSTRAP_RETRY_MAX_DOUBLINGS
+		>= BOOTSTRAP_RETRY_MAX_BACKOFF.as_millis(),
+	"the bootstrap back-off cannot double its way up to its own ceiling"
+);
+
+/// How often a bootstrap that is still retrying reports that it is still going.
+///
+/// The cadence is on the log, not on the retries: attempts run as fast as the
+/// back-off allows, and one in every interval is reported.
+const BOOTSTRAP_RETRY_LOG_INTERVAL: Duration = Duration::from_secs(5);
 
 /// The role assigned to the initial user created when starting the server with
 /// credentials for the first time
@@ -240,15 +284,20 @@ pub struct Datastore {
 	/// Cancellation for this datastore's own background work, tripped by
 	/// [`Self::shutdown`].
 	shutdown: CancellationToken,
-	/// Handles for the maintenance tasks the builder started for this
-	/// datastore, so [`Self::shutdown`] can wait for them to stop.
+	/// Handles for this datastore's maintenance tasks, so [`Self::shutdown`]
+	/// can wait for them to stop.
 	///
 	/// A datastore is not a working database without them — index compaction,
 	/// tombstone reclaim, changefeed GC, index-build recovery and the cluster
-	/// heartbeat all live there — so they are started at construction rather
-	/// than left to the embedder. `None` only for a datastore built with
-	/// [`Builder::without_maintenance_tasks`](self::builder::Builder::without_maintenance_tasks).
+	/// heartbeat all live there — so the builder starts them rather than
+	/// leaving it to the embedder. `None` for a datastore built with
+	/// [`Builder::without_maintenance_tasks`](self::builder::Builder::without_maintenance_tasks),
+	/// until [`Self::start_maintenance_tasks`] is called on it.
 	maintenance: parking_lot::Mutex<Option<crate::kvs::tasks::Tasks>>,
+	/// The cadences the maintenance tasks run at, kept so
+	/// [`Self::start_maintenance_tasks`] starts them on the same schedule the
+	/// builder was given rather than on whatever its caller passes in.
+	engine_options: EngineOptions,
 	/// Serialises [`Self::shutdown`] across the holders of this datastore.
 	///
 	/// The sequence has to run start to finish for exactly one caller at a time:
@@ -529,7 +578,13 @@ impl Datastore {
 	/// ```
 	/// The datastore is returned shared, because it starts background
 	/// maintenance tasks that hold a [`Weak`](std::sync::Weak) reference to it.
-	/// Use [`Builder::without_maintenance_tasks`] for a quiescent datastore.
+	/// Because those tasks write, this also settles the datastore's storage
+	/// version before any of them starts, so the datastore is handed back
+	/// already stamped; [`Self::check_version`] is still what checks that this
+	/// build can read what was found, and what runs any migrations owed.
+	///
+	/// Use [`Builder::without_maintenance_tasks`] for a quiescent datastore, or
+	/// for one whose tasks start later under the caller's own ordering.
 	pub async fn new(path: &str) -> Result<Arc<Self>> {
 		Builder::new().build_with_path(path).await
 	}
@@ -562,13 +617,14 @@ impl Datastore {
 	///
 	/// The restarted datastore carries **no** maintenance tasks: it is returned
 	/// unshared, so there is nothing for a task to hold a `Weak` to. Callers
-	/// that need them start them with
-	/// [`tasks::init`](crate::kvs::tasks::init) once they have shared it.
+	/// that need them call [`Self::start_maintenance_tasks`] once they have
+	/// shared it.
 	pub fn restart(self) -> Self {
 		self.buckets.clear();
 		Self {
 			shutdown: CancellationToken::new(),
 			maintenance: parking_lot::Mutex::new(None),
+			engine_options: self.engine_options,
 			shutdown_lock: tokio::sync::Mutex::new(()),
 			id: self.id,
 			auth_enabled: self.auth_enabled,
@@ -627,6 +683,7 @@ impl Datastore {
 			// A fork is unshared, so it carries no maintenance tasks.
 			shutdown: CancellationToken::new(),
 			maintenance: parking_lot::Mutex::new(None),
+			engine_options: self.engine_options,
 			shutdown_lock: tokio::sync::Mutex::new(()),
 			id,
 			auth_enabled: self.auth_enabled,
@@ -854,8 +911,7 @@ impl Datastore {
 	/// recreate, resetting an allocator that has already issued values.
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn check_version(&self) -> Result<(MajorVersion, bool)> {
-		// Retry because concurrent instances may conflict when writing the version key
-		let (version, is_new) = Self::retry("Check version", || self.get_version()).await?;
+		let (version, is_new) = self.settle_storage_version().await?;
 		// Check we are running the latest version
 		if !version.is_latest() {
 			bail!(DatastoreError::OutdatedStorageVersion {
@@ -878,6 +934,23 @@ impl Datastore {
 		migration::run(self, is_new).await?;
 		// Everything ok
 		Ok((version, is_new))
+	}
+
+	/// Settles the datastore's major storage version, stamping it if it carries
+	/// none, and reports whether this call was the one that stamped it.
+	///
+	/// The marker half of [`Self::check_version`], separated because the builder
+	/// owes it before it starts any writer but must not do the rest: the
+	/// migrations that follow the gate run under a lease with no bound on how
+	/// long they take, which is not something a constructor may hold a caller
+	/// for.
+	///
+	/// Retries because the storage layer may not be able to serve a transaction
+	/// yet, and because concurrent instances conflict over the version key.
+	/// Callers that want the gate — the check that this build can read what it
+	/// found — want [`Self::check_version`].
+	pub(crate) async fn settle_storage_version(&self) -> Result<(MajorVersion, bool)> {
+		Self::retry_bootstrap("Check version", || self.get_version()).await
 	}
 
 	/// The full semantic version the datastore has been advanced to.
@@ -942,58 +1015,158 @@ impl Datastore {
 			.collect()
 	}
 
-	// Initialise the cluster and run bootstrap utilities
-	// Returns the current version and a flag indicating if this is a new datastore
+	/// Reads the datastore's major storage version, stamping it on a datastore
+	/// that carries none, and reports whether this call was the one that
+	/// stamped it.
+	///
+	/// # What `!v`'s absence means
+	///
+	/// `!v` was introduced in 2.0, so a datastore that holds data but no `!v`
+	/// was either written by a build that predates it — a genuine v1 store,
+	/// which must be refused as out of date — or created by a later build whose
+	/// bootstrap was interrupted after something else wrote but before `!v`
+	/// landed. Nothing in the bytes tells those apart, so the second case
+	/// records itself: [`BootstrapKey`] is committed before `!v` and removed in
+	/// the same transaction that writes it, and its presence is what licenses
+	/// this call to complete the interrupted bootstrap instead of refusing it.
+	/// Without it, `MajorVersion::v1()` is the only safe reading, and an
+	/// interrupted bootstrap would be stamped v1 permanently.
+	///
+	/// # Ordering
+	///
+	/// The sentinel is only a fallback: nothing may write to a datastore before
+	/// its version is settled. That ordering is structural — the builder settles
+	/// the version before it starts any maintenance task, and a caller that
+	/// starts them itself does so after this has run (see
+	/// [`Datastore::start_maintenance_tasks`]). The sentinel is what keeps a
+	/// writer that escapes it anyway — a future job, a storage engine with keys
+	/// of its own — from turning a fresh datastore into an unstartable one.
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn get_version(&self) -> Result<(MajorVersion, bool)> {
+		#[cfg(test)]
+		maybe_inject_non_retryable_error(NonRetryableErrorSite::VersionBootstrapBegin, self.id)?;
 		// Start a new writeable transaction
 		let txn = self.transaction(Write).await?.enclose();
 		// Create the key where the version is stored
 		let key = VersionKey {};
 		// Check if a version is already set in storage
-		let val = match catch!(txn, txn.get_key(&key, None).await) {
-			// There is a version set in the storage
-			Some(val) => {
-				// We didn't write anything, so just rollback
+		if let Some(val) = catch!(txn, txn.get_key(&key, None).await) {
+			// We didn't write anything, so just rollback
+			catch!(txn, txn.cancel().await);
+			// Return the current version
+			return Ok((val, false));
+		}
+		// No version is set. Either nothing has ever stamped this datastore, or
+		// a previous start began stamping it and did not finish.
+		if let Some(target) = catch!(txn, txn.get_key(&BootstrapKey {}, None).await) {
+			// An interrupted bootstrap left the sentinel behind, so whatever is
+			// in storage was written by a versioned build and no pre-versioning
+			// layout can be present: the sentinel is only ever written after the
+			// probe below has found the datastore empty, and from that moment
+			// the only writers are versioned builds, none of which can serve a
+			// query until this call has passed. That is what licenses completing
+			// the job rather than refusing it — but not at just any version.
+			//
+			// The two directions are not symmetric. Finishing a bootstrap an
+			// *older* build began is sound at this build's own version: the
+			// residue such a build can leave is cluster state a newer build
+			// reads, and no user data can exist to owe a migration, because
+			// serving a query requires the stamp this call has not yet written.
+			// Finishing one a *newer* build began is not: stamping the datastore
+			// down a major version would pass this build's own gate against
+			// bytes it may not understand, and would leave the build that
+			// started the job reading back a stamp it refuses. So that case is
+			// declined without writing, which keeps the sentinel intact for the
+			// build that can finish it, and returns the target so the gate above
+			// reports what is actually on disk.
+			if u16::from(target) > MajorVersion::LATEST {
 				catch!(txn, txn.cancel().await);
-				// Return the current version
-				(val, false)
+				warn!(
+					target: TARGET,
+					target = u16::from(target),
+					running = MajorVersion::LATEST,
+					"This datastore's initialisation was begun by a newer version of SurrealDB \
+					and can only be completed by it. Run that version, or use a clean storage \
+					directory if this is intended to be a new instance."
+				);
+				return Ok((target, false));
 			}
-			// There is no version set in the storage
-			None => {
-				// Fetch any key at all, other than the version key itself. This has to
-				// span the whole byte space rather than the declared root: the point of
-				// the probe is data this release does not describe, which by definition
-				// need not sit under `/`. Finding any such key means the store predates
-				// versioning and must not be stamped as current.
-				let range = RawRange::every_key_after(&VersionKey {}.encode_key()?);
-				let keys = catch!(txn, txn.keys_raw(range, 1, 0, None).await);
-				// Check the storage if there are any other keys set
-				let version = if keys.is_empty() {
-					// There are no keys set in storage, so this is a new database
-					MajorVersion::latest()
-				} else {
-					// There were keys in storage, so this is an upgrade.
-					// Log the first key found for diagnostic purposes.
-					warn!(
-						target: TARGET,
-						first_key = ?keys.first().map(|k| format!("{:?}", k)),
-						"No version key found but existing data detected in storage. \
-						This storage contains data from a previous SurrealDB version. \
-						The server will not start until the data is migrated or removed."
-					);
-					MajorVersion::v1()
-				};
-				// Attempt to set the current version in storage
-				catch!(txn, txn.replace_key(&key, &version).await);
-				// We set the version, so commit the transaction
-				catch!(txn, txn.commit().await);
-				// Return the current version
-				(version, true)
-			}
-		};
-		// Everything ok
-		Ok(val)
+			let version = MajorVersion::latest();
+			warn!(
+				target: TARGET,
+				target = u16::from(target),
+				version = u16::from(version),
+				"Completing a datastore initialisation that a previous start left unfinished."
+			);
+			catch!(txn, txn.replace_key(&key, &version).await);
+			catch!(txn, txn.del_key(&BootstrapKey {}).await);
+			catch!(txn, txn.commit().await);
+			return Ok((version, true));
+		}
+		// Fetch any key at all, other than the version keys themselves. This has
+		// to span the whole byte space rather than the declared root: the point
+		// of the probe is data this release does not describe, which by
+		// definition need not sit under `/`. Finding any such key means the
+		// store predates versioning and must not be stamped as current.
+		let range = RawRange::every_key_after(&VersionKey {}.encode_key()?);
+		let keys = catch!(txn, txn.keys_raw(range, 1, 0, None).await);
+		if !keys.is_empty() {
+			// There were keys in storage, so this is an upgrade.
+			// Log the first key found for diagnostic purposes.
+			warn!(
+				target: TARGET,
+				first_key = ?keys.first().map(|k| format!("{:?}", k)),
+				"No version key found but existing data detected in storage. \
+				This storage contains data from a previous SurrealDB version. \
+				The server will not start until the data is migrated or removed."
+			);
+			let version = MajorVersion::v1();
+			catch!(txn, txn.replace_key(&key, &version).await);
+			catch!(txn, txn.commit().await);
+			return Ok((version, true));
+		}
+		// The datastore is empty, so this start is creating it. Claim it with the
+		// sentinel in a transaction of its own: the two writes cannot share one,
+		// because the whole point is for the sentinel to outlive a failure of the
+		// stamp below. The sentinel sorts before `!v` and so below the probe
+		// above, which is what keeps a datastore holding nothing else reading as
+		// empty rather than as data of unknown provenance.
+		let version = MajorVersion::latest();
+		catch!(txn, txn.set_key(&BootstrapKey {}, &version).await);
+		catch!(txn, txn.commit().await);
+		// Stamp the version and retire the sentinel. Should this fail, the next
+		// attempt takes the resume branch above and finishes the job.
+		#[cfg(test)]
+		maybe_inject_non_retryable_error(NonRetryableErrorSite::VersionBootstrapStamp, self.id)?;
+		self.finish_bootstrap(version).await
+	}
+
+	/// Stamps `!v` and retires the sentinel, completing a bootstrap this node
+	/// claimed.
+	///
+	/// Re-reads `!v` rather than writing over it blindly, for two reasons that
+	/// both come from this being a second transaction. Another node may have
+	/// claimed the same empty datastore, seen this node's sentinel and finished
+	/// the job in between, in which case this node did not create the datastore
+	/// and must not report that it did — two nodes both returning `is_new` have
+	/// both of them creating the default namespace, and the loser fails startup
+	/// on a namespace that already exists. And reading the key in the same
+	/// transaction that writes it is what arms a write conflict on backends that
+	/// detect one, which a blind replace would not.
+	pub(crate) async fn finish_bootstrap(
+		&self,
+		version: MajorVersion,
+	) -> Result<(MajorVersion, bool)> {
+		let key = VersionKey {};
+		let txn = self.transaction(Write).await?.enclose();
+		if let Some(existing) = catch!(txn, txn.get_key(&key, None).await) {
+			catch!(txn, txn.cancel().await);
+			return Ok((existing, false));
+		}
+		catch!(txn, txn.replace_key(&key, &version).await);
+		catch!(txn, txn.del_key(&BootstrapKey {}).await);
+		catch!(txn, txn.commit().await);
+		Ok((version, true))
 	}
 
 	// --------------------------------------------------
@@ -1089,6 +1262,42 @@ impl Datastore {
 		ensure!(!sess.expired(), DatastoreError::ExpiredSession);
 		// Execute the SQL import
 		self.execute(sql, sess, None).await.map_err(|e| anyhow::anyhow!(e))
+	}
+
+	/// Starts this datastore's maintenance tasks, if they are not already
+	/// running.
+	///
+	/// The builder starts them itself, and settles the storage version first, so
+	/// this exists for a caller that built with
+	/// [`Builder::without_maintenance_tasks`] in order to own that ordering.
+	/// Such a caller owes the same sequence, because these tasks write: the
+	/// node-membership refresh blindly upserts this node's row, and every leased
+	/// job writes its lease. A write that lands before `!v` does makes a
+	/// datastore this process created indistinguishable from one written before
+	/// `!v` existed, which [`Datastore::get_version`] is obliged to refuse as
+	/// out of date. Call this only once [`Datastore::check_version`] has
+	/// returned.
+	///
+	/// Idempotent: a datastore that already carries its tasks is left alone.
+	pub fn start_maintenance_tasks(self: &Arc<Self>) {
+		let mut maintenance = self.maintenance.lock();
+		if maintenance.is_some() {
+			return;
+		}
+		*maintenance =
+			Some(crate::kvs::tasks::init(self, self.shutdown.clone(), &self.engine_options));
+	}
+
+	/// Whether this datastore's maintenance tasks are running.
+	///
+	/// A datastore that never starts them is a database with no index
+	/// compaction, no tombstone reclaim, no changefeed GC, no index-build
+	/// recovery and no cluster heartbeat — none of which announces itself, so a
+	/// caller that defers the start with
+	/// [`Builder::without_maintenance_tasks`](self::builder::Builder::without_maintenance_tasks)
+	/// has this to assert against.
+	pub fn maintenance_tasks_running(&self) -> bool {
+		self.maintenance.lock().is_some()
 	}
 
 	/// Run the datastore shutdown tasks, performing any necessary cleanup
@@ -1400,6 +1609,134 @@ impl Datastore {
 		Self::retry("Remove nodes", || self.remove_nodes()).await?;
 		// Everything ok
 		Ok(())
+	}
+
+	/// Runs a startup precondition until it succeeds or its budget runs out,
+	/// retrying *every* failure rather than only a transaction conflict.
+	///
+	/// Almost every failure [`Self::get_version`] can report is the storage
+	/// layer declining to serve a transaction. On a distributed backend that is
+	/// what forming a cluster looks like from the outside — a replica refuses
+	/// writes while a view change is in flight — and it clears on its own once
+	/// formation settles. Those refusals are not distinguishable from each other
+	/// by class, which is why the loop retries by default rather than by
+	/// allow-list.
+	///
+	/// The exception is [`Self::is_permanent_bootstrap_failure`]: a marker whose
+	/// bytes this build cannot read is a property of the disk, and waiting on it
+	/// costs twice over — the caller waits out the whole budget, and the server,
+	/// whose own ceiling is shorter, then reports a timeout in place of the error
+	/// that would have named the problem.
+	///
+	/// The wait is bounded, and progress is reported on a fixed cadence rather
+	/// than per attempt, so a long formation is visible in the log without the
+	/// log growing with the retry rate.
+	///
+	/// The server wraps this in its own `SURREAL_STARTUP_OPERATION_TIMEOUT`
+	/// budget, which is the operator-facing ceiling and is shorter than
+	/// [`BOOTSTRAP_RETRY_BUDGET`] by default. This bound is what stops an
+	/// embedder, which has no such wrapper, from waiting forever.
+	/// Whether a bootstrap failure is a property of the bytes on disk rather
+	/// than of the storage layer's availability.
+	///
+	/// These name a datastore this build cannot read, and no amount of waiting
+	/// changes that. Matched by type rather than by rendered text, which is what
+	/// the server's equivalent has to fall back on across the crate boundary.
+	fn is_permanent_bootstrap_failure(err: &anyhow::Error) -> bool {
+		err.chain().any(|e| {
+			matches!(
+				e.downcast_ref::<DatastoreError>(),
+				Some(
+					DatastoreError::InvalidStorageVersion
+						| DatastoreError::OutdatedStorageVersion { .. }
+						| DatastoreError::MigratedBeyondStorageVersion { .. }
+				)
+			)
+		})
+	}
+
+	async fn retry_bootstrap<F, Fut, R>(task: &str, func: F) -> Result<R>
+	where
+		F: Fn() -> Fut,
+		Fut: Future<Output = Result<R>>,
+	{
+		let started = Instant::now();
+		let mut last_reported = started;
+		let mut attempt = 1u32;
+		// `None` after an attempt that never answered, which has no error to
+		// carry; the report below distinguishes the two.
+		let mut last_error = None;
+		loop {
+			let remaining = BOOTSTRAP_RETRY_BUDGET.saturating_sub(started.elapsed());
+			if remaining.is_zero() {
+				break;
+			}
+			// Bound the attempt itself as well as the budget: a backend that
+			// accepts the transaction and then never answers would otherwise
+			// spend the whole budget on one attempt.
+			let attempt_timeout = BOOTSTRAP_RETRY_ATTEMPT_TIMEOUT.min(remaining);
+			match timeout(attempt_timeout, func()).await {
+				Ok(Ok(result)) => {
+					if attempt > 1 {
+						info!(
+							target: TARGET,
+							task, attempt, elapsed = ?started.elapsed(),
+							"Storage became available and the startup step completed."
+						);
+					}
+					return Ok(result);
+				}
+				Ok(Err(e)) if Self::is_permanent_bootstrap_failure(&e) => return Err(e),
+				Ok(Err(e)) => last_error = Some(e),
+				Err(_) => last_error = None,
+			}
+			// One line per interval, whatever the attempt rate, and the first
+			// failure always reports so a wait is never silent.
+			if attempt == 1 || last_reported.elapsed() >= BOOTSTRAP_RETRY_LOG_INTERVAL {
+				last_reported = Instant::now();
+				match &last_error {
+					Some(e) => info!(
+						target: TARGET,
+						task, attempt, elapsed = ?started.elapsed(),
+						budget = ?BOOTSTRAP_RETRY_BUDGET, error = %e,
+						"Storage is not ready for the startup step yet; still retrying."
+					),
+					None => info!(
+						target: TARGET,
+						task, attempt, elapsed = ?started.elapsed(),
+						budget = ?BOOTSTRAP_RETRY_BUDGET,
+						timeout = ?attempt_timeout,
+						"The startup step did not answer within its attempt timeout; still retrying."
+					),
+				}
+			}
+			let remaining = BOOTSTRAP_RETRY_BUDGET.saturating_sub(started.elapsed());
+			if remaining.is_zero() {
+				break;
+			}
+			// Exponential back-off with jitter, so the nodes of a cluster that
+			// all restarted together do not retry in lockstep. The exponent is
+			// capped before it is applied, not after: `Duration`'s multiplication
+			// panics on overflow, so a doubling left to run free would abort the
+			// process rather than saturate at the ceiling below it.
+			let doublings = (attempt - 1).min(BOOTSTRAP_RETRY_MAX_DOUBLINGS);
+			let backoff = (BOOTSTRAP_RETRY_MIN_BACKOFF * 2u32.pow(doublings))
+				.min(BOOTSTRAP_RETRY_MAX_BACKOFF)
+				.mul_f64(rand::rng().random_range(0.5..=1.5))
+				.min(remaining);
+			sleep(backoff).await;
+			attempt = attempt.saturating_add(1);
+		}
+		match last_error {
+			Some(e) => Err(e).context(format!(
+				"{task} failed after {attempt} attempts over {:?}",
+				started.elapsed()
+			)),
+			None => bail!(EngineError::Internal(format!(
+				"{task} timed out after {attempt} attempts over {:?}",
+				started.elapsed()
+			))),
+		}
 	}
 
 	/// Retries an async operation until it succeeds or the global timeout elapses.

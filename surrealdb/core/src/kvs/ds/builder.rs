@@ -149,6 +149,16 @@ impl Builder {
 	/// `REMOVE NAMESPACE` never destroys the data it detached, changefeed data
 	/// is never collected, an interrupted index build is never resumed, and this
 	/// node's cluster heartbeat never refreshes.
+	///
+	/// It also hands the caller the storage version. These tasks write, and a
+	/// write that reaches a datastore before its version is stamped makes a
+	/// datastore this process just created read as storage from before the
+	/// version key existed — so the branch that starts them settles the version
+	/// first, and opting out of the one opts out of the other. A caller that
+	/// takes this route and then serves queries owes that ordering itself:
+	/// [`Datastore::check_version`] first, then
+	/// [`Datastore::start_maintenance_tasks`], which is what every entry point
+	/// in this workspace does.
 	pub fn without_maintenance_tasks(mut self) -> Self {
 		self.maintenance = false;
 		self
@@ -354,6 +364,7 @@ impl Builder {
 		let datastore = Datastore {
 			shutdown,
 			maintenance: parking_lot::Mutex::new(None),
+			engine_options: options,
 			shutdown_lock: tokio::sync::Mutex::new(()),
 			created_here: std::sync::atomic::AtomicBool::new(false),
 			id,
@@ -427,6 +438,23 @@ impl Builder {
 		// so starting them is the constructor's job rather than every embedder's
 		// to remember. Opt out with `without_maintenance_tasks`.
 		if maintenance {
+			// Settle the storage version first. Every maintenance task writes,
+			// and a write that reaches storage before the version key does makes
+			// a datastore this process just created read as storage from before
+			// that key existed — which `check_version` is then obliged to refuse,
+			// permanently, on this and every later open. Starting the writers is
+			// what creates that obligation, so it is this branch that owes the
+			// ordering; a caller who opts out owns both halves and settles the
+			// version itself.
+			//
+			// Only the marker, not the whole of `check_version`: the migrations
+			// that follow it run under a lease and have no bound on how long they
+			// take, which is not something a constructor may do. The caller still
+			// calls `check_version`, which finds the marker already written and
+			// reports whether *this process* created the datastore from the latch
+			// set below.
+			let (_, is_new) = datastore.settle_storage_version().await?;
+			datastore.created_here.fetch_or(is_new, std::sync::atomic::Ordering::SeqCst);
 			let tasks = crate::kvs::tasks::init(&datastore, datastore.shutdown.clone(), &options);
 			// This is the only writer, and it runs before the datastore is
 			// handed to anyone.
@@ -527,6 +555,10 @@ mod tests {
 		}
 	}
 
+	/// Both of these assert how the builder plumbs a composer's router state,
+	/// which says nothing about storage — and the stub above opens no
+	/// transactions. They therefore build without maintenance tasks, because
+	/// that branch settles the storage version and so does open one.
 	#[tokio::test]
 	async fn build_with_factory_path_returns_router_state() -> Result<()> {
 		let expected = Arc::new(7);
@@ -534,8 +566,10 @@ mod tests {
 			state: TestRouterState(Arc::clone(&expected)),
 		};
 
-		let (_datastore, router_state) =
-			Builder::new().build_with_factory_path_and_router_state("test:", composer).await?;
+		let (_datastore, router_state) = Builder::new()
+			.without_maintenance_tasks()
+			.build_with_factory_path_and_router_state("test:", composer)
+			.await?;
 
 		assert!(Arc::ptr_eq(&expected, &router_state.0));
 		Ok(())
@@ -547,7 +581,10 @@ mod tests {
 			state: TestRouterState(Arc::new(7)),
 		};
 
-		let datastore = Builder::new().build_with_factory_path("test:", composer).await?;
+		let datastore = Builder::new()
+			.without_maintenance_tasks()
+			.build_with_factory_path("test:", composer)
+			.await?;
 
 		assert_eq!(datastore.to_string(), "test");
 		Ok(())

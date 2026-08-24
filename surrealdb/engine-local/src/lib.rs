@@ -164,9 +164,19 @@ pub async fn connect(
 
 	let builder = builder.with_capabilities(config.capabilities);
 
-	let kvs = builder.build_with_path(&config.path).await.map_err(std_error_to_types_error)?;
+	// The maintenance tasks are started by hand below rather than at
+	// construction. Every one of them writes, and a write that lands before the
+	// version key does makes a datastore this process just created look like one
+	// written before that key existed — which `check_version` is obliged to
+	// refuse, permanently, on this and every later open.
+	let kvs = builder
+		.without_maintenance_tasks()
+		.build_with_path(&config.path)
+		.await
+		.map_err(std_error_to_types_error)?;
 	kvs.check_version().await.map_err(std_error_to_types_error)?;
 	kvs.bootstrap().await.map_err(std_error_to_types_error)?;
+	kvs.start_maintenance_tasks();
 	// If a root user is specified, setup the initial datastore credentials
 	if let Some(root) = &config.root {
 		kvs.initialise_credentials(&root.username, &root.password)

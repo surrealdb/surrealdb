@@ -115,6 +115,12 @@ impl EmbeddedEngine {
 			.with_capabilities(capabilities)
 			.with_transaction_timeout(transaction_timeout.map(Duration::from_secs))
 			.with_query_timeout(query_timeout.map(Duration::from_secs))
+			// Started by hand below, not at construction. Every maintenance task
+			// writes, and a write that lands before the version key does makes a
+			// datastore this process just created look like one written before
+			// that key existed — which `check_version` is obliged to refuse,
+			// permanently, on this and every later open.
+			.without_maintenance_tasks()
 			.build_with_path(endpoint)
 			.await?;
 
@@ -123,6 +129,7 @@ impl EmbeddedEngine {
 		// by node id, so a datastore that never bootstraps has no node row for
 		// its own subscriptions to hang off.
 		kvs.bootstrap().await?;
+		kvs.start_maintenance_tasks();
 
 		if is_new && let Some((namespace, database)) = defaults.get_defaults() {
 			kvs.initialise_defaults(&namespace, &database).await?;

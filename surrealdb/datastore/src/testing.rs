@@ -50,6 +50,15 @@ pub enum NonRetryableErrorSite {
 	/// (the error `Building::is_beyond_threshold` raises under memory
 	/// pressure).
 	ConcurrentIndexInitialBatchMemoryThreshold,
+	/// Simulates a storage layer that will not serve the version bootstrap a
+	/// transaction at all — what a distributed backend does while a view
+	/// change is in flight. Non-retryable by classification, transient in
+	/// fact, which is the combination the bootstrap has to survive.
+	VersionBootstrapBegin,
+	/// Simulates the version bootstrap being interrupted between committing
+	/// its sentinel and stamping `!v`, which is the half-initialised state a
+	/// later start has to recognise and finish.
+	VersionBootstrapStamp,
 }
 
 static RETRYABLE_CONFLICTS: OnceLock<Mutex<HashMap<(RetryableConflictSite, Uuid), usize>>> =

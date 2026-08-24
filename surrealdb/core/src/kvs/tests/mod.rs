@@ -25,4 +25,6 @@ mod tx_cache_versioned_test;
 mod tx_engine_test;
 mod tx_metrics;
 #[cfg(feature = "kv-mem")]
+mod version_test;
+#[cfg(feature = "kv-mem")]
 mod write_guard_test;
