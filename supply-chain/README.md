@@ -23,12 +23,19 @@ In this implementation, it is important to note that `cargo-vet` is only used as
 
 The following is a simplified lightweight process to support contributors in passing dependency checking.
 
-Using the dependency tools locally requires installing the following software:
+Using the dependency tools locally requires installing the following software, pinned
+to the versions CI uses (`.github/workflows/supply-chain.yml`) so local results match CI:
 
 ```bash
-cargo install --locked cargo-deny
-cargo install --locked cargo-vet
+cargo install --locked cargo-deny@0.19.4
+cargo install --locked cargo-vet@0.10.2
 ```
+
+cargo-vet records its own `major.minor` version in `supply-chain/config.toml`
+(the patch component is not stored). A local cargo-vet from a different minor
+line will re-stamp that field, and CI runs `cargo vet check --locked`, which
+refuses a store stamped by an incompatible version. Staying on the pinned minor
+avoids a spurious store-version failure.
 
 The following process can be followed whenever the dependency checking action fails:
 
@@ -42,7 +49,13 @@ The following process can be followed whenever the dependency checking action fa
   - The PR containing the dependency update will be approved by **@surrealdb/security**.
   - Rebase your original branch so that the dependency is updated.
 - If the action fails due to `cargo-vet`:
-  - This means that the dependency has not yet been trusted, audited nor exempted.
+  - If the crate is already trusted or audited and only its version moved, its
+    publisher record simply isn't in `imports.lock` yet (the common case, e.g.
+    a routine version bump of an already-trusted crate). Run a plain
+    `cargo vet check` (or `cargo vet fetch-imports`) to refresh the publisher
+    records, then commit `supply-chain/imports.lock`. `trust`, `add-exemption`
+    and `prune` all no-op in this case and do not fetch it for you.
+  - Otherwise the dependency has not yet been trusted, audited nor exempted.
   - If this is a new dependency, think about whether or not it needs to be introduced to SurrealDB.
   - If the dependency should be introduced:
     - If published by [a SurrealDB employee](https://github.com/orgs/surrealdb/people), it can be trusted as `safe-to-deploy`.
@@ -52,6 +65,11 @@ The following process can be followed whenever the dependency checking action fa
       - `cargo vet add-exemption <PACKAGE>`
   - Afterwards, prune the list of audits to remove outdated entries.
   	- `cargo vet prune`
+  - Commit the refreshed `supply-chain/imports.lock`. `cargo vet trust`,
+    `add-exemption` and `prune` all rewrite it, and CI runs
+    `cargo vet check --locked`, which will not fetch it for you: an uncommitted
+    refresh fails CI with `missing ["safe-to-deploy"]` even though a plain local
+    `cargo vet check` passes by re-fetching.
   - The changes will be approved by **@surrealdb/security**.
 
 ### Workspace crates published to crates.io

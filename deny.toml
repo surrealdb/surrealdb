@@ -60,6 +60,20 @@ yanked = "warn"
 #   see https://github.com/RustCrypto/RSA/issues/19#issuecomment-1822995643 for more information
 # - for RUSTSEC-2024-0436, paste is now unmaintained and archived, but we only use paste in tests
 #   so we could wait for ${concat(...)} metavariable expressions (issue #124225) to stabilize.
+# - for RUSTSEC-2026-0249, smartstring is unmaintained (archived 2026-05-03) and every version
+#   is affected, so there is no upgrade that clears it. It reaches us only through
+#   `opentelemetry-prometheus-text-exporter` (a runtime dep of surrealdb-server), which builds
+#   Prometheus label values in SmartString buffers. Tenant-supplied strings DO reach those
+#   buffers (namespace/database/user label values via `surrealdb/server/src/observe/metrics.rs`,
+#   settable by any authenticated session, e.g. `USE NS`), though they are Debug-escaped on
+#   emit and the advisory is unmaintained-only with no known memory-safety defect. The accepted
+#   risk is therefore "unmaintained crate on the metrics path", not unreachability. The
+#   exporter's 0.3.0 still requires `smartstring = "^1.0.1"`, so clearing this means the
+#   exporter migrating to `compact_str` or `smol_str`; bumping to 0.3.0 would only force an
+#   `opentelemetry` 0.31 -> 0.32 major bump across surrealdb-server (five opentelemetry
+#   crates plus tracing-opentelemetry move together, consumed well beyond
+#   `surrealdb/server/src/observe` and `surrealdb/server/src/telemetry`) for no advisory
+#   gain. Remove this entry once the exporter drops smartstring.
 #
 # Cleared by surrealdb-tikv-client 0.5.0:
 # - RUSTSEC-2025-0134 (rustls-pemfile archived): no longer transitive once the fork dropped
@@ -77,6 +91,7 @@ ignore = [
     "RUSTSEC-2025-0141",
     "RUSTSEC-2023-0071",
     "RUSTSEC-2024-0436",
+    "RUSTSEC-2026-0249",
 ]
 
 # --------------------------------------------------

@@ -20,6 +20,7 @@ on:
       - .github/workflows/supply-chain.yml
     branches:
       - main
+      - "releases/*"
   pull_request:
     paths:
       - Cargo.lock
@@ -37,10 +38,11 @@ on:
   merge_group:
 
 concurrency:
-  # Use github.run_id on main branch
+  # Use github.run_id on main and release branches, so every merged commit keeps
+  # its own completed supply-chain verdict (rapid backports must not cancel each other)
   # Use github.event.pull_request.number on pull requests, so it's unique per pull request
   # Use github.ref on other branches, so it's unique per branch
-  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/releases/')) && github.run_id || github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 defaults:
@@ -98,10 +100,15 @@ jobs:
           components: rustfmt
 
       - name: Install cargo-vet
-        run: cargo install --debug --locked cargo-vet
+        # Pinned like cargo-deny above: an unpinned install lets a new cargo-vet
+        # release flip this gate red/green with no repo change.
+        run: cargo install --debug --locked cargo-vet@0.10.2
 
       - name: Check dependencies for untrusted sources
-        run: cargo vet check
+        # --locked makes the committed imports.lock authoritative: a PR that bumps
+        # dependencies without committing the matching imports refresh fails here
+        # instead of silently re-fetching publisher data over the network.
+        run: cargo vet check --locked
 
       - name: Dependency check failure
         if: failure()

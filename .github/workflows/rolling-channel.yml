@@ -343,11 +343,29 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ inputs.git-ref }}
-          # release-plz compares against history to detect changed crates.
-          fetch-depth: 0
+
+      # CI tooling (first-party actions) comes from the WORKFLOW ref - the
+      # pushed commit on this branch, or whichever branch/tag a manual dispatch
+      # was run from - NOT from the (possibly older/overridden) commit checked
+      # out above for the build. Dispatch from main and the workflow, its
+      # actions and its scripts all come from main; dispatch from a branch or
+      # tag to debug and everything comes from that ref instead.
+      - name: Checkout CI tooling from the workflow ref
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            .github
+          sparse-checkout-cone-mode: false
+          path: .ci
+
+      # Hoisted from check-crate-versions so it too loads from the workflow ref
+      # (.ci), not the built commit.
+      - name: Setup environment
+        uses: ./.ci/.github/actions/setup-environment
 
       - name: Check crate versions
-        uses: ./.github/actions/check-crate-versions
+        uses: ./.ci/.github/actions/check-crate-versions
 
   package:
     name: Package crates (rolling)

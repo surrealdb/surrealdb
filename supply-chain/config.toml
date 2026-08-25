@@ -382,7 +382,7 @@ version = "0.1.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.cxxbridge-flags]]
-version = "1.0.194"
+version = "1.0.199"
 criteria = "safe-to-deploy"
 
 [[exemptions.darling]]
@@ -498,7 +498,7 @@ version = "3.3.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.event-listener]]
-version = "5.4.1"
+version = "5.4.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.event-listener-strategy]]
@@ -1321,10 +1321,6 @@ criteria = "safe-to-deploy"
 version = "0.10.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.scc]]
-version = "2.4.0"
-criteria = "safe-to-run"
-
 [[exemptions.schannel]]
 version = "0.1.29"
 criteria = "safe-to-deploy"
@@ -1340,10 +1336,6 @@ criteria = "safe-to-deploy"
 [[exemptions.scopeguard]]
 version = "1.1.0"
 criteria = "safe-to-deploy"
-
-[[exemptions.sdd]]
-version = "3.0.10"
-criteria = "safe-to-run"
 
 [[exemptions.sec1]]
 version = "0.7.3"
@@ -1382,11 +1374,11 @@ version = "0.7.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.serial_test]]
-version = "3.4.0"
+version = "3.5.0"
 criteria = "safe-to-run"
 
 [[exemptions.serial_test_derive]]
-version = "3.4.0"
+version = "3.5.0"
 criteria = "safe-to-run"
 
 [[exemptions.shell-words]]
@@ -1467,6 +1459,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.syn]]
 version = "2.0.117"
+criteria = "safe-to-deploy"
+
+[[exemptions.syn]]
+version = "3.0.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.sync_wrapper]]
