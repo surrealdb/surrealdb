@@ -5,7 +5,9 @@ description: >-
   releases). Extracted verbatim from release.yml; the interface is the ENV
   VARS set on the calling step - EVENT, CHANNEL, ROLLING_BUCKET, AWS_REGION,
   REQ_ENGINE, REQ_DOWNSTREAM, TEST, REQUESTED_REF, REQ_DOWNSTREAM_SHA,
-  GH_TOKEN, WAIT_MINUTES - which
+  GH_TOKEN, WAIT_MINUTES, and OWNER, DOWNSTREAM_REPO, DS_TOKEN (the downstream
+  repo coordinates + App token used to probe for the matching downstream release
+  branch) - which
   propagate into this composite step's process environment. Needs the repo
   checked out at the workspace root (it resolves refs with git) and AWS
   credentials able to read the rolling bucket.
@@ -38,6 +40,12 @@ outputs:
   downstream-branch:
     description: 'Downstream branch the image was built from'
     value: ${{ steps.locate.outputs.downstream-branch }}
+  downstream-branch-missing:
+    description: 'Whether the matching downstream release branch is absent (no downstream image is or will be built for this line)'
+    value: ${{ steps.locate.outputs.downstream-branch-missing }}
+  downstream-licensed:
+    description: 'Whether the downstream build produced the licence-enforcing (-licensed) image, from downstream.json'
+    value: ${{ steps.locate.outputs.downstream-licensed }}
 
 runs:
   using: 'composite'
@@ -529,20 +537,78 @@ runs:
         fi
 
         # For a versioned release that ships a downstream image (a downstream
-        # release or a test release), WAIT for its downstream.json (same rationale
-        # as the engine wait above: a freshly-pushed release tip's downstream build
-        # may still be running). Nightly never reaches here (it resolved an
-        # already-built commit).
-        #   * REQ_DOWNSTREAM_SHA set -> wait for the SPECIFIC pairing (the engine
-        #     commit's downstream.json must record that downstream commit), so a
-        #     stale pairing the engine commit already carries is not accepted.
-        #   * empty -> presence wait: ship whatever pairing the engine commit's
-        #     downstream build recorded (the historical behaviour).
+        # release or a test release) we normally WAIT for its downstream.json (same
+        # rationale as the engine wait above: a freshly-pushed release tip's
+        # downstream build may still be running). Nightly never reaches here (it
+        # resolved an already-built commit).
+        ds_branch_missing=false
         if [[ "$CHANNEL" == "versioned" && ( "$REQ_DOWNSTREAM" == "true" || "${TEST:-false}" == "true" ) ]]; then
           if [[ -n "${REQ_DOWNSTREAM_SHA:-}" ]]; then
+            # An explicit downstream commit was named: ship THAT pairing and always
+            # wait for it, regardless of the engine line's downstream branch. The
+            # requested commit may live on a different promotable ref (e.g. the
+            # downstream's main), so the matching-branch shortcut below must not
+            # override an explicit request.
             wait_for_downstream_pairing "$slug" "$sha" "$REQ_DOWNSTREAM_SHA"
           else
-            wait_for_build downstream "$slug" "$sha"
+            # No specific pairing requested. A promotable downstream image is only
+            # ever built for a release line that has a MATCHING downstream
+            # releases/X.Y branch: rolling-downstream marks a build promotable (and
+            # writes downstream.json) only when the downstream branch matches the
+            # engine line, falling back to the downstream's main otherwise. So with
+            # no matching downstream branch nothing promotable is ever written and
+            # the wait would only burn its whole timeout. Probe for the matching
+            # branch first:
+            #   * present  -> wait for the downstream build.
+            #   * absent   -> do NOT wait. Record downstream-branch-missing=true and
+            #     let resolve-release-components apply the policy: a public release
+            #     (the engine is shipping too) drops the downstream and ships the
+            #     engine only; an internal/test release (the downstream image is the
+            #     whole deliverable) fails.
+            #   * unknown (app unconfigured, or the repo could not be read) -> wait
+            #     for the downstream build rather than risk skipping a downstream
+            #     image that does in fact exist. Only a definitive "no such branch"
+            #     (ls-remote exit 2) counts as absent.
+            want_branch="$chosen"   # the engine release line, e.g. releases/3.1
+            branch_state="unknown"
+            if [[ -n "${DS_TOKEN:-}" && -n "${DOWNSTREAM_REPO:-}" && -n "${OWNER:-}" ]]; then
+              # Read refs over HTTPS with the App token via GIT_CONFIG (never in
+              # argv), and run git from RUNNER_TEMP, NOT the workspace: the checkout
+              # here leaves a host-scoped http.extraHeader bearing THIS repo's
+              # GITHUB_TOKEN that also matches the downstream URL, so git run in the
+              # workspace would send that (wrong) token and GitHub would answer
+              # "Repository not found", which we would misread as a missing branch.
+              # Mirrors release.yml's downstream-ref resolution, which reads the
+              # private downstream with this exact token.
+              ds_workdir="${RUNNER_TEMP:-/tmp}"
+              ds_url="https://github.com/${OWNER}/${DOWNSTREAM_REPO}.git"
+              ds_errf="$(mktemp)"
+              set +e
+              GIT_CONFIG_COUNT=1 \
+              GIT_CONFIG_KEY_0=http.extraHeader \
+              GIT_CONFIG_VALUE_0="Authorization: Basic $(printf 'x-access-token:%s' "${DS_TOKEN}" | base64 | tr -d '\n')" \
+                git -C "$ds_workdir" ls-remote --exit-code --heads "$ds_url" "refs/heads/${want_branch}" >/dev/null 2>"$ds_errf"
+              ds_rc=$?
+              set -e
+              if [[ $ds_rc -eq 0 ]]; then
+                branch_state="present"
+              elif [[ $ds_rc -eq 2 ]]; then
+                branch_state="absent"
+              else
+                echo "::warning::Could not read ${OWNER}/${DOWNSTREAM_REPO} to check for the downstream '${want_branch}' branch (git ls-remote rc=${ds_rc}): $(tr '\n' ' ' <"$ds_errf"). Falling back to waiting for the downstream build."
+              fi
+              rm -f "$ds_errf"
+            else
+              echo "::warning::The downstream app/repo is not configured for this run, so the downstream '${want_branch}' branch cannot be checked; falling back to waiting for the downstream build."
+            fi
+
+            if [[ "$branch_state" == "absent" ]]; then
+              ds_branch_missing=true
+              echo "::warning::No matching downstream release branch '${want_branch}' exists, so no downstream image is (or will be) built for this line. Skipping the downstream build wait; resolve-release-components will ship the engine only (public) or fail (internal/test)."
+            else
+              # present or unknown: wait for the downstream build.
+              wait_for_build downstream "$slug" "$sha"
+            fi
           fi
         fi
 
@@ -555,11 +621,17 @@ runs:
         ds_built=false
         ds_sha=""
         ds_branch=""
+        # `.licensed` is whether the downstream build produced the licence-enforcing
+        # (`-licensed`) image. Manifests written before licence enforcement lack the
+        # field and default to false, so the licensed DockerHub mirror is skipped for
+        # those lines instead of failing to find an image.
+        ds_licensed=false
         ds_json=$(aws s3 cp "s3://${ROLLING_BUCKET}/rolling-builds/${slug}/${sha}/downstream.json" - 2>/dev/null || true)
         if [[ -n "$ds_json" ]]; then
           ds_built=true
           ds_sha=$(echo "$ds_json" | jq -r '.sha // ""')
           ds_branch=$(echo "$ds_json" | jq -r '.branch // ""')
+          ds_licensed=$(echo "$ds_json" | jq -r 'if .licensed == true then "true" else "false" end')
         fi
 
         # When a specific downstream commit was requested, the pairing wait above
@@ -584,4 +656,6 @@ runs:
           echo "downstream-built=${ds_built}"
           echo "downstream-sha=${ds_sha}"
           echo "downstream-branch=${ds_branch}"
+          echo "downstream-branch-missing=${ds_branch_missing}"
+          echo "downstream-licensed=${ds_licensed}"
         } >> "$GITHUB_OUTPUT"

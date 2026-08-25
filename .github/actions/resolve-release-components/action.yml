@@ -31,6 +31,20 @@ runs:
           if [[ "${EVENT}" == "schedule" ]]; then
             echo "::warning::Nightly: no downstream image was built for ${SHA}; releasing the engine only."
             release_downstream=false
+          elif [[ "${DS_BRANCH_MISSING:-false}" == "true" ]]; then
+            # No matching downstream release branch for this line (Locate probed the
+            # downstream repo), so no downstream image exists or will ever be built.
+            # The policy depends on what was asked for:
+            #   * public (the engine is being released too) -> ship the engine only.
+            #   * internal / test (the downstream image is the whole deliverable) ->
+            #     fail; there is nothing to release.
+            if [[ "${release_engine}" == "true" ]]; then
+              echo "::warning::No matching downstream release branch exists for this line, so no downstream image is built; releasing the engine only."
+              release_downstream=false
+            else
+              echo "::error::No matching downstream release branch exists for this line, so no downstream image is (or will be) built - but this ${COMPONENTS} release ships only the downstream image. Create the matching downstream release branch and re-run its rolling build, or cut a public release instead."
+              exit 1
+            fi
           else
             echo "::error::A downstream image was requested (components=${COMPONENTS}) but none was built for ${SHA} (no downstream.json for this commit). Re-run the rolling build for this commit."
             exit 1

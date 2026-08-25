@@ -619,6 +619,13 @@ jobs:
           ENGINE_REF: ${{ inputs.engine-ref }}
           DS_BRANCH: ${{ needs.preflight.outputs.branch }}
           DS_SHA: ${{ needs.preflight.outputs.sha }}
+          # Whether this build produced the licence-ENFORCING (`-licensed`) image.
+          # That variant is built only on release lines (branch-slug releases-*),
+          # matching the `variant` matrix on the image/manifest jobs. Recording it
+          # lets promote skip the licensed DockerHub mirror for lines that never
+          # built it (older manifests lack the field and read false) without probing
+          # the registry.
+          LICENSED: ${{ startsWith(inputs.branch-slug, 'releases-') }}
         run: |
           set -euo pipefail
           # engine_sha is redundant with the prefix (which is keyed by the engine
@@ -628,8 +635,9 @@ jobs:
             --arg engine_sha "${ENGINE_REF}" \
             --arg branch "${DS_BRANCH}" \
             --arg sha "${DS_SHA}" \
+            --argjson licensed "${LICENSED}" \
             --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            '{engine_sha: $engine_sha, branch: $branch, sha: $sha, created_at: $created}' \
+            '{engine_sha: $engine_sha, branch: $branch, sha: $sha, licensed: $licensed, created_at: $created}' \
             > downstream.json
           cat downstream.json
           aws s3 cp --cache-control 'no-store' downstream.json "s3://${ROLLING_BUCKET}/${S3_PREFIX}/downstream.json"

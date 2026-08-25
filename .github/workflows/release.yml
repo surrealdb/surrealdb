@@ -213,6 +213,12 @@ jobs:
       downstream-built: ${{ steps.locate.outputs.downstream-built }}
       downstream-sha: ${{ steps.locate.outputs.downstream-sha }}
       downstream-branch: ${{ steps.locate.outputs.downstream-branch }}
+      # Whether this commit's downstream build produced the licence-ENFORCING
+      # (`-licensed`) image, read from the downstream.json manifest. Release lines
+      # whose downstream build predates licence enforcement (e.g. releases/3.2) have
+      # no such field and read false, so the licensed DockerHub mirror is skipped
+      # for them instead of failing to find a `-licensed` image.
+      downstream-licensed: ${{ steps.locate.outputs.downstream-licensed }}
       # Whether the resolved commit carries the npm package sources
       # (surrealdb/node + surrealdb/wasm). Release lines that predate the packages
       # (e.g. releases/3.1) have neither, so their promote skips the npm publish
@@ -270,15 +276,40 @@ jobs:
           sparse-checkout-cone-mode: false
           path: .ci
 
-      # When the release manager names a specific downstream commit/branch (not
-      # the pairing the engine build already recorded), resolve it to a full
-      # downstream sha so Locate can wait for THAT pairing. Needs a downstream
-      # token (branch tips and short shas resolve against the downstream repo).
-      # Gated: skipped entirely for the common case (empty input) and for
-      # engine-only / nightly releases, so nothing new runs on a normal release.
+      # Whether the downstream App is configured. Gated on the PRIVATE KEY (a
+      # secret), not the client-id (a variable): variables are present in contexts
+      # where secrets are withheld, so gating on the id would mint a token without a
+      # key and hard-fail instead of no-opping. Read here because the `secrets`
+      # context is not available in a step-level `if:`. Mirrors check-milestones.
+      - name: Downstream app configured?
+        id: ds-cfg
+        if: ${{ steps.config.outputs.release-channel == 'versioned' && (steps.config.outputs.release-downstream == 'true' || steps.config.outputs.test == 'true') }}
+        env:
+          HAS_APP: ${{ secrets.RELEASE_AUTOMATION_APP_PRIVATE_KEY != '' }}
+          DOWNSTREAM_REPO: ${{ secrets.DOWNSTREAM_REPO }}
+        run: |
+          set -euo pipefail
+          if [[ "${HAS_APP}" == "true" && -n "${DOWNSTREAM_REPO}" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # A downstream-scoped App token for the two downstream reads this job makes
+      # against the private downstream repo:
+      #   * Locate checks whether the matching downstream release branch exists
+      #     before waiting for its build (a public release ships the engine only
+      #     when it is absent; an internal/test release fails), and
+      #   * the Resolve-downstream-ref step below expands an explicitly requested
+      #     downstream commit/branch to a full sha.
+      # Minted for every versioned release that ships a downstream image (a
+      # downstream/public release or a test release), and only when the downstream
+      # App is configured, so this no-ops rather than hard-failing where downstream
+      # is not set up. Nightly and engine-only releases never touch the downstream,
+      # so this step is skipped for them.
       - name: Generate a token for the downstream repo
         id: ds-token
-        if: ${{ inputs.downstream-git-sha != '' && steps.config.outputs.release-channel == 'versioned' && steps.config.outputs.release-downstream == 'true' }}
+        if: ${{ steps.config.outputs.release-channel == 'versioned' && (steps.config.outputs.release-downstream == 'true' || steps.config.outputs.test == 'true') && steps.ds-cfg.outputs.configured == 'true' }}
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           client-id: ${{ vars.RELEASE_AUTOMATION_APP_CLIENT_ID }}
@@ -392,6 +423,15 @@ jobs:
           # (versioned releases wait for an in-progress build up to this many mins).
           GH_TOKEN: ${{ github.token }}
           WAIT_MINUTES: ${{ inputs.build-wait-minutes || '120' }}
+          # Downstream repo coordinates + an App token, so Locate can check whether
+          # the matching downstream release branch exists BEFORE waiting for its
+          # build. A promotable downstream image is only ever built for a line that
+          # has a matching downstream releases/X.Y branch, so without one the wait
+          # could only ever time out. Empty when the downstream App is unconfigured
+          # (Locate then waits for the downstream build instead of probing).
+          OWNER: ${{ github.repository_owner }}
+          DOWNSTREAM_REPO: ${{ secrets.DOWNSTREAM_REPO }}
+          DS_TOKEN: ${{ steps.ds-token.outputs.token }}
 
       # Resolve the effective sides to release against what actually exists. A
       # downstream release requested for a commit whose rolling build produced no
@@ -409,6 +449,10 @@ jobs:
           REQ_DOWNSTREAM: ${{ steps.config.outputs.release-downstream }}
           REQ_TEST: ${{ steps.config.outputs.test }}
           DS_BUILT: ${{ steps.locate.outputs.downstream-built }}
+          # Whether the matching downstream release branch is absent (Locate probed
+          # the downstream repo). When true a public release ships the engine only,
+          # while an internal/test release fails: there is no downstream to ship.
+          DS_BRANCH_MISSING: ${{ steps.locate.outputs.downstream-branch-missing }}
           SHA: ${{ steps.locate.outputs.git-sha }}
         uses: ./.ci/.github/actions/resolve-release-components
 
@@ -1225,11 +1269,14 @@ jobs:
     # Backwards compatible with pre-licensing release lines. release.yml is the one
     # canonical (main) workflow, run manually to promote ANY line, so this job also
     # runs when releasing an older commit (e.g. releases/3.1, releases/3.2) whose
-    # rolling build never produced a licensed image. The "licensed image present?"
-    # step below probes the downstream ECR and no-ops green when it is absent, so
-    # releasing a line without licence enforcement simply skips the licensed mirror
-    # rather than failing. finalize-engine then proceeds (a skipped-but-green
-    # licensed job satisfies its gate).
+    # rolling build never produced a licensed image. Whether a licensed image exists
+    # is read from the downstream.json manifest (`downstream-licensed`), written by
+    # the rolling build that produced the image: a line whose downstream build
+    # predates licence enforcement has no such flag and reads false, so the mirror
+    # steps skip and the job no-ops green. The job still RUNS (only its steps skip)
+    # so finalize-engine's `result == 'success'` gate stays satisfied. The manifest
+    # flag is the source of truth for licensed presence, so no registry probe (and
+    # no ECR describe permission) is needed.
     needs: [prepare-vars, approve]
     if: >-
       ${{ needs.prepare-vars.outputs.release-engine == 'true'
@@ -1260,48 +1307,26 @@ jobs:
             echo "::notice title=Mirror downstream licensed::DOWNSTREAM_DOCKERHUB_REPOSITORY not set; skipping the licensed DockerHub mirror."
           fi
 
-      # Backwards compatibility with pre-licensing release lines: probe the
-      # downstream ECR for this commit's licensed source tag. A public release is
-      # guaranteed to be cut from a releases/* line (prepare-vars fails otherwise),
-      # so absence here means that releases/* line predates licence enforcement (its
-      # rolling build produced no `-licensed` image); skip the mirror and no-op green
-      # rather than fail the release.
-      # Uses the runner's ambient IAM (describe-images, no docker login needed); the
-      # region is derived from the registry host.
-      - name: Licensed image present for this commit?
-        id: src
-        if: steps.cfg.outputs.configured == 'true'
+      # Backwards compatibility with pre-licensing release lines: a `-licensed` image
+      # only exists when this commit's downstream build recorded it in downstream.json
+      # (`downstream-licensed`), so the mirror steps below gate on that flag directly.
+      # A releases/* line whose downstream build predates licence enforcement reads
+      # false and skips them, the job no-ops green, and this step records WHY in the
+      # log. When true the image is pulled with a docker login (get-login-password),
+      # which needs no ECR describe permission.
+      - name: Note a skipped licensed mirror
+        if: steps.cfg.outputs.configured == 'true' && needs.prepare-vars.outputs.downstream-licensed != 'true'
         env:
-          REGISTRY: ${{ secrets.AWS_ECR_REGISTRY }}
-          REPO: ${{ secrets.DOWNSTREAM_ECR_REPOSITORY }}
           TAG: ${{ needs.prepare-vars.outputs.rolling-source-tag }}-licensed${{ matrix.tag-suffix }}
-        run: |
-          set -euo pipefail
-          region="$(printf '%s' "$REGISTRY" | cut -d. -f4)"
-          # Only a genuine ImageNotFoundException may be read as "this line predates
-          # licence enforcement". Any other failure (throttling, expired instance
-          # credentials, a renamed repository) must fail loudly: treating it as
-          # absence would skip the mirror, satisfy finalize-downstream, and record a
-          # release with no licensed image on DockerHub. Capture stderr (stdout to
-          # /dev/null) and branch on the error.
-          if err=$(aws ecr describe-images --region "$region" --repository-name "$REPO" \
-                     --image-ids "imageTag=${TAG}" 2>&1 >/dev/null); then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          elif printf '%s' "$err" | grep -q 'ImageNotFoundException'; then
-            echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=Mirror downstream licensed::No licensed image (${TAG}) in the downstream ECR for this commit; this release line predates licence enforcement, skipping the licensed DockerHub mirror."
-          else
-            echo "::error title=Mirror downstream licensed::Could not probe the downstream ECR for ${TAG}: ${err}"
-            exit 1
-          fi
+        run: echo "::notice title=Mirror downstream licensed::This commit's downstream build recorded no licensed (${TAG}) image; this release line predates licence enforcement, skipping the licensed DockerHub mirror."
 
       - name: Checkout sources
-        if: steps.cfg.outputs.configured == 'true' && steps.src.outputs.present == 'true'
+        if: steps.cfg.outputs.configured == 'true' && needs.prepare-vars.outputs.downstream-licensed == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Sanitize tag prefix
         id: tag
-        if: steps.cfg.outputs.configured == 'true' && steps.src.outputs.present == 'true'
+        if: steps.cfg.outputs.configured == 'true' && needs.prepare-vars.outputs.downstream-licensed == 'true'
         env:
           NAME: ${{ needs.prepare-vars.outputs.name }}
         run: |
@@ -1309,7 +1334,7 @@ jobs:
           echo "tag-prefix=${tag_prefix}" >> "$GITHUB_OUTPUT"
 
       - name: Mirror licensed image to DockerHub
-        if: steps.cfg.outputs.configured == 'true' && steps.src.outputs.present == 'true'
+        if: steps.cfg.outputs.configured == 'true' && needs.prepare-vars.outputs.downstream-licensed == 'true'
         uses: ./.github/actions/mirror-docker
         with:
           dry-run: ${{ needs.prepare-vars.outputs.publish != 'true' }}
