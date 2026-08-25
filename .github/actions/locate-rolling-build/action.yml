@@ -4,8 +4,8 @@ description: >-
   rolling artifacts exist (waiting for in-progress builds on versioned
   releases). Extracted verbatim from release.yml; the interface is the ENV
   VARS set on the calling step - EVENT, CHANNEL, ROLLING_BUCKET, AWS_REGION,
-  REQ_ENGINE, REQ_DOWNSTREAM, REQUESTED_REF, REQ_DOWNSTREAM_SHA, GH_TOKEN,
-  WAIT_MINUTES - which
+  REQ_ENGINE, REQ_DOWNSTREAM, INTERNAL, REQUESTED_REF, REQ_DOWNSTREAM_SHA,
+  GH_TOKEN, WAIT_MINUTES - which
   propagate into this composite step's process environment. Needs the repo
   checked out at the workspace root (it resolves refs with git) and AWS
   credentials able to read the rolling bucket.
@@ -488,9 +488,15 @@ runs:
           # downstream-only versioned release: promoting the downstream image implies
           # wanting to promote the engine at the same commit later, so the engine
           # build must succeed too (this wait is deliberately release-branch only).
+          #
+          # The exception is an INTERNAL downstream release: it exists precisely to
+          # ship the downstream image for internal testing WITHOUT coupling to the
+          # engine build, so it never waits. Internal is downstream-only, so
+          # REQ_ENGINE is false and the engine side is skipped entirely below.
+          #
           # A nightly (manual) dispatch keeps the original fail-fast and only when
           # the engine side is actually being released.
-          if [[ "$CHANNEL" == "versioned" ]]; then
+          if [[ "$CHANNEL" == "versioned" && "${INTERNAL:-false}" != "true" ]]; then
             wait_for_build engine "$slug" "$sha"
           elif [[ "$REQ_ENGINE" == "true" ]]; then
             if ! manifest_exists "$slug" "$sha"; then

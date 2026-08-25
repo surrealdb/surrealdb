@@ -31,7 +31,7 @@
 
 name: Release
 
-run-name: "${{ github.event_name == 'schedule' && (github.event.schedule == '30 0 * * *' && 'Nightly release (downstream)' || 'Nightly release (engine)') || format('{0}Release {1} (type: {2}, components: {3})', (!inputs.publish && '[dry-run] ' || ''), inputs.git-sha || 'latest release branch', inputs.release-type, inputs.components) }}"
+run-name: "${{ github.event_name == 'schedule' && (github.event.schedule == '30 0 * * *' && 'Nightly release (downstream)' || 'Nightly release (engine)') || format('{0}Release {1} (type: {2}, components: {3})', (!inputs.publish && '[dry-run] ' || ''), inputs.git-sha || 'latest release branch', inputs.release-type, (inputs.components == 'downstream (internal)' && 'internal' || inputs.components)) }}"
 
 on:
   workflow_dispatch:
@@ -48,11 +48,12 @@ on:
         required: false
         type: choice
         default: both
-        description: "Which build(s) to release: engine, downstream, or both"
+        description: "Which build(s) to release"
         options:
           - both
           - engine
           - downstream
+          - downstream (internal)
       git-sha:
         required: false
         default: ''
@@ -195,6 +196,12 @@ jobs:
       # effective values (in `resolve`) also account for whether a downstream
       # image actually exists. Used to gate the engine/downstream jobs.
       components: ${{ steps.config.outputs.components }}
+      # An internal downstream release (components: 'downstream (internal)'):
+      # mirror the image for internal testing without waiting on the engine build
+      # or pruning shared artifacts, tagged with build metadata so it never
+      # collides with the public release. Gates the engine wait, prune, and the
+      # release name below.
+      internal: ${{ steps.config.outputs.internal }}
       release-engine: ${{ steps.resolve.outputs.release-engine }}
       release-downstream: ${{ steps.resolve.outputs.release-downstream }}
       # Downstream provenance. `downstream-built` is the authoritative "a
@@ -368,6 +375,9 @@ jobs:
           # a downstream-only release must not require an engine build to exist.
           REQ_ENGINE: ${{ steps.config.outputs.release-engine }}
           REQ_DOWNSTREAM: ${{ steps.config.outputs.release-downstream }}
+          # Internal downstream release: skip the versioned engine-build wait
+          # below (the whole point is not to block on the engine build).
+          INTERNAL: ${{ steps.config.outputs.internal }}
           # The requested ref: a SHA, a branch, or empty (default to the latest
           # release line). Resolved to a concrete SHA below.
           REQUESTED_REF: ${{ steps.config.outputs.requested-ref }}
@@ -437,6 +447,11 @@ jobs:
         uses: ./.ci/.github/actions/prepare-release-vars
         with:
           nightly-release: ${{ steps.config.outputs.nightly-release }}
+          internal: ${{ steps.config.outputs.internal }}
+          # The downstream commit the image was built from; its short sha joins the
+          # engine short sha in an internal release's tag metadata (locate resolved
+          # it from the downstream.json manifest).
+          downstream-sha: ${{ steps.locate.outputs.downstream-sha }}
 
       # Decide whether this release owns the `latest` pointers (latest.txt,
       # v<major>.txt and the Docker `latest` tag). This is deliberately NOT "is
@@ -1397,8 +1412,13 @@ jobs:
     # and propagate all run on dry-runs, so their success is required in both
     # modes; mirror-downstream stays publish-gated, so a dry-run accepts it
     # skipped.
+    #
+    # An INTERNAL downstream release never prunes: it is an ephemeral test build
+    # that must not delete the shared rolling artifacts a later public release of
+    # this line still depends on.
     if: >-
       ${{ always() && needs.prepare-vars.result == 'success'
+      && needs.prepare-vars.outputs.internal != 'true'
       && (needs.prepare-vars.outputs.release-engine != 'true'
           || (needs.promote.result == 'success'
               && needs.mirror-docker.result == 'success'
@@ -1459,7 +1479,9 @@ jobs:
     needs: [prepare-vars, prune]
     # Runs on dry-runs too (deletions become a logged preview), so the
     # destructive ECR tag selection is validated at release time rather than
-    # surprising us on the first real prune.
+    # surprising us on the first real prune. An internal release is excluded for
+    # free: `prune` is skipped for it, and this job requires `prune` to have
+    # succeeded, so it never runs.
     if: >-
       ${{ always()
       && needs.prune.result == 'success'
@@ -1540,10 +1562,12 @@ jobs:
   bump-release-version:
     name: Bump release branch version
     needs: [prepare-vars, propagate]
-    # Gate on the actual release outcome:
-    #   * publish run  -> require propagate to have succeeded
-    #   * dry-run      -> propagate is skipped (its `if` is false), so allow skipped
-    if: ${{ always() && inputs.release-type == 'versioned' && startsWith(needs.prepare-vars.outputs.branch-slug, 'releases-') && needs.prepare-vars.result == 'success' && ((needs.prepare-vars.outputs.publish == 'true' && needs.propagate.result == 'success') || (needs.prepare-vars.outputs.publish != 'true' && (needs.propagate.result == 'success' || needs.propagate.result == 'skipped'))) }}
+    # Engine side only: a downstream-only release (internal or not) ships an image
+    # and never touches the engine's release-branch version, so it must not bump.
+    # propagate is the engine-release signal here (it runs whenever the engine side
+    # is released, in `--dryrun` mode on a dry-run), so requiring its success both
+    # gates on the engine side and confirms the release chain completed.
+    if: ${{ always() && inputs.release-type == 'versioned' && needs.prepare-vars.outputs.release-engine == 'true' && startsWith(needs.prepare-vars.outputs.branch-slug, 'releases-') && needs.prepare-vars.result == 'success' && needs.propagate.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -1637,7 +1661,11 @@ jobs:
   advance-main-version:
     name: Advance main development version
     needs: [prepare-vars, propagate]
-    if: ${{ always() && inputs.release-type == 'versioned' && needs.prepare-vars.outputs.pre-release == 'false' && needs.prepare-vars.result == 'success' && ((needs.prepare-vars.outputs.publish == 'true' && needs.propagate.result == 'success') || (needs.prepare-vars.outputs.publish != 'true' && (needs.propagate.result == 'success' || needs.propagate.result == 'skipped'))) }}
+    # Engine side only (like bump-release-version): a downstream-only release
+    # never advances main's engine dev version. propagate is the engine-release
+    # signal (runs in `--dryrun` mode on a dry-run), so requiring its success gates
+    # on the engine side and confirms the release chain completed.
+    if: ${{ always() && inputs.release-type == 'versioned' && needs.prepare-vars.outputs.release-engine == 'true' && needs.prepare-vars.outputs.pre-release == 'false' && needs.prepare-vars.result == 'success' && needs.propagate.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

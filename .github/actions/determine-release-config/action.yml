@@ -10,6 +10,9 @@ outputs:
   components:
     description: 'components (see step body)'
     value: ${{ steps.config.outputs.components }}
+  internal:
+    description: 'internal (see step body)'
+    value: ${{ steps.config.outputs.internal }}
   nightly-release:
     description: 'nightly-release (see step body)'
     value: ${{ steps.config.outputs.nightly-release }}
@@ -66,19 +69,33 @@ runs:
         # Which sides to release. Defaults to both; the engine side covers
         # binaries, crates, the public DockerHub image and all the follow-up
         # PRs, while the downstream side is only the private image mirror.
+        #
+        # 'downstream (internal)' is a downstream-only variant for internal test
+        # builds: same image mirror, but `internal=true` later skips the engine
+        # build wait and the artifact prune, and shifts the release name to carry
+        # build metadata so it never collides with the public tag. It is a manual,
+        # versioned concept only (engine has no internal notion; the scheduled
+        # nightly sets `components` itself and never reaches here as internal).
         [[ -z "$components" ]] && components=both
+        internal=false
         case "$components" in
-          both)       release_engine=true;  release_downstream=true ;;
-          engine)     release_engine=true;  release_downstream=false ;;
-          downstream) release_engine=false; release_downstream=true ;;
-          *) echo "::error::Unknown components value '${components}' (expected both|engine|downstream)"; exit 1 ;;
+          both)                    release_engine=true;  release_downstream=true ;;
+          engine)                  release_engine=true;  release_downstream=false ;;
+          downstream)              release_engine=false; release_downstream=true ;;
+          "downstream (internal)") release_engine=false; release_downstream=true; internal=true ;;
+          *) echo "::error::Unknown components value '${components}' (expected both|engine|downstream|'downstream (internal)')"; exit 1 ;;
         esac
+        if [[ "$internal" == "true" && "$channel" != "versioned" ]]; then
+          echo "::error::'downstream (internal)' is only valid for a versioned release (release-type: versioned), not '${channel}'."
+          exit 1
+        fi
         {
           echo "requested-ref=${requested_ref}"
           echo "release-channel=${channel}"
           echo "nightly-release=${nightly}"
           echo "publish=${publish}"
           echo "components=${components}"
+          echo "internal=${internal}"
           echo "release-engine=${release_engine}"
           echo "release-downstream=${release_downstream}"
         } >> "$GITHUB_OUTPUT"

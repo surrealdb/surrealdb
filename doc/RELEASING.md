@@ -90,8 +90,11 @@ Rolling builds keep full `mode=max` provenance + SBOM attestations on the privat
 ECR image (internal audit trail). They do **not** publish crates (crates.io
 versions are write-once) and do **not** re-run the CI quality/test matrix —
 correctness is gated by `ci.yml` on the same commit. The baked binary version
-comes from `Cargo.toml` plus build metadata (commit date/rev), so a `releases/*`
-commit already carries its intended release version. Every job is guarded by
+comes from `Cargo.toml`; the nightly (`main`) line additionally appends build
+metadata (`+<date>.<rev>`) so one `X.Y.0-nightly` build can be told from another,
+while a `releases/*` commit already carries a unique version (e.g. `3.3.0-beta.3`)
+and is baked **clean**, so `surreal version` reads the plain release version (the
+tag already identifies it). Every job is guarded by
 `github.repository`, so the workflow never runs in the public mirror.
 
 #### Channels
@@ -198,9 +201,13 @@ release **waits** for the required build(s) to finish before the approval gate:
 
 - It always waits for the **engine** build — even for a `components: downstream`
   release, because promoting the downstream image implies wanting to promote the engine at
-  the same commit later, so the engine build must succeed too.
+  the same commit later, so the engine build must succeed too. The one exception
+  is a **`downstream (internal)`** release (see [`components`](#components)): it
+  deliberately does **not** wait, shipping the downstream image for internal
+  testing without coupling to the engine build.
 - It additionally waits for the **downstream** build when the downstream side is
-  being released.
+  being released (internal releases included, since the downstream image is what
+  they ship).
 
 The wait polls S3 for the promotable artifacts and the Actions API for the
 build's run state, so a build that has already **failed** errors out immediately
@@ -371,6 +378,10 @@ The tag name matches the engine release (`vX.Y.Z`), so a downstream incident
 maps 1:1 to its engine release. Cloning the downstream and checking out the tag
 then rebuilds the exact engine + downstream code that shipped (fetching the
 pinned engine commit still requires read access to this private engine repo).
+An **internal** release ([`downstream (internal)`](#internal-test-releases))
+is tagged the same way, but its name carries build metadata
+(`vX.Y.Z+<engine-sha>.<downstream-sha>`) so its tag stays distinct from the public
+`vX.Y.Z` and never collides with it.
 
 The job runs on dry-runs too — it performs the pin and validation but does not
 push — so a dry-run surfaces a broken pin before a real release. It is
@@ -500,7 +511,7 @@ come in several flavors:
 - **When to use**: After verifying dry-run succeeds
 
 #### `components`
-- **Type**: Choice (`both`, `engine`, `downstream`)
+- **Type**: Choice (`both`, `engine`, `downstream`, `downstream (internal)`)
 - **Description**: Which side(s) to promote — the **engine** (public binaries,
   crates, GitHub release, DockerHub image) and/or the **downstream** (the private
   image mirror only).
@@ -513,6 +524,51 @@ come in several flavors:
   **fails fast** if no downstream image was built for that commit, rather than
   silently shipping without it. The two scheduled nightlies promote one side each
   (`engine` at `00:00`, `downstream` at `00:30`).
+
+##### Internal test releases
+
+Mirrors the downstream image for **internal testing** and nothing more. Use it
+when you need a downstream image deployed internally quickly and are **not**
+cutting a public release from the same commit. It is downstream-only and
+**versioned-only** (rejected on a nightly). Relative to a normal `downstream`
+release it:
+
+- **does not wait for the engine build.** A normal versioned downstream release
+  waits for the engine build too, on the assumption a matching public engine
+  release will follow ([Waiting for an in-progress build](#waiting-for-an-in-progress-build-versioned-releases));
+  an internal release drops that assumption and ships as soon as the downstream
+  image is ready.
+- **does not prune** superseded rolling artifacts (S3 or ECR). An internal build
+  is ephemeral and must not delete artifacts a later public release still needs.
+- **tags with build metadata.** The release name becomes
+  `v<version>+<engine-sha>.<downstream-sha>`, so the downstream git tag is
+  e.g. `v3.3.0-beta.3+6dce5c8.5fe3bc9` and the ECR/ACR image tag is
+  `v3.3.0-beta.3-6dce5c8.5fe3bc9` (`+` → `-`, as Docker forbids `+`). The two
+  short shas identify the exact engine+downstream pairing the image was built
+  from, so the name is unique whichever side you iterate (a fixed engine with a
+  fresh downstream commit still gets a new tag) and is **distinct from the public
+  `v3.3.0-beta.3`**, so it never claims or overwrites the real release.
+
+It still mirrors to ECR + ACR, still creates a reproducibility tag on the
+downstream repo, and still goes through the channel's approval gate. Because it
+promotes the same build-once artifact a public release would, the **image's
+`surreal version` reads the clean `3.3.0-beta.3`** (no metadata); internal
+builds are told apart by their tag and image digest, not by the version string.
+Internal images carry the release version but are **not** for production; deploy
+them only to internal/test environments.
+
+The milestone-readiness advisory ([Approval gate](#approval-gate)) is skipped for
+an internal release (its metadata-bearing name matches no `vX.Y.Z` milestone), on
+the basis that a throwaway test build is not the release that closes a milestone.
+
+**Retention.** Internal tags, images, and completion markers are not pruned
+automatically: release-style tags (`v*`) are never pruned (pruning only removes
+`rolling-*` tags), and internal releases skip pruning entirely. Each internal
+release therefore leaves a downstream git tag, ECR/ACR image tags, and a
+`releases/<name>/downstream.json` marker in place. These are cut infrequently, so
+accumulation is not a pressing concern; whether and how to age them out is an open
+question to settle with the teams that consume the images, once their use-cases
+are understood. Remove any you no longer need manually in the meantime.
 
 #### `overwrite`
 - **Type**: Boolean
@@ -567,6 +623,8 @@ prunes what it actually superseded:
   binaries, the stored npm bundles, and the engine ECR images).
 - A **downstream** release prunes ancestors' downstream ECR images.
 - A **both** release prunes both.
+- A **`downstream (internal)`** release prunes **nothing**: it is an ephemeral
+  test build and must not delete artifacts a later public release still needs.
 
 The tiny JSON manifests (`engine.json` + `downstream.json`) are **always** kept.
 This means promoting one side now and the other side later (for the same commit,

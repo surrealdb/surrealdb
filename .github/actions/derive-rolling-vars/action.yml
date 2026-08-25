@@ -43,7 +43,6 @@ runs:
         full_sha=$(git rev-parse HEAD)
         date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
         rev=$(git rev-parse --short HEAD)
-        build_metadata="${date}.${rev}"
 
         # The branch that namespaces the artifacts must be the line the BUILT
         # commit belongs to, not the ref the workflow file ran from: the release
@@ -84,6 +83,22 @@ runs:
               fi
             done
           fi
+        fi
+
+        # Build metadata (date.rev) is baked into the binary version, via
+        # SURREAL_BUILD_METADATA, ONLY for the nightly line (main). Every main
+        # commit shares the same X.Y.Z-nightly Cargo version, so the metadata is
+        # what tells one nightly binary from another. A versioned line
+        # (releases/*) already carries a unique version (e.g. 3.3.0-beta.3), so
+        # metadata there is redundant noise: leave it empty so `surreal version`
+        # reads the clean release version. This governs both the engine binaries
+        # and the downstream image, since both compile the engine from the commit
+        # checked out here, and it is the ONLY thing build metadata affects (the
+        # artifacts are keyed by sha, not by version string).
+        if [ "${branch}" = "main" ]; then
+          build_metadata="${date}.${rev}"
+        else
+          build_metadata=""
         fi
 
         # Slug the branch for namespacing: non-alphanumerics -> '-', lowercased.
