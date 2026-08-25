@@ -6,12 +6,12 @@ inputs:
     description: 'Whether this is a nightly release'
     required: false
     default: 'true'
-  internal:
-    description: 'Whether this is an internal downstream release (the release name carries build metadata so it never collides with the public tag)'
+  test:
+    description: 'Whether this is a test release (the release name carries build metadata so it never collides with a public tag)'
     required: false
     default: 'false'
   downstream-sha:
-    description: 'Full downstream commit sha the internal image was built from; its short form goes into the internal release metadata so distinct engine/downstream pairings never collide'
+    description: 'Full downstream commit sha the test image was built from; its short form goes into the test release metadata so distinct engine/downstream pairings never collide'
     required: false
     default: ''
 
@@ -29,7 +29,7 @@ outputs:
     description: 'Release environment name (nightly, alpha, beta, stable)'
     value: ${{ steps.outputs.outputs.release-name }}
   build-metadata:
-    description: 'Build metadata (nightly and internal releases)'
+    description: 'Build metadata (nightly and test releases)'
     value: ${{ steps.outputs.outputs.build-metadata }}
 
 runs:
@@ -70,21 +70,20 @@ runs:
         else
           # Versioned release - use version from Cargo.toml
           echo "version=${cargo_version}" >> $GITHUB_OUTPUT
-          # Internal downstream releases carry build metadata in the release name,
-          # so the git tag becomes v<version>+<metadata> and the image tag
-          # v<version>-<metadata> (the mirror sanitizer maps '+' to '-'). The
-          # metadata is the engine and downstream short shas (<engine>.<downstream>)
-          # that identify the exact pairing the internal image was built from, so
-          # it is unique whichever side is iterated (back-to-back internal tests
-          # against a fixed engine never collide) and stays distinct from the
-          # public v<version> tag, so an internal release never claims or clobbers
-          # the real release. The binary's own version stays clean (it is the same
-          # build-once artifact the public release promotes), so the metadata lives
-          # in the tag, not in `surreal version`.
-          if [[ "${{ inputs.internal }}" == "true" ]]; then
+          # Test releases carry build metadata in the release name, so the git tag
+          # becomes v<version>+<metadata> and the image tag v<version>-<metadata>
+          # (the mirror sanitizer maps '+' to '-'). The metadata is the engine and
+          # downstream short shas (<engine>.<downstream>) that identify the exact
+          # pairing the test image was built from, so it is unique whichever side is
+          # iterated (back-to-back test builds against a fixed engine never collide)
+          # and stays distinct from the public v<version> tag, so a test release
+          # never claims or clobbers the real release. The binary's own version stays
+          # clean (it is the same build-once artifact the public release promotes), so
+          # the metadata lives in the tag, not in `surreal version`.
+          if [[ "${{ inputs.test }}" == "true" ]]; then
             ds_sha="${{ inputs.downstream-sha }}"
             if [[ -z "$ds_sha" ]]; then
-              echo "::error::internal release: downstream-sha is empty, cannot build the internal tag metadata."
+              echo "::error::test release: downstream-sha is empty, cannot build the test tag metadata."
               exit 1
             fi
             build_metadata="$(git rev-parse --short HEAD).${ds_sha:0:9}"

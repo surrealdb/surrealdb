@@ -187,11 +187,34 @@ SHA it:
   The release version is injected via `SURREAL_VERSION`, so the addon and module
   carry the same version as the `surrealdb` release whose engine they embed.
   Nightly publishes no npm packages,
-- **mirrors** the prebuilt Docker image from private ECR to the public DockerHub
-  using `docker buildx imagetools create` (no rebuild), reproducing the full tag
-  matrix (`:vX.Y.Z`, `:X.Y`, `:X`, `:latest`, `:nightly`, `-dev`, etc.), and
+- **mirrors** prebuilt public images from private ECR to DockerHub with
+  `docker buildx imagetools create` (no rebuild, build attestations stripped).
+  Two independent public mirrors to two repos, with different tag matrices:
+  - the **engine** image to `surrealdb/surrealdb`, full matrix (`:vX.Y.Z`,
+    `:X.Y`, `:X`, `:latest`, `:nightly`, `-dev`), and
+  - on a **`public`** release (it ships with the engine), the **licence-enforcing**
+    image to the enterprise DockerHub repo named by the
+    `DOWNSTREAM_DOCKERHUB_REPOSITORY` variable (`:vX.Y.Z` + optional `:latest`,
+    `-dev`; no moving `:X.Y`/`:X`). It is a public customer artefact, so it ships
+    with the engine and never on its own: an `internal` or `test` release, and
+    nightly, do not publish it. Also skipped when that variable is unset or the
+    commit has no licensed image. The enforcement-off internal image is promoted
+    only within the private registries, never to DockerHub,
 - propagates the binaries to all regions, then prunes superseded rolling
   artifacts for that branch line.
+
+> **Licensed image prerequisite.** Publishing the licence-enforcing image requires
+> the **`DOWNSTREAM_DOCKERHUB_REPOSITORY`** repo *variable* (Settings → Secrets and
+> variables → Actions → Variables) set to the enterprise DockerHub repo. It is a
+> public image name, not a secret, so it stays inspectable and prints unmasked in
+> the mirror logs; auth reuses the `DOCKER_USER`/`DOCKER_PASS` secrets. While the
+> variable is unset the licensed mirror logs a notice and no-ops, so the release
+> still succeeds without publishing that image.
+>
+> A **`public`** release must be cut from a **`releases/*`** line, since the licensed
+> image is built only there; `prepare-vars` fails a public release from any other
+> source (e.g. `main`) with guidance to cut the release branch first (use `internal`
+> or `test` for a non-public build).
 
 #### Waiting for an in-progress build (versioned releases)
 
@@ -199,15 +222,14 @@ Releasing the **tip** of a release branch often races that tip's rolling build,
 which may still be running. Rather than failing immediately, a **versioned**
 release **waits** for the required build(s) to finish before the approval gate:
 
-- It always waits for the **engine** build — even for a `components: downstream`
-  release, because promoting the downstream image implies wanting to promote the engine at
-  the same commit later, so the engine build must succeed too. The one exception
-  is a **`downstream (internal)`** release (see [`components`](#components)): it
-  deliberately does **not** wait, shipping the downstream image for internal
-  testing without coupling to the engine build.
-- It additionally waits for the **downstream** build when the downstream side is
-  being released (internal releases included, since the downstream image is what
-  they ship).
+- It waits for the **engine** build on a versioned `public` or `internal` release,
+  because promoting either implies the engine at the same commit later, so the
+  engine build must succeed too. The one exception is a **`test`** release (see
+  [`components`](#components)): it deliberately does **not** wait, shipping an
+  ephemeral image without coupling to the engine build.
+- It additionally waits for the **downstream** build whenever the downstream image
+  is being released (`public`, `internal`, or `test`), since that image is what
+  they ship.
 
 The wait polls S3 for the promotable artifacts and the Actions API for the
 build's run state, so a build that has already **failed** errors out immediately
@@ -219,9 +241,10 @@ it is ready. On timeout it fails with a clear error. The window is the
 
 #### Approval gate
 
-Everything that ships something permanent — crates.io, the public download
-bucket + GitHub release, the DockerHub image, the downstream image mirror and the
-regional replication — sits behind a single `approve` job. Every one of those
+Everything that ships something permanent (crates.io, the public download
+bucket + GitHub release, the DockerHub engine image, the downstream Cloud image
+mirror to ECR/ACR, the licensed downstream image on DockerHub, and the regional
+replication) sits behind a single `approve` job. Every one of those
 jobs `needs: approve`, and the gate runs **before** `publish-crates`/`promote`,
 so **nothing is published until the run is approved**. The gate binds a GitHub
 [environment](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)
@@ -378,10 +401,8 @@ The tag name matches the engine release (`vX.Y.Z`), so a downstream incident
 maps 1:1 to its engine release. Cloning the downstream and checking out the tag
 then rebuilds the exact engine + downstream code that shipped (fetching the
 pinned engine commit still requires read access to this private engine repo).
-An **internal** release ([`downstream (internal)`](#internal-test-releases))
-is tagged the same way, but its name carries build metadata
-(`vX.Y.Z+<engine-sha>.<downstream-sha>`) so its tag stays distinct from the public
-`vX.Y.Z` and never collides with it.
+This tag is written for `public` and `internal` releases; a `test` release does
+not tag the downstream repo.
 
 The job runs on dry-runs too — it performs the pin and validation but does not
 push — so a dry-run surfaces a broken pin before a real release. It is
@@ -428,21 +449,21 @@ promoted from the branch → on `(X+1).0.0` stable, `main` advances to
 - **Trigger**: Automatically on a schedule, or manually via workflow dispatch.
   There are **two decoupled nightly promotes**, on separate schedules and separate
   concurrency keys so a failure on one never blocks the other:
-  - **`00:00 UTC` — engine nightly** (`components: engine`): promotes the public
+  - **`00:00 UTC`, engine nightly** (`components: engine`): promotes the public
     binaries + DockerHub image for the newest built `main` commit.
-  - **`00:30 UTC` — downstream nightly** (`components: downstream`): mirrors the
-    newest built downstream image to the `nightly` tag. Never tags the
+  - **`00:30 UTC`, downstream nightly** (`components: internal`): mirrors the
+    newest built enforcement-off internal image to the `nightly` tag. Never tags the
     downstream repo (tagging is versioned-only) and, being on `main`, never moves
-    a `latest` pointer.
+    a `latest` pointer. The licensed image is not built or published on this channel.
 - **Version Format**: Derived from main's version, which is always `X.Y.0-nightly` (e.g. `3.2.0-nightly`), plus build metadata
 - **Artifacts**: Binaries, Docker images (tagged with `nightly`)
 - **No**: Crate publishing, Git tags, GitHub releases, or main branch updates
 
 **When to use**: Never manually trigger unless testing the nightly pipeline, or to
 promote a **downstream-only** image off `main` for cloud testing (`release-type: nightly`,
-`components: downstream`, and a `main` commit or the `main` tip) — this ships the
-downstream image without requiring a corresponding engine release and without tagging the
-downstream repo.
+`components: internal`, and a `main` commit or the `main` tip): this ships the
+enforcement-off internal image without requiring a corresponding engine release and
+without tagging the downstream repo.
 
 ### Versioned Releases
 
@@ -511,64 +532,75 @@ come in several flavors:
 - **When to use**: After verifying dry-run succeeds
 
 #### `components`
-- **Type**: Choice (`both`, `engine`, `downstream`, `downstream (internal)`)
-- **Description**: Which side(s) to promote — the **engine** (public binaries,
-  crates, GitHub release, DockerHub image) and/or the **downstream** (the private
-  image mirror only).
-- **Default**: `both`
+- **Type**: Choice (`public`, `internal`, `test`)
+- **Description**: What to release:
+  - **`public`** (default): the full public release: engine binaries, crates, the
+    GitHub release, the engine DockerHub image, the **licence-enforcing** image (to
+    the enterprise DockerHub repo), **and** the enforcement-off internal image to
+    the private registries. The licensed image ships only here, with the engine.
+  - **`internal`**: the enforcement-off internal image to the private registries
+    only (mirror, the downstream reproducibility tag, finalize, prune). No public
+    artefacts.
+  - **`test`**: an ephemeral enforcement-off internal image for testing; see
+    [Internal test releases](#internal-test-releases).
+- **Default**: `public`
 - **Notes**: The rolling build writes the two sides as separate manifests
-  (`engine.json` and `downstream.json`, keyed by the same engine SHA), so each
-  side is promoted from its own manifest and can be selected independently. For a
-  **versioned** `downstream` (or `both`) release the promote **waits** for the
-  build (see `build-wait-minutes`); a **manual nightly** `downstream` dispatch
-  **fails fast** if no downstream image was built for that commit, rather than
-  silently shipping without it. The two scheduled nightlies promote one side each
-  (`engine` at `00:00`, `downstream` at `00:30`).
+  (`engine.json` and `downstream.json`, keyed by the same engine SHA). A `public`
+  release needs both (engine binaries plus the downstream-built images); `internal`
+  and `test` need only the downstream manifest. For a versioned release the promote
+  **waits** for the required build(s) (see `build-wait-minutes`); a manual nightly
+  downstream dispatch **fails fast** if no downstream image was built. The two
+  scheduled nightlies promote one side each (the engine side at `00:00`, the
+  internal image at `00:30`). Only `public` publishes the licence-enforcing image;
+  `internal`, `test`, and both nightlies use the enforcement-off image exclusively,
+  so licensing is never enforced on them.
 
 ##### Internal test releases
 
-Mirrors the downstream image for **internal testing** and nothing more. Use it
-when you need a downstream image deployed internally quickly and are **not**
-cutting a public release from the same commit. It is downstream-only and
-**versioned-only** (rejected on a nightly). Relative to a normal `downstream`
+Mirrors an ephemeral internal image for **testing** and nothing more. Use it when
+you need an internal image deployed quickly and are **not** cutting a public
+release from the same commit. It sets only the `test` flag (not release-downstream)
+and is **versioned-only** (rejected on a nightly). Relative to a normal `internal`
 release it:
 
-- **does not wait for the engine build.** A normal versioned downstream release
-  waits for the engine build too, on the assumption a matching public engine
-  release will follow ([Waiting for an in-progress build](#waiting-for-an-in-progress-build-versioned-releases));
-  an internal release drops that assumption and ships as soon as the downstream
-  image is ready.
-- **does not prune** superseded rolling artifacts (S3 or ECR). An internal build
-  is ephemeral and must not delete artifacts a later public release still needs.
-- **tags with build metadata.** The release name becomes
-  `v<version>+<engine-sha>.<downstream-sha>`, so the downstream git tag is
-  e.g. `v3.3.0-beta.3+6dce5c8.5fe3bc9` and the ECR/ACR image tag is
-  `v3.3.0-beta.3-6dce5c8.5fe3bc9` (`+` → `-`, as Docker forbids `+`). The two
-  short shas identify the exact engine+downstream pairing the image was built
-  from, so the name is unique whichever side you iterate (a fixed engine with a
-  fresh downstream commit still gets a new tag) and is **distinct from the public
+- **does not wait for the engine build.** A normal versioned `internal` release
+  waits for the engine build too, on the assumption a matching public release will
+  follow ([Waiting for an in-progress build](#waiting-for-an-in-progress-build-versioned-releases));
+  a test release drops that assumption and ships as soon as the internal image is
+  ready.
+- **does not tag the downstream repo or finalize.** A normal `internal` release
+  sets release-downstream, which drives the downstream reproducibility tag and the
+  `downstream.json` completion marker; a test release sets only `test`, so neither
+  runs. It is purely a mirror.
+- **does not prune** superseded rolling artifacts (S3 or ECR). A test build is
+  ephemeral and must not delete artifacts a later public release still needs.
+- **tags the image with build metadata.** The release name becomes
+  `v<version>+<engine-sha>.<downstream-sha>`, so the ECR/ACR image tag is
+  e.g. `v3.3.0-beta.3-6dce5c8.5fe3bc9` (`+` → `-`, as Docker forbids `+`). The two
+  short shas identify the exact engine+downstream pairing the image was built from,
+  so the tag is unique whichever side you iterate (a fixed engine with a fresh
+  downstream commit still gets a new tag) and is **distinct from the public
   `v3.3.0-beta.3`**, so it never claims or overwrites the real release.
 
-It still mirrors to ECR + ACR, still creates a reproducibility tag on the
-downstream repo, and still goes through the channel's approval gate. Because it
-promotes the same build-once artifact a public release would, the **image's
-`surreal version` reads the clean `3.3.0-beta.3`** (no metadata); internal
-builds are told apart by their tag and image digest, not by the version string.
-Internal images carry the release version but are **not** for production; deploy
-them only to internal/test environments.
+It mirrors the enforcement-off image to the private registries (ECR + ACR) and goes
+through the channel's approval gate, but does not tag the downstream repo or write a
+completion marker. Because it promotes the same build-once artifact a public release
+would, the **image's `surreal version` reads the clean `3.3.0-beta.3`** (no
+metadata); test builds are told apart by their tag and image digest, not by the
+version string. They carry the release version but are **not** for production;
+deploy them only to internal/test environments.
 
-The milestone-readiness advisory ([Approval gate](#approval-gate)) is skipped for
-an internal release (its metadata-bearing name matches no `vX.Y.Z` milestone), on
-the basis that a throwaway test build is not the release that closes a milestone.
+The milestone-readiness advisory ([Approval gate](#approval-gate)) is skipped for a
+test release (its metadata-bearing name matches no `vX.Y.Z` milestone), on the basis
+that a throwaway test build is not the release that closes a milestone.
 
-**Retention.** Internal tags, images, and completion markers are not pruned
-automatically: release-style tags (`v*`) are never pruned (pruning only removes
-`rolling-*` tags), and internal releases skip pruning entirely. Each internal
-release therefore leaves a downstream git tag, ECR/ACR image tags, and a
-`releases/<name>/downstream.json` marker in place. These are cut infrequently, so
-accumulation is not a pressing concern; whether and how to age them out is an open
-question to settle with the teams that consume the images, once their use-cases
-are understood. Remove any you no longer need manually in the meantime.
+**Retention.** Test image tags are not pruned automatically (pruning only removes
+`rolling-*` tags, and a test release skips pruning entirely), so each test release
+leaves ECR/ACR image tags in place; it writes no downstream git tag or
+`downstream.json` marker. These are cut infrequently, so accumulation is not a
+pressing concern; whether and how to age them out is an open question to settle with
+the teams that consume the images. Remove any you no longer need manually in the
+meantime.
 
 #### `overwrite`
 - **Type**: Boolean
@@ -619,12 +651,12 @@ release stays re-runnable) and is pruned by the next release on the same line.
 Pruning is **per side**, symmetric with promotion, so a partial release only
 prunes what it actually superseded:
 
-- An **engine** release prunes ancestors' engine artifacts (the heavy S3
-  binaries, the stored npm bundles, and the engine ECR images).
-- A **downstream** release prunes ancestors' downstream ECR images.
-- A **both** release prunes both.
-- A **`downstream (internal)`** release prunes **nothing**: it is an ephemeral
-  test build and must not delete artifacts a later public release still needs.
+- A **`public`** release prunes both sides' ancestors: the engine artifacts (the
+  heavy S3 binaries, the stored npm bundles, and the engine ECR images) and the
+  downstream ECR images.
+- An **`internal`** release prunes ancestors' downstream ECR images.
+- A **`test`** release prunes **nothing**: it is an ephemeral build and must not
+  delete artifacts a later public release still needs.
 
 The tiny JSON manifests (`engine.json` + `downstream.json`) are **always** kept.
 This means promoting one side now and the other side later (for the same commit,
@@ -1164,8 +1196,10 @@ prepare-vars (resolve SHA -> branch; wait for/verify rolling engine.json + downs
 	│          ├─ advance-main-version (auto: when a stable X.Y.0 ships and main still rides that line)
 	│          ├─ update-homebrew-tap (auto: latest stable release)
 	│          └─→ summarize-prs (clickable list of the follow-up PRs opened above)
-	├─→ mirror-downstream (downstream side: ECR rolling image -> release tag + ACR)
-	│      └─→ tag-downstream (pin the released engine sha on the downstream commit, push the tag)
+	├─→ mirror-downstream (enforcement-off internal image: ECR rolling image -> release tag + ACR; runs for public/internal/test)
+	│      └─→ tag-downstream (pin the released engine sha on the downstream commit, push the tag; public/internal only)
+	├─→ mirror-downstream-licensed (public only: licensed ECR image -> DockerHub; skips if the -licensed image or DOWNSTREAM_DOCKERHUB_REPOSITORY is absent)
+	│      ↓  (finalize-engine needs it, so a failed licensed push blocks the engine release record)
 	└─→ prune (delete superseded rolling artifacts per released side; runs whenever the released side(s) succeed)
 	       └─→ prune-images (superseded ECR images: engine repo gated on engine side, downstream repo on downstream side)
 ```

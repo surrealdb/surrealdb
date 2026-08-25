@@ -4,7 +4,7 @@ description: >-
   rolling artifacts exist (waiting for in-progress builds on versioned
   releases). Extracted verbatim from release.yml; the interface is the ENV
   VARS set on the calling step - EVENT, CHANNEL, ROLLING_BUCKET, AWS_REGION,
-  REQ_ENGINE, REQ_DOWNSTREAM, INTERNAL, REQUESTED_REF, REQ_DOWNSTREAM_SHA,
+  REQ_ENGINE, REQ_DOWNSTREAM, TEST, REQUESTED_REF, REQ_DOWNSTREAM_SHA,
   GH_TOKEN, WAIT_MINUTES - which
   propagate into this composite step's process environment. Needs the repo
   checked out at the workspace root (it resolves refs with git) and AWS
@@ -489,14 +489,14 @@ runs:
           # wanting to promote the engine at the same commit later, so the engine
           # build must succeed too (this wait is deliberately release-branch only).
           #
-          # The exception is an INTERNAL downstream release: it exists precisely to
-          # ship the downstream image for internal testing WITHOUT coupling to the
-          # engine build, so it never waits. Internal is downstream-only, so
-          # REQ_ENGINE is false and the engine side is skipped entirely below.
+          # The exception is a TEST release: it ships an ephemeral downstream image
+          # for internal testing WITHOUT coupling to the engine build, so it skips
+          # this engine wait (REQ_ENGINE is false). It still waits for its own
+          # downstream build below.
           #
           # A nightly (manual) dispatch keeps the original fail-fast and only when
           # the engine side is actually being released.
-          if [[ "$CHANNEL" == "versioned" && "${INTERNAL:-false}" != "true" ]]; then
+          if [[ "$CHANNEL" == "versioned" && "${TEST:-false}" != "true" ]]; then
             wait_for_build engine "$slug" "$sha"
           elif [[ "$REQ_ENGINE" == "true" ]]; then
             if ! manifest_exists "$slug" "$sha"; then
@@ -528,16 +528,17 @@ runs:
           fi
         fi
 
-        # For a versioned release that ships the downstream image, WAIT for its
-        # downstream.json (same rationale as the engine wait above: a
-        # freshly-pushed release tip's downstream build may still be running).
-        # Nightly never reaches here (it resolved an already-built commit).
+        # For a versioned release that ships a downstream image (a downstream
+        # release or a test release), WAIT for its downstream.json (same rationale
+        # as the engine wait above: a freshly-pushed release tip's downstream build
+        # may still be running). Nightly never reaches here (it resolved an
+        # already-built commit).
         #   * REQ_DOWNSTREAM_SHA set -> wait for the SPECIFIC pairing (the engine
         #     commit's downstream.json must record that downstream commit), so a
         #     stale pairing the engine commit already carries is not accepted.
         #   * empty -> presence wait: ship whatever pairing the engine commit's
         #     downstream build recorded (the historical behaviour).
-        if [[ "$CHANNEL" == "versioned" && "$REQ_DOWNSTREAM" == "true" ]]; then
+        if [[ "$CHANNEL" == "versioned" && ( "$REQ_DOWNSTREAM" == "true" || "${TEST:-false}" == "true" ) ]]; then
           if [[ -n "${REQ_DOWNSTREAM_SHA:-}" ]]; then
             wait_for_downstream_pairing "$slug" "$sha" "$REQ_DOWNSTREAM_SHA"
           else

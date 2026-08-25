@@ -1,5 +1,5 @@
 name: 'Mirror Docker image'
-description: 'Faithfully mirror a prebuilt multi-arch image from private ECR to the public DockerHub, stripping build attestations'
+description: 'Faithfully mirror a prebuilt multi-arch image from private ECR to a public DockerHub repository, stripping build attestations'
 
 inputs:
   ecr-registry:
@@ -31,6 +31,16 @@ inputs:
   docker-pass:
     description: 'DockerHub password'
     required: true
+  dest-repo:
+    description: 'Destination DockerHub repository (namespace/name). Required and passed explicitly by every caller: no default, so a mis-wired or empty value is a loud failure rather than a silent push to the public flagship repo.'
+    required: true
+  extra-stable-tags:
+    description: >-
+      Whether a stable release also gets the moving :<major>.<minor> and :<major>
+      tags. True for the engine image. False for the downstream licensed image,
+      which follows the downstream tag convention (<name> + optional :latest only).
+    required: false
+    default: 'true'
   dry-run:
     description: 'Verify the source manifests in ECR and compute the public tags, but do not create/push anything on DockerHub'
     required: false
@@ -78,6 +88,8 @@ runs:
         TAG_SUFFIX: ${{ inputs.tag-suffix }}
         ENVIRONMENT: ${{ inputs.environment }}
         LATEST: ${{ inputs.latest }}
+        DEST_REPO: ${{ inputs.dest-repo }}
+        EXTRA_STABLE_TAGS: ${{ inputs.extra-stable-tags }}
         DRY_RUN: ${{ inputs.dry-run }}
       run: |
         set -euo pipefail
@@ -96,9 +108,9 @@ runs:
         fi
 
         # Public tag matrix (mirrors the previous docker-build behaviour).
-        dest="surrealdb/surrealdb"
+        dest="${DEST_REPO}"
         tags=("${dest}:${TAG_PREFIX}${TAG_SUFFIX}")
-        if [[ "$ENVIRONMENT" == "stable" ]]; then
+        if [[ "$ENVIRONMENT" == "stable" && "${EXTRA_STABLE_TAGS}" == "true" ]]; then
           major=$(echo "$TAG_PREFIX" | cut -d. -f1)
           minor=$(echo "$TAG_PREFIX" | cut -d. -f2)
           tags+=("${dest}:${major}.${minor}${TAG_SUFFIX}" "${dest}:${major}${TAG_SUFFIX}")

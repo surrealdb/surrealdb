@@ -6,6 +6,11 @@
 # promote-many: the image is built here, from this exact commit, so a later
 # release just re-tags + mirrors it (see release.yml) instead of rebuilding.
 #
+# Two variants are built per target/arch from identical source, differing only in
+# the licence feature compiled in: the enforcement-OFF Cloud image (unmarked tags,
+# shipped to ECR/ACR) and the enforcement-ON licensed image (a `-licensed` tag
+# marker, mirrored to the public DockerHub at release for self-hosted customers).
+#
 # The downstream is built from a *colocated* checkout of this engine (a Cargo path
 # patch redirects the engine dependency to it), so the downstream image can never
 # drift from the engine commit it ships with — the cause of late, release-time
@@ -356,8 +361,18 @@ jobs:
 
   # Build + push each per-arch, per-target downstream image to the downstream ECR,
   # built from the colocated engine checkout (no git/SSH). Runs on private runners.
+  #
+  # Two variants are built from the same source, differing only in the licence
+  # feature the binary compiles in (the enterprise build-docker-image action maps
+  # `license-enforcement` onto the Dockerfile LICENSE_ENFORCEMENT arg):
+  #   * enforcement OFF: the Cloud image (unmarked tags). Cloud instances are
+  #     entitled by construction; this is what ECR/ACR ship.
+  #   * enforcement ON: the licensed image (a `-licensed` tag marker), which is
+  #     what release.yml mirrors to the public DockerHub for self-hosted customers.
+  #     Kept under a distinct tag so the enforcement-off bypass build can never be
+  #     mistaken for it.
   image:
-    name: Image (${{ matrix.image.target }}, ${{ matrix.platform.arch }})
+    name: Image (${{ matrix.image.target }}, ${{ matrix.platform.arch }}${{ matrix.variant.marker }})
     needs: [preflight, builder]
     if: needs.preflight.outputs.configured == 'true'
     # Private runner per arch (downstream pipeline); label from a
@@ -378,6 +393,13 @@ jobs:
             arch: amd64
           - platform: linux/arm64
             arch: arm64
+        # Variants: the enforcement-off Cloud image (unmarked tags) always, plus
+        # the enforcement-on licensed image (a `-licensed` marker) on release lines
+        # only. The licensed image is published solely from a `public` release, which
+        # is cut from a `releases/*` line, so building and scanning it on the
+        # main/nightly channel (where it is never mirrored) would be waste. Gate the
+        # variant list on the branch slug (`releases-*`) via fromJSON.
+        variant: ${{ fromJSON(startsWith(inputs.branch-slug, 'releases-') && '[{"enforcement":"off","marker":""},{"enforcement":"on","marker":"-licensed"}]' || '[{"enforcement":"off","marker":""}]') }}
     steps:
       # Mint a short-lived, repo-scoped token for the downstream, check it out,
       # and colocate this engine inside it so the downstream Dockerfile can build
@@ -451,7 +473,7 @@ jobs:
           dockerfile: downstream/docker/Dockerfile
           git-ref: ${{ needs.preflight.outputs.sha }}
           docker-repo: ${{ env.DOCKER_REPO }}
-          docker-tag: rolling-${{ inputs.branch-slug }}-${{ inputs.engine-ref }}
+          docker-tag: rolling-${{ inputs.branch-slug }}-${{ inputs.engine-ref }}${{ matrix.variant.marker }}
           tag-suffix: ${{ matrix.image.suffix }}
           tag-branch: ${{ inputs.branch-slug }}
           build-metadata: ${{ inputs.build-metadata }}
@@ -460,13 +482,14 @@ jobs:
           platform: ${{ matrix.platform.platform }}
           publish: 'true'
           engine-path: engine
+          license-enforcement: ${{ matrix.variant.enforcement }}
 
   # Stitch the per-arch images into a multi-arch manifest under the base rolling
   # tag, after an amd64 vulnerability scan. A CRITICAL/HIGH finding fails the job,
   # so the multi-arch rolling tag is never created and the commit is not
   # promotable for the downstream (the per-arch images stay in the private ECR only).
   manifest:
-    name: Manifest (${{ matrix.image.name }})
+    name: Manifest (${{ matrix.image.name }}${{ matrix.variant.marker }})
     needs: [preflight, image]
     if: needs.preflight.outputs.configured == 'true'
     # Private runner (downstream pipeline); label from a repo/org
@@ -474,7 +497,7 @@ jobs:
     runs-on: ${{ vars.RUNNER_AMD }}
     env:
       DOCKER_REPO: ${{ secrets.AWS_ECR_REGISTRY }}/${{ secrets.DOWNSTREAM_ECR_REPOSITORY }}
-      ROLLING_TAG: rolling-${{ inputs.branch-slug }}-${{ inputs.engine-ref }}
+      ROLLING_TAG: rolling-${{ inputs.branch-slug }}-${{ inputs.engine-ref }}${{ matrix.variant.marker }}
     strategy:
       fail-fast: false
       matrix:
@@ -483,6 +506,8 @@ jobs:
             suffix: ''
           - name: dev
             suffix: -dev
+        # Match the `image` job: the licensed variant exists only on release lines.
+        variant: ${{ fromJSON(startsWith(inputs.branch-slug, 'releases-') && '[{"enforcement":"off","marker":""},{"enforcement":"on","marker":"-licensed"}]' || '[{"enforcement":"off","marker":""}]') }}
     steps:
       # Check out the engine repo so the shared ./.github/actions/test-docker-image
       # composite action is available on this runner.
@@ -510,10 +535,16 @@ jobs:
       # amd64-only: the runtime base digest is shared across arches, so arm64
       # findings would match. Same shared gate as the engine image (Trivy +
       # version + startup + HTTP health).
+      #
+      # The licensed (enforcement-on) variant would fail the normal smoke test: it
+      # exits non-zero at startup with no licence key. expect-start-failure inverts
+      # the smoke test for it, asserting the refusal instead, which also proves
+      # enforcement is actually compiled into that variant.
       - name: Test the image (scan + smoke test)
         uses: ./.github/actions/test-docker-image
         with:
           image-ref: ${{ env.DOCKER_REPO }}:${{ env.ROLLING_TAG }}-linux-amd64${{ matrix.image.suffix }}
+          expect-start-failure: ${{ matrix.variant.enforcement == 'on' }}
 
       # Advisory audit-trail check that the downstream per-arch image carries the
       # provenance + SBOM attestations we expect. Warning-only (and

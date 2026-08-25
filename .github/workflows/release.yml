@@ -15,7 +15,11 @@
 #   * publishes the crates from the exact SHA (versioned releases; nightly
 #     never publishes crates),
 #   * mirrors the prebuilt Docker image from private ECR to the public DockerHub
-#     (stripping build attestations), and
+#     (stripping build attestations),
+#   * for the downstream: promotes the enforcement-off Cloud image within the
+#     private ECR + Azure ACR (mirror-downstream), and mirrors the enforcement-on
+#     licensed image from ECR to the public DockerHub (mirror-downstream-licensed),
+#     and
 #   * propagates the binaries to all regions, then prunes superseded rolling
 #     artifacts for that branch line.
 #
@@ -31,7 +35,7 @@
 
 name: Release
 
-run-name: "${{ github.event_name == 'schedule' && (github.event.schedule == '30 0 * * *' && 'Nightly release (downstream)' || 'Nightly release (engine)') || format('{0}Release {1} (type: {2}, components: {3})', (!inputs.publish && '[dry-run] ' || ''), inputs.git-sha || 'latest release branch', inputs.release-type, (inputs.components == 'downstream (internal)' && 'internal' || inputs.components)) }}"
+run-name: "${{ github.event_name == 'schedule' && (github.event.schedule == '30 0 * * *' && 'Nightly release (internal)' || 'Nightly release (engine)') || format('{0}Release {1} (type: {2}, components: {3})', (!inputs.publish && '[dry-run] ' || ''), inputs.git-sha || 'latest release branch', inputs.release-type, inputs.components) }}"
 
 on:
   workflow_dispatch:
@@ -47,13 +51,12 @@ on:
       components:
         required: false
         type: choice
-        default: both
-        description: "Which build(s) to release"
+        default: public
+        description: "What to release"
         options:
-          - both
-          - engine
-          - downstream
-          - downstream (internal)
+          - public
+          - internal
+          - test
       git-sha:
         required: false
         default: ''
@@ -196,12 +199,11 @@ jobs:
       # effective values (in `resolve`) also account for whether a downstream
       # image actually exists. Used to gate the engine/downstream jobs.
       components: ${{ steps.config.outputs.components }}
-      # An internal downstream release (components: 'downstream (internal)'):
-      # mirror the image for internal testing without waiting on the engine build
-      # or pruning shared artifacts, tagged with build metadata so it never
-      # collides with the public release. Gates the engine wait, prune, and the
-      # release name below.
-      internal: ${{ steps.config.outputs.internal }}
+      # A test release (components: 'test'): mirror an ephemeral Cloud image for
+      # internal testing without waiting on the engine build or pruning shared
+      # artifacts, tagged with build metadata so it never collides with a public
+      # release. Gates the engine wait, prune, and the release name below.
+      test: ${{ steps.config.outputs.test }}
       release-engine: ${{ steps.resolve.outputs.release-engine }}
       release-downstream: ${{ steps.resolve.outputs.release-downstream }}
       # Downstream provenance. `downstream-built` is the authoritative "a
@@ -375,9 +377,9 @@ jobs:
           # a downstream-only release must not require an engine build to exist.
           REQ_ENGINE: ${{ steps.config.outputs.release-engine }}
           REQ_DOWNSTREAM: ${{ steps.config.outputs.release-downstream }}
-          # Internal downstream release: skip the versioned engine-build wait
-          # below (the whole point is not to block on the engine build).
-          INTERNAL: ${{ steps.config.outputs.internal }}
+          # Test release: skip the versioned engine-build wait below (the whole
+          # point is not to block on the engine build).
+          TEST: ${{ steps.config.outputs.test }}
           # The requested ref: a SHA, a branch, or empty (default to the latest
           # release line). Resolved to a concrete SHA below.
           REQUESTED_REF: ${{ steps.config.outputs.requested-ref }}
@@ -405,9 +407,27 @@ jobs:
           COMPONENTS: ${{ steps.config.outputs.components }}
           REQ_ENGINE: ${{ steps.config.outputs.release-engine }}
           REQ_DOWNSTREAM: ${{ steps.config.outputs.release-downstream }}
+          REQ_TEST: ${{ steps.config.outputs.test }}
           DS_BUILT: ${{ steps.locate.outputs.downstream-built }}
           SHA: ${{ steps.locate.outputs.git-sha }}
         uses: ./.ci/.github/actions/resolve-release-components
+
+      # A public release publishes the licence-enforcing image, which the rolling
+      # build produces only on releases/* lines. Fail early (before the approval
+      # gate and any publish) if a public release is cut from a line that never
+      # built it, rather than letting the licensed mirror skip it via a misleading
+      # absence and then finalize green.
+      - name: Require a release line for a public (licensed) release
+        if: ${{ steps.resolve.outputs.release-engine == 'true' && steps.config.outputs.nightly-release != 'true' }}
+        shell: bash
+        env:
+          SLUG: ${{ steps.locate.outputs.branch-slug }}
+        run: |
+          set -euo pipefail
+          if [[ "$SLUG" != releases-* ]]; then
+            echo "::error::A public release publishes the licence-enforcing image, which is built only on releases/* lines, but this release's source line is '${SLUG}'. Cut the release from a releases/* branch (create it first if it does not exist), or use components=internal or test for a non-public build."
+            exit 1
+          fi
 
       # Re-checkout the resolved commit so the release version is read from the
       # exact commit being promoted (the scheduled nightly may resolve to an
@@ -447,10 +467,10 @@ jobs:
         uses: ./.ci/.github/actions/prepare-release-vars
         with:
           nightly-release: ${{ steps.config.outputs.nightly-release }}
-          internal: ${{ steps.config.outputs.internal }}
+          test: ${{ steps.config.outputs.test }}
           # The downstream commit the image was built from; its short sha joins the
-          # engine short sha in an internal release's tag metadata (locate resolved
-          # it from the downstream.json manifest).
+          # engine short sha in a test release's tag metadata (locate resolved it
+          # from the downstream.json manifest).
           downstream-sha: ${{ steps.locate.outputs.downstream-sha }}
 
       # Decide whether this release owns the `latest` pointers (latest.txt,
@@ -1081,6 +1101,7 @@ jobs:
           tag-suffix: ${{ matrix.tag-suffix }}
           environment: ${{ needs.prepare-vars.outputs.release-name }}
           latest: ${{ needs.prepare-vars.outputs.latest }}
+          dest-repo: surrealdb/surrealdb
           docker-user: ${{ secrets.DOCKER_USER }}
           docker-pass: ${{ secrets.DOCKER_PASS }}
 
@@ -1093,12 +1114,15 @@ jobs:
   # downstream registry coordinates/credentials come from secrets.
   mirror-downstream:
     name: Mirror downstream ${{ matrix.name }}
-    # Downstream side only. Independent of the engine promote so a
-    # downstream-only release can run on its own. prepare-vars
-    # already guaranteed a downstream image exists when release-downstream is true.
-    # Gated upstream by `approve` (no per-job environment).
+    # Downstream side only. Independent of the engine promote so a downstream-only
+    # release can run on its own. prepare-vars already guaranteed a downstream image
+    # exists when release-downstream (or test) is set. Gated upstream by `approve`
+    # (no per-job environment). Runs for a `test` release too: `test` sets only the
+    # `test` flag (not release-downstream), so it mirrors the ephemeral image here
+    # but the downstream-repo tag / finalize / prune jobs, gated on release-downstream,
+    # skip it.
     needs: [prepare-vars, approve]
-    if: ${{ needs.prepare-vars.outputs.publish == 'true' && needs.prepare-vars.outputs.release-downstream == 'true' }}
+    if: ${{ needs.prepare-vars.outputs.publish == 'true' && (needs.prepare-vars.outputs.release-downstream == 'true' || needs.prepare-vars.outputs.test == 'true') }}
     # Private runner (downstream pipeline): the downstream ECR login
     # uses the runner's ambient IAM instance role. Label from a repo/org
     # variable.
@@ -1167,6 +1191,142 @@ jobs:
           for t in "${targets[@]}"; do args+=(--tag "$t"); done
           echo "Promoting ${src} -> ${targets[*]}"
           docker buildx imagetools create "${args[@]}" "${src}"
+
+  # ----------------------------------------
+  # Mirror downstream licensed image (ECR -> DockerHub)
+  # ----------------------------------------
+  # Publishes the licence-ENFORCING downstream image to public DockerHub for
+  # self-hosted customers. The enforcement-off Cloud image (mirror-downstream above)
+  # never leaves the private ECR/ACR; this job takes the enforcement-on variant,
+  # built in the same rolling run under the `-licensed` ECR tag marker, and mirrors
+  # it with the shared mirror-docker action, which strips the ECR/account-bearing
+  # build attestations so nothing confidential reaches the public repo. The DockerHub
+  # repo comes from a repo VARIABLE, not a secret: it is a public image name, not a
+  # credential (only DOCKER_USER/DOCKER_PASS are), and a variable stays inspectable
+  # and prints unmasked in this job's own "Mirroring -> <repo>:<tag>" log lines.
+  # Tags follow the downstream convention (<name> + optional :latest, -dev suffix),
+  # NOT the engine's moving major/minor tags. Skips the mirror when
+  # DOWNSTREAM_DOCKERHUB_REPOSITORY is unset. Runs on dry-runs too (the action
+  # verifies the source manifests and computes the public tags without pushing),
+  # matching the engine's mirror-docker.
+  #
+  # Published with the engine on a `public` release. The licensed image is a public
+  # customer artefact, so it ships whenever the engine is publicly released and never
+  # on its own: the gate is release-engine (which `public` sets) minus nightly. That
+  # excludes an `internal`/`test` release (downstream-only, release-engine is false)
+  # and the engine nightly (release-engine true but nightly). Because it runs only
+  # when the engine is released, `latest` is always the engine-computed value
+  # (determine-latest-pointer gates on release-engine), so the public `:latest`
+  # moves correctly without a downstream-specific pointer.
+  mirror-downstream-licensed:
+    name: Mirror downstream licensed ${{ matrix.name }}
+    # Gated upstream by `approve` (no per-job environment), same as mirror-downstream.
+    #
+    # Backwards compatible with pre-licensing release lines. release.yml is the one
+    # canonical (main) workflow, run manually to promote ANY line, so this job also
+    # runs when releasing an older commit (e.g. releases/3.1, releases/3.2) whose
+    # rolling build never produced a licensed image. The "licensed image present?"
+    # step below probes the downstream ECR and no-ops green when it is absent, so
+    # releasing a line without licence enforcement simply skips the licensed mirror
+    # rather than failing. finalize-engine then proceeds (a skipped-but-green
+    # licensed job satisfies its gate).
+    needs: [prepare-vars, approve]
+    if: >-
+      ${{ needs.prepare-vars.outputs.release-engine == 'true'
+          && needs.prepare-vars.outputs.nightly-release != 'true' }}
+    # Private runner: reads the source image from the downstream ECR using the
+    # runner's ambient IAM instance role. Label from a repo/org variable.
+    runs-on: ${{ vars.RUNNER_AMD }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Prod image
+            tag-suffix: ''
+          - name: Dev image
+            tag-suffix: -dev
+    steps:
+      # Skip the mirror when the DockerHub target variable is unset.
+      - name: DockerHub target configured?
+        id: cfg
+        env:
+          HAS_REPO: ${{ vars.DOWNSTREAM_DOCKERHUB_REPOSITORY != '' }}
+        run: |
+          set -euo pipefail
+          if [[ "${HAS_REPO}" == "true" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Mirror downstream licensed::DOWNSTREAM_DOCKERHUB_REPOSITORY not set; skipping the licensed DockerHub mirror."
+          fi
+
+      # Backwards compatibility with pre-licensing release lines: probe the
+      # downstream ECR for this commit's licensed source tag. A public release is
+      # guaranteed to be cut from a releases/* line (prepare-vars fails otherwise),
+      # so absence here means that releases/* line predates licence enforcement (its
+      # rolling build produced no `-licensed` image); skip the mirror and no-op green
+      # rather than fail the release.
+      # Uses the runner's ambient IAM (describe-images, no docker login needed); the
+      # region is derived from the registry host.
+      - name: Licensed image present for this commit?
+        id: src
+        if: steps.cfg.outputs.configured == 'true'
+        env:
+          REGISTRY: ${{ secrets.AWS_ECR_REGISTRY }}
+          REPO: ${{ secrets.DOWNSTREAM_ECR_REPOSITORY }}
+          TAG: ${{ needs.prepare-vars.outputs.rolling-source-tag }}-licensed${{ matrix.tag-suffix }}
+        run: |
+          set -euo pipefail
+          region="$(printf '%s' "$REGISTRY" | cut -d. -f4)"
+          # Only a genuine ImageNotFoundException may be read as "this line predates
+          # licence enforcement". Any other failure (throttling, expired instance
+          # credentials, a renamed repository) must fail loudly: treating it as
+          # absence would skip the mirror, satisfy finalize-downstream, and record a
+          # release with no licensed image on DockerHub. Capture stderr (stdout to
+          # /dev/null) and branch on the error.
+          if err=$(aws ecr describe-images --region "$region" --repository-name "$REPO" \
+                     --image-ids "imageTag=${TAG}" 2>&1 >/dev/null); then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          elif printf '%s' "$err" | grep -q 'ImageNotFoundException'; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Mirror downstream licensed::No licensed image (${TAG}) in the downstream ECR for this commit; this release line predates licence enforcement, skipping the licensed DockerHub mirror."
+          else
+            echo "::error title=Mirror downstream licensed::Could not probe the downstream ECR for ${TAG}: ${err}"
+            exit 1
+          fi
+
+      - name: Checkout sources
+        if: steps.cfg.outputs.configured == 'true' && steps.src.outputs.present == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Sanitize tag prefix
+        id: tag
+        if: steps.cfg.outputs.configured == 'true' && steps.src.outputs.present == 'true'
+        env:
+          NAME: ${{ needs.prepare-vars.outputs.name }}
+        run: |
+          tag_prefix=$(printf '%s' "$NAME" | sed 's/[^a-zA-Z0-9_.-]/-/g' | tr '[:upper:]' '[:lower:]')
+          echo "tag-prefix=${tag_prefix}" >> "$GITHUB_OUTPUT"
+
+      - name: Mirror licensed image to DockerHub
+        if: steps.cfg.outputs.configured == 'true' && steps.src.outputs.present == 'true'
+        uses: ./.github/actions/mirror-docker
+        with:
+          dry-run: ${{ needs.prepare-vars.outputs.publish != 'true' }}
+          ecr-registry: ${{ secrets.AWS_ECR_REGISTRY }}
+          ecr-repository: ${{ secrets.DOWNSTREAM_ECR_REPOSITORY }}
+          # The licensed variant is staged in the downstream ECR under the
+          # `-licensed` marker the rolling build added; the public tags carry no
+          # marker (the DockerHub repo already distinguishes it).
+          source-tag: ${{ needs.prepare-vars.outputs.rolling-source-tag }}-licensed
+          tag-prefix: ${{ steps.tag.outputs.tag-prefix }}
+          tag-suffix: ${{ matrix.tag-suffix }}
+          environment: ${{ needs.prepare-vars.outputs.release-name }}
+          latest: ${{ needs.prepare-vars.outputs.latest }}
+          dest-repo: ${{ vars.DOWNSTREAM_DOCKERHUB_REPOSITORY }}
+          extra-stable-tags: 'false'
+          docker-user: ${{ secrets.DOCKER_USER }}
+          docker-pass: ${{ secrets.DOCKER_PASS }}
 
   # ----------------------------------------
   # Tag the downstream repo
@@ -1380,7 +1540,7 @@ jobs:
   #     THIS release (see prune-images), so an engine-only release never deletes a
   #     downstream image that has not been promoted yet.
   # Runs on releases that include the engine side; a downstream-only release
-  # prunes nothing (the next `both`/engine release cleans up).
+  # prunes nothing here (the next release with the engine side cleans up).
 
   # S3 pruning keeps its existing key-based auth (AMAZON_*), unchanged. It
   # computes which superseded commits to prune (strict ancestors of the released
@@ -1391,8 +1551,8 @@ jobs:
     name: Prune superseded S3 artifacts
     needs: [prepare-vars, promote, mirror-docker, mirror-downstream, propagate]
     # Run once the side(s) actually being released have succeeded, so pruning is
-    # symmetric with promotion: an engine-only release prunes engine artifacts, a
-    # downstream-only release prunes downstream images, and `both` prunes both.
+    # symmetric with promotion: the engine side prunes engine artifacts, the
+    # downstream side prunes downstream images, and a `public` release prunes both.
     # Each side is gated independently — a side NOT part of this release imposes no
     # requirement (its jobs are skipped), and a side that IS released must have
     # shipped successfully before we delete anything it supersedes. This is what
@@ -1413,12 +1573,12 @@ jobs:
     # modes; mirror-downstream stays publish-gated, so a dry-run accepts it
     # skipped.
     #
-    # An INTERNAL downstream release never prunes: it is an ephemeral test build
-    # that must not delete the shared rolling artifacts a later public release of
-    # this line still depends on.
+    # A TEST release never prunes: it is an ephemeral build that must not delete
+    # the shared rolling artifacts a later public release of this line still
+    # depends on.
     if: >-
       ${{ always() && needs.prepare-vars.result == 'success'
-      && needs.prepare-vars.outputs.internal != 'true'
+      && needs.prepare-vars.outputs.test != 'true'
       && (needs.prepare-vars.outputs.release-engine != 'true'
           || (needs.promote.result == 'success'
               && needs.mirror-docker.result == 'success'
@@ -1519,8 +1679,11 @@ jobs:
 
       # Prune the matching downstream images from the downstream ECR (same
       # ancestry, same rolling tags + the per-arch tags the downstream build
-      # pushes). The builder cache tags (builder-<arch>-<slug>) are line-stable
-      # and intentionally left in place.
+      # pushes). Two variants are pushed per commit: the unmarked Cloud image and
+      # the `-licensed` enforcement-on image, each with its own multi-arch + per-arch
+      # tags; both are pruned here so the enforcement variant does not orphan. The
+      # builder cache tags (builder-<arch>-<slug>) are line-stable and intentionally
+      # left in place.
       #
       # Gated on the downstream side being part of THIS release: an engine-only
       # release must NOT delete downstream images for ancestors, because they may
@@ -1534,22 +1697,32 @@ jobs:
           set -euo pipefail
           [[ -n "${OLDER// }" ]] || { echo "No superseded downstream images to prune"; exit 0; }
           region="$(printf '%s' "$ECR_REGISTRY" | cut -d. -f4)"
+          # The tag shapes each downstream commit pushes, per variant marker: the
+          # multi-arch rolling tag, its -dev sibling, and the four per-arch tags.
+          tag_shapes() {
+            local base="$1"
+            printf '%s\n' \
+              "${base}" \
+              "${base}-dev" \
+              "${base}-linux-amd64" \
+              "${base}-linux-arm64" \
+              "${base}-linux-amd64-dev" \
+              "${base}-linux-arm64-dev"
+          }
           for d in $OLDER; do
+            ids=()
+            for base in "rolling-${SLUG}-${d}" "rolling-${SLUG}-${d}-licensed"; do
+              while IFS= read -r t; do ids+=("imageTag=${t}"); done < <(tag_shapes "$base")
+            done
             if [ "${DRY_RUN:-false}" = "true" ]; then
-              echo "[dry-run] would prune downstream ECR images (repo ${DS_REPO}): rolling-${SLUG}-${d}{,-dev,-linux-amd64,-linux-arm64,-linux-amd64-dev,-linux-arm64-dev}"
+              echo "[dry-run] would prune downstream ECR images (repo ${DS_REPO}): ${ids[*]#imageTag=}"
               continue
             fi
             aws ecr batch-delete-image --region "$region" \
               --repository-name "$DS_REPO" \
-              --image-ids \
-                "imageTag=rolling-${SLUG}-${d}" \
-                "imageTag=rolling-${SLUG}-${d}-dev" \
-                "imageTag=rolling-${SLUG}-${d}-linux-amd64" \
-                "imageTag=rolling-${SLUG}-${d}-linux-arm64" \
-                "imageTag=rolling-${SLUG}-${d}-linux-amd64-dev" \
-                "imageTag=rolling-${SLUG}-${d}-linux-arm64-dev" \
+              --image-ids "${ids[@]}" \
               >/dev/null 2>&1 || true
-            echo "Pruned downstream ECR images for rolling-${SLUG}-${d}"
+            echo "Pruned downstream ECR images for rolling-${SLUG}-${d} (Cloud + licensed)"
           done
 
   # ----------------------------------------
@@ -1983,7 +2156,13 @@ jobs:
   # release artefacts, and re-running the release would not fix a failed bump.
   finalize-engine:
     name: Finalize engine release
-    needs: [prepare-vars, publish-crates, publish-npm, promote, mirror-docker, propagate, update-homebrew-tap, trigger-upstream-sync]
+    # The licensed image ships with the engine (mirror-downstream-licensed gates on
+    # release-engine), so it is release-critical here: a failed licensed push leaves
+    # the engine release un-finalized (and the run red) rather than silently
+    # recording a release whose customer image is missing. That job reports success
+    # when it skips (DOWNSTREAM_DOCKERHUB_REPOSITORY unset, or the commit has no
+    # licensed image), so an unconfigured or pre-licensing line does not block this.
+    needs: [prepare-vars, publish-crates, publish-npm, promote, mirror-docker, mirror-downstream-licensed, propagate, update-homebrew-tap, trigger-upstream-sync]
     if: >-
       ${{ always()
           && needs.prepare-vars.result == 'success'
@@ -1993,6 +2172,7 @@ jobs:
           && needs.publish-crates.result == 'success'
           && needs.promote.result == 'success'
           && needs.mirror-docker.result == 'success'
+          && needs.mirror-downstream-licensed.result == 'success'
           && needs.propagate.result == 'success'
           && (needs.publish-npm.result == 'success' || needs.prepare-vars.outputs.has-npm != 'true')
           && (needs.update-homebrew-tap.result == 'success' || needs.update-homebrew-tap.result == 'skipped')
@@ -2022,6 +2202,11 @@ jobs:
 
   finalize-downstream:
     name: Finalize downstream release
+    # The downstream release is finalized once the downstream image published (via
+    # mirror-downstream) and the downstream repo was tagged. Runs for `public` and
+    # `internal` (both set release-downstream); a `test` release sets only `test`, so
+    # it skips this. The licensed public image is gated on the engine side instead
+    # (finalize-engine), since it ships with the engine.
     needs: [prepare-vars, mirror-downstream, tag-downstream]
     if: >-
       ${{ always()
