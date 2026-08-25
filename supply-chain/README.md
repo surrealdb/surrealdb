@@ -52,9 +52,10 @@ The following process can be followed whenever the dependency checking action fa
   - If the crate is already trusted or audited and only its version moved, its
     publisher record simply isn't in `imports.lock` yet (the common case, e.g.
     a routine version bump of an already-trusted crate). Run a plain
-    `cargo vet check` (or `cargo vet fetch-imports`) to refresh the publisher
-    records, then commit `supply-chain/imports.lock`. `trust`, `add-exemption`
-    and `prune` all no-op in this case and do not fetch it for you.
+    `cargo vet check` (or `cargo vet regenerate imports`) to refresh the
+    publisher records, then commit `supply-chain/imports.lock`. The crate is
+    already trusted, so `trust` / `add-exemption` aren't needed here; only its
+    publisher record for the new version was missing.
   - Otherwise the dependency has not yet been trusted, audited nor exempted.
   - If this is a new dependency, think about whether or not it needs to be introduced to SurrealDB.
   - If the dependency should be introduced:
