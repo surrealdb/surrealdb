@@ -10,7 +10,10 @@
 //!    [`MatchesScope`].
 //! 3. On executor-table rows, an expression that was **not** registered from the SELECT's WHERE
 //!    condition (projection position, function arguments, a different expression than the one in
-//!    WHERE, or no WHERE at all) raises [`Error::NoIndexFoundForMatch`].
+//!    WHERE, or no WHERE at all) raises [`Error::NoIndexFoundForMatch`]. A WHERE condition carrying
+//!    such an expression is refused before execution instead, with the same error, so the refusal
+//!    does not depend on which rows the condition reaches — see
+//!    [`first_unregistered_cond_matches`].
 //! 4. A registered expression resolves an index for the row's table:
 //!    - a full-text index on the row's own table whose first column is the idiom → `RecordId →
 //!      DocId` + bitmap check (`get_doc_id()` + `contains_doc()`);
@@ -37,6 +40,8 @@ use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, BoxFut, ContextLevel};
 use crate::expr::idiom::Idiom;
 use crate::expr::operator::{BinaryOperator, MatchesOperator, PrefixOperator};
+use crate::expr::part::Part;
+use crate::expr::visit::{Visit, Visitor};
 use crate::expr::{Expr, FlowResult, Kind};
 use crate::iam::Action;
 use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms};
@@ -62,6 +67,17 @@ use crate::val::{TableName, Value};
 /// full table sources only — record-id sources never get one (see
 /// `Iterator::prepare_record_id`), so their rows evaluate MATCHES to `false`
 /// even when the expression sits in the WHERE condition.
+///
+/// The scope covers the SELECT's whole expression tree, matching the legacy
+/// executor's per-row lookup, which is keyed by expression and reached from
+/// anywhere the row is in scope. Parts of the tree planned at evaluation time
+/// carry it with them — see
+/// [`BlockPhysicalExpr`](crate::exec::physical_expr::BlockPhysicalExpr) — so a
+/// registered MATCHES resolves the same in a residual filter, a projection, and
+/// an IF/ELSE branch. It stops at a body that is planned in its own scope: a
+/// nested statement registers its own WHERE, and a user-defined function or
+/// closure body is planned per call and inherits nothing.
+#[derive(Debug)]
 pub(crate) struct MatchesScope {
 	/// MATCHES binary expressions reachable from the WHERE condition through
 	/// `Expr::Binary` nodes.
@@ -101,6 +117,92 @@ pub(crate) fn collect_cond_matches(expr: &Expr, out: &mut HashSet<Expr>) {
 			collect_cond_matches(inner, out);
 		}
 		_ => {}
+	}
+}
+
+/// The first MATCHES expression in `cond` that `allowlist` does not hold, or
+/// `None` when every MATCHES the condition evaluates is registered.
+///
+/// [`collect_cond_matches`] describes which MATCHES a SELECT registers; this is
+/// the complement, used to refuse such a condition at plan time with the same
+/// [`Error::NoIndexFoundForMatch`] the legacy executor raises per row. The two
+/// walks answer different questions, so the boundary this one draws is its own
+/// contract:
+///
+/// - A `BinaryOperator::Matches` node absent from `allowlist` is reported and the walk stops. A
+///   node the allowlist holds is registered, so the walk continues past it.
+/// - Statement-shaped nodes (`Select`, `Create`, `Update`, `Upsert`, `Delete`, `Relate`, `Insert`,
+///   `Define`, `Remove`, `Rebuild`, `Alter`, `Info`, `Foreach`, `Let`, `Sleep`, `Return`,
+///   `Explain`, `Match`, `Break`, `Continue`) and `Expr::Closure` are not descended into. A nested
+///   statement is planned in its own scope and registers its own WHERE, and a closure body is
+///   evaluated wherever the closure is finally called, which is not necessarily this row.
+/// - `Part::Where` and `Part::Lookup` are not descended into. An idiom filter and a graph hop
+///   evaluate their condition against values other than the SELECT's iteration row, where the
+///   outcome is decided by the per-row rules in the module docs (rules 1–2) rather than by
+///   registration.
+/// - Every other shape takes the generated walk, so a MATCHES in a function argument, a literal
+///   container, a block, or an IF/ELSE branch is reported.
+pub(crate) fn first_unregistered_cond_matches(
+	cond: &Expr,
+	allowlist: &HashSet<Expr>,
+) -> Option<Expr> {
+	/// Carries the offending expression out of the walk.
+	struct Unregistered(Expr);
+
+	struct UnregisteredMatches<'a> {
+		allowlist: &'a HashSet<Expr>,
+	}
+
+	impl Visitor for UnregisteredMatches<'_> {
+		type Error = Unregistered;
+
+		fn visit_expr(&mut self, e: &Expr) -> Result<(), Self::Error> {
+			match e {
+				Expr::Binary {
+					op: BinaryOperator::Matches(_),
+					..
+				} if !self.allowlist.contains(e) => Err(Unregistered(e.clone())),
+				Expr::Select(_)
+				| Expr::Create(_)
+				| Expr::Update(_)
+				| Expr::Upsert(_)
+				| Expr::Delete(_)
+				| Expr::Relate(_)
+				| Expr::Insert(_)
+				| Expr::Define(_)
+				| Expr::Remove(_)
+				| Expr::Rebuild(_)
+				| Expr::Alter(_)
+				| Expr::Info(_)
+				| Expr::Foreach(_)
+				| Expr::Let(_)
+				| Expr::Sleep(_)
+				| Expr::Return(_)
+				| Expr::Explain {
+					..
+				}
+				| Expr::Match(_)
+				| Expr::Break
+				| Expr::Continue
+				| Expr::Closure(_) => Ok(()),
+				_ => e.visit(self),
+			}
+		}
+
+		fn visit_part(&mut self, part: &Part) -> Result<(), Self::Error> {
+			match part {
+				Part::Where(_) | Part::Lookup(_) => Ok(()),
+				_ => part.visit(self),
+			}
+		}
+	}
+
+	let mut walker = UnregisteredMatches {
+		allowlist,
+	};
+	match walker.visit_expr(cond) {
+		Ok(()) => None,
+		Err(Unregistered(e)) => Some(e),
 	}
 }
 
@@ -329,7 +431,7 @@ impl MatchesOp {
 		&self,
 		ctx: &EvalContext<'_>,
 		target: &TableName,
-		remote_field: &[crate::expr::part::Part],
+		remote_field: &[Part],
 		query: &str,
 		check_perms: bool,
 		frozen: &crate::ctx::FrozenContext,
@@ -376,13 +478,9 @@ impl MatchesOp {
 		opt: &crate::dbs::Options,
 		tx: &Arc<crate::kvs::Transaction>,
 	) -> Result<(FullTextIndex, QueryTerms), anyhow::Error> {
-		// Reject a full-text index whose on-disk format predates the shared
-		// table-level doc-ID space; it must be rebuilt before it can serve
-		// MATCHES. Mirrors the legacy plan-time gate in idx/planner/tree.rs
-		// (`lookup_index_option`), which hard-errors for local and remote
-		// (record-link) resolution alike.
-		index_def.ensure_current_format()?;
-
+		// Legacy (pre-shared-doc-ID) indexes resolve postings through their
+		// historical private doc-ID layout until explicitly rebuilt; the
+		// format version selects the resolver used below.
 		let ft_params = match &index_def.index {
 			Index::FullText(params) => params,
 			_ => unreachable!("Caller checked for FullText"),
@@ -405,6 +503,7 @@ impl MatchesOp {
 			ikb,
 			ft_params,
 			&frozen.config.idx.file_allowlist,
+			index_def.format_version,
 		)
 		.await?;
 

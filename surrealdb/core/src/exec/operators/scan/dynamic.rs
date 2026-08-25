@@ -21,7 +21,7 @@ use crate::exec::permission::{
 use crate::exec::planner::util::{
 	SELECT_ITERATION_PARAMS, fold_condition_expressions, index_covers_ordering,
 	resolve_condition_params, resolve_projection_field_idioms,
-	strip_knn_and_matches_from_condition,
+	strip_knn_and_matches_from_condition, strip_knn_from_condition,
 };
 use crate::exec::pre_decode_filter::{PreDecodeFilterStatus, pre_decode_filter_for_execute};
 use crate::exec::{
@@ -778,6 +778,34 @@ async fn resolve_table_scan_stream(
 			// to get the residual for HNSW pushdown.
 			let residual_cond =
 				resolved_cond.as_ref().and_then(strip_knn_and_matches_from_condition);
+			// This path never builds an allow-list bitmap, so MATCHES
+			// conjuncts must stay evaluable during the ANN traversal for
+			// every index format — otherwise the top-k is chosen among all
+			// records and matching neighbours outside it are unrecoverable.
+			// Compile the KNN-stripped condition — MATCHES kept — into the
+			// scan's matches condition, which supersedes the residual above.
+			// The compile reproduces the select planner's MATCHES
+			// registration scope (allowlist from both condition forms, this
+			// table as the executor table); an unregistered MATCHES compiles
+			// to an operator that answers `false` for every row.
+			let matches_condition = match resolved_cond.as_ref().and_then(strip_knn_from_condition)
+			{
+				Some(c) => {
+					let mut allowlist = std::collections::HashSet::new();
+					if let Some(orig) = cfg.cond.as_ref() {
+						crate::exec::physical_expr::collect_cond_matches(&orig.0, &mut allowlist);
+					}
+					crate::exec::physical_expr::collect_cond_matches(&c.0, &mut allowlist);
+					let mut planner =
+						crate::exec::planner::Planner::new(ctx.ctx(), ctx.function_registry());
+					planner.set_matches_scope(Arc::new(crate::exec::physical_expr::MatchesScope {
+						allowlist,
+						executor_tables: Arc::from(vec![cfg.table_name.clone()]),
+					}));
+					Some(planner.physical_expr(c.0).await.map_err(|e| anyhow::anyhow!("{e}"))?)
+				}
+				None => None,
+			};
 			let knn_op = KnnScan::new(
 				index_ref,
 				vector,
@@ -789,7 +817,8 @@ async fn resolve_table_scan_stream(
 				residual_cond,
 				None,
 				None,
-			);
+			)
+			.with_matches_condition(matches_condition);
 			let stream = knn_op.execute(ctx)?;
 			Ok((stream, 0))
 		}

@@ -18,6 +18,7 @@
 
 use anyhow::Result;
 use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
+use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 use surrealdb_kvs::impl_kv_value_revisioned;
 use surrealdb_kvs::value::KVValue;
@@ -44,6 +45,33 @@ pub struct DiskAnnState {
 }
 
 impl KVValue for DiskAnnState {
+	type KeyContext = ();
+
+	#[inline]
+	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+		let mut val = Vec::new();
+		SerializeRevisioned::serialize_revisioned(self, &mut val)?;
+		Ok(val)
+	}
+
+	#[inline]
+	fn kv_decode_value(mut val: &[u8], _: ()) -> anyhow::Result<Self> {
+		Ok(DeserializeRevisioned::deserialize_revisioned(&mut val)?)
+	}
+}
+
+/// Persisted state of the pre-shared doc-ID allocator used by DiskANN before
+/// format version 1. Read only, so legacy indexes remain queryable.
+#[revisioned(revision = 1)]
+#[derive(Default, Clone, Serialize, Deserialize)]
+pub struct DiskAnnDocsState {
+	/// Recycled doc-IDs available for allocation.
+	pub available: RoaringTreemap,
+	/// The next never-used doc-ID.
+	pub next_doc_id: DocId,
+}
+
+impl KVValue for DiskAnnDocsState {
 	type KeyContext = ();
 
 	#[inline]

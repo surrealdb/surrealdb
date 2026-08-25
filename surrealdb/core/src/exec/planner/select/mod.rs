@@ -1044,6 +1044,25 @@ impl<'ctx> Planner<'ctx> {
 					_ => None,
 				})
 				.collect();
+			// A WHERE-clause MATCHES the registration walk does not reach —
+			// a function argument, a literal container, an IF/ELSE branch, a
+			// block — binds to no query executor, which the legacy engine
+			// reports per row as `NoIndexFoundForMatch`. Raise the same
+			// refusal here so the outcome does not depend on which rows the
+			// condition reaches. Only a full table source gets an executor at
+			// all: with none, MATCHES evaluates to `false` per row on both
+			// engines (see `MatchesScope`), and there is nothing to refuse.
+			if !executor_tables.is_empty()
+				&& let Some(ref c) = cond
+				&& let Some(found) =
+					crate::exec::physical_expr::first_unregistered_cond_matches(&c.0, &cond_matches)
+			{
+				use surrealdb_types::ToSql;
+				return Err(crate::idx::Error::NoIndexFoundForMatch {
+					exp: found.to_sql(),
+				}
+				.into());
+			}
 			pp.set_matches_scope(Arc::new(crate::exec::physical_expr::MatchesScope {
 				allowlist: cond_matches,
 				executor_tables: Arc::from(executor_tables),
@@ -1876,6 +1895,25 @@ impl<'ctx> Planner<'ctx> {
 		// the bitmap node tree evaluated at execute time, plus the true
 		// residual both as a `Cond` (for the in-traversal filter) and as a
 		// physical expression (for the graph-free exact tier).
+		// Compiled for a legacy index — which can never use the bitmap
+		// prefilter — and for any index whose KNN-stripped condition contains
+		// a MATCHES the prefilter may fail to cover: one served by a legacy
+		// (not bitmap-capable) full-text index, or an allow-list build that
+		// exceeds its runtime budget.
+		let stripped_cond =
+			cond.as_ref().and_then(|c| crate::exec::planner::util::strip_knn_from_condition(c));
+		let needs_matches_condition = !index_ref.definition().uses_shared_doc_ids()
+			|| stripped_cond.as_ref().is_some_and(|c| {
+				crate::exec::index::analysis::IndexAnalyzer::expr_contains_matches(&c.0)
+			});
+		let matches_condition = if needs_matches_condition {
+			match stripped_cond {
+				Some(c) => Some(self.physical_expr(c.0.clone()).await?),
+				None => None,
+			}
+		} else {
+			None
+		};
 		let prefilter = match prefilter {
 			Some(p) => {
 				let residual_phys = match &p.residual {
@@ -1888,6 +1926,7 @@ impl<'ctx> Planner<'ctx> {
 					node,
 					residual: p.residual,
 					residual_phys,
+					uncovered_matches: p.uncovered_matches,
 				})
 			}
 			None => None,
@@ -1903,7 +1942,8 @@ impl<'ctx> Planner<'ctx> {
 			residual_cond,
 			prefilter,
 			Some(needed_fields),
-		);
+		)
+		.with_matches_condition(matches_condition);
 		if let Some(tc) = table_ctx {
 			scan = scan.with_resolved(tc);
 		}

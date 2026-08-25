@@ -4694,6 +4694,97 @@ async fn bitmap_count_performs_zero_record_fetches() -> Result<()> {
 	Ok(())
 }
 
+/// Rewrites the stored `format_version` of `table`'s `index`, simulating an
+/// index persisted by an older binary. The table definition is rewritten in the
+/// same transaction, so cached index lists are refreshed and the next statement
+/// plans and maintains the index through the layout that version selects.
+///
+/// The index must be empty: only the definition changes, so any data already
+/// written in another layout would be left unreachable.
+#[cfg(feature = "kv-mem")]
+async fn downgrade_index_format(
+	ds: &Datastore,
+	table: &str,
+	index: &str,
+	format_version: u16,
+) -> Result<()> {
+	let tx = ds.transaction(TransactionType::Write).await?;
+	let ns = tx.get_ns_by_name("test", None).await?.expect("namespace should exist");
+	let db = tx.get_db_by_name("test", "test", None).await?.expect("database should exist");
+	let tb: TableName = table.into();
+	let ix = tx
+		.get_tb_index(ns.namespace_id, db.database_id, &tb, index, None)
+		.await?
+		.expect("index should exist");
+	let mut old = (*ix).clone();
+	old.format_version = format_version;
+	tx.put_tb_index(ns.namespace_id, db.database_id, &tb, &old).await?;
+	// Bump the table definition so cached index lists are refreshed.
+	let tb_def = tx.expect_tb(ns.namespace_id, db.database_id, &tb).await?;
+	tx.put_tb("test", "test", &tb_def).await?;
+	tx.commit().await?;
+	Ok(())
+}
+
+/// Runs `sql` under an explicit planner strategy — the two query engines are
+/// selected per session — and returns every row's record ID in sorted
+/// `table:key` form. Rows may be bare record IDs (`SELECT VALUE id`) or objects
+/// carrying an `id` field.
+#[cfg(feature = "kv-mem")]
+async fn planner_result_ids(
+	ds: &Datastore,
+	strategy: crate::dbs::NewPlannerStrategy,
+	sql: &str,
+) -> Result<Vec<String>> {
+	use surrealdb_types::ToSql;
+
+	let session = Session::owner().with_ns("test").with_db("test").new_planner_strategy(strategy);
+	let mut results = ds.execute(sql, &session, None).await?;
+	let value = results.remove(0).result?;
+	let surrealdb_types::Value::Array(rows) = value else {
+		anyhow::bail!("query returned non-array value: {value:?}");
+	};
+	let mut ids = Vec::with_capacity(rows.len());
+	for row in rows.iter() {
+		let id = match row {
+			surrealdb_types::Value::Object(obj) => obj.get("id"),
+			other => Some(other),
+		};
+		match id {
+			Some(surrealdb_types::Value::RecordId(rid)) => ids.push(rid.to_sql()),
+			other => anyhow::bail!("row without a record id: {other:?}"),
+		}
+	}
+	ids.sort();
+	Ok(ids)
+}
+
+/// Asserts that the engine `strategy` selects answers `sql` with exactly
+/// `expected` (sorted `table:key` form).
+#[cfg(feature = "kv-mem")]
+async fn assert_planner_returns(
+	ds: &Datastore,
+	strategy: crate::dbs::NewPlannerStrategy,
+	sql: &str,
+	expected: &[&str],
+) -> Result<()> {
+	let ids = planner_result_ids(ds, strategy, sql).await?;
+	assert_eq!(ids, expected, "{strategy} engine: {sql}");
+	Ok(())
+}
+
+/// Asserts that both query engines answer `sql` with exactly `expected`. The
+/// default `BestEffortReadOnlyStatements` strategy cannot pin an engine, so
+/// each side asks for its engine explicitly.
+#[cfg(feature = "kv-mem")]
+async fn assert_both_planners_return(ds: &Datastore, sql: &str, expected: &[&str]) -> Result<()> {
+	use crate::dbs::NewPlannerStrategy;
+
+	assert_planner_returns(ds, NewPlannerStrategy::ComputeOnly, sql, expected).await?;
+	assert_planner_returns(ds, NewPlannerStrategy::AllReadOnlyStatements, sql, expected).await?;
+	Ok(())
+}
+
 /// An index defined before the doc-ID entry format (simulated by downgrading
 /// `format_version`) keeps working with bare record-ID entry values: writes,
 /// guarded deletes and index-backed queries stay consistent, and the table
@@ -4709,24 +4800,9 @@ async fn btree_index_pre_doc_id_format_stays_maintainable() -> Result<()> {
 
 	// Downgrade the (empty) index definition to the pre-doc-ID format,
 	// simulating an index defined by an older binary.
-	{
-		let tx = ds.transaction(TransactionType::Write).await?;
-		let ns = tx.get_ns_by_name("test", None).await?.expect("namespace should exist");
-		let db = tx.get_db_by_name("test", "test", None).await?.expect("database should exist");
-		let tb: TableName = "t".into();
-		let ix = tx
-			.get_tb_index(ns.namespace_id, db.database_id, &tb, "idx_a", None)
-			.await?
-			.expect("index should exist");
-		let mut old = (*ix).clone();
-		old.format_version = BTREE_ENTRY_DOC_IDS_FORMAT_VERSION - 1;
-		assert!(!old.uses_doc_ids());
-		tx.put_tb_index(ns.namespace_id, db.database_id, &tb, &old).await?;
-		// Bump the table definition so cached index lists are refreshed.
-		let tb_def = tx.expect_tb(ns.namespace_id, db.database_id, &tb).await?;
-		tx.put_tb("test", "test", &tb_def).await?;
-		tx.commit().await?;
-	}
+	downgrade_index_format(&ds, "t", "idx_a", BTREE_ENTRY_DOC_IDS_FORMAT_VERSION - 1).await?;
+	let (_, _, _, ix) = get_table_index(&ds, "t", "idx_a").await?;
+	assert!(!ix.uses_doc_ids());
 
 	// Writes through the old-format definition keep the index consistent
 	// (bare record-ID values, guarded deletes still match)...
@@ -4745,6 +4821,354 @@ async fn btree_index_pre_doc_id_format_stays_maintainable() -> Result<()> {
 	// ...and no shared doc-ID mappings are allocated for it.
 	assert_eq!(count_doc_id_mappings(&ds, "t").await?, (0, 0));
 	Ok(())
+}
+
+/// A full-text index whose stored format predates the shared table-level
+/// doc-ID space (simulated by downgrading `format_version` to 0) serves
+/// MATCHES under both query engines. Its maintenance stays on the private
+/// per-index doc-ID layout — the table allocates no shared doc-ID mappings for
+/// it — until an explicit REBUILD moves it onto the shared space, which
+/// changes neither engine's answer.
+///
+/// MATCHES is only answerable from a full-text index, so every assertion here
+/// reads the index under test.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn legacy_fulltext_index_serves_matches_under_both_planners() -> Result<()> {
+	// 'bravo' is carried by t:1 and t:2 as created, by t:3 through the update,
+	// and no longer by the deleted t:4.
+	const MATCHES: &str = "SELECT VALUE id FROM t WHERE content @@ 'bravo'";
+	const CARRIERS: &[&str] = &["t:1", "t:2", "t:3"];
+
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE ANALYZER simple TOKENIZERS blank;
+		 DEFINE INDEX ft ON t FIELDS content FULLTEXT ANALYZER simple BM25;",
+	)
+	.await?;
+	downgrade_index_format(&ds, "t", "ft", 0).await?;
+	let (_, _, _, ix) = get_table_index(&ds, "t", "ft").await?;
+	assert!(ix.uses_doc_ids() && !ix.uses_shared_doc_ids());
+
+	// Legacy maintenance: inserts, an update that both retracts and adds a
+	// term, and a delete that retracts one.
+	execute_all(
+		&ds,
+		&session,
+		"CREATE t:1 SET content = 'alpha bravo';
+		 CREATE t:2 SET content = 'bravo charlie';
+		 CREATE t:3 SET content = 'delta';
+		 CREATE t:4 SET content = 'bravo echo';
+		 UPDATE t:3 SET content = 'bravo foxtrot';
+		 DELETE t:4;",
+	)
+	.await?;
+	assert_eq!(
+		count_doc_id_mappings(&ds, "t").await?,
+		(0, 0),
+		"a legacy full-text index keeps its private doc-ID space"
+	);
+	assert_both_planners_return(&ds, MATCHES, CARRIERS).await?;
+
+	// Compact the postings the writes appended, so the same terms have to be
+	// resolved from the compacted legacy layout. `new_index_test_ds` runs
+	// without maintenance tasks, so this drains the compaction queue itself.
+	let (batches, errors) = Datastore::index_compaction(
+		Arc::clone(&ds),
+		Duration::from_secs(60),
+		tokio_util::sync::CancellationToken::new(),
+	)
+	.await?;
+	assert_eq!(errors, 0, "the legacy layout must compact cleanly");
+	assert!(batches > 0, "the writes must leave the index queued for compaction");
+	assert_eq!(count_doc_id_mappings(&ds, "t").await?, (0, 0));
+	assert_both_planners_return(&ds, MATCHES, CARRIERS).await?;
+
+	execute_all(&ds, &session, "REBUILD INDEX ft ON t;").await?;
+	let (_, _, _, ix) = get_table_index(&ds, "t", "ft").await?;
+	assert!(ix.uses_shared_doc_ids(), "the rebuild must stamp the current format");
+	assert_eq!(
+		count_doc_id_mappings(&ds, "t").await?,
+		(3, 3),
+		"the rebuilt index allocates one shared doc-ID per surviving record"
+	);
+	assert_both_planners_return(&ds, MATCHES, CARRIERS).await?;
+	Ok(())
+}
+
+/// Coverage shared by the legacy HNSW and DiskANN tests. `define_index` must
+/// define a 2-D vector index named `vx` on `t.pt` with `DIST EUCLIDEAN`, which
+/// is downgraded to the pre-shared-doc-ID format while still empty.
+///
+/// Euclidean distances from the query point `[0, 0]`: t:1 = 1, t:6 = 1.5,
+/// t:2 = 2, t:3 = 3, t:5 = 5 (the update moved it out from 0.75). The deleted
+/// t:4 was the nearest of all at 0.5, so a stale entry for either the updated
+/// or the deleted record would displace an expected neighbour.
+///
+/// 'bravo' is carried by t:1, t:2 and t:3 but not by t:6, which sits between
+/// t:1 and t:2: a KNN restricted to the matching records answers `[t:1, t:2]`,
+/// while one that takes the two nearest overall and filters afterwards keeps
+/// only `[t:1]`. Every KNN-with-MATCHES expectation below therefore pins which
+/// of the two an engine performs.
+#[cfg(feature = "kv-mem")]
+async fn legacy_vector_index_knn_under_both_planners(define_index: &str) -> Result<()> {
+	use crate::dbs::NewPlannerStrategy::{AllReadOnlyStatements, ComputeOnly};
+
+	// An explicit `ef` plans through the ANN index on both engines.
+	const KNN: &str = "SELECT VALUE id FROM t WHERE pt <|2,40|> [0.0, 0.0]";
+	// A MATCHES conjunct that cannot drive an index iterator of its own,
+	// paired with the `<|k,DIST|>` KNN form.
+	const OR_MATCHES_KNN: &str = "SELECT VALUE id FROM t \
+		WHERE (content @@ 'bravo' OR content = 'unmatched') AND pt <|2,EUCLIDEAN|> [0.0, 0.0]";
+	// A top-level MATCHES, which the current-format full-text index serves.
+	const MATCHES_KNN: &str =
+		"SELECT VALUE id FROM t WHERE content @@ 'bravo' AND pt <|2,40|> [0.0, 0.0]";
+	const NEAREST_TWO: &[&str] = &["t:1", "t:6"];
+	const NEAREST_TWO_MATCHING: &[&str] = &["t:1", "t:2"];
+
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(&ds, &session, define_index).await?;
+	downgrade_index_format(&ds, "t", "vx", 0).await?;
+	let (_, _, _, ix) = get_table_index(&ds, "t", "vx").await?;
+	assert!(ix.uses_doc_ids() && !ix.uses_shared_doc_ids());
+
+	// Legacy maintenance: inserts, an update that moves a vector out of the
+	// nearest pair, and a delete that removes the nearest point of all.
+	execute_all(
+		&ds,
+		&session,
+		"CREATE t:1 SET pt = [1.0, 0.0], content = 'alpha bravo';
+		 CREATE t:2 SET pt = [0.0, 2.0], content = 'bravo charlie';
+		 CREATE t:3 SET pt = [3.0, 0.0], content = 'bravo delta';
+		 CREATE t:4 SET pt = [0.5, 0.0], content = 'echo';
+		 CREATE t:5 SET pt = [0.0, 0.75], content = 'foxtrot';
+		 CREATE t:6 SET pt = [1.5, 0.0], content = 'zulu golf';
+		 UPDATE t:5 SET pt = [0.0, 5.0];
+		 DELETE t:4;",
+	)
+	.await?;
+	assert_eq!(
+		count_doc_id_mappings(&ds, "t").await?,
+		(0, 0),
+		"a legacy vector index keeps its private doc-ID space"
+	);
+	// Answered from the record-keyed pendings, which no compaction has drained
+	// into the graph yet.
+	assert_both_planners_return(&ds, KNN, NEAREST_TWO).await?;
+
+	// Compact, so the same rows have to come back out of the graph the legacy
+	// layout persisted. `new_index_test_ds` runs without maintenance tasks, so
+	// this drains the compaction queue itself.
+	let (batches, errors) = Datastore::index_compaction(
+		Arc::clone(&ds),
+		Duration::from_secs(60),
+		tokio_util::sync::CancellationToken::new(),
+	)
+	.await?;
+	assert_eq!(errors, 0, "the legacy layout must compact cleanly");
+	assert!(batches > 0, "the writes must leave the index queued for compaction");
+	assert_eq!(count_doc_id_mappings(&ds, "t").await?, (0, 0));
+	assert_both_planners_return(&ds, KNN, NEAREST_TWO).await?;
+
+	// A current-format full-text index built over the existing records opens
+	// the table's shared doc-ID space. The legacy vector index keeps ignoring
+	// it, so both layouts are live on one table and serve one statement
+	// together.
+	execute_all(&ds, &session, "DEFINE ANALYZER simple TOKENIZERS blank;").await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX ft ON t FIELDS content FULLTEXT ANALYZER simple BM25;",
+	)
+	.await?;
+	assert_eq!(
+		count_doc_id_mappings(&ds, "t").await?,
+		(5, 5),
+		"the current-format full-text index allocates one shared doc-ID per record"
+	);
+	assert_both_planners_return(&ds, KNN, NEAREST_TWO).await?;
+
+	// A MATCHES the full-text index cannot answer on its own leaves the
+	// compute-only engine on a table scan, where excluding the legacy vector
+	// index from KNN planning hands the statement to the brute-force KNN pass.
+	// The exec engine takes the same rows through a top-K over its own filtered
+	// scan. Both restrict the search to the matching records.
+	assert_both_planners_return(&ds, OR_MATCHES_KNN, NEAREST_TWO_MATCHING).await?;
+
+	// A top-level MATCHES is served by the full-text index. The exec engine
+	// keeps the ANN search and evaluates MATCHES per candidate — a legacy
+	// vector index cannot join the shared-doc-ID bitmap prefilter, so this is
+	// the path that keeps the search restricted to the matching records.
+	assert_planner_returns(&ds, AllReadOnlyStatements, MATCHES_KNN, NEAREST_TWO_MATCHING).await?;
+	// KNN nested under OR: the exec planner rejects the shape outright before
+	// union analysis, so a multi-index OR union can never contain a KNN
+	// branch — legacy or current format.
+	const UNION_MATCHES_KNN: &str = "SELECT VALUE id FROM t \
+		WHERE (content @@ 'bravo' AND pt <|2,40|> [0.0, 0.0]) OR content @@ 'zulu'";
+	let err = planner_result_ids(&ds, AllReadOnlyStatements, UNION_MATCHES_KNN)
+		.await
+		.expect_err("KNN under OR must be rejected by the exec planner");
+	assert!(err.to_string().contains("top level of the WHERE clause"), "unexpected error: {err}");
+	// The compute-only engine accepts the shape, but MATCHES anywhere in the
+	// statement excludes the legacy vector index from indexed KNN planning,
+	// and the `<|k,ef|>` form has no brute-force fallback: the KNN conjunct
+	// evaluates false for every row, the whole branch contributes nothing,
+	// and only the 'zulu' branch survives.
+	assert_planner_returns(&ds, ComputeOnly, UNION_MATCHES_KNN, &["t:6"]).await?;
+
+	// A SELECT planned inside a function body is compiled without plan-time
+	// catalog context, so its source resolves at execute time through
+	// DynamicScan, which re-plans the index access per run. The legacy vector
+	// index must keep the MATCHES conjunct evaluable during ANN traversal on
+	// that path too.
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE FUNCTION fn::knn_plain() { \
+			RETURN SELECT VALUE id FROM t WHERE pt <|2,40|> [0.0, 0.0]; };
+		 DEFINE FUNCTION fn::knn_matches() { \
+			RETURN SELECT VALUE id FROM t \
+			WHERE content @@ 'bravo' AND pt <|2,40|> [0.0, 0.0]; };",
+	)
+	.await?;
+	assert_planner_returns(&ds, AllReadOnlyStatements, "RETURN fn::knn_plain()", NEAREST_TWO)
+		.await?;
+	assert_planner_returns(
+		&ds,
+		AllReadOnlyStatements,
+		"RETURN fn::knn_matches()",
+		NEAREST_TWO_MATCHING,
+	)
+	.await?;
+	// The compute-only engine cannot combine an index-served MATCHES with a KNN
+	// conjunct: the full-text index becomes its iterator, which disables the
+	// brute-force KNN pass, and the KNN conjunct is then false for every row.
+	// That is a property of the engine rather than of the legacy layout — the
+	// rebuilt, current-format index below answers the same way.
+	assert_planner_returns(&ds, ComputeOnly, MATCHES_KNN, &[]).await?;
+
+	// The rebuild moves the vector index onto the shared space it was ignoring.
+	execute_all(&ds, &session, "REBUILD INDEX vx ON t;").await?;
+	let (_, _, _, ix) = get_table_index(&ds, "t", "vx").await?;
+	assert!(ix.uses_shared_doc_ids(), "the rebuild must stamp the current format");
+	assert_eq!(count_doc_id_mappings(&ds, "t").await?, (5, 5));
+	assert_both_planners_return(&ds, KNN, NEAREST_TWO).await?;
+	// The exec engine now restricts the ANN search with the shared-doc-ID
+	// bitmap prefilter instead, and answers both MATCHES shapes identically.
+	assert_planner_returns(&ds, AllReadOnlyStatements, MATCHES_KNN, NEAREST_TWO_MATCHING).await?;
+	assert_planner_returns(&ds, AllReadOnlyStatements, OR_MATCHES_KNN, NEAREST_TWO_MATCHING)
+		.await?;
+	// On the compute-only engine a current-format vector index is planned for
+	// every KNN, including the shapes above: MATCHES is then evaluated inside
+	// the ANN traversal, where it computes to `false`. Keeping the legacy index
+	// out of those plans is what the rows above depend on.
+	assert_planner_returns(&ds, ComputeOnly, MATCHES_KNN, &[]).await?;
+	assert_planner_returns(&ds, ComputeOnly, OR_MATCHES_KNN, &[]).await?;
+	// A runtime-resolved source never carries a bitmap prefilter, so on that
+	// path the MATCHES conjunct stays evaluable during traversal for the
+	// rebuilt, current-format index too: the top-k is still chosen among the
+	// matching records.
+	assert_planner_returns(&ds, AllReadOnlyStatements, "RETURN fn::knn_plain()", NEAREST_TWO)
+		.await?;
+	assert_planner_returns(
+		&ds,
+		AllReadOnlyStatements,
+		"RETURN fn::knn_matches()",
+		NEAREST_TWO_MATCHING,
+	)
+	.await?;
+	Ok(())
+}
+
+/// A current-format vector index combined with a MATCHES served by a legacy
+/// (format 0) full-text index: the MATCHES conjunct cannot join the
+/// shared-doc-ID bitmap prefilter, so the ANN search must keep it evaluable
+/// during traversal — with no prefilter at all, and alongside an allow-list
+/// built from another coverable conjunct. Distances from `[0, 0]`:
+/// t:1 = 1, t:6 = 1.5, t:2 = 2, t:3 = 3; 'bravo' is carried by t:1, t:2 and
+/// t:3 but not t:6, so a top-2 chosen without the text predicate would keep
+/// t:6 and lose t:2.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn uncovered_matches_restricts_current_format_knn() -> Result<()> {
+	use crate::dbs::NewPlannerStrategy::AllReadOnlyStatements;
+
+	const MATCHES_KNN: &str =
+		"SELECT VALUE id FROM t WHERE content @@ 'bravo' AND pt <|2,40|> [0.0, 0.0]";
+	const COVERED_AND_MATCHES_KNN: &str = "SELECT VALUE id FROM t \
+		WHERE flag = true AND content @@ 'bravo' AND pt <|2,40|> [0.0, 0.0]";
+	const NEAREST_TWO_MATCHING: &[&str] = &["t:1", "t:2"];
+
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE ANALYZER simple TOKENIZERS blank;
+		 DEFINE INDEX ft ON t FIELDS content FULLTEXT ANALYZER simple BM25;",
+	)
+	.await?;
+	downgrade_index_format(&ds, "t", "ft", 0).await?;
+	execute_all(
+		&ds,
+		&session,
+		"DEFINE INDEX vx ON t FIELDS pt HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32 EFC 16 M 4;
+		 DEFINE INDEX flag_idx ON t FIELDS flag;
+		 CREATE t:1 SET pt = [1.0, 0.0], content = 'alpha bravo', flag = true;
+		 CREATE t:2 SET pt = [0.0, 2.0], content = 'bravo charlie', flag = true;
+		 CREATE t:3 SET pt = [3.0, 0.0], content = 'bravo delta', flag = true;
+		 CREATE t:6 SET pt = [1.5, 0.0], content = 'zulu golf', flag = true;",
+	)
+	.await?;
+	let (_, _, _, vx) = get_table_index(&ds, "t", "vx").await?;
+	assert!(vx.uses_shared_doc_ids(), "the vector index under test is current-format");
+
+	// The legacy MATCHES is the only non-KNN conjunct: no prefilter can be
+	// built, so the compiled MATCHES-aware condition restricts the traversal.
+	assert_planner_returns(&ds, AllReadOnlyStatements, MATCHES_KNN, NEAREST_TWO_MATCHING).await?;
+	// A coverable conjunct produces an allow-list that cannot include the
+	// MATCHES: the compiled condition must stay active alongside it.
+	assert_planner_returns(
+		&ds,
+		AllReadOnlyStatements,
+		COVERED_AND_MATCHES_KNN,
+		NEAREST_TWO_MATCHING,
+	)
+	.await?;
+	Ok(())
+}
+
+/// An HNSW index whose stored format predates the shared table-level doc-ID
+/// space (simulated by downgrading `format_version` to 0) serves KNN under
+/// both query engines — on its own and alongside a MATCHES conjunct answered
+/// by a current-format full-text index on the same table — and keeps its
+/// private doc-ID layout until an explicit REBUILD. See
+/// [`legacy_vector_index_knn_under_both_planners`] for the fixture's distances.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn legacy_hnsw_index_serves_knn_under_both_planners() -> Result<()> {
+	legacy_vector_index_knn_under_both_planners(
+		"DEFINE INDEX vx ON t FIELDS pt HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32 EFC 16 M 4;",
+	)
+	.await
+}
+
+/// DiskANN counterpart of [`legacy_hnsw_index_serves_knn_under_both_planners`]:
+/// a pre-shared-doc-ID DiskANN index serves KNN under both query engines, on
+/// its own and with a MATCHES conjunct, and keeps its private doc-ID layout
+/// until an explicit REBUILD.
+#[cfg(all(feature = "kv-mem", diskann))]
+#[tokio::test(flavor = "multi_thread")]
+#[test_log::test]
+async fn legacy_diskann_index_serves_knn_under_both_planners() -> Result<()> {
+	legacy_vector_index_knn_under_both_planners(
+		"DEFINE INDEX vx ON t FIELDS pt DISKANN DIMENSION 2 DIST EUCLIDEAN TYPE F32;",
+	)
+	.await
 }
 
 /// Concurrent removal of the *only* two consumers must not leak the shared
@@ -6739,9 +7163,15 @@ async fn a_compaction_plan_prepared_before_a_wipe_cannot_apply() -> Result<()> {
 	let mut ctx = ds.setup_ctx()?;
 	ctx.set_transaction(Arc::clone(&tx));
 	let ctx = ctx.freeze();
-	let applied =
-		IndexOperation::apply_hnsw_compaction(&ctx, ctx.get_index_stores(), &ikb, params, plan)
-			.await?;
+	let applied = IndexOperation::apply_hnsw_compaction(
+		&ctx,
+		ctx.get_index_stores(),
+		&ikb,
+		params,
+		crate::catalog::DOC_IDS_FORMAT_VERSION,
+		plan,
+	)
+	.await?;
 	tx.cancel().await?;
 	assert!(!applied, "a plan prepared before the wipe must be rejected, not applied");
 

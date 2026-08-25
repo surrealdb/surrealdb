@@ -33,6 +33,8 @@ pub(super) type FilterCache = HashMap<VectorId, Option<(Arc<RecordId>, Arc<Recor
 pub(super) struct HnswTruthyDocumentFilter<'a> {
 	/// Key base for record lookups.
 	ikb: IndexKeyBase,
+	/// Whether the index uses shared or legacy private doc-ID mappings.
+	format_version: u16,
 	/// Stable table id used to scope HNSW doc-id cache entries.
 	table_id: TableId,
 	/// Shared HNSW cache used for compact document ID resolution.
@@ -56,8 +58,10 @@ pub(super) struct HnswTruthyDocumentFilter<'a> {
 }
 
 impl<'a> HnswTruthyDocumentFilter<'a> {
+	#[allow(clippy::too_many_arguments)]
 	pub(super) fn new(
 		ikb: IndexKeyBase,
+		format_version: u16,
 		table_id: TableId,
 		vector_cache: VectorCache,
 		cond: Option<Arc<dyn CandidateCondition + 'a>>,
@@ -67,6 +71,7 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 	) -> Self {
 		Self {
 			ikb,
+			format_version,
 			table_id,
 			vector_cache,
 			cond,
@@ -164,6 +169,7 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 		if !doc_ids.is_empty() {
 			let resolved = HnswDocs::get_things_batch(
 				&self.ikb,
+				self.format_version,
 				self.table_id,
 				&self.vector_cache,
 				&ctx.tx,
@@ -221,6 +227,7 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 			VectorId::DocId(doc_id) => {
 				let Some(rid) = HnswDocs::get_thing_cached(
 					&self.ikb,
+					self.format_version,
 					self.table_id,
 					&self.vector_cache,
 					&ctx.tx,

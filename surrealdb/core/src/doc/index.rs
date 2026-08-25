@@ -141,7 +141,7 @@ impl Document {
 	pub(super) async fn remove_doc_id(&self, ctx: &FrozenContext) -> Result<()> {
 		// Only tables carrying a doc-ID-consuming index maintain the shared space.
 		let ixs = self.doc_ctx.ix()?;
-		if !ixs.iter().any(|ix| ix.uses_doc_ids()) {
+		if !ixs.iter().any(IndexDefinition::uses_shared_doc_ids) {
 			return Ok(());
 		}
 		// A table being dropped has its whole prefix reclaimed separately.
@@ -170,7 +170,7 @@ impl Document {
 		count_cond_match: Option<(bool, bool)>,
 	) -> Result<bool> {
 		// Does this index consume the table's shared doc-ID space?
-		let doc_id_index = ix.uses_doc_ids();
+		let doc_id_index = ix.uses_shared_doc_ids();
 		// Get the index builder
 		let (o, n) = if let Some(ib) = ctx.get_index_builder() {
 			let mutation = IndexMutation {

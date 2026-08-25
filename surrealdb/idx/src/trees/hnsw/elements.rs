@@ -20,6 +20,8 @@ pub(super) struct HnswElements {
 	ikb: IndexKeyBase,
 	/// In-memory LRU cache for element vectors.
 	vector_cache: VectorCache,
+	/// Stored index format used to scope cache entries.
+	format_version: u16,
 	/// The next element ID to assign.
 	next_element_id: ElementId,
 	/// Distance metric for similarity computations.
@@ -33,12 +35,14 @@ impl HnswElements {
 		ikb: IndexKeyBase,
 		dist: Distance,
 		vector_cache: VectorCache,
+		format_version: u16,
 	) -> Self {
 		Self {
 			table_id,
 			index_id: ikb.index(),
 			ikb,
 			vector_cache,
+			format_version,
 			next_element_id: 0,
 			dist,
 		}
@@ -62,14 +66,22 @@ impl HnswElements {
 
 	#[cfg(test)]
 	pub(super) async fn len(&self) -> usize {
-		self.vector_cache.len(self.ikb.ns(), self.ikb.db(), self.table_id, self.index_id).await
-			as usize
+		self.vector_cache
+			.len(self.ikb.ns(), self.ikb.db(), self.table_id, self.index_id, self.format_version)
+			.await as usize
 	}
 
 	#[cfg(test)]
 	pub(super) async fn contains(&self, e_id: ElementId) -> bool {
 		self.vector_cache
-			.contains(self.ikb.ns(), self.ikb.db(), self.table_id, self.index_id, e_id)
+			.contains(
+				self.ikb.ns(),
+				self.ikb.db(),
+				self.table_id,
+				self.index_id,
+				self.format_version,
+				e_id,
+			)
 			.await
 	}
 
@@ -85,7 +97,15 @@ impl HnswElements {
 		tx.set_key(&key, ser_vec).await?;
 		let pt: SharedVector = vec.into();
 		self.vector_cache
-			.insert(self.ikb.ns(), self.ikb.db(), self.table_id, self.index_id, id, pt.clone())
+			.insert(
+				self.ikb.ns(),
+				self.ikb.db(),
+				self.table_id,
+				self.index_id,
+				self.format_version,
+				id,
+				pt.clone(),
+			)
 			.await;
 		Ok(pt)
 	}
@@ -98,7 +118,14 @@ impl HnswElements {
 	) -> Result<Option<SharedVector>> {
 		if let Some(v) = self
 			.vector_cache
-			.get(self.ikb.ns(), self.ikb.db(), self.table_id, self.index_id, *e_id)
+			.get(
+				self.ikb.ns(),
+				self.ikb.db(),
+				self.table_id,
+				self.index_id,
+				self.format_version,
+				*e_id,
+			)
 			.await
 		{
 			return Ok(Some(v));
@@ -115,6 +142,7 @@ impl HnswElements {
 						self.ikb.db(),
 						self.table_id,
 						self.index_id,
+						self.format_version,
 						*e_id,
 						vec.clone(),
 					)
@@ -142,7 +170,14 @@ impl HnswElements {
 	/// Removes an element's vector from both the cache and the key-value store.
 	pub(super) async fn remove(&mut self, tx: &Transaction, e_id: ElementId) -> Result<()> {
 		self.vector_cache
-			.remove(self.ikb.ns(), self.ikb.db(), self.table_id, self.index_id, e_id)
+			.remove(
+				self.ikb.ns(),
+				self.ikb.db(),
+				self.table_id,
+				self.index_id,
+				self.format_version,
+				e_id,
+			)
 			.await;
 		let key = self.ikb.new_he_key(e_id);
 		tx.del_key(&key).await?;

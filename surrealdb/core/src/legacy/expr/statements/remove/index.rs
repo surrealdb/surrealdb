@@ -53,12 +53,12 @@ pub(crate) async fn remove_index_statement_compute(
 	// doc-ID-consuming index (full-text / HNSW / DiskAnn / doc-ID-format
 	// b-tree) on the table. If so, the shared table-level doc-ID mappings
 	// must be reclaimed once it is gone (see the purge below).
-	let removed_last_doc_id_index = ix.uses_doc_ids()
+	let removed_last_doc_id_index = ix.uses_shared_doc_ids()
 		&& !txn
 			.all_tb_indexes(ns, db, &table_name, None)
 			.await?
 			.iter()
-			.any(|other| other.index_id != ix.index_id && other.uses_doc_ids());
+			.any(|other| other.index_id != ix.index_id && other.uses_shared_doc_ids());
 	// Clear process-local index wrappers immediately, then retire durable
 	// build state in the same transaction that removes the catalog
 	// definition. The builder abort is deferred until this transaction

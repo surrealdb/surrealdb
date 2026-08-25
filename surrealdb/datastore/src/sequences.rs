@@ -44,9 +44,9 @@ use web_time::Instant;
 use crate::factory::TransactionFactory;
 use crate::key::schema::{
 	DbIdBatchKey, DbIdBatchPrefix, DbIdStateKey, DocIdBatchKey, DocIdBatchPrefix, DocIdStateKey,
-	IndexIdBatchKey, IndexIdBatchPrefix, IndexIdStateKey, NsIdBatchKey, NsIdBatchPrefix,
-	NsIdStateKey, SeqBatchKey, SeqBatchPrefix, SeqStateKey, TbIdBatchKey, TbIdBatchPrefix,
-	TbIdStateKey,
+	FtDocBatchKey, FtDocBatchPrefix, FtDocStateKey, IndexIdBatchKey, IndexIdBatchPrefix,
+	IndexIdStateKey, NsIdBatchKey, NsIdBatchPrefix, NsIdStateKey, SeqBatchKey, SeqBatchPrefix,
+	SeqStateKey, TbIdBatchKey, TbIdBatchPrefix, TbIdStateKey,
 };
 use crate::values::ids::DocId;
 use crate::{Transaction, TransactionType};
@@ -83,6 +83,8 @@ enum SequenceDomain {
 	TablesIds(NamespaceId, DatabaseId),
 	/// A sequence generating IDs for indexes
 	IndexIds(NamespaceId, DatabaseId, TableName),
+	/// The private full-text doc-ID allocator used by pre-format-1 indexes.
+	LegacyFullTextDocIds(NamespaceId, DatabaseId, TableName, IndexId),
 }
 
 impl SequenceDomain {
@@ -108,6 +110,15 @@ impl SequenceDomain {
 
 	pub fn new_index_ids(ns: NamespaceId, db: DatabaseId, tb: TableName) -> Self {
 		Self::IndexIds(ns, db, tb)
+	}
+
+	pub fn new_legacy_full_text_doc_ids(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: TableName,
+		ix: IndexId,
+	) -> Self {
+		Self::LegacyFullTextDocIds(ns, db, tb, ix)
 	}
 
 	fn new_batch_range_keys(&self) -> Result<TypedRange<BatchValue>> {
@@ -137,6 +148,9 @@ impl SequenceDomain {
 				tb: Cow::Borrowed(tb),
 			}
 			.range(),
+			Self::LegacyFullTextDocIds(ns, db, tb, ix) => {
+				FtDocBatchPrefix::new(*ns, *db, Cow::Borrowed(tb), *ix).range()
+			}
 		}
 	}
 
@@ -172,6 +186,9 @@ impl SequenceDomain {
 				tb: Cow::Borrowed(tb),
 				start,
 			}),
+			Self::LegacyFullTextDocIds(ns, db, tb, ix) => SequenceBatchKey::LegacyFullTextDocIds(
+				FtDocBatchKey::new(*ns, *db, Cow::Borrowed(tb), *ix, start),
+			),
 		}
 	}
 
@@ -191,6 +208,9 @@ impl SequenceDomain {
 			Self::DatabasesIds(..) => SequenceBatchKey::Databases(DbIdBatchKey::decode_key(bytes)?),
 			Self::TablesIds(..) => SequenceBatchKey::Tables(TbIdBatchKey::decode_key(bytes)?),
 			Self::IndexIds(..) => SequenceBatchKey::Indexes(IndexIdBatchKey::decode_key(bytes)?),
+			Self::LegacyFullTextDocIds(..) => {
+				SequenceBatchKey::LegacyFullTextDocIds(FtDocBatchKey::decode_key(bytes)?)
+			}
 		})
 	}
 
@@ -228,6 +248,9 @@ impl SequenceDomain {
 				tb: Cow::Owned(tb.clone()),
 				nid,
 			}),
+			Self::LegacyFullTextDocIds(ns, db, tb, ix) => SequenceStateKey::LegacyFullTextDocIds(
+				FtDocStateKey::new(*ns, *db, Cow::Owned(tb.clone()), *ix, nid),
+			),
 		}
 	}
 }
@@ -248,6 +271,7 @@ enum SequenceBatchKey<'a> {
 	Databases(DbIdBatchKey),
 	Tables(TbIdBatchKey),
 	Indexes(IndexIdBatchKey<'a>),
+	LegacyFullTextDocIds(FtDocBatchKey<'a>),
 }
 
 impl KVKey for SequenceBatchKey<'_> {
@@ -261,6 +285,7 @@ impl KVKey for SequenceBatchKey<'_> {
 			Self::Databases(k) => k.encode_buffer(buffer),
 			Self::Tables(k) => k.encode_buffer(buffer),
 			Self::Indexes(k) => k.encode_buffer(buffer),
+			Self::LegacyFullTextDocIds(k) => k.encode_buffer(buffer),
 		}
 	}
 
@@ -277,6 +302,7 @@ enum SequenceStateKey<'a> {
 	Databases(DbIdStateKey),
 	Tables(TbIdStateKey),
 	Indexes(IndexIdStateKey<'a>),
+	LegacyFullTextDocIds(FtDocStateKey<'a>),
 }
 
 impl KVKey for SequenceStateKey<'_> {
@@ -290,6 +316,7 @@ impl KVKey for SequenceStateKey<'_> {
 			Self::Databases(k) => k.encode_buffer(buffer),
 			Self::Tables(k) => k.encode_buffer(buffer),
 			Self::Indexes(k) => k.encode_buffer(buffer),
+			Self::LegacyFullTextDocIds(k) => k.encode_buffer(buffer),
 		}
 	}
 
@@ -554,6 +581,20 @@ impl Sequences {
 		let id = self.next_val(ctx, domain, 0, batch, None).await?;
 		Ok(id as DocId)
 	}
+
+	/// Generates the next document ID for a legacy full-text index's private space.
+	pub async fn next_legacy_full_text_doc_id(
+		&self,
+		ctx: Option<&dyn CancellationProbe>,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: TableName,
+		ix: IndexId,
+	) -> Result<DocId> {
+		let domain = Arc::new(SequenceDomain::new_legacy_full_text_doc_ids(ns, db, tb, ix));
+		let id = self.next_val(ctx, domain, 0, 100, None).await?;
+		Ok(id as DocId)
+	}
 }
 
 /// Internal per-node sequence state manager.
@@ -655,10 +696,12 @@ impl Sequence {
 					seeded = seeded.max(ix.index_id.0 as i64 + 1);
 				}
 			}
-			// Table doc IDs and user-defined sequences are not backed by the catalog
-			// id-allocation scheme, so there are no pre-existing IDs to avoid
+			// Document-ID spaces and user-defined sequences are not backed by the
+			// catalog id-allocation scheme, so there are no pre-existing IDs to avoid
 			// colliding with.
-			SequenceDomain::TableDocIds(..) | SequenceDomain::UserName(..) => {}
+			SequenceDomain::TableDocIds(..)
+			| SequenceDomain::LegacyFullTextDocIds(..)
+			| SequenceDomain::UserName(..) => {}
 		}
 		Ok(seeded)
 	}

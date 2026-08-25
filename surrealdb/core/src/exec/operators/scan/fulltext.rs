@@ -216,10 +216,9 @@ impl ExecOperator for FullTextScan {
 
 			// Get the FullText index parameters from the index definition
 			let index_def = index_ref.definition();
-			// Reject a full-text index whose on-disk format predates the shared
-			// table-level doc-ID space; it must be rebuilt before it can serve
-			// queries. Mirrors the plan-time gate in idx/planner/tree.rs.
-			index_def.ensure_current_format()?;
+			// Legacy (pre-shared-doc-ID) indexes resolve postings through their
+			// historical private doc-ID layout until explicitly rebuilt; the
+			// format version selects the resolver used below.
 			let ft_params = match &index_def.index {
 				Index::FullText(params) => params,
 				_ => Err(ControlFlow::Err(anyhow::anyhow!(
@@ -243,6 +242,7 @@ impl ExecOperator for FullTextScan {
 				ikb,
 				ft_params,
 				&frozen_ctx.config.idx.file_allowlist,
+				index_def.format_version,
 			)
 			.await
 			.context("Failed to open full-text index")?;

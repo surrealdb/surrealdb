@@ -12,7 +12,7 @@ use crate::catalog::{self, DatabaseId, Index, IndexDefinition, IndexId, Namespac
 use crate::exe::FlowResultExt as _;
 use crate::expr::operator::NearestNeighbor;
 use crate::expr::order::{OrderList, Ordering};
-use crate::expr::visit::MutVisitor;
+use crate::expr::visit::{MutVisitor, Visit, Visitor};
 use crate::expr::{BinaryOperator, Cond, Expr, Idiom, Kind, Literal, Order, Part, With};
 use crate::idx::planner::StatementContext;
 use crate::idx::planner::executor::{
@@ -99,6 +99,11 @@ struct TreeBuilder<'a> {
 	/// `Index::Count` indexes) that would otherwise leak the cardinality of
 	/// values the current user cannot read.
 	cond_touches_restricted_field: bool,
+	/// Set when the statement's WHERE condition contains a MATCHES operator
+	/// anywhere. Legacy vector indexes cannot evaluate MATCHES in traversal
+	/// (the legacy executor is not yet installed when their filter is built),
+	/// so they are excluded from indexed KNN planning when this is set.
+	cond_contains_matches: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -141,6 +146,7 @@ impl<'a> TreeBuilder<'a> {
 			leaf_nodes_count: 0,
 			leaf_nodes_with_index_count: 0,
 			cond_touches_restricted_field: false,
+			cond_contains_matches: false,
 		}
 	}
 
@@ -178,6 +184,7 @@ impl<'a> TreeBuilder<'a> {
 	}
 
 	async fn eval_cond(&mut self, stk: &mut Stk, cond: &Cond) -> Result<()> {
+		self.cond_contains_matches = Self::expr_contains_matches(&cond.0);
 		self.root = Some(self.eval_value(stk, 0, &cond.0).await?);
 		self.knn_condition = if self.knn_expressions.is_empty() {
 			None
@@ -191,6 +198,36 @@ impl<'a> TreeBuilder<'a> {
 			}
 		};
 		Ok(())
+	}
+
+	/// Whether the expression tree contains a MATCHES operator anywhere.
+	///
+	/// Uses the generated [`Visitor`] traversal, which walks every expression
+	/// shape — subqueries, blocks, if-else chains, closures, idiom parts, and
+	/// literal containers included — so a MATCHES nested in any evaluable
+	/// position is detected and legacy vector indexes are excluded from
+	/// indexed KNN planning.
+	fn expr_contains_matches(expr: &Expr) -> bool {
+		// Marker error that aborts the walk as soon as a MATCHES is found.
+		struct FoundMatches;
+		struct MatchesDetector;
+
+		impl Visitor for MatchesDetector {
+			type Error = FoundMatches;
+
+			fn visit_expr(&mut self, e: &Expr) -> Result<(), Self::Error> {
+				if let Expr::Binary {
+					op: BinaryOperator::Matches(_),
+					..
+				} = e
+				{
+					return Err(FoundMatches);
+				}
+				e.visit(self)
+			}
+		}
+
+		MatchesDetector.visit_expr(expr).is_err()
 	}
 
 	async fn eval_count(&mut self, table: &TableName) -> Result<()> {
@@ -607,18 +644,23 @@ impl<'a> TreeBuilder<'a> {
 				Index::Uniq => self.eval_index_operator(index_reference, op, n, p, *col),
 				Index::FullText {
 					..
-				} if *col == 0 => {
-					// Reject an index whose on-disk format predates the shared
-					// table-level doc-ID space before planning a search on it.
-					index_reference.ensure_current_format()?;
-					Self::eval_matches_operator(op, n)
-				}
-				Index::Hnsw(h) if *col == 0 => {
-					index_reference.ensure_current_format()?;
+				} if *col == 0 => Self::eval_matches_operator(op, n),
+				// Legacy vector indexes resolve candidates through private
+				// doc-ID spaces. Their in-traversal filter is built by the
+				// legacy executor before the full-text planner is installed,
+				// so it cannot evaluate a MATCHES conjunct. When the statement
+				// contains MATCHES anywhere, fall back to brute-force KNN so
+				// the outer filter can enforce MATCHES correctly.
+				Index::Hnsw(h)
+					if *col == 0
+						&& !(index_reference.format_version == 0 && self.cond_contains_matches) =>
+				{
 					self.eval_hnsw_knn(e, op, n, h)?
 				}
-				Index::DiskAnn(d) if *col == 0 => {
-					index_reference.ensure_current_format()?;
+				Index::DiskAnn(d)
+					if *col == 0
+						&& !(index_reference.format_version == 0 && self.cond_contains_matches) =>
+				{
 					self.eval_diskann_knn(e, op, n, d)?
 				}
 				_ => None,
@@ -1043,5 +1085,41 @@ impl From<ResolvedExpression> for Node {
 			right: re.right,
 			exp: re.exp,
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::TreeBuilder;
+
+	fn contains_matches(input: &str) -> bool {
+		let expr: crate::expr::Expr = crate::syn::expr(input).unwrap().into();
+		TreeBuilder::expr_contains_matches(&expr)
+	}
+
+	#[test]
+	fn matches_detection_covers_boolean_compositions() {
+		assert!(contains_matches("content @@ 'x'"));
+		assert!(contains_matches("content @1@ 'x'"));
+		assert!(contains_matches("flag = true AND content @@ 'x'"));
+		assert!(contains_matches("!(content @@ 'x')"));
+		assert!(contains_matches("flag = true OR (count > 3 AND content @@ 'x')"));
+	}
+
+	#[test]
+	fn matches_detection_covers_nested_shapes() {
+		// Shapes the boolean-composition walk alone would miss: the
+		// traversal-time evaluator can still reach a MATCHES inside these.
+		assert!(contains_matches("array::len([content @@ 'x']) > 0"));
+		assert!(contains_matches("[content @@ 'x'] CONTAINS true"));
+		assert!(contains_matches("IF content @@ 'x' { true } ELSE { false }"));
+		assert!(contains_matches("flag = true OR (SELECT VALUE v FROM t WHERE c @@ 'x')[0]"));
+	}
+
+	#[test]
+	fn matches_detection_ignores_conditions_without_matches() {
+		assert!(!contains_matches("flag = true AND count > 3"));
+		assert!(!contains_matches("point <|2|> [1.0, 2.0]"));
+		assert!(!contains_matches("point <|2|> [1.0, 2.0] AND flag = true"));
 	}
 }

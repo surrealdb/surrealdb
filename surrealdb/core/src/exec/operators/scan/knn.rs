@@ -128,6 +128,10 @@ pub(crate) struct KnnPrefilter {
 	/// `residual` compiled to a physical expression for per-row evaluation
 	/// outside the traversal (exact tier).
 	pub(crate) residual_phys: Option<Arc<dyn PhysicalExpr>>,
+	/// `true` when a MATCHES conjunct could not join the bitmap plan; the
+	/// scan then keeps [`KnnScan::matches_condition`] active alongside the
+	/// allow-list. See [`KnnPrefilterPlan::uncovered_matches`].
+	pub(crate) uncovered_matches: bool,
 }
 
 /// KNN scan operator using an ANN index.
@@ -182,6 +186,13 @@ pub struct KnnScan {
 	/// bitmap gating candidate admission, with the true residual for the
 	/// remaining predicates. `None` keeps the pure in-traversal filter path.
 	pub(crate) prefilter: Option<KnnPrefilter>,
+	/// KNN-stripped original WHERE compiled with MATCHES-aware physical
+	/// expressions, evaluated per candidate during traversal whenever no
+	/// allow-list bitmap restricts the search. Attached by the static planner
+	/// for legacy (pre-shared-doc-ID) indexes — which can never use the
+	/// shared-space bitmap prefilter — and by the runtime-resolved path for
+	/// every format, since that path never carries a prefilter.
+	pub(crate) matches_condition: Option<Arc<dyn PhysicalExpr>>,
 	/// The [`PrefilterTier`] actually taken, recorded during `execute()` for
 	/// EXPLAIN ANALYZE (`0` = no prefilter ran).
 	pub(crate) tier: Arc<std::sync::atomic::AtomicU8>,
@@ -217,6 +228,7 @@ impl KnnScan {
 			knn_context,
 			residual_cond,
 			prefilter,
+			matches_condition: None,
 			tier: Arc::new(std::sync::atomic::AtomicU8::new(0)),
 			needed_fields,
 		}
@@ -225,6 +237,11 @@ impl KnnScan {
 	/// Set the plan-time resolved table context.
 	pub(crate) fn with_resolved(mut self, resolved: ResolvedTableContext) -> Self {
 		self.resolved = Some(resolved);
+		self
+	}
+
+	pub(crate) fn with_matches_condition(mut self, phys: Option<Arc<dyn PhysicalExpr>>) -> Self {
+		self.matches_condition = phys;
 		self
 	}
 }
@@ -318,6 +335,7 @@ impl ExecOperator for KnnScan {
 		let version_expr = self.version.clone();
 		let knn_context = self.knn_context.clone();
 		let residual_cond = self.residual_cond.clone();
+		let matches_condition = self.matches_condition.clone();
 		let prefilter = self.prefilter.clone();
 		let tier_cell = Arc::clone(&self.tier);
 		let op_metrics = Arc::clone(&self.metrics);
@@ -401,11 +419,9 @@ impl ExecOperator for KnnScan {
 
 			// Get the ANN parameters from the index definition
 			let index_def = index_ref.definition();
-			// Reject an HNSW/DiskANN index whose on-disk format predates the
-			// shared table-level doc-ID space; it must be rebuilt before it can
-			// serve KNN searches. Mirrors the plan-time gate in
-			// idx/planner/tree.rs.
-			index_def.ensure_current_format()?;
+			// Legacy (pre-shared-doc-ID) indexes resolve candidates through
+			// their historical private doc-ID layouts until explicitly rebuilt;
+			// the format version selects the resolver used below.
 			let ikb = crate::idx::IndexKeyBase::new(
 				ns.namespace_id,
 				db.database_id,
@@ -422,7 +438,7 @@ impl ExecOperator for KnnScan {
 			let mut tier: Option<PrefilterTier> = None;
 			let mut allow_list: Option<RoaringTreemap> = None;
 			let mut in_traversal_cond: Option<Cond> = residual_cond;
-			if let Some(pf) = &prefilter {
+			if let Some(pf) = prefilter.as_ref().filter(|_| index_def.uses_shared_doc_ids()) {
 				if version.is_some() {
 					// The planner never attaches a prefilter to a versioned
 					// query (doc-ID mappings are not time-travel-aware);
@@ -450,6 +466,20 @@ impl ExecOperator for KnnScan {
 						}
 					}
 				}
+			}
+			// The compiled MATCHES-aware condition supersedes the residual
+			// whenever no allow-list bitmap restricts the search — and stays
+			// active alongside one that could not cover a MATCHES conjunct.
+			// An allow-list that covered every conjunct encodes them exactly.
+			let uncovered_matches =
+				prefilter.as_ref().is_some_and(|p| p.uncovered_matches) && allow_list.is_some();
+			let matches_phys = if allow_list.is_none() || uncovered_matches {
+				matches_condition
+			} else {
+				None
+			};
+			if matches_phys.is_some() {
+				in_traversal_cond = None;
 			}
 			tier_cell.store(tier.map_or(0, |t| t as u8), std::sync::atomic::Ordering::Relaxed);
 
@@ -506,7 +536,12 @@ impl ExecOperator for KnnScan {
 					&vector,
 					k as usize,
 					allow,
-					prefilter.as_ref().and_then(|p| p.residual_phys.as_ref()),
+					// An uncovered MATCHES makes the compiled condition the
+					// per-row filter (it subsumes the residual); otherwise the
+					// residual alone applies.
+					matches_phys
+						.as_ref()
+						.or_else(|| prefilter.as_ref().and_then(|p| p.residual_phys.as_ref())),
 					&select_permission,
 					check_perms,
 				)
@@ -545,31 +580,48 @@ impl ExecOperator for KnnScan {
 					)))
 				};
 				let fetch_counter = || Arc::clone(&op_metrics) as Arc<dyn CandidateFetchCounter>;
-				let cond_filter = match (&in_traversal_cond, ctx.options()) {
-					(Some(cond), Some(opt)) => Some(KnnCondFilter {
+				let cond_filter = if let Some(phys) = &matches_phys {
+					Some(KnnCondFilter {
 						select_gate: select_gate(),
-						cond: Some(Arc::new(LegacyCondition::new(
-							frozen_ctx,
-							opt,
-							Arc::new(cond.clone()),
+						cond: Some(Arc::new(crate::legacy::knn::PhysicalCondition::new(
+							Arc::clone(phys),
+							ctx.clone(),
 						))),
 						metrics: Some(fetch_counter()),
-					}),
-					(None, Some(_)) if needs_perm_gate && search_allow.is_some() => {
-						Some(KnnCondFilter {
+					})
+				} else {
+					match (&in_traversal_cond, ctx.options()) {
+						(Some(cond), Some(opt)) => Some(KnnCondFilter {
 							select_gate: select_gate(),
-							cond: None,
+							cond: Some(Arc::new(LegacyCondition::new(
+								frozen_ctx,
+								opt,
+								Arc::new(cond.clone()),
+							))),
 							metrics: Some(fetch_counter()),
-						})
+						}),
+						(None, Some(_)) if needs_perm_gate && search_allow.is_some() => {
+							Some(KnnCondFilter {
+								select_gate: select_gate(),
+								cond: None,
+								metrics: Some(fetch_counter()),
+							})
+						}
+						_ => None,
 					}
-					_ => None,
 				};
 				match &index_def.index {
 					Index::Hnsw(hnsw_params) => {
 						// Obtain the shared HNSW index
 						let hnsw_index = frozen_ctx
 							.get_index_stores()
-							.get_index_hnsw(frozen_ctx, table_id, &ikb, hnsw_params)
+							.get_index_hnsw(
+								frozen_ctx,
+								table_id,
+								&ikb,
+								hnsw_params,
+								index_def.format_version,
+							)
 							.await
 							.context("Failed to get HNSW index")?;
 
@@ -606,7 +658,12 @@ impl ExecOperator for KnnScan {
 					Index::DiskAnn(diskann_params) => {
 						let diskann_index = frozen_ctx
 							.get_index_stores()
-							.get_index_diskann(table_id, &ikb, diskann_params)
+							.get_index_diskann(
+								index_def.format_version,
+								table_id,
+								&ikb,
+								diskann_params,
+							)
 							.await
 							.context("Failed to get DiskANN index")?;
 

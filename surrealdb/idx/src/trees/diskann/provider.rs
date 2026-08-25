@@ -164,6 +164,7 @@ impl DiskAnnVectorElement for u8 {
 pub(super) struct DiskAnnProvider {
 	pub(super) ikb: IndexKeyBase,
 	table_id: TableId,
+	format_version: u16,
 	cache: DiskAnnCache,
 	dim: usize,
 	metric: Metric,
@@ -174,6 +175,7 @@ impl DiskAnnProvider {
 	pub(super) fn new(
 		ikb: IndexKeyBase,
 		table_id: TableId,
+		format_version: u16,
 		cache: DiskAnnCache,
 		dim: usize,
 		metric: Metric,
@@ -181,6 +183,7 @@ impl DiskAnnProvider {
 		Self {
 			ikb,
 			table_id,
+			format_version,
 			cache,
 			dim,
 			metric,
@@ -188,8 +191,8 @@ impl DiskAnnProvider {
 	}
 
 	/// Returns the cache scope tuple for this provider's index.
-	fn cache_index(&self) -> (NamespaceId, DatabaseId, TableId, IndexId) {
-		(self.ikb.ns(), self.ikb.db(), self.table_id, self.ikb.index())
+	fn cache_index(&self) -> (NamespaceId, DatabaseId, TableId, IndexId, u16) {
+		(self.ikb.ns(), self.ikb.db(), self.table_id, self.ikb.index(), self.format_version)
 	}
 
 	/// Builds the provider context for a specific transaction.
@@ -962,7 +965,7 @@ mod tests {
 		let tx = Arc::new(ds.transaction(TransactionType::Write).await?);
 		let ikb = ikb();
 		let provider =
-			DiskAnnProvider::new(ikb, TableId(4), DiskAnnCache::new(1024 * 1024), 2, Metric::L2);
+			DiskAnnProvider::new(ikb, TableId(4), 0, DiskAnnCache::new(1024 * 1024), 2, Metric::L2);
 		let context = provider.context(tx);
 		Ok((provider, context))
 	}

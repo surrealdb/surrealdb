@@ -11,6 +11,7 @@ use surrealdb_kvs::{Direction, Val};
 use tokio::sync::RwLock;
 
 use crate::catalog::{Distance, HnswParams, TableId, VectorType};
+use crate::docids::LegacyVectorDocIds;
 use crate::env::IndexEnv;
 use crate::key::schema::HnswRecordPendingKey;
 use crate::key::{KVKeyDecode, KVValue, Key};
@@ -209,6 +210,8 @@ pub struct HnswIndex {
 	hnsw: RwLock<HnswFlavor>,
 	/// Vector-to-document mappings.
 	vec_docs: VecDocs,
+	/// The stored index format that selects shared or legacy doc-ID mappings.
+	format_version: u16,
 }
 
 /// Contextual state passed through HNSW graph operations.
@@ -239,6 +242,10 @@ impl<'a> HnswContext<'a> {
 }
 
 impl HnswIndex {
+	pub(crate) fn format_version(&self) -> u16 {
+		self.format_version
+	}
+
 	/// Creates a new HNSW index, loading existing document state from the transaction.
 	pub(crate) async fn new(
 		vector_cache: VectorCache,
@@ -246,16 +253,30 @@ impl HnswIndex {
 		ikb: IndexKeyBase,
 		tb: TableId,
 		p: &HnswParams,
+		format_version: u16,
 	) -> Result<Self> {
 		Ok(Self {
 			dim: p.dimension as usize,
 			vector_type: p.vector_type,
 			distance: p.distance.clone(),
 			table_id: tb,
-			hnsw: RwLock::new(HnswFlavor::new(tb, ikb.clone(), p, vector_cache.clone())?),
-			vec_docs: VecDocs::new(ikb.clone(), tb, vector_cache.clone(), p.use_hashed_vector),
+			hnsw: RwLock::new(HnswFlavor::new(
+				tb,
+				ikb.clone(),
+				p,
+				vector_cache.clone(),
+				format_version,
+			)?),
+			vec_docs: VecDocs::new(
+				ikb.clone(),
+				tb,
+				vector_cache.clone(),
+				p.use_hashed_vector,
+				format_version,
+			),
 			vector_cache,
 			ikb,
+			format_version,
 		})
 	}
 
@@ -306,7 +327,7 @@ impl HnswIndex {
 			pending
 		} else {
 			HnswRecordPendingUpdate {
-				doc_id: HnswDocs::get_doc_id(&self.ikb, &tx, id).await?,
+				doc_id: HnswDocs::get_doc_id(&self.ikb, self.format_version, &tx, id).await?,
 				old_vectors,
 				new_vectors,
 			}
@@ -485,7 +506,7 @@ impl HnswIndex {
 		let mut hnsw = self.hnsw.write().await;
 		hnsw.check_state(env).await?;
 		let mut ctx = self.new_hnsw_context(env);
-		let docs = HnswDocs::new(self.ikb.clone());
+		let docs = HnswDocs::with_format_version(self.ikb.clone(), self.format_version);
 		for pending in pending {
 			self.apply_pending_operation(&mut ctx, &docs, &mut hnsw, pending).await?;
 		}
@@ -528,6 +549,14 @@ impl HnswIndex {
 					self.vec_docs.remove(ctx, &vector, doc_id, hnsw).await?;
 				}
 				if pending.new_vectors.is_empty() {
+					if self.format_version < crate::catalog::DOC_IDS_FORMAT_VERSION {
+						let legacy = LegacyVectorDocIds::Hnsw(self.ikb.clone());
+						if let Some(record) = &pending.record {
+							legacy.remove(&ctx.env.tx(), record).await?;
+						} else if let VectorId::DocId(doc_id) = pending.id {
+							legacy.remove_doc_id(&ctx.env.tx(), doc_id).await?;
+						}
+					}
 					docs.remove(doc_id, self.table_id, &self.vector_cache).await;
 				} else {
 					// A delete removes the record's shared doc-ID mapping and a
@@ -610,6 +639,7 @@ impl HnswIndex {
 		let mut filter = cond_filter.map(|f| {
 			HnswTruthyDocumentFilter::new(
 				self.ikb.clone(),
+				self.format_version,
 				self.table_id,
 				self.vector_cache.clone(),
 				f.cond,
@@ -670,6 +700,7 @@ impl HnswIndex {
 			let doc_ids: Vec<_> = doc_misses.iter().map(|(_, doc_id, _)| *doc_id).collect();
 			let rids = HnswDocs::get_things_batch(
 				&ctx.ikb,
+				self.format_version,
 				self.table_id,
 				&self.vector_cache,
 				&ctx.tx,
@@ -797,7 +828,9 @@ impl HnswIndex {
 				let member = match &id {
 					VectorId::DocId(doc_id) => allow.contains(*doc_id),
 					VectorId::RecordKey(key) => {
-						match HnswDocs::get_doc_id(&self.ikb, &ctx.tx, key).await? {
+						match HnswDocs::get_doc_id(&self.ikb, self.format_version, &ctx.tx, key)
+							.await?
+						{
 							Some(doc_id) => allow.contains(doc_id),
 							// A record with no doc-ID in the shared space has no
 							// entries in any doc-ID-carrying index, so the

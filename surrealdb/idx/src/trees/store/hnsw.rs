@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -41,31 +40,39 @@ impl HnswIndexes {
 		tb: TableId,
 		ikb: &IndexKeyBase,
 		p: &HnswParams,
+		format_version: u16,
 	) -> Result<SharedHnswIndex> {
 		let key = (ikb.ns(), ikb.db(), tb, ikb.index());
 		let h = self.0.read().await.get(&key).cloned();
-		if let Some(h) = h {
-			return Ok(h);
+		if h.as_ref().is_some_and(|h| h.format_version() == format_version) {
+			return Ok(h.expect("checked Some"));
 		}
 		let mut w = self.0.write().await;
-		let ix = match w.entry(key) {
-			Entry::Occupied(e) => Arc::clone(e.get()),
-			Entry::Vacant(e) => {
-				let h = Arc::new(
-					HnswIndex::new(
-						env.index_stores().vector_cache().clone(),
-						&env.tx(),
-						ikb.clone(),
-						tb,
-						p,
-					)
-					.await?,
-				);
-				e.insert(Arc::clone(&h));
-				h
-			}
+		let ix = if let Some(ix) =
+			w.get(&key).filter(|ix| ix.format_version() == format_version).map(Arc::clone)
+		{
+			Some(ix)
+		} else {
+			w.remove(&key);
+			env.index_stores()
+				.vector_cache()
+				.remove_index(ikb.ns(), ikb.db(), tb, ikb.index(), format_version)
+				.await;
+			let h = Arc::new(
+				HnswIndex::new(
+					env.index_stores().vector_cache().clone(),
+					&env.tx(),
+					ikb.clone(),
+					tb,
+					p,
+					format_version,
+				)
+				.await?,
+			);
+			w.insert(key, Arc::clone(&h));
+			Some(h)
 		};
-		Ok(ix)
+		Ok(ix.expect("wrapper is always present after creation"))
 	}
 
 	/// Removes an HNSW index from the registry.

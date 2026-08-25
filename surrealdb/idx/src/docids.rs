@@ -37,16 +37,21 @@
 use std::borrow::Cow;
 
 use anyhow::Result;
+use surrealdb_datastore::values::diskann::DiskAnnDocsState as DiskAnnDocState;
+use surrealdb_datastore::values::hnsw::HnswDocsState as HnswDocState;
 // A doc-ID is a stored value and a key field, so the number is declared below
 // this layer; the allocator that hands them out stays here.
 pub use surrealdb_datastore::values::ids::DocId;
 use surrealdb_datastore::{Transaction, storage_error};
 use surrealdb_kvs::Error as KvsError;
+use surrealdb_kvs::key::KVKey;
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::env::IndexEnv;
 use crate::key::schema::{
-	DocKeyKey, DocKeyPrefix, DocLookupKey, DocLookupPrefix, DocPendingPrefix,
+	DiskannDocKeyKey, DiskannDocLookupKey, DocKeyKey, DocKeyPrefix, DocLookupKey, DocLookupPrefix,
+	DocPendingPrefix, FtDocKeyKey, FtDocLookupKey, HnswDocKeyKey, HnswDocLookupKey,
+	HnswDocsStateKey,
 };
 use crate::val::{RecordIdKey, TableName};
 
@@ -59,6 +64,431 @@ pub struct TableDocIds {
 	ns: NamespaceId,
 	db: DatabaseId,
 	tb: TableName,
+}
+
+/// A full-text index's private document-ID allocator and record ↔ doc-ID mapping.
+///
+/// This is the layout written by releases before the shared table doc-ID format.
+/// Existing indexes keep using it so a 3.3 node can read and maintain data that
+/// was created by 3.2; only new indexes or explicit rebuilds use [`TableDocIds`].
+pub struct LegacyFullTextDocIds {
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: TableName,
+	ix: surrealdb_catalog::IndexId,
+}
+
+/// A vector index's private document-ID allocator and record ↔ doc-ID mapping.
+pub enum LegacyVectorDocIds {
+	Hnsw(crate::IndexKeyBase),
+	DiskAnn(crate::IndexKeyBase),
+}
+
+enum LegacyVectorFamily {
+	Hnsw,
+	DiskAnn,
+}
+
+#[derive(Default)]
+struct LegacyVectorDocState {
+	available: roaring::RoaringTreemap,
+	next_doc_id: DocId,
+}
+
+impl From<HnswDocState> for LegacyVectorDocState {
+	fn from(state: HnswDocState) -> Self {
+		Self {
+			available: state.available,
+			next_doc_id: state.next_doc_id,
+		}
+	}
+}
+
+impl From<DiskAnnDocState> for LegacyVectorDocState {
+	fn from(state: DiskAnnDocState) -> Self {
+		Self {
+			available: state.available,
+			next_doc_id: state.next_doc_id,
+		}
+	}
+}
+
+impl LegacyVectorFamily {
+	fn docs_state_key<'a>(
+		self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: Cow<'a, TableName>,
+		ix: surrealdb_catalog::IndexId,
+	) -> LegacyDocsStateKey<'a> {
+		match self {
+			Self::Hnsw => LegacyDocsStateKey::Hnsw(HnswDocsStateKey::new(ns, db, tb, ix)),
+			Self::DiskAnn => LegacyDocsStateKey::DiskAnn(
+				crate::key::schema::DiskannDocsStateKey::new(ns, db, tb, ix),
+			),
+		}
+	}
+}
+
+#[derive(Debug)]
+enum LegacyDocsStateKey<'a> {
+	Hnsw(HnswDocsStateKey<'a>),
+	DiskAnn(crate::key::schema::DiskannDocsStateKey<'a>),
+}
+
+impl KVKey for LegacyDocsStateKey<'_> {
+	type Value = HnswDocState;
+
+	fn encode_buffer(&self, buffer: &mut Vec<u8>) -> Result<()> {
+		match self {
+			Self::Hnsw(key) => key.encode_buffer(buffer),
+			Self::DiskAnn(key) => key.encode_buffer(buffer),
+		}
+	}
+
+	fn value_context(&self) {}
+}
+
+impl LegacyVectorDocIds {
+	fn family(&self) -> LegacyVectorFamily {
+		match self {
+			Self::Hnsw(_) => LegacyVectorFamily::Hnsw,
+			Self::DiskAnn(_) => LegacyVectorFamily::DiskAnn,
+		}
+	}
+
+	fn docs_state_key(&self) -> LegacyDocsStateKey<'_> {
+		let ikb = match self {
+			Self::Hnsw(ikb) | Self::DiskAnn(ikb) => ikb,
+		};
+		self.family().docs_state_key(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), ikb.index())
+	}
+
+	async fn docs_state(&self, tx: &Transaction) -> Result<LegacyVectorDocState> {
+		match self.docs_state_key() {
+			LegacyDocsStateKey::Hnsw(key) => {
+				Ok(tx.get_key(&key, None).await?.unwrap_or_default().into())
+			}
+			LegacyDocsStateKey::DiskAnn(key) => {
+				Ok(tx.get_key(&key, None).await?.unwrap_or_default().into())
+			}
+		}
+	}
+
+	async fn set_docs_state(&self, tx: &Transaction, state: LegacyVectorDocState) -> Result<()> {
+		match self.docs_state_key() {
+			LegacyDocsStateKey::Hnsw(key) => {
+				let concrete = HnswDocState {
+					available: state.available,
+					next_doc_id: state.next_doc_id,
+				};
+				tx.set_key(&key, &concrete).await
+			}
+			LegacyDocsStateKey::DiskAnn(key) => {
+				let concrete = DiskAnnDocState {
+					available: state.available,
+					next_doc_id: state.next_doc_id,
+				};
+				tx.set_key(&key, &concrete).await
+			}
+		}
+	}
+
+	pub async fn get_doc_id(&self, tx: &Transaction, id: &RecordIdKey) -> Result<Option<DocId>> {
+		let ikb = match self {
+			Self::Hnsw(ikb) | Self::DiskAnn(ikb) => ikb,
+		};
+		let key = self.family().lookup_key(
+			ikb.ns(),
+			ikb.db(),
+			Cow::Borrowed(ikb.table()),
+			ikb.index(),
+			Cow::Borrowed(id),
+		);
+		tx.get_key(&key, None).await
+	}
+
+	pub async fn resolve_or_assign(&self, env: &dyn IndexEnv, id: &RecordIdKey) -> Result<DocId> {
+		if let Some(doc_id) = self.get_doc_id(&env.tx(), id).await? {
+			return Ok(doc_id);
+		}
+		let mut state = self.docs_state(&env.tx()).await?;
+		let doc_id = if let Some(doc_id) = state.available.min() {
+			state.available.remove(doc_id);
+			doc_id
+		} else {
+			state.next_doc_id += 1;
+			state.next_doc_id - 1
+		};
+		self.set_docs_state(&env.tx(), state).await?;
+		let ikb = match self {
+			Self::Hnsw(ikb) | Self::DiskAnn(ikb) => ikb,
+		};
+		let lookup = self.family().lookup_key(
+			ikb.ns(),
+			ikb.db(),
+			Cow::Borrowed(ikb.table()),
+			ikb.index(),
+			Cow::Borrowed(id),
+		);
+		env.tx().set_key(&lookup, &doc_id).await?;
+		let reverse = self.family().doc_key(
+			ikb.ns(),
+			ikb.db(),
+			Cow::Borrowed(ikb.table()),
+			ikb.index(),
+			doc_id,
+		);
+		env.tx().set_key(&reverse, id).await?;
+		Ok(doc_id)
+	}
+
+	pub async fn get_record_ids_batch(
+		&self,
+		tx: &Transaction,
+		doc_ids: &[DocId],
+	) -> Result<Vec<Option<RecordIdKey>>> {
+		let ikb = match self {
+			Self::Hnsw(ikb) | Self::DiskAnn(ikb) => ikb,
+		};
+		let keys: Vec<LegacyVectorDocKey<'_>> = doc_ids
+			.iter()
+			.map(|&doc_id| {
+				self.family().doc_key(
+					ikb.ns(),
+					ikb.db(),
+					Cow::Borrowed(ikb.table()),
+					ikb.index(),
+					doc_id,
+				)
+			})
+			.collect();
+		tx.get_many_key(keys, None).await
+	}
+
+	pub async fn remove(&self, tx: &Transaction, id: &RecordIdKey) -> Result<Option<DocId>> {
+		let Some(doc_id) = self.get_doc_id(tx, id).await? else {
+			return Ok(None);
+		};
+		let ikb = match self {
+			Self::Hnsw(ikb) | Self::DiskAnn(ikb) => ikb,
+		};
+		let forward = self.family().lookup_key(
+			ikb.ns(),
+			ikb.db(),
+			Cow::Borrowed(ikb.table()),
+			ikb.index(),
+			Cow::Borrowed(id),
+		);
+		tx.del_key(&forward).await?;
+		let reverse = self.family().doc_key(
+			ikb.ns(),
+			ikb.db(),
+			Cow::Borrowed(ikb.table()),
+			ikb.index(),
+			doc_id,
+		);
+		tx.del_key(&reverse).await?;
+
+		let mut state = self.docs_state(tx).await?;
+		state.available.insert(doc_id);
+		self.set_docs_state(tx, state).await?;
+		Ok(Some(doc_id))
+	}
+
+	pub async fn remove_doc_id(
+		&self,
+		tx: &Transaction,
+		doc_id: DocId,
+	) -> Result<Option<RecordIdKey>> {
+		let ikb = match self {
+			Self::Hnsw(ikb) | Self::DiskAnn(ikb) => ikb,
+		};
+		let reverse = self.family().doc_key(
+			ikb.ns(),
+			ikb.db(),
+			Cow::Borrowed(ikb.table()),
+			ikb.index(),
+			doc_id,
+		);
+		let Some(id) = tx.get_key(&reverse, None).await? else {
+			return Ok(None);
+		};
+		let forward = self.family().lookup_key(
+			ikb.ns(),
+			ikb.db(),
+			Cow::Borrowed(ikb.table()),
+			ikb.index(),
+			Cow::Borrowed(&id),
+		);
+		tx.del_key(&forward).await?;
+		tx.del_key(&reverse).await?;
+
+		let mut state = self.docs_state(tx).await?;
+		state.available.insert(doc_id);
+		self.set_docs_state(tx, state).await?;
+		Ok(Some(id))
+	}
+}
+
+#[derive(Debug)]
+enum LegacyVectorLookup<'a> {
+	Hnsw(HnswDocLookupKey<'a>),
+	DiskAnn(DiskannDocLookupKey<'a>),
+}
+
+#[derive(Debug)]
+enum LegacyVectorDocKey<'a> {
+	Hnsw(HnswDocKeyKey<'a>),
+	DiskAnn(DiskannDocKeyKey<'a>),
+}
+
+impl KVKey for LegacyVectorLookup<'_> {
+	type Value = DocId;
+
+	fn encode_buffer(&self, buffer: &mut Vec<u8>) -> Result<()> {
+		match self {
+			Self::Hnsw(key) => key.encode_buffer(buffer),
+			Self::DiskAnn(key) => key.encode_buffer(buffer),
+		}
+	}
+
+	fn value_context(&self) {}
+}
+
+impl KVKey for LegacyVectorDocKey<'_> {
+	type Value = RecordIdKey;
+
+	fn encode_buffer(&self, buffer: &mut Vec<u8>) -> Result<()> {
+		match self {
+			Self::Hnsw(key) => key.encode_buffer(buffer),
+			Self::DiskAnn(key) => key.encode_buffer(buffer),
+		}
+	}
+
+	fn value_context(&self) {}
+}
+
+impl LegacyVectorFamily {
+	fn lookup_key<'a>(
+		self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: Cow<'a, TableName>,
+		ix: surrealdb_catalog::IndexId,
+		id: Cow<'a, RecordIdKey>,
+	) -> LegacyVectorLookup<'a> {
+		match self {
+			Self::Hnsw => LegacyVectorLookup::Hnsw(HnswDocLookupKey::new(ns, db, tb, ix, id)),
+			Self::DiskAnn => {
+				LegacyVectorLookup::DiskAnn(DiskannDocLookupKey::new(ns, db, tb, ix, id))
+			}
+		}
+	}
+
+	fn doc_key(
+		self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: Cow<'_, TableName>,
+		ix: surrealdb_catalog::IndexId,
+		doc_id: DocId,
+	) -> LegacyVectorDocKey<'_> {
+		match self {
+			Self::Hnsw => LegacyVectorDocKey::Hnsw(HnswDocKeyKey::new(ns, db, tb, ix, doc_id)),
+			Self::DiskAnn => {
+				LegacyVectorDocKey::DiskAnn(DiskannDocKeyKey::new(ns, db, tb, ix, doc_id))
+			}
+		}
+	}
+}
+
+impl LegacyFullTextDocIds {
+	pub fn new(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: TableName,
+		ix: surrealdb_catalog::IndexId,
+	) -> Self {
+		Self {
+			ns,
+			db,
+			tb,
+			ix,
+		}
+	}
+
+	pub async fn get_doc_id(&self, tx: &Transaction, id: &RecordIdKey) -> Result<Option<DocId>> {
+		let key = FtDocLookupKey::new(
+			self.ns,
+			self.db,
+			Cow::Borrowed(&self.tb),
+			self.ix,
+			Cow::Borrowed(id),
+		);
+		tx.get_key(&key, None).await
+	}
+
+	pub async fn resolve_or_assign(&self, env: &dyn IndexEnv, id: &RecordIdKey) -> Result<DocId> {
+		let tx = env.tx();
+		let key = FtDocLookupKey::new(
+			self.ns,
+			self.db,
+			Cow::Borrowed(&self.tb),
+			self.ix,
+			Cow::Borrowed(id),
+		);
+		if let Some(doc_id) = tx.get_key(&key, None).await? {
+			return Ok(doc_id);
+		}
+		let doc_id = env
+			.sequences()?
+			.next_legacy_full_text_doc_id(Some(env), self.ns, self.db, self.tb.clone(), self.ix)
+			.await?;
+		tx.set_key(&key, &doc_id).await?;
+		let reverse = FtDocKeyKey::new(self.ns, self.db, Cow::Borrowed(&self.tb), self.ix, doc_id);
+		tx.set_key(&reverse, id).await?;
+		Ok(doc_id)
+	}
+
+	pub async fn get_record_id(
+		&self,
+		tx: &Transaction,
+		doc_id: DocId,
+	) -> Result<Option<RecordIdKey>> {
+		let key = FtDocKeyKey::new(self.ns, self.db, Cow::Borrowed(&self.tb), self.ix, doc_id);
+		tx.get_key(&key, None).await
+	}
+
+	pub async fn get_record_ids_batch(
+		&self,
+		tx: &Transaction,
+		doc_ids: &[DocId],
+	) -> Result<Vec<Option<RecordIdKey>>> {
+		let keys: Vec<FtDocKeyKey<'_>> = doc_ids
+			.iter()
+			.map(|&doc_id| {
+				FtDocKeyKey::new(self.ns, self.db, Cow::Borrowed(&self.tb), self.ix, doc_id)
+			})
+			.collect();
+		tx.get_many_key(keys, None).await
+	}
+
+	pub async fn remove_doc_id(&self, tx: &Transaction, doc_id: DocId) -> Result<()> {
+		let reverse = FtDocKeyKey::new(self.ns, self.db, Cow::Borrowed(&self.tb), self.ix, doc_id);
+		if let Some(id) = tx.get_key(&reverse, None).await? {
+			let forward = FtDocLookupKey::new(
+				self.ns,
+				self.db,
+				Cow::Borrowed(&self.tb),
+				self.ix,
+				Cow::Borrowed(&id),
+			);
+			tx.del_key(&forward).await?;
+			tx.del_key(&reverse).await?;
+		}
+		Ok(())
+	}
 }
 
 impl TableDocIds {
@@ -239,6 +669,7 @@ mod tests {
 	use surrealdb_kvs::TransactionType::{Read, Write};
 
 	use super::*;
+	use crate::IndexKeyBase;
 	use crate::test_env::{TestIndexEnv, TestIndexStore};
 
 	const NS: NamespaceId = NamespaceId(1);
@@ -246,6 +677,57 @@ mod tests {
 
 	fn rid(s: &str) -> RecordIdKey {
 		RecordIdKey::from(s.to_owned())
+	}
+
+	#[tokio::test]
+	async fn legacy_full_text_uses_private_mappings() {
+		let ds = TestIndexStore::new().await;
+		let ix = surrealdb_catalog::IndexId(7);
+		{
+			let ctx = ds.env(Write).await;
+			let d = LegacyFullTextDocIds::new(NS, DB, "t".into(), ix);
+			assert_eq!(d.resolve_or_assign(&ctx, &rid("a")).await.unwrap(), 0);
+			assert_eq!(d.resolve_or_assign(&ctx, &rid("b")).await.unwrap(), 1);
+			finish(ctx).await;
+		}
+
+		// Existing private mappings remain readable.
+		let ctx = ds.env(Read).await;
+		let d = LegacyFullTextDocIds::new(NS, DB, "t".into(), ix);
+		assert_eq!(d.get_doc_id(&ctx.tx(), &rid("a")).await.unwrap(), Some(0));
+		assert_eq!(d.get_record_id(&ctx.tx(), 1).await.unwrap(), Some(rid("b")));
+		assert_eq!(
+			d.get_record_ids_batch(&ctx.tx(), &[0, 1]).await.unwrap(),
+			vec![Some(rid("a")), Some(rid("b"))]
+		);
+
+		// The shared table space must be untouched by legacy writes.
+		let shared = TableDocIds::new(NS, DB, "t".into());
+		assert_eq!(shared.get_doc_id(&ctx.tx(), &rid("a")).await.unwrap(), None);
+	}
+
+	#[tokio::test]
+	async fn legacy_vector_allocates_private_space() {
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NS, DB, "t".into(), surrealdb_catalog::IndexId(8));
+		{
+			let ctx = ds.env(Write).await;
+			LegacyVectorDocIds::Hnsw(ikb.clone()).resolve_or_assign(&ctx, &rid("a")).await.unwrap();
+			finish(ctx).await;
+		}
+
+		let ctx = ds.env(Write).await;
+		let legacy = LegacyVectorDocIds::Hnsw(ikb.clone());
+		assert_eq!(legacy.resolve_or_assign(&ctx, &rid("b")).await.unwrap(), 1);
+		finish(ctx).await;
+
+		let ctx = ds.env(Read).await;
+		assert_eq!(
+			legacy.get_record_ids_batch(&ctx.tx(), &[0, 1]).await.unwrap(),
+			vec![Some(rid("a")), Some(rid("b"))]
+		);
+		let shared = TableDocIds::new(NS, DB, "t".into());
+		assert_eq!(shared.get_doc_id(&ctx.tx(), &rid("a")).await.unwrap(), None);
 	}
 
 	/// Builds an environment (with sequences) plus a `TableDocIds` for table

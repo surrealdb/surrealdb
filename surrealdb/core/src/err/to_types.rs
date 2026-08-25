@@ -42,6 +42,7 @@ fn into_types_error_inner(error: Error, message: String) -> TypesError {
 		// Calling inward would frame twice and overwrite the cause.
 		Engine(error) => error.map_kind(message),
 		Exec(error) => error.map_kind(message),
+		Idx(error) => error.map_kind(message),
 		ApiError(error) => error.map_kind(message),
 		InvalidPath(_) => internal_todo(message),
 

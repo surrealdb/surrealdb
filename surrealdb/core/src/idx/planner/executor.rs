@@ -206,6 +206,7 @@ impl InnerQueryExecutor {
 									ikb,
 									p,
 									&ctx.config.idx.file_allowlist,
+									ix.format_version,
 								)
 								.await?;
 								let fte = FullTextEntry::new(stk, ctx, opt, &ft, io).await?;
@@ -280,7 +281,13 @@ impl InnerQueryExecutor {
 								);
 								let hi = ctx
 									.get_index_stores()
-									.get_index_hnsw(ctx, tb.table_id, &ikb, p)
+									.get_index_hnsw(
+										ctx,
+										tb.table_id,
+										&ikb,
+										p,
+										index_reference.format_version,
+									)
 									.await?;
 								// Ensure the local HNSW index is up to date with the KVS
 								hi.check_state(ctx).await?;
@@ -352,7 +359,12 @@ impl InnerQueryExecutor {
 								);
 								let di = ctx
 									.get_index_stores()
-									.get_index_diskann(tb.table_id, &ikb, p)
+									.get_index_diskann(
+										index_reference.format_version,
+										tb.table_id,
+										&ikb,
+										p,
+									)
 									.await?;
 								// Ensure the local DiskANN index is up to date with the KVS
 								di.check_state().await?;

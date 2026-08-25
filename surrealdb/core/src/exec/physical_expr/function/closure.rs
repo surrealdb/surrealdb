@@ -183,6 +183,10 @@ impl PhysicalExpr for ClosureCallExec {
 					// Execute the closure body
 					let block_expr = BlockPhysicalExpr {
 						block: crate::expr::Block(vec![body.clone()]),
+						// A closure body is evaluated wherever the closure is
+						// called, which need not be the statement that wrote
+						// it, so it inherits no MATCHES registrations.
+						matches_scope: None,
 					};
 					let eval_ctx = EvalContext {
 						exec_ctx: &isolated_ctx,

@@ -13,11 +13,11 @@ use crate::trees::knn::Ids64;
 use crate::trees::vector::SharedVector;
 use crate::val::RecordIdKey;
 
-pub(super) type HnswCacheIndex = (NamespaceId, DatabaseId, TableId, IndexId);
+pub(super) type HnswCacheIndex = (NamespaceId, DatabaseId, TableId, IndexId, u16);
 /// Cache key uniquely identifying a vector: (table, index, element).
-type VectorCacheKey = (NamespaceId, DatabaseId, TableId, IndexId, ElementId);
+type VectorCacheKey = (NamespaceId, DatabaseId, TableId, IndexId, u16, ElementId);
 type DocSetCacheKey = VectorCacheKey;
-type DocIdCacheKey = (NamespaceId, DatabaseId, TableId, IndexId, DocId);
+type DocIdCacheKey = (NamespaceId, DatabaseId, TableId, IndexId, u16, DocId);
 
 #[derive(Clone)]
 struct CachedDocId {
@@ -79,10 +79,11 @@ impl IdsPerIndex {
 		database_id: DatabaseId,
 		table_id: TableId,
 		index_id: IndexId,
+		format_version: u16,
 		element_id: ElementId,
 	) {
 		self.0
-			.entry((namespace_id, database_id, table_id, index_id))
+			.entry((namespace_id, database_id, table_id, index_id, format_version))
 			.or_default()
 			.write()
 			.insert(element_id);
@@ -95,8 +96,11 @@ impl IdsPerIndex {
 		database_id: DatabaseId,
 		table_id: TableId,
 		index_id: IndexId,
+		format_version: u16,
 	) -> u64 {
-		if let Some(elements_ids) = self.0.get(&(namespace_id, database_id, table_id, index_id)) {
+		if let Some(elements_ids) =
+			self.0.get(&(namespace_id, database_id, table_id, index_id, format_version))
+		{
 			elements_ids.read().len()
 		} else {
 			0
@@ -108,8 +112,11 @@ impl IdsPerIndex {
 		database_id: DatabaseId,
 		table_id: TableId,
 		index_id: IndexId,
+		format_version: u16,
 	) -> Option<RwLock<RoaringTreemap>> {
-		self.0.remove(&(namespace_id, database_id, table_id, index_id)).map(|entry| entry.1)
+		self.0
+			.remove(&(namespace_id, database_id, table_id, index_id, format_version))
+			.map(|entry| entry.1)
 	}
 	fn remove_element(
 		&self,
@@ -117,10 +124,11 @@ impl IdsPerIndex {
 		database_id: DatabaseId,
 		table_id: TableId,
 		index_id: IndexId,
+		format_version: u16,
 		element_id: ElementId,
 	) {
 		if let Entry::Occupied(mut entry) =
-			self.0.entry((namespace_id, database_id, table_id, index_id))
+			self.0.entry((namespace_id, database_id, table_id, index_id, format_version))
 		{
 			let is_empty = {
 				let mut elements_ids = entry.get_mut().write();
@@ -135,8 +143,8 @@ impl IdsPerIndex {
 	}
 
 	fn evict_element(&self, key: VectorCacheKey) {
-		if let Entry::Occupied(mut entry) = self.0.entry((key.0, key.1, key.2, key.3)) {
-			entry.get_mut().write().remove(key.4);
+		if let Entry::Occupied(mut entry) = self.0.entry((key.0, key.1, key.2, key.3, key.4)) {
+			entry.get_mut().write().remove(key.5);
 			// Note: We intentionally don't clean up empty index entries here to avoid potential
 			// race conditions. Empty entries are cleaned up during remove_element() calls.
 		}
@@ -220,20 +228,29 @@ impl VectorCache {
 	}
 
 	/// Inserts a vector into the cache, tracking it in the per-index element set.
+	#[allow(clippy::too_many_arguments)]
 	pub(super) async fn insert(
 		&self,
 		namespace_id: NamespaceId,
 		database_id: DatabaseId,
 		table_id: TableId,
 		index_id: IndexId,
+		format_version: u16,
 		element_id: ElementId,
 		vector: SharedVector,
 	) {
 		// Update indexes tracking first, before inserting into cache.
 		// This prevents a race condition where eviction could occur immediately after
 		// cache insertion but before index tracking is updated, leaving an inconsistent state.
-		let key = (namespace_id, database_id, table_id, index_id, element_id);
-		self.0.indexes.insert(namespace_id, database_id, table_id, index_id, element_id);
+		let key = (namespace_id, database_id, table_id, index_id, format_version, element_id);
+		self.0.indexes.insert(
+			namespace_id,
+			database_id,
+			table_id,
+			index_id,
+			format_version,
+			element_id,
+		);
 		self.0.cache.insert(HnswCacheKey::Vector(key), HnswCacheValue::Vector(vector));
 	}
 
@@ -244,9 +261,17 @@ impl VectorCache {
 		database_id: DatabaseId,
 		table_id: TableId,
 		index_id: IndexId,
+		format_version: u16,
 		element_id: ElementId,
 	) -> Option<SharedVector> {
-		let key = HnswCacheKey::Vector((namespace_id, database_id, table_id, index_id, element_id));
+		let key = HnswCacheKey::Vector((
+			namespace_id,
+			database_id,
+			table_id,
+			index_id,
+			format_version,
+			element_id,
+		));
 		match self.0.cache.get(&key) {
 			Some(HnswCacheValue::Vector(vector)) => Some(vector),
 			_ => None,
@@ -260,15 +285,24 @@ impl VectorCache {
 		database_id: DatabaseId,
 		table_id: TableId,
 		index_id: IndexId,
+		format_version: u16,
 		element_id: ElementId,
 	) {
 		// Remove from the indexes tracking structure first
-		self.0.indexes.remove_element(namespace_id, database_id, table_id, index_id, element_id);
+		self.0.indexes.remove_element(
+			namespace_id,
+			database_id,
+			table_id,
+			index_id,
+			format_version,
+			element_id,
+		);
 		self.0.cache.remove(&HnswCacheKey::Vector((
 			namespace_id,
 			database_id,
 			table_id,
 			index_id,
+			format_version,
 			element_id,
 		)));
 	}
@@ -279,7 +313,7 @@ impl VectorCache {
 		index: HnswCacheIndex,
 		element_id: ElementId,
 	) -> Option<Ids64> {
-		let key = HnswCacheKey::DocSet((index.0, index.1, index.2, index.3, element_id));
+		let key = HnswCacheKey::DocSet((index.0, index.1, index.2, index.3, index.4, element_id));
 		match self.0.cache.get(&key) {
 			Some(HnswCacheValue::DocSet(docs)) => Some(docs),
 			_ => None,
@@ -293,17 +327,19 @@ impl VectorCache {
 		element_id: ElementId,
 		docs: Ids64,
 	) {
-		let key = (index.0, index.1, index.2, index.3, element_id);
-		self.0.doc_set_indexes.insert(index.0, index.1, index.2, index.3, element_id);
+		let key = (index.0, index.1, index.2, index.3, index.4, element_id);
+		self.0.doc_set_indexes.insert(index.0, index.1, index.2, index.3, index.4, element_id);
 		self.0.cache.insert(HnswCacheKey::DocSet(key), HnswCacheValue::DocSet(docs));
 	}
 
 	/// Evicts cached compact document IDs for one element.
 	pub(super) async fn remove_doc_set(&self, index: HnswCacheIndex, element_id: ElementId) {
-		self.0.doc_set_indexes.remove_element(index.0, index.1, index.2, index.3, element_id);
 		self.0
-			.cache
-			.remove(&HnswCacheKey::DocSet((index.0, index.1, index.2, index.3, element_id)));
+			.doc_set_indexes
+			.remove_element(index.0, index.1, index.2, index.3, index.4, element_id);
+		self.0.cache.remove(&HnswCacheKey::DocSet((
+			index.0, index.1, index.2, index.3, index.4, element_id,
+		)));
 	}
 
 	/// Retrieves a cached compact document-id mapping if its generation still matches.
@@ -313,7 +349,7 @@ impl VectorCache {
 		doc_id: DocId,
 		generation: Option<u64>,
 	) -> Option<Arc<RecordIdKey>> {
-		let key = HnswCacheKey::DocId((index.0, index.1, index.2, index.3, doc_id));
+		let key = HnswCacheKey::DocId((index.0, index.1, index.2, index.3, index.4, doc_id));
 		let cached = match self.0.cache.get(&key)? {
 			HnswCacheValue::DocId(cached) => cached,
 			_ => return None,
@@ -330,9 +366,9 @@ impl VectorCache {
 		id: RecordIdKey,
 	) -> Arc<RecordIdKey> {
 		let id = Arc::new(id);
-		self.0.doc_id_indexes.insert(index.0, index.1, index.2, index.3, doc_id);
+		self.0.doc_id_indexes.insert(index.0, index.1, index.2, index.3, index.4, doc_id);
 		self.0.cache.insert(
-			HnswCacheKey::DocId((index.0, index.1, index.2, index.3, doc_id)),
+			HnswCacheKey::DocId((index.0, index.1, index.2, index.3, index.4, doc_id)),
 			HnswCacheValue::DocId(CachedDocId {
 				generation,
 				id: Arc::clone(&id),
@@ -343,22 +379,34 @@ impl VectorCache {
 
 	/// Evicts a cached compact document-id mapping.
 	pub(super) async fn remove_doc_id(&self, index: HnswCacheIndex, doc_id: DocId) {
-		self.0.doc_id_indexes.remove_element(index.0, index.1, index.2, index.3, doc_id);
-		self.0.cache.remove(&HnswCacheKey::DocId((index.0, index.1, index.2, index.3, doc_id)));
+		self.0.doc_id_indexes.remove_element(index.0, index.1, index.2, index.3, index.4, doc_id);
+		self.0
+			.cache
+			.remove(&HnswCacheKey::DocId((index.0, index.1, index.2, index.3, index.4, doc_id)));
 	}
 
-	/// Removes all cached entries for a given index, yielding periodically during bulk removal.
+	/// Removes all cached entries for one index at one stored format version,
+	/// yielding periodically during bulk removal.
+	///
+	/// Trackers and entries the same index holds under other format versions
+	/// are left in place: they belong to a different persisted layout and stay
+	/// correct for readers still on that layout.
 	pub(crate) async fn remove_index(
 		&self,
 		namespace_id: NamespaceId,
 		database_id: DatabaseId,
 		table_id: TableId,
 		index_id: IndexId,
+		format_version: u16,
 	) {
 		let mut count = 0;
-		if let Some(elements_ids) =
-			self.0.indexes.remove_index(namespace_id, database_id, table_id, index_id)
-		{
+		if let Some(elements_ids) = self.0.indexes.remove_index(
+			namespace_id,
+			database_id,
+			table_id,
+			index_id,
+			format_version,
+		) {
 			let ids: Vec<ElementId> = elements_ids.read().iter().collect();
 			for element_id in ids {
 				self.0.cache.remove(&HnswCacheKey::Vector((
@@ -366,6 +414,7 @@ impl VectorCache {
 					database_id,
 					table_id,
 					index_id,
+					format_version,
 					element_id,
 				)));
 				// Yield control every 1000 removals to prevent blocking other async tasks
@@ -376,9 +425,13 @@ impl VectorCache {
 				count += 1;
 			}
 		}
-		if let Some(elements_ids) =
-			self.0.doc_set_indexes.remove_index(namespace_id, database_id, table_id, index_id)
-		{
+		if let Some(elements_ids) = self.0.doc_set_indexes.remove_index(
+			namespace_id,
+			database_id,
+			table_id,
+			index_id,
+			format_version,
+		) {
 			let ids: Vec<ElementId> = elements_ids.read().iter().collect();
 			for (count, element_id) in ids.into_iter().enumerate() {
 				self.0.cache.remove(&HnswCacheKey::DocSet((
@@ -386,6 +439,7 @@ impl VectorCache {
 					database_id,
 					table_id,
 					index_id,
+					format_version,
 					element_id,
 				)));
 				if count % 1000 == 0 {
@@ -393,9 +447,13 @@ impl VectorCache {
 				}
 			}
 		}
-		if let Some(doc_ids) =
-			self.0.doc_id_indexes.remove_index(namespace_id, database_id, table_id, index_id)
-		{
+		if let Some(doc_ids) = self.0.doc_id_indexes.remove_index(
+			namespace_id,
+			database_id,
+			table_id,
+			index_id,
+			format_version,
+		) {
 			let ids: Vec<DocId> = doc_ids.read().iter().collect();
 			for (count, doc_id) in ids.into_iter().enumerate() {
 				self.0.cache.remove(&HnswCacheKey::DocId((
@@ -403,6 +461,7 @@ impl VectorCache {
 					database_id,
 					table_id,
 					index_id,
+					format_version,
 					doc_id,
 				)));
 				if count % 1000 == 0 {
@@ -418,8 +477,9 @@ impl VectorCache {
 		database_id: DatabaseId,
 		table_id: TableId,
 		index_id: IndexId,
+		format_version: u16,
 	) -> u64 {
-		self.0.indexes.len(namespace_id, database_id, table_id, index_id)
+		self.0.indexes.len(namespace_id, database_id, table_id, index_id, format_version)
 	}
 
 	#[cfg(test)]
@@ -429,6 +489,7 @@ impl VectorCache {
 		database_id: DatabaseId,
 		table_id: TableId,
 		index_id: IndexId,
+		format_version: u16,
 		element_id: ElementId,
 	) -> bool {
 		self.0.cache.contains_key(&HnswCacheKey::Vector((
@@ -436,6 +497,7 @@ impl VectorCache {
 			database_id,
 			table_id,
 			index_id,
+			format_version,
 			element_id,
 		)))
 	}
@@ -457,8 +519,9 @@ impl VectorCache {
 		database_id: DatabaseId,
 		table_id: TableId,
 		index_id: IndexId,
+		format_version: u16,
 	) -> u64 {
-		self.0.doc_set_indexes.len(namespace_id, database_id, table_id, index_id)
+		self.0.doc_set_indexes.len(namespace_id, database_id, table_id, index_id, format_version)
 	}
 
 	#[cfg(test)]
@@ -468,8 +531,9 @@ impl VectorCache {
 		database_id: DatabaseId,
 		table_id: TableId,
 		index_id: IndexId,
+		format_version: u16,
 	) -> u64 {
-		self.0.doc_id_indexes.len(namespace_id, database_id, table_id, index_id)
+		self.0.doc_id_indexes.len(namespace_id, database_id, table_id, index_id, format_version)
 	}
 }
 
@@ -497,11 +561,11 @@ mod tests {
 		let database_id = DatabaseId(2);
 		let table_id = TableId(3);
 		let index_id = IndexId(4);
-		let index = (namespace_id, database_id, table_id, index_id);
+		let index = (namespace_id, database_id, table_id, index_id, 0u16);
 		let vector = Vector::F32(Array1::from_vec(vec![1.0, 2.0, 3.0, 4.0]));
 
 		cache
-			.insert(namespace_id, database_id, table_id, index_id, 7, SharedVector::from(vector))
+			.insert(namespace_id, database_id, table_id, index_id, 0, 7, SharedVector::from(vector))
 			.await;
 		cache.insert_doc_set(index, 7, Ids64::Vec2([11, 12])).await;
 		cache.insert_doc_id(index, 11, Some(1), RecordIdKey::Number(99)).await;
@@ -528,10 +592,10 @@ mod tests {
 			let vector = Vector::F32(Array1::from_vec(data));
 			let shared = SharedVector::from(vector);
 
-			cache.insert(namespace_id, database_id, table_id, index_id, i, shared).await;
+			cache.insert(namespace_id, database_id, table_id, index_id, 0, i, shared).await;
 		}
 
-		assert!(cache.len(namespace_id, database_id, table_id, index_id).await < 100);
+		assert!(cache.len(namespace_id, database_id, table_id, index_id, 0).await < 100);
 	}
 
 	#[tokio::test]
@@ -543,7 +607,7 @@ mod tests {
 		let table_id = TableId(3);
 		let index_id = IndexId(4);
 		let element_id = 42u64;
-		let index = (namespace_id, database_id, table_id, index_id);
+		let index = (namespace_id, database_id, table_id, index_id, 0u16);
 
 		let data: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0];
 		let vector = Vector::F32(Array1::from_vec(data));
@@ -551,13 +615,14 @@ mod tests {
 
 		// Insert
 		cache
-			.insert(namespace_id, database_id, table_id, index_id, element_id, shared.clone())
+			.insert(namespace_id, database_id, table_id, index_id, 0, element_id, shared.clone())
 			.await;
-		assert!(cache.contains(namespace_id, database_id, table_id, index_id, element_id).await);
-		assert_eq!(cache.len(namespace_id, database_id, table_id, index_id).await, 1);
+		assert!(cache.contains(namespace_id, database_id, table_id, index_id, 0, element_id).await);
+		assert_eq!(cache.len(namespace_id, database_id, table_id, index_id, 0).await, 1);
 
 		// Get
-		let retrieved = cache.get(namespace_id, database_id, table_id, index_id, element_id).await;
+		let retrieved =
+			cache.get(namespace_id, database_id, table_id, index_id, 0, element_id).await;
 		assert!(retrieved.is_some());
 		assert_eq!(retrieved.unwrap(), shared);
 		cache.insert_doc_set(index, element_id, Ids64::Vec2([7, 8])).await;
@@ -571,13 +636,15 @@ mod tests {
 		assert!(cache.get_doc_id(index, 7, Some(4)).await.is_none());
 
 		// Remove
-		cache.remove(namespace_id, database_id, table_id, index_id, element_id).await;
+		cache.remove(namespace_id, database_id, table_id, index_id, 0, element_id).await;
 		cache.remove_doc_set(index, element_id).await;
 		cache.remove_doc_id(index, 7).await;
-		assert!(!cache.contains(namespace_id, database_id, table_id, index_id, element_id).await);
-		assert_eq!(cache.len(namespace_id, database_id, table_id, index_id).await, 0);
-		assert_eq!(cache.doc_set_len(namespace_id, database_id, table_id, index_id).await, 0);
-		assert_eq!(cache.doc_id_len(namespace_id, database_id, table_id, index_id).await, 0);
+		assert!(
+			!cache.contains(namespace_id, database_id, table_id, index_id, 0, element_id).await
+		);
+		assert_eq!(cache.len(namespace_id, database_id, table_id, index_id, 0).await, 0);
+		assert_eq!(cache.doc_set_len(namespace_id, database_id, table_id, index_id, 0).await, 0);
+		assert_eq!(cache.doc_id_len(namespace_id, database_id, table_id, index_id, 0).await, 0);
 	}
 
 	#[tokio::test]
@@ -588,30 +655,73 @@ mod tests {
 		let database_id = DatabaseId(2);
 		let table_id = TableId(3);
 		let index_id = IndexId(4);
-		let index = (namespace_id, database_id, table_id, index_id);
+		let index = (namespace_id, database_id, table_id, index_id, 0u16);
 
 		// Insert multiple vectors
 		for i in 0..10u64 {
 			let data: Vec<f32> = vec![i as f32; 4];
 			let vector = Vector::F32(Array1::from_vec(data));
 			let shared = SharedVector::from(vector);
-			cache.insert(namespace_id, database_id, table_id, index_id, i, shared).await;
+			cache.insert(namespace_id, database_id, table_id, index_id, 0, i, shared).await;
 			cache.insert_doc_set(index, i, Ids64::One(i)).await;
 			cache.insert_doc_id(index, i, Some(1), RecordIdKey::Number(i as i64)).await;
 		}
 
-		assert_eq!(cache.len(namespace_id, database_id, table_id, index_id).await, 10);
-		assert_eq!(cache.doc_set_len(namespace_id, database_id, table_id, index_id).await, 10);
-		assert_eq!(cache.doc_id_len(namespace_id, database_id, table_id, index_id).await, 10);
+		assert_eq!(cache.len(namespace_id, database_id, table_id, index_id, 0).await, 10);
+		assert_eq!(cache.doc_set_len(namespace_id, database_id, table_id, index_id, 0).await, 10);
+		assert_eq!(cache.doc_id_len(namespace_id, database_id, table_id, index_id, 0).await, 10);
 
 		// Remove entire index
-		cache.remove_index(namespace_id, database_id, table_id, index_id).await;
+		cache.remove_index(namespace_id, database_id, table_id, index_id, 0).await;
 
 		// All vectors should be gone
 		for i in 0..10u64 {
-			assert!(!cache.contains(namespace_id, database_id, table_id, index_id, i).await);
+			assert!(!cache.contains(namespace_id, database_id, table_id, index_id, 0, i).await);
 			assert!(cache.get_doc_set(index, i).await.is_none());
 			assert!(cache.get_doc_id(index, i, Some(1)).await.is_none());
 		}
+	}
+
+	#[tokio::test]
+	async fn test_remove_index_is_scoped_to_format_version() {
+		let cache = VectorCache::new(1024 * 1024);
+
+		let namespace_id = NamespaceId(1);
+		let database_id = DatabaseId(2);
+		let table_id = TableId(3);
+		let index_id = IndexId(4);
+		let legacy = (namespace_id, database_id, table_id, index_id, 0u16);
+		let rebuilt = (namespace_id, database_id, table_id, index_id, 1u16);
+
+		// Distinct element/doc ids per format so a scoped eviction cannot pass
+		// by accident through the other format's tracked ids.
+		let vector = SharedVector::from(Vector::F32(Array1::from_vec(vec![1.0, 2.0, 3.0, 4.0])));
+		cache.insert(namespace_id, database_id, table_id, index_id, 0, 7, vector.clone()).await;
+		cache.insert_doc_set(legacy, 7, Ids64::One(11)).await;
+		cache.insert_doc_id(legacy, 11, Some(1), RecordIdKey::Number(17)).await;
+		cache.insert(namespace_id, database_id, table_id, index_id, 1, 8, vector).await;
+		cache.insert_doc_set(rebuilt, 8, Ids64::One(12)).await;
+		cache.insert_doc_id(rebuilt, 12, Some(1), RecordIdKey::Number(18)).await;
+
+		cache.remove_index(namespace_id, database_id, table_id, index_id, 0).await;
+
+		// The evicted format is fully gone.
+		assert!(!cache.contains(namespace_id, database_id, table_id, index_id, 0, 7).await);
+		assert!(cache.get_doc_set(legacy, 7).await.is_none());
+		assert!(cache.get_doc_id(legacy, 11, Some(1)).await.is_none());
+
+		// The other format keeps its entries and its trackers.
+		assert!(cache.contains(namespace_id, database_id, table_id, index_id, 1, 8).await);
+		assert_eq!(cache.get_doc_set(rebuilt, 8).await, Some(Ids64::One(12)));
+		assert!(cache.get_doc_id(rebuilt, 12, Some(1)).await.is_some());
+		assert_eq!(cache.len(namespace_id, database_id, table_id, index_id, 1).await, 1);
+		assert_eq!(cache.doc_set_len(namespace_id, database_id, table_id, index_id, 1).await, 1);
+		assert_eq!(cache.doc_id_len(namespace_id, database_id, table_id, index_id, 1).await, 1);
+
+		// The surviving tracker still drives a later scoped eviction.
+		cache.remove_index(namespace_id, database_id, table_id, index_id, 1).await;
+		assert!(!cache.contains(namespace_id, database_id, table_id, index_id, 1, 8).await);
+		assert!(cache.get_doc_set(rebuilt, 8).await.is_none());
+		assert!(cache.get_doc_id(rebuilt, 12, Some(1)).await.is_none());
 	}
 }

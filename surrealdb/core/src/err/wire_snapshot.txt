@@ -1,5 +1,6 @@
 Engine	{ cause: NONE, code: -32005, details: { kind: 'Cancelled' }, kind: 'Query', message: 'The query was not executed due to a cancelled transaction' }
 Exec	{ cause: NONE, code: -32600, details: { kind: 'NamespaceEmpty' }, kind: 'Validation', message: 'Specify a namespace to use' }
+Idx	{ cause: NONE, code: -32000, kind: 'Validation', message: 'Duplicated Match reference: 1' }
 Kvs	{ cause: { cause: NONE, code: -32000, kind: 'Internal', message: 'There was an internal error: sample' }, code: -32000, kind: 'Internal', message: 'There was a problem with the key-value store: There was an internal error: sample' }
 IamError	{ cause: { cause: NONE, code: -32000, kind: 'Internal', message: "Invalid role 'sample'" }, code: -32002, details: { details: { details: { name: 'sample' }, kind: 'InvalidRole' }, kind: 'Auth' }, kind: 'NotAllowed', message: "IAM error: Invalid role 'sample'" }
 InvalidPath	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The string could not be parsed into a path: sample' }
@@ -174,7 +175,6 @@ AccessNsAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "T
 AccessDbAlreadyExists	{ cause: NONE, code: -32000, kind: 'Internal', message: "The access method 'sample' already exists in the database 'sample'" }
 AzInUse	{ cause: NONE, code: -32000, kind: 'Internal', message: "The analyzer 'sample' is in use by index 'sample' on table 'sample' and cannot be removed" }
 ApMethodDuplicate	{ cause: NONE, code: -32000, kind: 'Internal', message: "The method 'sample' is defined in more than one FOR clause on api 'sample'" }
-IndexRebuildRequired	{ cause: NONE, code: -32000, kind: 'Internal', message: 'The index `sample` on table `sample` was built with an out-of-date on-disk format (Expected: 1, Actual: 1). Run `REBUILD INDEX sample ON sample` before querying it.' }
 TokenMakingFailed	{ cause: NONE, code: -32002, details: { details: { kind: 'TokenMakingFailed' }, kind: 'Auth' }, kind: 'NotAllowed', message: 'There was an error creating the token' }
 NoRecordFound	{ cause: NONE, code: -32000, kind: 'NotFound', message: 'No record was returned' }
 MissingUserOrPass	{ cause: NONE, code: -32002, details: { details: { kind: 'MissingUserOrPass' }, kind: 'Auth' }, kind: 'NotAllowed', message: 'Username or Password was not provided' }

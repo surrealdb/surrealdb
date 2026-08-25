@@ -1253,8 +1253,11 @@ impl Building {
 
 	/// Evicts the process-local HNSW wrapper after a failed index-builder compaction write.
 	async fn evict_cached_hnsw_index(&self) {
-		if let Err(err) =
-			self.ctx.get_index_stores().remove_hnsw_index(self.tb, self.ikb.clone()).await
+		if let Err(err) = self
+			.ctx
+			.get_index_stores()
+			.remove_hnsw_index(self.tb, self.ikb.clone(), self.ix.format_version)
+			.await
 		{
 			warn!("Failed to evict HNSW index after index-builder compaction error: {err}");
 		}
@@ -1948,6 +1951,7 @@ impl Building {
 				ctx.get_index_stores(),
 				&self.ikb,
 				p,
+				self.ix.format_version,
 				plan,
 			)
 			.await;
@@ -2033,6 +2037,7 @@ impl Building {
 				ctx.get_index_stores(),
 				&self.ikb,
 				p,
+				self.ix.format_version,
 				plan,
 			)
 			.await;

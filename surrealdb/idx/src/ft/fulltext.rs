@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
@@ -20,7 +19,7 @@ use uuid::Uuid;
 
 use crate::catalog::providers::DatabaseProvider;
 use crate::catalog::{FullTextParams, Scoring};
-use crate::docids::{DocId, TableDocIds};
+use crate::docids::{DocId, LegacyFullTextDocIds, TableDocIds};
 use crate::env::IndexEnv;
 /// This module implements a concurrent full-text search index.
 ///
@@ -45,7 +44,7 @@ use crate::key::schema::{
 use crate::key::{KVKey, KVKeyDecode, KVValue, Resumable};
 use crate::trees::store::IndexStores;
 use crate::val::{RecordId, Value};
-use crate::{IndexKeyBase, bump_compaction_generation, catalog, read_compaction_generation};
+use crate::{IndexKeyBase, bump_compaction_generation, read_compaction_generation};
 /// Represents the terms in a search query and their associated document sets
 pub struct QueryTerms {
 	/// The tokenized query terms
@@ -119,9 +118,99 @@ pub struct FullTextIndex {
 	/// Whether highlighting is enabled for this index
 	highlighting: bool,
 	/// The table's shared record ↔ doc-ID mapping
-	doc_ids: TableDocIds,
+	doc_ids: FullTextDocIds,
 	/// BM25 scoring parameters, if scoring is enabled
 	bm25: Option<Bm25Params>,
+}
+
+/// The document-ID resolver used by one full-text index.
+#[derive(Clone, Copy)]
+enum FullTextDocIds {
+	Shared,
+	Legacy,
+}
+
+impl FullTextDocIds {
+	fn new(format_version: u16) -> Self {
+		if surrealdb_catalog::uses_shared_doc_ids(format_version) {
+			Self::Shared
+		} else {
+			Self::Legacy
+		}
+	}
+
+	async fn get_doc_id(
+		&self,
+		ikb: &IndexKeyBase,
+		tx: &Transaction,
+		id: &crate::val::RecordIdKey,
+	) -> Result<Option<DocId>> {
+		match self {
+			Self::Shared => {
+				TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone()).get_doc_id(tx, id).await
+			}
+			Self::Legacy => {
+				LegacyFullTextDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone(), ikb.index())
+					.get_doc_id(tx, id)
+					.await
+			}
+		}
+	}
+
+	fn uses_shared(self) -> bool {
+		matches!(self, Self::Shared)
+	}
+
+	async fn remove_legacy_doc_id(
+		&self,
+		ikb: &IndexKeyBase,
+		tx: &Transaction,
+		doc_id: DocId,
+	) -> Result<()> {
+		LegacyFullTextDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone(), ikb.index())
+			.remove_doc_id(tx, doc_id)
+			.await
+	}
+
+	async fn resolve_or_assign(
+		&self,
+		ikb: &IndexKeyBase,
+		env: &dyn IndexEnv,
+		id: &crate::val::RecordIdKey,
+	) -> Result<DocId> {
+		match self {
+			Self::Shared => {
+				TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone())
+					.resolve_or_assign(env, id)
+					.await
+			}
+			Self::Legacy => {
+				LegacyFullTextDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone(), ikb.index())
+					.resolve_or_assign(env, id)
+					.await
+			}
+		}
+	}
+
+	async fn get_record_id(
+		&self,
+		ikb: &IndexKeyBase,
+		tx: &Transaction,
+		doc_id: DocId,
+	) -> Result<Option<crate::val::RecordIdKey>> {
+		match self {
+			Self::Shared => {
+				TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone())
+					.get_record_id(tx, doc_id)
+					.await
+			}
+			Self::Legacy => {
+				LegacyFullTextDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone(), ikb.index())
+					.get_record_id(tx, doc_id)
+					.await
+			}
+		}
+	}
 }
 
 /// Ceiling on the entries one page of a compaction round's `!tx` scan asks for.
@@ -259,32 +348,20 @@ impl TermDocsCompactionPlan {
 }
 
 impl FullTextIndex {
-	/// Creates a new full-text index with the specified parameters
+	/// Creates a new full-text index for the stored on-disk format.
 	///
-	/// This method retrieves the analyzer from the database and then calls
-	/// `with_analyzer`
+	/// Retrieves the analyzer from the database and selects shared or legacy
+	/// doc-ID mappings based on `format_version`.
 	pub async fn new(
 		ixs: &IndexStores,
 		tx: &Transaction,
 		ikb: IndexKeyBase,
 		p: &FullTextParams,
 		allow_list: &[PathBuf],
+		format_version: u16,
 	) -> Result<Self> {
 		let az = tx.get_db_analyzer(ikb.0.ns, ikb.0.db, &p.analyzer, None).await?;
 		ixs.mappers().check(&az, allow_list).await?;
-		Self::with_analyzer(ixs, az, ikb, p)
-	}
-
-	/// Creates a new full-text index with the specified analyzer
-	///
-	/// This method initializes the index with the provided analyzer and
-	/// parameters
-	fn with_analyzer(
-		ixs: &IndexStores,
-		az: Arc<catalog::AnalyzerDefinition>,
-		ikb: IndexKeyBase,
-		p: &FullTextParams,
-	) -> Result<Self> {
 		let analyzer = Analyzer::new(ixs, az)?;
 		let mut bm25 = None;
 		if let Scoring::Bm {
@@ -300,7 +377,7 @@ impl FullTextIndex {
 		Ok(Self {
 			analyzer,
 			highlighting: p.highlight,
-			doc_ids: TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone()),
+			doc_ids: FullTextDocIds::new(format_version),
 			ikb,
 			bm25,
 		})
@@ -368,6 +445,9 @@ impl FullTextIndex {
 					*require_compaction = true;
 				}
 			}
+			if !self.doc_ids.uses_shared() {
+				self.doc_ids.remove_legacy_doc_id(&self.ikb, &tx, doc_id).await?;
+			}
 			Ok(Some(doc_id))
 		} else {
 			Ok(None)
@@ -391,7 +471,7 @@ impl FullTextIndex {
 		let tx = env.tx();
 		let nid = env.node_id();
 		// Resolve (or assign) the record's doc id in the table's shared space
-		let doc_id = self.doc_ids.resolve_or_assign(env, &rid.key).await?;
+		let doc_id = self.doc_ids.resolve_or_assign(&self.ikb, env, &rid.key).await?;
 		// Collect the tokens.
 		let tokens =
 			self.analyzer.analyze_content(stk, az_fn, content, FilteringStage::Indexing).await?;
@@ -958,7 +1038,7 @@ impl FullTextIndex {
 		if let Some(hits) = hits
 			&& !hits.is_empty()
 		{
-			return Some(FullTextHitsIterator::new(self.ikb.clone(), hits));
+			return Some(FullTextHitsIterator::new(self.ikb.clone(), self.doc_ids, hits));
 		}
 
 		// No documents match the terms
@@ -1042,7 +1122,7 @@ impl FullTextIndex {
 		if rid.table != *self.ikb.table() {
 			return Ok(None);
 		}
-		self.doc_ids.get_doc_id(tx, &rid.key).await
+		self.doc_ids.get_doc_id(&self.ikb, tx, &rid.key).await
 	}
 	pub async fn new_scorer(&self, env: &dyn IndexEnv) -> Result<Option<Scorer>> {
 		if let Some(bm25) = &self.bm25 {
@@ -1363,6 +1443,8 @@ impl FullTextIndex {
 pub struct FullTextHitsIterator {
 	/// The index key base used for key generation
 	ikb: IndexKeyBase,
+	/// The doc-ID mapping this index was created with
+	doc_ids: FullTextDocIds,
 	/// Iterator over the document IDs in the search results
 	iter: IntoIter,
 }
@@ -1372,9 +1454,10 @@ impl FullTextHitsIterator {
 	///
 	/// This method initializes an iterator with the index key base and a bitmap
 	/// of matching document IDs.
-	fn new(ikb: IndexKeyBase, hits: RoaringTreemap) -> Self {
+	fn new(ikb: IndexKeyBase, doc_ids: FullTextDocIds, hits: RoaringTreemap) -> Self {
 		Self {
 			ikb,
+			doc_ids,
 			iter: hits.into_iter(),
 		}
 	}
@@ -1395,9 +1478,8 @@ impl MatchesHitsIterator for FullTextHitsIterator {
 	/// This method retrieves the next document ID from the bitmap and resolves
 	/// it to a Thing. It returns None when there are no more hits.
 	async fn next(&mut self, tx: &Transaction) -> Result<Option<(RecordId, DocId)>> {
-		let docids = TableDocIds::new(self.ikb.ns(), self.ikb.db(), self.ikb.table().clone());
 		for doc_id in self.iter.by_ref() {
-			if let Some(key) = docids.get_record_id(tx, doc_id).await? {
+			if let Some(key) = self.doc_ids.get_record_id(&self.ikb, tx, doc_id).await? {
 				let rid = RecordId {
 					table: self.ikb.table().clone(),
 					key,
@@ -1646,6 +1728,7 @@ mod tests {
 		/// exercises: offsets are recorded only when highlighting is on.
 		async fn with_highlighting(highlight: bool) -> Self {
 			let ds = TestIndexStore::new().await;
+			let tx = ds.env(TransactionType::Write).await.tx();
 			// `DEFINE ANALYZER test TOKENIZERS blank`, as the definition the
 			// index consumes: lowering the statement to it is the evaluator's
 			// job and nothing here exercises that lowering.
@@ -1656,6 +1739,12 @@ mod tests {
 				filters: None,
 				comment: None,
 			});
+			let az_key = crate::key::schema::AnalyzerKey {
+				ns: NamespaceId(1),
+				db: DatabaseId(2),
+				az: std::borrow::Cow::Borrowed(az.name.as_str()),
+			};
+			tx.set_key(&az_key, az.as_ref()).await.unwrap();
 			let content = Arc::new(Value::from(Array::from(vec![
 				"Enter a search term",
 				"Welcome",
@@ -1691,8 +1780,16 @@ mod tests {
 			let nid = Uuid::new_v4();
 			let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "t".into(), IndexId(3));
 			let fti = Arc::new(
-				FullTextIndex::with_analyzer(ds.index_stores(), az, ikb.clone(), &ft_params)
-					.unwrap(),
+				FullTextIndex::new(
+					ds.index_stores(),
+					tx.as_ref(),
+					ikb.clone(),
+					&ft_params,
+					&[],
+					crate::catalog::DOC_IDS_FORMAT_VERSION,
+				)
+				.await
+				.unwrap(),
 			);
 			let start = Arc::new(Instant::now());
 			Self {

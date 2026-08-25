@@ -136,9 +136,7 @@ pub(crate) async fn define_index_statement_compute(
 		// already matches. Preserve data and durable build state while still
 		// allowing metadata such as comments to be refreshed. Preserve the
 		// existing on-disk `format_version` too: this path reuses the existing
-		// index data without rebuilding, so a stale doc-ID-backed index must
-		// stay stale (and keep failing `ensure_current_format`) rather than be
-		// falsely stamped current and read through the new table-level resolver.
+		// index data without rebuilding, so it remains on its legacy layout.
 		let index_def = IndexDefinition {
 			index_id: ix.index_id,
 			name: name.into(),
@@ -181,13 +179,13 @@ pub(crate) async fn define_index_statement_compute(
 		// consumer (b-tree entries carry doc-IDs from
 		// BTREE_ENTRY_DOC_IDS_FORMAT_VERSION).
 		let replacement_uses_doc_ids = !matches!(this.index, Index::Count(_));
-		let purge_table_doc_ids = ix.uses_doc_ids()
+		let purge_table_doc_ids = ix.uses_shared_doc_ids()
 			&& !replacement_uses_doc_ids
 			&& !txn
 				.all_tb_indexes(tb.namespace_id, tb.database_id, &tb_name, None)
 				.await?
 				.iter()
-				.any(|other| other.index_id != ix.index_id && other.uses_doc_ids());
+				.any(|other| other.index_id != ix.index_id && other.uses_shared_doc_ids());
 		// Clear process-local index wrappers without aborting the current
 		// durable builder here. Durable state and catalog entries are
 		// retired atomically in this schema transaction below, and the

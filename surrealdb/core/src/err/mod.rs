@@ -7,6 +7,7 @@ use thiserror::Error;
 use crate::api::err::ApiError;
 use crate::exec::Error as ExecError;
 use crate::iam::PolicyError;
+use crate::idx::Error as IdxError;
 use crate::kvs::Error as KvsError;
 
 #[cfg(test)]
@@ -445,6 +446,16 @@ pub(crate) enum Error {
 	/// the `?` conversion.
 	#[error(transparent)]
 	Exec(#[from] ExecError),
+
+	/// A failure raised by the index layer.
+	///
+	/// Transparent, like [`Error::Engine`]: the message and source chain are the
+	/// inner error's, so an index refusal raised while planning reads exactly as
+	/// the same refusal raised while executing. The wrapper exists because the
+	/// query planner is typed on `Error` rather than `anyhow::Result`, so it
+	/// needs the `?` conversion.
+	#[error(transparent)]
+	Idx(#[from] IdxError),
 
 	/// An error originating from the KVS (Key-Value Store) layer
 	#[error("There was a problem with the key-value store: {0}")]

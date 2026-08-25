@@ -65,6 +65,14 @@ fn every_variant() -> Vec<(&'static str, Error)> {
 		// Sampled the same way, against the bare `NsEmpty` row in the exec
 		// block below.
 		("Exec", Error::Exec(ExecError::NsEmpty)),
+		// Sampled the same way again, against the bare `DuplicatedMatchRef` row
+		// in the idx block below.
+		(
+			"Idx",
+			Error::Idx(IdxError::DuplicatedMatchRef {
+				mr: 1,
+			}),
+		),
 		("Kvs", Error::Kvs(KvsError::Internal("sample".to_string()))),
 		("IamError", Error::IamError(PolicyError::InvalidRole("sample".to_string()))),
 		// Sampled the same way again, against the bare `BodyDecodeFailure` row
@@ -857,15 +865,6 @@ fn every_catalog_variant() -> Vec<(&'static str, CatalogError)> {
 				method: "sample".to_string(),
 			},
 		),
-		(
-			"IndexRebuildRequired",
-			CatalogError::IndexRebuildRequired {
-				index: "sample".to_string(),
-				table: "sample".to_string(),
-				expected: 1,
-				actual: 1,
-			},
-		),
 	]
 }
 
@@ -1354,7 +1353,7 @@ fn snapshot_covers_every_variant() {
 // 173: idx::Error carries a `FileAccessDenied` twin of the buc variant with a
 // byte-identical message, so the mapper allowlist is enforced inside idx; the
 // wire output of the affected sites is unchanged.
-const UNTYPED_INTERNAL_BUDGET: usize = 172;
+const UNTYPED_INTERNAL_BUDGET: usize = 171;
 
 /// Counts variants whose OWN kind is `Internal`.
 ///

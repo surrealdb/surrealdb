@@ -128,6 +128,10 @@ impl PhysicalExpr for UserDefinedFunctionExec {
 			//    let the planner see resolved LET bindings).
 			let block_expr = BlockPhysicalExpr {
 				block: func_def.block.clone(),
+				// The body is stored separately from any caller and is planned
+				// in its own scope, so it inherits no MATCHES registrations
+				// from the statement that called it.
+				matches_scope: None,
 			};
 			let eval_ctx = EvalContext {
 				exec_ctx: &isolated_ctx,

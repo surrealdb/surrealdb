@@ -100,6 +100,7 @@ where
 		ikb: IndexKeyBase,
 		p: &HnswParams,
 		vector_cache: VectorCache,
+		format_version: u16,
 	) -> Result<Self> {
 		let m0 = p.m0 as usize;
 		Ok(Self {
@@ -109,7 +110,13 @@ where
 			ml: p.ml.to_float(),
 			layer0: HnswLayer::new(ikb.clone(), 0, m0),
 			layers: Vec::default(),
-			elements: HnswElements::new(table_id, ikb.clone(), p.distance.clone(), vector_cache),
+			elements: HnswElements::new(
+				table_id,
+				ikb.clone(),
+				p.distance.clone(),
+				vector_cache,
+				format_version,
+			),
 			// A fixed seed makes graph construction deterministic so build and
 			// search benchmarks are reproducible across runs; with none resolved,
 			// the RNG is seeded from entropy. See `surrealdb_cnf::hnsw_build_seed`
@@ -604,8 +611,8 @@ mod tests {
 	use crate::IndexKeyBase;
 	use crate::catalog::providers::CatalogProvider;
 	use crate::catalog::{
-		DatabaseId, Distance, HnswParams, IndexId, NamespaceId, StoredTableDefinition, TableId,
-		VectorType,
+		DOC_IDS_FORMAT_VERSION, DatabaseId, Distance, HnswParams, IndexId, NamespaceId,
+		StoredTableDefinition, TableId, VectorType,
 	};
 	use crate::docids::{DocId, TableDocIds};
 	use crate::error::Error;
@@ -704,8 +711,13 @@ mod tests {
 		let tb = TableId(3);
 		let tb = StoredTableDefinition::new(ns, db, tb, "tb".into());
 		let ikb = IndexKeyBase::new(ns, db, "tb".into(), IndexId(4));
-		let vec_docs =
-			VecDocs::new(ikb.clone(), tb.table_id, ds.index_stores().vector_cache().clone(), false);
+		let vec_docs = VecDocs::new(
+			ikb.clone(),
+			tb.table_id,
+			ds.index_stores().vector_cache().clone(),
+			false,
+			0,
+		);
 		let mut h = HnswFlavor::new(
 			tb.table_id,
 			IndexKeyBase::new(
@@ -716,6 +728,7 @@ mod tests {
 			),
 			p,
 			ds.index_stores().vector_cache().clone(),
+			0,
 		)
 		.unwrap();
 		let map = {
@@ -959,6 +972,7 @@ mod tests {
 				IndexKeyBase::new(ns, db, "tb".into(), ix),
 				tb,
 				&p,
+				DOC_IDS_FORMAT_VERSION,
 			)
 			.await
 			.unwrap();
@@ -1061,11 +1075,21 @@ mod tests {
 		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
 		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true, true);
 		let ds = Arc::new(TestIndexStore::new().await);
-		let vec_docs =
-			VecDocs::new(ikb.clone(), TableId(3), ds.index_stores().vector_cache().clone(), false);
-		let mut h =
-			HnswFlavor::new(TableId(3), ikb.clone(), &p, ds.index_stores().vector_cache().clone())
-				.unwrap();
+		let vec_docs = VecDocs::new(
+			ikb.clone(),
+			TableId(3),
+			ds.index_stores().vector_cache().clone(),
+			false,
+			0,
+		);
+		let mut h = HnswFlavor::new(
+			TableId(3),
+			ikb.clone(),
+			&p,
+			ds.index_stores().vector_cache().clone(),
+			0,
+		)
+		.unwrap();
 		{
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
 			let ctx = HnswContext::new(&ctx, ikb.clone(), &vec_docs);
@@ -1095,6 +1119,7 @@ mod tests {
 			ikb.clone(),
 			TableId(3),
 			&p,
+			DOC_IDS_FORMAT_VERSION,
 		)
 		.await?;
 		let id = RecordIdKey::Number(1);
@@ -1126,6 +1151,7 @@ mod tests {
 			ikb.clone(),
 			TableId(3),
 			&p,
+			DOC_IDS_FORMAT_VERSION,
 		)
 		.await?;
 		let id = RecordIdKey::Number(1);
@@ -1172,6 +1198,7 @@ mod tests {
 				ikb.clone(),
 				TableId(3),
 				&p,
+				DOC_IDS_FORMAT_VERSION,
 			)
 			.await?;
 			h.index(&ctx, &id, None, Some(vector_content(&first))).await?;
@@ -1264,6 +1291,7 @@ mod tests {
 				ikb.clone(),
 				TableId(3),
 				&p,
+				DOC_IDS_FORMAT_VERSION,
 			)
 			.await?;
 			for i in 1..=n {
@@ -1363,6 +1391,7 @@ mod tests {
 				ikb.clone(),
 				TableId(3),
 				&p,
+				DOC_IDS_FORMAT_VERSION,
 			)
 			.await?;
 			// Records 1 and 2 share one vector near the query (one graph
@@ -1454,6 +1483,7 @@ mod tests {
 				ikb.clone(),
 				TableId(3),
 				&p,
+				DOC_IDS_FORMAT_VERSION,
 			)
 			.await?;
 			h2.check_state(&ctx).await?;
@@ -1486,6 +1516,7 @@ mod tests {
 				ikb.clone(),
 				TableId(3),
 				&p,
+				DOC_IDS_FORMAT_VERSION,
 			)
 			.await?;
 			h.check_state(&ctx).await?;
@@ -1547,6 +1578,7 @@ mod tests {
 				ikb.clone(),
 				TableId(3),
 				&p,
+				DOC_IDS_FORMAT_VERSION,
 			)
 			.await?;
 			h.check_state(&ctx).await?;
@@ -1657,6 +1689,7 @@ mod tests {
 				ikb.clone(),
 				TableId(3),
 				&p,
+				DOC_IDS_FORMAT_VERSION,
 			)
 			.await?;
 			// Records 1 and 2 share one vector (one graph element, two
@@ -1743,6 +1776,7 @@ mod tests {
 				ikb.clone(),
 				TableId(3),
 				&p,
+				DOC_IDS_FORMAT_VERSION,
 			)
 			.await?;
 			h.index(&ctx, &id, None, Some(vector_content(&first))).await?;
@@ -1787,6 +1821,7 @@ mod tests {
 				ikb.clone(),
 				TableId(3),
 				&p,
+				DOC_IDS_FORMAT_VERSION,
 			)
 			.await?;
 			tx.commit().await?;
@@ -1840,6 +1875,7 @@ mod tests {
 				ikb.clone(),
 				TableId(3),
 				&p,
+				DOC_IDS_FORMAT_VERSION,
 			)
 			.await?;
 			h.index(&ctx, &id, None, Some(vector_content(&first))).await?;
@@ -1896,6 +1932,7 @@ mod tests {
 				ikb.clone(),
 				TableId(3),
 				&p,
+				DOC_IDS_FORMAT_VERSION,
 			)
 			.await?;
 			h.index(&ctx, &first_id, None, Some(vector_content(&first))).await?;
@@ -1949,6 +1986,7 @@ mod tests {
 				ikb.clone(),
 				TableId(3),
 				&p,
+				DOC_IDS_FORMAT_VERSION,
 			)
 			.await?;
 			h.index(&ctx, &id, None, Some(vector_content(&first))).await?;
@@ -2014,6 +2052,7 @@ mod tests {
 			IndexKeyBase::new(db.namespace_id, db.database_id, "tb".into(), ix),
 			tb,
 			&p,
+			DOC_IDS_FORMAT_VERSION,
 		)
 		.await?;
 		info!("Insert collection");
@@ -2168,6 +2207,7 @@ mod tests {
 			IndexKeyBase::new(db.namespace_id, db.database_id, "tb".into(), IndexId(4)),
 			TableId(3),
 			&p,
+			DOC_IDS_FORMAT_VERSION,
 		)
 		.await?;
 		for (doc_id, obj) in collection.to_vec_ref() {
@@ -2336,6 +2376,7 @@ mod tests {
 			IndexKeyBase::new(db.namespace_id, db.database_id, "tb".into(), IndexId(4)),
 			TableId(3),
 			&p,
+			DOC_IDS_FORMAT_VERSION,
 		)
 		.await?;
 		for (doc_id, obj) in collection.to_vec_ref() {

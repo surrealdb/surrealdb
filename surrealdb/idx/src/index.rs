@@ -110,8 +110,15 @@ impl<'a> IndexOperation<'a> {
 		};
 		let ikb = IndexKeyBase::new(ns, db, ix.table_name.clone(), ix.index_id);
 		Ok(Some(
-			FullTextIndex::new(env.index_stores(), &env.tx(), ikb, p, &env.config().file_allowlist)
-				.await?,
+			FullTextIndex::new(
+				env.index_stores(),
+				&env.tx(),
+				ikb,
+				p,
+				&env.config().file_allowlist,
+				ix.format_version,
+			)
+			.await?,
 		))
 	}
 
@@ -330,8 +337,9 @@ impl<'a> IndexOperation<'a> {
 		tx: &Transaction,
 		p: &FullTextParams,
 		allow_list: &[PathBuf],
+		format_version: u16,
 	) -> Result<FullTextCompactionPlan> {
-		let ft = FullTextIndex::new(ixs, tx, ikb.clone(), p, allow_list).await?;
+		let ft = FullTextIndex::new(ixs, tx, ikb.clone(), p, allow_list, format_version).await?;
 		ft.prepare_compaction(tx).await
 	}
 
@@ -345,9 +353,10 @@ impl<'a> IndexOperation<'a> {
 		tx: &Transaction,
 		p: &FullTextParams,
 		allow_list: &[PathBuf],
+		format_version: u16,
 		plan: FullTextCompactionPlan,
 	) -> Result<bool> {
-		let ft = FullTextIndex::new(ixs, tx, ikb.clone(), p, allow_list).await?;
+		let ft = FullTextIndex::new(ixs, tx, ikb.clone(), p, allow_list, format_version).await?;
 		ft.apply_compaction(tx, plan).await
 	}
 
@@ -368,11 +377,12 @@ impl<'a> IndexOperation<'a> {
 		ixs: &IndexStores,
 		ikb: &IndexKeyBase,
 		p: &HnswParams,
+		format_version: u16,
 		plan: HnswCompactionPlan,
 	) -> Result<bool> {
 		let tx = env.tx();
 		if let Some(tb) = tx.get_tb(ikb.ns(), ikb.db(), ikb.table(), None).await? {
-			let hnsw = ixs.get_index_hnsw(env, tb.table_id, ikb, p).await?;
+			let hnsw = ixs.get_index_hnsw(env, tb.table_id, ikb, p, format_version).await?;
 			return hnsw.apply_compaction(env, plan).await;
 		}
 		Ok(false)
@@ -394,11 +404,12 @@ impl<'a> IndexOperation<'a> {
 		ixs: &IndexStores,
 		ikb: &IndexKeyBase,
 		p: &DiskAnnParams,
+		format_version: u16,
 		plan: DiskAnnCompactionPlan,
 	) -> Result<bool> {
 		let tx = env.tx();
 		if let Some(tb) = tx.get_tb(ikb.ns(), ikb.db(), ikb.table(), None).await? {
-			let diskann = ixs.get_index_diskann(tb.table_id, ikb, p).await?;
+			let diskann = ixs.get_index_diskann(format_version, tb.table_id, ikb, p).await?;
 			return diskann.apply_compaction(env, plan).await;
 		}
 		Ok(false)
@@ -454,6 +465,7 @@ impl<'a> IndexOperation<'a> {
 			self.ikb.clone(),
 			p,
 			&self.env.config().file_allowlist,
+			self.ix.format_version,
 		)
 		.await?;
 		self.compute_fulltext_with_index(stk, az_fn, &fti, require_compaction).await
@@ -519,7 +531,11 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	async fn index_hnsw(&mut self, p: &HnswParams, require_compaction: &mut bool) -> Result<()> {
-		let hnsw = self.env.index_stores().get_index_hnsw(self.env, self.tb, &self.ikb, p).await?;
+		let hnsw = self
+			.env
+			.index_stores()
+			.get_index_hnsw(self.env, self.tb, &self.ikb, p, self.ix.format_version)
+			.await?;
 		let old_values = self.o.take();
 		let new_values = self.n.take();
 		if old_values.is_some() || new_values.is_some() {
@@ -541,7 +557,11 @@ impl<'a> IndexOperation<'a> {
 		}
 		#[cfg(diskann)]
 		{
-			let diskann = self.env.index_stores().get_index_diskann(self.tb, &self.ikb, p).await?;
+			let diskann = self
+				.env
+				.index_stores()
+				.get_index_diskann(self.ix.format_version, self.tb, &self.ikb, p)
+				.await?;
 			let old_values = self.o.take();
 			let new_values = self.n.take();
 			if old_values.is_some() || new_values.is_some() {

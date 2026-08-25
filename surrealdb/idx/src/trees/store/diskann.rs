@@ -5,7 +5,6 @@
 //! data remains authoritative; removing an index drops only the local wrapper.
 
 use std::collections::HashMap;
-use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -38,23 +37,27 @@ impl DiskAnnIndexes {
 		tb: TableId,
 		ikb: &IndexKeyBase,
 		p: &DiskAnnParams,
+		format_version: u16,
 		cache: DiskAnnCache,
 	) -> Result<SharedDiskAnnIndex> {
 		let key = (ikb.ns(), ikb.db(), tb, ikb.index());
 		let h = self.0.read().await.get(&key).cloned();
-		if let Some(h) = h {
-			return Ok(h);
+		if h.as_ref().is_some_and(|h| h.format_version() == format_version) {
+			return Ok(h.expect("checked Some"));
 		}
 		let mut w = self.0.write().await;
-		let ix = match w.entry(key) {
-			Entry::Occupied(e) => Arc::clone(e.get()),
-			Entry::Vacant(e) => {
-				let h = Arc::new(DiskAnnIndex::new(ikb.clone(), tb, p, cache).await?);
-				e.insert(Arc::clone(&h));
-				h
-			}
+		let ix = if let Some(ix) =
+			w.get(&key).filter(|ix| ix.format_version() == format_version).map(Arc::clone)
+		{
+			Some(ix)
+		} else {
+			w.remove(&key);
+			cache.remove_index(ikb.ns(), ikb.db(), tb, ikb.index(), format_version).await;
+			let h = Arc::new(DiskAnnIndex::new(ikb.clone(), tb, p, cache, format_version).await?);
+			w.insert(key, Arc::clone(&h));
+			Some(h)
 		};
-		Ok(ix)
+		Ok(ix.expect("wrapper is always present after creation"))
 	}
 
 	/// Drops the process-local wrapper for an index after catalog/index removal.

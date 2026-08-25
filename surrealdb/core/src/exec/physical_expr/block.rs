@@ -8,6 +8,11 @@
 //! When planning fails with `PlannerUnsupported` or `PlannerUnimplemented`,
 //! the block falls back to the legacy `Expr::compute` path, similar to how the
 //! top-level executor handles unplanned expressions.
+//!
+//! Deferring the plan must not shrink what the statements can see. Plan-time
+//! scope the enclosing statement established travels with the block and is
+//! installed on the deferred planner — see
+//! [`BlockPhysicalExpr::matches_scope`].
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -44,6 +49,19 @@ use crate::val::Value;
 pub struct BlockPhysicalExpr {
 	/// The original block containing Expr values
 	pub(crate) block: Block,
+	/// The MATCHES registration scope the block's statements are planned under.
+	///
+	/// A block written inside a SELECT is part of that SELECT's expression tree,
+	/// so a MATCHES its WHERE registered must resolve against the same query
+	/// executor wherever in the tree it is written (see
+	/// [`MatchesScope`](crate::exec::physical_expr::MatchesScope)). Deferred
+	/// planning would otherwise compile it with no scope at all, and the
+	/// expression would answer `false` instead of consulting the index.
+	///
+	/// `None` for a block that is not part of an enclosing SELECT's tree — a
+	/// user-defined function body, a closure body — each of which is planned per
+	/// call in its own scope and must not inherit the caller's registrations.
+	pub(crate) matches_scope: Option<Arc<crate::exec::physical_expr::MatchesScope>>,
 }
 
 /// Create a FrozenContext for planning that includes block-local parameters.
@@ -199,6 +217,7 @@ impl BlockPhysicalExpr {
 					&frozen_ctx,
 					current_exec_ctx.function_registry(),
 					depth,
+					self.matches_scope.clone(),
 				)
 				.await
 				{
@@ -291,6 +310,7 @@ impl BlockPhysicalExpr {
 					&frozen_ctx,
 					current_exec_ctx.function_registry(),
 					depth,
+					self.matches_scope.clone(),
 				)
 				.await
 				{

@@ -30,6 +30,8 @@ pub(super) type FilterCache = HashMap<VectorId, Option<(Arc<RecordId>, Arc<Recor
 
 /// Per-query cache for condition checks applied to DiskANN candidate documents.
 pub(super) struct DiskAnnTruthyDocumentFilter<'a> {
+	/// Whether the index uses shared or legacy private doc-ID mappings.
+	format_version: u16,
 	/// Index key identity used to resolve record IDs.
 	ikb: IndexKeyBase,
 	/// Stable table id used to scope DiskANN doc-id cache entries.
@@ -56,8 +58,10 @@ pub(super) struct DiskAnnTruthyDocumentFilter<'a> {
 
 impl<'a> DiskAnnTruthyDocumentFilter<'a> {
 	/// Creates a per-query truthy filter for one DiskANN lookup.
+	#[allow(clippy::too_many_arguments)]
 	pub(super) fn new(
 		ikb: IndexKeyBase,
+		format_version: u16,
 		table_id: TableId,
 		diskann_cache: DiskAnnCache,
 		pending_generation: Option<u64>,
@@ -67,6 +71,7 @@ impl<'a> DiskAnnTruthyDocumentFilter<'a> {
 	) -> Self {
 		Self {
 			ikb,
+			format_version,
 			table_id,
 			diskann_cache,
 			pending_generation,
@@ -91,6 +96,7 @@ impl<'a> DiskAnnTruthyDocumentFilter<'a> {
 			VectorId::DocId(doc_id) => {
 				let Some(rid) = DiskAnnDocs::get_thing_cached(
 					&self.ikb,
+					self.format_version,
 					self.table_id,
 					&self.diskann_cache,
 					&ctx.tx,
@@ -184,6 +190,7 @@ impl<'a> DiskAnnTruthyDocumentFilter<'a> {
 		if !doc_ids.is_empty() {
 			let resolved = DiskAnnDocs::get_things_batch(
 				&self.ikb,
+				self.format_version,
 				self.table_id,
 				&self.diskann_cache,
 				&ctx.tx,

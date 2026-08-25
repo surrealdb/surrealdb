@@ -488,7 +488,6 @@ impl BitmapNode {
 		operator: &MatchesOperator,
 	) -> std::result::Result<RoaringTreemap, ControlFlow> {
 		let index_def = index_ref.definition();
-		index_def.ensure_current_format()?;
 		let ft_params = match &index_def.index {
 			Index::FullText(params) => params,
 			_ => {
@@ -509,6 +508,7 @@ impl BitmapNode {
 			ikb,
 			ft_params,
 			&frozen_ctx.config.idx.file_allowlist,
+			index_def.format_version,
 		)
 		.await
 		.context("Failed to open full-text index")?;

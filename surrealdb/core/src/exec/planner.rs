@@ -735,8 +735,13 @@ impl<'ctx> Planner<'ctx> {
 			// Compound expressions
 			Expr::IfElse(stmt) => Box::pin(self.physical_if_else(*stmt)).await,
 			Expr::Mock(m) => Ok(Arc::new(MockExpr(m))),
+			// The block's statements are planned at evaluation time, so this
+			// planner's MATCHES registrations travel with it — a MATCHES the
+			// enclosing SELECT's WHERE registered resolves against the same
+			// query executor inside the block as outside it.
 			Expr::Block(b) => Ok(Arc::new(BlockPhysicalExpr {
 				block: *b,
+				matches_scope: self.matches_scope.clone(),
 			})),
 
 			// Control flow
@@ -1823,13 +1828,25 @@ pub(crate) async fn expr_to_physical_expr(
 /// [`crate::exec::physical_expr::block`], which passes the depth recorded on the
 /// calling node so nested `eval`/UDF recursion stays bounded by the same
 /// `max_computation_depth` the legacy path counts against.
+///
+/// `matches_scope` carries the registrations of the SELECT whose expression tree
+/// the body belongs to, so a MATCHES that SELECT's WHERE registered resolves
+/// against the same query executor here as it does in the eagerly planned parts
+/// of the tree. It is `None` for a body planned in its own scope — a
+/// user-defined function, a closure — which must not inherit the caller's
+/// registrations.
 pub(crate) async fn expr_to_physical_expr_at_depth(
 	expr: Expr,
 	ctx: &FrozenContext,
 	registry: &FunctionRegistry,
 	depth: u32,
+	matches_scope: Option<Arc<crate::exec::physical_expr::MatchesScope>>,
 ) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
-	Planner::new(ctx, registry).with_depth(depth).physical_expr(expr).await
+	let mut planner = Planner::new(ctx, registry).with_depth(depth);
+	if let Some(scope) = matches_scope {
+		planner.set_matches_scope(scope);
+	}
+	planner.physical_expr(expr).await
 }
 
 // ============================================================================

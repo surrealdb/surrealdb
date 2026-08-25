@@ -8,7 +8,7 @@ pub(crate) use surrealdb_datastore::values::hnsw::{ElementDocs, ElementHashedDoc
 
 use crate::IndexKeyBase;
 use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableId};
-use crate::docids::{DocId, TableDocIds};
+use crate::docids::{DocId, LegacyVectorDocIds, TableDocIds};
 use crate::env::IndexEnv;
 use crate::trees::hnsw::ElementId;
 use crate::trees::hnsw::cache::VectorCache;
@@ -28,17 +28,19 @@ use crate::val::{RecordId, RecordIdKey};
 pub(crate) struct HnswDocs {
 	/// Key base for generating storage keys.
 	ikb: IndexKeyBase,
-	/// The table-level doc-ID mapping shared by every index on the table.
-	docids: TableDocIds,
+	/// Whether the index uses the table-level shared doc-ID space.
+	uses_shared_doc_ids: bool,
+	/// Stored index format used to scope cache entries.
+	format_version: u16,
 }
 
 impl HnswDocs {
 	/// Creates an `HnswDocs` facade over the table's shared doc-ID space.
-	pub(crate) fn new(ikb: IndexKeyBase) -> Self {
-		let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
+	pub(crate) fn with_format_version(ikb: IndexKeyBase, format_version: u16) -> Self {
 		Self {
+			uses_shared_doc_ids: surrealdb_catalog::uses_shared_doc_ids(format_version),
 			ikb,
-			docids,
+			format_version,
 		}
 	}
 
@@ -48,35 +50,48 @@ impl HnswDocs {
 	/// avoiding the need to hold a lock on `HnswDocs`.
 	pub(super) async fn get_doc_id(
 		ikb: &IndexKeyBase,
+		format_version: u16,
 		tx: &Transaction,
 		id: &RecordIdKey,
 	) -> Result<Option<DocId>> {
-		TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone()).get_doc_id(tx, id).await
+		if surrealdb_catalog::uses_shared_doc_ids(format_version) {
+			TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone()).get_doc_id(tx, id).await
+		} else {
+			LegacyVectorDocIds::Hnsw(ikb.clone()).get_doc_id(tx, id).await
+		}
 	}
 
 	/// Resolves a record key to its doc ID in the table's shared space, allocating
 	/// a new one if needed.
 	pub(super) async fn resolve(&self, env: &dyn IndexEnv, id: &RecordIdKey) -> Result<DocId> {
-		self.docids.resolve_or_assign(env, id).await
+		if self.uses_shared_doc_ids {
+			TableDocIds::new(self.ikb.ns(), self.ikb.db(), self.ikb.table().clone())
+				.resolve_or_assign(env, id)
+				.await
+		} else {
+			LegacyVectorDocIds::Hnsw(self.ikb.clone()).resolve_or_assign(env, id).await
+		}
 	}
 
 	fn cache_index(
 		ikb: &IndexKeyBase,
 		table_id: TableId,
-	) -> (NamespaceId, DatabaseId, TableId, IndexId) {
-		(ikb.ns(), ikb.db(), table_id, ikb.index())
+		format_version: u16,
+	) -> (NamespaceId, DatabaseId, TableId, IndexId, u16) {
+		(ikb.ns(), ikb.db(), table_id, ikb.index(), format_version)
 	}
 
 	/// Resolves one compact document ID through the shared batch/cache path.
 	pub(super) async fn get_thing_cached(
 		ikb: &IndexKeyBase,
+		format_version: u16,
 		table_id: TableId,
 		cache: &VectorCache,
 		tx: &Transaction,
 		doc_id: DocId,
 		generation: Option<u64>,
 	) -> Result<Option<Arc<RecordId>>> {
-		Ok(Self::get_things_batch(ikb, table_id, cache, tx, &[doc_id], generation)
+		Ok(Self::get_things_batch(ikb, format_version, table_id, cache, tx, &[doc_id], generation)
 			.await?
 			.into_iter()
 			.next()
@@ -91,13 +106,14 @@ impl HnswDocs {
 	/// stay local to the caller.
 	pub(super) async fn get_things_batch(
 		ikb: &IndexKeyBase,
+		format_version: u16,
 		table_id: TableId,
 		cache: &VectorCache,
 		tx: &Transaction,
 		doc_ids: &[DocId],
 		generation: Option<u64>,
 	) -> Result<Vec<Option<Arc<RecordId>>>> {
-		let index = Self::cache_index(ikb, table_id);
+		let index = Self::cache_index(ikb, table_id, format_version);
 		let table = ikb.table().clone();
 		let mut rids = vec![None; doc_ids.len()];
 		let mut misses = Vec::new();
@@ -115,9 +131,13 @@ impl HnswDocs {
 			return Ok(rids);
 		}
 		let miss_ids: Vec<DocId> = misses.iter().map(|(_, doc_id)| *doc_id).collect();
-		let ids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone())
-			.get_record_ids_batch(tx, &miss_ids)
-			.await?;
+		let ids = if surrealdb_catalog::uses_shared_doc_ids(format_version) {
+			TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone())
+				.get_record_ids_batch(tx, &miss_ids)
+				.await?
+		} else {
+			LegacyVectorDocIds::Hnsw(ikb.clone()).get_record_ids_batch(tx, &miss_ids).await?
+		};
 		let cache_misses = !tx.writeable();
 		for ((pos, doc_id), id) in misses.into_iter().zip(ids) {
 			if let Some(id) = id {
@@ -141,7 +161,9 @@ impl HnswDocs {
 	/// removed centrally at record purge (see `doc::index`'s `remove_doc_id`), so
 	/// this only drops the process-local cache entry. Doc-IDs are never recycled.
 	pub(super) async fn remove(&self, doc_id: DocId, table_id: TableId, cache: &VectorCache) {
-		cache.remove_doc_id(Self::cache_index(&self.ikb, table_id), doc_id).await;
+		cache
+			.remove_doc_id(Self::cache_index(&self.ikb, table_id, self.format_version), doc_id)
+			.await;
 	}
 }
 
@@ -151,6 +173,7 @@ pub(crate) struct VecDocs {
 	table_id: TableId,
 	cache: VectorCache,
 	use_hashed_vector: bool,
+	format_version: u16,
 }
 
 impl VecDocs {
@@ -160,17 +183,19 @@ impl VecDocs {
 		table_id: TableId,
 		cache: VectorCache,
 		use_hashed_vector: bool,
+		format_version: u16,
 	) -> Self {
 		Self {
 			ikb,
 			table_id,
 			cache,
 			use_hashed_vector,
+			format_version,
 		}
 	}
 
-	fn cache_index(&self) -> (NamespaceId, DatabaseId, TableId, IndexId) {
-		(self.ikb.ns(), self.ikb.db(), self.table_id, self.ikb.index())
+	fn cache_index(&self) -> (NamespaceId, DatabaseId, TableId, IndexId, u16) {
+		(self.ikb.ns(), self.ikb.db(), self.table_id, self.ikb.index(), self.format_version)
 	}
 
 	pub(super) async fn get_cached_doc_set(&self, element_id: ElementId) -> Option<Ids64> {
@@ -383,6 +408,7 @@ mod tests {
 	use surrealdb_kvs::TransactionType;
 
 	use super::*;
+	use crate::catalog::DOC_IDS_FORMAT_VERSION;
 	use crate::key::schema::DocKeyKey;
 	use crate::test_env::TestIndexStore;
 
@@ -396,36 +422,34 @@ mod tests {
 		let ikb = ikb();
 		let cache = VectorCache::new(1024 * 1024);
 		{
-			let tx = ds.transaction(TransactionType::Write).await?;
-			tx.set_key(
-				&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 1),
-				&RecordIdKey::Number(11),
-			)
-			.await?;
-			tx.set_key(
-				&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 2),
-				&RecordIdKey::Number(22),
-			)
-			.await?;
-			tx.commit().await?;
+			let ctx = ds.env(TransactionType::Write).await;
+			LegacyVectorDocIds::Hnsw(ikb.clone())
+				.resolve_or_assign(&ctx, &RecordIdKey::Number(11))
+				.await?;
+			LegacyVectorDocIds::Hnsw(ikb.clone())
+				.resolve_or_assign(&ctx, &RecordIdKey::Number(22))
+				.await?;
+			ctx.tx().commit().await?;
 		}
 
 		let tx = ds.transaction(TransactionType::Read).await?;
-		let got =
-			HnswDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[2, 1, 3], Some(5)).await?;
-		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(22));
-		assert_eq!(&got[1].as_ref().unwrap().key, &RecordIdKey::Number(11));
-		assert!(got[2].is_none());
+		let got = HnswDocs::get_things_batch(&ikb, 0, TableId(4), &cache, &tx, &[9, 0, 1], Some(5))
+			.await?;
+		assert!(got[0].is_none());
+		assert_eq!(got[1].as_ref().map(|r| r.key.clone()), Some(RecordIdKey::Number(11)));
+		assert_eq!(got[2].as_ref().map(|r| r.key.clone()), Some(RecordIdKey::Number(22)));
 		tx.cancel().await?;
 
-		let tx = ds.transaction(TransactionType::Write).await?;
-		tx.del_key(&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 1)).await?;
-		tx.commit().await?;
+		let ctx = ds.env(TransactionType::Write).await;
+		LegacyVectorDocIds::Hnsw(ikb.clone()).remove(&ctx.tx(), &RecordIdKey::Number(11)).await?;
+		ctx.tx().commit().await?;
+		HnswDocs::with_format_version(ikb.clone(), 0).remove(0, TableId(4), &cache).await;
 
 		let tx = ds.transaction(TransactionType::Read).await?;
 		let cached =
-			HnswDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[1], Some(5)).await?;
-		assert_eq!(&cached[0].as_ref().unwrap().key, &RecordIdKey::Number(11));
+			HnswDocs::get_things_batch(&ikb, 0, TableId(4), &cache, &tx, &[0, 1], Some(5)).await?;
+		assert!(cached[0].is_none());
+		assert_eq!(cached[1].as_ref().unwrap().key, RecordIdKey::Number(22));
 		tx.cancel().await?;
 		Ok(())
 	}
@@ -438,26 +462,49 @@ mod tests {
 
 		let tx = ds.transaction(TransactionType::Read).await?;
 		assert_eq!(
-			HnswDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[9], Some(5)).await?,
+			HnswDocs::get_things_batch(
+				&ikb,
+				DOC_IDS_FORMAT_VERSION,
+				TableId(4),
+				&cache,
+				&tx,
+				&[9],
+				Some(5),
+			)
+			.await?,
 			vec![None]
 		);
 		tx.cancel().await?;
 
-		let tx = ds.transaction(TransactionType::Write).await?;
-		tx.set_key(
-			&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 9),
-			&RecordIdKey::Number(99),
+		let ctx = ds.env(TransactionType::Write).await;
+		LegacyVectorDocIds::Hnsw(ikb.clone())
+			.resolve_or_assign(&ctx, &RecordIdKey::Number(99))
+			.await?;
+		ctx.tx().commit().await?;
+
+		let ctx2 = ds.env(TransactionType::Write).await;
+		let got = HnswDocs::get_things_batch(
+			&ikb,
+			0,
+			TableId(4),
+			&cache,
+			ctx2.tx().as_ref(),
+			&[9],
+			Some(5),
 		)
 		.await?;
-		let got = HnswDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[9], Some(5)).await?;
-		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(99));
+		let doc_id = LegacyVectorDocIds::Hnsw(ikb.clone())
+			.get_doc_id(ctx2.tx().as_ref(), &RecordIdKey::Number(99))
+			.await?
+			.expect("mapping");
+		assert_eq!(got.len(), 1);
 		assert!(
 			cache
-				.get_doc_id((ikb.ns(), ikb.db(), TableId(4), ikb.index()), 9, Some(5))
+				.get_doc_id((ikb.ns(), ikb.db(), TableId(4), ikb.index(), 0u16), doc_id, Some(5))
 				.await
 				.is_none()
 		);
-		tx.cancel().await?;
+		ctx2.tx().commit().await?;
 		Ok(())
 	}
 
@@ -477,12 +524,21 @@ mod tests {
 		}
 
 		let tx = ds.transaction(TransactionType::Read).await?;
-		let got = HnswDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[1], Some(5)).await?;
+		let got = HnswDocs::get_things_batch(
+			&ikb,
+			DOC_IDS_FORMAT_VERSION,
+			TableId(4),
+			&cache,
+			&tx,
+			&[1],
+			Some(5),
+		)
+		.await?;
 		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(11));
 		tx.cancel().await?;
 		assert!(
 			cache
-				.get_doc_id((ikb.ns(), ikb.db(), TableId(4), ikb.index()), 1, Some(6))
+				.get_doc_id((ikb.ns(), ikb.db(), TableId(4), ikb.index(), 0u16), 1, Some(6))
 				.await
 				.is_none()
 		);
@@ -496,7 +552,16 @@ mod tests {
 		tx.commit().await?;
 
 		let tx = ds.transaction(TransactionType::Read).await?;
-		let got = HnswDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[1], Some(6)).await?;
+		let got = HnswDocs::get_things_batch(
+			&ikb,
+			DOC_IDS_FORMAT_VERSION,
+			TableId(4),
+			&cache,
+			&tx,
+			&[1],
+			Some(6),
+		)
+		.await?;
 		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(22));
 		tx.cancel().await?;
 		Ok(())
@@ -507,31 +572,32 @@ mod tests {
 		let ds = TestIndexStore::new().await;
 		let ikb = ikb();
 		let cache = VectorCache::new(1024 * 1024);
-		let id = RecordIdKey::Number(77);
 		{
-			let tx = ds.transaction(TransactionType::Write).await?;
-			tx.set_key(&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 7), &id)
+			let ctx = ds.env(TransactionType::Write).await;
+			LegacyVectorDocIds::Hnsw(ikb.clone())
+				.resolve_or_assign(&ctx, &RecordIdKey::Number(11))
 				.await?;
-			tx.commit().await?;
+			ctx.tx().commit().await?;
 		}
 
 		let tx = ds.transaction(TransactionType::Read).await?;
-		let got = HnswDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[7], Some(5)).await?;
-		assert_eq!(&got[0].as_ref().unwrap().key, &id);
+		let got =
+			HnswDocs::get_things_batch(&ikb, 0, TableId(4), &cache, &tx, &[0], Some(5)).await?;
+		assert_eq!(got[0].as_ref().unwrap().key, RecordIdKey::Number(11));
 		assert!(
 			cache
-				.get_doc_id((ikb.ns(), ikb.db(), TableId(4), ikb.index()), 7, Some(5))
+				.get_doc_id((ikb.ns(), ikb.db(), TableId(4), ikb.index(), 0u16), 0, Some(5))
 				.await
 				.is_some()
 		);
 		tx.cancel().await?;
 
 		let tx = ds.transaction(TransactionType::Write).await?;
-		let docs = HnswDocs::new(ikb.clone());
-		docs.remove(7, TableId(4), &cache).await;
+		LegacyVectorDocIds::Hnsw(ikb.clone()).remove(&tx, &RecordIdKey::Number(11)).await?;
+		HnswDocs::with_format_version(ikb.clone(), 0).remove(0, TableId(4), &cache).await;
 		assert!(
 			cache
-				.get_doc_id((ikb.ns(), ikb.db(), TableId(4), ikb.index()), 7, Some(5))
+				.get_doc_id((ikb.ns(), ikb.db(), TableId(4), ikb.index(), 0u16), 0, Some(5))
 				.await
 				.is_none()
 		);
@@ -545,7 +611,7 @@ mod tests {
 		let tx = ds.transaction(TransactionType::Write).await?;
 		let ikb = ikb();
 		let cache = VectorCache::new(1024 * 1024);
-		let vec_docs = VecDocs::new(ikb.clone(), TableId(4), cache.clone(), false);
+		let vec_docs = VecDocs::new(ikb.clone(), TableId(4), cache.clone(), false, 0);
 		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
 		let vector = Vector::from(ser_vec.clone());
 		tx.set_key(
@@ -559,7 +625,7 @@ mod tests {
 
 		assert_eq!(vec_docs.get_docs_by_element(&tx, 7, &vector).await?, Some(Ids64::One(42)));
 		assert_eq!(
-			cache.get_doc_set((ikb.ns(), ikb.db(), TableId(4), ikb.index()), 7).await,
+			cache.get_doc_set((ikb.ns(), ikb.db(), TableId(4), ikb.index(), 0u16), 7).await,
 			Some(Ids64::One(42))
 		);
 
@@ -576,7 +642,7 @@ mod tests {
 		let tx = ds.transaction(TransactionType::Write).await?;
 		let ikb = ikb();
 		let cache = VectorCache::new(1024 * 1024);
-		let vec_docs = VecDocs::new(ikb.clone(), TableId(4), cache.clone(), true);
+		let vec_docs = VecDocs::new(ikb.clone(), TableId(4), cache.clone(), true, 0);
 		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
 		let other_vec = SerializedVector::F32(vec![3.0, 4.0]);
 		let vector = Vector::from(ser_vec.clone());
@@ -601,12 +667,15 @@ mod tests {
 		let tx = ds.transaction(TransactionType::Write).await?;
 		let ikb = ikb();
 		let cache = VectorCache::new(1024 * 1024);
-		let vec_docs = VecDocs::new(ikb.clone(), TableId(4), cache.clone(), false);
+		let vec_docs = VecDocs::new(ikb.clone(), TableId(4), cache.clone(), false, 0);
 		let vector = Vector::from(SerializedVector::F32(vec![1.0, 2.0]));
 
 		assert_eq!(vec_docs.get_docs_by_element(&tx, 7, &vector).await?, None);
 		assert!(
-			cache.get_doc_set((ikb.ns(), ikb.db(), TableId(4), ikb.index()), 7).await.is_none()
+			cache
+				.get_doc_set((ikb.ns(), ikb.db(), TableId(4), ikb.index(), 0u16), 7)
+				.await
+				.is_none()
 		);
 		tx.cancel().await?;
 		Ok(())

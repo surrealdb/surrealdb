@@ -16,11 +16,11 @@ use crate::trees::knn::Ids64;
 use crate::trees::vector::SerializedVector;
 use crate::val::RecordIdKey;
 
-type IndexKey = (NamespaceId, DatabaseId, TableId, IndexId);
-type ElementCacheKey = (NamespaceId, DatabaseId, TableId, IndexId, ElementId);
+type IndexKey = (NamespaceId, DatabaseId, TableId, IndexId, u16);
+type ElementCacheKey = (NamespaceId, DatabaseId, TableId, IndexId, u16, ElementId);
 type NodeCacheKey = ElementCacheKey;
 type DocSetCacheKey = ElementCacheKey;
-type DocIdCacheKey = (NamespaceId, DatabaseId, TableId, IndexId, DocId);
+type DocIdCacheKey = (NamespaceId, DatabaseId, TableId, IndexId, u16, DocId);
 
 #[derive(Clone)]
 struct CachedDocId {
@@ -85,11 +85,14 @@ impl Weighter<DiskAnnCacheKey, DiskAnnCacheValue> for DiskAnnCacheWeighter {
 
 /// Shared weighted cache for one process' DiskANN graph data.
 ///
-/// The cache is scoped by namespace, database, table, and index id. Element vectors (`De` keys),
-/// adjacency lists (`Dn` keys), graph state (`Ds` key), and document mappings share one weighted
-/// budget keyed by the composite (`namespace`, `database`, `table`, `index`, `id`) tuples; index
-/// removal walks every shard with [`Cache::retain`] because per-key membership trackers cannot be
-/// kept reliably in sync with quick_cache's hot/cold/ghost eviction (see #7318).
+/// The cache is scoped by namespace, database, table, index id, and stored format version.
+/// Format-version scoping keeps an index's legacy and rebuilt layouts in disjoint keyspaces, so
+/// readers on either side of a `REBUILD INDEX` never observe — or evict — the other side's
+/// entries. Element vectors (`De` keys), adjacency lists (`Dn` keys), graph state (`Ds` key), and
+/// document mappings share one weighted budget keyed by the composite
+/// (`namespace`, `database`, `table`, `index`, `format`, `id`) tuples; index removal walks every
+/// shard with [`Cache::retain`] because per-key membership trackers cannot be kept reliably in
+/// sync with quick_cache's hot/cold/ghost eviction (see #7318).
 #[derive(Clone)]
 pub(crate) struct DiskAnnCache(Arc<Inner>);
 
@@ -112,16 +115,17 @@ impl DiskAnnCache {
 		database_id: DatabaseId,
 		table_id: TableId,
 		index_id: IndexId,
+		format_version: u16,
 	) -> IndexKey {
-		(namespace_id, database_id, table_id, index_id)
+		(namespace_id, database_id, table_id, index_id, format_version)
 	}
 
 	fn element_key(index: IndexKey, element_id: ElementId) -> ElementCacheKey {
-		(index.0, index.1, index.2, index.3, element_id)
+		(index.0, index.1, index.2, index.3, index.4, element_id)
 	}
 
 	fn doc_id_key(index: IndexKey, doc_id: DocId) -> DocIdCacheKey {
-		(index.0, index.1, index.2, index.3, doc_id)
+		(index.0, index.1, index.2, index.3, index.4, doc_id)
 	}
 
 	/// Returns cached graph state for one index.
@@ -261,7 +265,11 @@ impl DiskAnnCache {
 		self.0.cache.remove(&DiskAnnCacheKey::DocId(Self::doc_id_key(index, doc_id)));
 	}
 
-	/// Evicts every cache family entry scoped to one removed DiskANN index.
+	/// Evicts every cache family entry scoped to one DiskANN index at one stored format version.
+	///
+	/// Entries cached for the same index under a different format version are left in place: they
+	/// belong to a different persisted layout, stay correct for readers still on that layout, and
+	/// age out through normal weighted eviction once unused.
 	///
 	/// `Cache::retain` walks every shard of the shared cache. The DiskANN cache is shared across
 	/// all indices in the process, so this is the only sound way to guarantee no stale adjacency
@@ -278,14 +286,15 @@ impl DiskAnnCache {
 		database_id: DatabaseId,
 		table_id: TableId,
 		index_id: IndexId,
+		format_version: u16,
 	) {
-		let index = Self::index_key(namespace_id, database_id, table_id, index_id);
+		let index = Self::index_key(namespace_id, database_id, table_id, index_id, format_version);
 		self.0.cache.retain(|key, _| match key {
 			DiskAnnCacheKey::State(k) => *k != index,
-			DiskAnnCacheKey::Element(k) => (k.0, k.1, k.2, k.3) != index,
-			DiskAnnCacheKey::Node(k) => (k.0, k.1, k.2, k.3) != index,
-			DiskAnnCacheKey::DocSet(k) => (k.0, k.1, k.2, k.3) != index,
-			DiskAnnCacheKey::DocId(k) => (k.0, k.1, k.2, k.3) != index,
+			DiskAnnCacheKey::Element(k) => (k.0, k.1, k.2, k.3, k.4) != index,
+			DiskAnnCacheKey::Node(k) => (k.0, k.1, k.2, k.3, k.4) != index,
+			DiskAnnCacheKey::DocSet(k) => (k.0, k.1, k.2, k.3, k.4) != index,
+			DiskAnnCacheKey::DocId(k) => (k.0, k.1, k.2, k.3, k.4) != index,
 		});
 		yield_now!();
 	}
@@ -321,7 +330,7 @@ mod tests {
 	use crate::trees::vector::SerializedVector;
 
 	fn index() -> IndexKey {
-		(NamespaceId(1), DatabaseId(2), TableId(3), IndexId(4))
+		(NamespaceId(1), DatabaseId(2), TableId(3), IndexId(4), 0)
 	}
 
 	#[tokio::test]
@@ -397,13 +406,62 @@ mod tests {
 		);
 		assert!(cache.get_doc_id(index, 11, Some(6)).is_none());
 
-		cache.remove_index(index.0, index.1, index.2, index.3).await;
+		cache.remove_index(index.0, index.1, index.2, index.3, index.4).await;
 
 		assert!(cache.get_state(index).is_none());
 		assert!(cache.get_element(index, 7).is_none());
 		assert!(cache.get_node(index, 7).is_none());
 		assert!(cache.get_doc_set(index, 7).is_none());
 		assert!(cache.get_doc_id(index, 11, Some(5)).is_none());
+	}
+
+	#[tokio::test]
+	async fn diskann_cache_remove_index_is_scoped_to_format_version() {
+		let cache = DiskAnnCache::new(1024 * 1024);
+		let legacy = index();
+		let rebuilt = (legacy.0, legacy.1, legacy.2, legacy.3, 1u16);
+		for index in [legacy, rebuilt] {
+			cache.insert_state(
+				index,
+				DiskAnnState {
+					enter_point: Some(7),
+					next_element_id: 10,
+				},
+			);
+			cache.insert_element(
+				index,
+				7,
+				DiskAnnElement {
+					vector: SerializedVector::F32(vec![1.0, 2.0]),
+					deleted: false,
+				},
+			);
+			cache.insert_node(
+				index,
+				7,
+				DiskAnnNode {
+					neighbors: vec![8, 9],
+				},
+			);
+			cache.insert_doc_set(index, 7, Ids64::One(11));
+			cache.insert_doc_id(index, 11, Some(5), RecordIdKey::Number(17));
+		}
+
+		// Evicting one format version must leave the other version's entries untouched, so
+		// readers on the other side of a rebuild keep their warm cache.
+		cache.remove_index(legacy.0, legacy.1, legacy.2, legacy.3, legacy.4).await;
+
+		assert!(cache.get_state(legacy).is_none());
+		assert!(cache.get_element(legacy, 7).is_none());
+		assert!(cache.get_node(legacy, 7).is_none());
+		assert!(cache.get_doc_set(legacy, 7).is_none());
+		assert!(cache.get_doc_id(legacy, 11, Some(5)).is_none());
+
+		assert!(cache.get_state(rebuilt).is_some());
+		assert!(cache.get_element(rebuilt, 7).is_some());
+		assert!(cache.get_node(rebuilt, 7).is_some());
+		assert_eq!(cache.get_doc_set(rebuilt, 7), Some(Ids64::One(11)));
+		assert!(cache.get_doc_id(rebuilt, 11, Some(5)).is_some());
 	}
 
 	#[test]

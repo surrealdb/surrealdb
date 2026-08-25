@@ -3405,7 +3405,7 @@ impl Datastore {
 				Index::Hnsw(_) => {
 					// HNSW compaction owns its pending-key allocation and pending-range
 					// drain semantics separately from full-text/count compaction.
-					self.process_hnsw_compaction(ikb, &canceller).await?;
+					self.process_hnsw_compaction(ikb, ix.format_version, &canceller).await?;
 				}
 				#[cfg(diskann)]
 				Index::DiskAnn(_) => {
@@ -3427,10 +3427,14 @@ impl Datastore {
 	/// Pending entries are captured in a read transaction and conditionally
 	/// deleted in a short write transaction before graph mutation. If a write
 	/// fails after local graph mutation may have started, the cached HNSW index
-	/// is evicted so later use reloads persisted state.
+	/// is evicted so later use reloads persisted state. The eviction targets the
+	/// format version the write phase applied through — a `REBUILD INDEX` can
+	/// bump the catalog format after `format_version` was captured, and cache
+	/// entries are scoped per format.
 	async fn process_hnsw_compaction(
 		&self,
 		ikb: &IndexKeyBase,
+		format_version: u16,
 		canceller: &CancellationToken,
 	) -> Result<()> {
 		loop {
@@ -3474,6 +3478,11 @@ impl Datastore {
 			Self::ensure_not_cancelled(canceller)?;
 
 			let txn = Arc::new(self.transaction(Write).await?);
+			// The apply phase re-reads the catalog and mutates the wrapper and
+			// cache belonging to that fresh format, so every failure-side
+			// eviction below must clear the same format, not the one captured
+			// at dispatch time.
+			let mut applied_format = format_version;
 			let res: Result<bool> = async {
 				match txn
 					.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
@@ -3481,6 +3490,7 @@ impl Datastore {
 				{
 					Some(ix) if !ix.prepare_remove => match &ix.index {
 						Index::Hnsw(p) => {
+							applied_format = ix.format_version;
 							let mut ctx = self.setup_ctx()?;
 							ctx.set_transaction(Arc::clone(&txn));
 							let ctx = ctx.freeze();
@@ -3489,6 +3499,7 @@ impl Datastore {
 								&self.index_stores,
 								ikb,
 								p,
+								ix.format_version,
 								plan,
 							)
 							.await
@@ -3503,8 +3514,10 @@ impl Datastore {
 				Ok(true) => {
 					if let Err(e) = Self::ensure_not_cancelled(canceller) {
 						let _ = txn.cancel().await;
-						if let Err(evict) =
-							self.index_stores.remove_hnsw_index(tb, ikb.clone()).await
+						if let Err(evict) = self
+							.index_stores
+							.remove_hnsw_index(tb, ikb.clone(), applied_format)
+							.await
 						{
 							warn!(target: TARGET, "Failed to evict HNSW index after compaction cancellation: {evict}");
 						}
@@ -3516,8 +3529,10 @@ impl Datastore {
 						self.id,
 					) {
 						let _ = txn.cancel().await;
-						if let Err(evict) =
-							self.index_stores.remove_hnsw_index(tb, ikb.clone()).await
+						if let Err(evict) = self
+							.index_stores
+							.remove_hnsw_index(tb, ikb.clone(), applied_format)
+							.await
 						{
 							warn!(target: TARGET, "Failed to evict HNSW index after compaction commit error: {evict}");
 						}
@@ -3535,8 +3550,10 @@ impl Datastore {
 					}
 					if let Err(e) = txn.commit().await {
 						let _ = txn.cancel().await;
-						if let Err(evict) =
-							self.index_stores.remove_hnsw_index(tb, ikb.clone()).await
+						if let Err(evict) = self
+							.index_stores
+							.remove_hnsw_index(tb, ikb.clone(), applied_format)
+							.await
 						{
 							warn!(target: TARGET, "Failed to evict HNSW index after compaction commit error: {evict}");
 						}
@@ -3559,7 +3576,9 @@ impl Datastore {
 				}
 				Err(e) => {
 					let _ = txn.cancel().await;
-					if let Err(evict) = self.index_stores.remove_hnsw_index(tb, ikb.clone()).await {
+					if let Err(evict) =
+						self.index_stores.remove_hnsw_index(tb, ikb.clone(), applied_format).await
+					{
 						warn!(target: TARGET, "Failed to evict HNSW index after compaction error: {evict}");
 					}
 					if Self::retry_index_operation_conflict(
@@ -3653,6 +3672,7 @@ impl Datastore {
 								&self.index_stores,
 								ikb,
 								p,
+								ix.format_version,
 								plan,
 							)
 							.await
@@ -3700,12 +3720,22 @@ impl Datastore {
 			Self::ensure_not_cancelled(canceller)?;
 			let plan = {
 				let txn = self.transaction(Read).await?;
+				let ix = txn
+					.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
+					.await?
+					.filter(|ix| !ix.prepare_remove);
 				let res = IndexOperation::prepare_fulltext_compaction(
 					&self.index_stores,
 					ikb,
 					&txn,
 					p,
 					&self.config.idx.file_allowlist,
+					match &ix {
+						Some(ix) if matches!(ix.index, crate::catalog::Index::FullText(_)) => {
+							ix.format_version
+						}
+						_ => return Ok(()),
+					},
 				)
 				.await;
 				let _ = txn.cancel().await;
@@ -3731,6 +3761,7 @@ impl Datastore {
 								&txn,
 								p,
 								&self.config.idx.file_allowlist,
+								ix.format_version,
 								plan,
 							)
 							.await

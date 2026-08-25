@@ -143,6 +143,43 @@ impl CandidateCondition for LegacyCondition<'_> {
 	}
 }
 
+/// Evaluates the full original WHERE with the MATCHES-aware physical
+/// expression layer. Used only for legacy vector indexes, whose fallback
+/// cannot use a shared-doc-ID prefilter and whose legacy evaluator computes
+/// MATCHES to `false`.
+pub(crate) struct PhysicalCondition {
+	phys: Arc<dyn crate::exec::PhysicalExpr>,
+	exec_ctx: crate::exec::ExecutionContext,
+}
+
+impl PhysicalCondition {
+	pub(crate) fn new(
+		phys: Arc<dyn crate::exec::PhysicalExpr>,
+		exec_ctx: crate::exec::ExecutionContext,
+	) -> Self {
+		Self {
+			phys,
+			exec_ctx,
+		}
+	}
+}
+
+impl CandidateCondition for PhysicalCondition {
+	fn matches<'a>(
+		&'a self,
+		_stk: &'a mut Stk,
+		_rid: &'a std::sync::Arc<RecordId>,
+		record: &'a std::sync::Arc<Record>,
+	) -> BoxGateFut<'a> {
+		Box::pin(async move {
+			let value = record.data.clone();
+			let eval_ctx =
+				crate::exec::EvalContext::from_exec_ctx(&self.exec_ctx).with_value_and_doc(&value);
+			Ok(self.phys.evaluate(eval_ctx).await.catch_return()?.is_truthy())
+		})
+	}
+}
+
 /// Builds the filter the legacy planner pushes into an ANN search: the
 /// condition to evaluate against each candidate, and the SELECT-permission
 /// gate that must admit the candidate before that condition runs.

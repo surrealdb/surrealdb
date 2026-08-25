@@ -57,11 +57,9 @@ pub(crate) async fn rebuild_index_statement_compute(
 	let tb = ctx.tx().expect_tb(ns, db, &this.table).await?;
 
 	// Stamp the definition with the current on-disk format version. The rebuild
-	// repopulates the index in the current layout, so once it completes queries
-	// must stop rejecting it as out-of-date (see
-	// `StoredIndexDefinition::ensure_current_format`). Index kinds that don't use the
-	// shared doc-ID space are already at the required version, so this is a no-op
-	// for them.
+	// repopulates the index in the current layout. Existing indexes are not
+	// migrated automatically, so this explicit statement is what moves them to
+	// the shared table-level doc-ID space.
 	let ix = if ix.format_version != INDEX_FORMAT_VERSION {
 		let mut updated = (*ix).clone();
 		updated.format_version = INDEX_FORMAT_VERSION;

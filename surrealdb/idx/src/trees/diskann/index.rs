@@ -38,6 +38,7 @@ use surrealdb_kvs::{Direction, Val};
 use tokio::sync::RwLock;
 
 use crate::catalog::{DiskAnnParams, Distance, TableId, VectorType};
+use crate::docids::LegacyVectorDocIds;
 use crate::env::IndexEnv;
 use crate::key::schema::{DiskannRecordPendingKey, DiskannRecordPendingShardKey};
 use crate::key::{KVKey, KVKeyDecode, KVValue, Key, TypedRange};
@@ -319,6 +320,8 @@ pub struct DiskAnnIndex {
 	graph: RwLock<DiskAnnGraph>,
 	/// Vector-to-document mapping helper for `!dq`/`!dh` resolution.
 	vec_docs: DiskAnnVecDocs,
+	/// Whether the index uses shared or legacy private doc-ID mappings.
+	format_version: u16,
 }
 
 /// Context passed from SurrealDB execution into DiskANN provider calls.
@@ -363,7 +366,13 @@ type DiskAnnSearchResult = (ElementId, f64);
 
 impl DiskAnnGraph {
 	/// Builds the upstream DiskANN graph configuration and provider for one SurrealDB index.
-	fn new(ikb: IndexKeyBase, tb: TableId, p: &DiskAnnParams, cache: DiskAnnCache) -> Result<Self> {
+	fn new(
+		ikb: IndexKeyBase,
+		tb: TableId,
+		p: &DiskAnnParams,
+		cache: DiskAnnCache,
+		format_version: u16,
+	) -> Result<Self> {
 		let metric = distance_to_metric(&p.distance)?;
 		let alpha = p.alpha.to_float() as f32;
 		if !alpha.is_finite() || alpha <= 0.0 {
@@ -377,7 +386,8 @@ impl DiskAnnGraph {
 		);
 		builder.alpha(alpha);
 		let config = builder.build()?;
-		let provider = DiskAnnProvider::new(ikb, tb, cache, p.dimension as usize, metric);
+		let provider =
+			DiskAnnProvider::new(ikb, tb, format_version, cache, p.dimension as usize, metric);
 		Ok(Self {
 			index: RawDiskAnnIndex::new(config, provider, None),
 		})
@@ -582,12 +592,17 @@ struct DiskAnnGraphSearch<'a, 'b> {
 }
 
 impl DiskAnnIndex {
+	pub(crate) fn format_version(&self) -> u16 {
+		self.format_version
+	}
+
 	/// Creates a DiskANN index wrapper and validates the configured type/metric combination.
 	pub(crate) async fn new(
 		ikb: IndexKeyBase,
 		tb: TableId,
 		p: &DiskAnnParams,
 		cache: DiskAnnCache,
+		format_version: u16,
 	) -> Result<Self> {
 		if !matches!(
 			p.vector_type,
@@ -607,9 +622,22 @@ impl DiskAnnIndex {
 			distance: p.distance.clone(),
 			table_id: tb,
 			cache: cache.clone(),
-			graph: RwLock::new(DiskAnnGraph::new(ikb.clone(), tb, p, cache.clone())?),
-			vec_docs: DiskAnnVecDocs::new(ikb.clone(), tb, cache, p.use_hashed_vector),
+			graph: RwLock::new(DiskAnnGraph::new(
+				ikb.clone(),
+				tb,
+				p,
+				cache.clone(),
+				format_version,
+			)?),
+			vec_docs: DiskAnnVecDocs::new(
+				ikb.clone(),
+				tb,
+				cache,
+				p.use_hashed_vector,
+				format_version,
+			),
 			ikb,
+			format_version,
 		})
 	}
 
@@ -836,7 +864,7 @@ impl DiskAnnIndex {
 				}
 			}
 			(None, None) => DiskAnnRecordPendingUpdate {
-				doc_id: DiskAnnDocs::get_doc_id(&self.ikb, &tx, id).await?,
+				doc_id: DiskAnnDocs::get_doc_id(&self.ikb, self.format_version, &tx, id).await?,
 				old_vectors,
 				new_vectors,
 			},
@@ -1162,7 +1190,7 @@ impl DiskAnnIndex {
 		// that pre-empts KV.
 		let mut graph = self.graph.write().await;
 		let apply_result: Result<()> = async {
-			let docs = DiskAnnDocs::new(self.ikb.clone());
+			let docs = DiskAnnDocs::with_format_version(self.ikb.clone(), self.format_version);
 			let provider_context = graph.index.provider().context(Arc::clone(&tx));
 			let diskann_ctx = self.new_diskann_context(env, provider_context);
 			for pending in pending {
@@ -1203,7 +1231,13 @@ impl DiskAnnIndex {
 	/// `RwLock` continues to serialise compaction and KNN search.
 	async fn clear_local_cache(&self) {
 		self.cache
-			.remove_index(self.ikb.ns(), self.ikb.db(), self.table_id, self.ikb.index())
+			.remove_index(
+				self.ikb.ns(),
+				self.ikb.db(),
+				self.table_id,
+				self.ikb.index(),
+				self.format_version,
+			)
 			.await;
 	}
 
@@ -1223,6 +1257,13 @@ impl DiskAnnIndex {
 					self.vec_docs.remove(ctx, &vector, doc_id, graph).await?;
 				}
 				if pending.new_vectors.is_empty() {
+					if self.format_version < crate::catalog::DOC_IDS_FORMAT_VERSION
+						&& let Some(record) = &pending.record
+					{
+						LegacyVectorDocIds::DiskAnn(self.ikb.clone())
+							.remove(&ctx.env.tx(), record)
+							.await?;
+					}
 					docs.remove(doc_id, self.table_id, &self.cache);
 				} else {
 					// A delete removes the record's shared doc-ID mapping and a
@@ -1283,6 +1324,7 @@ impl DiskAnnIndex {
 		let mut filter = cond_filter.map(|f| {
 			DiskAnnTruthyDocumentFilter::new(
 				self.ikb.clone(),
+				self.format_version,
 				self.table_id,
 				self.cache.clone(),
 				compaction_generation,
@@ -1337,6 +1379,7 @@ impl DiskAnnIndex {
 			.collect();
 		let mut doc_rids = DiskAnnDocs::get_things_batch(
 			&ctx.ikb,
+			self.format_version,
 			self.table_id,
 			&self.cache,
 			&ctx.tx,
@@ -1590,7 +1633,9 @@ impl DiskAnnIndex {
 				let member = match &id {
 					VectorId::DocId(doc_id) => allow.contains(*doc_id),
 					VectorId::RecordKey(key) => {
-						match DiskAnnDocs::get_doc_id(&self.ikb, &ctx.tx, key).await? {
+						match DiskAnnDocs::get_doc_id(&self.ikb, self.format_version, &ctx.tx, key)
+							.await?
+						{
 							Some(doc_id) => allow.contains(doc_id),
 							// A record with no doc-ID in the shared space has no
 							// entries in any doc-ID-carrying index, so the
@@ -1709,7 +1754,7 @@ mod tests {
 	use temp_dir::TempDir;
 
 	use super::*;
-	use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+	use crate::catalog::{DOC_IDS_FORMAT_VERSION, DatabaseId, IndexId, NamespaceId};
 	use crate::docids::TableDocIds;
 	use crate::test_env::{TestIndexEnv, TestIndexStore};
 	use crate::trees::diskann::cache::DiskAnnCache;
@@ -1890,6 +1935,16 @@ mod tests {
 		Ok(keys)
 	}
 
+	#[cfg(test)]
+	async fn new_index(
+		ikb: IndexKeyBase,
+		table_id: TableId,
+		params: &DiskAnnParams,
+		cache: DiskAnnCache,
+	) -> Result<DiskAnnIndex> {
+		DiskAnnIndex::new(ikb, table_id, params, cache, DOC_IDS_FORMAT_VERSION).await
+	}
+
 	/// #548: the DiskANN graph tier post-filters `graph.search`'s top-`l`
 	/// list, so when every near candidate is outside the allow-list the
 	/// search must over-query (bounded list doubling) instead of returning
@@ -1898,7 +1953,7 @@ mod tests {
 	async fn diskann_allow_list_overqueries_past_disallowed_neighbours() -> Result<()> {
 		let ds = TestIndexStore::new().await;
 		let ikb = ikb();
-		let index = DiskAnnIndex::new(
+		let index = new_index(
 			ikb.clone(),
 			TableId(4),
 			&params(VectorType::F32, Distance::Euclidean),
@@ -1943,7 +1998,7 @@ mod tests {
 	async fn diskann_allow_list_restricts_admission() -> Result<()> {
 		let ds = TestIndexStore::new().await;
 		let ikb = ikb();
-		let index = DiskAnnIndex::new(
+		let index = new_index(
 			ikb.clone(),
 			TableId(4),
 			&params(VectorType::F32, Distance::Euclidean),
@@ -2009,7 +2064,10 @@ mod tests {
 		element_id: ElementId,
 	) -> Option<Vec<u64>> {
 		cache
-			.get_doc_set((ikb.ns(), ikb.db(), TableId(4), ikb.index()), element_id)
+			.get_doc_set(
+				(ikb.ns(), ikb.db(), TableId(4), ikb.index(), DOC_IDS_FORMAT_VERSION),
+				element_id,
+			)
 			.map(|docs| docs.iter().collect())
 	}
 
@@ -2071,7 +2129,7 @@ mod tests {
 			(VectorType::U8, Distance::InnerProduct),
 			(VectorType::I8, Distance::Euclidean),
 		] {
-			DiskAnnIndex::new(ikb(), TableId(4), &params(vector_type, distance), cache()).await?;
+			new_index(ikb(), TableId(4), &params(vector_type, distance), cache()).await?;
 		}
 		Ok(())
 	}
@@ -2079,17 +2137,12 @@ mod tests {
 	#[tokio::test]
 	async fn diskann_rejects_unsupported_type_metric_combinations() -> Result<()> {
 		assert!(
-			DiskAnnIndex::new(
-				ikb(),
-				TableId(4),
-				&params(VectorType::I16, Distance::Euclidean),
-				cache()
-			)
-			.await
-			.is_err()
+			new_index(ikb(), TableId(4), &params(VectorType::I16, Distance::Euclidean), cache())
+				.await
+				.is_err()
 		);
 		assert!(
-			DiskAnnIndex::new(
+			new_index(
 				ikb(),
 				TableId(4),
 				&params(VectorType::U8, Distance::CosineNormalized),
@@ -2099,7 +2152,7 @@ mod tests {
 			.is_err()
 		);
 		assert!(
-			DiskAnnIndex::new(
+			new_index(
 				ikb(),
 				TableId(4),
 				&params(VectorType::I8, Distance::CosineNormalized),
@@ -2113,13 +2166,9 @@ mod tests {
 
 	#[tokio::test]
 	async fn diskann_graph_distance_matches_public_euclidean_distance() -> Result<()> {
-		let index = DiskAnnIndex::new(
-			ikb(),
-			TableId(4),
-			&params(VectorType::F32, Distance::Euclidean),
-			cache(),
-		)
-		.await?;
+		let index =
+			new_index(ikb(), TableId(4), &params(VectorType::F32, Distance::Euclidean), cache())
+				.await?;
 		assert_eq!(index.graph_distance(9.0), 3.0);
 		Ok(())
 	}
@@ -2130,7 +2179,7 @@ mod tests {
 		let ds = TestIndexStore::new().await;
 		let ikb = ikb();
 		let cache = cache();
-		let index = DiskAnnIndex::new(
+		let index = new_index(
 			ikb.clone(),
 			TableId(4),
 			&params(VectorType::F32, Distance::Euclidean),
@@ -2179,7 +2228,7 @@ mod tests {
 	async fn diskann_index_write_marks_pending_state_non_empty() -> Result<()> {
 		let ds = TestIndexStore::new().await;
 		let ikb = ikb();
-		let index = DiskAnnIndex::new(
+		let index = new_index(
 			ikb.clone(),
 			TableId(4),
 			&params(VectorType::F32, Distance::Euclidean),
@@ -2232,7 +2281,7 @@ mod tests {
 	async fn diskann_lookup_skips_sharded_pendings_only_when_guard_is_empty() -> Result<()> {
 		let ds = TestIndexStore::new().await;
 		let ikb = ikb();
-		let index = DiskAnnIndex::new(
+		let index = new_index(
 			ikb.clone(),
 			TableId(4),
 			&params(VectorType::F32, Distance::Euclidean),
@@ -2302,7 +2351,7 @@ mod tests {
 	async fn diskann_old_compactor_clearing_legacy_guard_keeps_sharded_visible() -> Result<()> {
 		let ds = TestIndexStore::new().await;
 		let ikb = ikb();
-		let index = DiskAnnIndex::new(
+		let index = new_index(
 			ikb.clone(),
 			TableId(4),
 			&params(VectorType::F32, Distance::Euclidean),
@@ -2346,7 +2395,7 @@ mod tests {
 	async fn diskann_compaction_clears_pending_state_after_empty_confirmation() -> Result<()> {
 		let ds = TestIndexStore::new().await;
 		let ikb = ikb();
-		let index = DiskAnnIndex::new(
+		let index = new_index(
 			ikb.clone(),
 			TableId(4),
 			&params(VectorType::F32, Distance::Euclidean),
@@ -2403,7 +2452,7 @@ mod tests {
 		let path = format!("rocksdb:{}", dir.path().to_string_lossy());
 		let ds = TestIndexStore::with_path(&path).await;
 		let ikb = ikb();
-		let index = DiskAnnIndex::new(
+		let index = new_index(
 			ikb.clone(),
 			TableId(4),
 			&params(VectorType::F32, Distance::Euclidean),
@@ -2463,7 +2512,7 @@ mod tests {
 	async fn diskann_empty_compaction_plan_does_not_clear_concurrent_pending_write() -> Result<()> {
 		let ds = TestIndexStore::new().await;
 		let ikb = ikb();
-		let index = DiskAnnIndex::new(
+		let index = new_index(
 			ikb.clone(),
 			TableId(4),
 			&params(VectorType::F32, Distance::Euclidean),
@@ -2504,7 +2553,7 @@ mod tests {
 	async fn diskann_final_compaction_plan_preserves_concurrent_pending_write() -> Result<()> {
 		let ds = TestIndexStore::new().await;
 		let ikb = ikb();
-		let index = DiskAnnIndex::new(
+		let index = new_index(
 			ikb.clone(),
 			TableId(4),
 			&params(VectorType::F32, Distance::Euclidean),
@@ -2557,7 +2606,7 @@ mod tests {
 	async fn diskann_dual_read_drains_legacy_pending_then_uses_shards() -> Result<()> {
 		let ds = TestIndexStore::new().await;
 		let ikb = ikb();
-		let index = DiskAnnIndex::new(
+		let index = new_index(
 			ikb.clone(),
 			TableId(4),
 			&params(VectorType::F32, Distance::Euclidean),
@@ -2621,7 +2670,7 @@ mod tests {
 	async fn diskann_write_folds_legacy_pending_into_shard() -> Result<()> {
 		let ds = TestIndexStore::new().await;
 		let ikb = ikb();
-		let index = DiskAnnIndex::new(
+		let index = new_index(
 			ikb.clone(),
 			TableId(4),
 			&params(VectorType::F32, Distance::Euclidean),
@@ -2677,7 +2726,7 @@ mod tests {
 	async fn diskann_write_folds_legacy_even_when_sharded_exists() -> Result<()> {
 		let ds = TestIndexStore::new().await;
 		let ikb = ikb();
-		let index = DiskAnnIndex::new(
+		let index = new_index(
 			ikb.clone(),
 			TableId(4),
 			&params(VectorType::F32, Distance::Euclidean),
@@ -2762,7 +2811,7 @@ mod tests {
 	async fn diskann_compaction_orders_cross_layout_pending_by_vector_chain() -> Result<()> {
 		let ds = TestIndexStore::new().await;
 		let ikb = ikb();
-		let index = DiskAnnIndex::new(
+		let index = new_index(
 			ikb.clone(),
 			TableId(4),
 			&params(VectorType::F32, Distance::Euclidean),
@@ -2825,7 +2874,7 @@ mod tests {
 	async fn diskann_revert_across_layouts_leaves_no_phantom() -> Result<()> {
 		let ds = TestIndexStore::new().await;
 		let ikb = ikb();
-		let index = DiskAnnIndex::new(
+		let index = new_index(
 			ikb.clone(),
 			TableId(4),
 			&params(VectorType::F32, Distance::Euclidean),
@@ -2891,7 +2940,7 @@ mod tests {
 	async fn diskann_write_fold_inverse_pair_keeps_chain_head() -> Result<()> {
 		let ds = TestIndexStore::new().await;
 		let ikb = ikb();
-		let index = DiskAnnIndex::new(
+		let index = new_index(
 			ikb.clone(),
 			TableId(4),
 			&params(VectorType::F32, Distance::Euclidean),
@@ -3016,7 +3065,7 @@ mod tests {
 	async fn diskann_compaction_split_batch_does_not_leave_phantom_vector() -> Result<()> {
 		let ds = TestIndexStore::new().await;
 		let ikb = ikb();
-		let index = DiskAnnIndex::new(
+		let index = new_index(
 			ikb.clone(),
 			TableId(4),
 			&params(VectorType::F32, Distance::Euclidean),
@@ -3103,7 +3152,7 @@ mod tests {
 	async fn diskann_legacy_overflow_reports_has_more() -> Result<()> {
 		let ds = TestIndexStore::new().await;
 		let ikb = ikb();
-		let index = DiskAnnIndex::new(
+		let index = new_index(
 			ikb.clone(),
 			TableId(4),
 			&params(VectorType::F32, Distance::Euclidean),
@@ -3176,7 +3225,7 @@ mod tests {
 		let ds = TestIndexStore::new().await;
 		let ikb = ikb();
 		let cache = cache();
-		let index = DiskAnnIndex::new(
+		let index = new_index(
 			ikb.clone(),
 			TableId(4),
 			&params(VectorType::F32, Distance::Euclidean),
@@ -3224,7 +3273,7 @@ mod tests {
 
 		// Cache must be clean for this index: the post-failure `clear_local_cache` was
 		// triggered while the graph write lock was still held.
-		let cache_index = (ikb.ns(), ikb.db(), TableId(4), ikb.index());
+		let cache_index = (ikb.ns(), ikb.db(), TableId(4), ikb.index(), DOC_IDS_FORMAT_VERSION);
 		assert!(cache.get_state(cache_index).is_none(), "state cache should be empty");
 		// And no element/node entries either — the retain-based cleanup is authoritative.
 		for id in 0..4 {
@@ -3251,7 +3300,7 @@ mod tests {
 			use_hashed_vector: true,
 			..params(VectorType::F32, Distance::Euclidean)
 		};
-		let index = DiskAnnIndex::new(ikb.clone(), TableId(4), &params, cache.clone()).await?;
+		let index = new_index(ikb.clone(), TableId(4), &params, cache.clone()).await?;
 
 		let v0 = [1.0_f32, 0.0, 0.0, 0.0];
 		let v1 = [0.0_f32, 1.0, 0.0, 0.0];

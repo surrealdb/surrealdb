@@ -47,6 +47,7 @@ impl HnswFlavor {
 		ibk: IndexKeyBase,
 		p: &HnswParams,
 		vector_cache: VectorCache,
+		format_version: u16,
 	) -> Result<Self> {
 		let res = match p.m {
 			1..=4 => match p.m0 {
@@ -55,22 +56,29 @@ impl HnswFlavor {
 					ibk,
 					p,
 					vector_cache,
+					format_version,
 				)?),
 				9..=16 => Self::H5_17(Hnsw::<ArraySet<17>, ArraySet<5>>::new(
 					table_id,
 					ibk,
 					p,
 					vector_cache,
+					format_version,
 				)?),
 				17..=24 => Self::H5_25(Hnsw::<ArraySet<25>, ArraySet<5>>::new(
 					table_id,
 					ibk,
 					p,
 					vector_cache,
+					format_version,
 				)?),
-				_ => {
-					Self::H5set(Hnsw::<AHashSet, ArraySet<5>>::new(table_id, ibk, p, vector_cache)?)
-				}
+				_ => Self::H5set(Hnsw::<AHashSet, ArraySet<5>>::new(
+					table_id,
+					ibk,
+					p,
+					vector_cache,
+					format_version,
+				)?),
 			},
 			5..=8 => match p.m0 {
 				1..=16 => Self::H9_17(Hnsw::<ArraySet<17>, ArraySet<9>>::new(
@@ -78,16 +86,22 @@ impl HnswFlavor {
 					ibk,
 					p,
 					vector_cache,
+					format_version,
 				)?),
 				17..=24 => Self::H9_25(Hnsw::<ArraySet<25>, ArraySet<9>>::new(
 					table_id,
 					ibk,
 					p,
 					vector_cache,
+					format_version,
 				)?),
-				_ => {
-					Self::H9set(Hnsw::<AHashSet, ArraySet<9>>::new(table_id, ibk, p, vector_cache)?)
-				}
+				_ => Self::H9set(Hnsw::<AHashSet, ArraySet<9>>::new(
+					table_id,
+					ibk,
+					p,
+					vector_cache,
+					format_version,
+				)?),
 			},
 			9..=12 => match p.m0 {
 				17..=24 => Self::H13_25(Hnsw::<ArraySet<25>, ArraySet<13>>::new(
@@ -95,27 +109,51 @@ impl HnswFlavor {
 					ibk,
 					p,
 					vector_cache,
+					format_version,
 				)?),
 				_ => Self::H13set(Hnsw::<AHashSet, ArraySet<13>>::new(
 					table_id,
 					ibk,
 					p,
 					vector_cache,
+					format_version,
 				)?),
 			},
-			13..=16 => {
-				Self::H17set(Hnsw::<AHashSet, ArraySet<17>>::new(table_id, ibk, p, vector_cache)?)
-			}
-			17..=20 => {
-				Self::H21set(Hnsw::<AHashSet, ArraySet<21>>::new(table_id, ibk, p, vector_cache)?)
-			}
-			21..=24 => {
-				Self::H25set(Hnsw::<AHashSet, ArraySet<25>>::new(table_id, ibk, p, vector_cache)?)
-			}
-			25..=28 => {
-				Self::H29set(Hnsw::<AHashSet, ArraySet<29>>::new(table_id, ibk, p, vector_cache)?)
-			}
-			_ => Self::Hset(Hnsw::<AHashSet, AHashSet>::new(table_id, ibk, p, vector_cache)?),
+			13..=16 => Self::H17set(Hnsw::<AHashSet, ArraySet<17>>::new(
+				table_id,
+				ibk,
+				p,
+				vector_cache,
+				format_version,
+			)?),
+			17..=20 => Self::H21set(Hnsw::<AHashSet, ArraySet<21>>::new(
+				table_id,
+				ibk,
+				p,
+				vector_cache,
+				format_version,
+			)?),
+			21..=24 => Self::H25set(Hnsw::<AHashSet, ArraySet<25>>::new(
+				table_id,
+				ibk,
+				p,
+				vector_cache,
+				format_version,
+			)?),
+			25..=28 => Self::H29set(Hnsw::<AHashSet, ArraySet<29>>::new(
+				table_id,
+				ibk,
+				p,
+				vector_cache,
+				format_version,
+			)?),
+			_ => Self::Hset(Hnsw::<AHashSet, AHashSet>::new(
+				table_id,
+				ibk,
+				p,
+				vector_cache,
+				format_version,
+			)?),
 		};
 		Ok(res)
 	}

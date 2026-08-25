@@ -19,7 +19,7 @@ pub(crate) use surrealdb_datastore::values::diskann::{
 use crate::IndexKeyBase;
 #[cfg(not(target_family = "wasm"))]
 use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableId};
-use crate::docids::{DocId, TableDocIds};
+use crate::docids::{DocId, LegacyVectorDocIds, TableDocIds};
 use crate::env::IndexEnv;
 #[cfg(not(target_family = "wasm"))]
 use crate::trees::diskann::cache::DiskAnnCache;
@@ -40,54 +40,65 @@ use crate::val::{RecordId, RecordIdKey};
 pub(crate) struct DiskAnnDocs {
 	/// Shared key builder for all DiskANN document mapping keys.
 	ikb: IndexKeyBase,
-	/// The table-level doc-ID mapping shared by every index on the table.
-	docids: TableDocIds,
+	/// Whether the index uses shared or legacy private doc-ID mappings.
+	format_version: u16,
 }
 
 impl DiskAnnDocs {
-	/// Creates a `DiskAnnDocs` facade over the table's shared doc-ID space.
-	pub(crate) fn new(ikb: IndexKeyBase) -> Self {
-		let docids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone());
+	pub(crate) fn with_format_version(ikb: IndexKeyBase, format_version: u16) -> Self {
 		Self {
 			ikb,
-			docids,
+			format_version,
 		}
 	}
 
 	/// Looks up the compact document ID for a record key without allocating a new one.
 	pub(super) async fn get_doc_id(
 		ikb: &IndexKeyBase,
+		format_version: u16,
 		tx: &Transaction,
 		id: &RecordIdKey,
 	) -> Result<Option<DocId>> {
-		TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone()).get_doc_id(tx, id).await
+		if surrealdb_catalog::uses_shared_doc_ids(format_version) {
+			TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone()).get_doc_id(tx, id).await
+		} else {
+			LegacyVectorDocIds::DiskAnn(ikb.clone()).get_doc_id(tx, id).await
+		}
 	}
 
 	/// Returns the existing document ID for a record key or allocates a new one in
 	/// the table's shared doc-ID space.
 	pub(super) async fn resolve(&self, env: &dyn IndexEnv, id: &RecordIdKey) -> Result<DocId> {
-		self.docids.resolve_or_assign(env, id).await
+		if surrealdb_catalog::uses_shared_doc_ids(self.format_version) {
+			TableDocIds::new(self.ikb.ns(), self.ikb.db(), self.ikb.table().clone())
+				.resolve_or_assign(env, id)
+				.await
+		} else {
+			LegacyVectorDocIds::DiskAnn(self.ikb.clone()).resolve_or_assign(env, id).await
+		}
 	}
 
 	#[cfg(not(target_family = "wasm"))]
 	fn cache_index(
 		ikb: &IndexKeyBase,
 		table_id: TableId,
-	) -> (NamespaceId, DatabaseId, TableId, IndexId) {
-		(ikb.ns(), ikb.db(), table_id, ikb.index())
+		format_version: u16,
+	) -> (NamespaceId, DatabaseId, TableId, IndexId, u16) {
+		(ikb.ns(), ikb.db(), table_id, ikb.index(), format_version)
 	}
 
 	/// Resolves one compact document ID through the shared batch/cache path.
 	#[cfg(not(target_family = "wasm"))]
 	pub(super) async fn get_thing_cached(
 		ikb: &IndexKeyBase,
+		format_version: u16,
 		table_id: TableId,
 		cache: &DiskAnnCache,
 		tx: &Transaction,
 		doc_id: DocId,
 		generation: Option<u64>,
 	) -> Result<Option<Arc<RecordId>>> {
-		Ok(Self::get_things_batch(ikb, table_id, cache, tx, &[doc_id], generation)
+		Ok(Self::get_things_batch(ikb, format_version, table_id, cache, tx, &[doc_id], generation)
 			.await?
 			.into_iter()
 			.next()
@@ -110,13 +121,14 @@ impl DiskAnnDocs {
 	#[cfg(not(target_family = "wasm"))]
 	pub(super) async fn get_things_batch(
 		ikb: &IndexKeyBase,
+		format_version: u16,
 		table_id: TableId,
 		cache: &DiskAnnCache,
 		tx: &Transaction,
 		doc_ids: &[DocId],
 		generation: Option<u64>,
 	) -> Result<Vec<Option<Arc<RecordId>>>> {
-		let index = Self::cache_index(ikb, table_id);
+		let index = Self::cache_index(ikb, table_id, format_version);
 		let table = ikb.table().clone();
 		let mut rids = vec![None; doc_ids.len()];
 		let mut misses = Vec::new();
@@ -134,9 +146,13 @@ impl DiskAnnDocs {
 			return Ok(rids);
 		}
 		let miss_ids: Vec<DocId> = misses.iter().map(|(_, doc_id)| *doc_id).collect();
-		let ids = TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone())
-			.get_record_ids_batch(tx, &miss_ids)
-			.await?;
+		let ids = if surrealdb_catalog::uses_shared_doc_ids(format_version) {
+			TableDocIds::new(ikb.ns(), ikb.db(), ikb.table().clone())
+				.get_record_ids_batch(tx, &miss_ids)
+				.await?
+		} else {
+			LegacyVectorDocIds::DiskAnn(ikb.clone()).get_record_ids_batch(tx, &miss_ids).await?
+		};
 		let cache_misses = !tx.writeable();
 		for ((pos, doc_id), id) in misses.into_iter().zip(ids) {
 			if let Some(id) = id {
@@ -161,7 +177,7 @@ impl DiskAnnDocs {
 	/// this only drops the process-local cache entry. Doc-IDs are never recycled.
 	#[cfg(not(target_family = "wasm"))]
 	pub(super) fn remove(&self, doc_id: DocId, table_id: TableId, cache: &DiskAnnCache) {
-		cache.remove_doc_id(Self::cache_index(&self.ikb, table_id), doc_id);
+		cache.remove_doc_id(Self::cache_index(&self.ikb, table_id, self.format_version), doc_id);
 	}
 
 	#[cfg(target_family = "wasm")]
@@ -180,6 +196,8 @@ pub(crate) struct DiskAnnVecDocs {
 	/// Whether vector mappings are stored by vector hash (`!dh`) instead of full vector key
 	/// (`!dq`).
 	use_hashed_vector: bool,
+	/// Stored index format used to scope process-local cache entries.
+	format_version: u16,
 }
 
 #[cfg(not(target_family = "wasm"))]
@@ -189,17 +207,19 @@ impl DiskAnnVecDocs {
 		table_id: TableId,
 		cache: DiskAnnCache,
 		use_hashed_vector: bool,
+		format_version: u16,
 	) -> Self {
 		Self {
 			ikb,
 			table_id,
 			cache,
 			use_hashed_vector,
+			format_version,
 		}
 	}
 
-	fn cache_index(&self) -> (NamespaceId, DatabaseId, TableId, IndexId) {
-		(self.ikb.ns(), self.ikb.db(), self.table_id, self.ikb.index())
+	fn cache_index(&self) -> (NamespaceId, DatabaseId, TableId, IndexId, u16) {
+		(self.ikb.ns(), self.ikb.db(), self.table_id, self.ikb.index(), self.format_version)
 	}
 
 	fn evict_cached_doc_set(&self, element_id: ElementId) {
@@ -482,20 +502,19 @@ impl DiskAnnVecDocs {
 
 #[cfg(test)]
 mod tests {
-	use std::borrow::Cow;
-
 	use surrealdb_kvs::TransactionType;
 
 	use super::*;
-	use crate::key::schema::DocKeyKey;
 	use crate::test_env::TestIndexStore;
 
 	fn ikb() -> IndexKeyBase {
 		IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(3))
 	}
 
-	fn cache_index() -> (NamespaceId, DatabaseId, TableId, IndexId) {
-		(NamespaceId(1), DatabaseId(2), TableId(4), IndexId(3))
+	/// Every test in this module runs on the legacy private doc-ID layout (format version 0),
+	/// so cache entries live under that format version.
+	fn cache_index() -> (NamespaceId, DatabaseId, TableId, IndexId, u16) {
+		(NamespaceId(1), DatabaseId(2), TableId(4), IndexId(3), 0)
 	}
 
 	#[tokio::test]
@@ -504,47 +523,47 @@ mod tests {
 		let ikb = ikb();
 		let cache = DiskAnnCache::new(1024 * 1024);
 		{
-			let tx = ds.transaction(TransactionType::Write).await?;
-			tx.set_key(
-				&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 1),
-				&RecordIdKey::Number(11),
-			)
-			.await?;
-			tx.set_key(
-				&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 3),
-				&RecordIdKey::Number(33),
-			)
-			.await?;
-			tx.commit().await?;
+			let ctx = ds.env(TransactionType::Write).await;
+			let docs = LegacyVectorDocIds::DiskAnn(ikb.clone());
+			// Legacy doc ids are assigned sequentially from zero.
+			docs.resolve_or_assign(&ctx, &RecordIdKey::Number(11)).await?;
+			docs.resolve_or_assign(&ctx, &RecordIdKey::Number(22)).await?;
+			docs.resolve_or_assign(&ctx, &RecordIdKey::Number(33)).await?;
+			ctx.tx().commit().await?;
 		}
 
 		let tx = ds.transaction(TransactionType::Read).await?;
-		let got = DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[1, 2, 3], Some(5))
-			.await?;
-		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(11));
-		assert!(got[1].is_none());
-		assert_eq!(&got[2].as_ref().unwrap().key, &RecordIdKey::Number(33));
+		let got =
+			DiskAnnDocs::get_things_batch(&ikb, 0, TableId(4), &cache, &tx, &[2, 0, 9], Some(5))
+				.await?;
+		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(33));
+		assert_eq!(&got[1].as_ref().unwrap().key, &RecordIdKey::Number(11));
+		assert!(got[2].is_none());
 		assert_eq!(
-			cache.get_doc_id(cache_index(), 1, Some(5)).unwrap().as_ref(),
+			cache.get_doc_id(cache_index(), 0, Some(5)).unwrap().as_ref(),
 			&RecordIdKey::Number(11)
 		);
-		assert!(cache.get_doc_id(cache_index(), 2, Some(5)).is_none());
 		assert_eq!(
-			cache.get_doc_id(cache_index(), 3, Some(5)).unwrap().as_ref(),
+			cache.get_doc_id(cache_index(), 2, Some(5)).unwrap().as_ref(),
 			&RecordIdKey::Number(33)
 		);
+		// Unresolved doc ids are not negatively cached.
+		assert!(cache.get_doc_id(cache_index(), 9, Some(5)).is_none());
 		tx.cancel().await?;
 
 		let tx = ds.transaction(TransactionType::Write).await?;
-		tx.del_key(&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 1)).await?;
+		LegacyVectorDocIds::DiskAnn(ikb.clone()).remove(&tx, &RecordIdKey::Number(11)).await?;
 		tx.commit().await?;
 		let tx = ds.transaction(TransactionType::Read).await?;
-		let missing: Option<RecordIdKey> = tx
-			.get_key(&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 1), None)
-			.await?;
-		assert!(missing.is_none());
+		assert!(
+			LegacyVectorDocIds::DiskAnn(ikb.clone())
+				.get_doc_id(&tx, &RecordIdKey::Number(11))
+				.await?
+				.is_none()
+		);
+		// The KV mapping is gone, but the warmed cache entry still serves the doc id.
 		let cached =
-			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[1], Some(5)).await?;
+			DiskAnnDocs::get_things_batch(&ikb, 0, TableId(4), &cache, &tx, &[0], Some(5)).await?;
 		assert_eq!(&cached[0].as_ref().unwrap().key, &RecordIdKey::Number(11));
 		tx.cancel().await?;
 		Ok(())
@@ -553,27 +572,37 @@ mod tests {
 	#[tokio::test]
 	async fn diskann_docs_batch_does_not_cache_write_transaction_mappings() -> Result<()> {
 		let ds = TestIndexStore::new().await;
-		let tx = ds.transaction(TransactionType::Write).await?;
 		let ikb = ikb();
 		let cache = DiskAnnCache::new(1024 * 1024);
-		tx.set_key(
-			&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 9),
-			&RecordIdKey::Number(99),
+		let ctx = ds.env(TransactionType::Write).await;
+		let doc_id = LegacyVectorDocIds::DiskAnn(ikb.clone())
+			.resolve_or_assign(&ctx, &RecordIdKey::Number(99))
+			.await?;
+
+		// The write transaction sees its own uncommitted mapping…
+		let got = DiskAnnDocs::get_things_batch(
+			&ikb,
+			0,
+			TableId(4),
+			&cache,
+			ctx.tx().as_ref(),
+			&[doc_id],
+			Some(5),
 		)
 		.await?;
-
-		let got =
-			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[9], Some(5)).await?;
 		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(99));
-		assert!(cache.get_doc_id(cache_index(), 9, Some(5)).is_none());
-		tx.cancel().await?;
+		// …but the hit stays local: writable transactions never publish into the shared cache.
+		assert!(cache.get_doc_id(cache_index(), doc_id, Some(5)).is_none());
+		ctx.tx().cancel().await?;
 
+		// Nothing was committed, so a fresh read resolves nothing and still caches nothing.
 		let tx = ds.transaction(TransactionType::Read).await?;
 		assert_eq!(
-			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[9], Some(5)).await?,
+			DiskAnnDocs::get_things_batch(&ikb, 0, TableId(4), &cache, &tx, &[doc_id], Some(5))
+				.await?,
 			vec![None]
 		);
-		assert!(cache.get_doc_id(cache_index(), 9, Some(5)).is_none());
+		assert!(cache.get_doc_id(cache_index(), doc_id, Some(5)).is_none());
 		tx.cancel().await?;
 		Ok(())
 	}
@@ -584,33 +613,36 @@ mod tests {
 		let ikb = ikb();
 		let cache = DiskAnnCache::new(1024 * 1024);
 		{
-			let tx = ds.transaction(TransactionType::Write).await?;
-			tx.set_key(
-				&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 1),
-				&RecordIdKey::Number(11),
-			)
-			.await?;
-			tx.commit().await?;
+			let ctx = ds.env(TransactionType::Write).await;
+			LegacyVectorDocIds::DiskAnn(ikb.clone())
+				.resolve_or_assign(&ctx, &RecordIdKey::Number(11))
+				.await?;
+			ctx.tx().commit().await?;
 		}
 
+		// Warm the cache at generation 5.
 		let tx = ds.transaction(TransactionType::Read).await?;
 		let got =
-			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[1], Some(5)).await?;
+			DiskAnnDocs::get_things_batch(&ikb, 0, TableId(4), &cache, &tx, &[0], Some(5)).await?;
 		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(11));
 		tx.cancel().await?;
-		assert!(cache.get_doc_id(cache_index(), 1, Some(6)).is_none());
+		assert!(cache.get_doc_id(cache_index(), 0, Some(6)).is_none());
 
-		let tx = ds.transaction(TransactionType::Write).await?;
-		tx.set_key(
-			&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 1),
-			&RecordIdKey::Number(22),
-		)
-		.await?;
-		tx.commit().await?;
+		// Re-point doc id 0 at another record: `remove` frees the id and the next assignment
+		// reuses it.
+		{
+			let ctx = ds.env(TransactionType::Write).await;
+			let docs = LegacyVectorDocIds::DiskAnn(ikb.clone());
+			docs.remove(&ctx.tx(), &RecordIdKey::Number(11)).await?;
+			let doc_id = docs.resolve_or_assign(&ctx, &RecordIdKey::Number(22)).await?;
+			assert_eq!(doc_id, 0);
+			ctx.tx().commit().await?;
+		}
 
+		// A generation-6 read ignores the stale generation-5 entry and refetches from KV.
 		let tx = ds.transaction(TransactionType::Read).await?;
 		let got =
-			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[1], Some(6)).await?;
+			DiskAnnDocs::get_things_batch(&ikb, 0, TableId(4), &cache, &tx, &[0], Some(6)).await?;
 		assert_eq!(&got[0].as_ref().unwrap().key, &RecordIdKey::Number(22));
 		tx.cancel().await?;
 		Ok(())
@@ -623,30 +655,31 @@ mod tests {
 		let cache = DiskAnnCache::new(1024 * 1024);
 		let id = RecordIdKey::Number(77);
 		{
-			let tx = ds.transaction(TransactionType::Write).await?;
-			tx.set_key(&DocKeyKey::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table()), 7), &id)
-				.await?;
-			tx.commit().await?;
+			let ctx = ds.env(TransactionType::Write).await;
+			LegacyVectorDocIds::DiskAnn(ikb.clone()).resolve_or_assign(&ctx, &id).await?;
+			ctx.tx().commit().await?;
 		}
 
 		let tx = ds.transaction(TransactionType::Read).await?;
 		let got =
-			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[7], Some(5)).await?;
+			DiskAnnDocs::get_things_batch(&ikb, 0, TableId(4), &cache, &tx, &[0], Some(5)).await?;
 		assert_eq!(&got[0].as_ref().unwrap().key, &id);
-		assert!(cache.get_doc_id(cache_index(), 7, Some(5)).is_some());
+		assert!(cache.get_doc_id(cache_index(), 0, Some(5)).is_some());
 		tx.cancel().await?;
 
-		let tx = ds.transaction(TransactionType::Write).await?;
-		let docs = DiskAnnDocs::new(ikb.clone());
-		// `remove` is cache-only now: it evicts the process-local doc-id cache and never
-		// recycles ids (the shared record↔doc-id mapping is deleted centrally at record
-		// purge), so the KV mapping survives.
-		docs.remove(7, TableId(4), &cache);
-		assert!(cache.get_doc_id(cache_index(), 7, Some(5)).is_none());
+		// `remove` is cache-only: it evicts the process-local doc-id entry and never recycles
+		// ids (the record ↔ doc-id mapping is deleted centrally at record purge), so the KV
+		// mapping survives.
+		let docs = DiskAnnDocs::with_format_version(ikb.clone(), 0);
+		docs.remove(0, TableId(4), &cache);
+		assert!(cache.get_doc_id(cache_index(), 0, Some(5)).is_none());
+
 		// The mapping is still in KV, so a fresh lookup re-resolves it and re-warms the cache.
+		let tx = ds.transaction(TransactionType::Read).await?;
 		let reloaded =
-			DiskAnnDocs::get_things_batch(&ikb, TableId(4), &cache, &tx, &[7], Some(5)).await?;
+			DiskAnnDocs::get_things_batch(&ikb, 0, TableId(4), &cache, &tx, &[0], Some(5)).await?;
 		assert_eq!(&reloaded[0].as_ref().unwrap().key, &id);
+		assert!(cache.get_doc_id(cache_index(), 0, Some(5)).is_some());
 		tx.cancel().await?;
 		Ok(())
 	}
@@ -657,7 +690,7 @@ mod tests {
 		let tx = ds.transaction(TransactionType::Write).await?;
 		let ikb = ikb();
 		let cache = DiskAnnCache::new(1024 * 1024);
-		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), false);
+		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), false, 0);
 		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
 		let vector = Vector::from(ser_vec.clone());
 		tx.set_key(
@@ -691,7 +724,7 @@ mod tests {
 		let tx = ds.transaction(TransactionType::Write).await?;
 		let ikb = ikb();
 		let cache = DiskAnnCache::new(1024 * 1024);
-		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), false);
+		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), false, 0);
 		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
 		tx.set_key(
 			&ikb.new_de_key(7),
@@ -732,7 +765,7 @@ mod tests {
 		let tx = ds.transaction(TransactionType::Write).await?;
 		let ikb = ikb();
 		let cache = DiskAnnCache::new(1024 * 1024);
-		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), false);
+		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), false, 0);
 		let first_vec = SerializedVector::F32(vec![1.0, 2.0]);
 		let second_vec = SerializedVector::F32(vec![3.0, 4.0]);
 		for (element_id, ser_vec, docs) in
@@ -773,7 +806,7 @@ mod tests {
 		let tx = ds.transaction(TransactionType::Write).await?;
 		let ikb = ikb();
 		let cache = DiskAnnCache::new(1024 * 1024);
-		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), true);
+		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), true, 0);
 		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
 		let other_vec = SerializedVector::F32(vec![9.0, 9.0]);
 		let vector = Vector::from(ser_vec.clone());
@@ -806,7 +839,7 @@ mod tests {
 		let tx = ds.transaction(TransactionType::Write).await?;
 		let ikb = ikb();
 		let cache = DiskAnnCache::new(1024 * 1024);
-		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), true);
+		let vec_docs = DiskAnnVecDocs::new(ikb.clone(), TableId(4), cache.clone(), true, 0);
 		let ser_vec = SerializedVector::F32(vec![1.0, 2.0]);
 		let other_vec = SerializedVector::F32(vec![9.0, 9.0]);
 		tx.set_key(
@@ -840,7 +873,7 @@ mod tests {
 		let tx = ds.transaction(TransactionType::Write).await?;
 		let ikb = ikb();
 		let cache = DiskAnnCache::new(1024 * 1024);
-		let vec_docs = DiskAnnVecDocs::new(ikb, TableId(4), cache.clone(), false);
+		let vec_docs = DiskAnnVecDocs::new(ikb, TableId(4), cache.clone(), false, 0);
 
 		assert_eq!(
 			vec_docs.get_docs_by_element_batch(&tx, &[(99, 0.99)]).await?,

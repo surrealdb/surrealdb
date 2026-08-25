@@ -367,6 +367,23 @@ keyspace! {
 						/// term, compacted into one bitmap.
 						term_docs = ["!td", @, term: Str] => roaring::RoaringTreemap;
 
+						/// Legacy forward mapping from a record key to the private
+						/// full-text doc-ID allocated before format version 1.
+						#[format(IndexFormat)]
+						ft_doc_lookup = ["!id", @, id: Id] => DocId;
+
+						/// Legacy reverse mapping from a full-text doc-ID back to its
+						/// record key.
+						ft_doc_key = ["!ii", @, doc_id: DocId] => RecordIdKey;
+
+						/// Legacy allocator batch reserved by a pre-format-1 full-text
+						/// index.
+						ft_doc_batch = ["!ib", @, start: i64] => crate::sequences::BatchValue;
+
+						/// Legacy per-node allocator state reserved by a pre-format-1
+						/// full-text index.
+						ft_doc_state = ["!is", @, nid: Uuid] => crate::sequences::SequenceState;
+
 						/// Per-(term, document) posting, read but never written.
 						/// Extends the term's root key with one document id, so a
 						/// scan of the root's range returns both and the decoder
@@ -485,6 +502,10 @@ keyspace! {
 							=> crate::values::index_build::PrimaryAppending;
 
 						/// HNSW graph storage.
+						hnsw_docs_state = ["!hd"] => crate::values::hnsw::HnswDocsState;
+						#[format(IndexFormat)]
+						hnsw_doc_lookup = ["!hi", @, id: Id] => DocId;
+						hnsw_doc_key = hnsw_docs_state + [doc_id: DocId] => RecordIdKey;
 						hnsw_state = ["!hs"] => crate::values::hnsw::HnswState;
 						hnsw_generation = ["!hg"] => u64;
 						hnsw_vector = ["!he", @, element_id: ElementId]
@@ -511,6 +532,11 @@ keyspace! {
 						/// available. Conflicts are reported against every key
 						/// regardless of configuration, so these cannot collide with
 						/// the keys they coexist with when enabled.
+						diskann_docs_state = ["!dd"] => crate::values::diskann::DiskAnnDocsState;
+						#[format(IndexFormat)]
+						diskann_doc_lookup = ["!di", @, id: Id] => DocId;
+						diskann_doc_key = diskann_docs_state + [doc_id: DocId]
+							=> RecordIdKey;
 						#[cfg(diskann)]
 						diskann_state = ["!ds"] => crate::values::diskann::DiskAnnState;
 						#[cfg(diskann)]

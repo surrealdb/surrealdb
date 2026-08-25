@@ -57,19 +57,21 @@ impl IndexStores {
 		tb: TableId,
 		ikb: &IndexKeyBase,
 		p: &HnswParams,
+		format_version: u16,
 	) -> Result<SharedHnswIndex> {
-		self.0.hnsw_indexes.get(env, tb, ikb, p).await
+		self.0.hnsw_indexes.get(env, tb, ikb, p, format_version).await
 	}
 
 	/// Returns the process-local DiskANN wrapper for an index, creating it and sharing the cache.
 	#[cfg(diskann)]
 	pub async fn get_index_diskann(
 		&self,
+		format_version: u16,
 		tb: TableId,
 		ikb: &IndexKeyBase,
 		p: &DiskAnnParams,
 	) -> Result<SharedDiskAnnIndex> {
-		self.0.diskann_indexes.get(tb, ikb, p, self.0.diskann_cache.clone()).await
+		self.0.diskann_indexes.get(tb, ikb, p, format_version, self.0.diskann_cache.clone()).await
 	}
 
 	/// Evict process-local index wrappers and caches for a retired index.
@@ -96,28 +98,42 @@ impl IndexStores {
 	) -> Result<()> {
 		if matches!(ix.index, Index::Hnsw(_)) {
 			let ikb = IndexKeyBase::new(ns, db, ix.table_name.clone(), ix.index_id);
-			self.remove_hnsw_index(tb, ikb).await?;
+			let format_version = ix.format_version;
+			self.remove_hnsw_index(tb, ikb, format_version).await?;
 		}
 		#[cfg(diskann)]
 		if matches!(ix.index, Index::DiskAnn(_)) {
 			let ikb = IndexKeyBase::new(ns, db, ix.table_name.clone(), ix.index_id);
-			self.remove_diskann_index(tb, ikb).await?;
+			self.remove_diskann_index(tb, ikb, ix.format_version).await?;
 		}
 		Ok(())
 	}
 
 	/// Evicts cached HNSW graph and vector entries for one table index.
-	pub async fn remove_hnsw_index(&self, tb: TableId, ikb: IndexKeyBase) -> Result<()> {
+	pub async fn remove_hnsw_index(
+		&self,
+		tb: TableId,
+		ikb: IndexKeyBase,
+		format_version: u16,
+	) -> Result<()> {
 		self.0.hnsw_indexes.remove(tb, &ikb).await?;
-		self.0.vector_cache.remove_index(ikb.ns(), ikb.db(), tb, ikb.index()).await;
+		self.0.vector_cache.remove_index(ikb.ns(), ikb.db(), tb, ikb.index(), format_version).await;
 		Ok(())
 	}
 
 	/// Evicts the loaded DiskANN graph and its cached KV-backed graph data for one table index.
 	#[cfg(diskann)]
-	pub(crate) async fn remove_diskann_index(&self, tb: TableId, ikb: IndexKeyBase) -> Result<()> {
+	pub(crate) async fn remove_diskann_index(
+		&self,
+		tb: TableId,
+		ikb: IndexKeyBase,
+		format_version: u16,
+	) -> Result<()> {
 		self.0.diskann_indexes.remove(tb, &ikb).await?;
-		self.0.diskann_cache.remove_index(ikb.ns(), ikb.db(), tb, ikb.index()).await;
+		self.0
+			.diskann_cache
+			.remove_index(ikb.ns(), ikb.db(), tb, ikb.index(), format_version)
+			.await;
 		Ok(())
 	}
 

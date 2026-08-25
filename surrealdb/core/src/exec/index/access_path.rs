@@ -190,9 +190,16 @@ pub struct KnnPrefilterPlan {
 	pub root: BitmapPlan,
 	/// KNN-stripped conjuncts NOT covered by `root`, re-ANDed. `None` when
 	/// the whole stripped WHERE is covered. MATCHES conjuncts never appear
-	/// here: they are not evaluable in-traversal (no query executor), so an
-	/// uncovered MATCHES is enforced only by the outer `Filter`.
+	/// here: they are not evaluable through the plain in-traversal residual
+	/// (no query executor).
 	pub residual: Option<Cond>,
+	/// `true` when a MATCHES conjunct could not be covered by `root` (its
+	/// full-text index does not carry shared doc-IDs). Such a conjunct is
+	/// absent from `residual` too, so the scan must keep its MATCHES-aware
+	/// compiled condition active alongside the allow-list — otherwise the
+	/// top-k is chosen without the text predicate and matching neighbours
+	/// outside it are unrecoverable.
+	pub uncovered_matches: bool,
 }
 
 /// Plan-level bitmap candidate expression tree (issue #547).

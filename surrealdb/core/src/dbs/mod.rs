@@ -54,6 +54,8 @@ mod file;
 
 #[cfg(all(test, feature = "kv-mem"))]
 mod definer_rights_test;
+#[cfg(all(test, feature = "kv-mem"))]
+mod nested_matches_parity_test;
 #[cfg(test)]
 mod read_only_test;
 #[cfg(all(test, feature = "kv-mem"))]

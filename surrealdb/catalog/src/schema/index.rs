@@ -72,15 +72,13 @@ impl From<u32> for IndexId {
 }
 
 /// Current on-disk format version stamped on newly defined or rebuilt indexes.
-/// Bump when any index kind's persisted layout changes. Each kind's *required*
-/// version (see [`StoredIndexDefinition::required_format_version`]) stays at the
-/// version that introduced its current mandatory layout, so bumping this
-/// constant does not invalidate existing indexes of other kinds.
+/// Bump when any index kind's persisted layout changes. Existing indexes keep
+/// their original version and are read through their legacy doc-ID layout until
+/// explicitly rebuilt.
 pub const INDEX_FORMAT_VERSION: u16 = 2;
 
 /// Format version at which full-text, HNSW and DiskAnn indexes migrated onto
-/// the shared table-level doc-ID space. These kinds cannot be read below this
-/// version and require `REBUILD INDEX` after an upgrade.
+/// the shared table-level doc-ID space.
 pub const DOC_IDS_FORMAT_VERSION: u16 = 1;
 
 /// Format version at which b-tree (`Idx`/`Uniq`) index entry values carry the
@@ -107,10 +105,7 @@ pub struct StoredIndexDefinition {
 	/// indexing, and any in-progress index builds are cancelled.
 	pub prepare_remove: bool,
 	/// On-disk format version of this index's persisted data. Definitions written
-	/// by a binary predating the table-level doc-ID space decode this as `0`; the
-	/// doc-ID-backed kinds require [`INDEX_FORMAT_VERSION`] and are rejected with
-	/// [`Error::IndexRebuildRequired`](crate::catalog::Error::IndexRebuildRequired)
-	/// until rebuilt.
+	/// by a binary predating the table-level doc-ID space decode this as `0`.
 	#[revision(start = 2)]
 	pub format_version: u16,
 }
@@ -711,37 +706,31 @@ pub struct IndexDefinition {
 }
 
 impl IndexDefinition {
-	/// See [`StoredIndexDefinition::has_entry_doc_ids`]; same predicate on the
-	/// compiled form.
 	pub fn has_entry_doc_ids(&self) -> bool {
 		matches!(self.index, Index::Idx | Index::Uniq)
 			&& self.format_version >= BTREE_ENTRY_DOC_IDS_FORMAT_VERSION
 	}
 
-	/// See [`StoredIndexDefinition::uses_doc_ids`]; same predicate on the
-	/// compiled form.
 	pub fn uses_doc_ids(&self) -> bool {
 		matches!(self.index, Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_))
 			|| self.has_entry_doc_ids()
 	}
 
-	/// See [`StoredIndexDefinition::ensure_current_format`]; same check on the
-	/// compiled form.
-	pub fn ensure_current_format(&self) -> anyhow::Result<()> {
-		let required = match self.index {
-			Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_) => DOC_IDS_FORMAT_VERSION,
-			Index::Idx | Index::Uniq | Index::Count(_) => 0,
-		};
-		if self.format_version < required {
-			return Err(anyhow::Error::new(crate::catalog::Error::IndexRebuildRequired {
-				index: self.name.to_string(),
-				table: self.table_name.to_string(),
-				expected: required,
-				actual: self.format_version,
-			}));
-		}
-		Ok(())
+	/// Whether this index reads and writes the table-level shared doc-ID space.
+	///
+	/// Legacy indexes keep their private doc-ID spaces until explicitly rebuilt,
+	/// and COUNT indexes never consume doc-IDs even though new indexes are stamped
+	/// with the current format version.
+	pub fn uses_shared_doc_ids(&self) -> bool {
+		self.uses_doc_ids() && self.format_version >= DOC_IDS_FORMAT_VERSION
 	}
+}
+
+/// Whether an index with the given stored format version reads and writes the
+/// table-level shared doc-ID space. Indexes created before the shared space
+/// keep their private per-index layouts until explicitly rebuilt.
+pub fn uses_shared_doc_ids(format_version: u16) -> bool {
+	format_version >= DOC_IDS_FORMAT_VERSION
 }
 
 impl FromStored for IndexDefinition {

@@ -162,6 +162,14 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}*{db}*{tb}+{ix}*{fd..}\x02                                                                            UniqueKey ->  crate::values::entry::IndexEntryValue
 /*{ns}*{db}*{tb}+{ix}!td{term}                                                                            TermDocsKey ->  roaring::RoaringTreemap
 /*{ns}*{db}*{tb}+{ix}!td                                                                               TermDocsPrefix ->  (range)
+/*{ns}*{db}*{tb}+{ix}!id{id}                                                                           FtDocLookupKey ->  DocId
+/*{ns}*{db}*{tb}+{ix}!id                                                                            FtDocLookupPrefix ->  (range)
+/*{ns}*{db}*{tb}+{ix}!ii{doc_id}                                                                          FtDocKeyKey ->  RecordIdKey
+/*{ns}*{db}*{tb}+{ix}!ii                                                                               FtDocKeyPrefix ->  (range)
+/*{ns}*{db}*{tb}+{ix}!ib{start}                                                                         FtDocBatchKey ->  crate::sequences::BatchValue
+/*{ns}*{db}*{tb}+{ix}!ib                                                                             FtDocBatchPrefix ->  (range)
+/*{ns}*{db}*{tb}+{ix}!is{nid}                                                                           FtDocStateKey ->  crate::sequences::SequenceState
+/*{ns}*{db}*{tb}+{ix}!is                                                                             FtDocStatePrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!td{term}{id}                                                                     TermPostingKey ->  crate::values::fulltext::TermDocument
 /*{ns}*{db}*{tb}+{ix}!tr{term}                                                                    TermDocsResidualKey ->  crate::values::fulltext::TermDocsResidual
 /*{ns}*{db}*{tb}+{ix}!tr                                                                       TermDocsResidualPrefix ->  (range)
@@ -187,6 +195,10 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}*{db}*{tb}+{ix}!ig{appending_id}{batch_id}                                                       IndexAppendKey ->  Appending
 /*{ns}*{db}*{tb}+{ix}!ig                                                                            IndexAppendPrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!ip{id}                                                                          IndexPrimaryKey ->  crate::values::index_build::PrimaryAppending
+/*{ns}*{db}*{tb}+{ix}!hd                                                                             HnswDocsStateKey ->  crate::values::hnsw::HnswDocsState
+/*{ns}*{db}*{tb}+{ix}!hi{id}                                                                         HnswDocLookupKey ->  DocId
+/*{ns}*{db}*{tb}+{ix}!hi                                                                          HnswDocLookupPrefix ->  (range)
+/*{ns}*{db}*{tb}+{ix}!hd{doc_id}                                                                        HnswDocKeyKey ->  RecordIdKey
 /*{ns}*{db}*{tb}+{ix}!hs                                                                                 HnswStateKey ->  crate::values::hnsw::HnswState
 /*{ns}*{db}*{tb}+{ix}!hg                                                                            HnswGenerationKey ->  u64
 /*{ns}*{db}*{tb}+{ix}!he{element_id}                                                                    HnswVectorKey ->  crate::values::vector::SerializedVector
@@ -203,6 +215,10 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}*{db}*{tb}+{ix}!hr                                                                      HnswRecordPendingPrefix ->  (range)
 /*{ns}*{db}*{tb}+{ix}!hp{appending_id}                                                           HnswPendingLegacyKey ->  crate::values::hnsw::VectorPendingUpdate
 /*{ns}*{db}*{tb}+{ix}!hp                                                                      HnswPendingLegacyPrefix ->  (range)
+/*{ns}*{db}*{tb}+{ix}!dd                                                                          DiskannDocsStateKey ->  crate::values::diskann::DiskAnnDocsState
+/*{ns}*{db}*{tb}+{ix}!di{id}                                                                      DiskannDocLookupKey ->  DocId
+/*{ns}*{db}*{tb}+{ix}!di                                                                       DiskannDocLookupPrefix ->  (range)
+/*{ns}*{db}*{tb}+{ix}!dd{doc_id}                                                                     DiskannDocKeyKey ->  RecordIdKey
 /*{ns}*{db}*{tb}+{ix}!ds                                                                              DiskannStateKey ->  crate::values::diskann::DiskAnnState
 /*{ns}*{db}*{tb}+{ix}!dg                                                                         DiskannGenerationKey ->  u64
 /*{ns}*{db}*{tb}+{ix}!de{element_id}                                                                DiskannElementKey ->  crate::values::diskann::DiskAnnElement

@@ -280,8 +280,7 @@ impl<'a> IndexAnalyzer<'a> {
 	///   inexact subtraction would drop rows the residual filter can never restore.
 	///
 	/// Every b-tree branch requires an index whose entries carry doc-IDs
-	/// ([`StoredIndexDefinition::has_entry_doc_ids`]); full-text branches require
-	/// the current index format. Conjuncts that don't qualify simply stay
+	/// ([`StoredIndexDefinition::has_entry_doc_ids`]). Conjuncts that don't qualify simply stay
 	/// out of the plan — the caller keeps the whole WHERE clause as the
 	/// residual filter, so the bitmap only needs to over-approximate the
 	/// result per omitted conjunct.
@@ -460,7 +459,7 @@ impl<'a> IndexAnalyzer<'a> {
 			}
 			BTreeAccess::FullText {
 				..
-			} => c.index_ref.definition().ensure_current_format().is_ok(),
+			} => c.index_ref.definition().uses_shared_doc_ids(),
 			BTreeAccess::Knn {
 				..
 			} => false,
@@ -544,16 +543,14 @@ impl<'a> IndexAnalyzer<'a> {
 				index_ref,
 				query,
 				operator,
-			} => {
-				if index_ref.definition().ensure_current_format().is_err() {
-					return None;
-				}
-				Some(BitmapPlan::FullText {
-					index_ref: index_ref.clone(),
-					query: query.clone(),
-					operator: operator.clone(),
-				})
-			}
+			} if index_ref.definition().uses_shared_doc_ids() => Some(BitmapPlan::FullText {
+				index_ref: index_ref.clone(),
+				query: query.clone(),
+				operator: operator.clone(),
+			}),
+			AccessPath::FullTextSearch {
+				..
+			} => None,
 			AccessPath::Union {
 				paths,
 				..
@@ -737,13 +734,17 @@ impl<'a> IndexAnalyzer<'a> {
 		Self::flatten_and(&stripped.0, &mut conjuncts);
 		let mut covered: Vec<BitmapPlan> = Vec::new();
 		let mut residual: Vec<&Expr> = Vec::new();
+		let mut uncovered_matches = false;
 		for conjunct in conjuncts {
 			if Self::expr_contains_matches(conjunct) {
 				if let Some(leaf) = self.bitmap_exact_plan(conjunct, exact_col) {
 					covered.push(leaf);
+				} else {
+					// Not exactly coverable and excluded from the residual
+					// (see the method doc): flag it so the scan keeps its
+					// MATCHES-aware condition active alongside the allow-list.
+					uncovered_matches = true;
 				}
-				// Not exactly coverable: excluded from the residual too (see
-				// the method doc) — the outer Filter enforces it.
 			} else if Self::as_negated_expr(conjunct).is_some() {
 				residual.push(conjunct);
 			} else if let Some(leaf) = self.bitmap_exact_plan(conjunct, exact_col) {
@@ -772,6 +773,7 @@ impl<'a> IndexAnalyzer<'a> {
 		Some(KnnPrefilterPlan {
 			root,
 			residual,
+			uncovered_matches,
 		})
 	}
 

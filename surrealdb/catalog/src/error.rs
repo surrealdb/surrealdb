@@ -332,18 +332,6 @@ pub enum Error {
 		method: String,
 	},
 
-	/// An index was built by an older version whose on-disk format is no longer
-	/// readable, and it must be rebuilt before it can be queried.
-	#[error(
-		"The index `{index}` on table `{table}` was built with an out-of-date on-disk format \
-		 (Expected: {expected}, Actual: {actual}). Run `REBUILD INDEX {index} ON {table}` before querying it."
-	)]
-	IndexRebuildRequired {
-		index: String,
-		table: String,
-		expected: u16,
-		actual: u16,
-	},
 	/// The route path of an API definition failed to parse.
 	#[error("The string could not be parsed into a path: {0}")]
 	InvalidPath(String),
@@ -439,7 +427,7 @@ impl LeafError for Error {
 			// this mapper assumes. A kind chosen from the variant's name would
 			// be actively wrong here: it would re-type every `AlreadyExists`
 			// below as not-found, along with `AzInUse`, `ApMethodDuplicate` and
-			// `IndexRebuildRequired`, which are neither.
+			// `AzInUse`, which is neither.
 			Error::EvNotFound {
 				..
 			}
@@ -564,9 +552,6 @@ impl LeafError for Error {
 				..
 			}
 			| Error::ApMethodDuplicate {
-				..
-			}
-			| Error::IndexRebuildRequired {
 				..
 			} => internal_todo(message),
 		}
