@@ -30,7 +30,7 @@ use super::api::{
 	KeyVisitor, KeysBatch, ScanChunkStats, ScanCursorKeys, ScanCursorVals, ValVisitor, ValsBatch,
 };
 use super::batch::Batch;
-use super::{Key, LockType, TransactionFactory, TransactionType, Val, util};
+use super::{Key, LockType, NORMAL_BATCH_SIZE, TransactionFactory, TransactionType, Val, util};
 use crate::catalog::providers::{
 	ApiProvider, AuthorisationProvider, BoxProviderFut, BucketProvider, CatalogProvider,
 	DatabaseProvider, NamespaceProvider, NodeProvider, RootProvider, TableProvider, UserProvider,
@@ -1956,6 +1956,83 @@ impl Transaction {
 		Ok(self.tr.batch_keys_vals(beg..end, batch, version).await.map_err(Error::from)?)
 	}
 
+	/// The sequence definitions for a database, skipping whole any table whose
+	/// name begins with `sq`.
+	///
+	/// A definition is stored where a table name begins, so the range holding
+	/// them also spans every key of every table named `sq…`. Those keys are not
+	/// definitions and would fail to decode as one.
+	///
+	/// A colliding table is skipped entire rather than filtered key by key. Its
+	/// content root is byte-identical to the definition key of the sequence
+	/// named after the rest of its name, so the definition — if there is one —
+	/// sorts first and has already been read by the time any of the table's own
+	/// keys appears, and nothing deeper in the subtree can be a definition
+	/// either. A colliding table therefore costs one round trip rather than one
+	/// per key it holds.
+	async fn scan_db_sequences(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		version: Option<u64>,
+	) -> Result<Arc<[catalog::SequenceDefinition]>> {
+		let pre = crate::key::database::sq::name_prefix(ns, db)?;
+		let end = crate::key::database::sq::suffix(ns, db)?;
+		let mut start = crate::key::database::sq::prefix(ns, db)?;
+		let mut vals: Vec<Val> = Vec::new();
+
+		while start < end {
+			// Keys alone decide what is a definition, so a colliding table's
+			// values are never carried back over the wire; only the definitions'
+			// are read, in one further round trip per batch.
+			let batch =
+				self.batch_keys(start.clone()..end.clone(), NORMAL_BATCH_SIZE, version).await?;
+			self.metrics.record_scan(
+				batch.result.len() as u64,
+				batch.result.iter().map(|k| k.len() as u64).sum(),
+				0,
+			);
+
+			let mut skip_to = None;
+			let mut defs: Vec<Key> = Vec::new();
+			for key in batch.result {
+				if crate::key::database::sq::is_definition(&key, &pre) {
+					defs.push(key);
+				} else if let Some(bound) = crate::key::database::sq::skip_table_subtree(&key, &pre)
+				{
+					skip_to = Some(bound);
+					break;
+				}
+			}
+			if !defs.is_empty() {
+				vals.extend(self.getm(defs, version).await?.into_iter().flatten());
+			}
+
+			let next = match skip_to {
+				// Resume past the skipped table, not from where the batch
+				// stopped: what it left unread is the subtree being skipped.
+				Some(bound) => bound,
+				None => match batch.next {
+					Some(rng) => rng.start,
+					None => break,
+				},
+			};
+			// Both continuations advance strictly: a skip bound sorts above the
+			// key that produced it, and a batch resumes past what it returned.
+			// One that did not advance would spin, so it is reported rather than
+			// quietly yielding a partial set of definitions that the caller
+			// would then cache.
+			if next <= start {
+				anyhow::bail!(Error::Unreachable(
+					"a sequence definition scan continuation did not advance".to_string()
+				));
+			}
+			start = next;
+		}
+
+		util::deserialize_cache(vals.iter().map(|v| v.as_slice()))
+	}
+
 	// --------------------------------------------------
 	// Savepoint functions
 	// --------------------------------------------------
@@ -2772,19 +2849,13 @@ impl DatabaseProvider for Transaction {
 		Box::pin(
 			async move {
 				if version.is_some() {
-					let beg = crate::key::database::sq::prefix(ns, db)?;
-					let end = crate::key::database::sq::suffix(ns, db)?;
-					let val = self.getr(beg..end, version).await?;
-					return util::deserialize_cache(val.iter().map(|x| x.1.as_slice()));
+					return self.scan_db_sequences(ns, db, version).await;
 				}
 				let qey = cache::tx::Lookup::Sqs(ns, db);
 				match self.cache.get(&qey) {
 					Some(val) => val.try_into_sqs(),
 					None => {
-						let beg = crate::key::database::sq::prefix(ns, db)?;
-						let end = crate::key::database::sq::suffix(ns, db)?;
-						let val = self.getr(beg..end, None).await?;
-						let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+						let val = self.scan_db_sequences(ns, db, None).await?;
 						let entry = cache::tx::Entry::Sqs(Arc::clone(&val));
 						self.cache.insert(qey, entry);
 						Ok(val)

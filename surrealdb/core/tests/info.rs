@@ -759,3 +759,82 @@ async fn function_info_structure() {
 		"Output '{out_str}' doesn't match expected output '{out_expected}'",
 	);
 }
+
+/// A table whose name begins with `sq` shares the keyspace band that holds
+/// sequence definitions, so listing sequences scans that table's own rows. The
+/// rows are not definitions and must be skipped rather than decoded — otherwise
+/// every statement that lists sequences fails on such a database.
+#[tokio::test]
+async fn sequences_are_listed_beside_a_table_sharing_their_prefix() {
+	let sql = r#"
+        DEFINE SEQUENCE myseq START 100;
+        DEFINE TABLE sqfoo SCHEMALESS;
+        CREATE sqfoo:1 SET v = 1;
+        CREATE sqfoo:2 SET v = 2;
+        INFO FOR DB;
+        INFO FOR DB STRUCTURE;
+        RETURN sequence::nextval('myseq');
+        SELECT VALUE v FROM sqfoo ORDER BY v;
+    "#;
+	let mut t = Test::new(sql).await.unwrap();
+	t.skip_ok(4).unwrap();
+	t.expect_regex(r"sequences: \{ myseq: ").unwrap();
+	// The structured form reads the same definitions through a second path.
+	t.skip_ok(1).unwrap();
+	// The sequence allocates from its declared START, so the definition's
+	// parameters were decoded rather than merely counted.
+	t.expect_val("100").unwrap();
+	// The table's own rows are untouched by any of the above.
+	t.expect_val("[1, 2]").unwrap();
+}
+
+/// The converse: a table sharing the prefix must not be *reported* as a
+/// sequence. This is what fails if the keys are filtered too loosely — a
+/// table's content root is byte-for-byte the definition key of a sequence
+/// named after the rest of the table name.
+#[tokio::test]
+async fn a_table_sharing_the_sequence_prefix_is_not_read_as_a_sequence() {
+	let sql = r#"
+        DEFINE TABLE sqfoo SCHEMALESS;
+        CREATE sqfoo:1 SET v = 1;
+        INFO FOR DB;
+    "#;
+	let mut t = Test::new(sql).await.unwrap();
+	t.skip_ok(2).unwrap();
+	t.expect_regex(r"sequences: \{\s*\}").unwrap();
+}
+
+/// The adversarial arrangement: a sequence and a table whose keys coincide.
+/// Sequence `foo`'s definition key is byte-for-byte the content root of table
+/// `sqfoo`, so the two interleave in the scanned range — twice here, with a
+/// third sequence beyond both to catch a skip that overshoots.
+#[tokio::test]
+async fn sequences_and_colliding_tables_interleaved_are_all_found() {
+	let sql = r#"
+        DEFINE SEQUENCE bar;
+        DEFINE SEQUENCE foo;
+        DEFINE SEQUENCE zzz;
+        DEFINE TABLE sqbar SCHEMALESS;
+        DEFINE TABLE sqfoo SCHEMALESS;
+        CREATE sqbar:1 SET v = 'b1';
+        CREATE sqbar:2 SET v = 'b2';
+        CREATE sqfoo:1 SET v = 'f1';
+        CREATE sqfoo:2 SET v = 'f2';
+        INFO FOR DB;
+        RETURN sequence::nextval('bar');
+        RETURN sequence::nextval('foo');
+        RETURN sequence::nextval('zzz');
+        SELECT VALUE v FROM sqbar ORDER BY v;
+        SELECT VALUE v FROM sqfoo ORDER BY v;
+    "#;
+	let mut t = Test::new(sql).await.unwrap();
+	t.skip_ok(9).unwrap();
+	// Every sequence is listed: the one before the first colliding table, the
+	// one whose key is the second table's root, and the one after both.
+	t.expect_regex(r"sequences: \{ bar: .*, foo: .*, zzz: .* \}").unwrap();
+	// Each still allocates, so each definition was decoded rather than counted.
+	t.skip_ok(3).unwrap();
+	// Neither table lost rows to the scan that walked over them.
+	t.expect_val("['b1', 'b2']").unwrap();
+	t.expect_val("['f1', 'f2']").unwrap();
+}
