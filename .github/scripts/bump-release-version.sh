@@ -82,17 +82,54 @@ git fetch origin "${RELEASE_BRANCH}"
 git checkout "${RELEASE_BRANCH}"
 git pull origin "${RELEASE_BRANCH}"
 
-# Dynamically build list of surrealdb-* packages (excludes surrealism-*)
+# The engine crates all inherit the workspace version, so bumping any one of them
+# via cargo set-version moves `[workspace.package] version` and every inheriting
+# crate follows. Pick them out by name (`surrealdb*`; `surreal`, the CLI, and the
+# rest inherit the same version and come along for free).
 PACKAGES=$(cargo metadata --format-version 1 --no-deps | \
 	jq -r '.packages[].name' | \
 	grep '^surrealdb' | \
 	sed 's/^/--package /' | \
 	tr '\n' ' ')
 
-# Bump version for surrealdb packages only
+# Bump the inherited workspace version.
 # shellcheck disable=SC2086 # PACKAGES is an intentional list of --package args
 cargo set-version $PACKAGES "${NEXT_VERSION}"
-cargo update -p surrealdb -p surrealdb-core -p surrealdb-server
+
+# Bump the independently-versioned publishable crates (e.g. surrealism*,
+# surrealml-core) in LOCKSTEP with the workspace, so none is left sitting at an
+# already-published version when the next release tries to publish it - the whole
+# reason for bumping after every release. Each keeps its own major.minor and
+# adopts the workspace's new patch/pre-release TAIL (everything after major.minor:
+# `0-beta.5` when the workspace moves to 3.3.0-beta.5, `4` when it moves to 3.1.4),
+# so surrealism 0.6.0-beta.4 -> 0.6.0-beta.5 and a crate that fell a step behind at
+# 0.x.0-beta.3 snaps straight to 0.x.0-beta.5. Only crates.io-publishable crates
+# (`.publish == null`) are touched; a crate that inherits the workspace version was
+# already bumped above, and one somehow already ahead of the target is left alone
+# rather than moved backwards.
+TAIL="${NEXT_VERSION#*.}"; TAIL="${TAIL#*.}"
+while IFS=$'\t' read -r name ver manifest; do
+	if grep -qE '^version\.workspace *= *true|^version *= *\{[^}]*workspace *= *true' "${manifest}"; then
+		continue
+	fi
+	rest="${ver#*.}"
+	target="${ver%%.*}.${rest%%.*}.${TAIL}"
+	[[ "${ver}" == "${target}" ]] && continue
+	highest=$(printf '%s\n%s\n' "${ver}" "${target}" | sort -V | tail -n1)
+	if [[ "${highest}" != "${target}" ]]; then
+		echo "::warning::${name} is at ${ver}, ahead of the lockstep target ${target}; leaving it unchanged."
+		continue
+	fi
+	echo "Bumping ${name} from ${ver} to ${target}"
+	cargo set-version --package "${name}" "${target}"
+done < <(cargo metadata --format-version 1 --no-deps | \
+	jq -r '.packages[] | select(.publish == null) | "\(.name)\t\(.version)\t\(.manifest_path)"')
+
+# Refresh the root lockfile for every workspace member just rewritten - the
+# inherited bump and the independent crates - without touching any third-party
+# dependency: --workspace restricts the update to workspace packages, keeping a
+# deliberate dependency upgrade its own PR rather than a side effect of this bump.
+cargo update --workspace
 
 # The workspaces outside the root one depend on the crates just rewritten by
 # path, so their lockfiles now name a version that no longer exists. Resolved
