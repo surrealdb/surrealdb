@@ -52,6 +52,53 @@ runs:
           esac
         }
 
+        # The generated Cargo.toml is the ONLY packaged file that carries a
+        # crate's RESOLVED requirements: a `wasmtime.workspace = true` in the
+        # source resolves to a concrete `wasmtime = "<version>"` here, and every
+        # other workspace-inherited field (edition, license, ...) is likewise
+        # resolved. Cargo.toml.orig keeps the unresolved `*.workspace = true`
+        # and never moves when the workspace bumps a shared requirement, so it
+        # cannot stand in for the manifest. The manifest therefore MUST be
+        # compared - but its TEXT is normalized differently by different cargo
+        # versions (inline vs expanded tables, key order, the generated
+        # header), which a byte diff would report as spurious drift. Compare it
+        # as PARSED data instead: canonicalize to sorted JSON so formatting is
+        # irrelevant while any real change to a requirement or inherited field
+        # still shows. tomllib ships in the runner's Python 3.11+ standard
+        # library; if it is somehow absent, fall back to a byte comparison -
+        # noisier, but it never skips the manifest and stays fail-closed.
+        canon_ok=0
+        if python3 -c 'import tomllib' 2>/dev/null; then
+          canon_ok=1
+        else
+          echo "::warning::python3/tomllib unavailable; comparing the generated Cargo.toml byte-for-byte, which cargo-version formatting differences can flag as drift."
+        fi
+        manifest_repr() {
+          if [ "${canon_ok}" -eq 1 ]; then
+            python3 -c 'import sys, tomllib, json; json.dump(tomllib.load(open(sys.argv[1], "rb")), sys.stdout, sort_keys=True, indent=2)' "$1"
+          else
+            cat "$1"
+          fi
+        }
+
+        # Package the whole workspace at most once, and only if a single-crate
+        # package cannot do the job. cargo re-resolves a packaged crate's deps
+        # against crates.io ALONE, so a crate with a path-dep sibling at a
+        # not-yet-published version cannot be packaged on its own; a --workspace
+        # run supplies those siblings from the workspace's own packaged set. The
+        # single-crate attempt is far cheaper than packaging every member, so we
+        # try it first and fall back only on failure; this flag guards the one
+        # expensive fallback.
+        #
+        # EXCLUDE publish=false crates from the fallback: unlike `cargo publish`,
+        # `cargo package` packages them too and then fails resolving their own
+        # publish=false path deps (e.g. surrealdb-node -> surrealdb-embedded),
+        # which the real publish never touches. Nothing publishable depends on a
+        # publish=false crate, so excluding them cannot strand a crate we diff.
+        # The list is derived (publish == [] means publish=false) so new such
+        # crates are handled without editing this gate.
+        packaged_workspace=0
+
         fail=""
         while IFS=$'\t' read -r name ver; do
           # (a) Existence at THIS version. Distinguish a CONFIRMED-absent
@@ -64,8 +111,13 @@ runs:
           #   HTTP 404 -> crate name absent from the index -> never published.
           #   anything else (5xx, 000 timeout, ...) -> indeterminate -> fail.
           idxfile="$(mktemp)"
+          # On a transport failure curl exits non-zero but still prints the
+          # status (000) via -w; `|| true` keeps that non-zero exit from
+          # tripping `set -e` before the case can classify it. -w supplies the
+          # 000 by itself - appending one with `|| echo 000` would emit a
+          # doubled code into the error message.
           http="$(curl -sS --retry 3 --retry-delay 2 -o "${idxfile}" -w '%{http_code}' \
-            "https://index.crates.io/$(index_path "${name}")" 2>/dev/null || echo 000)"
+            "https://index.crates.io/$(index_path "${name}")" 2>/dev/null || true)"
           case "${http}" in
             200)
               if ! grep -qF "\"vers\":\"${ver}\"" "${idxfile}"; then
@@ -89,32 +141,20 @@ runs:
               ;;
           esac
 
-          # (b) Same-version content comparison. Excluded from the diff:
-          #   .cargo_vcs_info.json - embeds the commit sha, always differs;
-          #   Cargo.toml           - the cargo-normalized rewrite varies by
-          #                          cargo version (Cargo.toml.orig, which IS
-          #                          compared, carries the authored manifest);
-          #   Cargo.lock           - regenerated from registry state at package
-          #                          time, not derived from this commit.
+          # (b) Same-version content comparison.
           echo "${name} ${ver}: already on crates.io - comparing packaged content..."
-          # The whole workspace is packaged ONCE below (first time through);
-          # packaging crates individually would resolve their sibling
-          # dependencies against the registry alone, which fails whenever a
-          # sibling's version is the still-unpublished pending release. A
-          # --workspace run resolves those from the workspace's own packaged
-          # set instead.
-          #
-          # EXCLUDE publish=false crates: unlike `cargo publish`, `cargo package`
-          # packages them too and then fails resolving their own publish=false
-          # path deps (e.g. surrealdb-node -> surrealdb-embedded), which the real
-          # publish never touches. Nothing publishable depends on a publish=false
-          # crate, so excluding them cannot strand a crate we actually diff. The
-          # list is derived (publish == [] means publish=false) so new such
-          # crates are handled without editing this gate.
-          if [ ! -d target/package ]; then
-            mapfile -t skip < <(cargo metadata --no-deps --format-version 1 \
-              | jq -r '.packages[] | select(.publish == []) | "--exclude=\(.name)"')
-            cargo package --workspace --no-verify ${skip[@]+"${skip[@]}"}
+          # Package the crate freshly - never trust a pre-existing
+          # target/package artifact, which target caching could leave stale and
+          # turn into a false "identical". Single crate first; the whole
+          # workspace only if that fails on an unpublished sibling, and then
+          # only once (every later crate is covered by that run's output).
+          if [ "${packaged_workspace}" -eq 0 ]; then
+            if ! cargo package -p "${name}" --no-verify --locked 2>/dev/null; then
+              mapfile -t skip < <(cargo metadata --no-deps --format-version 1 \
+                | jq -r '.packages[] | select(.publish == []) | "--exclude=\(.name)"')
+              cargo package --workspace --no-verify --locked ${skip[@]+"${skip[@]}"}
+              packaged_workspace=1
+            fi
           fi
           workdir="$(mktemp -d)"
           curl -fsSL --retry 3 --retry-delay 2 \
@@ -123,8 +163,20 @@ runs:
           mkdir "${workdir}/published" "${workdir}/local"
           tar -xzf "${workdir}/published.crate" -C "${workdir}/published" --strip-components=1
           tar -xzf "target/package/${name}-${ver}.crate" -C "${workdir}/local" --strip-components=1
-          rm -f "${workdir}"/{published,local}/{.cargo_vcs_info.json,Cargo.toml,Cargo.lock}
-          if diff -r "${workdir}/published" "${workdir}/local" > "${workdir}/diff.txt" 2>&1; then
+          # Compare the generated manifest as parsed data (see manifest_repr),
+          # then the rest of the tree byte-for-byte. Excluded from the tree diff:
+          #   .cargo_vcs_info.json - embeds the commit sha, always differs;
+          #   Cargo.lock           - regenerated from registry state at package
+          #                          time, not derived from this commit;
+          #   Cargo.toml           - compared as parsed data, just below.
+          manifest_repr "${workdir}/published/Cargo.toml" > "${workdir}/published.manifest"
+          manifest_repr "${workdir}/local/Cargo.toml"     > "${workdir}/local.manifest"
+          rm -f "${workdir}"/{published,local}/{.cargo_vcs_info.json,Cargo.lock,Cargo.toml}
+          differs=0
+          diff -r "${workdir}/published" "${workdir}/local" > "${workdir}/diff.txt" 2>&1 || differs=1
+          diff -u "${workdir}/published.manifest" "${workdir}/local.manifest" \
+            >> "${workdir}/diff.txt" 2>&1 || differs=1
+          if [ "${differs}" -eq 0 ]; then
             echo "${name} ${ver}: identical to the published crate - publish will skip it."
           else
             echo "::group::${name} ${ver}: packaged content differs from the published crate"
