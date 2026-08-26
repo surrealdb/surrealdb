@@ -95,6 +95,7 @@ use crate::val::{Datetime, TableName, Value};
 				alg: Algorithm::Hs512,
 				key: "key".to_string(),
 			}),
+			audience: None,
 		},
 	}),
 	base: Base::Root,
@@ -103,7 +104,7 @@ use crate::val::{Datetime, TableName, Value};
 	token_duration: Some(Duration::from_secs(123)),
 	session_duration: Some(Duration::from_secs(123)),
 	comment: Some("comment".to_string()),
-}, 61)]
+}, 62)]
 #[case::access(AccessGrant {
 	id: "access".to_string(),
 	ac: "access".to_string(),

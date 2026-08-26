@@ -92,9 +92,26 @@ pub(crate) async fn define_access_statement_to_definition(
 			});
 		}
 
+		let audience = match &access.audience {
+			Some(exprs) => {
+				let mut list = Vec::with_capacity(exprs.len());
+				for expr in exprs {
+					list.push(
+						stk.run(|stk| crate::legacy::expr_compute(expr, stk, ctx, opt, doc))
+							.await
+							.catch_return()?
+							.coerce_to::<String>()?,
+					);
+				}
+				Some(list)
+			}
+			None => None,
+		};
+
 		Ok(catalog::JwtAccess {
 			verify,
 			issue,
+			audience,
 		})
 	}
 

@@ -106,7 +106,7 @@ pub enum BearerAccessSubject {
 	User,
 }
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub struct JwtAccess {
 	// Verify is required
@@ -114,6 +114,11 @@ pub struct JwtAccess {
 	// Issue is optional
 	// It is possible to only verify externally issued tokens
 	pub issue: Option<JwtAccessIssue>,
+	/// Accepted values for the token `aud` claim. When set, tokens verified
+	/// against this access method must carry an `aud` claim that intersects
+	/// this list. `None` disables audience validation.
+	#[revision(start = 2)]
+	pub audience: Option<Vec<String>>,
 }
 
 impl InfoStructure for JwtAccess {
@@ -141,6 +146,7 @@ impl InfoStructure for JwtAccess {
 				"alg" => v.alg.to_string().into(),
 				"key" => super::REDACTED.into(),
 			}),
+			"audience", if let Some(v) = self.audience => v.into_iter().map(Value::from).collect::<Vec<_>>().into(),
 		})
 	}
 }
@@ -309,6 +315,8 @@ impl JwtAccess {
 		Self {
 			verify: self.verify.redacted(),
 			issue: self.issue.map(|i| i.redacted()),
+			// Audience values are not secrets.
+			audience: self.audience,
 		}
 	}
 }
@@ -449,6 +457,11 @@ impl From<JwtAccess> for crate::expr::JwtAccess {
 		Self {
 			verify: v.verify.into(),
 			issue: v.issue.map(|i| i.into()),
+			audience: v.audience.map(|a| {
+				a.into_iter()
+					.map(|s| crate::expr::Expr::Literal(crate::expr::Literal::String(s.into())))
+					.collect()
+			}),
 		}
 	}
 }
@@ -458,6 +471,16 @@ impl From<crate::expr::JwtAccess> for JwtAccess {
 		Self {
 			verify: v.verify.into(),
 			issue: v.issue.map(|i| i.into()),
+			audience: v.audience.map(|a| {
+				a.into_iter()
+					.map(|e| match e {
+						crate::expr::Expr::Literal(crate::expr::Literal::String(s)) => {
+							s.into_string()
+						}
+						e => e.to_sql(),
+					})
+					.collect()
+			}),
 		}
 	}
 }

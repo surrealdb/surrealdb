@@ -172,6 +172,9 @@ macro_rules! T {
 	(AT) => {
 		$crate::BaseTokenKind::KwAt
 	};
+	(AUDIENCE) => {
+		$crate::BaseTokenKind::KwAudience
+	};
 	(AUTHENTICATE) => {
 		$crate::BaseTokenKind::KwAuthenticate
 	};

@@ -29,7 +29,7 @@ use crate::exec::Error as ExecError;
 use crate::expr::access_type;
 use crate::expr::statements::access;
 use crate::iam::issue::{config, expiration};
-use crate::iam::token::{Claims, HEADER};
+use crate::iam::token::{Audience, Claims, HEADER};
 use crate::iam::{self, Auth, Error as AuthError, algorithm_to_jwt_algorithm};
 use crate::kvs::TransactionType::*;
 use crate::kvs::{Datastore, is_retryable_transaction_conflict};
@@ -326,6 +326,11 @@ pub async fn db_access(
 										nbf: Some(Utc::now().timestamp()),
 										exp: iam::issue::expiration(av.token_duration)?,
 										jti: Some(Uuid::new_v4().to_string()),
+										aud: at
+											.jwt
+											.audience
+											.as_ref()
+											.map(|a| Audience::from_configured(a)),
 										ns: Some(ns.clone()),
 										db: Some(db.clone()),
 										ac: Some(ac.clone()),
@@ -870,6 +875,7 @@ pub(crate) async fn signin_bearer(
 		nbf: Some(Utc::now().timestamp()),
 		exp: expiration(av.token_duration)?,
 		jti: Some(Uuid::new_v4().to_string()),
+		aud: at.jwt.audience.as_ref().map(|a| Audience::from_configured(a)),
 		ns: ns.map(|ns| ns.name.to_string()),
 		db: db.map(|db| db.name.to_string()),
 		ac: Some(av.name.to_string()),
@@ -1785,6 +1791,164 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			} else {
 				panic!("Token could not be extracted from result")
 			}
+		}
+	}
+
+	#[tokio::test]
+	async fn test_signin_record_with_audience() {
+		// Single audience: issued tokens carry the `aud` claim and verify.
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				r#"
+				DEFINE ACCESS user ON DATABASE TYPE RECORD
+					SIGNIN (
+						SELECT * FROM user WHERE name = $user AND crypto::argon2::compare(pass, $pass)
+					)
+					SIGNUP (
+						CREATE user CONTENT {
+							name: $user,
+							pass: crypto::argon2::generate($pass)
+						}
+					)
+					WITH JWT ALGORITHM HS512 KEY 'secret' AUDIENCE "surrealdb-test"
+					DURATION FOR SESSION 2h, FOR TOKEN 15m
+				;
+
+				CREATE user:test CONTENT {
+					name: 'user',
+					pass: crypto::argon2::generate('pass')
+				}
+				"#,
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Signin with the user
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut vars = PublicVariables::new();
+			vars.insert("user", "user");
+			vars.insert("pass", "pass");
+			let res = db_access(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"test".to_string(),
+				"user".to_string(),
+				vars,
+			)
+			.await;
+			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
+			let sd = res.unwrap();
+			let token = match &sd {
+				Token::Access(token) => token,
+				Token::WithRefresh {
+					access: token,
+					..
+				} => token,
+			};
+
+			// The issued token carries the configured audience
+			let mut val = Validation::new(Algorithm::HS512);
+			val.set_audience(&["surrealdb-test"]);
+			let token_data =
+				decode::<Claims>(token, &DecodingKey::from_secret("secret".as_ref()), &val)
+					.unwrap();
+			match token_data.claims.aud {
+				Some(Audience::Single(aud)) => assert_eq!(aud, "surrealdb-test"),
+				aud => panic!("Expected a single audience claim, got {aud:?}"),
+			}
+
+			// The issued token round-trips through token verification
+			let mut sess = Session::default();
+			let res = crate::iam::verify::token(&ds, &mut sess, token).await;
+			assert!(res.is_ok(), "Failed to verify issued token: {:?}", res);
+			assert_eq!(sess.au.id(), "user:test");
+		}
+		// Several audiences: the `aud` claim is issued as an array.
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				r#"
+				DEFINE ACCESS user ON DATABASE TYPE RECORD
+					SIGNUP (
+						CREATE user CONTENT {
+							name: $user,
+							pass: crypto::argon2::generate($pass)
+						}
+					)
+					SIGNIN (
+						SELECT * FROM user WHERE name = $user AND crypto::argon2::compare(pass, $pass)
+					)
+					WITH JWT ALGORITHM HS512 KEY 'secret' AUDIENCE "aud1", "aud2"
+					DURATION FOR SESSION 2h, FOR TOKEN 15m
+				;
+
+				CREATE user:test CONTENT {
+					name: 'user',
+					pass: crypto::argon2::generate('pass')
+				}
+				"#,
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			// Signin with the user
+			let mut sess = Session {
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				..Default::default()
+			};
+			let mut vars = PublicVariables::new();
+			vars.insert("user", "user");
+			vars.insert("pass", "pass");
+			let res = db_access(
+				&ds,
+				&mut sess,
+				"test".to_string(),
+				"test".to_string(),
+				"user".to_string(),
+				vars,
+			)
+			.await;
+			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
+			let sd = res.unwrap();
+			let token = match &sd {
+				Token::Access(token) => token,
+				Token::WithRefresh {
+					access: token,
+					..
+				} => token,
+			};
+
+			// The issued token carries the configured audiences as an array
+			let mut val = Validation::new(Algorithm::HS512);
+			val.set_audience(&["aud1"]);
+			let token_data =
+				decode::<Claims>(token, &DecodingKey::from_secret("secret".as_ref()), &val)
+					.unwrap();
+			match token_data.claims.aud {
+				Some(Audience::Multiple(aud)) => {
+					assert_eq!(aud, vec!["aud1".to_string(), "aud2".to_string()])
+				}
+				aud => panic!("Expected an audience array claim, got {aud:?}"),
+			}
+
+			// The issued token round-trips through token verification
+			let mut sess = Session::default();
+			let res = crate::iam::verify::token(&ds, &mut sess, token).await;
+			assert!(res.is_ok(), "Failed to verify issued token: {:?}", res);
+			assert_eq!(sess.au.id(), "user:test");
 		}
 	}
 

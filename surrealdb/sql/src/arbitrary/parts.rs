@@ -522,9 +522,20 @@ impl<'a> Arbitrary<'a> for JwtAccess {
 			None
 		};
 
+		// An audience list is either absent or non-empty: `AUDIENCE` with no
+		// entries is not representable in the grammar.
+		let audience = if u.arbitrary()? {
+			let mut list: Vec<Expr> = u.arbitrary()?;
+			list.push(u.arbitrary()?);
+			Some(list)
+		} else {
+			None
+		};
+
 		Ok(JwtAccess {
 			verify,
 			issue,
+			audience,
 		})
 	}
 }

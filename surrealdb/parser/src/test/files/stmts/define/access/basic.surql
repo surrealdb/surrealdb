@@ -161,6 +161,7 @@ Query
                                         .op: BinaryOperator::Add
                                         .right: Expr::Integer
                                             +2
+                            .audience: None
         -TopLevelExpr::Expr
             Expr::DefineAccess
                 DefineAccess
@@ -188,6 +189,7 @@ Query
                                         .right: Expr::Integer
                                             +1
                             .issue: None
+                            .audience: None
         -TopLevelExpr::Expr
             Expr::DefineAccess
                 DefineAccess
@@ -233,5 +235,6 @@ Query
                                             .right: Expr::Integer
                                                 +3
                                 .issue: None
+                                .audience: None
                             .refresh: true
 */

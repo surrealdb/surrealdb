@@ -1111,6 +1111,12 @@ implement_visitor! {
 			this.visit_expr(&i.key)?
 		}
 
+		if let Some(aud) = j.audience.as_ref(){
+			for a in aud {
+				this.visit_expr(a)?
+			}
+		}
+
 		Ok(())
 	}
 

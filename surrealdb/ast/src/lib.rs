@@ -1209,6 +1209,7 @@ impl_vis_type! {
 	pub struct Jwt{
 		pub verify: JwtVerify,
 		pub issue: Option<JwtIssue>,
+		pub audience: Option<NodeListId<Expr>>,
 	}
 }
 

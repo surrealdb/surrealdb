@@ -1857,6 +1857,14 @@ impl Parser<'_> {
 			_ => unexpected!(self, peek, "`ALGORITHM`, or `URL`"),
 		}
 
+		if self.eat(t!("AUDIENCE")) {
+			let mut audience = vec![stk.run(|stk| self.parse_expr_field(stk)).await?];
+			while self.eat(t!(",")) {
+				audience.push(stk.run(|stk| self.parse_expr_field(stk)).await?);
+			}
+			res.audience = Some(audience);
+		}
+
 		if self.eat(t!("WITH")) {
 			expected!(self, t!("ISSUER"));
 			loop {

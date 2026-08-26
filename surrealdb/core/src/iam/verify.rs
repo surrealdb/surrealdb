@@ -73,13 +73,27 @@ fn decode_key(alg: catalog::Algorithm, key: &[u8]) -> Result<(DecodingKey, Valid
 		}
 	};
 
-	// TODO(gguillemas): This keeps the existing behavior as of SurrealDB 2.0.0-alpha.9.
-	// Up to that point, a fork of the "jsonwebtoken" crate in version 8.3.0 was being used.
-	// Now that the audience claim is validated by default, we could allow users to leverage this.
-	// This will most likely involve defining an audience string via "DEFINE ACCESS ... TYPE JWT".
+	// Without configured audiences the `aud` claim is not validated, matching
+	// access methods that do not define an AUDIENCE clause. Callers enable
+	// validation via `apply_audience_validation` when the access method
+	// defines an audience list.
 	val.validate_aud = false;
 
 	Ok((dec, val))
+}
+
+/// Enables audience validation when the access method defines an audience
+/// list: the token must carry an `aud` claim (string or array) that
+/// intersects the configured values. Access methods without configured
+/// audiences ignore the claim entirely.
+fn apply_audience_validation(val: &mut Validation, jwt: &catalog::JwtAccess) {
+	if let Some(audience) = &jwt.audience {
+		val.set_audience(audience);
+		val.validate_aud = true;
+		// A configured audience makes the claim mandatory; otherwise a
+		// token that simply omits `aud` would bypass the restriction.
+		val.required_spec_claims.insert("aud".to_string());
+	}
 }
 
 /// Decodes JWT claims without cryptographic verification.
@@ -235,24 +249,28 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			tx.cancel().await?;
 			// Obtain the configuration to verify the token based on the access method
 			let cf = match &de.access_type {
-				catalog::AccessType::Record(at) => match &at.jwt.verify {
-					catalog::JwtAccessVerify::Key(key) => {
-						iam::verify::decode_key(key.alg, key.key.as_bytes())
-					}
-					#[cfg(feature = "jwks")]
-					catalog::JwtAccessVerify::Jwks(jwks) => {
-						if let Some(kid) = token_data.header.kid {
-							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
-						} else {
-							Err(anyhow::Error::new(ExprError::InvalidFunctionArguments {
-								name: "token".to_string(),
-								message: "Missing token header 'kid'".to_string(),
-							}))
+				catalog::AccessType::Record(at) => {
+					let mut cf = match &at.jwt.verify {
+						catalog::JwtAccessVerify::Key(key) => {
+							iam::verify::decode_key(key.alg, key.key.as_bytes())
 						}
-					}
-					#[cfg(not(feature = "jwks"))]
-					_ => bail!(AuthError::AccessMethodMismatch),
-				}?,
+						#[cfg(feature = "jwks")]
+						catalog::JwtAccessVerify::Jwks(jwks) => {
+							if let Some(kid) = token_data.header.kid {
+								jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
+							} else {
+								Err(anyhow::Error::new(ExprError::InvalidFunctionArguments {
+									name: "token".to_string(),
+									message: "Missing token header 'kid'".to_string(),
+								}))
+							}
+						}
+						#[cfg(not(feature = "jwks"))]
+						_ => bail!(AuthError::AccessMethodMismatch),
+					}?;
+					apply_audience_validation(&mut cf.1, &at.jwt);
+					cf
+				}
 				_ => bail!(AuthError::AccessMethodMismatch),
 			};
 			// Verify the token
@@ -349,7 +367,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					jwt,
 					..
 				}) => {
-					let cf = match &jwt.verify {
+					let mut cf = match &jwt.verify {
 						catalog::JwtAccessVerify::Key(key) => {
 							decode_key(key.alg, key.key.as_bytes())
 						}
@@ -367,6 +385,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						#[cfg(not(feature = "jwks"))]
 						_ => bail!(AuthError::AccessMethodMismatch),
 					}?;
+					apply_audience_validation(&mut cf.1, jwt);
 					// Verify the token
 					verify_token(token, &cf.0, &cf.1)?;
 					// AUTHENTICATE clause
@@ -421,7 +440,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				catalog::AccessType::Record(at) => match &de.authenticate {
 					Some(au) => {
 						trace!("Access method `{}` is record access with AUTHENTICATE clause", ac);
-						let cf = match &at.jwt.verify {
+						let mut cf = match &at.jwt.verify {
 							catalog::JwtAccessVerify::Key(key) => {
 								decode_key(key.alg, key.key.as_bytes())
 							}
@@ -439,6 +458,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 							#[cfg(not(feature = "jwks"))]
 							_ => bail!(AuthError::AccessMethodMismatch),
 						}?;
+						apply_audience_validation(&mut cf.1, &at.jwt);
 
 						// Verify the token
 						verify_token(token, &cf.0, &cf.1)?;
@@ -586,24 +606,30 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				| catalog::AccessType::Bearer(catalog::BearerAccess {
 					jwt,
 					..
-				}) => match &jwt.verify {
-					catalog::JwtAccessVerify::Key(key) => decode_key(key.alg, key.key.as_bytes()),
-					#[cfg(feature = "jwks")]
-					catalog::JwtAccessVerify::Jwks(jwks) => {
-						if let Some(kid) = token_data.header.kid {
-							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
-						} else {
-							bail!(ExprError::InvalidFunctionArguments {
-								name: "token".to_string(),
-								message: "Missing token header 'kid'".to_string()
-							})
+				}) => {
+					let mut cf = match &jwt.verify {
+						catalog::JwtAccessVerify::Key(key) => {
+							decode_key(key.alg, key.key.as_bytes())
 						}
-					}
-					#[cfg(not(feature = "jwks"))]
-					_ => bail!(AuthError::AccessMethodMismatch),
-				},
+						#[cfg(feature = "jwks")]
+						catalog::JwtAccessVerify::Jwks(jwks) => {
+							if let Some(kid) = token_data.header.kid {
+								jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
+							} else {
+								bail!(ExprError::InvalidFunctionArguments {
+									name: "token".to_string(),
+									message: "Missing token header 'kid'".to_string()
+								})
+							}
+						}
+						#[cfg(not(feature = "jwks"))]
+						_ => bail!(AuthError::AccessMethodMismatch),
+					}?;
+					apply_audience_validation(&mut cf.1, jwt);
+					cf
+				}
 				_ => bail!(AuthError::AccessMethodMismatch),
-			}?;
+			};
 			// Verify the token
 			verify_token(token, &cf.0, &cf.1)?;
 			// AUTHENTICATE clause
@@ -738,24 +764,30 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				| catalog::AccessType::Bearer(catalog::BearerAccess {
 					jwt,
 					..
-				}) => match &jwt.verify {
-					catalog::JwtAccessVerify::Key(key) => decode_key(key.alg, key.key.as_bytes()),
-					#[cfg(feature = "jwks")]
-					catalog::JwtAccessVerify::Jwks(jwks) => {
-						if let Some(kid) = token_data.header.kid {
-							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
-						} else {
-							bail!(ExprError::InvalidFunctionArguments {
-								name: "token".to_string(),
-								message: "Missing token header 'kid'".to_string()
-							})
+				}) => {
+					let mut cf = match &jwt.verify {
+						catalog::JwtAccessVerify::Key(key) => {
+							decode_key(key.alg, key.key.as_bytes())
 						}
-					}
-					#[cfg(not(feature = "jwks"))]
-					_ => bail!(AuthError::AccessMethodMismatch),
-				},
+						#[cfg(feature = "jwks")]
+						catalog::JwtAccessVerify::Jwks(jwks) => {
+							if let Some(kid) = token_data.header.kid {
+								jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
+							} else {
+								bail!(ExprError::InvalidFunctionArguments {
+									name: "token".to_string(),
+									message: "Missing token header 'kid'".to_string()
+								})
+							}
+						}
+						#[cfg(not(feature = "jwks"))]
+						_ => bail!(AuthError::AccessMethodMismatch),
+					}?;
+					apply_audience_validation(&mut cf.1, jwt);
+					cf
+				}
 				_ => bail!(AuthError::AccessMethodMismatch),
-			}?;
+			};
 			// Verify the token
 			verify_token(token, &cf.0, &cf.1)?;
 			// AUTHENTICATE clause
@@ -1402,6 +1434,210 @@ mod tests {
 				exp > min_exp && exp < max_exp,
 				"Session expiration is expected to match the defined duration"
 			);
+		}
+	}
+
+	#[rstest]
+	#[case::matching_audience(Some(Audience::Single("surrealdb-test".to_string())), false)]
+	#[case::mismatched_audience(Some(Audience::Single("invalid".to_string())), true)]
+	#[case::missing_audience(None, true)]
+	#[case::array_with_matching_audience(Some(Audience::Multiple(vec!["other".to_string(), "surrealdb-test".to_string()])), false)]
+	#[case::array_without_matching_audience(Some(Audience::Multiple(vec!["other".to_string(), "invalid".to_string()])), true)]
+	#[tokio::test]
+	async fn test_token_with_audience(
+		#[case] aud: Option<Audience>,
+		#[case] expect_error: bool,
+		#[values(
+			 TestLevel {
+				level: "ROOT",
+				ns: None,
+				db: None,
+			},
+			TestLevel {
+				level: "NS",
+				ns: Some("test"),
+				db: None,
+			},
+			TestLevel {
+				level: "DB",
+				ns: Some("test"),
+				db: Some("test"),
+			}
+		)]
+		level: TestLevel,
+	) {
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::owner().with_ns("test").with_db("test");
+
+		// Define the access token for that level with a required audience
+		ds.execute(
+			format!(
+				r#"
+				DEFINE ACCESS token ON {} TYPE JWT
+					ALGORITHM HS512 KEY 'secret' AUDIENCE "surrealdb-test"
+					DURATION FOR SESSION 30d
+				;
+			"#,
+				level.level
+			)
+			.as_str(),
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
+
+		// Prepare the claims object
+		let claims = Claims {
+			iss: Some("surrealdb-test".to_string()),
+			iat: Some(Utc::now().timestamp()),
+			nbf: Some(Utc::now().timestamp()),
+			exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+			ac: Some("token".to_string()),
+			aud,
+			ns: level.ns.map(|s| s.to_string()),
+			db: level.db.map(|s| s.to_string()),
+			..Claims::default()
+		};
+
+		// Create the token
+		let key = EncodingKey::from_secret("secret".as_ref());
+		let enc = encode(&HEADER, &claims, &key).unwrap();
+
+		// Authenticate with the token
+		let mut sess = Session::default();
+		let res = token(&ds, &mut sess, &enc).await;
+
+		if expect_error {
+			assert!(res.is_err(), "Unexpected success with audience case");
+		} else {
+			assert!(res.is_ok(), "Failed to sign in with token: {:?}", res);
+			assert_eq!(sess.au.id(), "token");
+		}
+	}
+
+	#[rstest]
+	#[tokio::test]
+	async fn test_token_without_configured_audience(
+		#[values(
+			 TestLevel {
+				level: "ROOT",
+				ns: None,
+				db: None,
+			},
+			TestLevel {
+				level: "NS",
+				ns: Some("test"),
+				db: None,
+			},
+			TestLevel {
+				level: "DB",
+				ns: Some("test"),
+				db: Some("test"),
+			}
+		)]
+		level: TestLevel,
+	) {
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::owner().with_ns("test").with_db("test");
+
+		// Define the access token for that level without an audience
+		ds.execute(
+			format!(
+				r#"
+				DEFINE ACCESS token ON {} TYPE JWT
+					ALGORITHM HS512 KEY 'secret' DURATION FOR SESSION 30d
+				;
+			"#,
+				level.level
+			)
+			.as_str(),
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
+
+		// Any `aud` claim is ignored when the access method defines no audience
+		let claims = Claims {
+			iss: Some("surrealdb-test".to_string()),
+			iat: Some(Utc::now().timestamp()),
+			nbf: Some(Utc::now().timestamp()),
+			exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+			ac: Some("token".to_string()),
+			aud: Some(Audience::Single("anything".to_string())),
+			ns: level.ns.map(|s| s.to_string()),
+			db: level.db.map(|s| s.to_string()),
+			..Claims::default()
+		};
+
+		// Create the token
+		let key = EncodingKey::from_secret("secret".as_ref());
+		let enc = encode(&HEADER, &claims, &key).unwrap();
+
+		// Authenticate with the token
+		let mut sess = Session::default();
+		let res = token(&ds, &mut sess, &enc).await;
+		assert!(res.is_ok(), "Failed to sign in with token: {:?}", res);
+		assert_eq!(sess.au.id(), "token");
+	}
+
+	#[rstest]
+	#[case::matching_audience(Some(Audience::Single("surrealdb-test".to_string())), false)]
+	#[case::mismatched_audience(Some(Audience::Single("invalid".to_string())), true)]
+	#[case::missing_audience(None, true)]
+	#[tokio::test]
+	async fn test_token_record_with_audience(
+		#[case] aud: Option<Audience>,
+		#[case] expect_error: bool,
+	) {
+		let secret = "secret";
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			format!(
+				r#"
+			DEFINE ACCESS token ON DATABASE TYPE RECORD
+				WITH JWT ALGORITHM HS512 KEY '{secret}' AUDIENCE "surrealdb-test"
+				DURATION FOR SESSION 30d;
+
+			CREATE user:test;
+			"#
+			)
+			.as_str(),
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
+
+		// Prepare the claims object
+		let claims = Claims {
+			iss: Some("surrealdb-test".to_string()),
+			iat: Some(Utc::now().timestamp()),
+			nbf: Some(Utc::now().timestamp()),
+			exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+			ns: Some("test".to_string()),
+			db: Some("test".to_string()),
+			ac: Some("token".to_string()),
+			id: Some(syn::record_id("user:test").unwrap().to_sql()),
+			aud,
+			..Claims::default()
+		};
+
+		// Create the token
+		let key = EncodingKey::from_secret(secret.as_ref());
+		let enc = encode(&HEADER, &claims, &key).unwrap();
+
+		// Authenticate with the token
+		let mut sess = Session::default();
+		let res = token(&ds, &mut sess, &enc).await;
+
+		if expect_error {
+			assert!(res.is_err(), "Unexpected success with audience case");
+		} else {
+			assert!(res.is_ok(), "Failed to sign in with token: {:?}", res);
+			assert_eq!(sess.au.id(), "user:test");
 		}
 	}
 

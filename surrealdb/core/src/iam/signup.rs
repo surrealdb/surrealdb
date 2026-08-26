@@ -16,7 +16,7 @@ use crate::dbs::Session;
 use crate::err::exec_error;
 use crate::exec::Error as ExecError;
 use crate::iam::issue::{config, expiration};
-use crate::iam::token::Claims;
+use crate::iam::token::{Audience, Claims};
 use crate::iam::{Actor, Auth, Error as AuthError, Level, Role, algorithm_to_jwt_algorithm};
 use crate::kvs::TransactionType::*;
 use crate::kvs::{Datastore, is_retryable_transaction_conflict};
@@ -232,6 +232,7 @@ pub async fn db_access(
 				nbf: Some(Utc::now().timestamp()),
 				exp: expiration(av.token_duration)?,
 				jti: Some(Uuid::new_v4().to_string()),
+				aud: at.jwt.audience.as_ref().map(|a| Audience::from_configured(a)),
 				ns: Some(ns.clone()),
 				db: Some(db.clone()),
 				ac: Some(ac.clone()),

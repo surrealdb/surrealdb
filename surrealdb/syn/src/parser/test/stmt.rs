@@ -450,6 +450,7 @@ fn parse_define_access_jwt_key() {
 						key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 					}),
 					issue: None,
+					audience: None,
 				}),
 				authenticate: None,
 				// Default durations.
@@ -482,6 +483,7 @@ fn parse_define_access_jwt_key() {
 						alg: Algorithm::EdDSA,
 						key: Expr::Literal(Literal::String(Strand::new_static("bar"))),
 					}),
+					audience: None,
 				}),
 				authenticate: None,
 				// Default durations.
@@ -514,6 +516,7 @@ fn parse_define_access_jwt_key() {
 						alg: Algorithm::EdDSA,
 						key: Expr::Literal(Literal::String(Strand::new_static("bar"))),
 					}),
+					audience: None,
 				}),
 				authenticate: Some(Expr::Literal(Literal::Bool(true))),
 				// Default durations.
@@ -550,6 +553,7 @@ fn parse_define_access_jwt_key() {
 						alg: Algorithm::Hs256,
 						key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 					}),
+					audience: None,
 				}),
 				authenticate: None,
 				// Default durations.
@@ -582,6 +586,7 @@ fn parse_define_access_jwt_key() {
 						alg: Algorithm::Hs256,
 						key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 					}),
+					audience: None,
 				}),
 				authenticate: None,
 				duration: AccessDuration {
@@ -613,6 +618,7 @@ fn parse_define_access_jwt_key() {
 						alg: Algorithm::Hs256,
 						key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 					}),
+					audience: None,
 				}),
 				authenticate: None,
 				// Default durations.
@@ -665,6 +671,7 @@ fn parse_define_access_jwt_key() {
 						key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 					}),
 					issue: None,
+					audience: None,
 				}),
 				authenticate: None,
 				// Default durations.
@@ -699,6 +706,7 @@ fn parse_define_access_jwt_key() {
 						key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 					}),
 					issue: None,
+					audience: None,
 				}),
 				authenticate: None,
 				// Default durations.
@@ -712,6 +720,111 @@ fn parse_define_access_jwt_key() {
 				comment: Expr::Literal(Literal::String(Strand::new_static("bar"))),
 			}))),
 		)
+	}
+}
+
+#[test]
+fn parse_define_access_jwt_audience() {
+	// Static key verify with a single audience.
+	{
+		let res = crate::parse_with(
+			r#"DEFINE ACCESS a ON DATABASE TYPE JWT ALGORITHM EDDSA KEY "foo" AUDIENCE "aud1""#
+				.as_bytes(),
+			async |parser, stk| parser.parse_expr_inherit(stk).await,
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Expr::Define(Box::new(DefineStatement::Access(DefineAccessStatement {
+				kind: DefineKind::Default,
+				name: Expr::Idiom(Idiom::field("a".to_string())),
+				base: Base::Db,
+				access_type: AccessType::Jwt(JwtAccess {
+					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+						alg: Algorithm::EdDSA,
+						key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
+					}),
+					issue: None,
+					audience: Some(vec![Expr::Literal(Literal::String(Strand::new_static(
+						"aud1"
+					)))]),
+				}),
+				authenticate: None,
+				// Default durations.
+				duration: AccessDuration {
+					grant: Expr::Literal(Literal::Duration(std::time::Duration::from_secs(
+						(30) * 86400
+					))),
+					token: Expr::Literal(Literal::Duration(std::time::Duration::from_secs(3600))),
+					session: Expr::Literal(Literal::None),
+				},
+				comment: Expr::Literal(Literal::None),
+			}))),
+		)
+	}
+	// JWKS verify with several audiences and an issuer.
+	{
+		let res = crate::parse_with(
+			r#"DEFINE ACCESS a ON DATABASE TYPE JWT URL "http://example.com/.well-known/jwks.json" AUDIENCE "aud1", "aud2" WITH ISSUER ALGORITHM EDDSA KEY "bar""#
+				.as_bytes(),
+			async |parser, stk| parser.parse_expr_inherit(stk).await,
+		)
+		.unwrap();
+		assert_eq!(
+			res,
+			Expr::Define(Box::new(DefineStatement::Access(DefineAccessStatement {
+				kind: DefineKind::Default,
+				name: Expr::Idiom(Idiom::field("a".to_string())),
+				base: Base::Db,
+				access_type: AccessType::Jwt(JwtAccess {
+					verify: JwtAccessVerify::Jwks(JwtAccessVerifyJwks {
+						url: Expr::Literal(Literal::String(Strand::new_static(
+							"http://example.com/.well-known/jwks.json"
+						))),
+					}),
+					issue: Some(JwtAccessIssue {
+						alg: Algorithm::EdDSA,
+						key: Expr::Literal(Literal::String(Strand::new_static("bar"))),
+					}),
+					audience: Some(vec![
+						Expr::Literal(Literal::String(Strand::new_static("aud1"))),
+						Expr::Literal(Literal::String(Strand::new_static("aud2"))),
+					]),
+				}),
+				authenticate: None,
+				// Default durations.
+				duration: AccessDuration {
+					grant: Expr::Literal(Literal::Duration(std::time::Duration::from_secs(
+						(30) * 86400
+					))),
+					token: Expr::Literal(Literal::Duration(std::time::Duration::from_secs(3600))),
+					session: Expr::Literal(Literal::None),
+				},
+				comment: Expr::Literal(Literal::None),
+			}))),
+		)
+	}
+	// Record access inherits the audience on both the JWT and the refresh bearer.
+	{
+		let res = crate::parse_with(
+			r#"DEFINE ACCESS a ON DATABASE TYPE RECORD WITH REFRESH WITH JWT ALGORITHM HS512 KEY "foo" AUDIENCE "aud1""#
+				.as_bytes(),
+			async |parser, stk| parser.parse_expr_inherit(stk).await,
+		)
+		.unwrap();
+		let Expr::Define(stmt) = res else {
+			panic!("expected DEFINE statement");
+		};
+		let DefineStatement::Access(stmt) = *stmt else {
+			panic!("expected DEFINE ACCESS statement");
+		};
+		let AccessType::Record(record) = stmt.access_type else {
+			panic!("expected record access type");
+		};
+		let audience = Some(vec![Expr::Literal(Literal::String(Strand::new_static("aud1")))]);
+		assert_eq!(record.jwt.audience, audience);
+		let bearer = record.bearer.expect("expected refresh bearer");
+		assert_eq!(bearer.jwt.audience, audience);
 	}
 }
 
@@ -733,6 +846,7 @@ fn parse_define_access_jwt_jwks() {
 						)),
 					}),
 					issue: None,
+					audience: None,
 				}),
 				authenticate: None,
 				// Default durations.
@@ -766,6 +880,7 @@ fn parse_define_access_jwt_jwks() {
 						alg: Algorithm::Hs384,
 						key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 					}),
+					audience: None,
 				}),
 				authenticate: None,
 				// Default durations.
@@ -799,6 +914,7 @@ fn parse_define_access_jwt_jwks() {
 						alg: Algorithm::Hs384,
 						key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 					}),
+					audience: None,
 				}),
 				authenticate: None,
 				duration: AccessDuration {
@@ -831,6 +947,7 @@ fn parse_define_access_jwt_jwks() {
 						alg: Algorithm::Ps256,
 						key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 					}),
+					audience: None,
 				}),
 				authenticate: None,
 				// Default durations.
@@ -864,6 +981,7 @@ fn parse_define_access_jwt_jwks() {
 						alg: Algorithm::Ps256,
 						key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 					}),
+					audience: None,
 				}),
 				authenticate: None,
 				duration: AccessDuration {
@@ -1086,6 +1204,7 @@ fn parse_define_access_record() {
 							// algorithms.
 							key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 						}),
+						audience: None,
 					},
 					bearer: None,
 				})),
@@ -1125,6 +1244,7 @@ fn parse_define_access_record() {
 							alg: Algorithm::Ps512,
 							key: Expr::Literal(Literal::String(Strand::new_static("bar"))),
 						}),
+						audience: None,
 					},
 					bearer: None,
 				})),
@@ -1169,6 +1289,7 @@ fn parse_define_access_record() {
 							alg: Algorithm::Ps512,
 							key: Expr::Literal(Literal::String(Strand::new_static("bar"))),
 						}),
+						audience: None,
 					},
 					bearer: Some(BearerAccess {
 						kind: BearerAccessType::Refresh,
@@ -1182,6 +1303,7 @@ fn parse_define_access_record() {
 								alg: Algorithm::Ps512,
 								key: Expr::Literal(Literal::String(Strand::new_static("bar"))),
 							}),
+							audience: None,
 						},
 					}),
 				})),
@@ -1225,6 +1347,7 @@ fn parse_define_access_record() {
 							alg: Algorithm::Ps512,
 							key: Expr::Literal(Literal::String(Strand::new_static("bar"))),
 						}),
+						audience: None,
 					},
 					bearer: Some(BearerAccess {
 						kind: BearerAccessType::Refresh,
@@ -1238,6 +1361,7 @@ fn parse_define_access_record() {
 								alg: Algorithm::Ps512,
 								key: Expr::Literal(Literal::String(Strand::new_static("bar"))),
 							}),
+							audience: None,
 						},
 					}),
 				})),
@@ -1277,6 +1401,7 @@ fn parse_define_access_record() {
 							alg: Algorithm::Rs256,
 							key: Expr::Literal(Literal::String(Strand::new_static("bar"))),
 						}),
+						audience: None,
 					},
 					bearer: None,
 				})),
@@ -1523,6 +1648,7 @@ fn parse_define_access_bearer() {
 							// algorithms.
 							key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 						}),
+						audience: None,
 					},
 				}),
 				authenticate: None,
@@ -1564,6 +1690,7 @@ fn parse_define_access_bearer() {
 							// algorithms.
 							key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 						}),
+						audience: None,
 					},
 				}),
 				authenticate: None,

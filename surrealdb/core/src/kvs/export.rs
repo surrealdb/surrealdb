@@ -648,6 +648,9 @@ pub(crate) fn define_access_statement_from_definition(
 				alg: convert_algorithm(x.alg),
 				key: Expr::Literal(Literal::String(x.key.as_str().into())),
 			}),
+			audience: access.audience.as_ref().map(|a| {
+				a.iter().map(|s| Expr::Literal(Literal::String(s.as_str().into()))).collect()
+			}),
 		}
 	}
 

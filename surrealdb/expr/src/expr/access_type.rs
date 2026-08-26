@@ -52,6 +52,9 @@ pub struct JwtAccess {
 	// Issue is optional
 	// It is possible to only verify externally issued tokens
 	pub issue: Option<JwtAccessIssue>,
+	/// Accepted values for the token `aud` claim. When set, verification
+	/// requires the claim to be present and to intersect this list.
+	pub audience: Option<Vec<Expr>>,
 }
 
 impl Default for JwtAccess {
@@ -69,6 +72,7 @@ impl Default for JwtAccess {
 				alg,
 				key: Expr::Literal(Literal::String(key.into())),
 			}),
+			audience: None,
 		}
 	}
 }

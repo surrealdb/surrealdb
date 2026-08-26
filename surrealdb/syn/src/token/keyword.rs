@@ -38,6 +38,7 @@ keyword! {
 	Assert => "ASSERT",
 	Async => "ASYNC",
 	At => "AT",
+	Audience => "AUDIENCE",
 	Authenticate => "AUTHENTICATE",
 	Auto => "AUTO",
 	Backend => "BACKEND",

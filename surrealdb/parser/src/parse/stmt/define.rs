@@ -2303,6 +2303,12 @@ impl Parse for ast::Jwt {
 			_ => return Err(parser.unexpected(expect)),
 		};
 
+		let audience = if parser.eat(T![AUDIENCE])?.is_some() {
+			Some(parse_seperated_list(parser, T![,], Parser::parse_enter).await?.1)
+		} else {
+			None
+		};
+
 		let issue = if parser.eat(T![WITH])?.is_some() {
 			let _ = parser.expect(T![ISSUER])?;
 			let mut algorithm = None;
@@ -2340,6 +2346,7 @@ impl Parse for ast::Jwt {
 		Ok(ast::Jwt {
 			verify,
 			issue,
+			audience,
 		})
 	}
 }

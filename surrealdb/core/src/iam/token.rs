@@ -157,6 +157,17 @@ pub enum Audience {
 	Multiple(Vec<String>),
 }
 
+impl Audience {
+	/// Builds the `aud` claim value for a configured audience list: a single
+	/// entry is issued as a JSON string, several as a JSON array.
+	pub(crate) fn from_configured(list: &[String]) -> Self {
+		match list {
+			[single] => Audience::Single(single.clone()),
+			many => Audience::Multiple(many.to_vec()),
+		}
+	}
+}
+
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Claims {
 	#[serde(skip_serializing_if = "Option::is_none")]

@@ -73,11 +73,14 @@ fn version_writes_current_format(version_name: &str, type_name: &str, fixture: &
 	const V3_3_0_EMBEDS_A_BUMPED_TYPE: &[&str] = &["table_mutations_def"];
 	/// Bumped after the newest snapshot was captured, so *every* frozen file
 	/// holds the pre-bump encoding and none of them can pin the current one:
-	/// `StoredModuleDefinition` gained `unsigned` (1 -> 2). Their fixtures
-	/// still decode — the field defaults in — but re-encode a revision higher.
-	/// Each name drops off this list once a snapshot taken after its bump
-	/// exists to pin it, exactly as `V3_3_0_BUMPED` did at `v3_3_0`.
-	const AFTER_NEWEST_SNAPSHOT_BUMPED: &[&str] = &["StoredModuleDefinition"];
+	/// `StoredModuleDefinition` gained `unsigned` (1 -> 2), and
+	/// `StoredAccessDefinition` embeds `JwtAccess`, which gained `audience`
+	/// (1 -> 2). Their fixtures still decode — the field defaults in — but
+	/// re-encode a revision higher. Each name drops off this list once a
+	/// snapshot taken after its bump exists to pin it, exactly as
+	/// `V3_3_0_BUMPED` did at `v3_3_0`.
+	const AFTER_NEWEST_SNAPSHOT_BUMPED: &[&str] =
+		&["StoredModuleDefinition", "StoredAccessDefinition"];
 
 	let text_migration_moved_it = TEXT_MIGRATION_BUMPED.contains(&type_name);
 	if AFTER_NEWEST_SNAPSHOT_BUMPED.contains(&type_name) {
@@ -1228,11 +1231,22 @@ fn a_revision_bump_excuses_only_the_families_it_bumped() {
 	}
 	// ...and nothing else is. These kept their revision across the migration,
 	// so their v3_3_0 bytes must still round-trip exactly.
-	for unchanged in ["StoredEventDefinition", "StoredAccessDefinition", "Node", "RecordId"] {
+	for unchanged in ["StoredEventDefinition", "Node", "RecordId"] {
 		assert!(
 			version_writes_current_format("v3_3_0", unchanged, "irrelevant"),
 			"{unchanged} did not change revision, so its v3_3_0 encode pin must stay"
 		);
+	}
+	// Families bumped after the newest snapshot re-encode a revision higher
+	// than any frozen file, so no snapshot — including the newest — can hold
+	// their encode pin until one captured after the bump exists.
+	for bumped in ["StoredModuleDefinition", "StoredAccessDefinition"] {
+		for snapshot in ["v3_3_0", "v3_4_0"] {
+			assert!(
+				!version_writes_current_format(snapshot, bumped, "irrelevant"),
+				"{bumped} re-encodes at a new revision, so {snapshot} cannot be byte-exact for it"
+			);
+		}
 	}
 	// The stored view kept revision 1, so no table fixture is excused at v3_3_0 —
 	// including the two that store a view in a pre-`Clauses` shape.

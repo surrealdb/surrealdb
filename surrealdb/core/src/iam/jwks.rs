@@ -204,11 +204,10 @@ pub(super) async fn config(
 		Ok(dec) => {
 			let mut val = Validation::new(alg);
 
-			// TODO(gguillemas): This keeps the existing behavior as of SurrealDB
-			// 2.0.0-alpha.9. Up to that point, a fork of the "jsonwebtoken" crate in
-			// version 8.3.0 was being used. Now that the audience claim is validated by
-			// default, we could allow users to leverage this. This will most likely
-			// involve defining an audience string via "DEFINE ACCESS ... TYPE JWT".
+			// Without configured audiences the `aud` claim is not validated,
+			// matching access methods that do not define an AUDIENCE clause.
+			// Callers in `iam::verify` enable validation per access method,
+			// so cached JWKs never carry one method's audience to another.
 			val.validate_aud = false;
 
 			Ok((dec, val))

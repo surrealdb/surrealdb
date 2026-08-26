@@ -296,6 +296,8 @@ pub enum BaseTokenKind {
 	KwAssert,
 	#[regex(r"(?i)AT")]
 	KwAt,
+	#[regex(r"(?i)AUDIENCE")]
+	KwAudience,
 	#[regex(r"(?i)AUTHENTICATE")]
 	KwAuthenticate,
 	#[regex(r"(?i)AUTO")]
@@ -982,6 +984,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwAscii => "keyword `ASCII`",
 			BaseTokenKind::KwAssert => "keyword `ASSERT`",
 			BaseTokenKind::KwAt => "keyword `AT`",
+			BaseTokenKind::KwAudience => "keyword `AUDIENCE`",
 			BaseTokenKind::KwAuthenticate => "keyword `AUTHENTICATE`",
 			BaseTokenKind::KwAuto => "keyword `AUTO`",
 			BaseTokenKind::KwAsync => "keyword `ASYNC`",
@@ -1311,7 +1314,8 @@ impl BaseTokenKind {
 				| Self::KwAs | Self::KwAscending
 				| Self::KwAscii
 				| Self::KwAssert
-				| Self::KwAt | Self::KwAuthenticate
+				| Self::KwAt | Self::KwAudience
+				| Self::KwAuthenticate
 				| Self::KwAuto
 				| Self::KwAsync
 				| Self::KwBackend

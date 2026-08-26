@@ -30,6 +30,7 @@ impl From<JwtAccess> for crate::expr::JwtAccess {
 		Self {
 			verify: v.verify.into(),
 			issue: v.issue.map(Into::into),
+			audience: v.audience.map(|a| a.into_iter().map(Into::into).collect()),
 		}
 	}
 }
@@ -39,6 +40,7 @@ impl From<crate::expr::JwtAccess> for JwtAccess {
 		Self {
 			verify: v.verify.into(),
 			issue: v.issue.map(Into::into),
+			audience: v.audience.map(|a| a.into_iter().map(Into::into).collect()),
 		}
 	}
 }

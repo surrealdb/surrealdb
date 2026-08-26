@@ -1,3 +1,4 @@
+use common::fmt::Fmt;
 use rand::distr::{Alphanumeric, SampleString};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
@@ -89,6 +90,9 @@ pub struct JwtAccess {
 	// Issue is optional
 	// It is possible to only verify externally issued tokens
 	pub issue: Option<JwtAccessIssue>,
+	/// Accepted values for the token `aud` claim. When set, verification
+	/// requires the claim to be present and to intersect this list.
+	pub audience: Option<Vec<Expr>>,
 }
 
 //TODO: Move this logic out of the parser
@@ -107,6 +111,7 @@ impl Default for JwtAccess {
 				alg,
 				key: Expr::Literal(Literal::String(key.into())),
 			}),
+			audience: None,
 		}
 	}
 }
@@ -120,6 +125,14 @@ impl ToSql for JwtAccess {
 			JwtAccessVerify::Jwks(v) => {
 				write_sql!(f, sql_fmt, "URL {}", CoverStmts(&v.url));
 			}
+		}
+		if let Some(aud) = &self.audience {
+			write_sql!(
+				f,
+				sql_fmt,
+				" AUDIENCE {}",
+				Fmt::comma_separated(aud.iter().map(CoverStmts))
+			);
 		}
 		if let Some(iss) = &self.issue {
 			write_sql!(f, sql_fmt, " WITH ISSUER KEY {}", CoverStmts(&iss.key));

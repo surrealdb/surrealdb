@@ -227,6 +227,7 @@ fn statements() -> Vec<TopLevelExpr> {
 							key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 						}),
 						issue: None,
+						audience: None,
 					},
 					bearer: None,
 				})),
