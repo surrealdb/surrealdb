@@ -37,6 +37,9 @@ mod reduce; // Reduces the permissioned fields in this document
 mod store; // Writes the document content to the storage engine
 mod table; // Processes any foreign tables relevant for this document'
 
+#[cfg(test)]
+mod tests; // Datastore-backed tests for the document processing pipeline
+
 /// Error result used when a function can result in the value being processed
 /// being ignored.
 #[derive(Debug)]

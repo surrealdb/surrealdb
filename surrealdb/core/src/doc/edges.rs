@@ -144,8 +144,8 @@ impl Document {
 				let rtl_legacy = GraphKey {
 					ns,
 					db,
-					tb: Cow::Borrowed(&l.table),
-					id: Cow::Borrowed(&l.key),
+					tb: Cow::Borrowed(&r.table),
+					id: Cow::Borrowed(&r.key),
 					dir: Dir::In,
 					foreign_table: Cow::Borrowed(&rid.table),
 					foreign_key: Cow::Borrowed(&rid.key),
