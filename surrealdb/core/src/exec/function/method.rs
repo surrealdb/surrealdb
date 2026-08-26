@@ -92,29 +92,23 @@ impl MethodDescriptor {
 	/// Resolve the method to a concrete function for the given value.
 	///
 	/// Checks type-specific implementations first, then falls back to the
-	/// generic fallback. Returns an error if no implementation is found.
-	pub fn resolve(&self, value: &Value) -> anyhow::Result<&Arc<dyn ScalarFunction>> {
+	/// generic fallback. Returns `None` when no implementation exists for the
+	/// value's type; the caller decides how to degrade (method calls fall back
+	/// to closure-field-call semantics).
+	pub fn resolve(&self, value: &Value) -> Option<&Arc<dyn ScalarFunction>> {
 		let kind = ValueKind::of(value);
 
 		// Check type-specific implementations first
 		if let Some(kind) = kind {
 			for (k, func) in &self.type_impls {
 				if *k == kind {
-					return Ok(func);
+					return Some(func);
 				}
 			}
 		}
 
 		// Fall back to generic implementation
-		if let Some(ref func) = self.fallback {
-			return Ok(func);
-		}
-
-		Err(anyhow::anyhow!(
-			"Method '{}' cannot be called on value of type '{}'",
-			self.name,
-			value.kind_of()
-		))
+		self.fallback.as_ref()
 	}
 }
 

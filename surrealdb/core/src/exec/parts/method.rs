@@ -24,7 +24,10 @@ use crate::val::{Closure, Value};
 /// - `[1, 2, 3].len()` -> `array::len([1, 2, 3])`
 ///
 /// The method descriptor (resolved at plan time) contains the per-type function
-/// dispatch table. At eval time we just look up the function for the value's type.
+/// dispatch table. At eval time we look up the function for the value's type;
+/// when the descriptor has no implementation for that type, the call falls back
+/// to closure-field-call semantics (see [`ClosureFieldCallPart`]), so a closure
+/// stored under a name that collides with a registered method is still callable.
 #[derive(Debug, Clone)]
 pub struct MethodPart {
 	pub descriptor: Arc<MethodDescriptor>,
@@ -47,8 +50,17 @@ impl PhysicalExpr for MethodPart {
 		Box::pin(async move {
 			let value = ctx.current_value.cloned().unwrap_or(Value::None);
 
-			// Resolve the function for this value's type
-			let func = self.descriptor.resolve(&value)?;
+			// Resolve the function for this value's type. Builtin dispatch on
+			// the receiver type takes precedence; when the descriptor has no
+			// implementation for it, the call degrades to closure-field-call
+			// semantics: an object field of this name holding a closure is
+			// invoked, anything else is the unknown-method error. The compute
+			// path applies the same precedence, so a name collision between a
+			// builtin method and a closure field resolves identically under
+			// every planner strategy.
+			let Some(func) = self.descriptor.resolve(&value) else {
+				return closure_field_call(self.descriptor.name, &value, &self.args, ctx).await;
+			};
 
 			// Build the arguments: receiver value first, then method arguments
 			let mut func_args = Vec::with_capacity(1 + self.args.len());
@@ -144,125 +156,8 @@ impl PhysicalExpr for ClosureFieldCallPart {
 
 	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
 		Box::pin(async move {
-			use crate::expr::Error as ExprError;
-
 			let value = ctx.current_value.cloned().unwrap_or(Value::None);
-
-			// Get the field value from the object
-			let field_value = match &value {
-				Value::Object(obj) => obj.get(self.field.as_str()).cloned(),
-				_ => None,
-			};
-
-			// Check if the field contains a closure
-			let closure = match field_value {
-				Some(Value::Closure(c)) => c,
-				_ => {
-					let type_name = value.kind_of().to_string();
-					return Err(ExecError::InvalidFunction {
-						name: self.field.clone(),
-						message: format!("no such method found for the {} type", type_name),
-					}
-					.into());
-				}
-			};
-
-			// Evaluate all argument expressions
-			let mut evaluated_args = Vec::with_capacity(self.args.len());
-			for arg_expr in &self.args {
-				evaluated_args.push(arg_expr.evaluate(ctx.clone()).await?);
-			}
-
-			// Invoke the closure
-			match closure.as_ref() {
-				Closure::Expr {
-					args: arg_spec,
-					returns,
-					body,
-					captures,
-				} => {
-					// Create isolated execution context with captured variables
-					let mut isolated_ctx = ctx.exec_ctx.clone();
-					for (name, value) in captures.clone() {
-						isolated_ctx = isolated_ctx.with_param(name, value);
-					}
-
-					// Check for missing required arguments
-					if arg_spec.len() > evaluated_args.len()
-						&& let Some((param, kind)) =
-							arg_spec[evaluated_args.len()..].iter().find(|(_, k)| !k.can_be_none())
-					{
-						return Err(ExprError::InvalidFunctionArguments {
-							name: "ANONYMOUS".to_string(),
-							message: format!(
-								"Expected a value of type '{}' for argument {}",
-								kind.to_sql(),
-								param.to_sql()
-							),
-						}
-						.into());
-					}
-
-					// Bind arguments to parameter names with type coercion
-					let mut local_params: HashMap<Strand, Value> = HashMap::new();
-					for ((param, kind), arg_value) in arg_spec.iter().zip(evaluated_args) {
-						let coerced = arg_value.coerce_to_kind(kind).map_err(|_| {
-							ExprError::InvalidFunctionArguments {
-								name: "ANONYMOUS".to_string(),
-								message: format!(
-									"Expected a value of type '{}' for argument {}",
-									kind.to_sql(),
-									param.to_sql()
-								),
-							}
-						})?;
-						local_params.insert(param.clone().into_strand(), coerced);
-					}
-
-					// Add parameters to the execution context
-					for (name, value) in &local_params {
-						isolated_ctx = isolated_ctx.with_param(name.clone(), value.clone());
-					}
-
-					// Execute the closure body
-					let block_expr = BlockPhysicalExpr {
-						block: crate::expr::Block(vec![body.clone()]),
-						// A closure body is evaluated wherever the closure is
-						// called, which need not be the statement that wrote
-						// it, so it inherits no MATCHES registrations.
-						matches_scope: None,
-					};
-					let eval_ctx = EvalContext {
-						exec_ctx: &isolated_ctx,
-						current_value: ctx.current_value,
-						local_params: Some(&local_params),
-						recursion_ctx: None,
-						document_root: ctx.document_root,
-						skip_fetch_perms: ctx.skip_fetch_perms,
-						computing_record: ctx.computing_record.clone(),
-						// The closure body is one re-entry deeper — continue the
-						// depth count so nested recursion stays bounded.
-						plan_depth: ctx.plan_depth + 1,
-					};
-
-					let result = match block_expr.evaluate(eval_ctx).await {
-						Ok(v) => v,
-						Err(crate::expr::ControlFlow::Return(v)) => v,
-						Err(crate::expr::ControlFlow::Break)
-						| Err(crate::expr::ControlFlow::Continue) => {
-							return Err(ExecError::InvalidControlFlow.into());
-						}
-						Err(e) => return Err(e),
-					};
-
-					// Coerce return value to declared type if specified
-					Ok(validate_return("ANONYMOUS", returns.as_ref(), result)?)
-				}
-				Closure::Builtin(_) => Err(anyhow::anyhow!(
-					"Builtin closures are not yet supported in the streaming executor"
-				)
-				.into()),
-			}
+			closure_field_call(&self.field, &value, &self.args, ctx).await
 		})
 	}
 
@@ -271,6 +166,138 @@ impl PhysicalExpr for ClosureFieldCallPart {
 		// body may write, so the call must be assumed to — mirroring
 		// `ClosureCallExec::access_mode` for direct closure calls.
 		AccessMode::ReadWrite
+	}
+}
+
+/// Shared semantics for `.name(args)` resolved against a closure field.
+///
+/// Looks up `name` as a field on an object receiver and invokes the closure it
+/// holds with the evaluated arguments. A non-object receiver, a missing field,
+/// or a field holding a non-closure value is the unknown-method error naming
+/// the receiver's type. Used by [`ClosureFieldCallPart`] for names absent from
+/// the method registry, and by [`MethodPart`] when a registered method has no
+/// implementation for the receiver's type.
+async fn closure_field_call(
+	field: &str,
+	value: &Value,
+	args: &[Arc<dyn PhysicalExpr>],
+	ctx: EvalContext<'_>,
+) -> FlowResult<Value> {
+	use crate::expr::Error as ExprError;
+
+	// Get the field value from the object
+	let field_value = match value {
+		Value::Object(obj) => obj.get(field).cloned(),
+		_ => None,
+	};
+
+	// Check if the field contains a closure
+	let closure = match field_value {
+		Some(Value::Closure(c)) => c,
+		_ => {
+			let type_name = value.kind_of().to_string();
+			return Err(ExecError::InvalidFunction {
+				name: field.to_string(),
+				message: format!("no such method found for the {} type", type_name),
+			}
+			.into());
+		}
+	};
+
+	// Evaluate all argument expressions
+	let mut evaluated_args = Vec::with_capacity(args.len());
+	for arg_expr in args {
+		evaluated_args.push(arg_expr.evaluate(ctx.clone()).await?);
+	}
+
+	// Invoke the closure
+	match closure.as_ref() {
+		Closure::Expr {
+			args: arg_spec,
+			returns,
+			body,
+			captures,
+		} => {
+			// Create isolated execution context with captured variables
+			let mut isolated_ctx = ctx.exec_ctx.clone();
+			for (name, value) in captures.clone() {
+				isolated_ctx = isolated_ctx.with_param(name, value);
+			}
+
+			// Check for missing required arguments
+			if arg_spec.len() > evaluated_args.len()
+				&& let Some((param, kind)) =
+					arg_spec[evaluated_args.len()..].iter().find(|(_, k)| !k.can_be_none())
+			{
+				return Err(ExprError::InvalidFunctionArguments {
+					name: "ANONYMOUS".to_string(),
+					message: format!(
+						"Expected a value of type '{}' for argument {}",
+						kind.to_sql(),
+						param.to_sql()
+					),
+				}
+				.into());
+			}
+
+			// Bind arguments to parameter names with type coercion
+			let mut local_params: HashMap<Strand, Value> = HashMap::new();
+			for ((param, kind), arg_value) in arg_spec.iter().zip(evaluated_args) {
+				let coerced = arg_value.coerce_to_kind(kind).map_err(|_| {
+					ExprError::InvalidFunctionArguments {
+						name: "ANONYMOUS".to_string(),
+						message: format!(
+							"Expected a value of type '{}' for argument {}",
+							kind.to_sql(),
+							param.to_sql()
+						),
+					}
+				})?;
+				local_params.insert(param.clone().into_strand(), coerced);
+			}
+
+			// Add parameters to the execution context
+			for (name, value) in &local_params {
+				isolated_ctx = isolated_ctx.with_param(name.clone(), value.clone());
+			}
+
+			// Execute the closure body
+			let block_expr = BlockPhysicalExpr {
+				block: crate::expr::Block(vec![body.clone()]),
+				// A closure body is evaluated wherever the closure is
+				// called, which need not be the statement that wrote
+				// it, so it inherits no MATCHES registrations.
+				matches_scope: None,
+			};
+			let eval_ctx = EvalContext {
+				exec_ctx: &isolated_ctx,
+				current_value: ctx.current_value,
+				local_params: Some(&local_params),
+				recursion_ctx: None,
+				document_root: ctx.document_root,
+				skip_fetch_perms: ctx.skip_fetch_perms,
+				computing_record: ctx.computing_record.clone(),
+				// The closure body is one re-entry deeper — continue the
+				// depth count so nested recursion stays bounded.
+				plan_depth: ctx.plan_depth + 1,
+			};
+
+			let result = match block_expr.evaluate(eval_ctx).await {
+				Ok(v) => v,
+				Err(crate::expr::ControlFlow::Return(v)) => v,
+				Err(crate::expr::ControlFlow::Break) | Err(crate::expr::ControlFlow::Continue) => {
+					return Err(ExecError::InvalidControlFlow.into());
+				}
+				Err(e) => return Err(e),
+			};
+
+			// Coerce return value to declared type if specified
+			Ok(validate_return("ANONYMOUS", returns.as_ref(), result)?)
+		}
+		Closure::Builtin(_) => {
+			Err(anyhow::anyhow!("Builtin closures are not yet supported in the streaming executor")
+				.into())
+		}
 	}
 }
 
@@ -338,13 +365,46 @@ mod tests {
 
 	#[tokio::test]
 	async fn a_typed_only_method_on_an_unlisted_receiver_type_is_rejected() {
-		// No per-type entry and no fallback: the descriptor must refuse rather
-		// than invoke an arbitrary implementation.
+		// No per-type entry and no fallback: the call degrades to a closure
+		// field call, and a non-object receiver has no fields, so the result
+		// is the unknown-method error rather than an arbitrary implementation.
 		let ctx = root_ctx();
 		let err = call("true", ".len()", &ctx).await.unwrap_err();
 		assert!(
-			err.to_string().contains("cannot be called on value of type 'bool'"),
-			"expected the unresolvable-method error, got {err}"
+			err.to_string().contains("no such method found for the bool type"),
+			"expected the unknown-method error, got {err}"
+		);
+	}
+
+	#[tokio::test]
+	async fn a_closure_field_named_after_an_unimplemented_method_is_invoked() {
+		// `get` is registered (for file receivers), so the planner emits a
+		// MethodPart rather than a ClosureFieldCallPart — but with no object
+		// implementation the closure field must still be reached, exactly as
+		// if the name had not been registered at all.
+		let ctx = root_ctx();
+		let out = call("{ get: |$x: number| $x * 2 }", ".get(4)", &ctx).await.unwrap();
+		assert_eq!(out, Value::from(8));
+	}
+
+	#[tokio::test]
+	async fn a_method_implemented_for_the_receiver_type_wins_over_a_closure_field() {
+		// `len` has an object implementation, so the builtin counts the keys;
+		// the same-named closure field must not shadow it.
+		let ctx = root_ctx();
+		let out = call("{ len: || 42, other: true }", ".len()", &ctx).await.unwrap();
+		assert_eq!(out, Value::from(2));
+	}
+
+	#[tokio::test]
+	async fn an_unimplemented_method_without_a_closure_field_is_the_unknown_method_error() {
+		// The degraded path ends exactly like ClosureFieldCallPart: colliding
+		// with a registered name earns no different error.
+		let ctx = root_ctx();
+		let err = call("{ x: 1 }", ".get('x')", &ctx).await.unwrap_err();
+		assert!(
+			err.to_string().contains("no such method found for the object type"),
+			"expected the unknown-method error, got {err}"
 		);
 	}
 
