@@ -576,6 +576,7 @@ pub async fn asynchronous(
 		//
 		"api::invoke" => api::invoke((stk, ctx, opt)).await,
 		"api::req::body" => api::req::body((stk, ctx, opt, doc)).await,
+		"api::req::max_body" => api::req::max_body((stk, ctx, opt, doc)).await,
 		"api::res::body" => api::res::body((stk, ctx, opt, doc)).await,
 		"api::timeout" => api::timeout((stk, ctx, opt, doc)).await,
 		"api::res::status" => api::res::status((stk, ctx, opt, doc)).await,

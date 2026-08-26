@@ -24,6 +24,7 @@ pub static PATHS: phf::Map<UniCase<&'static str>, (PathKind, Option<UniCase<&'st
 		UniCase::ascii("api::invoke") => (PathKind::Function, None),
 		UniCase::ascii("api::timeout") => (PathKind::Function, None),
 		UniCase::ascii("api::req::body") => (PathKind::Function, None),
+		UniCase::ascii("api::req::max_body") => (PathKind::Function, None),
 		UniCase::ascii("api::res::body") => (PathKind::Function, None),
 		UniCase::ascii("api::res::status") => (PathKind::Function, None),
 		UniCase::ascii("api::res::header") => (PathKind::Function, None),

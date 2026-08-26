@@ -140,6 +140,17 @@ define_api_middleware_function!(
 );
 
 define_api_middleware_function!(
+	ApiReqMaxBody,
+	"api::req::max_body",
+	crate::fnc::api::req::max_body,
+	Signature::new()
+		.arg("request", Kind::Object)
+		.arg("next", Kind::Function(None, None))
+		.arg("limit", Kind::Any)
+		.returns(Kind::Any)
+);
+
+define_api_middleware_function!(
 	ApiResBody,
 	"api::res::body",
 	crate::fnc::api::res::body,
@@ -198,6 +209,7 @@ define_api_middleware_function!(
 pub fn register(registry: &mut FunctionRegistry) {
 	registry.register(ApiInvoke);
 	registry.register(ApiReqBody);
+	registry.register(ApiReqMaxBody);
 	registry.register(ApiResBody);
 	registry.register(ApiResStatus);
 	registry.register(ApiResHeader);

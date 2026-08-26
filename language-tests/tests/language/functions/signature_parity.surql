@@ -61,6 +61,12 @@ error = "Incorrect arguments for function api::res::header(). Expected 3 to 4 ar
 
 [[test.results]]
 error = "Incorrect arguments for function api::res::headers(). Expected 3 arguments"
+
+[[test.results]]
+value = "'ok'"
+
+[[test.results]]
+error = "Incorrect arguments for function api::req::max_body(). Expected 3 arguments"
 */
 
 -- Optional-argument functions default to the current time on both executors
@@ -88,3 +94,5 @@ RETURN api::res::body();
 RETURN api::res::status();
 RETURN api::res::header();
 RETURN api::res::headers();
+RETURN api::req::max_body({}, |$req| "ok", 1024);
+RETURN api::req::max_body();
