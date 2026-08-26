@@ -245,8 +245,10 @@ jobs:
           set -euo pipefail
 
           # Use sudo only when present and not already root (self-hosted runners
-          # vary). Best-effort: if apt/sudo are absent or a package is already
-          # present, proceed and let any genuine gap surface in the build below.
+          # vary). Best-effort: if apt/sudo are absent or the install fails
+          # (runner images with stale apt lists 404 on package fetches),
+          # proceed — the link probe below decides whether anything the build
+          # needs is actually missing.
           SUDO=""
           if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then SUDO="sudo"; fi
 
@@ -258,6 +260,28 @@ jobs:
             $SUDO apt-get -qq -y update || true
             $SUDO apt-get -qq -y install --no-install-recommends \
               cmake g++ git libcurl4-openssl-dev libssl-dev zlib1g-dev || true
+          fi
+
+          # The cargo steps below link these system libraries directly (the
+          # fork's build.rs emits -lcurl -lssl -lcrypto -lz), and the install
+          # above is allowed to fail on images that already ship them — so
+          # prove the linker can resolve each one now. A gap must fail this
+          # provisioning step with the missing libraries named, not surface
+          # half an hour later as a bare "cannot find -lcurl" from an ld
+          # invocation deep inside the cargo build.
+          if ! command -v cc >/dev/null 2>&1; then
+            echo "::error title=Downstream compatibility::no C compiler/linker driver (cc) on this runner, and the best-effort apt-get install above could not provide one (check its output) — the cargo steps below cannot link"
+            exit 1
+          fi
+          probe="${RUNNER_TEMP}/link-probe.c"
+          echo 'int main(void) { return 0; }' > "${probe}"
+          missing=""
+          for lib in curl ssl crypto z; do
+            cc "${probe}" "-l${lib}" -o /dev/null 2>/dev/null || missing="${missing} lib${lib}"
+          done
+          if [ -n "${missing}" ]; then
+            echo "::error title=Downstream compatibility::runner is missing system link libraries required by the downstream build:${missing} (from libcurl4-openssl-dev / libssl-dev / zlib1g-dev). The best-effort apt-get install above could not provide them (check its output for the cause) — failing here instead of at link time in the cargo steps below"
+            exit 1
           fi
 
           # Reuse the cached build when present (mirrors init_deps.sh's guard;
