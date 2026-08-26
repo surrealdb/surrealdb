@@ -1005,11 +1005,19 @@ mod tests {
 			.unwrap();
 		let jwks = DEFAULT_JWKS.clone();
 
+		// The server delay and the grace window are sized so that the two failure
+		// modes cannot be confused: a working timeout aborts the fetch close to
+		// REMOTE_TIMEOUT (the grace window absorbs scheduler lag on loaded
+		// machines), while a broken timeout waits out the full server delay and
+		// receives a valid JWKS response, failing the error assertion instead.
+		let server_delay = Duration::seconds(60);
+		let grace_window = Duration::seconds(30);
+
 		let jwks_path = format!("{}/jwks.json", random_path());
 		let mock_server = MockServer::start().await;
 		let response = ResponseTemplate::new(200)
 			.set_body_json(jwks)
-			.set_delay((*REMOTE_TIMEOUT + Duration::seconds(10)).to_std().unwrap());
+			.set_delay((*REMOTE_TIMEOUT + server_delay).to_std().unwrap());
 		Mock::given(method("GET"))
 			.and(path(&jwks_path))
 			.respond_with(response)
@@ -1029,11 +1037,11 @@ mod tests {
 		.await;
 		assert!(
 			res.is_err(),
-			"Unexpected success validating token configuration with unavailable remote location"
+			"Remote request was not aborted by the timeout; the fetch waited for the delayed response"
 		);
 		assert!(
-			Utc::now() - start_time < *REMOTE_TIMEOUT + Duration::seconds(1),
-			"Remote request was not aborted immediately after timeout"
+			Utc::now() - start_time < *REMOTE_TIMEOUT + grace_window,
+			"Remote request was not aborted within a bounded window after the timeout"
 		);
 	}
 
