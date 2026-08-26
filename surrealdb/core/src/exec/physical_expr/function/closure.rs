@@ -101,8 +101,13 @@ impl PhysicalExpr for ClosureCallExec {
 	}
 
 	fn required_context(&self) -> crate::exec::ContextLevel {
-		// The closure body may require any context level, so be conservative
-		// and take the max of target and arguments
+		// The closure body is a runtime value, invisible at plan time, so
+		// this can only declare what the target and argument expressions
+		// need. The executor materializes the highest context level the
+		// session's ns/db selection supports rather than just this minimum,
+		// which is what lets a database-touching body run. Declaring
+		// `Database` here instead would wrongly reject pure closures in
+		// sessions with no database selected.
 		let target_ctx = self.target.required_context();
 		let args_ctx = args_required_context(&self.arguments);
 		target_ctx.max(args_ctx)

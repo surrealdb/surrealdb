@@ -876,52 +876,69 @@ impl Executor {
 			version_stamp: None,
 		};
 
-		// Check what level of context we need
+		// The plan's declared context level is the minimum it needs (see
+		// `ContextLevel`), not a construction target: materialize the highest
+		// level the session's ns/db selection supports. A closure that
+		// arrives as a runtime value (`LET $f = || (SELECT ...); $f()`)
+		// hides its body from the planner, so a database-touching body must
+		// find the database context already in place even though the plan
+		// only declared root. Above the declared minimum the upgrade is
+		// opportunistic — a session pointing at a missing ns/db falls back
+		// to the declared level rather than failing a statement that never
+		// needed more. At or below the minimum, resolution failures surface
+		// exactly as before.
+		//
+		// SECURITY: `USE` no longer implicitly creates namespaces for
+		// sessions without `DEFINE NAMESPACE`-equivalent authorization, so
+		// this must not paper over a missing target by writing a fresh
+		// namespace into the catalog on the read path (which would also
+		// fail on a read-only transaction). `expect_ns_by_name` /
+		// `expect_db_by_name` surface a clean `NsNotFound` / `DbNotFound`
+		// instead.
+		use crate::exec::context::ContextLevel;
 		let required_level = plan.required_context();
 
-		let exec_ctx = match required_level {
-			crate::exec::context::ContextLevel::Root => ExecutionContext::Root(root_ctx),
-			crate::exec::context::ContextLevel::Namespace => {
-				// Get namespace definition. SECURITY: `USE` no longer
-				// implicitly creates namespaces for sessions without
-				// `DEFINE NAMESPACE`-equivalent authorization, so the
-				// planner must not paper over a missing target by writing
-				// a fresh namespace into the catalog on the read path
-				// (which would also fail on a read-only transaction).
-				// `expect_ns_by_name` surfaces a clean `NsNotFound`
-				// instead.
-				let ns_name = self.opt.ns()?;
-				let ns_def = txn.expect_ns_by_name(ns_name).await?;
-				ExecutionContext::Namespace(NamespaceContext {
+		let ns_def = if required_level >= ContextLevel::Namespace {
+			Some(txn.expect_ns_by_name(self.opt.ns()?).await?)
+		} else if let Ok(ns_name) = self.opt.ns() {
+			txn.expect_ns_by_name(ns_name).await.ok()
+		} else {
+			None
+		};
+
+		let db_def = match &ns_def {
+			Some(_) if required_level >= ContextLevel::Database => {
+				Some(txn.expect_db_by_name(self.opt.ns()?, self.opt.db()?).await?)
+			}
+			Some(_) => match (self.opt.ns(), self.opt.db()) {
+				(Ok(ns_name), Ok(db_name)) => txn.expect_db_by_name(ns_name, db_name).await.ok(),
+				_ => None,
+			},
+			None => None,
+		};
+
+		let exec_ctx = match (ns_def, db_def) {
+			(Some(ns_def), Some(db_def)) => ExecutionContext::Database(DatabaseContext {
+				ns_ctx: NamespaceContext {
 					root: root_ctx,
 					ns: ns_def,
-				})
-			}
-			crate::exec::context::ContextLevel::Database => {
-				// Get namespace and database definitions. See the
-				// `Namespace` arm above for why this no longer
-				// auto-creates the target through the planner.
-				let ns_name = self.opt.ns()?;
-				let db_name = self.opt.db()?;
-				let ns_def = txn.expect_ns_by_name(ns_name).await?;
-				let db_def = txn.expect_db_by_name(ns_name, db_name).await?;
-				ExecutionContext::Database(DatabaseContext {
-					ns_ctx: NamespaceContext {
-						root: root_ctx,
-						ns: ns_def,
-					},
-					db: db_def,
-					field_state_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
-						std::collections::HashMap::new(),
-					)),
-					table_def_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
-						std::collections::HashMap::new(),
-					)),
-					index_def_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
-						std::collections::HashMap::new(),
-					)),
-				})
-			}
+				},
+				db: db_def,
+				field_state_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
+					std::collections::HashMap::new(),
+				)),
+				table_def_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
+					std::collections::HashMap::new(),
+				)),
+				index_def_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
+					std::collections::HashMap::new(),
+				)),
+			}),
+			(Some(ns_def), None) => ExecutionContext::Namespace(NamespaceContext {
+				root: root_ctx,
+				ns: ns_def,
+			}),
+			(None, _) => ExecutionContext::Root(root_ctx),
 		};
 
 		// Execute the plan
