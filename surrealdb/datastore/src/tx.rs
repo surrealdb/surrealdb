@@ -1425,6 +1425,70 @@ impl Transaction {
 		Ok(val)
 	}
 
+	/// Fetch a key from the datastore, registering the key for
+	/// commit-time conflict detection.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn getu_key<K>(&self, key: &K) -> Result<Option<<K as KVKey>::Value>>
+	where
+		K: KVKey + Debug,
+	{
+		// The conflict registration is only validated when the transaction
+		// commits, which read-only transactions never do, so a locked read
+		// on one must fail rather than silently lose its guarantee.
+		if !self.tr.writeable() {
+			anyhow::bail!(KvsError::TransactionReadonly);
+		}
+		let encoded = key.encode_key()?;
+		let key_bytes = encoded.len() as u64;
+		let val = self.tr.getu(encoded).await?;
+		let (keys_found, value_bytes) = match &val {
+			Some(v) => (1, v.len() as u64),
+			None => (0, 0),
+		};
+		self.metrics.record_get(keys_found, key_bytes, value_bytes);
+		// Build the decode context only on a hit. For `RecordKey` this
+		// avoids a `RecordId` clone (table + key) on every miss.
+		val.map(|v| <K as KVKey>::Value::kv_decode_value(&v, key.value_context())).transpose()
+	}
+
+	/// Fetch a specific record value, registering the record key for
+	/// commit-time conflict detection.
+	///
+	/// This function will return a new default initialized record if it does not exist.
+	///
+	/// The read is always issued to the underlying datastore, even when
+	/// the record is present in the transaction read cache: the conflict
+	/// registration must reach the storage engine. The fetched value
+	/// refreshes the cache afterwards.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn get_record_for_update(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		id: &RecordIdKey,
+	) -> Result<Arc<Record>> {
+		// Fetch the record from the datastore. `tx.getu_key` decodes
+		// using the storage key, so the canonical `id` is spliced back
+		// in automatically (see `RecordKey::value_context`).
+		let key = RecordKey {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+			id: Cow::Borrowed(id),
+		};
+		match self.getu_key(&key).await? {
+			Some(record) => {
+				let record = record.into_read_only();
+				let qey = cache::tx::Lookup::Record(ns, db, tb.as_str(), id);
+				let entry = cache::tx::Entry::Val(Arc::clone(&record));
+				self.cache.insert(qey, entry);
+				Ok(record)
+			}
+			None => Ok(Arc::new(Default::default())),
+		}
+	}
+
 	/// Fetch every entry in a range, with its value decoded under the type the range
 	/// says it stores.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]

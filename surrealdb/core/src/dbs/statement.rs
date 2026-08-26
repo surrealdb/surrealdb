@@ -159,10 +159,97 @@ impl ToSql for Statement<'_> {
 	}
 }
 
+/// Rejection message for a `FOR UPDATE` FROM target that is not a
+/// specific record id. Shared by the plan-time guards and the runtime
+/// re-validation in the scan operators so both executors report the same
+/// error for the same query.
+pub(crate) const FOR_UPDATE_TARGETS_ERROR: &str =
+	"SELECT ... FOR UPDATE requires record ids as targets";
+
+/// Rejection message for a `FOR UPDATE` read combined with a version,
+/// whether from a statement-level VERSION clause or an enclosing version
+/// scope. Shared for the same reason as [`FOR_UPDATE_TARGETS_ERROR`].
+pub(crate) const FOR_UPDATE_VERSION_ERROR: &str =
+	"SELECT ... FOR UPDATE cannot be combined with VERSION";
+
+/// Validate the clause combinations a `FOR UPDATE` SELECT permits.
+///
+/// `FOR UPDATE` locks the selected records for the duration of the
+/// enclosing transaction, so it only supports plain reads of specific
+/// records: VERSION, GROUP BY, and SPLIT are rejected, and every FROM
+/// target must be a record id (see [`check_for_update_targets`]).
+///
+/// LIMIT is also rejected alongside more than one FROM target: both
+/// executors stop pulling from the sources once the limit is filled, so
+/// the targets past that point would never be read and never registered
+/// for conflict detection. A single target is unaffected — it is read
+/// before the limit discards its row.
+///
+/// A no-op when the statement does not carry `FOR UPDATE`.
+pub(crate) fn validate_for_update(
+	stm: &SelectStatement,
+) -> std::result::Result<(), crate::exec::Error> {
+	use crate::expr::{Expr, Literal};
+	if !stm.for_update {
+		return Ok(());
+	}
+	if !matches!(stm.version, Expr::Literal(Literal::None)) {
+		return Err(crate::exec::Error::Query {
+			message: FOR_UPDATE_VERSION_ERROR.to_string(),
+		});
+	}
+	if stm.group.is_some() || stm.split.is_some() {
+		return Err(crate::exec::Error::Query {
+			message: "SELECT ... FOR UPDATE cannot be combined with GROUP BY or SPLIT".to_string(),
+		});
+	}
+	if stm.limit.is_some() && stm.what.len() > 1 {
+		return Err(crate::exec::Error::Query {
+			message: "SELECT ... FOR UPDATE cannot be combined with LIMIT over multiple targets"
+				.to_string(),
+		});
+	}
+	check_for_update_targets(&stm.what)
+}
+
+/// Check that every statically-classifiable FROM target of a
+/// `FOR UPDATE` SELECT is a specific (non-range) record id.
+///
+/// Targets whose shape is only known at runtime — params, function
+/// calls, and call/method postfix expressions — pass this check and
+/// must be re-validated at the site where they resolve to a value.
+pub(crate) fn check_for_update_targets(
+	what: &[crate::expr::Expr],
+) -> std::result::Result<(), crate::exec::Error> {
+	use crate::expr::{Expr, Literal, PostfixOperator, RecordIdKeyLit};
+	for expr in what {
+		match expr {
+			Expr::Literal(Literal::RecordId(rid))
+				if !matches!(rid.key, RecordIdKeyLit::Range(_)) => {}
+			Expr::Param(_) | Expr::FunctionCall(_) => {}
+			Expr::Postfix {
+				op: PostfixOperator::MethodCall(..) | PostfixOperator::Call(..),
+				..
+			} => {}
+			_ => {
+				return Err(crate::exec::Error::Query {
+					message: FOR_UPDATE_TARGETS_ERROR.to_string(),
+				});
+			}
+		}
+	}
+	Ok(())
+}
+
 impl Statement<'_> {
 	/// Check if this is a SELECT statement
 	pub(crate) fn is_select(&self) -> bool {
 		matches!(self, Statement::Select { .. })
+	}
+
+	/// Check if this is a `SELECT ... FOR UPDATE` statement
+	pub(crate) fn is_for_update(&self) -> bool {
+		matches!(self, Statement::Select { stmt, .. } if stmt.for_update)
 	}
 
 	/// Check if this is a CREATE statement

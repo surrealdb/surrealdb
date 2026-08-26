@@ -116,6 +116,14 @@ pub enum Error {
 	#[error("The underlying datastore does not support versioned queries")]
 	UnsupportedVersionedQueries,
 
+	/// The underlying datastore does not support locked reads
+	///
+	/// Returned by the default [`crate::api::Transactable::getu`]
+	/// implementation, so that an engine without a conflict-tracked read
+	/// path refuses the read rather than serving an unvalidated one.
+	#[error("The underlying datastore does not support locked reads")]
+	UnsupportedLockedReads,
+
 	/// The specified timestamp is not valid for the underlying datastore
 	#[error("The specified timestamp is not valid for the underlying datastore: {0}")]
 	TimestampInvalid(String),

@@ -70,6 +70,7 @@ pub(crate) async fn value_fetch(
 						timeout: Expr::Literal(Literal::None),
 						explain: None,
 						tempfiles: false,
+						for_update: false,
 					};
 					*this = crate::legacy::value_get(
 						&crate::legacy::select_statement_compute(&stm, stk, ctx, opt, None)
@@ -300,6 +301,7 @@ pub(crate) async fn value_fetch(
 				timeout: Expr::Literal(Literal::None),
 				explain: None,
 				tempfiles: false,
+				for_update: false,
 			};
 			*this =
 				crate::legacy::select_statement_compute(&stm, stk, ctx, opt, None).await?.first();

@@ -503,6 +503,35 @@ pub trait Transactable: Send + Sync {
 	/// Fetch a key from the datastore.
 	fn get<'a>(&'a self, key: Key<'a>, version: Option<u64>) -> BoxFut<'a, Result<Option<Val>>>;
 
+	/// Fetch a key from the datastore, registering the key for
+	/// commit-time conflict detection.
+	///
+	/// A transaction that reads a key with this method commits
+	/// successfully only if no other transaction commits a write to the
+	/// key after this transaction's snapshot was established. The
+	/// registration is only validated when the transaction commits, so
+	/// implementations must reject calls on non-writeable transactions
+	/// with [`crate::err::Error::TransactionReadonly`]. The default
+	/// implementation rejects the call with
+	/// [`crate::err::Error::UnsupportedLockedReads`] so that an engine
+	/// without a conflict-tracked read path can never silently serve an
+	/// unvalidated read: engines with such a path must override this
+	/// with the read that arms their conflict-detection machinery, and
+	/// engines whose commit protocol already validates every read
+	/// against the snapshot may override it with a plain read.
+	///
+	/// Whether a registration taken inside a savepoint scope survives
+	/// [`Transactable::rollback_to_save_point`] is engine-defined:
+	/// engines built on rollback-scoped conflict tracking release it
+	/// with the scope, while engines with monotonic read tracking keep
+	/// it armed. Callers that must keep the guarantee across a rollback
+	/// re-issue the locked read afterwards rather than relying on
+	/// either behaviour.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	fn getu<'a>(&'a self, key: Key<'a>) -> BoxFut<'a, Result<Option<Val>>> {
+		Box::pin(async move { Err(Error::UnsupportedLockedReads) })
+	}
+
 	/// Insert or update a key in the datastore.
 	fn set<'a>(&'a self, key: Key<'a>, val: Val) -> BoxFut<'a, Result<()>>;
 

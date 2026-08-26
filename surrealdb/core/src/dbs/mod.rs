@@ -43,7 +43,10 @@ pub(crate) use self::options::{Force, NoWriteFrame, Options};
 pub use self::session::{AuthPrincipalSnapshot, Session};
 pub(crate) use self::session::{durable_session, restore_session};
 pub(crate) use self::sort_error::SortError;
-pub(crate) use self::statement::Statement;
+pub(crate) use self::statement::{
+	FOR_UPDATE_TARGETS_ERROR, FOR_UPDATE_VERSION_ERROR, Statement, check_for_update_targets,
+	validate_for_update,
+};
 pub(crate) use self::statement_counters::StatementCounters;
 pub use self::stream::{QueryItemStream, QueryStreamJob};
 pub use crate::catalog::node;

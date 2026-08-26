@@ -613,6 +613,16 @@ impl Iterator {
 			.run(|stk| crate::legacy::expr_compute(expr, stk, ctx, opt, doc))
 			.await
 			.catch_return()?;
+		// FOR UPDATE targets must resolve to specific (non-range) record ids
+		// so the locked read is never silently skipped for other shapes.
+		if stm_ctx.stm.is_for_update() {
+			ensure!(
+				matches!(&v, Value::RecordId(rid) if !rid.key.is_range()),
+				ExecError::Query {
+					message: crate::dbs::FOR_UPDATE_TARGETS_ERROR.to_string(),
+				}
+			);
+		}
 		match v {
 			Value::Table(table_name) => {
 				self.prepare_table(ctx, opt, stk, planner, stm_ctx, doc_ctx, &table_name).await?
@@ -897,6 +907,8 @@ impl Iterator {
 	/// without changing the semantics of the query.
 	///
 	/// What this actually checks (mirrors the code below):
+	/// - FOR UPDATE: disallowed, because every target record must still be fetched through the
+	///   locked read even when START discards it from the results. → false
 	/// - GROUP BY: disallowed, because grouping changes the result count/order. → false
 	/// - Multiple iterators: disallowed, because START must apply to the merged set. → false
 	/// - WHERE: allowed only if the sole iterator is an index whose executor applies the WHERE
@@ -910,6 +922,12 @@ impl Iterator {
 	/// performed by the index itself and, if ORDER BY is used, the iterator natively yields
 	/// rows in the required order.
 	fn can_start_skip(&self, ctx: &FrozenContext, stm: &Statement<'_>) -> bool {
+		// FOR UPDATE locks every record the FROM targets resolve to,
+		// including records discarded by START, so START cannot be pushed
+		// down to a storage-level skip that would bypass the locked read
+		if stm.is_for_update() {
+			return false;
+		}
 		// GROUP BY operations change the result structure and count
 		if stm.group().is_some() {
 			return false;

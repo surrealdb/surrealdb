@@ -563,6 +563,7 @@ ast_type! {
 		pub version: Option<NodeId<Expr>>,
 		pub timeout: Option<NodeId<Expr>>,
 		pub fetch: Option<NodeListId<Expr>>,
+		pub for_update: bool,
 		pub tempfiles: bool,
 		pub explain: Option<ExplainClause>,
 	}

@@ -706,6 +706,9 @@ impl<'ctx> Planner<'ctx> {
 		&self,
 		select: crate::expr::statements::SelectStatement,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
+		// Reject clause combinations FOR UPDATE does not support (VERSION,
+		// GROUP BY, SPLIT, and statically-classifiable non-record targets).
+		crate::dbs::validate_for_update(&select)?;
 		let crate::expr::statements::SelectStatement {
 			fields,
 			omit,
@@ -723,9 +726,21 @@ impl<'ctx> Planner<'ctx> {
 			timeout,
 			explain: _,
 			tempfiles,
+			for_update,
 		} = select;
 
 		let version = extract_version(version, self).await?;
+
+		// A FOR UPDATE read locks current record state; a versioned read
+		// (here always inherited from an enclosing version scope, as a
+		// statement-level VERSION clause is already rejected above) would
+		// make the lock meaningless.
+		if for_update && (version.is_some() || self.version.is_some()) {
+			return Err(ExecError::Query {
+				message: crate::dbs::FOR_UPDATE_VERSION_ERROR.to_string(),
+			}
+			.into());
+		}
 
 		// COUNT fast-path
 		if is_count_all_eligible(&fields, &group, &cond, &split, &order, &fetch, &omit, &what) {
@@ -873,7 +888,8 @@ impl<'ctx> Planner<'ctx> {
 				None,
 				needed_fields.as_ref(),
 			);
-			let mut scan = RecordIdScan::new(rid_expr, version.clone(), needed_fields, None);
+			let mut scan = RecordIdScan::new(rid_expr, version.clone(), needed_fields, None)
+				.with_for_update(for_update);
 			if let Some(tc) = resolved_table_ctx {
 				scan = scan.with_resolved(tc);
 			}
@@ -908,6 +924,14 @@ impl<'ctx> Planner<'ctx> {
 		// type::table($name) are rewritten to concrete Expr::Table nodes
 		// before any downstream checks.
 		self.resolve_source_exprs(&mut what).await;
+
+		// Re-classify FOR UPDATE targets now that params and function calls
+		// have been resolved where possible: a target that resolved to a
+		// non-record source is rejected here, while targets that stay
+		// dynamic are re-validated by the scan operators at execution time.
+		if for_update {
+			crate::dbs::check_for_update_targets(&what)?;
+		}
 
 		let is_value_source = all_value_sources(&what);
 		let primary_table = literal_primary_table.or_else(|| {
@@ -950,6 +974,7 @@ impl<'ctx> Planner<'ctx> {
 			Planner::new(self.ctx, self.function_registry)
 		}
 		.with_version(version.clone())
+		.with_for_update(for_update)
 		.with_cycle_guard(self.cycle_guard());
 		if let Some(ref auth) = self.auth {
 			pp = pp.with_auth(Arc::clone(auth));
@@ -1462,7 +1487,8 @@ impl<'ctx> Planner<'ctx> {
 				needed_fields.as_ref(),
 			);
 			let mut scan =
-				RecordIdScan::new(record_id_expr, version, needed_fields, scan_predicate.clone());
+				RecordIdScan::new(record_id_expr, version, needed_fields, scan_predicate.clone())
+					.with_for_update(self.for_update);
 			if let Some(tc) = resolved_table_ctx {
 				scan = scan.with_resolved(tc);
 			}
@@ -1661,12 +1687,10 @@ impl<'ctx> Planner<'ctx> {
 					.physical_expr(Expr::Literal(crate::expr::literal::Literal::RecordId(rid)))
 					.await?;
 				Ok(PlannedSource {
-					operator: Arc::new(RecordIdScan::new(
-						record_id_expr,
-						version,
-						needed_fields,
-						None,
-					)) as Arc<dyn ExecOperator>,
+					operator: Arc::new(
+						RecordIdScan::new(record_id_expr, version, needed_fields, None)
+							.with_for_update(self.for_update),
+					) as Arc<dyn ExecOperator>,
 					filter_action: FilterAction::UseOriginal,
 					limit_pushed: false,
 					topk_pushdown: None,
@@ -1692,6 +1716,25 @@ impl<'ctx> Planner<'ctx> {
 			// Expr::Table / Expr::Literal by resolve_source_exprs().
 			// Any remaining Expr::Param is unresolvable at plan time.
 			Expr::Param(_) => {
+				// Under FOR UPDATE the param must resolve to a record id at
+				// execution time; DynamicScan performs the locked lookup and
+				// rejects every other value shape.
+				if self.for_update {
+					return self
+						.plan_dynamic_scan(
+							expr,
+							version,
+							cond,
+							order,
+							with,
+							needed_fields,
+							scan_predicate,
+							scan_limit,
+							scan_start,
+							knn_ctx,
+						)
+						.await;
+				}
 				let phys_expr = self.physical_expr(expr).await?;
 				Ok(PlannedSource {
 					operator: Arc::new(SourceExpr::new(phys_expr)) as Arc<dyn ExecOperator>,
@@ -2449,7 +2492,8 @@ impl<'ctx> Planner<'ctx> {
 					dyn_start,
 				)
 				.with_knn_context(knn_ctx)
-				.with_pre_decode_filter(pdf),
+				.with_pre_decode_filter(pdf)
+				.with_for_update(self.for_update),
 			) as Arc<dyn ExecOperator>,
 			filter_action,
 			limit_pushed,

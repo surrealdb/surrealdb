@@ -149,7 +149,8 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
             Expr::Literal(Literal::Integer(3)),
         ]))))], close: None })), "IF true {\n\t1;\n\t2;\n} ELSE IF false { 3 }", "IF true {\n\n\t1;\n\t2;\n} ELSE IF false { 3 }")]
 // Expression: Select
-#[case::expr_select(Expr::Select(Box::new(SelectStatement { fields: Fields::all(), omit: vec![], only: false, what: vec![Expr::Table("user".into())], with: None, cond: None, split: None, group: None, order: None, limit: None, start: None, fetch: None, version: Expr::Literal(Literal::None), timeout: Expr::Literal(Literal::None), explain: None, tempfiles: false })), "SELECT * FROM user", "SELECT * FROM user")]
+#[case::expr_select(Expr::Select(Box::new(SelectStatement { fields: Fields::all(), omit: vec![], only: false, what: vec![Expr::Table("user".into())], with: None, cond: None, split: None, group: None, order: None, limit: None, start: None, fetch: None, version: Expr::Literal(Literal::None), timeout: Expr::Literal(Literal::None), explain: None, tempfiles: false, for_update: false })), "SELECT * FROM user", "SELECT * FROM user")]
+#[case::expr_select_for_update(Expr::Select(Box::new(SelectStatement { fields: Fields::all(), omit: vec![], only: false, what: vec![Expr::Table("user".into())], with: None, cond: None, split: None, group: None, order: None, limit: None, start: None, fetch: None, version: Expr::Literal(Literal::None), timeout: Expr::Literal(Literal::None), explain: None, tempfiles: false, for_update: true })), "SELECT * FROM user FOR UPDATE", "SELECT * FROM user FOR UPDATE")]
 // Expression: Create
 #[case::expr_create(Expr::Create(Box::new(CreateStatement { only: false, what: vec![Expr::Table("user".into())], data: None, output: None, timeout: Expr::Literal(Literal::None) })), "CREATE user", "CREATE user")]
 // Expression: Update
@@ -257,7 +258,8 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
             version: Expr::Literal(Literal::None),
             timeout: Expr::Literal(Literal::None),
             explain: None,
-            tempfiles: false
+            tempfiles: false,
+            for_update: false
         })),
         block: Block(vec![
             Expr::IfElse(Box::new(IfelseStatement {

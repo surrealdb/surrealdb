@@ -763,6 +763,23 @@ impl Transactable for IndxdbTx {
 		})
 	}
 
+	// This engine's commit protocol revalidates every read against its
+	// recorded value, so a plain read carries the `getu` guarantee — but
+	// only on a writeable transaction, as read-only transactions never
+	// commit and would silently discard the registration.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
+	fn getu<'a>(&'a self, key: Key<'a>) -> BoxFut<'a, KvsResult<Option<Val>>> {
+		Box::pin(async move {
+			if self.closed() {
+				return Err(KvsError::TransactionFinished);
+			}
+			if !self.writeable() {
+				return Err(KvsError::TransactionReadonly);
+			}
+			self.get_op(key).await
+		})
+	}
+
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.to_string()))]
 	fn set<'a>(&'a self, key: Key<'a>, val: Val) -> BoxFut<'a, KvsResult<()>> {
 		Box::pin(self.set_op(key, val))

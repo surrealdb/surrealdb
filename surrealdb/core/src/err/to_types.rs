@@ -106,7 +106,9 @@ fn into_types_error_inner(error: Error, message: String) -> TypesError {
 			KvsError::TransactionFinished
 			| KvsError::TransactionReadonly
 			| KvsError::TransactionConditionNotMet => TypesError::query(message, None),
-			KvsError::UnsupportedVersionedQueries => TypesError::configuration(message, None),
+			KvsError::UnsupportedVersionedQueries | KvsError::UnsupportedLockedReads => {
+				TypesError::configuration(message, None)
+			}
 			KvsError::Datastore(_)
 			| KvsError::Transaction(_)
 			| KvsError::NoSavepoint

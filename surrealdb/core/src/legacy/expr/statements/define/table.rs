@@ -296,6 +296,7 @@ pub(crate) async fn define_table_statement_initialize_materialized_view(
 		timeout: Expr::Literal(Literal::None),
 		explain: None,
 		tempfiles: false,
+		for_update: false,
 	};
 
 	let Value::Array(Array(v)) =
@@ -543,6 +544,7 @@ pub(crate) async fn define_table_statement_initialize_aggregate_view(
 		timeout: Expr::Literal(Literal::None),
 		explain: None,
 		tempfiles: false,
+		for_update: false,
 	};
 	let res = crate::legacy::select_statement_compute(&stmt, stk, ctx, opt, None).await?;
 	let Value::Array(res) = res else {

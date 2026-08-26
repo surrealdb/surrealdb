@@ -1340,6 +1340,7 @@ pub trait RpcProtocol {
 			timeout: Expr::Literal(Literal::None),
 			explain: None,
 			tempfiles: false,
+			for_update: false,
 		};
 		let ast = Ast::single_expr(Expr::Select(Box::new(sql)));
 

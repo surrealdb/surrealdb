@@ -64,6 +64,8 @@ pub(crate) async fn select_statement_compute(
 ) -> Result<Value> {
 	// Valid options?
 	opt.valid_for_db()?;
+	// Reject clause combinations FOR UPDATE does not support
+	crate::dbs::validate_for_update(this)?;
 	// Assign the statement
 	let stm = Statement::from_select(stk, ctx, opt, parent_doc, this).await?;
 	// Create a new iterator
@@ -78,7 +80,19 @@ pub(crate) async fn select_statement_compute(
 		.cast_to::<Option<Datetime>>()?
 		.map(|x| x.to_version_stamp(ts_impl.as_ref()))
 		.transpose()?;
-	let opt = Arc::new(opt.clone().with_version(version.or(opt.version)));
+	let opt = Arc::new(
+		opt.clone().with_version(version.or(opt.version)).with_for_update(this.for_update),
+	);
+	// A FOR UPDATE read locks current record state; a versioned read
+	// (here always inherited from an enclosing version scope, as a
+	// statement-level VERSION clause is already rejected above) would
+	// make the lock meaningless.
+	ensure!(
+		!(this.for_update && opt.version.is_some()),
+		ExecError::Query {
+			message: crate::dbs::FOR_UPDATE_VERSION_ERROR.to_string(),
+		}
+	);
 
 	// Extract the limits
 	iterator.setup_limit(stk, ctx, &opt, &stm).await?;

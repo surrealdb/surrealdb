@@ -683,6 +683,7 @@ pub(crate) async fn value_get(
 							timeout: Expr::Literal(Literal::None),
 							explain: None,
 							tempfiles: false,
+							for_update: false,
 						};
 
 						let res = stk

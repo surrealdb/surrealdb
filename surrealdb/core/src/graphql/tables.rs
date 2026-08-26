@@ -367,6 +367,7 @@ fn select_all_from_record(rid: &RecordId, version: &Option<Datetime>) -> SelectS
 		fetch: None,
 		explain: None,
 		tempfiles: false,
+		for_update: false,
 	}
 }
 
@@ -400,6 +401,7 @@ fn select_field_from_record(
 		fetch: None,
 		explain: None,
 		tempfiles: false,
+		for_update: false,
 	}
 }
 
@@ -432,6 +434,7 @@ fn select_all_from_table(
 		fetch: None,
 		explain: None,
 		tempfiles: false,
+		for_update: false,
 	}
 }
 
@@ -3183,6 +3186,7 @@ fn make_table_aggregate_field(
 				fetch: None,
 				explain: None,
 				tempfiles: false,
+				for_update: false,
 			};
 			let res = execute_select(&kvs, sess, stmt).await?;
 
@@ -3382,6 +3386,7 @@ async fn run_connection_total_count(
 		fetch: None,
 		explain: None,
 		tempfiles: false,
+		for_update: false,
 	};
 	let res = execute_select(&q.kvs, sess, stmt).await?;
 	let arr = match res {

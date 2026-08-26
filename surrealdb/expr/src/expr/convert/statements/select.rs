@@ -24,6 +24,7 @@ impl From<SelectStatement> for crate::expr::statements::SelectStatement {
 			timeout: v.timeout.into(),
 			explain: v.explain.map(Into::into),
 			tempfiles: v.tempfiles,
+			for_update: v.for_update,
 		}
 	}
 }
@@ -47,6 +48,7 @@ impl From<crate::expr::statements::SelectStatement> for SelectStatement {
 			timeout: v.timeout.into(),
 			explain: v.explain.map(Into::into),
 			tempfiles: v.tempfiles,
+			for_update: v.for_update,
 		}
 	}
 }

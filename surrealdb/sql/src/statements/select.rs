@@ -26,6 +26,7 @@ pub struct SelectStatement {
 	pub timeout: Expr,
 	pub explain: Option<Explain>,
 	pub tempfiles: bool,
+	pub for_update: bool,
 }
 
 impl ToSql for SelectStatement {
@@ -68,6 +69,9 @@ impl ToSql for SelectStatement {
 		}
 		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
 			write_sql!(f, fmt, " TIMEOUT {}", CoverStmts(&self.timeout));
+		}
+		if self.for_update {
+			write_sql!(f, fmt, " FOR UPDATE");
 		}
 		if let Some(ref v) = self.explain {
 			write_sql!(f, fmt, " {v}");

@@ -57,6 +57,9 @@ pub struct RecordIdScan {
 	/// Plan-time resolved table context. When present, `execute_record_lookup`
 	/// skips runtime `get_table_def()` and `build_field_state()` entirely.
 	pub(crate) resolved: Option<ResolvedTableContext>,
+	/// Whether the lookup is a locked read (`SELECT ... FOR UPDATE`),
+	/// registering the record key for commit-time conflict detection.
+	pub(crate) for_update: bool,
 	/// Predicate pre-decode filter status (plan-time); see [`PreDecodeFilterStatus`].
 	pub(crate) pre_decode_filter_status: PreDecodeFilterStatus,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
@@ -76,6 +79,7 @@ impl RecordIdScan {
 			needed_fields,
 			predicate,
 			resolved: None,
+			for_update: false,
 			pre_decode_filter_status: PreDecodeFilterStatus::NotApplicable,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
@@ -84,6 +88,12 @@ impl RecordIdScan {
 	/// Set the plan-time resolved table context.
 	pub(crate) fn with_resolved(mut self, resolved: ResolvedTableContext) -> Self {
 		self.resolved = Some(resolved);
+		self
+	}
+
+	/// Set whether the lookup performs a locked read (`FOR UPDATE`).
+	pub(crate) fn with_for_update(mut self, for_update: bool) -> Self {
+		self.for_update = for_update;
 		self
 	}
 
@@ -109,6 +119,9 @@ impl ExecOperator for RecordIdScan {
 		if let Some(s) = self.pre_decode_filter_status.explain_text() {
 			attrs.push(("pre_decode_filter".to_string(), s.to_string()));
 		}
+		if self.for_update {
+			attrs.push(("for_update".to_string(), "true".to_string()));
+		}
 		attrs
 	}
 
@@ -117,7 +130,14 @@ impl ExecOperator for RecordIdScan {
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		let mut mode = self.record_id.access_mode();
+		// A locked read registers conflict-detection state on the storage
+		// engine, which requires a writeable transaction.
+		let mut mode = if self.for_update {
+			AccessMode::ReadWrite
+		} else {
+			AccessMode::ReadOnly
+		};
+		mode = mode.combine(self.record_id.access_mode());
 		if let Some(ref version) = self.version {
 			mode = mode.combine(version.access_mode());
 		}
@@ -179,6 +199,7 @@ impl ExecOperator for RecordIdScan {
 		let needed_fields = self.needed_fields.clone();
 		let predicate = self.predicate.clone();
 		let resolved = self.resolved.clone();
+		let for_update = self.for_update;
 		let pre_decode_filter_status = self.pre_decode_filter_status.clone();
 		let ctx = ctx.clone();
 
@@ -190,6 +211,15 @@ impl ExecOperator for RecordIdScan {
 			let rid = match rid_value {
 				Value::RecordId(rid) => rid,
 				other => {
+					// FOR UPDATE targets must resolve to specific record ids
+					// so the locked read is never silently skipped.
+					if for_update {
+						return Err(ControlFlow::Err(anyhow::Error::new(
+							crate::exec::Error::Query {
+								message: crate::dbs::FOR_UPDATE_TARGETS_ERROR.to_string(),
+							},
+						)));
+					}
 					// If the expression didn't produce a RecordId, yield as-is
 					// (defensive fallback — the planner should only route RecordIds here)
 					yielder.emit(ValueBatch::new(vec![other])).await;
@@ -206,6 +236,7 @@ impl ExecOperator for RecordIdScan {
 			let results = execute_record_lookup(
 				&rid,
 				version,
+				for_update,
 				check_perms,
 				needed_fields.as_ref(),
 				&ctx,
@@ -242,12 +273,19 @@ impl ExecOperator for RecordIdScan {
 /// runtime, it forwards its pushed-down values here so that the results are
 /// correctly filtered and bounded.
 ///
+/// `for_update` makes the point lookup a locked read: the record key is
+/// registered on the storage engine for commit-time conflict detection,
+/// including when the record does not exist. It is incompatible with a
+/// `version` and with range keys — both are rejected here so a locked read
+/// is never silently downgraded.
+///
 /// This is the single implementation of RecordId-based data access, shared
 /// by `RecordIdScan` (plan-time) and `DynamicScan` (runtime-discovered).
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_record_lookup(
 	rid: &RecordId,
 	version: Option<u64>,
+	for_update: bool,
 	check_perms: bool,
 	needed_fields: Option<&std::collections::HashSet<String>>,
 	ctx: &ExecutionContext,
@@ -263,6 +301,19 @@ pub(crate) async fn execute_record_lookup(
 	let txn = ctx.txn();
 	let ns = Arc::clone(&db_ctx.ns_ctx.ns);
 	let db = Arc::clone(&db_ctx.db);
+
+	if for_update {
+		if version.is_some() {
+			return Err(ControlFlow::Err(anyhow::Error::new(crate::exec::Error::Query {
+				message: crate::dbs::FOR_UPDATE_VERSION_ERROR.to_string(),
+			})));
+		}
+		if rid.key.is_range() {
+			return Err(ControlFlow::Err(anyhow::Error::new(crate::exec::Error::Query {
+				message: crate::dbs::FOR_UPDATE_TARGETS_ERROR.to_string(),
+			})));
+		}
+	}
 
 	// 1. Check table existence and resolve SELECT permission.
 	// Use plan-time resolved context if available, otherwise runtime lookups.
@@ -378,9 +429,12 @@ pub(crate) async fn execute_record_lookup(
 		}
 		_ => {
 			// --- Point lookup ---
-			let Some(value) =
+			let fetched = if for_update {
+				crate::exec::operators::fetch::fetch_raw_record_for_update(ctx, rid).await?
+			} else {
 				crate::exec::operators::fetch::fetch_raw_record(ctx, rid, version).await?
-			else {
+			};
+			let Some(value) = fetched else {
 				return Ok(vec![]);
 			};
 

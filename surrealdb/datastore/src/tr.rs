@@ -103,6 +103,13 @@ impl Transactor {
 		self.inner.get(key, version).await
 	}
 
+	/// Fetch a key from the datastore, registering the key for
+	/// commit-time conflict detection.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	pub async fn getu(&self, key: Key<'_>) -> Result<Option<Val>> {
+		self.inner.getu(key).await
+	}
+
 	/// Fetch many keys from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn getm(&self, keys: &[Key<'_>], version: Option<u64>) -> Result<GetMultiResult> {

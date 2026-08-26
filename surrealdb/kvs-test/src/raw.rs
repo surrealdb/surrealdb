@@ -48,6 +48,73 @@ async fn get(b: &TestBackend) {
 	tx.cancel().await.unwrap();
 }
 
+/// `getu` reads exactly like `get` — the committed value for an existing
+/// key, `None` for an absent one — while additionally registering the key
+/// for commit-time conflict detection (asserted in the `multi` tests).
+/// Engines without a conflict-tracked read path reject `getu` instead; see
+/// [`getu_unsupported`].
+async fn getu(b: &TestBackend) {
+	// Create a new datastore
+	let ds = b.create_ds().await;
+	// Create a writeable transaction
+	let tx = ds.transaction(Write).await.unwrap();
+	tx.put("test".as_bytes().into(), "ok".as_bytes().to_vec()).await.unwrap();
+	tx.commit().await.unwrap();
+	// Create a writeable transaction
+	let tx = ds.transaction(Write).await.unwrap();
+	let val = tx.getu("test".as_bytes().into()).await.unwrap();
+	assert!(matches!(val.as_deref(), Some(b"ok")));
+	let val = tx.get("test".as_bytes().into(), None).await.unwrap();
+	assert!(matches!(val.as_deref(), Some(b"ok")));
+	let val = tx.getu("none".as_bytes().into()).await.unwrap();
+	assert!(val.as_deref().is_none());
+	tx.cancel().await.unwrap();
+}
+
+/// A `getu` registration is only validated when the transaction commits,
+/// which read-only transactions never do, so every engine with a locked
+/// read rejects it on a read-only transaction rather than degrading it to
+/// a plain `get` whose conflict guarantee would be silently discarded.
+/// Engines without locked-read support are excluded: they refuse `getu`
+/// on any transaction (see [`getu_unsupported`]), so this assertion would
+/// hold there for the wrong reason.
+async fn getu_readonly(b: &TestBackend) {
+	// Create a new datastore
+	let ds = b.create_ds().await;
+	// Create a writeable transaction
+	let tx = ds.transaction(Write).await.unwrap();
+	tx.put("test".as_bytes().into(), "ok".as_bytes().to_vec()).await.unwrap();
+	tx.commit().await.unwrap();
+	// Create a readonly transaction
+	let tx = ds.transaction(Read).await.unwrap();
+	let err = tx.getu("test".as_bytes().into()).await.unwrap_err();
+	assert!(
+		err.to_string().contains("read only"),
+		"expected a read-only transaction error, got: {err}"
+	);
+	tx.cancel().await.unwrap();
+}
+
+/// Engines without a conflict-tracked read path must reject `getu` with an
+/// explicit error rather than silently falling back to a plain `get`, which
+/// would drop the commit-time conflict guarantee callers rely on.
+async fn getu_unsupported(b: &TestBackend) {
+	// Create a new datastore
+	let ds = b.create_ds().await;
+	// Create a writeable transaction
+	let tx = ds.transaction(Write).await.unwrap();
+	tx.put("test".as_bytes().into(), "ok".as_bytes().to_vec()).await.unwrap();
+	tx.commit().await.unwrap();
+	// Create a writeable transaction
+	let tx = ds.transaction(Write).await.unwrap();
+	let err = tx.getu("test".as_bytes().into()).await.unwrap_err();
+	assert!(
+		err.to_string().contains("does not support locked reads"),
+		"expected an explicit unsupported error, got: {err}"
+	);
+	tx.cancel().await.unwrap();
+}
+
 async fn set(b: &TestBackend) {
 	// Create a new datastore
 	let ds = b.create_ds().await;
@@ -1082,6 +1149,9 @@ async fn cursor_for_each_respects_skip_both_directions(b: &TestBackend) {
 kvs_test!(initialise);
 kvs_test!(exists);
 kvs_test!(get);
+kvs_test!(getu, except = [surrealds]);
+kvs_test!(getu_readonly, except = [surrealds]);
+kvs_test!(getu_unsupported, only = [surrealds]);
 kvs_test!(set);
 kvs_test!(put);
 kvs_test!(putc);

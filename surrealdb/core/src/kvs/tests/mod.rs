@@ -16,6 +16,8 @@ mod keyspace_test;
 mod reclaim_test;
 #[cfg(feature = "kv-mem")]
 mod rpc_session_test;
+#[cfg(feature = "kv-rocksdb")]
+mod select_for_update_test;
 #[cfg(feature = "kv-tikv")]
 mod sequences_tikv_test;
 #[cfg(feature = "kv-mem")]

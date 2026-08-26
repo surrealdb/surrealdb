@@ -2237,7 +2237,8 @@ pub fn parse_for() {
 					version: Expr::Literal(Literal::None),
 					timeout: Expr::Literal(Literal::None),
 					explain: None,
-					tempfiles: false
+					tempfiles: false,
+					for_update: false
 				}))),
 				op: BinaryOperator::Multiply,
 				right: Box::new(Expr::Literal(Literal::Integer(2)))
@@ -2601,7 +2602,8 @@ fn parse_insert_select() {
 				version: Expr::Literal(Literal::None),
 				timeout: Expr::Literal(Literal::None),
 				explain: None,
-				tempfiles: false
+				tempfiles: false,
+				for_update: false
 			}))),
 			ignore: true,
 			update: None,
@@ -2610,6 +2612,50 @@ fn parse_insert_select() {
 			relation: false,
 		})),
 	)
+}
+
+#[test]
+fn parse_select_for_update() {
+	let res = crate::parse_with(
+		r#"SELECT * FROM ONLY a:b FOR UPDATE"#.as_bytes(),
+		async |parser, stk| parser.parse_expr_inherit(stk).await,
+	)
+	.unwrap();
+	assert_eq!(
+		res,
+		Expr::Select(Box::new(SelectStatement {
+			fields: Fields::all(),
+			omit: vec![],
+			only: true,
+			what: vec![Expr::Literal(Literal::RecordId(RecordIdLit {
+				table: "a".into(),
+				key: RecordIdKeyLit::String("b".into()),
+			}))],
+			with: None,
+			cond: None,
+			split: None,
+			group: None,
+			order: None,
+			limit: None,
+			start: None,
+			fetch: None,
+			version: Expr::Literal(Literal::None),
+			timeout: Expr::Literal(Literal::None),
+			explain: None,
+			tempfiles: false,
+			for_update: true,
+		}))
+	);
+}
+
+#[test]
+fn parse_select_for_update_roundtrip() {
+	use surrealdb_types::ToSql;
+	let src = r#"SELECT * FROM ONLY a:b FOR UPDATE"#;
+	let res =
+		crate::parse_with(src.as_bytes(), async |parser, stk| parser.parse_expr_inherit(stk).await)
+			.unwrap();
+	assert_eq!(res.to_sql(), src);
 }
 
 #[test]

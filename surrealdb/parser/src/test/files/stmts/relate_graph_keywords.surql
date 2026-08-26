@@ -124,6 +124,7 @@ Query
                                 .version: None
                                 .timeout: None
                                 .fetch: None
+                                .for_update: false
                                 .tempfiles: false
                                 .explain: None
                     .data: None
@@ -167,6 +168,7 @@ Query
                             .version: None
                             .timeout: None
                             .fetch: None
+                            .for_update: false
                             .tempfiles: false
                             .explain: None
                     .data: None

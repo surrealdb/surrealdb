@@ -706,6 +706,7 @@ impl Document {
 				timeout: Expr::Literal(Literal::None),
 				explain: None,
 				tempfiles: false,
+				for_update: false,
 			};
 
 			let value = stk
@@ -1137,6 +1138,7 @@ impl Document {
 				timeout: Expr::Literal(Literal::None),
 				explain: None,
 				tempfiles: false,
+				for_update: false,
 			};
 
 			let value = stk

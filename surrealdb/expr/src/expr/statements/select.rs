@@ -36,6 +36,11 @@ pub struct SelectStatement {
 	pub timeout: Expr,
 	pub explain: Option<Explain>,
 	pub tempfiles: bool,
+	/// Whether the read locks the selected records for the duration of
+	/// the transaction.
+	///
+	/// The FOR UPDATE part in `SELECT * FROM foo FOR UPDATE`.
+	pub for_update: bool,
 }
 
 impl SelectStatement {
@@ -47,8 +52,12 @@ impl SelectStatement {
 	/// executor picks the transaction type from this before the statement is
 	/// planned, so a clause omitted here would let a mutation reach a
 	/// read-only transaction and fail partway through the statement.
+	/// A `FOR UPDATE` read always requires a write transaction: the locked
+	/// reads register the fetched keys for commit-time conflict detection,
+	/// which storage engines only support on writeable transactions.
 	pub fn read_only(&self) -> bool {
-		self.fields.read_only()
+		!self.for_update
+			&& self.fields.read_only()
 			&& self.omit.iter().all(|v| v.read_only())
 			&& self.what.iter().all(|v| v.read_only())
 			&& self.cond.as_ref().map(|x| x.0.read_only()).unwrap_or(true)

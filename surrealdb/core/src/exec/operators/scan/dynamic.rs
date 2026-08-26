@@ -82,6 +82,10 @@ pub struct DynamicScan {
 	pub(crate) knn_context: Option<Arc<crate::exec::function::KnnContext>>,
 	/// Predicate pre-decode filter status (plan-time); see [`PreDecodeFilterStatus`].
 	pub(crate) pre_decode_filter_status: PreDecodeFilterStatus,
+	/// Whether the scan is a locked read (`SELECT ... FOR UPDATE`). The
+	/// source must then resolve to a specific record id at execution time;
+	/// every other value shape is rejected.
+	pub(crate) for_update: bool,
 }
 
 impl DynamicScan {
@@ -111,12 +115,19 @@ impl DynamicScan {
 			metrics: Arc::new(OperatorMetrics::new()),
 			knn_context: None,
 			pre_decode_filter_status: PreDecodeFilterStatus::NotApplicable,
+			for_update: false,
 		}
 	}
 
 	/// Set plan-time pre-decode filter status for EXPLAIN and execution.
 	pub(crate) fn with_pre_decode_filter(mut self, status: PreDecodeFilterStatus) -> Self {
 		self.pre_decode_filter_status = status;
+		self
+	}
+
+	/// Set whether the scan performs a locked read (`FOR UPDATE`).
+	pub(crate) fn with_for_update(mut self, for_update: bool) -> Self {
+		self.for_update = for_update;
 		self
 	}
 
@@ -147,6 +158,9 @@ impl ExecOperator for DynamicScan {
 		}
 		if let Some(s) = self.pre_decode_filter_status.explain_text() {
 			attrs.push(("pre_decode_filter".to_string(), s.to_string()));
+		}
+		if self.for_update {
+			attrs.push(("for_update".to_string(), "true".to_string()));
 		}
 		attrs
 	}
@@ -190,8 +204,15 @@ impl ExecOperator for DynamicScan {
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		// Scan is read-only, but expressions could contain subqueries with mutations.
-		let mut mode = self.source.access_mode();
+		// Scan is read-only, but expressions could contain subqueries with
+		// mutations, and a locked read registers conflict-detection state on
+		// the storage engine, which requires a writeable transaction.
+		let mut mode = if self.for_update {
+			AccessMode::ReadWrite
+		} else {
+			AccessMode::ReadOnly
+		};
+		mode = mode.combine(self.source.access_mode());
 		if let Some(ref version) = self.version {
 			mode = mode.combine(version.access_mode());
 		}
@@ -230,6 +251,7 @@ impl ExecOperator for DynamicScan {
 		let start_expr = self.start.clone();
 		let knn_context = self.knn_context.clone();
 		let pre_decode_filter_status = self.pre_decode_filter_status.clone();
+		let for_update = self.for_update;
 		let ctx = ctx.clone();
 
 		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
@@ -240,6 +262,14 @@ impl ExecOperator for DynamicScan {
 			// Evaluate table expression
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
 			let table_value = source_expr.evaluate(eval_ctx).await?;
+
+			// FOR UPDATE targets must resolve to specific record ids so the
+			// locked read is never silently skipped for other shapes.
+			if for_update && !matches!(table_value, Value::RecordId(_)) {
+				return Err(ControlFlow::Err(anyhow::Error::new(Error::Query {
+					message: crate::dbs::FOR_UPDATE_TARGETS_ERROR.to_string(),
+				})));
+			}
 
 			// Determine scan target: either a table name or a record ID
 			let table_name = match table_value {
@@ -281,14 +311,20 @@ impl ExecOperator for DynamicScan {
 						None => 0,
 					};
 
-					// Early exit if limit is 0
-					if limit_val == Some(0) {
+					// Early exit if limit is 0. A FOR UPDATE source must still
+					// reach `execute_record_lookup` so the locked read
+					// registers the key for conflict detection: the lookup
+					// performs the read first and discards the row for a zero
+					// limit afterwards, keeping this plan in agreement with
+					// the literal RecordIdScan plan for the same query.
+					if limit_val == Some(0) && !for_update {
 						return Ok(());
 					}
 
 					let results = super::record_id::execute_record_lookup(
 						&rid,
 						version,
+						for_update,
 						check_perms,
 						needed_fields.as_ref(),
 						&ctx,

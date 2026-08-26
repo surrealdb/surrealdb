@@ -43,6 +43,9 @@ pub struct Options {
 	pub(crate) import: bool,
 	/// The data version as a timestamp
 	pub(crate) version: Option<u64>,
+	/// Whether record reads must lock the fetched records for the duration
+	/// of the transaction (`SELECT ... FOR UPDATE`)
+	pub(crate) for_update: bool,
 	/// Tracks async event nesting depth for enforcing event MAXDEPTH.
 	async_event_depth: Option<u16>,
 }
@@ -88,6 +91,7 @@ impl Options {
 			import: false,
 			auth: Arc::new(Auth::default()),
 			version: None,
+			for_update: false,
 			async_event_depth: None,
 		}
 	}
@@ -184,6 +188,12 @@ impl Options {
 	// Set the version
 	pub fn with_version(mut self, version: Option<u64>) -> Self {
 		self.version = version;
+		self
+	}
+
+	// Set whether record reads lock the fetched records
+	pub fn with_for_update(mut self, for_update: bool) -> Self {
+		self.for_update = for_update;
 		self
 	}
 

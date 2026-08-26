@@ -312,6 +312,37 @@ pub(crate) async fn fetch_raw_record(
 	Ok(Some(record.data.clone()))
 }
 
+/// Fetch a single raw record value as a locked read, registering the
+/// record key for commit-time conflict detection.
+///
+/// Reads exactly what [`fetch_raw_record`] reads at the current version,
+/// except that the read is always issued to the underlying datastore —
+/// never served from the transaction read cache — so the conflict
+/// registration reaches the storage engine even for a record that does
+/// not exist. There is no versioned form: a locked read of a historical
+/// snapshot could never be validated at commit.
+pub(crate) async fn fetch_raw_record_for_update(
+	ctx: &ExecutionContext,
+	rid: &RecordId,
+) -> crate::expr::FlowResult<Option<Value>> {
+	let db_ctx = ctx.database().context("fetch_raw_record_for_update requires database context")?;
+	let txn = db_ctx.txn();
+	let record = txn
+		.get_record_for_update(
+			db_ctx.ns_ctx.ns.namespace_id,
+			db_ctx.db.database_id,
+			&rid.table,
+			&rid.key,
+		)
+		.await
+		.context("Failed to fetch record")?;
+	if record.data.is_none() {
+		return Ok(None);
+	}
+
+	Ok(Some(record.data.clone()))
+}
+
 /// Process a fetched record: check table-level permissions, evaluate computed
 /// fields, and apply field-level permissions.
 ///

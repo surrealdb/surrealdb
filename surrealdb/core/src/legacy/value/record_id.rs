@@ -32,6 +32,7 @@ pub(crate) async fn record_id_select_document(
 		timeout: Expr::Literal(Literal::None),
 		explain: None,
 		tempfiles: false,
+		for_update: false,
 	};
 
 	Ok(stk

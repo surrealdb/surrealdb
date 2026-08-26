@@ -62,6 +62,12 @@ impl Parser<'_> {
 			Expr::Literal(Literal::None)
 		};
 		let timeout = self.try_parse_timeout(stk).await?;
+		let for_update = if self.eat(t!("FOR")) {
+			expected!(self, t!("UPDATE"));
+			true
+		} else {
+			false
+		};
 		let tempfiles = self.eat(t!("TEMPFILES"));
 		let explain = self.try_parse_explain()?;
 
@@ -82,6 +88,7 @@ impl Parser<'_> {
 			timeout,
 			tempfiles,
 			explain,
+			for_update,
 		})
 	}
 

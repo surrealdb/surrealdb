@@ -266,6 +266,34 @@ impl Transactable for Transaction {
 		})
 	}
 
+	/// Fetch a key from the database, registering the key for
+	/// commit-time conflict detection.
+	#[instrument(
+		level = "trace",
+		target = "surrealdb::core::kvs::api",
+		skip(self),
+		fields(key = key.to_string())
+	)]
+	fn getu<'a>(&'a self, key: Key<'a>) -> BoxFut<'a, Result<Option<Val>>> {
+		Box::pin(async move {
+			// Check to see if transaction is closed
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			// Check to see if transaction is writable, as the conflict
+			// registration is only validated when the transaction commits
+			if !self.writeable() {
+				return Err(Error::TransactionReadonly);
+			}
+			// Load the inner transaction
+			let mut inner = self.inner.write().await;
+			// Get the key, arming commit-time conflict detection
+			let res = inner.get_for_update(key.into_inner()).map_err(kvs_error)?;
+			// Return result
+			Ok(res.map(Val::from))
+		})
+	}
+
 	/// Fetch multiple keys from the database.
 	#[instrument(
 		level = "trace",

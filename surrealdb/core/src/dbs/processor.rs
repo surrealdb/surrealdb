@@ -376,8 +376,21 @@ impl Collectable {
 		record_id: RecordId,
 		rid_only: bool,
 	) -> Result<Processable> {
-		// if it is skippable we only need the record id
-		let val = if rid_only {
+		let val = if opt.for_update && matches!(doc_ctx, DocumentContext::NsDbTbCtx(_)) {
+			// A locked read registers the record key for commit-time conflict
+			// detection, so it outranks the `rid_only` value-fetch skip: the
+			// registration is a side effect of reading the record, not of
+			// returning it. Only read-only (SELECT) record fetches lock;
+			// mutating statements register conflicts through their own writes.
+			txn.get_record_for_update(
+				doc_ctx.ns().namespace_id,
+				doc_ctx.db().database_id,
+				&record_id.table,
+				&record_id.key,
+			)
+			.await?
+		} else if rid_only {
+			// if it is skippable we only need the record id
 			Record::new(Value::Null).into_read_only()
 		} else {
 			txn.get_record(

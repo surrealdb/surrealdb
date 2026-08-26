@@ -210,6 +210,7 @@ impl<'a> arbitrary::Arbitrary<'a> for SelectStatement {
 			timeout: u.arbitrary()?,
 			explain: u.arbitrary()?,
 			tempfiles: u.arbitrary()?,
+			for_update: u.arbitrary()?,
 		})
 	}
 }

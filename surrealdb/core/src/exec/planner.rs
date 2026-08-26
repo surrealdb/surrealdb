@@ -143,6 +143,14 @@ pub struct Planner<'ctx> {
 	/// Propagated to `GraphEdgeScan` operators created during idiom
 	/// conversion so that graph edge traversals respect the VERSION clause.
 	pub(crate) version: Option<Arc<dyn crate::exec::PhysicalExpr>>,
+	/// Whether the SELECT statement being planned carries `FOR UPDATE`.
+	///
+	/// Set by `plan_select_core` on the inner planner it spawns for a
+	/// SELECT statement, and consumed by `plan_source` so the source
+	/// operators it creates perform locked record reads (registering the
+	/// fetched keys for commit-time conflict detection). Always `false`
+	/// on freshly constructed planners.
+	pub(crate) for_update: bool,
 	/// Optional auth principal for the planning statement.
 	///
 	/// Forwarded by the executor / macro layer when the calling
@@ -232,6 +240,7 @@ impl<'ctx> Planner<'ctx> {
 			ns: None,
 			db: None,
 			version: None,
+			for_update: false,
 			auth: None,
 			cycle_guard: CycleGuard::default(),
 			ns_db_ids_cache: tokio::sync::OnceCell::new(),
@@ -265,6 +274,7 @@ impl<'ctx> Planner<'ctx> {
 			ns,
 			db,
 			version: None,
+			for_update: false,
 			auth: None,
 			cycle_guard: CycleGuard::default(),
 			ns_db_ids_cache: tokio::sync::OnceCell::new(),
@@ -307,6 +317,14 @@ impl<'ctx> Planner<'ctx> {
 	/// Set the VERSION expression for propagation to graph edge scans.
 	pub fn with_version(mut self, version: Option<Arc<dyn crate::exec::PhysicalExpr>>) -> Self {
 		self.version = version;
+		self
+	}
+
+	/// Set whether the SELECT being planned carries `FOR UPDATE` (see the
+	/// `for_update` field).
+	#[must_use]
+	pub(crate) fn with_for_update(mut self, for_update: bool) -> Self {
+		self.for_update = for_update;
 		self
 	}
 

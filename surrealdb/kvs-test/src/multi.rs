@@ -282,3 +282,122 @@ async fn concurrent_conditional_writes_conflict(b: &TestBackend) {
 }
 
 kvs_test!(concurrent_conditional_writes_conflict);
+
+/// A `getu` read arms commit-time conflict detection: if another transaction
+/// commits a write to the read key, the reading transaction's commit fails
+/// even though its own writes touch entirely different keys. This is the
+/// guarantee `getu` exists to provide on engines whose plain reads are not
+/// validated at commit (e.g. last-writer-wins TiKV).
+async fn getu_write_conflict(b: &TestBackend) {
+	// Create a new datastore
+	let ds = b.create_ds().await;
+	// Insert an initial key
+	let tx = ds.transaction(Write).await.unwrap();
+	tx.set("test".as_bytes().into(), "some text".as_bytes().to_vec()).await.unwrap();
+	tx.commit().await.unwrap();
+	// Create a writeable transaction reading the key for update
+	let tx1 = ds.transaction(Write).await.unwrap();
+	let val = tx1.getu("test".as_bytes().into()).await.unwrap().unwrap();
+	assert_eq!(val, b"some text");
+	// A second transaction commits a write to the same key
+	let tx2 = ds.transaction(Write).await.unwrap();
+	tx2.set("test".as_bytes().into(), "other text".as_bytes().to_vec()).await.unwrap();
+	tx2.commit().await.unwrap();
+	// The first transaction writes a different key, but its commit must fail
+	tx1.set("other".as_bytes().into(), "value".as_bytes().to_vec()).await.unwrap();
+	tx1.commit().await.unwrap_err();
+	// Check that only the second transaction's write persisted
+	let tx = ds.transaction(Read).await.unwrap();
+	let val = tx.get("test".as_bytes().into(), None).await.unwrap().unwrap();
+	assert_eq!(val, b"other text");
+	let val = tx.get("other".as_bytes().into(), None).await.unwrap();
+	assert!(val.is_none());
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(getu_write_conflict, except = [surrealds]);
+
+/// Control for [`getu_write_conflict`]: a concurrent commit to an unrelated
+/// key does not invalidate a `getu` read, so the reading transaction commits
+/// cleanly.
+async fn getu_unrelated_write_commits(b: &TestBackend) {
+	// Create a new datastore
+	let ds = b.create_ds().await;
+	// Insert an initial key
+	let tx = ds.transaction(Write).await.unwrap();
+	tx.set("test".as_bytes().into(), "some text".as_bytes().to_vec()).await.unwrap();
+	tx.commit().await.unwrap();
+	// Create a writeable transaction reading the key for update
+	let tx1 = ds.transaction(Write).await.unwrap();
+	let val = tx1.getu("test".as_bytes().into()).await.unwrap().unwrap();
+	assert_eq!(val, b"some text");
+	// A second transaction commits a write to an unrelated key
+	let tx2 = ds.transaction(Write).await.unwrap();
+	tx2.set("unrelated".as_bytes().into(), "elsewhere".as_bytes().to_vec()).await.unwrap();
+	tx2.commit().await.unwrap();
+	// The first transaction's commit is unaffected
+	tx1.set("other".as_bytes().into(), "value".as_bytes().to_vec()).await.unwrap();
+	tx1.commit().await.unwrap();
+	// Check that both transactions' writes persisted
+	let tx = ds.transaction(Read).await.unwrap();
+	let val = tx.get("unrelated".as_bytes().into(), None).await.unwrap().unwrap();
+	assert_eq!(val, b"elsewhere");
+	let val = tx.get("other".as_bytes().into(), None).await.unwrap().unwrap();
+	assert_eq!(val, b"value");
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(getu_unrelated_write_commits, except = [surrealds]);
+
+/// A write transaction whose only footprint is a `getu` read still fails to
+/// commit when the read key is overwritten underneath it: the read lock is
+/// validated at commit even with an empty write set.
+async fn getu_read_only_conflict(b: &TestBackend) {
+	// Create a new datastore
+	let ds = b.create_ds().await;
+	// Insert an initial key
+	let tx = ds.transaction(Write).await.unwrap();
+	tx.set("test".as_bytes().into(), "some text".as_bytes().to_vec()).await.unwrap();
+	tx.commit().await.unwrap();
+	// Create a writeable transaction reading the key for update
+	let tx1 = ds.transaction(Write).await.unwrap();
+	let val = tx1.getu("test".as_bytes().into()).await.unwrap().unwrap();
+	assert_eq!(val, b"some text");
+	// A second transaction commits a write to the same key
+	let tx2 = ds.transaction(Write).await.unwrap();
+	tx2.set("test".as_bytes().into(), "other text".as_bytes().to_vec()).await.unwrap();
+	tx2.commit().await.unwrap();
+	// The first transaction wrote nothing, but its commit must still fail
+	tx1.commit().await.unwrap_err();
+}
+
+kvs_test!(getu_read_only_conflict, except = [surrealds]);
+
+/// `getu` on an absent key locks the key's identity, not just an existing
+/// value: another transaction creating the key invalidates this
+/// transaction's commit. This is what lets `getu` guard get-or-create paths
+/// against concurrent creation.
+async fn getu_absent_key_conflict(b: &TestBackend) {
+	// Create a new datastore
+	let ds = b.create_ds().await;
+	// Create a writeable transaction reading an absent key for update
+	let tx1 = ds.transaction(Write).await.unwrap();
+	let val = tx1.getu("test".as_bytes().into()).await.unwrap();
+	assert!(val.is_none());
+	// A second transaction creates the key and commits
+	let tx2 = ds.transaction(Write).await.unwrap();
+	tx2.put("test".as_bytes().into(), "created".as_bytes().to_vec()).await.unwrap();
+	tx2.commit().await.unwrap();
+	// The first transaction writes a different key, but its commit must fail
+	tx1.set("other".as_bytes().into(), "value".as_bytes().to_vec()).await.unwrap();
+	tx1.commit().await.unwrap_err();
+	// Check that only the creating transaction's write persisted
+	let tx = ds.transaction(Read).await.unwrap();
+	let val = tx.get("test".as_bytes().into(), None).await.unwrap().unwrap();
+	assert_eq!(val, b"created");
+	let val = tx.get("other".as_bytes().into(), None).await.unwrap();
+	assert!(val.is_none());
+	tx.cancel().await.unwrap();
+}
+
+kvs_test!(getu_absent_key_conflict, except = [surrealds]);

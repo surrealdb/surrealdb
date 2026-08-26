@@ -928,6 +928,13 @@ impl Parse for ast::Select {
 		let version = try_parse_clause_expr(parser, T![VERSION]).await?;
 		let timeout = try_parse_clause_expr(parser, T![TIMEOUT]).await?;
 
+		let for_update = if parser.eat(T![FOR])?.is_some() {
+			let _ = parser.expect(T![UPDATE])?;
+			true
+		} else {
+			false
+		};
+
 		let tempfiles = parser.eat(T![TEMPFILES])?.is_some();
 
 		let explain = try_parse_explain(parser).await?;
@@ -953,6 +960,8 @@ impl Parse for ast::Select {
 
 			version,
 			timeout,
+
+			for_update,
 
 			tempfiles,
 
