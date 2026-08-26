@@ -64,8 +64,14 @@ pub trait NodeProvider: Sync {
 	/// Retrieve all node definitions in a datastore.
 	fn all_nodes(&self) -> BoxProviderFut<'_, Result<Arc<[Node]>>>;
 
-	/// Retrieve a specific node definition.
-	fn get_node(&self, id: Uuid) -> BoxProviderFut<'_, Result<Arc<Node>>>;
+	/// Retrieve a specific node definition, or `None` if it does not exist.
+	///
+	/// An absent node is an ordinary state rather than a fault, and every caller
+	/// treats it as one: a node is registered part-way through its own startup,
+	/// and a peer archives and then reaps one whose heartbeat has expired. So
+	/// absence is reported separately from a failure to read, which only `Err`
+	/// carries.
+	fn get_node(&self, id: Uuid) -> BoxProviderFut<'_, Result<Option<Arc<Node>>>>;
 }
 
 pub trait RootProvider: Sync {

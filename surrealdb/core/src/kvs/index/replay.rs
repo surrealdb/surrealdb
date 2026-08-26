@@ -16,7 +16,7 @@ use super::{
 	IndexBuildReportStatus, LEGACY_BATCH_ID,
 };
 use crate::catalog::providers::{NodeProvider, TableProvider};
-use crate::catalog::{Error as CatalogError, Index, Record};
+use crate::catalog::{Index, Record};
 use crate::ctx::FrozenContext;
 use crate::doc::{CursorDoc, Document};
 use crate::exe::FlowResultExt as _;
@@ -443,19 +443,11 @@ impl Building {
 	}
 
 	/// Check durable node membership before discarding an expired reservation.
+	///
+	/// A node with no cluster row is not live: it has been reaped, so its
+	/// reservation is as expired as one an archived node still holds.
 	async fn reservation_node_is_live(&self, tx: &Transaction, node: Uuid) -> Result<bool> {
-		match tx.get_node(node).await {
-			Ok(node) => Ok(node.is_active()),
-			Err(err)
-				if matches!(
-					err.downcast_ref::<CatalogError>(),
-					Some(CatalogError::NdNotFound { .. })
-				) =>
-			{
-				Ok(false)
-			}
-			Err(err) => Err(err),
-		}
+		Ok(tx.get_node(node).await?.is_some_and(|node| node.is_active()))
 	}
 
 	/// Index one batch from the initial record scan.

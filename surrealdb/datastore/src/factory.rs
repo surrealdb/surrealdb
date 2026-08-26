@@ -108,6 +108,14 @@ impl TransactionFactory {
 		Ok(self.builder.shutdown().await?)
 	}
 
+	/// Waits until the backend is able to serve transactions.
+	///
+	/// See [`TransactionBuilder::wait_until_serve_ready`]: the wait is unbounded,
+	/// and `Err` means the backend will never serve.
+	pub async fn wait_until_serve_ready(&self) -> Result<()> {
+		Ok(self.builder.wait_until_serve_ready().await?)
+	}
+
 	/// Registers metrics for the current datastore flavor if supported.
 	pub fn register_metrics(&self) -> Option<Metrics> {
 		self.builder.register_metrics()

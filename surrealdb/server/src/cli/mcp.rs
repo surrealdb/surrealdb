@@ -117,8 +117,10 @@ pub async fn init<
 	let canceller = CancellationToken::new();
 	let (datastore, _recv, _router_state, pending_startup) =
 		dbs::init::<C>(composer, &config, canceller.clone(), observer, dbs_opts).await?;
-	// The MCP server has no HTTP listener to bind, so run the deferred startup
-	// work (import then credentials) inline before serving any tool requests.
+	// The MCP server has no HTTP listener to bind and no readiness endpoint to
+	// report through, so run the deferred startup work inline before serving any
+	// tool requests. A failure in either phase aborts the command.
+	dbs::initialise_datastore(&datastore, &pending_startup).await?;
 	dbs::finish_startup(&datastore, &pending_startup).await?;
 	let datastore = Arc::new(datastore);
 

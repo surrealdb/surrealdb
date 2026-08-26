@@ -1350,6 +1350,18 @@ impl Datastore {
 		self.transaction_factory.shutdown().await
 	}
 
+	/// Waits until the storage backend is able to serve transactions.
+	///
+	/// Startup awaits this before opening its first transaction. A backend that
+	/// can serve as soon as it is built returns immediately; one that has to
+	/// join a cluster and catch up first blocks here for as long as that takes,
+	/// which keeps a legitimately slow join from being charged against a
+	/// caller's retry budget. `Err` means the backend will never serve.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn wait_until_serve_ready(&self) -> Result<()> {
+		self.transaction_factory.wait_until_serve_ready().await
+	}
+
 	/// Drop every version of every key in the half-open range `[start, end)`
 	/// **outside** any user transaction.
 	///
@@ -1908,7 +1920,14 @@ impl Datastore {
 		let key = NodeKey {
 			nd: self.id,
 		};
-		let val = catch!(txn, txn.get_node(self.id).await);
+		let Some(val) = catch!(txn, txn.get_node(self.id).await) else {
+			// Nothing to archive: this node either never registered, or a peer's
+			// expiry scan has already reaped the row. Neither is a failure of
+			// this shutdown, and reporting one would put an error above whatever
+			// actually stopped the node.
+			let _ = txn.cancel().await;
+			return Ok(());
+		};
 		let node = val.as_ref().archive();
 		run!(txn, txn.replace_key(&key, &node).await)
 	}
@@ -1927,6 +1946,11 @@ impl Datastore {
 		};
 		let val = await_node_tx_step(&txn, deadline, timeout_duration, None, txn.get_node(self.id))
 			.await?;
+		let Some(val) = val else {
+			// Nothing to archive; see `delete_node`.
+			let _ = txn.cancel().await;
+			return Ok(());
+		};
 		let node = val.as_ref().archive();
 
 		await_node_tx_step(&txn, deadline, timeout_duration, None, txn.replace_key(&key, &node))
@@ -4066,7 +4090,7 @@ impl Datastore {
 	}
 
 	/// Returns how long ago the current node last refreshed its cluster
-	/// heartbeat.
+	/// heartbeat, or `None` when this node has no cluster membership row.
 	///
 	/// The node-membership refresh background task rewrites this node's
 	/// heartbeat to the KV store every `node_membership_refresh_interval`. A
@@ -4075,18 +4099,27 @@ impl Datastore {
 	/// heartbeat was recently committed) and read path (it is readable here in
 	/// a fresh transaction) are healthy. Readiness probes use this instead of a
 	/// dedicated health check to avoid duplicating that work.
-	pub async fn node_heartbeat_age(&self) -> Result<Duration> {
+	///
+	/// An absent row is `None` rather than an error, because it is an ordinary
+	/// state of a live node and not a failure to read: `insert_node` writes the
+	/// row during startup, a peer that archives this node deletes it again, and
+	/// either way the next refresh tick writes it back. A caller can therefore
+	/// tell "no heartbeat yet" from "storage did not answer", which only `Err`
+	/// reports. `/ready` depends on the distinction.
+	pub async fn node_heartbeat_age(&self) -> Result<Option<Duration>> {
 		// Open a fresh read transaction so the lookup misses the per-transaction
 		// cache and actually reads the node key from storage.
 		let tx = self.transaction(Read).await?;
 		let res = tx.get_node(self.id).await;
 		// Always release the transaction, regardless of the lookup result.
 		let _ = tx.cancel().await;
-		let node = res?;
+		let Some(node) = res? else {
+			return Ok(None);
+		};
 		// Heartbeats are stored as milliseconds since the epoch; saturate to
 		// avoid underflow from minor clock skew between writes and this read.
 		let now = self.clock_now();
-		Ok(Duration::from_millis(now.value.saturating_sub(node.heartbeat.value)))
+		Ok(Some(Duration::from_millis(now.value.saturating_sub(node.heartbeat.value))))
 	}
 
 	/// Parse and execute an SQL query
@@ -6814,8 +6847,21 @@ mod test {
 		let ds = Datastore::new("memory").await.unwrap();
 		// `insert_node` writes the current node's heartbeat at `clock_now()`.
 		ds.insert_node().await.unwrap();
-		let age = ds.node_heartbeat_age().await.unwrap();
+		let age = ds.node_heartbeat_age().await.unwrap().expect("the node row was just written");
 		assert!(age < Duration::from_secs(5), "heartbeat should be fresh, got {age:?}");
+	}
+
+	/// A node with no membership row reports no heartbeat, rather than the read
+	/// failure `get_node` raises for the same state. Readiness depends on the
+	/// distinction: before `insert_node` runs, and after a peer archives and
+	/// reaps this node, the row is legitimately absent.
+	#[tokio::test]
+	async fn node_heartbeat_age_is_absent_without_a_node_row() {
+		let ds = Datastore::new("memory").await.unwrap();
+		assert!(
+			ds.node_heartbeat_age().await.unwrap().is_none(),
+			"an unregistered node reported a heartbeat"
+		);
 	}
 
 	#[tokio::test]
@@ -6837,7 +6883,7 @@ mod test {
 		txn.set_key(&key, &stale).await.unwrap();
 		txn.commit().await.unwrap();
 		// The reported age should reflect the stale heartbeat.
-		let age = ds.node_heartbeat_age().await.unwrap();
+		let age = ds.node_heartbeat_age().await.unwrap().expect("the node row was just written");
 		assert!(age >= Duration::from_secs(59), "heartbeat should be stale, got {age:?}");
 	}
 

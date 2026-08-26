@@ -3085,27 +3085,24 @@ impl NodeProvider for Transaction {
 	}
 
 	/// Retrieve a specific node in the cluster.
-	fn get_node(&self, id: Uuid) -> BoxProviderFut<'_, Result<Arc<Node>>> {
+	fn get_node(&self, id: Uuid) -> BoxProviderFut<'_, Result<Option<Arc<Node>>>> {
 		Box::pin(
 			async move {
 				let qey = cache::tx::Lookup::Nd(id);
 				match self.cache.get(&qey) {
-					Some(val) => val,
+					Some(val) => val.try_into_type().map(Option::Some),
 					None => {
 						let key = NodeKey {
 							nd: id,
 						};
-						let val = self.get_key(&key, None).await?.ok_or_else(|| {
-							CatalogError::NdNotFound {
-								uuid: id.to_string(),
-							}
-						})?;
+						let Some(val) = self.get_key(&key, None).await? else {
+							return Ok(None);
+						};
 						let val = cache::tx::Entry::Any(Arc::new(val));
 						self.cache.insert(qey, val.clone());
-						val
+						val.try_into_type().map(Option::Some)
 					}
 				}
-				.try_into_type()
 			}
 			.instrument(trace_span!(target: "surrealdb::core::kvs::tx", "get_node")),
 		)

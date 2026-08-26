@@ -67,6 +67,27 @@ pub trait TransactionBuilder: Send + Sync + 'static {
 	/// - `metric`: The name of the metric to collect.
 	fn collect_u64_metric(&self, metric: &str) -> Option<u64>;
 
+	/// Waits until this backend is able to serve transactions.
+	///
+	/// The datastore awaits this before it opens the first transaction of
+	/// startup, so a backend that cannot answer the moment it is built — one
+	/// that has to join a cluster and catch up first — reports that wait here
+	/// instead of spending the caller's retry budget on transactions that
+	/// cannot succeed yet. The wait is unbounded by design: how long becoming
+	/// ready may legitimately take is the backend's judgement, not the
+	/// caller's, and callers gate their own liveness elsewhere.
+	///
+	/// Cancellation is the backend's own concern — it holds the canceller it
+	/// was built with, and returning early on shutdown is a valid `Ok`.
+	///
+	/// `Err` means this backend will never serve and startup must fail.
+	///
+	/// The default returns immediately, for backends that can serve as soon as
+	/// they are built.
+	fn wait_until_serve_ready(&self) -> BoxFut<'_, Result<()>> {
+		Box::pin(async { Ok(()) })
+	}
+
 	/// Returns an immutable backend-specific extension handle.
 	///
 	/// Backends expose only stable, shareable handles through this hook. The

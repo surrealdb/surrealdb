@@ -1023,7 +1023,7 @@ mod test {
 		dbs.insert_node().await.unwrap();
 		let tasks = tasks::init(&dbs, can.clone(), &opt);
 		tokio::time::sleep(Duration::from_millis(500)).await;
-		let age = dbs.node_heartbeat_age().await.unwrap();
+		let age = dbs.node_heartbeat_age().await.unwrap().expect("the node was registered");
 		can.cancel();
 		tasks.resolve().await.unwrap();
 		assert!(age < Duration::from_millis(500), "heartbeat was {age:?} stale");
