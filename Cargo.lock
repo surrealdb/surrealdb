@@ -7673,6 +7673,7 @@ dependencies = [
  "opentelemetry-proto",
  "opentelemetry_sdk",
  "pin-project-lite",
+ "quick_cache",
  "rand 0.9.4",
  "rcgen",
  "reqwest 0.13.3",

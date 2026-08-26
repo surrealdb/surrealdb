@@ -1123,6 +1123,94 @@ mod http_integration {
 	}
 
 	#[test(tokio::test)]
+	async fn signin_rate_limit() -> Result<(), Box<dyn std::error::Error>> {
+		use std::collections::HashMap;
+		// Opt in with a burst of 3 and a one-token-per-minute refill: no
+		// wall-clock the test can plausibly spend (including debug-build
+		// Argon2 comparisons on each failed attempt) refills a token
+		// mid-test, so the drain is deterministic. Refill behaviour itself
+		// is unit-tested with a controlled clock.
+		let vars: HashMap<String, String> = [
+			("SURREAL_HTTP_AUTH_RATE_LIMIT_ENABLED".to_string(), "true".to_string()),
+			("SURREAL_HTTP_AUTH_RATE_LIMIT_BURST".to_string(), "3".to_string()),
+			("SURREAL_HTTP_AUTH_RATE_LIMIT_PER_MINUTE".to_string(), "1".to_string()),
+		]
+		.into();
+		let (addr, _server) = common::start_server(StartServerArguments {
+			vars: Some(vars),
+			..Default::default()
+		})
+		.await
+		.unwrap();
+		let url = &format!("http://{addr}/signin");
+
+		// Prepare HTTP client
+		let mut headers = reqwest::header::HeaderMap::new();
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?;
+		let body = serde_json::to_string(
+			json!({ "user": USER, "pass": "wrong-password" }).as_object().unwrap(),
+		)?;
+
+		// The first three attempts consume the burst: they fail
+		// authentication (401) but are not rate limited.
+		for i in 0..3 {
+			let res = client.post(url).body(body.clone()).send().await?;
+			assert_eq!(res.status(), 401, "attempt {i} body: {}", res.text().await?);
+		}
+
+		// The fourth rapid attempt is rejected with 429 and a Retry-After
+		// hint, and a cross-origin caller is allowed to read that header.
+		let res = client
+			.post(url)
+			.header(header::ORIGIN, "http://example.com")
+			.body(body.clone())
+			.send()
+			.await?;
+		assert_eq!(res.status(), 429, "body: {}", res.text().await?);
+		let retry_after: u64 =
+			res.headers().get("Retry-After").expect("Retry-After header").to_str()?.parse()?;
+		assert!(retry_after >= 1, "Retry-After: {retry_after}");
+		let exposed = res
+			.headers()
+			.get("Access-Control-Expose-Headers")
+			.expect("Access-Control-Expose-Headers header")
+			.to_str()?
+			.to_ascii_lowercase();
+		assert!(exposed.contains("retry-after"), "exposed headers: {exposed}");
+
+		// The limiter sits ahead of the authentication layer: a request
+		// carrying credentials that layer would reject is still answered with
+		// 429, so no credential verification runs for a limited request.
+		let res = client
+			.post(url)
+			.basic_auth(USER, Some("wrong-password"))
+			.body(body.clone())
+			.send()
+			.await?;
+		assert_eq!(res.status(), 429, "basic-auth body: {}", res.text().await?);
+
+		// Signup draws from the same per-address budget, so it is throttled
+		// before its handler ever runs.
+		let res = client.post(format!("http://{addr}/signup")).body(body.clone()).send().await?;
+		assert_eq!(res.status(), 429, "signup body: {}", res.text().await?);
+
+		// A real CORS preflight is answered even while the bucket is empty.
+		let res = client
+			.request(Method::OPTIONS, url)
+			.header(header::ORIGIN, "http://example.com")
+			.header(header::ACCESS_CONTROL_REQUEST_METHOD, "POST")
+			.send()
+			.await?;
+		assert!(res.status().is_success(), "preflight status: {}", res.status());
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
 	async fn signin_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let url = &format!("http://{addr}/signin");

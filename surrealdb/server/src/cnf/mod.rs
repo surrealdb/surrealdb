@@ -157,6 +157,54 @@ pub static HTTP_MAX_SIGNUP_BODY_SIZE: LazyLock<usize> =
 pub static HTTP_MAX_SIGNIN_BODY_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_HTTP_MAX_SIGNIN_BODY_SIZE", usize, 1 << 10);
 
+/// Whether to rate limit authentication attempts on the HTTP /signin and
+/// /signup endpoints per client address (default: false). Accepted values
+/// are exactly `true` and `false`; any other value is ignored and the
+/// default applies.
+///
+/// The limiter keys on the client address resolved by the `--client-ip`
+/// strategy, so enabling it requires a strategy that yields one address per
+/// client: `socket` when clients connect directly, or a header strategy
+/// behind a trusted proxy (the last, proxy-appended element of a
+/// comma-separated chain is used, and IPv6 addresses are grouped by /64
+/// prefix). Behind a proxy with `--client-ip socket`, every client resolves
+/// to the proxy's address and shares one budget, so enabling the limiter
+/// there throttles all authentication collectively. With `--client-ip none`
+/// no address is available and the limiter is inert.
+///
+/// A header strategy is only as trustworthy as the proxy that sets the
+/// header: a request that reaches the instance without it yields no address
+/// and is admitted unchecked, so the limiter only protects deployments where
+/// every request to these endpoints passes through that proxy.
+pub static HTTP_AUTH_RATE_LIMIT_ENABLED: LazyLock<bool> =
+	lazy_env_parse!("SURREAL_HTTP_AUTH_RATE_LIMIT_ENABLED", bool, false);
+
+/// The burst of authentication attempts a single client address may make
+/// against the HTTP /signin and /signup endpoints before being rate
+/// limited (default: 60). Both endpoints draw from one shared budget.
+/// Setting this to 0 disables the limiter.
+pub static HTTP_AUTH_RATE_LIMIT_BURST: LazyLock<u32> =
+	lazy_env_parse!("SURREAL_HTTP_AUTH_RATE_LIMIT_BURST", u32, 60);
+
+/// The sustained rate, in attempts per minute, at which a client address's
+/// authentication budget refills (default: 60, i.e. one attempt per
+/// second). Setting this to 0 disables the limiter.
+pub static HTTP_AUTH_RATE_LIMIT_PER_MINUTE: LazyLock<u32> =
+	lazy_env_parse!("SURREAL_HTTP_AUTH_RATE_LIMIT_PER_MINUTE", u32, 60);
+
+/// The maximum number of client addresses tracked by the authentication
+/// rate limiter at once (default: 16384). Setting this to 0 disables the
+/// limiter.
+///
+/// The tracking store is written by unauthenticated callers, so it is a
+/// bounded cache: at capacity, tracking a new address evicts an existing
+/// entry rather than growing the store or turning the limiter off. An
+/// evicted address starts again from a full burst, so the sustained rate
+/// binds an address only while it stays tracked: size this above the number
+/// of distinct addresses the instance authenticates.
+pub static HTTP_AUTH_RATE_LIMIT_MAX_TRACKED_CLIENTS: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_HTTP_AUTH_RATE_LIMIT_MAX_TRACKED_CLIENTS", usize, 16384);
+
 /// The maximum HTTP body size of the HTTP /import endpoint (default: 4 GiB)
 pub static HTTP_MAX_IMPORT_BODY_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_HTTP_MAX_IMPORT_BODY_SIZE", usize, 4 << 30);

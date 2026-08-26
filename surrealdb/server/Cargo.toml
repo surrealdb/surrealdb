@@ -163,6 +163,7 @@ futures-util.workspace = true
 http.workspace = true
 num_cpus.workspace = true
 pin-project-lite.workspace = true
+quick_cache.workspace = true
 rand.workspace = true
 reqwest = { workspace = true, default-features = false, features = [
     "blocking",

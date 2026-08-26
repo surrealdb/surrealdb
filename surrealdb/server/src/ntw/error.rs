@@ -41,6 +41,9 @@ pub enum Error {
 
 	#[error("There was a problem parsing the header {0}: {1}")]
 	InvalidHeader(HeaderName, String),
+
+	#[error("Too many authentication attempts, please try again later")]
+	TooManyRequests(u64),
 }
 
 impl IntoResponse for Error {
@@ -92,6 +95,20 @@ impl IntoResponse for Error {
 					description: Some("The server is still starting up and cannot serve this request yet. Retry once the instance is ready.".to_string()),
 					information: Some(self.to_string()),
 				}.into_response(),
+			Error::TooManyRequests(retry_after_secs) => {
+				let mut response = ErrorMessage {
+					code: StatusCode::TOO_MANY_REQUESTS,
+					details: Some("Too many requests".to_string()),
+					description: Some("Too many authentication attempts were made from this client address. Wait before retrying.".to_string()),
+					information: Some(self.to_string()),
+				}.into_response();
+				// Hint clients when the next attempt will be admitted.
+				response.headers_mut().insert(
+					http::header::RETRY_AFTER,
+					HeaderValue::from(retry_after_secs),
+				);
+				response
+			}
 			_ => ErrorMessage {
 				code: StatusCode::BAD_REQUEST,
 				details: Some("Request problems detected".to_string()),
@@ -279,5 +296,12 @@ mod tests {
 	fn non_timeout_query_error_still_renders_as_bad_request() {
 		let err = TypesError::query("cancelled".to_string(), QueryError::Cancelled);
 		assert_eq!(types_error_into_response(&err).status(), StatusCode::BAD_REQUEST);
+	}
+
+	#[test]
+	fn too_many_requests_renders_429_with_retry_after() {
+		let res = Error::TooManyRequests(2).into_response();
+		assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS);
+		assert_eq!(res.headers().get(http::header::RETRY_AFTER).unwrap(), "2");
 	}
 }

@@ -18,6 +18,7 @@ pub mod mcp;
 pub mod ml;
 pub(crate) mod output;
 mod params;
+mod rate_limit;
 mod ready;
 pub mod rpc;
 mod signals;
@@ -510,10 +511,10 @@ impl SurrealRouter {
 			// ahead of auth so gated requests short-circuit before authentication
 			// touches the (still-initialising) datastore.
 			.layer(middleware::from_fn_with_state(gate_ready, ready::readiness_gate))
-			.layer(auth::SurrealAuthLayer)
-			.layer(headers::add_server_header(!opt.no_identification_headers)?)
-			.layer(headers::add_version_header(!opt.no_identification_headers)?)
-			// Apply CORS headers to relevant responses
+			// Apply CORS headers to relevant responses. Sits ahead of the rate
+			// limiter and the auth layer so the responses they emit — 429s
+			// with Retry-After in particular — carry CORS headers that
+			// cross-origin browser clients are allowed to read.
 			.layer({
 				let cors = CorsLayer::new()
 					.allow_methods([
@@ -528,11 +529,26 @@ impl SurrealRouter {
 					.allow_origin(allow_origin)
 					.max_age(Duration::from_secs(86400));
 
+				// Expose Retry-After so cross-origin browser clients can read
+				// the backoff hint on rate-limited responses.
+				#[cfg(not(feature = "mcp"))]
+				let expose_headers = vec![header::RETRY_AFTER];
 				#[cfg(feature = "mcp")]
-				let cors = cors.expose_headers(mcp_expose_headers);
+				let expose_headers = {
+					let mut expose = vec![header::RETRY_AFTER];
+					expose.extend(mcp_expose_headers);
+					expose
+				};
 
-				cors
-			});
+				cors.expose_headers(expose_headers)
+			})
+			// Throttle authentication attempts per client address ahead of the
+			// auth layer, so a limited request performs no credential
+			// verification work at all.
+			.layer(middleware::from_fn(rate_limit::auth_rate_limit_middleware))
+			.layer(auth::SurrealAuthLayer)
+			.layer(headers::add_server_header(!opt.no_identification_headers)?)
+			.layer(headers::add_version_header(!opt.no_identification_headers)?);
 
 		// Build the route tree from the RouterFactory
 		let axum_app = F::configure_router(router_state);
