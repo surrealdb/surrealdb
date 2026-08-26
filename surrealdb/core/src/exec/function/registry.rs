@@ -184,6 +184,12 @@ impl FunctionRegistry {
 		self.methods.get(name)
 	}
 
+	/// The full method registry.
+	#[cfg(test)]
+	pub fn methods(&self) -> &MethodRegistry {
+		&self.methods
+	}
+
 	// =========================================================================
 	// Combined methods
 	// =========================================================================

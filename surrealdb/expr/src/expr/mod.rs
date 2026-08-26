@@ -35,6 +35,7 @@ pub mod limit;
 pub mod literal;
 pub mod lookup;
 pub mod match_plan;
+pub mod method;
 pub mod mock;
 pub mod model;
 pub mod mutation;

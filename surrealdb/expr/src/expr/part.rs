@@ -4,6 +4,7 @@ use common::fmt::EscapeKwFreeIdent;
 use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
+use crate::expr::method::is_builtin_method;
 use crate::expr::{Expr, Idiom, Literal, Lookup};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -56,7 +57,6 @@ impl Part {
 		}
 	}
 
-	/// Check if we require a writeable transaction
 	/// Whether evaluating this part can be done on a read-only transaction.
 	///
 	/// Matched exhaustively on purpose: a new variant that carries an
@@ -67,7 +67,11 @@ impl Part {
 			Part::Start(v) => v.read_only(),
 			Part::Where(v) => v.read_only(),
 			Part::Value(v) => v.read_only(),
-			Part::Method(_, v) => v.iter().all(Expr::read_only),
+			// A builtin method writes nothing beyond what its arguments
+			// carry, but an unregistered name invokes a closure stored on
+			// the receiver — a runtime value whose body is invisible here —
+			// so it must over-approximate to writable.
+			Part::Method(name, v) => is_builtin_method(name) && v.iter().all(Expr::read_only),
 			Part::Lookup(v) => v.read_only(),
 			Part::Destructure(v) => v.iter().all(DestructurePart::read_only),
 			Part::Recurse(_, alias, instruction) => {

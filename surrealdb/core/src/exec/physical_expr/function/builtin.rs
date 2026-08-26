@@ -10,6 +10,14 @@ use crate::exec::{AccessMode, BoxFut};
 use crate::expr::FlowResult;
 use crate::val::Value;
 
+/// Whether the named builtin can evaluate arbitrary nested statements, and so
+/// needs a write transaction regardless of what its arguments look like.
+/// Every other builtin writes nothing of its own; only its arguments carry
+/// user expressions.
+pub(crate) fn builtin_can_write(name: &str) -> bool {
+	matches!(name, "api::invoke" | "eval::surql" | "eval::gql")
+}
+
 /// Built-in function expression - math::abs(), string::len(), etc.
 ///
 /// These functions are registered in the FunctionRegistry at startup.
@@ -69,10 +77,7 @@ impl PhysicalExpr for BuiltinFunctionExec {
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		// `api::invoke` and the `eval::*` functions can run nested writes, so they
-		// are read-write; everything else is read-only.
-		let func_mode = if matches!(self.name.as_str(), "api::invoke" | "eval::surql" | "eval::gql")
-		{
+		let func_mode = if builtin_can_write(&self.name) {
 			AccessMode::ReadWrite
 		} else {
 			AccessMode::ReadOnly

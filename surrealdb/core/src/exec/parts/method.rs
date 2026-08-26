@@ -89,6 +89,12 @@ impl PhysicalExpr for MethodPart {
 	}
 
 	fn access_mode(&self) -> AccessMode {
+		// Every function a descriptor can resolve to is a builtin, and no
+		// registered method maps to one of the statement-evaluating builtins
+		// that need a write transaction (`BuiltinFunctionExec::access_mode`'s
+		// write set) — `no_registered_method_resolves_to_a_writing_builtin`
+		// in `exec::function::method` pins that. Only the arguments carry
+		// user expressions.
 		self.args.iter().map(|a| a.access_mode()).combine_all()
 	}
 }
@@ -261,7 +267,10 @@ impl PhysicalExpr for ClosureFieldCallPart {
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		self.args.iter().map(|a| a.access_mode()).combine_all()
+		// The field holds a runtime value the plan cannot inspect, and its
+		// body may write, so the call must be assumed to — mirroring
+		// `ClosureCallExec::access_mode` for direct closure calls.
+		AccessMode::ReadWrite
 	}
 }
 
@@ -563,6 +572,19 @@ mod tests {
 				"expected InvalidControlFlow for {body}, got {err}"
 			);
 		}
+	}
+
+	#[test]
+	fn a_closure_field_call_reports_a_write_access_mode() {
+		// The field holds a runtime value: whether its body writes is
+		// invisible at plan time, so the part must claim a write up front
+		// even with no arguments at all. The planner picks the transaction
+		// mode and the ordering barriers from this.
+		let call_part = ClosureFieldCallPart {
+			field: "w".to_string(),
+			args: vec![],
+		};
+		assert_eq!(call_part.access_mode(), AccessMode::ReadWrite);
 	}
 
 	#[tokio::test]

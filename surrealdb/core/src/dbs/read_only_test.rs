@@ -97,6 +97,12 @@ fn read_only_statements_keep_their_read_transaction() {
 		"SELECT tags[WHERE value > 1] FROM person",
 		"RETURN person FETCH friends",
 		"RETURN 1 + 2",
+		// Registered builtin methods dispatch to builtins, so only their
+		// receiver and arguments matter — including on receivers whose value
+		// the plan cannot see, and with a pure literal closure argument.
+		"RETURN $s.len()",
+		"RETURN 'a'.len()",
+		"SELECT tags.map(|$t| $t + 1) FROM person",
 	];
 	for sql in cases {
 		assert!(read_only(sql), "`{sql}` should not need a write transaction");
@@ -141,6 +147,12 @@ fn closures_that_may_write_require_a_write_transaction() {
 			"writing literal body, as a builtin argument",
 			"RETURN array::map([1], || { CREATE log })",
 		),
+		// A method call whose name is not a registered builtin resolves to a
+		// closure stored on the receiver, whose body the statement text does
+		// not reveal — through the idiom path and the postfix operator alike.
+		("closure field invoked as a method", "RETURN $o.w()"),
+		("closure field invoked as a postfix method", "RETURN ($o).w()"),
+		("closure field invoked mid-idiom", "SELECT handlers.w().n FROM person"),
 	];
 	assert_none_claim_read_only(&cases);
 }

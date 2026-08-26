@@ -235,6 +235,16 @@ mod tests {
 	}
 
 	#[tokio::test]
+	async fn a_body_invoking_a_closure_field_resolves_read_write() {
+		// `$o.w()` is not a registered method, so it invokes a closure stored
+		// on the receiver — a body the facts walk cannot see. The body must
+		// count as opaque and force a conservative read-write resolution.
+		let db =
+			TestDb::new("DEFINE FUNCTION fn::call_field($o: object) { RETURN $o.w(); };").await;
+		assert_eq!(access_mode_of(&db, "fn::call_field({ w: || 1 })").await, AccessMode::ReadWrite);
+	}
+
+	#[tokio::test]
 	async fn a_read_only_body_with_a_writing_argument_is_read_write() {
 		// The body only reads, but a writing function passed as the argument is
 		// evaluated at the call site, so the call as a whole is read-write —

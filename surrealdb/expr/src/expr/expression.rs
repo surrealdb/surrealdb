@@ -114,22 +114,27 @@ impl Expr {
 			Expr::Postfix {
 				expr,
 				op,
-			} => match op {
-				// Calling a closure executes a body this expression can only
-				// see when the target is a closure literal; anything else
-				// (a param, a field) must over-approximate to writable.
-				PostfixOperator::Call(args) => {
-					matches!(&**expr, Expr::Closure(_))
-						&& expr.read_only()
-						&& args.iter().all(Expr::read_only)
+			} => {
+				match op {
+					// Calling a closure executes a body this expression can only
+					// see when the target is a closure literal; anything else
+					// (a param, a field) must over-approximate to writable.
+					PostfixOperator::Call(args) => {
+						matches!(&**expr, Expr::Closure(_))
+							&& expr.read_only() && args.iter().all(Expr::read_only)
+					}
+					// A registered method dispatches to a builtin, so only the
+					// receiver and arguments carry user expressions. Any other
+					// name invokes a closure stored on the receiver — a runtime
+					// value whose body is invisible here — and must
+					// over-approximate to writable, mirroring `Part::Method`.
+					PostfixOperator::MethodCall(name, args) => {
+						crate::expr::method::is_builtin_method(name)
+							&& expr.read_only() && args.iter().all(Expr::read_only)
+					}
+					PostfixOperator::Range | PostfixOperator::RangeSkip => expr.read_only(),
 				}
-				// Method dispatch resolves to builtins; only its arguments
-				// carry user expressions, mirroring `Part::Method`.
-				PostfixOperator::MethodCall(_, args) => {
-					expr.read_only() && args.iter().all(Expr::read_only)
-				}
-				PostfixOperator::Range | PostfixOperator::RangeSkip => expr.read_only(),
-			},
+			}
 			Expr::Binary {
 				left,
 				right,

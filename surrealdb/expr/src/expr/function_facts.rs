@@ -13,17 +13,20 @@
 //! - **Conservative** ("possibly writes"): `direct_writes` or `opaque_effects` anywhere reachable.
 //!   This is the polarity a planner must use before treating an expression as read-only.
 //!
-//! Known envelope: a closure *value* that reaches an invocation site as data —
-//! through a parameter, an object field invoked as a method, or as an argument
-//! to a closure-taking builtin — is invisible to this walk, exactly as it is
-//! to the executors' own access-mode analysis. The runtime write refusal and
-//! the transaction's own write gate remain the backstop for those shapes.
+//! Known envelope: a closure *value* that reaches an invocation site as data
+//! is invisible to this walk when the site itself looks harmless — as an
+//! argument to a closure-taking builtin (`array::map($arr, $fn)`), or stored
+//! on the receiver under a name that shadows a registered builtin method.
+//! This matches the executors' own access-mode analysis. The runtime write
+//! refusal and the transaction's own write gate remain the backstop for those
+//! shapes. Method calls whose name is *not* a registered builtin can only
+//! resolve to such a closure, so they count as opaque here.
 
 use std::collections::BTreeSet;
 
 use crate::expr::operator::PostfixOperator;
 use crate::expr::visit::{Visit as _, Visitor};
-use crate::expr::{Block, Expr, Function};
+use crate::expr::{Block, Expr, Function, Part};
 
 /// What one expression tree contributes to a mutability answer, before any
 /// callee bodies are consulted.
@@ -92,6 +95,19 @@ impl Visitor for FactsScanner {
 				}
 			}
 
+			// A method call whose name is not a registered builtin resolves
+			// to a closure stored on the receiver, whose body this tree
+			// cannot see. `Part::Method` is the idiom-path shape of the same
+			// call and is classified in `visit_part`.
+			Expr::Postfix {
+				op: PostfixOperator::MethodCall(name, _),
+				..
+			} => {
+				if !crate::expr::method::is_builtin_method(name) {
+					self.facts.opaque_effects = true;
+				}
+			}
+
 			// Everything else contributes only what the default traversal
 			// finds in its children: blocks, subqueries, idiom parts, closure
 			// bodies and call arguments are all descended into.
@@ -128,6 +144,17 @@ impl Visitor for FactsScanner {
 			} => {}
 		}
 		expr.visit(self)
+	}
+
+	/// The idiom-path shape of a method call: an unregistered name resolves
+	/// to a closure stored on the receiver, whose body this tree cannot see.
+	fn visit_part(&mut self, part: &Part) -> Result<(), Self::Error> {
+		if let Part::Method(name, _) = part
+			&& !crate::expr::method::is_builtin_method(name)
+		{
+			self.facts.opaque_effects = true;
+		}
+		part.visit(self)
 	}
 
 	fn visit_function(&mut self, f: &Function) -> Result<(), Self::Error> {
