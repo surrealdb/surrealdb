@@ -1,7 +1,11 @@
+// Computing the layout of the parser's deeply nested async state machine exceeds rustc's
+// default query recursion limit when monomorphized in this crate.
+#![recursion_limit = "256"]
+
 use std::hint::black_box;
 use std::path::Path;
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group};
 
 fn parse(s: &str) {
 	let x = surrealdb_parser::Parser::enter_parse::<ast::Query>(black_box(s), Default::default())
@@ -45,6 +49,19 @@ fn gather_lang_tests() -> String {
 		"language/statements/alter/alter_access.surql",
 		"language/graph/edge_clauses.surql",
 		"reproductions/7169_from_only_in_graph_lookup.surql",
+		// These expect runtime errors (control flow outside a loop, DEFINE API duplicate
+		// methods) that this parser reports at parse time, so the `parsing-error` filter
+		// below does not exclude them.
+		"language/statements/explain/control_flow.surql",
+		"language/statements/for/break_in_function.surql",
+		"language/statements/for/continue_in_function.surql",
+		"language/functions/array/filter.surql",
+		"language/functions/array/filter_index.surql",
+		"language/functions/array/find.surql",
+		"language/functions/array/find_index.surql",
+		"language/functions/array/map.surql",
+		"language/control_flow/loop/break_within_let_value.surql",
+		"api/config/duplicate_method.surql",
 	];
 
 	let mut res = String::new();
@@ -81,4 +98,19 @@ fn criterion_benchmark(c: &mut Criterion) {
 }
 
 criterion_group!(benches, criterion_benchmark);
-criterion_main!(benches);
+
+// Parsing the most deeply nested corpus files overflows the default main-thread stack when the
+// parser is unoptimized, so the whole harness runs on a thread with an explicitly sized stack.
+// `main` is the entry point for both `cargo bench` and `cargo test --benches`, covering both
+// modes; the body mirrors criterion's `criterion_main!` expansion.
+fn main() {
+	std::thread::Builder::new()
+		.stack_size(16 * 1024 * 1024)
+		.spawn(|| {
+			benches();
+			Criterion::default().configure_from_args().final_summary();
+		})
+		.expect("failed to spawn benchmark thread")
+		.join()
+		.expect("benchmark thread panicked");
+}
