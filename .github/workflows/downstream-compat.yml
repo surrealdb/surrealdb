@@ -466,15 +466,23 @@ jobs:
             done
           fi
 
+      # The downstream workspace includes the Kubernetes operator crates
+      # (s7b-operator, s7b-operator-e2e). Their build graph is disjoint from the
+      # engine: they do not depend on the patched engine crates, so they add no
+      # compatibility signal here. Building them also needs the Go toolchain (the
+      # envtest dev-dependency's build script), and their tests need a live
+      # cluster, neither of which this runner provides. Exclude them, matching
+      # the downstream repo's own engine `cargo make ci-*` tasks; its operator-*
+      # workflows cover those crates.
       - name: Build downstream (cargo check)
         if: steps.preflight.outputs.configured == 'true'
         working-directory: downstream
-        run: cargo check --workspace
+        run: cargo check --workspace --exclude s7b-operator --exclude s7b-operator-e2e
 
       - name: Test downstream (unit suite)
         if: steps.preflight.outputs.configured == 'true'
         working-directory: downstream
-        run: cargo nextest run --workspace --exclude surrealdb-integration
+        run: cargo nextest run --workspace --exclude surrealdb-integration --exclude s7b-operator --exclude s7b-operator-e2e
 
       - name: sccache stats
         if: ${{ always() && steps.preflight.outputs.configured == 'true' }}
