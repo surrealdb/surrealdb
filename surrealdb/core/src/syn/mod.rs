@@ -56,6 +56,154 @@ fn lift<T>(result: std::result::Result<T, ParseError>) -> Result<T> {
 	result.map_err(anyhow::Error::new)
 }
 
+/// Pretty-prints a SurrealQL script.
+///
+/// Each statement is re-emitted from its parsed AST via
+/// [`ToSql::to_sql_pretty`](surrealdb_types::ToSql::to_sql_pretty); standalone
+/// comment lines and single blank lines between statements are preserved.
+/// Returns a [`ParseError`] (lifted into `anyhow`) if the input is not valid
+/// SurrealQL, leaving the caller free to leave the original source untouched.
+pub fn format(input: &[u8]) -> Result<String> {
+	use std::fmt::Write;
+
+	use surrealdb_syn::token::{Token, TokenKind};
+	use surrealdb_types::ToSql;
+
+	parse_with(input, async |parser, stk| {
+		let mut output = String::new();
+		let mut carry_token = Token::invalid();
+
+		loop {
+			let is_eof = parser.lex_compound(carry_token, |lexer, _| Ok(lexer.is_eof()))?;
+
+			if is_eof.value {
+				break;
+			}
+
+			let result = parser.lex_compound(carry_token, |lexer, _| format_line(lexer))?;
+
+			carry_token = Token {
+				kind: TokenKind::Invalid,
+				span: result.span.after(),
+			};
+
+			match result.value {
+				FormatLine::SingleComment(s) => _ = write!(&mut output, "#{s}"),
+				FormatLine::MultiComment(s) => output.push_str(&s),
+				FormatLine::Whitespace => output.push('\n'),
+				FormatLine::Statement => {
+					let parsed = stk.run(|ctx| parser.parse_statement(ctx)).await?;
+					parser.eat(TokenKind::SemiColon);
+
+					carry_token = Token {
+						kind: TokenKind::Invalid,
+						span: parser.recent_span(),
+					};
+
+					output += &parsed.to_sql_pretty();
+				}
+			}
+
+			let result = parser.lex_compound(carry_token, |lexer, _| {
+				let cr = lexer.eat(b'\r');
+				let lf = lexer.eat(b'\n');
+				Ok(cr || lf)
+			})?;
+
+			carry_token = Token {
+				kind: TokenKind::Invalid,
+				span: result.span.after(),
+			};
+
+			if result.value {
+				output += "\n";
+			}
+		}
+
+		Ok(output)
+	})
+}
+
+/// The state of a source line, and how [`format`] should reproduce it.
+enum FormatLine {
+	/// Normalize to a single-line comment.
+	SingleComment(String),
+	/// Normalize to a multi-line comment.
+	MultiComment(String),
+	/// Collapse a run of whitespace-only lines into a single blank line.
+	Whitespace,
+	/// Parse and pretty-print a statement.
+	Statement,
+}
+
+fn format_line(lexer: &mut Lexer) -> ParseResult<FormatLine> {
+	lexer.eat_single_line_whitespace();
+	lexer.advance_span();
+
+	let mut span = lexer.current_span();
+	span.len = 1;
+
+	let lookahead = lexer.span_bytes(span);
+
+	match lookahead {
+		b"#" => {
+			lexer.eat(b'#');
+			lexer.advance_span();
+			Ok(format_single_line_comment(lexer))
+		}
+		b"-" => {
+			let mut span = span.after();
+			span.len = 1;
+			let lookahead = lexer.span_bytes(span);
+
+			if lookahead == b"-" {
+				lexer.eat(b'-');
+				lexer.eat(b'-');
+				lexer.advance_span();
+				Ok(format_single_line_comment(lexer))
+			} else {
+				Ok(FormatLine::Statement)
+			}
+		}
+		b"/" => {
+			let mut span = span.after();
+			span.len = 1;
+			let lookahead = lexer.span_bytes(span);
+
+			match lookahead {
+				b"/" => {
+					lexer.eat(b'/');
+					lexer.eat(b'/');
+					lexer.advance_span();
+					Ok(format_single_line_comment(lexer))
+				}
+				b"*" => {
+					lexer.eat(b'/');
+					lexer.eat(b'*');
+					lexer.eat_multi_line_comment()?;
+					let span = lexer.advance_span();
+					let comment = lexer.span_str(span).to_string();
+					Ok(FormatLine::MultiComment(comment))
+				}
+				_ => Ok(FormatLine::Statement),
+			}
+		}
+		b"\n" | b"\r" => {
+			lexer.eat_whitespace();
+			lexer.advance_span();
+			Ok(FormatLine::Whitespace)
+		}
+		_ => Ok(FormatLine::Statement),
+	}
+}
+
+fn format_single_line_comment(lexer: &mut Lexer) -> FormatLine {
+	lexer.eat_single_line_comment();
+	let span = lexer.advance_span();
+	let comment = lexer.span_str(span).to_string();
+	FormatLine::SingleComment(comment)
+}
+
 /// Creates the parser settings struct from the global configuration values as
 /// wel as the capabilities  struct.
 pub fn settings_from_capabilities_config(
