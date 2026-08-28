@@ -1,8 +1,8 @@
 <a href="https://surrealdb.com#gh-dark-mode-only" target="_blank">
-    <img width="100%" src="/img/white/hero.png" alt="SurrealDB Hero">
+    <img width="100%" src="./img/white/hero.png" alt="SurrealDB Hero">
 </a>
 <a href="https://surrealdb.com#gh-light-mode-only" target="_blank">
-    <img width="100%" src="/img/black/hero.png" alt="SurrealDB Hero">
+    <img width="100%" src="./img/black/hero.png" alt="SurrealDB Hero">
 </a>
 
 <p align="center">
@@ -159,13 +159,13 @@ Getting started with SurrealDB is as easy as starting up the SurrealDB database 
     <a href="https://surrealdb.com/docs/integration/sdks/ember"><img width=60 title="Ember.js" src="https://raw.githubusercontent.com/surrealdb/icons/main/emberjs.svg" /></a>
 </p>
 
-<h2><img height="20" src="/img/cloud.svg?raw=true">&nbsp;&nbsp;SurrealDB Cloud</h2>
+<h2><img height="20" src="./img/cloud.svg?raw=true">&nbsp;&nbsp;SurrealDB Cloud</h2>
 
 <a href="https://surrealdb.com/cloud#gh-dark-mode-only" target="_blank">
-    <img width="100%" src="/img/white/cloud.png" alt="SurrealDB Cloud">
+    <img width="100%" src="./img/white/cloud.png" alt="SurrealDB Cloud">
 </a>
 <a href="https://surrealdb.com/cloud#gh-light-mode-only" target="_blank">
-    <img width="100%" src="/img/black/cloud.png" alt="SurrealDB Cloud">
+    <img width="100%" src="./img/black/cloud.png" alt="SurrealDB Cloud">
 </a>
 
 SurrealDB is available as a [managed cloud service](https://app.surrealdb.com/overview). Forget about infrastructure operations, monitoring, backups or capacity planning. [SurrealDB Cloud](https://surrealdb.com/cloud) allows you to focus on building great products using the power and flexibility of SurrealDB in just a few clicks. Grow from prototype to enterprise-scale. The SurrealDB Cloud scalable architecture allows your database to evolve as your application grows, ensuring you are always ahead of demand. However if you want to deploy SurrealDB yourself, keep reading below.
