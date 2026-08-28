@@ -41,7 +41,6 @@ Temporary Items
 /lib/cache/
 /lib/store/
 /lib/target/
-/tests/sdk/*/Cargo.lock
 /tests/sdk/*/target
 /.github/scripts/__pycache__/
 
