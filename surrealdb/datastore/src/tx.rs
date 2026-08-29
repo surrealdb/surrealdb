@@ -2090,7 +2090,7 @@ impl Transaction {
 		Ok(val)
 	}
 
-	/// Retrieve a batch set of keys from the datastor, without decoding.
+	/// Retrieve a batch set of keys from the datastore, without decoding.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn getm_raw<K>(&self, keys: Vec<K>, version: Option<u64>) -> Result<Vec<Option<Val>>>
 	where

@@ -684,11 +684,13 @@ pub trait Transactable: Send + Sync {
 
 	/// Fetch many keys from the datastore.
 	///
-	/// This function fetches all matching keys pairs from the underlying
-	/// datastore concurrently. The returned [`GetMultiResult`] also reports
-	/// the number of input keys that were found and the total value bytes
-	/// across the hits, accumulated in the same loop that performs the
-	/// individual point gets.
+	/// The default implementation issues one sequential point get per input
+	/// key, so backends where each get is a round-trip override this method
+	/// with a native batched read. Results preserve input order, with misses
+	/// reported as `None`. The returned [`GetMultiResult`] also reports the
+	/// number of input keys that were found and the total value bytes across
+	/// the hits, accumulated in the same loop that performs the individual
+	/// point gets.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(keys = keys.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")))]
 	fn getm<'a>(
 		&'a self,
