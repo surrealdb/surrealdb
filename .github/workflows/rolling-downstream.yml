@@ -16,12 +16,14 @@
 # shipped to ECR/ACR) and the enforcement-ON licensed image (a `-licensed` tag
 # marker, mirrored to the public DockerHub at release for self-hosted customers).
 #
-# The downstream is built from a *colocated* checkout of this engine (a Cargo path
-# patch redirects the engine dependency to it), so the downstream image can never
-# drift from the engine commit it ships with — the cause of late, release-time
-# breakage this whole pipeline exists to remove. The downstream repo keeps owning
-# its build logic: we only invoke its Docker composite actions from a mounted
-# checkout.
+# The downstream image is built --locked, from the downstream commit's own
+# Cargo.lock, re-pinned to this exact engine commit first (`cargo update
+# --precise`, inside the downstream's Docker build — see its docker/Dockerfile).
+# Cargo.toml is never touched, so the image the downstream ships and the image
+# its own CI tests resolve dependencies by the same rule. The downstream repo
+# keeps owning its build logic: we only invoke its Docker composite actions
+# from a checkout, authenticated to fetch itself over git with this workflow's
+# own token (this repo IS the engine the downstream depends on).
 #
 # Registry coordinates, credentials and the downstream repo all come from
 # DOWNSTREAM_* secrets, and every job no-ops green when those secrets are absent.
@@ -307,9 +309,7 @@ jobs:
           - platform: linux/arm64
             arch: arm64
     steps:
-      # Mint a short-lived, repo-scoped token for the downstream, check it out,
-      # and colocate this engine inside it so the downstream Dockerfile can build
-      # the engine from a path (engine-path) instead of fetching it.
+      # Mint a short-lived, repo-scoped token for the downstream and check it out.
       - name: Generate a token for the downstream repo
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -325,13 +325,6 @@ jobs:
           ref: ${{ needs.preflight.outputs.sha }}
           token: ${{ steps.app-token.outputs.token }}
           path: downstream
-          persist-credentials: false
-
-      - name: Colocate engine source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.engine-ref }}
-          path: downstream/engine
           persist-credentials: false
 
       # Downstream build TOOLING (the build-docker-* actions) comes from the tip
@@ -424,9 +417,7 @@ jobs:
         # variant list on the branch slug (`releases-*`) via fromJSON.
         variant: ${{ fromJSON(startsWith(inputs.branch-slug, 'releases-') && '[{"enforcement":"off","marker":""},{"enforcement":"on","marker":"-licensed"}]' || '[{"enforcement":"off","marker":""}]') }}
     steps:
-      # Mint a short-lived, repo-scoped token for the downstream, check it out,
-      # and colocate this engine inside it so the downstream Dockerfile can build
-      # the engine from a path (engine-path) instead of fetching it.
+      # Mint a short-lived, repo-scoped token for the downstream and check it out.
       - name: Generate a token for the downstream repo
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -444,23 +435,31 @@ jobs:
           path: downstream
           persist-credentials: false
 
-      - name: Colocate engine source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.engine-ref }}
-          path: downstream/engine
-          persist-credentials: false
+      # The SOURCE (Dockerfile, its patch script, manifests) comes from the
+      # pinned commit checked out above, which is what docker build reads - build
+      # config stays coupled to the code it builds (see the tooling checkout
+      # below for the contrast). A downstream commit old enough to predate
+      # ENGINE_PIN_SHA support has no way to consume engine-precise-sha: its
+      # Dockerfile would silently build whatever ITS OWN Cargo.lock already had
+      # locked instead of engine-ref, while the tag and downstream.json still
+      # claim engine-ref. Fail here instead of shipping a mismatched pairing;
+      # this only bites a reproduce/rebuild of a commit from before the
+      # downstream line picked up locked-engine-pin support.
+      - name: Assert the downstream commit supports the locked engine pin
+        run: |
+          set -euo pipefail
+          if ! grep -q 'ARG ENGINE_PIN_SHA' downstream/docker/Dockerfile; then
+            echo "::error::downstream commit ${{ needs.preflight.outputs.sha }} predates ENGINE_PIN_SHA support (its docker/Dockerfile declares no such ARG), so it cannot be built against a specific engine commit now that the colocated-checkout fallback is gone. Rebuild a downstream commit whose Dockerfile already has ENGINE_PIN_SHA, or backport that support to this downstream line first."
+            exit 1
+          fi
 
       # Downstream build TOOLING (the build-docker-* actions) comes from the tip
       # of the RESOLVED downstream branch - the downstream analogue of loading
       # this repo's tooling from the workflow ref - not from the (possibly
       # older) downstream commit being (re)built. An action fix on a downstream
       # line therefore applies to every (re)build of that line immediately,
-      # without commit-level backports. The SOURCE (Dockerfile, its patch
-      # script, manifests) still comes from the pinned commit checked out above,
-      # which is what docker build reads - build config stays coupled to the
-      # code it builds. Falls back to the built commit when no branch was
-      # resolved (explicit downstream-sha override).
+      # without commit-level backports. Falls back to the built commit when no
+      # branch was resolved (explicit downstream-sha override).
       - name: Checkout downstream CI tooling from the resolved branch
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -486,9 +485,10 @@ jobs:
           aws ecr get-login-password --region "$region" \
             | docker login --username AWS --password-stdin "$REGISTRY"
 
-      # Build the engine from the colocated checkout (engine-path), so no git fetch
-      # / SSH deploy key is needed. Pushes both the base rolling tag and the
-      # per-arch tag the manifest step stitches together.
+      # Fetch the engine over git, authenticated with this workflow's own
+      # ambient token (contents: read on this repo — the engine IS this repo),
+      # re-pinned to engine-ref before the build. Pushes both the base rolling
+      # tag and the per-arch tag the manifest step stitches together.
       - name: Build + push downstream image
         uses: ./downstream-ci/.github/actions/build-docker-image
         with:
@@ -510,7 +510,8 @@ jobs:
           target: ${{ matrix.image.target }}
           platform: ${{ matrix.platform.platform }}
           publish: 'true'
-          engine-path: engine
+          github-token: ${{ github.token }}
+          engine-precise-sha: ${{ inputs.engine-ref }}
           license-enforcement: ${{ matrix.variant.enforcement }}
 
   # Stitch the per-arch images into a multi-arch manifest under the base rolling
