@@ -17,6 +17,8 @@ pub trait Parse<T> {
 }
 
 #[cfg(test)]
+mod format_test;
+#[cfg(test)]
 mod test;
 
 use anyhow::{Result, bail, ensure};
@@ -58,15 +60,22 @@ fn lift<T>(result: std::result::Result<T, ParseError>) -> Result<T> {
 
 /// Pretty-prints a SurrealQL script.
 ///
-/// Each statement is re-emitted from its parsed AST via
-/// [`ToSql::to_sql_pretty`](surrealdb_types::ToSql::to_sql_pretty); standalone
-/// comment lines and single blank lines between statements are preserved.
+/// Statements are re-emitted from their parsed AST via
+/// [`ToSql::to_sql_pretty`](surrealdb_types::ToSql::to_sql_pretty). Standalone
+/// comment lines and single blank lines between statements are preserved, and
+/// every line-comment marker (`--`, `//`, `#`) is normalized to `#`.
+///
+/// The AST carries no comments, so a statement whose own source contains a
+/// comment is emitted verbatim rather than reflowed - this guarantees a comment
+/// is never dropped, at the cost of not reformatting that statement. The output
+/// ends with exactly one newline; empty input yields an empty string.
+///
 /// Returns a [`ParseError`] (lifted into `anyhow`) if the input is not valid
-/// SurrealQL, leaving the caller free to leave the original source untouched.
+/// SurrealQL, leaving the caller free to keep the original source untouched.
 pub fn format(input: &[u8]) -> Result<String> {
 	use std::fmt::Write;
 
-	use surrealdb_syn::token::{Token, TokenKind};
+	use surrealdb_syn::token::{Span, Token, TokenKind};
 	use surrealdb_types::ToSql;
 
 	parse_with(input, async |parser, stk| {
@@ -87,20 +96,43 @@ pub fn format(input: &[u8]) -> Result<String> {
 				span: result.span.after(),
 			};
 
+			// Anything sharing a line with earlier output is separated by a
+			// single space so a trailing comment or statement never glues onto
+			// the preceding token. Blank lines carry their own newline.
+			if !matches!(result.value, FormatLine::Whitespace) {
+				separate_same_line(&mut output);
+			}
+
 			match result.value {
 				FormatLine::SingleComment(s) => _ = write!(&mut output, "#{s}"),
 				FormatLine::MultiComment(s) => output.push_str(&s),
 				FormatLine::Whitespace => output.push('\n'),
 				FormatLine::Statement => {
+					let start = parser.peek().span.offset;
 					let parsed = stk.run(|ctx| parser.parse_statement(ctx)).await?;
 					parser.eat(TokenKind::SemiColon);
 
+					let end_span = parser.recent_span();
 					carry_token = Token {
 						kind: TokenKind::Invalid,
-						span: parser.recent_span(),
+						span: end_span,
 					};
 
-					output += &parsed.to_sql_pretty();
+					let end = end_span.offset.saturating_add(end_span.len);
+					let source =
+						parser.span_str(Span::from_range(start..end.max(start))).to_string();
+
+					if statement_has_comment(source.as_bytes()) {
+						// The AST dropped the comment, so keep the original text
+						// rather than reformatting; ensure it stays terminated.
+						let trimmed = source.trim();
+						output.push_str(trimmed);
+						if !trimmed.ends_with(';') {
+							output.push(';');
+						}
+					} else {
+						output += &parsed.to_sql_pretty();
+					}
 				}
 			}
 
@@ -116,11 +148,18 @@ pub fn format(input: &[u8]) -> Result<String> {
 			};
 
 			if result.value {
-				output += "\n";
+				output.push('\n');
 			}
 		}
 
-		Ok(output)
+		// Normalize to exactly one trailing newline, dropping leading and
+		// trailing blank lines. Empty input stays empty.
+		let trimmed = output.trim();
+		Ok(if trimmed.is_empty() {
+			String::new()
+		} else {
+			format!("{trimmed}\n")
+		})
 	})
 }
 
@@ -134,6 +173,33 @@ enum FormatLine {
 	Whitespace,
 	/// Parse and pretty-print a statement.
 	Statement,
+}
+
+/// Inserts a single space when `output` already holds content on the current
+/// line, so the next token is never appended directly onto the previous one.
+fn separate_same_line(output: &mut String) {
+	if !output.is_empty() && !output.ends_with('\n') {
+		output.push(' ');
+	}
+}
+
+/// Whether a statement's source contains a comment in any inter-token gap.
+///
+/// Between two lexed tokens the lexer only ever skips whitespace and comments,
+/// so a gap holding a non-whitespace byte marks a comment. Content inside string
+/// or quoted-identifier literals lives within a token span, never in a gap, so
+/// it cannot be mistaken for one. A non-ASCII (e.g. Unicode whitespace) gap is
+/// treated conservatively as a comment, which only keeps the statement verbatim.
+fn statement_has_comment(source: &[u8]) -> bool {
+	let mut prev_end = 0usize;
+	for token in Lexer::new(source) {
+		let start = token.span.offset as usize;
+		if source[prev_end..start].iter().any(|b| !b.is_ascii_whitespace()) {
+			return true;
+		}
+		prev_end = start + token.span.len as usize;
+	}
+	source[prev_end..].iter().any(|b| !b.is_ascii_whitespace())
 }
 
 fn format_line(lexer: &mut Lexer) -> ParseResult<FormatLine> {
