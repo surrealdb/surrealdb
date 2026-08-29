@@ -1230,6 +1230,79 @@ impl Parse for ast::Access {
 					span,
 				})
 			}
+			T![REVOKE] => {
+				let _ = parser.next();
+				let expect = "`ALL`, `GRANT`, or `WHERE`";
+				let which = parser.peek_expect(expect)?;
+				let kind = match which.token {
+					T![ALL] => {
+						let _ = parser.next();
+						ast::AccessRevokeKind::All
+					}
+					T![GRANT] => {
+						let _ = parser.next();
+						ast::AccessRevokeKind::Grant(parser.parse_sync()?)
+					}
+					T![WHERE] => {
+						let _ = parser.next();
+						ast::AccessRevokeKind::Condition(
+							parser
+								.with_state(
+									|s| s.difference(ParserState::LOOP),
+									Parser::parse_enter,
+								)
+								.await?,
+						)
+					}
+					_ => return Err(parser.unexpected(expect)),
+				};
+
+				let span = parser.span_since(peek.span);
+				ast::AccessKind::Revoke(ast::AccessRevoke {
+					kind,
+					span,
+				})
+			}
+			T![PURGE] => {
+				let _ = parser.next();
+				let expect = "`EXPIRED` or `REVOKED`";
+
+				let mut kind = None;
+				loop {
+					let Some(token) = parser.peek()? else {
+						break;
+					};
+					let next = match (token.token, &kind) {
+						(T![EXPIRED], None) => ast::PurgeKind::Expired,
+						(T![REVOKED], None) => ast::PurgeKind::Revoked,
+						(T![EXPIRED], Some(ast::PurgeKind::Revoked))
+						| (T![REVOKED], Some(ast::PurgeKind::Expired)) => ast::PurgeKind::Both,
+						(T![EXPIRED] | T![REVOKED], Some(_)) => {
+							return Err(parser.unexpected_token("`FOR` or `;`", token));
+						}
+						_ => break,
+					};
+					let _ = parser.next();
+					kind = Some(next);
+					let _ = parser.eat(T![,])?;
+				}
+				let Some(kind) = kind else {
+					return Err(parser.unexpected(expect));
+				};
+
+				let grace = if parser.eat(T![FOR])?.is_some() {
+					Some(parser.parse_sync()?)
+				} else {
+					None
+				};
+
+				let span = parser.span_since(peek.span);
+				ast::AccessKind::Purge(ast::AccessPurge {
+					kind,
+					grace,
+					span,
+				})
+			}
 			_ => return Err(parser.unexpected(expect)),
 		};
 

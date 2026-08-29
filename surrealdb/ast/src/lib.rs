@@ -669,7 +669,7 @@ impl_vis_type! {
 ast_type! {
 	pub struct AccessPurge{
 		pub kind: PurgeKind,
-		pub grace: NodeId<Spanned<Duration>>,
+		pub grace: Option<NodeId<Spanned<Duration>>>,
 	}
 }
 
