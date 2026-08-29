@@ -1,3 +1,15 @@
+# Unoptimised builds spill every local and temporary into each async fn's
+# stack frame, and executing a query polls through a chain that is hundreds of
+# async frames deep, so some debug-build tests need more than the 2 MiB
+# default thread stack. Threads spawned without an explicit stack size —
+# libtest test threads and tokio runtime threads included — honour
+# RUST_MIN_STACK, and cargo applies [env] to every process it launches,
+# including test binaries under both `cargo test` and `cargo nextest`. CI sets
+# the same 8 MiB for the workspace test job in ci.yml. A RUST_MIN_STACK
+# already exported in the environment takes precedence over this entry.
+[env]
+RUST_MIN_STACK = "8388608"
+
 [target.wasm32-unknown-unknown]
 # getrandom 0.3 refuses to build for this target until a backend is named, and
 # the choice is a cfg rather than a feature so it cannot be expressed as a
