@@ -614,7 +614,15 @@ async fn parse_relate_expr(parser: &mut Parser<'_, '_>) -> ParseResult<NodeId<Ex
 			let expr = parser.parse().await.map(Expr::Array)?;
 			Ok(parser.push(expr))
 		}
-		BaseTokenKind::OpenParen => parser.parse_enter().await,
+		BaseTokenKind::OpenParen => {
+			// The endpoint grammar consumes the parenthesis itself so that the
+			// expression inside cannot extend past the closing delimiter, e.g.
+			// picking up `->` after `)` as a graph traversal.
+			let _ = parser.next();
+			let expr = parser.parse_enter().await?;
+			let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseParen, peek.span)?;
+			Ok(parser.push(Expr::Covered(expr)))
+		}
 		T![RETURN]
 		| T![SELECT]
 		| T![CREATE]
