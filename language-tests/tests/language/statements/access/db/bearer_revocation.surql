@@ -71,10 +71,10 @@ match = '''
 match = ''' $result == [] '''
 
 [[test.results]]
-match = ''' $result == [[]] '''
+error = "The access method 'invalid' does not exist in the database 'test'"
 
 [[test.results]]
-match = ''' $result == [] '''
+error = "The access method 'invalid' does not exist in the database 'test'"
 
 [[test.results]]
 error = "The access grant 'invalid' does not exist for 'api' in the database 'test'"
@@ -101,7 +101,7 @@ ACCESS api ON DATABASE PURGE REVOKED EXPIRED FOR 1d;
 SLEEP 1100ms;
 ACCESS api ON DATABASE PURGE REVOKED;
 ACCESS api ON DATABASE SHOW ALL;
--- An access method that does not exist simply holds no grants to revoke or purge
+-- An access method that does not exist cannot be revoked from or purged
 ACCESS invalid ON DATABASE REVOKE ALL;
 ACCESS invalid ON DATABASE PURGE EXPIRED;
 -- Should fail

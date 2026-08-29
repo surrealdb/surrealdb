@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
 use rand::Rng;
@@ -41,6 +42,54 @@ pub(crate) async fn subject_compute(
 	}
 }
 
+/// Resolve the access method named by an access statement under the given base.
+///
+/// The namespace and database of the base are resolved first, so a missing
+/// namespace or database is reported before a missing access method. Every
+/// access statement must name an access method that exists under its base.
+async fn expect_access(
+	base: Base,
+	ac: &str,
+	ctx: &FrozenContext,
+	opt: &Options,
+) -> Result<Arc<catalog::AccessDefinition>> {
+	let txn = ctx.tx();
+	match base {
+		Base::Root => txn.expect_root_access(ac).await,
+		Base::Ns => {
+			let ns = ctx.expect_ns_id(opt).await?;
+			txn.get_ns_access(ns, ac, None).await?.ok_or_else(|| {
+				CatalogError::AccessNsNotFound {
+					ac: ac.to_owned(),
+					// The namespace is expected above
+					ns: opt.ns.as_deref().expect("namespace validated by expect_ns_id").to_owned(),
+				}
+				.into()
+			})
+		}
+		Base::Db => {
+			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+			txn.get_db_access(ns, db, ac, None).await?.ok_or_else(|| {
+				CatalogError::AccessDbNotFound {
+					ac: ac.to_owned(),
+					// The namespace and database are expected above
+					ns: opt
+						.ns
+						.as_deref()
+						.expect("namespace validated by expect_ns_db_ids")
+						.to_owned(),
+					db: opt
+						.db
+						.as_deref()
+						.expect("database validated by expect_ns_db_ids")
+						.to_owned(),
+				}
+				.into()
+			})
+		}
+	}
+}
+
 pub(crate) async fn create_grant(
 	access: String,
 	base: Option<Base>,
@@ -60,38 +109,7 @@ pub(crate) async fn create_grant(
 	txn.clear_cache();
 
 	// Read the access definition.
-	let ac = match base {
-		Base::Root => txn.expect_root_access(&access).await?,
-		Base::Ns => {
-			let ns = ctx.expect_ns_id(opt).await?;
-			txn.get_ns_access(ns, &access, None).await?.ok_or_else(|| {
-				CatalogError::AccessNsNotFound {
-					ac: access.clone(),
-					// The namespace is expected above
-					ns: opt.ns.as_deref().expect("namespace validated by expect_ns_id").to_owned(),
-				}
-			})?
-		}
-		Base::Db => {
-			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-			txn.get_db_access(ns, db, &access, None).await?.ok_or_else(|| {
-				CatalogError::AccessDbNotFound {
-					ac: access.clone(),
-					// The namespace and database is expected above
-					ns: opt
-						.ns
-						.as_deref()
-						.expect("namespace validated by expect_ns_db_ids")
-						.to_owned(),
-					db: opt
-						.db
-						.as_deref()
-						.expect("database validated by expect_ns_db_ids")
-						.to_owned(),
-				}
-			})?
-		}
-	};
+	let ac = expect_access(base, &access, ctx, opt).await?;
 
 	// Verify the access type.
 	match &ac.access_type {
@@ -362,41 +380,7 @@ pub(crate) async fn compute_show(
 	// Clear the cache.
 	txn.clear_cache();
 	// Check if the access method exists.
-	match base {
-		Base::Root => {
-			txn.expect_root_access(stmt.ac.as_str()).await?;
-		}
-		Base::Ns => {
-			let ns = ctx.expect_ns_id(opt).await?;
-			if txn.get_ns_access(ns, stmt.ac.as_str(), None).await?.is_none() {
-				bail!(CatalogError::AccessNsNotFound {
-					ac: stmt.ac.to_string(),
-					// We expected a namespace above
-					ns: opt.ns.as_deref().expect("namespace validated by expect_ns_id").to_owned(),
-				});
-			}
-		}
-		Base::Db => {
-			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-			// We expected a namespace above
-			if txn.get_db_access(ns, db, stmt.ac.as_str(), None).await?.is_none() {
-				bail!(CatalogError::AccessDbNotFound {
-					ac: stmt.ac.to_string(),
-					// We expected a namespace and database above
-					ns: opt
-						.ns
-						.as_deref()
-						.expect("namespace validated by expect_ns_db_ids")
-						.to_owned(),
-					db: opt
-						.db
-						.as_deref()
-						.expect("database validated by expect_ns_db_ids")
-						.to_owned(),
-				});
-			}
-		}
-	};
+	expect_access(base, stmt.ac.as_str(), ctx, opt).await?;
 
 	// Get the grants to show.
 	match &stmt.gr {
@@ -512,17 +496,7 @@ pub(crate) async fn revoke_grant(
 	// Clear the cache
 	txn.clear_cache();
 	// Check if the access method exists.
-	match base {
-		Base::Root => txn.get_root_access(stmt.ac.as_str(), None).await?,
-		Base::Ns => {
-			let ns = ctx.expect_ns_id(opt).await?;
-			txn.get_ns_access(ns, stmt.ac.as_str(), None).await?
-		}
-		Base::Db => {
-			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-			txn.get_db_access(ns, db, stmt.ac.as_str(), None).await?
-		}
-	};
+	expect_access(base, stmt.ac.as_str(), ctx, opt).await?;
 
 	// Get the grants to revoke.
 	let mut revoked = Vec::new();
@@ -750,23 +724,13 @@ pub(crate) async fn compute_purge(
 	// Clear the cache.
 	txn.clear_cache();
 	// Check if the access method exists.
-	match base {
-		Base::Root => txn.get_root_access(stmt.ac.as_str(), None).await?,
-		Base::Ns => {
-			let ns = ctx.get_ns_id(opt).await?;
-			txn.get_ns_access(ns, stmt.ac.as_str(), None).await?
-		}
-		Base::Db => {
-			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-			txn.get_db_access(ns, db, stmt.ac.as_str(), None).await?
-		}
-	};
+	expect_access(base, stmt.ac.as_str(), ctx, opt).await?;
 	// Get all grants to purge.
 	let mut purged = Array::new();
 	let grs = match base {
 		Base::Root => txn.all_root_access_grants(stmt.ac.as_str(), None).await?,
 		Base::Ns => {
-			let ns = ctx.get_ns_id(opt).await?;
+			let ns = ctx.expect_ns_id(opt).await?;
 			txn.all_ns_access_grants(ns, stmt.ac.as_str(), None).await?
 		}
 		Base::Db => {
@@ -802,7 +766,7 @@ pub(crate) async fn compute_purge(
 					txn.del_key(&key).await?
 				}
 				Base::Ns => {
-					let ns = ctx.get_ns_id(opt).await?;
+					let ns = ctx.expect_ns_id(opt).await?;
 					let key = NsGrantKey {
 						ns,
 						ac: Cow::Borrowed(&stmt.ac),
