@@ -29,8 +29,11 @@ outputs:
     description: 'S3 prefix the rolling artifacts live under'
     value: ${{ steps.locate.outputs.s3-prefix }}
   rolling-source-tag:
-    description: 'Rolling Docker source tag'
+    description: 'Rolling Docker source tag for the engine image (engine sha only)'
     value: ${{ steps.locate.outputs.rolling-source-tag }}
+  downstream-source-tag:
+    description: 'Base rolling Docker source tag for the downstream image (compound <engine-short>.<downstream-short>, read verbatim from the manifest; the promote side appends the -dev / -licensed markers)'
+    value: ${{ steps.locate.outputs.downstream-source-tag }}
   downstream-built:
     description: 'Whether a promotable downstream image exists for this commit'
     value: ${{ steps.locate.outputs.downstream-built }}
@@ -304,9 +307,21 @@ runs:
           local absent_grace=3
           deadline=$(( $(date +%s) + WAIT_MINUTES * 60 ))
           while :; do
-            have="$(aws s3 cp "s3://${ROLLING_BUCKET}/rolling-builds/${s}/${eng}/downstream.json" - 2>/dev/null | jq -r '.sha // ""' 2>/dev/null || true)"
-            if [[ "$have" == "$ds" ]]; then
+            # The per-pairing manifest is immutable and authoritative: its presence
+            # means the image for exactly this engine/downstream pairing was built
+            # and is promotable, whichever pairing the engine-level pointer names.
+            if aws s3 cp "s3://${ROLLING_BUCKET}/rolling-builds/${s}/${eng}/${ds}/downstream.json" - >/dev/null 2>&1; then
               echo "Downstream pairing present: engine ${eng} ⇢ downstream ${ds}."
+              return 0
+            fi
+            have="$(aws s3 cp "s3://${ROLLING_BUCKET}/rolling-builds/${s}/${eng}/downstream.json" - 2>/dev/null | jq -r '.sha // ""' 2>/dev/null || true)"
+            # Backward compatibility: a pre-compound downstream build recorded the
+            # pairing only in the engine-level pointer (no per-pairing object), so
+            # accept the pointer when it names the requested pairing. New builds are
+            # caught by the immutable per-pairing check above; this read is otherwise
+            # diagnostic (which pairing is currently latest).
+            if [[ "$have" == "$ds" ]]; then
+              echo "Downstream pairing present (legacy pointer): engine ${eng} ⇢ downstream ${ds}."
               return 0
             fi
             # API-tolerant (like wait_for_build): an UNREADABLE runs API is
@@ -613,11 +628,15 @@ runs:
         fi
 
         # Downstream provenance: the engine and downstream sides write SEPARATE
-        # manifests keyed by the same engine sha. A downstream.json is written
-        # only when a promotable downstream image exists for this commit, so its
-        # PRESENCE is the authoritative "a downstream image exists" signal. It records
-        # which downstream commit was built (no registry/account — those come
+        # manifests. A downstream.json is written only when a promotable downstream
+        # image exists, so its PRESENCE is the authoritative "a downstream image
+        # exists" signal. It records which downstream commit was built and the base
+        # rolling tag the image was pushed under (no registry/account; those come
         # from secrets at promote time). Absent simply means nothing to mirror.
+        #
+        # A specific pairing (downstream-git-sha override) reads its immutable
+        # per-pairing manifest at <engine-sha>/<downstream-sha>/downstream.json; a
+        # normal release reads the engine-level pointer to the latest pairing.
         ds_built=false
         ds_sha=""
         ds_branch=""
@@ -626,22 +645,47 @@ runs:
         # field and default to false, so the licensed DockerHub mirror is skipped for
         # those lines instead of failing to find an image.
         ds_licensed=false
-        ds_json=$(aws s3 cp "s3://${ROLLING_BUCKET}/rolling-builds/${slug}/${sha}/downstream.json" - 2>/dev/null || true)
+        # `.tag` is the compound <engine-short>.<downstream-short> base rolling tag
+        # the build pushed. Manifests written before the compound tag existed lack
+        # it; those fall back to the legacy engine-only tag below.
+        ds_tag=""
+        if [[ -n "${REQ_DOWNSTREAM_SHA:-}" ]]; then
+          ds_manifest="rolling-builds/${slug}/${sha}/${REQ_DOWNSTREAM_SHA}/downstream.json"
+          ds_json=$(aws s3 cp "s3://${ROLLING_BUCKET}/${ds_manifest}" - 2>/dev/null || true)
+          if [[ -z "$ds_json" ]]; then
+            # Backward compatibility: a pre-compound build wrote only the engine-level
+            # pointer. Accept it here; the invariant check below still rejects it
+            # unless it records the requested pairing.
+            ds_manifest="rolling-builds/${slug}/${sha}/downstream.json"
+            ds_json=$(aws s3 cp "s3://${ROLLING_BUCKET}/${ds_manifest}" - 2>/dev/null || true)
+          fi
+        else
+          ds_manifest="rolling-builds/${slug}/${sha}/downstream.json"
+          ds_json=$(aws s3 cp "s3://${ROLLING_BUCKET}/${ds_manifest}" - 2>/dev/null || true)
+        fi
         if [[ -n "$ds_json" ]]; then
           ds_built=true
           ds_sha=$(echo "$ds_json" | jq -r '.sha // ""')
           ds_branch=$(echo "$ds_json" | jq -r '.branch // ""')
           ds_licensed=$(echo "$ds_json" | jq -r 'if .licensed == true then "true" else "false" end')
+          ds_tag=$(echo "$ds_json" | jq -r '.tag // ""')
         fi
 
-        # When a specific downstream commit was requested, the pairing wait above
-        # confirmed the manifest recorded it - but downstream.json is keyed by the
-        # engine sha and holds ONE pairing, so a concurrent downstream build for
-        # this engine commit could have overwritten it between that check and this
-        # read. Re-assert the shipped pairing IS the requested one rather than
-        # silently promote whatever now sits there.
+        # The downstream image source tag: the compound tag the build recorded, or
+        # the legacy engine-only tag for pre-compound manifests (still promotable
+        # because those older images were pushed under that engine-only tag).
+        if [[ -n "$ds_tag" ]]; then
+          ds_source_tag="$ds_tag"
+        else
+          ds_source_tag="rolling-${slug}-${sha}"
+        fi
+
+        # Invariant: an explicit override reads its own immutable per-pairing
+        # manifest, so the recorded downstream sha must be the requested one. A
+        # mismatch (or a missing manifest) means the intended pairing was never
+        # built; fail rather than promote the wrong downstream code.
         if [[ -n "${REQ_DOWNSTREAM_SHA:-}" && "$ds_sha" != "$REQ_DOWNSTREAM_SHA" ]]; then
-          echo "::error::The downstream pairing for engine ${sha} now records '${ds_sha:-none}', not the requested ${REQ_DOWNSTREAM_SHA} (a concurrent downstream build for this engine commit overwrote it). Re-run the release once the intended downstream build is the latest for this engine commit."
+          echo "::error::No promotable downstream image records the requested pairing engine ${sha} ⇢ downstream ${REQ_DOWNSTREAM_SHA} (manifest ${ds_manifest} records '${ds_sha:-none}'). Build it with rolling-downstream-build.yml (engine-git-sha=${sha}, downstream-git-sha=${REQ_DOWNSTREAM_SHA}) before releasing."
           exit 1
         fi
 
@@ -653,6 +697,7 @@ runs:
           echo "branch-slug=${slug}"
           echo "s3-prefix=rolling-builds/${slug}/${sha}"
           echo "rolling-source-tag=rolling-${slug}-${sha}"
+          echo "downstream-source-tag=${ds_source_tag}"
           echo "downstream-built=${ds_built}"
           echo "downstream-sha=${ds_sha}"
           echo "downstream-branch=${ds_branch}"

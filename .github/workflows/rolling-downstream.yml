@@ -1,9 +1,14 @@
 # Rolling downstream (reusable)
 #
 # Builds the downstream multi-arch Docker image for ONE channel of a single commit
-# and stores it in the downstream's private ECR, tagged with this engine's rolling
-# identity (rolling-<slug>-<sha>). This is the downstream half of build-once /
-# promote-many: the image is built here, from this exact commit, so a later
+# and stores it in the downstream's private ECR under a compound rolling identity
+# (rolling-<slug>-<engine-short>.<downstream-short>), so distinct downstream commits
+# built against the same engine commit are separately promotable instead of
+# overwriting each other. The image tag uses short shas for readability; the full
+# shas key the S3 namespace (the per-pairing manifest under
+# rolling-builds/<slug>/<engine>/<downstream>/ and the engine-level pointer beside
+# it) that is the non-collision backstop. This is the downstream half of build-once
+# / promote-many: the image is built here, from this exact commit, so a later
 # release just re-tags + mirrors it (see release.yml) instead of rebuilding.
 #
 # Two variants are built per target/arch from identical source, differing only in
@@ -91,6 +96,10 @@ jobs:
       configured: ${{ steps.preflight.outputs.configured }}
       branch: ${{ steps.branch.outputs.ref }}
       sha: ${{ steps.branch.outputs.sha }}
+      # Short <engine-short>.<downstream-short> pair for the readable image tag.
+      # The full shas stay in the S3 namespace (finalize) as the non-collision
+      # backstop; a 9+9 hex pair is itself collision-free in practice.
+      sha-pair: ${{ steps.pair.outputs.sha-pair }}
       # Whether this build is promotable, i.e. it was built from the downstream
       # branch that MATCHES the engine line (or is an explicit rebuild). A build
       # that fell back to the downstream's 'main' is not promotable — finalize
@@ -262,6 +271,20 @@ jobs:
             echo "promotable=${promotable}"
           } >> "$GITHUB_OUTPUT"
           echo "Building the downstream from ${ref} (${sha})"
+
+      # The readable image tag's <engine-short>.<downstream-short> pair, computed
+      # once here so the image, manifest and downstream.json all agree byte for
+      # byte. The image is addressed by this tag at promote time, so it must match
+      # what finalize records. The full shas keep the S3 namespace unique.
+      - name: Compute short tag pair
+        id: pair
+        if: steps.preflight.outputs.configured == 'true'
+        env:
+          ENGINE_REF: ${{ inputs.engine-ref }}
+          DS_SHA: ${{ steps.branch.outputs.sha }}
+        run: |
+          set -euo pipefail
+          echo "sha-pair=${ENGINE_REF:0:9}.${DS_SHA:0:9}" >> "$GITHUB_OUTPUT"
 
   # Pre-build the heavy builder image (Rust + aws-sdk-cpp + sources) once per arch
   # and cache it in the downstream ECR, so the per-target image builds below are
@@ -473,7 +496,13 @@ jobs:
           dockerfile: downstream/docker/Dockerfile
           git-ref: ${{ needs.preflight.outputs.sha }}
           docker-repo: ${{ env.DOCKER_REPO }}
-          docker-tag: rolling-${{ inputs.branch-slug }}-${{ inputs.engine-ref }}${{ matrix.variant.marker }}
+          # Compound rolling tag: <engine-short>.<downstream-short>. Keying on both
+          # sides lets distinct downstream commits built against the SAME engine
+          # commit coexist as separately promotable images instead of overwriting
+          # one another under a shared engine-only tag. Short shas keep the tag
+          # readable; the full-sha S3 namespace (finalize) is the non-collision
+          # backstop.
+          docker-tag: rolling-${{ inputs.branch-slug }}-${{ needs.preflight.outputs.sha-pair }}${{ matrix.variant.marker }}
           tag-suffix: ${{ matrix.image.suffix }}
           tag-branch: ${{ inputs.branch-slug }}
           build-metadata: ${{ inputs.build-metadata }}
@@ -497,7 +526,8 @@ jobs:
     runs-on: ${{ vars.RUNNER_AMD }}
     env:
       DOCKER_REPO: ${{ secrets.AWS_ECR_REGISTRY }}/${{ secrets.DOWNSTREAM_ECR_REPOSITORY }}
-      ROLLING_TAG: rolling-${{ inputs.branch-slug }}-${{ inputs.engine-ref }}${{ matrix.variant.marker }}
+      # Compound rolling tag: <engine-short>.<downstream-short> (see the image job).
+      ROLLING_TAG: rolling-${{ inputs.branch-slug }}-${{ needs.preflight.outputs.sha-pair }}${{ matrix.variant.marker }}
     strategy:
       fail-fast: false
       matrix:
@@ -566,19 +596,25 @@ jobs:
           echo "Created multi-arch rolling manifest ${BASE}"
 
   # Record that a promotable downstream image exists for this engine commit, by
-  # writing downstream.json next to the engine's engine.json in the private CI
-  # bucket (keyed by the SAME engine sha). This is the downstream half of the
-  # decoupled manifests: engine.json (from the engine rolling build) and this file
-  # are written by different sides and never share an object, so builds that land
-  # close together can't clobber each other.
+  # writing downstream.json in the private CI bucket. Two objects are written:
+  #   * The per-pairing manifest at <engine-sha>/<downstream-sha>/downstream.json
+  #     is the authoritative, immutable record of THIS pairing. A different
+  #     downstream commit built against the same engine commit writes its own
+  #     object under its own downstream sha, so pairings never clobber each other
+  #     and every built image stays independently promotable (released by naming
+  #     the pairing via a downstream-git-sha override).
+  #   * The engine-level <engine-sha>/downstream.json is a moving pointer to the
+  #     latest pairing for this engine commit, which a normal (no-override) release
+  #     promotes. It sits next to the engine's engine.json; the two manifests are
+  #     written by different sides and never share an object.
   #
   # PRESENCE is the signal: this job only runs after every per-target multi-arch
-  # manifest succeeded, so the mere existence of downstream.json means "a
-  # promotable downstream image exists for this engine sha". A not-configured /
-  # failed / absent downstream build simply leaves no downstream.json. The file
-  # carries only public-safe provenance (which downstream branch/sha it built
-  # against, and the engine sha it belongs to) — no registry/account/repo, which
-  # the promote workflow reconstructs from secrets + the rolling tag.
+  # manifest succeeded, so the mere existence of a downstream.json means "a
+  # promotable downstream image exists". A not-configured / failed / absent
+  # downstream build simply leaves no downstream.json. The file carries only
+  # public-safe provenance (which downstream branch/sha it built against, the
+  # engine sha it belongs to, and the base rolling tag the image was pushed under)
+  # and no registry/account/repo, which the promote workflow supplies from secrets.
   #
   # Only promotable builds get a downstream.json. Three guards, one per "ref" the
   # build is pinned by — all must be on a promotion line, but they need not match
@@ -616,9 +652,11 @@ jobs:
           ROLLING_BUCKET: ${{ secrets.AWS_S3_RELEASE_ARTIFACTS_BUCKET_NAME }}
           AWS_REGION: us-east-1
           S3_PREFIX: ${{ inputs.s3-prefix }}
+          BRANCH_SLUG: ${{ inputs.branch-slug }}
           ENGINE_REF: ${{ inputs.engine-ref }}
           DS_BRANCH: ${{ needs.preflight.outputs.branch }}
           DS_SHA: ${{ needs.preflight.outputs.sha }}
+          SHA_PAIR: ${{ needs.preflight.outputs.sha-pair }}
           # Whether this build produced the licence-ENFORCING (`-licensed`) image.
           # That variant is built only on release lines (branch-slug releases-*),
           # matching the `variant` matrix on the image/manifest jobs. Recording it
@@ -628,16 +666,27 @@ jobs:
           LICENSED: ${{ startsWith(inputs.branch-slug, 'releases-') }}
         run: |
           set -euo pipefail
-          # engine_sha is redundant with the prefix (which is keyed by the engine
-          # sha), but recording it lets promote assert this downstream image was
-          # built against the engine commit it is being married to.
+          # The base rolling tag the downstream image was pushed under: the readable
+          # <engine-short>.<downstream-short> pair. The promote side reads this
+          # verbatim and appends the -dev / -licensed markers, so the tag format is
+          # defined here alone (and must match the image/manifest jobs). The full
+          # shas below key the S3 namespace; engine_sha is redundant with the prefix
+          # (keyed by the full engine sha), but recording it lets promote assert this
+          # downstream image was built against the engine commit it is married to.
+          tag="rolling-${BRANCH_SLUG}-${SHA_PAIR}"
           jq -n \
             --arg engine_sha "${ENGINE_REF}" \
             --arg branch "${DS_BRANCH}" \
             --arg sha "${DS_SHA}" \
+            --arg tag "${tag}" \
             --argjson licensed "${LICENSED}" \
             --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            '{engine_sha: $engine_sha, branch: $branch, sha: $sha, licensed: $licensed, created_at: $created}' \
+            '{engine_sha: $engine_sha, branch: $branch, sha: $sha, tag: $tag, licensed: $licensed, created_at: $created}' \
             > downstream.json
           cat downstream.json
+          # Per-pairing manifest (immutable) first, then the engine-level pointer to
+          # the latest pairing (written last so it is the newest object). A normal
+          # release reads the pointer; a downstream-git-sha override reads the
+          # per-pairing object directly.
+          aws s3 cp --cache-control 'no-store' downstream.json "s3://${ROLLING_BUCKET}/${S3_PREFIX}/${DS_SHA}/downstream.json"
           aws s3 cp --cache-control 'no-store' downstream.json "s3://${ROLLING_BUCKET}/${S3_PREFIX}/downstream.json"

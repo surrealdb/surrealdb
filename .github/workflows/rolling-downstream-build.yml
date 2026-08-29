@@ -1,10 +1,12 @@
 # Rolling build (downstream)
 #
-# Builds and stores the downstream image for a commit and records it as
-# promotable by writing rolling-builds/<slug>/<sha>/downstream.json next to the
-# engine's engine.json (keyed by the SAME commit). This is the downstream half of
-# build-once / promote-many; the reusable rolling-downstream.yml does the actual
-# build and push.
+# Builds and stores the downstream image for a commit and records it as promotable
+# by writing an immutable per-pairing manifest at
+# rolling-builds/<slug>/<engine-sha>/<downstream-sha>/downstream.json, plus an
+# engine-level rolling-builds/<slug>/<engine-sha>/downstream.json pointer (next to
+# the engine's engine.json) tracking the latest pairing a normal release promotes.
+# This is the downstream half of build-once / promote-many; the reusable
+# rolling-downstream.yml does the actual build and push.
 #
 # The downstream image is released from a release line (versioned) or from main
 # (the nightly channel). Both are marked PROMOTABLE (they write downstream.json).
