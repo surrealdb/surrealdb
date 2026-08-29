@@ -13,8 +13,8 @@ pub type ParseResult<T> = Result<T, ParseError>;
 ///
 /// # Safety
 /// This error type uses values 1 and 2 to report specific error states.
-/// This is safe as the 0 is guarenteed to not be valid pointer and  the pointer returned from
-/// [`TypedError`] is guarenteed to be atleast 4 byte aligned, so even if 1 is a valid pointer
+/// This is safe as the 0 is guaranteed to not be valid pointer and  the pointer returned from
+/// [`TypedError`] is guaranteed to be atleast 4 byte aligned, so even if 1 is a valid pointer
 /// address it would still be an invalid address for the pointer from TypedError.
 pub struct ParseError(NonNull<()>);
 
