@@ -1,22 +1,33 @@
 /**
-[test]
-reason = "Test ORDER BY field that is NOT in SELECT - this produces a parsing error"
+[env]
+namespace = true
+database = true
+auth = { level = "owner" }
 
-[test.results]
-parsing-error = """
-Missing order idiom `age` in statement selection
-  --> [22:33]
-   |
-22 | SELECT id, name FROM t ORDER BY age ASC;
-   |                                 ^^^^^^^
-  --> [22:8]
-   |
-22 | SELECT id, name FROM t ORDER BY age ASC;
-   |        ^^^^^^^^ Idiom missing here
-"""
+[test]
+reason = "ORDER BY a field that is not in the SELECT list is allowed. The engine sorts by the non-projected field and returns only the selected columns."
+
+[[test.results]]
+value = "'OK'"
+
+[[test.results]]
+value = "[{ id: t:1, name: 'alice' }, { id: t:2, name: 'bob' }, { id: t:3, name: 'charlie' }]"
+
+[[test.results]]
+value = "[{ id: t:3, name: 'charlie' }, { id: t:2, name: 'bob' }, { id: t:1, name: 'alice' }]"
 
 */
 
--- Test: ORDER BY field not in SELECT produces a parsing error
--- This is expected behavior in SurrealDB - ORDER BY fields must be in the SELECT list
+-- Setup: records with `age` NOT in SELECT
+{
+	CREATE t:1 SET name = "alice", age = 30;
+	CREATE t:2 SET name = "bob",   age = 20;
+	CREATE t:3 SET name = "charlie", age = 25;
+	RETURN "OK";
+};
+
+-- ORDER BY age ASC but only SELECT id and name (age not in output)
 SELECT id, name FROM t ORDER BY age ASC;
+
+-- ORDER BY age DESC
+SELECT id, name FROM t ORDER BY age DESC;

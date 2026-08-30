@@ -174,8 +174,10 @@ impl Parser<'_> {
 	) -> ParseResult<()> {
 		let is_group = matches!(kind, MissingKind::Group);
 
-		// ORDER BY on `SELECT VALUE ...` runs on the full row before VALUE projection.
-		if matches!(kind, MissingKind::Order) && matches!(fields, Fields::Value(_)) {
+		// ORDER BY fields do not need to appear in SELECT. The execution engine
+		// fetches the full document from storage and can sort by any field, then
+		// projects only the requested columns afterwards.
+		if matches!(kind, MissingKind::Order) {
 			return Ok(());
 		}
 
