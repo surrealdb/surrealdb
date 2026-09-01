@@ -5,7 +5,7 @@ use crate::syn::token::{Token, TokenKind, t};
 
 impl Lexer<'_> {
 	/// Eats a single line comment.
-	pub(super) fn eat_single_line_comment(&mut self) {
+	pub fn eat_single_line_comment(&mut self) {
 		while let Some(byte) = self.reader.next() {
 			match byte {
 				byte::CR => {
@@ -68,7 +68,7 @@ impl Lexer<'_> {
 	}
 
 	/// Eats a multi line comment and returns an error if `*/` would be missing.
-	pub(super) fn eat_multi_line_comment(&mut self) -> Result<(), SyntaxError> {
+	pub fn eat_multi_line_comment(&mut self) -> Result<(), SyntaxError> {
 		let start_span = self.current_span();
 		loop {
 			let Some(byte) = self.reader.next() else {
@@ -86,8 +86,45 @@ impl Lexer<'_> {
 		}
 	}
 
+	/// Eat whitespace like spaces tables, but no new-lines
+	pub fn eat_single_line_whitespace(&mut self) {
+		loop {
+			let Some(byte) = self.reader.peek() else {
+				return;
+			};
+			match byte {
+				byte::FF | byte::SP | byte::VT | byte::TAB => {
+					self.reader.next();
+				}
+				x if !x.is_ascii() => {
+					let backup = self.reader.offset();
+					self.reader.next();
+					let char = match self.reader.complete_char(x) {
+						Ok(x) => x,
+						Err(_) => {
+							self.reader.backup(backup);
+							break;
+						}
+					};
+
+					match char {
+						'\u{00A0}' | '\u{1680}' | '\u{2000}' | '\u{2001}' | '\u{2002}'
+						| '\u{2003}' | '\u{2004}' | '\u{2005}' | '\u{2006}' | '\u{2007}'
+						| '\u{2008}' | '\u{2009}' | '\u{200A}' | '\u{202F}' | '\u{205F}'
+						| '\u{3000}' => {}
+						_ => {
+							self.reader.backup(backup);
+							break;
+						}
+					}
+				}
+				_ => break,
+			}
+		}
+	}
+
 	/// Eat whitespace like spaces tables and new-lines.
-	pub(super) fn eat_whitespace(&mut self) {
+	pub fn eat_whitespace(&mut self) {
 		loop {
 			let Some(byte) = self.reader.peek() else {
 				return;

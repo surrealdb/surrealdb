@@ -73,6 +73,11 @@ impl<'a> Lexer<'a> {
 		self.error = None;
 	}
 
+	/// Is the reader of this lexer at eof
+	pub fn is_eof(&self) -> bool {
+		self.reader.is_empty()
+	}
+
 	/// Change the used source from the lexer to a new buffer.
 	///
 	/// Usefull for reusing buffers.
@@ -125,7 +130,7 @@ impl<'a> Lexer<'a> {
 	}
 
 	// Returns the span for the current token being lexed.
-	pub(crate) fn current_span(&self) -> Span {
+	pub fn current_span(&self) -> Span {
 		// We make sure that the source is no longer then u32::MAX so this can't
 		// overflow.
 		let new_offset = self.reader.offset();
@@ -145,7 +150,7 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
-	fn advance_span(&mut self) -> Span {
+	pub fn advance_span(&mut self) -> Span {
 		let span = self.current_span();
 		self.last_offset = self.reader.offset();
 		span
@@ -176,7 +181,7 @@ impl<'a> Lexer<'a> {
 	/// and returns true. Otherwise returns false.
 	///
 	/// Also returns false if there is no next character.
-	fn eat(&mut self, byte: u8) -> bool {
+	pub fn eat(&mut self, byte: u8) -> bool {
 		if self.reader.peek() == Some(byte) {
 			self.reader.next();
 			true
