@@ -23,7 +23,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::idx::docids::TableDocIds;
 use crate::key::schema::TableKey;
 use crate::kvs::index::{
-	AbortLocalBuild, CleanUncommittedBuild, IndexBuilder, retire_durable_index,
+	CleanRetiredBuild, CleanUncommittedBuild, IndexBuilder, retire_durable_index,
 };
 use crate::kvs::{DatastoreError, Transaction};
 use crate::legacy::{expr_to_ident, exprs_to_fields};
@@ -192,8 +192,9 @@ pub(crate) async fn define_index_statement_compute(
 		// process-local builder abort is deferred until commit.
 		ctx.get_index_stores().index_removed(tb.namespace_id, tb.database_id, &tb, ix).await?;
 		if let Some(index_builder) = ctx.get_index_builder() {
-			txn.on_commit(AbortLocalBuild::boxed(
+			txn.on_commit(CleanRetiredBuild::boxed_with_data_cleanup(
 				index_builder.clone(),
+				txn.sequences(),
 				tb.namespace_id,
 				tb.database_id,
 				tb_name.clone(),
@@ -201,7 +202,8 @@ pub(crate) async fn define_index_statement_compute(
 			))
 			.await;
 		}
-		retire_durable_index(&txn, tb.namespace_id, tb.database_id, &tb_name, ix.index_id).await?;
+		retire_durable_index(&txn, tb.namespace_id, tb.database_id, &tb_name, ix.index_id, false)
+			.await?;
 		txn.del_tb_index(tb.namespace_id, tb.database_id, &tb_name, &name).await?;
 		if purge_table_doc_ids {
 			TableDocIds::new(tb.namespace_id, tb.database_id, tb_name.clone())

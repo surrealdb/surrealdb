@@ -26,7 +26,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::statements::remove::RemoveStatement;
 use crate::kvs::Transaction;
-use crate::kvs::index::{AbortLocalBuild, retire_durable_index};
+use crate::kvs::index::{CleanRetiredBuild, retire_durable_index};
 use crate::val::Value;
 
 /// Process this type returning a computed simple Value
@@ -96,9 +96,10 @@ pub(crate) async fn retire_namespace_indexes(
 	ctx: &FrozenContext,
 	txn: &Transaction,
 	ns: NamespaceId,
+	expunge: bool,
 ) -> Result<()> {
 	for db in txn.all_db(ns, None).await?.iter() {
-		retire_database_indexes(ctx, txn, ns, db.database_id).await?;
+		retire_database_indexes(ctx, txn, ns, db.database_id, expunge).await?;
 	}
 	Ok(())
 }
@@ -108,9 +109,10 @@ pub(crate) async fn retire_database_indexes(
 	txn: &Transaction,
 	ns: NamespaceId,
 	db: DatabaseId,
+	expunge: bool,
 ) -> Result<()> {
 	for tb in txn.all_tb(ns, db, None).await?.iter() {
-		retire_table_indexes(ctx, txn, ns, db, tb).await?;
+		retire_table_indexes(ctx, txn, ns, db, tb, expunge).await?;
 	}
 	Ok(())
 }
@@ -121,6 +123,7 @@ pub(crate) async fn retire_table_indexes(
 	ns: NamespaceId,
 	db: DatabaseId,
 	tb: &TableDefinition,
+	expunge: bool,
 ) -> Result<()> {
 	let index_builder = ctx.get_index_builder().cloned();
 	let tb_name = tb.name.clone();
@@ -129,16 +132,18 @@ pub(crate) async fn retire_table_indexes(
 		// is process memory and must only be aborted after this transaction commits.
 		ctx.get_index_stores().index_removed(ns, db, tb, ix).await?;
 		if let Some(index_builder) = &index_builder {
-			txn.on_commit(AbortLocalBuild::boxed(
+			txn.on_commit(CleanRetiredBuild::boxed_with_deferred_data(
 				index_builder.clone(),
+				txn.sequences(),
 				ns,
 				db,
 				tb_name.clone(),
 				ix.index_id,
+				expunge,
 			))
 			.await;
 		}
-		retire_durable_index(txn, ns, db, &tb_name, ix.index_id).await?;
+		retire_durable_index(txn, ns, db, &tb_name, ix.index_id, expunge).await?;
 	}
 	Ok(())
 }

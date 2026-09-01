@@ -1,11 +1,16 @@
 use std::borrow::Cow;
-use std::sync::Arc;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use anyhow::Result;
 use chrono::Utc;
+use surrealdb_datastore::close::CommitAction;
 use surrealdb_kvs::TransactionType;
+#[cfg(feature = "kv-surrealkv")]
+use temp_dir::TempDir;
 use tokio::time::{sleep, timeout};
 use uuid::Uuid;
 use web_time::Instant;
@@ -21,9 +26,10 @@ use crate::dbs::Session;
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
 use crate::idx::index::IndexOperation;
+use crate::key::reclaim::{Expunge, ReclaimKind};
 use crate::key::schema::{
 	DocKeyPrefix, DocLookupPrefix, DocPendingKey, DocPendingPrefix, EntryPrefix, IdxRoot,
-	IndexCountKey, IndexCountPrefix, RecordPrefix,
+	IndexCountKey, IndexCountPrefix, ReclaimKey, ReclaimPrefix, RecordPrefix,
 };
 use crate::key::{KVKey, KVKeyDecode, KVSubspace, KVValue, Key};
 use crate::kvs::index::CleanUncommittedBuild;
@@ -39,6 +45,19 @@ use crate::kvs::{Datastore, DatastoreError, is_retryable_transaction_conflict, s
 use crate::val::{RecordId, RecordIdKey, TableName, Value};
 
 const REPEATED_RETRY_CONFLICTS: usize = 1000;
+
+struct RecordCommitDrainStart(Arc<StdMutex<Vec<Instant>>>);
+
+impl CommitAction for RecordCommitDrainStart {
+	fn run(self: Box<Self>, drain_started_at: Instant) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+		Box::pin(async move {
+			self.0
+				.lock()
+				.expect("commit drain recorder should not be poisoned")
+				.push(drain_started_at);
+		})
+	}
+}
 
 async fn new_index_test_ds() -> Result<(Arc<Datastore>, Session)> {
 	// These tests adopt, resume and observe index builds directly, and assert on
@@ -413,7 +432,10 @@ async fn assert_cancelled_remove_keeps_local_builder(sql: &str) -> Result<()> {
 }
 
 #[cfg(feature = "kv-mem")]
-async fn assert_committed_remove_aborts_local_builder(sql: &str) -> Result<()> {
+async fn assert_committed_remove_aborts_local_builder(
+	sql: &str,
+	expected_expunge: Expunge,
+) -> Result<()> {
 	let PausedRemoveBuild {
 		ds,
 		session,
@@ -422,20 +444,25 @@ async fn assert_committed_remove_aborts_local_builder(sql: &str) -> Result<()> {
 		db,
 		table,
 		ix,
-		builder: _,
+		builder,
 	} = start_paused_remove_build().await?;
 	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
 	seed_durable_queue_generation(&ds, &ikb, 99).await?;
 	assert_eq!(durable_queue_all_generations_count(&ds, &ikb).await?, 3);
 
 	execute_all_retrying_conflicts(&ds, &session, sql).await?;
+	assert!(
+		builder.is_finished(),
+		"committed cascading remove returned while the retired builder could still write"
+	);
 	wait_for_no_local_builder(&ds, ns, db, &table, ix.index_id).await?;
 	drop(guard);
-	sleep(Duration::from_millis(200)).await;
-
-	assert!(!durable_build_state_exists(&ds, &ikb).await?);
-	assert_eq!(durable_queue_all_generations_count(&ds, &ikb).await?, 0);
-	assert_eq!(index_prefix_key_count(&ds, ns, db, &table, ix.index_id).await?, 0);
+	assert_no_index_build_artifacts(&ds, ns, db, &table, ix.index_id).await?;
+	let reclaim_modes = index_reclaim_modes(&ds, ns, db, &table, ix.index_id).await?;
+	assert!(
+		reclaim_modes.contains(&expected_expunge),
+		"post-builder reclaim modes {reclaim_modes:?} did not contain {expected_expunge:?}"
+	);
 	Ok(())
 }
 
@@ -546,6 +573,37 @@ async fn assert_no_index_build_artifacts(
 	assert_eq!(index_prefix_key_count(ds, ns, db, table, ix).await?, 0);
 	assert!(local_builder_for_key(ds, ns, db, table, ix).await?.is_none());
 	Ok(())
+}
+
+async fn reclaim_queue_len(ds: &Datastore) -> Result<usize> {
+	let tx = ds.transaction(TransactionType::Read).await?;
+	let count = catch!(tx, tx.count(ReclaimPrefix {}.range()?, None).await);
+	tx.cancel().await?;
+	Ok(count)
+}
+
+async fn index_reclaim_modes(
+	ds: &Datastore,
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &TableName,
+	ix: IndexId,
+) -> Result<Vec<Expunge>> {
+	let tx = ds.transaction(TransactionType::Read).await?;
+	let entries = catch!(tx, tx.getr_raw(ReclaimPrefix {}.range()?, None).await);
+	tx.cancel().await?;
+	Ok(entries
+		.into_iter()
+		.filter_map(|(key, _)| {
+			let reclaim = ReclaimKey::decode_key(&key).ok()?;
+			(reclaim.kind == ReclaimKind::Index
+				&& reclaim.ns == ns
+				&& reclaim.db == db
+				&& reclaim.tb.as_ref() == tb
+				&& reclaim.ix == ix)
+				.then_some(reclaim.expunge)
+		})
+		.collect())
 }
 
 async fn index_prefix_key_count(
@@ -944,16 +1002,23 @@ async fn remove_index_commit_aborts_local_builder_after_commit() -> Result<()> {
 	)
 	.await?;
 	let (ns, db, table, ix) = get_table_index(&ds, "user", "test").await?;
-	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
-	assert!(local_builder_for_key(&ds, ns, db, &table, ix.index_id).await?.is_some());
+	let builder = local_builder_for_key(&ds, ns, db, &table, ix.index_id)
+		.await?
+		.expect("local builder should be running");
 
 	execute_all_retrying_conflicts(&ds, &session, "REMOVE INDEX test ON user").await?;
+	assert!(
+		builder.is_finished(),
+		"committed REMOVE INDEX returned while the retired builder could still write"
+	);
 	wait_for_no_local_builder(&ds, ns, db, &table, ix.index_id).await?;
 	drop(guard);
-	sleep(Duration::from_millis(200)).await;
-
-	assert!(!durable_build_state_exists(&ds, &ikb).await?);
-	assert_eq!(index_prefix_key_count(&ds, ns, db, &table, ix.index_id).await?, 0);
+	assert_no_index_build_artifacts(&ds, ns, db, &table, ix.index_id).await?;
+	assert_eq!(
+		reclaim_queue_len(&ds).await?,
+		2,
+		"retirement must enqueue a post-builder reclaim in addition to the schema tombstone"
+	);
 	Ok(())
 }
 
@@ -978,19 +1043,88 @@ async fn remove_namespace_cancel_keeps_local_builder_running() -> Result<()> {
 #[cfg(feature = "kv-mem")]
 #[tokio::test(flavor = "multi_thread")]
 async fn remove_table_commit_aborts_local_builder_after_commit() -> Result<()> {
-	assert_committed_remove_aborts_local_builder("REMOVE TABLE user").await
+	assert_committed_remove_aborts_local_builder("REMOVE TABLE user", Expunge::Keep).await
 }
 
 #[cfg(feature = "kv-mem")]
 #[tokio::test(flavor = "multi_thread")]
 async fn remove_database_commit_aborts_local_builder_after_commit() -> Result<()> {
-	assert_committed_remove_aborts_local_builder("REMOVE DATABASE test").await
+	assert_committed_remove_aborts_local_builder("REMOVE DATABASE test", Expunge::Keep).await
 }
 
 #[cfg(feature = "kv-mem")]
 #[tokio::test(flavor = "multi_thread")]
 async fn remove_namespace_commit_aborts_local_builder_after_commit() -> Result<()> {
-	assert_committed_remove_aborts_local_builder("REMOVE NAMESPACE test").await
+	assert_committed_remove_aborts_local_builder("REMOVE NAMESPACE test", Expunge::Keep).await
+}
+
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn remove_table_expunge_hard_cleans_retired_local_builder() -> Result<()> {
+	assert_committed_remove_aborts_local_builder("REMOVE TABLE AND EXPUNGE user", Expunge::Expunge)
+		.await
+}
+
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn remove_database_expunge_hard_cleans_retired_local_builder() -> Result<()> {
+	assert_committed_remove_aborts_local_builder(
+		"REMOVE DATABASE AND EXPUNGE test",
+		Expunge::Expunge,
+	)
+	.await
+}
+
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn remove_namespace_expunge_hard_cleans_retired_local_builder() -> Result<()> {
+	assert_committed_remove_aborts_local_builder(
+		"REMOVE NAMESPACE AND EXPUNGE test",
+		Expunge::Expunge,
+	)
+	.await
+}
+
+#[cfg(feature = "kv-surrealkv")]
+#[tokio::test]
+async fn expunge_removes_historical_durable_build_state() -> Result<()> {
+	let dir = TempDir::new()?;
+	let path = format!("surrealkv://{}?versioned=true&retention=1h", dir.path().to_string_lossy());
+	let ds = Datastore::builder().without_maintenance_tasks().build_with_path(&path).await?;
+	let ns = NamespaceId(1);
+	let db = DatabaseId(2);
+	let table = TableName::from("user");
+	let ix = IndexId(3);
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix);
+
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.set_key(
+		&ikb.new_bs_key(),
+		&durable_build_state_for_phase(IndexBuildPhase::Building, 1, Some(ds.id())),
+	)
+	.await?;
+	tx.commit().await?;
+
+	let tx = ds.transaction(TransactionType::Read).await?;
+	assert!(tx.get_key(&ikb.new_bs_key(), None).await?.is_some());
+	let before_expunge = std::time::SystemTime::now()
+		.duration_since(std::time::UNIX_EPOCH)?
+		.as_nanos()
+		.try_into()?;
+	assert!(tx.get_key(&ikb.new_bs_key(), Some(before_expunge)).await?.is_some());
+	tx.cancel().await?;
+
+	let tx = ds.transaction(TransactionType::Write).await?;
+	retire_durable_index(&tx, ns, db, &table, ix, true).await?;
+	tx.commit().await?;
+
+	let tx = ds.transaction(TransactionType::Read).await?;
+	assert!(
+		tx.get_key(&ikb.new_bs_key(), Some(before_expunge)).await?.is_none(),
+		"EXPUNGE must remove historical durable build-state versions"
+	);
+	tx.cancel().await?;
+	Ok(())
 }
 
 #[cfg(feature = "kv-mem")]
@@ -1115,7 +1249,9 @@ async fn define_index_overwrite_aborts_retired_local_builder_after_commit() -> R
 	)
 	.await?;
 	let (ns, db, table, old_ix) = get_table_index(&ds, "user", "test").await?;
-	assert!(local_builder_for_key(&ds, ns, db, &table, old_ix.index_id).await?.is_some());
+	let old_builder = local_builder_for_key(&ds, ns, db, &table, old_ix.index_id)
+		.await?
+		.expect("retired local builder should be running");
 
 	execute_all_retrying_conflicts(
 		&ds,
@@ -1123,13 +1259,17 @@ async fn define_index_overwrite_aborts_retired_local_builder_after_commit() -> R
 		"DEFINE INDEX OVERWRITE test ON user FIELDS account CONCURRENTLY",
 	)
 	.await?;
+	assert!(
+		old_builder.is_finished(),
+		"committed DEFINE INDEX OVERWRITE returned while the retired builder could still write"
+	);
 	wait_for_no_local_builder(&ds, ns, db, &table, old_ix.index_id).await?;
+	assert_no_index_build_artifacts(&ds, ns, db, &table, old_ix.index_id).await?;
 	drop(guard);
 	wait_for_index_ready(&ds, &session, "user", "test").await?;
 
 	let (_, _, _, new_ix) = get_table_index(&ds, "user", "test").await?;
 	assert_ne!(new_ix.index_id, old_ix.index_id);
-	assert_eq!(index_prefix_key_count(&ds, ns, db, &table, old_ix.index_id).await?, 0);
 	Ok(())
 }
 
@@ -1289,6 +1429,21 @@ async fn remove_index_and_wait_stops_waiting_once_the_drain_budget_is_spent() ->
 		building.aborted.load(Ordering::Relaxed),
 		"the builder must still be signalled to abort when the wait is skipped"
 	);
+	Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn commit_actions_share_one_drain_start() -> Result<()> {
+	let (ds, _) = new_index_test_ds().await?;
+	let starts = Arc::new(StdMutex::new(Vec::new()));
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.on_commit(Box::new(RecordCommitDrainStart(Arc::clone(&starts)))).await;
+	tx.on_commit(Box::new(RecordCommitDrainStart(Arc::clone(&starts)))).await;
+	tx.commit().await?;
+
+	let starts = starts.lock().expect("commit drain recorder should not be poisoned");
+	assert_eq!(starts.len(), 2);
+	assert_eq!(starts[0], starts[1], "commit actions must share one close-time wait budget");
 	Ok(())
 }
 

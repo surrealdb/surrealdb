@@ -67,7 +67,7 @@ pub(crate) async fn remove_table_statement_compute(
 
 	// Retire index state before deleting the table definition. Durable
 	// cleanup is transactional; local builder aborts are deferred until commit.
-	retire_table_indexes(ctx, &txn, ns, db, &tb).await?;
+	retire_table_indexes(ctx, &txn, ns, db, &tb, this.expunge).await?;
 	// Every subscription on the table is about to lose its keys, so each one
 	// is owed a KILLED. Compiling is total, so this reaches subscriptions
 	// whose text no longer parses too: the clients most in need of being

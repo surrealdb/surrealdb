@@ -451,30 +451,13 @@ impl IndexBuilder {
 		building
 	}
 
-	/// Abort a builder task running in this process.
-	///
-	/// Schema statements retire durable state separately in their own
-	/// transaction. This method only handles the process-local task map.
-	pub(crate) async fn remove_index(
-		&self,
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &TableName,
-		ix: IndexId,
-	) -> Result<()> {
-		self.take_local_builder(ns, db, tb, ix).await;
-		Ok(())
-	}
-
 	/// Abort a builder task running in this process and wait for it to stop.
 	///
-	/// [`Self::remove_index`] only raises the abort flag; the task observes it at
-	/// its next checkpoint and keeps writing until then, including the durable
-	/// state and index data of the batch it is inside. A caller that deletes
-	/// those keys afterwards must order its delete after the task's last write,
-	/// so it waits here first: a builder write that lands after the delete
-	/// re-creates state for a build that no longer exists, and nothing ever
-	/// removes it.
+	/// The task observes the abort flag at its next checkpoint and can keep
+	/// writing until then, including the durable state and index data of the
+	/// batch it is inside. A caller that deletes those keys must order its delete
+	/// after the task's last write: a builder write that lands later re-creates
+	/// state for a build that no longer exists, and nothing removes it.
 	///
 	/// `deadline` is the budget for the whole transaction-close drain, from
 	/// [`build_abort_deadline`](super::build_abort_deadline), so aborting several
@@ -483,6 +466,9 @@ impl IndexBuilder {
 	/// builder write performs as the only fence. The task's map entry is already
 	/// gone by then, so a caller that retries its delete does so without a
 	/// second wait — the warning below is the only record of that degradation.
+	///
+	/// Returns whether a process-local builder was found. A committed retirement
+	/// that finds none has no local writer to order a second durable delete after.
 	pub(crate) async fn remove_index_and_wait(
 		&self,
 		ns: NamespaceId,
@@ -490,9 +476,9 @@ impl IndexBuilder {
 		tb: &TableName,
 		ix: IndexId,
 		deadline: Instant,
-	) {
+	) -> bool {
 		let Some(building) = self.take_local_builder(ns, db, tb, ix).await else {
-			return;
+			return false;
 		};
 		// A drain that has already spent its budget still polls the wait once,
 		// which is enough for a builder that has meanwhile finished.
@@ -506,5 +492,6 @@ impl IndexBuilder {
 				 its durable build state is being deleted while it may still write"
 			);
 		}
+		true
 	}
 }

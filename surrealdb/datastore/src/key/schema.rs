@@ -610,6 +610,27 @@ impl ReclaimKey<'_> {
 		}
 	}
 
+	/// A queue entry for one retired index. See [`Self::namespace`] on the
+	/// fields that identify the containing catalog objects.
+	pub fn index<'a>(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a TableName,
+		ix: IndexId,
+		expunge: bool,
+		uid: Uuid,
+	) -> ReclaimKey<'a> {
+		ReclaimKey {
+			kind: ReclaimKind::Index,
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+			ix,
+			expunge: Self::expunge(expunge),
+			uid,
+		}
+	}
+
 	fn expunge(expunge: bool) -> Expunge {
 		match expunge {
 			true => Expunge::Expunge,

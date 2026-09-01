@@ -43,7 +43,7 @@ pub(crate) async fn remove_namespace_statement_compute(
 
 	// Retire index state before deleting the namespace definition. Durable
 	// cleanup is transactional; local builder aborts are deferred until commit.
-	retire_namespace_indexes(ctx, &txn, ns.namespace_id).await?;
+	retire_namespace_indexes(ctx, &txn, ns.namespace_id, this.expunge).await?;
 	// Tell every subscriber in the namespace that it is going away. The
 	// deferred delete below takes the whole `/*{ns}` prefix, `lq` rows
 	// included, so nothing else would ever wake these clients.

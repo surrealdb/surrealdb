@@ -46,7 +46,7 @@ pub(crate) async fn remove_database_statement_compute(
 
 	// Retire index state before deleting the database definition. Durable
 	// cleanup is transactional; local builder aborts are deferred until commit.
-	retire_database_indexes(ctx, &txn, db.namespace_id, db.database_id).await?;
+	retire_database_indexes(ctx, &txn, db.namespace_id, db.database_id, this.expunge).await?;
 	// Tell every subscriber in the database that it is going away. The
 	// deferred delete below takes the whole `/*{ns}*{db}` prefix, `lq` rows
 	// included, so nothing else would ever wake these clients.

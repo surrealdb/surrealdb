@@ -57,7 +57,6 @@ use crate::cache::tx::TransactionCache;
 // The transaction holds the queue because only it knows when the outcome is
 // settled; what to run belongs to the layer that registered it.
 use crate::close::{CommitAction, RollbackAction};
-use crate::key::reclaim::{Expunge, ReclaimKind};
 use crate::key::schema::{
 	AnalyzerKey, AnalyzerPrefix, ApiKey, ApiPrefix, BucketKey, BucketPrefix,
 	BuildAppendTicketPrefix, BuildReservationKey, BuildStateKey, ChangeFeedKey, DatabaseKey,
@@ -1893,17 +1892,29 @@ impl Transaction {
 			ix: ix_def.index_id,
 		};
 		self.del_key(&name_lookup_key).await?;
-		// Enqueue background reclaim of the index data prefix.
-		let rc = ReclaimKey {
-			kind: ReclaimKind::Index,
+		self.enqueue_index_reclaim(ns, db, tb, ix_def.index_id, false).await?;
+		// Invalidate the cached list of all indexes for this table.
+		self.cache.remove(&cache::tx::Lookup::Ixs(ns, db, tb.as_ref()));
+		// Invalidate the cached index entry.
+		self.cache.remove(&cache::tx::Lookup::Ix(ns, db, tb.as_ref(), &ix_def.name));
+		Ok(())
+	}
 
-			ns,
-			db,
-			tb: Cow::Borrowed(tb),
-			ix: ix_def.index_id,
-			expunge: Expunge::Keep,
-			uid: Uuid::now_v7(),
-		};
+	/// Enqueue background reclaim of an index-data prefix by its stable id.
+	///
+	/// The id is sufficient after catalog retirement because index ids are never
+	/// reused. Re-enqueuing is safe and ensures a reclaim that raced with a final
+	/// builder write is followed by another idempotent pass. `expunge` preserves
+	/// the all-version deletion policy of a cascading parent removal.
+	pub async fn enqueue_index_reclaim(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+		expunge: bool,
+	) -> Result<()> {
+		let rc = ReclaimKey::index(ns, db, tb, ix, expunge, Uuid::now_v7());
 		self.set_key(
 			&rc,
 			&crate::key::reclaim::ReclaimState {
@@ -1911,10 +1922,6 @@ impl Transaction {
 			},
 		)
 		.await?;
-		// Invalidate the cached list of all indexes for this table.
-		self.cache.remove(&cache::tx::Lookup::Ixs(ns, db, tb.as_ref()));
-		// Invalidate the cached index entry.
-		self.cache.remove(&cache::tx::Lookup::Ix(ns, db, tb.as_ref(), &ix_def.name));
 		Ok(())
 	}
 
@@ -3034,8 +3041,9 @@ impl Transaction {
 			let mut pending = self.commit_actions.lock().await;
 			std::mem::take(&mut *pending)
 		};
+		let drain_started_at = Instant::now();
 		for action in actions {
-			action.run().await;
+			action.run(drain_started_at).await;
 		}
 	}
 

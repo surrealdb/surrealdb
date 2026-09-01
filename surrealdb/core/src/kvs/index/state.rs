@@ -26,10 +26,33 @@ pub(crate) async fn retire_durable_index(
 	db: DatabaseId,
 	tb: &TableName,
 	ix: IndexId,
+	expunge: bool,
 ) -> Result<()> {
 	let ikb = IndexKeyBase::new(ns, db, tb.clone(), ix);
-	tx.del_key(&ikb.new_bs_key()).await?;
-	delete_durable_build_queues(tx, &ikb).await?;
+	delete_durable_build_artifacts(tx, &ikb, expunge).await?;
+	Ok(())
+}
+
+/// Delete build state and every generation-scoped queue for one index.
+///
+/// EXPUNGE must clear all MVCC versions. Cascading removals pass that policy
+/// through both their schema transaction and their post-builder cleanup, since
+/// the builder can write again after the parent prefix was first cleared.
+pub(super) async fn delete_durable_build_artifacts(
+	tx: &Transaction,
+	ikb: &IndexKeyBase,
+	expunge: bool,
+) -> Result<()> {
+	if expunge {
+		tx.clr_key(&ikb.new_bs_key()).await?;
+		tx.clrr(ikb.new_bg_all_generations_range()?).await?;
+		tx.clrr(ikb.new_bp_all_generations_range()?).await?;
+		tx.clrr(ikb.new_br_all_generations_range()?).await?;
+		tx.clrr(ikb.new_bt_all_generations_range()?).await?;
+	} else {
+		tx.del_key(&ikb.new_bs_key()).await?;
+		delete_durable_build_queues(tx, ikb).await?;
+	}
 	Ok(())
 }
 

@@ -20,8 +20,9 @@ use wasm_bindgen_futures::spawn_local as spawn;
 use web_time::Instant;
 
 use super::state::{
-	build_owner_expired, delete_stale_build_queues, durable_index_error_reason,
-	durable_report_count, is_condition_not_met, report_status_from_phase,
+	build_owner_expired, delete_durable_build_artifacts, delete_stale_build_queues,
+	durable_index_error_reason, durable_report_count, is_condition_not_met,
+	report_status_from_phase,
 };
 use super::{
 	AcquiredBuild, BUILD_CLOSING_SLEEP, BuildGeneration, IndexBuildPhase, IndexBuildReportStatus,
@@ -47,9 +48,9 @@ use crate::kvs::{
 	INDEXING_PROBE_BATCH_SIZE, Transaction, TransactionFactory, TransactionType,
 	is_retryable_transaction_conflict, is_shutdown_error,
 };
-/// How long to wait before retrying a conflicting cleanup of an uncommitted
-/// index build. Matches the reservation-release pause it runs beside.
-const UNCOMMITTED_BUILD_CLEANUP_RETRY_SLEEP: Duration = Duration::from_millis(100);
+/// How long to wait before retrying a conflicting index-build cleanup.
+/// Matches the reservation-release pause it runs beside.
+const INDEX_BUILD_CLEANUP_RETRY_SLEEP: Duration = Duration::from_millis(100);
 
 use crate::mem::ALLOC;
 use crate::val::{RecordId, RecordIdKey, TableName, Value};
@@ -2149,45 +2150,156 @@ fn expect_not_prepare_remove(ix: &IndexDefinition) -> anyhow::Result<()> {
 	}
 }
 
-/// Stop a process-local index builder once a schema retirement has committed.
-///
-/// The durable side of retirement - deleting build state and the catalog entry -
-/// is staged in the schema transaction. The builder map is process memory and is
-/// not, so aborting before the commit would stop a build that a rollback then
-/// leaves valid.
-pub(crate) struct AbortLocalBuild {
-	pub(crate) builder: IndexBuilder,
-	pub(crate) ns: NamespaceId,
-	pub(crate) db: DatabaseId,
-	pub(crate) tb: TableName,
-	pub(crate) ix: IndexId,
+struct IndexBuildCleanup {
+	builder: IndexBuilder,
+	tf: TransactionFactory,
+	sequences: Sequences,
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: TableName,
+	ix: IndexId,
 }
 
-impl AbortLocalBuild {
-	pub(crate) fn boxed(
+impl IndexBuildCleanup {
+	fn new(
 		builder: IndexBuilder,
+		tf: TransactionFactory,
+		sequences: Sequences,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: TableName,
+		ix: IndexId,
+	) -> Self {
+		Self {
+			builder,
+			tf,
+			sequences,
+			ns,
+			db,
+			tb,
+			ix,
+		}
+	}
+
+	async fn stop_builder(&self, abort_deadline: Instant) -> bool {
+		self.builder
+			.remove_index_and_wait(self.ns, self.db, &self.tb, self.ix, abort_deadline)
+			.await
+	}
+
+	async fn delete_once(&self, delete_index_data: bool, expunge: bool) -> Result<()> {
+		let tx = self.tf.transaction(TransactionType::Write, self.sequences.clone()).await?;
+		let ikb = IndexKeyBase::new(self.ns, self.db, self.tb.clone(), self.ix);
+		let result: Result<()> = async {
+			delete_durable_build_artifacts(&tx, &ikb, expunge).await?;
+			if delete_index_data {
+				let index_prefix = IdxRoot {
+					ns: self.ns,
+					db: self.db,
+					tb: Cow::Borrowed(&self.tb),
+					ix: self.ix,
+				}
+				.range()?;
+				if expunge {
+					tx.clrr(index_prefix).await?;
+				} else {
+					tx.delr(index_prefix).await?;
+				}
+			} else {
+				tx.enqueue_index_reclaim(self.ns, self.db, &self.tb, self.ix, expunge).await?;
+			}
+			tx.commit_bare().await?;
+			Ok(())
+		}
+		.await;
+		if let Err(err) = result {
+			let _ = tx.cancel_bare().await;
+			return Err(err);
+		}
+		Ok(())
+	}
+}
+
+/// Finish cleaning an index whose catalog retirement has committed.
+///
+/// The catalog and its first durable-state delete commit before this action
+/// runs, because aborting process-local work earlier would make a rolled-back
+/// retirement stop a still-valid build. This action waits for the task and then
+/// reissues the durable delete so no later builder write can restore retired
+/// state.
+pub(crate) struct CleanRetiredBuild {
+	cleanup: IndexBuildCleanup,
+	delete_index_data: bool,
+	expunge: bool,
+}
+
+impl CleanRetiredBuild {
+	fn boxed(
+		cleanup: IndexBuildCleanup,
+		delete_index_data: bool,
+		expunge: bool,
+	) -> Box<dyn CommitAction> {
+		Box::new(Self {
+			cleanup,
+			delete_index_data,
+			expunge,
+		})
+	}
+
+	/// Finish a retirement whose index-data prefix is handled by a durable
+	/// background-reclaim entry committed with the catalog removal.
+	pub(crate) fn boxed_with_deferred_data(
+		builder: IndexBuilder,
+		sequences: Sequences,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: TableName,
+		ix: IndexId,
+		expunge: bool,
+	) -> Box<dyn CommitAction> {
+		let tf = builder.transaction_factory();
+		Self::boxed(IndexBuildCleanup::new(builder, tf, sequences, ns, db, tb, ix), false, expunge)
+	}
+
+	/// Finish a retirement whose schema transaction deleted the index-data
+	/// prefix synchronously and therefore has no later reclaim entry.
+	pub(crate) fn boxed_with_data_cleanup(
+		builder: IndexBuilder,
+		sequences: Sequences,
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: TableName,
 		ix: IndexId,
 	) -> Box<dyn CommitAction> {
-		Box::new(Self {
-			builder,
-			ns,
-			db,
-			tb,
-			ix,
-		})
+		let tf = builder.transaction_factory();
+		Self::boxed(IndexBuildCleanup::new(builder, tf, sequences, ns, db, tb, ix), true, false)
 	}
 }
 
-impl CommitAction for AbortLocalBuild {
-	fn run(self: Box<Self>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+impl CommitAction for CleanRetiredBuild {
+	fn run(self: Box<Self>, drain_started_at: Instant) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+		let abort_deadline = build_abort_deadline(drain_started_at);
 		Box::pin(async move {
-			if let Err(err) = self.builder.remove_index(self.ns, self.db, &self.tb, self.ix).await {
-				warn!(
-					"failed to abort local index builder after committed schema retirement: {err}"
-				);
+			// The schema transaction already performed the durable delete. Reissue
+			// it only when this process had a task that could have written later.
+			if !self.cleanup.stop_builder(abort_deadline).await {
+				return;
+			}
+			loop {
+				match self.cleanup.delete_once(self.delete_index_data, self.expunge).await {
+					Ok(()) => return,
+					Err(err) if is_retryable_transaction_conflict(&err) => {
+						debug!(
+							error = %err,
+							"retryable conflict while cleaning retired index build, retrying"
+						);
+						sleep(INDEX_BUILD_CLEANUP_RETRY_SLEEP).await;
+					}
+					Err(err) => {
+						warn!(error = %err, "failed to clean retired index build after commit");
+						return;
+					}
+				}
 			}
 		})
 	}
@@ -2205,13 +2317,7 @@ impl CommitAction for AbortLocalBuild {
 /// beside it. Six writes is far below any limit an operator would set, and a
 /// cleanup that silently bypassed the guard would be the stranger choice.
 pub(crate) struct CleanUncommittedBuild {
-	pub(crate) builder: IndexBuilder,
-	pub(crate) tf: TransactionFactory,
-	pub(crate) sequences: Sequences,
-	pub(crate) ns: NamespaceId,
-	pub(crate) db: DatabaseId,
-	pub(crate) tb: TableName,
-	pub(crate) ix: IndexId,
+	cleanup: IndexBuildCleanup,
 }
 
 impl CleanUncommittedBuild {
@@ -2225,58 +2331,8 @@ impl CleanUncommittedBuild {
 		ix: IndexId,
 	) -> Box<dyn RollbackAction> {
 		Box::new(Self {
-			builder,
-			tf,
-			sequences,
-			ns,
-			db,
-			tb,
-			ix,
+			cleanup: IndexBuildCleanup::new(builder, tf, sequences, ns, db, tb, ix),
 		})
-	}
-
-	async fn cleanup_once(&self, abort_deadline: Instant) -> Result<()> {
-		// Stop the local builder and wait for it to exit, so the deletes below are
-		// the build's last writes: a builder write that lands after them re-creates
-		// state nothing will ever collect, because the catalog never referenced this
-		// index id, so no retirement and no resume scan can reach it. That same
-		// unreachability is why waiting for the local task is enough on a cluster:
-		// a remote node can only own a build it found through a committed catalog
-		// entry, which this index id never had. Writer admission is fenced
-		// separately, by the `!bt` counter range deleted alongside the rest.
-		//
-		// `abort_deadline` comes from the start of the close drain, so a schema
-		// transaction that defined several indexes waits once rather than once per
-		// index.
-		self.builder
-			.remove_index_and_wait(self.ns, self.db, &self.tb, self.ix, abort_deadline)
-			.await;
-
-		let tx = self.tf.transaction(TransactionType::Write, self.sequences.clone()).await?;
-		let ikb = IndexKeyBase::new(self.ns, self.db, self.tb.clone(), self.ix);
-		let index_prefix = IdxRoot {
-			ns: self.ns,
-			db: self.db,
-			tb: Cow::Borrowed(&self.tb),
-			ix: self.ix,
-		}
-		.range()?;
-		let result: Result<()> = async {
-			tx.del_key(&ikb.new_bs_key()).await?;
-			tx.delr(ikb.new_bg_all_generations_range()?).await?;
-			tx.delr(ikb.new_bp_all_generations_range()?).await?;
-			tx.delr(ikb.new_br_all_generations_range()?).await?;
-			tx.delr(ikb.new_bt_all_generations_range()?).await?;
-			tx.delr(index_prefix).await?;
-			tx.commit_bare().await?;
-			Ok(())
-		}
-		.await;
-		if let Err(err) = result {
-			let _ = tx.cancel_bare().await;
-			return Err(err);
-		}
-		Ok(())
 	}
 }
 
@@ -2287,15 +2343,18 @@ impl RollbackAction for CleanUncommittedBuild {
 	) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
 		let abort_deadline = build_abort_deadline(drain_started_at);
 		Box::pin(async move {
+			// Provisional state must be deleted even when no process-local task is
+			// present to stop.
+			self.cleanup.stop_builder(abort_deadline).await;
 			loop {
-				match self.cleanup_once(abort_deadline).await {
+				match self.cleanup.delete_once(true, false).await {
 					Ok(()) => return Ok(()),
 					Err(err) if is_retryable_transaction_conflict(&err) => {
 						debug!(
 							error = %err,
 							"retryable conflict while cleaning uncommitted index build, retrying"
 						);
-						sleep(UNCOMMITTED_BUILD_CLEANUP_RETRY_SLEEP).await;
+						sleep(INDEX_BUILD_CLEANUP_RETRY_SLEEP).await;
 					}
 					Err(err) => return Err(err),
 				}
