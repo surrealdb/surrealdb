@@ -1117,6 +1117,11 @@ jobs:
     # Private runner: reads the source image from ECR using the runner's ambient
     # IAM instance role. Label from a repo/org variable.
     runs-on: ${{ vars.RUNNER_AMD }}
+    # id-token: write lets the DockerHub mirror exchange the job's GitHub OIDC
+    # token for a short-lived DockerHub token, so no long-lived credential is used.
+    permissions:
+      contents: read
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -1147,8 +1152,7 @@ jobs:
           environment: ${{ needs.prepare-vars.outputs.release-name }}
           latest: ${{ needs.prepare-vars.outputs.latest }}
           dest-repo: surrealdb/surrealdb
-          docker-user: ${{ secrets.DOCKER_USER }}
-          docker-pass: ${{ secrets.DOCKER_PASS }}
+          oidc-connection-id: ${{ vars.DOCKERHUB_OIDC_CONNECTION_ID }}
 
   # ----------------------------------------
   # Mirror downstream image (ECR -> release tag + ACR)
@@ -1247,10 +1251,14 @@ jobs:
   # never leaves the private ECR/ACR; this job takes the enforcement-on variant,
   # built in the same rolling run under the `-licensed` ECR tag marker, and mirrors
   # it with the shared mirror-docker action, which strips the ECR/account-bearing
-  # build attestations so nothing confidential reaches the public repo. The DockerHub
-  # repo comes from a repo VARIABLE, not a secret: it is a public image name, not a
-  # credential (only DOCKER_USER/DOCKER_PASS are), and a variable stays inspectable
-  # and prints unmasked in this job's own "Mirroring -> <repo>:<tag>" log lines.
+  # build attestations so nothing confidential reaches the public repo. DockerHub
+  # auth is keyless: the action exchanges this job's GitHub OIDC token (id-token:
+  # write) for a short-lived DockerHub token via the org OIDC connection, so there
+  # is no long-lived credential. Both the destination repo and the OIDC connection
+  # id come from repo VARIABLES, not secrets: neither is a credential (the repo is a
+  # public image name; the connection id only names the trust, which the signed OIDC
+  # token enforces), and a variable stays inspectable and prints unmasked in this
+  # job's own "Mirroring -> <repo>:<tag>" log lines.
   # Tags follow the downstream convention (<name> + optional :latest, -dev suffix),
   # NOT the engine's moving major/minor tags. Skips the mirror when
   # DOWNSTREAM_DOCKERHUB_REPOSITORY is unset. Runs on dry-runs too (the action
@@ -1287,6 +1295,11 @@ jobs:
     # Private runner: reads the source image from the downstream ECR using the
     # runner's ambient IAM instance role. Label from a repo/org variable.
     runs-on: ${{ vars.RUNNER_AMD }}
+    # id-token: write lets the DockerHub mirror exchange the job's GitHub OIDC
+    # token for a short-lived DockerHub token, so no long-lived credential is used.
+    permissions:
+      contents: read
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -1354,8 +1367,7 @@ jobs:
           latest: ${{ needs.prepare-vars.outputs.latest }}
           dest-repo: ${{ vars.DOWNSTREAM_DOCKERHUB_REPOSITORY }}
           extra-stable-tags: 'false'
-          docker-user: ${{ secrets.DOCKER_USER }}
-          docker-pass: ${{ secrets.DOCKER_PASS }}
+          oidc-connection-id: ${{ vars.DOCKERHUB_OIDC_CONNECTION_ID }}
 
   # ----------------------------------------
   # Tag the downstream repo

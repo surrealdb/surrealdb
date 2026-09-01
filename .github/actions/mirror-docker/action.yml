@@ -25,11 +25,8 @@ inputs:
     description: 'Whether to also publish the :latest tag'
     required: false
     default: 'false'
-  docker-user:
-    description: 'DockerHub username'
-    required: true
-  docker-pass:
-    description: 'DockerHub password'
+  oidc-connection-id:
+    description: 'Docker OIDC connection ID for keyless DockerHub auth via GitHub Actions OIDC. The caller job must grant `id-token: write`.'
     required: true
   dest-repo:
     description: 'Destination DockerHub repository (namespace/name). Required and passed explicitly by every caller: no default, so a mis-wired or empty value is a loud failure rather than a silent push to the public flagship repo.'
@@ -64,11 +61,36 @@ runs:
         aws ecr get-login-password --region "$region" \
           | docker login --username AWS --password-stdin "$ECR_REGISTRY"
 
+    # OIDC keyless auth: the DockerHub login username is the org that owns the
+    # destination repo (the namespace before the '/'), so it can never drift from
+    # the repo being pushed to. login-action exchanges the job's GitHub OIDC token
+    # (id-token: write, granted by the caller) for a short-lived DockerHub token
+    # scoped by the org's OIDC connection rulesets. No long-lived credential.
+    #
+    # This couples the login org to the OIDC connection: dest-repo's namespace must
+    # be the same Docker org that owns oidc-connection-id, otherwise the exchange is
+    # rejected. Both currently resolve to the `surrealdb` org.
+    - name: Resolve DockerHub org
+      id: docker-org
+      shell: bash
+      env:
+        DEST_REPO: ${{ inputs.dest-repo }}
+      run: |
+        set -euo pipefail
+        # Guard a malformed dest-repo here so it fails on the real cause rather
+        # than as a confusing empty-username OIDC error two steps later.
+        if [[ "$DEST_REPO" != */* ]]; then
+          echo "::error::dest-repo must be '<org>/<name>', got '${DEST_REPO}'"
+          exit 1
+        fi
+        printf 'name=%s\n' "${DEST_REPO%%/*}" >> "$GITHUB_OUTPUT"
+
     - name: Login to DockerHub
       uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
       with:
-        username: ${{ inputs.docker-user }}
-        password: ${{ inputs.docker-pass }}
+        username: ${{ steps.docker-org.outputs.name }}
+      env:
+        DOCKERHUB_OIDC_CONNECTIONID: ${{ inputs.oidc-connection-id }}
 
     # Mirror the multi-arch image from ECR to DockerHub by recreating the index
     # from the per-platform manifests ONLY. This deliberately omits the
