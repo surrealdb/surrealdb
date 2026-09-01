@@ -25,11 +25,8 @@ inputs:
     description: 'Whether to also publish the :latest tag'
     required: false
     default: 'false'
-  docker-user:
-    description: 'DockerHub username'
-    required: true
-  docker-pass:
-    description: 'DockerHub password'
+  oidc-connection-id:
+    description: 'Docker OIDC connection ID for keyless DockerHub auth via GitHub Actions OIDC. The caller job must grant `id-token: write`.'
     required: true
 
 runs:
@@ -50,11 +47,17 @@ runs:
         aws ecr get-login-password --region "$region" \
           | docker login --username AWS --password-stdin "$ECR_REGISTRY"
 
+    # OIDC keyless auth: login-action exchanges the job's GitHub OIDC token
+    # (id-token: write, granted by the caller) for a short-lived DockerHub token
+    # scoped by the org's OIDC connection rulesets. No long-lived credential. The
+    # username is the `surrealdb` org that owns both the destination repo and the
+    # OIDC connection (this action only ever mirrors to surrealdb/surrealdb).
     - name: Login to DockerHub
-      uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+      uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
       with:
-        username: ${{ inputs.docker-user }}
-        password: ${{ inputs.docker-pass }}
+        username: surrealdb
+      env:
+        DOCKERHUB_OIDC_CONNECTIONID: ${{ inputs.oidc-connection-id }}
 
     # Mirror the multi-arch image from ECR to DockerHub by recreating the index
     # from the per-platform manifests ONLY. This deliberately omits the

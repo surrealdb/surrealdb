@@ -1196,6 +1196,11 @@ jobs:
     # Private runner: reads the source image from ECR using the runner's ambient
     # IAM instance role. Label from a repo/org variable.
     runs-on: ${{ vars.RUNNER_AMD }}
+    # id-token: write lets the DockerHub mirror exchange the job's GitHub OIDC
+    # token for a short-lived DockerHub token, so no long-lived credential is used.
+    permissions:
+      contents: read
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -1229,8 +1234,7 @@ jobs:
           tag-suffix: ${{ matrix.tag-suffix }}
           environment: ${{ needs.prepare-vars.outputs.release-name }}
           latest: ${{ needs.prepare-vars.outputs.latest }}
-          docker-user: ${{ secrets.DOCKER_USER }}
-          docker-pass: ${{ secrets.DOCKER_PASS }}
+          oidc-connection-id: ${{ vars.DOCKERHUB_OIDC_CONNECTION_ID }}
 
   # ----------------------------------------
   # Mirror downstream image (ECR -> release tag + ACR)
