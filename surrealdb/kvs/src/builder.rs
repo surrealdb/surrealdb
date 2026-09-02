@@ -97,9 +97,15 @@ pub trait TransactionBuilder: Send + Sync + 'static {
 	/// This is the extension point for backend-specific operations that
 	/// don't fit the generic transaction interface: e.g. the TiKV backend
 	/// returns its `TikvOpsHandle` (matched on `TypeId`) so the engine can
-	/// offer MVCC-GC / lock-cleanup / `unsafe_destroy_range` to operators
-	/// without polluting this trait with TiKV-only signatures every other
-	/// backend would have to no-op.
+	/// offer MVCC-GC and lock-cleanup to operators without polluting this
+	/// trait with TiKV-only signatures every other backend would have to
+	/// no-op.
+	///
+	/// A capability several backends can offer is published under a shared
+	/// `TypeId` instead of a backend-specific one, so the engine resolves it
+	/// without naming any backend: [`crate::DestroyRangeHandle`] is that
+	/// shape. A backend publishes such a handle only while it can actually
+	/// perform the operation, so `None` is the caller's signal to fall back.
 	fn extension(&self, _: TypeId) -> Option<Arc<dyn Any + Send + Sync>> {
 		None
 	}

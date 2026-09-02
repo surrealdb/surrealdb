@@ -69,9 +69,14 @@ pub(crate) async fn alter_table_statement_compute(
 	}
 
 	let mut changefeed_replaced = false;
+	// Distinct from `changefeed_replaced`: setting a retention on a table that had
+	// none also raises its database's collection watermark, and only a *set* can
+	// extend it — dropping one can only lower the maximum, which strands nothing.
+	let mut changefeed_set = false;
 	match this.changefeed {
 		AlterKind::Set(x) => {
 			changefeed_replaced = dt.changefeed.is_some();
+			changefeed_set = true;
 			dt.changefeed = Some(x)
 		}
 		AlterKind::Drop => dt.changefeed = None,
@@ -110,6 +115,12 @@ pub(crate) async fn alter_table_statement_compute(
 
 	// Set the table definition
 	txn.put_tb(ns_name, db_name, &dt).await?;
+	// A retention written here makes the changefeed collector's watermark stale,
+	// so the fence is bumped in the same transaction: a collection page that
+	// armed against it is rejected rather than deleting under the old policy.
+	if changefeed_set {
+		txn.bump_changefeed_retention_fence(ns, db).await?;
+	}
 
 	// Clear the cache
 	txn.clear_cache();

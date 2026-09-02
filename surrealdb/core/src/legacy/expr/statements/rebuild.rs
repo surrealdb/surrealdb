@@ -11,6 +11,8 @@ use crate::doc::CursorDoc;
 use crate::expr::Base;
 use crate::expr::statements::rebuild::{RebuildIndexStatement, RebuildStatement};
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::DatastoreError;
+use crate::kvs::tx::DocIdsReclaimClaim;
 use crate::legacy::{refresh_table_index_cache, run_indexing};
 use crate::val::Value;
 
@@ -64,6 +66,28 @@ pub(crate) async fn rebuild_index_statement_compute(
 		let mut updated = (*ix).clone();
 		updated.format_version = INDEX_FORMAT_VERSION;
 		let txn = ctx.tx();
+		// Stamping the current format turns a legacy index into a consumer of
+		// the table's shared doc-ID space, which it then adopts through
+		// `TableDocIds::resolve_or_assign`'s fast path. An untouched reclaim of
+		// that space is cancelled in the transaction that stamps the format. Once
+		// paging starts, the space may be torn, so the rebuild instead waits for
+		// bounded cleanup before it can safely become a consumer.
+		//
+		// Only the upgrade needs this: an index already at the current format
+		// was itself a consumer, so no last-consumer drop could have queued the
+		// space while it existed.
+		if !ix.uses_shared_doc_ids()
+			&& updated.uses_shared_doc_ids()
+			&& txn.claim_tb_doc_ids_reclaim(ns, db, &tb.name).await?
+				== DocIdsReclaimClaim::InProgress
+		{
+			anyhow::bail!(DatastoreError::QueryNotExecuted {
+				message: format!(
+					"The shared document-ID space for table `{}` is still being reclaimed; retry REBUILD INDEX after cleanup completes",
+					tb.name
+				),
+			});
+		}
 		txn.put_tb_index(ns, db, &this.table, &updated).await?;
 		let (ns_name, db_name) = opt.ns_db()?;
 		refresh_table_index_cache(ctx, &txn, ns_name, db_name, &tb).await?;

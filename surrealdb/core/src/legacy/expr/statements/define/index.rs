@@ -20,11 +20,11 @@ use crate::expr::statements::define::DefineKind;
 use crate::expr::statements::define::index::DefineIndexStatement;
 use crate::expr::{Base, Idiom, Part};
 use crate::iam::{Action, ResourceKind};
-use crate::idx::docids::TableDocIds;
 use crate::key::schema::TableKey;
 use crate::kvs::index::{
 	CleanRetiredBuild, CleanUncommittedBuild, IndexBuilder, retire_durable_index,
 };
+use crate::kvs::tx::DocIdsReclaimClaim;
 use crate::kvs::{DatastoreError, Transaction};
 use crate::legacy::{expr_to_ident, exprs_to_fields};
 use crate::val::{TableName, Value};
@@ -156,14 +156,34 @@ pub(crate) async fn define_index_statement_compute(
 		return Ok(Value::None);
 	}
 
+	// A doc-ID-consuming index adopts existing table mappings through
+	// `TableDocIds::resolve_or_assign`'s fast path. An untouched queued reclaim
+	// can be cancelled atomically here and those mappings remain valid. Once any
+	// page has committed, however, the space may be torn; leave the queue intact
+	// so the bounded reaper can finish, and refuse to publish a consumer until it
+	// has done so.
+	if !matches!(this.index, Index::Count(_))
+		&& txn.claim_tb_doc_ids_reclaim(tb.namespace_id, tb.database_id, &tb_name).await?
+			== DocIdsReclaimClaim::InProgress
+	{
+		bail!(DatastoreError::QueryNotExecuted {
+			message: format!(
+				"The shared document-ID space for table `{tb_name}` is still being reclaimed; retry DEFINE INDEX after cleanup completes"
+			),
+		});
+	}
+
 	// If an index with this name already exists, this is a destructive
 	// replacement: either `Overwrite`, or an import replay whose physical
 	// definition changed (a plain redefine over an existing index has already
 	// bailed at the guard above, and an idempotent import replay returned at
-	// the fast path). Retire the old index's durable state and delete its data
-	// here, synchronously, before the new index is rebuilt — delete-before-
-	// rebuild keeps peak disk roughly flat for an inline rebuild instead of
-	// holding the old and new index data simultaneously.
+	// the fast path). The old index's durable state is retired here, and its
+	// data is enqueued for background reclaim.
+	//
+	// The replacement is built while the retired index's data is still on disk,
+	// so peak disk holds both. That is the price of a bounded transaction: an
+	// inline delete of the old index would put one write per entry into this
+	// transaction, which for a large index does not fit in memory.
 	if let Some(ix) = existing.as_ref() {
 		// Decide up front — before the catalog is mutated — whether this
 		// destructive replacement drops the table's LAST doc-ID-consuming
@@ -192,23 +212,26 @@ pub(crate) async fn define_index_statement_compute(
 		// process-local builder abort is deferred until commit.
 		ctx.get_index_stores().index_removed(tb.namespace_id, tb.database_id, &tb, ix).await?;
 		if let Some(index_builder) = ctx.get_index_builder() {
-			txn.on_commit(CleanRetiredBuild::boxed_with_data_cleanup(
+			txn.on_commit(CleanRetiredBuild::boxed_with_deferred_data(
 				index_builder.clone(),
 				txn.sequences(),
 				tb.namespace_id,
 				tb.database_id,
 				tb_name.clone(),
 				ix.index_id,
+				false,
 			))
 			.await;
 		}
 		retire_durable_index(&txn, tb.namespace_id, tb.database_id, &tb_name, ix.index_id, false)
 			.await?;
-		txn.del_tb_index(tb.namespace_id, tb.database_id, &tb_name, &name).await?;
+		// The replaced index's data prefix is enqueued for background reclaim
+		// rather than deleted here, so this transaction stays bounded whatever
+		// the index holds. The replacement is given a fresh index id below, so
+		// its prefix is disjoint from the one queued here.
+		txn.del_tb_index_deferred(tb.namespace_id, tb.database_id, &tb_name, &name).await?;
 		if purge_table_doc_ids {
-			TableDocIds::new(tb.namespace_id, tb.database_id, tb_name.clone())
-				.remove_all(&txn)
-				.await?;
+			txn.del_tb_doc_ids_deferred(tb.namespace_id, tb.database_id, &tb_name).await?;
 		}
 		// Serialize concurrent last-consumer replacements on last-writer-wins
 		// backends (TiKV). The `purge_table_doc_ids` decision above is read

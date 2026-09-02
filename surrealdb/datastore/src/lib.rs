@@ -153,7 +153,7 @@ pub use surrealdb_kvs::{
 	timestamp,
 };
 pub use tr::Transactor;
-pub use tx::Transaction;
+pub use tx::{DocIdsReclaimClaim, Transaction};
 pub mod error;
 #[cfg(any(test, feature = "test-hooks"))]
 pub mod testing;

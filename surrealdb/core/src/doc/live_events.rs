@@ -307,7 +307,9 @@ mod tests {
 		// but the already-written event must still be collected by retention.
 		ds.execute(&format!("KILL u'{lqid}'"), &live, None).await.unwrap();
 		tokio::time::sleep(Duration::from_millis(500)).await;
-		ds.changefeed_process(&Duration::from_secs(1)).await.unwrap();
+		ds.changefeed_process(&Duration::from_secs(1), &tokio_util::sync::CancellationToken::new())
+			.await
+			.unwrap();
 		assert!(
 			live_events(&ds, ns_id, db_id).await.is_empty(),
 			"orphaned live-query events must be GC'd by retention even with no current subscriber"

@@ -2260,20 +2260,6 @@ impl CleanRetiredBuild {
 		let tf = builder.transaction_factory();
 		Self::boxed(IndexBuildCleanup::new(builder, tf, sequences, ns, db, tb, ix), false, expunge)
 	}
-
-	/// Finish a retirement whose schema transaction deleted the index-data
-	/// prefix synchronously and therefore has no later reclaim entry.
-	pub(crate) fn boxed_with_data_cleanup(
-		builder: IndexBuilder,
-		sequences: Sequences,
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: TableName,
-		ix: IndexId,
-	) -> Box<dyn CommitAction> {
-		let tf = builder.transaction_factory();
-		Self::boxed(IndexBuildCleanup::new(builder, tf, sequences, ns, db, tb, ix), true, false)
-	}
 }
 
 impl CommitAction for CleanRetiredBuild {

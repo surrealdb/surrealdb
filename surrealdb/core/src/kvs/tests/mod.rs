@@ -2,6 +2,10 @@
 //! transaction metrics wrappers, the transaction cache, and the deferred
 //! data reclaim task. The raw KV-store behaviour tests live in the
 //! `surrealdb-kvs-any` crate.
+//!
+//! A module gated on `kv-mem` asserts behaviour every backend shares, so the
+//! in-memory store is enough to cover it. An ungated module carries per-backend
+//! tests, each gated on its own `kv-*` feature.
 #![cfg(any(
 	feature = "kv-mem",
 	feature = "kv-rocksdb",
@@ -11,7 +15,10 @@
 ))]
 
 #[cfg(feature = "kv-mem")]
+mod changefeed_gc_test;
+#[cfg(feature = "kv-mem")]
 mod keyspace_test;
+mod reclaim_backends_test;
 #[cfg(feature = "kv-mem")]
 mod reclaim_test;
 #[cfg(feature = "kv-mem")]

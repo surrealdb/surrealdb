@@ -18,7 +18,10 @@ use surrealdb_kvs::err::{Error, Result};
 use surrealdb_kvs::timestamp::{
 	BoxTimeStamp, BoxTimeStampImpl, MAX_TIMESTAMP_BYTES, TimeStamp, TimeStampImpl,
 };
-use surrealdb_kvs::{Key, KeyRange, Metrics, TransactionBuilder, TransactionType, Val};
+use surrealdb_kvs::{
+	DestroyRange, DestroyRangeHandle, Key, KeyRange, Metrics, TransactionBuilder, TransactionType,
+	Val,
+};
 use tikv::transaction::ResolveLocksOptions;
 use tikv::{CheckLevel, Config, TimestampExt, TransactionClient, TransactionOptions};
 use tokio::sync::RwLock;
@@ -176,11 +179,14 @@ fn kvs_error(e: tikv::Error) -> Error {
 /// Callers reach this through the top-level
 /// [`crate::kvs::Datastore::run_mvcc_gc`] /
 /// [`crate::kvs::Datastore::run_lock_cleanup`] /
-/// [`crate::kvs::Datastore::unsafe_destroy_range`] /
 /// [`crate::kvs::Datastore::in_flight_transaction_count`] convenience
 /// methods, which look the handle up by `TypeId` so non-TiKV backends
 /// return a no-op without the generic `TransactionBuilder` trait needing
 /// to advertise these signatures.
+///
+/// The same handle also serves the backend-agnostic
+/// [`DestroyRange`] capability, published under
+/// [`DestroyRangeHandle`] so the engine resolves it without naming TiKV.
 pub struct TikvOpsHandle {
 	/// Underlying transactional client.
 	db: Pin<Arc<TransactionClient>>,
@@ -585,7 +591,30 @@ impl TransactionBuilder for Datastore {
 	}
 
 	fn extension(&self, type_id: TypeId) -> Option<Arc<dyn Any + Send + Sync>> {
-		(type_id == TypeId::of::<TikvOpsHandle>()).then(|| self.ops_handle() as _)
+		if type_id == TypeId::of::<TikvOpsHandle>() {
+			return Some(self.ops_handle() as _);
+		}
+		// Offered only while garbage collection is running. The destroy bypasses
+		// MVCC, so what makes it safe is the safepoint advancing past the removal
+		// before the data goes; with collection disabled the safepoint never
+		// moves, a snapshot older than the removal is never invalidated, and a
+		// reader holding one would watch keys vanish mid-scan. Withholding the
+		// capability is what routes such a deployment to the transactional delete,
+		// which every reader's snapshot does see consistently.
+		if type_id == TypeId::of::<DestroyRangeHandle>() && self.handle.config.gc_enabled {
+			return Some(Arc::new(DestroyRangeHandle(self.ops_handle())) as _);
+		}
+		None
+	}
+}
+
+impl DestroyRange for TikvOpsHandle {
+	fn mechanism(&self) -> &'static str {
+		"tikv-unsafe-destroy-range"
+	}
+
+	fn destroy_range(&self, range: KeyRange<'static>) -> BoxFut<'_, Result<()>> {
+		Box::pin(async move { self.unsafe_destroy_range(range).await })
 	}
 }
 
@@ -1171,16 +1200,16 @@ impl Transactable for Transaction {
 
 	/// Delete a range of keys from the database transactionally.
 	///
-	/// Previously this called `unsafe_destroy_range` on the underlying
-	/// `TransactionClient` directly which bypassed MVCC entirely: a
-	/// rollback could not undo it and concurrent snapshot readers could
-	/// observe partial state. The new implementation materialises keys
-	/// via `scan_keys` in batches and deletes them as part of the
-	/// surrounding transaction, capped by `SURREAL_TIKV_DELR_MAX_KEYS`
-	/// to keep individual transactions reasonably sized. Callers that
-	/// need to drop arbitrarily large ranges out-of-transaction (e.g. a
-	/// background namespace expunge) should use
-	/// [`Datastore::unsafe_destroy_range`] instead.
+	/// Keys are materialised via `scan_keys` in batches and deleted as part of
+	/// the surrounding transaction, so a rollback undoes the delete and a
+	/// concurrent snapshot reader never observes partial state. The number of
+	/// keys one call may delete is capped by `SURREAL_TIKV_DELR_MAX_KEYS`;
+	/// exceeding it returns [`Error::TransactionRangeTooLarge`] rather than
+	/// building an oversized transaction. Callers that need to drop an
+	/// arbitrarily large range either page the delete across committed
+	/// transactions or use the out-of-transaction
+	/// [`DestroyRange`] capability, which bypasses MVCC and is only safe once
+	/// the range is already logically unreachable.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
 	fn delr<'a>(&'a self, rng: KeyRange<'a>) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move { self.delete_range_bounded(rng).await })

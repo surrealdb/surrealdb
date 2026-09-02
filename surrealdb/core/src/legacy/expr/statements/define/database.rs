@@ -73,6 +73,12 @@ pub(crate) async fn define_database_statement_compute(
 		strict: this.strict,
 	};
 	txn.put_db(nsv.name.as_str(), db_def).await?;
+	// A retention written here makes the changefeed collector's watermark stale,
+	// so the fence is bumped in the same transaction: a collection page that
+	// armed against it is rejected rather than deleting under the old policy.
+	if this.changefeed.is_some() {
+		txn.bump_changefeed_retention_fence(nsv.namespace_id, database_id).await?;
+	}
 
 	// Clear the cache
 	if let Some(cache) = ctx.get_cache() {

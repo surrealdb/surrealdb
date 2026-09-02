@@ -647,11 +647,12 @@ impl TableDocIds {
 	/// `!dp` pending-reclaim markers) in three prefix deletes, reclaiming the
 	/// shared space.
 	///
-	/// Intended for when the table's last doc-ID-consuming index is dropped:
-	/// with no consumer left, a record delete's central [`remove`](Self::remove)
-	/// no longer fires (see the document machinery's `remove_doc_id`), so the mappings
-	/// allocated while an index existed would otherwise be leaked — and a later
-	/// re-create of a purged record key could be handed its stale, reused id.
+	/// The write set is proportional to the table, so this is only for a caller
+	/// that needs the space gone before its own transaction commits — a space a
+	/// background reclaim has already torn, whose surviving mappings are no
+	/// longer internally consistent and so cannot be adopted by a new index. A
+	/// last-consumer drop instead enqueues the space for background reclaim
+	/// (`Transaction::del_tb_doc_ids_deferred`), which is bounded.
 	///
 	/// The monotonic sequence counter is deliberately left intact, so a doc-ID
 	/// index defined later keeps allocating fresh, never-reused ids.

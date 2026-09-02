@@ -40,7 +40,7 @@ use surrealdb_kvs::api::{
 	Batch, KeyVisitor, KeysBatch, ScanChunkStats, ScanCursorKeys, ScanCursorVals, ValVisitor,
 	ValsBatch,
 };
-use surrealdb_kvs::key::{AnyRange, KVKey, KVKeyDecode, KVSubspace, TypedRange};
+use surrealdb_kvs::key::{AnyRange, KVKey, KVKeyDecode, KVSubspace, Resumable, TypedRange};
 use surrealdb_kvs::timestamp::{BoxTimeStamp, BoxTimeStampImpl};
 use surrealdb_kvs::value::KVValue;
 use surrealdb_kvs::{Key, KeyRange};
@@ -57,16 +57,18 @@ use crate::cache::tx::TransactionCache;
 // The transaction holds the queue because only it knows when the outcome is
 // settled; what to run belongs to the layer that registered it.
 use crate::close::{CommitAction, RollbackAction};
+use crate::key::reclaim::{Expunge, ReclaimKind, ReclaimState};
 use crate::key::schema::{
 	AnalyzerKey, AnalyzerPrefix, ApiKey, ApiPrefix, BucketKey, BucketPrefix,
-	BuildAppendTicketPrefix, BuildReservationKey, BuildStateKey, ChangeFeedKey, DatabaseKey,
-	DatabasePrefix, DbAccessMethodKey, DbAccessMethodPrefix, DbAccessRoot, DbConfigKey,
-	DbConfigPrefix, DbGrantKey, DbGrantPrefix, DbUserKey, DbUserPrefix, DocStatsBatchKey, EventKey,
-	EventPrefix, FieldKey, FieldPrefix, ForeignTablePrefix, FunctionKey, FunctionPrefix, IdxRoot,
-	IndexCompactionKey, IndexCountKey, IndexDefKey, IndexDefPrefix, IndexNameKey, LiveEventsKey,
-	MlModelKey, MlModelPrefix, ModuleKey, ModulePrefix, NamespaceKey, NamespacePrefix, NodeKey,
-	NodePrefix, NsAccessMethodKey, NsAccessMethodPrefix, NsAccessRoot, NsGrantKey, NsGrantPrefix,
-	NsUserKey, NsUserPrefix, ParamKey, ParamPrefix, ReclaimKey, RecordKey, RootAccessMethodKey,
+	BuildAppendTicketPrefix, BuildReservationKey, BuildStateKey, ChangeFeedKey, ChangefeedFenceKey,
+	DatabaseKey, DatabasePrefix, DbAccessMethodKey, DbAccessMethodPrefix, DbAccessRoot,
+	DbConfigKey, DbConfigPrefix, DbGrantKey, DbGrantPrefix, DbUserKey, DbUserPrefix,
+	DocStatsBatchKey, EventKey, EventPrefix, FieldKey, FieldPrefix, ForeignTablePrefix,
+	FunctionKey, FunctionPrefix, IdxRoot, IndexCompactionKey, IndexCountKey, IndexDefKey,
+	IndexDefPrefix, IndexNameKey, LiveEventsKey, MlModelKey, MlModelPrefix, ModuleKey,
+	ModulePrefix, NamespaceKey, NamespacePrefix, NodeKey, NodePrefix, NsAccessMethodKey,
+	NsAccessMethodPrefix, NsAccessRoot, NsGrantKey, NsGrantPrefix, NsUserKey, NsUserPrefix,
+	ParamKey, ParamPrefix, ReclaimKey, ReclaimTbPrefix, RecordKey, RootAccessMethodKey,
 	RootAccessMethodPrefix, RootAccessRoot, RootConfigKey, RootGrantKey, RootGrantPrefix,
 	RootUserKey, RootUserPrefix, SequenceKey, SequencePrefix, SubscriptionPrefix, TableKey,
 	TablePrefix, TermChangeBatchKey,
@@ -218,6 +220,19 @@ pub struct Transaction {
 	/// Drained by [`Self::cancel`] and by a failed commit; discarded once the
 	/// commit succeeds.
 	rollback_actions: Mutex<Vec<Box<dyn RollbackAction>>>,
+}
+
+/// Whether a table's shared doc-ID space is safe for a new consumer to adopt.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DocIdsReclaimClaim {
+	/// No reclaim had started. Any queued entries were cancelled by this
+	/// transaction, so the mappings that remain are internally consistent.
+	Available,
+	/// At least one reclaim page committed, or one of the three prefix entries
+	/// was already retired. The surviving mappings may be torn and must not be
+	/// adopted; the queued reclaim is left intact so the background task can
+	/// finish it in bounded pages.
+	InProgress,
 }
 
 const INDEX_BUILD_RESERVATION_RELEASE_RETRY_SLEEP: Duration = Duration::from_millis(100);
@@ -1716,6 +1731,16 @@ impl Transaction {
 
 	/// Delete all versions of a key from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn clr(&self, key: Key<'_>) -> Result<()> {
+		self.reserve_write_slot()?;
+		let key_bytes = key.len() as u64;
+		self.tr.clr(key).await?;
+		self.metrics.record_del(1, key_bytes);
+		Ok(())
+	}
+
+	/// Delete all versions of a key from the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn clr_key<K>(&self, key: &K) -> Result<()>
 	where
 		K: KVKey + Debug,
@@ -1797,13 +1822,7 @@ impl Transaction {
 		}
 		// Enqueue background reclaim of the namespace data prefix.
 		let rc = ReclaimKey::namespace(ns_def.namespace_id, expunge, Uuid::now_v7());
-		self.set_key(
-			&rc,
-			&crate::key::reclaim::ReclaimState {
-				observed_ms: 0,
-			},
-		)
-		.await?;
+		self.set_key(&rc, &crate::key::reclaim::ReclaimState::enqueued()).await?;
 		// Invalidate cached namespace lookups so the removal is observed.
 		self.cache.remove(&cache::tx::Lookup::Nss);
 		self.cache.remove(&cache::tx::Lookup::NsByName(&ns_def.name));
@@ -1839,13 +1858,7 @@ impl Transaction {
 		// Enqueue background reclaim of the database data prefix.
 		let rc =
 			ReclaimKey::database(db_def.namespace_id, db_def.database_id, expunge, Uuid::now_v7());
-		self.set_key(
-			&rc,
-			&crate::key::reclaim::ReclaimState {
-				observed_ms: 0,
-			},
-		)
-		.await?;
+		self.set_key(&rc, &crate::key::reclaim::ReclaimState::enqueued()).await?;
 		// Invalidate cached database lookups so the removal is observed.
 		self.cache.remove(&cache::tx::Lookup::Dbs(db_def.namespace_id));
 		self.cache.remove(&cache::tx::Lookup::DbByName(ns, &db_def.name));
@@ -1900,6 +1913,51 @@ impl Transaction {
 		Ok(())
 	}
 
+	/// Register this database's changefeed-retention fence for commit-time
+	/// conflict detection, so this transaction cannot commit if a retention
+	/// change lands first.
+	///
+	/// Read through [`Self::getu_key`] rather than written: the fence exists only
+	/// to give the changefeed collector and the statements that set a retention a
+	/// key in common, and a plain read would not serve — on a last-writer-wins
+	/// backend nothing validates a read set, which is the backend where the two
+	/// otherwise share no key and so never conflict.
+	///
+	/// The collector calls this inside each page's own write transaction, so the
+	/// arming covers that page and no more.
+	pub async fn arm_changefeed_retention_fence(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<()> {
+		let key = ChangefeedFenceKey {
+			ns,
+			db,
+		};
+		let _ = self.getu_key(&key).await?;
+		Ok(())
+	}
+
+	/// Bump this database's changefeed-retention fence, so a collection page that
+	/// armed against it cannot commit.
+	///
+	/// Called by every path that writes a changefeed retention. The count carries
+	/// no meaning beyond changing, and over-bumping costs only a retried page, so
+	/// it is bumped whenever a written definition carries a retention rather than
+	/// only when one is extended.
+	pub async fn bump_changefeed_retention_fence(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<()> {
+		let key = ChangefeedFenceKey {
+			ns,
+			db,
+		};
+		let next = self.get_key(&key, None).await?.unwrap_or(0).wrapping_add(1);
+		self.set_key(&key, &next).await
+	}
+
 	/// Enqueue background reclaim of an index-data prefix by its stable id.
 	///
 	/// The id is sufficient after catalog retirement because index ids are never
@@ -1915,14 +1973,159 @@ impl Transaction {
 		expunge: bool,
 	) -> Result<()> {
 		let rc = ReclaimKey::index(ns, db, tb, ix, expunge, Uuid::now_v7());
-		self.set_key(
-			&rc,
-			&crate::key::reclaim::ReclaimState {
-				observed_ms: 0,
-			},
-		)
-		.await?;
+		self.set_key(&rc, &crate::key::reclaim::ReclaimState::enqueued()).await?;
 		Ok(())
+	}
+
+	/// Enqueue a table's shared doc-ID space for asynchronous background
+	/// reclaim.
+	///
+	/// The deferred companion to
+	/// [`surrealdb_idx::docids::TableDocIds::remove_all`], for the callers that
+	/// drop the table's last doc-ID-consuming index. The space holds one entry
+	/// per record in each direction, so deleting it inline would put a write per
+	/// record into the caller's transaction; the three prefixes are destroyed
+	/// later by [`crate::Datastore::reclaim_tombstones`] instead.
+	///
+	/// Each of the three prefixes is enqueued separately, because the table's key
+	/// space interleaves them with the doc-ID sequence counter (`!dd` < `!dh` <
+	/// `!di` < `!dp` < `!ds`) and the counter must survive: a monotonic counter
+	/// is what stops a later index handing a second record an id the first still
+	/// holds. Separate entries also give each prefix its own resume cursor.
+	///
+	/// The caller must guarantee no doc-ID-consuming index can adopt a surviving
+	/// mapping before the reclaim completes. The prefixes are reclaimed
+	/// independently and page by page, so an interrupted reclaim leaves the space
+	/// torn — a `!di` entry whose `!dd` twin is already gone. Adopting one of
+	/// those through
+	/// [`resolve_or_assign`](surrealdb_idx::docids::TableDocIds::resolve_or_assign)'s
+	/// fast path would give an index entries pointing at a doc-ID that resolves
+	/// to no record. `DEFINE INDEX` upholds this with
+	/// [`Self::claim_tb_doc_ids_reclaim`], which it calls in the transaction
+	/// that defines the consumer.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn del_tb_doc_ids_deferred(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<()> {
+		// All three in one transaction, so a strict subset of them surviving in
+		// the queue is itself evidence that the reaper has drained and retired
+		// the rest. `Self::claim_tb_doc_ids_reclaim` reads that.
+		for kind in [ReclaimKind::DocLookup, ReclaimKind::DocKey, ReclaimKind::DocPending] {
+			let rc = ReclaimKey {
+				kind,
+				ns,
+				db,
+				tb: Cow::Borrowed(tb),
+				// The space is table-scoped: no index id addresses it.
+				ix: IndexId(0),
+				expunge: Expunge::Keep,
+				uid: Uuid::now_v7(),
+			};
+			self.set_key(&rc, &crate::key::reclaim::ReclaimState::enqueued()).await?;
+		}
+		Ok(())
+	}
+
+	/// Claim a table's shared doc-ID space for a new consumer when it is still
+	/// internally consistent.
+	///
+	/// `DEFINE INDEX` calls this before defining a doc-ID-consuming index. If all
+	/// three reclaim entries still exist and none carries a cursor, no deletion
+	/// has committed and they are conditionally cancelled in this transaction.
+	/// The conditional deletes make the cancellation atomic with a concurrent
+	/// page on last-writer-wins backends: either this transaction removes the
+	/// claim and defines the index, or the page advances the state and this
+	/// transaction is rejected.
+	///
+	/// Once a cursor exists, or a strict subset of the three entries survives,
+	/// the space may be torn. In that case no entry is cancelled: the caller must
+	/// not define a consumer, and the background task remains able to finish the
+	/// purge in bounded pages. No queued entries means either no reclaim was ever
+	/// needed or it completed, both of which are safe for a new consumer.
+	///
+	/// Two things say the space is torn. A surviving entry carrying a resume
+	/// cursor names a prefix the reaper has deleted from. And because the three
+	/// entries are enqueued in one transaction, a strict subset of them surviving
+	/// means the reaper drained and retired the rest — a tear no surviving
+	/// cursor records, since retiring an entry destroys its cursor with it.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn claim_tb_doc_ids_reclaim(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+	) -> Result<DocIdsReclaimClaim> {
+		// Whether a surviving entry names a prefix already deleted from, and
+		// which of the three kinds are still queued for this table.
+		let mut started = false;
+		let mut queued = [false; 3];
+		// Exact key/value bytes become compare-delete guards if every entry proves
+		// untouched. An unreadable value is retained and blocks adoption.
+		let mut entries = Vec::new();
+		// The queue is keyed by kind first, so a table's three entries are not
+		// contiguous: each kind is scanned over its own `(kind, ns, db, tb)`
+		// range rather than the whole queue being walked to pick them out. Every
+		// key such a range holds is one of this table's by construction, so none
+		// has to be decoded to be attributed. Each range is still read in batches
+		// so an unexpectedly duplicated queue cannot force one unbounded backend
+		// scan result; normal operation has one entry per kind.
+		for (slot, kind) in [ReclaimKind::DocKey, ReclaimKind::DocLookup, ReclaimKind::DocPending]
+			.into_iter()
+			.enumerate()
+		{
+			let mut window = ReclaimTbPrefix {
+				kind,
+				ns,
+				db,
+				tb: Cow::Borrowed(tb),
+			}
+			.range()?;
+			loop {
+				let items = self.scan_raw(window.clone(), NORMAL_BATCH_SIZE, 0, None).await?;
+				let Some((last, _)) = items.last() else {
+					break;
+				};
+				let last = last.clone();
+				let exhausted = items.len() < NORMAL_BATCH_SIZE as usize;
+				for (k, v) in &items {
+					queued[slot] = true;
+					// A state that cannot be read is treated as started, because
+					// a cursor it may have held cannot be ruled out.
+					started |= match ReclaimState::kv_decode_value(v, ()) {
+						Ok(state) => state.cursor.is_some(),
+						Err(_) => true,
+					};
+					entries.push((k.clone(), v.clone()));
+				}
+				if exhausted {
+					break;
+				}
+				window = window.resume_after(&last, Direction::Forward);
+			}
+		}
+		// A strict subset of the three surviving means the reaper drained and
+		// retired the rest, so the space is torn whatever the survivors' cursors
+		// say. Leave every surviving entry intact: finishing them in bounded pages
+		// is the recovery path.
+		let queued_any = queued.iter().any(|&q| q);
+		let queued_all = queued.iter().all(|&q| q);
+		if started || (queued_any && !queued_all) {
+			return Ok(DocIdsReclaimClaim::InProgress);
+		}
+		// No entries means the space was never queued or has been fully drained.
+		if !queued_any {
+			return Ok(DocIdsReclaimClaim::Available);
+		}
+		// Every entry is untouched. Withdraw exactly the values observed above so
+		// a page that advances one concurrently wins the race rather than having
+		// its cursor deleted and its partial purge adopted by the new index.
+		for (key, value) in entries {
+			self.del_compare(Key::from(key), Some(&value)).await?;
+		}
+		Ok(DocIdsReclaimClaim::Available)
 	}
 
 	/// Insert or update a key in the datastore.

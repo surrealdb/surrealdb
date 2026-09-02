@@ -38,6 +38,7 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /!ic{ns}{db}{tb}{ix}                                                                          IndexCompactionIxPrefix ->  (range)
 /!rc{kind}{ns}{db}{tb}{ix}{expunge}{uid}                                                                   ReclaimKey ->  ReclaimState
 /!rc                                                                                                    ReclaimPrefix ->  (range)
+/!rc{kind}{ns}{db}{tb}                                                                                ReclaimTbPrefix ->  (range)
 /${nd}                                                                                                  NodeStateRoot ->  (subtree)
 /${nd}!lq{lq}                                                                                        NodeLiveQueryKey ->  surrealdb_catalog::NodeLiveQuery
 /${nd}!lq                                                                                         NodeLiveQueryPrefix ->  (range)
@@ -73,6 +74,7 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}*{db}!bu                                                                                           BucketPrefix ->  (range)
 /*{ns}*{db}!cg{ty}                                                                                        DbConfigKey ->  surrealdb_catalog::StoredConfigDefinition
 /*{ns}*{db}!cg                                                                                         DbConfigPrefix ->  (range)
+/*{ns}*{db}!cf                                                                                     ChangefeedFenceKey ->  u64
 /*{ns}*{db}!fn{fc}                                                                                        FunctionKey ->  surrealdb_catalog::StoredFunctionDefinition
 /*{ns}*{db}!fn                                                                                         FunctionPrefix ->  (range)
 /*{ns}*{db}!md{md}                                                                                          ModuleKey ->  surrealdb_catalog::StoredModuleDefinition

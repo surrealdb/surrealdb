@@ -151,7 +151,7 @@ keyspace! {
 
 		/// Resources awaiting reclamation after a drop.
 		reclaim = ["!rc", @, kind: ReclaimKind, ns: NamespaceId, db: DatabaseId,
-				   tb: Table, ix: IndexId, expunge: Expunge, uid: Uuid] => ReclaimState;
+				   tb: Table, @, ix: IndexId, expunge: Expunge, uid: Uuid] => ReclaimState;
 
 		/// Per-node state. The node's own bytes address nothing; only the keys
 		/// beneath them do.
@@ -197,6 +197,26 @@ keyspace! {
 				analyzer = ["!az", @, az: Str] => surrealdb_catalog::AnalyzerDefinition;
 				bucket = ["!bu", @, bu: Str] => surrealdb_catalog::StoredBucketDefinition;
 				db_config = ["!cg", @, ty: Str] => surrealdb_catalog::StoredConfigDefinition;
+
+				/// Serialisation point between a change to this database's
+				/// changefeed retention and the collector deleting behind the
+				/// watermark that retention produced.
+				///
+				/// The collector computes a watermark from the catalog and then
+				/// deletes below it over many committed pages. A `DEFINE`/`ALTER`
+				/// that extends retention in that window makes entries the
+				/// collector is still deleting live again, and a deleted changefeed
+				/// entry cannot be recovered. Every path that writes a changefeed
+				/// retention bumps this counter, and each collection page reads it
+				/// through [`crate::Transaction::getu_key`] — registering it for
+				/// commit-time conflict detection, which is what makes the page
+				/// abort rather than delete under a policy that has since changed.
+				/// A plain read would not: on a last-writer-wins backend nothing
+				/// validates a read set.
+				///
+				/// The count itself carries no meaning beyond changing; it is a
+				/// conflict token, and over-bumping only costs a retried page.
+				changefeed_fence = ["!cf"] => u64;
 
 				/// A user-defined function. The tag is `!fn`, not `!fc`.
 				function = ["!fn", @, fc: Str] => surrealdb_catalog::StoredFunctionDefinition;

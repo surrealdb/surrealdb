@@ -114,7 +114,8 @@ fn into_types_error_inner(error: Error, message: String) -> TypesError {
 			| KvsError::NoSavepoint
 			| KvsError::TimestampInvalid(_)
 			| KvsError::Internal(_)
-			| KvsError::CompactionNotSupported => TypesError::internal(message),
+			| KvsError::CompactionNotSupported
+			| KvsError::RangeDestroyNotSupported => TypesError::internal(message),
 		},
 	}
 }

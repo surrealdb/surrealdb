@@ -64,12 +64,12 @@ pub struct EngineOptions {
 	/// data is physically reclaimed.
 	///
 	/// This is a snapshot-safety grace period, not a convenience delay. The
-	/// reclaim task destroys data out-of-band — on TiKV via `unsafe_destroy_range`,
-	/// which bypasses MVCC — so a read transaction whose snapshot predates the
-	/// `REMOVE` must be given time to finish before its data is physically
-	/// removed. A removal is only reclaimed once it is older than this window,
-	/// which is equivalent to requiring its commit timestamp to fall behind the
-	/// MVCC GC safepoint.
+	/// reclaim task destroys data out-of-band, and on a backend offering
+	/// out-of-transaction range destruction that destruction bypasses MVCC — so
+	/// a read transaction whose snapshot predates the `REMOVE` must be given
+	/// time to finish before its data is physically removed. A removal is only
+	/// reclaimed once it is older than this window, which is equivalent to
+	/// requiring its commit timestamp to fall behind the MVCC GC safepoint.
 	///
 	/// This MUST be `>= tikv_gc_lifetime` (the safepoint lag): a removal older
 	/// than the grace is also older than the safepoint, so any transaction that

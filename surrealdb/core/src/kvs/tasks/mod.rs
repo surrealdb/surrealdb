@@ -439,11 +439,14 @@ struct Slot {
 	next_due: Instant,
 }
 
-/// The jobs whose cost per pass is bounded by catalog size.
+/// The jobs whose cost per pass is bounded up front.
 ///
-/// Each of these reads a fixed number of catalog rows, or a queue that a single
-/// pass empties in bounded work, so they can share one task without delaying a
-/// peer by more than one short pass.
+/// Each of these either reads a fixed number of catalog rows, or bounds its own
+/// pass explicitly: `changefeed_process` deletes at most one key budget per pass,
+/// shared across the databases it visits, however far the retention backlog has
+/// run ahead of it. So they can share one task without delaying a peer by more
+/// than one short pass, and a job with more work than one pass allows continues
+/// on the next tick rather than holding the task.
 fn maintenance_slots(opts: &EngineOptions) -> Vec<Slot> {
 	slots(&[
 		(MaintenanceJob::SystemMetricsRefresh, opts.system_metrics_refresh_interval),
@@ -456,14 +459,17 @@ fn maintenance_slots(opts: &EngineOptions) -> Vec<Slot> {
 	])
 }
 
-/// The jobs whose queue is nearly always empty but whose entries are unbounded.
+/// The jobs whose queue is nearly always empty but whose cost per pass is not
+/// bounded by catalog size.
 ///
-/// `reclaim_tombstones` destroys a whole namespace or database prefix per queue
-/// entry, and `purge_expired_rpc_sessions` pages the entire session keyspace,
-/// opening a write transaction for every expired entry. Both are therefore a
-/// no-op scan in the steady state and arbitrarily long right after a `REMOVE` or
-/// on a busy durable-session deployment. They share a task with each other, not
-/// with the bounded jobs.
+/// `purge_expired_rpc_sessions` pages the entire session keyspace, opening a
+/// write transaction for every expired entry, so one pass is arbitrarily long on
+/// a busy durable-session deployment. `reclaim_tombstones` bounds its own pass
+/// by a key budget, but the queue it drains is filled by `REMOVE` statements
+/// rather than by catalog size, and a large removal takes many passes to finish.
+/// Both are therefore a no-op scan in the steady state and neither belongs
+/// alongside the jobs whose pass length follows the catalog; they share a task
+/// with each other instead.
 fn sweep_slots(opts: &EngineOptions) -> Vec<Slot> {
 	slots(&[
 		(MaintenanceJob::ReclaimTombstones, opts.reclaim_interval),
@@ -523,7 +529,9 @@ async fn run_maintenance_job(
 	let res = match job {
 		MaintenanceJob::NodeExpire => dbs.expire_nodes().await,
 		MaintenanceJob::NodeCleanup => dbs.remove_nodes().await,
-		MaintenanceJob::ChangefeedGc => dbs.changefeed_process(&opts.changefeed_gc_interval).await,
+		MaintenanceJob::ChangefeedGc => {
+			dbs.changefeed_process(&opts.changefeed_gc_interval, canceller).await
+		}
 		MaintenanceJob::ReclaimTombstones => Datastore::reclaim_tombstones(
 			Arc::clone(dbs),
 			opts.reclaim_interval,
@@ -597,11 +605,12 @@ fn spawn_task_scheduler(
 	opts: &EngineOptions,
 ) -> Task {
 	let opts = *opts;
-	// Clamp the grace up to at least the TiKV GC lifetime: on TiKV,
-	// `unsafe_destroy_range` bypasses MVCC, so data must not be reclaimed while a
-	// snapshot older than the GC safepoint (`now - tikv_gc_lifetime`) could still
-	// read it. Deriving the effective grace here means a longer `--tikv-gc-lifetime`
-	// can never be undercut by leaving `--reclaim-grace` at its default.
+	// Clamp the grace up to at least the TiKV GC lifetime: the reclaim's
+	// out-of-transaction range destroy bypasses MVCC, so data must not be
+	// reclaimed while a snapshot older than the GC safepoint
+	// (`now - tikv_gc_lifetime`) could still read it. Deriving the effective
+	// grace here means a longer `--tikv-gc-lifetime` can never be undercut by
+	// leaving `--reclaim-grace` at its default.
 	let reclaim_grace = opts.reclaim_grace.max(opts.tikv_gc_lifetime);
 	into_task(async move {
 		trace!(

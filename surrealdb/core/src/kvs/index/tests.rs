@@ -575,13 +575,6 @@ async fn assert_no_index_build_artifacts(
 	Ok(())
 }
 
-async fn reclaim_queue_len(ds: &Datastore) -> Result<usize> {
-	let tx = ds.transaction(TransactionType::Read).await?;
-	let count = catch!(tx, tx.count(ReclaimPrefix {}.range()?, None).await);
-	tx.cancel().await?;
-	Ok(count)
-}
-
 async fn index_reclaim_modes(
 	ds: &Datastore,
 	ns: NamespaceId,
@@ -1014,8 +1007,11 @@ async fn remove_index_commit_aborts_local_builder_after_commit() -> Result<()> {
 	wait_for_no_local_builder(&ds, ns, db, &table, ix.index_id).await?;
 	drop(guard);
 	assert_no_index_build_artifacts(&ds, ns, db, &table, ix.index_id).await?;
+	// Scoped to this index's own entries: dropping the table's last doc-ID
+	// consumer also queues the three shared doc-ID prefixes, which this
+	// assertion is not about.
 	assert_eq!(
-		reclaim_queue_len(&ds).await?,
+		index_reclaim_modes(&ds, ns, db, &table, ix.index_id).await?.len(),
 		2,
 		"retirement must enqueue a post-builder reclaim in addition to the schema tombstone"
 	);
@@ -4640,13 +4636,28 @@ async fn datastore_drop_releases_index_builder_after_build() -> Result<()> {
 // independently decides whether it dropped the last consumer.
 // ---------------------------------------------------------------------------
 
-/// Smallest key strictly greater than every key sharing `prefix`. The `!di` /
-/// `!dd` sigils end in an ASCII letter well below `0xFF`, so incrementing the
-/// final byte yields a valid exclusive upper bound for a prefix scan.
+/// Drain the deferred reclaim queue, so a test can assert on the shared doc-ID
+/// space a last-consumer drop enqueued for background reclaim.
+async fn drain_reclaim_queue(ds: &Arc<Datastore>) {
+	const MAX_PASSES: usize = 64;
+	for _ in 0..MAX_PASSES {
+		let (batches, _) = Datastore::reclaim_tombstones(
+			Arc::clone(ds),
+			web_time::Duration::from_secs(1),
+			web_time::Duration::ZERO,
+			tokio_util::sync::CancellationToken::new(),
+		)
+		.await
+		.expect("the reclaim pass must not fail");
+		if batches == 0 {
+			return;
+		}
+	}
+}
+
 /// Returns `(record→doc count, doc→record count)` for `table`'s shared doc-ID
 /// space. Each prefix is scanned over its own range, so the `!dh`/`!ds` sequence
 /// keys (which deliberately survive a purge) are excluded from the counts.
-#[cfg(feature = "kv-mem")]
 async fn count_doc_id_mappings(ds: &Datastore, table: &str) -> Result<(usize, usize)> {
 	let tx = ds.transaction(TransactionType::Read).await?;
 	let ns = tx.get_ns_by_name("test", None).await?.expect("namespace should exist");
@@ -4692,6 +4703,7 @@ async fn table_doc_ids_purged_only_when_last_consumer_removed() -> Result<()> {
 
 	// Dropping the last consumer reclaims the whole shared space.
 	execute_all(&ds, &session, "REMOVE INDEX ft2 ON t;").await?;
+	drain_reclaim_queue(&ds).await;
 	assert_eq!(
 		count_doc_id_mappings(&ds, "t").await?,
 		(0, 0),
@@ -4761,6 +4773,7 @@ async fn btree_index_entries_carry_doc_ids() -> Result<()> {
 		"mappings survive while another b-tree consumer remains"
 	);
 	execute_all(&ds, &session, "REMOVE INDEX uniq_b ON t;").await?;
+	drain_reclaim_queue(&ds).await;
 	assert_eq!(
 		count_doc_id_mappings(&ds, "t").await?,
 		(0, 0),
@@ -5368,6 +5381,7 @@ async fn concurrent_removal_of_last_doc_id_indexes_purges_mappings() -> Result<(
 	rb.expect("task B panicked")?;
 
 	// Both consumers gone → space fully reclaimed, nothing leaked.
+	drain_reclaim_queue(&ds).await;
 	assert_eq!(
 		count_doc_id_mappings(&ds, "t").await?,
 		(0, 0),
@@ -5481,6 +5495,7 @@ async fn distributed_concurrent_removal_of_last_doc_id_indexes_purges_mappings()
 
 	// Read from a fresh transaction: both consumers gone across both nodes, the
 	// shared space is reclaimed, and nothing leaked.
+	drain_reclaim_queue(&ds_a).await;
 	assert_eq!(
 		count_doc_id_mappings(&ds_a, "t").await?,
 		(0, 0),
@@ -5519,6 +5534,7 @@ async fn overwrite_last_doc_id_index_with_plain_index_purges_mappings() -> Resul
 	// Overwriting with a COUNT index — the only non-consumer kind — drops the
 	// last consumer, so the shared space must be reclaimed.
 	execute_all(&ds, &session, "DEFINE INDEX OVERWRITE ix ON t COUNT;").await?;
+	drain_reclaim_queue(&ds).await;
 	assert_eq!(
 		count_doc_id_mappings(&ds, "t").await?,
 		(0, 0),

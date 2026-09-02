@@ -23,6 +23,7 @@ pub mod builder;
 pub mod config;
 pub mod consts;
 pub mod cursor;
+pub mod destroy;
 pub mod err;
 pub mod key;
 pub mod savepoint;
@@ -35,6 +36,7 @@ pub use api::{
 	Batch, GetMultiResult, KeysResult, ScanCursorKeys, ScanCursorVals, ScanResult, Transactable,
 };
 pub use builder::{Metric, Metrics, TransactionBuilder};
+pub use destroy::{DestroyRange, DestroyRangeHandle};
 pub use err::{Error, Result};
 pub use savepoint::SavepointStack;
 pub use types::{Key, KeyRange};

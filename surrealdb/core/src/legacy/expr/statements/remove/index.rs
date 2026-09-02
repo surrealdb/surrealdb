@@ -11,7 +11,6 @@ use crate::doc::CursorDoc;
 use crate::expr::Base;
 use crate::expr::statements::remove::index::RemoveIndexStatement;
 use crate::iam::{Action, ResourceKind};
-use crate::idx::docids::TableDocIds;
 use crate::key::schema::TableKey;
 use crate::kvs::index::{CleanRetiredBuild, retire_durable_index};
 use crate::legacy::expr_to_ident;
@@ -91,8 +90,15 @@ pub(crate) async fn remove_index_statement_compute(
 	// skipped, so the `!di`/`!dd` mappings allocated earlier would leak (and
 	// could later hand a re-created record a stale, reused doc-ID). The
 	// monotonic sequence counter is preserved.
+	//
+	// The space holds one entry per record in each direction, so it is enqueued
+	// for background reclaim rather than deleted here: an inline delete would
+	// put a write per record into this transaction, and a table's worth of them
+	// does not fit in memory. Defining a doc-ID consumer on the table cancels
+	// the queued reclaim in the same transaction that defines it, so no index
+	// can adopt a mapping the reclaim would then delete.
 	if removed_last_doc_id_index {
-		TableDocIds::new(ns, db, table_name.clone()).remove_all(&txn).await?;
+		txn.del_tb_doc_ids_deferred(ns, db, &table_name).await?;
 	}
 	// Serialize concurrent last-consumer removals on last-writer-wins backends
 	// (TiKV). The `removed_last_doc_id_index` decision above is read from a
@@ -134,7 +140,9 @@ mod tikv_concurrency {
 	use std::sync::Arc;
 
 	use surrealdb_strand::TableName;
+	use tokio_util::sync::CancellationToken;
 	use uuid::Uuid;
+	use web_time::Duration;
 
 	use crate::CommunityComposer;
 	use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
@@ -155,6 +163,25 @@ mod tikv_concurrency {
 		tx.del_key(&VersionKey {}).await.unwrap();
 		tx.commit().await.unwrap();
 		ds
+	}
+
+	/// Drain the deferred reclaim queue, so a test can assert on data the
+	/// statement under test enqueued for background reclaim rather than deleted.
+	async fn drain_reclaim_queue(ds: &Arc<Datastore>) {
+		const MAX_PASSES: usize = 64;
+		for _ in 0..MAX_PASSES {
+			let (batches, _) = Datastore::reclaim_tombstones(
+				Arc::clone(ds),
+				Duration::from_secs(1),
+				Duration::ZERO,
+				CancellationToken::new(),
+			)
+			.await
+			.unwrap();
+			if batches == 0 {
+				return;
+			}
+		}
 	}
 
 	/// Run a `REMOVE INDEX IF EXISTS` to completion, retrying on the transient
@@ -219,6 +246,7 @@ mod tikv_concurrency {
 			b.await.unwrap();
 
 			// The shared doc-ID mappings for this table must be fully reclaimed.
+			drain_reclaim_queue(&ds).await;
 			let tx = ds.transaction(TransactionType::Read).await.unwrap();
 			let ns = tx.get_ns_by_name("test", None).await.unwrap().unwrap().namespace_id;
 			let db = tx.get_db_by_name("test", "test", None).await.unwrap().unwrap().database_id;
@@ -301,6 +329,7 @@ mod tikv_concurrency {
 			b.await.unwrap();
 
 			// With no doc-ID consumer left, the shared space must be reclaimed.
+			drain_reclaim_queue(&ds).await;
 			let tx = ds.transaction(TransactionType::Read).await.unwrap();
 			let ns = tx.get_ns_by_name("test", None).await.unwrap().unwrap().namespace_id;
 			let db = tx.get_db_by_name("test", "test", None).await.unwrap().unwrap().database_id;
