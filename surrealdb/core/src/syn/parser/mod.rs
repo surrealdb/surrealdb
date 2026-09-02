@@ -430,8 +430,11 @@ impl<'a> Parser<'a> {
 	}
 
 	/// Parse a single statement.
-	async fn parse_statement(&mut self, stk: &mut Stk) -> ParseResult<sql::TopLevelExpr> {
-		self.parse_top_level_expr(stk).await
+	pub async fn parse_statement(&mut self, stk: &mut Stk) -> ParseResult<sql::Ast> {
+		let statement = self.parse_top_level_expr(stk).await?;
+		Ok(sql::Ast {
+			expressions: vec![statement],
+		})
 	}
 
 	/// Parse a single expression.
@@ -603,7 +606,7 @@ impl StatementStream {
 			return Ok(None);
 		}
 
-		let res = self.stack.enter(|stk| parser.parse_statement(stk)).finish();
+		let res = self.stack.enter(|stk| parser.parse_top_level_expr(stk)).finish();
 		if parser.peek().is_eof() {
 			if buffer.len() > u32::MAX as usize {
 				let error = syntax_error!("Cannot parse query, statement exceeded maximum size of 4GB", @parser.last_span());
@@ -671,7 +674,7 @@ impl StatementStream {
 			return Ok(None);
 		}
 
-		match self.stack.enter(|stk| parser.parse_statement(stk)).finish() {
+		match self.stack.enter(|stk| parser.parse_top_level_expr(stk)).finish() {
 			Ok(x) => {
 				if !parser.peek().is_eof() && !parser.eat(t!(";")) {
 					let peek = parser.peek();
