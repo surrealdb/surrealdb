@@ -349,12 +349,21 @@ impl ToSql for Expr {
 				let left_bp = BindingPower::for_expr(left);
 				let right_bp = BindingPower::for_expr(right);
 
+				// A left-associative operator's default nesting already puts a
+				// same-power child on the left (`a - b + c` parses as
+				// `(a - b) + c`), so equal power there needs no parentheses.
+				// `Power` is right-associative, so the opposite holds: a
+				// same-power left child only exists because it was explicitly
+				// parenthesised (`(a ** b) ** c`), and dropping the parens
+				// would reparse it right-associatively instead.
 				if left.needs_parentheses()
 					|| left_bp < op_bp
 					|| left_bp == op_bp
 						&& matches!(
 							left_bp,
-							BindingPower::Range | BindingPower::Relation | BindingPower::Equality
+							BindingPower::Range
+								| BindingPower::Relation | BindingPower::Equality
+								| BindingPower::Power
 						) {
 					write_sql!(f, fmt, "({left})");
 				} else {
@@ -375,12 +384,23 @@ impl ToSql for Expr {
 					f.push(' ');
 				}
 
+				// Mirror image of the left operand: a same-power right child
+				// under a left-associative operator only exists because it
+				// was explicitly parenthesised (`a - (b + c)`, `a / (b * c)`),
+				// since default left-associative nesting never produces one.
+				// Dropping the parentheses would reparse it left-associatively
+				// instead, changing the value for any non-associative pairing
+				// within the group (`-` vs `+`, `/` vs `*`). `Power` is
+				// right-associative, so its default nesting already matches
+				// and needs no parentheses here.
 				if right.needs_parentheses()
 					|| right_bp < op_bp
 					|| right_bp == op_bp
 						&& matches!(
 							right_bp,
-							BindingPower::Range | BindingPower::Relation | BindingPower::Equality
+							BindingPower::Range
+								| BindingPower::Relation | BindingPower::Equality
+								| BindingPower::AddSub | BindingPower::MulDiv
 						) {
 					write_sql!(f, fmt, "({right})");
 				} else {
