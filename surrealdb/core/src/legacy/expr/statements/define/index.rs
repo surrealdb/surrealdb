@@ -22,7 +22,7 @@ use crate::expr::{Base, Idiom, Part};
 use crate::iam::{Action, ResourceKind};
 use crate::key::schema::TableKey;
 use crate::kvs::index::{
-	CleanRetiredBuild, CleanUncommittedBuild, IndexBuilder, retire_durable_index,
+	AbortLocalBuild, CleanUncommittedBuild, IndexBuilder, retire_durable_index,
 };
 use crate::kvs::tx::DocIdsReclaimClaim;
 use crate::kvs::{DatastoreError, Transaction};
@@ -212,14 +212,12 @@ pub(crate) async fn define_index_statement_compute(
 		// process-local builder abort is deferred until commit.
 		ctx.get_index_stores().index_removed(tb.namespace_id, tb.database_id, &tb, ix).await?;
 		if let Some(index_builder) = ctx.get_index_builder() {
-			txn.on_commit(CleanRetiredBuild::boxed_with_deferred_data(
+			txn.on_commit(AbortLocalBuild::boxed(
 				index_builder.clone(),
-				txn.sequences(),
 				tb.namespace_id,
 				tb.database_id,
 				tb_name.clone(),
 				ix.index_id,
-				false,
 			))
 			.await;
 		}

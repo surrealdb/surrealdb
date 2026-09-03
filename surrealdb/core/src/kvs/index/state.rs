@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 // Answering from durable build state needs only the keyspace that binds it, so
 // those readers live with it; the protocol that writes the state stays here.
 pub(super) use surrealdb_datastore::index_state::{
-	catalog_still_references_index, durable_index_error_reason, report_status_from_phase,
+	CatalogIndexState, catalog_index_state, durable_index_error_reason, report_status_from_phase,
 };
 pub(crate) use surrealdb_datastore::index_state::{filter_online_indexes, index_building_info};
 
@@ -20,6 +20,13 @@ use crate::val::TableName;
 /// definition. Once the catalog no longer references this `(name, IndexId)`,
 /// missing `!bs` means retired state; while it still does, missing `!bs` is the
 /// legacy/pre-durable ready state.
+///
+/// Deleting `!bs` here is also the fence that stops the build. Every builder
+/// transaction that writes index data brings `!bs` into its own conflict
+/// domain first — a build batch by compare-and-swap, post-`Online` compaction
+/// by locked read — so once this commits such a transaction can neither find
+/// the state it needs nor commit against a deleted one. Aborting the
+/// process-local task afterwards only saves it a failed batch.
 pub(crate) async fn retire_durable_index(
 	tx: &Transaction,
 	ns: NamespaceId,
@@ -35,9 +42,9 @@ pub(crate) async fn retire_durable_index(
 
 /// Delete build state and every generation-scoped queue for one index.
 ///
-/// EXPUNGE must clear all MVCC versions. Cascading removals pass that policy
-/// through both their schema transaction and their post-builder cleanup, since
-/// the builder can write again after the parent prefix was first cleared.
+/// EXPUNGE must clear all MVCC versions, so a cascading removal passes its
+/// policy down to the keys it retires here rather than leaving history a later
+/// versioned read could still resolve.
 pub(super) async fn delete_durable_build_artifacts(
 	tx: &Transaction,
 	ikb: &IndexKeyBase,

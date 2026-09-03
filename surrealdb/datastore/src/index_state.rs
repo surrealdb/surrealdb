@@ -93,11 +93,56 @@ pub async fn catalog_still_references_index(
 	index_name: &Strand,
 	index_id: IndexId,
 ) -> Result<bool> {
+	Ok(matches!(
+		catalog_index_state(tx, ns, db, table_name, index_name, index_id).await?,
+		CatalogIndexState::Present
+	))
+}
+
+/// What the catalog says about an index that a writer still holds a definition
+/// for.
+///
+/// A holder that finds its index gone and one that finds it replaced owe the
+/// write different things, so the two are named apart. Collapsing them loses
+/// the distinction that decides whether a mutation may be skipped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CatalogIndexState {
+	/// The catalog names this exact index and it is not staged for removal.
+	Present,
+	/// The name is gone, or is staged for removal. Nothing maintains the index
+	/// and nothing will replay a mutation queued against it.
+	Retired,
+	/// The name now belongs to a different index id. The replacement is not
+	/// something a holder of the old id can maintain: its definition is not in
+	/// that writer's snapshot, so the mutation would reach neither index.
+	Replaced,
+}
+
+/// Resolve [`CatalogIndexState`] for one index.
+///
+/// Read this through a transaction that can actually observe the change being
+/// ruled on. A user transaction cannot: its snapshot predates a concurrent
+/// schema change, and [`crate::Transaction::get_tb_index`] answers from the
+/// transaction cache before it consults storage.
+pub async fn catalog_index_state(
+	tx: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	table_name: &TableName,
+	index_name: &Strand,
+	index_id: IndexId,
+) -> Result<CatalogIndexState> {
 	let Some(current) = tx.get_tb_index(ns, db, &table_name.clone(), index_name, None).await?
 	else {
-		return Ok(false);
+		return Ok(CatalogIndexState::Retired);
 	};
-	Ok(!current.prepare_remove && current.index_id == index_id)
+	if current.index_id != index_id {
+		return Ok(CatalogIndexState::Replaced);
+	}
+	if current.prepare_remove {
+		return Ok(CatalogIndexState::Retired);
+	}
+	Ok(CatalogIndexState::Present)
 }
 
 /// Remove indexes that have a durable build state but are not online.

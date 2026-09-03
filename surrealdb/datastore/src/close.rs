@@ -23,12 +23,8 @@ use web_time::Instant;
 /// happened and cannot be taken back, so a failure here is logged rather than
 /// surfaced. Discarded when the transaction is cancelled or its commit fails,
 /// because the change the action answers to never became durable.
-///
-/// `drain_started_at` is shared by every action in the queue. Actions with a
-/// bounded wait measure it from that common origin so a transaction that
-/// registered several actions cannot multiply the close-time allowance.
 pub trait CommitAction: Send + Sync + 'static {
-	fn run(self: Box<Self>, drain_started_at: Instant) -> Pin<Box<dyn Future<Output = ()> + Send>>;
+	fn run(self: Box<Self>) -> Pin<Box<dyn Future<Output = ()> + Send>>;
 }
 
 /// Work owed when a transaction does *not* commit.

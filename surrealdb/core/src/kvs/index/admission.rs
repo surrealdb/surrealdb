@@ -5,7 +5,7 @@ use surrealdb_strand::TableName;
 use web_time::Instant;
 
 use super::builder::{IndexKey, IndexMutation};
-use super::state::{catalog_still_references_index, is_condition_not_met};
+use super::state::{CatalogIndexState, catalog_index_state, is_condition_not_met};
 use super::{
 	Appending, BUILD_CLOSING_SLEEP, BUILD_RESERVATION_TTL_SECS, ConsumeResult, DurableAdmission,
 	DurableAdmissionDecision, DurableAdmissionFence, IndexBuildPhase, IndexBuildReservation,
@@ -30,6 +30,17 @@ struct AdmittedMutation {
 	ticket: super::BuildTicket,
 	mutation_seq: super::BuildTicketMutationSeq,
 	initial_complete: bool,
+}
+
+/// Whether a reservation cached earlier in the same user transaction may
+/// still be used for another mutation.
+#[derive(Debug)]
+pub(super) enum CachedAdmission {
+	/// The build still owns the cached generation; queue under its ticket.
+	Valid,
+	/// The index is no longer in the catalog, so nothing maintains or replays
+	/// it and the mutation skips it.
+	Retired,
 }
 
 impl AdmittedMutation {
@@ -98,11 +109,29 @@ impl IndexBuilder {
 		// `!bg(old_gen, *)` entries that no builder would replay.
 		if let Some(lookup) = ctx.tx().lookup_cached_index_build_reservation(&cache_key).await? {
 			let admitted = AdmittedMutation::from_lookup(lookup);
-			self.recheck_cached_admission(ctx, &ikb, ix, admitted.generation).await?;
-			return self.write_admitted_mutation(ctx, &ikb, mutation, admitted).await;
+			return match self
+				.recheck_cached_admission(
+					ctx,
+					&ikb,
+					ix,
+					db.namespace_id,
+					db.database_id,
+					admitted.generation,
+				)
+				.await?
+			{
+				CachedAdmission::Valid => {
+					self.write_admitted_mutation(ctx, &ikb, mutation, admitted).await
+				}
+				// The index is gone from the catalog, so there is nothing for
+				// this mutation to maintain and nothing that will ever replay a
+				// queued one. The write proceeds without it.
+				CachedAdmission::Retired => Ok(ConsumeResult::Retired),
+			};
 		}
 
-		match self.reserve_durable_admission(ctx, &ikb).await? {
+		match self.reserve_durable_admission(ctx, &ikb, ix, db.namespace_id, db.database_id).await?
+		{
 			DurableAdmissionDecision::Admit(admission) => {
 				// Admission has already committed `!br`. Publish the prepared
 				// release and ticket into the per-user-txn cache before fence
@@ -143,23 +172,7 @@ impl IndexBuilder {
 			DurableAdmissionDecision::IndexNormally => {
 				Ok(ConsumeResult::Ignored(mutation.old_values, mutation.new_values))
 			}
-			DurableAdmissionDecision::MissingState => {
-				let tx = ctx.tx();
-				if catalog_still_references_index(
-					&tx,
-					db.namespace_id,
-					db.database_id,
-					&ix.table_name,
-					&ix.name,
-					ix.index_id,
-				)
-				.await?
-				{
-					Ok(ConsumeResult::Ignored(mutation.old_values, mutation.new_values))
-				} else {
-					Ok(ConsumeResult::Retired)
-				}
-			}
+			DurableAdmissionDecision::Retired => Ok(ConsumeResult::Retired),
 		}
 	}
 
@@ -257,6 +270,28 @@ impl IndexBuilder {
 		}
 	}
 
+	/// Whether this write is already maintaining the index that replaced `ix`.
+	///
+	/// A replacement is only a problem for a write that cannot see it. The user
+	/// transaction is authoritative about exactly that one question — not about
+	/// what the catalog durably holds, which its snapshot and its cache both
+	/// predate. A write whose own view already carries the new definition is
+	/// maintaining it under that definition, so the stale one it also holds is
+	/// simply skipped; a write still holding the replaced id cannot reach the
+	/// new index at all, and skipping would drop the record from it.
+	async fn write_maintains_replacement(
+		&self,
+		ctx: &FrozenContext,
+		ix: &IndexDefinition,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<bool> {
+		Ok(!matches!(
+			catalog_index_state(&ctx.tx(), ns, db, &ix.table_name, &ix.name, ix.index_id).await?,
+			CatalogIndexState::Present
+		))
+	}
+
 	/// Revalidate a cached admission against the live durable build state.
 	///
 	/// The first mutation in a user transaction pays the full fence (a fresh
@@ -267,28 +302,64 @@ impl IndexBuilder {
 	/// protocol relies on. Without this recheck, the next mutation would
 	/// write `!bg(old_gen, *)` that no builder will replay.
 	///
-	/// On `Online`, generation mismatch, or missing state, the user
-	/// transaction is aborted with `IndexingBuildingCancelled`; an errored
-	/// build keeps queueing (see `reserve_durable_admission`). The cached
-	/// ticket's `!br` is removed by the close-path release; an idempotent
-	/// `delc(key, val)` handles the case where it was already wiped.
+	/// On `Online` or a generation mismatch the user transaction is aborted
+	/// with `IndexingBuildingCancelled`; an errored build keeps queueing (see
+	/// `reserve_durable_admission`). Missing state splits on the catalog, the
+	/// same way first-use admission does: a retirement deletes `!bs` in the
+	/// transaction that removes the definition, and a write must not fail
+	/// because an index it no longer has to maintain went away underneath it.
+	/// State that is missing while the definition still stands is a build that
+	/// vanished under a live index, which is not recoverable here.
+	///
+	/// The cached ticket's `!br` is removed by the close-path release; an
+	/// idempotent `delc(key, val)` handles the case where it was already wiped.
 	pub(super) async fn recheck_cached_admission(
 		&self,
 		ctx: &FrozenContext,
 		ikb: &IndexKeyBase,
 		ix: &IndexDefinition,
+		ns: NamespaceId,
+		db: DatabaseId,
 		cached_generation: super::BuildGeneration,
-	) -> Result<()> {
+	) -> Result<CachedAdmission> {
 		let tx =
 			self.tf.transaction(TransactionType::Read, ctx.try_get_sequences()?.clone()).await?;
 		let state = catch!(tx, tx.get_key(&ikb.new_bs_key(), None).await);
-		tx.cancel().await?;
 		let Some(state) = state else {
-			return Err(DatastoreError::IndexingBuildingCancelled {
-				reason: format!("Index {} build state no longer exists", ix.name),
-			}
-			.into());
+			// Both halves of this decision come from the transaction that
+			// observed `!bs` missing, never from the user transaction. The
+			// retirement being ruled on commits *during* the write, so it is
+			// invisible to that transaction: its snapshot predates the removal,
+			// and its catalog cache is already holding the definition the write
+			// read on its first record.
+			let catalog = catch!(
+				tx,
+				catalog_index_state(&tx, ns, db, &ix.table_name, &ix.name, ix.index_id).await
+			);
+			tx.cancel().await?;
+			return match catalog {
+				CatalogIndexState::Retired => Ok(CachedAdmission::Retired),
+				CatalogIndexState::Replaced => {
+					if self.write_maintains_replacement(ctx, ix, ns, db).await? {
+						Ok(CachedAdmission::Retired)
+					} else {
+						Err(DatastoreError::IndexingBuildingCancelled {
+							reason: format!(
+								"Index {} was replaced mid-transaction; queued mutations \
+								 would be lost",
+								ix.name
+							),
+						}
+						.into())
+					}
+				}
+				CatalogIndexState::Present => Err(DatastoreError::IndexingBuildingCancelled {
+					reason: format!("Index {} build state no longer exists", ix.name),
+				}
+				.into()),
+			};
 		};
+		tx.cancel().await?;
 		if state.generation != cached_generation {
 			return Err(DatastoreError::IndexingBuildingCancelled {
 				reason: format!("Index {} build generation changed mid-transaction", ix.name),
@@ -302,7 +373,9 @@ impl IndexBuilder {
 			// recovering `REBUILD INDEX`, so consistency does not depend on
 			// replay. Aborting here would fail the user's write for a
 			// background build failure.
-			IndexBuildPhase::Building | IndexBuildPhase::Closing | IndexBuildPhase::Error => Ok(()),
+			IndexBuildPhase::Building | IndexBuildPhase::Closing | IndexBuildPhase::Error => {
+				Ok(CachedAdmission::Valid)
+			}
 			IndexBuildPhase::Online => Err(DatastoreError::IndexingBuildingCancelled {
 				reason: format!(
 					"Index {} became online mid-transaction; queued mutations would be lost",
@@ -325,6 +398,9 @@ impl IndexBuilder {
 		&self,
 		ctx: &FrozenContext,
 		ikb: &IndexKeyBase,
+		ix: &IndexDefinition,
+		ns: NamespaceId,
+		db: DatabaseId,
 	) -> Result<DurableAdmissionDecision> {
 		loop {
 			if let Some(reason) = ctx.done(true)? {
@@ -336,8 +412,44 @@ impl IndexBuilder {
 				.await?;
 			let state_key = ikb.new_bs_key();
 			let Some(state) = tx.get_key(&state_key, None).await? else {
+				// Missing `!bs` is either an index that never had durable build
+				// state — legacy, or simply ready — or one the catalog has
+				// retired, and only this transaction can tell them apart. The
+				// retirement may commit *during* the write, which makes it
+				// invisible to the user transaction: that snapshot predates the
+				// removal, and its catalog cache is already holding the
+				// definition the write read before it. Reading the catalog here
+				// keeps both halves of the decision on the view that observed
+				// the state missing.
+				let catalog =
+					match catalog_index_state(&tx, ns, db, &ix.table_name, &ix.name, ix.index_id)
+						.await
+					{
+						Ok(catalog) => catalog,
+						Err(err) => {
+							let _ = tx.cancel().await;
+							return Err(err);
+						}
+					};
 				tx.cancel().await?;
-				return Ok(DurableAdmissionDecision::MissingState);
+				return match catalog {
+					CatalogIndexState::Present => Ok(DurableAdmissionDecision::IndexNormally),
+					CatalogIndexState::Retired => Ok(DurableAdmissionDecision::Retired),
+					CatalogIndexState::Replaced => {
+						if self.write_maintains_replacement(ctx, ix, ns, db).await? {
+							Ok(DurableAdmissionDecision::Retired)
+						} else {
+							Err(DatastoreError::IndexingBuildingCancelled {
+								reason: format!(
+									"Index {} was replaced mid-transaction; queued mutations \
+									 would be lost",
+									ix.name
+								),
+							}
+							.into())
+						}
+					}
+				};
 			};
 			match state.phase {
 				IndexBuildPhase::Online => {
@@ -451,13 +563,31 @@ impl IndexBuilder {
 		building
 	}
 
+	/// Abort a builder task running in this process.
+	///
+	/// Retirement fences the build durably: the schema transaction deletes `!bs`,
+	/// and every builder transaction that writes index data reads and
+	/// compare-and-swaps that key in the same transaction, so a builder cannot
+	/// commit anything once the retirement is durable. Raising the abort flag
+	/// only stops the task sooner than the failed batch would.
+	pub(crate) async fn remove_index(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		ix: IndexId,
+	) {
+		self.take_local_builder(ns, db, tb, ix).await;
+	}
+
 	/// Abort a builder task running in this process and wait for it to stop.
 	///
-	/// The task observes the abort flag at its next checkpoint and can keep
-	/// writing until then, including the durable state and index data of the
-	/// batch it is inside. A caller that deletes those keys must order its delete
-	/// after the task's last write: a builder write that lands later re-creates
-	/// state for a build that no longer exists, and nothing removes it.
+	/// For the rollback path, where no committed schema change fences the build:
+	/// `!bs` is still live and still owned by the task, so a caller deleting it
+	/// and the build's index data has to order those deletes after the task's
+	/// last write. The task observes the abort flag at its next checkpoint and
+	/// can keep writing until then, including the state and data of the batch it
+	/// is inside.
 	///
 	/// `deadline` is the budget for the whole transaction-close drain, from
 	/// [`build_abort_deadline`](super::build_abort_deadline), so aborting several
@@ -466,9 +596,6 @@ impl IndexBuilder {
 	/// builder write performs as the only fence. The task's map entry is already
 	/// gone by then, so a caller that retries its delete does so without a
 	/// second wait — the warning below is the only record of that degradation.
-	///
-	/// Returns whether a process-local builder was found. A committed retirement
-	/// that finds none has no local writer to order a second durable delete after.
 	pub(crate) async fn remove_index_and_wait(
 		&self,
 		ns: NamespaceId,
@@ -476,9 +603,9 @@ impl IndexBuilder {
 		tb: &TableName,
 		ix: IndexId,
 		deadline: Instant,
-	) -> bool {
+	) {
 		let Some(building) = self.take_local_builder(ns, db, tb, ix).await else {
-			return false;
+			return;
 		};
 		// A drain that has already spent its budget still polls the wait once,
 		// which is enough for a builder that has meanwhile finished.
@@ -492,6 +619,5 @@ impl IndexBuilder {
 				 its durable build state is being deleted while it may still write"
 			);
 		}
-		true
 	}
 }

@@ -149,10 +149,7 @@ impl SendKill {
 }
 
 impl CommitAction for SendKill {
-	fn run(
-		self: Box<Self>,
-		_drain_started_at: web_time::Instant,
-	) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+	fn run(self: Box<Self>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
 		Box::pin(async move {
 			self.broker.send(self.notification).await;
 		})

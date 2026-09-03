@@ -877,17 +877,13 @@ async fn assert_removal_reclaims_in_bounded_pages(removal: Removal) {
 		} => ReclaimKind::Database,
 		Removal::Index | Removal::IndexExpunged => ReclaimKind::Index,
 	};
-	// A statement queues the index prefix twice: once with the catalog removal,
-	// and once after the local builder is stopped, so a reclaim that raced a
-	// final builder write is followed by an idempotent pass. The hand-written
-	// entry has no builder to stop and so stays single.
-	let expected_own = match removal {
-		Removal::Index => 2,
-		_ => 1,
-	};
+	// One entry per removal, queued in the transaction that removes the
+	// catalog definition. Retirement fences the build durably by deleting
+	// `!bs` in that same transaction, so no later builder write can land under
+	// the prefix and nothing needs a second, follow-up pass.
 	assert_eq!(
 		count_kind(&kinds, own_kind),
-		expected_own,
+		1,
 		"unexpected number of {own_kind:?} entries queued for the removal"
 	);
 	// `REMOVE INDEX` drops the table's last doc-ID consumer, so it enqueues the
@@ -1646,14 +1642,13 @@ async fn remove_index_defers_the_shared_doc_id_reclaim() {
 		seeded,
 		"REMOVE INDEX must defer the shared doc-ID space, not delete it inline"
 	);
-	// The index's own data prefix — queued with the catalog removal and again
-	// once the local builder has stopped — plus one entry per shared doc-ID
-	// prefix.
+	// The index's own data prefix, queued with the catalog removal, plus one
+	// entry per shared doc-ID prefix.
 	let kinds = reclaim_queue_kinds(&ds).await;
 	assert_eq!(
 		count_kind(&kinds, ReclaimKind::Index),
-		2,
-		"the removal must enqueue the index prefix, and again after the builder stops"
+		1,
+		"the removal must enqueue the index prefix"
 	);
 	for kind in [ReclaimKind::DocLookup, ReclaimKind::DocKey, ReclaimKind::DocPending] {
 		assert_eq!(
@@ -1893,8 +1888,8 @@ async fn defining_a_doc_id_index_waits_when_a_sibling_entry_has_retired() {
 	let kinds = reclaim_queue_kinds(&ds).await;
 	assert_eq!(
 		count_kind(&kinds, ReclaimKind::Index),
-		2,
-		"the removal must enqueue the index's own prefix, and again after the builder stops"
+		1,
+		"the removal must enqueue the index's own prefix"
 	);
 	assert_eq!(
 		count_doc_kinds(&kinds),

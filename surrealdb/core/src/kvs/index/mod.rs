@@ -38,7 +38,7 @@ mod tests;
 
 use std::time::Duration;
 
-pub(crate) use builder::{CleanRetiredBuild, CleanUncommittedBuild, IndexBuilder, IndexMutation};
+pub(crate) use builder::{AbortLocalBuild, CleanUncommittedBuild, IndexBuilder, IndexMutation};
 pub(crate) use state::{filter_online_indexes, index_building_info, retire_durable_index};
 // Only the frozen-fixture corpus names this directly; the builder reaches a
 // primary appending through its ticket.
@@ -124,8 +124,9 @@ enum DurableAdmissionDecision {
 	Admit(DurableAdmission),
 	/// Durable state exists and is already online, so index normally.
 	IndexNormally,
-	/// Durable state is absent; the caller must disambiguate legacy from retired catalog state.
-	MissingState,
+	/// Durable state is absent and the catalog no longer names this index, so
+	/// there is nothing to maintain and nothing that will replay a queued write.
+	Retired,
 }
 
 enum DurableAdmissionFence {

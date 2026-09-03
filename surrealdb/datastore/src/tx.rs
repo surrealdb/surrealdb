@@ -1961,9 +1961,8 @@ impl Transaction {
 	/// Enqueue background reclaim of an index-data prefix by its stable id.
 	///
 	/// The id is sufficient after catalog retirement because index ids are never
-	/// reused. Re-enqueuing is safe and ensures a reclaim that raced with a final
-	/// builder write is followed by another idempotent pass. `expunge` preserves
-	/// the all-version deletion policy of a cascading parent removal.
+	/// reused, so the prefix this names can gain no new writer. `expunge`
+	/// preserves the all-version deletion policy of a cascading parent removal.
 	pub async fn enqueue_index_reclaim(
 		&self,
 		ns: NamespaceId,
@@ -3244,9 +3243,8 @@ impl Transaction {
 			let mut pending = self.commit_actions.lock().await;
 			std::mem::take(&mut *pending)
 		};
-		let drain_started_at = Instant::now();
 		for action in actions {
-			action.run(drain_started_at).await;
+			action.run().await;
 		}
 	}
 

@@ -1,15 +1,12 @@
 use std::borrow::Cow;
-use std::future::Future;
-use std::pin::Pin;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use anyhow::Result;
 use chrono::Utc;
-use surrealdb_datastore::close::CommitAction;
 use surrealdb_kvs::TransactionType;
-#[cfg(feature = "kv-surrealkv")]
+#[cfg(any(feature = "kv-surrealkv", feature = "kv-rocksdb"))]
 use temp_dir::TempDir;
 use tokio::time::{sleep, timeout};
 use uuid::Uuid;
@@ -33,6 +30,7 @@ use crate::key::schema::{
 };
 use crate::key::{KVKey, KVKeyDecode, KVSubspace, KVValue, Key};
 use crate::kvs::index::CleanUncommittedBuild;
+use crate::kvs::index::admission::CachedAdmission;
 use crate::kvs::testing::{
 	NonRetryableErrorSite, RetryableConflictGuard, RetryableConflictSite,
 	inject_non_retryable_error, inject_retryable_conflict, inject_retryable_conflicts,
@@ -45,19 +43,6 @@ use crate::kvs::{Datastore, DatastoreError, is_retryable_transaction_conflict, s
 use crate::val::{RecordId, RecordIdKey, TableName, Value};
 
 const REPEATED_RETRY_CONFLICTS: usize = 1000;
-
-struct RecordCommitDrainStart(Arc<StdMutex<Vec<Instant>>>);
-
-impl CommitAction for RecordCommitDrainStart {
-	fn run(self: Box<Self>, drain_started_at: Instant) -> Pin<Box<dyn Future<Output = ()> + Send>> {
-		Box::pin(async move {
-			self.0
-				.lock()
-				.expect("commit drain recorder should not be poisoned")
-				.push(drain_started_at);
-		})
-	}
-}
 
 async fn new_index_test_ds() -> Result<(Arc<Datastore>, Session)> {
 	// These tests adopt, resume and observe index builds directly, and assert on
@@ -431,11 +416,97 @@ async fn assert_cancelled_remove_keeps_local_builder(sql: &str) -> Result<()> {
 	Ok(())
 }
 
+/// Resume a parked build, optionally deleting its durable state first, and
+/// report what it committed: the number of index-data keys, and whether `!bs`
+/// came back.
+///
+/// No retirement runs here and no abort flag is raised, so the only thing that
+/// can stop the build is the state deletion itself. That is the point: the
+/// process-local abort would otherwise stop the task first and the fence would
+/// never be exercised.
 #[cfg(feature = "kv-mem")]
-async fn assert_committed_remove_aborts_local_builder(
-	sql: &str,
-	expected_expunge: Expunge,
-) -> Result<()> {
+async fn resume_paused_build_and_count(delete_build_state: bool) -> Result<(usize, bool)> {
+	let PausedRemoveBuild {
+		ds,
+		session: _session,
+		guard,
+		ns,
+		db,
+		table,
+		ix,
+		builder,
+	} = start_paused_remove_build().await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+	assert!(
+		durable_build_state_exists(&ds, &ikb).await?,
+		"the parked build must have durable state for either arm to mean anything"
+	);
+	if delete_build_state {
+		let txn = ds.transaction(TransactionType::Write).await?;
+		catch!(txn, txn.del_key(&ikb.new_bs_key()).await);
+		txn.commit().await?;
+		assert!(
+			!builder.is_finished(),
+			"the builder must still be live when the state is deleted, or the window \
+			 under test was not reproduced"
+		);
+	}
+	// Wait on the task rather than on the builder map entry: no retirement ran
+	// here, so nothing retires that entry — what settles is the task itself.
+	drop(guard);
+	timeout(Duration::from_secs(30), builder.wait_finished())
+		.await
+		.map_err(|_| anyhow::anyhow!("the resumed build task did not finish"))?;
+	Ok((
+		index_prefix_key_count(&ds, ns, db, &table, ix.index_id).await?,
+		durable_build_state_exists(&ds, &ikb).await?,
+	))
+}
+
+/// Deleting `!bs` is what stops a build, and this is the test that says so.
+///
+/// Every retirement path relies on it: the schema transaction deletes `!bs`
+/// beside the catalog entry, and from that point a builder cannot commit index
+/// data because each of its write transactions reads and compare-and-swaps that
+/// key before the batch's other writes. Aborting the process-local task is a
+/// courtesy on top, and it is deliberately not used here — it would stop the
+/// task before the fence was ever reached, which is why the removal tests
+/// cannot stand in for this one.
+///
+/// Three call sites enforce it for a build in progress —
+/// `maintain_build_ownership`, `update_build_state_in_tx` and
+/// `update_owned_build_state_inner` — and a build's path through a batch
+/// crosses all three, so relaxing any one of them alone does not open the
+/// window. Anything that makes a missing `!bs` survivable at *every* one of
+/// them fails the fenced arm below. Compaction runs after `Online` and is
+/// fenced separately, by the locked read in
+/// `compaction_write_still_owns_index`; see
+/// `compaction_write_fence_conflicts_with_a_retirement_that_commits_after_it`.
+///
+/// Two arms, because that is what makes it mean anything: the control resumes
+/// the same harness untouched and asserts it *does* commit, so a sabotaged
+/// fence fails the test instead of quietly satisfying it.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn deleting_build_state_stops_a_running_builder_committing() -> Result<()> {
+	let (control_keys, _) = resume_paused_build_and_count(false).await?;
+	assert!(
+		control_keys > 0,
+		"the control arm must commit index data, or the fenced arm proves nothing"
+	);
+
+	let (fenced_keys, state_back) = resume_paused_build_and_count(true).await?;
+	assert_eq!(
+		fenced_keys, 0,
+		"a build whose durable state was deleted must not commit index data \
+		 (control committed {control_keys})"
+	);
+	assert!(!state_back, "a stopped build must not recreate the durable state it was stopped by");
+	Ok(())
+}
+
+#[cfg(feature = "kv-mem")]
+async fn assert_committed_remove_aborts_local_builder(sql: &str) -> Result<()> {
 	let PausedRemoveBuild {
 		ds,
 		session,
@@ -451,18 +522,17 @@ async fn assert_committed_remove_aborts_local_builder(
 	assert_eq!(durable_queue_all_generations_count(&ds, &ikb).await?, 3);
 
 	execute_all_retrying_conflicts(&ds, &session, sql).await?;
-	assert!(
-		builder.is_finished(),
-		"committed cascading remove returned while the retired builder could still write"
-	);
 	wait_for_no_local_builder(&ds, ns, db, &table, ix.index_id).await?;
-	drop(guard);
+	// The removal's own transaction deleted the build state and every queue,
+	// so nothing is left before the paused builder is even released.
 	assert_no_index_build_artifacts(&ds, ns, db, &table, ix.index_id).await?;
-	let reclaim_modes = index_reclaim_modes(&ds, ns, db, &table, ix.index_id).await?;
-	assert!(
-		reclaim_modes.contains(&expected_expunge),
-		"post-builder reclaim modes {reclaim_modes:?} did not contain {expected_expunge:?}"
-	);
+	// Releasing it is the fence test. The builder resumes into a batch that
+	// reads `!bs` first, finds it gone, and stops without committing. Waiting
+	// for the task is what makes the second assertion mean "it ran and wrote
+	// nothing" rather than "it had not run yet".
+	drop(guard);
+	wait_for_finished_builder(&builder).await?;
+	assert_no_index_build_artifacts(&ds, ns, db, &table, ix.index_id).await?;
 	Ok(())
 }
 
@@ -529,6 +599,25 @@ async fn local_builder_for_key(
 	};
 	let key = Arc::new(IndexKey::new(ns, db, table, ix));
 	Ok(index_builder.indexes.read().await.get(&key).cloned())
+}
+
+/// Wait for a builder task to exit.
+///
+/// A committed retirement returns without waiting for the task: it is fenced by
+/// the `!bs` delete rather than by a close-time drain, so its map entry is gone
+/// while the task itself is still winding down. A test that asserts on what the
+/// task did has to wait for it here.
+async fn wait_for_finished_builder(building: &IndexBuilding) -> Result<()> {
+	timeout(Duration::from_secs(10), async {
+		loop {
+			if building.is_finished() {
+				return Ok(());
+			}
+			sleep(Duration::from_millis(10)).await;
+		}
+	})
+	.await
+	.map_err(|_| anyhow::anyhow!("timed out waiting for the index builder task to exit"))?
 }
 
 async fn wait_for_no_local_builder(
@@ -1000,20 +1089,21 @@ async fn remove_index_commit_aborts_local_builder_after_commit() -> Result<()> {
 		.expect("local builder should be running");
 
 	execute_all_retrying_conflicts(&ds, &session, "REMOVE INDEX test ON user").await?;
-	assert!(
-		builder.is_finished(),
-		"committed REMOVE INDEX returned while the retired builder could still write"
-	);
 	wait_for_no_local_builder(&ds, ns, db, &table, ix.index_id).await?;
+	assert_no_index_build_artifacts(&ds, ns, db, &table, ix.index_id).await?;
+	// The released builder must not be able to bring any of it back: its next
+	// batch reads the `!bs` the removal deleted and stops there.
 	drop(guard);
+	wait_for_finished_builder(&builder).await?;
 	assert_no_index_build_artifacts(&ds, ns, db, &table, ix.index_id).await?;
 	// Scoped to this index's own entries: dropping the table's last doc-ID
 	// consumer also queues the three shared doc-ID prefixes, which this
-	// assertion is not about.
+	// assertion is not about. One entry, committed with the catalog removal,
+	// owns the data prefix; the retirement queues nothing after it.
 	assert_eq!(
 		index_reclaim_modes(&ds, ns, db, &table, ix.index_id).await?.len(),
-		2,
-		"retirement must enqueue a post-builder reclaim in addition to the schema tombstone"
+		1,
+		"retirement must queue exactly the schema tombstone for the index data"
 	);
 	Ok(())
 }
@@ -1039,46 +1129,104 @@ async fn remove_namespace_cancel_keeps_local_builder_running() -> Result<()> {
 #[cfg(feature = "kv-mem")]
 #[tokio::test(flavor = "multi_thread")]
 async fn remove_table_commit_aborts_local_builder_after_commit() -> Result<()> {
-	assert_committed_remove_aborts_local_builder("REMOVE TABLE user", Expunge::Keep).await
+	assert_committed_remove_aborts_local_builder("REMOVE TABLE user").await
 }
 
 #[cfg(feature = "kv-mem")]
 #[tokio::test(flavor = "multi_thread")]
 async fn remove_database_commit_aborts_local_builder_after_commit() -> Result<()> {
-	assert_committed_remove_aborts_local_builder("REMOVE DATABASE test", Expunge::Keep).await
+	assert_committed_remove_aborts_local_builder("REMOVE DATABASE test").await
 }
 
 #[cfg(feature = "kv-mem")]
 #[tokio::test(flavor = "multi_thread")]
 async fn remove_namespace_commit_aborts_local_builder_after_commit() -> Result<()> {
-	assert_committed_remove_aborts_local_builder("REMOVE NAMESPACE test", Expunge::Keep).await
+	assert_committed_remove_aborts_local_builder("REMOVE NAMESPACE test").await
 }
 
 #[cfg(feature = "kv-mem")]
 #[tokio::test(flavor = "multi_thread")]
-async fn remove_table_expunge_hard_cleans_retired_local_builder() -> Result<()> {
-	assert_committed_remove_aborts_local_builder("REMOVE TABLE AND EXPUNGE user", Expunge::Expunge)
-		.await
+async fn remove_table_expunge_aborts_local_builder_after_commit() -> Result<()> {
+	assert_committed_remove_aborts_local_builder("REMOVE TABLE AND EXPUNGE user").await
 }
 
 #[cfg(feature = "kv-mem")]
 #[tokio::test(flavor = "multi_thread")]
-async fn remove_database_expunge_hard_cleans_retired_local_builder() -> Result<()> {
-	assert_committed_remove_aborts_local_builder(
-		"REMOVE DATABASE AND EXPUNGE test",
-		Expunge::Expunge,
+async fn remove_database_expunge_aborts_local_builder_after_commit() -> Result<()> {
+	assert_committed_remove_aborts_local_builder("REMOVE DATABASE AND EXPUNGE test").await
+}
+
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn remove_namespace_expunge_aborts_local_builder_after_commit() -> Result<()> {
+	assert_committed_remove_aborts_local_builder("REMOVE NAMESPACE AND EXPUNGE test").await
+}
+
+/// `EXPUNGE` must reach the build-state keys a cascading removal retires, not
+/// only the data prefixes it queues. Each statement retires them through a
+/// different level of the cascade, so each is exercised: an `EXPUNGE` that a
+/// level drops leaves a historical `!bs` a versioned read can still resolve.
+#[cfg(feature = "kv-surrealkv")]
+async fn assert_removal_expunges_historical_build_state(sql: &str) -> Result<()> {
+	let dir = TempDir::new()?;
+	let path = format!("surrealkv://{}?versioned=true&retention=1h", dir.path().to_string_lossy());
+	let ds = Datastore::builder().without_maintenance_tasks().build_with_path(&path).await?;
+	let session = Session::owner().with_ns("test").with_db("test");
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.ensure_ns_db(None, "test", "test").await?;
+	tx.commit().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:one SET email = 'one@example.com' RETURN NONE;
+			DEFINE INDEX test ON user FIELDS email;
+			",
 	)
-	.await
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "user", "test").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+
+	// A build that has reached `Online` still holds a committed `!bs`, which
+	// is the version the removal has to expunge.
+	let tx = ds.transaction(TransactionType::Read).await?;
+	assert!(tx.get_key(&ikb.new_bs_key(), None).await?.is_some());
+	let before_removal: u64 = std::time::SystemTime::now()
+		.duration_since(std::time::UNIX_EPOCH)?
+		.as_nanos()
+		.try_into()?;
+	assert!(tx.get_key(&ikb.new_bs_key(), Some(before_removal)).await?.is_some());
+	tx.cancel().await?;
+
+	execute_all(&ds, &session, sql).await?;
+
+	let tx = ds.transaction(TransactionType::Read).await?;
+	let historical = tx.get_key(&ikb.new_bs_key(), Some(before_removal)).await?;
+	tx.cancel().await?;
+	assert!(
+		historical.is_none(),
+		"`{sql}` must expunge the historical durable build state it retires"
+	);
+	Ok(())
 }
 
-#[cfg(feature = "kv-mem")]
-#[tokio::test(flavor = "multi_thread")]
-async fn remove_namespace_expunge_hard_cleans_retired_local_builder() -> Result<()> {
-	assert_committed_remove_aborts_local_builder(
-		"REMOVE NAMESPACE AND EXPUNGE test",
-		Expunge::Expunge,
-	)
-	.await
+#[cfg(feature = "kv-surrealkv")]
+#[tokio::test]
+async fn remove_table_expunge_removes_historical_durable_build_state() -> Result<()> {
+	assert_removal_expunges_historical_build_state("REMOVE TABLE AND EXPUNGE user").await
+}
+
+#[cfg(feature = "kv-surrealkv")]
+#[tokio::test]
+async fn remove_database_expunge_removes_historical_durable_build_state() -> Result<()> {
+	assert_removal_expunges_historical_build_state("REMOVE DATABASE AND EXPUNGE test").await
+}
+
+#[cfg(feature = "kv-surrealkv")]
+#[tokio::test]
+async fn remove_namespace_expunge_removes_historical_durable_build_state() -> Result<()> {
+	assert_removal_expunges_historical_build_state("REMOVE NAMESPACE AND EXPUNGE test").await
 }
 
 #[cfg(feature = "kv-surrealkv")]
@@ -1255,13 +1403,13 @@ async fn define_index_overwrite_aborts_retired_local_builder_after_commit() -> R
 		"DEFINE INDEX OVERWRITE test ON user FIELDS account CONCURRENTLY",
 	)
 	.await?;
-	assert!(
-		old_builder.is_finished(),
-		"committed DEFINE INDEX OVERWRITE returned while the retired builder could still write"
-	);
 	wait_for_no_local_builder(&ds, ns, db, &table, old_ix.index_id).await?;
 	assert_no_index_build_artifacts(&ds, ns, db, &table, old_ix.index_id).await?;
 	drop(guard);
+	// The replacement's own build shares the injected conflict site, so the
+	// retired builder is released alongside it. It must still write nothing.
+	wait_for_finished_builder(&old_builder).await?;
+	assert_no_index_build_artifacts(&ds, ns, db, &table, old_ix.index_id).await?;
 	wait_for_index_ready(&ds, &session, "user", "test").await?;
 
 	let (_, _, _, new_ix) = get_table_index(&ds, "user", "test").await?;
@@ -1425,21 +1573,6 @@ async fn remove_index_and_wait_stops_waiting_once_the_drain_budget_is_spent() ->
 		building.aborted.load(Ordering::Relaxed),
 		"the builder must still be signalled to abort when the wait is skipped"
 	);
-	Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn commit_actions_share_one_drain_start() -> Result<()> {
-	let (ds, _) = new_index_test_ds().await?;
-	let starts = Arc::new(StdMutex::new(Vec::new()));
-	let tx = ds.transaction(TransactionType::Write).await?;
-	tx.on_commit(Box::new(RecordCommitDrainStart(Arc::clone(&starts)))).await;
-	tx.on_commit(Box::new(RecordCommitDrainStart(Arc::clone(&starts)))).await;
-	tx.commit().await?;
-
-	let starts = starts.lock().expect("commit drain recorder should not be poisoned");
-	assert_eq!(starts.len(), 2);
-	assert_eq!(starts[0], starts[1], "commit actions must share one close-time wait budget");
 	Ok(())
 }
 
@@ -1713,6 +1846,72 @@ async fn consume_skips_retired_cached_index_definition() -> Result<()> {
 	Ok(())
 }
 
+/// The same blind spot as the cached-admission recheck, on the path a bulk
+/// write takes for its *first* record.
+///
+/// First-use admission also has to tell a legacy index with no `!bs` apart from
+/// one the catalog has retired, and asking the write's own transaction cannot
+/// do it: that transaction read the definition before the removal and answers
+/// from its cache. Getting it wrong here is the worse direction — the write
+/// would index normally into a retired index's prefix, leaving entries under an
+/// id the catalog no longer names.
+#[tokio::test(flavor = "multi_thread")]
+async fn consume_skips_an_index_retired_after_the_write_began() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:one SET email = 'one@example.com' RETURN NONE;
+			DEFINE INDEX test ON user FIELDS email;
+			",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "user", "test").await?;
+
+	// The write's transaction, opened and its catalog cache warmed before the
+	// removal commits.
+	let tx = Arc::new(ds.transaction(TransactionType::Write).await?);
+	let db_def = tx.get_db_by_name("test", "test", None).await?.expect("database should exist");
+	assert!(
+		tx.get_tb_index(ns, db, &table, ix.name.as_str(), None).await?.is_some(),
+		"the write's transaction must have the definition cached for this to mean anything"
+	);
+
+	execute_all(&ds, &session, "REMOVE INDEX test ON user").await?;
+
+	let mut ctx = ds.setup_ctx()?;
+	ctx.set_transaction(Arc::clone(&tx));
+	let ctx = ctx.freeze();
+	let rid = RecordId {
+		table,
+		key: RecordIdKey::from("two".to_owned()),
+	};
+	let result = ctx
+		.get_index_builder()
+		.expect("index builder should be present")
+		.consume(
+			db_def.as_ref(),
+			&ctx,
+			&ix,
+			IndexMutation {
+				old_values: None,
+				new_values: Some(vec![Value::from("two@example.com")]),
+				rid: &rid,
+				count_cond_match: None,
+			},
+		)
+		.await?;
+	tx.cancel().await?;
+
+	assert!(
+		matches!(result, ConsumeResult::Retired),
+		"a write must not index into an index retired after it began"
+	);
+	Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn compaction_write_fence_rejects_committed_index_removal() -> Result<()> {
 	let (ds, session) = new_index_test_ds().await?;
@@ -1747,18 +1946,97 @@ async fn compaction_write_fence_rejects_committed_index_removal() -> Result<()> 
 	build.build_generation.store(generation, Ordering::Release);
 	tx.cancel().await?;
 
-	let tx = ds.transaction(TransactionType::Read).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
 	assert!(build.compaction_write_still_owns_index(&tx, generation).await?);
 	tx.cancel().await?;
 
 	execute_all(&ds, &session, "REMOVE INDEX test ON user").await?;
 
-	let tx = ds.transaction(TransactionType::Read).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
 	assert!(
 		!build.compaction_write_still_owns_index(&tx, generation).await?,
 		"retired indexes must not accept post-online builder compaction writes"
 	);
 	tx.cancel().await?;
+	Ok(())
+}
+
+/// Passing the compaction fence has to bind at commit, not just at the check.
+///
+/// Compaction runs after `Online`, so it has no ownership heartbeat to
+/// compare-and-swap the way a build batch does — its guard is a read. A
+/// retirement that commits between that read and the apply's commit has to
+/// take the apply with it; otherwise the compaction writes index data under a
+/// prefix the catalog no longer names, and only the queued reclaim would sweep
+/// it, if it had not already finished.
+#[cfg(feature = "kv-rocksdb")]
+#[tokio::test(flavor = "multi_thread")]
+async fn compaction_write_fence_conflicts_with_a_retirement_that_commits_after_it() -> Result<()> {
+	let dir = TempDir::new()?;
+	let ds = Datastore::builder()
+		.without_maintenance_tasks()
+		.build_with_path(&format!("rocksdb://{}", dir.path().to_string_lossy()))
+		.await?;
+	let session = Session::owner().with_ns("test").with_db("test");
+	let tx = ds.transaction(TransactionType::Write).await?;
+	tx.ensure_ns_db(None, "test", "test").await?;
+	tx.commit().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+			DEFINE TABLE user SCHEMALESS;
+			CREATE user:one SET email = 'one@example.com' RETURN NONE;
+			DEFINE INDEX test ON user FIELDS email;
+			",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "user", "test").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+	let state = durable_build_state(&ds, &ikb).await?;
+
+	let tx = ds.transaction(TransactionType::Write).await?;
+	let mut ctx = ds.setup_ctx()?;
+	ctx.set_transaction(Arc::new(ds.transaction(TransactionType::Read).await?));
+	let ctx = ctx.freeze();
+	let table_def = ds
+		.transaction(TransactionType::Read)
+		.await?
+		.get_tb(ns, db, &table, None)
+		.await?
+		.expect("table should exist");
+	let build = Building::new(
+		&ctx,
+		ds.transaction_factory().clone(),
+		ds.setup_options(&session),
+		table_def.table_id,
+		Arc::clone(&ix),
+		Arc::new(IndexKey::new(ns, db, &table, ix.index_id)),
+	)?;
+
+	// The compaction transaction passes its guard while the index is live.
+	assert!(build.compaction_write_still_owns_index(&tx, state.generation).await?);
+
+	// The retirement commits in between, as it may on any node.
+	execute_all(&ds, &session, "REMOVE INDEX test ON user").await?;
+
+	// The apply this guard was standing in for. It writes index data, not the
+	// guarded key: a write to `!bs` itself would conflict on the write alone
+	// and prove nothing about whether the guard's read is tracked.
+	let mut entry = IdxRoot {
+		ns,
+		db,
+		tb: Cow::Borrowed(&table),
+		ix: ix.index_id,
+	}
+	.range()?
+	.start()
+	.to_vec();
+	entry.push(0x01);
+	tx.set(Key::from(entry), vec![0x01]).await?;
+	let err = tx.commit().await.expect_err("the retirement must take the compaction with it");
+	assert!(is_retryable_transaction_conflict(&err), "expected a retryable conflict, got: {err}");
+	let _ = tx.cancel().await;
 	Ok(())
 }
 
@@ -1796,7 +2074,7 @@ async fn compaction_write_fence_rejects_previous_rebuild_generation() -> Result<
 	build.build_generation.store(generation, Ordering::Release);
 	tx.cancel().await?;
 
-	let tx = ds.transaction(TransactionType::Read).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
 	assert!(build.compaction_write_still_owns_index(&tx, generation).await?);
 	tx.cancel().await?;
 
@@ -1810,7 +2088,7 @@ async fn compaction_write_fence_rejects_previous_rebuild_generation() -> Result<
 	assert_eq!(rebuilt_state.generation, generation.saturating_add(1));
 	assert_eq!(rebuilt_state.phase, IndexBuildPhase::Online);
 
-	let tx = ds.transaction(TransactionType::Read).await?;
+	let tx = ds.transaction(TransactionType::Write).await?;
 	assert!(
 		!build.compaction_write_still_owns_index(&tx, generation).await?,
 		"previous build generations must not accept post-online compaction writes after rebuild"
@@ -3326,26 +3604,28 @@ async fn recheck_cached_admission_rejects_mid_transaction_state_changes() -> Res
 
 	// Matching state — recheck succeeds.
 	seed_build_state(&ds, &ikb, IndexBuildPhase::Building, 1).await?;
-	run_recheck_cached_admission(&ds, &ikb, ix.as_ref(), 1)
+	let outcome = run_recheck_cached_admission(&ds, ns, db, &ikb, ix.as_ref(), 1)
 		.await?
 		.expect("recheck on matching Building state should succeed");
+	assert!(matches!(outcome, CachedAdmission::Valid));
 
 	// Closing is still queueable.
 	seed_build_state(&ds, &ikb, IndexBuildPhase::Closing, 1).await?;
-	run_recheck_cached_admission(&ds, &ikb, ix.as_ref(), 1)
+	let outcome = run_recheck_cached_admission(&ds, ns, db, &ikb, ix.as_ref(), 1)
 		.await?
 		.expect("recheck on matching Closing state should succeed");
+	assert!(matches!(outcome, CachedAdmission::Valid));
 
 	// Generation rotation — recheck aborts.
 	seed_build_state(&ds, &ikb, IndexBuildPhase::Building, 2).await?;
-	let err = run_recheck_cached_admission(&ds, &ikb, ix.as_ref(), 1)
+	let err = run_recheck_cached_admission(&ds, ns, db, &ikb, ix.as_ref(), 1)
 		.await?
 		.expect_err("generation mismatch must abort cached admission");
 	assert!(err.to_string().contains("generation"), "unexpected error: {err}");
 
 	// Online phase — cached writers cannot trust the cached ticket.
 	seed_build_state(&ds, &ikb, IndexBuildPhase::Online, 1).await?;
-	let err = run_recheck_cached_admission(&ds, &ikb, ix.as_ref(), 1)
+	let err = run_recheck_cached_admission(&ds, ns, db, &ikb, ix.as_ref(), 1)
 		.await?
 		.expect_err("online phase must abort cached admission");
 	assert!(err.to_string().contains("online"), "unexpected error: {err}");
@@ -3354,19 +3634,60 @@ async fn recheck_cached_admission_rejects_mid_transaction_state_changes() -> Res
 	// writes. The queued mutations die with the errored generation's wipe
 	// and the records are rescanned by the recovering `REBUILD INDEX`.
 	seed_build_state(&ds, &ikb, IndexBuildPhase::Error, 1).await?;
-	run_recheck_cached_admission(&ds, &ikb, ix.as_ref(), 1)
+	let outcome = run_recheck_cached_admission(&ds, ns, db, &ikb, ix.as_ref(), 1)
 		.await?
 		.expect("recheck on matching Error state should keep queueing");
+	assert!(matches!(outcome, CachedAdmission::Valid));
 
-	// Missing state — recheck aborts.
+	// Missing state under a definition the catalog still carries — recheck
+	// aborts: a build vanished under a live index, which this cannot repair.
 	let tx = ds.transaction(TransactionType::Write).await?;
 	tx.del_key(&ikb.new_bs_key()).await?;
 	tx.commit().await?;
-	let err = run_recheck_cached_admission(&ds, &ikb, ix.as_ref(), 1)
+	let err = run_recheck_cached_admission(&ds, ns, db, &ikb, ix.as_ref(), 1)
 		.await?
 		.expect_err("missing build state must abort cached admission");
 	assert!(err.to_string().contains("no longer exists"), "unexpected error: {err}");
 
+	Ok(())
+}
+
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn recheck_cached_admission_skips_a_retired_index_instead_of_failing_the_write() -> Result<()>
+{
+	// A bulk write admits once and reuses the reservation for every later
+	// record. If `REMOVE INDEX` commits in between, the recheck finds no `!bs`
+	// — the same observation as a build that vanished under a live definition,
+	// but the opposite conclusion: there is no index left to maintain, so the
+	// write skips it rather than failing. First-use admission has always split
+	// on the catalog this way; the cached path must agree.
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+				DEFINE TABLE user SCHEMALESS;
+				DEFINE INDEX test ON user FIELDS email;
+				",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "user", "test").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+	seed_build_state(&ds, &ikb, IndexBuildPhase::Building, 1).await?;
+
+	// The definition a mid-transaction write still holds is read before the
+	// removal, which is exactly the stale handle the recheck has to judge.
+	let cached_ix = Arc::clone(&ix);
+	execute_all(&ds, &session, "REMOVE INDEX test ON user").await?;
+
+	let outcome = run_recheck_cached_admission(&ds, ns, db, &ikb, cached_ix.as_ref(), 1)
+		.await?
+		.expect("a retired index must not fail the write that was mid-transaction");
+	assert!(
+		matches!(outcome, CachedAdmission::Retired),
+		"the recheck must report the index retired so the mutation skips it"
+	);
 	Ok(())
 }
 
@@ -3402,13 +3723,120 @@ async fn seed_build_state(
 	Ok(())
 }
 
+/// The retirement the recheck has to notice is one that commits *during* the
+/// write, so the write's own transaction cannot be what reports it.
+///
+/// A bulk write reads the index definition once and reuses it, which leaves
+/// that definition in its transaction cache. A catalog read issued through
+/// that transaction afterwards is answered from the cache and still sees the
+/// index, whatever the backend's snapshot rules — so the recheck has to ask the
+/// same fresh transaction that observed `!bs` missing.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn recheck_cached_admission_sees_a_retirement_the_user_transaction_cannot() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+				DEFINE TABLE user SCHEMALESS;
+				DEFINE INDEX test ON user FIELDS email;
+				",
+	)
+	.await?;
+	let (ns, db, table, ix) = get_table_index(&ds, "user", "test").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), ix.index_id);
+	seed_build_state(&ds, &ikb, IndexBuildPhase::Building, 1).await?;
+
+	// The write's transaction, opened and its catalog cache warmed before the
+	// removal — exactly what record 1 of a bulk write leaves behind.
+	let tx = Arc::new(ds.transaction(TransactionType::Read).await?);
+	assert!(
+		tx.get_tb_index(ns, db, &table, ix.name.as_str(), None).await?.is_some(),
+		"the write's transaction must have the definition cached for this to mean anything"
+	);
+
+	execute_all(&ds, &session, "REMOVE INDEX test ON user").await?;
+
+	let mut ctx = ds.setup_ctx()?;
+	ctx.set_transaction(Arc::clone(&tx));
+	let frozen = ctx.freeze();
+	let builder = frozen
+		.get_index_builder()
+		.expect("index builder should be available on the configured Datastore")
+		.clone();
+	let outcome = builder.recheck_cached_admission(&frozen, &ikb, ix.as_ref(), ns, db, 1).await;
+	tx.cancel().await?;
+
+	assert!(
+		matches!(outcome?, CachedAdmission::Retired),
+		"a retirement that commits mid-write must still be reported as retired"
+	);
+	Ok(())
+}
+
+/// A replacement is only a retirement for a write that can already see it.
+///
+/// `DEFINE INDEX OVERWRITE` retires the old id and defines a new one under the
+/// same name. A write whose own view still carries the replaced definition
+/// cannot reach the new index — it is not in that write's snapshot — so
+/// skipping the mutation would let the replacement publish without this
+/// record. Failing is what sends the write back to retry against the
+/// definition that now exists.
+#[cfg(feature = "kv-mem")]
+#[tokio::test(flavor = "multi_thread")]
+async fn recheck_cached_admission_rejects_a_replacement_the_write_cannot_see() -> Result<()> {
+	let (ds, session) = new_index_test_ds().await?;
+	execute_all(
+		&ds,
+		&session,
+		"
+				DEFINE TABLE user SCHEMALESS;
+				CREATE user:one SET email = 'one@example.com', account = 'apple' RETURN NONE;
+				DEFINE INDEX test ON user FIELDS email;
+				",
+	)
+	.await?;
+	let (ns, db, table, old_ix) = get_table_index(&ds, "user", "test").await?;
+	let ikb = IndexKeyBase::new(ns, db, table.clone(), old_ix.index_id);
+	seed_build_state(&ds, &ikb, IndexBuildPhase::Building, 1).await?;
+
+	// The write's transaction, opened and its catalog cache warmed before the
+	// replacement commits, so its view still carries the old definition.
+	let tx = Arc::new(ds.transaction(TransactionType::Read).await?);
+	assert!(
+		tx.get_tb_index(ns, db, &table, old_ix.name.as_str(), None).await?.is_some(),
+		"the write's transaction must have the old definition cached"
+	);
+
+	execute_all(&ds, &session, "DEFINE INDEX OVERWRITE test ON user FIELDS account").await?;
+	let (_, _, _, new_ix) = get_table_index(&ds, "user", "test").await?;
+	assert_ne!(new_ix.index_id, old_ix.index_id, "the overwrite must allocate a fresh id");
+
+	let mut ctx = ds.setup_ctx()?;
+	ctx.set_transaction(Arc::clone(&tx));
+	let frozen = ctx.freeze();
+	let builder = frozen
+		.get_index_builder()
+		.expect("index builder should be available on the configured Datastore")
+		.clone();
+	let outcome = builder.recheck_cached_admission(&frozen, &ikb, old_ix.as_ref(), ns, db, 1).await;
+	tx.cancel().await?;
+
+	let err = outcome.expect_err("a replacement the write cannot see must abort it");
+	assert!(err.to_string().contains("replaced"), "unexpected error: {err}");
+	Ok(())
+}
+
 #[cfg(feature = "kv-mem")]
 async fn run_recheck_cached_admission(
 	ds: &Datastore,
+	ns: NamespaceId,
+	db: DatabaseId,
 	ikb: &IndexKeyBase,
 	ix: &IndexDefinition,
 	cached_generation: u64,
-) -> Result<Result<()>> {
+) -> Result<Result<CachedAdmission>> {
 	let tx = ds.transaction(TransactionType::Read).await?;
 	let mut ctx = ds.setup_ctx()?;
 	let tx = Arc::new(tx);
@@ -3418,7 +3846,8 @@ async fn run_recheck_cached_admission(
 		.get_index_builder()
 		.expect("index builder should be available on the configured Datastore")
 		.clone();
-	let result = builder.recheck_cached_admission(&frozen, ikb, ix, cached_generation).await;
+	let result =
+		builder.recheck_cached_admission(&frozen, ikb, ix, ns, db, cached_generation).await;
 	tx.cancel().await?;
 	Ok(result)
 }
