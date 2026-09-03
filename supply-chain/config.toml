@@ -273,6 +273,10 @@ criteria = "safe-to-deploy"
 version = "1.2.62"
 criteria = "safe-to-deploy"
 
+[[exemptions.chacha20]]
+version = "0.10.2"
+criteria = "safe-to-deploy"
+
 [[exemptions.ciborium]]
 version = "0.2.2"
 criteria = "safe-to-deploy"
