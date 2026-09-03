@@ -233,6 +233,107 @@ mod http_integration {
 		Ok(())
 	}
 
+	// GHSA-2v9j: the `Surreal-NS`/`Surreal-DB` headers select the session context
+	// independently of the authenticated level. A Database-level principal must
+	// not be able to point them at a foreign namespace/database and query it
+	// without a `USE` (the Basic-auth "header pivot").
+	#[test(tokio::test)]
+	async fn session_ns_db_headers_confined_to_auth_level() -> Result<(), Box<dyn std::error::Error>>
+	{
+		let (addr, _server) = common::start_server_with_guests().await.unwrap();
+		let url = &format!("http://{addr}/sql");
+		let client = reqwest::Client::builder().build()?;
+
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		ensure_namespace_and_database(&client, &addr, &ns, &db).await?;
+
+		// Define a Database-level user in ns/db (as root, in that context).
+		{
+			let res = client
+				.post(url)
+				.header("surreal-ns", &ns)
+				.header("surreal-db", &db)
+				.header(header::ACCEPT, "application/json")
+				.basic_auth(USER, Some(PASS))
+				.body("DEFINE USER dbuser ON DATABASE PASSWORD 'dbpass' ROLES OWNER")
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200, "define user failed: {}", res.text().await?);
+		}
+
+		// Cross-database pivot: dbuser is Database(ns, db), but the selected
+		// context (`Surreal-NS`/`Surreal-DB`) points at a sibling db.
+		{
+			let res = client
+				.post(url)
+				.header(&AUTH_NS, &ns)
+				.header(&AUTH_DB, &db)
+				.header("surreal-ns", &ns)
+				.header("surreal-db", "other_db")
+				.header(header::ACCEPT, "application/json")
+				.basic_auth("dbuser", Some("dbpass"))
+				.body("INFO FOR DB")
+				.send()
+				.await?;
+			assert_eq!(res.status(), 401, "cross-database header pivot must be rejected");
+		}
+
+		// Cross-namespace pivot.
+		{
+			let res = client
+				.post(url)
+				.header(&AUTH_NS, &ns)
+				.header(&AUTH_DB, &db)
+				.header("surreal-ns", "other_ns")
+				.header("surreal-db", &db)
+				.header(header::ACCEPT, "application/json")
+				.basic_auth("dbuser", Some("dbpass"))
+				.body("INFO FOR DB")
+				.send()
+				.await?;
+			assert_eq!(res.status(), 401, "cross-namespace header pivot must be rejected");
+		}
+
+		// Regression: a context matching the authenticated level is allowed.
+		{
+			let res = client
+				.post(url)
+				.header(&AUTH_NS, &ns)
+				.header(&AUTH_DB, &db)
+				.header("surreal-ns", &ns)
+				.header("surreal-db", &db)
+				.header(header::ACCEPT, "application/json")
+				.basic_auth("dbuser", Some("dbpass"))
+				.body("INFO FOR DB")
+				.send()
+				.await?;
+			let status = res.status();
+			assert_eq!(
+				status,
+				200,
+				"legitimate same-tenant access must be allowed: {}",
+				res.text().await?
+			);
+		}
+
+		// Regression: an unscoped ROOT session may select any context.
+		{
+			let res = client
+				.post(url)
+				.header("surreal-ns", &ns)
+				.header("surreal-db", &db)
+				.header(header::ACCEPT, "application/json")
+				.basic_auth(USER, Some(PASS))
+				.body("INFO FOR DB")
+				.send()
+				.await?;
+			assert_ne!(res.status(), 401, "root must be able to select any namespace/database");
+		}
+
+		Ok(())
+	}
+
 	#[test(tokio::test)]
 	async fn bearer_auth() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_guests().await.unwrap();
