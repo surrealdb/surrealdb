@@ -16,6 +16,10 @@ impl Document {
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, IgnoreError> {
+		// SECURITY (GHSA-2v9j): confine record users to their own tenant. The
+		// read path enforces this at the scan operators, but writes perform no
+		// scan, so the gate must be applied explicitly here.
+		self.check_record_user_access(opt)?;
 		// Skip the create attempt when we already have the document
 		if !self.is_iteration_initial() {
 			return self.insert_update(stk, ctx, opt, stm).await;

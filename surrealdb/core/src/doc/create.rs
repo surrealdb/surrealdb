@@ -14,6 +14,10 @@ impl Document {
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, IgnoreError> {
+		// SECURITY (GHSA-2v9j): confine record users to their own tenant. The
+		// read path enforces this at the scan operators, but writes perform no
+		// scan, so the gate must be applied explicitly here.
+		self.check_record_user_access(opt)?;
 		// Ensure we can write to the table at all
 		self.check_permissions_quick_create(ctx, opt)?;
 		// Reject writes to read-only view tables (after the permission gate)

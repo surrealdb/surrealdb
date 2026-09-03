@@ -14,6 +14,10 @@ impl Document {
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, IgnoreError> {
+		// SECURITY (GHSA-2v9j): confine record users to their own tenant. The
+		// read path enforces this at the scan operators, but writes perform no
+		// scan, so the gate must be applied explicitly here.
+		self.check_record_user_access(opt)?;
 		// Check if the record actually exists
 		self.check_record_exists()?;
 		// SECURITY: evaluate the table-level update permission BEFORE any

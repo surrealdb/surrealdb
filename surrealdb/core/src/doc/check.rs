@@ -8,12 +8,49 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::{CursorDoc, Document, Error as DocError, Extras};
 use crate::exe::FlowResultExt;
+use crate::exec::Error as ExecError;
 use crate::expr::paths::{ID, IN, OUT};
 use crate::expr::{Cond, Error};
 use crate::iam::Action;
 use crate::val::{RecordId, Value};
 
 impl Document {
+	/// Tenant-boundary gate for the write pipeline (GHSA-2v9j).
+	///
+	/// Record-user namespace/database isolation is enforced on the read path
+	/// by [`crate::exec::permission::validate_record_user_access`], but that
+	/// gate is only reachable through the scan operators, so it never runs for
+	/// `CREATE` / `UPDATE` / `DELETE`, which perform no scan. Without this
+	/// mirror, a record user that pivots into a foreign namespace/database
+	/// (e.g. `USE NS other DB other` over `/sql`) can blind-write — create,
+	/// tamper, or delete — any table there whose write `PERMISSIONS` are
+	/// satisfiable, even though the same session's reads are denied.
+	///
+	/// The authenticated record level is the source of truth; the session's
+	/// *selected* ns/db can be steered by `USE` and must not be trusted. Only
+	/// record users are confined here — system principals (root / namespace /
+	/// database) are governed by role and table `PERMISSIONS`.
+	#[inline]
+	pub(super) fn check_record_user_access(&self, opt: &Options) -> Result<()> {
+		if !opt.auth.is_record() {
+			return Ok(());
+		}
+		let (ns, db) = opt.ns_db()?;
+		ensure!(
+			opt.auth.level().ns() == Some(ns),
+			ExecError::NsNotAllowed {
+				ns: ns.to_owned(),
+			}
+		);
+		ensure!(
+			opt.auth.level().db() == Some(db),
+			ExecError::DbNotAllowed {
+				db: db.to_owned(),
+			}
+		);
+		Ok(())
+	}
+
 	/// Checks that a specifically selected record
 	/// actually exists in the underlying datastore.
 	/// If the user specifies a record directly

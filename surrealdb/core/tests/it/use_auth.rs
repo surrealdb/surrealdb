@@ -9,7 +9,7 @@
 use anyhow::Result;
 use surrealdb_core::dbs::Session;
 use surrealdb_iam::{Level, Role};
-use surrealdb_types::ToSql;
+use surrealdb_types::{RecordId, ToSql, Value};
 
 use crate::helpers::new_ds;
 
@@ -117,6 +117,98 @@ async fn process_use_materializes_for_root_editor() -> Result<()> {
 		info.contains("fresh_ns"),
 		"Root Editor must still be able to auto-create namespaces via USE; INFO FOR ROOT did not mention `fresh_ns`: {info}",
 	);
+	Ok(())
+}
+
+/// Provision a second tenant `ns_b`/`db_b` with a `PERMISSIONS FULL` table
+/// (fully writable) holding one seed row, as owner.
+async fn provision_writable_tenant_b(ds: &surrealdb_core::kvs::Datastore) -> Result<()> {
+	ds.execute("DEFINE NS ns_b", &Session::owner(), None).await?;
+	ds.execute(
+		"DEFINE DB db_b; DEFINE TABLE fullsecret SCHEMALESS PERMISSIONS FULL; \
+		 CREATE fullsecret:1 SET data = 'TENANT_B_SECRET';",
+		&Session::owner().with_ns("ns_b").with_db("db_b"),
+		None,
+	)
+	.await?;
+	Ok(())
+}
+
+/// Build a record user of `ns_a`/`db_a` whose session has been pivoted to
+/// `ns_b`/`db_b` (the state reached after `USE NS ns_b DB db_b`). The Auth
+/// level stays bound to the record's home tenant.
+fn pivoted_record_user() -> Session {
+	Session::for_record(
+		"ns_a",
+		"db_a",
+		"acc",
+		Value::RecordId(RecordId::new("appuser", "alice".to_string())),
+	)
+	.with_ns("ns_b")
+	.with_db("db_b")
+}
+
+/// Regression (record-user write isolation): the write pipeline must confine a
+/// record user to its own tenant. Even against a `PERMISSIONS FULL` table,
+/// every mutation (CREATE / UPDATE / DELETE / INSERT / UPSERT) issued by a
+/// record user whose session has been pivoted into a foreign tenant must be
+/// denied — mirroring the read path's `validate_record_user_access` gate.
+#[tokio::test]
+async fn write_pipeline_denies_cross_tenant_record_user() -> Result<()> {
+	let (_, ds) = new_ds("ns_a", "db_a", true).await?;
+	provision_writable_tenant_b(&ds).await?;
+
+	let sess = pivoted_record_user();
+
+	for stmt in [
+		"CREATE fullsecret:evil SET data = 'INJECT'",
+		"UPDATE fullsecret:1 SET data = 'TAMPER'",
+		"INSERT INTO fullsecret { id: fullsecret:ins, data: 'INS' }",
+		"UPSERT fullsecret:1 SET data = 'UPSERTED'",
+		"DELETE fullsecret:1",
+	] {
+		let mut resp = ds.execute(stmt, &sess, None).await?;
+		let res = resp.remove(0).output();
+		assert!(res.is_err(), "cross-tenant record write must be denied: `{stmt}` => {res:?}");
+	}
+
+	// Ground truth: tenant B is untouched and the seed row survives.
+	let mut resp = ds
+		.execute(
+			"SELECT * FROM fullsecret",
+			&Session::owner().with_ns("ns_b").with_db("db_b"),
+			None,
+		)
+		.await?;
+	let view = resp.remove(0).output()?.to_sql();
+	for marker in ["INJECT", "TAMPER", "INS", "UPSERTED"] {
+		assert!(!view.contains(marker), "tenant B was mutated cross-tenant ({marker}): {view}");
+	}
+	assert!(view.contains("TENANT_B_SECRET"), "seed row must survive the blocked DELETE: {view}");
+	Ok(())
+}
+
+/// Sanity: a record user writing within its OWN tenant, against a table whose
+/// permission it satisfies, still works — the gate targets cross-tenant writes
+/// only.
+#[tokio::test]
+async fn write_pipeline_allows_same_tenant_record_user() -> Result<()> {
+	let (_, ds) = new_ds("ns_a", "db_a", true).await?;
+	ds.execute(
+		"DEFINE TABLE t SCHEMALESS PERMISSIONS FULL",
+		&Session::owner().with_ns("ns_a").with_db("db_a"),
+		None,
+	)
+	.await?;
+
+	let sess = Session::for_record(
+		"ns_a",
+		"db_a",
+		"acc",
+		Value::RecordId(RecordId::new("appuser", "alice".to_string())),
+	);
+	let mut resp = ds.execute("CREATE t:1 SET ok = true", &sess, None).await?;
+	assert!(resp.remove(0).output().is_ok(), "same-tenant record write must be allowed");
 	Ok(())
 }
 
