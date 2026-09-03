@@ -11,6 +11,7 @@ mod disk_space_manager;
 mod garbage_collector;
 mod inline_guard;
 mod memory_manager;
+mod owned_tx;
 mod prefix_extractor;
 mod range_shard;
 mod scan_cursor;
@@ -18,9 +19,8 @@ mod scan_cursor;
 mod tests;
 
 use std::ops::Range;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::time::Duration;
 
 use background_flusher::BackgroundFlusher;
@@ -33,14 +33,11 @@ use memory_manager::MemoryManager;
 use range_shard::{COUNT_PARALLEL_MAX_SHARDS, shard_range};
 use rocksdb::{
 	BottommostLevelCompaction, ColumnFamilyDescriptor, CompactOptions, DBCompactionStyle,
-	DBCompressionType, DBRawIteratorWithThreadMode, FlushOptions, LogLevel,
-	OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions,
-	SnapshotWithThreadMode, UniversalCompactOptions, UniversalCompactionStopStyle,
-	WaitForCompactOptions, WriteOptions, properties,
+	DBCompressionType, FlushOptions, LogLevel, OptimisticTransactionDB,
+	OptimisticTransactionOptions, Options, ReadOptions, UniversalCompactOptions,
+	UniversalCompactionStopStyle, WaitForCompactOptions, WriteOptions, properties,
 };
-use scan_cursor::{
-	AliveGuard, RocksDbKeysCursor, RocksDbValsCursor, ScanIter, ScanStateKeys, ScanStateVals,
-};
+use scan_cursor::{RocksDbKeysCursor, RocksDbValsCursor, ScanIter, ScanStateKeys, ScanStateVals};
 use surrealdb_kvs::api::{
 	BoxFut, GetMultiResult, KeySpan, KeyValSpan, KeyVisitor, KeysBatch, KeysResult, ScanChunkStats,
 	ScanCursorKeys, ScanCursorVals, ScanResult, Transactable, ValVisitor, ValsBatch,
@@ -54,8 +51,9 @@ use surrealdb_kvs::{
 	Val,
 };
 use tokio::sync::{Mutex, MutexGuard};
-use tracing::{error, info, instrument, warn};
-use web_time::Instant;
+use tracing::{error, info, instrument};
+
+use crate::owned_tx::{Db, OwnedTx};
 
 const TARGET: &str = "surrealdb::core::kvs::rocksdb";
 
@@ -77,7 +75,7 @@ fn kvs_error(e: rocksdb::Error) -> Error {
 
 pub struct Datastore {
 	/// The underlying RocksDB optimistic transaction database
-	db: Pin<Arc<OptimisticTransactionDB>>,
+	db: Db,
 	/// Whether user-defined timestamps (versioning) are enabled
 	versioned: bool,
 	/// Memory manager for managing memory usage
@@ -114,15 +112,6 @@ pub struct Datastore {
 }
 
 pub struct Transaction {
-	/// Number of open caller-owned cursors. Each `open_*_cursor`
-	/// increments after passing the `done` check; each cursor handle's
-	/// `AliveGuard` decrements on `Drop`. `commit`/`cancel` drain-wait
-	/// on this counter before consuming `inner` so that no cursor's
-	/// iterator can outlive the snapshot/tx it references.
-	///
-	/// See `scan_cursor.rs` for the safety contract and SeqCst
-	/// ordering rationale.
-	pub(crate) cursors_alive: AtomicUsize,
 	/// Is the transaction complete?
 	done: AtomicBool,
 	/// Is the transaction writeable?
@@ -151,7 +140,7 @@ pub struct Transaction {
 	/// `MutexGuard<'_, Option<TransactionInner>>` is `Send` (because
 	/// `TransactionInner: Send`), and `spawn_local`'s `'pool` lifetime
 	/// admits non-`'static` borrows from `&self`.
-	inner: Mutex<Option<TransactionInner>>,
+	inner: Mutex<Option<OwnedTx>>,
 	/// Engine savepoints backing each open savepoint.
 	///
 	/// Always acquired before `inner` and held across it, so the scope counts
@@ -164,10 +153,6 @@ pub struct Transaction {
 	disk_space_manager: Option<Arc<DiskSpaceManager>>,
 	/// Commit coordinator for batching transaction commits when sync writes are enabled
 	commit_coordinator: Option<Arc<CommitCoordinator>>,
-	/// The above, supposedly 'static transaction actually points here, so we
-	/// need to ensure the memory is kept alive. This pointer must be declared
-	/// last, so that it is dropped last.
-	db: Pin<Arc<OptimisticTransactionDB>>,
 	/// Whether the custom SurrealDB prefix extractor is enabled on the
 	/// column family. Controls whether `apply_prefix_mode` sets
 	/// `prefix_same_as_start` / `total_order_seek` on scan `ReadOptions`.
@@ -189,32 +174,6 @@ impl Transaction {
 		}
 		Ok(())
 	}
-}
-
-/// The rocksdb transaction and its pre-captured snapshot, bundled together so
-/// that the snapshot is always dropped before the transaction it borrows from.
-///
-/// `snapshot` holds a `'static` reference into the boxed transaction: the
-/// RocksDB snapshot's `db` field points at the `Transaction` allocation **inside**
-/// `tx: Box<...>`, which has a stable address while `TransactionInner` is moved
-/// (only the `Box` pointer moves, not the heap allocation). `tx` must outlive
-/// `snapshot`. Two paths guarantee this:
-///
-/// * On natural drop, struct fields drop in declaration order. `snapshot` is declared before `tx`
-///   and therefore drops first — while `tx` is still alive.
-/// * On commit, the commit path destructures this struct, drops `snapshot` first, then consumes the
-///   boxed transaction with `(*inner).commit()` (where `inner` is the
-///   `Box<rocksdb::Transaction<…>>`).
-struct TransactionInner {
-	/// The snapshot for the underlying datastore transaction.
-	///
-	/// Declared before `tx` so it drops first on natural drop: the snapshot
-	/// must be released before the boxed `Transaction` is destroyed.
-	snapshot:
-		SnapshotWithThreadMode<'static, rocksdb::Transaction<'static, OptimisticTransactionDB>>,
-	/// The underlying datastore transaction (boxed so `snapshot` can safely
-	/// hold a `&Transaction` into a stable allocation when `TransactionInner` moves).
-	tx: Box<rocksdb::Transaction<'static, OptimisticTransactionDB>>,
 }
 
 /// Apply the column-family-level RocksDB options derived from `config`
@@ -486,14 +445,15 @@ impl Datastore {
 			// Open the database with the "default" column family
 			let descriptors = vec![ColumnFamilyDescriptor::new("default", cf_opts)];
 			// Open the database with the "default" column family
-			Arc::pin(
-				OptimisticTransactionDB::open_cf_descriptors(&opts, path, descriptors)
-					.map_err(kvs_error)?,
-			)
+			OptimisticTransactionDB::open_cf_descriptors(&opts, path, descriptors)
+				.map_err(kvs_error)?
 		} else {
 			// Open the database without a default column family
-			Arc::pin(OptimisticTransactionDB::open(&opts, path).map_err(kvs_error)?)
+			OptimisticTransactionDB::open(&opts, path).map_err(kvs_error)?
 		};
+
+		let db = Db::new(db);
+
 		// Create the commit coordinator if enabled
 		let commit_coordinator = if let SyncMode::Every = config.sync_mode {
 			Some(Arc::new(CommitCoordinator::new(db.clone(), &config)?))
@@ -793,7 +753,7 @@ impl Datastore {
 		// sync=<interval> or sync=never, no per-transaction fsync is needed either.
 		wo.set_sync(false);
 		// Create a new transaction
-		let tx = self.db.transaction_opt(&wo, &to);
+		let tx = self.db.begin(&wo, &to);
 		// When versioning is enabled the default column family uses a
 		// user-defined-timestamp (UDT) comparator. RocksDB then requires every
 		// `OptimisticTransaction` to have a `read_timestamp_` strictly less
@@ -825,48 +785,12 @@ impl Datastore {
 			let read_ts = HlcTimeStamp::next();
 			tx.set_read_timestamp_for_validation(read_ts.0);
 		}
-		// SAFETY: The transaction lifetime is tied to the database through the db field.
-		// The database is guaranteed to outlive the transaction because:
-		// 1. The transaction holds a Pin<Arc<OptimisticTransactionDB>> reference
-		// 2. The transaction struct ensures db is dropped after inner
-		// 3. The Pin ensures the database isn't moved or dropped while referenced
-		let tx = unsafe {
-			std::mem::transmute::<
-				rocksdb::Transaction<'_, OptimisticTransactionDB>,
-				rocksdb::Transaction<'static, OptimisticTransactionDB>,
-			>(tx)
-		};
-		// Heap-allocate before capturing the snapshot so `SnapshotWithThreadMode`'s
-		// `db: &Transaction` points at a stable address: moving `TransactionInner`
-		// only moves the `Box` pointer, not the transaction allocation.
-		let tx = Box::new(tx);
-		// Capture the transaction's internal snapshot (set by `set_snapshot(true)`
-		// above) and extend its lifetime to `'static`. Using the transaction's
-		// own snapshot ensures reads always see the sequence number used for
-		// commit-time conflict detection; using a different snapshot (e.g. from
-		// `db.snapshot()`) would allow read/conflict-detection to disagree and
-		// break optimistic concurrency correctness.
-		//
-		// SAFETY: The snapshot borrows `&*tx` into the boxed transaction. The
-		// transmute is sound because `tx` and `snapshot` live in the same
-		// `TransactionInner` (with `snapshot` declared before `tx` so it drops
-		// first), and the commit path drops `snapshot` before consuming the
-		// boxed `Transaction` (see `Transactable::commit`).
-		let snapshot = unsafe {
-			std::mem::transmute::<
-				SnapshotWithThreadMode<'_, rocksdb::Transaction<'static, OptimisticTransactionDB>>,
-				SnapshotWithThreadMode<
-					'static,
-					rocksdb::Transaction<'static, OptimisticTransactionDB>,
-				>,
-			>(tx.as_ref().snapshot())
-		};
 		// Build the default read options pointing at the captured snapshot.
 		// `set_snapshot` copies the internal snapshot pointer into the
 		// `ReadOptions`, so `ReadOptions` remains valid as long as the
 		// underlying rocksdb snapshot (owned by `inner`) is alive.
 		let mut ro = ReadOptions::default();
-		ro.set_snapshot(&snapshot);
+		ro.set_snapshot(&tx.snapshot());
 		ro.set_async_io(true);
 		ro.fill_cache(true);
 		// When versioned, default reads fetch the latest version
@@ -875,20 +799,15 @@ impl Datastore {
 		}
 		// Create a new transaction
 		Ok(Box::new(Transaction {
-			cursors_alive: AtomicUsize::new(0),
 			done: AtomicBool::new(false),
 			write: matches!(write, TransactionType::Write),
 			versioned: self.versioned,
 			read_options: ro,
-			inner: Mutex::new(Some(TransactionInner {
-				tx,
-				snapshot,
-			})),
+			inner: Mutex::new(Some(tx)),
 			savepoints: Mutex::new(SavepointStack::default()),
 			transaction_state: Arc::new(Default::default()),
 			disk_space_manager: self.disk_space_manager.clone(),
 			commit_coordinator: self.commit_coordinator.clone(),
-			db: self.db.clone(),
 			prefix_extractor_enabled: self.prefix_extractor_enabled,
 			scan_verify_checksums: self.scan_verify_checksums,
 			inline_guard: Arc::clone(&self.inline_guard),
@@ -974,13 +893,9 @@ impl Transaction {
 	/// The caller must pass the already-borrowed `TransactionInner` so the read uses
 	/// the transaction's captured snapshot (matching the conflict-detection
 	/// view that will be used at commit time).
-	fn versioned_read_options(
-		&self,
-		version: Option<u64>,
-		inner: &TransactionInner,
-	) -> ReadOptions {
+	fn versioned_read_options(&self, version: Option<u64>, inner: &OwnedTx) -> ReadOptions {
 		let mut ro = ReadOptions::default();
-		ro.set_snapshot(&inner.snapshot);
+		ro.set_snapshot(&inner.snapshot());
 		ro.set_async_io(true);
 		ro.fill_cache(true);
 		if self.versioned {
@@ -1039,10 +954,10 @@ impl Transaction {
 		&self,
 		rng: &Range<Vec<u8>>,
 		version: Option<u64>,
-		inner: &TransactionInner,
+		inner: &OwnedTx,
 	) -> ReadOptions {
 		let mut ro = ReadOptions::default();
-		ro.set_snapshot(&inner.snapshot);
+		ro.set_snapshot(&inner.snapshot());
 		ro.set_iterate_lower_bound(rng.start.clone());
 		ro.set_iterate_upper_bound(rng.end.clone());
 		ro.set_auto_readahead_size(true);
@@ -1075,10 +990,10 @@ impl Transaction {
 		&self,
 		rng: &Range<Vec<u8>>,
 		version: Option<u64>,
-		inner: &TransactionInner,
+		inner: &OwnedTx,
 	) -> ReadOptions {
 		let mut ro = ReadOptions::default();
-		ro.set_snapshot(&inner.snapshot);
+		ro.set_snapshot(&inner.snapshot());
 		ro.set_iterate_lower_bound(rng.start.clone());
 		ro.set_iterate_upper_bound(rng.end.clone());
 		ro.set_auto_readahead_size(true);
@@ -1111,7 +1026,7 @@ impl Transaction {
 	/// pool unconditionally.
 	async fn run_blocking<'a, F, R>(&'a self, op: F) -> Result<R>
 	where
-		F: FnOnce(MutexGuard<'a, Option<TransactionInner>>) -> Result<R> + Send + 'a,
+		F: FnOnce(MutexGuard<'a, Option<OwnedTx>>) -> Result<R> + Send + 'a,
 		R: Send + 'a,
 	{
 		let guard = self.inner.lock().await;
@@ -1131,11 +1046,10 @@ impl Transaction {
 		&self,
 		rng: Range<Vec<u8>>,
 		version: Option<u64>,
-		guard: MutexGuard<'_, Option<TransactionInner>>,
+		guard: MutexGuard<'_, Option<OwnedTx>>,
 	) -> Result<usize> {
 		// Get the inner transaction state
-		let inner =
-			guard.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
+		let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
 		// Get the ReadOptions with the snapshot and iterate bounds
 		let ro = self.count_read_options(&rng, version, inner);
 		// Initialize the result
@@ -1146,7 +1060,7 @@ impl Transaction {
 		// the iterator.
 		if self.write {
 			// Create the iterator on the transaction
-			let mut iter = inner.tx.raw_iterator_opt(ro);
+			let mut iter = inner.raw_iterator_opt(ro);
 			// Seek to the start key
 			iter.seek(&rng.start);
 			// Count the items
@@ -1162,14 +1076,17 @@ impl Transaction {
 		// as it avoids the `BaseDeltaIterator` wrapper used by the
 		// transactional iterator.
 		else {
+			let db = inner.db().clone();
+
 			// Release the inner lock before the scan: `ReadOptions` already
 			// holds the raw snapshot pointer, and the underlying rocksdb
 			// snapshot stays alive for as long as the boxed `inner.tx` (owned by this
 			// `Transaction`) is alive. Read-only transactions never take the
 			// inner out of the mutex, so the snapshot is safe to use unlocked.
 			drop(guard);
+
+			let mut iter = db.raw_iterator_opt(ro);
 			// Create the iterator on the database
-			let mut iter = self.db.raw_iterator_opt(ro);
 			// Seek to the start key
 			iter.seek(&rng.start);
 			// Count the items
@@ -1198,11 +1115,10 @@ impl Transaction {
 		skip: u32,
 		version: Option<u64>,
 		dir: Direction,
-		guard: MutexGuard<'_, Option<TransactionInner>>,
+		guard: MutexGuard<'_, Option<OwnedTx>>,
 	) -> Result<KeysResult> {
 		// Get the inner transaction state
-		let inner =
-			guard.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
+		let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
 		// Get the ReadOptions with the snapshot and iterate bounds
 		let ro = self.scan_read_options(&rng, version, inner);
 		// If the transaction is writable, we create the iterator on the
@@ -1211,7 +1127,7 @@ impl Transaction {
 		// the iterator.
 		if self.write {
 			// Create the iterator on the transaction
-			let mut iter = inner.tx.raw_iterator_opt(ro);
+			let mut iter = inner.raw_iterator_opt(ro);
 			// Seek to the start (or end) key based on direction
 			match dir {
 				Direction::Forward => iter.seek(&rng.start),
@@ -1225,10 +1141,11 @@ impl Transaction {
 		// as it avoids the `BaseDeltaIterator` wrapper used by the
 		// transactional iterator.
 		else {
+			let db = inner.db().clone();
 			// Release the inner lock before the scan
 			drop(guard);
 			// Create the iterator on the database
-			let mut iter = self.db.raw_iterator_opt(ro);
+			let mut iter = db.raw_iterator_opt(ro);
 			// Seek to the start (or end) key based on direction
 			match dir {
 				Direction::Forward => iter.seek(&rng.start),
@@ -1253,11 +1170,10 @@ impl Transaction {
 		skip: u32,
 		version: Option<u64>,
 		dir: Direction,
-		guard: MutexGuard<'_, Option<TransactionInner>>,
+		guard: MutexGuard<'_, Option<OwnedTx>>,
 	) -> Result<ScanResult> {
 		// Get the inner transaction state
-		let inner =
-			guard.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
+		let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
 		// Get the ReadOptions with the snapshot and iterate bounds
 		let ro = self.scan_read_options(&rng, version, inner);
 		// If the transaction is writable, we create the iterator on the
@@ -1266,7 +1182,7 @@ impl Transaction {
 		// the iterator.
 		if self.write {
 			// Create the iterator on the transaction
-			let mut iter = inner.tx.raw_iterator_opt(ro);
+			let mut iter = inner.raw_iterator_opt(ro);
 			// Seek to the start (or end) key based on direction
 			match dir {
 				Direction::Forward => iter.seek(&rng.start),
@@ -1280,10 +1196,11 @@ impl Transaction {
 		// as it avoids the `BaseDeltaIterator` wrapper used by the
 		// transactional iterator.
 		else {
+			let db = inner.db().clone();
 			// Release the inner lock before the scan
 			drop(guard);
 			// Create the iterator on the database
-			let mut iter = self.db.raw_iterator_opt(ro);
+			let mut iter = db.raw_iterator_opt(ro);
 			// Seek to the start (or end) key based on direction
 			match dir {
 				Direction::Forward => iter.seek(&rng.start),
@@ -1304,177 +1221,22 @@ impl Transaction {
 	/// The iterator is **not** seeked here — the first `next_batch` call
 	/// performs the seek so a caller that opens a cursor and never pumps
 	/// pays no LSM-seek cost.
-	///
-	/// SAFETY: the `'static` lifetime on the returned iterator is an
-	/// erasure of the borrow into `inner.tx` (writable) or `self.db`
-	/// (read-only). Sound because the iterator is moved into a
-	/// caller-owned cursor handle whose drop order is load-bearing:
-	///
-	/// * On the cursor handle (`RocksDbKeysCursor` / `RocksDbValsCursor`), the `ScanState` field
-	///   (which carries this iterator) is declared before `_alive_guard`. Rust drops fields in
-	///   declaration order, so the iterator's destructor runs while the parent (snapshot, tx, db)
-	///   is still alive; only after that does `AliveGuard::drop` decrement `cursors_alive`.
-	/// * `commit`/`cancel` set `done = true` (SeqCst) and then `drain_cursors` until `cursors_alive
-	///   == 0` before consuming `inner`. Paired with the open-protocol `fetch_add(SeqCst)` then
-	///   `load(done, SeqCst)` on `open_*_cursor`, any cursor either completes and drops (drain
-	///   observes it and waits) or sees `done == true` and aborts before allocating its iterator.
-	///
-	/// Both invariants are documented at `Transaction::cursors_alive` and
-	/// the cursor handle field order in `scan_cursor.rs`.
 	fn build_scan_iter(
 		&self,
 		rng: &Range<Vec<u8>>,
 		version: Option<u64>,
-		inner: &TransactionInner,
+		inner: &OwnedTx,
 	) -> ScanIter {
 		let ro = self.scan_read_options(rng, version, inner);
 		if self.write {
-			let iter = inner.tx.raw_iterator_opt(ro);
-			// SAFETY: erasing the iterator's borrow into `inner.tx` to
-			// `'static`. Sound iff the four invariants below all hold;
-			// changing any of them silently produces use-after-free.
-			//
-			//   I1. CURSOR FIELD ORDER. `RocksDbValsCursor` / `RocksDbKeysCursor` declare
-			//       `state` BEFORE `_alive_guard`. Rust drops fields in declaration order, so the
-			//       iterator (inside `state`) is destroyed before `_alive_guard` decrements
-			//       `cursors_alive`. Do not reorder these fields, do not extract `ScanState` into a
-			//       separately-owned helper, and do not introduce any helper that moves the
-			// iterator       out of the cursor.
-			//
-			//   I2. DRAIN ON COMMIT/CANCEL. `commit`/`cancel` set `done = true` (SeqCst), then
-			//       `drain_cursors().await` until `cursors_alive == 0` BEFORE consuming `inner`.
-			//       Without the drain, the boxed `rocksdb::Transaction` could be dropped while an
-			//       iterator still references it.
-			//
-			//   I3. SEQCST OPEN PROTOCOL. `open_*_cursor` does `fetch_add(cursors_alive, SeqCst)`
-			//       then `load(done, SeqCst)`. Paired against commit's `swap(done, SeqCst)` then
-			//       `load(cursors_alive, SeqCst)`, the four-op SeqCst total order rules out the
-			//       interleaving where a cursor opens AFTER commit has observed
-			//       `cursors_alive == 0`.
-			//
-			//   I4. BORROW-CHECKER-TIED CURSOR LIFETIME. The cursor handle returned to the caller
-			// is       `Box<dyn ScanCursorKeys + 'a>` where `'a` is the borrow of `&'a
-			// Transaction`. The       cursor cannot outlive the `Transaction` at the type level.
-			// If you ever expose a       way to upgrade this to `'static` (e.g. through
-			// `Arc<Transaction>`), invariants       I1–I3 alone are no longer sufficient — you
-			// must additionally hold the parent       alive past every cursor's drop.
-			//
-			// Migrating to `self_cell` or `ouroboros` would express the
-			// self-referential borrow at the type level and remove this
-			// transmute. See the module comment in `scan_cursor.rs`.
-			let iter: DBRawIteratorWithThreadMode<
-				'static,
-				rocksdb::Transaction<'static, OptimisticTransactionDB>,
-			> = unsafe {
-				std::mem::transmute::<
-					DBRawIteratorWithThreadMode<
-						'_,
-						rocksdb::Transaction<'static, OptimisticTransactionDB>,
-					>,
-					DBRawIteratorWithThreadMode<
-						'static,
-						rocksdb::Transaction<'static, OptimisticTransactionDB>,
-					>,
-				>(iter)
-			};
+			let iter = inner.owned_raw_iter(ro);
 			ScanIter::Tx(iter)
 		} else {
-			let iter = self.db.raw_iterator_opt(ro);
-			// SAFETY: same four invariants as the writable branch above
-			// (cursor field order, drain on commit/cancel, SeqCst open
-			// protocol, borrow-checker-tied cursor lifetime). The erased
-			// borrow here is into `self.db` (`Pin<Arc<OptimisticTransactionDB>>`)
-			// rather than `inner.tx`; `db` is held by the `Transaction`
-			// itself so the drain on `cursors_alive` is what keeps it
-			// alive until every iterator has destructed.
-			let iter: DBRawIteratorWithThreadMode<'static, OptimisticTransactionDB> = unsafe {
-				std::mem::transmute::<
-					DBRawIteratorWithThreadMode<'_, OptimisticTransactionDB>,
-					DBRawIteratorWithThreadMode<'static, OptimisticTransactionDB>,
-				>(iter)
-			};
+			let iter = inner.db().owned_raw_iter(ro, inner);
 			ScanIter::Db(iter)
 		}
 	}
 }
-
-/// Drain wait: yield-loop until no caller-owned cursors are alive on
-/// this transaction. Called as the first action of `commit`/`cancel`
-/// (after `done` has been set to `true`, so no new cursors can open).
-///
-/// Uses `SeqCst` to participate in the same total order as the cursor's
-/// open protocol (`fetch_add(SeqCst)` then `load(done, SeqCst)`) and
-/// commit's own `done.swap(SeqCst)`. The four operations together rule
-/// out the case where commit reads `count == 0` and cursor reads
-/// `done == false`: in any SeqCst total order, either the cursor's
-/// `fetch_add` precedes this load (commit sees `count >= 1`, waits), or
-/// the cursor's `done` load follows commit's `done` swap (cursor sees
-/// `done == true`, aborts). The SeqCst load is also at least as strong as
-/// Acquire, so each cursor's `AliveGuard::drop` (`Release`) synchronises
-/// with this load — any iterator-destructor side effects on the rocksdb
-/// parent's refcount are visible to the commit thread before it proceeds
-/// to consume `inner`.
-///
-/// In practice the wait is one or zero yields — callers conventionally
-/// drop cursors before committing — but the loop is correct under
-/// arbitrary scheduling.
-///
-/// # Stuck drain
-///
-/// We cannot time out: if `cursors_alive > 0`, an iterator destructor
-/// has not yet decremented the rocksdb parent's refcount, and giving up
-/// here would let `commit`/`cancel` consume `inner` underneath a live
-/// iterator (use-after-free). So a stuck cursor-holding task causes the
-/// drain to wait forever — silent hang.
-///
-/// To make that loud rather than silent, we emit one `warn!` per drain
-/// once the wait exceeds [`DRAIN_STUCK_WARN_AFTER`]. The warning fires
-/// at most once per `drain_cursors` call to avoid log spam, with an
-/// escalating second warning at `10×` the threshold for confirmation.
-/// The clock is consulted only every 1024 yields to keep the steady-state
-/// (zero or one yield) cost unchanged.
-async fn drain_cursors(tx: &Transaction) {
-	if tx.cursors_alive.load(Ordering::SeqCst) == 0 {
-		return;
-	}
-	let started = Instant::now();
-	let mut warned = false;
-	let mut escalated = false;
-	let mut yields: u32 = 0;
-	while tx.cursors_alive.load(Ordering::SeqCst) > 0 {
-		tokio::task::yield_now().await;
-		yields = yields.wrapping_add(1);
-		// Cheap mask check — only consult the wall clock once per ~1024
-		// yields so the hot path (drain completing in 0–1 yields) is
-		// unaffected.
-		if yields & 1023 == 0 {
-			let elapsed = started.elapsed();
-			if !warned && elapsed >= DRAIN_STUCK_WARN_AFTER {
-				let alive = tx.cursors_alive.load(Ordering::SeqCst);
-				warn!(
-					target: TARGET,
-					"drain_cursors waiting unusually long: {alive} cursor(s) still alive after {elapsed:?}; \
-					possible stuck task holding a cursor handle past commit/cancel"
-				);
-				warned = true;
-			}
-			if !escalated && elapsed >= DRAIN_STUCK_WARN_AFTER * 10 {
-				let alive = tx.cursors_alive.load(Ordering::SeqCst);
-				warn!(
-					target: TARGET,
-					"drain_cursors still blocked: {alive} cursor(s) alive after {elapsed:?}; \
-					commit/cancel will not progress until every cursor handle is dropped"
-				);
-				escalated = true;
-			}
-		}
-	}
-}
-
-/// How long [`drain_cursors`] waits before logging a warning. Chosen so
-/// the routine drain (single-digit microseconds) never trips it and a
-/// truly stuck cursor produces a loud, single-line signal in logs.
-const DRAIN_STUCK_WARN_AFTER: Duration = Duration::from_secs(5);
 
 /// First-call seek + leading-skip shared by the keys/vals `fill`/`visit`
 /// drivers. Seeks the iterator to the range's near edge (forward → `start`,
@@ -1961,6 +1723,42 @@ pub(crate) async fn cursor_for_each_keys(
 		.await
 }
 
+async fn compact(db: Db, range: Option<KeyRange<'_>>) -> Result<()> {
+	// Convert the range to owned bytes up front so the returned future
+	// does not capture the range's borrowed lifetime.
+	let range = range.map(|r| r.into_static());
+	// Create new flush options
+	let mut fopts = FlushOptions::default();
+	// Wait for the sync to finish
+	fopts.set_wait(true);
+	// Create new compact options
+	let mut copts = CompactOptions::default();
+	// Set the exclusive manual compaction flag
+	copts.set_exclusive_manual_compaction(true);
+	// Allow files to move to a higher level
+	copts.set_change_level(true);
+	// Set the target level for SSTs
+	copts.set_target_level(6);
+	// Force the bottommost SSTs to be rewritten
+	copts.set_bottommost_level_compaction(BottommostLevelCompaction::Force);
+	affinitypool::spawn(move || {
+		// Flush the WAL to storage
+		db.flush_wal(true).map_err(kvs_error)?;
+		// Flush the memtables to SST
+		db.flush_opt(&fopts).map_err(kvs_error)?;
+		// Get the compaction range
+		let (start, end) = match range {
+			Some(r) => (Some(r.start.to_vec()), Some(r.end.to_vec())),
+			None => (None, None),
+		};
+		// Compact the specified range with the bottommost target.
+		db.compact_range_opt(start, end, &copts);
+		// All ok
+		Ok(())
+	})
+	.await
+}
+
 impl Transactable for Transaction {
 	fn kind(&self) -> &'static str {
 		"rocksdb"
@@ -1981,29 +1779,16 @@ impl Transactable for Transaction {
 	fn cancel(&self) -> BoxFut<'_, Result<()>> {
 		Box::pin(async move {
 			// Atomically mark transaction as done and check if it was already
-			// closed. SeqCst pairs with the cursor open protocol — see
-			// `drain_cursors` for the full ordering argument.
+			// closed.
 			if self.done.swap(true, Ordering::SeqCst) {
 				return Err(Error::TransactionFinished);
 			}
-			// Wait for any caller-owned cursors to drop before we consume
-			// `inner`. Each cursor's `AliveGuard` decrements `cursors_alive`
-			// only AFTER its iterator's destructor runs (field-declaration
-			// order on the cursor handle), so by the time we observe
-			// `cursors_alive == 0` every iterator has decremented its
-			// parent's refcount. `done` was already swapped to `true`
-			// above, so no new cursor can open. See `scan_cursor.rs` for
-			// the SeqCst ordering rationale.
-			drain_cursors(self).await;
-			// `rollback` on an OptimisticTransaction just clears the in-memory
 			// WriteBatchWithIndex and resets the tracked-keys set — it never
 			// touches disk. We therefore take the inner lock and run inline
 			// rather than dispatching through the inline-blocking guard.
-			let guard = self.inner.lock().await;
-			let inner =
-				guard.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
-			inner.tx.rollback().map_err(kvs_error)?;
-			Ok(())
+			let mut guard = self.inner.lock().await;
+			let inner = guard.take().ok_or(Error::TransactionFinished)?;
+			inner.into_inner().await.rollback().map_err(kvs_error)
 		})
 	}
 
@@ -2012,8 +1797,7 @@ impl Transactable for Transaction {
 	fn commit(&self) -> BoxFut<'_, Result<()>> {
 		Box::pin(async move {
 			// Atomically mark transaction as done and check if it was already
-			// closed. SeqCst pairs with the cursor open protocol — see
-			// `drain_cursors` for the full ordering argument.
+			// closed.
 			if self.done.swap(true, Ordering::SeqCst) {
 				return Err(Error::TransactionFinished);
 			}
@@ -2025,30 +1809,11 @@ impl Transactable for Transaction {
 			if self.is_restricted(true) && self.contains_writes() {
 				return Err(Error::ReadAndDeleteOnly);
 			}
-			// Wait for any caller-owned cursors to drop before we consume
-			// `inner`. See the matching comment in `cancel` for rationale.
-			drain_cursors(self).await;
 			// Take ownership of the transaction state. The tokio mutex guard
 			// is dropped at the end of this statement, so no lock is held
 			// across subsequent awaits (e.g. the commit coordinator wait below).
-			let TransactionInner {
-				tx: inner,
-				snapshot,
-			} = self
-				.inner
-				.lock()
-				.await
-				.take()
-				.ok_or_else(|| Error::Internal("expected a transaction".into()))?;
-			// Explicitly drop the snapshot before consuming the boxed transaction.
-			// `snapshot` borrows the transaction inside `inner`, and `commit` consumes
-			// it, so the snapshot must be released first.
-			drop(snapshot);
-			// When versioned, stamp all writes with the current HLC timestamp
-			if self.versioned {
-				let ts = HlcTimeStamp::next();
-				inner.set_commit_timestamp(ts.0);
-			}
+			let tx = self.inner.lock().await.take().ok_or(Error::TransactionFinished)?;
+
 			// Refuse the commit before applying anything once the datastore
 			// has begun shutting down: the grouped fsync can no longer
 			// confirm durability, so no new commit should run past this
@@ -2061,6 +1826,17 @@ impl Transactable for Transaction {
 			{
 				return Err(Error::Shutdown);
 			}
+
+			let db = tx.db().clone();
+
+			let tx = tx.into_inner().await;
+
+			// When versioned, stamp all writes with the current HLC timestamp
+			if self.versioned {
+				let ts = HlcTimeStamp::next();
+				tx.set_commit_timestamp(ts.0);
+			}
+
 			// RocksDB commit may invoke `fsync` when sync writes are
 			// enabled, so it is the highest-latency synchronous call in
 			// the transaction lifecycle and must respect the
@@ -2068,16 +1844,17 @@ impl Transactable for Transaction {
 			// permit: granted → run on the calling tokio worker; refused →
 			// dispatched to the affinity pool.
 			self.inline_guard
-				.try_inline_or_offload(move || (*inner).commit())
+				.try_inline_or_offload(move || tx.commit())
 				.await
 				.map_err(kvs_error)?;
+
 			// If we have a coordinator, wait for the grouped fsync
 			if let Some(coordinator) = &self.commit_coordinator {
 				coordinator.wait_for_sync().await?;
 			}
 			// Perform compaction if necessary
 			if self.is_restricted(true) && self.contains_deletes() {
-				self.compact(None).await?;
+				compact(db, None).await?;
 			}
 			// Continue
 			Ok(())
@@ -2095,13 +1872,11 @@ impl Transactable for Transaction {
 				return Err(Error::TransactionFinished);
 			}
 			self.run_blocking(move |guard| {
-				let inner = guard
-					.as_ref()
-					.ok_or_else(|| Error::Internal("expected a transaction".into()))?;
+				let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
 				let res = if version.is_some() {
-					inner.tx.get_pinned_opt(key, &self.versioned_read_options(version, inner))
+					inner.get_pinned_opt(key, &self.versioned_read_options(version, inner))
 				} else {
-					inner.tx.get_pinned_opt(key, &self.read_options)
+					inner.get_pinned_opt(key, &self.read_options)
 				}
 				.map_err(kvs_error)?
 				.is_some();
@@ -2122,13 +1897,11 @@ impl Transactable for Transaction {
 				return Err(Error::TransactionFinished);
 			}
 			self.run_blocking(move |guard| {
-				let inner = guard
-					.as_ref()
-					.ok_or_else(|| Error::Internal("expected a transaction".into()))?;
+				let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
 				let res = if version.is_some() {
-					inner.tx.get_opt(key, &self.versioned_read_options(version, inner))
+					inner.get_opt(key, &self.versioned_read_options(version, inner))
 				} else {
-					inner.tx.get_opt(key, &self.read_options)
+					inner.get_opt(key, &self.read_options)
 				}
 				.map_err(kvs_error)?;
 				Ok(res)
@@ -2158,10 +1931,8 @@ impl Transactable for Transaction {
 				// Read through the snapshot read options so that commit-time
 				// conflict detection validates the key against the
 				// transaction snapshot rather than the read timestamp.
-				let res = inner
-					.tx
-					.get_for_update_opt(key, true, &self.read_options)
-					.map_err(kvs_error)?;
+				let res =
+					inner.get_for_update_opt(key, true, &self.read_options).map_err(kvs_error)?;
 				Ok(res)
 			})
 			.await
@@ -2189,13 +1960,11 @@ impl Transactable for Transaction {
 				return Err(Error::TransactionFinished);
 			}
 			self.run_blocking(move |guard| {
-				let inner = guard
-					.as_ref()
-					.ok_or_else(|| Error::Internal("expected a transaction".into()))?;
+				let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
 				let res = if version.is_some() {
-					inner.tx.multi_get_opt(keys, &self.versioned_read_options(version, inner))
+					inner.multi_get_opt(keys, &self.versioned_read_options(version, inner))
 				} else {
-					inner.tx.multi_get_opt(keys, &self.read_options)
+					inner.multi_get_opt(keys, &self.read_options)
 				};
 				// Convert result, accumulating the hit count and value bytes during
 				// the same pass so callers do not need to re-walk the result.
@@ -2246,9 +2015,8 @@ impl Transactable for Transaction {
 			// inline-blocking guard, which would only add a function-call hop
 			// (granted) or a wasteful thread hop (diverted) for a pure-memory op.
 			let guard = self.inner.lock().await;
-			let inner =
-				guard.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
-			inner.tx.put(key, val).map_err(kvs_error)?;
+			let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
+			inner.put(key, val).map_err(kvs_error)?;
 			self.store_writes();
 			Ok(())
 		})
@@ -2271,11 +2039,9 @@ impl Transactable for Transaction {
 				return Err(Error::ReadAndDeleteOnly);
 			}
 			self.run_blocking(move |guard| {
-				let inner = guard
-					.as_ref()
-					.ok_or_else(|| Error::Internal("expected a transaction".into()))?;
-				match inner.tx.get_pinned_opt(&key, &self.read_options).map_err(kvs_error)? {
-					None => inner.tx.put(key, val).map_err(kvs_error)?,
+				let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
+				match inner.get_pinned_opt(&key, &self.read_options).map_err(kvs_error)? {
+					None => inner.put(key, val).map_err(kvs_error)?,
 					_ => return Err(Error::TransactionKeyAlreadyExists),
 				};
 				self.store_writes();
@@ -2302,12 +2068,10 @@ impl Transactable for Transaction {
 				return Err(Error::ReadAndDeleteOnly);
 			}
 			self.run_blocking(move |guard| {
-				let inner = guard
-					.as_ref()
-					.ok_or_else(|| Error::Internal("expected a transaction".into()))?;
-				match (inner.tx.get_pinned_opt(&key, &self.read_options).map_err(kvs_error)?, chk) {
-					(Some(v), Some(w)) if v.eq(&w) => inner.tx.put(key, val).map_err(kvs_error)?,
-					(None, None) => inner.tx.put(key, val).map_err(kvs_error)?,
+				let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
+				match (inner.get_pinned_opt(&key, &self.read_options).map_err(kvs_error)?, chk) {
+					(Some(v), Some(w)) if v.eq(&w) => inner.put(key, val).map_err(kvs_error)?,
+					(None, None) => inner.put(key, val).map_err(kvs_error)?,
 					_ => return Err(Error::TransactionConditionNotMet),
 				};
 				self.store_writes();
@@ -2335,9 +2099,8 @@ impl Transactable for Transaction {
 			// therefore take the inner lock and run inline rather than
 			// dispatching through the inline-blocking guard.
 			let guard = self.inner.lock().await;
-			let inner =
-				guard.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
-			inner.tx.delete(key).map_err(kvs_error)?;
+			let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
+			inner.delete(key).map_err(kvs_error)?;
 			self.store_deletes();
 			Ok(())
 		})
@@ -2356,12 +2119,10 @@ impl Transactable for Transaction {
 				return Err(Error::TransactionReadonly);
 			}
 			self.run_blocking(move |guard| {
-				let inner = guard
-					.as_ref()
-					.ok_or_else(|| Error::Internal("expected a transaction".into()))?;
-				match (inner.tx.get_pinned_opt(&key, &self.read_options).map_err(kvs_error)?, chk) {
-					(Some(v), Some(w)) if *v == *w => inner.tx.delete(key).map_err(kvs_error)?,
-					(None, None) => inner.tx.delete(key).map_err(kvs_error)?,
+				let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
+				match (inner.get_pinned_opt(&key, &self.read_options).map_err(kvs_error)?, chk) {
+					(Some(v), Some(w)) if *v == *w => inner.delete(key).map_err(kvs_error)?,
+					(None, None) => inner.delete(key).map_err(kvs_error)?,
 					_ => return Err(Error::TransactionConditionNotMet),
 				};
 				self.store_deletes();
@@ -2452,15 +2213,13 @@ impl Transactable for Transaction {
 			// dispatching shards: the snapshot stays alive for as long as
 			// `inner.tx` is alive (owned by this `Transaction`), and read-only
 			// transactions never take the inner out of the mutex.
-			let scans = {
+			let (scans, db) = {
 				// Acquire the inner lock
 				let guard = self.inner.lock().await;
 				// Get the inner transaction state
-				let inner = guard
-					.as_ref()
-					.ok_or_else(|| Error::Internal("expected a transaction".into()))?;
+				let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
 				// Build one (sub-range, ReadOptions) pair per shard
-				sub_ranges
+				let scans = sub_ranges
 					.into_iter()
 					.map(|(lo, hi)| {
 						// Construct the shard's sub-range
@@ -2469,12 +2228,14 @@ impl Transactable for Transaction {
 						let ro = self.count_read_options(&sub_rng, version, inner);
 						(sub_rng, ro)
 					})
-					.collect::<Vec<_>>()
+					.collect::<Vec<_>>();
+
+				(scans, inner.db().clone())
 			};
 			let mut tasks = Vec::with_capacity(scans.len());
 			for (sub_rng, ro) in scans {
 				// Clone the Arc'd handle so each shard owns its own reference
-				let db = self.db.clone();
+				let db = db.clone();
 				let count_shard = move || -> Result<usize> {
 					// Create the iterator on the database
 					let mut iter = db.raw_iterator_opt(ro);
@@ -2737,27 +2498,6 @@ impl Transactable for Transaction {
 			// Convert the range to owned bytes: the cursor state stores the
 			// bounds for the first-time seek, which outlives this call.
 			let rng = rng.start.to_vec()..rng.end.to_vec();
-			// Open protocol: increment `cursors_alive` (SeqCst), then claim
-			// the slot via `AliveGuard` so every subsequent exit — the
-			// `done == true` re-check, the future being dropped at the
-			// `self.inner.lock().await` below (query cancel / timeout), the
-			// `?` early-out on `guard.as_ref()` — decrements via Drop.
-			// Without the guard, those error/cancel paths would leak the
-			// increment and stall `drain_cursors` forever.
-			//
-			// The SeqCst increment + SeqCst `done` load paired against
-			// commit's `done.store` + `cursors_alive.load` rule out the
-			// race where a cursor proceeds against a transaction that's
-			// already mid-commit. See `scan_cursor.rs` for the proof.
-			//
-			// `AliveGuard::drop` decrements with Release. That's safe on
-			// the error/cancel paths (no iterator has been built, so there
-			// are no destructor side-effects to publish) and on the
-			// success path (the iterator destructor runs *before* the
-			// guard drops, because the guard is the last field in the
-			// cursor struct, so the Release publishes its side-effects).
-			self.cursors_alive.fetch_add(1, Ordering::SeqCst);
-			let alive_guard = AliveGuard::new(self);
 			if self.done.load(Ordering::SeqCst) {
 				return Err(Error::TransactionFinished);
 			}
@@ -2766,8 +2506,7 @@ impl Transactable for Transaction {
 			// owns the snapshot pointer via its captured `ReadOptions`;
 			// no further inner access is needed for cursor advance.
 			let guard = self.inner.lock().await;
-			let inner =
-				guard.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
+			let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
 			let iter = self.build_scan_iter(&rng, version, inner);
 			drop(guard);
 			Ok(Box::new(RocksDbKeysCursor {
@@ -2782,7 +2521,6 @@ impl Transactable for Transaction {
 					key_buf: Vec::new(),
 					key_spans: Vec::new(),
 				},
-				_alive_guard: alive_guard,
 			}) as Box<dyn ScanCursorKeys + 'a>)
 		})
 	}
@@ -2802,16 +2540,11 @@ impl Transactable for Transaction {
 			// Convert the range to owned bytes: the cursor state stores the
 			// bounds for the first-time seek, which outlives this call.
 			let rng = rng.start.to_vec()..rng.end.to_vec();
-			// See `open_keys_cursor` for the open-protocol rationale and
-			// why the `AliveGuard` must be bound before the `lock().await`.
-			self.cursors_alive.fetch_add(1, Ordering::SeqCst);
-			let alive_guard = AliveGuard::new(self);
 			if self.done.load(Ordering::SeqCst) {
 				return Err(Error::TransactionFinished);
 			}
 			let guard = self.inner.lock().await;
-			let inner =
-				guard.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
+			let inner = guard.as_ref().ok_or(Error::TransactionFinished)?;
 			let iter = self.build_scan_iter(&rng, version, inner);
 			drop(guard);
 			Ok(Box::new(RocksDbValsCursor {
@@ -2827,7 +2560,6 @@ impl Transactable for Transaction {
 					val_buf: Vec::new(),
 					spans: Vec::new(),
 				},
-				_alive_guard: alive_guard,
 			}) as Box<dyn ScanCursorVals + 'a>)
 		})
 	}
@@ -2841,9 +2573,8 @@ impl Transactable for Transaction {
 			}
 			let mut savepoints = self.savepoints.lock().await;
 			let guard = self.inner.lock().await;
-			let state =
-				guard.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
-			state.tx.set_savepoint();
+			let state = guard.as_ref().ok_or(Error::TransactionFinished)?;
+			state.set_savepoint();
 			// Counted only once the engine has accepted the savepoint, so a
 			// refusal cannot leave a scope counted that the engine never took.
 			savepoints.open();
@@ -2863,12 +2594,14 @@ impl Transactable for Transaction {
 			// stack guard is held across the unwind so the count and the engine
 			// cannot diverge partway through.
 			let mut savepoints = self.savepoints.lock().await;
-			let guard = self.inner.lock().await;
-			let state =
-				guard.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
+			let mut guard = self.inner.lock().await;
+			let Some(state) = guard.as_mut() else {
+				return Err(Error::TransactionFinished);
+			};
 			let unwind = savepoints.take()?;
+			let borrow = state.get_mut();
 			for _ in 0..unwind {
-				state.tx.rollback_to_savepoint().map_err(kvs_error)?;
+				borrow.rollback_to_savepoint().map_err(kvs_error)?;
 			}
 			Ok(())
 		})
@@ -2882,50 +2615,18 @@ impl Transactable for Transaction {
 		})
 	}
 
-	fn compact(&self, range: Option<KeyRange<'_>>) -> BoxFut<'_, Result<()>> {
-		// Convert the range to owned bytes up front so the returned future
-		// does not capture the range's borrowed lifetime.
-		let range = range.map(|r| (r.start.to_vec(), r.end.to_vec()));
+	fn compact<'a>(&'a self, range: Option<KeyRange<'a>>) -> BoxFut<'a, Result<()>> {
 		Box::pin(async move {
-			// Create new flush options
-			let mut fopts = FlushOptions::default();
-			// Wait for the sync to finish
-			fopts.set_wait(true);
-			// Create new compact options
-			let mut copts = CompactOptions::default();
-			// Set the exclusive manual compaction flag
-			copts.set_exclusive_manual_compaction(true);
-			// Allow files to move to a higher level
-			copts.set_change_level(true);
-			// Set the target level for SSTs
-			copts.set_target_level(6);
-			// Force the bottommost SSTs to be rewritten
-			copts.set_bottommost_level_compaction(BottommostLevelCompaction::Force);
-			// Spawn a new task to compact the range
-			//
-			// SAFETY: the closure borrows `self`, so the returned future must
-			// not be leaked while that borrow is live. It is awaited inline here
-			// and never stored, so its destructor — which blocks until the
-			// worker has stopped touching the borrow — always runs before the
-			// enclosing future completes.
-			unsafe {
-				affinitypool::spawn_local(move || {
-					// Flush the WAL to storage
-					self.db.flush_wal(true).map_err(kvs_error)?;
-					// Flush the memtables to SST
-					self.db.flush_opt(&fopts).map_err(kvs_error)?;
-					// Get the compaction range
-					let (start, end) = match range {
-						Some((start, end)) => (Some(start), Some(end)),
-						None => (None, None),
-					};
-					// Compact the specified range with the bottommost target.
-					self.db.compact_range_opt(start, end, &copts);
-					// All ok
-					Ok(())
-				})
-			}
-			.await
+			let db = {
+				let guard = self.inner.lock().await;
+				let Some(state) = guard.as_ref() else {
+					return Err(Error::TransactionFinished);
+				};
+				state.db().clone()
+			};
+			//TODO: If compact is an operation on the whole database, maybe this function should
+			// not be a part of Transactable
+			compact(db, range).await
 		})
 	}
 }

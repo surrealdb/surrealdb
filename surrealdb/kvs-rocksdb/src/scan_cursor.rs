@@ -12,56 +12,7 @@
 //! `&mut self` borrow. One allocation per batch (the result `Vec<&[u8]>`);
 //! the buffer itself is reused across batches. Per-item heap allocations
 //! are zero.
-//!
-//! # Lifetime
-//!
-//! The handle's `'tx` lifetime is the borrow into the parent
-//! `Transaction`. Cursors cannot outlive the transaction at the type
-//! level. The iterator inside `ScanState` is `'static`-erased (same
-//! pattern as `TransactionInner`'s `tx`/`snapshot`) because Rust can't
-//! express the self-referential borrow into the boxed
-//! `rocksdb::Transaction` or `Pin<Arc<DB>>` without a helper crate.
-//!
-//! # Safety vs commit/cancel
-//!
-//! `commit`/`cancel` need to drop the snapshot (and, for writable
-//! transactions, consume the boxed `rocksdb::Transaction`) before any
-//! cursor's iterator destructor runs — RocksDB's
-//! `rocksdb_iter_destroy` decrements the parent's internal refcount, so
-//! freeing it on a dropped parent is use-after-free.
-//!
-//! Two invariants close that race:
-//!
-//! 1. `Transaction::cursors_alive` counts live cursors. `open_*_cursor` increments after passing
-//!    the `done` check (SeqCst); the cursor's drop guard decrements (Release).
-//! 2. `commit`/`cancel` set `done = true` (SeqCst), then `yield_now`-loop until `cursors_alive ==
-//!    0` (SeqCst) before consuming `inner`. With SeqCst on both atomics, a cursor that successfully
-//!    passes its `done` check has its `cursors_alive` increment globally ordered before commit's
-//!    load, so commit will wait for it. Conversely, a cursor that opens after commit's `done` store
-//!    sees `done == true` and aborts before allocating its iterator.
-//!
-//! # Drop ordering on the cursor handle
-//!
-//! The cursor handle is laid out as:
-//!
-//! ```text
-//! struct RocksDbKeysCursor<'tx> {
-//!     tx: &'tx Transaction,
-//!     state: ScanState,          // contains iter + reusable buffers
-//!     _alive_guard: AliveGuard,  // decrements cursors_alive on drop
-//! }
-//! ```
-//!
-//! Fields drop in declaration order (Rust reference). So on cursor
-//! drop: `tx` (no-op), then `state` (iterator destroyed, snapshot
-//! refcount decremented while parent still alive), then `_alive_guard`
-//! (counter decrement → unblocks commit's drain). The iterator is
-//! destroyed **before** commit is allowed to proceed; commit can then
-//! safely drop the snapshot.
 
-use std::sync::atomic::Ordering;
-
-use rocksdb::{DBRawIteratorWithThreadMode, OptimisticTransactionDB};
 use surrealdb_kvs::api::{
 	BoxFut, KeySpan, KeyValSpan, KeyVisitor, KeysBatch, ScanChunkStats, ScanCursorKeys,
 	ScanCursorVals, ValVisitor, ValsBatch,
@@ -69,6 +20,7 @@ use surrealdb_kvs::api::{
 use surrealdb_kvs::err::Result;
 
 use super::{Direction, Transaction};
+use crate::owned_tx::{OwnedRawDbIter, OwnedRawTxIter};
 
 /// Which underlying object the iterator borrows from. Decided at open
 /// time by whether the transaction is writable: writable scans iterate
@@ -77,18 +29,13 @@ use super::{Direction, Transaction};
 /// the underlying database directly, which avoids the BaseDeltaIterator
 /// wrapper.
 pub(super) enum ScanIter {
-	/// Iterator built from `self.db.raw_iterator_opt(ro)`. Borrows from
-	/// `self.db`. Used for read-only transactions.
-	Db(DBRawIteratorWithThreadMode<'static, OptimisticTransactionDB>),
-	/// Iterator built from `inner.tx.raw_iterator_opt(ro)`. Borrows from
-	/// `inner.tx`. Used for writable transactions so the iterator sees
+	/// Iterator built from `self.db.raw_iterator_opt(ro)`.
+	/// Used for read-only transactions.
+	Db(OwnedRawDbIter),
+	/// Iterator built from `inner.tx.raw_iterator_opt(ro)`.
+	/// Used for writable transactions so the iterator sees
 	/// pending writes in the same logical tx.
-	Tx(
-		DBRawIteratorWithThreadMode<
-			'static,
-			rocksdb::Transaction<'static, OptimisticTransactionDB>,
-		>,
-	),
+	Tx(OwnedRawTxIter),
 }
 
 /// Per-keys-cursor state. Owned directly by `RocksDbKeysCursor` — no
@@ -148,34 +95,6 @@ pub(crate) struct ScanStateVals {
 	pub(super) spans: Vec<KeyValSpan>,
 }
 
-/// RAII guard that decrements `Transaction::cursors_alive` on drop.
-/// Declared as the **last** field of each cursor handle so it drops
-/// **after** the iterator (declared earlier in the struct) — see the
-/// module-level comment for why ordering matters.
-pub(super) struct AliveGuard<'tx> {
-	tx: &'tx Transaction,
-}
-
-impl<'tx> AliveGuard<'tx> {
-	pub(super) fn new(tx: &'tx Transaction) -> Self {
-		Self {
-			tx,
-		}
-	}
-}
-
-impl Drop for AliveGuard<'_> {
-	fn drop(&mut self) {
-		// Release: this decrement is paired with the SeqCst load in
-		// `Transaction::cancel`/`commit`'s wait loop. Any iterator
-		// destructor side-effects on the parent's refcount (which ran
-		// just before this drop, because the iterator field is declared
-		// earlier in the cursor struct) are guaranteed to be visible to
-		// the commit thread once it observes `cursors_alive == 0`.
-		self.tx.cursors_alive.fetch_sub(1, Ordering::Release);
-	}
-}
-
 /// Caller-owned handle for a keys-only scan.
 ///
 /// Field order is load-bearing (see module-level comment): `tx` first
@@ -185,14 +104,12 @@ impl Drop for AliveGuard<'_> {
 pub(super) struct RocksDbKeysCursor<'tx> {
 	pub(super) tx: &'tx Transaction,
 	pub(super) state: ScanStateKeys,
-	pub(super) _alive_guard: AliveGuard<'tx>,
 }
 
 /// Caller-owned handle for a key+value scan. See [`RocksDbKeysCursor`].
 pub(super) struct RocksDbValsCursor<'tx> {
 	pub(super) tx: &'tx Transaction,
 	pub(super) state: ScanStateVals,
-	pub(super) _alive_guard: AliveGuard<'tx>,
 }
 
 impl ScanCursorKeys for RocksDbKeysCursor<'_> {

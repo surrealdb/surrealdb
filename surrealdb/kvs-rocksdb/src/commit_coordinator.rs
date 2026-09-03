@@ -1,11 +1,10 @@
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use parking_lot::{Condvar, Mutex};
-use rocksdb::{OptimisticTransactionDB, Options};
+use rocksdb::Options;
 use surrealdb_kvs::config::SyncMode;
 use surrealdb_kvs::err::{Error, Result};
 use tokio::sync::oneshot::{self, Sender};
@@ -13,6 +12,7 @@ use tracing::info;
 
 use super::TARGET;
 use crate::RocksDbConfig;
+use crate::owned_tx::Db;
 
 /// Shared state for producer-consumer communication between transaction submitters and the batcher.
 ///
@@ -133,7 +133,7 @@ impl CommitCoordinator {
 	}
 
 	/// Create a new commit coordinator
-	pub fn new(db: Pin<Arc<OptimisticTransactionDB>>, config: &RocksDbConfig) -> Result<Self> {
+	pub fn new(db: Db, config: &RocksDbConfig) -> Result<Self> {
 		// Get the batched commit configuration options
 		let timeout = config.grouped_commit_timeout;
 		let wait_threshold = config.grouped_commit_wait_threshold;
@@ -285,7 +285,7 @@ struct CommitBatcher {
 	/// Shared state for receiving commit requests
 	shared: Arc<SharedState>,
 	/// Reference to the database for explicit WAL flushing
-	db: Pin<Arc<OptimisticTransactionDB>>,
+	db: Db,
 	/// Maximum time to wait for collecting a batch
 	timeout: Duration,
 	/// Threshold for deciding whether to wait for more transactions

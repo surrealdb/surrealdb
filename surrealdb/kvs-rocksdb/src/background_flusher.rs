@@ -1,17 +1,17 @@
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
 use parking_lot::{Condvar, Mutex};
-use rocksdb::{OptimisticTransactionDB, Options};
+use rocksdb::Options;
 use surrealdb_kvs::config::SyncMode;
 use surrealdb_kvs::err::{Error, Result};
 use tracing::{error, info};
 
 use super::TARGET;
 use crate::RocksDbConfig;
+use crate::owned_tx::Db;
 
 /// Background flusher for periodically syncing the Write-Ahead Log (WAL) to disk.
 ///
@@ -71,7 +71,7 @@ impl BackgroundFlusher {
 	}
 
 	/// Create and new background flusher
-	pub fn new(db: Pin<Arc<OptimisticTransactionDB>>, interval: Duration) -> Result<Self> {
+	pub fn new(db: Db, interval: Duration) -> Result<Self> {
 		// Create a new shutdown notifier
 		let notify = Arc::new(ShutdownSignal {
 			flag: AtomicBool::new(false),

@@ -594,10 +594,6 @@ async fn cancel_blocks_until_live_cursor_drops() {
 		tx.commit().await.unwrap();
 	}
 
-	// Read-only tx so the iterator goes through the `ScanIter::Db`
-	// branch (borrow into `self.db`) rather than `ScanIter::Tx`.
-	// Combined with the writable variant in the commit test above, both
-	// `ScanIter` arms get coverage.
 	let tx = ds.transaction(TransactionType::Read).await.unwrap();
 	let tx_ref = tx.as_ref();
 

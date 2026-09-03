@@ -1,16 +1,15 @@
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
 use parking_lot::{Condvar, Mutex};
-use rocksdb::OptimisticTransactionDB;
 use surrealdb_kvs::err::{Error, Result};
 use tracing::{error, info, trace};
 use web_time::{SystemTime, UNIX_EPOCH};
 
 use super::TARGET;
+use crate::owned_tx::Db;
 
 const GC_INTERVAL: Duration = Duration::from_secs(60);
 
@@ -52,7 +51,7 @@ struct ShutdownSignal {
 
 impl GarbageCollector {
 	/// Create a new garbage collector that advances the GC watermark every 60 seconds.
-	pub fn new(db: Pin<Arc<OptimisticTransactionDB>>, retention: Duration) -> Result<Self> {
+	pub fn new(db: Db, retention: Duration) -> Result<Self> {
 		let retention_millis = retention.as_millis().try_into().unwrap_or(u64::MAX);
 		// Log the version garbage collector configuration options
 		info!(target: TARGET, "Version garbage collector: enabled (retention={}ms, interval={}s)",
