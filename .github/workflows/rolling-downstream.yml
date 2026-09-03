@@ -343,8 +343,12 @@ jobs:
           repository: ${{ github.repository_owner }}/${{ secrets.DOWNSTREAM_REPO }}
           ref: ${{ inputs.downstream-branch || needs.preflight.outputs.sha }}
           token: ${{ steps.app-token.outputs.token }}
+          # The build-docker-* composite actions invoke a sibling scripts/
+          # helper (engine-pin) resolved via github.action_path, so scripts/
+          # must be fetched into this tooling checkout alongside .github.
           sparse-checkout: |
             .github
+            scripts
           sparse-checkout-cone-mode: false
           path: downstream-ci
           persist-credentials: false
@@ -466,8 +470,12 @@ jobs:
           repository: ${{ github.repository_owner }}/${{ secrets.DOWNSTREAM_REPO }}
           ref: ${{ inputs.downstream-branch || needs.preflight.outputs.sha }}
           token: ${{ steps.app-token.outputs.token }}
+          # The build-docker-* composite actions invoke a sibling scripts/
+          # helper (engine-pin) resolved via github.action_path, so scripts/
+          # must be fetched into this tooling checkout alongside .github.
           sparse-checkout: |
             .github
+            scripts
           sparse-checkout-cone-mode: false
           path: downstream-ci
           persist-credentials: false
