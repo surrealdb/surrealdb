@@ -155,7 +155,7 @@ async fn metrics_collectable(b: &TestBackend) {
 	}
 }
 
-kvs_test!(metrics_collectable, only = [rocksdb, surrealds]);
+kvs_test!(metrics_collectable, only = [rocksdb, surrealds, surrealos, surrealos_s3]);
 
 /// Backends without metrics return `None` from both metric hooks.
 async fn metrics_none(b: &TestBackend) {
@@ -164,7 +164,7 @@ async fn metrics_none(b: &TestBackend) {
 	assert!(ds.builder().collect_u64_metric("anything").is_none());
 }
 
-kvs_test!(metrics_none, except = [rocksdb, surrealds]);
+kvs_test!(metrics_none, except = [rocksdb, surrealds, surrealos, surrealos_s3]);
 
 /// Process-local backends report their transactions as local.
 ///
