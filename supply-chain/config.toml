@@ -349,6 +349,10 @@ criteria = "safe-to-deploy"
 version = "1.2.62"
 criteria = "safe-to-deploy"
 
+[[exemptions.chacha20]]
+version = "0.10.2"
+criteria = "safe-to-deploy"
+
 [[exemptions.ciborium]]
 version = "0.2.2"
 criteria = "safe-to-deploy"
@@ -1567,10 +1571,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.simd_cesu8]]
 version = "1.1.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.simdutf8]]
-version = "0.1.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.simple_asn1]]
