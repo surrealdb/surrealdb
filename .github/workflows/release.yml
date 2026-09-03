@@ -1162,7 +1162,7 @@ jobs:
   # rebuilt. No-ops when the downstream was not built for this commit. All
   # downstream registry coordinates/credentials come from secrets.
   mirror-downstream:
-    name: Mirror downstream ${{ matrix.name }}
+    name: Mirror downstream image
     # Downstream side only. Independent of the engine promote so a downstream-only
     # release can run on its own. prepare-vars already guaranteed a downstream image
     # exists when release-downstream (or test) is set. Gated upstream by `approve`
@@ -1183,14 +1183,6 @@ jobs:
       # pairing is promoted rather than whatever last built for the engine commit.
       SOURCE_TAG: ${{ needs.prepare-vars.outputs.downstream-source-tag }}
       LATEST: ${{ needs.prepare-vars.outputs.latest }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Prod image
-            tag-suffix: ''
-          - name: Dev image
-            tag-suffix: -dev
     steps:
       - name: Sanitize tag prefix
         id: tag
@@ -1229,14 +1221,13 @@ jobs:
       # copies the manifest + blobs without rebuilding.
       - name: Promote + mirror downstream image
         env:
-          SUFFIX: ${{ matrix.tag-suffix }}
           PREFIX: ${{ steps.tag.outputs.tag-prefix }}
         run: |
           set -euo pipefail
-          src="${ECR_REPO}:${SOURCE_TAG}${SUFFIX}"
-          targets=("${ECR_REPO}:${PREFIX}${SUFFIX}" "${ACR_REPO}:${PREFIX}${SUFFIX}")
+          src="${ECR_REPO}:${SOURCE_TAG}"
+          targets=("${ECR_REPO}:${PREFIX}" "${ACR_REPO}:${PREFIX}")
           if [[ "${LATEST}" == "true" ]]; then
-            targets+=("${ECR_REPO}:latest${SUFFIX}" "${ACR_REPO}:latest${SUFFIX}")
+            targets+=("${ECR_REPO}:latest" "${ACR_REPO}:latest")
           fi
           args=()
           for t in "${targets[@]}"; do args+=(--tag "$t"); done
@@ -1259,7 +1250,7 @@ jobs:
   # public image name; the connection id only names the trust, which the signed OIDC
   # token enforces), and a variable stays inspectable and prints unmasked in this
   # job's own "Mirroring -> <repo>:<tag>" log lines.
-  # Tags follow the downstream convention (<name> + optional :latest, -dev suffix),
+  # Tags follow the downstream convention (<name> + optional :latest),
   # NOT the engine's moving major/minor tags. Skips the mirror when
   # DOWNSTREAM_DOCKERHUB_REPOSITORY is unset. Runs on dry-runs too (the action
   # verifies the source manifests and computes the public tags without pushing),
@@ -1274,7 +1265,7 @@ jobs:
   # (determine-latest-pointer gates on release-engine), so the public `:latest`
   # moves correctly without a downstream-specific pointer.
   mirror-downstream-licensed:
-    name: Mirror downstream licensed ${{ matrix.name }}
+    name: Mirror downstream licensed image
     # Gated upstream by `approve` (no per-job environment), same as mirror-downstream.
     #
     # Backwards compatible with pre-licensing release lines. release.yml is the one
@@ -1300,14 +1291,6 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Prod image
-            tag-suffix: ''
-          - name: Dev image
-            tag-suffix: -dev
     steps:
       # Skip the mirror when the DockerHub target variable is unset.
       - name: DockerHub target configured?
@@ -1333,7 +1316,7 @@ jobs:
       - name: Note a skipped licensed mirror
         if: steps.cfg.outputs.configured == 'true' && needs.prepare-vars.outputs.downstream-licensed != 'true'
         env:
-          TAG: ${{ needs.prepare-vars.outputs.downstream-source-tag }}-licensed${{ matrix.tag-suffix }}
+          TAG: ${{ needs.prepare-vars.outputs.downstream-source-tag }}-licensed
         run: echo "::notice title=Mirror downstream licensed::This commit's downstream build recorded no licensed (${TAG}) image; this release line predates licence enforcement, skipping the licensed DockerHub mirror."
 
       - name: Checkout sources
@@ -1362,7 +1345,6 @@ jobs:
           # (the DockerHub repo already distinguishes it).
           source-tag: ${{ needs.prepare-vars.outputs.downstream-source-tag }}-licensed
           tag-prefix: ${{ steps.tag.outputs.tag-prefix }}
-          tag-suffix: ${{ matrix.tag-suffix }}
           environment: ${{ needs.prepare-vars.outputs.release-name }}
           latest: ${{ needs.prepare-vars.outputs.latest }}
           dest-repo: ${{ vars.DOWNSTREAM_DOCKERHUB_REPOSITORY }}
@@ -1721,8 +1703,8 @@ jobs:
       # Prune the matching downstream images from the downstream ECR (same
       # ancestry). A superseded engine commit carries one image PER downstream
       # pairing built against it, each under a compound
-      # rolling-<slug>-<engine-short>.<downstream-short> base plus its -dev /
-      # -licensed markers and per-arch tags. The pairings are recovered from the
+      # rolling-<slug>-<engine-short>.<downstream-short> base plus its -licensed
+      # marker and per-arch tags. The pairings are recovered from the
       # retained per-pairing manifests in S3
       # (rolling-builds/<slug>/<engine>/<downstream>/downstream.json, kept even
       # after the heavy binaries are pruned), whose `.tag` is the authoritative base
@@ -1748,14 +1730,13 @@ jobs:
           [[ -n "${OLDER// }" ]] || { echo "No superseded downstream images to prune"; exit 0; }
           region="$(printf '%s' "$ECR_REGISTRY" | cut -d. -f4)"
 
-          # Every tag shape a single base pushes: the multi-arch tag, its -dev
-          # sibling, and the four per-arch tags.
+          # Every tag shape a single base pushes: the multi-arch tag and the two
+          # per-arch tags.
           tag_shapes() {
             local base="$1"
             printf '%s\n' \
-              "${base}" "${base}-dev" \
-              "${base}-linux-amd64" "${base}-linux-arm64" \
-              "${base}-linux-amd64-dev" "${base}-linux-arm64-dev"
+              "${base}" \
+              "${base}-linux-amd64" "${base}-linux-arm64"
           }
           ids=()
           add_base() {   # queue a base, plus its -licensed sibling when built

@@ -11,7 +11,7 @@
 # / promote-many: the image is built here, from this exact commit, so a later
 # release just re-tags + mirrors it (see release.yml) instead of rebuilding.
 #
-# Two variants are built per target/arch from identical source, differing only in
+# Two variants are built per arch from identical source, differing only in
 # the licence feature compiled in: the enforcement-OFF Cloud image (unmarked tags,
 # shipped to ECR/ACR) and the enforcement-ON licensed image (a `-licensed` tag
 # marker, mirrored to the public DockerHub at release for self-hosted customers).
@@ -379,7 +379,7 @@ jobs:
           build-metadata: ${{ inputs.build-metadata }}
           release-version: ${{ inputs.release-version }}
 
-  # Build + push each per-arch, per-target downstream image to the downstream ECR,
+  # Build + push each per-arch downstream image to the downstream ECR,
   # built from the colocated engine checkout (no git/SSH). Runs on private runners.
   #
   # Two variants are built from the same source, differing only in the licence
@@ -392,7 +392,7 @@ jobs:
   #     Kept under a distinct tag so the enforcement-off bypass build can never be
   #     mistaken for it.
   image:
-    name: Image (${{ matrix.image.target }}, ${{ matrix.platform.arch }}${{ matrix.variant.marker }})
+    name: Image (${{ matrix.platform.arch }}${{ matrix.variant.marker }})
     needs: [preflight, builder]
     if: needs.preflight.outputs.configured == 'true'
     # Private runner per arch (downstream pipeline); label from a
@@ -403,11 +403,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image:
-          - target: prod
-            suffix: ''
-          - target: dev
-            suffix: -dev
         platform:
           - platform: linux/amd64
             arch: amd64
@@ -511,11 +506,9 @@ jobs:
           # readable; the full-sha S3 namespace (finalize) is the non-collision
           # backstop.
           docker-tag: rolling-${{ inputs.branch-slug }}-${{ needs.preflight.outputs.sha-pair }}${{ matrix.variant.marker }}
-          tag-suffix: ${{ matrix.image.suffix }}
           tag-branch: ${{ inputs.branch-slug }}
           build-metadata: ${{ inputs.build-metadata }}
           release-version: ${{ inputs.release-version }}
-          target: ${{ matrix.image.target }}
           platform: ${{ matrix.platform.platform }}
           publish: 'true'
           github-token: ${{ github.token }}
@@ -527,7 +520,7 @@ jobs:
   # so the multi-arch rolling tag is never created and the commit is not
   # promotable for the downstream (the per-arch images stay in the private ECR only).
   manifest:
-    name: Manifest (${{ matrix.image.name }}${{ matrix.variant.marker }})
+    name: Manifest${{ matrix.variant.marker }}
     needs: [preflight, image]
     if: needs.preflight.outputs.configured == 'true'
     # Private runner (downstream pipeline); label from a repo/org
@@ -540,11 +533,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image:
-          - name: prod
-            suffix: ''
-          - name: dev
-            suffix: -dev
         # Match the `image` job: the licensed variant exists only on release lines.
         variant: ${{ fromJSON(startsWith(inputs.branch-slug, 'releases-') && '[{"enforcement":"off","marker":""},{"enforcement":"on","marker":"-licensed"}]' || '[{"enforcement":"off","marker":""}]') }}
     steps:
@@ -582,7 +570,7 @@ jobs:
       - name: Test the image (scan + smoke test)
         uses: ./.github/actions/test-docker-image
         with:
-          image-ref: ${{ env.DOCKER_REPO }}:${{ env.ROLLING_TAG }}-linux-amd64${{ matrix.image.suffix }}
+          image-ref: ${{ env.DOCKER_REPO }}:${{ env.ROLLING_TAG }}-linux-amd64
           expect-start-failure: ${{ matrix.variant.enforcement == 'on' }}
 
       # Advisory audit-trail check that the downstream per-arch image carries the
@@ -592,13 +580,13 @@ jobs:
         continue-on-error: true
         uses: ./.github/actions/verify-attestations
         with:
-          image-ref: ${{ env.DOCKER_REPO }}:${{ env.ROLLING_TAG }}-linux-amd64${{ matrix.image.suffix }}
+          image-ref: ${{ env.DOCKER_REPO }}:${{ env.ROLLING_TAG }}-linux-amd64
 
       - name: Create multi-arch rolling manifest
         env:
-          BASE: ${{ env.DOCKER_REPO }}:${{ env.ROLLING_TAG }}${{ matrix.image.suffix }}
-          ARM64: ${{ env.DOCKER_REPO }}:${{ env.ROLLING_TAG }}-linux-arm64${{ matrix.image.suffix }}
-          AMD64: ${{ env.DOCKER_REPO }}:${{ env.ROLLING_TAG }}-linux-amd64${{ matrix.image.suffix }}
+          BASE: ${{ env.DOCKER_REPO }}:${{ env.ROLLING_TAG }}
+          ARM64: ${{ env.DOCKER_REPO }}:${{ env.ROLLING_TAG }}-linux-arm64
+          AMD64: ${{ env.DOCKER_REPO }}:${{ env.ROLLING_TAG }}-linux-amd64
         run: |
           set -euo pipefail
           docker buildx imagetools create --tag "${BASE}" "${ARM64}" "${AMD64}"
