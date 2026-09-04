@@ -33,11 +33,6 @@ on:
         required: false
         type: string
         description: "Extra features enabled in the binary"
-    secrets:
-      AWS_CI_ACCESS_KEY_ID:
-        description: "AWS access key ID"
-      AWS_CI_SECRET_ACCESS_KEY:
-        description: "AWS secret access key"
 
 defaults:
   run:
@@ -47,6 +42,9 @@ permissions:
   contents: read
   # contents: write
   # pull-requests: write
+
+env:
+  RUST_VERSION: 1.94.0
 
 jobs:
   prepare-vars:
@@ -64,12 +62,12 @@ jobs:
       release-branch: ${{ steps.outputs.outputs.release-branch }}
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.git-ref }}
           ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
@@ -186,25 +184,27 @@ jobs:
   test:
     name: Test
     needs: [prepare-vars]
-    runs-on: [runner-amd64-2xlarge]
+    runs-on: ${{ vars.RUNNER_AMD }}
     steps:
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.prepare-vars.outputs.release-branch }}
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           save-if: ${{ inputs.git-ref == 'main' }}
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@76081f88faadd9c23688b78b70c734925ea84cca # (Actions must be pinned by commit hash) cargo-llvm-cov
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
+        with:
+          tool: cargo-llvm-cov
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
@@ -222,7 +222,7 @@ jobs:
           cat /tmp/surrealdb.log || true
 
       - name: Upload coverage report
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: code-coverage-report
           path: target/llvm-cov/html/
@@ -231,17 +231,17 @@ jobs:
   lint:
     name: Lint
     needs: [prepare-vars]
-    runs-on: [runner-amd64-2xlarge]
+    runs-on: ${{ vars.RUNNER_AMD }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.prepare-vars.outputs.release-branch }}
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_VERSION }}
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
@@ -278,17 +278,17 @@ jobs:
     permissions:
       contents: write
     needs: [prepare-vars, test, lint, build]
-    runs-on: [runner-amd64-2xlarge]
+    runs-on: ${{ vars.RUNNER_AMD }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.prepare-vars.outputs.release-branch }}
 
       - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # stable (Actions must be pinned by commit hash)
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Install release-plz
         run: |
@@ -378,7 +378,7 @@ jobs:
           path: artifacts
 
       - name: Publish release
-        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         if: ${{ inputs.publish && inputs.create-release }}
         with:
           tag_name: v${{ needs.prepare-vars.outputs.version }}
@@ -394,7 +394,7 @@ jobs:
             artifacts/surreal-${{ needs.prepare-vars.outputs.name }}.*/*.exe
 
       - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7 # (Actions must be pinned by commit hash) v6.0.0
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         if: ${{ inputs.publish }}
         with:
           aws-region: us-east-2
@@ -433,6 +433,11 @@ jobs:
     name: Docker images
     needs: [prepare-vars, publish]
     if: ${{ inputs.publish }}
+    # Pass id-token: write down to docker.yml so it can authenticate to DockerHub
+    # keylessly via GitHub OIDC.
+    permissions:
+      contents: read
+      id-token: write
     uses: ./.github/workflows/docker.yml
     with:
       environment: ${{ needs.prepare-vars.outputs.environment }}
@@ -463,7 +468,7 @@ jobs:
           path: arm64
 
       - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7 # (Actions must be pinned by commit hash) v6.0.0
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
           aws-region: us-east-2
           aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
@@ -490,7 +495,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS
-        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7 # (Actions must be pinned by commit hash) v6.0.0
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
           aws-region: us-east-2
           aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
@@ -511,7 +516,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
 

@@ -33,9 +33,12 @@ permissions:
 jobs:
   release:
     name: Prepare release
+    # id-token: write flows down through publish-version.yml to docker.yml, which
+    # uses it for keyless DockerHub authentication via GitHub OIDC.
     permissions:
       contents: write
       pull-requests: write
+      id-token: write
     uses: ./.github/workflows/publish-version.yml
     with:
       git-ref: ${{ inputs.git-ref }}

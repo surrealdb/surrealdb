@@ -61,11 +61,23 @@ yanked = "warn"
 # - for RUSTSEC-2025-0134, rustls-pemfile is unmaintained - transitive dependency from axum-server, reqwest, tonic
 # - for RUSTSEC-2026-0009, time DoS via RFC 2822: we do not use time's RFC 2822 parsing (no Rfc2822/well_known in code).
 #   Our only use is doc examples (OffsetDateTime::now_utc()) and serde; time is pinned to 0.3.40 to avoid Windows build breakage from 0.3.47.
+# - for RUSTSEC-2026-0098/0099/0104 (rustls-webpki 0.101.7) and RUSTSEC-2026-0258 (h2 0.3): pinned transitively by
+#   tonic 0.10.2 via surrealdb-tikv-client (the storage-tikv feature). Bumping tonic is a breaking change unsuitable for
+#   a 2.6 patch release; the newer rustls-webpki 0.103 and h2 0.4 copies in the tree are already updated to patched
+#   versions, and exposure is limited to the TiKV client's TLS/HTTP2 stack. Tracked for the next major dependency bump.
+# - for RUSTSEC-2026-0194/0195 (quick-xml 0.26.0): pinned by pprof 0.14 -> inferno 0.11 (profiling/flamegraph output).
+#   inferno serialises its own generated flamegraph data, not untrusted input, so the XML DoS is not reachable here.
 ignore = [
     "RUSTSEC-2024-0436",
     "RUSTSEC-2025-0141",
     "RUSTSEC-2025-0134",
     "RUSTSEC-2026-0009",
+    "RUSTSEC-2026-0098",
+    "RUSTSEC-2026-0099",
+    "RUSTSEC-2026-0104",
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+    "RUSTSEC-2026-0258",
 ]
 
 # --------------------------------------------------

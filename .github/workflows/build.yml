@@ -33,11 +33,6 @@ on:
         type: boolean
         default: true
         description: "Compile with release flag"
-    secrets:
-      AWS_CI_ACCESS_KEY_ID:
-        description: "AWS access key ID"
-      AWS_CI_SECRET_ACCESS_KEY:
-        description: "AWS secret access key"
 
 defaults:
   run:
@@ -47,63 +42,8 @@ permissions:
   contents: read
 
 jobs:
-  docker-builder:
-    name: Prepare docker builder
-    runs-on: ubuntu-latest
-    outputs:
-      name: ${{ steps.image.outputs.name }}
-      tag: ${{ steps.image.outputs.tag }}
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # Actions must be pinned by hash
-        with:
-          ref: ${{ inputs.release-branch }}
-
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # (Actions must be pinned by commit hash) v4.0.0
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7 # (Actions must be pinned by commit hash) v6.0.0
-        with:
-          aws-access-key-id: ${{ secrets.AWS_CI_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_CI_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@c75a9a1d9c6f7cf1e4cfb2966839b590c3d46865 # (Actions must be pinned by commit hash) v2.1.0
-
-      - name: Prepare docker image name
-        id: image
-        run: |
-          set -x
-
-          # (Actions must be pinned by commit hash) Use the github branch name so we can use modified builders on custom branches
-          tag=$(echo ${{ github.ref_name }} | sed -e 's/[^a-zA-Z0-9]/-/g')
-
-          echo "name=${{ steps.login-ecr.outputs.registry }}/surrealdb-builder" >> $GITHUB_OUTPUT
-          echo "tag=${tag}" >> $GITHUB_OUTPUT
-
-      - name: Build & Push builder image
-        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # (Actions must be pinned by commit hash) v7.0.0
-        id: build
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          file: ./docker/Dockerfile
-          target: builder
-          cache-from: |
-            type=registry,ref=${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
-            type=registry,ref=${{ steps.image.outputs.name }}:main
-          cache-to: type=inline
-          push: true
-          tags: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
-          build-args: |
-            RUST_VERSION=1.86
-
   build:
     name: Build ${{ matrix.arch }} binary
-    needs: [docker-builder]
     strategy:
       fail-fast: false
       matrix:
@@ -180,7 +120,6 @@ jobs:
 
           # Linux amd64
           - arch: x86_64-unknown-linux-gnu
-            runner: [runner-amd64-2xlarge]
             file: surreal-${{ inputs.name }}.linux-amd64
             build-step: |
               # Build
@@ -200,16 +139,24 @@ jobs:
                 tar -xz -C $tmpdir
               export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpdir/lib
 
+              # Build the SurrealDB builder image, then compile the binary inside it.
+              # The runner's Docker layer cache keeps this build warm across runs.
+              docker build \
+                --target builder \
+                --build-arg RUST_VERSION=1.86 \
+                --tag surrealdb-builder:local \
+                --file ./docker/Dockerfile \
+                .
+
               docker run \
                 --rm -t \
-                --pull always \
                 -v $(pwd):/surrealdb \
                 -e SURREAL_BUILD_METADATA=$SURREAL_BUILD_METADATA \
                 -e RUSTFLAGS="${RUSTFLAGS}" \
                 -e ORT_STRATEGY=$ORT_STRATEGY \
                 -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
                 -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
-                ${{ needs.docker-builder.outputs.name }}:${{ needs.docker-builder.outputs.tag }} \
+                surrealdb-builder:local \
                   --target x86_64-unknown-linux-gnu ${extra_args} --locked
 
               # Package
@@ -224,7 +171,6 @@ jobs:
 
           # Linux arm64
           - arch: aarch64-unknown-linux-gnu
-            runner: [runner-arm64-2xlarge]
             file: surreal-${{ inputs.name }}.linux-arm64
             build-step: |
               set -x
@@ -246,16 +192,24 @@ jobs:
                 tar -xz -C $tmpdir
               export ORT_STRATEGY=system ORT_LIB_LOCATION=$tmpdir/lib
 
+              # Build the SurrealDB builder image, then compile the binary inside it.
+              # The runner's Docker layer cache keeps this build warm across runs.
+              docker build \
+                --target builder \
+                --build-arg RUST_VERSION=1.86 \
+                --tag surrealdb-builder:local \
+                --file ./docker/Dockerfile \
+                .
+
               docker run \
                 --rm -t \
-                --pull always \
                 -v $(pwd):/surrealdb \
                 -e SURREAL_BUILD_METADATA=$SURREAL_BUILD_METADATA \
                 -e RUSTFLAGS="${RUSTFLAGS}" \
                 -e ORT_STRATEGY=$ORT_STRATEGY \
                 -e ORT_LIB_LOCATION=$ORT_LIB_LOCATION \
                 -v $ORT_LIB_LOCATION:$ORT_LIB_LOCATION \
-                ${{ needs.docker-builder.outputs.name }}:${{ needs.docker-builder.outputs.tag }} \
+                surrealdb-builder:local \
                   --target aarch64-unknown-linux-gnu ${extra_args} --locked
 
               # Package
@@ -302,33 +256,21 @@ jobs:
               cp target/x86_64-pc-windows-msvc/${compile_profile}/surreal.exe surreal-${{ inputs.name }}.windows-amd64.exe
               echo $(certutil -hashfile surreal-${{ inputs.name }}.windows-amd64.exe SHA256 | sed -n '2p') > surreal-${{ inputs.name }}.windows-amd64.txt
 
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner || (matrix.arch == 'x86_64-unknown-linux-gnu' && vars.RUNNER_AMD) || vars.RUNNER_ARM }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.release-branch }}
 
       - name: Install Rust 1.86 toolchain
-        uses: dtolnay/rust-toolchain@3dd5273ed1de1fed7235f01571ea77b704362cc1 # 1.86.0 (Actions must be pinned by commit hash)
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # stable
         with:
+          toolchain: 1.86.0
           targets: ${{ matrix.arch }}
 
       - name: Add target for Rust 1.86 toolchain
         run: rustup target add ${{ matrix.arch }} --toolchain 1.86
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7 # (Actions must be pinned by commit hash) v6.0.0
-        if: ${{ matrix.arch == 'x86_64-unknown-linux-gnu' || matrix.arch == 'aarch64-unknown-linux-gnu' }}
-        with:
-          aws-access-key-id: ${{ secrets.AWS_CI_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_CI_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        if: ${{ matrix.arch == 'x86_64-unknown-linux-gnu' || matrix.arch == 'aarch64-unknown-linux-gnu' }}
-        uses: aws-actions/amazon-ecr-login@c75a9a1d9c6f7cf1e4cfb2966839b590c3d46865 # (Actions must be pinned by commit hash) v2.1.0
 
       - name: Output package versions
         run: |
@@ -344,7 +286,7 @@ jobs:
 
       - name: Upload artifacts
         if: ${{ inputs.upload }}
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ matrix.file }}
           path: |

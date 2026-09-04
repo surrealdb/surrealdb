@@ -31,7 +31,7 @@ ENTRYPOINT ["/builder-entrypoint.sh"]
 # This stage is used to install the timezone files
 ###
 
-FROM cgr.dev/chainguard/wolfi-base AS tzdata
+FROM cgr.dev/chainguard/wolfi-base:latest@sha256:e161445c05b19e668cb5cc44df2f0403329fd4f0ac892794255e328e760612a1 AS tzdata
 
 RUN apk add --no-cache tzdata
 
@@ -42,7 +42,7 @@ RUN apk add --no-cache tzdata
 #
 # Development image (built on the CI environment)
 #
-FROM cgr.dev/chainguard/glibc-dynamic:latest-dev AS dev-ci
+FROM cgr.dev/chainguard/glibc-dynamic:latest-dev@sha256:8f2b1cf92d7f7390bff0e6f4ea8206f3a4e1b17597a925cb804b8d54f7449c9d AS dev-ci
 
 ARG TARGETOS
 ARG TARGETARCH
@@ -75,7 +75,7 @@ ENTRYPOINT ["/surreal"]
 #
 # Production image (built on the CI environment)
 #
-FROM cgr.dev/chainguard/glibc-dynamic:latest AS prod-ci
+FROM cgr.dev/chainguard/glibc-dynamic:latest@sha256:0dc86136587f0ac15d61d307dcd8193e4a9880d26d2f2659b9e2b142640eecc0 AS prod-ci
 
 COPY --from=dev-ci /surreal /surreal
 
@@ -96,7 +96,7 @@ ENTRYPOINT ["/surreal"]
 #
 # Development image (built locally)
 #
-FROM cgr.dev/chainguard/glibc-dynamic:latest-dev AS dev
+FROM cgr.dev/chainguard/glibc-dynamic:latest-dev@sha256:8f2b1cf92d7f7390bff0e6f4ea8206f3a4e1b17597a925cb804b8d54f7449c9d AS dev
 
 ARG SURREALDB_BINARY=target/release/surreal
 
@@ -126,7 +126,7 @@ ENTRYPOINT ["/surreal"]
 #
 # Production image (built locally)
 #
-FROM cgr.dev/chainguard/glibc-dynamic:latest AS prod
+FROM cgr.dev/chainguard/glibc-dynamic:latest@sha256:0dc86136587f0ac15d61d307dcd8193e4a9880d26d2f2659b9e2b142640eecc0 AS prod
 
 COPY --from=dev /surreal /surreal
 
