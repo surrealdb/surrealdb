@@ -161,6 +161,25 @@ async fn put(b: &TestBackend) {
 	tx.cancel().await.unwrap();
 }
 
+async fn put_after_delete(b: &TestBackend) {
+	// Create a new datastore
+	let ds = b.create_ds().await;
+	// Create a writeable transaction
+	let tx = ds.transaction(Write).await.unwrap();
+	tx.put("test".as_bytes().into(), "one".as_bytes().to_vec()).await.unwrap();
+	tx.commit().await.unwrap();
+	// Delete then reinsert the same key within a single transaction
+	let tx = ds.transaction(Write).await.unwrap();
+	tx.del("test".as_bytes().into()).await.unwrap();
+	tx.put("test".as_bytes().into(), "two".as_bytes().to_vec()).await.unwrap();
+	tx.commit().await.unwrap();
+	// Create a readonly transaction
+	let tx = ds.transaction(Read).await.unwrap();
+	let val = tx.get("test".as_bytes().into(), None).await.unwrap();
+	assert!(matches!(val.as_deref(), Some(b"two")));
+	tx.cancel().await.unwrap();
+}
+
 async fn putc(b: &TestBackend) {
 	// Create a new datastore
 	let ds = b.create_ds().await;
@@ -1154,6 +1173,7 @@ kvs_test!(getu_readonly, except = [surrealds]);
 kvs_test!(getu_unsupported, only = [surrealds]);
 kvs_test!(set);
 kvs_test!(put);
+kvs_test!(put_after_delete);
 kvs_test!(putc);
 kvs_test!(del);
 kvs_test!(delc);

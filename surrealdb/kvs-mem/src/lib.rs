@@ -398,8 +398,13 @@ impl Transactable for Transaction {
 			}
 			// Load the inner transaction
 			let mut inner = self.inner.write().await;
-			// Set the key if empty
-			inner.put(key.into_inner(), val).map_err(kvs_error)?;
+			// Set the key if empty.
+			// `put` checks the base store directly and would reject a key deleted
+			// earlier in this transaction; the current view must decide existence.
+			match inner.get(key.as_slice()).map_err(kvs_error)? {
+				None => inner.set(key.into_inner(), val).map_err(kvs_error)?,
+				_ => return Err(Error::TransactionKeyAlreadyExists),
+			}
 			// Return result
 			Ok(())
 		})
