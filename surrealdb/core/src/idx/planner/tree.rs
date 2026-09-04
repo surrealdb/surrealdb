@@ -106,6 +106,12 @@ pub(super) type IdiomCol = usize;
 pub(super) type LocalIndexRefs = Vec<(IndexReference, IdiomCol)>;
 pub(super) type RemoteIndexRefs = Arc<Vec<(Arc<Idiom>, LocalIndexRefs)>>;
 
+#[derive(Clone, Copy)]
+enum IndexScope {
+	Local,
+	Remote,
+}
+
 impl<'a> TreeBuilder<'a> {
 	fn new(ctx: &'a StatementContext<'a>, table: &'a TableName) -> Self {
 		let with_indexes = WithIndexes::with_capacity(ctx.with);
@@ -553,7 +559,9 @@ impl<'a> TreeBuilder<'a> {
 		if let Some(remote_irs) = remote_irs {
 			let mut remote_ios = Vec::with_capacity(remote_irs.len());
 			for (id, irs) in remote_irs.iter() {
-				if let Some(io) = self.lookup_index_option(irs, o, id, node, exp, p)? {
+				if let Some(io) =
+					self.lookup_index_option(irs, o, id, node, exp, p, IndexScope::Remote)?
+				{
 					remote_ios.push(io);
 				} else {
 					return Ok(None);
@@ -570,10 +578,11 @@ impl<'a> TreeBuilder<'a> {
 			}
 			return Ok(None);
 		}
-		let io = self.lookup_index_option(local_irs, o, id, node, exp, p)?;
+		let io = self.lookup_index_option(local_irs, o, id, node, exp, p, IndexScope::Local)?;
 		Ok(io)
 	}
 
+	#[expect(clippy::too_many_arguments)]
 	fn lookup_index_option(
 		&mut self,
 		irs: &LocalIndexRefs,
@@ -582,12 +591,14 @@ impl<'a> TreeBuilder<'a> {
 		n: &Node,
 		e: &Arc<Expr>,
 		p: IdiomPosition,
+		scope: IndexScope,
 	) -> Result<Option<IndexOption>> {
 		let mut res = None;
 		for (index_reference, col) in irs.iter() {
 			let op = match &index_reference.index {
-				Index::Idx => self.eval_index_operator(index_reference, op, n, p, *col),
-				Index::Uniq => self.eval_index_operator(index_reference, op, n, p, *col),
+				Index::Idx | Index::Uniq => {
+					self.eval_index_operator(index_reference, op, n, p, *col, scope)
+				}
 				Index::FullText {
 					..
 				} if *col == 0 => Self::eval_matches_operator(op, n),
@@ -720,13 +731,16 @@ impl<'a> TreeBuilder<'a> {
 		n: &Node,
 		p: IdiomPosition,
 		col: IdiomCol,
+		scope: IndexScope,
 	) -> Option<IndexOperator> {
 		if let Some(v) = n.is_computed() {
 			#[allow(clippy::collapsible_match)]
 			match (op, v, p) {
 				(BinaryOperator::Equal | BinaryOperator::ExactEqual, v, _) => {
 					let iop = IndexOperator::Equality(v);
-					self.index_map.check_compound(ixr, col, &iop);
+					if matches!(scope, IndexScope::Local) {
+						self.index_map.check_compound(ixr, col, &iop);
+					}
 					if col == 0 {
 						return Some(iop);
 					}
@@ -743,7 +757,9 @@ impl<'a> TreeBuilder<'a> {
 				}
 				(BinaryOperator::Inside, v, IdiomPosition::Left) => {
 					if let Value::Array(a) = v.as_ref() {
-						self.index_map.check_compound_array(ixr, col, a);
+						if matches!(scope, IndexScope::Local) {
+							self.index_map.check_compound_array(ixr, col, a);
+						}
 						if col == 0 {
 							return Some(IndexOperator::Union(v));
 						}
@@ -772,7 +788,9 @@ impl<'a> TreeBuilder<'a> {
 					p,
 				) => {
 					let iop = IndexOperator::RangePart(p.transform(op), v);
-					self.index_map.check_compound(ixr, col, &iop);
+					if matches!(scope, IndexScope::Local) {
+						self.index_map.check_compound(ixr, col, &iop);
+					}
 					if col == 0 {
 						return Some(iop);
 					}
@@ -865,13 +883,14 @@ impl IndexReference {
 
 impl Hash for IndexReference {
 	fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-		state.write_usize(self.idx);
+		self.table_name.hash(state);
+		self.index_id.hash(state);
 	}
 }
 
 impl PartialEq for IndexReference {
 	fn eq(&self, other: &Self) -> bool {
-		self.idx == other.idx
+		self.table_name == other.table_name && self.index_id == other.index_id
 	}
 }
 

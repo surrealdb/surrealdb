@@ -703,34 +703,34 @@ mod tests {
 	use std::collections::HashSet;
 	use std::sync::Arc;
 
-	use crate::expr::Idiom;
-	use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
-	use crate::idx::planner::tree::{IdiomPosition, IndexReference};
-	use crate::val::{Array, Value};
+	use crate::catalog::{Index, IndexDefinition, IndexId};
+	use crate::idx::planner::plan::RangeValue;
+	use crate::idx::planner::tree::IndexReference;
+	use crate::val::Value;
 
 	#[expect(clippy::mutable_key_type)]
 	#[test]
-	fn test_hash_index_option() {
+	fn test_hash_index_reference() {
+		fn index(table: &str) -> IndexDefinition {
+			IndexDefinition {
+				index_id: IndexId(1),
+				name: "idx".into(),
+				table_name: table.into(),
+				cols: vec![],
+				index: Index::Idx,
+				comment: None,
+				prepare_remove: false,
+			}
+		}
+
+		let indexes: Arc<[IndexDefinition]> = Arc::new([index("table")]);
 		let mut set = HashSet::new();
-		let io1 = IndexOption::new(
-			IndexReference::new(Arc::new([]), 1),
-			Some(Idiom::field("test".to_owned()).into()),
-			IdiomPosition::Right,
-			IndexOperator::Equality(Value::Array(Array::from(vec!["test"])).into()),
-		);
+		set.insert(IndexReference::new(Arc::clone(&indexes), 0));
+		set.insert(IndexReference::new(indexes, 0));
+		set.insert(IndexReference::new(Arc::new([index("table")]), 0));
+		set.insert(IndexReference::new(Arc::new([index("other")]), 0));
 
-		let io2 = IndexOption::new(
-			IndexReference::new(Arc::new([]), 1),
-			Some(Idiom::field("test".to_owned()).into()),
-			IdiomPosition::Right,
-			IndexOperator::Equality(Value::Array(Array::from(vec!["test"])).into()),
-		);
-
-		set.insert(io1);
-		set.insert(io2.clone());
-		set.insert(io2);
-
-		assert_eq!(set.len(), 1);
+		assert_eq!(set.len(), 2);
 	}
 
 	#[test]
