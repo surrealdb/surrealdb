@@ -6039,6 +6039,97 @@ mod test {
 		Ok(())
 	}
 
+	#[tokio::test]
+	async fn record_auth_is_scoped_to_its_ns_db() -> Result<()> {
+		// A record-scoped principal is only authorized for the namespace and
+		// database it authenticated against. If the session context drifts to
+		// another namespace or database (via a USE statement or connection
+		// headers), every document operation must be rejected — even when the
+		// target table's PERMISSIONS clauses would otherwise allow the
+		// operation for record users.
+		let ds = Datastore::new("memory").await?;
+		let txn = ds.transaction(Write).await?;
+		txn.ensure_ns_db(None, "first", "first").await?;
+		txn.ensure_ns_db(None, "first", "other").await?;
+		txn.ensure_ns_db(None, "second", "second").await?;
+		txn.commit().await?;
+		// Victim data in `second/second` with fully permissive permissions
+		let owner = Session::owner().with_ns("second").with_db("second");
+		execute_all(
+			&ds,
+			&owner,
+			"DEFINE TABLE thing SCHEMALESS PERMISSIONS FULL; CREATE thing:1 SET secret = 'v';",
+		)
+		.await?;
+		// A record principal authenticated against `first/first`, whose
+		// session context has drifted to `second/second`
+		let mut rec = Session::for_record(
+			"first",
+			"first",
+			"user",
+			surrealdb_types::Value::RecordId(surrealdb_types::RecordId::new("user", "tester")),
+		);
+		rec.ns = Some("second".to_owned());
+		rec.db = Some("second".to_owned());
+		// Every write into the drifted scope must be rejected
+		for query in [
+			"CREATE thing:2 SET secret = 'w'",
+			"UPDATE thing:1 SET secret = 'w'",
+			"UPSERT thing:1 SET secret = 'w'",
+			"DELETE thing:1",
+			"INSERT INTO thing { id: thing:3, secret: 'w' }",
+		] {
+			let err = execute_all(&ds, &rec, query)
+				.await
+				.expect_err(&format!("record user expected to be denied: {query}"));
+			assert!(
+				err.to_string().contains("namespace"),
+				"expected a namespace authorization error for {query}, got: {err}"
+			);
+		}
+		// Reads from the drifted scope must be rejected as well
+		let err = execute_all(&ds, &rec, "SELECT * FROM thing")
+			.await
+			.expect_err("record user expected to be denied: SELECT");
+		assert!(
+			err.to_string().contains("namespace"),
+			"expected a namespace authorization error for SELECT, got: {err}"
+		);
+		// A drift within the same namespace but to a different database must
+		// also be rejected
+		let owner = Session::owner().with_ns("first").with_db("other");
+		execute_all(
+			&ds,
+			&owner,
+			"DEFINE TABLE thing SCHEMALESS PERMISSIONS FULL; CREATE thing:1 SET secret = 'v';",
+		)
+		.await?;
+		let mut rec = Session::for_record(
+			"first",
+			"first",
+			"user",
+			surrealdb_types::Value::RecordId(surrealdb_types::RecordId::new("user", "tester")),
+		);
+		rec.db = Some("other".to_owned());
+		let err = execute_all(&ds, &rec, "UPDATE thing:1 SET secret = 'w'")
+			.await
+			.expect_err("record user expected to be denied in a sibling database");
+		assert!(
+			err.to_string().contains("database"),
+			"expected a database authorization error, got: {err}"
+		);
+		// The victim data must be unchanged
+		let owner = Session::owner().with_ns("second").with_db("second");
+		let mut res = ds.execute("SELECT VALUE secret FROM thing", &owner, None).await?;
+		let val = res.remove(0).result?;
+		assert_eq!(
+			val,
+			PublicValue::Array(surrealdb_types::array!["v"]),
+			"victim data was modified by an out-of-scope record user"
+		);
+		Ok(())
+	}
+
 	#[cfg(feature = "gql")]
 	#[tokio::test]
 	async fn execute_gql_available_without_experimental_capability() -> Result<()> {

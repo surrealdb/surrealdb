@@ -499,6 +499,22 @@ impl Document {
 		perms: &Permission,
 		clause: PermissionClauseKind,
 	) -> Result<(), IgnoreError> {
+		// Check that record authentication matches the execution scope,
+		// mirroring validate_record_user_access on the streaming path
+		if opt.auth.is_record() {
+			let ns: &str = &self.doc_ctx.ns().name;
+			if opt.auth.level().ns() != Some(ns) {
+				return Err(IgnoreError::from(anyhow::Error::new(ExecError::NsNotAllowed {
+					ns: ns.into(),
+				})));
+			}
+			let db: &str = &self.doc_ctx.db().name;
+			if opt.auth.level().db() != Some(db) {
+				return Err(IgnoreError::from(anyhow::Error::new(ExecError::DbNotAllowed {
+					db: db.into(),
+				})));
+			}
+		}
 		match perms {
 			Permission::None => Err(IgnoreError::Ignore),
 			Permission::Full => Ok(()),
