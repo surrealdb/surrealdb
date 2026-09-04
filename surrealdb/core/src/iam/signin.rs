@@ -13,7 +13,7 @@ use surrealdb_types::ToSql;
 use uuid::Uuid;
 
 use super::access::{
-	authenticate_generic, authenticate_record, create_refresh_token_record,
+	access_session, authenticate_generic, authenticate_record, create_refresh_token_record,
 	revoke_refresh_token_record,
 };
 use super::verify::{verify_db_creds, verify_ns_creds, verify_root_creds};
@@ -306,10 +306,7 @@ pub async fn db_access(
 				// This record access allows signin
 				Some(val) => {
 					// Setup the system session for finding the signin record
-					let mut sess =
-						Session::for_level(Level::Database(ns.clone(), db.clone()), Role::Editor);
-					sess.ip.clone_from(&session.ip);
-					sess.or.clone_from(&session.or);
+					let sess = access_session(&av, Some(ns.as_str()), Some(db.as_str()), session)?;
 					// Compute the value with the params
 					match kvs.evaluate(val, &sess, Some(vars)).await {
 						// The signin value succeeded
@@ -341,10 +338,12 @@ pub async fn db_access(
 									if let Some(au) = &av.authenticate {
 										// Setup the system session for finding the signin
 										// record
-										let mut sess = Session::for_level(
-											Level::Database(ns.clone(), db.clone()),
-											Role::Editor,
-										);
+										let mut sess = access_session(
+											&av,
+											Some(ns.as_str()),
+											Some(db.as_str()),
+											session,
+										)?;
 										sess.rd = Some(
 											crate::val::convert_value_to_public_value(
 												Value::RecordId(rid.clone().into()),
@@ -357,8 +356,6 @@ pub async fn db_access(
 											)
 											.expect("claims conversion should succeed"),
 										);
-										sess.ip.clone_from(&session.ip);
-										sess.or.clone_from(&session.or);
 										rid = authenticate_record(kvs, &sess, au).await?;
 									}
 									// Create refresh token if defined for the record access
@@ -892,23 +889,16 @@ pub(crate) async fn signin_bearer(
 	// AUTHENTICATE clause
 	if let Some(au) = &av.authenticate {
 		// Setup the system session for executing the clause.
-		let mut sess = match (&ns, &db) {
-			(Some(ns), Some(db)) => Session::for_level(
-				Level::Database(ns.name.to_string(), db.name.to_string()),
-				Role::Editor,
-			),
-			(Some(ns), None) => {
-				Session::for_level(Level::Namespace(ns.name.to_string()), Role::Editor)
-			}
-			(None, None) => Session::editor(),
-			(None, Some(_)) => bail!(ExecError::NsEmpty),
-		};
+		let mut sess = access_session(
+			&av,
+			ns.map(|ns| ns.name.as_str()),
+			db.map(|db| db.name.as_str()),
+			session,
+		)?;
 		sess.tk = Some(
 			crate::val::convert_value_to_public_value(claims.clone().into_claims_object().into())
 				.expect("claims conversion should succeed"),
 		);
-		sess.ip.clone_from(&session.ip);
-		sess.or.clone_from(&session.or);
 		authenticate_generic(kvs, &sess, au).await?;
 	}
 	// If the bearer grant is a refresh token.

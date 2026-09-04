@@ -8,7 +8,7 @@ use surrealdb_rpc::Token;
 use surrealdb_types::ToSql;
 use uuid::Uuid;
 
-use super::access::{authenticate_record, create_refresh_token_record};
+use super::access::{access_session, authenticate_record, create_refresh_token_record};
 use crate::catalog;
 use crate::catalog::Error as CatalogError;
 use crate::catalog::providers::{AuthorisationProvider, DatabaseProvider};
@@ -17,7 +17,7 @@ use crate::err::exec_error;
 use crate::exec::Error as ExecError;
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::{Audience, Claims};
-use crate::iam::{Actor, Auth, Error as AuthError, Level, Role, algorithm_to_jwt_algorithm};
+use crate::iam::{Actor, Auth, Error as AuthError, Level, algorithm_to_jwt_algorithm};
 use crate::kvs::TransactionType::*;
 use crate::kvs::{Datastore, is_retryable_transaction_conflict};
 use crate::types::PublicVariables;
@@ -212,9 +212,7 @@ pub async fn db_access(
 	};
 	// Setup the query params
 	// Setup the system session for finding the signup record
-	let mut sess = Session::for_level(Level::Database(ns.clone(), db.clone()), Role::Editor);
-	sess.ip.clone_from(&session.ip);
-	sess.or.clone_from(&session.or);
+	let sess = access_session(&av, Some(ns.as_str()), Some(db.as_str()), session)?;
 	// Compute the value with the params
 	match kvs.evaluate(val, &sess, Some(vars)).await {
 		// The signup value succeeded
@@ -242,8 +240,7 @@ pub async fn db_access(
 			// AUTHENTICATE clause
 			if let Some(au) = &av.authenticate {
 				// Setup the system session for finding the signin record
-				let mut sess =
-					Session::for_level(Level::Database(ns.clone(), db.clone()), Role::Editor);
+				let mut sess = access_session(&av, Some(ns.as_str()), Some(db.as_str()), session)?;
 				sess.rd = Some(
 					crate::val::convert_value_to_public_value(Value::RecordId(rid.clone().into()))
 						.expect("record id conversion should succeed"),
@@ -254,8 +251,6 @@ pub async fn db_access(
 					)
 					.expect("claims conversion should succeed"),
 				);
-				sess.ip.clone_from(&session.ip);
-				sess.or.clone_from(&session.or);
 				rid = authenticate_record(kvs, &sess, au).await?;
 			}
 			// Create refresh token if defined for the record access method

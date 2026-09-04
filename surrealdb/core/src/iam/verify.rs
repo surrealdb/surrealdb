@@ -15,7 +15,7 @@ use crate::dbs::Session;
 use crate::err::Error;
 #[cfg(feature = "jwks")]
 use crate::expr::Error as ExprError;
-use crate::iam::access::{authenticate_generic, authenticate_record};
+use crate::iam::access::{access_session, authenticate_generic, authenticate_record};
 use crate::iam::issue::expiration;
 #[cfg(feature = "jwks")]
 use crate::iam::jwks;
@@ -278,7 +278,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// AUTHENTICATE clause
 			if let Some(au) = &de.authenticate {
 				// Setup the system session for finding the signin record
-				let mut sess = Session::editor().with_ns(ns).with_db(db);
+				let mut sess = access_session(&de, Some(ns.as_str()), Some(db.as_str()), session)?;
 				sess.rd = Some(
 					crate::val::convert_value_to_public_value(crate::val::Value::RecordId(
 						rid.clone().into(),
@@ -291,8 +291,6 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					)
 					.expect("claims conversion should succeed"),
 				);
-				sess.ip.clone_from(&session.ip);
-				sess.or.clone_from(&session.or);
 				rid = authenticate_record(kvs, &sess, au).await?;
 			}
 			// Log the success
@@ -391,15 +389,14 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					// AUTHENTICATE clause
 					if let Some(au) = &de.authenticate {
 						// Setup the system session for executing the clause
-						let mut sess = Session::editor().with_ns(ns).with_db(db);
+						let mut sess =
+							access_session(&de, Some(ns.as_str()), Some(db.as_str()), session)?;
 						sess.tk = Some(
 							crate::val::convert_value_to_public_value(
 								token_data.claims.clone().into_claims_object().into(),
 							)
 							.expect("claims conversion should succeed"),
 						);
-						sess.ip.clone_from(&session.ip);
-						sess.or.clone_from(&session.or);
 						authenticate_generic(kvs, &sess, au).await?;
 					}
 					// Parse the roles
@@ -464,15 +461,14 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						verify_token(token, &cf.0, &cf.1)?;
 						// AUTHENTICATE clause
 						// Setup the system session for finding the signin record
-						let mut sess = Session::editor().with_ns(ns).with_db(db);
+						let mut sess =
+							access_session(&de, Some(ns.as_str()), Some(db.as_str()), session)?;
 						sess.tk = Some(
 							crate::val::convert_value_to_public_value(
 								token_data.claims.clone().into_claims_object().into(),
 							)
 							.expect("claims conversion should succeed"),
 						);
-						sess.ip.clone_from(&session.ip);
-						sess.or.clone_from(&session.or);
 						let rid = authenticate_record(kvs, &sess, au).await?;
 						// Log the success
 						debug!("Authenticated with record access method `{}`", ac);
@@ -635,15 +631,13 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// AUTHENTICATE clause
 			if let Some(au) = &de.authenticate {
 				// Setup the system session for executing the clause
-				let mut sess = Session::editor().with_ns(ns);
+				let mut sess = access_session(&de, Some(ns.as_str()), None, session)?;
 				sess.tk = Some(
 					crate::val::convert_value_to_public_value(
 						token_data.claims.clone().into_claims_object().into(),
 					)
 					.expect("claims conversion should succeed"),
 				);
-				sess.ip.clone_from(&session.ip);
-				sess.or.clone_from(&session.or);
 				authenticate_generic(kvs, &sess, au).await?;
 			}
 			// Parse the roles
@@ -793,15 +787,13 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// AUTHENTICATE clause
 			if let Some(au) = &de.authenticate {
 				// Setup the system session for executing the clause
-				let mut sess = Session::editor();
+				let mut sess = access_session(&de, None, None, session)?;
 				sess.tk = Some(
 					crate::val::convert_value_to_public_value(
 						token_data.claims.clone().into_claims_object().into(),
 					)
 					.expect("claims conversion should succeed"),
 				);
-				sess.ip.clone_from(&session.ip);
-				sess.or.clone_from(&session.or);
 				authenticate_generic(kvs, &sess, au).await?;
 			}
 			// Parse the roles
@@ -2323,6 +2315,275 @@ mod tests {
 					);
 				}
 			}
+		}
+	}
+
+	/// Returns the names of the namespaces currently defined at root level.
+	async fn root_namespaces(ds: &Datastore) -> Vec<String> {
+		let mut info = ds.execute("INFO FOR ROOT", &Session::owner(), None).await.unwrap();
+		let info = info.remove(0).result.unwrap();
+		let crate::types::PublicValue::Object(info) = info else {
+			panic!("INFO FOR ROOT did not return an object: {info:?}");
+		};
+		let Some(crate::types::PublicValue::Object(namespaces)) = info.get("namespaces") else {
+			panic!("INFO FOR ROOT did not list namespaces: {info:?}");
+		};
+		namespaces.keys().cloned().collect()
+	}
+
+	/// Checks the outcome of presenting a token whose AUTHENTICATE clause
+	/// attempts a root-level operation. The namespaces in `present` must still
+	/// exist, those in `absent` must not, and verification must have been
+	/// rejected with `InvalidAuth`. Namespace state is checked before the
+	/// verification result so that a clause which ran with excess privileges
+	/// is reported as such rather than as an unexpected success.
+	async fn assert_root_operation_denied(
+		ds: &Datastore,
+		res: Result<()>,
+		present: &[&str],
+		absent: &[&str],
+		clause: &str,
+	) {
+		let namespaces = root_namespaces(ds).await;
+		for ns in present {
+			assert!(
+				namespaces.iter().any(|n| n == ns),
+				"Namespace `{ns}` was removed by a {clause} AUTHENTICATE clause: {namespaces:?}"
+			);
+		}
+		for ns in absent {
+			assert!(
+				!namespaces.iter().any(|n| n == ns),
+				"Namespace `{ns}` was created by a {clause} AUTHENTICATE clause: {namespaces:?}"
+			);
+		}
+		assert!(
+			res.is_err(),
+			"Token was accepted despite a root-level statement in a {clause} AUTHENTICATE clause"
+		);
+		match res.unwrap_err().downcast().expect("Unexpected error kind") {
+			AuthError::InvalidAuth => {}
+			e => panic!("Unexpected error, expected InvalidAuth found {e}"),
+		}
+	}
+
+	#[tokio::test]
+	async fn test_token_authenticate_clause_minimum_privileges() {
+		// The AUTHENTICATE clause must be evaluated with a session scoped to
+		// the access method's own level, never at root level. A database- or
+		// namespace-level access definer must not be able to execute
+		// root-level statements (e.g. removing another namespace) when a
+		// token is presented.
+		let secret = "jwt_secret";
+		let key = EncodingKey::from_secret(secret.as_ref());
+		let root = Session::owner();
+
+		// Database-level JWT access attempting a root-level operation
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			ds.execute("DEFINE NAMESPACE second", &root, None).await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				format!(
+					r#"
+					DEFINE ACCESS user ON DATABASE TYPE JWT
+						ALGORITHM HS512 KEY '{secret}'
+						AUTHENTICATE {{
+							REMOVE NAMESPACE second;
+						}}
+						DURATION FOR SESSION 2h
+					;
+				"#
+				)
+				.as_str(),
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			let claims = Claims {
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				ac: Some("user".to_string()),
+				..Claims::default()
+			};
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+			assert_root_operation_denied(&ds, res, &["second"], &[], "database-level").await;
+		}
+
+		// Namespace-level JWT access attempting a root-level operation
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			let sess = Session::owner().with_ns("test");
+			ds.execute(
+				format!(
+					r#"
+					DEFINE ACCESS user ON NAMESPACE TYPE JWT
+						ALGORITHM HS512 KEY '{secret}'
+						AUTHENTICATE {{
+							DEFINE NAMESPACE pwned;
+						}}
+						DURATION FOR SESSION 2h
+					;
+				"#
+				)
+				.as_str(),
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			let claims = Claims {
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ns: Some("test".to_string()),
+				ac: Some("user".to_string()),
+				..Claims::default()
+			};
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+			// The access method's own namespace anchors the listing, so an
+			// empty or malformed INFO FOR ROOT cannot satisfy the check
+			assert_root_operation_denied(&ds, res, &["test"], &["pwned"], "namespace-level").await;
+		}
+
+		// Record access with an `id` claim attempting a root-level operation
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			ds.execute("DEFINE NAMESPACE second", &root, None).await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				format!(
+					r#"
+					DEFINE ACCESS user ON DATABASE TYPE RECORD
+						WITH JWT ALGORITHM HS512 KEY '{secret}'
+						AUTHENTICATE {{
+							REMOVE NAMESPACE second;
+							RETURN $auth;
+						}}
+						DURATION FOR SESSION 2h
+					;
+
+					CREATE user:1;
+				"#
+				)
+				.as_str(),
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			let claims = Claims {
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				ac: Some("user".to_string()),
+				id: Some("user:1".to_string()),
+				..Claims::default()
+			};
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+			assert_root_operation_denied(&ds, res, &["second"], &[], "record-access").await;
+		}
+
+		// Record access without an `id` claim attempting a root-level operation.
+		// This takes the path where the AUTHENTICATE clause itself resolves the
+		// record, which is only reachable when the token carries no `id`.
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			ds.execute("DEFINE NAMESPACE second", &root, None).await.unwrap();
+			let sess = Session::owner().with_ns("test").with_db("test");
+			ds.execute(
+				format!(
+					r#"
+					DEFINE ACCESS user ON DATABASE TYPE RECORD
+						WITH JWT ALGORITHM HS512 KEY '{secret}'
+						AUTHENTICATE {{
+							REMOVE NAMESPACE second;
+							RETURN user:1;
+						}}
+						DURATION FOR SESSION 2h
+					;
+
+					CREATE user:1;
+				"#
+				)
+				.as_str(),
+				&sess,
+				None,
+			)
+			.await
+			.unwrap();
+
+			let claims = Claims {
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				ac: Some("user".to_string()),
+				..Claims::default()
+			};
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+			assert_root_operation_denied(&ds, res, &["second"], &[], "record-access").await;
+		}
+
+		// Root-level JWT access performing the same root-level operation. This
+		// is the positive control: the clause is legitimately evaluated at
+		// root level, so the token is accepted and the namespace is removed.
+		{
+			let ds = Datastore::new("memory").await.unwrap();
+			ds.execute("DEFINE NAMESPACE second", &root, None).await.unwrap();
+			ds.execute(
+				format!(
+					r#"
+					DEFINE ACCESS user ON ROOT TYPE JWT
+						ALGORITHM HS512 KEY '{secret}'
+						AUTHENTICATE {{
+							REMOVE NAMESPACE second;
+						}}
+						DURATION FOR SESSION 2h
+					;
+				"#
+				)
+				.as_str(),
+				&root,
+				None,
+			)
+			.await
+			.unwrap();
+
+			let claims = Claims {
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ac: Some("user".to_string()),
+				..Claims::default()
+			};
+			let enc = encode(&HEADER, &claims, &key).unwrap();
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
+			assert!(res.is_ok(), "Root-level AUTHENTICATE clause was rejected: {res:?}");
+			let namespaces = root_namespaces(&ds).await;
+			assert!(
+				!namespaces.iter().any(|n| n == "second"),
+				"Root-level AUTHENTICATE clause did not remove the namespace: {namespaces:?}"
+			);
 		}
 	}
 

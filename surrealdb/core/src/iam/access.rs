@@ -1,19 +1,48 @@
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use reblessive;
 
 use crate::catalog;
+use crate::catalog::base::Base as AccessBase;
 use crate::dbs::Session;
 use crate::err::exec_error;
 use crate::exec::Error as ExecError;
 use crate::expr::statements::access;
 use crate::expr::{Base, Expr};
-use crate::iam::Error as AuthError;
+use crate::iam::{Error as AuthError, Level, Role};
 use crate::kvs::TransactionType::*;
 use crate::kvs::{Datastore, is_retryable_transaction_conflict};
 use crate::types::{PublicRecordId, PublicValue};
 use crate::val::RecordId;
+
+// Create the system session used to evaluate an access method's SIGNUP, SIGNIN or
+// AUTHENTICATE clause. The session is an Editor scoped to the level implied by the
+// definition's base and the namespace and database it was resolved in. A mismatch
+// between the two fails authentication rather than widening the scope.
+pub(crate) fn access_session(
+	de: &catalog::AccessDefinition,
+	ns: Option<&str>,
+	db: Option<&str>,
+	caller: &Session,
+) -> Result<Session> {
+	let level = match (&de.base, ns, db) {
+		(AccessBase::Root, None, None) => Level::Root,
+		(AccessBase::Ns, Some(ns), None) => Level::Namespace(ns.to_owned()),
+		(AccessBase::Db, Some(ns), Some(db)) => Level::Database(ns.to_owned(), db.to_owned()),
+		(base, ns, db) => {
+			warn!(
+				"Access method `{}` is defined at {base} level but was resolved with namespace {ns:?} and database {db:?}",
+				de.name
+			);
+			bail!(AuthError::InvalidAuth)
+		}
+	};
+	let mut sess = Session::for_level(level, Role::Editor);
+	sess.ip.clone_from(&caller.ip);
+	sess.or.clone_from(&caller.or);
+	Ok(sess)
+}
 
 // Execute the AUTHENTICATE clause for a record access method
 pub(crate) async fn authenticate_record(
