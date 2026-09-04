@@ -57,6 +57,7 @@ description = "Check documentation generation"
 command = "cargo"
 args = [
     "doc",
+    "--locked",
     "--no-deps",
     "--package",
     "surrealdb",
@@ -131,6 +132,7 @@ description = "Run clippy linting"
 command = "cargo"
 args = [
     "clippy",
+    "--locked",
     "--workspace",
     "--all-targets",
     "--features",
@@ -160,6 +162,7 @@ description = "Run clippy linting with surrealism disabled"
 command = "cargo"
 args = [
     "clippy",
+    "--locked",
     "--package",
     "surrealdb-core",
     "--package",
@@ -196,6 +199,7 @@ description = "Run code quality linting (release)"
 command = "cargo"
 args = [
     "clippy",
+    "--locked",
     "--workspace",
     "--all-targets",
     "--profile",
@@ -234,6 +238,7 @@ command = "cargo"
 args = [
     "hack",
     "check",
+    "--locked",
     "--package",
     "surrealdb",
     "--each-feature",
@@ -251,6 +256,7 @@ command = "cargo"
 args = [
     "hack",
     "check",
+    "--locked",
     "--package",
     "surrealdb-engine-local",
     "--each-feature",
@@ -267,6 +273,7 @@ command = "cargo"
 args = [
     "hack",
     "check",
+    "--locked",
     "--package",
     "surrealdb-core",
     "--each-feature",
@@ -283,6 +290,7 @@ command = "cargo"
 args = [
     "hack",
     "check",
+    "--locked",
     "--package",
     "surrealdb-kvs",
     "--each-feature",
@@ -297,6 +305,7 @@ command = "cargo"
 args = [
     "hack",
     "check",
+    "--locked",
     "--package",
     "surrealdb-kvs-any",
     "--each-feature",
@@ -313,6 +322,7 @@ command = "cargo"
 args = [
     "hack",
     "check",
+    "--locked",
     "--package",
     "surrealdb-datastore",
     "--each-feature",
@@ -327,6 +337,7 @@ command = "cargo"
 args = [
     "hack",
     "check",
+    "--locked",
     "--package",
     "surrealdb-runtime",
     "--each-feature",
@@ -341,6 +352,7 @@ command = "cargo"
 args = [
     "hack",
     "check",
+    "--locked",
     "--package",
     "surrealdb-idx",
     "--each-feature",
@@ -358,6 +370,7 @@ command = "cargo"
 args = [
     "hack",
     "check",
+    "--locked",
     "--package",
     "surrealdb-server",
     "--each-feature",
@@ -872,9 +885,9 @@ script = """
     #!/bin/bash -ex
     cd language-tests
     if [ "${_TEST_LANG_FEATURES}" != "" ]; then
-        cargo build --features ${_TEST_LANG_FEATURES}
+        cargo build --locked --features ${_TEST_LANG_FEATURES}
     else
-        cargo build
+        cargo build --locked
     fi
     if [ "${_TEST_API_ENGINE}" = "tikv" ]; then
         ./target/debug/surrealql-test --color always run --no-wip --jobs 1 --backend ${_TEST_API_ENGINE}
@@ -949,7 +962,7 @@ script = """
 #!/bin/bash -ex
 # Override _TEST_LANG_UPGRADE_JOBS to tune per-runner concurrency (default 12).
 cd language-tests
-cargo build --features "${_TEST_LANG_FEATURES}"
+cargo build --locked --features "${_TEST_LANG_FEATURES}"
 # `;` separates independent chains, `,` separates versions within one. Adjacent
 # pairs are hopped within a chain; no hop is made across a chain boundary.
 IFS=';' read -ra CHAINS <<< "${LANG_UPGRADE_VERSIONS}"
@@ -1127,7 +1140,7 @@ script = """
     cargo llvm-cov clean --workspace
 
     # Build language-tests with instrumentation
-    cargo build
+    cargo build --locked
 
     # Run the language tests (this exercises surrealdb-core)
     ./target/debug/surrealql-test --color always run --no-wip --jobs 3 --backend memory
@@ -1264,6 +1277,7 @@ description = "Run SurrealDB benchmarks"
 command = "cargo"
 args = [
     "bench",
+    "--locked",
     "--quiet",
     "--package",
     "surrealdb",
@@ -1285,6 +1299,7 @@ category = "CI - BENCHMARK"
 command = "cargo"
 args = [
     "bench",
+    "--locked",
     "--package",
     "surrealdb-engine-local",
     "--bench",
@@ -1301,6 +1316,7 @@ category = "CI - BENCHMARK"
 command = "cargo"
 args = [
     "bench",
+    "--locked",
     "--package",
     "surrealdb",
     "--bench",

@@ -1,0 +1,78 @@
+# Release build lock guard
+#
+# The shipped binaries must build from the committed Cargo.lock, so that a
+# tagged commit plus its lock reproduces the binary. This job fails if any of
+# the three release build actions stops compiling with --locked. macOS and
+# Windows compile with a direct `cargo build ... --locked`; Linux compiles
+# inside the builder image, where build-linux passes --locked through to the
+# `cargo build "$@"` in docker/builder-entrypoint.sh. It reads only checked-out
+# files.
+
+name: Release lock guard
+
+run-name: "Release lock guard '${{ github.head_ref || github.ref_name }}'"
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - "releases/*"
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+  merge_group:
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-lock-guard-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Assert release builds pass --locked
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Every release build compiles from the committed Cargo.lock
+        run: |
+          set -euo pipefail
+          fail=0
+          strip_comments() { grep -vE '^[[:space:]]*#' "$1"; }
+
+          # macOS and Windows compile with a direct `cargo build ... --locked`.
+          for a in build-macos build-windows; do
+            f=".github/actions/${a}/action.yml"
+            if ! strip_comments "$f" | grep -qE 'cargo build\b.*--locked'; then
+              echo "::error file=${f}::no 'cargo build ... --locked'; the shipped ${a#build-} binary must build from the committed Cargo.lock" >&2
+              fail=1
+            fi
+          done
+
+          # Linux compiles inside the builder image: build-linux passes --locked
+          # to docker/builder-entrypoint.sh, which runs `cargo build "$@"`.
+          if ! strip_comments .github/actions/build-linux/action.yml | grep -q -- '--locked'; then
+            echo "::error file=.github/actions/build-linux/action.yml::the docker build no longer passes --locked to the builder" >&2
+            fail=1
+          fi
+          if ! grep -qF 'cargo build "$@"' docker/builder-entrypoint.sh; then
+            echo "::error file=docker/builder-entrypoint.sh::expected 'cargo build \"\$@\"' so the action's --locked reaches cargo" >&2
+            fail=1
+          fi
+
+          if [ "$fail" -eq 0 ]; then
+            echo "All release build actions compile from the committed Cargo.lock."
+          fi
+          exit "$fail"

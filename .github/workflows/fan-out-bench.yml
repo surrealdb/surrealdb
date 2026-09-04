@@ -79,7 +79,7 @@ jobs:
         # quiet_system.py drops back to the invoking user with a minimal
         # environment, which is not a reliable place to resolve `cargo`.
         run: |
-          cargo bench -p surrealdb-core --bench fan_out \
+          cargo bench --locked -p surrealdb-core --bench fan_out \
             --no-default-features --features ${{ matrix.backend }} --no-run
 
       - name: Locate benchmark binary
@@ -88,7 +88,7 @@ jobs:
         # `--message-format=json` puts compiler diagnostics on stdout, where a
         # `jq` filter would swallow the very errors this step exists to surface.
         run: |
-          cargo bench -p surrealdb-core --bench fan_out \
+          cargo bench --locked -p surrealdb-core --bench fan_out \
             --no-default-features --features ${{ matrix.backend }} \
             --no-run --message-format=json \
             | jq -r 'select(.executable != null and .target.name == "fan_out") | .executable' \

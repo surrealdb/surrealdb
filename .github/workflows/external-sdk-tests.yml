@@ -58,7 +58,7 @@ jobs:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build binary
-        run: cargo build --target x86_64-unknown-linux-gnu
+        run: cargo build --locked --target x86_64-unknown-linux-gnu
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # (Actions must be pinned by commit hash) v7.0.1
@@ -483,10 +483,10 @@ jobs:
         run: |
           version=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | grep '^version' | cut -d'"' -f2)
           echo "Installing wasm-bindgen-cli $version"
-          cargo install -f wasm-bindgen-cli --version "$version"
+          cargo install --locked -f wasm-bindgen-cli --version "$version"
 
       - name: Install wasm-opt
-        run: cargo install wasm-opt --version 0.116.1
+        run: cargo install --locked wasm-opt --version 0.116.1
 
       - name: Build and pack the addon
         id: node

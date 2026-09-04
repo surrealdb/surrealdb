@@ -65,7 +65,7 @@ jobs:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build binary
-        run: cargo build --target ${{ matrix.target }}
+        run: cargo build --locked --target ${{ matrix.target }}
 
       # rust-toolchain.toml pins the toolchain every cargo invocation resolves
       # to, which is not the one the setup action installs targets for, so the
@@ -210,7 +210,7 @@ jobs:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Run miri
-        run: cargo +nightly miri test -p surrealdb-common --lib
+        run: cargo +nightly miri test --locked -p surrealdb-common --lib
 
   check-debug:
     name: Check workspace (debug)
@@ -321,7 +321,7 @@ jobs:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install wasm-pack
-        run: cargo install wasm-pack@=0.15.0
+        run: cargo install --locked wasm-pack@=0.15.0
 
       - name: Test the IndexedDB backend in headless Chrome
         working-directory: surrealdb/kvs-indxdb
@@ -394,7 +394,7 @@ jobs:
         uses: ./.github/actions/install-tools
 
       - name: Install cargo-hack
-        run: cargo install cargo-hack
+        run: cargo install --locked cargo-hack
 
       - name: Check feature combinations
         run: cargo make ci-feature-check
@@ -419,7 +419,7 @@ jobs:
         uses: ./.github/actions/install-tools
 
       - name: Install cargo-machete
-        run: cargo install cargo-machete
+        run: cargo install --locked cargo-machete
 
       - name: Check unused dependencies
         run: cargo make ci-unused-deps
@@ -750,7 +750,7 @@ jobs:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Check tokio-console feature
-        run: cargo check --package surrealdb-server --features tokio-console
+        run: cargo check --locked --package surrealdb-server --features tokio-console
 
   # ----------------------------------------
   # Language-test bench harness
@@ -779,7 +779,7 @@ jobs:
           cache-key: lang-bench
 
       - name: Check bench harness compiles
-        run: cargo check --features bench,bench-remote-store --manifest-path language-tests/Cargo.toml
+        run: cargo check --locked --features bench,bench-remote-store --manifest-path language-tests/Cargo.toml
 
   # ----------------------------------------
   # JS SDK conformance suite
@@ -966,10 +966,10 @@ jobs:
         run: |
           version=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | grep '^version' | cut -d'"' -f2)
           echo "Installing wasm-bindgen-cli $version"
-          cargo install -f wasm-bindgen-cli --version "$version"
+          cargo install --locked -f wasm-bindgen-cli --version "$version"
 
       - name: Install wasm-opt
-        run: cargo install wasm-opt --version 0.116.1
+        run: cargo install --locked wasm-opt --version 0.116.1
 
       - name: Install dependencies
         working-directory: surrealdb/wasm

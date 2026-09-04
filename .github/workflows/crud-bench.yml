@@ -91,7 +91,7 @@ jobs:
       - name: Build SurrealDB with minimal features
         run: |
           echo "Building SurrealDB with in-memory storage only"
-          cargo build --release --no-default-features --features "storage-mem,http"
+          cargo build --locked --release --no-default-features --features "storage-mem,http"
       
       - name: Upload binary
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -122,7 +122,7 @@ jobs:
       - name: Build SurrealDB with minimal features
         run: |
           echo "Building SurrealDB with RocksDB storage only"
-          cargo build --release --no-default-features --features "storage-rocksdb,http"
+          cargo build --locked --release --no-default-features --features "storage-rocksdb,http"
       
       - name: Upload binary
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

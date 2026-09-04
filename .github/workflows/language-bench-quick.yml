@@ -101,7 +101,7 @@ jobs:
           workspaces: language-tests
 
       - name: Build benchmark suite
-        run: cargo build --release --features bench,bench-remote-store --manifest-path language-tests/Cargo.toml
+        run: cargo build --locked --release --features bench,bench-remote-store --manifest-path language-tests/Cargo.toml
 
       - name: Benchmark PR head (compare vs nightly main in the shared store)
         run: |

@@ -740,12 +740,12 @@ jobs:
             echo "wasm-bindgen-cli $version already installed (cache)"
           else
             echo "Installing wasm-bindgen-cli $version"
-            cargo install -f wasm-bindgen-cli --version "$version"
+            cargo install --locked -f wasm-bindgen-cli --version "$version"
           fi
           if installed wasm-opt 0.116.1; then
             echo "wasm-opt 0.116.1 already installed (cache)"
           else
-            cargo install -f wasm-opt --version 0.116.1
+            cargo install --locked -f wasm-opt --version 0.116.1
           fi
 
       - name: Install dependencies

@@ -42,7 +42,7 @@ runs:
         # (build-once / promote-many), compiling each crate from its packaged
         # tarball, so skip the redundant per-crate rebuild here. This stays a
         # cheap name/version/registry sanity check on top of that gate.
-        cargo publish --workspace --dry-run --no-verify
+        cargo publish --workspace --dry-run --no-verify --locked
 
     # Real publish — cargo only, no release-plz and no forge/GitHub token.
     #
@@ -251,7 +251,7 @@ runs:
         try_publish() {
           local c="$1" v="${VERSION[$1]}" out rc lift now
           echo "Publishing ${c}@${v} (attempt $(( ATTEMPTS[$c] + 1 ))/${MAX_ATTEMPTS}, ${CLASS[$c]}-name bucket)"
-          out="$(cargo publish -p "$c" --no-verify 2>&1)"; rc=$?
+          out="$(cargo publish -p "$c" --no-verify --locked 2>&1)"; rc=$?
           printf '%s\n' "$out"
           [ "$rc" -eq 0 ] && return 0
           if printf '%s' "$out" | grep -qiE 'already (uploaded|exists)|is already uploaded|already published'; then

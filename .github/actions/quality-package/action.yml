@@ -36,4 +36,9 @@ runs:
         # publish run --no-verify safely: this gate has already verified the
         # packaged form compiles for this SHA. Do not add --no-verify here
         # without also removing it from the real publish in publish-crate.
-        cargo publish --workspace --dry-run
+        #
+        # --locked: verify the packaged form against the committed Cargo.lock
+        # rather than a fresh re-resolve, so this gate - and the promotion it
+        # guards - builds exactly the locked dependency set. It also fails here,
+        # before any irreversible publish, if a release SHA's lock is out of sync.
+        cargo publish --workspace --dry-run --locked

@@ -33,6 +33,15 @@ Located in `surrealdb/tests/` and `tests/`. Follow standard Rust testing convent
 - Instrument public async functions with `#[instrument(...)]`
 - Never log sensitive user data or credentials
 
+## Build reproducibility (`--locked`)
+
+So that a commit plus its `Cargo.lock` reproduces the build, every cargo command that resolves dependencies passes `--locked`: `build`, `check`, `test`/`nextest`, `clippy`, `run`, `doc`, `bench`, `install`, `publish`, `hack`, and dependency-resolving `metadata`. Two categories are intentionally exempt:
+
+- Commands that resolve nothing, so `--locked` is inert or rejected: `cargo metadata --no-deps` and `cargo fmt`.
+- Steps that re-lock or re-resolve by design, e.g. a targeted `cargo update` before a benchmark build, `reconcile-satellite-lockfiles.sh`, or a check run against a `[patch]`-ed dependency tree.
+
+The shipped-binary builds are enforced by `.github/workflows/release-lock-guard.yml`.
+
 ## Comment discipline — describe the contract, not the narrative
 
 Applies to in-source comments and doc comments, and to standalone docs in this repo.

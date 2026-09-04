@@ -49,7 +49,7 @@ jobs:
         run: |
           cd language-tests
 
-          cargo build --release --features bench,bench-remote-store
+          cargo build --locked --release --features bench,bench-remote-store
 
       # The harness pins the HNSW graph seed itself, so the ANN benches build the
       # same graph here as in a local `cargo make bench` and their run-to-run
@@ -85,6 +85,6 @@ jobs:
 
       - name: Run reproduction test
         run: |
-          cargo test -p surreal --release --no-default-features \
+          cargo test --locked -p surreal --release --no-default-features \
             --features 'storage-mem,http' \
             --test reproduce_issue_7318 -- --ignored --nocapture
