@@ -1364,11 +1364,11 @@ script = """
     #!/bin/bash -e
     echo "Building SDK local tests..."
     cd tests/sdk/local
-    cargo build
+    cargo build --locked
 
     echo "Building SDK remote tests..."
     cd ../remote
-    cargo build
+    cargo build --locked
 """
 
 [tasks.ci-all-required]

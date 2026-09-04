@@ -38,7 +38,7 @@ jobs:
           workspaces: fuzz
 
       - name: Check fuzzers
-        run: cargo build --manifest-path fuzz/Cargo.toml
+        run: cargo build --locked --manifest-path fuzz/Cargo.toml
 
       - name: Check OSS-Fuzz
         uses: google/oss-fuzz/infra/cifuzz/actions/build_fuzzers@22d0a9a05012b976c58c78398d4b7238f74fd158 # (Actions must be pinned by commit hash) master

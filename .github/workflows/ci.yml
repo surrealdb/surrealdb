@@ -567,11 +567,11 @@ jobs:
 
       - name: Build local
         working-directory: tests/sdk/local
-        run: cargo build
+        run: cargo build --locked
 
       - name: Build remote
         working-directory: tests/sdk/remote
-        run: cargo build
+        run: cargo build --locked
 
   sdk-engines:
     name: Rust SDK - ${{ matrix.engine }} engine
