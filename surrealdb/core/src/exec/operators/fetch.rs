@@ -7,7 +7,7 @@ use crate::catalog::table_select_permission;
 use crate::exec::fan_out::{RECORD_DEREFERENCE, evaluate_each};
 use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, convert_permission_to_physical_runtime,
-	should_check_perms,
+	should_check_perms, validate_record_user_access,
 };
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{
@@ -358,6 +358,11 @@ pub(crate) async fn process_fetched_record(
 	val: &mut Value,
 ) -> crate::expr::FlowResult<bool> {
 	let db_ctx = ctx.database().context("process_fetched_record requires database context")?;
+	// SECURITY (GHSA-2v9j): confine record materialization to the caller's
+	// tenant. This path serves record dereference and the FETCH clause, which
+	// resolve records by id with no preceding scan, so it is the fetch-side
+	// equivalent of the scan-operator tenant guard.
+	validate_record_user_access(db_ctx)?;
 	let check_perms =
 		should_check_perms(db_ctx, Action::View).context("Failed to check permissions")?;
 

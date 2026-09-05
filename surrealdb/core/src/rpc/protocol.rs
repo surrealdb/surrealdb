@@ -19,6 +19,7 @@ use crate::dbs::capabilities::{ExperimentalTarget, MethodTarget};
 use crate::dbs::{
 	AuthPrincipalSnapshot, QueryResult, QueryStreamItem, QueryStreamJob, QueryType, Session,
 };
+use crate::exec::Error as ExecError;
 use crate::kvs::{Datastore, TransactionType};
 use crate::observe::{
 	AuthAction, AuthEvent, AuthEventSafe, AuthScope, Outcome, RpcEvent, RpcEventSafe,
@@ -698,6 +699,46 @@ pub trait RpcProtocol {
 			.ok_or(invalid_params("Expected (ns, db)".to_string()))?;
 		// Get a write lock on the session to modify it
 		let mut session = session_lock.write().await;
+		// SECURITY (GHSA-2v9j): tenant-boundary gate, mirroring the SurrealQL
+		// `USE` handler (`dbs::executor`) and the embedded `process_use`. The RPC
+		// `use` method dispatches here, so an authenticated Database-, Namespace-
+		// or Record-level principal must be verified as authorized for the target
+		// namespace/database before the session is pivoted; otherwise it could
+		// switch into a foreign tenant and reach any table there with satisfiable
+		// PERMISSIONS. Resolve the target the same way the mutation below does (a
+		// string changes it, `None` leaves it, `Null` unsets it) and check the
+		// authenticated Auth level, which is the source of truth. Root and
+		// anonymous (`Level::No`, e.g. `use` before `signin`) principals are
+		// unrestricted by `can_access_ns_db`, preserving the pre-signin pattern.
+		{
+			let resolved_ns = match &ns {
+				PublicValue::String(ns) => Some(ns.as_str()),
+				PublicValue::Null => None,
+				// `None` (leave unchanged) or an invalid type (rejected below)
+				// keeps the current selection for the boundary check.
+				_ => session.ns.as_deref(),
+			};
+			let resolved_db = match &db {
+				PublicValue::String(db) => Some(db.as_str()),
+				PublicValue::Null => None,
+				_ => session.db.as_deref(),
+			};
+			if let Some(ns_name) = resolved_ns {
+				let db_name = resolved_db.unwrap_or_default();
+				if !session.au.can_access_ns_db(ns_name, db_name) {
+					let err = if session.au.level().ns() == Some(ns_name) {
+						ExecError::DbNotAllowed {
+							db: db_name.to_owned(),
+						}
+					} else {
+						ExecError::NsNotAllowed {
+							ns: ns_name.to_owned(),
+						}
+					};
+					return Err(surrealdb_types::Error::not_allowed(err.to_string(), None));
+				}
+			}
+		}
 		// Empty USE call: apply defaults only if session doesn't already have ns/db
 		if ns.is_none() && db.is_none() {
 			// Skip applying defaults if ns is already set (e.g., from token authentication)
@@ -719,6 +760,27 @@ pub trait RpcProtocol {
 				} else {
 					(None, None)
 				};
+
+				// SECURITY (GHSA-2v9j): gate the resolved default the same way an
+				// explicit `use` is gated, so an empty `use` cannot pivot a scoped
+				// principal onto a foreign default tenant. Root and anonymous
+				// principals are unrestricted by `can_access_ns_db`.
+				if let Some(ns_name) = &ns {
+					let db_name = db.as_deref().unwrap_or_default();
+					if !session.au.can_access_ns_db(ns_name, db_name) {
+						let _ = tx.cancel().await;
+						let err = if session.au.level().ns() == Some(ns_name.as_str()) {
+							ExecError::DbNotAllowed {
+								db: db_name.to_owned(),
+							}
+						} else {
+							ExecError::NsNotAllowed {
+								ns: ns_name.to_owned(),
+							}
+						};
+						return Err(surrealdb_types::Error::not_allowed(err.to_string(), None));
+					}
+				}
 
 				if let Some(ns) = ns {
 					match tx.get_or_add_ns(None, &ns).await {
@@ -2776,6 +2838,60 @@ mod tests {
 
 	fn use_params(ns: &str, db: &str) -> PublicArray {
 		vec![PublicValue::String(ns.to_owned()), PublicValue::String(db.to_owned())].into()
+	}
+
+	/// Regression (GHSA-2v9j): the RPC `use` handler (`yuse`) enforces the same
+	/// tenant boundary as the SurrealQL `USE` statement and `process_use` - a
+	/// Database-level principal cannot pivot into a foreign tenant over RPC.
+	#[tokio::test]
+	async fn use_rpc_denies_cross_tenant_pivot_for_database_user() {
+		use surrealdb_iam::{Level, Role};
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let sid = Uuid::from_u128(41);
+
+		// A Database Editor confined to ns_a/db_a, already on its own tenant.
+		let sess =
+			Session::for_level(Level::Database("ns_a".to_owned(), "db_a".to_owned()), Role::Editor)
+				.with_ns("ns_a")
+				.with_db("db_a");
+		rpc.set_session(sid, Arc::new(RwLock::new(sess)));
+
+		let err = rpc
+			.execute(None, sid, Some(sid), Method::Use, use_params("ns_b", "db_b"))
+			.await
+			.expect_err("cross-tenant RPC use must be denied");
+		assert!(
+			err.to_string().contains("ns_b"),
+			"expected a tenant-boundary denial naming the foreign namespace, got: {err}"
+		);
+
+		// The session must not have been pivoted into tenant B.
+		let lock = rpc.get_session(&sid).await.unwrap();
+		let session = lock.read().await;
+		assert_eq!(session.ns.as_deref(), Some("ns_a"));
+		assert_eq!(session.db.as_deref(), Some("db_a"));
+	}
+
+	/// Sanity: the RPC `use` gate still lets a principal re-select its own tenant.
+	#[tokio::test]
+	async fn use_rpc_allows_same_tenant_for_database_user() {
+		use surrealdb_iam::{Level, Role};
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let rpc = DurableRpc::new(ds);
+		let sid = Uuid::from_u128(42);
+
+		let sess =
+			Session::for_level(Level::Database("ns_a".to_owned(), "db_a".to_owned()), Role::Editor)
+				.with_ns("ns_a")
+				.with_db("db_a");
+		rpc.set_session(sid, Arc::new(RwLock::new(sess)));
+
+		rpc.execute(None, sid, Some(sid), Method::Use, use_params("ns_a", "db_a"))
+			.await
+			.expect("own-tenant RPC use must be allowed");
 	}
 
 	/// Counts `on_rpc_complete` calls, reporting itself as a no-op shell or not.

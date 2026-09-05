@@ -17,38 +17,42 @@ use crate::val::{RecordId, Value};
 impl Document {
 	/// Tenant-boundary gate for the write pipeline (GHSA-2v9j).
 	///
-	/// Record-user namespace/database isolation is enforced on the read path
-	/// by [`crate::exec::permission::validate_record_user_access`], but that
-	/// gate is only reachable through the scan operators, so it never runs for
+	/// The read path enforces the same boundary in
+	/// [`crate::exec::permission::validate_record_user_access`], but that gate
+	/// is only reachable through the scan operators, so it never runs for
 	/// `CREATE` / `UPDATE` / `DELETE`, which perform no scan. Without this
-	/// mirror, a record user that pivots into a foreign namespace/database
-	/// (e.g. `USE NS other DB other` over `/sql`) can blind-write — create,
-	/// tamper, or delete — any table there whose write `PERMISSIONS` are
-	/// satisfiable, even though the same session's reads are denied.
+	/// mirror, a principal that has pivoted into a foreign namespace/database
+	/// (for example via the RPC `use` method, which sets the context without
+	/// rejecting the switch) could blind-write (create, tamper, or delete) any
+	/// table there whose write `PERMISSIONS` are satisfiable, even though the
+	/// same session's reads are denied.
 	///
-	/// The authenticated record level is the source of truth; the session's
-	/// *selected* ns/db can be steered by `USE` and must not be trusted. Only
-	/// record users are confined here — system principals (root / namespace /
-	/// database) are governed by role and table `PERMISSIONS`.
+	/// The authenticated auth level is the source of truth; the session's
+	/// *selected* ns/db can be steered by `USE` and must not be trusted. Root
+	/// and anonymous principals are unconfined, a namespace principal may write
+	/// any database within its namespace, and database and record principals are
+	/// pinned to their exact namespace/database.
 	#[inline]
 	pub(super) fn check_record_user_access(&self, opt: &Options) -> Result<()> {
-		if !opt.auth.is_record() {
+		// Root and anonymous principals carry no tenant to confine; skip the
+		// ns/db lookup so tenant-less contexts are unaffected.
+		if opt.auth.is_root() || opt.auth.is_anon() {
 			return Ok(());
 		}
 		let (ns, db) = opt.ns_db()?;
-		ensure!(
-			opt.auth.level().ns() == Some(ns),
-			ExecError::NsNotAllowed {
-				ns: ns.to_owned(),
-			}
-		);
-		ensure!(
-			opt.auth.level().db() == Some(db),
-			ExecError::DbNotAllowed {
+		if opt.auth.can_access_ns_db(ns, db) {
+			return Ok(());
+		}
+		// A namespace match with a database mismatch is a database-scope
+		// violation; otherwise the namespace itself is out of reach.
+		if opt.auth.level().ns() == Some(ns) {
+			bail!(ExecError::DbNotAllowed {
 				db: db.to_owned(),
-			}
-		);
-		Ok(())
+			});
+		}
+		bail!(ExecError::NsNotAllowed {
+			ns: ns.to_owned(),
+		});
 	}
 
 	/// Checks that a specifically selected record

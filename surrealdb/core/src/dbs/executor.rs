@@ -1108,6 +1108,43 @@ impl Executor {
 					}
 				};
 
+				// SECURITY (GHSA-2v9j): `USE` moves the session's *selected*
+				// namespace/database to caller-supplied operands. The
+				// authenticated Auth level — not the (about-to-be-overwritten)
+				// selected ns/db — is the source of truth for tenant scope, so
+				// the principal must be verified as authorized for the target
+				// BEFORE the switch takes effect (SECURITY_GUIDE section 3).
+				// Without this gate a Database- or Namespace-level principal
+				// could pivot into a foreign tenant and reach any table there
+				// whose PERMISSIONS are satisfiable (e.g. `PERMISSIONS FULL`),
+				// collapsing the namespace/database isolation boundary. This
+				// mirrors the custom-API tenant gate added for
+				// GHSA-848m-r628-vrxw (`api/invocation.rs`, `kvs/ds.rs`), which
+				// had never been applied to the `USE` / `/sql` executor path.
+				// A switch that only changes one of ns/db keeps the other from
+				// the current session (`or(self.opt...)`); Root and anonymous
+				// (`Level::No`) principals are unrestricted by `can_access_ns_db`.
+				let target_ns = use_ns.as_deref().or(self.opt.ns.as_deref());
+				let target_db = use_db.as_deref().or(self.opt.db.as_deref());
+				if let Some(ns_name) = target_ns {
+					let db_name = target_db.unwrap_or_default();
+					if !self.opt.auth.can_access_ns_db(ns_name, db_name) {
+						// Report the narrowest boundary that failed: if the
+						// namespace itself is in scope, the database is the
+						// offending operand, otherwise the namespace is.
+						let err = if self.opt.auth.level().ns() == Some(ns_name) {
+							ExecError::DbNotAllowed {
+								db: db_name.to_owned(),
+							}
+						} else {
+							ExecError::NsNotAllowed {
+								ns: ns_name.to_owned(),
+							}
+						};
+						return Err(ControlFlow::Err(anyhow::Error::new(err)));
+					}
+				}
+
 				// SECURITY: implicit creation of a namespace or database via
 				// `USE` requires the same authorization as the explicit
 				// `DEFINE NAMESPACE` / `DEFINE DATABASE` statements

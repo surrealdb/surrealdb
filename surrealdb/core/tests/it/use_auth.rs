@@ -6,9 +6,11 @@
 //! via USE in non-strict mode must require the same authorization as
 //! explicit DEFINE NAMESPACE/DATABASE."
 
+use std::sync::Arc;
+
 use anyhow::Result;
 use surrealdb_core::dbs::Session;
-use surrealdb_iam::{Level, Role};
+use surrealdb_iam::{Auth, Level, Role};
 use surrealdb_types::{RecordId, ToSql, Value};
 
 use crate::helpers::new_ds;
@@ -134,6 +136,152 @@ async fn provision_writable_tenant_b(ds: &surrealdb_core::kvs::Datastore) -> Res
 	Ok(())
 }
 
+/// Regression (GHSA-2v9j): a Database-level Editor of one tenant must not be
+/// able to pivot into another tenant with the SurrealQL `USE` statement. The
+/// `USE` must error and the follow-up cross-tenant read must not return the
+/// foreign row.
+#[tokio::test]
+async fn use_statement_denies_cross_tenant_pivot_for_database_user() -> Result<()> {
+	let (_, ds) = new_ds("ns_a", "db_a", true).await?;
+	provision_writable_tenant_b(&ds).await?;
+
+	// Attacker: Database Editor confined to ns_a/db_a.
+	let sess =
+		Session::for_level(Level::Database("ns_a".to_owned(), "db_a".to_owned()), Role::Editor)
+			.with_ns("ns_a")
+			.with_db("db_a");
+
+	// The `USE` pivot itself must be rejected.
+	let mut resp = ds.execute("USE NS ns_b DB db_b", &sess, None).await?;
+	let res = resp.remove(0).output();
+	assert!(res.is_err(), "cross-tenant USE must be denied, got: {res:?}");
+
+	// And a batched pivot+read must not leak tenant B's row.
+	let mut resp = ds.execute("USE NS ns_b DB db_b; SELECT * FROM fullsecret", &sess, None).await?;
+	let _use = resp.remove(0).output();
+	let read = resp.remove(0).output();
+	// The read either errors (context never pivoted) or is empty — never the row.
+	if let Ok(v) = read {
+		assert!(
+			!v.to_sql().contains("TENANT_B_SECRET"),
+			"cross-tenant read leaked tenant B data: {v:?}"
+		);
+	}
+	Ok(())
+}
+
+/// Regression (GHSA-2v9j): the RPC / embedded `use` path (`process_use`) must
+/// enforce the same tenant boundary as the SurrealQL `USE` statement.
+#[tokio::test]
+async fn process_use_denies_cross_tenant_pivot_for_database_user() -> Result<()> {
+	let (_, ds) = new_ds("ns_a", "db_a", true).await?;
+	provision_writable_tenant_b(&ds).await?;
+
+	let mut sess =
+		Session::for_level(Level::Database("ns_a".to_owned(), "db_a".to_owned()), Role::Editor)
+			.with_ns("ns_a")
+			.with_db("db_a");
+
+	let out =
+		ds.process_use(None, &mut sess, Some("ns_b".to_owned()), Some("db_b".to_owned())).await;
+	assert!(out.is_err(), "cross-tenant process_use must be denied, got: {out:?}");
+	// Session must not have been pivoted into tenant B.
+	assert_eq!(sess.ns.as_deref(), Some("ns_a"));
+	assert_eq!(sess.db.as_deref(), Some("db_a"));
+	Ok(())
+}
+
+/// Regression (GHSA-2v9j): an empty `USE` must not pivot a scoped principal onto
+/// a foreign default tenant. The default-config branch gates the resolved default
+/// the same way an explicit `USE` is gated.
+#[tokio::test]
+async fn process_use_default_config_denies_cross_tenant_for_database_user() -> Result<()> {
+	let (_, ds) = new_ds("ns_a", "db_a", true).await?;
+	// Root points the configured default at a foreign tenant.
+	ds.execute("DEFINE CONFIG DEFAULT NAMESPACE ns_b DATABASE db_b", &Session::owner(), None)
+		.await?
+		.remove(0)
+		.output()?;
+
+	// A Database Editor of ns_a/db_a with no selected namespace (the state after
+	// an explicit unset), so the empty `USE` resolves the configured default
+	// (ns_b/db_b), which is foreign to this principal.
+	let mut sess = Session {
+		au: Arc::new(Auth::for_db(Role::Editor, "ns_a", "db_a")),
+		..Session::default()
+	};
+	let out = ds.process_use(None, &mut sess, None, None).await;
+	assert!(out.is_err(), "empty USE must not pivot a scoped user onto a foreign default: {out:?}");
+	// The session was not pivoted onto the foreign default.
+	assert_eq!(sess.ns.as_deref(), None);
+	assert_eq!(sess.db.as_deref(), None);
+	Ok(())
+}
+
+/// Sanity: an anonymous session (the pre-signin `use` pattern) still receives the
+/// configured default; the gate confines scoped principals, not anonymous ones.
+#[tokio::test]
+async fn process_use_default_config_allowed_for_anonymous_session() -> Result<()> {
+	let (_, ds) = new_ds("ns_a", "db_a", true).await?;
+	ds.execute("DEFINE CONFIG DEFAULT NAMESPACE ns_b DATABASE db_b", &Session::owner(), None)
+		.await?
+		.remove(0)
+		.output()?;
+
+	let mut sess = Session::default();
+	ds.process_use(None, &mut sess, None, None).await?;
+	assert_eq!(sess.ns.as_deref(), Some("ns_b"));
+	assert_eq!(sess.db.as_deref(), Some("db_b"));
+	Ok(())
+}
+
+/// Regression (GHSA-2v9j): the `USE` tenant gate also confines **record**
+/// users — `can_access_ns_db` treats `Level::Record` identically to
+/// `Level::Database`. Because the pivot itself is refused, the record-user
+/// cross-tenant *write* attack (which depends on the pivot) is blocked by this
+/// gate too, not only by the write-path mirror in the companion PR.
+#[tokio::test]
+async fn use_statement_denies_cross_tenant_pivot_for_record_user() -> Result<()> {
+	let (_, ds) = new_ds("ns_a", "db_a", true).await?;
+	provision_writable_tenant_b(&ds).await?;
+
+	// Record user of ns_a/db_a attempting to pivot into tenant B, then write.
+	let sess = Session::for_record(
+		"ns_a",
+		"db_a",
+		"acc",
+		Value::RecordId(RecordId::new("appuser", "alice".to_string())),
+	);
+
+	let use_res = ds.execute("USE NS ns_b DB db_b", &sess, None).await?.remove(0).output();
+	assert!(use_res.is_err(), "record-user cross-tenant USE must be denied, got: {use_res:?}");
+
+	// The pivot having failed, a follow-up cross-tenant write cannot land.
+	let mut resp = ds
+		.execute("USE NS ns_b DB db_b; CREATE fullsecret:evil SET data = 'X'", &sess, None)
+		.await?;
+	let _use = resp.remove(0).output();
+	let write = resp.remove(0).output();
+	if let Ok(v) = write {
+		assert!(
+			!v.to_sql().contains("fullsecret:evil"),
+			"record-user cross-tenant write landed despite the USE gate: {v:?}"
+		);
+	}
+
+	// Ground truth: tenant B has no injected row.
+	let mut resp = ds
+		.execute(
+			"SELECT * FROM fullsecret",
+			&Session::owner().with_ns("ns_b").with_db("db_b"),
+			None,
+		)
+		.await?;
+	let view = resp.remove(0).output()?.to_sql();
+	assert!(!view.contains("fullsecret:evil"), "tenant B was written cross-tenant: {view}");
+	Ok(())
+}
+
 /// Build a record user of `ns_a`/`db_a` whose session has been pivoted to
 /// `ns_b`/`db_b` (the state reached after `USE NS ns_b DB db_b`). The Auth
 /// level stays bound to the record's home tenant.
@@ -185,6 +333,30 @@ async fn write_pipeline_denies_cross_tenant_record_user() -> Result<()> {
 		assert!(!view.contains(marker), "tenant B was mutated cross-tenant ({marker}): {view}");
 	}
 	assert!(view.contains("TENANT_B_SECRET"), "seed row must survive the blocked DELETE: {view}");
+	Ok(())
+}
+
+/// Sanity: a Database Editor may still `USE` its own namespace/database, and a
+/// Namespace Editor may still select any database within its own namespace —
+/// the gate targets cross-tenant pivots, not legitimate re-selection.
+#[tokio::test]
+async fn use_statement_allows_same_tenant_and_intra_namespace() -> Result<()> {
+	let (_, ds) = new_ds("ns_a", "db_a", true).await?;
+
+	let db_sess =
+		Session::for_level(Level::Database("ns_a".to_owned(), "db_a".to_owned()), Role::Editor)
+			.with_ns("ns_a")
+			.with_db("db_a");
+	let mut resp = ds.execute("USE NS ns_a DB db_a", &db_sess, None).await?;
+	assert!(resp.remove(0).output().is_ok(), "own-tenant USE must be allowed");
+
+	let ns_sess =
+		Session::for_level(Level::Namespace("ns_a".to_owned()), Role::Editor).with_ns("ns_a");
+	let mut resp = ds.execute("USE NS ns_a DB db_a", &ns_sess, None).await?;
+	assert!(
+		resp.remove(0).output().is_ok(),
+		"namespace user must reach any database within its own namespace"
+	);
 	Ok(())
 }
 

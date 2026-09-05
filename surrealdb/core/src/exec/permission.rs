@@ -112,41 +112,42 @@ pub(crate) fn should_check_perms(db_ctx: &DatabaseContext, action: Action) -> Re
 	}
 }
 
-/// Validate that a record user has access to the current namespace and database.
+/// Validate that the authenticated principal may read in the current namespace
+/// and database (GHSA-2v9j tenant-boundary gate for the read path).
 ///
-/// Record users (tokens scoped to a specific record) should only be able to access
-/// data within their authenticated namespace and database. This check ensures that
-/// a record user cannot access data in other namespaces or databases.
+/// The session's *selected* ns/db can be steered with `USE` - including the RPC
+/// `use` method, which sets the context without rejecting a cross-tenant switch -
+/// so it must not be trusted on its own. The authenticated auth level is the
+/// source of truth: root and anonymous principals are unconfined, a namespace
+/// principal may read any database within its namespace, and database and record
+/// principals are pinned to their exact namespace/database. Enforcing this here,
+/// before table/field `PERMISSIONS` are consulted, stops a principal that has
+/// pivoted into a foreign tenant from reading a table there whose `PERMISSIONS`
+/// happen to be satisfiable.
 ///
 /// Returns `Ok(())` if access is allowed, `Err` with an appropriate error if denied.
 pub(crate) fn validate_record_user_access(db_ctx: &DatabaseContext) -> Result<(), Error> {
 	let root = &db_ctx.ns_ctx.root;
 
-	// Only check for record users
-	if !root.auth.is_record() {
-		return Ok(());
-	}
-
 	let ns = db_ctx.ns_name();
 	let db = db_ctx.db_name();
 
-	// Verify namespace matches
-	if root.auth.level().ns() != Some(ns) {
-		return Err(ExecError::NsNotAllowed {
-			ns: ns.into(),
-		}
-		.into());
+	if root.auth.can_access_ns_db(ns, db) {
+		return Ok(());
 	}
 
-	// Verify database matches
-	if root.auth.level().db() != Some(db) {
+	// A namespace match with a database mismatch is a database-scope violation;
+	// otherwise the namespace itself is out of the principal's reach.
+	if root.auth.level().ns() == Some(ns) {
 		return Err(ExecError::DbNotAllowed {
 			db: db.into(),
 		}
 		.into());
 	}
-
-	Ok(())
+	Err(ExecError::NsNotAllowed {
+		ns: ns.into(),
+	}
+	.into())
 }
 
 /// Check a physical permission against a specific record value.
@@ -396,10 +397,65 @@ mod tests {
 	// =========================================================================
 
 	#[tokio::test]
-	async fn non_record_identities_bypass_the_ns_db_confinement_check() {
+	async fn root_and_anonymous_identities_are_unconfined() {
 		let db = TestDb::new("").await;
 		let ctx = db.exec_ctx_as(&TestDb::owner(), TransactionType::Read).await;
 		assert!(validate_record_user_access(ctx.database().unwrap()).is_ok());
+	}
+
+	#[tokio::test]
+	async fn a_database_user_is_confined_to_its_own_database() {
+		let db = TestDb::new("").await;
+		let rid = crate::types::PublicValue::String("user:tobie".to_owned());
+
+		// A database Viewer of test/test reading its own database is allowed.
+		let own = Session {
+			au: Arc::new(crate::iam::Auth::for_db(crate::iam::Role::Viewer, "test", "test")),
+			..Session::for_record("test", "test", "user", rid.clone())
+		};
+		let ctx = db.exec_ctx_as(&own, TransactionType::Read).await;
+		assert!(validate_record_user_access(ctx.database().unwrap()).is_ok());
+
+		// The same principal whose authenticated level names a different database
+		// than the one it is operating in (the state left by an RPC `use` pivot)
+		// is denied at the read gate, before any table PERMISSIONS are consulted.
+		let pivoted = Session {
+			au: Arc::new(crate::iam::Auth::for_db(crate::iam::Role::Viewer, "test", "other")),
+			..Session::for_record("test", "test", "user", rid)
+		};
+		let ctx = db.exec_ctx_as(&pivoted, TransactionType::Read).await;
+		let err = validate_record_user_access(ctx.database().unwrap()).unwrap_err();
+		assert!(
+			matches!(err, Error::Exec(ExecError::DbNotAllowed { .. })),
+			"expected DbNotAllowed, got {err:?}"
+		);
+	}
+
+	#[tokio::test]
+	async fn a_namespace_user_is_confined_to_its_own_namespace() {
+		let db = TestDb::new("").await;
+		let rid = crate::types::PublicValue::String("user:tobie".to_owned());
+
+		// A namespace Viewer of `test` may read within its own namespace
+		// (a namespace level authorizes any database inside it).
+		let own_ns = Session {
+			au: Arc::new(crate::iam::Auth::for_ns(crate::iam::Role::Viewer, "test")),
+			..Session::for_record("test", "test", "user", rid.clone())
+		};
+		let ctx = db.exec_ctx_as(&own_ns, TransactionType::Read).await;
+		assert!(validate_record_user_access(ctx.database().unwrap()).is_ok());
+
+		// A namespace principal operating in a different namespace is refused.
+		let other_ns = Session {
+			au: Arc::new(crate::iam::Auth::for_ns(crate::iam::Role::Viewer, "other")),
+			..Session::for_record("test", "test", "user", rid)
+		};
+		let ctx = db.exec_ctx_as(&other_ns, TransactionType::Read).await;
+		let err = validate_record_user_access(ctx.database().unwrap()).unwrap_err();
+		assert!(
+			matches!(err, Error::Exec(ExecError::NsNotAllowed { .. })),
+			"expected NsNotAllowed, got {err:?}"
+		);
 	}
 
 	#[tokio::test]

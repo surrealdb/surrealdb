@@ -34,7 +34,7 @@ use crate::catalog::providers::TableProvider;
 use crate::catalog::table_select_permission;
 use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, convert_permission_to_physical_runtime,
-	should_check_perms,
+	should_check_perms, validate_record_user_access,
 };
 use crate::exec::{ControlFlowExt, ExecutionContext};
 use crate::expr::ControlFlow;
@@ -181,6 +181,11 @@ pub(crate) async fn resolve_with_field_state(
 	if rids.is_empty() {
 		return Ok(Vec::new());
 	}
+
+	// SECURITY (GHSA-2v9j): confine record resolution to the caller's tenant. The
+	// MATCH operators materialize records through this shared path without a
+	// preceding validated scan, so enforce the namespace/database boundary here.
+	validate_record_user_access(ctx.database()?)?;
 
 	let check_perms = cache.resolve_check_perms(ctx)?;
 	let version = ctx.version_stamp();

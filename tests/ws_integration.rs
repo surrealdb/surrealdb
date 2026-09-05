@@ -1925,14 +1925,14 @@ pub async fn session_use_change_database(cfg_server: Option<Format>, cfg_format:
 	// Verify that the authenticated session corresponds with the original user
 	let res = socket.send_message_query("SELECT VALUE name FROM user:1").await.unwrap();
 	assert_eq!(res[0]["result"], json!(["original"]), "result: {:?}", res);
-	// Swtich to the different database without signing in again
-	socket.send_message_use(Some(NS), Some("different")).await.unwrap();
-	// Verify that the authenticated session is unable to query data
+	// Attempt to switch to a different database without signing in again. The
+	// tenant-boundary gate (GHSA-2v9j) rejects the cross-tenant pivot at `use`
+	// itself, so a database user cannot reach a database outside its level.
+	let res = socket.send_message_use(Some(NS), Some("different")).await;
+	assert!(res.is_err(), "cross-tenant RPC use must be rejected, got: {res:?}");
+	// The session was not pivoted: it still reads its own database.
 	let res = socket.send_message_query("SELECT VALUE name FROM user:1").await.unwrap();
-	// The query succeeds but the results does not contain the value with
-	// permissions
-	assert_eq!(res[0]["status"], "OK", "result: {:?}", res);
-	assert_eq!(res[0]["result"], json!([]), "result: {:?}", res);
+	assert_eq!(res[0]["result"], json!(["original"]), "result: {:?}", res);
 	// Test passed
 	server.finish().unwrap();
 }
@@ -2021,18 +2021,14 @@ pub async fn session_use_change_database_scope(cfg_server: Option<Format>, cfg_f
 	// Verify that the authenticated session corresponds with the original user
 	let res = socket.send_message_query("SELECT VALUE name FROM $auth").await.unwrap();
 	assert_eq!(res[0]["result"], json!(["original"]), "result: {:?}", res);
-	// Swtich to the different database without signing in again
-	socket.send_message_use(Some(NS), Some("different")).await.unwrap();
-	// Verify that the authenticated session is unable to query data
+	// Attempt to switch to a different database without signing in again. The
+	// tenant-boundary gate (GHSA-2v9j) rejects the cross-tenant pivot at `use`
+	// itself, so a record user cannot reach a database outside its level.
+	let res = socket.send_message_use(Some(NS), Some("different")).await;
+	assert!(res.is_err(), "cross-tenant RPC use must be rejected, got: {res:?}");
+	// The session was not pivoted; $auth still resolves in the original database.
 	let res = socket.send_message_query("SELECT VALUE name FROM $auth").await.unwrap();
-	// The following statement would be true when the bug was present:
-	// assert_eq!(res[0]["result"], json!(["different"]), "result: {:?}", res);
-	assert_eq!(res[0]["status"], "ERR", "result: {:?}", res);
-	assert_eq!(
-		res[0]["result"], "You don't have permission to change to the different database",
-		"result: {:?}",
-		res
-	);
+	assert_eq!(res[0]["result"], json!(["original"]), "result: {:?}", res);
 	// Test passed
 	server.finish().unwrap();
 }

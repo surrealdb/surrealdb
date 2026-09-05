@@ -1353,7 +1353,7 @@ fn snapshot_covers_every_variant() {
 // 173: idx::Error carries a `FileAccessDenied` twin of the buc variant with a
 // byte-identical message, so the mapper allowlist is enforced inside idx; the
 // wire output of the affected sites is unchanged.
-const UNTYPED_INTERNAL_BUDGET: usize = 171;
+const UNTYPED_INTERNAL_BUDGET: usize = 169;
 
 /// Counts variants whose OWN kind is `Internal`.
 ///

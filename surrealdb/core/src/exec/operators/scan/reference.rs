@@ -15,7 +15,9 @@ use super::common::{
 	evaluate_bound_key, extract_record_ids_into, resolve_record_batch, resolve_version_stamp,
 };
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::exec::permission::{PhysicalPermission, should_check_perms};
+use crate::exec::permission::{
+	PhysicalPermission, should_check_perms, validate_record_user_access,
+};
 use crate::exec::{
 	AccessMode, ContextLevel, ControlFlowExt, ExecOperator, ExecutionContext, FlowResult,
 	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
@@ -153,6 +155,11 @@ impl ExecOperator for ReferenceScan {
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let db_ctx = ctx.database()?.clone();
+		// SECURITY (GHSA-2v9j): confine the reference resolution to the caller's
+		// tenant. Like the graph scan, a reference scan can be rooted at a literal
+		// record, so it is not guaranteed to sit downstream of a validated entry
+		// scan; enforce the namespace/database boundary here.
+		validate_record_user_access(&db_ctx)?;
 		// SECURITY: reference scan results bypass `Document::pluck_select`, so
 		// the referencing table's SELECT permission must be enforced here
 		// (same family as the graph scan check). `resolve_record_batch`

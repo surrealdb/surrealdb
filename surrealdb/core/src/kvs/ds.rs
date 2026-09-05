@@ -66,6 +66,7 @@ use crate::dbs::{
 use crate::doc::process_next_events_batch;
 use crate::err::{EngineError, Error};
 use crate::exe::FlowResultExt as _;
+use crate::exec::Error as ExecError;
 use crate::exec::config::ExecConfig;
 use crate::exec::function::FunctionRegistry;
 use crate::expr::model::get_model_path;
@@ -5624,6 +5625,38 @@ impl Datastore {
 		// auto-created namespace they should not have been able to
 		// create. See `SECURITY_GUIDE.md` section 3.
 		let map_internal = |err: anyhow::Error| TypesError::internal(err.to_string());
+		// SECURITY (GHSA-2v9j): tenant-boundary gate, mirroring the SurrealQL
+		// `USE` statement handler (`dbs::executor`) and the RPC `use` handler
+		// (`rpc::protocol::yuse`). This path (`process_use`) serves the embedded
+		// SDK `Command::Use` and the PostgreSQL wire; the WS/HTTP/gRPC RPC `use`
+		// method carries its own copy of this gate in `yuse`. An authenticated
+		// Database-, Namespace- or Record-level principal must be verified as
+		// authorized for the target namespace/database before the session is
+		// pivoted, or it could switch into a foreign tenant and reach any table
+		// there with satisfiable PERMISSIONS. The authenticated Auth level is the
+		// source of truth; a switch that changes only one of ns/db keeps the
+		// other from the current session. Root and anonymous (`Level::No`, e.g.
+		// `use` before `signin`) principals are unrestricted by `can_access_ns_db`,
+		// preserving the pre-signin `use` pattern.
+		{
+			let target_ns = namespace.as_deref().or(session.ns.as_deref());
+			let target_db = database.as_deref().or(session.db.as_deref());
+			if let Some(ns_name) = target_ns {
+				let db_name = target_db.unwrap_or_default();
+				if !session.au.can_access_ns_db(ns_name, db_name) {
+					let err = if session.au.level().ns() == Some(ns_name) {
+						ExecError::DbNotAllowed {
+							db: db_name.to_owned(),
+						}
+					} else {
+						ExecError::NsNotAllowed {
+							ns: ns_name.to_owned(),
+						}
+					};
+					return Err(TypesError::not_allowed(err.to_string(), None));
+				}
+			}
+		}
 		match (namespace, database) {
 			(Some(ns), Some(db)) => {
 				let tx = new_tx().await?;
@@ -5705,6 +5738,25 @@ impl Datastore {
 				// created what it could not have defined. See
 				// `SECURITY_GUIDE.md` section 3.
 				if let Some((Some(ns), db)) = default {
+					// SECURITY (GHSA-2v9j): the default names a namespace/database
+					// to a scoped principal just as an explicit `USE` would, so gate
+					// the resolved default the same way before selecting or creating
+					// it. Root and anonymous principals are unrestricted by
+					// `can_access_ns_db`; a scoped principal is confined to its own
+					// namespace/database. Mirrors the executor's `USE DEFAULT` path.
+					if !session.au.can_access_ns_db(&ns, db.as_deref().unwrap_or_default()) {
+						let _ = tx.cancel().await;
+						let err = if session.au.level().ns() == Some(ns.as_str()) {
+							ExecError::DbNotAllowed {
+								db: db.clone().unwrap_or_default(),
+							}
+						} else {
+							ExecError::NsNotAllowed {
+								ns: ns.clone(),
+							}
+						};
+						return Err(TypesError::not_allowed(err.to_string(), None));
+					}
 					let create_ns = self
 						.should_materialize_ns_on_use(&tx, &session.au, &ns)
 						.await

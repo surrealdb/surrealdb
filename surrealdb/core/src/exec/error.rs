@@ -401,6 +401,17 @@ impl LeafError for Error {
 			// nothing for a client to correct, so it stays internal.
 			Error::Unimplemented(_) => TypesError::internal(message),
 
+			// A cross-tenant namespace/database refusal: the authenticated auth
+			// level is not permitted to reach the selected ns/db. This is an
+			// authorization denial, so it reaches clients as `NotAllowed` rather
+			// than as an internal error.
+			Error::NsNotAllowed {
+				..
+			}
+			| Error::DbNotAllowed {
+				..
+			} => TypesError::not_allowed(message, None),
+
 			// Reach clients as an untyped internal error only because they always
 			// have. Each is a candidate for a real kind, and giving one a kind
 			// moves the wire snapshot, so it is a deliberate change and not a
@@ -427,12 +438,6 @@ impl LeafError for Error {
 				..
 			}
 			| Error::InvalidControlFlow
-			| Error::NsNotAllowed {
-				..
-			}
-			| Error::DbNotAllowed {
-				..
-			}
 			| Error::ComputationDepthExceeded
 			| Error::InvalidStatement(_)
 			| Error::InvalidStatementTarget {

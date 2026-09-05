@@ -206,8 +206,8 @@ InvalidScript	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Problem w
 InvalidModel	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Problem with machine learning computation. sample' }
 InvalidFunction	{ cause: NONE, code: -32000, kind: 'Internal', message: 'There was a problem running the sample() function. sample' }
 InvalidControlFlow	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Invalid control flow statement, break or continue statement found outside of loop.' }
-NsNotAllowed	{ cause: NONE, code: -32000, kind: 'Internal', message: "You don't have permission to change to the sample namespace" }
-DbNotAllowed	{ cause: NONE, code: -32000, kind: 'Internal', message: "You don't have permission to change to the sample database" }
+NsNotAllowed	{ cause: NONE, code: -32000, kind: 'NotAllowed', message: "You don't have permission to change to the sample namespace" }
+DbNotAllowed	{ cause: NONE, code: -32000, kind: 'NotAllowed', message: "You don't have permission to change to the sample database" }
 ComputationDepthExceeded	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Reached excessive computation depth due to functions, subqueries, or computed values' }
 InvalidStatement	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Invalid statement: sample' }
 InvalidStatementTarget	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Cannot execute statement using value: sample' }

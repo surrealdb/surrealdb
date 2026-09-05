@@ -16,7 +16,9 @@ pub use super::graph_keys::EdgeTableSpec;
 use super::graph_keys::{compute_graph_ranges, decode_graph_edge};
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::exec::parts::LookupDirection;
-use crate::exec::permission::{PhysicalPermission, should_check_perms};
+use crate::exec::permission::{
+	PhysicalPermission, should_check_perms, validate_record_user_access,
+};
 use crate::exec::{
 	AccessMode, ContextLevel, ControlFlowExt, EvalContext, ExecOperator, ExecutionContext,
 	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream,
@@ -233,6 +235,11 @@ impl ExecOperator for GraphEdgeScan {
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let db_ctx = ctx.database()?.clone();
+		// SECURITY (GHSA-2v9j): confine the traversal to the caller's tenant. A
+		// graph scan can be rooted at a literal record (`CurrentValueSource`), so
+		// unlike the other scan operators it is not guaranteed to sit downstream
+		// of a validated entry scan; enforce the namespace/database boundary here.
+		validate_record_user_access(&db_ctx)?;
 		// SECURITY: graph edge results bypass `Document::pluck_select`, so we
 		// must enforce the edge/target table's SELECT permission here. Without
 		// this check a low-privileged user could traverse `->edge` to
