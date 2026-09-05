@@ -394,9 +394,11 @@ macro_rules! check_perm {
 /// Combined single-pass filter and process for a batch of decoded values.
 ///
 /// Per-record pipeline (sequential, in-place):
-///   table permission -> computed fields -> field permissions -> WHERE predicate.
-/// Field-level permissions precede the predicate so a field the reader may not
-/// see is already cut from the document the condition is evaluated against.
+///   table permission -> [`materialise_fields_with_permissions`] -> WHERE predicate.
+/// Computed fields and field-level permissions both precede the predicate so a
+/// field the reader may not see is already cut from the document the condition
+/// is evaluated against, and a computed field derived from such a field already
+/// reads as `NONE` there.
 /// Records that fail any check are compacted out via an in-place swap so the
 /// surviving prefix can be truncated at the end with no extra allocation.
 pub(crate) async fn filter_and_process_batch(
@@ -441,14 +443,11 @@ pub(crate) async fn filter_and_process_batch(
 		if write_idx != read_idx {
 			batch.swap(write_idx, read_idx);
 		}
-		// Computed fields (must run before predicate)
-		compute_fields_for_value(ctx, state, &mut batch[write_idx], false).await?;
-		// Field-level permissions (must run before the WHERE predicate so that
-		// restricted fields are removed before the condition is evaluated,
-		// matching the old compute path's behaviour).
-		if check_perms {
-			filter_fields_by_permission(ctx, state, &mut batch[write_idx]).await?;
-		}
+		// Computed fields and field-level permissions, both of which must run
+		// before the WHERE predicate so the condition is evaluated against the
+		// document this caller is allowed to read.
+		materialise_fields_with_permissions(ctx, state, &mut batch[write_idx], false, check_perms)
+			.await?;
 		// WHERE predicate (evaluated on the permission-reduced document)
 		if let Some(pred) = predicate {
 			let eval_ctx = EvalContext::from_exec_ctx(ctx).with_value_and_doc(&batch[write_idx]);
@@ -940,6 +939,130 @@ pub(crate) async fn compute_fields_for_value(
 	Ok(())
 }
 
+/// Which of `state.field_permissions` a pass applies.
+///
+/// The two-pass materialisation splits the entries the way the legacy read path
+/// splits them, and for the same reason: a field's clause must be answered
+/// exactly once, against the view that field actually exists on. Evaluating one
+/// twice and keeping the union is not merely wasted work — a volatile predicate
+/// such as `WHERE rand::bool()` would be allowed by either roll, turning a 50%
+/// policy into 75%.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PermissionPass {
+	/// Every entry, for the single-pass case.
+	All,
+	/// Only fields with no `COMPUTED` clause, mirroring `reduce_document`.
+	/// These are the cuts that make re-derivation produce a different answer.
+	Stored,
+	/// Only `COMPUTED` fields, mirroring `filter_computed_field_permissions`.
+	/// Deferred to after re-derivation, which is where their values are final.
+	Computed,
+}
+
+impl PermissionPass {
+	/// Whether this pass applies the entry for `idiom`.
+	///
+	/// `dep_map` is keyed by every `COMPUTED` field on the table and is *not*
+	/// narrowed by the projection, unlike `computed_fields`, so it stays a
+	/// sound classifier for a state built for a selective `SELECT`.
+	fn applies_to(self, state: &FieldState, idiom: &crate::expr::Idiom) -> bool {
+		let computed = match idiom.0.as_slice() {
+			[crate::expr::Part::Field(name)] => state.dep_map.contains_key(name.as_str()),
+			_ => state.dep_map.contains_key(&idiom.to_raw_string()),
+		};
+		match self {
+			PermissionPass::All => true,
+			PermissionPass::Stored => !computed,
+			PermissionPass::Computed => computed,
+		}
+	}
+}
+
+/// Populate `value`'s computed fields and apply field-level permissions, in the
+/// order that stops a computed field from carrying a value the caller's
+/// permissions deny.
+///
+/// Computed fields are evaluated first, because a field-level permission
+/// predicate may read one and must see the value the record computes to. That
+/// leaves every computed field derived from the document *before* any field was
+/// cut, so one whose body reads a denied field still holds its value once the
+/// permission pass has removed the source. Re-deriving them against the reduced
+/// document is what the legacy read path does.
+///
+/// The passes are split by field kind, as [`PermissionPass`] describes: stored
+/// fields are cut first, because those cuts are what re-derivation reacts to,
+/// and a computed field's own clause is applied afterwards, against its final
+/// value. Every clause is therefore evaluated exactly once.
+///
+/// Re-derivation itself is skipped whenever it cannot change the answer: the
+/// table has no computed fields, no field on it restricts reads, or the stored
+/// pass cut nothing so `value` still equals the record.
+///
+/// KNOWN GAP: a computed field that reaches its own row by dereferencing the
+/// record id (`COMPUTED id.secret`) is served by
+/// [`crate::exec::parts::field`] from raw storage rather than from `value`, so
+/// re-derivation does not reduce it and the denied source is still returned.
+/// The self-read has to consult the reduced row for that to hold.
+pub(crate) async fn materialise_fields_with_permissions(
+	ctx: &ExecutionContext,
+	state: &FieldState,
+	value: &mut Value,
+	skip_fetch_perms: bool,
+	check_perms: bool,
+) -> Result<(), ControlFlow> {
+	compute_fields_for_value(ctx, state, value, skip_fetch_perms).await?;
+	// Nothing on the table restricts reads, so nothing can be cut and nothing
+	// needs re-deriving. Checked before the snapshot below so a table whose
+	// fields are all readable pays no clone.
+	if !check_perms || state.field_permissions.is_empty() {
+		return Ok(());
+	}
+	// Without computed fields there is nothing to re-derive and nothing to
+	// defer, so one pass over every entry is both necessary and sufficient —
+	// and it snapshots lazily.
+	if state.computed_fields.is_empty() {
+		return filter_fields_by_permission(ctx, state, value).await;
+	}
+	// The record as computed from storage. Both passes answer their predicates
+	// against it rather than against `value`: `value` has the caller's denied
+	// fields cut from it, so a clause naming one would read it as `NONE` there
+	// and pass a field the clause was written to deny.
+	let record = value.clone();
+	// Stored fields first. `value` still equals `record`, so it doubles as the
+	// snapshot that `each` expansion and the `$value` binding read.
+	let cut = filter_fields_by_permission_inner(
+		ctx,
+		state,
+		value,
+		PermissionPass::Stored,
+		Some(&record),
+		Some(&record),
+	)
+	.await?;
+	if cut {
+		// Re-derive the computed fields, now against the reduced record, so one
+		// whose body reads a denied field yields `NONE` instead of the value it
+		// held before that field was cut.
+		compute_fields_for_value(ctx, state, value, skip_fetch_perms).await?;
+	}
+	// The computed fields' own clauses, against their final values. The
+	// snapshot is left implicit when a re-derivation ran, because `each` and
+	// `$value` must read the re-derived view — the value the caller would
+	// receive, not the pre-reduction one. With no re-derivation `value` still
+	// equals `record`, which is that view and saves the clone.
+	let snapshot = (!cut).then_some(&record);
+	filter_fields_by_permission_inner(
+		ctx,
+		state,
+		value,
+		PermissionPass::Computed,
+		snapshot,
+		Some(&record),
+	)
+	.await?;
+	Ok(())
+}
+
 /// Filter fields from a value based on field-level permissions.
 ///
 /// Each `(idiom, perm)` entry is expanded via [`Value::each`] to handle
@@ -952,23 +1075,60 @@ pub(crate) async fn filter_fields_by_permission(
 	state: &FieldState,
 	value: &mut Value,
 ) -> Result<(), ControlFlow> {
+	filter_fields_by_permission_inner(ctx, state, value, PermissionPass::All, None, None).await?;
+	Ok(())
+}
+
+/// The body of [`filter_fields_by_permission`], restricted to one
+/// [`PermissionPass`], with the two documents it reads separable, and reporting
+/// whether any path was cut from `value`.
+///
+/// `snapshot` is the unmutated view that `Value::each` expansion and the
+/// `$value` binding read, so that a cut made for one field cannot perturb the
+/// paths or values a later field is judged on. It defaults to a lazy clone of
+/// `value`; a caller that already holds an identical copy passes it to save the
+/// clone. It must never be a view `value` has since diverged from — the paths
+/// it yields are applied to `value`, and `$value` has to be the value the
+/// caller would actually receive.
+///
+/// `predicate_doc` is the document a `Permission::Specific` clause is evaluated
+/// against, defaulting to `snapshot`. A caller that has already reduced `value`
+/// passes the unreduced record: the reduced view is missing the fields the
+/// caller may not select, so a clause naming one of them reads it as `NONE`
+/// there and passes a field the clause was written to deny — the same reason
+/// the reduce kernel answers a stored field's clause against the record.
+async fn filter_fields_by_permission_inner(
+	ctx: &ExecutionContext,
+	state: &FieldState,
+	value: &mut Value,
+	pass: PermissionPass,
+	snapshot: Option<&Value>,
+	predicate_doc: Option<&Value>,
+) -> Result<bool, ControlFlow> {
 	if state.field_permissions.is_empty() {
-		return Ok(());
+		return Ok(false);
 	}
 	if !matches!(value, Value::Object(_)) {
-		return Ok(());
+		return Ok(false);
 	}
 
 	// Snapshot the row only when we actually need to evaluate something
-	// against the unmutated document. Per-field denies cut from `value`;
-	// predicates and `each` read from the snapshot so earlier cuts don't
-	// affect later field expansion.
-	let mut snapshot: Option<Value> = None;
+	// against the unmutated document, and only when the caller did not supply
+	// one. Per-field denies cut from `value`; predicates and `each` read from
+	// the snapshot so earlier cuts don't affect later field expansion.
+	let mut lazy_snapshot: Option<Value> = None;
+	let mut cut_any = false;
 	for (idiom, perm) in state.field_permissions.iter() {
+		if !pass.applies_to(state, idiom) {
+			continue;
+		}
 		match perm {
 			PhysicalPermission::Allow => continue,
 			PhysicalPermission::Deny => {
-				let original = snapshot.get_or_insert_with(|| value.clone());
+				let original = match snapshot {
+					Some(snapshot) => snapshot,
+					None => &*lazy_snapshot.get_or_insert_with(|| value.clone()),
+				};
 				// SECURITY: iterate in reverse. `each` yields ascending
 				// array indices and `Value::cut` removes via `Vec::remove`
 				// (shifting later indices down), so a forward pass would
@@ -977,32 +1137,37 @@ pub(crate) async fn filter_fields_by_permission(
 				// indices first keeps the pending lower indices valid.
 				for path in original.each(&idiom.0).into_iter().rev() {
 					value.cut(&path.0);
+					cut_any = true;
 				}
 			}
 			PhysicalPermission::Conditional(_) => {
-				let original = snapshot.get_or_insert_with(|| value.clone());
+				let original = match snapshot {
+					Some(snapshot) => snapshot,
+					None => &*lazy_snapshot.get_or_insert_with(|| value.clone()),
+				};
+				let doc = predicate_doc.unwrap_or(original);
 				// SECURITY: iterate in reverse (see the Deny arm above and
-				// issue #7356). Predicates read from `original` (immutable),
-				// so evaluation order is irrelevant.
+				// issue #7356). Predicates read from `original` and `doc`,
+				// both immutable, so evaluation order is irrelevant.
 				for path in original.each(&idiom.0).into_iter().rev() {
 					let field_value = original.pick(&path.0);
-					let allowed =
-						check_permission_for_value(perm, original, Some(&field_value), ctx)
-							.await
-							.map_err(|e| {
+					let allowed = check_permission_for_value(perm, doc, Some(&field_value), ctx)
+						.await
+						.map_err(|e| {
 							ControlFlow::Err(anyhow::anyhow!(
 								"Failed to check field permission: {e}"
 							))
 						})?;
 					if !allowed {
 						value.cut(&path.0);
+						cut_any = true;
 					}
 				}
 			}
 		}
 	}
 
-	Ok(())
+	Ok(cut_any)
 }
 
 #[cfg(test)]

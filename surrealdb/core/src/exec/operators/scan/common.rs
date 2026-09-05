@@ -5,9 +5,7 @@
 
 use std::sync::Arc;
 
-use super::pipeline::{
-	FieldState, build_field_state, compute_fields_for_value, filter_fields_by_permission,
-};
+use super::pipeline::{FieldState, build_field_state, materialise_fields_with_permissions};
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId, table_select_permission};
 use crate::exec::{ControlFlowExt, EvalContext, ExecutionContext, PhysicalExpr};
@@ -233,10 +231,14 @@ pub(crate) async fn resolve_record_batch(
 				field_state_cache.insert(rid.table.clone(), fs);
 			}
 			let field_state = &field_state_cache[&rid.table];
-			compute_fields_for_value(ctx, field_state, &mut value, skip_fetch_perms).await?;
-			if check_perms {
-				filter_fields_by_permission(ctx, field_state, &mut value).await?;
-			}
+			materialise_fields_with_permissions(
+				ctx,
+				field_state,
+				&mut value,
+				skip_fetch_perms,
+				check_perms,
+			)
+			.await?;
 
 			values.push(value);
 		} else {

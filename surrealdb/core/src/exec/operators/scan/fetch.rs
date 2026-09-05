@@ -29,9 +29,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::pipeline::{
-	FieldState, build_field_state, compute_fields_for_value, filter_fields_by_permission,
-};
+use super::pipeline::{FieldState, build_field_state, materialise_fields_with_permissions};
 use crate::catalog::providers::TableProvider;
 use crate::catalog::table_select_permission;
 use crate::exec::permission::{
@@ -242,14 +240,16 @@ pub(crate) async fn resolve_with_field_state(
 			Err(arc) => arc.data.clone(),
 		};
 
-		// 2. Computed fields: evaluated and injected before field permissions, exactly as
-		//    filter_and_process_batch orders it.
-		compute_fields_for_value(ctx, &table_state.field_state, &mut value, false).await?;
-
-		// 3. Field-level SELECT permissions: cut fields the caller cannot read.
-		if check_perms {
-			filter_fields_by_permission(ctx, &table_state.field_state, &mut value).await?;
-		}
+		// 2. Computed fields and field-level SELECT permissions, ordered exactly as
+		//    `filter_and_process_batch` orders them.
+		materialise_fields_with_permissions(
+			ctx,
+			&table_state.field_state,
+			&mut value,
+			false,
+			check_perms,
+		)
+		.await?;
 
 		out.push(Some(value));
 	}
