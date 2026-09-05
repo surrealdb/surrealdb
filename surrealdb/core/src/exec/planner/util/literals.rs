@@ -7,6 +7,7 @@
 
 use std::ops::Bound;
 
+use crate::dbs::capabilities::Capabilities;
 use crate::err::{EngineError, Error};
 use crate::exec::Error as ExecError;
 use crate::exec::function::FunctionRegistry;
@@ -126,12 +127,18 @@ pub(crate) fn try_expr_to_value(expr: &Expr) -> Option<crate::val::Value> {
 /// - Are arithmetic on literals, or calls to a built-in that is both context-free and deterministic
 ///   (math::*, string::*, type::*, etc.) with all arguments already literals. `rand::*` is
 ///   context-free but not deterministic, so it is left for per-row evaluation.
+/// - Call only functions `capabilities` permits the caller to execute.
 ///
 /// `time::now()` is evaluated once at plan time, consistent with how most
 /// databases evaluate `NOW()` once per statement/transaction.
-pub(crate) fn fold_condition_expressions(cond: &mut Cond, registry: &FunctionRegistry) {
+pub(crate) fn fold_condition_expressions(
+	cond: &mut Cond,
+	registry: &FunctionRegistry,
+	capabilities: &Capabilities,
+) {
 	let mut folder = ExpressionFolder {
 		registry,
+		capabilities,
 	};
 	let _ = folder.visit_mut_expr(&mut cond.0);
 }
@@ -141,6 +148,7 @@ pub(crate) fn fold_condition_expressions(cond: &mut Cond, registry: &FunctionReg
 /// node is checked.
 struct ExpressionFolder<'a> {
 	registry: &'a FunctionRegistry,
+	capabilities: &'a Capabilities,
 }
 
 impl MutVisitor for ExpressionFolder<'_> {
@@ -151,7 +159,7 @@ impl MutVisitor for ExpressionFolder<'_> {
 		expr.visit_mut(self)?;
 
 		// Then try to fold this node to a literal
-		if let Some(folded) = try_fold_to_literal(expr, self.registry) {
+		if let Some(folded) = try_fold_to_literal(expr, self.registry, self.capabilities) {
 			*expr = folded;
 		}
 		Ok(())
@@ -180,7 +188,20 @@ impl MutVisitor for ExpressionFolder<'_> {
 /// context, [`ScalarFunction::is_deterministic`] whether repeated calls agree.
 /// `rand::*` answers yes then no, and folding it would freeze one draw into
 /// every row.
-fn try_fold_to_literal(expr: &Expr, registry: &FunctionRegistry) -> Option<Expr> {
+///
+/// A call is folded only when `capabilities` permits the caller to execute it.
+/// Folding runs the function here, at plan time, and no physical expression is
+/// built for what it replaces — so this is the only place the function-name
+/// capability can be enforced for a folded call. A denied call is left
+/// unfolded rather than rejected here: it stays an ordinary call and fails at
+/// evaluation with `FunctionNotAllowed`, which keeps the error identical to
+/// the unfolded path and keeps plan construction (including `EXPLAIN`)
+/// infallible.
+fn try_fold_to_literal(
+	expr: &Expr,
+	registry: &FunctionRegistry,
+	capabilities: &Capabilities,
+) -> Option<Expr> {
 	use crate::expr::Function;
 	use crate::val::{Datetime, Value};
 
@@ -192,7 +213,8 @@ fn try_fold_to_literal(expr: &Expr, registry: &FunctionRegistry) -> Option<Expr>
 		// of the determinism gate.
 		Expr::FunctionCall(fc)
 			if matches!(&fc.receiver, Function::Normal(name) if name == "time::now")
-				&& fc.arguments.is_empty() =>
+				&& fc.arguments.is_empty()
+				&& capabilities.allows_function_name("time::now") =>
 		{
 			Some(Value::Datetime(Datetime::now()).into_literal())
 		}
@@ -205,6 +227,12 @@ fn try_fold_to_literal(expr: &Expr, registry: &FunctionRegistry) -> Option<Expr>
 			let Function::Normal(name) = &fc.receiver else {
 				return None;
 			};
+			// Folding executes the call, so the caller must be allowed to run
+			// it. Left unfolded when denied, so the physical expression built
+			// for it raises `FunctionNotAllowed` at evaluation.
+			if !capabilities.allows_function_name(name.as_str()) {
+				return None;
+			}
 			let func = registry.get(name.as_str())?;
 			// `is_pure` only says the call needs no context; folding also
 			// requires that repeated calls agree, or the single plan-time

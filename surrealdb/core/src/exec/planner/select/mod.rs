@@ -1023,7 +1023,8 @@ impl<'ctx> Planner<'ctx> {
 		// - type::int('42') → 42
 		let cond = match cond {
 			Some(mut c) => {
-				fold_condition_expressions(&mut c, self.function_registry());
+				let capabilities = self.ctx.get_capabilities();
+				fold_condition_expressions(&mut c, self.function_registry(), &capabilities);
 				Some(c)
 			}
 			None => None,

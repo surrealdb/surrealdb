@@ -733,7 +733,8 @@ async fn resolve_table_scan_stream(
 			let ns_db = Some((cfg.ns_id, cfg.db_id));
 			let mut cond =
 				resolve_condition_params(c, &ctx.root().ctx, ns_db, SELECT_ITERATION_PARAMS).await;
-			fold_condition_expressions(&mut cond, ctx.function_registry());
+			let capabilities = ctx.root().ctx.get_capabilities();
+			fold_condition_expressions(&mut cond, ctx.function_registry(), &capabilities);
 			resolve_projection_field_idioms(&mut cond, ctx.function_registry());
 			Some(cond)
 		}

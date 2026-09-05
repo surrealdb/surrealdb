@@ -708,14 +708,21 @@ Flag when changes touch:
 
 ## 11. Function Execution
 
-**Files**: `fnc/`, scripting runtime (QuickJS), HTTP client, capabilities,
-Surrealism/WASM
+**Files**: `fnc/`, `exec/planner/` (plan-time evaluation), scripting runtime
+(QuickJS), HTTP client, capabilities, Surrealism/WASM
 
 ### Invariants
 
 - JavaScript scripting must be gated by capabilities and denied by default.
 - Every function invocation must be checked against the capabilities allow/deny list.
   Deny rules override allow rules.
+- Plan-time evaluation is an invocation. Whenever the planner runs a function while
+  building a plan — constant folding in `exec/planner/util/literals.rs`, plan-time
+  `FROM` source resolution — the capability must be checked before the call, because
+  the folded result replaces the expression and leaves no physical expression to check
+  at evaluation. A denied call is left unfolded rather than rejected during planning,
+  so it fails at evaluation with the same `FunctionNotAllowed` an unfolded call would
+  raise and plan construction stays infallible for `EXPLAIN`.
 - Outbound HTTP requests must be checked against network allow/deny lists. Both the
   initial URL and all DNS-resolved IP addresses must be validated. The DNS filtering
   resolver must validate every resolution result.
