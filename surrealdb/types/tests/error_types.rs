@@ -1396,6 +1396,7 @@ fn test_error_wire_query_transaction_conflict() {
 	//   "details": { "kind": "TransactionConflict" }
 	// }
 	let err = Error::query("Transaction conflict".into(), QueryError::TransactionConflict);
+	assert!(err.is_retryable());
 	let val = err.into_value();
 
 	let Value::Object(ref obj) = val else {
@@ -1405,7 +1406,11 @@ fn test_error_wire_query_transaction_conflict() {
 
 	let parsed = Error::from_value(val).unwrap();
 	assert!(parsed.is_query());
+	assert!(parsed.is_retryable());
 	assert_eq!(parsed.query_details(), Some(&QueryError::TransactionConflict));
+
+	let wrapped = Error::internal("request failed".into()).with_cause(parsed);
+	assert!(wrapped.is_retryable());
 }
 
 #[test]
@@ -1418,6 +1423,7 @@ fn test_error_wire_query_not_executed() {
 	//   "details": { "kind": "NotExecuted" }
 	// }
 	let err = Error::query("Query not executed".into(), QueryError::NotExecuted);
+	assert!(!err.is_retryable());
 	let val = err.into_value();
 
 	let parsed = Error::from_value(val).unwrap();
