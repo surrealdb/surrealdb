@@ -52,46 +52,20 @@ pub async fn run(
 	name: &str,
 	args: Vec<Value>,
 ) -> Result<Value> {
-	if name.eq("sleep")
-		|| name.eq("array::all")
-		|| name.eq("array::any")
-		|| name.eq("array::every")
-		|| name.eq("array::filter_index")
-		|| name.eq("array::filter")
-		|| name.eq("array::find_index")
-		|| name.eq("array::find")
-		|| name.eq("array::fold")
-		|| name.eq("array::includes")
-		|| name.eq("array::index_of")
-		|| name.eq("array::map")
-		|| name.eq("array::reduce")
-		|| name.eq("array::some")
-		|| name.eq("file::put")
-		|| name.eq("file::put_if_not_exists")
-		|| name.eq("file::get")
-		|| name.eq("file::head")
-		|| name.eq("file::delete")
-		|| name.eq("file::exists")
-		|| name.eq("file::copy")
-		|| name.eq("file::copy_if_not_exists")
-		|| name.eq("file::rename")
-		|| name.eq("file::rename_if_not_exists")
-		|| name.eq("file::list")
-		|| name.eq("record::exists")
-		|| name.eq("record::is_edge")
-		|| name.eq("set::all")
-		|| name.eq("set::any")
-		|| name.eq("set::filter")
-		|| name.eq("set::find")
-		|| name.eq("set::fold")
-		|| name.eq("set::map")
-		|| name.eq("set::reduce")
-		|| name.eq("type::field")
-		|| name.eq("type::fields")
-		|| name.eq("value::diff")
-		|| name.eq("value::expect")
-		|| name.eq("value::patch")
-		|| name.eq("sequence::nextval")
+	let is_async = matches!(
+			name,
+			"sleep" | "array::all" | "array::any" | "array::every" 
+			| "array::filter_index" | "array::filter" | "array::find_index" 
+			| "array::find" | "array::fold" | "array::includes" 
+			| "array::index_of" | "array::map" | "array::reduce" | "array::some" 
+			| "file::put" | "file::put_if_not_exists" | "file::get" | "file::head" 
+			| "file::delete" | "file::exists" | "file::copy" | "file::copy_if_not_exists" 
+			| "file::rename" | "file::rename_if_not_exists" | "file::list" 
+			| "record::exists" | "record::is_edge" | "set::all" | "set::any" 
+			| "set::filter" | "set::find" | "set::fold" | "set::map" | "set::reduce" 
+			| "type::field" | "type::fields" | "value::diff" | "value::expect" 
+			| "value::patch" | "sequence::nextval" | "schema::table::exists"
+		) 
 		|| name.starts_with("eval::")
 		|| name.starts_with("api")
 		|| name.starts_with("http")
@@ -99,9 +73,9 @@ pub async fn run(
 		|| name.starts_with("crypto::argon2")
 		|| name.starts_with("crypto::bcrypt")
 		|| name.starts_with("crypto::pbkdf2")
-		|| name.starts_with("crypto::scrypt")
-		|| name.eq("schema::table::exists")
-	{
+		|| name.starts_with("crypto::scrypt");
+
+	if is_async {
 		stk.run(|stk| asynchronous(stk, ctx, opt, doc, name, args)).await
 	} else {
 		synchronous(ctx, doc, name, args)

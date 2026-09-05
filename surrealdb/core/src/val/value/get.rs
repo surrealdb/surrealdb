@@ -373,18 +373,33 @@ impl Value {
 							_ => None,
 						};
 						let ctx = parent_ctx.as_ref().unwrap_or(ctx);
-						let mut a = Vec::new();
-						for v in v.iter() {
-							let cur = v.clone().into();
-							if stk
-								.run(|stk| w.compute(stk, ctx, opt, Some(&cur)))
-								.await
-								.catch_return()?
-								.is_truthy()
-							{
-								a.push(v.clone());
-							}
-						}
+						let a: Vec<Value> = stk.scope(|scope| {
+							let futs = v.iter().map(|v| {
+								scope.run(|stk| {
+									let cur = CursorDoc::from(v.clone());
+									async move {
+										let res = match w.compute(stk, ctx, opt, Some(&cur)).await.catch_return(){
+											Ok(v) => v,
+											Err(e)=> {
+												return Err(e);
+											}
+										};
+			
+										if res.is_truthy() {
+											Ok(Some(cur.doc.into_owned()))
+										} else {
+											Ok(None)
+										}
+									}
+								})
+							});
+							try_join_all_buffered(futs, ctx.config.max_concurrent_tasks)
+						})
+						.await?
+						.into_iter()
+						.flatten()
+						.collect();
+
 						let v = Value::from(a);
 						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 					}
@@ -493,19 +508,34 @@ impl Value {
 							_ => None,
 						};
 						let ctx = parent_ctx.as_ref().unwrap_or(ctx);
-						let mut a = Vec::new();
-						for v in v.iter() {
-							let cur = v.clone().into();
-							if stk
-								.run(|stk| w.compute(stk, ctx, opt, Some(&cur)))
-								.await
-								.catch_return()?
-								.is_truthy()
-							{
-								a.push(v.clone());
-							}
-						}
-						let v = Value::Set(a.into_iter().collect());
+						let a: Vec<Value> = stk.scope(|scope| {
+							let futs = v.iter().map(|v| {
+								scope.run(|stk| {
+									let cur = CursorDoc::from(v.clone());
+									async move {
+										let res = match w.compute(stk, ctx, opt, Some(&cur)).await.catch_return(){
+											Ok(v) => v,
+											Err(e)=> {
+												return Err(e);
+											}
+										};
+			
+										if res.is_truthy() {
+											Ok(Some(cur.doc.into_owned()))
+										} else {
+											Ok(None)
+										}
+									}
+								})
+							});
+							try_join_all_buffered(futs, ctx.config.max_concurrent_tasks)
+						})
+						.await?
+						.into_iter()
+						.flatten()
+						.collect();
+
+						let v = Value::Set(a.into());
 						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 					}
 					Part::Value(x) => match stk
