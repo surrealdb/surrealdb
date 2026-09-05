@@ -100,11 +100,25 @@ pub(crate) async fn evaluate_field(
 			{
 				return Ok(obj.get(name).cloned().unwrap_or(Value::None));
 			}
-			// When we are already computing fields for this record, fetch the
-			// raw stored data without re-evaluating computed fields. Otherwise
+			// When we are already computing fields for this record, answer the
+			// dereference directly rather than fetching the record. Otherwise
 			// a computed field like `{ return $this.id.prop }` would re-enter
 			// compute_fields_for_value for the same record and stack-overflow.
-			if ctx.computing_record.as_ref() == Some(rid) {
+			//
+			// SECURITY: prefer the caller's reduced view of the row. Reading
+			// storage here sees the record as written, so a computed field
+			// spelled `id.secret` returns a field the caller's
+			// `PERMISSIONS FOR select` removed, whatever order the computed
+			// fields and the permission passes ran in.
+			if let Some(computing) =
+				ctx.computing_record.as_ref().filter(|computing| &computing.rid == rid)
+			{
+				if let Some(stored) = &computing.stored {
+					return Ok(match stored {
+						Value::Object(obj) => obj.get(name).cloned().unwrap_or(Value::None),
+						_ => Value::None,
+					});
+				}
 				let version = ctx.exec_ctx.version_stamp();
 				let raw =
 					crate::exec::operators::fetch::fetch_raw_record(ctx.exec_ctx, rid, version)
@@ -150,6 +164,7 @@ mod tests {
 	use crate::dbs::Session;
 	use crate::exec::ExecutionContext;
 	use crate::exec::operators::test_util::{TestDb, eval_on, root_ctx, val};
+	use crate::exec::physical_expr::ComputingRecord;
 	use crate::kvs::TransactionType;
 	use crate::val::{RecordId, RecordIdKey};
 
@@ -363,7 +378,7 @@ mod tests {
 			name: "label".to_owned(),
 		};
 		let mut eval_ctx = EvalContext::from_exec_ctx(&ctx);
-		eval_ctx.computing_record = Some(node.clone());
+		eval_ctx.computing_record = Some(ComputingRecord::raw(node.clone()));
 		let out = part.evaluate(eval_ctx.clone().with_value_and_doc(&link)).await.unwrap();
 		assert_eq!(out, Value::None);
 
@@ -391,7 +406,7 @@ mod tests {
 			name: "label".to_owned(),
 		};
 		let mut eval_ctx = EvalContext::from_exec_ctx(&ctx);
-		eval_ctx.computing_record = Some(rid("node:1").await);
+		eval_ctx.computing_record = Some(ComputingRecord::raw(rid("node:1").await));
 		// A different record still goes through the full fetch, computed fields
 		// included.
 		let out = part.evaluate(eval_ctx.with_value_and_doc(&link)).await.unwrap();

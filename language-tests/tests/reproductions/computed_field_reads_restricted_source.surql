@@ -9,12 +9,14 @@ reason = "The streaming read path evaluated computed fields against the full rec
 # Scanned by record id. `secret` is absent, as its permissions require, and
 # `derived` computes from it, so it must be NONE rather than carrying the value
 # across. `denied` is a computed field the caller may not read at all, so it
-# must stay absent. `gated`'s own clause reads `$value` and is answered with the
+# must stay absent. `viaid` reaches `secret` by dereferencing the record id and
+# `viathis` through `$this`; both resolve against the reduced row, so neither
+# recovers the cut value from storage. `gated`'s own clause reads `$value` and is answered with the
 # value the caller receives, so it is allowed and present as NONE; answering it
 # on the pre-reduction value would deny it, and the missing key would then
 # report what `secret` holds.
 [[test.results]]
-value = "[{ derived: NONE, gated: NONE, id: items:one }]"
+value = "[{ derived: NONE, gated: NONE, id: items:one, viaid: NONE, viathis: NONE }]"
 
 # The same through an explicit projection of just the readable computed field.
 [[test.results]]
@@ -22,7 +24,7 @@ value = "[{ derived: NONE }]"
 
 # Resolved by a WHERE predicate rather than by the record-id fast path.
 [[test.results]]
-value = "[{ derived: NONE, gated: NONE, id: items:one }]"
+value = "[{ derived: NONE, gated: NONE, id: items:one, viaid: NONE, viathis: NONE }]"
 
 # Nothing stored is cut on this table, so no re-derivation runs — but the
 # computed fields' own clauses must still be applied, so `hidden` is absent.

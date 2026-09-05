@@ -868,6 +868,24 @@ pub(crate) async fn compute_fields_for_value(
 	value: &mut Value,
 	skip_fetch_perms: bool,
 ) -> Result<(), ControlFlow> {
+	compute_fields_for_value_against(ctx, state, value, skip_fetch_perms, None).await
+}
+
+/// [`compute_fields_for_value`] with the view a self-dereference resolves
+/// against supplied explicitly.
+///
+/// `stored_view` becomes [`ComputingRecord::stored`]: the row's stored fields
+/// as the caller may read them. A caller that has reduced `value` passes one,
+/// so a computed field spelled `id.<field>` reads the reduced row instead of
+/// storage and cannot recover a field the reduction removed. `None` keeps the
+/// read from storage, which is what a caller holding no reduced view wants.
+pub(crate) async fn compute_fields_for_value_against(
+	ctx: &ExecutionContext,
+	state: &FieldState,
+	value: &mut Value,
+	skip_fetch_perms: bool,
+	stored_view: Option<Value>,
+) -> Result<(), ControlFlow> {
 	if state.computed_fields.is_empty() {
 		return Ok(());
 	}
@@ -876,11 +894,16 @@ pub(crate) async fn compute_fields_for_value(
 	eval_ctx.skip_fetch_perms = skip_fetch_perms;
 
 	// Extract the record ID before entering the loop so that field
-	// dereferences that target this same record can return raw data
+	// dereferences that target this same record are answered directly
 	// instead of re-computing fields (which would loop forever).
 	eval_ctx.computing_record = match &*value {
 		Value::Object(obj) => match obj.get("id") {
-			Some(Value::RecordId(rid)) => Some(rid.clone()),
+			Some(Value::RecordId(rid)) => {
+				Some(Arc::new(crate::exec::physical_expr::ComputingRecord {
+					rid: rid.clone(),
+					stored: stored_view,
+				}))
+			}
 			_ => None,
 		},
 		_ => None,
@@ -937,6 +960,26 @@ pub(crate) async fn compute_fields_for_value(
 	}
 
 	Ok(())
+}
+
+/// The stored fields of `value`, as the caller may read them.
+///
+/// `value` is the reduced row after the stored permission pass, still carrying
+/// the computed fields the first evaluation left on it. Dropping every COMPUTED
+/// name yields what a read of storage would return for this caller — the shape
+/// a self-dereference has always seen, minus the fields the reduction removed.
+///
+/// `dep_map` is keyed by every COMPUTED field on the table and, unlike
+/// `computed_fields`, is not narrowed by the projection, so a state built for a
+/// selective `SELECT` still drops all of them.
+fn stored_fields_view(state: &FieldState, value: &Value) -> Value {
+	let mut view = value.clone();
+	if let Value::Object(obj) = &mut view {
+		for name in state.dep_map.keys() {
+			obj.remove(name.as_str());
+		}
+	}
+	view
 }
 
 /// Which of `state.field_permissions` a pass applies.
@@ -1042,8 +1085,12 @@ pub(crate) async fn materialise_fields_with_permissions(
 	if cut {
 		// Re-derive the computed fields, now against the reduced record, so one
 		// whose body reads a denied field yields `NONE` instead of the value it
-		// held before that field was cut.
-		compute_fields_for_value(ctx, state, value, skip_fetch_perms).await?;
+		// held before that field was cut. The same reduced row backs the
+		// self-dereference, so `id.<field>` cannot fetch the cut value back out
+		// of storage.
+		let stored_view = stored_fields_view(state, value);
+		compute_fields_for_value_against(ctx, state, value, skip_fetch_perms, Some(stored_view))
+			.await?;
 	}
 	// The computed fields' own clauses, against their final values. The
 	// snapshot is left implicit when a re-derivation ran, because `each` and

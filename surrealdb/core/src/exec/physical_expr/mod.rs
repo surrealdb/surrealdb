@@ -109,12 +109,10 @@ pub struct EvalContext<'a> {
 	/// links with conditional table permissions.
 	pub skip_fetch_perms: bool,
 
-	/// RecordId currently having its computed fields evaluated.
-	/// When a field dereference targets this same RecordId, raw data is
-	/// returned without re-evaluating computed fields, breaking what would
-	/// otherwise be infinite recursion (e.g. `$this.id.prop` on a record
-	/// whose computed field accesses `$this.id.prop`).
-	pub computing_record: Option<RecordId>,
+	/// The record currently having its computed fields evaluated, and the view
+	/// a dereference of that same record resolves against. See
+	/// [`ComputingRecord`].
+	pub computing_record: Option<Arc<ComputingRecord>>,
 
 	/// Expression-nesting depth recorded at plan time for a re-entry node (an
 	/// `eval` / user-defined-function body). Carries the planner's depth across
@@ -122,6 +120,45 @@ pub struct EvalContext<'a> {
 	/// re-planned `eval` strings continue counting toward `max_computation_depth`
 	/// instead of resetting to 0. Zero for ordinary per-row evaluation.
 	pub plan_depth: u32,
+}
+
+/// The record whose computed fields are being evaluated, and what a
+/// dereference of that same record reads.
+///
+/// A field dereference that targets `rid` must not re-enter computed-field
+/// evaluation for it: a body like `$this.id.prop` would recurse until the
+/// stack gave out. The dereference is answered directly instead, from `stored`
+/// when the caller supplied one and from storage otherwise.
+pub struct ComputingRecord {
+	/// The record being computed.
+	pub rid: RecordId,
+	/// The row's stored fields as this caller is permitted to read them.
+	///
+	/// SECURITY: a self-dereference answered from storage sees the record as
+	/// written, not as reduced, so a computed field spelled `id.secret` returns
+	/// a field the caller's `PERMISSIONS FOR select` removed. A caller that has
+	/// reduced the row supplies it here so the dereference reads the same view
+	/// the caller will receive.
+	///
+	/// Computed field names are deliberately absent from this view: they are
+	/// not stored, so resolving one against it yields `NONE`, which is what a
+	/// read of storage yields and what keeps the result independent of how far
+	/// computed-field evaluation has progressed.
+	///
+	/// `None` restores the read from storage, for a caller that has applied no
+	/// reduction and holds no view to offer.
+	pub stored: Option<Value>,
+}
+
+impl ComputingRecord {
+	/// A self-read served from storage, for a caller with no reduced view.
+	#[cfg(test)]
+	pub(crate) fn raw(rid: RecordId) -> Arc<Self> {
+		Arc::new(Self {
+			rid,
+			stored: None,
+		})
+	}
 }
 
 impl<'a> EvalContext<'a> {

@@ -20,7 +20,13 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ denied: 'S3CRET_TOKEN_VALUE', derived: 'S3CRET_TOKEN_VALUE', gated: 'S3CRET_TOKEN_VALUE', id: items:one, secret: 'S3CRET_TOKEN_VALUE' }]"
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ denied: 'S3CRET_TOKEN_VALUE', derived: 'S3CRET_TOKEN_VALUE', gated: 'S3CRET_TOKEN_VALUE', id: items:one, secret: 'S3CRET_TOKEN_VALUE', viaid: 'S3CRET_TOKEN_VALUE', viathis: 'S3CRET_TOKEN_VALUE' }]"
 
 [[test.results]]
 value = "NONE"
@@ -72,6 +78,12 @@ DEFINE FIELD denied ON items COMPUTED secret PERMISSIONS FOR select NONE;
 -- reduced record — not with the value the field held before `secret` was cut,
 -- or the field's presence in the result reports what `secret` holds.
 DEFINE FIELD gated ON items COMPUTED secret PERMISSIONS FOR select WHERE $value != 'S3CRET_TOKEN_VALUE';
+-- A computed field that reaches its own row by dereferencing the record id.
+-- The self-read resolves against the reduced row, so it sees `secret` cut
+-- rather than fetching it back out of storage.
+DEFINE FIELD viaid ON items COMPUTED id.secret PERMISSIONS FOR select FULL;
+-- The same reach spelled through `$this`, which resolves from the document.
+DEFINE FIELD viathis ON items COMPUTED $this.secret PERMISSIONS FOR select FULL;
 
 CREATE items:one SET secret = 'S3CRET_TOKEN_VALUE';
 
