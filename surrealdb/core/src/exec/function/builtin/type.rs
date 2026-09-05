@@ -36,6 +36,27 @@ define_pure_function!(TypeStringLossy, "type::string_lossy", (value: Any) -> Str
 define_pure_function!(TypeTable, "type::table", (value: Any) -> Any, crate::fnc::r#type::table);
 define_pure_function!(TypeUuid, "type::uuid", (value: Any) -> Uuid, crate::fnc::r#type::uuid);
 
+// Checked type conversion functions
+define_pure_function!(TypeTryArray, "type::try_array", (value: Any) -> Any, crate::fnc::r#type::r#try::array);
+define_pure_function!(TypeTryBool, "type::try_bool", (value: Any) -> Any, crate::fnc::r#type::r#try::bool);
+define_pure_function!(TypeTryBytes, "type::try_bytes", (value: Any) -> Any, crate::fnc::r#type::r#try::bytes);
+define_pure_function!(TypeTryDatetime, "type::try_datetime", (value: Any) -> Any, crate::fnc::r#type::r#try::datetime);
+define_pure_function!(TypeTryDecimal, "type::try_decimal", (value: Any) -> Any, crate::fnc::r#type::r#try::decimal);
+define_pure_function!(TypeTryDuration, "type::try_duration", (value: Any) -> Any, crate::fnc::r#type::r#try::duration);
+define_pure_function!(TypeTryFile, "type::try_file", (bucket: String, key: String) -> Any, crate::fnc::r#type::r#try::file);
+define_pure_function!(TypeTryFloat, "type::try_float", (value: Any) -> Any, crate::fnc::r#type::r#try::float);
+define_pure_function!(TypeTryGeometry, "type::try_geometry", (value: Any) -> Any, crate::fnc::r#type::r#try::geometry);
+define_pure_function!(TypeTryInt, "type::try_int", (value: Any) -> Any, crate::fnc::r#type::r#try::int);
+define_pure_function!(TypeTryNumber, "type::try_number", (value: Any) -> Any, crate::fnc::r#type::r#try::number);
+define_pure_function!(TypeTryPoint, "type::try_point", (value: Any, ?y: Any) -> Any, crate::fnc::r#type::r#try::point);
+define_pure_function!(TypeTryRange, "type::try_range", (value: Any) -> Any, crate::fnc::r#type::r#try::range);
+define_pure_function!(TypeTryRecord, "type::try_record", (value: Any, ?table: String) -> Any, crate::fnc::r#type::r#try::record);
+define_pure_function!(TypeTrySet, "type::try_set", (value: Any) -> Any, crate::fnc::r#type::r#try::set);
+define_pure_function!(TypeTryString, "type::try_string", (value: Any) -> Any, crate::fnc::r#type::r#try::string);
+define_pure_function!(TypeTryStringLossy, "type::try_string_lossy", (value: Any) -> Any, crate::fnc::r#type::r#try::string_lossy);
+define_pure_function!(TypeTryTable, "type::try_table", (value: Any) -> Any, crate::fnc::r#type::r#try::table);
+define_pure_function!(TypeTryUuid, "type::try_uuid", (value: Any) -> Any, crate::fnc::r#type::r#try::uuid);
+
 // Type checking functions
 define_pure_function!(TypeIsArray, "type::is_array", (value: Any) -> Bool, crate::fnc::r#type::is::array);
 define_pure_function!(TypeIsBool, "type::is_bool", (value: Any) -> Bool, crate::fnc::r#type::is::bool);
@@ -205,6 +226,16 @@ pub fn register(registry: &mut FunctionRegistry) {
 		TypeFloat,
 		TypeGeometry,
 		TypeInt,
+		TypeNumber,
+		TypeOf,
+		TypePoint,
+		TypeRange,
+		TypeRecord,
+		TypeSet,
+		TypeString,
+		TypeStringLossy,
+		TypeTable,
+		TypeUuid,
 		TypeIsArray,
 		TypeIsBool,
 		TypeIsBytes,
@@ -230,16 +261,25 @@ pub fn register(registry: &mut FunctionRegistry) {
 		TypeIsSet,
 		TypeIsString,
 		TypeIsUuid,
-		TypeNumber,
-		TypeOf,
-		TypePoint,
-		TypeRange,
-		TypeRecord,
-		TypeSet,
-		TypeString,
-		TypeStringLossy,
-		TypeTable,
-		TypeUuid,
+		TypeTryArray,
+		TypeTryBool,
+		TypeTryBytes,
+		TypeTryDatetime,
+		TypeTryDecimal,
+		TypeTryDuration,
+		TypeTryFile,
+		TypeTryFloat,
+		TypeTryGeometry,
+		TypeTryInt,
+		TypeTryNumber,
+		TypeTryPoint,
+		TypeTryRange,
+		TypeTryRecord,
+		TypeTrySet,
+		TypeTryString,
+		TypeTryStringLossy,
+		TypeTryTable,
+		TypeTryUuid,
 	);
 	// Register projection functions (these produce field bindings, not single values)
 	registry.register_projection(TypeField);
