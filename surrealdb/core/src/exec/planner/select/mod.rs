@@ -37,8 +37,8 @@ use super::util::{
 	strip_index_conditions, strip_knn_and_matches_from_condition, strip_knn_from_condition,
 	strip_union_index_conditions,
 };
-use crate::catalog::Index;
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
+use crate::catalog::{Index, IndexDefinition};
 use crate::err::{EngineError, Error};
 use crate::exec::index::access_path::{
 	AccessPath, BTreeAccess, BitmapPlan, IndexRef, KnnPrefilterPlan, select_access_path,
@@ -1555,6 +1555,7 @@ impl<'ctx> Planner<'ctx> {
 					// context both disqualify bitmap fusion: doc-ID mappings
 					// and index entries are not time-travel-aware.
 					version.is_some() || self.version.is_some(),
+					&restricted_select,
 				)
 				.await;
 			if let Ok(Some((access_path, direction))) = resolved {
@@ -2830,6 +2831,7 @@ impl<'ctx> Planner<'ctx> {
 		with: Option<&With>,
 		has_limit: bool,
 		has_version: bool,
+		restricted_select: &RestrictedPrefixes,
 	) -> Result<Option<(AccessPath, Direction)>, Error> {
 		let direction = determine_scan_direction(order);
 
@@ -2844,6 +2846,19 @@ impl<'ctx> Planner<'ctx> {
 
 		if matches!(with, Some(With::NoIndex)) {
 			return Ok(Some((AccessPath::TableScan, direction)));
+		}
+
+		// SECURITY: `AssumeRestricted` records that plan-time permission context
+		// was unavailable, not that a restricted field exists. Resolving here
+		// would withhold every index on the table and pin a table scan, which
+		// also turns a `MATCHES` on a fully readable column into
+		// `NoIndexFoundForMatch` because no full-text index can be named.
+		// Decline the plan-time path instead, exactly as the catalog lookups
+		// below do when they cannot resolve: the `DynamicScan` fallback applies
+		// the same guard at execute time against the actor's resolved field
+		// permissions, so it is fail-closed without over-applying.
+		if matches!(restricted_select, RestrictedPrefixes::AssumeRestricted) {
+			return Ok(None);
 		}
 
 		// Look up namespace and database to get IDs
@@ -2886,6 +2901,19 @@ impl<'ctx> Planner<'ctx> {
 			c
 		});
 		let analysis_cond = rewritten_cond.as_ref();
+
+		// SECURITY: an index whose columns carry a non-`Full` SELECT permission
+		// is withheld from access-path selection entirely. Every scan built
+		// from a candidate answers its predicate from index entries and drops
+		// the covered condition, so the document-level reduction never gets to
+		// hide the value the decision was made from — the full-text, compound
+		// B-tree and HNSW paths all become oracles over a field the actor
+		// cannot read. Withholding the index leaves the predicate to be
+		// answered from the reduced document instead.
+		let indexes = drop_restricted_indexes(indexes, restricted_select);
+		if indexes.is_empty() {
+			return Ok(Some((AccessPath::TableScan, direction)));
+		}
 
 		let analyzer = IndexAnalyzer::new(indexes, with);
 		let candidates = analyzer.analyze(analysis_cond, order);
@@ -3211,6 +3239,30 @@ fn field_kind_excludes_arrays(kind: &crate::expr::Kind) -> bool {
 	}
 }
 
+/// Removes every index whose columns are governed by a non-`Full` SELECT
+/// permission for the current actor.
+///
+/// See [`RestrictedPrefixes::index_touches`] for why such an index must not
+/// reach access-path selection. Returns the input untouched when nothing is
+/// restricted, so the common case allocates nothing.
+fn drop_restricted_indexes(
+	indexes: Arc<[IndexDefinition]>,
+	restricted_select: &RestrictedPrefixes,
+) -> Arc<[IndexDefinition]> {
+	if matches!(restricted_select, RestrictedPrefixes::None) {
+		return indexes;
+	}
+	if !indexes.iter().any(|ix| restricted_select.index_touches(&ix.cols)) {
+		return indexes;
+	}
+	indexes
+		.iter()
+		.filter(|ix| !restricted_select.index_touches(&ix.cols))
+		.cloned()
+		.collect::<Vec<_>>()
+		.into()
+}
+
 /// Outcome of resolving which fields on a table carry a non-`Full` SELECT
 /// permission for the current actor.
 enum RestrictedPrefixes {
@@ -3245,6 +3297,31 @@ impl RestrictedPrefixes {
 		use crate::expr::visit::Visitor;
 		let _ = checker.visit_expr(&cond.0);
 		checker.found
+	}
+
+	/// SECURITY: returns `true` when any column of an index is governed by a
+	/// non-`Full` SELECT permission for the current actor (or when restriction
+	/// must be conservatively assumed because plan-time context is missing).
+	///
+	/// An index scan answers a predicate from index entries rather than from
+	/// the document, so the field-level reduction that hides the value never
+	/// runs on the data the decision was made from. Whether a record is
+	/// returned then reports something about a value the actor may not read:
+	/// which records contain a guessed value or search term, or which
+	/// restricted vectors lie nearest a supplied one. Callers drop such an
+	/// index from the candidate set, so the predicate is answered from the
+	/// reduced document instead.
+	///
+	/// An ancestor field definition governs the column too — reducing an
+	/// ancestor implicitly reduces its descendants — which `starts_with`
+	/// covers.
+	fn index_touches(&self, cols: &[Idiom]) -> bool {
+		let prefixes = match self {
+			RestrictedPrefixes::AssumeRestricted => return true,
+			RestrictedPrefixes::None => return false,
+			RestrictedPrefixes::Some(p) => p,
+		};
+		cols.iter().any(|col| prefixes.iter().any(|prefix| col.starts_with(prefix.0.as_slice())))
 	}
 
 	/// SECURITY (value-ordering oracle): returns `true` when any top-level

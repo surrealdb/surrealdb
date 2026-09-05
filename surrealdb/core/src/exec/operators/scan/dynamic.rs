@@ -564,6 +564,7 @@ impl ExecOperator for DynamicScan {
 							.map(|l| (l + start_val).min(u32::MAX as usize) as u32),
 						knn_context: knn_context.clone(),
 						pre_decode_filter,
+						field_permissions: Arc::clone(&field_state.field_permissions),
 					},
 				)
 				.await?
@@ -637,6 +638,29 @@ fn order_touches_restricted_select_field(
 		.any(|o| field_permissions.iter().any(|(field, _)| o.value.starts_with(field.0.as_slice())))
 }
 
+/// SECURITY: whether any column of an index is governed by a non-`Full` SELECT
+/// permission for the current actor.
+///
+/// An index scan answers its predicate from index entries and drops the covered
+/// condition, so the document-level reduction never runs on the data the
+/// decision was made from — index membership then reports something about a
+/// value the actor may not read. Withholding the index leaves the predicate to
+/// be answered from the reduced document.
+///
+/// `field_permissions` is empty when permission enforcement is skipped
+/// (owner/root), so a privileged actor never matches here. Mirrors the
+/// plan-time `RestrictedPrefixes::index_touches` guard in `planner/select`.
+fn index_touches_restricted_select_field(
+	cols: &[crate::expr::Idiom],
+	field_permissions: &[(crate::expr::Idiom, PhysicalPermission)],
+) -> bool {
+	if field_permissions.is_empty() {
+		return false;
+	}
+	cols.iter()
+		.any(|col| field_permissions.iter().any(|(field, _)| col.starts_with(field.0.as_slice())))
+}
+
 /// Configuration bundle for [`resolve_table_scan_stream`].
 struct TableScanConfig {
 	ns_id: NamespaceId,
@@ -664,6 +688,13 @@ struct TableScanConfig {
 	knn_context: Option<Arc<crate::exec::function::KnnContext>>,
 	/// Optional structural WHERE pre-decode filter for raw KV table scans.
 	pre_decode_filter: Option<Arc<crate::exec::pre_decode_filter::PreDecodeFilter>>,
+	/// The actor's resolved per-field SELECT permissions, shared with the
+	/// scan's [`FieldState`] rather than copied. Empty when enforcement is
+	/// skipped (owner/root). Used to withhold indexes whose columns the actor
+	/// may not read from access-path selection.
+	///
+	/// [`FieldState`]: crate::exec::operators::scan::pipeline::FieldState
+	field_permissions: Arc<Vec<(crate::expr::Idiom, PhysicalPermission)>>,
 }
 
 /// Resolve the optimal access path for a table scan and return the source
@@ -731,6 +762,25 @@ async fn resolve_table_scan_stream(
 			.get_table_indexes(&cfg.table_name, version_stamp)
 			.await
 			.context("Failed to fetch indexes")?;
+		// SECURITY: drop indexes whose columns the actor may not select, for
+		// the reason given on `index_touches_restricted_select_field`. The
+		// actor's real field permissions are known here, so this cannot
+		// over-apply the way a conservative plan-time assumption would.
+		let indexes: std::sync::Arc<[_]> = if indexes
+			.iter()
+			.any(|ix| index_touches_restricted_select_field(&ix.cols, &cfg.field_permissions))
+		{
+			indexes
+				.iter()
+				.filter(|ix| {
+					!index_touches_restricted_select_field(&ix.cols, &cfg.field_permissions)
+				})
+				.cloned()
+				.collect::<Vec<_>>()
+				.into()
+		} else {
+			indexes
+		};
 
 		let analyzer = IndexAnalyzer::new(indexes, cfg.with.as_ref());
 		let candidates = analyzer.analyze(resolved_cond.as_ref(), cfg.order.as_ref());
