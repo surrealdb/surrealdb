@@ -524,6 +524,24 @@ impl Value {
 		matches!(self, Value::None | Value::Null)
 	}
 
+	/// Returns a string slice if this value is a string.
+	#[inline]
+	pub fn as_str(&self) -> Option<&str> {
+		match self {
+			Value::String(s) => Some(s.as_str()),
+			_ => None,
+		}
+	}
+
+	/// Returns a byte slice if this value is binary data.
+	#[inline]
+	pub fn as_byte_slice(&self) -> Option<&[u8]> {
+		match self {
+			Value::Bytes(b) => Some(b.as_ref()),
+			_ => None,
+		}
+	}
+
 	/// Check if this Value is empty.
 	pub fn is_empty(&self) -> bool {
 		match self {
@@ -1433,5 +1451,24 @@ mod tests {
 		for kind in not_kinds {
 			assert!(!value.is_kind(&kind), "{value:?} is a {kind} but should not be");
 		}
+	}
+
+	#[test]
+	fn test_value_accessors() {
+		let s = Value::String("hello".to_string());
+		assert_eq!(s.as_str(), Some("hello"));
+		assert_eq!(s.as_byte_slice(), None);
+
+		let bytes = Value::Bytes(Bytes::from(vec![1, 2, 3]));
+		assert_eq!(bytes.as_byte_slice(), Some(&[1, 2, 3][..]));
+		assert_eq!(bytes.as_str(), None);
+
+		let none = Value::None;
+		assert_eq!(none.as_str(), None);
+		assert_eq!(none.as_byte_slice(), None);
+
+		let b = Value::Bool(true);
+		assert_eq!(b.as_str(), None);
+		assert_eq!(b.as_byte_slice(), None);
 	}
 }
