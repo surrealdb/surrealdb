@@ -41,12 +41,12 @@ async fn test_hnsw_inner_product_smoke() -> Result<()> {
 }
 
 /// A filtered KNN search evaluates the residual `WHERE` against each visited
-/// candidate's record. This change batches those fetches — one multi-get per
-/// neighbourhood for the committed graph (`search_with_filter`), and one
-/// multi-get for the whole pending set (`search_pendings`) — so the search
-/// issues far fewer KV *get operations* than the records it reads
-/// (`ops_get` well below `keys_read`). The pre-batching code fetched one
-/// record per get, so the two were ~equal. Results are unchanged.
+/// candidate's record, and fetches those records in batches: one multi-get per
+/// neighbourhood for the committed graph (`search_with_filter`), and one per
+/// materialisation batch of the pending queue (`search_pendings`). Both paths
+/// therefore issue far fewer KV *get operations* than the records they read —
+/// `ops_get` well below `keys_read`, where one fetch per candidate would make
+/// the two roughly equal.
 ///
 /// The assertions are structural — K matches are found and `ops_get` sits well
 /// below `keys_read` — so they hold for any graph; no fixed build seed is
@@ -149,6 +149,84 @@ async fn test_hnsw_filtered_knn_batches_record_fetches() -> Result<()> {
 		"committed path should batch: ops_get={} keys_read={}",
 		committed_m.ops_get,
 		committed_m.keys_read
+	);
+	Ok(())
+}
+
+/// A pending queue deeper than one materialisation batch is scored in several
+/// batches, but the top-K is taken across the whole queue. The second query's
+/// nearest neighbour is the queue's last record and its runners-up are far
+/// earlier ones, so a result kept per batch — or a residual `WHERE` whose
+/// per-candidate verdicts did not survive the batch that produced them —
+/// returns a different set.
+#[test(tokio::test(flavor = "multi_thread"))]
+async fn hnsw_filtered_knn_spans_pending_materialisation_batches() -> Result<()> {
+	// The queue must still be uncompacted when the queries run.
+	let ds = Datastore::builder().without_maintenance_tasks().build_with_path("memory").await?;
+	{
+		let tx = ds.transaction(TransactionType::Write).await?;
+		tx.ensure_ns_db(None, "test", "test").await?;
+		tx.commit().await?;
+	}
+	let session = Session::owner()
+		.with_ns("test")
+		.with_db("test")
+		.new_planner_strategy(crate::dbs::NewPlannerStrategy::AllReadOnlyStatements);
+
+	// Record `i` sits at (i, i) and carries `category = i % 100`, so a
+	// category selects an evenly spread 1-in-100 subset of the queue. The
+	// count is deliberately above the pending materialisation batch size, so
+	// the scan needs more than one batch.
+	let n = 1100u32;
+	let mut setup = String::from(
+		"DEFINE INDEX emb ON pts FIELDS vec HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32 EFC 100 M 12;\n",
+	);
+	for i in 1..=n {
+		setup
+			.push_str(&format!("CREATE pts:{i} SET vec = [{i}f, {i}f], category = {};\n", i % 100));
+	}
+	for response in ds.execute(&setup, &session, None).await? {
+		response.result?;
+	}
+
+	async fn ids(ds: &Arc<Datastore>, session: &Session, query: &str) -> Result<Vec<i64>> {
+		let mut response = ds.execute(query, session, None).await?;
+		let surrealdb_types::Value::Array(rows) = response.remove(0).result? else {
+			panic!("expected an array result");
+		};
+		let mut ids: Vec<i64> = rows
+			.iter()
+			.map(|row| match row {
+				surrealdb_types::Value::Object(o) => match o.get("id") {
+					Some(surrealdb_types::Value::RecordId(rid)) => match &rid.key {
+						surrealdb_types::RecordIdKey::Number(n) => *n,
+						other => panic!("unexpected record key: {other:?}"),
+					},
+					other => panic!("unexpected id field: {other:?}"),
+				},
+				other => panic!("unexpected row: {other:?}"),
+			})
+			.collect();
+		ids.sort();
+		Ok(ids)
+	}
+
+	// Winners at the head of the queue, wholly inside the first batch.
+	assert_eq!(
+		ids(&ds, &session, "SELECT id FROM pts WHERE vec <|5,400|> [0f, 0f] AND category = 7;")
+			.await?,
+		vec![7, 107, 207, 307, 407]
+	);
+	// Winners straddling the batch boundary: pts:1025 is read in the second
+	// batch, its two runners-up in the first.
+	assert_eq!(
+		ids(
+			&ds,
+			&session,
+			"SELECT id FROM pts WHERE vec <|3,400|> [1025f, 1025f] AND category = 25;"
+		)
+		.await?,
+		vec![825, 925, 1025]
 	);
 	Ok(())
 }

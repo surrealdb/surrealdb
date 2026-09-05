@@ -165,7 +165,9 @@ pub(super) struct KnnResultBuilder {
 	knn: usize,
 	/// The sorted results
 	priority_list: KnnResult,
-	/// Count the number of time a vector id is present in the result
+	/// The number of slots each vector id holds in `priority_list`. An id that
+	/// holds no slot is absent from the map, which is what makes `contains` a
+	/// faithful answer for the callers that release per-candidate state on it.
 	vector_id_count: BTreeMap<VectorId, usize>,
 }
 
@@ -206,8 +208,16 @@ impl KnnResultBuilder {
 	/// Add the result to the priority list.
 	/// Returns any evicted id, so any filter cache can be freed
 	pub(super) fn add_vector_id_result(&mut self, dist: f64, id: VectorId) -> Option<VectorId> {
-		// Insert the result in the list
-		self.priority_list.insert((FloatKey(dist), id.clone()));
+		// The list is a set, so an identical (distance, id) pair — one id reached
+		// at the same distance twice, which two equidistant vectors of the same
+		// record produce — takes no additional slot. Counting it would leave the
+		// id one above its slots, and a count that never reaches zero keeps the
+		// id in the map after its last slot is evicted: `contains` would then
+		// report a slot the id no longer holds, and the caller would never
+		// release the state it keeps alongside it.
+		if !self.priority_list.insert((FloatKey(dist), id.clone())) {
+			return None;
+		}
 		// Update the vector count
 		self.vector_id_count.entry(id).and_modify(|c| *c += 1).or_insert(1);
 		// Is the priority list full?
@@ -227,6 +237,15 @@ impl KnnResultBuilder {
 			*c -= 1;
 		}
 		None
+	}
+
+	/// Returns whether the id currently holds at least one slot in the result.
+	///
+	/// Lets a caller tell a candidate that is still in the running from one
+	/// that was scored and rejected, so per-candidate state kept alongside the
+	/// builder can be released for the latter.
+	pub(super) fn contains(&self, id: &VectorId) -> bool {
+		self.vector_id_count.contains_key(id)
 	}
 
 	pub(super) fn collect(self) -> KnnResult {
@@ -488,6 +507,57 @@ pub(super) mod tests {
 				(FloatKey(0.2), VectorId::DocId(8))
 			])
 		);
+	}
+
+	#[test]
+	fn knn_result_builder_equidistant_duplicate_takes_one_slot() {
+		// Two equidistant vectors of one record submit the same (distance, id)
+		// pair twice. The second takes no slot, so the id holds exactly one and
+		// is released the moment that slot is evicted.
+		let mut b = KnnResultBuilder::new(1);
+		assert_eq!(b.add_vector_id_result(0.5, VectorId::DocId(1)), None);
+		assert_eq!(b.add_vector_id_result(0.5, VectorId::DocId(1)), None);
+		assert!(b.contains(&VectorId::DocId(1)));
+
+		// A closer result takes the only slot, evicting the duplicated id.
+		assert_eq!(b.add_vector_id_result(0.1, VectorId::DocId(2)), Some(VectorId::DocId(1)));
+		assert!(!b.contains(&VectorId::DocId(1)));
+		assert!(b.contains(&VectorId::DocId(2)));
+
+		assert_eq!(b.collect(), BTreeSet::from([(FloatKey(0.1), VectorId::DocId(2))]));
+	}
+
+	#[test]
+	fn knn_result_builder_distinct_distances_hold_distinct_slots() {
+		// One id reached at two distances holds two slots: evicting the farther
+		// leaves the id in the result, and only the second eviction releases it.
+		let mut b = KnnResultBuilder::new(2);
+		assert_eq!(b.add_vector_id_result(0.2, VectorId::DocId(1)), None);
+		assert_eq!(b.add_vector_id_result(0.3, VectorId::DocId(1)), None);
+
+		assert_eq!(b.add_vector_id_result(0.1, VectorId::DocId(2)), None);
+		assert!(b.contains(&VectorId::DocId(1)));
+
+		assert_eq!(b.add_vector_id_result(0.05, VectorId::DocId(3)), Some(VectorId::DocId(1)));
+		assert!(!b.contains(&VectorId::DocId(1)));
+	}
+
+	#[test]
+	fn knn_result_builder_equidistant_graph_results_release_shared_docs() {
+		// A record whose indexed field holds several vectors belongs to several
+		// elements' doc sets, and two of those elements can sit at the same
+		// distance from the query point. The shared doc then reaches the builder
+		// twice at one distance, and must still be reported as evicted when its
+		// single slot goes.
+		let mut b = KnnResultBuilder::new(2);
+		assert!(b.add_graph_result(0.2, &Ids64::Vec2([1, 2])).is_empty());
+		assert!(b.add_graph_result(0.2, &Ids64::One(1)).is_empty());
+
+		assert_eq!(b.add_graph_result(0.1, &Ids64::One(3)), vec![VectorId::DocId(2)]);
+		assert!(b.contains(&VectorId::DocId(1)));
+
+		assert_eq!(b.add_graph_result(0.05, &Ids64::One(4)), vec![VectorId::DocId(1)]);
+		assert!(!b.contains(&VectorId::DocId(1)));
 	}
 
 	#[test]

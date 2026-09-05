@@ -11,6 +11,7 @@ pub mod gate;
 mod graph;
 pub mod hnsw;
 pub(crate) mod knn;
+pub(crate) mod pending;
 pub mod store;
 pub mod vector;
 

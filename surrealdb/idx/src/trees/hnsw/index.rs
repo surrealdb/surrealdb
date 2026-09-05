@@ -1,4 +1,6 @@
 use std::collections::VecDeque;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use ahash::HashMap;
@@ -14,7 +16,7 @@ use crate::catalog::{Distance, HnswParams, TableId, VectorType};
 use crate::docids::LegacyVectorDocIds;
 use crate::env::IndexEnv;
 use crate::key::schema::HnswRecordPendingKey;
-use crate::key::{KVKeyDecode, KVValue, Key};
+use crate::key::{KVKeyDecode, KVValue, Key, Resumable};
 use crate::trees::hnsw::cache::VectorCache;
 use crate::trees::hnsw::docs::{HnswDocs, VecDocs};
 use crate::trees::hnsw::filter::HnswTruthyDocumentFilter;
@@ -23,6 +25,7 @@ use crate::trees::hnsw::{
 	ElementId, HnswRecordPendingUpdate, HnswSearch, VectorId, VectorPendingUpdate,
 };
 use crate::trees::knn::KnnResultBuilder;
+use crate::trees::pending::{PendingBacklogReport, PendingScan, PendingScanStats};
 use crate::trees::vector::{
 	DistanceExt as _, SerializedVector, SharedVector, Vector, serialized_vector_from_value,
 };
@@ -37,6 +40,7 @@ use crate::{
 const HNSW_COMPACTION_MAX_PENDING_KEYS: usize = 1024;
 /// Maximum encoded pending key/value bytes captured by one compaction plan.
 const HNSW_COMPACTION_MAX_PENDING_BYTES: usize = 16 * 1024 * 1024;
+
 /// Exact pending key/value observed by an HNSW compaction read phase.
 ///
 /// Both halves stay as the bytes the scan returned rather than as the key and
@@ -76,6 +80,32 @@ struct PendingOperation {
 	old_vectors: Vec<SerializedVector>,
 	/// Desired vectors for the record after compaction.
 	new_vectors: Vec<SerializedVector>,
+}
+
+/// Fixed-size lookup key for identities held by one bounded legacy scoring
+/// chunk. Hash collisions are resolved against the full identity before a
+/// candidate is marked superseded.
+fn legacy_identity_hash(id: &VectorId) -> u64 {
+	let mut hasher = DefaultHasher::new();
+	id.hash(&mut hasher);
+	hasher.finish()
+}
+
+/// Marks the matching candidate in a legacy chunk as superseded.
+fn suppress_legacy_candidate(
+	id: &VectorId,
+	ids: &[VectorId],
+	positions: &HashMap<u64, Vec<usize>>,
+	live: &mut [bool],
+) {
+	let Some(candidates) = positions.get(&legacy_identity_hash(id)) else {
+		return;
+	};
+	for &position in candidates {
+		if live[position] && ids[position] == *id {
+			live[position] = false;
+		}
+	}
 }
 
 /// Snapshot gathered by the read phase of HNSW pending compaction.
@@ -212,6 +242,15 @@ pub struct HnswIndex {
 	vec_docs: VecDocs,
 	/// The stored index format that selects shared or legacy doc-ID mappings.
 	format_version: u16,
+	/// Set from the moment a kNN scan reads more of this index's pending queue
+	/// than one materialisation batch holds, by entry count or by a scoring
+	/// rollover. Re-armed by a scan that runs to completion inside both budgets
+	/// only if no newer scan observed another crossing, so the warning is
+	/// emitted once per crossing rather than once per query.
+	pending_backlog_reported: PendingBacklogReport,
+	/// What the kNN pending scans on this index materialised. Zero-sized
+	/// outside test builds.
+	pending_scan_stats: PendingScanStats,
 }
 
 /// Contextual state passed through HNSW graph operations.
@@ -277,7 +316,23 @@ impl HnswIndex {
 			vector_cache,
 			ikb,
 			format_version,
+			pending_backlog_reported: PendingBacklogReport::default(),
+			pending_scan_stats: PendingScanStats::default(),
 		})
+	}
+
+	/// What the kNN pending scans on this index materialised.
+	#[cfg(test)]
+	pub(crate) fn pending_scan_stats(&self) -> &PendingScanStats {
+		&self.pending_scan_stats
+	}
+
+	/// Whether the pending-backlog report is armed for this index, which it is
+	/// from the moment a scan crosses a materialisation budget until one
+	/// completes inside both.
+	#[cfg(test)]
+	pub(crate) fn pending_backlog_reported(&self) -> bool {
+		self.pending_backlog_reported.is_reported()
 	}
 
 	/// Converts content values into serialized vectors, validating dimensionality.
@@ -771,12 +826,160 @@ impl HnswIndex {
 		}
 	}
 
+	/// Coalesces and scores one bounded chunk of the append-keyed legacy queue.
+	///
+	/// Entries later in this chunk win locally. A scan of the append-keyed suffix
+	/// and record-keyed range then removes candidates superseded outside the
+	/// chunk. The lookup stores only hashes and positions for this chunk, with an
+	/// exact identity comparison on every match, so user-sized record keys are
+	/// never copied into an O(backlog) liveness map.
+	#[expect(clippy::too_many_arguments)]
+	async fn score_legacy_pending_chunk(
+		&self,
+		ctx: &HnswContext<'_>,
+		stk: &mut Stk,
+		search: &HnswSearch,
+		filter: &mut Option<HnswTruthyDocumentFilter<'_>>,
+		allow_list: Option<&RoaringTreemap>,
+		builder: &mut KnnResultBuilder,
+		scan: &mut PendingScan<'_>,
+		chunk_end: &[u8],
+		checkpoints: &mut usize,
+	) -> Result<()> {
+		debug_assert!(!scan.batch.is_empty());
+
+		// Keep only the last occurrence of each identity within this chunk. The
+		// lookup owns fixed-size positions, not another copy of the identities.
+		let mut live = vec![false; scan.batch.ids.len()];
+		let mut positions: HashMap<u64, Vec<usize>> = HashMap::default();
+		for position in (0..scan.batch.ids.len()).rev() {
+			let id = &scan.batch.ids[position];
+			let candidates = positions.entry(legacy_identity_hash(id)).or_default();
+			if candidates.iter().any(|&candidate| scan.batch.ids[candidate] == *id) {
+				continue;
+			}
+			live[position] = true;
+			candidates.push(position);
+		}
+
+		// Any matching append after this chunk supersedes its candidate. The
+		// suffix begins strictly after the chunk's final encoded key.
+		{
+			let rng = self.ikb.new_hp_range()?.resume_after(chunk_end, Direction::Forward);
+			let mut cursor = ctx.tx.open_vals_cursor(rng, Direction::Forward, 0, None).await?;
+			loop {
+				let read = cursor.next_batch(scan.rows()).await?;
+				scan.observe_page(&read);
+				if read.is_empty() {
+					break;
+				}
+				for (_, value) in &read {
+					*checkpoints += 1;
+					if ctx.env.is_done(Some(*checkpoints)).await? {
+						bail!(EngineError::QueryCancelled)
+					}
+					let pending = VectorPendingUpdate::kv_decode_value(value, ())?;
+					suppress_legacy_candidate(&pending.id, &scan.batch.ids, &positions, &mut live);
+				}
+			}
+		}
+
+		// Every record-keyed entry is later in logical scan order than every
+		// append-keyed entry. Its captured identity and its record identity both
+		// suppress a matching legacy candidate, whether it deletes or replaces.
+		{
+			let rng = self.ikb.new_hr_range()?;
+			let mut cursor = ctx.tx.open_vals_cursor(rng, Direction::Forward, 0, None).await?;
+			loop {
+				let read = cursor.next_batch(scan.rows()).await?;
+				scan.observe_page(&read);
+				if read.is_empty() {
+					break;
+				}
+				for (key, value) in &read {
+					*checkpoints += 1;
+					if ctx.env.is_done(Some(*checkpoints)).await? {
+						bail!(EngineError::QueryCancelled)
+					}
+					let hr = HnswRecordPendingKey::decode_key(key)?;
+					let pending = HnswRecordPendingUpdate::kv_decode_value(value, ())?;
+					let pending = Self::record_pending_to_operation(hr.id.into_owned(), pending);
+					suppress_legacy_candidate(&pending.id, &scan.batch.ids, &positions, &mut live);
+					if let Some(record) = pending.record {
+						suppress_legacy_candidate(
+							&VectorId::RecordKey(record),
+							&scan.batch.ids,
+							&positions,
+							&mut live,
+						);
+					}
+				}
+			}
+		}
+
+		// Keep the chunk allocation and its accounting intact until scoring, but
+		// clear vectors belonging to superseded, deleting, or disallowed entries.
+		// Empty vectors take no result slot.
+		for (position, is_live) in live.into_iter().enumerate() {
+			if !is_live || scan.batch.vectors[position].is_empty() {
+				scan.batch.vectors[position].clear();
+				continue;
+			}
+			let id = scan.batch.ids[position].clone();
+			if !self.allow_list_admits(&ctx.tx, allow_list, &id).await? {
+				scan.batch.vectors[position].clear();
+			}
+		}
+
+		self.score_pending_batch(ctx, stk, search, filter, builder, scan).await
+	}
+
 	/// Searches through pending (not-yet-applied) updates for nearest neighbors.
 	///
-	/// Scans all pending updates to identify active (non-deleted) vectors,
-	/// computes distances against the search query, and adds matches to the
-	/// result builder. Returns a bitmap of doc IDs seen in pending updates
-	/// so the graph search can exclude them to avoid duplicate results.
+	/// Scores every pending vector that is still live against the query and
+	/// returns the suppression bitmap of doc-IDs seen anywhere in the pending
+	/// keyspace, which the graph search uses to hide the stale entries those
+	/// pendings supersede.
+	///
+	/// # Residency
+	///
+	/// The whole pending queue is read, but what the scan holds at any moment
+	/// is one cursor page plus the candidates read from it and not yet scored,
+	/// bounded by [`PendingScan`]: at most `PENDING_MAX_BATCH_KEYS` buffered
+	/// entries, at most `PENDING_MAX_ROWS` entries in a page, and page and batch
+	/// together sized for `PENDING_MAX_BYTES` — a target the page sizer
+	/// converges to rather than a ceiling, for the reason given on
+	/// [`crate::trees::pending`]. Candidates are buffered, scored into the
+	/// result builder, and dropped before the scan advances; the page they came
+	/// from shares the budget because it stays borrowed while they are scored. A
+	/// deep queue therefore costs more batches, not more memory — which matters
+	/// because this cost is paid per concurrent search, and the queue is deepest
+	/// exactly when bulk writes are outrunning compaction.
+	///
+	/// Two things are deliberately *not* bounded, because bounding them would
+	/// change results rather than only memory:
+	///
+	/// * The suppression bitmap is complete. It is a [`RoaringTreemap`] of doc-IDs and stays small
+	///   even for a deep queue, and dropping an id from it would resurrect that document's stale
+	///   graph vector.
+	/// * Every live pending vector is scored. Truncating the scan would drop candidates that can
+	///   win a top-K slot, silently degrading recall.
+	///
+	/// # Coalescing
+	///
+	/// A pending entry is *live* if no later entry in scan order supersedes or
+	/// deletes it, where scan order is the append-keyed `!hp` range followed by
+	/// the record-keyed `!hr` range. The two layouts coalesce differently:
+	///
+	/// * `!hr` holds exactly one entry per record — writes read-modify-write that single key — and
+	///   an entry only ever supersedes its own record's identity. Every non-deleting `!hr` entry is
+	///   therefore live the moment it is read, and is scored in the same pass that reads it.
+	/// * `!hp` may hold several entries per identity, and any of them can be superseded by an `!hr`
+	///   entry read afterwards. It is divided into scoring-sized chunks. Within each chunk the last
+	///   entry per identity is retained, then the later `!hp` suffix and `!hr` range are scanned to
+	///   discard candidates superseded outside it. This repeats legacy reads in exchange for
+	///   keeping liveness bookkeeping bounded by one scoring chunk; nothing writes `!hp`, so the
+	///   migration cost disappears as compaction drains it.
 	async fn search_pendings(
 		&self,
 		ctx: &HnswContext<'_>,
@@ -786,144 +989,248 @@ impl HnswIndex {
 		allow_list: Option<&RoaringTreemap>,
 		builder: &mut KnnResultBuilder,
 	) -> Result<Option<RoaringTreemap>> {
+		let env = ctx.env;
+		let tx = &ctx.tx;
 		let mut all_existing_docs = RoaringTreemap::new();
-		let mut non_deleted_docs = HashMap::default();
-		// First pass, identify deleted doc
-		self.collect_pending(ctx.env, &ctx.tx, |pending| {
-			if let VectorId::DocId(doc_id) = &pending.id {
-				all_existing_docs.insert(*doc_id);
-			};
-			if pending.new_vectors.is_empty() {
-				non_deleted_docs.remove(&pending.id);
-			} else {
-				// A record-keyed pending may carry a doc-ID captured before a
-				// delete → re-create of the record: that id's shared mapping is
-				// gone, so a DocId-keyed hit could not be resolved back to a
-				// record and would be silently dropped. Emit the surviving
-				// vectors under the record key — always resolvable — while the
-				// captured id (inserted above) still masks the graph's stale
-				// entries. An entry coalesced earlier under the captured id is
-				// superseded.
-				let id = if let Some(record) = &pending.record {
-					non_deleted_docs.remove(&pending.id);
-					VectorId::RecordKey(Arc::clone(record))
-				} else {
-					pending.id
-				};
-				non_deleted_docs.insert(id, pending.new_vectors);
-			}
-		})
-		.await?;
-		if all_existing_docs.is_empty() && non_deleted_docs.is_empty() {
-			return Ok(None);
-		}
-		// #548: drop pending candidates outside the allow-list before the
-		// prefetch below, so non-members are never fetched. Note the
-		// `all_existing_docs` suppression bitmap is deliberately NOT filtered:
-		// a pending doc must mask its stale graph entries whether or not it is
-		// allowed.
-		if let Some(allow) = allow_list {
-			let mut allowed = HashMap::default();
-			for (id, vectors) in non_deleted_docs {
-				let member = match &id {
-					VectorId::DocId(doc_id) => allow.contains(*doc_id),
-					VectorId::RecordKey(key) => {
-						match HnswDocs::get_doc_id(&self.ikb, self.format_version, &ctx.tx, key)
-							.await?
-						{
-							Some(doc_id) => allow.contains(doc_id),
-							// A record with no doc-ID in the shared space has no
-							// entries in any doc-ID-carrying index, so the
-							// index-covered conjuncts cannot hold for it.
-							None => false,
-						}
+		// One scan across every range read: only the first page is sized before
+		// any entry size is known, the cancellation checks keep their back-off
+		// schedule over the whole scan, and the backlog report fires on what the
+		// whole scan has read.
+		let mut scan = PendingScan::new(
+			"hnsw",
+			&self.ikb,
+			&self.pending_backlog_reported,
+			&self.pending_scan_stats,
+		);
+		// Cancellation checkpoints include the bounded legacy-validation reads,
+		// while `scan.entries()` remains the logical queue depth reported to users.
+		let mut checkpoints = 0usize;
+
+		// Stream the append-keyed range into bounded chunks. Each completed chunk
+		// is checked against the later append suffix and the record-keyed range
+		// before it is scored, so no liveness state survives into the next chunk.
+		let mut legacy_chunk_end = Vec::new();
+		{
+			let rng = self.ikb.new_hp_range()?;
+			let mut cursor = Some(tx.open_vals_cursor(rng, Direction::Forward, 0, None).await?);
+			loop {
+				let read = cursor
+					.as_mut()
+					.expect("the legacy cursor is reopened after every bounded chunk")
+					.next_batch(scan.rows())
+					.await?;
+				scan.observe_page(&read);
+				if read.is_empty() {
+					break;
+				}
+				let mut chunk_full = false;
+				for (key, value) in &read {
+					// Charged before the checkpoint, so an entry the scan has
+					// read is accounted — and reported, if it crosses — before an
+					// expired deadline can bail out of the scan.
+					scan.charge_entry(value.len());
+					checkpoints += 1;
+					if env.is_done(Some(checkpoints)).await? {
+						bail!(EngineError::QueryCancelled)
 					}
-				};
-				if member {
-					allowed.insert(id, vectors);
+					let pending = VectorPendingUpdate::kv_decode_value(value, ())?;
+					if let VectorId::DocId(doc_id) = &pending.id {
+						all_existing_docs.insert(*doc_id);
+					}
+					chunk_full |= scan.rollover_required(value.len());
+					scan.push(pending.id, pending.new_vectors, value.len());
+					legacy_chunk_end.clear();
+					legacy_chunk_end.extend_from_slice(key);
+				}
+				// Keep chunks page-aligned. The hard page-row cap bounds the entries
+				// admitted after the first rollover crossing.
+				if chunk_full {
+					// Validation opens its own append-suffix and record-keyed cursors.
+					// Release this page and its cursor arena first, so only one cursor
+					// arena is resident alongside the scoring batch at any point.
+					drop(cursor.take());
+					scan.release_page();
+					self.score_legacy_pending_chunk(
+						ctx,
+						stk,
+						search,
+						filter,
+						allow_list,
+						builder,
+						&mut scan,
+						&legacy_chunk_end,
+						&mut checkpoints,
+					)
+					.await?;
+					let rng = self
+						.ikb
+						.new_hp_range()?
+						.resume_after(&legacy_chunk_end, Direction::Forward);
+					cursor = Some(tx.open_vals_cursor(rng, Direction::Forward, 0, None).await?);
 				}
 			}
-			non_deleted_docs = allowed;
 		}
-		// Warm the transaction record cache for the pending candidates in one
-		// batch, so the per-doc truthy checks below hit the cache instead of
-		// fetching each record individually.
-		if let Some(filter) = filter.as_mut() {
-			let ids: Vec<VectorId> = non_deleted_docs.keys().cloned().collect();
-			filter.prefetch_records(ctx, &ids).await?;
+		if !scan.batch.is_empty() {
+			self.score_legacy_pending_chunk(
+				ctx,
+				stk,
+				search,
+				filter,
+				allow_list,
+				builder,
+				&mut scan,
+				&legacy_chunk_end,
+				&mut checkpoints,
+			)
+			.await?;
 		}
-		// Second pass, we build the KNN result for non-deleted documents
-		for (id, vectors) in non_deleted_docs {
-			// If there is a filter, we need to check if the record is truthy
-			if let Some(filter) = filter
-				&& !filter.check_vector_id_truthy(ctx, stk, id.clone()).await?
-			{
-				continue;
-			}
-			for vector in vectors {
-				let vector = Vector::from(vector);
-				let d = self.distance.calculate(&search.pt, &vector);
-				if builder.check_add(d)
-					&& let Some(evicted_id) = builder.add_vector_id_result(d, id.clone())
-					&& let Some(filter) = filter
-				{
-					filter.expire(&evicted_id);
+
+		// Read the record-keyed range once for its own suppression and scoring.
+		// The validation scans above already used it to discard legacy candidates.
+		{
+			let rng = self.ikb.new_hr_range()?;
+			let mut cursor = tx.open_vals_cursor(rng, Direction::Forward, 0, None).await?;
+			loop {
+				let read = cursor.next_batch(scan.rows()).await?;
+				scan.observe_page(&read);
+				if read.is_empty() {
+					break;
+				}
+				for (key, value) in &read {
+					let entry_bytes = key.len() + value.len();
+					// Charged before the checkpoint — see the legacy pass above.
+					scan.charge_entry(entry_bytes);
+					checkpoints += 1;
+					if env.is_done(Some(checkpoints)).await? {
+						bail!(EngineError::QueryCancelled)
+					}
+					let hr = HnswRecordPendingKey::decode_key(key)?;
+					let pending = HnswRecordPendingUpdate::kv_decode_value(value, ())?;
+					let pending = Self::record_pending_to_operation(hr.id.into_owned(), pending);
+					if let VectorId::DocId(doc_id) = &pending.id {
+						all_existing_docs.insert(*doc_id);
+					}
+					if pending.new_vectors.is_empty() {
+						continue;
+					}
+					// A record-keyed pending may carry a doc-ID captured before a
+					// delete → re-create of the record: that id's shared mapping is
+					// gone, so a DocId-keyed hit could not be resolved back to a
+					// record and would be silently dropped. Score the surviving
+					// vectors under the record key — always resolvable — while the
+					// captured id (inserted above) still masks the graph's stale
+					// entries.
+					let record = pending
+						.record
+						.expect("a record-keyed pending always carries its record key");
+					let id = VectorId::RecordKey(record);
+					// Drop candidates outside the allow-list before they take
+					// batch budget, so non-members are never fetched. The
+					// suppression bitmap above is deliberately NOT gated: a
+					// pending doc must mask its stale graph entries whether or
+					// not it is allowed.
+					if !self.allow_list_admits(tx, allow_list, &id).await? {
+						continue;
+					}
+					if scan.rollover_required(entry_bytes) {
+						self.score_pending_batch(ctx, stk, search, filter, builder, &mut scan)
+							.await?;
+					}
+					scan.push(id, pending.new_vectors, entry_bytes);
 				}
 			}
 		}
+		self.score_pending_batch(ctx, stk, search, filter, builder, &mut scan).await?;
+		scan.finish();
 		if all_existing_docs.is_empty() {
 			return Ok(None);
 		}
 		Ok(Some(all_existing_docs))
 	}
 
-	/// Streams all pending updates and passes graph operations to a collector.
+	/// Returns whether a pending candidate is admitted by the allow-list.
 	///
-	/// Append-keyed entries are streamed before record-keyed entries. The
-	/// collector decides whether and how to coalesce operations.
-	async fn collect_pending<F>(
+	/// Membership is over the table's shared doc-ID space, so a record-keyed
+	/// candidate resolves its *current* doc-ID first. A record with no doc-ID
+	/// in that space has no entries in any doc-ID-carrying index, so the
+	/// index-covered conjuncts cannot hold for it. No allow-list admits
+	/// everything.
+	async fn allow_list_admits(
 		&self,
-		env: &dyn IndexEnv,
 		tx: &Transaction,
-		mut collector: F,
-	) -> Result<()>
-	where
-		F: FnMut(PendingOperation),
-	{
-		let rng = self.ikb.new_hp_range()?;
-		let mut cursor = tx.open_vals_cursor(rng, Direction::Forward, 0, None).await?;
-		let mut count = 0;
-		loop {
-			let batch = cursor.next_batch(surrealdb_kvs::consts::NORMAL_BATCH_SIZE).await?;
-			if batch.is_empty() {
-				break;
-			}
-			for (_, v) in &batch {
-				if env.is_done(Some(count)).await? {
-					bail!(EngineError::QueryCancelled)
+		allow_list: Option<&RoaringTreemap>,
+		id: &VectorId,
+	) -> Result<bool> {
+		let Some(allow) = allow_list else {
+			return Ok(true);
+		};
+		Ok(match id {
+			VectorId::DocId(doc_id) => allow.contains(*doc_id),
+			VectorId::RecordKey(key) => {
+				match HnswDocs::get_doc_id(&self.ikb, self.format_version, tx, key).await? {
+					Some(doc_id) => allow.contains(doc_id),
+					None => false,
 				}
-				let pending = VectorPendingUpdate::kv_decode_value(v, ())?;
-				collector(Self::append_pending_to_operation(pending));
-				count += 1;
 			}
-		}
-		drop(cursor);
+		})
+	}
 
-		let rng = self.ikb.new_hr_range()?;
-		let mut cursor = tx.open_vals_cursor(rng, Direction::Forward, 0, None).await?;
-		loop {
-			let batch = cursor.next_batch(surrealdb_kvs::consts::NORMAL_BATCH_SIZE).await?;
-			if batch.is_empty() {
-				break;
-			}
-			for (key, value) in &batch {
-				if env.is_done(Some(count)).await? {
-					bail!(EngineError::QueryCancelled)
+	/// Scores one buffered batch of pending candidates and empties it.
+	///
+	/// The records behind the batch are warmed in a single multi-get before the
+	/// per-candidate truthy checks, so those checks read the transaction cache
+	/// instead of fetching one record at a time.
+	///
+	/// A candidate that takes no top-K slot has its filter-cache entry released
+	/// on the way out, so the cache the search carries grows with `k` rather
+	/// than with the length of the queue — the filter keeps a full record per
+	/// truthy candidate and otherwise drops one only when the result builder
+	/// evicts it. Releasing an entry costs at most a re-evaluation, and never
+	/// happens to a candidate that holds a slot: the ids reaching this function
+	/// are distinct, and every pending doc is suppressed from the graph search
+	/// that follows, so no released verdict is asked for again.
+	async fn score_pending_batch(
+		&self,
+		ctx: &HnswContext<'_>,
+		stk: &mut Stk,
+		search: &HnswSearch,
+		filter: &mut Option<HnswTruthyDocumentFilter<'_>>,
+		builder: &mut KnnResultBuilder,
+		scan: &mut PendingScan<'_>,
+	) -> Result<()> {
+		if scan.batch.is_empty() {
+			return Ok(());
+		}
+		scan.begin_scoring();
+		scan.batch.retain_non_empty_vectors();
+		if scan.batch.is_empty() {
+			return Ok(());
+		}
+		if let Some(filter) = filter.as_mut() {
+			filter.prefetch_records(ctx, &scan.batch.ids).await?;
+		}
+		let batch = &mut scan.batch;
+		for (id, vectors) in batch.ids.drain(..).zip(batch.vectors.drain(..)) {
+			let truthy = match filter.as_mut() {
+				Some(filter) => filter.check_vector_id_truthy(ctx, stk, id.clone()).await?,
+				None => true,
+			};
+			if truthy {
+				for vector in vectors {
+					let vector = Vector::from(vector);
+					let d = self.distance.calculate(&search.pt, &vector);
+					if builder.check_add(d)
+						&& let Some(evicted_id) = builder.add_vector_id_result(d, id.clone())
+						&& let Some(filter) = filter.as_mut()
+					{
+						filter.expire(&evicted_id);
+					}
 				}
-				let hr = HnswRecordPendingKey::decode_key(key)?;
-				let pending = HnswRecordPendingUpdate::kv_decode_value(value, ())?;
-				collector(Self::record_pending_to_operation(hr.id.into_owned(), pending));
-				count += 1;
+			}
+			if let Some(filter) = filter.as_mut()
+				&& !builder.contains(&id)
+			{
+				filter.expire(&id);
 			}
 		}
 		Ok(())

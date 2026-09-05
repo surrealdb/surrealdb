@@ -1252,7 +1252,17 @@ impl Building {
 		Ok(ctx.freeze())
 	}
 
-	/// Evicts the process-local HNSW wrapper after a failed index-builder compaction write.
+	/// Discards the HNSW wrapper and element caches after an index-builder
+	/// compaction write that reached the graph and did not commit.
+	///
+	/// Neither half of that state can be validated against the store. The
+	/// caches hold values read and written through the failed transaction and
+	/// carry no version. A graph layer carries one, but it is a counter each
+	/// writer advances in its own copy as it applies, so two writers applying
+	/// the same batch from the same version reach the same one and a state
+	/// check cannot tell the rolled-back topology from the one the winning
+	/// commit stored. An apply that failed part-way can also mutate a layer
+	/// before reaching the `save_nodes` that advances the version at all.
 	async fn evict_cached_hnsw_index(&self) {
 		if let Err(err) = self
 			.ctx
@@ -1260,7 +1270,7 @@ impl Building {
 			.remove_hnsw_index(self.tb, self.ikb.clone(), self.ix.format_version)
 			.await
 		{
-			warn!("Failed to evict HNSW index after index-builder compaction error: {err}");
+			warn!("Failed to evict HNSW index after index-builder compaction apply error: {err}");
 		}
 	}
 

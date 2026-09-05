@@ -109,7 +109,15 @@ impl IndexStores {
 		Ok(())
 	}
 
-	/// Evicts cached HNSW graph and vector entries for one table index.
+	/// Evicts the loaded HNSW graph and the element caches for one table index.
+	///
+	/// The next access rebuilds the wrapper and reloads every layer from
+	/// persisted state. This is the only recovery available to a caller whose
+	/// write reached the graph and then rolled back: a layer's version is a
+	/// counter each writer advances in its own copy as it applies, so two
+	/// writers applying the same batch from the same version reach the same
+	/// one, and a state check comparing versions cannot tell a rolled-back
+	/// topology from the commit that won.
 	pub async fn remove_hnsw_index(
 		&self,
 		tb: TableId,
@@ -119,6 +127,24 @@ impl IndexStores {
 		self.0.hnsw_indexes.remove(tb, &ikb).await?;
 		self.0.vector_cache.remove_index(ikb.ns(), ikb.db(), tb, ikb.index(), format_version).await;
 		Ok(())
+	}
+
+	/// Drops the process-local element caches for one table index at one format
+	/// version, leaving any loaded graph in place.
+	///
+	/// The vector and document caches are keyed by element and carry no
+	/// version, so nothing reconciles them against the store; a caller that has
+	/// made their contents unreachable must drop them itself. Reach for
+	/// [`Self::remove_hnsw_index`] instead whenever the loaded graph is also in
+	/// doubt: it drops the wrapper as well, and a graph cannot be validated
+	/// against the store by its layer versions alone.
+	pub async fn invalidate_hnsw_index_caches(
+		&self,
+		tb: TableId,
+		ikb: &IndexKeyBase,
+		format_version: u16,
+	) {
+		self.0.vector_cache.remove_index(ikb.ns(), ikb.db(), tb, ikb.index(), format_version).await;
 	}
 
 	/// Evicts the loaded DiskANN graph and its cached KV-backed graph data for one table index.

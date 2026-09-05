@@ -20,6 +20,57 @@ use crate::trees::hnsw::{ElementId, HnswElements, HnswSearch, VectorId};
 use crate::trees::knn::{DoublePriorityQueue, Ids64};
 use crate::trees::vector::SharedVector;
 
+/// What [`HnswLayer::load`] re-read from the store.
+///
+/// A reload drops the layer's resident graph and streams its whole `Hn` range
+/// back, so this is the accounting a test needs to say how much of the graph an
+/// operation rebuilt.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) struct ReloadCounts {
+	/// `Hn` range scans opened, one per layer reloaded.
+	pub(super) scans: usize,
+	/// Nodes those scans streamed back into a layer graph.
+	pub(super) nodes: usize,
+}
+
+// Reload work performed on this thread and not yet taken.
+//
+// Per thread rather than per index: the layers sit behind the graph lock and
+// are reachable only through the index that owns them, so there is nowhere to
+// hang a per-index counter that a test can read. A test reading it must
+// therefore run on a current-thread runtime, where its own future is the only
+// producer.
+#[cfg(test)]
+thread_local! {
+	static RELOAD_COUNTS: std::cell::Cell<ReloadCounts> =
+		const { std::cell::Cell::new(ReloadCounts { scans: 0, nodes: 0 }) };
+}
+
+/// Returns the reload work recorded on this thread and resets the count.
+#[cfg(test)]
+pub(super) fn take_reload_counts() -> ReloadCounts {
+	RELOAD_COUNTS.with(|c| c.replace(ReloadCounts::default()))
+}
+
+#[cfg(test)]
+fn record_reload_scan() {
+	RELOAD_COUNTS.with(|c| {
+		let mut counts = c.get();
+		counts.scans += 1;
+		c.set(counts);
+	});
+}
+
+#[cfg(test)]
+fn record_reload_node() {
+	RELOAD_COUNTS.with(|c| {
+		let mut counts = c.get();
+		counts.nodes += 1;
+		c.set(counts);
+	});
+}
+
 #[derive(Debug)]
 pub(super) struct HnswLayer<S>
 where
@@ -696,6 +747,8 @@ where
 		// for each node and take precedence over the Hl data loaded above.
 		let range = self.ikb.new_hn_layer_range(self.level)?;
 		let mut count = 0;
+		#[cfg(test)]
+		record_reload_scan();
 		let mut cursor = tx.open_vals_cursor(range, Direction::Forward, 0, None).await?;
 		loop {
 			let batch = cursor.next_batch(surrealdb_kvs::consts::NORMAL_BATCH_SIZE).await?;
@@ -709,6 +762,8 @@ where
 				}
 				let key = HnswNodeKey::decode_key(k)?;
 				self.graph.load_node(key.node, v);
+				#[cfg(test)]
+				record_reload_node();
 				count += 1;
 			}
 		}
@@ -759,5 +814,357 @@ where
 				"h.elements.contains_key(e_id) - el: {e_id} - f_ids: {f_ids:?}"
 			);
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::ops::Deref;
+
+	use anyhow::Result;
+	use ndarray::Array1;
+	use surrealdb_datastore::Transaction;
+	use surrealdb_kvs::TransactionType;
+
+	use super::{ReloadCounts, take_reload_counts};
+	use crate::IndexKeyBase;
+	use crate::catalog::{
+		DOC_IDS_FORMAT_VERSION, DatabaseId, Distance, HnswParams, IndexId, NamespaceId, TableId,
+		VectorType,
+	};
+	use crate::test_env::TestIndexStore;
+	use crate::trees::hnsw::HnswState;
+	use crate::trees::hnsw::index::HnswIndex;
+	use crate::trees::vector::{SharedVector, Vector};
+	use crate::val::{Number, RecordIdKey, Value};
+
+	const NS: NamespaceId = NamespaceId(1);
+	const DB: DatabaseId = DatabaseId(2);
+	const TB: TableId = TableId(3);
+	const IX: IndexId = IndexId(4);
+
+	fn params() -> HnswParams {
+		let m: u8 = 12;
+		HnswParams {
+			dimension: 2,
+			distance: Distance::Euclidean,
+			vector_type: VectorType::I16,
+			m,
+			m0: m * 2,
+			ml: (1.0 / (m as f64).ln()).into(),
+			ef_construction: 40,
+			extend_candidates: true,
+			keep_pruned_connections: true,
+			use_hashed_vector: true,
+		}
+	}
+
+	/// The indexed content for record `i`: the vector `(i, i)`, so record order
+	/// along the diagonal is also distance order from the origin.
+	fn diagonal(i: i16) -> Vec<Value> {
+		let vector: SharedVector = Vector::I16(Array1::from_vec(vec![i, i])).into();
+		vec![Value::from(vector.deref())]
+	}
+
+	/// A process-local wrapper over the index at `ikb`, holding no graph until
+	/// its first state check.
+	async fn new_instance(ds: &TestIndexStore, ikb: &IndexKeyBase) -> Result<HnswIndex> {
+		let env = ds.env(TransactionType::Read).await;
+		let h = HnswIndex::new(
+			ds.index_stores().vector_cache().clone(),
+			&env.tx(),
+			ikb.clone(),
+			TB,
+			&params(),
+			DOC_IDS_FORMAT_VERSION,
+		)
+		.await?;
+		env.tx().cancel().await?;
+		Ok(h)
+	}
+
+	/// Persists a graph of `n` elements, records `1..=n` on the diagonal, with
+	/// the pending queue fully drained.
+	async fn seed_graph(ds: &TestIndexStore, ikb: &IndexKeyBase, n: i16) -> Result<HnswIndex> {
+		let h = new_instance(ds, ikb).await?;
+		{
+			let env = ds.env(TransactionType::Write).await;
+			for i in 1..=n {
+				h.index(&env, &RecordIdKey::Number(i.into()), None, Some(diagonal(i))).await?;
+			}
+			env.tx().commit().await?;
+		}
+		loop {
+			let env = ds.env(TransactionType::Write).await;
+			let compacted = h.index_pendings(&env).await?;
+			env.tx().commit().await?;
+			if compacted == 0 {
+				break;
+			}
+		}
+		Ok(h)
+	}
+
+	/// The layer versions the given transaction sees, layer 0 first.
+	async fn layer_versions(tx: &Transaction, ikb: &IndexKeyBase) -> Result<Vec<u64>> {
+		let st: HnswState = tx.get_key(&ikb.new_hs_key(), None).await?.unwrap_or_default();
+		let mut versions = Vec::with_capacity(1 + st.layers.len());
+		versions.push(st.layer0.version);
+		versions.extend(st.layers.iter().map(|l| l.version));
+		Ok(versions)
+	}
+
+	async fn persisted_layer_versions(ds: &TestIndexStore, ikb: &IndexKeyBase) -> Result<Vec<u64>> {
+		let tx = ds.transaction(TransactionType::Read).await?;
+		let versions = layer_versions(&tx, ikb).await?;
+		tx.cancel().await?;
+		Ok(versions)
+	}
+
+	/// The levels a write moved, among the levels the persisted state still
+	/// names. A layer the write stacked above the persisted top is dropped by
+	/// the next state check rather than reloaded, so it is not one of them.
+	fn moved_levels(persisted: &[u64], staged: &[u64]) -> Vec<u16> {
+		persisted
+			.iter()
+			.zip(staged)
+			.enumerate()
+			.filter(|(_, (p, s))| p != s)
+			.map(|(level, _)| level as u16)
+			.collect()
+	}
+
+	/// The number of persisted `Hn` nodes across the given levels, which is
+	/// what reloading those levels streams back.
+	async fn persisted_nodes(
+		ds: &TestIndexStore,
+		ikb: &IndexKeyBase,
+		levels: &[u16],
+	) -> Result<usize> {
+		let tx = ds.transaction(TransactionType::Read).await?;
+		let mut nodes = 0;
+		for &level in levels {
+			nodes += tx.count(ikb.new_hn_layer_range(level)?, None).await?;
+		}
+		tx.cancel().await?;
+		Ok(nodes)
+	}
+
+	/// The `k` records nearest the origin, by record number.
+	async fn nearest_to_origin(ds: &TestIndexStore, h: &HnswIndex, k: usize) -> Result<Vec<i64>> {
+		let env = ds.env(TransactionType::Read).await;
+		let pt = vec![Number::Int(0), Number::Int(0)];
+		let mut stack = reblessive::tree::TreeStack::new();
+		let res = stack
+			.enter(|stk| async { h.knn_search(&env, stk, &pt, k, 40, None, None).await })
+			.finish()
+			.await?;
+		env.tx().cancel().await?;
+		let mut keys: Vec<i64> = res
+			.iter()
+			.map(|(rid, _, _)| match &rid.key {
+				RecordIdKey::Number(n) => *n,
+				other => panic!("unexpected record key: {other:?}"),
+			})
+			.collect();
+		keys.sort();
+		Ok(keys)
+	}
+
+	async fn check_state(ds: &TestIndexStore, h: &HnswIndex) -> Result<()> {
+		let env = ds.env(TransactionType::Read).await;
+		let res = h.check_state(&env).await;
+		env.tx().cancel().await?;
+		res
+	}
+
+	/// A graph write that is rolled back must leave the resident graph usable.
+	///
+	/// The write advances the in-memory version of every layer it mutates past
+	/// the version the store keeps, so the next state check reloads exactly
+	/// those layers — taking back precisely the nodes the store holds for them,
+	/// which is the graph the rollback restored the index to — and leaves the
+	/// layers the write never reached alone. Dropping the instance instead,
+	/// which is what treating a rollback as corruption requires, costs a pass
+	/// over every layer.
+	#[tokio::test]
+	async fn hnsw_rolled_back_graph_write_reloads_only_the_layers_it_moved() -> Result<()> {
+		// Enough records for the graph to stack layers above layer 0, so
+		// "only the layers that moved" is a claim with something to exclude.
+		const RECORDS: i16 = 300;
+
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NS, DB, "tb".into(), IX);
+		let _seed = seed_graph(&ds, &ikb, RECORDS).await?;
+
+		// An instance holding the whole graph, level with the store.
+		let h = new_instance(&ds, &ikb).await?;
+		check_state(&ds, &h).await?;
+		let persisted = persisted_layer_versions(&ds, &ikb).await?;
+		assert!(
+			persisted.len() > 1,
+			"fixture must build a layered graph: {RECORDS} records produced a flat one"
+		);
+
+		// One more record for the compaction to apply.
+		{
+			let env = ds.env(TransactionType::Write).await;
+			let id = RecordIdKey::Number((RECORDS + 1).into());
+			h.index(&env, &id, None, Some(diagonal(RECORDS + 1))).await?;
+			env.tx().commit().await?;
+		}
+
+		// Apply the compaction, then roll the transaction back. The state the
+		// apply staged in the doomed transaction names the layers it mutated.
+		let moved = {
+			let env = ds.env(TransactionType::Write).await;
+			let plan = HnswIndex::prepare_compaction(&env, &ikb).await?;
+			assert!(plan.has_work(), "the staged pending must give the apply something to do");
+			assert!(h.apply_compaction(&env, plan).await?, "the apply must reach the graph");
+			let staged = layer_versions(&env.tx(), &ikb).await?;
+			env.tx().cancel().await?;
+			moved_levels(&persisted, &staged)
+		};
+		assert_eq!(moved.first(), Some(&0), "an insertion always mutates layer 0");
+
+		// The reload the rollback owes: one pass over each mutated layer, and
+		// nothing over the rest of the graph.
+		let expected = ReloadCounts {
+			scans: moved.len(),
+			nodes: persisted_nodes(&ds, &ikb, &moved).await?,
+		};
+		take_reload_counts();
+		check_state(&ds, &h).await?;
+		assert_eq!(
+			take_reload_counts(),
+			expected,
+			"the state check must reload the mutated layers and no others"
+		);
+
+		// A second check owes nothing: the reload left the instance level with
+		// the store, so the rolled-back write costs one repair, not a loop.
+		check_state(&ds, &h).await?;
+		assert_eq!(take_reload_counts(), ReloadCounts::default());
+
+		// What dropping the instance costs instead: a wrapper created in its
+		// place carries no layer versions, so it re-reads every layer.
+		let replacement = new_instance(&ds, &ikb).await?;
+		take_reload_counts();
+		check_state(&ds, &replacement).await?;
+		assert_eq!(
+			take_reload_counts().scans,
+			persisted.len(),
+			"a replacement wrapper re-reads every layer"
+		);
+
+		// The repaired graph answers. The rolled-back record sits at the far
+		// end of the diagonal, so the nearest records are the seeded ones.
+		assert_eq!(nearest_to_origin(&ds, &h, 5).await?, (1..=5).collect::<Vec<i64>>());
+		Ok(())
+	}
+
+	/// A layer version identifies how far a writer's own copy has moved, not
+	/// which writer moved it.
+	///
+	/// `save_nodes` advances a per-layer counter in the applying copy, so two
+	/// writers that apply the same batch from the same version reach the same
+	/// version on the same layers. Once one of them commits, a state check on
+	/// the other reads its own version back out of the store and reloads
+	/// nothing — it cannot see that the topology under that version is the
+	/// winner's and not its own. A writer whose apply did not commit therefore
+	/// has to be discarded outright; keeping it and waiting for a version to
+	/// disagree does not work.
+	///
+	/// A removal makes the two applies exactly comparable: it takes its levels
+	/// and its per-level write count from the graph both copies loaded, with no
+	/// random level draw in between.
+	#[tokio::test]
+	async fn hnsw_rolled_back_apply_lands_on_the_version_a_peer_commits() -> Result<()> {
+		// Enough records for the graph to stack layers above layer 0, so a
+		// reload that does happen has something to count beyond layer 0.
+		const RECORDS: i16 = 300;
+		// The record both applies remove.
+		const REMOVED: i16 = 7;
+
+		let ds = TestIndexStore::new().await;
+		let ikb = IndexKeyBase::new(NS, DB, "tb".into(), IX);
+		let seed = seed_graph(&ds, &ikb, RECORDS).await?;
+
+		// Two independent wrappers over the one store, each holding the whole
+		// graph and level with it: the writer whose apply will roll back, and
+		// the peer whose apply will commit.
+		let loser = new_instance(&ds, &ikb).await?;
+		let winner = new_instance(&ds, &ikb).await?;
+		check_state(&ds, &loser).await?;
+		check_state(&ds, &winner).await?;
+		let persisted = persisted_layer_versions(&ds, &ikb).await?;
+		assert!(
+			persisted.len() > 1,
+			"fixture must build a layered graph: {RECORDS} records produced a flat one"
+		);
+
+		// One staged removal for both of them to apply.
+		{
+			let env = ds.env(TransactionType::Write).await;
+			let id = RecordIdKey::Number(REMOVED.into());
+			seed.index(&env, &id, Some(diagonal(REMOVED)), None).await?;
+			env.tx().commit().await?;
+		}
+
+		// The apply that rolls back. Its transaction sees the state it staged,
+		// which is the state its copy now carries.
+		let staged = {
+			let env = ds.env(TransactionType::Write).await;
+			let plan = HnswIndex::prepare_compaction(&env, &ikb).await?;
+			assert!(plan.has_work(), "the staged pending must give the apply something to do");
+			assert!(loser.apply_compaction(&env, plan).await?, "the apply must reach the graph");
+			let staged = layer_versions(&env.tx(), &ikb).await?;
+			env.tx().cancel().await?;
+			staged
+		};
+		let moved = moved_levels(&persisted, &staged);
+		assert_eq!(moved.first(), Some(&0), "removing a record always mutates layer 0");
+
+		// The apply that commits, from the same base and over the same pending
+		// the rollback left in place.
+		{
+			let env = ds.env(TransactionType::Write).await;
+			let plan = HnswIndex::prepare_compaction(&env, &ikb).await?;
+			assert!(plan.has_work(), "the rollback must leave the pending for the peer");
+			assert!(winner.apply_compaction(&env, plan).await?, "the apply must reach the graph");
+			env.tx().commit().await?;
+		}
+
+		// The store now stands at the version the rolled-back copy stands at,
+		// layer for layer.
+		let committed = persisted_layer_versions(&ds, &ikb).await?;
+		assert_eq!(
+			staged, committed,
+			"the peer's commit must land the versions the rollback left in memory"
+		);
+
+		// So a state check on the rolled-back copy reloads nothing at all,
+		// while the same check on a copy that carries no versions reloads every
+		// layer. Only discarding the wrapper reaches the store.
+		take_reload_counts();
+		check_state(&ds, &loser).await?;
+		assert_eq!(
+			take_reload_counts(),
+			ReloadCounts::default(),
+			"the collided version must leave the state check with nothing to do"
+		);
+		let replacement = new_instance(&ds, &ikb).await?;
+		take_reload_counts();
+		check_state(&ds, &replacement).await?;
+		assert_eq!(
+			take_reload_counts(),
+			ReloadCounts {
+				scans: committed.len(),
+				nodes: persisted_nodes(&ds, &ikb, &(0..committed.len() as u16).collect::<Vec<_>>())
+					.await?,
+			},
+			"a replacement wrapper must take every layer from the store"
+		);
+		Ok(())
 	}
 }

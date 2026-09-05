@@ -13,6 +13,7 @@
 //! allocates exactly as it does in production.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::Result;
 use surrealdb_cnf::ConfigMap;
@@ -146,5 +147,80 @@ impl IndexEnv for TestIndexEnv {
 
 	fn config(&self) -> &IdxConfig {
 		&self.store.config
+	}
+}
+
+/// A [`TestIndexEnv`] whose cancellation checkpoint reports done on the `at`-th
+/// counted call, for the tests that pin what a scan has accounted for when a
+/// deadline stops it.
+///
+/// A scan loop checks cancellation once per entry, so the call index *is* the
+/// entry index: reporting done on call `n` stands for a deadline that had
+/// expired by the time the scan reached its `n`th entry. Which entry that call
+/// belongs to is what a reordering of the loop body changes, and what the
+/// ordering tests read back off the engine's own accounting.
+///
+/// Only counted calls are the ones a scan loop makes (`Some(count)`); a
+/// single-operation check (`None`) passes through untouched, so an unrelated
+/// probe cannot shift the schedule.
+pub(crate) struct CancelAtCheckpoint {
+	inner: TestIndexEnv,
+	at: usize,
+	calls: AtomicUsize,
+}
+
+impl CancelAtCheckpoint {
+	pub(crate) fn new(inner: TestIndexEnv, at: usize) -> Self {
+		Self {
+			inner,
+			at,
+			calls: AtomicUsize::new(0),
+		}
+	}
+
+	/// The operation's transaction, for the assertions that read keys directly.
+	pub(crate) fn tx(&self) -> Arc<Transaction> {
+		self.inner.tx()
+	}
+}
+
+impl CancellationProbe for CancelAtCheckpoint {
+	fn expect_not_timedout(&self) -> BoxProviderFut<'_, Result<()>> {
+		self.inner.expect_not_timedout()
+	}
+}
+
+impl IndexEnv for CancelAtCheckpoint {
+	fn tx(&self) -> Arc<Transaction> {
+		IndexEnv::tx(&self.inner)
+	}
+
+	fn is_done(&self, count: Option<usize>) -> BoxEnvFut<'_> {
+		Box::pin(async move {
+			if count.is_none() {
+				return self.inner.is_done(count).await;
+			}
+			let call = self.calls.fetch_add(1, Ordering::Relaxed) + 1;
+			if call >= self.at {
+				return Ok(true);
+			}
+			self.inner.is_done(count).await
+		})
+	}
+
+	fn index_stores(&self) -> &IndexStores {
+		self.inner.index_stores()
+	}
+
+	fn node_id(&self) -> Uuid {
+		self.inner.node_id()
+	}
+
+	fn sequences(&self) -> Result<&Sequences> {
+		self.inner.sequences()
+	}
+
+	fn config(&self) -> &IdxConfig {
+		self.inner.config()
 	}
 }
