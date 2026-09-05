@@ -1136,8 +1136,35 @@ script = """
     # Set up LLVM coverage instrumentation environment
     eval "$(cargo llvm-cov show-env --export-prefix)"
 
+    # `language-tests` declares its own workspace, so every crate under test is
+    # an out-of-workspace path dependency and cargo-llvm-cov instruments none
+    # of them by default. Only the crates named here are compiled with
+    # `-C instrument-coverage`, and a crate left out is absent from the report
+    # entirely rather than showing up as uncovered — so this list is what
+    # defines the measured surface, and a crate added to the harness's
+    # dependency graph must be added here too.
+    #
+    # These are every first-party library crate the harness pulls in. The two
+    # first-party proc-macro crates (surrealdb-keyspace-macro,
+    # surrealdb-types-derive) are deliberately absent: they execute while the
+    # compiler runs, so instrumenting them measures the build, not the tests.
+    COVERAGE_PACKAGES="surrealdb-catalog surrealdb-cnf surrealdb-collections \
+        surrealdb-common surrealdb-core surrealdb-datastore surrealdb-expr \
+        surrealdb-gql surrealdb-iam surrealdb-idx surrealdb-kvs \
+        surrealdb-kvs-any surrealdb-kvs-mem surrealdb-observe \
+        surrealdb-parse-common surrealdb-rpc surrealdb-runtime surrealdb-sql \
+        surrealdb-strand surrealdb-syn surrealdb-types"
+    export __CARGO_LLVM_COV_RUSTC_WRAPPER_CRATE_NAMES="surrealql_test,surrealql_test_tests,$(echo $COVERAGE_PACKAGES | tr ' -' ',_')"
+
     # Clean previous coverage artifacts
     cargo llvm-cov clean --workspace
+    # `clean --workspace` evicts only this workspace's own artifacts. The crates
+    # under test sit outside it, and the variable above is not part of cargo's
+    # fingerprint, so their existing artifacts would otherwise be reused as-is
+    # and the instrumentation request silently ignored. `cargo clean` rejects a
+    # package that is not in the graph, so a crate dropped from the workspace
+    # fails here rather than lingering in the list.
+    cargo clean --locked $(for p in $COVERAGE_PACKAGES; do echo -p $p; done)
 
     # Build language-tests with instrumentation
     cargo build --locked
@@ -1150,6 +1177,19 @@ script = """
         --lcov \
         --output-path ../language-tests-lcov.info \
         --ignore-filename-regex 'language-tests/src/'
+
+    # An instrumentation gap produces a well-formed but empty lcov file, which
+    # the upload accepts without complaint. Assert that the crates under test
+    # reached the report so the failure surfaces here instead of as a coverage
+    # figure that quietly measures nothing. `syn` is checked alongside the two
+    # largest crates because it sits outside the pair the report is most often
+    # read for, so it also catches the crate list narrowing back to those two.
+    for coverage_anchor in core/src/exec expr/src syn/src; do
+        if ! grep -q "surrealdb/$coverage_anchor" ../language-tests-lcov.info; then
+            echo "ERROR: no coverage recorded for surrealdb/$coverage_anchor; the crates under test were not instrumented" >&2
+            exit 1
+        fi
+    done
 """
 
 # --------------------------------------------------
