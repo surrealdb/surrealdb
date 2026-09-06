@@ -99,8 +99,9 @@ impl Expr {
 			| Expr::Constant(_)
 			| Expr::Break
 			| Expr::Continue
-			| Expr::Info(_)
 			| Expr::Sleep(_) => true,
+
+			Expr::Info(info) => info.read_only(),
 
 			// Composite literals evaluate their element expressions in place.
 			Expr::Literal(l) => l.read_only(),

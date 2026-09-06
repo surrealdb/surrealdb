@@ -15,7 +15,7 @@ use surrealdb_cnf::ConfigMap;
 use crate::catalog::providers::CatalogProvider;
 use crate::dbs::Session;
 use crate::key::Key;
-use crate::kvs::{Datastore, TransactionType};
+use crate::kvs::{Datastore, QueryRequest, TransactionType};
 
 /// Builds a memory datastore with the guard configured to `limit` (0 = off).
 async fn guarded_ds(limit: u64) -> (Arc<Datastore>, Session) {
@@ -217,7 +217,7 @@ async fn write_guard_applies_to_external_transactions() {
 	setup_cascade(&ds, &ses, 10, 50).await;
 	let tx = Arc::new(ds.transaction(TransactionType::Write).await.unwrap());
 	let results = ds
-		.execute_with_transaction("DELETE document:doc1;", &ses, None, Arc::clone(&tx))
+		.run(QueryRequest::new("DELETE document:doc1;", &ses).with_transaction(Arc::clone(&tx)))
 		.await
 		.unwrap();
 	let errs: Vec<String> =
@@ -239,7 +239,7 @@ async fn write_guard_poisons_external_transactions_on_trip() {
 	setup_cascade(&ds, &ses, 10, 50).await;
 	let tx = Arc::new(ds.transaction(TransactionType::Write).await.unwrap());
 	let results = ds
-		.execute_with_transaction("DELETE document:doc1;", &ses, None, Arc::clone(&tx))
+		.run(QueryRequest::new("DELETE document:doc1;", &ses).with_transaction(Arc::clone(&tx)))
 		.await
 		.unwrap();
 	assert!(
@@ -374,7 +374,7 @@ async fn write_guard_poison_refuses_a_bare_commit() {
 	setup_cascade(&ds, &ses, 10, 50).await;
 	let tx = Arc::new(ds.transaction(TransactionType::Write).await.unwrap());
 	let results = ds
-		.execute_with_transaction("DELETE document:doc1;", &ses, None, Arc::clone(&tx))
+		.run(QueryRequest::new("DELETE document:doc1;", &ses).with_transaction(Arc::clone(&tx)))
 		.await
 		.unwrap();
 	assert!(

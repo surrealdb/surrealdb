@@ -57,9 +57,7 @@ impl Function {
 			| Self::Silo {
 				..
 			} => false,
-			// `eval::*` can evaluate arbitrary nested queries (including writes),
-			// so they must open a write transaction like `api::invoke`.
-			Self::Normal(f) => f != "api::invoke" && f != "eval::surql" && f != "eval::gql",
+			Self::Normal(f) => !crate::sql::method::is_writer_builtin(f),
 			Self::Model(_) => true,
 		}
 	}

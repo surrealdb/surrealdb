@@ -35,7 +35,10 @@ pub mod limit;
 pub mod literal;
 pub mod lookup;
 pub mod match_plan;
-pub mod method;
+// The builtin-method name table lives one layer down, in `surrealdb-sql`, so
+// that the surface AST can classify a method call the same way this layer
+// does. Re-exported here to keep the `crate::expr::method::…` paths intact.
+pub use crate::sql::method;
 pub mod mock;
 pub mod model;
 pub mod mutation;

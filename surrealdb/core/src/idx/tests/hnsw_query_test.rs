@@ -9,7 +9,7 @@ use crate::catalog::providers::{CatalogProvider, TableProvider};
 use crate::dbs::Session;
 use crate::idx::IndexKeyBase;
 use crate::idx::trees::hnsw::HnswState;
-use crate::kvs::{Datastore, TransactionType};
+use crate::kvs::{Datastore, QueryRequest, TransactionType};
 
 #[test(tokio::test(flavor = "multi_thread"))]
 async fn test_hnsw_inner_product_smoke() -> Result<()> {
@@ -103,7 +103,7 @@ async fn test_hnsw_filtered_knn_batches_record_fetches() -> Result<()> {
 	) -> Result<(usize, crate::observe::TransactionMetricsSnapshot)> {
 		let tx = Arc::new(ds.transaction(TransactionType::Read).await?);
 		let mut response =
-			ds.execute_with_transaction(query, session, None, Arc::clone(&tx)).await?;
+			ds.run(QueryRequest::new(query, session).with_transaction(Arc::clone(&tx))).await?;
 		let len = match response.remove(0).result? {
 			surrealdb_types::Value::Array(a) => a.len(),
 			_ => 0,

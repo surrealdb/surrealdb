@@ -1,9 +1,7 @@
 use anyhow::Result;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_rpc::capabilities::Capabilities;
-use surrealdb_rpc::capabilities::NewPlannerStrategy;
-use surrealdb_rpc::capabilities::Targets;
+use surrealdb_rpc::capabilities::{Capabilities, NewPlannerStrategy, Targets};
 use surrealdb_types::Value as SurValue;
 
 use crate::tests::TestRun;

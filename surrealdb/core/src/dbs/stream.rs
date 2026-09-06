@@ -1,9 +1,9 @@
 //! Executing a query as a stream of results.
 //!
-//! [`Datastore::execute`](crate::kvs::Datastore::execute) answers with every
+//! [`Datastore::run`](crate::kvs::Datastore::run) answers with every
 //! statement's result at once, which means holding a whole `SELECT` in memory
 //! and sending nothing until the last row is read.
-//! [`Datastore::execute_stream`](crate::kvs::Datastore::execute_stream) answers
+//! [`Datastore::run_streaming`](crate::kvs::Datastore::run_streaming) answers
 //! with [`QueryStreamItem`]s instead, so a transport can put rows on the wire as
 //! the executor produces them.
 //!

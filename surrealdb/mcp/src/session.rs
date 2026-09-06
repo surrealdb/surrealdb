@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use surrealdb_core::dbs::Session;
-use surrealdb_core::kvs::Datastore;
+use surrealdb_core::kvs::{Datastore, QueryRequest, QuerySource};
 use surrealdb_rpc::{QueryResult, QueryResultBuilder};
 use surrealdb_types::Variables;
 use tokio::sync::RwLock;
@@ -85,7 +85,10 @@ impl McpSession {
 			);
 			return Ok(vec![QueryResultBuilder::started_now().finish_with_result(Err(err))]);
 		}
-		self.run_to_results(self.ds.execute_gql(query, &session, vars)).await
+		self.run_to_results(
+			self.ds.run(QueryRequest::new(QuerySource::gql(query), &session).with_variables(vars)),
+		)
+		.await
 	}
 
 	/// Execute a GraphQL request against the namespace and database selected on

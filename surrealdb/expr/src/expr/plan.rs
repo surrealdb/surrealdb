@@ -42,6 +42,16 @@ impl TopLevelExpr {
 
 impl surrealdb_types::ToSql for TopLevelExpr {
 	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		// Render a bare expression through `Expr`'s own `ToSql`, which carves
+		// out the forms that have no SurrealQL surface to convert back to —
+		// `Expr::Match`, which GQL lowers to and which the conversion below
+		// would replace with a `NONE` placeholder after a `debug_assert!`.
+		// `sql::TopLevelExpr::Expr` renders as its inner expression, so this
+		// arm produces the same text the conversion would for everything else.
+		if let TopLevelExpr::Expr(expr) = self {
+			expr.fmt_sql(f, fmt);
+			return;
+		}
 		let sql_expr: crate::sql::TopLevelExpr = self.clone().into();
 		sql_expr.fmt_sql(f, fmt);
 	}

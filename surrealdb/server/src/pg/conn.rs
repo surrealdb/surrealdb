@@ -9,7 +9,7 @@ use bytes::BytesMut;
 use surrealdb_core::ctx::CancelHandle;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::verify::{self, ScramAuth, basic};
-use surrealdb_core::kvs::Datastore;
+use surrealdb_core::kvs::{Datastore, Dialect, QueryRequest, QuerySource};
 use surrealdb_core::syn;
 use surrealdb_datastore::Transaction;
 use surrealdb_kvs::TransactionType;
@@ -38,14 +38,6 @@ type PgStream = Either<TcpStream, tokio_rustls::server::TlsStream<TcpStream>>;
 /// and typed for portal-described flows. `PROTOCOL 3.0` binary result flag.
 const FORMAT_TEXT: i16 = 0;
 const FORMAT_BINARY: i16 = 1;
-
-/// The query language a connection speaks. Chosen at startup via
-/// `options=-c dialect=...` and switchable in-session with `SET dialect`.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Dialect {
-	SurrealQl,
-	Gql,
-}
 
 /// Upper bound on live prepared statements / portals per connection, so a
 /// client cannot accumulate them without limit.
@@ -317,6 +309,8 @@ struct Connection {
 	session: Session,
 	statements: HashMap<String, PreparedStatement>,
 	portals: HashMap<String, Portal>,
+	/// The query language this connection speaks. Chosen at startup via
+	/// `options=-c dialect=...` and switchable in-session with `SET dialect`.
 	dialect: Dialect,
 	/// The active interactive transaction opened by a standalone `BEGIN`.
 	transaction: Option<Arc<Transaction>>,
@@ -1251,15 +1245,26 @@ impl Connection {
 		}
 		let cancel = self.arm_cancel();
 		let results = match (self.dialect, self.transaction.clone(), parsed) {
-			(Dialect::Gql, _, _) => self.execute_gql_query(query, params).await,
-			(Dialect::SurrealQl, Some(tx), Some(ast)) => self
+			// GQL is never parsed at Parse time (different parser, different
+			// parameter syntax), so it reaches here as text. It cannot be in a
+			// transaction: the guard above refused that.
+			(Dialect::Gql, _, _) => self
 				.ds
-				.process_with_transaction_and_cancel(ast, &self.session, Some(params), tx, cancel)
+				.run(
+					QueryRequest::new(QuerySource::gql(query), &self.session)
+						.with_variables(Some(params))
+						.with_cancel(cancel),
+				)
 				.await
 				.map_err(|e| PgError::from(&e)),
-			(Dialect::SurrealQl, None, Some(ast)) => self
+			(Dialect::SurrealQl, transaction, Some(ast)) => self
 				.ds
-				.process_with_cancel(ast, &self.session, Some(params), cancel)
+				.run(
+					QueryRequest::new(ast, &self.session)
+						.with_variables(Some(params))
+						.with_optional_transaction(transaction)
+						.with_cancel(cancel),
+				)
 				.await
 				.map_err(|e| PgError::from(&e)),
 			// An empty SurrealQL statement has no AST; empty portals are
@@ -1274,24 +1279,6 @@ impl Connection {
 			}
 		}
 		Ok(last)
-	}
-
-	#[cfg(feature = "gql")]
-	async fn execute_gql_query(
-		&self,
-		query: &str,
-		params: Variables,
-	) -> Result<Vec<surrealdb_rpc::QueryResult>, PgError> {
-		self.ds.execute_gql(query, &self.session, Some(params)).await.map_err(|e| PgError::from(&e))
-	}
-
-	#[cfg(not(feature = "gql"))]
-	async fn execute_gql_query(
-		&self,
-		_query: &str,
-		_params: Variables,
-	) -> Result<Vec<surrealdb_rpc::QueryResult>, PgError> {
-		Err(PgError::feature_not_supported("this server was not built with GQL support"))
 	}
 
 	async fn simple_query(&mut self, sql: &str) -> Result<()> {
@@ -1409,7 +1396,8 @@ impl Connection {
 			};
 			let cancel = self.arm_cancel();
 			let mut results =
-				match self.ds.process_with_cancel(unit, &self.session, None, cancel).await {
+				match self.ds.run(QueryRequest::new(unit, &self.session).with_cancel(cancel)).await
+				{
 					Ok(results) => results,
 					Err(err) => {
 						msg::write_error_response(out, &PgError::from(&err));
@@ -1456,8 +1444,10 @@ impl Connection {
 	async fn run_in_transaction(&mut self, sql: &str, out: &mut BytesMut) -> Result<()> {
 		let tx = self.transaction.clone().expect("caller checked transaction is open");
 		let cancel = self.arm_cancel();
-		let results =
-			self.ds.execute_with_transaction_and_cancel(sql, &self.session, None, tx, cancel).await;
+		let results = self
+			.ds
+			.run(QueryRequest::new(sql, &self.session).with_transaction(tx).with_cancel(cancel))
+			.await;
 		match results {
 			Ok(results) => {
 				for result in results {
@@ -1486,9 +1476,13 @@ impl Connection {
 
 	/// Execute a GQL query and stream its results (as typed columns, like the
 	/// SurrealQL simple path). GQL runs against the current namespace/database.
-	#[cfg(feature = "gql")]
 	async fn run_gql(&mut self, sql: &str, out: &mut BytesMut) -> Result<()> {
-		match self.ds.execute_gql(sql, &self.session, None).await {
+		let cancel = self.arm_cancel();
+		match self
+			.ds
+			.run(QueryRequest::new(QuerySource::gql(sql), &self.session).with_cancel(cancel))
+			.await
+		{
 			Ok(results) => {
 				for result in results {
 					match result.result {
@@ -1506,15 +1500,6 @@ impl Connection {
 			}
 			Err(err) => msg::write_error_response(out, &PgError::from(&err)),
 		}
-		Ok(())
-	}
-
-	#[cfg(not(feature = "gql"))]
-	async fn run_gql(&mut self, _sql: &str, out: &mut BytesMut) -> Result<()> {
-		msg::write_error_response(
-			out,
-			&PgError::feature_not_supported("this server was not built with GQL support"),
-		);
 		Ok(())
 	}
 

@@ -27,6 +27,7 @@ pub(crate) mod compat;
 pub(crate) mod index;
 pub(crate) mod migration;
 pub(crate) mod paging;
+pub mod request;
 pub(crate) mod slowlog;
 
 #[cfg(test)]
@@ -43,6 +44,7 @@ pub use ds::{
 	Builder, Datastore, LiveQueryEngine, TransactionBuilderFactory, TransactionBuilderParts,
 };
 pub(crate) use err::Error;
+pub use request::{Dialect, QueryRequest, QuerySource};
 pub(crate) use surrealdb_datastore::IntoBytes;
 // Named for the layer rather than re-exported as `Error`: `kvs::Error` above is
 // the storage backend's, and a datastore failure is a different thing.

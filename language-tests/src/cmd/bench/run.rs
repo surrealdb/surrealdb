@@ -11,9 +11,8 @@ use sha2::{Digest, Sha256};
 use surrealdb_core::channel;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::env::VERSION;
-use surrealdb_core::kvs::{Builder, Datastore};
-use surrealdb_rpc::capabilities::Capabilities;
-use surrealdb_rpc::capabilities::Targets;
+use surrealdb_core::kvs::{Builder, Datastore, QueryRequest, QuerySource};
+use surrealdb_rpc::capabilities::{Capabilities, Targets};
 use surrealdb_types::Datetime;
 
 use crate::cli::{Backend, ColorMode};
@@ -915,7 +914,7 @@ enum BenchStatement {
 	/// A parsed-and-lowered GQL plan. Parse + lowering happen once in
 	/// `prepare`, so the timed iterations measure plan execution only (mirroring
 	/// the GraphQL arm, which generates its schema up front). The plan is cloned
-	/// per iteration because `process_gql` consumes it by value.
+	/// per iteration because submitting it consumes it by value.
 	Gql {
 		plan: surrealdb_gql::PreparedGqlQuery,
 	},
@@ -944,7 +943,7 @@ impl BenchStatement {
 			Dialect::Gql => {
 				// Parse + lower the `.gql` source once, exactly as the run path
 				// does (see `cmd::run::run_test_with_dbs`), so the timed loop
-				// measures only `process_gql`.
+				// measures only execution.
 				let settings = surrealdb_gql::GqlParserSettings::default();
 				let source = run.case.test.source.as_bytes();
 				let plan =
@@ -1010,9 +1009,10 @@ impl BenchStatement {
 			Self::Gql {
 				plan,
 			} => {
-				// `process_gql` takes the plan by value, so each iteration
+				// Submitting the plan takes it by value, so each iteration
 				// executes a fresh clone of the once-lowered plan.
-				let _ = dbs.process_gql(plan.clone(), session, None).await?;
+				let _ =
+					dbs.run(QueryRequest::new(QuerySource::Plan(plan.clone().0), session)).await?;
 			}
 			Self::GraphQl {
 				schema,

@@ -18,7 +18,7 @@ use surrealdb_core::dbs::{AuthPrincipalSnapshot, Session};
 use surrealdb_core::iam;
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealdb_core::iam::check::check_ns_db;
-use surrealdb_core::kvs::Datastore;
+use surrealdb_core::kvs::{Datastore, QueryRequest};
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealdb_engine_api::MlExportConfig;
 use surrealdb_engine_api::{EngineContext, EngineFuture, SurrealEngine, single_result};
@@ -384,7 +384,11 @@ impl SurrealEngine for LocalEngine {
 						let abandon = AbandonOnCancel::new(&state, txn);
 						let results = self
 							.kvs
-							.execute_with_transaction(query.as_ref(), &session, Some(vars), tx)
+							.run(
+								QueryRequest::new(query.as_ref(), &session)
+									.with_variables(Some(vars))
+									.with_transaction(tx),
+							)
 							.await;
 						abandon.finished();
 						results
@@ -424,30 +428,20 @@ impl SurrealEngine for LocalEngine {
 			// held. The job itself owns everything it needs from here.
 			let job = {
 				let session = state.session.read().await;
-				match ctx.transaction {
+				let transaction = match ctx.transaction {
+					// The statement never runs, so there is no statement
+					// result to report this on; it belongs to the call.
 					Some(txn) => {
-						// The statement never runs, so there is no statement
-						// result to report this on; it belongs to the call.
-						let Some(tx) = state.transactions.get(&txn) else {
-							return Err(transaction_not_found());
-						};
-						self.kvs.execute_stream_with_transaction(
-							query.as_ref(),
-							&session,
-							Some(vars),
-							tx,
-							None,
-							items,
-						)?
+						Some(state.transactions.get(&txn).ok_or_else(transaction_not_found)?)
 					}
-					None => self.kvs.execute_stream(
-						query.as_ref(),
-						&session,
-						Some(vars),
-						None,
-						items,
-					)?,
-				}
+					None => None,
+				};
+				self.kvs.run_streaming(
+					QueryRequest::new(query.as_ref(), &session)
+						.with_variables(Some(vars))
+						.with_optional_transaction(transaction),
+					items,
+				)?
 			};
 
 			// The caller drains the item channel, so driving the execution here

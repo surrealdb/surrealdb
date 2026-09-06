@@ -7,7 +7,7 @@ use anyhow::Result;
 use crate::catalog::providers::CatalogProvider;
 use crate::dbs::{NewPlannerStrategy, Session};
 use crate::key::schema::RecordKey;
-use crate::kvs::{Datastore, TransactionType};
+use crate::kvs::{Datastore, QueryRequest, TransactionType};
 use crate::val::RecordIdKey;
 
 /// DiskANN counterpart of the HNSW filtered-KNN batching test. A filtered KNN
@@ -69,7 +69,7 @@ async fn test_diskann_filtered_knn_batches_record_fetches() -> Result<()> {
 	) -> Result<(usize, crate::observe::TransactionMetricsSnapshot)> {
 		let tx = Arc::new(ds.transaction(TransactionType::Read).await?);
 		let mut response =
-			ds.execute_with_transaction(query, session, None, Arc::clone(&tx)).await?;
+			ds.run(QueryRequest::new(query, session).with_transaction(Arc::clone(&tx))).await?;
 		let len = match response.remove(0).result? {
 			surrealdb_types::Value::Array(a) => a.len(),
 			_ => 0,

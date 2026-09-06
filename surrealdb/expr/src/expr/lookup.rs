@@ -28,7 +28,8 @@ impl Lookup {
 	/// expression, so each is inspected; the subject (`what`) names tables and
 	/// ranges only.
 	pub fn read_only(&self) -> bool {
-		self.expr.as_ref().map(|x| x.read_only()).unwrap_or(true)
+		self.what.iter().all(LookupSubject::read_only)
+			&& self.expr.as_ref().map(|x| x.read_only()).unwrap_or(true)
 			&& self.cond.as_ref().map(|x| x.0.read_only()).unwrap_or(true)
 			&& self.split.as_ref().map(|x| x.read_only()).unwrap_or(true)
 			&& self.group.as_ref().map(|x| x.read_only()).unwrap_or(true)
@@ -36,6 +37,22 @@ impl Lookup {
 			&& self.limit.as_ref().map(|x| x.read_only()).unwrap_or(true)
 			&& self.start.as_ref().map(|x| x.read_only()).unwrap_or(true)
 			&& self.alias.as_ref().map(|x| x.read_only()).unwrap_or(true)
+	}
+}
+
+impl LookupSubject {
+	/// A range subject's bounds are record-id keys, which carry arbitrary
+	/// expressions in their array and object forms.
+	pub fn read_only(&self) -> bool {
+		match self {
+			LookupSubject::Table {
+				..
+			} => true,
+			LookupSubject::Range {
+				range,
+				..
+			} => range.read_only(),
+		}
 	}
 }
 

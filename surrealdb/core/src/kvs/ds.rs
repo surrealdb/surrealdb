@@ -52,7 +52,7 @@ use crate::catalog::providers::{
 };
 use crate::catalog::{Index, NodeLiveQuery};
 use crate::config::RuntimeConfig;
-use crate::ctx::{CancelHandle, Context};
+use crate::ctx::{CancelHandle, Context, FrozenContext};
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
 use crate::dbs::capabilities::{
@@ -61,7 +61,8 @@ use crate::dbs::capabilities::{
 use crate::dbs::node::{Node, Timestamp};
 use crate::dbs::{
 	Capabilities, DurableSession, Executor, MessageBroker, Options, QueryResult,
-	QueryResultBuilder, QueryStreamItem, QueryStreamJob, Session, durable_session, restore_session,
+	QueryResultBuilder, QueryStreamItem, QueryStreamJob, Session, TopLevelStatement,
+	durable_session, restore_session,
 };
 use crate::doc::process_next_events_batch;
 use crate::err::{EngineError, Error};
@@ -74,8 +75,6 @@ use crate::expr::statements::define::DefineKind;
 use crate::expr::statements::{DefineModelStatement, DefineStatement, DefineUserStatement};
 use crate::expr::user::UserDuration;
 use crate::expr::{Base, Expr, Idiom, Literal, LogicalPlan, TopLevelExpr};
-#[cfg(feature = "gql")]
-use crate::gql::PreparedGqlQuery;
 #[cfg(feature = "http")]
 use crate::http::HttpClient;
 use crate::iam::{Action, Auth, PolicyError, Resource, ResourceKind, Role, ScramCredential};
@@ -97,6 +96,7 @@ use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::clock::SystemClock;
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::paging::{PageCompanion, PagedDelete, PagedOutcome};
+use crate::kvs::request::{Dialect, QueryRequest, QuerySource};
 use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
 use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
@@ -4688,6 +4688,261 @@ impl Datastore {
 		Ok(Some(Duration::from_millis(now.value.saturating_sub(node.heartbeat.value))))
 	}
 
+	/// Run a query.
+	///
+	/// Every buffered query entry point that takes a whole query is this one:
+	/// a [`QueryRequest`] describes what to run, who runs it, and the
+	/// conditions — a caller-owned transaction, bound variables, a
+	/// cancellation handle — independently of one another, so the
+	/// combinations do not need a method each. Import is the exception: it
+	/// consumes a byte stream and keeps its own preflight, whose session
+	/// errors differ from this one's.
+	///
+	/// The source is split into statements before the session preflight, so a
+	/// caller that submitted unparsable text learns that from the call
+	/// whatever else is wrong with the request. SurrealQL statements stay in
+	/// surface form; see [`Self::statements_for`].
+	///
+	/// See [`Self::run_streaming`] to receive results as they are produced
+	/// rather than all at once.
+	///
+	/// ```rust,no_run
+	/// use anyhow::Error;
+	/// use surrealdb_core::kvs::{Datastore, QueryRequest};
+	/// use surrealdb_core::dbs::Session;
+	///
+	/// #[tokio::main]
+	/// async fn main() -> Result<(),Error> {
+	///     let ds = Datastore::new("memory").await?;
+	///     let ses = Session::owner();
+	///     let sql = "USE NS test DB test; SELECT * FROM person;";
+	///     let res = ds.run(QueryRequest::new(sql, &ses)).await?;
+	///     Ok(())
+	/// }
+	/// ```
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn run(
+		&self,
+		req: QueryRequest<'_>,
+	) -> std::result::Result<Vec<QueryResult>, TypesError> {
+		let QueryRequest {
+			source,
+			session,
+			variables,
+			transaction,
+			cancel,
+		} = req;
+		let statements = self.statements_for(source)?;
+		let (opt, ctx) = self.setup_query(session, variables, transaction.as_ref(), cancel)?;
+		match transaction {
+			Some(_) => {
+				Executor::execute_statements_with_transaction(self, ctx, opt, statements).await
+			}
+			None => Executor::execute_statements(self, ctx, opt, statements).await,
+		}
+		// `anyhow_to_types_error`, not a downcast to `err::Error`: that enum
+		// holds a handful of residual variants, so a bare layer error
+		// (`ExecError::DbEmpty` from `Options::ns_db()`, say) misses and
+		// reaches the client as `internal` where it used to be a validation
+		// failure. The helper walks the whole registry.
+		.map_err(crate::err::anyhow_to_types_error)
+	}
+
+	/// Prepare a query to stream its results.
+	///
+	/// Where [`Self::run`] answers with every statement's result at once, this
+	/// sends [`QueryStreamItem`]s into `items` as the executor produces them,
+	/// so a caller can forward rows before the query finishes. See the
+	/// [`stream`](crate::dbs::QueryStreamItem) module for what a consumer may
+	/// assume about them — chiefly that rows are provisional until their
+	/// statement's terminal item arrives.
+	///
+	/// Parsing and the session checks happen here, so their failures are
+	/// reported instead of a job. Everything after that is reported by driving
+	/// [`QueryStreamJob::run`].
+	///
+	/// A streaming caller wants [`QueryRequest::cancel`]: a consumer that stops
+	/// reading is only noticed at the next send otherwise, so a query in a
+	/// phase that emits nothing for a while — a sort, an aggregate — would run
+	/// to completion after the client had gone.
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub fn run_streaming(
+		self: &Arc<Self>,
+		req: QueryRequest<'_>,
+		items: Sender<QueryStreamItem>,
+	) -> std::result::Result<QueryStreamJob, TypesError> {
+		let QueryRequest {
+			source,
+			session,
+			variables,
+			transaction,
+			cancel,
+		} = req;
+		let statements = self.statements_for(source)?;
+		let (opt, ctx) = self.setup_query(session, variables, transaction.as_ref(), cancel)?;
+		let in_transaction = transaction.is_some();
+		// The count is known now because parsing is done, which is what lets a
+		// transport announce it before the first result exists.
+		let statement_count = statements.len();
+		let kvs = Arc::clone(self);
+		Ok(QueryStreamJob {
+			statement_count,
+			run: Box::pin(async move {
+				let executed = if in_transaction {
+					Executor::execute_statements_streaming_with_transaction(
+						&kvs, ctx, opt, statements, items,
+					)
+					.await
+				} else {
+					Executor::execute_statements_streaming(&kvs, ctx, opt, statements, items).await
+				};
+				executed.map_err(crate::err::anyhow_to_types_error)
+			}),
+		})
+	}
+
+	/// Split a [`QuerySource`] into the statements the executor runs.
+	///
+	/// Parsed SurrealQL stays in surface form: the executor converts each
+	/// statement when it is about to run it, rather than converting the batch
+	/// before the first one does. GQL has no SurrealQL surface form — it lowers
+	/// straight to a plan — so it arrives at the executor already lowered, as
+	/// does a source a caller lowered itself.
+	fn statements_for(
+		&self,
+		source: QuerySource<'_>,
+	) -> std::result::Result<Vec<TopLevelStatement>, TypesError> {
+		fn lowered(plan: LogicalPlan) -> Vec<TopLevelStatement> {
+			plan.expressions.into_iter().map(TopLevelStatement::Plan).collect()
+		}
+
+		let ast = match source {
+			QuerySource::Text {
+				text,
+				dialect: Dialect::SurrealQl,
+			} => syn::parse_with_capabilities(text, &self.capabilities.load(), &self.parser_config)
+				.map_err(|e| TypesError::validation(e.to_string(), None))?,
+			QuerySource::Text {
+				text,
+				dialect: Dialect::Gql,
+			} => return Ok(lowered(self.parse_gql(text)?)),
+			QuerySource::Ast(ast) => ast,
+			QuerySource::Plan(plan) => return Ok(lowered(plan)),
+		};
+		Ok(ast.expressions.into_iter().map(TopLevelStatement::Ast).collect())
+	}
+
+	/// Parse and lower GQL query text to the plan the executor runs.
+	///
+	/// The plan is returned bare rather than in its `PreparedGqlQuery`
+	/// wrapper: that type comes from the `gql` crate, so naming it here would
+	/// leave the signature unbuildable on a build without the feature.
+	#[cfg(feature = "gql")]
+	fn parse_gql(&self, text: &str) -> std::result::Result<LogicalPlan, TypesError> {
+		crate::gql::parse_with_capabilities(text, &self.capabilities.load(), &self.parser_config)
+			.map(|prepared| prepared.0)
+			.map_err(|e| TypesError::validation(e.to_string(), None))
+	}
+
+	/// The dialect exists on every build because it is chosen from what a
+	/// client sent; the front end that would parse it does not.
+	#[cfg(not(feature = "gql"))]
+	fn parse_gql(&self, _text: &str) -> std::result::Result<LogicalPlan, TypesError> {
+		Err(TypesError::configuration(
+			"This build does not support GQL queries".to_string(),
+			surrealdb_types::ConfigurationError::DialectNotSupported,
+		))
+	}
+
+	/// The preflight a query runs: the session checks, and the options and
+	/// context the statements execute against.
+	///
+	/// [`Self::execute_import`] does not come through here. It repeats these
+	/// checks inline and reports an expired session and an anonymous actor as
+	/// `DatastoreError`/`PolicyError` where this reports `TypesError`, so a
+	/// check added here does not reach the import path.
+	///
+	/// A caller-owned transaction is prepared here rather than by the executor.
+	/// It carries the session's tenant identity so the emitted
+	/// [`crate::observe::TransactionEvent`] names the active namespace,
+	/// database and user; and the write-cardinality guard is armed on it
+	/// because statements running inside a client-owned transaction (RPC
+	/// `begin`, SDK-managed transactions) are subject to the same configured
+	/// limit as executor-created statement transactions — wrapping a statement
+	/// in an explicit transaction must not bypass the guard.
+	fn setup_query(
+		&self,
+		sess: &Session,
+		vars: Option<PublicVariables>,
+		tx: Option<&Arc<Transaction>>,
+		cancel: Option<CancelHandle>,
+	) -> std::result::Result<(Options, FrozenContext), TypesError> {
+		// Check if the session has expired
+		if sess.expired() {
+			return Err(TypesError::not_allowed(
+				"The session has expired".to_string(),
+				AuthError::SessionExpired,
+			));
+		}
+
+		// Check if anonymous actors can execute queries when auth is enabled
+		// TODO(sgirones): Check this as part of the authorisation layer
+		if let Err(e) = self.check_anon(sess) {
+			return Err(TypesError::not_allowed(
+				format!("Anonymous access not allowed: {e}"),
+				AuthError::NotAllowed {
+					actor: "anonymous".to_owned(),
+					action: "process".to_owned(),
+					resource: "query".to_owned(),
+				},
+			));
+		}
+
+		// Create a new query options
+		let opt = self.setup_options(sess);
+
+		// Create a default context.
+		//
+		// `anyhow_to_types_error`, not a downcast to `err::Error`: that enum
+		// holds a handful of residual variants, so a bare layer error
+		// (`ExecError::DbEmpty` from `Options::ns_db()`, say) misses and
+		// reaches the client as `internal` where it used to be a validation
+		// failure. The helper walks the whole registry.
+		let mut ctx = self.setup_ctx().map_err(crate::err::anyhow_to_types_error)?;
+
+		// Install the external cancellation handle if one was supplied. The
+		// executor checks `Context::done` between statements and in iterator
+		// hot loops, so flipping the flag mid-query causes the next yield to
+		// return `EngineError::QueryCancelled` and the executor's error path
+		// finalises the transaction cleanly. Bare-await sites (`SLEEP`)
+		// `select!` against the handle's awaitable view. This is a flag rather
+		// than the caller dropping the execution future because dropping the
+		// future would drop an open transaction with it.
+		if let Some(cancel) = cancel {
+			ctx.set_cancellation(&cancel);
+		}
+
+		// Start an execution context
+		ctx.attach_session(sess).map_err(crate::err::into_types_error)?;
+
+		// Store the query variables
+		if let Some(vars) = vars {
+			ctx.attach_variables(vars.into()).map_err(crate::err::into_types_error)?;
+		}
+
+		// Prepare an externally-supplied transaction. See the method docs for
+		// why the identity and the guard are applied here.
+		if let Some(tx) = tx {
+			if let Some(identity) = ctx.tenant_identity() {
+				tx.set_tenant_identity(Arc::clone(identity));
+			}
+			tx.arm_write_keys_limit(self.transaction_max_write_keys());
+			ctx.set_transaction(Arc::clone(tx));
+		}
+
+		Ok((opt, ctx.freeze()))
+	}
+
 	/// Parse and execute an SQL query
 	///
 	/// ```rust,no_run
@@ -4711,292 +4966,18 @@ impl Datastore {
 		sess: &Session,
 		vars: Option<PublicVariables>,
 	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		// Parse the SQL query text
-		let ast = syn::parse_with_capabilities(txt, &self.capabilities.load(), &self.parser_config)
-			.map_err(|e| TypesError::validation(e.to_string(), None))?;
-		// Process the AST
-		self.process(ast, sess, vars).await
+		self.run(QueryRequest::new(txt, sess).with_variables(vars)).await
 	}
 
-	/// Parse and lower a GQL query into a [`PreparedGqlQuery`].
-	#[cfg(feature = "gql")]
-	pub(crate) fn parse_gql(&self, txt: &str) -> std::result::Result<PreparedGqlQuery, TypesError> {
-		// Parse and lower the GQL query text
-		crate::gql::parse_with_capabilities(txt, &self.capabilities.load(), &self.parser_config)
-			.map_err(|e| TypesError::validation(e.to_string(), None))
-	}
-
-	/// Parse and execute a GQL query
-	#[cfg(feature = "gql")]
+	/// Execute a pre-parsed SQL query
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn execute_gql(
-		&self,
-		txt: &str,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		// Parse and lower the GQL query text
-		let plan = self.parse_gql(txt)?;
-		// Process the lowered plan
-		self.process_gql(plan, sess, vars).await
-	}
-
-	/// Execute a pre-lowered GQL query.
-	///
-	/// Mirrors [`Self::process`] for the GQL dialect: the
-	/// [`PreparedGqlQuery`] already wraps a [`LogicalPlan`], so it is handed
-	/// directly to the shared plan-level executor.
-	#[cfg(feature = "gql")]
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn process_gql(
-		&self,
-		q: PreparedGqlQuery,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		self.process_plan_inner(q.0, sess, vars, None).await
-	}
-
-	/// Execute a pre-lowered GQL query with an externally-owned cancellation
-	/// handle. See [`Self::process_with_transaction_and_cancel`] for the
-	/// cancellation semantics.
-	#[cfg(feature = "gql")]
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub(crate) async fn process_gql_with_cancel(
-		&self,
-		q: PreparedGqlQuery,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-		cancel: CancelHandle,
-	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		self.process_plan_inner(q.0, sess, vars, Some(cancel)).await
-	}
-
-	/// Execute a pre-lowered GQL query with an existing transaction.
-	#[cfg(feature = "gql")]
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub(crate) async fn process_gql_with_transaction(
-		&self,
-		q: PreparedGqlQuery,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-		tx: Arc<Transaction>,
-	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		self.process_plan_with_transaction_inner(q.0, sess, vars, tx, None).await
-	}
-
-	/// Execute a pre-lowered GQL query with an existing transaction and an
-	/// externally-owned cancellation handle. See
-	/// [`Self::process_with_transaction_and_cancel`] for the cancellation
-	/// semantics.
-	#[cfg(feature = "gql")]
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub(crate) async fn process_gql_with_transaction_and_cancel(
-		&self,
-		q: PreparedGqlQuery,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-		tx: Arc<Transaction>,
-		cancel: CancelHandle,
-	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		self.process_plan_with_transaction_inner(q.0, sess, vars, tx, Some(cancel)).await
-	}
-
-	/// Execute a SurrealQL query with an externally-owned cancellation
-	/// handle. See [`Self::process_with_transaction_and_cancel`] for the
-	/// cancellation semantics.
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn execute_with_cancel(
-		&self,
-		txt: &str,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-		cancel: CancelHandle,
-	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		// Parse the SQL query text
-		let ast = syn::parse_with_capabilities(txt, &self.capabilities.load(), &self.parser_config)
-			.map_err(|e| TypesError::validation(e.to_string(), None))?;
-		// Process the AST
-		self.process_with_cancel(ast, sess, vars, cancel).await
-	}
-
-	/// Execute a query with an existing transaction
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn execute_with_transaction(
-		&self,
-		txt: &str,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-		tx: Arc<Transaction>,
-	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		// Parse the SQL query text
-		let ast = syn::parse_with_capabilities(txt, &self.capabilities.load(), &self.parser_config)
-			.map_err(|e| TypesError::validation(e.to_string(), None))?;
-		// Process the AST with the transaction
-		self.process_with_transaction(ast, sess, vars, tx).await
-	}
-
-	/// Execute a query with an existing transaction and an externally-owned
-	/// cancellation handle. See [`Self::process_with_transaction_and_cancel`]
-	/// for the cancellation semantics.
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn execute_with_transaction_and_cancel(
-		&self,
-		txt: &str,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-		tx: Arc<Transaction>,
-		cancel: CancelHandle,
-	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		// Parse the SQL query text
-		let ast = syn::parse_with_capabilities(txt, &self.capabilities.load(), &self.parser_config)
-			.map_err(|e| TypesError::validation(e.to_string(), None))?;
-		// Process the AST with the transaction
-		self.process_with_transaction_and_cancel(ast, sess, vars, tx, cancel).await
-	}
-
-	/// Process an AST with an existing transaction
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn process_with_transaction(
+	pub async fn process(
 		&self,
 		ast: Ast,
 		sess: &Session,
 		vars: Option<PublicVariables>,
-		tx: Arc<Transaction>,
 	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		self.process_with_transaction_inner(ast, sess, vars, tx, None).await
-	}
-
-	/// Process an AST with an existing transaction and an externally-owned
-	/// cancellation handle. When the handle is tripped the executor's
-	/// `Context::done` walks short-circuit with `Reason::Canceled` at the
-	/// next yield point (statement boundary, iterator hot loop check, etc.)
-	/// and the transaction is finalised on the executor's normal error path.
-	/// Bare-await sites (e.g. `SLEEP`) `select!` against the handle's
-	/// awaitable view, so they are also interrupted instead of running to
-	/// completion.
-	///
-	/// Used by the WebSocket RPC layer so a client disconnect cancels the
-	/// in-flight query without waiting for it to run to completion. The
-	/// caller owns the [`CancelHandle`] and is responsible for tripping it.
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn process_with_transaction_and_cancel(
-		&self,
-		ast: Ast,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-		tx: Arc<Transaction>,
-		cancel: CancelHandle,
-	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		self.process_with_transaction_inner(ast, sess, vars, tx, Some(cancel)).await
-	}
-
-	/// Ast-level shim over [`Self::process_plan_with_transaction_inner`]: the
-	/// SurrealQL surface AST is converted to a [`LogicalPlan`] before the
-	/// shared plan-level body runs. Keeps the SurrealQL `Ast` entry points
-	/// unchanged while letting GQL (which already lowers to a `LogicalPlan`)
-	/// share the same execution path.
-	async fn process_with_transaction_inner(
-		&self,
-		ast: Ast,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-		tx: Arc<Transaction>,
-		cancel: Option<CancelHandle>,
-	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		self.process_plan_with_transaction_inner(ast.into(), sess, vars, tx, cancel).await
-	}
-
-	/// Shared body for [`Self::process_with_transaction`],
-	/// [`Self::process_with_transaction_and_cancel`] and the GQL
-	/// `process_gql` variants. The public Ast variants exist to keep the
-	/// non-cancel API stable for SDK / embedded callers; `cancel: None`
-	/// reproduces the pre-cancellation behaviour exactly.
-	async fn process_plan_with_transaction_inner(
-		&self,
-		plan: LogicalPlan,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-		tx: Arc<Transaction>,
-		cancel: Option<CancelHandle>,
-	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		// Check if the session has expired
-		if sess.expired() {
-			return Err(TypesError::not_allowed(
-				"The session has expired".to_string(),
-				AuthError::SessionExpired,
-			));
-		}
-
-		// Check if anonymous actors can execute queries when auth is enabled
-		if let Err(e) = self.check_anon(sess) {
-			return Err(TypesError::not_allowed(
-				format!("Anonymous access not allowed: {e}"),
-				AuthError::NotAllowed {
-					actor: "anonymous".to_owned(),
-					action: "process".to_owned(),
-					resource: "query".to_owned(),
-				},
-			));
-		}
-
-		// Create a new query options
-		let opt = self.setup_options(sess);
-
-		// Create a default context
-		let mut ctx = self.setup_ctx().map_err(|e| {
-			// `anyhow_to_types_error`, not a downcast to `err::Error`: that
-			// enum now holds a handful of residual variants, so a bare layer
-			// error (`ExecError::DbEmpty` from `Options::ns_db()`, say) misses
-			// and reaches the client as `internal` where it used to be a
-			// validation failure. The helper walks the whole registry.
-			crate::err::anyhow_to_types_error(e)
-		})?;
-
-		// Install the external cancellation handle if one was supplied.
-		// The executor checks `Context::done` between statements and in
-		// iterator hot loops, so flipping the flag mid-query causes the
-		// next yield to return `EngineError::QueryCancelled` and the executor's
-		// error path finalises the transaction cleanly. Bare-await sites
-		// (`SLEEP`) `select!` against the handle's awaitable view.
-		if let Some(cancel) = cancel {
-			ctx.set_cancellation(&cancel);
-		}
-
-		// Start an execution context
-		ctx.attach_session(sess).map_err(crate::err::into_types_error)?;
-
-		// Store the query variables
-		if let Some(vars) = vars {
-			ctx.attach_variables(vars.into()).map_err(crate::err::into_types_error)?;
-		}
-
-		// Propagate the resolved tenant identity onto the externally-supplied
-		// transaction so the emitted [`crate::observe::TransactionEvent`]
-		// carries the active session's namespace, database, user, etc.
-		if let Some(identity) = ctx.tenant_identity() {
-			tx.set_tenant_identity(Arc::clone(identity));
-		}
-
-		// Arm the write-cardinality guard: statements executing on an
-		// explicit client-owned transaction (RPC `begin`, SDK-managed
-		// transactions) are subject to the same configured limit as
-		// executor-created statement transactions, so the guard cannot be
-		// bypassed by wrapping a statement in an explicit transaction.
-		tx.arm_write_keys_limit(self.transaction_max_write_keys());
-
-		// Set the transaction in the context
-		ctx.set_transaction(tx);
-
-		// Process all statements with the transaction
-		Executor::execute_plan_with_transaction(self, ctx.freeze(), opt, plan).await.map_err(|e| {
-			// `anyhow_to_types_error`, not a downcast to `err::Error`: that
-			// enum now holds a handful of residual variants, so a bare layer
-			// error (`ExecError::DbEmpty` from `Options::ns_db()`, say) misses
-			// and reaches the client as `internal` where it used to be a
-			// validation failure. The helper walks the whole registry.
-			crate::err::anyhow_to_types_error(e)
-		})
+		self.run(QueryRequest::new(ast, sess).with_variables(vars)).await
 	}
 
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
@@ -5104,247 +5085,6 @@ impl Datastore {
 		});
 
 		Executor::execute_stream(self, Arc::new(ctx), opt, true, stream).await
-	}
-
-	/// Execute a pre-parsed SQL query
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn process(
-		&self,
-		ast: Ast,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		//TODO: Insert planner here.
-		self.process_plan_inner(ast.into(), sess, vars, None).await
-	}
-
-	/// Execute a pre-parsed SQL query with an externally-owned cancellation
-	/// handle. See [`Self::process_with_transaction_and_cancel`] for the
-	/// cancellation semantics.
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn process_with_cancel(
-		&self,
-		ast: Ast,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-		cancel: CancelHandle,
-	) -> std::result::Result<Vec<QueryResult>, TypesError> {
-		self.process_plan_inner(ast.into(), sess, vars, Some(cancel)).await
-	}
-
-	pub(crate) async fn process_plan(
-		&self,
-		plan: LogicalPlan,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-	) -> Result<Vec<QueryResult>, TypesError> {
-		self.process_plan_inner(plan, sess, vars, None).await
-	}
-
-	async fn process_plan_inner(
-		&self,
-		plan: LogicalPlan,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-		cancel: Option<CancelHandle>,
-	) -> Result<Vec<QueryResult>, TypesError> {
-		// Check if the session has expired
-		if sess.expired() {
-			return Err(TypesError::not_allowed(
-				"The session has expired".to_string(),
-				AuthError::SessionExpired,
-			));
-		}
-
-		// Check if anonymous actors can execute queries when auth is enabled
-		// TODO(sgirones): Check this as part of the authorisation layer
-		if let Err(e) = self.check_anon(sess) {
-			return Err(TypesError::not_allowed(
-				format!("Anonymous access not allowed: {e}"),
-				AuthError::NotAllowed {
-					actor: "anonymous".to_owned(),
-					action: "process".to_owned(),
-					resource: "query".to_owned(),
-				},
-			));
-		}
-
-		// Create a new query options
-		let opt = self.setup_options(sess);
-
-		// Create a default context
-		let mut ctx = self.setup_ctx().map_err(|e| {
-			// `anyhow_to_types_error`, not a downcast to `err::Error`: that
-			// enum now holds a handful of residual variants, so a bare layer
-			// error (`ExecError::DbEmpty` from `Options::ns_db()`, say) misses
-			// and reaches the client as `internal` where it used to be a
-			// validation failure. The helper walks the whole registry.
-			crate::err::anyhow_to_types_error(e)
-		})?;
-
-		// Install the external cancellation flag if one was supplied. See
-		// [`Self::process_with_transaction_and_cancel`].
-		if let Some(cancel) = cancel {
-			ctx.set_cancellation(&cancel);
-		}
-
-		// Start an execution context
-		ctx.attach_session(sess).map_err(crate::err::into_types_error)?;
-
-		// Store the query variables
-		if let Some(vars) = vars {
-			ctx.attach_variables(vars.into()).map_err(crate::err::into_types_error)?;
-		}
-
-		// Process all statements
-		Executor::execute_plan(self, ctx.freeze(), opt, plan).await.map_err(|e| {
-			// `anyhow_to_types_error`, not a downcast to `err::Error`: that
-			// enum now holds a handful of residual variants, so a bare layer
-			// error (`ExecError::DbEmpty` from `Options::ns_db()`, say) misses
-			// and reaches the client as `internal` where it used to be a
-			// validation failure. The helper walks the whole registry.
-			crate::err::anyhow_to_types_error(e)
-		})
-	}
-
-	/// Parse SurrealQL and prepare it to stream its results.
-	///
-	/// Where [`Self::execute`] answers with every statement's result at once,
-	/// this sends [`QueryStreamItem`]s into `items` as the executor produces
-	/// them, so a caller can forward rows before the query finishes. See the
-	/// [`stream`](crate::dbs::QueryStreamItem) module for what a consumer may
-	/// assume about them — chiefly that rows are provisional until their
-	/// statement's terminal item arrives.
-	///
-	/// Parsing and the session checks happen here, so their failures are
-	/// reported instead of a job. Everything after that is reported by driving
-	/// [`QueryStreamJob::run`].
-	/// `cancel` stops the execution at its next yield point. A streaming caller
-	/// wants one: a consumer that stops reading is only noticed at the next
-	/// send otherwise, so a query in a phase that emits nothing for a while — a
-	/// sort, an aggregate — would run to completion after the client had gone.
-	pub fn execute_stream(
-		self: &Arc<Self>,
-		txt: &str,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-		cancel: Option<CancelHandle>,
-		items: Sender<QueryStreamItem>,
-	) -> Result<QueryStreamJob, TypesError> {
-		// Parse the SQL query text
-		let ast = syn::parse_with_capabilities(txt, &self.capabilities.load(), &self.parser_config)
-			.map_err(|e| TypesError::validation(e.to_string(), None))?;
-		self.process_plan_streaming(ast.into(), sess, vars, None, cancel, items)
-	}
-
-	/// Parse SurrealQL and prepare it to stream its results, running inside an
-	/// existing transaction. See [`Self::execute_stream`].
-	pub fn execute_stream_with_transaction(
-		self: &Arc<Self>,
-		txt: &str,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-		tx: Arc<Transaction>,
-		cancel: Option<CancelHandle>,
-		items: Sender<QueryStreamItem>,
-	) -> Result<QueryStreamJob, TypesError> {
-		// Parse the SQL query text
-		let ast = syn::parse_with_capabilities(txt, &self.capabilities.load(), &self.parser_config)
-			.map_err(|e| TypesError::validation(e.to_string(), None))?;
-		self.process_plan_streaming(ast.into(), sess, vars, Some(tx), cancel, items)
-	}
-
-	/// Prepare an already-parsed plan to stream its results.
-	///
-	/// Shares [`Self::process_plan_inner`]'s preflight — an expired session,
-	/// anonymous access, a context that cannot be built — because a caller that
-	/// fails those has no query to stream and should learn so from the call
-	/// rather than from an empty stream.
-	pub(crate) fn process_plan_streaming(
-		self: &Arc<Self>,
-		plan: LogicalPlan,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-		tx: Option<Arc<Transaction>>,
-		cancel: Option<CancelHandle>,
-		items: Sender<QueryStreamItem>,
-	) -> Result<QueryStreamJob, TypesError> {
-		// Check if the session has expired
-		if sess.expired() {
-			return Err(TypesError::not_allowed(
-				"The session has expired".to_string(),
-				AuthError::SessionExpired,
-			));
-		}
-
-		// Check if anonymous actors can execute queries when auth is enabled
-		if let Err(e) = self.check_anon(sess) {
-			return Err(TypesError::not_allowed(
-				format!("Anonymous access not allowed: {e}"),
-				AuthError::NotAllowed {
-					actor: "anonymous".to_owned(),
-					action: "process".to_owned(),
-					resource: "query".to_owned(),
-				},
-			));
-		}
-
-		// Create a new query options
-		let opt = self.setup_options(sess);
-
-		// Create a default context
-		let mut ctx = self.setup_ctx().map_err(crate::err::anyhow_to_types_error)?;
-
-		// Install the external cancellation flag if one was supplied. The
-		// executor short-circuits at its next yield with `Reason::Canceled` and
-		// finalises the transaction on its normal error path -- which is why
-		// this is a flag rather than the caller dropping the execution future,
-		// since dropping it would drop the open transaction with it.
-		if let Some(cancel) = cancel {
-			ctx.set_cancellation(&cancel);
-		}
-
-		// Start an execution context
-		ctx.attach_session(sess).map_err(crate::err::into_types_error)?;
-
-		// Store the query variables
-		if let Some(vars) = vars {
-			ctx.attach_variables(vars.into()).map_err(crate::err::into_types_error)?;
-		}
-
-		// An externally-supplied transaction is prepared exactly as on the
-		// buffered path: it carries the session's tenant identity into the
-		// transaction events, and the write-cardinality guard applies to
-		// statements running inside a client-owned transaction too, so wrapping
-		// a statement in one cannot bypass it.
-		if let Some(tx) = &tx {
-			if let Some(identity) = ctx.tenant_identity() {
-				tx.set_tenant_identity(Arc::clone(identity));
-			}
-			tx.arm_write_keys_limit(self.transaction_max_write_keys());
-			ctx.set_transaction(Arc::clone(tx));
-		}
-
-		// The count is known now because parsing is done, which is what lets a
-		// transport announce it before the first result exists.
-		let statement_count = plan.expressions.len();
-		let kvs = Arc::clone(self);
-		let ctx = ctx.freeze();
-		Ok(QueryStreamJob {
-			statement_count,
-			run: Box::pin(async move {
-				let executed = match tx {
-					Some(_) => {
-						Executor::execute_plan_streaming_with_transaction(
-							&kvs, ctx, opt, plan, items,
-						)
-						.await
-					}
-					None => Executor::execute_plan_streaming(&kvs, ctx, opt, plan, items).await,
-				};
-				executed.map_err(crate::err::anyhow_to_types_error)
-			}),
-		})
 	}
 
 	/// Evaluates a SQL [`Value`] without checking authenticating config
@@ -5946,7 +5686,7 @@ impl Datastore {
 			))))],
 		};
 
-		self.process_plan(q, session, None).await.map_err(|e| anyhow::anyhow!(e))?;
+		self.run(QueryRequest::new(q, session)).await.map_err(|e| anyhow::anyhow!(e))?;
 
 		Ok(())
 	}
@@ -6191,12 +5931,14 @@ mod test {
 
 	#[cfg(feature = "gql")]
 	#[tokio::test]
-	async fn execute_gql_available_without_experimental_capability() -> Result<()> {
+	async fn gql_is_available_without_the_experimental_capability() -> Result<()> {
 		let ds = Datastore::new("memory").await?;
 		let ses = Session::owner().with_ns("test").with_db("test");
 		// GQL is on by default: it must not be refused as an experimental
 		// capability (any other error — e.g. missing namespace — is irrelevant).
-		if let Err(err) = ds.execute_gql("MATCH (n:person) RETURN n", &ses, None).await {
+		if let Err(err) =
+			ds.run(QueryRequest::new(QuerySource::gql("MATCH (n:person) RETURN n"), &ses)).await
+		{
 			assert!(
 				!err.to_string().contains("Experimental capability `gql` is not enabled"),
 				"GQL was still gated: {err}"
@@ -6207,7 +5949,7 @@ mod test {
 
 	#[cfg(feature = "gql")]
 	#[tokio::test]
-	async fn execute_gql_parses_lowers_and_executes() -> Result<()> {
+	async fn gql_text_parses_lowers_and_executes() -> Result<()> {
 		use crate::dbs::capabilities::Targets;
 		let ds = Datastore::builder()
 			.with_capabilities(Capabilities::all().with_experimental(Targets::All))
@@ -6220,13 +5962,19 @@ mod test {
 		execute_all(&ds, &ses, "CREATE person:tobie SET name = 'Tobie';").await?;
 		// A valid GQL query parses, lowers, and executes through the
 		// SurrealQL pipeline
-		let mut res = ds.execute_gql("MATCH (n:person) RETURN n.name AS name", &ses, None).await?;
+		let mut res = ds
+			.run(QueryRequest::new(
+				QuerySource::gql("MATCH (n:person) RETURN n.name AS name"),
+				&ses,
+			))
+			.await?;
 		assert_eq!(res.len(), 1);
 		let val = res.remove(0).result?;
 		assert_eq!(val, PublicValue::Array(surrealdb_types::array![object! { name: "Tobie" }]));
 		// An invalid GQL query reports a parse error rather than a
 		// capability error
-		let err = ds.execute_gql("MATCH RETURN", &ses, None).await.unwrap_err();
+		let err =
+			ds.run(QueryRequest::new(QuerySource::gql("MATCH RETURN"), &ses)).await.unwrap_err();
 		assert!(!err.to_string().contains("experimental"), "unexpected error: {err}");
 		Ok(())
 	}
@@ -6283,7 +6031,7 @@ mod test {
 	/// Run one GQL query, asserting a single statement result, and return it.
 	#[cfg(feature = "gql")]
 	async fn run_gql(ds: &Datastore, ses: &Session, query: &str) -> Result<PublicValue> {
-		let mut res = ds.execute_gql(query, ses, None).await?;
+		let mut res = ds.run(QueryRequest::new(QuerySource::gql(query), ses)).await?;
 		assert_eq!(res.len(), 1, "expected one result for {query:?}");
 		Ok(res.remove(0).result?)
 	}
@@ -6292,7 +6040,7 @@ mod test {
 	/// per-statement execution error), returning the rendered error.
 	#[cfg(feature = "gql")]
 	async fn run_gql_err(ds: &Datastore, ses: &Session, query: &str) -> String {
-		match ds.execute_gql(query, ses, None).await {
+		match ds.run(QueryRequest::new(QuerySource::gql(query), ses)).await {
 			Ok(mut res) => match res.remove(0).result {
 				Ok(value) => panic!("expected {query:?} to fail, got {value:?}"),
 				Err(e) => e.to_string(),
@@ -6666,9 +6414,15 @@ mod test {
 		);
 		// Each write goes through the native document pipeline, so each is denied:
 		// INSERT (create), SET (update), DELETE (delete) all leave the row intact.
-		let _ = ds.execute_gql("INSERT (p:person {name: 'B'})", &rec, None).await;
-		let _ = ds.execute_gql("MATCH (n:person) SET n.age = 99", &rec, None).await;
-		let _ = ds.execute_gql("MATCH (n:person) DETACH DELETE n", &rec, None).await;
+		let _ = ds
+			.run(QueryRequest::new(QuerySource::gql("INSERT (p:person {name: 'B'})"), &rec))
+			.await;
+		let _ = ds
+			.run(QueryRequest::new(QuerySource::gql("MATCH (n:person) SET n.age = 99"), &rec))
+			.await;
+		let _ = ds
+			.run(QueryRequest::new(QuerySource::gql("MATCH (n:person) DETACH DELETE n"), &rec))
+			.await;
 		// As owner: exactly the original row remains, unchanged.
 		let val =
 			run_gql(&ds, &ses, "MATCH (n:person) RETURN n.name AS name, n.age AS age").await?;

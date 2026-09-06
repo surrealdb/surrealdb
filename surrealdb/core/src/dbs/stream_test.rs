@@ -11,7 +11,7 @@ use surrealdb_types::Value as PublicValue;
 
 use crate::catalog::providers::CatalogProvider;
 use crate::dbs::{QueryStreamItem, Session};
-use crate::kvs::{Datastore, TransactionType};
+use crate::kvs::{Datastore, QueryRequest, TransactionType};
 
 /// What a consumer reassembles from one statement's items.
 #[derive(Default)]
@@ -63,7 +63,8 @@ fn session() -> Session {
 /// see, the way a client demultiplexing by statement index does.
 async fn streamed(ds: &Arc<Datastore>, sql: &str) -> Result<Vec<QueryResult>, String> {
 	let (tx, rx) = async_channel::bounded(QUERY_STREAM_BUFFER);
-	let job = ds.execute_stream(sql, &session(), None, None, tx).map_err(|e| e.to_string())?;
+	let job =
+		ds.run_streaming(QueryRequest::new(sql, &session()), tx).map_err(|e| e.to_string())?;
 
 	// The execution and the drain have to run together: the channel is bounded,
 	// so an execution left to run alone would block forever on a full channel.
@@ -188,11 +189,8 @@ async fn a_rolled_back_block_retracts_its_rows() {
 
 	let (tx, rx) = async_channel::bounded(QUERY_STREAM_BUFFER);
 	let job = ds
-		.execute_stream(
-			"BEGIN; SELECT * FROM thing; THROW 'nope'; COMMIT;",
-			&session(),
-			None,
-			None,
+		.run_streaming(
+			QueryRequest::new("BEGIN; SELECT * FROM thing; THROW 'nope'; COMMIT;", &session()),
 			tx,
 		)
 		.expect("the query parses");
@@ -256,11 +254,8 @@ async fn each_statement_is_terminated_exactly_once() {
 
 	let (tx, rx) = async_channel::bounded(QUERY_STREAM_BUFFER);
 	let job = ds
-		.execute_stream(
-			"SELECT * FROM thing; RETURN 1; SELECT * FROM thing",
-			&session(),
-			None,
-			None,
+		.run_streaming(
+			QueryRequest::new("SELECT * FROM thing; RETURN 1; SELECT * FROM thing", &session()),
 			tx,
 		)
 		.expect("the query parses");
@@ -319,7 +314,8 @@ async fn dropping_the_consumer_stops_the_execution() {
 	let ds = datastore().await;
 
 	let (tx, rx) = async_channel::bounded(QUERY_STREAM_BUFFER);
-	let job = ds.execute_stream("SELECT * FROM thing", &session(), None, None, tx).expect("parses");
+	let job =
+		ds.run_streaming(QueryRequest::new("SELECT * FROM thing", &session()), tx).expect("parses");
 	drop(rx);
 
 	// With nothing draining, a send-blocking execution would hang here.
@@ -357,7 +353,7 @@ async fn a_dropped_consumer_stops_later_statements() {
 
 	let (tx, rx) = async_channel::bounded(QUERY_STREAM_BUFFER);
 	let job = ds
-		.execute_stream("SELECT * FROM big; CREATE marker:1", &session(), None, None, tx)
+		.run_streaming(QueryRequest::new("SELECT * FROM big; CREATE marker:1", &session()), tx)
 		.expect("the query parses");
 	// The execution has to be driven for anything to arrive, and the point of
 	// the test is to stop reading while it is still going.

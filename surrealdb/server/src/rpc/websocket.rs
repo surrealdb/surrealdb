@@ -1232,8 +1232,8 @@ impl Websocket {
 	/// while still honouring the connection-level cancel handle.
 	///
 	/// `begin` and any other RPC method that needs a fresh transaction
-	/// without going through `process_with_transaction_and_cancel` MUST
-	/// route through here. The executor's `Context::done` short-circuit
+	/// without going through a cancellable `Datastore::run` MUST route
+	/// through here. The executor's `Context::done` short-circuit
 	/// does not cover `kvs().transaction(...)` directly, so the cancel
 	/// has to be observed manually at two points:
 	///

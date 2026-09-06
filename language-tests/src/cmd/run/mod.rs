@@ -12,7 +12,7 @@ use provisioner::Provisioner;
 use semver::Version;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::env::VERSION;
-use surrealdb_core::kvs::Datastore;
+use surrealdb_core::kvs::{Datastore, QueryRequest, QuerySource};
 use surrealdb_gql as gql;
 use surrealdb_rpc::capabilities::ExperimentalTarget;
 use surrealdb_syn::parser;
@@ -507,10 +507,11 @@ async fn run_test_body(
 			// GQL has no capability-gated syntax; the default recursion
 			// limit matches `parser::ParserSettings::default()` above.
 			// Lowering produces a `PreparedGqlQuery` (a `MatchPlan` embedded
-			// in a logical plan); it executes through the streaming engine via
-			// `process_gql`, so `.gql` cases default away from the
-			// compute-only strategy (see `Dialect::Gql` default in the
-			// schema's planner-strategy seam).
+			// in a logical plan), which is submitted as an already-lowered
+			// `QuerySource::Plan`. It executes through the streaming engine,
+			// so `.gql` cases default away from the compute-only strategy
+			// (see `Dialect::Gql` default in the schema's planner-strategy
+			// seam).
 			let settings = gql::GqlParserSettings::default();
 			let source = &run.case.test.source.as_bytes();
 			let query = match gql::parse_to_plan_with_settings(&run.case.test.source, settings) {
@@ -523,7 +524,7 @@ async fn run_test_body(
 			};
 
 			let start = Instant::now();
-			let result = dbs.process_gql(query, &*session, None).await;
+			let result = dbs.run(QueryRequest::new(QuerySource::Plan(query.0), &*session)).await;
 			let did_timeout = start.elapsed() > timeout_duration;
 			let result = result
 				.map(|x| x.into_iter().map(|x| x.result.map_err(|e| e.to_string())).collect())
@@ -656,8 +657,7 @@ mod tests {
 	use std::time::SystemTime;
 
 	use surrealdb_core::kvs::Datastore;
-	use surrealdb_rpc::capabilities::Capabilities;
-	use surrealdb_rpc::capabilities::Targets;
+	use surrealdb_rpc::capabilities::{Capabilities, Targets};
 
 	use super::*;
 	use crate::tests::case::{CaseId, Dialect, Origin, TestCase};

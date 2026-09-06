@@ -20,7 +20,7 @@ use crate::dbs::{
 	AuthPrincipalSnapshot, QueryResult, QueryStreamItem, QueryStreamJob, QueryType, Session,
 };
 use crate::exec::Error as ExecError;
-use crate::kvs::{Datastore, TransactionType};
+use crate::kvs::{Datastore, Dialect, QueryRequest, QuerySource, TransactionType};
 use crate::observe::{
 	AuthAction, AuthEvent, AuthEventSafe, AuthScope, Outcome, RpcEvent, RpcEventSafe,
 	TenantIdentity,
@@ -1937,9 +1937,16 @@ pub trait RpcProtocol {
 		let (query, vars) = extract_query_params(params, &session)?;
 
 		Ok(DbResult::Query(
-			run_query(self, txn, session_id, &session, QueryForm::Text(&query), vars)
-				.await
-				.map_err(types_error_from_anyhow)?,
+			run_query(
+				self,
+				txn,
+				session_id,
+				&session,
+				QueryForm::Text(&query, Dialect::SurrealQl),
+				vars,
+			)
+			.await
+			.map_err(types_error_from_anyhow)?,
 		))
 	}
 
@@ -2021,13 +2028,17 @@ pub trait RpcProtocol {
 		let guard_cancel = cancel.clone();
 		let cancel = cancel.or_else(|| self.cancel_handle());
 		let kvs = self.kvs_arc();
-		let job = match txn {
-			Some(txn_id) => {
-				let tx = self.get_tx(txn_id).await?;
-				kvs.execute_stream_with_transaction(&query, &session, vars, tx, cancel, items)?
-			}
-			None => kvs.execute_stream(&query, &session, vars, cancel, items)?,
+		let transaction = match txn {
+			Some(txn_id) => Some(self.get_tx(txn_id).await?),
+			None => None,
 		};
+		let job = kvs.run_streaming(
+			QueryRequest::new(query.as_str(), &session)
+				.with_variables(vars)
+				.with_optional_transaction(transaction)
+				.with_optional_cancel(cancel),
+			items,
+		)?;
 
 		// Bound the execution the way `execute` bounds a buffered one. The
 		// guard wraps the run future, so it covers producing every row rather
@@ -2233,13 +2244,17 @@ pub trait RpcProtocol {
 				}
 			};
 
-			// Parse and lower the GQL query into a prepared plan
-			let plan = self.kvs().parse_gql(&query)?;
-
 			Ok(DbResult::Query(
-				run_query(self, txn, session_id, &session, QueryForm::Plan(plan), vars)
-					.await
-					.map_err(types_error_from_anyhow)?,
+				run_query(
+					self,
+					txn,
+					session_id,
+					&session,
+					QueryForm::Text(&query, Dialect::Gql),
+					vars,
+				)
+				.await
+				.map_err(types_error_from_anyhow)?,
 			))
 		}
 	}
@@ -2521,12 +2536,10 @@ pub trait RpcProtocol {
 }
 
 enum QueryForm<'a> {
-	Text(&'a str),
+	/// Query text in the given dialect. The `gql` handler is the only caller
+	/// that names a dialect; every other one submits SurrealQL.
+	Text(&'a str, Dialect),
 	Parsed(Ast),
-	/// A pre-lowered GQL query. Only constructed by the `gql` handler, which
-	/// is itself gated behind the `gql` feature.
-	#[cfg(feature = "gql")]
-	Plan(crate::gql::PreparedGqlQuery),
 }
 
 /// Read a `query` call's arguments: the SurrealQL text, and the variables to
@@ -2587,59 +2600,27 @@ where
 		return Err(bad_lq_config().into());
 	}
 
-	// If a transaction UUID is provided, retrieve it and execute with it
 	let cancel = this.cancel_handle();
-	let res = if let Some(txn_id) = txn {
-		// Retrieve the transaction - fail if not found
-		let tx = this.get_tx(txn_id).await.map_err(anyhow::Error::from)?;
-		// Execute with the existing transaction by passing it through context
-		match (query, cancel) {
-			(QueryForm::Text(query), Some(cancel)) => {
-				this.kvs()
-					.execute_with_transaction_and_cancel(query, session, vars, tx, cancel)
-					.await?
-			}
-			(QueryForm::Text(query), None) => {
-				this.kvs().execute_with_transaction(query, session, vars, tx).await?
-			}
-			(QueryForm::Parsed(ast), Some(cancel)) => {
-				this.kvs()
-					.process_with_transaction_and_cancel(ast, session, vars, tx, cancel)
-					.await?
-			}
-			(QueryForm::Parsed(ast), None) => {
-				this.kvs().process_with_transaction(ast, session, vars, tx).await?
-			}
-			#[cfg(feature = "gql")]
-			(QueryForm::Plan(plan), Some(cancel)) => {
-				this.kvs()
-					.process_gql_with_transaction_and_cancel(plan, session, vars, tx, cancel)
-					.await?
-			}
-			#[cfg(feature = "gql")]
-			(QueryForm::Plan(plan), None) => {
-				this.kvs().process_gql_with_transaction(plan, session, vars, tx).await?
-			}
-		}
-	} else {
-		// No transaction - execute normally
-		match (query, cancel) {
-			(QueryForm::Text(query), Some(cancel)) => {
-				this.kvs().execute_with_cancel(query, session, vars, cancel).await?
-			}
-			(QueryForm::Text(query), None) => this.kvs().execute(query, session, vars).await?,
-			(QueryForm::Parsed(ast), Some(cancel)) => {
-				this.kvs().process_with_cancel(ast, session, vars, cancel).await?
-			}
-			(QueryForm::Parsed(ast), None) => this.kvs().process(ast, session, vars).await?,
-			#[cfg(feature = "gql")]
-			(QueryForm::Plan(plan), Some(cancel)) => {
-				this.kvs().process_gql_with_cancel(plan, session, vars, cancel).await?
-			}
-			#[cfg(feature = "gql")]
-			(QueryForm::Plan(plan), None) => this.kvs().process_gql(plan, session, vars).await?,
-		}
+	let source = match query {
+		QueryForm::Text(text, dialect) => QuerySource::in_dialect(text, dialect),
+		QueryForm::Parsed(ast) => QuerySource::Ast(ast),
 	};
+	// A transaction UUID names a client-owned transaction to run inside — fail
+	// if it is not one this connection holds. Without one the executor creates
+	// and finalises a transaction per statement.
+	let transaction = match txn {
+		Some(txn_id) => Some(this.get_tx(txn_id).await.map_err(anyhow::Error::from)?),
+		None => None,
+	};
+	let res = this
+		.kvs()
+		.run(
+			QueryRequest::new(source, session)
+				.with_variables(vars)
+				.with_optional_transaction(transaction)
+				.with_optional_cancel(cancel),
+		)
+		.await?;
 
 	// Post-process hooks for web layer.
 	//

@@ -113,8 +113,8 @@ pub struct Transaction {
 	/// surfaced as the `*Ctx` half of the emitted [`TransactionEvent`].
 	///
 	/// `OnceLock` so callers that wrap the [`Transaction`] in an `Arc` before
-	/// the session is known (e.g. [`crate::Datastore::execute_with_transaction`])
-	/// can still attach identity after the fact via
+	/// the session is known (a client-owned transaction handed to
+	/// `Datastore::run`) can still attach identity after the fact via
 	/// [`Self::set_tenant_identity`].
 	tenant_identity: OnceLock<Arc<TenantIdentity>>,
 	/// The underlying transactor.
@@ -867,8 +867,8 @@ impl Transaction {
 
 	/// Arms the write-cardinality guard on a transaction that is already
 	/// wrapped in an `Arc` — the externally-supplied (client-owned)
-	/// transactions that statements execute on via
-	/// [`crate::Datastore::process_with_transaction`] and its variants.
+	/// transactions that statements execute on when one is set on a
+	/// `Datastore::run` request.
 	/// Same contract as [`Self::with_write_keys_limit`]. Idempotent: the
 	/// first arming wins and later calls are silently ignored, so repeated
 	/// statement executions on one transaction keep a single limit.

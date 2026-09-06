@@ -6,14 +6,10 @@ use std::time::Duration;
 use semver::VersionReq;
 use serde::{Deserialize, Serialize, de};
 use surrealdb_core::syn::{self};
-use surrealdb_rpc::capabilities::ArbitraryQueryTarget;
-use surrealdb_rpc::capabilities::EvalQueryTarget;
-use surrealdb_rpc::capabilities::ExperimentalTarget;
-use surrealdb_rpc::capabilities::FuncTarget;
-use surrealdb_rpc::capabilities::MethodTarget;
-use surrealdb_rpc::capabilities::NetTarget;
-use surrealdb_rpc::capabilities::NewPlannerStrategy;
-use surrealdb_rpc::capabilities::RouteTarget;
+use surrealdb_rpc::capabilities::{
+	ArbitraryQueryTarget, EvalQueryTarget, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
+	NewPlannerStrategy, RouteTarget,
+};
 use surrealdb_syn::parser::ParserSettings;
 use surrealdb_types::{Object, RecordId, ToSql, Value};
 

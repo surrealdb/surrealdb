@@ -7,8 +7,7 @@ use anyhow::Result;
 use surrealdb_cnf::ConfigMap;
 use surrealdb_core::channel;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_rpc::capabilities::Capabilities;
-use surrealdb_rpc::capabilities::Targets;
+use surrealdb_rpc::capabilities::{Capabilities, Targets};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
 use crate::cli::Backend;

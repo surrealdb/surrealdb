@@ -31,7 +31,8 @@ use crate::exec::physical_expr::EvalContext;
 use crate::exec::plan_or_compute::evaluate_expr_at_depth;
 use crate::expr::Kind;
 use crate::fnc::args::{FromArgs, Optional};
-use crate::fnc::eval::{Dialect, prepare};
+use crate::fnc::eval::prepare;
+use crate::kvs::Dialect;
 use crate::val::{Object, Value};
 
 /// Evaluate a prepared eval query on the streaming engine, isolated from the
@@ -143,7 +144,7 @@ impl ScalarFunction for EvalSurql {
 	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
 			let (query, Optional(bindings)) = FromArgs::from_args("eval::surql", args)?;
-			evaluate_streaming(ctx, Dialect::Surql, query, bindings).await
+			evaluate_streaming(ctx, Dialect::SurrealQl, query, bindings).await
 		})
 	}
 }

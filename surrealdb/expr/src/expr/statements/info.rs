@@ -18,6 +18,26 @@ pub enum InfoStatement {
 	/// Index information
 	Index(Expr, Expr, bool),
 }
+impl InfoStatement {
+	/// Whether evaluating this statement does only reads.
+	///
+	/// `INFO` reads catalog metadata, but its subject and `VERSION` clause are
+	/// expressions the statement evaluates first, so a write reaches the
+	/// transaction through them.
+	pub fn read_only(&self) -> bool {
+		match self {
+			InfoStatement::Root(_, version)
+			| InfoStatement::Ns(_, version)
+			| InfoStatement::Db(_, version) => version.as_ref().is_none_or(|version| version.read_only()),
+			InfoStatement::Tb(table, _, version) => {
+				table.read_only() && version.as_ref().is_none_or(|version| version.read_only())
+			}
+			InfoStatement::User(user, _, _) => user.read_only(),
+			InfoStatement::Index(index, table, _) => index.read_only() && table.read_only(),
+		}
+	}
+}
+
 pub trait InfoStructure {
 	fn structure(self) -> Value;
 }

@@ -73,21 +73,15 @@ use crate::exec::Error as ExecError;
 use crate::expr::{Block, LogicalPlan, TopLevelExpr};
 use crate::fnc::args::Optional;
 use crate::iam::Auth;
+use crate::kvs::Dialect;
 use crate::val::{Object, Value};
 
-/// Which query language the supplied string is written in.
-#[derive(Clone, Copy)]
-pub(crate) enum Dialect {
-	Surql,
-	Gql,
-}
-
-impl Dialect {
-	pub(crate) fn func_name(self) -> &'static str {
-		match self {
-			Dialect::Surql => "eval::surql",
-			Dialect::Gql => "eval::gql",
-		}
+/// The `eval::*` builtin that evaluates a string in `dialect`, for the
+/// capability gate and the error messages.
+fn func_name(dialect: Dialect) -> &'static str {
+	match dialect {
+		Dialect::SurrealQl => "eval::surql",
+		Dialect::Gql => "eval::gql",
 	}
 }
 
@@ -104,7 +98,7 @@ pub(crate) fn prepare(
 	dialect: Dialect,
 	query: &str,
 ) -> Result<Block> {
-	let name = dialect.func_name();
+	let name = func_name(dialect);
 
 	// --- Gates #2 and #3: subject checks against the current execution auth.
 	// Both must pass, so `eval` can never grant more query power than the
@@ -123,7 +117,7 @@ pub(crate) fn prepare(
 	// wrapping a `LogicalPlan`.
 	let config = crate::syn::ParserConfig::default();
 	let plan: LogicalPlan = match dialect {
-		Dialect::Surql => crate::syn::parse_with_capabilities(query, caps, &config)
+		Dialect::SurrealQl => crate::syn::parse_with_capabilities(query, caps, &config)
 			.map_err(|e| ExecError::InvalidFunction {
 				name: name.to_string(),
 				message: e.to_string(),
@@ -139,10 +133,10 @@ pub(crate) fn prepare(
 				.0
 		}
 		#[cfg(not(feature = "gql"))]
-		Dialect::Gql => bail!(ExecError::InvalidFunction {
-			name: name.to_string(),
-			message: "GQL support was not enabled at compile time".to_string(),
-		}),
+		Dialect::Gql => bail!(surrealdb_types::Error::configuration(
+			"This build does not support GQL queries".to_string(),
+			surrealdb_types::ConfigurationError::DialectNotSupported,
+		)),
 	};
 
 	// --- Collect the expression statements, rejecting top-level-only forms that
@@ -166,7 +160,7 @@ pub(crate) fn prepare(
 	// wrapped in an explicit block `{ ... }`, which has well-defined last-value
 	// semantics. `eval::gql` is exempt: one GQL query lowers to several SurrealQL
 	// statements internally.
-	if matches!(dialect, Dialect::Surql) && statements.len() > 1 {
+	if matches!(dialect, Dialect::SurrealQl) && statements.len() > 1 {
 		bail!(ExecError::InvalidFunction {
 			name: name.to_string(),
 			message: "eval::surql evaluates a single statement; wrap multiple statements in a \
@@ -181,7 +175,7 @@ pub async fn surql(
 	(stk, ctx, opt, doc): (&mut Stk, &FrozenContext, &Options, Option<&CursorDoc>),
 	(query, Optional(bindings)): (String, Optional<Object>),
 ) -> Result<Value> {
-	run_eval(stk, ctx, opt, doc, Dialect::Surql, query, bindings).await
+	run_eval(stk, ctx, opt, doc, Dialect::SurrealQl, query, bindings).await
 }
 
 pub async fn gql(

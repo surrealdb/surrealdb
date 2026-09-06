@@ -1058,9 +1058,11 @@ the binding-table operators — `exec/operators/graph/` (`expand.rs`, `endpoint.
 `path_expand.rs`, `distinct_edges.rs`), `exec/operators/join/hash_join.rs`,
 `exec/operators/{bind.rs, distinct.rs}`, and the FieldState-aware fetch helper
 `exec/operators/scan/fetch.rs` —
-`exec/planner/match_plan.rs`, `kvs/ds.rs` (`parse_gql` / `process_gql` /
-`execute_gql`), `rpc/protocol.rs` (`gql` method, `QueryForm::Plan`),
-`ntw/gql.rs` (`/gql` route)
+`exec/planner/match_plan.rs`, `kvs/ds.rs` (`parse_gql`, reached from
+`statements_for` when the request names `Dialect::Gql`), `rpc/protocol.rs`
+(`gql` method, `QueryForm::Text` carrying `Dialect::Gql`),
+`ntw/gql.rs` (`/gql` route), `pg/conn.rs` (`run_gql` and `execute_query`,
+reached by `options=-c dialect=gql` or `SET dialect = 'gql'`)
 
 GQL is a second query language lowered to a `MatchPlan` IR and executed by
 the streaming engine. The lowering constructs only a single top-level
@@ -1083,14 +1085,21 @@ invariants.
   cut). The bare `scan::common::resolve_record_batch` must **not** be substituted
   — it applies only the table-level permission and skips the field-level
   machinery, which would leak restricted fields into binding rows.
-- **Layered gate chain.** Reaching the GQL executor must require, in order: the
+- **Layered gate chain.** Reaching the GQL executor requires, in order: the
   `gql` cargo feature compiled in; for HTTP, the `RouteTarget::Gql` capability
-  on the `/gql` route; the `ExperimentalTarget::Gql` experimental capability
-  (checked in `Datastore::parse_gql` *and* `gql::parse_with_capabilities`
-  — the language gates itself, not relying on the caller); `allows_query_by_subject`
-  for the session's auth subject (the `gql` RPC method); and a valid, non-anonymous
-  session under the namespace/database authorization context. Removing or
-  reordering any layer is a regression.
+  on the `/gql` route; `allows_query_by_subject` for the session's auth
+  subject (the `gql` RPC method); and a valid, non-anonymous session under the
+  namespace/database authorization context. Removing or reordering any layer
+  is a regression.
+
+  Two gaps in that chain are known and unclosed. GQL is **not** gated on
+  `ExperimentalTarget::Gql` — neither `Datastore::parse_gql` nor
+  `gql::parse_with_capabilities` checks it, and a test pins that GQL stays
+  reachable without it. And the Postgres wire protocol reaches the same
+  executor while checking only `RouteTarget::Postgres`, so denying
+  `RouteTarget::Gql` stops `/gql` but not `options=-c dialect=gql` on the
+  Postgres port. An operator disabling GQL by capability must close the
+  Postgres port too.
 - **Resource bounds.** The path-expansion and join operators must enforce row-count
   ceilings: `SURREAL_GQL_MAX_PATH_ROWS` (default 1,000,000) bounds live+emitted
   rows in `PathExpand` **per source row** (the counter resets for each input row,

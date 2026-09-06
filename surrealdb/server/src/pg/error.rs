@@ -134,6 +134,10 @@ impl From<&TypesError> for PgError {
 			"NotAllowed" => "42501",
 			"Thrown" => "P0001",
 			"NotFound" => "42704",
+			// The deployment cannot do what was asked — a dialect this build
+			// was not compiled with, say. `0A000 feature_not_supported` is
+			// what a client can act on; `XX000` would read as a server fault.
+			"Configuration" => "0A000",
 			_ => "XX000",
 		};
 		Self::new(code, err.message())

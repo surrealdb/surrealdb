@@ -22,8 +22,8 @@ use crate::catalog::providers::{
 use crate::ctx::reason::Reason;
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{
-	Force, MessageBroker, Options, QueryResult, QueryStreamItem, QueryType, RoutedNotification,
-	StatementCounters, items_for_result,
+	Dispatch, Force, MessageBroker, Options, QueryResult, QueryStreamItem, QueryType,
+	RoutedNotification, StatementCounters, TopLevelStatement, items_for_result,
 };
 use crate::doc::DefaultBroker;
 use crate::err::{EngineError, Error};
@@ -31,7 +31,6 @@ use crate::exec::function::FunctionRegistry;
 use crate::exec::planner::try_plan_expr;
 use crate::exec::{Error as ExecError, OutputShape};
 use crate::expr::paths::{DB, NS};
-use crate::expr::plan::LogicalPlan;
 use crate::expr::statements::{OptionStatement, UseStatement};
 use crate::expr::{Base, ControlFlow, Expr, FlowResult, TopLevelExpr};
 use crate::iam::{Action, ResourceKind};
@@ -44,7 +43,7 @@ use crate::observe::{
 };
 use crate::rpc::types_error_from_anyhow;
 use crate::val::{Array, Value, convert_value_to_public_value};
-use crate::{err, expr, sql};
+use crate::{err, sql};
 
 const TARGET: &str = "surrealdb::core::dbs";
 
@@ -84,87 +83,6 @@ pub fn classify_anyhow_error(err: &anyhow::Error) -> &'static str {
 		return classify_types_error(types_err);
 	}
 	INTERNAL
-}
-
-/// Classify a [`TopLevelExpr`] into its bounded [`StatementType`] category.
-///
-/// Lives in `dbs` rather than the observe crate because it matches on
-/// [`crate::expr`] shapes, which the leaf observe crate cannot depend on.
-pub(crate) fn statement_type_from_top_level(expr: &TopLevelExpr) -> StatementType {
-	match expr {
-		TopLevelExpr::Begin => StatementType::Begin,
-		TopLevelExpr::Cancel => StatementType::Cancel,
-		TopLevelExpr::Commit => StatementType::Commit,
-		TopLevelExpr::Access(_) => StatementType::Access,
-		TopLevelExpr::Kill(_) => StatementType::Kill,
-		TopLevelExpr::Live(_) => StatementType::Live,
-		TopLevelExpr::Option(_) => StatementType::Option,
-		TopLevelExpr::Use(_) => StatementType::Use,
-		TopLevelExpr::Show(_) => StatementType::Show,
-		TopLevelExpr::Expr(expr) => statement_type_from_expr(expr),
-	}
-}
-
-/// Classify a bare [`Expr`] into its bounded [`StatementType`] category.
-fn statement_type_from_expr(expr: &Expr) -> StatementType {
-	match expr {
-		Expr::Select(_) => StatementType::Select,
-		Expr::Create(_) => StatementType::Create,
-		Expr::Update(_) => StatementType::Update,
-		Expr::Upsert(_) => StatementType::Upsert,
-		Expr::Delete(_) => StatementType::Delete,
-		Expr::Relate(_) => StatementType::Relate,
-		Expr::Insert(_) => StatementType::Insert,
-		Expr::Define(_) => StatementType::Define,
-		Expr::Remove(_) => StatementType::Remove,
-		Expr::Rebuild(_) => StatementType::Rebuild,
-		Expr::Alter(_) => StatementType::Alter,
-		Expr::Info(_) => StatementType::Info,
-		Expr::Foreach(_) => StatementType::Foreach,
-		Expr::IfElse(_) => StatementType::IfElse,
-		Expr::Sleep(_) => StatementType::Sleep,
-		Expr::Explain {
-			..
-		} => StatementType::Explain,
-		Expr::Let(_) => StatementType::Let,
-		Expr::Return(_) => StatementType::Return,
-		Expr::Break => StatementType::Break,
-		Expr::Continue => StatementType::Continue,
-		Expr::Throw(_) => StatementType::Throw,
-		Expr::Block(_) => StatementType::Block,
-		// Anything that isn't a recognised statement-shaped
-		// expression collapses to `Other`. Enumerated rather than
-		// using a wildcard so a new `Expr` variant forces a
-		// classification decision at compile time.
-		Expr::Literal(_)
-		| Expr::Param(_)
-		| Expr::Idiom(_)
-		| Expr::Table(_)
-		| Expr::Mock(_)
-		| Expr::Constant(_)
-		| Expr::Prefix {
-			..
-		}
-		| Expr::Postfix {
-			..
-		}
-		| Expr::Binary {
-			..
-		}
-		| Expr::FunctionCall(_)
-		| Expr::Closure(_) => StatementType::Other,
-		// GQL MATCH is not a SurrealQL statement-shaped expression.
-		Expr::Match(_) => StatementType::Other,
-	}
-}
-
-/// Returns the query type for the given toplevel expression.
-fn query_type_for_toplevel_expr(expr: &TopLevelExpr) -> QueryType {
-	match expr {
-		TopLevelExpr::Live(_) => QueryType::Live,
-		TopLevelExpr::Kill(_) => QueryType::Kill,
-		_ => QueryType::Other,
-	}
 }
 
 /// Turns the values a plan produced into the statement's result value.
@@ -1027,12 +945,25 @@ impl Executor {
 
 	/// Executes a statement which needs a transaction with the supplied
 	/// transaction.
+	///
+	/// This is where a statement is converted to the expression layer on its
+	/// way to an engine: a batch that ends before reaching a statement never
+	/// converts it. Rendering a statement as text converts one too, and
+	/// `dispatch` converts an `OPTION`'s payload, so this is the conversion
+	/// that runs, not the only one.
+	///
+	/// The transaction is already open by the time this runs, so the
+	/// conversion happens inside it and counts against the transaction
+	/// timeout. That is free for most statements and is not for
+	/// `DEFINE USER`/`ALTER USER ... PASSWORD`, whose conversion derives an
+	/// Argon2 hash and a SCRAM verifier — deliberately expensive, and with no
+	/// yield point. Work added to a `From` impl is added here.
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
 	async fn execute_plan_in_transaction(
 		&mut self,
 		txn: Arc<Transaction>,
 		start: &Instant,
-		plan: TopLevelExpr,
+		stmt: TopLevelStatement,
 	) -> FlowResult<Value> {
 		/// Helper method to get mutable access to the context
 		macro_rules! ctx_mut {
@@ -1046,7 +977,7 @@ impl Executor {
 					.map_err(anyhow::Error::new)?
 			};
 		}
-		let res = match plan {
+		let res = match stmt.into_expr() {
 			TopLevelExpr::Use(stmt) => {
 				// The namespace and database arguments are expressions, and an
 				// expression may read or write the datastore. They are computed
@@ -1450,7 +1381,7 @@ impl Executor {
 		&mut self,
 		kvs: &Datastore,
 		start: &Instant,
-		stmt: TopLevelExpr,
+		stmt: TopLevelStatement,
 	) -> Result<Value> {
 		// Don't even try to run if the query should already be finished.
 		match self.ctx.done(true)? {
@@ -1470,10 +1401,10 @@ impl Executor {
 		&mut self,
 		kvs: &Datastore,
 		start: &Instant,
-		plan: TopLevelExpr,
+		stmt: TopLevelStatement,
 	) -> Result<Value> {
 		self.broker_owned_by_executor = false;
-		let result = self.execute_plan_impl_inner(kvs, start, plan).await;
+		let result = self.execute_plan_impl_inner(kvs, start, stmt).await;
 		if self.broker_owned_by_executor {
 			self.clear_broker();
 		}
@@ -1484,9 +1415,12 @@ impl Executor {
 		&mut self,
 		kvs: &Datastore,
 		start: &Instant,
-		plan: TopLevelExpr,
+		stmt: TopLevelStatement,
 	) -> Result<Value> {
-		let transaction_type = if plan.read_only() {
+		// The mode is chosen before anything is converted: the predicate
+		// answers from the statement's syntax alone, so which kind of
+		// transaction to open is known without building the expression tree.
+		let transaction_type = if stmt.read_only() {
 			TransactionType::Read
 		} else {
 			TransactionType::Write
@@ -1506,7 +1440,7 @@ impl Executor {
 			Some(timeout) => {
 				match common::time::timeout(
 					timeout,
-					self.execute_plan_in_transaction(Arc::clone(&txn), start, plan),
+					self.execute_plan_in_transaction(Arc::clone(&txn), start, stmt),
 				)
 				.await
 				{
@@ -1517,7 +1451,7 @@ impl Executor {
 					}
 				}
 			}
-			None => self.execute_plan_in_transaction(Arc::clone(&txn), start, plan).await,
+			None => self.execute_plan_in_transaction(Arc::clone(&txn), start, stmt).await,
 		};
 
 		match exec_result {
@@ -1580,7 +1514,7 @@ impl Executor {
 		stream: Pin<&mut S>,
 	) -> Result<()>
 	where
-		S: Stream<Item = Result<TopLevelExpr>>,
+		S: Stream<Item = Result<TopLevelStatement>>,
 	{
 		self.broker_owned_by_executor = false;
 		let result = self.execute_begin_statement_impl(kvs, stream).await;
@@ -1596,7 +1530,7 @@ impl Executor {
 		mut stream: Pin<&mut S>,
 	) -> Result<()>
 	where
-		S: Stream<Item = Result<TopLevelExpr>>,
+		S: Stream<Item = Result<TopLevelStatement>>,
 	{
 		let Ok(txn) = kvs.transaction(TransactionType::Write).await.map(|tx| {
 			tx.with_tenant_identity(self.ctx.tenant_identity().cloned())
@@ -1607,11 +1541,11 @@ impl Executor {
 			while let Some(stmt) = stream.next().await {
 				yield_now!();
 				let stmt = stmt?;
-				if let TopLevelExpr::Cancel | TopLevelExpr::Commit = stmt {
+				if let Dispatch::Cancel | Dispatch::Commit = stmt.dispatch() {
 					return Ok(());
 				}
 
-				let kind = statement_type_from_top_level(&stmt);
+				let kind = stmt.statement_type();
 				self.results.push(QueryResult {
 					time: Duration::ZERO,
 					result: Err(TypesError::query(
@@ -1688,7 +1622,7 @@ impl Executor {
 		mut stream: Pin<&mut S>,
 	) -> Result<()>
 	where
-		S: Stream<Item = Result<TopLevelExpr>>,
+		S: Stream<Item = Result<TopLevelStatement>>,
 	{
 		// Create a sender for this transaction only if the context allows for
 		// notifications.
@@ -1741,9 +1675,9 @@ impl Executor {
 				while let Some(stmt) = stream.next().await {
 					yield_now!();
 					let stmt = stmt?;
-					let kind = statement_type_from_top_level(&stmt);
-					match stmt {
-						TopLevelExpr::Commit => {
+					let kind = stmt.statement_type();
+					match stmt.dispatch() {
+						Dispatch::Commit => {
 							// After timeout/cancel the txn is already gone: COMMIT cannot succeed.
 							// Still emit one `QueryResult` for this COMMIT statement so the batch
 							// has one row per statement (mirrors successful COMMIT, which
@@ -1768,7 +1702,7 @@ impl Executor {
 							self.emit_statement_event_unexecuted(kvs, kind, cancel_class);
 							return Ok(());
 						}
-						ref stmt => {
+						dispatch => {
 							let result = Err(match done {
 								Reason::Timedout(d) => TypesError::query(
 									format!("Timed out: {d}"),
@@ -1788,7 +1722,7 @@ impl Executor {
 								query_type: QueryType::Other,
 							});
 							self.emit_statement_event_unexecuted(kvs, kind, cancel_class);
-							if matches!(stmt, TopLevelExpr::Cancel) {
+							if matches!(dispatch, Dispatch::Cancel) {
 								return Ok(());
 							}
 						}
@@ -1799,23 +1733,20 @@ impl Executor {
 				return Ok(());
 			}
 
-			if skip_remaining && !matches!(stmt, TopLevelExpr::Cancel | TopLevelExpr::Commit) {
+			let dispatch = stmt.dispatch();
+			if skip_remaining && !matches!(dispatch, Dispatch::Cancel | Dispatch::Commit) {
 				continue;
 			}
 
 			trace!(target: TARGET, statement = %stmt.to_sql(), "Executing statement");
 
-			let query_type = match stmt {
-				TopLevelExpr::Live(_) => QueryType::Live,
-				TopLevelExpr::Kill(_) => QueryType::Kill,
-				_ => QueryType::Other,
-			};
+			let query_type = stmt.query_type();
 
 			// Capture classification up-front so we can emit a
 			// `StatementEvent` regardless of which control-flow branch the
 			// match below takes. The statement itself is moved into the
 			// match, so anything the observer needs must be derived here.
-			let statement_type = statement_type_from_top_level(&stmt);
+			let statement_type = stmt.statement_type();
 			let statement_read_only = stmt.read_only();
 			let sql_text = kvs.observer().needs_statement_text().then(|| stmt.to_sql());
 
@@ -1825,18 +1756,15 @@ impl Executor {
 			// match either returns early or contributes a non-DML
 			// statement, so 0 is the right default.
 			let mut stmt_result_rows: u64 = 0;
-			let result = match stmt {
-				TopLevelExpr::Begin => {
+			let result = match dispatch {
+				Dispatch::Begin => {
 					let _ = txn.cancel().await;
 					// tried to begin a transaction within a transaction.
 
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
 						res.result = Err(TypesError::query(
-							format!(
-								"The query was not executed due to a failed transaction: {}",
-								stmt.to_sql()
-							),
+							"The query was not executed due to a failed transaction".to_string(),
 							Some(QueryError::NotExecuted),
 						));
 					}
@@ -1864,8 +1792,8 @@ impl Executor {
 					while let Some(stmt) = stream.next().await {
 						yield_now!();
 						let stmt = stmt?;
-						match stmt {
-							TopLevelExpr::Commit => {
+						match stmt.dispatch() {
+							Dispatch::Commit => {
 								self.results.push(QueryResult {
 									time: Duration::ZERO,
 									result: Err(TypesError::query(
@@ -1877,19 +1805,17 @@ impl Executor {
 								});
 								return Ok(());
 							}
-							ref stmt => {
+							dispatch => {
 								self.results.push(QueryResult {
 									time: Duration::ZERO,
 									result: Err(TypesError::query(
-										format!(
-											"The query was not executed due to a failed transaction: {}",
-											stmt.to_sql()
-										),
+										"The query was not executed due to a failed transaction"
+											.to_string(),
 										Some(QueryError::NotExecuted),
 									)),
 									query_type: QueryType::Other,
 								});
-								if matches!(stmt, TopLevelExpr::Cancel) {
+								if matches!(dispatch, Dispatch::Cancel) {
 									return Ok(());
 								}
 							}
@@ -1899,7 +1825,7 @@ impl Executor {
 					// Missing CANCEL/COMMIT statement, statement already canceled so nothing todo.
 					return Ok(());
 				}
-				TopLevelExpr::Cancel => {
+				Dispatch::Cancel => {
 					let _ = txn.cancel().await;
 
 					// update the results indicating cancelation.
@@ -1931,7 +1857,7 @@ impl Executor {
 
 					return Ok(());
 				}
-				TopLevelExpr::Commit => {
+				Dispatch::Commit => {
 					// Commit the transaction.
 					// If error undo results.
 					let e = if let Err(e) = txn.commit().await {
@@ -2033,7 +1959,7 @@ impl Executor {
 
 					return Ok(());
 				}
-				TopLevelExpr::Option(stmt) => match self.execute_option_statement(&stmt) {
+				Dispatch::Option(option) => match self.execute_option_statement(&option) {
 					Ok(_) => {
 						// OPTION returns NONE
 						self.results.push(QueryResult {
@@ -2055,10 +1981,7 @@ impl Executor {
 					}
 					Err(e) => Err(TypesError::internal(e.to_string())),
 				},
-				stmt => {
-					// reintroduce planner later.
-					let plan = stmt;
-
+				Dispatch::Runnable => {
 					// Install fresh per-statement counters so DML
 					// iterators inside this BEGIN/COMMIT block can
 					// surface affected-row counts independently of the
@@ -2066,7 +1989,7 @@ impl Executor {
 					let counters = self.install_statement_counters();
 					let statement_index = self.current_index();
 					let r: Result<Value> = match self
-						.execute_plan_in_transaction(Arc::clone(&txn), &before, plan)
+						.execute_plan_in_transaction(Arc::clone(&txn), &before, stmt)
 						.await
 					{
 						Ok(x) => Ok(x),
@@ -2118,8 +2041,8 @@ impl Executor {
 							while let Some(stmt) = stream.next().await {
 								yield_now!();
 								let stmt = stmt?;
-								match stmt {
-									TopLevelExpr::Commit => {
+								match stmt.dispatch() {
+									Dispatch::Commit => {
 										// Aborted txn: COMMIT must error (same intent as
 										// `txn.commit()` failure above — descriptive
 										// `Cannot COMMIT:` prefix) (#7207).
@@ -2134,7 +2057,7 @@ impl Executor {
 											});
 										return Ok(());
 									}
-									TopLevelExpr::Cancel => {
+									Dispatch::Cancel => {
 										return Ok(());
 									}
 									_ => {
@@ -2217,26 +2140,26 @@ impl Executor {
 	}
 
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
-	pub(crate) async fn execute_plan(
+	pub(crate) async fn execute_statements(
 		kvs: &Datastore,
 		ctx: FrozenContext,
 		opt: Options,
-		plan: LogicalPlan,
+		statements: Vec<TopLevelStatement>,
 	) -> Result<Vec<QueryResult>> {
-		let stream = futures::stream::iter(plan.expressions.into_iter().map(Ok));
-		Self::execute_expr_stream(kvs, ctx, opt, false, stream).await
+		let stream = futures::stream::iter(statements.into_iter().map(Ok));
+		Self::execute_statement_stream(kvs, ctx, opt, false, stream).await
 	}
 
-	/// Execute a logical plan with an existing transaction
+	/// Execute a batch of statements with an existing transaction
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
-	pub(crate) async fn execute_plan_with_transaction(
+	pub(crate) async fn execute_statements_with_transaction(
 		kvs: &Datastore,
 		ctx: FrozenContext,
 		opt: Options,
-		plan: LogicalPlan,
+		statements: Vec<TopLevelStatement>,
 	) -> Result<Vec<QueryResult>> {
 		let mut executor = Self::new(kvs, ctx, opt);
-		executor.run_plan_with_transaction(kvs, plan).await?;
+		executor.run_with_transaction(kvs, statements).await?;
 		Ok(executor.results)
 	}
 
@@ -2247,15 +2170,15 @@ impl Executor {
 	/// statement's result is final as soon as the statement ends — there is no
 	/// block resolution to wait for, and whether the caller later commits is
 	/// its own affair, exactly as on the buffered path.
-	pub(crate) async fn execute_plan_streaming_with_transaction(
+	pub(crate) async fn execute_statements_streaming_with_transaction(
 		kvs: &Datastore,
 		ctx: FrozenContext,
 		opt: Options,
-		plan: LogicalPlan,
+		statements: Vec<TopLevelStatement>,
 		items: Sender<QueryStreamItem>,
 	) -> Result<Vec<QueryResult>> {
 		let mut executor = Self::new_streaming(kvs, ctx, opt, items);
-		let outcome = executor.run_plan_with_transaction(kvs, plan).await;
+		let outcome = executor.run_with_transaction(kvs, statements).await;
 		executor.finalise_results().await;
 		outcome.map(|()| executor.results)
 	}
@@ -2263,10 +2186,10 @@ impl Executor {
 	/// Shared body: run every statement against the transaction already on the
 	/// context, accumulating results on `self` and streaming them when this
 	/// executor streams.
-	async fn run_plan_with_transaction(
+	async fn run_with_transaction(
 		&mut self,
 		kvs: &Datastore,
-		plan: LogicalPlan,
+		statements: Vec<TopLevelStatement>,
 	) -> Result<()> {
 		// The transaction is already set in the context
 		// Execute each expression with the transaction
@@ -2274,30 +2197,28 @@ impl Executor {
 		let batch_start = Instant::now();
 		let results_start = self.results.len();
 
-		for expr in plan.expressions {
-			// See `consumer_gone`: the rest of the plan is abandoned rather
+		for stmt in statements {
+			// See `consumer_gone`: the rest of the batch is abandoned rather
 			// than run. The transaction spans requests and its owner still
 			// decides whether to commit.
 			if self.consumer_gone() {
 				break;
 			}
 			let start = Instant::now();
-			// Capture classification before the expression is moved
+			// Capture classification before the statement is moved
 			// into `execute_plan_in_transaction` so we can emit a
 			// matching `StatementEvent` regardless of which control-flow
 			// branch the result lands in (mirrors the cached helper
-			// pattern used in `execute_expr_stream`).
-			let statement_type = statement_type_from_top_level(&expr);
-			let statement_read_only = matches!(expr, TopLevelExpr::Use(_) | TopLevelExpr::Show(_))
-				|| matches!(
-					&expr,
-					TopLevelExpr::Expr(e) if matches!(
-						e,
-						Expr::Select(_) | Expr::Info(_) | Expr::Explain { .. }
-					)
-				);
+			// pattern used in `run_statement_stream`).
+			let statement_type = stmt.statement_type();
+			let statement_read_only = stmt.kind_reads_only();
+			// A `LIVE SELECT` run inside a caller-owned transaction has to
+			// report itself as one: the transports register the subscription
+			// off this field, and one they never see is one they never tear
+			// down when the session ends or its principal changes.
+			let query_type = stmt.query_type();
 			let counters = self.install_statement_counters();
-			let result = self.execute_plan_in_transaction(Arc::clone(&tx), &start, expr).await;
+			let result = self.execute_plan_in_transaction(Arc::clone(&tx), &start, stmt).await;
 
 			let time = start.elapsed();
 			let query_result = match result {
@@ -2305,7 +2226,7 @@ impl Executor {
 					time,
 					result: crate::val::convert_value_to_public_value(value)
 						.map_err(|e| TypesError::internal(e.to_string())),
-					query_type: QueryType::Other,
+					query_type,
 				},
 				Err(ControlFlow::Err(e)) => QueryResult {
 					time,
@@ -2363,12 +2284,12 @@ impl Executor {
 	where
 		S: Stream<Item = Result<sql::TopLevelExpr>>,
 	{
-		Self::execute_expr_stream(
+		Self::execute_statement_stream(
 			kvs,
 			ctx,
 			opt,
 			skip_success_results,
-			stream.map(|x| x.map(expr::TopLevelExpr::from)),
+			stream.map(|x| x.map(TopLevelStatement::Ast)),
 		)
 		.await
 	}
@@ -2395,7 +2316,7 @@ impl Executor {
 			surrealdb.statement_type = tracing::field::Empty,
 		),
 	)]
-	pub(crate) async fn execute_expr_stream<S>(
+	pub(crate) async fn execute_statement_stream<S>(
 		kvs: &Datastore,
 		ctx: FrozenContext,
 		opt: Options,
@@ -2403,28 +2324,28 @@ impl Executor {
 		stream: S,
 	) -> Result<Vec<QueryResult>>
 	where
-		S: Stream<Item = Result<TopLevelExpr>>,
+		S: Stream<Item = Result<TopLevelStatement>>,
 	{
 		let mut this = Executor::new(kvs, ctx, opt);
-		this.run_expr_stream(kvs, skip_success_results, stream).await?;
+		this.run_statement_stream(kvs, skip_success_results, stream).await?;
 		Ok(this.results)
 	}
 
-	/// Execute a logical plan, sending results into `items` as they are
+	/// Execute a batch of statements, sending results into `items` as they are
 	/// produced rather than collecting them.
 	///
 	/// Returns the results as well, so an embedded caller that wants both the
 	/// streamed items and the assembled answer pays for the query once.
-	pub(crate) async fn execute_plan_streaming(
+	pub(crate) async fn execute_statements_streaming(
 		kvs: &Datastore,
 		ctx: FrozenContext,
 		opt: Options,
-		plan: LogicalPlan,
+		statements: Vec<TopLevelStatement>,
 		items: Sender<QueryStreamItem>,
 	) -> Result<Vec<QueryResult>> {
-		let stream = futures::stream::iter(plan.expressions.into_iter().map(Ok));
+		let stream = futures::stream::iter(statements.into_iter().map(Ok));
 		let mut this = Executor::new_streaming(kvs, ctx, opt, items);
-		let outcome = this.run_expr_stream(kvs, false, stream).await;
+		let outcome = this.run_statement_stream(kvs, false, stream).await;
 		// However the execution ended, every result it produced is now final.
 		// A consumer is owed a terminal item for each one, including on the
 		// paths that returned an error before the loop finalised them.
@@ -2439,14 +2360,14 @@ impl Executor {
 	/// can finalise whatever was produced even on the paths that fail — a
 	/// streaming consumer is owed a terminal item for every statement that
 	/// produced a result, however the execution ended.
-	async fn run_expr_stream<S>(
+	async fn run_statement_stream<S>(
 		&mut self,
 		kvs: &Datastore,
 		skip_success_results: bool,
 		stream: S,
 	) -> Result<()>
 	where
-		S: Stream<Item = Result<TopLevelExpr>>,
+		S: Stream<Item = Result<TopLevelStatement>>,
 	{
 		// Capture batch boundaries up-front so the `QueryEvent` emitted
 		// at every return path measures the full span of the batch even
@@ -2461,8 +2382,8 @@ impl Executor {
 			// The import path requires OPTION IMPORT as the first statement.
 			// This sets opt.import which skips events, live queries, field
 			// processing, table views, and result output for performance.
-			match stream.as_mut().next().await {
-				Some(Ok(TopLevelExpr::Option(ref stmt)))
+			match stream.as_mut().next().await.map(|stmt| stmt.map(|stmt| stmt.dispatch())) {
+				Some(Ok(Dispatch::Option(ref stmt)))
 					if stmt.name.eq_ignore_ascii_case("IMPORT") && stmt.what =>
 				{
 					self.execute_option_statement(stmt)?;
@@ -2512,13 +2433,13 @@ impl Executor {
 			// customer values to an unauthenticated sink -- `StatementType`
 			// is a bounded enum and `to_sql` is only invoked when the
 			// installed observer explicitly opts in.
-			let statement_type = statement_type_from_top_level(&stmt);
+			let statement_type = stmt.statement_type();
 			let statement_read_only = stmt.read_only();
 			let sql_text = kvs.observer().needs_statement_text().then(|| stmt.to_sql());
 			let start = Instant::now();
 
-			match stmt {
-				TopLevelExpr::Option(stmt) => {
+			match stmt.dispatch() {
+				Dispatch::Option(stmt) => {
 					if skip_success_results && stmt.name.eq_ignore_ascii_case("IMPORT") {
 						bail!(ExecError::InvalidStatement(
 							"Cannot change OPTION IMPORT during an import stream. \
@@ -2554,7 +2475,7 @@ impl Executor {
 						});
 					}
 				}
-				TopLevelExpr::Begin => {
+				Dispatch::Begin => {
 					if !skip_success_results {
 						self.results.push(QueryResult {
 							time: Duration::ZERO,
@@ -2603,8 +2524,8 @@ impl Executor {
 						return Ok(());
 					}
 				}
-				stmt => {
-					let query_type: QueryType = query_type_for_toplevel_expr(&stmt);
+				Dispatch::Cancel | Dispatch::Commit | Dispatch::Runnable => {
+					let query_type: QueryType = stmt.query_type();
 
 					// Install fresh per-statement counters so DML
 					// iterators can record affected rows independently of

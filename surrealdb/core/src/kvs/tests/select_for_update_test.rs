@@ -5,7 +5,7 @@
 //! record with `SELECT ... FOR UPDATE` commits successfully only if no
 //! other transaction commits a write to that record after the locking
 //! transaction's snapshot was established. These tests drive the same
-//! [`Datastore::execute_with_transaction`] entry point the RPC session
+//! [`Datastore::run`] entry point the RPC session
 //! transaction layer uses, with an await-sequenced interleaving so the
 //! outcome is deterministic, and run each scenario under both planner
 //! strategies so the legacy compute path and the streaming executor path
@@ -19,7 +19,7 @@ use temp_dir::TempDir;
 use crate::CommunityComposer;
 use crate::catalog::providers::CatalogProvider;
 use crate::dbs::{NewPlannerStrategy, Session};
-use crate::kvs::{Datastore, Transaction, is_retryable_transaction_conflict};
+use crate::kvs::{Datastore, QueryRequest, Transaction, is_retryable_transaction_conflict};
 
 /// The planner strategies each scenario runs under: the legacy compute
 /// executor and the streaming executor.
@@ -48,7 +48,8 @@ async fn rocksdb_ds(strategy: NewPlannerStrategy) -> (TempDir, Arc<Datastore>, S
 /// Run a query on the given caller-held transaction, asserting every
 /// statement succeeded.
 async fn run_in_tx(ds: &Datastore, ses: &Session, tx: &Arc<Transaction>, sql: &str) {
-	let results = ds.execute_with_transaction(sql, ses, None, Arc::clone(tx)).await.unwrap();
+	let results =
+		ds.run(QueryRequest::new(sql, ses).with_transaction(Arc::clone(tx))).await.unwrap();
 	for result in results {
 		result.result.unwrap();
 	}

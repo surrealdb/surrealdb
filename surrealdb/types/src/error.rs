@@ -19,6 +19,7 @@ mod code {
 	pub const LIVE_QUERY_NOT_SUPPORTED: i64 = -32604;
 	pub const BAD_LIVE_QUERY_CONFIG: i64 = -32605;
 	pub const BAD_GRAPHQL_CONFIG: i64 = -32606;
+	pub const DIALECT_NOT_SUPPORTED: i64 = -32607;
 	pub const INTERNAL_ERROR: i64 = -32000;
 	pub const CLIENT_SIDE_ERROR: i64 = -32001;
 	pub const INVALID_AUTH: i64 = -32002;
@@ -156,6 +157,7 @@ impl Error {
 				ConfigurationError::LiveQueryNotSupported => code::LIVE_QUERY_NOT_SUPPORTED,
 				ConfigurationError::BadLiveQueryConfig => code::BAD_LIVE_QUERY_CONFIG,
 				ConfigurationError::BadGraphqlConfig => code::BAD_GRAPHQL_CONFIG,
+				ConfigurationError::DialectNotSupported => code::DIALECT_NOT_SUPPORTED,
 			})
 			.unwrap_or(code::INTERNAL_ERROR);
 		Self {
@@ -839,6 +841,12 @@ pub enum ConfigurationError {
 	BadLiveQueryConfig,
 	/// Bad GraphQL config.
 	BadGraphqlConfig,
+	/// A query named a dialect this build cannot parse.
+	///
+	/// The dialect is chosen from what a client sent, so it is a runtime value
+	/// on every path that produces one; a build without the front end for it
+	/// reports that rather than failing to name it.
+	DialectNotSupported,
 }
 
 /// Serialisation failure reason for [`ErrorKind::Serialization`] errors.

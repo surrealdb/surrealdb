@@ -21,6 +21,7 @@ mod statement;
 mod statement_counters;
 mod store;
 mod stream;
+mod top_level;
 
 // A session outlives the process that attached it, so its stored form belongs to
 // the keyspace; the live session above converts in and out of it.
@@ -49,6 +50,7 @@ pub(crate) use self::statement::{
 };
 pub(crate) use self::statement_counters::StatementCounters;
 pub use self::stream::{QueryItemStream, QueryStreamJob};
+pub(crate) use self::top_level::{Dispatch, TopLevelStatement};
 pub use crate::catalog::node;
 pub(crate) use crate::expr::variables::Variables;
 
@@ -65,3 +67,5 @@ mod read_only_test;
 mod stream_test;
 #[cfg(test)]
 pub(crate) mod test;
+#[cfg(test)]
+mod top_level_test;

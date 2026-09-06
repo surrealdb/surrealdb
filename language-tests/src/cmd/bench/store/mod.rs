@@ -4,7 +4,6 @@ use std::pin::Pin;
 
 use anyhow::Result;
 use clap::ArgMatches;
-
 use surrealdb_types::{Datetime, SurrealValue, Value};
 
 use crate::cli::Backend;

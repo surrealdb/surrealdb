@@ -707,24 +707,25 @@ pub fn build_method_registry(funcs: &FunctionRegistry) -> MethodRegistry {
 mod tests {
 	use super::*;
 
-	/// The expr layer classifies a method call as read-only exactly when its
-	/// name dispatches to a builtin; an unregistered name resolves to a
+	/// Read-only classification treats a method call as read-only exactly when
+	/// its name dispatches to a builtin; an unregistered name resolves to a
 	/// closure stored on the receiver, whose body is invisible at that point,
-	/// and must be classified writable. It reads that distinction from
-	/// `crate::expr::method::BUILTIN_METHOD_NAMES`, a static mirror of this
-	/// registry (the expr crate cannot depend on this one). The two must stay
-	/// identical: a name missing from the mirror costs every use of that
+	/// and must be classified writable. Both the surface AST and the
+	/// expression tree read that distinction from
+	/// `surrealdb_sql::method::BUILTIN_METHOD_NAMES`, a static mirror of this
+	/// registry (the layers below cannot depend on this one). The two must
+	/// stay identical: a name missing from the mirror costs every use of that
 	/// method its read transaction, and a stale extra name lets a writing
 	/// closure body reach a read-only transaction.
 	#[test]
-	fn the_expr_layer_name_mirror_matches_the_registry() {
+	fn the_name_mirror_matches_the_registry() {
 		let registry = FunctionRegistry::with_builtins();
 		let mut registered: Vec<&str> = registry.methods().names().collect();
 		registered.sort_unstable();
 		assert_eq!(
 			registered,
-			crate::expr::method::BUILTIN_METHOD_NAMES,
-			"keep `crate::expr::method::BUILTIN_METHOD_NAMES` identical to the \
+			crate::sql::method::BUILTIN_METHOD_NAMES,
+			"keep `surrealdb_sql::method::BUILTIN_METHOD_NAMES` identical to the \
 			 names registered in `build_method_registry`"
 		);
 	}

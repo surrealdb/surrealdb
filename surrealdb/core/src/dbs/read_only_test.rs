@@ -7,15 +7,35 @@
 //! partway through. It also makes the same statement behave differently
 //! depending on whether the caller wrapped it in `BEGIN`, which opens a write
 //! transaction unconditionally.
+//!
+//! The predicate exists twice — once over the surface AST (`sql::TopLevelExpr`)
+//! and once over the expression tree it converts to (`expr::TopLevelExpr`) —
+//! because the transaction mode is chosen on whichever form the caller holds.
+//! The two enums evolve separately, so every fixture here answers through both
+//! and the answers must match: a variant handled on one side and not the other
+//! surfaces as a disagreement rather than as a mutation reaching a read-only
+//! transaction.
 
 use crate::expr::TopLevelExpr;
 
-/// Parse one statement and report whether it claims to be read-only.
+/// Parse one statement and report whether it claims to be read-only, asserting
+/// the surface AST and the expression tree agree on the answer.
 fn read_only(sql: &str) -> bool {
 	let mut ast = crate::syn::parse(sql).expect("fixture should parse");
 	assert_eq!(ast.expressions.len(), 1, "expected exactly one statement in {sql:?}");
-	let top: TopLevelExpr = ast.expressions.remove(0).into();
-	top.read_only()
+	assert_agree(&ast.expressions.remove(0), sql)
+}
+
+/// Answer through both implementations and require them to match.
+fn assert_agree(surface: &crate::sql::TopLevelExpr, context: &str) -> bool {
+	let converted: TopLevelExpr = surface.clone().into();
+	let answer = surface.read_only();
+	assert_eq!(
+		answer,
+		converted.read_only(),
+		"`sql::TopLevelExpr::read_only` and `expr::TopLevelExpr::read_only` disagree on {context}"
+	);
+	answer
 }
 
 /// Assert that no case claims to be read-only, skipping shapes the grammar
@@ -67,6 +87,38 @@ fn a_mutation_in_any_idiom_part_requires_a_write_transaction() {
 		("method argument", "SELECT tags.at((CREATE log).n) FROM person"),
 		("destructure alias", "SELECT person.{ name, tag: tags[WHERE (CREATE log)] } FROM person"),
 		("graph lookup cond", "SELECT ->likes[WHERE (CREATE log)]->thing FROM person"),
+	];
+	assert_none_claim_read_only(&cases);
+}
+
+/// `INFO` names what it reports on with expressions, and takes a `VERSION`
+/// expression, all of which the statement evaluates before it reads anything.
+#[test]
+fn a_mutation_in_an_info_subject_or_version_requires_a_write_transaction() {
+	let cases = [
+		("root version", "INFO FOR ROOT VERSION (CREATE log:1).id"),
+		("ns version", "INFO FOR NS VERSION (CREATE log:1).id"),
+		("db version", "INFO FOR DB VERSION (CREATE log:1).id"),
+		("table version", "INFO FOR TABLE person VERSION (CREATE log:1).id"),
+		("table name", "INFO FOR TABLE (CREATE log:1).id"),
+		("user name", "INFO FOR USER (CREATE log:1).id"),
+		("index name", "INFO FOR INDEX (CREATE log:1).id ON person"),
+		("index table", "INFO FOR INDEX idx ON (CREATE log:1).id"),
+	];
+	assert_none_claim_read_only(&cases);
+}
+
+/// A graph lookup's subject carries record-id range bounds, which are
+/// record-id keys and so carry arbitrary expressions.
+#[test]
+fn a_mutation_in_a_lookup_subject_requires_a_write_transaction() {
+	let cases = [
+		("lookup range upper bound", "SELECT * FROM b:1->computed_edge:[6]..=[(CREATE log:1).id]"),
+		("lookup range lower bound", "SELECT * FROM b:1->computed_edge:[(CREATE log:1).id]..=[6]"),
+		(
+			"lookup subject in projection",
+			"SELECT * FROM person:1->likes:[(CREATE log:2).id]..->post",
+		),
 	];
 	assert_none_claim_read_only(&cases);
 }

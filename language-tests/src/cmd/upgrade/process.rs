@@ -6,8 +6,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use futures::{SinkExt, StreamExt};
-use surrealdb_rpc::DbResponse;
-use surrealdb_rpc::DbResult;
+use surrealdb_rpc::{DbResponse, DbResult};
 use surrealdb_types::{Error as TypesError, Value};
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;

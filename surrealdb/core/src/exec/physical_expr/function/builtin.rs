@@ -12,10 +12,8 @@ use crate::val::Value;
 
 /// Whether the named builtin can evaluate arbitrary nested statements, and so
 /// needs a write transaction regardless of what its arguments look like.
-/// Every other builtin writes nothing of its own; only its arguments carry
-/// user expressions.
 pub(crate) fn builtin_can_write(name: &str) -> bool {
-	matches!(name, "api::invoke" | "eval::surql" | "eval::gql")
+	crate::expr::method::is_writer_builtin(name)
 }
 
 /// Built-in function expression - math::abs(), string::len(), etc.

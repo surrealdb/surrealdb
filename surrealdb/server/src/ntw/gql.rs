@@ -13,6 +13,7 @@ use axum::{Extension, Router};
 use axum_extra::TypedHeader;
 use bytes::Bytes;
 use surrealdb_core::dbs::Session;
+use surrealdb_core::kvs::{QueryRequest, QuerySource};
 use surrealdb_rpc::capabilities::RouteTarget;
 use surrealdb_types::{Array, SurrealValue, Value, Variables};
 use tower_http::limit::RequestBodyLimitLayer;
@@ -59,7 +60,8 @@ async fn post_handler(
 	let gql = bytes_to_utf8(&gql).context("Non UTF-8 request body").map_err(ResponseError)?;
 	// Execute the received gql query under the configured wall-clock query
 	// timeout (default off), reusing `--query-timeout` as the guard duration.
-	match with_query_timeout(db.query_timeout(), db.execute_gql(gql, &session, Some(vars))).await {
+	let request = QueryRequest::new(QuerySource::gql(gql), &session).with_variables(Some(vars));
+	match with_query_timeout(db.query_timeout(), db.run(request)).await {
 		Ok(res) => match output.as_deref() {
 			// Simple serialization
 			None | Some(Accept::ApplicationJson) => {

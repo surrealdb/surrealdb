@@ -12,6 +12,9 @@
 //! method registry (`build_method_registry` in the core crate), which cannot
 //! be consulted from here without inverting the crate dependency. A test in
 //! that module asserts the two stay identical.
+//!
+//! It lives in this layer rather than the expression layer because both the
+//! surface AST and the expression tree classify a method call the same way.
 
 /// Every method name that dispatches to a builtin function, sorted so
 /// membership is a binary search.
@@ -275,6 +278,16 @@ pub const BUILTIN_METHOD_NAMES: &[&str] = &[
 /// rather than a closure stored on the receiver.
 pub fn is_builtin_method(name: &str) -> bool {
 	BUILTIN_METHOD_NAMES.binary_search(&name).is_ok()
+}
+
+/// Whether the named builtin can evaluate arbitrary nested statements, and so
+/// needs a write transaction whatever its arguments look like.
+///
+/// Every other builtin writes nothing of its own; only its arguments carry
+/// user expressions. Both `read_only` predicates and the planner's access-mode
+/// choice ask this, so a builtin added to one is added to all three.
+pub fn is_writer_builtin(name: &str) -> bool {
+	matches!(name, "api::invoke" | "eval::gql" | "eval::surql")
 }
 
 #[cfg(test)]
