@@ -273,25 +273,44 @@ impl ToSql for Idiom {
 
 impl FromStr for Idiom {
 	type Err = revision::Error;
+
+	/// Shared parse for the two string forms of an idiom: fresh runtime strings
+	/// (`parameterize::resolve_idiom`, for a field name or index column computed
+	/// at runtime) and the engine-rendered wire encoding
+	/// (`DeserializeRevisioned`, which reads back what
+	/// `SerializeRevisioned` wrote as `to_raw_string`).
+	///
+	/// Parses the idiom grammar, which is what both forms are: a field path.
+	/// It has to be that grammar rather than the expression one, because a
+	/// leading field is escaped with `EscapeKwFreeIdent` — which backticks
+	/// only a name that would not lex as an identifier, and so leaves a
+	/// reserved keyword such as `function` bare. Read as an expression, that
+	/// bare keyword is the start of a call or a statement and fails to parse.
+	///
+	/// The idiom grammar admits only an identifier or a graph edge at the
+	/// start, so an idiom rooted in a `Part::Start` expression (`$param.x`,
+	/// `person:test.x`) is rejected rather than accepted as some other path.
+	/// Nothing that reaches here can hold one: every persisted idiom is a field
+	/// name or index column, and `Value` — the one stored type that carries
+	/// arbitrary user data — has no `Idiom` variant. A runtime-resolved field
+	/// name is not a valid field path either, so failing is the useful answer
+	/// there.
+	///
+	/// The whole input must be consumed. Without that, trailing content after a
+	/// valid idiom prefix would be silently dropped (e.g. "foo bogus" would
+	/// parse to just "foo"), which is a footgun for any caller that resolves a
+	/// string at runtime and re-parses it as an idiom.
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		let buf = s.as_bytes();
 		let mut stack = Stack::new();
 		let mut parser = crate::syn::parser::Parser::new_with_experimental(buf, true);
-		let expr = stack
-			.enter(|stk| parser.parse_expr(stk))
+		let idiom = stack
+			.enter(|stk| parser.parse_plain_idiom(stk))
 			.finish()
 			.map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
-		// The Pratt parser exits as soon as it hits a token with no continuation
-		// binding power. Without this check, trailing content after a valid
-		// idiom prefix would be silently dropped (e.g. "foo bogus" would parse
-		// to just "foo"), which is a footgun for any caller that resolves a
-		// string at runtime and re-parses it as an idiom.
 		parser.assert_finished().map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
 
-		match expr {
-			crate::sql::Expr::Idiom(idiom) => Ok(idiom.into()),
-			_ => Err(revision::Error::Conversion("Expected an idiom".to_string())),
-		}
+		Ok(idiom.into())
 	}
 }
 
@@ -617,11 +636,78 @@ mod tests {
 			crate::expr::part::DestructurePart::Field(Strand::new_static("zip")),
 		]),
 	]))]
+	// A reserved keyword is rendered bare when it leads the path, so the
+	// decoder has to read it as a field rather than as the statement or call
+	// the same word starts. `function` and `select` are the two shapes that
+	// fail differently as expressions (a call needing `(`, and a statement
+	// needing a field list).
+	#[case::keyword_field(Idiom::from(vec![field("function")]))]
+	#[case::keyword_field_select(Idiom::from(vec![field("select")]))]
+	#[case::keyword_field_nested(Idiom::from(vec![field("function"), field("sub")]))]
+	#[case::keyword_field_tail(Idiom::from(vec![field("meta"), field("function")]))]
+	#[case::keyword_field_index(Idiom::from(vec![field("select"), lit_int(0)]))]
 	fn idiom_revisioned_roundtrip(#[case] idiom: Idiom) {
 		let mut bytes = Vec::new();
 		idiom.serialize_revisioned(&mut bytes).unwrap();
 		let parsed = Idiom::deserialize_revisioned(&mut bytes.as_slice())
 			.unwrap_or_else(|e| panic!("round-trip failed for {idiom:?}: {e}"));
 		assert_eq!(idiom, parsed, "round-trip mismatch for {idiom:?}");
+	}
+
+	/// Every reserved keyword must survive the wire round-trip as a leading
+	/// field name, both alone and with a tail. The rendering leaves a leading
+	/// keyword bare, so this is the property that keeps the two halves of
+	/// `Idiom`'s wire format agreeing; pinning the whole keyword set rather
+	/// than samples means a word added to `RESERVED_KEYWORD` cannot introduce
+	/// a name that stores but does not load. A field name that stores and then
+	/// does not load makes the whole table's schema unreadable, not just the
+	/// one field.
+	#[test]
+	fn every_reserved_keyword_round_trips_as_a_field_name() {
+		for kw in crate::syn::lexer::keywords::RESERVED_KEYWORD.iter() {
+			let kw = kw.into_inner();
+			for idiom in [
+				Idiom::from(vec![field(kw)]),
+				Idiom::from(vec![field(kw), field("tail")]),
+				Idiom::from(vec![field("head"), field(kw)]),
+			] {
+				let mut bytes = Vec::new();
+				idiom.serialize_revisioned(&mut bytes).unwrap();
+				let parsed =
+					Idiom::deserialize_revisioned(&mut bytes.as_slice()).unwrap_or_else(|e| {
+						panic!("keyword `{kw}` did not survive the wire round-trip: {e}")
+					});
+				assert_eq!(idiom, parsed, "round-trip mismatch for keyword `{kw}`");
+			}
+		}
+	}
+
+	/// A string that merely *starts* with a valid idiom is rejected rather than
+	/// truncated to that prefix, so a caller resolving a field path at runtime
+	/// cannot silently address a shorter path than the one it was given.
+	/// An idiom rooted in a `Part::Start` expression renders as that
+	/// expression, which is not a field path and so does not read back. This is
+	/// pinned rather than left implicit: nothing that reaches this funnel can
+	/// hold such a part (see the `FromStr` contract), so the useful behaviour
+	/// is that the string is rejected outright instead of being accepted as a
+	/// different path.
+	#[test]
+	fn an_expression_rooted_idiom_is_not_a_field_path() {
+		let idiom = Idiom::from(vec![
+			Part::Start(Expr::Param(crate::expr::Param::from("test".to_string()))),
+			field("temporary"),
+		]);
+		assert_eq!(idiom.to_raw_string(), "$test.temporary");
+		assert!(
+			Idiom::from_str(&idiom.to_raw_string()).is_err(),
+			"an expression-rooted idiom should not parse as a field path"
+		);
+	}
+
+	#[test]
+	fn trailing_content_after_an_idiom_is_rejected() {
+		for s in ["foo bogus", "function bogus", "foo.bar baz"] {
+			assert!(Idiom::from_str(s).is_err(), "`{s}` should not parse to just its idiom prefix");
+		}
 	}
 }
