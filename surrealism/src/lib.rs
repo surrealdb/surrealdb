@@ -11,12 +11,11 @@ pub mod imports;
 pub mod registry;
 
 pub use imports::{kv, run, sql, sql_with_vars};
-pub use inventory;
 pub use registry::{SurrealismEntry, SurrealismInit};
 pub use surrealism_macros::surrealism;
-pub use surrealism_types as types;
 #[doc(hidden)]
 pub use tokio;
+pub use {inventory, surrealism_types as types};
 
 #[doc(hidden)]
 pub fn async_runtime() -> &'static tokio::runtime::Runtime {
