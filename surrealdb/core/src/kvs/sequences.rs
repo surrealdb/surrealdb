@@ -166,6 +166,10 @@ pub(crate) struct BatchValue {
 impl_kv_value_revisioned!(BatchValue);
 
 impl BatchValue {
+	pub(crate) fn end(&self) -> i64 {
+		self.to
+	}
+
 	#[cfg(test)]
 	pub(crate) fn new(to: i64, owner: Uuid) -> Self {
 		Self {

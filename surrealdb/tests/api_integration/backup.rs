@@ -67,6 +67,39 @@ pub async fn export_import(new_db: impl CreateDb) {
 	}
 }
 
+pub async fn export_import_preserves_sequence_position(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (source_permit, source) = new_db.create_db(config).await;
+	let source_db = Ulid::new().to_string();
+	source.use_ns(Ulid::new().to_string()).use_db(&source_db).await.unwrap();
+	source
+		.query(
+			"DEFINE SEQUENCE order_id BATCH 10 START 1;
+			 DEFINE TABLE thing SCHEMAFULL;
+			 DEFINE FIELD id ON thing TYPE int DEFAULT sequence::nextval('order_id');
+			 CREATE thing CONTENT {};
+			 CREATE thing CONTENT {};
+			 CREATE thing CONTENT {};",
+		)
+		.await
+		.unwrap();
+
+	drop(source_permit);
+	let dir = temp_dir::TempDir::new().unwrap();
+	let file = dir.path().join("sequence.surql");
+	source.export(&file).await.unwrap();
+
+	let config = Config::new();
+	let (_restored_permit, restored) = new_db.create_db(config).await;
+	let restored_db = Ulid::new().to_string();
+	restored.use_ns(Ulid::new().to_string()).use_db(&restored_db).await.unwrap();
+	restored.import(&file).await.unwrap();
+
+	let mut response = restored.query("RETURN sequence::nextval('order_id');").await.unwrap();
+	let next: Option<i64> = response.take(0).unwrap();
+	assert_eq!(next, Some(11));
+}
+
 pub async fn export_with_config(new_db: impl CreateDb) {
 	let config = Config::new();
 	let (permit, db) = new_db.create_db(config).await;
@@ -206,6 +239,9 @@ relate person:`a`->`friends2\`;\nDEFINE USER IF NOT EXISTS pwned ON ROOT PASSWOR
 define_include_tests!(backup => {
 	#[tokio::test]
 	export_import,
+
+	#[tokio::test]
+	export_import_preserves_sequence_position,
 
 	#[tokio::test]
 	export_with_config,

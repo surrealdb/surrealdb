@@ -15,6 +15,8 @@ use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::define::{DefineAccessStatement, DefineUserStatement};
 use crate::expr::{Base, DefineAnalyzerStatement};
 use crate::key::record;
+use crate::key::sequence::Prefix;
+use crate::kvs::sequences::BatchValue;
 use crate::sql::statements::OptionStatement;
 
 #[derive(Clone, Debug, SurrealValue)]
@@ -263,7 +265,15 @@ impl Transaction {
 
 		// Output SEQUENCES
 		if cfg.sequences {
-			let sequences = self.all_db_sequences(ns, db, None).await?;
+			let mut sequences = self.all_db_sequences(ns, db, None).await?.to_vec();
+			for sequence in &mut sequences {
+				let batches =
+					self.getr(Prefix::new_ba_range(ns, db, &sequence.name)?, None).await?;
+				for (_, value) in batches {
+					let batch: BatchValue = revision::from_slice(&value)?;
+					sequence.start = sequence.start.max(batch.end());
+				}
+			}
 			self.export_section("SEQUENCES", sequences.iter(), chn).await?;
 		}
 
