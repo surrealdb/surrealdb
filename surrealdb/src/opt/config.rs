@@ -1,7 +1,9 @@
 #[cfg(storage)]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+#[cfg(storage)]
+use surrealdb_core::cnf::ConfigMap;
 use surrealdb_core::dbs::Capabilities as CoreCapabilities;
 use surrealdb_core::iam::Level;
 
@@ -26,6 +28,8 @@ pub struct Config {
 	pub(crate) websocket: WebsocketConfig,
 	#[cfg(storage)]
 	pub(crate) temporary_directory: Option<PathBuf>,
+	#[cfg(storage)]
+	pub(crate) datastore_config: ConfigMap,
 	pub(crate) node_membership_refresh_interval: Option<Duration>,
 	pub(crate) node_membership_check_interval: Option<Duration>,
 	pub(crate) node_membership_cleanup_interval: Option<Duration>,
@@ -116,6 +120,29 @@ impl Config {
 		self
 	}
 
+	/// Set the directories allowed for local `file://` bucket backends.
+	#[cfg(storage)]
+	pub fn bucket_folder_allowlist<I, P>(mut self, paths: I) -> Self
+	where
+		I: IntoIterator<Item = P>,
+		P: AsRef<Path>,
+	{
+		self.datastore_config =
+			with_path_allowlist(self.datastore_config, "bucket_folder_allowlist", paths);
+		self
+	}
+
+	/// Set the directories allowed for local file access used by datastore features.
+	#[cfg(storage)]
+	pub fn file_allowlist<I, P>(mut self, paths: I) -> Self
+	where
+		I: IntoIterator<Item = P>,
+		P: AsRef<Path>,
+	{
+		self.datastore_config = with_path_allowlist(self.datastore_config, "file_allowlist", paths);
+		self
+	}
+
 	/// Set the interval at which the database should run node maintenance tasks
 	pub fn node_membership_refresh_interval(
 		mut self,
@@ -144,5 +171,36 @@ impl Config {
 	pub fn changefeed_gc_interval(mut self, interval: impl Into<Option<Duration>>) -> Self {
 		self.changefeed_gc_interval = interval.into().filter(|x| !x.is_zero());
 		self
+	}
+}
+
+#[cfg(storage)]
+fn with_path_allowlist<I, P>(config: ConfigMap, key: &str, paths: I) -> ConfigMap
+where
+	I: IntoIterator<Item = P>,
+	P: AsRef<Path>,
+{
+	config.with_key_value(key, path_allowlist_value(paths))
+}
+
+#[cfg(storage)]
+fn path_allowlist_value<I, P>(paths: I) -> String
+where
+	I: IntoIterator<Item = P>,
+	P: AsRef<Path>,
+{
+	paths
+		.into_iter()
+		.map(|path| path.as_ref().to_string_lossy().into_owned())
+		.collect::<Vec<_>>()
+		.join(path_allowlist_delimiter())
+}
+
+#[cfg(storage)]
+fn path_allowlist_delimiter() -> &'static str {
+	if cfg!(target_os = "windows") {
+		";"
+	} else {
+		":"
 	}
 }
