@@ -88,7 +88,7 @@ impl ExecOperator for VersionScope {
 			let stamp = v
 				.cast_to::<crate::val::Datetime>()
 				.map_err(|e| anyhow::anyhow!("{e}"))?
-				.to_version_stamp(ctx.txn().timestamp_impl().as_ref())?;
+				.to_version_stamp(ctx.txn().version_timestamp_impl().as_ref())?;
 
 			let versioned_ctx = ctx.with_version_stamp(Some(stamp));
 			let inner_stream = inner.execute(&versioned_ctx)?;

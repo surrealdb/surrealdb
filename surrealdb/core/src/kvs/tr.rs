@@ -555,4 +555,9 @@ impl Transactor {
 	pub fn timestamp_impl(&self) -> BoxTimeStampImpl {
 		self.inner.timestamp_impl()
 	}
+
+	/// Returns the timestamp implementation for `VERSION` queries.
+	pub fn version_timestamp_impl(&self) -> BoxTimeStampImpl {
+		self.inner.version_timestamp_impl()
+	}
 }

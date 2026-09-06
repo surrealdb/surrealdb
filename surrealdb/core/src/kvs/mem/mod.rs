@@ -665,7 +665,7 @@ impl Transactable for Transaction {
 		Box::pin(async move { Ok(()) })
 	}
 
-	fn timestamp_impl(&self) -> BoxTimeStampImpl {
+	fn version_timestamp_impl(&self) -> BoxTimeStampImpl {
 		Box::new(SurrealMxTimeStampImpl)
 	}
 }

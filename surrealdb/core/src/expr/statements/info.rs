@@ -58,7 +58,7 @@ impl InfoStatement {
 							.await
 							.catch_return()?
 							.cast_to::<Datetime>()?
-							.to_version_stamp(txn.timestamp_impl().as_ref())?,
+							.to_version_stamp(txn.version_timestamp_impl().as_ref())?,
 					),
 					_ => None,
 				};
@@ -131,7 +131,7 @@ impl InfoStatement {
 							.await
 							.catch_return()?
 							.cast_to::<Datetime>()?
-							.to_version_stamp(txn.timestamp_impl().as_ref())?,
+							.to_version_stamp(txn.version_timestamp_impl().as_ref())?,
 					),
 					_ => None,
 				};
@@ -184,7 +184,7 @@ impl InfoStatement {
 							.await
 							.catch_return()?
 							.cast_to::<Datetime>()?
-							.to_version_stamp(txn.timestamp_impl().as_ref())?,
+							.to_version_stamp(txn.version_timestamp_impl().as_ref())?,
 					),
 					_ => None,
 				};
@@ -312,7 +312,7 @@ impl InfoStatement {
 							.await
 							.catch_return()?
 							.cast_to::<Datetime>()?
-							.to_version_stamp(txn.timestamp_impl().as_ref())?,
+							.to_version_stamp(txn.version_timestamp_impl().as_ref())?,
 					),
 					_ => None,
 				};
