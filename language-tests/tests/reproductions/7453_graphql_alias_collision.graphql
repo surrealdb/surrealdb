@@ -1,0 +1,14 @@
+/**
+[env]
+imports = ["reproductions/7453_graphql_alias_collision_schema.surql"]
+
+[test]
+reason = "Because the alias now names the table's Object type, aliasing onto a built-in type is reported as a naming collision instead of silently shadowing it"
+issue = 7453
+
+[[test.results]]
+error = "Error generating schema: GraphQL naming collision on type `PageInfo` — built-in type `PageInfo` and table `widget` produce the same type. Set an explicit `GRAPHQL_ALIAS` on the table."
+*/
+query {
+	__typename
+}

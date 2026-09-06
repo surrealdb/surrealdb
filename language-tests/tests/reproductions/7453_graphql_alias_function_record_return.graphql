@@ -1,0 +1,38 @@
+/**
+[env]
+imports = ["reproductions/7453_graphql_alias_function_schema.surql"]
+
+[test]
+reason = "A function returning `record` or `record<a | b>` tags its result with the table's aliased Object type, so interface and union fragments still match"
+issue = 7453
+
+[[test.results]]
+value = "{ anyRecord: { __typename: 'Gadget', label: 'First' }, singleTarget: { label: 'First' }, unionGadget: { __typename: 'Gadget', label: 'First' }, unionWidget: { __typename: 'Widget', title: 'Second' } }"
+*/
+query {
+	# `record` — the interface. Without a concrete tag async-graphql reports
+	# `object "gadget" does not implement interface "record"`.
+	anyRecord: fn_any_record {
+		__typename
+		... on Gadget {
+			label
+		}
+	}
+	# `record<gadget | widget>` — the generated union, both ways round.
+	unionGadget: fn_pick_gadget {
+		__typename
+		... on Gadget {
+			label
+		}
+	}
+	unionWidget: fn_pick_widget {
+		__typename
+		... on Widget {
+			title
+		}
+	}
+	# `record<gadget>` — already the `Gadget` Object type, no tag involved.
+	singleTarget: fn_the_gadget {
+		label
+	}
+}

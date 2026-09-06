@@ -1,0 +1,36 @@
+/**
+[env]
+imports = ["reproductions/7453_graphql_alias_schema.surql"]
+
+[test]
+reason = "An aliased table still resolves: __typename reports the alias, and record links, relation traversals and the generic _get interface all reach the renamed Object type"
+issue = 7453
+
+[[test.results]]
+value = "{ _get: { label: 'First' }, holders: [{ item: { __typename: 'Gadget', label: 'First' }, uses: [{ out: { __typename: 'Gadget', label: 'First' } }] }], single: { __typename: 'Gadget', label: 'First' } }"
+*/
+query {
+	single: Gadget(id: "one") {
+		__typename
+		label
+	}
+	holders {
+		item {
+			__typename
+			label
+		}
+		uses {
+			out {
+				__typename
+				label
+			}
+		}
+	}
+	# The generic `_get` tags its result with the concrete type at runtime, so
+	# this only resolves if the alias reached that tag too.
+	_get(id: "gadget:one") {
+		... on Gadget {
+			label
+		}
+	}
+}

@@ -1,0 +1,20 @@
+/**
+[env]
+imports = ["reproductions/7453_graphql_alias_schema.surql"]
+
+[test]
+reason = "GRAPHQL_ALIAS on a nested field renames it and still resolves its value, like a top-level field alias does"
+issue = 7453
+
+[[test.results]]
+value = "{ widgets: [{ createdAt: '2024-01-15T10:00:00+00:00', price: { currency: 'EUR', inEuro: 9.5f } }] }"
+*/
+query {
+	widgets {
+		createdAt
+		price {
+			inEuro
+			currency
+		}
+	}
+}

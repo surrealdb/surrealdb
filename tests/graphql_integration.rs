@@ -7185,6 +7185,113 @@ mod graphql_integration {
 		Ok(())
 	}
 
+	/// A `GRAPHQL_ALIAS` renames the field in the schema but not in storage, so
+	/// the LIVE query behind a subscription has to project the *storage* name of
+	/// whatever was selected. Projecting the GraphQL name instead leaves the
+	/// value out of the notification, and a non-null field then fails to
+	/// resolve (#7453).
+	#[test(tokio::test)]
+	async fn subscriptions_live_query_projects_aliased_fields()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
+		let gql_ws_url = &format!("ws://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+					DEFINE TABLE thing SCHEMAFUL GRAPHQL_ALIAS 'Thing';
+					DEFINE FIELD user_count ON thing TYPE int GRAPHQL_ALIAS 'userCount';
+					DEFINE FIELD label ON thing TYPE string;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		let mut req = gql_ws_url.into_client_request()?;
+		req.headers_mut().insert("surreal-ns", ns.parse()?);
+		req.headers_mut().insert("surreal-db", db.parse()?);
+		req.headers_mut().insert("Sec-WebSocket-Protocol", "graphql-transport-ws".parse()?);
+		let (mut ws, _) = connect_async(req).await?;
+
+		ws.send(Message::Text(json!({"type":"connection_init"}).to_string().into())).await?;
+		let Some(Ok(Message::Text(ack_msg))) = ws.next().await else {
+			return Err(std::io::Error::other("expected websocket connection ack").into());
+		};
+		let ack_json: serde_json::Value = serde_json::from_str(&ack_msg)?;
+		assert_eq!(ack_json["type"], "connection_ack");
+
+		ws.send(Message::Text(
+			json!({
+				"id": "sub-alias",
+				"type": "subscribe",
+				"payload": {
+					"query": "subscription { Thing { id userCount label } }"
+				}
+			})
+			.to_string()
+			.into(),
+		))
+		.await?;
+
+		// Allow the server to fully register the live query before mutating data
+		tokio::time::sleep(Duration::from_secs(1)).await;
+
+		{
+			let res = client
+				.post(sql_url)
+				.body(r#"CREATE thing:1 SET user_count = 7, label = "seven";"#)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		let received = tokio::time::timeout(Duration::from_secs(10), async {
+			while let Some(frame) = ws.next().await {
+				let Ok(frame) = frame else {
+					continue;
+				};
+				let Message::Text(text) = frame else {
+					continue;
+				};
+				let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+					continue;
+				};
+				if matches!(value["type"].as_str(), Some("next" | "error"))
+					&& value["id"] == "sub-alias"
+				{
+					return Some(value);
+				}
+			}
+			None
+		})
+		.await?
+		.ok_or_else(|| std::io::Error::other("subscription stream ended before event"))?;
+
+		assert_eq!(received["type"], "next", "subscription errored: {received:?}");
+		assert_eq!(received["payload"]["data"]["Thing"]["id"], "thing:1");
+		assert_eq!(received["payload"]["data"]["Thing"]["userCount"], 7);
+		// The un-aliased field alongside it must keep working.
+		assert_eq!(received["payload"]["data"]["Thing"]["label"], "seven");
+		Ok(())
+	}
+
 	/// Helper to spin up an authless server with a fresh namespace/database and
 	/// return a GraphQL/SQL client pair.
 	async fn fresh_client() -> Result<

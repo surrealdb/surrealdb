@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use async_graphql::dynamic::indexmap::IndexMap;
@@ -110,14 +110,17 @@ fn make_table_subscription_field(
 	fds: Arc<[FieldDefinition]>,
 ) -> SubscriptionField {
 	let tb_name = tb.name.clone();
-	let tb_name_str = tb_name.as_str().to_string();
-	let table_filter_name = filter_name_from_table(&tb_name);
-	let selectable_fields = selectable_top_level_fields(&fds);
+	// The subscription field and its payload type follow the table's GraphQL
+	// name, so a `GRAPHQL_ALIAS` reaches them too (#7453).
+	let gql_name: Arc<str> = Arc::from(super::naming::table_base_name(tb));
+	let table_filter_name = filter_name_from_table(&gql_name);
+	let selectable_fields = Arc::new(selectable_top_level_fields(&fds));
 
-	SubscriptionField::new(tb_name_str.clone(), TypeRef::named(&tb_name_str), move |ctx| {
+	SubscriptionField::new(gql_name.to_string(), TypeRef::named(gql_name.as_ref()), move |ctx| {
 		let tb_name = tb_name.clone();
+		let gql_name = Arc::clone(&gql_name);
 		let fds = Arc::clone(&fds);
-		let selectable_fields = selectable_fields.clone();
+		let selectable_fields = Arc::clone(&selectable_fields);
 		SubscriptionFieldFuture::new(async move {
 			let ds = ctx.data::<Arc<Datastore>>()?;
 			let sess = ctx.data::<Arc<Session>>()?;
@@ -130,7 +133,7 @@ fn make_table_subscription_field(
 
 			let live_sess = sess.as_ref().clone().with_rt(true);
 			let fields = projected_live_fields(&ctx, &selectable_fields);
-			let cond = parse_subscription_cond(args, &fds, &tb_name)?;
+			let cond = parse_subscription_cond(args, &fds, &tb_name, &gql_name)?;
 			let fetch = parse_fetch_arg(args)?;
 			let live_id =
 				start_table_live_query(ds, &live_sess, &tb_name, fields, cond, fetch).await?;
@@ -161,15 +164,26 @@ fn make_table_subscription_field(
 	.argument(InputValue::new("fetch", TypeRef::named_nn_list(TypeRef::STRING)))
 }
 
-fn selectable_top_level_fields(fds: &[FieldDefinition]) -> HashSet<String> {
-	let mut out = HashSet::new();
-	out.insert("id".to_string());
+/// The top-level fields a subscription can project, keyed by the name they are
+/// selected under in GraphQL and valued by the SurrealQL field the LIVE query
+/// has to read.
+///
+/// The two diverge as soon as a field carries a `GRAPHQL_ALIAS` (#7453), so the
+/// mapping has to be built here rather than reconstructed from the selection
+/// set. Only single-part idioms are projectable: a nested `parent.child` field
+/// is reached by projecting `parent` whole.
+fn selectable_top_level_fields(fds: &[FieldDefinition]) -> HashMap<String, String> {
+	// Vec<(String, String)> with a linear scan would likely be slightly faster
+	// for under ~50 fields. Opting for code clarity over an unknown performance
+	// benefit with this cold code.
+	let mut out = HashMap::new();
+	out.insert("id".to_string(), "id".to_string());
 	for fd in fds {
 		if fd.name.0.len() != 1 {
 			continue;
 		}
 		if let Some(Part::Field(name)) = fd.name.0.first() {
-			out.insert(name.as_str().to_owned());
+			out.insert(super::naming::field_graphql_name(fd), name.as_str().to_owned());
 		}
 	}
 	out
@@ -177,23 +191,10 @@ fn selectable_top_level_fields(fds: &[FieldDefinition]) -> HashSet<String> {
 
 fn projected_live_fields(
 	ctx: &async_graphql::dynamic::ResolverContext<'_>,
-	selectable_fields: &HashSet<String>,
+	selectable_fields: &HashMap<String, String>,
 ) -> LiveFields {
-	let mut selected = Vec::new();
-	for field in ctx.field().selection_set() {
-		let name = field.name();
-		if name.starts_with("__") {
-			continue;
-		}
-		if selectable_fields.contains(name) {
-			selected.push(name.to_string());
-		}
-	}
-	if !selected.iter().any(|x| x == "id") {
-		selected.push("id".to_string());
-	}
-	selected.sort_unstable();
-	selected.dedup();
+	let selected =
+		projected_storage_names(ctx.field().selection_set().map(|f| f.name()), selectable_fields);
 	let projected = selected
 		.into_iter()
 		.map(|name| {
@@ -206,13 +207,41 @@ fn projected_live_fields(
 	LiveFields::Select(Fields::Select(projected))
 }
 
+/// Translate a subscription's selection set into the sorted list of SurrealQL
+/// field names its LIVE query should project.
+///
+/// Selections carry *GraphQL* names, so an aliased field has to be mapped back
+/// to its storage name before it reaches the projection — otherwise the value
+/// is never fetched and the cached notification resolves it as missing (#7453).
+/// Names that are not stored columns (introspection, relation fields, which
+/// resolve by their own queries) are dropped, and `id` is always projected
+/// because the notification payload is keyed by it.
+fn projected_storage_names<'a>(
+	selection: impl Iterator<Item = &'a str>,
+	selectable_fields: &HashMap<String, String>,
+) -> Vec<String> {
+	let mut selected: Vec<String> = selection
+		.filter(|name| !name.starts_with("__"))
+		.filter_map(|name| selectable_fields.get(name).cloned())
+		.collect();
+	if !selected.iter().any(|x| x == "id") {
+		selected.push("id".to_string());
+	}
+	selected.sort_unstable();
+	selected.dedup();
+	selected
+}
+
 fn parse_subscription_cond(
 	args: &IndexMap<Name, GraphqlValue>,
 	fds: &[FieldDefinition],
 	tb_name: &TableName,
+	gql_name: &str,
 ) -> Result<Option<Cond>, async_graphql::Error> {
 	let id_cond = parse_id_cond(args, tb_name)?;
-	let where_cond = parse_filter_arg(args, fds, tb_name.as_str(), &[])
+	// The `where` argument is typed by `_filter_<gql_name>`, so its enum scope
+	// has to be the table's GraphQL name rather than the SurrealQL one (#7453).
+	let where_cond = parse_filter_arg(args, fds, gql_name, &[])
 		.map_err(|e| async_graphql::Error::new(e.to_string()))?;
 	Ok(combine_cond(id_cond, where_cond))
 }
@@ -406,5 +435,64 @@ impl Drop for LiveQueryCleanup {
 				trace!(?err, ?live_id, "failed to cleanup GraphQL live query");
 			}
 		});
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// A `DEFINE FIELD <name> ON <tb> …` entry with the given `GRAPHQL_ALIAS`.
+	fn field(name: &str, alias: Option<&str>) -> FieldDefinition {
+		FieldDefinition {
+			name: Idiom(vec![Part::Field(name.into())]),
+			graphql_alias: alias.map(str::to_owned),
+			..Default::default()
+		}
+	}
+
+	#[test]
+	fn selectable_fields_are_keyed_by_the_graphql_name() {
+		let map = selectable_top_level_fields(&[
+			field("created_at", Some("createdAt")),
+			field("label", None),
+			// A nested sub-field is not projectable on its own; its parent is.
+			FieldDefinition {
+				name: Idiom(vec![Part::Field("price".into()), Part::Field("in_euro".into())]),
+				..Default::default()
+			},
+		]);
+		assert_eq!(map.get("createdAt").map(String::as_str), Some("created_at"));
+		assert_eq!(map.get("label").map(String::as_str), Some("label"));
+		assert_eq!(map.get("id").map(String::as_str), Some("id"));
+		// The raw name of an aliased field is not selectable — the generated
+		// Object type does not expose it under that name either.
+		assert!(!map.contains_key("created_at"));
+		assert!(!map.contains_key("in_euro"));
+	}
+
+	#[test]
+	fn an_aliased_selection_projects_its_storage_name() {
+		let map = selectable_top_level_fields(&[field("created_at", Some("createdAt"))]);
+		// Selecting `createdAt` has to reach `created_at` in the LIVE query, or
+		// the notification never carries the value the resolver looks up.
+		assert_eq!(
+			projected_storage_names(["createdAt"].into_iter(), &map),
+			vec!["created_at".to_string(), "id".to_string()]
+		);
+	}
+
+	#[test]
+	fn id_is_always_projected_and_unknown_names_are_dropped() {
+		let map = selectable_top_level_fields(&[field("label", None)]);
+		assert_eq!(
+			projected_storage_names(["__typename", "label", "uses_in", "label"].into_iter(), &map),
+			vec!["id".to_string(), "label".to_string()]
+		);
+		// An explicit `id` selection must not be projected twice.
+		assert_eq!(
+			projected_storage_names(["id", "label"].into_iter(), &map),
+			vec!["id".to_string(), "label".to_string()]
+		);
 	}
 }

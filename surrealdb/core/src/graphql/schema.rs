@@ -39,7 +39,7 @@ use super::ext::ValidatorExt;
 use crate::catalog::providers::{AuthorisationProvider, DatabaseProvider, TableProvider};
 use crate::catalog::{
 	DatabaseId, FieldDefinition, GraphQLConfig, GraphQLFunctionsConfig, GraphQLIntrospectionConfig,
-	GraphQLTablesConfig, NamespaceId,
+	GraphQLTablesConfig, NamespaceId, TableDefinition,
 };
 use crate::dbs::Session;
 use crate::expr::kind::{GeometryKind, KindLiteral};
@@ -66,6 +66,46 @@ pub(crate) struct SchemaContext<'a> {
 	pub ns: NamespaceId,
 	pub db: DatabaseId,
 	pub datastore: &'a Arc<Datastore>,
+}
+
+/// Maps a raw SurrealQL table name to the name of the GraphQL Object type
+/// generated for it.
+///
+/// The two are identical until `GRAPHQL_ALIAS` is set on the table (#7453), so
+/// every place that turns a *table name* into a *GraphQL type reference* —
+/// `record<foo>` field types, relation traversal targets,
+/// [`FieldValue::with_type`] on a resolved record link — has to resolve it here
+/// rather than using the table name directly.
+///
+/// Only aliased tables are stored; anything else maps to itself. Tables that
+/// are not exposed through GraphQL are therefore left untouched, producing the
+/// same dangling type reference they did before (async-graphql reports those at
+/// schema-build time).
+///
+/// Built once per schema and shared by `Arc` with the resolvers that need it at
+/// runtime, rather than registered as schema data: it is derived from the same
+/// catalog snapshot the schema was built from and never varies per request, so
+/// a captured handle is both cheaper and impossible to look up wrongly.
+#[derive(Clone, Debug, Default)]
+pub struct TableTypeNames(HashMap<String, String>);
+
+impl TableTypeNames {
+	/// Build the map from the tables that are being exposed.
+	pub(crate) fn new(tbs: &[TableDefinition]) -> Self {
+		Self(
+			tbs.iter()
+				.filter_map(|tb| {
+					let ty = super::naming::table_base_name(tb);
+					(ty != tb.name.as_str()).then(|| (tb.name.as_str().to_owned(), ty.to_owned()))
+				})
+				.collect(),
+		)
+	}
+
+	/// The GraphQL Object type name generated for `table`.
+	pub fn get<'a>(&'a self, table: &'a str) -> &'a str {
+		self.0.get(table).map_or(table, String::as_str)
+	}
 }
 
 /// Generate a complete GraphQL schema from database metadata.
@@ -162,6 +202,14 @@ pub async fn generate_schema(
 		None => Vec::new(),
 	};
 
+	// Resolved before any type is built: every generated type reference to a
+	// table goes through this, so it has to know about all exposed tables up
+	// front — including ones processed later than the field referring to them.
+	let table_types = Arc::new(match &tbs {
+		Some(tbs) => TableTypeNames::new(tbs),
+		None => TableTypeNames::default(),
+	});
+
 	let schema_ctx = SchemaContext {
 		tx: &tx,
 		ns: db_def.namespace_id,
@@ -182,11 +230,14 @@ pub async fn generate_schema(
 				&schema_ctx,
 				&relations,
 				&mut table_fields,
+				&table_types,
 			)
 			.await?;
 
 			// Generate mutations for all tables
-			mutation_obj = Some(process_mutations(Arc::clone(tbs), &mut types, &schema_ctx).await?);
+			mutation_obj = Some(
+				process_mutations(Arc::clone(tbs), &mut types, &schema_ctx, &table_types).await?,
+			);
 			subscription_obj = process_subscriptions(&tbs[..], &table_fields);
 		}
 		_ => {}
@@ -203,7 +254,7 @@ pub async fn generate_schema(
 	}
 
 	if let Some(fns) = fns {
-		query = process_fns(fns, query, &mut types, datastore).await?;
+		query = process_fns(fns, query, &mut types, datastore, &table_types).await?;
 	}
 
 	// Register all geometry-related types (enum, object types, union, input types)
@@ -515,8 +566,9 @@ pub fn kind_to_type(
 	kind: Kind,
 	types: &mut Vec<Type>,
 	is_input: bool,
+	table_types: &TableTypeNames,
 ) -> Result<TypeRef, GraphqlError> {
-	kind_to_type_with_enum_prefix(kind, types, is_input, None)
+	kind_to_type_with_enum_prefix(kind, types, is_input, None, table_types)
 }
 
 /// Maximum allowed depth of nested `array<...>` types in the generated GraphQL
@@ -538,8 +590,9 @@ pub fn kind_to_type_with_enum_prefix(
 	types: &mut Vec<Type>,
 	is_input: bool,
 	enum_scope: Option<&str>,
+	table_types: &TableTypeNames,
 ) -> Result<TypeRef, GraphqlError> {
-	kind_to_type_inner(kind, types, is_input, enum_scope, 0)
+	kind_to_type_inner(kind, types, is_input, enum_scope, table_types, 0)
 }
 
 fn kind_to_type_inner(
@@ -547,6 +600,7 @@ fn kind_to_type_inner(
 	types: &mut Vec<Type>,
 	is_input: bool,
 	enum_scope: Option<&str>,
+	table_types: &TableTypeNames,
 	array_depth: usize,
 ) -> Result<TypeRef, GraphqlError> {
 	let optional = kind.can_be_none();
@@ -567,16 +621,23 @@ fn kind_to_type_inner(
 		Kind::String => TypeRef::named(TypeRef::STRING),
 		Kind::Uuid => TypeRef::named("uuid"),
 		Kind::Table(ref _t) => TypeRef::named(kind.to_sql()),
-		Kind::Record(mut tables) => match tables.len() {
+		Kind::Record(tables) => match tables.len() {
 			0 => TypeRef::named("record"),
-			1 => TypeRef::named(tables.pop().expect("single table in record kind").into_string()),
+			1 => {
+				let table = tables.first().expect("single table in record kind");
+				TypeRef::named(table_types.get(table.as_str()).to_owned())
+			}
 			_ => {
-				let ty_name = tables.join("_or_");
+				// Both the union's own name and its members follow the tables'
+				// GraphQL Object type names, so a `GRAPHQL_ALIAS` shows up here
+				// too rather than resurrecting the raw table name (#7453).
+				let names: Vec<&str> = tables.iter().map(|t| table_types.get(t.as_str())).collect();
+				let ty_name = names.join("_or_");
 
 				let mut tmp_union = Union::new(ty_name.clone())
-					.description(format!("A record which is one of: {}", tables.join(", ")));
-				for n in tables {
-					tmp_union = tmp_union.possible_type(n.into_string());
+					.description(format!("A record which is one of: {}", names.join(", ")));
+				for n in &names {
+					tmp_union = tmp_union.possible_type(*n);
 				}
 
 				types.push(Type::Union(tmp_union));
@@ -636,7 +697,14 @@ fn kind_to_type_inner(
 			// to avoid creating a single-member union.
 			if ks.len() == 1 {
 				let inner = ks.into_iter().next().expect("checked len == 1");
-				let inner_ty = kind_to_type_inner(inner, types, is_input, enum_scope, array_depth)?;
+				let inner_ty = kind_to_type_inner(
+					inner,
+					types,
+					is_input,
+					enum_scope,
+					table_types,
+					array_depth,
+				)?;
 				// Unwrap any NonNull wrapper — the outer optional flag will re-apply
 				// nullability as needed.
 				return Ok(match optional {
@@ -681,7 +749,9 @@ fn kind_to_type_inner(
 
 			let pos_names: Result<Vec<TypeRef>, GraphqlError> = others
 				.into_iter()
-				.map(|k| kind_to_type_inner(k, types, is_input, enum_scope, array_depth))
+				.map(|k| {
+					kind_to_type_inner(k, types, is_input, enum_scope, table_types, array_depth)
+				})
 				.collect();
 			let pos_names: Vec<String> = pos_names?.into_iter().map(|tr| tr.to_string()).collect();
 			let ty_name = pos_names.join("_or_");
@@ -717,6 +787,7 @@ fn kind_to_type_inner(
 					types,
 					is_input,
 					enum_scope,
+					table_types,
 					array_depth + 1,
 				)?))
 			}
@@ -729,6 +800,7 @@ fn kind_to_type_inner(
 				types,
 				is_input,
 				enum_scope,
+				table_types,
 				array_depth,
 			);
 		}
@@ -1739,5 +1811,49 @@ mod tests {
 
 		let literal = GraphqlValue::String("19.99dec".to_owned());
 		assert_eq!(graphql_to_sql_kind(&literal, Kind::Decimal).unwrap(), decimal);
+	}
+
+	/// A table definition carrying the given `GRAPHQL_ALIAS`.
+	fn table(name: &str, alias: Option<&str>) -> TableDefinition {
+		let mut tb = TableDefinition::new(
+			crate::catalog::NamespaceId(1),
+			crate::catalog::DatabaseId(1),
+			crate::catalog::TableId(1),
+			name.into(),
+		);
+		tb.graphql_alias = alias.map(str::to_owned);
+		tb
+	}
+
+	#[test]
+	fn table_type_names_resolves_aliases_and_falls_back_to_the_table_name() {
+		let map = TableTypeNames::new(&[table("gadget", Some("Gadget")), table("holder", None)]);
+
+		assert_eq!(map.get("gadget"), "Gadget");
+		// Un-aliased tables resolve to themselves.
+		assert_eq!(map.get("holder"), "holder");
+		// Excluded tables stay untouched.
+		assert_eq!(map.get("never_exposed"), "never_exposed");
+	}
+
+	#[test]
+	fn table_type_names_stores_nothing_without_a_meaningful_alias() {
+		// The map is empty unless an alias actually changes a name.
+		let unaliased = TableTypeNames::new(&[table("widget", None), table("holder", None)]);
+		assert!(unaliased.0.is_empty(), "un-aliased tables must not be stored: {:?}", unaliased.0);
+
+		// An alias equal to the table name changes nothing either.
+		let identity = TableTypeNames::new(&[table("widget", Some("widget"))]);
+		assert!(identity.0.is_empty(), "identity alias must not be stored: {:?}", identity.0);
+
+		// An alias outside the GraphQL Name grammar is ignored by
+		// `table_base_name`, so it must not be stored either. `DEFINE TABLE …
+		// GRAPHQL_ALIAS` rejects these, so only a catalog entry predating that
+		// validation can reach here — which no language test can produce.
+		for invalid in ["My Table", "1st", "kebab-case", ""] {
+			let map = TableTypeNames::new(&[table("widget", Some(invalid))]);
+			assert!(map.0.is_empty(), "alias {invalid:?} should have been rejected");
+			assert_eq!(map.get("widget"), "widget");
+		}
 	}
 }

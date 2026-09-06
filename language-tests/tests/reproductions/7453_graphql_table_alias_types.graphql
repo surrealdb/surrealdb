@@ -1,0 +1,44 @@
+/**
+[env]
+imports = ["reproductions/7453_graphql_alias_schema.surql"]
+
+[test]
+reason = "GRAPHQL_ALIAS on a table names every type generated for it, not just the connection and input types"
+issue = 7453
+
+[[test.results]]
+value = "{ aggregateRow: { kind: 'OBJECT' }, connection: { kind: 'OBJECT' }, edge: { kind: 'OBJECT' }, filterInput: { kind: 'INPUT_OBJECT' }, groupableEnum: { kind: 'ENUM' }, objectType: { fields: [{ name: 'id' }, { name: 'label' }, { name: 'uses_in' }], kind: 'OBJECT' }, orderInput: { kind: 'INPUT_OBJECT' }, orderableEnum: { kind: 'ENUM' }, rawTableName: NULL }"
+*/
+query {
+	objectType: __type(name: "Gadget") {
+		kind
+		fields {
+			name
+		}
+	}
+	filterInput: __type(name: "_filter_Gadget") {
+		kind
+	}
+	orderInput: __type(name: "_order_Gadget") {
+		kind
+	}
+	orderableEnum: __type(name: "_orderable_Gadget") {
+		kind
+	}
+	groupableEnum: __type(name: "_groupable_Gadget") {
+		kind
+	}
+	aggregateRow: __type(name: "Gadget_aggregate_row") {
+		kind
+	}
+	connection: __type(name: "GadgetConnection") {
+		kind
+	}
+	edge: __type(name: "GadgetEdge") {
+		kind
+	}
+	# The raw table name must not leak a second type into the schema.
+	rawTableName: __type(name: "gadget") {
+		kind
+	}
+}

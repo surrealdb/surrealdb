@@ -127,6 +127,21 @@ pub(crate) fn field_graphql_name(fd: &FieldDefinition) -> String {
 	field_base_name(fd)
 }
 
+/// Field name exposed on a generated *nested* Object type for a sub-field
+/// declared as `parent.child` (or `parent.*.child`).
+///
+/// Such a field is addressed by the last segment of its idiom rather than by
+/// the whole idiom, so it cannot go through [`field_base_name`], whose fallback
+/// flattens the full path (`price.in_euro` → `price_in_euro`). An explicit
+/// `GRAPHQL_ALIAS` still wins, exactly as it does for a top-level field
+/// (#7453); `lookup_name` is the raw segment used otherwise.
+pub(crate) fn nested_field_graphql_name(fd: &FieldDefinition, lookup_name: &str) -> String {
+	match fd.graphql_alias.as_deref() {
+		Some(alias) if is_valid_graphql_identifier(alias) => alias.to_owned(),
+		_ => lookup_name.to_owned(),
+	}
+}
+
 /// Plural query field name — the table list query (e.g. `stores`).
 ///
 /// When `GRAPHQL <alias>` is set on the table the alias is treated as the
@@ -273,5 +288,46 @@ mod tests {
 		assert_eq!(pluralize("Person"), "Persons"); // naive, no irregulars
 		assert_eq!(pluralize("orders"), "orders"); // already plural
 		assert_eq!(pluralize(""), "");
+	}
+
+	/// A `DEFINE FIELD price.in_euro …` entry with the given `GRAPHQL_ALIAS`.
+	fn nested_field(alias: Option<&str>) -> FieldDefinition {
+		FieldDefinition {
+			name: Idiom(vec![Part::Field("price".into()), Part::Field("in_euro".into())]),
+			graphql_alias: alias.map(str::to_owned),
+			..Default::default()
+		}
+	}
+
+	#[test]
+	fn nested_field_name_prefers_the_alias_then_the_segment() {
+		// A sub-field of a generated nested Object type is addressed by the last
+		// segment of its idiom, so the un-aliased name is `in_euro` — not the
+		// flattened `price_in_euro` that `field_base_name` produces for the same
+		// definition. That difference is the reason both functions exist; if
+		// this assertion ever collapses, one of them is redundant.
+		let plain = nested_field(None);
+		assert_eq!(nested_field_graphql_name(&plain, "in_euro"), "in_euro");
+		assert_eq!(field_base_name(&plain), "price_in_euro");
+
+		let aliased = nested_field(Some("inEuro"));
+		assert_eq!(nested_field_graphql_name(&aliased, "in_euro"), "inEuro");
+	}
+
+	#[test]
+	fn nested_field_name_ignores_an_invalid_alias() {
+		// `DEFINE FIELD … GRAPHQL_ALIAS` rejects anything outside the GraphQL
+		// Name grammar, so this can only come from a catalog entry written
+		// before that validation existed. Degrade to the SurrealQL name rather
+		// than emitting a field GraphQL cannot parse — no language test can
+		// reach this, because the DDL path refuses to store such an alias.
+		for invalid in ["in euro", "1st", "in-euro", ""] {
+			let fd = nested_field(Some(invalid));
+			assert_eq!(
+				nested_field_graphql_name(&fd, "in_euro"),
+				"in_euro",
+				"alias {invalid:?} should have been rejected"
+			);
+		}
 	}
 }
