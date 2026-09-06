@@ -541,8 +541,9 @@ impl IndexRangeThingIterator {
 	///   key in the index keyspace.
 	/// - Otherwise, serialize the `from` value into an index field array and construct the boundary
 	///   key. For an inclusive lower bound use `prefix_ids_beg` (include all records with that
-	///   value); for an exclusive lower bound use `prefix_ids_end` so the scan starts after all
-	///   records with that exact value.
+	///   value); for an exclusive lower bound use `prefix_ids_composite_end` so the scan starts
+	///   after all records with that exact value, including compound entries whose remaining
+	///   columns are encoded after it.
 	fn compute_beg(
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -557,7 +558,7 @@ impl IndexRangeThingIterator {
 		if from.inclusive {
 			Index::prefix_ids_beg(ns, db, ix_what, index_id, &array)
 		} else {
-			Index::prefix_ids_end(ns, db, ix_what, index_id, &array)
+			Index::prefix_ids_composite_end(ns, db, ix_what, index_id, &array)
 		}
 	}
 
@@ -566,9 +567,12 @@ impl IndexRangeThingIterator {
 	/// - If `to.value` is `None` (unbounded), use the index-prefix end to stop at the last key in
 	///   the index keyspace.
 	/// - Otherwise, serialize the `to` value and construct the boundary key. For an inclusive upper
-	///   bound use `prefix_ids_end` so the scan can include all records with that exact value; for
-	///   an exclusive upper bound use `prefix_ids_beg` so the scan stops just before any key
-	///   matching that exact value.
+	///   bound use `prefix_ids_composite_end` so the scan can include all records with that exact
+	///   value — including keys that continue with further indexed columns (`prefix_ids_end`
+	///   appends the 0xff sentinel *after* the array terminator, which sorts before those
+	///   continuation bytes, so on a multi-column index `<=` would silently drop the rows equal to
+	///   the bound); for an exclusive upper bound use `prefix_ids_beg` so the scan stops just
+	///   before any key matching that exact value.
 	fn compute_end(
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -581,7 +585,7 @@ impl IndexRangeThingIterator {
 		};
 		let array = Array::from(vec![value.as_ref().clone()]);
 		if to.inclusive {
-			Index::prefix_ids_end(ns, db, ix_what, index_id, &array)
+			Index::prefix_ids_composite_end(ns, db, ix_what, index_id, &array)
 		} else {
 			Index::prefix_ids_beg(ns, db, ix_what, index_id, &array)
 		}
@@ -657,7 +661,9 @@ impl IndexRangeThingIterator {
 		if inclusive {
 			Index::prefix_ids_beg(ns, db, ix_what, index_id, &fd)
 		} else {
-			Index::prefix_ids_end(ns, db, ix_what, index_id, &fd)
+			// `fd` may still be shorter than the indexed column list, so the exclusive
+			// lower bound has to overwrite the array terminator rather than sit before it.
+			Index::prefix_ids_composite_end(ns, db, ix_what, index_id, &fd)
 		}
 	}
 
@@ -675,7 +681,11 @@ impl IndexRangeThingIterator {
 		let mut fd = prefix.clone();
 		fd.0.push(value.as_ref().clone());
 		if inclusive {
-			Index::prefix_ids_end(ns, db, ix_what, index_id, &fd)
+			// `composite_end`, not `prefix_ids_end`: when further indexed columns
+			// follow the range column, the bound must sort after their
+			// continuation bytes or `<=` drops the rows equal to the bound
+			// (see `compute_end`).
+			Index::prefix_ids_composite_end(ns, db, ix_what, index_id, &fd)
 		} else {
 			Index::prefix_ids_beg(ns, db, ix_what, index_id, &fd)
 		}
@@ -1250,8 +1260,11 @@ impl UniqueRangeThingIterator {
 	) -> Result<RangeScan> {
 		let from_bound = from.value.as_ref().map(|v| (v.as_ref(), from.inclusive));
 		let to_bound = to.value.as_ref().map(|v| (v.as_ref(), to.inclusive));
-		let (beg, beg_incl) = Self::compute_beg(ns, db, &ix.table_name, ix.index_id, from_bound)?;
-		let (end, end_incl) = Self::compute_end(ns, db, &ix.table_name, ix.index_id, to_bound)?;
+		let composite = ix.cols.len() > 1;
+		let (beg, beg_incl) =
+			Self::compute_beg(ns, db, &ix.table_name, ix.index_id, from_bound, composite)?;
+		let (end, end_incl) =
+			Self::compute_end(ns, db, &ix.table_name, ix.index_id, to_bound, composite)?;
 		Ok(RangeScan::new(beg, beg_incl, end, end_incl))
 	}
 
@@ -1311,6 +1324,7 @@ impl UniqueRangeThingIterator {
 		ix_what: &TableName,
 		index_id: IndexId,
 		from: Option<(&Value, bool)>,
+		composite: bool,
 	) -> Result<(Vec<u8>, bool)> {
 		let Some((from, inclusive)) = from else {
 			return Ok((Index::prefix_beg(ns, db, ix_what, index_id)?, true));
@@ -1320,7 +1334,18 @@ impl UniqueRangeThingIterator {
 			let key = if inclusive {
 				Index::prefix_ids_beg(ns, db, ix_what, index_id, &array)?
 			} else {
-				Index::prefix_ids_end(ns, db, ix_what, index_id, &array)?
+				Index::prefix_ids_composite_end(ns, db, ix_what, index_id, &array)?
+			};
+			return Ok((key, true));
+		}
+		if composite {
+			// A one-element array cannot address an entry of a compound unique index: the
+			// exact key sorts before every stored entry, which encodes the remaining
+			// columns. Bound the whole leading-column tuple instead.
+			let key = if inclusive {
+				Index::prefix_ids_composite_beg(ns, db, ix_what, index_id, &array)?
+			} else {
+				Index::prefix_ids_composite_end(ns, db, ix_what, index_id, &array)?
 			};
 			return Ok((key, true));
 		}
@@ -1334,15 +1359,25 @@ impl UniqueRangeThingIterator {
 		ix_what: &TableName,
 		index_id: IndexId,
 		to: Option<(&Value, bool)>,
+		composite: bool,
 	) -> Result<(Vec<u8>, bool)> {
 		let Some((to, inclusive)) = to else {
 			// Sentinel boundary key — no real record is stored here.
 			return Ok((Index::prefix_end(ns, db, ix_what, index_id)?, false));
 		};
 		let array = Array::from(vec![to.clone()]);
+		if composite && !array.is_any_none_or_null() {
+			// See `compute_beg`: bound the leading-column tuple, not the exact key.
+			let key = if inclusive {
+				Index::prefix_ids_composite_end(ns, db, ix_what, index_id, &array)?
+			} else {
+				Index::prefix_ids_composite_beg(ns, db, ix_what, index_id, &array)?
+			};
+			return Ok((key, false));
+		}
 		if array.is_any_none_or_null() {
 			let key = if inclusive {
-				Index::prefix_ids_end(ns, db, ix_what, index_id, &array)?
+				Index::prefix_ids_composite_end(ns, db, ix_what, index_id, &array)?
 			} else {
 				Index::prefix_ids_beg(ns, db, ix_what, index_id, &array)?
 			};
@@ -1350,6 +1385,9 @@ impl UniqueRangeThingIterator {
 			// `RangeScan` when the scan is exhausted (mirrors `compute_unique_range_end_key`).
 			return Ok((key, false));
 		}
+		// Single-column unique index: the exact encoded key addresses the entry itself, so
+		// keep the original bound semantics (`RangeScan` compensates an inclusive end with a
+		// trailing `get(end)`).
 		Ok((Index::new(ns, db, ix_what, index_id, &array, None).encode_key()?, inclusive))
 	}
 

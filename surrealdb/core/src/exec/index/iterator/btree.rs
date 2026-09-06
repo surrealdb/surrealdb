@@ -71,7 +71,7 @@ fn decode_record_ids(res: Vec<(Key, Val)>) -> Result<Vec<RecordId>> {
 ///
 /// Non-unique indexes store one KV entry per (value, record-id) pair, so an
 /// equality lookup may match many entries.  This iterator scans the
-/// half-open range `[prefix_ids_beg, prefix_ids_end)` in forward or
+/// half-open range `[prefix_ids_beg, prefix_ids_composite_end)` in forward or
 /// backward order, advancing/retreating the cursor after each batch.
 pub(crate) struct IndexEqualIterator {
 	/// Lower bound of the remaining scan range (inclusive).
@@ -108,7 +108,10 @@ impl IndexEqualIterator {
 	) -> Result<Self> {
 		let array = Array::from(vec![value.clone()]);
 		let beg = Index::prefix_ids_beg(ns, db, &ix.table_name, ix.index_id, &array)?;
-		let end = Index::prefix_ids_end(ns, db, &ix.table_name, ix.index_id, &array)?;
+		// `array` only covers the leading column, so the upper bound must overwrite the
+		// array terminator (composite form). Appending 0xff *after* the terminator would
+		// sort before every entry whose remaining columns are encoded, hiding all of them.
+		let end = Index::prefix_ids_composite_end(ns, db, &ix.table_name, ix.index_id, &array)?;
 		Ok(Self {
 			beg,
 			end,
@@ -208,7 +211,7 @@ impl UniqueEqualIterator {
 		let array = Array::from(vec![value.clone()]);
 		let inner = if array.is_any_none_or_null() {
 			let beg = Index::prefix_ids_beg(ns, db, &ix.table_name, ix.index_id, &array)?;
-			let end = Index::prefix_ids_end(ns, db, &ix.table_name, ix.index_id, &array)?;
+			let end = Index::prefix_ids_composite_end(ns, db, &ix.table_name, ix.index_id, &array)?;
 			UniqueEqualInner::PrefixScan {
 				beg,
 				end,
@@ -264,8 +267,11 @@ impl UniqueEqualIterator {
 /// Returns `(key, inclusive)` where:
 /// - **inclusive bound** (`>=`): uses `prefix_ids_beg` so the scan starts at the first entry for
 ///   the given value.
-/// - **exclusive bound** (`>`): uses `prefix_ids_end` so the scan starts *after* all entries for
-///   the given value.
+/// - **exclusive bound** (`>`): uses `prefix_ids_composite_end` so the scan starts *after* all
+///   entries for the given value. The `composite` variant replaces the array terminator with the
+///   0xff sentinel; `prefix_ids_end` appends it *after* the terminator, which still sorts before
+///   the continuation bytes of any further indexed column, so on a multi-column index `>` would
+///   include the bound value.
 /// - **no bound**: uses the index-wide `prefix_beg` (start of index).
 fn compute_index_range_beg_key(
 	ns: NamespaceId,
@@ -278,7 +284,10 @@ fn compute_index_range_beg_key(
 		if from.inclusive {
 			Ok((Index::prefix_ids_beg(ns, db, &ix.table_name, ix.index_id, &array)?, true))
 		} else {
-			Ok((Index::prefix_ids_end(ns, db, &ix.table_name, ix.index_id, &array)?, false))
+			Ok((
+				Index::prefix_ids_composite_end(ns, db, &ix.table_name, ix.index_id, &array)?,
+				false,
+			))
 		}
 	} else {
 		Ok((Index::prefix_beg(ns, db, &ix.table_name, ix.index_id)?, true))
@@ -288,8 +297,10 @@ fn compute_index_range_beg_key(
 /// Compute the end key for a non-unique index range scan.
 ///
 /// Returns `(key, inclusive)` where:
-/// - **inclusive bound** (`<=`): uses `prefix_ids_end` so the scan covers all entries for the given
-///   value.
+/// - **inclusive bound** (`<=`): uses `prefix_ids_composite_end` so the scan covers all entries
+///   for the given value, including keys that continue with further indexed columns (see
+///   [`compute_index_range_beg_key`] — with `prefix_ids_end` a multi-column index would silently
+///   drop the rows equal to the bound).
 /// - **exclusive bound** (`<`): uses `prefix_ids_beg` so the scan stops *before* any entry for the
 ///   given value.
 /// - **no bound**: uses the index-wide `prefix_end` (end of index).
@@ -302,7 +313,10 @@ fn compute_index_range_end_key(
 	if let Some(to) = to {
 		let array = Array::from(vec![to.value.clone()]);
 		if to.inclusive {
-			Ok((Index::prefix_ids_end(ns, db, &ix.table_name, ix.index_id, &array)?, true))
+			Ok((
+				Index::prefix_ids_composite_end(ns, db, &ix.table_name, ix.index_id, &array)?,
+				true,
+			))
 		} else {
 			Ok((Index::prefix_ids_beg(ns, db, &ix.table_name, ix.index_id, &array)?, false))
 		}
@@ -568,7 +582,19 @@ fn compute_unique_range_beg_key(
 			let key = if from.inclusive {
 				Index::prefix_ids_beg(ns, db, &ix.table_name, ix.index_id, &array)?
 			} else {
-				Index::prefix_ids_end(ns, db, &ix.table_name, ix.index_id, &array)?
+				Index::prefix_ids_composite_end(ns, db, &ix.table_name, ix.index_id, &array)?
+			};
+			Ok((key, true))
+		} else if ix.cols.len() > 1 {
+			// Compound unique index bounded on its leading column: the stored keys continue
+			// with the remaining columns, so they sort *after* the exact encoded key of the
+			// bound value alone — an inclusive bound would start before them (fine) but an
+			// equality-based skip for an exclusive bound would let them all through. Bound
+			// the whole value-prefix group with composite sentinels instead.
+			let key = if from.inclusive {
+				Index::prefix_ids_composite_beg(ns, db, &ix.table_name, ix.index_id, &array)?
+			} else {
+				Index::prefix_ids_composite_end(ns, db, &ix.table_name, ix.index_id, &array)?
 			};
 			Ok((key, true))
 		} else {
@@ -593,9 +619,21 @@ fn compute_unique_range_end_key(
 		let array = Array::from(vec![to.value.clone()]);
 		if array.is_any_none_or_null() {
 			let key = if to.inclusive {
-				Index::prefix_ids_end(ns, db, &ix.table_name, ix.index_id, &array)?
+				Index::prefix_ids_composite_end(ns, db, &ix.table_name, ix.index_id, &array)?
 			} else {
 				Index::prefix_ids_beg(ns, db, &ix.table_name, ix.index_id, &array)?
+			};
+			// Sentinel boundary keys never store a row; avoid a trailing `get(end)`.
+			Ok((key, false))
+		} else if ix.cols.len() > 1 {
+			// See `compute_unique_range_beg_key`: a one-element array cannot address a
+			// compound entry directly — the stored keys continue with the remaining columns
+			// and sort after it, so an inclusive bound would drop every row equal to the
+			// bound. Cover the whole value-prefix group with composite sentinels instead.
+			let key = if to.inclusive {
+				Index::prefix_ids_composite_end(ns, db, &ix.table_name, ix.index_id, &array)?
+			} else {
+				Index::prefix_ids_composite_beg(ns, db, &ix.table_name, ix.index_id, &array)?
 			};
 			// Sentinel boundary keys never store a row; avoid a trailing `get(end)`.
 			Ok((key, false))
@@ -1156,10 +1194,15 @@ impl CompoundRangeBackwardIterator {
 /// | Operator | `beg`                  | `end`                       |
 /// |----------|------------------------|-----------------------------|
 /// | `=`      | `prefix_ids_composite_beg(val)` | `prefix_ids_composite_end(val)` |
-/// | `>`      | `prefix_ids_end(val)`  | `prefix_ids_composite_end(prefix)` |
+/// | `>`      | `prefix_ids_composite_end(val)` | `prefix_ids_composite_end(prefix)` |
 /// | `>=`     | `prefix_ids_beg(val)`  | `prefix_ids_composite_end(prefix)` |
 /// | `<`      | `prefix_ids_composite_beg(prefix)` | `prefix_ids_beg(val)` |
-/// | `<=`     | `prefix_ids_composite_beg(prefix)` | `prefix_ids_end(val)` |
+/// | `<=`     | `prefix_ids_composite_beg(prefix)` | `prefix_ids_composite_end(val)` |
+///
+/// The `composite` variants replace the trailing array terminator with the
+/// sentinel so the bound covers keys that continue with further indexed
+/// columns; `prefix_ids_end` (sentinel appended *after* the terminator) is
+/// only a group upper bound when `val` covers every indexed column.
 ///
 /// When no range is present, the scan covers the full composite prefix.
 fn compute_compound_key_range(
@@ -1195,7 +1238,17 @@ fn compute_compound_key_range(
 				Ok((beg, end))
 			}
 			BinaryOperator::MoreThan => {
-				let beg = Index::prefix_ids_end(ns, db, &ix.table_name, ix.index_id, &key_array)?;
+				// `prefix_ids_composite_end` (not `prefix_ids_end`): the bound must sort
+				// after every key sharing the value prefix. `prefix_ids_end` appends 0xff
+				// after the array terminator, which still sorts before the continuation
+				// bytes of any further indexed column, so `>` would include the bound value.
+				let beg = Index::prefix_ids_composite_end(
+					ns,
+					db,
+					&ix.table_name,
+					ix.index_id,
+					&key_array,
+				)?;
 				let end = Index::prefix_ids_composite_end(
 					ns,
 					db,
@@ -1235,7 +1288,16 @@ fn compute_compound_key_range(
 					ix.index_id,
 					&prefix_array,
 				)?;
-				let end = Index::prefix_ids_end(ns, db, &ix.table_name, ix.index_id, &key_array)?;
+				// `prefix_ids_composite_end` (not `prefix_ids_end`): the exclusive end
+				// must sort after every key sharing the value prefix, otherwise `<=`
+				// silently drops the rows equal to the bound (see MoreThan above).
+				let end = Index::prefix_ids_composite_end(
+					ns,
+					db,
+					&ix.table_name,
+					ix.index_id,
+					&key_array,
+				)?;
 				Ok((beg, end))
 			}
 			_ => {
