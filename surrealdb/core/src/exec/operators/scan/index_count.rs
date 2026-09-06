@@ -32,8 +32,8 @@ use crate::catalog::{DatabaseId, Error, Index, NamespaceId, table_select_permiss
 use crate::err::EngineError;
 use crate::exec::index::access_path::{BTreeAccess, IndexRef};
 use crate::exec::permission::{
-	PhysicalPermission, convert_permission_to_physical_runtime, should_check_perms,
-	validate_record_user_access,
+	PhysicalPermission, check_permission_for_value, convert_permission_to_physical_runtime,
+	should_check_perms, validate_record_user_access,
 };
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
@@ -410,8 +410,6 @@ async fn count_with_filter_fallback(
 	permission: &PhysicalPermission,
 	predicate: &Arc<dyn PhysicalExpr>,
 ) -> Result<usize, ControlFlow> {
-	use crate::exec::permission::PhysicalPermission;
-
 	let txn = ctx.txn();
 	let range = RecordPrefix {
 		ns: ns_id,
@@ -446,17 +444,12 @@ async fn count_with_filter_fallback(
 				.context("Failed to deserialize record")?;
 			let value = record.data;
 
-			// Check per-record permission first.
-			let perm_allowed = match permission {
-				PhysicalPermission::Allow => true,
-				PhysicalPermission::Deny => false,
-				PhysicalPermission::Conditional(expr) => {
-					let eval_ctx = EvalContext::from_exec_ctx(ctx).with_value(&value);
-					expr.evaluate(eval_ctx).await.map(|v| v.is_truthy()).map_err(|e| {
-						ControlFlow::Err(anyhow::anyhow!("Failed to check permission: {e}"))
-					})?
-				}
-			};
+			// Check per-record permission first, through the same helper the scan
+			// path uses. The WHERE predicate below is NOT a permission and keeps
+			// its own evaluation, without the permission bypass.
+			let perm_allowed = check_permission_for_value(permission, &value, None, ctx)
+				.await
+				.map_err(ControlFlow::Err)?;
 			if !perm_allowed {
 				continue;
 			}

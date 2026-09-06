@@ -25,8 +25,8 @@ use crate::catalog::{DatabaseId, Error, Index, NamespaceId, table_select_permiss
 use crate::err::EngineError;
 use crate::exec::operators::scan::index_count::sum_index_count_deltas;
 use crate::exec::permission::{
-	PhysicalPermission, convert_permission_to_physical_runtime, should_check_perms,
-	validate_record_user_access,
+	PhysicalPermission, check_permission_for_value, convert_permission_to_physical_runtime,
+	should_check_perms, validate_record_user_access,
 };
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
@@ -396,17 +396,11 @@ async fn count_with_perm_fallback(
 				.context("Failed to deserialize record")?;
 			let value = record.data;
 
-			// Check per-record permission
-			let allowed = match permission {
-				PhysicalPermission::Allow => true,
-				PhysicalPermission::Deny => false,
-				PhysicalPermission::Conditional(expr) => {
-					let eval_ctx = EvalContext::from_exec_ctx(ctx).with_value(&value);
-					expr.evaluate(eval_ctx).await.map(|v| v.is_truthy()).map_err(|e| {
-						ControlFlow::Err(anyhow::anyhow!("Failed to check permission: {e}"))
-					})?
-				}
-			};
+			// Check per-record permission through the same helper the scan path
+			// uses, so a count and the SELECT it counts agree on visibility.
+			let allowed = check_permission_for_value(permission, &value, None, ctx)
+				.await
+				.map_err(ControlFlow::Err)?;
 			if allowed {
 				count += 1;
 			}
@@ -422,15 +416,5 @@ async fn check_perm_value(
 	value: &Value,
 	permission: &PhysicalPermission,
 ) -> Result<bool, ControlFlow> {
-	match permission {
-		PhysicalPermission::Allow => Ok(true),
-		PhysicalPermission::Deny => Ok(false),
-		PhysicalPermission::Conditional(expr) => {
-			let eval_ctx = EvalContext::from_exec_ctx(ctx).with_value(value);
-			expr.evaluate(eval_ctx)
-				.await
-				.map(|v| v.is_truthy())
-				.map_err(|e| ControlFlow::Err(anyhow::anyhow!("Failed to check permission: {e}")))
-		}
-	}
+	check_permission_for_value(permission, value, None, ctx).await.map_err(ControlFlow::Err)
 }
