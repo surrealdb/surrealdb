@@ -1,0 +1,18 @@
+/**
+[env]
+imports = ["reproductions/7452_graphql_enum_array_schema.surql"]
+
+[test]
+reason = "Elements of an `array<'A' | 'B'>` are read back as enum values, like a scalar literal union is — including when the array sits inside an `option<…>`"
+issue = 7452
+
+[[test.results]]
+value = "{ persons: [{ roles: ['PERSON_ROLES_ADMIN', 'PERSON_ROLES_DEV'], status: 'PERSON_STATUS_NEW', tags: ['PERSON_TAGS_X'] }] }"
+*/
+query {
+	persons {
+		status
+		roles
+		tags
+	}
+}

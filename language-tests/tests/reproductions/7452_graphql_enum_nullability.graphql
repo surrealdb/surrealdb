@@ -1,0 +1,26 @@
+/**
+[env]
+imports = ["reproductions/7452_graphql_enum_nullability_schema.surql"]
+
+[test]
+reason = "A literal-union field derives its non-null wrapper like every other kind: `'A' | 'B'` is `<Enum>!` and `option<'A' | 'B'>` stays nullable"
+issue = 7452
+
+[[test.results]]
+value = "{ __type: { fields: [{ name: 'id', type: { kind: 'NON_NULL', name: NULL, ofType: { kind: 'SCALAR', name: 'ID' } } }, { name: 'mood', type: { kind: 'ENUM', name: 'PERSON_MOOD_ENUM_HAPPY_OR_SAD', ofType: NULL } }, { name: 'name', type: { kind: 'NON_NULL', name: NULL, ofType: { kind: 'SCALAR', name: 'String' } } }, { name: 'note', type: { kind: 'SCALAR', name: 'String', ofType: NULL } }, { name: 'status', type: { kind: 'NON_NULL', name: NULL, ofType: { kind: 'ENUM', name: 'PERSON_STATUS_ENUM_ACTIVE_OR_BANNED' } } }] } }"
+*/
+query {
+	__type(name: "person") {
+		fields {
+			name
+			type {
+				kind
+				name
+				ofType {
+					kind
+					name
+				}
+			}
+		}
+	}
+}

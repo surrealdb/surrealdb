@@ -1,0 +1,26 @@
+/**
+[env]
+imports = ["reproductions/7452_graphql_enum_array_schema.surql"]
+
+[test]
+reason = "Enum values can be written into an `array<'A' | 'B'>` field, and read back unchanged"
+issue = 7452
+
+[[test.results]]
+value = "{ createPerson: { roles: ['PERSON_ROLES_DEV', 'PERSON_ROLES_ADMIN'], status: 'PERSON_STATUS_OLD', tags: ['PERSON_TAGS_Y'] } }"
+*/
+mutation {
+	createPerson(
+		data: {
+			id: "bob"
+			name: "Bob"
+			status: PERSON_STATUS_OLD
+			roles: [PERSON_ROLES_DEV, PERSON_ROLES_ADMIN]
+			tags: [PERSON_TAGS_Y]
+		}
+	) {
+		status
+		roles
+		tags
+	}
+}
