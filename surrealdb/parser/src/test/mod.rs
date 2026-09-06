@@ -4,6 +4,8 @@ use std::path::Path;
 use std::{env, fmt};
 
 use ast::Query;
+use ast::AstSpan;
+use ast::Expr;
 
 use crate::Config;
 
@@ -239,5 +241,78 @@ fn all_language_tests_impl() {
 	if failed != 0 {
 		eprintln!("\nFailed {failed} tests, parsed {successfull} tests successfully.");
 		panic!("Did not parse all the tests correctly");
+	}
+}
+
+fn literal_span<'a>(src: &'a str, ast: &ast::Ast, expr: Expr) -> Option<&'a str> {
+	let span = expr.ast_span(ast);
+	src.get(span.start as usize..span.end as usize)
+}
+
+#[test]
+fn spanned_literal_ast_span_does_not_include_following_token() {
+	let config = Config {
+		depth_limit: 1000,
+		generate_warnings: true,
+		feature_bearer_access: true,
+		feature_surrealism: true,
+		quirk_redefine: false,
+		quirk_block_first_no_semi: false,
+		quirk_delete_permission_field: false,
+	};
+
+	let cases: &[(&str, &[_])] = &[
+		("1.5 + 2", &["1.5"]),
+		("98dec = 98dec", &["98dec", "98dec"]),
+		(r#"["x", 15h]"#, &["15h"]),
+		(
+			r#"d"2024-01-01T00:00:00Z" = $value"#,
+			&[r#"d"2024-01-01T00:00:00Z""#],
+		),
+		(
+			r#"u"a8f30d8b-db67-47ec-8b38-ef703e05ad1b" = $value"#,
+			&[r#"u"a8f30d8b-db67-47ec-8b38-ef703e05ad1b""#],
+		),
+	];
+
+	for &(source, expected) in cases {
+		let (expr, ast) =
+			crate::Parser::enter_parse::<Expr>(source, config).expect("failed to parse");
+
+		let mut got = Vec::new();
+		let mut stack = vec![expr];
+		while let Some(e) = stack.pop() {
+			if matches!(
+				e,
+				Expr::Float(_)
+					| Expr::Decimal(_)
+					| Expr::Uuid(_)
+					| Expr::DateTime(_)
+					| Expr::Duration(_)
+			) {
+				if let Some(s) = literal_span(source, &ast, e) {
+					got.push(s);
+				}
+				continue;
+			}
+			match e {
+				Expr::Binary(id) => {
+					let binary = &ast[id];
+					stack.push(ast[binary.left]);
+					stack.push(ast[binary.right]);
+				}
+				Expr::Array(id) => {
+					for item in ast.iter_list(ast[id].entries) {
+						stack.push(ast[item]);
+					}
+				}
+				_ => {}
+			}
+		}
+		assert_eq!(
+			got,
+			expected,
+			"source `{source}`: expected literal spans {expected:?}, got {got:?}",
+		);
 	}
 }

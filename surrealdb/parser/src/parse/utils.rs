@@ -16,11 +16,7 @@ impl<T: ParseSync> ParseSync for Spanned<T> {
 
 		let value = T::parse_sync(parser)?;
 
-		let end = if let Some(x) = parser.peek()? {
-			x.span
-		} else {
-			parser.eof_span()
-		};
+		let end = parser.last_span;
 		Ok(Spanned {
 			value,
 			span: start.extend(end),
@@ -38,11 +34,7 @@ impl<T: Parse> Parse for Spanned<T> {
 
 		let value = T::parse(parser).await?;
 
-		let end = if let Some(x) = parser.peek()? {
-			x.span
-		} else {
-			parser.eof_span()
-		};
+		let end = parser.last_span;
 		Ok(Spanned {
 			value,
 			span: start.extend(end),
