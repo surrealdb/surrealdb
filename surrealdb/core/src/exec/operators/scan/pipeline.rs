@@ -1039,13 +1039,12 @@ impl PermissionPass {
 ///
 /// Re-derivation itself is skipped whenever it cannot change the answer: the
 /// table has no computed fields, no field on it restricts reads, or the stored
-/// pass cut nothing so `value` still equals the record.
+/// pass cut nothing.
 ///
-/// KNOWN GAP: a computed field that reaches its own row by dereferencing the
-/// record id (`COMPUTED id.secret`) is served by
-/// [`crate::exec::parts::field`] from raw storage rather than from `value`, so
-/// re-derivation does not reduce it and the denied source is still returned.
-/// The self-read has to consult the reduced row for that to hold.
+/// A computed field that reaches its own row by dereferencing the record id
+/// (`COMPUTED id.secret`) is served by [`crate::exec::parts::field`] from the
+/// view supplied here rather than from storage, so the reduction reaches it
+/// too.
 pub(crate) async fn materialise_fields_with_permissions(
 	ctx: &ExecutionContext,
 	state: &FieldState,
@@ -1053,7 +1052,25 @@ pub(crate) async fn materialise_fields_with_permissions(
 	skip_fetch_perms: bool,
 	check_perms: bool,
 ) -> Result<(), ControlFlow> {
-	compute_fields_for_value(ctx, state, value, skip_fetch_perms).await?;
+	// A key stored under a name the table now defines as COMPUTED stays in the
+	// record's bytes: it is unreachable through the field, but a
+	// self-dereference reads storage directly and would return it. Redefining a
+	// stored field as COMPUTED leaves exactly that.
+	//
+	// Sampled before the computed fields are written, which is the only point
+	// the stored key and the field that now shadows it are distinguishable, and
+	// applied to this first derivation rather than to the re-derivation below.
+	// Two reasons: the permission passes return early on a table that restricts
+	// no field, which would leave the shadowed key served there; and a
+	// re-derivation answers a computed field's own clause against `$value` from
+	// the second pass and `record` from the first, which is only sound where a
+	// cut makes the two genuinely differ.
+	let shadowed = match &*value {
+		Value::Object(obj) => state.dep_map.keys().any(|name| obj.contains_key(name.as_str())),
+		_ => false,
+	};
+	let first_view = shadowed.then(|| stored_fields_view(state, value));
+	compute_fields_for_value_against(ctx, state, value, skip_fetch_perms, first_view).await?;
 	// Nothing on the table restricts reads, so nothing can be cut and nothing
 	// needs re-deriving. Checked before the snapshot below so a table whose
 	// fields are all readable pays no clone.
@@ -1086,8 +1103,8 @@ pub(crate) async fn materialise_fields_with_permissions(
 		// Re-derive the computed fields, now against the reduced record, so one
 		// whose body reads a denied field yields `NONE` instead of the value it
 		// held before that field was cut. The same reduced row backs the
-		// self-dereference, so `id.<field>` cannot fetch the cut value back out
-		// of storage.
+		// self-dereference, so `id.<field>` reads neither the cut value nor a
+		// shadowed stored one back out of storage.
 		let stored_view = stored_fields_view(state, value);
 		compute_fields_for_value_against(ctx, state, value, skip_fetch_perms, Some(stored_view))
 			.await?;
