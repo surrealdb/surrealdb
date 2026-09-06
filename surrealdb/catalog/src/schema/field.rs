@@ -461,4 +461,38 @@ mod tests {
 			);
 		}
 	}
+
+	/// A field named after any reserved keyword must survive the stored-text
+	/// round-trip, as the leading segment and after a dot. The raw rendering
+	/// leaves a leading keyword bare, so this is what keeps a definition that
+	/// stores from becoming one that cannot be loaded — which would make the
+	/// whole table's schema unreadable, not just the one field. Pinning the
+	/// entire keyword set means a word added to `RESERVED_KEYWORD` cannot
+	/// reintroduce that.
+	#[test]
+	fn every_reserved_keyword_round_trips_as_a_field_name() {
+		for kw in common::keywords::RESERVED_KEYWORD.iter() {
+			let kw = kw.into_inner();
+			for name in [
+				Idiom::field(kw),
+				Idiom::field(kw).push(crate::expr::Part::Field(kw.into())),
+				Idiom::field("meta").push(crate::expr::Part::Field(kw.into())),
+			] {
+				let def = FieldDefinition {
+					name: name.clone(),
+					table: TableName::from("t"),
+					..Default::default()
+				};
+				let stored = def.to_stored();
+				assert_eq!(
+					FieldDefinition::from_stored(&stored).unwrap_or_else(|e| panic!(
+						"keyword field `{kw}` stored as `{}` did not load: {e}",
+						stored.name.as_str()
+					)),
+					def,
+					"keyword field `{kw}` did not survive to_stored/from_stored"
+				);
+			}
+		}
+	}
 }
