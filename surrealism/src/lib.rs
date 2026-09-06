@@ -22,8 +22,10 @@ pub use tokio;
 pub fn async_runtime() -> &'static tokio::runtime::Runtime {
 	static RT: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
 	RT.get_or_init(|| {
+		// `enable_io()` is intentionally omitted: it requires tokio's "net" feature,
+		// which does not compile on wasm32-wasip2 (tokio's own compile_error! guard
+		// rejects "net" for any wasm target), and no guest SDK code uses tokio I/O.
 		tokio::runtime::Builder::new_current_thread()
-			.enable_io()
 			.enable_time()
 			.build()
 			.expect("failed to build async runtime")
