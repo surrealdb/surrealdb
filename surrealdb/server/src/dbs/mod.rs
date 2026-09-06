@@ -1563,6 +1563,17 @@ mod tests {
 				true,
 				"<!DOCTYPE html>".to_string(),
 			),
+			(
+				Datastore::builder()
+					.with_capabilities(Capabilities::all())
+					.build_with_path("memory")
+					.await
+					.unwrap(),
+				Session::owner(),
+				"RETURN http::get('http://[2606:4700:4700::1001]')".to_string(),
+				true,
+				"<!DOCTYPE html>".to_string(),
+			),
 		];
 
 		for (idx, (ds, sess, query, succeeds, contains)) in cases.into_iter().enumerate() {

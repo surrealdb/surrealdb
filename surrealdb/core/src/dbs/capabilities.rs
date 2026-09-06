@@ -221,7 +221,12 @@ impl NetTarget {
 	pub(crate) async fn resolve(&self) -> Result<Vec<Self>, std::io::Error> {
 		match self {
 			NetTarget::Host(h, p) => {
-				let r = lookup_host((h.to_string(), p.unwrap_or(80)))
+				let addr = match h {
+					url::Host::Domain(domain) => domain.clone(),
+					url::Host::Ipv4(ipv4_addr) => ipv4_addr.to_string(),
+					url::Host::Ipv6(ipv6_addr) => ipv6_addr.to_string(),
+				};
+				let r = lookup_host((addr, p.unwrap_or(80)))
 					.await?
 					.map(|a| NetTarget::IPNet(a.ip().into()))
 					.collect();
