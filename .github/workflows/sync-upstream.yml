@@ -3,6 +3,10 @@
 # Scheduled and manual runs update main from surrealdb/surrealdb. A manual "push"
 # run sends any missing releases (and their tags) to surrealdb/surrealdb; the
 # variant that includes main also pushes main (which may carry unreleased fixes).
+#
+# Scheduled runs also check for releases that have not been pushed to
+# surrealdb/surrealdb and file an alert issue when one goes unsynced for more
+# than a day, so the manual "push (releases)" step cannot be silently forgotten.
 
 name: Sync with upstream
 
@@ -511,3 +515,90 @@ jobs:
 
             rm -rf "$workdir"
           done <<< "$source_releases"
+
+  # The releases push above is a manual step, so a release can silently stay
+  # unpublished on surrealdb/surrealdb (see surrealdb/surrealdb#7349 and
+  # surrealdb/surrealdb#7431). Scheduled runs compare the two release sets and
+  # keep exactly one alert issue open while drift exists.
+  release-drift:
+    name: Check for unsynced releases
+    if: github.repository != 'surrealdb/surrealdb' && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Harden the runner (audit egress)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Compare releases with surrealdb/surrealdb
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SRC_REPO: ${{ github.repository }}
+          DST_REPO: surrealdb/surrealdb
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          MIN_AGE_HOURS: "24"
+        run: |
+          set -euo pipefail
+          # A release younger than the threshold is still within the normal
+          # window for an operator to run "push (releases)"; only older ones
+          # count as drift.
+          cutoff="$(date -u -d "$MIN_AGE_HOURS hours ago" +%Y-%m-%dT%H:%M:%SZ)"
+          src="$(gh api --paginate "repos/$SRC_REPO/releases?per_page=100" \
+            --jq ".[] | select((.draft | not) and (.published_at != null) and (.published_at < \"$cutoff\")) | .tag_name" \
+            | sort -u)"
+          dst="$(gh api --paginate "repos/$DST_REPO/releases?per_page=100" \
+            --jq '.[] | select(.draft | not) | .tag_name' | sort -u)"
+          missing="$(comm -23 <(printf '%s\n' "$src") <(printf '%s\n' "$dst") | grep . || true)"
+
+          if [ -z "$missing" ]; then
+            echo "All releases older than ${MIN_AGE_HOURS}h exist on $DST_REPO"
+            # Drift is gone, so any open alert is stale; close it.
+            gh issue list --label "release-sync" --state open --json number --jq '.[].number' \
+              | while IFS= read -r n; do
+                  [ -z "$n" ] && continue
+                  gh issue close "$n" --comment "All releases are now synced to \`$DST_REPO\`."
+                done
+            exit 0
+          fi
+
+          echo "Releases missing on $DST_REPO:"
+          printf '%s\n' "$missing"
+
+          open_count="$(gh issue list --label "release-sync" --state open --json number --jq 'length')"
+          if [ "$open_count" != "0" ]; then
+            echo "An open release sync issue already exists, skipping"
+            exit 0
+          fi
+          # Ensure the label exists so issue creation cannot fail on it.
+          gh label create "release-sync" \
+            --description "Releases missing on the public repository" \
+            --color "D93F0B" --force
+          # Build the body from a static template, then inject trusted values as
+          # plain data so nothing in it is evaluated by the shell.
+          template="$(cat <<'EOF'
+          ## Releases not synced to surrealdb/surrealdb
+
+          The following releases were published here more than @@HOURS@@ hours ago
+          but do not exist on `surrealdb/surrealdb` (detected by run @@RUN_URL@@):
+
+          ```
+          @@MISSING@@
+          ```
+
+          To publish them, run the "Sync with upstream" workflow with direction
+          "push (releases)". This issue is closed automatically once a scheduled
+          run finds every release synced.
+          EOF
+          )"
+          body="${template//@@RUN_URL@@/$RUN_URL}"
+          body="${body//@@HOURS@@/$MIN_AGE_HOURS}"
+          body="${body//@@MISSING@@/$missing}"
+          gh issue create \
+            --title "Release sync needed: releases missing on surrealdb/surrealdb" \
+            --label "release-sync" \
+            --body "$body"
