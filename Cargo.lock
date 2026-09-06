@@ -2582,6 +2582,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "frostem"
+version = "1.20260804.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d0ae10cfccbae085dd8612669ccc116fe88bd5dfe39d202a8fa68c24c1e546f"
+
+[[package]]
 name = "fs-err"
 version = "3.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5995,16 +6001,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rust-stemmers"
-version = "1.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e46a2036019fdb888131db7a4c847a1063a7493f971ed94ea82c67eada63ca54"
-dependencies = [
- "serde",
- "serde_derive",
-]
-
-[[package]]
 name = "rust_decimal"
 version = "1.42.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6962,6 +6958,7 @@ dependencies = [
  "ext-sort",
  "fastnum",
  "flate2",
+ "frostem",
  "fst",
  "futures",
  "fuzzy-matcher",
@@ -7006,7 +7003,6 @@ dependencies = [
  "roaring",
  "rquickjs",
  "rstest",
- "rust-stemmers",
  "rust_decimal",
  "scrypt",
  "semver",
