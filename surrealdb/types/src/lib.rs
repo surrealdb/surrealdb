@@ -21,6 +21,14 @@ pub use flatbuffers::*;
 pub use hashmap::HashMap;
 pub use kind::*;
 pub use notification::*;
+/// The protobuf runtime the `proto` conversions are built on.
+///
+/// Re-exported so that a caller working with the generated messages -- sizing
+/// one against a transport's message limit, say -- reaches the same `prost`
+/// these conversions were built against, rather than pinning its own copy and
+/// risking two versions of the trait.
+#[cfg(feature = "proto")]
+pub use prost;
 #[cfg(feature = "proto")]
 pub use proto::{decode as decode_proto, encode as encode_proto};
 pub use sql::{SqlFormat, ToSql, fmt_non_finite_f64, write_sql};

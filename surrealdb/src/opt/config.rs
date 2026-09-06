@@ -6,6 +6,7 @@ use surrealdb_iam::Level;
 use surrealdb_rpc::capabilities::Capabilities as CoreCapabilities;
 
 use crate::opt::capabilities::Capabilities;
+use crate::opt::grpc::GrpcConfig;
 use crate::opt::websocket::WebsocketConfig;
 
 /// Configuration for a connection: credentials, capabilities, TLS, timeouts,
@@ -24,6 +25,7 @@ pub struct Config {
 	pub(crate) password: String,
 	pub(crate) capabilities: CoreCapabilities,
 	pub(crate) websocket: WebsocketConfig,
+	pub(crate) grpc: GrpcConfig,
 	#[cfg(storage)]
 	pub(crate) temporary_directory: Option<PathBuf>,
 	pub(crate) node_membership_refresh_interval: Option<Duration>,
@@ -107,6 +109,29 @@ impl Config {
 			return Err(crate::Error::internal("The write buffer size is too small".to_string()));
 		}
 		self.websocket = websocket;
+		Ok(self)
+	}
+
+	/// Set the gRPC config
+	pub fn grpc(mut self, grpc: GrpcConfig) -> crate::Result<Self> {
+		// Refused here rather than at connect: a size this small cannot work
+		// against any server, so there is nothing about the connection left to
+		// find out.
+		if let Some(size) = grpc.max_message_size
+			&& size < crate::opt::grpc::MIN_MESSAGE_SIZE
+		{
+			return Err(crate::Error::configuration(
+				format!(
+					"The gRPC maximum message size must be at least \
+					 {} bytes, and is {size}: a file transfer is framed in fixed {} byte \
+					 chunks, which a smaller limit cannot carry in either direction.",
+					crate::opt::grpc::MIN_MESSAGE_SIZE,
+					crate::opt::grpc::FILE_CHUNK_SIZE
+				),
+				None,
+			));
+		}
+		self.grpc = grpc;
 		Ok(self)
 	}
 

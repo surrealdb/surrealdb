@@ -27,7 +27,7 @@ use surrealdb_protocol::proto::rpc::v1::{
 };
 use surrealdb_rpc::capabilities::Capabilities;
 use surrealdb_server::ntw::{RouterOptions, SurrealRouter};
-use surrealdb_types::Value;
+use surrealdb_types::{QueryError, Value};
 use tokio_util::sync::CancellationToken;
 
 const USER: &str = "root";
@@ -212,6 +212,46 @@ async fn a_result_larger_than_one_message_still_arrives() {
 	);
 }
 
+/// Records wide enough that a full batch of them exceeds one message are split
+/// on bytes, not just on record count.
+///
+/// The SDK accepts compressed responses on every connection, and tonic weighs
+/// its send limit against the *compressed* payload while the receiving decoder
+/// applies its own limit to the decompressed one. A frame bounded only by
+/// record count can therefore be several times the limit, compress to almost
+/// nothing on the way out, and fail inside the client's decompressor -- where
+/// the caller sees a corrupt stream rather than a size. The padding here is a
+/// repeated byte precisely so that it compresses away: a fixture that did not
+/// compress would be refused on the way out and never reach the case this
+/// covers.
+#[tokio::test]
+async fn a_batch_of_wide_records_arrives_over_a_compressed_stream() {
+	let server = TestServer::start().await;
+	let db = server.connect_as_root().await;
+
+	// 48 records ramp to batches of 16 then 32; at this width the second batch
+	// is past the 4 MiB default, so it only arrives if bytes bound the frame.
+	const RECORDS: usize = 48;
+	const PADDING: usize = 140 * 1024;
+	const _: () = assert!(
+		32 * PADDING > 4 * 1024 * 1024,
+		"a full batch has to exceed one message for this to prove anything"
+	);
+
+	db.query(
+		"FOR $i IN array::range(0, $count) { CREATE type::record('wide', $i) SET pad = $pad }",
+	)
+	.bind(("count", RECORDS as i64))
+	.bind(("pad", "x".repeat(PADDING)))
+	.await
+	.expect("send")
+	.check()
+	.expect("create");
+
+	let all: Vec<Value> = db.select("wide").await.expect("a result split on bytes");
+	assert_eq!(all.len(), RECORDS, "every record must survive the split");
+}
+
 /// `run` reaches the database as its own RPC, so the function name travels as
 /// data rather than being compiled into a query the caller never wrote.
 #[tokio::test]
@@ -306,6 +346,32 @@ async fn a_failed_statement_does_not_fail_the_others() {
 	assert!(response.take::<Option<i64>>(1).is_err(), "the THROW is that statement's error");
 	let last: Option<i64> = response.take(2).expect("the statement after the failure");
 	assert_eq!(last, Some(42));
+}
+
+/// A statement's failure reaches the caller as the typed reason the taxonomy
+/// names, not merely as a message. The protocol states the message is not part
+/// of the contract and will be reworded, so a client that only receives one has
+/// nothing durable to branch on -- which is exactly what a retry loop around a
+/// transaction conflict depends on.
+#[tokio::test]
+async fn a_failed_statement_carries_its_typed_reason() {
+	let server = TestServer::start().await;
+	let db = server.connect_as_root().await;
+
+	// A failure inside a transaction block abandons the statements around it,
+	// and the executor reports each of those as `NotExecuted` -- the same
+	// per-statement error frame a conflicting `COMMIT` travels in.
+	let mut response = db
+		.query("BEGIN; CREATE person:one; THROW 'nope'; CREATE person:two; COMMIT")
+		.await
+		.expect("send");
+	let failures = response.take_errors();
+	let reasons: Vec<Option<&QueryError>> =
+		failures.values().map(surrealdb::Error::query_details).collect();
+	assert!(
+		reasons.contains(&Some(&QueryError::NotExecuted)),
+		"an abandoned statement should name its reason, got {reasons:?}"
+	);
 }
 
 /// Variables bound by the session outlive the request that set them, and are
@@ -975,4 +1041,33 @@ async fn export_frames_are_bounded_regardless_of_record_width() {
 	let text = String::from_utf8(body).expect("the export is utf-8");
 	assert!(text.contains("person:0"), "the export must carry its records");
 	assert!(text.contains(&format!("person:{}", RECORDS - 1)));
+}
+
+/// An error a query composes has no bound: `THROW` puts the thrown value in the
+/// message. A status carries its message as a trailer, where the peer's HTTP/2
+/// header list -- not the gRPC message size -- is the limit, and an oversized
+/// header block is refused rather than truncated: the caller sees an h2
+/// protocol error and loses the error entirely. Trimming is what keeps it an
+/// error.
+#[tokio::test]
+async fn an_unbounded_thrown_message_still_arrives_as_an_error() {
+	let server = TestServer::start().await;
+	let db = server.connect_as_root().await;
+
+	db.query("DEFINE FUNCTION fn::boom() { THROW string::repeat('q', 1000000) }")
+		.await
+		.expect("send")
+		.check()
+		.expect("define");
+
+	let error = db.run::<Value>("fn::boom").await.expect_err("the function throws");
+	let rendered = error.to_string();
+	assert!(
+		rendered.contains("qqq"),
+		"the thrown value has to survive as far as it fits: {rendered}"
+	);
+	assert!(
+		!rendered.contains("h2 protocol error"),
+		"an oversized trailer costs the caller the error itself: {rendered}"
+	);
 }

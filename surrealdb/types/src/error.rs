@@ -331,6 +331,39 @@ impl Error {
 		}
 	}
 
+	/// As [`from_parts`](Self::from_parts), but assigning the legacy numeric
+	/// code that the kind-specific constructors assign.
+	///
+	/// [`from_parts`](Self::from_parts) is for wire shapes that carry no code
+	/// and want the catch-all. A transport that rebuilds an error from its kind
+	/// and details wants the code matching what it rebuilt, so a consumer still
+	/// reading the backwards-compatible numeric field -- a proxy forwarding the
+	/// error, say -- sees the same value it would on any other transport.
+	///
+	/// Dispatching through the constructors rather than mapping the code here
+	/// is what keeps the two from drifting: there is one place a kind's code is
+	/// decided, and this is not it.
+	#[doc(hidden)]
+	pub fn from_wire(message: String, kind: Option<&str>, details: Option<Value>) -> Self {
+		let parsed = Self::from_parts(message, kind, details);
+		let message = parsed.message;
+		match parsed.details {
+			ErrorDetails::Validation(details) => Self::validation(message, details),
+			ErrorDetails::Configuration(details) => Self::configuration(message, details),
+			ErrorDetails::Query(details) => Self::query(message, details),
+			ErrorDetails::Serialization(details) => Self::serialization(message, details),
+			ErrorDetails::NotAllowed(details) => Self::not_allowed(message, details),
+			ErrorDetails::NotFound(details) => Self::not_found(message, details),
+			ErrorDetails::AlreadyExists(details) => Self::already_exists(message, details),
+			ErrorDetails::Connection(details) => Self::connection(message, details),
+			ErrorDetails::Thrown => Self::thrown(message),
+			ErrorDetails::Context => Self::context(message),
+			// `Internal`, and any kind a newer peer introduces, which the
+			// taxonomy already degrades to it.
+			_ => Self::internal(message),
+		}
+	}
+
 	/// Returns the optional underlying cause for error chaining.
 	pub fn cause(&self) -> Option<&Error> {
 		self.cause.as_deref()
@@ -1288,4 +1321,42 @@ pub fn union_conversion_error(expected: Kind, value: impl Into<Value>) -> Error 
 	ConversionError::from_value(expected, &value)
 		.with_context("Value does not match any variant in union type")
 		.into()
+}
+
+#[cfg(test)]
+mod tests {
+	use super::{Error, QueryError, Value, code};
+	use crate::Object;
+
+	/// The legacy numeric code is what a consumer predating the structured
+	/// model still reads, so an error rebuilt from its kind and details has to
+	/// carry the code that kind assigns. `from_parts` deliberately does not --
+	/// it is for wire shapes that carry no code at all -- which is the
+	/// difference these two spell out.
+	#[test]
+	fn from_wire_assigns_the_code_its_kind_would() {
+		let thrown = Error::from_wire("boom".to_string(), Some("Thrown"), None);
+		assert_eq!(thrown.code, code::THROWN);
+		assert_eq!(
+			Error::from_parts("boom".to_string(), Some("Thrown"), None).code,
+			code::INTERNAL_ERROR
+		);
+
+		// A reason carries its own code, which is finer than the kind's.
+		let mut conflict = Object::new();
+		conflict.insert("kind", Value::String("TransactionConflict".to_string()));
+		let error =
+			Error::from_wire("conflict".to_string(), Some("Query"), Some(Value::Object(conflict)));
+		assert_eq!(error.code, code::QUERY_TRANSACTION_CONFLICT);
+		assert_eq!(error.query_details(), Some(&QueryError::TransactionConflict));
+	}
+
+	/// A kind this build does not recognise still has to behave, and takes the
+	/// catch-all code with the catch-all kind.
+	#[test]
+	fn from_wire_degrades_an_unknown_kind_to_internal() {
+		let error = Error::from_wire("from the future".to_string(), Some("Telepathic"), None);
+		assert!(error.is_internal());
+		assert_eq!(error.code, code::INTERNAL_ERROR);
+	}
 }

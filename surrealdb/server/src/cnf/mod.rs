@@ -78,6 +78,61 @@ pub static HTTP_MAX_ATTACHED_SESSIONS: LazyLock<usize> =
 pub static WEBSOCKET_MAX_ATTACHED_SESSIONS: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_WEBSOCKET_MAX_ATTACHED_SESSIONS", usize, 256);
 
+/// The maximum size of a single gRPC message, in either direction
+/// (default: the HTTP `/rpc` body limit).
+///
+/// Bounds two things at once, and deliberately so: the decode limit the gRPC
+/// service enforces on a request, and the `max_message_bytes` the capability
+/// handshake advertises. A client sizes its own limits from what is
+/// advertised, so the two must be the same number -- advertising more than is
+/// enforced invites a client to send a message the service then rejects mid
+/// body, which reaches it as an opaque HTTP/2 stream error rather than as a
+/// status naming the limit.
+///
+/// The default tracks `SURREAL_HTTP_MAX_RPC_BODY_SIZE` so that the two RPC
+/// transports sharing this listener start out bounded alike, rather than gRPC
+/// carrying a message size the HTTP route would refuse. Raise it for a
+/// workload whose individual records or transactions exceed it -- bulk
+/// ingest of embeddings is the usual case -- keeping in mind that this is the
+/// memory a single caller can make the server buffer for one message.
+///
+/// A value below [`GRPC_MIN_MESSAGE_SIZE`] is raised to it, and one that is not
+/// a size at all falls back to the default.
+pub static GRPC_MAX_MESSAGE_SIZE: LazyLock<usize> =
+	LazyLock::new(|| grpc_message_size(env::var("SURREAL_GRPC_MAX_MESSAGE_SIZE").ok().as_deref()));
+
+/// The smallest gRPC message size that leaves the service able to do its job.
+///
+/// The service frames an export and an import at a fixed
+/// `DEFAULT_FILE_CHUNK_SIZE`, and reports that same figure as the handshake's
+/// `max_chunk_bytes`, so a message size below it would advertise a chunk the
+/// same handshake says cannot be carried, and every export would fail while
+/// still appearing to be offered. The allowance above the chunk covers the
+/// fields wrapping it in its response message, which are tens of bytes.
+///
+/// A message size anywhere near this floor is a very unusual thing to want.
+/// The floor is here so that a mistaken one degrades to a working service
+/// rather than to one that starts, advertises its methods, and fails every
+/// call.
+pub(crate) const GRPC_MIN_MESSAGE_SIZE: usize =
+	surrealdb_protocol::DEFAULT_FILE_CHUNK_SIZE + (4 << 10);
+
+/// Resolves the configured gRPC message size.
+///
+/// Anything unparseable, or absent, takes the default. Whatever the source, the
+/// result is raised to [`GRPC_MIN_MESSAGE_SIZE`]: this limit governs every
+/// message the service encodes, so a value too small to carry one leaves a
+/// service no client can even hand shake with. Zero is only the most obvious of
+/// those; an inherited `SURREAL_HTTP_MAX_RPC_BODY_SIZE` that has itself been
+/// set very low is the least.
+fn grpc_message_size(configured: Option<&str>) -> usize {
+	use common::str::ParseBytes;
+	configured
+		.and_then(|var| var.parse_bytes::<usize>().ok())
+		.unwrap_or(*HTTP_MAX_RPC_BODY_SIZE)
+		.max(GRPC_MIN_MESSAGE_SIZE)
+}
+
 /// The maximum number of explicitly attached sessions the gRPC transport will
 /// retain at once (default: 16384).
 ///
@@ -397,3 +452,40 @@ pub static PKG_VERSION: LazyLock<String> = LazyLock::new(|| {
 /// `tokio-console` feature.
 pub static ENABLE_TOKIO_CONSOLE: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_TOKIO_CONSOLE_ENABLED", bool, false);
+
+#[cfg(test)]
+mod tests {
+	use super::{GRPC_MIN_MESSAGE_SIZE, HTTP_MAX_RPC_BODY_SIZE, grpc_message_size};
+
+	/// A size this small configures the service to refuse messages it has to be
+	/// able to send -- `GetCapabilities` at the bottom end, an export chunk at
+	/// the top -- leaving a service that starts, advertises its methods and
+	/// then fails every call.
+	#[test]
+	fn an_unusable_grpc_message_size_is_raised_to_the_floor() {
+		for configured in ["0", "1", "1k", "255k"] {
+			assert_eq!(
+				grpc_message_size(Some(configured)),
+				GRPC_MIN_MESSAGE_SIZE,
+				"{configured} cannot carry a message this service must send"
+			);
+		}
+	}
+
+	/// A value that is not a size says nothing about intent, so it takes the
+	/// default rather than the floor.
+	#[test]
+	fn an_unreadable_grpc_message_size_takes_the_default() {
+		let default = *HTTP_MAX_RPC_BODY_SIZE;
+		assert_eq!(grpc_message_size(Some("banana")), default, "a word is not a size");
+		assert_eq!(grpc_message_size(Some("")), default, "nor is nothing");
+		assert_eq!(grpc_message_size(None), default, "and unset is the default");
+	}
+
+	/// A size an operator actually meant is honoured, with the byte suffixes
+	/// the other size settings accept.
+	#[test]
+	fn a_configured_grpc_message_size_is_honoured() {
+		assert_eq!(grpc_message_size(Some("128mib")), 128 << 20);
+	}
+}

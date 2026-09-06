@@ -69,15 +69,18 @@ use surrealdb_rpc::error::{invalid_params, method_not_allowed, session_exists, s
 use surrealdb_rpc::{
 	DbResult, Method, QUERY_STREAM_BUFFER, QueryResult, QueryStreamItem, QueryType, Token, export,
 };
-use surrealdb_types::{Array, Error as TypesError, HashMap, Notification, SurrealValue, Value};
+use surrealdb_types::{
+	Array, Error as TypesError, ErrorDetails as TypesErrorDetails, HashMap, Notification,
+	QueryError, SurrealValue, Value,
+};
 use tokio::sync::{RwLock, mpsc};
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 use web_time::Instant;
 
 use crate::cnf::{
-	GRPC_MAX_ATTACHED_SESSIONS, GRPC_NOTIFICATION_BUFFER, HTTP_MAX_IMPORT_BODY_SIZE,
-	HTTP_MAX_RPC_BODY_SIZE, MAX_TRANSACTIONS_PER_SESSION, PKG_NAME, PKG_VERSION,
+	GRPC_MAX_ATTACHED_SESSIONS, GRPC_MAX_MESSAGE_SIZE, GRPC_NOTIFICATION_BUFFER,
+	HTTP_MAX_IMPORT_BODY_SIZE, MAX_TRANSACTIONS_PER_SESSION, PKG_NAME, PKG_VERSION,
 };
 use crate::rpc::RpcState;
 
@@ -87,21 +90,150 @@ use crate::rpc::RpcState;
 /// their bytes the same way.
 const EXPORT_CHUNK_SIZE: usize = surrealdb_protocol::DEFAULT_FILE_CHUNK_SIZE;
 
+/// An export is framed by bytes rather than by records, so its frames are
+/// bounded by construction -- provided the fixed chunk still fits the smallest
+/// message size an operator can configure. Checked here rather than in a test
+/// because both sides are constants: a chunk size raised past the floor should
+/// fail the build, not a run.
+const _: () = assert!(
+	EXPORT_CHUNK_SIZE + QUERY_FRAME_RESERVE <= crate::cnf::GRPC_MIN_MESSAGE_SIZE,
+	"an export chunk plus its framing must fit the smallest configurable message"
+);
+
 /// The most records one query batch frame carries, whatever a client asks for.
 ///
 /// A statement's results are split across frames so that no single message
-/// grows with the result set: a gRPC client decodes 4 MiB per message by
-/// default, so without this an otherwise valid large `SELECT` is refused
-/// outright rather than returning its rows.
+/// grows with the result set: a message past the configured
+/// `GRPC_MAX_MESSAGE_SIZE` is refused at both ends, so without this an
+/// otherwise valid large `SELECT` is refused outright rather than returning its
+/// rows.
 ///
-/// The bound is a record count, not a byte budget, because measuring the
-/// encoded size would mean depending on `prost` here. At 256 a record has
-/// 16 KiB before a frame approaches that default, which covers ordinary
-/// records but is not a guarantee -- a table of documents averaging more than
-/// that still needs the client to raise its limit, which it does from the
-/// `max_message_bytes` this server reports. Bounding the frame in bytes is the
-/// only way to make it unconditional.
+/// This is the record half of the bound and the reason a frame stays small
+/// enough to be worth streaming; [`query_value_budget`] is the byte half and
+/// the reason it is never too large to carry. Whichever is reached first ends
+/// the frame.
 const QUERY_BATCH_RECORDS: usize = 256;
+
+/// Bytes of every query batch frame reserved for what is not a record.
+///
+/// A frame carries its statement and batch indices, its kind, its stats and
+/// the tag and length prefix of each level it nests through. All of those are
+/// fixed-width scalars measured in tens of bytes, so a kibibyte is several
+/// times what the largest of them needs -- and it is charged against a message
+/// size whose own floor is [`GRPC_MIN_MESSAGE_SIZE`], where it costs well under
+/// a percent of the payload.
+///
+/// A frame carrying an error carries no records, so the two never compete for
+/// the same budget.
+///
+/// [`GRPC_MIN_MESSAGE_SIZE`]: crate::cnf::GRPC_MIN_MESSAGE_SIZE
+const QUERY_FRAME_RESERVE: usize = 1 << 10;
+
+/// Bytes charged to a variable-length field on top of its own encoding.
+///
+/// Such a field -- a record inside a repeated one, an error's message -- is
+/// prefixed on the wire by a tag and its length as a varint. The tag is one
+/// byte at these field numbers and the varint is at most five for any length
+/// that could fit in a message at all, so six is an upper bound rather than an
+/// estimate; charging an upper bound is what makes the budget a guarantee
+/// rather than a hope.
+const WIRE_FIELD_OVERHEAD: usize = 6;
+
+/// The most encoded bytes of variable-sized payload one frame carries: the
+/// records of a batch, or the message and details of an error.
+///
+/// The bound is on the *encoded* size, taken before the frame is handed to
+/// tonic, because that is the only measurement both peers agree on. tonic
+/// applies the send-side limit to the compressed payload while the receiving
+/// client applies its own to the decompressed one, so a frame bounded after
+/// compression can still be one the client refuses to decompress -- a failure
+/// that surfaces there as a truncated or corrupt stream rather than as the
+/// limit it is. Measuring first costs one `encoded_len` walk per record, which
+/// the encoder was going to do anyway.
+///
+/// A single record larger than this cannot be framed under it at any record
+/// count, so the statement that produced it fails naming the limit rather than
+/// emitting a frame neither end will take.
+fn frame_payload_budget() -> usize {
+	GRPC_MAX_MESSAGE_SIZE.saturating_sub(QUERY_FRAME_RESERVE).max(1)
+}
+
+/// Hands back a unary response once it is known to encode within the message
+/// size this server advertises, refusing it as a status naming the limit
+/// otherwise.
+///
+/// Every unary response goes through this, including the ones that carry
+/// nothing a caller can influence. Only `Run` can currently return a value
+/// large enough to matter, but deciding that per method is a judgement that has
+/// to be made again whenever a response gains a field, and getting it wrong is
+/// silent: tonic weighs the *compressed* payload against its send limit, so an
+/// oversized response that happens to compress goes out and fails inside the
+/// client's decompressor, where nothing names a size. `encoded_len` on an empty
+/// message is a few instructions, which is a small price for a rule with no
+/// exceptions.
+///
+/// The streaming responses are the deliberate exception, because a stream has
+/// no single message to weigh. Each of them bounds its own frames instead:
+/// query batches against [`frame_payload_budget`], exports against
+/// [`EXPORT_CHUNK_SIZE`], and subscriptions per notification.
+fn checked_response<M: surrealdb_types::prost::Message>(message: M) -> Result<M, Status> {
+	let size = message.encoded_len();
+	let limit = *GRPC_MAX_MESSAGE_SIZE;
+	if size > limit {
+		return Err(Status::resource_exhausted(format!(
+			"The response encodes to {size} bytes, above this server's gRPC message limit of \
+			 {limit} bytes. Raise SURREAL_GRPC_MAX_MESSAGE_SIZE on this server."
+		)));
+	}
+	Ok(message)
+}
+
+/// Hands back a subscription frame that fits in one message, or the error that
+/// replaces one which does not.
+///
+/// The only frame that can be too large is a notification, whose record a
+/// client's own writes decide the size of, and it is a single record with no
+/// smaller form -- so what the subscriber gets is the reason instead of the
+/// change.
+fn bounded_notification(frame: rpc::subscribe_response::Frame) -> rpc::subscribe_response::Frame {
+	use surrealdb_types::prost::Message;
+
+	let limit = *GRPC_MAX_MESSAGE_SIZE;
+	let response = rpc::SubscribeResponse {
+		frame: Some(frame),
+	};
+	let size = response.encoded_len();
+	if size <= limit {
+		// Restored from the message it was measured in; the field was set
+		// immediately above.
+		return response.frame.expect("the frame this was built around");
+	}
+	rpc::subscribe_response::Frame::Error(to_proto_error(&oversized_record(size, limit)))
+}
+
+/// What one record costs a frame: its own encoding plus the wire's per-element
+/// framing.
+fn record_cost(value: &proto::Value) -> usize {
+	use surrealdb_types::prost::Message;
+
+	value.encoded_len() + WIRE_FIELD_OVERHEAD
+}
+
+/// The failure a record too large for any frame is reported as.
+///
+/// Named as a size against a limit, and pointing at the setting that moves it,
+/// because the alternative a caller has is not to retry but to reconfigure --
+/// or to project fewer fields.
+fn oversized_record(size: usize, budget: usize) -> TypesError {
+	TypesError::validation(
+		format!(
+			"A single record encodes to {size} bytes, above the {budget} bytes one gRPC message \
+			 can carry. Raise SURREAL_GRPC_MAX_MESSAGE_SIZE on this server, or select fewer \
+			 fields."
+		),
+		surrealdb_types::ValidationError::InvalidRequest,
+	)
+}
 
 /// A registered LIVE query, and the subscription streaming it (once one
 /// attaches).
@@ -324,14 +456,15 @@ impl Grpc {
 			// exists for -- and the protocol's only channel for it is the
 			// terminal error frame. The registration is left in place so the
 			// client can still `KILL` the broken query.
-			surrealdb_types::Action::Error => {
-				rpc::subscribe_response::Frame::Error(proto::SurrealError::new(
+			surrealdb_types::Action::Error => rpc::subscribe_response::Frame::Error(bounded_error(
+				proto::SurrealError::new(
 					proto::ErrorKind::Query,
 					notification.result.clone().into_string().unwrap_or_else(|_| {
 						"The live query raised an evaluation error".to_string()
 					}),
-				))
-			}
+				),
+				frame_payload_budget(),
+			)),
 			action => match to_proto_notification(notification, action) {
 				Ok(notification) => {
 					if let Some(observer) = self.metrics_observer.as_ref() {
@@ -348,6 +481,12 @@ impl Grpc {
 				Err(error) => rpc::subscribe_response::Frame::Error(to_proto_error(&error)),
 			},
 		};
+		// A notification is one record and cannot be split, so a record too
+		// large for a message ends the subscription carrying the reason. That
+		// is the same answer this gives a change it cannot render: a stream
+		// with no retention and no resumption has no way to skip one and stay
+		// truthful about what the subscriber has seen.
+		let frame = bounded_notification(frame);
 		let mut terminal = !matches!(frame, rpc::subscribe_response::Frame::Notification(_));
 		// The last slot is held back for a terminal frame, so a subscriber that
 		// has fallen behind can always be told why its stream is ending.
@@ -828,9 +967,9 @@ impl SurrealDbService for GrpcService {
 				client.name, client.version, client.platform
 			);
 		}
-		Ok(Response::new(rpc::GetCapabilitiesResponse {
+		Ok(Response::new(checked_response(rpc::GetCapabilitiesResponse {
 			capabilities: Some(self.server_capabilities()),
-		}))
+		})?))
 	}
 
 	async fn health(
@@ -844,7 +983,7 @@ impl SurrealDbService for GrpcService {
 			error!("Health check failed: {err}");
 			Status::unavailable("Health check failed")
 		})?;
-		Ok(Response::new(rpc::HealthResponse {}))
+		Ok(Response::new(checked_response(rpc::HealthResponse {})?))
 	}
 
 	async fn attach_session(
@@ -866,10 +1005,10 @@ impl SurrealDbService for GrpcService {
 				.verify_caller_for_session(&id, self.caller.au.as_ref())
 				.await
 				.map_err(|err| to_status(&err))?;
-			return Ok(Response::new(rpc::AttachSessionResponse {
+			return Ok(Response::new(checked_response(rpc::AttachSessionResponse {
 				session: Some(proto::Uuid::from_uuid(id)),
 				created: false,
-			}));
+			})?));
 		}
 		// Creating a session mints its id here, so it is unguessable and
 		// unique by construction.
@@ -880,10 +1019,10 @@ impl SurrealDbService for GrpcService {
 			timeout: context.and_then(|context| context.timeout),
 		};
 		self.execute(Some(&context), Method::Attach, Array::new()).await?;
-		Ok(Response::new(rpc::AttachSessionResponse {
+		Ok(Response::new(checked_response(rpc::AttachSessionResponse {
 			session: Some(proto::Uuid::from_uuid(id)),
 			created: true,
-		}))
+		})?))
 	}
 
 	async fn detach_session(
@@ -892,7 +1031,7 @@ impl SurrealDbService for GrpcService {
 	) -> Result<Response<rpc::DetachSessionResponse>, Status> {
 		let context = request.into_inner().context;
 		self.execute(context.as_ref(), Method::Detach, Array::new()).await?;
-		Ok(Response::new(rpc::DetachSessionResponse {}))
+		Ok(Response::new(checked_response(rpc::DetachSessionResponse {})?))
 	}
 
 	async fn reset_session(
@@ -901,7 +1040,7 @@ impl SurrealDbService for GrpcService {
 	) -> Result<Response<rpc::ResetSessionResponse>, Status> {
 		let context = request.into_inner().context;
 		self.execute(context.as_ref(), Method::Reset, Array::new()).await?;
-		Ok(Response::new(rpc::ResetSessionResponse {}))
+		Ok(Response::new(checked_response(rpc::ResetSessionResponse {})?))
 	}
 
 	async fn r#use(
@@ -924,10 +1063,10 @@ impl SurrealDbService for GrpcService {
 			Some(Value::String(value)) => value.clone(),
 			_ => String::new(),
 		};
-		Ok(Response::new(rpc::UseResponse {
+		Ok(Response::new(checked_response(rpc::UseResponse {
 			namespace: field("namespace"),
 			database: field("database"),
-		}))
+		})?))
 	}
 
 	async fn set_variable(
@@ -941,7 +1080,7 @@ impl SurrealDbService for GrpcService {
 		};
 		let params = Array::from(vec![Value::String(request.name), value]);
 		self.execute(request.context.as_ref(), Method::Set, params).await?;
-		Ok(Response::new(rpc::SetVariableResponse {}))
+		Ok(Response::new(checked_response(rpc::SetVariableResponse {})?))
 	}
 
 	async fn unset_variable(
@@ -951,7 +1090,7 @@ impl SurrealDbService for GrpcService {
 		let request = request.into_inner();
 		let params = Array::from(vec![Value::String(request.name)]);
 		self.execute(request.context.as_ref(), Method::Unset, params).await?;
-		Ok(Response::new(rpc::UnsetVariableResponse {}))
+		Ok(Response::new(checked_response(rpc::UnsetVariableResponse {})?))
 	}
 
 	async fn signup(
@@ -964,9 +1103,9 @@ impl SurrealDbService for GrpcService {
 			.ok_or_else(|| Status::invalid_argument("Expected signup credentials"))?;
 		let params = Array::from(vec![Value::Object(record_credentials(credentials)?)]);
 		let result = self.execute(request.context.as_ref(), Method::Signup, params).await?;
-		Ok(Response::new(rpc::SignupResponse {
+		Ok(Response::new(checked_response(rpc::SignupResponse {
 			tokens: Some(to_tokens(result)?),
-		}))
+		})?))
 	}
 
 	async fn signin(
@@ -979,9 +1118,9 @@ impl SurrealDbService for GrpcService {
 			.ok_or_else(|| Status::invalid_argument("Expected an access method"))?;
 		let params = Array::from(vec![Value::Object(access_credentials(access)?)]);
 		let result = self.execute(request.context.as_ref(), Method::Signin, params).await?;
-		Ok(Response::new(rpc::SigninResponse {
+		Ok(Response::new(checked_response(rpc::SigninResponse {
 			tokens: Some(to_tokens(result)?),
-		}))
+		})?))
 	}
 
 	async fn authenticate(
@@ -994,10 +1133,10 @@ impl SurrealDbService for GrpcService {
 		// The session may end up authenticated with a token other than the one
 		// presented, so the answer reports what is actually in effect rather
 		// than leaving the client to assume its own.
-		Ok(Response::new(rpc::AuthenticateResponse {
+		Ok(Response::new(checked_response(rpc::AuthenticateResponse {
 			expires_at: None,
 			tokens: to_tokens(result).ok(),
-		}))
+		})?))
 	}
 
 	/// Exchanges a refresh token for a fresh pair.
@@ -1012,9 +1151,9 @@ impl SurrealDbService for GrpcService {
 		let request = request.into_inner();
 		let params = Array::from(vec![token_value(request.access, request.refresh)]);
 		let result = self.execute(request.context.as_ref(), Method::Refresh, params).await?;
-		Ok(Response::new(rpc::RefreshTokensResponse {
+		Ok(Response::new(checked_response(rpc::RefreshTokensResponse {
 			tokens: Some(to_tokens(result)?),
-		}))
+		})?))
 	}
 
 	async fn revoke_tokens(
@@ -1024,7 +1163,7 @@ impl SurrealDbService for GrpcService {
 		let request = request.into_inner();
 		let params = Array::from(vec![token_value(request.access, request.refresh)]);
 		self.execute(request.context.as_ref(), Method::Revoke, params).await?;
-		Ok(Response::new(rpc::RevokeTokensResponse {}))
+		Ok(Response::new(checked_response(rpc::RevokeTokensResponse {})?))
 	}
 
 	async fn invalidate(
@@ -1033,7 +1172,7 @@ impl SurrealDbService for GrpcService {
 	) -> Result<Response<rpc::InvalidateResponse>, Status> {
 		let context = request.into_inner().context;
 		self.execute(context.as_ref(), Method::Invalidate, Array::new()).await?;
-		Ok(Response::new(rpc::InvalidateResponse {}))
+		Ok(Response::new(checked_response(rpc::InvalidateResponse {})?))
 	}
 
 	async fn begin_transaction(
@@ -1045,9 +1184,9 @@ impl SurrealDbService for GrpcService {
 		let DbResult::Other(Value::Uuid(id)) = result else {
 			return Err(Status::internal("Begin did not return a transaction id"));
 		};
-		Ok(Response::new(rpc::BeginTransactionResponse {
+		Ok(Response::new(checked_response(rpc::BeginTransactionResponse {
 			transaction: Some(proto::Uuid::from_uuid(id.into_inner())),
-		}))
+		})?))
 	}
 
 	async fn commit_transaction(
@@ -1056,7 +1195,7 @@ impl SurrealDbService for GrpcService {
 	) -> Result<Response<rpc::CommitTransactionResponse>, Status> {
 		let context = request.into_inner().context;
 		self.execute(context.as_ref(), Method::Commit, Array::new()).await?;
-		Ok(Response::new(rpc::CommitTransactionResponse {}))
+		Ok(Response::new(checked_response(rpc::CommitTransactionResponse {})?))
 	}
 
 	async fn cancel_transaction(
@@ -1065,7 +1204,7 @@ impl SurrealDbService for GrpcService {
 	) -> Result<Response<rpc::CancelTransactionResponse>, Status> {
 		let context = request.into_inner().context;
 		self.execute(context.as_ref(), Method::Cancel, Array::new()).await?;
-		Ok(Response::new(rpc::CancelTransactionResponse {}))
+		Ok(Response::new(checked_response(rpc::CancelTransactionResponse {})?))
 	}
 
 	type QueryStream = ResponseStream<rpc::QueryResponse>;
@@ -1125,9 +1264,9 @@ impl SurrealDbService for GrpcService {
 		let DbResult::Other(value) = result else {
 			return Err(Status::internal("Run did not return a value"));
 		};
-		Ok(Response::new(rpc::RunResponse {
+		Ok(Response::new(checked_response(rpc::RunResponse {
 			result: Some(to_proto_value(value)?),
-		}))
+		})?))
 	}
 
 	/// Ends a live query.
@@ -1145,7 +1284,7 @@ impl SurrealDbService for GrpcService {
 			.ok_or_else(|| Status::invalid_argument("Expected a live query id"))?;
 		let params = Array::from(vec![Value::Uuid(to_uuid(&live_query_id)?.into())]);
 		self.execute(request.context.as_ref(), Method::Kill, params).await?;
-		Ok(Response::new(rpc::KillResponse {}))
+		Ok(Response::new(checked_response(rpc::KillResponse {})?))
 	}
 
 	type SubscribeStream = ResponseStream<rpc::SubscribeResponse>;
@@ -1336,7 +1475,7 @@ impl GrpcService {
 			capabilities,
 			denied_methods: denied,
 			limits: Some(rpc::Limits {
-				max_message_bytes: *HTTP_MAX_RPC_BODY_SIZE as u64,
+				max_message_bytes: *GRPC_MAX_MESSAGE_SIZE as u64,
 				max_chunk_bytes: EXPORT_CHUNK_SIZE as u64,
 				max_query_duration: self
 					.kvs()
@@ -1670,7 +1809,7 @@ impl GrpcService {
 			Err(err) => return Err(Status::internal(format!("Import framing task failed: {err}"))),
 		}
 		result.map_err(|err| Status::invalid_argument(err.to_string()))?;
-		Ok(Response::new(rpc::ImportSurqlResponse {}))
+		Ok(Response::new(checked_response(rpc::ImportSurqlResponse {})?))
 	}
 
 	/// Applies a streamed SurrealML model.
@@ -1763,7 +1902,7 @@ impl GrpcService {
 			.put_ml_model(&session, &name, &version, &description, file.to_bytes())
 			.await
 			.map_err(|err| Status::internal(err.to_string()))?;
-		Ok(Response::new(rpc::ImportMlModelResponse {}))
+		Ok(Response::new(checked_response(rpc::ImportMlModelResponse {})?))
 	}
 
 	/// SurrealML support is a build-time feature; without it there is nowhere
@@ -2062,6 +2201,10 @@ struct QueryFrames {
 	queued: VecDeque<rpc::QueryResponse>,
 	/// The largest batch this client accepted.
 	batch_records: usize,
+	/// The most encoded bytes of records one frame may carry, read once at
+	/// construction so that a query's framing cannot change under it partway
+	/// through a result set.
+	value_budget: usize,
 	/// Statements already terminated, so a second attempt is ignored.
 	///
 	/// Two things can end a statement: its own `Finished` item, and a value
@@ -2077,6 +2220,16 @@ struct QueryFrames {
 #[derive(Default)]
 struct PendingStatement {
 	values: Vec<proto::Value>,
+	/// What each entry of `values` costs on the wire, in the same order.
+	///
+	/// Kept alongside rather than recomputed at flush time so that draining
+	/// part of the pending set can subtract exactly what it took: an
+	/// `encoded_len` walk is cheap per record but not free, and a frame that
+	/// mis-accounts what it dropped stops being a bound at all.
+	costs: Vec<usize>,
+	/// What `values` currently costs in total, which is the figure the byte
+	/// budget is read against.
+	bytes: usize,
 	/// How many batches have gone out, which is the frame's `batch_index`.
 	batches: u64,
 	/// Records to accumulate before flushing, doubling per batch up to the
@@ -2223,6 +2376,7 @@ impl QueryFrames {
 			pending: StdHashMap::new(),
 			queued: VecDeque::new(),
 			batch_records,
+			value_budget: frame_payload_budget(),
 			terminated: StdHashSet::new(),
 		}
 	}
@@ -2266,12 +2420,9 @@ impl QueryFrames {
 			} => {
 				let index = index as u32;
 				let batch_records = self.batch_records;
-				let entry = self
-					.pending
-					.entry(index)
-					.or_insert_with(|| PendingStatement::new(batch_records));
-				match try_values(values.into_iter()) {
-					Ok(mut encoded) => entry.values.append(&mut encoded),
+				self.pending.entry(index).or_insert_with(|| PendingStatement::new(batch_records));
+				let encoded = match try_values(values.into_iter()) {
+					Ok(encoded) => encoded,
 					// A value the wire cannot carry fails only the statement
 					// that produced it, exactly as its own error would.
 					Err(error) => {
@@ -2284,9 +2435,15 @@ impl QueryFrames {
 						);
 						return None;
 					}
-				}
-				while self.pending.get(&index).is_some_and(|p| p.values.len() >= p.target) {
-					self.flush(index);
+				};
+				if let Err(error) = self.accumulate(index, encoded) {
+					self.pending.remove(&index);
+					self.queue_terminal(
+						index,
+						rpc::QueryStatementKind::Other,
+						Some(to_proto_error(&error)),
+						0,
+					);
 				}
 				None
 			}
@@ -2304,8 +2461,18 @@ impl QueryFrames {
 					Value::Uuid(id) => Some(id.into_inner()),
 					_ => None,
 				};
-				match proto::Value::try_from(value).map_err(types_error_from_anyhow) {
-					Ok(value) => {
+				match proto::Value::try_from(value).map_err(types_error_from_anyhow).and_then(
+					|value| match record_cost(&value) {
+						// A single value is not batched, so there is no record
+						// count that would bring it under the budget: it is
+						// either carried whole or not at all.
+						cost if cost > self.value_budget => {
+							Err(oversized_record(cost, self.value_budget))
+						}
+						cost => Ok((value, cost)),
+					},
+				) {
+					Ok((value, cost)) => {
 						// A single value is not a list, so it is not batched:
 						// the terminal frame carries it whole, marked `SINGLE`
 						// so the client does not rebuild an array around it.
@@ -2314,6 +2481,8 @@ impl QueryFrames {
 							.entry(index)
 							.or_insert_with(|| PendingStatement::new(batch_records));
 						entry.values.push(value);
+						entry.costs.push(cost);
+						entry.bytes += cost;
 						entry.single = true;
 						entry.live_query = live_query;
 					}
@@ -2362,13 +2531,59 @@ impl QueryFrames {
 		}
 	}
 
-	/// Emit a full batch for `index`, leaving the statement open.
-	fn flush(&mut self, index: u32) {
+	/// Add one statement's rows to its pending set, emitting a frame each time
+	/// the set reaches either bound.
+	///
+	/// Rows are taken one at a time so that both bounds are read between every
+	/// pair of them: appending a block and splitting it afterwards would mean
+	/// holding the whole block, which is the peak this framing exists to avoid,
+	/// and would let a frame pass the byte budget before anything noticed.
+	///
+	/// Fails on a record whose own encoding is over the budget. No frame can
+	/// carry it, so the statement it belongs to ends there -- the same way a
+	/// value the wire cannot encode at all ends it -- rather than the whole
+	/// query failing or, worse, a frame going out that the client cannot
+	/// decode.
+	fn accumulate(&mut self, index: u32, encoded: Vec<proto::Value>) -> Result<(), TypesError> {
+		for value in encoded {
+			let cost = record_cost(&value);
+			if cost > self.value_budget {
+				return Err(oversized_record(cost, self.value_budget));
+			}
+			let Some(entry) = self.pending.get_mut(&index) else {
+				return Ok(());
+			};
+			// Close the current frame before the record that would overflow it
+			// rather than after, so what goes out is always within budget.
+			if !entry.values.is_empty() && entry.bytes + cost > self.value_budget {
+				self.flush(index, usize::MAX);
+			}
+			let Some(entry) = self.pending.get_mut(&index) else {
+				return Ok(());
+			};
+			entry.values.push(value);
+			entry.costs.push(cost);
+			entry.bytes += cost;
+			let target = entry.target;
+			if entry.values.len() >= target {
+				self.flush(index, target);
+			}
+		}
+		Ok(())
+	}
+
+	/// Emit a batch for `index` carrying up to `take` records, leaving the
+	/// statement open.
+	fn flush(&mut self, index: u32, take: usize) {
 		let Some(entry) = self.pending.get_mut(&index) else {
 			return;
 		};
-		let take = entry.target.min(entry.values.len());
+		let take = take.min(entry.values.len());
+		if take == 0 {
+			return;
+		}
 		let values: Vec<proto::Value> = entry.values.drain(..take).collect();
+		entry.bytes -= entry.costs.drain(..take).sum::<usize>();
 		let batch_index = entry.batches;
 		entry.batches += 1;
 		entry.sent += values.len() as i64;
@@ -2907,9 +3122,103 @@ fn to_uuid(uuid: &proto::Uuid) -> Result<Uuid, Status> {
 	uuid.to_uuid().map_err(|err| Status::invalid_argument(err.to_string()))
 }
 
+/// Splits typed error details into the `(reason, content)` pair the protocol
+/// carries, or `None` when the error has no reason beyond its kind.
+///
+/// Details nest, and each level serialises as an object tagged the same way:
+/// `{ kind, details }`. `ErrorDetails.kind` on the wire is the reason's own
+/// name -- `"TransactionConflict"`, `"Auth"`, `"TimedOut"` -- and
+/// `ErrorDetails.content` is whatever sits below it, which is either a further
+/// tagged object or a leaf payload such as the duration a `TimedOut` query gave
+/// up after. Taking both from the serialised form rather than matching every
+/// variant is what keeps this from needing a new arm each time a layer gains an
+/// error type.
+fn to_proto_details(details: &TypesErrorDetails) -> Option<(String, Option<Value>)> {
+	let Value::Object(mut outer) = details.clone().into_value() else {
+		return None;
+	};
+	// The outer object is the kind, already carried as `SurrealError.kind`.
+	let Some(Value::Object(mut reason)) = outer.remove("details") else {
+		return None;
+	};
+	let Some(Value::String(kind)) = reason.remove("kind") else {
+		return None;
+	};
+	Some((kind, reason.remove("details")))
+}
+
 /// Renders an error in the structured shape the protocol carries inside its
-/// streams, preserving the kind, message and cause chain.
+/// streams, preserving the kind, message, specific reason, retry hint and
+/// cause chain.
+///
+/// The reason and the retry hint are what a client is required to branch on:
+/// the protocol states that `message` is not part of the contract and will be
+/// reworded, so an error that arrived carrying only a kind and a message would
+/// leave a client with nothing stable to classify it by. Dropping them here
+/// would push clients back onto substring matching, which is the failure this
+/// part of the schema exists to prevent.
+/// The suffix that marks an error message this server had to cut short.
+///
+/// Present so a reader can tell a trimmed message from one that simply ended,
+/// which is the difference between "the error says this" and "the error said
+/// more than would fit".
+const TRUNCATION_MARKER: &str = " [...truncated]";
+
 fn to_proto_error(error: &TypesError) -> proto::SurrealError {
+	bounded_error(proto_error(error), frame_payload_budget())
+}
+
+/// Trims an error down to what one frame can carry.
+///
+/// Nearly every error is a few hundred bytes and passes through untouched. The
+/// one that is not is an error carrying user data: `THROW` puts the thrown
+/// value into the message, and nothing bounds what a query throws. Emitting
+/// that whole would produce a frame the receiving client refuses -- and under
+/// compression one this server could not even detect it had produced, since
+/// tonic weighs the compressed payload -- which costs the client the error
+/// entirely rather than the part of it that did not fit.
+///
+/// What is shed, in order: the cause chain, then the typed details, then the
+/// message itself. The kind survives all three, so an error trimmed to nothing
+/// else is still one a client can classify and branch on.
+fn bounded_error(mut error: proto::SurrealError, budget: usize) -> proto::SurrealError {
+	use surrealdb_types::prost::Message;
+
+	if error.encoded_len() <= budget {
+		return error;
+	}
+	error.cause = None;
+	if error.encoded_len() <= budget {
+		return error;
+	}
+	error.details = None;
+	if error.encoded_len() <= budget {
+		return error;
+	}
+	// Everything still standing apart from the message is fixed-width, so
+	// measuring the error without one says exactly what the message may take.
+	let mut fixed = error.clone();
+	fixed.message = String::new();
+	let room =
+		budget.saturating_sub(fixed.encoded_len() + WIRE_FIELD_OVERHEAD + TRUNCATION_MARKER.len());
+	error.message = format!("{}{TRUNCATION_MARKER}", truncate_on_boundary(&error.message, room));
+	error
+}
+
+/// The longest prefix of `text` that is at most `bytes` long and still valid
+/// UTF-8.
+fn truncate_on_boundary(text: &str, bytes: usize) -> &str {
+	if text.len() <= bytes {
+		return text;
+	}
+	let mut end = bytes;
+	while end > 0 && !text.is_char_boundary(end) {
+		end -= 1;
+	}
+	&text[..end]
+}
+
+fn proto_error(error: &TypesError) -> proto::SurrealError {
 	let kind = if error.is_validation() {
 		proto::ErrorKind::Validation
 	} else if error.is_configuration() {
@@ -2934,8 +3243,21 @@ fn to_proto_error(error: &TypesError) -> proto::SurrealError {
 		proto::ErrorKind::Internal
 	};
 	let mut out = proto::SurrealError::new(kind, error.message());
+	if let Some((reason, content)) = to_proto_details(error.details()) {
+		// A payload that cannot cross the wire costs the leaf detail, not the
+		// reason: the reason is the part a client classifies on.
+		out =
+			out.with_details(reason, content.and_then(|value| proto::Value::try_from(value).ok()));
+	}
+	// Presence is the whole signal, and a conflict is the one failure the
+	// engine reports as transient. No delay is suggested: the client's own
+	// backoff is better placed to choose one than a server that cannot see how
+	// contended the row is.
+	if matches!(error.query_details(), Some(QueryError::TransactionConflict)) {
+		out = out.with_retry(None);
+	}
 	if let Some(cause) = error.cause() {
-		out = out.with_cause(to_proto_error(cause));
+		out = out.with_cause(proto_error(cause));
 	}
 	out
 }
@@ -2943,12 +3265,42 @@ fn to_proto_error(error: &TypesError) -> proto::SurrealError {
 /// Maps an error onto the gRPC status that terminates a unary call.
 ///
 /// A status carries a code and a message but no structured error, so the
-/// finer-grained detail an [`Error`](TypesError) holds survives only where the
-/// protocol has a frame to put it in -- a query batch, or a stream's error
-/// frame. The codes chosen here are the ones the SDK's engine maps back onto
-/// the matching error kind.
+/// reason and the retry hint an [`Error`](TypesError) holds survive only where
+/// the protocol has a frame to put them in -- a query batch, or a stream's
+/// error frame. A `BEGIN ... COMMIT` block inside a query reports its conflict
+/// on the failing statement, and so keeps both; the standalone
+/// `CommitTransaction` RPC has an empty response message and can only fail as a
+/// status, so a conflict there reaches the client as `ABORTED` and its message.
+/// The codes chosen here are the ones the SDK's engine maps back onto the
+/// matching error kind.
+/// The most bytes of message a gRPC status carries.
+///
+/// A status travels as the `grpc-message` trailer, so what bounds it is the
+/// peer's HTTP/2 header list size rather than the message size -- a far smaller
+/// budget, and one the wire can spend three bytes of per byte here, since the
+/// trailer is percent-encoded. Nothing truncates it on the way: a header block
+/// past that size is refused outright and the call fails as an h2 protocol
+/// error, so the caller loses the error rather than the end of it.
+///
+/// Two kibibytes is several times the longest error this server composes, and
+/// leaves the encoded trailer inside the smallest header list a peer is likely
+/// to accept.
+const STATUS_MESSAGE_BYTES: usize = 2 << 10;
+
+/// Trims an error message to what a status trailer can carry.
+///
+/// Only a query decides a message this long: `THROW` puts the thrown value in
+/// it, and nothing bounds what a query throws.
+fn bounded_status_message(message: &str) -> String {
+	if message.len() <= STATUS_MESSAGE_BYTES {
+		return message.to_string();
+	}
+	let room = STATUS_MESSAGE_BYTES - TRUNCATION_MARKER.len();
+	format!("{}{TRUNCATION_MARKER}", truncate_on_boundary(message, room))
+}
+
 fn to_status(error: &TypesError) -> Status {
-	let message = error.message().to_string();
+	let message = bounded_status_message(error.message());
 	if error.is_validation() {
 		Status::invalid_argument(message)
 	} else if error.is_configuration() {
@@ -2971,7 +3323,7 @@ fn to_status(error: &TypesError) -> Status {
 #[cfg(test)]
 mod tests {
 	use surrealdb_rpc::capabilities::Capabilities;
-	use surrealdb_types::{Object, SerializationError};
+	use surrealdb_types::{AuthError, NotAllowedError, Object, SerializationError};
 
 	use super::*;
 
@@ -3710,6 +4062,118 @@ mod tests {
 			.collect()
 	}
 
+	/// The record count is only half the bound. Records wide enough that a full
+	/// batch of them would not fit have to be split on bytes instead, or the
+	/// frame is one neither peer will take.
+	///
+	/// The failure this guards is silent when responses are compressed: tonic
+	/// weighs the compressed payload against its send limit, so an oversized
+	/// frame that happens to compress goes out and dies in the client's
+	/// decompressor, naming no size at all.
+	#[test]
+	fn a_frame_of_wide_records_is_split_on_bytes() {
+		use surrealdb_types::prost::Message;
+
+		// Wide enough that a batch of 256 would be several times the limit, and
+		// few enough that the fixture stays small.
+		let width = *GRPC_MAX_MESSAGE_SIZE / 64;
+		let records = 100;
+		let rows =
+			Array::from((0..records).map(|_| Value::String("x".repeat(width))).collect::<Vec<_>>());
+		let frames = frames(vec![result(Value::Array(rows))]);
+
+		let batches: Vec<&rpc::QueryBatchFrame> =
+			frames[1..frames.len() - 1].iter().map(batch).collect();
+		let framed: usize = batches
+			.iter()
+			.map(|b| match &b.payload {
+				Some(rpc::query_batch_frame::Payload::Values(values)) => values.values.len(),
+				_ => 0,
+			})
+			.sum();
+		assert_eq!(framed, records, "every record still arrives, just in more frames");
+		assert!(
+			batches.len() > records.div_ceil(QUERY_BATCH_RECORDS),
+			"the record count alone would not have split this: {} frames",
+			batches.len()
+		);
+		for frame in &frames {
+			assert!(
+				frame.encoded_len() <= *GRPC_MAX_MESSAGE_SIZE,
+				"a frame encodes to {} bytes, above the {} byte limit both peers enforce",
+				frame.encoded_len(),
+				*GRPC_MAX_MESSAGE_SIZE
+			);
+		}
+	}
+
+	/// A record wider than a whole message has no batch size that would carry
+	/// it, so its statement fails saying so. Emitting it regardless would put a
+	/// frame on the wire that the client cannot decode, which costs the caller
+	/// the rest of the query as well.
+	#[test]
+	fn a_record_no_frame_can_carry_fails_its_statement() {
+		let rows = Array::from(vec![
+			Value::String("x".to_string()),
+			Value::String("x".repeat(*GRPC_MAX_MESSAGE_SIZE)),
+		]);
+		let frames = frames(vec![result(Value::Array(rows))]);
+		let batches: Vec<&rpc::QueryBatchFrame> =
+			frames[1..frames.len() - 1].iter().map(batch).collect();
+
+		let terminal = batches.last().expect("a terminal batch");
+		let error = terminal.error.as_ref().expect("the statement fails");
+		assert_eq!(error.kind, proto::ErrorKind::Validation as i32);
+		assert!(
+			error.message.contains("above the"),
+			"the refusal has to name the limit: {}",
+			error.message
+		);
+		assert!(
+			batches.iter().all(|b| b.payload.is_none()
+				|| matches!(
+					&b.payload,
+					Some(rpc::query_batch_frame::Payload::Values(v)) if v.values.is_empty()
+				)),
+			"a failed statement retracts its rows rather than framing them beside the refusal"
+		);
+	}
+
+	/// An error is the one frame whose size a query decides: `THROW` puts the
+	/// thrown value in the message. Trimming it is what keeps the subscriber or
+	/// caller an error at all -- an oversized one is not a large error, it is
+	/// no error and a broken stream.
+	#[test]
+	fn an_oversized_error_is_trimmed_rather_than_lost() {
+		use surrealdb_types::prost::Message;
+
+		const BUDGET: usize = 512;
+		let thrown = TypesError::thrown("y".repeat(BUDGET * 4))
+			.with_cause(TypesError::internal("z".repeat(BUDGET * 4)));
+		let bounded = bounded_error(proto_error(&thrown), BUDGET);
+
+		assert!(
+			bounded.encoded_len() <= BUDGET,
+			"trimmed to {} bytes against a {BUDGET} byte budget",
+			bounded.encoded_len()
+		);
+		assert_eq!(
+			bounded.kind,
+			proto::ErrorKind::Thrown as i32,
+			"the kind is what a client branches on and survives every trim"
+		);
+		assert!(
+			bounded.message.ends_with(TRUNCATION_MARKER),
+			"a trimmed message says it was trimmed: {}",
+			bounded.message
+		);
+		assert!(bounded.cause.is_none(), "the cause chain goes before the message");
+
+		// An error that already fits is passed through untouched.
+		let small = proto_error(&TypesError::thrown("nope".to_string()));
+		assert_eq!(bounded_error(small.clone(), BUDGET), small);
+	}
+
 	/// A result larger than one batch is split, so no single message grows with
 	/// the result set -- a client decoding with gRPC's 4 MiB default would
 	/// otherwise refuse a large `SELECT` outright.
@@ -3958,6 +4422,89 @@ mod tests {
 		let cause = proto.cause.expect("cause");
 		assert_eq!(cause.kind, proto::ErrorKind::Serialization as i32);
 		assert_eq!(cause.message, "inner");
+	}
+
+	/// The reason and its payload are what a client is left to classify on:
+	/// the protocol states the message is not part of the contract and will be
+	/// reworded, so an error carrying only a kind gives a client nothing stable
+	/// to branch on.
+	#[test]
+	fn proto_errors_carry_their_reason() {
+		// Details nest: the reason sits one level below the kind, and the
+		// content one level below that.
+		let nested = to_proto_error(&TypesError::not_allowed(
+			"nope".to_string(),
+			NotAllowedError::Auth(AuthError::TokenExpired),
+		));
+		assert_eq!(nested.kind, proto::ErrorKind::NotAllowed as i32);
+		assert_eq!(nested.detail_kind(), Some("Auth"));
+		let content = nested.details.and_then(|details| details.content).expect("nested content");
+		assert_eq!(
+			Value::try_from(content).expect("a decodable payload"),
+			AuthError::TokenExpired.into_value()
+		);
+
+		// A leaf payload travels in the same field as a nested reason does.
+		let timed_out = to_proto_error(&TypesError::query(
+			"too slow".to_string(),
+			QueryError::TimedOut {
+				duration: Duration::from_secs(5),
+			},
+		));
+		assert_eq!(timed_out.detail_kind(), Some("TimedOut"));
+		assert!(timed_out.details.and_then(|details| details.content).is_some());
+
+		// An error whose kind is its whole story carries no reason rather than
+		// an empty one, which is what lets a client tell the two apart.
+		assert_eq!(to_proto_error(&TypesError::internal("i".to_string())).detail_kind(), None);
+	}
+
+	/// A conflict is the one failure the engine reports as transient, and the
+	/// hint's presence is the entire signal: absence has to read as "not
+	/// retryable", never as "the server did not say".
+	#[test]
+	fn a_conflict_is_the_only_error_marked_retryable() {
+		let conflict = to_proto_error(&TypesError::query(
+			"This transaction can be retried".to_string(),
+			QueryError::TransactionConflict,
+		));
+		assert!(conflict.is_retryable());
+		assert_eq!(conflict.detail_kind(), Some("TransactionConflict"));
+
+		for error in [
+			TypesError::query("cancelled".to_string(), QueryError::Cancelled),
+			TypesError::query("no reason given".to_string(), None),
+			TypesError::internal("broken".to_string()),
+		] {
+			assert!(!to_proto_error(&error).is_retryable(), "{}", error.message());
+		}
+	}
+
+	/// A client sizes its own decode and encode limits from what the handshake
+	/// reports, so the advertised size has to be the one the route enforces.
+	/// Advertising more invites a message the service then rejects mid-body,
+	/// which reaches the client as an opaque stream error.
+	#[tokio::test]
+	async fn the_advertised_message_size_is_the_configured_one() {
+		let limits = service().await.server_capabilities().limits.expect("limits");
+		assert_eq!(limits.max_message_bytes, *GRPC_MAX_MESSAGE_SIZE as u64);
+	}
+
+	/// The floor on that size exists so a mistaken configuration degrades to a
+	/// working service rather than one that starts and then fails every call.
+	/// It only does that if the handshake itself fits inside it -- a client
+	/// that cannot read the capabilities never gets as far as any other call.
+	#[tokio::test]
+	async fn the_smallest_allowed_message_size_still_carries_the_handshake() {
+		use surrealdb_types::prost::Message;
+
+		let capabilities = service().await.server_capabilities();
+		assert!(
+			capabilities.encoded_len() < crate::cnf::GRPC_MIN_MESSAGE_SIZE,
+			"the handshake encodes to {} bytes, which the {} byte floor cannot carry",
+			capabilities.encoded_len(),
+			crate::cnf::GRPC_MIN_MESSAGE_SIZE
+		);
 	}
 
 	/// The tokens an auth method answered with are read from whichever shape

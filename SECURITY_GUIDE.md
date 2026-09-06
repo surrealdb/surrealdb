@@ -460,6 +460,22 @@ transaction management, notification routing
 - WebSocket upgrade must validate the Origin header against an allowlist.
 - Default WebSocket message size limits must be conservative (consistent with HTTP
   RPC body size limits, not orders of magnitude larger).
+- The same holds for the gRPC message size (`GRPC_MAX_MESSAGE_SIZE`), which bounds
+  what one caller can make the server buffer for a single message and therefore
+  defaults to the HTTP RPC body size rather than to a transport-specific figure.
+- The gRPC message size the capability handshake advertises
+  (`Limits.max_message_bytes`) must be the size the service enforces, in both
+  directions. A client sizes its own decode and encode limits from what is
+  advertised, so advertising more than is enforced converts a stated limit into a
+  mid-body rejection the client can only see as a stream reset.
+- Every gRPC message must be bounded on its *encoded* size before it is handed to
+  tonic, measured on the protobuf rather than on what compression makes of it.
+  tonic weighs its send limit against the compressed payload while the receiving
+  peer applies its own limit to the decompressed one, so a message bounded after
+  compression can still be one the peer refuses — a failure that surfaces there as
+  a corrupt stream naming no size. Responses that grow with user data must be
+  framed by encoded bytes (`frame_payload_budget`), not by a record count alone;
+  a payload with no smaller form must be refused with the limit named.
 - Memory threshold checks must be applied consistently across all transport entry
   points before full message body deserialization.
 - Protected session parameter names must be normalized (lowercase, NFC Unicode,

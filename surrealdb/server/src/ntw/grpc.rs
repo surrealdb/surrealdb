@@ -27,7 +27,7 @@ use tonic::codec::CompressionEncoding;
 use tower_service::Service;
 
 use super::AppState;
-use crate::cnf::HTTP_MAX_RPC_BODY_SIZE;
+use crate::cnf::GRPC_MAX_MESSAGE_SIZE;
 use crate::ntw::error::Error as NetError;
 use crate::rpc::RpcState;
 use crate::rpc::grpc::GrpcService;
@@ -82,11 +82,14 @@ async fn handler(
 	// authenticated session, which is the principal the handler's ownership
 	// gate compares against the session a request names.
 	let mut service = SurrealDbServiceServer::new(GrpcService::new(rpc_state, session))
-		// Bound what a client may send us, matching the HTTP RPC body limit.
-		// The encoding limit is deliberately left at its default: a query
-		// result or an export chunk is bounded by the data, not by what a
-		// client may push at us.
-		.max_decoding_message_size(*HTTP_MAX_RPC_BODY_SIZE);
+		// `Limits.max_message_bytes` is the largest message the server will
+		// "accept or emit", so both directions are bound to the same number
+		// the handshake reports. Bounding only the decode side would let the
+		// service emit a message larger than it told the client to expect,
+		// which the client refuses while decoding -- a failure that reads as a
+		// corrupt or oversized response rather than as the limit it is.
+		.max_decoding_message_size(*GRPC_MAX_MESSAGE_SIZE)
+		.max_encoding_message_size(*GRPC_MAX_MESSAGE_SIZE);
 	// Accept a compressed request in any of these, and answer in one of them.
 	// tonic picks the response encoding per request from the client's
 	// `grpc-accept-encoding`, so a client advertising none — including one built

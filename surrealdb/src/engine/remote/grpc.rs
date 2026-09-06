@@ -33,7 +33,10 @@ use tonic::codec::CompressionEncoding;
 use tonic::transport::Channel;
 use uuid::Uuid;
 
-use crate::types::{Action, Array, Notification, Object, SerializationError, Value, Variables};
+use crate::types::prost::Message;
+use crate::types::{
+	Action, Array, Notification, Object, SerializationError, ValidationError, Value, Variables,
+};
 use crate::{Error, ExtraFeatures, SessionId};
 
 type EngineResult<T> = crate::Result<T>;
@@ -141,6 +144,14 @@ pub(crate) async fn connect_engine(
 	let mut client = SurrealDbServiceClient::new(channel)
 		.accept_compressed(CompressionEncoding::Zstd)
 		.accept_compressed(CompressionEncoding::Gzip);
+	// A caller's own limit governs the handshake as well. It is the first
+	// response this client decodes, and a limit applied only once the handshake
+	// has been read would let a server hand this client more than the caller
+	// allowed before the caller had any way to object -- while `GrpcConfig`
+	// documents the bound as applying in either direction.
+	if let Some(limit) = address.config.grpc.max_message_size {
+		client = client.max_decoding_message_size(limit).max_encoding_message_size(limit);
+	}
 	let capabilities = fetch_capabilities(&mut client).await?;
 	// The other direction has no negotiation of its own: a client compresses
 	// unconditionally, and a server that cannot decode the encoding rejects the
@@ -151,17 +162,35 @@ pub(crate) async fn connect_engine(
 	// default in place: the server splits a query's records across frames, but
 	// a single record larger than the default would still be undecodable, and
 	// the limit the operator configured is the one that applies.
-	if let Some(limit) = capabilities.limits.as_ref().map(|limits| limits.max_message_bytes)
-		&& let Ok(limit) = usize::try_from(limit)
-		&& limit > 0
+	let advertised = capabilities
+		.limits
+		.as_ref()
+		.map(|limits| limits.max_message_bytes)
+		.and_then(|limit| usize::try_from(limit).ok())
+		.filter(|limit| *limit > 0);
+	let configured = address.config.grpc.max_message_size;
+	if let (Some(configured), Some(advertised)) = (configured, advertised)
+		&& configured > advertised
 	{
-		client = client.max_decoding_message_size(limit).max_encoding_message_size(limit);
+		warn!(
+			"The configured gRPC message size ({configured} bytes) is larger than the server \
+			 accepts ({advertised} bytes); requests stay bounded by the server's figure. Raise \
+			 SURREAL_GRPC_MAX_MESSAGE_SIZE on the server to send more than that."
+		);
+	}
+	if let Some(limit) = max_response_size(configured, advertised) {
+		client = client.max_decoding_message_size(limit);
+	}
+	let max_request_size = max_request_size(configured, advertised);
+	if let Some((limit, _)) = max_request_size {
+		client = client.max_encoding_message_size(limit);
 	}
 
 	let features = extra_features(&capabilities);
 	let engine = Arc::new(GrpcEngine {
 		client,
 		compress_requests,
+		max_request_size,
 		server_version: capabilities.server_version,
 		sessions: SessionRegistry::default(),
 		query_timeout: address
@@ -410,6 +439,16 @@ struct GrpcEngine {
 	/// spending a round trip, as the protocol intends.
 	server_version: String,
 	sessions: SessionRegistry,
+	/// The largest request this client will send, which is the smaller of what
+	/// the server said it accepts and what the caller configured, paired with
+	/// the side that set it so a refusal can name the setting that moves it.
+	/// `None` when neither said anything, which leaves tonic's default in
+	/// place.
+	///
+	/// Deliberately not the limit on what this client will *decode*: that one
+	/// follows the caller's configuration alone, since it bounds memory here
+	/// rather than what the far end will take.
+	max_request_size: Option<(usize, LimitSource)>,
 	/// Converted once at connect: the wire counts seconds in an `i64`, so the
 	/// conversion is fallible, and a per-request context has nowhere to report
 	/// a failure that the configuration caused.
@@ -426,6 +465,24 @@ impl std::fmt::Debug for GrpcEngine {
 impl GrpcEngine {
 	fn client(&self) -> SurrealDbServiceClient<Channel> {
 		self.client.clone()
+	}
+
+	/// Hands back `request` once it is known to encode within the size this
+	/// connection may send, refusing it with the limit and the setting that
+	/// moves it otherwise.
+	///
+	/// Every unary request goes through this, including the ones whose size a
+	/// caller cannot influence. Taking the encoded length of a small message
+	/// costs almost nothing, and a rule with no exceptions spares each reader
+	/// re-deriving per call site whether a given request is bounded -- a
+	/// judgement that has to be made again every time a method is added.
+	///
+	/// The streaming uploads are the deliberate exception. They are framed in
+	/// fixed chunks that both peers floor their message size at, so no frame
+	/// they produce can exceed the limit.
+	fn checked<M: Message>(&self, request: M) -> EngineResult<M> {
+		check_message_size(self.max_request_size, &request)?;
+		Ok(request)
 	}
 
 	/// A client that compresses what it sends, or `None` when the server did not
@@ -533,9 +590,9 @@ impl GrpcEngine {
 	async fn attach(&self) -> EngineResult<Uuid> {
 		let response = self
 			.client()
-			.attach_session(rpc::AttachSessionRequest {
+			.attach_session(self.checked(rpc::AttachSessionRequest {
 				context: None,
-			})
+			})?)
 			.await
 			.map_err(status_to_error)?
 			.into_inner();
@@ -548,9 +605,9 @@ impl GrpcEngine {
 
 	async fn detach(&self, session: Uuid) -> EngineResult<()> {
 		self.client()
-			.detach_session(rpc::DetachSessionRequest {
+			.detach_session(self.checked(rpc::DetachSessionRequest {
 				context: Some(self.context(session, None)),
-			})
+			})?)
 			.await
 			.map_err(status_to_error)?;
 		Ok(())
@@ -567,11 +624,11 @@ impl GrpcEngine {
 	) -> EngineResult<(Option<String>, Option<String>)> {
 		let response = self
 			.client()
-			.r#use(rpc::UseRequest {
+			.r#use(self.checked(rpc::UseRequest {
 				context: Some(context),
 				namespace: namespace.map(nullable),
 				database: database.map(nullable),
-			})
+			})?)
 			.await
 			.map_err(status_to_error)?
 			.into_inner();
@@ -586,23 +643,21 @@ impl GrpcEngine {
 		key: String,
 		value: Value,
 	) -> EngineResult<()> {
-		self.client()
-			.set_variable(rpc::SetVariableRequest {
-				context: Some(context),
-				name: key,
-				value: Some(to_proto_value(value)?),
-			})
-			.await
-			.map_err(status_to_error)?;
+		let request = rpc::SetVariableRequest {
+			context: Some(context),
+			name: key,
+			value: Some(to_proto_value(value)?),
+		};
+		self.client().set_variable(self.checked(request)?).await.map_err(status_to_error)?;
 		Ok(())
 	}
 
 	async fn unset_inner(&self, context: rpc::RequestContext, key: String) -> EngineResult<()> {
 		self.client()
-			.unset_variable(rpc::UnsetVariableRequest {
+			.unset_variable(self.checked(rpc::UnsetVariableRequest {
 				context: Some(context),
 				name: key,
-			})
+			})?)
 			.await
 			.map_err(status_to_error)?;
 		Ok(())
@@ -613,12 +668,13 @@ impl GrpcEngine {
 		context: rpc::RequestContext,
 		credentials: Object,
 	) -> EngineResult<Token> {
+		let request = rpc::SigninRequest {
+			context: Some(context),
+			access_method: Some(access_method(credentials)?),
+		};
 		let response = self
 			.client()
-			.signin(rpc::SigninRequest {
-				context: Some(context),
-				access_method: Some(access_method(credentials)?),
-			})
+			.signin(self.checked(request)?)
 			.await
 			.map_err(status_to_error)?
 			.into_inner();
@@ -630,12 +686,13 @@ impl GrpcEngine {
 		context: rpc::RequestContext,
 		credentials: Object,
 	) -> EngineResult<Token> {
+		let request = rpc::SignupRequest {
+			context: Some(context),
+			credentials: Some(record_credentials(credentials)?),
+		};
 		let response = self
 			.client()
-			.signup(rpc::SignupRequest {
-				context: Some(context),
-				credentials: Some(record_credentials(credentials)?),
-			})
+			.signup(self.checked(request)?)
 			.await
 			.map_err(status_to_error)?
 			.into_inner();
@@ -656,10 +713,10 @@ impl GrpcEngine {
 		};
 		let response = self
 			.client()
-			.authenticate(rpc::AuthenticateRequest {
+			.authenticate(self.checked(rpc::AuthenticateRequest {
 				context: Some(context),
 				token: access,
-			})
+			})?)
 			.await
 			.map_err(status_to_error)?
 			.into_inner();
@@ -674,9 +731,9 @@ impl GrpcEngine {
 
 	async fn invalidate_inner(&self, context: rpc::RequestContext) -> EngineResult<()> {
 		self.client()
-			.invalidate(rpc::InvalidateRequest {
+			.invalidate(self.checked(rpc::InvalidateRequest {
 				context: Some(context),
-			})
+			})?)
 			.await
 			.map_err(status_to_error)?;
 		Ok(())
@@ -695,20 +752,16 @@ impl GrpcEngine {
 		variables: Variables,
 		max_batch_records: u32,
 	) -> EngineResult<tonic::Streaming<rpc::QueryResponse>> {
-		Ok(self
-			.client()
-			.query(rpc::QueryRequest {
-				context: Some(context),
-				query,
-				variables: Some(to_proto_variables(variables)?),
-				// Empty means row-oriented values only, which is all this
-				// engine can decode.
-				accepted_encodings: Vec::new(),
-				max_batch_records,
-			})
-			.await
-			.map_err(status_to_error)?
-			.into_inner())
+		let request = rpc::QueryRequest {
+			context: Some(context),
+			query,
+			variables: Some(to_proto_variables(variables)?),
+			// Empty means row-oriented values only, which is all this
+			// engine can decode.
+			accepted_encodings: Vec::new(),
+			max_batch_records,
+		};
+		Ok(self.client().query(self.checked(request)?).await.map_err(status_to_error)?.into_inner())
 	}
 
 	/// Run a query and assemble one result per statement.
@@ -1051,15 +1104,16 @@ impl SurrealEngine for GrpcEngine {
 		Box::pin(async move {
 			let context = self.ready(ctx).await?;
 			let args = args.into_iter().map(to_proto_value).collect::<EngineResult<Vec<_>>>()?;
+			let request = rpc::RunRequest {
+				context: Some(context),
+				name,
+				// The wire spells "no version" as an empty string.
+				version: version.unwrap_or_default(),
+				args,
+			};
 			let response = self
 				.client()
-				.run(rpc::RunRequest {
-					context: Some(context),
-					name,
-					// The wire spells "no version" as an empty string.
-					version: version.unwrap_or_default(),
-					args,
-				})
+				.run(self.checked(request)?)
 				.await
 				.map_err(status_to_error)?
 				.into_inner();
@@ -1156,11 +1210,11 @@ impl SurrealEngine for GrpcEngine {
 			// new pair is minted for.
 			let response = self
 				.client()
-				.refresh_tokens(rpc::RefreshTokensRequest {
+				.refresh_tokens(self.checked(rpc::RefreshTokensRequest {
 					context: Some(context),
 					access,
 					refresh,
-				})
+				})?)
 				.await
 				.map_err(status_to_error)?
 				.into_inner();
@@ -1179,11 +1233,11 @@ impl SurrealEngine for GrpcEngine {
 				} => (access, refresh),
 			};
 			self.client()
-				.revoke_tokens(rpc::RevokeTokensRequest {
+				.revoke_tokens(self.checked(rpc::RevokeTokensRequest {
 					context: Some(context),
 					access,
 					refresh,
-				})
+				})?)
 				.await
 				.map_err(status_to_error)?;
 			Ok(())
@@ -1204,9 +1258,9 @@ impl SurrealEngine for GrpcEngine {
 			let context = self.ready(ctx).await?;
 			let response = self
 				.client()
-				.begin_transaction(rpc::BeginTransactionRequest {
+				.begin_transaction(self.checked(rpc::BeginTransactionRequest {
 					context: Some(context),
-				})
+				})?)
 				.await
 				.map_err(status_to_error)?
 				.into_inner();
@@ -1227,9 +1281,9 @@ impl SurrealEngine for GrpcEngine {
 			let context =
 				self.ready(EngineContext::with_transaction(ctx.session, Some(txn))).await?;
 			self.client()
-				.commit_transaction(rpc::CommitTransactionRequest {
+				.commit_transaction(self.checked(rpc::CommitTransactionRequest {
 					context: Some(context),
-				})
+				})?)
 				.await
 				.map_err(status_to_error)?;
 			Ok(())
@@ -1243,9 +1297,9 @@ impl SurrealEngine for GrpcEngine {
 			let context =
 				self.ready(EngineContext::with_transaction(ctx.session, Some(txn))).await?;
 			self.client()
-				.cancel_transaction(rpc::CancelTransactionRequest {
+				.cancel_transaction(self.checked(rpc::CancelTransactionRequest {
 					context: Some(context),
-				})
+				})?)
 				.await
 				.map_err(status_to_error)?;
 			Ok(())
@@ -1256,9 +1310,9 @@ impl SurrealEngine for GrpcEngine {
 		Box::pin(async move {
 			let context = self.ready(ctx).await?;
 			self.client()
-				.health(rpc::HealthRequest {
+				.health(self.checked(rpc::HealthRequest {
 					context: Some(context),
-				})
+				})?)
 				.await
 				.map_err(status_to_error)?;
 			Ok(())
@@ -1273,10 +1327,10 @@ impl SurrealEngine for GrpcEngine {
 		Box::pin(async move {
 			let context = self.ready(ctx).await?;
 			self.client()
-				.kill(rpc::KillRequest {
+				.kill(self.checked(rpc::KillRequest {
 					context: Some(context),
 					live_query_id: Some(proto::Uuid::from_uuid(uuid)),
-				})
+				})?)
 				.await
 				.map_err(status_to_error)?;
 			Ok(())
@@ -1298,13 +1352,13 @@ impl SurrealEngine for GrpcEngine {
 			// is for.
 			let stream = self
 				.client()
-				.subscribe(rpc::SubscribeRequest {
+				.subscribe(self.checked(rpc::SubscribeRequest {
 					context: Some(context),
 					resume_from: None,
 					subscribe_to: Some(rpc::subscribe_request::SubscribeTo::LiveQueryId(
 						proto::Uuid::from_uuid(uuid),
 					)),
-				})
+				})?)
 				.await
 				.map_err(status_to_error)?
 				.into_inner();
@@ -1437,10 +1491,10 @@ impl GrpcEngine {
 		let config = config.map(export_config).transpose()?;
 		let stream = self
 			.client()
-			.export_surql(rpc::ExportSurqlRequest {
+			.export_surql(self.checked(rpc::ExportSurqlRequest {
 				context: Some(context),
 				config,
-			})
+			})?)
 			.await
 			.map_err(status_to_error)?
 			.into_inner();
@@ -1456,11 +1510,11 @@ impl GrpcEngine {
 	) -> EngineResult<ExportChunks> {
 		let stream = self
 			.client()
-			.export_ml_model(rpc::ExportMlModelRequest {
+			.export_ml_model(self.checked(rpc::ExportMlModelRequest {
 				context: Some(context),
 				name: config.name,
 				version: config.version,
-			})
+			})?)
 			.await
 			.map_err(status_to_error)?
 			.into_inner();
@@ -2097,31 +2151,167 @@ fn status_to_error(status: tonic::Status) -> Error {
 	}
 }
 
-/// Maps a structured error carried on the wire, preserving its kind, message
-/// and cause chain.
+/// The largest response this client will decode.
 ///
-/// The finer-grained `details.kind` is not rebuilt into the matching typed
-/// detail: callers get the right `is_*` classification and message, but not
-/// the structured sub-reason.
-fn proto_error(error: proto::SurrealError) -> Error {
+/// The caller's own bound wins where they set one: it is their memory ceiling
+/// here, and a server can emit a message larger than it advertises, so a caller
+/// raising it is asking for something reachable.
+fn max_response_size(configured: Option<usize>, advertised: Option<usize>) -> Option<usize> {
+	configured.or(advertised)
+}
+
+/// Which side's configuration produced the limit in force, so that a refusal
+/// can name the setting that would actually move it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LimitSource {
+	/// The server's advertised figure binds; raising the client alone would
+	/// change nothing.
+	Server,
+	/// The caller's own configuration binds; the server already allows more.
+	Client,
+	/// Both agree on the figure, so both have to move.
+	Both,
+}
+
+impl LimitSource {
+	/// What to change to send a larger request.
+	fn remedy(self) -> &'static str {
+		match self {
+			Self::Server => "Raise SURREAL_GRPC_MAX_MESSAGE_SIZE on the server",
+			Self::Client => "Raise max_message_size on this connection's GrpcConfig",
+			Self::Both => {
+				"Raise SURREAL_GRPC_MAX_MESSAGE_SIZE on the server and max_message_size on \
+				 this connection's GrpcConfig"
+			}
+		}
+	}
+}
+
+/// The largest request this client will send, and which side set it.
+///
+/// Never more than the server said it accepts, because no client-side setting
+/// persuades it to accept more: honouring a larger one would send a request the
+/// server rejects part way through the body, which reaches the caller as a bare
+/// stream error -- the failure the preflight exists to replace. A caller asking
+/// for less than the server allows still gets less.
+fn max_request_size(
+	configured: Option<usize>,
+	advertised: Option<usize>,
+) -> Option<(usize, LimitSource)> {
+	match (configured, advertised) {
+		(Some(configured), Some(advertised)) => Some(match configured.cmp(&advertised) {
+			std::cmp::Ordering::Less => (configured, LimitSource::Client),
+			std::cmp::Ordering::Greater => (advertised, LimitSource::Server),
+			std::cmp::Ordering::Equal => (configured, LimitSource::Both),
+		}),
+		(Some(configured), None) => Some((configured, LimitSource::Client)),
+		(None, Some(advertised)) => Some((advertised, LimitSource::Server)),
+		(None, None) => None,
+	}
+}
+
+/// Refuses a request that cannot be encoded within the negotiated message size,
+/// naming the size, the limit and the setting that moves it.
+///
+/// tonic enforces the same bound, but only once the request body is being
+/// written, where the status it raises has nowhere to go: the body stream
+/// fails, the HTTP/2 stream is reset, and the caller is left holding a protocol
+/// error that mentions no size at all. Measuring first is what turns that into
+/// an answer -- `encoded_len` walks the message without allocating, which the
+/// encoder was about to do anyway.
+///
+/// `None` means neither peer named a limit, which leaves tonic's send side
+/// unbounded and nothing to check against.
+fn check_message_size<M: Message>(
+	limit: Option<(usize, LimitSource)>,
+	request: &M,
+) -> EngineResult<()> {
+	let Some((limit, source)) = limit else {
+		return Ok(());
+	};
+	let size = request.encoded_len();
+	if size <= limit {
+		return Ok(());
+	}
+	Err(Error::validation(
+		format!(
+			"The request encodes to {size} bytes, above this connection's gRPC message limit of \
+			 {limit} bytes. {}, or split the work into smaller statements.",
+			source.remedy()
+		),
+		ValidationError::InvalidRequest,
+	))
+}
+
+/// The server's spelling of an error kind, which is the tag its typed details
+/// are keyed by.
+///
+/// The proto enum and the taxonomy in `surrealdb-types` are one set of kinds in
+/// two spellings, kept in step variant for variant, so this is a rename rather
+/// than a mapping that can lose anything. `Unspecified` cannot reach here --
+/// `kind_or_internal` has already degraded it -- and is spelled with `Internal`
+/// because that is the behaviour both ends assign it.
+fn kind_str(kind: proto::ErrorKind) -> &'static str {
 	use proto::ErrorKind;
+	match kind {
+		ErrorKind::Validation => "Validation",
+		ErrorKind::Configuration => "Configuration",
+		ErrorKind::Query => "Query",
+		ErrorKind::Serialization => "Serialization",
+		ErrorKind::NotAllowed => "NotAllowed",
+		ErrorKind::NotFound => "NotFound",
+		ErrorKind::AlreadyExists => "AlreadyExists",
+		ErrorKind::Connection => "Connection",
+		ErrorKind::Thrown => "Thrown",
+		ErrorKind::Context => "Context",
+		ErrorKind::Internal | ErrorKind::Unspecified => "Internal",
+	}
+}
+
+/// Rebuilds the value a typed detail deserializes from.
+///
+/// Each level of a detail serializes as `{ kind, details }`, and the wire
+/// splits one level of that open: `ErrorDetails.kind` names the reason and
+/// `ErrorDetails.content` carries whatever nests below it. Putting the two back
+/// into a single object is what lets the shared taxonomy parse it, however deep
+/// the nesting goes.
+fn proto_details(details: proto::ErrorDetails) -> Option<Value> {
+	if details.kind.is_empty() {
+		return None;
+	}
+	let mut object = Object::new();
+	object.insert("kind".to_string(), Value::String(details.kind));
+	// A payload this build cannot decode is left out rather than failing the
+	// whole reason. A reason that needs its payload -- `TimedOut` and its
+	// duration -- then falls back to the bare kind when the taxonomy parses
+	// this, and one that does not, such as `TransactionConflict`, is unaffected.
+	if let Some(content) = details.content.and_then(|content| Value::try_from(content).ok()) {
+		object.insert("details".to_string(), content);
+	}
+	Some(Value::Object(object))
+}
+
+/// Maps a structured error carried on the wire, preserving its kind, message,
+/// reason, retryability and cause chain.
+///
+/// The reason is rebuilt into the typed detail the rest of the SDK exposes, so
+/// `query_details()` and its siblings answer the same here as on any other
+/// transport. Leaving it out would push callers back onto the message, which
+/// the protocol states is not part of the contract and will be reworded.
+fn proto_error(error: proto::SurrealError) -> Error {
 	let kind = error.kind_or_internal();
 	let cause = error.cause.map(|cause| proto_error(*cause));
-	let message = error.message;
-	let mapped = match kind {
-		ErrorKind::Validation => Error::validation(message, None),
-		ErrorKind::Configuration => Error::configuration(message, None),
-		ErrorKind::Query => Error::query(message, None),
-		ErrorKind::Serialization => Error::serialization(message, None),
-		ErrorKind::NotAllowed => Error::not_allowed(message, None),
-		ErrorKind::NotFound => Error::not_found(message, None),
-		ErrorKind::AlreadyExists => Error::already_exists(message, None),
-		ErrorKind::Connection => Error::connection(message, None),
-		ErrorKind::Thrown => Error::thrown(message),
-		ErrorKind::Internal | ErrorKind::Context | ErrorKind::Unspecified => {
-			Error::internal(message)
-		}
-	};
+	let details = error.details.and_then(proto_details);
+	// `SurrealError.retry` is not rebuilt into anything. It says the operation
+	// may be retried and deliberately says nothing about why, so there is no
+	// reason to derive from it -- and `Error` has nowhere to hold retryability
+	// apart from the reason, since a field for it would change the shape every
+	// transport serialises this type in. A conflict still reaches callers as
+	// `QueryError::TransactionConflict`, which this server pairs with the hint,
+	// so a retry loop has the typed reason to branch on either way. A peer that
+	// sends a hint with some other reason, or with none, has its retryability
+	// dropped here rather than turned into a reason it did not state.
+	let mapped = Error::from_wire(error.message, Some(kind_str(kind)), details);
 	match cause {
 		Some(cause) => mapped.with_cause(cause),
 		None => mapped,
@@ -2131,7 +2321,7 @@ fn proto_error(error: proto::SurrealError) -> Error {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::types::Number;
+	use crate::types::{AuthError, NotAllowedError, Number, QueryError, SurrealValue};
 
 	fn object(pairs: &[(&str, &str)]) -> Object {
 		let mut object = Object::new();
@@ -2312,6 +2502,139 @@ mod tests {
 			..Default::default()
 		});
 		assert!(error.is_internal(), "expected an internal error, got {error:?}");
+	}
+
+	/// The reason is what a caller classifies a failure by: the protocol states
+	/// the message is not part of the contract and will be reworded, so an
+	/// error that arrives carrying only a kind leaves a retry loop nothing but
+	/// substring matching.
+	#[test]
+	fn wire_errors_rebuild_their_typed_reason() {
+		let conflict = proto_error(
+			proto::SurrealError::new(proto::ErrorKind::Query, "conflict")
+				.with_details("TransactionConflict", None),
+		);
+		assert_eq!(conflict.query_details(), Some(&QueryError::TransactionConflict));
+
+		// A reason that nests rebuilds all the way down, not just its first
+		// level.
+		let expired = proto_error(
+			proto::SurrealError::new(proto::ErrorKind::NotAllowed, "expired").with_details(
+				"Auth",
+				proto::Value::try_from(AuthError::TokenExpired.into_value()).ok(),
+			),
+		);
+		assert_eq!(
+			expired.not_allowed_details(),
+			Some(&NotAllowedError::Auth(AuthError::TokenExpired))
+		);
+
+		// A payload the reason carries survives with it. The wire splits the
+		// reason from its payload, so build both halves the way the server
+		// does: the tag becomes `ErrorDetails.kind` and what nests under it
+		// becomes the content.
+		let detail = QueryError::TimedOut {
+			duration: StdDuration::from_secs(5),
+		};
+		let Value::Object(mut serialized) = detail.clone().into_value() else {
+			panic!("a detail serializes as a tagged object");
+		};
+		let content = serialized.remove("details").expect("TimedOut carries a duration");
+		let timed_out = proto_error(
+			proto::SurrealError::new(proto::ErrorKind::Query, "too slow")
+				.with_details("TimedOut", proto::Value::try_from(content).ok()),
+		);
+		assert_eq!(timed_out.query_details(), Some(&detail));
+	}
+
+	/// The hint says an operation may be retried and nothing about why, so it
+	/// is not evidence of any particular reason. Deriving one from it would put
+	/// a reason on the error that the peer never stated -- and would mislabel a
+	/// retryable timeout as a conflict.
+	#[test]
+	fn a_retry_hint_does_not_invent_a_reason() {
+		let bare = proto_error(
+			proto::SurrealError::new(proto::ErrorKind::Query, "wording that will change")
+				.with_retry(None),
+		);
+		assert_eq!(bare.query_details(), None, "no reason was stated, so none is reported");
+
+		// A reason the peer did state is untouched by the hint beside it.
+		let timed_out = proto_error(
+			proto::SurrealError::new(proto::ErrorKind::Query, "too slow")
+				.with_details("TimedOut", None)
+				.with_retry(None),
+		);
+		assert!(timed_out.is_query(), "expected a query error, got {timed_out:?}");
+
+		// The conflict this server pairs the hint with still arrives as one,
+		// because the reason travels alongside rather than being derived.
+		let conflict = proto_error(
+			proto::SurrealError::new(proto::ErrorKind::Query, "conflict")
+				.with_details("TransactionConflict", None)
+				.with_retry(None),
+		);
+		assert_eq!(conflict.query_details(), Some(&QueryError::TransactionConflict));
+	}
+
+	/// The two directions do not reconcile the same way. What this client
+	/// accepts is the caller's business; what it sends is the server's, since
+	/// no setting here makes the far end take more than it said it would.
+	#[test]
+	fn the_two_message_limits_reconcile_independently() {
+		// A caller raising the limit gets it for responses, but a request is
+		// still bounded by what the server accepts -- and the server is the
+		// side a refusal has to name.
+		assert_eq!(max_response_size(Some(128), Some(4)), Some(128));
+		assert_eq!(max_request_size(Some(128), Some(4)), Some((4, LimitSource::Server)));
+
+		// A caller lowering it gets the lower figure in both directions, and
+		// is the side that has to move.
+		assert_eq!(max_response_size(Some(2), Some(4)), Some(2));
+		assert_eq!(max_request_size(Some(2), Some(4)), Some((2, LimitSource::Client)));
+
+		// Agreeing on a figure means both have to move to send more.
+		assert_eq!(max_request_size(Some(4), Some(4)), Some((4, LimitSource::Both)));
+
+		// With only one side speaking, that side governs both.
+		assert_eq!(
+			(max_response_size(None, Some(4)), max_request_size(None, Some(4))),
+			(Some(4), Some((4, LimitSource::Server)))
+		);
+		assert_eq!(
+			(max_response_size(Some(8), None), max_request_size(Some(8), None)),
+			(Some(8), Some((8, LimitSource::Client)))
+		);
+
+		// And with neither, tonic's own defaults stand.
+		assert_eq!((max_response_size(None, None), max_request_size(None, None)), (None, None));
+	}
+
+	/// A request past the negotiated limit has to be refused with the limit in
+	/// hand. tonic would otherwise fail it while writing the body, which
+	/// reaches the caller as a bare HTTP/2 stream error naming no size at all.
+	#[test]
+	fn an_oversized_request_is_refused_before_it_is_sent() {
+		let request = rpc::QueryRequest {
+			context: None,
+			query: "x".repeat(1024),
+			variables: None,
+			accepted_encodings: Vec::new(),
+			max_batch_records: 0,
+		};
+		let error = check_message_size(Some((64, LimitSource::Server)), &request)
+			.expect_err("above the limit");
+		let message = error.message();
+		assert!(message.contains("64 bytes"), "the limit should be named: {message}");
+		assert!(
+			message.contains(&request.encoded_len().to_string()),
+			"the size should be named: {message}"
+		);
+
+		check_message_size(Some((1 << 20, LimitSource::Server)), &request)
+			.expect("within the limit");
+		// Nothing to check against when neither peer named a limit.
+		check_message_size(None, &request).expect("unbounded");
 	}
 
 	fn batch(values: Vec<Value>, kind: rpc::QueryResponseKind) -> rpc::QueryBatchFrame {
