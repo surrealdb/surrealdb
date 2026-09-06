@@ -1802,7 +1802,7 @@ implement_visitor_mut! {
 	fn visit_mut_expr(this, s: &mut Expr){
 		match s {
 			Expr::Literal(literal) => {
-				this.visit_mut_liter_mutal(literal)?;
+				this.visit_mut_literal(literal)?;
 			}
 			Expr::Param(p) => {
 				this.visit_mut_param(p)?;
@@ -1925,7 +1925,7 @@ implement_visitor_mut! {
 	Ok(())
 	}
 
-	fn visit_mut_liter_mutal(this, s: &mut Literal){
+	fn visit_mut_literal(this, s: &mut Literal){
 		match s {
 			Literal::None |
 			Literal::Null |
@@ -3026,13 +3026,13 @@ implement_visitor_mut! {
 				}
 			},
 			Kind::Literal(literal) => {
-				this.visit_mut_kind_liter_mutal(literal)?;
+				this.visit_mut_kind_literal(literal)?;
 			},
 		}
 		Ok(())
 	}
 
-	fn visit_mut_kind_liter_mutal(this, k: &mut KindLiteral){
+	fn visit_mut_kind_literal(this, k: &mut KindLiteral){
 		match k{
 			KindLiteral::String(_) => {},
 			KindLiteral::Bool(_) => {},
