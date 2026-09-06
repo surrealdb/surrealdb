@@ -210,6 +210,24 @@ impl Default for FunctionRegistry {
 	}
 }
 
+/// The experimental target a built-in is gated behind, if any.
+///
+/// Mirrors the `exp(...)` markers on the corresponding arms of `fnc::dispatch`,
+/// which is where the legacy executor enforces the same gate. Registry entries
+/// that reach a bucket acquire it through their `EvalContext` and check for
+/// themselves; the functions listed here are pure, so they carry no context and
+/// the gate has to be applied by whoever invokes them — the built-in physical
+/// expression, and the plan-time folder.
+pub(crate) fn experimental_target(
+	name: &str,
+) -> Option<crate::dbs::capabilities::ExperimentalTarget> {
+	use crate::dbs::capabilities::ExperimentalTarget;
+	match name {
+		"type::file" | "file::bucket" | "file::key" => Some(ExperimentalTarget::Files),
+		_ => None,
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;

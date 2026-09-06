@@ -739,6 +739,16 @@ Flag when changes touch:
   at evaluation. A denied call is left unfolded rather than rejected during planning,
   so it fails at evaluation with the same `FunctionNotAllowed` an unfolded call would
   raise and plan construction stays infallible for `EXPLAIN`.
+- Plan-time elimination is also an invocation, of everything it discards. A fold that
+  drops a subtree — `x INSIDE []`, an AND/OR short-circuit — must keep any subtree whose
+  evaluation could dispatch, since no physical expression is built for what it removes.
+  `evaluation_is_inert` in `exec/planner/util/literals.rs` is a fail-closed whitelist:
+  unrecognised shapes are preserved, and a function call is never inert regardless of
+  whether it is currently permitted. Two things outside the expression decide what a
+  bare field read costs, so both are supplied by the caller: what the `FROM` sources can
+  put in a row (a record id dereferences, a scalar does not), and whether reading a row
+  of that table evaluates anything — a `COMPUTED` field or a field-level `SELECT`
+  permission runs before the condition observes the row.
 - Outbound HTTP requests must be checked against network allow/deny lists. Both the
   initial URL and all DNS-resolved IP addresses must be validated. The DNS filtering
   resolver must validate every resolution result.

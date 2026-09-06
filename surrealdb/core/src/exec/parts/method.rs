@@ -70,6 +70,19 @@ impl PhysicalExpr for MethodPart {
 				func_args.push(arg_value);
 			}
 
+			// Method dispatch reaches the same registry entry a direct call
+			// does, so a pure built-in behind an experimental target is gated
+			// here too — after the arguments, matching the direct-call path.
+			if let Some(target) = crate::exec::function::experimental_target(func.name())
+				&& !ctx.capabilities().allows_experimental(&target)
+			{
+				return Err(crate::exec::Error::InvalidFunction {
+					name: self.descriptor.name.to_string(),
+					message: format!("Experimental feature {target} is not enabled"),
+				}
+				.into());
+			}
+
 			// Invoke the resolved function
 			let result = if func.is_pure() && !func.is_async() {
 				func.invoke(func_args)
@@ -361,6 +374,25 @@ mod tests {
 		let ctx = root_ctx();
 		assert_eq!(call("true", ".to_string()", &ctx).await.unwrap(), Value::from("true"));
 		assert_eq!(call("1", ".to_string()", &ctx).await.unwrap(), Value::from("1"));
+	}
+
+	#[tokio::test]
+	async fn a_file_method_is_gated_on_the_files_experimental_target() {
+		// A file value can outlive the capability that created it — stored on a
+		// record, or bound as a parameter — so method dispatch has to apply the
+		// same experimental gate a direct `file::bucket()` call does. The value
+		// is built directly because SurrealQL cannot parse a file literal while
+		// the target is off, which is also why this is not a language test.
+		let ctx = root_ctx();
+		let receiver = Value::File(crate::val::File::new("bucket".to_string(), "/key".to_string()));
+		let err = part("bucket", Vec::new(), &ctx)
+			.evaluate(EvalContext::from_exec_ctx(&ctx).with_value_and_doc(&receiver))
+			.await
+			.unwrap_err();
+		assert!(
+			err.to_string().contains("Experimental feature"),
+			"expected the experimental gate, got {err}"
+		);
 	}
 
 	#[tokio::test]

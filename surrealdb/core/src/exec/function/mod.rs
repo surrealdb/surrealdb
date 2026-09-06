@@ -31,6 +31,7 @@ pub use index::{
 pub use method::MethodDescriptor;
 pub use projection::ProjectionFunction;
 pub use registry::FunctionRegistry;
+pub(crate) use registry::experimental_target;
 pub use signature::Signature;
 
 use crate::exec::BoxFut;

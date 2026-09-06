@@ -17,6 +17,7 @@ mod pipeline;
 mod projection;
 mod record_fold;
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 pub(crate) use pipeline::{
@@ -33,9 +34,9 @@ use super::util::{
 	has_knn_k_operator, has_knn_ktree_operator, has_knn_operator, has_top_level_or,
 	idiom_to_field_name, index_covers_ordering, is_bounded_topk_downstream, is_count_all_eligible,
 	is_indexed_count_eligible, order_is_scan_compatible, resolve_condition_params,
-	resolve_param_value, resolve_projection_field_idioms, strip_fts_condition,
-	strip_index_conditions, strip_knn_and_matches_from_condition, strip_knn_from_condition,
-	strip_union_index_conditions,
+	resolve_param_value, resolve_projection_field_idioms, source_field_reads_are_inert,
+	strip_fts_condition, strip_index_conditions, strip_knn_and_matches_from_condition,
+	strip_knn_from_condition, strip_union_index_conditions,
 };
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::catalog::{Index, IndexDefinition};
@@ -45,6 +46,7 @@ use crate::exec::index::access_path::{
 };
 use crate::exec::index::analysis::IndexAnalyzer;
 use crate::exec::operators::scan::determine_scan_direction;
+use crate::exec::operators::scan::pipeline::table_read_restricted_fields;
 use crate::exec::operators::scan::resolved::{ResolvedTableContext, resolve_table_context};
 use crate::exec::operators::{
 	AnalyzePlan, BitmapNode, BitmapResolve, DynamicScan, ExplainPlan, Fetch, FetchStep, Filter,
@@ -1021,10 +1023,63 @@ impl<'ctx> Planner<'ctx> {
 		// - time::now() - 365d → datetime literal
 		// - math::floor(20.5) → 20 (any pure function with literal args)
 		// - type::int('42') → 42
+		// A fold that discards a subtree must not discard a field read that
+		// would have fetched a record or evaluated something on one, so the
+		// folder is told what these sources can put in a row and what reading
+		// a row of them runs. A versioned read resolves its stamp at
+		// evaluation, so the definitions that will apply are not known here.
+		let restricted_fields = if !source_field_reads_are_inert(&what) {
+			None
+		} else if version.is_some() || self.version.is_some() {
+			// A versioned read resolves its stamp at evaluation, so the
+			// definitions that will apply are not known here.
+			(!what.iter().any(|e| matches!(e, Expr::Table(_)))).then(HashSet::new)
+		} else {
+			match (self.txn(), ns_db) {
+				(Some(txn), Some((ns_id, db_id))) => {
+					let check_perms = match (self.ns.as_deref(), self.db.as_deref()) {
+						(Some(ns), Some(db)) => self.should_check_perms_for_view(ns, db),
+						// Without names to check against, assume enforcement.
+						_ => true,
+					};
+					let mut restricted = HashSet::new();
+					let mut resolved = true;
+					for e in what.iter() {
+						let Expr::Table(name) = e else {
+							continue;
+						};
+						match table_read_restricted_fields(
+							txn,
+							ns_id,
+							db_id,
+							name,
+							None,
+							check_perms,
+						)
+						.await
+						{
+							Some(names) => restricted.extend(names),
+							None => {
+								resolved = false;
+								break;
+							}
+						}
+					}
+					resolved.then_some(restricted)
+				}
+				// Without catalog access a table's field definitions are unknown.
+				_ => (!what.iter().any(|e| matches!(e, Expr::Table(_)))).then(HashSet::new),
+			}
+		};
 		let cond = match cond {
 			Some(mut c) => {
 				let capabilities = self.ctx.get_capabilities();
-				fold_condition_expressions(&mut c, self.function_registry(), &capabilities);
+				fold_condition_expressions(
+					&mut c,
+					self.function_registry(),
+					&capabilities,
+					restricted_fields.as_ref(),
+				);
 				Some(c)
 			}
 			None => None,
@@ -1048,6 +1103,17 @@ impl<'ctx> Planner<'ctx> {
 					&& c.0.read_only()
 				{
 					self.fold_constant_record_idioms(&mut c).await;
+					// Substitution can leave an operand constant that was not
+					// constant during the first pass, so simplify again under
+					// the same rules. A literal operand is inert, which is what
+					// lets the enclosing comparison collapse.
+					let capabilities = self.ctx.get_capabilities();
+					fold_condition_expressions(
+						&mut c,
+						self.function_registry(),
+						&capabilities,
+						restricted_fields.as_ref(),
+					);
 				}
 				Some(c)
 			}

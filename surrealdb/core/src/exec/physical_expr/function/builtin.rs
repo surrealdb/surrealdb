@@ -62,6 +62,20 @@ impl PhysicalExpr for BuiltinFunctionExec {
 			// Evaluate all arguments
 			let args = evaluate_args(&self.arguments, ctx.clone()).await?;
 
+			// A pure built-in behind an experimental target carries no context
+			// of its own, so the gate the legacy dispatcher applies is applied
+			// here instead — after the arguments, which is where the legacy
+			// dispatcher applies it, so an argument's own error surfaces first.
+			if let Some(target) = crate::exec::function::experimental_target(&self.name)
+				&& !ctx.capabilities().allows_experimental(&target)
+			{
+				return Err(crate::exec::Error::InvalidFunction {
+					name: self.name.clone(),
+					message: format!("Experimental feature {target} is not enabled"),
+				}
+				.into());
+			}
+
 			// Invoke the function based on whether it's pure or needs context
 			if func.is_pure() && !func.is_async() {
 				Ok(func.invoke(args)?)

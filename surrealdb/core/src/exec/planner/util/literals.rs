@@ -5,6 +5,7 @@
 //! deterministic, document-independent expressions in WHERE clauses to
 //! literals so the index analyzer can match them.
 
+use std::collections::HashSet;
 use std::ops::Bound;
 
 use crate::dbs::capabilities::Capabilities;
@@ -135,12 +136,59 @@ pub(crate) fn fold_condition_expressions(
 	cond: &mut Cond,
 	registry: &FunctionRegistry,
 	capabilities: &Capabilities,
+	restricted_fields: Option<&HashSet<String>>,
 ) {
 	let mut folder = ExpressionFolder {
 		registry,
 		capabilities,
+		restricted_fields,
 	};
 	let _ = folder.visit_mut_expr(&mut cond.0);
+}
+
+/// `true` when a bare field read off any row these `FROM` sources produce
+/// evaluates to a plain value without fetching anything.
+///
+/// A table's rows are records, and therefore objects, so a field read is a key
+/// lookup. A scalar source yields that scalar, and a field read off a scalar is
+/// `NONE`. Any other source can yield a record id — directly, or inside an
+/// array the read maps over — where the same read dereferences it and runs
+/// computed fields and permissions on the target.
+///
+/// Every source must qualify: `plan_sources` hands the same condition to each
+/// one, so a single dereferencing source makes the whole condition unsafe to
+/// discard. Unrecognised sources are excluded, which costs an optimisation
+/// rather than an enforcement.
+pub(crate) fn source_field_reads_are_inert(what: &[Expr]) -> bool {
+	use crate::expr::literal::Literal;
+	what.iter().all(|e| match e {
+		Expr::Table(_) => true,
+		// Every `Constant` yields a float, datetime or duration, so its row is
+		// a scalar like any other.
+		Expr::Constant(_) => true,
+		// An object row's bare field read is a key lookup like a record's; the
+		// expressions building the object are evaluated by the source either way,
+		// fold or no fold.
+		Expr::Literal(Literal::Object(_)) => true,
+		Expr::Literal(lit) => matches!(
+			lit,
+			Literal::None
+				| Literal::Null
+				| Literal::Bool(_)
+				| Literal::Float(_)
+				| Literal::Integer(_)
+				| Literal::Decimal(_)
+				| Literal::String(_)
+				| Literal::Bytes(_)
+				| Literal::Regex(_)
+				| Literal::Duration(_)
+				| Literal::Datetime(_)
+				| Literal::Uuid(_)
+				| Literal::Geometry(_)
+				| Literal::File(_)
+		),
+		_ => false,
+	})
 }
 
 /// MutVisitor that replaces constant expression subtrees with their literal
@@ -149,6 +197,9 @@ pub(crate) fn fold_condition_expressions(
 struct ExpressionFolder<'a> {
 	registry: &'a FunctionRegistry,
 	capabilities: &'a Capabilities,
+	/// Names whose read is not inert, or `None` when no field read reaching
+	/// this condition is. See [`source_field_reads_are_inert`].
+	restricted_fields: Option<&'a HashSet<String>>,
 }
 
 impl MutVisitor for ExpressionFolder<'_> {
@@ -159,7 +210,9 @@ impl MutVisitor for ExpressionFolder<'_> {
 		expr.visit_mut(self)?;
 
 		// Then try to fold this node to a literal
-		if let Some(folded) = try_fold_to_literal(expr, self.registry, self.capabilities) {
+		if let Some(folded) =
+			try_fold_to_literal(expr, self.registry, self.capabilities, self.restricted_fields)
+		{
 			*expr = folded;
 		}
 		Ok(())
@@ -171,6 +224,181 @@ impl MutVisitor for ExpressionFolder<'_> {
 	) -> Result<(), Self::Error> {
 		// Don't recurse into subqueries — they have their own planning.
 		Ok(())
+	}
+}
+
+/// `true` when evaluating `expr` cannot dispatch anything a capability gates,
+/// so a fold may discard it without hiding an error evaluation would raise.
+///
+/// This is a fail-closed whitelist. Every variant is listed and anything not
+/// explicitly cleared counts as capable of invoking something, so a new
+/// `Expr`, `Part` or `BinaryOperator` variant stops compiling until someone
+/// decides which side it falls on rather than silently becoming discardable.
+///
+/// Enumerating the ways a subtree *can* reach a denial does not work, because
+/// there are too many and they do not share a shape: a built-in enforces
+/// network, scripting or experimental capabilities of its own beyond its
+/// name; a method call is an `Idiom` part and a closure call an
+/// `Expr::Postfix`, neither of them an `Expr::FunctionCall`; and a
+/// user-defined function, module, script or `eval::surql` runs a body that is
+/// not visible at plan time at all. Clearing only the shapes that provably
+/// reach nothing is the side of that line which fails safe.
+///
+/// Being capability-independent is deliberate. An operand that can invoke
+/// something is kept whatever the configuration permits, which also stops a
+/// fold from discarding a call with side effects — what evaluation would have
+/// run, it still runs.
+fn evaluation_is_inert(expr: &Expr, restricted_fields: Option<&HashSet<String>>) -> bool {
+	use crate::expr::part::Part;
+
+	fn operator_is_inert(op: &BinaryOperator) -> bool {
+		match op {
+			BinaryOperator::Subtract
+			| BinaryOperator::Add
+			| BinaryOperator::Multiply
+			| BinaryOperator::Divide
+			| BinaryOperator::Remainder
+			| BinaryOperator::Power
+			| BinaryOperator::Equal
+			| BinaryOperator::ExactEqual
+			| BinaryOperator::NotEqual
+			| BinaryOperator::AllEqual
+			| BinaryOperator::AnyEqual
+			| BinaryOperator::Or
+			| BinaryOperator::And
+			| BinaryOperator::NullCoalescing
+			| BinaryOperator::TenaryCondition
+			| BinaryOperator::LessThan
+			| BinaryOperator::LessThanEqual
+			| BinaryOperator::MoreThan
+			| BinaryOperator::MoreThanEqual
+			| BinaryOperator::Contain
+			| BinaryOperator::NotContain
+			| BinaryOperator::Inside
+			| BinaryOperator::NotInside
+			| BinaryOperator::ContainAll
+			| BinaryOperator::ContainAny
+			| BinaryOperator::ContainNone
+			| BinaryOperator::AllInside
+			| BinaryOperator::AnyInside
+			| BinaryOperator::NoneInside
+			| BinaryOperator::Outside
+			| BinaryOperator::Intersects
+			// A range operator builds a `Value::Range` from its two bounds and
+			// dispatches nothing; the bounds themselves are checked above.
+			| BinaryOperator::Range
+			| BinaryOperator::RangeInclusive
+			| BinaryOperator::RangeSkip
+			| BinaryOperator::RangeSkipInclusive => true,
+			// `@@` and `<|..|>` dispatch index functions.
+			BinaryOperator::Matches(_) | BinaryOperator::NearestNeighbor(_) => false,
+		}
+	}
+
+	match expr {
+		// Composite literals evaluate their element expressions in place.
+		Expr::Literal(lit) => literal_is_inert(lit, restricted_fields),
+		Expr::Table(_) | Expr::Mock(_) | Expr::Constant(_) => true,
+		// A parameter that still reaches here is one resolution deliberately
+		// left alone: a closure, whose captures make substitution lossy, or a
+		// `DEFINE PARAM` whose permission clause is evaluated per read. Both
+		// dispatch on evaluation, so neither may be discarded. A parameter
+		// carrying a plain value was already replaced by its literal, and
+		// folds on that literal instead.
+		Expr::Param(_) => false,
+		// A single field read is inert only when the row it reads from is a
+		// record and reading that particular field evaluates nothing. Field
+		// access recurses through arrays and fetches any record id it lands
+		// on, evaluating that record's computed fields and permission
+		// expressions — so over a source like `[[target:1]]` even a one-part
+		// idiom dereferences, and from the second part onward the receiver can
+		// be a record id whatever the source. Over a table the read is a plain
+		// key lookup, so `a IN []` still collapses, while `ref.bad IN []` and
+		// a read of a field materialisation has to compute are kept.
+		Expr::Idiom(idiom) => match (restricted_fields, idiom.0.as_slice()) {
+			(Some(restricted), [Part::Field(name)]) => !restricted.contains(name.as_str()),
+			_ => false,
+		},
+		Expr::Prefix {
+			expr,
+			..
+		} => evaluation_is_inert(expr, restricted_fields),
+		Expr::Binary {
+			left,
+			op,
+			right,
+		} => {
+			operator_is_inert(op)
+				&& evaluation_is_inert(left, restricted_fields)
+				&& evaluation_is_inert(right, restricted_fields)
+		}
+		// Everything else can reach a dispatch: a call of any kind, a closure
+		// body, a block or statement, or a subquery with its own planning.
+		Expr::Postfix {
+			..
+		}
+		| Expr::FunctionCall(_)
+		| Expr::Closure(_)
+		| Expr::Block(_)
+		| Expr::Break
+		| Expr::Continue
+		| Expr::Return(_)
+		| Expr::Throw(_)
+		| Expr::IfElse(_)
+		| Expr::Select(_)
+		| Expr::Create(_)
+		| Expr::Update(_)
+		| Expr::Upsert(_)
+		| Expr::Delete(_)
+		| Expr::Relate(_)
+		| Expr::Insert(_)
+		| Expr::Define(_)
+		| Expr::Remove(_)
+		| Expr::Rebuild(_)
+		| Expr::Alter(_)
+		| Expr::Info(_)
+		| Expr::Foreach(_)
+		| Expr::Let(_)
+		| Expr::Sleep(_)
+		| Expr::Explain {
+			..
+		}
+		| Expr::Match(_) => false,
+	}
+}
+
+/// `true` when every expression a literal carries is itself inert.
+fn literal_is_inert(
+	lit: &crate::expr::literal::Literal,
+	restricted_fields: Option<&HashSet<String>>,
+) -> bool {
+	use crate::expr::literal::Literal;
+
+	match lit {
+		Literal::None
+		| Literal::Null
+		| Literal::Bool(_)
+		| Literal::Float(_)
+		| Literal::Integer(_)
+		| Literal::Decimal(_)
+		| Literal::String(_)
+		| Literal::Uuid(_)
+		| Literal::Datetime(_)
+		| Literal::Duration(_)
+		| Literal::Bytes(_)
+		| Literal::Regex(_)
+		| Literal::Geometry(_)
+		| Literal::File(_)
+		| Literal::UnboundedRange => true,
+		Literal::Array(exprs) | Literal::Set(exprs) => {
+			exprs.iter().all(|e| evaluation_is_inert(e, restricted_fields))
+		}
+		Literal::Object(entries) => {
+			entries.iter().all(|e| evaluation_is_inert(&e.value, restricted_fields))
+		}
+		// A record id builds a value from its key; whether that dispatches
+		// depends on the key.
+		Literal::RecordId(rid) => record_id_key_is_inert(&rid.key, restricted_fields),
 	}
 }
 
@@ -201,6 +429,7 @@ fn try_fold_to_literal(
 	expr: &Expr,
 	registry: &FunctionRegistry,
 	capabilities: &Capabilities,
+	restricted_fields: Option<&HashSet<String>>,
 ) -> Option<Expr> {
 	use crate::expr::Function;
 	use crate::val::{Datetime, Value};
@@ -233,6 +462,14 @@ fn try_fold_to_literal(
 			if !capabilities.allows_function_name(name.as_str()) {
 				return None;
 			}
+			// A pure built-in behind an experimental target is gated the same
+			// way, and for the same reason: the physical expression raises the
+			// experimental error at evaluation.
+			if let Some(target) = crate::exec::function::experimental_target(name.as_str())
+				&& !capabilities.allows_experimental(&target)
+			{
+				return None;
+			}
 			let func = registry.get(name.as_str())?;
 			// `is_pure` only says the call needs no context; folding also
 			// requires that repeated calls agree, or the single plan-time
@@ -255,9 +492,9 @@ fn try_fold_to_literal(
 		// `AccessPath::EmptyScan` for the whole SELECT.
 		Expr::Binary {
 			op: BinaryOperator::Inside,
+			left,
 			right,
-			..
-		} if is_empty_array_literal(right) => {
+		} if is_empty_array_literal(right) && evaluation_is_inert(left, restricted_fields) => {
 			Some(Expr::Literal(crate::expr::literal::Literal::Bool(false)))
 		}
 
@@ -269,7 +506,7 @@ fn try_fold_to_literal(
 			op,
 			right,
 		} => {
-			if let Some(short) = try_short_circuit_bool(left, op, right) {
+			if let Some(short) = try_short_circuit_bool(left, op, right, restricted_fields) {
 				return Some(short);
 			}
 			let left_val = try_expr_to_value(left)?;
@@ -293,7 +530,86 @@ fn is_empty_array_literal(expr: &Expr) -> bool {
 /// - `true AND x`  and `x AND true`  → the other operand
 /// - `true OR _`   and `_ OR true`   → `true`
 /// - `false OR x`  and `x OR false`  → the other operand
-fn try_short_circuit_bool(left: &Expr, op: &BinaryOperator, right: &Expr) -> Option<Expr> {
+///
+/// Only the operand that runtime evaluation would actually reach needs
+/// protecting. `AND`/`OR` short-circuit left to right, so `false AND x` and
+/// `true OR x` never evaluate `x`: collapsing them discards a subtree that
+/// would not have run anyway, and folding is sound even when `x` holds a
+/// denied call. The mirrored arms are different — `x AND false` and
+/// `x OR true` do evaluate `x` first — so those are refused when `x` holds a
+/// call the caller may not execute; see [`evaluation_is_inert`]. The arms
+/// that return the other operand discard only a bool literal, which can hold
+/// no call.
+/// `true` when this expression can only evaluate to a boolean.
+///
+/// `AND` and `OR` yield one of their operands rather than a boolean: `7 OR true`
+/// is `7`, and `7 AND true` is `true`. A rewrite that replaces the whole
+/// expression with a constant, or with the operand alone, therefore only
+/// preserves the value when the left operand could not have carried one of its
+/// own. Truthiness is not enough — the folded node can sit anywhere in the
+/// condition, including under a comparison that reads its value.
+fn is_boolean_valued(expr: &Expr) -> bool {
+	use crate::expr::literal::Literal;
+	match expr {
+		Expr::Literal(Literal::Bool(_)) => true,
+		Expr::Prefix {
+			op: crate::expr::PrefixOperator::Not,
+			..
+		} => true,
+		Expr::Binary {
+			op,
+			..
+		} => match op {
+			BinaryOperator::Equal
+			| BinaryOperator::ExactEqual
+			| BinaryOperator::NotEqual
+			| BinaryOperator::AllEqual
+			| BinaryOperator::AnyEqual
+			| BinaryOperator::LessThan
+			| BinaryOperator::LessThanEqual
+			| BinaryOperator::MoreThan
+			| BinaryOperator::MoreThanEqual
+			| BinaryOperator::Contain
+			| BinaryOperator::NotContain
+			| BinaryOperator::ContainAll
+			| BinaryOperator::ContainAny
+			| BinaryOperator::ContainNone
+			| BinaryOperator::Inside
+			| BinaryOperator::NotInside
+			| BinaryOperator::AllInside
+			| BinaryOperator::AnyInside
+			| BinaryOperator::NoneInside
+			| BinaryOperator::Outside
+			| BinaryOperator::Intersects
+			| BinaryOperator::Matches(_) => true,
+			// `AND`/`OR` return an operand, `??`/`?:` select one, and the rest
+			// are arithmetic, ranges or a KNN operator.
+			BinaryOperator::And
+			| BinaryOperator::Or
+			| BinaryOperator::NullCoalescing
+			| BinaryOperator::TenaryCondition
+			| BinaryOperator::Subtract
+			| BinaryOperator::Add
+			| BinaryOperator::Multiply
+			| BinaryOperator::Divide
+			| BinaryOperator::Remainder
+			| BinaryOperator::Power
+			| BinaryOperator::Range
+			| BinaryOperator::RangeInclusive
+			| BinaryOperator::RangeSkip
+			| BinaryOperator::RangeSkipInclusive
+			| BinaryOperator::NearestNeighbor(_) => false,
+		},
+		_ => false,
+	}
+}
+
+fn try_short_circuit_bool(
+	left: &Expr,
+	op: &BinaryOperator,
+	right: &Expr,
+	restricted_fields: Option<&HashSet<String>>,
+) -> Option<Expr> {
 	use crate::expr::literal::Literal;
 	let l_bool = match left {
 		Expr::Literal(Literal::Bool(b)) => Some(*b),
@@ -304,16 +620,27 @@ fn try_short_circuit_bool(left: &Expr, op: &BinaryOperator, right: &Expr) -> Opt
 		_ => None,
 	};
 	match (op, l_bool, r_bool) {
-		(BinaryOperator::And, Some(false), _) | (BinaryOperator::And, _, Some(false)) => {
+		// `false AND x` / `true OR x`: `x` is never evaluated at runtime, so
+		// discarding it is what evaluation would have done.
+		(BinaryOperator::And, Some(false), _) => Some(Expr::Literal(Literal::Bool(false))),
+		(BinaryOperator::Or, Some(true), _) => Some(Expr::Literal(Literal::Bool(true))),
+		// `x AND false` / `x OR true`: `x` runs first, so it has to survive
+		// when it holds a call the caller may not execute, and its value has
+		// to be one the rewrite can stand in for.
+		(BinaryOperator::And, _, Some(false))
+			if is_boolean_valued(left) && evaluation_is_inert(left, restricted_fields) =>
+		{
 			Some(Expr::Literal(Literal::Bool(false)))
 		}
-		(BinaryOperator::And, Some(true), _) => Some(right.clone()),
-		(BinaryOperator::And, _, Some(true)) => Some(left.clone()),
-		(BinaryOperator::Or, Some(true), _) | (BinaryOperator::Or, _, Some(true)) => {
+		(BinaryOperator::Or, _, Some(true))
+			if is_boolean_valued(left) && evaluation_is_inert(left, restricted_fields) =>
+		{
 			Some(Expr::Literal(Literal::Bool(true)))
 		}
+		(BinaryOperator::And, Some(true), _) => Some(right.clone()),
 		(BinaryOperator::Or, Some(false), _) => Some(right.clone()),
-		(BinaryOperator::Or, _, Some(false)) => Some(left.clone()),
+		(BinaryOperator::And, _, Some(true)) if is_boolean_valued(left) => Some(left.clone()),
+		(BinaryOperator::Or, _, Some(false)) if is_boolean_valued(left) => Some(left.clone()),
 		_ => None,
 	}
 }
@@ -334,6 +661,47 @@ fn try_eval_binary(
 		// behavior with division-by-zero, overflow, etc. These cover the
 		// common datetime ± duration patterns.
 		_ => None,
+	}
+}
+
+/// `true` when building a record-id key evaluates nothing that could dispatch,
+/// and yields the same key every time.
+///
+/// A scalar key is just a value. A composite one carries expressions, which are
+/// held to the same standard as anywhere else. `Generate` is excluded because
+/// it draws a fresh key per evaluation, so discarding it would freeze one draw
+/// — the same reason `rand::*` is never folded.
+fn record_id_key_is_inert(
+	key: &crate::expr::RecordIdKeyLit,
+	restricted_fields: Option<&HashSet<String>>,
+) -> bool {
+	use std::ops::Bound;
+
+	use crate::expr::RecordIdKeyLit;
+
+	fn bound_is_inert(
+		bound: &Bound<RecordIdKeyLit>,
+		restricted_fields: Option<&HashSet<String>>,
+	) -> bool {
+		match bound {
+			Bound::Included(k) | Bound::Excluded(k) => record_id_key_is_inert(k, restricted_fields),
+			Bound::Unbounded => true,
+		}
+	}
+
+	match key {
+		RecordIdKeyLit::Number(_) | RecordIdKeyLit::String(_) | RecordIdKeyLit::Uuid(_) => true,
+		RecordIdKeyLit::Array(exprs) => {
+			exprs.iter().all(|e| evaluation_is_inert(e, restricted_fields))
+		}
+		RecordIdKeyLit::Object(entries) => {
+			entries.iter().all(|e| evaluation_is_inert(&e.value, restricted_fields))
+		}
+		RecordIdKeyLit::Range(range) => {
+			bound_is_inert(&range.start, restricted_fields)
+				&& bound_is_inert(&range.end, restricted_fields)
+		}
+		RecordIdKeyLit::Generate(_) => false,
 	}
 }
 

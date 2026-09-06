@@ -606,6 +606,81 @@ fn narrowing_auth_limit(
 /// field definitions, PhysicalExpr compilation, dependency analysis, and
 /// topological sorting. It takes explicit parameters instead of
 /// `ExecutionContext`, making it usable at both plan time and execution time.
+/// The fields of this table whose read is not inert, or `None` when no field
+/// read of it is.
+///
+/// Materialising a row runs the table's `SELECT` permission, then the computed
+/// fields and field-level permissions the query needs, all before a condition
+/// observes the row. A fold that discards a field read discards whatever that
+/// read would have triggered — including a call the caller is not permitted to
+/// make.
+///
+/// A conditional table permission is evaluated for any row that is read at all,
+/// so it makes every field read non-inert and answers `None`. Otherwise only
+/// the fields that carry work of their own are listed, since materialisation
+/// resolves the fields the query needs rather than all of them.
+///
+/// `check_perms` mirrors the enforcement decision the scan itself makes: a
+/// session that skips permission evaluation never runs those expressions, so
+/// they are not work this fold would be discarding. Computed fields are
+/// evaluated either way, and are the only per-name entries — materialisation
+/// resolves those from the fields the query needs.
+///
+/// Answers `None` whenever the definitions cannot be read or a field is named
+/// by something other than a plain path, so an unresolvable table costs an
+/// optimisation rather than an enforcement.
+pub(crate) async fn table_read_restricted_fields(
+	txn: &Transaction,
+	ns_id: crate::catalog::NamespaceId,
+	db_id: crate::catalog::DatabaseId,
+	table_name: &TableName,
+	version: Option<u64>,
+	check_perms: bool,
+) -> Option<HashSet<String>> {
+	let Ok(table_def) = txn.get_tb(ns_id, db_id, table_name, version).await else {
+		return None;
+	};
+	// `Full` evaluates nothing and `None` withholds the rows outright; only a
+	// conditional permission runs an expression, and only when enforcement is
+	// on for this session at all.
+	if check_perms
+		&& matches!(
+			crate::catalog::table_select_permission(table_def.as_deref()),
+			Permission::Specific(_)
+		) {
+		return None;
+	}
+
+	let Ok(field_defs) = txn.all_tb_fields(ns_id, db_id, table_name, version).await else {
+		return None;
+	};
+	// A conditional field permission is enforced for every restricted field on
+	// the table whatever the query touches — `filter_field_state_for_projection`
+	// keeps the whole list on purpose — so it is row-wide work, not work
+	// attached to reads of its own name.
+	if check_perms
+		&& field_defs.iter().any(|fd| matches!(fd.select_permission, Permission::Specific(_)))
+	{
+		return None;
+	}
+
+	let mut restricted = HashSet::new();
+	for fd in field_defs.iter() {
+		if fd.computed.is_none() {
+			continue;
+		}
+		// A definition on `a.b` is reached by reading `a`, so the read that
+		// has to be kept is named by the leading segment.
+		match fd.name.0.first() {
+			Some(crate::expr::part::Part::Field(name)) => {
+				restricted.insert(name.to_string());
+			}
+			_ => return None,
+		}
+	}
+	Some(restricted)
+}
+
 pub(crate) async fn build_field_state_raw(
 	planner: &crate::exec::planner::Planner<'_>,
 	ns_id: crate::catalog::NamespaceId,

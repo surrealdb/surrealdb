@@ -7,6 +7,7 @@ use tracing::instrument;
 
 use super::pipeline::{
 	build_field_state, determine_scan_direction, eval_limit_expr, kv_scan_stream,
+	table_read_restricted_fields,
 };
 use super::{FullTextScan, IndexScan, KnnScan};
 use crate::catalog::{DatabaseId, Error, NamespaceId, table_select_permission};
@@ -734,7 +735,30 @@ async fn resolve_table_scan_stream(
 			let mut cond =
 				resolve_condition_params(c, &ctx.root().ctx, ns_db, SELECT_ITERATION_PARAMS).await;
 			let capabilities = ctx.root().ctx.get_capabilities();
-			fold_condition_expressions(&mut cond, ctx.function_registry(), &capabilities);
+			// This path scans a table, so every row reaching the condition is
+			// a record. A field read off one is still only inert while
+			// materialising that row evaluates nothing.
+			// Mirror the scan's own enforcement decision: a session that skips
+			// permission evaluation never runs those expressions.
+			let check_perms = match ctx.database() {
+				Ok(db_ctx) => should_check_perms(db_ctx, Action::View).unwrap_or(true),
+				Err(_) => true,
+			};
+			let restricted_fields = table_read_restricted_fields(
+				&txn,
+				cfg.ns_id,
+				cfg.db_id,
+				&cfg.table_name,
+				version_stamp,
+				check_perms,
+			)
+			.await;
+			fold_condition_expressions(
+				&mut cond,
+				ctx.function_registry(),
+				&capabilities,
+				restricted_fields.as_ref(),
+			);
 			resolve_projection_field_idioms(&mut cond, ctx.function_registry());
 			Some(cond)
 		}
