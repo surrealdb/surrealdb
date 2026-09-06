@@ -364,6 +364,11 @@ pub(crate) async fn execute_record_lookup(
 				}
 				let mut batch = batch_result?;
 				let cont = pipeline.process_batch(&mut batch.values, ctx).await?;
+				// Meter delivered rows: these survived filtering and
+				// permission checks and enter the statement's response.
+				if let Some(meter) = ctx.ctx().delivery_meter() {
+					meter.record(rid.table.as_str(), batch.values.len() as u64);
+				}
 				results.extend(batch.values);
 				if !cont {
 					break;
@@ -399,6 +404,13 @@ pub(crate) async fn execute_record_lookup(
 			}
 			if !batch.is_empty() && limit == Some(0) {
 				batch.clear();
+			}
+			// Meter the delivered record: it survived filtering and
+			// permission checks and enters the statement's response.
+			if !batch.is_empty()
+				&& let Some(meter) = ctx.ctx().delivery_meter()
+			{
+				meter.record(rid.table.as_str(), batch.len() as u64);
 			}
 			Ok(batch)
 		}

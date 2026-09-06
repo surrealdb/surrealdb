@@ -36,6 +36,7 @@ pub(crate) mod output;
 pub(crate) mod param;
 pub(crate) mod part;
 pub(crate) mod permission;
+pub(crate) mod ratelimit;
 pub(crate) mod record_id;
 pub(crate) mod reference;
 pub(crate) mod scoring;
@@ -92,7 +93,8 @@ pub(crate) use self::order::Order;
 pub(crate) use self::output::Output;
 pub(crate) use self::param::Param;
 pub(crate) use self::part::Part;
-pub(crate) use self::permission::{Permission, Permissions};
+pub(crate) use self::permission::{Permission, PermissionKind, Permissions};
+pub(crate) use self::ratelimit::{RateLimit, RateLimits};
 pub(crate) use self::record_id::{
 	RecordIdKeyGen, RecordIdKeyLit, RecordIdKeyRangeLit, RecordIdLit,
 };

@@ -127,6 +127,7 @@ pub fn table_basic() -> TableDefinition {
 		schemafull: false,
 		view: None,
 		permissions: Permissions::default(),
+		ratelimits: Vec::new(),
 		changefeed: None,
 		comment: None,
 		table_type: TableType::Normal,
@@ -136,6 +137,21 @@ pub fn table_basic() -> TableDefinition {
 		cache_indexes_ts: UuidExt::nil(),
 		graphql_alias: None,
 		graphql_deprecated: None,
+	}
+}
+
+/// Table with a RATELIMIT policy (added in the 3.2.0 wire format)
+pub fn table_with_ratelimit() -> TableDefinition {
+	TableDefinition {
+		ratelimits: vec![crate::catalog::RateLimit {
+			actions: vec![PermissionKind::Select],
+			condition: Some(Expr::Literal(Literal::Bool(true))),
+			bucket: Expr::Literal(Literal::String(Strand::new_static("$session.ip"))),
+			limit: 100,
+			period: Duration::from_secs(60),
+			max: Some(200),
+		}],
+		..table_basic()
 	}
 }
 
@@ -161,6 +177,7 @@ pub fn table_with_view() -> TableDefinition {
 			groups: Some(Groups::default()),
 		}),
 		permissions: Permissions::default(),
+		ratelimits: Vec::new(),
 		changefeed: None,
 		comment: Some("User statistics view".to_string()),
 		table_type: TableType::Normal,
@@ -184,6 +201,7 @@ pub fn table_schemafull() -> TableDefinition {
 		schemafull: true,
 		view: None,
 		permissions: Permissions::default(),
+		ratelimits: Vec::new(),
 		changefeed: Some(ChangeFeed {
 			expiry: Duration::from_secs(86400),
 			store_diff: false,
@@ -217,6 +235,7 @@ pub fn table_relation() -> TableDefinition {
 			update: Permission::None,
 			delete: Permission::None,
 		},
+		ratelimits: Vec::new(),
 		changefeed: None,
 		comment: Some("User likes relation".to_string()),
 		table_type: TableType::Relation(Relation {
@@ -248,6 +267,7 @@ pub fn table_with_materialized_view() -> TableDefinition {
 			condition: Some(Expr::Literal(Literal::String(Strand::new_static("active = true")))),
 		}),
 		permissions: Permissions::default(),
+		ratelimits: Vec::new(),
 		changefeed: None,
 		comment: Some("Materialized view of active users".to_string()),
 		table_type: TableType::Normal,
@@ -271,6 +291,7 @@ pub fn table_any_type() -> TableDefinition {
 		schemafull: false,
 		view: None,
 		permissions: Permissions::default(),
+		ratelimits: Vec::new(),
 		changefeed: None,
 		comment: None,
 		table_type: TableType::Any,
@@ -804,6 +825,7 @@ pub fn field_basic() -> FieldDefinition {
 		select_permission: Permission::Full,
 		create_permission: Permission::Full,
 		update_permission: Permission::Full,
+		ratelimits: Vec::new(),
 		comment: None,
 		reference: None,
 		auth_limit: AuthLimit::new_no_limit(),
@@ -832,6 +854,7 @@ pub fn field_with_type() -> FieldDefinition {
 		select_permission: Permission::Full,
 		create_permission: Permission::Full,
 		update_permission: Permission::Full,
+		ratelimits: Vec::new(),
 		comment: Some("User email address".to_string()),
 		reference: None,
 		auth_limit: AuthLimit::new_no_limit(),
@@ -856,6 +879,7 @@ pub fn field_readonly() -> FieldDefinition {
 		select_permission: Permission::Full,
 		create_permission: Permission::None,
 		update_permission: Permission::None,
+		ratelimits: Vec::new(),
 		comment: Some("Record creation timestamp".to_string()),
 		reference: None,
 		auth_limit: AuthLimit::new_no_limit(),
@@ -882,6 +906,7 @@ pub fn field_flexible_with_reference() -> FieldDefinition {
 		update_permission: Permission::Specific(Expr::Literal(Literal::String(
 			"$auth.role = 'admin'".into(),
 		))),
+		ratelimits: Vec::new(),
 		comment: Some("Calculated total price".to_string()),
 		reference: Some(Reference {
 			on_delete: ReferenceDeleteStrategy::Cascade,
@@ -917,6 +942,7 @@ pub fn field_with_default_set() -> FieldDefinition {
 		update_permission: Permission::Specific(Expr::Literal(Literal::String(
 			"$auth.role = 'manager'".into(),
 		))),
+		ratelimits: Vec::new(),
 		comment: None,
 		reference: Some(Reference {
 			on_delete: ReferenceDeleteStrategy::Reject,
@@ -946,6 +972,7 @@ pub fn field_record_type() -> FieldDefinition {
 		select_permission: Permission::Full,
 		create_permission: Permission::Full,
 		update_permission: Permission::None,
+		ratelimits: Vec::new(),
 		comment: Some("Author reference".to_string()),
 		reference: Some(Reference {
 			on_delete: ReferenceDeleteStrategy::Custom(Expr::Literal(Literal::String(

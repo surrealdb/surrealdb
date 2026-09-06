@@ -38,6 +38,7 @@ Query
                     .computed: None
                     .default: None
                     .permissions: None
+                    .ratelimits: None
                     .comment: None
                     .on_delete: None
         -TopLevelExpr::Expr
@@ -71,6 +72,7 @@ Query
                     .computed: None
                     .default: None
                     .permissions: None
+                    .ratelimits: None
                     .comment: None
                     .on_delete: None
         -TopLevelExpr::Expr
@@ -104,6 +106,7 @@ Query
                     .computed: None
                     .default: None
                     .permissions: None
+                    .ratelimits: None
                     .comment: None
                     .on_delete: None
         -TopLevelExpr::Expr
@@ -128,6 +131,7 @@ Query
                     .computed: None
                     .default: None
                     .permissions: None
+                    .ratelimits: None
                     .comment: None
                     .on_delete: None
         -TopLevelExpr::Expr
@@ -154,6 +158,7 @@ Query
                     .computed: None
                     .default: None
                     .permissions: None
+                    .ratelimits: None
                     .comment: None
                     .on_delete: None
         -TopLevelExpr::Expr
@@ -187,6 +192,7 @@ Query
                     .computed: None
                     .default: None
                     .permissions: None
+                    .ratelimits: None
                     .comment: None
                     .on_delete: None
         -TopLevelExpr::Expr
@@ -220,6 +226,7 @@ Query
                         +2
                     .default: None
                     .permissions: None
+                    .ratelimits: None
                     .comment: None
                     .on_delete: None
         -TopLevelExpr::Expr
@@ -249,6 +256,7 @@ Query
                         Expr::Integer
                             +3
                     .permissions: None
+                    .ratelimits: None
                     .comment: None
                     .on_delete: None
         -TopLevelExpr::Expr
@@ -283,6 +291,7 @@ Query
                         Permission::Full
                         .select: Some
                         Permission::Full
+                    .ratelimits: None
                     .comment: None
                     .on_delete: None
         -TopLevelExpr::Expr
@@ -314,6 +323,7 @@ Query
                         Permission::Full
                         .select: Some
                         Permission::Full
+                    .ratelimits: None
                     .comment: Some
                     Expr::String
                         StringLit
@@ -341,6 +351,7 @@ Query
                     .computed: None
                     .default: None
                     .permissions: None
+                    .ratelimits: None
                     .comment: Some
                     Expr::String
                         StringLit
@@ -369,6 +380,7 @@ Query
                     .computed: None
                     .default: None
                     .permissions: None
+                    .ratelimits: None
                     .comment: None
                     .on_delete: Some
                     OnDelete::Reject
@@ -394,6 +406,7 @@ Query
                     .computed: None
                     .default: None
                     .permissions: None
+                    .ratelimits: None
                     .comment: None
                     .on_delete: Some
                     OnDelete::Cascade
@@ -419,6 +432,7 @@ Query
                     .computed: None
                     .default: None
                     .permissions: None
+                    .ratelimits: None
                     .comment: None
                     .on_delete: Some
                     OnDelete::Unset
@@ -444,6 +458,7 @@ Query
                     .computed: None
                     .default: None
                     .permissions: None
+                    .ratelimits: None
                     .comment: None
                     .on_delete: Some
                     OnDelete::Then

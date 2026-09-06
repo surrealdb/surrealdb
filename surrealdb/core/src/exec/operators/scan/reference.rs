@@ -60,6 +60,12 @@ pub struct ReferenceScan {
 	/// What to output: RecordId or FullRecord
 	pub(crate) output_mode: ReferenceScanOutput,
 
+	/// Whether records this scan materialises are delivered into the
+	/// statement's response (a projection or aggregation consumes their
+	/// data) rather than fetched only to navigate or filter. Drives
+	/// delivery metering for table RATELIMIT policies.
+	pub(crate) deliver: bool,
+
 	/// Range start bound for the referencing record IDs.
 	/// When `Unbounded`, starts from the field/table prefix.
 	pub(crate) range_start: Bound<Arc<dyn PhysicalExpr>>,
@@ -93,8 +99,16 @@ impl ReferenceScan {
 			range_start,
 			range_end,
 			version,
+			deliver: false,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
+	}
+
+	/// Mark this scan's materialised records as delivered into the
+	/// statement's response (see the `deliver` field).
+	pub(crate) fn with_deliver(mut self, deliver: bool) -> Self {
+		self.deliver = deliver;
+		self
 	}
 }
 impl ExecOperator for ReferenceScan {
@@ -168,6 +182,7 @@ impl ExecOperator for ReferenceScan {
 		let scan_batch_size = ctx.root().ctx.config.scan_batch_size;
 		let ctx = ctx.clone();
 		let fetch_full = output_mode == ReferenceScanOutput::FullRecord;
+		let deliver = self.deliver;
 		let version_expr = self.version.clone();
 
 		let stream = async_stream::try_stream! {
@@ -247,8 +262,8 @@ impl ExecOperator for ReferenceScan {
 						// free for the next call and bounds memory.
 						if rid_batch.len() >= scan_batch_size {
 							let values = resolve_record_batch(
-								&ctx, &txn, ns_id, db_id, &rid_batch, fetch_full, check_perms,
-								version, CachePolicy::ReadWrite, &mut perm_cache,
+								&ctx, &txn, ns_id, db_id, &rid_batch, fetch_full, deliver,
+								check_perms, version, CachePolicy::ReadWrite, &mut perm_cache,
 							).await?;
 							yield ValueBatch { values };
 							rid_batch.clear();
@@ -260,8 +275,8 @@ impl ExecOperator for ReferenceScan {
 			// Yield remaining batch
 			if !rid_batch.is_empty() {
 				let values = resolve_record_batch(
-					&ctx, &txn, ns_id, db_id, &rid_batch, fetch_full, check_perms, version,
-					CachePolicy::ReadWrite, &mut perm_cache,
+					&ctx, &txn, ns_id, db_id, &rid_batch, fetch_full, deliver, check_perms,
+					version, CachePolicy::ReadWrite, &mut perm_cache,
 				).await?;
 				yield ValueBatch { values };
 			}

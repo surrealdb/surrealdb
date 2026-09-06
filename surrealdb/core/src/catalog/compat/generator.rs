@@ -106,6 +106,11 @@ fn table_fixtures() -> TypeFixtures {
 				bytes: fix::table_basic().kv_encode_value().unwrap(),
 			},
 			Fixture {
+				name: "TABLE_WITH_RATELIMIT",
+				description: "table with a RATELIMIT policy",
+				bytes: fix::table_with_ratelimit().kv_encode_value().unwrap(),
+			},
+			Fixture {
 				name: "TABLE_WITH_VIEW",
 				description: "table with view definition",
 				bytes: fix::table_with_view().kv_encode_value().unwrap(),
@@ -1102,6 +1107,25 @@ fn generator_v3_1_1() {
 	run_generator("v3_1_1", "3.1.1");
 }
 
+/// Generate fixture bytes for the 3.2.0 wire format snapshot. Run with:
+///
+/// ```text
+/// cargo test -p surrealdb-core --lib \
+///     catalog::compat::generator::generator_v3_2_0 -- --ignored --nocapture
+/// ```
+///
+/// Copy the output into `v3_2_0.rs`, then paste the printed hash into
+/// the assertion in `test_v3_2_0_remains_unchanged` below.
+///
+/// 3.2.0 added the `ratelimits` field to `TableDefinition` (revision 3)
+/// and `FieldDefinition`, so their fixtures re-encode at the new
+/// revision; the `TABLE_WITH_RATELIMIT` fixture first appears here.
+#[test]
+#[ignore]
+fn generator_v3_2_0() {
+	run_generator("v3_2_0", "3.2.0");
+}
+
 #[test]
 fn test_v3_0_0_beta_1_remains_unchanged() {
 	use sha2::{Digest, Sha256};
@@ -1154,6 +1178,22 @@ fn test_v3_1_0_remains_unchanged() {
 	let hash = Sha256::digest(v3_1_0);
 	let hash_str = hex::encode(hash);
 	assert_eq!(hash_str, "84897ab9a06cf136d1af5bb8ee0005462ebd56726de822724ff60c6dc3ba23a9");
+}
+
+#[test]
+fn test_v3_2_0_remains_unchanged() {
+	use sha2::{Digest, Sha256};
+
+	// Read the v3_2_0.rs file, hash it and assert on the hash.
+	//
+	// v3_2_0 captures the wire format after `TableDefinition` (revision 3)
+	// and `FieldDefinition` gained the `ratelimits` field. Every
+	// TableDefinition / FieldDefinition fixture re-encodes at the new
+	// revision, and the `TABLE_WITH_RATELIMIT` fixture first appears here.
+	let v3_2_0 = include_bytes!("v3_2_0.rs");
+	let hash = Sha256::digest(v3_2_0);
+	let hash_str = hex::encode(hash);
+	assert_eq!(hash_str, "4c24036739c57ee67f82fc5590a56272fa3dbe085f8ef6e2eceaea0c2eefb84f");
 }
 
 #[test]

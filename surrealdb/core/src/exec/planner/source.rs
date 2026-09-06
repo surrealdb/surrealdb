@@ -287,13 +287,18 @@ impl<'ctx> Planner<'ctx> {
 					edge_tables.push(spec);
 				}
 
+				// Full records fetched for a projection or aggregation are
+				// delivered into the response; records fetched only so a
+				// WHERE/SPLIT can filter (and then projected back to ids)
+				// are not.
 				let scan = GraphEdgeScan::new(
 					input,
 					LookupDirection::from(dir),
 					edge_tables,
 					output_mode,
 					self.version.clone(),
-				);
+				)
+				.with_deliver(needs_full_pipeline);
 				// Push limit into the scan when no filter/sort/split would
 				// change the result count. This avoids scanning all edges
 				// when only a few are needed. When START is present, add
@@ -368,15 +373,19 @@ impl<'ctx> Planner<'ctx> {
 					ReferenceScanOutput::RecordId
 				};
 
-				Arc::new(ReferenceScan::new(
-					input,
-					referencing_table,
-					referencing_field,
-					ref_output_mode,
-					range_start,
-					range_end,
-					self.version.clone(),
-				))
+				Arc::new(
+					ReferenceScan::new(
+						input,
+						referencing_table,
+						referencing_field,
+						ref_output_mode,
+						range_start,
+						range_end,
+						self.version.clone(),
+					)
+					// See the GraphEdgeScan deliver note above.
+					.with_deliver(needs_full_pipeline),
+				)
 			}
 		};
 

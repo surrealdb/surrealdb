@@ -42,6 +42,7 @@ use crate::dbs::{
 use crate::err::Error;
 use crate::exec::function::FunctionRegistry;
 use crate::expr::Base;
+use crate::gov::RateLimiter;
 #[cfg(feature = "http")]
 use crate::http::HttpClient;
 use crate::iam::{Action, ResourceKind};
@@ -126,6 +127,18 @@ pub struct Context {
 	// the corresponding `StatementEvent`. Replaced by the executor before
 	// each top-level statement; `None` outside an active statement.
 	statement_counters: Option<Arc<StatementCounters>>,
+	// Per-statement accumulator for rate-limit charges incurred during
+	// document processing (field-level RATELIMIT clauses). Installed by the
+	// executor before each top-level statement and settled in a dedicated
+	// charge transaction after the statement completes; `None` outside an
+	// active statement.
+	ratelimit_charges: Option<Arc<std::sync::Mutex<Vec<crate::gov::PendingCharge>>>>,
+	// Per-statement accumulator counting the records each table delivers
+	// into the statement's response. Installed by the executor before each
+	// top-level statement; bumped from the output paths of both execution
+	// engines and settled atomically against table RATELIMIT policies
+	// before the response is returned.
+	delivery_meter: Option<Arc<crate::gov::DeliveryMeter>>,
 	// Pre-resolved tenant identity (namespace, database, user, session id,
 	// client ip) derived from the active session at `attach_session` time.
 	// Read by the executor and the transaction layer to populate the
@@ -134,6 +147,8 @@ pub struct Context {
 	tenant_identity: Option<Arc<crate::observe::TenantIdentity>>,
 	// Matches context for index functions (search::highlight, search::score, etc.)
 	matches_context: Option<Arc<crate::exec::function::MatchesContext>>,
+	// Shared admission limiter for schema-defined rate limits.
+	rate_limiter: Arc<RateLimiter>,
 	// KNN context for index functions (vector::distance::knn)
 	knn_context: Option<Arc<crate::exec::function::KnnContext>>,
 	/// Client for making http requests.
@@ -196,7 +211,10 @@ impl Context {
 			new_planner_strategy: NewPlannerStrategy::default(),
 			redact_volatile_explain_attrs: false,
 			statement_counters: None,
+			ratelimit_charges: None,
+			delivery_meter: None,
 			matches_context: None,
+			rate_limiter: Arc::clone(&parent.rate_limiter),
 			knn_context: None,
 			config: Arc::clone(&parent.config),
 			#[cfg(feature = "http")]
@@ -254,7 +272,10 @@ impl Context {
 			new_planner_strategy: parent.new_planner_strategy,
 			redact_volatile_explain_attrs: parent.redact_volatile_explain_attrs,
 			statement_counters: parent.statement_counters.clone(),
+			ratelimit_charges: parent.ratelimit_charges.clone(),
+			delivery_meter: parent.delivery_meter.clone(),
 			matches_context: parent.matches_context.clone(),
+			rate_limiter: Arc::clone(&parent.rate_limiter),
 			knn_context: parent.knn_context.clone(),
 			config: Arc::clone(&parent.config),
 			#[cfg(feature = "http")]
@@ -298,7 +319,10 @@ impl Context {
 			new_planner_strategy: parent.new_planner_strategy,
 			redact_volatile_explain_attrs: parent.redact_volatile_explain_attrs,
 			statement_counters: parent.statement_counters.clone(),
+			ratelimit_charges: parent.ratelimit_charges.clone(),
+			delivery_meter: parent.delivery_meter.clone(),
 			matches_context: parent.matches_context.clone(),
+			rate_limiter: Arc::clone(&parent.rate_limiter),
 			knn_context: parent.knn_context.clone(),
 			config: Arc::clone(&parent.config),
 			#[cfg(feature = "http")]
@@ -359,7 +383,10 @@ impl Context {
 			new_planner_strategy: from.new_planner_strategy,
 			redact_volatile_explain_attrs: from.redact_volatile_explain_attrs,
 			statement_counters: from.statement_counters.clone(),
+			ratelimit_charges: from.ratelimit_charges.clone(),
+			delivery_meter: from.delivery_meter.clone(),
 			matches_context: from.matches_context.clone(),
+			rate_limiter: Arc::clone(&from.rate_limiter),
 			knn_context: from.knn_context.clone(),
 			config: Arc::clone(&from.config),
 			#[cfg(feature = "http")]
@@ -411,7 +438,10 @@ impl Context {
 			new_planner_strategy: from.new_planner_strategy,
 			redact_volatile_explain_attrs: from.redact_volatile_explain_attrs,
 			statement_counters: from.statement_counters.clone(),
+			ratelimit_charges: from.ratelimit_charges.clone(),
+			delivery_meter: from.delivery_meter.clone(),
 			matches_context: from.matches_context.clone(),
+			rate_limiter: Arc::clone(&from.rate_limiter),
 			knn_context: from.knn_context.clone(),
 			config: Arc::clone(&from.config),
 			#[cfg(feature = "http")]
@@ -439,6 +469,7 @@ impl Context {
 		sequences: Sequences,
 		cache: Arc<DatastoreCache>,
 		function_registry: Arc<FunctionRegistry>,
+		rate_limiter: Arc<RateLimiter>,
 		#[cfg(feature = "http")] http_client: Arc<HttpClient>,
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
 		buckets: BucketsManager,
@@ -472,7 +503,10 @@ impl Context {
 			new_planner_strategy: planner_strategy,
 			redact_volatile_explain_attrs: false,
 			statement_counters: None,
+			ratelimit_charges: None,
+			delivery_meter: None,
 			matches_context: None,
+			rate_limiter,
 			knn_context: None,
 			config,
 			#[cfg(feature = "http")]
@@ -519,7 +553,10 @@ impl Context {
 			new_planner_strategy: NewPlannerStrategy::default(),
 			redact_volatile_explain_attrs: false,
 			statement_counters: None,
+			ratelimit_charges: None,
+			delivery_meter: None,
 			matches_context: None,
+			rate_limiter: Arc::new(RateLimiter::default()),
 			knn_context: None,
 			config: Default::default(),
 			#[cfg(feature = "http")]
@@ -538,6 +575,11 @@ impl Context {
 			live: false,
 			broker: None,
 		}
+	}
+
+	/// Returns the shared admission limiter for schema-defined rate limits.
+	pub(crate) fn rate_limiter(&self) -> &Arc<RateLimiter> {
+		&self.rate_limiter
 	}
 
 	/// Freezes this context, allowing it to be used as a parent context.
@@ -821,6 +863,36 @@ impl Context {
 	/// from the iterator's record-result path.
 	pub(crate) fn statement_counters(&self) -> Option<&Arc<StatementCounters>> {
 		self.statement_counters.as_ref()
+	}
+
+	/// Install the per-statement rate-limit charge accumulator. Called by
+	/// the executor before each top-level statement; field-level RATELIMIT
+	/// clauses append to it during document processing and the executor
+	/// settles the total in a dedicated charge transaction afterwards.
+	pub(crate) fn set_ratelimit_charges(
+		&mut self,
+		charges: Option<Arc<std::sync::Mutex<Vec<crate::gov::PendingCharge>>>>,
+	) {
+		self.ratelimit_charges = charges;
+	}
+
+	/// The per-statement rate-limit charge accumulator, if one is installed.
+	pub(crate) fn ratelimit_charges(
+		&self,
+	) -> Option<&Arc<std::sync::Mutex<Vec<crate::gov::PendingCharge>>>> {
+		self.ratelimit_charges.as_ref()
+	}
+
+	/// Install (or clear) the per-statement delivery meter. Called by the
+	/// executor around each top-level statement.
+	pub(crate) fn set_delivery_meter(&mut self, meter: Option<Arc<crate::gov::DeliveryMeter>>) {
+		self.delivery_meter = meter;
+	}
+
+	/// The per-statement delivery meter, if one is installed. Bumped from
+	/// the output paths of both execution engines.
+	pub(crate) fn delivery_meter(&self) -> Option<&Arc<crate::gov::DeliveryMeter>> {
+		self.delivery_meter.as_ref()
 	}
 
 	pub(crate) fn tx(&self) -> Arc<Transaction> {
@@ -1453,6 +1525,18 @@ mod tests {
 			r.err().unwrap().to_string(),
 			"Access to network target '127.0.0.1/32' is not allowed"
 		);
+	}
+
+	#[test]
+	fn context_limiter_is_shared_with_background_work() {
+		use std::sync::Arc;
+
+		let ctx = Context::new_test();
+		let limiter = Arc::clone(ctx.rate_limiter());
+
+		let background = Context::background(&ctx).freeze();
+
+		assert!(Arc::ptr_eq(&limiter, background.rate_limiter()));
 	}
 
 	#[tokio::test]

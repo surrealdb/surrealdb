@@ -7,7 +7,7 @@ use serde::{Serialize, Serializer};
 use surrealdb_core::api::X_SURREAL_REQUEST_ID;
 use surrealdb_core::api::err::ApiError;
 use surrealdb_core::err::anyhow_to_types_error;
-use surrealdb_types::{AuthError, NotAllowedError};
+use surrealdb_types::{AuthError, NotAllowedError, QueryError};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -210,6 +210,30 @@ fn types_error_into_response(e: &surrealdb_types::Error) -> Response {
 			information: Some(e.message().to_string()),
 		}
 		.into_response();
+	}
+	if let Some(QueryError::RateLimited {
+		retry_after,
+		..
+	}) = e.query_details()
+	{
+		let mut response = ErrorMessage {
+			code: StatusCode::TOO_MANY_REQUESTS,
+			details: Some("Rate limit exceeded".to_string()),
+			description: Some(
+				"The request was denied by a rate-limit policy. Retry later.".to_string(),
+			),
+			information: Some(e.message().to_string()),
+		}
+		.into_response();
+		if let Some(retry_after) = retry_after {
+			// Retry-After carries whole delay-seconds; round up so a
+			// compliant client never retries before the bucket can admit.
+			let secs = retry_after.as_secs_f64().ceil().max(1.0) as u64;
+			if let Ok(value) = HeaderValue::from_str(&secs.to_string()) {
+				response.headers_mut().insert(http::header::RETRY_AFTER, value);
+			}
+		}
+		return response;
 	}
 	ErrorMessage {
 		code: StatusCode::BAD_REQUEST,

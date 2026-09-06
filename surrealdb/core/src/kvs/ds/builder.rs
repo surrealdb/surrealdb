@@ -304,6 +304,7 @@ impl Builder {
 			#[cfg(all(feature = "graphql", not(target_family = "wasm")))]
 			graphql_schema_cache: crate::graphql::cache::GraphQLSchemaCache::default(),
 			function_registry: Arc::new(FunctionRegistry::with_builtins()),
+			rate_limiter: Arc::new(crate::gov::RateLimiter::default()),
 			buckets,
 			sequences: Sequences::new(tf, id),
 			async_event_trigger,

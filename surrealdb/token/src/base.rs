@@ -454,6 +454,8 @@ pub enum BaseTokenKind {
 	KwM0,
 	#[regex(r"(?i)MAPPER")]
 	KwMapper,
+	#[regex(r"(?i)MAX")]
+	KwMax,
 	#[regex(r"(?i)MAXDEPTH")]
 	KwMaxdepth,
 	#[regex(r"(?i)MIDDLEWARE")]
@@ -511,6 +513,8 @@ pub enum BaseTokenKind {
 	KwPatch,
 	#[regex(r"(?i)PATH")]
 	KwPath,
+	#[regex(r"(?i)PER")]
+	KwPer,
 	#[regex(r"(?i)PERMISSIONS")]
 	KwPermissions,
 	#[regex(r"(?i)POSTINGS_CACHE")]
@@ -525,6 +529,8 @@ pub enum BaseTokenKind {
 	KwPurge,
 	#[regex(r"(?i)RANGE")]
 	KwRange,
+	#[regex(r"(?i)RATELIMIT")]
+	KwRatelimit,
 	#[regex(r"(?i)READONLY")]
 	KwReadonly,
 	#[regex(r"(?i)REJECT")]
@@ -1025,6 +1031,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwM => "keyword `M`",
 			BaseTokenKind::KwM0 => "keyword `M0`",
 			BaseTokenKind::KwMapper => "keyword `MAPPER`",
+			BaseTokenKind::KwMax => "keyword `MAX`",
 			BaseTokenKind::KwMaxdepth => "keyword `MAXDEPTH`",
 			BaseTokenKind::KwMiddleware => "keyword `MIDDLEWARE`",
 			BaseTokenKind::KwML => "keyword `ML`",
@@ -1053,6 +1060,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwPassword => "keyword `PASSWORD`",
 			BaseTokenKind::KwPatch => "keyword `PATCH`",
 			BaseTokenKind::KwPath => "keyword `PATH`",
+			BaseTokenKind::KwPer => "keyword `PER`",
 			BaseTokenKind::KwPermissions => "keyword `PERMISSIONS`",
 			BaseTokenKind::KwPostingsCache => "keyword `POSTINGSCACHE`",
 			BaseTokenKind::KwPostingsOrder => "keyword `POSTINGSORDER`",
@@ -1060,6 +1068,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwPunct => "keyword `PUNCT`",
 			BaseTokenKind::KwPurge => "keyword `PURGE`",
 			BaseTokenKind::KwRange => "keyword `RANGE`",
+			BaseTokenKind::KwRatelimit => "keyword `RATELIMIT`",
 			BaseTokenKind::KwReadonly => "keyword `READONLY`",
 			BaseTokenKind::KwReject => "keyword `REJECT`",
 			BaseTokenKind::KwRelate => "keyword `RELATE`",
@@ -1347,6 +1356,7 @@ impl BaseTokenKind {
 				| Self::KwLowercase
 				| Self::KwLm | Self::KwM
 				| Self::KwM0 | Self::KwMapper
+				| Self::KwMax
 				| Self::KwMaxdepth
 				| Self::KwMiddleware
 				| Self::KwML | Self::KwMerge
@@ -1372,6 +1382,7 @@ impl BaseTokenKind {
 				| Self::KwPassword
 				| Self::KwPatch
 				| Self::KwPath
+				| Self::KwPer
 				| Self::KwPermissions
 				| Self::KwPostingsCache
 				| Self::KwPostingsOrder
@@ -1379,6 +1390,7 @@ impl BaseTokenKind {
 				| Self::KwPunct
 				| Self::KwPurge
 				| Self::KwRange
+				| Self::KwRatelimit
 				| Self::KwReadonly
 				| Self::KwReject
 				| Self::KwRelate

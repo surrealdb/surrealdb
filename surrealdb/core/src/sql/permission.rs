@@ -47,7 +47,8 @@ impl Permissions {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
-pub enum PermissionKind {
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub(crate) enum PermissionKind {
 	Select,
 	Create,
 	Update,
@@ -55,7 +56,7 @@ pub enum PermissionKind {
 }
 
 impl PermissionKind {
-	fn as_str(&self) -> &str {
+	pub(crate) fn as_str(&self) -> &str {
 		match self {
 			PermissionKind::Select => "select",
 			PermissionKind::Create => "create",

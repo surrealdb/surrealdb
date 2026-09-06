@@ -487,6 +487,9 @@ macro_rules! T {
 	(MAPPER) => {
 		$crate::BaseTokenKind::KwMapper
 	};
+	(MAX) => {
+		$crate::BaseTokenKind::KwMax
+	};
 	(MAXDEPTH) => {
 		$crate::BaseTokenKind::KwMaxdepth
 	};
@@ -571,6 +574,9 @@ macro_rules! T {
 	(PATH) => {
 		$crate::BaseTokenKind::KwPath
 	};
+	(PER) => {
+		$crate::BaseTokenKind::KwPer
+	};
 	(PERMISSIONS) => {
 		$crate::BaseTokenKind::KwPermissions
 	};
@@ -591,6 +597,9 @@ macro_rules! T {
 	};
 	(RANGE) => {
 		$crate::BaseTokenKind::KwRange
+	};
+	(RATELIMIT) => {
+		$crate::BaseTokenKind::KwRatelimit
 	};
 	(READONLY) => {
 		$crate::BaseTokenKind::KwReadonly

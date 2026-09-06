@@ -1,7 +1,7 @@
 use revision::revisioned;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use super::Permission;
+use super::{Permission, RateLimits};
 use crate::catalog::auth::AuthLimit;
 use crate::expr::reference::Reference;
 use crate::expr::statements::info::InfoStructure;
@@ -36,7 +36,7 @@ pub struct ComputedDeps {
 	pub is_complete: bool,
 }
 
-#[revisioned(revision = 4)]
+#[revisioned(revision = 5)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct FieldDefinition {
 	// TODO: Needs to be it's own type.
@@ -55,6 +55,9 @@ pub struct FieldDefinition {
 	pub(crate) select_permission: Permission,
 	pub(crate) create_permission: Permission,
 	pub(crate) update_permission: Permission,
+
+	#[revision(start = 5)]
+	pub(crate) ratelimits: RateLimits,
 
 	pub(crate) comment: Option<String>,
 	pub(crate) reference: Option<Reference>,
@@ -125,6 +128,7 @@ impl FieldDefinition {
 				update: self.update_permission.to_sql_definition(),
 				delete: sql::Permission::Full,
 			},
+			ratelimits: self.ratelimits.clone().into_iter().map(Into::into).collect(),
 			comment: self
 				.comment
 				.clone()
@@ -156,6 +160,7 @@ impl InfoStructure for FieldDefinition {
 				"create" => self.create_permission.structure(),
 				"update" => self.update_permission.structure(),
 			}),
+			"ratelimits", if !self.ratelimits.is_empty() => self.ratelimits.into_iter().map(|v| v.structure()).collect::<Vec<_>>().into(),
 			"comment", if let Some(v) = self.comment => v.into(),
 			"graphql_alias", if let Some(v) = self.graphql_alias => v.into(),
 			"graphql_deprecated", if let Some(v) = self.graphql_deprecated => v.into(),

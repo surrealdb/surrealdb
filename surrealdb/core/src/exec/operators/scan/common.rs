@@ -149,6 +149,7 @@ pub(crate) async fn resolve_record_batch(
 	db_id: DatabaseId,
 	rids: &[RecordId],
 	fetch_full: bool,
+	deliver: bool,
 	check_perms: bool,
 	version: Option<u64>,
 	cache_policy: CachePolicy,
@@ -227,6 +228,14 @@ pub(crate) async fn resolve_record_batch(
 		}
 
 		if fetch_full {
+			// Meter the delivered record: its data survived permission
+			// checks and is incorporated into the statement's response.
+			// Intermediate hops (`deliver == false`) materialise records
+			// only to navigate or filter; their data never reaches the
+			// response, so they are free. Id-only hops carry no data.
+			if deliver && let Some(meter) = ctx.ctx().delivery_meter() {
+				meter.record(rid.table.as_str(), 1);
+			}
 			let mut value = match Arc::try_unwrap(record) {
 				Ok(rec) => rec.data,
 				Err(arc) => arc.data.clone(),
@@ -289,7 +298,7 @@ pub(crate) async fn fetch_and_filter_records_batch(
 		.context("Failed to fetch records")?;
 
 	let mut values = Vec::with_capacity(rids.len());
-	for record in records {
+	for (rid, record) in rids.iter().zip(records) {
 		if record.data.is_none() {
 			continue;
 		}
@@ -309,6 +318,13 @@ pub(crate) async fn fetch_and_filter_records_batch(
 			if !allowed {
 				continue;
 			}
+		}
+
+		// Meter the delivered record: its data survived permission checks
+		// and is incorporated into the statement's response (shared by the
+		// index, fulltext, and KNN scan target fetches).
+		if let Some(meter) = ctx.ctx().delivery_meter() {
+			meter.record(rid.table.as_str(), 1);
 		}
 
 		// Move data out of the Arc when possible (refcount == 1),

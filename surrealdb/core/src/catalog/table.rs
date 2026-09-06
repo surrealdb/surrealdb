@@ -4,7 +4,7 @@ use revision::{
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use uuid::Uuid;
 
-use crate::catalog::{DatabaseId, NamespaceId, Permissions, ViewDefinition};
+use crate::catalog::{DatabaseId, NamespaceId, Permissions, RateLimits, ViewDefinition};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{ChangeFeed, Kind};
 use crate::fmt::EscapeKwFreeIdent;
@@ -60,7 +60,7 @@ impl revision::WalkRevisioned for TableId {
 	}
 }
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct TableDefinition {
 	pub(crate) namespace_id: NamespaceId,
@@ -71,6 +71,9 @@ pub struct TableDefinition {
 	pub(crate) schemafull: bool,
 	pub(crate) view: Option<ViewDefinition>,
 	pub(crate) permissions: Permissions,
+
+	#[revision(start = 3)]
+	pub(crate) ratelimits: RateLimits,
 	pub(crate) changefeed: Option<ChangeFeed>,
 	pub(crate) comment: Option<String>,
 	pub(crate) table_type: TableType,
@@ -115,6 +118,7 @@ impl TableDefinition {
 			schemafull: false,
 			view: None,
 			permissions: Permissions::none(),
+			ratelimits: Vec::new(),
 			changefeed: None,
 			comment: None,
 			table_type: TableType::default(),
@@ -144,6 +148,7 @@ impl TableDefinition {
 			full: self.schemafull,
 			view: self.view.clone().map(|v| v.to_sql_definition()),
 			permissions: self.permissions.clone().into(),
+			ratelimits: self.ratelimits.clone().into_iter().map(Into::into).collect(),
 			changefeed: self.changefeed.map(|v| v.into()),
 			comment: self
 				.comment
@@ -174,6 +179,7 @@ impl InfoStructure for TableDefinition {
 			"view", if let Some(v) = self.view => v.structure(),
 			"changefeed", if let Some(v) = self.changefeed => v.structure(),
 			"permissions" => self.permissions.structure(),
+			"ratelimits", if !self.ratelimits.is_empty() => self.ratelimits.into_iter().map(|v| v.structure()).collect::<Vec<_>>().into(),
 			"comment", if let Some(v) = self.comment => v.into(),
 			"graphql_alias", if let Some(v) = self.graphql_alias => v.into(),
 			"graphql_deprecated", if let Some(v) = self.graphql_deprecated => v.into(),

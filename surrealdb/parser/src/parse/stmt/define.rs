@@ -1,6 +1,6 @@
 use ast::{
-	AccessType, Base, CountIndex, DefineConfigKind, FullTextScoring, NodeId, RelationTable,
-	UserSecret,
+	AccessType, Base, CountIndex, DefineConfigKind, FullTextScoring, NodeId, NodeListId,
+	RelationTable, UserSecret,
 };
 use common::source_error::{AnnotationKind, Level};
 use common::span::Span;
@@ -306,6 +306,85 @@ impl Parse for ast::DefineParam {
 	}
 }
 
+/// Parse the rule list of a `RATELIMIT` clause: `FOR <actions> [WHERE <cond>]
+/// BY <key> LIMIT <n> PER <duration> [MAX <burst>]`, with further rules
+/// chained by `, FOR ...`.
+async fn parse_ratelimits(
+	parser: &mut Parser<'_, '_>,
+	allow_delete: bool,
+) -> ParseResult<NodeListId<ast::RateLimit>> {
+	let mut head = None;
+	let mut tail = None;
+	let _ = parser.expect(T![FOR])?;
+	loop {
+		let rule = parse_ratelimit_rule(parser, allow_delete).await?;
+		parser.push_list(rule, &mut head, &mut tail);
+		let _ = parser.eat(T![,])?;
+		if parser.eat(T![FOR])?.is_none() {
+			break;
+		}
+	}
+	Ok(head.expect("the loop pushes at least one rule"))
+}
+
+async fn parse_ratelimit_rule(
+	parser: &mut Parser<'_, '_>,
+	allow_delete: bool,
+) -> ParseResult<ast::RateLimit> {
+	let start = parser.peek_span();
+	let mut actions = ast::RateLimitActions {
+		select: false,
+		create: false,
+		update: false,
+		delete: false,
+	};
+	loop {
+		let peek = parser.peek_expect("one of `SELECT`, `CREATE`, `UPDATE` or `DELETE`")?;
+		match peek.token {
+			T![SELECT] => actions.select = true,
+			T![CREATE] => actions.create = true,
+			T![UPDATE] => actions.update = true,
+			T![DELETE] if allow_delete => actions.delete = true,
+			T![DELETE] => return Err(parser.unexpected("one of `SELECT`, `CREATE` or `UPDATE`")),
+			_ => return Err(parser.unexpected("one of `SELECT`, `CREATE`, `UPDATE` or `DELETE`")),
+		}
+		let _ = parser.next();
+		if parser.eat(T![,])?.is_none() {
+			break;
+		}
+	}
+
+	let condition = if parser.eat(T![WHERE])?.is_some() {
+		Some(parser.parse_enter().await?)
+	} else {
+		None
+	};
+
+	let _ = parser.expect(T![BY])?;
+	let key = parser.parse_enter().await?;
+
+	let _ = parser.expect(T![LIMIT])?;
+	let limit = parser.parse_sync()?;
+	let _ = parser.expect(T![PER])?;
+	let period = parser.parse_sync()?;
+	let max = if parser.eat(T![MAX])?.is_some() {
+		Some(parser.parse_sync()?)
+	} else {
+		None
+	};
+
+	let span = parser.span_since(start);
+	Ok(ast::RateLimit {
+		actions,
+		condition,
+		key,
+		limit,
+		period,
+		max,
+		span,
+	})
+}
+
 impl Parse for ast::TablePermissions {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let _ = parser.expect(T![PERMISSIONS])?;
@@ -499,6 +578,7 @@ impl Parse for ast::DefineTable {
 
 		let mut comment = None;
 		let mut permissions = None;
+		let mut ratelimits = None;
 		let mut drop = None;
 		let mut schema = None;
 		let mut view = None;
@@ -529,6 +609,13 @@ impl Parse for ast::DefineTable {
 				}
 				T![PERMISSIONS] => {
 					parse_unordered_clause(parser, &mut permissions, x.span, Parser::parse).await?;
+				}
+				T![RATELIMIT] => {
+					let _ = parser.next();
+					parse_unordered_clause(parser, &mut ratelimits, x.span, async |parser| {
+						parse_ratelimits(parser, true).await
+					})
+					.await?;
 				}
 				T![AS] => {
 					let _ = parser.next();
@@ -565,6 +652,7 @@ impl Parse for ast::DefineTable {
 			name,
 			comment: comment.map(|x| x.0),
 			permission: permissions.map(|x| x.0),
+			ratelimits: ratelimits.map(|x| x.0),
 			drop: drop.is_some(),
 			schema: schema.map(|x| x.0),
 			view: view.map(|x| x.0),
@@ -1106,6 +1194,7 @@ impl Parse for ast::DefineField {
 		let mut computed = None;
 		let mut default = None;
 		let mut permissions = None;
+		let mut ratelimits = None;
 		let mut comment = None;
 		let mut on_delete = None;
 		loop {
@@ -1149,6 +1238,13 @@ impl Parse for ast::DefineField {
 					parse_unordered_clause(parser, &mut permissions, peek.span, Parser::parse)
 						.await?
 				}
+				T![RATELIMIT] => {
+					let _ = parser.next();
+					parse_unordered_clause(parser, &mut ratelimits, peek.span, async |parser| {
+						parse_ratelimits(parser, false).await
+					})
+					.await?
+				}
 				T![DEFAULT] => {
 					let _ = parser.next();
 					parse_unordered_clause(parser, &mut default, peek.span, async |parser| {
@@ -1180,6 +1276,7 @@ impl Parse for ast::DefineField {
 			computed: computed.map(|x| x.0),
 			default: default.map(|x| x.0),
 			permissions: permissions.map(|x| x.0),
+			ratelimits: ratelimits.map(|x| x.0),
 			comment: comment.map(|x| x.0),
 			on_delete: on_delete.map(|x| x.0),
 			span,

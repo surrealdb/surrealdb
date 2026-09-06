@@ -65,6 +65,18 @@ impl Fields {
 		}))
 	}
 
+	/// Whether this projection is exactly `VALUE id` — the id-only shape
+	/// synthesised for graph-traversal navigation hops (see
+	/// [`Fields::value_id`]). Rows produced under it are record references,
+	/// not record data, so delivery metering skips them.
+	pub(crate) fn is_value_id_only(&self) -> bool {
+		let Fields::Value(selector) = self else {
+			return false;
+		};
+		selector.alias.is_none()
+			&& matches!(&selector.expr, Expr::Idiom(Idiom(parts)) if parts.as_slice() == ID.as_slice())
+	}
+
 	/// Returns an iterator which returns all fields which are not `Field::All`.
 	pub(crate) fn iter_non_all_fields(&self) -> FieldsIter<'_> {
 		match self {

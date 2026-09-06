@@ -3,7 +3,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use super::DefineKind;
 use crate::fmt::CoverStmts;
 use crate::sql::reference::Reference;
-use crate::sql::{Expr, Kind, Literal, Permissions};
+use crate::sql::{Expr, Kind, Literal, Permissions, RateLimits};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -55,6 +55,7 @@ pub(crate) struct DefineFieldStatement {
 	pub computed: Option<Expr>,
 	pub default: DefineDefault,
 	pub permissions: Permissions,
+	pub ratelimits: RateLimits,
 	pub comment: Expr,
 	pub reference: Option<Reference>,
 	/// Optional GraphQL alias declared via `GRAPHQL_ALIAS "..."`.
@@ -78,6 +79,7 @@ impl Default for DefineFieldStatement {
 			computed: None,
 			default: DefineDefault::None,
 			permissions: Permissions::default(),
+			ratelimits: Vec::new(),
 			comment: Expr::Literal(Literal::None),
 			reference: None,
 			graphql_alias: None,
@@ -141,6 +143,15 @@ impl ToSql for DefineFieldStatement {
 			f.push(' ');
 		}
 		self.permissions.fmt_sql(f, sql_fmt);
+		if !self.ratelimits.is_empty() {
+			if sql_fmt.is_pretty() {
+				f.push('\n');
+				sql_fmt.write_indent(f);
+			} else {
+				f.push(' ');
+			}
+			crate::sql::ratelimit::fmt_ratelimits_block(f, sql_fmt, &self.ratelimits);
+		}
 	}
 }
 
@@ -158,6 +169,7 @@ impl From<DefineFieldStatement> for crate::expr::statements::DefineFieldStatemen
 			computed: v.computed.map(Into::into),
 			default: v.default.into(),
 			permissions: v.permissions.into(),
+			ratelimits: v.ratelimits.into_iter().map(Into::into).collect(),
 			comment: v.comment.into(),
 			reference: v.reference.map(Into::into),
 			graphql_alias: v.graphql_alias,
@@ -181,6 +193,7 @@ impl From<crate::expr::statements::DefineFieldStatement> for DefineFieldStatemen
 			computed: v.computed.map(Into::into),
 			default: v.default.into(),
 			permissions: v.permissions.into(),
+			ratelimits: v.ratelimits.into_iter().map(Into::into).collect(),
 			comment: v.comment.into(),
 			reference: v.reference.map(Into::into),
 			graphql_alias: v.graphql_alias,

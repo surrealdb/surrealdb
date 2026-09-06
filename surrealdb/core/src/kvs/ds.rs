@@ -253,6 +253,8 @@ pub struct Datastore {
 	/// `Arc`. Every `Context` clones this `Arc` rather than rebuilding the
 	/// registry, which is otherwise the single biggest per-query cost.
 	function_registry: Arc<FunctionRegistry>,
+	// Shared admission limiter for schema-defined rate limits.
+	rate_limiter: Arc<crate::gov::RateLimiter>,
 	// The index asynchronous builder
 	index_builder: IndexBuilder,
 	#[cfg(storage)]
@@ -1001,6 +1003,7 @@ impl Datastore {
 			#[cfg(all(feature = "graphql", not(target_family = "wasm")))]
 			graphql_schema_cache: crate::graphql::cache::GraphQLSchemaCache::default(),
 			function_registry: Arc::new(FunctionRegistry::with_builtins()),
+			rate_limiter: Arc::new(crate::gov::RateLimiter::default()),
 			buckets: self.buckets,
 			sequences: Sequences::new(self.transaction_factory.clone(), self.id),
 			transaction_factory: self.transaction_factory,
@@ -1051,6 +1054,7 @@ impl Datastore {
 			#[cfg(all(feature = "graphql", not(target_family = "wasm")))]
 			graphql_schema_cache: crate::graphql::cache::GraphQLSchemaCache::default(),
 			function_registry: Arc::new(FunctionRegistry::with_builtins()),
+			rate_limiter: Arc::new(crate::gov::RateLimiter::default()),
 			buckets: self.buckets.clone(),
 			sequences: Sequences::new(transaction_factory.clone(), id),
 			transaction_factory,
@@ -3354,6 +3358,20 @@ impl Datastore {
 		self.transaction_factory.transaction(write, lock, self.sequences.clone()).await
 	}
 
+	/// A transaction source for rate-limit charge settlement, usable from
+	/// contexts that carry no datastore handle (scan operators, document
+	/// processing).
+	pub(crate) fn ratelimit_charge_session(
+		&self,
+		tenant: Option<Arc<crate::observe::TenantIdentity>>,
+	) -> crate::gov::ChargeSession {
+		crate::gov::ChargeSession::new(
+			self.transaction_factory.clone(),
+			self.sequences.clone(),
+			tenant,
+		)
+	}
+
 	pub(crate) fn sequences(&self) -> &Sequences {
 		&self.sequences
 	}
@@ -4086,6 +4104,7 @@ impl Datastore {
 			self.sequences.clone(),
 			Arc::clone(&self.cache),
 			Arc::clone(&self.function_registry),
+			Arc::clone(&self.rate_limiter),
 			#[cfg(feature = "http")]
 			Arc::clone(&self.http_client),
 			#[cfg(storage)]

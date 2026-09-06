@@ -1219,6 +1219,8 @@ impl Iterator {
 		}
 		// Get the record strategy
 		let rs = pro.record_strategy;
+		// Capture attribution for delivery metering before `pro` is moved.
+		let delivered_table = pro.rid.as_ref().map(|rid| rid.table.clone());
 		// Extract the value
 		let res = {
 			// Check if this is a count all
@@ -1288,6 +1290,19 @@ impl Iterator {
 					self.error = Some(e);
 					self.canceller.cancel();
 					return Ok(());
+				}
+				// Meter delivered records: this row survived filtering and
+				// permission checks and its data enters the SELECT
+				// response. Count-only strategies and `VALUE id`
+				// projections (graph-traversal navigation hops) produce
+				// references or aggregates, not record data.
+				if matches!(stm, Statement::Select { .. })
+					&& !matches!(rs, RecordStrategy::Count)
+					&& stm.expr().is_some_and(|fields| !fields.is_value_id_only())
+					&& let Some(table) = &delivered_table
+					&& let Some(meter) = ctx.delivery_meter()
+				{
+					meter.record(table.as_str(), 1);
 				}
 			}
 		}

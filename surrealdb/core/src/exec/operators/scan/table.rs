@@ -294,6 +294,11 @@ impl ExecOperator for TableScan {
 				let mut batch = batch_result?;
 				let cont = pipeline.process_batch(&mut batch.values, &ctx).await?;
 				if !batch.values.is_empty() {
+					// Meter delivered rows: these survived filtering and
+					// permission checks and enter the statement's response.
+					if let Some(meter) = ctx.ctx().delivery_meter() {
+						meter.record(table_name.as_str(), batch.values.len() as u64);
+					}
 					yield ValueBatch { values: batch.values };
 				}
 				if !cont {

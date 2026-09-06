@@ -239,6 +239,26 @@ pub(crate) enum Error {
 	#[error("The query was not executed due to a cancelled transaction")]
 	QueryCancelled,
 
+	/// The query exceeded a configured rate limit.
+	#[error("The query exceeded the rate limit for {scope}")]
+	RateLimitExceeded {
+		scope: String,
+		/// Estimated wait until the bucket has refilled enough to admit the
+		/// same request. `None` when the request exceeds the bucket
+		/// capacity outright and can never be admitted.
+		retry_after: Option<std::time::Duration>,
+	},
+
+	/// A RATELIMIT BY key expression evaluated to NONE or NULL. Rate limits
+	/// fail closed: a missing key would otherwise silently merge all
+	/// key-less requests into one shared bucket, voiding the policy.
+	#[error(
+		"The rate limit key for {scope} evaluated to NONE. Guard the policy with a WHERE clause or use a key that is always present"
+	)]
+	RateLimitKeyUnavailable {
+		scope: String,
+	},
+
 	/// The query did not execute, because the memory threshold has been reached
 	#[error("The query was not executed due to the memory threshold being reached")]
 	QueryBeyondMemoryThreshold,

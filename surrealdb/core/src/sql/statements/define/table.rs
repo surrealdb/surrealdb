@@ -3,7 +3,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use super::DefineKind;
 use crate::fmt::{CoverStmts, EscapeKwFreeIdent};
 use crate::sql::changefeed::ChangeFeed;
-use crate::sql::{Expr, Literal, Permissions, TableType, View};
+use crate::sql::{Expr, Literal, Permissions, RateLimits, TableType, View};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -15,6 +15,7 @@ pub(crate) struct DefineTableStatement {
 	pub full: bool,
 	pub view: Option<View>,
 	pub permissions: Permissions,
+	pub ratelimits: RateLimits,
 	pub changefeed: Option<ChangeFeed>,
 	pub comment: Expr,
 	pub table_type: TableType,
@@ -35,6 +36,7 @@ impl Default for DefineTableStatement {
 			full: false,
 			view: None,
 			permissions: Permissions::none(),
+			ratelimits: Vec::new(),
 			changefeed: None,
 			comment: Expr::Literal(Literal::None),
 			table_type: TableType::default(),
@@ -113,6 +115,16 @@ impl ToSql for DefineTableStatement {
 			f.push(' ');
 		}
 		write_sql!(f, sql_fmt, "{}", self.permissions);
+		if !self.ratelimits.is_empty() {
+			if sql_fmt.is_pretty() {
+				f.push('\n');
+				let inner_fmt = sql_fmt.increment();
+				inner_fmt.write_indent(f);
+			} else {
+				f.push(' ');
+			}
+			crate::sql::ratelimit::fmt_ratelimits_block(f, sql_fmt, &self.ratelimits);
+		}
 	}
 }
 
@@ -126,6 +138,7 @@ impl From<DefineTableStatement> for crate::expr::statements::DefineTableStatemen
 			full: v.full,
 			view: v.view.map(Into::into),
 			permissions: v.permissions.into(),
+			ratelimits: v.ratelimits.into_iter().map(Into::into).collect(),
 			changefeed: v.changefeed.map(Into::into),
 			comment: v.comment.into(),
 			table_type: v.table_type.into(),
@@ -146,6 +159,7 @@ impl From<crate::expr::statements::DefineTableStatement> for DefineTableStatemen
 			full: v.full,
 			view: v.view.map(Into::into),
 			permissions: v.permissions.into(),
+			ratelimits: v.ratelimits.into_iter().map(Into::into).collect(),
 			changefeed: v.changefeed.map(Into::into),
 			comment: v.comment.into(),
 			table_type: v.table_type.into(),

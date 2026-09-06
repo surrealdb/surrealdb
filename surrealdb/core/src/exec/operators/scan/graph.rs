@@ -105,6 +105,12 @@ pub struct GraphEdgeScan {
 	/// `Planner::graph_predicate_is_key_resident`.
 	pub(crate) predicate_key_resident: bool,
 
+	/// Whether records this scan materialises are delivered into the
+	/// statement's response (a projection or aggregation consumes their
+	/// data) rather than fetched only to navigate or filter. Drives
+	/// delivery metering for table RATELIMIT policies.
+	pub(crate) deliver: bool,
+
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -127,8 +133,16 @@ impl GraphEdgeScan {
 			limit: None,
 			predicate: None,
 			predicate_key_resident: false,
+			deliver: false,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
+	}
+
+	/// Mark this scan's materialised records as delivered into the
+	/// statement's response (see the `deliver` field).
+	pub(crate) fn with_deliver(mut self, deliver: bool) -> Self {
+		self.deliver = deliver;
+		self
 	}
 
 	pub(crate) fn with_limit(mut self, limit: usize) -> Self {
@@ -251,6 +265,7 @@ impl ExecOperator for GraphEdgeScan {
 		let direction = self.direction;
 		let edge_tables = self.edge_tables.clone();
 		let output_mode = self.output_mode;
+		let deliver = self.deliver;
 		let target_tables = self.target_tables.clone();
 		let edge_limit = self.limit;
 		let version_expr = self.version.clone();
@@ -461,6 +476,7 @@ impl ExecOperator for GraphEdgeScan {
 												db_id,
 												&rid_batch,
 												fetch_full,
+												deliver,
 												check_perms,
 												version,
 												&mut perm_cache,
@@ -577,6 +593,7 @@ impl ExecOperator for GraphEdgeScan {
 														db_id,
 														&rid_batch,
 														fetch_full,
+														deliver,
 														check_perms,
 														version,
 														CachePolicy::ReadWrite,
@@ -629,7 +646,7 @@ impl ExecOperator for GraphEdgeScan {
 			// no predicate.
 			if !rid_batch.is_empty() {
 				let values = resolve_and_filter_batch(
-					&ctx, &txn, ns_id, db_id, &rid_batch, fetch_full, check_perms,
+					&ctx, &txn, ns_id, db_id, &rid_batch, fetch_full, deliver, check_perms,
 					version, &mut perm_cache, key_predicate.as_ref(),
 					record_predicate.as_ref(),
 				)
@@ -661,12 +678,17 @@ async fn resolve_and_filter_batch(
 	db_id: DatabaseId,
 	rids: &[RecordId],
 	fetch_full: bool,
+	deliver: bool,
 	check_perms: bool,
 	version: Option<u64>,
 	perm_cache: &mut std::collections::HashMap<TableName, PhysicalPermission>,
 	key_predicate: Option<&Arc<dyn PhysicalExpr>>,
 	record_predicate: Option<&Arc<dyn PhysicalExpr>>,
 ) -> Result<Vec<Value>, ControlFlow> {
+	// Records the record-referencing predicate drops below never reach the
+	// response, so with such a predicate delivery metering moves after
+	// that filter instead of happening inside the resolve.
+	let meter_in_resolve = deliver && record_predicate.is_none();
 	let values = if let Some(pred) = key_predicate {
 		// Key-resident pre-fetch skip: evaluate against the
 		// adjacency-key identity so non-matches are never fetched
@@ -692,6 +714,7 @@ async fn resolve_and_filter_batch(
 			db_id,
 			&survivors,
 			fetch_full,
+			meter_in_resolve,
 			check_perms,
 			version,
 			CachePolicy::ReadWrite,
@@ -706,6 +729,7 @@ async fn resolve_and_filter_batch(
 			db_id,
 			rids,
 			fetch_full,
+			meter_in_resolve,
 			check_perms,
 			version,
 			CachePolicy::ReadWrite,
@@ -717,7 +741,24 @@ async fn resolve_and_filter_batch(
 		// Record-referencing predicate runs after fetch + permission,
 		// on the decoded record, preserving fetch -> permission ->
 		// filter order.
-		Some(pred) => apply_record_predicate(pred, ctx, values).await,
+		Some(pred) => {
+			let survivors = apply_record_predicate(pred, ctx, values).await?;
+			// Meter the delivered records: predicate survivors whose data
+			// is incorporated into the statement's response.
+			if deliver
+				&& fetch_full
+				&& let Some(meter) = ctx.ctx().delivery_meter()
+			{
+				for value in &survivors {
+					if let Value::Object(obj) = value
+						&& let Some(Value::RecordId(rid)) = obj.get("id")
+					{
+						meter.record(rid.table.as_str(), 1);
+					}
+				}
+			}
+			Ok(survivors)
+		}
 		None => Ok(values),
 	}
 }

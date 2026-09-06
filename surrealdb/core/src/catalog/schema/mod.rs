@@ -14,6 +14,7 @@ mod index;
 mod ml;
 mod module;
 mod param;
+mod ratelimit;
 mod sequence;
 mod user;
 use std::fmt::{Display, Formatter};
@@ -30,6 +31,7 @@ pub use index::*;
 pub use ml::*;
 pub use module::*;
 pub(crate) use param::*;
+pub use ratelimit::*;
 pub use sequence::*;
 pub use user::*;
 
@@ -139,7 +141,8 @@ impl InfoStructure for Permissions {
 	}
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Debug)]
+#[revisioned(revision = 1)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub enum PermissionKind {
 	Select,
 	Create,
@@ -148,7 +151,7 @@ pub enum PermissionKind {
 }
 
 impl PermissionKind {
-	fn as_str(&self) -> &str {
+	pub fn as_str(&self) -> &str {
 		match self {
 			PermissionKind::Select => "select",
 			PermissionKind::Create => "create",
@@ -161,5 +164,27 @@ impl PermissionKind {
 impl Display for PermissionKind {
 	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
 		f.write_str(self.as_str())
+	}
+}
+
+impl From<crate::sql::PermissionKind> for PermissionKind {
+	fn from(value: crate::sql::PermissionKind) -> Self {
+		match value {
+			crate::sql::PermissionKind::Select => Self::Select,
+			crate::sql::PermissionKind::Create => Self::Create,
+			crate::sql::PermissionKind::Update => Self::Update,
+			crate::sql::PermissionKind::Delete => Self::Delete,
+		}
+	}
+}
+
+impl From<PermissionKind> for crate::sql::PermissionKind {
+	fn from(value: PermissionKind) -> Self {
+		match value {
+			PermissionKind::Select => Self::Select,
+			PermissionKind::Create => Self::Create,
+			PermissionKind::Update => Self::Update,
+			PermissionKind::Delete => Self::Delete,
+		}
 	}
 }

@@ -284,6 +284,7 @@ fn statements() -> Vec<TopLevelExpr> {
 				update: Permission::None,
 				delete: Permission::None,
 			},
+			ratelimits: Vec::new(),
 			changefeed: Some(ChangeFeed {
 				expiry: PublicDuration::from_secs(1),
 				store_diff: false,
@@ -332,6 +333,7 @@ fn statements() -> Vec<TopLevelExpr> {
 					create: Permission::Specific(Expr::Literal(Literal::Bool(true))),
 					select: Permission::Full,
 				},
+				ratelimits: Vec::new(),
 				comment: Expr::Literal(Literal::None),
 				reference: None,
 				computed: None,

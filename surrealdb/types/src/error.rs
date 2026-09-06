@@ -26,6 +26,7 @@ mod code {
 	pub const QUERY_TIMEDOUT: i64 = -32004;
 	pub const QUERY_CANCELLED: i64 = -32005;
 	pub const QUERY_TRANSACTION_CONFLICT: i64 = -32009;
+	pub const QUERY_RATE_LIMITED: i64 = -32010;
 	pub const THROWN: i64 = -32006;
 	pub const SERIALIZATION_ERROR: i64 = -32007;
 	pub const DESERIALIZATION_ERROR: i64 = -32008;
@@ -189,6 +190,9 @@ impl Error {
 				} => code::QUERY_TIMEDOUT,
 				QueryError::Cancelled => code::QUERY_CANCELLED,
 				QueryError::TransactionConflict => code::QUERY_TRANSACTION_CONFLICT,
+				QueryError::RateLimited {
+					..
+				} => code::QUERY_RATE_LIMITED,
 			})
 			.unwrap_or(code::INTERNAL_ERROR);
 		Self {
@@ -881,6 +885,15 @@ pub enum QueryError {
 	/// Transaction conflict; the operation can be retried.
 	#[surreal(skip_content)]
 	TransactionConflict,
+	/// Query was denied by a rate-limit policy.
+	RateLimited {
+		/// The policy locus that denied the query (e.g. `table post`).
+		scope: String,
+		/// Estimated wait until the policy can admit the same query again.
+		/// `None` when the query exceeds the bucket capacity outright and
+		/// can never be admitted.
+		retry_after: Option<Duration>,
+	},
 }
 
 /// Already-exists reason for [`ErrorKind::AlreadyExists`] errors.

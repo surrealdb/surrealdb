@@ -287,3 +287,7 @@ required-features = ["kv-rocksdb"]
 [[bench]]
 name = "import_load"
 harness = false
+
+[[bench]]
+name = "ratelimit"
+harness = false

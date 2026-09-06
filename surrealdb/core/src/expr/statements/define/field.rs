@@ -8,7 +8,7 @@ use uuid::Uuid;
 use super::DefineKind;
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{
-	self, DatabaseId, FieldDefinition, NamespaceId, Permission, Permissions, Relation,
+	self, DatabaseId, FieldDefinition, NamespaceId, Permission, Permissions, RateLimits, Relation,
 	TableDefinition, TableType,
 };
 use crate::ctx::FrozenContext;
@@ -46,6 +46,7 @@ pub(crate) struct DefineFieldStatement {
 	pub computed: Option<Expr>,
 	pub default: DefineDefault,
 	pub permissions: Permissions,
+	pub ratelimits: RateLimits,
 	pub comment: Expr,
 	pub reference: Option<Reference>,
 	pub graphql_alias: Option<String>,
@@ -66,6 +67,7 @@ impl Default for DefineFieldStatement {
 			computed: None,
 			default: DefineDefault::None,
 			permissions: Permissions::default(),
+			ratelimits: Vec::new(),
 			comment: Expr::Literal(Literal::None),
 			reference: None,
 			graphql_alias: None,
@@ -139,6 +141,7 @@ impl DefineFieldStatement {
 			select_permission: convert_permission(&self.permissions.select),
 			create_permission: convert_permission(&self.permissions.create),
 			update_permission: convert_permission(&self.permissions.update),
+			ratelimits: self.ratelimits.clone(),
 			comment,
 			reference: self.reference.clone(),
 			auth_limit: AuthLimit::new_from_auth(opt.auth.as_ref()).into(),

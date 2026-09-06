@@ -51,6 +51,7 @@ pub mod env;
 pub mod err;
 pub mod exec;
 pub mod expr;
+pub(crate) mod gov;
 #[cfg(feature = "gql")]
 pub mod gql;
 #[cfg(feature = "graphql")]

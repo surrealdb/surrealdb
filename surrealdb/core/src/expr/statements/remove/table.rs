@@ -157,6 +157,7 @@ impl RemoveTableStatement {
 		}
 		// Clear the transaction cache
 		txn.clear_cache();
+		ctx.rate_limiter().clear_table_plans();
 		// Ok all good
 		Ok(Value::None)
 	}

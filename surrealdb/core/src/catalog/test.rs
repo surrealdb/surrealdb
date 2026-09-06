@@ -54,6 +54,7 @@ use crate::val::{Datetime, TableName, Value};
 		groups: Some(Groups::default()),
 	}),
 	permissions: Permissions::default(),
+	ratelimits: Vec::new(),
 	changefeed: Some(ChangeFeed {
 		expiry: Duration::from_secs(123),
 		store_diff: false,
@@ -66,7 +67,7 @@ use crate::val::{Datetime, TableName, Value};
 	cache_indexes_ts: Uuid::default(),
 	graphql_alias: None,
 	graphql_deprecated: None,
-}, 151)]
+}, 152)]
 #[case::subscription(SubscriptionDefinition {
 	id: Uuid::default(),
 	node: Uuid::default(),
@@ -185,13 +186,14 @@ use crate::val::{Datetime, TableName, Value};
 	select_permission: Permission::Full,
 	create_permission: Permission::Full,
 	update_permission: Permission::Full,
+	ratelimits: Vec::new(),
 	comment: Some("comment".to_string()),
 	reference: None,
 	auth_limit: AuthLimit::default(),
 	computed_deps: None,
 	graphql_alias: None,
 	graphql_deprecated: None,
-}, 46)]
+}, 47)]
 #[case::function(FunctionDefinition {
 	name: "function".into(),
 	args: vec![],

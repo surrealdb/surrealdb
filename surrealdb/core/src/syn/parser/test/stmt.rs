@@ -45,8 +45,8 @@ use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
 	Algorithm, AssignOperator, Base, BinaryOperator, Block, Cond, Data, Dir, Explain, Expr, Fetch,
 	Fetchs, Field, Fields, Group, Groups, Idiom, Index, Kind, Literal, Lookup, Mock, Output, Param,
-	Part, Permission, Permissions, RecordIdKeyLit, RecordIdLit, Scoring, TableType, TopLevelExpr,
-	With,
+	Part, Permission, PermissionKind, Permissions, RecordIdKeyLit, RecordIdLit, Scoring, TableType,
+	TopLevelExpr, With,
 };
 use crate::syn;
 use crate::syn::parser::ParserSettings;
@@ -1588,6 +1588,7 @@ fn parse_define_table() {
 				update: Permission::None,
 				delete: Permission::Full,
 			},
+			ratelimits: Vec::new(),
 			changefeed: Some(ChangeFeed {
 				expiry: PublicDuration::from_secs(1),
 				store_diff: true,
@@ -1660,6 +1661,7 @@ fn parse_define_field() {
 					create: Permission::Specific(Expr::Literal(Literal::Bool(true))),
 					select: Permission::Full,
 				},
+				ratelimits: Vec::new(),
 				comment: Expr::Literal(Literal::None),
 				reference: None,
 				computed: None,
@@ -3163,4 +3165,65 @@ fn parse_access_purge() {
 			})))
 		);
 	}
+}
+
+#[test]
+fn parse_define_table_ratelimit() {
+	let res = syn::parse_with(
+		r#"DEFINE TABLE post RATELIMIT FOR SELECT WHERE $auth IS NONE BY $session.ip LIMIT 2 PER 1s MAX 4"#.as_bytes(),
+		async |parser, stk| parser.parse_expr_inherit(stk).await,
+	)
+	.unwrap();
+
+	match res {
+		Expr::Define(stmt) => match *stmt {
+			DefineStatement::Table(stmt) => {
+				assert_eq!(stmt.ratelimits.len(), 1);
+				let limit = &stmt.ratelimits[0];
+				assert_eq!(limit.actions, vec![PermissionKind::Select]);
+				assert!(limit.condition.is_some());
+				assert_eq!(limit.limit, 2);
+				assert_eq!(limit.period, PublicDuration::from_secs(1));
+				assert_eq!(limit.max, Some(4));
+			}
+			_ => panic!("expected table definition"),
+		},
+		_ => panic!("expected define statement"),
+	}
+}
+
+#[test]
+fn parse_define_table_ratelimit_grouped_clauses() {
+	let res = syn::parse_with(
+		r#"DEFINE TABLE knows RATELIMIT FOR SELECT BY $auth.id LIMIT 100 PER 1m, FOR UPDATE BY $auth.id LIMIT 100 PER 1h"#.as_bytes(),
+		async |parser, stk| parser.parse_expr_inherit(stk).await,
+	)
+	.unwrap();
+
+	match res {
+		Expr::Define(stmt) => match *stmt {
+			DefineStatement::Table(stmt) => {
+				assert_eq!(stmt.ratelimits.len(), 2);
+				assert_eq!(stmt.ratelimits[0].actions, vec![PermissionKind::Select]);
+				assert_eq!(stmt.ratelimits[0].limit, 100);
+				assert_eq!(stmt.ratelimits[0].period, PublicDuration::from_secs(60));
+				assert_eq!(stmt.ratelimits[1].actions, vec![PermissionKind::Update]);
+				assert_eq!(stmt.ratelimits[1].limit, 100);
+				assert_eq!(stmt.ratelimits[1].period, PublicDuration::from_secs(3600));
+			}
+			_ => panic!("expected table definition"),
+		},
+		_ => panic!("expected define statement"),
+	}
+}
+
+#[test]
+fn parse_define_field_ratelimit_rejects_delete() {
+	let err = syn::parse_with(
+		r#"DEFINE FIELD name ON post RATELIMIT FOR DELETE BY $auth.id LIMIT 1 PER 1s"#.as_bytes(),
+		async |parser, stk| parser.parse_expr_inherit(stk).await,
+	)
+	.unwrap_err();
+	let err = err.to_string();
+	assert!(err.contains("SELECT") || err.contains("UPDATE"));
 }

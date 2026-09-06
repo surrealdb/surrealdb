@@ -363,6 +363,12 @@ pub(crate) async fn fetch_record(
 	if !process_fetched_record(ctx, rid, &mut val).await? {
 		return Ok(Value::None);
 	}
+	// Meter the delivered record: it survived permission checks and its
+	// data is incorporated into the statement's response (FETCH clauses,
+	// record-link resolution).
+	if let Some(meter) = ctx.ctx().delivery_meter() {
+		meter.record(rid.table.as_str(), 1);
+	}
 	Ok(val)
 }
 

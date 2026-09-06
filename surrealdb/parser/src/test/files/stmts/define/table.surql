@@ -15,6 +15,8 @@ DEFINE TABLE foo PERMISSIONS NONE;
 DEFINE TABLE foo PERMISSIONS FOR select, delete FULL;
 DEFINE TABLE foo PERMISSIONS FOR select, delete FULL, FOR create NONE;
 DEFINE TABLE foo PERMISSIONS FOR select, delete FULL, FOR create NONE, FOR update WHERE 1 == 1;
+DEFINE TABLE foo RATELIMIT FOR SELECT WHERE $auth != NONE BY $session.ip LIMIT 2 PER 1s MAX 4, FOR CREATE, UPDATE BY 'global' LIMIT 100 PER 1m;
+
 /* ===== result =====
 Query
     .exprs: Some
@@ -32,6 +34,7 @@ Query
                     .schema: None
                     .table_kind: None
                     .permission: None
+                    .ratelimits: None
                     .changefeed: None
                     .view: None
         -TopLevelExpr::Expr
@@ -48,6 +51,7 @@ Query
                     .schema: None
                     .table_kind: None
                     .permission: None
+                    .ratelimits: None
                     .changefeed: None
                     .view: None
         -TopLevelExpr::Expr
@@ -64,6 +68,7 @@ Query
                     .schema: None
                     .table_kind: None
                     .permission: None
+                    .ratelimits: None
                     .changefeed: None
                     .view: None
         -TopLevelExpr::Expr
@@ -83,6 +88,7 @@ Query
                     .schema: None
                     .table_kind: None
                     .permission: None
+                    .ratelimits: None
                     .changefeed: None
                     .view: None
         -TopLevelExpr::Expr
@@ -102,6 +108,7 @@ Query
                     .schema: None
                     .table_kind: None
                     .permission: None
+                    .ratelimits: None
                     .changefeed: None
                     .view: None
         -TopLevelExpr::Expr
@@ -119,6 +126,7 @@ Query
                     Full
                     .table_kind: None
                     .permission: None
+                    .ratelimits: None
                     .changefeed: None
                     .view: None
         -TopLevelExpr::Expr
@@ -136,6 +144,7 @@ Query
                     Less
                     .table_kind: None
                     .permission: None
+                    .ratelimits: None
                     .changefeed: None
                     .view: None
         -TopLevelExpr::Expr
@@ -152,6 +161,7 @@ Query
                     .schema: None
                     .table_kind: None
                     .permission: None
+                    .ratelimits: None
                     .changefeed: None
                     .view: Some
                     Select
@@ -191,6 +201,7 @@ Query
                     .schema: None
                     .table_kind: None
                     .permission: None
+                    .ratelimits: None
                     .changefeed: Some
                     ChangeFeed::Base
                         1s
@@ -210,6 +221,7 @@ Query
                     .table_kind: Some
                     TableKind::Normal
                     .permission: None
+                    .ratelimits: None
                     .changefeed: None
                     .view: None
         -TopLevelExpr::Expr
@@ -227,6 +239,7 @@ Query
                     .table_kind: Some
                     TableKind::Any
                     .permission: None
+                    .ratelimits: None
                     .changefeed: None
                     .view: None
         -TopLevelExpr::Expr
@@ -256,6 +269,7 @@ Query
                                     .text: "d"
                             .enforced: true
                     .permission: None
+                    .ratelimits: None
                     .changefeed: None
                     .view: None
         -TopLevelExpr::Expr
@@ -281,6 +295,7 @@ Query
                         Permission::Full
                         .select: Some
                         Permission::Full
+                    .ratelimits: None
                     .changefeed: None
                     .view: None
         -TopLevelExpr::Expr
@@ -306,6 +321,7 @@ Query
                         Permission::None
                         .select: Some
                         Permission::None
+                    .ratelimits: None
                     .changefeed: None
                     .view: None
         -TopLevelExpr::Expr
@@ -329,6 +345,7 @@ Query
                         .update: None
                         .select: Some
                         Permission::Full
+                    .ratelimits: None
                     .changefeed: None
                     .view: None
         -TopLevelExpr::Expr
@@ -353,6 +370,7 @@ Query
                         .update: None
                         .select: Some
                         Permission::Full
+                    .ratelimits: None
                     .changefeed: None
                     .view: None
         -TopLevelExpr::Expr
@@ -385,6 +403,64 @@ Query
                                         +1
                         .select: Some
                         Permission::Full
+                    .ratelimits: None
+                    .changefeed: None
+                    .view: None
+        -TopLevelExpr::Expr
+            Expr::DefineTable
+                DefineTable
+                    .kind: Create
+                    .name: Expr::Path
+                        Path
+                            .start: Ident
+                                .text: "foo"
+                            .parts: None
+                    .comment: None
+                    .drop: false
+                    .schema: None
+                    .table_kind: None
+                    .permission: None
+                    .ratelimits: Some
+                        -RateLimit
+                            .actions: RateLimitActions
+                                .select: true
+                                .create: false
+                                .update: false
+                                .delete: false
+                            .condition: Some
+                            Expr::Binary
+                                BinaryExpr
+                                    .left: Expr::Param
+                                        Param
+                                            .text: "auth"
+                                    .op: NotEqual
+                                    .right: Expr::Builtin
+                                        Builtin::None
+                            .key: Expr::Idiom
+                                IdiomExpr
+                                    .left: Expr::Param
+                                        Param
+                                            .text: "session"
+                                    .op: IdiomOperator::Field
+                                        Ident
+                                            .text: "ip"
+                            .limit: +2
+                            .period: 1s
+                            .max: Some
+                            +4
+                        -RateLimit
+                            .actions: RateLimitActions
+                                .select: false
+                                .create: true
+                                .update: true
+                                .delete: false
+                            .condition: None
+                            .key: Expr::String
+                                StringLit
+                                    .text: "global"
+                            .limit: +100
+                            .period: 60s
+                            .max: None
                     .changefeed: None
                     .view: None
 */

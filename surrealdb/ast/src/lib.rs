@@ -124,6 +124,9 @@ library! {
 		api_action: Vec<ApiAction>,
 		api_middleware: Vec<ApiMiddleware>,
 		api_middlewares: Vec<NodeList<ApiMiddleware>>,
+
+		ratelimit: Vec<RateLimit>,
+		ratelimits: Vec<NodeList<RateLimit>>,
 		define_api: Vec<DefineApi>,
 
 		expr: Vec<Expr>,
@@ -811,6 +814,27 @@ impl_vis_type! {
 	}
 }
 
+impl_vis_type! {
+	#[derive(Debug)]
+	pub struct RateLimitActions{
+		pub select: bool,
+		pub create: bool,
+		pub update: bool,
+		pub delete: bool,
+	}
+}
+
+ast_type! {
+	pub struct RateLimit{
+		pub actions: RateLimitActions,
+		pub condition: Option<NodeId<Expr>>,
+		pub key: NodeId<Expr>,
+		pub limit: NodeId<Integer>,
+		pub period: NodeId<Spanned<Duration>>,
+		pub max: Option<NodeId<Integer>>,
+	}
+}
+
 ast_type! {
 	pub struct DefineTable{
 		pub kind: DefineKind,
@@ -820,6 +844,7 @@ ast_type! {
 		pub schema: Option<Schema>,
 		pub table_kind: Option<TableKind>,
 		pub permission: Option<TablePermissions>,
+		pub ratelimits: Option<NodeListId<RateLimit>>,
 		pub changefeed: Option<ChangeFeed>,
 		pub view: Option<NodeId<Select>>,
 	}
@@ -923,6 +948,7 @@ ast_type! {
 		pub computed: Option<NodeId<Expr>>,
 		pub default: Option<FieldDefault>,
 		pub permissions: Option<FieldPermissions>,
+		pub ratelimits: Option<NodeListId<RateLimit>>,
 		pub comment: Option<NodeId<Expr>>,
 		// NOTE: maybe move into own struct if `REFERENCE` gets more subclauses.
 		/// `REFERENCE ON DELETE` clause

@@ -12,8 +12,8 @@ use crate::catalog::aggregation::{
 };
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::catalog::{
-	DatabaseId, FieldDefinition, Metadata, NamespaceId, Permissions, Record, RecordType,
-	TableDefinition, TableType, ViewDefinition,
+	DatabaseId, FieldDefinition, Metadata, NamespaceId, Permissions, RateLimits, Record,
+	RecordType, TableDefinition, TableType, ViewDefinition,
 };
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
@@ -41,6 +41,7 @@ pub(crate) struct DefineTableStatement {
 	pub full: bool,
 	pub view: Option<View>,
 	pub permissions: Permissions,
+	pub ratelimits: RateLimits,
 	pub changefeed: Option<ChangeFeed>,
 	pub comment: Expr,
 	pub table_type: TableType,
@@ -58,6 +59,7 @@ impl Default for DefineTableStatement {
 			full: false,
 			view: None,
 			permissions: Permissions::default(),
+			ratelimits: Vec::new(),
 			changefeed: None,
 			comment: Expr::Literal(Literal::None),
 			table_type: TableType::default(),
@@ -142,6 +144,7 @@ impl DefineTableStatement {
 			table_type: self.table_type.clone(),
 			view: self.view.clone().map(|v| v.to_definition()).transpose()?,
 			permissions: self.permissions.clone(),
+			ratelimits: self.ratelimits.clone(),
 			comment,
 			changefeed: self.changefeed,
 
@@ -166,6 +169,7 @@ impl DefineTableStatement {
 
 		// Clear the cache
 		txn.clear_cache();
+		ctx.rate_limiter().clear_table_plans();
 
 		let parent = NsDbCtx {
 			ns: Arc::clone(&ns),
@@ -225,6 +229,7 @@ impl DefineTableStatement {
 		}
 		// Clear the cache
 		txn.clear_cache();
+		ctx.rate_limiter().clear_table_plans();
 		// Ok all good
 		Ok(Value::None)
 	}
