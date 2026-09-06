@@ -14,7 +14,7 @@ use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::plan_or_compute::collect_stream;
 use crate::exec::{
 	AccessMode, BoxFut, CardinalityHint, Error as ExecError, ExecOperator, FlowResult,
-	OperatorMetrics, ValueBatchStream, buffer_stream,
+	OperatorMetrics, OutputShape, ValueBatchStream, buffer_stream,
 };
 use crate::expr::{ControlFlow, Kind};
 use crate::val::{Array, Value};
@@ -154,6 +154,14 @@ impl ExecOperator for LetPlan {
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {
 		Some(&self.metrics)
+	}
+
+	fn output_shape(&self) -> OutputShape {
+		// `execute()` always emits exactly one row (`NONE`), so a caller reading
+		// this plan's own result as an expression value — e.g. a block reduced to
+		// a single LET statement — must see that one value unwrapped, not an
+		// array containing it.
+		OutputShape::Scalar
 	}
 }
 
@@ -449,6 +457,16 @@ mod tests {
 			vec![Value::None],
 			"LET is not an expression: its own output is always NONE"
 		);
+	}
+
+	#[tokio::test]
+	async fn output_shape_is_scalar_so_a_lone_let_statement_reduces_to_bare_none() {
+		// A block reduced to this one statement (`{ LET $x = 1 }`) is read as an
+		// expression value via `output_shape()`, not by draining `execute()`
+		// itself. It must see the single NONE row unwrapped, matching every
+		// other non-query expression, rather than an array containing it.
+		let plan = let_plan(StubValue::rows(vec![Value::from(3i64)]).into_operator());
+		assert_eq!(plan.output_shape(), OutputShape::Scalar);
 	}
 
 	#[tokio::test]

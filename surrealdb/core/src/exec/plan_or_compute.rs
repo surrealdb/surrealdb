@@ -170,8 +170,9 @@ pub(crate) async fn evaluate_expr_at_depth(
 		depth
 	) {
 		Ok(plan) => {
+			let shape = plan.output_shape();
 			let stream = plan.execute(ctx)?;
-			collect_single_value(stream).await
+			collect_shaped_value(stream, shape).await
 		}
 		Err(Error::Exec(
 			e @ (ExecError::PlannerUnsupported(_) | ExecError::PlannerUnimplemented(_)),
@@ -228,8 +229,9 @@ pub(crate) async fn evaluate_body_expr(
 				*ctx = plan.output_context(ctx).await?;
 				Ok(Value::None)
 			} else {
+				let shape = plan.output_shape();
 				let stream = plan.execute(ctx)?;
-				collect_single_value(stream).await
+				collect_shaped_value(stream, shape).await
 			}
 		}
 		Err(Error::Exec(
@@ -282,15 +284,22 @@ pub(crate) async fn evaluate_body_expr(
 // Stream Collection Helpers
 // ============================================================================
 
-/// Collect values from a stream into a single value.
+/// Collect values from a stream into the single value an expression evaluates
+/// to, shaped by the plan's declared [`OutputShape`] rather than how many rows
+/// it happened to produce.
 ///
-/// - Empty stream → `Value::None`
-/// - Single value → that value
-/// - Multiple values → wrapped in an array (for query results like SELECT)
+/// - `OutputShape::Scalar` (e.g. `SELECT ONLY`, or any non-query expression) → the one emitted
+///   value, or `Value::None` if the plan emitted none.
+/// - `OutputShape::Rows` (e.g. an ordinary `SELECT`) → always `Value::Array`, regardless of row
+///   count. A caller using the result as a `FOR` range, or any other array-shaped context, must see
+///   `[]` for zero rows and `[x]` for one — never `NONE` or the bare element — the same contract
+///   [`ScalarSubquery`](crate::exec::physical_expr::subquery::ScalarSubquery) already applies to a
+///   subquery expression.
 ///
 /// Propagates control flow signals (BREAK, CONTINUE, RETURN, errors).
-pub(crate) async fn collect_single_value(
+pub(crate) async fn collect_shaped_value(
 	mut stream: ValueBatchStream,
+	shape: crate::exec::OutputShape,
 ) -> crate::expr::FlowResult<Value> {
 	let mut values = Vec::new();
 
@@ -301,10 +310,8 @@ pub(crate) async fn collect_single_value(
 		}
 	}
 
-	if values.is_empty() {
-		Ok(Value::None)
-	} else if values.len() == 1 {
-		Ok(values.into_iter().next().expect("values verified non-empty"))
+	if shape.is_scalar() {
+		Ok(values.pop().unwrap_or(Value::None))
 	} else {
 		Ok(Value::Array(crate::val::Array(values)))
 	}

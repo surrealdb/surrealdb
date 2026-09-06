@@ -202,11 +202,12 @@ test("eval-query allowed: eval::gql executes the embedded GQL query", async () =
 	const { db } = await rootClient(gqlServer);
 	await db.query("CREATE eval_person:tobie SET name = 'Tobie'");
 	const [rows] = await db
-		.query<[Record<string, unknown>]>(`RETURN eval::gql('MATCH (n:eval_person) RETURN n.name')`)
+		.query<[Array<Record<string, unknown>>]>(
+			`RETURN eval::gql('MATCH (n:eval_person) RETURN n.name')`,
+		)
 		.json();
-	// Quirk pinned deliberately: eval::gql collapses a single-row result to the
-	// bare object rather than a one-element array.
-	expect(rows).toEqual({ "n.name": "Tobie" });
+	// A row-shaped MATCH result is always an array, regardless of row count.
+	expect(rows).toEqual([{ "n.name": "Tobie" }]);
 	await db.close();
 });
 
@@ -377,7 +378,7 @@ test("RPC gql: executes with (query, vars) params and returns envelope array", a
 // Enabled server: eval::gql through the SDK — the only SDK-reachable surface.
 // ---------------------------------------------------------------------------
 
-test("eval::gql over the SDK: runs GQL inside SurrealQL, with single-row collapse", async () => {
+test("eval::gql over the SDK: runs GQL inside SurrealQL, results always array-shaped", async () => {
 	const { db } = await rootClient(gqlServer);
 	await db.query(`
 		CREATE eval_person:a SET name = 'A';
@@ -392,29 +393,30 @@ test("eval::gql over the SDK: runs GQL inside SurrealQL, with single-row collaps
 		.json();
 	expect(rows).toEqual([{ "n.name": "A" }, { "n.name": "B" }]);
 
-	// SURPRISING, pinned: a single-row result collapses to the bare object
-	// (not a one-element array), so callers cannot distinguish "one row" from
-	// "a scalar" by shape alone.
+	// A single-row result stays a one-element array, not a bare object —
+	// row count never changes the result's shape.
 	const [single] = await db
-		.query<[Record<string, string>]>(
+		.query<[Array<Record<string, string>>]>(
 			`RETURN eval::gql('MATCH (n:eval_person) WHERE n.name = "A" RETURN n.name')`,
 		)
 		.json();
-	expect(single).toEqual({ "n.name": "A" });
+	expect(single).toEqual([{ "n.name": "A" }]);
 
 	// Bindings are passed as a second argument.
 	const [bound] = await db
-		.query<[Record<string, string>]>(
+		.query<[Array<Record<string, string>>]>(
 			`RETURN eval::gql('MATCH (n:eval_person) WHERE n.name = $name RETURN n.name', { name: 'B' })`,
 		)
 		.json();
-	expect(bound).toEqual({ "n.name": "B" });
+	expect(bound).toEqual([{ "n.name": "B" }]);
 
-	// A GQL INSERT evaluates to NONE (undefined via .json()) but persists.
+	// A mutation-only GQL query (no trailing RETURN) evaluates to an empty
+	// array, mirroring a native DELETE/UPDATE with no output clause, but
+	// still persists its writes.
 	const [insertResult] = await db
-		.query<[unknown]>(`RETURN eval::gql('INSERT (:eval_widget {name: "w1"})')`)
+		.query<[unknown[]]>(`RETURN eval::gql('INSERT (:eval_widget {name: "w1"})')`)
 		.json();
-	expect(insertResult).toBeUndefined();
+	expect(insertResult).toEqual([]);
 	const [widgets] = await db.query<[unknown[]]>("SELECT name FROM eval_widget").json();
 	expect(widgets).toEqual([{ name: "w1" }]);
 

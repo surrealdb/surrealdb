@@ -100,9 +100,8 @@ landed on `main` but is not yet in a stable release.
     emits, while `_get` requires the full form; anonymous denial surfaces as
     HTTP 200 + "Internal Error: ..." in the errors array (`graphql`).
   - ISO GQL is enabled by default (the `--allow-experimental=gql` flag remains
-    a no-op accepted for backwards compatibility). `eval::gql` collapses a
-    single-row result to the bare object, and `/gql` binds `$vars` from URL
-    query parameters (`gql`).
+    a no-op accepted for backwards compatibility), and `/gql` binds `$vars`
+    from URL query parameters (`gql`).
   - `$auth`/`$session`/`$token` bindings are rejected as protected, but
     `$this`/`$parent` are accepted as wire bindings (document context still
     shadows them per-record) (`surrealql-wire`).
