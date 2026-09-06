@@ -117,20 +117,50 @@ pub static GRPC_MAX_MESSAGE_SIZE: LazyLock<usize> =
 pub(crate) const GRPC_MIN_MESSAGE_SIZE: usize =
 	surrealdb_protocol::DEFAULT_FILE_CHUNK_SIZE + (4 << 10);
 
+/// The largest gRPC message the wire can describe.
+///
+/// Every message is length-prefixed with four bytes, so a longer one cannot be
+/// framed at all: tonic refuses to emit it whatever the configured limit says.
+/// A configured size above this would be advertised by the handshake and sized
+/// into every client's buffers, promising a message the route can never carry
+/// and turning a misconfiguration into a failure that only shows up on the
+/// largest payloads.
+pub(crate) const GRPC_MAX_MESSAGE_CEILING: usize = u32::MAX as usize;
+
 /// Resolves the configured gRPC message size.
 ///
 /// Anything unparseable, or absent, takes the default. Whatever the source, the
-/// result is raised to [`GRPC_MIN_MESSAGE_SIZE`]: this limit governs every
-/// message the service encodes, so a value too small to carry one leaves a
-/// service no client can even hand shake with. Zero is only the most obvious of
-/// those; an inherited `SURREAL_HTTP_MAX_RPC_BODY_SIZE` that has itself been
-/// set very low is the least.
+/// result is held between [`GRPC_MIN_MESSAGE_SIZE`] and
+/// [`GRPC_MAX_MESSAGE_CEILING`]: this limit governs every message the service
+/// encodes, and both ends of that range are sizes at which the service would
+/// otherwise start, advertise its methods, and then fail calls. Below the floor
+/// nothing can be carried at all -- zero is only the most obvious of those, an
+/// inherited `SURREAL_HTTP_MAX_RPC_BODY_SIZE` that has itself been set very low
+/// is the least. Above the ceiling the failure is narrower and later: only the
+/// messages past four gibibytes are refused, by which point a client has been
+/// told it may send them.
 fn grpc_message_size(configured: Option<&str>) -> usize {
 	use common::str::ParseBytes;
-	configured
-		.and_then(|var| var.parse_bytes::<usize>().ok())
-		.unwrap_or(*HTTP_MAX_RPC_BODY_SIZE)
-		.max(GRPC_MIN_MESSAGE_SIZE)
+
+	// Read as a `u128`, bounded there, and only then narrowed.
+	//
+	// `u128` is the width the parser itself accumulates in, which is what makes
+	// this the last place the distinction can be lost: reading into anything
+	// narrower turns a size past that narrower type into a parse failure, and a
+	// parse failure takes the default. A size deliberately set far too high
+	// would come back as four mebibytes -- the opposite of what it asked for,
+	// and silently.
+	//
+	// A number so large that the parser overflows computing it is not a size it
+	// can express at all, and falls under the same rule as any other unreadable
+	// value.
+	let configured = configured
+		.and_then(|var| var.parse_bytes::<u128>().ok())
+		.unwrap_or(*HTTP_MAX_RPC_BODY_SIZE as u128);
+	let bounded = configured.clamp(GRPC_MIN_MESSAGE_SIZE as u128, GRPC_MAX_MESSAGE_CEILING as u128);
+	// The ceiling is `u32::MAX`, which every pointer width this builds for can
+	// represent, so the narrowing cannot truncate.
+	bounded as usize
 }
 
 /// The maximum number of explicitly attached sessions the gRPC transport will
@@ -455,7 +485,9 @@ pub static ENABLE_TOKIO_CONSOLE: LazyLock<bool> =
 
 #[cfg(test)]
 mod tests {
-	use super::{GRPC_MIN_MESSAGE_SIZE, HTTP_MAX_RPC_BODY_SIZE, grpc_message_size};
+	use super::{
+		GRPC_MAX_MESSAGE_CEILING, GRPC_MIN_MESSAGE_SIZE, HTTP_MAX_RPC_BODY_SIZE, grpc_message_size,
+	};
 
 	/// A size this small configures the service to refuse messages it has to be
 	/// able to send -- `GetCapabilities` at the bottom end, an export chunk at
@@ -480,6 +512,14 @@ mod tests {
 		assert_eq!(grpc_message_size(Some("banana")), default, "a word is not a size");
 		assert_eq!(grpc_message_size(Some("")), default, "nor is nothing");
 		assert_eq!(grpc_message_size(None), default, "and unset is the default");
+		// The boundary of "readable": a number the parser overflows computing
+		// is not a size it can express, so it is unreadable rather than large.
+		// Anything it can express is capped instead -- see the ceiling test.
+		assert_eq!(
+			grpc_message_size(Some("340282366920938463463374607431768211456")),
+			default,
+			"a number past what the parser accumulates in is not a size"
+		);
 	}
 
 	/// A size an operator actually meant is honoured, with the byte suffixes
@@ -487,5 +527,31 @@ mod tests {
 	#[test]
 	fn a_configured_grpc_message_size_is_honoured() {
 		assert_eq!(grpc_message_size(Some("128mib")), 128 << 20);
+	}
+
+	/// A message longer than four gibibytes cannot be length-prefixed, so the
+	/// transport refuses it whatever this says. Advertising such a size would
+	/// have every client size its buffers to a message the route can never
+	/// carry.
+	#[test]
+	fn a_grpc_message_size_past_the_frame_width_is_capped() {
+		for configured in [
+			"8g",
+			"4gib",
+			"16gib",
+			// Past `usize` on a 32-bit target, and past `u64` everywhere: each
+			// is a size the parser can still express, so each is capped rather
+			// than mistaken for a value it could not read.
+			"18446744073709551616",
+			"17179869184gib",
+		] {
+			assert_eq!(
+				grpc_message_size(Some(configured)),
+				GRPC_MAX_MESSAGE_CEILING,
+				"{configured} is longer than a four byte length prefix can describe"
+			);
+		}
+		// And a size just inside it is left alone.
+		assert_eq!(grpc_message_size(Some("2gib")), 2 << 30);
 	}
 }

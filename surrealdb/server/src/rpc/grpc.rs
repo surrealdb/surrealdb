@@ -96,8 +96,10 @@ const EXPORT_CHUNK_SIZE: usize = surrealdb_protocol::DEFAULT_FILE_CHUNK_SIZE;
 /// because both sides are constants: a chunk size raised past the floor should
 /// fail the build, not a run.
 const _: () = assert!(
-	EXPORT_CHUNK_SIZE + QUERY_FRAME_RESERVE <= crate::cnf::GRPC_MIN_MESSAGE_SIZE,
-	"an export chunk plus its framing must fit the smallest configurable message"
+	EXPORT_CHUNK_SIZE + (crate::cnf::GRPC_MIN_MESSAGE_SIZE / 256) + (1 << 10)
+		<= crate::cnf::GRPC_MIN_MESSAGE_SIZE,
+	"an export chunk plus its framing and compression headroom must fit the smallest \
+	 configurable message"
 );
 
 /// The most records one query batch frame carries, whatever a client asks for.
@@ -114,20 +116,30 @@ const _: () = assert!(
 /// the frame.
 const QUERY_BATCH_RECORDS: usize = 256;
 
-/// Bytes of every query batch frame reserved for what is not a record.
+/// Bytes of every message reserved for what the transport adds to a payload.
 ///
-/// A frame carries its statement and batch indices, its kind, its stats and
-/// the tag and length prefix of each level it nests through. All of those are
-/// fixed-width scalars measured in tens of bytes, so a kibibyte is several
-/// times what the largest of them needs -- and it is charged against a message
-/// size whose own floor is [`GRPC_MIN_MESSAGE_SIZE`], where it costs well under
-/// a percent of the payload.
+/// Two things sit between the payload and the limit tonic enforces.
+///
+/// The first is the frame's own fixed fields: its statement and batch indices,
+/// its kind, its stats, and the tag and length prefix of each level it nests
+/// through. Those are fixed-width scalars measured in tens of bytes, which the
+/// kibibyte term covers at any message size.
+///
+/// The second is compression, and it is proportional rather than fixed. tonic
+/// weighs the *compressed* payload against its send limit, and compresses
+/// unconditionally once a client has negotiated an encoding -- it does not
+/// check whether compressing helped. Data that does not compress therefore
+/// grows: measured on incompressible input, gzip at level 6 adds about 0.031%
+/// and zstd about 0.003%, both of it stored-block framing. One part in 256 is
+/// an order of magnitude more than the worse of the two, and costs 0.4% of a
+/// payload that would otherwise be refused for being marginally too large
+/// *after* this server had already accepted it.
 ///
 /// A frame carrying an error carries no records, so the two never compete for
 /// the same budget.
-///
-/// [`GRPC_MIN_MESSAGE_SIZE`]: crate::cnf::GRPC_MIN_MESSAGE_SIZE
-const QUERY_FRAME_RESERVE: usize = 1 << 10;
+fn transport_reserve(limit: usize) -> usize {
+	(limit / 256) + (1 << 10)
+}
 
 /// Bytes charged to a variable-length field on top of its own encoding.
 ///
@@ -155,12 +167,19 @@ const WIRE_FIELD_OVERHEAD: usize = 6;
 /// count, so the statement that produced it fails naming the limit rather than
 /// emitting a frame neither end will take.
 fn frame_payload_budget() -> usize {
-	GRPC_MAX_MESSAGE_SIZE.saturating_sub(QUERY_FRAME_RESERVE).max(1)
+	let limit = *GRPC_MAX_MESSAGE_SIZE;
+	limit.saturating_sub(transport_reserve(limit)).max(1)
 }
 
-/// Hands back a unary response once it is known to encode within the message
-/// size this server advertises, refusing it as a status naming the limit
+/// Hands back a unary response once it is known to encode within
+/// [`frame_payload_budget`], refusing it as a status naming the limit
 /// otherwise.
+///
+/// Bounded against the budget rather than against the advertised size, because
+/// the advertised size is what tonic weighs the *compressed* payload against: a
+/// response encoding to exactly the limit and failing to compress would be
+/// refused by tonic after this had passed it, which is the mid-stream failure
+/// this exists to replace.
 ///
 /// Every unary response goes through this, including the ones that carry
 /// nothing a caller can influence. Only `Run` can currently return a value
@@ -174,13 +193,18 @@ fn frame_payload_budget() -> usize {
 ///
 /// The streaming responses are the deliberate exception, because a stream has
 /// no single message to weigh. Each of them bounds its own frames instead:
-/// query batches against [`frame_payload_budget`], exports against
-/// [`EXPORT_CHUNK_SIZE`], and subscriptions per notification.
+/// query batches record by record, exports against [`EXPORT_CHUNK_SIZE`], and
+/// subscriptions per notification.
 fn checked_response<M: surrealdb_types::prost::Message>(message: M) -> Result<M, Status> {
 	let size = message.encoded_len();
-	let limit = *GRPC_MAX_MESSAGE_SIZE;
+	let limit = frame_payload_budget();
 	if size > limit {
-		return Err(Status::resource_exhausted(format!(
+		// `OutOfRange` is the code tonic itself raises for a message past the
+		// limit, so the preflight and the enforcement it front-runs classify
+		// the same condition the same way -- and it is the code the SDK already
+		// maps onto a validation error, which is how the same limit is reported
+		// on every other path.
+		return Err(Status::out_of_range(format!(
 			"The response encodes to {size} bytes, above this server's gRPC message limit of \
 			 {limit} bytes. Raise SURREAL_GRPC_MAX_MESSAGE_SIZE on this server."
 		)));
@@ -198,7 +222,7 @@ fn checked_response<M: surrealdb_types::prost::Message>(message: M) -> Result<M,
 fn bounded_notification(frame: rpc::subscribe_response::Frame) -> rpc::subscribe_response::Frame {
 	use surrealdb_types::prost::Message;
 
-	let limit = *GRPC_MAX_MESSAGE_SIZE;
+	let limit = frame_payload_budget();
 	let response = rpc::SubscribeResponse {
 		frame: Some(frame),
 	};
@@ -4062,6 +4086,33 @@ mod tests {
 			.collect()
 	}
 
+	/// The reserve exists to cover what the transport adds to a payload, and
+	/// the larger term of that is compression, which is proportional. tonic
+	/// weighs the compressed payload against its send limit and compresses
+	/// unconditionally once an encoding is negotiated, so data that does not
+	/// compress grows: measured on incompressible input, gzip at level 6 adds
+	/// one byte per ~3200 and zstd one per ~43000, both of it stored-block
+	/// framing.
+	///
+	/// The reserve therefore has to stay clear of that rate at every size a
+	/// deployment can configure, which a fixed number cannot do. One byte per
+	/// 2048 is worse than either codec and is the rate asserted here.
+	#[test]
+	fn the_transport_reserve_clears_worst_case_compression() {
+		for limit in [
+			crate::cnf::GRPC_MIN_MESSAGE_SIZE,
+			4 << 20,
+			128 << 20,
+			crate::cnf::GRPC_MAX_MESSAGE_CEILING,
+		] {
+			let payload = limit - transport_reserve(limit);
+			assert!(
+				payload + payload / 2048 <= limit,
+				"a {payload} byte payload under a {limit} byte limit has no room to expand"
+			);
+		}
+	}
+
 	/// The record count is only half the bound. Records wide enough that a full
 	/// batch of them would not fit have to be split on bytes instead, or the
 	/// frame is one neither peer will take.
@@ -4074,10 +4125,16 @@ mod tests {
 	fn a_frame_of_wide_records_is_split_on_bytes() {
 		use surrealdb_types::prost::Message;
 
-		// Wide enough that a batch of 256 would be several times the limit, and
-		// few enough that the fixture stays small.
-		let width = *GRPC_MAX_MESSAGE_SIZE / 64;
-		let records = 100;
+		// Narrow enough that a frame packs tight against the budget rather than
+		// stopping a whole record short of it, and wide enough that the byte
+		// bound is still what closes the frame rather than the record count. A
+		// fixture that leaves a record's width of slack cannot tell a budget
+		// holding back a fixed kibibyte from one holding back a proportional
+		// share -- the two differ by less than one wide record.
+		let width = *GRPC_MAX_MESSAGE_SIZE / QUERY_BATCH_RECORDS;
+		// Enough to reach a full frame through the ramp: 16, 32, 64 and 128
+		// records go out before one is bounded by bytes rather than by count.
+		let records = 16 + 32 + 64 + 128 + QUERY_BATCH_RECORDS;
 		let rows =
 			Array::from((0..records).map(|_| Value::String("x".repeat(width))).collect::<Vec<_>>());
 		let frames = frames(vec![result(Value::Array(rows))]);
@@ -4097,11 +4154,24 @@ mod tests {
 			"the record count alone would not have split this: {} frames",
 			batches.len()
 		);
+
+		let largest = frames.iter().map(|frame| frame.encoded_len()).max().expect("frames");
+		// Without this the rest proves nothing: a fixture whose frames all sit
+		// comfortably below the budget passes whatever the budget is.
+		assert!(
+			largest + width >= frame_payload_budget(),
+			"the fixture has to fill a frame for this to test the budget: largest is {largest} \
+			 against a {} byte budget",
+			frame_payload_budget()
+		);
 		for frame in &frames {
+			// The bound that matters is the one after compression: tonic weighs
+			// the compressed payload, and data that does not compress grows.
+			let encoded = frame.encoded_len();
 			assert!(
-				frame.encoded_len() <= *GRPC_MAX_MESSAGE_SIZE,
-				"a frame encodes to {} bytes, above the {} byte limit both peers enforce",
-				frame.encoded_len(),
+				encoded + encoded / 256 <= *GRPC_MAX_MESSAGE_SIZE,
+				"a frame encodes to {encoded} bytes, which worst-case expansion takes past the \
+				 {} byte limit both peers enforce",
 				*GRPC_MAX_MESSAGE_SIZE
 			);
 		}

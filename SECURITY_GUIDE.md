@@ -475,7 +475,14 @@ transaction management, notification routing
   compression can still be one the peer refuses — a failure that surfaces there as
   a corrupt stream naming no size. Responses that grow with user data must be
   framed by encoded bytes (`frame_payload_budget`), not by a record count alone;
-  a payload with no smaller form must be refused with the limit named.
+  a payload with no smaller form must be refused with the limit named. The budget
+  must hold back headroom proportional to the limit (`transport_reserve`), because
+  compression is applied unconditionally and expands data that does not compress —
+  a payload bounded at exactly the limit is one the transport then refuses.
+- The configured gRPC message size must be held within what the transport can
+  represent (`GRPC_MAX_MESSAGE_CEILING`, the four-byte length prefix), on the
+  client as well as the server. Advertising a size larger than that has every
+  client size its buffers to a message the route can never carry.
 - Memory threshold checks must be applied consistently across all transport entry
   points before full message body deserialization.
 - Protected session parameter names must be normalized (lowercase, NFC Unicode,

@@ -252,6 +252,78 @@ async fn a_batch_of_wide_records_arrives_over_a_compressed_stream() {
 	assert_eq!(all.len(), RECORDS, "every record must survive the split");
 }
 
+/// A frame of data that does not compress still fits.
+///
+/// tonic weighs the *compressed* payload against its send limit and compresses
+/// unconditionally once a client has negotiated an encoding -- it never checks
+/// whether compressing helped. Incompressible data therefore grows on the way
+/// out, so a frame filled to exactly the advertised limit would be refused by
+/// tonic after this server had already accepted it, and the caller would see
+/// `out_of_range` on a response that was within the size it was promised. The
+/// budget holds back a proportional reserve for that expansion; this fills a
+/// frame against the budget with bytes chosen so neither codec can shrink them.
+#[tokio::test]
+async fn incompressible_records_still_fit_their_frame() {
+	let server = TestServer::start().await;
+	let db = server.connect_as_root().await;
+
+	// Narrow enough that a frame packs tight against the budget instead of
+	// stopping a whole record short of it, and numerous enough to reach a frame
+	// the byte budget closes: the batches ramp 16, 32, 64, 128 before one is
+	// bounded by bytes rather than by count. A fixture that leaves a record's
+	// width of slack never reaches the headroom this is about.
+	const PADDING: usize = 16 * 1024;
+	const RECORDS: usize = 16 + 32 + 64 + 128 + 256;
+
+	// Every record gets its own bytes. One buffer stored in all of them would
+	// be incompressible per record and enormously compressible per frame: both
+	// codecs reach back across the records around it -- deflate over 32 KiB and
+	// zstd far further -- and a frame of one repeated 16 KiB block encodes down
+	// to a few tens of kibibytes, which exercises no expansion at all.
+	let mut state = 0x243F6A8885A308D3u64;
+	let mut next_pad = || -> surrealdb_types::Bytes {
+		surrealdb_types::Bytes::from(
+			(0..PADDING)
+				.map(|_| {
+					state ^= state << 13;
+					state ^= state >> 7;
+					state ^= state << 17;
+					(state >> 33) as u8
+				})
+				.collect::<Vec<u8>>(),
+		)
+	};
+	let pads: Vec<surrealdb_types::Bytes> = (0..RECORDS).map(|_| next_pad()).collect();
+
+	// Written a chunk at a time because the whole fixture is larger than one
+	// message: the limit this test is about bounds requests too.
+	for chunk in pads.chunks(64) {
+		db.query("FOR $pad IN $pads { CREATE dense SET pad = $pad }")
+			.bind(("pads", chunk.to_vec()))
+			.await
+			.expect("send")
+			.check()
+			.expect("create");
+	}
+
+	let all: Vec<Value> = db.select("dense").await.expect("a result tonic will still emit");
+	assert_eq!(all.len(), RECORDS, "every record must survive compression");
+
+	// Guards what the fixture is for: were these to coincide, the frames would
+	// compress away and the test would pass without touching the headroom.
+	let distinct: std::collections::HashSet<Vec<u8>> = all
+		.iter()
+		.map(|record| match record {
+			Value::Object(fields) => match fields.get("pad") {
+				Some(Value::Bytes(bytes)) => bytes.clone().into_inner().to_vec(),
+				other => panic!("expected bytes, got {other:?}"),
+			},
+			other => panic!("expected a record, got {other:?}"),
+		})
+		.collect();
+	assert_eq!(distinct.len(), RECORDS, "each record must carry its own bytes");
+}
+
 /// `run` reaches the database as its own RPC, so the function name travels as
 /// data rather than being compiled into a query the caller never wrote.
 #[tokio::test]

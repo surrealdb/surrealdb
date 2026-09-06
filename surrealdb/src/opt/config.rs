@@ -131,6 +131,27 @@ impl Config {
 				None,
 			));
 		}
+		// And likewise a size the wire cannot describe: a message carries its
+		// length in a four byte prefix, so no connection can transfer one past
+		// that however either peer is configured.
+		//
+		// Asked as "does this fit the prefix" rather than as a comparison
+		// against the ceiling, because on a 32-bit target -- wasm among them --
+		// the ceiling is `usize::MAX` and no comparison against it can ever be
+		// true. The conversion says the same thing at every pointer width.
+		if let Some(size) = grpc.max_message_size
+			&& u32::try_from(size).is_err()
+		{
+			return Err(crate::Error::configuration(
+				format!(
+					"The gRPC maximum message size must be at most {} bytes, and is {size}: a \
+					 message carries its length in a four byte prefix, so a longer one cannot be \
+					 framed.",
+					crate::opt::grpc::MAX_MESSAGE_SIZE
+				),
+				None,
+			));
+		}
 		self.grpc = grpc;
 		Ok(self)
 	}
