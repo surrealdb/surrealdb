@@ -467,3 +467,40 @@ async fn check_permissions_auth_disabled() {
 		);
 	}
 }
+
+#[tokio::test]
+async fn table_permissions_before_after_create() {
+	let (_, ds) = new_ds("NS", "DB", true).await.unwrap();
+	let owner = Session::owner().with_ns("NS").with_db("DB");
+	let anon = Session::default().with_ns("NS").with_db("DB");
+
+	let mut resp = ds
+		.execute(
+			"DEFINE TABLE item SCHEMAFULL PERMISSIONS
+				FOR select FULL
+				FOR create WHERE $after.name != NONE
+				FOR update FULL
+				FOR delete FULL;
+			DEFINE FIELD name ON item TYPE option<string>;",
+			&owner,
+			None,
+		)
+		.await
+		.unwrap();
+	assert!(resp.remove(0).output().is_ok(), "failed to define table");
+	assert!(resp.remove(0).output().is_ok(), "failed to define field");
+
+	let mut resp = ds.execute("CREATE item:one SET name = NONE;", &anon, None).await.unwrap();
+	assert_eq!(
+		resp.remove(0).output().unwrap(),
+		Value::Array(Array::new()),
+		"anonymous user should not be able to create when $after is NONE"
+	);
+
+	let mut resp = ds.execute("CREATE item:one SET name = 'one';", &anon, None).await.unwrap();
+	assert_eq!(
+		resp.remove(0).output().unwrap(),
+		syn::value("[{ id: item:one, name: 'one' }]").unwrap(),
+		"anonymous user should create when $after is the new record"
+	);
+}

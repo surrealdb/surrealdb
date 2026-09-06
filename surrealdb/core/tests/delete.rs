@@ -574,6 +574,62 @@ async fn check_permissions_auth_disabled() {
 }
 
 #[tokio::test]
+async fn table_permissions_before_after_delete() {
+	let (_, ds) = new_ds("NS", "DB", true).await.unwrap();
+	let owner = Session::owner().with_ns("NS").with_db("DB");
+	let anon = Session::default().with_ns("NS").with_db("DB");
+
+	let mut resp = ds
+		.execute(
+			"DEFINE TABLE item SCHEMAFULL PERMISSIONS
+				FOR select FULL
+				FOR create FULL
+				FOR update FULL
+				FOR delete WHERE $before.deleted IS NONE;
+			DEFINE FIELD name ON item TYPE string;
+			DEFINE FIELD deleted ON item TYPE option<datetime>;
+			CREATE item:active SET name = 'active';
+			CREATE item:deleted SET name = 'deleted', deleted = time::now();",
+			&owner,
+			None,
+		)
+		.await
+		.unwrap();
+	assert!(resp.remove(0).output().is_ok(), "failed to define table");
+	assert!(resp.remove(0).output().is_ok(), "failed to define field name");
+	assert!(resp.remove(0).output().is_ok(), "failed to define field deleted");
+	assert!(resp.remove(0).output().is_ok(), "failed to create active record");
+	assert!(resp.remove(0).output().is_ok(), "failed to create deleted record");
+
+	let mut resp = ds.execute("DELETE item:active;", &anon, None).await.unwrap();
+	assert!(
+		resp.remove(0).output().is_ok(),
+		"anonymous user should delete active records when $before.deleted is NONE"
+	);
+
+	let mut resp = ds.execute("SELECT * FROM item:active", &owner, None).await.unwrap();
+	assert_eq!(
+		resp.remove(0).output().unwrap(),
+		Value::Array(Array::new()),
+		"active record should be removed after delete"
+	);
+
+	let mut resp = ds.execute("DELETE item:deleted;", &anon, None).await.unwrap();
+	assert!(
+		resp.remove(0).output().is_ok(),
+		"delete statement should succeed even when permission denies the row"
+	);
+
+	let mut resp = ds.execute("SELECT * FROM item:deleted", &owner, None).await.unwrap();
+	let res = resp.remove(0).output().unwrap();
+	assert_eq!(
+		res.into_array().unwrap().len(),
+		1,
+		"soft-deleted record should still exist after denied delete"
+	);
+}
+
+#[tokio::test]
 async fn delete_filtered_live_notification() -> Result<()> {
 	let (notifications, dbs) = new_ds("test", "test", false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);

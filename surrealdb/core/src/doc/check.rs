@@ -1,10 +1,12 @@
+use std::sync::Arc;
+
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
 use super::IgnoreError;
 use crate::catalog::Permission;
-use crate::ctx::FrozenContext;
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::compute::DocKind;
 use crate::doc::{CursorDoc, Document, Extras};
@@ -13,6 +15,17 @@ use crate::expr::paths::{ID, IN, OUT};
 use crate::expr::{Cond, FlowResultExt};
 use crate::iam::Action;
 use crate::val::{RecordId, Value};
+
+/// Which table-level permission check is running. Controls `$before`,
+/// `$after`, and `$this` / `$self` (via the returned `CursorDoc`).
+#[derive(Clone, Copy)]
+enum TablePermissionPhase {
+	Select,
+	Create,
+	UpdatePre,
+	UpdatePost,
+	Delete,
+}
 
 impl Document {
 	/// Checks that a specifically selected record
@@ -360,8 +373,15 @@ impl Document {
 		doc: &CursorDoc,
 	) -> Result<(), IgnoreError> {
 		if self.id.is_some() && ctx.check_perms(opt, Action::View)? {
-			self.process_permissions(stk, ctx, opt, doc, &self.doc_ctx.tb()?.permissions.select)
-				.await?;
+			self.process_permissions(
+				stk,
+				ctx,
+				opt,
+				doc,
+				&self.doc_ctx.tb()?.permissions.select,
+				TablePermissionPhase::Select,
+			)
+			.await?;
 		}
 		Ok(())
 	}
@@ -377,16 +397,23 @@ impl Document {
 		doc: &CursorDoc,
 	) -> Result<(), IgnoreError> {
 		if self.id.is_some() && ctx.check_perms(opt, Action::Edit)? {
-			self.process_permissions(stk, ctx, opt, doc, &self.doc_ctx.tb()?.permissions.create)
-				.await?;
+			self.process_permissions(
+				stk,
+				ctx,
+				opt,
+				doc,
+				&self.doc_ctx.tb()?.permissions.create,
+				TablePermissionPhase::Create,
+			)
+			.await?;
 		}
 		Ok(())
 	}
 
-	/// Check the `PERMISSIONS FOR update` clause on this table. Short-
+	/// Check the `PERMISSIONS FOR update` clause before mutation. Short-
 	/// circuits if the record being processed does not have an id,
 	/// so temporary documents never trip the permissions lookup.
-	pub(super) async fn check_update_permissions(
+	pub(super) async fn check_update_permissions_pre(
 		&self,
 		stk: &mut Stk,
 		ctx: &FrozenContext,
@@ -394,8 +421,39 @@ impl Document {
 		doc: &CursorDoc,
 	) -> Result<(), IgnoreError> {
 		if self.id.is_some() && ctx.check_perms(opt, Action::Edit)? {
-			self.process_permissions(stk, ctx, opt, doc, &self.doc_ctx.tb()?.permissions.update)
-				.await?;
+			self.process_permissions(
+				stk,
+				ctx,
+				opt,
+				doc,
+				&self.doc_ctx.tb()?.permissions.update,
+				TablePermissionPhase::UpdatePre,
+			)
+			.await?;
+		}
+		Ok(())
+	}
+
+	/// Check the `PERMISSIONS FOR update` clause after mutation. Short-
+	/// circuits if the record being processed does not have an id,
+	/// so temporary documents never trip the permissions lookup.
+	pub(super) async fn check_update_permissions_post(
+		&self,
+		stk: &mut Stk,
+		ctx: &FrozenContext,
+		opt: &Options,
+		doc: &CursorDoc,
+	) -> Result<(), IgnoreError> {
+		if self.id.is_some() && ctx.check_perms(opt, Action::Edit)? {
+			self.process_permissions(
+				stk,
+				ctx,
+				opt,
+				doc,
+				&self.doc_ctx.tb()?.permissions.update,
+				TablePermissionPhase::UpdatePost,
+			)
+			.await?;
 		}
 		Ok(())
 	}
@@ -411,8 +469,15 @@ impl Document {
 		doc: &CursorDoc,
 	) -> Result<(), IgnoreError> {
 		if self.id.is_some() && ctx.check_perms(opt, Action::Edit)? {
-			self.process_permissions(stk, ctx, opt, doc, &self.doc_ctx.tb()?.permissions.delete)
-				.await?;
+			self.process_permissions(
+				stk,
+				ctx,
+				opt,
+				doc,
+				&self.doc_ctx.tb()?.permissions.delete,
+				TablePermissionPhase::Delete,
+			)
+			.await?;
 		}
 		Ok(())
 	}
@@ -430,7 +495,7 @@ impl Document {
 		doc: &CursorDoc,
 	) -> Result<(), IgnoreError> {
 		if matches!(&self.doc_ctx.tb()?.permissions.update, Permission::Specific(_)) {
-			self.check_update_permissions(stk, ctx, opt, doc).await?;
+			self.check_update_permissions_post(stk, ctx, opt, doc).await?;
 		}
 		Ok(())
 	}
@@ -439,12 +504,18 @@ impl Document {
 	/// signal `IgnoreError::Ignore` when access is denied.
 	///
 	/// Shared by `check_select_permissions` / `check_create_permissions`
-	/// / `check_update_permissions` / `check_delete_permissions` so the
+	/// / `check_update_permissions_pre` / `check_update_permissions_post`
+	/// / `check_delete_permissions` so the
 	/// `Permission::None` / `Permission::Full` / `Permission::Specific`
 	/// dispatch lives in one place. For `Specific(expr)` the predicate
 	/// is computed against `doc` with permission checks disabled on the
 	/// nested `Options`, so the predicate itself cannot recursively trip
 	/// table-level permission gates.
+	///
+	/// `$before` / `$after` follow mutation-transition semantics: both are
+	/// `NONE` on SELECT; CREATE is `NONE` → new row; UPDATE pre is snapshot →
+	/// snapshot; UPDATE post is snapshot → updated row; DELETE is snapshot →
+	/// `NONE`. `$this` / `$self` resolve via the document passed to compute.
 	async fn process_permissions(
 		&self,
 		stk: &mut Stk,
@@ -452,6 +523,7 @@ impl Document {
 		opt: &Options,
 		doc: &CursorDoc,
 		perms: &Permission,
+		phase: TablePermissionPhase,
 	) -> Result<(), IgnoreError> {
 		match perms {
 			Permission::None => Err(IgnoreError::Ignore),
@@ -459,9 +531,28 @@ impl Document {
 			Permission::Specific(e) => {
 				// Disable permission recursion and block side effects
 				let opt = &opt.new_for_permission_predicate();
+				let none = Arc::new(Value::None);
+				let snapshot = self.initial.doc.as_arc();
+				let (before, after) = match phase {
+					TablePermissionPhase::Select => (Arc::clone(&none), Arc::clone(&none)),
+					TablePermissionPhase::Create => (Arc::clone(&none), doc.doc.as_arc()),
+					TablePermissionPhase::UpdatePre => {
+						(Arc::clone(&snapshot), Arc::clone(&snapshot))
+					}
+					TablePermissionPhase::UpdatePost => (Arc::clone(&snapshot), doc.doc.as_arc()),
+					TablePermissionPhase::Delete => (snapshot, none),
+				};
+				let this_doc = match phase {
+					TablePermissionPhase::Delete => &self.initial,
+					_ => doc,
+				};
+				let mut child_ctx = Context::new_child(ctx);
+				child_ctx.add_value("before", before);
+				child_ctx.add_value("after", after);
+				let child_ctx = child_ctx.freeze();
 				// Process the PERMISSION clause
 				if !stk
-					.run(|stk| e.compute(stk, ctx, opt, Some(doc)))
+					.run(|stk| e.compute(stk, &child_ctx, opt, Some(this_doc)))
 					.await
 					.catch_return()?
 					.is_truthy()

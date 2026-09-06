@@ -370,7 +370,9 @@ macro_rules! check_perm {
 				if $ctx.root().skip_fetch_perms {
 					Ok(true)
 				} else {
-					let mut eval_ctx = EvalContext::from_exec_ctx($ctx).with_value($value);
+					let bound =
+						$ctx.with_param("before", Value::None).with_param("after", Value::None);
+					let mut eval_ctx = EvalContext::from_exec_ctx(&bound).with_value($value);
 					eval_ctx.skip_fetch_perms = true;
 					expr.evaluate(eval_ctx).await.map(|v| v.is_truthy()).map_err(|e| {
 						ControlFlow::Err(anyhow::anyhow!("Failed to check permission: {e}"))
