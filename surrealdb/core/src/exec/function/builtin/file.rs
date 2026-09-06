@@ -519,17 +519,83 @@ fn file_key_impl((file,): (File,)) -> Result<Value> {
 
 // Note: We use `Any` for file arguments in the macro signature because Kind::File takes
 // parameters (bucket types). The actual type checking happens via FromArgs::from_args.
-define_async_function!(FilePut, "file::put", (file: Any, value: Any) -> Any, file_put_impl);
-define_async_function!(FilePutIfNotExists, "file::put_if_not_exists", (file: Any, value: Any) -> Any, file_put_if_not_exists_impl);
-define_async_function!(FileGet, "file::get", (file: Any) -> Any, file_get_impl);
-define_async_function!(FileHead, "file::head", (file: Any) -> Any, file_head_impl);
-define_async_function!(FileDelete, "file::delete", (file: Any) -> Any, file_delete_impl);
-define_async_function!(FileCopy, "file::copy", (src: Any, dst: Any) -> Any, file_copy_impl);
-define_async_function!(FileCopyIfNotExists, "file::copy_if_not_exists", (src: Any, dst: Any) -> Any, file_copy_if_not_exists_impl);
-define_async_function!(FileRename, "file::rename", (file: Any, target: String) -> Any, file_rename_impl);
-define_async_function!(FileRenameIfNotExists, "file::rename_if_not_exists", (file: Any, target: String) -> Any, file_rename_if_not_exists_impl);
-define_async_function!(FileExists, "file::exists", (file: Any) -> Any, file_exists_impl);
-define_async_function!(FileList, "file::list", (bucket: String, ?opts: Object) -> Any, file_list_impl);
+define_async_function!(
+	FilePut,
+	"file::put",
+	(file: Any, value: Any) -> Any,
+	file_put_impl,
+	required_context = crate::exec::ContextLevel::Database
+);
+define_async_function!(
+	FilePutIfNotExists,
+	"file::put_if_not_exists",
+	(file: Any, value: Any) -> Any,
+	file_put_if_not_exists_impl,
+	required_context = crate::exec::ContextLevel::Database
+);
+define_async_function!(
+	FileGet,
+	"file::get",
+	(file: Any) -> Any,
+	file_get_impl,
+	required_context = crate::exec::ContextLevel::Database
+);
+define_async_function!(
+	FileHead,
+	"file::head",
+	(file: Any) -> Any,
+	file_head_impl,
+	required_context = crate::exec::ContextLevel::Database
+);
+define_async_function!(
+	FileDelete,
+	"file::delete",
+	(file: Any) -> Any,
+	file_delete_impl,
+	required_context = crate::exec::ContextLevel::Database
+);
+define_async_function!(
+	FileCopy,
+	"file::copy",
+	(src: Any, dst: Any) -> Any,
+	file_copy_impl,
+	required_context = crate::exec::ContextLevel::Database
+);
+define_async_function!(
+	FileCopyIfNotExists,
+	"file::copy_if_not_exists",
+	(src: Any, dst: Any) -> Any,
+	file_copy_if_not_exists_impl,
+	required_context = crate::exec::ContextLevel::Database
+);
+define_async_function!(
+	FileRename,
+	"file::rename",
+	(file: Any, target: String) -> Any,
+	file_rename_impl,
+	required_context = crate::exec::ContextLevel::Database
+);
+define_async_function!(
+	FileRenameIfNotExists,
+	"file::rename_if_not_exists",
+	(file: Any, target: String) -> Any,
+	file_rename_if_not_exists_impl,
+	required_context = crate::exec::ContextLevel::Database
+);
+define_async_function!(
+	FileExists,
+	"file::exists",
+	(file: Any) -> Any,
+	file_exists_impl,
+	required_context = crate::exec::ContextLevel::Database
+);
+define_async_function!(
+	FileList,
+	"file::list",
+	(bucket: String, ?opts: Object) -> Any,
+	file_list_impl,
+	required_context = crate::exec::ContextLevel::Database
+);
 
 define_pure_function!(FileBucket, "file::bucket", (file: Any) -> Any, file_bucket_impl);
 define_pure_function!(FileKey, "file::key", (file: Any) -> Any, file_key_impl);

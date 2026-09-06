@@ -390,11 +390,16 @@ macro_rules! define_context_function {
 /// - I/O-bound operations (HTTP requests)
 /// - CPU-intensive operations (crypto hashing)
 /// - Timer-based operations (sleep)
+/// - File operations that require database context (file)
+///
+/// If `required_context = ...` is omitted, the generated function falls back to
+/// `ContextLevel::Root`. Use an explicit context for async functions that read database-scoped
+/// metadata or evaluate expressions that require namespace/database context.
 ///
 /// # Usage
 ///
 /// ```ignore
-/// // Async function with one argument
+/// // Root-context async function with one argument, e.g. sleep timers.
 /// define_async_function!(
 ///     Sleep,                          // Struct name
 ///     "sleep",                        // Function name
@@ -402,22 +407,48 @@ macro_rules! define_context_function {
 ///     sleep_impl                      // Async implementation function
 /// );
 ///
-/// // Async function with two arguments
+/// // Root-context async function with two arguments, e.g. crypto hashing/checking.
+/// define_async_function!(
+///     CryptoArgon2Compare,
+///     "crypto::argon2::compare",
+///     (hash: String, pass: String) -> Bool,
+///     argon2_compare_impl
+/// );
+///
+/// // Root-context async function with an optional argument, e.g. HTTP requests.
 /// define_async_function!(
 ///     HttpGet,
 ///     "http::get",
 ///     (url: String, ?opts: Object) -> Any,
 ///     http_get_impl
 /// );
+///
+/// // Database-context async function, e.g. file operations that read bucket metadata
+/// // and evaluate bucket permission predicates.
+/// define_async_function!(
+///     FileGet,
+///     "file::get",
+///     (file: Any) -> Any,
+///     file_get_impl,
+///     required_context = crate::exec::ContextLevel::Database
+/// );
 /// ```
 #[macro_export]
 macro_rules! define_async_function {
+	(@required_context) => {
+		$crate::exec::ContextLevel::Root
+	};
+	(@required_context $context:expr) => {
+		$context
+	};
+
 	// No arguments: () -> ReturnType
 	(
 		$struct_name:ident,
 		$func_name:literal,
 		() -> $ret:ident,
 		$impl_fn:expr
+		$(, required_context = $context:expr)?
 	) => {
 		#[derive(Debug, Clone, Copy, Default)]
 		pub struct $struct_name;
@@ -429,6 +460,10 @@ macro_rules! define_async_function {
 
 			fn signature(&self) -> $crate::exec::function::Signature {
 				$crate::exec::function::Signature::new().returns($crate::expr::Kind::$ret)
+			}
+
+			fn required_context(&self) -> $crate::exec::ContextLevel {
+				$crate::define_async_function!(@required_context $($context)?)
 			}
 
 			fn is_pure(&self) -> bool {
@@ -459,6 +494,7 @@ macro_rules! define_async_function {
 		$func_name:literal,
 		($arg_name:ident : $arg_type:ident) -> $ret:ident,
 		$impl_fn:expr
+		$(, required_context = $context:expr)?
 	) => {
 		#[derive(Debug, Clone, Copy, Default)]
 		pub struct $struct_name;
@@ -472,6 +508,10 @@ macro_rules! define_async_function {
 				$crate::exec::function::Signature::new()
 					.arg(stringify!($arg_name), $crate::expr::Kind::$arg_type)
 					.returns($crate::expr::Kind::$ret)
+			}
+
+			fn required_context(&self) -> $crate::exec::ContextLevel {
+				$crate::define_async_function!(@required_context $($context)?)
 			}
 
 			fn is_pure(&self) -> bool {
@@ -502,6 +542,7 @@ macro_rules! define_async_function {
 		$func_name:literal,
 		($arg1_name:ident : $arg1_type:ident, $arg2_name:ident : $arg2_type:ident) -> $ret:ident,
 		$impl_fn:expr
+		$(, required_context = $context:expr)?
 	) => {
 		#[derive(Debug, Clone, Copy, Default)]
 		pub struct $struct_name;
@@ -516,6 +557,10 @@ macro_rules! define_async_function {
 					.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
 					.arg(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
 					.returns($crate::expr::Kind::$ret)
+			}
+
+			fn required_context(&self) -> $crate::exec::ContextLevel {
+				$crate::define_async_function!(@required_context $($context)?)
 			}
 
 			fn is_pure(&self) -> bool {
@@ -546,6 +591,7 @@ macro_rules! define_async_function {
 		$func_name:literal,
 		($arg1_name:ident : $arg1_type:ident, ? $arg2_name:ident : $arg2_type:ident) -> $ret:ident,
 		$impl_fn:expr
+		$(, required_context = $context:expr)?
 	) => {
 		#[derive(Debug, Clone, Copy, Default)]
 		pub struct $struct_name;
@@ -560,6 +606,10 @@ macro_rules! define_async_function {
 					.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
 					.optional(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
 					.returns($crate::expr::Kind::$ret)
+			}
+
+			fn required_context(&self) -> $crate::exec::ContextLevel {
+				$crate::define_async_function!(@required_context $($context)?)
 			}
 
 			fn is_pure(&self) -> bool {
@@ -590,6 +640,7 @@ macro_rules! define_async_function {
 		$func_name:literal,
 		($arg1_name:ident : $arg1_type:ident, ? $arg2_name:ident : $arg2_type:ident, ? $arg3_name:ident : $arg3_type:ident) -> $ret:ident,
 		$impl_fn:expr
+		$(, required_context = $context:expr)?
 	) => {
 		#[derive(Debug, Clone, Copy, Default)]
 		pub struct $struct_name;
@@ -605,6 +656,10 @@ macro_rules! define_async_function {
 					.optional(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
 					.optional(stringify!($arg3_name), $crate::expr::Kind::$arg3_type)
 					.returns($crate::expr::Kind::$ret)
+			}
+
+			fn required_context(&self) -> $crate::exec::ContextLevel {
+				$crate::define_async_function!(@required_context $($context)?)
 			}
 
 			fn is_pure(&self) -> bool {
