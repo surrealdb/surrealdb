@@ -774,10 +774,12 @@ impl DiskAnnIndex {
 		let pending = match (tx.get(&key, None).await?, legacy) {
 			(Some(mut sharded), None) => {
 				sharded.new_vectors = new_vectors;
+				sharded.record_id = Some(id.clone());
 				sharded
 			}
 			(None, Some(mut legacy)) => {
 				legacy.new_vectors = new_vectors;
+				legacy.record_id = Some(id.clone());
 				legacy
 			}
 			(Some(sharded), Some(legacy)) => {
@@ -804,12 +806,14 @@ impl DiskAnnIndex {
 						legacy.old_vectors
 					},
 					new_vectors,
+					record_id: Some(id.clone()),
 				}
 			}
 			(None, None) => DiskAnnRecordPendingUpdate {
 				doc_id: DiskAnnDocs::get_doc_id(&self.ikb, &tx, id).await?,
 				old_vectors,
 				new_vectors,
+				record_id: Some(id.clone()),
 			},
 		};
 		tx.set(&key, &pending).await?;
@@ -841,7 +845,7 @@ impl DiskAnnIndex {
 		let id = if let Some(doc_id) = pending.doc_id {
 			VectorId::DocId(doc_id)
 		} else {
-			VectorId::RecordKey(Arc::new(id))
+			VectorId::RecordKey(Arc::new(pending.record_id.unwrap_or(id)))
 		};
 		PendingOperation {
 			id,
@@ -1538,13 +1542,48 @@ impl DiskAnnIndex {
 
 #[cfg(test)]
 mod tests {
+	use revision::{SerializeRevisioned, revisioned};
 	#[cfg(feature = "kv-rocksdb")]
 	use temp_dir::TempDir;
 
 	use super::*;
 	use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+	use crate::idx::seqdocids::DocId;
 	use crate::idx::trees::diskann::cache::DiskAnnCache;
 	use crate::kvs::{Datastore, LockType, TransactionType};
+	use crate::val::{Array, Object};
+
+	#[revisioned(revision = 1)]
+	struct LegacyDiskAnnRecordPendingUpdate {
+		doc_id: Option<DocId>,
+		old_vectors: Vec<SerializedVector>,
+		new_vectors: Vec<SerializedVector>,
+	}
+
+	fn complex_numeric_ids() -> [RecordIdKey; 2] {
+		[
+			RecordIdKey::Array(Array::from(vec![Value::Number(Number::Float(1.25))])),
+			RecordIdKey::Object(Object::from_iter([(
+				"n",
+				Value::Number(Number::Decimal("2.50".parse().unwrap())),
+			)])),
+		]
+	}
+
+	fn assert_exact_complex_numeric_id(id: &RecordIdKey) {
+		match id {
+			RecordIdKey::Array(values) => assert!(matches!(
+				values.first(),
+				Some(Value::Number(Number::Float(value))) if *value == 1.25
+			)),
+			RecordIdKey::Object(values) => assert!(matches!(
+				values.get("n"),
+				Some(Value::Number(Number::Decimal(value)))
+					if *value == "2.50".parse().unwrap()
+			)),
+			other => panic!("expected a complex numeric record key, got {other:?}"),
+		}
+	}
 
 	fn ikb() -> IndexKeyBase {
 		IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(3))
@@ -1642,6 +1681,7 @@ mod tests {
 			doc_id: None,
 			old_vectors: vec![],
 			new_vectors: vec![SerializedVector::F32(values.to_vec())],
+			record_id: None,
 		}
 	}
 
@@ -2158,6 +2198,63 @@ mod tests {
 	}
 
 	#[tokio::test]
+	async fn diskann_pending_preserves_exact_complex_numeric_record_ids() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let ikb = ikb();
+		let index = DiskAnnIndex::new(
+			ikb.clone(),
+			TableId(4),
+			&params(VectorType::F32, Distance::Euclidean),
+			cache(),
+		)
+		.await?;
+		let ctx = new_ctx(&ds, TransactionType::Write).await;
+		let tx = ctx.tx();
+
+		for id in complex_numeric_ids() {
+			index.index(&ctx, &id, None, Some(f32_content(&[1.0, 2.0, 3.0, 4.0]))).await?;
+			index
+				.index(
+					&ctx,
+					&id,
+					Some(f32_content(&[1.0, 2.0, 3.0, 4.0])),
+					Some(f32_content(&[4.0, 3.0, 2.0, 1.0])),
+				)
+				.await?;
+			let pending: DiskAnnRecordPendingUpdate =
+				tx.get(&dw_key(&ikb, &id), None).await?.unwrap();
+			assert_exact_complex_numeric_id(pending.record_id.as_ref().unwrap());
+			let operation =
+				DiskAnnIndex::record_pending_to_operation(RecordIdKey::Number(99), pending);
+			let VectorId::RecordKey(operation_id) = operation.id else {
+				panic!("unresolved pending record unexpectedly used a document ID");
+			};
+			assert_exact_complex_numeric_id(&operation_id);
+		}
+		tx.cancel().await?;
+		Ok(())
+	}
+
+	#[test]
+	fn diskann_revision_1_pending_value_uses_routing_key_fallback() {
+		let legacy = LegacyDiskAnnRecordPendingUpdate {
+			doc_id: None,
+			old_vectors: vec![],
+			new_vectors: vec![SerializedVector::F32(vec![1.0, 2.0, 3.0, 4.0])],
+		};
+		let mut bytes = Vec::new();
+		legacy.serialize_revisioned(&mut bytes).unwrap();
+		let pending = DiskAnnRecordPendingUpdate::kv_decode_value(&bytes, ()).unwrap();
+		assert!(pending.record_id.is_none());
+		let fallback = RecordIdKey::Number(7);
+		let operation = DiskAnnIndex::record_pending_to_operation(fallback.clone(), pending);
+		assert!(matches!(
+			operation.id,
+			VectorId::RecordKey(id) if id.as_ref() == &fallback
+		));
+	}
+
+	#[tokio::test]
 	async fn diskann_lookup_skips_sharded_pendings_only_when_guard_is_empty() -> Result<()> {
 		let ds = Datastore::new("memory").await?;
 		let ikb = ikb();
@@ -2628,6 +2725,7 @@ mod tests {
 					doc_id: None,
 					old_vectors: vec![SerializedVector::F32(vec![1.0, 1.0, 1.0, 1.0])],
 					new_vectors: vec![SerializedVector::F32(vec![2.0, 2.0, 2.0, 2.0])],
+					record_id: None,
 				},
 			)
 			.await?;
@@ -2637,6 +2735,7 @@ mod tests {
 					doc_id: None,
 					old_vectors: vec![SerializedVector::F32(vec![2.0, 2.0, 2.0, 2.0])],
 					new_vectors: vec![SerializedVector::F32(vec![3.0, 3.0, 3.0, 3.0])],
+					record_id: None,
 				},
 			)
 			.await?;
@@ -2713,6 +2812,7 @@ mod tests {
 					doc_id: None,
 					old_vectors: vec![SerializedVector::F32(vec![10.0, 10.0, 10.0, 10.0])],
 					new_vectors: vec![SerializedVector::F32(vec![20.0, 20.0, 20.0, 20.0])],
+					record_id: None,
 				},
 			)
 			.await?;
@@ -2722,6 +2822,7 @@ mod tests {
 					doc_id: None,
 					old_vectors: vec![SerializedVector::F32(vec![20.0, 20.0, 20.0, 20.0])],
 					new_vectors: vec![SerializedVector::F32(vec![30.0, 30.0, 30.0, 30.0])],
+					record_id: None,
 				},
 			)
 			.await?;
@@ -2799,6 +2900,7 @@ mod tests {
 						doc_id,
 						old_vectors: vec![SerializedVector::F32(b.to_vec())],
 						new_vectors: vec![SerializedVector::F32(a.to_vec())],
+						record_id: None,
 					},
 				)
 				.await?;
@@ -2865,6 +2967,7 @@ mod tests {
 						doc_id,
 						old_vectors: vec![SerializedVector::F32(b.to_vec())],
 						new_vectors: vec![SerializedVector::F32(a.to_vec())],
+						record_id: None,
 					},
 				)
 				.await?;
@@ -2976,6 +3079,7 @@ mod tests {
 					doc_id: None,
 					old_vectors: vec![SerializedVector::F32(vec![2.0, 2.0, 2.0, 2.0])],
 					new_vectors: vec![SerializedVector::F32(vec![3.0, 3.0, 3.0, 3.0])],
+					record_id: None,
 				},
 			)
 			.await?;
@@ -2987,6 +3091,7 @@ mod tests {
 						doc_id: None,
 						old_vectors: vec![],
 						new_vectors: vec![],
+						record_id: None,
 					},
 				)
 				.await?;
@@ -3061,6 +3166,7 @@ mod tests {
 						doc_id: None,
 						old_vectors: vec![],
 						new_vectors: vec![],
+						record_id: None,
 					},
 				)
 				.await?;
@@ -3073,6 +3179,7 @@ mod tests {
 					doc_id: None,
 					old_vectors: vec![SerializedVector::F32(vec![1.0, 1.0, 1.0, 1.0])],
 					new_vectors: vec![SerializedVector::F32(vec![2.0, 2.0, 2.0, 2.0])],
+					record_id: None,
 				},
 			)
 			.await?;

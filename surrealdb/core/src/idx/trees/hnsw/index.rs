@@ -45,13 +45,13 @@ struct CapturedPendingKey {
 
 /// Coalesced record operation that should be applied to the HNSW graph.
 #[derive(Clone)]
-struct PendingOperation {
+pub(super) struct PendingOperation {
 	/// Existing document ID or record key for a not-yet-resolved document.
-	id: VectorId,
+	pub(super) id: VectorId,
 	/// Graph baseline vectors to remove before applying the desired state.
-	old_vectors: Vec<SerializedVector>,
+	pub(super) old_vectors: Vec<SerializedVector>,
 	/// Desired vectors for the record after compaction.
-	new_vectors: Vec<SerializedVector>,
+	pub(super) new_vectors: Vec<SerializedVector>,
 }
 
 /// Snapshot gathered by the read phase of HNSW pending compaction.
@@ -280,12 +280,14 @@ impl HnswIndex {
 		let key = self.ikb.new_hr_key(id);
 		let pending = if let Some(mut pending) = tx.get(&key, None).await? {
 			pending.new_vectors = new_vectors;
+			pending.record_id = Some(id.clone());
 			pending
 		} else {
 			HnswRecordPendingUpdate {
 				doc_id: HnswDocs::get_doc_id(&self.ikb, &tx, id).await?,
 				old_vectors,
 				new_vectors,
+				record_id: Some(id.clone()),
 			}
 		};
 		tx.set(&key, &pending).await?;
@@ -306,14 +308,14 @@ impl HnswIndex {
 	/// Existing records are addressed by their graph document ID. Records that
 	/// have not reached the graph are addressed by their record key until
 	/// compaction resolves a document ID for them.
-	fn record_pending_to_operation(
+	pub(super) fn record_pending_to_operation(
 		id: RecordIdKey,
 		pending: HnswRecordPendingUpdate,
 	) -> PendingOperation {
 		let id = if let Some(doc_id) = pending.doc_id {
 			VectorId::DocId(doc_id)
 		} else {
-			VectorId::RecordKey(Arc::new(id))
+			VectorId::RecordKey(Arc::new(pending.record_id.unwrap_or(id)))
 		};
 		PendingOperation {
 			id,

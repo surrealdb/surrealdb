@@ -93,7 +93,7 @@ impl KVValue for HnswState {
 /// identifies the record; `doc_id` records the current graph document mapping
 /// when one already exists. `old_vectors` is the graph baseline to remove, and
 /// `new_vectors` is the latest desired indexed state for that record.
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub(crate) struct HnswRecordPendingUpdate {
 	/// Existing internal document ID, if the record has already reached the graph.
 	doc_id: Option<DocId>,
@@ -101,6 +101,9 @@ pub(crate) struct HnswRecordPendingUpdate {
 	old_vectors: Vec<SerializedVector>,
 	/// Latest vectors that should represent the record after compaction.
 	new_vectors: Vec<SerializedVector>,
+	/// Exact record key for unresolved records; absent on revision-1 values.
+	#[revision(start = 2)]
+	record_id: Option<RecordIdKey>,
 }
 
 /// A pending vector update queued for later application to the HNSW graph.
@@ -639,6 +642,7 @@ mod tests {
 	use ndarray::Array1;
 	use rand::rngs::SmallRng;
 	use reblessive::tree::Stk;
+	use revision::{SerializeRevisioned, revisioned};
 	use test_log::test;
 
 	use crate::catalog::providers::{CatalogProvider, TableProvider};
@@ -662,8 +666,44 @@ mod tests {
 	use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
 	use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
 	use crate::kvs::LockType::Optimistic;
-	use crate::kvs::{Datastore, TransactionType};
-	use crate::val::{RecordIdKey, Value};
+	use crate::kvs::{Datastore, KVValue, TransactionType};
+	use crate::val::{Array, Number, Object, RecordIdKey, Value};
+
+	#[revisioned(revision = 1)]
+	struct LegacyHnswRecordPendingUpdate {
+		doc_id: Option<DocId>,
+		old_vectors: Vec<SerializedVector>,
+		new_vectors: Vec<SerializedVector>,
+	}
+
+	fn complex_numeric_ids() -> [RecordIdKey; 2] {
+		[
+			RecordIdKey::Array(Array::from(vec![Value::Number(Number::Float(1.25))])),
+			RecordIdKey::Object(Object::from_iter([(
+				"n",
+				Value::Number(Number::Decimal("2.50".parse().unwrap())),
+			)])),
+		]
+	}
+
+	fn assert_exact_complex_numeric_id(id: &RecordIdKey) {
+		match id {
+			RecordIdKey::Array(values) => {
+				assert!(matches!(
+					values.first(),
+					Some(Value::Number(Number::Float(value))) if *value == 1.25
+				));
+			}
+			RecordIdKey::Object(values) => {
+				assert!(matches!(
+					values.get("n"),
+					Some(Value::Number(Number::Decimal(value)))
+						if *value == "2.50".parse().unwrap()
+				));
+			}
+			other => panic!("expected a complex numeric record key, got {other:?}"),
+		}
+	}
 
 	async fn insert_collection_hnsw(
 		ctx: &HnswContext<'_>,
@@ -1286,6 +1326,65 @@ mod tests {
 		assert_eq!(pending.new_vectors, vec![serialized(&second)]);
 		tx.cancel().await?;
 		Ok(())
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_pending_preserves_exact_complex_numeric_record_ids() -> Result<()> {
+		let ds = Datastore::new("memory").await?;
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
+		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true, true);
+		let ctx = new_ctx(&ds, TransactionType::Write).await;
+		let tx = ctx.tx();
+		let h = HnswIndex::new(
+			ctx.get_index_stores().vector_cache().clone(),
+			&tx,
+			ikb.clone(),
+			TableId(3),
+			&p,
+		)
+		.await?;
+		let first = new_i16_vec(1, 1);
+		let second = new_i16_vec(2, 2);
+
+		for id in complex_numeric_ids() {
+			h.index(&ctx, &id, None, Some(vector_content(&first))).await?;
+			h.index(&ctx, &id, Some(vector_content(&first)), Some(vector_content(&second))).await?;
+
+			let pending: HnswRecordPendingUpdate =
+				tx.get(&ikb.new_hr_key(&id), None).await?.unwrap();
+			assert_exact_complex_numeric_id(pending.record_id.as_ref().unwrap());
+			assert!(pending.old_vectors.is_empty());
+			assert_eq!(pending.new_vectors, vec![serialized(&second)]);
+
+			let operation =
+				HnswIndex::record_pending_to_operation(RecordIdKey::Number(99), pending);
+			let VectorId::RecordKey(operation_id) = operation.id else {
+				panic!("unresolved pending record unexpectedly used a document ID");
+			};
+			assert_exact_complex_numeric_id(&operation_id);
+		}
+		tx.cancel().await?;
+		Ok(())
+	}
+
+	#[test]
+	fn hnsw_revision_1_pending_value_uses_routing_key_fallback() {
+		let legacy = LegacyHnswRecordPendingUpdate {
+			doc_id: None,
+			old_vectors: vec![],
+			new_vectors: vec![SerializedVector::I16(vec![1, 2])],
+		};
+		let mut bytes = Vec::new();
+		legacy.serialize_revisioned(&mut bytes).unwrap();
+		let pending = HnswRecordPendingUpdate::kv_decode_value(&bytes, ()).unwrap();
+		assert!(pending.record_id.is_none());
+
+		let fallback = RecordIdKey::Number(7);
+		let operation = HnswIndex::record_pending_to_operation(fallback.clone(), pending);
+		assert!(matches!(
+			operation.id,
+			VectorId::RecordKey(id) if id.as_ref() == &fallback
+		));
 	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]

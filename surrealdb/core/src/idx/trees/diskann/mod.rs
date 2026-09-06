@@ -27,6 +27,7 @@ use serde::{Deserialize, Serialize};
 use crate::idx::seqdocids::DocId;
 use crate::idx::trees::vector::SerializedVector;
 use crate::kvs::{KVValue, impl_kv_value_revisioned};
+use crate::val::RecordIdKey;
 
 /// Unique identifier for a vector element in the DiskANN graph.
 pub(crate) type ElementId = u64;
@@ -139,7 +140,7 @@ pub(crate) struct DiskAnnPendingState {
 impl_kv_value_revisioned!(DiskAnnPendingState);
 
 /// Coalesced pending vector state for a single DiskANN indexed record.
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 pub(crate) struct DiskAnnRecordPendingUpdate {
 	/// Existing internal document ID, if the record has already reached the graph.
 	pub(crate) doc_id: Option<DocId>,
@@ -147,6 +148,9 @@ pub(crate) struct DiskAnnRecordPendingUpdate {
 	pub(crate) old_vectors: Vec<SerializedVector>,
 	/// Latest vectors that should represent the record after compaction.
 	pub(crate) new_vectors: Vec<SerializedVector>,
+	/// Exact record key for unresolved records; absent on revision-1 values.
+	#[revision(start = 2)]
+	pub(crate) record_id: Option<RecordIdKey>,
 }
 
 impl_kv_value_revisioned!(DiskAnnRecordPendingUpdate);
