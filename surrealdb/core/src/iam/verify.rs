@@ -117,6 +117,55 @@ fn decode_claims_unverified(token: &str) -> Result<TokenData<Claims>, AuthError>
 	})
 }
 
+/// The actor identity for a session authenticated by a non-record access
+/// method.
+///
+/// `Auth::id()` is the identity half of every principal fingerprint the engine
+/// takes — the MCP transport's per-request subject re-check, and
+/// `AuthPrincipalSnapshot`, which tears a stream down when its session stops
+/// acting as the principal it was opened for. Naming the access method alone
+/// makes that identity identical for every holder of a token issued by it, so
+/// two different users of one `DEFINE ACCESS` are indistinguishable to both.
+///
+/// The token's own `sub` claim is therefore folded in, scoped by the access
+/// method so subjects cannot collide across methods. `sub` is the standard JWT
+/// subject and, unlike `id`, is not part of the claim shape that selects record
+/// or user authentication, so it is free to name the principal here.
+///
+/// The access name is length-prefixed rather than bare-joined with `/`, because
+/// an access name is an ident that may itself contain `/` (`DEFINE ACCESS
+/// `a/b``). A bare `"{access}/{sub}"` would then be ambiguous — access `a` with
+/// subject `b/c` and access `a/b` with subject `c` would both render `a/b/c` —
+/// which is exactly the cross-method collision this identity exists to prevent.
+/// The `<len>:` prefix fixes the access span, so the encoding is injective over
+/// `(access, sub)` and over `(access, no-sub)`.
+///
+/// A token carrying no `sub` names the access method alone, which is the most
+/// that can be said about it — so every holder of a sub-less token for one
+/// method shares an actor identity, and the per-subject protections that
+/// fingerprint `Auth::id()` (the MCP transport's session binding,
+/// `AuthPrincipalSnapshot`) cannot tell those holders apart. That is a property
+/// of the token, not something this function can repair, so it warns (once per
+/// process, since `token` runs per request on stateless transports) rather than
+/// inventing an identity: an operator relying on subject binding must issue
+/// tokens with a `sub` claim. Callers that do not rely on it are unaffected.
+fn access_actor_id(access: &str, claims: &Claims) -> String {
+	match claims.sub.as_deref() {
+		Some(subject) => format!("{}:{access}/{subject}", access.len()),
+		None => {
+			// `token` runs on every request that carries a token, so warn at most
+			// once per process rather than per request. Mirrors the ES512 notice.
+			static SUBLESS_WARN: Once = Once::new();
+			SUBLESS_WARN.call_once(|| {
+				warn!(
+					"Access method '{access}' authenticated a token with no 'sub' claim: every sub-less token for an access method shares one actor identity, so per-subject session binding (such as the MCP transport's) cannot distinguish their holders. Issue tokens with a 'sub' claim to identify the principal."
+				);
+			});
+			format!("{}:{access}", access.len())
+		}
+	}
+}
+
 pub async fn basic(
 	kvs: &Datastore,
 	session: &mut Session,
@@ -464,7 +513,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					session.ac = Some(ac.to_owned());
 					session.exp = session_exp;
 					session.au = Arc::new(Auth::new(Actor::new(
-						de.name.to_string(),
+						access_actor_id(&de.name, &token_data.claims),
 						roles,
 						Level::Database(ns.clone(), db.clone()),
 					)));
@@ -730,7 +779,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.ac = Some(ac.to_owned());
 			session.exp = session_exp;
 			session.au = Arc::new(Auth::new(Actor::new(
-				de.name.to_string(),
+				access_actor_id(&de.name, &token_data.claims),
 				roles,
 				Level::Namespace(ns.clone()),
 			)));
@@ -891,7 +940,11 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			);
 			session.ac = Some(ac.to_owned());
 			session.exp = session_exp;
-			session.au = Arc::new(Auth::new(Actor::new(de.name.to_string(), roles, Level::Root)));
+			session.au = Arc::new(Auth::new(Actor::new(
+				access_actor_id(&de.name, &token_data.claims),
+				roles,
+				Level::Root,
+			)));
 			Ok(())
 		}
 		// Check if this is root authentication with user credentials
@@ -1488,7 +1541,8 @@ mod tests {
 			assert!(res.is_ok(), "Failed to sign in with token");
 			assert_eq!(sess.ns, level.ns.map(|s| s.to_string()));
 			assert_eq!(sess.db, level.db.map(|s| s.to_string()));
-			assert_eq!(sess.au.id(), "token");
+			// Sub-less token: the identity is the access name, length-prefixed.
+			assert_eq!(sess.au.id(), "5:token");
 
 			// Check roles
 			for role in AVAILABLE_ROLES {
@@ -1583,7 +1637,8 @@ mod tests {
 			assert!(res.is_err(), "Unexpected success with audience case");
 		} else {
 			assert!(res.is_ok(), "Failed to sign in with token: {:?}", res);
-			assert_eq!(sess.au.id(), "token");
+			// Sub-less token: the identity is the access name, length-prefixed.
+			assert_eq!(sess.au.id(), "5:token");
 		}
 	}
 
@@ -1650,7 +1705,8 @@ mod tests {
 		let mut sess = Session::default();
 		let res = token(&ds, &mut sess, &enc).await;
 		assert!(res.is_ok(), "Failed to sign in with token: {:?}", res);
-		assert_eq!(sess.au.id(), "token");
+		// Sub-less token: the identity is the access name, length-prefixed.
+		assert_eq!(sess.au.id(), "5:token");
 	}
 
 	#[rstest]
@@ -2155,6 +2211,129 @@ mod tests {
 		}
 	}
 
+	// Every holder of a token issued by one `DEFINE ACCESS` shared an actor
+	// identity, because it was the access method's name. `Auth::id()` is the
+	// identity half of the fingerprints the MCP transport's per-request subject
+	// re-check and `AuthPrincipalSnapshot` both take, so two different users of
+	// one access method were indistinguishable to both.
+	#[tokio::test]
+	async fn test_token_actor_id_distinguishes_subjects_of_one_access_method() {
+		let secret = "jwt_secret_that_is_long_enough_for_hs512_signing_in_tests";
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::owner().with_ns("test").with_db("test");
+		ds.execute(
+			&format!(
+				r#"DEFINE ACCESS api ON DATABASE TYPE JWT
+					ALGORITHM HS512 KEY '{secret}' DURATION FOR SESSION 1h;"#
+			),
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
+
+		let key = EncodingKey::from_secret(secret.as_ref());
+		// Two tokens for the same access method differing only in subject and
+		// roles, exactly as two users of one method would be issued.
+		let sign = |subject: &str, roles: Vec<String>| {
+			let claims = Claims {
+				iss: Some("surrealdb-test".to_string()),
+				iat: Some(Utc::now().timestamp()),
+				nbf: Some(Utc::now().timestamp()),
+				exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+				ns: Some("test".to_string()),
+				db: Some("test".to_string()),
+				ac: Some("api".to_string()),
+				sub: Some(subject.to_string()),
+				roles: Some(roles),
+				..Claims::default()
+			};
+			encode(&HEADER, &claims, &key).unwrap()
+		};
+
+		let mut alice_sess = Session::default();
+		token(&ds, &mut alice_sess, &sign("alice", vec!["Editor".to_string()]))
+			.await
+			.expect("alice's token must verify");
+		let mut bob_sess = Session::default();
+		token(&ds, &mut bob_sess, &sign("bob", vec!["Viewer".to_string()]))
+			.await
+			.expect("bob's token must verify");
+
+		assert_ne!(
+			alice_sess.au.id(),
+			bob_sess.au.id(),
+			"two subjects of one access method must not share an actor identity"
+		);
+		// The identity is scoped by the access method, so subjects cannot
+		// collide across methods.
+		// The identity is the access name length-prefixed (so a `/` in an access
+		// name can't collide two subjects across methods), then the subject.
+		assert_eq!(alice_sess.au.id(), "3:api/alice");
+		assert_eq!(bob_sess.au.id(), "3:api/bob");
+		// The level still describes the access path both were granted.
+		assert_eq!(alice_sess.au.level(), bob_sess.au.level());
+
+		// The same subject presented twice is stable, so a legitimate caller is
+		// not rejected by their own re-presented token.
+		let mut again = Session::default();
+		token(&ds, &mut again, &sign("alice", vec!["Editor".to_string()]))
+			.await
+			.expect("alice's token must verify again");
+		assert_eq!(again.au.id(), alice_sess.au.id());
+
+		// A token carrying no `sub` claim keeps naming the access method: that is
+		// the most that can be said about it.
+		let anonymous_subject = Claims {
+			iss: Some("surrealdb-test".to_string()),
+			iat: Some(Utc::now().timestamp()),
+			nbf: Some(Utc::now().timestamp()),
+			exp: Some((Utc::now() + Duration::hours(1)).timestamp()),
+			ns: Some("test".to_string()),
+			db: Some("test".to_string()),
+			ac: Some("api".to_string()),
+			..Claims::default()
+		};
+		let mut plain = Session::default();
+		token(&ds, &mut plain, &encode(&HEADER, &anonymous_subject, &key).unwrap())
+			.await
+			.expect("a token with no subject claim must still verify");
+		assert_eq!(plain.au.id(), "3:api");
+	}
+
+	// An access name is an ident that may contain '/', and `sub` is an arbitrary
+	// claim, so a bare "{access}/{sub}" join is ambiguous: access "a" + subject
+	// "b/c" and access "a/b" + subject "c" would both render "a/b/c", colliding
+	// two subjects across methods — the very thing the per-subject identity
+	// exists to prevent. The length prefix keeps the encoding injective.
+	#[test]
+	fn access_actor_id_encoding_is_injective() {
+		let with_sub = |access: &str, sub: &str| {
+			access_actor_id(
+				access,
+				&Claims {
+					sub: Some(sub.to_owned()),
+					..Claims::default()
+				},
+			)
+		};
+		let no_sub = |access: &str| access_actor_id(access, &Claims::default());
+
+		assert_ne!(
+			with_sub("a", "b/c"),
+			with_sub("a/b", "c"),
+			"a '/' in the access name must not collide two subjects across methods"
+		);
+		assert_ne!(
+			no_sub("a/x"),
+			with_sub("a", "x"),
+			"a sub-less identity must not collide with a with-subject one"
+		);
+		// The same principal is stable across presentations.
+		assert_eq!(with_sub("api", "alice"), with_sub("api", "alice"));
+		assert_eq!(no_sub("api"), no_sub("api"));
+	}
+
 	#[tokio::test]
 	async fn test_expired_token() {
 		let secret = "jwt_secret";
@@ -2355,7 +2534,8 @@ mod tests {
 					assert_eq!(sess.ns, level.ns.map(|s| s.to_string()));
 					assert_eq!(sess.db, level.db.map(|s| s.to_string()));
 					assert_eq!(sess.ac, Some("user".to_string()));
-					assert_eq!(sess.au.id(), "user");
+					// Sub-less token: the identity is the access name, length-prefixed.
+					assert_eq!(sess.au.id(), "4:user");
 
 					// Check auth level
 					assert_eq!(sess.au.level().ns(), level.ns);

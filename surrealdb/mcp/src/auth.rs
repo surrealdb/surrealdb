@@ -16,7 +16,7 @@
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer};
 use surrealdb_core::dbs::{Session, SessionData};
-use surrealdb_iam::Level;
+use surrealdb_iam::{Level, Role};
 
 /// Extract the authenticated `Session` from HTTP request parts in the
 /// extensions.
@@ -40,11 +40,13 @@ pub(crate) fn extract_session_from_parts(parts: &http::request::Parts) -> Option
 /// networked transports must present the same authenticated subject —
 /// missing, anonymous, or different credentials are rejected.
 ///
-/// The identity comes from `Auth::id()`, which for access-method tokens names
-/// the *access method* rather than the individual token holder, so two callers
-/// authenticated by the same `DEFINE ACCESS` share a fingerprint. Roles are not
-/// part of it either. The check therefore binds a session to an access path, not
-/// to a principal.
+/// The identity comes from `Auth::id()`, which names the individual principal:
+/// a record id for record access, a user name for the user/password path, and
+/// the access method scoped by the token's own subject for a `TYPE JWT` or
+/// `TYPE BEARER` method. The granted privilege is part of the fingerprint too:
+/// the bound session executes with the roles captured at handshake, so a
+/// caller presenting a token for the same subject at a different privilege
+/// must re-initialize rather than act through the roles already bound.
 ///
 /// SECURITY: the access method's `CONTEXT` payload is part of the fingerprint,
 /// for the same reason `AuthPrincipalSnapshot` counts it as part of the auth
@@ -66,6 +68,10 @@ pub(crate) fn extract_session_from_parts(parts: &http::request::Parts) -> Option
 pub(crate) struct BoundSubject {
 	level: Level,
 	identity: String,
+	/// The highest role the token granted. Roles are totally ordered, so this
+	/// captures the effective privilege without depending on the order the
+	/// claim happened to list them in.
+	privilege: Option<Role>,
 	/// The access method's `CONTEXT` payload, compared by [`SessionData`]'s own
 	/// order-insensitive equality so a rescan that reorders an unchanged grant
 	/// list does not read as a different subject.
@@ -79,6 +85,7 @@ impl BoundSubject {
 		Self {
 			level: session.au.level().clone(),
 			identity: session.au.id().to_string(),
+			privilege: session.au.max_role(),
 			data: session.data.clone(),
 		}
 	}
@@ -229,11 +236,13 @@ mod tests {
 		let alice = BoundSubject {
 			level: Level::Database("ns".into(), "db".into()),
 			identity: "alice".into(),
+			privilege: Some(Role::Editor),
 			data: None,
 		};
 		let bob = BoundSubject {
 			level: Level::Database("ns".into(), "db".into()),
 			identity: "bob".into(),
+			privilege: Some(Role::Editor),
 			data: None,
 		};
 		assert!(check_subject(&alice, Some(bob)).is_err());
@@ -248,6 +257,53 @@ mod tests {
 		let bound = BoundSubject::from_session(&s);
 		let again = BoundSubject::from_session(&s);
 		assert!(check_subject(&bound, Some(again)).is_ok());
+	}
+
+	// Two holders of tokens issued by the same `DEFINE ACCESS` must not share a
+	// fingerprint. The identity is `Auth::id()`, and naming the access method
+	// alone made every holder of that method identical, so possession of a
+	// session id plus any valid token for the method was enough to act on
+	// somebody else's bound session.
+	#[test]
+	fn same_access_method_different_subjects_are_rejected() {
+		let level = Level::Database("ns".into(), "db".into());
+		let alice = BoundSubject {
+			level: level.clone(),
+			identity: "api/alice".into(),
+			privilege: Some(Role::Editor),
+			data: None,
+		};
+		let bob = BoundSubject {
+			level,
+			identity: "api/bob".into(),
+			privilege: Some(Role::Viewer),
+			data: None,
+		};
+		assert!(
+			check_subject(&alice, Some(bob)).is_err(),
+			"a different subject of the same access method must be rejected"
+		);
+	}
+
+	// The bound session runs with the privilege captured at handshake, so a
+	// token for the same subject at a different privilege is a different
+	// subject and must re-initialize.
+	#[test]
+	fn same_subject_different_privilege_is_rejected() {
+		let level = Level::Database("ns".into(), "db".into());
+		let editor = BoundSubject {
+			level: level.clone(),
+			identity: "api/alice".into(),
+			privilege: Some(Role::Editor),
+			data: None,
+		};
+		let viewer = BoundSubject {
+			level,
+			identity: "api/alice".into(),
+			privilege: Some(Role::Viewer),
+			data: None,
+		};
+		assert!(check_subject(&editor, Some(viewer)).is_err());
 	}
 
 	/// A revoked grant changes the `CONTEXT` payload the request is
@@ -298,6 +354,7 @@ mod tests {
 		let auth = BoundSubject {
 			level: Level::Root,
 			identity: "root".into(),
+			privilege: Some(Role::Owner),
 			data: None,
 		};
 		assert!(auth.audit_label().contains("root"));
