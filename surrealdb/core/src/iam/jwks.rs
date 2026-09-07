@@ -260,9 +260,14 @@ fn check_capabilities_url(kvs: &Datastore, url: &str) -> Result<()> {
 			bail!(Error::InvalidUrl(url.to_string()));
 		}
 	};
+	// The effective port must be carried into the capability target, including
+	// when the URL relies on the scheme's default. A `deny-net HOST:PORT` rule
+	// is stored as `NetTarget::Host(host, Some(port))` and only matches a target
+	// that carries the same port, so dropping an implicit `:80` / `:443` would
+	// leave such a rule unenforced.
 	let addr = match url_parsed.host_str() {
 		Some(host) => {
-			if let Some(port) = url_parsed.port() {
+			if let Some(port) = url_parsed.port_or_known_default() {
 				format!("{host}:{port}")
 			} else {
 				host.to_string()
@@ -332,7 +337,10 @@ fn build_jwks_client(kvs: &Datastore) -> Result<Client> {
 		let url_str = attempt.url().to_string();
 		// Re-validate the redirect target host (and explicit port, if any) against
 		// the configured network capabilities, mirroring `check_capabilities_url`.
-		let addr = match (attempt.url().host_str(), attempt.url().port()) {
+		// `port_or_known_default` for the same reason as the initial check: an
+		// implicit default port must still be matched against port-specific
+		// deny rules.
+		let addr = match (attempt.url().host_str(), attempt.url().port_or_known_default()) {
 			(Some(host), Some(port)) => Some(format!("{host}:{port}")),
 			(Some(host), None) => Some(host.to_string()),
 			(None, _) => None,
@@ -591,6 +599,46 @@ mod tests {
 		)
 		.await;
 		assert!(res.is_err(), "Unexpected success validating token from unallowed remote location");
+	}
+
+	// A `deny-net HOST:PORT` rule must still be enforced when the JWKS URL
+	// relies on the scheme's default port. `Url::port()` returns `None` for
+	// `http://host/` and `https://host/`, so building the capability target
+	// from it would drop the effective port and leave the rule unmatched.
+	#[tokio::test]
+	async fn test_deny_net_matches_implicit_default_port() {
+		for (scheme, port) in [("http", 80u16), ("https", 443u16)] {
+			let ds = Datastore::builder()
+				.with_capabilities(
+					Capabilities::default()
+						.with_network_targets(Targets::<NetTarget>::All)
+						.without_network_targets(Targets::<NetTarget>::Some(
+							[NetTarget::from_str(&format!("127.0.0.1:{port}")).unwrap()].into(),
+						)),
+				)
+				.build_with_path("memory")
+				.await
+				.unwrap();
+			// No explicit port: the effective port is the scheme default.
+			let implicit = format!("{scheme}://127.0.0.1/jwks.json");
+			assert!(
+				check_capabilities_url(&ds, &implicit).is_err(),
+				"deny-net 127.0.0.1:{port} must block the implicitly addressed URL {implicit}"
+			);
+			// Positive control: the same URL written with the explicit port.
+			let explicit = format!("{scheme}://127.0.0.1:{port}/jwks.json");
+			assert!(
+				check_capabilities_url(&ds, &explicit).is_err(),
+				"deny-net 127.0.0.1:{port} must block the explicitly addressed URL {explicit}"
+			);
+			// Negative control: a different port on the same host is unaffected,
+			// proving the rule is still port-specific rather than host-wide.
+			let other = format!("{scheme}://127.0.0.1:9999/jwks.json");
+			assert!(
+				check_capabilities_url(&ds, &other).is_ok(),
+				"deny-net 127.0.0.1:{port} must not block {other}"
+			);
+		}
 	}
 
 	#[tokio::test]
