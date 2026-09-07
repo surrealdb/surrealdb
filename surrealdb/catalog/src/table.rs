@@ -164,6 +164,16 @@ pub struct StoredTableDefinition {
 	/// Same semantics as `inline_edges_cap`, for reference back-links.
 	#[revision(start = 4)]
 	pub inline_refs_cap: Option<u32>,
+
+	/// Generation counter of the table's inline-field set. Bumped by every
+	/// schema mutation that changes which edge-table fields are inlined
+	/// (or an inlined field's type), it stamps every written inline payload
+	/// so readers can tell a current payload from one written under an
+	/// older field set — stale payloads fall back to the record, never
+	/// evaluate silently. Zero means the table has never had an inline
+	/// field. Internal bookkeeping: excluded from INFO and export.
+	#[revision(start = 4)]
+	pub graph_inline_gen: u32,
 }
 
 impl_kv_value_revisioned!(StoredTableDefinition);
@@ -199,6 +209,7 @@ impl StoredTableDefinition {
 			graph_doc_ids: false,
 			inline_edges_cap: None,
 			inline_refs_cap: None,
+			graph_inline_gen: 0,
 		}
 	}
 }
@@ -285,6 +296,8 @@ pub struct TableDefinition {
 	pub inline_edges_cap: Option<u32>,
 	/// See [`StoredTableDefinition::inline_refs_cap`].
 	pub inline_refs_cap: Option<u32>,
+	/// See [`StoredTableDefinition::graph_inline_gen`].
+	pub graph_inline_gen: u32,
 }
 
 /// The SELECT permission guarding a table, for callers holding a table lookup
@@ -329,6 +342,7 @@ impl FromStored for TableDefinition {
 				graph_doc_ids: stored.graph_doc_ids,
 				inline_edges_cap: stored.inline_edges_cap,
 				inline_refs_cap: stored.inline_refs_cap,
+				graph_inline_gen: stored.graph_inline_gen,
 			})
 		}
 		build(stored).with_context(|| {
@@ -374,6 +388,7 @@ impl TableDefinition {
 			graph_doc_ids: self.graph_doc_ids,
 			inline_edges_cap: self.inline_edges_cap,
 			inline_refs_cap: self.inline_refs_cap,
+			graph_inline_gen: self.graph_inline_gen,
 		}
 	}
 }

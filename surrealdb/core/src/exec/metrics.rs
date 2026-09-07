@@ -84,6 +84,11 @@ pub(crate) struct OperatorMetrics {
 	/// [`OperatorMetrics::add_cache_misses`].
 	cache_hits: AtomicU64,
 	cache_misses: AtomicU64,
+	/// Inline-payload predicate evaluations by a graph scan (truthy or
+	/// falsy — the edges served without fetching their records), and edges
+	/// whose payload was unusable and fell back to the record path.
+	props_evals: AtomicU64,
+	props_fallbacks: AtomicU64,
 	/// Candidate records fetched for per-candidate evaluation *inside* an ANN
 	/// search (the truthy-document filters' record fetch + permission gate +
 	/// cond evaluation), one per unique candidate evaluated. This counts
@@ -122,6 +127,8 @@ impl OperatorMetrics {
 			delta_hits: AtomicU64::new(0),
 			cache_hits: AtomicU64::new(0),
 			cache_misses: AtomicU64::new(0),
+			props_evals: AtomicU64::new(0),
+			props_fallbacks: AtomicU64::new(0),
 			records_fetched: AtomicU64::new(0),
 			branch_dropped: AtomicBool::new(false),
 		}
@@ -221,6 +228,26 @@ impl OperatorMetrics {
 	/// Record `n` eligible inline-cache lookups that fell back to the scan.
 	pub(crate) fn add_cache_misses(&self, n: u64) {
 		self.cache_misses.fetch_add(n, Ordering::Relaxed);
+	}
+
+	/// Inline-payload predicate evaluations so far.
+	pub(crate) fn props_evals(&self) -> u64 {
+		self.props_evals.load(Ordering::Relaxed)
+	}
+
+	/// Record `n` inline-payload predicate evaluations.
+	pub(crate) fn add_props_evals(&self, n: u64) {
+		self.props_evals.fetch_add(n, Ordering::Relaxed);
+	}
+
+	/// Edges whose payload fell back to the record path so far.
+	pub(crate) fn props_fallbacks(&self) -> u64 {
+		self.props_fallbacks.load(Ordering::Relaxed)
+	}
+
+	/// Record `n` edges whose payload fell back to the record path.
+	pub(crate) fn add_props_fallbacks(&self, n: u64) {
+		self.props_fallbacks.fetch_add(n, Ordering::Relaxed);
 	}
 
 	/// Candidate records fetched for in-traversal evaluation so far.

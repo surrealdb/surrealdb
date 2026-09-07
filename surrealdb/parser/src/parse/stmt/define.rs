@@ -1182,6 +1182,7 @@ impl Parse for ast::DefineField {
 		let mut ty = None;
 		let mut flexible = None;
 		let mut readonly = None;
+		let mut inline = None;
 		let mut value = None;
 		let mut assert = None;
 		let mut computed = None;
@@ -1210,6 +1211,10 @@ impl Parse for ast::DefineField {
 				T![READONLY] => {
 					let _ = parser.next();
 					parse_unordered_clause_sync(parser, &mut readonly, peek.span, |_| Ok(()))?
+				}
+				T![INLINE] => {
+					let _ = parser.next();
+					parse_unordered_clause_sync(parser, &mut inline, peek.span, |_| Ok(()))?
 				}
 				T![VALUE] => {
 					let _ = parser.next();
@@ -1271,6 +1276,7 @@ impl Parse for ast::DefineField {
 			ty: ty.map(|x| x.0),
 			flexible: flexible.is_some(),
 			readonly: readonly.is_some(),
+			inline: inline.is_some(),
 			value: value.map(|x| x.0),
 			assert: assert.map(|x| x.0),
 			computed: computed.map(|x| x.0),

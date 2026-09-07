@@ -30,6 +30,7 @@ pub use dynamic::DynamicScan;
 pub use empty::EmptyScan;
 pub use fulltext::FullTextScan;
 pub use graph::{EdgeTableSpec, GraphEdgeScan, GraphScanOutput};
+pub(crate) use graph::{PayloadPredicateSpec, PayloadTableSpec};
 pub use index::IndexScan;
 pub(crate) use knn::KnnPrefilter;
 pub use knn::KnnScan;

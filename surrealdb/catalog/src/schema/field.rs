@@ -39,7 +39,7 @@ pub struct ComputedDeps {
 	pub is_complete: bool,
 }
 
-#[revisioned(revision = 5)]
+#[revisioned(revision = 6)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct StoredFieldDefinition {
 	/// Canonical SurrealQL text of the field's path.
@@ -100,6 +100,14 @@ pub struct StoredFieldDefinition {
 	/// while remaining usable for backwards compatibility.
 	#[revision(start = 4)]
 	pub graphql_deprecated: Option<String>,
+
+	/// Whether this field's value is inlined into the edge's vertex-side
+	/// adjacency values (the `INLINE` clause), so an edge-table predicate
+	/// over it can be evaluated during a traversal without fetching the
+	/// edge record. Only top-level, non-computed fields of a non-lightweight
+	/// relation may set it.
+	#[revision(start = 6)]
+	pub inline: bool,
 }
 
 impl StoredFieldDefinition {
@@ -147,6 +155,7 @@ impl InfoStructure for FieldDefinition {
 			"default", if let DefineDefault::Always(v) | DefineDefault::Set(v) = self.default => Value::from(v.to_stored_sql()),
 			"reference", if let Some(v) = self.reference => v.structure(),
 			"readonly" => self.readonly.into(),
+			"inline", if self.inline => true.into(),
 			"permissions" => Value::from(map!{
 				"select" => self.select_permission.structure(),
 				"create" => self.create_permission.structure(),
@@ -177,6 +186,7 @@ impl FieldDefinition {
 			field_kind: self.field_kind.clone().map(|x| x.into()),
 			flexible: self.flexible,
 			readonly: self.readonly,
+			inline: self.inline,
 			value: self.value.clone().map(|x| x.into()),
 			assert: self.assert.clone().map(|x| x.into()),
 			computed: self.computed.clone().map(|x| x.into()),
@@ -259,6 +269,7 @@ pub struct FieldDefinition {
 	pub field_kind: Option<Kind>,
 	pub flexible: bool,
 	pub readonly: bool,
+	pub inline: bool,
 	pub value: Option<Expr>,
 	pub assert: Option<Expr>,
 	pub computed: Option<Expr>,
@@ -284,6 +295,7 @@ impl FromStored for FieldDefinition {
 				field_kind: stored.field_kind.as_ref().map(|t| t.compile()).transpose()?,
 				flexible: stored.flexible,
 				readonly: stored.readonly,
+				inline: stored.inline,
 				value: stored.value.as_ref().map(|t| t.compile()).transpose()?,
 				assert: stored.assert.as_ref().map(|t| t.compile()).transpose()?,
 				computed: stored.computed.as_ref().map(|t| t.compile()).transpose()?,
@@ -405,6 +417,7 @@ impl FieldDefinition {
 			field_kind: self.field_kind.as_ref().map(KindText::new),
 			flexible: self.flexible,
 			readonly: self.readonly,
+			inline: self.inline,
 			value: self.value.as_ref().map(ExprText::new),
 			assert: self.assert.as_ref().map(ExprText::new),
 			computed: self.computed.as_ref().map(ExprText::new),

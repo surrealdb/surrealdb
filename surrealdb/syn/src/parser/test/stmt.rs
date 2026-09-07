@@ -1857,6 +1857,7 @@ fn parse_define_field() {
 				])),
 				flexible: false,
 				readonly: false,
+				inline: false,
 				value: Some(Expr::Literal(Literal::Null)),
 				assert: Some(Expr::Literal(Literal::Bool(true))),
 				default: DefineDefault::Set(Expr::Literal(Literal::Bool(false))),

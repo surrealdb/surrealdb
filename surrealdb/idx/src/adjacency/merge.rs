@@ -282,6 +282,57 @@ impl<'a> MergedAdjacencyCursor<'a> {
 		})
 	}
 
+	/// Opens the merged cursor with the delta side always reading values,
+	/// regardless of the folded flag. The keys-only delta of [`Self::open`]
+	/// is an optimisation for never-folded tables whose pointer values are
+	/// all empty; a caller that needs the values themselves — an inline
+	/// property payload — must see them either way.
+	pub async fn open_with_values(
+		txn: &'a Transaction,
+		scope: AdjacencyScope<'_>,
+		folded: bool,
+		version: Option<u64>,
+		resolve: Option<&'a AdjacencyResolveCache>,
+	) -> Result<Self> {
+		let window_start = scope.delta_range.start().to_vec();
+		let window_end = scope.delta_range.end().to_vec();
+		let blocks = if folded {
+			let block_range = block_range(txn, &scope, version).await?;
+			Some(
+				txn.open_vals_cursor_raw(block_range, Direction::Forward, 0, version)
+					.await
+					.context("Failed to open the adjacency block cursor")?,
+			)
+		} else {
+			None
+		};
+		let delta = txn
+			.open_vals_cursor_raw(scope.delta_range, Direction::Forward, 0, version)
+			.await
+			.context("Failed to open the graph delta cursor")?;
+		Ok(Self {
+			txn,
+			version,
+			resolve,
+			delta: DeltaCursor::Vals(delta),
+			delta_buf: VecDeque::new(),
+			delta_done: false,
+			delta_fill: 1,
+			blocks,
+			current_chunk: None,
+			block_buf: VecDeque::new(),
+			block_done: false,
+			direction: Direction::Forward,
+			filter: None,
+			mode: None,
+			window_start,
+			window_end,
+			stats: MergeStats::default(),
+			#[cfg(test)]
+			delta_fills: 0,
+		})
+	}
+
 	/// Opens the merged cursor over a whole vertex table's adjacency —
 	/// every vertex, both directions, all edge tables — walked in
 	/// `direction` order.

@@ -413,6 +413,10 @@ impl Parser<'_> {
 							self.pop_peek();
 							res.readonly = AlterKind::Drop;
 						}
+						t!("INLINE") => {
+							self.pop_peek();
+							res.inline = AlterKind::Drop;
+						}
 						t!("VALUE") => {
 							self.pop_peek();
 							res.value = AlterKind::Drop;
@@ -437,7 +441,7 @@ impl Parser<'_> {
 							unexpected!(
 								self,
 								peek,
-								"`FLEXIBLE`, `TYPE`, `READONLY`, `VALUE`, `ASSERT`, `DEFAULT`, `COMMENT`, or `REFERENCE`"
+								"`FLEXIBLE`, `TYPE`, `READONLY`, `INLINE`, `VALUE`, `ASSERT`, `DEFAULT`, `COMMENT`, or `REFERENCE`"
 							)
 						}
 					}
@@ -462,6 +466,10 @@ impl Parser<'_> {
 				t!("READONLY") => {
 					self.pop_peek();
 					res.readonly = AlterKind::Set(());
+				}
+				t!("INLINE") => {
+					self.pop_peek();
+					res.inline = AlterKind::Set(());
 				}
 				t!("VALUE") => {
 					self.pop_peek();

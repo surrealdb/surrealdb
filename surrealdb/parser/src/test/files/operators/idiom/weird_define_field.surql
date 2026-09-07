@@ -37,6 +37,7 @@ Query
                     .ty: None
                     .flexible: false
                     .readonly: false
+                    .inline: false
                     .value: None
                     .assert: None
                     .computed: None
@@ -70,6 +71,7 @@ Query
                     .ty: None
                     .flexible: false
                     .readonly: false
+                    .inline: false
                     .value: None
                     .assert: None
                     .computed: None
@@ -100,6 +102,7 @@ Query
                     .ty: None
                     .flexible: false
                     .readonly: false
+                    .inline: false
                     .value: None
                     .assert: None
                     .computed: None
@@ -132,6 +135,7 @@ Query
                     .ty: None
                     .flexible: false
                     .readonly: false
+                    .inline: false
                     .value: None
                     .assert: None
                     .computed: None
@@ -164,6 +168,7 @@ Query
                     .ty: None
                     .flexible: false
                     .readonly: false
+                    .inline: false
                     .value: None
                     .assert: None
                     .computed: None
@@ -199,6 +204,7 @@ Query
                     .ty: None
                     .flexible: false
                     .readonly: false
+                    .inline: false
                     .value: None
                     .assert: None
                     .computed: None
@@ -237,6 +243,7 @@ Query
                     .ty: None
                     .flexible: false
                     .readonly: false
+                    .inline: false
                     .value: None
                     .assert: None
                     .computed: None
@@ -274,6 +281,7 @@ Query
                     .ty: None
                     .flexible: false
                     .readonly: false
+                    .inline: false
                     .value: None
                     .assert: None
                     .computed: None
@@ -321,6 +329,7 @@ Query
                     .ty: None
                     .flexible: false
                     .readonly: false
+                    .inline: false
                     .value: None
                     .assert: None
                     .computed: None
@@ -357,6 +366,7 @@ Query
                     .ty: None
                     .flexible: false
                     .readonly: false
+                    .inline: false
                     .value: None
                     .assert: None
                     .computed: None
@@ -388,6 +398,7 @@ Query
                     .ty: None
                     .flexible: false
                     .readonly: false
+                    .inline: false
                     .value: None
                     .assert: None
                     .computed: None
@@ -446,6 +457,7 @@ Query
                     .ty: None
                     .flexible: false
                     .readonly: false
+                    .inline: false
                     .value: None
                     .assert: None
                     .computed: None
@@ -476,6 +488,7 @@ Query
                     .ty: None
                     .flexible: false
                     .readonly: false
+                    .inline: false
                     .value: None
                     .assert: None
                     .computed: None
@@ -506,6 +519,7 @@ Query
                     .ty: None
                     .flexible: false
                     .readonly: false
+                    .inline: false
                     .value: None
                     .assert: None
                     .computed: None
@@ -536,6 +550,7 @@ Query
                     .ty: None
                     .flexible: false
                     .readonly: false
+                    .inline: false
                     .value: None
                     .assert: None
                     .computed: None

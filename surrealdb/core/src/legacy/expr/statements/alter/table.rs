@@ -130,6 +130,15 @@ pub(crate) async fn alter_table_statement_compute(
 		&mut dt,
 	)
 	.await?;
+	// A type change away from RELATION must not orphan INLINE fields.
+	crate::legacy::expr::statements::define::table::validate_inline_fields_survive_type_change(
+		&txn,
+		ns,
+		db,
+		Some(previous.deref()),
+		&dt,
+	)
+	.await?;
 
 	// Add table relational fields
 	if matches!(this.kind, Some(TableType::Relation(_))) {

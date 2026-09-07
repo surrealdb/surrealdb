@@ -80,31 +80,38 @@ pub(crate) async fn define_table_statement_compute(
 	// packed adjacency blocks may exist under the table's subspace, or hold
 	// its record ids, which redefining the schema does not change.
 	let existing = txn.get_tb(ns.namespace_id, db.database_id, &name, None).await?;
-	let (table_id, graph_folded, graph_doc_ids, old_edges_cap, old_refs_cap) = if let Some(tb) =
-		&existing
-	{
-		match this.kind {
-			DefineKind::Default => {
-				if !opt.import {
-					bail!(CatalogError::TbAlreadyExists {
-						name: name.as_str().to_string(),
-					});
+	let (table_id, graph_folded, graph_doc_ids, graph_inline_gen, old_edges_cap, old_refs_cap) =
+		if let Some(tb) = &existing {
+			match this.kind {
+				DefineKind::Default => {
+					if !opt.import {
+						bail!(CatalogError::TbAlreadyExists {
+							name: name.as_str().to_string(),
+						});
+					}
 				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => return Ok(Value::None),
 			}
-			DefineKind::Overwrite => {}
-			DefineKind::IfNotExists => return Ok(Value::None),
-		}
 
-		(tb.table_id, tb.graph_folded, tb.graph_doc_ids, tb.inline_edges_cap, tb.inline_refs_cap)
-	} else {
-		(
-			txn.get_next_tb_id(Some(ctx), ns.namespace_id, db.database_id).await?,
-			false,
-			false,
-			None,
-			None,
-		)
-	};
+			(
+				tb.table_id,
+				tb.graph_folded,
+				tb.graph_doc_ids,
+				tb.graph_inline_gen,
+				tb.inline_edges_cap,
+				tb.inline_refs_cap,
+			)
+		} else {
+			(
+				txn.get_next_tb_id(Some(ctx), ns.namespace_id, db.database_id).await?,
+				false,
+				false,
+				0,
+				None,
+				None,
+			)
+		};
 
 	let comment = stk
 		.run(|stk| crate::legacy::expr_compute(&this.comment, stk, ctx, opt, doc))
@@ -138,6 +145,7 @@ pub(crate) async fn define_table_statement_compute(
 		graphql_deprecated: this.graphql_deprecated.clone(),
 		graph_folded,
 		graph_doc_ids,
+		graph_inline_gen,
 		inline_edges_cap: this.inline_edges_cap,
 		inline_refs_cap: this.inline_refs_cap,
 	};
@@ -150,6 +158,15 @@ pub(crate) async fn define_table_statement_compute(
 		db.database_id,
 		existing.as_deref(),
 		&mut tb_def,
+	)
+	.await?;
+	// A type change away from RELATION must not orphan INLINE fields.
+	validate_inline_fields_survive_type_change(
+		&txn,
+		ns.namespace_id,
+		db.database_id,
+		existing.as_deref(),
+		&tb_def,
 	)
 	.await?;
 
@@ -890,6 +907,33 @@ pub(crate) async fn define_table_statement_add_in_out_fields(
 		// Refresh the table cache for the fields
 		tb.cache_fields_ts = Uuid::now_v7();
 	}
+	Ok(())
+}
+
+/// Rejects a table-type change away from `RELATION` while the table still
+/// carries `INLINE` fields: their payloads ride the edges' adjacency
+/// values, which only relation records have, so the fields must be
+/// un-inlined (or removed) first.
+pub(crate) async fn validate_inline_fields_survive_type_change(
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	existing: Option<&TableDefinition>,
+	def: &TableDefinition,
+) -> Result<()> {
+	let was_relation = existing.is_some_and(|e| matches!(e.table_type, TableType::Relation(_)));
+	if !was_relation || matches!(def.table_type, TableType::Relation(_)) {
+		return Ok(());
+	}
+	let has_inline = txn.all_tb_fields(ns, db, &def.name, None).await?.iter().any(|fd| fd.inline);
+	anyhow::ensure!(
+		!has_inline,
+		crate::exec::Error::Thrown(format!(
+			"the relation `{}` still has INLINE fields; remove or un-inline them before \
+			 changing its type",
+			def.name
+		))
+	);
 	Ok(())
 }
 

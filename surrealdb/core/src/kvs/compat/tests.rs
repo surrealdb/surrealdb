@@ -83,8 +83,12 @@ fn version_writes_current_format(version_name: &str, type_name: &str, fixture: &
 	/// re-encode a revision higher. Each name drops off this list once a
 	/// snapshot taken after its bump exists to pin it, exactly as
 	/// `V3_3_0_BUMPED` did at `v3_3_0`.
-	const AFTER_NEWEST_SNAPSHOT_BUMPED: &[&str] =
-		&["StoredModuleDefinition", "StoredAccessDefinition", "StoredTableDefinition"];
+	const AFTER_NEWEST_SNAPSHOT_BUMPED: &[&str] = &[
+		"StoredModuleDefinition",
+		"StoredAccessDefinition",
+		"StoredTableDefinition",
+		"StoredFieldDefinition",
+	];
 	/// Fixtures of a type not itself bumped after the newest snapshot that
 	/// nonetheless *embed* one that was, so they carry its revision byte:
 	/// `TableMutation::Def` boxes a `StoredTableDefinition`. The other

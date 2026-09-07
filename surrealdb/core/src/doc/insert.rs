@@ -204,6 +204,7 @@ impl Document {
 		// Store the document and index data
 		self.store_record_data(ctx, stm).await?;
 		self.store_edges_data(ctx, opt).await?;
+		self.store_inline_adjacency_data(ctx, opt).await?;
 		self.store_index_data(stk, ctx, opt).await?;
 		// Materialise the computed fields the record's observers read: they are
 		// stripped before storage, so events, live queries, changefeeds and the

@@ -21,6 +21,8 @@ pub struct DefineFieldStatement {
 	pub field_kind: Option<Kind>,
 	pub flexible: bool,
 	pub readonly: bool,
+	/// Inline the field's value into the edge's adjacency (the `INLINE` clause).
+	pub inline: bool,
 	pub value: Option<Expr>,
 	pub assert: Option<Expr>,
 	pub computed: Option<Expr>,
@@ -44,6 +46,7 @@ impl Default for DefineFieldStatement {
 			field_kind: None,
 			flexible: false,
 			readonly: false,
+			inline: false,
 			value: None,
 			assert: None,
 			computed: None,
@@ -83,6 +86,9 @@ impl ToSql for DefineFieldStatement {
 		}
 		if self.readonly {
 			f.push_str(" READONLY");
+		}
+		if self.inline {
+			f.push_str(" INLINE");
 		}
 		if let Some(ref v) = self.value {
 			write_sql!(f, sql_fmt, " VALUE {}", CoverStmts(v))

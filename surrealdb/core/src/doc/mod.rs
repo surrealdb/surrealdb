@@ -26,6 +26,8 @@ mod changefeeds; // Processes any change feeds relevant for this document
 mod check; // Data and condition checking for this document
 pub(crate) mod compute; // Compute computed fields for this document
 mod edges; // Attempts to store the edge data for this document
+mod inline; // Keeps inline edge-property payloads in step with the record
+pub(crate) use inline::{inline_field_name, inline_fields};
 mod event; // Processes any table events relevant for this document
 mod field; // Processes any schema-defined fields for this document
 mod index; // Attempts to store the index data for this document

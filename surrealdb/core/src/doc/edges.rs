@@ -208,7 +208,28 @@ impl Document {
 				target_key: Cow::Borrowed(&l.key),
 			};
 
-			let live = AdjacencyValue::live();
+			// A table with inline fields embeds their values into the pointer
+			// values from the first write; without any, this is the same
+			// empty-encoding live value pointer keys have always carried.
+			let live = if lightweight {
+				AdjacencyValue::live()
+			} else {
+				let inline = super::inline::inline_fields(self.doc_ctx.fd()?);
+				if inline.is_empty() {
+					AdjacencyValue::live()
+				} else {
+					let section = super::inline::encode_inline_section(
+						self.current.doc.as_ref(),
+						&inline,
+						tb.graph_inline_gen,
+						ctx.config.idx.graph_inline_props_cap,
+					)?;
+					AdjacencyValue {
+						tombstone: false,
+						sections: vec![section],
+					}
+				}
+			};
 			if lightweight {
 				futures::try_join!(txn.set_key(&ltr, &live), txn.set_key(&rtl, &live))?;
 			} else {

@@ -139,6 +139,7 @@ pub fn table_basic() -> StoredTableDefinition {
 		graph_doc_ids: false,
 		inline_edges_cap: None,
 		inline_refs_cap: None,
+		graph_inline_gen: 0,
 	}
 }
 
@@ -179,6 +180,7 @@ pub fn table_with_view() -> StoredTableDefinition {
 		graph_doc_ids: false,
 		inline_edges_cap: None,
 		inline_refs_cap: None,
+		graph_inline_gen: 0,
 	}
 }
 
@@ -210,6 +212,7 @@ pub fn table_schemafull() -> StoredTableDefinition {
 		graph_doc_ids: false,
 		inline_edges_cap: None,
 		inline_refs_cap: None,
+		graph_inline_gen: 0,
 	}
 }
 
@@ -248,6 +251,7 @@ pub fn table_relation() -> StoredTableDefinition {
 		graph_doc_ids: false,
 		inline_edges_cap: None,
 		inline_refs_cap: None,
+		graph_inline_gen: 0,
 	}
 }
 
@@ -285,6 +289,7 @@ pub fn table_with_stored_clauses() -> StoredTableDefinition {
 		graph_doc_ids: false,
 		inline_edges_cap: None,
 		inline_refs_cap: None,
+		graph_inline_gen: 0,
 	}
 }
 
@@ -317,6 +322,7 @@ pub fn table_with_materialized_view() -> StoredTableDefinition {
 		graph_doc_ids: false,
 		inline_edges_cap: None,
 		inline_refs_cap: None,
+		graph_inline_gen: 0,
 	}
 }
 
@@ -345,6 +351,7 @@ pub fn table_any_type() -> StoredTableDefinition {
 		graph_doc_ids: false,
 		inline_edges_cap: None,
 		inline_refs_cap: None,
+		graph_inline_gen: 0,
 	}
 }
 
@@ -863,6 +870,7 @@ pub fn field_basic() -> StoredFieldDefinition {
 		table: TableName::from("users"),
 		field_kind: None,
 		readonly: false,
+		inline: false,
 		flexible: false,
 		value: None,
 		assert: None,
@@ -886,6 +894,7 @@ pub fn field_with_type() -> StoredFieldDefinition {
 		table: TableName::from("users"),
 		field_kind: Some(KindText::new(&Kind::String)),
 		readonly: false,
+		inline: false,
 		flexible: false,
 		value: Some(ExprText::from_raw("'string::lowercase($value)'")),
 		assert: Some(ExprText::from_raw("'string::is::email($value)'")),
@@ -909,6 +918,7 @@ pub fn field_readonly() -> StoredFieldDefinition {
 		table: TableName::from("users"),
 		field_kind: Some(KindText::new(&Kind::Datetime)),
 		readonly: true,
+		inline: false,
 		flexible: false,
 		value: None,
 		assert: None,
@@ -932,6 +942,7 @@ pub fn field_flexible_with_reference() -> StoredFieldDefinition {
 		table: TableName::from("orders"),
 		field_kind: Some(KindText::new(&Kind::Number)),
 		readonly: false,
+		inline: false,
 		flexible: true,
 		value: Some(ExprText::from_raw("'$price * $quantity'")),
 		assert: None,
@@ -959,6 +970,7 @@ pub fn field_with_default_set() -> StoredFieldDefinition {
 		table: TableName::from("orders"),
 		field_kind: Some(KindText::new(&Kind::String)),
 		readonly: false,
+		inline: false,
 		flexible: false,
 		value: None,
 		assert: Some(ExprText::from_raw("\"$value INSIDE ['pending', 'active', 'closed']\"")),
@@ -986,6 +998,7 @@ pub fn field_record_type() -> StoredFieldDefinition {
 		table: TableName::from("posts"),
 		field_kind: Some(KindText::new(&Kind::Record(vec![TableName::from("users")]))),
 		readonly: true,
+		inline: false,
 		flexible: false,
 		value: None,
 		assert: None,

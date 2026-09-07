@@ -22,6 +22,8 @@ pub struct AlterFieldStatement {
 	pub kind: AlterKind<Kind>,
 	pub flexible: AlterKind<()>,
 	pub readonly: AlterKind<()>,
+	/// Set or drop the `INLINE` clause.
+	pub inline: AlterKind<()>,
 	pub value: AlterKind<Expr>,
 	pub assert: AlterKind<Expr>,
 	pub default: AlterDefault,
@@ -39,6 +41,7 @@ impl Default for AlterFieldStatement {
 			kind: AlterKind::None,
 			flexible: AlterKind::None,
 			readonly: AlterKind::None,
+			inline: AlterKind::None,
 			value: AlterKind::None,
 			assert: AlterKind::None,
 			default: AlterDefault::None,

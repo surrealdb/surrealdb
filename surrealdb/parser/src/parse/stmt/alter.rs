@@ -651,6 +651,7 @@ impl Parse for ast::AlterField {
 		let mut ty = None;
 		let mut flexible = None;
 		let mut readonly = None;
+		let mut inline = None;
 		let mut value = None;
 		let mut assert = None;
 		let mut default = None;
@@ -686,6 +687,13 @@ impl Parse for ast::AlterField {
 							let _ = parser.next();
 							let span = parser.span_since(drop.span);
 							parse_unordered_clause_sync(parser, &mut readonly, span, |_| {
+								Ok(AlterKind::Drop(span))
+							})?;
+						}
+						T![INLINE] => {
+							let _ = parser.next();
+							let span = parser.span_since(drop.span);
+							parse_unordered_clause_sync(parser, &mut inline, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
 						}
@@ -744,6 +752,12 @@ impl Parse for ast::AlterField {
 				T![READONLY] => {
 					let _ = parser.next();
 					parse_unordered_clause_sync(parser, &mut readonly, peek.span, |_| {
+						Ok(AlterKind::Set(()))
+					})?;
+				}
+				T![INLINE] => {
+					let _ = parser.next();
+					parse_unordered_clause_sync(parser, &mut inline, peek.span, |_| {
 						Ok(AlterKind::Set(()))
 					})?;
 				}
@@ -822,6 +836,7 @@ impl Parse for ast::AlterField {
 			default: default.map(|x| x.0),
 			flexible: flexible.map(|x| x.0),
 			readonly: readonly.map(|x| x.0),
+			inline: inline.map(|x| x.0),
 			comment: comment.map(|x| x.0),
 			on_delete: on_delete.map(|x| x.0),
 			permissions: permissions.map(|x| x.0),

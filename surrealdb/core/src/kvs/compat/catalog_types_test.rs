@@ -70,7 +70,8 @@ use crate::val::{Datetime, TableName, Value};
 	graph_doc_ids: false,
 	inline_edges_cap: None,
 	inline_refs_cap: None,
-}, 167)]
+		graph_inline_gen: 0,
+}, 168)]
 #[case::subscription(StoredSubscriptionDefinition {
 	id: Uuid::default(),
 	node: Uuid::default(),
@@ -183,6 +184,7 @@ use crate::val::{Datetime, TableName, Value};
 	table: TableName::from("what"),
 	field_kind: None,
 	readonly: false,
+	inline: false,
 	flexible: false,
 	value: None,
 	assert: None,
@@ -196,7 +198,7 @@ use crate::val::{Datetime, TableName, Value};
 	auth_limit: AuthLimit::default(),
 	graphql_alias: None,
 	graphql_deprecated: None,
-}, 45)]
+}, 46)]
 #[case::function(StoredFunctionDefinition {
 	name: "function".into(),
 	args: vec![],

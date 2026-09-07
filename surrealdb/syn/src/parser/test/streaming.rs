@@ -328,6 +328,7 @@ fn statements() -> Vec<TopLevelExpr> {
 				])),
 				flexible: false,
 				readonly: false,
+				inline: false,
 				value: Some(Expr::Literal(Literal::Null)),
 				assert: Some(Expr::Literal(Literal::Bool(true))),
 				default: DefineDefault::Set(Expr::Literal(Literal::Bool(false))),

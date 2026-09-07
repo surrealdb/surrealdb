@@ -54,6 +54,13 @@ pub struct IdxConfig {
 	/// The maximum total size of the doc-ID → record-key cache that
 	/// resolves numeric adjacency entries (default: 64 MiB)
 	pub graph_resolve_cache_size: u64,
+	/// The maximum encoded size, in bytes, of one edge's inline property
+	/// payload. A payload past the cap is written spilled — the values live
+	/// only in the edge record and filtered traversals fall back to it.
+	/// Read by the document pipeline when writing edges, not by an index
+	/// engine; it lives here because the payload rides the adjacency
+	/// values the graph engine owns. (default: 64)
+	pub graph_inline_props_cap: usize,
 }
 
 impl Default for IdxConfig {
@@ -67,6 +74,7 @@ impl Default for IdxConfig {
 			graph_fold_batch: 1024,
 			graph_numeric_ids: false,
 			graph_resolve_cache_size: 64 * 1024 * 1024,
+			graph_inline_props_cap: 64,
 		}
 	}
 }
@@ -79,6 +87,7 @@ impl cnf::Config for IdxConfig {
 			.parse_key("graph_fold_batch", &mut self.graph_fold_batch)
 			.parse_key("graph_numeric_ids", &mut self.graph_numeric_ids)
 			.parse_key("graph_resolve_cache_size", &mut self.graph_resolve_cache_size)
+			.parse_key("graph_inline_props_cap", &mut self.graph_inline_props_cap)
 			.parse_key_with("file_allowlist", &mut self.file_allowlist, |x| {
 				// FIXME: We really shouldn't be doing random, faillable, IO when reading
 				// configuration values. But no way to fix it without restructuring the

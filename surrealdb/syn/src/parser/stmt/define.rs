@@ -989,6 +989,10 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.readonly = true;
 				}
+				t!("INLINE") => {
+					self.pop_peek();
+					res.inline = true;
+				}
 				t!("VALUE") => {
 					self.pop_peek();
 					res.value = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);

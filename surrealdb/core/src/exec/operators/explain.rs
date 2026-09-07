@@ -399,6 +399,14 @@ fn format_metrics_text(metrics: &OperatorMetrics, redact_volatile_explain_attrs:
 	if cache_misses > 0 {
 		extra.push_str(&format!(", cache_misses: {}", cache_misses));
 	}
+	let props_evals = metrics.props_evals();
+	if props_evals > 0 {
+		extra.push_str(&format!(", props_evals: {}", props_evals));
+	}
+	let props_fallbacks = metrics.props_fallbacks();
+	if props_fallbacks > 0 {
+		extra.push_str(&format!(", props_fallbacks: {}", props_fallbacks));
+	}
 	let skipped = metrics.skipped_rows();
 	if skipped > 0 {
 		extra.push_str(&format!(", skipped: {}", skipped));
@@ -547,6 +555,14 @@ fn format_analyze_plan_json(
 			let cache_misses = metrics.cache_misses();
 			if cache_misses > 0 {
 				metrics_obj.insert("cache_misses", Value::from(cache_misses as i64));
+			}
+			let props_evals = metrics.props_evals();
+			if props_evals > 0 {
+				metrics_obj.insert("props_evals", Value::from(props_evals as i64));
+			}
+			let props_fallbacks = metrics.props_fallbacks();
+			if props_fallbacks > 0 {
+				metrics_obj.insert("props_fallbacks", Value::from(props_fallbacks as i64));
 			}
 			let skipped = metrics.skipped_rows();
 			if skipped > 0 {

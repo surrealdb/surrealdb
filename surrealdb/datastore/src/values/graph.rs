@@ -9,7 +9,7 @@
 use anyhow::{Result, bail, ensure};
 use surrealdb_catalog::{DatabaseId, NamespaceId};
 use surrealdb_expr::expr::dir::Dir;
-use surrealdb_expr::val::RecordIdKey;
+use surrealdb_expr::val::{RecordIdKey, Value};
 use surrealdb_kvs::key::Error as KeyError;
 use surrealdb_kvs::value::KVValue;
 use surrealdb_strand::TableName;
@@ -40,6 +40,173 @@ pub const ADJACENCY_FLAG_PROPS: u8 = 1 << 1;
 
 /// Flag bit reserved for the target doc-id section.
 pub const ADJACENCY_FLAG_TARGET_DOC_ID: u8 = 1 << 2;
+
+/// Props-section header bit: the edge's inline values outgrew the cap and
+/// were not written; readers must fall back to the record.
+pub const INLINE_PROPS_SPILLED: u8 = 1 << 0;
+
+/// The inline edge-property payload — the body of the
+/// [`ADJACENCY_FLAG_PROPS`] section of an [`AdjacencyValue`], and of a
+/// block entry's props segment (the fold copies section bodies verbatim).
+///
+/// # Encoding
+///
+/// One header byte (bit 0 [`INLINE_PROPS_SPILLED`]; other bits reserved and
+/// rejected), the writing table's inline-field **generation** as a
+/// little-endian `u32`, and — unless spilled — a value count byte followed
+/// by that many revision-encoded [`Value`]s, one per inline field **in the
+/// field-name order the generation defines** (`Value::None` for a field
+/// the edge does not carry).
+///
+/// The generation is what makes a payload trustworthy: it identifies the
+/// exact inline field set (names, order, and types) the values were
+/// written under, and every schema mutation that changes that set bumps
+/// it. A reader whose plan-time generation or field count differs treats
+/// the payload as stale and falls back to the record — never evaluating
+/// values against a different set than wrote them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InlineProps {
+	/// The writing table's inline-field generation.
+	pub generation: u32,
+	/// The inline values in generation-defined field order, or `None` when
+	/// the payload spilled past the cap.
+	pub values: Option<Vec<Value>>,
+}
+
+impl InlineProps {
+	/// A spilled payload: the generation is still recorded, so a reader can
+	/// tell "current but too large" from "written under an older set".
+	pub fn spilled(generation: u32) -> Self {
+		Self {
+			generation,
+			values: None,
+		}
+	}
+
+	pub fn is_spilled(&self) -> bool {
+		self.values.is_none()
+	}
+
+	/// Encodes the section body.
+	pub fn encode(&self) -> Result<Vec<u8>> {
+		let mut buf = Vec::new();
+		match &self.values {
+			None => {
+				buf.push(INLINE_PROPS_SPILLED);
+				buf.extend_from_slice(&self.generation.to_le_bytes());
+			}
+			Some(values) => {
+				ensure!(
+					values.len() <= u8::MAX as usize,
+					"an inline props payload cannot carry more than 255 values"
+				);
+				buf.push(0);
+				buf.extend_from_slice(&self.generation.to_le_bytes());
+				buf.push(values.len() as u8);
+				for value in values {
+					revision::SerializeRevisioned::serialize_revisioned(value, &mut buf)?;
+				}
+			}
+		}
+		Ok(buf)
+	}
+
+	/// Encodes a live section body for `count` values directly from
+	/// borrowed values, abandoning the serialisation as soon as the
+	/// encoded values would exceed `cap` bytes.
+	///
+	/// Returns `None` on overflow — the caller writes
+	/// [`InlineProps::spilled`] instead — so the work spent on an
+	/// over-cap payload is bounded by roughly `cap` bytes rather than
+	/// the values' full encoded size. The boundary matches
+	/// [`InlineProps::encode`] exactly: values whose encoding totals
+	/// `cap` bytes still fit; one byte more spills. A completed
+	/// encoding is byte-identical to [`InlineProps::encode`] over the
+	/// same values.
+	pub fn encode_values_capped<'a>(
+		generation: u32,
+		values: impl IntoIterator<Item = &'a Value>,
+		count: u8,
+		cap: usize,
+	) -> Result<Option<Vec<u8>>> {
+		// Header byte, generation, count: the fixed prelude the cap does
+		// not bound.
+		const PRELUDE: usize = 6;
+		let mut writer = CappedWriter::new(cap.saturating_add(PRELUDE));
+		writer.buf.push(0);
+		writer.buf.extend_from_slice(&generation.to_le_bytes());
+		writer.buf.push(count);
+		for value in values {
+			match revision::SerializeRevisioned::serialize_revisioned(value, &mut writer) {
+				Ok(()) => {}
+				Err(_) if writer.overflowed => return Ok(None),
+				Err(e) => return Err(e.into()),
+			}
+		}
+		Ok(Some(writer.buf))
+	}
+
+	/// Decodes a section body.
+	pub fn decode(mut body: &[u8]) -> Result<Self> {
+		let corrupted = || KeyError::Corrupted("an inline props payload is malformed");
+		let (&header, rest) = body.split_first().ok_or_else(corrupted)?;
+		body = rest;
+		ensure!(header & !INLINE_PROPS_SPILLED == 0, corrupted());
+		let (gen_bytes, rest) = body.split_at_checked(4).ok_or_else(corrupted)?;
+		body = rest;
+		let generation = u32::from_le_bytes(gen_bytes.try_into().expect("split at four"));
+		if header & INLINE_PROPS_SPILLED != 0 {
+			ensure!(body.is_empty(), corrupted());
+			return Ok(Self::spilled(generation));
+		}
+		let (&count, rest) = body.split_first().ok_or_else(corrupted)?;
+		let mut reader = rest;
+		let mut values = Vec::with_capacity(count as usize);
+		for _ in 0..count {
+			values.push(revision::DeserializeRevisioned::deserialize_revisioned(&mut reader)?);
+		}
+		ensure!(reader.is_empty(), corrupted());
+		Ok(Self {
+			generation,
+			values: Some(values),
+		})
+	}
+}
+
+/// A `Vec`-backed writer that refuses any write growing the buffer past
+/// `max` bytes, flagging the refusal so a caller can tell a cap trip
+/// from a genuine serialisation error. A refused write consumes nothing,
+/// so the buffer never holds more than `max` bytes.
+struct CappedWriter {
+	buf: Vec<u8>,
+	max: usize,
+	overflowed: bool,
+}
+
+impl CappedWriter {
+	fn new(max: usize) -> Self {
+		Self {
+			buf: Vec::new(),
+			max,
+			overflowed: false,
+		}
+	}
+}
+
+impl std::io::Write for CappedWriter {
+	fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+		if data.len() > self.max.saturating_sub(self.buf.len()) {
+			self.overflowed = true;
+			return Err(std::io::ErrorKind::WriteZero.into());
+		}
+		self.buf.extend_from_slice(data);
+		Ok(data.len())
+	}
+
+	fn flush(&mut self) -> std::io::Result<()> {
+		Ok(())
+	}
+}
 
 /// The value of a vertex-side graph pointer key.
 ///
@@ -792,5 +959,112 @@ mod tests {
 		let bytes = ok.kv_encode_value().unwrap();
 		assert_eq!(AdjacencyBlock::kv_decode_value(&bytes, ()).unwrap(), ok);
 		assert!(block(256).kv_encode_value().is_err());
+	}
+
+	/// The inline-props payload round-trips through its section body, in
+	/// both live and spilled forms, and rejects what it cannot interpret.
+	#[test]
+	fn inline_props_round_trip() {
+		for props in [
+			InlineProps {
+				generation: 0,
+				values: Some(Vec::new()),
+			},
+			InlineProps {
+				generation: 7,
+				values: Some(vec![
+					Value::from(42),
+					Value::None,
+					Value::from("text"),
+					Value::Bool(true),
+				]),
+			},
+			InlineProps::spilled(u32::MAX),
+		] {
+			let body = props.encode().unwrap();
+			assert_eq!(InlineProps::decode(&body).unwrap(), props);
+		}
+		// Unknown header bits are rejected: they would change the layout.
+		assert!(InlineProps::decode(&[0x02, 0, 0, 0, 0, 0]).is_err());
+		// A spilled payload carries no values.
+		assert!(InlineProps::decode(&[0x01, 0, 0, 0, 0, 9]).is_err());
+		// A truncated value list is rejected.
+		let body = InlineProps {
+			generation: 1,
+			values: Some(vec![Value::from(1)]),
+		}
+		.encode()
+		.unwrap();
+		assert!(InlineProps::decode(&body[..body.len() - 1]).is_err());
+		// Trailing bytes beyond the declared count are rejected.
+		let mut long = body;
+		long.push(0);
+		assert!(InlineProps::decode(&long).is_err());
+	}
+
+	/// The capped encoder is byte-identical to `encode` while the values
+	/// fit, honours the exact spill boundary (`cap` bytes of encoded
+	/// values still fit; one fewer spills), and reports overflow as
+	/// `None` rather than an error.
+	#[test]
+	fn capped_encode_matches_encode_and_its_boundary() {
+		let props = InlineProps {
+			generation: 7,
+			values: Some(vec![Value::from(42), Value::None, Value::from("text")]),
+		};
+		let full = props.encode().unwrap();
+		let values = props.values.as_ref().unwrap();
+		let capped = |cap: usize| {
+			InlineProps::encode_values_capped(7, values.iter(), values.len() as u8, cap).unwrap()
+		};
+		assert_eq!(capped(64), Some(full.clone()));
+		// The prelude (header, generation, count) is exempt from the cap.
+		let exact = full.len() - 6;
+		assert_eq!(capped(exact), Some(full));
+		assert_eq!(capped(exact - 1), None);
+	}
+
+	/// The capped writer refuses — without buffering — any write that
+	/// would grow it past its bound, so an over-cap value costs at most
+	/// the cap, not its own encoded size.
+	#[test]
+	fn capped_writer_bounds_the_buffer() {
+		use std::io::Write;
+		let mut writer = CappedWriter::new(70);
+		writer.write_all(&[0u8; 70]).unwrap();
+		assert!(!writer.overflowed);
+		assert!(writer.write_all(&[1u8]).is_err());
+		assert!(writer.overflowed);
+		assert_eq!(writer.buf.len(), 70);
+		// A megabyte strand against a small cap is refused, not accumulated.
+		let big = Value::from("x".repeat(1024 * 1024));
+		assert_eq!(InlineProps::encode_values_capped(1, [&big], 1, 64).unwrap(), None);
+	}
+
+	/// A live pointer value carrying only a props section keeps the
+	/// section container contract: skippable by builds that do not
+	/// interpret bit 1, and preserved verbatim on rewrite.
+	#[test]
+	fn props_section_rides_the_container() {
+		let body = InlineProps {
+			generation: 3,
+			values: Some(vec![Value::from(1)]),
+		}
+		.encode()
+		.unwrap();
+		let value = AdjacencyValue {
+			tombstone: false,
+			sections: vec![AdjacencySection {
+				flag_bit: ADJACENCY_FLAG_PROPS.trailing_zeros() as u8,
+				body: body.clone(),
+			}],
+		};
+		let bytes = value.kv_encode_value().unwrap();
+		let decoded = AdjacencyValue::kv_decode_value(&bytes, ()).unwrap();
+		assert_eq!(decoded, value);
+		assert_eq!(
+			decoded.section(ADJACENCY_FLAG_PROPS.trailing_zeros() as u8),
+			Some(body.as_slice())
+		);
 	}
 }

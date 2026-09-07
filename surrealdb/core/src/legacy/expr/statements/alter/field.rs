@@ -90,6 +90,12 @@ pub(crate) async fn alter_field_statement_compute(
 		AlterKind::None => {}
 	}
 
+	match this.inline {
+		AlterKind::Set(_) => df.inline = true,
+		AlterKind::Drop => df.inline = false,
+		AlterKind::None => {}
+	}
+
 	match this.value {
 		AlterKind::Set(ref k) => df.value = Some(k.clone()),
 		AlterKind::Drop => df.value = None,
@@ -135,6 +141,57 @@ pub(crate) async fn alter_field_statement_compute(
 	// TYPEs — validated against the fully-resolved definition. Without this,
 	// ALTER FIELD silently bypassed the restrictions DEFINE FIELD enforces.
 	crate::legacy::expr::statements::define::field::validate_id_field_restrictions(&df)?;
+
+	// INLINE embeds the field's value into the edge's adjacency payloads;
+	// the same restrictions as DEFINE FIELD, validated against the fully
+	// resolved definition.
+	if df.inline && !opt.import {
+		let is_relation = txn
+			.get_tb(ns, db, &what, None)
+			.await?
+			.is_some_and(|tb| matches!(tb.table_type, catalog::TableType::Relation(_)));
+		ensure!(
+			is_relation,
+			ExecError::Thrown(
+				"INLINE requires an existing TYPE RELATION table: the value is embedded into \
+				 the edges' adjacency payloads"
+					.to_owned(),
+			)
+		);
+		ensure!(
+			!matches!(name.as_str(), "id" | "in" | "out"),
+			ExecError::Thrown(
+				"the `id`, `in` and `out` fields already live in the adjacency keys and cannot \
+				 be INLINE"
+					.to_owned(),
+			)
+		);
+		ensure!(
+			df.name.len() == 1,
+			ExecError::Thrown("only a top-level field can be INLINE".to_owned())
+		);
+		ensure!(
+			df.computed.is_none(),
+			ExecError::Thrown(
+				"a COMPUTED field cannot be INLINE: its value is derived at read time, so \
+				 there is nothing stored to embed"
+					.to_owned(),
+			)
+		);
+		// The payload's value count is a single byte, so a table carries at
+		// most 255 INLINE fields; reject the overflowing toggle here rather
+		// than failing every subsequent edge write.
+		let fields = txn.all_tb_fields(ns, db, &what, None).await?;
+		let others = fields.iter().filter(|f| f.inline && f.name != df.name).count();
+		ensure!(
+			others < u8::MAX as usize,
+			ExecError::Thrown(
+				"a table cannot carry more than 255 INLINE fields: the adjacency payload's \
+				 value count is a single byte"
+					.to_owned(),
+			)
+		);
+	}
 
 	if df.flexible {
 		ensure!(
@@ -182,11 +239,27 @@ pub(crate) async fn alter_field_statement_compute(
 		}
 		.into());
 	};
+	// The generation identifies the payload shape: the inline field set's
+	// names, order, and types. Bump it only when this ALTER changes that
+	// shape — the field joins or leaves the inline set, or an inline
+	// field's declared type changes — so readers fall back until a write
+	// restamps the payloads. Clauses that never enter a payload
+	// (PERMISSIONS, COMMENT, ASSERT, DEFAULT, VALUE) leave written
+	// payloads valid: permissions are re-checked at plan time, and the
+	// payload stores whatever values the record stores.
+	let inline_toggled = df.inline != old_definition.inline;
+	let inline_kind_changed =
+		df.inline && old_definition.inline && df.field_kind != old_definition.field_kind;
 	txn.replace_tb(
 		ns_name,
 		db_name,
 		&catalog::TableDefinition {
 			cache_fields_ts: Uuid::now_v7(),
+			graph_inline_gen: if inline_toggled || inline_kind_changed {
+				tb.graph_inline_gen.wrapping_add(1)
+			} else {
+				tb.graph_inline_gen
+			},
 			..(*tb).clone()
 		},
 	)

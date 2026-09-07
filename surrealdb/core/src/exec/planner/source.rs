@@ -237,24 +237,39 @@ impl<'ctx> Planner<'ctx> {
 		// key alone, so the scan stays in `TargetId` mode and skips fetching
 		// non-matching edge records; a record-referencing predicate needs the
 		// full edge record.
-		let graph_pushdown: Option<(Arc<dyn crate::exec::PhysicalExpr>, bool)> =
-			if is_graph && !needs_full_pipeline {
-				match &cond {
-					Some(c) => {
-						let pred = self.physical_expr(c.0.clone()).await?;
-						let key_resident = Self::graph_predicate_is_key_resident(&pred);
-						Some((pred, key_resident))
-					}
-					None => None,
+		let graph_pushdown: Option<(
+			Arc<dyn crate::exec::PhysicalExpr>,
+			bool,
+			Option<crate::exec::operators::scan::PayloadPredicateSpec>,
+		)> = if is_graph && !needs_full_pipeline {
+			match &cond {
+				Some(c) => {
+					let pred = self.physical_expr(c.0.clone()).await?;
+					let key_resident = Self::graph_predicate_is_key_resident(&pred);
+					// A predicate that is not key-resident may still be
+					// payload-resident: every field it references inlined
+					// into the adjacency payloads of every named edge table.
+					let payload = if key_resident {
+						None
+					} else {
+						self.graph_predicate_payload_spec(&c.0, &pred, &what).await
+					};
+					Some((pred, key_resident, payload))
 				}
-			} else {
-				None
-			};
-		let cond_key_resident = graph_pushdown.as_ref().map(|(_, kr)| *kr).unwrap_or(false);
-		// A `cond` still forces full records unless it is a key-resident graph
-		// predicate; `SPLIT` and the expr/group pipeline force full as before.
+				None => None,
+			}
+		} else {
+			None
+		};
+		let cond_pushed_pre_fetch = graph_pushdown
+			.as_ref()
+			.map(|(_, kr, payload)| *kr || payload.is_some())
+			.unwrap_or(false);
+		// A `cond` still forces full records unless it is evaluated before
+		// the fetch (key- or payload-resident); `SPLIT` and the expr/group
+		// pipeline force full as before.
 		let needs_full_records =
-			needs_full_pipeline || (cond.is_some() && !cond_key_resident) || split.is_some();
+			needs_full_pipeline || (cond.is_some() && !cond_pushed_pre_fetch) || split.is_some();
 		let output_mode = if needs_full_records {
 			GraphScanOutput::FullEdge
 		} else {
@@ -332,10 +347,14 @@ impl<'ctx> Planner<'ctx> {
 				};
 				// Push the compiled predicate into the scan, replacing the
 				// downstream Filter for graph lookups.
-				let scan = if let Some((pred, key_resident)) = &graph_pushdown {
-					scan.with_predicate(Arc::clone(pred), *key_resident)
-				} else {
-					scan
+				let scan = match &graph_pushdown {
+					Some((pred, _, Some(payload))) => {
+						scan.with_payload_predicate(Arc::clone(pred), payload.clone())
+					}
+					Some((pred, key_resident, None)) => {
+						scan.with_predicate(Arc::clone(pred), *key_resident)
+					}
+					None => scan,
 				};
 				Arc::new(scan)
 			}
@@ -456,6 +475,123 @@ impl<'ctx> Planner<'ctx> {
 	/// record-referencing.
 	fn graph_predicate_is_key_resident(_pred: &Arc<dyn crate::exec::PhysicalExpr>) -> bool {
 		false
+	}
+
+	/// Whether a graph-lookup predicate is "payload-resident": evaluable
+	/// against the inline property payload the adjacency values carry,
+	/// before fetching any edge record.
+	///
+	/// Admission is deliberately conservative — anything not provably
+	/// payload-resident stays record-referencing, which only costs a fetch:
+	///
+	/// * the traversal must name its edge tables and read current data (`VERSION` reads take the
+	///   record path);
+	/// * static analysis of the predicate must fully resolve the fields it reads (a subquery,
+	///   parameter or traversal makes it opaque), each of which — beyond the always-synthesized
+	///   `id`/`in`/`out` — must be inlined on *every* named table;
+	/// * the predicate must not mutate;
+	/// * every named table must be a non-lightweight relation whose SELECT permission is `Full`,
+	///   and each referenced inline field's SELECT permission must be `Full` too — payload
+	///   evaluation reads raw stored values, so a row- or field-level clause would otherwise let
+	///   hidden values steer the visible result set.
+	///
+	/// Returns the per-table `(generation, field order)` snapshot the
+	/// evaluation trusts at read time.
+	async fn graph_predicate_payload_spec(
+		&self,
+		cond: &crate::expr::Expr,
+		pred: &Arc<dyn crate::exec::PhysicalExpr>,
+		what: &[crate::expr::lookup::LookupSubject],
+	) -> Option<crate::exec::operators::scan::PayloadPredicateSpec> {
+		use crate::catalog::providers::TableProvider;
+		use crate::exec::operators::scan::{PayloadPredicateSpec, PayloadTableSpec};
+
+		let (Some(txn), Some(ns), Some(db)) = (&self.txn, &self.ns, &self.db) else {
+			return None;
+		};
+		if self.version.is_some() || what.is_empty() {
+			return None;
+		}
+		if pred.access_mode() != crate::exec::AccessMode::ReadOnly {
+			return None;
+		}
+		let deps = crate::expr::computed_deps::extract_computed_deps(cond);
+		if !deps.is_complete {
+			return None;
+		}
+		let needed: Vec<&String> =
+			deps.fields.iter().filter(|f| !matches!(f.as_str(), "id" | "in" | "out")).collect();
+		if needed.is_empty() {
+			// A pure id/in/out predicate has nothing to gain from payloads.
+			return None;
+		}
+		// When the actor's runtime permission checks are provably skipped,
+		// the permission gates below don't apply; otherwise every involved
+		// permission must be `Full`, because payload evaluation reads raw
+		// stored values.
+		let perms_skipped = !self.should_check_perms_for_view(ns, db);
+		let mut tables = std::collections::HashMap::new();
+		for subject in what {
+			let table = match subject {
+				crate::expr::lookup::LookupSubject::Table {
+					table,
+					..
+				}
+				| crate::expr::lookup::LookupSubject::Range {
+					table,
+					..
+				} => table,
+			};
+			let Ok(Some(def)) = txn.get_tb_by_name(ns, db, table, None).await else {
+				return None;
+			};
+			if !perms_skipped && !matches!(def.permissions.select, crate::catalog::Permission::Full)
+			{
+				return None;
+			}
+			match &def.table_type {
+				crate::catalog::TableType::Relation(rel) if !rel.lightweight => {}
+				_ => return None,
+			}
+			let Ok(fields) =
+				txn.all_tb_fields(def.namespace_id, def.database_id, &def.name, None).await
+			else {
+				return None;
+			};
+			let inline = crate::doc::inline_fields(&fields);
+			let names: Vec<String> =
+				inline.iter().map(|f| crate::doc::inline_field_name(f)).collect();
+			for field in &needed {
+				names.iter().position(|n| &n == field)?;
+			}
+			// Payload evaluation reads the referenced fields' raw stored
+			// values — including everything nested inside them — so every
+			// field definition rooted at a referenced field must be
+			// SELECT-Full: a `meta.secret` clause under an inline `meta`
+			// would otherwise let hidden sub-values steer the results.
+			if !perms_skipped {
+				for fd in fields.iter() {
+					let Some(crate::expr::Part::Field(root)) = fd.name.0.first() else {
+						continue;
+					};
+					if needed.iter().any(|n| n.as_str() == root.as_str())
+						&& !matches!(fd.select_permission, crate::catalog::Permission::Full)
+					{
+						return None;
+					}
+				}
+			}
+			tables.insert(
+				def.name.clone(),
+				PayloadTableSpec {
+					generation: def.graph_inline_gen,
+					fields: names,
+				},
+			);
+		}
+		Some(PayloadPredicateSpec {
+			tables,
+		})
 	}
 
 	/// Decide whether a consecutive `(edge_lookup, vertex_lookup)` pair can

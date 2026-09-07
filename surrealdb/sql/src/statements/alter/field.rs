@@ -24,6 +24,8 @@ pub struct AlterFieldStatement {
 	pub kind: AlterKind<Kind>,
 	pub flexible: AlterKind<()>,
 	pub readonly: AlterKind<()>,
+	/// Set or drop the `INLINE` clause.
+	pub inline: AlterKind<()>,
 	pub value: AlterKind<Expr>,
 	pub assert: AlterKind<Expr>,
 	pub default: AlterDefault,
@@ -41,6 +43,7 @@ impl Default for AlterFieldStatement {
 			kind: AlterKind::None,
 			flexible: AlterKind::None,
 			readonly: AlterKind::None,
+			inline: AlterKind::None,
 			value: AlterKind::None,
 			assert: AlterKind::None,
 			default: AlterDefault::None,
@@ -71,6 +74,11 @@ impl ToSql for AlterFieldStatement {
 		match self.readonly {
 			AlterKind::Set(_) => write_sql!(f, fmt, " READONLY"),
 			AlterKind::Drop => write_sql!(f, fmt, " DROP READONLY"),
+			AlterKind::None => {}
+		}
+		match self.inline {
+			AlterKind::Set(_) => write_sql!(f, fmt, " INLINE"),
+			AlterKind::Drop => write_sql!(f, fmt, " DROP INLINE"),
 			AlterKind::None => {}
 		}
 		match self.value {

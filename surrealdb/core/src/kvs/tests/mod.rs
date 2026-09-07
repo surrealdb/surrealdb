@@ -25,6 +25,8 @@ mod graph_semijoin_test;
 #[cfg(feature = "kv-mem")]
 mod inline_cache_test;
 #[cfg(feature = "kv-mem")]
+mod inline_props_test;
+#[cfg(feature = "kv-mem")]
 mod keyspace_test;
 #[cfg(feature = "kv-mem")]
 mod lightweight_test;

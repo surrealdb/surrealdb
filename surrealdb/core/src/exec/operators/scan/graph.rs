@@ -37,6 +37,28 @@ use crate::key::schema::EdgeCacheKey;
 use crate::kvs::{CachePolicy, Direction, Transaction};
 use crate::val::{RecordId, RecordIdKey, TableName, Value};
 
+/// Plan-time snapshot of the inline-field state a payload-resident
+/// predicate was admitted under: per edge table, the inline generation and
+/// the complete inline field set in canonical (payload) order.
+///
+/// The snapshot is the trust anchor at read time: a payload whose stamped
+/// generation or value count differs was written under a different field
+/// set and falls back to the record — the predicate is never evaluated
+/// against values that mean something else than the plan assumed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PayloadPredicateSpec {
+	pub(crate) tables: std::collections::HashMap<TableName, PayloadTableSpec>,
+}
+
+/// One table's inline-field snapshot inside a [`PayloadPredicateSpec`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PayloadTableSpec {
+	/// The table's inline generation at plan time.
+	pub(crate) generation: u32,
+	/// The raw names of every inline field, in the canonical payload order.
+	pub(crate) fields: Vec<String>,
+}
+
 /// What kind of output the GraphEdgeScan should produce.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GraphScanOutput {
@@ -115,6 +137,15 @@ pub struct GraphEdgeScan {
 	/// `Planner::graph_predicate_is_key_resident`.
 	pub(crate) predicate_key_resident: bool,
 
+	/// When set, `predicate` is payload-resident: every field it references
+	/// is inlined into the adjacency payloads of every scanned edge table,
+	/// so it is evaluated against the synthesized `{id, in, out, …inline}`
+	/// object before any fetch — a falsy edge is dropped without touching
+	/// its record. Edges whose payload is unusable (absent, spilled, or
+	/// written under a different generation) fall back per flush to the
+	/// record path, where the same predicate is applied after fetch.
+	pub(crate) payload_spec: Option<Arc<PayloadPredicateSpec>>,
+
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -137,6 +168,7 @@ impl GraphEdgeScan {
 			limit: None,
 			predicate: None,
 			predicate_key_resident: false,
+			payload_spec: None,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
@@ -165,6 +197,20 @@ impl GraphEdgeScan {
 	) -> Self {
 		self.predicate = Some(predicate);
 		self.predicate_key_resident = key_resident;
+		self
+	}
+
+	/// Attach a payload-resident `WHERE` predicate together with the
+	/// plan-time inline-field snapshot it was admitted under. See
+	/// [`GraphEdgeScan::payload_spec`].
+	pub(crate) fn with_payload_predicate(
+		mut self,
+		predicate: Arc<dyn PhysicalExpr>,
+		spec: PayloadPredicateSpec,
+	) -> Self {
+		self.predicate = Some(predicate);
+		self.predicate_key_resident = false;
+		self.payload_spec = Some(Arc::new(spec));
 		self
 	}
 }
@@ -202,6 +248,8 @@ impl ExecOperator for GraphEdgeScan {
 				"predicate_scope".to_string(),
 				if self.predicate_key_resident {
 					"key".to_string()
+				} else if self.payload_spec.is_some() {
+					"payload".to_string()
 				} else {
 					"record".to_string()
 				},
@@ -281,6 +329,7 @@ impl ExecOperator for GraphEdgeScan {
 			self.predicate.clone().filter(|_| self.predicate_key_resident);
 		let record_predicate: Option<Arc<dyn PhysicalExpr>> =
 			self.predicate.clone().filter(|_| !self.predicate_key_resident);
+		let payload_spec = self.payload_spec.clone();
 		let metrics = Arc::clone(&self.metrics);
 		let record_metrics = metrics.is_enabled();
 
@@ -313,7 +362,10 @@ impl ExecOperator for GraphEdgeScan {
 			// adjacency in one value, so they are usable only when this scan
 			// reads current data over unbounded edge-table specs — a windowed
 			// (`->edge:a..b`) or versioned read needs the cursor.
-			let cache_eligible = version.is_none()
+			// A payload-resident predicate needs the adjacency values, which
+			// the caches do not carry — payload mode always reads the cursor.
+			let cache_eligible = payload_spec.is_none()
+				&& version.is_none()
 				&& edge_tables.iter().all(|s| {
 					matches!(s.range_start, std::ops::Bound::Unbounded)
 						&& matches!(s.range_end, std::ops::Bound::Unbounded)
@@ -337,6 +389,9 @@ impl ExecOperator for GraphEdgeScan {
 
 			// Read from the child operator stream and extract RecordIds
 			let mut rid_batch: Vec<RecordId> = Vec::with_capacity(scan_batch_size);
+			// Payload-mode edges buffered for the flush-time batched
+			// evaluation; always drained by the per-cursor-batch flush.
+			let mut payload_pending: Vec<PayloadPending> = Vec::new();
 
 			while let Some(batch_result) = input_stream.next().await {
 				let batch = batch_result?;
@@ -591,6 +646,26 @@ impl ExecOperator for GraphEdgeScan {
 											)
 											.context("Failed to open graph cursor")?
 										}
+										// Payload mode needs the adjacency
+										// values even on a never-folded table,
+										// whose keys-only scan would otherwise
+										// skip them.
+										VertexAdjacency::Normal {
+											folded,
+										} if payload_spec.is_some() => MergedAdjacencyCursor::open_with_values(
+											&txn,
+											adjacency_scope,
+											folded,
+											version,
+											Some(
+												ctx.root()
+													.ctx
+													.get_index_stores()
+													.adjacency_resolve(),
+											),
+										)
+										.await
+										.context("Failed to open graph cursor")?,
 										VertexAdjacency::Normal {
 											folded,
 										} => MergedAdjacencyCursor::open(
@@ -677,6 +752,28 @@ impl ExecOperator for GraphEdgeScan {
 														}
 													}
 												}
+											} else if let Some(spec) = payload_spec.as_deref() {
+												// Payload-resident predicate: synthesize the
+												// candidate object now, evaluate at flush time
+												// in one batch — a falsy edge is dropped there
+												// without touching its record (the selectivity
+												// win), a truthy one proceeds to the batched
+												// existence and permission resolve. An edge
+												// whose payload is unusable falls back to the
+												// one trustworthy source, the edge record,
+												// prefetched per flush with a single multi-get.
+												// Scan order is preserved throughout.
+												let entry = synthesize_payload_candidate(
+													spec, rid, dir, item,
+												);
+												if record_metrics {
+													if entry.1.is_some() {
+														metrics.add_props_evals(1);
+													} else {
+														metrics.add_props_fallbacks(1);
+													}
+												}
+												payload_pending.push(entry);
 											} else {
 												// `TargetId` / `FullEdge` operate on the
 												// edge identity. Defer counting until after
@@ -706,25 +803,56 @@ impl ExecOperator for GraphEdgeScan {
 										// source+direction); without one we flush at
 										// `scan_batch_size` to amortise the batch fetch.
 										let should_flush = if has_predicate {
-											!rid_batch.is_empty()
+											!rid_batch.is_empty() || !payload_pending.is_empty()
 										} else {
 											rid_batch.len() >= scan_batch_size
 										};
 										if should_flush {
-											let mut values = resolve_and_filter_batch(
-												&ctx,
-												&txn,
-												ns_id,
-												db_id,
-												&rid_batch,
-												fetch_full,
-												check_perms,
-												version,
-												&mut perm_cache,
-												key_predicate.as_ref(),
-												record_predicate.as_ref(),
-											)
-											.await?;
+											// In payload mode the buffered edges are first
+											// reduced to the predicate's matches — evaluated
+											// in batch against their payloads or their
+											// prefetched records — so the flush resolves
+											// without re-applying it: that resolve is the
+											// batched existence-and-permissions check.
+											if !payload_pending.is_empty() {
+												let pred = record_predicate
+													.as_ref()
+													.expect("payload mode implies a predicate");
+												filter_payload_pending(
+													&ctx,
+													&txn,
+													ns_id,
+													db_id,
+													version,
+													pred,
+													std::mem::take(&mut payload_pending),
+													&mut rid_batch,
+												)
+												.await?;
+											}
+											let flush_record_predicate = if payload_spec.is_some() {
+												None
+											} else {
+												record_predicate.as_ref()
+											};
+											let mut values = if rid_batch.is_empty() {
+												Vec::new()
+											} else {
+												resolve_and_filter_batch(
+													&ctx,
+													&txn,
+													ns_id,
+													db_id,
+													&rid_batch,
+													fetch_full,
+													check_perms,
+													version,
+													&mut perm_cache,
+													key_predicate.as_ref(),
+													flush_record_predicate,
+												)
+												.await?
+											};
 											rid_batch.clear();
 											if has_predicate {
 												// Count post-filter matches and enforce the
@@ -920,6 +1048,145 @@ impl ExecOperator for GraphEdgeScan {
 
 		Ok(monitor_stream(Box::pin(stream), "GraphEdgeScan", &self.metrics))
 	}
+}
+
+/// One payload-mode edge awaiting its flush-time predicate evaluation:
+/// the edge's record id paired with the synthesized `{id, in, out,
+/// …inline}` candidate object — `None` when the payload was unusable and
+/// the edge record is the only source of truth.
+type PayloadPending = (RecordId, Option<Value>);
+
+/// Synthesizes the candidate object a payload-resident predicate is
+/// evaluated against, for one adjacency entry. Trust is anchored on the
+/// plan-time snapshot: the payload's stamped generation and value count
+/// must match it exactly. A `None` candidate marks a fallback — the
+/// payload was absent, spilled, written under a different generation or
+/// field count, undecodable, or a legacy entry with no embedded target —
+/// and the edge record is the only source of truth.
+fn synthesize_payload_candidate(
+	spec: &PayloadPredicateSpec,
+	source: &RecordId,
+	dir: Dir,
+	item: crate::idx::adjacency::MergedAdjacencyEdge,
+) -> PayloadPending {
+	use surrealdb_datastore::values::graph::InlineProps;
+	let edge = item.edge;
+	let Some(table_spec) = spec.tables.get(&edge.table) else {
+		return (edge, None);
+	};
+	let Some(target) = item.target else {
+		return (edge, None);
+	};
+	let Some(body) = item.props.as_deref() else {
+		return (edge, None);
+	};
+	let Ok(props) = InlineProps::decode(body) else {
+		return (edge, None);
+	};
+	if props.generation != table_spec.generation {
+		return (edge, None);
+	}
+	let Some(values) = props.values else {
+		return (edge, None);
+	};
+	if values.len() != table_spec.fields.len() {
+		return (edge, None);
+	}
+	let (in_rid, out_rid) = match dir {
+		Dir::Out => (source.clone(), target),
+		Dir::In => (target, source.clone()),
+		Dir::Both => return (edge, None),
+	};
+	let mut object = crate::val::Object::default();
+	object.insert("id".to_owned(), Value::RecordId(edge.clone()));
+	object.insert("in".to_owned(), Value::RecordId(in_rid));
+	object.insert("out".to_owned(), Value::RecordId(out_rid));
+	for (name, value) in table_spec.fields.iter().zip(values) {
+		object.insert(name.clone(), value);
+	}
+	(edge, Some(Value::Object(object)))
+}
+
+/// Reduces one flush's worth of payload-mode edges to the predicate's
+/// matches, appended to `out` in scan order.
+///
+/// Edges carrying a synthesized candidate are evaluated in one batch.
+/// Fallback edges are prefetched with a single multi-get and evaluated
+/// in a second batch over the fetched records — a missing record (a
+/// vertex-side orphan) simply doesn't match. The prefetch populates the
+/// transaction's read cache, so the subsequent existence-and-permissions
+/// resolve does not re-read the surviving records from the store.
+#[allow(clippy::too_many_arguments)]
+async fn filter_payload_pending(
+	ctx: &ExecutionContext,
+	txn: &Transaction,
+	ns_id: NamespaceId,
+	db_id: DatabaseId,
+	version: Option<u64>,
+	predicate: &Arc<dyn PhysicalExpr>,
+	pending: Vec<PayloadPending>,
+	out: &mut Vec<RecordId>,
+) -> Result<(), ControlFlow> {
+	// Split the flush into its two evaluation groups, remembering each
+	// edge's group so survivors merge back in scan order.
+	let mut candidates: Vec<Value> = Vec::new();
+	let mut fallback_rids: Vec<RecordId> = Vec::new();
+	let mut order: Vec<(RecordId, bool)> = Vec::with_capacity(pending.len());
+	for (rid, candidate) in pending {
+		match candidate {
+			Some(value) => {
+				candidates.push(value);
+				order.push((rid, true));
+			}
+			None => {
+				fallback_rids.push(rid.clone());
+				order.push((rid, false));
+			}
+		}
+	}
+	let candidate_results = if candidates.is_empty() {
+		Vec::new()
+	} else {
+		predicate.evaluate_batch(EvalContext::from_exec_ctx(ctx), &candidates).await?
+	};
+	let fallback_matches = if fallback_rids.is_empty() {
+		Vec::new()
+	} else {
+		let records = txn
+			.get_records(ns_id, db_id, &fallback_rids, version, CachePolicy::ReadWrite)
+			.await
+			.context("Failed to fetch the payload-fallback edge records")?;
+		let mut matches = vec![false; records.len()];
+		let mut present_slots: Vec<usize> = Vec::new();
+		let mut present_values: Vec<Value> = Vec::new();
+		for (slot, record) in records.iter().enumerate() {
+			if record.metadata.is_some() || !record.data.is_none() {
+				present_slots.push(slot);
+				present_values.push(record.data.clone());
+			}
+		}
+		if !present_values.is_empty() {
+			let results =
+				predicate.evaluate_batch(EvalContext::from_exec_ctx(ctx), &present_values).await?;
+			for (slot, result) in present_slots.into_iter().zip(results) {
+				matches[slot] = result.is_truthy();
+			}
+		}
+		matches
+	};
+	let mut candidate_results = candidate_results.into_iter();
+	let mut fallback_matches = fallback_matches.into_iter();
+	for (rid, evaluated) in order {
+		let keep = if evaluated {
+			candidate_results.next().is_some_and(|v| v.is_truthy())
+		} else {
+			fallback_matches.next().unwrap_or(false)
+		};
+		if keep {
+			out.push(rid);
+		}
+	}
+	Ok(())
 }
 
 /// Decodes one cached adjacency entry's identity bytes into its owned

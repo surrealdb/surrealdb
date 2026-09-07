@@ -101,12 +101,19 @@ pub(crate) async fn remove_field_statement_compute(
 		}
 		.into());
 	};
-	// Refresh the table cache
+	// Refresh the table cache. Removing an inline field changes the inline
+	// field set, so the generation is bumped and every written payload
+	// falls back until a write restamps it.
 	txn.replace_tb(
 		ns_name,
 		db_name,
 		&TableDefinition {
 			cache_fields_ts: Uuid::now_v7(),
+			graph_inline_gen: if fd.inline {
+				tb.graph_inline_gen.wrapping_add(1)
+			} else {
+				tb.graph_inline_gen
+			},
 			..(*tb).clone()
 		},
 	)
