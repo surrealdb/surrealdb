@@ -92,8 +92,9 @@ impl Document {
 			Action::Update => (Value::from("UPDATE").into(), false),
 		};
 
-		// Get the current and initial docs
-		// These are only used for EVENTS, so they should not be reduced
+		// The pre- and post-mutation records, unreduced. Reduction is
+		// per-subscriber (each subscription carries its own auth), so it happens
+		// inside `process_table_lives_inner` rather than here.
 		let initial = self.initial.doc.as_arc();
 		let current = self.current.doc.as_arc();
 
@@ -207,53 +208,98 @@ impl Document {
 			})
 			.map_err(anyhow::Error::new)?;
 
-		// We need to create a new context which we will
-		// use for processing this LIVE query statement.
-		// This ensures that we are using the session
-		// of the user who created the LIVE query.
-		let mut ctx = Context::background(ctx);
-		// Set the current transaction on the new LIVE
-		// query context to prevent unreachable behaviour
-		// and ensure that queries can be executed.
-		ctx.set_transaction(tx);
-		// SECURITY: captured user variables MUST be added first so the
-		// trusted LIVE / session params below overwrite any user-named
-		// `$value` / `$before` / `$after` / `$event` / `$session` /
-		// `$auth` / `$access` / `$token`. Otherwise a subscriber could
-		// shadow the real document context that table permission
-		// expressions read.
-		ctx.add_values(live_subscription.vars.clone());
-		// Add the session params to this LIVE query, so
-		// that queries can use these within field
-		// projections and WHERE clauses.
-		ctx.add_value("access", sess.pick(AC.as_ref()).into());
-		ctx.add_value("auth", sess.pick(RD.as_ref()).into());
-		ctx.add_value("token", sess.pick(TK.as_ref()).into());
-		ctx.add_value("session", sess.clone().into());
-		// Add $before, $after, $value, and $event params
-		// to this LIVE query so the user can use these
-		// within field projections and WHERE clauses.
-		ctx.add_value("event", met);
-		ctx.add_value("value", Arc::clone(&current));
-		ctx.add_value("after", current);
-		ctx.add_value("before", initial);
-		// Freeze the context
-		let ctx = ctx.freeze();
-
-		// Get the document to check against and to return based on lq context.
-		// `prepare_live_doc` clones+reduces the source, populates computed
-		// fields under the LIVE owner's auth, then re-cuts computed fields
-		// that the owner does not have permission to read. It returns
-		// `None` if any step fails so the notification is skipped rather
-		// than the triggering write being aborted.
-		let source = if is_delete {
-			&self.initial
-		} else {
-			&self.current
+		// Build a context for processing this LIVE query statement. This
+		// ensures that we are using the session of the user who created the
+		// LIVE query.
+		//
+		// SECURITY: captured user variables MUST be added first so the trusted
+		// LIVE / session params below overwrite any user-named `$value` /
+		// `$before` / `$after` / `$event` / `$session` / `$auth` / `$access` /
+		// `$token`. Otherwise a subscriber could shadow the real document
+		// context that table permission expressions read.
+		let build_ctx = |docs: Option<(Arc<Value>, Arc<Value>)>| {
+			let mut ctx = Context::background(ctx);
+			// Set the current transaction on the new LIVE query context to
+			// prevent unreachable behaviour and ensure that queries can be
+			// executed.
+			ctx.set_transaction(Arc::clone(&tx));
+			ctx.add_values(live_subscription.vars.clone());
+			// Add the session params to this LIVE query, so that queries can
+			// use these within field projections and WHERE clauses.
+			ctx.add_value("access", sess.pick(AC.as_ref()).into());
+			ctx.add_value("auth", sess.pick(RD.as_ref()).into());
+			ctx.add_value("token", sess.pick(TK.as_ref()).into());
+			ctx.add_value("session", sess.clone().into());
+			ctx.add_value("event", Arc::clone(&met));
+			// Add $before, $after and $value so the subscription can use them
+			// within field projections and WHERE clauses.
+			if let Some((before, after)) = docs {
+				ctx.add_value("value", Arc::clone(&after));
+				ctx.add_value("after", after);
+				ctx.add_value("before", before);
+			}
+			ctx.freeze()
 		};
-		let Some(doc) = self.prepare_live_doc(stk, &ctx, &opt, source).await else {
+
+		// Materialise the per-subscriber views. `prepare_live_doc` clones and
+		// reduces its source, populates computed fields under the LIVE owner's
+		// auth, then re-cuts the computed fields that owner has no permission
+		// to read. It returns `None` if any step fails, so the notification is
+		// skipped rather than the triggering write being aborted.
+		//
+		// The context this runs under binds the *unreduced* record to `$value`
+		// / `$after` / `$before`, because the only expressions it evaluates are
+		// the schema owner's own field-permission predicates and computed-field
+		// bodies. Those are answered against the record by design — the same
+		// choice `reduce_document` makes — since a predicate reading the view
+		// its own clause is about to cut from would decide on a document with
+		// the field already missing.
+		let prep_ctx = build_ctx(Some((Arc::clone(&initial), Arc::clone(&current))));
+		// `self.current` is cleared before a delete reaches this point, so the
+		// delivered document comes from `self.initial` for a delete and from
+		// `self.current` otherwise. Both sides are reduced regardless, so
+		// `$before` and `$after` are each authorisation-consistent.
+		let (source, counterpart) = if is_delete {
+			(&self.initial, &self.current)
+		} else {
+			(&self.current, &self.initial)
+		};
+		let Some(doc) = self.prepare_live_doc(stk, &prep_ctx, &opt, source).await else {
 			return Ok(());
 		};
+		// The counterpart is the opposite image — `$before` on a create,
+		// `$after` on a delete — and is absent for exactly those two actions. An
+		// absent record has no fields to reduce or derive: running
+		// `prepare_live_doc` on it would evaluate every COMPUTED body against
+		// NONE, and a TYPE-constrained field then fails to coerce and yields
+		// `None`, which would drop the whole notification. Bind the empty view
+		// directly; a present counterpart (an update's pre-image) is prepared as
+		// before.
+		let counterpart = if counterpart.doc.as_ref().is_nullish() {
+			counterpart.clone()
+		} else {
+			let Some(prepared) = self.prepare_live_doc(stk, &prep_ctx, &opt, counterpart).await
+			else {
+				return Ok(());
+			};
+			prepared
+		};
+
+		// SECURITY: `$value`, `$after` and `$before` are rebound to the reduced
+		// views before any subscriber-authored expression runs. The projection
+		// and the `WHERE` clause of a LIVE query are subscriber-authored and
+		// may root an idiom at these params, so binding the record itself would
+		// let a subscriber denied a field read it through
+		// `LIVE SELECT $after.<field>`, or test it through
+		// `WHERE $after.<field> = ...` and use notification delivery as a
+		// boolean oracle — the reduced document handed to `lq_check` and the
+		// projection notwithstanding.
+		let (before, after) = if is_delete {
+			(doc.doc.as_arc(), counterpart.doc.as_arc())
+		} else {
+			(counterpart.doc.as_arc(), doc.doc.as_arc())
+		};
+		let ctx = build_ctx(Some((before, after)));
 
 		// First of all, let's check to see if the WHERE
 		// clause of the LIVE query is matched by this
@@ -1268,5 +1314,87 @@ mod tests {
 		let mut res =
 			ds.execute("DELETE person:3", &ses_write, None).await.expect("execute should not Err");
 		res.remove(0).result.expect("DELETE should succeed");
+	}
+
+	/// A CREATE notification must still fire for a table with a TYPE-constrained
+	/// COMPUTED field. The `$before` image of a create is absent, and deriving
+	/// the computed field against it coerces `NONE` to the declared type and
+	/// fails; the counterpart must be bound as the empty view rather than run
+	/// through computed-field evaluation, or the whole notification is dropped.
+	#[tokio::test]
+	async fn test_live_create_notification_survives_typed_computed_field() {
+		let (recv, ds) = new_ds_with_broker().await.unwrap();
+		let (ns, db) = ("test", "test");
+		let tx = ds.transaction(Write).await.unwrap();
+		tx.ensure_ns_db(None, ns, db).await.unwrap();
+		tx.commit().await.unwrap();
+
+		let owner_ses = Session::owner().with_ns(ns).with_db(db);
+		// `derived` computes to a plain `string`, so it is `NONE` on the absent
+		// pre-image and fails the `TYPE string` coercion there.
+		ds.execute(
+			"DEFINE TABLE person PERMISSIONS FOR select FULL; \
+			 DEFINE FIELD name ON person TYPE string; \
+			 DEFINE FIELD derived ON person TYPE string COMPUTED name",
+			&owner_ses,
+			None,
+		)
+		.await
+		.unwrap();
+
+		let live_ses = Session::owner().with_ns(ns).with_db(db).with_rt(true);
+		ds.execute("LIVE SELECT * FROM person", &live_ses, None).await.unwrap();
+		while recv.try_recv().is_ok() {}
+
+		ds.execute("CREATE person:1 SET name = 'foo'", &owner_ses, None).await.unwrap();
+
+		let notif = tokio::time::timeout(tokio::time::Duration::from_millis(500), recv.recv())
+			.await
+			.expect("a CREATE notification must fire despite the typed computed field")
+			.expect("channel should not be closed");
+		assert_eq!(notif.action, PublicAction::Create);
+		let PublicValue::Object(obj) = notif.result else {
+			panic!("CREATE result should be an object, got: {:?}", notif.result);
+		};
+		assert_eq!(
+			obj.get("derived"),
+			Some(&PublicValue::String("foo".to_string())),
+			"the present record's computed field must be delivered; got: {obj:?}",
+		);
+	}
+
+	/// The DELETE counterpart (`$after`) is likewise absent, so the same drop
+	/// applies to deletes: the notification must still fire.
+	#[tokio::test]
+	async fn test_live_delete_notification_survives_typed_computed_field() {
+		let (recv, ds) = new_ds_with_broker().await.unwrap();
+		let (ns, db) = ("test", "test");
+		let tx = ds.transaction(Write).await.unwrap();
+		tx.ensure_ns_db(None, ns, db).await.unwrap();
+		tx.commit().await.unwrap();
+
+		let owner_ses = Session::owner().with_ns(ns).with_db(db);
+		ds.execute(
+			"DEFINE TABLE person PERMISSIONS FOR select FULL; \
+			 DEFINE FIELD name ON person TYPE string; \
+			 DEFINE FIELD derived ON person TYPE string COMPUTED name",
+			&owner_ses,
+			None,
+		)
+		.await
+		.unwrap();
+		ds.execute("CREATE person:1 SET name = 'foo'", &owner_ses, None).await.unwrap();
+
+		let live_ses = Session::owner().with_ns(ns).with_db(db).with_rt(true);
+		ds.execute("LIVE SELECT * FROM person", &live_ses, None).await.unwrap();
+		while recv.try_recv().is_ok() {}
+
+		ds.execute("DELETE person:1", &owner_ses, None).await.unwrap();
+
+		let notif = tokio::time::timeout(tokio::time::Duration::from_millis(500), recv.recv())
+			.await
+			.expect("a DELETE notification must fire despite the typed computed field")
+			.expect("channel should not be closed");
+		assert_eq!(notif.action, PublicAction::Delete);
 	}
 }

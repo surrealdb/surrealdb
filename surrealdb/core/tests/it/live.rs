@@ -559,3 +559,186 @@ async fn test_remove_user_kills_their_live_queries() -> Result<()> {
 
 	Ok(())
 }
+
+/// A LIVE projection rooted at `$after` / `$before` must not read a field the
+/// subscriber has no permission to select.
+///
+/// The projection is subscriber-authored and `$after` / `$before` are trusted
+/// LIVE params, so binding the unreduced record to them lets the subscriber
+/// copy a denied field straight into the notification payload — the reduced
+/// document the normal delivery path uses notwithstanding. Sibling of
+/// `live_document_reduction`, which covers the payload path.
+#[tokio::test]
+async fn live_projection_via_params_respects_field_permissions() -> Result<()> {
+	let (channel, dbs) = new_ds("test", "test", true).await?;
+
+	let ses_owner = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	let ses_record = Session::for_record(
+		"test",
+		"test",
+		"test",
+		Value::RecordId(RecordId::new("user".to_owned(), "test".to_owned())),
+	)
+	.with_rt(true);
+
+	let sql = "
+		DEFINE TABLE test SCHEMAFULL PERMISSIONS FULL;
+		DEFINE FIELD visible ON test PERMISSIONS FULL;
+		DEFINE FIELD hidden ON test PERMISSIONS NONE;
+	";
+	let res = &mut dbs.execute(sql, &ses_owner, None).await?;
+	assert_eq!(res.len(), 3);
+	skip_ok(res, 3)?;
+
+	// Project the restricted field out of `$after` under an alias, so the
+	// name-keyed output filter has no matching path to cut.
+	let sql = "LIVE SELECT $after.hidden AS leaked, $after.visible AS shown FROM test;";
+	let res = &mut dbs.execute(sql, &ses_record, None).await?;
+	assert_eq!(res.len(), 1);
+	let lqid = res.remove(0).result?;
+	assert_eq!(lqid.kind(), Kind::Uuid);
+
+	// CREATE: `$after` carries the new record.
+	let sql = "CREATE test:1 SET hidden = 123, visible = 'abc';";
+	let res = &mut dbs.execute(sql, &ses_owner, None).await?;
+	assert_eq!(res.len(), 1);
+	skip_ok(res, 1)?;
+
+	let tmp = channel.recv().await?;
+	assert_eq!(tmp.action, Action::Create);
+	// `leaked` must be NONE, and the unrestricted sibling must still arrive so
+	// the params are bound to the record rather than to nothing at all.
+	assert_eq!(
+		tmp.result,
+		syn::value("{ leaked: NONE, shown: 'abc' }")?,
+		"a LIVE projection must not read a denied field through $after"
+	);
+
+	// UPDATE: `$after` carries the post-mutation record.
+	let sql = "UPDATE test:1 SET hidden = 456, visible = 'def';";
+	let res = &mut dbs.execute(sql, &ses_owner, None).await?;
+	assert_eq!(res.len(), 1);
+	skip_ok(res, 1)?;
+
+	let tmp = channel.recv().await?;
+	assert_eq!(tmp.action, Action::Update);
+	assert_eq!(tmp.result, syn::value("{ leaked: NONE, shown: 'def' }")?);
+
+	Ok(())
+}
+
+/// The delete-side sibling: `$before` must be reduced too. The delete path
+/// clears `self.current` before LIVE processing, so `$before` is the only
+/// param carrying the pre-delete record.
+#[tokio::test]
+async fn live_projection_via_before_param_respects_field_permissions() -> Result<()> {
+	let (channel, dbs) = new_ds("test", "test", true).await?;
+
+	let ses_owner = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	let ses_record = Session::for_record(
+		"test",
+		"test",
+		"test",
+		Value::RecordId(RecordId::new("user".to_owned(), "test".to_owned())),
+	)
+	.with_rt(true);
+
+	let sql = "
+		DEFINE TABLE test SCHEMAFULL PERMISSIONS FULL;
+		DEFINE FIELD visible ON test PERMISSIONS FULL;
+		DEFINE FIELD hidden ON test PERMISSIONS NONE;
+		CREATE test:1 SET hidden = 123, visible = 'abc';
+	";
+	let res = &mut dbs.execute(sql, &ses_owner, None).await?;
+	assert_eq!(res.len(), 4);
+	skip_ok(res, 4)?;
+
+	let sql = "LIVE SELECT $before.hidden AS leaked, $before.visible AS shown FROM test;";
+	let res = &mut dbs.execute(sql, &ses_record, None).await?;
+	assert_eq!(res.len(), 1);
+	let lqid = res.remove(0).result?;
+	assert_eq!(lqid.kind(), Kind::Uuid);
+
+	let sql = "DELETE test:1;";
+	let res = &mut dbs.execute(sql, &ses_owner, None).await?;
+	assert_eq!(res.len(), 1);
+	skip_ok(res, 1)?;
+
+	let tmp = channel.recv().await?;
+	assert_eq!(tmp.action, Action::Delete);
+	assert_eq!(
+		tmp.result,
+		syn::value("{ leaked: NONE, shown: 'abc' }")?,
+		"a LIVE projection must not read a denied field through $before"
+	);
+
+	Ok(())
+}
+
+/// A LIVE `WHERE` clause rooted at `$after` must not be able to test a field
+/// the subscriber has no permission to select.
+///
+/// The payload may still omit the field, but whether a notification arrives at
+/// all is itself the disclosure: the pair of outcomes below turns delivery into
+/// a boolean oracle over the restricted value. Sibling of the
+/// `WHERE hidden = 123` coverage in `live_document_reduction`.
+#[tokio::test]
+async fn live_where_via_params_respects_field_permissions() -> Result<()> {
+	let (channel, dbs) = new_ds("test", "test", true).await?;
+
+	let ses_owner = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	let ses_record = Session::for_record(
+		"test",
+		"test",
+		"test",
+		Value::RecordId(RecordId::new("user".to_owned(), "test".to_owned())),
+	)
+	.with_rt(true);
+
+	let sql = "
+		DEFINE TABLE test SCHEMAFULL PERMISSIONS FULL;
+		DEFINE FIELD visible ON test PERMISSIONS FULL;
+		DEFINE FIELD hidden ON test PERMISSIONS NONE;
+	";
+	let res = &mut dbs.execute(sql, &ses_owner, None).await?;
+	assert_eq!(res.len(), 3);
+	skip_ok(res, 3)?;
+
+	let sql = "LIVE SELECT * FROM test WHERE $after.hidden = 123;";
+	let res = &mut dbs.execute(sql, &ses_record, None).await?;
+	assert_eq!(res.len(), 1);
+	let lqid = res.remove(0).result?;
+	assert_eq!(lqid.kind(), Kind::Uuid);
+
+	// A record whose restricted field matches the guessed value must not
+	// deliver: `$after.hidden` reads NONE, so the predicate is false.
+	let sql = "CREATE test:1 SET hidden = 123, visible = 'abc';";
+	let res = &mut dbs.execute(sql, &ses_owner, None).await?;
+	assert_eq!(res.len(), 1);
+	skip_ok(res, 1)?;
+
+	let res = tokio::time::timeout(Duration::from_millis(500), channel.recv()).await;
+	assert!(res.is_err(), "a LIVE WHERE clause must not match on a denied field through $after");
+
+	// Control: the same subscription shape over an *unrestricted* field still
+	// matches, so the guard is scoped to denied fields rather than making every
+	// param-rooted predicate unsatisfiable.
+	let sql = "LIVE SELECT * FROM test WHERE $after.visible = 'xyz';";
+	let res = &mut dbs.execute(sql, &ses_record, None).await?;
+	assert_eq!(res.len(), 1);
+	let lqid = res.remove(0).result?;
+	assert_eq!(lqid.kind(), Kind::Uuid);
+
+	let sql = "CREATE test:2 SET hidden = 789, visible = 'xyz';";
+	let res = &mut dbs.execute(sql, &ses_owner, None).await?;
+	assert_eq!(res.len(), 1);
+	skip_ok(res, 1)?;
+
+	let tmp = tokio::time::timeout(Duration::from_millis(500), channel.recv())
+		.await
+		.expect("an unrestricted param-rooted predicate must still match")?;
+	assert_eq!(tmp.action, Action::Create);
+	assert_eq!(tmp.result, syn::value("{ id: test:2, visible: 'xyz' }")?);
+
+	Ok(())
+}
