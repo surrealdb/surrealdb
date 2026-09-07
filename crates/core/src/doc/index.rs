@@ -67,8 +67,10 @@ impl Document {
 			(o, n)
 		};
 
-		// Store all the variables and parameters required by the index operation
-		let mut ic = IndexOperation::new(ctx, opt, ix, o, n, rid);
+		// Store all the variables and parameters required by the index operation.
+		// Document indexing operates on committed schema, so the analyzer (if any)
+		// can be looked up lazily by FtIndex::new from the current transaction.
+		let mut ic = IndexOperation::new(ctx, opt, ix, None, o, n, rid);
 		// Keep track of compaction requests, we need to trigger them after the index operation
 		let mut require_compaction = false;
 		// Execute the index operation

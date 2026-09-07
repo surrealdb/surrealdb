@@ -10,16 +10,21 @@ use crate::key::index::iu::IndexCountKey;
 use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::{Transaction, TransactionType};
 use crate::sql::index::{HnswParams, MTreeParams, SearchParams};
-use crate::sql::statements::DefineIndexStatement;
+use crate::sql::statements::{DefineAnalyzerStatement, DefineIndexStatement};
 use crate::sql::{Array, Index, Part, Thing, Value};
 use reblessive::tree::Stk;
 use std::borrow::Cow;
+use std::sync::Arc;
 use uuid::Uuid;
 
 pub(crate) struct IndexOperation<'a> {
 	ctx: &'a Context,
 	opt: &'a Options,
 	ix: &'a DefineIndexStatement,
+	/// Pre-resolved analyzer (used by background search-index builds when the
+	/// analyzer was defined in the same transaction as the index, so it cannot
+	/// be looked up from a fresh independent transaction).
+	az: Option<Arc<DefineAnalyzerStatement>>,
 	/// The old values (if existing)
 	o: Option<Vec<Value>>,
 	/// The new values (if existing)
@@ -32,6 +37,7 @@ impl<'a> IndexOperation<'a> {
 		ctx: &'a Context,
 		opt: &'a Options,
 		ix: &'a DefineIndexStatement,
+		az: Option<Arc<DefineAnalyzerStatement>>,
 		o: Option<Vec<Value>>,
 		n: Option<Vec<Value>>,
 		rid: &'a Thing,
@@ -40,6 +46,7 @@ impl<'a> IndexOperation<'a> {
 			ctx,
 			opt,
 			ix,
+			az,
 			o,
 			n,
 			rid,
@@ -69,11 +76,12 @@ impl<'a> IndexOperation<'a> {
 		ctx: &Context,
 		opt: &Options,
 		ix: &DefineIndexStatement,
+		az: Option<Arc<DefineAnalyzerStatement>>,
 	) -> Result<Option<FtIndex>, Error> {
 		if let Index::Search(p) = &ix.index {
 			let (ns, db) = opt.ns_db()?;
 			let ikb = IndexKeyBase::new(ns, db, ix)?;
-			Ok(Some(FtIndex::new(ctx, opt, &p.az, ikb, p, TransactionType::Write).await?))
+			Ok(Some(FtIndex::new(ctx, opt, &p.az, az, ikb, p, TransactionType::Write).await?))
 		} else {
 			Ok(None)
 		}
@@ -215,8 +223,16 @@ impl<'a> IndexOperation<'a> {
 		let (ns, db) = self.opt.ns_db()?;
 		let ikb = IndexKeyBase::new(ns, db, self.ix)?;
 
-		let mut ft =
-			FtIndex::new(self.ctx, self.opt, &p.az, ikb, p, TransactionType::Write).await?;
+		let mut ft = FtIndex::new(
+			self.ctx,
+			self.opt,
+			&p.az,
+			self.az.clone(),
+			ikb,
+			p,
+			TransactionType::Write,
+		)
+		.await?;
 
 		if let Some(n) = self.n.take() {
 			ft.index_document(stk, self.ctx, self.opt, self.rid, n).await?;

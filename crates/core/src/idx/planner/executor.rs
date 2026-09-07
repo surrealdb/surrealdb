@@ -142,6 +142,7 @@ impl InnerQueryExecutor {
 								ctx,
 								opt,
 								p.az.as_str(),
+								None,
 								ikb,
 								p,
 								TransactionType::Read,

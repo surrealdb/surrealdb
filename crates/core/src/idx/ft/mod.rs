@@ -100,15 +100,23 @@ impl FtIndex {
 	pub(crate) async fn new(
 		ctx: &Context,
 		opt: &Options,
-		az: &str,
+		az_name: &str,
+		pre_az: Option<Arc<DefineAnalyzerStatement>>,
 		index_key_base: IndexKeyBase,
 		p: &SearchParams,
 		tt: TransactionType,
 	) -> Result<Self, Error> {
 		let tx = ctx.tx();
 		let ixs = ctx.get_index_stores();
-		let (ns, db) = opt.ns_db()?;
-		let az = tx.get_db_analyzer(ns, db, az).await?;
+		// Use the pre-resolved analyzer when provided (e.g. when starting an index
+		// build inside a user transaction that defines the analyzer in the same
+		// transaction). Otherwise look it up from the current transaction.
+		let az = if let Some(az) = pre_az {
+			az
+		} else {
+			let (ns, db) = opt.ns_db()?;
+			tx.get_db_analyzer(ns, db, az_name).await?
+		};
 		ixs.mappers().check(&az).await?;
 		Self::with_analyzer(ixs, &tx, az, index_key_base, p, tt).await
 	}
