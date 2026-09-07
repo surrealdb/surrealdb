@@ -1061,8 +1061,9 @@ the binding-table operators — `exec/operators/graph/` (`expand.rs`, `endpoint.
 `exec/planner/match_plan.rs`, `kvs/ds.rs` (`parse_gql`, reached from
 `statements_for` when the request names `Dialect::Gql`), `rpc/protocol.rs`
 (`gql` method, `QueryForm::Text` carrying `Dialect::Gql`),
-`ntw/gql.rs` (`/gql` route), `pg/conn.rs` (`run_gql` and `execute_query`,
-reached by `options=-c dialect=gql` or `SET dialect = 'gql'`)
+`ntw/gql.rs` (`/gql` route), `pg/conn.rs` (`select_dialect`, the gate for
+`options=-c dialect=gql` and `SET dialect = 'gql'`, and the `run_gql` /
+`execute_query` paths those select), `fnc/eval.rs` (`eval::gql`)
 
 GQL is a second query language lowered to a `MatchPlan` IR and executed by
 the streaming engine. The lowering constructs only a single top-level
@@ -1086,20 +1087,47 @@ invariants.
   — it applies only the table-level permission and skips the field-level
   machinery, which would leak restricted fields into binding rows.
 - **Layered gate chain.** Reaching the GQL executor requires, in order: the
-  `gql` cargo feature compiled in; for HTTP, the `RouteTarget::Gql` capability
-  on the `/gql` route; `allows_query_by_subject` for the session's auth
-  subject (the `gql` RPC method); and a valid, non-anonymous session under the
-  namespace/database authorization context. Removing or reordering any layer
-  is a regression.
+  `gql` cargo feature compiled in; the capability gating the entry surface the
+  request arrived on (below); `allows_query_by_subject` for the session's auth
+  subject; and a valid, non-anonymous session under the namespace/database
+  authorization context. Removing or reordering any layer is a regression.
 
-  Two gaps in that chain are known and unclosed. GQL is **not** gated on
+  There is no single "GQL off" capability. Each entry surface carries its own
+  gate, and an operator disabling GQL must deny each one they expose:
+
+  | Entry surface | Gate |
+  | --- | --- |
+  | `POST /gql` (`ntw/gql.rs`) | `RouteTarget::Gql` |
+  | Postgres `options=-c dialect=gql` / `SET dialect = 'gql'` (`pg/conn.rs`) | `RouteTarget::Gql`, on top of `RouteTarget::Postgres` for the port |
+  | RPC `gql` method (WebSocket, `/rpc`, gRPC) | `MethodTarget` for `gql`, on top of the transport's own route |
+  | `eval::gql(…)` from any SurrealQL (`fnc/eval.rs`) | `allows_function_name("eval::gql")`, `allows_query`, and `allows_eval_query` — the last denies every subject by default, including under `--allow-all` |
+
+  On the Postgres port that gate is applied in two places, and both are
+  load-bearing. At dialect *selection*, `Connection::select_dialect` is the sole
+  assignment to the connection's dialect, so a denied dialect can never be
+  entered from any selection point; a connect-time selection is refused fatally
+  and an in-session `SET` with `42501`, rather than silently leaving the
+  connection in SurrealQL — which would answer the client's GQL with parse
+  errors instead of the reason. And *per query*, `check_current_dialect` re-runs
+  the same gate in both `simple_query` and `execute_query`, because capabilities
+  are swapped atomically at runtime (`Datastore::set_capabilities`) and a
+  long-lived connection must not outlive a tightening. That matches the other
+  transports, where the GQL gate is evaluated per request (`/gql`) or per
+  dispatch (the `gql` RPC method's `MethodTarget`). The per-query check runs
+  after the `SET` interception, so a connection refused by it can still switch
+  back to a dialect it may use rather than being stranded.
+
+  `RouteTarget::Postgres` is deliberately *not* re-checked per query: it gates
+  the transport, and stays connection-scoped like `RouteTarget::Rpc` at
+  WebSocket upgrade.
+
+  A new selection point that assigns the dialect directly, or an execution path
+  that skips the per-query re-check, is a regression.
+
+  One gap in the chain is known and unclosed: GQL is **not** gated on
   `ExperimentalTarget::Gql` — neither `Datastore::parse_gql` nor
   `gql::parse_with_capabilities` checks it, and a test pins that GQL stays
-  reachable without it. And the Postgres wire protocol reaches the same
-  executor while checking only `RouteTarget::Postgres`, so denying
-  `RouteTarget::Gql` stops `/gql` but not `options=-c dialect=gql` on the
-  Postgres port. An operator disabling GQL by capability must close the
-  Postgres port too.
+  reachable without it.
 - **Resource bounds.** The path-expansion and join operators must enforce row-count
   ceilings: `SURREAL_GQL_MAX_PATH_ROWS` (default 1,000,000) bounds live+emitted
   rows in `PathExpand` **per source row** (the counter resets for each input row,
@@ -1177,9 +1205,18 @@ Flag when changes touch:
 - `exec/operators/scan/fetch.rs` or any binding-fetch call site (a switch to
   `resolve_record_batch`, or a new fetch path that bypasses FieldState, is a
   field-permission leak)
-- The gate chain: `ExperimentalTarget::Gql`, `RouteTarget::Gql`,
-  `allows_query_by_subject` in the `gql` RPC method, or the experimental check in
+- The gate chain: `ExperimentalTarget::Gql`, `RouteTarget::Gql`, the `gql`
+  `MethodTarget`, `allows_query_by_subject` in the `gql` RPC method, the
+  `eval::gql` gates in `fnc/eval.rs`, or the experimental check in
   `Datastore::parse_gql`
+- `pg/conn.rs` dialect gating: `Connection::select_dialect` must stay the only
+  assignment to the connection's dialect, and both selection points
+  (`dialect_from_options` at startup, `SET dialect` in session) must route
+  through it — a direct assignment reopens GQL on the Postgres port under a
+  denied `gql` capability. `check_current_dialect` must stay on both query
+  paths (`simple_query`, `execute_query`), or a connection that selected GQL
+  before the capability was denied keeps serving it
+- A new GQL entry surface, which needs its own row in the gate table above
 - `SURREAL_GQL_MAX_PATH_ROWS` / `SURREAL_GQL_MAX_JOIN_BUILD_ROWS` /
   `SURREAL_GQL_MAX_OUTPUT_ROWS` defaults or their enforcement in `PathExpand` /
   `HashJoin` / `Expand` / `Distinct`, or removal of a `ctx.cancellation()` poll

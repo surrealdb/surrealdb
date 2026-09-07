@@ -634,9 +634,31 @@ args = [
     "gql_integration",
 ]
 
+[tasks.ci-pg-integration]
+category = "CI - INTEGRATION TESTS"
+description = "Run Postgres wire protocol integration tests"
+command = "cargo"
+env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "cli_integration::common=debug", condition = { env_not_set = [
+    "RUST_LOG",
+] } } }
+# `postgres` must stay in this feature list: the suite sits behind
+# `#[cfg(feature = "postgres")]` on this package's own feature, which the
+# default feature set does not enable. Without it the suite compiles away and
+# reports "running 0 tests" while still exiting 0.
+args = [
+    "test",
+    "--locked",
+    "--features",
+    "storage-mem,postgres",
+    "--test",
+    "pg_integration",
+    "--",
+    "pg_integration",
+]
+
 [tasks.ci-integration-all]
 category = "CI - INTEGRATION TESTS"
-description = "Single compile: CLI, HTTP, WS, ML, GraphQL, and GQL integration suites"
+description = "Single compile: CLI, HTTP, WS, ML, GraphQL, GQL, and Postgres integration suites"
 command = "cargo"
 env = { RUST_BACKTRACE = 1 }
 args = [
@@ -646,7 +668,7 @@ args = [
     "--workspace",
     "--no-default-features",
     "--features",
-    "storage-mem,storage-surrealkv,http,scripting,jwks,cli,ml,graphql,gql",
+    "storage-mem,storage-surrealkv,http,scripting,jwks,cli,ml,graphql,gql,postgres",
     "--test",
     "cli_integration",
     "--test",
@@ -659,6 +681,8 @@ args = [
     "graphql_integration",
     "--test",
     "gql_integration",
+    "--test",
+    "pg_integration",
 ]
 
 # --------------------------------------------------
@@ -1103,10 +1127,12 @@ args = [
     "--locked",
     "--no-default-features",
     # Mirror the `ci-integration-all` feature set so the integration suites
-    # (cli/http/ws/ml/graphql/gql) run under coverage, plus the coverage-only
-    # allocator features. `cli` is required for the `sql` subcommand.
+    # (cli/http/ws/ml/graphql/gql/pg) run under coverage, plus the coverage-only
+    # allocator features. `cli` is required for the `sql` subcommand, and
+    # `postgres` for the `pg_integration` suite, which is compiled away without
+    # it.
     "--features",
-    "allocator,allocation-tracking,storage-mem,storage-surrealkv,scripting,http,jwks,cli,ml,graphql,gql",
+    "allocator,allocation-tracking,storage-mem,storage-surrealkv,scripting,http,jwks,cli,ml,graphql,gql,postgres",
     "--workspace",
     # Exclude surrealism packages due to wasmtime complexity and stdin loops
     "--exclude", "surrealism-runtime",

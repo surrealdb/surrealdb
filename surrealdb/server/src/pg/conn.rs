@@ -311,6 +311,8 @@ struct Connection {
 	portals: HashMap<String, Portal>,
 	/// The query language this connection speaks. Chosen at startup via
 	/// `options=-c dialect=...` and switchable in-session with `SET dialect`.
+	/// Only ever assigned through [`Connection::select_dialect`], which applies
+	/// the per-dialect capability gate.
 	dialect: Dialect,
 	/// The active interactive transaction opened by a standalone `BEGIN`.
 	transaction: Option<Arc<Transaction>>,
@@ -447,11 +449,16 @@ impl Connection {
 			self.report(&PgError::protocol("no user specified in startup packet").fatal()).await?;
 			return Ok(false);
 		};
-		// Apply a connect-time `options=-c dialect=...` selection.
+		// Apply a connect-time `options=-c dialect=...` selection. A dialect the
+		// deployment denies closes the connection rather than leaving it in
+		// SurrealQL, which would answer the client's queries with parse errors
+		// instead of the reason they were refused.
 		if let Some(options) = options.as_deref()
 			&& let Some(dialect) = dialect_from_options(options)
+			&& let Err(err) = self.select_dialect(dialect)
 		{
-			self.dialect = dialect;
+			self.report(&err.fatal()).await?;
+			return Ok(false);
 		}
 		let (ns, db) = parse_database_param(&user, database.as_deref());
 		self.session = Session::default();
@@ -1238,6 +1245,7 @@ impl Connection {
 		query: &str,
 		params: Variables,
 	) -> Result<Value, PgError> {
+		self.check_current_dialect()?;
 		if self.dialect == Dialect::Gql && self.transaction.is_some() {
 			return Err(PgError::feature_not_supported(
 				"GQL queries cannot run inside an interactive transaction",
@@ -1312,8 +1320,16 @@ impl Connection {
 		// is a GQL mutation clause and reaches the executor.
 		if let Some(set) = parse_set(trimmed).filter(|set| self.should_intercept_set(set)) {
 			if let Err(err) = self.handle_set(set, &mut out) {
-				msg::write_error_response(&mut out, &err);
+				self.note_simple_error(&err, &mut out);
 			}
+			return self.finish_query(out).await;
+		}
+		// The dialect gate is re-checked here, not just where the dialect was
+		// selected, so a runtime capability change applies to this query. It
+		// runs after the `SET` interception above so a client refused here can
+		// still switch back to a dialect it is allowed to use.
+		if let Err(err) = self.check_current_dialect() {
+			self.note_simple_error(&err, &mut out);
 			return self.finish_query(out).await;
 		}
 		match self.dialect {
@@ -1321,11 +1337,11 @@ impl Connection {
 			// an interactive transaction would silently auto-commit outside the
 			// block. Refuse rather than mislead.
 			Dialect::Gql if self.transaction.is_some() => {
-				msg::write_error_response(
-					&mut out,
+				self.note_simple_error(
 					&PgError::feature_not_supported(
 						"GQL queries cannot run inside an interactive transaction",
 					),
+					&mut out,
 				);
 			}
 			Dialect::Gql => self.run_gql(sql, &mut out).await?,
@@ -1562,6 +1578,56 @@ impl Connection {
 		Ok(())
 	}
 
+	/// Switch the connection to `dialect`, enforcing the capability that gates
+	/// it. Every assignment to `self.dialect` goes through here, so a dialect a
+	/// deployment has switched off cannot be entered from any selection point.
+	fn select_dialect(&mut self, dialect: Dialect) -> Result<(), PgError> {
+		self.check_dialect(dialect)?;
+		self.dialect = dialect;
+		Ok(())
+	}
+
+	/// Re-check the dialect the connection already speaks, before running a
+	/// query in it.
+	///
+	/// Capabilities are swapped atomically at runtime, so the gate is evaluated
+	/// per query and not only when the dialect was chosen: denying `gql` must
+	/// stop an established connection from issuing more GQL, the way it
+	/// immediately stops `/gql` (checked per request) and the `gql` RPC method
+	/// (checked per dispatch). The connection is not stranded — `SET dialect`
+	/// is intercepted before this runs, so a client can switch back to
+	/// SurrealQL. `RouteTarget::Postgres` stays connection-scoped by contrast,
+	/// matching `RouteTarget::Rpc` on a WebSocket, which is checked once at
+	/// upgrade.
+	fn check_current_dialect(&self) -> Result<(), PgError> {
+		self.check_dialect(self.dialect)
+	}
+
+	/// The dialect gate itself. The match is exhaustive so that a new dialect
+	/// cannot be added without deciding what gates it.
+	fn check_dialect(&self, dialect: Dialect) -> Result<(), PgError> {
+		let allowed = match dialect {
+			// The port's own language, gated only by `RouteTarget::Postgres`,
+			// which the connection already passed.
+			Dialect::SurrealQl => true,
+			// Gated on `RouteTarget::Gql`, the same capability that gates the
+			// `/gql` HTTP route, so denying `gql` closes the GQL entry surface
+			// on this port as well as over HTTP.
+			Dialect::Gql => self.ds.allows_http_route(&RouteTarget::Gql),
+		};
+		if !allowed {
+			let name = dialect_name(dialect);
+			warn!(
+				target: LOG,
+				"Capabilities denied postgres {name} dialect request from {}", self.peer
+			);
+			return Err(PgError::insufficient_privilege(format!(
+				"Forbidden: the {name} dialect is not allowed on this server"
+			)));
+		}
+		Ok(())
+	}
+
 	/// Whether a `SET` should be intercepted rather than executed. In the
 	/// SurrealQL dialect every `SET` is intercepted (top-level `SET` is not
 	/// SurrealQL). In the GQL dialect `SET` is a mutation clause, so only what a
@@ -1590,7 +1656,7 @@ impl Connection {
 		if name.eq_ignore_ascii_case("dialect") {
 			let dialect = parse_dialect(&value)
 				.ok_or_else(|| PgError::invalid_text(format!("unrecognized dialect: {value}")))?;
-			self.dialect = dialect;
+			self.select_dialect(dialect)?;
 			msg::write_command_complete(out, "SET");
 			return Ok(());
 		}
@@ -1644,6 +1710,18 @@ impl Connection {
 	/// interactive transaction, poison the transaction so the next Sync reports
 	/// status 'E' — matching the simple-protocol path and Postgres semantics.
 	fn note_extended_error(&mut self, err: &PgError, out: &mut BytesMut) {
+		msg::write_error_response(out, err);
+		if self.transaction.is_some() {
+			self.txn_failed = true;
+		}
+	}
+
+	/// Report a simple-protocol error raised by a statement the connection
+	/// intercepted rather than executed, poisoning an open transaction the same
+	/// way an executor error does. Any error inside a transaction block aborts
+	/// it, so the next statement must be refused with 25P02 until
+	/// `COMMIT`/`ROLLBACK` — an intercepted statement is not an exception.
+	fn note_simple_error(&mut self, err: &PgError, out: &mut BytesMut) {
 		msg::write_error_response(out, err);
 		if self.transaction.is_some() {
 			self.txn_failed = true;
@@ -2209,11 +2287,21 @@ fn parse_dialect(value: &str) -> Option<Dialect> {
 	}
 }
 
+/// The canonical name of a dialect, as [`parse_dialect`] accepts it. Used in the
+/// messages a client sees when a dialect is refused.
+fn dialect_name(dialect: Dialect) -> &'static str {
+	match dialect {
+		Dialect::SurrealQl => "surrealql",
+		Dialect::Gql => "gql",
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::{
-		Dialect, TxnOp, dialect_from_options, parse_database_param, parse_dialect, parse_set,
-		rewrite_positional_params, row_within_wire_limit, transaction_control, wire_row_fits,
+		Dialect, TxnOp, dialect_from_options, dialect_name, parse_database_param, parse_dialect,
+		parse_set, rewrite_positional_params, row_within_wire_limit, transaction_control,
+		wire_row_fits,
 	};
 
 	fn rewrite(query: &str) -> String {
@@ -2280,6 +2368,15 @@ mod tests {
 		assert_eq!(parse_dialect("'GQL'"), Some(Dialect::Gql));
 		assert_eq!(parse_dialect("surrealql"), Some(Dialect::SurrealQl));
 		assert_eq!(parse_dialect("nope"), None);
+	}
+
+	#[test]
+	fn dialect_names_round_trip() {
+		// The name a refusal reports must be one a client can actually select,
+		// so it names the setting to change.
+		for dialect in [Dialect::SurrealQl, Dialect::Gql] {
+			assert_eq!(parse_dialect(dialect_name(dialect)), Some(dialect));
+		}
 	}
 
 	#[test]

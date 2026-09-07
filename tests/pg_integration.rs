@@ -1,5 +1,11 @@
-// RUST_LOG=warn cargo test --locked --features storage-mem --workspace --test pg_integration
-// -- pg_integration --nocapture
+// RUST_LOG=warn cargo test --locked --features storage-mem,postgres --test pg_integration
+// -- --nocapture
+//
+// `postgres` is required and is NOT implied by the root package's default
+// features: `default` forwards to `surrealdb-server/default`, which does not
+// enable this package's own `postgres` feature. Without it the module below is
+// compiled away and the run reports "running 0 tests" — a green result that
+// tested nothing. Check the count, not just the exit status.
 mod common;
 
 #[cfg(feature = "postgres")]
@@ -7,7 +13,6 @@ mod pg_integration {
 	use std::error::Error;
 	use std::time::Duration;
 
-	use rand::Rng;
 	use test_log::test;
 	use tokio::io::{AsyncReadExt, AsyncWriteExt};
 	use tokio::net::TcpStream;
@@ -26,18 +31,27 @@ mod pg_integration {
 	/// Send an SSLRequest to the port and return the server's single-byte reply
 	/// ('S' = TLS accepted, 'N' = declined), retrying while the listener binds.
 	async fn ssl_request_reply(port: u16) -> u8 {
+		try_ssl_request_reply(port)
+			.await
+			.unwrap_or_else(|| panic!("no SSLRequest reply from port {port}"))
+	}
+
+	/// As [`ssl_request_reply`], but `None` rather than a panic when the port
+	/// never answers — so a caller that can restart the server on a fresh port
+	/// can retry instead of failing.
+	async fn try_ssl_request_reply(port: u16) -> Option<u8> {
 		for _ in 0..50 {
 			if let Ok(mut sock) = TcpStream::connect(("127.0.0.1", port)).await
 				&& sock.write_all(&SSL_REQUEST).await.is_ok()
 			{
 				let mut byte = [0u8; 1];
 				if sock.read_exact(&mut byte).await.is_ok() {
-					return byte[0];
+					return Some(byte[0]);
 				}
 			}
 			tokio::time::sleep(Duration::from_millis(100)).await;
 		}
-		panic!("no SSLRequest reply from port {port}");
+		None
 	}
 
 	/// Build a v3.0 StartupMessage carrying the given `key\0value` parameters.
@@ -97,18 +111,43 @@ mod pg_integration {
 		start_pg_server_with_args(auth, "").await
 	}
 
+	/// A port the OS reports as free, taken from the ephemeral range by binding
+	/// and immediately releasing it. The listener is dropped before the server
+	/// binds the port, so this narrows the collision window rather than closing
+	/// it — callers that can retry should.
+	fn free_port() -> u16 {
+		std::net::TcpListener::bind("127.0.0.1:0")
+			.expect("bind an ephemeral port")
+			.local_addr()
+			.expect("read the bound port")
+			.port()
+	}
+
+	/// Start a server with the Postgres listener bound to a free port.
+	///
+	/// A `--postgres-bind` collision fails the whole server startup (the
+	/// listener binds before startup completes), and `common::start_server`
+	/// retries only its own HTTP port — the Postgres one is fixed in the args
+	/// it is given. So a collision is retried here, on a fresh port.
 	async fn start_pg_server_with_args(
 		auth: bool,
 		extra: &str,
 	) -> Result<(u16, common::Child), Box<dyn Error>> {
-		let port: u16 = rand::rng().random_range(24000..33000);
-		let (_, child) = common::start_server(StartServerArguments {
-			auth,
-			args: format!("--postgres-bind 127.0.0.1:{port} {extra}"),
-			..Default::default()
-		})
-		.await?;
-		Ok((port, child))
+		let mut last = None;
+		for _ in 0..3 {
+			let port = free_port();
+			match common::start_server(StartServerArguments {
+				auth,
+				args: format!("--postgres-bind 127.0.0.1:{port} {extra}"),
+				..Default::default()
+			})
+			.await
+			{
+				Ok((_, child)) => return Ok((port, child)),
+				Err(err) => last = Some(err),
+			}
+		}
+		Err(last.unwrap_or_else(|| "server failed to start".into()))
 	}
 
 	async fn connect(port: u16, config: &str) -> Result<Client, tokio_postgres::Error> {
@@ -133,7 +172,12 @@ mod pg_integration {
 	}
 
 	async fn connect_root(port: u16) -> Result<Client, tokio_postgres::Error> {
-		connect(port, &format!("user={USER} password={PASS} dbname=testns/testdb")).await
+		connect(port, &root_config("")).await
+	}
+
+	/// A root connection string for `testns/testdb`, plus any extra settings.
+	fn root_config(extra: &str) -> String {
+		format!("user={USER} password={PASS} dbname=testns/testdb {extra}")
 	}
 
 	fn rows(messages: Vec<SimpleQueryMessage>) -> Vec<SimpleQueryRow> {
@@ -709,7 +753,51 @@ mod pg_integration {
 		// rather than silently auto-committing outside the block.
 		let err = client.simple_query("MATCH (p:person) RETURN p").await.unwrap_err();
 		assert_eq!(err.code(), Some(&SqlState::FEATURE_NOT_SUPPORTED));
+		// The refusal is an error inside a transaction block, so it aborts the
+		// block like any other; the next statement is refused until ROLLBACK.
+		let err = client.simple_query("MATCH (p:person) RETURN p").await.expect_err("aborted txn");
+		assert_eq!(err.code(), Some(&SqlState::IN_FAILED_SQL_TRANSACTION));
 		client.simple_query("ROLLBACK").await?;
+		// The connection is still in the GQL dialect, so switch back before
+		// checking it serves SurrealQL again.
+		client.simple_query("SET dialect = 'surrealql'").await?;
+		let back = rows(client.simple_query("RETURN 1").await?);
+		assert_eq!(back[0].get(0), Some("1"));
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn denied_gql_dialect_in_transaction_aborts_it() -> Result<(), Box<dyn Error>> {
+		// A rejected `SET` is intercepted rather than executed, but it is still
+		// an error inside a transaction block and must abort it — otherwise the
+		// connection keeps reporting status 'T' and accepting statements.
+		let (port, _server) = start_pg_server_with_args(true, "--deny-http gql").await?;
+		let client = connect_root(port).await?;
+		client.simple_query("BEGIN").await?;
+		let err = client.simple_query("SET dialect = 'gql'").await.expect_err("switched dialect");
+		assert_eq!(err.code(), Some(&SqlState::INSUFFICIENT_PRIVILEGE));
+		let err = client.simple_query("RETURN 1").await.expect_err("ran in aborted txn");
+		assert_eq!(err.code(), Some(&SqlState::IN_FAILED_SQL_TRANSACTION));
+		client.simple_query("ROLLBACK").await?;
+		let back = rows(client.simple_query("RETURN 1").await?);
+		assert_eq!(back[0].get(0), Some("1"));
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn unknown_set_parameter_in_transaction_aborts_it() -> Result<(), Box<dyn Error>> {
+		// Same contract for the other intercepted-`SET` rejections, which are
+		// not GQL-specific.
+		let (port, _server) = start_pg_server(true).await?;
+		let client = connect_root(port).await?;
+		client.simple_query("BEGIN").await?;
+		let err = client.simple_query("SET made_up_param = 1").await.expect_err("accepted");
+		assert_eq!(err.code(), Some(&SqlState::UNDEFINED_OBJECT));
+		let err = client.simple_query("RETURN 1").await.expect_err("ran in aborted txn");
+		assert_eq!(err.code(), Some(&SqlState::IN_FAILED_SQL_TRANSACTION));
+		client.simple_query("ROLLBACK").await?;
+		let back = rows(client.simple_query("RETURN 1").await?);
+		assert_eq!(back[0].get(0), Some("1"));
 		Ok(())
 	}
 
@@ -727,14 +815,68 @@ mod pg_integration {
 	}
 
 	#[test(tokio::test)]
-	async fn gql_disabled_reports_cleanly() -> Result<(), Box<dyn Error>> {
-		// Without --allow-experimental gql, selecting the dialect is fine but
-		// running a GQL query reports a clean feature error, not a crash.
+	async fn gql_query_error_reports_cleanly() -> Result<(), Box<dyn Error>> {
+		// A failing GQL query must reach the client as a Postgres error with a
+		// specific SQLSTATE, and leave the connection usable — GQL errors are
+		// mapped onto the wire protocol, not surfaced as a dropped connection
+		// or a generic internal error.
 		let (port, _server) = start_pg_server(true).await?;
 		let client = connect_root(port).await?;
 		client.simple_query("SET dialect = 'gql'").await?;
-		let err = client.simple_query("MATCH (p:person) RETURN p").await.unwrap_err();
-		assert!(err.code().is_some(), "expected a clean SQLSTATE error");
+		// `person` is not defined in this database.
+		let err = client.simple_query("MATCH (p:person) RETURN p").await.expect_err("matched");
+		assert_eq!(err.code(), Some(&SqlState::UNDEFINED_OBJECT));
+		client.simple_query("SET dialect = 'surrealql'").await?;
+		let back = rows(client.simple_query("RETURN 1").await?);
+		assert_eq!(back[0].get(0), Some("1"));
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn startup_options_select_gql_dialect() -> Result<(), Box<dyn Error>> {
+		// `options=-c dialect=gql` puts the connection in GQL from its first
+		// query, with no `SET`.
+		let (port, _server) = start_pg_server(true).await?;
+		let seed = connect_root(port).await?;
+		seed.simple_query("CREATE person:orion SET name = 'Orion' RETURN NONE").await?;
+		let client = connect(port, &root_config("options='-c dialect=gql'")).await?;
+		let matched = rows(client.simple_query("MATCH (p:person) RETURN p.name").await?);
+		assert!(!matched.is_empty(), "startup dialect selection should run the query as GQL");
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn denied_gql_capability_refuses_startup_dialect() -> Result<(), Box<dyn Error>> {
+		// `RouteTarget::Gql` gates the GQL entry surface on this port as well as
+		// the `/gql` HTTP route, so a denied dialect refuses the connection
+		// rather than silently leaving it in SurrealQL.
+		let (port, _server) = start_pg_server_with_args(true, "--deny-http gql").await?;
+		let err =
+			connect(port, &root_config("options='-c dialect=gql'")).await.expect_err("connected");
+		assert_eq!(err.code(), Some(&SqlState::INSUFFICIENT_PRIVILEGE));
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn denied_gql_capability_refuses_set_dialect() -> Result<(), Box<dyn Error>> {
+		let (port, _server) = start_pg_server_with_args(true, "--deny-http gql").await?;
+		let client = connect_root(port).await?;
+		let err = client.simple_query("SET dialect = 'gql'").await.expect_err("switched dialect");
+		assert_eq!(err.code(), Some(&SqlState::INSUFFICIENT_PRIVILEGE));
+		// The refusal leaves the connection in SurrealQL and usable: denying
+		// `gql` must not disable the Postgres port itself.
+		let back = rows(client.simple_query("RETURN 1").await?);
+		assert_eq!(back[0].get(0), Some("1"));
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn denied_postgres_capability_refuses_connection() -> Result<(), Box<dyn Error>> {
+		// The port's own capability is separate from the dialect's: denying
+		// `postgres` closes the port outright, in either dialect.
+		let (port, _server) = start_pg_server_with_args(true, "--deny-http postgres").await?;
+		let err = connect_root(port).await.expect_err("connected");
+		assert_eq!(err.code(), Some(&SqlState::INSUFFICIENT_PRIVILEGE));
 		Ok(())
 	}
 
@@ -763,17 +905,25 @@ mod pg_integration {
 		// With a certificate configured (via --web-crt/--web-key), the listener
 		// accepts the SSLRequest ('S') and upgrades. The HTTP readiness probe
 		// can't speak HTTPS here, so bind without waiting and poll the port.
-		let port: u16 = rand::rng().random_range(24000..33000);
-		let (_, _server) = common::start_server(StartServerArguments {
-			auth: true,
-			tls: true,
-			wait_is_ready: false,
-			args: format!("--postgres-bind 127.0.0.1:{port}"),
-			..Default::default()
-		})
-		.await?;
-		assert_eq!(ssl_request_reply(port).await, b'S');
-		Ok(())
+		// `wait_is_ready: false` means a bind collision is invisible at startup,
+		// so a port that never answers is retried as a fresh start rather than
+		// failing the test.
+		for _ in 0..3 {
+			let port = free_port();
+			let (_, _server) = common::start_server(StartServerArguments {
+				auth: true,
+				tls: true,
+				wait_is_ready: false,
+				args: format!("--postgres-bind 127.0.0.1:{port}"),
+				..Default::default()
+			})
+			.await?;
+			if let Some(reply) = try_ssl_request_reply(port).await {
+				assert_eq!(reply, b'S');
+				return Ok(());
+			}
+		}
+		panic!("the postgres TLS listener never answered on any port");
 	}
 
 	#[test(tokio::test)]
