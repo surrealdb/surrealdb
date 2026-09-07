@@ -77,11 +77,11 @@ pub(super) trait DiskAnnVectorElement:
 }
 
 fn vector_type_mismatch(expected: &str, vector: &SerializedVector) -> ANNError {
-	ANNError::log_index_error(format!("DiskANN expected {expected} vector, got {vector:?}"))
+	ANNError::message(format!("DiskANN expected {expected} vector, got {vector:?}"))
 }
 
 fn vector_len_mismatch(current: usize, expected: usize) -> ANNError {
-	ANNError::log_index_error(format!(
+	ANNError::message(format!(
 		"DiskANN vector dimension mismatch: got {current}, expected {expected}"
 	))
 }
@@ -350,8 +350,7 @@ impl DiskAnnProvider {
 		&self,
 		context: &DiskAnnProviderContext,
 	) -> ANNResult<Vec<ElementId>> {
-		let state =
-			self.read_state(context).await.map_err(|e| ANNError::log_index_error(e.to_string()))?;
+		let state = self.read_state(context).await.map_err(|e| ANNError::message(e.to_string()))?;
 		if let Some(element_id) = state.enter_point
 			&& self
 				.status_by_internal_id(context, element_id)
@@ -362,27 +361,26 @@ impl DiskAnnProvider {
 		}
 		// The stored entry point may have been deleted. Scan for a replacement and populate the
 		// element cache with any entries touched during the fallback scan.
-		let rng =
-			context.ikb.new_de_range().map_err(|e| ANNError::log_index_error(e.to_string()))?;
+		let rng = context.ikb.new_de_range().map_err(|e| ANNError::message(e.to_string()))?;
 		let mut cursor = context
 			.tx
 			.open_vals_cursor(rng, surrealdb_kvs::Direction::Forward, 0, None)
 			.await
-			.map_err(|e| ANNError::log_index_error(e.to_string()))?;
+			.map_err(|e| ANNError::message(e.to_string()))?;
 		let cache_misses = !context.tx.writeable();
 		loop {
 			let batch = cursor
 				.next_batch(surrealdb_kvs::consts::NORMAL_BATCH_SIZE)
 				.await
-				.map_err(|e| ANNError::log_index_error(e.to_string()))?;
+				.map_err(|e| ANNError::message(e.to_string()))?;
 			if batch.is_empty() {
 				break;
 			}
 			for (key, value) in &batch {
-				let key: DiskannElementKey<'_> = storekey::decode_borrow(key)
-					.map_err(|e| ANNError::log_index_error(e.to_string()))?;
+				let key: DiskannElementKey<'_> =
+					storekey::decode_borrow(key).map_err(|e| ANNError::message(e.to_string()))?;
 				let element = DiskAnnElement::kv_decode_value(value, ())
-					.map_err(|e| ANNError::log_index_error(e.to_string()))?;
+					.map_err(|e| ANNError::message(e.to_string()))?;
 				let deleted = element.deleted;
 				// Only publish non-tombstoned entries into the shared cache, and only from a
 				// read-only tx (writable txs may have buffered uncommitted writes; see
@@ -486,11 +484,7 @@ where
 			vector: T::serialized_from_slice(element),
 			deleted: false,
 		};
-		context
-			.tx
-			.set_key(&key, &element)
-			.await
-			.map_err(|e| ANNError::log_index_error(e.to_string()))?;
+		context.tx.set_key(&key, &element).await.map_err(|e| ANNError::message(e.to_string()))?;
 		// Writable-tx cache write-through: only sound because the caller is inside an
 		// `apply_compaction` frame that clears the per-index cache on commit/apply failure.
 		// See the module-level `Cache coherency invariant` (rule 2).
@@ -509,7 +503,7 @@ impl Delete for DiskAnnProvider {
 		let Some(element) = self
 			.read_elements(context, std::slice::from_ref(gid))
 			.await
-			.map_err(|e| ANNError::log_index_error(e.to_string()))?
+			.map_err(|e| ANNError::message(e.to_string()))?
 			.pop()
 			.flatten()
 		else {
@@ -517,11 +511,7 @@ impl Delete for DiskAnnProvider {
 		};
 		let mut element = (*element).clone();
 		element.deleted = true;
-		context
-			.tx
-			.set_key(&key, &element)
-			.await
-			.map_err(|e| ANNError::log_index_error(e.to_string()))?;
+		context.tx.set_key(&key, &element).await.map_err(|e| ANNError::message(e.to_string()))?;
 		// Keep the deleted marker hot and visible to subsequent status checks.
 		self.cache.insert_element(self.cache_index(), *gid, element);
 		Ok(())
@@ -536,7 +526,7 @@ impl Delete for DiskAnnProvider {
 			.tx
 			.del_key(&context.ikb.new_de_key(id))
 			.await
-			.map_err(|e| ANNError::log_index_error(e.to_string()))?;
+			.map_err(|e| ANNError::message(e.to_string()))?;
 		// Release removes the element record entirely, so remove any cached vector/status too.
 		self.cache.remove_element(self.cache_index(), id);
 		Ok(())
@@ -550,11 +540,11 @@ impl Delete for DiskAnnProvider {
 		let Some(element) = self
 			.read_elements(context, std::slice::from_ref(&id))
 			.await
-			.map_err(|e| ANNError::log_index_error(e.to_string()))?
+			.map_err(|e| ANNError::message(e.to_string()))?
 			.pop()
 			.flatten()
 		else {
-			return Err(ANNError::log_index_error(format!("DiskANN element {id} is missing")));
+			return Err(ANNError::message(format!("DiskANN element {id} is missing")));
 		};
 		if element.deleted {
 			Ok(ElementStatus::Deleted)
@@ -636,12 +626,10 @@ where
 			.provider
 			.read_elements(self.context, &ids)
 			.await
-			.map_err(|e| ANNError::log_index_error(e.to_string()))?;
+			.map_err(|e| ANNError::message(e.to_string()))?;
 		for (id, element) in ids.into_iter().zip(elements) {
 			let Some(element) = element else {
-				return Err(ANNError::log_index_error(format!(
-					"DiskANN start point {id} is missing"
-				)));
+				return Err(ANNError::message(format!("DiskANN start point {id} is missing")));
 			};
 			let distance = self.distance_to(&element)?;
 			f(id, distance);
@@ -671,7 +659,7 @@ where
 			.provider
 			.read_nodes(self.context, &ids)
 			.await
-			.map_err(|e| ANNError::log_index_error(e.to_string()))?;
+			.map_err(|e| ANNError::message(e.to_string()))?;
 		// A well-behaved predicate never re-admits an id it has already yielded, so filtering
 		// the neighbors with `eval_mut` also deduplicates the surviving candidates.
 		let mut candidates = Vec::new();
@@ -686,7 +674,7 @@ where
 			.provider
 			.read_elements(self.context, &candidates)
 			.await
-			.map_err(|e| ANNError::log_index_error(e.to_string()))?;
+			.map_err(|e| ANNError::message(e.to_string()))?;
 		for (id, element) in candidates.into_iter().zip(elements) {
 			// A candidate whose element was compacted away mid-search is dropped: the
 			// `expand_beam` contract tolerates skipping candidates in exceptional cases.
@@ -781,7 +769,7 @@ where
 			.provider
 			.read_elements(self.context, &missing)
 			.await
-			.map_err(|e| ANNError::log_index_error(e.to_string()))?;
+			.map_err(|e| ANNError::message(e.to_string()))?;
 		let mut decoded: HashMap<ElementId, Box<[T]>> = HashMap::with_capacity(missing.len());
 		for (id, element) in missing.into_iter().zip(fetched) {
 			if let Some(element) = element
@@ -822,7 +810,7 @@ impl NeighborAccessor for DiskAnnNeighborAccessor<'_> {
 			.provider
 			.read_nodes(self.context, &[id])
 			.await
-			.map_err(|e| ANNError::log_index_error(e.to_string()))?
+			.map_err(|e| ANNError::message(e.to_string()))?
 			.into_iter()
 			.next()
 			.flatten()
@@ -844,7 +832,7 @@ impl NeighborAccessorMut for DiskAnnNeighborAccessor<'_> {
 			.tx
 			.set_key(&self.context.ikb.new_dn_key(id), &node)
 			.await
-			.map_err(|e| ANNError::log_index_error(e.to_string()))?;
+			.map_err(|e| ANNError::message(e.to_string()))?;
 		// Keep cached adjacency coherent with the persisted graph mutation.
 		self.provider.cache.insert_node(self.provider.cache_index(), id, node);
 		Ok(())
@@ -856,7 +844,7 @@ impl NeighborAccessorMut for DiskAnnNeighborAccessor<'_> {
 			.provider
 			.read_nodes(self.context, &[id])
 			.await
-			.map_err(|e| ANNError::log_index_error(e.to_string()))?
+			.map_err(|e| ANNError::message(e.to_string()))?
 			.into_iter()
 			.next()
 			.flatten()
@@ -867,11 +855,7 @@ impl NeighborAccessorMut for DiskAnnNeighborAccessor<'_> {
 				node.neighbors.push(*neighbor);
 			}
 		}
-		self.context
-			.tx
-			.set_key(&key, &node)
-			.await
-			.map_err(|e| ANNError::log_index_error(e.to_string()))?;
+		self.context.tx.set_key(&key, &node).await.map_err(|e| ANNError::message(e.to_string()))?;
 		// Keep cached adjacency coherent with the persisted graph mutation.
 		self.provider.cache.insert_node(self.provider.cache_index(), id, node);
 		Ok(())
