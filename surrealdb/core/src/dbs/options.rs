@@ -33,6 +33,17 @@ pub struct Options {
 	pub(crate) force: Force,
 	/// Should we run permissions checks?
 	pub(crate) perms: bool,
+	/// The [`Self::perms`] value the actor's own statement carried.
+	///
+	/// Equal to `perms` in every frame except one: a `REFERENCE ON DELETE
+	/// CASCADE` disables `perms` so the referencing record's own gate cannot
+	/// block referential integrity. `perms` is a single frame-wide flag, so
+	/// that also disables it for everything the nested delete reaches —
+	/// including the graph-edge cascade, whose contract is the opposite (it
+	/// must run as the caller, so an edge table's `PERMISSIONS FOR delete`
+	/// still applies to an endpoint delete). A frame that needs the actor's
+	/// real permission state rather than the integrity bypass reads this.
+	pub(crate) caller_perms: bool,
 	/// Why a data-modifying statement is rejected in this frame, if it is.
 	///
 	/// Both reasons are stored expressions that a *read* evaluates, so a write
@@ -86,6 +97,7 @@ impl Options {
 			db: None,
 			dive: config.max_computation_depth,
 			perms: true,
+			caller_perms: true,
 			no_write: None,
 			force: Force::None,
 			import: false,
@@ -163,9 +175,38 @@ impl Options {
 
 	/// Specify whether permissions should be run for
 	/// code which uses this `Options`, with chaining.
+	///
+	/// Moves [`Self::caller_perms`] in step: this is a statement of the actor's
+	/// permission state, not a referential-integrity bypass. Use
+	/// [`Self::new_for_reference_cascade`] for the latter.
 	pub fn with_perms(mut self, perms: bool) -> Self {
 		self.perms = perms;
+		self.caller_perms = perms;
 		self
+	}
+
+	/// Disable permission checks for a `REFERENCE ON DELETE` cascade, keeping
+	/// [`Self::caller_perms`] at the actor's real permission state.
+	///
+	/// The cascade must be able to modify or delete the referencing record
+	/// whatever the actor may do to it, or referential integrity could not be
+	/// maintained. That bypass is scoped to the referencing record itself:
+	/// nested work with its own permission contract — the graph-edge cascade in
+	/// [`crate::doc::Document::purge_edges`] — restores `caller_perms`.
+	pub(crate) fn new_for_reference_cascade(&self) -> Self {
+		Self {
+			perms: false,
+			..self.clone()
+		}
+	}
+
+	/// Restore the actor's own permission state, undoing a
+	/// [`Self::new_for_reference_cascade`] bypass.
+	pub(crate) fn new_with_caller_perms(&self) -> Self {
+		Self {
+			perms: self.caller_perms,
+			..self.clone()
+		}
 	}
 
 	/// Specify whether tables/events should re-run
@@ -219,9 +260,13 @@ impl Options {
 	}
 
 	/// Create a new Options object for a subquery
+	///
+	/// Moves [`Self::caller_perms`] in step, for the reason given on
+	/// [`Self::with_perms`].
 	pub fn new_with_perms(&self, perms: bool) -> Self {
 		Self {
 			perms,
+			caller_perms: perms,
 			..self.clone()
 		}
 	}
@@ -236,6 +281,7 @@ impl Options {
 	pub fn new_for_permission_predicate(&self) -> Self {
 		Self {
 			perms: false,
+			caller_perms: false,
 			no_write: Some(NoWriteFrame::PermissionPredicate),
 			..self.clone()
 		}
@@ -252,6 +298,7 @@ impl Options {
 	pub fn new_for_mutable_permission_predicate(&self) -> Self {
 		Self {
 			perms: false,
+			caller_perms: false,
 			no_write: None,
 			..self.clone()
 		}

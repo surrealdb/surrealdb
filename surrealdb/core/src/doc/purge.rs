@@ -285,13 +285,18 @@ impl Document {
 				]))],
 				..Default::default()
 			};
-			// Execute the delete statement. We deliberately do NOT disable
-			// permissions here: an edge table's `PERMISSIONS FOR delete`
-			// clause must still apply even when the cascade is triggered by
-			// deleting one of the endpoint vertices, otherwise an actor with
-			// vertex-delete permission could erase edges they are not
-			// allowed to remove directly.
-			crate::legacy::delete_statement_compute(&stm, stk, ctx, opt, None).await?;
+			// Execute the delete statement under the caller's own permission
+			// state. An edge table's `PERMISSIONS FOR delete` clause must
+			// still apply even when the cascade is triggered by deleting one
+			// of the endpoint vertices, otherwise an actor with vertex-delete
+			// permission could erase edges they are not allowed to remove
+			// directly. `new_with_caller_perms` matters when this delete was
+			// itself reached through a `REFERENCE ON DELETE CASCADE`, which
+			// disables `perms` for the referencing record: that bypass exists
+			// to complete referential integrity and must not extend to the
+			// edge cascade.
+			let opt = opt.new_with_caller_perms();
+			crate::legacy::delete_statement_compute(&stm, stk, ctx, &opt, None).await?;
 		}
 		// Carry on
 		Ok(())
@@ -450,7 +455,7 @@ impl Document {
 								&stm,
 								stk,
 								ctx,
-								&opt.clone().with_perms(false),
+								&opt.new_for_reference_cascade(),
 								None,
 							)
 							.await
