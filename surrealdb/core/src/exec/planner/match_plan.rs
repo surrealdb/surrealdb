@@ -1135,6 +1135,7 @@ impl<'ctx> Planner<'ctx> {
 				None,
 				None,
 				false,
+				false,
 				&super::select::TopKPushdownRequest::NotApplicable,
 			)
 			.await?;

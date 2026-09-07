@@ -1315,6 +1315,10 @@ impl<'ctx> Planner<'ctx> {
 				scan_predicate,
 				scan_limit,
 				scan_start,
+				// A blocking GROUP BY consumes the whole source stream, so its
+				// LIMIT never terminates the source early and must not
+				// disqualify bitmap fusion.
+				limit.is_some() && group.is_none(),
 				downstream_topk,
 				&topk_request,
 			)
@@ -1433,6 +1437,9 @@ impl<'ctx> Planner<'ctx> {
 	}
 
 	/// Plan FROM sources with plan-time index resolution.
+	///
+	/// `has_query_limit` reports a LIMIT the pipeline can terminate the source
+	/// early on — see [`Self::plan_source`] for the contract.
 	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn plan_sources(
 		&self,
@@ -1445,6 +1452,7 @@ impl<'ctx> Planner<'ctx> {
 		scan_predicate: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 		scan_limit: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 		scan_start: Option<Arc<dyn crate::exec::PhysicalExpr>>,
+		has_query_limit: bool,
 		downstream_topk: bool,
 		topk_request: &TopKPushdownRequest,
 	) -> Result<PlannedSource, Error> {
@@ -1477,6 +1485,7 @@ impl<'ctx> Planner<'ctx> {
 					scan_predicate.clone(),
 					scan_limit.clone(),
 					scan_start.clone(),
+					has_query_limit,
 					downstream_topk,
 					topk_request,
 				)
@@ -1521,6 +1530,14 @@ impl<'ctx> Planner<'ctx> {
 		scan_predicate: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 		scan_limit: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 		scan_start: Option<Arc<dyn crate::exec::PhysicalExpr>>,
+		// Whether the enclosing SELECT carries a LIMIT the pipeline can
+		// terminate the source early on. A LIMIT above a blocking stage
+		// (GROUP BY) consumes the whole stream first and does not count.
+		// Bitmap fusion declines under such a LIMIT so streaming plans keep
+		// pull-based early termination; independent of `scan_limit`, which
+		// only carries a limit the scan itself may consume (never set for a
+		// top-level OR).
+		has_query_limit: bool,
 		downstream_topk: bool,
 		topk_request: &TopKPushdownRequest,
 	) -> Result<PlannedSource, Error> {
@@ -1617,7 +1634,7 @@ impl<'ctx> Planner<'ctx> {
 					cond,
 					order,
 					with,
-					scan_limit.is_some(),
+					has_query_limit,
 					// A statement-level VERSION or an enclosing version
 					// context both disqualify bitmap fusion: doc-ID mappings
 					// and index entries are not time-travel-aware.
@@ -1731,13 +1748,23 @@ impl<'ctx> Planner<'ctx> {
 					}
 					AccessPath::BitmapFusion {
 						root,
+						fallback,
 					} => {
-						return Self::plan_bitmap_fusion_source(
-							table,
-							root,
-							needed_fields,
-							table_ctx,
-						);
+						return self
+							.plan_bitmap_fusion_source(
+								table,
+								root,
+								fallback,
+								order,
+								cond,
+								needed_fields,
+								version,
+								table_ctx,
+								knn_ctx,
+								downstream_topk,
+								&restricted_select,
+							)
+							.await;
 					}
 					AccessPath::EmptyScan => {
 						return Ok(Self::plan_empty_source());
@@ -2074,13 +2101,73 @@ impl<'ctx> Planner<'ctx> {
 	/// predicate per surviving row keeps the plan's results identical to the
 	/// streaming plans by construction — including when a range branch is
 	/// dropped at runtime for exceeding its drained-entry budget.
-	fn plan_bitmap_fusion_source(
+	///
+	/// For OR fusion, `fallback` carries the streaming union the fused plan
+	/// replaced. It is planned into a `UnionIndexScan` here and handed to the
+	/// `BitmapResolve`, which streams it instead of the bitmap when a union
+	/// branch overflows its budget at execute time. The union's own filter
+	/// action is discarded — this source stays `FilterAction::UseOriginal`,
+	/// so the full WHERE above re-filters either path.
+	#[allow(clippy::too_many_arguments)]
+	async fn plan_bitmap_fusion_source(
+		&self,
 		table: surrealdb_strand::TableName,
 		root: BitmapPlan,
+		fallback: Option<Box<AccessPath>>,
+		order: Option<&crate::expr::order::Ordering>,
+		cond: Option<&Cond>,
 		needed_fields: Option<std::collections::HashSet<String>>,
+		version: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 		table_ctx: Option<ResolvedTableContext>,
+		knn_ctx: Option<Arc<crate::exec::function::KnnContext>>,
+		downstream_topk: bool,
+		restricted_select: &RestrictedPrefixes,
 	) -> Result<PlannedSource, Error> {
+		let fallback_op = match fallback.map(|f| *f) {
+			Some(AccessPath::Union {
+				paths,
+				dedupe,
+			}) => Some(
+				self.plan_union_index_source(
+					table.clone(),
+					paths,
+					dedupe,
+					order,
+					// A LIMIT is never pushed into a fused source, so there is
+					// no per-batch ceiling to hand the union's sub-scans.
+					None,
+					cond,
+					needed_fields.clone(),
+					version,
+					table_ctx.clone(),
+					knn_ctx,
+					downstream_topk,
+					restricted_select,
+				)
+				.await?
+				.operator,
+			),
+			Some(other) => {
+				// Server-side log carries the Debug-formatted access path for
+				// diagnosis; the client-facing message stays opaque so internal
+				// access-path details don't leak.
+				tracing::error!(
+					path = ?other,
+					"BitmapFusion carried an unexpected fallback access path"
+				);
+				return Err(EngineError::Internal(
+					"BitmapFusion carried an unexpected fallback access path; \
+					 only Union is valid here"
+						.into(),
+				)
+				.into());
+			}
+			None => None,
+		};
 		let mut scan = BitmapResolve::new(table, bitmap_plan_to_node(root), needed_fields);
+		if let Some(op) = fallback_op {
+			scan = scan.with_overflow_fallback(op);
+		}
 		if let Some(tc) = table_ctx {
 			scan = scan.with_resolved(tc);
 		}
@@ -3015,9 +3102,51 @@ impl<'ctx> Planner<'ctx> {
 			return Ok(Some((
 				AccessPath::BitmapFusion {
 					root,
+					fallback: None,
 				},
 				direction,
 			)));
+		}
+
+		// Top-level OR fusion (issue #550): union the per-branch candidate
+		// bitmaps over the shared doc-ID space instead of k-way-merging
+		// RecordId streams, whose dedupe set grows with the result size.
+		// Gated like the AND fusion above: LIMIT without ORDER BY keeps
+		// streaming early termination (a bitmap plan materializes every
+		// branch first), an index-covered ORDER BY keeps the union scan's
+		// sorted-merge and sort-elimination plans, and ORDER BY id keeps
+		// the union's merge-by-id. An ordering nothing covers installs a
+		// blocking Sort above either plan, so fusion is allowed there even
+		// under LIMIT.
+		if with.is_none()
+			&& !has_version
+			&& ((order.is_none() && !has_limit)
+				|| (order.is_some() && !order_covered && !order_is_scan_compatible(order)))
+			&& let Some((root, fallback)) =
+				analyzer.try_bitmap_union_fusion(analysis_cond, direction)
+		{
+			// `order_covered` only sees whole-condition candidates, which for
+			// an OR root never include the branches' index accesses — so it
+			// misses the union's composite k-way merge: when every branch
+			// pins the same composite-index prefix and the ordering is that
+			// index's next column, the union satisfies the ORDER BY with no
+			// Sort. Keep the streaming union for that shape.
+			let union_covers_order = matches!(
+				&fallback,
+				AccessPath::Union {
+					paths,
+					..
+				} if detect_order_for_composite_union(order, paths).is_some()
+			);
+			if !union_covers_order {
+				return Ok(Some((
+					AccessPath::BitmapFusion {
+						root,
+						fallback: Some(Box::new(fallback)),
+					},
+					direction,
+				)));
+			}
 		}
 
 		if candidates.is_empty() {

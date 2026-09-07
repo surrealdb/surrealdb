@@ -12,7 +12,10 @@
 //!   and feeds the standard fetch pipeline (table permissions per record, computed fields,
 //!   field-level permissions). Rows are emitted in doc-ID order, which is unspecified relative to
 //!   any field — the planner only chooses this plan when no index-covered ORDER BY is available, so
-//!   any ORDER BY is enforced by a downstream Sort.
+//!   any ORDER BY is enforced by a downstream Sort. An OR fusion plan additionally carries the
+//!   streaming union it replaced as an overflow fallback: when any union branch exceeds its
+//!   drained-entry budget, the bitmap is abandoned and the fallback's stream is emitted instead
+//!   (`union_tier: fallback` under EXPLAIN ANALYZE).
 //!
 //! [`BitmapNode`]s implement [`ExecOperator`] so EXPLAIN renders the bitmap
 //! expression as a plan subtree (`BitmapAnd` / `BitmapOr` / `BitmapAndNot` /
@@ -29,6 +32,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use common::future::stream::{self, Yielder};
+use futures::StreamExt;
 use reblessive::TreeStack;
 use roaring::RoaringTreemap;
 
@@ -132,9 +136,14 @@ pub(crate) enum BitmapNodeKind {
 /// per-branch entry budget ([`surrealdb_cnf::BITMAP_BRANCH_BUDGET`]). An AND
 /// simply drops such a branch — the full WHERE clause is kept as a residual
 /// filter above [`BitmapResolve`], so dropping a conjunct only widens the
-/// candidate set. A branch that cannot be dropped (a union member, an AND-NOT
-/// base, or the plan's anchor) is evaluated without a budget and never
-/// overflows.
+/// candidate set. A branch that cannot be dropped (a union member or an
+/// AND-NOT base) propagates its overflow to the whole evaluation instead;
+/// under an anchored plan root that propagation cannot occur, because an
+/// anchored node — one whose bitmap is required for the plan to produce rows
+/// at all — is evaluated without a budget and never overflows. A root is
+/// anchored only when the owning [`BitmapResolve`] has no overflow fallback;
+/// with one attached, every branch is budgeted and a root overflow switches
+/// execution to the fallback's streaming plan.
 enum BranchBitmap {
 	Ready(RoaringTreemap),
 	Overflow,
@@ -636,6 +645,18 @@ pub struct BitmapResolve {
 	/// Plan-time resolved table context. When present, `execute()` skips
 	/// runtime table def + permission lookup.
 	resolved: Option<ResolvedTableContext>,
+	/// Streaming plan to run when a bitmap branch overflows its budget.
+	///
+	/// Attached for OR fusion plans (a `UnionIndexScan` over the same
+	/// branches): an OR may not drop an overflowing branch, so instead of
+	/// draining branches unbudgeted the root is evaluated unanchored and any
+	/// branch overflow abandons the bitmap in favour of this operator's
+	/// stream. `None` (AND fusion) keeps the root anchored: overflowing
+	/// conjuncts are dropped and the residual filter compensates.
+	overflow_fallback: Option<Arc<dyn ExecOperator>>,
+	/// Whether the overflow fallback ran, recorded during `execute()` for
+	/// EXPLAIN ANALYZE (`union_tier: fallback`).
+	fallback_taken: Arc<std::sync::atomic::AtomicBool>,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	metrics: Arc<OperatorMetrics>,
 }
@@ -653,6 +674,8 @@ impl BitmapResolve {
 			root_dyn,
 			needed_fields,
 			resolved: None,
+			overflow_fallback: None,
+			fallback_taken: Arc::new(std::sync::atomic::AtomicBool::new(false)),
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
@@ -660,6 +683,13 @@ impl BitmapResolve {
 	/// Set the plan-time resolved table context.
 	pub(crate) fn with_resolved(mut self, resolved: ResolvedTableContext) -> Self {
 		self.resolved = Some(resolved);
+		self
+	}
+
+	/// Attach the streaming plan to run when a bitmap branch overflows its
+	/// drained-entry budget. See [`Self::overflow_fallback`].
+	pub(crate) fn with_overflow_fallback(mut self, fallback: Arc<dyn ExecOperator>) -> Self {
+		self.overflow_fallback = Some(fallback);
 		self
 	}
 }
@@ -670,7 +700,15 @@ impl ExecOperator for BitmapResolve {
 	}
 
 	fn attrs(&self) -> Vec<(String, String)> {
-		vec![("table".to_string(), self.table_name.to_string())]
+		let mut attrs = vec![("table".to_string(), self.table_name.to_string())];
+		// Whether a branch overflow abandoned the bitmap for the streaming
+		// union fallback, recorded during execution — present under EXPLAIN
+		// ANALYZE (which drains the plan before formatting), absent in a
+		// plain EXPLAIN. Mirrors KnnScan's `prefilter_tier: fallback`.
+		if self.fallback_taken.load(std::sync::atomic::Ordering::Relaxed) {
+			attrs.push(("union_tier".to_string(), "fallback".to_string()));
+		}
+		attrs
 	}
 
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
@@ -698,6 +736,8 @@ impl ExecOperator for BitmapResolve {
 		let root = Arc::clone(&self.root);
 		let resolved = self.resolved.clone();
 		let needed_fields = self.needed_fields.clone();
+		let overflow_fallback = self.overflow_fallback.clone();
+		let fallback_taken = Arc::clone(&self.fallback_taken);
 		let ctx = ctx.clone();
 
 		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
@@ -764,14 +804,33 @@ impl ExecOperator for BitmapResolve {
 				budget: *surrealdb_cnf::BITMAP_BRANCH_BUDGET,
 				strict: false,
 			};
-			let bitmap = match root.build_bitmap(&bctx, true).await? {
+			// With a fallback attached the root runs unanchored, so every
+			// branch respects the drained-entry budget and pre-emission work
+			// is bounded to ~budget entries per branch; without one (AND
+			// fusion) the root is anchored and never overflows.
+			let anchored = overflow_fallback.is_none();
+			let bitmap = match root.build_bitmap(&bctx, anchored).await? {
 				BranchBitmap::Ready(bitmap) => bitmap,
-				// The root is anchored; overflow is unreachable.
 				BranchBitmap::Overflow => {
-					Err(ControlFlow::Err(anyhow::anyhow!(
-						"The anchored bitmap plan root overflowed its branch budget"
-					)))?;
-					unreachable!()
+					let Some(fallback) = overflow_fallback else {
+						// The root is anchored when no fallback is attached;
+						// overflow is unreachable.
+						Err(ControlFlow::Err(anyhow::anyhow!(
+							"The anchored bitmap plan root overflowed its branch budget"
+						)))?;
+						unreachable!()
+					};
+					// A union branch exceeded the budget: abandon the bitmap
+					// and stream the equivalent plan instead. The operator
+					// handles permissions and fields itself, and the full
+					// WHERE clause above re-filters its rows exactly as it
+					// does the bitmap path's.
+					fallback_taken.store(true, std::sync::atomic::Ordering::Relaxed);
+					let mut stream = fallback.execute(&ctx)?;
+					while let Some(batch) = stream.next().await {
+						yielder.emit(batch?).await;
+					}
+					return Ok(());
 				}
 			};
 

@@ -415,6 +415,90 @@ impl<'a> IndexAnalyzer<'a> {
 		})
 	}
 
+	/// Build a bitmap union plan for a top-level OR (issue #550): every
+	/// branch's best candidate drains to a doc-ID bitmap and the union
+	/// resolves once, inherently deduplicated — replacing the
+	/// `UnionIndexScan` RecordId merge, whose dedupe set grows with the
+	/// result size. The [`AccessPath::Union`] the plan was derived from is
+	/// returned alongside it, as the executor's overflow fallback: a union
+	/// branch exceeding its drained-entry budget abandons the bitmap plan
+	/// and streams the union instead.
+	///
+	/// Returns `None` unless every branch is independently bitmap-capable
+	/// (a union missing a branch would silently drop rows) and at least two
+	/// branches survive: a degenerate single-branch OR is better served by
+	/// the streaming single-index plan, and a provably-empty OR by the
+	/// EmptyScan path. The caller gates on the query shape: LIMIT without
+	/// ORDER BY keeps streaming early termination, and an ORDER BY declines
+	/// fusion only when an index covers the ordering or the ordering is
+	/// record-id order — both of which the union scan can satisfy without a
+	/// Sort; an ordering nothing covers installs a Sort above either plan.
+	pub(crate) fn try_bitmap_union_fusion(
+		&self,
+		cond: Option<&Cond>,
+		direction: Direction,
+	) -> Option<(BitmapPlan, AccessPath)> {
+		let cond = cond?;
+		// Explicit hints pin the plan (NOINDEX is handled before analysis).
+		if self.with_hints.is_some() {
+			return None;
+		}
+		// A KNN operator must be consumed by its KnnScan; see
+		// [`Self::try_bitmap_fusion`].
+		if Self::expr_contains_knn(&cond.0) {
+			return None;
+		}
+		if !matches!(
+			cond.0,
+			Expr::Binary {
+				op: BinaryOperator::Or,
+				..
+			}
+		) {
+			return None;
+		}
+		let (path, _) = self.or_union_from_expr(&cond.0, direction)?;
+		match Self::bitmap_plan_from_access_path(&path)? {
+			BitmapPlan::Or(children)
+				if children.len() >= 2 && !Self::equality_branches_disjoint(&children) =>
+			{
+				Some((BitmapPlan::Or(children), path))
+			}
+			_ => None,
+		}
+	}
+
+	/// Whether every union member is an equality lookup on the same index
+	/// with pairwise-distinct values — record-disjoint branches (barring
+	/// array-valued fan-out, where declining is merely conservative). The
+	/// fused plan's structural win over the streaming union is dedupe, so
+	/// with no duplicates to save the union's direct row streaming beats the
+	/// bitmap's extra doc-ID resolve step: the caller declines fusion and
+	/// the streaming `UnionIndexScan` keeps the query.
+	fn equality_branches_disjoint(children: &[BitmapPlan]) -> bool {
+		let mut shared_index: Option<&IndexRef> = None;
+		let mut values: Vec<&Value> = Vec::with_capacity(children.len());
+		for child in children {
+			let BitmapPlan::BTree {
+				index_ref,
+				access: BTreeAccess::Equality(value),
+			} = child
+			else {
+				return false;
+			};
+			match shared_index {
+				None => shared_index = Some(index_ref),
+				Some(seen) if seen == index_ref => {}
+				Some(_) => return false,
+			}
+			if values.contains(&value) {
+				return false;
+			}
+			values.push(value);
+		}
+		true
+	}
+
 	/// Match a negated expression: the `!` prefix operator, or the builtin
 	/// `not()` function — the parsed form of `NOT (...)`. Both negate
 	/// truthiness identically.
@@ -2276,6 +2360,87 @@ mod tests {
 			let cond = parse_cond("a = 1 AND b = 2");
 			let plan = fuse(&az, &cond, false).expect("two capable branches fuse");
 			assert!(matches!(plan, BitmapPlan::And(ref children) if children.len() == 2));
+		}
+
+		/// Run `try_bitmap_union_fusion` the way `resolve_access_path` does.
+		fn fuse_union(az: &IndexAnalyzer<'_>, cond: &Cond) -> Option<BitmapPlan> {
+			az.try_bitmap_union_fusion(Some(cond), Direction::Forward).map(|(plan, _)| plan)
+		}
+
+		#[test]
+		fn top_level_or_of_capable_branches_fuses() {
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_v2(2, "idx_b", &["b"])], None);
+			let cond = parse_cond("a = 1 OR b = 2");
+			let plan = fuse_union(&az, &cond).expect("two capable branches union");
+			assert!(matches!(plan, BitmapPlan::Or(ref children) if children.len() == 2));
+		}
+
+		#[test]
+		fn or_trees_flatten_into_one_union() {
+			let az = analyzer(
+				vec![
+					idx_v2(1, "idx_a", &["a"]),
+					idx_v2(2, "idx_b", &["b"]),
+					idx_v2(3, "idx_c", &["c"]),
+				],
+				None,
+			);
+			let cond = parse_cond("a = 1 OR b = 2 OR c = 3");
+			let plan = fuse_union(&az, &cond).expect("nested OR flattens");
+			assert!(matches!(plan, BitmapPlan::Or(ref children) if children.len() == 3));
+		}
+
+		#[test]
+		fn union_fusion_declines_conjunctions() {
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_v2(2, "idx_b", &["b"])], None);
+			let cond = parse_cond("a = 1 AND b = 2");
+			assert!(fuse_union(&az, &cond).is_none(), "AND is try_bitmap_fusion's shape");
+		}
+
+		#[test]
+		fn disjoint_same_index_equalities_decline() {
+			// Same-index equality branches with distinct values are
+			// record-disjoint: no duplicate fetches to save, so the
+			// streaming union keeps the query.
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"])], None);
+			let cond = parse_cond("a = 1 OR a = 2");
+			assert!(fuse_union(&az, &cond).is_none());
+		}
+
+		#[test]
+		fn same_index_range_branches_still_fuse() {
+			// A range branch can overlap an equality branch on the same
+			// index, so the disjointness decline does not apply.
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"])], None);
+			let cond = parse_cond("a = 1 OR a > 5");
+			let plan = fuse_union(&az, &cond).expect("overlappable branches union");
+			assert!(matches!(plan, BitmapPlan::Or(ref children) if children.len() == 2));
+		}
+
+		#[test]
+		fn a_pre_doc_id_branch_blocks_the_union() {
+			// One branch's index predates entry doc-IDs: a union missing a
+			// branch would silently drop rows, so nothing fuses.
+			let az =
+				analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_basic(2, "idx_b", &["b"])], None);
+			let cond = parse_cond("a = 1 OR b = 2");
+			assert!(fuse_union(&az, &cond).is_none());
+		}
+
+		#[test]
+		fn an_unindexed_branch_blocks_the_union() {
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"])], None);
+			let cond = parse_cond("a = 1 OR unindexed = 2");
+			assert!(fuse_union(&az, &cond).is_none());
+		}
+
+		#[test]
+		fn a_with_hint_pins_the_union_plan() {
+			let with = With::Index(vec!["idx_a".to_owned()]);
+			let az =
+				analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_v2(2, "idx_b", &["b"])], Some(&with));
+			let cond = parse_cond("a = 1 OR b = 2");
+			assert!(fuse_union(&az, &cond).is_none());
 		}
 
 		#[test]

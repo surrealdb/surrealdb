@@ -120,13 +120,23 @@ pub enum AccessPath {
 	/// (issue #547).
 	///
 	/// Chosen for an AND-composed WHERE clause with at least two index-backed
-	/// members (or one plus a subtractable `NOT`), when every participating
+	/// members (or one plus a subtractable `NOT`), or a top-level OR whose
+	/// every branch is bitmap-capable (issue #550), when every participating
 	/// index carries doc-IDs, no index covers the ORDER BY, and no
 	/// early-termination (LIMIT without ORDER BY) or VERSION constraints
 	/// apply. Surfaces as a `BitmapResolve` operator over a `BitmapNode`
 	/// tree; the whole WHERE clause stays as the residual filter.
+	///
+	/// `fallback` carries the streaming [`AccessPath::Union`] the OR fusion
+	/// replaced. An OR may not drop an overflowing branch (the residual
+	/// filter can only narrow the candidate set, never restore dropped
+	/// rows), so instead of draining branches unbudgeted the executor
+	/// abandons the bitmap on the first branch overflow and streams the
+	/// fallback in its place. `None` for AND fusion, whose anchored root
+	/// drops overflowing conjuncts and lets the residual filter compensate.
 	BitmapFusion {
 		root: BitmapPlan,
+		fallback: Option<Box<AccessPath>>,
 	},
 
 	/// Union of multiple index scans (OR-union, scalar IN-expansion,

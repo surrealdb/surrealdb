@@ -98,6 +98,9 @@ value = '''"SelectProject [ctx: Db] [projections: id]\n    Filter [ctx: Db] [pre
 
 [[test.results]]
 value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}\n    Filter [ctx: Db] [predicate: category = 'ml' AND published = true] {rows: 2}\n        BitmapResolve [ctx: Db] [table: docs] {rows: 2}\n            BitmapAnd [ctx: Db] {rows: 2}\n                BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'ml'] {rows: 3}\n                BitmapIndexScan [ctx: Db] [index: idx_published, access: = true] {rows: 3}\n\nTotal rows: 2"'''
+
+[[test.results]]
+value = '''"Limit [ctx: Db] [limit: 5]\n    Aggregate [ctx: Db] [by: category]\n        Filter [ctx: Db] [predicate: category = 'ml' AND published = true]\n            BitmapResolve [ctx: Db] [table: docs]\n                BitmapAnd [ctx: Db]\n                    BitmapIndexScan [ctx: Db] [index: idx_category, access: = 'ml']\n                    BitmapIndexScan [ctx: Db] [index: idx_published, access: = true]\n"'''
 */
 
 DEFINE FIELD category ON docs TYPE string;
@@ -161,3 +164,7 @@ EXPLAIN SELECT id FROM docs WITH INDEX idx_category WHERE category = 'ml' AND pu
 
 -- EXPLAIN ANALYZE reports per-node candidate cardinalities.
 EXPLAIN ANALYZE SELECT id FROM docs WHERE category = 'ml' AND published = true;
+
+-- A LIMIT above a blocking GROUP BY cannot terminate the source early:
+-- bitmap fusion still applies.
+EXPLAIN SELECT category, count() FROM docs WHERE category = 'ml' AND published = true GROUP BY category LIMIT 5;
