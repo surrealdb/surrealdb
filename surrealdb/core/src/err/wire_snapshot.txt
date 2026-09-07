@@ -47,6 +47,7 @@ Unencodable	{ cause: NONE, code: -32000, kind: 'Serialization', message: 'Tried 
 Corrupted	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Encountered KV store corruption: sample' }
 InvalidContent	{ cause: NONE, code: -32600, details: { details: { value: 'NONE' }, kind: 'InvalidContent' }, kind: 'Validation', message: 'Cannot use NONE in a CONTENT clause' }
 InvalidMerge	{ cause: NONE, code: -32600, details: { details: { value: 'NONE' }, kind: 'InvalidMerge' }, kind: 'Validation', message: 'Cannot use NONE in a MERGE clause' }
+ValueTooDeep	{ cause: NONE, code: -32000, kind: 'Validation', message: 'The value is nested too deeply. A value may be nested at most 256 levels; reduce the nesting or split the data across records' }
 InvalidPatch	{ cause: NONE, code: -32000, kind: 'Validation', message: 'The JSON Patch contains invalid operations. Failed to parse JSON patch structure: sample' }
 PatchTest	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Given test operation failed for JSON Patch. Expected `sample`, but got `sample` instead.' }
 InvalidFunctionArguments	{ cause: NONE, code: -32000, kind: 'Internal', message: 'Incorrect arguments for function sample(). sample' }

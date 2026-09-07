@@ -32,6 +32,14 @@ pub enum Error {
 		value: Value,
 	},
 
+	/// A value is nested deeper than the engine will walk
+	#[error(
+		"The value is nested too deeply. A value may be nested at most {max} levels; reduce the nesting or split the data across records"
+	)]
+	ValueTooDeep {
+		max: usize,
+	},
+
 	/// There was an error with the provided JSON Patch
 	#[error("The JSON Patch contains invalid operations. {0}")]
 	InvalidPatch(PatchError),
@@ -169,6 +177,11 @@ impl LeafError for Error {
 				},
 			),
 			Error::InvalidPatch(_) => TypesError::validation(message, None),
+			// A rejected shape of input, so it is reported like any other
+			// validation failure rather than as an engine fault.
+			Error::ValueTooDeep {
+				..
+			} => TypesError::validation(message, None),
 			Error::Coerce(_) => TypesError::validation(message, None),
 			Error::Cast(_) => TypesError::validation(message, None),
 			Error::TryAdd(..)

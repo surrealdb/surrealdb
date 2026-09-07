@@ -11,7 +11,7 @@ use surrealdb_kvs::value::KVValue;
 use surrealdb_strand::Strand;
 
 use crate::catalog::aggregation::AggregationStat;
-use crate::val::{RecordId, Value};
+use crate::val::{RecordId, Value, check_value_depth};
 
 /// Represents a record stored in the database
 ///
@@ -67,7 +67,17 @@ impl KVValue for Record {
 
 	/// Encode a `Record` for storage via the derived `revisioned`
 	/// serialiser. The top-level `"id"` (if present) is stored as-is.
+	///
+	/// The nesting depth is checked first. The derived codec recurses over
+	/// nested collections with no depth guard of its own, and so do the SQL
+	/// formatter used by export and `INFO` and the public-value conversion every
+	/// query result passes through — a value deep enough to overflow a thread
+	/// stack in any of them aborts the process, and once stored it does so again
+	/// on every subsequent read. Rejecting the write is what keeps such a value
+	/// from existing: the parser's caps are per-parse, so a read-modify-write
+	/// loop adding one level per request never approaches them.
 	fn kv_encode_value(&self) -> Result<Vec<u8>> {
+		check_value_depth(&self.data)?;
 		Ok(revision::to_vec(self)?)
 	}
 

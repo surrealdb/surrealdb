@@ -196,6 +196,12 @@ fn every_expr_variant() -> Vec<(&'static str, ExprError)> {
 			},
 		),
 		(
+			"ValueTooDeep",
+			ExprError::ValueTooDeep {
+				max: 256,
+			},
+		),
+		(
 			"InvalidPatch",
 			ExprError::InvalidPatch(PatchError {
 				message: "sample".to_string(),

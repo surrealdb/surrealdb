@@ -1222,7 +1222,124 @@ impl FromIterator<(String, Value)> for Value {
 ///
 /// In the future, as the two types diverge, this function will need access to the context in order
 /// to convert certain values to the public value.
+/// Maximum nesting depth a [`Value`] may carry.
+///
+/// Several code paths walk a value with native recursion — the public-value
+/// conversion every query result passes through, the SQL formatter used by
+/// export and `INFO`, and the derived `revision` storage codec. None can carry
+/// its own cumulative depth counter across the others, and `surrealdb-core` is
+/// built with `panic = "abort"` under the release profile, so a stack overflow
+/// in any of them is an unconditional process abort rather than a failed
+/// request.
+///
+/// The parser's own caps do not bound this: they are per-parse, and a value is
+/// grown one level per request by a read-modify-write loop
+/// (`UPDATE deep:1 SET v = [v]`) that stays far under them at every step. The
+/// compute cap (`max_computation_depth`) bounds expression nesting, not the
+/// runtime nesting of a value being cloned or serialised.
+///
+/// Sized well above any legitimate document and far below the depth at which
+/// the recursive walks approach a thread stack.
+pub const MAX_VALUE_DEPTH: usize = 256;
+
+/// A node in the iterative depth walk: a [`Value`] or a [`RecordIdKey`]. A
+/// record id nests through its key, which is not itself a `Value`, so the
+/// worklist has to carry either.
+enum DepthNode<'a> {
+	Value(&'a Value),
+	Key(&'a crate::val::RecordIdKey),
+}
+
+/// Rejects a [`Value`] nested deeper than [`MAX_VALUE_DEPTH`].
+///
+/// Deliberately iterative: a recursive checker would overflow the stack on
+/// exactly the input it exists to reject. Traversal stops at the first node
+/// past the cap, so a deeply-nested value is rejected without being walked in
+/// full.
+///
+/// A record id's key is walked too. The derived storage codec, the SQL
+/// formatter and the recursive drop all descend into a compound key
+/// (`t:[[[...]]]`), so a key deep enough to overflow them must be rejected at
+/// the same point a deep field value is.
+pub fn check_value_depth(value: &Value) -> Result<()> {
+	use crate::val::RecordIdKey;
+	// (node, depth of that node)
+	let mut stack: Vec<(DepthNode<'_>, usize)> = vec![(DepthNode::Value(value), 1)];
+	while let Some((node, depth)) = stack.pop() {
+		if depth > MAX_VALUE_DEPTH {
+			bail!(Error::ValueTooDeep {
+				max: MAX_VALUE_DEPTH,
+			});
+		}
+		match node {
+			DepthNode::Value(value) => match value {
+				Value::Array(v) => {
+					stack.extend(v.0.iter().map(|v| (DepthNode::Value(v), depth + 1)))
+				}
+				Value::Set(v) => stack.extend(v.0.iter().map(|v| (DepthNode::Value(v), depth + 1))),
+				Value::Object(v) => {
+					stack.extend(v.0.values().map(|v| (DepthNode::Value(v), depth + 1)))
+				}
+				Value::Range(v) => {
+					for bound in [&v.start, &v.end] {
+						match bound {
+							Bound::Included(v) | Bound::Excluded(v) => {
+								stack.push((DepthNode::Value(v), depth + 1))
+							}
+							Bound::Unbounded => {}
+						}
+					}
+				}
+				Value::RecordId(v) => stack.push((DepthNode::Key(&v.key), depth + 1)),
+				// Every other variant is a leaf as far as `Value` nesting goes.
+				// `Geometry` nests within itself rather than within `Value`, and
+				// is bounded by the parser when it is read.
+				_ => {}
+			},
+			DepthNode::Key(key) => match key {
+				RecordIdKey::Array(a) => {
+					stack.extend(a.0.iter().map(|v| (DepthNode::Value(v), depth + 1)))
+				}
+				RecordIdKey::Object(o) => {
+					stack.extend(o.0.values().map(|v| (DepthNode::Value(v), depth + 1)))
+				}
+				RecordIdKey::Range(r) => {
+					for bound in [&r.start, &r.end] {
+						match bound {
+							Bound::Included(k) | Bound::Excluded(k) => {
+								stack.push((DepthNode::Key(k), depth + 1))
+							}
+							Bound::Unbounded => {}
+						}
+					}
+				}
+				// Number / String / Uuid are leaves.
+				_ => {}
+			},
+		}
+	}
+	Ok(())
+}
+
 pub fn convert_value_to_public_value(value: crate::val::Value) -> Result<surrealdb_types::Value> {
+	convert_value_to_public_value_at(value, 1)
+}
+
+/// [`convert_value_to_public_value`] carrying the depth of `value`.
+///
+/// The depth is threaded through the mutual recursion rather than checked by a
+/// separate pass so the universal query-result path pays only a counter, and so
+/// a value already in storage from before [`MAX_VALUE_DEPTH`] was enforced
+/// surfaces an error here instead of aborting the process.
+fn convert_value_to_public_value_at(
+	value: crate::val::Value,
+	depth: usize,
+) -> Result<surrealdb_types::Value> {
+	if depth > MAX_VALUE_DEPTH {
+		bail!(Error::ValueTooDeep {
+			max: MAX_VALUE_DEPTH,
+		});
+	}
 	match value {
 		crate::val::Value::None => Ok(surrealdb_types::Value::None),
 		crate::val::Value::Null => Ok(surrealdb_types::Value::Null),
@@ -1232,12 +1349,12 @@ pub fn convert_value_to_public_value(value: crate::val::Value) -> Result<surreal
 		crate::val::Value::Datetime(value) => convert_datetime_to_public(value),
 		crate::val::Value::Duration(value) => convert_duration_to_public(value),
 		crate::val::Value::Uuid(value) => convert_uuid_to_public(value),
-		crate::val::Value::Array(value) => convert_array_to_public(value),
-		crate::val::Value::Set(value) => convert_set_to_public(value),
-		crate::val::Value::Object(value) => convert_object_to_public(value),
+		crate::val::Value::Array(value) => convert_array_to_public(value, depth),
+		crate::val::Value::Set(value) => convert_set_to_public(value, depth),
+		crate::val::Value::Object(value) => convert_object_to_public(value, depth),
 		crate::val::Value::Geometry(value) => convert_geometry_to_public(value),
 		crate::val::Value::Bytes(value) => convert_bytes_to_public(value),
-		crate::val::Value::RecordId(value) => convert_record_id_to_public(value),
+		crate::val::Value::RecordId(value) => convert_record_id_to_public(value, depth),
 		crate::val::Value::File(value) => convert_file_to_public(value),
 		crate::val::Value::Range(value) => convert_range_to_public(*value),
 		crate::val::Value::Regex(value) => convert_regex_to_public(value),
@@ -1309,36 +1426,52 @@ fn convert_geometry_to_public(value: crate::val::Geometry) -> Result<surrealdb_t
 	Ok(surrealdb_types::Value::Geometry(geometry))
 }
 
-fn convert_array_to_public(value: crate::val::Array) -> Result<surrealdb_types::Value> {
+fn convert_array_to_public(
+	value: crate::val::Array,
+	depth: usize,
+) -> Result<surrealdb_types::Value> {
 	let converted: Result<Vec<_>> =
-		value.0.into_iter().map(convert_value_to_public_value).collect();
+		value.0.into_iter().map(|v| convert_value_to_public_value_at(v, depth + 1)).collect();
 	Ok(surrealdb_types::Value::Array(surrealdb_types::Array::from(converted?)))
 }
 
-fn convert_set_to_public(value: crate::val::Set) -> Result<surrealdb_types::Value> {
+fn convert_set_to_public(value: crate::val::Set, depth: usize) -> Result<surrealdb_types::Value> {
 	// Set is stored as a sorted Vec internally
 	let converted: Result<Vec<surrealdb_types::Value>> =
-		value.0.into_iter().map(convert_value_to_public_value).collect();
+		value.0.into_iter().map(|v| convert_value_to_public_value_at(v, depth + 1)).collect();
 	Ok(surrealdb_types::Value::Set(surrealdb_types::Set::from(converted?)))
 }
 
-fn convert_object_to_public(value: crate::val::Object) -> Result<surrealdb_types::Value> {
-	let converted = convert_object_to_public_map(value)?;
+fn convert_object_to_public(
+	value: crate::val::Object,
+	depth: usize,
+) -> Result<surrealdb_types::Value> {
+	let converted = convert_object_to_public_map_at(value, depth)?;
 	Ok(surrealdb_types::Value::Object(surrealdb_types::Object::from(converted)))
 }
 
 pub fn convert_object_to_public_map(
 	value: crate::val::Object,
 ) -> Result<BTreeMap<String, surrealdb_types::Value>> {
+	convert_object_to_public_map_at(value, 1)
+}
+
+fn convert_object_to_public_map_at(
+	value: crate::val::Object,
+	depth: usize,
+) -> Result<BTreeMap<String, surrealdb_types::Value>> {
 	value
 		.0
 		.into_iter()
-		.map(|(k, v)| convert_value_to_public_value(v).map(|v| (k.into_string(), v)))
+		.map(|(k, v)| convert_value_to_public_value_at(v, depth + 1).map(|v| (k.into_string(), v)))
 		.collect()
 }
 
-fn convert_record_id_to_public(value: crate::val::RecordId) -> Result<surrealdb_types::Value> {
-	let key = convert_record_id_key_to_public(value.key)?;
+fn convert_record_id_to_public(
+	value: crate::val::RecordId,
+	depth: usize,
+) -> Result<surrealdb_types::Value> {
+	let key = convert_record_id_key_to_public(value.key, depth)?;
 	Ok(surrealdb_types::Value::RecordId(surrealdb_types::RecordId {
 		table: value.table.into_public_table(),
 		key,
@@ -1347,7 +1480,13 @@ fn convert_record_id_to_public(value: crate::val::RecordId) -> Result<surrealdb_
 
 fn convert_record_id_key_to_public(
 	key: crate::val::RecordIdKey,
+	depth: usize,
 ) -> Result<surrealdb_types::RecordIdKey> {
+	if depth > MAX_VALUE_DEPTH {
+		bail!(Error::ValueTooDeep {
+			max: MAX_VALUE_DEPTH,
+		});
+	}
 	match key {
 		crate::val::RecordIdKey::Number(n) => Ok(surrealdb_types::RecordIdKey::Number(n)),
 		crate::val::RecordIdKey::String(s) => Ok(surrealdb_types::RecordIdKey::String(s.into())),
@@ -1355,7 +1494,7 @@ fn convert_record_id_key_to_public(
 			Ok(surrealdb_types::RecordIdKey::Uuid(surrealdb_types::Uuid::from(u.0)))
 		}
 		crate::val::RecordIdKey::Array(a) => {
-			let converted_array = convert_array_to_public(a)?;
+			let converted_array = convert_array_to_public(a, depth)?;
 			if let surrealdb_types::Value::Array(arr) = converted_array {
 				Ok(surrealdb_types::RecordIdKey::Array(arr))
 			} else {
@@ -1363,7 +1502,7 @@ fn convert_record_id_key_to_public(
 			}
 		}
 		crate::val::RecordIdKey::Object(o) => {
-			let converted_object = convert_object_to_public(o)?;
+			let converted_object = convert_object_to_public(o, depth)?;
 			if let surrealdb_types::Value::Object(obj) = converted_object {
 				Ok(surrealdb_types::RecordIdKey::Object(obj))
 			} else {
@@ -1373,13 +1512,21 @@ fn convert_record_id_key_to_public(
 		crate::val::RecordIdKey::Range(r) => {
 			Ok(surrealdb_types::RecordIdKey::Range(Box::new(surrealdb_types::RecordIdKeyRange {
 				start: match r.start {
-					Bound::Included(k) => Bound::Included(convert_record_id_key_to_public(k)?),
-					Bound::Excluded(k) => Bound::Excluded(convert_record_id_key_to_public(k)?),
+					Bound::Included(k) => {
+						Bound::Included(convert_record_id_key_to_public(k, depth + 1)?)
+					}
+					Bound::Excluded(k) => {
+						Bound::Excluded(convert_record_id_key_to_public(k, depth + 1)?)
+					}
 					Bound::Unbounded => Bound::Unbounded,
 				},
 				end: match r.end {
-					Bound::Included(k) => Bound::Included(convert_record_id_key_to_public(k)?),
-					Bound::Excluded(k) => Bound::Excluded(convert_record_id_key_to_public(k)?),
+					Bound::Included(k) => {
+						Bound::Included(convert_record_id_key_to_public(k, depth + 1)?)
+					}
+					Bound::Excluded(k) => {
+						Bound::Excluded(convert_record_id_key_to_public(k, depth + 1)?)
+					}
 					Bound::Unbounded => Bound::Unbounded,
 				},
 			})))
@@ -1404,6 +1551,106 @@ fn convert_range_to_public(value: crate::val::Range) -> Result<surrealdb_types::
 
 #[cfg(test)]
 mod tests {
+	use super::{MAX_VALUE_DEPTH, check_value_depth, convert_value_to_public_value};
+	use crate::val::{Array, Object, Value};
+
+	/// Builds a value nested `depth` levels deep: `depth` of 1 is a bare
+	/// integer, 2 is `[1]`, 3 is `[[1]]`, and so on.
+	fn nested_array(depth: usize) -> Value {
+		let mut value = Value::from(1i64);
+		for _ in 1..depth {
+			value = Value::Array(Array::from(vec![value]));
+		}
+		value
+	}
+
+	fn nested_object(depth: usize) -> Value {
+		let mut value = Value::from(1i64);
+		for _ in 1..depth {
+			let mut obj = Object::default();
+			obj.insert("v".to_owned(), value);
+			value = Value::Object(obj);
+		}
+		value
+	}
+
+	// The recursion sinks that walk a `Value` — the public-value conversion, the
+	// SQL formatter, and the derived storage codec — carry no depth guard of
+	// their own, and a stack overflow in any of them aborts the process under
+	// the release profile's `panic = "abort"`. A value is grown one level per
+	// request by a read-modify-write loop, so the parser's per-parse caps never
+	// fire during accumulation; the depth of the value itself has to be bounded.
+	#[test]
+	fn value_depth_within_the_cap_is_accepted() {
+		check_value_depth(&nested_array(MAX_VALUE_DEPTH))
+			.expect("a value exactly at the cap must be accepted");
+		check_value_depth(&nested_object(MAX_VALUE_DEPTH))
+			.expect("objects nest the same way as arrays");
+		check_value_depth(&Value::from(1i64)).expect("a scalar is depth 1");
+	}
+
+	#[test]
+	fn value_depth_past_the_cap_is_rejected() {
+		let err = check_value_depth(&nested_array(MAX_VALUE_DEPTH + 1))
+			.expect_err("a value one level past the cap must be rejected");
+		assert!(err.to_string().contains("nested too deeply"), "unexpected error: {err}");
+		assert!(check_value_depth(&nested_object(MAX_VALUE_DEPTH + 1)).is_err());
+	}
+
+	// The check must survive the input it exists to reject: a recursive
+	// implementation would overflow the stack rather than return an error. The
+	// depth used is far past any thread stack's tolerance for a recursive walk,
+	// so this test aborts rather than fails if the check regresses to recursion.
+	//
+	// The value is leaked deliberately. `Value`'s derived `Drop` is itself
+	// recursive, so releasing a value this deep overflows the stack whatever
+	// this check does — which is the reason the depth cap is enforced when a
+	// record is written rather than only where the recursive walks are: a value
+	// past the cap must never come to exist, because merely dropping one is
+	// fatal.
+	#[test]
+	fn value_depth_check_does_not_recurse() {
+		let deep = std::mem::ManuallyDrop::new(nested_array(200_000));
+		assert!(
+			check_value_depth(&deep).is_err(),
+			"a very deeply nested value must be rejected, not overflow the stack"
+		);
+	}
+
+	// The conversion every query result passes through carries the depth
+	// through its own mutual recursion, so a value already in storage from
+	// before the cap was enforced surfaces an error rather than aborting.
+	#[test]
+	fn public_value_conversion_rejects_values_past_the_cap() {
+		convert_value_to_public_value(nested_array(MAX_VALUE_DEPTH))
+			.expect("a value at the cap must still convert");
+		let err = convert_value_to_public_value(nested_array(MAX_VALUE_DEPTH + 1))
+			.expect_err("a value past the cap must not convert");
+		assert!(err.to_string().contains("nested too deeply"), "unexpected error: {err}");
+	}
+
+	/// A record id nests through its key, which the storage codec and the
+	/// recursive drop both descend into. Treating a record id as a leaf let a
+	/// compound key (`t:[[[...]]]`) past the cap through; the key must be walked
+	/// like any other nested value.
+	#[test]
+	fn record_id_key_depth_is_walked() {
+		use crate::val::{RecordId, RecordIdKey};
+
+		// A record id whose key wraps an array nested `inner` levels.
+		fn record_id_with_nested_key(inner: usize) -> Value {
+			Value::RecordId(RecordId {
+				table: "t".into(),
+				key: RecordIdKey::Array(Array::from(vec![nested_array(inner)])),
+			})
+		}
+
+		check_value_depth(&record_id_with_nested_key(8))
+			.expect("a shallow compound key must be accepted");
+		let err = check_value_depth(&record_id_with_nested_key(MAX_VALUE_DEPTH + 8))
+			.expect_err("a record id whose key nests past the cap must be rejected");
+		assert!(err.to_string().contains("nested too deeply"), "unexpected error: {err}");
+	}
 
 	/// A table name that collides with a keyword must render quoted, or the
 	/// output cannot be parsed back. `TableName` derefs to `str`, so the
