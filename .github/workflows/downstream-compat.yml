@@ -78,6 +78,11 @@ jobs:
       # no-op, not a red mark on every PR (it is a soft signal, not a gate). All
       # the real work below is gated on `configured`, so an unconfigured repo
       # passes green with a notice instead of failing at the token step.
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: Check whether the downstream check is configured
         id: preflight
         env:
