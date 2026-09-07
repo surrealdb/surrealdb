@@ -943,7 +943,35 @@ pub(crate) async fn compute_fields_for_value(
 	value: &mut Value,
 	skip_fetch_perms: bool,
 ) -> Result<(), ControlFlow> {
-	compute_fields_for_value_against(ctx, state, value, skip_fetch_perms, None).await
+	let view = shadowed_stored_view(state, value);
+	compute_fields_for_value_against(ctx, state, value, skip_fetch_perms, view).await
+}
+
+/// The view a self-dereference resolves against when the record carries a key
+/// shadowed by a COMPUTED field of the same name, or `None` when it carries
+/// none.
+///
+/// A key written while a field was ordinary stays in the record's bytes once
+/// that field is redefined as COMPUTED. The field no longer reaches it, but a
+/// self-dereference reads storage directly and would return it. Dropping the
+/// computed names makes `id.<name>` yield `NONE` there — the answer a read of
+/// storage gives for a name that is not stored.
+///
+/// Derived here rather than at the call sites so that every path evaluating
+/// computed fields resolves a self-dereference the same way, including
+/// permission-predicate evaluation, which computes without applying
+/// permissions and so never reaches the passes in
+/// [`materialise_fields_with_permissions`].
+///
+/// Sampled before the computed fields are written: afterwards every computed
+/// name is present by construction, so the test would match on every table
+/// that has one.
+fn shadowed_stored_view(state: &FieldState, value: &Value) -> Option<Value> {
+	let shadowed = match value {
+		Value::Object(obj) => state.dep_map.keys().any(|name| obj.contains_key(name.as_str())),
+		_ => false,
+	};
+	shadowed.then(|| stored_fields_view(state, value))
 }
 
 /// [`compute_fields_for_value`] with the view a self-dereference resolves
@@ -1127,25 +1155,7 @@ pub(crate) async fn materialise_fields_with_permissions(
 	skip_fetch_perms: bool,
 	check_perms: bool,
 ) -> Result<(), ControlFlow> {
-	// A key stored under a name the table now defines as COMPUTED stays in the
-	// record's bytes: it is unreachable through the field, but a
-	// self-dereference reads storage directly and would return it. Redefining a
-	// stored field as COMPUTED leaves exactly that.
-	//
-	// Sampled before the computed fields are written, which is the only point
-	// the stored key and the field that now shadows it are distinguishable, and
-	// applied to this first derivation rather than to the re-derivation below.
-	// Two reasons: the permission passes return early on a table that restricts
-	// no field, which would leave the shadowed key served there; and a
-	// re-derivation answers a computed field's own clause against `$value` from
-	// the second pass and `record` from the first, which is only sound where a
-	// cut makes the two genuinely differ.
-	let shadowed = match &*value {
-		Value::Object(obj) => state.dep_map.keys().any(|name| obj.contains_key(name.as_str())),
-		_ => false,
-	};
-	let first_view = shadowed.then(|| stored_fields_view(state, value));
-	compute_fields_for_value_against(ctx, state, value, skip_fetch_perms, first_view).await?;
+	compute_fields_for_value(ctx, state, value, skip_fetch_perms).await?;
 	// Nothing on the table restricts reads, so nothing can be cut and nothing
 	// needs re-deriving. Checked before the snapshot below so a table whose
 	// fields are all readable pays no clone.

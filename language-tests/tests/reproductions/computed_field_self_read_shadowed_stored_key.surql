@@ -32,9 +32,16 @@ value = "[{ viaid: NONE }]"
 [[test.results]]
 value = "[{ hidden: 'REDACTED', id: redact:one, viaid: NONE }]"
 
+# The predicate reaches the shadowed key through a link, on the path that
+# computes a record without applying permissions. `viaid` reads NONE there too,
+# so the predicate does not match and the row stays hidden.
+[[test.results]]
+value = "[]"
+
 */
 
 SELECT * FROM stale:one;
 SELECT * FROM stale WHERE id = stale:one;
 SELECT viaid FROM stale:one;
 SELECT * FROM redact:one;
+SELECT * FROM holder:one;

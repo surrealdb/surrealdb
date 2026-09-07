@@ -34,6 +34,12 @@ value = "NONE"
 [[test.results]]
 value = "NONE"
 
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: holder:one, link: redact:one }]"
+
 */
 
 DEFINE ACCESS user ON DATABASE TYPE RECORD
@@ -65,3 +71,11 @@ DEFINE TABLE redact SCHEMALESS PERMISSIONS FOR select, create FULL;
 CREATE redact:one SET hidden = 'STALE_SECRET';
 DEFINE FIELD hidden ON redact COMPUTED 'REDACTED' PERMISSIONS FOR select FULL;
 DEFINE FIELD viaid ON redact COMPUTED id.hidden PERMISSIONS FOR select FULL;
+
+-- A table permission predicate that dereferences a linked record. Predicates
+-- are evaluated without applying permissions, so the linked record is computed
+-- through the no-permission path rather than through the passes that apply
+-- them. The shadowed key must not be the value `viaid` carries there either,
+-- or this predicate admits a record it was written to deny.
+DEFINE TABLE holder SCHEMALESS PERMISSIONS FOR select WHERE link.viaid = 'STALE_SECRET', FOR create FULL;
+CREATE holder:one SET link = redact:one;
