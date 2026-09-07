@@ -10,12 +10,90 @@ For the release **process** (how releases are cut and shipped), see
 [`RELEASING.md`](./RELEASING.md). For end-user release notes, see
 <https://surrealdb.com/releases>.
 
-## v3.4.0 — a rolled-back transaction is reported as `cancelled`
+## v3.4.0 — silo module definitions re-keyed, and rollbacks reported as `cancelled`
 
-**Impact**: dashboards that count transactions with
-`surrealdb_transaction_total{outcome="success"}` will read lower after the
-upgrade. Nothing about transaction behaviour changes — only how a rollback is
-labelled.
+**Impact**:
+
+- A silo module defined by v3.2.4 or earlier is unreachable under v3.3.0+ until
+  migration 2 runs, and once it has run, older nodes stop resolving that
+  module. `mod::` modules are unaffected.
+- Dashboards that count transactions with
+  `surrealdb_transaction_total{outcome="success"}` will read lower after the
+  upgrade. Nothing about transaction behaviour changes — only how a rollback is
+  labelled.
+
+### Why a silo module written by an older release cannot be reached
+
+A module definition is stored at `/*{ns}*{db}!md{name}`, where `{name}` is not
+part of the value but derived from it. `REMOVE`, `ALTER`, `DEFINE … OVERWRITE`
+and a call to one of the module's exports all re-derive that name and read the
+one key it spells.
+
+The silo derivation gained a `::` before its version segment in v3.3.0, so
+releases up to and including v3.2.4 wrote
+
+```
+silo::acme::widgets<1.2.3>
+```
+
+where v3.3.0+ derives
+
+```
+silo::acme::widgets::<1.2.3>
+```
+
+Nothing reported the mismatch. `INFO FOR DB` lists modules by scanning the band
+and recomputing each name from the decoded value, so the definition rendered
+exactly as it should while `REMOVE MODULE` on the name `INFO` had just printed
+answered `The module '…' does not exist`. `DEFINE MODULE … OVERWRITE` then wrote
+a *second* row at the derived key: `INFO FOR DB STRUCTURE` showed the module
+twice, and `INFO FOR DB` still showed it once, because both rows recompute to
+the same map key.
+
+### Migration 2 moves the definition
+
+Migration 2 walks the module band of every database and moves each row whose key
+disagrees with the name its own value derives. Values are rewritten unchanged,
+so permissions, comments and the `unsigned` flag carry across untouched.
+
+Where both rows already exist — the store of an operator who worked around the
+break with `DEFINE MODULE … OVERWRITE` — the addressable row wins and the
+unreachable one is dropped, leaving one definition where there were two.
+
+Unlike migration 1, this one **moves** rather than copies. The two keys hold the
+same module, and the listing paths scan the band rather than addressing keys, so
+leaving both behind would make every consumer of the module list report the
+module twice. That is the state the migration exists to end.
+
+What still works during a mixed-version rollout:
+
+- Every `mod::` module, on nodes of either version. `mod::{name}` has never
+  changed, and the migration does not touch those rows.
+- Every other statement.
+
+What doesn't:
+
+- **A silo module stops resolving on nodes older than v3.3.0 once the migration
+  runs.** No arrangement of the band avoids this: the two builds parse and derive
+  different names for the same package, so no single key satisfies both. Upgrade
+  every node before relying on a silo module, or re-run `DEFINE MODULE` once the
+  rollout is complete.
+- Rolling back to a pre-v3.3.0 build after any v3.3.0+ node has started, per the
+  v3.3.0 downgrade note below.
+
+### Time-travel reads of a silo module predate the move
+
+On a versioned backend (`?versioned=true`), a silo module *call* resolved at a
+timestamp before the migration committed fails to find the module: the derived
+key does not exist at those timestamps. `INFO FOR DB VERSION <t>` still lists
+the module, because listing scans the band and recomputes each name from the
+value it finds. Silo modules at the present timestamp are unaffected, as is
+every `mod::` module at any timestamp.
+
+The migration's cost is proportional to the number of module definitions a
+database holds, so it is negligible on any ordinary store.
+
+### A rolled-back transaction is reported as `cancelled`
 
 `outcome` on the `surrealdb.transaction` family previously took `success` for a
 transaction that committed *and* for one that rolled back, because both report

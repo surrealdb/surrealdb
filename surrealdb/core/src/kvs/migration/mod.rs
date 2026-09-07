@@ -44,6 +44,7 @@
 //! fix authored on a release branch carries that branch's version, so a store
 //! already stamped past it would skip it forever if the stamp gated selection.
 
+mod module_keys;
 mod sequence_defs;
 
 use std::future::Future;
@@ -87,12 +88,20 @@ pub(crate) struct Migration {
 }
 
 /// Every migration, in ascending `id` order.
-pub(crate) static MIGRATIONS: &[Migration] = &[Migration {
-	id: 1,
-	name: "copy sequence definitions out of the table band",
-	version: (3, 3, 0),
-	run: |ds| Box::pin(sequence_defs::copy_definitions_out_of_the_table_band(ds)),
-}];
+pub(crate) static MIGRATIONS: &[Migration] = &[
+	Migration {
+		id: 1,
+		name: "copy sequence definitions out of the table band",
+		version: (3, 3, 0),
+		run: |ds| Box::pin(sequence_defs::copy_definitions_out_of_the_table_band(ds)),
+	},
+	Migration {
+		id: 2,
+		name: "re-key module definitions to their derived name",
+		version: (3, 4, 0),
+		run: |ds| Box::pin(module_keys::rekey_definitions_to_their_derived_name(ds)),
+	},
+];
 
 /// Brings the datastore's version stamp up to the running build, applying any
 /// data migrations the gap calls for.
