@@ -104,3 +104,40 @@ async fn sequence_next_val_after_restart() -> Result<()> {
 
 	Ok(())
 }
+
+/// `sequence::nextval` is dense, so a restart *inside* an allocated window has
+/// to resume on the id it stopped at rather than skipping the window's tail.
+///
+/// The sibling `sequence_next_val_after_restart` takes exactly one batch's
+/// worth of values, so it reloads on a window boundary and never exercises
+/// this. Here the batch is far larger than the run.
+#[tokio::test]
+async fn sequence_next_val_after_mid_batch_restart() -> Result<()> {
+	const BEFORE: usize = 30;
+	const AFTER: usize = 30;
+
+	let (_, ds) = new_ds("test", "test", false).await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+
+	let res = &mut ds.execute("DEFINE SEQUENCE sq BATCH 1000;", &ses, None).await?;
+	skip_ok(res, 1)?;
+
+	let set1 = concurrent_task(&ds, "sq", BEFORE).await;
+
+	// `restart` keeps the node id, which is what makes the persisted state
+	// reachable again: it is keyed per node.
+	let ds = Arc::new(Arc::into_inner(ds).expect("sole owner of the datastore").restart());
+
+	let set2 = concurrent_task(&ds, "sq", AFTER).await;
+
+	let set: BTreeSet<i64> = set1.into_iter().chain(set2.into_iter()).collect();
+	assert_eq!(set.len(), BEFORE + AFTER, "no id may be handed out twice");
+	assert_eq!(set.first().copied(), Some(0));
+	assert_eq!(
+		set.last().copied(),
+		Some((BEFORE + AFTER - 1) as i64),
+		"a dense sequence must not skip its window's tail across a restart"
+	);
+
+	Ok(())
+}

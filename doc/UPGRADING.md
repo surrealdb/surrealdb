@@ -10,6 +10,31 @@ For the release **process** (how releases are cut and shipped), see
 [`RELEASING.md`](./RELEASING.md). For end-user release notes, see
 <https://surrealdb.com/releases>.
 
+## v3.4.0 — a rolled-back transaction is reported as `cancelled`
+
+**Impact**: dashboards that count transactions with
+`surrealdb_transaction_total{outcome="success"}` will read lower after the
+upgrade. Nothing about transaction behaviour changes — only how a rollback is
+labelled.
+
+`outcome` on the `surrealdb.transaction` family previously took `success` for a
+transaction that committed *and* for one that rolled back, because both report
+the same result to the metrics layer. The two are now distinguished: `success`
+means committed, `cancelled` means rolled back, and `error` stays reserved for a
+commit or cancel that itself failed.
+
+Rollbacks are routine — read-only work and internal probes end that way — so the
+shift is not small on a busy node. To keep counting every transaction that
+finished, admit both values:
+
+```
+surrealdb_transaction_total{outcome=~"success|cancelled"}
+```
+
+To count only work that reached durability, which is what the label now means,
+keep filtering on `outcome="success"`. See the metric catalogue in
+[`OBSERVABILITY.md`](./OBSERVABILITY.md) for the full attribute set.
+
 ## v3.3.0 — datastore version stamp, startup data migrations, and the sequence keyspace move
 
 **Impact**: the first v3.3.0+ node to start records data migrations it has

@@ -5812,7 +5812,7 @@ mod test {
 		CatalogProvider, DatabaseProvider, NamespaceProvider, TableProvider,
 	};
 	use crate::iam::verify::verify_root_creds;
-	use crate::key::schema::{IndexCountKey, IndexCountPrefix};
+	use crate::key::schema::{DocKeyPrefix, DocLookupPrefix, IndexCountKey, IndexCountPrefix};
 	use crate::kvs::test_support::{WriteTxSizeObserver, cleanup_sizes};
 	use crate::kvs::testing::{
 		RetryableConflictSite, inject_retryable_conflict, retryable_conflict_count,
@@ -7782,5 +7782,233 @@ mod test {
 		}
 		//
 		Ok(())
+	}
+
+	/// Exact-count accounting for the durable commits an indexed write incurs
+	/// beyond its own statement transaction.
+	///
+	/// Groups every observed transaction completion by outcome, type and
+	/// `keys_written`, so a per-record commit is distinguishable from a
+	/// per-record cancel: a cancel costs nothing on a remote backend, a commit
+	/// is a full durability round trip.
+	#[derive(Default)]
+	struct TxOutcomeObserver(std::sync::Mutex<Vec<(&'static str, bool, u64)>>);
+
+	impl ExecutionObserver for TxOutcomeObserver {
+		fn on_transaction_complete(&self, event: &crate::observe::TransactionEvent) {
+			self.0.lock().unwrap().push((
+				event.safe.outcome.as_label(),
+				event.safe.write,
+				event.safe.metrics.keys_written,
+			));
+		}
+	}
+
+	impl TxOutcomeObserver {
+		fn take(&self) -> Vec<(&'static str, bool, u64)> {
+			let mut g = self.0.lock().unwrap();
+			std::mem::take(&mut *g)
+		}
+	}
+
+	#[tokio::test]
+	async fn doc_id_allocation_commits_per_record() -> Result<()> {
+		// Windowed allocation makes the commit count flat in the row count. The
+		// doc-ID window is `table_doc_ids_batch_size` wide (1000), so none of
+		// these sizes exhausts one, and the builder commits per batch of
+		// `INDEXING_BATCH_SIZE`. Persisting per allocation instead put this at
+		// one commit per row, which is what the bounds below rule out: they sit
+		// far under the smallest row count, so a per-row commit breaches them at
+		// every size.
+		const ROWS: [usize; 3] = [100, 200, 400];
+		const INSERT_MAX: usize = 16;
+		const BUILD_MAX: usize = 48;
+
+		let mut observed = Vec::with_capacity(ROWS.len());
+		for rows in ROWS {
+			let (insert, build) = measure_doc_id_commits(rows).await?;
+			assert!(
+				insert <= INSERT_MAX,
+				"{rows} indexed inserts took {insert} durable write commits, over the {INSERT_MAX} \
+				 a windowed allocator needs"
+			);
+			assert!(
+				build <= BUILD_MAX,
+				"a DEFINE INDEX over {rows} rows took {build} durable write commits, over the \
+				 {BUILD_MAX} a windowed allocator needs"
+			);
+			observed.push((insert, build));
+		}
+
+		// Flat in the row count, not merely bounded: quadrupling the rows must
+		// not multiply the commits. A per-row commit shows up here as growth
+		// proportional to `ROWS`, even were the caps above ever loosened.
+		let (first_insert, first_build) = observed[0];
+		let (last_insert, last_build) = observed[ROWS.len() - 1];
+		let (first_rows, last_rows) = (ROWS[0], ROWS[ROWS.len() - 1]);
+		assert!(
+			last_insert <= first_insert * 2,
+			"inserting {last_rows} rows took {last_insert} commits against {first_insert} for \
+			 {first_rows}: the cost is tracking the row count"
+		);
+		assert!(
+			last_build <= first_build * 2,
+			"building over {last_rows} rows took {last_build} commits against {first_build} for \
+			 {first_rows}: the cost is tracking the row count"
+		);
+
+		Ok(())
+	}
+
+	async fn measure_doc_id_commits(rows: usize) -> Result<(usize, usize)> {
+		let observer = Arc::new(TxOutcomeObserver::default());
+		let ds = Datastore::builder()
+			.with_observer(Arc::clone(&observer) as Arc<dyn ExecutionObserver>)
+			.without_maintenance_tasks()
+			.build_with_path("memory")
+			.await?;
+		let session = Session::owner().with_ns("test").with_db("test");
+		{
+			let txn = ds.transaction(Write).await?;
+			txn.ensure_ns_db(None, "test", "test").await?;
+			txn.commit().await?;
+		}
+
+		let report = |label: &str, obs: Vec<(&'static str, bool, u64)>| -> usize {
+			let mut h: BTreeMap<(&'static str, bool, u64), usize> = BTreeMap::new();
+			for e in &obs {
+				*h.entry(*e).or_default() += 1;
+			}
+			// A rollback reports `Outcome::Cancelled`, so a `success` write
+			// completion is exactly a durable commit. Of those, the single-key
+			// ones are the sequence state writes this test is about: nothing
+			// else on this path commits exactly one key.
+			let durable_writes = obs.iter().filter(|(o, w, _)| *o == "success" && *w).count();
+			let seq_state = obs.iter().filter(|(o, w, k)| *o == "success" && *w && *k == 1).count();
+			let per_row = durable_writes as f64 / rows as f64;
+			println!(
+				"  {label}: {durable_writes} durable write commits ({per_row:.3}/row), of which {seq_state} single-key sequence-state; {} completions total",
+				obs.len()
+			);
+			for ((outcome, write, keys), n) in h {
+				let kind = if write {
+					"write"
+				} else {
+					"read "
+				};
+				println!("      {n:>4} x [{outcome:>9} {kind} keys_written={keys}]");
+			}
+			durable_writes
+		};
+
+		// Case A: inserts into a table that already carries a b-tree index.
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE item SCHEMALESS;
+			 DEFINE INDEX idx_name ON item FIELDS name;",
+		)
+		.await?;
+		let _ = observer.take();
+		execute_all(&ds, &session, &format!("CREATE |item:1..={rows}| SET name = 'x' RETURN NONE"))
+			.await?;
+		let insert_obs = observer.take();
+
+		// Case B: DEFINE INDEX over rows that already exist.
+		execute_all(&ds, &session, "DEFINE TABLE other SCHEMALESS;").await?;
+		execute_all(
+			&ds,
+			&session,
+			&format!("CREATE |other:1..={rows}| SET name = 'x' RETURN NONE"),
+		)
+		.await?;
+		let _ = observer.take();
+		execute_all(&ds, &session, "DEFINE INDEX idx_other ON other FIELDS name;").await?;
+		let build_obs = observer.take();
+
+		println!("\n  rows={rows}");
+		let insert = report("insert", insert_obs);
+		let build = report("build ", build_obs);
+
+		Ok((insert, build))
+	}
+
+	/// A doc-ID is issued once. The forward map (record -> id) and the reverse
+	/// map (id -> record) therefore hold one entry per record: reissuing an id
+	/// overwrites a reverse entry, which leaves the reverse map short while the
+	/// forward map stays whole.
+	///
+	/// The restart lands mid-window — the doc-ID batch is 1000 and far fewer
+	/// records are written — which is the case a persisted per-allocation
+	/// cursor used to cover and the window's committed end covers now. A
+	/// restart keeps the node id, which is what makes the persisted allocator
+	/// state reachable at all: it is keyed per node.
+	#[tokio::test]
+	async fn doc_ids_stay_unique_across_mid_batch_restart() -> Result<()> {
+		const BEFORE: usize = 30;
+		const AFTER: usize = 30;
+
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(
+			&ds,
+			&session,
+			"DEFINE TABLE item SCHEMALESS;
+			 DEFINE INDEX idx_tag ON item FIELDS tag;",
+		)
+		.await?;
+		execute_all(
+			&ds,
+			&session,
+			&format!("CREATE |item:1..={BEFORE}| SET tag = 'x' RETURN NONE"),
+		)
+		.await?;
+
+		let ds = Arc::new(Arc::into_inner(ds).expect("sole owner of the datastore").restart());
+		let lo = BEFORE + 1;
+		let hi = BEFORE + AFTER;
+		execute_all(&ds, &session, &format!("CREATE |item:{lo}..={hi}| SET tag = 'x' RETURN NONE"))
+			.await?;
+
+		let (forward, reverse) = doc_id_map_sizes(&ds, "item", "idx_tag").await?;
+
+		assert_eq!(forward, BEFORE + AFTER, "one forward doc-ID mapping per record");
+		assert_eq!(
+			reverse,
+			BEFORE + AFTER,
+			"a reissued doc-ID overwrites a reverse mapping, leaving this map short"
+		);
+
+		Ok(())
+	}
+
+	/// The sizes of a table's doc-ID maps: the forward map keyed by record and
+	/// the reverse map keyed by id. They hold one entry per record while every
+	/// id is distinct; a reissued id overwrites a reverse entry, so the reverse
+	/// map is where a collision becomes visible.
+	async fn doc_id_map_sizes(ds: &Datastore, tb: &str, ix: &str) -> Result<(usize, usize)> {
+		let ikb = index_key_base(ds, tb, ix).await?;
+		let txn = ds.transaction(Read).await?;
+		let forward = catch!(
+			txn,
+			txn.keys(
+				DocLookupPrefix::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table())).range()?,
+				u32::MAX,
+				0,
+				None
+			)
+			.await
+		);
+		let reverse = catch!(
+			txn,
+			txn.keys(
+				DocKeyPrefix::new(ikb.ns(), ikb.db(), Cow::Borrowed(ikb.table())).range()?,
+				u32::MAX,
+				0,
+				None
+			)
+			.await
+		);
+		let _ = txn.cancel().await;
+		Ok((forward.len(), reverse.len()))
 	}
 }

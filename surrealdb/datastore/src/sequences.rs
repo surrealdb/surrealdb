@@ -154,6 +154,32 @@ impl SequenceDomain {
 		}
 	}
 
+	/// Whether this domain has to hand out a dense, gap-free run of ids.
+	///
+	/// Only the user-facing sequence behind `sequence::nextval` promises that:
+	/// its conformance suite fixes `BATCH` as a reservation size rather than a
+	/// per-connection stride, so a caller may rely on consecutive values while
+	/// the node stays up. Every other domain allocates surrogate keys that
+	/// consumers look up rather than count — the shared doc-ID space says so
+	/// where it assigns them, and the catalog domains already seed past ids in
+	/// use — so a skipped id costs nothing there.
+	///
+	/// Density is bought with one durable commit per allocation, because every
+	/// id in between has to be recoverable on its own. A domain that does not
+	/// need it must not pay for it: an indexed write allocates a doc-ID per
+	/// record, so that commit would land on the hot write path.
+	///
+	/// Density does not survive every crash, and cannot. A node that claims a
+	/// window and stops before its first per-allocation commit leaves behind a
+	/// cursor that predates the claim, and the resume bound in
+	/// [`Sequence::check_batch_allocation`] raises that cursor to the window's
+	/// own start rather than trusting it, because the range beneath it may
+	/// since have been claimed by a peer. The ids in between are skipped by
+	/// this node; the alternative is handing out a peer's ids a second time.
+	fn requires_dense_ids(&self) -> bool {
+		matches!(self, Self::UserName(..))
+	}
+
 	fn new_batch_key(&self, start: i64) -> SequenceBatchKey<'_> {
 		match &self {
 			Self::UserName(ns, db, sq) => SequenceBatchKey::User(SeqBatchKey {
@@ -272,6 +298,25 @@ enum SequenceBatchKey<'a> {
 	Tables(TbIdBatchKey),
 	Indexes(IndexIdBatchKey<'a>),
 	LegacyFullTextDocIds(FtDocBatchKey<'a>),
+}
+
+impl SequenceBatchKey<'_> {
+	/// The inclusive lower bound of the window this key names.
+	///
+	/// A window's start is encoded only in its key, never in the
+	/// [`BatchValue`] stored under it, so a resume point taken from a scanned
+	/// row has to read the bound back from here.
+	fn start(&self) -> i64 {
+		match self {
+			Self::User(k) => k.start,
+			Self::TableDocIds(k) => k.start,
+			Self::Namespaces(k) => k.start,
+			Self::Databases(k) => k.start,
+			Self::Tables(k) => k.start,
+			Self::Indexes(k) => k.start,
+			Self::LegacyFullTextDocIds(k) => k.start,
+		}
+	}
 }
 
 impl KVKey for SequenceBatchKey<'_> {
@@ -709,8 +754,13 @@ impl Sequence {
 	/// Gets the next ID from this sequence.
 	///
 	/// If the current batch is exhausted, this method will allocate a new batch
-	/// before returning the next ID. The state is persisted to the key-value store
-	/// after each allocation.
+	/// before returning the next ID.
+	///
+	/// A dense domain persists its cursor after every allocation, since a
+	/// restart has to resume on the exact id it stopped at. A gap-tolerant one
+	/// persists nothing here: its window's end was committed with the claim
+	/// that reserved it, which already bounds every id the window can yield.
+	/// See [`SequenceDomain::requires_dense_ids`].
 	///
 	/// # Arguments
 	/// * `sqs` - The sequences manager
@@ -731,6 +781,11 @@ impl Sequence {
 		}
 		let v = self.st.next;
 		self.st.next += 1;
+		if !seq.requires_dense_ids() {
+			// The claim that reserved this window already committed its end, so
+			// there is nothing left to make durable per id.
+			return Ok(v);
+		}
 		// write the state on the KV store
 		let tx = self.tf.transaction(TransactionType::Write, sqs.clone()).await?;
 
@@ -827,6 +882,11 @@ impl Sequence {
 		batch: u32,
 	) -> Result<(i64, i64)> {
 		let tx = sqs.tf.transaction(TransactionType::Write, sqs.clone()).await?;
+		// Gap-tolerant domains persist the window's end here, in the same
+		// transaction that claims it, instead of persisting a cursor per
+		// allocation. See `SequenceDomain::requires_dense_ids`.
+		let dense = seq.requires_dense_ids();
+		let state_key = seq.new_state_key(sqs.nid);
 
 		// Execute operations and ensure transaction is cancelled on error
 		let result = async {
@@ -838,11 +898,31 @@ impl Sequence {
 				next_start = next_start.max(ba.to);
 				// The batch belongs to this node
 				if ba.owner == sqs.nid {
-					// If a previous batch belongs to this node, we can remove it,
-					// as we are going to create a new one
-					// If the current value is still in the batch range, we return it
-					if next < ba.to {
-						return Ok((next, ba.to));
+					// Decoded up front: both the resume bound below and the
+					// retirement under it address the row through this key.
+					let decoded = seq.decode_batch_key(key);
+					// A window this node still owns is resumed into rather than
+					// replaced — but never below its own start. The start is
+					// encoded only in the key, and a peer may have claimed the
+					// range beneath it since this node last persisted, so
+					// resuming at `next` alone would hand out the peer's ids a
+					// second time. An undecodable key carries no bound, so it
+					// cannot be resumed into safely and is retired instead.
+					let resume = match &decoded {
+						Ok(batch_key) => next.max(batch_key.start()),
+						Err(_) => ba.to,
+					};
+					if resume < ba.to {
+						if !dense {
+							tx.set_key(
+								&state_key,
+								&SequenceState {
+									next: ba.to,
+								},
+							)
+							.await?;
+						}
+						return Ok((resume, ba.to));
 					}
 					// Otherwise we can remove this old batch and create a new one.
 					//
@@ -854,7 +934,7 @@ impl Sequence {
 					// retried by `find_batch_allocation`, so one unreadable entry
 					// would stall this domain's allocation for as long as the caller
 					// waits.
-					match seq.decode_batch_key(key) {
+					match decoded {
 						Ok(batch_key) => tx.del_key(&batch_key).await?,
 						Err(e) => {
 							warn!("Retiring an undecodable sequence batch key: {e}");
@@ -864,7 +944,14 @@ impl Sequence {
 				}
 			}
 			// We compute the new batch
-			let next_to = next_start + batch as i64;
+			// At least one id, whatever `batch` says. `next` hands out
+			// `next_start` as soon as this returns, and for a gap-tolerant
+			// domain the watermark recorded below is the only record that it
+			// was issued. An empty window would record a mark equal to that
+			// id, so a restart would resume on it and hand it out twice.
+			// `batch` reaches here straight from configuration, which sets no
+			// lower bound of its own.
+			let next_to = next_start + batch.max(1) as i64;
 			// And store it in the KV store
 			let bv = BatchValue {
 				to: next_to,
@@ -885,6 +972,23 @@ impl Sequence {
 			// Conflict-serializing backends (mem/rocksdb/surrealkv) already reject
 			// the second writer either way.
 			tx.put_key(&batch_key, &bv).await?;
+			// For a gap-tolerant domain, persist the window's end in the very
+			// transaction that claims it. Committing a high-water mark rather
+			// than a cursor is what lets ids be handed out from memory: a
+			// restart resumes at or past every id this window can yield, so the
+			// unconsumed tail is skipped and none is ever issued twice. Riding
+			// the claim's own commit keeps that free — there is no second
+			// transaction, and so no window where a claimed range is durable
+			// but its bound is not.
+			if !dense {
+				tx.set_key(
+					&state_key,
+					&SequenceState {
+						next: next_to,
+					},
+				)
+				.await?;
+			}
 			Ok::<(i64, i64), anyhow::Error>((next_start, next_to))
 		}
 		.await;
@@ -905,6 +1009,7 @@ impl Sequence {
 #[cfg(test)]
 mod tests {
 	use std::sync::Arc;
+	use std::time::Duration;
 
 	use surrealdb_catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 	use surrealdb_catalog::{
@@ -1006,6 +1111,50 @@ mod tests {
 		);
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 		(tf, sequences)
+	}
+
+	/// A claimed window always contains at least one id, whatever `batch` says.
+	///
+	/// `batch` reaches the allocator straight from configuration, which sets no
+	/// lower bound of its own. At zero the window would be empty, and a
+	/// gap-tolerant domain records the window's end as the only evidence that
+	/// an id was issued — so the recorded mark would equal the id just handed
+	/// out, and a reload would resume on it and issue it a second time.
+	#[tokio::test]
+	async fn a_zero_batch_still_records_past_every_issued_id() {
+		let (tf, _) = factory().await;
+		// One node id across both allocators. The state key is keyed per node,
+		// so this is what a restart of the same node reads back.
+		let nid = Uuid::from_u128(9);
+		let ns = NamespaceId(1);
+		let db = DatabaseId(2);
+		let tb = TableName::from("t");
+
+		// Bounded, because an unclamped zero batch does not merely reissue: the
+		// window it claims is zero-width, so the next claim deletes that row and
+		// re-creates it at the same start, the conditional create rejects it,
+		// and `find_batch_allocation` retries that forever. Without a deadline
+		// a regression here hangs instead of failing.
+		let allocate = |seqs: Sequences, tb: TableName| async move {
+			let mut ids = Vec::new();
+			for _ in 0..4 {
+				ids.push(seqs.next_table_doc_id(None, ns, db, tb.clone(), 0).await.unwrap());
+			}
+			ids
+		};
+		let deadline = Duration::from_secs(10);
+		let mut ids =
+			tokio::time::timeout(deadline, allocate(Sequences::new(tf.clone(), nid), tb.clone()))
+				.await
+				.expect("a zero batch stalled allocation");
+		ids.extend(
+			tokio::time::timeout(deadline, allocate(Sequences::new(tf, nid), tb.clone()))
+				.await
+				.expect("a zero batch stalled allocation after the reload"),
+		);
+
+		let unique: std::collections::HashSet<_> = ids.iter().copied().collect();
+		assert_eq!(unique.len(), ids.len(), "a zero batch reissued an id across a reload: {ids:?}");
 	}
 
 	#[tokio::test]

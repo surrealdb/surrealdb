@@ -110,8 +110,8 @@ should update their queries.
 | `surrealdb_query_errors_total` | `surrealdb_query_total{outcome="error"}` |
 | `surrealdb_query_duration_seconds` | `surrealdb_query_duration_seconds{outcome,namespace,database,user}` |
 | `surrealdb_query_dim_duration_seconds` | `surrealdb_query_duration_seconds` |
-| `surrealdb_transactions_completed_total` | `surrealdb_transaction_total{outcome="success"}` |
-| `surrealdb_transaction_writes_total` | `surrealdb_transaction_total{write="true",outcome="success"}` |
+| `surrealdb_transactions_completed_total` | `surrealdb_transaction_total{outcome=~"success\|cancelled"}` |
+| `surrealdb_transaction_writes_total` | `surrealdb_transaction_total{write="true",outcome=~"success\|cancelled"}` |
 | `surrealdb_transaction_errors_total` | `surrealdb_transaction_total{outcome="error"}` |
 | `surrealdb_rpcs_completed_total` | `surrealdb_rpc_total{outcome="success"}` |
 | `surrealdb_rpc_errors_total` | `surrealdb_rpc_total{outcome="error"}` |
@@ -209,6 +209,14 @@ no per-call, per-tenant, or per-protocol detail.
 | `surrealdb_process_cpu_percent` | gauge | none | Aggregate process CPU %; may exceed 100 on multi-core. |
 | `target_info` | gauge | resource attrs | Emitted by the OTel SDK from the process Resource. Carries `service_edition`. |
 | `otel_scope_info` | gauge | scope attrs | Emitted by the OTel SDK per instrumentation scope. |
+
+On `surrealdb.transaction`, `outcome` separates durable work from discarded
+work. `success` counts transactions that committed, `cancelled` those that
+rolled back, and `error` those whose commit or cancel itself failed. A rollback
+is an ordinary outcome rather than a fault — read-only work and internal probes
+routinely end that way — so a query for every transaction that *finished* has to
+admit `cancelled` alongside `success`, as the two rows above do. Only `success`
+counts work that reached durability.
 
 ### Authenticated-only — primary signal families
 

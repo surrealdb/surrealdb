@@ -1162,11 +1162,21 @@ impl Transaction {
 		// Cancel the underlying transactor. Emit a transaction event on
 		// either outcome so counters and durations are always reported
 		// even when cancel itself reports a driver-level error.
+		//
+		// A successful rollback reports [`Outcome::Cancelled`], not
+		// `Outcome::Success`: the `outcome` attribute is what separates work
+		// that was made durable from work that was discarded, and a commit is
+		// the only thing that earns `Success`. `Outcome::Error` stays reserved
+		// for a cancel the driver itself failed to perform, which leaves the
+		// transaction's durability unknown rather than known-discarded.
 		let result = self.tr.cancel().await;
 		let cleanup_result = self.run_rollback_actions().await;
 		let release_result = self.release_index_build_reservations().await;
 		self.discard_commit_actions().await;
-		self.emit_transaction_event(Outcome::from(&result));
+		self.emit_transaction_event(match &result {
+			Ok(_) => Outcome::Cancelled,
+			Err(_) => Outcome::Error,
+		});
 		result?;
 		cleanup_result?;
 		release_result?;
