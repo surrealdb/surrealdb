@@ -22,7 +22,7 @@
 //! without a custom resolver.
 
 use std::error::Error;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -44,15 +44,7 @@ pub(crate) struct NetFilter {
 /// Registries (RFC 5735 / RFC 6890 / RFC 4193 / RFC 3513).
 fn is_private_ip(ip: IpAddr) -> bool {
 	match ip.to_canonical() {
-		IpAddr::V4(v4) => {
-			v4.is_loopback()      // 127.0.0.0/8
-				|| v4.is_private()    // 10/8, 172.16/12, 192.168/16
-				|| v4.is_link_local() // 169.254.0.0/16
-				|| v4.is_broadcast()  // 255.255.255.255
-				|| v4.is_unspecified() // 0.0.0.0
-				// Shared address space (RFC 6598): 100.64.0.0/10
-				|| (u32::from(v4) & 0xFFC0_0000) == 0x6440_0000
-		}
+		IpAddr::V4(v4) => is_private_ipv4(v4),
 		IpAddr::V6(v6) => {
 			v6.is_loopback()       // ::1
 				|| v6.is_unspecified() // ::
@@ -60,7 +52,41 @@ fn is_private_ip(ip: IpAddr) -> bool {
 				|| (v6.segments()[0] & 0xFE00) == 0xFC00
 				// Link-local (fe80::/10)
 				|| (v6.segments()[0] & 0xFFC0) == 0xFE80
+				// Transition addresses that embed an IPv4 destination
+				|| embedded_ipv4(&v6).is_some_and(is_private_ipv4)
 		}
+	}
+}
+
+/// Whether an IPv4 address is private, loopback or otherwise special-use.
+fn is_private_ipv4(v4: Ipv4Addr) -> bool {
+	v4.is_loopback()      // 127.0.0.0/8
+		|| v4.is_private()    // 10/8, 172.16/12, 192.168/16
+		|| v4.is_link_local() // 169.254.0.0/16
+		|| v4.is_broadcast()  // 255.255.255.255
+		|| v4.is_unspecified() // 0.0.0.0
+		// Shared address space (RFC 6598): 100.64.0.0/10
+		|| (u32::from(v4) & 0xFFC0_0000) == 0x6440_0000
+}
+
+/// Extracts the IPv4 destination embedded in an IPv6 transition address.
+///
+/// `IpAddr::to_canonical` only unwraps IPv4-mapped addresses (`::ffff:a.b.c.d`).
+/// The transition mechanisms below also carry an IPv4 destination and, on a host
+/// with the corresponding connectivity, route to it — so the embedded address is
+/// what a private/special-use check must be applied to. Returns `None` for an
+/// address that carries no embedded IPv4 destination.
+fn embedded_ipv4(v6: &Ipv6Addr) -> Option<Ipv4Addr> {
+	let s = v6.segments();
+	let v4 = |hi: u16, lo: u16| Ipv4Addr::from(((hi as u32) << 16) | lo as u32);
+	match s {
+		// NAT64 well-known prefix (RFC 6052): 64:ff9b::/96, low 32 bits = IPv4.
+		[0x0064, 0xff9b, 0, 0, 0, 0, hi, lo] => Some(v4(hi, lo)),
+		// 6to4 (RFC 3056): 2002::/16, bits 16-47 = IPv4.
+		[0x2002, hi, lo, ..] => Some(v4(hi, lo)),
+		// Teredo (RFC 4380): 2001:0::/32, low 32 bits = IPv4 XOR 0xffffffff.
+		[0x2001, 0x0000, .., hi, lo] => Some(v4(hi ^ 0xffff, lo ^ 0xffff)),
+		_ => None,
 	}
 }
 
@@ -272,6 +298,62 @@ mod tests {
 		assert!(is_private_ip(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0xc0a8, 0x0101)))); // ::ffff:192.168.1.1
 		assert!(is_private_ip(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0xac10, 0x0001)))); // ::ffff:172.16.0.1
 		assert!(!is_private_ip(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0x0101, 0x0101)))); // ::ffff:1.1.1.1
+	}
+
+	// `to_canonical` only unwraps IPv4-mapped addresses, so transition
+	// mechanisms that embed an IPv4 destination must be unwrapped explicitly:
+	// on a host with the matching connectivity they route to that address, and
+	// the IPv6 special-use checks (loopback / unspecified / ULA / link-local)
+	// match none of these prefixes.
+	#[test]
+	fn test_is_private_ip_nat64_embedded_ipv4() {
+		// 64:ff9b::7f00:1 -> 127.0.0.1
+		assert!(is_private_ip(IpAddr::V6("64:ff9b::7f00:1".parse().unwrap())));
+		// 64:ff9b::a9fe:a9fe -> 169.254.169.254 (cloud instance metadata)
+		assert!(is_private_ip(IpAddr::V6("64:ff9b::a9fe:a9fe".parse().unwrap())));
+		// 64:ff9b::a00:1 -> 10.0.0.1
+		assert!(is_private_ip(IpAddr::V6("64:ff9b::a00:1".parse().unwrap())));
+		// A NAT64 address embedding a public IPv4 stays allowed.
+		// 64:ff9b::101:101 -> 1.1.1.1
+		assert!(!is_private_ip(IpAddr::V6("64:ff9b::101:101".parse().unwrap())));
+	}
+
+	#[test]
+	fn test_is_private_ip_6to4_embedded_ipv4() {
+		// 2002:a9fe:a9fe:: -> 169.254.169.254
+		assert!(is_private_ip(IpAddr::V6("2002:a9fe:a9fe::".parse().unwrap())));
+		// 2002:7f00:1:: -> 127.0.0.1
+		assert!(is_private_ip(IpAddr::V6("2002:7f00:1::".parse().unwrap())));
+		// 2002:c0a8:101:: -> 192.168.1.1
+		assert!(is_private_ip(IpAddr::V6("2002:c0a8:101::".parse().unwrap())));
+		// 2002:101:101:: -> 1.1.1.1, public, stays allowed.
+		assert!(!is_private_ip(IpAddr::V6("2002:101:101::".parse().unwrap())));
+	}
+
+	#[test]
+	fn test_is_private_ip_teredo_embedded_ipv4() {
+		// Low 32 bits are the IPv4 destination XOR 0xffffffff.
+		// 10.0.0.1 -> f5ff:fffe
+		assert!(is_private_ip(IpAddr::V6("2001:0:4136:e378:8000:63bf:f5ff:fffe".parse().unwrap())));
+		// 127.0.0.1 -> 80ff:fffe
+		assert!(is_private_ip(IpAddr::V6("2001:0:4136:e378:8000:63bf:80ff:fffe".parse().unwrap())));
+		// 1.1.1.1 -> fefe:fefe, public, stays allowed.
+		assert!(!is_private_ip(IpAddr::V6(
+			"2001:0:4136:e378:8000:63bf:fefe:fefe".parse().unwrap()
+		)));
+	}
+
+	#[test]
+	fn test_is_private_ip_non_transition_ipv6_unaffected() {
+		// `2001:db8::/32` shares Teredo's first segment but not its second, so
+		// it must not be misread as carrying an embedded IPv4 destination.
+		assert!(!is_private_ip(IpAddr::V6("2001:db8::1".parse().unwrap())));
+		// `2003::/16` is adjacent to 6to4's `2002::/16` and carries no embedding.
+		assert!(!is_private_ip(IpAddr::V6("2003:7f00:1::".parse().unwrap())));
+		// The NAT64 prefix requires the full 64:ff9b:: 96-bit prefix; a
+		// same-first-segment address with a different second segment does not
+		// embed anything.
+		assert!(!is_private_ip(IpAddr::V6("64:ff9c::7f00:1".parse().unwrap())));
 	}
 
 	#[test]
