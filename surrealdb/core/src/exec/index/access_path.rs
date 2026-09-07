@@ -234,6 +234,24 @@ pub enum BitmapPlan {
 		query: String,
 		operator: MatchesOperator,
 	},
+	/// A single-hop graph reachability semi-join (issue #549): the doc-IDs of
+	/// scanned-table rows adjacent to `source` through `edge_tables`,
+	/// traversed in `direction` — the *inverse* of the direction the
+	/// predicate was written in, so a `->edge->` containment anchors at its
+	/// target literal and walks back to the candidate rows. Read entirely
+	/// from adjacency pointer keys, which embed the far vertex; a
+	/// legacy-format key (no embedded target) overflows the branch, so an
+	/// unmigrated scope degrades to the residual filter instead of
+	/// under-approximating. Never exact: participates only as a droppable,
+	/// budgeted AND conjunct beneath the original-WHERE residual.
+	Graph {
+		/// Plan-time literal record id to traverse from.
+		source: crate::val::RecordId,
+		/// Traversal direction from `source` (never `Both`).
+		direction: crate::expr::Dir,
+		/// Edge tables to walk; the predicate names them explicitly.
+		edge_tables: Vec<surrealdb_strand::TableName>,
+	},
 	/// Intersection of all children.
 	And(Vec<BitmapPlan>),
 	/// Union of all children. An empty union is a provably-empty conjunct.

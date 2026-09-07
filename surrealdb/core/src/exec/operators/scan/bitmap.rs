@@ -47,7 +47,7 @@ use crate::exec::index::iterator::btree::{
 };
 use crate::exec::permission::{
 	PhysicalPermission, convert_permission_to_physical_runtime, should_check_perms,
-	validate_record_user_access,
+	tables_have_full_select_permission, validate_record_user_access,
 };
 use crate::exec::{
 	AccessMode, BoxFut, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
@@ -66,6 +66,13 @@ use crate::val::{RecordId, TableName};
 
 /// Number of doc-IDs resolved and fetched per output batch.
 const RESOLVE_BATCH_SIZE: usize = 1000;
+
+/// Multiplier applied to the accumulated intersection's cardinality to budget
+/// each droppable AND child: a branch may drain at most `acc.len()` times this
+/// factor before it is cut off, since past that point completing it cannot
+/// beat re-checking its predicate per surviving row through the residual
+/// filter.
+const AND_CHILD_BUDGET_FACTOR: u64 = 64;
 
 /// Reject execution under a version (time-travel) context.
 ///
@@ -114,6 +121,16 @@ pub(crate) enum BitmapNodeKind {
 		index_ref: IndexRef,
 		query: String,
 		operator: MatchesOperator,
+	},
+	/// A single-hop graph reachability semi-join (issue #549): scanned-table
+	/// rows adjacent to `source` through `edge_tables` in `direction`, read
+	/// entirely from adjacency pointer keys. See
+	/// [`crate::exec::index::access_path::BitmapPlan::Graph`] for the
+	/// contract; the build arm documents the budget and legacy-key rules.
+	Graph {
+		source: crate::val::RecordId,
+		direction: crate::expr::Dir,
+		edge_tables: Vec<TableName>,
 	},
 	/// Intersection of all children (applied smallest-first).
 	And {
@@ -171,6 +188,22 @@ impl BitmapNode {
 				index_ref,
 				query,
 				operator,
+			},
+			children_dyn: Vec::new(),
+			metrics: Arc::new(OperatorMetrics::new()),
+		})
+	}
+
+	pub(crate) fn graph(
+		source: crate::val::RecordId,
+		direction: crate::expr::Dir,
+		edge_tables: Vec<TableName>,
+	) -> Arc<Self> {
+		Arc::new(Self {
+			kind: BitmapNodeKind::Graph {
+				source,
+				direction,
+				edge_tables,
 			},
 			children_dyn: Vec::new(),
 			metrics: Arc::new(OperatorMetrics::new()),
@@ -243,6 +276,11 @@ impl BitmapNode {
 						self.build_fulltext_bitmap(bctx, index_ref, query, operator).await?,
 					)
 				}
+				BitmapNodeKind::Graph {
+					source,
+					direction,
+					edge_tables,
+				} => self.build_graph_bitmap(bctx, source, *direction, edge_tables).await?,
 				BitmapNodeKind::And {
 					children,
 				} => {
@@ -254,7 +292,28 @@ impl BitmapNode {
 					// invalidates the whole evaluation.
 					let mut acc: Option<RoaringTreemap> = None;
 					for (i, child) in children.iter().enumerate() {
-						match child.build_bitmap(bctx, anchored && i == 0).await? {
+						// Droppable children are budgeted in proportion to the
+						// intersection accumulated so far: once `acc` is known
+						// to be small, a branch draining past `acc.len() *
+						// AND_CHILD_BUDGET_FACTOR` entries cannot pay for
+						// itself against the residual per-row filter, so it is
+						// cut off there instead of at the full branch budget.
+						// Never tightened in strict mode (an overflow there
+						// invalidates the whole tree, see
+						// [`Self::build_allowlist`]) or in exact/unbudgeted
+						// mode (`budget == 0`).
+						let child_budget = match &acc {
+							Some(acc) if !bctx.strict && bctx.budget > 0 => bctx.budget.min(
+								usize::try_from(acc.len().saturating_mul(AND_CHILD_BUDGET_FACTOR))
+									.unwrap_or(usize::MAX),
+							),
+							_ => bctx.budget,
+						};
+						let child_bctx = BitmapBuildContext {
+							budget: child_budget,
+							..*bctx
+						};
+						match child.build_bitmap(&child_bctx, anchored && i == 0).await? {
 							BranchBitmap::Ready(bitmap) => {
 								acc = Some(match acc {
 									None => bitmap,
@@ -338,9 +397,12 @@ impl BitmapNode {
 					}
 				}
 			};
-			if let BranchBitmap::Ready(bitmap) = &result {
+			match &result {
 				// Candidate cardinality for EXPLAIN ANALYZE.
-				self.metrics.add_output_rows(bitmap.len());
+				BranchBitmap::Ready(bitmap) => self.metrics.add_output_rows(bitmap.len()),
+				// A declined branch renders as `dropped: true` so it is
+				// distinguishable from a genuinely empty candidate set.
+				BranchBitmap::Overflow => self.metrics.set_branch_dropped(),
 			}
 			Ok(result)
 		})
@@ -488,6 +550,131 @@ impl BitmapNode {
 		Ok(BranchBitmap::Ready(docs))
 	}
 
+	/// Drain a single-hop reachability scope into a doc-ID bitmap
+	/// (issue #549).
+	///
+	/// Reads the anchor's adjacency pointer keys — which embed the far
+	/// vertex — so the reachable set costs one key-range scan plus one
+	/// batched doc-ID lookup per scanned batch, with no edge or record
+	/// fetches. Each batch's far-vertex keys are resolved as soon as they
+	/// are scanned, so peak memory is one batch of keys rather than the
+	/// whole reachable set; deduplication is per batch only, and a target
+	/// reachable through several batches (parallel edges, multiple edge
+	/// tables) costs a redundant point lookup against an idempotent bitmap
+	/// insert. On the overflow path, lookups already paid for earlier
+	/// batches are discarded with the branch — bounded by the same budget
+	/// that triggers the overflow. Three rules keep it a superset producer
+	/// under the residual WHERE filter:
+	///
+	/// - **Always budgeted**, even as the plan's anchor: an adjacency band has no selectivity
+	///   guarantee (a hub vertex drains unbounded), and the analyzer only ever emits this leaf as a
+	///   droppable AND conjunct.
+	/// - **A legacy-format key overflows the branch**: it carries no target, so the reachable set
+	///   would silently under-approximate — dropping the branch instead only widens the candidate
+	///   set.
+	/// - **Strict mode overflows immediately**: an allow-list branch is dropped from the
+	///   in-traversal residual, so nothing downstream could correct a miss.
+	///
+	/// A far vertex with no doc-ID in the scanned table's space is skipped:
+	/// it cannot appear in any sibling index bitmap (doc-IDs are assigned
+	/// when index entries are written), so the intersection is unchanged.
+	async fn build_graph_bitmap(
+		&self,
+		bctx: &BitmapBuildContext<'_>,
+		source: &crate::val::RecordId,
+		direction: crate::expr::Dir,
+		edge_tables: &[TableName],
+	) -> std::result::Result<BranchBitmap, ControlFlow> {
+		use std::ops::Bound;
+
+		use super::graph_keys::{EdgeTableSpec, compute_graph_ranges};
+		if bctx.strict {
+			return Ok(BranchBitmap::Overflow);
+		}
+		// SECURITY: this leaf resolves the far vertex straight from the
+		// anchor's adjacency key, never fetching -- and so never
+		// permission-checking -- the edge record. That is the same bypass
+		// `Planner::try_fast_path_pair` gates behind `Permission::Full` for
+		// the equivalent `GraphEdgeScan` `TargetVertex` collapse, so it is
+		// gated identically here. `IndexAnalyzer::try_bitmap_fusion` only
+		// ever appends this leaf alongside another AND branch, never as the
+		// plan's anchor, so declining it just drops it from the
+		// intersection: the unchanged residual `Filter` re-evaluates the
+		// original lookup through the permission-checked traversal path and
+		// still answers correctly. The check runs before any adjacency scan
+		// so a denied session pays a fixed, schema-only cost rather than one
+		// that scales with the relationship count it has no SELECT
+		// permission to observe.
+		let db_ctx = bctx.ctx.database().context("Bitmap graph leaf requires database context")?;
+		if should_check_perms(db_ctx, Action::View)?
+			&& !tables_have_full_select_permission(
+				bctx.txn,
+				db_ctx.ns_name(),
+				db_ctx.db_name(),
+				edge_tables,
+			)
+			.await
+		{
+			return Ok(BranchBitmap::Overflow);
+		}
+		let specs: Vec<EdgeTableSpec> = edge_tables
+			.iter()
+			.map(|table| EdgeTableSpec {
+				table: table.clone(),
+				range_start: Bound::Unbounded,
+				range_end: Bound::Unbounded,
+			})
+			.collect();
+		let ranges =
+			compute_graph_ranges(bctx.ns, bctx.db, source, direction, &specs, bctx.ctx).await?;
+		let mut docs = RoaringTreemap::new();
+		let mut batch_targets: Vec<crate::val::RecordIdKey> = Vec::new();
+		let mut drained = 0usize;
+		for mut range in ranges {
+			loop {
+				if bctx.ctx.cancellation().is_cancelled() {
+					return Err(ControlFlow::Err(anyhow::anyhow!(EngineError::QueryCancelled)));
+				}
+				let keys =
+					crate::kvs::util::scan_keys(&mut range.range, bctx.txn, INDEX_BATCH_SIZE)
+						.await
+						.context("Failed to scan adjacency keys")?;
+				if keys.is_empty() {
+					break;
+				}
+				drained += keys.len();
+				if bctx.budget > 0 && drained > bctx.budget {
+					return Ok(BranchBitmap::Overflow);
+				}
+				batch_targets.clear();
+				for key in &keys {
+					let decoded = range.decoder.decode(key)?;
+					match decoded.target {
+						Some(target) if target.table == *bctx.table => {
+							batch_targets.push(target.key);
+						}
+						Some(_) => {}
+						None => return Ok(BranchBitmap::Overflow),
+					}
+				}
+				if batch_targets.is_empty() {
+					continue;
+				}
+				// Sorted for lookup locality on LSM backends, deduplicated so
+				// a single multi-get never carries duplicate keys.
+				batch_targets.sort_unstable();
+				batch_targets.dedup();
+				let ids = bctx
+					.doc_ids
+					.get_doc_ids_batch(bctx.txn, &batch_targets)
+					.await
+					.context("Failed to resolve reachable records to doc-IDs")?;
+				docs.extend(ids.into_iter().flatten());
+			}
+		}
+		Ok(BranchBitmap::Ready(docs))
+	}
+
 	/// Expose a full-text query's merged posting bitmap.
 	async fn build_fulltext_bitmap(
 		&self,
@@ -546,6 +733,9 @@ impl ExecOperator for BitmapNode {
 			BitmapNodeKind::FullText {
 				..
 			} => "BitmapFullTextScan",
+			BitmapNodeKind::Graph {
+				..
+			} => "BitmapGraphScan",
 			BitmapNodeKind::And {
 				..
 			} => "BitmapAnd",
@@ -574,6 +764,26 @@ impl ExecOperator for BitmapNode {
 			} => vec![
 				("index".to_string(), index_ref.name.to_string()),
 				("query".to_string(), query.clone()),
+			],
+			BitmapNodeKind::Graph {
+				source,
+				direction,
+				edge_tables,
+			} => vec![
+				("source".to_string(), surrealdb_types::ToSql::to_sql(source)),
+				(
+					"direction".to_string(),
+					match direction {
+						crate::expr::Dir::In => "<-",
+						crate::expr::Dir::Out => "->",
+						crate::expr::Dir::Both => "<->",
+					}
+					.to_string(),
+				),
+				(
+					"edges".to_string(),
+					edge_tables.iter().map(|t| t.to_string()).collect::<Vec<_>>().join(", "),
+				),
 			],
 			_ => vec![],
 		}

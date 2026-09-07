@@ -596,6 +596,23 @@ impl TableDocIds {
 		tx.get_many_key(keys, None).await
 	}
 
+	/// Resolves many record keys to their doc-IDs in one batched read,
+	/// preserving input order. Records with no id in this table's space yield
+	/// `None` in their slot.
+	pub async fn get_doc_ids_batch(
+		&self,
+		tx: &Transaction,
+		ids: &[RecordIdKey],
+	) -> Result<Vec<Option<DocId>>> {
+		let keys: Vec<DocLookupKey<'_>> = ids
+			.iter()
+			.map(|id| {
+				DocLookupKey::new(self.ns, self.db, Cow::Borrowed(&self.tb), Cow::Borrowed(id))
+			})
+			.collect();
+		tx.get_many_key(keys, None).await
+	}
+
 	/// Removes both directions of the mapping for `id`. The id is *not* recycled.
 	///
 	/// Must only be called once a record is being purged and every index has

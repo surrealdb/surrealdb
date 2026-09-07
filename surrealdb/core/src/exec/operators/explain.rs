@@ -343,8 +343,17 @@ fn format_execution_plan_json(plan: &dyn ExecOperator) -> Object {
 fn format_metrics_text(metrics: &OperatorMetrics, redact_volatile_explain_attrs: bool) -> String {
 	let rows = metrics.output_rows();
 
+	// A bitmap branch that declined (budget overflow or a gate) is flagged so
+	// its `rows: 0` is distinguishable from a genuinely empty candidate set.
+	// Deterministic for a given dataset and configuration, so never redacted.
+	let dropped = if metrics.branch_dropped() {
+		", dropped: true"
+	} else {
+		""
+	};
+
 	if redact_volatile_explain_attrs {
-		return format!("rows: {}", rows);
+		return format!("rows: {}{}", rows, dropped);
 	}
 
 	let batches = metrics.output_batches();
@@ -380,7 +389,7 @@ fn format_metrics_text(metrics: &OperatorMetrics, redact_volatile_explain_attrs:
 	if fetched > 0 {
 		extra.push_str(&format!(", fetched: {}", fetched));
 	}
-	format!("rows: {}, batches: {}, elapsed: {}{}", rows, batches, elapsed_str, extra)
+	format!("rows: {}, batches: {}, elapsed: {}{}{}", rows, batches, elapsed_str, extra, dropped)
 }
 
 /// Format an execution plan node as a text tree with metrics.
@@ -488,6 +497,13 @@ fn format_analyze_plan_json(
 	if let Some(metrics) = plan.metrics() {
 		let mut metrics_obj = Object::default();
 		metrics_obj.insert("output_rows", Value::from(metrics.output_rows() as i64));
+		// Emitted only when a bitmap branch declined, so its `output_rows: 0`
+		// is distinguishable from a genuinely empty candidate set.
+		// Deterministic for a given dataset and configuration, so never
+		// redacted.
+		if metrics.branch_dropped() {
+			metrics_obj.insert("dropped", Value::Bool(true));
+		}
 		if !redact_volatile_explain_attrs {
 			metrics_obj.insert("output_batches", Value::from(metrics.output_batches() as i64));
 			metrics_obj.insert("elapsed_ns", Value::from(metrics.elapsed_ns() as i64));

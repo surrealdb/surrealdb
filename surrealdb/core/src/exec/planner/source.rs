@@ -589,23 +589,20 @@ impl<'ctx> Planner<'ctx> {
 		//      WHERE wouldn't run either, so the bypass is equivalent.
 		// (2) requires the calling auth principal; when it isn't wired
 		// through (txn-less or deeply-nested planner) we stay conservative.
-		if !self.should_check_perms_for_view(ns, db) {
-			return Ok(Some(TargetVertexPlan {
-				direction: LookupDirection::from(edge_dir),
-				edge_tables,
-				target_tables,
-			}));
-		}
-		for spec in &edge_tables {
-			use crate::catalog::providers::TableProvider;
-			let td = match txn.get_tb_by_name(ns, db, &spec.table, None).await {
-				Ok(Some(td)) => td,
-				// Missing edge table or any catalog error → take the slow
-				// path; this is purely an optimisation, never a correctness
-				// gate.
-				_ => return Ok(None),
-			};
-			if !matches!(td.permissions.select, crate::catalog::Permission::Full) {
+		// A missing edge table or catalog error falls back to the slow path
+		// too; this whole check is purely an optimisation, never a
+		// correctness gate.
+		if self.should_check_perms_for_view(ns, db) {
+			let edge_table_names: Vec<TableName> =
+				edge_tables.iter().map(|spec| spec.table.clone()).collect();
+			if !crate::exec::permission::tables_have_full_select_permission(
+				txn,
+				ns,
+				db,
+				&edge_table_names,
+			)
+			.await
+			{
 				return Ok(None);
 			}
 		}

@@ -79,6 +79,13 @@ pub(crate) struct OperatorMetrics {
 	/// claim is observable. Deliberately excludes the exact tier's bounded
 	/// resolve-stage fetches, which happen outside any traversal.
 	records_fetched: AtomicU64,
+	/// Whether a bitmap branch declined to produce its bitmap (budget
+	/// overflow, a strict-mode propagation, or a permission or legacy-key
+	/// gate) and was dropped from its parent's composition. Distinguishes a
+	/// dropped branch from a genuinely empty candidate set in EXPLAIN
+	/// ANALYZE, where both otherwise render `rows: 0`. Discloses only that
+	/// the branch declined, never any cardinality.
+	branch_dropped: AtomicBool,
 }
 
 impl OperatorMetrics {
@@ -96,6 +103,7 @@ impl OperatorMetrics {
 			skipped_rows: AtomicU64::new(0),
 			edges_scanned: AtomicU64::new(0),
 			records_fetched: AtomicU64::new(0),
+			branch_dropped: AtomicBool::new(false),
 		}
 	}
 
@@ -164,6 +172,17 @@ impl OperatorMetrics {
 	/// ANN search's truthy-document filter.
 	pub(crate) fn add_records_fetched(&self, n: u64) {
 		self.records_fetched.fetch_add(n, Ordering::Relaxed);
+	}
+
+	/// Whether this operator's bitmap branch declined and was dropped.
+	pub(crate) fn branch_dropped(&self) -> bool {
+		self.branch_dropped.load(Ordering::Relaxed)
+	}
+
+	/// Record that this operator's bitmap branch declined to produce its
+	/// bitmap and was dropped from its parent's composition.
+	pub(crate) fn set_branch_dropped(&self) {
+		self.branch_dropped.store(true, Ordering::Relaxed);
 	}
 
 	/// Record one batch of `rows` values, adding `delta_ns` to elapsed time.

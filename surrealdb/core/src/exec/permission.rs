@@ -112,6 +112,39 @@ pub(crate) fn should_check_perms(db_ctx: &DatabaseContext, action: Action) -> Re
 	}
 }
 
+/// Whether every table in `tables` carries `Permission::Full` for `SELECT`.
+///
+/// `Permission::Full` is the only declaration under which a fast path may
+/// resolve a value embedded in an index or adjacency key — a doc-ID, a
+/// target vertex — without fetching and permission-checking the record
+/// itself: with no per-row predicate to evaluate, skipping the fetch
+/// changes nothing observable. A missing table or catalog error is
+/// conservatively `false`.
+///
+/// This only ever gates an optimization, never a correctness requirement,
+/// so callers always have a slower, per-record-checked path to fall back
+/// to. Callers are responsible for their own `should_check_perms` /
+/// `should_check_perms_for_view` gate: when permission evaluation would be
+/// skipped for the session regardless, the fast path is safe independent
+/// of the declared permission, and this function should not be reached.
+pub(crate) async fn tables_have_full_select_permission(
+	txn: &crate::kvs::Transaction,
+	ns: &str,
+	db: &str,
+	tables: &[crate::val::TableName],
+) -> bool {
+	use crate::catalog::providers::TableProvider;
+	for table in tables {
+		let Ok(Some(td)) = txn.get_tb_by_name(ns, db, table, None).await else {
+			return false;
+		};
+		if !matches!(td.permissions.select, Permission::Full) {
+			return false;
+		}
+	}
+	true
+}
+
 /// Validate that the authenticated principal may read in the current namespace
 /// and database (GHSA-2v9j tenant-boundary gate for the read path).
 ///

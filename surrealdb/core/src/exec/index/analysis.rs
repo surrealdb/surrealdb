@@ -331,6 +331,7 @@ impl<'a> IndexAnalyzer<'a> {
 
 		let mut and_children: Vec<BitmapPlan> = Vec::new();
 		let mut covered: Vec<Idiom> = Vec::new();
+		let mut anchor_at_most_one_row = false;
 		for c in leaves {
 			let cols = Self::candidate_pinned_columns(c);
 			if cols.is_empty() || cols.iter().all(|col| covered.contains(col)) {
@@ -341,6 +342,9 @@ impl<'a> IndexAnalyzer<'a> {
 			}
 			covered.extend(cols);
 			if let Some(leaf) = Self::bitmap_leaf_from_candidate(c) {
+				if and_children.is_empty() {
+					anchor_at_most_one_row = Self::candidate_returns_at_most_one_row(c);
+				}
 				and_children.push(leaf);
 			}
 		}
@@ -373,6 +377,25 @@ impl<'a> IndexAnalyzer<'a> {
 				&& let Some(node) = Self::bitmap_plan_from_access_path(&path)
 			{
 				and_children.push(node);
+			}
+		}
+
+		// Graph reachability semi-joins (issue #549): a single-hop
+		// `->edge->vertex CONTAINS <literal id>` conjunct anchors at the
+		// literal and walks the inverse direction back to the candidate
+		// rows, entirely from adjacency pointer keys. Appended after the
+		// index leaves so a graph leaf never anchors the intersection — an
+		// adjacency band has no selectivity guarantee — and only alongside
+		// at least one index-backed branch, so it is always droppable on
+		// overflow. Skipped entirely when the anchoring branch guarantees
+		// at most one row: draining an adjacency band to intersect against
+		// a ≤1-row anchor can never beat the residual per-row traversal,
+		// which is a single adjacency-band lookup for that row.
+		if !and_children.is_empty() && !anchor_at_most_one_row {
+			for conjunct in &conjuncts {
+				if let Some(leaf) = Self::graph_semijoin_leaf(conjunct) {
+					and_children.push(leaf);
+				}
 			}
 		}
 
@@ -575,6 +598,25 @@ impl<'a> IndexAnalyzer<'a> {
 		}
 	}
 
+	/// Whether a candidate's access is guaranteed to match at most one row:
+	/// it pins the entire key of a unique index, either as a single-column
+	/// equality (multi-column indexes always surface as `Compound`, see
+	/// [`Self::try_match_comparison`]) or as a rangeless compound prefix
+	/// covering every column.
+	fn candidate_returns_at_most_one_row(c: &IndexCandidate) -> bool {
+		if !c.index_ref.is_unique() {
+			return false;
+		}
+		match &c.access {
+			BTreeAccess::Equality(_) => true,
+			BTreeAccess::Compound {
+				prefix,
+				range,
+			} => range.is_none() && prefix.len() >= c.index_ref.definition().cols.len(),
+			_ => false,
+		}
+	}
+
 	/// Convert a positive candidate into a bitmap leaf.
 	fn bitmap_leaf_from_candidate(c: &IndexCandidate) -> Option<BitmapPlan> {
 		match &c.access {
@@ -654,6 +696,117 @@ impl<'a> IndexAnalyzer<'a> {
 				..
 			} => None,
 		}
+	}
+
+	/// Recognize a single-hop graph containment conjunct as a reachability
+	/// semi-join leaf (issue #549): `->edge->vertex CONTAINS vertex:lit` or
+	/// the flipped `vertex:lit INSIDE ->edge->vertex`.
+	///
+	/// Admitted only when the truth set is exactly "rows adjacent to the
+	/// literal": two bare lookup parts in one fixed direction, plain table
+	/// subjects, no lookup clauses, and a plan-time record-id literal whose
+	/// table the vertex hop names. The produced leaf traverses the INVERSE
+	/// direction from the literal. Anything else — multi-hop, `<->`,
+	/// ranges, edge conditions, unfolded parameters — keeps today's
+	/// per-row evaluation.
+	fn graph_semijoin_leaf(conjunct: &Expr) -> Option<BitmapPlan> {
+		use crate::expr::part::Part;
+		let (idiom, lit) = match conjunct {
+			Expr::Binary {
+				left,
+				op: BinaryOperator::Contain,
+				right,
+			} => match (&**left, &**right) {
+				(Expr::Idiom(idiom), Expr::Literal(lit)) => (idiom, lit),
+				_ => return None,
+			},
+			Expr::Binary {
+				left,
+				op: BinaryOperator::Inside,
+				right,
+			} => match (&**left, &**right) {
+				(Expr::Literal(lit), Expr::Idiom(idiom)) => (idiom, lit),
+				_ => return None,
+			},
+			_ => return None,
+		};
+		let Some(Value::RecordId(anchor)) = try_literal_to_value(lit) else {
+			return None;
+		};
+		let [Part::Lookup(edge_hop), Part::Lookup(vertex_hop)] = idiom.0.as_slice() else {
+			return None;
+		};
+		let (edge_tables, dir) = Self::plain_graph_hop(edge_hop)?;
+		let (vertex_tables, vertex_dir) = Self::plain_graph_hop(vertex_hop)?;
+		if dir != vertex_dir || edge_tables.is_empty() {
+			return None;
+		}
+		// The vertex hop names the tables the far end may belong to; the
+		// anchor must be one of them or the predicate cannot hold — leave
+		// that shape to the ordinary filter.
+		if !vertex_tables.contains(&anchor.table) {
+			return None;
+		}
+		let direction = match dir {
+			crate::expr::Dir::Out => crate::expr::Dir::In,
+			crate::expr::Dir::In => crate::expr::Dir::Out,
+			crate::expr::Dir::Both => return None,
+		};
+		Some(BitmapPlan::Graph {
+			source: anchor,
+			direction,
+			edge_tables,
+		})
+	}
+
+	/// A lookup part usable in a semi-join hop: a bare graph lookup in one
+	/// fixed direction over plain table subjects, with no clauses — the
+	/// shapes whose truth set is pure adjacency.
+	fn plain_graph_hop(
+		lookup: &crate::expr::lookup::Lookup,
+	) -> Option<(Vec<surrealdb_strand::TableName>, crate::expr::Dir)> {
+		use crate::expr::lookup::{Lookup, LookupKind, LookupSubject};
+		let Lookup {
+			kind,
+			expr,
+			only,
+			what,
+			cond,
+			split,
+			group,
+			order,
+			limit,
+			start,
+			alias,
+		} = lookup;
+		let LookupKind::Graph(dir) = kind else {
+			return None;
+		};
+		if matches!(dir, crate::expr::Dir::Both) {
+			return None;
+		}
+		if expr.is_some()
+			|| *only || cond.is_some()
+			|| split.is_some()
+			|| group.is_some()
+			|| order.is_some()
+			|| limit.is_some()
+			|| start.is_some()
+			|| alias.is_some()
+		{
+			return None;
+		}
+		let mut tables = Vec::with_capacity(what.len());
+		for s in what {
+			match s {
+				LookupSubject::Table {
+					table,
+					referencing_field: None,
+				} => tables.push(table.clone()),
+				_ => return None,
+			}
+		}
+		Some((tables, *dir))
 	}
 
 	/// Build an *exact* bitmap fusion plan for an index-only COUNT
@@ -2441,6 +2594,102 @@ mod tests {
 				analyzer(vec![idx_v2(1, "idx_a", &["a"]), idx_v2(2, "idx_b", &["b"])], Some(&with));
 			let cond = parse_cond("a = 1 OR b = 2");
 			assert!(fuse_union(&az, &cond).is_none());
+		}
+
+		/// The graph semi-join leaf lands after the index leaves, in both
+		/// containment spellings, traversing the inverse direction.
+		#[test]
+		fn a_graph_conjunct_joins_the_intersection() {
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"])], None);
+			for cond in ["a = 1 AND ->wrote->doc CONTAINS doc:x", "a = 1 AND doc:x IN ->wrote->doc"]
+			{
+				let plan = fuse(&az, &parse_cond(cond), false).expect("graph conjunct fuses");
+				let BitmapPlan::And(children) = plan else {
+					panic!("expected an intersection for `{cond}`")
+				};
+				assert_eq!(children.len(), 2, "`{cond}`");
+				assert!(
+					matches!(
+						&children[1],
+						BitmapPlan::Graph {
+							direction: crate::expr::Dir::In,
+							..
+						}
+					),
+					"graph leaf must follow the index leaf for `{cond}`"
+				);
+			}
+		}
+
+		/// A unique index at the doc-ID entry format (bitmap-capable).
+		fn idx_uniq_v2(id: u32, name: &str, cols: &[&str]) -> IndexDefinition {
+			let mut def = idx_uniq(id, name, cols);
+			def.format_version = BTREE_ENTRY_DOC_IDS_FORMAT_VERSION;
+			def
+		}
+
+		/// A unique-equality anchor guarantees at most one candidate row, so
+		/// the graph conjunct must not join the intersection — draining an
+		/// adjacency band to intersect against a ≤1-row anchor can never beat
+		/// the residual per-row traversal. With no other member the fusion
+		/// declines entirely, keeping the streaming single-index plan.
+		#[test]
+		fn a_unique_anchor_skips_the_graph_leaf() {
+			let az = analyzer(vec![idx_uniq_v2(1, "idx_a", &["a"])], None);
+			let cond = parse_cond("a = 1 AND ->wrote->doc CONTAINS doc:x");
+			assert!(fuse(&az, &cond, false).is_none(), "unique anchor keeps the streaming plan");
+		}
+
+		/// The guard only drops the graph leaf: sibling index branches still
+		/// fuse around the unique anchor.
+		#[test]
+		fn a_unique_anchor_with_a_sibling_fuses_without_the_graph_leaf() {
+			let az =
+				analyzer(vec![idx_uniq_v2(1, "idx_a", &["a"]), idx_v2(2, "idx_b", &["b"])], None);
+			let cond = parse_cond("a = 1 AND b = 2 AND ->wrote->doc CONTAINS doc:x");
+			let plan = fuse(&az, &cond, false).expect("two b-tree branches fuse");
+			let BitmapPlan::And(children) = plan else {
+				panic!("expected an intersection")
+			};
+			assert_eq!(children.len(), 2);
+			assert!(
+				children.iter().all(|c| !matches!(c, BitmapPlan::Graph { .. })),
+				"the graph leaf must stay out of a unique-anchored intersection"
+			);
+		}
+
+		/// A compound prefix on a unique index is a ≤1-row anchor only when
+		/// it pins every column with no range; a partial prefix can match
+		/// many rows and keeps the graph leaf.
+		#[test]
+		fn only_a_fully_pinned_unique_compound_anchor_skips_the_graph_leaf() {
+			let az = analyzer(vec![idx_uniq_v2(1, "idx_ab", &["a", "b"])], None);
+			let full = parse_cond("a = 1 AND b = 2 AND ->wrote->doc CONTAINS doc:x");
+			assert!(fuse(&az, &full, false).is_none(), "fully pinned unique prefix declines");
+			let partial = parse_cond("a = 1 AND ->wrote->doc CONTAINS doc:x");
+			let plan = fuse(&az, &partial, false).expect("partial prefix keeps the graph leaf");
+			assert!(matches!(plan, BitmapPlan::And(ref c) if c.len() == 2));
+		}
+
+		/// Every shape outside the single-hop literal-anchored contract
+		/// declines, and a graph conjunct alone cannot anchor a plan.
+		#[test]
+		fn graph_conjuncts_outside_the_contract_decline() {
+			let az = analyzer(vec![idx_v2(1, "idx_a", &["a"])], None);
+			for cond in [
+				// No index-backed sibling to anchor the intersection.
+				"->wrote->doc CONTAINS doc:x AND unindexed = 2",
+				// Multi-hop.
+				"a = 1 AND ->wrote->doc->wrote->doc CONTAINS doc:x",
+				// Both-direction traversal.
+				"a = 1 AND <->wrote<->doc CONTAINS doc:x",
+				// The anchor's table is not a vertex table the hop names.
+				"a = 1 AND ->wrote->doc CONTAINS person:1",
+				// A clause on the lookup changes its truth set.
+				"a = 1 AND ->(wrote WHERE weight > 1)->doc CONTAINS doc:x",
+			] {
+				assert!(fuse(&az, &parse_cond(cond), false).is_none(), "`{cond}`");
+			}
 		}
 
 		#[test]

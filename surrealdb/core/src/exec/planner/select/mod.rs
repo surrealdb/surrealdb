@@ -3385,6 +3385,11 @@ fn bitmap_plan_to_node(plan: BitmapPlan) -> Arc<BitmapNode> {
 			query,
 			operator,
 		} => BitmapNode::fulltext(index_ref, query, operator),
+		BitmapPlan::Graph {
+			source,
+			direction,
+			edge_tables,
+		} => BitmapNode::graph(source, direction, edge_tables),
 		BitmapPlan::And(children) => {
 			BitmapNode::and(children.into_iter().map(bitmap_plan_to_node).collect())
 		}
