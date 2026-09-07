@@ -76,3 +76,47 @@ strip = false
 panic = "unwind"
 lto = "thin"
 codegen-units = 16
+
+# Password-hashing primitives are deliberately expensive by iteration count, so
+# their cost scales directly with how well the inner compression loop is
+# compiled. At `opt-level = 0` that loop runs one to two orders of magnitude
+# slower than optimised, which is enough to push the `crypto::*` tests past
+# their `[env] timeout` on a debug build of the runner. Optimising just these
+# packages keeps the runner itself debuggable while running the hash cores at
+# release speed; it changes no output, only how long producing it takes.
+#
+# This workspace does not inherit the root SurrealDB workspace's profiles, so
+# these mirror the overrides in the root manifest and must be kept in step with
+# them.
+[profile.dev.package.sha1]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.md-5]
+opt-level = 3
+[profile.dev.package.blake3]
+opt-level = 3
+[profile.dev.package.digest]
+opt-level = 3
+[profile.dev.package.block-buffer]
+opt-level = 3
+[profile.dev.package.crypto-common]
+opt-level = 3
+[profile.dev.package.hmac]
+opt-level = 3
+[profile.dev.package.pbkdf2]
+opt-level = 3
+[profile.dev.package.scrypt]
+opt-level = 3
+[profile.dev.package.salsa20]
+opt-level = 3
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.bcrypt]
+opt-level = 3
+[profile.dev.package.blowfish]
+opt-level = 3
+[profile.dev.package.password-hash]
+opt-level = 3
+[profile.dev.package.base64ct]
+opt-level = 3

@@ -586,6 +586,51 @@ split-debuginfo = "unpacked"
 codegen-units = 1
 incremental = false
 
+# Password hashing is deliberately expensive by iteration count, so its cost
+# scales directly with how well the inner compression loop is compiled. At
+# `opt-level = 0` these cores run one to two orders of magnitude slower than
+# optimised — enough that a single `crypto::scrypt::generate` takes over ten
+# seconds and the `crypto::*` language tests exceed their per-test timeout.
+# Optimising only these packages leaves every workspace crate debuggable while
+# the hash cores run at release speed. Output is unchanged; only the time taken
+# to produce it differs, so nothing here relaxes a cost parameter and the hashes
+# a debug build produces stay the ones a release build would.
+#
+# `language-tests` is a separate workspace and does not inherit this, so it
+# carries the same overrides in its own manifest.
+[profile.dev.package.sha1]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.md-5]
+opt-level = 3
+[profile.dev.package.blake3]
+opt-level = 3
+[profile.dev.package.digest]
+opt-level = 3
+[profile.dev.package.block-buffer]
+opt-level = 3
+[profile.dev.package.crypto-common]
+opt-level = 3
+[profile.dev.package.hmac]
+opt-level = 3
+[profile.dev.package.pbkdf2]
+opt-level = 3
+[profile.dev.package.scrypt]
+opt-level = 3
+[profile.dev.package.salsa20]
+opt-level = 3
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.bcrypt]
+opt-level = 3
+[profile.dev.package.blowfish]
+opt-level = 3
+[profile.dev.package.password-hash]
+opt-level = 3
+[profile.dev.package.base64ct]
+opt-level = 3
+
 [profile.release]
 codegen-units = 1
 lto = true
