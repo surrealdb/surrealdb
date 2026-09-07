@@ -43,6 +43,7 @@ mod timeout;
 mod update;
 mod upsert;
 mod use_auth;
+mod write_gate_computed;
 
 #[cfg(not(target_family = "wasm"))]
 mod complex;

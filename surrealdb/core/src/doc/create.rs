@@ -38,7 +38,9 @@ impl Document {
 		self.process_table_fields(stk, ctx, opt, stm).await?;
 		// Clean up table fields and NONE values
 		self.cleanup_table_fields()?;
-		// Check table permissions after create
+		// Check table permissions after create. A predicate naming a COMPUTED
+		// field is evaluated against that field's value, materialised on a scratch
+		// copy so the derived value never reaches storage.
 		self.check_create_permissions(stk, ctx, opt, &self.current).await?;
 		// Store the document and index data
 		self.store_record_data(ctx, stm).await?;

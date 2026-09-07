@@ -27,6 +27,19 @@ pub(super) enum DocKind {
 	CurrentReduced,
 }
 
+/// Which computed fields a set of projection roots requires, resolved once
+/// against the table's dependency map so [`Document::compute_fields`] and
+/// [`Document::compute_fields_into`] make the identical choice.
+enum ComputePlan {
+	/// Evaluate every computed field: the roots were `None`, or a dependency
+	/// analysed as opaque and forced the safe full-compute fallback.
+	Full,
+	/// Evaluate the resolved transitive closure of the requested roots.
+	Selective(HashSet<String>),
+	/// The roots reach no computed field; leave the view untouched.
+	Skip,
+}
+
 impl Document {
 	/// Materialise the pre-mutation snapshot that a statement's `WHERE`
 	/// condition and its data clause both read, and return the view they
@@ -210,6 +223,10 @@ impl Document {
 		};
 		let fields = Arc::clone(self.doc_ctx.fd()?);
 
+		// Resolve which computed fields to evaluate before borrowing a view, so
+		// the immutable `&self` the resolution needs is released first.
+		let plan = self.resolve_compute_plan(needed_roots)?;
+
 		// Resolve the doc reference up front so the &mut self borrow
 		// is dropped before the async call below.
 		let doc: &mut CursorDoc = match doc_kind {
@@ -225,55 +242,100 @@ impl Document {
 			},
 		};
 
-		let Some(needed_roots) = needed_roots else {
-			return Document::computed_fields_inner(
-				stk,
-				ctx,
-				opt,
-				rid.as_ref(),
-				&fields,
-				doc,
-				None,
-			)
-			.await;
-		};
+		Document::apply_compute_plan(stk, ctx, opt, rid.as_ref(), &fields, doc, plan).await
+	}
 
+	/// Resolve the transitive closure of computed fields a set of projection
+	/// roots requires, against the table's dependency map.
+	///
+	/// - `needed_roots = None` → [`ComputePlan::Full`]: evaluate every computed field, the
+	///   conservative choice the full-record write paths and `Output::After` / `Before` / `Diff`
+	///   use.
+	/// - `needed_roots = Some(roots)` → the transitive closure of those roots, or
+	///   [`ComputePlan::Full`] when any dependency analyses as opaque (parameters, graph
+	///   traversals), or [`ComputePlan::Skip`] when the roots reach no computed field at all.
+	///
+	/// Pure over `&self`, so it can run before a view is borrowed mutably; both
+	/// [`Self::compute_fields`] and [`Self::compute_fields_into`] route through
+	/// it so an in-place and a scratch materialisation never diverge.
+	fn resolve_compute_plan(
+		&self,
+		needed_roots: Option<&HashSet<String>>,
+	) -> anyhow::Result<ComputePlan> {
+		let Some(needed_roots) = needed_roots else {
+			return Ok(ComputePlan::Full);
+		};
 		// Derived once when the table context was built, not per document:
 		// extracting them walks every computed field's expression tree, and the
 		// result depends only on the field set.
 		let dep_map = self.doc_ctx.computed_deps()?;
-
-		// Resolve transitive computed-field requirements from the selected
-		// roots. Opaque dependencies trigger a safe full-compute fallback.
-		let required = match crate::expr::computed_deps::resolve_required_computed_fields(
-			needed_roots,
-			dep_map,
-		) {
-			Some(required) => required,
-			None => {
-				return Document::computed_fields_inner(
-					stk,
-					ctx,
-					opt,
-					rid.as_ref(),
-					&fields,
-					doc,
-					None,
-				)
-				.await;
-			}
+		// Opaque dependencies trigger a safe full-compute fallback.
+		let Some(required) =
+			crate::expr::computed_deps::resolve_required_computed_fields(needed_roots, dep_map)
+		else {
+			return Ok(ComputePlan::Full);
 		};
+		if !required.iter().any(|name| dep_map.contains_key(name)) {
+			return Ok(ComputePlan::Skip);
+		}
+		Ok(ComputePlan::Selective(required))
+	}
 
-		// If the projection doesn't reach any computed field, leave the
-		// cursor untouched. Keep `fields_computed = false` so a later
-		// full evaluation (e.g. live-query notification) can still run.
-		let has_required_computed = required.iter().any(|name| dep_map.contains_key(name));
-		if !has_required_computed {
+	/// Run a resolved [`ComputePlan`] against one `doc`.
+	async fn apply_compute_plan(
+		stk: &mut Stk,
+		ctx: &FrozenContext,
+		opt: &Options,
+		rid: &RecordId,
+		fields: &[FieldDefinition],
+		doc: &mut CursorDoc,
+		plan: ComputePlan,
+	) -> anyhow::Result<()> {
+		match plan {
+			ComputePlan::Full => {
+				Document::computed_fields_inner(stk, ctx, opt, rid, fields, doc, None).await
+			}
+			ComputePlan::Selective(required) => {
+				Document::computed_fields_inner(stk, ctx, opt, rid, fields, doc, Some(&required))
+					.await
+			}
+			// The projection doesn't reach any computed field: leave the cursor
+			// untouched. `fields_computed` stays false so a later full evaluation
+			// (e.g. a live-query notification) can still run.
+			ComputePlan::Skip => Ok(()),
+		}
+	}
+
+	/// Populate the computed fields resolved from `needed_roots` onto a
+	/// caller-owned `doc`, rather than one of `self`'s own views.
+	///
+	/// [`Self::compute_fields`] materialises onto a view of the record itself
+	/// (`current`, `initial`, or a reduced form). A write `PERMISSIONS` gate
+	/// instead evaluates its predicate against a scratch copy of the record:
+	/// computing in place would persist the derived values, because
+	/// `store_record_data` writes `self.current` verbatim. Both share
+	/// [`Self::resolve_compute_plan`] and [`Self::computed_fields_inner`], so the
+	/// scratch materialisation evaluates exactly the fields an in-place one would.
+	pub(super) async fn compute_fields_into(
+		&self,
+		stk: &mut Stk,
+		ctx: &FrozenContext,
+		opt: &Options,
+		doc: &mut CursorDoc,
+		needed_roots: Option<&HashSet<String>>,
+	) -> anyhow::Result<()> {
+		// Skip when the table has no computed fields at all.
+		if !self.has_computed_fields() {
 			return Ok(());
 		}
-
-		Document::computed_fields_inner(stk, ctx, opt, rid.as_ref(), &fields, doc, Some(&required))
-			.await
+		// Computed field evaluation needs a record id — temporary
+		// documents (no id) have no schema to project against.
+		let Ok(rid) = self.id() else {
+			return Ok(());
+		};
+		let fields = Arc::clone(self.doc_ctx.fd()?);
+		let plan = self.resolve_compute_plan(needed_roots)?;
+		Document::apply_compute_plan(stk, ctx, opt, rid.as_ref(), &fields, doc, plan).await
 	}
 
 	/// Populate the computed fields on one view, unless that view holds no

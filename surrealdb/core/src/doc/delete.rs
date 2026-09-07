@@ -20,10 +20,12 @@ impl Document {
 		self.check_record_user_access(opt)?;
 		// Check if the record actually exists
 		self.check_record_exists()?;
-		// SECURITY: evaluate the table-level update permission BEFORE any
+		// SECURITY: evaluate the table-level delete permission BEFORE any
 		// user-supplied expression in the WHERE clause or data clause.
 		// Otherwise a `WHERE THROW ...` could exfiltrate field values
-		// before the permission check rejects the operation.
+		// before the permission check rejects the operation. A predicate naming a
+		// COMPUTED field is evaluated against that field's value, materialised on
+		// a scratch copy.
 		self.check_delete_permissions(stk, ctx, opt, &self.current).await?;
 		// Reject writes to read-only view tables (after the permission gate)
 		self.check_table_not_view(opt)?;

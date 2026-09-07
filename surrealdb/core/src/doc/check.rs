@@ -1,3 +1,6 @@
+use std::borrow::Cow;
+use std::collections::HashSet;
+
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
@@ -402,17 +405,68 @@ impl Document {
 		doc: &CursorDoc,
 	) -> Result<(), IgnoreError> {
 		if self.id.is_some() && ctx.check_perms(opt, Action::Edit)? {
-			self.process_permissions(
-				stk,
-				ctx,
-				opt,
-				doc,
-				&self.doc_ctx.tb()?.permissions.create,
-				PermissionClauseKind::Write,
-			)
-			.await?;
+			let perm = &self.doc_ctx.tb()?.permissions.create;
+			let doc = self.gate_doc(stk, ctx, opt, perm, doc).await?;
+			self.process_permissions(stk, ctx, opt, &doc, perm, PermissionClauseKind::Write)
+				.await?;
 		}
 		Ok(())
+	}
+
+	/// Build the document a write `PERMISSIONS` predicate is evaluated against:
+	/// `doc` with the computed fields that predicate reads materialised onto a
+	/// scratch copy.
+	///
+	/// Computed fields are stripped before storage, so the record about to be
+	/// written (`self.current`, passed as `doc`) carries none of them. A
+	/// `Permission::Specific` predicate naming a computed field would resolve it
+	/// to `NONE`, so a clause written to *deny* (`WHERE blocked != true`,
+	/// `WHERE status != 'final'`) is satisfied by `NONE != true` and lets every
+	/// caller through.
+	///
+	/// The values are materialised on a copy, never on `doc` itself, because
+	/// `store_record_data` persists `self.current` verbatim: computing them in
+	/// place would write the derived values into storage. `Cow::Borrowed(doc)`
+	/// is returned whenever nothing needs materialising, so a table with no
+	/// computed fields — or a predicate that reads none — pays only a dependency
+	/// scan and no clone.
+	///
+	/// Only the fields the predicate reads are evaluated, resolved the same way
+	/// [`Document::compute_fields`] resolves a projection's roots; an
+	/// unresolvable dependency set falls back to evaluating every computed
+	/// field. The bodies run under the definer's auth in a write frame, exactly
+	/// as on the read path, so evaluating them ahead of the gate grants the
+	/// caller nothing — though a body that errors surfaces its error rather than
+	/// the permission denial, as the `SELECT` gate already does.
+	async fn gate_doc<'a>(
+		&self,
+		stk: &mut Stk,
+		ctx: &FrozenContext,
+		opt: &Options,
+		perm: &Permission,
+		doc: &'a CursorDoc,
+	) -> Result<Cow<'a, CursorDoc>> {
+		// Only a `Specific` predicate reads the document; `Full` / `None` decide
+		// without it.
+		let Permission::Specific(e) = perm else {
+			return Ok(Cow::Borrowed(doc));
+		};
+		// A temporary document with no id, or a table with no computed fields,
+		// has nothing to prepare.
+		if self.id.is_none() || !self.has_computed_fields() {
+			return Ok(Cow::Borrowed(doc));
+		}
+		let deps = crate::expr::computed_deps::extract_computed_deps(e);
+		// A fully-resolved predicate that names no computed field needs no copy.
+		if deps.is_complete && deps.fields.is_empty() {
+			return Ok(Cow::Borrowed(doc));
+		}
+		// `None` roots means "evaluate every computed field", which is how
+		// `compute_fields` reads an unresolvable dependency set.
+		let roots = deps.is_complete.then(|| deps.fields.into_iter().collect::<HashSet<String>>());
+		let mut scratch = doc.clone();
+		self.compute_fields_into(stk, ctx, opt, &mut scratch, roots.as_ref()).await?;
+		Ok(Cow::Owned(scratch))
 	}
 
 	/// Check the `PERMISSIONS FOR update` clause on this table. Short-
@@ -426,15 +480,10 @@ impl Document {
 		doc: &CursorDoc,
 	) -> Result<(), IgnoreError> {
 		if self.id.is_some() && ctx.check_perms(opt, Action::Edit)? {
-			self.process_permissions(
-				stk,
-				ctx,
-				opt,
-				doc,
-				&self.doc_ctx.tb()?.permissions.update,
-				PermissionClauseKind::Write,
-			)
-			.await?;
+			let perm = &self.doc_ctx.tb()?.permissions.update;
+			let doc = self.gate_doc(stk, ctx, opt, perm, doc).await?;
+			self.process_permissions(stk, ctx, opt, &doc, perm, PermissionClauseKind::Write)
+				.await?;
 		}
 		Ok(())
 	}
@@ -450,15 +499,10 @@ impl Document {
 		doc: &CursorDoc,
 	) -> Result<(), IgnoreError> {
 		if self.id.is_some() && ctx.check_perms(opt, Action::Edit)? {
-			self.process_permissions(
-				stk,
-				ctx,
-				opt,
-				doc,
-				&self.doc_ctx.tb()?.permissions.delete,
-				PermissionClauseKind::Write,
-			)
-			.await?;
+			let perm = &self.doc_ctx.tb()?.permissions.delete;
+			let doc = self.gate_doc(stk, ctx, opt, perm, doc).await?;
+			self.process_permissions(stk, ctx, opt, &doc, perm, PermissionClauseKind::Write)
+				.await?;
 		}
 		Ok(())
 	}

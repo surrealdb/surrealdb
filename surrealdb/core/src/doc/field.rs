@@ -455,6 +455,15 @@ impl Document {
 		// above materialised for the field clauses that read it, along with any
 		// value the user tried to assign to a computed field, and clear the
 		// flag so the read side re-derives from the values just written.
+		//
+		// SECURITY: the write permission gate depends on this reset. It runs
+		// after `process_table_fields` on the create/update paths and evaluates
+		// its predicate against a scratch clone of `self.current`
+		// (`Document::gate_doc`); if `fields_computed` were left `true` here with
+		// the values stripped, the clone would inherit the stale flag and a
+		// full-compute plan would skip materialisation, so a predicate naming a
+		// computed field would read `NONE` again (GHSA-f6h4-5xf2-86q9). Keep this
+		// strip-and-reset ahead of the gate.
 		for fd in fields.iter() {
 			if fd.computed.is_some() {
 				self.current.doc.to_mut().cut(&fd.name);
