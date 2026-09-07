@@ -461,7 +461,7 @@ impl DiskAnnGraph {
 			return Ok(Vec::new());
 		}
 		let limit = l.max(k).max(1);
-		let params = Knn::new_default(limit, limit)?;
+		let params = Knn::new_default(limit)?;
 		let mut ids = vec![0; limit];
 		let mut distances = vec![0.0; limit];
 		let mut output = IdDistance::new(&mut ids, &mut distances);
