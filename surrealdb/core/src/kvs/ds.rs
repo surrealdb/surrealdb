@@ -3389,11 +3389,7 @@ impl Datastore {
 				Ok(true) => {
 					if let Err(e) = Self::ensure_not_cancelled(canceller) {
 						let _ = txn.cancel().await;
-						if let Err(evict) =
-							self.index_stores.remove_hnsw_index(tb, ikb.clone()).await
-						{
-							warn!(target: TARGET, "Failed to evict HNSW index after compaction cancellation: {evict}");
-						}
+						self.index_stores.invalidate_hnsw_caches(tb, ikb.clone()).await;
 						return Err(e);
 					}
 					#[cfg(test)]
@@ -3402,11 +3398,7 @@ impl Datastore {
 						self.id,
 					) {
 						let _ = txn.cancel().await;
-						if let Err(evict) =
-							self.index_stores.remove_hnsw_index(tb, ikb.clone()).await
-						{
-							warn!(target: TARGET, "Failed to evict HNSW index after compaction commit error: {evict}");
-						}
+						self.index_stores.invalidate_hnsw_caches(tb, ikb.clone()).await;
 						if Self::retry_index_operation_conflict(
 							&e,
 							format!(
@@ -3421,11 +3413,7 @@ impl Datastore {
 					}
 					if let Err(e) = txn.commit().await {
 						let _ = txn.cancel().await;
-						if let Err(evict) =
-							self.index_stores.remove_hnsw_index(tb, ikb.clone()).await
-						{
-							warn!(target: TARGET, "Failed to evict HNSW index after compaction commit error: {evict}");
-						}
+						self.index_stores.invalidate_hnsw_caches(tb, ikb.clone()).await;
 						if Self::retry_index_operation_conflict(
 							&e,
 							format!(

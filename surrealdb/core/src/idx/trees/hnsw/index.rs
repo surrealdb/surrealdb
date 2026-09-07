@@ -31,9 +31,60 @@ use crate::kvs::{KVValue, Key, Transaction, Val};
 use crate::val::{Number, RecordId, RecordIdKey, Value};
 
 /// Maximum number of pending key/value pairs captured by one compaction plan.
-const HNSW_COMPACTION_MAX_PENDING_KEYS: usize = 1024;
+pub(super) const HNSW_COMPACTION_MAX_PENDING_KEYS: usize = 1024;
 /// Maximum encoded pending key/value bytes captured by one compaction plan.
 const HNSW_COMPACTION_MAX_PENDING_BYTES: usize = 16 * 1024 * 1024;
+
+/// Candidate cap on one pending scoring batch on the kNN read path.
+///
+/// The compaction path over this same keyspace has always been capped; an
+/// uncapped read path is what let queue depth set a query's peak residency.
+pub(super) const HNSW_QUERY_MAX_PENDING_KEYS: usize = 1024;
+
+/// Byte target for one pending scoring batch on the kNN read path.
+///
+/// A target, not a ceiling: a single encoded pending value is itself unbounded,
+/// so a batch that admits one oversized value overshoots once. What holds
+/// unconditionally is that residency does not grow with the backlog.
+pub(super) const HNSW_QUERY_MAX_PENDING_BYTES: usize = 4 * 1024 * 1024;
+
+/// Counts pending scoring batches flushed by the kNN read path, so tests can
+/// assert residency is bounded by batch count rather than by timing.
+///
+/// Keyed by index table so a test asserting an exact count is unaffected by
+/// any other test scoring pending entries concurrently in the same process.
+#[cfg(test)]
+static PENDING_SCORE_FLUSHES: std::sync::LazyLock<
+	std::sync::Mutex<std::collections::HashMap<String, usize>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Peak filter-cache size observed after a pending scoring batch retired its
+/// non-result entries, keyed by index table. Lets a test assert the filter
+/// cache does not grow with the backlog.
+#[cfg(test)]
+static PENDING_FILTER_CACHE_PEAK: std::sync::LazyLock<
+	std::sync::Mutex<std::collections::HashMap<String, usize>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+#[cfg(test)]
+pub(super) fn reset_pending_filter_cache_peak(table: &str) {
+	PENDING_FILTER_CACHE_PEAK.lock().unwrap().insert(table.to_string(), 0);
+}
+
+#[cfg(test)]
+pub(super) fn pending_filter_cache_peak(table: &str) -> usize {
+	PENDING_FILTER_CACHE_PEAK.lock().unwrap().get(table).copied().unwrap_or(0)
+}
+
+#[cfg(test)]
+pub(super) fn reset_pending_score_flushes(table: &str) {
+	PENDING_SCORE_FLUSHES.lock().unwrap().insert(table.to_string(), 0);
+}
+
+#[cfg(test)]
+pub(super) fn pending_score_flushes(table: &str) -> usize {
+	PENDING_SCORE_FLUSHES.lock().unwrap().get(table).copied().unwrap_or(0)
+}
 /// Exact pending key/value observed by an HNSW compaction read phase.
 struct CapturedPendingKey {
 	/// Encoded key to delete if the value still matches.
@@ -698,60 +749,183 @@ impl HnswIndex {
 		filter: &mut Option<HnswTruthyDocumentFilter<'_>>,
 		builder: &mut KnnResultBuilder,
 	) -> Result<Option<RoaringTreemap>> {
+		// A kNN search has to observe the whole pending queue: every live
+		// pending vector can win a top-K slot, and every pending doc-ID must
+		// mask the stale graph entry it supersedes. The read is O(backlog) by
+		// construction. What is bounded here is *residency* — the record-keyed
+		// range is scored in batches capped by `HNSW_QUERY_MAX_PENDING_KEYS` /
+		// `HNSW_QUERY_MAX_PENDING_BYTES` rather than accumulated whole.
 		let mut all_existing_docs = RoaringTreemap::new();
-		let mut non_deleted_docs = HashMap::default();
-		// First pass, identify deleted doc
-		self.collect_pending(ctx.ctx, &ctx.tx, |pending| {
+
+		// The append-keyed range is a legacy layout that this version never
+		// writes; entries there are residue an older one left, and compaction
+		// drains them. It is the only range where one document can hold several
+		// entries, so it keeps the coalescing map — bounded by that residue
+		// rather than by the ingest rate.
+		let mut legacy: HashMap<VectorId, Vec<SerializedVector>> = HashMap::default();
+		self.collect_append_pending(ctx.ctx, &ctx.tx, |pending| {
 			if let VectorId::DocId(doc_id) = &pending.id {
 				all_existing_docs.insert(*doc_id);
 			};
 			if pending.new_vectors.is_empty() {
-				non_deleted_docs.remove(&pending.id);
+				legacy.remove(&pending.id);
 			} else {
-				non_deleted_docs.insert(pending.id, pending.new_vectors);
+				legacy.insert(pending.id, pending.new_vectors);
 			}
 		})
 		.await?;
-		if all_existing_docs.is_empty() && non_deleted_docs.is_empty() {
-			return Ok(None);
-		}
-		// Warm the transaction record cache for the pending candidates in one
-		// batch, so the per-doc truthy checks below hit the cache instead of
-		// fetching each record individually.
-		if let Some(filter) = filter.as_mut() {
-			let ids: Vec<VectorId> = non_deleted_docs.keys().cloned().collect();
-			filter.prefetch_records(ctx, &ids).await?;
-		}
-		// Second pass, we build the KNN result for non-deleted documents
-		for (id, vectors) in non_deleted_docs {
-			// If there is a filter, we need to check if the record is truthy
-			if let Some(filter) = filter
-				&& !filter.check_vector_id_truthy(ctx, stk, id.clone()).await?
-			{
-				continue;
+
+		// The record-keyed range is keyed by the record, so it holds at most one
+		// entry per document and a later write overwrites it in place. Nothing
+		// in it can supersede anything else in it, which is what makes scoring
+		// it as it is read — rather than after a full coalescing pass — safe.
+		// This is the range bulk ingest fills, and the one whose depth used to
+		// set a query's peak residency.
+		let mut batch: Vec<(VectorId, Vec<SerializedVector>)> = Vec::new();
+		let mut batch_bytes = 0usize;
+		let rng = self.ikb.new_hr_range()?;
+		let mut cursor = ctx.tx.open_vals_cursor(rng, ScanDirection::Forward, 0, None).await?;
+		let mut count = 0;
+		loop {
+			let entries = cursor.next_batch(crate::kvs::NORMAL_BATCH_SIZE).await?;
+			if entries.is_empty() {
+				break;
 			}
-			for vector in vectors {
-				let vector = Vector::from(vector);
-				let d = self.distance.calculate(&search.pt, &vector);
-				if builder.check_add(d)
-					&& let Some(evicted_id) = builder.add_vector_id_result(d, id.clone())
-					&& let Some(filter) = filter
+			let owned: Vec<(Vec<u8>, Vec<u8>)> =
+				entries.iter().map(|(k, v)| (k.to_vec(), v.to_vec())).collect();
+			for (key, value) in owned {
+				if ctx.ctx.is_done(Some(count)).await? {
+					bail!(Error::QueryCancelled)
+				}
+				count += 1;
+				let hr = HnswRecordPending::decode_key(&key)?;
+				let p = HnswRecordPendingUpdate::kv_decode_value(&value, ())?;
+				let pending = Self::record_pending_to_operation(hr.id.into_owned(), p);
+				if let VectorId::DocId(doc_id) = &pending.id {
+					all_existing_docs.insert(*doc_id);
+				};
+				// A record-keyed entry is the document's current pending state,
+				// so it supersedes any legacy append-keyed entry for it.
+				legacy.remove(&pending.id);
+				if pending.new_vectors.is_empty() {
+					continue;
+				}
+				batch_bytes += value.len();
+				batch.push((pending.id, pending.new_vectors));
+				if batch.len() >= HNSW_QUERY_MAX_PENDING_KEYS
+					|| batch_bytes >= HNSW_QUERY_MAX_PENDING_BYTES
 				{
-					filter.expire(&evicted_id);
+					self.score_pending_batch(ctx, stk, search, filter, builder, &mut batch).await?;
+					batch_bytes = 0;
 				}
 			}
 		}
+		drop(cursor);
+
+		// Whatever legacy entries this document set did not supersede, in the
+		// same bounded batches.
+		for (id, vectors) in legacy.drain() {
+			batch.push((id, vectors));
+			if batch.len() >= HNSW_QUERY_MAX_PENDING_KEYS {
+				self.score_pending_batch(ctx, stk, search, filter, builder, &mut batch).await?;
+			}
+		}
+		if !batch.is_empty() {
+			self.score_pending_batch(ctx, stk, search, filter, builder, &mut batch).await?;
+		}
+
 		if all_existing_docs.is_empty() {
 			return Ok(None);
 		}
 		Ok(Some(all_existing_docs))
 	}
 
-	/// Streams all pending updates and passes graph operations to a collector.
+	/// Prefetches and scores one bounded batch of pending candidates, leaving it
+	/// empty.
+	async fn score_pending_batch(
+		&self,
+		ctx: &HnswContext<'_>,
+		stk: &mut Stk,
+		search: &HnswSearch,
+		filter: &mut Option<HnswTruthyDocumentFilter<'_>>,
+		builder: &mut KnnResultBuilder,
+		batch: &mut Vec<(VectorId, Vec<SerializedVector>)>,
+	) -> Result<()> {
+		#[cfg(test)]
+		PENDING_SCORE_FLUSHES
+			.lock()
+			.unwrap()
+			.entry(self.ikb.table().to_string())
+			.and_modify(|c| *c += 1)
+			.or_insert(1);
+		// Warm the transaction record cache for this batch, so the per-doc
+		// truthy checks below hit the cache instead of fetching each record
+		// individually.
+		//
+		if let Some(filter) = filter.as_mut() {
+			let ids: Vec<VectorId> = batch.iter().map(|(id, _)| id.clone()).collect();
+			filter.prefetch_records(ctx, &ids).await?;
+		}
+		for (id, vectors) in batch.drain(..) {
+			// If there is a filter, we need to check if the record is truthy
+			let truthy = match filter.as_mut() {
+				Some(filter) => filter.check_vector_id_truthy(ctx, stk, id.clone()).await?,
+				None => true,
+			};
+			if truthy {
+				for vector in vectors {
+					let vector = Vector::from(vector);
+					let d = self.distance.calculate(&search.pt, &vector);
+					if builder.check_add(d)
+						&& let Some(evicted_id) = builder.add_vector_id_result(d, id.clone())
+						&& let Some(filter) = filter.as_mut()
+					{
+						filter.expire(&evicted_id);
+					}
+				}
+			}
+			// The filter caches a verdict for every candidate it checks, holding
+			// the whole record for a matching one, and an eviction from the
+			// result builder is the only other thing that retires an entry.
+			// Bounding the vectors alone would therefore still leave residency
+			// growing with the backlog: once the builder is full, a broad
+			// residual condition over increasingly distant records keeps every
+			// record it visited but never admitted. Retire each candidate that
+			// is not a result as soon as it has been scored.
+			//
+			// This cannot cost a re-fetch: a document scored here is in the
+			// suppression bitmap, so the graph phase skips it.
+			if let Some(filter) = filter.as_mut()
+				&& !builder.contains(&id)
+			{
+				filter.expire(&id);
+			}
+		}
+		#[cfg(test)]
+		if let Some(filter) = filter.as_ref() {
+			let len = filter.cache_len();
+			PENDING_FILTER_CACHE_PEAK
+				.lock()
+				.unwrap()
+				.entry(self.ikb.table().to_string())
+				.and_modify(|p| *p = (*p).max(len))
+				.or_insert(len);
+		}
+		Ok(())
+	}
+
+	/// Streams the legacy append-keyed pending range and passes each graph
+	/// operation to a collector.
 	///
-	/// Append-keyed entries are streamed before record-keyed entries. The
-	/// collector decides whether and how to coalesce operations.
-	async fn collect_pending<F>(
+	/// This range is not written by this version — entries in it are residue
+	/// from an older layout, which compaction drains. It is also the only
+	/// pending range where one document can hold several entries, so the
+	/// collector is responsible for coalescing them.
+	///
+	/// The record-keyed range is not streamed here: it holds at most one entry
+	/// per document, so the kNN read path scores it in bounded batches as it
+	/// reads rather than coalescing it first.
+	async fn collect_append_pending<F>(
 		&self,
 		ctx: &Context,
 		tx: &Transaction,
@@ -774,25 +948,6 @@ impl HnswIndex {
 				}
 				let pending = VectorPendingUpdate::kv_decode_value(v, ())?;
 				collector(Self::append_pending_to_operation(pending));
-				count += 1;
-			}
-		}
-		drop(cursor);
-
-		let rng = self.ikb.new_hr_range()?;
-		let mut cursor = tx.open_vals_cursor(rng, ScanDirection::Forward, 0, None).await?;
-		loop {
-			let batch = cursor.next_batch(crate::kvs::NORMAL_BATCH_SIZE).await?;
-			if batch.is_empty() {
-				break;
-			}
-			for (key, value) in &batch {
-				if ctx.is_done(Some(count)).await? {
-					bail!(Error::QueryCancelled)
-				}
-				let hr = HnswRecordPending::decode_key(key)?;
-				let pending = HnswRecordPendingUpdate::kv_decode_value(value, ())?;
-				collector(Self::record_pending_to_operation(hr.id.into_owned(), pending));
 				count += 1;
 			}
 		}

@@ -113,10 +113,37 @@ impl IndexStores {
 	}
 
 	/// Evicts cached HNSW graph and vector entries for one table index.
+	///
+	/// Drops the loaded graph as well as the element caches, so the next access
+	/// reloads every layer from persisted state. Reserved for real index
+	/// removal and for a compaction *apply* that failed part-way: there, a
+	/// fallible operation may have followed an in-memory graph mutation but
+	/// preceded the `save_nodes` that advances the layer version, leaving a
+	/// mutated layer that no version check can detect.
 	pub(crate) async fn remove_hnsw_index(&self, tb: TableId, ikb: IndexKeyBase) -> Result<()> {
 		self.0.hnsw_indexes.remove(tb, &ikb).await?;
 		self.0.vector_cache.remove_index(ikb.ns(), ikb.db(), tb, ikb.index()).await;
 		Ok(())
+	}
+
+	/// Invalidates the unversioned HNSW element caches for one table index,
+	/// keeping the loaded graph.
+	///
+	/// For a compaction whose apply *completed* and whose transaction was then
+	/// cancelled or failed to commit. The element caches carry no version and
+	/// are the real hazard there: `VecDocs::insert` on an already-present
+	/// vector writes the `Hv` key and the cached doc set without touching the
+	/// graph, so no version moves and a rollback would leave the cache serving
+	/// a doc the store does not have.
+	///
+	/// The graph does not need dropping on that path. Graph mutation goes
+	/// through `save_nodes`, which advances the in-memory layer version, so a
+	/// rolled-back apply leaves each mutated layer ahead of the persisted `hs`
+	/// record and `check_state` reloads exactly those layers. Dropping the
+	/// whole graph instead forces an O(N) reload of every layer, which under
+	/// sustained ingest is a timeout-then-rebuild cycle that never converges.
+	pub(crate) async fn invalidate_hnsw_caches(&self, tb: TableId, ikb: IndexKeyBase) {
+		self.0.vector_cache.remove_index(ikb.ns(), ikb.db(), tb, ikb.index()).await;
 	}
 
 	/// Evicts the loaded DiskANN graph and its cached KV-backed graph data for one table index.

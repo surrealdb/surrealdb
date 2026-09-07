@@ -1222,13 +1222,30 @@ impl Building {
 		Ok(ctx.freeze())
 	}
 
-	/// Evicts the process-local HNSW wrapper after a failed index-builder compaction write.
+	/// Evicts the process-local HNSW wrapper and element caches after an
+	/// index-builder compaction *apply* returned an error.
+	///
+	/// On that path a fallible operation may have followed an in-memory graph
+	/// mutation but preceded the `save_nodes` that advances the layer version,
+	/// so the mutation is undetectable by a version check and the graph has to
+	/// go with the caches.
 	async fn evict_cached_hnsw_index(&self) {
 		if let Err(err) =
 			self.ctx.get_index_stores().remove_hnsw_index(self.tb, self.ikb.clone()).await
 		{
 			warn!("Failed to evict HNSW index after index-builder compaction error: {err}");
 		}
+	}
+
+	/// Invalidates the unversioned element caches after an index-builder
+	/// compaction whose apply completed and whose commit then failed, keeping
+	/// the loaded graph.
+	///
+	/// Every graph layer the apply mutated has advanced its in-memory version,
+	/// so `check_state` reloads exactly those from persisted state. Dropping
+	/// the graph as well would force a full reload each cycle.
+	async fn invalidate_cached_hnsw_caches(&self) {
+		self.ctx.get_index_stores().invalidate_hnsw_caches(self.tb, self.ikb.clone()).await;
 	}
 
 	pub(super) async fn check_prepare_remove_with_tx(
@@ -1893,7 +1910,7 @@ impl Building {
 			match res {
 				Ok(true) => {
 					if let Err(err) = tx.commit().await {
-						self.evict_cached_hnsw_index().await;
+						self.invalidate_cached_hnsw_caches().await;
 						return Err(err);
 					}
 				}

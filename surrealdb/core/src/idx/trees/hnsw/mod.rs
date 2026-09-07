@@ -1611,6 +1611,200 @@ mod tests {
 		Ok(())
 	}
 
+	/// The read path must never admit a larger scoring batch than the
+	/// compaction path over the same keyspace already accepts. An uncapped read
+	/// path is what let queue depth set a query's peak residency.
+	const _: () = assert!(
+		crate::idx::trees::hnsw::index::HNSW_QUERY_MAX_PENDING_KEYS
+			<= crate::idx::trees::hnsw::index::HNSW_COMPACTION_MAX_PENDING_KEYS
+	);
+
+	/// Builds `count` record-keyed pending entries: the index is defined first,
+	/// so every record created after it is queued rather than compacted.
+	async fn pending_backlog_ds(tb_name: &str, count: usize) -> Result<(Arc<Datastore>, Session)> {
+		let ds = Arc::new(Datastore::new("memory").await?);
+		let db = {
+			let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+			let db = tx.ensure_ns_db(None, "test", "test").await?;
+			tx.commit().await?;
+			db
+		};
+		let session = Session::owner().with_ns("test").with_db("test");
+		let define = format!(
+			"DEFINE INDEX hnsw_pts ON {tb_name} FIELDS point HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32 EFC 100 M 12;"
+		);
+		for response in ds.execute(&define, &session, None).await? {
+			response.result?;
+		}
+		// Spread along x so the nearest neighbours of the origin are the lowest
+		// ids, whatever order the backlog is read or batched in.
+		let mut sql = String::new();
+		for i in 0..count {
+			sql.push_str(&format!(
+				"CREATE {tb_name}:{i} SET point = [{}f, 0f], grp = 'a';\n",
+				i as f64
+			));
+		}
+		for response in ds.execute(&sql, &session, None).await? {
+			response.result?;
+		}
+		// These cases are only meaningful against a queue that is actually
+		// pending, so fail loudly rather than vacuously if it was compacted.
+		let tx = ds.transaction(TransactionType::Read, Optimistic).await?;
+		let tb = tb_name.into();
+		let ix =
+			tx.get_tb_index(db.namespace_id, db.database_id, &tb, "hnsw_pts", None).await?.unwrap();
+		let ikb = IndexKeyBase::new(db.namespace_id, db.database_id, tb, ix.index_id);
+		let queued = tx.getr(ikb.new_hr_range()?, None).await?.len();
+		tx.cancel().await?;
+		assert_eq!(queued, count, "backlog was compacted, so nothing is pending");
+		Ok((ds, session))
+	}
+
+	/// Scoring must run in batches capped by `HNSW_QUERY_MAX_PENDING_KEYS`, so a
+	/// query's resident candidate set does not grow with queue depth.
+	///
+	/// Asserted by flush count rather than by timing or memory: the previous
+	/// behaviour accumulated the whole backlog and scored it once, which is
+	/// exactly one flush however deep the queue.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_query_bounds_pending_scoring_batches() -> Result<()> {
+		let cap = crate::idx::trees::hnsw::index::HNSW_QUERY_MAX_PENDING_KEYS;
+		let count = cap * 2 + 100;
+		// A table name unique to this case, so the flush count cannot be
+		// perturbed by another test scoring pending entries concurrently.
+		let tb = "pts_flush_accounting";
+		let (ds, session) = pending_backlog_ds(tb, count).await?;
+		crate::idx::trees::hnsw::index::reset_pending_score_flushes(tb);
+		let mut response = ds
+			.execute(
+				&format!("SELECT id FROM {tb} WHERE point <|3,100|> [0f, 0f];"),
+				&session,
+				None,
+			)
+			.await?;
+		response.remove(0).result?;
+		let flushes = crate::idx::trees::hnsw::index::pending_score_flushes(tb);
+		let expected = count.div_ceil(cap);
+		assert_eq!(
+			flushes, expected,
+			"{count} queued entries should score in {expected} bounded batches, got {flushes}"
+		);
+		Ok(())
+	}
+
+	/// Bounding residency must not cost recall: the true nearest neighbours are
+	/// returned even when they are spread across scoring batches.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_query_pending_batching_preserves_recall() -> Result<()> {
+		let count = crate::idx::trees::hnsw::index::HNSW_QUERY_MAX_PENDING_KEYS * 2 + 100;
+		let tb = "pts_recall";
+		let (ds, session) = pending_backlog_ds(tb, count).await?;
+		let mut response = ds
+			.execute(
+				&format!("SELECT id FROM {tb} WHERE point <|3,100|> [0f, 0f];"),
+				&session,
+				None,
+			)
+			.await?;
+		let result = response.remove(0).result?;
+		let surrealdb_types::Value::Array(result) = result else {
+			panic!("Expected array result");
+		};
+		let ids: Vec<String> = result
+			.iter()
+			.map(|r| {
+				let surrealdb_types::Value::Object(o) = r else {
+					panic!("Expected object");
+				};
+				format!("{:?}", o.get("id").expect("id"))
+			})
+			.collect();
+		assert_eq!(ids.len(), 3, "wrong neighbour count: {ids:?}");
+		// pts:0, pts:1 and pts:2 sit at x = 0, 1, 2 and are the three closest to
+		// the origin; anything else means a batch boundary dropped a candidate.
+		for expected in ["Number(0)", "Number(1)", "Number(2)"] {
+			assert!(ids.iter().any(|id| id.contains(expected)), "{expected} missing from {ids:?}");
+		}
+		Ok(())
+	}
+
+	/// A record retired while still queued must not surface, and the retirement
+	/// must survive being read in a different batch from its neighbours.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_query_pending_retirement_survives_batching() -> Result<()> {
+		let count = crate::idx::trees::hnsw::index::HNSW_QUERY_MAX_PENDING_KEYS * 2 + 100;
+		let tb = "pts_retire";
+		let (ds, session) = pending_backlog_ds(tb, count).await?;
+		for response in ds.execute(&format!("DELETE {tb}:1;"), &session, None).await? {
+			response.result?;
+		}
+		let mut response = ds
+			.execute(
+				&format!("SELECT id FROM {tb} WHERE point <|3,100|> [0f, 0f];"),
+				&session,
+				None,
+			)
+			.await?;
+		let result = response.remove(0).result?;
+		let surrealdb_types::Value::Array(result) = result else {
+			panic!("Expected array result");
+		};
+		let ids: Vec<String> = result
+			.iter()
+			.map(|r| {
+				let surrealdb_types::Value::Object(o) = r else {
+					panic!("Expected object");
+				};
+				format!("{:?}", o.get("id").expect("id"))
+			})
+			.collect();
+		assert!(!ids.iter().any(|id| id.contains("Number(1)")), "retired doc surfaced: {ids:?}");
+		// With pts:1 retired the three closest to the origin are pts:0, pts:2
+		// and pts:3.
+		for expected in ["Number(0)", "Number(2)", "Number(3)"] {
+			assert!(ids.iter().any(|id| id.contains(expected)), "{expected} missing from {ids:?}");
+		}
+		assert_eq!(ids.len(), 3, "wrong neighbour count: {ids:?}");
+		Ok(())
+	}
+
+	/// A *filtered* kNN over a deep backlog must not accumulate the filter's
+	/// per-candidate verdicts, which hold the whole matching record.
+	///
+	/// Batching the vectors alone does not achieve that: only an eviction from
+	/// the result builder retires a cache entry, so once the builder is full a
+	/// broad residual condition keeps every record it visited but never
+	/// admitted. Asserted on the cache's peak size after each batch retires its
+	/// non-result entries — without that retirement the peak grows to the
+	/// backlog depth.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn hnsw_query_bounds_pending_filter_cache() -> Result<()> {
+		let k = 3usize;
+		let count = crate::idx::trees::hnsw::index::HNSW_QUERY_MAX_PENDING_KEYS * 2 + 100;
+		let tb = "pts_filter_cache";
+		let (ds, session) = pending_backlog_ds(tb, count).await?;
+		crate::idx::trees::hnsw::index::reset_pending_filter_cache_peak(tb);
+		// `grp = 'a'` matches every row, so every candidate is truthy and would
+		// cache a record — the worst case for the filter cache.
+		let mut response = ds
+			.execute(
+				&format!("SELECT id FROM {tb} WHERE point <|{k},100|> [0f, 0f] AND grp = 'a';"),
+				&session,
+				None,
+			)
+			.await?;
+		response.remove(0).result?;
+		let peak = crate::idx::trees::hnsw::index::pending_filter_cache_peak(tb);
+		assert!(peak > 0, "filter never engaged, so this case proves nothing");
+		assert!(
+			peak <= k,
+			"filter cache retained {peak} verdicts over a {count}-entry backlog; only the {k} \
+			 results should survive a batch"
+		);
+		Ok(())
+	}
+
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn hnsw_query_reads_record_keyed_pending_vectors() -> Result<()> {
 		let ds = Datastore::new("memory").await?;
