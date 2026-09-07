@@ -23,6 +23,10 @@ pub struct DefineTableStatement {
 	/// Optional GraphQL deprecation reason declared via
 	/// `GRAPHQL_DEPRECATED "..."`.
 	pub graphql_deprecated: Option<String>,
+	/// Inline adjacency cache cap declared via `INLINE EDGES <n>`.
+	pub inline_edges_cap: Option<u32>,
+	/// Inline reference cache cap declared via `INLINE REFERENCES <n>`.
+	pub inline_refs_cap: Option<u32>,
 }
 
 impl Default for DefineTableStatement {
@@ -40,6 +44,8 @@ impl Default for DefineTableStatement {
 			table_type: TableType::default(),
 			graphql_alias: None,
 			graphql_deprecated: None,
+			inline_edges_cap: None,
+			inline_refs_cap: None,
 		}
 	}
 }
@@ -98,6 +104,12 @@ impl ToSql for DefineTableStatement {
 		}
 		if let Some(ref reason) = self.graphql_deprecated {
 			write_sql!(f, sql_fmt, " GRAPHQL_DEPRECATED {}", common::fmt::QuoteStr(reason));
+		}
+		if let Some(cap) = self.inline_edges_cap {
+			write_sql!(f, sql_fmt, " INLINE EDGES {}", cap);
+		}
+		if let Some(cap) = self.inline_refs_cap {
+			write_sql!(f, sql_fmt, " INLINE REFERENCES {}", cap);
 		}
 		if let Some(ref v) = self.view {
 			write_sql!(f, sql_fmt, " {}", v);

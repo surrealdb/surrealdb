@@ -10,10 +10,12 @@ use std::sync::Arc;
 
 use common::future::stream::{self, Yielder};
 use futures::StreamExt;
+use surrealdb_datastore::values::inline_cache::{CacheValue, RefCacheEntry};
 
 use super::common::{
 	evaluate_bound_key, extract_record_ids_into, resolve_record_batch, resolve_version_stamp,
 };
+use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::exec::permission::{
 	PhysicalPermission, should_check_perms, validate_record_user_access,
@@ -25,12 +27,12 @@ use crate::exec::{
 use crate::expr::ControlFlow;
 use crate::iam::Action;
 use crate::key::schema::{
-	DbRoot, ReferenceForeignFieldPrefix, ReferenceForeignTablePrefix, ReferenceIdPrefix,
-	ReferenceKey,
+	DbRoot, RefCacheKey, ReferenceForeignFieldPrefix, ReferenceForeignTablePrefix,
+	ReferenceIdPrefix, ReferenceKey,
 };
 use crate::key::{KVKeyDecode, TypedRange};
 use crate::kvs::{CachePolicy, Direction};
-use crate::val::{RecordId, TableName};
+use crate::val::{RecordId, RecordIdKey, TableName};
 
 /// What kind of output the ReferenceScan should produce.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -182,6 +184,8 @@ impl ExecOperator for ReferenceScan {
 		let ctx = ctx.clone();
 		let fetch_full = output_mode == ReferenceScanOutput::FullRecord;
 		let version_expr = self.version.clone();
+		let metrics = Arc::clone(&self.metrics);
+		let record_metrics = metrics.is_enabled();
 
 		let stream = stream::try_async_stream(async move |mut yielder: Yielder<_>| {
 			let txn = ctx.txn();
@@ -197,6 +201,38 @@ impl ExecOperator for ReferenceScan {
 			// `VersionScope` over re-evaluating `version_expr` here.
 			let version: Option<u64> = resolve_version_stamp(&ctx, version_expr.as_ref()).await?;
 
+			// Inline reference caches hold a record's complete current
+			// reference set, so they are usable only when this scan reads
+			// current data with no key-range bounds; a table or field
+			// restriction is a filter over the complete set and stays
+			// cache-servable.
+			let cache_eligible = version.is_none()
+				&& matches!(range_start, Bound::Unbounded)
+				&& matches!(range_end, Bound::Unbounded);
+
+			// Raw-byte pre-screen for the cache fast path: a table
+			// restriction is every matching entry's leading storekey
+			// segment, extended by the field segment when both are set. A
+			// field restriction without a table is not a prefix (the field
+			// sorts after the table inside each entry), so it keeps the
+			// decoded comparison alone. The decoded comparisons below stay
+			// authoritative either way; the prefix only skips decoding
+			// entries the restriction is certain to reject.
+			let cache_filter_prefix: Option<Vec<u8>> = match (&referencing_table, cache_eligible) {
+				(Some(table), true) => {
+					let mut prefix =
+						storekey::encode_vec(table).map_err(anyhow::Error::from_boxed)?;
+					if let Some(field) = &referencing_field {
+						prefix.extend(
+							storekey::encode_vec(field.as_str())
+								.map_err(anyhow::Error::from_boxed)?,
+						);
+					}
+					Some(prefix)
+				}
+				_ => None,
+			};
+
 			// Read from the child operator stream and extract RecordIds
 			let mut rid_batch: Vec<RecordId> = Vec::with_capacity(scan_batch_size);
 
@@ -211,8 +247,122 @@ impl ExecOperator for ReferenceScan {
 					})
 					.collect();
 
+				// One multi-get fetches every eligible target's cache key for
+				// this input batch — the fan-out the caches exist to amortise.
+				// A live hit is that record's complete reference set, held in
+				// its raw entry form until the per-target loop below consumes
+				// it, so at most one target's set is ever decoded at a time;
+				// anything else falls back to the key scan.
+				let mut cache_map: std::collections::HashMap<usize, Vec<RefCacheEntry>> =
+					std::collections::HashMap::new();
+				if cache_eligible {
+					// One catalog lookup per distinct target table in this
+					// batch — targets overwhelmingly share one table.
+					let mut table_capped: std::collections::HashMap<TableName, bool> =
+						std::collections::HashMap::new();
+					let mut slots: Vec<usize> = Vec::new();
+					let mut keys: Vec<RefCacheKey> = Vec::new();
+					for (tgt_idx, rid) in target_rids.iter().enumerate() {
+						let capped = match table_capped.get(&rid.table) {
+							Some(capped) => *capped,
+							None => {
+								let tb = txn
+									.get_tb(ns_id, db_id, &rid.table, None)
+									.await
+									.context("Failed to resolve the referenced record's table")?;
+								let capped =
+									crate::idx::inline_cache::effective_refs_cap(tb.as_deref())
+										.is_some();
+								table_capped.insert(rid.table.clone(), capped);
+								capped
+							}
+						};
+						if !capped {
+							continue;
+						}
+						slots.push(tgt_idx);
+						keys.push(RefCacheKey {
+							ns: ns_id,
+							db: db_id,
+							tb: Cow::Borrowed(&rid.table),
+							id: Cow::Borrowed(&rid.key),
+						});
+					}
+					if !keys.is_empty() {
+						let values = txn
+							.get_many_key(keys, None)
+							.await
+							.context("Failed to read the inline reference caches")?;
+						let mut hits: u64 = 0;
+						let mut misses: u64 = 0;
+						for (tgt_idx, value) in slots.into_iter().zip(values) {
+							match value {
+								Some(CacheValue::Live(entries)) => {
+									hits += 1;
+									cache_map.insert(tgt_idx, entries);
+								}
+								_ => misses += 1,
+							}
+						}
+						if record_metrics {
+							metrics.add_cache_hits(hits);
+							metrics.add_cache_misses(misses);
+						}
+					}
+				}
+
 				// Scan references for each target record
-				for rid in &target_rids {
+				for (tgt_idx, rid) in target_rids.iter().enumerate() {
+					// Cache fast path: filter the complete cached set by the
+					// requested table/field — entries are held in reference-key
+					// byte order, so the surviving subsequence is exactly what
+					// the narrowed key scan would have produced. The prefix
+					// pre-screen rejects on the raw bytes, so only entries the
+					// restriction can accept are ever decoded.
+					if let Some(entries) = cache_map.remove(&tgt_idx) {
+						for entry in &entries {
+							if let Some(prefix) = &cache_filter_prefix
+								&& !entry.reference.starts_with(prefix)
+							{
+								continue;
+							}
+							let (ft, ff, fk) =
+								storekey::decode_borrow::<(TableName, String, RecordIdKey)>(
+									&entry.reference,
+								)
+								.map_err(|e| {
+									anyhow::anyhow!("Failed to decode a cached reference: {e}")
+								})?;
+							if referencing_table.as_ref().is_some_and(|t| *t != ft) {
+								continue;
+							}
+							if referencing_field.as_deref().is_some_and(|f| f != ff) {
+								continue;
+							}
+							rid_batch.push(RecordId {
+								table: ft,
+								key: fk,
+							});
+							if rid_batch.len() >= scan_batch_size {
+								let values = resolve_record_batch(
+									&ctx,
+									&txn,
+									ns_id,
+									db_id,
+									&rid_batch,
+									fetch_full,
+									check_perms,
+									version,
+									CachePolicy::ReadWrite,
+									&mut perm_cache,
+								)
+								.await?;
+								yielder.emit(ValueBatch::new(values)).await;
+								rid_batch.clear();
+							}
+						}
+						continue;
+					}
 					let range = compute_ref_key_range(
 						ns_id,
 						db_id,

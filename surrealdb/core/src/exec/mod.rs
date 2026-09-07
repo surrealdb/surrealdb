@@ -265,6 +265,15 @@ pub(crate) trait ExecOperator: Debug + Send + Sync {
 		if let Some(m) = self.metrics() {
 			m.enable();
 		}
+		// Operator trees embedded in this operator's expressions — a lookup
+		// part's pre-planned scan, for example — are rendered by EXPLAIN
+		// ANALYZE exactly like children, so they must be instrumented like
+		// children too.
+		for (_, expr) in self.expressions() {
+			for (_, embedded) in expr.embedded_operators() {
+				embedded.enable_metrics();
+			}
+		}
 		for child in self.children() {
 			child.enable_metrics();
 		}

@@ -150,6 +150,20 @@ pub struct StoredTableDefinition {
 	/// encoding therefore stays behind its default-off knob until removal
 	/// epochs land.
 	pub graph_doc_ids: bool,
+
+	/// Cap on the inline adjacency cache kept beside each of this table's
+	/// records (the `INLINE EDGES` clause). `None` disables the cache —
+	/// there is deliberately no global default, so the caches a reader may
+	/// trust exist only where a durable, per-table declaration maintains
+	/// them. Changing the stored value invalidates the table's cache
+	/// subspace wholesale; caches re-materialise lazily on the write path.
+	#[revision(start = 4)]
+	pub inline_edges_cap: Option<u32>,
+
+	/// Cap on the inline reference cache (the `INLINE REFERENCES` clause).
+	/// Same semantics as `inline_edges_cap`, for reference back-links.
+	#[revision(start = 4)]
+	pub inline_refs_cap: Option<u32>,
 }
 
 impl_kv_value_revisioned!(StoredTableDefinition);
@@ -183,6 +197,8 @@ impl StoredTableDefinition {
 			graphql_deprecated: None,
 			graph_folded: false,
 			graph_doc_ids: false,
+			inline_edges_cap: None,
+			inline_refs_cap: None,
 		}
 	}
 }
@@ -205,6 +221,8 @@ impl TableDefinition {
 			table_type: self.table_type.clone().into(),
 			graphql_alias: self.graphql_alias.clone(),
 			graphql_deprecated: self.graphql_deprecated.clone(),
+			inline_edges_cap: self.inline_edges_cap,
+			inline_refs_cap: self.inline_refs_cap,
 			..Default::default()
 		}
 	}
@@ -231,6 +249,8 @@ impl InfoStructure for TableDefinition {
 			"graphql_deprecated", if let Some(v) = self.graphql_deprecated => v.into(),
 			"graph_folded", if self.graph_folded => true.into(),
 			"graph_doc_ids", if self.graph_doc_ids => true.into(),
+			"inline_edges_cap", if let Some(v) = self.inline_edges_cap => (v as i64).into(),
+			"inline_refs_cap", if let Some(v) = self.inline_refs_cap => (v as i64).into(),
 			"id" => self.table_id.0.into(),
 		})
 	}
@@ -261,6 +281,10 @@ pub struct TableDefinition {
 	pub graph_folded: bool,
 	/// See [`StoredTableDefinition::graph_doc_ids`].
 	pub graph_doc_ids: bool,
+	/// See [`StoredTableDefinition::inline_edges_cap`].
+	pub inline_edges_cap: Option<u32>,
+	/// See [`StoredTableDefinition::inline_refs_cap`].
+	pub inline_refs_cap: Option<u32>,
 }
 
 /// The SELECT permission guarding a table, for callers holding a table lookup
@@ -303,6 +327,8 @@ impl FromStored for TableDefinition {
 				graphql_deprecated: stored.graphql_deprecated.clone(),
 				graph_folded: stored.graph_folded,
 				graph_doc_ids: stored.graph_doc_ids,
+				inline_edges_cap: stored.inline_edges_cap,
+				inline_refs_cap: stored.inline_refs_cap,
 			})
 		}
 		build(stored).with_context(|| {
@@ -346,6 +372,8 @@ impl TableDefinition {
 			graphql_deprecated: self.graphql_deprecated.clone(),
 			graph_folded: self.graph_folded,
 			graph_doc_ids: self.graph_doc_ids,
+			inline_edges_cap: self.inline_edges_cap,
+			inline_refs_cap: self.inline_refs_cap,
 		}
 	}
 }

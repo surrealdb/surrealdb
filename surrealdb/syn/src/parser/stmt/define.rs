@@ -738,6 +738,21 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.graphql_deprecated = Some(self.parse_string_lit()?);
 				}
+				t!("INLINE") => {
+					self.pop_peek();
+					let peek = self.peek();
+					match peek.kind {
+						t!("EDGES") => {
+							self.pop_peek();
+							res.inline_edges_cap = Some(self.next_token_value()?);
+						}
+						t!("REFERENCES") => {
+							self.pop_peek();
+							res.inline_refs_cap = Some(self.next_token_value()?);
+						}
+						_ => unexpected!(self, peek, "`EDGES` or `REFERENCES`"),
+					}
+				}
 				_ => break,
 			}
 		}

@@ -140,8 +140,23 @@ impl Parser<'_> {
 							self.pop_peek();
 							res.changefeed = AlterKind::Drop;
 						}
+						t!("INLINE") => {
+							self.pop_peek();
+							let peek = self.peek();
+							match peek.kind {
+								t!("EDGES") => {
+									self.pop_peek();
+									res.inline_edges_cap = AlterKind::Drop;
+								}
+								t!("REFERENCES") => {
+									self.pop_peek();
+									res.inline_refs_cap = AlterKind::Drop;
+								}
+								_ => unexpected!(self, peek, "`EDGES` or `REFERENCES`"),
+							}
+						}
 						_ => {
-							unexpected!(self, peek, "`COMMENT` or `CHANGEFEED`")
+							unexpected!(self, peek, "`COMMENT`, `CHANGEFEED` or `INLINE`")
 						}
 					}
 				}
@@ -152,6 +167,21 @@ impl Parser<'_> {
 				t!("COMPACT") => {
 					self.pop_peek();
 					res.compact = true;
+				}
+				t!("INLINE") => {
+					self.pop_peek();
+					let peek = self.peek();
+					match peek.kind {
+						t!("EDGES") => {
+							self.pop_peek();
+							res.inline_edges_cap = AlterKind::Set(self.next_token_value()?);
+						}
+						t!("REFERENCES") => {
+							self.pop_peek();
+							res.inline_refs_cap = AlterKind::Set(self.next_token_value()?);
+						}
+						_ => unexpected!(self, peek, "`EDGES` or `REFERENCES`"),
+					}
 				}
 				t!("TYPE") => {
 					self.pop_peek();

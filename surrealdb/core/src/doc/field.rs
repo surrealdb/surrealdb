@@ -926,7 +926,21 @@ impl FieldEditContext<'_> {
 							foreign_field: Cow::Borrowed(&ff),
 							foreign_key: Cow::Borrowed(&self.rid.key),
 						};
-						self.ctx.tx().set_key(&key, &()).await?;
+						let txn = self.ctx.tx();
+						txn.set_key(&key, &()).await?;
+						// Fold the back-link into the referenced record's
+						// inline cache — after the key write, so a
+						// first-write backfill's scan already includes it.
+						crate::idx::inline_cache::record_ref_write(
+							&txn,
+							ns,
+							db,
+							rid,
+							&self.rid.table,
+							&ff,
+							&self.rid.key,
+						)
+						.await?;
 					}
 					RefAction::Delete(rid) => {
 						let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;
@@ -939,7 +953,20 @@ impl FieldEditContext<'_> {
 							foreign_field: Cow::Borrowed(&ff),
 							foreign_key: Cow::Borrowed(&self.rid.key),
 						};
-						self.ctx.tx().del_key(&key).await?;
+						let txn = self.ctx.tx();
+						txn.del_key(&key).await?;
+						// Remove the back-link from the referenced record's
+						// inline cache.
+						crate::idx::inline_cache::record_ref_delete(
+							&txn,
+							ns,
+							db,
+							rid,
+							&self.rid.table,
+							&ff,
+							&self.rid.key,
+						)
+						.await?;
 					}
 				}
 			}

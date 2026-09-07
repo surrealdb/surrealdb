@@ -822,6 +822,8 @@ ast_type! {
 		pub permission: Option<TablePermissions>,
 		pub changefeed: Option<ChangeFeed>,
 		pub view: Option<NodeId<Select>>,
+		pub inline_edges_cap: Option<NodeId<Integer>>,
+		pub inline_refs_cap: Option<NodeId<Integer>>,
 	}
 }
 
@@ -1432,6 +1434,8 @@ ast_type! {
 		pub table_kind: Option<TableKind>,
 		pub compact: bool,
 		pub permissions: Option<TablePermissions>,
+		pub inline_edges_cap: Option<AlterKind<NodeId<Integer>>>,
+		pub inline_refs_cap: Option<AlterKind<NodeId<Integer>>>,
 	}
 }
 

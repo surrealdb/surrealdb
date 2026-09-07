@@ -52,6 +52,7 @@ pub(crate) mod error;
 pub mod file;
 pub mod ft;
 pub mod index;
+pub mod inline_cache;
 pub mod keys;
 #[cfg(test)]
 pub(crate) mod test_env;

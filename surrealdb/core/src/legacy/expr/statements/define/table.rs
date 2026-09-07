@@ -18,6 +18,7 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::{self, CursorDoc, Document, DocumentContext, NsDbCtx};
 use crate::exe::FlowResultExt;
+use crate::exec::Error as ExecError;
 use crate::expr::field::Selector;
 use crate::expr::paths::{ID, IN, OUT};
 use crate::expr::statements::define::DefineKind;
@@ -27,7 +28,9 @@ use crate::expr::{
 	SelectStatement,
 };
 use crate::iam::{Action, ResourceKind};
-use crate::key::schema::{FieldKey, ForeignTableKey, RecordKey, TblRoot};
+use crate::key::schema::{
+	EdgeCachePrefix, FieldKey, ForeignTableKey, RecordKey, RefCachePrefix, TblRoot,
+};
 use crate::kvs::Transaction;
 use crate::legacy::{expr_to_ident, kill_table_subscriptions};
 use crate::val::{Array, Number, RecordId, RecordIdKey, TableName, Value};
@@ -50,6 +53,19 @@ pub(crate) async fn define_table_statement_compute(
 	// Process the name
 	let name = TableName::new(expr_to_ident(stk, ctx, opt, doc, &this.name, "table name").await?);
 
+	// The inline cache caps rewrite a whole cache value per maintained
+	// entry, so their cost grows quadratically with the cap; the hard bound
+	// keeps that below the cursor cost the cache replaces.
+	for cap in [this.inline_edges_cap, this.inline_refs_cap] {
+		anyhow::ensure!(
+			cap.is_none_or(|cap| cap <= crate::idx::inline_cache::MAX_INLINE_CACHE_CAP),
+			ExecError::Thrown(format!(
+				"an INLINE cache cap cannot exceed {}",
+				crate::idx::inline_cache::MAX_INLINE_CACHE_CAP
+			))
+		);
+	}
+
 	// Get the NS and DB
 	let (ns_name, db_name) = opt.ns_db()?;
 
@@ -63,24 +79,31 @@ pub(crate) async fn define_table_statement_compute(
 	// table id and carries the graph markers forward: they record that
 	// packed adjacency blocks may exist under the table's subspace, or hold
 	// its record ids, which redefining the schema does not change.
-	let (table_id, graph_folded, graph_doc_ids) =
-		if let Some(tb) = txn.get_tb(ns.namespace_id, db.database_id, &name, None).await? {
-			match this.kind {
-				DefineKind::Default => {
-					if !opt.import {
-						bail!(CatalogError::TbAlreadyExists {
-							name: name.as_str().to_string(),
-						});
-					}
+	let (table_id, graph_folded, graph_doc_ids, old_edges_cap, old_refs_cap) = if let Some(tb) =
+		txn.get_tb(ns.namespace_id, db.database_id, &name, None).await?
+	{
+		match this.kind {
+			DefineKind::Default => {
+				if !opt.import {
+					bail!(CatalogError::TbAlreadyExists {
+						name: name.as_str().to_string(),
+					});
 				}
-				DefineKind::Overwrite => {}
-				DefineKind::IfNotExists => return Ok(Value::None),
 			}
+			DefineKind::Overwrite => {}
+			DefineKind::IfNotExists => return Ok(Value::None),
+		}
 
-			(tb.table_id, tb.graph_folded, tb.graph_doc_ids)
-		} else {
-			(txn.get_next_tb_id(Some(ctx), ns.namespace_id, db.database_id).await?, false, false)
-		};
+		(tb.table_id, tb.graph_folded, tb.graph_doc_ids, tb.inline_edges_cap, tb.inline_refs_cap)
+	} else {
+		(
+			txn.get_next_tb_id(Some(ctx), ns.namespace_id, db.database_id).await?,
+			false,
+			false,
+			None,
+			None,
+		)
+	};
 
 	let comment = stk
 		.run(|stk| crate::legacy::expr_compute(&this.comment, stk, ctx, opt, doc))
@@ -114,6 +137,8 @@ pub(crate) async fn define_table_statement_compute(
 		graphql_deprecated: this.graphql_deprecated.clone(),
 		graph_folded,
 		graph_doc_ids,
+		inline_edges_cap: this.inline_edges_cap,
+		inline_refs_cap: this.inline_refs_cap,
 	};
 
 	// Add table relational fields
@@ -146,6 +171,27 @@ pub(crate) async fn define_table_statement_compute(
 	// marker back to false on a last-writer-wins backend, hiding every
 	// folded edge.
 	let tb = txn.replace_tb(ns_name, db_name, &tb_def).await?;
+
+	// A cache is only trustworthy under the cap regime it was built under,
+	// so any change to a cap — set, raised, lowered or dropped — deletes the
+	// table's cache subspace in this transaction. Caches re-materialise
+	// lazily from the first eligible write.
+	if old_edges_cap != tb_def.inline_edges_cap {
+		let key = EdgeCachePrefix {
+			ns: ns.namespace_id,
+			db: db.database_id,
+			tb: Cow::Borrowed(&name),
+		};
+		txn.del_prefix_key(&key).await?;
+	}
+	if old_refs_cap != tb_def.inline_refs_cap {
+		let key = RefCachePrefix {
+			ns: ns.namespace_id,
+			db: db.database_id,
+			tb: Cow::Borrowed(&name),
+		};
+		txn.del_prefix_key(&key).await?;
+	}
 
 	// Clear the cache
 	txn.clear_cache();

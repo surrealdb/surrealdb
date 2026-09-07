@@ -20,6 +20,8 @@ impl From<DefineTableStatement> for crate::expr::statements::DefineTableStatemen
 			table_type: v.table_type.into(),
 			graphql_alias: v.graphql_alias,
 			graphql_deprecated: v.graphql_deprecated,
+			inline_edges_cap: v.inline_edges_cap,
+			inline_refs_cap: v.inline_refs_cap,
 		}
 	}
 }
@@ -40,6 +42,8 @@ impl From<crate::expr::statements::DefineTableStatement> for DefineTableStatemen
 			table_type: v.table_type.into(),
 			graphql_alias: v.graphql_alias,
 			graphql_deprecated: v.graphql_deprecated,
+			inline_edges_cap: v.inline_edges_cap,
+			inline_refs_cap: v.inline_refs_cap,
 		}
 	}
 }

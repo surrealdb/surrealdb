@@ -121,6 +121,11 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}*{db}*{tb}^{id}                                                                               AdjacencyIdPrefix ->  (range)
 /*{ns}*{db}*{tb}^{id}{dir}                                                                         AdjacencyDirPrefix ->  (range)
 /*{ns}*{db}*{tb}^{id}{dir}{edge_table}                                                       AdjacencyEdgeTablePrefix ->  (range)
+/*{ns}*{db}*{tb}!ce{id}{dir}                                                                             EdgeCacheKey ->  crate::values::inline_cache::EdgeCacheValue
+/*{ns}*{db}*{tb}!ce                                                                                   EdgeCachePrefix ->  (range)
+/*{ns}*{db}*{tb}!ce{id}                                                                             EdgeCacheIdPrefix ->  (range)
+/*{ns}*{db}*{tb}!cr{id}                                                                                   RefCacheKey ->  crate::values::inline_cache::RefCacheValue
+/*{ns}*{db}*{tb}!cr                                                                                    RefCachePrefix ->  (range)
 /*{ns}*{db}*{tb}&{id}{foreign_table}{foreign_field}{foreign_key}                                         ReferenceKey ->  ()
 /*{ns}*{db}*{tb}&                                                                                     ReferencePrefix ->  (range)
 /*{ns}*{db}*{tb}&{id}                                                                               ReferenceIdPrefix ->  (range)

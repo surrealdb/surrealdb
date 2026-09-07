@@ -16,6 +16,8 @@ impl From<AlterTableStatement> for crate::expr::statements::alter::AlterTableSta
 			comment: v.comment.into(),
 			kind: v.kind.map(Into::into),
 			compact: v.compact,
+			inline_edges_cap: v.inline_edges_cap.into(),
+			inline_refs_cap: v.inline_refs_cap.into(),
 		}
 	}
 }
@@ -31,6 +33,8 @@ impl From<crate::expr::statements::alter::AlterTableStatement> for AlterTableSta
 			comment: v.comment.into(),
 			kind: v.kind.map(Into::into),
 			compact: v.compact,
+			inline_edges_cap: v.inline_edges_cap.into(),
+			inline_refs_cap: v.inline_refs_cap.into(),
 		}
 	}
 }

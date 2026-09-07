@@ -292,6 +292,8 @@ fn statements() -> Vec<TopLevelExpr> {
 				store_diff: false,
 			}),
 			comment: Expr::Literal(Literal::None),
+			inline_edges_cap: None,
+			inline_refs_cap: None,
 
 			table_type: TableType::Normal,
 			graphql_alias: None,

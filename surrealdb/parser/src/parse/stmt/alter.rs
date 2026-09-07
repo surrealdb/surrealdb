@@ -121,6 +121,8 @@ impl Parse for ast::AlterTable {
 		let mut permissions = None;
 		let mut schema = None;
 		let mut table_kind = None;
+		let mut inline_edges_cap = None;
+		let mut inline_refs_cap = None;
 		loop {
 			let Some(peek) = parser.peek()? else {
 				break;
@@ -129,7 +131,7 @@ impl Parse for ast::AlterTable {
 			match peek.token {
 				T![DROP] => {
 					let _ = parser.next();
-					let expect = "`CHANGEFEED` or `COMMENT`";
+					let expect = "`CHANGEFEED`, `COMMENT` or `INLINE`";
 					let drop = parser.peek_expect(expect)?;
 					match drop.token {
 						T![COMMENT] => {
@@ -145,6 +147,30 @@ impl Parse for ast::AlterTable {
 							parse_unordered_clause_sync(parser, &mut changefeed, span, |_| {
 								Ok(AlterKind::Drop(span))
 							})?;
+						}
+						T![INLINE] => {
+							let _ = parser.next();
+							let span = parser.span_since(peek.span);
+							if parser.eat(T![EDGES])?.is_some() {
+								parse_unordered_clause_sync(
+									parser,
+									&mut inline_edges_cap,
+									span,
+									|_| Ok(AlterKind::Drop(span)),
+								)?;
+							} else if parser.eat(T![REFERENCES])?.is_some() {
+								parse_unordered_clause_sync(
+									parser,
+									&mut inline_refs_cap,
+									span,
+									|_| Ok(AlterKind::Drop(span)),
+								)?;
+							} else {
+								return Err(parser.unexpected_label(
+									"`EDGES` or `REFERENCES`",
+									"the inline cache to drop",
+								));
+							}
 						}
 						_ => return Err(parser.unexpected(expect)),
 					}
@@ -191,6 +217,29 @@ impl Parse for ast::AlterTable {
 						Parser::parse_sync,
 					)?;
 				}
+				T![INLINE] => {
+					let _ = parser.next();
+					if parser.eat(T![EDGES])?.is_some() {
+						parse_unordered_clause_sync(
+							parser,
+							&mut inline_edges_cap,
+							peek.span,
+							|parser| parser.parse_sync().map(AlterKind::Set),
+						)?;
+					} else if parser.eat(T![REFERENCES])?.is_some() {
+						parse_unordered_clause_sync(
+							parser,
+							&mut inline_refs_cap,
+							peek.span,
+							|parser| parser.parse_sync().map(AlterKind::Set),
+						)?;
+					} else {
+						return Err(parser.unexpected_label(
+							"`EDGES` or `REFERENCES`",
+							"the inline cache to configure",
+						));
+					}
+				}
 				_ => break,
 			}
 		}
@@ -205,6 +254,8 @@ impl Parse for ast::AlterTable {
 			permissions: permissions.map(|x| x.0),
 			schema: schema.map(|x| x.0),
 			table_kind: table_kind.map(|x| x.0),
+			inline_edges_cap: inline_edges_cap.map(|x| x.0),
+			inline_refs_cap: inline_refs_cap.map(|x| x.0),
 			span,
 		})
 	}

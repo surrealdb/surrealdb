@@ -61,6 +61,10 @@ impl Document {
 			let db = self.doc_ctx.db().database_id;
 			// Purge the record data
 			txn.del_record(ns, db, &rid.table, &rid.key).await?;
+			// Purge the record's own inline cache keys, if its table
+			// maintains any. The edge cascade below updates the caches of
+			// *other* records; these are this record's own.
+			crate::idx::inline_cache::purge_record_caches(&txn, ns, db, &rid).await?;
 			// Mark this row as having mutated the KV store so the
 			// iterator bumps the per-statement affected-row counter.
 			self.mutated = true;
@@ -184,6 +188,11 @@ impl Document {
 				txn.del_key(&etr),
 				txn.del_key(&rtl)
 			)?;
+			// A legacy-format edge can never sit in a live inline cache (a
+			// backfill that observes one spills), so these calls settle to
+			// no-ops; they run for uniformity with the pointer branch.
+			crate::idx::inline_cache::record_edge_delete(&txn, ns, db, l, Dir::Out, rid).await?;
+			crate::idx::inline_cache::record_edge_delete(&txn, ns, db, r, Dir::In, rid).await?;
 		} else {
 			let ltr = GraphPointerKey {
 				ns,
@@ -252,6 +261,12 @@ impl Document {
 				}
 			}
 			futures::try_join!(txn.del_key(&etl), txn.del_key(&etr))?;
+			// Remove the edge from each endpoint's inline adjacency cache.
+			// The cache sits above the merged (blocks ∪ delta) tiers, so the
+			// removal is the same whether the key above was deleted or
+			// tombstoned.
+			crate::idx::inline_cache::record_edge_delete(&txn, ns, db, l, Dir::Out, rid).await?;
+			crate::idx::inline_cache::record_edge_delete(&txn, ns, db, r, Dir::In, rid).await?;
 		}
 		// Carry on
 		Ok(())

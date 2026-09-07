@@ -1797,6 +1797,8 @@ fn parse_define_table() {
 				store_diff: true,
 			}),
 			comment: Expr::Literal(Literal::None),
+			inline_edges_cap: None,
+			inline_refs_cap: None,
 
 			table_type: TableType::Normal,
 			graphql_alias: None,

@@ -524,12 +524,37 @@ impl Parse for ast::DefineTable {
 		let mut view = None;
 		let mut changefeed = None;
 		let mut table_kind = None;
+		let mut inline_edges_cap = None;
+		let mut inline_refs_cap = None;
 		while let Some(x) = parser.peek()? {
 			match x.token {
 				T![COMMENT] => {
 					let _ = parser.next();
 					parse_unordered_clause(parser, &mut comment, x.span, Parser::parse_enter)
 						.await?;
+				}
+				T![INLINE] => {
+					let _ = parser.next();
+					if parser.eat(T![EDGES])?.is_some() {
+						parse_unordered_clause_sync(
+							parser,
+							&mut inline_edges_cap,
+							x.span,
+							Parser::parse_sync,
+						)?;
+					} else if parser.eat(T![REFERENCES])?.is_some() {
+						parse_unordered_clause_sync(
+							parser,
+							&mut inline_refs_cap,
+							x.span,
+							Parser::parse_sync,
+						)?;
+					} else {
+						return Err(parser.unexpected_label(
+							"`EDGES` or `REFERENCES`",
+							"the inline cache to configure",
+						));
+					}
 				}
 				T![DROP] => {
 					let _ = parser.next();
@@ -590,6 +615,8 @@ impl Parse for ast::DefineTable {
 			view: view.map(|x| x.0),
 			changefeed: changefeed.map(|x| x.0),
 			table_kind: table_kind.map(|x| x.0),
+			inline_edges_cap: inline_edges_cap.map(|x| x.0),
+			inline_refs_cap: inline_refs_cap.map(|x| x.0),
 			span,
 		})
 	}

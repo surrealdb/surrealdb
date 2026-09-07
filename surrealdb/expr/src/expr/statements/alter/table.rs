@@ -37,6 +37,10 @@ pub struct AlterTableStatement {
 	pub compact: bool,
 	/// Change the table type (`NORMAL` / `RELATION` / `ANY`).
 	pub kind: Option<TableType>,
+	/// Set/drop the inline adjacency cache cap.
+	pub inline_edges_cap: AlterKind<u32>,
+	/// Set/drop the inline reference cache cap.
+	pub inline_refs_cap: AlterKind<u32>,
 }
 
 impl Default for AlterTableStatement {
@@ -50,6 +54,8 @@ impl Default for AlterTableStatement {
 			comment: AlterKind::None,
 			compact: false,
 			kind: None,
+			inline_edges_cap: AlterKind::None,
+			inline_refs_cap: AlterKind::None,
 		}
 	}
 }

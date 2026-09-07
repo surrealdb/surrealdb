@@ -20,6 +20,10 @@ pub struct DefineTableStatement {
 	pub table_type: TableType,
 	pub graphql_alias: Option<String>,
 	pub graphql_deprecated: Option<String>,
+	/// Inline adjacency cache cap (`INLINE EDGES <n>`).
+	pub inline_edges_cap: Option<u32>,
+	/// Inline reference cache cap (`INLINE REFERENCES <n>`).
+	pub inline_refs_cap: Option<u32>,
 }
 
 impl Default for DefineTableStatement {
@@ -37,6 +41,8 @@ impl Default for DefineTableStatement {
 			table_type: TableType::default(),
 			graphql_alias: None,
 			graphql_deprecated: None,
+			inline_edges_cap: None,
+			inline_refs_cap: None,
 		}
 	}
 }

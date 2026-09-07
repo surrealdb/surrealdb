@@ -28,6 +28,10 @@ pub struct AlterTableStatement {
 	pub kind: Option<TableType>,
 	/// Request table‑level compaction when true.
 	pub compact: bool,
+	/// `INLINE EDGES <n>` / `DROP INLINE EDGES`.
+	pub inline_edges_cap: AlterKind<u32>,
+	/// `INLINE REFERENCES <n>` / `DROP INLINE REFERENCES`.
+	pub inline_refs_cap: AlterKind<u32>,
 }
 
 impl Default for AlterTableStatement {
@@ -41,6 +45,8 @@ impl Default for AlterTableStatement {
 			comment: AlterKind::None,
 			kind: None,
 			compact: false,
+			inline_edges_cap: AlterKind::None,
+			inline_refs_cap: AlterKind::None,
 		}
 	}
 }
@@ -102,6 +108,18 @@ impl ToSql for AlterTableStatement {
 			AlterKind::Drop => f.push_str(" DROP CHANGEFEED"),
 			AlterKind::None => {}
 		}
+		match self.inline_edges_cap {
+			AlterKind::Set(cap) => write_sql!(f, fmt, " INLINE EDGES {}", cap),
+			AlterKind::Drop => f.push_str(" DROP INLINE EDGES"),
+			AlterKind::None => {}
+		}
+
+		match self.inline_refs_cap {
+			AlterKind::Set(cap) => write_sql!(f, fmt, " INLINE REFERENCES {}", cap),
+			AlterKind::Drop => f.push_str(" DROP INLINE REFERENCES"),
+			AlterKind::None => {}
+		}
+
 		if let Some(permissions) = &self.permissions {
 			write_sql!(f, fmt, " {permissions}");
 		}

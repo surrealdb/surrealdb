@@ -184,6 +184,23 @@ impl Document {
 				txn.set_key(&etr, &()),
 				txn.set_key(&rtl, &live),
 			)?;
+			// Fold the edge into each endpoint's inline adjacency cache —
+			// after the key writes above, so a first-write backfill's scan
+			// (which runs in this transaction) already includes them.
+			let resolve = Some(ctx.get_index_stores().adjacency_resolve());
+			crate::idx::inline_cache::record_edge_write(
+				&txn,
+				ns,
+				db,
+				l,
+				Dir::Out,
+				&rid,
+				r,
+				resolve,
+			)
+			.await?;
+			crate::idx::inline_cache::record_edge_write(&txn, ns, db, r, Dir::In, &rid, l, resolve)
+				.await?;
 			// Reset `in` / `out` to the canonical RELATE endpoints so a
 			// user-supplied document body can't override the edge's
 			// graph endpoints.

@@ -20,7 +20,7 @@ use crate::expr::statements::define::field::{
 use crate::expr::{Base, Idiom, Kind, KindLiteral, Part, RecordIdKeyLit};
 use crate::iam::{Action, AuthLimit, ResourceKind};
 use crate::key::KVKeyDecode;
-use crate::key::schema::{FieldKey, ReferenceKey, ReferencePrefix};
+use crate::key::schema::{FieldKey, RefCachePrefix, ReferenceKey, ReferencePrefix};
 use crate::kvs::{Direction, NORMAL_BATCH_SIZE, Transaction};
 use crate::legacy::{expr_to_ident, expr_to_idiom};
 use crate::val::{TableName, Value};
@@ -738,6 +738,20 @@ pub(crate) async fn purge_dropped_reference_keys(
 		for raw in &orphaned {
 			let key = ReferenceKey::decode_key(raw)?;
 			txn.del_key(&key).await?;
+		}
+		// The deletions above happen behind the target table's inline
+		// reference caches, so those caches — if the table maintains any —
+		// are now stale. Drop the table's whole cache subspace in this
+		// transaction; caches re-materialise lazily. Invalidate-to-missing
+		// here is one range delete, where cache-accurate maintenance would
+		// be a read-modify-write per orphaned key.
+		if !orphaned.is_empty() {
+			let key = RefCachePrefix {
+				ns,
+				db,
+				tb: Cow::Borrowed(target),
+			};
+			txn.del_prefix_key(&key).await?;
 		}
 	}
 	Ok(())

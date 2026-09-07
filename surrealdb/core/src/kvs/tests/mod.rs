@@ -23,6 +23,8 @@ mod graph_migration_test;
 #[cfg(feature = "kv-mem")]
 mod graph_semijoin_test;
 #[cfg(feature = "kv-mem")]
+mod inline_cache_test;
+#[cfg(feature = "kv-mem")]
 mod keyspace_test;
 mod reclaim_backends_test;
 #[cfg(feature = "kv-mem")]

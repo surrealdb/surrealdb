@@ -14,7 +14,7 @@ use crate::expr::Base;
 use crate::expr::statements::alter::AlterKind;
 use crate::expr::statements::alter::table::AlterTableStatement;
 use crate::iam::{Action, ResourceKind};
-use crate::key::schema::TblRoot;
+use crate::key::schema::{EdgeCachePrefix, RefCachePrefix, TblRoot};
 use crate::legacy::expr_to_ident;
 use crate::val::{TableName, Value};
 
@@ -90,6 +90,31 @@ pub(crate) async fn alter_table_statement_compute(
 		AlterKind::None => {}
 	}
 
+	let old_edges_cap = dt.inline_edges_cap;
+	let old_refs_cap = dt.inline_refs_cap;
+	for (kind, cap) in [
+		(&this.inline_edges_cap, &mut dt.inline_edges_cap),
+		(&this.inline_refs_cap, &mut dt.inline_refs_cap),
+	] {
+		match kind {
+			AlterKind::Set(x) => {
+				// The caps rewrite a whole cache value per maintained entry,
+				// so their cost grows quadratically with the cap; the hard
+				// bound keeps that below the cursor cost the cache replaces.
+				anyhow::ensure!(
+					*x <= crate::idx::inline_cache::MAX_INLINE_CACHE_CAP,
+					crate::exec::Error::Thrown(format!(
+						"an INLINE cache cap cannot exceed {}",
+						crate::idx::inline_cache::MAX_INLINE_CACHE_CAP
+					))
+				);
+				*cap = Some(*x);
+			}
+			AlterKind::Drop => *cap = None,
+			AlterKind::None => {}
+		}
+	}
+
 	if let Some(kind) = &this.kind {
 		dt.table_type = kind.clone();
 	}
@@ -120,6 +145,42 @@ pub(crate) async fn alter_table_statement_compute(
 	// armed against it is rejected rather than deleting under the old policy.
 	if changefeed_set {
 		txn.bump_changefeed_retention_fence(ns, db).await?;
+	}
+
+	// A cache is only trustworthy under the cap regime it was built under,
+	// so any change to a cap — set, raised, lowered or dropped — deletes the
+	// table's cache subspace in this transaction. Caches re-materialise
+	// lazily from the first eligible write.
+	//
+	// This delete only removes the keys its own scan observes at this
+	// transaction's snapshot; it carries no range-level conflict of its
+	// own, on any backend. A first-eligible-write backfill running
+	// concurrently under the old cap reads and writes only the one cache
+	// key it backfills, which this scan has no reason to touch when that
+	// key does not exist yet — so if that backfill's write commits after
+	// this scan has already passed its key by, the new entry survives
+	// into the new cap regime unremoved, and is then read as though it
+	// belonged to it. Closing this fully needs either a range-conflict
+	// primitive this repository's transaction API does not have, or a
+	// generation stamped into the cache key or value that a reader can
+	// compare against the table's current cap generation and ignore on
+	// mismatch — both are schema/infrastructure changes broader than this
+	// statement.
+	if old_edges_cap != dt.inline_edges_cap {
+		let key = EdgeCachePrefix {
+			ns,
+			db,
+			tb: Cow::Borrowed(&name),
+		};
+		txn.del_prefix_key(&key).await?;
+	}
+	if old_refs_cap != dt.inline_refs_cap {
+		let key = RefCachePrefix {
+			ns,
+			db,
+			tb: Cow::Borrowed(&name),
+		};
+		txn.del_prefix_key(&key).await?;
 	}
 
 	// Clear the cache

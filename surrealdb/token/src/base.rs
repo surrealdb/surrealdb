@@ -411,6 +411,10 @@ pub enum BaseTokenKind {
 	KwEnd,
 	#[regex(r"(?i)ENFORCED")]
 	KwEnforced,
+	#[regex(r"(?i)EDGES")]
+	KwEdges,
+	#[regex(r"(?i)INLINE")]
+	KwInline,
 	#[regex(r"(?i)EXCLUDE")]
 	KwExclude,
 	#[regex(r"(?i)EXISTS")]
@@ -1042,6 +1046,8 @@ impl BaseTokenKind {
 			BaseTokenKind::KwElse => "keyword `ELSE`",
 			BaseTokenKind::KwEnd => "keyword `END`",
 			BaseTokenKind::KwEnforced => "keyword `ENFORCED`",
+			BaseTokenKind::KwEdges => "keyword `EDGES`",
+			BaseTokenKind::KwInline => "keyword `INLINE`",
 			BaseTokenKind::KwExclude => "keyword `EXCLUDE`",
 			BaseTokenKind::KwExists => "keyword `EXISTS`",
 			BaseTokenKind::KwExpired => "keyword `EXPIRED`",
@@ -1372,6 +1378,8 @@ impl BaseTokenKind {
 				| Self::KwElse
 				| Self::KwEnd
 				| Self::KwEnforced
+				| Self::KwEdges
+				| Self::KwInline
 				| Self::KwExclude
 				| Self::KwExists
 				| Self::KwExpired

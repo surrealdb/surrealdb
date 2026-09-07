@@ -391,6 +391,14 @@ fn format_metrics_text(metrics: &OperatorMetrics, redact_volatile_explain_attrs:
 	if delta_hits > 0 {
 		extra.push_str(&format!(", delta_hits: {}", delta_hits));
 	}
+	let cache_hits = metrics.cache_hits();
+	if cache_hits > 0 {
+		extra.push_str(&format!(", cache_hits: {}", cache_hits));
+	}
+	let cache_misses = metrics.cache_misses();
+	if cache_misses > 0 {
+		extra.push_str(&format!(", cache_misses: {}", cache_misses));
+	}
 	let skipped = metrics.skipped_rows();
 	if skipped > 0 {
 		extra.push_str(&format!(", skipped: {}", skipped));
@@ -531,6 +539,14 @@ fn format_analyze_plan_json(
 			let delta_hits = metrics.delta_hits();
 			if delta_hits > 0 {
 				metrics_obj.insert("delta_hits", Value::from(delta_hits as i64));
+			}
+			let cache_hits = metrics.cache_hits();
+			if cache_hits > 0 {
+				metrics_obj.insert("cache_hits", Value::from(cache_hits as i64));
+			}
+			let cache_misses = metrics.cache_misses();
+			if cache_misses > 0 {
+				metrics_obj.insert("cache_misses", Value::from(cache_misses as i64));
 			}
 			let skipped = metrics.skipped_rows();
 			if skipped > 0 {

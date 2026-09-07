@@ -317,6 +317,24 @@ keyspace! {
 					adjacency = ["^", @, id: Id, @, dir: Dir, @, edge_table: Table,
 								 @, chunk_start: Id] => crate::values::graph::AdjacencyBlock;
 
+					/// Inline adjacency cache: the complete set of one record's
+					/// vertex-side graph entries in one direction, or an opaque
+					/// spilled marker. A missing key means "never materialised";
+					/// a present, non-spilled value is authoritative for the
+					/// whole direction, so eligible fan-outs read it in one
+					/// multi-get instead of opening a cursor. Maintained by the
+					/// edge write and delete paths when the record's table sets
+					/// an `INLINE EDGES` cap.
+					edge_cache = ["!ce", @, id: Id, @, dir: Dir]
+						=> crate::values::inline_cache::EdgeCacheValue;
+
+					/// Inline reference cache: the complete set of one record's
+					/// incoming reference back-links, or an opaque spilled
+					/// marker. Same contract as the adjacency cache above, under
+					/// an `INLINE REFERENCES` cap.
+					ref_cache = ["!cr", @, id: Id]
+						=> crate::values::inline_cache::RefCacheValue;
+
 					/// Reference back-links.
 					///
 					/// Field order is what the four bounds scan by: every reference to

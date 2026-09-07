@@ -28,6 +28,7 @@ pub mod hnsw;
 pub mod ids;
 pub mod index_build;
 pub mod index_delta;
+pub mod inline_cache;
 pub mod live_query;
 pub mod session;
 pub mod vector;

@@ -4,17 +4,20 @@
 //! target edge tables. It is used to implement graph traversal idioms like
 //! `person:alice->knows->person`.
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use common::future::stream::{self, Yielder};
 use futures::StreamExt;
+use surrealdb_datastore::values::inline_cache::{CacheValue, EdgeCacheEntry};
 
 use super::common::{extract_record_ids_into, resolve_record_batch, resolve_version_stamp};
 // Re-exported so the existing `pub use graph::{EdgeTableSpec, ...}` surface is
 // unchanged after the key-scan machinery moved into `graph_keys`.
 pub use super::graph_keys::EdgeTableSpec;
-use super::graph_keys::{compute_graph_ranges, observe_fold_candidate, vertex_table_folded_memo};
-use crate::catalog::{DatabaseId, NamespaceId};
+use super::graph_keys::{compute_graph_ranges, observe_fold_candidate};
+use crate::catalog::providers::TableProvider;
+use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::exec::parts::LookupDirection;
 use crate::exec::permission::{
 	PhysicalPermission, should_check_perms, validate_record_user_access,
@@ -28,8 +31,9 @@ use crate::expr::{ControlFlow, Dir};
 use crate::iam::Action;
 use crate::idx::adjacency::{AdjacencyScope, MergedAdjacencyCursor};
 use crate::key::Resumable;
+use crate::key::schema::EdgeCacheKey;
 use crate::kvs::{CachePolicy, Direction, Transaction};
-use crate::val::{RecordId, TableName, Value};
+use crate::val::{RecordId, RecordIdKey, TableName, Value};
 
 /// What kind of output the GraphEdgeScan should produce.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -303,13 +307,34 @@ impl ExecOperator for GraphEdgeScan {
 				)))?,
 			};
 
+			// Inline sidecar caches serve a `(source, dir)`'s complete current
+			// adjacency in one value, so they are usable only when this scan
+			// reads current data over unbounded edge-table specs — a windowed
+			// (`->edge:a..b`) or versioned read needs the cursor.
+			let cache_eligible = version.is_none()
+				&& edge_tables.iter().all(|s| {
+					matches!(s.range_start, std::ops::Bound::Unbounded)
+						&& matches!(s.range_end, std::ops::Bound::Unbounded)
+				});
+
+			// The specs' encoded table names, for the cache fast path's
+			// spec-order grouping: a table name is a prefix-free leading
+			// segment of an entry's identity bytes, so a byte-prefix test
+			// selects exactly the entries whose decoded edge table equals
+			// the spec's — without decoding the rejects.
+			let spec_prefixes: Vec<Vec<u8>> = if cache_eligible {
+				edge_tables
+					.iter()
+					.map(|spec| {
+						storekey::encode_vec(&spec.table).map_err(anyhow::Error::from_boxed)
+					})
+					.collect::<Result<_, anyhow::Error>>()?
+			} else {
+				Vec::new()
+			};
+
 			// Read from the child operator stream and extract RecordIds
 			let mut rid_batch: Vec<RecordId> = Vec::with_capacity(scan_batch_size);
-
-			// Per-table `graph_folded` answers, cached for the whole stream
-			// (source rids can span tables).
-			let mut folded_memo: std::collections::HashMap<TableName, bool> =
-				std::collections::HashMap::new();
 
 			while let Some(batch_result) = input_stream.next().await {
 				let batch = batch_result?;
@@ -322,16 +347,193 @@ impl ExecOperator for GraphEdgeScan {
 					})
 					.collect();
 
-				// Scan edges for each source record
+				// One catalog lookup per distinct source table in this input
+				// batch — the cache-eligibility check and the folded-adjacency
+				// flag below both read the same definition, and sources
+				// overwhelmingly share one table. `get_tb` is snapshot-stable
+				// within the transaction, so batching the lookups observes the
+				// same definitions a per-source lookup would.
+				let mut source_tables: std::collections::HashMap<
+					TableName,
+					Option<Arc<TableDefinition>>,
+				> = std::collections::HashMap::new();
 				for rid in &source_rids {
+					if !source_tables.contains_key(&rid.table) {
+						let tb = txn
+							.get_tb(ns_id, db_id, &rid.table, None)
+							.await
+							.context("Failed to resolve the source vertex's table")?;
+						source_tables.insert(rid.table.clone(), tb);
+					}
+				}
+				let source_table =
+					|rid: &RecordId| source_tables.get(&rid.table).and_then(|tb| tb.as_deref());
+
+				// One multi-get fetches every eligible source's cache keys for
+				// this input batch — the fan-out the caches exist to amortise.
+				// A live hit is that `(source, dir)`'s complete adjacency,
+				// held in its raw entry form until the per-source loop below
+				// consumes it, so at most one source's adjacency is ever
+				// decoded at a time; anything else falls back to the merged
+				// cursor.
+				let mut cache_map: std::collections::HashMap<(usize, Dir), Vec<EdgeCacheEntry>> =
+					std::collections::HashMap::new();
+				if cache_eligible {
+					let mut slots: Vec<(usize, Dir)> = Vec::new();
+					let mut keys: Vec<EdgeCacheKey> = Vec::new();
+					for (src_idx, rid) in source_rids.iter().enumerate() {
+						if crate::idx::inline_cache::effective_edges_cap(source_table(rid))
+							.is_none()
+						{
+							continue;
+						}
+						for &dir in &directions {
+							slots.push((src_idx, dir));
+							keys.push(EdgeCacheKey {
+								ns: ns_id,
+								db: db_id,
+								tb: Cow::Borrowed(&rid.table),
+								id: Cow::Borrowed(&rid.key),
+								dir,
+							});
+						}
+					}
+					if !keys.is_empty() {
+						let values = txn
+							.get_many_key(keys, None)
+							.await
+							.context("Failed to read the inline adjacency caches")?;
+						let mut hits: u64 = 0;
+						let mut misses: u64 = 0;
+						for (slot, value) in slots.into_iter().zip(values) {
+							match value {
+								Some(CacheValue::Live(entries)) => {
+									hits += 1;
+									cache_map.insert(slot, entries);
+								}
+								_ => misses += 1,
+							}
+						}
+						if record_metrics {
+							metrics.add_cache_hits(hits);
+							metrics.add_cache_misses(misses);
+						}
+					}
+				}
+
+				// Scan edges for each source record
+				for (src_idx, rid) in source_rids.iter().enumerate() {
 					let mut edges_yielded: usize = 0;
 					// Whether the source's table has folded adjacency, which
 					// is what routes the scan through the packed-block merge.
-					let folded =
-						vertex_table_folded_memo(&txn, ns_id, db_id, &rid.table, &mut folded_memo)
-							.await
-							.context("Failed to resolve the source vertex's table")?;
+					let folded = source_table(rid).is_some_and(|tb| tb.graph_folded);
 					'dir_loop: for &dir in &directions {
+						// Cache fast path: emit the cached adjacency through
+						// the same limit/predicate flush machinery the cursor
+						// path uses, grouped in the requested spec order — no
+						// cursor is opened for this direction. Entries are
+						// taken out of the batch map and decoded one at a
+						// time as they are consumed, so a LIMIT stops both
+						// the decoding and the `edges_scanned` count at the
+						// entries it actually visited, and the adjacency
+						// drops as soon as this direction is done.
+						if let Some(entries) = cache_map.remove(&(src_idx, dir)) {
+							let selected: Box<dyn Iterator<Item = &EdgeCacheEntry> + Send + '_> =
+								if spec_prefixes.is_empty() {
+									Box::new(entries.iter())
+								} else {
+									Box::new(spec_prefixes.iter().flat_map(|prefix| {
+										entries
+											.iter()
+											.filter(move |e| e.edge.starts_with(prefix.as_slice()))
+									}))
+								};
+							let mut scanned: u64 = 0;
+							let mut limit_hit = false;
+							for entry in selected {
+								scanned += 1;
+								let (edge, target) = decode_edge_cache_entry(entry)?;
+								match output_mode {
+									GraphScanOutput::TargetVertex => {
+										if target_tables.is_empty()
+											|| target_tables.contains(&target.table)
+										{
+											rid_batch.push(target);
+											edges_yielded += 1;
+										}
+									}
+									_ => {
+										rid_batch.push(edge);
+										if !has_predicate {
+											edges_yielded += 1;
+										}
+									}
+								}
+								if !has_predicate {
+									if edge_limit.is_some_and(|l| edges_yielded >= l) {
+										limit_hit = true;
+										break;
+									}
+									if rid_batch.len() >= scan_batch_size {
+										let values = resolve_and_filter_batch(
+											&ctx,
+											&txn,
+											ns_id,
+											db_id,
+											&rid_batch,
+											fetch_full,
+											check_perms,
+											version,
+											&mut perm_cache,
+											key_predicate.as_ref(),
+											record_predicate.as_ref(),
+										)
+										.await?;
+										rid_batch.clear();
+										yielder.emit(ValueBatch::new(values)).await;
+									}
+								}
+							}
+							if record_metrics && scanned > 0 {
+								metrics.add_edges_scanned(scanned);
+							}
+							// With a predicate, flush per (source, direction) so
+							// filtering and per-source LIMIT counting stay
+							// within one source, exactly as the cursor path
+							// flushes per cursor batch.
+							if has_predicate && !rid_batch.is_empty() {
+								let mut values = resolve_and_filter_batch(
+									&ctx,
+									&txn,
+									ns_id,
+									db_id,
+									&rid_batch,
+									fetch_full,
+									check_perms,
+									version,
+									&mut perm_cache,
+									key_predicate.as_ref(),
+									record_predicate.as_ref(),
+								)
+								.await?;
+								rid_batch.clear();
+								if let Some(l) = edge_limit {
+									let room = l.saturating_sub(edges_yielded);
+									if values.len() >= room {
+										values.truncate(room);
+										limit_hit = true;
+									}
+								}
+								edges_yielded += values.len();
+								if !values.is_empty() {
+									yielder.emit(ValueBatch::new(values)).await;
+								}
+							}
+							if limit_hit {
+								break 'dir_loop;
+							}
+							continue;
+						}
 						let scopes =
 							compute_graph_ranges(ns_id, db_id, rid, dir, &edge_tables, &ctx)
 								.await?;
@@ -683,6 +885,16 @@ impl ExecOperator for GraphEdgeScan {
 
 		Ok(monitor_stream(Box::pin(stream), "GraphEdgeScan", &self.metrics))
 	}
+}
+
+/// Decodes one cached adjacency entry's identity bytes into its owned
+/// `(edge, target)` record ids.
+fn decode_edge_cache_entry(entry: &EdgeCacheEntry) -> Result<(RecordId, RecordId), anyhow::Error> {
+	let (table, key): (TableName, RecordIdKey) = storekey::decode_borrow(&entry.edge)
+		.map_err(|e| anyhow::anyhow!("Failed to decode a cached edge identity: {e}"))?;
+	let (t_table, t_key): (TableName, RecordIdKey) = storekey::decode_borrow(&entry.target)
+		.map_err(|e| anyhow::anyhow!("Failed to decode a cached edge target: {e}"))?;
+	Ok((RecordId::new(table, key), RecordId::new(t_table, t_key)))
 }
 
 /// Fetch and filter a batch of candidate edges/vertices for one flush.
