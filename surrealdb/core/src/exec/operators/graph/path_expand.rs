@@ -81,13 +81,14 @@ use tracing::debug;
 
 use super::expand::ExpandDir;
 use crate::exec::operators::scan::fetch::{FetchFieldStateCache, resolve_with_field_state};
-use crate::exec::operators::scan::graph_keys::{EdgeTableSpec, compute_graph_ranges};
+use crate::exec::operators::scan::graph_keys::{
+	EdgeTableSpec, compute_graph_ranges, visit_graph_range,
+};
 use crate::exec::{
-	AccessMode, CardinalityHint, ContextLevel, ControlFlowExt, ExecOperator, ExecutionContext,
-	FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
+	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
+	OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
 use crate::expr::{ControlFlow, Dir};
-use crate::kvs::Direction;
 use crate::val::{Array, Object, RecordId, TableName, Value};
 
 /// The storage-layer [`Dir`] scanned from a source vertex for an expand
@@ -546,8 +547,9 @@ impl ExecOperator for PathExpand {
 						// Enumerate the tip's adjacency for this direction,
 						// collecting (edge id, decoded target) pairs and
 						// skipping edges already used on this path
-						// (DIFFERENT-EDGES). The cursor must be dropped before
-						// the FieldState fetch can borrow `txn` again. Each
+						// (DIFFERENT-EDGES). The range visitor holds the scan
+						// cursor only for the duration of the call, so the
+						// FieldState fetch below can borrow `txn` again. Each
 						// range comes paired with the decoder that strips its
 						// bound's route prefix from every key it returns.
 						let ranges =
@@ -557,31 +559,20 @@ impl ExecOperator for PathExpand {
 						let mut edge_ids: Vec<RecordId> = Vec::new();
 						let mut decoded_targets: Vec<Option<RecordId>> = Vec::new();
 						for gr in ranges {
-							let mut cursor = txn
-								.open_keys_cursor(gr.range, Direction::Forward, 0, version)
-								.await
-								.context("Failed to open PathExpand graph cursor")?;
-							loop {
-								crate::exec::operators::check_cancelled(&ctx)?;
-								let keys = cursor
-									.next_batch(crate::kvs::NORMAL_BATCH_SIZE)
-									.await
-									.context("Failed to scan PathExpand graph edge")?;
-								if keys.is_empty() {
-									break;
-								}
-								for key in &keys {
-									let decoded = gr
-										.decoder
-										.decode(key)
-										.context("Failed to decode graph key")?;
+							visit_graph_range(
+								&txn,
+								&ctx,
+								gr,
+								version,
+								"PathExpand graph",
+								&mut |decoded| {
 									if !path.contains_edge(&decoded.edge) {
 										edge_ids.push(decoded.edge);
 										decoded_targets.push(decoded.target);
 									}
-								}
-							}
-							drop(cursor);
+								},
+							)
+							.await?;
 						}
 
 						if edge_ids.is_empty() {

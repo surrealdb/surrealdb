@@ -15,12 +15,12 @@ use std::sync::Arc;
 
 use super::common::evaluate_bound_key;
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::exec::{ExecutionContext, PhysicalExpr};
+use crate::exec::{ControlFlowExt, ExecutionContext, PhysicalExpr};
 use crate::expr::{ControlFlow, Dir};
+use crate::key::schema::{DecodedGraph, GraphDirPrefix, GraphForeignTablePrefix};
 /// Adjacency key decode types, re-exported so scan and expand operators don't
 /// need to reach into the `key::schema` module directly.
 pub(crate) use crate::key::schema::{DecodedGraphPrefix, DecodedGraphTarget};
-use crate::key::schema::{GraphDirPrefix, GraphForeignTablePrefix};
 use crate::key::{KVRange, KVSubspace, TypedRange};
 use crate::val::{RecordId, RecordIdKey, TableName};
 
@@ -113,6 +113,63 @@ pub(crate) async fn compute_graph_ranges(
 			});
 		}
 		Ok(ranges)
+	}
+}
+
+/// Enumerate every adjacency key in one [`GraphRange`], decoding each key with
+/// the range's paired decoder and handing the result to `visit`.
+///
+/// The cursor is driven with the zero-copy `for_each` path: each key is
+/// decoded straight from the cursor's borrowed bytes, with no batch-arena
+/// copy on any backend. The visitor runs synchronously inside the chunk
+/// drive — on the mem backend that means under the transaction's read
+/// guard — so it must stay cheap and non-blocking (decode + push); anything
+/// that awaits belongs after this call returns. Chunks are capped at
+/// [`crate::kvs::NORMAL_BATCH_SIZE`] and cancellation is polled between them.
+///
+/// `op` names the scan in error contexts (e.g. `"graph"`, `"PathExpand
+/// graph"`), producing "Failed to open {op} cursor" / "Failed to scan {op}
+/// edge".
+pub(crate) async fn visit_graph_range(
+	txn: &crate::kvs::Transaction,
+	ctx: &ExecutionContext,
+	gr: GraphRange,
+	version: Option<u64>,
+	op: &str,
+	visit: &mut (dyn FnMut(DecodedGraph) + Send),
+) -> Result<(), ControlFlow> {
+	let mut cursor = txn
+		.open_keys_cursor(gr.range, crate::kvs::Direction::Forward, 0, version)
+		.await
+		.with_context(|| format!("Failed to open {op} cursor"))?;
+	loop {
+		crate::exec::operators::check_cancelled(ctx)?;
+		// A decode failure is captured and re-raised after the chunk (the
+		// visitor's return channel carries the kvs error type, not `anyhow`),
+		// keeping it distinct from a scan error.
+		let mut decode_err: Option<anyhow::Error> = None;
+		let stats = cursor
+			.for_each(crate::kvs::NORMAL_BATCH_SIZE, &mut |key| match gr.decoder.decode(key) {
+				Ok(decoded) => {
+					visit(decoded);
+					Ok(std::ops::ControlFlow::Continue(()))
+				}
+				Err(e) => {
+					decode_err = Some(e);
+					Ok(std::ops::ControlFlow::Break(()))
+				}
+			})
+			.await
+			.with_context(|| format!("Failed to scan {op} edge"))?;
+		if let Some(e) = decode_err {
+			return Err(e).context("Failed to decode graph key")?;
+		}
+		// A chunk that visited nothing means the range is exhausted (the
+		// decode-failure `Break` is handled above, and no other visitor
+		// outcome stops a chunk short).
+		if stats.rows == 0 {
+			return Ok(());
+		}
 	}
 }
 

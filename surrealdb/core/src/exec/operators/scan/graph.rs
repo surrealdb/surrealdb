@@ -380,89 +380,116 @@ impl ExecOperator for GraphEdgeScan {
 												None => crate::kvs::NORMAL_BATCH_SIZE,
 											}
 										};
-										let batch = cursor
-											.next_batch(batch_size)
-											.await
-											.context("Failed to scan graph edge")?;
-										if batch.is_empty() {
-											break;
-										}
-										let mut scanned_in_batch: u64 = 0;
-										for key in &batch {
-											scanned_in_batch += 1;
-											if output_mode == GraphScanOutput::TargetVertex {
-												match decoder
-													.decode_target(key)
-													.context("Failed to decode graph key")?
-												{
-													// New-format key: the embedded
-													// target vertex lets us skip
-													// the edge-record hop entirely.
-													DecodedGraphTarget::Target(target)
-														if target_tables.is_empty()
-															|| target_tables
-																.contains(&target.table) =>
-													{
-														rid_batch.push(target);
-														edges_yielded += 1;
+										// Drive the chunk with the zero-copy `for_each` path: each
+										// key is decoded straight from the cursor's borrowed bytes,
+										// with no batch-arena copy on any backend. The visitor is
+										// synchronous (decode + push); the flush below, which
+										// awaits, runs between chunks. A decode failure is captured
+										// and re-raised after the chunk (the visitor's return
+										// channel carries the kvs error type), keeping it distinct
+										// from a scan error.
+										let mut decode_err: Option<anyhow::Error> = None;
+										let stats = cursor
+											.for_each(batch_size, &mut |key| {
+												if output_mode == GraphScanOutput::TargetVertex {
+													match decoder.decode_target(key) {
+														// New-format key: the embedded
+														// target vertex lets us skip
+														// the edge-record hop entirely.
+														Ok(DecodedGraphTarget::Target(target))
+															if target_tables.is_empty()
+																|| target_tables
+																	.contains(&target.table) =>
+														{
+															rid_batch.push(target);
+															edges_yielded += 1;
+														}
+														Ok(DecodedGraphTarget::Target(_)) => {
+															// Target table doesn't
+															// match the next-hop
+															// filter; skip.
+														}
+														Ok(DecodedGraphTarget::Edge(edge)) => {
+															// Legacy key: defer the
+															// fallback scan until the
+															// outer cursor closes
+															// (see below). Bound the
+															// buffer to `scan_batch_size`
+															// so a vertex with many
+															// un-migrated edges
+															// doesn't OOM the scan.
+															legacy_edges.push(edge);
+															if legacy_edges.len() >= scan_batch_size
+															{
+																chunk_bound_hit = true;
+																last_processed_key =
+																	Some(key.to_vec());
+																return Ok(
+																	std::ops::ControlFlow::Break(()),
+																);
+															}
+														}
+														Err(e) => {
+															decode_err = Some(e);
+															return Ok(
+																std::ops::ControlFlow::Break(()),
+															);
+														}
 													}
-													DecodedGraphTarget::Target(_) => {
-														// Target table doesn't
-														// match the next-hop
-														// filter; skip.
-													}
-													DecodedGraphTarget::Edge(edge) => {
-														// Legacy key: defer the
-														// fallback scan until the
-														// outer cursor closes
-														// (see below). Bound the
-														// buffer to `scan_batch_size`
-														// so a vertex with many
-														// un-migrated edges
-														// doesn't OOM the scan.
-														legacy_edges.push(edge);
-														if legacy_edges.len() >= scan_batch_size {
-															chunk_bound_hit = true;
-															last_processed_key = Some(key.to_vec());
-															break;
+												} else {
+													// `TargetId` / `FullEdge` operate on the
+													// edge identity, so a pointer key's target
+													// is left undecoded. Defer counting until
+													// after filtering at flush time when a
+													// predicate is pushed down; otherwise count
+													// each edge as it is buffered.
+													match decoder.decode_edge(key) {
+														Ok(edge) => {
+															rid_batch.push(edge);
+															if !has_predicate {
+																edges_yielded += 1;
+															}
+														}
+														Err(e) => {
+															decode_err = Some(e);
+															return Ok(
+																std::ops::ControlFlow::Break(()),
+															);
 														}
 													}
 												}
-											} else {
-												// `TargetId` / `FullEdge` operate on the
-												// edge identity, so a pointer key's target
-												// is left undecoded. Defer counting until
-												// after filtering at flush time when a
-												// predicate is pushed down; otherwise count
-												// each edge as it is buffered.
-												rid_batch.push(
-													decoder
-														.decode_edge(key)
-														.context("Failed to decode graph key")?,
-												);
-												if !has_predicate {
-													edges_yielded += 1;
+												if !has_predicate
+													&& edge_limit
+														.is_some_and(|l| edges_yielded >= l)
+												{
+													limit_hit = true;
+													return Ok(std::ops::ControlFlow::Break(()));
 												}
-											}
-											if !has_predicate
-												&& edge_limit.is_some_and(|l| edges_yielded >= l)
-											{
-												limit_hit = true;
-												break;
-											}
+												Ok(std::ops::ControlFlow::Continue(()))
+											})
+											.await
+											.context("Failed to scan graph edge")?;
+										if let Some(e) = decode_err {
+											return Err(e).context("Failed to decode graph key")?;
 										}
 										// Record scanned adjacency keys for EXPLAIN
 										// selectivity (matched = output_rows).
-										if record_metrics && scanned_in_batch > 0 {
-											metrics.add_edges_scanned(scanned_in_batch);
+										if record_metrics && stats.rows > 0 {
+											metrics.add_edges_scanned(stats.rows);
 										}
-										// `batch`'s borrow of the cursor ends with the
-										// for-loop above (NLL), so awaiting the fetch here
-										// is safe. With a predicate we flush after every
-										// cursor batch so filtering and per-source LIMIT
-										// counting stay within one source (cursors are per
-										// source+direction); without one we flush at
-										// `scan_batch_size` to amortise the batch fetch.
+										// A chunk that visited nothing means the range is
+										// exhausted; every early stop above raises a flag or
+										// captures an error first, and both are handled above.
+										if stats.rows == 0 {
+											break;
+										}
+										// With a predicate we flush after every chunk so
+										// filtering and per-source LIMIT counting stay within
+										// one source (cursors are per source+direction);
+										// without one we flush at `scan_batch_size` to
+										// amortise the chunk drive. The flush awaits, which
+										// is why it sits between `for_each` chunks rather
+										// than in the visitor.
 										let should_flush = if has_predicate {
 											!rid_batch.is_empty()
 										} else {
@@ -554,34 +581,54 @@ impl ExecOperator for GraphEdgeScan {
 													"Failed to open legacy-fallback graph cursor",
 												)?;
 											loop {
-												let inner_batch = inner_cursor
-													.next_batch(crate::kvs::NORMAL_BATCH_SIZE)
+												// A decode failure is captured and re-raised
+												// after the chunk (the visitor's return
+												// channel carries the kvs error type),
+												// keeping it distinct from a scan error.
+												let mut decode_err: Option<anyhow::Error> = None;
+												let stats = inner_cursor
+													.for_each(
+														crate::kvs::NORMAL_BATCH_SIZE,
+														&mut |ik| {
+															// On edge-side adjacency keys the
+															// `(ft, fk)` slot holds the endpoint
+															// vertex, not an edge -- the legacy
+															// fallback walks the edge's own
+															// adjacency precisely to recover
+															// that vertex. Bind it under a name
+															// that reflects what it actually is.
+															let endpoint = match inner_decoder
+																.decode_edge(ik)
+															{
+																Ok(endpoint) => endpoint,
+																Err(e) => {
+																	decode_err = Some(e);
+																	return Ok(std::ops::ControlFlow::Break(()));
+																}
+															};
+															rid_batch.push(endpoint);
+															edges_yielded += 1;
+															if edge_limit
+																.is_some_and(|l| edges_yielded >= l)
+															{
+																limit_hit = true;
+																return Ok(
+																	std::ops::ControlFlow::Break(()),
+																);
+															}
+															Ok(std::ops::ControlFlow::Continue(()))
+														},
+													)
 													.await
 													.context(
 														"Failed to scan edge adjacency for legacy graph fallback",
 													)?;
-												if inner_batch.is_empty() {
-													break;
-												}
-												for ik in &inner_batch {
-													// On edge-side adjacency keys the
-													// `(ft, fk)` slot holds the endpoint
-													// vertex, not an edge -- the legacy
-													// fallback walks the edge's own
-													// adjacency precisely to recover
-													// that vertex. Bind it under a name
-													// that reflects what it actually is.
-													let endpoint = inner_decoder
-														.decode_edge(ik)
+												if let Some(e) = decode_err {
+													return Err(e)
 														.context("Failed to decode graph key")?;
-													rid_batch.push(endpoint);
-													edges_yielded += 1;
-													if edge_limit
-														.is_some_and(|l| edges_yielded >= l)
-													{
-														limit_hit = true;
-														break;
-													}
+												}
+												if stats.rows == 0 {
+													break;
 												}
 												if rid_batch.len() >= scan_batch_size {
 													let values = resolve_record_batch(

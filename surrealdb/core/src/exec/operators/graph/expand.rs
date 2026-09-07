@@ -78,14 +78,15 @@ use futures::StreamExt;
 use tracing::debug;
 
 use crate::exec::operators::scan::fetch::{FetchFieldStateCache, resolve_with_field_state};
-use crate::exec::operators::scan::graph_keys::{EdgeTableSpec, compute_graph_ranges};
+use crate::exec::operators::scan::graph_keys::{
+	EdgeTableSpec, compute_graph_ranges, visit_graph_range,
+};
 use crate::exec::{
-	AccessMode, CardinalityHint, ContextLevel, ControlFlowExt, EvalContext, ExecOperator,
-	ExecutionContext, FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream,
-	buffer_stream, monitor_stream,
+	AccessMode, CardinalityHint, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
+	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream,
+	monitor_stream,
 };
 use crate::expr::{ControlFlow, Dir};
-use crate::kvs::Direction;
 use crate::val::{Object, RecordId, TableName, Value};
 
 /// Direction of a single `Expand` hop.
@@ -509,26 +510,11 @@ async fn expand_row(
 	let mut decoded_targets: Vec<Option<RecordId>> = Vec::new();
 
 	for gr in ranges {
-		let mut cursor = txn
-			.open_keys_cursor(gr.range, Direction::Forward, 0, version)
-			.await
-			.context("Failed to open graph cursor")?;
-		loop {
-			crate::exec::operators::check_cancelled(ctx)?;
-			let keys = cursor
-				.next_batch(crate::kvs::NORMAL_BATCH_SIZE)
-				.await
-				.context("Failed to scan graph edge")?;
-			if keys.is_empty() {
-				break;
-			}
-			for key in &keys {
-				let decoded = gr.decoder.decode(key).context("Failed to decode graph key")?;
-				edge_rids.push(decoded.edge);
-				decoded_targets.push(decoded.target);
-			}
-		}
-		drop(cursor);
+		visit_graph_range(txn, ctx, gr, version, "graph", &mut |decoded| {
+			edge_rids.push(decoded.edge);
+			decoded_targets.push(decoded.target);
+		})
+		.await?;
 	}
 
 	if edge_rids.is_empty() {

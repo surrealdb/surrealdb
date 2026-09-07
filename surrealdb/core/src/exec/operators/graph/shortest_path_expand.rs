@@ -69,12 +69,13 @@ use super::path_expand::{
 	node_passes_label, path_rows_exceeded, scan_dir, source_record_id, step_kind, target_field,
 };
 use crate::exec::operators::scan::fetch::{FetchFieldStateCache, resolve_with_field_state};
-use crate::exec::operators::scan::graph_keys::{EdgeTableSpec, compute_graph_ranges};
-use crate::exec::{
-	AccessMode, CardinalityHint, ContextLevel, ControlFlowExt, ExecOperator, ExecutionContext,
-	FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
+use crate::exec::operators::scan::graph_keys::{
+	EdgeTableSpec, compute_graph_ranges, visit_graph_range,
 };
-use crate::kvs::Direction;
+use crate::exec::{
+	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
+	OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
+};
 use crate::val::{RecordId, TableName, Value};
 
 /// Which of the paths to each endpoint a path search keeps. Named for the
@@ -545,32 +546,20 @@ impl ExecOperator for ShortestPathExpand {
 						let mut edge_ids: Vec<RecordId> = Vec::new();
 						let mut decoded_targets: Vec<Option<RecordId>> = Vec::new();
 						for gr in ranges {
-							let mut cursor = txn
-								.open_keys_cursor(gr.range, Direction::Forward, 0, version)
-								.await
-								.context("Failed to open ShortestPathExpand graph cursor")?;
-							loop {
-								crate::exec::operators::check_cancelled(&ctx)?;
-								let keys =
-									cursor
-										.next_batch(crate::kvs::NORMAL_BATCH_SIZE)
-										.await
-										.context("Failed to scan ShortestPathExpand graph edge")?;
-								if keys.is_empty() {
-									break;
-								}
-								for key in &keys {
-									let decoded = gr
-										.decoder
-										.decode(key)
-										.context("Failed to decode graph key")?;
+							visit_graph_range(
+								&txn,
+								&ctx,
+								gr,
+								version,
+								"ShortestPathExpand graph",
+								&mut |decoded| {
 									if !path.contains_edge(&decoded.edge) {
 										edge_ids.push(decoded.edge);
 										decoded_targets.push(decoded.target);
 									}
-								}
-							}
-							drop(cursor);
+								},
+							)
+							.await?;
 						}
 
 						if edge_ids.is_empty() {
