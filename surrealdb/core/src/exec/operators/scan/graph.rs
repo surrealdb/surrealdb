@@ -13,7 +13,7 @@ use super::common::{extract_record_ids_into, resolve_record_batch, resolve_versi
 // Re-exported so the existing `pub use graph::{EdgeTableSpec, ...}` surface is
 // unchanged after the key-scan machinery moved into `graph_keys`.
 pub use super::graph_keys::EdgeTableSpec;
-use super::graph_keys::{compute_graph_ranges, decode_graph_edge};
+use super::graph_keys::{DecodedGraphTarget, compute_graph_ranges};
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::exec::parts::LookupDirection;
 use crate::exec::permission::{
@@ -323,7 +323,13 @@ impl ExecOperator for GraphEdgeScan {
 							compute_graph_ranges(ns_id, db_id, rid, dir, &edge_tables, &ctx)
 								.await?;
 
-						for r in ranges {
+						for gr in ranges {
+							// Every key this range returns repeats its bound's
+							// route prefix; the paired decoder strips it so the
+							// per-key decode below starts at the first varying
+							// field.
+							let decoder = gr.decoder;
+							let r = gr.range;
 							// Outer cursor over the source vertex's adjacency.
 							// In `TargetVertex` mode, legacy-format keys (no
 							// embedded target) are buffered into a bounded
@@ -383,14 +389,16 @@ impl ExecOperator for GraphEdgeScan {
 										}
 										let mut scanned_in_batch: u64 = 0;
 										for key in &batch {
-											let decoded = decode_graph_edge(key)?;
 											scanned_in_batch += 1;
 											if output_mode == GraphScanOutput::TargetVertex {
-												match decoded.target {
+												match decoder
+													.decode_target(key)
+													.context("Failed to decode graph key")?
+												{
 													// New-format key: the embedded
 													// target vertex lets us skip
 													// the edge-record hop entirely.
-													Some(target)
+													DecodedGraphTarget::Target(target)
 														if target_tables.is_empty()
 															|| target_tables
 																.contains(&target.table) =>
@@ -398,12 +406,12 @@ impl ExecOperator for GraphEdgeScan {
 														rid_batch.push(target);
 														edges_yielded += 1;
 													}
-													Some(_) => {
+													DecodedGraphTarget::Target(_) => {
 														// Target table doesn't
 														// match the next-hop
 														// filter; skip.
 													}
-													None => {
+													DecodedGraphTarget::Edge(edge) => {
 														// Legacy key: defer the
 														// fallback scan until the
 														// outer cursor closes
@@ -412,7 +420,7 @@ impl ExecOperator for GraphEdgeScan {
 														// so a vertex with many
 														// un-migrated edges
 														// doesn't OOM the scan.
-														legacy_edges.push(decoded.edge);
+														legacy_edges.push(edge);
 														if legacy_edges.len() >= scan_batch_size {
 															chunk_bound_hit = true;
 															last_processed_key = Some(key.to_vec());
@@ -422,11 +430,16 @@ impl ExecOperator for GraphEdgeScan {
 												}
 											} else {
 												// `TargetId` / `FullEdge` operate on the
-												// edge identity. Defer counting until after
-												// filtering at flush time when a predicate is
-												// pushed down; otherwise count each edge as it
-												// is buffered.
-												rid_batch.push(decoded.edge);
+												// edge identity, so a pointer key's target
+												// is left undecoded. Defer counting until
+												// after filtering at flush time when a
+												// predicate is pushed down; otherwise count
+												// each edge as it is buffered.
+												rid_batch.push(
+													decoder
+														.decode_edge(key)
+														.context("Failed to decode graph key")?,
+												);
 												if !has_predicate {
 													edges_yielded += 1;
 												}
@@ -527,9 +540,15 @@ impl ExecOperator for GraphEdgeScan {
 											&ctx,
 										)
 										.await?;
-										for r in inner_ranges {
+										for gr in inner_ranges {
+											let inner_decoder = gr.decoder;
 											let mut inner_cursor = txn
-												.open_keys_cursor(r, Direction::Forward, 0, version)
+												.open_keys_cursor(
+													gr.range,
+													Direction::Forward,
+													0,
+													version,
+												)
 												.await
 												.context(
 													"Failed to open legacy-fallback graph cursor",
@@ -552,7 +571,9 @@ impl ExecOperator for GraphEdgeScan {
 													// adjacency precisely to recover
 													// that vertex. Bind it under a name
 													// that reflects what it actually is.
-													let endpoint = decode_graph_edge(ik)?.edge;
+													let endpoint = inner_decoder
+														.decode_edge(ik)
+														.context("Failed to decode graph key")?;
 													rid_batch.push(endpoint);
 													edges_yielded += 1;
 													if edge_limit

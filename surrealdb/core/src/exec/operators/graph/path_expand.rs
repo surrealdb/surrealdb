@@ -67,7 +67,7 @@
 //! ### Deterministic emission order
 //!
 //! Given a fixed KV adjacency order (the order `compute_graph_ranges` +
-//! `decode_graph_edge` enumerate edges), the emission order is fully
+//! the per-scan key decoder enumerate edges), the emission order is fully
 //! deterministic: successors are pushed onto the DFS stack in reverse decoded
 //! order so they are popped — and thus explored and emitted — in decoded order.
 //! Within one source row this yields a pre-order DFS: a node at depth `d` is
@@ -81,9 +81,7 @@ use tracing::debug;
 
 use super::expand::ExpandDir;
 use crate::exec::operators::scan::fetch::{FetchFieldStateCache, resolve_with_field_state};
-use crate::exec::operators::scan::graph_keys::{
-	EdgeTableSpec, compute_graph_ranges, decode_graph_edge,
-};
+use crate::exec::operators::scan::graph_keys::{EdgeTableSpec, compute_graph_ranges};
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, ControlFlowExt, ExecOperator, ExecutionContext,
 	FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
@@ -549,16 +547,18 @@ impl ExecOperator for PathExpand {
 						// collecting (edge id, decoded target) pairs and
 						// skipping edges already used on this path
 						// (DIFFERENT-EDGES). The cursor must be dropped before
-						// the FieldState fetch can borrow `txn` again.
+						// the FieldState fetch can borrow `txn` again. Each
+						// range comes paired with the decoder that strips its
+						// bound's route prefix from every key it returns.
 						let ranges =
 							compute_graph_ranges(ns_id, db_id, &path.tip, dir, &edge_specs, &ctx)
 								.await?;
 
 						let mut edge_ids: Vec<RecordId> = Vec::new();
 						let mut decoded_targets: Vec<Option<RecordId>> = Vec::new();
-						for r in ranges {
+						for gr in ranges {
 							let mut cursor = txn
-								.open_keys_cursor(r, Direction::Forward, 0, version)
+								.open_keys_cursor(gr.range, Direction::Forward, 0, version)
 								.await
 								.context("Failed to open PathExpand graph cursor")?;
 							loop {
@@ -571,7 +571,10 @@ impl ExecOperator for PathExpand {
 									break;
 								}
 								for key in &keys {
-									let decoded = decode_graph_edge(key)?;
+									let decoded = gr
+										.decoder
+										.decode(key)
+										.context("Failed to decode graph key")?;
 									if !path.contains_edge(&decoded.edge) {
 										edge_ids.push(decoded.edge);
 										decoded_targets.push(decoded.target);

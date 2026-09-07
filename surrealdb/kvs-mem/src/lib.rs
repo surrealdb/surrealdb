@@ -16,12 +16,12 @@ use tracing::instrument;
 const TARGET: &str = "surrealdb::core::kvs::mem";
 
 use surrealdb_kvs::api::{
-	BoxFut, GetMultiResult, KeyValSpan, KeysResult, ScanChunkStats, ScanCursorVals, ScanResult,
-	Transactable, ValVisitor, ValsBatch,
+	BoxFut, GetMultiResult, KeySpan, KeyValSpan, KeyVisitor, KeysBatch, KeysResult, ScanChunkStats,
+	ScanCursorKeys, ScanCursorVals, ScanResult, Transactable, ValVisitor, ValsBatch,
 };
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_kvs::config::{AolMode, SnapshotMode, SyncMode};
-use surrealdb_kvs::cursor::fill_vals_batch;
+use surrealdb_kvs::cursor::{fill_vals_batch, update_range};
 use surrealdb_kvs::err::{Error, Result};
 use surrealdb_kvs::timestamp::{
 	BoxTimeStamp, BoxTimeStampImpl, MAX_TIMESTAMP_BYTES, TimeStamp, TimeStampImpl,
@@ -692,10 +692,43 @@ impl Transactable for Transaction {
 		})
 	}
 
+	/// Open a stateful keys-only scan cursor. Overrides the default cursor —
+	/// which pays a per-key `Vec` allocation plus a second copy into its
+	/// arena — with a resume-by-bound cursor that packs each key straight
+	/// from the engine iterator into the reusable batch arena. See
+	/// [`MemKeysCursor`].
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
+	fn open_keys_cursor<'a>(
+		&'a self,
+		rng: KeyRange<'a>,
+		dir: Direction,
+		skip: u32,
+		version: Option<u64>,
+	) -> BoxFut<'a, Result<Box<dyn ScanCursorKeys + 'a>>> {
+		Box::pin(async move {
+			// The memory backend does not support versioned queries.
+			if version.is_some() {
+				return Err(Error::UnsupportedVersionedQueries);
+			}
+			if self.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			Ok(Box::new(MemKeysCursor {
+				tx: self,
+				rng,
+				dir,
+				skip,
+				key_buf: Vec::new(),
+				spans: Vec::new(),
+			}) as Box<dyn ScanCursorKeys + 'a>)
+		})
+	}
+
 	/// Open a stateful key+value scan cursor. Overrides the default
 	/// (double-copying) cursor with a resume-by-bound cursor whose `for_each`
 	/// streams the engine's refcounted `Bytes` to the visitor with no payload
 	/// copy. See [`MemValsCursor`].
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.to_string()))]
 	fn open_vals_cursor<'a>(
 		&'a self,
 		rng: KeyRange<'a>,
@@ -861,6 +894,176 @@ fn consume_vals(cursor: &mut ScanIterator<'_>, limit: u32, skip: u32) -> ScanRes
 	}
 }
 
+/// Stateful, resume-by-bound keys-only scan cursor for the in-memory engine.
+///
+/// surrealmx key iterators borrow the transaction's `RwLock` read guard, so a
+/// cursor cannot hold one across calls without a self-referential borrow.
+/// Instead this cursor re-seeks the B-tree from the current range bound on
+/// each call (a cheap operation) and advances the bound past the last visited
+/// key. `next_batch` packs each key straight from the engine iterator into the
+/// reusable batch arena — one copy per key, no per-key allocation — and
+/// `for_each` hands the engine's refcounted `Bytes` to the visitor by
+/// reference with no copy at all.
+///
+/// Range exhaustion is signalled once per call, after the resume bound has
+/// advanced: a chunk that ends short of its row budget with no early visitor
+/// `Break` means the iterator dried up, and the range is emptied. That is the
+/// substitute for the default cursor's short-page heuristic, and the same
+/// signal [`MemValsCursor::for_each`] uses (its `next_batch` delegates to the
+/// short-page path instead).
+///
+/// Unlike the default cursor — which fetches an owned page and then visits it
+/// with no lock held — both driving methods here run their whole chunk,
+/// including the visitor's per-row work on the `for_each` path (e.g. a
+/// reference scan's key decode), under the transaction's `RwLock` read guard:
+/// a same-transaction writer queues behind up to `skip + limit` rows, and the
+/// FIFO-fair lock queues later readers behind that writer.
+struct MemKeysCursor<'a> {
+	/// The parent transaction (source of the `RwLock`-guarded inner tx).
+	tx: &'a Transaction,
+	/// Remaining range to scan; advanced past the last visited key each call.
+	rng: KeyRange<'a>,
+	/// Fixed scan direction.
+	dir: Direction,
+	/// Entries still to skip before the first visited row (burned once).
+	skip: u32,
+	/// Reusable concatenated key buffer for the `next_batch` path.
+	key_buf: Vec<u8>,
+	/// Reusable per-key spans for the `next_batch` path.
+	spans: Vec<KeySpan>,
+}
+
+impl MemKeysCursor<'_> {
+	/// Build a fresh forward/backward iterator over the current range,
+	/// borrowing the supplied read guard.
+	fn build_iter<'g>(&self, inner: &'g Tx) -> Result<KeyIterator<'g>> {
+		let rng = self.rng.start.as_slice()..self.rng.end.as_slice();
+		Ok(match self.dir {
+			Direction::Forward => inner.keys_iter(rng).map_err(kvs_error)?,
+			Direction::Backward => inner.keys_iter_reverse(rng).map_err(kvs_error)?,
+		})
+	}
+
+	/// Move the resume bound past the last visited key, or empty the range
+	/// when the call visited nothing.
+	fn advance_past(&mut self, last: Option<&[u8]>) {
+		match last {
+			Some(last) => update_range(&mut self.rng, self.dir, last),
+			None => self.rng.end = Key::empty(),
+		}
+	}
+}
+
+impl ScanCursorKeys for MemKeysCursor<'_> {
+	fn next_batch<'s>(&'s mut self, limit: u32) -> BoxFut<'s, Result<KeysBatch<'s>>> {
+		Box::pin(async move {
+			if self.tx.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			self.key_buf.clear();
+			self.spans.clear();
+			let mut key_bytes = 0u64;
+			// A zero-budget call must be a pure no-op: bail before burning
+			// `skip` or touching the iterator so the cursor state is intact
+			// for the next (non-zero) call.
+			if limit == 0 || self.rng.is_empty() {
+				return Ok(KeysBatch::from_parts(&self.key_buf, &self.spans, key_bytes));
+			}
+			let tx = self.tx;
+			let mut last = None;
+			{
+				let inner = tx.inner.read().await;
+				let mut iter = self.build_iter(&inner)?;
+				// A dried-up skip burn leaves the main loop nothing to pull,
+				// so its first `next()` re-observes the exhaustion.
+				for _ in 0..std::mem::take(&mut self.skip) {
+					if iter.next().is_none() {
+						break;
+					}
+				}
+				while self.spans.len() < limit as usize {
+					let Some(k) = iter.next() else {
+						break;
+					};
+					let offset = self.key_buf.len();
+					let len = k.len();
+					self.key_buf.extend_from_slice(&k);
+					self.spans.push(KeySpan {
+						offset,
+						len,
+					});
+					key_bytes += len as u64;
+					last = Some(k);
+				}
+			}
+			self.advance_past(last.as_deref());
+			// The one exhaustion signal: a short batch means the iterator
+			// dried up before the row budget.
+			if self.spans.len() < limit as usize {
+				self.rng.end = Key::empty();
+			}
+			Ok(KeysBatch::from_parts(&self.key_buf, &self.spans, key_bytes))
+		})
+	}
+
+	/// Zero-copy chunk drive. See the struct doc for the guard-holding
+	/// trade-off this path accepts.
+	fn for_each<'s>(
+		&'s mut self,
+		limit: u32,
+		f: &'s mut dyn KeyVisitor,
+	) -> BoxFut<'s, Result<ScanChunkStats>> {
+		Box::pin(async move {
+			if self.tx.closed() {
+				return Err(Error::TransactionFinished);
+			}
+			let mut stats = ScanChunkStats::default();
+			// A zero-budget call must be a pure no-op: bail before burning
+			// `skip` or touching the iterator so the cursor state is intact
+			// for the next (non-zero) call.
+			if limit == 0 || self.rng.is_empty() {
+				return Ok(stats);
+			}
+			let tx = self.tx;
+			let mut last = None;
+			let mut broke = false;
+			{
+				let inner = tx.inner.read().await;
+				let mut iter = self.build_iter(&inner)?;
+				// A dried-up skip burn leaves the main loop nothing to pull,
+				// so its first `next()` re-observes the exhaustion.
+				for _ in 0..std::mem::take(&mut self.skip) {
+					if iter.next().is_none() {
+						break;
+					}
+				}
+				while stats.rows < limit as u64 {
+					let Some(k) = iter.next() else {
+						break;
+					};
+					// Count only after the visitor accepts the row, so a
+					// visitor error never records an unresumed row.
+					let flow = f(&k[..])?;
+					stats.rows += 1;
+					stats.key_bytes += k.len() as u64;
+					last = Some(k);
+					if let std::ops::ControlFlow::Break(()) = flow {
+						broke = true;
+						break;
+					}
+				}
+			}
+			self.advance_past(last.as_deref());
+			// The one exhaustion signal: a short chunk without an early
+			// `Break` means the iterator dried up before the row budget.
+			if !broke && stats.rows < limit as u64 {
+				self.rng.end = Key::empty();
+			}
+			Ok(stats)
+		})
+	}
+}
+
 /// Stateful, resume-by-bound key+value scan cursor for the in-memory engine.
 ///
 /// surrealmx scan iterators borrow the transaction's `RwLock` read guard, so a
@@ -983,18 +1186,9 @@ impl ScanCursorVals for MemValsCursor<'_> {
 				}
 			}
 
-			if let Some(l) = last {
-				match self.dir {
-					Direction::Forward => {
-						self.rng.start.clone_from_slice(&l);
-						self.rng.start.advance();
-					}
-					Direction::Backward => {
-						self.rng.end.clone_from_slice(&l);
-					}
-				}
-			} else {
-				self.rng.end = Key::empty();
+			match last {
+				Some(l) => update_range(&mut self.rng, self.dir, &l),
+				None => self.rng.end = Key::empty(),
 			}
 			// A short chunk without an early `Break` means the iterator dried
 			// up before the row budget: the range is exhausted.

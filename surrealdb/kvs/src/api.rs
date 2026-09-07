@@ -359,8 +359,10 @@ impl<T: FnMut(&[u8]) -> Result<std::ops::ControlFlow<()>> + Send> KeyVisitor for
 /// outer rows).
 pub trait ScanCursorKeys: Send + Sync {
 	/// Advance the cursor and return up to `limit` more keys, borrowed
-	/// from the cursor's internal buffer. An empty batch signals end of
-	/// range. The cursor remains valid after an empty batch and may be
+	/// from the cursor's internal buffer. An empty batch from a non-zero
+	/// `limit` signals end of range; a `limit == 0` call is a pure no-op —
+	/// it returns an empty batch without consuming rows or exhausting the
+	/// cursor. The cursor remains valid after an empty batch and may be
 	/// dropped at any time.
 	fn next_batch<'s>(&'s mut self, limit: u32) -> BoxFut<'s, Result<KeysBatch<'s>>>;
 
@@ -369,7 +371,8 @@ pub trait ScanCursorKeys: Send + Sync {
 	/// `ControlFlow::Break(())` to stop early without exhausting the range.
 	/// Returns this chunk's row/byte stats (`value_bytes` is always `0`); rows
 	/// are counted only after the visitor accepts them, and pre-decode-filter
-	/// rejects (visitor returns `Continue`) count as scanned. After a visitor
+	/// rejects (visitor returns `Continue`) count as scanned. A `limit == 0`
+	/// chunk visits nothing and leaves the cursor untouched. After a visitor
 	/// error the cursor's resume position is implementation-defined — treat
 	/// the error as terminal and do not reuse the cursor.
 	fn for_each<'s>(
@@ -407,7 +410,9 @@ pub trait ScanCursorKeys: Send + Sync {
 pub trait ScanCursorVals: Send + Sync {
 	/// Advance the cursor and return up to `limit` more `(key, value)`
 	/// pairs, borrowed from the cursor's internal buffer. An empty batch
-	/// signals end of range.
+	/// from a non-zero `limit` signals end of range; a `limit == 0` call is
+	/// a pure no-op — it returns an empty batch without consuming rows or
+	/// exhausting the cursor.
 	fn next_batch<'s>(&'s mut self, limit: u32) -> BoxFut<'s, Result<ValsBatch<'s>>>;
 
 	/// Drive the cursor, invoking `f` for up to `limit` `(key, value)` pairs
@@ -415,7 +420,8 @@ pub trait ScanCursorVals: Send + Sync {
 	/// returns `ControlFlow::Break(())` to stop early without exhausting the
 	/// range. Returns this chunk's row/byte stats; rows are counted only after
 	/// the visitor accepts them, and pre-decode-filter rejects (visitor returns
-	/// `Continue`) count as scanned. After a visitor error the cursor's resume
+	/// `Continue`) count as scanned. A `limit == 0` chunk visits nothing and
+	/// leaves the cursor untouched. After a visitor error the cursor's resume
 	/// position is implementation-defined — treat the error as terminal and do
 	/// not reuse the cursor.
 	fn for_each<'s>(

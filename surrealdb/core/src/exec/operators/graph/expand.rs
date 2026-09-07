@@ -36,8 +36,8 @@
 //! ## `IdOnly` edges and the target-rid decision
 //!
 //! The adjacency keys scanned here are *pointer keys* (vertex-side adjacency):
-//! [`DecodedGraph::edge`](super::super::scan::graph_keys::DecodedGraph) is the
-//! **edge record id**, and [`DecodedGraph::target`] is **`Some` only for
+//! [`DecodedGraph::edge`](crate::key::schema::DecodedGraph) is the
+//! **edge record id**, and `DecodedGraph::target` is **`Some` only for
 //! new-format keys**, carrying the far endpoint vertex directly.
 //!
 //! The target vertex id is therefore resolved in priority order:
@@ -78,9 +78,7 @@ use futures::StreamExt;
 use tracing::debug;
 
 use crate::exec::operators::scan::fetch::{FetchFieldStateCache, resolve_with_field_state};
-use crate::exec::operators::scan::graph_keys::{
-	EdgeTableSpec, compute_graph_ranges, decode_graph_edge,
-};
+use crate::exec::operators::scan::graph_keys::{EdgeTableSpec, compute_graph_ranges};
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, ControlFlowExt, EvalContext, ExecOperator,
 	ExecutionContext, FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream,
@@ -502,15 +500,17 @@ async fn expand_row(
 ) -> Result<(), ControlFlow> {
 	// Enumerate the source vertex's adjacency, collecting (edge rid, optional
 	// decoded target) pairs. `decoded.edge` is the edge record id; `decoded.
-	// target` is the far vertex on new-format pointer keys.
+	// target` is the far vertex on new-format pointer keys. Each range comes
+	// paired with the decoder that strips its bound's route prefix, so the
+	// per-key decode starts at the first varying field.
 	let ranges = compute_graph_ranges(ns_id, db_id, source_rid, dir, edge_specs, ctx).await?;
 
 	let mut edge_rids: Vec<RecordId> = Vec::new();
 	let mut decoded_targets: Vec<Option<RecordId>> = Vec::new();
 
-	for range in ranges {
+	for gr in ranges {
 		let mut cursor = txn
-			.open_keys_cursor(range, Direction::Forward, 0, version)
+			.open_keys_cursor(gr.range, Direction::Forward, 0, version)
 			.await
 			.context("Failed to open graph cursor")?;
 		loop {
@@ -523,7 +523,7 @@ async fn expand_row(
 				break;
 			}
 			for key in &keys {
-				let decoded = decode_graph_edge(key)?;
+				let decoded = gr.decoder.decode(key).context("Failed to decode graph key")?;
 				edge_rids.push(decoded.edge);
 				decoded_targets.push(decoded.target);
 			}

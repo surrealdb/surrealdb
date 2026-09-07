@@ -69,9 +69,7 @@ use super::path_expand::{
 	node_passes_label, path_rows_exceeded, scan_dir, source_record_id, step_kind, target_field,
 };
 use crate::exec::operators::scan::fetch::{FetchFieldStateCache, resolve_with_field_state};
-use crate::exec::operators::scan::graph_keys::{
-	EdgeTableSpec, compute_graph_ranges, decode_graph_edge,
-};
+use crate::exec::operators::scan::graph_keys::{EdgeTableSpec, compute_graph_ranges};
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, ControlFlowExt, ExecOperator, ExecutionContext,
 	FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
@@ -546,9 +544,9 @@ impl ExecOperator for ShortestPathExpand {
 
 						let mut edge_ids: Vec<RecordId> = Vec::new();
 						let mut decoded_targets: Vec<Option<RecordId>> = Vec::new();
-						for r in ranges {
+						for gr in ranges {
 							let mut cursor = txn
-								.open_keys_cursor(r, Direction::Forward, 0, version)
+								.open_keys_cursor(gr.range, Direction::Forward, 0, version)
 								.await
 								.context("Failed to open ShortestPathExpand graph cursor")?;
 							loop {
@@ -562,7 +560,10 @@ impl ExecOperator for ShortestPathExpand {
 									break;
 								}
 								for key in &keys {
-									let decoded = decode_graph_edge(key)?;
+									let decoded = gr
+										.decoder
+										.decode(key)
+										.context("Failed to decode graph key")?;
 									if !path.contains_edge(&decoded.edge) {
 										edge_ids.push(decoded.edge);
 										decoded_targets.push(decoded.target);

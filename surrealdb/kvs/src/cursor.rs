@@ -23,7 +23,16 @@ use crate::err::Result;
 use crate::types::{Key, KeyRange};
 use crate::{Direction, Val};
 
-fn update_range(rng: &mut KeyRange<'_>, dir: Direction, last: &[u8]) {
+/// Move a resume-by-bound cursor's range past `last`, the final key its
+/// current chunk visited.
+///
+/// This is the one place the successor rule lives: forward, the start becomes
+/// `last ++ 0x00` — the smallest key strictly greater than `last`, so a key
+/// sharing `last` as a prefix is not skipped — and backward, the exclusive end
+/// becomes `last` itself. Backend cursors that keep their own resume bound
+/// (the mem cursors) advance through this same function rather than restating
+/// the rule.
+pub fn update_range(rng: &mut KeyRange<'_>, dir: Direction, last: &[u8]) {
 	match dir {
 		Direction::Forward => {
 			rng.start.clone_from_slice(last);
@@ -45,7 +54,11 @@ async fn fetch_vals_page<T: Transactable + ?Sized>(
 	skip: &mut u32,
 	limit: u32,
 ) -> Result<ScanResult> {
-	if rng.is_empty() {
+	// A zero-limit page is a pure no-op — no rows consumed, `skip` and the
+	// resume bound untouched — so an empty page signals exhaustion only when
+	// rows were actually requested. Every backend cursor upholds the same
+	// contract; see the trait docs in `api`.
+	if limit == 0 || rng.is_empty() {
 		return Ok(ScanResult::default());
 	}
 	let skip = std::mem::take(skip);
@@ -114,7 +127,10 @@ async fn fetch_keys_page<T: Transactable + ?Sized>(
 	skip: &mut u32,
 	limit: u32,
 ) -> Result<KeysResult> {
-	if rng.is_empty() {
+	// See `fetch_vals_page` on why a zero-limit page must be a pure no-op:
+	// without this guard the empty page would take the exhaustion arm below
+	// and permanently end the scan.
+	if limit == 0 || rng.is_empty() {
 		return Ok(KeysResult::default());
 	}
 	let skip = std::mem::take(skip);

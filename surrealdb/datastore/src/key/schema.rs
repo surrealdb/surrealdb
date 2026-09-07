@@ -705,6 +705,223 @@ impl DecodedGraph {
 			target: None,
 		})
 	}
+
+	/// Decodes only the edge identity, in a single pass over either layout.
+	///
+	/// The two layouts agree byte for byte through the edge fields, so the
+	/// bytes after them — a pointer key's target, or nothing — are left
+	/// unread. That skips both the target decode and the failed-pointer retry
+	/// that [`Self::decode`] pays on an inner key, at the cost of not telling
+	/// a pointer tail apart from trailing corruption; [`Self::decode`] is the
+	/// validating form.
+	pub fn decode_edge(bytes: &[u8]) -> anyhow::Result<RecordId> {
+		let mut reader = ::storekey::BorrowReader::new(bytes);
+		let inner = <GraphKey as ::storekey::BorrowDecode<'_, ()>>::borrow_decode(&mut reader)
+			.map_err(|_| KeyError::Corrupted("cannot decode graph adjacency key"))?;
+		Ok(RecordId {
+			table: inner.foreign_table.into_owned(),
+			key: inner.foreign_key.into_owned(),
+		})
+	}
+}
+
+/// What a target-seeking traversal gets from one adjacency key: the far
+/// vertex when the pointer layout embeds it, otherwise the edge identity the
+/// caller must resolve itself.
+///
+/// Produced by [`DecodedGraphPrefix::decode_target`], which builds an owned
+/// `RecordId` only for whichever half applies.
+pub enum DecodedGraphTarget {
+	/// The far vertex, from the pointer layout. Reaching it needs no read of
+	/// the edge record.
+	Target(RecordId),
+	/// The edge, from the inner layout, which carries no target; the caller
+	/// recovers the far vertex through the edge's own adjacency.
+	Edge(RecordId),
+}
+
+/// A per-scan decoder over the graph adjacency family.
+///
+/// Every key an adjacency scan returns repeats the route prefix the scan
+/// bound was built from — namespace, database, table, source id and
+/// direction, plus the edge table when the bound fixes one. Stripping that
+/// prefix from each key lets the per-key decode begin at the first field
+/// that varies between keys: the saving is the skipped route decode (the
+/// source id above all), the skipped edge-table decode when the bound fixes
+/// it, and — on inner-layout keys — the failed `GraphPointerKey` parse the
+/// general decoder pays before retrying. The edge id must still be decoded
+/// (and, in [`Self::decode_target`], discarded on the pointer path) to reach
+/// the bytes after it, since `RecordIdKey` has no skip path.
+///
+/// `decode` and `decode_target` accept exactly the byte strings the general
+/// [`DecodedGraph::decode`] accepts; `decode_edge` is more permissive about
+/// trailing bytes (see its doc). Every scan pairs its decoder with ranges
+/// built from the same bound, so a key that does not start with the prefix
+/// means that pairing broke: the debug assertion in each method makes that a
+/// test failure rather than a silent fall back to the general decoder, which
+/// release builds do so results stay correct.
+pub struct DecodedGraphPrefix {
+	prefix: Key<'static>,
+	/// `Some` when the prefix extends through the edge-table field: the table
+	/// is then absent from the tail, and this supplies it.
+	foreign_table: Option<TableName>,
+}
+
+/// The message the fallback assertion carries; shared so the tests pinning
+/// the assertion cannot drift from it.
+const OUTSIDE_SCAN_PREFIX: &str = "graph adjacency key does not start with the scan's route prefix";
+
+impl DecodedGraphPrefix {
+	/// Builds the decoder for scans over the adjacency of `(tb, id)` in
+	/// direction `dir`.
+	pub fn new(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &TableName,
+		id: &RecordIdKey,
+		dir: Dir,
+	) -> anyhow::Result<Self> {
+		let prefix = GraphDirPrefix {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+			id: Cow::Borrowed(id),
+			dir,
+		}
+		.encode_bound()?;
+		Ok(Self::from_dir_bound(prefix))
+	}
+
+	/// Wraps the already-encoded bound of a [`GraphDirPrefix`] — the route
+	/// prefix every key under that bound starts with — so a caller that
+	/// encoded the bound for its scan range does not encode it again.
+	pub fn from_dir_bound(bound: Key<'static>) -> Self {
+		DecodedGraphPrefix {
+			prefix: bound,
+			foreign_table: None,
+		}
+	}
+
+	/// Wraps the already-encoded bound of a [`GraphForeignTablePrefix`].
+	///
+	/// Such a bound fixes the edge table, so it never appears in a key's
+	/// tail; `foreign_table` must name the same table the bound encodes and
+	/// supplies it to the decoded edges instead.
+	pub fn from_foreign_table_bound(bound: Key<'static>, foreign_table: TableName) -> Self {
+		DecodedGraphPrefix {
+			prefix: bound,
+			foreign_table: Some(foreign_table),
+		}
+	}
+
+	/// The bytes after the shared route prefix, or `None` for a key from
+	/// outside this scan's adjacency.
+	fn tail<'b>(&self, key: &'b [u8]) -> Option<&'b [u8]> {
+		key.strip_prefix(self.prefix.as_slice())
+	}
+
+	/// The edge table of the key being decoded: the one the bound fixes, or
+	/// the tail's next field. Borrowed so [`Self::decode_target`] can drop it
+	/// unmaterialized on the pointer path.
+	fn edge_table<'d>(
+		&'d self,
+		reader: &mut ::storekey::BorrowReader<'_>,
+	) -> anyhow::Result<Cow<'d, TableName>> {
+		Ok(match &self.foreign_table {
+			Some(fixed) => Cow::Borrowed(fixed),
+			None => Cow::Owned(decode_graph_table(reader)?),
+		})
+	}
+
+	/// Both halves of whichever layout `key` is, under the same contract as
+	/// [`DecodedGraph::decode`].
+	pub fn decode(&self, key: &[u8]) -> anyhow::Result<DecodedGraph> {
+		let Some(tail) = self.tail(key) else {
+			debug_assert!(false, "{OUTSIDE_SCAN_PREFIX}");
+			return DecodedGraph::decode(key);
+		};
+		let mut reader = ::storekey::BorrowReader::new(tail);
+		let table = self.edge_table(&mut reader)?;
+		let key = decode_graph_id(&mut reader)?;
+		let edge = RecordId {
+			table: table.into_owned(),
+			key,
+		};
+		if reader.is_empty() {
+			return Ok(DecodedGraph {
+				edge,
+				target: None,
+			});
+		}
+		let table = decode_graph_table(&mut reader)?;
+		let key = decode_graph_id(&mut reader)?;
+		Ok(DecodedGraph {
+			edge,
+			target: Some(RecordId {
+				table,
+				key,
+			}),
+		})
+	}
+
+	/// Only the edge identity, leaving a pointer key's target unread. See
+	/// [`DecodedGraph::decode_edge`] for the validation trade-off.
+	pub fn decode_edge(&self, key: &[u8]) -> anyhow::Result<RecordId> {
+		let Some(tail) = self.tail(key) else {
+			debug_assert!(false, "{OUTSIDE_SCAN_PREFIX}");
+			return DecodedGraph::decode_edge(key);
+		};
+		let mut reader = ::storekey::BorrowReader::new(tail);
+		let table = self.edge_table(&mut reader)?;
+		let key = decode_graph_id(&mut reader)?;
+		Ok(RecordId {
+			table: table.into_owned(),
+			key,
+		})
+	}
+
+	/// The far vertex if `key` embeds one, otherwise the edge identity.
+	///
+	/// The edge id still has to be decoded — and, on the pointer path,
+	/// discarded — to reach the target fields behind it; only the owned
+	/// `RecordId` for the half being returned is built.
+	pub fn decode_target(&self, key: &[u8]) -> anyhow::Result<DecodedGraphTarget> {
+		let Some(tail) = self.tail(key) else {
+			debug_assert!(false, "{OUTSIDE_SCAN_PREFIX}");
+			let decoded = DecodedGraph::decode(key)?;
+			return Ok(match decoded.target {
+				Some(target) => DecodedGraphTarget::Target(target),
+				None => DecodedGraphTarget::Edge(decoded.edge),
+			});
+		};
+		let mut reader = ::storekey::BorrowReader::new(tail);
+		let table = self.edge_table(&mut reader)?;
+		let key = decode_graph_id(&mut reader)?;
+		if reader.is_empty() {
+			return Ok(DecodedGraphTarget::Edge(RecordId {
+				table: table.into_owned(),
+				key,
+			}));
+		}
+		let table = decode_graph_table(&mut reader)?;
+		let key = decode_graph_id(&mut reader)?;
+		Ok(DecodedGraphTarget::Target(RecordId {
+			table,
+			key,
+		}))
+	}
+}
+
+/// Decodes one table-name field of the adjacency layouts.
+fn decode_graph_table(reader: &mut ::storekey::BorrowReader<'_>) -> anyhow::Result<TableName> {
+	<TableName as ::storekey::BorrowDecode<'_, ()>>::borrow_decode(reader)
+		.map_err(|_| KeyError::Corrupted("cannot decode graph adjacency key").into())
+}
+
+/// Decodes one record-id field of the adjacency layouts.
+fn decode_graph_id(reader: &mut ::storekey::BorrowReader<'_>) -> anyhow::Result<RecordIdKey> {
+	<RecordIdKey as ::storekey::BorrowDecode<'_, ()>>::borrow_decode(reader)
+		.map_err(|_| KeyError::Corrupted("cannot decode graph adjacency key").into())
 }
 
 #[cfg(test)]
@@ -1479,6 +1696,15 @@ mod tests {
 		let mut trailing = inner.to_vec();
 		trailing.extend_from_slice(b"\x01\x02");
 		assert!(GraphKey::decode_key(&trailing).is_err(), "an inner key rejects trailing bytes");
+		// The edge-only decoders are the deliberate exemption from that
+		// rejection: they stop after the edge fields, so bytes beyond — a
+		// pointer tail or corruption alike — go unread. Only the strict
+		// `DecodedGraph::decode` distinguishes the two.
+		assert!(
+			DecodedGraph::decode_edge(&trailing).is_ok(),
+			"the edge-only decoder reads the edge and ignores what follows"
+		);
+		assert!(DecodedGraph::decode(&trailing).is_err(), "the validating form still rejects it");
 
 		let tt = TableName::from("target");
 		let tk = RecordIdKey::String(Strand::new_static("c"));
@@ -1505,6 +1731,190 @@ mod tests {
 		// Raw bytes still resolve to the more specific layout of the two.
 		assert_eq!(AnyKey::decode(&inner).map(|k| k.kind()), Some(KeyKind::Graph));
 		assert_eq!(AnyKey::decode(&pointer).map(|k| k.kind()), Some(KeyKind::GraphPointer));
+	}
+
+	/// The properties the prefix-stripped fast path rests on, across the
+	/// direction and id shapes a scan can be built from: the encoded scan
+	/// bound is a byte prefix of both layouts, no scan's bound prefixes
+	/// another scan's keys, and both decoder flavours agree with the general
+	/// decoder on both layouts.
+	#[test]
+	fn the_graph_fast_decoders_agree_with_the_general_decoder() {
+		use surrealdb_expr::expr::dir::Dir;
+		use surrealdb_expr::val::{Array, Value};
+
+		let tb = TableName::from("testtb");
+		let ft = TableName::from("other");
+		let tt = TableName::from("target");
+		let tk = RecordIdKey::String(Strand::new_static("c"));
+
+		// Source-id shapes, including a pair sharing a byte prefix ("a" and
+		// "ab") — the pair an unterminated id encoding would confuse.
+		let ids = vec![
+			RecordIdKey::String(Strand::new_static("a")),
+			RecordIdKey::String(Strand::new_static("ab")),
+			RecordIdKey::Number(42),
+			RecordIdKey::Number(i64::MIN),
+			RecordIdKey::Uuid(Uuid::from_u128(7).into()),
+			RecordIdKey::Array(Array(vec![Value::from("x"), Value::from("y")])),
+		];
+		// Edge-id shapes: the field every decode walks in both layouts.
+		let fks =
+			vec![RecordIdKey::Number(42), RecordIdKey::String(Strand::new_static("edge-key"))];
+
+		// One (bound, sample key) pair per scan shape, for the cross-scan
+		// prefix-freedom check below.
+		let mut scans: Vec<(Key<'static>, Key<'static>)> = Vec::new();
+
+		for dir in [Dir::In, Dir::Out] {
+			for id in &ids {
+				let bound = GraphDirPrefix {
+					ns: NamespaceId(1),
+					db: DatabaseId(2),
+					tb: Cow::Borrowed(&tb),
+					id: Cow::Borrowed(id),
+					dir,
+				}
+				.encode_bound()
+				.unwrap();
+				let ft_bound = GraphForeignTablePrefix {
+					ns: NamespaceId(1),
+					db: DatabaseId(2),
+					tb: Cow::Borrowed(&tb),
+					id: Cow::Borrowed(id),
+					dir,
+					foreign_table: Cow::Borrowed(&ft),
+				}
+				.encode_bound()
+				.unwrap();
+				let dir_decoder =
+					DecodedGraphPrefix::new(NamespaceId(1), DatabaseId(2), &tb, id, dir).unwrap();
+				let ft_decoder =
+					DecodedGraphPrefix::from_foreign_table_bound(ft_bound.clone(), ft.clone());
+
+				for fk in &fks {
+					let edge_rid = RecordId {
+						table: ft.clone(),
+						key: fk.clone(),
+					};
+					let target_rid = RecordId {
+						table: tt.clone(),
+						key: tk.clone(),
+					};
+					let inner = GraphKey::new(
+						NamespaceId(1),
+						DatabaseId(2),
+						Cow::Borrowed(&tb),
+						Cow::Borrowed(id),
+						dir,
+						Cow::Borrowed(&ft),
+						Cow::Borrowed(fk),
+					)
+					.encode_key()
+					.unwrap();
+					let pointer = GraphPointerKey::new(
+						NamespaceId(1),
+						DatabaseId(2),
+						Cow::Borrowed(&tb),
+						Cow::Borrowed(id),
+						dir,
+						Cow::Borrowed(&ft),
+						Cow::Borrowed(fk),
+						Cow::Borrowed(&tt),
+						Cow::Borrowed(&tk),
+					)
+					.encode_key()
+					.unwrap();
+
+					// The bounds are byte prefixes of both layouts — the
+					// property the fast path engages on.
+					assert!(inner.starts_with(&bound) && pointer.starts_with(&bound));
+					assert!(inner.starts_with(&ft_bound) && pointer.starts_with(&ft_bound));
+
+					for decoder in [&dir_decoder, &ft_decoder] {
+						// Inner layout: the edge in every mode, no target.
+						let decoded = decoder.decode(&inner).unwrap();
+						assert_eq!(decoded.edge, edge_rid);
+						assert!(decoded.target.is_none());
+						assert_eq!(decoder.decode_edge(&inner).unwrap(), edge_rid);
+						assert!(matches!(
+							decoder.decode_target(&inner).unwrap(),
+							DecodedGraphTarget::Edge(e) if e == edge_rid
+						));
+
+						// Pointer layout: the same edge, plus the target.
+						let decoded = decoder.decode(&pointer).unwrap();
+						assert_eq!(decoded.edge, edge_rid);
+						assert_eq!(decoded.target, Some(target_rid.clone()));
+						assert_eq!(decoder.decode_edge(&pointer).unwrap(), edge_rid);
+						assert!(matches!(
+							decoder.decode_target(&pointer).unwrap(),
+							DecodedGraphTarget::Target(t) if t == target_rid
+						));
+					}
+					assert_eq!(DecodedGraph::decode_edge(&inner).unwrap(), edge_rid);
+					assert_eq!(DecodedGraph::decode_edge(&pointer).unwrap(), edge_rid);
+				}
+
+				let sample = GraphKey::new(
+					NamespaceId(1),
+					DatabaseId(2),
+					Cow::Borrowed(&tb),
+					Cow::Borrowed(id),
+					dir,
+					Cow::Borrowed(&ft),
+					Cow::Borrowed(&fks[0]),
+				)
+				.encode_key()
+				.unwrap();
+				scans.push((bound, sample));
+			}
+		}
+
+		// Prefix freedom across scans: no bound prefixes another scan's keys,
+		// so a decoder can never engage on bytes from a different adjacency.
+		for (i, (bound, _)) in scans.iter().enumerate() {
+			for (j, (_, key)) in scans.iter().enumerate() {
+				if i != j {
+					assert!(
+						!key.starts_with(bound.as_slice()),
+						"scan bound {i} prefixes a key of scan {j}"
+					);
+				}
+			}
+		}
+	}
+
+	/// In debug builds a prefix miss is an assertion failure: every scan
+	/// pairs its decoder with ranges built from the same bound, so a key from
+	/// outside that adjacency reaching the decoder means the pairing broke —
+	/// and a silent fallback would silently discard the optimization. Release
+	/// builds fall back to the general decoder, so results stay correct.
+	#[cfg(debug_assertions)]
+	#[test]
+	#[should_panic(expected = "route prefix")]
+	fn a_key_from_another_adjacency_trips_the_debug_assertion() {
+		use surrealdb_expr::expr::dir::Dir;
+
+		let tb = TableName::from("testtb");
+		let id = RecordIdKey::String(Strand::new_static("a"));
+		let other = RecordIdKey::String(Strand::new_static("z"));
+		let ft = TableName::from("other");
+		let fk = RecordIdKey::Number(1);
+		let decoder =
+			DecodedGraphPrefix::new(NamespaceId(1), DatabaseId(2), &tb, &id, Dir::Out).unwrap();
+		let key = GraphKey::new(
+			NamespaceId(1),
+			DatabaseId(2),
+			Cow::Borrowed(&tb),
+			Cow::Borrowed(&other),
+			Dir::Out,
+			Cow::Borrowed(&ft),
+			Cow::Borrowed(&fk),
+		)
+		.encode_key()
+		.unwrap();
+		let _ = decoder.decode(&key);
 	}
 
 	/// A bound excludes its own bytes and stops before the next sibling subspace,

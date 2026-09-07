@@ -1165,6 +1165,56 @@ async fn cursor_for_each_respects_skip_both_directions(b: &TestBackend) {
 	}
 }
 
+/// The keys cursor's `next_batch` honours the open-time skip in both
+/// directions, and a `limit == 0` call is a pure no-op — it neither consumes
+/// rows nor exhausts the cursor, whether it lands before the first fetch
+/// (skip still pending) or between fetches.
+async fn cursor_keys_next_batch_skip_and_zero_limit(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	let keys: Vec<Vec<u8>> = (0u8..6).map(|i| vec![b'k', i]).collect();
+	let tx = ds.transaction(Write).await.unwrap();
+	for k in &keys {
+		tx.set(k.into(), b"v".to_vec()).await.unwrap();
+	}
+	tx.commit().await.unwrap();
+
+	let rng = KeyRange::from(&b"k"[..]..&b"l"[..]);
+	let tx = ds.transaction(Read).await.unwrap();
+
+	// Drain the cursor with the given batch limits, prefixing every fetch
+	// with a zero-limit call that must not disturb it.
+	async fn drain(
+		c: &mut Box<dyn surrealdb_kvs::api::ScanCursorKeys + '_>,
+		limits: &[u32],
+	) -> Vec<Vec<u8>> {
+		let mut out = Vec::new();
+		for &limit in limits {
+			assert!(c.next_batch(0).await.unwrap().is_empty(), "zero limit returned rows");
+			let batch = c.next_batch(limit).await.unwrap();
+			for k in &batch {
+				out.push(k.to_vec());
+			}
+		}
+		out
+	}
+
+	// Forward, skip 2: k2..k5 in ascending order, exhausted by the short
+	// final batch.
+	let mut c = tx.open_keys_cursor(rng.as_borrowed(), Direction::Forward, 2, None).await.unwrap();
+	let collected = drain(&mut c, &[2, 10, 2]).await;
+	assert_eq!(collected, keys[2..].to_vec(), "forward skip mismatch");
+	drop(c);
+
+	// Backward, skip 2: k3..k0 in descending order.
+	let mut c = tx.open_keys_cursor(rng, Direction::Backward, 2, None).await.unwrap();
+	let collected = drain(&mut c, &[2, 10, 2]).await;
+	let mut expected: Vec<Vec<u8>> = keys[..4].to_vec();
+	expected.reverse();
+	assert_eq!(collected, expected, "backward skip mismatch");
+	drop(c);
+	tx.cancel().await.unwrap();
+}
+
 kvs_test!(initialise);
 kvs_test!(exists);
 kvs_test!(get);
@@ -1193,3 +1243,4 @@ kvs_test!(cursor_for_each_vals_limit_counts_match_next_batch);
 kvs_test!(cursor_for_each_keys_break_resumes);
 kvs_test!(cursor_for_each_keys_matches_next_batch_reverse);
 kvs_test!(cursor_for_each_respects_skip_both_directions);
+kvs_test!(cursor_keys_next_batch_skip_and_zero_limit);

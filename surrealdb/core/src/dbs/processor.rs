@@ -188,6 +188,10 @@ impl Collectable {
 		// Parse the data from the store
 		let (ft, fk) = match kind {
 			LookupKind::Graph(_) => {
+				// The strict, validating decode: this path handles one key per
+				// lookup (cascade deletes above all), so the per-key cost of
+				// full validation is irrelevant and its corruption signal is
+				// not.
 				let gra = DecodedGraph::decode(&key)?;
 				(gra.edge.table, gra.edge.key)
 			}

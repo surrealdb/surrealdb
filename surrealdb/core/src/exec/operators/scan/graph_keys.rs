@@ -15,13 +15,13 @@ use std::sync::Arc;
 
 use super::common::evaluate_bound_key;
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::exec::{ControlFlowExt, ExecutionContext, PhysicalExpr};
+use crate::exec::{ExecutionContext, PhysicalExpr};
 use crate::expr::{ControlFlow, Dir};
-use crate::key::TypedRange;
-/// Adjacency key decode result, re-exported so callers of [`decode_graph_edge`]
-/// don't need to reach into the `key::graph` module directly.
-pub(crate) use crate::key::schema::DecodedGraph;
+/// Adjacency key decode types, re-exported so scan and expand operators don't
+/// need to reach into the `key::schema` module directly.
+pub(crate) use crate::key::schema::{DecodedGraphPrefix, DecodedGraphTarget};
 use crate::key::schema::{GraphDirPrefix, GraphForeignTablePrefix};
+use crate::key::{KVRange, KVSubspace, TypedRange};
 use crate::val::{RecordId, RecordIdKey, TableName};
 
 /// Specification for an edge table to scan, optionally with ID range bounds.
@@ -38,7 +38,23 @@ pub struct EdgeTableSpec {
 	pub range_end: Bound<Arc<dyn PhysicalExpr>>,
 }
 
-/// Compute all KV key ranges to scan for a single record + direction.
+/// One scannable adjacency range paired with the decoder for the keys it
+/// returns.
+///
+/// The decoder's stripped prefix covers every route field the range's bound
+/// fixes — through the direction for a wildcard scan, through the edge table
+/// for a per-table scan — so per-key decoding starts at the first field that
+/// varies inside this range. Keeping the pair together is also what upholds
+/// the decoder's contract that it is only fed keys from its own adjacency.
+pub(crate) struct GraphRange {
+	/// The KV range to open a cursor over.
+	pub range: TypedRange<()>,
+	/// The decoder for every key that range returns.
+	pub decoder: DecodedGraphPrefix,
+}
+
+/// Compute all KV key ranges to scan for a single record + direction, each
+/// paired with the decoder for its keys.
 ///
 /// When `edge_tables` is empty, returns a single wildcard range covering all
 /// edges in the given direction. Otherwise returns one range per edge table,
@@ -50,39 +66,51 @@ pub(crate) async fn compute_graph_ranges(
 	dir: Dir,
 	edge_tables: &[EdgeTableSpec],
 	ctx: &ExecutionContext,
-) -> Result<Vec<TypedRange<()>>, ControlFlow> {
+) -> Result<Vec<GraphRange>, ControlFlow> {
 	if edge_tables.is_empty() {
-		// Scan all edges in this direction
-		Ok(vec![
-			GraphDirPrefix {
-				ns: ns_id,
-				db: db_id,
-				tb: Cow::Borrowed(&rid.table),
-				id: Cow::Borrowed(&rid.key),
-				dir,
-			}
-			.range()?,
-		])
+		// Scan all edges in this direction. The bound is encoded once and
+		// serves both sides of the pair: everything strictly beneath it is
+		// the range, and its bytes are the prefix every returned key repeats.
+		let prefix = GraphDirPrefix {
+			ns: ns_id,
+			db: db_id,
+			tb: Cow::Borrowed(&rid.table),
+			id: Cow::Borrowed(&rid.key),
+			dir,
+		};
+		let bound = prefix.encode_bound()?;
+		let range = prefix.typed(bound.clone().prefix_expect());
+		Ok(vec![GraphRange {
+			range,
+			decoder: DecodedGraphPrefix::from_dir_bound(bound),
+		}])
 	} else {
 		let mut ranges = Vec::with_capacity(edge_tables.len());
 		for spec in edge_tables {
 			// The spec's bounds constrain the edge's foreign key, the field that
 			// follows the foreign table in the adjacency layout, so the range is
-			// cut on that field of the foreign-table bound.
+			// cut on that field of the foreign-table bound — and every key in it
+			// shares the bound's bytes through the edge table, which the decoder
+			// therefore supplies instead of re-decoding per key.
 			let start = eval_fk_bound(&spec.range_start, ctx).await?;
 			let end = eval_fk_bound(&spec.range_end, ctx).await?;
 
-			ranges.push(
-				GraphForeignTablePrefix {
-					ns: ns_id,
-					db: db_id,
-					tb: Cow::Borrowed(&rid.table),
-					id: Cow::Borrowed(&rid.key),
-					dir,
-					foreign_table: Cow::Borrowed(&spec.table),
-				}
-				.range_where((start.map(Cow::Owned), end.map(Cow::Owned)))?,
+			let prefix = GraphForeignTablePrefix {
+				ns: ns_id,
+				db: db_id,
+				tb: Cow::Borrowed(&rid.table),
+				id: Cow::Borrowed(&rid.key),
+				dir,
+				foreign_table: Cow::Borrowed(&spec.table),
+			};
+			let decoder = DecodedGraphPrefix::from_foreign_table_bound(
+				prefix.encode_bound()?,
+				spec.table.clone(),
 			);
+			ranges.push(GraphRange {
+				range: prefix.range_where((start.map(Cow::Owned), end.map(Cow::Owned)))?,
+				decoder,
+			});
 		}
 		Ok(ranges)
 	}
@@ -102,14 +130,4 @@ async fn eval_fk_bound(
 		Bound::Excluded(expr) => Bound::Excluded(evaluate_bound_key(expr, ctx).await?),
 		Bound::Unbounded => Bound::Unbounded,
 	})
-}
-
-/// Decode a graph key. For legacy keys, returns the edge id; for new-format
-/// keys, also returns the embedded target vertex.
-///
-/// Thin wrapper over [`DecodedGraph::decode`] that converts the anyhow error
-/// into a [`ControlFlow`] with a consistent context string, so call sites in the
-/// scan pipeline can stay on `?`.
-pub(crate) fn decode_graph_edge(key: &[u8]) -> Result<DecodedGraph, ControlFlow> {
-	DecodedGraph::decode(key).context("Failed to decode graph key")
 }
