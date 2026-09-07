@@ -209,7 +209,7 @@ pub(crate) async fn define_field_statement_compute(
 						from: field_kind.clone(),
 						..relation.clone()
 					});
-					txn.put_tb(ns_name, db_name, &tb).await?;
+					txn.replace_tb(ns_name, db_name, &tb).await?;
 					// Clear the cache
 					txn.clear_cache();
 					// Ok all good
@@ -236,7 +236,7 @@ pub(crate) async fn define_field_statement_compute(
 						to: field_kind.clone(),
 						..relation.clone()
 					});
-					txn.put_tb(ns_name, db_name, &tb).await?;
+					txn.replace_tb(ns_name, db_name, &tb).await?;
 					// Clear the cache
 					txn.clear_cache();
 					// Ok all good
@@ -246,7 +246,7 @@ pub(crate) async fn define_field_statement_compute(
 		}
 	}
 
-	txn.put_tb(ns_name, db_name, &tb).await?;
+	txn.replace_tb(ns_name, db_name, &tb).await?;
 
 	// Process possible recursive defitions
 	crate::legacy::define_field_statement_process_recursive_definitions(

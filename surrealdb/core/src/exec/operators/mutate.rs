@@ -39,8 +39,8 @@ use crate::expr::data::Assignment;
 use crate::expr::match_plan::{DetachMode, UpdateData};
 use crate::expr::statements::{CreateStatement, DeleteStatement, RelateStatement, UpdateStatement};
 use crate::expr::{AssignOperator, ControlFlow, Data, Expr, Literal, Output};
+use crate::idx::adjacency::{AdjacencyScope, MergedAdjacencyCursor, vertex_table_folded};
 use crate::key::schema::GraphIdPrefix;
-use crate::kvs::Direction;
 use crate::val::{Object, RecordId, TableName, Value};
 
 /// `SET` / `REMOVE` over the binding bound at `target`.
@@ -378,13 +378,16 @@ async fn apply_delete(
 
 /// Whether `rid` has any connected graph edge (in either direction).
 ///
-/// Peeks the record's graph-key range directly off the transaction — exactly the
+/// Peeks the record's adjacency through the merged reader — exactly the
 /// permission-independent check the native cascade uses
-/// (`doc::purge::purge_edges`), fetching at most one key. This deliberately does
-/// NOT go through a SELECT/idiom read: the `NODETACH` guard must reflect the
-/// record's actual adjacency, never the caller's SELECT visibility, or a
-/// record-scoped user who cannot read the incident edges would slip past the
-/// guard and the native DELETE would silently cascade them.
+/// (`doc::purge::purge_edges`), fetching at most one entry across the
+/// per-edge pointer keys and, once the table has folded, the packed blocks
+/// (tombstones subtracted, so deleted-but-unfolded edges do not trip the
+/// guard). This deliberately does NOT go through a SELECT/idiom read: the
+/// `NODETACH` guard must reflect the record's actual adjacency, never the
+/// caller's SELECT visibility, or a record-scoped user who cannot read the
+/// incident edges would slip past the guard and the native DELETE would
+/// silently cascade them.
 async fn has_connected_edges(
 	rid: &RecordId,
 	ns: NamespaceId,
@@ -392,16 +395,26 @@ async fn has_connected_edges(
 	frozen: &FrozenContext,
 ) -> Result<bool, ControlFlow> {
 	let txn = frozen.tx();
-	let range = GraphIdPrefix {
+	let folded = vertex_table_folded(&txn, ns, db, &rid.table).await.map_err(ControlFlow::Err)?;
+	let scope = AdjacencyScope {
 		ns,
 		db,
-		tb: Cow::Borrowed(&rid.table),
-		id: Cow::Borrowed(&rid.key),
-	}
-	.range()?;
+		vertex: rid,
+		dir: None,
+		edge_table: None,
+		fk_lower: None,
+		delta_range: GraphIdPrefix {
+			ns,
+			db,
+			tb: Cow::Borrowed(&rid.table),
+			id: Cow::Borrowed(&rid.key),
+		}
+		.range()?,
+	};
 	let mut cursor =
-		txn.open_keys_cursor(range, Direction::Forward, 0, None).await.map_err(ControlFlow::Err)?;
-	let batch = cursor.next_batch(1).await.map_err(ControlFlow::Err)?;
+		MergedAdjacencyCursor::open(&txn, scope, folded, None).await.map_err(ControlFlow::Err)?;
+	// Only emptiness matters here, so nothing is decoded.
+	let batch = cursor.next_batch_keys(1).await.map_err(ControlFlow::Err)?;
 	Ok(!batch.is_empty())
 }
 

@@ -74,16 +74,27 @@ fn version_writes_current_format(version_name: &str, type_name: &str, fixture: &
 	/// Bumped after the newest snapshot was captured, so *every* frozen file
 	/// holds the pre-bump encoding and none of them can pin the current one:
 	/// `StoredModuleDefinition` gained `unsigned` (1 -> 2), and
+	/// Bumped after the newest snapshot was captured, so *every* frozen file
+	/// holds the pre-bump encoding and none of them can pin the current one:
+	/// `StoredModuleDefinition` gained `unsigned` (1 -> 2),
 	/// `StoredAccessDefinition` embeds `JwtAccess`, which gained `audience`
-	/// (1 -> 2). Their fixtures still decode — the field defaults in — but
+	/// (1 -> 2), and `StoredTableDefinition` gained the graph markers
+	/// (3 -> 4). Their fixtures still decode — the field defaults in — but
 	/// re-encode a revision higher. Each name drops off this list once a
 	/// snapshot taken after its bump exists to pin it, exactly as
 	/// `V3_3_0_BUMPED` did at `v3_3_0`.
 	const AFTER_NEWEST_SNAPSHOT_BUMPED: &[&str] =
-		&["StoredModuleDefinition", "StoredAccessDefinition"];
+		&["StoredModuleDefinition", "StoredAccessDefinition", "StoredTableDefinition"];
+	/// Fixtures of a type not itself bumped after the newest snapshot that
+	/// nonetheless *embed* one that was, so they carry its revision byte:
+	/// `TableMutation::Def` boxes a `StoredTableDefinition`. The other
+	/// `TableMutations` fixtures embed no definition and keep their pin.
+	const AFTER_NEWEST_SNAPSHOT_EMBEDS_A_BUMPED_TYPE: &[&str] = &["table_mutations_def"];
 
 	let text_migration_moved_it = TEXT_MIGRATION_BUMPED.contains(&type_name);
-	if AFTER_NEWEST_SNAPSHOT_BUMPED.contains(&type_name) {
+	if AFTER_NEWEST_SNAPSHOT_BUMPED.contains(&type_name)
+		|| AFTER_NEWEST_SNAPSHOT_EMBEDS_A_BUMPED_TYPE.contains(&fixture)
+	{
 		return false;
 	}
 	match version_name {
@@ -1205,7 +1216,7 @@ compat_test!(
 #[test]
 fn byte_exact_gate_names_a_current_format_snapshot() {
 	assert!(
-		version_writes_current_format("v3_4_0", "StoredTableDefinition", "table_basic"),
+		version_writes_current_format("v3_4_0", "StoredEventDefinition", "event_basic"),
 		"no snapshot is gated as current-format, so the byte-exact re-encode assertion \
 		 is unreachable: capture a snapshot from the current encoder and name it in \
 		 version_writes_current_format"
@@ -1248,8 +1259,9 @@ fn a_revision_bump_excuses_only_the_families_it_bumped() {
 			);
 		}
 	}
-	// The stored view kept revision 1, so no table fixture is excused at v3_3_0 —
-	// including the two that store a view in a pre-`Clauses` shape.
+	// `StoredTableDefinition` joined them (3 -> 4, the graph markers): every
+	// table fixture is excused at every snapshot until a post-bump snapshot
+	// exists.
 	for table in [
 		"table_basic",
 		"table_schemafull",
@@ -1258,16 +1270,19 @@ fn a_revision_bump_excuses_only_the_families_it_bumped() {
 		"table_with_view",
 		"table_with_materialized_view",
 	] {
-		assert!(
-			version_writes_current_format("v3_3_0", "StoredTableDefinition", table),
-			"{table} did not change revision, so its v3_3_0 encode pin must stay"
-		);
-		// v3_1_1 predates the table's own 2 -> 3 bump, so none of them hold there.
-		assert!(
-			!version_writes_current_format("v3_1_1", "StoredTableDefinition", table),
-			"{table} re-encodes at revision 3, so v3_1_1 cannot be byte-exact for it"
-		);
+		for version in ["v3_4_0", "v3_3_0", "v3_1_1"] {
+			assert!(
+				!version_writes_current_format(version, "StoredTableDefinition", table),
+				"{table} re-encodes at revision 4, so {version} cannot be byte-exact for it"
+			);
+		}
 	}
+	// The excusal reaches fixtures that *embed* a table definition — the
+	// `TableMutation::Def` fixture carries its revision byte — but not the
+	// sibling `TableMutations` fixtures, which embed no definition and must
+	// keep their encode pin.
+	assert!(!version_writes_current_format("v3_4_0", "TableMutations", "table_mutations_def"));
+	assert!(version_writes_current_format("v3_4_0", "TableMutations", "table_mutations_set"));
 }
 
 /// Freeze `v3_4_0.rs` against edits.

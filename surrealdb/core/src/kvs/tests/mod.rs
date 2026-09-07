@@ -17,6 +17,10 @@
 #[cfg(feature = "kv-mem")]
 mod changefeed_gc_test;
 #[cfg(feature = "kv-mem")]
+mod graph_fold_test;
+#[cfg(feature = "kv-mem")]
+mod graph_migration_test;
+#[cfg(feature = "kv-mem")]
 mod graph_semijoin_test;
 #[cfg(feature = "kv-mem")]
 mod keyspace_test;

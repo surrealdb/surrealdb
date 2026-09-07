@@ -71,6 +71,7 @@
 //! (`check_perms == false`) the gate is skipped and the common path remains
 //! fetch-free.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use common::future::stream::{self, Yielder};
@@ -78,9 +79,7 @@ use futures::StreamExt;
 use tracing::debug;
 
 use crate::exec::operators::scan::fetch::{FetchFieldStateCache, resolve_with_field_state};
-use crate::exec::operators::scan::graph_keys::{
-	EdgeTableSpec, compute_graph_ranges, visit_graph_range,
-};
+use crate::exec::operators::scan::graph_keys::{EdgeTableSpec, collect_adjacency};
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
 	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream,
@@ -332,6 +331,9 @@ impl ExecOperator for Expand {
 			// table's permission + FieldState are resolved at most once.
 			let mut edge_cache = FetchFieldStateCache::new();
 			let mut target_cache = FetchFieldStateCache::new();
+			// Per-table `graph_folded` answers, cached for the whole stream
+			// (source rids can span tables).
+			let mut folded_memo: HashMap<TableName, bool> = HashMap::new();
 
 			// Cumulative emitted-row count across all batches and source rows —
 			// bounds high-fan-out expand output (a single dense source vertex, or
@@ -368,6 +370,7 @@ impl ExecOperator for Expand {
 								scan_batch_size,
 								&mut edge_cache,
 								&mut target_cache,
+								&mut folded_memo,
 								&mut out,
 								&mut emitted,
 								max_output_rows,
@@ -495,27 +498,35 @@ async fn expand_row(
 	scan_batch_size: usize,
 	edge_cache: &mut FetchFieldStateCache,
 	target_cache: &mut FetchFieldStateCache,
+	folded_memo: &mut HashMap<TableName, bool>,
 	out: &mut Vec<Value>,
 	emitted: &mut usize,
 	max_output_rows: usize,
 ) -> Result<(), ControlFlow> {
-	// Enumerate the source vertex's adjacency, collecting (edge rid, optional
-	// decoded target) pairs. `decoded.edge` is the edge record id; `decoded.
-	// target` is the far vertex on new-format pointer keys. Each range comes
-	// paired with the decoder that strips its bound's route prefix, so the
-	// per-key decode starts at the first varying field.
-	let ranges = compute_graph_ranges(ns_id, db_id, source_rid, dir, edge_specs, ctx).await?;
-
+	// Enumerate the source vertex's adjacency — packed blocks merged with
+	// per-edge pointer keys — retaining only (edge rid, optional decoded
+	// target) pairs per item: the key and props are dropped as each edge
+	// streams by, never buffered for the whole fan-out. `edge` is the edge
+	// record id; `target` is the far vertex on new-format entries.
 	let mut edge_rids: Vec<RecordId> = Vec::new();
 	let mut decoded_targets: Vec<Option<RecordId>> = Vec::new();
-
-	for gr in ranges {
-		visit_graph_range(txn, ctx, gr, version, "graph", &mut |decoded| {
-			edge_rids.push(decoded.edge);
-			decoded_targets.push(decoded.target);
-		})
-		.await?;
-	}
+	collect_adjacency(
+		txn,
+		ns_id,
+		db_id,
+		source_rid,
+		dir,
+		edge_specs,
+		ctx,
+		version,
+		folded_memo,
+		|item| {
+			edge_rids.push(item.edge);
+			decoded_targets.push(item.target);
+			Ok(())
+		},
+	)
+	.await?;
 
 	if edge_rids.is_empty() {
 		if optional {

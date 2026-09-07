@@ -61,6 +61,9 @@ pub struct Builder {
 	temporary_directory: Option<Arc<PathBuf>>,
 	authenticate: bool,
 	config: ConfigMap,
+	/// Overrides the built-in graph fold threshold; see
+	/// [`Builder::with_graph_fold_threshold`].
+	graph_fold_threshold: Option<usize>,
 	/// Object store provider for file buckets. When unset the datastore uses the
 	/// built-in [`CommunityComposer`] (memory, and — off wasm — file/S3/GCS/Azure).
 	/// Embedders on platforms the built-in backends can't reach (e.g. a wasm
@@ -94,6 +97,7 @@ impl Builder {
 			temporary_directory: None,
 			authenticate: false,
 			config: ConfigMap::empty(),
+			graph_fold_threshold: None,
 			bucket_store_provider: None,
 			#[cfg(feature = "surrealism")]
 			lazy_surrealism: false,
@@ -104,6 +108,20 @@ impl Builder {
 	/// Sets config values for the builder.
 	pub fn with_config(mut self, config: ConfigMap) -> Self {
 		self.config = config;
+		self
+	}
+
+	/// Overrides the built-in graph fold threshold: how many unfolded
+	/// per-edge adjacency keys a traversal tolerates on one scope before
+	/// observing it for a background fold. The threshold is deliberately not
+	/// a config-map key — every node against a shared datastore must fold
+	/// identically — so this builder hook is the only override, for tests
+	/// and benchmarks that need eager folding (`1`) or no fold initiation
+	/// (`0`, which disables read-path observation; edge deletes on tables
+	/// already folded still queue their scopes and the background pass
+	/// still drains that debt).
+	pub fn with_graph_fold_threshold(mut self, threshold: usize) -> Self {
+		self.graph_fold_threshold = Some(threshold);
 		self
 	}
 
@@ -340,7 +358,11 @@ impl Builder {
 		let options = self.engine_options;
 		let shutdown = self.shutdown.clone();
 		let observer = self.observer;
-		let config = Arc::new(RuntimeConfig::load(&self.config));
+		let mut runtime_config = RuntimeConfig::load(&self.config);
+		if let Some(threshold) = self.graph_fold_threshold {
+			runtime_config.idx.graph_fold_threshold = threshold;
+		}
+		let config = Arc::new(runtime_config);
 		let tf = TransactionFactory::new(
 			Arc::clone(&triggers),
 			builder,

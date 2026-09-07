@@ -36,12 +36,13 @@ pub use surrealdb_expr::{expr, val};
 pub(crate) mod key {
 	pub(crate) use surrealdb_datastore::key::schema;
 	pub(crate) use surrealdb_kvs::key::{
-		KVKey, KVKeyDecode, KVRange, KVSubspace, Resumable, TypedRange,
+		KVKey, KVKeyDecode, KVRange, KVSubspace, RawRange, Resumable, TypedRange,
 	};
 	pub(crate) use surrealdb_kvs::value::KVValue;
 	pub(crate) use surrealdb_kvs::{Key, KeyRange};
 }
 
+pub mod adjacency;
 pub mod config;
 pub mod count;
 pub mod docids;

@@ -135,6 +135,7 @@ pub fn table_basic() -> StoredTableDefinition {
 		cache_lives_ts: UuidExt::nil(),
 		graphql_alias: None,
 		graphql_deprecated: None,
+		graph_folded: false,
 	}
 }
 
@@ -171,6 +172,7 @@ pub fn table_with_view() -> StoredTableDefinition {
 		cache_lives_ts: UuidExt::nil(),
 		graphql_alias: None,
 		graphql_deprecated: None,
+		graph_folded: false,
 	}
 }
 
@@ -198,6 +200,7 @@ pub fn table_schemafull() -> StoredTableDefinition {
 		cache_lives_ts: UuidExt::nil(),
 		graphql_alias: None,
 		graphql_deprecated: None,
+		graph_folded: false,
 	}
 }
 
@@ -231,6 +234,7 @@ pub fn table_relation() -> StoredTableDefinition {
 		cache_lives_ts: UuidExt::nil(),
 		graphql_alias: None,
 		graphql_deprecated: None,
+		graph_folded: false,
 	}
 }
 
@@ -264,6 +268,7 @@ pub fn table_with_stored_clauses() -> StoredTableDefinition {
 		cache_lives_ts: UuidExt::nil(),
 		graphql_alias: None,
 		graphql_deprecated: None,
+		graph_folded: false,
 	}
 }
 
@@ -292,6 +297,7 @@ pub fn table_with_materialized_view() -> StoredTableDefinition {
 		cache_lives_ts: UuidExt::nil(),
 		graphql_alias: None,
 		graphql_deprecated: None,
+		graph_folded: false,
 	}
 }
 
@@ -316,6 +322,7 @@ pub fn table_any_type() -> StoredTableDefinition {
 		cache_lives_ts: UuidExt::nil(),
 		graphql_alias: None,
 		graphql_deprecated: None,
+		graph_folded: false,
 	}
 }
 

@@ -23,6 +23,7 @@ pub mod diskann;
 pub mod entry;
 pub mod event_queue;
 pub mod fulltext;
+pub mod graph;
 pub mod hnsw;
 pub mod ids;
 pub mod index_build;

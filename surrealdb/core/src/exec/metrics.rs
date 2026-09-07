@@ -68,6 +68,14 @@ pub(crate) struct OperatorMetrics {
 	/// Like `skipped_rows`, the scan accumulates per cursor batch and flushes
 	/// via [`OperatorMetrics::add_edges_scanned`].
 	edges_scanned: AtomicU64,
+	/// Graph adjacency entries served from packed block chunks by the merged
+	/// adjacency reader, and entries served from per-edge pointer keys. The
+	/// two split `edges_scanned` by storage tier, making the fold's effect
+	/// observable: a fully folded scope scans blocks only. Accumulated per
+	/// cursor and flushed via [`OperatorMetrics::add_block_hits`] /
+	/// [`OperatorMetrics::add_delta_hits`].
+	block_hits: AtomicU64,
+	delta_hits: AtomicU64,
 	/// Candidate records fetched for per-candidate evaluation *inside* an ANN
 	/// search (the truthy-document filters' record fetch + permission gate +
 	/// cond evaluation), one per unique candidate evaluated. This counts
@@ -102,6 +110,8 @@ impl OperatorMetrics {
 			elapsed_ns: AtomicU64::new(0),
 			skipped_rows: AtomicU64::new(0),
 			edges_scanned: AtomicU64::new(0),
+			block_hits: AtomicU64::new(0),
+			delta_hits: AtomicU64::new(0),
 			records_fetched: AtomicU64::new(0),
 			branch_dropped: AtomicBool::new(false),
 		}
@@ -161,6 +171,26 @@ impl OperatorMetrics {
 	/// Record `n` graph adjacency-key entries scanned by a graph edge scan.
 	pub(crate) fn add_edges_scanned(&self, n: u64) {
 		self.edges_scanned.fetch_add(n, Ordering::Relaxed);
+	}
+
+	/// Graph adjacency entries served from packed blocks so far.
+	pub(crate) fn block_hits(&self) -> u64 {
+		self.block_hits.load(Ordering::Relaxed)
+	}
+
+	/// Record `n` adjacency entries served from packed blocks.
+	pub(crate) fn add_block_hits(&self, n: u64) {
+		self.block_hits.fetch_add(n, Ordering::Relaxed);
+	}
+
+	/// Graph adjacency entries served from per-edge pointer keys so far.
+	pub(crate) fn delta_hits(&self) -> u64 {
+		self.delta_hits.load(Ordering::Relaxed)
+	}
+
+	/// Record `n` adjacency entries served from per-edge pointer keys.
+	pub(crate) fn add_delta_hits(&self, n: u64) {
+		self.delta_hits.fetch_add(n, Ordering::Relaxed);
 	}
 
 	/// Candidate records fetched for in-traversal evaluation so far.

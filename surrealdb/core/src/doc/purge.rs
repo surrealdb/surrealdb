@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_datastore::values::graph::{AdjacencyValue, GraphFoldScope};
 use surrealdb_types::ToSql;
 
 use crate::catalog::providers::TableProvider;
@@ -18,6 +19,7 @@ use crate::expr::paths::{IN, OUT};
 use crate::expr::reference::ReferenceDeleteStrategy;
 use crate::expr::statements::{DeleteStatement, UpdateStatement};
 use crate::expr::{AssignOperator, Data, Expr, Idiom, Literal, Lookup, Part};
+use crate::idx::adjacency::{AdjacencyScope, MergedAdjacencyCursor, vertex_table_folded};
 use crate::key::KVKeyDecode;
 use crate::key::schema::{
 	GraphIdPrefix, GraphKey, GraphPointerKey, ReferenceIdPrefix, ReferenceKey,
@@ -205,12 +207,51 @@ impl Document {
 				target_table: Cow::Borrowed(&l.table),
 				target_key: Cow::Borrowed(&l.key),
 			};
-			futures::try_join!(
-				txn.del_key(&ltr),
-				txn.del_key(&etl),
-				txn.del_key(&etr),
-				txn.del_key(&rtl)
+			// A vertex table with folded adjacency may hold this edge in a
+			// packed block, which a key deletion cannot reach: write a
+			// tombstone over the pointer key instead — blind either way —
+			// which the merged reader subtracts and the next fold consumes.
+			// On a never-folded table the key deletion is exact, as always.
+			// Both writes are blind: neither reads the pointer key first.
+			let (l_folded, r_folded) = futures::try_join!(
+				vertex_table_folded(&txn, ns, db, &l.table),
+				vertex_table_folded(&txn, ns, db, &r.table)
 			)?;
+			let tombstone = AdjacencyValue::tombstone();
+			// A tombstone is debt the next fold repays; queue that fold at
+			// commit so it happens even if the scope is never read again.
+			for (folded, vertex, dir) in [(l_folded, &l, Dir::Out), (r_folded, &r, Dir::In)] {
+				if folded {
+					txn.buffer_graph_fold_trigger(
+						GraphFoldScope {
+							ns,
+							db,
+							tb: vertex.table.clone(),
+							id: vertex.key.clone(),
+							dir,
+						},
+						ctx.node_id(),
+					);
+				}
+			}
+			match (l_folded, r_folded) {
+				(false, false) => {
+					futures::try_join!(txn.del_key(&ltr), txn.del_key(&rtl))?;
+				}
+				(true, false) => {
+					futures::try_join!(txn.set_key(&ltr, &tombstone), txn.del_key(&rtl))?;
+				}
+				(false, true) => {
+					futures::try_join!(txn.del_key(&ltr), txn.set_key(&rtl, &tombstone))?;
+				}
+				(true, true) => {
+					futures::try_join!(
+						txn.set_key(&ltr, &tombstone),
+						txn.set_key(&rtl, &tombstone)
+					)?;
+				}
+			}
+			futures::try_join!(txn.del_key(&etl), txn.del_key(&etr))?;
 		}
 		// Carry on
 		Ok(())
@@ -258,18 +299,31 @@ impl Document {
 		let ns = self.doc_ctx.ns().namespace_id;
 		// Get the database id
 		let db = self.doc_ctx.db().database_id;
-		// Get the key range of the graph keys
-		let range = GraphIdPrefix {
+		// Peek the record's adjacency through the merged reader, which spans
+		// the per-edge pointer keys and — once the table has folded — the
+		// packed blocks, subtracting tombstones so a fully-deleted-but-not-
+		// yet-folded vertex does not trigger a cascade over nothing.
+		let folded = self.doc_ctx.tb()?.graph_folded;
+		let scope = AdjacencyScope {
 			ns,
 			db,
-			tb: Cow::Borrowed(&rid.table),
-			id: Cow::Borrowed(&rid.key),
-		}
-		.range()?;
-		// Open a cursor over the graph edge range so we can peek the first key.
-		let mut cursor = txn.open_keys_cursor(range, Direction::Forward, 0, None).await?;
-		// Check if there are any edges to purge by fetching at most one key.
-		let batch = cursor.next_batch(1).await?;
+			vertex: rid,
+			dir: None,
+			edge_table: None,
+			fk_lower: None,
+			delta_range: GraphIdPrefix {
+				ns,
+				db,
+				tb: Cow::Borrowed(&rid.table),
+				id: Cow::Borrowed(&rid.key),
+			}
+			.range()?,
+		};
+		let mut cursor = MergedAdjacencyCursor::open(&txn, scope, folded, None).await?;
+		// Check if there are any edges to purge by fetching at most one key:
+		// only emptiness matters here, so nothing is decoded.
+		let batch = cursor.next_batch_keys(1).await?;
+		drop(cursor);
 		// Only proceed if there are edges for this record.
 		if !batch.is_empty() {
 			// Create a `DELETE FROM record:id<->` statement. `Part::Lookup`

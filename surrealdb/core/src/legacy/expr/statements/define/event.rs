@@ -90,7 +90,7 @@ pub(crate) async fn define_event_statement_compute(
 		cache_events_ts: Uuid::now_v7(),
 		..(*tb).clone()
 	};
-	txn.put_tb(ns_name, db_name, &tb).await?;
+	txn.replace_tb(ns_name, db_name, &tb).await?;
 	// Clear the cache
 	txn.clear_cache();
 	// Ok all good

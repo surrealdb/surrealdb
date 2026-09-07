@@ -106,7 +106,7 @@ pub(crate) async fn remove_table_statement_compute(
 			txn.del_key(&key).await?;
 			// Refresh the table cache for foreign tables
 			let foreign_tb = txn.expect_tb(ns, db, ft).await?;
-			txn.put_tb(
+			txn.replace_tb(
 				ns_name,
 				db_name,
 				&TableDefinition {

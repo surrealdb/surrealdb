@@ -163,6 +163,12 @@ mod tests {
 		assert_eq!(c.hnsw_cache_size, 7);
 		let c: IdxConfig = map_with("diskann_cache_size", "7").load();
 		assert_eq!(c.diskann_cache_size, 7);
+		// The fold threshold is a built-in constant, not a config key: a map
+		// entry naming it must be ignored.
+		let c: IdxConfig = map_with("graph_fold_threshold", "7").load();
+		assert_eq!(c.graph_fold_threshold, IdxConfig::default().graph_fold_threshold);
+		let c: IdxConfig = map_with("graph_fold_batch", "7").load();
+		assert_eq!(c.graph_fold_batch, 7);
 		// Canonicalizing, so the value has to name a directory that exists.
 		let dir = std::env::temp_dir();
 		let c: IdxConfig = map_with("file_allowlist", &dir.to_string_lossy()).load();

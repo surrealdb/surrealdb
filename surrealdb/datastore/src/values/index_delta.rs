@@ -58,6 +58,7 @@ use surrealdb_expr::val::TableName;
 use uuid::Uuid;
 
 use crate::values::fulltext::DocLengthAndCount;
+use crate::values::graph::GraphFoldScope;
 
 /// Identifies one index within the transaction's buffers.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -169,6 +170,9 @@ pub struct IndexDeltaBuffer {
 	/// and the summed document-length and count contribution per index.
 	term_changes: Mutex<Vec<HashMap<BufferedTerm, FullTextDelta>>>,
 	doc_stats: Mutex<Vec<HashMap<BufferedIndex, (DocLengthAndCount, Uuid)>>>,
+	/// Adjacency scopes that asked for a fold, and the node id to tag the
+	/// queue entry with.
+	graph_folds: Mutex<Vec<HashMap<GraphFoldScope, Uuid>>>,
 }
 
 impl Default for IndexDeltaBuffer {
@@ -178,6 +182,7 @@ impl Default for IndexDeltaBuffer {
 			compactions: Mutex::new(vec![HashMap::new()]),
 			term_changes: Mutex::new(vec![HashMap::new()]),
 			doc_stats: Mutex::new(vec![HashMap::new()]),
+			graph_folds: Mutex::new(vec![HashMap::new()]),
 		}
 	}
 }
@@ -215,6 +220,19 @@ impl IndexDeltaBuffer {
 		let mut frames = self.compactions.lock();
 		let frame = frames.last_mut().expect("the transaction frame is always present");
 		frame.insert(index, nid);
+	}
+
+	/// Record that an adjacency scope wants folding once this transaction
+	/// commits. Deduplicated per scope: the queue only needs to name the
+	/// scope once per transaction, not once per tombstoned edge.
+	// A record id key can embed a regex, which carries interior mutability
+	// the hash cannot observe; the same engine-wide reasoning as the idx
+	// crate's blanket allow.
+	#[allow(clippy::mutable_key_type)]
+	pub fn buffer_graph_fold_trigger(&self, scope: GraphFoldScope, nid: Uuid) {
+		let mut frames = self.graph_folds.lock();
+		let frame = frames.last_mut().expect("the transaction frame is always present");
+		frame.insert(scope, nid);
 	}
 
 	/// Record that `doc_id` gained (`add`) or lost a full-text term.
@@ -369,12 +387,25 @@ impl IndexDeltaBuffer {
 		merged.into_iter().collect()
 	}
 
+	/// Drain the accumulated fold triggers.
+	#[allow(clippy::mutable_key_type)]
+	pub fn take_graph_folds(&self) -> Vec<(GraphFoldScope, Uuid)> {
+		let mut frames = self.graph_folds.lock();
+		let mut merged: HashMap<GraphFoldScope, Uuid> = HashMap::new();
+		for frame in frames.drain(..) {
+			merged.extend(frame);
+		}
+		frames.push(HashMap::new());
+		merged.into_iter().collect()
+	}
+
 	/// True when nothing is buffered, so commit can skip the flush entirely.
 	pub fn is_empty(&self) -> bool {
 		self.counts.lock().iter().all(HashMap::is_empty)
 			&& self.compactions.lock().iter().all(HashMap::is_empty)
 			&& self.term_changes.lock().iter().all(HashMap::is_empty)
 			&& self.doc_stats.lock().iter().all(HashMap::is_empty)
+			&& self.graph_folds.lock().iter().all(HashMap::is_empty)
 	}
 
 	/// Discard everything buffered. Used when the transaction is cancelled.
@@ -383,6 +414,7 @@ impl IndexDeltaBuffer {
 		reset_frames(&mut self.compactions.lock());
 		reset_frames(&mut self.term_changes.lock());
 		reset_frames(&mut self.doc_stats.lock());
+		reset_frames(&mut self.graph_folds.lock());
 	}
 
 	/// Open a frame for a save point, so its mutations can be discarded whole.
@@ -394,10 +426,12 @@ impl IndexDeltaBuffer {
 		self.compactions.lock().push(HashMap::new());
 		self.term_changes.lock().push(HashMap::new());
 		self.doc_stats.lock().push(HashMap::new());
+		self.graph_folds.lock().push(HashMap::new());
 	}
 
 	/// Fold the save point's frame into the one beneath it: its writes survived,
 	/// so its buffered contributions belong to the enclosing scope.
+	#[allow(clippy::mutable_key_type)]
 	pub fn release_save_point(&self) {
 		{
 			let mut frames = self.counts.lock();
@@ -426,12 +460,19 @@ impl IndexDeltaBuffer {
 				}
 			}
 		}
-		let mut frames = self.doc_stats.lock();
+		{
+			let mut frames = self.doc_stats.lock();
+			if let Some(top) = pop_save_point(&mut frames) {
+				let parent = frames.last_mut().expect("popping left at least one frame");
+				for (index, (stats, nid)) in top {
+					fold_doc_stats(parent, index, stats, nid);
+				}
+			}
+		}
+		let mut frames = self.graph_folds.lock();
 		if let Some(top) = pop_save_point(&mut frames) {
 			let parent = frames.last_mut().expect("popping left at least one frame");
-			for (index, (stats, nid)) in top {
-				fold_doc_stats(parent, index, stats, nid);
-			}
+			parent.extend(top);
 		}
 	}
 
@@ -442,6 +483,7 @@ impl IndexDeltaBuffer {
 		pop_save_point(&mut self.compactions.lock());
 		pop_save_point(&mut self.term_changes.lock());
 		pop_save_point(&mut self.doc_stats.lock());
+		pop_save_point(&mut self.graph_folds.lock());
 	}
 }
 

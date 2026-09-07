@@ -11,7 +11,6 @@ use crate::doc::CursorDoc;
 use crate::expr::Base;
 use crate::expr::statements::remove::index::RemoveIndexStatement;
 use crate::iam::{Action, ResourceKind};
-use crate::key::schema::TableKey;
 use crate::kvs::index::{AbortLocalBuild, retire_durable_index};
 use crate::legacy::expr_to_ident;
 use crate::val::Value;
@@ -98,25 +97,18 @@ pub(crate) async fn remove_index_statement_compute(
 	if removed_last_doc_id_index {
 		txn.del_tb_doc_ids_deferred(ns, db, &table_name).await?;
 	}
-	// Serialize concurrent last-consumer removals on last-writer-wins backends
-	// (TiKV). The `removed_last_doc_id_index` decision above is read from a
-	// range scan of the index list, which those backends do not validate for
-	// write-conflicts; two `REMOVE INDEX`es dropping the final two doc-ID
-	// consumers could each decide the other still remains and both skip the
-	// purge, leaking the shared `!di`/`!dd` mappings. Reading the table
-	// definition key here arms the write-conflict check against the `put_tb`
-	// write just below (which targets the same key): the second committer is
-	// rejected, its whole transaction rolls back (nothing removed, no leak),
-	// and it re-evaluates the decision on retry as the sole remover. On
-	// conflict-serializing backends the `put_tb` write already serializes them.
-	let tb_key = TableKey {
-		ns,
-		db,
-		tb: std::borrow::Cow::Borrowed(&table_name),
-	};
-	let _ = txn.get_key(&tb_key, None).await?;
-	// Refresh the table cache for indexes
-	txn.put_tb(
+	// Refresh the table cache for indexes. `replace_tb`'s locked read of
+	// the table-definition key also serializes concurrent last-consumer
+	// removals on last-writer-wins backends (TiKV): the
+	// `removed_last_doc_id_index` decision above is read from a range scan
+	// of the index list, which those backends do not validate for
+	// write-conflicts, so two `REMOVE INDEX`es dropping the final two
+	// doc-ID consumers could otherwise each decide the other still remains
+	// and both skip the purge, leaking the shared `!di`/`!dd` mappings.
+	// The second committer is rejected, its whole transaction rolls back
+	// (nothing removed, no leak), and it re-evaluates the decision on
+	// retry as the sole remover.
+	txn.replace_tb(
 		ns_name,
 		db_name,
 		&TableDefinition {
@@ -206,9 +198,10 @@ mod tikv_concurrency {
 	/// table concurrently must not both skip the shared-mapping purge. On TiKV a
 	/// blind `put_tb` does not serialize them, so both could read the pre-delete
 	/// index list, each see the other still present, and leave the `!di`/`!dd`
-	/// mappings behind. The serialization guard (reading the table-definition key
-	/// before `put_tb`) forces one to retry and re-decide as the sole remover, so
-	/// the mappings are always purged. Repeated to make the racing window likely.
+	/// mappings behind. The serialization guard (`replace_tb`'s locked read of
+	/// the table-definition key) forces one to retry and re-decide as the sole
+	/// remover, so the mappings are always purged. Repeated to make the racing
+	/// window likely.
 	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 	#[serial_test::serial]
 	async fn concurrent_last_consumer_removal_purges_mappings() {

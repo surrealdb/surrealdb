@@ -40,6 +40,11 @@ pub struct EngineOptions {
 	///
 	/// Default: 5 seconds
 	pub event_processing_interval: Duration,
+	/// Interval between graph adjacency fold passes, which pack queued
+	/// (vertex, direction) scopes' per-edge keys into adjacency blocks.
+	///
+	/// Default: 5 seconds
+	pub graph_fold_interval: Duration,
 	/// Interval at which the per-node live-query router tails the dedicated
 	/// `lqe` keyspace and delivers notifications off the write path.
 	///
@@ -143,6 +148,7 @@ impl Default for EngineOptions {
 			index_compaction_interval: Duration::from_secs(5),
 			index_build_resume_interval: Duration::from_secs(30),
 			event_processing_interval: Duration::from_secs(5),
+			graph_fold_interval: Duration::from_secs(5),
 			live_query_router_interval: Duration::from_millis(100),
 			reclaim_interval: Duration::from_secs(60),
 			reclaim_grace: Duration::from_secs(600),
@@ -180,6 +186,12 @@ impl EngineOptions {
 
 	pub fn with_index_build_resume_interval(mut self, interval: Duration) -> Self {
 		self.index_build_resume_interval = interval;
+		self
+	}
+
+	/// Set the graph adjacency fold interval
+	pub fn with_graph_fold_interval(mut self, interval: Duration) -> Self {
+		self.graph_fold_interval = interval;
 		self
 	}
 

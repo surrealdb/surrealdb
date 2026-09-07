@@ -64,8 +64,8 @@ use crate::key::schema::{
 	DatabaseKey, DatabasePrefix, DbAccessMethodKey, DbAccessMethodPrefix, DbAccessRoot,
 	DbConfigKey, DbConfigPrefix, DbGrantKey, DbGrantPrefix, DbUserKey, DbUserPrefix,
 	DocStatsBatchKey, EventKey, EventPrefix, FieldKey, FieldPrefix, ForeignTablePrefix,
-	FunctionKey, FunctionPrefix, IdxRoot, IndexCompactionKey, IndexCountKey, IndexDefKey,
-	IndexDefPrefix, IndexNameKey, LiveEventsKey, MlModelKey, MlModelPrefix, ModuleKey,
+	FunctionKey, FunctionPrefix, GraphFoldKey, IdxRoot, IndexCompactionKey, IndexCountKey,
+	IndexDefKey, IndexDefPrefix, IndexNameKey, LiveEventsKey, MlModelKey, MlModelPrefix, ModuleKey,
 	ModulePrefix, NamespaceKey, NamespacePrefix, NodeKey, NodePrefix, NsAccessMethodKey,
 	NsAccessMethodPrefix, NsAccessRoot, NsGrantKey, NsGrantPrefix, NsUserKey, NsUserPrefix,
 	ParamKey, ParamPrefix, ReclaimKey, ReclaimTbPrefix, RecordKey, RootAccessMethodKey,
@@ -82,6 +82,7 @@ use crate::testing::{
 use crate::triggers::CommitTriggers;
 use crate::values::changefeed::Changefeed;
 use crate::values::fulltext::DocLengthAndCount;
+use crate::values::graph::GraphFoldScope;
 use crate::values::index_build::{
 	BuildGeneration, BuildTicket, BuildTicketMutationSeq, IndexBuildPhase, IndexBuildReportStatus,
 };
@@ -141,6 +142,7 @@ pub struct Transaction {
 	trigger_async_event: AtomicBool,
 	/// Did this transaction queue any index-compaction work?
 	trigger_index_compaction: AtomicBool,
+	trigger_graph_fold: AtomicBool,
 	/// Write-cardinality guard: maximum number of individual key writes this
 	/// transaction may buffer before further writes fail. Unset by default,
 	/// leaving the transaction unbounded. Armed once — by the executor for
@@ -833,6 +835,7 @@ impl Transaction {
 			triggers,
 			trigger_async_event: AtomicBool::new(false),
 			trigger_index_compaction: AtomicBool::new(false),
+			trigger_graph_fold: AtomicBool::new(false),
 			write_keys_limit: OnceLock::new(),
 			write_guard_poisoned: AtomicBool::new(false),
 			save_point_poisoned: AtomicBool::new(false),
@@ -1396,6 +1399,11 @@ impl Transaction {
 			// gap between the two is what lets the delta log grow unbounded.
 			self.triggers.index_compaction.notify_one();
 		}
+		if self.trigger_graph_fold.load(Ordering::Relaxed) {
+			// Notify after commit so the queued fold work is visible to the
+			// fold task, for the same reason as the compaction trigger above.
+			self.triggers.graph_fold.notify_one();
+		}
 		self.emit_transaction_event(Outcome::Success);
 		Ok(())
 	}
@@ -1921,6 +1929,35 @@ impl Transaction {
 		// Invalidate the cached index entry.
 		self.cache.remove(&cache::tx::Lookup::Ix(ns, db, tb.as_ref(), &ix_def.name));
 		Ok(())
+	}
+
+	/// Writes back a table definition produced by modifying a
+	/// previously-read copy, serializing the read-modify-write against
+	/// every concurrent writer of the same definition.
+	///
+	/// The definition key is read locked ([`Self::getu_key`]) before the
+	/// write. A blind [`TableProvider::put_tb`] is safe only for a
+	/// definition's initial write: on a backend whose commit protocol
+	/// validates writes but not plain reads (TiKV), two read-modify-writes
+	/// of the same definition would both commit and the later one would
+	/// silently erase whatever the earlier one changed — most critically
+	/// the `graph_folded` marker a concurrent fold flips, whose loss hides
+	/// every folded edge on the table. The locked read registers the key
+	/// for commit-time validation on every backend, so the second
+	/// committer conflicts and retries from a fresh read instead.
+	pub async fn replace_tb(
+		&self,
+		ns: &str,
+		db: &str,
+		tb: &TableDefinition,
+	) -> Result<Arc<TableDefinition>> {
+		let key = TableKey {
+			ns: tb.namespace_id,
+			db: tb.database_id,
+			tb: Cow::Borrowed(&tb.name),
+		};
+		let _ = self.getu_key(&key).await?;
+		self.put_tb(ns, db, tb).await
 	}
 
 	/// Register this database's changefeed-retention fence for commit-time
@@ -2838,6 +2875,23 @@ impl Transaction {
 			)
 	}
 
+	/// Register that a graph adjacency scope wants folding once this
+	/// transaction commits. Written by the edge-deletion path when it
+	/// tombstones a pointer key on a folded table, so the tombstone is
+	/// consumed even if the scope is never traversed again.
+	pub fn buffer_graph_fold_trigger(&self, scope: GraphFoldScope, nid: Uuid) {
+		self.index_deltas
+			.get_or_init(|| Box::new(IndexDeltaBuffer::new()))
+			.buffer_graph_fold_trigger(scope, nid)
+	}
+
+	/// Record a hot adjacency scope observed by a read, waking the fold
+	/// task. Purely in-memory: reads cannot write a queue entry, so the
+	/// fold task drains these into the durable queue on its pass.
+	pub fn observe_graph_fold(&self, scope: GraphFoldScope) {
+		self.triggers.observe_graph_fold(scope);
+	}
+
 	/// Record that a document gained (`add`) or lost a full-text term.
 	///
 	/// Buffered rather than written per (term, document): a `!tt` key per pair
@@ -2990,6 +3044,22 @@ impl Transaction {
 				db: index.db,
 				tb: Cow::Borrowed(&index.tb),
 				ix: index.ix,
+				nid,
+				uid: Uuid::now_v7(),
+			};
+			self.put_key(&key, &()).await?;
+		}
+		let graph_folds = buffer.take_graph_folds();
+		if !graph_folds.is_empty() {
+			self.trigger_graph_fold.store(true, Ordering::Relaxed);
+		}
+		for (scope, nid) in graph_folds {
+			let key = GraphFoldKey {
+				ns: scope.ns,
+				db: scope.db,
+				tb: Cow::Borrowed(&scope.tb),
+				id: Cow::Borrowed(&scope.id),
+				dir: scope.dir,
 				nid,
 				uid: Uuid::now_v7(),
 			};

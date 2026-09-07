@@ -51,6 +51,12 @@ Each test is a pair: `X_import.surql` runs on an old released binary and writes
 data, `X.surql` runs on a newer one and asserts what comes back. The versions
 hopped through live in `LANG_UPGRADE_VERSIONS` in `Makefile.ci.toml`.
 
+The spawned servers run with maintenance tasks live, and graph adjacency
+folding is on by default: a traversal over a vertex with enough edges can fold
+its scope mid-test, rewriting the storage layout (never the query results).
+Assert only on query results in upgrade tests, never on raw key layout or
+storage shape.
+
 **Every new release must be appended to `LANG_UPGRADE_VERSIONS` before the `..`
 token.** The chain runs *adjacent pairs*, so a release that is missing does not
 merely go untested — it widens the final hop into a multi-release jump, and the

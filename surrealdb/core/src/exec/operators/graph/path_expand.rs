@@ -73,6 +73,7 @@
 //! Within one source row this yields a pre-order DFS: a node at depth `d` is
 //! emitted before the deeper paths that extend through it.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use common::future::stream::{self, Yielder};
@@ -81,9 +82,7 @@ use tracing::debug;
 
 use super::expand::ExpandDir;
 use crate::exec::operators::scan::fetch::{FetchFieldStateCache, resolve_with_field_state};
-use crate::exec::operators::scan::graph_keys::{
-	EdgeTableSpec, compute_graph_ranges, visit_graph_range,
-};
+use crate::exec::operators::scan::graph_keys::{EdgeTableSpec, collect_adjacency};
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
 	OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
@@ -470,6 +469,9 @@ impl ExecOperator for PathExpand {
 			// caches avoid churn (mirrors `Expand`'s edge/target split).
 			let mut edge_cache = FetchFieldStateCache::new();
 			let mut node_cache = FetchFieldStateCache::new();
+			// Per-table `graph_folded` answers, cached for the whole stream
+			// (path tips can span tables).
+			let mut folded_memo: HashMap<TableName, bool> = HashMap::new();
 
 			// Output batch, flushed when it reaches the configured batch size.
 			let mut out: Vec<Value> = Vec::with_capacity(scan_batch_size);
@@ -545,35 +547,33 @@ impl ExecOperator for PathExpand {
 						let depth = path.depth();
 
 						// Enumerate the tip's adjacency for this direction,
-						// collecting (edge id, decoded target) pairs and
-						// skipping edges already used on this path
-						// (DIFFERENT-EDGES). The range visitor holds the scan
-						// cursor only for the duration of the call, so the
-						// FieldState fetch below can borrow `txn` again. Each
-						// range comes paired with the decoder that strips its
-						// bound's route prefix from every key it returns.
-						let ranges =
-							compute_graph_ranges(ns_id, db_id, &path.tip, dir, &edge_specs, &ctx)
-								.await?;
-
+						// retaining only the (edge id, decoded target) pairs
+						// not already used on this path (DIFFERENT-EDGES) —
+						// the filter runs per streamed item, so the whole
+						// unfiltered fan-out is never buffered. The cursor is
+						// dropped before the FieldState fetch can borrow
+						// `txn` again.
 						let mut edge_ids: Vec<RecordId> = Vec::new();
 						let mut decoded_targets: Vec<Option<RecordId>> = Vec::new();
-						for gr in ranges {
-							visit_graph_range(
-								&txn,
-								&ctx,
-								gr,
-								version,
-								"PathExpand graph",
-								&mut |decoded| {
-									if !path.contains_edge(&decoded.edge) {
-										edge_ids.push(decoded.edge);
-										decoded_targets.push(decoded.target);
-									}
-								},
-							)
-							.await?;
-						}
+						collect_adjacency(
+							&txn,
+							ns_id,
+							db_id,
+							&path.tip,
+							dir,
+							&edge_specs,
+							&ctx,
+							version,
+							&mut folded_memo,
+							|item| {
+								if !path.contains_edge(&item.edge) {
+									edge_ids.push(item.edge);
+									decoded_targets.push(item.target);
+								}
+								Ok(())
+							},
+						)
+						.await?;
 
 						if edge_ids.is_empty() {
 							continue;

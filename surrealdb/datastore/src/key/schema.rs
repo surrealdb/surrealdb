@@ -149,6 +149,11 @@ keyspace! {
 		index_compaction = ["!ic", @, ns: NamespaceId, db: DatabaseId, tb: Table,
 							@, ix: IndexId, @, nid: Uuid, uid: Uuid] => ();
 
+		/// Graph adjacency fold work items, one per (vertex, direction) scope
+		/// observed to carry enough per-edge pointer keys to be worth packing.
+		graph_fold = ["!gf", @, ns: NamespaceId, db: DatabaseId, tb: Table,
+					  @, id: Id, dir: Dir, @, nid: Uuid, uid: Uuid] => ();
+
 		/// Resources awaiting reclamation after a drop.
 		reclaim = ["!rc", @, kind: ReclaimKind, ns: NamespaceId, db: DatabaseId,
 				   tb: Table, @, ix: IndexId, expunge: Expunge, uid: Uuid] => ReclaimState;
@@ -288,10 +293,29 @@ keyspace! {
 					/// returns both, and the pointer form tolerates trailing bytes so
 					/// a later format can append without breaking this reader. The
 					/// inner form does not: trailing bytes there mean corruption.
+					///
+					/// A pointer key's value is an [`AdjacencyValue`]
+					/// (crate::values::graph::AdjacencyValue): empty bytes — what
+					/// every write produces unless the vertex's table has folded
+					/// adjacency — mean a live edge, and a flagged value carries a
+					/// tombstone over a folded edge or optional per-edge sections.
 					graph = ["~", @, id: Id, @, dir: Dir, @, foreign_table: Table,
 							 @, foreign_key: Id] => ();
-					graph_pointer = graph + [target_table: Table, target_key: Id] => ()
-						(ignore_trailing);
+					graph_pointer = graph + [target_table: Table, target_key: Id]
+						=> crate::values::graph::AdjacencyValue (ignore_trailing);
+
+					/// Packed adjacency blocks: folded vertex-side graph edges.
+					///
+					/// One block holds a sorted run of a (vertex, direction,
+					/// edge-table) scope's edges, moved here out of the per-edge
+					/// pointer keys above by the fold task. `chunk_start` is the
+					/// smallest edge key the block holds, so a bounded lookup can
+					/// seek its covering chunk. Readers merge blocks with the
+					/// remaining pointer keys; an absent block means the scope's
+					/// edges live entirely under `~`, so correctness never depends
+					/// on a fold having run.
+					adjacency = ["^", @, id: Id, @, dir: Dir, @, edge_table: Table,
+								 @, chunk_start: Id] => crate::values::graph::AdjacencyBlock;
 
 					/// Reference back-links.
 					///

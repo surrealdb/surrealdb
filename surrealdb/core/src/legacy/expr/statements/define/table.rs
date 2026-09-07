@@ -59,8 +59,11 @@ pub(crate) async fn define_table_statement_compute(
 	let ns = txn.expect_ns_by_name(ns_name).await?;
 	let db = txn.expect_db_by_name(ns_name, db_name).await?;
 
-	// Check if the definition exists
-	let table_id =
+	// Check if the definition exists. A redefinition keeps the existing
+	// table id and carries the `graph_folded` marker forward: the marker
+	// records that packed adjacency blocks may exist under the table's
+	// subspace, which redefining the schema does not change.
+	let (table_id, graph_folded) =
 		if let Some(tb) = txn.get_tb(ns.namespace_id, db.database_id, &name, None).await? {
 			match this.kind {
 				DefineKind::Default => {
@@ -74,9 +77,9 @@ pub(crate) async fn define_table_statement_compute(
 				DefineKind::IfNotExists => return Ok(Value::None),
 			}
 
-			tb.table_id
+			(tb.table_id, tb.graph_folded)
 		} else {
-			txn.get_next_tb_id(Some(ctx), ns.namespace_id, db.database_id).await?
+			(txn.get_next_tb_id(Some(ctx), ns.namespace_id, db.database_id).await?, false)
 		};
 
 	let comment = stk
@@ -109,6 +112,7 @@ pub(crate) async fn define_table_statement_compute(
 		cache_lives_ts: cache_ts,
 		graphql_alias: this.graphql_alias.clone(),
 		graphql_deprecated: this.graphql_deprecated.clone(),
+		graph_folded,
 	};
 
 	// Add table relational fields
@@ -135,8 +139,12 @@ pub(crate) async fn define_table_statement_compute(
 		txn.bump_changefeed_retention_fence(ns.namespace_id, db.database_id).await?;
 	}
 
-	// Update the catalog
-	let tb = txn.put_tb(ns_name, db_name, &tb_def).await?;
+	// Update the catalog. The locked read inside `replace_tb` serializes
+	// this write against a concurrent fold's `graph_folded` flip: without
+	// it, an overwrite whose snapshot predates the flip would write the
+	// marker back to false on a last-writer-wins backend, hiding every
+	// folded edge.
+	let tb = txn.replace_tb(ns_name, db_name, &tb_def).await?;
 
 	// Clear the cache
 	txn.clear_cache();
@@ -184,7 +192,7 @@ pub(crate) async fn define_table_statement_compute(
 				});
 			};
 
-			txn.put_tb(
+			txn.replace_tb(
 				ns_name,
 				db_name,
 				&TableDefinition {

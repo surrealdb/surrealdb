@@ -35,6 +35,8 @@ pub enum TaskLeaseType {
 	RpcSessionCleanup,
 	/// Applying pending data migrations at startup
 	DataMigration,
+	/// Folding graph adjacency keys into packed blocks
+	GraphFold,
 }
 
 impl Encode for TaskLeaseType {
@@ -47,6 +49,7 @@ impl Encode for TaskLeaseType {
 			TaskLeaseType::IndexBuildResume => w.write_u16(5),
 			TaskLeaseType::RpcSessionCleanup => w.write_u16(6),
 			TaskLeaseType::DataMigration => w.write_u16(7),
+			TaskLeaseType::GraphFold => w.write_u16(8),
 		}
 	}
 }
@@ -61,6 +64,7 @@ impl<'de> BorrowDecode<'de> for TaskLeaseType {
 			5 => TaskLeaseType::IndexBuildResume,
 			6 => TaskLeaseType::RpcSessionCleanup,
 			7 => TaskLeaseType::DataMigration,
+			8 => TaskLeaseType::GraphFold,
 			_ => return Err(DecodeError::InvalidFormat),
 		})
 	}

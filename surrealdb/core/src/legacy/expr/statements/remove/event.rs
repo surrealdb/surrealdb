@@ -64,7 +64,7 @@ pub(crate) async fn remove_event_statement_compute(
 	};
 
 	// Refresh the table cache for events
-	txn.put_tb(
+	txn.replace_tb(
 		ns_name,
 		db_name,
 		&TableDefinition {

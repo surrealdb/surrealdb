@@ -65,7 +65,7 @@ impl revision::WalkRevisioned for TableId {
 	}
 }
 
-#[revisioned(revision = 3)]
+#[revisioned(revision = 4)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct StoredTableDefinition {
 	pub namespace_id: NamespaceId,
@@ -109,6 +109,24 @@ pub struct StoredTableDefinition {
 	/// auto-generated Query/Mutation field that targets this table.
 	#[revision(start = 2)]
 	pub graphql_deprecated: Option<String>,
+
+	/// Whether packed adjacency blocks exist — or have ever existed — for
+	/// this table's records as graph vertices.
+	///
+	/// Set transactionally with the first block the fold task writes under
+	/// the table's `^` subspace, and never cleared: once set, an edge
+	/// deletion on one of this table's vertices must write a tombstone
+	/// rather than deleting its pointer key (the entry may live in a
+	/// block), readers must merge blocks with the pointer keys, and the
+	/// edge-existence peeks must probe the block subspace as well. While
+	/// unset, none of that machinery engages and the table behaves — byte
+	/// for byte — as it did before blocks existed.
+	///
+	/// Internal bookkeeping: not part of the DEFINE TABLE surface, so it
+	/// is excluded from the SQL rendering; surfaced in `INFO` structure
+	/// output for observability.
+	#[revision(start = 4)]
+	pub graph_folded: bool,
 }
 
 impl_kv_value_revisioned!(StoredTableDefinition);
@@ -140,6 +158,7 @@ impl StoredTableDefinition {
 			cache_lives_ts: now,
 			graphql_alias: None,
 			graphql_deprecated: None,
+			graph_folded: false,
 		}
 	}
 }
@@ -186,6 +205,7 @@ impl InfoStructure for TableDefinition {
 			"comment", if let Some(v) = self.comment => v.into(),
 			"graphql_alias", if let Some(v) = self.graphql_alias => v.into(),
 			"graphql_deprecated", if let Some(v) = self.graphql_deprecated => v.into(),
+			"graph_folded", if self.graph_folded => true.into(),
 			"id" => self.table_id.0.into(),
 		})
 	}
@@ -212,6 +232,8 @@ pub struct TableDefinition {
 	pub cache_lives_ts: Uuid,
 	pub graphql_alias: Option<String>,
 	pub graphql_deprecated: Option<String>,
+	/// See [`StoredTableDefinition::graph_folded`].
+	pub graph_folded: bool,
 }
 
 /// The SELECT permission guarding a table, for callers holding a table lookup
@@ -252,6 +274,7 @@ impl FromStored for TableDefinition {
 				cache_lives_ts: stored.cache_lives_ts,
 				graphql_alias: stored.graphql_alias.clone(),
 				graphql_deprecated: stored.graphql_deprecated.clone(),
+				graph_folded: stored.graph_folded,
 			})
 		}
 		build(stored).with_context(|| {
@@ -293,6 +316,7 @@ impl TableDefinition {
 			cache_lives_ts: self.cache_lives_ts,
 			graphql_alias: self.graphql_alias.clone(),
 			graphql_deprecated: self.graphql_deprecated.clone(),
+			graph_folded: self.graph_folded,
 		}
 	}
 }

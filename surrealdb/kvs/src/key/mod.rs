@@ -225,6 +225,15 @@ impl<V> AnyRange for TypedRange<V> {
 	}
 }
 
+/// Forgetting a range's value type is always sound: the bytes are unchanged,
+/// and the `_raw` readers a [`RawRange`] feeds make the caller decode by hand.
+/// This is what lets one scan cover a typed region and a mixed one.
+impl<V> From<TypedRange<V>> for RawRange {
+	fn from(range: TypedRange<V>) -> Self {
+		RawRange(range.range)
+	}
+}
+
 impl AnyRange for RawRange {
 	fn into_key_range(self) -> KeyRange<'static> {
 		self.0

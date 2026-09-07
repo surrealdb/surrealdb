@@ -69,9 +69,7 @@ use super::path_expand::{
 	node_passes_label, path_rows_exceeded, scan_dir, source_record_id, step_kind, target_field,
 };
 use crate::exec::operators::scan::fetch::{FetchFieldStateCache, resolve_with_field_state};
-use crate::exec::operators::scan::graph_keys::{
-	EdgeTableSpec, compute_graph_ranges, visit_graph_range,
-};
+use crate::exec::operators::scan::graph_keys::{EdgeTableSpec, collect_adjacency};
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
 	OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
@@ -468,6 +466,9 @@ impl ExecOperator for ShortestPathExpand {
 
 			let mut edge_cache = FetchFieldStateCache::new();
 			let mut node_cache = FetchFieldStateCache::new();
+			// Per-table `graph_folded` answers, cached for the whole stream
+			// (path tips can span tables).
+			let mut folded_memo: HashMap<TableName, bool> = HashMap::new();
 
 			let mut out: Vec<Value> = Vec::with_capacity(scan_batch_size);
 
@@ -537,30 +538,30 @@ impl ExecOperator for ShortestPathExpand {
 						crate::exec::operators::check_cancelled(&ctx)?;
 						let depth = path.depth();
 
-						// Enumerate the tip's adjacency, skipping edges already on
-						// the path (DIFFERENT EDGES). Identical to `PathExpand`.
-						let ranges =
-							compute_graph_ranges(ns_id, db_id, &path.tip, dir, &edge_specs, &ctx)
-								.await?;
-
+						// Enumerate the tip's adjacency, retaining only edges
+						// not already on the path (DIFFERENT EDGES), filtered
+						// per streamed item. Identical to `PathExpand`.
 						let mut edge_ids: Vec<RecordId> = Vec::new();
 						let mut decoded_targets: Vec<Option<RecordId>> = Vec::new();
-						for gr in ranges {
-							visit_graph_range(
-								&txn,
-								&ctx,
-								gr,
-								version,
-								"ShortestPathExpand graph",
-								&mut |decoded| {
-									if !path.contains_edge(&decoded.edge) {
-										edge_ids.push(decoded.edge);
-										decoded_targets.push(decoded.target);
-									}
-								},
-							)
-							.await?;
-						}
+						collect_adjacency(
+							&txn,
+							ns_id,
+							db_id,
+							&path.tip,
+							dir,
+							&edge_specs,
+							&ctx,
+							version,
+							&mut folded_memo,
+							|item| {
+								if !path.contains_edge(&item.edge) {
+									edge_ids.push(item.edge);
+									decoded_targets.push(item.target);
+								}
+								Ok(())
+							},
+						)
+						.await?;
 
 						if edge_ids.is_empty() {
 							continue;

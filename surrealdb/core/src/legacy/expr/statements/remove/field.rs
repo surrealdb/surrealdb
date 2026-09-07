@@ -90,7 +90,7 @@ pub(crate) async fn remove_field_statement_compute(
 		.into());
 	};
 	// Refresh the table cache
-	txn.put_tb(
+	txn.replace_tb(
 		ns_name,
 		db_name,
 		&TableDefinition {

@@ -65,7 +65,7 @@ pub(crate) async fn alter_index_statement_compute(
 
 	// Refresh the table cache for indexes
 	let tb = txn.expect_tb(ns, db, &table).await?;
-	txn.put_tb(
+	txn.replace_tb(
 		ns_name,
 		db_name,
 		&TableDefinition {

@@ -20,7 +20,6 @@ use crate::expr::statements::define::DefineKind;
 use crate::expr::statements::define::index::DefineIndexStatement;
 use crate::expr::{Base, Idiom, Part};
 use crate::iam::{Action, ResourceKind};
-use crate::key::schema::TableKey;
 use crate::kvs::index::{
 	AbortLocalBuild, CleanUncommittedBuild, IndexBuilder, retire_durable_index,
 };
@@ -231,25 +230,17 @@ pub(crate) async fn define_index_statement_compute(
 		if purge_table_doc_ids {
 			txn.del_tb_doc_ids_deferred(tb.namespace_id, tb.database_id, &tb_name).await?;
 		}
-		// Serialize concurrent last-consumer replacements on last-writer-wins
-		// backends (TiKV). The `purge_table_doc_ids` decision above is read
-		// from a range scan of the index list, which those backends do not
-		// validate for write-conflicts; two `DEFINE INDEX OVERWRITE`s
-		// replacing the final two doc-ID consumers with non-doc-ID indexes
-		// could each see the other still present and both skip the purge,
-		// leaking the shared `!di`/`!dd` mappings. Reading the
-		// table-definition key here arms the write-conflict check against the
-		// `put_tb` in `refresh_table_index_cache` below (which targets the
-		// same key): the second committer is rejected, its whole transaction
+		// Concurrent last-consumer replacements are serialized by the locked
+		// table-definition read inside `refresh_table_index_cache`'s
+		// `replace_tb` below. The `purge_table_doc_ids` decision above is
+		// read from a range scan of the index list, which last-writer-wins
+		// backends (TiKV) do not validate for write-conflicts; two `DEFINE
+		// INDEX OVERWRITE`s replacing the final two doc-ID consumers with
+		// non-doc-ID indexes could otherwise each see the other still
+		// present and both skip the purge, leaking the shared `!di`/`!dd`
+		// mappings. The second committer is rejected, its whole transaction
 		// rolls back, and it re-evaluates the decision on retry as the sole
-		// remaining replacer. On conflict-serializing backends the `put_tb`
-		// write already serializes them.
-		let tb_key = TableKey {
-			ns: tb.namespace_id,
-			db: tb.database_id,
-			tb: std::borrow::Cow::Borrowed(&tb_name),
-		};
-		let _ = txn.get_key(&tb_key, None).await?;
+		// remaining replacer.
 	}
 	// A (re)defined index always gets a fresh internal id, so the retired
 	// index's durable state and generation-scoped queues can never be mistaken
@@ -311,7 +302,7 @@ pub(crate) async fn refresh_table_index_cache(
 	db: &str,
 	tb: &TableDefinition,
 ) -> Result<()> {
-	txn.put_tb(
+	txn.replace_tb(
 		ns,
 		db,
 		&TableDefinition {

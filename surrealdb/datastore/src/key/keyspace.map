@@ -36,6 +36,10 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /!ic                                                                                            IndexCompactionPrefix ->  (range)
 /!ic{ns}{db}{tb}                                                                              IndexCompactionTbPrefix ->  (range)
 /!ic{ns}{db}{tb}{ix}                                                                          IndexCompactionIxPrefix ->  (range)
+/!gf{ns}{db}{tb}{id}{dir}{nid}{uid}                                                                      GraphFoldKey ->  ()
+/!gf                                                                                                  GraphFoldPrefix ->  (range)
+/!gf{ns}{db}{tb}                                                                                    GraphFoldTbPrefix ->  (range)
+/!gf{ns}{db}{tb}{id}{dir}                                                                          GraphFoldDirPrefix ->  (range)
 /!rc{kind}{ns}{db}{tb}{ix}{expunge}{uid}                                                                   ReclaimKey ->  ReclaimState
 /!rc                                                                                                    ReclaimPrefix ->  (range)
 /!rc{kind}{ns}{db}{tb}                                                                                ReclaimTbPrefix ->  (range)
@@ -111,7 +115,12 @@ Generated from the `keyspace!` schema; do not edit by hand.
 /*{ns}*{db}*{tb}~{id}                                                                                   GraphIdPrefix ->  (range)
 /*{ns}*{db}*{tb}~{id}{dir}                                                                             GraphDirPrefix ->  (range)
 /*{ns}*{db}*{tb}~{id}{dir}{foreign_table}                                                     GraphForeignTablePrefix ->  (range)
-/*{ns}*{db}*{tb}~{id}{dir}{foreign_table}{foreign_key}{target_table}{target_key}                      GraphPointerKey ->  ()
+/*{ns}*{db}*{tb}~{id}{dir}{foreign_table}{foreign_key}{target_table}{target_key}                      GraphPointerKey ->  crate::values::graph::AdjacencyValue
+/*{ns}*{db}*{tb}^{id}{dir}{edge_table}{chunk_start}                                                      AdjacencyKey ->  crate::values::graph::AdjacencyBlock
+/*{ns}*{db}*{tb}^                                                                                     AdjacencyPrefix ->  (range)
+/*{ns}*{db}*{tb}^{id}                                                                               AdjacencyIdPrefix ->  (range)
+/*{ns}*{db}*{tb}^{id}{dir}                                                                         AdjacencyDirPrefix ->  (range)
+/*{ns}*{db}*{tb}^{id}{dir}{edge_table}                                                       AdjacencyEdgeTablePrefix ->  (range)
 /*{ns}*{db}*{tb}&{id}{foreign_table}{foreign_field}{foreign_key}                                         ReferenceKey ->  ()
 /*{ns}*{db}*{tb}&                                                                                     ReferencePrefix ->  (range)
 /*{ns}*{db}*{tb}&{id}                                                                               ReferenceIdPrefix ->  (range)

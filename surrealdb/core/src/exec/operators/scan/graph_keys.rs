@@ -1,27 +1,45 @@
-//! Graph adjacency key-scan machinery, shared across operators.
+//! Graph adjacency scan machinery, shared across operators.
 //!
 //! This module owns the low-level pieces that turn a `(record id, direction,
-//! edge tables)` triple into KV key ranges and decode the adjacency keys those
-//! ranges return. It was extracted from [`super::graph`] so that operators
-//! other than `GraphEdgeScan` (the GQL `Expand` / `PathExpand` operators, which
-//! must enumerate edges *per input row* rather than flattening the correlation
-//! away) can reuse the exact same range computation and decode logic.
+//! edge tables)` triple into adjacency ranges and enumerate the edges those
+//! ranges hold. It was extracted from [`super::graph`] so that operators
+//! other than `GraphEdgeScan` (the GQL `Expand` / `PathExpand` operators,
+//! which must enumerate edges *per input row* rather than flattening the
+//! correlation away) can reuse the exact same range computation and
+//! enumeration logic.
+//!
+//! Enumeration goes through the merged adjacency reader
+//! ([`MergedAdjacencyCursor`]), which serves packed blocks and per-edge
+//! pointer keys as one stream; on a vertex table that has never folded it
+//! collapses to the plain keys-only scan. A [`GraphRange`] also carries a
+//! [`DecodedGraphPrefix`] decoder for the few call sites that read the
+//! vertex-side range directly instead of through the merged reader —
+//! currently the bitmap-fusion reachability leaf and the legacy-format
+//! fallback scan of an edge's own (never-folded) adjacency.
 //!
 //! `GraphEdgeScan` is layered unchanged on top of these helpers.
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::ops::Bound;
 use std::sync::Arc;
+
+use anyhow::Result as AnyResult;
+use surrealdb_datastore::values::graph::GraphFoldScope;
 
 use super::common::evaluate_bound_key;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::exec::{ControlFlowExt, ExecutionContext, PhysicalExpr};
 use crate::expr::{ControlFlow, Dir};
-use crate::key::schema::{DecodedGraph, GraphDirPrefix, GraphForeignTablePrefix};
-/// Adjacency key decode types, re-exported so scan and expand operators don't
-/// need to reach into the `key::schema` module directly.
-pub(crate) use crate::key::schema::{DecodedGraphPrefix, DecodedGraphTarget};
-use crate::key::{KVRange, KVSubspace, TypedRange};
+use crate::idx::adjacency::{
+	AdjacencyScope, MergeStats, MergedAdjacencyCursor, MergedAdjacencyEdge, vertex_table_folded,
+};
+/// The decoder re-exported so scan and expand operators don't need to reach
+/// into the `key::schema` module directly for the range-decode call sites.
+pub(crate) use crate::key::schema::DecodedGraphPrefix;
+use crate::key::schema::{GraphDirPrefix, GraphForeignTablePrefix};
+use crate::key::{KVSubspace, RawRange};
+use crate::kvs::Transaction;
 use crate::val::{RecordId, RecordIdKey, TableName};
 
 /// Specification for an edge table to scan, optionally with ID range bounds.
@@ -38,23 +56,52 @@ pub struct EdgeTableSpec {
 	pub range_end: Bound<Arc<dyn PhysicalExpr>>,
 }
 
-/// One scannable adjacency range paired with the decoder for the keys it
-/// returns.
+/// One adjacency slice to scan for a single record + direction: the
+/// vertex-side key range, the decoder for keys read directly from it, and
+/// the scope fields the merged reader needs to mirror it onto the
+/// packed-block side.
 ///
 /// The decoder's stripped prefix covers every route field the range's bound
 /// fixes — through the direction for a wildcard scan, through the edge table
 /// for a per-table scan — so per-key decoding starts at the first field that
-/// varies inside this range. Keeping the pair together is also what upholds
-/// the decoder's contract that it is only fed keys from its own adjacency.
+/// varies inside this range. It is unused by callers that read through
+/// [`MergedAdjacencyCursor`], which decodes internally.
 pub(crate) struct GraphRange {
-	/// The KV range to open a cursor over.
-	pub range: TypedRange<()>,
-	/// The decoder for every key that range returns.
-	pub decoder: DecodedGraphPrefix,
+	/// The edge table the range is restricted to; `None` spans all of them.
+	pub(crate) edge_table: Option<TableName>,
+	/// The evaluated lower foreign-key bound, when the spec had one — the
+	/// block side's chunk-routing hint.
+	pub(crate) fk_lower: Option<RecordIdKey>,
+	/// The vertex-side key range, bounds applied.
+	pub(crate) range: RawRange,
+	/// The decoder for every key this range returns.
+	pub(crate) decoder: DecodedGraphPrefix,
+}
+
+impl GraphRange {
+	/// The merged reader's borrowed view of this range.
+	pub(crate) fn as_adjacency_scope<'a>(
+		&'a self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		vertex: &'a RecordId,
+		dir: Dir,
+	) -> AdjacencyScope<'a> {
+		AdjacencyScope {
+			ns,
+			db,
+			vertex,
+			dir: Some(dir),
+			edge_table: self.edge_table.as_ref(),
+			fk_lower: self.fk_lower.as_ref(),
+			delta_range: self.range.clone(),
+		}
+	}
 }
 
 /// Compute all KV key ranges to scan for a single record + direction, each
-/// paired with the decoder for its keys.
+/// paired with the decoder for its keys and the scope fields the merged
+/// reader needs.
 ///
 /// When `edge_tables` is empty, returns a single wildcard range covering all
 /// edges in the given direction. Otherwise returns one range per edge table,
@@ -79,8 +126,10 @@ pub(crate) async fn compute_graph_ranges(
 			dir,
 		};
 		let bound = prefix.encode_bound()?;
-		let range = prefix.typed(bound.clone().prefix_expect());
+		let range = prefix.raw(bound.clone().prefix_expect());
 		Ok(vec![GraphRange {
+			edge_table: None,
+			fk_lower: None,
 			range,
 			decoder: DecodedGraphPrefix::from_dir_bound(bound),
 		}])
@@ -94,6 +143,10 @@ pub(crate) async fn compute_graph_ranges(
 			// therefore supplies instead of re-decoding per key.
 			let start = eval_fk_bound(&spec.range_start, ctx).await?;
 			let end = eval_fk_bound(&spec.range_end, ctx).await?;
+			let fk_lower = match &start {
+				Bound::Included(key) | Bound::Excluded(key) => Some(key.clone()),
+				Bound::Unbounded => None,
+			};
 
 			let prefix = GraphForeignTablePrefix {
 				ns: ns_id,
@@ -107,8 +160,12 @@ pub(crate) async fn compute_graph_ranges(
 				prefix.encode_bound()?,
 				spec.table.clone(),
 			);
+			let range = prefix.range_where((as_cow_bound(&start), as_cow_bound(&end)))?;
+
 			ranges.push(GraphRange {
-				range: prefix.range_where((start.map(Cow::Owned), end.map(Cow::Owned)))?,
+				edge_table: Some(spec.table.clone()),
+				fk_lower,
+				range,
 				decoder,
 			});
 		}
@@ -116,61 +173,123 @@ pub(crate) async fn compute_graph_ranges(
 	}
 }
 
-/// Enumerate every adjacency key in one [`GraphRange`], decoding each key with
-/// the range's paired decoder and handing the result to `visit`.
-///
-/// The cursor is driven with the zero-copy `for_each` path: each key is
-/// decoded straight from the cursor's borrowed bytes, with no batch-arena
-/// copy on any backend. The visitor runs synchronously inside the chunk
-/// drive — on the mem backend that means under the transaction's read
-/// guard — so it must stay cheap and non-blocking (decode + push); anything
-/// that awaits belongs after this call returns. Chunks are capped at
-/// [`crate::kvs::NORMAL_BATCH_SIZE`] and cancellation is polled between them.
-///
-/// `op` names the scan in error contexts (e.g. `"graph"`, `"PathExpand
-/// graph"`), producing "Failed to open {op} cursor" / "Failed to scan {op}
-/// edge".
-pub(crate) async fn visit_graph_range(
-	txn: &crate::kvs::Transaction,
-	ctx: &ExecutionContext,
-	gr: GraphRange,
-	version: Option<u64>,
-	op: &str,
-	visit: &mut (dyn FnMut(DecodedGraph) + Send),
-) -> Result<(), ControlFlow> {
-	let mut cursor = txn
-		.open_keys_cursor(gr.range, crate::kvs::Direction::Forward, 0, version)
-		.await
-		.with_context(|| format!("Failed to open {op} cursor"))?;
-	loop {
-		crate::exec::operators::check_cancelled(ctx)?;
-		// A decode failure is captured and re-raised after the chunk (the
-		// visitor's return channel carries the kvs error type, not `anyhow`),
-		// keeping it distinct from a scan error.
-		let mut decode_err: Option<anyhow::Error> = None;
-		let stats = cursor
-			.for_each(crate::kvs::NORMAL_BATCH_SIZE, &mut |key| match gr.decoder.decode(key) {
-				Ok(decoded) => {
-					visit(decoded);
-					Ok(std::ops::ControlFlow::Continue(()))
-				}
-				Err(e) => {
-					decode_err = Some(e);
-					Ok(std::ops::ControlFlow::Break(()))
-				}
-			})
-			.await
-			.with_context(|| format!("Failed to scan {op} edge"))?;
-		if let Some(e) = decode_err {
-			return Err(e).context("Failed to decode graph key")?;
-		}
-		// A chunk that visited nothing means the range is exhausted (the
-		// decode-failure `Break` is handled above, and no other visitor
-		// outcome stops a chunk short).
-		if stats.rows == 0 {
-			return Ok(());
-		}
+fn as_cow_bound<'a>(bound: &'a Bound<RecordIdKey>) -> Bound<Cow<'a, RecordIdKey>> {
+	match bound {
+		Bound::Included(key) => Bound::Included(Cow::Borrowed(key)),
+		Bound::Excluded(key) => Bound::Excluded(Cow::Borrowed(key)),
+		Bound::Unbounded => Bound::Unbounded,
 	}
+}
+
+/// Enumerate every edge of one record + direction through the merged
+/// adjacency reader, handing each edge to `visit` as it is produced.
+///
+/// This is the whole-source enumeration the GQL expand operators do per
+/// input row; `GraphEdgeScan` drives the ranges and cursor itself for its
+/// batching, LIMIT and resume machinery. The visitor keeps the fan-out
+/// streaming — only what it chooses to retain is buffered, never the whole
+/// unfiltered adjacency — and must not hold the transaction borrow (store
+/// plain values; the cursor is dropped before the caller can use `txn`
+/// again). `folded_memo` caches the per-table `graph_folded` lookup across
+/// calls within one operator execution; `get_tb` is transaction-cache-stable
+/// within a statement, so the memo returns what each per-row lookup would.
+/// The returned stats accumulate across all ranges.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn collect_adjacency(
+	txn: &Transaction,
+	ns_id: NamespaceId,
+	db_id: DatabaseId,
+	rid: &RecordId,
+	dir: Dir,
+	edge_tables: &[EdgeTableSpec],
+	ctx: &ExecutionContext,
+	version: Option<u64>,
+	folded_memo: &mut HashMap<TableName, bool>,
+	mut visit: impl FnMut(MergedAdjacencyEdge) -> Result<(), ControlFlow>,
+) -> Result<MergeStats, ControlFlow> {
+	let ranges = compute_graph_ranges(ns_id, db_id, rid, dir, edge_tables, ctx).await?;
+	let folded = vertex_table_folded_memo(txn, ns_id, db_id, &rid.table, folded_memo)
+		.await
+		.map_err(ControlFlow::Err)?;
+	let fold_threshold = ctx.root().ctx.config.idx.graph_fold_threshold;
+	let mut stats = MergeStats::default();
+	for range in &ranges {
+		let mut cursor = MergedAdjacencyCursor::open(
+			txn,
+			range.as_adjacency_scope(ns_id, db_id, rid, dir),
+			folded,
+			version,
+		)
+		.await
+		.context("Failed to open graph cursor")?;
+		loop {
+			crate::exec::operators::check_cancelled(ctx)?;
+			let batch = cursor
+				.next_batch(crate::kvs::NORMAL_BATCH_SIZE)
+				.await
+				.context("Failed to scan graph edge")?;
+			if batch.is_empty() {
+				break;
+			}
+			for item in batch {
+				visit(item)?;
+			}
+		}
+		let range_stats = cursor.stats();
+		stats.block_hits += range_stats.block_hits;
+		stats.delta_hits += range_stats.delta_hits;
+	}
+	observe_fold_candidate(txn, ns_id, db_id, rid, dir, stats.delta_hits, fold_threshold);
+	Ok(stats)
+}
+
+/// As [`vertex_table_folded`], memoized per [`TableName`] for the lifetime
+/// of one operator execution. The answer is invariant per table within a
+/// statement (`get_tb` is transaction-cache-stable), so the memo exists
+/// only to skip the boxed catalog lookup the plain call pays per row.
+pub(crate) async fn vertex_table_folded_memo(
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	table: &TableName,
+	memo: &mut HashMap<TableName, bool>,
+) -> AnyResult<bool> {
+	if let Some(folded) = memo.get(table) {
+		return Ok(*folded);
+	}
+	let folded = vertex_table_folded(txn, ns, db, table).await?;
+	memo.insert(table.clone(), folded);
+	Ok(folded)
+}
+
+/// Observe a (vertex, direction) range for a background fold when a scan
+/// found it carrying at least `threshold` unfolded per-edge keys. A zero
+/// threshold disables fold initiation — no new observations — but not
+/// debt repayment: the background drain keeps consuming durable triggers
+/// queued by edge deletes on already-folded tables. Keys a fold cannot
+/// pack — legacy-format keys, and values carrying a section this build
+/// does not interpret — count toward the tally but are never drained by
+/// one; the observation set's drop-on-full bound keeps re-observing such
+/// ranges harmless.
+pub(crate) fn observe_fold_candidate(
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	rid: &RecordId,
+	dir: Dir,
+	delta_hits: u64,
+	threshold: usize,
+) {
+	if threshold == 0 || (delta_hits as usize) < threshold {
+		return;
+	}
+	txn.observe_graph_fold(GraphFoldScope {
+		ns,
+		db,
+		tb: rid.table.clone(),
+		id: rid.key.clone(),
+		dir,
+	});
 }
 
 /// Evaluate one [`EdgeTableSpec`] bound into the foreign-key bound a graph range

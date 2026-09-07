@@ -63,6 +63,10 @@ const NODE_MEMBERSHIP_UPDATE_TIMEOUT: Duration = Duration::from_secs(60);
 /// that land during the wait into a single pass.
 const INDEX_COMPACTION_TRIGGER_DEBOUNCE: Duration = Duration::from_millis(250);
 
+/// How long the graph fold task waits after a commit-time wake-up before
+/// running, for the same batching reason as the compaction debounce above.
+const GRAPH_FOLD_TRIGGER_DEBOUNCE: Duration = Duration::from_millis(250);
+
 enum NodeMembershipUpdateResult {
 	Updated,
 	Cancelled,
@@ -136,6 +140,12 @@ pub fn init(dbs: &Arc<Datastore>, canceller: CancellationToken, opts: &EngineOpt
 		opts,
 	));
 	tasks.push(spawn_task_index_compaction(
+		Weak::clone(&weak),
+		Arc::clone(triggers),
+		canceller.clone(),
+		opts,
+	));
+	tasks.push(spawn_task_graph_fold(
 		Weak::clone(&weak),
 		Arc::clone(triggers),
 		canceller.clone(),
@@ -313,6 +323,57 @@ fn spawn_task_index_compaction(
 			}
 		}
 		trace!("Background task exited: Running index compaction");
+	})
+}
+
+/// Spawns the graph adjacency fold task.
+///
+/// Runs at `opts.graph_fold_interval` and wakes early when a commit queues
+/// fold work or a read observes a hot scope. Keeps its own task rather than
+/// joining the maintenance scheduler for the same reason as index
+/// compaction: the queue is fed by the write and read paths, and each pass
+/// drains it to empty. The pass itself is a no-op while the fold threshold
+/// is 0.
+fn spawn_task_graph_fold(
+	dbs: Weak<Datastore>,
+	triggers: Arc<CommitTriggers>,
+	canceller: CancellationToken,
+	opts: &EngineOptions,
+) -> Task {
+	let interval = opts.graph_fold_interval;
+	into_task(async move {
+		trace!("Running graph fold every {interval:?}");
+		let mut ticker = interval_ticker(interval).await;
+		loop {
+			tokio::select! {
+				biased;
+				_ = canceller.cancelled() => break,
+				_ = triggers.graph_fold.notified() => {
+					tokio::select! {
+						biased;
+						_ = canceller.cancelled() => break,
+						_ = sleep(GRAPH_FOLD_TRIGGER_DEBOUNCE) => {}
+					}
+					let Some(dbs) = dbs.upgrade() else { break };
+					if let Err(e) = Datastore::graph_fold(dbs, interval, canceller.clone()).await {
+						if canceller.is_cancelled() {
+							break;
+						}
+						error!("Error running graph fold: {e}");
+					}
+				}
+				Some(_) = ticker.next() => {
+					let Some(dbs) = dbs.upgrade() else { break };
+					if let Err(e) = Datastore::graph_fold(dbs, interval, canceller.clone()).await {
+						if canceller.is_cancelled() {
+							break;
+						}
+						error!("Error running graph fold: {e}");
+					}
+				}
+			}
+		}
+		trace!("Background task exited: Running graph fold");
 	})
 }
 
@@ -1079,8 +1140,9 @@ mod test {
 		let opt = EngineOptions::default();
 		let dbs = Datastore::new("memory").await.unwrap();
 		let tasks = tasks::init(&dbs, can.clone(), &opt);
-		// heartbeat, event processing, index compaction, maintenance, sweeps.
-		assert_eq!(tasks.0.len(), 5);
+		// heartbeat, event processing, index compaction, graph fold,
+		// maintenance, sweeps.
+		assert_eq!(tasks.0.len(), 6);
 		can.cancel();
 		tasks.resolve().await.unwrap();
 	}
@@ -1096,7 +1158,7 @@ mod test {
 			.with_rpc_session_gc_interval(Duration::ZERO);
 		let dbs = Datastore::new("memory").await.unwrap();
 		let tasks = tasks::init(&dbs, can.clone(), &opt);
-		assert_eq!(tasks.0.len(), 4, "the empty sweep group should not be spawned");
+		assert_eq!(tasks.0.len(), 5, "the empty sweep group should not be spawned");
 		can.cancel();
 		tasks.resolve().await.unwrap();
 	}

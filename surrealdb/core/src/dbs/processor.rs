@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::ops::Bound;
 use std::sync::Arc;
 use std::vec;
 
@@ -16,6 +17,7 @@ use crate::exec::Error as ExecError;
 use crate::expr::Mock;
 use crate::expr::dir::Dir;
 use crate::expr::lookup::{ComputedLookupSubject, LookupKind};
+use crate::idx::adjacency::{AdjacencyScope, MergedAdjacencyCursor};
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, RecordIterator};
 use crate::idx::planner::{IterationStage, RecordStrategy};
 use crate::key::schema::{
@@ -1129,30 +1131,82 @@ pub(super) trait Collector {
 
 		// Pull out options
 		let tb = &from.table;
-		// Fetch start and end key pairs
-		let ranges = match (what.is_empty(), &kind) {
-			(true, LookupKind::Reference) => vec![
-				ReferenceIdPrefix {
-					ns: prefix.ns,
-					db: prefix.db,
-					tb: Cow::Borrowed(tb),
-					id: Cow::Borrowed(&from.key),
-				}
-				.range()?,
-			],
-			(true, LookupKind::Graph(dir)) => match dir {
-				// /ns/db/tb/id
-				Dir::Both => vec![
-					GraphIdPrefix {
+		// Get the transaction
+		let txn = ctx.tx();
+
+		if matches!(kind, LookupKind::Reference) {
+			// Fetch start and end key pairs
+			let ranges = if what.is_empty() {
+				vec![
+					ReferenceIdPrefix {
 						ns: prefix.ns,
 						db: prefix.db,
 						tb: Cow::Borrowed(tb),
 						id: Cow::Borrowed(&from.key),
 					}
 					.range()?,
-				],
-				x => vec![
-					GraphDirPrefix {
+				]
+			} else {
+				what.iter()
+					.map(|v| reference_lookup_range(v, ns, db, tb, &from.key))
+					.collect::<Result<Vec<_>>>()?
+			};
+			// Loop over the reference ranges
+			'keys: for rng in ranges {
+				// Create a new iterable range
+				let mut cursor =
+					txn.open_keys_cursor(rng, Direction::Forward, 0, opt.version).await?;
+				// Loop until no more entries
+				let mut count = 0;
+				loop {
+					let batch = cursor.next_batch(NORMAL_BATCH_SIZE).await?;
+					if batch.is_empty() {
+						break;
+					}
+					for key in batch.iter() {
+						if ctx.is_done(Some(count)).await? {
+							break 'keys;
+						}
+						self.collect(Collectable::Lookup(
+							doc_ctx.clone(),
+							kind.clone(),
+							key.to_vec(),
+						))
+						.await?;
+						count += 1;
+					}
+				}
+			}
+			return Ok(());
+		}
+
+		// Graph lookups go through the merged adjacency reader, which spans
+		// the per-edge pointer keys and — once the vertex table has folded —
+		// the packed blocks. Block-sourced entries carry the pointer-key
+		// bytes they had before folding, so the collectable's raw-key
+		// contract is unchanged. The vertex-delete cascade runs through this
+		// collector, so missing folded edges here would leak them.
+		let folded = crate::idx::adjacency::vertex_table_folded(&txn, ns, db, tb).await?;
+		let scopes: Vec<GraphLookupScope> = match (what.is_empty(), &kind) {
+			(true, LookupKind::Graph(dir)) => match dir {
+				// One scope spanning both directions, in key order.
+				Dir::Both => vec![GraphLookupScope {
+					dir: None,
+					edge_table: None,
+					fk_lower: None,
+					delta_range: GraphIdPrefix {
+						ns: prefix.ns,
+						db: prefix.db,
+						tb: Cow::Borrowed(tb),
+						id: Cow::Borrowed(&from.key),
+					}
+					.range()?,
+				}],
+				x => vec![GraphLookupScope {
+					dir: Some(*x),
+					edge_table: None,
+					fk_lower: None,
+					delta_range: GraphDirPrefix {
 						ns: prefix.ns,
 						db: prefix.db,
 						tb: Cow::Borrowed(tb),
@@ -1160,55 +1214,53 @@ pub(super) trait Collector {
 						dir: *x,
 					}
 					.range()?,
-				],
+				}],
 			},
 			(false, LookupKind::Graph(Dir::Both)) => what
 				.iter()
 				.flat_map(|v| {
 					[
-						computed_lookup_subject_presuf(
-							v,
-							ns,
-							db,
-							tb,
-							&from.key,
-							&LookupKind::Graph(Dir::In),
-						),
-						computed_lookup_subject_presuf(
-							v,
-							ns,
-							db,
-							tb,
-							&from.key,
-							&LookupKind::Graph(Dir::Out),
-						),
+						graph_lookup_scope(v, ns, db, tb, &from.key, Dir::In),
+						graph_lookup_scope(v, ns, db, tb, &from.key, Dir::Out),
 					]
 				})
 				.collect::<Result<Vec<_>>>()?,
-			(false, kind) => what
+			(false, LookupKind::Graph(dir)) => what
 				.iter()
-				.map(|v| computed_lookup_subject_presuf(v, ns, db, tb, &from.key, kind))
+				.map(|v| graph_lookup_scope(v, ns, db, tb, &from.key, *dir))
 				.collect::<Result<Vec<_>>>()?,
+			(_, LookupKind::Reference) => unreachable!("handled above"),
 		};
-		// Get the transaction
-		let txn = ctx.tx();
-		// Loop over the chosen edge types
-		'keys: for rng in ranges {
-			// Create a new iterable range
-			let mut cursor = txn.open_keys_cursor(rng, Direction::Forward, 0, opt.version).await?;
-			// Loop until no more entries
+		'scopes: for scope in &scopes {
+			let mut cursor = MergedAdjacencyCursor::open(
+				&txn,
+				AdjacencyScope {
+					ns,
+					db,
+					vertex: &from,
+					dir: scope.dir,
+					edge_table: scope.edge_table.as_ref(),
+					fk_lower: scope.fk_lower.as_ref(),
+					delta_range: scope.delta_range.clone(),
+				},
+				folded,
+				opt.version,
+			)
+			.await?;
 			let mut count = 0;
 			loop {
-				let batch = cursor.next_batch(NORMAL_BATCH_SIZE).await?;
+				// Keys-only: the collectable forwards raw key bytes and
+				// `process_lookup` performs the one decode, so the cursor
+				// must not decode each item a second time.
+				let batch = cursor.next_batch_keys(NORMAL_BATCH_SIZE).await?;
 				if batch.is_empty() {
 					break;
 				}
-				for key in batch.iter() {
+				for key in batch {
 					if ctx.is_done(Some(count)).await? {
-						break 'keys;
+						break 'scopes;
 					}
-					self.collect(Collectable::Lookup(doc_ctx.clone(), kind.clone(), key.to_vec()))
-						.await?;
+					self.collect(Collectable::Lookup(doc_ctx.clone(), kind.clone(), key)).await?;
 					count += 1;
 				}
 			}
@@ -1362,107 +1414,135 @@ impl From<RelateThrough> for Value {
 	}
 }
 
-/// The range of edges or back-links a lookup reaches, from the lookup subject and
-/// the lookup kind.
-pub(crate) fn computed_lookup_subject_presuf(
+/// The reference back-link range one lookup subject reaches.
+fn reference_lookup_range(
 	this: &ComputedLookupSubject,
 	ns: NamespaceId,
 	db: DatabaseId,
 	tb: &TableName,
 	id: &RecordIdKey,
-	kind: &LookupKind,
 ) -> Result<TypedRange<()>> {
-	let prefix = DbRoot {
-		ns,
-		db,
-	};
-	match kind {
-		// We're looking up record references
-		LookupKind::Reference => match this {
-			// Scan the entire range
-			ComputedLookupSubject::Table {
-				table,
-				referencing_field: None,
-			} => ReferenceForeignTablePrefix {
-				ns: prefix.ns,
-				db: prefix.db,
-				tb: Cow::Borrowed(tb),
-				id: Cow::Borrowed(id),
-				foreign_table: Cow::Borrowed(table),
-			}
-			.range(),
-			// Scan the entire range with a referencing field
-			ComputedLookupSubject::Table {
-				table,
-				referencing_field: Some(field),
-			} => ReferenceForeignFieldPrefix {
-				ns: prefix.ns,
-				db: prefix.db,
+	match this {
+		// Scan the entire range
+		ComputedLookupSubject::Table {
+			table,
+			referencing_field: None,
+		} => ReferenceForeignTablePrefix {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+			id: Cow::Borrowed(id),
+			foreign_table: Cow::Borrowed(table),
+		}
+		.range(),
+		// Scan the entire range with a referencing field
+		ComputedLookupSubject::Table {
+			table,
+			referencing_field: Some(field),
+		} => ReferenceForeignFieldPrefix {
+			ns,
+			db,
+			tb: Cow::Borrowed(tb),
+			id: Cow::Borrowed(id),
+			foreign_table: Cow::Borrowed(table),
+			foreign_field: Cow::Borrowed(field),
+		}
+		.range(),
+		// Scan a specific range
+		ComputedLookupSubject::Range {
+			table,
+			range,
+			referencing_field,
+		} => {
+			let Some(field) = referencing_field else {
+				bail!(
+					"Cannot scan a specific range of record references without a referencing field"
+				);
+			};
+
+			ReferenceForeignFieldPrefix {
+				ns,
+				db,
 				tb: Cow::Borrowed(tb),
 				id: Cow::Borrowed(id),
 				foreign_table: Cow::Borrowed(table),
 				foreign_field: Cow::Borrowed(field),
 			}
-			.range(),
-			// Scan a specific range
-			ComputedLookupSubject::Range {
-				table,
-				range,
-				referencing_field,
-			} => {
-				let Some(field) = referencing_field else {
-					bail!(
-						"Cannot scan a specific range of record references without a referencing field"
-					);
-				};
-
-				ReferenceForeignFieldPrefix {
-					ns: prefix.ns,
-					db: prefix.db,
-					tb: Cow::Borrowed(tb),
-					id: Cow::Borrowed(id),
-					foreign_table: Cow::Borrowed(table),
-					foreign_field: Cow::Borrowed(field),
-				}
-				.range_where((
-					range.start.as_ref().map(Cow::Borrowed),
-					range.end.as_ref().map(Cow::Borrowed),
-				))
-			}
-		},
-		// We're looking up graph edges
-		LookupKind::Graph(dir) => match this {
-			// Scan the entire range
-			ComputedLookupSubject::Table {
-				table,
-				..
-			} => GraphForeignTablePrefix {
-				ns: prefix.ns,
-				db: prefix.db,
-				tb: Cow::Borrowed(tb),
-				id: Cow::Borrowed(id),
-				dir: *dir,
-				foreign_table: Cow::Borrowed(table),
-			}
-			.range(),
-			// Scan a specific range. An edge key is a prefix of the pointer keys that
-			// extend it, so a bound on the foreign key covers that whole run.
-			ComputedLookupSubject::Range {
-				table,
-				range,
-				..
-			} => GraphForeignTablePrefix {
-				ns: prefix.ns,
-				db: prefix.db,
-				tb: Cow::Borrowed(tb),
-				id: Cow::Borrowed(id),
-				dir: *dir,
-				foreign_table: Cow::Borrowed(table),
-			}
 			.range_where((
 				range.start.as_ref().map(Cow::Borrowed),
 				range.end.as_ref().map(Cow::Borrowed),
-			)),
-		},
+			))
+		}
 	}
+}
+
+/// One graph adjacency slice a lookup subject reaches in one direction: the
+/// vertex-side key range plus the fields the merged reader mirrors onto the
+/// packed-block side.
+struct GraphLookupScope {
+	/// `None` spans both directions in one key-ordered scan.
+	dir: Option<Dir>,
+	edge_table: Option<TableName>,
+	fk_lower: Option<RecordIdKey>,
+	delta_range: RawRange,
+}
+
+/// The adjacency slice one lookup subject reaches in `dir`.
+fn graph_lookup_scope(
+	this: &ComputedLookupSubject,
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &TableName,
+	id: &RecordIdKey,
+	dir: Dir,
+) -> Result<GraphLookupScope> {
+	let table = match this {
+		ComputedLookupSubject::Table {
+			table,
+			..
+		}
+		| ComputedLookupSubject::Range {
+			table,
+			..
+		} => table,
+	};
+	let prefix = GraphForeignTablePrefix {
+		ns,
+		db,
+		tb: Cow::Borrowed(tb),
+		id: Cow::Borrowed(id),
+		dir,
+		foreign_table: Cow::Borrowed(table),
+	};
+	let (delta_range, fk_lower) = match this {
+		// Scan the entire range
+		ComputedLookupSubject::Table {
+			table: _,
+			..
+		} => (prefix.range()?, None),
+		// Scan a specific range. An edge key is a prefix of the pointer keys
+		// that extend it, so a bound on the foreign key covers that whole run.
+		ComputedLookupSubject::Range {
+			range,
+			..
+		} => {
+			let fk_lower = match &range.start {
+				Bound::Included(key) | Bound::Excluded(key) => Some(key.clone()),
+				Bound::Unbounded => None,
+			};
+			(
+				prefix.range_where((
+					range.start.as_ref().map(Cow::Borrowed),
+					range.end.as_ref().map(Cow::Borrowed),
+				))?,
+				fk_lower,
+			)
+		}
+	};
+	Ok(GraphLookupScope {
+		dir: Some(dir),
+		edge_table: Some(table.clone()),
+		fk_lower,
+		delta_range,
+	})
 }

@@ -1233,6 +1233,86 @@ kvs_test!(scan);
 kvs_test!(scanr);
 kvs_test!(skip);
 kvs_test!(batch);
+/// Two cursors over disjoint ranges of one transaction, batched in
+/// alternation. A reader that merges two key regions — packed graph
+/// adjacency blocks against their per-edge delta keys — holds both
+/// cursors at once and interleaves their batches, so every backend must
+/// keep two cursors live and independent on a single transaction.
+async fn cursors_interleave_on_one_transaction(b: &TestBackend) {
+	let ds = b.create_ds().await;
+	let tx = ds.transaction(Write).await.unwrap();
+	let mut left: Vec<Vec<u8>> = Vec::new();
+	let mut right: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+	for i in 0..17u8 {
+		let key = [b"a/".as_slice(), &[i]].concat();
+		tx.set(key.as_slice().into(), b"l".to_vec()).await.unwrap();
+		left.push(key);
+		let key = [b"b/".as_slice(), &[i]].concat();
+		let val = vec![i];
+		tx.set(key.as_slice().into(), val.clone()).await.unwrap();
+		right.push((key, val));
+	}
+	tx.commit().await.unwrap();
+
+	let tx = ds.transaction(Read).await.unwrap();
+	let mut keys_cursor = tx
+		.open_keys_cursor(
+			KeyRange {
+				start: b"a/".into(),
+				end: b"a0".into(),
+			},
+			Direction::Forward,
+			0,
+			None,
+		)
+		.await
+		.unwrap();
+	let mut vals_cursor = tx
+		.open_vals_cursor(
+			KeyRange {
+				start: b"b/".into(),
+				end: b"b0".into(),
+			},
+			Direction::Forward,
+			0,
+			None,
+		)
+		.await
+		.unwrap();
+
+	// Alternate small batches between the two cursors until both are
+	// exhausted; each must progress independently of the other.
+	let mut collected_left: Vec<Vec<u8>> = Vec::new();
+	let mut collected_right: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+	let (mut left_done, mut right_done) = (false, false);
+	while !left_done || !right_done {
+		if !left_done {
+			let batch = keys_cursor.next_batch(3).await.unwrap();
+			if batch.is_empty() {
+				left_done = true;
+			}
+			for k in &batch {
+				collected_left.push(k.to_vec());
+			}
+		}
+		if !right_done {
+			let batch = vals_cursor.next_batch(2).await.unwrap();
+			if batch.is_empty() {
+				right_done = true;
+			}
+			for (k, v) in &batch {
+				collected_right.push((k.to_vec(), v.to_vec()));
+			}
+		}
+	}
+	drop(keys_cursor);
+	drop(vals_cursor);
+	tx.cancel().await.unwrap();
+
+	assert_eq!(collected_left, left, "keys cursor lost or reordered rows while interleaved");
+	assert_eq!(collected_right, right, "vals cursor lost or reordered rows while interleaved");
+}
+
 kvs_test!(cursor_keys_resume_past_prefix);
 kvs_test!(cursor_vals_resume_past_prefix);
 kvs_test!(cursor_for_each_vals_matches_next_batch);
@@ -1243,4 +1323,5 @@ kvs_test!(cursor_for_each_vals_limit_counts_match_next_batch);
 kvs_test!(cursor_for_each_keys_break_resumes);
 kvs_test!(cursor_for_each_keys_matches_next_batch_reverse);
 kvs_test!(cursor_for_each_respects_skip_both_directions);
+kvs_test!(cursors_interleave_on_one_transaction);
 kvs_test!(cursor_keys_next_batch_skip_and_zero_limit);

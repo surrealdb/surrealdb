@@ -167,7 +167,7 @@ pub(crate) async fn alter_field_statement_compute(
 		}
 		.into());
 	};
-	txn.put_tb(
+	txn.replace_tb(
 		ns_name,
 		db_name,
 		&catalog::TableDefinition {

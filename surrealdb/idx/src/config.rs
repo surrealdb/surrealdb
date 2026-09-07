@@ -1,9 +1,8 @@
-//! The index engines' configurable resource limits.
+//! The index and graph-adjacency engines' configurable resource limits.
 //!
-//! These knobs govern the resources only index code allocates: the batch in
-//! which a table's shared doc-ID space is drawn from its distributed sequence,
-//! and the size of the two ANN vector caches (HNSW and DiskANN). Nothing above
-//! this layer allocates against them, so this layer owns them.
+//! A knob lives here when this layer is the lowest that reads it: layers
+//! above only thread the values down, so this layer owns each knob's
+//! invariant.
 //!
 //! `file_allowlist` belongs here for the same reason. The allowlist is only
 //! ever *enforced* by `crate::file::check_is_path_allowed`, and its only
@@ -34,6 +33,19 @@ pub struct IdxConfig {
 	pub diskann_cache_size: u64,
 	/// Specifies a list of paths in which files can be accessed (default: empty)
 	pub file_allowlist: Vec<PathBuf>,
+	/// How many unfolded per-edge adjacency keys a graph traversal tolerates
+	/// on one (vertex, direction) scope before observing it for a background
+	/// fold into packed blocks. Folding is always on at this built-in
+	/// threshold: the value is deliberately not read from the config map, so
+	/// every node against a shared datastore folds identically. `0` disables
+	/// folding entirely — nothing is observed, queued or folded — and exists
+	/// for code constructing the config directly (tests needing a quiescent
+	/// adjacency layer). (default: 64)
+	pub graph_fold_threshold: usize,
+	/// How many adjacency keys one fold pass consumes per transaction.
+	/// Bounds the fold's transaction size on high-degree vertices; a scope
+	/// with more keys drains over several passes. (default: 1024)
+	pub graph_fold_batch: usize,
 }
 
 impl Default for IdxConfig {
@@ -43,6 +55,8 @@ impl Default for IdxConfig {
 			hnsw_cache_size: 256 * 1024 * 1024,
 			diskann_cache_size: 256 * 1024 * 1024,
 			file_allowlist: Vec::new(),
+			graph_fold_threshold: 64,
+			graph_fold_batch: 1024,
 		}
 	}
 }
@@ -52,6 +66,7 @@ impl cnf::Config for IdxConfig {
 		map.parse_key("table_doc_ids_batch_size", &mut self.table_doc_ids_batch_size)
 			.parse_key("hnsw_cache_size", &mut self.hnsw_cache_size)
 			.parse_key("diskann_cache_size", &mut self.diskann_cache_size)
+			.parse_key("graph_fold_batch", &mut self.graph_fold_batch)
 			.parse_key_with("file_allowlist", &mut self.file_allowlist, |x| {
 				// FIXME: We really shouldn't be doing random, faillable, IO when reading
 				// configuration values. But no way to fix it without restructuring the

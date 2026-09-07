@@ -66,7 +66,8 @@ use crate::val::{Datetime, TableName, Value};
 	cache_lives_ts: Uuid::default(),
 	graphql_alias: None,
 	graphql_deprecated: None,
-}, 163)]
+	graph_folded: false,
+}, 164)]
 #[case::subscription(StoredSubscriptionDefinition {
 	id: Uuid::default(),
 	node: Uuid::default(),

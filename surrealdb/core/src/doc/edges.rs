@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 
 use anyhow::{Result, ensure};
+use surrealdb_datastore::values::graph::AdjacencyValue;
 use surrealdb_types::ToSql;
 
 use crate::catalog::providers::TableProvider;
@@ -176,11 +177,12 @@ impl Document {
 				target_key: Cow::Borrowed(&l.key),
 			};
 
+			let live = AdjacencyValue::live();
 			futures::try_join!(
-				txn.set_key(&ltr, &()),
+				txn.set_key(&ltr, &live),
 				txn.set_key(&etl, &()),
 				txn.set_key(&etr, &()),
-				txn.set_key(&rtl, &()),
+				txn.set_key(&rtl, &live),
 			)?;
 			// Reset `in` / `out` to the canonical RELATE endpoints so a
 			// user-supplied document body can't override the edge's

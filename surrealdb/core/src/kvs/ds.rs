@@ -1,12 +1,10 @@
 use std::any::TypeId;
 use std::borrow::Cow;
-use std::collections::BinaryHeap;
 #[cfg(not(target_family = "wasm"))]
 use std::collections::HashMap;
-#[cfg(target_family = "wasm")]
-use std::collections::HashSet;
 #[cfg(not(target_family = "wasm"))]
 use std::collections::hash_map::Entry;
+use std::collections::{BinaryHeap, HashSet};
 use std::fmt::{self, Display};
 #[cfg(storage)]
 use std::path::PathBuf;
@@ -29,6 +27,7 @@ use reblessive::TreeStack;
 use surrealdb_cnf::ConfigMap;
 use surrealdb_cnf::dynamic::DynamicConfiguration;
 use surrealdb_datastore::triggers::CommitTriggers;
+use surrealdb_datastore::values::graph::GraphFoldScope;
 use surrealdb_kvs::TransactionType::*;
 use surrealdb_kvs::{DestroyRange, DestroyRangeHandle, TransactionType};
 use surrealdb_types::{AuthError, Error as TypesError, SurrealValue, object};
@@ -83,11 +82,11 @@ use crate::idx::index::IndexOperation;
 use crate::idx::trees::store::IndexStores;
 use crate::key::reclaim::{Expunge, ReclaimKind, ReclaimState};
 use crate::key::schema::{
-	BootstrapKey, DbRoot, DocKeyPrefix, DocLookupPrefix, DocPendingPrefix, IdxRoot,
-	IndexCompactionIxPrefix, IndexCompactionKey, IndexCompactionPrefix, MigrationKey,
-	MigrationPrefix, NodeKey, NodeLiveQueryKey, NodeLiveQueryPrefix, NsRoot, ReclaimKey,
-	ReclaimPrefix, SessionKey, SessionPrefix, StorageVersionKey, SubscriptionKey,
-	VersionHistoryPrefix, VersionKey,
+	BootstrapKey, DbRoot, DocKeyPrefix, DocLookupPrefix, DocPendingPrefix, GraphFoldDirPrefix,
+	GraphFoldKey, GraphFoldPrefix, IdxRoot, IndexCompactionIxPrefix, IndexCompactionKey,
+	IndexCompactionPrefix, MigrationKey, MigrationPrefix, NodeKey, NodeLiveQueryKey,
+	NodeLiveQueryPrefix, NsRoot, ReclaimKey, ReclaimPrefix, SessionKey, SessionPrefix,
+	StorageVersionKey, SubscriptionKey, VersionHistoryPrefix, VersionKey,
 };
 use crate::key::{
 	AnyRange, KVKey, KVKeyDecode, KVSubspace, KVValue, Key, KeyRange, RawRange, Resumable,
@@ -3840,6 +3839,281 @@ impl Datastore {
 
 	/// Compacts each distinct index referenced by the given queue keys.
 	///
+	/// Folds queued graph adjacency scopes into packed blocks.
+	///
+	/// Modeled on [`Self::index_compaction`]: leased so one node drains the
+	/// queue at a time, a rotating window so a hot table cannot starve
+	/// later-sorting ones, bounded read batches, and queue cleanup in
+	/// separate bounded write transactions. Before the leased drain, this
+	/// node's read-path observations are flushed into the durable queue —
+	/// they are held in memory because a read cannot write a queue entry.
+	///
+	/// The pass runs regardless of `graph_fold_threshold`: a zero threshold
+	/// disables new read-path observations (fold initiation), never debt
+	/// repayment — edge deletes on already-folded tables keep writing
+	/// tombstones and queueing durable triggers whatever the threshold, and
+	/// leaving those queued would grow the queue and the per-read tombstone
+	/// subtraction without bound.
+	pub async fn graph_fold(
+		dbs: Arc<Datastore>,
+		interval: Duration,
+		canceller: CancellationToken,
+	) -> Result<(usize, usize)> {
+		trace!(target: TARGET, "Attempting graph fold process");
+		Self::flush_graph_fold_observations(&dbs).await?;
+		let lh = LeaseHandler::new_with_canceller(
+			dbs.sequences.clone(),
+			dbs.id,
+			dbs.transaction_factory.clone(),
+			TaskLeaseType::GraphFold,
+			interval * 2,
+			canceller.clone(),
+		)?;
+		let batch = dbs.config.idx.graph_fold_batch;
+		let mut count_iteration = 0;
+		let mut count_error = 0;
+		let queue = GraphFoldPrefix {}.range()?;
+		let mut window = queue.clone();
+		// Whether the sweep since the last window wrap deleted a queue entry
+		// or folded a scope. A wrap-around re-scan retries entries retained
+		// by failed folds; without progress between two wraps every remaining
+		// entry has just failed again, so the call yields to the next
+		// interval instead of hot-looping on a poison scope.
+		let mut progressed = false;
+		'fold: loop {
+			Self::ensure_not_cancelled(&canceller)?;
+			// Without the lease, another node is draining the queue.
+			if !lh.has_lease().await? {
+				break 'fold;
+			}
+			Self::ensure_not_cancelled(&canceller)?;
+			trace!(target: TARGET, "Running graph fold process");
+			// One bounded, keys-only batch of queue entries per iteration,
+			// in a short-lived read transaction.
+			let keys = {
+				let txn = dbs.transaction(Read).await?;
+				let res =
+					txn.keys(window.clone(), INDEX_COMPACTION_QUEUE_BATCH_SIZE, 0, None).await;
+				let _ = txn.cancel().await;
+				res?
+			};
+			Self::ensure_not_cancelled(&canceller)?;
+			if keys.is_empty() {
+				if window.start() == queue.start() || !progressed {
+					// Nothing left anywhere in the queue, or everything left
+					// belongs to scopes that failed this sweep.
+					break 'fold;
+				}
+				// End of the range: wrap to re-scan entries skipped when the
+				// window seeked past a partially-drained scope, or retained
+				// when a scope's fold failed.
+				progressed = false;
+				window = queue.clone();
+				continue;
+			}
+			count_iteration += 1;
+			// The distinct scopes this batch names, in queue order, and each
+			// entry's scope for the cleanup below. Entries that fail to
+			// decode name nothing foldable; the cleanup removes them.
+			let mut scopes: Vec<GraphFoldScope> = Vec::new();
+			let mut seen: HashSet<GraphFoldScope> = HashSet::new();
+			let mut key_scopes: Vec<Option<GraphFoldScope>> = Vec::with_capacity(keys.len());
+			for key in &keys {
+				match GraphFoldKey::decode_key(key) {
+					Ok(key) => {
+						let scope = GraphFoldScope {
+							ns: key.ns,
+							db: key.db,
+							tb: key.tb.into_owned(),
+							id: key.id.into_owned(),
+							dir: key.dir,
+						};
+						if seen.insert(scope.clone()) {
+							scopes.push(scope.clone());
+						}
+						key_scopes.push(Some(scope));
+					}
+					Err(e) => {
+						warn!(target: TARGET, "Skipping undecodable graph fold queue entry: {e}");
+						key_scopes.push(None);
+					}
+				}
+			}
+			// The scopes whose drain completed; only their queue entries are
+			// deleted below. A failed scope keeps its entries, so its fold
+			// debt survives for the wrap-around re-scan and later calls.
+			let mut folded: HashSet<GraphFoldScope> = HashSet::with_capacity(scopes.len());
+			for scope in scopes {
+				match Self::fold_queued_scope(&dbs, &scope, batch, &canceller).await {
+					Ok(()) => {
+						folded.insert(scope);
+					}
+					Err(e) => {
+						if canceller.is_cancelled() {
+							return Err(e);
+						}
+						count_error += 1;
+						warn!(target: TARGET, "Graph fold failed for a queued scope: {e}");
+					}
+				}
+			}
+			// Seek the next batch past the last scope's run of queue entries,
+			// so a scope that keeps re-enqueueing cannot pin the window.
+			if let Some(last_key) = keys.last() {
+				window = match GraphFoldKey::decode_key(last_key) {
+					Ok(last) => {
+						let covered = GraphFoldDirPrefix {
+							ns: last.ns,
+							db: last.db,
+							tb: Cow::Owned(last.tb.into_owned()),
+							id: Cow::Owned(last.id.into_owned()),
+							dir: last.dir,
+						}
+						.skip_extensions()?;
+						queue.clone().resume_after(&covered, Direction::Forward)
+					}
+					Err(_) => queue.clone().resume_after(last_key, Direction::Forward),
+				};
+			}
+			// Delete this batch's consumed queue entries in a separate bounded
+			// write transaction: entries whose scope folded, and undecodable
+			// entries — which can never be folded — deleted as bytes so they
+			// do not park at the head of the queue forever.
+			let deletable: Vec<&Vec<u8>> = keys
+				.iter()
+				.zip(&key_scopes)
+				.filter(|(_, scope)| scope.as_ref().is_none_or(|s| folded.contains(s)))
+				.map(|(k, _)| k)
+				.collect();
+			if deletable.is_empty() {
+				continue;
+			}
+			progressed = true;
+			loop {
+				let txn = dbs.transaction(Write).await?;
+				if let Err(e) = Self::ensure_not_cancelled(&canceller) {
+					let _ = txn.cancel().await;
+					return Err(e);
+				}
+				for k in &deletable {
+					if let Err(e) = txn.del(Key::from(k.as_slice())).await {
+						warn!(target: TARGET, "Failed to delete graph fold queue entry: {e}");
+					}
+				}
+				if let Err(e) = txn.commit().await {
+					if Self::cancel_and_retry_index_operation_conflict(
+						&txn,
+						&e,
+						"Retryable conflict committing graph fold queue cleanup, retrying",
+					)
+					.await
+					{
+						continue;
+					}
+					warn!(target: TARGET, "Failed to commit graph fold queue cleanup: {e}");
+					break 'fold;
+				}
+				break;
+			}
+		}
+		Ok((count_iteration, count_error))
+	}
+
+	/// Writes this node's read-path fold observations into the durable
+	/// queue: blind puts of per-observation keys, so nothing contends.
+	async fn flush_graph_fold_observations(dbs: &Arc<Datastore>) -> Result<()> {
+		let observations = dbs.triggers.drain_graph_fold_observations();
+		if observations.is_empty() {
+			return Ok(());
+		}
+		let txn = dbs.transaction(Write).await?;
+		for scope in &observations {
+			let key = GraphFoldKey {
+				ns: scope.ns,
+				db: scope.db,
+				tb: Cow::Borrowed(&scope.tb),
+				id: Cow::Borrowed(&scope.id),
+				dir: scope.dir,
+				nid: dbs.id,
+				uid: Uuid::now_v7(),
+			};
+			if let Err(e) = txn.put_key(&key, &()).await {
+				let _ = txn.cancel().await;
+				return Err(e);
+			}
+		}
+		txn.commit().await
+	}
+
+	/// Drains one queued scope: bounded fold passes, each in its own
+	/// transaction, retrying a bounded number of times when a concurrent
+	/// edge write conflicts with a pass.
+	async fn fold_queued_scope(
+		dbs: &Arc<Datastore>,
+		scope: &GraphFoldScope,
+		batch: usize,
+		canceller: &CancellationToken,
+	) -> Result<()> {
+		// The catalog write that marks the vertex table folded addresses the
+		// namespace and database by name. A namespace or database dropped
+		// since the entry was queued leaves nothing to fold.
+		let (ns_name, db_name) = {
+			let txn = dbs.transaction(Read).await?;
+			let ns = txn
+				.all_ns(None)
+				.await?
+				.iter()
+				.find(|n| n.namespace_id == scope.ns)
+				.map(|n| n.name.to_string());
+			let db = txn
+				.all_db(scope.ns, None)
+				.await?
+				.iter()
+				.find(|d| d.database_id == scope.db)
+				.map(|d| d.name.to_string());
+			let _ = txn.cancel().await;
+			match (ns, db) {
+				(Some(ns), Some(db)) => (ns, db),
+				_ => return Ok(()),
+			}
+		};
+		let vertex = crate::val::RecordId::new(scope.tb.clone(), scope.id.clone());
+		let mut retries = 0;
+		loop {
+			Self::ensure_not_cancelled(canceller)?;
+			let txn = dbs.transaction(Write).await?;
+			let outcome = match crate::idx::adjacency::fold_scope(
+				&txn, scope.ns, scope.db, &ns_name, &db_name, &vertex, scope.dir, batch,
+			)
+			.await
+			{
+				Ok(outcome) => outcome,
+				Err(e) => {
+					let _ = txn.cancel().await;
+					return Err(e);
+				}
+			};
+			match txn.commit().await {
+				Ok(()) => {
+					retries = 0;
+					if !outcome.has_more {
+						return Ok(());
+					}
+				}
+				Err(e) => {
+					// A concurrent RELATE or DELETE on the scope beat this
+					// pass; take a fresh snapshot and try again, bounded so a
+					// write-hot vertex cannot spin the task.
+					if surrealdb_datastore::is_retryable_transaction_conflict(&e) && retries < 5 {
+						retries += 1;
+						continue;
+					}
+					return Err(e);
+				}
+			}
+		}
+	}
+
 	/// On native targets, compaction tasks are spawned in parallel — one per
 	/// distinct index — and joined afterwards. Duplicate queue entries for
 	/// the same index are deduplicated via a [`HashMap`] so only one task is

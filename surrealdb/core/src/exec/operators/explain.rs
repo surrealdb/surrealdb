@@ -381,6 +381,16 @@ fn format_metrics_text(metrics: &OperatorMetrics, redact_volatile_explain_attrs:
 	if scanned > 0 {
 		extra.push_str(&format!(", scanned: {}", scanned));
 	}
+	// The storage-tier split of `scanned`: entries served from packed
+	// adjacency blocks vs per-edge pointer keys.
+	let block_hits = metrics.block_hits();
+	if block_hits > 0 {
+		extra.push_str(&format!(", block_hits: {}", block_hits));
+	}
+	let delta_hits = metrics.delta_hits();
+	if delta_hits > 0 {
+		extra.push_str(&format!(", delta_hits: {}", delta_hits));
+	}
 	let skipped = metrics.skipped_rows();
 	if skipped > 0 {
 		extra.push_str(&format!(", skipped: {}", skipped));
@@ -513,6 +523,14 @@ fn format_analyze_plan_json(
 			let scanned = metrics.edges_scanned();
 			if scanned > 0 {
 				metrics_obj.insert("edges_scanned", Value::from(scanned as i64));
+			}
+			let block_hits = metrics.block_hits();
+			if block_hits > 0 {
+				metrics_obj.insert("block_hits", Value::from(block_hits as i64));
+			}
+			let delta_hits = metrics.delta_hits();
+			if delta_hits > 0 {
+				metrics_obj.insert("delta_hits", Value::from(delta_hits as i64));
 			}
 			let skipped = metrics.skipped_rows();
 			if skipped > 0 {

@@ -114,7 +114,7 @@ pub(crate) async fn alter_table_statement_compute(
 	}
 
 	// Set the table definition
-	txn.put_tb(ns_name, db_name, &dt).await?;
+	txn.replace_tb(ns_name, db_name, &dt).await?;
 	// A retention written here makes the changefeed collector's watermark stale,
 	// so the fence is bumped in the same transaction: a collection page that
 	// armed against it is rejected rather than deleting under the old policy.
