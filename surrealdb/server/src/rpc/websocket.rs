@@ -26,6 +26,7 @@ use surrealdb_rpc::error::{invalid_params, stream_not_found};
 use surrealdb_rpc::{DbResponse, DbResult, Method};
 use surrealdb_types::{Array, Error as TypesError, HashMap, ToSql, Value};
 use tokio::sync::RwLock;
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -74,6 +75,19 @@ const SERVER_SHUTTING_DOWN: &str = "The server is gracefully shutting down";
 /// instead; this constant is `begin`-only because `begin` bypasses the
 /// executor and goes straight to `kvs().transaction(...)`.
 const REQUEST_CANCELLED: &str = "The request was cancelled because the WebSocket is closing";
+
+/// An error string sent when a client stops reading the notifications its
+/// live queries produce, filling the connection's outbound queue
+const CLIENT_LAGGING: &str = "Notifications were produced faster than this connection read them";
+
+/// How long the write loop may spend, in total, draining what is still
+/// queued once the connection is being torn down.
+///
+/// Short on purpose: the frame this exists to deliver is a close frame
+/// naming why the connection is ending, and the client most in need of it is
+/// one that may have stopped reading altogether. Waiting longer would delay
+/// the teardown of a connection that is already over.
+const TEARDOWN_FLUSH_GRACE: Duration = Duration::from_secs(1);
 
 /// Build an OTel parent `Context` from W3C Trace Context propagation
 /// headers carried in the RPC envelope's `trace_context` field. Reuses
@@ -348,11 +362,7 @@ impl Websocket {
 					// Capture the byte length before the message is moved
 					// into the sink so we can fold it into the outbound
 					// Prometheus counter when metrics are enabled.
-					let out_bytes = match &res {
-						Message::Text(msg) => msg.len(),
-						Message::Binary(msg) => msg.len(),
-						_ => 0,
-					};
+					let out_bytes = Self::payload_len(&res);
 					// Check if the socket is buffered
 					let result = match buffer {
 						// Send the message to the socket buffer
@@ -373,22 +383,8 @@ impl Websocket {
 						break;
 					}
 					// Record outbound bytes on success. We deliberately avoid
-					// double-counting on the error path above. `ctx` carries
-					// `(namespace, database, user)` from the bound session;
-					// record-access principals collapse to the `<record>`
-					// sentinel in `NetworkBytesEventCtx`'s `From<&Session>`
-					// impl to keep dimensional cardinality bounded.
-					if out_bytes > 0 {
-						let ctx = rpc.default_network_ctx().await;
-						rpc.datastore.observer().on_network_bytes(&NetworkBytesEvent {
-							safe: NetworkBytesEventSafe {
-								direction: NetworkDirection::Sent,
-								protocol: SessionProtocol::WebSocket,
-								bytes: out_bytes as u64,
-							},
-							ctx,
-						});
-					}
+					// double-counting on the error path above.
+					rpc.record_sent_bytes(out_bytes).await;
 				},
 				// Wait for a short period of time
 				_ = tokio::time::sleep(period), if buffer => {
@@ -405,6 +401,113 @@ impl Websocket {
 						break;
 					}
 				}
+			}
+		}
+		// Write out whatever teardown left in the channel.
+		rpc.flush_on_teardown(&mut socket, &mut internal_receiver).await;
+	}
+
+	/// Write what is already queued, so a close frame that teardown put in
+	/// the channel still reaches the client.
+	///
+	/// Teardown queues its close frame and trips the connection canceller,
+	/// and the write loop polls that canceller ahead of the response channel
+	/// so it cannot be starved. What guarantees the frame goes out is
+	/// therefore this, on the way past: without it the client would be left
+	/// to infer an unexplained disconnect in place of a stated reason.
+	///
+	/// Only what is already queued, because senders remain alive and a `recv`
+	/// would wait for a message that is not coming. Bounded by
+	/// [`TEARDOWN_FLUSH_GRACE`] across the whole drain and abandoned on the
+	/// first write error: the client this serves most is by definition one
+	/// that may have stopped reading, and the connection is over either way.
+	async fn flush_on_teardown<S: SinkExt<Message> + Unpin>(
+		&self,
+		socket: &mut S,
+		internal_receiver: &mut Receiver<Message>,
+	) where
+		<S as Sink<Message>>::Error: fmt::Display,
+	{
+		let deadline = tokio::time::Instant::now() + TEARDOWN_FLUSH_GRACE;
+		while let Ok(msg) = internal_receiver.try_recv() {
+			// Before the message moves into the sink, as in the write loop.
+			let out_bytes = Self::payload_len(&msg);
+			if !Self::teardown_progressed(tokio::time::timeout_at(deadline, socket.feed(msg)).await)
+			{
+				// Stop draining, but still flush below: what already reached
+				// the sink is worth writing even when the frame behind it was
+				// not, and the close frame is usually the one in front.
+				break;
+			}
+			// A frame written here left the machine like any other, so it is
+			// charged like any other.
+			self.record_sent_bytes(out_bytes).await;
+		}
+		// Flush unconditionally, not just when something was drained above.
+		// In buffered mode the write loop feeds without flushing and relies on
+		// its periodic flush, so a frame it took from the channel before
+		// handing over is sitting in the sink rather than on the wire -- and a
+		// frame in the sink has not reached the client any more than one left
+		// in the channel had.
+		Self::teardown_progressed(tokio::time::timeout_at(deadline, socket.flush()).await);
+	}
+
+	/// The payload bytes an outbound frame is charged for.
+	///
+	/// Ping, Pong and Close carry nothing a tenant is billed for and report
+	/// zero, which [`Self::record_sent_bytes`] then short-circuits on.
+	fn payload_len(msg: &Message) -> usize {
+		match msg {
+			Message::Text(msg) => msg.len(),
+			Message::Binary(msg) => msg.len(),
+			_ => 0,
+		}
+	}
+
+	/// Charge a frame's payload to the outbound network counters.
+	///
+	/// Every path that hands a frame to the sink goes through this, because a
+	/// frame written but not counted understates the tenant-attributed
+	/// counters that chargeback reads. Called after the hand-off succeeds, so
+	/// a frame the sink refused is not charged.
+	///
+	/// `ctx` carries `(namespace, database, user)` from the bound session;
+	/// record-access principals collapse to the `<record>` sentinel in
+	/// [`NetworkBytesEventCtx`]'s `From<&Session>` impl to keep dimensional
+	/// label cardinality bounded.
+	async fn record_sent_bytes(&self, bytes: usize) {
+		if bytes == 0 {
+			return;
+		}
+		let ctx = self.default_network_ctx().await;
+		self.datastore.observer().on_network_bytes(&NetworkBytesEvent {
+			safe: NetworkBytesEventSafe {
+				direction: NetworkDirection::Sent,
+				protocol: SessionProtocol::WebSocket,
+				bytes: bytes as u64,
+			},
+			ctx,
+		});
+	}
+
+	/// Whether a teardown write got through, tracing the reason when it did
+	/// not. A failure ends the drain: the connection is going away regardless,
+	/// and the client it serves may be one that stopped reading.
+	fn teardown_progressed<E: fmt::Display>(
+		result: Result<Result<(), E>, tokio::time::error::Elapsed>,
+	) -> bool {
+		match result {
+			Ok(Ok(())) => true,
+			Ok(Err(err)) => {
+				// Output any errors if not a close error
+				if err.to_string() != CONN_CLOSED_ERR {
+					trace!("WebSocket error while draining on teardown: {err}");
+				}
+				false
+			}
+			Err(_) => {
+				trace!("Gave up draining a WebSocket that stopped reading");
+				false
 			}
 		}
 	}
@@ -575,12 +678,21 @@ impl Websocket {
 		if let Ok(req) = &parsed {
 			// Now that we know the method, update the tracing span so
 			// structured fields show up on any OTel-bridged trace.
-			span.record("rpc.method", req.method.to_str());
-			span.record("otel.name", format!("surrealdb.rpc/{}", req.method));
-			span.record(
-				"rpc.request_id",
-				req.id.as_ref().map(|id| id.to_sql()).unwrap_or_default(),
-			);
+			//
+			// Guarded because the field values are built eagerly whether or
+			// not anything consumes them: `span` is a `debug_span!`, which no
+			// subscriber is interested in at the default log level, and
+			// `record` on such a span is a no-op that still costs its
+			// arguments. Two of these allocate, on a path that runs once per
+			// inbound message.
+			if !span.is_disabled() {
+				span.record("rpc.method", req.method.to_str());
+				span.record("otel.name", format!("surrealdb.rpc/{}", req.method));
+				span.record(
+					"rpc.request_id",
+					req.id.as_ref().map(|id| id.to_sql()).unwrap_or_default(),
+				);
+			}
 			// If the client included W3C Trace Context propagation
 			// headers in the RPC envelope, use them as the OTel parent
 			// of the per-message span. WebSocket has no per-message
@@ -764,6 +876,63 @@ impl Websocket {
 		// Cancel the WebSocket tasks AND the executor cancel flag so any
 		// in-flight queries return early.
 		rpc.cancel_all();
+	}
+
+	/// Queue a live-query notification on this connection, without waiting.
+	///
+	/// Reports whether the notification is on its way to the client.
+	///
+	/// The outbound channel is bounded and shared by every response on the
+	/// connection, so a client that has stopped reading fills it. Waiting for
+	/// capacity here would park one encoded notification per notification
+	/// produced, with nothing bounding how many accumulate: the dispatcher
+	/// that calls this keeps receiving from the datastore regardless of
+	/// whether any delivery ever completes. So delivery never waits, and a
+	/// connection whose queue is full is closed carrying the reason instead.
+	/// Closing rather than dropping the notification is what tells the client
+	/// it fell behind -- this transport retains nothing, so a notification
+	/// dropped here could not be recovered, and a client told nothing would
+	/// read the gap as quiescence.
+	///
+	/// The last slot is held back for that close frame, so a client that has
+	/// fallen behind can be told why. Delivering the frame is still
+	/// best-effort: another response may take the reserved slot first, and the
+	/// teardown has to happen either way.
+	pub(crate) fn deliver_notification(&self, response: DbResponse) -> bool {
+		// A connection already being torn down takes nothing further. It stays
+		// reachable from the live-query registry until its tasks finish, so
+		// notifications keep arriving while the write loop drains, and the
+		// drain frees the very capacity the check below reads. A frame queued
+		// behind the close frame is one the protocol forbids -- the sink
+		// refuses data after a close -- and that refusal would end the drain
+		// holding the close frame it was there to deliver.
+		if self.cancel.is_cancelled() {
+			return false;
+		}
+		// Hold the last slot back for the close frame below.
+		if self.channel.capacity() > 1 {
+			match crate::rpc::response::try_send(response, self.format, &self.channel) {
+				Ok(()) => return true,
+				// The connection has already gone away, so there is no
+				// teardown left to do and nobody to tell.
+				Err(TrySendError::Closed(_)) => return false,
+				// Lost the race for the slot the check above saw free.
+				Err(TrySendError::Full(_)) => {}
+			}
+		}
+		// Log the reason this connection is going away
+		warn!("Closing a WebSocket whose client stopped reading its notifications");
+		// Create a custom close frame
+		let frame = CloseFrame {
+			code: AGAIN,
+			reason: CLIENT_LAGGING.into(),
+		};
+		// Respond with a close message, in the slot held back for it
+		let _ = self.channel.try_send(Message::Close(Some(frame)));
+		// Cancel the WebSocket tasks AND the executor cancel flag so any
+		// in-flight queries return early.
+		self.cancel_all();
+		false
 	}
 
 	/// Snapshot the connection's default session into a
@@ -1435,6 +1604,286 @@ mod tests {
 			cancel: surrealdb_core::ctx::CancelHandle::new(),
 			channel: tx,
 		})
+	}
+
+	/// A bare connection whose outbound channel has the given capacity, handed
+	/// back with its receiving end so a test controls how much room is left.
+	async fn ws_with_channel(capacity: usize) -> (Arc<Websocket>, Receiver<Message>) {
+		ws_with_channel_and_observer(capacity, None).await
+	}
+
+	/// As [`ws_with_channel`], with an observer installed so a test can see
+	/// the network byte events the connection emits.
+	async fn ws_with_channel_and_observer(
+		capacity: usize,
+		observer: Option<Arc<dyn ExecutionObserver>>,
+	) -> (Arc<Websocket>, Receiver<Message>) {
+		let mut builder = Datastore::builder();
+		if let Some(obs) = observer {
+			builder = builder.with_observer(obs);
+		}
+		let ds = builder.build_with_path("memory").await.unwrap();
+		let state = Arc::new(crate::rpc::RpcState::new(Arc::clone(&ds)));
+		let (tx, rx) = channel::<Message>(capacity);
+		let rpc = Arc::new(Websocket {
+			id: Uuid::new_v4(),
+			format: Format::Json,
+			state,
+			datastore: ds,
+			sessions: HashMap::new(),
+			transactions: DashMap::new(),
+			counters: DashMap::new(),
+			streams: DashMap::new(),
+			stream_slots: AtomicUsize::new(0),
+			shutdown: CancellationToken::new(),
+			cancel: surrealdb_core::ctx::CancelHandle::new(),
+			channel: tx,
+		});
+		(rpc, rx)
+	}
+
+	/// Any response will do: `deliver_notification` is about how a response
+	/// reaches the queue, not what it carries.
+	fn deliverable() -> DbResponse {
+		DbResponse::success(None, None, DbResult::Other(Value::None))
+	}
+
+	/// A client that has stopped reading fills the connection's queue. The
+	/// notification cannot be dropped silently -- this transport retains
+	/// nothing, so the client would read the gap as quiescence -- so the
+	/// connection is closed carrying the reason, in the slot held back for it.
+	///
+	/// That the delivery does not *wait* for room is enforced by the compiler
+	/// rather than here: `deliver_notification` is a plain `fn`, so it has no
+	/// await to park on, which is what bounds the dispatcher's in-flight set.
+	#[tokio::test]
+	async fn a_notification_for_a_client_that_stopped_reading_closes_the_connection() {
+		// Two slots: one taken by a response already queued, and the last
+		// reserved for the close frame.
+		let (rpc, mut frames) = ws_with_channel(2).await;
+		rpc.channel.try_send(Message::Text("queued".into())).expect("a free slot");
+		assert_eq!(rpc.channel.capacity(), 1, "only the reserved slot is left");
+
+		let delivered = rpc.deliver_notification(deliverable());
+
+		assert!(!delivered, "a notification that could not be queued is not reported as delivered");
+		assert!(rpc.cancel.token().is_cancelled(), "the connection is torn down");
+		// The already-queued response first, then the close frame behind it.
+		assert!(
+			matches!(frames.recv().await, Some(Message::Text(_))),
+			"the response that was already queued"
+		);
+		let Some(Message::Close(Some(frame))) = frames.recv().await else {
+			panic!("the close frame reaches the client");
+		};
+		assert_eq!(frame.code, AGAIN, "the client is invited to reconnect");
+		assert_eq!(frame.reason.as_str(), CLIENT_LAGGING, "and told why it was closed");
+	}
+
+	/// Queueing the close frame is not enough on its own: the write loop polls
+	/// the connection canceller ahead of the response channel, so what carries
+	/// the frame to the client is the drain the loop performs on its way out.
+	/// Without it a lagging client would be left inferring an unexplained
+	/// disconnect in place of the reason it was given.
+	#[tokio::test]
+	async fn the_close_frame_for_a_lagging_client_reaches_the_socket() {
+		// Two slots: one taken by a response already queued, the last
+		// reserved for the close frame.
+		let (rpc, frames) = ws_with_channel(2).await;
+		rpc.channel.try_send(Message::Text("queued".into())).expect("a free slot");
+
+		// Trip the lagging path before the writer runs, so the canceller is
+		// already set when it takes its first look -- the ordering that drops
+		// the frame if the drain is missing.
+		assert!(!rpc.deliver_notification(deliverable()), "the client is closed, not served");
+
+		// Drive the real write loop over a sink that records what it wrote.
+		let (sink, mut written) = futures::channel::mpsc::unbounded::<Message>();
+		Websocket::write(Arc::clone(&rpc), sink, frames).await;
+
+		let mut messages = Vec::new();
+		while let Ok(Some(msg)) = written.try_next() {
+			messages.push(msg);
+		}
+		let Some(Message::Close(Some(frame))) = messages.pop() else {
+			panic!("the close frame is the last thing written, got {messages:?}");
+		};
+		assert_eq!(frame.code, AGAIN, "the client is invited to reconnect");
+		assert_eq!(frame.reason.as_str(), CLIENT_LAGGING, "and told why it was closed");
+		assert!(
+			matches!(messages.as_slice(), [Message::Text(_)]),
+			"the response queued ahead of it goes out too, got {messages:?}"
+		);
+	}
+
+	/// A sink that keeps what it has been handed apart from what it has been
+	/// told to flush -- the distinction a buffered connection turns on, and
+	/// which a plain recording sink cannot express.
+	#[derive(Clone, Default)]
+	struct BufferedSink {
+		fed: Arc<Mutex<Vec<Message>>>,
+		flushed: Arc<Mutex<Vec<Message>>>,
+	}
+
+	impl Sink<Message> for BufferedSink {
+		// Any `Display` error will do; nothing here fails.
+		type Error = std::fmt::Error;
+
+		fn poll_ready(
+			self: std::pin::Pin<&mut Self>,
+			_: &mut std::task::Context<'_>,
+		) -> std::task::Poll<Result<(), Self::Error>> {
+			std::task::Poll::Ready(Ok(()))
+		}
+
+		fn start_send(self: std::pin::Pin<&mut Self>, item: Message) -> Result<(), Self::Error> {
+			self.fed.lock().unwrap().push(item);
+			Ok(())
+		}
+
+		fn poll_flush(
+			self: std::pin::Pin<&mut Self>,
+			_: &mut std::task::Context<'_>,
+		) -> std::task::Poll<Result<(), Self::Error>> {
+			let drained: Vec<Message> = self.fed.lock().unwrap().drain(..).collect();
+			self.flushed.lock().unwrap().extend(drained);
+			std::task::Poll::Ready(Ok(()))
+		}
+
+		fn poll_close(
+			self: std::pin::Pin<&mut Self>,
+			cx: &mut std::task::Context<'_>,
+		) -> std::task::Poll<Result<(), Self::Error>> {
+			self.poll_flush(cx)
+		}
+	}
+
+	/// In buffered mode the write loop feeds without flushing and leans on its
+	/// periodic flush, so a frame it has taken from the channel is sitting in
+	/// the sink rather than on the wire. Teardown therefore has to flush the
+	/// sink, not merely drain whatever is still queued -- a frame in the sink
+	/// has reached the client no more than one left in the channel had.
+	#[tokio::test]
+	async fn teardown_flushes_a_frame_the_write_loop_had_already_fed() {
+		let (rpc, mut frames) = ws_with_channel(4).await;
+		let mut sink = BufferedSink::default();
+		let view = sink.clone();
+
+		// Reproduce the handover state: the frame is out of the channel and
+		// fed into the sink, unflushed, with nothing left queued behind it.
+		rpc.channel.try_send(Message::Close(None)).expect("a free slot");
+		let handed_over = frames.recv().await.expect("the frame leaves the channel");
+		SinkExt::feed(&mut sink, handed_over).await.expect("the sink takes it");
+		assert!(view.flushed.lock().unwrap().is_empty(), "nothing has reached the wire yet");
+
+		rpc.flush_on_teardown(&mut sink, &mut frames).await;
+
+		assert_eq!(
+			view.flushed.lock().unwrap().len(),
+			1,
+			"the fed frame is flushed even though the channel had nothing left"
+		);
+	}
+
+	/// A frame the drain writes has left the machine, so it is charged like
+	/// any other. The outbound counters are tenant-attributed and feed
+	/// chargeback, so a frame delivered but uncounted understates them --
+	/// silently, and in the customer's favour.
+	#[tokio::test]
+	async fn the_teardown_drain_charges_the_bytes_it_writes() {
+		let observer = Arc::new(CapturingObserver::default());
+		let (rpc, mut frames) = ws_with_channel_and_observer(
+			4,
+			Some(Arc::clone(&observer) as Arc<dyn ExecutionObserver>),
+		)
+		.await;
+		// The session the byte context is attributed to.
+		rpc.set_session(rpc.id, Arc::new(RwLock::new(Session::default())));
+		// A payload-carrying response left queued when teardown began, plus
+		// the close frame behind it, which carries nothing chargeable.
+		rpc.channel.try_send(Message::Text("payload".into())).expect("a free slot");
+		rpc.channel.try_send(Message::Close(None)).expect("a free slot");
+
+		let mut sink = BufferedSink::default();
+		rpc.flush_on_teardown(&mut sink, &mut frames).await;
+
+		let charged: u64 = observer
+			.events
+			.lock()
+			.unwrap()
+			.iter()
+			.filter(|event| matches!(event.safe.direction, NetworkDirection::Sent))
+			.map(|event| event.safe.bytes)
+			.sum();
+		assert_eq!(
+			charged,
+			"payload".len() as u64,
+			"the drained payload is charged, and the close frame adds nothing"
+		);
+	}
+
+	/// The smallest queue an operator can configure still delivers. One slot
+	/// is held back for a close frame, so the floor is what leaves a slot
+	/// beside it: were the reservation able to consume the only slot, every
+	/// notification would close the connection instead of reaching it, however
+	/// promptly the client was reading.
+	#[tokio::test]
+	async fn a_notification_fits_the_smallest_configured_queue() {
+		let (rpc, mut frames) = ws_with_channel(crate::cnf::WEBSOCKET_RESPONSE_CHANNEL_FLOOR).await;
+
+		assert!(rpc.deliver_notification(deliverable()), "the notification is queued");
+
+		assert!(!rpc.cancel.token().is_cancelled(), "a client that is reading is not closed");
+		assert!(matches!(frames.recv().await, Some(Message::Text(_))), "the notification");
+	}
+
+	/// A connection already being torn down takes no further notifications,
+	/// however much room its queue appears to have.
+	///
+	/// It stays reachable from the live-query registry until its tasks
+	/// finish, so notifications keep arriving while the write loop drains --
+	/// and the drain frees the capacity a naive check would read as room. The
+	/// frame would land behind the close frame, where the protocol forbids
+	/// it, and the sink's refusal would end the drain still holding the close
+	/// frame it existed to deliver.
+	#[tokio::test]
+	async fn a_notification_after_teardown_began_is_refused() {
+		// Plenty of room, so capacity is not what refuses it.
+		let (rpc, mut frames) = ws_with_channel(8).await;
+		rpc.cancel_all();
+
+		assert!(!rpc.deliver_notification(deliverable()), "the notification is refused");
+
+		assert!(
+			frames.try_recv().is_err(),
+			"nothing was queued behind a connection that is closing"
+		);
+	}
+
+	/// The ordinary case: room in the queue, so the notification is queued and
+	/// the connection is left alone.
+	#[tokio::test]
+	async fn a_notification_for_a_reading_client_is_queued() {
+		let (rpc, mut frames) = ws_with_channel(8).await;
+
+		assert!(rpc.deliver_notification(deliverable()), "the notification is queued");
+
+		assert!(!rpc.cancel.token().is_cancelled(), "the connection is left alone");
+		assert!(matches!(frames.recv().await, Some(Message::Text(_))), "the notification");
+	}
+
+	/// A connection whose receiver is gone is already over. There is nobody to
+	/// tell and no teardown left to do, so this reports the notification
+	/// undelivered and does nothing else -- notably it does not fire the
+	/// canceller, which the departing write loop has already handled.
+	#[tokio::test]
+	async fn a_notification_for_a_departed_client_is_dropped_quietly() {
+		let (rpc, frames) = ws_with_channel(8).await;
+		drop(frames);
+
+		assert!(!rpc.deliver_notification(deliverable()), "nothing was queued");
+
+		assert!(!rpc.cancel.token().is_cancelled(), "no teardown of a connection already gone");
 	}
 
 	#[tokio::test]

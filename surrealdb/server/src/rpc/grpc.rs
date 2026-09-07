@@ -302,9 +302,30 @@ pub struct Grpc {
 	transactions: DashMap<Uuid, (Uuid, Arc<Transaction>)>,
 	/// How many transactions each session currently holds open, enforcing
 	/// [`MAX_TRANSACTIONS_PER_SESSION`].
+	///
+	/// A slot is reserved before the transaction it admits exists, which is
+	/// also what makes this a safe skip-hint for
+	/// [`cleanup_txns_filtered`](Self::cleanup_txns_filtered): a session with
+	/// no entry here has no transaction open and none on its way.
 	transaction_counts: DashMap<Uuid, usize>,
 	/// Registered LIVE queries, keyed by live query id.
 	live_queries: DashMap<Uuid, LiveQuery>,
+	/// How many live queries each session has registered.
+	///
+	/// A hint that lets a session's sweep skip the registry scan, not a
+	/// record of which live queries it holds. Counted before a registration
+	/// is published and uncounted after it is removed, so a session with no
+	/// entry here has none registered and none on its way, and skipping the
+	/// scan cannot miss one.
+	///
+	/// The scan itself stays over [`Self::live_queries`] deliberately.
+	/// Publishing into a registry and a derived set is not atomic, so a sweep
+	/// that reads the set can miss a registration that has reached the
+	/// registry and not yet the set -- and every per-session sweep is exactly
+	/// the thing that must not miss one. A count cannot be missed that way
+	/// because it is established first, and being wrong in the other
+	/// direction only costs a scan that finds nothing.
+	live_query_counts: DashMap<Uuid, usize>,
 	metrics_observer: Option<Arc<crate::observe::metrics::MetricsObserver>>,
 }
 
@@ -320,6 +341,7 @@ impl Grpc {
 			transactions: DashMap::new(),
 			transaction_counts: DashMap::new(),
 			live_queries: DashMap::new(),
+			live_query_counts: DashMap::new(),
 			metrics_observer,
 		}
 	}
@@ -414,6 +436,26 @@ impl Grpc {
 	/// caller cannot tell "not yours" from "not there".
 	fn transaction_belongs_to(&self, txn: &Uuid, session_id: Uuid) -> bool {
 		self.transactions.get(txn).is_some_and(|entry| entry.value().0 == session_id)
+	}
+
+	/// Counts a live query on its way into the registry.
+	///
+	/// Called before the registration is published, which is what makes an
+	/// absent count mean "none registered and none in flight" rather than
+	/// merely "none registered yet".
+	fn count_live_query(&self, session_id: Uuid) {
+		*self.live_query_counts.entry(session_id).or_insert(0) += 1;
+	}
+
+	/// Uncounts a live query that has left the registry.
+	fn uncount_live_query(&self, session_id: &Uuid) {
+		if let Some(mut count) = self.live_query_counts.get_mut(session_id)
+			&& *count > 0
+		{
+			*count -= 1;
+		}
+		// Drop the guard before pruning: `remove_if` takes the same lock.
+		self.live_query_counts.remove_if(session_id, |_, count| *count == 0);
 	}
 
 	/// Returns a slot reserved by [`reserve_transaction_slot`](Self::reserve_transaction_slot).
@@ -578,8 +620,12 @@ impl Grpc {
 	}
 
 	/// Drops a live query's registration and balances the active-LQ gauge.
+	///
+	/// The only path that unregisters a live query, and so the only place the
+	/// session's count is released.
 	fn forget_live_query(&self, live_query_id: &Uuid) -> Option<LiveQuery> {
 		let (_, entry) = self.live_queries.remove(live_query_id)?;
+		self.uncount_live_query(&entry.session_id);
 		if let Some(observer) = self.metrics_observer.as_ref() {
 			observer.adjust_live_query_active(
 				-1,
@@ -601,6 +647,22 @@ impl Grpc {
 
 	/// Cancels every transaction a session left open.
 	async fn cleanup_txns_filtered(&self, session_filter: Option<&Uuid>) {
+		// A session that has reserved no slot holds no transaction and has
+		// none opening, because the slot is taken before the transaction
+		// exists. Skipping on that is what keeps the per-request teardown of
+		// an ephemeral session off the size of the whole map -- such a
+		// session cannot open a transaction at all, so it never reserves one.
+		if let Some(session_id) = session_filter
+			&& !self.transaction_counts.contains_key(session_id)
+		{
+			return;
+		}
+		// Everything past the hint reads the transaction map itself. A sweep
+		// is the one thing that must not miss a transaction, and publishing
+		// into a map and a derived index is not atomic: an index would be
+		// consulted in the window after the transaction is in the map and
+		// before it is in the index, and `reset` -- which sweeps and leaves
+		// the session in place -- would return having cancelled nothing.
 		let doomed: Vec<Uuid> = self
 			.transactions
 			.iter()
@@ -686,6 +748,10 @@ impl RpcProtocol for Grpc {
 		namespace: Option<String>,
 		database: Option<String>,
 	) {
+		// Counted before the registration is published, so a sweep either
+		// sees the count and searches the registry, or ran entirely before
+		// this call and has nothing of this session's to find.
+		self.count_live_query(session_id);
 		self.live_queries.insert(
 			*lqid,
 			LiveQuery {
@@ -698,12 +764,45 @@ impl RpcProtocol for Grpc {
 		if let Some(observer) = self.metrics_observer.as_ref() {
 			observer.adjust_live_query_active(1, namespace.as_deref(), database.as_deref());
 		}
+		// Close the register/detach race: `del_session` removes the session
+		// from the map *before* sweeping what it owns, so a detach
+		// interleaved with the publication above searched a registry this
+		// live query had not reached, and would leave it behind with the
+		// datastore row it was committed with. Re-checking after publishing
+		// means one side always observes the other -- the ordering `begin`
+		// relies on for a transaction.
+		//
+		// A caller only reaches here having found the session (see
+		// `register_live_queries`), and a gRPC session id cannot come back
+		// once detached -- `attach_session` adopts an existing session and
+		// never creates one under a caller's chosen id, and this transport
+		// does not persist sessions -- so a session absent now is gone for
+		// good rather than replaced by another bearing the same id.
+		if !self.sessions.contains_key(&session_id) {
+			// Just this registration: anything else under that id belongs to
+			// the calls that registered it and answers for itself.
+			self.discard_live_query(lqid).await;
+			return;
+		}
 		// The session id is a capability and stays out of the log; the live
 		// query id identifies the registration well enough to trace it.
 		trace!("Registered live query {lqid} on the gRPC transport");
 	}
 
 	async fn cleanup_lqs(&self, session_id: &Uuid) {
+		// A session with nothing counted has nothing registered and nothing
+		// registering, because the count is taken before the registration is
+		// published. Skipping on that is what keeps the per-request teardown
+		// of an ephemeral session off the size of the whole map -- such a
+		// session is not realtime, so it can register no live query and never
+		// counts one.
+		if !self.live_query_counts.contains_key(session_id) {
+			return;
+		}
+		// Everything past the hint reads the registry itself, for the reason
+		// spelled out on `cleanup_txns_filtered`: a sweep must not miss a
+		// registration, and one that consults a derived set misses whatever
+		// has reached the registry and not yet the set.
 		let doomed: Vec<Uuid> = self
 			.live_queries
 			.iter()
@@ -3366,18 +3465,52 @@ mod tests {
 		GrpcService::new(Arc::new(RpcState::new(datastore)), caller)
 	}
 
-	fn register_live_query(service: &GrpcService, session_id: Uuid) -> Uuid {
+	/// Registers a live query the way the transport does, rather than by
+	/// inserting into the registry: `handle_live` also counts it against its
+	/// session, and that count is what decides whether the session's teardown
+	/// searches the registry at all.
+	///
+	/// The session is attached first because a registration only survives one
+	/// that exists -- `handle_live` discards a live query whose session has
+	/// gone, which is what closes the register/detach race.
+	async fn register_live_query(service: &GrpcService, session_id: Uuid) -> Uuid {
+		if !service.rpc().sessions.contains_key(&session_id) {
+			service.rpc().attach(session_id).await.expect("attach");
+		}
 		let id = Uuid::new_v4();
-		service.rpc().live_queries.insert(
-			id,
-			LiveQuery {
-				session_id,
-				namespace: None,
-				database: None,
-				subscriber: None,
-			},
-		);
+		service.rpc().handle_live(&id, session_id, None, None).await;
 		id
+	}
+
+	/// The live queries the registry holds for a session, sorted so a test can
+	/// compare them. This is what the session's teardown sweeps, so it is what
+	/// a test asserting reclamation has to read.
+	fn registered_live_queries(service: &GrpcService, session_id: Uuid) -> Vec<Uuid> {
+		let mut ids: Vec<Uuid> = service
+			.rpc()
+			.live_queries
+			.iter()
+			.filter(|entry| entry.value().session_id == session_id)
+			.map(|entry| *entry.key())
+			.collect();
+		ids.sort();
+		ids
+	}
+
+	/// The session's live-query count, or `None` when it holds no entry --
+	/// which is the state that makes its teardown skip the registry scan.
+	fn live_query_count(service: &GrpcService, session_id: Uuid) -> Option<usize> {
+		service.rpc().live_query_counts.get(&session_id).map(|entry| *entry.value())
+	}
+
+	/// Opens a transaction on an attached session and hands back its id.
+	async fn begin_txn(service: &GrpcService, session_id: Uuid) -> Uuid {
+		let DbResult::Other(Value::Uuid(txn)) =
+			service.rpc().begin(None, session_id).await.expect("begin")
+		else {
+			panic!("begin should answer with a transaction id");
+		};
+		txn.into_inner()
 	}
 
 	/// A session starts life bound to nobody, so whoever holds its id may drive
@@ -3469,7 +3602,7 @@ mod tests {
 	async fn a_subscriber_that_stops_reading_is_ended() {
 		let service = service().await;
 		let owner = Uuid::new_v4();
-		let live_query_id = register_live_query(&service, owner);
+		let live_query_id = register_live_query(&service, owner).await;
 		let subscription =
 			service.attach_subscription(owner, live_query_id, false).expect("subscribe");
 		// Held but never polled, so nothing drains the queue.
@@ -3520,6 +3653,281 @@ mod tests {
 		assert!(service.rpc().transactions.is_empty(), "shutdown must cancel every transaction");
 	}
 
+	/// A session's teardown has to reap every live query that session holds and
+	/// none that it does not: reaping fewer leaves a subscription delivering
+	/// change data past the authorization that created it, reaping more crosses
+	/// into another session's subscriptions.
+	///
+	/// It also has to release the session's count, or the counts would grow by
+	/// one entry per session that ever registered a live query.
+	#[tokio::test]
+	async fn a_sessions_live_queries_are_reclaimed_and_no_others() {
+		let service = service().await;
+		let session_id = Uuid::new_v4();
+		let first = register_live_query(&service, session_id).await;
+		let second = register_live_query(&service, session_id).await;
+		// Another session's, which this session's teardown must not touch.
+		let bystander_session = Uuid::new_v4();
+		let bystander = register_live_query(&service, bystander_session).await;
+
+		let mut registered = vec![first, second];
+		registered.sort();
+		assert_eq!(
+			registered_live_queries(&service, session_id),
+			registered,
+			"both live queries are registered under the session that made them"
+		);
+		assert_eq!(
+			live_query_count(&service, session_id),
+			Some(2),
+			"and both are counted, so the session's teardown searches for them"
+		);
+
+		service.rpc().cleanup_lqs(&session_id).await;
+
+		assert!(!service.rpc().live_queries.contains_key(&first), "the first is unregistered");
+		assert!(!service.rpc().live_queries.contains_key(&second), "and so is the second");
+		assert_eq!(
+			live_query_count(&service, session_id),
+			None,
+			"the count entry is released rather than left behind at zero"
+		);
+		assert!(
+			service.rpc().live_queries.contains_key(&bystander),
+			"another session's live query survives"
+		);
+		assert_eq!(
+			live_query_count(&service, bystander_session),
+			Some(1),
+			"and stays counted under its own session"
+		);
+	}
+
+	/// The skip in a session's live-query teardown is only safe if a session
+	/// holding a registration always holds a count: an uncounted registration
+	/// would be skipped past and stranded, outliving the session it belongs
+	/// to. Asserted in both directions, since a count that is never released
+	/// costs every later teardown of that session a scan of the whole
+	/// registry.
+	#[tokio::test]
+	async fn a_registered_live_query_is_counted_and_an_unregistered_one_is_not() {
+		let service = service().await;
+		let session_id = Uuid::new_v4();
+		assert_eq!(
+			live_query_count(&service, session_id),
+			None,
+			"a session that has registered nothing is not counted"
+		);
+
+		let lqid = register_live_query(&service, session_id).await;
+		assert_eq!(
+			live_query_count(&service, session_id),
+			Some(1),
+			"registering counts against the session"
+		);
+
+		service.rpc().forget_live_query(&lqid);
+		assert_eq!(
+			live_query_count(&service, session_id),
+			None,
+			"and unregistering releases the count"
+		);
+	}
+
+	/// A registration whose session is already gone is discarded rather than
+	/// published. This is the end state the register/detach race can produce,
+	/// pinned deterministically: a live query left registered under a session
+	/// that no longer exists would keep delivering change data under an
+	/// authorization that has been torn down, and its datastore row would
+	/// outlive every path that could find it.
+	#[tokio::test]
+	async fn a_live_query_whose_session_went_away_is_not_left_registered() {
+		let service = service().await;
+		// Never attached, which is the state a detach that has already run
+		// leaves behind.
+		let session_id = Uuid::new_v4();
+		let lqid = Uuid::new_v4();
+
+		service.rpc().handle_live(&lqid, session_id, None, None).await;
+
+		assert!(
+			!service.rpc().live_queries.contains_key(&lqid),
+			"the registration must not survive the session it belongs to"
+		);
+		assert_eq!(live_query_count(&service, session_id), None, "and must leave no count behind");
+	}
+
+	/// Samples registration against removal, asserting what makes the count a
+	/// safe skip-hint: it must never be absent while the registry still holds
+	/// a registration for that session, because a teardown reading an absent
+	/// count skips the scan that would have reaped it.
+	///
+	/// A sample, not a guard. Registration counts before it publishes, with no
+	/// await point between, so the interleaving that would break the invariant
+	/// is a few instructions wide and this passes whether or not the ordering
+	/// is the right way round; it is here to catch a coarser regression, such
+	/// as the counting being dropped from one of the two paths. The ordering
+	/// each path relies on is documented on `live_query_counts`, and the
+	/// count's two directions are pinned deterministically by
+	/// [`a_registered_live_query_is_counted_and_an_unregistered_one_is_not`].
+	#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+	async fn concurrent_registration_and_removal_keep_the_count_covering_the_registry() {
+		let service = service().await;
+		for _ in 0..2000 {
+			let session_id = Uuid::new_v4();
+			service.rpc().attach(session_id).await.expect("attach");
+			let lqid = Uuid::new_v4();
+			let g1 = Arc::clone(&service.state.grpc);
+			let g2 = Arc::clone(&service.state.grpc);
+			let register = tokio::spawn(async move {
+				g1.handle_live(&lqid, session_id, None, None).await;
+			});
+			// Everything that ends a live query goes through here: a `KILL`, a
+			// dropped table or database, a revoked principal.
+			let end = tokio::spawn(async move {
+				g2.forget_live_query(&lqid);
+			});
+			let _ = tokio::join!(register, end);
+
+			// Whichever order they landed in, anything still registered under
+			// the session must be covered by a count, or its teardown will
+			// skip straight past it.
+			let registered = registered_live_queries(&service, session_id);
+			assert!(
+				registered.is_empty() || live_query_count(&service, session_id).is_some(),
+				"the registry holds {registered:?} for a session with no count"
+			);
+			// Leave the transport clean for the next iteration.
+			service.rpc().cleanup_lqs(&session_id).await;
+		}
+	}
+
+	/// `del_session` removes the session before sweeping what it owns, and
+	/// registration counts before it publishes, so either can interleave with
+	/// the other. Whichever way they land the session ends detached, so
+	/// nothing may remain registered under it.
+	#[tokio::test]
+	async fn registering_a_live_query_racing_detach_strands_nothing() {
+		let service = service().await;
+		for _ in 0..100 {
+			let session_id = Uuid::new_v4();
+			service.rpc().attach(session_id).await.expect("attach a fresh session");
+			let lqid = Uuid::new_v4();
+			let g1 = Arc::clone(&service.state.grpc);
+			let g2 = Arc::clone(&service.state.grpc);
+			let register = tokio::spawn(async move {
+				g1.handle_live(&lqid, session_id, None, None).await;
+			});
+			let detach = tokio::spawn(async move {
+				let _ = g2.del_session(&session_id).await;
+			});
+			let _ = tokio::join!(register, detach);
+
+			assert!(
+				!service.rpc().live_queries.contains_key(&lqid),
+				"live query {lqid} was stranded under detached session"
+			);
+			assert_eq!(
+				live_query_count(&service, session_id),
+				None,
+				"a count was stranded under detached session"
+			);
+		}
+	}
+
+	/// A session's transaction teardown carries the same obligation as its
+	/// live-query teardown: cancel every transaction that session opened and
+	/// none that it did not. One missed would hold its locks past the session
+	/// that opened it, until the server stops.
+	#[tokio::test]
+	async fn a_sessions_transactions_are_reclaimed_and_no_others() {
+		let service = service().await;
+		let session_id = Uuid::new_v4();
+		service.rpc().attach(session_id).await.expect("attach");
+		let bystander_session = Uuid::new_v4();
+		service.rpc().attach(bystander_session).await.expect("attach");
+		let txn = begin_txn(&service, session_id).await;
+		let bystander = begin_txn(&service, bystander_session).await;
+
+		assert!(
+			service.rpc().transaction_counts.contains_key(&session_id),
+			"an open transaction holds a slot, so the session's teardown searches for it"
+		);
+
+		service.rpc().cleanup_txns(&session_id).await;
+
+		assert!(!service.rpc().transactions.contains_key(&txn), "the transaction is cancelled");
+		assert!(
+			!service.rpc().transaction_counts.contains_key(&session_id),
+			"and its slot released"
+		);
+		assert!(
+			service.rpc().transactions.contains_key(&bystander),
+			"another session's transaction survives"
+		);
+		assert!(
+			service.rpc().transaction_counts.contains_key(&bystander_session),
+			"and keeps holding its own slot"
+		);
+	}
+
+	/// `commit` and `cancel` end a transaction without going through any
+	/// teardown, so they are the paths that have to release the session's slot
+	/// themselves. One left reserved would spend the session's transaction
+	/// budget on a transaction that has already finished.
+	#[tokio::test]
+	async fn finishing_a_transaction_releases_the_sessions_slot() {
+		for (name, finish) in [("commit", true), ("cancel", false)] {
+			let service = service().await;
+			let session_id = Uuid::new_v4();
+			service.rpc().attach(session_id).await.expect("attach");
+			let txn = begin_txn(&service, session_id).await;
+
+			let outcome = match finish {
+				true => service.rpc().commit(Some(txn), session_id, Array::new()).await,
+				false => service.rpc().cancel(Some(txn), session_id, Array::new()).await,
+			};
+			outcome.unwrap_or_else(|err| panic!("{name} should succeed: {err:?}"));
+
+			assert!(
+				!service.rpc().transaction_counts.contains_key(&session_id),
+				"{name} must leave no slot reserved"
+			);
+			assert!(
+				!service.rpc().transactions.contains_key(&txn),
+				"{name} must remove the transaction"
+			);
+		}
+	}
+
+	/// `reset` sweeps what a session holds and leaves the session itself in
+	/// place, so it is the one teardown that runs while the session can still
+	/// be opening a transaction or registering a live query on another
+	/// request. It must reclaim both.
+	#[tokio::test]
+	async fn reset_reclaims_what_the_session_holds_and_keeps_the_session() {
+		let service = service().await;
+		let session_id = Uuid::new_v4();
+		service.rpc().attach(session_id).await.expect("attach");
+		let txn = begin_txn(&service, session_id).await;
+		let lqid = register_live_query(&service, session_id).await;
+
+		service.rpc().reset(session_id).await.expect("reset");
+
+		assert!(
+			!service.rpc().transactions.contains_key(&txn),
+			"reset must cancel the session's open transaction"
+		);
+		assert!(
+			!service.rpc().live_queries.contains_key(&lqid),
+			"reset must end the session's live query"
+		);
+		assert!(
+			service.rpc().sessions.contains_key(&session_id),
+			"and must leave the session itself attached"
+		);
+	}
+
 	/// A live query is only reachable by the session that registered it.
 	/// Without this, holding a live query id -- which is an ordinary query
 	/// result, not a secret -- would be enough to receive another session's
@@ -3531,7 +3939,7 @@ mod tests {
 	async fn a_live_query_is_only_reachable_by_its_own_session() {
 		let service = service().await;
 		let owner = Uuid::new_v4();
-		let live_query_id = register_live_query(&service, owner);
+		let live_query_id = register_live_query(&service, owner).await;
 
 		let refused = service
 			.attach_subscription(Uuid::new_v4(), live_query_id, false)
@@ -3552,7 +3960,7 @@ mod tests {
 	async fn a_second_subscriber_is_refused() {
 		let service = service().await;
 		let owner = Uuid::new_v4();
-		let live_query_id = register_live_query(&service, owner);
+		let live_query_id = register_live_query(&service, owner).await;
 
 		let Ok(_subscription) = service.attach_subscription(owner, live_query_id, false) else {
 			panic!("the first subscriber should be accepted");
@@ -3571,7 +3979,7 @@ mod tests {
 	async fn dropping_a_subscription_releases_it() {
 		let service = service().await;
 		let owner = Uuid::new_v4();
-		let live_query_id = register_live_query(&service, owner);
+		let live_query_id = register_live_query(&service, owner).await;
 
 		let Ok(subscription) = service.attach_subscription(owner, live_query_id, false) else {
 			panic!("the first subscriber should be accepted");

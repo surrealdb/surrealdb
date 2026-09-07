@@ -354,10 +354,26 @@ pub static WEBSOCKET_MAX_WRITE_BUFFER_SIZE: LazyLock<usize> = LazyLock::new(|| {
 	buffer_size().unwrap_or(usize::MAX)
 });
 
+/// The smallest outbound queue a WebSocket connection can run with.
+///
+/// Two, because one slot carries the message being delivered and one is held
+/// back so a connection being torn down can always queue the close frame
+/// naming why -- see [`Websocket::deliver_notification`]. A queue of one has
+/// no room to do both: the reservation would consume its only slot, and every
+/// notification would close the connection instead of being delivered,
+/// however promptly the client was reading. A queue of zero is not a queue at
+/// all and panics the channel it is handed to.
+///
+/// [`Websocket::deliver_notification`]: crate::rpc::websocket::Websocket::deliver_notification
+pub const WEBSOCKET_RESPONSE_CHANNEL_FLOOR: usize = 2;
+
 /// How many messages can be queued for sending down the WebSocket (default:
-/// 100)
-pub static WEBSOCKET_RESPONSE_CHANNEL_SIZE: LazyLock<usize> =
-	lazy_env_parse!("SURREAL_WEBSOCKET_RESPONSE_CHANNEL_SIZE", usize, 100);
+/// 100), never fewer than [`WEBSOCKET_RESPONSE_CHANNEL_FLOOR`].
+pub static WEBSOCKET_RESPONSE_CHANNEL_SIZE: LazyLock<usize> = LazyLock::new(|| {
+	static CONFIGURED: LazyLock<usize> =
+		lazy_env_parse!("SURREAL_WEBSOCKET_RESPONSE_CHANNEL_SIZE", usize, 100);
+	(*CONFIGURED).max(WEBSOCKET_RESPONSE_CHANNEL_FLOOR)
+});
 
 /// How many responses can be buffered when delivering to the client (default:
 /// 0)

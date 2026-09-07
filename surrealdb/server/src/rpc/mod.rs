@@ -148,22 +148,25 @@ pub async fn dispatch_live_notification(notification: Notification, state: Arc<R
 	if let Some(entry) = live_query
 		&& let Some(rpc) = state.web_sockets.read().await.get(&entry.websocket_id).cloned()
 	{
-		// Count the notification once we know it will actually be delivered to a client. Drops
-		// (unknown LQ id or disconnected WS) are deliberately not counted.
-		if let Some(obs) = state.metrics_observer.as_ref() {
-			obs.record_live_query_notification(
-				entry.namespace.as_deref(),
-				entry.database.as_deref(),
-			);
-		}
 		// Hide the connection's implicit session UUID from the client: when a LIVE query was
 		// registered without an explicit session_id it resolves to `rpc.id`, which is an
 		// internal connection identifier the client never supplied.
 		let wire_session_id = (entry.session_id != rpc.id).then_some(entry.session_id);
 		let message = DbResponse::success(None, wire_session_id, DbResult::Live(notification));
-		let format = rpc.format;
-		let sender = rpc.channel.clone();
-		crate::rpc::response::send(message, format, sender).await;
+		// Delivery never waits: see [`Websocket::deliver_notification`]. That is what bounds the
+		// in-flight set this function is spawned into -- every call returns without parking, so
+		// the dispatcher cannot accumulate one pending send per notification produced.
+		if rpc.deliver_notification(message) {
+			// Count the notification once it is actually on its way to a client. Drops (unknown
+			// LQ id, disconnected WS, or a client that fell behind and is being closed) are
+			// deliberately not counted.
+			if let Some(obs) = state.metrics_observer.as_ref() {
+				obs.record_live_query_notification(
+					entry.namespace.as_deref(),
+					entry.database.as_deref(),
+				);
+			}
+		}
 	}
 }
 
@@ -183,6 +186,13 @@ pub async fn dispatch_live_notification(notification: Notification, state: Arc<R
 /// This is called automatically by
 /// [`SurrealRouter::spawn_notifications`](crate::ntw::SurrealRouter::spawn_notifications).
 /// If you need lower-level control you can call it directly inside your own `tokio::spawn`.
+///
+/// The loop keeps receiving whether or not the deliveries it has already
+/// started have finished, so what bounds the set of them in flight is that no
+/// delivery waits on a client: both transports queue a notification without
+/// blocking and end a connection that has stopped reading. A delivery
+/// therefore only ever waits on the registry locks it consults, which no
+/// client paces.
 pub async fn notifications(
 	channel: Receiver<Notification>,
 	state: Arc<RpcState>,
